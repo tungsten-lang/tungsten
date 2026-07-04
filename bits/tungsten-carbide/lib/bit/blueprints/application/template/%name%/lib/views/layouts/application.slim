@@ -1,0 +1,57 @@
+doctype html
+html(lang="en")
+  head
+    meta(charset="UTF-8")
+    meta(name="viewport" content="width=device-width, initial-scale=1.0")
+
+    title "[page_title] — [app_name]"
+    meta(name="description" content="[page_description]")
+
+    / Open Graph
+    meta(property="og:title" content="[page_title]")
+    meta(property="og:description" content="[page_description]")
+    meta(property="og:image" content="[og_image_url]")
+    meta(property="og:url" content="[canonical_url]")
+    meta(property="og:type" content="website")
+    meta(property="og:site_name" content="[app_name]")
+
+    / Twitter Card
+    meta(name="twitter:card" content="summary_large_image")
+    meta(name="twitter:title" content="[page_title]")
+    meta(name="twitter:description" content="[page_description]")
+    meta(name="twitter:image" content="[og_image_url]")
+
+    / Canonical
+    link(rel="canonical" href="[canonical_url]")
+
+    / Favicon
+    link(rel="icon" href="/favicon.ico" sizes="any")
+    link(rel="icon" href="/icon.svg" type="image/svg+xml")
+    link(rel="apple-touch-icon" href="/apple-touch-icon.png")
+
+    / Preconnect for performance
+    link(rel="preconnect" href="https://fonts.googleapis.com")
+
+    / Stylesheets
+    link(rel="stylesheet" href="/assets/application.css")
+
+    / JSON-LD structured data
+    script(type="application/ld+json")
+      | {"@context":"https://schema.org","@type":"WebApplication","name":"[app_name]"}
+
+    / CSRF token
+    meta(name="csrf-token" content="[csrf_token]")
+
+  body
+    - if flash[:notice]
+      div.flash.flash--notice
+        p = flash[:notice]
+
+    - if flash[:alert]
+      div.flash.flash--alert
+        p = flash[:alert]
+
+    main#content
+      = yield
+
+    script(src="/assets/application.js" defer)

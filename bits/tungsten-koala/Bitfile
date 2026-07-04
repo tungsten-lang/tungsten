@@ -1,0 +1,12 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-koala"
+version     "0.1.0"
+summary     "Data science and machine learning for Tungsten"
+description "Koala is a friendlier pandas — DataFrames, linear algebra, matrix math, ML pipelines, and interop. Columnar storage backed by Apache Arrow for zero-copy performance."
+license     "MIT OR Apache-2.0"
+authors     ["Tungsten Language Project"]
+
+dependency "tungsten-math", "~> 0.1"
+dependency "tungsten-json", "~> 0.1"
+dependency "tungsten-pg",   "~> 0.1", optional: true

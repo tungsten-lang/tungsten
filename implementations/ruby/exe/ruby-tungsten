@@ -1,0 +1,267 @@
+#!/usr/bin/env ruby
+
+require "bundler/setup"
+require_relative "../lib/tungsten"
+require "optparse"
+
+# Handle subcommands before OptionParser
+case ARGV[0]
+when "fmt"
+  ARGV.shift
+  files = ARGV.dup
+  ARGV.clear
+  write_in_place = files.delete("-w")
+
+  if files.empty?
+    $stderr.puts "Usage: tungsten fmt [-w] <file.w ...>"
+    exit 1
+  end
+
+  color = $stderr.tty? && !ENV["NO_COLOR"]
+  dim = color ? "\e[2m" : ""
+  reset = color ? "\e[0m" : ""
+
+  formatter = Tungsten::Formatter.new
+  files.each do |f|
+    begin
+      source = File.read(f)
+      formatted = formatter.format(source)
+      if write_in_place
+        if formatted != source
+          File.write(f, formatted)
+          $stderr.puts "#{dim}formatted#{reset} #{f}"
+        end
+      else
+        print formatted
+      end
+    rescue Tungsten::Error => e
+      reporter = Tungsten::ErrorReporter.new(color: $stderr.tty? && !ENV["NO_COLOR"])
+      $stderr.puts reporter.format(e, source: source, file: f)
+      exit 1
+    end
+  end
+  exit
+
+when "new"
+  ARGV.shift
+  name = ARGV.shift
+  unless name
+    $stderr.puts "Usage: tungsten new <project-name>"
+    exit 1
+  end
+
+  color = $stdout.tty? && !ENV["NO_COLOR"]
+  bold = color ? "\e[1m" : ""
+  yellow = color ? "\e[33m" : ""
+  dim = color ? "\e[2m" : ""
+  green = color ? "\e[32m" : ""
+  reset = color ? "\e[0m" : ""
+
+  Dir.mkdir(name)
+  File.write("#{name}/main.w", "<< \"hello world\"\n")
+  puts "#{bold}#{yellow}✶ Created #{name}/#{reset}"
+  puts "  #{dim}main.w#{reset}"
+  puts
+  puts "#{green}Run: cd #{name} && tungsten main.w#{reset}"
+  exit
+
+when "doctor"
+  ARGV.shift
+  Tungsten::Doctor.new.run
+  exit
+
+when "ai"
+  ARGV.shift
+  prompt = ARGV.join(" ")
+  require_relative "../lib/tungsten/ai"
+  Tungsten::AI.new.run(prompt)
+  exit
+end
+
+eval_code = nil
+repl_mode = false
+show_ast = false
+show_lex = false
+check_only = false
+profile = false
+debug_mode = false
+load_paths = []
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: tungsten [options] [file]"
+
+  opts.on("-v", "--version", "Show version") do
+    start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    Tungsten::Parser # trigger autoload
+    ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start) * 1000).round
+    ruby_label = Tungsten::Runtime::Builtins.runtime_version_label
+    if $stdout.tty? && !ENV["NO_COLOR"]
+      puts "\e[1m\e[33m✶ Tungsten\e[0m \e[1m#{Tungsten::VERSION}\e[0m \e[2m·\e[0m \e[2mloads in\e[0m \e[36m#{ms}ms\e[0m \e[2m·\e[0m \e[36m#{ruby_label}\e[0m"
+    else
+      puts "Tungsten #{Tungsten::VERSION} (#{ruby_label})"
+    end
+    exit
+  end
+
+  opts.on("-e CODE", "Evaluate code") do |code|
+    eval_code = code
+  end
+
+  opts.on("--repl", "Start interactive REPL") do
+    repl_mode = true
+  end
+
+  opts.on("--ast", "Print AST as s-expressions") do
+    show_ast = true
+  end
+
+  opts.on("--lex", "Print tokens") do
+    show_lex = true
+  end
+
+  opts.on("--check", "Check syntax without running") do
+    check_only = true
+  end
+
+  opts.on("--profile", "Show execution time and node count") do
+    profile = true
+  end
+
+  opts.on("--debug", "Show stack traces with Tungsten source locations") do
+    debug_mode = true
+  end
+
+  opts.on("-I DIR", "Add directory to load path") do |dir|
+    load_paths << dir
+  end
+end.parse!
+
+color = $stdout.tty? && !ENV["NO_COLOR"]
+
+DIM        = color ? "\e[2m"  : ""
+CYAN       = color ? "\e[36m" : ""
+MAGENTA    = color ? "\e[35m" : ""
+GREEN      = color ? "\e[32m" : ""
+BRIGHT_RED = color ? "\e[91m" : ""
+RESET      = color ? "\e[0m"  : ""
+
+source = nil
+file = nil
+
+begin
+  if repl_mode
+    Tungsten::REPL.new.start
+    exit
+  end
+
+  if eval_code
+    source = eval_code
+    file = "(eval)"
+  elsif ARGV[0]
+    file = ARGV.shift
+    source = File.read(file)
+  else
+    $stderr.puts "Usage: tungsten [options] [file]"
+    $stderr.puts "       wit (interactive mode)"
+    exit 1
+  end
+
+  if show_lex
+    lexer = Tungsten::Lexer.new(source)
+    lexer.file = file
+    loop do
+      tok = lexer.next_token
+      break if tok.type == :EOF
+      next if [:SP, :NL, :INDENT, :DEDENT].include?(tok.type)
+      val = tok.value ? " #{tok.value}" : ""
+      puts "#{DIM}#{tok.row}:#{tok.col}#{RESET} #{CYAN}#{tok.type}#{RESET}#{val}"
+    end
+    exit
+  end
+
+  ast = Tungsten::Parser.parse(source)
+
+  if show_ast
+    print_ast(ast, 0)
+    exit
+  end
+
+  if check_only
+    puts "#{GREEN}✓ OK#{RESET} #{DIM}#{file}#{RESET}"
+    exit
+  end
+
+  start = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profile
+
+  interp = Tungsten::Interpreter.new
+  interp.run(source, file_path: file)
+
+  if profile
+    elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start) * 1000).round
+    node_count = count_nodes(ast)
+    puts "#{DIM}Executed in#{RESET} #{CYAN}#{elapsed}ms#{RESET} #{DIM}·#{RESET} #{CYAN}#{node_count}#{RESET} #{DIM}nodes#{RESET}"
+  end
+
+rescue Tungsten::Error => e
+  if debug_mode
+    $stderr.puts e.full_message
+  else
+    reporter = Tungsten::ErrorReporter.new(color: $stderr.tty? && !ENV["NO_COLOR"])
+    $stderr.puts reporter.format(e, source: source, file: file)
+  end
+  exit 1
+end
+
+BEGIN {
+  def print_ast(node, depth)
+    color = $stdout.tty? && !ENV["NO_COLOR"]
+    dim = color ? "\e[2m" : ""
+    cyan = color ? "\e[36m" : ""
+    magenta = color ? "\e[35m" : ""
+    reset = color ? "\e[0m" : ""
+    indent = "  " * depth
+
+    case node
+    when Tungsten::AST::List
+      node.each { |child| print_ast(child, depth) }
+    when Tungsten::AST::Node
+      name = node.class.name.split("::").last
+      attrs = []
+      node.instance_variables.each do |var|
+        next if var == :@location
+        val = node.instance_variable_get(var)
+        case val
+        when Tungsten::AST::Node
+          # printed as children
+        when Array
+          # printed as children
+        when nil
+          # skip
+        else
+          attrs << "#{magenta}#{val}#{reset}"
+        end
+      end
+      attr_str = attrs.empty? ? "" : " #{attrs.join(" ")}"
+      puts "#{indent}#{dim}(#{reset}#{cyan}#{name}#{reset}#{attr_str}"
+      node.instance_variables.each do |var|
+        next if var == :@location
+        val = node.instance_variable_get(var)
+        case val
+        when Tungsten::AST::Node
+          print_ast(val, depth + 1)
+        when Array
+          val.each { |v| print_ast(v, depth + 1) if v.is_a?(Tungsten::AST::Node) }
+        end
+      end
+      puts "#{indent}#{dim})#{reset}" if depth > 0
+    end
+  end
+
+  def count_nodes(node)
+    count = 1
+    if node.respond_to?(:children)
+      node.children { |child| count += count_nodes(child) }
+    end
+    count
+  end
+}

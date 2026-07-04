@@ -1,0 +1,16 @@
+#!/usr/bin/env tungsten
+# Set up the application for development
+say "Installing dependencies..."
+System.exec("bit install")
+
+say "Creating database..."
+System.exec("bit carbide db:create")
+
+say "Running migrations..."
+System.exec("bit carbide db:migrate")
+
+say "Seeding database..."
+System.exec("bit carbide db:seed")
+
+say ""
+say "Done! Run `bit carbide server` to start."

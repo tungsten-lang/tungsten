@@ -1,0 +1,46 @@
+tungsten-flame(1) -- Make flame graphs
+======================================
+
+## SYNOPSIS
+
+`tungsten flame` [FILE ...] [options] [display-options] -- [buildopts]
+`tungsten flame` --ruby FILE.w [options] [display-options]
+`tungsten flame` [options] [display-options] -- COMMAND [ARGS...]
+`tungsten flame` -e "CODE"  [options] [display-options] -- [buildopts]
+`tungsten flame` --pid PID  [options] [display-options] -- [buildopts]
+
+## OPTIONS
+
+-d, --duration N       Profiling seconds (default: 5)
+    --rate N           Sample frequency in Hz (auto if omitted)
+    --top N            Print the top N most expensive methods
+
+    --lex              Only lexing
+    --ruby             Profile the Ruby interpreter path
+    --parse            Only parsing
+    --execution        Only execution (skip lexing and parsing)
+
+    --pid PID          Attach to existing process
+
+    --focus METHOD     Filter + breakdown for a specific method
+    --build-only       Compile with debug symbols, don't profile
+
+## DISPLAY OPTIONS
+
+    --silent           No live output
+    --keeper [N]       Enable animation and select keeper (default: random)
+-o, --output FILE      Output path
+
+## FUTURE CONSIDERATION
+
+    --lines            Profile lines instead of methods
+
+## SUMMARY
+
+Profile Tungsten or arbitrary processes
+
+## DESCRIPTION
+
+If the top function is over 40% automatically include the caller/callee breakdown.
+
+Use `--pid PID` to attach to an existing process, or pass a command after `--` to launch and sample a non-Tungsten process for the requested duration.

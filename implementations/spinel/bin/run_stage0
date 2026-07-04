@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+BIN="$ROOT/implementations/spinel/build/tungsten-stage0"
+
+if [ ! -x "$BIN" ]; then
+  "$ROOT/implementations/spinel/bin/build_stage0" >/dev/null
+fi
+
+exec "$BIN" "$@"

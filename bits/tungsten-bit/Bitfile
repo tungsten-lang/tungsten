@@ -1,0 +1,6 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-bit"
+version     "0.1.0"
+summary     "Package manager for Tungsten"
+license     "MIT OR Apache-2.0"

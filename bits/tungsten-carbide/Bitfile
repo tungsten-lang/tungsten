@@ -1,0 +1,8 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-carbide"
+version     "0.1.0"
+summary     "Full-stack web framework for Tungsten"
+license     "MIT OR Apache-2.0"
+
+constant_alias "WC"

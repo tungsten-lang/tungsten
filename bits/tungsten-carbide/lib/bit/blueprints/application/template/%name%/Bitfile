@@ -1,0 +1,18 @@
+tungsten "%name%-0.1.0"
+
+# Framework
+bit "tungsten-carbide"
+
+# Database
+bit "tungsten-db-postgres"
+
+# JSON handling
+bit "tungsten-json"
+
+group :development do
+  bit "tungsten-reload"
+  bit "tungsten-debugger"
+
+group :spec do
+  bit "tungsten-spec"
+  bit "tungsten-spec-carbide"

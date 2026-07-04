@@ -1,0 +1,39 @@
+# frozen_string_literal: true
+
+begin
+  require 'rubygems'
+  require 'bundler/setup'
+rescue LoadError
+  puts "You must `gem install bundler` and `bundle install` to run rake tasks."
+end
+
+require "bundler/gem_tasks"
+
+require "rubocop/rake_task"
+RuboCop::RakeTask.new
+
+require "rspec/core/rake_task"
+RSpec::Core::RakeTask.new(:spec) do |task|
+  task.exclude_pattern = "spec/parity_spec.rb"
+end
+
+RSpec::Core::RakeTask.new(:expensive) do |task|
+  task.pattern = "spec/**/*_expensive.rb"
+  task.rspec_opts = "-f failures"
+end
+
+RSpec::Core::RakeTask.new(:parity) do |task|
+  task.pattern = "spec/parity_spec.rb"
+end
+
+desc "Launch a console with Tungsten loaded"
+task :console do
+  ARGV.clear
+
+  require "tungsten"
+  require "pry"
+
+  Pry.start
+end
+
+task default: :spec # %i[rubocop spec]

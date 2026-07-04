@@ -1,0 +1,8 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-llama"
+version     "0.0.1"
+summary     "Pure-Tungsten LLM inference engine"
+description "Loads GGUF-format quantized transformer weights and runs inference in pure Tungsten. No C, no external linear-algebra libraries. Primary target is qwen3:30b-a3b-q8_0 (Q8_0 MoE); gpt-oss:20b (MXFP4) is a stretch goal."
+license     "MIT OR Apache-2.0"
+authors     ["Erik Peterson"]

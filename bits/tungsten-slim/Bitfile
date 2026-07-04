@@ -1,0 +1,10 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-slim"
+version     "0.1.0"
+summary     "Slim template engine for Tungsten"
+description "A whitespace-significant template language that compiles to HTML. Inspired by Slim, built for Tungsten."
+license     "MIT OR Apache-2.0"
+authors     ["Tungsten Language Project"]
+
+dependency "tungsten-carbide", "~> 0.1"

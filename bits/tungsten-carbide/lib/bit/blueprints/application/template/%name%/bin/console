@@ -1,0 +1,9 @@
+#!/usr/bin/env tungsten
+# Start an interactive console with the app loaded
+use Tungsten:Carbide
+
+ENV["CARBIDE_ENV"] ||= "development"
+use "../lib/%file_name%"
+
+Carbide.app.initialize!
+Carbide:Console.start

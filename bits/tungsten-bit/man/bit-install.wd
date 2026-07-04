@@ -1,0 +1,116 @@
+bit-install(1) -- Install bits
+==============================
+
+## SYNOPSIS
+
+`bit install` [NAME ...] [options] [install-options] [install-flags] -- [buildopts]
+
+## OPTIONS
+
+    --deploy          # See [DEPLOY MODE]
+
+-v, --version VERSION # Install a specific version
+
+    --with    GROUP [GROUP ...]
+    --without GROUP [GROUP ...]
+
+## INSTALL OPTIONS
+
+    --bitfile FILE    # Bitfile to use, defaults to current directory
+-d, --dir     DIR     # Directory to install bits
+-b, --bin     DIR     # Directory to install binstubs
+-j, --jobs    NUM     # Max number of parallel download and install jobs
+    --retry   NUM     # Retry failed network requests NUM times
+
+## INSTALL FLAGS
+
+    --clean           # Remove bits not required by Bitfile
+    --debug           # Open interactive debugging session on failure
+-n, --dry-run         # Normal output without installing
+-f, --force           # Skip dependency checks
+    --local           # Do not connect to bits.tungsten-lang.org
+    --pre             # Allow prerelease versions
+    --system          # Installs to system location, overrides --dir
+
+    --[no-]binstubs   # Generate binstubs
+    --[no-]docs       # Generate docs
+    --[no-]suggest    # Suggest alternatives when none found
+
+## SUMMARY
+
+Install bits
+
+## DESCRIPTION
+
+Install the bits listed in your Bitfile(5) into a local directory.
+
+If Bitfile.lock exists, and your Bitfile(5) is the same, the Bitfile.lock versions are used.
+
+Remote lock entries with SHA256 metadata are verified before unpacking. If a
+remote lock entry also includes SSH signature and public-key metadata, `bit
+install` verifies the signature before unpacking the archive.
+
+If Bitfile.lock exists, and your Bitfile(5) has changed, the Bitfile.lock versions are used for bits without changes,
+and dependencies are recalculated for the bits with changes.
+
+Installing an executable bit will generate a wrapper file, or _binstub_, in TUNGSTEN_BINDIR.
+
+## DEFAULTS
+
+--binstubs --docs --rc --suggest --jobs <cpu_count> --dir BIT_HOME --bin BIT_BINDIR
+
+## DESCRIPTIONS
+
+--dir=<DIR>
+
+  The directory for installing the specified bits. Defaults to BIT_HOME. Bits installed directly, _e.g._ `bit install <name>`,
+  are placed here as well. Therefore, bits installed without `--dir` will show up by calling `bit list`. Likewise, bits
+  installed to other locations are not listed.
+
+## DEPLOY MODE
+
+Bit's defaults are optimized for development. To switch to defaults optimized for production and CI, use the
+`--deploy` flag. Do not activate deploy mode on development machines, as it will cause an error when the Bitfile(5) is
+modified.
+
+1. A Bitfile.lock is required.
+
+2. The Bitfile.lock must be up to date.
+
+3. Bits are installed to `vendor/cache` instead of BIT_HOME.
+
+## SUDO USAGE
+
+By default, bits are installed to the system location.
+
+If the system location is not writable by your user, bit will stage everything in a temporary directory, then ask
+for your sudo password in order to copy the bits to the system location.
+
+You should never use `sudo bit install`. Several steps in `bit install` must be performed as the current user.
+
+* Updating your Bitfile.lock
+
+* Updating your vendor/cache, if necessary
+
+* Checking out private git repositories using an SSH key belonging to your user
+
+## GROUPS USAGE
+
+By default, `bit install` will install all bits in all groups in your Bitfile(5), except those declared for a different platform.
+
+However, you can explicitly tell Bit to skip installing certain groups with the `--without` option.
+
+While the `--without` option will skip **installing** the bits in the specified groups, it will still **download**
+those bits and use them to resolve the dependencies of every bit in your Bitfile(5).
+
+This is so that installing a different set of groups on another machine (such as a production server) will not
+change the bits and versions tha tyou have already developed and tested against.
+
+`Bit guarantees that you will deploy the same bit versions you used for development and testing.`
+
+## UPDATING
+
+When you make a change to the Bitfile(5) and run `bit install`, Bit will only update the bits that you modified.
+
+`Summary:` In general, after changing Bitfile(5), you should first try to `bit install`, which will guarantee that no
+other bit in the Bitfile(5) is impacted by the change. If that does not work, run `bit update`.

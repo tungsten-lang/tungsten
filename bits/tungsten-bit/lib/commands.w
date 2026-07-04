@@ -1,0 +1,30 @@
+# Tungsten Bit command registry support.
+
+use commands/help
+use commands/install
+use commands/new
+use commands/build
+use commands/spec
+use commands/publish
+use commands/push
+use commands/sign
+use commands/pack
+use commands/signup
+use commands/login
+use commands/create
+use commands/register
+use commands/yank
+use commands/search
+use commands/clean
+use commands/generate
+use commands/destroy
+use commands/list
+use commands/show
+use commands/update
+use commands/outdated
+use commands/upgrade
+use commands/prune
+use commands/info
+use commands/env
+use commands/doctor
+use commands/audit

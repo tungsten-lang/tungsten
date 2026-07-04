@@ -1,0 +1,16 @@
+h1 "%class_name%"
+
+table
+  thead
+    tr
+      th "Name"
+      th "Actions"
+  tbody
+    - %file_name%s.each -> (item)
+      tr
+        td = item.name
+        td
+          a(href="/%name%/[item.id]") "Show"
+          a(href="/%name%/[item.id]/edit") "Edit"
+
+a(href="/%name%/new") "New %class_name%"

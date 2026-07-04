@@ -1,0 +1,164 @@
+bit(1) -- Tungsten package manager
+==================================
+
+## NAME
+
+**bit** - the official Tungsten package manager
+
+## SYNOPSIS
+
+    `bit` COMMAND [options] [ARGS]
+
+## DESCRIPTION
+
+`bit` creates, builds, tests, publishes, and consumes Tungsten packages
+(bits). It reads a `Bitfile(5)` from the project root, resolves
+dependencies against the registry, and manages the local bit cache.
+
+## OPTIONS
+
+    -c, --copyright  Print the copyright notice
+    -v, --verbose    Print version and enable verbose mode
+    -h, --help       Show help
+
+## COMMANDS
+
+    bit help                Show help
+    bit help commands       List all commands
+    bit env                 Show local bit environment info
+    bit doctor              Check local and publish readiness
+
+    bit create              Create a registry profile
+    bit signup              Create a registry profile
+    bit login               Store or fetch registry credentials
+
+    bit new NAME            Create a new bit project
+    bit init                Initialize a bit in the current directory
+
+    bit search QUERY        Search the registry
+    bit info NAME           Show bit details, versions, and security status
+    bit install             Install dependencies from Bitfile
+    bit uninstall NAME      Remove a dependency
+    bit update              Update dependencies to latest allowed versions
+    bit outdated            Show dependencies with newer versions available
+    bit audit               Audit locked dependency security metadata
+    bit prune               Remove unused dependencies
+    bit list                List installed dependencies
+    bit bundle              Vendor dependencies into the bit
+    bit open NAME           Open a dependency in $EDITOR
+    bit viz                 Visualize the dependency graph
+
+    bit build               Compile the bit
+    bit clean               Remove build artifacts
+    bit spec                Run the spec suite
+    bit bench               Run benchmarks
+    bit lint                Run the linter
+    bit console             Start a REPL with dependencies loaded
+    bit exec CMD            Run a command with the bit loaded
+    bit generate TYPE       Scaffold files (class, spec, etc.)
+
+    bit pack                Create a .bit archive
+    bit sign                Sign the bit archive for publishing
+    bit push                Run CI, sign, and publish
+    bit publish             Alias for bit push
+    bit yank NAME VERSION   Yank a published version
+    bit unpublish           Remove a version from the registry
+    bit deprecate           Mark a version as deprecated (still installable)
+
+    bit author              Manage author identity and registry credentials
+    bit config              View and set bit configuration
+    bit env                 Show registry, profile, key, toolchain, and project paths
+    bit doctor              Check Bitfile, lockfile, tools, auth, and signing setup
+
+## PROJECT STRUCTURE
+
+`bit new pg`
+
+    pg
+    ├─ bin
+    │  └─ pg*
+    ├─ lib
+    │  ├─ pg
+    │  │  └─ version.w
+    │  └─ pg.w
+    ├─ man
+    │  └─ pg.1.wd
+    ├─ spec
+    │  ├─ support/
+    │  └─ pg_spec.w
+    ├─ Bitfile
+    ├─ LICENSE
+    └─ README.md
+
+Layout rules:
+
+* `lib/NAME.w` is the main entry point. `use NAME` loads this file.
+* `lib/NAME/` holds internal modules.
+* `lib/NAME/version.w` holds a version constant (convention, not required).
+* `bin/NAME` is the optional CLI binary. Its filename must match the bit name.
+* `spec/` holds test files. `bit spec` discovers `*_spec.w` here.
+* `spec/support/` holds test helpers loaded before specs.
+
+## VALID BIT NAMES
+
+    /^
+       [a-z]         # Begins with lowercase letter
+      ([a-z0-9]+-?)* # Dash separated alpha-numerics, no double dashes
+       [a-z0-9]      # No trailing dash, no single character names
+    $/x
+
+## VALID VERSIONS
+
+    /^
+      (?<major> 0 | [1-9][0-9]* ) \.
+      (?<minor> 0 | [1-9][0-9]* ) \.
+      (?<tiny>  0 | [1-9][0-9]* )
+      (?<note>
+        \. ( alpha | beta | rc )
+           ( [1-9][0-9]* )?
+      )?
+    $/x
+
+Pre-release ordering:
+
+    1.0.0.alpha < 1.0.0.alpha2 < 1.0.0.beta < 1.0.0.beta2
+                < 1.0.0.rc    < 1.0.0.rc2  < 1.0.0
+
+A bare pre-release tag (`1.0.0.alpha`) sorts as `1.0.0.alpha1`.
+
+## VERSION CONSTRAINTS
+
+    "1.0.0"             Exact version.
+    ">= 1.0.0"          Minimum version.
+    "< 2.0.0"           Maximum version (exclusive).
+    "~> 1.2"            Pessimistic: >= 1.2.0 and < 2.0.0.
+    "~> 1.2.3"          Pessimistic: >= 1.2.3 and < 1.3.0.
+    ">= 1.0", "< 3"     Multiple constraints (all must be satisfied).
+
+## RESERVED BIT NAMES
+
+    /^(w-|tungsten)/
+
+Names beginning with `w-` are reserved for the Tungsten standard library.
+
+Names beginning with `tungsten` are reserved for official Tungsten project packages.
+
+## COMMAND LINE BINARIES
+
+A bit can have one and only one CLI command, which matches the bit name.
+Related commands should be exposed as subcommands:
+
+    pg migrate
+    pg console
+    pg dump
+
+This prevents PATH pollution and keeps one bit equal to one command. If two
+tools are genuinely unrelated, they belong in two bits.
+
+## SEE ALSO
+
+    Bitfile(5), bit-install(1), tungsten(1)
+
+## AUTHORS
+
+Bit is developed and maintained by Erik Peterson.

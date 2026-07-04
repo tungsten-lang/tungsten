@@ -1,0 +1,217 @@
+#!/bin/sh
+set -eu
+
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+SPINEL_DIR="$ROOT/implementations/spinel"
+UPSTREAM="$ROOT/src/patched/spinel"
+BUILD="$SPINEL_DIR/build"
+BUNDLE="$BUILD/tungsten_stage0_bundle.rb"
+C_FILE="$BUILD/tungsten_stage0.c"
+BIN="$BUILD/tungsten-stage0"
+STAGE0_INPUT_SHA="$BUILD/tungsten-stage0.input.sha"
+STAGE0_FINGERPRINT="$BUILD/tungsten-stage0.fingerprint"
+STAGE0_RUBY_FINGERPRINT="$BUILD/tungsten-stage0.ruby"
+STAGE0_STATUS="$BUILD/tungsten-stage0.status"
+RUNTIME_ARCHIVE="$BUILD/runtime-stage0.a"
+RUNTIME_OBJ_DIR="$BUILD/runtime-stage0-objs"
+RUBY_BIN="${RUBY:-ruby}"
+FORCE_STAGE0="${TUNGSTEN_SPINEL_FORCE_STAGE0:-0}"
+: "${TUNGSTEN_SPINEL_STAGE0_CLANG_OPT:=-O3 -march=native -mtune=native -ffast-math -DNDEBUG -flto=auto}"
+: "${TUNGSTEN_SPINEL_STAGE0_NO_GC:=0}"
+: "${TUNGSTEN_SPINEL_STAGE0_GC_THRESHOLD:=536870912}"
+export TUNGSTEN_SPINEL_STAGE0_CLANG_OPT
+export TUNGSTEN_SPINEL_STAGE0_NO_GC
+export TUNGSTEN_SPINEL_STAGE0_GC_THRESHOLD
+if [ "${1:-}" = "--force" ]; then
+  FORCE_STAGE0=1
+  shift
+fi
+
+mkdir -p "$BUILD"
+
+file_sha() {
+  shasum -a 256 "$1" | awk '{print $1}'
+}
+
+stage0_input_sha() {
+  "$RUBY_BIN" "$SPINEL_DIR/scripts/stage0_fingerprint.rb" \
+    "$ROOT" \
+    "$BUILD/tree-digests.marshal" \
+    "$STAGE0_RUBY_FINGERPRINT" \
+    "$0" \
+    "$SPINEL_DIR/scripts/stage0_fingerprint.rb" \
+    "$SPINEL_DIR/scripts/tree_fingerprint.rb" \
+    "$SPINEL_DIR/scripts/build_bundle.rb" \
+    "$SPINEL_DIR/stage0" \
+    "$ROOT/implementations/ruby/lib" \
+    "$ROOT/runtime/runtime.c" \
+    "$ROOT/runtime/event_kqueue.c" \
+    "$ROOT/runtime/aks.c" \
+    "$ROOT/runtime/tls_stub.c" \
+    "$ROOT/runtime/slab_zstd.c" \
+    "$ROOT/runtime/w_char_table.c" \
+    "$ROOT/runtime/w_lexchar_cache.c" \
+    "$UPSTREAM/spinel" \
+    "$UPSTREAM/spinel_parse" \
+    "$UPSTREAM/spinel_codegen" \
+    "$UPSTREAM/spinel_codegen.rb" \
+    "$UPSTREAM/lib/sp_runtime.h" \
+    "$UPSTREAM/lib/libspinel_rt.a"
+}
+
+write_stage0_fingerprint() {
+  bin_sha=""
+  runtime_sha=""
+  if [ -f "$BIN" ]; then
+    bin_sha=$(file_sha "$BIN")
+  fi
+  if [ -f "$RUNTIME_ARCHIVE" ]; then
+    runtime_sha=$(file_sha "$RUNTIME_ARCHIVE")
+  fi
+  {
+    printf "input=%s\n" "$CURRENT_STAGE0_INPUT_SHA"
+    printf "ruby=%s\n" "$(cat "$STAGE0_RUBY_FINGERPRINT" 2>/dev/null | shasum -a 256 | awk '{print $1}')"
+    printf "bin=%s\n" "$bin_sha"
+    printf "runtime=%s\n" "$runtime_sha"
+  } > "$STAGE0_FINGERPRINT"
+}
+
+runtime_archive_stale() {
+  if [ ! -f "$RUNTIME_ARCHIVE" ]; then
+    return 0
+  fi
+
+  for runtime_src in \
+    "$ROOT/runtime/runtime.c" \
+    "$ROOT/runtime/event_kqueue.c" \
+    "$ROOT/runtime/aks.c" \
+    "$ROOT/runtime/tls_stub.c" \
+    "$ROOT/runtime/slab_zstd.c"
+  do
+    if [ "$runtime_src" -nt "$RUNTIME_ARCHIVE" ]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+rebuild_runtime_archive() {
+  mkdir -p "$RUNTIME_OBJ_DIR"
+  rm -f "$RUNTIME_OBJ_DIR"/*.o
+  (
+    cd "$RUNTIME_OBJ_DIR"
+    # -flto=auto emits LTO bitcode; the stage0 link step (which also
+    # passes -flto=auto) can then inline runtime functions into the
+    # generated stage0 code across the archive boundary.
+    clang -O3 -DNDEBUG -march=native -mtune=native -flto=auto \
+      -I"$ROOT/runtime" -I/opt/homebrew/include \
+      -c "$ROOT/runtime/runtime.c" \
+         "$ROOT/runtime/event_kqueue.c" \
+         "$ROOT/runtime/aks.c" \
+         "$ROOT/runtime/tls_stub.c" \
+         "$ROOT/runtime/slab_zstd.c"
+    ar rcs "$RUNTIME_ARCHIVE" runtime.o event_kqueue.o aks.o tls_stub.o slab_zstd.o
+  )
+}
+
+stage0_stale() {
+  if [ "$FORCE_STAGE0" = "1" ]; then
+    return 0
+  fi
+
+  if [ ! -x "$BIN" ]; then
+    return 0
+  fi
+
+  if [ ! -f "$STAGE0_INPUT_SHA" ] || [ "$(cat "$STAGE0_INPUT_SHA")" != "$CURRENT_STAGE0_INPUT_SHA" ]; then
+    return 0
+  fi
+
+  return 1
+}
+
+: "${SPINEL_STAGE0_FULL:=1}"
+: "${SPINEL_STAGE0_REAL_TOKEN:=1}"
+: "${SPINEL_STAGE0_REAL_LEXER:=1}"
+: "${SPINEL_STAGE0_REAL_PARSER:=1}"
+: "${SPINEL_STAGE0_FULL_REAL_PARSER:=1}"
+: "${SPINEL_STAGE0_REAL_ENV:=1}"
+: "${SPINEL_STAGE0_REAL_LOADER:=1}"
+: "${SPINEL_STAGE0_REAL_INTERPRETER:=1}"
+: "${SPINEL_STAGE0_FULL_RUBY_INTERPRETER:=1}"
+: "${SPINEL_STAGE0_NO_FULL_INTERPRETER_COMPAT:=1}"
+export SPINEL_STAGE0_FULL
+export SPINEL_STAGE0_REAL_TOKEN
+export SPINEL_STAGE0_REAL_LEXER
+export SPINEL_STAGE0_REAL_PARSER
+export SPINEL_STAGE0_FULL_REAL_PARSER
+export SPINEL_STAGE0_REAL_ENV
+export SPINEL_STAGE0_REAL_LOADER
+export SPINEL_STAGE0_REAL_INTERPRETER
+export SPINEL_STAGE0_FULL_RUBY_INTERPRETER
+export SPINEL_STAGE0_NO_FULL_INTERPRETER_COMPAT
+
+CURRENT_STAGE0_INPUT_SHA=$(stage0_input_sha)
+
+if ! stage0_stale; then
+  if runtime_archive_stale; then
+    rebuild_runtime_archive
+    write_stage0_fingerprint
+  fi
+  echo cached > "$STAGE0_STATUS"
+  echo "$BIN"
+  exit 0
+fi
+
+"$RUBY_BIN" "$SPINEL_DIR/scripts/build_bundle.rb" "$BUNDLE"
+
+SPINEL_NO_GC="$TUNGSTEN_SPINEL_STAGE0_NO_GC" "$UPSTREAM/spinel" "$BUNDLE" -c -o "$C_FILE"
+
+# Post-codegen: pool the per-call sp_PolyArray that evaluate_args
+# produces. Removes ~448 B of dirty-page traffic per interpreter
+# method call — the dominant remaining allocator now that the
+# Environment pool covers env churn (commit ba532415) and the
+# Environment/WClass key hoists are gone (commit 19c777db).
+if [ "${TUNGSTEN_SPINEL_STAGE0_SKIP_ARGS_POOL:-0}" != "1" ]; then
+  "$RUBY_BIN" "$SPINEL_DIR/scripts/inject_args_pool.rb" "$C_FILE"
+fi
+
+RUNTIME_INCLUDES=""
+RUNTIME_LINK=""
+# Link runtime.a when the bundle either explicitly includes runtime.h
+# OR declares any extern referencing a w_node_* / w_ast_* runtime
+# function (the WRuntime FFI module in preamble.rb produces these
+# externs so visit_call's :ccall arm can dispatch ast.w's slab-AST
+# primitives).
+if grep -q '#include "runtime.h"' "$C_FILE" || grep -qE 'extern .*w_(node|ast)_' "$C_FILE"; then
+  if runtime_archive_stale; then
+    rebuild_runtime_archive
+  fi
+  RUNTIME_INCLUDES="-I$ROOT/runtime"
+  RUNTIME_LINK="$RUNTIME_ARCHIVE"
+fi
+
+NO_GC_CFLAGS=""
+if [ "$TUNGSTEN_SPINEL_STAGE0_NO_GC" = "1" ]; then
+  NO_GC_CFLAGS="-DSPINEL_NO_GC"
+fi
+GC_CFLAGS=""
+if [ "$TUNGSTEN_SPINEL_STAGE0_NO_GC" != "1" ]; then
+  GC_CFLAGS="-DSP_GC_THRESHOLD_INIT=$TUNGSTEN_SPINEL_STAGE0_GC_THRESHOLD"
+fi
+
+cc $TUNGSTEN_SPINEL_STAGE0_CLANG_OPT $NO_GC_CFLAGS $GC_CFLAGS -w -Wno-all -Wno-int-conversion -Wno-incompatible-pointer-types -ffunction-sections -fdata-sections \
+  -I"$UPSTREAM/lib" -I"$UPSTREAM/lib/regexp" $RUNTIME_INCLUDES \
+  "$C_FILE" $RUNTIME_LINK -lm "$UPSTREAM/lib/libspinel_rt.a" -Wl,-dead_strip \
+  -o "$BIN"
+
+if runtime_archive_stale; then
+  rebuild_runtime_archive
+fi
+
+echo "$CURRENT_STAGE0_INPUT_SHA" > "$STAGE0_INPUT_SHA"
+write_stage0_fingerprint
+echo built > "$STAGE0_STATUS"
+
+echo "$BIN"

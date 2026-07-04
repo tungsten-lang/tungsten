@@ -1,0 +1,33 @@
+tungsten-hammer(1) -- HTTP benchmark tool
+==========================================
+
+## SYNOPSIS
+
+`tungsten hammer` [options] URL
+
+## OPTIONS
+
+-c, --connections N    Concurrent connections (default: 100)
+-d, --duration N       Duration in seconds (default: 10)
+-w, --workers N        Worker threads, 0 for auto-detect (default: 0)
+-b, --batch N          Pipeline batch depth (default: 256, max: 512)
+-p, --protocol PROTO   Protocol: h10, h11, h2 (default: h11)
+    --forge            Interactive forge mode (pipeline=1, space to increase)
+    --max              Max throughput mode (skip latency/capacity extras)
+    --tungsten         Use the experimental Tungsten HTTP/1.1 engine
+-h, --help             Show help
+
+## SUMMARY
+
+High-performance M:N threaded HTTP benchmark tool.
+
+## DESCRIPTION
+
+Hammer sends concurrent HTTP requests to a URL and reports throughput,
+latency percentiles, and error rates. Uses goroutines on multiple worker
+threads for maximum throughput. Supports HTTP/1.0, HTTP/1.1, and TLS.
+
+Protocol aliases: h10 or 1.0, h11 or 1.1, h2 or 2.
+
+Forge mode starts with pipeline depth 1 for interactive load testing
+against a local Forge server.

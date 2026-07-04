@@ -1,0 +1,6 @@
+tungsten "tungsten-spec-0.1.0"
+
+name        "tungsten-spec"
+version     "0.1.0"
+summary     "Behavior-driven testing framework for Tungsten"
+license     "MIT OR Apache-2.0"

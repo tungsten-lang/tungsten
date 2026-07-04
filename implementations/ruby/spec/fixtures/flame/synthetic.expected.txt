@@ -1,0 +1,22 @@
+
+  Profile Breakdown  (575 active / 25 idle samples)
+
+  Top Functions
+     52.1%  w_str_concat
+     17.3%  w_method_call
+      8.6%  parser_parse
+      8.6%  tokenize
+      6.9%  malloc
+      5.2%  w_eq
+
+  Callers of w_str_concat
+     83.3%  tokenize
+     16.6%  w_method_call
+  (leaf — no callees)
+
+  ██████████████████████████████   52.1%  string ops    (300)
+  ██████████░░░░░░░░░░░░░░░░░░░░   18.2%  other         (105)
+  ██████████░░░░░░░░░░░░░░░░░░░░   17.3%  method call   (100)
+  ████░░░░░░░░░░░░░░░░░░░░░░░░░░    6.9%  allocation    (40)
+  ███░░░░░░░░░░░░░░░░░░░░░░░░░░░    5.2%  comparison    (30)
+

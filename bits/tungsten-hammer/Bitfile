@@ -1,0 +1,9 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-hammer"
+version     "0.1.0"
+summary     "High-performance HTTP benchmark tool"
+description "Hammer is an M:N threaded HTTP benchmark tool for Tungsten. Uses goroutines on multiple worker threads for maximum throughput. Supports HTTP/1.0, HTTP/1.1, and TLS."
+license     "MIT OR Apache-2.0"
+authors     ["Tungsten Language Project"]
+includes    ["lib/hammer.c"]

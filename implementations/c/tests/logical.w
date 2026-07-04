@@ -1,0 +1,5 @@
+puts "left" || "right"
+puts false || "right"
+puts nil || "right"
+puts "left" && "right"
+puts false && "right"

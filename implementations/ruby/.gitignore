@@ -1,0 +1,10 @@
+/.bundle/
+!/.rspec
+/.yardoc
+/_yardoc/
+/coverage/
+/doc/
+/pkg/
+/spec/reports/
+/spec/status.txt
+/tmp/

@@ -1,0 +1,231 @@
+#!/bin/zsh
+set -eu
+zmodload zsh/datetime
+
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+BUILD="$ROOT/implementations/spinel/build"
+STAGE0="$BUILD/tungsten-stage0"
+STAGE0_FINGERPRINT="$BUILD/tungsten-stage0.fingerprint"
+STAGE0_RUBY_FINGERPRINT="$BUILD/tungsten-stage0.ruby"
+STAGE0_STATUS="$BUILD/tungsten-stage0.status"
+STAGE1="/tmp/tungsten/tungsten-stage1"
+STAGE1_LL_DIR="$BUILD/stage1-ll"
+STAGE1_LL="$STAGE1_LL_DIR/tungsten.ll"
+STAGE1_LL_CACHE="$BUILD/stage1-spinel.ll"
+STAGE1_INPUT_SHA="$BUILD/tungsten-stage1.input.sha"
+STAGE2="${TUNGSTEN_SPINEL_STAGE2:-/tmp/tungsten/tungsten-stage2}"
+STAGE2_LL_DIR="$BUILD/stage2-ll"
+STAGE2_LL="$STAGE2_LL_DIR/tungsten.ll"
+STAGE2_LL_CACHE="$BUILD/stage2-spinel.ll"
+STAGE2_INPUT_SHA="$BUILD/tungsten-stage2.input.sha"
+STAGE2_STATUS="$BUILD/tungsten-stage2.status"
+RUNTIME_ARCHIVE="$BUILD/runtime-stage0.a"
+BUILD_LOG="$BUILD/build_stage0.log"
+STAGE1_BUILD_LOG="$BUILD/tungsten-stage1.log"
+STAGE2_BUILD_LOG="$BUILD/tungsten-stage2.log"
+
+cd "$ROOT"
+
+: "${TUNGSTEN_CLANG_OPT:=-O1}"
+: "${TUNGSTEN_SPINEL_STAGE1_CLANG_OPT:=-O0}"
+: "${TUNGSTEN_SPINEL_STAGE2_CLANG_OPT:=-O0}"
+: "${SP_GC_DISABLE:=1}"
+export TUNGSTEN_CLANG_OPT
+export SP_GC_DISABLE
+
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  green="$(printf '\033[32m')"
+  dim="$(printf '\033[2m')"
+  reset="$(printf '\033[0m')"
+else
+  green=""
+  dim=""
+  reset=""
+fi
+
+now() {
+  printf "%.9f\n" "$EPOCHREALTIME"
+}
+
+elapsed() {
+  printf "%.0f\n" $(( (EPOCHREALTIME - $1) * 1000 ))
+}
+
+cached_line() {
+  printf "    %sCACHED%s %s %s%6sms%s\n" "$green" "$reset" "$1" "$dim" "$2" "$reset"
+}
+
+built_line() {
+  printf "    %sbuilt%s  %s %s%6sms%s\n" "$green" "$reset" "$1" "$dim" "$2" "$reset"
+}
+
+source_tree_sha() {
+  ruby "$ROOT/implementations/spinel/scripts/tree_fingerprint.rb" "$ROOT" "$BUILD/tree-digests.marshal" "$@"
+}
+
+stage1_input_sha() {
+  stage0_fp="missing"
+  ruby_fp="missing"
+  if [ -f "$STAGE0_FINGERPRINT" ]; then
+    stage0_fp=$(cat "$STAGE0_FINGERPRINT")
+  fi
+  if [ -f "$STAGE0_RUBY_FINGERPRINT" ]; then
+    ruby_fp=$(cat "$STAGE0_RUBY_FINGERPRINT")
+  fi
+  src_sha=$(source_tree_sha \
+    compiler \
+    core \
+    languages \
+    lib)
+  {
+    printf "ruby:\n%s\n" "$ruby_fp"
+    printf "stage0:\n%s\n" "$stage0_fp"
+    printf "src=%s\n" "$src_sha"
+    printf "clang_opt=%s\n" "$TUNGSTEN_SPINEL_STAGE1_CLANG_OPT"
+  } | shasum -a 256 | awk '{print $1}'
+}
+
+stage2_input_sha() {
+  if [ ! -f "$STAGE1_LL_CACHE" ]; then
+    echo ""
+    return
+  fi
+
+  src_sha=$(source_tree_sha "$STAGE1_LL_CACHE" "$RUNTIME_ARCHIVE")
+  {
+    printf "src=%s\n" "$src_sha"
+    printf "clang_opt=%s\n" "$TUNGSTEN_SPINEL_STAGE2_CLANG_OPT"
+  } | shasum -a 256 | awk '{print $1}'
+}
+
+t0=$(now)
+
+if ! "$ROOT/implementations/spinel/bin/build_stage0" >"$BUILD_LOG" 2>&1; then
+  cat "$BUILD_LOG"
+  exit 1
+fi
+t1=$(now)
+stage0_elapsed=$(elapsed "$t0")
+stage0_status="built"
+if [ -f "$STAGE0_STATUS" ]; then
+  stage0_status=$(cat "$STAGE0_STATUS")
+fi
+if [ "$stage0_status" = "cached" ]; then
+  cached_line stage0 "$stage0_elapsed"
+else
+  built_line stage0 "$stage0_elapsed"
+fi
+
+stage1_start=$(now)
+current_stage1_input_sha=$(stage1_input_sha)
+stage1_current=0
+if [ "${TUNGSTEN_SPINEL_FORCE_STAGE2:-0}" != "1" ] &&
+   [ -x "$STAGE1" ] &&
+   [ -f "$STAGE1_LL_CACHE" ] &&
+   [ -f "$STAGE1_INPUT_SHA" ] &&
+   [ "$(cat "$STAGE1_INPUT_SHA")" = "$current_stage1_input_sha" ]; then
+  stage1_current=1
+fi
+
+if [ "$stage1_current" -eq 1 ]; then
+  stage1_elapsed=$(elapsed "$stage1_start")
+  cached_line stage1 "$stage1_elapsed"
+else
+  STAGE0_CACHE="/tmp/tungsten/spinel-stage0-cache-$$"
+  mkdir -p "$STAGE0_CACHE" "$STAGE1_LL_DIR"
+  rm -f "$STAGE1_LL" "$STAGE1_LL.done"
+  TUNGSTEN_LL_DIR="$STAGE1_LL_DIR" TUNGSTEN_LL_PATH="$STAGE1_LL" TUNGSTEN_LL_DONE_MARKER="$STAGE1_LL.done" TUNGSTEN_CACHE_DIR="$STAGE0_CACHE" TUNGSTEN_CLANG_OPT="$TUNGSTEN_SPINEL_STAGE1_CLANG_OPT" "$STAGE0" compiler/tungsten.w compile compiler/tungsten.w \
+    --emit-ll \
+    --release \
+    >"$STAGE1_BUILD_LOG" 2>&1 &
+  stage0_pid=$!
+  stage0_status=0
+  stage0_waited=0
+  while kill -0 "$stage0_pid" 2>/dev/null; do
+    if [ -f "$STAGE1_LL.done" ]; then
+      kill "$stage0_pid" 2>/dev/null || true
+      wait "$stage0_pid" 2>/dev/null || true
+      stage0_waited=1
+      stage0_status=0
+      break
+    fi
+    sleep 1
+  done
+  if [ "$stage0_waited" -eq 0 ]; then
+    wait "$stage0_pid" || stage0_status=$?
+  fi
+  if [ "$stage0_status" -ne 0 ]; then
+    cat "$STAGE1_BUILD_LOG"
+    exit 1
+  fi
+  # Stage 0 exits 0 even when its interpreter silently fails to produce IR
+  # (e.g. when a Spinel transpilation regression breaks Integer#to_s or
+  # string interpolation). Refuse to cache a missing or stale .ll, otherwise
+  # downstream verify compares against a stale artifact from an unrelated
+  # earlier compile and produces misleading "stage 1 != stage 2" errors.
+  if [ ! -f "$STAGE1_LL" ]; then
+    cat "$STAGE1_BUILD_LOG"
+    echo "stage 0 produced no IR at $STAGE1_LL — see $STAGE1_BUILD_LOG" >&2
+    exit 1
+  fi
+  if ! clang "$TUNGSTEN_SPINEL_STAGE1_CLANG_OPT" -DNDEBUG -march=native -mtune=native \
+      -Wl,-dead_strip -Wl,-stack_size,0x8000000 \
+      "$RUNTIME_ARCHIVE" "$STAGE1_LL" -L/opt/homebrew/lib -lzstd -o "$STAGE1" \
+      >>"$STAGE1_BUILD_LOG" 2>&1; then
+    cat "$STAGE1_BUILD_LOG"
+    echo "failed to link stage 1 from $STAGE1_LL — see $STAGE1_BUILD_LOG" >&2
+    exit 1
+  fi
+  cp "$STAGE1_LL" "$STAGE1_LL_CACHE"
+  echo "$current_stage1_input_sha" > "$STAGE1_INPUT_SHA"
+fi
+t2=$(now)
+if [ "$stage1_current" -eq 0 ]; then
+  built_line stage1 "$(elapsed "$stage1_start")"
+fi
+
+stage2_start=$(now)
+current_stage2_input_sha=$(stage2_input_sha)
+stage2_current=0
+if [ "${TUNGSTEN_SPINEL_FORCE_STAGE2:-0}" != "1" ] &&
+   [ -x "$STAGE2" ] &&
+   [ -f "$STAGE2_LL_CACHE" ] &&
+   [ -f "$STAGE2_INPUT_SHA" ] &&
+   [ -n "$current_stage2_input_sha" ] &&
+   [ "$(cat "$STAGE2_INPUT_SHA")" = "$current_stage2_input_sha" ]; then
+  stage2_current=1
+fi
+
+if [ "${TUNGSTEN_SPINEL_STAGE1_ONLY:-0}" = "1" ]; then
+  exit 0
+fi
+
+if [ "$stage2_current" -eq 1 ]; then
+  echo cached > "$STAGE2_STATUS"
+  stage2_elapsed=$(elapsed "$stage2_start")
+  cached_line stage2 "$stage2_elapsed"
+else
+  mkdir -p "$STAGE2_LL_DIR"
+  rm -f "$STAGE2_LL"
+  if ! TUNGSTEN_LL_DIR="$STAGE2_LL_DIR" TUNGSTEN_LL_PATH="$STAGE2_LL" TUNGSTEN_CLANG_OPT="$TUNGSTEN_SPINEL_STAGE2_CLANG_OPT" "$STAGE1" compile compiler/tungsten.w \
+      --runtime "$RUNTIME_ARCHIVE" \
+      --no-lto \
+      --release \
+      --out "$STAGE2" >"$STAGE2_BUILD_LOG" 2>&1; then
+    cat "$STAGE2_BUILD_LOG"
+    exit 1
+  fi
+  if [ -f "$STAGE2_LL" ]; then
+    cp "$STAGE2_LL" "$STAGE2_LL_CACHE"
+  fi
+  if [ -n "$current_stage2_input_sha" ]; then
+    echo "$current_stage2_input_sha" > "$STAGE2_INPUT_SHA"
+  fi
+  echo built > "$STAGE2_STATUS"
+fi
+t3=$(now)
+if [ "$stage2_current" -eq 1 ]; then
+  :
+else
+  built_line stage2 "$(elapsed "$t2")"
+fi

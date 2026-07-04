@@ -1,0 +1,7 @@
+/vendor
+/tmp
+/log/*.log
+Bitfile.lock
+/db/*.sqlite
+.env
+.env.local

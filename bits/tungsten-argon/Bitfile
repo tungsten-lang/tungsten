@@ -1,0 +1,8 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-argon"
+version     "0.1.0"
+summary     "Manpage-driven option parser"
+description "Argon parses a manpage-formatted OPTIONS section and produces a complete CLI parser. Define your CLI once in documentation, get parsing for free."
+license     "MIT OR Apache-2.0"
+authors     ["Tungsten Language Project"]

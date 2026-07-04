@@ -1,0 +1,10 @@
+start;main;_ctx_start;g_body_entry;parser_parse 50
+start;main;_ctx_start;g_body_entry;parser_parse;w_method_call 100
+start;main;_ctx_start;g_body_entry;parser_parse;w_method_call;w_str_concat 50
+start;main;_ctx_start;g_body_entry;parser_parse;tokenize;w_str_concat + 42 250
+start;main;_ctx_start;g_body_entry;parser_parse;tokenize 50
+start;main;_ctx_start;g_body_entry;parser_parse;w_alloc;libsystem_malloc.dylib`malloc 40
+start;main;_ctx_start;g_body_entry;parser_parse;w_eq 30
+start;main;libsystem_kernel.dylib`kevent 15
+start;main;libsystem_kernel.dylib`poll 10
+start;dyld 5

@@ -1,0 +1,1 @@
+class Carbide:Request<Factory>

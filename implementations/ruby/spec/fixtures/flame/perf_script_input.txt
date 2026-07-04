@@ -1,0 +1,15 @@
+program  12345 [001]  1234.567890: 1000000 cycles:
+	ffffffff8101a1c0 do_syscall_64+0x44 ([kernel.kallsyms])
+	00007fff6e521234 __libc_start_main+0xf0 (/usr/lib/libc.so.6)
+	0000000000401234 main+0x12 (/path/to/binary)
+
+program  12345 [001]  1234.568890: 1000000 cycles:
+	ffffffff8101a1c0 do_syscall_64+0x44 ([kernel.kallsyms])
+	00007fff6e521234 __libc_start_main+0xf0 (/usr/lib/libc.so.6)
+	0000000000401234 main+0x12 (/path/to/binary)
+
+program  12345 [001]  1234.569890: 1000000 cycles:
+	0000000000405678 my_hot_function+0x8 (/path/to/binary)
+	0000000000401300 main+0x80 (/path/to/binary)
+	00007fff6e521234 __libc_start_main+0xf0 (/usr/lib/libc.so.6)
+	0000000000401234 _start+0x0 (/path/to/binary)

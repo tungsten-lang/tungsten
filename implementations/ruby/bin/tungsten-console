@@ -1,0 +1,10 @@
+#!/usr/bin/env ruby
+
+# tungsten-console — W Interactive Tungsten (REPL)
+# Shorthand for: tungsten --repl
+
+ENV["BUNDLE_GEMFILE"] ||= File.expand_path("../Gemfile", __dir__)
+require "bundler/setup"
+require_relative "../lib/tungsten"
+
+Tungsten::REPL.new.start

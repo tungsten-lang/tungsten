@@ -1,0 +1,6 @@
+tungsten "%name%-0.1.0"
+
+bit "tungsten-carbide"
+
+group :spec do
+  bit "tungsten-spec"

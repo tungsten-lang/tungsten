@@ -1,0 +1,88 @@
+#compdef tungsten
+
+# Zsh completion for the tungsten CLI
+
+_tungsten_commands() {
+  local -a commands
+  commands=(
+    'compile:Compile a .w file to a native binary'
+    'compile-batch:Compile multiple .w files'
+    'build:Bootstrap the self-hosted compiler'
+    'fmt:Format .w source files'
+    'new:Create a new tungsten project'
+    'flame:Profile a .w file with flame graphs'
+    'fire:Alias for flame'
+    'forge:HTTP load testing'
+    'doctor:Check tungsten installation'
+    'console:Start interactive REPL'
+    'ai:AI assistant'
+    'symbolicate:Resolve compact symbols from a .sidemap'
+  )
+  _describe 'command' commands
+}
+
+_tungsten() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '1:command:_tungsten_commands' \
+    '*::arg:->args'
+
+  case $state in
+    args)
+      case $line[1] in
+        compile|compile-batch)
+          _arguments \
+            '--out[Output path]:file:_files' \
+            '--emit-wire[Emit WIRE IR text]' \
+            '--no-lto[Disable link-time optimization]' \
+            '--frame-pointers[Keep frame pointers]' \
+            '--release[Skip debug safety checks and stacktrace metadata]' \
+            '--ast[Print the AST and exit]' \
+            '--lex[Print tokens and exit]' \
+            '-v[Verbose output]' \
+            '*:tungsten source:_files -g "*.w"'
+          ;;
+        build)
+          _arguments \
+            '-1[Build and install only the stage-1 compiler]' \
+            '-2[Reuse /tmp/tungsten.wc and build only stage 2]' \
+            '--force[Ignore cached stage binaries and rebuild]' \
+            '--pgo[Build the compiler with profile-guided optimization]' \
+            '(-h --help)'{-h,--help}'[Show help]'
+          ;;
+        flame|fire)
+          _arguments \
+            '--duration[Profile duration in seconds]:seconds' \
+            '--rate[Sample rate in Hz]:rate' \
+            '--svg[Generate SVG flame graph]' \
+            '--open[Open SVG after generating]' \
+            '--build[Build only, do not profile]' \
+            '-o[Output path]:file:_files' \
+            '--pid[Profile an existing process by PID]:pid:_pids' \
+            '--lex[Profile the lexer]' \
+            '*:tungsten source:_files -g "*.w"'
+          ;;
+        fmt)
+          _arguments \
+            '-w[Write formatted output in place]' \
+            '*:tungsten source:_files -g "*.w"'
+          ;;
+        new)
+          _arguments '1:project name'
+          ;;
+        symbolicate)
+          _arguments \
+            '1:sidemap:_files -g "*.sidemap"' \
+            '*:symbol'
+          ;;
+        *)
+          _files -g "*.w"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_tungsten "$@"

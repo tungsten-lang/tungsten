@@ -1,0 +1,14 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-lsp"
+version     "0.1.0"
+summary     "Language Server Protocol for Tungsten"
+description "LSP server over stdio providing document symbols, hover, and go-to-definition for Tungsten source files."
+license     "MIT OR Apache-2.0"
+authors     ["Tungsten Language Project"]
+
+# The server `use json`, whose SIMD classifier (w_json_simd_classify) lives in
+# the tungsten-json bit's C runtime. Link it so the binary resolves the symbol.
+# (Honored by the build when compiling from this bit directory; for a direct
+# `bin/tungsten -o` from elsewhere, pass it via TUNGSTEN_C_INCLUDES.)
+includes    ["../tungsten-json/runtime/json_simd.c"]

@@ -1,0 +1,237 @@
+.TH BIT 1 "April 2026" "Tungsten" "Tungsten Package Manager"
+.SH NAME
+bit \- Tungsten package manager
+.SH SYNOPSIS
+.B bit
+.I COMMAND
+[options] [ARGS]
+.SH DESCRIPTION
+.B bit
+is the official package manager for the Tungsten programming language.
+It creates, builds, tests, publishes, and consumes Tungsten packages (bits).
+It reads a
+.BR Bitfile (5)
+from the project root, resolves dependencies against the registry, and
+manages the local bit cache.
+.SH OPTIONS
+.TP
+.BR \-c ", " \-\-copyright
+Print the copyright notice.
+.TP
+.BR \-v ", " \-\-verbose
+Print version and enable verbose mode.
+.TP
+.BR \-h ", " \-\-help
+Show help.
+.SH COMMANDS
+.PP
+.B Help
+.RS 4
+.nf
+bit help                Show help
+bit help commands       List all commands
+bit env                 Show local bit environment info
+bit doctor              Check local and publish readiness
+.fi
+.RE
+.PP
+.B Identity setup
+.RS 4
+.nf
+bit create              Create a registry profile
+bit signup              Create a registry profile
+bit login               Store or fetch registry credentials
+.fi
+.RE
+.PP
+.B Project lifecycle
+.RS 4
+.nf
+bit new NAME            Create a new bit project
+bit init                Initialize a bit in the current directory
+.fi
+.RE
+.PP
+.B Dependencies
+.RS 4
+.nf
+bit search QUERY        Search the registry
+bit info NAME           Show bit details, versions, and security status
+bit install             Install dependencies from Bitfile
+bit uninstall NAME      Remove a dependency
+bit update              Update dependencies to latest allowed versions
+bit outdated            Show dependencies with newer versions available
+bit audit               Audit locked dependency security metadata
+bit prune               Remove unused dependencies
+bit list                List installed dependencies
+bit bundle              Vendor dependencies into the bit
+bit open NAME           Open a dependency's source in $EDITOR
+bit viz                 Visualize the dependency graph
+.fi
+.RE
+.PP
+.B Build and test
+.RS 4
+.nf
+bit build               Compile the bit
+bit clean               Remove build artifacts
+bit spec                Run the spec suite
+bit bench               Run benchmarks
+bit lint                Run the linter
+bit console             Start a REPL with dependencies loaded
+bit exec CMD            Run a command in the bit's environment
+bit generate TYPE       Scaffold files (class, spec, etc.)
+.fi
+.RE
+.PP
+.B Publishing
+.RS 4
+.nf
+bit pack                Create a .bit archive
+bit sign                Sign the bit archive for publishing
+bit push                Run CI, sign, and publish
+bit publish             Alias for bit push
+bit yank NAME VERSION   Yank a published version
+bit unpublish           Remove a version from the registry
+bit deprecate           Mark a version as deprecated (still installable)
+.fi
+.RE
+.PP
+.B Identity and config
+.RS 4
+.nf
+bit author              Manage author identity and registry credentials
+bit config              View and set bit configuration
+bit env                 Show registry, profile, key, toolchain, and project paths
+bit doctor              Check Bitfile, lockfile, tools, auth, and signing setup
+.fi
+.RE
+.SH PROJECT STRUCTURE
+.PP
+.BR "bit new pg"
+creates:
+.PP
+.RS 4
+.nf
+pg
+├─ bin
+│  └─ pg*
+├─ spec
+│  ├─ support/
+│  └─ pg_spec.w
+├─ lib
+│  ├─ pg
+│  │  └─ version.w
+│  └─ pg.w
+├─ Bitfile
+├─ LICENSE
+└─ README.md
+.fi
+.RE
+.PP
+Layout rules:
+.IP \(bu 2
+.BR lib/NAME.w
+is the main entry point.
+.B use NAME
+loads this file.
+.IP \(bu 2
+.BR lib/NAME/
+holds internal modules.
+.IP \(bu 2
+.BR lib/NAME/version.w
+holds a version constant (convention, not required).
+.IP \(bu 2
+.BR bin/NAME
+is the optional CLI binary. Its filename must match the bit name.
+.IP \(bu 2
+.BR spec/
+holds test files.
+.B bit spec
+discovers
+.BR *_spec.w
+here.
+.IP \(bu 2
+.BR spec/support/
+holds test helpers loaded before specs.
+.SH VALID BIT NAMES
+.RS 4
+.nf
+/^
+   [a\-z]         # Begins with lowercase letter
+  ([a\-z0\-9]+\-?)* # Dash separated alpha\-numerics, no double dashes
+   [a\-z0\-9]      # No trailing dash, no single character names
+$/x
+.fi
+.RE
+.SH VALID VERSIONS
+.RS 4
+.nf
+/^
+  (?<major> 0 | [1\-9][0\-9]* ) \e.
+  (?<minor> 0 | [1\-9][0\-9]* ) \e.
+  (?<tiny>  0 | [1\-9][0\-9]* )
+  (?<note>
+    \e. ( alpha | beta | rc )
+       ( [1\-9][0\-9]* )?
+  )?
+$/x
+.fi
+.RE
+.PP
+Pre-release ordering:
+.PP
+.RS 4
+.nf
+1.0.0.alpha < 1.0.0.alpha2 < 1.0.0.beta < 1.0.0.beta2
+            < 1.0.0.rc    < 1.0.0.rc2  < 1.0.0
+.fi
+.RE
+.PP
+A bare pre-release tag
+.RB ( 1.0.0.alpha )
+sorts as
+.BR 1.0.0.alpha1 .
+.SH VERSION CONSTRAINTS
+.RS 4
+.nf
+"1.0.0"             Exact version.
+">= 1.0.0"          Minimum version.
+"< 2.0.0"           Maximum version (exclusive).
+"~> 1.2"            Pessimistic: >= 1.2.0 and < 2.0.0.
+"~> 1.2.3"          Pessimistic: >= 1.2.3 and < 1.3.0.
+">= 1.0", "< 3"     Multiple constraints (all must be satisfied).
+.fi
+.RE
+.SH RESERVED BIT NAMES
+.RS 4
+.nf
+/^(w\-|tungsten)/
+.fi
+.RE
+.PP
+Names beginning with
+.B w\-
+are reserved for the Tungsten standard library. Names beginning with
+.B tungsten
+are reserved for official Tungsten project packages.
+.SH COMMAND LINE BINARIES
+A bit can have one and only one CLI command, which matches the bit name.
+Related commands should be exposed as subcommands:
+.PP
+.RS 4
+.nf
+pg migrate
+pg console
+pg dump
+.fi
+.RE
+.PP
+This prevents PATH pollution and keeps one bit equal to one command. If two
+tools are genuinely unrelated, they belong in two bits.
+.SH SEE ALSO
+.BR Bitfile (5),
+.BR bit-install (1),
+.BR tungsten (1)
+.SH AUTHORS
+Bit is developed and maintained by Erik Peterson.

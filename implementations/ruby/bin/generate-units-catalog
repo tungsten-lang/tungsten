@@ -1,0 +1,133 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Generates doc/units_catalog.md from the live UNIT_TABLE / UNIT_ALIASES /
+# COMPOUND_DEFS registry. Groups by dimension, lists symbol → factor → aliases →
+# description for each entry. Run from the gem root:
+#
+#   bin/generate-units-catalog                     # writes to doc/units_catalog.md
+#   bin/generate-units-catalog --json out.json     # also dump a machine-readable JSON
+
+$LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+require "tungsten"
+require "fileutils"
+require "json"
+require "optparse"
+
+options = { md: nil, json: nil }
+OptionParser.new do |opts|
+  opts.banner = "Usage: bin/generate-units-catalog [options]"
+  opts.on("-m", "--md PATH", "Output markdown path (default: doc/units_catalog.md)") { |v| options[:md] = v }
+  opts.on("-j", "--json PATH", "Also output a JSON dump at PATH") { |v| options[:json] = v }
+end.parse!
+
+repo_root = File.expand_path("..", __dir__)
+md_path = options[:md] || File.join(repo_root, "doc", "units_catalog.md")
+FileUtils.mkdir_p(File.dirname(md_path)) unless Dir.exist?(File.dirname(md_path))
+
+# Group by dimension name. Custom-dim units share the dim's tag name.
+def dim_label(dim)
+  return dim.custom_name if dim.respond_to?(:custom?) && dim.custom?
+  named = Tungsten::Units::DIMENSION_NAMES[dim]
+  return named if named
+  # Compose a compact name from non-zero exponents.
+  axes = { length: "L", mass: "M", time: "T", current: "I", temperature: "Θ",
+           substance: "N", luminosity: "J", information: "B" }
+  parts = axes.filter_map do |axis, label|
+    e = dim.public_send(axis)
+    next if e.zero?
+    e == 1 ? label : "#{label}^#{e}"
+  end
+  parts.empty? ? "dimensionless" : "[#{parts.join('·')}]"
+end
+
+# Build alias index: canonical → [alias names]
+alias_index = Hash.new { |h, k| h[k] = [] }
+Tungsten::Units::UNIT_ALIASES.each { |al, can| alias_index[can] << al }
+
+groups = Hash.new { |h, k| h[k] = [] }
+Tungsten::Units::UNIT_TABLE.each do |sym, def_obj|
+  groups[dim_label(def_obj.dimension)] << [sym, def_obj]
+end
+Tungsten::Units::COMPOUND_DEFS.each_key do |sym|
+  cu = Tungsten::Units.compound_units[sym]
+  next unless cu
+  groups[dim_label(cu.dimension)] << [sym, cu]
+end
+
+# Stable order: SI base dims first, then alphabetical.
+priority_order = %w[
+  length mass time current temperature substance luminosity information
+  area volume velocity acceleration force energy power pressure frequency
+  voltage charge resistance capacitance inductance magnetic\ flux
+  magnetic\ flux\ density conductance illuminance absorbed\ dose
+  catalytic\ activity dynamic\ viscosity kinematic\ viscosity
+  inverse\ length inverse\ area magnetic\ field\ strength
+  electric\ dipole\ moment magnetic\ moment dimensionless
+]
+sorted_groups = groups.keys.sort_by { |g| [priority_order.index(g) || 999, g] }
+
+md = +"# Tungsten Unit Catalog\n\n"
+md << "Auto-generated from `lib/tungsten/support/units.rb`.\n"
+md << "Total: #{Tungsten::Units::UNIT_TABLE.size} atomic units"
+md << " · #{Tungsten::Units::UNIT_ALIASES.size} aliases"
+md << " · #{Tungsten::Units::COMPOUND_DEFS.size} compound forms.\n\n"
+md << "Generated #{Time.now.strftime('%Y-%m-%d')}.\n\n"
+
+# Table of contents
+md << "## Dimensions\n\n"
+sorted_groups.each do |g|
+  anchor = g.gsub(/[^\w]+/, "-").downcase
+  md << "- [#{g}](##{anchor}) (#{groups[g].size} units)\n"
+end
+md << "\n"
+
+sorted_groups.each do |g|
+  md << "## #{g}\n\n"
+  md << "| Symbol | Factor (SI) | Description | Aliases |\n"
+  md << "|---|---|---|---|\n"
+  groups[g].sort_by { |sym, _| sym.downcase }.each do |sym, base|
+    factor = base.factor
+    factor_str = case factor
+                 when Rational then factor.denominator == 1 ? factor.to_i.to_s : "#{factor.to_f} (#{factor})"
+                 when Float then factor.to_s
+                 else factor.to_s
+                 end
+    desc = (base.respond_to?(:description) && base.description) ? base.description : ""
+    aliases = alias_index[sym].sort.first(8).join(", ")
+    aliases += "…" if alias_index[sym].size > 8
+    desc = desc.gsub("|", "\\|").gsub("\n", " ")
+    aliases = aliases.gsub("|", "\\|")
+    md << "| `#{sym}` | #{factor_str} | #{desc} | #{aliases} |\n"
+  end
+  md << "\n"
+end
+
+File.write(md_path, md)
+puts "Wrote #{md_path} (#{md.bytesize} bytes, #{sorted_groups.size} dimensions)"
+
+if options[:json]
+  json_data = {
+    generated_at: Time.now.iso8601,
+    counts: {
+      atomic: Tungsten::Units::UNIT_TABLE.size,
+      aliases: Tungsten::Units::UNIT_ALIASES.size,
+      compound: Tungsten::Units::COMPOUND_DEFS.size,
+    },
+    units: Tungsten::Units::UNIT_TABLE.map do |sym, d|
+      {
+        symbol: sym,
+        dimension: dim_label(d.dimension),
+        factor: d.factor.is_a?(Rational) ? d.factor.to_f : d.factor,
+        offset: d.offset.is_a?(Rational) ? d.offset.to_f : d.offset,
+        description: d.respond_to?(:description) ? d.description : nil,
+        measured: d.respond_to?(:measured) ? d.measured : nil,
+        year_defined: d.respond_to?(:year_defined) ? d.year_defined : nil,
+        defining_source: d.respond_to?(:defining_source) ? d.defining_source : nil,
+        aliases: alias_index[sym],
+      }
+    end,
+  }
+  File.write(options[:json], JSON.pretty_generate(json_data))
+  puts "Wrote #{options[:json]}"
+end

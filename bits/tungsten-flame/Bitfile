@@ -1,0 +1,8 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-flame"
+version     "0.2.0"
+summary     "Flame graph profiler for Tungsten"
+description "Profiles compiled Tungsten binaries and generates interactive SVG flame graphs with inline text breakdown."
+license     "MIT OR Apache-2.0"
+authors     ["Tungsten Language Project"]

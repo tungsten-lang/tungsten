@@ -1,0 +1,395 @@
+#!/bin/bash
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+COMPILER="$ROOT/bin/tungsten-compiler"
+RUBY_CLI="$ROOT/bin/tungsten.rb"
+CUSTOM_RUBY="$ROOT/src/patched/ruby/ruby"
+
+# Single-source the version from the repo-root VERSION file, so children (the
+# compiled CLI, the REPL banner) read it from the environment instead of
+# re-hardcoding it.
+export TUNGSTEN_VERSION="$(cat "$ROOT/VERSION" 2>/dev/null || echo dev)"
+
+# Anchor stdlib resolution to the install root, not the caller's cwd. Without
+# this, `tungsten /tmp/foo.w` from outside the repo fails to autoload any
+# pure-Tungsten core class (JSON, Matrix, Hypercomplex, …) because
+# find_core_root only walks the source file's ancestry and cwd for
+# core/tungsten.w — neither of which exists next to an arbitrary user file.
+# C-builtin methods (String#upcase, Array#sort) survive since they live in the
+# runtime, which masked this for simple programs. See loader.w:find_core_root.
+export TUNGSTEN_ROOT="$ROOT"
+
+# Prefer custom ruby, fall back to system ruby
+if [ -x "$CUSTOM_RUBY" ]; then
+  RUBY="$CUSTOM_RUBY"
+else
+  RUBY=ruby
+fi
+
+# Commands handled by the Ruby CLI (not yet ported to the compiled binary).
+# `start` lives here on purpose: it's the first-run welcome, and it must work on
+# a fresh clone that has no compiler yet, so it takes the Ruby-dispatch path.
+#
+# `repl` is the canonical REPL subcommand (`console` is its alias): both run the
+# compiled REPL (jit/hot/scrub live there), falling back to the Ruby CLI's
+# console only when no compiled binary exists yet.
+case "$1" in
+  repl|console)
+    shift
+    if [ -x "$COMPILER" ]; then
+      exec "$COMPILER" --repl "$@"
+    else
+      exec "$RUBY" "$RUBY_CLI" console "$@"
+    fi
+    ;;
+  build|fmt|new|start|doctor|ai|forge|flame|fire|bit|compile-batch|symbolicate)
+    exec "$RUBY" "$RUBY_CLI" "$@"
+    ;;
+esac
+
+# --fast-math / --no-fast-math: compile-time choice for `if FAST_MATH`
+# branches in .w source. Translated to `-D FAST_MATH=true|false`, which
+# the compiler turns into a build-time constant. The .w `if FAST_MATH`
+# check constant-folds during lowering — no runtime branch, no global.
+#
+# -D NAME=VALUE flags are accumulated into TUNGSTEN_DEFINES (semicolon-
+# separated) and stripped from argv before the Ruby CLI sees them
+# (its OptionParser rejects -D).
+filtered_args=()
+defines=""
+i=0
+args_arr=("$@")
+n_args=${#args_arr[@]}
+while [ "$i" -lt "$n_args" ]; do
+  arg="${args_arr[$i]}"
+  case "$arg" in
+    --fast-math)
+      # Matches the universal `-ffast-math` meaning, three effects:
+      #   1. Fast floating-point semantics (math_mode = :fast) — forwarded as
+      #      `--fast`, which the Ruby driver (compile.rb) strips and hands to
+      #      `tungsten-compiler compile`.
+      #   2. The `FAST_MATH` build-time constant, so `if FAST_MATH` source
+      #      branches constant-fold to the fast path.
+      #   3. Pass -ffast-math to the backend clang so LLVM's loop vectorizer
+      #      can auto-SIMD float reductions/maps (FP add isn't associative, so
+      #      the vectorizer is gated on this) — see fast_math_on below.
+      defines="${defines:+${defines};}FAST_MATH=true"
+      fast_math_on=1
+      filtered_args+=("--fast")
+      ;;
+    --fast|-fast)
+      # Same fast-FP intent as --fast-math; also enable clang auto-vectorization.
+      fast_math_on=1
+      filtered_args+=("$arg")
+      ;;
+    --no-fast-math)
+      defines="${defines:+${defines};}FAST_MATH=false"
+      ;;
+    -D)
+      i=$((i + 1))
+      if [ "$i" -lt "$n_args" ]; then
+        d="${args_arr[$i]}"
+        case "$d" in *=*) : ;; *) d="${d}=true" ;; esac
+        defines="${defines:+${defines};}${d}"
+      fi
+      ;;
+    -D*)
+      d="${arg#-D}"
+      case "$d" in *=*) : ;; *) d="${d}=true" ;; esac
+      defines="${defines:+${defines};}${d}"
+      ;;
+    *)
+      filtered_args+=("$arg")
+      ;;
+  esac
+  i=$((i + 1))
+done
+set -- "${filtered_args[@]}"
+
+if [ -n "$defines" ]; then
+  if [ -n "$TUNGSTEN_DEFINES" ]; then
+    export TUNGSTEN_DEFINES="${TUNGSTEN_DEFINES};${defines}"
+  else
+    export TUNGSTEN_DEFINES="$defines"
+  fi
+fi
+
+# Fast-math build: hand the backend clang -ffast-math so LLVM auto-vectorizes
+# clean scalar float loops (reductions/maps over typed f64[]/f32[] arrays) into
+# NEON/AVX/SVE for the target -march. Only defaults it — an explicit
+# TUNGSTEN_CLANG_OPT from the user wins. Off by default (fast-math changes FP
+# semantics: reassociation, no nnan/ninf); -fast is the opt-in.
+if [ -n "$fast_math_on" ] && [ -z "$TUNGSTEN_CLANG_OPT" ]; then
+  export TUNGSTEN_CLANG_OPT="-O3 -ffast-math"
+fi
+
+
+# Walk up from a path looking for a Bitfile. Echoes the bit dir on stdout
+# (or empty if none found). The bit dir is the first ancestor that contains
+# a Bitfile.
+find_bitfile_dir() {
+  local d
+  d=$(cd "$(dirname "$1")" 2>/dev/null && pwd)
+  while [ -n "$d" ] && [ "$d" != "/" ]; do
+    if [ -f "$d/Bitfile" ]; then
+      echo "$d"
+      return
+    fi
+    d=$(dirname "$d")
+  done
+}
+
+# Parse a Bitfile's `includes [...]` line and emit colon-separated absolute
+# paths for the includes (resolved relative to the Bitfile's dir).
+bitfile_includes() {
+  local bit_dir="$1"
+  local bf="$bit_dir/Bitfile"
+  [ -f "$bf" ] || return
+  # Match `includes ["foo", "bar"]` (single-line form). Multi-line could be
+  # added later if any bit needs it.
+  grep -E '^[[:space:]]*includes[[:space:]]+\[' "$bf" 2>/dev/null \
+    | sed -E 's/.*\[(.*)\].*/\1/' \
+    | tr ',' '\n' \
+    | sed -E 's/^[[:space:]]*"([^"]*)".*/\1/' \
+    | while IFS= read -r inc; do
+        [ -n "$inc" ] && printf '%s:' "$bit_dir/$inc"
+      done
+}
+
+# Parse `Tungsten[:name] = "bit"` service binding lines from a Bitfile
+# and emit them as "name=bit,name2=bit2,..." for TUNGSTEN_SERVICE_BINDINGS.
+# Missing Bitfile or no bindings → empty output.
+bitfile_service_bindings() {
+  local bit_dir="$1"
+  local bf="$bit_dir/Bitfile"
+  [ -f "$bf" ] || return
+  grep -E '^[[:space:]]*Tungsten\[:[a-z_]+\][[:space:]]*=[[:space:]]*"[^"]+"' "$bf" 2>/dev/null \
+    | sed -E 's/^[[:space:]]*Tungsten\[:([a-z_]+)\][[:space:]]*=[[:space:]]*"([^"]+)".*/\1=\2/' \
+    | tr '\n' ',' \
+    | sed 's/,$//'
+}
+
+# Parse a Bitfile's `requires [...]` line and emit the bit names
+# one per line. Same single-line form as `includes [...]`.
+bitfile_requires() {
+  local bit_dir="$1"
+  local bf="$bit_dir/Bitfile"
+  [ -f "$bf" ] || return
+  grep -E '^[[:space:]]*requires[[:space:]]+\[' "$bf" 2>/dev/null \
+    | sed -E 's/.*\[(.*)\].*/\1/' \
+    | tr ',' '\n' \
+    | sed -E 's/^[[:space:]]*"([^"]*)".*/\1/'
+}
+
+# Walk the requires graph from a starting bit dir, emitting colon-
+# separated include paths for every transitively reached bit. BFS
+# with a visited set to prevent infinite loops on cycles.
+# Arg 1: starting bit dir (the project or bit whose Bitfile we're in).
+# Arg 2: repo root (where bits/<name> lives).
+walk_requires_includes() {
+  local start_dir="$1"
+  local repo_root="$2"
+  local visited=""
+  local queue="$start_dir"
+  local emitted=""
+
+  while [ -n "$queue" ]; do
+    local current="${queue%% *}"
+    queue="${queue#* }"
+    [ "$queue" = "$current" ] && queue=""
+
+    case ",$visited," in
+      *,"$current",*) continue ;;
+    esac
+    visited="${visited},${current}"
+
+    # Emit this Bitfile's own includes
+    local cur_incs
+    cur_incs=$(bitfile_includes "$current")
+    if [ -n "$cur_incs" ]; then
+      emitted="${emitted}${cur_incs}"
+    fi
+
+    # Enqueue each required bit's dir
+    while IFS= read -r req; do
+      [ -z "$req" ] && continue
+      local req_dir="$repo_root/bits/$req"
+      if [ ! -d "$req_dir" ]; then
+        echo "bin/tungsten: requires '$req' not found under $repo_root/bits/" >&2
+        return 1
+      fi
+      queue="${queue} ${req_dir}"
+    done < <(bitfile_requires "$current")
+  done
+
+  printf '%s' "$emitted"
+}
+
+# "compile" goes directly to the compiled binary's built-in compiler.
+# Before exec'ing, look up the Bitfile of the file being compiled and:
+#   1. Add its `includes` to TUNGSTEN_C_INCLUDES so the link step picks
+#      up bit C files automatically.
+#   2. Parse any `Tungsten[:svc] = "bit"` service bindings and export
+#      them as TUNGSTEN_SERVICE_BINDINGS so the loader can route bare
+#      `use json` calls to the selected bit.
+if [ "$1" = "compile" ]; then
+  for arg in "${@:2}"; do
+    case "$arg" in
+      -*|--*) ;;
+      *)
+        if [ -f "$arg" ]; then
+          bit_dir=$(find_bitfile_dir "$arg")
+          if [ -n "$bit_dir" ]; then
+            # Walk the source file's Bitfile PLUS any bits it
+            # `requires` — transitively — to build the complete
+            # TUNGSTEN_C_INCLUDES path. Cycles are caught by the
+            # walker's visited set.
+            bit_incs=$(walk_requires_includes "$bit_dir" "$ROOT") || exit $?
+            if [ -n "$bit_incs" ]; then
+              if [ -n "$TUNGSTEN_C_INCLUDES" ]; then
+                export TUNGSTEN_C_INCLUDES="${bit_incs}${TUNGSTEN_C_INCLUDES}"
+              else
+                export TUNGSTEN_C_INCLUDES="${bit_incs%:}"
+              fi
+            fi
+            bit_bindings=$(bitfile_service_bindings "$bit_dir")
+            if [ -n "$bit_bindings" ] && [ -z "$TUNGSTEN_SERVICE_BINDINGS" ]; then
+              export TUNGSTEN_SERVICE_BINDINGS="$bit_bindings"
+            fi
+          fi
+          break
+        fi
+        ;;
+    esac
+  done
+  # Default output path: `tungsten compile file.w` writes the binary `file`
+  # (the source with its .w stripped), unless the user passed -o/--out. If that
+  # path already exists, warn and confirm before clobbering it — and refuse
+  # outright in a non-interactive shell (no TTY to answer the prompt). The
+  # compiler's own default (file.wc) is left untouched for the build system.
+  compile_out_args=()
+  _has_out=""
+  _src=""
+  for arg in "${@:2}"; do
+    case "$arg" in
+      -o|--out|-o=*|--out=*) _has_out=1 ;;
+      -*) ;;
+      *.w) [ -z "$_src" ] && [ -f "$arg" ] && _src="$arg" ;;
+    esac
+  done
+  if [ -z "$_has_out" ] && [ -n "$_src" ]; then
+    _out="${_src%.w}"
+    if [ -e "$_out" ]; then
+      if [ -t 0 ] && [ -t 2 ]; then
+        printf "'%s' already exists. Overwrite? [y/N] " "$_out" >&2
+        read -r _ans
+        case "$_ans" in
+          y|Y|yes|YES|Yes) ;;
+          *) echo "Aborted — no output written." >&2; exit 1 ;;
+        esac
+      else
+        echo "tungsten compile: '$_out' already exists; pass -o <path> or remove it." >&2
+        exit 1
+      fi
+    fi
+    compile_out_args=(-o "$_out")
+  fi
+  if [ -x "$COMPILER" ]; then
+    exec "$COMPILER" "$@" "${compile_out_args[@]}"
+  else
+    exec "$RUBY" "$RUBY_CLI" "$@" "${compile_out_args[@]}"
+  fi
+fi
+
+# "run file.w" interprets through the Tungsten interpreter (compiler/tungsten.w's
+# `run` command) — no compile, no build artifacts. `--ruby` forces the Ruby
+# tree-walker instead; and it's also the fallback when no compiler is built yet.
+if [ "$1" = "run" ]; then
+  shift  # remove "run"
+  ruby_mode=false
+  run_args=()
+  for arg in "$@"; do
+    if [ "$arg" = "--ruby" ]; then
+      ruby_mode=true
+    else
+      run_args+=("$arg")
+    fi
+  done
+  if [ "$ruby_mode" = false ] && [ -x "$COMPILER" ]; then
+    exec "$COMPILER" run "${run_args[@]}"
+  else
+    exec "$RUBY" "$RUBY_CLI" --ruby "${run_args[@]}"
+  fi
+fi
+
+# --interpret: run a .w file through the interpreter (used by polyglot scripts)
+if [ "$1" = "--interpret" ]; then
+  shift
+  exec "$RUBY" "$RUBY_CLI" --ruby "$@"
+fi
+
+# `--ast` / `--lex` are file-inspection modes implemented by the compiled
+# frontend (compiler/tungsten.w). Route them straight to the compiled binary
+# — the Ruby CLI's handling is stale. Falls back to Ruby only if the compiled
+# binary hasn't been built yet.
+case "$1" in
+  --ast|--lex)
+    if [ -x "$COMPILER" ]; then
+      exec "$COMPILER" "$@"
+    else
+      exec "$RUBY" "$RUBY_CLI" "$@"
+    fi
+    ;;
+esac
+
+# Interactive REPL modes are implemented by the compiled frontend
+# (compiler/tungsten.w → compiler/lib/repl.w): route them to the compiled
+# binary, which the Ruby CLI does not handle (it rejects --wit/--jit/--hot).
+# Falls back to Ruby only if the compiled binary hasn't been built yet.
+case "$1" in
+  --wit|--repl|--jit|--hot)
+    if [ -x "$COMPILER" ]; then
+      exec "$COMPILER" "$@"
+    else
+      exec "$RUBY" "$RUBY_CLI" "$@"
+    fi
+    ;;
+esac
+
+# Canonical help is the compiled CLI's man page (doc/TUNGSTEN.md via Argon):
+# let -h/--help fall through to the tungsten.wc block below, which renders it
+# (and falls back to the Ruby CLI's help when no compiler is built yet).
+# All other leading-flag invocations (`--ll`, `-e`, ...) belong to the Ruby CLI.
+case "$1" in
+  -h|--help|-\?)
+    : # fall through to the compiled-CLI block
+    ;;
+  -*)
+    exec "$RUBY" "$RUBY_CLI" "$@"
+    ;;
+esac
+
+if [ -f "$1" ]; then
+  # Bare `tungsten file.w ...` is an interpreted run via the Tungsten
+  # interpreter (same path as `tungsten run file.w`) — no compile, no build
+  # artifacts. Falls back to the Ruby tree-walker only when no compiler exists.
+  if [ -x "$COMPILER" ]; then
+    exec "$COMPILER" run "$@"
+  else
+    exec "$RUBY" "$RUBY_CLI" --ruby "$@"
+  fi
+fi
+
+if [ -x "$COMPILER" ]; then
+  # The compiled compiler BUILDS the Tungsten-written CLI (bin/tungsten.wc)
+  # but does not exec it — so `tungsten file.w` used to print "Built …" and
+  # exit without running anything. Build if stale, then run the CLI with the
+  # user's args.
+  WC="$ROOT/bin/tungsten.wc"
+  if [ ! -x "$WC" ] || [ "$ROOT/bin/tungsten.w" -nt "$WC" ]; then
+    "$COMPILER" "$ROOT/bin/tungsten.w" >/dev/null 2>&1 || exec "$RUBY" "$RUBY_CLI" "$@"
+  fi
+  exec "$WC" "$@"
+else
+  exec "$RUBY" "$RUBY_CLI" "$@"
+fi

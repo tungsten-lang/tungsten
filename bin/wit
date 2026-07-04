@@ -1,0 +1,22 @@
+#!/usr/bin/env ruby
+
+# vim: filetype=ruby
+
+# bin/wit — W Interactive Tungsten (REPL)
+#
+# Runs the Tungsten REPL written in Tungsten (stages/tungsten/lib/repl.w).
+# Falls back to the Ruby REPL if the stage REPL isn't available.
+
+ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "implementations/ruby/lib"))
+
+require "tungsten"
+
+repl_source = File.join(ROOT, "stages/tungsten/lib/repl.w")
+
+if File.exist?(repl_source)
+  source = File.read(repl_source) + "\nREPL.new().start()"
+  Tungsten::Interpreter.new.run(source, file_path: repl_source)
+else
+  Tungsten::REPL.new.start
+end

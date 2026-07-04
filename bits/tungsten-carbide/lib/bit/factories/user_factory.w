@@ -1,0 +1,1 @@
+class Carbide:User<Factory>

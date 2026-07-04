@@ -1,0 +1,9 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-json"
+version     "0.1.0"
+summary     "High-throughput JSON parser for Tungsten — simdjson-class via 16-byte SIMD classifier"
+description "Drop-in faster JSON parser that overrides the default JSON.parse with a 16-byte NEON SIMD classifier (simdjson stage-1 algorithm, PMULL prefix-XOR string state, escape detection). ~3× faster than the recursive descent parser in lib/json.w on multi-MB JSON files. Conforms to the JSON contract defined in lib/json.w — same return types, same value tree."
+license     "MIT OR Apache-2.0"
+authors     ["Tungsten Language Project"]
+includes    ["runtime/json_simd.c"]

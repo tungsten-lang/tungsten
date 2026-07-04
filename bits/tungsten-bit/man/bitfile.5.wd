@@ -1,0 +1,42 @@
+Bitfile(5) -- A format for describing bit dependencies of Tungsten programs
+===========================================================================
+
+## SYNOPSIS
+
+A `Bitfile` describes the bits required to execute associated Tungsten code.
+
+Place the `Bitfile` in the root directory of a Tungsten bit or application.
+
+## SYNTAX
+
+A `Bitfile` is evaluated as Tungsten code, in a context which makes available
+a number of methods used to describe the bit requirements.
+
+## SOURCES
+
+At the top of the `Bitfile`, add a line for the `Tungsten` source that contains
+the bits listed in the `Bitfile`.
+
+    source "https://bits.tungsten-lang.org"
+
+Feature release cooldowns can be configured per source:
+
+    source "https://bits.tungsten-lang.org", cooldown: 7
+
+`cooldown` is measured in days. Security releases are always eligible
+immediately. Sources may be marked trusted to allow immediate feature upgrades:
+
+    source "https://github.com/example/bits", cooldown: 14, trusted: true
+
+Git/GitHub dependencies built from source should only bypass cooldown when the
+source is explicitly trusted.
+
+## INCLUDES
+
+Bits that need extra C sources at link time can declare them in the `Bitfile`.
+Paths are relative to the bit root.
+
+    includes ["lib/hammer.c"]
+
+The build tooling compiles and links these C files alongside the Tungsten runtime,
+similar to how `runtime.c` is included for normal Tungsten binaries.

@@ -1,0 +1,337 @@
+#!/usr/bin/env bash
+exec "$(dirname "$0")/tungsten" run "$0" "$@"
+# Tungsten Benchmark Suite
+# Rewrite of bin/bench (bash) in Tungsten
+
+root = capture("cd \"[__DIR__]/..\" && pwd").strip
+benchdir = root + "/benchmarks"
+tungsten = root + "/bin/tungsten"
+
+runs_env = env("RUNS")
+runs = 3
+if runs_env
+  runs = runs_env.to_i()
+
+BOLD  = "\e[1m"
+DIM   = "\e[2m"
+RESET = "\e[0m"
+GREEN = "\e[32m"
+RED   = "\e[31m"
+CYAN  = "\e[36m"
+WHITE = "\e[97m"
+
+all_langs = ["tungsten", "c", "rust", "zig", "odin", "go", "crystal", "ruby", "python"]
+names     = {"c": "C", "rust": "Rust", "zig": "Zig", "odin": "Odin", "go": "Go", "crystal": "Crystal", "ruby": "Ruby", "python": "Python", "tungsten": "Tungsten"}
+exts      = {"c": "c", "rust": "rs", "zig": "zig", "odin": "odin", "go": "go", "crystal": "cr", "ruby": "rb", "python": "py", "tungsten": "w"}
+cmds      = {"c": "clang", "rust": "rustc", "zig": "zig", "odin": "odin", "go": "go", "crystal": "crystal", "ruby": "ruby", "python": "python3"}
+suffixes  = {"c": "_c", "rust": "_rs", "zig": "_zig", "odin": "_odin", "go": "_go", "crystal": "_cr", "tungsten": "_w"}
+
+-> display_name(lang)
+  names[lang]
+
+-> lang_ext(lang)
+  exts[lang]
+
+-> has_lang(lang)
+  if lang == "tungsten"
+    return capture("test -x \"[tungsten]\" && echo yes || echo no").strip() == "yes"
+  cmd = cmds[lang]
+  capture("command -v [cmd] 2>/dev/null").strip().length() > 0
+
+# A benchmark only includes a language if its source file is present —
+# not every benchmark provides every language (e.g. polysum has rs/zig/
+# odin, pipeline does not). Guards the compile/verify/run loops so a
+# missing source is silently skipped instead of erroring. (Built by
+# concatenation — a nested `[exts[lang]]` interpolation crashes the
+# interpreter with "undefined method '[]'".)
+-> has_source(dir, bench, lang)
+  path = dir + "/" + bench + "." + exts[lang]
+  capture("test -f \"" + path + "\" && echo yes").strip() == "yes"
+
+# A compiled language only runs if its binary was actually produced. A
+# failed compile (e.g. a source that doesn't match the installed toolchain
+# version) must be SKIPPED in verify/timing, NOT run as a missing binary
+# and clocked at 0s — otherwise a broken benchmark looks instantaneous.
+# Test -s (non-empty), not just -x: a failed `zig build-exe -femit-bin`
+# leaves a 0-byte executable STUB that -x would accept (and running an
+# empty file is instant → a bogus "0.002s"). Ruby/Python run from source.
+-> has_binary(dir, bench, lang)
+  if lang == "ruby" || lang == "python"
+    return true
+  bin = dir + "/" + bench + suffixes[lang]
+  capture("test -s \"" + bin + "\" -a -x \"" + bin + "\" && echo yes").strip() == "yes"
+
+# Languages to skip for a specific benchmark, even when installed and a
+# source exists. polysum's interpreters are ~1000x slower than its compiled
+# languages, so at the N where C/Rust/… reach ~1-2s they would run for
+# minutes — drop them from the suite (the source files stay for standalone
+# runs / correctness reference).
+bench_skip = {"polysum": "ruby python"}
+
+-> skip_lang?(bench, lang)
+  if !bench_skip.has_key?(bench)
+    return false
+  bench_skip[bench].split(" ").include?(lang)
+
+# Extra runtime args per benchmark. polysum's per-element work (5 high-degree
+# polynomials) is ~50x heavier than the other loops, so the interpreters
+# would run for minutes at the source default — pass a smaller N/REPS here.
+bench_args = {"polysum": "100000000 10"}
+
+-> run_args_for(bench)
+  if bench_args.has_key?(bench)
+    return " " + bench_args[bench]
+  ""
+
+# Format seconds to 3 decimals. Float#round(n) ignores its precision arg
+# (rounds to an integer), so sub-second times would all print as "0s" —
+# truncate the decimal string instead.
+-> fmt_secs(t)
+  s = "" + t.to_s()
+  dot = s.index(".")
+  if dot == nil
+    return s + "s"
+  s.slice(0, dot + 4) + "s"
+
+-> run_cmd(lang, dir, bench)
+  extra = run_args_for(bench)
+  case lang
+  when "ruby"
+    return "ruby --yjit '" + dir + "/" + bench + ".rb'" + extra
+  when "python"
+    return "python3 '" + dir + "/" + bench + ".py'" + extra
+  else
+    "'" + dir + "/" + bench + suffixes[lang] + "'" + extra
+
+-> compile_cmd(lang, dir, bench)
+  case lang
+  when "c"
+    return "clang -O3 -march=native -flto -DNDEBUG \"[dir]/[bench].c\" -o \"[dir]/[bench]_c\""
+  when "rust"
+    return "rustc -O \"[dir]/[bench].rs\" -o \"[dir]/[bench]_rs\" 2>/dev/null"
+  when "zig"
+    return "zig build-exe -OReleaseFast -lc \"[dir]/[bench].zig\" -femit-bin=\"[dir]/[bench]_zig\" 2>/dev/null"
+  when "odin"
+    return "odin build \"[dir]/[bench].odin\" -file -o:speed -out:\"[dir]/[bench]_odin\" 2>/dev/null"
+  when "go"
+    return "go build -o \"[dir]/[bench]_go\" \"[dir]/[bench].go\""
+  when "crystal"
+    return "crystal build --release -o \"[dir]/[bench]_cr\" \"[dir]/[bench].cr\" 2>/dev/null"
+  when "tungsten"
+    return "\"[tungsten]\" compile --native \"[dir]/[bench].w\" -o \"[dir]/[bench]_w\" 2>/dev/null"
+
+only = env("ONLY")
+langs = all_langs
+
+if only
+  selected = only.downcase.split(",")
+  langs = []
+  selected.each -> (s)
+    s = s.strip
+
+    s = "tungsten" if s == "w"
+
+    if all_langs.include?(s)
+      langs.push(s)
+    else
+      << "Unknown platform: [s] (available: [all_langs.join(" ")])"
+      exit(1)
+
+all_benchmarks = ["fib", "primes", "ackermann", "sum", "collatz", "gcd", "nested_loops", "pipeline", "polysum"]
+labels = {"fib": "fib(42)", "primes": "primes(120M)", "ackermann": "ackermann(3,12)", "sum": "sum(3.5B)", "collatz": "collatz(5M)", "gcd": "gcd(22M)", "nested_loops": "nested_loops(1B)", "pipeline": "pipeline(100M)", "polysum": "polysum(deg 1-20)"}
+
+# bin/tungsten run exposes only user arguments to Tungsten code.
+script_args = argv()
+benchmarks = all_benchmarks
+
+if script_args.size > 0
+  name = script_args[0]
+  if !all_benchmarks.include?(name)
+    << "Unknown benchmark: [name] (available: [all_benchmarks.join(" ")])"
+    exit(1)
+  benchmarks = [name]
+
+-> get_label(bench)
+  labels[bench]
+
+-> best_time(cmd, n)
+  best = -1.0
+  i = 0
+  while i < n
+    t1 = clock()
+    ok = system(cmd + " > /dev/null 2>&1")
+    if ok == false
+      return nil
+    t2 = clock()
+    elapsed = t2 - t1
+
+    if best < 0.0
+      best = elapsed
+    elsif elapsed < best
+      best = elapsed
+    i = i + 1
+  best
+
+<< "[BOLD]Tungsten Benchmark Suite[RESET]"
+<< ""
+
+print("Languages: ")
+langs.each -> (lang)
+  name = display_name(lang)
+  if has_lang(lang)
+    print("[GREEN][name][RESET] ")
+  else
+    print("[DIM][name] (not found)[RESET] ")
+<< ""
+<< ""
+
+<< "[BOLD]Compiling...[RESET]"
+
+benchmarks.each -> (bench)
+  dir = benchdir + "/" + bench
+  langs.each -> (lang)
+    if has_lang(lang) && has_source(dir, bench, lang) && !skip_lang?(bench, lang)
+      cmd = compile_cmd(lang, dir, bench)
+      if cmd
+        ext = lang_ext(lang)
+        << "  [DIM][bench].[ext][RESET]"
+        system(cmd)
+
+<< ""
+
+<< "[BOLD]Verifying outputs match...[RESET]"
+verify_ok = true
+
+bench_i = 0
+while bench_i < benchmarks.size()
+  bench = benchmarks[bench_i]
+  label = get_label(bench)
+  dir = benchdir + "/" + bench
+  expected = ""
+  expected_name = ""
+  mismatch = ""
+
+  lang_i = 0
+  while lang_i < langs.size()
+    lang = langs[lang_i]
+    if has_lang(lang) && has_source(dir, bench, lang) && !skip_lang?(bench, lang) && has_binary(dir, bench, lang)
+      if lang != "ruby"
+        cmd = run_cmd(lang, dir, bench)
+        output = capture(cmd + " 2>/dev/null").strip()
+
+        if output == ""
+          name = display_name(lang)
+          mismatch = name + " produced no output"
+        elsif expected == ""
+          expected = output
+          expected_name = display_name(lang)
+        elsif output != expected
+          name = display_name(lang)
+          mismatch = name + " (got: " + output + ", " + expected_name + " expected: " + expected + ")"
+    lang_i = lang_i + 1
+
+  if mismatch != ""
+    << "  [RED]MISMATCH[RESET] [label]: [mismatch]"
+    verify_ok = false
+  else
+    << "  [GREEN]OK[RESET] [label] = [expected]"
+  bench_i = bench_i + 1
+
+<< ""
+
+if verify_ok == false
+  << "[RED]WARNING: Some outputs don't match![RESET]"
+  << ""
+  exit(1)
+
+<< "[BOLD]Running benchmarks ([runs] runs each, best time)...[RESET]"
+<< ""
+
+results = {}
+
+benchmarks.each -> (bench)
+  label = get_label(bench)
+  dir = benchdir + "/" + bench
+  print("  [CYAN][label][RESET] ")
+  bench_results = {}
+
+  langs.each -> (lang)
+    if has_lang(lang) && has_source(dir, bench, lang) && !skip_lang?(bench, lang) && has_binary(dir, bench, lang)
+      cmd = run_cmd(lang, dir, bench)
+      t = best_time(cmd, runs)
+      bench_results[lang] = t
+      print(".")
+
+  results[bench] = bench_results
+  << ""
+
+<< ""
+
+col1_w = 20
+col_w = 12
+
+header = BOLD + "Benchmark".ljust(col1_w)
+lang_i = 0
+while lang_i < langs.size()
+  lang = langs[lang_i]
+  if has_lang(lang)
+    header = header + display_name(lang).ljust(col_w)
+  lang_i = lang_i + 1
+header = header + RESET
+<< header
+
+sep_len = col1_w
+lang_i = 0
+while lang_i < langs.size()
+  lang = langs[lang_i]
+  if has_lang(lang)
+    sep_len = sep_len + col_w
+  lang_i = lang_i + 1
+<< "─" * sep_len
+
+bench_i = 0
+while bench_i < benchmarks.size()
+  bench = benchmarks[bench_i]
+  label = get_label(bench)
+  bench_results = results[bench]
+
+  best_t = -1.0
+  lang_i = 0
+  while lang_i < langs.size()
+    lang = langs[lang_i]
+    if has_lang(lang)
+      t = bench_results[lang]
+      if t
+        if best_t < 0.0
+          best_t = t
+        elsif t < best_t
+          best_t = t
+    lang_i = lang_i + 1
+
+  row = label.ljust(col1_w)
+  lang_i = 0
+  while lang_i < langs.size()
+    lang = langs[lang_i]
+    if has_lang(lang)
+      t = bench_results[lang]
+      if t
+        time_str = fmt_secs(t)
+        if t == best_t
+          row += BOLD + time_str.ljust(col_w) + RESET
+        else
+          row += time_str.ljust(col_w)
+      else
+        row += "—".ljust(col_w)
+    lang_i = lang_i + 1
+
+  << row
+  bench_i = bench_i + 1
+
+<< ""
+
+<< "[DIM]Cleaning up compiled binaries...[RESET]"
+benchmarks.each -> (bench)
+  dir = benchdir + "/" + bench
+  system("rm -f \"[dir]/[bench]_c\" \"[dir]/[bench]_go\" \"[dir]/[bench]_cr\" \"[dir]/[bench]_w\"")
+
+<< "[GREEN]Done![RESET]"

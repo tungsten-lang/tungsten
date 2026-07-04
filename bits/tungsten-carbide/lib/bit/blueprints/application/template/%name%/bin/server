@@ -1,0 +1,9 @@
+#!/usr/bin/env tungsten
+# Start the Carbide development server
+use Tungsten:Carbide
+
+ENV["CARBIDE_ENV"] ||= "development"
+use "../lib/%file_name%"
+
+Carbide.app.initialize!
+Carbide:Server.start(port: ENV["PORT"] || 3000)

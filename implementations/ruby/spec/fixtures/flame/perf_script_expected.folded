@@ -1,0 +1,2 @@
+_start;__libc_start_main;main;my_hot_function 1
+main;__libc_start_main;do_syscall_64 2

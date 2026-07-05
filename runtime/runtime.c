@@ -5338,20 +5338,20 @@ static void w_secure_random_fill(uint8_t *buf, size_t len) {
     arc4random_buf(buf, len);
     return;
 #elif defined(__linux__)
-    size_t off = 0;
-    while (off < len) {
-        size_t want = len - off;
+    size_t loff = 0;
+    while (loff < len) {
+        size_t want = len - loff;
         if (want > (1u << 20)) want = (1u << 20);
-        ssize_t n = getrandom(buf + off, want, 0);
+        ssize_t n = getrandom(buf + loff, want, 0);
         if (n > 0) {
-            off += (size_t)n;
+            loff += (size_t)n;
             continue;
         }
         if (n < 0 && errno == EINTR) continue;
         if (n < 0 && (errno == ENOSYS || errno == EAGAIN)) break;
         dief("secure random failed: %s", strerror(errno));
     }
-    if (off == len) return;
+    if (loff == len) return;
 #endif
 
     int flags = O_RDONLY;
@@ -10578,8 +10578,14 @@ static uint64_t w_hash_sha64(const uint8_t *data, size_t len) {
     return ((uint64_t)h0 << 32) | (uint64_t)h1;
 }
 
-/* AES-based hash using hardware AES instructions */
-#if defined(__aarch64__)
+/* AES-based hash using hardware AES instructions.
+ * Gate on __ARM_FEATURE_AES (mirrors the x86 __AES__ guard below): the
+ * vaeseq_u8/vaesmcq_u8 intrinsic *declarations* in <arm_neon.h> are only
+ * emitted when the global -march enables crypto. Apple clang's baseline
+ * includes it; a plain -march=armv8-a / non-crypto -march=native (e.g. clang
+ * on Graviton) does not, so without this guard the aarch64 arm fails to
+ * compile. When crypto is unavailable we fall through to the wyhash fallback. */
+#if defined(__aarch64__) && defined(__ARM_FEATURE_AES)
 #include <arm_neon.h>
 __attribute__((target("+crypto")))
 static uint64_t w_hash_aes(const uint8_t *data, size_t len) {
@@ -11102,6 +11108,38 @@ static void w_raise_type_error(const char *fmt, WValue offender, WValue other) {
         w_raise(w_string(tagged));
     }
     __builtin_unreachable();
+}
+
+/* Coerce a Range bound to int64 for the integer-only closed-form pipeline
+ * optimizations (prime-count, parity-count in pipeline_fusion.w's
+ * "Range/predicate:count closed forms"). A bound must be a genuine integer
+ * or a whole-valued Decimal (scale >= 0 — e.g. `1e10`, the common
+ * scientific-notation shorthand for a big integer): anything else,
+ * including a Decimal with actual fractional digits (scale < 0) or an
+ * overflowing one, is a catchable TypeError here instead of the fatal
+ * process abort raw w_to_i64/as_int hit (0xfffd... "numeric" Decimal tag
+ * isn't w_is_int, so as_int() called exit(1)). */
+int64_t w_range_bound_i64(WValue v) {
+    if (w_is_integer_any(v)) return integer_low_i64(v);
+    if (is_decimal_any(v)) {
+        int64_t sig;
+        int scale;
+        decimal_extract(v, &sig, &scale);
+        if (scale >= 0) {
+            int64_t result = sig;
+            for (int i = 0; i < scale; i++) {
+                if (__builtin_mul_overflow(result, (int64_t)10, &result))
+                    w_raise_type_error("Range bound %s is too large to use as an integer", v, v);
+            }
+            return result;
+        }
+        w_raise_type_error("Range bound must be a whole number, got %s", v, v);
+    }
+    w_raise_type_error("Range bound must be an integer, got %s", v, v);
+}
+
+WValue w_range_bound_i64_w(WValue v) {
+    return w_int(w_range_bound_i64(v));
 }
 
 WValue w_add(WValue a, WValue b) {

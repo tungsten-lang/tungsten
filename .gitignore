@@ -126,9 +126,25 @@ tools/textmate/*.vsix
 # Python bytecode from the generator scripts (scripts/gen_*.py)
 __pycache__/
 
-# Matmul flip-graph overnight campaign: compiled walker/GPU binaries and
-# per-stage run logs are ephemeral/regenerable. records/ is NOT ignored --
-# it holds the actual tensor decompositions found at record rank, which are
-# the durable point of the campaign.
+# Matmul flip-graph campaign: compiled walker/GPU binaries, per-stage run
+# logs/workdirs, and the bulk tie/beat dump POPULATION are ephemeral/
+# regenerable (records/ used to be tracked when it held only a handful of
+# hand-verified finds; a single fleet run now dumps hundreds-to-thousands of
+# files there). When a find is worth keeping, promote/copy it to a named,
+# durable file instead (e.g. metaflip/matmul_5x5_rank93_sparse_gf2.txt,
+# zoo/record_table_f2.txt) rather than tracking the raw dump directory.
 benchmarks/matmul/metaflip/bin/
 benchmarks/matmul/metaflip/runs/
+benchmarks/matmul/metaflip/records/
+benchmarks/matmul/zoo/runs/
+
+# Matmul search/: a legacy campaign scratch directory — hundreds of one-off
+# numbered experiment variants (turbo*, conj*, energy*, idea2*, sym*, sw*,
+# rng_*, fix*, ...), none reusable. Allowlist the handful of durable
+# reference/seed assets other machinery actually imports.
+benchmarks/matmul/search/*
+!benchmarks/matmul/search/seed_mp93.txt
+!benchmarks/matmul/search/seed_mp153.txt
+!benchmarks/matmul/search/scheme23.txt
+!benchmarks/matmul/search/scheme47.txt
+!benchmarks/matmul/search/at_f2.npz

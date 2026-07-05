@@ -1,0 +1,551 @@
+# GPU relay running the ACTUAL cal2zone schedule per-thread (not the old
+# margin/leash heuristic, and not best-of-N candidate scoring). Rationale for
+# dropping best-of-N here: earlier debugging established that even a cheap
+# O(rank) single-candidate walk needs ~2,000,000 steps to find its first
+# lucky descent at rank~64 — best-of-N's O(rank^2) per-step cost cuts the
+# achievable step count by ~64x for the same wall-clock budget, which starves
+# the schedule of the raw step volume it needs to ever escalate through
+# multiple bands. The GPU's actual edge over 18 CPU processes is parallel
+# breadth (thousands of independent attempts), not smarter per-step choices,
+# so this kernel goes back to cheap first-found selection and spends the
+# saved budget on more total steps instead.
+#
+# Per-thread cal2zone state (mirrors bucket_gen.py's cal2zone mode exactly,
+# just with move-quanta scaled down — GPU threads run ~1/1000th the speed of
+# a CPU walker since throughput comes from thread COUNT, not per-thread
+# speed, so CPU's 2B/500M-move quanta would take a single GPU thread days to
+# traverse once):
+#   aband  - current band, starts at 1 (bstart)
+#   wthr   - work/wander zone boundary, starts at wthr0 (7), self-calibrates
+#            UP-ONLY: any descent sets wthr = max(wthr, descent_band + 1)
+#   wraps  - counts genuine hit-60-and-wrap cycles (NOT descent-triggered
+#            resets); at 2, reset RNG + reset the whole scheme back to
+#            whatever this dispatch's seed was (the doinit init, redone)
+#   mv     - this thread's own cumulative move counter
+#   nextesc - mv value at which to next check for band escalation
+# Any descent (rank < best) resets aband back to bstart(=1) immediately.
+#
+# Re-seeding: exactly like flipgraph_gpu_relay.w — every dispatch reads
+# whatever the CPU coordinator's file currently holds and re-inits every
+# walker from it (doinit=1 every round). "Always seed from current-best CPU
+# result", per instruction.
+
+## i32[]: work_us
+## i32[]: work_vs
+## i32[]: work_ws
+## i32[]: best_us
+## i32[]: best_vs
+## i32[]: best_ws
+## i32[]: st
+## i32[]: seed_us
+## i32[]: seed_vs
+## i32[]: seed_ws
+## i32[]: params
+@gpu fn flipwalk(work_us, work_vs, work_ws, best_us, best_vs, best_ws, st, seed_us, seed_vs, seed_ws, params)
+  tid = gpu.thread_position_in_grid.x ## i32
+  ltid = gpu.thread_position_in_threadgroup.x ## i32
+  nterms = params[0] ## i32
+  cap = params[1] ## i32
+  steps = params[2] ## i32
+  doinit = params[3] ## i32
+  margin = params[4] ## i32
+  wqwork = params[5] ## i32
+  wqwander = params[6] ## i32
+  wthr0 = params[7] ## i32
+  firstinit = params[8] ## i32
+  base = tid * cap ## i32
+  sb = tid * 8 ## i32
+  sus = gpu.shared_i32(2240)
+  svs = gpu.shared_i32(2240)
+  sws = gpu.shared_i32(2240)
+  i = 0 ## i32
+  rank = 0 ## i32
+  best = 0 ## i32
+  state = 0 ## i32
+  aband = 0 ## i32
+  wthr = 0 ## i32
+  wraps = 0 ## i32
+  mv = 0 ## i32
+  nextesc = 0 ## i32
+  step = 0 ## i32
+  roll = 0 ## i32
+  didplus = 0 ## i32
+  pt = 0 ## i32
+  u1 = 0 ## i32
+  fi = 0 ## i32
+  axis = 0 ## i32
+  off = 0 ## i32
+  fj = 0 ## i32
+  scan = 0 ## i32
+  cand = 0 ## i32
+  t = 0 ## i32
+  z = 0 ## i32
+  a = 0 ## i32
+  bb = 0 ## i32
+  dup = 0 ## i32
+  ci = 0 ## i32
+  dchk = 0 ## i32
+  pb = 0 ## i32
+  paxis = 0 ## i32
+  nb = 0 ## i32
+  if doinit == 1
+    i = 0
+    while i < nterms
+      sus[i * 16 + ltid] = seed_us[i]
+      svs[i * 16 + ltid] = seed_vs[i]
+      sws[i * 16 + ltid] = seed_ws[i]
+      best_us[base + i] = seed_us[i]
+      best_vs[base + i] = seed_vs[i]
+      best_ws[base + i] = seed_ws[i]
+      i = i + 1
+    st[sb] = nterms
+    st[sb + 1] = nterms
+    st[sb + 2] = tid * 9973 + 12345
+  if firstinit == 1
+    st[sb + 3] = 1
+    st[sb + 4] = wthr0
+    st[sb + 5] = 0
+    st[sb + 6] = 0
+    st[sb + 7] = wqwork
+  rank = st[sb]
+  best = st[sb + 1]
+  state = st[sb + 2]
+  aband = st[sb + 3]
+  wthr = st[sb + 4]
+  wraps = st[sb + 5]
+  mv = st[sb + 6]
+  nextesc = st[sb + 7]
+  if doinit == 0
+    i = 0
+    while i < rank
+      sus[i * 16 + ltid] = work_us[base + i]
+      svs[i * 16 + ltid] = work_vs[base + i]
+      sws[i * 16 + ltid] = work_ws[base + i]
+      i = i + 1
+  step = 0
+  while step < steps
+    mv = mv + 1
+    state = state * 1103515245 + 12345
+    roll = ((state % 6) + 6) % 6
+    didplus = 0
+    if roll == 0
+      if rank < best + margin
+        if rank < cap - 1
+          state = state * 1103515245 + 12345
+          pt = ((state % rank) + rank) % rank
+          state = state * 1103515245 + 12345
+          u1 = (((state % 65535) + 65535) % 65535) + 1
+          state = state * 1103515245 + 12345
+          paxis = ((state % 3) + 3) % 3
+          pb = pt * 16 + ltid
+          if paxis == 0
+            if u1 != sus[pb]
+              sus[rank * 16 + ltid] = sus[pb] ^ u1
+              svs[rank * 16 + ltid] = svs[pb]
+              sws[rank * 16 + ltid] = sws[pb]
+              sus[pb] = u1
+              rank = rank + 1
+              didplus = 1
+          if paxis == 1
+            if u1 != svs[pb]
+              svs[rank * 16 + ltid] = svs[pb] ^ u1
+              sus[rank * 16 + ltid] = sus[pb]
+              sws[rank * 16 + ltid] = sws[pb]
+              svs[pb] = u1
+              rank = rank + 1
+              didplus = 1
+          if paxis == 2
+            if u1 != sws[pb]
+              sws[rank * 16 + ltid] = sws[pb] ^ u1
+              sus[rank * 16 + ltid] = sus[pb]
+              svs[rank * 16 + ltid] = svs[pb]
+              sws[pb] = u1
+              rank = rank + 1
+              didplus = 1
+    if didplus == 0
+      state = state * 1103515245 + 12345
+      fi = ((state % rank) + rank) % rank
+      state = state * 1103515245 + 12345
+      axis = ((state % 3) + 3) % 3
+      state = state * 1103515245 + 12345
+      off = ((state % rank) + rank) % rank
+      fj = -1
+      scan = 0
+      while scan < rank
+        if fj < 0
+          cand = (off + scan) % rank
+          if cand != fi
+            if axis == 0
+              if sus[cand * 16 + ltid] == sus[fi * 16 + ltid]
+                fj = cand
+            if axis == 1
+              if svs[cand * 16 + ltid] == svs[fi * 16 + ltid]
+                fj = cand
+            if axis == 2
+              if sws[cand * 16 + ltid] == sws[fi * 16 + ltid]
+                fj = cand
+        scan = scan + 1
+      if fj >= 0
+        if axis == 0
+          sws[fi * 16 + ltid] = sws[fi * 16 + ltid] ^ sws[fj * 16 + ltid]
+          svs[fj * 16 + ltid] = svs[fi * 16 + ltid] ^ svs[fj * 16 + ltid]
+        if axis == 1
+          sws[fi * 16 + ltid] = sws[fi * 16 + ltid] ^ sws[fj * 16 + ltid]
+          sus[fj * 16 + ltid] = sus[fi * 16 + ltid] ^ sus[fj * 16 + ltid]
+        if axis == 2
+          svs[fi * 16 + ltid] = svs[fi * 16 + ltid] ^ svs[fj * 16 + ltid]
+          sus[fj * 16 + ltid] = sus[fi * 16 + ltid] ^ sus[fj * 16 + ltid]
+    t = 0
+    while t < rank
+      z = 0
+      if sus[t * 16 + ltid] == 0
+        z = 1
+      if svs[t * 16 + ltid] == 0
+        z = 1
+      if sws[t * 16 + ltid] == 0
+        z = 1
+      if z == 1
+        sus[t * 16 + ltid] = sus[(rank - 1) * 16 + ltid]
+        svs[t * 16 + ltid] = svs[(rank - 1) * 16 + ltid]
+        sws[t * 16 + ltid] = sws[(rank - 1) * 16 + ltid]
+        rank = rank - 1
+      if z == 0
+        t = t + 1
+    # O(rank) duplicate check: a duplicate can only newly appear at a slot
+    # touched THIS step (the flip's fi/fj, or the plus-move's new slot at
+    # rank-1) — every other term didn't change, so if it wasn't a duplicate
+    # before it still isn't. Check just the touched slot(s) against the rest
+    # every step, instead of an O(rank^2) all-pairs scan periodically.
+    if didplus == 1
+      a = rank - 1
+      if a >= 0
+        dup = -1
+        bb = 0
+        while bb < a
+          if dup < 0
+            if sus[a * 16 + ltid] == sus[bb * 16 + ltid]
+              if svs[a * 16 + ltid] == svs[bb * 16 + ltid]
+                if sws[a * 16 + ltid] == sws[bb * 16 + ltid]
+                  dup = bb
+          bb = bb + 1
+        if dup >= 0
+          sus[dup * 16 + ltid] = sus[(rank - 1) * 16 + ltid]
+          svs[dup * 16 + ltid] = svs[(rank - 1) * 16 + ltid]
+          sws[dup * 16 + ltid] = sws[(rank - 1) * 16 + ltid]
+          rank = rank - 1
+          sus[a * 16 + ltid] = sus[(rank - 1) * 16 + ltid]
+          svs[a * 16 + ltid] = svs[(rank - 1) * 16 + ltid]
+          sws[a * 16 + ltid] = sws[(rank - 1) * 16 + ltid]
+          rank = rank - 1
+    if didplus == 0
+      a = fi
+      if a < rank
+        dup = -1
+        bb = 0
+        while bb < rank
+          if dup < 0
+            if bb != a
+              if sus[a * 16 + ltid] == sus[bb * 16 + ltid]
+                if svs[a * 16 + ltid] == svs[bb * 16 + ltid]
+                  if sws[a * 16 + ltid] == sws[bb * 16 + ltid]
+                    dup = bb
+          bb = bb + 1
+        if dup >= 0
+          sus[dup * 16 + ltid] = sus[(rank - 1) * 16 + ltid]
+          svs[dup * 16 + ltid] = svs[(rank - 1) * 16 + ltid]
+          sws[dup * 16 + ltid] = sws[(rank - 1) * 16 + ltid]
+          rank = rank - 1
+          sus[a * 16 + ltid] = sus[(rank - 1) * 16 + ltid]
+          svs[a * 16 + ltid] = svs[(rank - 1) * 16 + ltid]
+          sws[a * 16 + ltid] = sws[(rank - 1) * 16 + ltid]
+          rank = rank - 1
+      a = fj
+      if a < rank
+        dup = -1
+        bb = 0
+        while bb < rank
+          if dup < 0
+            if bb != a
+              if sus[a * 16 + ltid] == sus[bb * 16 + ltid]
+                if svs[a * 16 + ltid] == svs[bb * 16 + ltid]
+                  if sws[a * 16 + ltid] == sws[bb * 16 + ltid]
+                    dup = bb
+          bb = bb + 1
+        if dup >= 0
+          sus[dup * 16 + ltid] = sus[(rank - 1) * 16 + ltid]
+          svs[dup * 16 + ltid] = svs[(rank - 1) * 16 + ltid]
+          sws[dup * 16 + ltid] = sws[(rank - 1) * 16 + ltid]
+          rank = rank - 1
+          sus[a * 16 + ltid] = sus[(rank - 1) * 16 + ltid]
+          svs[a * 16 + ltid] = svs[(rank - 1) * 16 + ltid]
+          sws[a * 16 + ltid] = sws[(rank - 1) * 16 + ltid]
+          rank = rank - 1
+    dchk = step % 4096
+    if dchk == 0
+      a = 0
+      while a < rank
+        dup = -1
+        bb = a + 1
+        while bb < rank
+          if dup < 0
+            if sus[a * 16 + ltid] == sus[bb * 16 + ltid]
+              if svs[a * 16 + ltid] == svs[bb * 16 + ltid]
+                if sws[a * 16 + ltid] == sws[bb * 16 + ltid]
+                  dup = bb
+          bb = bb + 1
+        if dup >= 0
+          sus[dup * 16 + ltid] = sus[(rank - 1) * 16 + ltid]
+          svs[dup * 16 + ltid] = svs[(rank - 1) * 16 + ltid]
+          sws[dup * 16 + ltid] = sws[(rank - 1) * 16 + ltid]
+          rank = rank - 1
+          sus[a * 16 + ltid] = sus[(rank - 1) * 16 + ltid]
+          svs[a * 16 + ltid] = svs[(rank - 1) * 16 + ltid]
+          sws[a * 16 + ltid] = sws[(rank - 1) * 16 + ltid]
+          rank = rank - 1
+        if dup < 0
+          a = a + 1
+    if rank < best
+      best = rank
+      ci = 0
+      while ci < rank
+        best_us[base + ci] = sus[ci * 16 + ltid]
+        best_vs[base + ci] = svs[ci * 16 + ltid]
+        best_ws[base + ci] = sws[ci * 16 + ltid]
+        ci = ci + 1
+      if aband + 1 > wthr
+        wthr = aband + 1
+      aband = 1
+    if mv >= nextesc
+      nb = aband + 1
+      if aband > wthr
+        nb = aband + 12
+      if nb > 60
+        nb = 1
+        wraps = wraps + 1
+        if wraps >= 2
+          wraps = 0
+          state = ((state ^ (mv & 2147483647)) * 1103515245 + 54321) & 2147483647
+          state = state * 1103515245 + 12345
+          state = state * 1103515245 + 12345
+          i = 0
+          while i < nterms
+            sus[i * 16 + ltid] = seed_us[i]
+            svs[i * 16 + ltid] = seed_vs[i]
+            sws[i * 16 + ltid] = seed_ws[i]
+            i = i + 1
+          rank = nterms
+          best = nterms
+          ci = 0
+          while ci < nterms
+            best_us[base + ci] = seed_us[ci]
+            best_vs[base + ci] = seed_vs[ci]
+            best_ws[base + ci] = seed_ws[ci]
+            ci = ci + 1
+      aband = nb
+      if aband > wthr
+        nextesc = mv + wqwander
+      if aband <= wthr
+        nextesc = mv + wqwork
+    step = step + 1
+  i = 0
+  while i < rank
+    work_us[base + i] = sus[i * 16 + ltid]
+    work_vs[base + i] = svs[i * 16 + ltid]
+    work_ws[base + i] = sws[i * 16 + ltid]
+    i = i + 1
+  st[sb] = rank
+  st[sb + 1] = best
+  st[sb + 2] = state
+  st[sb + 3] = aband
+  st[sb + 4] = wthr
+  st[sb + 5] = wraps
+  st[sb + 6] = mv
+  st[sb + 7] = nextesc
+
+# ---------------- host ----------------
+use core/metal
+
+-> parity(mask, vec, dim) (i64 i64 i64) i64
+  p = 0
+  b = 0
+  while b < dim
+    if ((mask >> b) & 1) == 1
+      if ((vec >> b) & 1) == 1
+        p = (p + 1) % 2
+    b += 1
+  p
+
+-> verify_buf(bufu, bufv, bufw, baseoff, rank, seed0, nn, mm, pp) (i64[] i64[] i64[] i64 i64 i64 i64 i64 i64) i64
+  ab = nn * mm
+  bb = mm * pp
+  cb = nn * pp
+  moda = 1
+  z5 = 0
+  while z5 < ab
+    moda = moda * 2
+    z5 += 1
+  modb = 1
+  z6 = 0
+  while z6 < bb
+    modb = modb * 2
+    z6 += 1
+  ok = 1
+  s = seed0
+  trial = 0
+  while trial < 40
+    s = (s * 1103515245 + 12345) % 2147483648
+    av = s % moda
+    s = (s * 1103515245 + 12345) % 2147483648
+    bv = s % modb
+    o = 0
+    while o < cb
+      cs = 0
+      t = 0
+      while t < rank
+        wt = metal_buffer_read_i32(bufw, baseoff + t)
+        if ((wt >> o) & 1) == 1
+          ut = metal_buffer_read_i32(bufu, baseoff + t)
+          vt = metal_buffer_read_i32(bufv, baseoff + t)
+          la = parity(ut, av, ab)
+          lb = parity(vt, bv, bb)
+          if la == 1
+            if lb == 1
+              cs = (cs + 1) % 2
+        t += 1
+      oi = o / pp
+      oj = o % pp
+      ct = 0
+      k = 0
+      while k < mm
+        if ((av >> (oi * mm + k)) & 1) == 1
+          if ((bv >> (k * pp + oj)) & 1) == 1
+            ct = (ct + 1) % 2
+        k += 1
+      if cs != ct
+        ok = 0
+      o += 1
+    trial += 1
+  ok
+
+NW = 4096
+WPG = 16
+CAP = 140
+STEPS = 500000
+ROUNDS = 1000000
+MARGIN = 4
+WQWORK = 150000
+WQWANDER = 60000
+WTHR0 = 7
+
+seedpath = "benchmarks/matmul/metaflip/runs/run_555/current_best.txt"
+gpubestpath = "benchmarks/matmul/metaflip/runs/run_555/gpu_best.txt"
+nn = 5
+mm = 5
+pp = 5
+av0 = argv()
+if av0.size() > 0
+  seedpath = av0[0]
+if av0.size() > 1
+  gpubestpath = av0[1]
+if av0.size() > 4
+  nn = av0[2].to_i()
+  mm = av0[3].to_i()
+  pp = av0[4].to_i()
+recordpath = ""
+recordtarget = 0
+if av0.size() > 6
+  recordpath = av0[5]
+  recordtarget = av0[6].to_i()
+recordhit = 0
+
+seedu = i64[160]
+seedv = i64[160]
+seedw = i64[160]
+
+msl = read_file("benchmarks/matmul/flipgraph_gpu_cal2zone.metal")
+device = metal_device()
+library = metal_compile_source(device, msl)
+pipeline = metal_pipeline(library, "flipwalk")
+
+work_us = metal_buffer(device, NW * CAP * 4)
+work_vs = metal_buffer(device, NW * CAP * 4)
+work_ws = metal_buffer(device, NW * CAP * 4)
+best_us = metal_buffer(device, NW * CAP * 4)
+best_vs = metal_buffer(device, NW * CAP * 4)
+best_ws = metal_buffer(device, NW * CAP * 4)
+st = metal_buffer(device, NW * 8 * 4)
+seed_us = metal_buffer(device, 160 * 4)
+seed_vs = metal_buffer(device, 160 * 4)
+seed_ws = metal_buffer(device, 160 * 4)
+params = metal_buffer(device, 9 * 4)
+queue = metal_queue(device)
+bufs = [work_us, work_vs, work_ws, best_us, best_vs, best_ws, st, seed_us, seed_vs, seed_ws, params]
+
+globalbest = 999
+rd = 0
+while rd < ROUNDS
+  content = read_file(seedpath)
+  lines = content.split("\n")
+  startrank = lines[0].to_i()
+  ti2 = 0
+  while ti2 < startrank
+    ln = lines[ti2 + 1]
+    parts = ln.split(" ")
+    seedu[ti2] = parts[0].to_i()
+    seedv[ti2] = parts[1].to_i()
+    seedw[ti2] = parts[2].to_i()
+    ti2 += 1
+  ii = 0
+  while ii < startrank
+    metal_buffer_write_i32(seed_us, ii, seedu[ii])
+    metal_buffer_write_i32(seed_vs, ii, seedv[ii])
+    metal_buffer_write_i32(seed_ws, ii, seedw[ii])
+    ii += 1
+  metal_buffer_write_i32(params, 0, startrank)
+  metal_buffer_write_i32(params, 1, CAP)
+  metal_buffer_write_i32(params, 2, STEPS)
+  metal_buffer_write_i32(params, 3, 1)
+  metal_buffer_write_i32(params, 4, MARGIN)
+  metal_buffer_write_i32(params, 5, WQWORK)
+  metal_buffer_write_i32(params, 6, WQWANDER)
+  metal_buffer_write_i32(params, 7, WTHR0)
+  firstinit = 0
+  if rd == 0
+    firstinit = 1
+  metal_buffer_write_i32(params, 8, firstinit)
+  metal_dispatch_groups(queue, pipeline, bufs, NW / WPG, WPG)
+  w = 0
+  localmin = startrank
+  bestthread = 0
+  while w < NW
+    bw = metal_buffer_read_i32(st, w * 8 + 1)
+    if bw < localmin
+      localmin = bw
+      bestthread = w
+    w += 1
+  if localmin < startrank
+    vok = verify_buf(best_us, best_vs, best_ws, bestthread * CAP, localmin, 555, nn, mm, pp)
+    if vok == 1
+      body = localmin.to_s() + "\n"
+      di = 0
+      while di < localmin
+        uu = metal_buffer_read_i32(best_us, bestthread * CAP + di)
+        vv = metal_buffer_read_i32(best_vs, bestthread * CAP + di)
+        ww = metal_buffer_read_i32(best_ws, bestthread * CAP + di)
+        body = body + uu.to_s() + " " + vv.to_s() + " " + ww.to_s() + "\n"
+        di += 1
+      write_file(gpubestpath, body)
+      << "round " + rd.to_s() + "  GPU IMPROVED " + startrank.to_s() + " -> " + localmin.to_s() + "  verify=" + vok.to_s()
+      flush()
+      if localmin < globalbest
+        globalbest = localmin
+      if recordpath.size() > 0
+        if localmin <= recordtarget
+          recordhit = recordhit + 1
+          write_file(recordpath + "_" + recordhit.to_s() + ".txt", body)
+  << "round " + rd.to_s() + "/" + ROUNDS.to_s() + "  started_from=" + startrank.to_s() + "  round_best=" + localmin.to_s() + "  global_best=" + globalbest.to_s()
+  flush()
+  rd += 1
+
+<< ""
+<< "GPU-CAL2ZONE DONE.  global best over " + ROUNDS.to_s() + " rounds x " + NW.to_s() + " walkers = " + globalbest.to_s()

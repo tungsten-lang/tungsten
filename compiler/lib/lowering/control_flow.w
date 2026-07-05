@@ -49,6 +49,30 @@
         emit_scope_pop(wfn, else_sid)
     return nil
 
+  # Snapshot the bindings valid on entry, and the set of vars assigned in ANY
+  # branch. The merge block below is reached only via non-terminating paths, so
+  # a var NOT assigned in any branch keeps its entry binding — its defining
+  # register dominates the merge. Restoring these at the merge stops a
+  # terminating branch's `ctx[:bindings] = {}` (or materialize_bindings' reset)
+  # from dropping a typed param's binding: without the binding the param loses
+  # its raw-int type and a later use mis-unboxes it (w_to_i64 on a raw param →
+  # "expected int, got singleton") — the same class as the while-loop bug.
+  pre_if_bindings = {}
+  if ctx[:bindings] != nil
+    pbk = ctx[:bindings].keys()
+    pbi = 0
+    while pbi < pbk.size()
+      pre_if_bindings[pbk[pbi]] = ctx[:bindings][pbk[pbi]]
+      pbi += 1
+  if_assigned = {}
+  scan_assigns_for_params(node.then_body, if_assigned)
+  scan_assigns_for_params(node.else_body, if_assigned)
+  if node.elsif_clauses != nil
+    eci = 0
+    while eci < node.elsif_clauses.size()
+      scan_assigns_for_params(node.elsif_clauses[eci][1], if_assigned)
+      eci += 1
+
   cond = lower_expression(ctx, node.condition)
 
   # If condition is already i1 (from inline comparison), use directly
@@ -159,6 +183,20 @@
       ctx[:bindings] = {}
 
   start_block(wfn, end_label)
+
+  # Restore entry bindings for vars untouched by every branch (see the snapshot
+  # above). Vars assigned in a branch are materialized to slots and resolve via
+  # var_slots; everything else keeps its still-valid entry binding, preserving
+  # e.g. a typed param's raw-int type across the if.
+  merged = {}
+  mbk = pre_if_bindings.keys()
+  mbi = 0
+  while mbi < mbk.size()
+    mname = mbk[mbi]
+    if if_assigned[mname] == nil
+      merged[mname] = pre_if_bindings[mname]
+    mbi += 1
+  ctx[:bindings] = merged
   nil
 
 -> lower_if_expr(ctx, node)

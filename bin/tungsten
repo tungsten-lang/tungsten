@@ -1,6 +1,16 @@
 #!/bin/bash
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Resolve symlinks so ROOT is the real install dir even when invoked via a
+# symlink on PATH (the installer links this script into ~/.local/bin).
+SELF="$0"
+while [ -L "$SELF" ]; do
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *)  SELF="$(dirname "$SELF")/$LINK" ;;
+  esac
+done
+ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 COMPILER="$ROOT/bin/tungsten-compiler"
 RUBY_CLI="$ROOT/bin/tungsten.rb"
 CUSTOM_RUBY="$ROOT/src/patched/ruby/ruby"

@@ -29,7 +29,7 @@ read the runtime's LTO-bitcode archive).
 
 ## 3. Install Tungsten
 
-One-liner (builds from source; prefers a prebuilt binary once releases exist):
+One-liner (clones the repo and builds from source):
 
 ```bash
 curl -fsSL https://tungsten-lang.org/install | sh

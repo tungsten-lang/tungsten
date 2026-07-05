@@ -982,6 +982,13 @@ use lowering/definitions
     mod[:builtin_class_names][builtin_classes[bi]] = true
     bi += 1
 
+  # Runtime intrinsic methods that consume their own trailing block. They are
+  # implemented in C (not .w), so the def-walk that populates block_method_names
+  # never records them; without this seed, method_takes_no_block? assumes they
+  # take no block and mis-rewrites `sock.serve_http { }` into
+  # `serve_http().each { }` — serve_http then gets 0 args and dies on its block.
+  mod[:block_method_names]["serve_http"] = true
+
   # Register built-in runtime functions so they aren't rewritten to self.method()
   # inside class bodies. These map to __w_<name> in the C runtime.
   mod[:known_calls]["read_file"] = "__w_read_file"

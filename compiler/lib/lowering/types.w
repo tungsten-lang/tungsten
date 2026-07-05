@@ -583,7 +583,7 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
     mark_builtin_runtime_class_uses(node[:body], mod)
     return
 
-  if t == :var
+  if t in (:var :class_ref)
     name = node.name
     if mod[:builtin_class_names][name] == true
       mark_builtin_class_used(mod, name)

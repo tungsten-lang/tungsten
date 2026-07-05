@@ -14,6 +14,16 @@
 
   recv_node = node.receiver
 
+  # `arr.flip(i)` — toggle element i in place. Sugar for `arr[i] = !arr[i]`,
+  # built from the same "[]"/"[]=" calls the parser emits for subscript
+  # get/set (not an Assign-with-call-target, which drops the index arg).
+  # Works on any indexable receiver; primarily meant for bool[]/BoolArray.
+  if recv_node != nil && method_name == "flip" && node.block == nil && node.args != nil && node.args.size() == 1
+    idx_node = node.args[0]
+    get_call = Tungsten:AST:Call.new(recv_node, "\[]", [idx_node])
+    set_call = Tungsten:AST:Call.new(recv_node, "\[]=", [idx_node, Tungsten:AST:Not.new(get_call)])
+    return lower_method_call(ctx, set_call)
+
   # Block passthrough: a trailing block on a method that declares no block of
   # its own is NOT consumed by that method — it iterates over the call's
   # RESULT (implicit `.each`). So `n.prev -> body` runs `body` (n-1) times,
@@ -104,7 +114,7 @@
 
   # Thread.new -> ... creates an OS thread around the block closure. Thread is a
   # runtime primitive, so bypass class lookup here just like Atomic.new.
-  if recv_node != nil && ast_kind(recv_node) in (:var :call) && recv_node.name == "Thread" && method_name == "new" && node.block != nil
+  if recv_node != nil && ast_kind(recv_node) in (:var :call :class_ref) && recv_node.name == "Thread" && method_name == "new" && node.block != nil
     materialize_bindings(ctx)
     closure_tv = lower_block_closure(ctx, node.block)
     closure_reg = ensure_i64_value(wfn, closure_tv)
@@ -631,6 +641,12 @@
     temp = next_temp(wfn)
     emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_view_range", args: [receiver_reg, from_reg, to_reg, excl_reg]})
     return typed_value(:i64, temp)
+
+  # Range#step(n): same desugar as `range / n` (lower_range_step in ops.w) —
+  # exposed as a method too since `range / n` needs a space before the `/`
+  # to avoid lexing as the `/name` pipeline-map operator.
+  if method_name == "step" && node.args != nil && node.args.size() == 1 && recv_node != nil && ast_kind(recv_node) == :range
+    return lower_range_step(ctx, recv_node, node.args[0], node.block)
 
   # Range#to_a optimization: (0..255).to_a → pre-sized array
   if method_name == "to_a" && node.args.size() == 0 && recv_node != nil && ast_kind(recv_node) == :range

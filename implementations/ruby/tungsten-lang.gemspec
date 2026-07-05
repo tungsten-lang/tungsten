@@ -3,7 +3,7 @@
 require_relative "lib/tungsten/version"
 
 Gem::Specification.new do |spec|
-  spec.name          = "tungsten"
+  spec.name          = "tungsten-lang"
   spec.version       = Tungsten::VERSION
   spec.authors       = ["Erik Peterson"]
   spec.email         = ["thecompanygardener@gmail.com"]

@@ -9,7 +9,7 @@ To experiment with Tungsten code, use `bin/tungsten`.
 
 Install the gem and add to the application's Gemfile by executing:
 
-    $ bundle add tungsten
+    $ bundle add tungsten-lang
 
 and then execute:
 
@@ -17,7 +17,7 @@ and then execute:
 
 If bundler is not being used to manage dependencies, install the gem by executing:
 
-    $ gem install tungsten
+    $ gem install tungsten-lang
 
 ## Usage
 

@@ -92,5 +92,9 @@
   auto :Comparable,   "traits/comparable"
   auto :Enumerable,   "traits/enumerable"
 
+  auto :ArgumentError, "argument_error"
+  auto :RangeError,    "range_error"
+  auto :TypeError,     "type_error"
+
   -> .root
     Path(__project_root)

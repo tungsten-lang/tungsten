@@ -1400,12 +1400,18 @@ use target
 
   -> apply_binary_op(op, left, right)
     if op == :PLUS
+      # Strict string `+` — only text concatenates with text; a String
+      # mixed with anything else is a TypeError, mirroring runtime w_add.
       if type(left) == "String"
-        return left + w_to_s(right)
+        if type(right) == "String" || type(right) == "Char"
+          return left + right
+        raise "TypeError: no implicit conversion of [w_type_name(right)] into String"
       if type(left) == "Array"
         if type(right) == "Array"
           return left + right
         return left + [right]
+      if type(right) == "String" && type(left) != "Char" && type(left) != "StringBuffer"
+        raise "TypeError: String can't be coerced into [w_type_name(left)]"
       return left + right
     if op == :MINUS
       return left - right

@@ -63,6 +63,7 @@ static WMethod *w_static_method_lookup(WClass *klass, WValue name);
 static WMethod *w_static_method_lookup_arity(WClass *klass, WValue name, int arity);
 static const char *as_str(WValue v);
 static int64_t as_int(WValue v);
+WValue __w_type(WValue v);
 static int64_t integer_low_i64(WValue v);
 static void die(const char *msg);
 static void dief(const char *fmt, ...);
@@ -11066,6 +11067,43 @@ static inline int w_is_plain_scalar_num(WValue v) {
     return w_is_int(v) || w_is_double(v) || is_decimal_any(v);
 }
 
+/* Raise a TypeError whose message names the offending value's class.
+ * Uses the core TypeError class when it is linked into the binary;
+ * otherwise the "TypeError: ..." message raises as a plain string
+ * (the same shape as a bare `raise "msg"`), so the error stays
+ * catchable in thin programs that never reference the class. */
+static WClass *g_type_error_class = NULL;
+static void w_raise_type_error(const char *fmt, WValue offender, WValue other) __attribute__((noreturn));
+static void w_raise_type_error(const char *fmt, WValue offender, WValue other) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), fmt, as_str(__w_type(offender)));
+    if (getenv("W_TYPE_ERROR_DEBUG")) {
+        fprintf(stderr, "[type-error] %s (offender: %s) (other operand: %.200s)\n",
+                msg, as_str(w_to_s(offender)), as_str(w_to_s(other)));
+        w_print_error_tail(32);
+    }
+    if (!g_type_error_class) {
+        for (int i = 0; i < g_next_class_id; i++) {
+            WClass *k = g_class_table[i];
+            if (k && strcmp(k->name, "TypeError") == 0) { g_type_error_class = k; break; }
+        }
+    }
+    if (g_type_error_class) {
+        /* Construct through the class's compiled `new` (mirrors what
+         * `raise TypeError, msg` lowers to) — compiled constructors set
+         * @message by slot index, which a by-name w_ivar_set can't reach. */
+        WValue msg_v = w_string(msg);
+        WValue err = w_method_call_fast(w_box_ptr(g_type_error_class, W_SUBTAG_CLASS),
+                                        w_string("new"), &msg_v, 1);
+        w_raise(err);
+    } else {
+        char tagged[288];
+        snprintf(tagged, sizeof(tagged), "TypeError: %s", msg);
+        w_raise(w_string(tagged));
+    }
+    __builtin_unreachable();
+}
+
 WValue w_add(WValue a, WValue b) {
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_add_elem(a, b);
     /* StringBuffer << value → in-place append, return buffer */
@@ -11092,16 +11130,26 @@ WValue w_add(WValue a, WValue b) {
             (w_is_double(b) || w_is_int(b)))
             return w_float(as_numeric_double(a) + as_numeric_double(b));
     }
-    if (w_is_stringy(a) || w_is_stringy(b) ||
-        w_is_rope(a) || w_is_rope(b)) {
-        /* Fast path: string + small int → format int directly into concat result */
-        if (w_is_stringy(a) && w_is_int(b)) {
-            int64_t n = w_as_int(b);
-            if (n >= 0 && n <= 99999) {
-                return w_str_concat(a, w_int_to_str(n));
-            }
+    /* Strict string `+`: only text (String/Char/Rope) concatenates with
+     * text. A String mixed with anything else raises TypeError instead
+     * of silently coercing through to_s — `"5" + 3` and `5 + "3"` are
+     * errors. (`instance + "str"` still routes to the instance's own
+     * `+` method below; interpolation lowers to w_str_concat directly
+     * and is unaffected.) */
+    {
+        int a_str = w_is_string(a) || w_is_rope(a);
+        int b_str = w_is_string(b) || w_is_rope(b);
+        if (a_str || b_str) {
+            int a_text = a_str || w_is_char(a);
+            int b_text = b_str || w_is_char(b);
+            if (a_text && b_text)
+                return w_str_concat(w_is_rope(a) ? a : w_to_s(a),
+                                    w_is_rope(b) ? b : w_to_s(b));
+            if (a_str)
+                w_raise_type_error("no implicit conversion of %s into String", b, a);
+            if (!w_is_instance(a))
+                w_raise_type_error("String can't be coerced into %s", a, b);
         }
-        return w_str_concat(w_is_rope(a) ? a : w_to_s(a), w_is_rope(b) ? b : w_to_s(b));
     }
     /* instant + int → instant (shift milliseconds) */
     if (w_is_instant(a) && w_is_int(b))
@@ -11676,8 +11724,11 @@ WValue w_bit_or(WValue a, WValue b)  { return bit_binop('|', a, b); }
 WValue w_bit_xor(WValue a, WValue b) { return bit_binop('^', a, b); }
 WValue w_bit_shl(WValue a, WValue b) {
     if (w_is_strbuf(a)) return w_strbuf_append(a, w_to_s(b));
+    /* String << x is the coercing append (builder semantics) — it can't
+     * ride w_add anymore now that strict `+` raises on non-text operands. */
+    if (w_is_string(a) || w_is_rope(a)) return w_str_append(a, b);
     /* Non-integer LHS or non-int shift count: preserve the overloaded `<<`
-     * fallback (e.g. collection/string appends route through w_add). */
+     * fallback (e.g. collection appends route through w_add). */
     if (!w_is_integer_any(a) || !w_is_int(b)) return w_add(a, b);
     int64_t k = w_as_int(b);
     if (k < 0) return bignum_shr(a, -k);  /* negative left shift == right shift */
@@ -12732,6 +12783,11 @@ WValue w_str_concat(WValue a, WValue b) {
  * Only safe when the caller owns the sole reference (compiler-proven).
  * Returns a new WValue — may be a different pointer after realloc. */
 WValue w_str_append(WValue str, WValue suffix) {
+    /* `<<` is the coercing append operator: a non-text suffix (int in
+     * `s << 3`, …) is stringified, matching the interpreter. Previously
+     * w_str_data read it as zero bytes and the append silently no-op'd. */
+    if (!w_is_stringy(suffix) && !w_is_rope(suffix) && !w_is_char(suffix))
+        suffix = w_to_s(suffix);
     /* Extract suffix bytes */
     char sfx_buf[6];
     const char *sfx_data;
@@ -14411,6 +14467,7 @@ WValue __w_type(WValue v) {
     if (w_is_string(v) || w_is_rope(v)) return w_string("String");
     if (w_is_strbuf(v)) return w_string("StringBuffer");
     if (w_is_symbol(v)) return w_string("Symbol");
+    if (w_is_char(v))   return w_string("Char");
     if (w_is_array(v) || w_is_body(v)) return w_string("Array");
     if (w_is_hash(v))   return w_string("Hash");
     if (w_is_range(v))  return w_string("Range");
@@ -16341,7 +16398,10 @@ static WValue w_ic_string_length(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_string_to_s(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    return r;
+    /* Symbols share the string dispatch table (same 0xFFF9 tag), so
+     * identity here would leak a Symbol out of sym.to_s — w_to_s is
+     * identity for strings and clears the symbol bit for symbols. */
+    return w_to_s(r);
 }
 /* Phase 7+g: String case-conversion and predicate methods. */
 static WValue w_ic_string_idx(WValue r, WValue *a, int c) {

@@ -747,7 +747,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # Only triggered when we know the LHS is a string — an unknown (nil) type
   # used to trigger this path, which wrongly promoted integer parameters
   # to string-append semantics and hung loops like `while n < 3; n += 1`.
-  if op == :PLUS && lt == :string
+  # The RHS must be provably text too: strict `+` means s += 3 is a
+  # TypeError, so non-text and unknown RHS fall to the generic w_add,
+  # which concatenates text and raises for everything else.
+  if op == :PLUS && lt == :string && vt in (:string :char)
     result = next_temp(wfn)
     emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: "w_str_append", args: [cur, rhs_reg]})
     if ptr != nil

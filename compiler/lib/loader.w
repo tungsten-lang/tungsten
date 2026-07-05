@@ -499,6 +499,19 @@ use parser
       while bj < node.else_body.size()
         collect_autoload_refs(node.else_body[bj], defined, registry, seen, pending)
         bj += 1
+    # begin/rescue/ensure — the rescue and ensure clauses live in their own
+    # fields, so class refs that appear only inside them (`rescue TypeError`
+    # checks, ensure-time cleanup) would otherwise never trigger autoload.
+    if node.rescue_body != nil
+      bj = 0
+      while bj < node.rescue_body.size()
+        collect_autoload_refs(node.rescue_body[bj], defined, registry, seen, pending)
+        bj += 1
+    if node.ensure_body != nil
+      bj = 0
+      while bj < node.ensure_body.size()
+        collect_autoload_refs(node.ensure_body[bj], defined, registry, seen, pending)
+        bj += 1
     if node.expressions != nil
       ej = 0
       while ej < node.expressions.size()

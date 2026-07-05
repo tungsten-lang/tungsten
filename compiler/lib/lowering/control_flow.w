@@ -453,9 +453,25 @@
       emit_instruction(wfn, {op: :store_i64, value: boxed_temp, ptr: boxed_slot})
     ui += 1
 
-  # Clear any stale bindings for vars that were modified inside the loop
-  # (they point to registers from inside the loop's blocks)
-  ctx[:bindings] = {}
+  # Invalidate bindings for vars ASSIGNED inside the loop — their pre-loop
+  # register bindings are now stale (the value lives in a loop-internal block).
+  # Clearing ALL bindings (the old behavior) also dropped bindings for vars the
+  # loop never touched, e.g. an `## i64`-typed param used after the loop: losing
+  # its binding lost its raw-int type, so the later use re-materialized it as a
+  # boxed WValue and mis-unboxed it (w_to_i64 on a raw param → "expected int,
+  # got singleton"). A var not assigned in the loop keeps its binding, which is
+  # still valid: its defining register dominates the loop-exit block.
+  if ctx[:bindings] != nil && ctx[:bindings].size() > 0
+    loop_assigned = find_loop_assigned_vars(node.body, node.condition)
+    kept = {}
+    bkeys = ctx[:bindings].keys()
+    bi = 0
+    while bi < bkeys.size()
+      bname = bkeys[bi]
+      if loop_assigned[bname] == nil
+        kept[bname] = ctx[:bindings][bname]
+      bi += 1
+    ctx[:bindings] = kept
 
   ctx[:unboxed_vars] = prev_unboxed
   nil

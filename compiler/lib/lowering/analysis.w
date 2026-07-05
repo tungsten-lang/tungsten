@@ -38,6 +38,19 @@
     i += 1
   result
 
+# Names of every var assigned (plain or compound) anywhere in a loop's body or
+# condition. lower_while uses this to invalidate ONLY the bindings the loop
+# actually made stale, so a var the loop never touches (e.g. an `## i64`-typed
+# param used after the loop) keeps its binding and its raw-int type. Reuses
+# scan_assigns_for_params (the trusted reassignment walker: recurses if / while /
+# case / case_value) rather than scan_loop_vars — for a binding-clear a MISSED
+# assignment is harmful (a stale binding survives), so err toward completeness.
+-> find_loop_assigned_vars(body, condition)
+  assigned = {}
+  scan_assigns_for_params(body, assigned)
+  scan_assigns_for_params([condition], assigned)
+  assigned
+
 -> scan_loop_vars(nodes, compound_vars, assigned_vars, var_types)
   if nodes == nil
     return nil

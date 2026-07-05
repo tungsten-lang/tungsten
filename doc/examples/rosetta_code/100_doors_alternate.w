@@ -1,17 +1,13 @@
-next_open = 1
-delta = 3
-
-(1..100).each ->(pass)
-  state = "closed"
-  if pass == next_open
-    state = "open"
-    next_open += delta
-    delta += 2
-  << "Door [pass] is [state]."
+(1..10)/sq -> << "Door [i] is open"
 
 ## expect stdout
-## Door 1 is open.
-## Door 2 is closed.
-## Door 3 is closed.
-## ...
-## Door 100 is open.
+## Door 1 is open
+## Door 4 is open
+## Door 9 is open
+## Door 16 is open
+## Door 25 is open
+## Door 36 is open
+## Door 49 is open
+## Door 64 is open
+## Door 81 is open
+## Door 100 is open

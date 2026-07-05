@@ -324,6 +324,8 @@ use target
     if t == :array
       return ast_get(node, :elements).map -> (e)
         evaluate(e, env)
+    if t in (:typed_array :typed_array_new)
+      return eval_typed_array_new(node, env)
     if t == :hash_literal
       return eval_hash(node, env)
     if t == :string_interp
@@ -1426,6 +1428,8 @@ use target
     if op == :POW
       return left ** right
     if op == :SLASH
+      if type(left) == "Hash" && left[:rt] == :range
+        return eval_range_step(left, right)
       return left / right
     if op == :PERCENT
       return left % right
@@ -1457,6 +1461,21 @@ use target
     if op == :GTE
       return left >= right
     raise "Unknown operator: [op]"
+
+  # Range#/ (step): materialize `(a..b) / n` as [a, a+n, a+2n, ...] while
+  # < b (or <= b for an inclusive range). Mirrors the compiled path's
+  # lower_range_step, which desugars to the same array+while-loop shape.
+  -> eval_range_step(range, step)
+    from = range[:from]
+    to = range[:to]
+    excl = range[:exclusive]
+    limit = excl ? to : to + 1
+    result = []
+    i = from
+    while i < limit
+      result.push(i)
+      i += step
+    result
 
   -> eval_unary_op(node, env)
     operand = evaluate(ast_get(node, :operand), env)
@@ -1883,6 +1902,25 @@ use target
               raise err
           i = i + 1
         return nil
+      if name == "step" && args.size() == 1
+        raise "cannot call .step on unbounded range" if unbounded
+        if block != nil
+          i = from
+          limit = excl ? to : to + 1
+          while i < limit
+            begin
+              call_block(block, [i])
+            rescue err
+              if err == "__SIGNAL__" && @signal[:type] == :break
+                @signal[:type] = nil
+                break
+              elsif err == "__SIGNAL__" && @signal[:type] == :next
+                @signal[:type] = nil
+              else
+                raise err
+            i += args[0]
+          return nil
+        return eval_range_step(recv, args[0])
       if name == "map" && block != nil
         raise "cannot call .map on unbounded range" if unbounded
         result = []
@@ -1929,6 +1967,9 @@ use target
     if name == "\[]="
       recv[args[0]] = args[1]
       return args[1]
+    if name == "flip" && args.size() == 1
+      recv[args[0]] = !recv[args[0]]
+      return nil
 
     # Parity is lowered inline on the compiled path; the runtime IC has no
     # handler, so compute it here so `n.even?` / `n.odd?` work under -e/--wit.
@@ -2107,6 +2148,15 @@ use target
     if t == :compound_assign
       collect_free_vars(ast_get(node, :value), env, vars, seen)
       collect_free_vars(ast_get(node, :target), env, vars, seen)
+      return nil
+    if t == :string_interp
+      parts = ast_get(node, :parts)
+      i = 0
+      while i < parts.size()
+        part = parts[i]
+        if part[0] != :str
+          collect_free_vars(part[1], env, vars, seen)
+        i += 1
       return nil
     # Generic walk: recurse into all AST children. The Hash-era walk
     # skipped :node/:op/:name/:exclusive keys explicitly — those carry
@@ -2447,6 +2497,47 @@ use target
       v = evaluate(entry[1], env)
       result[k] = v
     result
+
+  # `bool[N]` / `i32[N]` / etc. — zero-filled typed array. Mirrors
+  # lower_typed_array_new (compiler/lib/lowering/literals.w): bool routes
+  # to the bit-packed BoolArray allocator, other known element types to
+  # the generic bits-keyed zero-fill, anything else falls back to a plain
+  # empty Array so the tree-walker never crashes on an unrecognized etype.
+  -> eval_typed_array_new(node, env)
+    etype = ast_get(node, :element_type)
+    size = evaluate(ast_get(node, :size), env)
+    if etype == "bool"
+      return ccall("w_bool_array_new", size)
+    bits = 0
+    if etype == "u1" || etype == "i1"
+      bits = 1
+    elsif etype == "u4"
+      bits = 4
+    elsif etype == "i4"
+      bits = -4
+    elsif etype == "u8"
+      bits = 8
+    elsif etype == "i8"
+      bits = 108
+    elsif etype == "u16"
+      bits = 16
+    elsif etype == "i16"
+      bits = 116
+    elsif etype in ("u32" "i32")
+      bits = 32
+    elsif etype in ("u64" "i64")
+      bits = 64
+    elsif etype == "f32"
+      bits = 0 - 32
+    elsif etype == "bf16"
+      bits = 0 - 116
+    elsif etype == "w64"
+      bits = 65
+    elsif etype == "f64"
+      bits = 0 - 64
+    if bits != 0
+      return ccall("w_array_zeros", bits.to_s(), size)
+    ccall("w_array_new_empty")
 
   # -- String interpolation --
 

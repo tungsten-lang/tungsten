@@ -844,9 +844,49 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return nil
   {name: name, digits: digits}
 
+# Range#/ (step): `(a..b) / n` → an Array of a, a+n, a+2n, ... while < b
+# (or <= b for an inclusive range). Bounds aren't known at compile time in
+# general (e.g. `pass.prev..100`), so this desugars to real statements —
+# an empty array, a counter, and a while-loop — lowered through the normal
+# statement pipeline rather than hand-emitted IR.
+# `range.step(n)` (block_node == nil) is parsed identically to any other
+# no-block call, so a trailing arrow-block instead attaches directly to
+# `step` itself — `step` is on the block-taking exclusion list in
+# method_takes_no_block? (types.w), same as Ruby's Numeric#step. Honor
+# that: with a block, dispatch it per stepped value (like .each); without
+# one, return the materialized array.
+-> lower_range_step(ctx, range_node, step_node, block_node = nil)
+  uid = ctx[:mod][:next_block]
+  ctx[:mod][:next_block] = uid + 1
+  arr_name = "__step_arr_" + uid.to_s()
+  i_name = "__step_i_" + uid.to_s()
+  lim_name = "__step_lim_" + uid.to_s()
+
+  lower_statement(ctx, Tungsten:AST:Assign.new(Tungsten:AST:Var.new(arr_name), Tungsten:AST:Array.new([])))
+  lower_statement(ctx, Tungsten:AST:Assign.new(Tungsten:AST:Var.new(i_name), range_node.from))
+
+  limit_expr = range_node.to
+  if range_node.exclusive != true
+    limit_expr = Tungsten:AST:BinaryOp.new(range_node.to, :PLUS, Tungsten:AST:Int.new(1))
+  lower_statement(ctx, Tungsten:AST:Assign.new(Tungsten:AST:Var.new(lim_name), limit_expr))
+
+  cond = Tungsten:AST:BinaryOp.new(Tungsten:AST:Var.new(i_name), :LT, Tungsten:AST:Var.new(lim_name))
+  push_call = Tungsten:AST:Call.new(Tungsten:AST:Var.new(arr_name), "push", [Tungsten:AST:Var.new(i_name)])
+  incr = Tungsten:AST:CompoundAssign.new(Tungsten:AST:Var.new(i_name), :PLUS, step_node)
+  lower_statement(ctx, Tungsten:AST:While.new(cond, [push_call, incr]))
+
+  if block_node != nil
+    lower_statement(ctx, Tungsten:AST:Call.new(Tungsten:AST:Var.new(arr_name), "each", [], block_node))
+    return typed_value(:i64, w_nil.to_s())
+
+  lower_expression(ctx, Tungsten:AST:Var.new(arr_name))
+
 -> lower_binary_op(ctx, node)
   wfn = ctx[:func]
   op = node.op
+
+  if op == :SLASH && ast_kind(node.left) == :range
+    return lower_range_step(ctx, node.left, node.right)
 
   # Conversion pipe on quantities: `5 kg + 3 kg | lb(2)` — converts into the
   # named unit, optionally rounding. Syntactic: the RHS names a unit rather

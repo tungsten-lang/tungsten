@@ -1,17 +1,10 @@
 # 100 Doors
 
-doors = []
-0..99 -> doors.push(false)
+doors = bool[100]
 
-1..100 ->
-  i = pass - 1
+1..100 -> pass.prev...100 .step(pass) -> doors.flip(door_idx)
 
-  while i < 100
-    doors[i] = !doors[i]
-    i += pass
-
-1..100 ->
-  << "Door [i] is open" if doors[i - 1]
+0..99 -> << "Door [i + 1] is open" if doors[i]
 
 ## expect stdout
 ## Door 1 is open

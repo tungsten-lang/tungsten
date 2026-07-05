@@ -401,6 +401,10 @@
     collect_free_vars_in_node(ast_get(node, :left), vars, seen, outer_vars, params, known_calls, bindings)
     collect_free_vars_in_node(ast_get(node, :right), vars, seen, outer_vars, params, known_calls, bindings)
     return nil
+  when :range
+    collect_free_vars_in_node(ast_get(node, :from), vars, seen, outer_vars, params, known_calls, bindings)
+    collect_free_vars_in_node(ast_get(node, :to), vars, seen, outer_vars, params, known_calls, bindings)
+    return nil
   when :call
     if ast_get(node, :receiver) != nil
       collect_free_vars_in_node(ast_get(node, :receiver), vars, seen, outer_vars, params, known_calls, bindings)

@@ -46,7 +46,7 @@
 
 #define HAMMER_READ_BUF      65536
 #define HAMMER_MAX_LATENCIES  (4 * 1024 * 1024)  /* 4M samples per worker */
-#define HAMMER_MAX_PIPELINE   512 /* max pipeline depth */
+#define HAMMER_MAX_PIPELINE   4096 /* max pipeline depth */
 #define HAMMER_PROTOCOL_H10  0   /* HTTP/1.0 — close after each response */
 #define HAMMER_PROTOCOL_H11  1   /* HTTP/1.1 — keep-alive */
 #define HAMMER_PROTOCOL_H2   2   /* HTTP/2   — multiplexed (future) */

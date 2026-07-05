@@ -10,7 +10,7 @@ tungsten-hammer(1) -- HTTP benchmark tool
 -c, --connections N    Concurrent connections (default: 100)
 -d, --duration N       Duration in seconds (default: 10)
 -w, --workers N        Worker threads, 0 for auto-detect (default: 0)
--b, --batch N          Pipeline batch depth (default: 256, max: 512)
+-b, --batch N          Pipeline batch depth (default: 256, max: 4096)
 -p, --protocol PROTO   Protocol: h10, h11, h2 (default: h11)
     --forge            Interactive forge mode (pipeline=1, space to increase)
     --max              Max throughput mode (skip latency/capacity extras)

@@ -29,43 +29,48 @@ if ARGV.include?("--agent")
   puts "More for agents:"
   puts "  stdlib index:  #{File.join(ROOT, "doc/CORE.md")}"
   puts "  MCP server:    #{File.join(ROOT, "bits/tungsten-lsp/bin/mcp-server.w")} (build: bin/tungsten build)"
-  puts "  examples:      #{File.join(ROOT, "doc/examples")} (## expect blocks = machine-checked output)"
+  puts "  examples:      #{File.join(ROOT, "doc/examples")}"
   puts "  web index:     https://tungsten-lang.org/llms.txt"
   exit
 end
 
 puts
-puts "#{bold}#{cyan}W  Tungsten#{reset} #{dim}— pseudocode that runs#{reset}"
+puts "#{bold}#{cyan}The Tungsten Programming Language#{reset}"
 puts
-puts "An object-oriented language that reads like the pseudocode in your"
-puts "notebook. No ends, braces, colons, or return; blocks close by dedent."
+puts "An object-oriented, multi-paradigm systems programming language"
 puts
 
 puts "#{bold}The map#{reset}"
-puts "  #{yellow}Language#{reset}  write #{dim}.w#{reset} files; they compile to a native binary (@gpu fn -> Metal)"
-puts "  #{yellow}REPL#{reset}      #{green}tungsten --repl#{reset}  -- an interactive playground (a.k.a. wit)"
-puts "  #{yellow}bit#{reset}       the package manager: find, install, and test shared code"
-puts "  #{yellow}Docs#{reset}      #{File.join("doc", "getting-started")}/  +  tungsten-lang.org"
+puts
+puts "  tungsten #{yellow}run#{reset}     FILE.w   run a Tungsten program"
+puts "  tungsten #{yellow}compile#{reset} FILE.w   compile a Tungsten program"
+puts
+puts "  tungsten #{yellow}build#{reset}            build the current project"
+puts "  tungsten #{yellow}doctor#{reset}           diagnose environment issues"
+puts
+puts "  tungsten #{yellow}repl#{reset}             an interactive playground"
+puts
+puts "  #{green}Spec#{reset}                      #{File.join("doc", "specification")}"
+puts "  #{green}Examples#{reset}                  #{File.join("doc", "examples")}"
 puts
 
 puts "#{bold}Try it now#{reset}"
+puts
 puts "  #{green}bin/tungsten -e '<< 1 + 1'#{reset}   #{dim}#=> 2#{reset}"
-puts "  #{dim}(more in the guide: currency, units, classes without the noise)#{reset}"
 puts
 
 # Tailor the next step to what actually exists on this machine.
 if HAVE_COMPILER
   puts "#{bold}Next#{reset}"
-  puts "  #{green}tungsten --repl#{reset}      explore interactively"
-  puts "  #{green}tungsten new myapp#{reset}   scaffold a project"
+  puts
+  puts "  #{green}tungsten repl#{reset}        explore interactively"
 else
   puts "#{bold}Next — build the compiler#{reset} #{dim}(a fresh clone ships without one)#{reset}"
+  puts
   puts "  #{green}bin/tungsten build#{reset}"
   puts "  #{dim}or one-line install:#{reset} #{green}curl -fsSL tungsten-lang.org/install | sh#{reset}"
 end
 puts
-
-puts "#{bold}Guide#{reset}  #{cyan}https://tungsten-lang.org/getting-started.html#{reset}"
 
 # ── The 60-second tour (Decision 1A) ─────────────────────────────────────────
 # Runs REAL snippets through the compiled engine. Gated three ways so it can
@@ -73,26 +78,33 @@ puts "#{bold}Guide#{reset}  #{cyan}https://tungsten-lang.org/getting-started.htm
 # compiled binary (a fresh clone hasn't built one yet), and skips under CI=1.
 if HAVE_COMPILER && $stdout.tty? && $stdin.tty? && ENV["CI"].nil?
   tour = [
-    ["price minus a percentage — money is a native literal", %q(<< $499.99 - 15%)],
+    ["price minus a percentage", %q(<< $499.99 - 15%)],
     ["integers don't overflow", %q(<< 2 ** 64)],
     ["ranges are collections", %q(<< (1..100).sum)],
-    ["calculus is notation, not a library", %q(<< ∫(x², 0..2))],
-    ["arrays do what you'd hope", %q(<< [3, 1, 2].sort)]
+    ["some calculus included", %q(<< ∫(x², 0..2))],
+    ["arrays do what you'd expect", %q(<< [3, 1, 2].sort)]
   ]
   puts
   print "#{bold}Press Enter for a 20-second tour#{reset} #{dim}(anything else skips)#{reset} "
+
   if $stdin.gets&.strip == ""
     tour.each do |label, snippet|
       puts
       puts "  #{dim}# #{label}#{reset}"
+      puts
       puts "  #{green}#{snippet}#{reset}"
       out, _err, _st = Open3.capture3(File.join(ROOT, "bin/tungsten"), "-e", snippet)
-      out.each_line { |l| puts "  #{bold}#{l.chomp}#{reset}" }
+      out.each_line { |l| puts "  => #{bold}#{l.chomp}#{reset}" }
     end
     puts
-    puts "That's the flavor. The playground is #{green}tungsten repl#{reset} — try"
-    puts "#{cyan}? Σ(2x⁷ + 3x²)#{reset}, then press #{bold}Enter on a blank line#{reset} and #{bold}↑/↓#{reset} to scrub"
-    puts "the coefficients live. #{cyan}? ∫(x², 0..2)#{reset} plots the curve and shades the area."
+    puts "The interactive playground is #{green}tungsten repl#{reset}."
+    puts
+    puts "Enter a command, then #{bold}press Enter on a blank line#{reset}, use #{bold}↑/↓#{reset} to scrub the coefficients live — try:"
+    puts
+    puts "  #{cyan}? Σ(2x⁷ + 3x²)#{reset}    closed-form sum of a polynomial."
+    puts
+    puts "  #{cyan}? ∫(x², -10..10)#{reset}  plots the curve and shades the area."
+    puts ""
   end
 end
 

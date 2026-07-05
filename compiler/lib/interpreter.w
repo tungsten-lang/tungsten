@@ -591,8 +591,13 @@ use target
                     return ccall("w_prime_count_u64_w", 2, n_hi)
             crv = evaluate(cinner, env)
             if type(crv) == "Hash" && crv[:rt] == :range
-              clo = crv[:from]
-              chi = crv[:to]
+              # Coerce to genuine Int WValues before any arithmetic/comparison
+              # below — a bound can be a whole-valued Decimal (`1e10`), which
+              # none of `<`/`-`/`%` handle (mirrors the compiled lowering's
+              # w_range_bound_i64, raising a catchable TypeError instead of
+              # the fatal as_int abort a raw Decimal would hit).
+              clo = ccall("w_range_bound_i64_w", crv[:from])
+              chi = ccall("w_range_bound_i64_w", crv[:to])
               if crv[:exclusive]
                 chi = chi - 1
               # even?/odd? are pure arithmetic — no ccall, so bounds of ANY
@@ -1882,6 +1887,17 @@ use target
     if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :range
       from = recv[:from]
       to = recv[:to]
+      # A bound can be a whole-valued Decimal (`1e10`, common
+      # scientific-notation shorthand for a big integer) — none of the
+      # arithmetic/comparisons below (`+`, `<`, `-`) handle Decimal, so
+      # coerce upfront (mirrors the compiled lowering's w_range_bound_i64).
+      # Gated on the runtime class specifically (not just "not Integer")
+      # so non-numeric bounds — a Char range's `:-A..:-Z`, say — pass
+      # through unchanged; only Decimal is a confirmed-broken case.
+      if from != nil && type(from) != "Integer" && ccall("w_class_name", from) == "Decimal"
+        from = ccall("w_range_bound_i64_w", from)
+      if to != nil && type(to) != "Integer" && ccall("w_class_name", to) == "Decimal"
+        to = ccall("w_range_bound_i64_w", to)
       excl = recv[:exclusive]
       unbounded = to == nil
       if name == "each" && block != nil

@@ -252,25 +252,29 @@
   if count_pred == "prime_12k?"
     wheel12_hi = wheel12_prime_hi_ast(base)
   if count_pred == "prime?" || count_pred == "even?" || count_pred == "odd?" || wheel12_hi != nil
-    # Bounds unbox via w_to_i64, NOT nanunbox: a bound > 2^48 is a BOXED
-    # bigint WValue, and nanunbox on it yields garbage (wrong counts for
-    # e.g. (0..10^18).count(:even?)). w_to_i64 handles both representations.
+    # Bounds unbox via w_range_bound_i64, NOT nanunbox: a bound > 2^48 is a
+    # BOXED bigint WValue, and nanunbox on it yields garbage (wrong counts
+    # for e.g. (0..10^18).count(:even?)). w_range_bound_i64 handles both
+    # int representations, plus a whole-valued Decimal bound (`1e10`,
+    # common scientific-notation shorthand for a big integer) — raising a
+    # catchable TypeError instead of the fatal abort plain w_to_i64/as_int
+    # hit on a Decimal (0xfffd... "numeric" isn't w_is_int).
     lo_pc = nil
     hi_pc = nil
     if wheel12_hi != nil
       lo_b = ensure_i64_value(wfn, lower_expression(ctx, Tungsten:AST:Int.new(2, nil, "2")))
       hi_b = ensure_i64_value(wfn, lower_expression(ctx, wheel12_hi))
       lo_pc = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: lo_pc, name: "w_to_i64", args: [lo_b]})
+      emit_instruction(wfn, {op: :call_direct_i64, temp: lo_pc, name: "w_range_bound_i64", args: [lo_b]})
       hi_pc = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: hi_pc, name: "w_to_i64", args: [hi_b]})
+      emit_instruction(wfn, {op: :call_direct_i64, temp: hi_pc, name: "w_range_bound_i64", args: [hi_b]})
     else
       lo_b = ensure_i64_value(wfn, lower_expression(ctx, ast_get(base, :from)))
       hi_b = ensure_i64_value(wfn, lower_expression(ctx, ast_get(base, :to)))
       lo_pc = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: lo_pc, name: "w_to_i64", args: [lo_b]})
+      emit_instruction(wfn, {op: :call_direct_i64, temp: lo_pc, name: "w_range_bound_i64", args: [lo_b]})
       hi_pc = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: hi_pc, name: "w_to_i64", args: [hi_b]})
+      emit_instruction(wfn, {op: :call_direct_i64, temp: hi_pc, name: "w_range_bound_i64", args: [hi_b]})
       if ast_get(base, :exclusive)
         hi_ex = next_temp(wfn)
         emit_instruction(wfn, {op: :sub_i64, temp: hi_ex, lhs: hi_pc, rhs: "1"})

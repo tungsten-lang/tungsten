@@ -530,10 +530,26 @@
 
     # Evaluate range bounds. Right-unbounded ranges (`1..`, `1...`) have
     # collection.to == nil and iterate forever until a `break` exits.
+    #
+    # Raw `:nanunbox_int` is bit extraction with no type check — correct
+    # only when the bound is genuinely an inline-boxed int. A bound
+    # statically known non-int (e.g. a Decimal literal like `1e10`) would
+    # otherwise silently reinterpret its sig/scale bits as a small garbage
+    # int instead of raising/coercing. Route those through
+    # w_range_bound_i64 (real type check + coercion, catchable TypeError
+    # on a non-whole bound); leave the fast nanunbox path untouched for
+    # the common case (known int, or non-statically-typed but an int at
+    # runtime).
+    from_type = infer_type(collection.from, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    to_type = infer_type(collection.to, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+
     start_tv = lower_expression(ctx, collection.from)
     start_reg = ensure_i64_value(wfn, start_tv)
     start_raw = next_temp(wfn)
-    emit_instruction(wfn, {op: :nanunbox_int, temp: start_raw, temp_shl: start_raw + ".shl", boxed: start_reg})
+    if from_type != nil && !is_integer_like_type(from_type)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: start_raw, name: "w_range_bound_i64", args: [start_reg]})
+    else
+      emit_instruction(wfn, {op: :nanunbox_int, temp: start_raw, temp_shl: start_raw + ".shl", boxed: start_reg})
 
     unbounded = collection.to == nil
     end_raw = nil
@@ -541,7 +557,10 @@
       end_tv = lower_expression(ctx, collection.to)
       end_reg = ensure_i64_value(wfn, end_tv)
       end_raw = next_temp(wfn)
-      emit_instruction(wfn, {op: :nanunbox_int, temp: end_raw, temp_shl: end_raw + ".shl", boxed: end_reg})
+      if to_type != nil && !is_integer_like_type(to_type)
+        emit_instruction(wfn, {op: :call_direct_i64, temp: end_raw, name: "w_range_bound_i64", args: [end_reg]})
+      else
+        emit_instruction(wfn, {op: :nanunbox_int, temp: end_raw, temp_shl: end_raw + ".shl", boxed: end_reg})
 
     cmp_op = "sle"
     if collection.exclusive == true
@@ -552,8 +571,6 @@
     body_label = next_label(wfn, "with.body")
     inc_label = next_label(wfn, "with.inc")
     exit_label = next_label(wfn, "with.exit")
-
-    from_type = infer_type(collection.from, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
     slot_type = "i64"
     if is_machine_int_type(from_type)
       slot_type = machine_slot_type(from_type)

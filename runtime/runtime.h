@@ -292,6 +292,8 @@ typedef struct {
 /* ---- Boxing constructors (runtime functions) ---- */
 WValue w_int(int64_t v);
 int64_t w_to_i64(WValue v);
+int64_t w_range_bound_i64(WValue v);
+WValue w_range_bound_i64_w(WValue v);
 WValue w_u64(uint64_t v);
 uint64_t w_to_u64(WValue v);
 WValue w_i128(__int128 v);

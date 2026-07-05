@@ -535,8 +535,28 @@
     to_tv = lower_expression(ctx, range_node.to)
     to_reg = ensure_i64_value(wfn, to_tv)
 
-    from_raw = nanunbox_int_emit(wfn, from_reg)
-    to_raw = nanunbox_int_emit(wfn, to_reg)
+    # nanunbox_int_emit is raw bit extraction with no type check — correct
+    # only when the bound is genuinely an inline-boxed int. A bound that's
+    # statically known non-int (e.g. a Decimal literal like `1e10`, common
+    # scientific-notation shorthand for a big integer) would otherwise
+    # silently reinterpret its sig/scale bits as a small garbage int
+    # (`(1..1e10)` iterating ~130 times instead of ten billion). Route
+    # those through w_range_bound_i64 (real type check + coercion,
+    # catchable TypeError on a non-whole bound) instead; leave the fast
+    # nanunbox path untouched for the common case (known int, or a
+    # non-statically-typed expression that's an int at runtime).
+    from_static_type = infer_type(range_node.from, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    to_static_type = infer_type(range_node.to, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    if from_static_type != nil && !is_integer_like_type(from_static_type)
+      from_raw = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: from_raw, name: "w_range_bound_i64", args: [from_reg]})
+    else
+      from_raw = nanunbox_int_emit(wfn, from_reg)
+    if to_static_type != nil && !is_integer_like_type(to_static_type)
+      to_raw = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: to_raw, name: "w_range_bound_i64", args: [to_reg]})
+    else
+      to_raw = nanunbox_int_emit(wfn, to_reg)
 
     # Materialize bindings before the loop (for capture correctness)
     materialize_bindings(ctx)

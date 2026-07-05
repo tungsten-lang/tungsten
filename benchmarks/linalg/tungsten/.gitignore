@@ -1,0 +1,8 @@
+# Compiled benchmark binaries — rebuilt from the .w sources by the build_*.sh
+# scripts. Track the sources, ignore the executables.
+matmul_*
+validate_f64
+!*.w
+!*.sh
+!*.md
+!.gitignore

@@ -21357,11 +21357,21 @@ static void *thread_entry(void *arg) {
 
 static int w_capture_entry_looks_like_slot(WValue entry) {
     if (entry == 0) return 0;
-    if ((entry & 0xFULL) != 0) return 0;
+    /* Capture cells are WValue-sized (8-byte) allocas — 8-byte aligned, NOT
+     * necessarily 16. The old `& 0xF` (16-byte) check silently misclassified
+     * every 8-aligned cell as a value, so its slot was never dereferenced and
+     * the closure captured the raw pointer bits. Apple stacks happen to 16-align
+     * these allocas so it was hidden on macOS; Linux 8-aligns them, corrupting
+     * half the captures (surfaced as garbage host/port in the goroutine client). */
+    if ((entry & 0x7ULL) != 0) return 0;
     if (entry < 4096) return 0;
 
-    uint16_t tag = (uint16_t)(entry >> 48);
-    if (tag == 0xFFF9 || tag == 0xFFFA || tag == 0x7FF8) return 0;
+    /* NaN-boxed WValues (int/float/string/heap-object) have all 11 exponent bits
+     * set — top 12 bits are 0x7FF or 0xFFF. A raw pointer to a capture cell has a
+     * zero exponent (user-space addresses are < 2^48). This subsumes the old
+     * 0xFFF9/0xFFFA/0x7FF8 tag list and also covers every other boxed tag. */
+    uint16_t exp = (uint16_t)((entry >> 52) & 0xFFF);
+    if (exp == 0x7FF || exp == 0xFFF) return 0;
 
     return 1;
 }

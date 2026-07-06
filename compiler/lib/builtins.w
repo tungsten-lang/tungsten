@@ -116,6 +116,9 @@
   when "prepend"
     recv.prepend(args[0])
 
+  when "zip"
+    recv.zip(args[0])
+
   when "reverse"
     recv.reverse()
 
@@ -352,7 +355,7 @@ builtin_names = [
   "append", "prepend",
   "reverse", "slice", "copy", "push", "pop", "first", "last", "empty?", "nil?",
   "join", "sort", "flatten", "uniq", "delete", "each", "map", "select",
-  "reject", "reduce", "each_with_index", "map_with_index", "any?", "all?",
+  "reject", "reduce", "each_with_index", "map_with_index", "zip", "any?", "all?",
   "find", "count", "sum", "times", "keys", "values", "has_key?", "abs", "max", "min",
   "respond_to?", "is_a?", "freeze", "argv", "clock", "runtime_identity",
   "capture", "system", "env", "ljust", "rjust", "round", "gets"

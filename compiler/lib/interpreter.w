@@ -975,6 +975,17 @@ use target
     name = ast_get(node, :name)
     if name == "ARGV"
       return argv()
+    # Bare `class` in a method body resolves to the current class — the runtime
+    # class of the receiver for instance methods, or self for class methods — so
+    # `class.new(...)` / `class.zero` factory methods work, matching the compiled
+    # path (which treats `class` as the enclosing/receiver class, not a variable).
+    if name == "class"
+      cs = current_self()
+      if cs != nil && type(cs) == "Hash"
+        if cs.has_key?(:w_class)
+          return cs[:w_class]
+        if cs.has_key?(:rt) && cs[:rt] == :class
+          return cs
     if env.defined?(name)
       return env.get(name)
     if !@classes.has_key?(name)
@@ -1412,6 +1423,14 @@ use target
     apply_binary_op(node_op, left, right)
 
   -> apply_binary_op(op, left, right)
+    # Object operands dispatch their own operator method (a + b -> a.+(b)),
+    # mirroring the compiled operator-overload path and the `·` arm below —
+    # covers the hypercomplex tower, Vec/Mat, etc. Arithmetic/bitwise only;
+    # comparisons (== < > …) fall through to the primitive arms unchanged.
+    if type(left) == "Hash" && left.has_key?(:rt) && left[:rt] == :object
+      opn = binop_method_name(op)
+      if opn != nil
+        return dispatch_method(left, opn, [right], nil, nil)
     if op == :PLUS
       # Strict string `+` — only text concatenates with text; a String
       # mixed with anything else is a TypeError, mirroring runtime w_add.
@@ -1472,6 +1491,30 @@ use target
     if op == :GTE
       return left >= right
     raise "Unknown operator: [op]"
+
+  # Operator symbol -> the method name an object overloads it with, so
+  # apply_binary_op can dispatch `a <op> b` to `a.<method>(b)`. Returns nil
+  # for ops not overloaded here (comparisons stay on the primitive arms).
+  -> binop_method_name(op)
+    if op == :PLUS
+      return "+"
+    if op == :MINUS
+      return "-"
+    if op == :STAR
+      return "*"
+    if op == :SLASH
+      return "/"
+    if op == :PERCENT
+      return "%"
+    if op == :POW
+      return "**"
+    if op == :AMPERSAND
+      return "&"
+    if op == :PIPE
+      return "|"
+    if op == :CARET
+      return "^"
+    nil
 
   # Range#/ (step): materialize `(a..b) / n` as [a, a+n, a+2n, ...] while
   # < b (or <= b for an inclusive range). Mirrors the compiled path's
@@ -2265,6 +2308,10 @@ use target
     if w_class == nil
       superclass = nil
       if ast_get(node, :superclass) != nil
+        # Autoload the parent so a subclass of an autoloaded generic (e.g.
+        # Octonion < Hypercomplex) inherits its methods (+, abs2, <=>) — the
+        # bare lookup below would otherwise miss a not-yet-referenced parent.
+        try_autoload_class(ast_get(node, :superclass))
         superclass = @classes[ast_get(node, :superclass)]
       w_class = {rt: :class, name: ast_get(node, :name), superclass: superclass, methods: {}, class_methods: {}}
       @classes[ast_get(node, :name)] = w_class
@@ -2282,7 +2329,14 @@ use target
       elsif ast_kind(expr) == :view_decl && ast_get(expr, :kind) == "struct"
         register_data_field_accessors(expr, w_class)
       else
-        evaluate(expr, env)
+        # Declarative class-body pragmas (noncommutative / noassoc / runtime …)
+        # are bare receiver-less calls the interpreter has no handler for. The
+        # compiled lower_class_def silently skips any class-body statement that
+        # isn't a method / accessor / view / assign; mirror that here. Without
+        # this, the pragma's `evaluate` raise aborts method registration and
+        # leaves the class a method-less husk (autoload's rescue then hides it).
+        if !(ast_kind(expr) == :call && ast_get(expr, :receiver) == nil)
+          evaluate(expr, env)
     w_class
 
   # `-> new(@x, @y) ro` — a bare ro/rw body statement marks the @-bound

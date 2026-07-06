@@ -58,6 +58,17 @@
   -> to_a
     self
 
+  # Concatenation: a new array of self's elements followed by @1's. The
+  # `## T[n]` at call sites re-types the polymorphic result. Non-mutating.
+  # The hypercomplex tower's Cayley–Dickson `*` joins its two halves here.
+  -> concat/1
+    out = []
+    self.each -> (x)
+      out.push(x)
+    @1.each -> (x)
+      out.push(x)
+    out
+
   # Pythagorean (L2) norm: √(Σ xᵢ²). Naive form — overflow-safe for
   # the ML-scale ranges this is meant for; for bigger values use the
   # scaled algorithm in Math.hypot.

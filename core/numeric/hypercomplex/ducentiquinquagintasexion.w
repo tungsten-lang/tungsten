@@ -1,6 +1,9 @@
 # Ducentiquinquagintasexion — dimension-256 hypercomplex algebra.
 # Cayley–Dickson doubling of Centumduodetrigintanion. Name follows
 # Latin `ducenti-quinquaginta-sex` = 200 + 50 + 6 = 256.
+#
+# Literal (scalar-first; no Metal-native type above dimension 16):
+#   %h256-f32[e0 e1 … e255]  → Ducentiquinquagintasexion<f32>
 + Ducentiquinquagintasexion<T> < Hypercomplex<T>
   noncommutative :*
   noassoc       :*

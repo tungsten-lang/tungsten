@@ -14,6 +14,20 @@
 # These algebras carry no natural total order, so `<=>` ranks values
 # by magnitude (the norm); `==` stays exact and componentwise — `i`
 # and `1` share a magnitude but are not equal.
+#
+# Literal syntax — `%h<dim>-<type>[ c0 c1 … ]`:
+#   <dim>  one of 2 4 8 16 32 64 128 256 (the algebra's dimension).
+#   <type> a scalar type (f16 f32 f64 … posit64) → the math class,
+#          scalar-first; or a Metal vector type where one exists
+#          (float2 @2, float4 @4, float4x2 @8, float4x4 @16) → the
+#          Metal-aligned reading. The type also fixes T (float*→f32,
+#          half*→f16, bfloat*→bf16).
+#   c0…    exactly <dim> space-separated components, in the target
+#          class's storage order.
+# Only dimension 4 splits into two classes: `%h4-f32` → Quaternion
+# (scalar-first) vs `%h4-float4` → QuaternionMetal (scalar-LAST). At
+# every other level the Metal form names the same scalar-first class,
+# just its GPU-aligned storage. Per-class forms are in each subclass.
 + Hypercomplex<T> < Number
   with T in (
     f16 f32 f64 f80 f128 f256

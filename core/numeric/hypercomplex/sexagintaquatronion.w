@@ -1,5 +1,8 @@
 # Sexagintaquatronion — dimension-64 hypercomplex algebra. Cayley–Dickson
 # doubling of Trigintaduonion. Name follows Latin `sexagintaquatro` = 64.
+#
+# Literal (scalar-first; no Metal-native type above dimension 16):
+#   %h64-f32[e0 e1 … e63]  → Sexagintaquatronion<f32>
 + Sexagintaquatronion<T> < Hypercomplex<T>
   noncommutative :*
   noassoc       :*

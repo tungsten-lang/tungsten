@@ -2,6 +2,12 @@
 # Multiplication is non-commutative and non-associative. The last of
 # the four normed division algebras: |a·b| = |a|·|b| holds, but the
 # associator (a·b)·c − a·(b·c) is generally non-zero.
+#
+# Literals (scalar-first, [e0 e1 … e7] = 1 scalar + 7 imaginary units):
+#   %h8-f32[e0 e1 e2 e3 e4 e5 e6 e7]       → Octonion<f32>  (math)
+#   %h8-float4x2[e0 e1 e2 e3 e4 e5 e6 e7]  → Octonion<f32>  (Metal-aligned;
+#     byte-aliases float4x2. Octonion is scalar-first at the GPU boundary
+#     too — same order, no separate metal class, unlike Quaternion.)
 + Octonion<T> < Hypercomplex<T>
   noncommutative :*
   noassoc        :*

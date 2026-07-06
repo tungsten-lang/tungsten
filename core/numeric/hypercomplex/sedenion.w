@@ -2,6 +2,11 @@
 # Non-commutative, non-associative, and the first Cayley–Dickson level
 # with zero divisors and where the multiplicative-norm property
 # |a·b| = |a|·|b| no longer holds.
+#
+# Literals (scalar-first, [e0 e1 … e15]):
+#   %h16-f32[e0 e1 … e15]       → Sedenion<f32>  (math)
+#   %h16-float4x4[e0 e1 … e15]  → Sedenion<f32>  (Metal-aligned; byte-aliases
+#     float4x4, same scalar-first order — no separate metal class)
 + Sedenion<T> < Hypercomplex<T>
   noncommutative :*
   noassoc       :*

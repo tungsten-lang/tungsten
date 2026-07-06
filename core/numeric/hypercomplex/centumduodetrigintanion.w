@@ -1,6 +1,9 @@
 # Centumduodetrigintanion — dimension-128 hypercomplex algebra.
 # Cayley–Dickson doubling of Sexagintaquatronion. Name follows Latin
 # `centum-duo-de-triginta` = 100 + (30 − 2) = 128.
+#
+# Literal (scalar-first; no Metal-native type above dimension 16):
+#   %h128-f32[e0 e1 … e127]  → Centumduodetrigintanion<f32>
 + Centumduodetrigintanion<T> < Hypercomplex<T>
   noncommutative :*
   noassoc       :*

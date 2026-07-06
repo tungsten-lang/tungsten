@@ -4,6 +4,9 @@
 # finer multiplicative regularities (Moufang identities, power-
 # flexibility) at this and each subsequent doubling. The name follows
 # Latin `trigintaduo` = 32.
+#
+# Literal (scalar-first; no Metal-native type above dimension 16):
+#   %h32-f32[e0 e1 … e31]  → Trigintaduonion<f32>
 + Trigintaduonion<T> < Hypercomplex<T>
   noncommutative :*
   noassoc       :*

@@ -1,5 +1,9 @@
 # Complex — dimension-2 hypercomplex (basis: 1, i).
 # z = a + bi stored as components [a, b]. Scalar-first.
+#
+# Literals:
+#   %h2-f32[a b]     → Complex<f32>  (math; a + bi)
+#   %h2-float2[a b]  → Complex<f32>  (Metal-aligned float2; same order)
 + Complex<T> < Hypercomplex<T>
   - data
     T components[2]

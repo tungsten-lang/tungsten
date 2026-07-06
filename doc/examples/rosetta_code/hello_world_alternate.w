@@ -12,6 +12,7 @@ name = "Tungsten"
 
 # stdout, without newline
 <- "Hello world!"
+
 ## expect stdout
 ## Hello world!
 ## Hello, Tungsten.

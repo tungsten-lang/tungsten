@@ -28,6 +28,11 @@
 # (scalar-first) vs `%h4-float4` → QuaternionMetal (scalar-LAST). At
 # every other level the Metal form names the same scalar-first class,
 # just its GPU-aligned storage. Per-class forms are in each subclass.
+#
+# The tower and its `%h` literals require the compiled path (`tungsten -o`)
+# or the default interpreter (`tungsten file.w`). The legacy `--ruby`
+# tree-walker predates generics, operator-method definitions, and the
+# algebraic-law pragmas these classes use, so it cannot run them.
 + Hypercomplex<T> < Number
   with T in (
     f16 f32 f64 f80 f128 f256

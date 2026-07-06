@@ -11,11 +11,12 @@
   true
 
 tests = [
-  "The quick brown fox jumps over the lazy dog"
+  "The quick brown fox jumps over the lazy dog",
   "The quick brown fox jumped over the lazy dog"
 ]
-tests.each { |t|
-  puts "\"[t]\": [pangram?(t)]"
-}
+tests.each -> (t)
+  << "\"[t]\": [pangram?(t)]"
 
-## expect skip currently unsupported in this runtime
+## expect stdout
+## "The quick brown fox jumps over the lazy dog": true
+## "The quick brown fox jumped over the lazy dog": false

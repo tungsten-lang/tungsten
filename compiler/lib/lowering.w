@@ -1022,6 +1022,7 @@ use lowering/definitions
   mod[:known_calls]["print"] = "__w_print"
   mod[:known_calls]["flush"] = "w_flush"
   mod[:known_calls]["read_bytes"] = "w_read_bytes"
+  mod[:known_calls]["gets"] = "w_read_line_stdin"
   mod[:known_calls]["freeze_slab"] = "w_slab_freeze_safe"
   mod[:known_calls]["no_more_interns"] = "w_slab_freeze_safe"
   mod[:known_calls]["the_internship_is_over"] = "w_slab_freeze_safe"

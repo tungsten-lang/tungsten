@@ -1,10 +1,16 @@
 # Greatest common divisor
 
--> gcd(a, 0) : a
-   gcd(a, b) : gcd(b, a % b)
+-> gcd(a, b)
+  if b == 0
+    a
+  else
+    gcd(b, a % b)
 
 << gcd(12, 8)
 << gcd(100, 75)
 << gcd(1071, 462)
 
-## expect skip currently unsupported in this runtime
+## expect stdout
+## 4
+## 25
+## 21

@@ -16,6 +16,7 @@ use target
   -> new(argv_values = nil)
     @env = Environment.new()
     @classes = {}
+    @traits = {}
     @self_stack = [nil]
     @signal = {type: nil, value: nil}
     @loaded_files = []
@@ -389,6 +390,8 @@ use target
       return eval_method_def(node, env)
     if t == :class_def
       return eval_class_def(node, env)
+    if t == :trait_def
+      return eval_trait_def(node, env)
     if t == :block
       return [env, node]
     if t == :puts
@@ -448,10 +451,13 @@ use target
     # and no extern linkage, so a no-op is the faithful mirror. A program that
     # actually *calls* a @gpu kernel or an extern fails later with a clear
     # "undefined method", not a generic Unknown-AST crash at definition time.
-    # :trait_include (`is Enumerable` in a class body) and :trait_def are
-    # no-ops here for now — the tree-walker doesn't compose traits, but a class
-    # that uses one (e.g. Date) must still load so its OWN methods dispatch.
-    if t in (:field_decl :layout_def :view_decl :view_field :view_base :view_value :view_access :extern_fn :extern_lib :gpu_kernel_def :schedule_def :trait_include :trait_def)
+    # :trait_include (`is Enumerable` in a class body) is expanded inline by
+    # eval_class_def (see expand_trait_includes below), which splices the
+    # named trait's own methods into the class body before it's walked. A
+    # :trait_include reached here is either outside a class body or names an
+    # unknown trait — a no-op is the faithful mirror of the compiled path's
+    # E_LOWER_UNKNOWN_TRAIT-or-ignore behavior without erroring at load time.
+    if t in (:field_decl :layout_def :view_decl :view_field :view_base :view_value :view_access :extern_fn :extern_lib :gpu_kernel_def :schedule_def :trait_include)
       return nil
 
     # @fastmath / @strictmath scoped blocks. The tree-walker does direct
@@ -1394,12 +1400,12 @@ use target
         left = evaluate(ast_get(node, :left), env)
         if w_type_name(left) == "Quantity"
           return ccall("w_quantity_pipe", left, "" + pu[:name], pu[:digits])
-    if node_op == :LSHIFT && ast_get(node, :left) != nil && ast_get(node, :left)[:node] == :var
+    if node_op == :LSHIFT && ast_get(node, :left) != nil && ast_kind(ast_get(node, :left)) == :var
       left = evaluate(ast_get(node, :left), env)
       if type(left) == "String"
         right = evaluate(ast_get(node, :right), env)
         result = left + w_to_s(right)
-        env.set(ast_get(node, :left)[:name], result)
+        env.set(ast_get(ast_get(node, :left), :name), result)
         return result
     left = evaluate(ast_get(node, :left), env)
     right = evaluate(ast_get(node, :right), env)
@@ -1657,9 +1663,9 @@ use target
     if ast_get(node, :receiver) != nil
       recv = evaluate(ast_get(node, :receiver), env)
       result = dispatch_method(recv, ast_get(node, :name), args, block, env)
-      if ast_get(node, :receiver)[:node] == :var && type(recv) == "String"
+      if ast_kind(ast_get(node, :receiver)) == :var && type(recv) == "String"
         if ast_get(node, :name) in ("concat" "append" "prepend" "<<" "<</1")
-          env.set(ast_get(node, :receiver)[:name], result)
+          env.set(ast_get(ast_get(node, :receiver), :name), result)
       return result
 
     dispatch_bare_call(ast_get(node, :name), args, block, env)
@@ -1747,15 +1753,11 @@ use target
         cap = args[0]
       return ccall("w_strbuf_new", cap)
 
-    # Builtins
-    if is_builtin?(name)
-      return dispatch_builtin(self, name, nil, args, block)
-
-    # Class constructor
-    if @classes.has_key?(name)
-      return instantiate(@classes[name], args, env)
-
-    # Method on current self
+    # Method on current self — checked before the generic builtin table so a
+    # user's own method (or top-level function, below) wins over a same-named
+    # builtin that expects a real receiver (e.g. a top-level `-> max(arr)`
+    # must resolve before `is_builtin?("max")`, which would otherwise call
+    # dispatch_builtin with a hardcoded nil receiver and crash).
     s = current_self()
     if s != nil && type(s) == "Hash" && s.has_key?(:rt) && s[:rt] == :object
       m = lookup_method(s[:w_class], name)
@@ -1767,6 +1769,17 @@ use target
     if @env.defined?(method_key)
       m = @env.get(method_key)
       return call_w_method(current_self(), m, args, block, env)
+
+    # Builtins — dispatched on the current self (e.g. a bare `map(...)` inside
+    # a method body means `self.map(...)`), which is nil at top level (same as
+    # the previous hardcoded nil), so this only changes behavior when a real
+    # self is active.
+    if is_builtin?(name)
+      return dispatch_builtin(self, name, current_self(), args, block)
+
+    # Class constructor
+    if @classes.has_key?(name)
+      return instantiate(@classes[name], args, env)
 
     # A local/top-level variable holding a closure, invoked directly:
     # `f = -> x ...; f(21)`. A block evaluates to an [env, node] pair (see the
@@ -1814,6 +1827,8 @@ use target
     if name == "class_name" && args.size() == 0
       if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :class
         return "Class"
+      if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :object
+        return recv[:w_class][:name]
       return type(recv)
     if name == "class" && args.size() == 0
       if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :class
@@ -2158,8 +2173,8 @@ use target
       return nil
     if t == :assign
       collect_free_vars(ast_get(node, :value), env, vars, seen)
-      if ast_get(node, :target) != nil && ast_get(node, :target)[:node] == :var
-        seen[ast_get(node, :target)[:name]] = true
+      if ast_get(node, :target) != nil && ast_kind(ast_get(node, :target)) == :var
+        seen[ast_get(ast_get(node, :target), :name)] = true
       return nil
     if t == :compound_assign
       collect_free_vars(ast_get(node, :value), env, vars, seen)
@@ -2215,6 +2230,33 @@ use target
 
   # -- Class/method definitions --
 
+  # `trait Name ... ` — record the trait's own body (its method_defs) under
+  # its name; expand_trait_includes splices these into a composing class's
+  # body, mirroring the compiled path's expand_class_traits (lowering.w).
+  -> eval_trait_def(node, env)
+    @traits[ast_get(node, :name)] = ast_get(node, :body)
+    nil
+
+  # Replace each `is TraitName` (:trait_include) marker in a class body with
+  # the named trait's own method_defs, spliced in place. A class's own
+  # methods appear later in the walked list (either before or after the
+  # `is TraitName` line, depending on source order) and simply overwrite the
+  # trait's entry in w_class[:methods] via eval_class_def's last-wins
+  # assignment — so the trait acts as a set of defaults, not an override.
+  # An unresolvable trait name is left as a bare :trait_include, which the
+  # main evaluate() dispatcher no-ops (see its :trait_include case).
+  -> expand_trait_includes(body)
+    if body == nil
+      return body
+    expanded = []
+    body.each -> (expr)
+      if is_ast_node?(expr) && ast_kind(expr) == :trait_include && @traits.has_key?(ast_get(expr, :name))
+        @traits[ast_get(expr, :name)].each -> (m)
+          expanded.push(m)
+      else
+        expanded.push(expr)
+    expanded
+
   -> eval_class_def(node, env)
     # Class re-open: if a class with this name already exists, merge the
     # new methods into the existing class table with last-wins semantics
@@ -2229,7 +2271,7 @@ use target
     if w_class[:class_methods] == nil
       w_class[:class_methods] = {}
 
-    ast_get(node, :body).each -> (expr)
+    expand_trait_includes(ast_get(node, :body)).each -> (expr)
       if ast_kind(expr) == :method_def
         mbody = register_trailing_accessors(expr, ast_get(expr, :body), w_class)
         w_method = {rt: :method, name: ast_get(expr, :name), params: ast_get(expr, :params), body: mbody, w_class: w_class, file: @current_file}
@@ -2578,9 +2620,13 @@ use target
     is_builtin?(method_name)
 
   -> is_a_class?(recv, klass)
-    if type(recv) != "Hash" || !recv.has_key?(:rt) || recv[:rt] != :object
-      return false
-    w_class = recv[:w_class]
+    w_class = nil
+    if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :object
+      w_class = recv[:w_class]
+    else
+      # Primitive receiver (Array/String/Integer/…) — not an :object hash,
+      # so walk its core-class chain instead of bailing out to false.
+      w_class = primitive_runtime_class(recv)
     while w_class != nil
       if w_class == klass || w_class[:name] == klass
         return true

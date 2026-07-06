@@ -13,9 +13,19 @@
   result
 
 s = "1"
-1.upto(10) { |_|
-  puts s
+(1..10).each -> (_)
+  << s
   s = look_and_say(s)
-}
 
-## expect skip currently unsupported in this runtime
+## expect skip compiled-only for now — the Ruby interpreter (which runs this harness) can't execute it; try `bin/tungsten look_and_say.w`
+## expect stdout
+## 1
+## 11
+## 21
+## 1211
+## 111221
+## 312211
+## 13112221
+## 1113213211
+## 31131211131221
+## 13211311123113112211

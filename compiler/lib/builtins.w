@@ -181,8 +181,14 @@
 
   # -- Array methods with blocks --
   when "each"
-    recv.each -> (elem)
-      interp.call_block(block, [elem])
+    # Hash#each yields (key, value) — a fixed single-param wrapper would
+    # silently drop the value, so forward both only for Hash receivers.
+    if type(recv) == "Hash"
+      recv.each -> (k, v)
+        interp.call_block(block, [k, v])
+    else
+      recv.each -> (elem)
+        interp.call_block(block, [elem])
 
     recv
 
@@ -293,6 +299,9 @@
   when "argv"
     interp.argv()
 
+  when "gets"
+    gets()
+
   when "clock"
     clock()
 
@@ -346,7 +355,7 @@ builtin_names = [
   "reject", "reduce", "each_with_index", "map_with_index", "any?", "all?",
   "find", "count", "sum", "times", "keys", "values", "has_key?", "abs", "max", "min",
   "respond_to?", "is_a?", "freeze", "argv", "clock", "runtime_identity",
-  "capture", "system", "env", "ljust", "rjust", "round"
+  "capture", "system", "env", "ljust", "rjust", "round", "gets"
 ]
 
 -> is_builtin?(name)

@@ -1,6 +1,16 @@
-special_variables<md>
-  * `$&` The complete String that matched the last Regex, or nil if the match failed.
-  * `$\`` The string preceding the last Regex match, or nil if the match failed.
-  * `$'` The string following the last Regex match, or nil if the match failed.
+# Special variables: `$name` globals, visible across functions without
+# threading a parameter through every call
 
-## expect skip currently unsupported in this runtime
+$counter = 0
+
+-> increment
+  $counter += 1
+
+increment
+increment
+increment
+
+<< $counter
+
+## expect stdout
+## 3

@@ -10,4 +10,7 @@
 << abs(42)
 << abs(0)
 
-## expect skip currently unsupported in this runtime
+## expect stdout
+## 42
+## 42
+## 0

@@ -4,11 +4,16 @@
   s == s.reverse
 
 words = ["racecar", "hello", "madam", "world", "level", "noon"]
-words.each { |w|
+words.each -> (w)
   if palindrome?(w)
-    puts "[w] is a palindrome"
+    << "[w] is a palindrome"
   else
-    puts "[w] is not a palindrome"
-}
+    << "[w] is not a palindrome"
 
-## expect skip currently unsupported in this runtime
+## expect stdout
+## racecar is a palindrome
+## hello is not a palindrome
+## madam is a palindrome
+## world is not a palindrome
+## level is a palindrome
+## noon is a palindrome

@@ -16,7 +16,7 @@ abundant = 0
 deficient = 0
 perfect = 0
 
-1.upto(20000) ->
+(1..20000).each -> (n)
   s = sum_divisors(n)
 
   if s > n
@@ -30,4 +30,8 @@ perfect = 0
 << "Abundant:  [abundant]"
 << "Perfect:   [perfect]"
 
-## expect skip currently unsupported in this runtime
+## expect timeout 20
+## expect stdout
+## Deficient: 15042
+## Abundant:  4953
+## Perfect:   5

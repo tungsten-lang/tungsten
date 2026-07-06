@@ -15271,7 +15271,7 @@ WValue __w_prime_aks(WValue n) {
 #define WN_clear   W_M5("clear")
 
 /* >5 byte method names — interned at first use via w_string() */
-static WValue WN_empty_q = 0, WN_include_q = 0, WN_has_q = 0, WN_reverse = 0;
+static WValue WN_empty_q = 0, WN_include_q = 0, WN_has_q = 0, WN_reverse = 0, WN_length = 0;
 static WValue WN_last_index = 0, WN_replace_byte_bang = 0;
 static WValue WN_select = 0, WN_values = 0, WN_delete = 0, WN_has_key_q = 0;
 static WValue WN_starts_with_q = 0, WN_ends_with_q = 0, WN_replace = 0;
@@ -15368,6 +15368,7 @@ static void w_init_method_names(void) {
     WN_last_index   = w_string("last_index");
     WN_replace_byte_bang = w_string("replace_byte!");
     WN_reverse      = w_string("reverse");
+    WN_length       = w_string("length");
     WN_select       = w_string("select");
     WN_reject       = w_string("reject");
     WN_compact      = w_string("compact");
@@ -16566,6 +16567,34 @@ static WValue w_ic_string_chars(WValue r, WValue *a, int c) {
         p += clen;
         remaining -= clen;
     }
+    return result;
+}
+
+/* Reverse by codepoint, not by byte — a byte-reverse would scramble every
+ * multi-byte UTF-8 character (mirrors the codepoint-boundary walk in
+ * w_ic_string_chars just above). */
+static WValue w_ic_string_reverse(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    char buf[6]; const char *str; size_t str_len;
+    w_str_data(r, buf, &str, &str_len);
+    char *out = malloc(str_len + 1);
+    const unsigned char *p = (const unsigned char *)str;
+    size_t remaining = str_len;
+    size_t write_pos = str_len;
+    while (remaining > 0) {
+        int clen = 1;
+        if (*p >= 0xF0) clen = 4;
+        else if (*p >= 0xE0) clen = 3;
+        else if (*p >= 0xC0) clen = 2;
+        if ((size_t)clen > remaining) clen = (int)remaining;
+        write_pos -= clen;
+        memcpy(out + write_pos, p, clen);
+        p += clen;
+        remaining -= clen;
+    }
+    out[str_len] = '\0';
+    WValue result = w_string_n(out, str_len);
+    free(out);
     return result;
 }
 
@@ -19280,6 +19309,8 @@ static WICEntry w_ic_string_table[] = {
     {0, w_ic_string_matchop},   /* WN_matchop — Phase 7+q */
     {0, w_ic_string_matchop},   /* WN_match_q — same handler */
     {0, w_ic_string_rindex},    /* WN_rindex */
+    {0, w_ic_string_reverse},   /* WN_reverse */
+    {0, w_ic_string_length},    /* WN_length — alias for size */
     {0, NULL}
 };
 
@@ -20153,6 +20184,8 @@ static void w_init_ic_tables(void) {
     w_ic_string_table[34].name = WN_matchop;     /* Phase 7+q */
     w_ic_string_table[35].name = WN_match_q;
     w_ic_string_table[36].name = WN_rindex;
+    w_ic_string_table[37].name = WN_reverse;
+    w_ic_string_table[38].name = WN_length;
     /* Int */
     w_ic_int_table[0].name    = WN_to_s;
     w_ic_int_table[1].name    = WN_abs;

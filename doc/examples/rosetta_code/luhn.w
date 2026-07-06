@@ -1,13 +1,27 @@
-# https://rosettacode.org/wiki/Luhn_test_of_credit_card_numbers#Ruby
+# Luhn test of credit card numbers
 
 + String
-  #  @note to_i.digits fails for cases with leading zeros
   -> luhn?
-    scan(/\d/).reverse
-              .each_slice(2)
-              .sum ->(i, k = 0) i.to_i + (k.to_i * 2).digits.sum
-              .modulo(10).zero?
+    digits = chars.map -> (c) c.to_i
+    sum = 0
+    alt = false
+    i = digits.size - 1
+    while i >= 0
+      n = digits[i]
+      if alt
+        n *= 2
+        n -= 9 if n > 9
+      sum += n
+      alt = !alt
+      i -= 1
+    sum % 10 == 0
 
-%s[49927398716 49927398717 1234567812345678 1234567812345670]:luhn?
+["49927398716", "49927398717", "1234567812345678", "1234567812345670"].each -> (s)
+  << "[s]: [s.luhn?]"
 
-## expect skip currently unsupported in this runtime
+## expect skip compiled-only for now — the Ruby interpreter (which runs this harness) can't execute it; try `bin/tungsten luhn.w`
+## expect stdout
+## 49927398716: true
+## 49927398717: false
+## 1234567812345678: false
+## 1234567812345670: true

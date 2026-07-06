@@ -8,7 +8,7 @@
     return true
   if name in ("w_system" "w_exit" "w_raise" "w_env")
     return true
-  if name in ("w_goroutine_spawn" "w_thread_spawn" "w_flush" "w_read_bytes")
+  if name in ("w_goroutine_spawn" "w_thread_spawn" "w_flush" "w_read_bytes" "w_read_line_stdin")
     return true
   if name == "w_slab_freeze_safe"
     return true

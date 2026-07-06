@@ -11,11 +11,15 @@
     false
 
 years = [1900, 2000, 2024, 2025, 2100]
-years.each { |y|
+years.each -> (y)
   if leap?(y)
-    puts "[y] is a leap year"
+    << "[y] is a leap year"
   else
-    puts "[y] is not a leap year"
-}
+    << "[y] is not a leap year"
 
-## expect skip currently unsupported in this runtime
+## expect stdout
+## 1900 is not a leap year
+## 2000 is a leap year
+## 2024 is a leap year
+## 2025 is not a leap year
+## 2100 is not a leap year

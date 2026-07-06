@@ -1,92 +1,34 @@
-use io
-use argv
+# Polymorphism: a shared method (describe) dispatches to whichever
+# override of area each runtime type provides — the caller never checks
+# what kind of Shape it has.
 
-+ Point
-  rw :x, :y
++ Shape
+  -> area
+    0
 
-  -> new(@x=0, @y=0)
-  -> to_s "Point at [x],[y]"
+  -> describe
+    << "[self.class_name]: area = [area]"
 
-+ Circle < Point
-  rw :r
++ Circle < Shape
+  -> new(@radius) ro
+  -> area
+    3.14159265 * radius * radius
 
-  -> new(@x=0, @y=0, @r=0)
-  -> to_s "Circle at [x],[y] with radius [r]"
++ Rectangle < Shape
+  -> new(@width, @height) ro
+  -> area
+    width * height
 
-p Point.new
++ Square < Shape
+  -> new(@side) ro
+  -> area
+    side * side
 
-p = Point.new(1, 2)
-io p
-   p.x
+shapes = [Circle(3), Rectangle(4, 5), Square(6)]
+shapes.each -> (s)
+  s.describe
 
-p.y += 1
-io p
-
-# Create a circle
-c = Circle.new(4,5,6)
-
-# copy it
-d = c.dup
-d.r = 7.5
-
-put  c
-puts d
-
-### with out ###
-
-out p
-    p.x
-
-    c
-    d
-
-### with log ###
-
-log p
-    p.x
-
-    c
-    d
-
-err msg
-
-### with << ###
-
-<< p
-   p.x
-
-   c
-   d
-
-<! msg
-<~ msg # debug
-
-### with _< ###
-
-_< p
-   p.x
-
-   c
-   d
-
-_! err
-
-### with <= ###
-
-<= p
-   p.x
-
-   c
-   d
-
-### with ~~ ###
-
-~~ p
-   p.x
-
-   c
-   d
-
-   "Hello World"
-
-## expect skip currently unsupported in this runtime
+## expect stdout
+## Circle: area = 28.27433385
+## Rectangle: area = 20
+## Square: area = 36

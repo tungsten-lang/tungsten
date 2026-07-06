@@ -6,6 +6,7 @@ doors = bool[100]
 
 0..99 -> << "Door [i + 1] is open" if doors[i]
 
+## expect skip compiled-only for now — the Ruby interpreter (which runs this harness) can't execute it; try `bin/tungsten 100_doors.w`
 ## expect stdout
 ## Door 1 is open
 ## Door 4 is open

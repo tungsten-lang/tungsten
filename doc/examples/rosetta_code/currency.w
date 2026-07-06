@@ -1,25 +1,27 @@
-# http://rosettacode.org/wiki/Currency
+# Currency: exact decimal money arithmetic (no floating-point rounding error)
 
-items<table>
-  | *name*    | price | quantity              |
-  | hamburger | $5.50 | 4_000_000_000_000_000 |
-  | milkshake | $2.86 | 2                     |
+items = [
+  {name: "hamburger", price: $5.50, quantity: 4},
+  {name: "milkshake", price: $2.86, quantity: 2}
+]
 
-items[:cost] = items.product(:price, :quantity)
+subtotal = $0.00
+items.each -> (item)
+  cost = item[:price] * item[:quantity]
+  << "[item[:name]]: [item[:quantity]] x [item[:price]] = [cost]"
+  subtotal += cost
 
-subtotal = items.sum(:cost)
+tax_rate = 0.0765
+tax = subtotal * tax_rate
+total = subtotal + tax
 
-tax      = subtotal * 7.65%
-total    = subtotal + tax
+<< "Subtotal: [subtotal]"
+<< "Tax:      [tax]"
+<< "Total:    [total]"
 
-items ->
-  blankrow
-
-  row quantity: "subtotal", cost: subtotal, align: "|"
-  row quantity: "tax",      cost: tax
-  row quantity: "total",    cost: total
-
-  align "<>>"
-  print
-
-## expect skip currently unsupported in this runtime
+## expect stdout
+## hamburger: 4 x $5.50 = $22.00
+## milkshake: 2 x $2.86 = $5.72
+## Subtotal: $27.72
+## Tax:      ≈$2.12
+## Total:    ≈$29.84

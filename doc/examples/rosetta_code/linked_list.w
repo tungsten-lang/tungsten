@@ -19,7 +19,9 @@
       current = current.next
 
   -> to_s
-    map(:to_s).join(" -> ")
+    parts = []
+    each -> (v) parts.push(v.to_s)
+    parts.join(" -> ")
 
 list = LinkedList()
 list.prepend(3)
@@ -28,4 +30,6 @@ list.prepend(1)
 
 << list
 
-## expect skip currently unsupported in this runtime
+## expect skip compiled-only for now — the Ruby interpreter (which runs this harness) can't execute it; try `bin/tungsten linked_list.w`
+## expect stdout
+## 1 -> 2 -> 3

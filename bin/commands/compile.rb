@@ -16,6 +16,16 @@ MACOS = RUBY_PLATFORM =~ /darwin/
 # (w_method_call_cached etc.).
 RELEASE_MODE = ARGV.include?("--release")
 ARGV.delete("--release") if RELEASE_MODE
+# LTO policy: the compiled `compile` backend links a fast native-object runtime
+# archive by default and does whole-program LTO only for --release/--native/--lto.
+# Strip those here (OptionParser would reject --lto) and forward them verbatim to
+# the fast path so `tungsten -o file.w --release` reaches the backend's LTO path.
+LTO_MODE = ARGV.delete("--lto") ? true : false
+NATIVE_MODE = ARGV.delete("--native") ? true : false
+LTO_FORWARD = []
+LTO_FORWARD << "--release" if RELEASE_MODE
+LTO_FORWARD << "--lto" if LTO_MODE
+LTO_FORWARD << "--native" if NATIVE_MODE
 LTO_FLAG = RELEASE_MODE ? "-flto=full" : "-flto=thin"
 
 # Floating-point math mode. Unlike --release (which only tunes Ruby-side LTO),
@@ -651,7 +661,7 @@ when ".w"
     # Fast path: delegate to compiled binary
     cmd = [COMPILER]
     if out_path
-      cmd += ["compile", script, "--out", out_path, "--intern", intern_algo] + MATH_MODE_FLAGS
+      cmd += ["compile", script, "--out", out_path, "--intern", intern_algo] + MATH_MODE_FLAGS + LTO_FORWARD
     else
       cmd += ["run", script, *args]
     end

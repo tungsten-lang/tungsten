@@ -47,6 +47,7 @@ wit_mode       = false
 jit_mode       = false
 hot_mode       = false
 no_lto         = false
+explicit_lto   = false
 frame_pointers = false
 keep_ll        = false
 emit_ll_only   = false
@@ -91,6 +92,7 @@ while i < args.size()
     << "  --emit-wire      Emit WIRE IR text instead of LLVM IR"
     << "  --intern ALGO    Static slab encoding (raw or zstd)"
     << "  --no-lto         Disable link-time optimization"
+    << "  --lto            Whole-program LTO (leaner binary; default links a fast native runtime archive)"
     << "  --frame-pointers Keep frame pointers (for profiling/debugging)"
     << "  --release        Skip debug safety checks and stacktrace metadata"
     << "  --fast, -fast    Fast FP: FMA + reassociation + reciprocals + nnan/ninf"
@@ -111,6 +113,8 @@ while i < args.size()
     emit_wire = true
   elsif arg == "--no-lto"
     no_lto = true
+  elsif arg == "--lto"
+    explicit_lto = true
   elsif arg == "--intern"
     i += 1
     intern_algo = args[i]
@@ -574,6 +578,17 @@ while i < args.size()
   lexchars_needed = ll_text_has(ll_probe_text, "lchs") || ll_text_has(ll_probe_text, "lexchars")
   link_started_at = clock
   needs_zstd = ll_needs_zstd_path(ll_path)
+  # LTO is opt-in: whole-program LTO (lean binary, slow link) only for
+  # --release / --native / --lto; the default is a native-object runtime
+  # archive (fatter binary, ~0.1s link vs ~5s recompiling the C runtime).
+  doing_lto = (release_mode || explicit_lto) && !no_lto
+  # Fast dev link (default): reuse the cached native-object runtime archive
+  # rather than recompiling the ~28k-line runtime every build. runtime.o's weak
+  # companion stubs keep the gated ssmr/lexchar/metal/blas adds below valid.
+  # Configs the shared archive can't represent (cross-target, frame pointers,
+  # zstd) fall through to the from-source path.
+  if runtime_objs == nil && !doing_lto && cross_target == "" && !frame_pointers && !needs_zstd
+    runtime_objs = dev_runtime_archive(verbose)
   clang_opt = env("TUNGSTEN_CLANG_OPT")
   if clang_opt == nil || clang_opt == ""
     clang_opt = "-O3"
@@ -590,8 +605,8 @@ while i < args.size()
     clang_cmd << march_flags()
   clang_cmd << " -fmerge-all-constants "
 
-  if !frame_pointers
-    clang_cmd << "-flto " unless no_lto
+  if !frame_pointers && doing_lto
+    clang_cmd << "-flto "
 
   if frame_pointers
     clang_cmd << "-fno-omit-frame-pointer "
@@ -627,14 +642,17 @@ while i < args.size()
       clang_cmd << zcf
       clang_cmd << " "
 
+  # -I the runtime dir on BOTH paths: the native archive omits the .c sources,
+  # but the gated companions (ssmr/metal/…) and any bit C includes below still
+  # #include runtime.h and need the header search path.
+  runtime_dir = resolve_runtime_dir
+  clang_cmd << "-I"
+  clang_cmd << runtime_dir
+  clang_cmd << " "
   if runtime_objs != nil
     clang_cmd << runtime_objs
     clang_cmd << " "
   else
-    runtime_dir = resolve_runtime_dir
-    clang_cmd << "-I"
-    clang_cmd << runtime_dir
-    clang_cmd << " "
     clang_cmd << runtime_dir
     clang_cmd << "runtime.c "
 
@@ -716,6 +734,59 @@ while i < args.size()
   log_phase(verbose, "clang", link_started_at)
   result == true
 
+# Persistent NATIVE-object runtime archive for fast dev links. Linking against
+# this skips recompiling the ~28k-line C runtime on every build (~5s -> ~0.1s).
+# runtime.o keeps weak stubs for the gated companions, so link_binary still adds
+# the strong ssmr/lexchar/metal/blas sources when a program needs them. The
+# archive is rebuilt whenever any base runtime source is newer than it. The
+# whole-program-LTO builds (--release / --native / --lto) skip this and rebuild
+# the runtime from source for a lean, cross-optimized binary.
+-> dev_runtime_archive(verbose = false)
+  runtime_dir = resolve_runtime_dir
+  archive = "/tmp/tungsten-runtime-native.a"
+  ev = runtime_event_source
+  evo = ev.replace(".c", ".o")
+
+  # Freshness: reuse the cached archive iff it is newer than every base source.
+  bases = ["runtime.c", "runtime.h", "wvalue.h", ev, "aks.c", "tls_stub.c"]
+  fresh = StringBuffer(0)
+  fresh << "test -e "
+  fresh << archive
+  bi = 0
+  while bi < bases.size()
+    fresh << " && test "
+    fresh << archive
+    fresh << " -nt "
+    fresh << runtime_dir
+    fresh << bases[bi]
+    bi += 1
+  if file?(archive) && system(fresh.to_s()) == true
+    return archive
+
+  if verbose
+    << "Building native runtime archive (one-time)..."
+  cc = StringBuffer(0)
+  cc << "cd "
+  cc << runtime_dir
+  cc << " && "
+  cc << host_c_compiler()
+  cc << " -O3 -DNDEBUG "
+  cc << march_flags()
+  cc << " -c runtime.c "
+  cc << ev
+  cc << " aks.c tls_stub.c && "
+  cc << archive_tool()
+  cc << " rcs "
+  cc << archive
+  cc << " runtime.o "
+  cc << evo
+  cc << " aks.o tls_stub.o && rm -f runtime.o "
+  cc << evo
+  cc << " aks.o tls_stub.o"
+  if system(cc.to_s()) != true
+    return nil
+  archive
+
 -> compile_runtime_objs(tmp_dir, needs_zstd = false, verbose = false)
   # Compile all runtime .c files into a single combined .o
   runtime_dir = resolve_runtime_dir
@@ -742,7 +813,7 @@ while i < args.size()
     cc << ocf
     cc << " "
 
-  if !no_lto && !frame_pointers
+  if (release_mode || explicit_lto) && !no_lto && !frame_pointers
     cc << "-flto "
 
   if frame_pointers

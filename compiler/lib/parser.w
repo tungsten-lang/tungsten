@@ -1911,6 +1911,10 @@ use ../../core/token
     # Symbol array (%i[one two three])
     if at_type?(T_SYMBOL_ARRAY)
       return Tungsten:AST:SymbolArray.new(advance_value())
+    # Hypercomplex literal: %h4-f32[1 2 3 4] -> Quaternion<f32>.new([1, 2, 3, 4]).
+    # Desugars to a generic constructor call, reusing the whole construction path.
+    if at_type?(T_HYPER_ARRAY)
+      return build_hyper_literal(advance_value())
 
     # MAP operator (/method_name) — consume the following identifier
     if at_type?(T_MAP)
@@ -3400,6 +3404,57 @@ use ../../core/token
         advance()
     expect_type(T_GT)
     params
+
+  # Desugar a %h<dim>-<type>[...] literal token (payload [dim, type, comps])
+  # into `<Class><scalar>.new([components])`, reusing the generic-construction
+  # path. dim -> base class; a Metal vector type (float4 etc.) maps to its
+  # scalar element, and at dim 4 selects the scalar-last QuaternionMetal.
+  -> build_hyper_literal(payload)
+    dim = payload[0].to_i()
+    info = hyper_class_and_scalar(dim, payload[1])
+    comps = payload[2]
+    nodes = []
+    ci = 0
+    while ci < comps.size()
+      nodes.push(hyper_component_node(comps[ci]))
+      ci += 1
+    cr = Tungsten:AST:ClassRef.new(info[0])
+    cr.type_args = [info[1]]
+    Tungsten:AST:Call.new(cr, "new", [Tungsten:AST:Array.new(nodes)], nil)
+
+  -> hyper_class_and_scalar(dim, type)
+    base = "Complex"
+    if dim == 4
+      base = "Quaternion"
+    elsif dim == 8
+      base = "Octonion"
+    elsif dim == 16
+      base = "Sedenion"
+    elsif dim == 32
+      base = "Trigintaduonion"
+    elsif dim == 64
+      base = "Sexagintaquatronion"
+    elsif dim == 128
+      base = "Centumduodetrigintanion"
+    elsif dim == 256
+      base = "Ducentiquinquagintasexion"
+    scalar = type
+    if type.starts_with?("float") || type.starts_with?("half") || type.starts_with?("bfloat")
+      scalar = "f32"
+      if type.starts_with?("half")
+        scalar = "f16"
+      elsif type.starts_with?("bfloat")
+        scalar = "bf16"
+      if dim == 4
+        base = "QuaternionMetal"
+    [base, scalar]
+
+  -> hyper_component_node(s)
+    if s.include?(".")
+      return Tungsten:AST:Decimal.new(s)
+    if s.to_i().to_s() == s
+      return Tungsten:AST:Int.new(parse_int_value(s), nil, s)
+    Tungsten:AST:Var.new(s)
 
   # Class-body `with NAME in (type1 type2 …)` constraint clause.
   # Whitespace-delimited typename list. Registers the constraint on

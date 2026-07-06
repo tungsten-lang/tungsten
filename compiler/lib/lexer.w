@@ -64,6 +64,7 @@ use ../../languages/tungsten/lexers/regex_helpers
   # the chunker by tracking `has_lower` as identifier-extend bytes
   # are consumed.
   t_constant     = tag | (0x1A << 38)
+  t_hyper_array  = tag | (0x1B << 38)
 
   loop
     if pos >= count
@@ -720,6 +721,17 @@ use ../../languages/tungsten/lexers/regex_helpers
             tokens[tc] = t_word_array | ((pos - start) << 26) | (start << 2)
           else
             tokens[tc] = t_symbol_array | ((pos - start) << 26) | (start << 2)
+          tc++
+          next
+        # `%h<dim>-<type>[…]` hypercomplex literal — `%h` then a digit; scan to
+        # the closing `]` exactly like %w/%i (materialize splits dim/type/comps).
+        if c2 == :-h && c3 >= 48 && c3 <= 57
+          pos += 2
+          while pos < count && ((lc[pos] >> 18) & cp_mask) != :-]
+            pos++
+          if pos < count
+            pos++
+          tokens[tc] = t_hyper_array | ((pos - start) << 26) | (start << 2)
           tc++
           next
 
@@ -2394,6 +2406,56 @@ use ../../languages/tungsten/lexers/regex_helpers
       @col += 1
     raise compile_error(:E_LEX_UNTERMINATED_PI, "Unterminated %i[] literal", @file, @line, @col)
 
+  -> scan_hyper_array
+    # Already consumed "%h"; @pos is at the first dim digit. Read
+    # <dim> '-' <type> '[' then space/tab/newline-separated components until ']'.
+    dim = StringBuffer(4)
+    while @pos < @char_count && @chars[@pos] != "-"
+      dim << @chars[@pos]
+      @pos += 1
+      @col += 1
+    if @pos < @char_count
+      @pos += 1
+      @col += 1
+    type = StringBuffer(8)
+    while @pos < @char_count && @chars[@pos] != "\["
+      type << @chars[@pos]
+      @pos += 1
+      @col += 1
+    if @pos < @char_count
+      @pos += 1
+      @col += 1
+    components = []
+    word = StringBuffer(16)
+    while @pos < @char_count
+      ch = @chars[@pos]
+      if ch == "]"
+        @pos += 1
+        @col += 1
+        if word.size() > 0
+          components.push(word.to_s())
+        emit(:HYPER_ARRAY, [dim.to_s(), type.to_s(), components])
+        return nil
+      if ch == " " || ch == "\t"
+        if word.size() > 0
+          components.push(word.to_s())
+          word = StringBuffer(16)
+        @pos += 1
+        @col += 1
+        next
+      if ch == "\n"
+        if word.size() > 0
+          components.push(word.to_s())
+          word = StringBuffer(16)
+        @pos += 1
+        @line += 1
+        @col = 1
+        next
+      word << ch
+      @pos += 1
+      @col += 1
+    raise compile_error(:E_LEX_UNTERMINATED_PH, "Unterminated %h[] literal", @file, @line, @col)
+
   -> scan_heredoc
     # @pos is at '<', '<<~' detected. Consume <<~ and delimiter.
     @pos += 3
@@ -2755,6 +2817,7 @@ use ../../languages/tungsten/lexers/regex_helpers
     when :SWAP then 155
     when :IP6 then 156
     when :CIDR6 then 157
+    when :HYPER_ARRAY then 158
     else 0
 
   -> emit_at(type, value, off)
@@ -2864,6 +2927,9 @@ use ../../languages/tungsten/lexers/regex_helpers
     when 21
       reset_scan_position(off + 3)
       scan_symbol_array()
+    when 27
+      reset_scan_position(off + 2)
+      scan_hyper_array()
     when 22
       materialize_magic(raw, off)
     when 23

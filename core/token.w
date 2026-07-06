@@ -208,6 +208,9 @@ T_SWAP            = 155
 T_IP6             = 156
 T_CIDR6           = 157
 
+# `%h<dim>-<type>[c0 c1 …]` hypercomplex literal, e.g. `%h4-f32[1 2 3 4]`.
+T_HYPER_ARRAY     = 158
+
 + Token
   # Force-load helper — referencing this from a caller triggers the
   # autoload pass to load core/token.w, which in turn registers Token

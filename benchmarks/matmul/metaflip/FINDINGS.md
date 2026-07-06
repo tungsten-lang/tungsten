@@ -224,6 +224,89 @@ whatever the CPU fleet finds.
   decomposition of ⟨5,5,5⟩ over GF(2) (predates the record table correction
   above but the rank-93 finding itself was never in question).
 
+## 2026-07-05 (evening): three new levers — two structural negatives + a tool gain
+
+After the 7/5 rigidity pass (frontier schemes locally rigid; ⟨4,4,4⟩=47
+flip-isolated, ⟨5,5,5⟩=93 flip-poor), three genuinely-new levers were built and
+run in parallel. None broke a wall (both remain open world records), but two
+produced *structural* negatives deeper than "the fleet plateaus," and one
+improved the C3 tool. Live confirmation of the walls on the current files: the
+47 has **0** flip-eligible pairs (47/47 terms mutually isolated, 0 reduction
+pairs); the 93 has **14** flip pairs (74/93 isolated).
+
+### Flip-richness-seeking search — FALSIFIED (the key result). DO NOT re-run.
+
+Hypothesis: the search has only ever minimized (rank, then bits), never flip-
+CONNECTIVITY, so it dies in flip-poor corners; an energy `E = rank + λ·(#flip-
+isolated terms)` should steer to flip-rich 93s where a descent channel to 92
+exists. Python prototype (`scratchpad/flipsearch.py` + `e*.py`), every scheme
+exact-validated (`recon==T`):
+
+- **0 reducible pairs (direct 93→92 channels) across ~1.71M rank-93 states**
+  inspected, INCLUDING the maximally flip-rich ones. A 93→92 reduction requires
+  a pair sharing 2 axes; one never appears. 160-dive aggregate min-rank
+  distribution {93: 102, 94: 39, 95: 14, 96: 5} — none below 93.
+- Enrichment is real but marginal (lateral flip-walk raises flip-pairs 14→19,
+  lowers isolated 74→69) and lives ABOVE 93 (rank 95: ~29 pairs; rank 105: ~48).
+  It does NOT survive the dive: enrich-then-dive from the richest rank-105 basins
+  (48 pairs) still collapses to a channel-free 93 (~19 pairs). The reducer is
+  proven working (105→93 in 12 consecutive valid reductions) — then stops dead.
+- `E = rank + λ·isolated` never beats rank-only (both reach 93, neither 92, no
+  winning λ ∈ {0.05, 0.1, 0.25}); iso-greedy steering ≈ uniform.
+- **Meaning: 92 is not one reduction from ANY reachable 93.** This is why every
+  from-93 push (incl. the earlier 54.6B-move seed-92 run) and every from-naive
+  descent fail — the entire reachable rank-93 level set is channel-free, and
+  flip-richness cannot manufacture a channel. The flip + plus + reduction family
+  is exhausted for 5×5 with a *structural* reason, not a budget one. (Scope: does
+  not cover the cross-format extend/project edges — already "mis-aimed" for
+  squares per the meta-flip README.)
+
+### C3-symmetric FROM NAIVE — any-axis plus-transition: 102 → 97 (tool gain)
+
+`sym_gen2.py`'s C3 quotient walker run from the naive rank-125 scheme on 5×5
+(the from-naive symmetric descent had never been cleanly run before — prior C3
+runs were seeded ON the flip-poor 93):
+
+- W-only plus-transition (original) floors at **102**; generalizing the plus to
+  a random U/V/W-axis split floors at **97** — a clean 5-rank gain, exactly
+  validated (`recon==T`, C3-symmetric). New tool: **`sym_gen2_anyaxis.py`**
+  (only `gen()`'s plus differs, 33 lines).
+- **97 is a hard floor** (recorded 3395×, rank 96 never appeared once; robust
+  across bands {2..120}, plusper {10k..200k}, marathons to ~600M moves/dive).
+  naive→93 is a genuine MOVE-SET gap needing MP's exact algorithm, not tuning —
+  consistent with the reduction-channel exhaustion above (even reaching 93 would
+  not yield 92).
+- **Band guidance is INVERTED for the C3 walker** vs the asymmetric one: tight
+  bands 2–4 STALL at 122–125 (orbit-inserts move rank in steps of ~3, so a tight
+  band resets before any plus-excursion can explore); **large bands 15–40 are
+  optimal**. The sawtooth schedule stalls at 125 from naive (tiny start-band +
+  huge escalation quanta never reach a productive band).
+
+### Large-k SAT surgery for ⟨4,4,4⟩→46 — k=5 all-UNSAT (long-shot, live)
+
+Extended the validated k≤4 `sat_surgery.py` to k=5–8 with guided subset
+selection (smallest joint support + factor-adjacency): new tool
+**`sat_surgery_hik.py`** (--selftest passes; k≤4 UNSAT reproduced; a planted k=5
+merge is found). A k→(k−1) hit anywhere = rank 46. Also validated the *global*
+rank-existence encoders (`sat_rank.py` / `sat_rank_cnf.py`, previously never
+run): correct (z3 gives 2×2 rank-7 sat, rank-6 unsat) but **monolithic global
+SAT is out at 4×4 scale** — cryptominisat5 could not find even the *known-SAT*
+rank-47 in 280s (matches the literature: the analogous 3×3 rank-23 SAT cost
+~35 CPU-years just to *find* solutions).
+
+- **k=5 and k=6: all 3,628 guided subsets UNSAT** across the 3 sparsest 47s,
+  zero timeouts (k=5 = 1,780: at_f2 687 + cpu16 532 + cpu10 561; k=6 = 1,848:
+  676 + 559 + 613). Strengthens 4×4 local minimality from k≤4 to **k≤6** — no
+  ≤6-term chunk of a known 47 re-decomposes with one fewer term.
+- k=7–8 grinding as a deeper probe (beam 700–1000, perk 350–500, 45s/solve);
+  coverage is beam-capped so these need not exhaust. The one live long-shot;
+  a hit is the rank-46 record. *(Update with the k=7/8 verdict if/when it lands.)*
+
+**Net:** ⟨5,5,5⟩→92 is now more definitively closed for the flip-graph family
+(the 0-channel result supplies the structural reason); ⟨4,4,4⟩→46 remains a live
+long-shot only via large-k surgery. New durable tools: `sat_surgery_hik.py`,
+`sym_gen2_anyaxis.py`.
+
 ## Corrections (superseded claims, kept for context)
 
 - "⟨7,7,7⟩ = 250 is the GF(2) record" — **wrong**, see the record table note

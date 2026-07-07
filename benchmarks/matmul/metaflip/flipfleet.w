@@ -141,11 +141,23 @@ while w < J
 rankhist = i64[80]
 opshist = i64[80]
 histn = 0 ## i64
+# fleet_best/fleet_best_den = the best (rank, density) EVER seen (monotonic; it
+# survives a fleet-wide sawtooth wrap, and is what we log/seed the GPU from).
 fleet_best = 999 ## i64
-fleet_best_den = 999999999 ## i64   # density (mask popcount) of the fleet-best scheme
+fleet_best_den = 999999999 ## i64
 best_ops = 0 ## i64
 best_bitsv = 0 ## i64
 best_valid = 1 ## i64
+# cur_rank = the elite's CURRENT best rank (the decomposition the fleet is working
+# right now; jumps back to naive after a wrap). gband = the global band = the
+# elite's band, which every explorer follows. band_moves/rank_moves = per-thread
+# moves spent at the current band / current rank (for the TUI).
+cur_rank = 999 ## i64
+gband = 1 ## i64
+prev_gband = 0 ## i64
+band_moves = 0 ## i64
+rank_moves = 0 ## i64
+prev_rank = 999 ## i64
 newbests = 0 ## i64
 reseeds = 0 ## i64
 naive_wraps = 0 ## i64
@@ -352,63 +364,92 @@ while round < 2000000000
     threads[w].join
     w += 1
 
-  # ---- fleet best over the round: lexicographic (rank, density) ----
-  best = 999 ## i64
-  bestden = 999999999 ## i64
+  # ---- ONE coordinated searcher. Walker 0 is the ELITE/leader: it carries the
+  # sawtooth, holds the current-best decomposition, and its band is the global
+  # band. Walkers 1..J-1 are EXPLORERS that hammer the elite's decomposition. ----
+
+  # best-of-round over ALL walkers (lexicographic rank, then density)
   bestw = 0 ## i64
-  w = 0
+  brank = read_best_rank(sts[0]) ## i64
+  bden = best_bits(sts[0]) ## i64
+  w = 1
   while w < J
     r = read_best_rank(sts[w]) ## i64
     d = best_bits(sts[w]) ## i64
     better = 0 ## i64
-    if r < best
+    if r < brank
       better = 1
-    if r == best
-      if d < bestden
+    if r == brank
+      if d < bden
         better = 1
     if better == 1
-      best = r
-      bestden = d
+      brank = r
+      bden = d
       bestw = w
     w += 1
 
-  # ---- EXPLOIT: new lexicographic (rank, density) best -> reseed the others onto it.
-  # A strictly lower rank wins; at equal rank, a lower-density (fewer-ops) scheme wins,
-  # so density improvements (incl. ones the GPU scout suggests) propagate through the fleet. ----
-  exploit = 0 ## i64
-  if best < fleet_best
-    exploit = 1
-  if best == fleet_best
-    if bestden < fleet_best_den
-      exploit = 1
-  if exploit == 1
-    fleet_best = best
-    fleet_best_den = bestden
+  # if an explorer beat the elite, the elite ADOPTS it — this resets the elite's
+  # sawtooth to band 1, exactly like an in-place descent would.
+  if bestw != 0
+    z = reseed_from(sts[0], sts[bestw], round * 131 + 7)
+    reseeds += 1
+  cur_rank = read_best_rank(sts[0])
+  cur_den = best_bits(sts[0]) ## i64
+  gband = sts[0][10091 + 3]
+
+  # best-ever bookkeeping (monotonic; survives a fleet wrap). This is the record
+  # we show, log, and (with --gpu) seed the density scout from.
+  everbetter = 0 ## i64
+  if cur_rank < fleet_best
+    everbetter = 1
+  if cur_rank == fleet_best
+    if cur_den < fleet_best_den
+      everbetter = 1
+  if everbetter == 1
+    fleet_best = cur_rank
+    fleet_best_den = cur_den
+    best_bitsv = cur_den
+    best_ops = cur_den - cur_rank - OUTPUTS
+    best_valid = verify_best(sts[0])
     newbests += 1
-    best_bitsv = bestden
-    best_ops = best_bitsv - best - OUTPUTS
-    best_valid = verify_best(sts[bestw])
-    src = sts[bestw]
+    if GPU == 1
+      gd = dump_scheme(sts[0], GSEED)
+
+  # fleet-wide sawtooth wrap: when the leader's sawtooth exhausts (CYCLEOUT), the
+  # WHOLE fleet abandons this decomposition and restarts from fresh naive seeds.
+  if read_cycled(sts[0]) == 1
     w = 0
     while w < J
-      if w != bestw
-        z = reseed_from(sts[w], src, round * 131 + w + 7)
-        reseeds += 1
-      w += 1
-
-  # ---- EXPLORE: any walker at its sawtooth CYCLEOUT -> fresh naive ----
-  w = 0
-  while w < J
-    if read_cycled(sts[w]) == 1
       z = init_naive(sts[w], round * 977 + w * 13 + 1, DSLACK, CYCLES)
-      naive_wraps += 1
-    w += 1
+      w += 1
+    naive_wraps += 1
+    gband = 1
+  else
+    # explorers reseed onto the leader's best EVERY round (full force on one seed),
+    # at the leader's band (follow-the-leader).
+    w = 1
+    while w < J
+      z = reseed_from(sts[w], sts[0], round * 263 + w * 17 + 3)
+      sts[w][10091 + 3] = gband
+      reseeds += 1
+      w += 1
+  cur_rank = read_best_rank(sts[0])
 
-  # ---- GPU scout: keep its seed at the frontier, pull any improvement it finds ----
+  # ---- per-thread move counters (moves spent at the current band / rank) ----
+  if gband != prev_gband
+    band_moves = 0
+  else
+    band_moves = band_moves + STEPS
+  prev_gband = gband
+  if cur_rank < prev_rank
+    rank_moves = 0
+  else
+    rank_moves = rank_moves + STEPS
+  prev_rank = cur_rank
+
+  # ---- GPU scout: its seed (dumped on each new best-ever) is the record; pull any
+  # lexicographically better candidate it returns into an explorer to be adopted ----
   if GPU == 1
-    if fleet_best < 999
-      if (round % 8) == 0
-        gd = dump_scheme(sts[bestw], GSEED)
     gc = read_file(GBEST)
     grank = 0 ## i64
     gden = 0 ## i64
@@ -487,6 +528,7 @@ while round < 2000000000
   << "\e[1;33m  flipfleet\e[0m  ⟨5,5,5⟩ GF(2)      \e[2mthreads\e[0m " + J.to_s() + "   \e[2mround\e[0m " + round.to_s() + "   \e[2melapsed\e[0m " + el.to_s() + "s   \e[2mmoves\e[0m " + moves.to_s()
   << ""
   << "  \e[1;32mfleet best  rank " + fleet_best.to_s() + "\e[0m   \e[2m(+" + gap.to_s() + " to record " + RECORD.to_s() + ")\e[0m      \e[1mops " + best_ops.to_s() + "\e[0m \e[2m(naive " + NAIVE_OPS.to_s() + ")\e[0m   \e[2mbits\e[0m " + best_bitsv.to_s() + "   \e[2mvalid\e[0m " + best_valid.to_s()
+  << "  \e[36mleader\e[0m  working rank " + cur_rank.to_s() + "    \e[2mband\e[0m " + gband.to_s() + "    \e[2mmoves@band\e[0m " + band_moves.to_s() + "    \e[2mmoves@rank\e[0m " + rank_moves.to_s()
   << ""
   if histn > 1
     << "  \e[32mrank " + spark(rankhist, histn, RECORD, 125, 60) + "\e[0m  \e[2m125→" + fleet_best.to_s() + "\e[0m"
@@ -496,7 +538,7 @@ while round < 2000000000
   if GPU == 1
     << "  \e[35mGPU scout\e[0m  relay best " + gpu_seen.to_s() + "   \e[2mcandidates pulled\e[0m " + gpu_pulls.to_s()
   << ""
-  << "  \e[36mwalkers (best rank per thread)\e[0m"
+  << "  \e[36mwalkers (best rank per thread; w0 = leader, rest hammer its decomposition)\e[0m"
   w = 0 ## i64
   line = "   "
   while w < J
@@ -513,7 +555,7 @@ while round < 2000000000
 
   # ---- hook: status file every 4 rounds ----
   if (round % 4) == 0
-    sbody = "round=" + round.to_s() + " fleet_best=" + fleet_best.to_s() + " ops=" + best_ops.to_s() + " bits=" + best_bitsv.to_s() + " valid=" + best_valid.to_s() + " newbests=" + newbests.to_s() + " reseeds=" + reseeds.to_s() + " naive_wraps=" + naive_wraps.to_s() + " moves=" + moves.to_s() + " elapsed=" + el.to_s() + " dslack=" + DSLACK.to_s() + " gpu_best=" + gpu_seen.to_s() + " gpu_pulls=" + gpu_pulls.to_s() + "\n"
+    sbody = "round=" + round.to_s() + " fleet_best=" + fleet_best.to_s() + " ops=" + best_ops.to_s() + " bits=" + best_bitsv.to_s() + " valid=" + best_valid.to_s() + " cur_rank=" + cur_rank.to_s() + " band=" + gband.to_s() + " moves_at_band=" + band_moves.to_s() + " moves_at_rank=" + rank_moves.to_s() + " newbests=" + newbests.to_s() + " reseeds=" + reseeds.to_s() + " naive_wraps=" + naive_wraps.to_s() + " moves=" + moves.to_s() + " elapsed=" + el.to_s() + " dslack=" + DSLACK.to_s() + " gpu_best=" + gpu_seen.to_s() + " gpu_pulls=" + gpu_pulls.to_s() + "\n"
     write_file("flipfleet_status.txt", sbody)
 
   round += 1

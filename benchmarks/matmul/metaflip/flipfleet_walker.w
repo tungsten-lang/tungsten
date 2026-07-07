@@ -358,8 +358,8 @@
       q = 2500000000 ## i64
       if aband > wthr
         q = 500000000
-    if rank <= 93
-      q = 10000000000
+      if rank <= 93
+        q = 10000000000
       nextesc = mv + q
     if rank > best_rank + aband
       hz = 0 ## i64

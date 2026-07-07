@@ -903,8 +903,8 @@ def gen_worker(n, m, p, recv, world_record=None, cycles=4, thr=6, thrper=300000,
     recq = ""
     if world_record is not None:
         recq = f"""
-    if rank <= {world_record}
-      q = 10000000000"""
+      if rank <= {world_record}
+        q = 10000000000"""
 
     return f'''{helpers}
 

@@ -447,12 +447,23 @@ while round < 2000000000
   cur_rank = read_best_rank(sts[0])
 
   # ---- per-thread move counters (moves spent at the current band / rank) ----
+  # A new (lower) rank restarts the sawtooth at band 1, so moves@band resets then
+  # too — not only when the band value changes (a band-1 -> band-1 descent wouldn't
+  # otherwise trip the gband-change check).
+  rank_dropped = 0 ## i64
+  if cur_rank < prev_rank
+    rank_dropped = 1
+  band_reset = 0 ## i64
   if gband != prev_gband
+    band_reset = 1
+  if rank_dropped == 1
+    band_reset = 1
+  if band_reset == 1
     band_moves = 0
   else
     band_moves = band_moves + STEPS
   prev_gband = gband
-  if cur_rank < prev_rank
+  if rank_dropped == 1
     rank_moves = 0
   else
     rank_moves = rank_moves + STEPS

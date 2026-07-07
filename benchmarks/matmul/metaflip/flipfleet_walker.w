@@ -355,9 +355,9 @@
         if wraps >= cyclesv
           st[10091 + 9] = 1
       aband = nb
-      q = 2500000000 ## i64
+      q = 500000000 ## i64
       if aband > wthr
-        q = 500000000
+        q = 100000000
       if rank <= 93
         q = 10000000000
       nextesc = mv + q
@@ -390,7 +390,7 @@
             wthr = 58
       if aband != bstart
         aband = bstart
-      nextesc = mv + 2500000000
+      nextesc = mv + 500000000
       ci = 0 ## i64
       while ci < rank
         sl = st[1256 + ci] ## i64

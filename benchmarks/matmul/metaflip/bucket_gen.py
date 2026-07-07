@@ -1073,9 +1073,9 @@ def gen_worker(n, m, p, recv, world_record=None, cycles=4, thr=6, thrper=300000,
         if wraps >= cyclesv
           st[{S} + 9] = 1
       aband = nb
-      q = 2500000000 ## i64
+      q = 500000000 ## i64
       if aband > wthr
-        q = 500000000{recq}
+        q = 100000000{recq}
       nextesc = mv + q
     if rank > best_rank + aband
       hz = 0 ## i64
@@ -1106,7 +1106,7 @@ def gen_worker(n, m, p, recv, world_record=None, cycles=4, thr=6, thrper=300000,
             wthr = 58
       if aband != bstart
         aband = bstart
-      nextesc = mv + 2500000000
+      nextesc = mv + 500000000
       ci = 0 ## i64
       while ci < rank
         sl = st[{O['LIVE']} + ci] ## i64

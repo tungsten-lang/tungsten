@@ -35,6 +35,8 @@ GWORKQ = 150000 ## i64       # --gpu-workq    : work-zone budget
 GWANDERQ = 60000 ## i64      # --gpu-wanderq  : wander-zone budget
 GWTHR = 7 ## i64             # --gpu-wthr     : work-zone band threshold
 GNW = 4096 ## i64            # --gpu-nw       : GPU thread count (multiple of 16)
+GSEED_EVERY = 200 ## i64     # --gpu-seed-every: rounds between GPU seed refreshes (a
+                             # rank record refreshes immediately regardless)
 # Restart-free live sweep: ramp ONE param over time in a single relay process.
 SWEEP_PARAM = ""             # --gpu-sweep <steps|reseed|margin|workq|wanderq|wthr>
 SWEEP_LO = 3 ## i64          # --sweep-lo
@@ -86,6 +88,9 @@ while ai < av.size()
   if a == "--gpu-nw"
     if ai + 1 < av.size()
       GNW = av[ai + 1].to_i()
+  if a == "--gpu-seed-every"
+    if ai + 1 < av.size()
+      GSEED_EVERY = av[ai + 1].to_i()
   if a == "--gpu-sweep"
     GPU = 1
     GPU_ONLY = 1
@@ -395,7 +400,7 @@ while round < 2000000000
   # escalating, exactly as an in-place descent (walk_worker) does.
   if bestw != 0
     z = reseed_from(sts[0], sts[bestw], round * 131 + 7)
-    sts[0][10091 + 7] = sts[0][10091 + 6] + 2500000000
+    sts[0][10091 + 7] = sts[0][10091 + 6] + 500000000
     reseeds += 1
   cur_rank = read_best_rank(sts[0])
   cur_den = best_bits(sts[0]) ## i64
@@ -404,8 +409,10 @@ while round < 2000000000
   # best-ever bookkeeping (monotonic; survives a fleet wrap). This is the record
   # we show, log, and (with --gpu) seed the density scout from.
   everbetter = 0 ## i64
+  rank_record = 0 ## i64
   if cur_rank < fleet_best
     everbetter = 1
+    rank_record = 1
   if cur_rank == fleet_best
     if cur_den < fleet_best_den
       everbetter = 1
@@ -416,11 +423,10 @@ while round < 2000000000
     best_ops = cur_den - cur_rank - OUTPUTS
     best_valid = verify_best(sts[0])
     newbests += 1
-    if GPU == 1
-      gd = dump_scheme(sts[0], GSEED)
 
   # fleet-wide sawtooth wrap: when the leader's sawtooth exhausts (CYCLEOUT), the
   # WHOLE fleet abandons this decomposition and restarts from fresh naive seeds.
+  wrapped = 0 ## i64
   if read_cycled(sts[0]) == 1
     w = 0
     while w < J
@@ -428,6 +434,7 @@ while round < 2000000000
       w += 1
     naive_wraps += 1
     gband = 1
+    wrapped = 1
   else
     # explorers reseed onto the leader's best EVERY round (full force on one seed),
     # at the leader's band (follow-the-leader).
@@ -451,9 +458,20 @@ while round < 2000000000
     rank_moves = rank_moves + STEPS
   prev_rank = cur_rank
 
-  # ---- GPU scout: its seed (dumped on each new best-ever) is the record; pull any
-  # lexicographically better candidate it returns into an explorer to be adopted ----
+  # ---- GPU scout: re-seed it from the record only on a new rank record (immediate)
+  # or a periodic refresh (every GSEED_EVERY rounds), NOT on every density tweak —
+  # that thrashed the relay's seed. Then pull any lexicographically better candidate
+  # it returns into an explorer to be adopted. ----
   if GPU == 1
+    do_dump = 0 ## i64
+    if rank_record == 1
+      do_dump = 1
+    if (round % GSEED_EVERY) == 0
+      if wrapped == 0
+        do_dump = 1
+    if do_dump == 1
+      if fleet_best < 999
+        gd = dump_scheme(sts[0], GSEED)
     gc = read_file(GBEST)
     grank = 0 ## i64
     gden = 0 ## i64
@@ -524,15 +542,18 @@ while round < 2000000000
       opshist[HK - 1] = best_ops
 
   gap = fleet_best - RECORD ## i64
-  moves = round * J * STEPS ## i64
+  moves = round * J * STEPS ## i64   # TOTAL moves across all J threads
+  band_budget = 500000000 ## i64     # work-zone dwell per band (per-thread)
+  if gband > sts[0][10091 + 4]
+    band_budget = 100000000          # wander-zone dwell per band
   el = (clock - start).to_i() ## i64
 
   # ---- TUI: redraw in place ----
   << "\e[H\e[2J"
-  << "\e[1;33m  flipfleet\e[0m  ⟨5,5,5⟩ GF(2)      \e[2mthreads\e[0m " + J.to_s() + "   \e[2mround\e[0m " + round.to_s() + "   \e[2melapsed\e[0m " + el.to_s() + "s   \e[2mmoves\e[0m " + moves.to_s()
+  << "\e[1;33m  flipfleet\e[0m  ⟨5,5,5⟩ GF(2)      \e[2mthreads\e[0m " + J.to_s() + "   \e[2mround\e[0m " + round.to_s() + "   \e[2melapsed\e[0m " + el.to_s() + "s   \e[2mmoves\e[0m " + (moves / 1000000000).to_s() + "." + ((moves / 100000000) % 10).to_s() + "B"
   << ""
   << "  \e[1;32mfleet best  rank " + fleet_best.to_s() + "\e[0m   \e[2m(+" + gap.to_s() + " to record " + RECORD.to_s() + ")\e[0m      \e[1mops " + best_ops.to_s() + "\e[0m \e[2m(naive " + NAIVE_OPS.to_s() + ")\e[0m   \e[2mbits\e[0m " + best_bitsv.to_s() + "   \e[2mvalid\e[0m " + best_valid.to_s()
-  << "  \e[36mleader\e[0m  working rank " + cur_rank.to_s() + "    \e[2mband\e[0m " + gband.to_s() + "    \e[2mmoves@band\e[0m " + band_moves.to_s() + "    \e[2mmoves@rank\e[0m " + rank_moves.to_s()
+  << "  \e[36mleader\e[0m  working rank " + cur_rank.to_s() + "    \e[2mband\e[0m " + gband.to_s() + "    \e[2mmoves@band\e[0m " + (band_moves / 1000000).to_s() + "M/" + (band_budget / 1000000).to_s() + "M    \e[2mmoves@rank\e[0m " + (rank_moves / 1000000).to_s() + "M"
   << ""
   if histn > 1
     << "  \e[32mrank " + spark(rankhist, histn, RECORD, 125, 60) + "\e[0m  \e[2m125→" + fleet_best.to_s() + "\e[0m"

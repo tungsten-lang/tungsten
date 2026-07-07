@@ -35,6 +35,12 @@ GWORKQ = 150000 ## i64       # --gpu-workq    : work-zone budget
 GWANDERQ = 60000 ## i64      # --gpu-wanderq  : wander-zone budget
 GWTHR = 7 ## i64             # --gpu-wthr     : work-zone band threshold
 GNW = 4096 ## i64            # --gpu-nw       : GPU thread count (multiple of 16)
+# Restart-free live sweep: ramp ONE param over time in a single relay process.
+SWEEP_PARAM = ""             # --gpu-sweep <steps|reseed|margin|workq|wanderq|wthr>
+SWEEP_LO = 3 ## i64          # --sweep-lo
+SWEEP_HI = 15 ## i64         # --sweep-hi
+SWEEP_STEP = 2 ## i64        # --sweep-step
+SWEEP_DWELL = 40 ## i64      # --sweep-dwell  : seconds of fresh descent per value
 av = argv()
 ai = 0 ## i64
 while ai < av.size()
@@ -80,6 +86,23 @@ while ai < av.size()
   if a == "--gpu-nw"
     if ai + 1 < av.size()
       GNW = av[ai + 1].to_i()
+  if a == "--gpu-sweep"
+    GPU = 1
+    GPU_ONLY = 1
+    if ai + 1 < av.size()
+      SWEEP_PARAM = av[ai + 1]
+  if a == "--sweep-lo"
+    if ai + 1 < av.size()
+      SWEEP_LO = av[ai + 1].to_i()
+  if a == "--sweep-hi"
+    if ai + 1 < av.size()
+      SWEEP_HI = av[ai + 1].to_i()
+  if a == "--sweep-step"
+    if ai + 1 < av.size()
+      SWEEP_STEP = av[ai + 1].to_i()
+  if a == "--sweep-dwell"
+    if ai + 1 < av.size()
+      SWEEP_DWELL = av[ai + 1].to_i()
   ai += 1
 if J < 1
   J = 1
@@ -139,6 +162,7 @@ flush()
 # so --gpu works from ANY directory inside the repo. ----
 GSEED = "ff_gpu_seed.txt"
 GBEST = "ff_gpu_best.txt"
+GLIVE = "ff_gpu_live.txt"
 gpu_seen = 999 ## i64
 gpu_pulled = 999 ## i64
 gpu_pulls = 0 ## i64
@@ -150,6 +174,7 @@ if GPU == 1
     cwd = cwdc.split("\n")[0]
   GSEED = cwd + "/ff_gpu_seed.txt"
   GBEST = cwd + "/ff_gpu_best.txt"
+  GLIVE = cwd + "/ff_gpu_live.txt"
   glog = cwd + "/ff_gpu_log.txt"
   ds = dump_scheme(sts[0], GSEED)
   zc = write_file(GBEST, "")
@@ -168,10 +193,104 @@ if GPU == 1
   hp = " x 0 " + GSTEPS.to_s() + " " + GRESEED.to_s() + " " + GMARGIN.to_s() + " " + GWORKQ.to_s() + " " + GWANDERQ.to_s() + " " + GWTHR.to_s() + " " + GNW.to_s()
   # Spawn detached, wrapped in a watchdog: $PPID = this flipfleet; when we exit
   # (Ctrl+C, kill, crash), the watchdog reaps the relay so no GPU process is left.
-  gcmd = "FF=$PPID; ( cd " + root + "; ./benchmarks/matmul/gpu_relay " + GSEED + " " + GBEST + " 5 5 5" + hp + " > " + glog + " 2>&1 & R=$!; while kill -0 $FF 2>/dev/null; do sleep 3; done; kill $R 2>/dev/null ) &"
+  gcmd = "FF=$PPID; ( cd " + root + "; ./benchmarks/matmul/gpu_relay " + GSEED + " " + GBEST + " 5 5 5" + hp + " " + GLIVE + " > " + glog + " 2>&1 & R=$!; while kill -0 $FF 2>/dev/null; do sleep 3; done; kill $R 2>/dev/null ) &"
   zs = system(gcmd)
   << "  GPU relay spawned as candidate scout (log: " + glog + "). first descent ~15-30s (Metal compile). stop with: pkill gpu_relay"
   flush()
+
+# ---- --gpu-sweep: ramp ONE param live in a single relay process (no restarts). Each
+# value gets a fresh descent (naive seed + new generation -> relay force-reseeds). ----
+if SWEEP_PARAM != ""
+  << "  LIVE SWEEP of '" + SWEEP_PARAM + "' " + SWEEP_LO.to_s() + "->" + SWEEP_HI.to_s() + " step " + SWEEP_STEP.to_s() + ", " + SWEEP_DWELL.to_s() + "s/value (one relay, no restarts). results -> ff_gpu_sweep.txt"
+  flush()
+  results = "param=" + SWEEP_PARAM + "\n"
+  gen = 0 ## i64
+  V = SWEEP_LO ## i64
+  while V <= SWEEP_HI
+    gen += 1
+    sv_steps = GSTEPS ## i64
+    sv_reseed = GRESEED ## i64
+    sv_margin = GMARGIN ## i64
+    sv_workq = GWORKQ ## i64
+    sv_wanderq = GWANDERQ ## i64
+    sv_wthr = GWTHR ## i64
+    if SWEEP_PARAM == "steps"
+      sv_steps = V
+    if SWEEP_PARAM == "reseed"
+      sv_reseed = V
+    if SWEEP_PARAM == "margin"
+      sv_margin = V
+    if SWEEP_PARAM == "workq"
+      sv_workq = V
+    if SWEEP_PARAM == "wanderq"
+      sv_wanderq = V
+    if SWEEP_PARAM == "wthr"
+      sv_wthr = V
+    ds3 = dump_scheme(sts[0], GSEED)
+    liveline = sv_steps.to_s() + " " + sv_reseed.to_s() + " " + sv_margin.to_s() + " " + sv_workq.to_s() + " " + sv_wanderq.to_s() + " " + sv_wthr.to_s() + " " + gen.to_s() + "\n"
+    zl = write_file(GLIVE, liveline)
+    # handshake: wait until the relay logs it applied this generation (reseeded from
+    # naive with the new value) — covers Metal compile + long rounds. Then discard any
+    # stale in-flight best so the dwell measures only this value's fresh descent.
+    tag = "gen=" + gen.to_s() + " "
+    hw = 0 ## i64
+    while hw < 60
+      lgc = read_file(glog)
+      if lgc != nil
+        if lgc.include?(tag)
+          hw = 900
+      if hw < 900
+        zzh = ccall("w_thread_sleep_ms", 1000)
+        hw += 1
+    zc3 = write_file(GBEST, "")
+    bestv = 999 ## i64
+    # el2 counts elapsed; the SWEEP_DWELL measurement window only STARTS once the fresh
+    # descent produces its first write (absorbs GPU round latency — a single dispatch of
+    # big STEPS can exceed the dwell). Hard cap so a dead relay can't stall the sweep.
+    started = 0 ## i64
+    dstart = 0 ## i64
+    el2 = 0 ## i64
+    cap2 = SWEEP_DWELL + 120 ## i64
+    while el2 < cap2
+      gc2 = read_file(GBEST)
+      if gc2 != nil
+        gl2 = gc2.split("\n")
+        if gl2.size() > 0
+          gr2 = gl2[0].to_i()
+          if gr2 > 0
+            if gr2 < bestv
+              bestv = gr2
+            if started == 0
+              started = 1
+              dstart = el2
+      phase = "warming up (reseed + first dispatch)..."
+      if started == 1
+        phase = "measuring " + (el2 - dstart).to_s() + "/" + SWEEP_DWELL.to_s() + "s"
+      << "\e[H\e[2J"
+      << "\e[1;35m  flipfleet live-sweep\e[0m  ⟨5,5,5⟩ GF(2)    \e[2mparam\e[0m " + SWEEP_PARAM + "    \e[2mvalue\e[0m " + V.to_s()
+      << ""
+      if bestv == 999
+        << "  \e[2m" + phase + "\e[0m"
+      else
+        << "  \e[1;32mbest this value  rank " + bestv.to_s() + "\e[0m   \e[2m(record " + RECORD.to_s() + ")   " + phase + "\e[0m"
+      << ""
+      << "  \e[36mresults so far\e[0m"
+      << results
+      << "  \e[2mCtrl-C to stop.\e[0m"
+      flush()
+      zzz2 = ccall("w_thread_sleep_ms", 2000)
+      el2 += 2
+      if started == 1
+        if (el2 - dstart) >= SWEEP_DWELL
+          el2 = cap2
+    results = results + SWEEP_PARAM + "=" + V.to_s() + " gpu_best=" + bestv.to_s() + "\n"
+    zr = write_file("ff_gpu_sweep.txt", results)
+    V += SWEEP_STEP
+  << "\e[H\e[2J"
+  << "LIVE SWEEP DONE — results (also in ff_gpu_sweep.txt):"
+  << results
+  flush()
+  round = 2000000000
 
 # ---- --gpu-only: no CPU walkers; just poll the relay + report (hyperparam sweeps) ----
 if GPU_ONLY == 1

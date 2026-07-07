@@ -480,6 +480,12 @@ if av0.size() > 12
   WTHR0 = av0[12].to_i()
 if av0.size() > 13
   NW = av0[13].to_i()
+# av0[14] = a live-params file we poll each round (for restart-free sweeps).
+# Line 0 = "STEPS RESEED MARGIN WORKQ WANDERQ WTHR GEN"; a new GEN forces a reseed.
+livepath = ""
+if av0.size() > 14
+  livepath = av0[14]
+live_gen = 0
 << "GPU cfg: NW=" + NW.to_s() + " STEPS=" + STEPS.to_s() + " RESEED=" + RESEED_EVERY.to_s() + " MARGIN=" + MARGIN.to_s() + " WORKQ=" + WQWORK.to_s() + " WANDERQ=" + WQWANDER.to_s() + " WTHR=" + WTHR0.to_s()
 flush()
 
@@ -526,11 +532,36 @@ while rd < ROUNDS
     metal_buffer_write_i32(seed_vs, ii, seedv[ii])
     metal_buffer_write_i32(seed_ws, ii, seedw[ii])
     ii += 1
+  # poll the live-params file (restart-free sweep); a new GEN forces a reseed
+  force_reseed = 0
+  if livepath != ""
+    livec = read_file(livepath)
+    if livec != nil
+      livel = livec.split("\n")
+      if livel.size() > 0
+        lparts = livel[0].split(" ")
+        if lparts.size() > 6
+          STEPS = lparts[0].to_i()
+          RESEED_EVERY = lparts[1].to_i()
+          MARGIN = lparts[2].to_i()
+          WQWORK = lparts[3].to_i()
+          WQWANDER = lparts[4].to_i()
+          WTHR0 = lparts[5].to_i()
+          if RESEED_EVERY < 1
+            RESEED_EVERY = 1
+          newgen = lparts[6].to_i()
+          if newgen != live_gen
+            force_reseed = 1
+            live_gen = newgen
+            << "LIVE gen=" + newgen.to_s() + " STEPS=" + STEPS.to_s() + " RESEED=" + RESEED_EVERY.to_s() + " MARGIN=" + MARGIN.to_s() + " WORKQ=" + WQWORK.to_s() + " WANDERQ=" + WQWANDER.to_s() + " WTHR=" + WTHR0.to_s()
+            flush()
   metal_buffer_write_i32(params, 0, startrank)
   metal_buffer_write_i32(params, 1, CAP)
   metal_buffer_write_i32(params, 2, STEPS)
   reseed = 0
   if (rd % RESEED_EVERY) == 0
+    reseed = 1
+  if force_reseed == 1
     reseed = 1
   metal_buffer_write_i32(params, 3, reseed)
   metal_buffer_write_i32(params, 4, MARGIN)

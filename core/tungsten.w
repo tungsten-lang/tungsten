@@ -41,6 +41,7 @@
   auto :String,       "string"
   auto :StringBuffer, "string_buffer"
   auto :Symbol,       "symbol"
+  auto :Thread,       "thread"
   auto :Token,        "token"
   auto :UUID,         "uuid"
   auto :Value,        "value"

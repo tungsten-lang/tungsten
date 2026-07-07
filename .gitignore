@@ -154,3 +154,13 @@ benchmarks/matmul/search/*
 !benchmarks/matmul/search/scheme23.txt
 !benchmarks/matmul/search/scheme47.txt
 !benchmarks/matmul/search/at_f2.npz
+
+# metaflip flipfleet / GPU-relay binaries (rebuilt via bin/tungsten -o) + runtime scratch
+benchmarks/matmul/gpu_relay
+benchmarks/matmul/metaflip/flipfleet
+benchmarks/matmul/metaflip/ff_gpu_seed.txt
+benchmarks/matmul/metaflip/ff_gpu_best.txt
+benchmarks/matmul/metaflip/ff_gpu_log.txt
+benchmarks/matmul/metaflip/flipfleet_status.txt
+benchmarks/matmul/metaflip/gpu_sweep_results.txt
+benchmarks/matmul/metaflip/.ff_cwd.tmp

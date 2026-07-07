@@ -166,7 +166,9 @@ if GPU == 1
       root = root + "/.."
     probes += 1
   hp = " x 0 " + GSTEPS.to_s() + " " + GRESEED.to_s() + " " + GMARGIN.to_s() + " " + GWORKQ.to_s() + " " + GWANDERQ.to_s() + " " + GWTHR.to_s() + " " + GNW.to_s()
-  gcmd = "cd " + root + " && ./benchmarks/matmul/gpu_relay " + GSEED + " " + GBEST + " 5 5 5" + hp + " > " + glog + " 2>&1 &"
+  # Spawn detached, wrapped in a watchdog: $PPID = this flipfleet; when we exit
+  # (Ctrl+C, kill, crash), the watchdog reaps the relay so no GPU process is left.
+  gcmd = "FF=$PPID; ( cd " + root + "; ./benchmarks/matmul/gpu_relay " + GSEED + " " + GBEST + " 5 5 5" + hp + " > " + glog + " 2>&1 & R=$!; while kill -0 $FF 2>/dev/null; do sleep 3; done; kill $R 2>/dev/null ) &"
   zs = system(gcmd)
   << "  GPU relay spawned as candidate scout (log: " + glog + "). first descent ~15-30s (Metal compile). stop with: pkill gpu_relay"
   flush()
@@ -211,7 +213,7 @@ if GPU_ONLY == 1
     flush()
     sb = "gpu_only=1 gpu_best=" + gpu_seen.to_s() + " elapsed=" + el.to_s() + " nw=" + GNW.to_s() + " steps=" + GSTEPS.to_s() + " reseed=" + GRESEED.to_s() + " margin=" + GMARGIN.to_s() + " workq=" + GWORKQ.to_s() + " wanderq=" + GWANDERQ.to_s() + " wthr=" + GWTHR.to_s() + "\n"
     zw = write_file("flipfleet_status.txt", sb)
-    zzz = system("sleep 2")
+    zzz = ccall("w_thread_sleep_ms", 2000)   # NOT system("sleep") — that masks SIGINT (Ctrl+C)
     round += 1
 
 while round < 2000000000

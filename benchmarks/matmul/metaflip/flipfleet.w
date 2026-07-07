@@ -142,6 +142,7 @@ rankhist = i64[80]
 opshist = i64[80]
 histn = 0 ## i64
 fleet_best = 999 ## i64
+fleet_best_den = 999999999 ## i64   # density (mask popcount) of the fleet-best scheme
 best_ops = 0 ## i64
 best_bitsv = 0 ## i64
 best_valid = 1 ## i64
@@ -165,6 +166,7 @@ GBEST = "ff_gpu_best.txt"
 GLIVE = "ff_gpu_live.txt"
 gpu_seen = 999 ## i64
 gpu_pulled = 999 ## i64
+gpu_pulled_den = 999999999 ## i64
 gpu_pulls = 0 ## i64
 if GPU == 1
   zp = system("pwd > .ff_cwd.tmp 2>/dev/null")
@@ -350,22 +352,40 @@ while round < 2000000000
     threads[w].join
     w += 1
 
-  # ---- fleet best over the round ----
+  # ---- fleet best over the round: lexicographic (rank, density) ----
   best = 999 ## i64
+  bestden = 999999999 ## i64
   bestw = 0 ## i64
   w = 0
   while w < J
     r = read_best_rank(sts[w]) ## i64
+    d = best_bits(sts[w]) ## i64
+    better = 0 ## i64
     if r < best
+      better = 1
+    if r == best
+      if d < bestden
+        better = 1
+    if better == 1
       best = r
+      bestden = d
       bestw = w
     w += 1
 
-  # ---- EXPLOIT: new fleet best -> benchmark + reseed the others onto it ----
+  # ---- EXPLOIT: new lexicographic (rank, density) best -> reseed the others onto it.
+  # A strictly lower rank wins; at equal rank, a lower-density (fewer-ops) scheme wins,
+  # so density improvements (incl. ones the GPU scout suggests) propagate through the fleet. ----
+  exploit = 0 ## i64
   if best < fleet_best
+    exploit = 1
+  if best == fleet_best
+    if bestden < fleet_best_den
+      exploit = 1
+  if exploit == 1
     fleet_best = best
+    fleet_best_den = bestden
     newbests += 1
-    best_bitsv = best_bits(sts[bestw])
+    best_bitsv = bestden
     best_ops = best_bitsv - best - OUTPUTS
     best_valid = verify_best(sts[bestw])
     src = sts[bestw]
@@ -391,27 +411,57 @@ while round < 2000000000
         gd = dump_scheme(sts[bestw], GSEED)
     gc = read_file(GBEST)
     grank = 0 ## i64
+    gden = 0 ## i64
     if gc != nil
       gl = gc.split("\n")
       if gl.size() > 0
-        grank = gl[0].to_i()
+        l0 = gl[0].split(" ")
+        grank = l0[0].to_i()
+        if l0.size() > 1
+          gden = l0[1].to_i()
     gpu_seen = grank
     if grank > 0
+      # pull if the GPU candidate is lexicographically better than the fleet best
+      # (lower rank, or same rank at lower density) AND we have not already pulled it
+      glex = 0 ## i64
+      if grank < fleet_best
+        glex = 1
+      if grank == fleet_best
+        if gden > 0
+          if gden < fleet_best_den
+            glex = 1
+      fresh = 0 ## i64
       if grank < gpu_pulled
-        if grank < fleet_best
+        fresh = 1
+      if grank == gpu_pulled
+        if gden < gpu_pulled_den
+          fresh = 1
+      if glex == 1
+        if fresh == 1
+          # overwrite the least-valuable walker (highest rank, then highest density)
           worstw = 0 ## i64
           worstr = 0 ## i64
+          worstd = 0 ## i64
           w = 0
           while w < J
             rr = read_best_rank(sts[w]) ## i64
+            dd = best_bits(sts[w]) ## i64
+            wbetter = 0 ## i64
             if rr > worstr
+              wbetter = 1
+            if rr == worstr
+              if dd > worstd
+                wbetter = 1
+            if wbetter == 1
               worstr = rr
+              worstd = dd
               worstw = w
             w += 1
           lr = load_scheme(sts[worstw], GBEST, round * 271 + 3)
           if verify_best(sts[worstw]) == 1
             gpu_pulls += 1
             gpu_pulled = grank
+            gpu_pulled_den = gden
 
   # ---- record history for the sparklines ----
   if fleet_best < 999

@@ -431,6 +431,13 @@ NW = 4096
 WPG = 16
 CAP = 140
 STEPS = 500000
+# Re-seed (reset each thread back to the seed + band-1 fresh start) only every
+# RESEED_EVERY rounds instead of every round, so a thread runs STEPS*RESEED_EVERY
+# = 500000*200 = 100,000,000 moves of continuous descent before it resets. Kept
+# as many small STEPS-sized dispatches (not one giant dispatch) to stay well
+# under Metal's GPU-command watchdog. Between re-seeds threads continue from their
+# saved working scheme + band state (doinit=0 path).
+RESEED_EVERY = 200
 ROUNDS = 1000000
 MARGIN = 4
 WQWORK = 150000
@@ -457,6 +464,24 @@ if av0.size() > 6
   recordpath = av0[5]
   recordtarget = av0[6].to_i()
 recordhit = 0
+
+# ---- optional hyperparameters (av0[7..13]) for flipfleet --gpu-only sweeps ----
+if av0.size() > 7
+  STEPS = av0[7].to_i()
+if av0.size() > 8
+  RESEED_EVERY = av0[8].to_i()
+if av0.size() > 9
+  MARGIN = av0[9].to_i()
+if av0.size() > 10
+  WQWORK = av0[10].to_i()
+if av0.size() > 11
+  WQWANDER = av0[11].to_i()
+if av0.size() > 12
+  WTHR0 = av0[12].to_i()
+if av0.size() > 13
+  NW = av0[13].to_i()
+<< "GPU cfg: NW=" + NW.to_s() + " STEPS=" + STEPS.to_s() + " RESEED=" + RESEED_EVERY.to_s() + " MARGIN=" + MARGIN.to_s() + " WORKQ=" + WQWORK.to_s() + " WANDERQ=" + WQWANDER.to_s() + " WTHR=" + WTHR0.to_s()
+flush()
 
 seedu = i64[160]
 seedv = i64[160]
@@ -504,15 +529,15 @@ while rd < ROUNDS
   metal_buffer_write_i32(params, 0, startrank)
   metal_buffer_write_i32(params, 1, CAP)
   metal_buffer_write_i32(params, 2, STEPS)
-  metal_buffer_write_i32(params, 3, 1)
+  reseed = 0
+  if (rd % RESEED_EVERY) == 0
+    reseed = 1
+  metal_buffer_write_i32(params, 3, reseed)
   metal_buffer_write_i32(params, 4, MARGIN)
   metal_buffer_write_i32(params, 5, WQWORK)
   metal_buffer_write_i32(params, 6, WQWANDER)
   metal_buffer_write_i32(params, 7, WTHR0)
-  firstinit = 0
-  if rd == 0
-    firstinit = 1
-  metal_buffer_write_i32(params, 8, firstinit)
+  metal_buffer_write_i32(params, 8, reseed)
   metal_dispatch_groups(queue, pipeline, bufs, NW / WPG, WPG)
   w = 0
   localmin = startrank

@@ -54,7 +54,7 @@
   wthr0 = params[7] ## i32
   firstinit = params[8] ## i32
   base = tid * cap ## i32
-  sb = tid * 8 ## i32
+  sb = tid * 9 ## i32
   sus = gpu.shared_i32(2240)
   svs = gpu.shared_i32(2240)
   sws = gpu.shared_i32(2240)
@@ -88,6 +88,11 @@
   pb = 0 ## i32
   paxis = 0 ## i32
   nb = 0 ## i32
+  bestden = 0 ## i32
+  dsum = 0 ## i32
+  capit = 0 ## i32
+  docap = 0 ## i32
+  pz = 0 ## i32
   if doinit == 1
     i = 0
     while i < nterms
@@ -107,6 +112,7 @@
     st[sb + 5] = 0
     st[sb + 6] = 0
     st[sb + 7] = wqwork
+    st[sb + 8] = 999999
   rank = st[sb]
   best = st[sb + 1]
   state = st[sb + 2]
@@ -115,6 +121,7 @@
   wraps = st[sb + 5]
   mv = st[sb + 6]
   nextesc = st[sb + 7]
+  bestden = st[sb + 8]
   if doinit == 0
     i = 0
     while i < rank
@@ -304,17 +311,52 @@
           rank = rank - 1
         if dup < 0
           a = a + 1
+    # Capture best by lexicographic (rank, density): a strictly lower rank
+    # always wins; at equal rank, lower total density (mask popcount = base-case
+    # ops) wins. On a rank drop we must recompute density; while sitting AT the
+    # best rank we sample density only every 64 steps (the O(rank*bits) popcount
+    # would otherwise dominate the hot loop at the frontier).
+    docap = 0
     if rank < best
-      best = rank
+      docap = 1
+    if rank == best
+      if (step % 64) == 0
+        docap = 1
+    if docap == 1
+      dsum = 0
       ci = 0
       while ci < rank
-        best_us[base + ci] = sus[ci * 16 + ltid]
-        best_vs[base + ci] = svs[ci * 16 + ltid]
-        best_ws[base + ci] = sws[ci * 16 + ltid]
+        pz = sus[ci * 16 + ltid]
+        while pz != 0
+          pz = pz & (pz - 1)
+          dsum = dsum + 1
+        pz = svs[ci * 16 + ltid]
+        while pz != 0
+          pz = pz & (pz - 1)
+          dsum = dsum + 1
+        pz = sws[ci * 16 + ltid]
+        while pz != 0
+          pz = pz & (pz - 1)
+          dsum = dsum + 1
         ci = ci + 1
-      if aband + 1 > wthr
-        wthr = aband + 1
-      aband = 1
+      capit = 0
+      if rank < best
+        capit = 1
+      if rank == best
+        if dsum < bestden
+          capit = 1
+      if capit == 1
+        best = rank
+        bestden = dsum
+        ci = 0
+        while ci < rank
+          best_us[base + ci] = sus[ci * 16 + ltid]
+          best_vs[base + ci] = svs[ci * 16 + ltid]
+          best_ws[base + ci] = sws[ci * 16 + ltid]
+          ci = ci + 1
+        if aband + 1 > wthr
+          wthr = aband + 1
+        aband = 1
     if mv >= nextesc
       nb = aband + 1
       if aband > wthr
@@ -335,6 +377,7 @@
             i = i + 1
           rank = nterms
           best = nterms
+          bestden = 999999
           ci = 0
           while ci < nterms
             best_us[base + ci] = seed_us[ci]
@@ -361,6 +404,7 @@
   st[sb + 5] = wraps
   st[sb + 6] = mv
   st[sb + 7] = nextesc
+  st[sb + 8] = bestden
 
 # ---------------- host ----------------
 use core/metal
@@ -374,6 +418,14 @@ use core/metal
         p = (p + 1) % 2
     b += 1
   p
+
+-> popcnt(v) (i64) i64
+  c = 0
+  x = v
+  while x != 0
+    x = x & (x - 1)
+    c += 1
+  c
 
 -> verify_buf(bufu, bufv, bufw, baseoff, rank, seed0, nn, mm, pp) (i64[] i64[] i64[] i64 i64 i64 i64 i64 i64) i64
   ab = nn * mm
@@ -431,6 +483,13 @@ NW = 4096
 WPG = 16
 CAP = 140
 STEPS = 500000
+# Re-seed (reset each thread back to the seed + band-1 fresh start) only every
+# RESEED_EVERY rounds instead of every round, so a thread runs STEPS*RESEED_EVERY
+# = 500000*200 = 100,000,000 moves of continuous descent before it resets. Kept
+# as many small STEPS-sized dispatches (not one giant dispatch) to stay well
+# under Metal's GPU-command watchdog. Between re-seeds threads continue from their
+# saved working scheme + band state (doinit=0 path).
+RESEED_EVERY = 200
 ROUNDS = 1000000
 MARGIN = 4
 WQWORK = 150000
@@ -458,6 +517,30 @@ if av0.size() > 6
   recordtarget = av0[6].to_i()
 recordhit = 0
 
+# ---- optional hyperparameters (av0[7..13]) for flipfleet --gpu-only sweeps ----
+if av0.size() > 7
+  STEPS = av0[7].to_i()
+if av0.size() > 8
+  RESEED_EVERY = av0[8].to_i()
+if av0.size() > 9
+  MARGIN = av0[9].to_i()
+if av0.size() > 10
+  WQWORK = av0[10].to_i()
+if av0.size() > 11
+  WQWANDER = av0[11].to_i()
+if av0.size() > 12
+  WTHR0 = av0[12].to_i()
+if av0.size() > 13
+  NW = av0[13].to_i()
+# av0[14] = a live-params file we poll each round (for restart-free sweeps).
+# Line 0 = "STEPS RESEED MARGIN WORKQ WANDERQ WTHR GEN"; a new GEN forces a reseed.
+livepath = ""
+if av0.size() > 14
+  livepath = av0[14]
+live_gen = 0
+<< "GPU cfg: NW=" + NW.to_s() + " STEPS=" + STEPS.to_s() + " RESEED=" + RESEED_EVERY.to_s() + " MARGIN=" + MARGIN.to_s() + " WORKQ=" + WQWORK.to_s() + " WANDERQ=" + WQWANDER.to_s() + " WTHR=" + WTHR0.to_s()
+flush()
+
 seedu = i64[160]
 seedv = i64[160]
 seedw = i64[160]
@@ -473,7 +556,7 @@ work_ws = metal_buffer(device, NW * CAP * 4)
 best_us = metal_buffer(device, NW * CAP * 4)
 best_vs = metal_buffer(device, NW * CAP * 4)
 best_ws = metal_buffer(device, NW * CAP * 4)
-st = metal_buffer(device, NW * 8 * 4)
+st = metal_buffer(device, NW * 9 * 4)
 seed_us = metal_buffer(device, 160 * 4)
 seed_vs = metal_buffer(device, 160 * 4)
 seed_ws = metal_buffer(device, 160 * 4)
@@ -501,32 +584,82 @@ while rd < ROUNDS
     metal_buffer_write_i32(seed_vs, ii, seedv[ii])
     metal_buffer_write_i32(seed_ws, ii, seedw[ii])
     ii += 1
+  # density (total mask popcount = base-case ops budget) of the current seed;
+  # a same-rank GPU candidate only counts as an improvement if it beats this.
+  seedden = 0
+  ii = 0
+  while ii < startrank
+    seedden = seedden + popcnt(seedu[ii]) + popcnt(seedv[ii]) + popcnt(seedw[ii])
+    ii += 1
+  # poll the live-params file (restart-free sweep); a new GEN forces a reseed
+  force_reseed = 0
+  if livepath != ""
+    livec = read_file(livepath)
+    if livec != nil
+      livel = livec.split("\n")
+      if livel.size() > 0
+        lparts = livel[0].split(" ")
+        if lparts.size() > 6
+          STEPS = lparts[0].to_i()
+          RESEED_EVERY = lparts[1].to_i()
+          MARGIN = lparts[2].to_i()
+          WQWORK = lparts[3].to_i()
+          WQWANDER = lparts[4].to_i()
+          WTHR0 = lparts[5].to_i()
+          if RESEED_EVERY < 1
+            RESEED_EVERY = 1
+          newgen = lparts[6].to_i()
+          if newgen != live_gen
+            force_reseed = 1
+            live_gen = newgen
+            << "LIVE gen=" + newgen.to_s() + " STEPS=" + STEPS.to_s() + " RESEED=" + RESEED_EVERY.to_s() + " MARGIN=" + MARGIN.to_s() + " WORKQ=" + WQWORK.to_s() + " WANDERQ=" + WQWANDER.to_s() + " WTHR=" + WTHR0.to_s()
+            flush()
   metal_buffer_write_i32(params, 0, startrank)
   metal_buffer_write_i32(params, 1, CAP)
   metal_buffer_write_i32(params, 2, STEPS)
-  metal_buffer_write_i32(params, 3, 1)
+  reseed = 0
+  if (rd % RESEED_EVERY) == 0
+    reseed = 1
+  if force_reseed == 1
+    reseed = 1
+  metal_buffer_write_i32(params, 3, reseed)
   metal_buffer_write_i32(params, 4, MARGIN)
   metal_buffer_write_i32(params, 5, WQWORK)
   metal_buffer_write_i32(params, 6, WQWANDER)
   metal_buffer_write_i32(params, 7, WTHR0)
-  firstinit = 0
-  if rd == 0
-    firstinit = 1
-  metal_buffer_write_i32(params, 8, firstinit)
+  metal_buffer_write_i32(params, 8, reseed)
   metal_dispatch_groups(queue, pipeline, bufs, NW / WPG, WPG)
+  # pick the lexicographic (rank, density) best thread: lower rank wins; at equal
+  # rank, lower density (fewer base-case ops) wins.
   w = 0
   localmin = startrank
+  localden = 999999999
   bestthread = 0
   while w < NW
-    bw = metal_buffer_read_i32(st, w * 8 + 1)
+    bw = metal_buffer_read_i32(st, w * 9 + 1)
+    bd = metal_buffer_read_i32(st, w * 9 + 8)
+    better = 0
     if bw < localmin
+      better = 1
+    if bw == localmin
+      if bd < localden
+        better = 1
+    if better == 1
       localmin = bw
+      localden = bd
       bestthread = w
     w += 1
+  # improvement = lower rank than the seed, OR same rank at strictly lower density
+  improved = 0
   if localmin < startrank
+    improved = 1
+  if localmin == startrank
+    if localden < seedden
+      improved = 1
+  if improved == 1
     vok = verify_buf(best_us, best_vs, best_ws, bestthread * CAP, localmin, 555, nn, mm, pp)
     if vok == 1
-      body = localmin.to_s() + "\n"
+      body = localmin.to_s() + " " + localden.to_s() + "\n"
       di = 0
       while di < localmin
         uu = metal_buffer_read_i32(best_us, bestthread * CAP + di)
@@ -535,7 +668,7 @@ while rd < ROUNDS
         body = body + uu.to_s() + " " + vv.to_s() + " " + ww.to_s() + "\n"
         di += 1
       write_file(gpubestpath, body)
-      << "round " + rd.to_s() + "  GPU IMPROVED " + startrank.to_s() + " -> " + localmin.to_s() + "  verify=" + vok.to_s()
+      << "round " + rd.to_s() + "  GPU IMPROVED  rank " + startrank.to_s() + " -> " + localmin.to_s() + "  density " + seedden.to_s() + " -> " + localden.to_s() + "  verify=" + vok.to_s()
       flush()
       if localmin < globalbest
         globalbest = localmin
@@ -543,7 +676,7 @@ while rd < ROUNDS
         if localmin <= recordtarget
           recordhit = recordhit + 1
           write_file(recordpath + "_" + recordhit.to_s() + ".txt", body)
-  << "round " + rd.to_s() + "/" + ROUNDS.to_s() + "  started_from=" + startrank.to_s() + "  round_best=" + localmin.to_s() + "  global_best=" + globalbest.to_s()
+  << "round " + rd.to_s() + "/" + ROUNDS.to_s() + "  started_from=" + startrank.to_s() + "  seed_density=" + seedden.to_s() + "  round_best=" + localmin.to_s() + "  round_density=" + localden.to_s() + "  global_best=" + globalbest.to_s()
   flush()
   rd += 1
 

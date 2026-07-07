@@ -484,7 +484,13 @@ while i < args.size()
   kernels = collect_gpu_kernels(ast)
   if kernels.size() > 0
     metal_text = emit_gpu_kernels_metal(kernels)
-    metal_path = ll_path.replace(".ll", ".metal")
+    # Emit the .metal (and the opt-in .cu/.wgsl sidecars) next to the SOURCE,
+    # not next to the .ll. For `-o` the .ll lands in a temp build dir, but the
+    # runtime loads the kernel via a source-relative path (read_file →
+    # metal_compile_source), so a source-adjacent .metal is what actually runs;
+    # deriving from ll_path left `-o` writing a temp .metal and running a stale
+    # kernel. Now every rebuild of the source refreshes its companion .metal.
+    metal_path = file_path.replace(".w", ".metal")
     write_file(metal_path, metal_text)
     if verbose
       << "Wrote " + metal_path + " (" + kernels.size().to_s() + " @gpu fn)"
@@ -493,13 +499,13 @@ while i < args.size()
     dialects = env("TUNGSTEN_GPU_DIALECTS")
     if dialects != nil && dialects.include?("cuda")
       cuda_text = emit_gpu_kernels_cuda(kernels)
-      cuda_path = ll_path.replace(".ll", ".cu")
+      cuda_path = file_path.replace(".w", ".cu")
       write_file(cuda_path, cuda_text)
       if verbose
         << "Wrote " + cuda_path
     if dialects != nil && dialects.include?("wgsl")
       wgsl_text = emit_gpu_kernels_wgsl(kernels)
-      wgsl_path = ll_path.replace(".ll", ".wgsl")
+      wgsl_path = file_path.replace(".w", ".wgsl")
       write_file(wgsl_path, wgsl_text)
       if verbose
         << "Wrote " + wgsl_path

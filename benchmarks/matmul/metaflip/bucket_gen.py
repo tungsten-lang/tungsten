@@ -29,7 +29,8 @@ Usage: python3 bucket_gen.py <n> <m> <p> <recv> [seed] [cap] [thr] [thrper] [plu
 """
 
 
-def gen(n, m, p, recv, arr=200, cap=14000000000, seed=None, thr=6, thrper=300000, plusper=2000, band=10, adaptive_esc=None, stopat=None, randstart=False, z1max=4, z1q=100000000, workq=3000000000, wstep=10, wq=500000000, thr0=10, thrbump=2, rsmax=4, world_record=None, tiegap=2000, tiemax=500):
+def gen(n, m, p, recv, arr=200, cap=14000000000, seed=None, thr=6, thrper=300000, plusper=2000, band=10, adaptive_esc=None, stopat=None, randstart=False, z1max=4, z1q=100000000, workq=3000000000, wstep=10, wq=500000000, thr0=10, thrbump=2, rsmax=4, world_record=None, tiegap=2000, tiemax=500, record_bandq=None, runtime_seed=False,
+        worker=False):
     thrspan = thr + 1
     AB, BB, CB = n*m, m*p, n*p
     MODA, MODB = 1 << AB, 1 << BB
@@ -55,13 +56,37 @@ def gen(n, m, p, recv, arr=200, cap=14000000000, seed=None, thr=6, thrper=300000
                        ("HU", TS), ("HV", TS), ("HW", TS),
                        ("NXU", arr), ("PVU", arr), ("NXV", arr), ("PVV", arr),
                        ("NXW", arr), ("PVW", arr), ("IDL", arr),
-                       ("SU", arr + 8), ("SV", arr + 8), ("SW", arr + 8)]:
+                       ("SU", arr + 8), ("SV", arr + 8), ("SW", arr + 8),
+                       # STV: per-walker schedule state, persisted across rounds so
+                       # walk_worker(st, steps) can be called repeatedly (thread
+                       # worker mode). Slots: 0 rank, 1 best_rank, 2 rng, 3 aband,
+                       # 4 wthr, 5 wraps, 6 mv, 7 nextesc, 8 cyclesv, 9 cycled.
+                       ("STV", 12)]:
         off[name] = cur
         cur += size
     TOT = cur
     O = off
 
-    if seed_lines is not None:
+    if runtime_seed:
+        # Read the startup scheme from a bare-dump file (rank\nu v w\n...) named
+        # by av0[4], parse and install it — same pattern the GPU relay uses. Lets
+        # the orchestrator seed each walker at (re)launch time: naive on the first
+        # launch, a random fleet-best after a CYCLEOUT. All string parsing happens
+        # here at startup, never in the hot move loop.
+        seed_block = f"""sav = argv()
+rspath = sav[4]
+rscontent = read_file(rspath)
+rslines = rscontent.split("\\n")
+rsrank = rslines[0].to_i() ## i64
+rsi = 0 ## i64
+while rsi < rsrank
+  rsp = rslines[rsi + 1].split(" ")
+  rsu = rsp[0].to_i() ## i64
+  rsv = rsp[1].to_i() ## i64
+  rsw = rsp[2].to_i() ## i64
+  rank = ins_term(st, rsu, rsv, rsw, rank)
+  rsi += 1"""
+    elif seed_lines is not None:
         seed_terms = "\n".join(
             ln.replace("us[", f"st[{O['SU']} + ").replace("vs[", f"st[{O['SV']} + ")
               .replace("ws[", f"st[{O['SW']} + ")
@@ -91,6 +116,7 @@ while ni < {n}
 
     esc_block = ""
     impreset = ""
+    cycles_read = ""   # cal2zone2: read sawtooth-cycles-before-CYCLEOUT from av0[5]
     if adaptive_esc == "wcal2":
         # start 1-4 @100M; work 5..wthr @3B; wander @+10/500M; wrap>60 -> bstart.
         # 2 wraps -> fresh RNG + FULL reset-to-seed (naive) incl. best arrays.
@@ -234,6 +260,16 @@ while ni < {n}
           st[{O['BWS']} + rci] = st[{O['WS']} + rsl]
           rci += 1"""
         cycle_reset = restart_naive if seed is None else ""
+        # Record-mode budget: while the LIVE scheme sits AT the world record
+        # (rank <= world_record), dwell record_bandq moves per band before
+        # escalating (vs the 2B/500M zone quanta) — give a walker parked on the
+        # frontier a much longer look at each band. Only injected when both a
+        # world_record and a record_bandq are supplied.
+        recordq_block = ""
+        if world_record is not None and record_bandq is not None:
+            recordq_block = f"""
+    if rank <= {world_record}
+      q = {record_bandq}"""
         esc_block = f"""  if mv >= nextesc
     nb = aband + 1 ## i64
     if aband > wthr
@@ -252,7 +288,7 @@ while ni < {n}
     aband = nb
     q = 2000000000 ## i64
     if aband > wthr
-      q = 500000000
+      q = 500000000{recordq_block}
     nextesc = mv + q
     << "BAND band=" + aband.to_s() + " rank=" + rank.to_s() + " mv=" + mv.to_s()
     flush()"""
@@ -265,6 +301,56 @@ while ni < {n}
       << "BAND band=" + aband.to_s() + " rank=" + rank.to_s() + " mv=" + mv.to_s()
       flush()
     nextesc = mv + 2000000000"""
+    elif adaptive_esc == "cal2zone2":
+        # cal2zone variant (2026-07-06): work zone (band <= wthr) +1 band / 2.5B
+        # moves; wander zone (band > wthr) +12 / 500M; sawtooth wrap at band 60.
+        # FOUR full cycles with no descent -> the walker prints CYCLEOUT and EXITS
+        # (mv = cap); the orchestrator reseeds it from the fleet's current best
+        # (random among ties) and relaunches. wthr rises by ONE whenever a descent
+        # lands within one band of the threshold. Record budget (record_bandq):
+        # dwell that many moves per band while rank <= world_record.
+        recordq_block = ""
+        if world_record is not None and record_bandq is not None:
+            recordq_block = f"""
+    if rank <= {world_record}
+      q = {record_bandq}"""
+        # sawtooth cycles before a CYCLEOUT reseed: runtime-tunable via av0[5]
+        # (default 4 when not supplied, so existing 5-arg callers are unchanged).
+        cycles_read = """cyclesv = 4 ## i64
+if av0.size() > 5
+  cyclesv = av0[5].to_i()
+<< "CYCLES " + cyclesv.to_s()
+flush()"""
+        esc_block = f"""  if mv >= nextesc
+    nb = aband + 1 ## i64
+    if aband > wthr
+      nb = aband + 12
+    if nb > 60
+      nb = bstart
+      wraps = wraps + 1
+      if wraps >= cyclesv
+        << "CYCLEOUT rank=" + rank.to_s() + " mv=" + mv.to_s()
+        flush()
+        mv = {cap}
+    aband = nb
+    q = 2500000000 ## i64
+    if aband > wthr
+      q = 500000000{recordq_block}
+    nextesc = mv + q
+    << "BAND band=" + aband.to_s() + " rank=" + rank.to_s() + " mv=" + mv.to_s()
+    flush()"""
+        impreset = f"""    if aband >= wthr - 1
+      if aband <= wthr + 1
+        wthr = wthr + 1
+        if wthr > 58
+          wthr = 58
+        << "WTHR thr=" + wthr.to_s() + " band=" + aband.to_s() + " mv=" + mv.to_s()
+        flush()
+    if aband != bstart
+      aband = bstart
+      << "BAND band=" + aband.to_s() + " rank=" + rank.to_s() + " mv=" + mv.to_s()
+      flush()
+    nextesc = mv + 2500000000"""
     elif adaptive_esc == "zones":
         # zone quanta: bands 1-4 -> +1/500M; 5-20 -> +1/2B; 21+ -> +5/1B; sawtooth at 60
         esc_block = """  if mv >= nextesc
@@ -621,6 +707,7 @@ aband = bstart ## i64
 nextesc = {z1q} ## i64
 wthr = {thr0} ## i64
 wraps = 0 ## i64
+{cycles_read}
 << "BSTART " + bstart.to_s()
 flush()
 mv = 0 ## i64
@@ -761,8 +848,405 @@ while di < best_rank
 '''
 
 
+def gen_worker(n, m, p, recv, world_record=None, cycles=4, thr=6, thrper=300000,
+               plusper=2000, arr=200):
+    """Thread-worker form of the cal2zone2 walker for flipfleet.w.
+
+    Emits a MODULE of functions (no standalone `main`) that operate on a caller-
+    owned `st = i64[worker_st_size(...)]`, so N of them can run on N threads over
+    N separate `st` arrays:
+
+      init_naive(st, seed)    build the naive scheme + init schedule state in st
+      walk_worker(st, steps)  run `steps` flip-graph moves (allocation-free, no
+                              I/O); schedule state (rng/aband/wthr/wraps/mv/
+                              nextesc/best_rank/rank) lives in st's STV slots and
+                              is loaded at entry / saved at exit — so repeated
+                              calls continue one walker's cal2zone2 descent
+      read_best_rank/…/cycled main-thread readers for coordination + the TUI
+
+    The hash-chain helpers (hsh/chain_link/ins_term/chain_rpick/pressure/verify)
+    are reused verbatim from gen() so this stays the *same* walker; only the
+    driver (loop wrapper + state persistence + I/O removal) is new here.
+    """
+    # ---- layout (mirrors gen(); STV is last so earlier offsets are identical) --
+    AB, BB, CB = n * m, m * p, n * p
+    MODA, MODB = 1 << AB, 1 << BB
+    maxbits = max(AB, BB, CB) + 1
+    seed_rank = n * m * p
+    arr = max(arr, seed_rank + 80)
+    TS = 1
+    while TS < 8 * arr + 8:
+        TS *= 2
+    off, cur = {}, 0
+    for name, size in [("P2", maxbits), ("US", arr), ("VS", arr), ("WS", arr),
+                       ("BUS", arr), ("BVS", arr), ("BWS", arr),
+                       ("LIVE", arr), ("POS", arr), ("FL", arr), ("FLT", 2),
+                       ("HU", TS), ("HV", TS), ("HW", TS),
+                       ("NXU", arr), ("PVU", arr), ("NXV", arr), ("PVV", arr),
+                       ("NXW", arr), ("PVW", arr), ("IDL", arr),
+                       ("SU", arr + 8), ("SV", arr + 8), ("SW", arr + 8),
+                       ("STV", 12)]:
+        off[name] = cur
+        cur += size
+    TOT = cur
+    O = off
+    S = off["STV"]  # STV slots: 0 rank 1 best 2 rng 3 aband 4 wthr 5 wraps 6 mv
+                    #            7 nextesc 8 cyclesv 9 cycled
+
+    # ---- reuse gen()'s io-free hash-chain helpers by slicing them out ----------
+    full = gen(n, m, p, recv, adaptive_esc="cal2zone2", band=1, thr0=7,
+               world_record=None, thr=thr, thrper=thrper, plusper=plusper, arr=arr)
+    helpers = full[full.index("-> hsh(x)"):full.index("\nrank = 0 ## i64")]
+
+    thrspan = thr + 1
+    # record budget: dwell 10B moves/band while at/under the world record
+    recq = ""
+    if world_record is not None:
+        recq = f"""
+      if rank <= {world_record}
+        q = 10000000000"""
+
+    return f'''{helpers}
+
+-> wpc(x) (i64) i64
+  c = 0 ## i64
+  y = x ## i64
+  while y != 0
+    y = y & (y - 1)
+    c = c + 1
+  c
+
+-> worker_st_size (i64)
+  {TOT}
+
+-> init_naive(st, seed, dslack, cycles) (i64[] i64 i64 i64) i64
+  st[{O['P2']}] = 1
+  kk = 1 ## i64
+  while kk < {maxbits}
+    st[{O['P2']} + kk] = st[{O['P2']} + kk - 1] + st[{O['P2']} + kk - 1]
+    kk += 1
+  ii = 0 ## i64
+  while ii < {arr}
+    st[{O['IDL']} + ii] = ii
+    st[{O['FL']} + ii] = {arr} - 1 - ii
+    ii += 1
+  st[{O['FLT']}] = {arr}
+  hz = 0 ## i64
+  while hz < {TS}
+    st[{O['HU']} + hz] = 0
+    st[{O['HV']} + hz] = 0
+    st[{O['HW']} + hz] = 0
+    hz += 1
+  rank = 0 ## i64
+  ni = 0 ## i64
+  while ni < {n}
+    nj = 0 ## i64
+    while nj < {m}
+      nk = 0 ## i64
+      while nk < {p}
+        tu = st[{O['P2']} + ni * {m} + nj] ## i64
+        tv = st[{O['P2']} + nj * {p} + nk] ## i64
+        tw = st[{O['P2']} + ni * {p} + nk] ## i64
+        rank = ins_term(st, tu, tv, tw, rank)
+        nk += 1
+      nj += 1
+    ni += 1
+  bi = 0 ## i64
+  while bi < rank
+    sl = st[{O['LIVE']} + bi] ## i64
+    st[{O['BUS']} + bi] = st[{O['US']} + sl]
+    st[{O['BVS']} + bi] = st[{O['VS']} + sl]
+    st[{O['BWS']} + bi] = st[{O['WS']} + sl]
+    bi += 1
+  st[{S}] = rank
+  st[{S} + 1] = rank
+  st[{S} + 2] = seed * 1009 + 12345
+  st[{S} + 3] = 1
+  st[{S} + 4] = 7
+  st[{S} + 5] = 0
+  st[{S} + 6] = 0
+  st[{S} + 7] = 100000000
+  st[{S} + 8] = cycles
+  st[{S} + 9] = 0
+  st[{S} + 10] = dslack
+  0
+
+-> walk_worker(st, steps) (i64[] i64) i64
+  rank = st[{S}] ## i64
+  best_rank = st[{S} + 1] ## i64
+  rng = st[{S} + 2] ## i64
+  aband = st[{S} + 3] ## i64
+  wthr = st[{S} + 4] ## i64
+  wraps = st[{S} + 5] ## i64
+  mv = st[{S} + 6] ## i64
+  nextesc = st[{S} + 7] ## i64
+  cyclesv = st[{S} + 8] ## i64
+  dslack = st[{S} + 10] ## i64
+  bstart = 1 ## i64
+  threshold = {thr} ## i64
+  sc = 0 ## i64
+  while sc < steps
+    rng = (rng * 1103515245 + 12345) & 2147483647
+    td = (rng * rank) >> 31 ## i64
+    ti = st[{O['LIVE']} + td] ## i64
+    ui = st[{O['US']} + ti] ## i64
+    vi = st[{O['VS']} + ti] ## i64
+    wi = st[{O['WS']} + ti] ## i64
+    rng = (rng * 1103515245 + 12345) & 2147483647
+    axis = (((rng >> 22) & 511) * 3) >> 9 ## i64
+    partner = 0 - 1 ## i64
+    rng = (rng * 1103515245 + 12345) & 2147483647
+    if axis == 0
+      partner = chain_rpick(st, {O['HU']}, {O['NXU']}, {O['US']}, ui, ti, rng)
+    if axis == 1
+      partner = chain_rpick(st, {O['HV']}, {O['NXV']}, {O['VS']}, vi, ti, rng)
+    if axis == 2
+      partner = chain_rpick(st, {O['HW']}, {O['NXW']}, {O['WS']}, wi, ti, rng)
+    if partner >= 0
+      uj = st[{O['US']} + partner] ## i64
+      vj = st[{O['VS']} + partner] ## i64
+      wj = st[{O['WS']} + partner] ## i64
+      au = ui ## i64
+      av2 = vi ## i64
+      aw = wi ## i64
+      bu = ui ## i64
+      bv = vi ## i64
+      bw = wj ## i64
+      if axis == 0
+        aw = wi ^ wj
+        bv = vi ^ vj
+      if axis == 1
+        aw = wi ^ wj
+        bu = ui ^ uj
+      if axis == 2
+        av2 = vi ^ vj
+        aw = wi
+        bu = ui ^ uj
+        bv = vj
+        bw = wi
+      pold = pressure(st, ui, vi, wi) + pressure(st, uj, vj, wj) ## i64
+      rankb = rank ## i64
+      rank = ins_term(st, ui, vi, wi, rank) ## i64
+      rank = ins_term(st, uj, vj, wj, rank) ## i64
+      rank = ins_term(st, au, av2, aw, rank) ## i64
+      rank = ins_term(st, bu, bv, bw, rank) ## i64
+      pnew = pressure(st, au, av2, aw) + pressure(st, bu, bv, bw) ## i64
+      acc = 0 ## i64
+      if rank < rankb
+        acc = 1
+      if acc == 0
+        if pnew + threshold >= pold
+          dn = wpc(au) + wpc(av2) + wpc(aw) + wpc(bu) + wpc(bv) + wpc(bw) ## i64
+          do0 = wpc(ui) + wpc(vi) + wpc(wi) + wpc(uj) + wpc(vj) + wpc(wj) ## i64
+          if dn <= do0 + dslack
+            acc = 1
+      if acc == 0
+        rank = ins_term(st, ui, vi, wi, rank) ## i64
+        rank = ins_term(st, uj, vj, wj, rank) ## i64
+        rank = ins_term(st, au, av2, aw, rank) ## i64
+        rank = ins_term(st, bu, bv, bw, rank) ## i64
+    if (mv % {plusper}) == 0
+      rng = (rng * 1103515245 + 12345) & 2147483647
+      pd1 = (rng * rank) >> 31 ## i64
+      pt1 = st[{O['LIVE']} + pd1] ## i64
+      rng = (rng * 1103515245 + 12345) & 2147483647
+      pd2 = (rng * rank) >> 31 ## i64
+      pt2 = st[{O['LIVE']} + pd2] ## i64
+      spu = st[{O['US']} + pt1] ## i64
+      spv = st[{O['VS']} + pt1] ## i64
+      spw = st[{O['WS']} + pt1] ## i64
+      wpr = st[{O['WS']} + pt2] ## i64
+      if wpr != spw
+        if wpr != 0
+          spw2 = spw ^ wpr ## i64
+          rank = ins_term(st, spu, spv, spw, rank) ## i64
+          rank = ins_term(st, spu, spv, wpr, rank) ## i64
+          rank = ins_term(st, spu, spv, spw2, rank) ## i64
+    threshold = {thr} - ((mv / {thrper}) % {thrspan}) ## i64
+    if mv >= nextesc
+      nb = aband + 1 ## i64
+      if aband > wthr
+        nb = aband + 12
+      if nb > 60
+        nb = bstart
+        wraps = wraps + 1
+        if wraps >= cyclesv
+          st[{S} + 9] = 1
+      aband = nb
+      q = 500000000 ## i64
+      if aband > wthr
+        q = 100000000{recq}
+      nextesc = mv + q
+    if rank > best_rank + aband
+      hz = 0 ## i64
+      while hz < {TS}
+        st[{O['HU']} + hz] = 0
+        st[{O['HV']} + hz] = 0
+        st[{O['HW']} + hz] = 0
+        hz += 1
+      fz = 0 ## i64
+      while fz < {arr}
+        st[{O['FL']} + fz] = {arr} - 1 - fz
+        fz += 1
+      st[{O['FLT']}] = {arr}
+      rank = 0 ## i64
+      ri = 0 ## i64
+      while ri < best_rank
+        cu = st[{O['BUS']} + ri] ## i64
+        cv = st[{O['BVS']} + ri] ## i64
+        cw = st[{O['BWS']} + ri] ## i64
+        rank = ins_term(st, cu, cv, cw, rank)
+        ri += 1
+    if rank < best_rank
+      best_rank = rank
+      if aband >= wthr - 1
+        if aband <= wthr + 1
+          wthr = wthr + 1
+          if wthr > 58
+            wthr = 58
+      if aband != bstart
+        aband = bstart
+      nextesc = mv + 500000000
+      ci = 0 ## i64
+      while ci < rank
+        sl = st[{O['LIVE']} + ci] ## i64
+        st[{O['BUS']} + ci] = st[{O['US']} + sl]
+        st[{O['BVS']} + ci] = st[{O['VS']} + sl]
+        st[{O['BWS']} + ci] = st[{O['WS']} + sl]
+        ci += 1
+    mv += 1
+    sc += 1
+  st[{S}] = rank
+  st[{S} + 1] = best_rank
+  st[{S} + 2] = rng
+  st[{S} + 3] = aband
+  st[{S} + 4] = wthr
+  st[{S} + 5] = wraps
+  st[{S} + 6] = mv
+  st[{S} + 7] = nextesc
+  best_rank
+
+-> read_best_rank(st) (i64[]) i64
+  st[{S} + 1]
+
+-> read_best_u(st, i) (i64[] i64) i64
+  st[{O['BUS']} + i]
+
+-> read_best_v(st, i) (i64[] i64) i64
+  st[{O['BVS']} + i]
+
+-> read_best_w(st, i) (i64[] i64) i64
+  st[{O['BWS']} + i]
+
+-> read_cycled(st) (i64[]) i64
+  st[{S} + 9]
+
+-> verify_best(st) (i64[]) i64
+  verify(st, {O['BUS']}, {O['BVS']}, {O['BWS']}, {O['IDL']}, st[{S} + 1], 31)
+
+-> best_bits(st) (i64[]) i64
+  tb = 0 ## i64
+  br = st[{S} + 1] ## i64
+  t = 0 ## i64
+  while t < br
+    tb = tb + wpc(st[{O['BUS']} + t]) + wpc(st[{O['BVS']} + t]) + wpc(st[{O['BWS']} + t])
+    t += 1
+  tb
+
+-> reseed_from(st, src, seed) (i64[] i64[] i64) i64
+  hz = 0 ## i64
+  while hz < {TS}
+    st[{O['HU']} + hz] = 0
+    st[{O['HV']} + hz] = 0
+    st[{O['HW']} + hz] = 0
+    hz += 1
+  fz = 0 ## i64
+  while fz < {arr}
+    st[{O['FL']} + fz] = {arr} - 1 - fz
+    fz += 1
+  st[{O['FLT']}] = {arr}
+  rank = 0 ## i64
+  srank = src[{S} + 1] ## i64
+  si = 0 ## i64
+  while si < srank
+    rank = ins_term(st, src[{O['BUS']} + si], src[{O['BVS']} + si], src[{O['BWS']} + si], rank)
+    si += 1
+  ci = 0 ## i64
+  while ci < rank
+    sl = st[{O['LIVE']} + ci] ## i64
+    st[{O['BUS']} + ci] = st[{O['US']} + sl]
+    st[{O['BVS']} + ci] = st[{O['VS']} + sl]
+    st[{O['BWS']} + ci] = st[{O['WS']} + sl]
+    ci += 1
+  st[{S}] = rank
+  st[{S} + 1] = rank
+  st[{S} + 2] = seed * 1009 + 12345
+  st[{S} + 3] = 1
+  st[{S} + 4] = 7
+  st[{S} + 5] = 0
+  st[{S} + 6] = 0
+  st[{S} + 7] = 100000000
+  st[{S} + 9] = 0
+  0
+
+-> load_scheme(st, path, seed) (i64[] String i64) i64
+  hz = 0 ## i64
+  while hz < {TS}
+    st[{O['HU']} + hz] = 0
+    st[{O['HV']} + hz] = 0
+    st[{O['HW']} + hz] = 0
+    hz += 1
+  fz = 0 ## i64
+  while fz < {arr}
+    st[{O['FL']} + fz] = {arr} - 1 - fz
+    fz += 1
+  st[{O['FLT']}] = {arr}
+  rank = 0 ## i64
+  content = read_file(path)
+  lines = content.split("\\n")
+  srank = lines[0].to_i() ## i64
+  si = 0 ## i64
+  while si < srank
+    parts = lines[si + 1].split(" ")
+    rank = ins_term(st, parts[0].to_i(), parts[1].to_i(), parts[2].to_i(), rank)
+    si += 1
+  ci = 0 ## i64
+  while ci < rank
+    sl = st[{O['LIVE']} + ci] ## i64
+    st[{O['BUS']} + ci] = st[{O['US']} + sl]
+    st[{O['BVS']} + ci] = st[{O['VS']} + sl]
+    st[{O['BWS']} + ci] = st[{O['WS']} + sl]
+    ci += 1
+  st[{S}] = rank
+  st[{S} + 1] = rank
+  st[{S} + 2] = seed * 1009 + 12345
+  st[{S} + 3] = 1
+  st[{S} + 4] = 7
+  st[{S} + 5] = 0
+  st[{S} + 6] = 0
+  st[{S} + 7] = 100000000
+  st[{S} + 9] = 0
+  rank
+
+-> dump_scheme(st, path) (i64[] String) i64
+  br = st[{S} + 1] ## i64
+  body = br.to_s() + "\\n"
+  di = 0 ## i64
+  while di < br
+    body = body + st[{O['BUS']} + di].to_s() + " " + st[{O['BVS']} + di].to_s() + " " + st[{O['BWS']} + di].to_s() + "\\n"
+    di += 1
+  z = write_file(path, body)
+  br
+'''
+
+
 if __name__ == "__main__":
     import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "--worker":
+        n, m, p, recv = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
+        wr = int(sys.argv[6]) if len(sys.argv) > 6 else None
+        print(gen_worker(n, m, p, recv, world_record=wr), end="")
+        sys.exit(0)
     n, m, p, recv = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
     seed = sys.argv[5] if len(sys.argv) > 5 else None
     cap = int(sys.argv[6]) if len(sys.argv) > 6 else 14000000000

@@ -389,9 +389,13 @@ while round < 2000000000
     w += 1
 
   # if an explorer beat the elite, the elite ADOPTS it — this resets the elite's
-  # sawtooth to band 1, exactly like an in-place descent would.
+  # sawtooth to band 1, exactly like an in-place descent would. reseed_from arms
+  # nextesc to the short naive-init budget (100M); re-arm it to a full work-zone
+  # dwell (2.5B) so the band holds at 1 for 2.5B moves at the adopted rank before
+  # escalating, exactly as an in-place descent (walk_worker) does.
   if bestw != 0
     z = reseed_from(sts[0], sts[bestw], round * 131 + 7)
+    sts[0][10091 + 7] = sts[0][10091 + 6] + 2500000000
     reseeds += 1
   cur_rank = read_best_rank(sts[0])
   cur_den = best_bits(sts[0]) ## i64

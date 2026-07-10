@@ -92,7 +92,7 @@ msl_src << "  if (lane == 0) y\[m\] = partial;\n"
 msl_src << "}\n"
 msl = msl_src.to_s()
 
-<< "MSL string built, length=" + msl.length.to_s
+<< "MSL string built, length=" + msl.size.to_s
 << "compiling MSL..."
 library = metal_compile_source(device, msl)
 << "compiled, getting pipeline..."

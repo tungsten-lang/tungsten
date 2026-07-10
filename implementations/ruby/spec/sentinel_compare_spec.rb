@@ -17,8 +17,7 @@ require "open3"
 RSpec.describe "sentinel equality fast path" do
   project_root = File.expand_path("../../..", __dir__)
   compiler_bin = File.join(project_root, "bin/tungsten-compiler")
-  llc_bin = `which llc`.strip
-  llc_bin = "/opt/homebrew/opt/llvm/bin/llc" if llc_bin.empty? && File.exist?("/opt/homebrew/opt/llvm/bin/llc")
+  clang_bin = ENV.fetch("TUNGSTEN_CC", "clang")
 
   def compile_to_ll(source, name, compiler_bin, project_root)
     Dir.mktmpdir("tungsten-sentinel") do |dir|
@@ -133,28 +132,24 @@ RSpec.describe "sentinel equality fast path" do
   end
 
   describe "ARM64 asm: single instruction for nil, ≤2 for true/false", if: RUBY_PLATFORM =~ /arm64|aarch64/i do
-    before do
-      skip "llc not available" unless llc_bin && File.exist?(llc_bin)
-    end
-
     # Compiles the source through clang -S to produce ARM64 assembly for the
     # named function, then counts the relevant compare/branch ops in its
     # body. Uses -O3 to match release builds.
-    def compile_to_asm(source, name, compiler_bin, llc_bin, project_root)
+    def compile_to_asm(source, name, compiler_bin, clang_bin, project_root)
       Dir.mktmpdir("tungsten-asm") do |dir|
         src = File.join(dir, "#{name}.w")
         File.write(src, source)
         bin_out = File.join(dir, name)
-      env = { "TUNGSTEN_EMIT_LL" => "1", "TUNGSTEN_CACHE_DIR" => File.join(project_root, "build/cache") }
-      _o, err, status = Open3.capture3(env, compiler_bin, "compile", src, "--out", bin_out)
-      raise "compile failed: #{err}" unless status.success?
-      @last_sidemap_path = "#{bin_out}.sidemap"
-      @last_sidemap = File.exist?(@last_sidemap_path) ? JSON.parse(File.read(@last_sidemap_path)) : nil
-      ll_path = "/tmp/tungsten/#{name}.ll"
+        env = { "TUNGSTEN_EMIT_LL" => "1", "TUNGSTEN_CACHE_DIR" => File.join(project_root, "build/cache") }
+        _o, err, status = Open3.capture3(env, compiler_bin, "compile", src, "--out", bin_out)
+        raise "compile failed: #{err}" unless status.success?
+        @last_sidemap_path = "#{bin_out}.sidemap"
+        @last_sidemap = File.exist?(@last_sidemap_path) ? JSON.parse(File.read(@last_sidemap_path)) : nil
+        ll_path = "/tmp/tungsten/#{name}.ll"
         raise "LL not emitted" unless File.exist?(ll_path)
         asm_path = File.join(dir, "#{name}.s")
-        _o, err, status = Open3.capture3(llc_bin, "-O3", "-mtriple=arm64-apple-macos", ll_path, "-o", asm_path)
-        raise "llc failed: #{err}" unless status.success?
+        _o, err, status = Open3.capture3(clang_bin, "-S", "-O3", "--target=arm64-apple-macos", ll_path, "-o", asm_path)
+        raise "clang -S failed: #{err}" unless status.success?
         yield File.read(asm_path)
       end
     end
@@ -225,7 +220,7 @@ RSpec.describe "sentinel equality fast path" do
     end
 
     it "x == nil in branch context uses cbz (1 compare-op)" do
-      compile_to_asm(wrapper_source, "asm_branch_nil", compiler_bin, llc_bin, project_root) do |asm|
+      compile_to_asm(wrapper_source, "asm_branch_nil", compiler_bin, clang_bin, project_root) do |asm|
         body = asm_body(asm, "branch_nil")
         ops = count_compare_ops(body)
         expect(ops).to be <= 1, "expected ≤1 compare-op for nil branch, got #{ops}:\n#{body}"
@@ -233,7 +228,7 @@ RSpec.describe "sentinel equality fast path" do
     end
 
     it "x != nil in branch context uses cbnz (1 compare-op)" do
-      compile_to_asm(wrapper_source, "asm_branch_not_nil", compiler_bin, llc_bin, project_root) do |asm|
+      compile_to_asm(wrapper_source, "asm_branch_not_nil", compiler_bin, clang_bin, project_root) do |asm|
         body = asm_body(asm, "branch_not_nil")
         ops = count_compare_ops(body)
         expect(ops).to be <= 1, "expected ≤1 compare-op for !nil branch, got #{ops}:\n#{body}"
@@ -241,7 +236,7 @@ RSpec.describe "sentinel equality fast path" do
     end
 
     it "x == true in branch context uses cmp+b.cond (≤2 compare-ops)" do
-      compile_to_asm(wrapper_source, "asm_branch_true", compiler_bin, llc_bin, project_root) do |asm|
+      compile_to_asm(wrapper_source, "asm_branch_true", compiler_bin, clang_bin, project_root) do |asm|
         body = asm_body(asm, "branch_true")
         ops = count_compare_ops(body)
         expect(ops).to be <= 2, "expected ≤2 compare-ops for true branch, got #{ops}:\n#{body}"
@@ -249,7 +244,7 @@ RSpec.describe "sentinel equality fast path" do
     end
 
     it "x == false in branch context uses cmp+b.cond (≤2 compare-ops)" do
-      compile_to_asm(wrapper_source, "asm_branch_false", compiler_bin, llc_bin, project_root) do |asm|
+      compile_to_asm(wrapper_source, "asm_branch_false", compiler_bin, clang_bin, project_root) do |asm|
         body = asm_body(asm, "branch_false")
         ops = count_compare_ops(body)
         expect(ops).to be <= 2, "expected ≤2 compare-ops for false branch, got #{ops}:\n#{body}"

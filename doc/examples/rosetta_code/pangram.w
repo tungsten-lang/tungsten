@@ -4,7 +4,7 @@
   letters = "abcdefghijklmnopqrstuvwxyz"
   lower = s.downcase
   i = 0
-  while i < letters.length
+  while i < letters.size
     unless lower.include?(letters[i])
       return false
     i += 1

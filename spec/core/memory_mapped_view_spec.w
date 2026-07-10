@@ -14,23 +14,23 @@ use core/file
 
 m = File.mmap("/tmp/tungsten-mmap-view-smoke.bin")
 
-if m.length != 16
-  << "FAIL mmap length"
+if m.size != 16
+  << "FAIL mmap size"
   exit 1
 
 bview = m.as_u8
-if bview.length != 16 || bview[0] != 1 || bview[4] != 2 || bview[8] != 3 || bview[12] != 4
+if bview.size != 16 || bview[0] != 1 || bview[4] != 2 || bview[8] != 3 || bview[12] != 4
   << "FAIL as_u8"
   exit 1
 
 wview = m.as_u32
-if wview.length != 4 || wview[0] != 1 || wview[1] != 2 || wview[2] != 3 || wview[3] != 4
+if wview.size != 4 || wview[0] != 1 || wview[1] != 2 || wview[2] != 3 || wview[3] != 4
   << "FAIL as_u32"
   exit 1
 
 fview = m.as_f32
-if fview.length != 4
-  << "FAIL as_f32 length"
+if fview.size != 4
+  << "FAIL as_f32 size"
   exit 1
 
 m.close

@@ -10,22 +10,22 @@
 use ../../languages/c/lexer32
 
 args = argv()
-if args.length() == 0
+if args.size() == 0
   << "Usage: bench_parallel <file.c> [total_jobs] [goroutines]"
   exit(1)
 
 file = args[0]
 total_jobs = 20
-if args.length() > 1
+if args.size() > 1
   total_jobs = args[1].to_i()
 goroutines = 8
-if args.length() > 2
+if args.size() > 2
   goroutines = args[2].to_i()
 
 source = read_file(file)
 lc = source.lchs("c", bits: 32)             # C-specific codepoints: IS_ID_START includes A-Z
-count = lc.length()
-byte_count = source.length()
+count = lc.size()
+byte_count = source.size()
 
 << "Parallel C Lexer Benchmark (Lex32)"
 << "  file:       [file]"

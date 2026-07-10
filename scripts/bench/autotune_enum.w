@@ -23,11 +23,11 @@ layouts   = ["none", "packed"]
 
 variants = []
 i = 0
-while i < strides.length()
+while i < strides.size()
   j = 0
-  while j < vec_factors.length()
+  while j < vec_factors.size()
     k = 0
-    while k < layouts.length()
+    while k < layouts.size()
       variants.push({stride: strides[i], vec: vec_factors[j], layout: layouts[k]})
       k = k + 1
     j = j + 1
@@ -65,7 +65,7 @@ sb << "@layout q8_matvec.packed_q8\n"
 sb << "  buffer :w_q, from: \"i8\[\]\", to: \"i32\[\]\", unpack: :sign_extend_per_byte\n\n"
 
 i = 0
-while i < variants.length()
+while i < variants.size()
   v = variants[i]
   sb << "@schedule q8_matvec." + variant_name(v) + "\n"
   if v[:layout] == "packed"
@@ -79,7 +79,7 @@ while i < variants.length()
   i = i + 1
 
 write_file(GEN_PATH, sb.to_s)
-<< "wrote " + variants.length().to_s + " variants → " + GEN_PATH
+<< "wrote " + variants.size().to_s + " variants → " + GEN_PATH
 
 # Compile to get the .metal file (and a binary we don't actually run).
 system("bin/tungsten compile " + GEN_PATH + " --ll -o " + GEN_BIN)
@@ -126,7 +126,7 @@ default_pipe = metal_pipeline(library, "q8_matvec")
 candidates.push(AutotuneCandidate.new("default", default_pipe, n_rows, 0, bufs))
 
 i = 0
-while i < variants.length()
+while i < variants.size()
   vname = variant_name(variants[i])
   pipe  = metal_pipeline(library, "q8_matvec_" + vname)
   candidates.push(AutotuneCandidate.new(vname, pipe, n_rows, 32, bufs))

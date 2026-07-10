@@ -73,6 +73,19 @@ RSpec.describe "CLI commands surface" do
     end
   end
 
+  describe "doctor" do
+    it "checks the required clang/lld toolchain without requiring standalone llc" do
+      out, err, status = run_cli(ruby_cli, "doctor")
+
+      expect(status.exitstatus).to eq(0), err
+      expect(out).to include("clang")
+      expect(out).to include("lld linker")
+      expect(out).to include("libzstd (zstd.h)")
+      expect(out).not_to include("llc")
+      expect(out).to match(%r{\d+/7 checks passed})
+    end
+  end
+
   describe "script arguments" do
     it "passes user args to argv() and ARGV without the script path" do
       Dir.mktmpdir("tungsten-cli-argv") do |dir|

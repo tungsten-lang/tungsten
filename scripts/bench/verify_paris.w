@@ -275,13 +275,13 @@ pos = 0
 i = 0
 last_pred = -1
 t_prefill_start = ccall("__w_clock_ms")
-while i < prompt_ids.length()
+while i < prompt_ids.size()
   last_pred = forward_step(prompt_ids[i], pos)
   pos = pos + 1
   i = i + 1
 t_prefill = ccall("__w_clock_ms") - t_prefill_start
 << ""
-<< "prefill: " + prompt_ids.length().to_s + " tokens in " + t_prefill.to_s + " ms (" + (t_prefill / prompt_ids.length()).to_s + " ms/token)"
+<< "prefill: " + prompt_ids.size().to_s + " tokens in " + t_prefill.to_s + " ms (" + (t_prefill / prompt_ids.size()).to_s + " ms/token)"
 
 << ""
 << "next-token argmax = " + last_pred.to_s + " ('" + tok.decode([last_pred]) + "')"

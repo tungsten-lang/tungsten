@@ -1,0 +1,171 @@
+# Unit table — single source of truth for stages/tungsten/runtime/runtime.c
+# and stages/tungsten/lib/lowering.w
+#
+# Format: id<TAB>name<TAB>category
+# Lines starting with # are comments. Blank lines are ignored.
+# Unicode characters are stored as-is (UTF-8).
+
+# SI base units (0-6)
+0	m	SI base
+1	kg	SI base
+2	s	SI base
+3	A	SI base
+4	K	SI base
+5	mol	SI base
+6	cd	SI base
+
+# SI derived units (7-26)
+7	Hz	SI derived
+8	N	SI derived
+9	Pa	SI derived
+10	J	SI derived
+11	W	SI derived
+12	C	SI derived
+13	V	SI derived
+14	F	SI derived
+15	Ω	SI derived
+16	S	SI derived
+17	Wb	SI derived
+18	T	SI derived
+19	H	SI derived
+20	°C	SI derived
+21	lm	SI derived
+22	lx	SI derived
+23	Bq	SI derived
+24	Gy	SI derived
+25	Sv	SI derived
+26	kat	SI derived
+
+# SI prefixed length (27-32)
+27	km	prefixed length
+28	cm	prefixed length
+29	mm	prefixed length
+30	µm	prefixed length
+31	nm	prefixed length
+32	pm	prefixed length
+
+# SI prefixed mass (33-36)
+33	g	prefixed mass
+34	mg	prefixed mass
+35	µg	prefixed mass
+36	t	prefixed mass
+
+# SI prefixed time (37-40)
+37	ms	prefixed time
+38	µs	prefixed time
+39	ns	prefixed time
+40	ps	prefixed time
+
+# SI prefixed frequency (41-44)
+41	kHz	prefixed frequency
+42	MHz	prefixed frequency
+43	GHz	prefixed frequency
+44	THz	prefixed frequency
+
+# SI prefixed energy/power (45-52)
+45	kJ	prefixed energy
+46	MJ	prefixed energy
+47	GJ	prefixed energy
+48	kW	prefixed power
+49	MW	prefixed power
+50	GW	prefixed power
+51	kWh	prefixed energy
+52	MWh	prefixed energy
+
+# SI prefixed electric (53-56)
+53	mA	prefixed electric
+54	µA	prefixed electric
+55	kV	prefixed electric
+56	MV	prefixed electric
+
+# SI prefixed pressure (57-59)
+57	kPa	prefixed pressure
+58	MPa	prefixed pressure
+59	GPa	prefixed pressure
+
+# Imperial length (60-63)
+60	in	imperial length
+61	ft	imperial length
+62	yd	imperial length
+63	mi	imperial length
+
+# Imperial mass (64-65)
+64	oz	imperial mass
+65	lb	imperial mass
+
+# Imperial volume (66-69)
+66	fl oz	imperial volume
+67	gal	imperial volume
+68	qt	imperial volume
+69	pt	imperial volume
+
+# Area (70-75)
+70	m²	area
+71	cm²	area
+72	km²	area
+73	ha	area
+74	acre	area
+75	ft²	area
+
+# Volume (76-79)
+76	m³	volume
+77	cm³	volume
+78	L	volume
+79	mL	volume
+
+# Speed/acceleration (80-83)
+80	m/s	speed
+81	km/h	speed
+82	mph	speed
+83	m/s²	acceleration
+
+# Angular/temperature (84-87)
+84	rad	angular
+85	°	angular
+86	sr	angular
+87	°F	temperature
+
+# Information (88-98)
+88	bit	information
+89	B	information
+90	KB	information
+91	MB	information
+92	GB	information
+93	TB	information
+94	PB	information
+95	KiB	information
+96	MiB	information
+97	GiB	information
+98	TiB	information
+
+# Compound/scientific (99-118)
+99	J·s	compound
+100	m³/(kg·s²)	compound
+101	1/mol	compound
+102	J/K	compound
+103	J/(mol·K)	compound
+104	F/m	compound
+105	N/A²	compound
+106	W/(m²·K⁴)	compound
+107	eV	energy
+108	cal	energy
+109	kcal	energy
+110	atm	pressure
+111	bar	pressure
+112	mbar	pressure
+113	Torr	pressure
+114	nmi	length
+115	ly	length
+116	au	length
+117	pc	length
+118	e₀	electric
+
+# Sentinel
+255	%	sentinel
+
+# Common spelled aliases (119-121) — resolve to the same dimensions/factors
+# as their canonical units via the Ruby reference at generation time.
+119	lbs	mass
+120	sqft	area
+121	sqm	area
+122	mi/h	speed

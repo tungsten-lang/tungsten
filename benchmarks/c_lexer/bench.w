@@ -10,7 +10,7 @@
 use ../../languages/c/lexer
 
 args = argv()
-if args.length() == 0
+if args.size() == 0
   << "Tungsten C Lexer Benchmark"
   << ""
   << "Usage: bench_lexer <file.c> [rounds]"
@@ -22,7 +22,7 @@ if args.length() == 0
 
 file = args[0]
 rounds = 20
-if args.length() > 1
+if args.size() > 1
   rounds = args[1].to_i()
 
 source = read_file(file)
@@ -31,8 +31,8 @@ if source == nil
   exit(1)
 
 lc = source.lchs()
-count = lc.length()
-byte_count = source.length()
+count = lc.size()
+byte_count = source.size()
 
 << "╔══════════════════════════════════════════════════════════╗"
 << "║            Tungsten C Lexer Benchmark                   ║"
@@ -92,7 +92,7 @@ total_e2e = 0 ## i64
 r = 0
 while r < rounds
   lc_fresh = source.lchs()
-  total_e2e += c_tokenize_fast(lc_fresh, lc_fresh.length(), i64[lc_fresh.length()])
+  total_e2e += c_tokenize_fast(lc_fresh, lc_fresh.size(), i64[lc_fresh.size()])
   r += 1
 t5 = ccall("__w_clock_ms")
 ms_e2e = t5 - t4

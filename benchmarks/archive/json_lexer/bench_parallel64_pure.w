@@ -3,22 +3,22 @@
 use ../../languages/json/lexer_eatws_pure
 
 args = argv()
-if args.length() == 0
+if args.size() == 0
   << "usage: json_par64_pure <file.json> [total_jobs] [goroutines]"
   exit(1)
 
 file = args[0]
 total_jobs = 32
-if args.length() > 1
+if args.size() > 1
   total_jobs = args[1].to_i()
 goroutines = 8
-if args.length() > 2
+if args.size() > 2
   goroutines = args[2].to_i()
 
 source = read_file(file)
 lc = source.lchs("json", bits: 64)
-count = lc.length()
-byte_count = source.length()
+count = lc.size()
+byte_count = source.size()
 
 << "JSON Parallel Lexer Benchmark (Lex64 eatws_pure)"
 << "  file:       [file]"

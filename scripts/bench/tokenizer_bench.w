@@ -8,13 +8,13 @@ GGUF_PATH = "/Users/erik/.ollama/models/blobs/sha256-ae354763fe478c790125fb993e5
 
 g = GGUF.new(GGUF_PATH)
 tok = Tokenizer.new(g)
-<< "vocab loaded: " + tok.tokens.length().to_s + " tokens, " + tok.merges.length().to_s + " merges"
+<< "vocab loaded: " + tok.tokens.size().to_s + " tokens, " + tok.merges.size().to_s + " merges"
 
 # Sample text — 5 paragraphs of mixed prose, ~1.5 KB.
 TEXT = "The quick brown fox jumps over the lazy dog. Sphinx of black quartz, judge my vow. Pack my box with five dozen liquor jugs. The five boxing wizards jump quickly.\n\nIn programming, the choice of data structure often determines the performance characteristics of an algorithm. A well-chosen hash table can deliver constant-time lookups, while a poorly tuned one degenerates into linear scans through long collision chains.\n\nLanguage models trained on large corpora exhibit emergent behaviors that were not explicitly programmed: they can perform arithmetic, translate between languages, write code, and answer questions about topics they have never seen explicitly during training.\n\nThe history of compilers is a history of trade-offs. Early compilers prioritized correctness over speed; modern ones invest enormous effort in optimization passes that can take longer than the original program would have run interpreted.\n\nDistributed systems are inherently subject to partial failure. Any node may stop responding, any link may drop messages, and clocks across the cluster will not agree. Designs that ignore these realities tend to break in production at the worst possible time."
 ROUNDS = 100
 
-byte_count = TEXT.length
+byte_count = TEXT.size
 << "input bytes: " + byte_count.to_s
 << "rounds: " + ROUNDS.to_s
 
@@ -23,7 +23,7 @@ i = 0
 while i < 5
   ids = tok.encode(TEXT)
   i = i + 1
-<< "warmup tokens: " + ids.length().to_s
+<< "warmup tokens: " + ids.size().to_s
 
 # Bench
 t0 = ccall("__w_clock_ms")
@@ -31,7 +31,7 @@ total_tokens = 0
 i = 0
 while i < ROUNDS
   ids = tok.encode(TEXT)
-  total_tokens = total_tokens + ids.length()
+  total_tokens = total_tokens + ids.size()
   i = i + 1
 elapsed = ccall("__w_clock_ms") - t0
 

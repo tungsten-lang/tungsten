@@ -3,10 +3,10 @@
 -> look_and_say(s)
   result = ""
   i = 0
-  while i < s.length
+  while i < s.size
     c = s[i]
     count = 1
-    while i + count < s.length and s[i + count] == c
+    while i + count < s.size and s[i + count] == c
       count += 1
     result += count.to_s + c
     i += count

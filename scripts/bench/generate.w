@@ -403,7 +403,7 @@ sampler = Sampler.new(TEMPERATURE, TOP_K_SAMPLE, ccall("__w_clock_ms"))
 -> stat_min(values)
   m = values[0]
   i = 1
-  while i < values.length()
+  while i < values.size()
     if values[i] < m
       m = values[i]
     i = i + 1
@@ -412,14 +412,14 @@ sampler = Sampler.new(TEMPERATURE, TOP_K_SAMPLE, ccall("__w_clock_ms"))
 -> stat_mean(values)
   sum = 0
   i = 0
-  while i < values.length()
+  while i < values.size()
     sum = sum + values[i]
     i = i + 1
-  sum / values.length()
+  sum / values.size()
 
 -> stat_median(values)
   sorted = values.sort
-  sorted[sorted.length() / 2]
+  sorted[sorted.size() / 2]
 
 -> run_trial(prompt_ids)
   all_ids = []
@@ -427,16 +427,16 @@ sampler = Sampler.new(TEMPERATURE, TOP_K_SAMPLE, ccall("__w_clock_ms"))
   i = 0
   last_pred = -1
   t_prefill_start = ccall("__w_clock_ms")
-  if prompt_ids.length() == PREFILL_LEN
-    while i < prompt_ids.length()
+  if prompt_ids.size() == PREFILL_LEN
+    while i < prompt_ids.size()
       all_ids.push(prompt_ids[i])
       i = i + 1
     last_pred = prefill_batch_fixed(prompt_ids)
     pos = PREFILL_LEN
   else
-    while i < prompt_ids.length()
+    while i < prompt_ids.size()
       all_ids.push(prompt_ids[i])
-      last_pred = forward_step(prompt_ids[i], pos, i == prompt_ids.length() - 1)
+      last_pred = forward_step(prompt_ids[i], pos, i == prompt_ids.size() - 1)
       pos = pos + 1
       i = i + 1
   t_prefill = ccall("__w_clock_ms") - t_prefill_start
@@ -456,7 +456,7 @@ sampler = Sampler.new(TEMPERATURE, TOP_K_SAMPLE, ccall("__w_clock_ms"))
 prompt_ids = tok.encode(PROMPT)
 << ""
 << "prompt: '" + PROMPT + "'"
-<< "  ids: " + prompt_ids.to_s + " (" + prompt_ids.length().to_s + " tokens)"
+<< "  ids: " + prompt_ids.to_s + " (" + prompt_ids.size().to_s + " tokens)"
 << "benchmark: " + BENCH_WARMUP_RUNS.to_s + " warmup, " + BENCH_RUNS.to_s + " measured runs"
 
 i = 0
@@ -474,7 +474,7 @@ while i < BENCH_RUNS
   prefill_times.push(r[:prefill])
   decode_times.push(r[:decode])
   output_text = r[:output]
-  << "run " + (i + 1).to_s + "/" + BENCH_RUNS.to_s + ": prefill " + r[:prefill].to_s + " ms (" + (r[:prefill] / prompt_ids.length()).to_s + " ms/token), decode " + r[:decode].to_s + " ms (" + (r[:decode] / N_GENERATE).to_s + " ms/token)"
+  << "run " + (i + 1).to_s + "/" + BENCH_RUNS.to_s + ": prefill " + r[:prefill].to_s + " ms (" + (r[:prefill] / prompt_ids.size()).to_s + " ms/token), decode " + r[:decode].to_s + " ms (" + (r[:decode] / N_GENERATE).to_s + " ms/token)"
   i = i + 1
 
 << ""

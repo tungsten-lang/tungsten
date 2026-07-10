@@ -176,7 +176,6 @@
 
 # Mmap — return type of File.mmap. Borrowed view of file bytes.
 + Mmap
-  -> length
   -> size
   -> byte_at(i)
   -> [](i)

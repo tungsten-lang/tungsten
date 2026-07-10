@@ -15,18 +15,18 @@
 
 # Benchmark: classify every character in a source file N times
 args = argv()
-if args.length() == 0
+if args.size() == 0
   << "usage: lexer_strcmp.w <file.w> [rounds]"
   exit(1)
 
 file = args[0]
 rounds = 10
-if args.length() > 1
+if args.size() > 1
   rounds = args[1].to_i()
 
 source = read_file(file)
 chars = source.chars()
-char_count = chars.length()
+char_count = chars.size()
 
 << "String-compare baseline benchmark"
 << "  file: [file] ([char_count] chars, [rounds] rounds)"

@@ -1,4 +1,3 @@
-LLC = /opt/homebrew/opt/llvm/bin/llc
 CLANG = clang
 ZSTD_CFLAGS = $(shell pkg-config --cflags libzstd 2>/dev/null || echo -I/opt/homebrew/include)
 ZSTD_LDFLAGS = $(shell pkg-config --libs libzstd 2>/dev/null || echo -L/opt/homebrew/lib -lzstd)

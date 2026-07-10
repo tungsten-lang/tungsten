@@ -12,7 +12,7 @@ while i <= 3000
   den = den / g
   i = i + 1
 
-digits = num.to_s().length()
+digits = num.to_s().size()
 
 t1 = clock
 << digits

@@ -10,7 +10,7 @@ while n > 0
   a = tmp
   n = n - 1
 
-digits = b.to_s().length()
+digits = b.to_s().size()
 
 t1 = clock
 << digits

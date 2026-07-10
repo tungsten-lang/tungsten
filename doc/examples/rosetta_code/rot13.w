@@ -3,7 +3,7 @@
 -> rot13(s)
   result = ""
   i = 0
-  while i < s.length
+  while i < s.size
     c = s[i]
     if c >= "a" and c <= "z"
       result += (((c.ord - 97 + 13) % 26) + 97).chr

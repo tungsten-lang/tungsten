@@ -27,7 +27,7 @@ T_OTHER = 7
 -> tokenize_fast(source)
   lc = source.lchs()
   chars = source.chars()
-  count = lc.length()
+  count = lc.size()
   tokens = []
   pos = 0 ## i64
 
@@ -75,17 +75,17 @@ T_OTHER = 7
 
 # Benchmark
 args = argv()
-if args.length() == 0
+if args.size() == 0
   << "usage: bench_token_wvalue.w <file.w> [rounds]"
   exit(1)
 
 file = args[0]
 rounds = 10
-if args.length() > 1
+if args.size() > 1
   rounds = args[1].to_i()
 
 source = read_file(file)
-char_count = source.length()
+char_count = source.size()
 
 << "Token WValue benchmark"
 << "  file: [file] ([char_count] chars, [rounds] rounds)"
@@ -100,7 +100,7 @@ total_fast = 0 ## i64
 r = 0 ## i64
 while r < rounds
   toks = tokenize_fast(source)
-  total_fast += toks.length()
+  total_fast += toks.size()
   r += 1
 t1 = ccall("__w_clock_ms")
 ms_fast = t1 - t0
@@ -111,7 +111,7 @@ total_hash = 0 ## i64
 r = 0
 while r < rounds
   toks = Lexer.new(source, file).tokenize()
-  total_hash += toks.length()
+  total_hash += toks.size()
   r += 1
 t3 = ccall("__w_clock_ms")
 ms_hash = t3 - t2

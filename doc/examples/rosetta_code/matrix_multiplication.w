@@ -1,9 +1,9 @@
 # Matrix multiplication
 
 -> mat_mul(a, b)
-  rows_a = a.length
-  cols_a = a[0].length
-  cols_b = b[0].length
+  rows_a = a.size
+  cols_a = a[0].size
+  cols_b = b[0].size
   result = []
   i = 0
   while i < rows_a

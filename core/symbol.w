@@ -6,10 +6,10 @@
   -> <=>/1 to_s <=> @1.to_s
 
   -> length
-    to_s.length
+    size
 
   -> size
-    length
+    to_s.size
 
   -> empty?
     to_s.empty?

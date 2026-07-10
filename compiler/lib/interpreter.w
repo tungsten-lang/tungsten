@@ -2066,7 +2066,7 @@ use target
       if args.size() == 1 && name == "gcd"
         return ccall("w_method_call", recv, "" + name, args)
 
-    raise "Undefined method '[name]' on [w_type_name(recv)]"
+    raise "undefined method '[name]' for [w_to_s(recv)]"
 
   -> primitive_runtime_class(recv)
     class_name = nil

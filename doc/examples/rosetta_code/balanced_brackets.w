@@ -3,7 +3,7 @@
 -> balanced?(s)
   depth = 0
   i = 0
-  while i < s.length
+  while i < s.size
     if s[i] == "\["
       depth += 1
     elsif s[i] == "\]"

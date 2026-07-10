@@ -265,6 +265,21 @@
           }
           CNEXT();
         }
+        // Keep compiler-driver diagnostics on stderr when a rescue path runs
+        // under the stage-0 VM. Native stages call runtime.c's w_eputs.
+        if (!has_receiver && name_len == 5 && memcmp(name, "ccall", 5) == 0 && argc == 2
+            && tc_kind(args[0]) == TC_VAL_STRING
+            && tc_str_len(args[0]) == 7
+            && memcmp(tc_str_bytes_only(args[0]), "w_eputs", 7) == 0) {
+          tc_value_print(args[1], stderr);
+          fputc('\n', stderr);
+          fflush(stderr);
+          FREE_ARGS();
+          if (!push(&vm, tc_box_nil(), err)) {
+            goto cleanup_fail;
+          }
+          CNEXT();
+        }
         // Slab-AST fused kind-extract + table lookup (fix #5).
         // ast_kind in compiler/lib/ast.w dispatches
         //   ccall("w_node_kind_sym", node, kind_sym_table_data)

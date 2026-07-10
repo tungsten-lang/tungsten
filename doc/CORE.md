@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(74 total), grouped by area, with its declaration, a one-line
+(84 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -22,38 +22,48 @@ summary from the source header, and a link to the source.
 | `Bool` | `+ Bool` | Bool — true (subtag 0x2) and false (subtag 0x1) singletons | [`core/bool.w`](../core/bool.w) |
 | `BoolArray` | `+ BoolArray` | Bit-packed boolean array. Phase 6i.1b folded the dedicated WBoolArray | [`core/bool_array.w`](../core/bool_array.w) |
 | `ByteArray` | `+ ByteArray` | Length-counted, mutable, heap-allocated byte buffer. Phase 6i.1 | [`core/byte_array.w`](../core/byte_array.w) |
-| `Char` | `+ Char` | Char — Unicode codepoint (tag 0xFFFC) | [`core/char.w`](../core/char.w) |
+| `Char` | `+ Char` | Char — Unicode scalar value. | [`core/char.w`](../core/char.w) |
 | `Class` | `+ Class` | — | [`core/class.w`](../core/class.w) |
 | `Closure` | `+ Closure` | — | [`core/closure.w`](../core/closure.w) |
+| `CIDR` | `+ CIDR` | — | [`core/cidr.w`](../core/cidr.w) |
 | `Color` | `+ Color` | — | [`core/color.w`](../core/color.w) |
+| `Crypto` | — | Crypto - secure random bytes and digest algorithms. | [`core/crypto.w`](../core/crypto.w) |
 | `Currency` | `+ Currency` | Currency — monetary value with currency symbol (tag 0xFFFD) | [`core/currency.w`](../core/currency.w) |
 | `Date` | `+ Date` | — | [`core/date.w`](../core/date.w) |
+| `Digest` | — | Digest - hash convenience facade. | [`core/digest.w`](../core/digest.w) |
 | `Duration` | `+ Duration` | Duration — time span (tag 0xFFFF). Two-component representation: | [`core/duration.w`](../core/duration.w) |
 | `Error` | `+ Error` | Error — base error class | [`core/error.w`](../core/error.w) |
 | `Float` | `+ Float` | Float — IEEE 754 double (quiet NaN range) | [`core/float.w`](../core/float.w) |
 | `Hash` | `+ Hash` | — | [`core/hash.w`](../core/hash.w) |
-| `IPv4` | `+ IPv4` | IPv4 — IPv4 address with optional CIDR prefix (tag 0xFFFE) | [`core/ipv4.w`](../core/ipv4.w) |
+| `IPv4` | `+ IPv4` | IPv4 — packed IPv4 address with optional CIDR prefix. | [`core/ipv4.w`](../core/ipv4.w) |
+| `IPv6` | `+ IPv6` | IPv6 — heap-backed 128-bit IP address with optional CIDR prefix. | [`core/ipv6.w`](../core/ipv6.w) |
 | `Instant` | `+ Instant` | Instant — millisecond-precision timestamp (tag 0xFFFB). | [`core/instant.w`](../core/instant.w) |
 | `Integer` | `+ Integer` | Integer — 48-bit NaN-boxed signed integer (tag 0xFFFA) | [`core/integer.w`](../core/integer.w) |
 | `JSON` | `+ JSON` | JSON encoder/decoder — interface and default implementation. | [`core/json.w`](../core/json.w) |
 | `Math` | `+ Math` | Math — pure-Tungsten implementations of math functions derived from | [`core/math.w`](../core/math.w) |
 | `Matrix` | `+ Matrix<T> < Number` | Matrix — generic M×N matrices over a scalar type T. Storage is | [`core/matrix.w`](../core/matrix.w) |
+| `MAC` | `+ MAC` | — | [`core/mac.w`](../core/mac.w) |
 | `Module` | `+ Module` | — | [`core/module.w`](../core/module.w) |
 | `Nil` | `+ Nil` | — | [`core/nil.w`](../core/nil.w) |
 | `Number` | `+ Number` | Number — root of the numeric tower. Every concrete number is either a | [`core/number.w`](../core/number.w) |
 | `Object` | `+ Object < BlankSlate` | Object is the default root of all Tungsten objects. Object inherits from BlankSlate (the | [`core/object.w`](../core/object.w) |
 | `Path` | `+ Path` | Path — immutable filesystem path | [`core/path.w`](../core/path.w) |
 | `Quantity` | `+ Quantity` | Quantity — numeric value with unit (tag 0xFFFD) | [`core/quantity.w`](../core/quantity.w) |
+| `Random` | `+ Random` | — | [`core/random.w`](../core/random.w) |
 | `Range` | `+ Range` | — | [`core/range.w`](../core/range.w) |
 | `Regex` | `+ Regex` | Regex — a homegrown regular-expression engine, written in Tungsten. | [`core/regex.w`](../core/regex.w) |
 | `SmallArray` | `+ SmallArray` | Frozen, stack-allocatable, packed array. Up to 255 elements. | [`core/small_array.w`](../core/small_array.w) |
 | `String` | `+ String` | Tungsten strings are an immutable sequence of UTF-8 encoded codepoints. | [`core/string.w`](../core/string.w) |
 | `StringBuffer` | `+ string_buffer` | string_buffer - mutable UTF-8 string builder | [`core/string_buffer.w`](../core/string_buffer.w) |
 | `Symbol` | `+ Symbol` | — | [`core/symbol.w`](../core/symbol.w) |
+| `Thread` | `+ Thread` | Thread — a native OS thread (pthread). | [`core/thread.w`](../core/thread.w) |
 | `Token` | — | Token — lexical token, a W_TAG_CHAR value with subtype 00. | [`core/token.w`](../core/token.w) |
 | `UUID` | `+ UUID` | — | [`core/uuid.w`](../core/uuid.w) |
 | `Value` | `+ Value` | — | [`core/value.w`](../core/value.w) |
 | `Vector` | `+ Vector<T> < Number` | Vector — generic real-valued N-dimensional vectors. Distinct from | [`core/vector.w`](../core/vector.w) |
+| `ArgumentError` | `+ ArgumentError < Error` | ArgumentError — raised when an argument's value is unacceptable, | [`core/argument_error.w`](../core/argument_error.w) |
+| `RangeError` | `+ RangeError < Error` | RangeError — raised when a value falls outside the range an | [`core/range_error.w`](../core/range_error.w) |
+| `TypeError` | `+ TypeError < Error` | TypeError — raised when a value of the wrong type reaches an | [`core/type_error.w`](../core/type_error.w) |
 
 ## Numeric tower
 

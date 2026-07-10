@@ -20,7 +20,7 @@ st = Safetensors.new(LIGHTNING_PATH)
 << "first 10 tensor names:"
 keys = st.tensors.keys
 i = 0
-while i < 10 && i < keys.length()
+while i < 10 && i < keys.size()
   k = keys[i]
   d = st.tensor(k)
   << "  " + k + ": dtype=" + d[:dtype] + " shape=" + d[:shape].to_s + " offset=" + d[:byte_offset].to_s + " bytes=" + d[:byte_length].to_s

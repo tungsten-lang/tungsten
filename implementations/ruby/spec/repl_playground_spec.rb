@@ -11,20 +11,31 @@ require "timeout"
 # linux-bootstrap job builds it and exercises these.
 RSpec.describe "REPL playground" do
   project_root = File.expand_path("../../..", __dir__)
-  wrapper      = File.join(project_root, "bin/tungsten")
+  wrapper      = File.join(project_root, "bin/wit")
   compiler     = File.join(project_root, "bin/tungsten-compiler")
 
   before(:all) do
     skip "bin/tungsten-compiler not built" unless File.executable?(compiler)
   end
 
-  # Pipe `input` lines into `tungsten repl` (non-tty → cooked reads) and return
+  # Pipe `input` lines into `wit` (non-tty → cooked reads) and return
   # combined output with ANSI escapes stripped.
   def repl_piped(wrapper, project_root, input)
     out, _err, _status = Open3.capture3(
-      wrapper, "repl", stdin_data: input, chdir: project_root
+      wrapper, stdin_data: input, chdir: project_root
     )
     out.gsub(/\e\[[0-9;]*m/, "")
+  end
+
+  def read_pty_until(reader, output, needle)
+    loop do
+      clean = output.gsub(/\e\[[0-9;]*[A-Za-z]/, "")
+      return if clean.include?(needle)
+
+      raise Timeout::Error, "PTY output did not include #{needle.inspect}" unless IO.select([reader], nil, nil, 5)
+
+      output << reader.readpartial(4096)
+    end
   end
 
   describe "banner" do
@@ -142,12 +153,12 @@ RSpec.describe "REPL playground" do
   describe "Tab completion (PTY, raw-mode editor)" do
     it "completes a stdlib method after a dot" do
       output = +""
-      PTY.spawn(wrapper, "repl", chdir: project_root) do |reader, writer, pid|
+      PTY.spawn(wrapper, chdir: project_root) do |reader, writer, pid|
         Timeout.timeout(30) do
           # Wait for the prompt, type a receiver + dot + partial, hit Tab.
-          sleep 1.5
+          read_pty_until(reader, output, "wit> ")
           writer.write(%q{"abc".uppercas} + "\t")
-          sleep 1.0
+          read_pty_until(reader, output, "uppercase")
           writer.write("\x03") # Ctrl+C cancels the line
           writer.write("\x04") # Ctrl+D exits
           begin

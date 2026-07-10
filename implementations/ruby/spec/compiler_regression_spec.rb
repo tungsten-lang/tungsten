@@ -506,13 +506,6 @@ RSpec.describe "Compiler regressions" do
   end
 
   it "dispatches core class methods and runtime ccall helpers under eval mode" do
-    compiler_path = File.join(@tmpdir, "tungsten-compiler-eval")
-    compile_args = [@compiler_path, "compile", TUNGSTEN_SOURCE, "--out", compiler_path]
-    compile_args += ["--runtime", RUNTIME_ARCHIVE] if File.exist?(RUNTIME_ARCHIVE)
-
-    _compile_out, compile_err, compile_status = Open3.capture3(*compile_args, chdir: PROJECT_ROOT)
-    expect(compile_status.success?).to be(true), compile_err
-
     source = <<~W
       ip = IPv4.parse("192.168.1.42")
       net = CIDR.parse("192.168.1.0/24")
@@ -529,7 +522,10 @@ RSpec.describe "Compiler regressions" do
       << Digest.sha256("abc")
     W
 
-    out, err, status = Open3.capture3(compiler_path, "-e", source, chdir: PROJECT_ROOT)
+    # Root `rake` has already built and fixed-point-verified this compiler. Use
+    # it directly instead of rebuilding compiler/tungsten.w solely to exercise
+    # the eval entry point (an otherwise redundant ~12-second compile).
+    out, err, status = Open3.capture3(@compiler_path, "-e", source, chdir: PROJECT_ROOT)
     expect(status.success?).to be(true), err
     expect(out).to eq(<<~OUT)
       192

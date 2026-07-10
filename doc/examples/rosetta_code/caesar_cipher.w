@@ -3,7 +3,7 @@
 -> caesar_encrypt(text, shift)
   result = ""
   i = 0
-  while i < text.length
+  while i < text.size
     c = text[i]
     if c >= "a" and c <= "z"
       result += (((c.ord - 97 + shift) % 26) + 97).chr

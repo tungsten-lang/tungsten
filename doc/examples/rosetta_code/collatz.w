@@ -11,7 +11,7 @@
   seq
 
 seq = collatz(27)
-puts "Collatz(27): [seq.length] steps"
+puts "Collatz(27): [seq.size] steps"
 puts "First 10: [seq.first(10)]"
 puts "Last 10:  [seq.last(10)]"
 

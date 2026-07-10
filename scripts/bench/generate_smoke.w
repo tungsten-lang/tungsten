@@ -321,7 +321,7 @@ prompt_ids = tok.encode(prompt)
 all_ids = []
 pos = 0
 i = 0
-while i < prompt_ids.length()
+while i < prompt_ids.size()
   all_ids.push(prompt_ids[i])
   next_id = forward_step(prompt_ids[i], pos)
   pos = pos + 1
@@ -333,7 +333,7 @@ i = 0
 while i < N_GENERATE
   # The last `next_id` we computed is what comes after the current context.
   # Feed it in, get the next prediction.
-  chosen = forward_step(all_ids[all_ids.length() - 1], pos)
+  chosen = forward_step(all_ids[all_ids.size() - 1], pos)
   all_ids.push(chosen)
   pos = pos + 1
   << "  pos=" + (pos - 1).to_s + ": token " + chosen.to_s + " = '" + tok.decode([chosen]) + "'"

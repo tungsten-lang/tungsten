@@ -25,7 +25,7 @@ max_freq = 0
 keys = freq.keys()
 
 k = 0
-while k < keys.length()
+while k < keys.size()
   v = freq[keys[k]]
   if v > max_freq
     max_freq = v

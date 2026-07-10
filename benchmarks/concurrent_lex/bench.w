@@ -58,19 +58,19 @@ fn bench_cooperative(lc, count, goroutines)
 
 # --- Main ---
 args = argv()
-if args.length() == 0
+if args.size() == 0
   << "usage: bench.w <file.c> [rounds]"
   exit(1)
 
 file = args[0]
 rounds = 20
-if args.length() > 1
+if args.size() > 1
   rounds = args[1].to_i()
 
 source = read_file(file)
 lc = source.lchs()
-count = lc.length()
-byte_count = source.length()
+count = lc.size()
+byte_count = source.size()
 
 << "Concurrent C Lexer Benchmark"
 << "  file: [file]"

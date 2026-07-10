@@ -14640,7 +14640,7 @@ static WMmap *as_mmap(WValue v) {
 
 WValue __w_mmap_length(WValue mmap_val) {
     WMmap *m = as_mmap(mmap_val);
-    if (!m) w_raise(w_string("Mmap#length: not an mmap"));
+    if (!m) w_raise(w_string("Mmap#size: not an mmap"));
     return w_int(m->size);
 }
 

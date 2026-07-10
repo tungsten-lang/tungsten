@@ -2,17 +2,17 @@
 use ../compiler/lib/lexer
 
 args = argv()
-if args.length() == 0
+if args.size() == 0
   << "usage: bench_compiled_lexer.w <file.w> [rounds]"
   exit(1)
 
 file = args[0]
 rounds = 10
-if args.length() > 1
+if args.size() > 1
   rounds = args[1].to_i()
 
 source = read_file(file)
-char_count = source.length()
+char_count = source.size()
 << "LexChar — compiled lexer benchmark"
 << "  file: [file] ([char_count] chars)"
 
@@ -28,7 +28,7 @@ total_tokens = 0 ## i64
 i = 0
 while i < rounds
   tokens = Lexer.new(source, file).tokenize()
-  total_tokens = total_tokens + tokens.length()
+  total_tokens = total_tokens + tokens.size()
   i = i + 1
 
 t1 = ccall("__w_clock_ms")

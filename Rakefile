@@ -37,7 +37,7 @@ def run_command(*cmd, chdir: nil, env: nil)
 end
 
 desc "Build compiler and run all test suites"
-task default: %i[check:units check:layouts check:core_doc build:tungsten test:ruby test:wvalue test:parity]
+task default: %i[check:all build:tungsten test:all]
 
 desc "Linux leg: assert we're on Linux, then run the full default suite"
 task :linux do
@@ -55,6 +55,9 @@ namespace :build do
 end
 
 namespace :check do
+  desc "Run generated-data and layout consistency checks in parallel"
+  multitask all: %i[units layouts core_doc]
+
   desc "Verify generated unit lookup tables match data/units.tsv"
   task :units do
     run_command "ruby", File.join(ROOT, "scripts/gen_units.rb"), "--check"
@@ -79,6 +82,14 @@ namespace :doc do
 end
 
 namespace :test do
+  # Ruby compiler specs may create shared runtime archives on a cold checkout,
+  # and the Tungsten specs warm the native dev archive. Run those first; only
+  # then overlap the independent C-runtime and parity legs.
+  desc "Run all default non-hardware test suites"
+  task all: %i[ruby tungsten remaining]
+
+  multitask remaining: %i[wvalue parity]
+
   desc "Run implementations/ruby specs (RSpec)"
   task :ruby do
     Bundler.with_unbundled_env do
@@ -111,6 +122,11 @@ namespace :test do
   desc "Run WIRE pipeline parity tests"
   task :parity do
     run_command "bash", File.join(ROOT, "compiler/test/parity_test.sh")
+  end
+
+  desc "Run compiled/interpreted Tungsten specs, including core runtime specs"
+  task :tungsten do
+    run_command "make", "specs", env: { "RUN_CORE_SPECS" => "1" }
   end
 end
 

@@ -9,8 +9,8 @@ GGUF_PATH = "/Users/erik/.ollama/models/blobs/sha256-ae354763fe478c790125fb993e5
 g = GGUF.new(GGUF_PATH)
 tok = Tokenizer.new(g)
 
-<< "vocab size: " + tok.tokens.length().to_s
-<< "merges: " + tok.merges.length().to_s
+<< "vocab size: " + tok.tokens.size().to_s
+<< "merges: " + tok.merges.size().to_s
 << "bos = " + tok.bos_id.to_s + ", eos = " + tok.eos_id.to_s + ", pad = " + tok.pad_id.to_s
 
 # 1. Decode tokens we already verified by direct lookup.
@@ -26,7 +26,7 @@ tok = Tokenizer.new(g)
 << "round-trip tests:"
 inputs = ["Hello world", "What is the capital of France?", "Paris", "The capital is Paris"]
 i = 0
-while i < inputs.length()
+while i < inputs.size()
   s = inputs[i]
   ids = tok.encode(s)
   back = tok.decode(ids)

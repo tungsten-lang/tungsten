@@ -1,50 +1,51 @@
-# Tungsten
+# Tungsten Ruby Reference Implementation
 
-Welcome to Tungsten! In this gem, you'll find the tools necessary to write your first Tungsten program.
+This directory contains Tungsten's Ruby lexer, parser, tree-walking
+interpreter, formatter, and reference literal implementations. It is useful for
+language development and differential testing; the self-hosted native compiler
+at the repository root is the most complete execution path.
 
-To experiment with Tungsten code, use `bin/tungsten`.
+## Running it
 
+From the repository root:
 
-## Installation
+```sh
+bin/tungsten --ruby program.w
+bin/tungsten --ruby -e '<< 1 + 1'
+```
 
-Install the gem and add to the application's Gemfile by executing:
+Or run the gem executable directly:
 
-    $ bundle add tungsten-lang
+```sh
+cd implementations/ruby
+bundle install
+bundle exec ruby exe/ruby-tungsten ../../doc/examples/01-basics/hello.w
+```
 
-and then execute:
-
-    $ bundle install
-
-If bundler is not being used to manage dependencies, install the gem by executing:
-
-    $ gem install tungsten-lang
-
-## Usage
-
-TODO: Write usage instructions here
+Programmatic parsing is available through `Tungsten.parse(source)` or
+`Tungsten::Parser.parse(source)`.
 
 ## Development
 
-After checking out the repo, run `bin/setup` to install dependencies. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
+```sh
+bundle install
+bundle exec rake spec
+bundle exec rspec spec/lexer_spec.rb
+bundle exec rspec spec/parser_spec.rb:42
+bundle exec rake expensive
+bundle exec rubocop
+```
 
-To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for the version, push git commits and the created tag, and push the `.gem` file to [rubygems.org](https://rubygems.org).
+Run the complete cross-implementation suite with `rake` from the repository
+root. That command builds and fixed-point-verifies the self-hosted compiler
+before running the Ruby, native runtime, Tungsten, and parity suites.
 
-## Contributing
+## Installing the gem
 
-Bug reports and pull requests are welcome on GitHub at https://github.com/tungsten-lang/tungsten.
+```sh
+gem install tungsten-lang
+ruby-tungsten -e '<< "hello world"'
+```
 
-## License
-
-The gem is available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).
-
-## Reference / Learning
-
-* Rubinius
-
-  See "rubinius/toolset" and "rubinius/compiler"
-
-* State Machine Lexer
-
-  http://nothings.org/computer/lexing.html
-
-* Treetop
+The gem is distributed under the MIT license. The full repository is dual
+licensed as described in the root README.

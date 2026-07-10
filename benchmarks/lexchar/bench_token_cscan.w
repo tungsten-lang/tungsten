@@ -6,19 +6,19 @@
 use ../compiler/lib/lexer
 
 args = argv()
-if args.length() == 0
+if args.size() == 0
   << "usage: bench_token_cscan.w <file.w> [rounds]"
   exit(1)
 
 file = args[0]
 rounds = 20
-if args.length() > 1
+if args.size() > 1
   rounds = args[1].to_i()
 
 source = read_file(file)
 lc = source.lchs()
-char_count = source.length()
-lc_count = lc.length() ## i64
+char_count = source.size()
+lc_count = lc.size() ## i64
 
 << "Token C-scan benchmark"
 << "  file: [file] ([char_count] chars, [rounds] rounds)"
@@ -42,7 +42,7 @@ total_hash = 0 ## i64
 r = 0
 while r < rounds
   toks = Lexer.new(source, file).tokenize()
-  total_hash += toks.length()
+  total_hash += toks.size()
   r += 1
 t3 = ccall("__w_clock")
 sec_hash = t3 - t2

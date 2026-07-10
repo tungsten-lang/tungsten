@@ -11,10 +11,9 @@ module Tungsten
     # missing, so the caller can print friendly guidance and abort before a raw
     # make/clang error dump partway through the bootstrap.
     #
-    # Only genuinely-required, PATH-resolved tools are hard-checked here (clang,
-    # make). Tools with special resolution — e.g. `llc` from keg-only Homebrew
-    # LLVM, which lives off PATH at /opt/homebrew/opt/llvm/bin — are left to the
-    # full `doctor` so this gate never false-aborts a working toolchain.
+    # PATH-resolved build tools (clang, make) are checked directly. Linker and
+    # header dependencies use functional probes so keg-only Homebrew installs
+    # and other nonstandard-but-working layouts are accepted.
     def self.build_preflight
       linux = RbConfig::CONFIG["host_os"] =~ /linux/
       missing = []
@@ -101,9 +100,6 @@ module Tungsten
 
       clang_version = `clang --version 2>/dev/null`.lines.first&.strip
       check("clang", clang_version || "not found") { clang_version }
-
-      llc_out = `llc --version 2>/dev/null`.lines.grep(/LLVM version/).first&.strip
-      check("LLVM (llc)", llc_out || "not found") { llc_out }
 
       lld_out = `ld.lld --version 2>/dev/null`.lines.first&.strip
       linker_ok = self.class.linker_ok?

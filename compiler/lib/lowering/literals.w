@@ -118,17 +118,14 @@
   typed_value(:i64, w_false.to_s())
 
 -> lower_magic_constant(ctx, node)
-  # magic_constant's slab schema has :name/:loc/:loc_end but no :line —
-  # extract the line number from the tagged W_PACKED_LOCATION via the
-  # runtime's unbox helper. (The previous inline `(loc >> 11) & 0x3FFFF`
-  # only worked when :loc held a NaN-boxed int with the location payload
-  # bits; now that :loc stores a real W_PACKED_LOCATION WValue, `>>` on
-  # it dispatches as a WValue method call and has no implementation —
-  # use the ccall_nobox helper instead.)
+  # Locations use FileOffset mode, so the payload carries a file id and source
+  # offset rather than an inline line number. Resolve it through the registered
+  # per-file lookup table; treating the offset bits as the legacy line field
+  # makes __LINE__ silently evaluate to zero near the start of a file.
   loc = ast_get(node, :loc)
   line = 0
   if loc != nil
-    line = ccall_nobox("w_unbox_location_line_extern", loc)
+    line = location_line(loc)
   case node.name
   when "FILE"
     lower_string(ctx, Tungsten:AST:String.new(ctx[:source_path]))

@@ -26,7 +26,7 @@ keys = [
 ]
 
 i = 0
-while i < keys.length()
+while i < keys.size()
   k = keys[i]
   v = g.metadata[k]
   if v == nil

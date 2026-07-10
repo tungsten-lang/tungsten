@@ -46,22 +46,26 @@ commands = {
 
 # Main entry point — parse argv and dispatch to the appropriate command
 -> run(argv)
-  name = argv |> self.first
-  args = argv |> .drop(1)
+  name = nil
+  args = []
+  if argv != nil && argv.size() > 0
+    name = argv[0]
+    if argv.size() > 1
+      args = argv.slice(1, argv.size())
 
   case name
-    nil     => Tungsten:Bit:Commands:Help.new(args).execute
-    "help"  => Tungsten:Bit:Commands:Help.new(args).execute
-    =>
-      command_class = commands[name.to_sym]
-      if command_class
-        command_class.new(args).execute
-      else
-        << "Unknown command: " + name.to_s
-        << "Run `bit help` for available commands."
-        exit 1
+  when nil, "help"
+    Tungsten:Bit:Commands:Help.new(args).execute
+  else
+    command_class = commands[name.to_sym]
+    if command_class
+      command_class.new(args).execute
+    else
+      << "Unknown command: " + name.to_s
+      << "Run `bit help` for available commands."
+      exit 1
 
 -> version
   Version:STRING
 
-run(ARGV)
+run(argv())

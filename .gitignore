@@ -70,6 +70,14 @@ runtime/tests/*.dSYM
 *.cu
 !benchmarks/cuda_add/host.cu
 
+# On-demand compiled CLI tool binaries (bin/commands/*.w → bin/commands/<name>)
+bin/commands/fmt
+bin/commands/ai
+bin/commands/symbolicate
+bin/commands/forge
+bits/*/bin/*
+!bits/*/bin/.gitkeep
+
 # dSYM debug symbol bundles (Xcode/clang)
 *.dSYM
 

@@ -42,9 +42,10 @@ COMMANDS
     ai / symbolicate / forge / flame
                          Additional tools
 
-    compile, run, console, doctor, start, and new execute in the compiled CLI
-    (bin/tungsten.wc, option parsing via Argon from this manpage). build and a
-    few ancillary tools still use the bootstrap driver; see DEVELOPER OPTIONS.
+    compile, run, console, doctor, start, new, fmt, forge, flame, bit, ai, and
+    symbolicate execute in the compiled CLI (bin/tungsten.wc, option parsing via
+    Argon from this manpage). `build` still uses the bootstrap driver; see
+    DEVELOPER OPTIONS.
 
     The REPL is started with `tungsten console` or the `wit` binary — not
     `tungsten --repl`.

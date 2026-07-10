@@ -11,12 +11,27 @@ use xctrace_xml
 use builder
 use sampler
 
+# Boot marker (also forces top-level statements after uses).
+# << "flame boot"
+
 module Flame
   VERSION = "0.3.0"
 
 # ---- Read and parse the manpage ----
+# Prefer TUNGSTEN_ROOT (set by the CLI); __DIR__ is not always populated
+# for compile-to-binary entry points.
 
-manpage = read_file(__DIR__ + "/../man/flame.5.wd")
+manpage = nil
+root = env("TUNGSTEN_ROOT")
+if root != nil && root != ""
+  manpage = read_file(root + "/bits/tungsten-flame/man/flame.5.wd")
+if manpage == nil
+  # Dev fallback when running the .w source via the interpreter
+  if __DIR__ != nil
+    manpage = read_file(__DIR__ + "/../man/flame.5.wd")
+if manpage == nil
+  << "tungsten flame: could not read manpage (set TUNGSTEN_ROOT)"
+  exit(1)
 cli = Argon.new(manpage)
 
 # ============================================================
@@ -29,14 +44,32 @@ if opts.flag?("help") || opts.flag?("h")
   opts.help!
 
 # Bind argv options to locals.  Stable surface for later stages.
-fl_duration    = (opts.get("duration") || "5").to_i()
-fl_rate_raw    = opts.get("rate") || ""
-fl_rate        = (fl_rate_raw == "") ? nil : fl_rate_raw.to_i()
-fl_top         = (opts.get("top") || "10").to_i()
-fl_pid_raw     = opts.get("pid") || ""
-fl_pid         = (fl_pid_raw == "") ? nil : fl_pid_raw.to_i()
-fl_focus       = opts.get("focus") || ""
-fl_output      = opts.get("output") || ""
+fl_duration = opts.get("duration")
+if fl_duration == nil
+  fl_duration = "5"
+fl_duration = fl_duration.to_i()
+fl_rate_raw = opts.get("rate")
+if fl_rate_raw == nil
+  fl_rate_raw = ""
+fl_rate = nil
+if fl_rate_raw != ""
+  fl_rate = fl_rate_raw.to_i()
+fl_top = opts.get("top")
+if fl_top == nil
+  fl_top = "10"
+fl_top = fl_top.to_i()
+fl_pid_raw = opts.get("pid")
+if fl_pid_raw == nil
+  fl_pid_raw = ""
+fl_pid = nil
+if fl_pid_raw != ""
+  fl_pid = fl_pid_raw.to_i()
+fl_focus = opts.get("focus")
+if fl_focus == nil
+  fl_focus = ""
+fl_output = opts.get("output")
+if fl_output == nil
+  fl_output = ""
 fl_keeper      = opts.get("keeper")
 fl_lex         = opts.flag?("lex")
 fl_ruby        = opts.flag?("ruby")
@@ -61,9 +94,11 @@ if fl_lex
   exit(0)
 
 if fl_files.size() == 0
-  << "tungsten flame v" + Flame:VERSION
+  << "tungsten flame v0.3.0"
   << ""
-  << cli.help()
+  help_text = cli.help()
+  if help_text != nil
+    << help_text
   exit(0)
 
 if fl_ruby

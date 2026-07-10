@@ -62,9 +62,7 @@ MANPAGE = manpage_lines.join("\n")
     exit(0)
   exit(1)
 
-# Legacy bootstrap / unported tools still live in the Ruby driver.
-# Only used for developer options (--ruby/--spinel bootstrap) and
-# tools not yet reimplemented in Tungsten (fmt, forge, flame, bit, …).
+# Legacy bootstrap only: --ruby / --spinel / `build` still use the Ruby driver.
 -> exec_ruby_driver
   ruby_cli = ROOT + "/bin/tungsten.rb"
   ruby = "ruby"
@@ -80,6 +78,92 @@ MANPAGE = manpage_lines.join("\n")
   if system(cmd)
     exit(0)
   exit(1)
+
+# Compile-on-demand a bin/commands/*.w tool, then exec it with tool_args.
+# Interpretation is intentionally avoided: several stdlib methods (and JSON
+# edge cases) behave better on the compiled path.
+-> run_command_w(rel_path, tool_args)
+  if !system("test -x " + sh_quote(COMPILER))
+    << "tungsten: bin/tungsten-compiler not found — run `bin/tungsten build` first"
+    exit(1)
+  entry = ROOT + "/" + rel_path
+  # Cache native binaries next to the source: bin/commands/fmt.w → bin/commands/fmt
+  out_bin = entry.replace(".w", "")
+  need = true
+  if system("test -x " + sh_quote(out_bin))
+    if system("test " + sh_quote(entry) + " -ot " + sh_quote(out_bin))
+      need = false
+  if need
+    cmd = "BIT_HOME=" + sh_quote(ROOT + "/bits") + " TUNGSTEN_ROOT=" + sh_quote(ROOT) + " " + sh_quote(COMPILER) + " compile " + sh_quote(entry) + " --out " + sh_quote(out_bin) + " --no-lto"
+    if !system(cmd + " >/dev/null 2>&1")
+      << "tungsten: failed to compile " + rel_path
+      exit(1)
+    if system("uname -s | grep -q Darwin")
+      system("codesign --force -s - " + sh_quote(out_bin) + " >/dev/null 2>&1")
+  cmd = "BIT_HOME=" + sh_quote(ROOT + "/bits") + " TUNGSTEN_ROOT=" + sh_quote(ROOT) + " " + sh_quote(out_bin)
+  i = 0
+  while i < tool_args.size
+    cmd = cmd + " " + sh_quote(tool_args[i])
+    i = i + 1
+  if system(cmd)
+    exit(0)
+  exit(1)
+
+# Compile-on-demand a bit entry (flame/bit use `module` etc. the interpreter
+# does not support — they must be native binaries).
+-> ensure_bit_binary(bit_pkg, entry_name)
+  bin_dir = ROOT + "/bits/" + bit_pkg + "/bin"
+  out_bin = bin_dir + "/" + entry_name
+  src = ROOT + "/bits/" + bit_pkg + "/lib/" + entry_name + ".w"
+  if !system("test -f " + sh_quote(src))
+    << "tungsten: missing " + src
+    exit(1)
+  # Rebuild if missing or source newer than binary
+  need = true
+  if system("test -x " + sh_quote(out_bin))
+    if system("test " + sh_quote(src) + " -ot " + sh_quote(out_bin))
+      need = false
+  if need
+    system("mkdir -p " + sh_quote(bin_dir))
+    cmd = "BIT_HOME=" + sh_quote(ROOT + "/bits") + " TUNGSTEN_ROOT=" + sh_quote(ROOT) + " " + sh_quote(COMPILER) + " compile " + sh_quote(src) + " --out " + sh_quote(out_bin) + " --no-lto"
+    if !system(cmd + " >/dev/null 2>&1")
+      << "tungsten: failed to compile " + bit_pkg + " (" + entry_name + ")"
+      << "  try: BIT_HOME=bits bin/tungsten-compiler compile " + src + " --out " + out_bin
+      exit(1)
+    if system("uname -s | grep -q Darwin")
+      system("codesign --force -s - " + sh_quote(out_bin) + " >/dev/null 2>&1")
+  out_bin
+
+-> run_bit_binary(bit_pkg, entry_name, tool_args)
+  out_bin = ensure_bit_binary(bit_pkg, entry_name)
+  cmd = "BIT_HOME=" + sh_quote(ROOT + "/bits") + " TUNGSTEN_ROOT=" + sh_quote(ROOT) + " " + sh_quote(out_bin)
+  i = 0
+  while i < tool_args.size
+    cmd = cmd + " " + sh_quote(tool_args[i])
+    i = i + 1
+  if system(cmd)
+    exit(0)
+  exit(1)
+
+# Args after the subcommand token (so flags like -w still reach the tool).
+-> tool_argv_after_command(command_name)
+  raw = argv()
+  out = []
+  i = 0
+  while i < raw.size
+    if raw[i] == command_name
+      i = i + 1
+      while i < raw.size
+        out.push(raw[i])
+        i = i + 1
+      return out
+    i = i + 1
+  # Command name not found as a bare token — drop first arg if present
+  i = 1
+  while i < raw.size
+    out.push(raw[i])
+    i = i + 1
+  out
 
 # ---- doctor ----
 
@@ -243,15 +327,16 @@ if opts.flag?("copyright")
   << COPYRIGHT
   exit(0)
 
-if opts.flag?("help") || opts.flag?("h")
+command = opts.command()
+rest = opts.arguments()
+
+# Global --help only when no subcommand (so `tungsten forge --help` reaches forge).
+if (opts.flag?("help") || opts.flag?("h")) && command == nil
   opts.help!
 
 # Developer option: force the Ruby tree-walking interpreter.
 if opts.flag?("ruby")
   exec_ruby_driver()
-
-command = opts.command()
-rest = opts.arguments()
 
 case command
 when "compile", "compile-batch"
@@ -287,7 +372,7 @@ when "build"
   exec_ruby_driver()
 
 when "fmt"
-  exec_ruby_driver()
+  run_command_w("bin/commands/fmt.w", tool_argv_after_command("fmt"))
 
 when "new"
   run_new(rest)
@@ -298,8 +383,17 @@ when "start"
 when "doctor"
   run_doctor()
 
-when "ai", "symbolicate", "forge", "flame", "fire"
-  exec_ruby_driver()
+when "ai"
+  run_command_w("bin/commands/ai.w", tool_argv_after_command("ai"))
+
+when "symbolicate"
+  run_command_w("bin/commands/symbolicate.w", tool_argv_after_command("symbolicate"))
+
+when "forge"
+  run_command_w("bin/commands/forge.w", tool_argv_after_command("forge"))
+
+when "flame", "fire"
+  run_bit_binary("tungsten-flame", "flame", tool_argv_after_command(command))
 
 when "console"
   # Public REPL entry (alongside bin/wit). Compiler uses --repl internally.
@@ -310,7 +404,7 @@ when "repl"
   exit(2)
 
 when "bit"
-  exec_ruby_driver()
+  run_bit_binary("tungsten-bit", "bit", tool_argv_after_command("bit"))
 
 when nil
   # Bare invocation: file args or help

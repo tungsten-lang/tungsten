@@ -51,10 +51,10 @@ case "$1" in
       exec "$RUBY" "$RUBY_CLI" console "$@"
     fi
     ;;
-  # doctor / start / new / compile-batch live in the Tungsten CLI (bin/tungsten.wc).
   # build still uses the bootstrap driver (Ruby orchestrator); --ruby/--spinel
-  # are developer options on that path. fmt/forge/flame/bit/ai are not yet ported.
-  build|fmt|ai|forge|flame|fire|bit|symbolicate)
+  # are developer options on that path. fmt/forge/flame/bit/ai/symbolicate are
+  # handled by bin/tungsten.wc (Tungsten CLI).
+  build)
     exec "$RUBY" "$RUBY_CLI" "$@"
     ;;
 esac

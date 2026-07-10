@@ -7,7 +7,7 @@
 use argon
 
 ROOT = __DIR__ + "/.."
-VERSION = read_file(ROOT + "/VERSION").strip()
+VERSION = read_file(ROOT + "/VERSION").strip
 COPYRIGHT = "tungsten - Copyright (c) 2013–2026 Erik Peterson.\nTungsten is freely available under the MIT License."
 COMPILER = ROOT + "/bin/tungsten-compiler"
 
@@ -198,7 +198,7 @@ MANPAGE = manpage_lines.join("\n")
   has_clang = tool_on_path?("clang")
   clang_ver = ""
   if has_clang
-    clang_ver = capture("clang --version 2>/dev/null | head -1").strip()
+    clang_ver = capture("clang --version 2>/dev/null | head -1").strip
   doctor_check("clang", clang_ver != "" ? clang_ver : "not found", has_clang, passed, failed, use_color)
 
   has_make = tool_on_path?("make")
@@ -215,18 +215,18 @@ MANPAGE = manpage_lines.join("\n")
   << ""
   << c(use_color, "\e[2m", "Developer options (not required for normal use):")
   has_ruby = tool_on_path?("ruby")
-  ruby_detail = has_ruby ? capture("ruby -v 2>/dev/null").strip() : "not installed"
+  ruby_detail = has_ruby ? capture("ruby -v 2>/dev/null").strip : "not installed"
   doctor_check("Ruby (--ruby bootstrap)", ruby_detail, true, passed, failed, use_color)
 
   has_nvcc = tool_on_path?("nvcc")
-  doctor_check("nvcc (CUDA)", has_nvcc ? capture("nvcc --version 2>/dev/null | tail -1").strip() : "not installed", true, passed, failed, use_color)
+  doctor_check("nvcc (CUDA)", has_nvcc ? capture("nvcc --version 2>/dev/null | tail -1").strip : "not installed", true, passed, failed, use_color)
 
   has_metal = system("command -v xcrun > /dev/null 2>&1 && xcrun -f metal > /dev/null 2>&1")
   doctor_check("Metal toolchain", has_metal ? "ok" : "not on this host", true, passed, failed, use_color)
 
   << ""
   total = passed[0] + failed[0]
-  << c(use_color, "\e[2m", "" + passed[0].to_s() + "/" + total.to_s() + " required checks passed")
+  << c(use_color, "\e[2m", "" + passed[0].to_s + "/" + total.to_s + " required checks passed")
   if failed[0] > 0
     exit(1)
   exit(0)
@@ -327,8 +327,8 @@ if opts.flag?("copyright")
   << COPYRIGHT
   exit(0)
 
-command = opts.command()
-rest = opts.arguments()
+command = opts.command
+rest = opts.arguments
 
 # Global --help only when no subcommand (so `tungsten forge --help` reaches forge).
 if (opts.flag?("help") || opts.flag?("h")) && command == nil
@@ -408,7 +408,7 @@ when "bit"
 
 when nil
   # Bare invocation: file args or help
-  args = opts.args()
+  args = opts.args
   if args.size > 0
     # First arg may be a .w file → run it
     first = args[0]

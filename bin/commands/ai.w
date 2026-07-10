@@ -15,7 +15,7 @@ if prompt == "--help"
 if prompt == nil
   << "Usage: tungsten ai 'describe what you want'"
   exit(1)
-if prompt.strip() == ""
+if prompt.strip == ""
   << "Usage: tungsten ai 'describe what you want'"
   exit(1)
 
@@ -69,20 +69,20 @@ system("rm -f " + tmp)
 if resp == nil
   << "Empty response from API"
   exit(1)
-if resp.strip() == ""
+if resp.strip == ""
   << "Empty response from API"
   exit(1)
 
 parsed = JSON.parse(resp)
 if parsed["error"] != nil
-  << "API error: " + parsed["error"].to_s()
+  << "API error: " + parsed["error"].to_s
   exit(1)
 
 content = parsed["content"]
 if content == nil
   << "Unexpected API response"
   exit(1)
-if content.size() == 0
+if content.size == 0
   << "Unexpected API response"
   exit(1)
 
@@ -90,7 +90,7 @@ code = content[0]["text"]
 if code == nil
   << "No text in API response"
   exit(1)
-code = code.strip()
+code = code.strip
 
 << "---"
 << code
@@ -99,7 +99,7 @@ code = code.strip()
 << "Run this? (y/n)"
 answer = gets()
 if answer != nil
-  a = answer.strip()
+  a = answer.strip
   if a == "y"
     << ""
     run_tmp = "/tmp/tungsten-ai-run.w"

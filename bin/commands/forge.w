@@ -14,7 +14,7 @@ max_mode = false
 capacity_headers = false
 
 i = 0
-while i < args.size()
+while i < args.size
   a = args[i]
   if a == "start" || a == "stop"
     if subcommand == nil
@@ -23,12 +23,12 @@ while i < args.size()
       source_file = a
   elsif a == "-p" || a == "--port"
     i = i + 1
-    if i < args.size()
-      port = args[i].to_i()
+    if i < args.size
+      port = args[i].to_i
   elsif a == "-w" || a == "--workers"
     i = i + 1
-    if i < args.size()
-      workers = args[i].to_i()
+    if i < args.size
+      workers = args[i].to_i
   elsif a == "--max"
     max_mode = true
   elsif a == "--capacity"
@@ -59,19 +59,19 @@ if root == nil
 compiler = root + "/bin/tungsten-compiler"
 
 -> default_source(port, workers)
-  "use Forge\n\nForge.configure ->\n  host \"127.0.0.1\"\n  port " + port.to_s() + "\n  workers " + workers.to_s() + "\n\nForge.routes ->\n  get \"/\" -> (request)\n    Response.ok(\"Welcome to Forge\")\n\n  get \"/health\" -> (request)\n    Response.json({status: \"ok\"})\n\nForge.start\n"
+  "use Forge\n\nForge.configure ->\n  host \"127.0.0.1\"\n  port " + port.to_s + "\n  workers " + workers.to_s + "\n\nForge.routes ->\n  get \"/\" -> (request)\n    Response.ok(\"Welcome to Forge\")\n\n  get \"/health\" -> (request)\n    Response.json({status: \"ok\"})\n\nForge.start\n"
 
 -> read_pid(pid_file)
   if !system("test -f '" + pid_file + "'")
     return nil
-  text = read_file(pid_file).strip()
+  text = read_file(pid_file).strip
   if text == ""
     return nil
-  pid = text.to_i()
+  pid = text.to_i
   if pid <= 0
     return nil
   # alive?
-  if system("kill -0 " + pid.to_s() + " 2>/dev/null")
+  if system("kill -0 " + pid.to_s + " 2>/dev/null")
     return pid
   system("rm -f '" + pid_file + "'")
   nil
@@ -103,9 +103,9 @@ if subcommand == "stop"
   if pid == nil
     << "No forge server running"
     exit(0)
-  system("kill " + pid.to_s() + " 2>/dev/null")
+  system("kill " + pid.to_s + " 2>/dev/null")
   system("rm -f '" + pid_file + "'")
-  << "Stopped forge server (pid " + pid.to_s() + ")"
+  << "Stopped forge server (pid " + pid.to_s + ")"
   exit(0)
 
 system("mkdir -p '" + forge_dir + "'")
@@ -127,19 +127,19 @@ if capacity_headers && !max_mode
 if subcommand == "start"
   existing = read_pid(pid_file)
   if existing != nil
-    << "Forge already running (pid " + existing.to_s() + ")"
+    << "Forge already running (pid " + existing.to_s + ")"
     exit(1)
   # daemonize
   cmd = env_prefix + "'" + bin_path + "' >/dev/null 2>&1 & echo $!"
-  pid_s = capture(cmd).strip()
+  pid_s = capture(cmd).strip
   write_file(pid_file, pid_s + "\n")
   # wait briefly for listen
   system("sleep 0.5")
-  << "forge started on http://127.0.0.1:" + port.to_s() + "/ (pid " + pid_s + ")"
+  << "forge started on http://127.0.0.1:" + port.to_s + "/ (pid " + pid_s + ")"
   exit(0)
 
 # Foreground
-<< "forge listening on http://127.0.0.1:" + port.to_s() + "/"
+<< "forge listening on http://127.0.0.1:" + port.to_s + "/"
 << "Ctrl+C to stop"
 << ""
 if env_prefix != ""

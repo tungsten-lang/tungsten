@@ -48,10 +48,10 @@ commands = {
 -> run(argv)
   name = nil
   args = []
-  if argv != nil && argv.size() > 0
+  if argv != nil && argv.size > 0
     name = argv[0]
-    if argv.size() > 1
-      args = argv.slice(1, argv.size())
+    if argv.size > 1
+      args = argv.slice(1, argv.size)
 
   case name
   when nil, "help"

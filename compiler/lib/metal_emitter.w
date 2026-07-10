@@ -1049,7 +1049,25 @@ use ast
 # ---- Subset checker helpers ----
 
 -> gpu_kernel_error(node, msg)
-  raise compile_error_for_node(:E_GPU_KERNEL_UNSUPPORTED, "@gpu kernel: " + msg, nil, node)
+  hint = gpu_error_hint(msg)
+  full = "@gpu kernel: " + msg
+  if hint != nil
+    full = full + "\n  help: " + hint
+  raise compile_error_for_node(:E_GPU_KERNEL_UNSUPPORTED, full, nil, node)
+
+# Short recovery hints for common GPU-subset mistakes.
+-> gpu_error_hint(msg)
+  if msg.include?("elsif")
+    return "rewrite as nested `if` / `else` (elsif is supported as nested if/else chains in recent emitters — rebuild the compiler if you still see this)"
+  if msg.include?("type hint")
+    return "annotate parameters and locals: `x ## f32[]`, `i ## i32 = …`"
+  if msg.include?("CUDA-only")
+    return "build with TUNGSTEN_GPU_DIALECTS=cuda (default) or use the Metal simdgroup_* surface"
+  if msg.include?("unsupported statement") || msg.include?("unsupported expression")
+    return "GPU kernels support assign, if/else, while, return, arithmetic, indexing, and gpu.* primitives — see doc/getting-started and metal_emitter.w"
+  if msg.include?("unsupported")
+    return "check the @gpu subset: typed arrays, scalars, and gpu.thread_position_in_grid / gpu.shared_* / barriers"
+  nil
 
 -> dup_hash(h)
   out = {}
@@ -1325,14 +1343,40 @@ use ast
     bi += 1
   ctx[:indent] = ctx[:indent] - 1
   emit_indent(out, ctx)
-  out << "}\n"
+  out << "}"
+  # elsif → else if chain (MSL and CUDA both accept `else if`).
+  # Parser stores each elsif as [condition, body_array] (see parser.w).
   elsif_clauses = node.elsif_clauses
-  if elsif_clauses != nil && elsif_clauses.size() > 0
-    gpu_kernel_error(ctx[:node], "`elsif` is not yet supported in @gpu kernels; use nested `if`")
+  if elsif_clauses != nil
+    ei = 0
+    while ei < elsif_clauses.size()
+      clause = elsif_clauses[ei]
+      cond = nil
+      cbody = nil
+      if type(clause) == "Array"
+        cond = clause[0]
+        cbody = clause[1]
+      else
+        # Defensive: accept If-shaped nodes if the AST ever changes.
+        cond = clause.condition
+        cbody = clause.then_body
+      out << " else if ("
+      out << emit_expr(ctx, cond)
+      out << ") {\n"
+      ctx[:indent] = ctx[:indent] + 1
+      if cbody == nil
+        cbody = []
+      ci = 0
+      while ci < cbody.size()
+        emit_stmt(out, ctx, cbody[ci])
+        ci += 1
+      ctx[:indent] = ctx[:indent] - 1
+      emit_indent(out, ctx)
+      out << "}"
+      ei += 1
   eb = node.else_body
   if eb != nil && eb.size() > 0
-    emit_indent(out, ctx)
-    out << "else {\n"
+    out << " else {\n"
     ctx[:indent] = ctx[:indent] + 1
     ei = 0
     while ei < eb.size()
@@ -1340,7 +1384,8 @@ use ast
       ei += 1
     ctx[:indent] = ctx[:indent] - 1
     emit_indent(out, ctx)
-    out << "}\n"
+    out << "}"
+  out << "\n"
 
 -> emit_while(out, ctx, node)
   emit_indent(out, ctx)
@@ -1916,6 +1961,59 @@ use ast
   out << "}\n"
   out.to_s()
 
+# Emit a `@gpu fn` with `## TYPE: ret` as a CUDA `__device__` helper.
+-> emit_device_fn_cuda(node, gpu_fns)
+  name = node.name
+  params = node.params
+  type_hints = node.type_hints
+  if type_hints == nil
+    type_hints = {}
+  ret = type_hints["ret"]
+  ret_c = msl_scalar_type(ret)
+  if ret_c == nil
+    arr = msl_array_elt_type(ret)
+    if arr != nil
+      ret_c = cuda_elt_name(arr) + " *"
+    else
+      gpu_kernel_error(node, "device fn `" + name + "` has unsupported return type `" + ret.to_s() + "`")
+  out = StringBuffer(512)
+  out << "__device__ "
+  out << ret_c
+  out << " "
+  out << name
+  out << "("
+  param_types = {}
+  param_names = []
+  pi = 0
+  while pi < params.size()
+    p = params[pi]
+    pname = p.name
+    ptype = type_hints[pname]
+    if ptype == nil
+      gpu_kernel_error(node, "device fn `" + name + "` param `" + pname + "` needs a ## type hint")
+    param_types[pname] = ptype
+    param_names.push(pname)
+    if pi > 0
+      out << ", "
+    out << cuda_param_decl(ptype, pname)
+    pi += 1
+  out << ") {\n"
+  ctx = {
+    node: node,
+    var_types: dup_hash(param_types),
+    params: param_names,
+    indent: 1,
+    dialect: "cuda",
+    gpu_fns: gpu_fns
+  }
+  body = node.body
+  bi = 0
+  while bi < body.size()
+    emit_stmt(out, ctx, body[bi])
+    bi += 1
+  out << "}\n"
+  out.to_s()
+
 -> emit_gpu_kernels_cuda(kernels)
   if kernels == nil || kernels.size() == 0
     return nil
@@ -1923,16 +2021,35 @@ use ast
   out << "// Tungsten @gpu kernel output (CUDA C dialect) — do not edit by hand\n"
   out << "#include <cuda_runtime.h>\n"
   out << "#include <cuda_bf16.h>\n"
+  out << "#include <device_launch_parameters.h>\n"
   out << "#include <mma.h>\n"
   out << "using namespace nvcuda;\n\n"
+  # Cooperative-group / shared-memory helpers used by gpu.barrier etc.
+  out << "__device__ inline void __w_gpu_barrier() { __syncthreads(); }\n\n"
+  gpu_fns = {}
   i = 0
   while i < kernels.size()
-    # Device helper functions (ret-hinted) aren't mapped in the CUDA v0
-    # path — skip them so they aren't emitted as __global__ kernels.
+    rt = gpu_fn_return_type(kernels[i])
+    if rt != nil
+      gpu_fns["" + kernels[i].name.to_s()] = rt
+    i += 1
+  # Device helpers first so kernels can call them.
+  i = 0
+  while i < kernels.size()
+    if gpu_fn_return_type(kernels[i]) != nil
+      out << emit_device_fn_cuda(kernels[i], gpu_fns)
+      out << "\n"
+    i += 1
+  i = 0
+  while i < kernels.size()
     if gpu_fn_return_type(kernels[i]) == nil
       out << emit_kernel_cuda(kernels[i])
       out << "\n"
     i += 1
+  # Host-side launch helper stub (optional include for hand-written hosts).
+  out << "// Host launch pattern (link with cudart):\n"
+  out << "//   kernel<<<grid, block, shared_bytes, stream>>>(args...);\n"
+  out << "//   cudaDeviceSynchronize();\n"
   out.to_s()
 
 # ---- WGSL emission (WebGPU dialect, v0 — restricted subset) ----

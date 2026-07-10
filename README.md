@@ -56,6 +56,10 @@ See [tungsten-lang.org][home] for more information.
 
 ## Getting Started
 
+Tutorial path (install → syntax → OOP → literals → novelties → gotchas):
+
+**[doc/getting-started/](doc/getting-started/)**
+
 *Currency and percentages*
 
 ```tungsten
@@ -142,9 +146,10 @@ For scientists, mathematicians, and anyone who thinks in code.
 
 ### Build & Run Flags
 
-**Prerequisites:** `git`, `clang`, `LLVM`, `make`, and `ruby`.
+**Prerequisites:** `git`, `clang`, `LLVM`, `make` (and `lld` + `libzstd` headers).
 
-Run `bin/tungsten doctor` to check your toolchain.
+Run `bin/tungsten doctor` to check your toolchain. Ruby is **not** required for
+normal use; it is only a developer bootstrap option (`--ruby`).
 
 `bin/tungsten FILE.w` picks the fastest path automatically. When you want an
 explicit mode:
@@ -155,9 +160,17 @@ explicit mode:
 | `-e '<expr>'`               | Evaluate a one-liner.                                          |
 | `-o OUT f.w`                | Compile `f.w` to a native binary `OUT` (via LLVM → clang).     |
 | `-c`, `--check`             | Syntax-check only; prints `200 OK`.                            |
-| `--repl`                    | Interactive REPL (`wit`).                                      |
+| `console` / `bin/wit`       | Interactive REPL (not `tungsten --repl`).                      |
 | `--ast` / `--ll`            | Print the AST / the emitted LLVM IR (don't run).               |
-| `--ruby`                    | Run via the Ruby tree-walking interpreter (no native compile). |
+
+**Developer options** (bootstrap / interpreter experiments — see `doc/TUNGSTEN.md`):
+
+| Flag       | What it does                                                                 |
+| ---------- | ---------------------------------------------------------------------------- |
+| `--ruby`   | Ruby tree-walking interpreter, or Ruby stage-1 bootstrap for `build`.        |
+| `--spinel` | Spinel stage-0 bootstrap for `build` (experimental; mutually exclusive with `--ruby`). |
+
+New to the language? Start at [doc/getting-started/](doc/getting-started/).
 
 **Performance flags** (for `-o` native builds):
 

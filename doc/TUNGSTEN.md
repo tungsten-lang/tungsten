@@ -31,27 +31,31 @@ COMMANDS
 
     compile FILE         Compile a .w file to a native binary (-o FILE)
     run FILE             Interpret a .w file
-    repl                 Interactive REPL, a.k.a. wit  (alias: console)
+    console              Interactive REPL (also: wit(1))
     start                First-run welcome: what Tungsten is + your next step
     new NAME             Scaffold a new project
     build                Bootstrap the self-hosted compiler
                          (stage 1 and stage 2 must emit byte-identical IR)
-    doctor               Check your toolchain (clang, LLVM, Ruby)
+    doctor               Check your toolchain (clang, make, lld, zstd, compiler)
     fmt FILE             Format .w source
     bit ...              The Bit package manager (install, new, search, ...)
     ai / symbolicate / forge / flame
                          Additional tools
 
-    compile, run, and repl execute in the compiled CLI. The remaining commands
-    are currently delegated to the Ruby driver (bin/tungsten.rb) and move into
-    the compiled CLI as they are ported.
+    compile, run, console, doctor, start, and new execute in the compiled CLI
+    (bin/tungsten.wc, option parsing via Argon from this manpage). build and a
+    few ancillary tools still use the bootstrap driver; see DEVELOPER OPTIONS.
+
+    The REPL is started with `tungsten console` or the `wit` binary — not
+    `tungsten --repl`.
 
 EXAMPLES
     tungsten --version
     tungsten --check file.w
     tungsten -e "<< 'hello world'"
     tungsten start
-    tungsten repl
+    tungsten console
+    wit
 
 OPTIONS
         --copyright
@@ -132,9 +136,6 @@ OPTIONS
 
         Equivalent: --no-debug --no-warning
 
-        --ruby
-        Use the Ruby interpreter
-
     -t, --threads
         Max number of threads.
 
@@ -149,9 +150,6 @@ OPTIONS
     -o, --out FILE
         Write compiled binary to FILE (for .w files).
 
-        --repl
-        Start interactive REPL.
-
     -w, --[no-]warnings
         Enable warnings.
 
@@ -164,6 +162,27 @@ OPTIONS
     -X, --no-rc
         Skip loading ~/.tungstenrc.
 
+DEVELOPER OPTIONS
+    These flags are for compiler authors and bootstrap maintainers. Day-to-day
+    use of Tungsten does not need them. Default bootstrap is the C bytecode VM
+    (implementations/c/); stage 1 and stage 2 must still emit byte-identical IR.
+
+        --ruby
+        Use the Ruby tree-walking interpreter (implementations/ruby/) for stage
+        1 of `tungsten build`, or run a program through that interpreter when
+        passed to `tungsten` / `tungsten run` / `tungsten compile`. Requires a
+        Ruby install and the gem bundle under implementations/ruby/.
+
+        --spinel
+        Bootstrap stage 1 via the Spinel-compiled stage-0 path instead of the
+        default C VM. Implies the experimental implementations/spinel/ tree.
+        Mutually exclusive with --ruby. Used only with `tungsten build`.
+
+    Equivalent environment overrides for the build driver:
+
+        TUNGSTEN_BOOTSTRAP=ruby
+        TUNGSTEN_BOOTSTRAP=spinel
+
 EXIT STATUS
     0 success
     1 error
@@ -174,6 +193,10 @@ ENVIRONMENT
     W_HOME
     W_PATH
     W_VERBOSE
+    TUNGSTEN_GPU_DIALECTS
+        Comma list of extra GPU dialect sidecars to emit for @gpu fn
+        (e.g. cuda,wgsl). Metal is always emitted when kernels are present;
+        CUDA is also emitted by default on non-Darwin hosts.
 
 FEATURES
     Native literals

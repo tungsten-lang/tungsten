@@ -1,22 +1,35 @@
-#!/usr/bin/env ruby
-
-# vim: filetype=ruby
-
+#!/bin/bash
 # bin/wit — W Interactive Tungsten (REPL)
 #
-# Runs the Tungsten REPL written in Tungsten (stages/tungsten/lib/repl.w).
-# Falls back to the Ruby REPL if the stage REPL isn't available.
+# Canonical playground entry point. Equivalent to: tungsten console
 
-ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "implementations/ruby/lib"))
+# Resolve symlinks so ROOT is the real install dir even when invoked via PATH.
+SELF="$0"
+while [ -L "$SELF" ]; do
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *)  SELF="$(dirname "$SELF")/$LINK" ;;
+  esac
+done
+ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+COMPILER="$ROOT/bin/tungsten-compiler"
+RUBY_CLI="$ROOT/bin/tungsten.rb"
 
-require "tungsten"
-
-repl_source = File.join(ROOT, "stages/tungsten/lib/repl.w")
-
-if File.exist?(repl_source)
-  source = File.read(repl_source) + "\nREPL.new().start()"
-  Tungsten::Interpreter.new.run(source, file_path: repl_source)
+if [ -x "$ROOT/src/patched/ruby/ruby" ]; then
+  RUBY="$ROOT/src/patched/ruby/ruby"
 else
-  Tungsten::REPL.new.start
-end
+  RUBY=ruby
+fi
+
+export TUNGSTEN_VERSION="$(cat "$ROOT/VERSION" 2>/dev/null || echo dev)"
+export TUNGSTEN_ROOT="$ROOT"
+
+if [ -x "$COMPILER" ]; then
+  # Compiler's internal --repl flag starts the pure-Tungsten REPL.
+  # Public entry points are only `wit` and `tungsten console`.
+  exec "$COMPILER" --repl "$@"
+fi
+
+# Fresh clone without a compiler: Ruby-driven REPL via the console path.
+exec "$RUBY" "$RUBY_CLI" console "$@"

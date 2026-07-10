@@ -29,16 +29,18 @@ if ARGV.include?("--help") || ARGV.include?("-h")
     Default bootstrap: implementations/c (the C bytecode VM).
 
     Options:
-      -0          Build only the Spinel stage-0 compiler (implies --spinel)
       -1          Build and install only the stage-1 compiler
       -2          Reuse the existing stage-1 binary and build stage 2
       --force     Ignore cached stage binaries and rebuild
       --pgo       Build the compiler with profile-guided optimization
       --no-bits   Skip compiling bit entry points (implied by -0, -1, and -2)
-      --spinel    Bootstrap stage 1 via the Spinel-compiled stage-0 path
-                  instead of the default C VM
-      --ruby      Use the Ruby interpreter for stage 1
       -h, --help  Show this help
+
+    Developer options (bootstrap maintainers; not needed day-to-day):
+      -0          Build only the Spinel stage-0 compiler (implies --spinel)
+      --spinel    Bootstrap stage 1 via Spinel stage-0 instead of the C VM
+      --ruby      Bootstrap stage 1 via the Ruby interpreter
+                  (or set TUNGSTEN_BOOTSTRAP=ruby|spinel)
   HELP
   exit 0
 end

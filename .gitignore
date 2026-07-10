@@ -66,6 +66,9 @@ runtime/tests/*.dSYM
 !compiler/lib/kernels/**/*.metal
 !bits/tungsten-llama/lib/kernels/**/*.metal
 !bits/tungsten-llama/lib/*.metal
+# Compiler-emitted CUDA sidecars for @gpu fn (regenerated on compile)
+*.cu
+!benchmarks/cuda_add/host.cu
 
 # dSYM debug symbol bundles (Xcode/clang)
 *.dSYM

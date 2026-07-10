@@ -40,11 +40,10 @@ fi
 # `start` lives here on purpose: it's the first-run welcome, and it must work on
 # a fresh clone that has no compiler yet, so it takes the Ruby-dispatch path.
 #
-# `repl` is the canonical REPL subcommand (`console` is its alias): both run the
-# compiled REPL (jit/hot/scrub live there), falling back to the Ruby CLI's
-# console only when no compiled binary exists yet.
+# Interactive REPL: public entry is `tungsten console` (and `bin/wit`).
+# There is no `tungsten --repl` / `tungsten repl`.
 case "$1" in
-  repl|console)
+  console)
     shift
     if [ -x "$COMPILER" ]; then
       exec "$COMPILER" --repl "$@"
@@ -52,7 +51,10 @@ case "$1" in
       exec "$RUBY" "$RUBY_CLI" console "$@"
     fi
     ;;
-  build|fmt|new|start|doctor|ai|forge|flame|fire|bit|compile-batch|symbolicate)
+  # doctor / start / new / compile-batch live in the Tungsten CLI (bin/tungsten.wc).
+  # build still uses the bootstrap driver (Ruby orchestrator); --ruby/--spinel
+  # are developer options on that path. fmt/forge/flame/bit/ai are not yet ported.
+  build|fmt|ai|forge|flame|fire|bit|symbolicate)
     exec "$RUBY" "$RUBY_CLI" "$@"
     ;;
 esac
@@ -352,17 +354,19 @@ case "$1" in
     ;;
 esac
 
-# Interactive REPL modes are implemented by the compiled frontend
-# (compiler/tungsten.w → compiler/lib/repl.w): route them to the compiled
-# binary, which the Ruby CLI does not handle (it rejects --wit/--jit/--hot).
-# Falls back to Ruby only if the compiled binary hasn't been built yet.
+# Developer / internal REPL modes (--jit/--hot). Public REPL is `wit` or
+# `tungsten console` — not `tungsten --repl`.
 case "$1" in
-  --wit|--repl|--jit|--hot)
+  --jit|--hot)
     if [ -x "$COMPILER" ]; then
       exec "$COMPILER" "$@"
     else
       exec "$RUBY" "$RUBY_CLI" "$@"
     fi
+    ;;
+  --repl|--wit)
+    echo "tungsten: use \`bin/wit\` or \`bin/tungsten console\` for the REPL" >&2
+    exit 2
     ;;
 esac
 
@@ -394,12 +398,37 @@ if [ -x "$COMPILER" ]; then
   # The compiled compiler BUILDS the Tungsten-written CLI (bin/tungsten.wc)
   # but does not exec it — so `tungsten file.w` used to print "Built …" and
   # exit without running anything. Build if stale, then run the CLI with the
-  # user's args.
+  # user's args. BIT_HOME is required so `use argon` resolves under bits/.
   WC="$ROOT/bin/tungsten.wc"
   if [ ! -x "$WC" ] || [ "$ROOT/bin/tungsten.w" -nt "$WC" ]; then
-    "$COMPILER" "$ROOT/bin/tungsten.w" >/dev/null 2>&1 || exec "$RUBY" "$RUBY_CLI" "$@"
+    BIT_HOME="${BIT_HOME:-$ROOT/bits}" \
+      "$COMPILER" compile "$ROOT/bin/tungsten.w" --out "$WC" --no-lto >/dev/null 2>&1 \
+      || exec "$RUBY" "$RUBY_CLI" "$@"
+    # Ad-hoc codesign on macOS so a freshly linked CLI is launchable.
+    if [ "$(uname -s)" = "Darwin" ]; then
+      codesign --force -s - "$WC" >/dev/null 2>&1 || true
+    fi
   fi
   exec "$WC" "$@"
 else
+  # Fresh clone: only `start` / `doctor` should work without a compiler.
+  # Prefer a tiny pure-shell fallback for start so the welcome is never blocked.
+  case "$1" in
+    start|doctor|new|--help|-h|-\?|--version|-v|--copyright)
+      # No compiled CLI yet — print a minimal pointer rather than requiring Ruby.
+      if [ "$1" = "start" ] || [ -z "$1" ]; then
+        echo "The Tungsten Programming Language"
+        echo
+        echo "  Next: bin/tungsten build    # bootstrap the self-hosted compiler"
+        echo "  Then: bin/tungsten doctor   # check clang / make / lld / zstd"
+        echo "  Docs: doc/getting-started/"
+        exit 0
+      fi
+      if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+        echo "tungsten $(cat "$ROOT/VERSION" 2>/dev/null || echo dev)"
+        exit 0
+      fi
+      ;;
+  esac
   exec "$RUBY" "$RUBY_CLI" "$@"
 fi

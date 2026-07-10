@@ -494,21 +494,35 @@ while i < args.size()
     write_file(metal_path, metal_text)
     if verbose
       << "Wrote " + metal_path + " (" + kernels.size().to_s() + " @gpu fn)"
-    # Additional GPU dialects (v0, opt-in): CUDA C and WGSL sidecars.
-    # TUNGSTEN_GPU_DIALECTS is a comma list, e.g. "cuda,wgsl".
+    # Additional GPU dialects: CUDA C and WGSL sidecars.
+    # TUNGSTEN_GPU_DIALECTS is a comma list, e.g. "cuda,wgsl" or "none".
+    # Default: emit CUDA always (cross-platform kernel source). WGSL stays
+    # opt-in. Set TUNGSTEN_GPU_DIALECTS=none to suppress extras; Metal is
+    # always written when kernels are present.
     dialects = env("TUNGSTEN_GPU_DIALECTS")
-    if dialects != nil && dialects.include?("cuda")
+    emit_cuda = true
+    emit_wgsl = false
+    if dialects != nil
+      if dialects == "none" || dialects == ""
+        emit_cuda = false
+        emit_wgsl = false
+      else
+        emit_cuda = dialects.include?("cuda")
+        emit_wgsl = dialects.include?("wgsl")
+    if emit_cuda
       cuda_text = emit_gpu_kernels_cuda(kernels)
-      cuda_path = file_path.replace(".w", ".cu")
-      write_file(cuda_path, cuda_text)
-      if verbose
-        << "Wrote " + cuda_path
-    if dialects != nil && dialects.include?("wgsl")
+      if cuda_text != nil
+        cuda_path = file_path.replace(".w", ".cu")
+        write_file(cuda_path, cuda_text)
+        if verbose
+          << "Wrote " + cuda_path + " (" + kernels.size().to_s() + " @gpu fn → CUDA)"
+    if emit_wgsl
       wgsl_text = emit_gpu_kernels_wgsl(kernels)
-      wgsl_path = file_path.replace(".w", ".wgsl")
-      write_file(wgsl_path, wgsl_text)
-      if verbose
-        << "Wrote " + wgsl_path
+      if wgsl_text != nil
+        wgsl_path = file_path.replace(".w", ".wgsl")
+        write_file(wgsl_path, wgsl_text)
+        if verbose
+          << "Wrote " + wgsl_path
 
   return ll_path
 
@@ -1044,10 +1058,10 @@ if eval_code != nil
     interp.run(eval_code, "(eval)")
   rescue err
     if type(err) == "Hash" && err[:rt] == :compile_error
-      << format_compile_error(err)
+      ccall("w_eputs", format_compile_error(err))
       exit 1
     if type(err) == "String"
-      << format_runtime_error(err)
+      ccall("w_eputs", format_runtime_error(err, "(eval)"))
       exit 1
     raise err
   # exit AFTER the begin/rescue, not as the last stmt inside `begin`: an in-block
@@ -1092,10 +1106,10 @@ if command == "run"
     interp.run(source, file_path)
   rescue err
     if type(err) == "Hash" && err[:rt] == :compile_error
-      << format_compile_error(err)
+      ccall("w_eputs", format_compile_error(err))
       exit 1
     if type(err) == "String"
-      << format_runtime_error(err)
+      ccall("w_eputs", format_runtime_error(err, file_path))
       exit 1
     raise err
 
@@ -1107,7 +1121,7 @@ elsif command == "compile"
       dump_ast_stats()
   rescue err
     if type(err) == "Hash" && err[:rt] == :compile_error
-      << format_compile_error(err)
+      ccall("w_eputs", format_compile_error(err))
       exit 1
     raise err
 
@@ -1147,7 +1161,7 @@ elsif command == "compile-batch"
     rescue err
       fail_count += 1
       if type(err) == "Hash" && err[:rt] == :compile_error
-        << format_compile_error(err)
+        ccall("w_eputs", format_compile_error(err))
       else
         << "Unhandled exception compiling [fp]: [err]"
 

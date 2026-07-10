@@ -70,7 +70,7 @@ bin/tungsten --ast file.w       # print the AST
 bin/tungsten --ll file.w        # print LLVM IR
 bin/tungsten -o out file.w      # compile to a native binary
 bin/tungsten --ruby file.w      # run via the Ruby interpreter (no compile)
-bin/tungsten --repl             # interactive REPL
+bin/wit                         # interactive REPL (or: bin/tungsten console)
 bin/tungsten --clear-cache      # clear all .memo (incremental compile) cache files
 ```
 

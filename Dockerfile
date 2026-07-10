@@ -2,7 +2,7 @@
 #
 #   docker build -t tungsten .
 #   docker run --rm -it tungsten                 # prints `tungsten start`
-#   docker run --rm -it tungsten tungsten --repl # the playground REPL
+#   docker run --rm -it tungsten wit              # the playground REPL
 #
 # Builds the self-hosted compiler from source (stage 1 == stage 2 byte-identity
 # is checked). clang/LLVM is required to compile .w programs, so it stays in the

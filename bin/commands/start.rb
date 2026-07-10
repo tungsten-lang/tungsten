@@ -63,7 +63,7 @@ puts
 if HAVE_COMPILER
   puts "#{bold}Next#{reset}"
   puts
-  puts "  #{green}tungsten repl#{reset}        explore interactively"
+  puts "  #{green}tungsten console#{reset}    or: #{green}wit#{reset}"
 else
   puts "#{bold}Next — build the compiler#{reset} #{dim}(a fresh clone ships without one)#{reset}"
   puts
@@ -97,7 +97,7 @@ if HAVE_COMPILER && $stdout.tty? && $stdin.tty? && ENV["CI"].nil?
       out.each_line { |l| puts "  => #{bold}#{l.chomp}#{reset}" }
     end
     puts
-    puts "The interactive playground is #{green}tungsten repl#{reset}."
+    puts "The interactive playground is #{green}wit#{reset} (or #{green}tungsten console#{reset})."
     puts
     puts "Enter a command, then #{bold}press Enter on a blank line#{reset}, use #{bold}↑/↓#{reset} to scrub the coefficients live — try:"
     puts

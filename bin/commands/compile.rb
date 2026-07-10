@@ -244,7 +244,7 @@ flag_ll        = false
 flag_verbose   = false
 out_path       = nil
 eval_code      = nil
-repl_mode      = false
+
 interactive    = false
 intern_algo    = "raw"
 extra_c_includes = ENV.fetch("TUNGSTEN_C_INCLUDES", "").split(File::PATH_SEPARATOR).reject(&:empty?)
@@ -292,10 +292,6 @@ parser = OptionParser.new do |opts|
 
   opts.on "--ruby", "Use Ruby interpreter (skip compilation)" do
     flag_interpret = true
-  end
-
-  opts.on "--repl", "Start interactive REPL" do
-    repl_mode = true
   end
 
   opts.on "-i", "--interactive", "Start REPL after evaluating -e" do
@@ -435,7 +431,7 @@ rest = parser.parse(ARGV)
 begin
 
 # -v with no other action: exit after printing version
-if flag_verbose && !eval_code && !repl_mode && !interactive && rest.empty?
+if flag_verbose && !eval_code && !interactive && rest.empty?
   exit 0
 end
 
@@ -478,8 +474,8 @@ if eval_code
   exit 0
 end
 
-# --repl / -i: interactive mode
-if repl_mode || interactive
+# -i: interactive mode after -e (REPL playground is `wit` / `tungsten console`)
+if interactive
   load_gem!
   Tungsten::REPL.new.start
   exit 0

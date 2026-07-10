@@ -122,10 +122,10 @@
 
 # -- Runtime error formatter --
 # Runtime errors are raised as plain strings (no source span), so there's no
-# caret — just a clean `error: <message>` header matching format_compile_error's
-# first line, instead of the raw "unhandled exception: …" + C backtrace.
+# caret. When the driver knows the source file, include it without inventing a
+# line number; otherwise render just the clean `error: <message>` header.
 
--> format_runtime_error(message)
+-> format_runtime_error(message, file = nil)
   color = error_formatter_use_color()
   out = StringBuffer(128)
   out << "\n"
@@ -136,6 +136,13 @@
   out << message.to_s()
   out << c(color, ansi_reset())
   out << "\n"
+  if file != nil
+    out << "\n"
+    out << c(color, ansi_dim())
+    out << "  --> "
+    out << shorten_path(file)
+    out << c(color, ansi_reset())
+    out << "\n"
   out.to_s()
 
 # -- Main formatter --
@@ -143,6 +150,27 @@
 # ready to print to stderr. The hash must have :message; file/row/col/
 # source context are optional. If file is present but unreadable,
 # source context is skipped without error.
+
+# Split multi-line messages so `help:` trails render as dim notes.
+-> format_error_message_lines(out, color, message)
+  text = message.to_s()
+  parts = text.split("\n")
+  i = 0
+  while i < parts.size()
+    line = parts[i]
+    if i == 0
+      out << c(color, ansi_bold())
+      out << line
+      out << c(color, ansi_reset())
+    elsif line.starts_with?("  help:") || line.starts_with?("help:")
+      out << "\n"
+      out << c(color, ansi_dim())
+      out << line
+      out << c(color, ansi_reset())
+    else
+      out << "\n"
+      out << line
+    i += 1
 
 -> format_compile_error(err)
   color = error_formatter_use_color()
@@ -162,13 +190,11 @@
   out = StringBuffer(256)
   out << "\n"
 
-  # Header: `error: <message>`
+  # Header: `error: <message>` (optional multi-line help: notes)
   out << c(color, ansi_bright_red())
   out << "error: "
   out << c(color, ansi_reset())
-  out << c(color, ansi_bold())
-  out << message
-  out << c(color, ansi_reset())
+  format_error_message_lines(out, color, message)
   out << "\n"
 
   # Location arrow: `  --> file:row:col`

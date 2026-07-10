@@ -105,16 +105,61 @@ run_metal_spec() {
   rm -f "$ll_path" "$ll_path.done" "$metal_path"
 }
 
+# Emit-only CUDA dialect check: compiles with TUNGSTEN_GPU_DIALECTS=cuda so a
+# sibling .cu is written next to the source; the binary reads that text. No
+# CUDA toolkit or GPU is required. Always cleans metal/cu/ll sidecars.
+run_cuda_emit_spec() {
+  local path="$1"
+  local name
+  local out
+  local ll_path
+  local metal_path
+  local cuda_path
+  local output
+  local status
+
+  name="$(basename "${path%.w}")"
+  out="$TMP_ROOT/$name"
+  ll_path="$ROOT/${path%.w}.ll"
+  metal_path="$ROOT/${path%.w}.metal"
+  cuda_path="$ROOT/${path%.w}.cu"
+
+  echo "compile+run $path (TUNGSTEN_GPU_DIALECTS=cuda)"
+  if ! TUNGSTEN_GPU_DIALECTS=cuda TUNGSTEN_LL_PATH="$ll_path" \
+      "$TUNGSTEN" compile "$path" --out "$out" >/dev/null; then
+    echo "FAIL [$name] compile failed" >&2
+    fail=1
+    rm -f "$ll_path" "$ll_path.done" "$metal_path" "$cuda_path"
+    return
+  fi
+
+  set +e
+  output="$("$out" 2>&1)"
+  status=$?
+  set -e
+  record_result "$name" "$output" "$status"
+  rm -f "$ll_path" "$ll_path.done" "$metal_path" "$cuda_path"
+}
+
 compiled_specs=(
   spec/compiler/block_passthrough_spec.w
   spec/compiler/recase_spec.w
   spec/compiler/typed_overload_spec.w
   spec/compiler/view_field_var_spec.w
+  spec/core/basics_spec.w
+  spec/core/control_flow_spec.w
+  spec/core/classes_spec.w
+  spec/core/arrays_hashes_spec.w
   spec/numeric/complex_spec.w
   spec/numeric/fp_math_mode_spec.w
   spec/numeric/matrix_spec.w
   spec/numeric/operator_overload_spec.w
   spec/numeric/vector_spec.w
+)
+
+# Emit-only GPU dialect specs (no hardware). Run always with make specs.
+cuda_emit_specs=(
+  spec/compiler/gpu_cuda_emit_spec.w
 )
 
 interpreter_specs=(
@@ -139,6 +184,10 @@ metal_specs=(
 
 for spec in "${compiled_specs[@]}"; do
   run_compiled_spec "$spec"
+done
+
+for spec in "${cuda_emit_specs[@]}"; do
+  run_cuda_emit_spec "$spec"
 done
 
 for spec in "${interpreter_specs[@]}"; do

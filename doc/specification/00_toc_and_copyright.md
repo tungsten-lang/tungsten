@@ -14,8 +14,11 @@ Every implementation comes with a number of core classes, see _[The Tungsten Cor
 
 0. [Introduction](01_introduction.md)
 1. [Lexical Analysis](02_lexical_analysis.md)
-2. [Floating-Point Math Modes](floating-point-math.md)
-3. Appendix
+2. [Grammar](03_grammar.md)
+3. [Semantics](04_semantics.md)
+4. [Object Model](05_object_model.md)
+5. [Floating-Point Math Modes](floating-point-math.md)
+6. Appendix
     A: [Units of measurement](appendix_units_of_measurement.md)
     B: [Inspiration](appendex_language_inspiration.md)
 

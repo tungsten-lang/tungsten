@@ -1445,6 +1445,12 @@
     raw_return_type = normalize_type_symbol(node.return_type)
     if is_raw_int_storage_type(raw_return_type)
       new_fn[:raw_return_type] = raw_return_type
+    # Static methods are called `Class.name(…)` — register the dotted key
+    # infer_type's static-receiver lookup uses, so a declared return type
+    # (e.g. `-> .atan2(y, x) f64` in core/math.w) drives call-site
+    # inference the same way top-level fn annotations do.
+    if node.is_class_method == true
+      mod[:fn_return_types][class_name + "." + name] = raw_return_type
 
   needs_block_return = analysis[:needs_block_return]
   if needs_block_return

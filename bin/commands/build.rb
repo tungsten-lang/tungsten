@@ -607,7 +607,7 @@ puts "#{bold}==> Runtime: compiling C sources#{reset}"
 t_runtime_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
 tls_enabled = ENV["TLS"] || ENV["TUNGSTEN_TLS"]
-runtime_srcs = %w[runtime.c ssmr_witness.c lexchar_tables.c tls_stub.c aks.c slab_zstd.c]
+runtime_srcs = %w[runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c tls_stub.c aks.c slab_zstd.c]
 runtime_srcs << platform_event_src if platform_event_src
 runtime_srcs << "tls.c" if tls_enabled
 metal_enabled = RUBY_PLATFORM =~ /darwin/

@@ -59,6 +59,7 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
     @last_inspect_lines = 0
     @scrub_jumpback = 0
     @stdlib_methods = nil
+    @unit_metadata = nil
 
   -> start
     # Survive runtime faults (div-by-zero, type errors): route die() through the
@@ -842,7 +843,61 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
       ins_block(ccall("w_color_scene", v))
     if tn == "IPv4"
       ins_block(ccall("w_ip4_scene", v))
+    if tn == "Quantity"
+      inspect_quantity_metadata(v)
     insp_breakdown(v)
+
+  # Unit prose is intentionally external to the compiler/runtime binary. Both
+  # REPLs read data/unit_metadata.tsv so history edits do not require a rebuild.
+  -> load_unit_metadata
+    if @unit_metadata != nil
+      return @unit_metadata
+    @unit_metadata = {}
+    root = env("TUNGSTEN_ROOT")
+    path = "data/unit_metadata.tsv"
+    if root != nil && root != ""
+      path = root + "/data/unit_metadata.tsv"
+    content = read_file(path)
+    if content == nil
+      return @unit_metadata
+    lines = content.split("\n")
+    i = 0
+    while i < lines.size()
+      line = lines[i]
+      if line.size() > 0 && !line.starts_with?("#")
+        fields = line.split("\t")
+        if fields.size() >= 7
+          @unit_metadata[fields[0]] = fields
+      i = i + 1
+    @unit_metadata
+
+  -> inspect_quantity_metadata(value)
+    symbol = ccall("w_quantity_unit_name", value)
+    if symbol == nil
+      return
+    ins(insp_hline("unit", symbol))
+    metadata = load_unit_metadata()[symbol]
+    if metadata == nil
+      return
+    if metadata[1] != ""
+      ins(insp_hline("description", metadata[1]))
+    if metadata[2] != ""
+      ins(insp_hline("etymology", metadata[2]))
+    if metadata[3] != ""
+      ins(insp_hline("history", metadata[3]))
+    defined = ""
+    if metadata[6] != ""
+      defined = metadata[6]
+    if metadata[5] != ""
+      if defined != ""
+        defined = defined + " — "
+      defined = defined + metadata[5]
+    if metadata[4] != ""
+      if defined != ""
+        defined = defined + " — "
+      defined = defined + metadata[4]
+    if defined != ""
+      ins(insp_hline("defined", defined))
 
   # Build the inspection of `src` as one \r\n-joined string (no trailing newline)
   # for the in-place scrub repaint; "(incomplete)" if `src` doesn't evaluate.
@@ -1803,6 +1858,8 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
     if t == "Currency" || t == "Quantity"
       return GREEN + value.to_s() + RESET
     if t == "String"
+      if value.include?("It's peanut butter jelly time!")
+        return value
       return WHITE + "\"" + value + "\"" + RESET
     if t == "Symbol"
       return YELLOW + ":" + value.to_s() + RESET

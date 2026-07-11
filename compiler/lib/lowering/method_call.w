@@ -14,6 +14,27 @@
 
   recv_node = node.receiver
 
+  # Unit-carrying tensor factory syntax is intentionally a type-level spelling
+  # even though Tensor's implementation stores dtype/unit as runtime metadata:
+  #
+  #   Tensor<f64, m/s>.zeros([100, 100])
+  #
+  # Do this before generic monomorphized dispatch. Tensor is not a generic
+  # template (units are open-ended expressions), so specializing a class for
+  # every unit would be both misleading and needlessly expensive.
+  if recv_node != nil && ast_kind(recv_node) == :class_ref && recv_node.name == "Tensor" && method_name == "zeros"
+    tensor_args = node.type_args
+    if tensor_args == nil
+      tensor_args = recv_node.type_args
+    if tensor_args != nil
+      if tensor_args.size() != 2 || node.args == nil || node.args.size() != 1
+        raise compile_error_for_node(:E_LOWER_TENSOR_UNIT_TYPE, "Tensor unit factory expects Tensor<dtype, unit>.zeros(shape)", ctx[:source_path], node)
+      if lookup_unit_static_signature(tensor_args[1]) == nil
+        raise compile_error_for_node(:E_LOWER_TENSOR_UNIT_TYPE, "unknown Tensor unit expression: " + tensor_args[1], ctx[:source_path], node)
+      rewritten = Tungsten:AST:Call.new(Tungsten:AST:ClassRef.new("Tensor"), "zeros_unit", [Tungsten:AST:String.new(tensor_args[0]), Tungsten:AST:String.new(tensor_args[1]), node.args[0]], nil)
+      rewritten.loc = ast_get(node, :loc)
+      return lower_method_call(ctx, rewritten)
+
   # `arr.flip(i)` — toggle element i in place. Sugar for `arr[i] = !arr[i]`,
   # built from the same "[]"/"[]=" calls the parser emits for subscript
   # get/set (not an Assign-with-call-target, which drops the index arg).
@@ -153,6 +174,39 @@
     recv_node = ctx[:range_bindings][recv_node.name]
 
   recv_type = receiver_static_type(ctx, recv_node)
+
+  # Quantity is an immediate/domain runtime value rather than a heap Instance,
+  # so its metadata/equivalence methods lower directly instead of entering the
+  # user-class method cache.
+  recv_is_known_quantity = recv_type == :quantity || ast_kind(recv_node) == :quantity
+  if !recv_is_known_quantity && ast_kind(recv_node) == :var && ctx[:quantity_dimensions] != nil
+    recv_is_known_quantity = ctx[:quantity_dimensions][recv_node.name] != nil
+  if recv_is_known_quantity && node.block == nil && method_name in ("point" "delta" "point?" "delta?" "origin" "equivalent" "equivalent_to")
+    recv_tv = lower_expression(ctx, recv_node)
+    call_args = [ensure_i64_value(wfn, recv_tv)]
+    helper = "w_quantity_origin"
+    if method_name == "point"
+      helper = "w_quantity_point"
+      annotation = node.args.size() == 0 ? Tungsten:AST:Symbol.new("default") : node.args[0]
+      call_args.push(ensure_i64_value(wfn, lower_expression(ctx, annotation)))
+    elsif method_name == "delta"
+      helper = "w_quantity_delta"
+      annotation = node.args.size() == 0 ? Tungsten:AST:Nil.new() : node.args[0]
+      call_args.push(ensure_i64_value(wfn, lower_expression(ctx, annotation)))
+    elsif method_name == "point?"
+      helper = "w_quantity_point_p"
+    elsif method_name == "delta?"
+      helper = "w_quantity_delta_p"
+    elsif method_name == "equivalent" || method_name == "equivalent_to"
+      if node.args.size() != 2
+        raise compile_error_for_node(:E_LOWER_QUANTITY_EQUIVALENCE, "quantity equivalence expects target unit and named bridge", ctx[:source_path], node)
+      helper = "w_quantity_equivalent"
+      call_args.push(ensure_i64_value(wfn, lower_expression(ctx, node.args[0])))
+      call_args.push(ensure_i64_value(wfn, lower_expression(ctx, node.args[1])))
+    temp = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: helper, args: call_args})
+    return typed_value(:i64, temp)
+
   if recv_type == :array && call_has_ast_block?(node) && (node.args == nil || node.args.size() == 0) && inline_array_iterator_method?(method_name)
     inlined = lower_inline_array_iterator_call(ctx, recv_node, method_name, node.block)
     if inlined != nil
@@ -485,14 +539,38 @@
         math_unary = "w_math_abs"
       if math_unary != nil && args.size() == 1
         arg_val = lower_expression(ctx, args[0])
+        # Raw fast path: operand is already an unboxed machine number — call
+        # libm directly on the double (call_libm_f64) and stay raw, skipping
+        # the box → w_math_* → unbox → re-box round-trip. Boxed WValues keep
+        # the runtime path: they carry Int/Float dynamically and
+        # w_math_to_double resolves that at runtime.
+        if arg_val[:type] in (:raw_f64 :raw_f32 :raw_int :raw_i64 :raw_u64)
+          libm_name = method_name
+          if method_name == "abs"
+            libm_name = "fabs"
+          arg_raw = ensure_raw_f64(wfn, arg_val)
+          temp = next_temp(wfn)
+          emit_instruction(wfn, {op: :call_libm_f64, temp: temp, name: libm_name, value: arg_raw})
+          return typed_value(:raw_f64, temp)
         arg_reg = ensure_i64_value(wfn, arg_val)
         temp = next_temp(wfn)
         emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: math_unary, args: [arg_reg]})
         return typed_value(:i64, temp)
       if method_name in ("pow" "ldexp" "atan2") && args.size() == 2
         a_val = lower_expression(ctx, args[0])
-        a_reg = ensure_i64_value(wfn, a_val)
         b_val = lower_expression(ctx, args[1])
+        # Raw fast path for the pure-libm pair (ldexp's second arg is an
+        # int, so it stays on the runtime path). Both operands must already
+        # be raw — a boxed WValue needs w_math_to_double's dynamic Int/Float
+        # handling.
+        if method_name in ("pow" "atan2")
+          if a_val[:type] in (:raw_f64 :raw_f32 :raw_int :raw_i64 :raw_u64) && b_val[:type] in (:raw_f64 :raw_f32 :raw_int :raw_i64 :raw_u64)
+            a_raw = ensure_raw_f64(wfn, a_val)
+            b_raw = ensure_raw_f64(wfn, b_val)
+            temp = next_temp(wfn)
+            emit_instruction(wfn, {op: :call_libm_f64, temp: temp, name: method_name, lhs: a_raw, rhs: b_raw})
+            return typed_value(:raw_f64, temp)
+        a_reg = ensure_i64_value(wfn, a_val)
         b_reg = ensure_i64_value(wfn, b_val)
         rt_name = "w_math_pow"
         if method_name == "ldexp"
@@ -1129,6 +1207,11 @@
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: [receiver_reg, arg_reg]})
       return typed_value(:i64, temp)
     if method_name in ("cos" "sin" "sqrt") && node.args.size() == 0
+      # f64 receivers fuse into a single raw loop with a scalar libm call
+      # per element (vectorizable); other dtypes keep the kernel.
+      fused = try_fuse_elementwise(ctx, node)
+      if fused != nil
+        return fused
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)

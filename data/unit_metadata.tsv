@@ -1,0 +1,93 @@
+# External unit documentation loaded by the Ruby and compiled REPLs.
+# symbol<TAB>description<TAB>etymology<TAB>history<TAB>source<TAB>year<TAB>status
+m	metre — SI base unit of length, defined via the speed of light c	From Greek metron, “measure”, through French mètre.	The 1983 definition fixed the speed of light at exactly 299,792,458 metres per second.	17th CGPM	1983	exact
+kg	kilogram — SI base unit of mass, defined via the Planck constant h	Greek khilioi, “thousand”, plus gramme.	Since 2019 the kilogram is defined by fixing the Planck constant rather than by a metal artefact.	26th CGPM	2019	exact
+g	gram — one thousandth of a kilogram	From Late Latin gramma, a small weight, ultimately Greek grammē.	The gram was an original metric mass unit; modern SI treats the kilogram as the base unit.	26th CGPM	2019	exact
+s	second — SI base unit of time, defined by the caesium-133 hyperfine transition	From Latin secunda pars minuta, the “second diminished part” of an hour.	The atomic definition was adopted in 1967 and refined in wording without changing its duration.	13th CGPM	1967	exact
+A	ampere — SI base unit of electric current	Named for French physicist André-Marie Ampère.	Since 2019 it is defined by fixing the elementary charge.	26th CGPM	2019	exact
+K	kelvin — SI base unit of thermodynamic temperature	Named for William Thomson, Lord Kelvin.	Since 2019 it is defined by fixing the Boltzmann constant.	26th CGPM	2019	exact
+mol	mole — SI base unit of amount of substance	From German Mol, shortened from Molekül.	Since 2019 one mole contains exactly 6.02214076×10²³ specified entities.	26th CGPM	2019	exact
+cd	candela — SI base unit of luminous intensity	Latin candela, “candle”.	The modern photometric definition fixes the luminous efficacy of 540 THz radiation.	16th CGPM	1979	exact
+Hz	hertz — one cycle per second	Named for physicist Heinrich Hertz.	The IEC adopted hertz in 1933; the CGPM adopted it for SI in 1960.	IEC	1933	exact
+N	newton — SI derived unit of force, kg·m/s²	Named for Isaac Newton.	The name newton was adopted internationally in 1948.	9th CGPM	1948	exact
+Pa	pascal — SI derived unit of pressure, N/m²	Named for Blaise Pascal.	The pascal was adopted as the SI pressure name in 1971.	14th CGPM	1971	exact
+J	joule — SI derived unit of energy, N·m	Named for James Prescott Joule.	The joule became an international electrical-mechanical energy unit in the late nineteenth century.	BIPM	1889	exact
+W	watt — SI derived unit of power, J/s	Named for James Watt.	The watt was adopted by the British Association in 1882 and standardized internationally in 1889.	BIPM	1889	exact
+V	volt — SI derived unit of electric potential	Named for Alessandro Volta.	The volt was adopted by the first International Electrical Congress in 1881.	International Electrical Congress	1881	exact
+Ω	ohm — SI derived unit of electrical resistance	Named for Georg Ohm.	The ohm was adopted internationally in 1881 and later incorporated into SI.	International Electrical Congress	1881	exact
+PB	petabyte — 10¹⁵ bytes	SI prefix peta, from Greek pente, “five”, marking the fifth power of one thousand.	The SI prefix peta was adopted in 1975; decimal storage usage was standardized separately from IEC pebibytes.	15th CGPM	1975	exact
+eV	electronvolt — energy gained by one elementary charge through one volt	Coined from electron plus volt.	Widely used in atomic and particle physics; it became exact after the 2019 SI fixed the elementary charge.	SI Brochure	2019	exact
+smoot	informal length equal to 1.7018 metres	Named for Oliver R. Smoot, used bodily as the measuring rod.	MIT students measured the Harvard Bridge in 1958 as 364.4 smoots plus or minus one ear.	MIT Lambda Chi Alpha	1958	measured
+banana	banana equivalent dose — approximately 0.1 microsievert	Named for the familiar fruit used to communicate potassium-40 exposure.	The informal comparison was popularized in radiation-safety communication in the 1990s.	Lawrence Livermore	1995	measured
+hartree	atomic unit of energy, approximately 27.211 electronvolts	Named for Douglas Hartree.	Introduced with atomic-unit methods for quantum calculations.	CODATA	1928	measured
+bohr_radius	atomic unit of length for the hydrogen ground state	Named for Niels Bohr.	Derived from the 1913 Bohr model and maintained as a CODATA atomic constant.	CODATA	1913	measured
+electron_mass	rest mass of an electron	Named for the electron, from Greek elektron, “amber”.	A measured particle constant periodically refined by CODATA.	CODATA	2018	measured
+proton_mass	rest mass of a proton	Proton comes from Greek prōtos, “first”.	A measured particle constant periodically refined by CODATA.	CODATA	2018	measured
+neutron_mass	rest mass of a neutron	From Latin neuter, “neither”, referring to its lack of electric charge.	A measured particle constant periodically refined by CODATA.	CODATA	2018	measured
+°C	degree Celsius — an absolute temperature point with the ice point near zero	Named for Swedish astronomer Anders Celsius.	Celsius proposed a centigrade scale in 1742; its modern relation to kelvin is exact.	BIPM	1948	exact
+°F	degree Fahrenheit — an absolute temperature point	Named for instrument maker Daniel Gabriel Fahrenheit.	Fahrenheit published his mercury-thermometer scale in 1724; its modern relation to kelvin is exact.	BIPM	1724	exact
+ΔK	kelvin temperature difference	Named for William Thomson, Lord Kelvin; delta marks a difference rather than a point.	A kelvin interval has the same exact size as a Celsius interval.	BIPM	1967	exact
+Δ°C	degree Celsius temperature difference	Named for Anders Celsius; delta marks a difference rather than a point.	Celsius intervals were separated from absolute Celsius readings here to prevent affine arithmetic mistakes.	Tungsten	2026	exact
+Δ°F	degree Fahrenheit temperature difference	Named for Daniel Gabriel Fahrenheit; delta marks a difference rather than a point.	A Fahrenheit interval is exactly five ninths of a kelvin interval.	BIPM	1724	exact
+lm	lumen — SI unit of luminous flux	Latin lumen, “light”.	The lumen predates SI and was incorporated as the candela-steradian derived unit.	BIPM	1948	exact
+lx	lux — SI unit of illuminance, one lumen per square metre	Latin lux, “light”.	The name lux was recommended internationally in the late nineteenth century and incorporated into SI.	BIPM	1948	exact
+nit	unit of luminance equal to one candela per square metre	From Latin nitere, “to shine”.	The non-SI name became common in display engineering; candela per square metre remains the SI expression.	IEC	1940	exact
+Gy	gray — absorbed dose of one joule per kilogram	Named for radiobiologist Louis Harold Gray.	Adopted by the CGPM in 1975 as the special SI name for absorbed dose.	15th CGPM	1975	exact
+Sv	sievert — equivalent or effective radiation dose of one joule per kilogram	Named for medical physicist Rolf Maximilian Sievert.	Adopted in 1979 to distinguish biological dose weighting from absorbed dose measured in grays.	16th CGPM	1979	exact
+rem	roentgen equivalent man — 0.01 sievert	An acronym for roentgen equivalent man.	Introduced for radiation protection before the sievert; retained as a non-SI unit.	ICRP	1940	exact
+rad	radian — plane angle subtending an arc equal to the radius	A shortening of radius.	The name was coined in the nineteenth century and the radian is the coherent SI unit of plane angle.	BIPM	1873	exact
+sr	steradian — SI unit of solid angle	Greek stereos, “solid”, plus radian.	The term was introduced in the nineteenth century and adopted into SI.	BIPM	1880	exact
+ppm	parts per million — ratio of 10⁻⁶	A literal abbreviation of parts per million.	Widely used for trace concentrations; explicit ratios are preferred when ambiguity about mass or volume matters.	ISO	1900	exact
+kg/m³	kilograms per cubic metre — SI mass density	A compositional SI expression.	The coherent SI density unit follows directly from kilogram and metre.	BIPM	1960	exact
+m³/s	cubic metres per second — SI volumetric flow rate	A compositional SI expression.	Used in fluid mechanics and hydrology as the coherent volumetric flow unit.	BIPM	1960	exact
+L/min	litres per minute — practical volumetric flow rate	Litre derives from French litre, historically related to litron.	Common in medicine, process engineering, and gas flow where cubic metres per second is inconveniently large.	BIPM	1964	exact
+kg/s	kilograms per second — SI mass flow rate	A compositional SI expression.	Used as the coherent mass-flow unit in thermodynamics and process engineering.	BIPM	1960	exact
+J/K	joules per kelvin — heat capacity or entropy	A compositional SI expression.	Heat capacity and entropy share this unit but represent different physical quantities.	BIPM	1960	exact
+J/kg/K	joules per kilogram-kelvin — specific heat capacity	A compositional SI expression.	The coherent specific-heat unit replaced calorie-based conventions in SI work.	BIPM	1960	exact
+W/m/K	watts per metre-kelvin — thermal conductivity	A compositional SI expression.	Used for Fourier-law thermal conductivity in engineering and materials science.	BIPM	1960	exact
+W/m²	watts per square metre — heat or irradiance flux	A compositional SI expression.	Used for power distributed over area in heat transfer and radiometry.	BIPM	1960	exact
+V/m	volts per metre — electric-field strength	A compositional SI expression.	One of the standard coherent expressions for electric field in SI.	BIPM	1960	exact
+A/m²	amperes per square metre — electric-current density	A compositional SI expression.	Used for current distributed across a conductor cross-section.	BIPM	1960	exact
+Ω·m	ohm metre — electrical resistivity	Named from the ohm, honoring Georg Ohm, times metre.	The coherent SI resistivity unit is the reciprocal counterpart of siemens per metre.	BIPM	1960	exact
+S/m	siemens per metre — electrical conductivity	Named for Werner von Siemens, divided by metre.	The coherent SI conductivity unit is reciprocal ohm metre.	BIPM	1971	exact
+C/m³	coulombs per cubic metre — volume charge density	Named from the coulomb, honoring Charles-Augustin de Coulomb.	The coherent SI expression measures electric charge distributed through volume.	BIPM	1960	exact
+N/m	newtons per metre — surface tension	Named from the newton divided by metre.	Used in the force-per-length form of surface tension.	BIPM	1960	exact
+kg/m	kilograms per metre — linear mass density	A compositional SI expression.	Used for cables, fibres, rails, and other distributed masses.	BIPM	1960	exact
+kg/m²	kilograms per square metre — areal mass density	A compositional SI expression.	Used for paper grammage, coatings, textiles, and structural sheets.	BIPM	1960	exact
+J/m³	joules per cubic metre — energy density	A compositional SI expression.	Dimensionally equal to a pascal, but semantically used for stored energy per volume.	BIPM	1960	exact
+J/kg	joules per kilogram — specific energy	A compositional SI expression.	Dimensionally equal to absorbed dose, but semantically used for energy per mass rather than ionizing-radiation dose.	BIPM	1960	exact
+mol/mol	moles per mole — amount fraction	A compositional ratio of like amount units.	The explicit mol/mol spelling avoids ambiguity in ppm-style concentration reporting.	BIPM	1960	exact
+kat/m³	katals per cubic metre — catalytic activity concentration	Katal comes from catalysis, ultimately Greek katalysis, “dissolution”.	Used for catalytic activity distributed through a volume.	BIPM	1999	exact
+cd/m²	candelas per square metre — SI luminance expression	Candela is Latin for “candle”.	This SI expression is commonly called a nit in display specifications.	BIPM	1960	exact
+lx·s	lux second — luminous exposure	Lux is Latin for “light”, multiplied by second.	Used in sensitometry and exposure measurement as illuminance integrated over time.	CIE	1900	exact
+lm·s	lumen second — quantity of light	Lumen is Latin for “light”, multiplied by second.	Used for time-integrated luminous flux, including flash output.	CIE	1900	exact
+rad/s	radians per second — angular velocity	Radian derives from radius.	The coherent SI angular-velocity expression makes the angular kind explicit.	BIPM	1960	exact
+rad/s²	radians per second squared — angular acceleration	Radian derives from radius.	The coherent SI angular-acceleration expression makes the angular kind explicit.	BIPM	1960	exact
+m/s³	metres per second cubed — jerk	Jerk is the established mechanics term for the time derivative of acceleration.	Used in motion planning, ride comfort, and control systems.	Engineering usage	1900	exact
+kg·m/s	kilogram metres per second — momentum	Latin momentum, “movement” or “moving power”.	The coherent SI momentum expression follows from mass times velocity.	BIPM	1960	exact
+N·s	newton second — impulse	Latin impulsus, “a pushing against”.	Impulse is force integrated over time and equals change in momentum.	BIPM	1960	exact
+N·m	newton metre — torque	Torque comes from Latin torquere, “to twist”.	The explicit newton-metre spelling distinguishes rotational moment from joules of energy despite identical SI exponents.	BIPM	1960	exact
+heat_capacity	joules per kelvin tagged as heat capacity	Heat comes from Old English hætu; capacity from Latin capacitas.	The semantic spelling prevents heat capacity from being added to entropy solely because both use J/K.	Tungsten	2026	exact
+entropy	joules per kelvin tagged as thermodynamic entropy	Coined by Rudolf Clausius from Greek en, “in”, and tropē, “transformation”.	Clausius introduced entropy in 1865; the semantic spelling distinguishes the state quantity from heat capacity.	Scientific usage	1865	exact
+specific_energy	joules per kilogram tagged as specific energy	Specific denotes a quantity per unit mass.	The semantic spelling prevents ordinary specific energy from being treated as radiation absorbed dose.	Tungsten	2026	exact
+Bq	becquerel — one radioactive decay per second	Named for physicist Henri Becquerel.	The CGPM adopted the becquerel in 1975; Tungsten retains decay as a compositional event kind rather than identifying it with cycles.	15th CGPM	1975	exact
+bit/s/Hz	bits per second per hertz — spectral efficiency	Bit was coined from binary digit; hertz honors Heinrich Hertz.	A communications metric describing information rate per unit bandwidth.	IEEE	1900	exact
+J/op	joules per operation — computational energy efficiency	Operation is shortened to op in computing.	Used to compare the energy cost of processors, accelerators, and algorithms.	Engineering usage	2000	measured
+J/tok	joules per token — model-inference energy intensity	Token derives from an item standing for another item; NLP adopted it for text pieces.	A practical modern metric for language-model inference efficiency.	Tungsten	2026	measured
+B/flop	bytes per floating-point operation — computational intensity reciprocal	FLOP abbreviates floating-point operation.	Used in roofline-style performance analysis to describe data traffic per arithmetic operation.	HPC usage	2000	measured
+kgCO₂e	kilograms of carbon-dioxide equivalent	CO₂e means carbon dioxide equivalent, aggregating greenhouse gases by warming effect.	Greenhouse-gas accounting uses CO₂e to report unlike gases on a shared basis.	IPCC	1990	measured
+gCO₂e	grams of carbon-dioxide equivalent	CO₂e means carbon dioxide equivalent.	A convenient smaller-scale greenhouse-gas accounting unit.	IPCC	1990	measured
+gCO₂e/kWh	grams CO₂e per kilowatt-hour — electricity carbon intensity	A compositional greenhouse-gas and energy expression.	Widely used to compare electricity grids and generation technologies.	GHG Protocol	2000	measured
+gCO₂e/pkm	grams CO₂e per passenger-kilometre — transport carbon intensity	Passenger-kilometre combines one passenger with one kilometre travelled.	Used to compare per-passenger emissions among transport modes.	Transport accounting	2000	measured
+px	CSS reference pixel — one ninety-sixth of a CSS inch	Pixel is a blend of picture and element.	CSS standardized the reference pixel and fixes 96 px per CSS inch for absolute-unit conversion.	W3C CSS	1996	exact
+dpi	dots per inch — spatial resolution	Dot plus the abbreviation for inch.	Long used for print and display addressability; one dpi is one reciprocal inch.	Publishing usage	1900	exact
+dppx	dots per CSS pixel — resolution unit equal to 96 dpi	An abbreviation of dots per pixel.	CSS Values and Units defines dppx for resolution media queries.	W3C CSS	2012	exact
+rem_css	CSS root-em — size relative to the root element font	Rem abbreviates root em; em comes from the typographic em square.	Introduced by CSS to make font-relative sizing independent of nested element font sizes.	W3C CSS	2011	contextual
+vw	one percent of viewport width	An abbreviation of viewport width.	CSS introduced viewport-percentage lengths for responsive layouts.	W3C CSS	2012	contextual
+vh	one percent of viewport height	An abbreviation of viewport height.	CSS introduced viewport-percentage lengths for responsive layouts.	W3C CSS	2012	contextual
+person_hour	one person working for one hour	A transparent compound of person and hour.	Used in project planning while preserving the distinction between elapsed time and aggregate effort.	Planning usage	1900	contextual
+QALY	quality-adjusted life year	An acronym of quality-adjusted life year.	Health economics developed QALYs to combine survival duration with a health-quality weight.	Health economics	1968	contextual
+story_point	relative software-estimation unit	Named from user stories and an abstract point scale.	Popularized by agile planning as a team-relative measure rather than a duration.	Agile practice	2001	contextual
+mg/dL_glucose	milligrams of glucose per decilitre	A compositional clinical concentration expression scoped explicitly to glucose.	Common in United States blood-glucose reporting; conversion depends on glucose molar mass.	Clinical usage	1900	measured
+mmol/L_glucose	millimoles of glucose per litre	A compositional amount-concentration expression scoped explicitly to glucose.	Common internationally for blood-glucose reporting and convertible to mg/dL only when the analyte is known.	Clinical usage	1900	measured
+mach_air_20C	Mach number in dry air at 20 degrees Celsius using 343 m/s	Named for physicist Ernst Mach.	This contextual spelling freezes an approximate reference sound speed instead of pretending Mach has one universal linear conversion.	Tungsten	2026	contextual

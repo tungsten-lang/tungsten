@@ -1,4 +1,5 @@
 use regex_helpers
+use known_units
 
 + RegexBase
   -> new(source, @file = nil)
@@ -183,12 +184,28 @@ use regex_helpers
       if try_scan_rational(num)
         return nil
 
-    # Check for unit suffix → quantity (e.g. 3kg, 5.25m)
-    if @pos < @chars.size() && is_alpha?(@lc[@pos])
+    # Check for unit suffix → quantity (e.g. 3kg, 5.25m, 100°C)
+    if @pos < @chars.size() && unit_alpha_at?(@pos)
       unit = scan_unit_suffix()
       if unit != nil
         emit(:QUANTITY, [num, unit])
         return nil
+
+    # Space-separated units use the same generated registry as the production
+    # compiler lexer. Longest-match keeps phrases such as "fluid ounces" and
+    # "J/(mol·K)" atomic without turning arbitrary prose into quantities.
+    if @pos + 1 < @chars.size() && @chars[@pos] == " " && unit_alpha_at?(@pos + 1)
+      spaced_save = @pos
+      @pos += 1
+      unit = scan_known_unit_phrase()
+      if unit != nil
+        emit(:QUANTITY, [num, unit])
+        return nil
+      unit = scan_unit_suffix()
+      if unit == "in" && !next_nonspace_is_lparen?()
+        emit(:QUANTITY, [num, unit])
+        return nil
+      @pos = spaced_save
 
     if is_float
       emit(:DECIMAL, num)
@@ -476,11 +493,42 @@ use regex_helpers
     # subscript digits/letters (g₀, mₚₗ), and superscript digits/sign (m², cm⁻¹).
     saved_pos = @pos
     unit = ""
-    while @pos < @chars.size() && (is_alpha?(@lc[@pos]) || @chars[@pos] == "/" || @chars[@pos] == "·" || @chars[@pos] == "*" || @chars[@pos] == "^" || (@chars[@pos] >= "0" && @chars[@pos] <= "9" && unit.size() > 0) || is_subscript?(@chars[@pos]) || is_superscript_char?(@chars[@pos]))
+    while @pos < @chars.size() && (unit_alpha_at?(@pos) || @chars[@pos] == "/" || @chars[@pos] == "·" || @chars[@pos] == "*" || @chars[@pos] == "^" || (@chars[@pos] >= "0" && @chars[@pos] <= "9" && unit.size() > 0) || is_subscript?(@chars[@pos]) || is_superscript_char?(@chars[@pos]))
       unit += @chars[@pos]
       @pos += 1
     if unit.size() > 0
       return unit
+    @pos = saved_pos
+    nil
+
+  -> unit_alpha_at?(pos)
+    return false if pos < 0 || pos >= @chars.size()
+    is_alpha?(@lc[pos]) || lc_cp(@lc[pos]) >= 128
+
+  -> next_nonspace_is_lparen?
+    p = @pos
+    while p < @chars.size() && @chars[p] == " "
+      p += 1
+    p < @chars.size() && @chars[p] == "("
+
+  -> scan_known_unit_phrase
+    saved_pos = @pos
+    candidate = ""
+    last_unit = nil
+    last_pos = saved_pos
+    while @pos < @chars.size()
+      ch = @chars[@pos]
+      allowed = unit_alpha_at?(@pos) || ch == "_" || ch == "/" || ch == "·" || ch == "*" || ch == "^" || ch == "-" || ch == "'" || ch == " " || ch == "(" || ch == ")" || (ch >= "0" && ch <= "9" && candidate.size() > 0) || is_subscript?(ch) || is_superscript_char?(ch)
+      if !allowed
+        break
+      candidate += ch
+      @pos += 1
+      if regex_known_unit_name?(candidate)
+        last_unit = "" + candidate
+        last_pos = @pos
+    if last_unit != nil
+      @pos = last_pos
+      return last_unit
     @pos = saved_pos
     nil
 

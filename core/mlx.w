@@ -64,3 +64,65 @@ fn mlx_bgemm(a, b, c, m, n, k)
 # Use this to populate bf16 inputs from f32 fill code.
 fn f32_to_bf16(src, dst, len)
   ccall("w_f32_to_bf16_array", src, dst, len)
+
+# ---- Elementwise graph ops (f32 arrays; in/out same shape) ----
+# These schedule MLX ops on the default GPU stream; call mlx_eval to sync.
+
+fn mlx_add(a, b, out, n)
+  ccall("w_mlx_add_f32", a, b, out, n)
+
+fn mlx_mul(a, b, out, n)
+  ccall("w_mlx_mul_f32", a, b, out, n)
+
+fn mlx_sub(a, b, out, n)
+  ccall("w_mlx_sub_f32", a, b, out, n)
+
+fn mlx_div(a, b, out, n)
+  ccall("w_mlx_div_f32", a, b, out, n)
+
+fn mlx_exp(a, out, n)
+  ccall("w_mlx_exp_f32", a, out, n)
+
+fn mlx_log(a, out, n)
+  ccall("w_mlx_log_f32", a, out, n)
+
+fn mlx_sqrt(a, out, n)
+  ccall("w_mlx_sqrt_f32", a, out, n)
+
+fn mlx_tanh(a, out, n)
+  ccall("w_mlx_tanh_f32", a, out, n)
+
+# ---- Reductions / softmax ----
+# sum/max over all elements (axis-all). Axis-selective variants later.
+fn mlx_sum(a, n)
+  ccall("w_mlx_sum_f32", a, n)
+
+fn mlx_max(a, n)
+  ccall("w_mlx_max_f32", a, n)
+
+# Row-wise softmax for matrix stored row-major M×N in flat f32 array.
+fn mlx_softmax_rows(a, out, m, n)
+  ccall("w_mlx_softmax_rows_f32", a, out, m, n)
+
+# ---- FFT (complex split: re/im f32 length n, power of 2) ----
+fn mlx_fft(re, im, n, inverse)
+  ccall("w_mlx_fft_f32", re, im, n, inverse)
+
+# ---- RNG ----
+fn mlx_random_uniform(out, n, lo, hi, seed)
+  ccall("w_mlx_random_uniform_f32", out, n, lo, hi, seed)
+
+fn mlx_random_normal(out, n, mean, std, seed)
+  ccall("w_mlx_random_normal_f32", out, n, mean, std, seed)
+
+# ---- Eval / compile control ----
+# Force evaluation of pending graph (sync GPU).
+fn mlx_eval
+  ccall("w_mlx_eval")
+
+# Optional: mark arrays as graph inputs for mlx_compile (when bridge supports).
+fn mlx_compile_begin
+  ccall("w_mlx_compile_begin")
+
+fn mlx_compile_end
+  ccall("w_mlx_compile_end")

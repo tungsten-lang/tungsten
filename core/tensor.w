@@ -1,19 +1,22 @@
-# core/tensor.w — N-dimensional Tensor that shares memory with a Metal 4
-# MTLTensor.
+# core/tensor.w — N-dimensional dense Tensor (language type).
 #
-# One shared MTLBuffer, three faces over the SAME bytes (zero copy):
-#   .buffer        — the MTLBuffer (legacy buffer kernels + MTL4 residency)
-#   .metal_tensor  — an MTLTensor view (MTL4 cooperative-tensor kernels)
-#   .at / .set     — CPU element access (unified memory — the GPU sees writes)
+# Naming:
+#   Tensor   — language-level multi-D array (shape/strides/dtype/unit + ops)
+#   WTensor  — C struct header in runtime/runtime.h for the CPU storage face
+#              (ebits, rank, offset, shape, strides, storage pointer). Same
+#              role as WArray for 1-D: the boxed runtime layout, not a second
+#              user-facing type. Factories: Tensor.w_zeros / w_at / w_view.
 #
-# Because every Metal buffer is MTLResourceStorageModeShared (unified memory),
-# the same allocation is reachable from the CPU, as an MTLBuffer, and as an
-# MTLTensor simultaneously — that is the whole point of this type.
+# Faces over shared bytes (Metal path, zero-copy when unified memory):
+#   .buffer        — MTLBuffer (legacy buffer kernels + MTL4 residency)
+#   .metal_tensor  — MTLTensor view (MTL4 cooperative-tensor kernels)
+#   .at / .set     — CPU element access
+#   :cpu buffer    — typed WArray (f32/f64) for Metal-free programs
 #
-# dtype is a runtime field (METAL_DTYPE_*), not a `Tensor<T>` generic: it
-# mirrors MTLTensor.dataType and handles quantized formats (bf16, int4) that
-# have no clean Tungsten scalar. Shape is row-major, outer→inner (NumPy/
-# PyTorch). Strides are in elements.
+# dtype and unit are runtime fields. `Tensor<f64, m/s>.zeros(shape)` is compiler
+# syntax for the checked `Tensor.zeros_unit("f64", "m/s", shape)` factory; it
+# does not monomorphize a class for every open-ended unit expression. Shape is
+# row-major, outer→inner (NumPy/PyTorch). Strides are in elements.
 #
 # Compiled-only: factories are class-side methods (`-> .zeros`), which the
 # tree-walking interpreter doesn't dispatch — run Tensor programs via `-o`.
@@ -142,11 +145,15 @@ TENSOR_EW = {}
     rw shape
     rw strides
     rw offset
+    rw unit
 
   # dtype accessors — mirror METAL_DTYPE_* in core/metal.w (values validated by
   # the m4_matmul_bench MTLTensor path). Class-side so `Tensor.f32` reads well
   # without the caller needing `use core/metal`.
   -> .f32 3
+  # CPU-native f64 marker. Metal has no f64 arithmetic, so a Tensor with this
+  # dtype deliberately remains on the CPU path.
+  -> .f64 64
   -> .f16 16
   -> .bf16 121
   -> .i32 29
@@ -155,18 +162,111 @@ TENSOR_EW = {}
   -> .i8 45
   -> .u8 49
 
-  # Primitive constructor — binds all six fields. Prefer the factories below.
+  # Primitive constructors. The six-argument form preserves compatibility for
+  # untyped tensors; unit-aware factories and views use the seventh field.
   -> new(@device, @buffer, @dtype, @shape, @strides, @offset)
+    @unit = nil
+
+  -> new(@device, @buffer, @dtype, @shape, @strides, @offset, @unit)
 
   # ---- factories (class-side) ----
 
   # Allocate a fresh zero-initialized shared buffer sized for `shape`.
   # Strides are ALWAYS materialized explicit (packed, row-major) — see the note
   # on flat_index for why we never carry empty strides.
+  #
+  # Two overloads:
+  #   Tensor.zeros(device, dtype, shape)  — Metal shared buffer (GPU face)
+  #   Tensor.zeros(shape)                 — CPU f32 WArray (no Metal)
+  #   Tensor.zeros(dtype, shape)          — CPU typed path for f32 (dtype=3)
   -> .zeros(device, dtype, shape)
     nbytes = Tensor.byte_size(dtype, shape)
     buffer = metal_buffer(device, nbytes)
     Tensor.new(device, buffer, dtype, shape, Tensor.packed_strides(shape), 0)
+
+  # CPU-only zeros (f32). Prefer this when Metal is unavailable or unwanted.
+  # Storage is a page-aligned f32 WArray — zeros-by-default if the OS gives
+  # zero pages; we still size the array for logical length.
+  -> .zeros(shape)
+    n = Tensor.elem_count(shape)
+    arr = f32_array(n)
+    # expose full length for []
+    # (f32_array may start size=0; bump via write loop of zeros is free if pages zero)
+    i = 0
+    while i < n
+      arr[i] = ~0.0
+      i = i + 1
+    Tensor.new(:cpu, arr, 3, shape, Tensor.packed_strides(shape), 0)
+
+  -> .zeros_f32(shape)
+    Tensor.zeros(shape)
+
+  # Target of `Tensor<dtype, unit>.zeros(shape)`. Validate both spellings at
+  # construction time so typos fail at the source rather than after arithmetic.
+  -> .zeros_unit(dtype_name, unit_name, shape)
+    # `0<unit>` asks the same generated unit registry used by quantity
+    # literals to validate the unit during lowering. The runtime metadata keeps
+    # the original readable expression.
+    dtype = Tensor.f32
+    if dtype_name == "f64"
+      dtype = Tensor.f64
+    elsif dtype_name != "f32"
+      raise "Tensor.zeros_unit: supported CPU dtypes are f32 and f64"
+    n = Tensor.elem_count(shape)
+    arr = f32_array(n)
+    if dtype == Tensor.f64
+      arr = f64_array(n)
+    i = 0
+    while i < n
+      arr[i] = ~0.0
+      i = i + 1
+    Tensor.new(:cpu, arr, dtype, shape, Tensor.packed_strides(shape), 0, unit_name)
+
+  -> .zeros_like(tensor, shape, result_unit)
+    if tensor.device == :cpu
+      dtype_name = "f32"
+      if tensor.dtype == Tensor.f64
+        dtype_name = "f64"
+      Tensor.zeros_unit(dtype_name, result_unit, shape)
+    else
+      result = Tensor.zeros(tensor.device, tensor.dtype, shape)
+      result.unit = result_unit
+      result
+
+  # Unit annotation (nil = untyped). Set at zeros_unit / zeros_like; views
+  # and reshape/permute/slice carry the same unit string.
+  -> unit
+    @unit
+  -> unit=(u)
+    @unit = u
+    self
+
+  # ---- WTensor C-header face (runtime/runtime.h struct WTensor) ----
+  # Opaque W_TYPE_WTENSOR handle: shape/strides/offset + f32 storage.
+  # Prefer language Tensor for the full API; use these when you need the
+  # native multi-D header (views/slices without a Tensor object).
+  -> .w_zeros(shape)
+    ccall("w_tensor_zeros_f32", shape)
+
+  -> .w_at(t, indices)
+    ccall("w_tensor_at_f32", t, indices)
+
+  -> .w_set(t, indices, value)
+    ccall("w_tensor_set_f32", t, indices, value)
+
+  -> .w_shape(t)
+    ccall("w_tensor_shape", t)
+
+  -> .w_rank(t)
+    ccall("w_tensor_rank", t)
+
+  # Zero-copy view: offset in elements from parent origin, new C-contiguous shape.
+  -> .w_view(t, offset, shape)
+    ccall("w_tensor_view_f32", t, offset, shape)
+
+  # Slice outer axis: t[start:stop, ...]
+  -> .w_slice0(t, start, stop)
+    ccall("w_tensor_slice0_f32", t, start, stop)
 
   # Wrap existing storage (e.g. mmap'd weights, another buffer). `offset` and
   # `strides` are in elements; pass `[]` to default to contiguous row-major.
@@ -197,6 +297,7 @@ TENSOR_EW = {}
       3   => 32
       29  => 32
       33  => 32
+      64  => 64
       => 32
 
   -> .elem_count(shape)
@@ -261,7 +362,7 @@ TENSOR_EW = {}
       raise "Tensor.reshape: element count mismatch"
     if !self.contiguous?
       raise "Tensor.reshape: requires a contiguous tensor"
-    Tensor.new(device, buffer, dtype, new_shape, Tensor.packed_strides(new_shape), offset)
+    Tensor.new(device, buffer, dtype, new_shape, Tensor.packed_strides(new_shape), offset, unit)
 
   # Reorder axes: new axis i is the old axis axes[i]. Carries explicit strides,
   # so the result is a (possibly non-contiguous) strided view — still a valid
@@ -276,7 +377,7 @@ TENSOR_EW = {}
       new_shape = new_shape.push(shape[ax])
       new_strides = new_strides.push(es[ax])
       i = i + 1
-    Tensor.new(device, buffer, dtype, new_shape, new_strides, offset)
+    Tensor.new(device, buffer, dtype, new_shape, new_strides, offset, unit)
 
   # Reverse all axes (2-D matrix transpose generalizes to N-D).
   -> transpose
@@ -298,7 +399,7 @@ TENSOR_EW = {}
       else
         new_shape = new_shape.push(shape[i])
       i = i + 1
-    Tensor.new(device, buffer, dtype, new_shape, es, offset + start * es[axis])
+    Tensor.new(device, buffer, dtype, new_shape, es, offset + start * es[axis], unit)
 
   # A contiguous (packed row-major) copy. Returns self if already contiguous
   # (NumPy/PyTorch semantics); otherwise materializes a fresh packed Tensor —
@@ -308,7 +409,7 @@ TENSOR_EW = {}
     if self.contiguous?
       self
     else
-      result = Tensor.zeros(device, dtype, shape)
+      result = Tensor.zeros_like(self, shape, unit)
       n = self.size
       fi = 0
       while fi < n
@@ -353,9 +454,12 @@ TENSOR_EW = {}
     fi = self.flat_index(indices)
     self.write_flat(fi, value)
 
-  # dtype-dispatched scalar read/write at a flat element index. v0 CPU path
-  # covers f32 / f16 / bf16 / i32; other dtypes raise (GPU kernels still work).
+  # dtype-dispatched scalar read/write at a flat element index.
+  # CPU tensors (device == :cpu) store a typed WArray in buffer.
+  # Metal tensors use metal_buffer_read_*.
   -> read_flat(i)
+    if device == :cpu
+      return buffer[i]
     case dtype
       3   => metal_buffer_read_f32(buffer, i)
       16  => metal_buffer_read_f16(buffer, i)
@@ -364,6 +468,9 @@ TENSOR_EW = {}
       => raise "Tensor.read_flat: dtype " + dtype.to_s + " has no CPU path (f32/f16/bf16/i32 only)"
 
   -> write_flat(i, value)
+    if device == :cpu
+      buffer[i] = value
+      return self
     case dtype
       3   => metal_buffer_write_f32(buffer, i, value)
       16  => metal_buffer_write_f16(buffer, i, value)
@@ -394,6 +501,10 @@ TENSOR_EW = {}
     if other.shape[0] != k
       raise "Tensor.matmul: inner dimensions disagree"
     n = other.shape[1]
+    if device == :cpu && other.device == :cpu
+      result = Tensor.zeros([m, n])
+      sgemm(buffer, other.buffer, result.buffer, m, n, k)
+      return result
     result = Tensor.zeros(device, 3, [m, n])
     av = metal_buffer_view(buffer, -32, m * k)
     bv = metal_buffer_view(other.buffer, -32, k * n)
@@ -471,8 +582,9 @@ TENSOR_EW = {}
   -> binop(other, kind)
     if dtype != other.dtype
       raise "Tensor.binop: dtype mismatch"
+    result_unit = Tensor.binop_unit(unit, other.unit, kind)
     oshape = Tensor.broadcast_shape(shape, other.shape)
-    result = Tensor.zeros(device, dtype, oshape)
+    result = Tensor.zeros_like(self, oshape, result_unit)
     r = oshape.size()
     total = Tensor.elem_count(oshape)
     fi = 0
@@ -490,6 +602,28 @@ TENSOR_EW = {}
       result.set(ocoord, rv)
       fi = fi + 1
     result
+
+  -> .binop_unit(left, right, kind)
+    # Addition/subtraction are the dimensional safety boundary. Untyped
+    # tensors remain compatible with each other, but never silently mix with a
+    # unit-carrying tensor.
+    if kind == 0 || kind == 1
+      if left != right
+        raise "Tensor: cannot add or subtract tensors with different units"
+      return left
+    if kind == 2
+      if left == nil
+        return right
+      if right == nil
+        return left
+      return left + "·" + right
+    if left == right
+      return nil
+    if right == nil
+      return left
+    if left == nil
+      return "1/" + right
+    left + "/" + right
 
   -> .shapes_equal?(a, b)
     if a.size() != b.size()
@@ -533,7 +667,7 @@ TENSOR_EW = {}
   -> gpu_binop(other, kind)
     st = tensor_ew_state()
     n = self.size
-    result = Tensor.zeros(device, 3, shape)
+    result = Tensor.zeros_like(self, shape, Tensor.binop_unit(unit, other.unit, kind))
     op_buf = metal_buffer(device, 4)
     metal_buffer_write_i32(op_buf, 0, kind)
     n_buf = metal_buffer(device, 4)

@@ -33,7 +33,6 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/mman.h>
-#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -42,7 +41,6 @@
 #include <sys/random.h>
 #include <netpacket/packet.h>
 #endif
-#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -2358,7 +2356,7 @@ static void bz_d3n2n(const uint64_t *a, const uint64_t *b, int32_t n,
     int32_t k = n >> 1;
     const uint64_t *A0  = a;               /* k limbs  */
     const uint64_t *A12 = a + k;           /* n limbs  */
-    const uint64_t *Blo = b;               /* k limbs  (B0 is a termios macro) */
+    const uint64_t *Blo = b;               /* k limbs */
     const uint64_t *Bhi = b + k;           /* k limbs, top bit set */
     uint64_t *r1  = sc;                    /* k+1 limbs */
     uint64_t *dd  = sc + (k + 1);          /* 2k limbs: Q̂·Blo */
@@ -4200,6 +4198,7 @@ static void decimal_normalize(int64_t *sig, int *scale) {
 static WValue domain_heap_alloc(uint8_t type, int64_t sig, int32_t scale,
                                  int32_t extra, int64_t extra2);
 static void decimal_extract(WValue v, int64_t *sig, int *scale);
+static void quantity_extract(WValue v, int *unit, int64_t *sig, int *scale);
 static int is_currency_any(WValue v);
 static int is_quantity_any(WValue v);
 static int is_duration_any(WValue v);
@@ -4211,6 +4210,42 @@ WValue w_decimal(int64_t sig, int scale) {
         return w_box_decimal(sig, scale);
     return domain_heap_alloc(W_DOMAIN_DECIMAL, sig, scale, 0, 0);
 }
+
+#define W_QUANTITY_ROLE_POINT 1
+#define W_QUANTITY_ROLE_DELTA 2
+
+static int quantity_explicit_role(WValue v) {
+    if (!w_is_domain_obj(v)) return 0;
+    WDomainHeap *d = w_as_domain(v);
+    if (d->domain_type != W_DOMAIN_QUANTITY) return 0;
+    return d->domain_flags;
+}
+
+static WValue quantity_origin_value(WValue v) {
+    if (!w_is_domain_obj(v)) return W_NIL;
+    WDomainHeap *d = w_as_domain(v);
+    if (d->domain_type != W_DOMAIN_QUANTITY || d->domain_flags == 0) return W_NIL;
+    return (WValue)d->extra2;
+}
+
+static WValue quantity_with_role(WValue v, int role, WValue origin) {
+    int unit, scale;
+    int64_t sig;
+    quantity_extract(v, &unit, &sig, &scale);
+    WValue result = domain_heap_alloc(W_DOMAIN_QUANTITY, sig, scale, unit, (int64_t)origin);
+    w_as_domain(result)->domain_flags = (uint8_t)role;
+    return result;
+}
+
+WValue w_quantity_point(WValue quantity, WValue origin) {
+    return quantity_with_role(quantity, W_QUANTITY_ROLE_POINT, origin);
+}
+
+WValue w_quantity_delta(WValue quantity, WValue origin) {
+    return quantity_with_role(quantity, W_QUANTITY_ROLE_DELTA, origin);
+}
+
+WValue w_quantity_origin(WValue quantity) { return quantity_origin_value(quantity); }
 
 /* Align two decimals to the same scale (the lower/more-negative one) */
 static void decimal_align(__int128 *a_sig, int *a_scale,
@@ -4437,7 +4472,9 @@ WValue w_currency_mul_scalar(WValue currency, WValue scalar) {
 /* ---- Quantity ---- */
 
 /* --- BEGIN GENERATED: unit_names --- */
-static const char *unit_names[256] = {
+#define W_UNIT_CAPACITY 4096
+#define W_UNIT_CUSTOM_BASE 2048
+static const char *unit_names[W_UNIT_CAPACITY] = {
     /* 0-: SI base */
     [0] = "m",
     [1] = "kg",
@@ -4621,142 +4658,2701 @@ static const char *unit_names[256] = {
 
     /* 255-: sentinel */
     [255] = "%",
+
+    /* 256-: Ruby registry */
+    [256] = "\xc2\xb0R",
+    [257] = "\xc2\xb0\x44\x65",
+    [258] = "\xc2\xb0N",
+    [259] = "\xc2\xb0R\xc3\xa9",
+    [260] = "\xc2\xb0R\xc3\xb8",
+    [261] = "\xc2\xb0W",
+    [262] = "\xce\x94K",
+    [263] = "\xce\x94\xc2\xb0\x43",
+    [264] = "\xce\x94\xc2\xb0\x46",
+    [265] = "\xce\x94\xc2\xb0R",
+    [266] = "\xce\x94\xc2\xb0\x44\x65",
+    [267] = "\xce\x94\xc2\xb0N",
+    [268] = "\xce\x94\xc2\xb0R\xc3\xa9",
+    [269] = "\xce\x94\xc2\xb0R\xc3\xb8",
+    [270] = "\xce\x94\xc2\xb0W",
+    [271] = "fur",
+    [272] = "rod",
+    [273] = "ch",
+    [274] = "smoot",
+    [275] = "hand",
+    [276] = "league",
+    [277] = "RU",
+    [278] = "\xc3\x85",
+    [279] = "fathom",
+    [280] = "cable",
+
+    /* 281-: Ruby compound */
+    [281] = "knot",
+    [282] = "kph",
+
+    /* 283-: Ruby registry */
+    [283] = "mach",
+    [284] = "lightsecond",
+    [285] = "lightminute",
+    [286] = "lighthour",
+    [287] = "\xe2\x84\x93\xe2\x82\x9a",
+    [288] = "gr",
+    [289] = "dr",
+    [290] = "st",
+    [291] = "qr",
+    [292] = "cwt",
+    [293] = "CWT",
+    [294] = "tn",
+    [295] = "LT",
+    [296] = "Da",
+    [297] = "u",
+    [298] = "slug",
+    [299] = "m\xe2\x82\x9a\xe2\x82\x97",
+    [300] = "\xe2\x84\x88",
+    [301] = "\xca\x92",
+    [302] = "\xe2\x84\xa5",
+    [303] = "\xe2\x84\x94",
+    [304] = "troyounce",
+    [305] = "pennyweight",
+    [306] = "carat",
+    [307] = "quintal",
+    [308] = "min",
+    [309] = "h",
+    [310] = "d",
+    [311] = "week",
+    [312] = "month",
+    [313] = "year",
+    [314] = "decade",
+    [315] = "millennium",
+    [316] = "fortnight",
+    [317] = "century",
+    [318] = "shake",
+    [319] = "siderealyear",
+    [320] = "tropicalyear",
+    [321] = "julianyear",
+    [322] = "siderealday",
+    [323] = "lunarmonth",
+    [324] = "lustrum",
+    [325] = "dogyear",
+    [326] = "t\xe2\x82\x9a",
+    [327] = "ac",
+    [328] = "barn",
+    [329] = "l",
+    [330] = "cup",
+    [331] = "gill",
+    [332] = "floz",
+    [333] = "fldr",
+    [334] = "impgal",
+    [335] = "bushel",
+    [336] = "peck",
+    [337] = "tbsp",
+    [338] = "tsp",
+    [339] = "drop",
+    [340] = "dash",
+    [341] = "pinch",
+    [342] = "smidgen",
+    [343] = "jigger",
+    [344] = "firkin",
+    [345] = "rundlet",
+    [346] = "tierce",
+    [347] = "hogshead",
+    [348] = "puncheon",
+    [349] = "pipe",
+    [350] = "tun",
+    [351] = "kilderkin",
+    [352] = "split",
+    [353] = "bottle",
+    [354] = "magnum",
+    [355] = "jeroboam",
+    [356] = "methuselah",
+    [357] = "nebuchadnezzar",
+    [358] = "melchizedek",
+    [359] = "Ba",
+    [360] = "at",
+    [361] = "psi",
+    [362] = "torr",
+    [363] = "mmHg",
+    [364] = "inHg",
+    [365] = "cmH2O",
+    [366] = "lbf",
+    [367] = "kgf",
+    [368] = "erg",
+    [369] = "BTU",
+    [370] = "therm",
+    [371] = "ftlbf",
+    [372] = "dyn",
+    [373] = "hp",
+    [374] = "PS",
+    [375] = "Ga",
+
+    /* 376-: Ruby compound */
+    [376] = "Ci",
+
+    /* 377-: Ruby registry */
+    [377] = "rem",
+    [378] = "deg",
+    [379] = "arcmin",
+    [380] = "arcsec",
+    [381] = "gon",
+    [382] = "turn",
+    [383] = "mil",
+    [384] = "brad",
+    [385] = "Gal",
+    [386] = "b",
+    [387] = "nibble",
+    [388] = "o",
+    [389] = "PiB",
+    [390] = "EiB",
+
+    /* 391-: Ruby compound */
+    [391] = "bps",
+    [392] = "Bps",
+    [393] = "baud",
+
+    /* 394-: Ruby registry */
+    [394] = "P",
+    [395] = "cP",
+    [396] = "St",
+    [397] = "cSt",
+    [398] = "solarmass",
+    [399] = "earthmass",
+    [400] = "jupitermass",
+    [401] = "moonmass",
+    [402] = "solarradius",
+    [403] = "earthradius",
+    [404] = "point",
+    [405] = "pica",
+    [406] = "texpt",
+    [407] = "didot",
+    [408] = "cicero",
+    [409] = "altuve",
+    [410] = "outhouse",
+    [411] = "shed",
+    [412] = "barrel",
+    [413] = "stere",
+    [414] = "cord",
+    [415] = "beard second",
+    [416] = "barn megaparsec",
+    [417] = "banana",
+    [418] = "warhol",
+    [419] = "kilowarhol",
+
+    /* 420-: Ruby compound */
+    [420] = "rpm",
+    [421] = "rd",
+
+    /* 422-: Ruby registry */
+    [422] = "Mx",
+    [423] = "millihelen",
+    [424] = "nit",
+    [425] = "sb",
+    [426] = "La",
+    [427] = "fL",
+    [428] = "asb",
+    [429] = "sk",
+    [430] = "em",
+    [431] = "en",
+    [432] = "qquad",
+    [433] = "peanutbutter",
+    [434] = "jelly",
+    [435] = "beat",
+    [436] = "cycle",
+    [437] = "frame",
+    [438] = "instant",
+    [439] = "jiffy",
+    [440] = "moment",
+    [441] = "sample",
+    [442] = "tick",
+    [443] = "revolution",
+    [444] = "decay",
+    [445] = "rotation",
+    [446] = "flop",
+    [447] = "op",
+    [448] = "mac",
+    [449] = "instruction",
+    [450] = "tok",
+    [451] = "transfer",
+    [452] = "query",
+    [453] = "request",
+    [454] = "txn",
+    [455] = "packet",
+    [456] = "io",
+    [457] = "nat",
+    [458] = "ban",
+    [459] = "deciban",
+    [460] = "ppm",
+    [461] = "ppb",
+    [462] = "ppt",
+    [463] = "pphm",
+    [464] = "sone",
+    [465] = "phon",
+    [466] = "Jy",
+    [467] = "mag",
+    [468] = "Mag",
+    [469] = "M_bol",
+    [470] = "femtobarn",
+    [471] = "attobarn",
+    [472] = "picobarn",
+    [473] = "nanobarn",
+    [474] = "fb\xe2\x81\xbb\xc2\xb9",
+    [475] = "ab\xe2\x81\xbb\xc2\xb9",
+    [476] = "pb\xe2\x81\xbb\xc2\xb9",
+    [477] = "nb\xe2\x81\xbb\xc2\xb9",
+    [478] = "Oe",
+    [479] = "Gb",
+    [480] = "D",
+    [481] = "\xce\xbc_B",
+    [482] = "micromort",
+    [483] = "microlife",
+    [484] = "kayser",
+    [485] = "mohs",
+    [486] = "vickers",
+    [487] = "rockwell",
+    [488] = "brinell",
+    [489] = "dozen",
+    [490] = "gross",
+    [491] = "great_gross",
+    [492] = "score",
+    [493] = "bakers_dozen",
+    [494] = "googol",
+    [495] = "googolplex",
+    [496] = "cubit",
+    [497] = "span",
+    [498] = "handbreadth",
+    [499] = "fingerbreadth",
+    [500] = "biblical_mil",
+    [501] = "parsa",
+    [502] = "techum",
+    [503] = "omer",
+    [504] = "ephah",
+    [505] = "hin",
+    [506] = "bath",
+    [507] = "seah",
+    [508] = "kor",
+    [509] = "kab",
+    [510] = "shekel",
+    [511] = "biblical_mina",
+    [512] = "biblical_talent",
+    [513] = "gerah",
+    [514] = "beka",
+    [515] = "helek",
+    [516] = "rega",
+    [517] = "onah",
+    [518] = "yovel",
+    [519] = "shmita",
+    [520] = "g\xe2\x82\x80",
+    [521] = "g_n",
+    [522] = "gee",
+    [523] = "mpg",
+    [524] = "mpge",
+    [525] = "L/100km",
+    [526] = "stick",
+    [527] = "kiloton",
+    [528] = "megaton",
+    [529] = "gigaton",
+    [530] = "oil_barrel",
+    [531] = "BOE",
+    [532] = "TCE",
+    [533] = "heap",
+    [534] = "hole",
+    [535] = "shaku",
+    [536] = "sun",
+    [537] = "ri",
+    [538] = "jo",
+    [539] = "tsubo",
+    [540] = "tatami",
+    [541] = "koku",
+    [542] = "g\xc5\x8d",
+    [543] = "momme",
+    [544] = "kanme",
+    [545] = "chi",
+    [546] = "cun",
+    [547] = "fen",
+    [548] = "zhang",
+    [549] = "li_cn",
+    [550] = "mu",
+    [551] = "jin",
+    [552] = "liang",
+    [553] = "dan_cn",
+    [554] = "verst",
+    [555] = "arshin",
+    [556] = "sazhen",
+    [557] = "vershok",
+    [558] = "pud",
+    [559] = "funt_ru",
+    [560] = "chetvert",
+    [561] = "pied",
+    [562] = "pouce",
+    [563] = "toise",
+    [564] = "arpent",
+    [565] = "lieue_de_poste",
+    [566] = "pes",
+    [567] = "passus",
+    [568] = "mille_passuum",
+    [569] = "iugerum",
+    [570] = "libra_roma",
+    [571] = "uncia_roma",
+    [572] = "amphora",
+    [573] = "royal_cubit",
+    [574] = "egypt_palm",
+    [575] = "digit",
+    [576] = "khet",
+    [577] = "aroura",
+    [578] = "hath",
+    [579] = "gaz",
+    [580] = "kos",
+    [581] = "tola",
+    [582] = "seer",
+    [583] = "maund",
+    [584] = "hartree",
+    [585] = "rydberg_unit",
+    [586] = "bohr_radius",
+    [587] = "compton_e",
+    [588] = "compton_p",
+    [589] = "compton_n",
+    [590] = "fine_structure",
+    [591] = "electron_mass",
+    [592] = "proton_mass",
+    [593] = "neutron_mass",
+    [594] = "muon_mass",
+    [595] = "boiler_horsepower",
+    [596] = "electric_horsepower",
+    [597] = "water_horsepower",
+    [598] = "donkeypower",
+    [599] = "metric_cup",
+    [600] = "metric_tbsp",
+    [601] = "australian_tbsp",
+    [602] = "japanese_cup",
+    [603] = "imperial_pint",
+    [604] = "crumb",
+    [605] = "dword",
+    [606] = "qword",
+    [607] = "paragraph",
+    [608] = "sector",
+    [609] = "page",
+    [610] = "block",
+    [611] = "cluster",
+    [612] = "EV",
+    [613] = "f_stop",
+    [614] = "ISO_speed",
+    [615] = "cent_pitch",
+    [616] = "semitone",
+    [617] = "savart",
+    [618] = "octave",
+    [619] = "basis_point",
+    [620] = "tenth_cent",
+    [621] = "pip",
+    [622] = "link_chain",
+    [623] = "rope",
+    [624] = "perch",
+    [625] = "barleycorn",
+    [626] = "shaftment",
+    [627] = "english_cubit",
+    [628] = "nail_cloth",
+    [629] = "cable_length",
+    [630] = "mH2O",
+    [631] = "inH2O",
+    [632] = "ftH2O",
+    [633] = "pieze",
+    [634] = "denier",
+    [635] = "tex",
+    [636] = "decitex",
+    [637] = "french_gauge",
+    [638] = "mickey",
+    [639] = "sagan",
+    [640] = "light_nanosecond",
+    [641] = "banana_for_scale",
+    [642] = "kg/m\xc2\xb3",
+    [643] = "m\xc2\xb3/s",
+    [644] = "L/min",
+    [645] = "kg/s",
+    [646] = "heat_capacity",
+    [647] = "entropy",
+    [648] = "J/kg/K",
+    [649] = "W/m/K",
+    [650] = "W/m\xc2\xb2",
+    [651] = "V/m",
+    [652] = "A/m\xc2\xb2",
+    [653] = "\xce\xa9\xc2\xb7m",
+    [654] = "S/m",
+    [655] = "C/m\xc2\xb3",
+    [656] = "N/m",
+    [657] = "kg/m",
+    [658] = "kg/m\xc2\xb2",
+    [659] = "J/m\xc2\xb3",
+    [660] = "J/kg",
+    [661] = "specific_energy",
+    [662] = "mol/mol",
+    [663] = "kat/m\xc2\xb3",
+    [664] = "cd/m\xc2\xb2",
+    [665] = "lx\xc2\xb7s",
+    [666] = "lm\xc2\xb7s",
+    [667] = "rad/s",
+    [668] = "rad/s\xc2\xb2",
+    [669] = "m/s\xc2\xb3",
+    [670] = "kg\xc2\xb7m/s",
+    [671] = "N\xc2\xb7s",
+    [672] = "N\xc2\xb7m",
+    [673] = "bit/s/Hz",
+    [674] = "J/op",
+    [675] = "J/tok",
+    [676] = "B/flop",
+    [677] = "kgCO\xe2\x82\x82\x65",
+    [678] = "gCO\xe2\x82\x82\x65",
+    [679] = "gCO\xe2\x82\x82\x65/kWh",
+    [680] = "gCO\xe2\x82\x82\x65/pkm",
+    [681] = "px",
+    [682] = "dpi",
+    [683] = "dppx",
+    [684] = "rem_css",
+    [685] = "vw",
+    [686] = "vh",
+    [687] = "person_hour",
+    [688] = "QALY",
+    [689] = "story_point",
+    [690] = "mg/dL_glucose",
+    [691] = "mmol/L_glucose",
+    [692] = "mach_air_20C",
+    [693] = "bortle",
+    [694] = "beaufort",
+    [695] = "saffir_simpson",
+    [696] = "fujita",
+    [697] = "EF",
+    [698] = "richter",
+    [699] = "moment_magnitude",
+    [700] = "apgar",
+    [701] = "RBE",
+    [702] = "hounsfield_unit",
+
+    /* 703-: Ruby compound */
+    [703] = "bpm",
+    [704] = "fps",
+    [705] = "flops",
+    [706] = "FLOPS",
+    [707] = "kflops",
+    [708] = "kFLOPS",
+    [709] = "Mflops",
+    [710] = "MFLOPS",
+    [711] = "Gflops",
+    [712] = "GFLOPS",
+    [713] = "Tflops",
+    [714] = "TFLOPS",
+    [715] = "Pflops",
+    [716] = "PFLOPS",
+    [717] = "Eflops",
+    [718] = "EFLOPS",
+    [719] = "Zflops",
+    [720] = "ZFLOPS",
+    [721] = "Yflops",
+    [722] = "YFLOPS",
+    [723] = "ops_per_s",
+    [724] = "KOPS",
+    [725] = "MOPS",
+    [726] = "GOPS",
+    [727] = "TOPS",
+    [728] = "POPS",
+    [729] = "EOPS",
+    [730] = "MIPS",
+    [731] = "GIPS",
+    [732] = "DMIPS",
+    [733] = "MAC/s",
+    [734] = "MMAC/s",
+    [735] = "GMAC/s",
+    [736] = "TMAC/s",
+    [737] = "tok/s",
+    [738] = "ktok/s",
+    [739] = "Mtok/s",
+    [740] = "Gtok/s",
+    [741] = "T/s",
+    [742] = "MT/s",
+    [743] = "GT/s",
+    [744] = "TT/s",
+    [745] = "qps",
+    [746] = "QPS",
+    [747] = "rps",
+    [748] = "RPS",
+    [749] = "tps",
+    [750] = "TPS",
+    [751] = "pps",
+    [752] = "PPS",
+    [753] = "iops",
+    [754] = "IOPS",
+    [755] = "molar",
+    [756] = "molal",
 };
+
+typedef struct { const char *name; int id; } WUnitAlias;
+static const WUnitAlias unit_aliases[] = {
+    {"%", 255},
+    {"1/mol", 101},
+    {"A", 3},
+    {"A/m\xc2\xb2", 652},
+    {"AU tbsp", 601},
+    {"Apgar", 700},
+    {"B", 89},
+    {"B/flop", 676},
+    {"BOE", 531},
+    {"BPM", 703},
+    {"BTU", 369},
+    {"Ba", 359},
+    {"Beaufort", 694},
+    {"Bortle", 693},
+    {"Bps", 392},
+    {"Bq", 23},
+    {"C", 12},
+    {"C/m\xc2\xb3", 655},
+    {"CWT", 293},
+    {"Ci", 376},
+    {"D", 480},
+    {"DMIPS", 732},
+    {"DWORD", 605},
+    {"Da", 296},
+    {"EF", 697},
+    {"EF-scale", 697},
+    {"EFLOPS", 718},
+    {"EOPS", 729},
+    {"EV", 612},
+    {"Eflops", 717},
+    {"Eh", 584},
+    {"EiB", 390},
+    {"F", 14},
+    {"F-scale", 696},
+    {"F/m", 104},
+    {"FLOPS", 706},
+    {"FPS", 704},
+    {"Fr_catheter", 637},
+    {"GB", 92},
+    {"GFLOPS", 712},
+    {"GHz", 43},
+    {"GIPS", 731},
+    {"GJ", 47},
+    {"GMAC/s", 735},
+    {"GOPS", 726},
+    {"GPa", 59},
+    {"GT/s", 743},
+    {"GW", 50},
+    {"Ga", 375},
+    {"Gal", 385},
+    {"Gb", 479},
+    {"Gflops", 711},
+    {"GiB", 97},
+    {"Gtok/s", 740},
+    {"Gy", 24},
+    {"H", 19},
+    {"HB", 488},
+    {"HRC", 487},
+    {"HU", 702},
+    {"HV", 486},
+    {"Hz", 7},
+    {"IOPS", 754},
+    {"ISO", 614},
+    {"ISO sensitivity", 614},
+    {"ISO_speed", 614},
+    {"J", 10},
+    {"J/(kg\xc2\xb7K)", 648},
+    {"J/(mol\xc2\xb7K)", 103},
+    {"J/K", 102},
+    {"J/kg", 660},
+    {"J/kg/K", 648},
+    {"J/m\xc2\xb3", 659},
+    {"J/op", 674},
+    {"J/tok", 675},
+    {"Jy", 466},
+    {"J\xc2\xb7s", 99},
+    {"K", 4},
+    {"KB", 90},
+    {"KOPS", 724},
+    {"KiB", 95},
+    {"L", 78},
+    {"L per 100 km", 525},
+    {"L/100km", 525},
+    {"L/min", 644},
+    {"LT", 295},
+    {"La", 426},
+    {"MAC/s", 733},
+    {"MB", 91},
+    {"MFLOPS", 710},
+    {"MHz", 42},
+    {"MIPS", 730},
+    {"MJ", 46},
+    {"MMAC/s", 734},
+    {"MOPS", 725},
+    {"MPG", 523},
+    {"MPGe", 524},
+    {"MPa", 58},
+    {"MT/s", 742},
+    {"MV", 56},
+    {"MW", 49},
+    {"MWh", 52},
+    {"M_bol", 469},
+    {"Mach at 20 C", 692},
+    {"Mach in air at 20 C", 692},
+    {"Mag", 468},
+    {"Mbol", 469},
+    {"Mflops", 709},
+    {"MiB", 96},
+    {"Mohs", 485},
+    {"Mtok/s", 739},
+    {"Mw", 699},
+    {"Mx", 422},
+    {"M\xe2\x8a\x95", 399},
+    {"M\xe2\x98\x89", 398},
+    {"M\xe2\x98\xbd", 401},
+    {"M\xe2\x99\x83", 400},
+    {"N", 8},
+    {"N/A\xc2\xb2", 105},
+    {"N/m", 656},
+    {"N\xc2\xb7m", 672},
+    {"N\xc2\xb7s", 671},
+    {"Oe", 478},
+    {"P", 394},
+    {"PB", 94},
+    {"PFLOPS", 716},
+    {"POPS", 728},
+    {"PPS", 752},
+    {"PS", 374},
+    {"Pa", 9},
+    {"Pflops", 715},
+    {"PiB", 389},
+    {"Planck length", 287},
+    {"Planck mass", 299},
+    {"Planck time", 326},
+    {"QALY", 688},
+    {"QALYs", 688},
+    {"QPS", 746},
+    {"QWORD", 606},
+    {"RBE", 701},
+    {"RPS", 748},
+    {"RU", 277},
+    {"Richter", 698},
+    {"Ry", 585},
+    {"R\xe2\x8a\x95", 403},
+    {"R\xe2\x98\x89", 402},
+    {"S", 16},
+    {"S/m", 654},
+    {"SS_category", 695},
+    {"Saffir-Simpson", 695},
+    {"St", 396},
+    {"Sv", 25},
+    {"T", 18},
+    {"T/s", 741},
+    {"TB", 93},
+    {"TCE", 532},
+    {"TFLOPS", 714},
+    {"THz", 44},
+    {"TMAC/s", 736},
+    {"TOPS", 727},
+    {"TPS", 750},
+    {"TT/s", 744},
+    {"Tflops", 713},
+    {"TiB", 98},
+    {"Torr", 113},
+    {"V", 13},
+    {"V/m", 651},
+    {"W", 11},
+    {"W/(m\xc2\xb2\xc2\xb7K\xe2\x81\xb4)", 106},
+    {"W/(m\xc2\xb7K)", 649},
+    {"W/m/K", 649},
+    {"W/m\xc2\xb2", 650},
+    {"Wb", 17},
+    {"YFLOPS", 722},
+    {"Yflops", 721},
+    {"ZFLOPS", 720},
+    {"Zflops", 719},
+    {"a0", 586},
+    {"a_0", 586},
+    {"ab-1", 475},
+    {"ab^-1", 475},
+    {"abarn", 471},
+    {"abinv", 475},
+    {"absolute magnitude", 468},
+    {"ab\xe2\x81\xbb\xc2\xb9", 475},
+    {"ac", 327},
+    {"acre", 74},
+    {"acres", 327},
+    {"alpha", 590},
+    {"altuve", 409},
+    {"altuves", 409},
+    {"amah", 496},
+    {"amot", 496},
+    {"ampere", 3},
+    {"amperes", 3},
+    {"amperes per square meter", 652},
+    {"amphora", 572},
+    {"amphorae", 572},
+    {"amphoras", 572},
+    {"angstrom", 278},
+    {"angstroms", 278},
+    {"angular acceleration", 668},
+    {"angular velocity", 667},
+    {"apgar", 700},
+    {"apgar score", 700},
+    {"apostilb", 428},
+    {"apostilbs", 428},
+    {"apparent magnitude", 467},
+    {"arcmin", 379},
+    {"arcsec", 380},
+    {"areal density", 658},
+    {"aroura", 577},
+    {"arourae", 577},
+    {"arouras", 577},
+    {"arpent", 564},
+    {"arpents", 564},
+    {"arshin", 555},
+    {"arshins", 555},
+    {"asb", 428},
+    {"astronomical unit", 116},
+    {"astronomical units", 116},
+    {"at", 360},
+    {"atm", 110},
+    {"atmosphere", 110},
+    {"atmospheres", 110},
+    {"attobarn", 471},
+    {"attobarns", 471},
+    {"au", 116},
+    {"australian tablespoon", 601},
+    {"australian tablespoons", 601},
+    {"australian tbsp", 601},
+    {"australian_tbsp", 601},
+    {"b", 386},
+    {"baker's dozen", 493},
+    {"bakers dozen", 493},
+    {"bakers_dozen", 493},
+    {"ban", 458},
+    {"banana", 417},
+    {"banana for scale", 641},
+    {"banana_for_scale", 641},
+    {"bananas", 417},
+    {"bananas for scale", 641},
+    {"bar", 111},
+    {"barleycorn", 625},
+    {"barleycorns", 625},
+    {"barn", 328},
+    {"barn megaparsec", 416},
+    {"barn-megaparsec", 416},
+    {"barn-megaparsecs", 416},
+    {"barns", 328},
+    {"barrel", 412},
+    {"barrel of oil equivalent", 531},
+    {"barrels", 412},
+    {"barye", 359},
+    {"basis point", 619},
+    {"basis points", 619},
+    {"basis_point", 619},
+    {"basis_points", 619},
+    {"bath", 506},
+    {"baths", 506},
+    {"baud", 393},
+    {"beard second", 415},
+    {"beard seconds", 415},
+    {"beard-second", 415},
+    {"beard-seconds", 415},
+    {"beat", 435},
+    {"beats", 435},
+    {"beats per minute", 703},
+    {"beaufort", 694},
+    {"becquerel", 23},
+    {"becquerels", 23},
+    {"beka", 514},
+    {"bekah", 514},
+    {"bekas", 514},
+    {"biblical talent", 512},
+    {"biblical_mil", 500},
+    {"biblical_mina", 511},
+    {"biblical_talent", 512},
+    {"billions and billions", 639},
+    {"bit", 88},
+    {"bit/(s\xc2\xb7Hz)", 673},
+    {"bit/s/Hz", 673},
+    {"bits", 386},
+    {"bits per second per hertz", 673},
+    {"block", 610},
+    {"blocks", 610},
+    {"boe", 531},
+    {"bohr magneton", 481},
+    {"bohr_magneton", 481},
+    {"bohr_radius", 586},
+    {"boiler horsepower", 595},
+    {"boiler_horsepower", 595},
+    {"bolometric magnitude", 469},
+    {"bortle", 693},
+    {"bottle", 353},
+    {"bottles", 353},
+    {"bp_finance", 619},
+    {"bpm", 703},
+    {"bps", 391},
+    {"brad", 384},
+    {"brads", 384},
+    {"brinell", 488},
+    {"bu", 335},
+    {"bushel", 335},
+    {"bushels", 335},
+    {"butt", 349},
+    {"byte", 89},
+    {"bytes", 89},
+    {"bytes per flop", 676},
+    {"cP", 395},
+    {"cSt", 397},
+    {"cable", 280},
+    {"cable length", 629},
+    {"cable lengths", 629},
+    {"cable_length", 629},
+    {"cables", 280},
+    {"cal", 108},
+    {"calorie", 108},
+    {"calories", 108},
+    {"candela", 6},
+    {"candela per square meter", 664},
+    {"candelas", 6},
+    {"carat", 306},
+    {"carats", 306},
+    {"catalytic activity concentration", 663},
+    {"cd", 6},
+    {"cd/m\xc2\xb2", 664},
+    {"celsius", 20},
+    {"celsius difference", 263},
+    {"cent", 615},
+    {"cent_pitch", 615},
+    {"centipoise", 395},
+    {"centistokes", 397},
+    {"cents", 615},
+    {"centuries", 317},
+    {"century", 317},
+    {"ch", 273},
+    {"chain", 273},
+    {"chains", 273},
+    {"charge density", 655},
+    {"chelakim", 515},
+    {"chelek", 515},
+    {"chetvert", 560},
+    {"chetverts", 560},
+    {"chi", 545},
+    {"chinese dan", 553},
+    {"chinese li", 549},
+    {"chinese_dan", 553},
+    {"chinese_li", 549},
+    {"chis", 545},
+    {"cicero", 408},
+    {"cloth nail", 628},
+    {"cluster", 611},
+    {"clusters", 611},
+    {"cm", 28},
+    {"cm-1", 484},
+    {"cmH2O", 365},
+    {"cm^-1", 484},
+    {"cm\xc2\xb2", 71},
+    {"cm\xc2\xb3", 77},
+    {"cm\xe2\x81\xbb\xc2\xb9", 484},
+    {"compton wavelength", 587},
+    {"compton wavelength electron", 587},
+    {"compton wavelength neutron", 589},
+    {"compton wavelength proton", 588},
+    {"compton_e", 587},
+    {"compton_n", 589},
+    {"compton_p", 588},
+    {"compton_wavelength", 587},
+    {"conductivity", 654},
+    {"cord", 414},
+    {"cords", 414},
+    {"coulomb", 12},
+    {"coulombs", 12},
+    {"coulombs per cubic meter", 655},
+    {"crumb", 604},
+    {"crumbs", 604},
+    {"css rem", 684},
+    {"ct", 306},
+    {"cubic meters per second", 643},
+    {"cubit", 496},
+    {"cubits", 496},
+    {"cun", 546},
+    {"cuns", 546},
+    {"cup", 330},
+    {"cups", 330},
+    {"curie", 376},
+    {"curies", 376},
+    {"current density", 652},
+    {"cwt", 292},
+    {"cyc", 436},
+    {"cycle", 436},
+    {"cycles", 436},
+    {"d", 310},
+    {"dalton", 296},
+    {"daltons", 296},
+    {"dan_cn", 553},
+    {"dash", 340},
+    {"dashes", 340},
+    {"day", 310},
+    {"days", 310},
+    {"debye", 480},
+    {"debyes", 480},
+    {"decade", 314},
+    {"decades", 314},
+    {"decay", 444},
+    {"decays", 444},
+    {"deciban", 459},
+    {"decibans", 459},
+    {"decitex", 636},
+    {"deg", 378},
+    {"degree", 378},
+    {"degrees", 378},
+    {"delisle", 257},
+    {"delta celsius", 263},
+    {"delta fahrenheit", 264},
+    {"delta kelvin", 262},
+    {"delta rankine", 265},
+    {"denier", 634},
+    {"deniers", 634},
+    {"didot", 407},
+    {"digit", 575},
+    {"digits", 575},
+    {"dit", 458},
+    {"dits", 458},
+    {"dog year", 325},
+    {"dog years", 325},
+    {"dogyear", 325},
+    {"donkey power", 598},
+    {"donkey-power", 598},
+    {"donkeypower", 598},
+    {"dots per inch", 682},
+    {"dots per pixel", 683},
+    {"dozen", 489},
+    {"dozens", 489},
+    {"dpi", 682},
+    {"dppx", 683},
+    {"dr", 289},
+    {"drachm", 289},
+    {"drams", 289},
+    {"drop", 339},
+    {"drops", 339},
+    {"dword", 605},
+    {"dwords", 605},
+    {"dwt", 305},
+    {"dyn", 372},
+    {"dyne", 372},
+    {"dynes", 372},
+    {"eV", 107},
+    {"earth mass", 399},
+    {"earth radius", 403},
+    {"earthmass", 399},
+    {"earthradius", 403},
+    {"egypt_palm", 574},
+    {"egyptian palm", 574},
+    {"egyptian palms", 574},
+    {"electric field", 651},
+    {"electric horsepower", 596},
+    {"electric_horsepower", 596},
+    {"electron mass", 591},
+    {"electron_mass", 591},
+    {"electronvolt", 107},
+    {"electronvolts", 107},
+    {"em", 430},
+    {"en", 431},
+    {"energy density", 659},
+    {"english cubit", 627},
+    {"english cubits", 627},
+    {"english_cubit", 627},
+    {"enhanced fujita", 697},
+    {"entropy", 647},
+    {"ephah", 504},
+    {"ephahs", 504},
+    {"ephas", 504},
+    {"erg", 368},
+    {"etzba", 499},
+    {"etzbaot", 499},
+    {"ev", 612},
+    {"e\xe2\x82\x80", 118},
+    {"f stop", 613},
+    {"f-stop", 613},
+    {"f-stops", 613},
+    {"fL", 427},
+    {"f_stop", 613},
+    {"fahrenheit", 87},
+    {"fahrenheit difference", 264},
+    {"farad", 14},
+    {"farads", 14},
+    {"fathom", 279},
+    {"fathoms", 279},
+    {"fb-1", 474},
+    {"fb^-1", 474},
+    {"fbarn", 470},
+    {"fbinv", 474},
+    {"fb\xe2\x81\xbb\xc2\xb9", 474},
+    {"feet", 61},
+    {"feet of water", 632},
+    {"femtobarn", 470},
+    {"femtobarns", 470},
+    {"fen", 547},
+    {"fens", 547},
+    {"fine structure constant", 590},
+    {"fine_structure", 590},
+    {"fingerbreadth", 499},
+    {"firkin", 344},
+    {"firkins", 344},
+    {"fl dr", 333},
+    {"fl oz", 66},
+    {"fldr", 333},
+    {"flop", 446},
+    {"flops", 705},
+    {"flops_count", 446},
+    {"floz", 332},
+    {"fluid dram", 333},
+    {"fluid drams", 333},
+    {"fluid ounce", 332},
+    {"fluid ounces", 332},
+    {"foot", 61},
+    {"foot of water", 632},
+    {"foot pound", 371},
+    {"foot pounds", 371},
+    {"foot-lambert", 427},
+    {"foot-pound", 371},
+    {"foot-pounds", 371},
+    {"fortnight", 316},
+    {"fortnights", 316},
+    {"fps", 704},
+    {"frame", 437},
+    {"frames", 437},
+    {"frames per second", 704},
+    {"french gauge", 637},
+    {"french_gauge", 637},
+    {"fstop", 613},
+    {"ft", 61},
+    {"ft H2O", 632},
+    {"ft of water", 632},
+    {"ftH2O", 632},
+    {"ftlbf", 371},
+    {"ft\xc2\xb2", 75},
+    {"fujita", 696},
+    {"fujita scale", 696},
+    {"funt", 559},
+    {"funt_ru", 559},
+    {"fur", 271},
+    {"furlong", 271},
+    {"furlongs", 271},
+    {"g", 33},
+    {"g CO2e", 678},
+    {"g0", 520},
+    {"gCO\xe2\x82\x82\x65", 678},
+    {"gCO\xe2\x82\x82\x65/kWh", 679},
+    {"gCO\xe2\x82\x82\x65/pkm", 680},
+    {"g_n", 521},
+    {"gal", 67},
+    {"gallon", 67},
+    {"gallons", 67},
+    {"gauss", 375},
+    {"gaz", 579},
+    {"gazes", 579},
+    {"gee", 522},
+    {"gerah", 513},
+    {"gerahs", 513},
+    {"gigaton", 529},
+    {"gigatons", 529},
+    {"gilbert", 479},
+    {"gilberts", 479},
+    {"gill", 331},
+    {"gills", 331},
+    {"gon", 381},
+    {"googol", 494},
+    {"googolplex", 495},
+    {"googolplexes", 495},
+    {"googols", 494},
+    {"gos", 542},
+    {"gr", 288},
+    {"grad", 381},
+    {"gradian", 381},
+    {"gradians", 381},
+    {"grain", 288},
+    {"grains", 288},
+    {"gram", 33},
+    {"grams", 33},
+    {"grams CO2e", 678},
+    {"grape jelly", 434},
+    {"grave", 1},
+    {"gray", 24},
+    {"grays", 24},
+    {"great gross", 491},
+    {"great_gross", 491},
+    {"grid carbon intensity", 679},
+    {"gross", 490},
+    {"g\xc5\x8d", 542},
+    {"g\xe2\x82\x80", 520},
+    {"h", 309},
+    {"ha", 73},
+    {"halakim", 515},
+    {"half step", 616},
+    {"halfstep", 616},
+    {"hand", 275},
+    {"handbreadth", 498},
+    {"handbreadths", 498},
+    {"hands", 275},
+    {"hartley", 458},
+    {"hartleys", 458},
+    {"hartree", 584},
+    {"hartrees", 584},
+    {"hath", 578},
+    {"haths", 578},
+    {"heap", 533},
+    {"heaps", 533},
+    {"heat capacity", 646},
+    {"heat flux", 650},
+    {"heat_capacity", 646},
+    {"hectare", 73},
+    {"hectares", 73},
+    {"helek", 515},
+    {"henries", 19},
+    {"henry", 19},
+    {"henrys", 19},
+    {"hertz", 7},
+    {"hin", 505},
+    {"hins", 505},
+    {"hogshead", 347},
+    {"hogsheads", 347},
+    {"hole", 534},
+    {"holes", 534},
+    {"horsepower", 373},
+    {"hounsfield", 702},
+    {"hounsfield_unit", 702},
+    {"hour", 309},
+    {"hours", 309},
+    {"hp", 373},
+    {"imp gal", 334},
+    {"imperial bottle", 356},
+    {"imperial gallon", 334},
+    {"imperial gallons", 334},
+    {"imperial pint", 603},
+    {"imperial pints", 603},
+    {"imperial_pint", 603},
+    {"impgal", 334},
+    {"impulse", 671},
+    {"in", 60},
+    {"in H2O", 631},
+    {"in of water", 631},
+    {"inH2O", 631},
+    {"inHg", 364},
+    {"inch", 60},
+    {"inch of water", 631},
+    {"inches", 60},
+    {"inches of water", 631},
+    {"indian kos", 580},
+    {"instant", 438},
+    {"instants", 438},
+    {"instruction", 449},
+    {"instructions", 449},
+    {"inv_ab", 475},
+    {"inv_fb", 474},
+    {"inv_nb", 477},
+    {"inv_pb", 476},
+    {"inverse attobarn", 475},
+    {"inverse femtobarn", 474},
+    {"inverse nanobarn", 477},
+    {"inverse picobarn", 476},
+    {"io", 456},
+    {"io_op", 456},
+    {"io_ops", 456},
+    {"iops", 753},
+    {"ios", 456},
+    {"isaron", 503},
+    {"iso", 614},
+    {"issaron", 503},
+    {"iugera", 569},
+    {"iugerum", 569},
+    {"j", 434},
+    {"jam", 434},
+    {"janskies", 466},
+    {"jansky", 466},
+    {"janskys", 466},
+    {"japanese cup", 602},
+    {"japanese cups", 602},
+    {"japanese_cup", 602},
+    {"jelly", 434},
+    {"jerk", 669},
+    {"jeroboam", 355},
+    {"jeroboams", 355},
+    {"jiffies", 439},
+    {"jiffy", 439},
+    {"jigger", 343},
+    {"jiggers", 343},
+    {"jin", 551},
+    {"jins", 551},
+    {"jo", 538},
+    {"jos", 538},
+    {"joule", 10},
+    {"joules", 10},
+    {"joules per kelvin", 102},
+    {"joules per operation", 674},
+    {"joules per token", 675},
+    {"jubilee", 518},
+    {"jubilees", 518},
+    {"jugerum", 569},
+    {"julian year", 321},
+    {"julian years", 321},
+    {"julianyear", 321},
+    {"jupiter mass", 400},
+    {"jupitermass", 400},
+    {"kFLOPS", 708},
+    {"kHz", 41},
+    {"kJ", 45},
+    {"kPa", 57},
+    {"kV", 55},
+    {"kW", 48},
+    {"kWh", 51},
+    {"kab", 509},
+    {"kabim", 509},
+    {"kabs", 509},
+    {"kanme", 544},
+    {"kanmes", 544},
+    {"kat", 26},
+    {"kat/m\xc2\xb3", 663},
+    {"katal", 26},
+    {"katals", 26},
+    {"kayser", 484},
+    {"kaysers", 484},
+    {"kcal", 109},
+    {"kelvin", 4},
+    {"kelvin difference", 262},
+    {"kflops", 707},
+    {"kg", 1},
+    {"kg CO2e", 677},
+    {"kg/m", 657},
+    {"kg/m\xc2\xb2", 658},
+    {"kg/m\xc2\xb3", 642},
+    {"kg/s", 645},
+    {"kgCO\xe2\x82\x82\x65", 677},
+    {"kgf", 367},
+    {"kg\xc2\xb7m/s", 670},
+    {"khet", 576},
+    {"khets", 576},
+    {"kikar", 512},
+    {"kilderkin", 351},
+    {"kilderkins", 351},
+    {"kilocalorie", 109},
+    {"kilocalories", 109},
+    {"kilogram", 1},
+    {"kilogram force", 367},
+    {"kilogram-force", 367},
+    {"kilograms", 1},
+    {"kilograms CO2e", 677},
+    {"kilograms per cubic meter", 642},
+    {"kilograms per second", 645},
+    {"kiloton", 527},
+    {"kilotons", 527},
+    {"kilowarhol", 419},
+    {"kilowarhols", 419},
+    {"kilowatt hour", 51},
+    {"kilowatt hours", 51},
+    {"kilowatt-hour", 51},
+    {"kilowatt-hours", 51},
+    {"km", 27},
+    {"km/h", 81},
+    {"km\xc2\xb2", 72},
+    {"kn", 281},
+    {"knot", 281},
+    {"knots", 281},
+    {"koku", 541},
+    {"kokus", 541},
+    {"kor", 508},
+    {"korim", 508},
+    {"kors", 508},
+    {"kos", 580},
+    {"kos_indian", 580},
+    {"kph", 282},
+    {"kt", 281},
+    {"ktok/s", 738},
+    {"l", 329},
+    {"l/100km", 525},
+    {"lambert", 426},
+    {"lamberts", 426},
+    {"lb", 65},
+    {"lbf", 366},
+    {"lbs", 119},
+    {"league", 276},
+    {"leagues", 276},
+    {"li_cn", 549},
+    {"liang", 552},
+    {"liangs", 552},
+    {"libra romana", 570},
+    {"libra_roma", 570},
+    {"lieue de poste", 565},
+    {"lieue_de_poste", 565},
+    {"lieues de poste", 565},
+    {"light hour", 286},
+    {"light hours", 286},
+    {"light minute", 285},
+    {"light minutes", 285},
+    {"light nanosecond", 640},
+    {"light second", 284},
+    {"light seconds", 284},
+    {"light year", 115},
+    {"light years", 115},
+    {"light-nanosecond", 640},
+    {"light_nanosecond", 640},
+    {"lighthour", 286},
+    {"lighthours", 286},
+    {"lightminute", 285},
+    {"lightminutes", 285},
+    {"lightsecond", 284},
+    {"lightseconds", 284},
+    {"lightyear", 115},
+    {"lightyears", 115},
+    {"linear density", 657},
+    {"link", 622},
+    {"link_chain", 622},
+    {"links", 622},
+    {"liter", 78},
+    {"liters", 78},
+    {"liters per 100 km", 525},
+    {"liters per minute", 644},
+    {"litre", 78},
+    {"litres", 78},
+    {"litres per minute", 644},
+    {"lm", 21},
+    {"lm\xc2\xb7s", 666},
+    {"long ton", 295},
+    {"long tons", 295},
+    {"lumen", 21},
+    {"lumens", 21},
+    {"luminous energy", 666},
+    {"luminous exposure", 665},
+    {"lunar month", 323},
+    {"lunar months", 323},
+    {"lunarmonth", 323},
+    {"lustra", 324},
+    {"lustrum", 324},
+    {"lustrums", 324},
+    {"lux", 22},
+    {"lx", 22},
+    {"lx\xc2\xb7s", 665},
+    {"ly", 115},
+    {"m", 0},
+    {"m H2O", 630},
+    {"m of water", 630},
+    {"m/s", 80},
+    {"m/s\xc2\xb2", 83},
+    {"m/s\xc2\xb3", 669},
+    {"mA", 53},
+    {"mH2O", 630},
+    {"mL", 79},
+    {"m_e", 591},
+    {"m_n", 593},
+    {"m_p", 592},
+    {"m_\xce\xbc", 594},
+    {"mac", 448},
+    {"mach", 283},
+    {"mach_air_20C", 692},
+    {"macs", 448},
+    {"mag", 467},
+    {"magnitude", 467},
+    {"magnitudes", 467},
+    {"magnum", 354},
+    {"magnums", 354},
+    {"maneh", 511},
+    {"mass density", 642},
+    {"mass flow", 645},
+    {"maund", 583},
+    {"maunds", 583},
+    {"maxwell", 422},
+    {"maxwells", 422},
+    {"mbar", 112},
+    {"megaton", 528},
+    {"megatons", 528},
+    {"melchizedek", 358},
+    {"melchizedeks", 358},
+    {"meter", 0},
+    {"meter of water", 630},
+    {"meters", 0},
+    {"meters of water", 630},
+    {"methuselah", 356},
+    {"methuselahs", 356},
+    {"metric cup", 599},
+    {"metric cups", 599},
+    {"metric tablespoon", 600},
+    {"metric tablespoons", 600},
+    {"metric tbsp", 600},
+    {"metric ton", 36},
+    {"metric tons", 36},
+    {"metric_cup", 599},
+    {"metric_tbsp", 600},
+    {"mg", 34},
+    {"mg/dL glucose", 690},
+    {"mg/dL_glucose", 690},
+    {"mho", 16},
+    {"mi", 63},
+    {"mi/h", 122},
+    {"mickey", 638},
+    {"mickeys", 638},
+    {"microlife", 483},
+    {"microlives", 483},
+    {"micromort", 482},
+    {"micromorts", 482},
+    {"mil", 383},
+    {"mile", 63},
+    {"mile per hour", 82},
+    {"miles", 63},
+    {"miles per gallon", 523},
+    {"miles per gallon equivalent", 524},
+    {"miles per hour", 82},
+    {"mill_finance", 620},
+    {"mille passuum", 568},
+    {"mille_passuum", 568},
+    {"millennia", 315},
+    {"millennium", 315},
+    {"millenniums", 315},
+    {"millihelen", 423},
+    {"millihelens", 423},
+    {"mils", 383},
+    {"min", 308},
+    {"mina", 511},
+    {"minas", 511},
+    {"minute", 308},
+    {"minutes", 308},
+    {"mm", 29},
+    {"mmHg", 363},
+    {"mmol/L glucose", 691},
+    {"mmol/L_glucose", 691},
+    {"mo", 312},
+    {"mohs", 485},
+    {"mol", 5},
+    {"mol/mol", 662},
+    {"molal", 756},
+    {"molar", 755},
+    {"mole", 5},
+    {"mole fraction", 662},
+    {"moles", 5},
+    {"moment", 440},
+    {"moment magnitude", 699},
+    {"moment_magnitude", 699},
+    {"moments", 440},
+    {"momentum", 670},
+    {"momme", 543},
+    {"mommes", 543},
+    {"month", 312},
+    {"months", 312},
+    {"moon mass", 401},
+    {"moonmass", 401},
+    {"mpg", 523},
+    {"mpge", 524},
+    {"mph", 82},
+    {"ms", 37},
+    {"mu", 550},
+    {"muB", 481},
+    {"muon mass", 594},
+    {"muon_mass", 594},
+    {"mus", 550},
+    {"m\xc2\xb2", 70},
+    {"m\xc2\xb3", 76},
+    {"m\xc2\xb3/(kg\xc2\xb7s\xc2\xb2)", 100},
+    {"m\xc2\xb3/s", 643},
+    {"m\xe2\x82\x9a\xe2\x82\x97", 299},
+    {"nail_cloth", 628},
+    {"nanobarn", 473},
+    {"nanobarns", 473},
+    {"nat", 457},
+    {"nats", 457},
+    {"nautical mile", 114},
+    {"nautical miles", 114},
+    {"nb-1", 477},
+    {"nb^-1", 477},
+    {"nbarn", 473},
+    {"nb\xe2\x81\xbb\xc2\xb9", 477},
+    {"nebuchadnezzar", 357},
+    {"nebuchadnezzars", 357},
+    {"neutron mass", 593},
+    {"neutron_mass", 593},
+    {"newton", 8},
+    {"newtons", 8},
+    {"newtons per meter", 656},
+    {"nibble", 387},
+    {"nibbles", 387},
+    {"nit", 424},
+    {"nits", 424},
+    {"nm", 31},
+    {"nmi", 114},
+    {"ns", 39},
+    {"o", 388},
+    {"octave", 618},
+    {"octaves", 618},
+    {"octet", 388},
+    {"octets", 388},
+    {"oersted", 478},
+    {"oersteds", 478},
+    {"ohm", 15},
+    {"ohm meter", 653},
+    {"ohms", 15},
+    {"oil barrel", 530},
+    {"oil barrels", 530},
+    {"oil_barrel", 530},
+    {"omer", 503},
+    {"omers", 503},
+    {"onah", 517},
+    {"onot", 517},
+    {"op", 447},
+    {"ops", 447},
+    {"ops_per_s", 723},
+    {"ounce", 64},
+    {"ounces", 64},
+    {"outhouse", 410},
+    {"oz", 64},
+    {"ozt", 304},
+    {"packet", 455},
+    {"packets", 455},
+    {"page", 609},
+    {"pages", 609},
+    {"paragraph", 607},
+    {"paragraphs", 607},
+    {"parsa", 501},
+    {"parsec", 117},
+    {"parsecs", 117},
+    {"parts per billion", 461},
+    {"parts per hundred million", 463},
+    {"parts per million", 460},
+    {"parts per trillion", 462},
+    {"parts-per-billion", 461},
+    {"parts-per-million", 460},
+    {"parts-per-trillion", 462},
+    {"pascal", 9},
+    {"pascals", 9},
+    {"passus", 567},
+    {"passuses", 567},
+    {"pb", 433},
+    {"pb-1", 476},
+    {"pb^-1", 476},
+    {"pbarn", 472},
+    {"pb\xe2\x81\xbb\xc2\xb9", 476},
+    {"pc", 117},
+    {"peanut butter", 433},
+    {"peanutbutter", 433},
+    {"peck", 336},
+    {"pecks", 336},
+    {"pedes", 566},
+    {"pennyweight", 305},
+    {"pennyweights", 305},
+    {"perch", 624},
+    {"perches", 624},
+    {"person hour", 687},
+    {"person hours", 687},
+    {"person_hour", 687},
+    {"pes", 566},
+    {"petabyte", 94},
+    {"petabytes", 94},
+    {"petroleum barrel", 530},
+    {"petroleum_barrel", 530},
+    {"phon", 465},
+    {"phons", 465},
+    {"pica", 405},
+    {"picas", 405},
+    {"piccolo", 352},
+    {"picobarn", 472},
+    {"picobarns", 472},
+    {"pied", 561},
+    {"pied du roi", 561},
+    {"pieds", 561},
+    {"pieds du roi", 561},
+    {"pieze", 633},
+    {"pinch", 341},
+    {"pinches", 341},
+    {"pint", 69},
+    {"pints", 69},
+    {"pip", 621},
+    {"pipe", 349},
+    {"pipes", 349},
+    {"pips", 621},
+    {"pixel", 681},
+    {"pixels", 681},
+    {"pk", 336},
+    {"planck length", 287},
+    {"planck mass", 299},
+    {"planck time", 326},
+    {"pm", 32},
+    {"point", 404},
+    {"points", 404},
+    {"poise", 394},
+    {"pouce", 562},
+    {"pouces", 562},
+    {"pound", 65},
+    {"pound force", 366},
+    {"pound-force", 366},
+    {"pounds", 65},
+    {"ppb", 461},
+    {"pphm", 463},
+    {"ppm", 460},
+    {"pps", 751},
+    {"ppt", 462},
+    {"proton mass", 592},
+    {"proton_mass", 592},
+    {"ps", 40},
+    {"psi", 361},
+    {"pt", 69},
+    {"pud", 558},
+    {"puds", 558},
+    {"puncheon", 348},
+    {"puncheons", 348},
+    {"px", 681},
+    {"qps", 745},
+    {"qquad", 432},
+    {"qr", 291},
+    {"qt", 68},
+    {"quad", 430},
+    {"quality adjusted life year", 688},
+    {"quality-adjusted life year", 688},
+    {"quart", 68},
+    {"quarter", 291},
+    {"quarters", 291},
+    {"quarts", 68},
+    {"queries", 452},
+    {"query", 452},
+    {"quintal", 307},
+    {"quintals", 307},
+    {"qword", 606},
+    {"qwords", 606},
+    {"rack unit", 277},
+    {"rack units", 277},
+    {"rad", 84},
+    {"rad/s", 667},
+    {"rad/s\xc2\xb2", 668},
+    {"radian", 84},
+    {"radians", 84},
+    {"rankine", 256},
+    {"rankine difference", 265},
+    {"rbe", 701},
+    {"rd", 421},
+    {"reaumur", 259},
+    {"rega", 516},
+    {"regaim", 516},
+    {"rehoboam", 355},
+    {"relative biological effectiveness", 701},
+    {"rem", 377},
+    {"rem_css", 684},
+    {"rems", 377},
+    {"request", 453},
+    {"requests", 453},
+    {"resistivity", 653},
+    {"rev", 443},
+    {"revolution", 443},
+    {"revolutions", 443},
+    {"revolutions per minute", 420},
+    {"revs", 443},
+    {"ri", 537},
+    {"richter", 698},
+    {"richter scale", 698},
+    {"rockwell", 487},
+    {"rod", 272},
+    {"rods", 272},
+    {"roman libra", 570},
+    {"roman mile", 568},
+    {"roman uncia", 571},
+    {"romer", 260},
+    {"rope", 623},
+    {"ropes", 623},
+    {"rot", 445},
+    {"rotation", 445},
+    {"rotations", 445},
+    {"rotations per minute", 420},
+    {"royal cubit", 573},
+    {"royal cubits", 573},
+    {"royal_cubit", 573},
+    {"rpm", 420},
+    {"rps", 747},
+    {"rundlet", 345},
+    {"rundlets", 345},
+    {"russian funt", 559},
+    {"russian_funt", 559},
+    {"rutherford", 421},
+    {"rutherfords", 421},
+    {"rydberg", 585},
+    {"rydberg_unit", 585},
+    {"rydbergs", 585},
+    {"r\xc3\xa9\x61umur", 259},
+    {"r\xc3\xb8mer", 260},
+    {"s", 2},
+    {"sabbath day's journey", 502},
+    {"sabbatical", 519},
+    {"saffir simpson", 695},
+    {"saffir_simpson", 695},
+    {"sagan", 639},
+    {"sagans", 639},
+    {"sample", 441},
+    {"samples", 441},
+    {"savart", 617},
+    {"savarts", 617},
+    {"sazhen", 556},
+    {"sazhens", 556},
+    {"sb", 425},
+    {"score", 492},
+    {"scores", 492},
+    {"scruple", 300},
+    {"scruples", 300},
+    {"seah", 507},
+    {"seahs", 507},
+    {"second", 2},
+    {"seconds", 2},
+    {"sector", 608},
+    {"sectors", 608},
+    {"seer", 582},
+    {"seers", 582},
+    {"seim", 507},
+    {"semitone", 616},
+    {"semitones", 616},
+    {"shaftment", 626},
+    {"shaftments", 626},
+    {"shake", 318},
+    {"shakes", 318},
+    {"shaku", 535},
+    {"shakus", 535},
+    {"shed", 411},
+    {"shekalim", 510},
+    {"shekel", 510},
+    {"shekels", 510},
+    {"shmita", 519},
+    {"shmitas", 519},
+    {"shmitta", 519},
+    {"short ton", 294},
+    {"short tons", 294},
+    {"sidereal day", 322},
+    {"sidereal days", 322},
+    {"sidereal year", 319},
+    {"sidereal years", 319},
+    {"siderealday", 322},
+    {"siderealyear", 319},
+    {"siemens", 16},
+    {"siemens per meter", 654},
+    {"sievert", 25},
+    {"sieverts", 25},
+    {"sk", 429},
+    {"skot", 429},
+    {"skots", 429},
+    {"slug", 298},
+    {"slugs", 298},
+    {"smidgen", 342},
+    {"smidgens", 342},
+    {"smoot", 274},
+    {"smoots", 274},
+    {"solar mass", 398},
+    {"solar radius", 402},
+    {"solarmass", 398},
+    {"solarradius", 402},
+    {"sone", 464},
+    {"sones", 464},
+    {"span", 497},
+    {"spans", 497},
+    {"specific energy", 661},
+    {"specific heat capacity", 648},
+    {"specific_energy", 661},
+    {"spectral efficiency", 673},
+    {"split", 352},
+    {"splits", 352},
+    {"sq ft", 120},
+    {"sqft", 120},
+    {"sqm", 121},
+    {"square feet", 120},
+    {"square foot", 120},
+    {"sr", 86},
+    {"st", 290},
+    {"standard gravity", 520},
+    {"steradian", 86},
+    {"steradians", 86},
+    {"stere", 413},
+    {"stick", 526},
+    {"stick of butter", 526},
+    {"sticks", 526},
+    {"sticks of butter", 526},
+    {"stilb", 425},
+    {"stilbs", 425},
+    {"stokes", 396},
+    {"stone", 290},
+    {"stones", 290},
+    {"stop", 612},
+    {"stops", 612},
+    {"story point", 689},
+    {"story points", 689},
+    {"story_point", 689},
+    {"st\xc3\xa8re", 413},
+    {"st\xc3\xa8res", 413},
+    {"sun", 536},
+    {"suns", 536},
+    {"surface tension", 656},
+    {"synodic month", 323},
+    {"synodic months", 323},
+    {"t", 36},
+    {"tablespoon", 337},
+    {"tablespoons", 337},
+    {"talent", 512},
+    {"talents", 512},
+    {"talmudic mil", 500},
+    {"talmudic_mil", 500},
+    {"tatami", 540},
+    {"tatamis", 540},
+    {"tbsp", 337},
+    {"tce", 532},
+    {"teaspoon", 338},
+    {"teaspoons", 338},
+    {"techum", 502},
+    {"techum shabbat", 502},
+    {"tefach", 498},
+    {"tefachim", 498},
+    {"tenth cent", 620},
+    {"tenth_cent", 620},
+    {"tertian", 348},
+    {"tesla", 18},
+    {"teslas", 18},
+    {"tex", 635},
+    {"texpt", 406},
+    {"therm", 370},
+    {"thermal conductivity", 649},
+    {"therms", 370},
+    {"tick", 442},
+    {"ticks", 442},
+    {"tierce", 346},
+    {"tierces", 346},
+    {"tn", 294},
+    {"toise", 563},
+    {"toises", 563},
+    {"tok", 450},
+    {"tok/s", 737},
+    {"token", 450},
+    {"tokens", 450},
+    {"tola", 581},
+    {"tolas", 581},
+    {"ton", 294},
+    {"tonne", 36},
+    {"tonne of coal equivalent", 532},
+    {"tonnes", 36},
+    {"tons", 294},
+    {"torque", 672},
+    {"torr", 362},
+    {"torrs", 362},
+    {"tps", 749},
+    {"transaction", 454},
+    {"transactions", 454},
+    {"transfer", 451},
+    {"transfers", 451},
+    {"transport carbon intensity", 680},
+    {"tropical year", 320},
+    {"tropical years", 320},
+    {"tropicalyear", 320},
+    {"troy ounce", 304},
+    {"troy ounces", 304},
+    {"troyounce", 304},
+    {"tsp", 338},
+    {"tsubo", 539},
+    {"tsubos", 539},
+    {"tun", 350},
+    {"tuns", 350},
+    {"turn", 382},
+    {"turns", 382},
+    {"txn", 454},
+    {"t\xe2\x82\x9a", 326},
+    {"u", 297},
+    {"uncia_roma", 571},
+    {"vershok", 557},
+    {"vershoks", 557},
+    {"verst", 554},
+    {"versts", 554},
+    {"vh", 686},
+    {"vickers", 486},
+    {"viewport height", 686},
+    {"viewport width", 685},
+    {"volt", 13},
+    {"volts", 13},
+    {"volts per meter", 651},
+    {"volumetric flow", 643},
+    {"vw", 685},
+    {"warhol", 418},
+    {"warhols", 418},
+    {"water horsepower", 597},
+    {"water_horsepower", 597},
+    {"watt", 11},
+    {"watts", 11},
+    {"watts per square meter", 650},
+    {"wavenumber", 484},
+    {"weber", 17},
+    {"webers", 17},
+    {"wedgwood", 261},
+    {"week", 311},
+    {"weeks", 311},
+    {"wk", 311},
+    {"yard", 62},
+    {"yards", 62},
+    {"yd", 62},
+    {"year", 313},
+    {"years", 313},
+    {"yovel", 518},
+    {"yovels", 518},
+    {"yr", 313},
+    {"zeret", 497},
+    {"zhang", 548},
+    {"zhangs", 548},
+    {"\xc2\xb0", 85},
+    {"\xc2\xb0\x43", 20},
+    {"\xc2\xb0\x44\x65", 257},
+    {"\xc2\xb0\x46", 87},
+    {"\xc2\xb0N", 258},
+    {"\xc2\xb0R", 256},
+    {"\xc2\xb0Ra", 256},
+    {"\xc2\xb0Re", 259},
+    {"\xc2\xb0R\xc3\xa9", 259},
+    {"\xc2\xb0R\xc3\xb8", 260},
+    {"\xc2\xb0W", 261},
+    {"\xc2\xb0r", 259},
+    {"\xc2\xb5\x41", 54},
+    {"\xc2\xb5g", 35},
+    {"\xc2\xb5m", 30},
+    {"\xc2\xb5s", 38},
+    {"\xc3\x85", 278},
+    {"\xc3\xa5ngstr\xc3\xb6m", 278},
+    {"\xc9\xa1", 520},
+    {"\xca\x92", 301},
+    {"\xce\x94K", 262},
+    {"\xce\x94\xc2\xb0\x43", 263},
+    {"\xce\x94\xc2\xb0\x44\x65", 266},
+    {"\xce\x94\xc2\xb0\x46", 264},
+    {"\xce\x94\xc2\xb0N", 267},
+    {"\xce\x94\xc2\xb0R", 265},
+    {"\xce\x94\xc2\xb0R\xc3\xa9", 268},
+    {"\xce\x94\xc2\xb0R\xc3\xb8", 269},
+    {"\xce\x94\xc2\xb0W", 270},
+    {"\xce\xa9", 15},
+    {"\xce\xa9\xc2\xb7m", 653},
+    {"\xce\xb1", 590},
+    {"\xce\xbc_B", 481},
+    {"\xce\xbclife", 483},
+    {"\xce\xbcmort", 482},
+    {"\xe2\x84\x83", 20},
+    {"\xe2\x84\x88", 300},
+    {"\xe2\x84\x89", 87},
+    {"\xe2\x84\x93\xe2\x82\x9a", 287},
+    {"\xe2\x84\x94", 303},
+    {"\xe2\x84\xa5", 302},
+    {"\xe2\x84\xa7", 16},
+    {"\xe3\x8d\xb3", 116},
+};
+static int unit_lookup_id(const char *name) {
+    int lo = 0, hi = (int)(sizeof(unit_aliases) / sizeof(unit_aliases[0])) - 1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        int cmp = strcmp(name, unit_aliases[mid].name);
+        if (cmp == 0) return unit_aliases[mid].id;
+        if (cmp < 0) hi = mid - 1; else lo = mid + 1;
+    }
+    return -1;
+}
 /* --- END GENERATED: unit_names --- */
 
 /* --- BEGIN GENERATED: unit_info --- */
-typedef struct { int8_t dim[8]; int64_t num; int64_t den; int64_t off_num; int64_t off_den; } WUnitInfo;
-/* non-const: the custom region (140+) takes synthesized compound units at runtime */
-static WUnitInfo unit_info[256] = {
-    [0] = {{1,0,0,0,0,0,0,0}, 1, 1, 0, 1}, /* m */
-    [1] = {{0,1,0,0,0,0,0,0}, 1, 1, 0, 1}, /* kg */
-    [2] = {{0,0,1,0,0,0,0,0}, 1, 1, 0, 1}, /* s */
-    [3] = {{0,0,0,1,0,0,0,0}, 1, 1, 0, 1}, /* A */
-    [4] = {{0,0,0,0,1,0,0,0}, 1, 1, 0, 1}, /* K */
-    [5] = {{0,0,0,0,0,1,0,0}, 1, 1, 0, 1}, /* mol */
-    [6] = {{0,0,0,0,0,0,1,0}, 1, 1, 0, 1}, /* cd */
-    [7] = {{0,0,-1,0,0,0,0,0}, 1, 1, 0, 1}, /* Hz */
-    [8] = {{1,1,-2,0,0,0,0,0}, 1, 1, 0, 1}, /* N */
-    [9] = {{-1,1,-2,0,0,0,0,0}, 1, 1, 0, 1}, /* Pa */
-    [10] = {{2,1,-2,0,0,0,0,0}, 1, 1, 0, 1}, /* J */
-    [11] = {{2,1,-3,0,0,0,0,0}, 1, 1, 0, 1}, /* W */
-    [12] = {{0,0,1,1,0,0,0,0}, 1, 1, 0, 1}, /* C */
-    [13] = {{2,1,-3,-1,0,0,0,0}, 1, 1, 0, 1}, /* V */
-    [14] = {{-2,-1,4,2,0,0,0,0}, 1, 1, 0, 1}, /* F */
-    [15] = {{2,1,-3,-2,0,0,0,0}, 1, 1, 0, 1}, /* \xce\xa9 */
-    [16] = {{-2,-1,3,2,0,0,0,0}, 1, 1, 0, 1}, /* S */
-    [17] = {{2,1,-2,-1,0,0,0,0}, 1, 1, 0, 1}, /* Wb */
-    [18] = {{0,1,-2,-1,0,0,0,0}, 1, 1, 0, 1}, /* T */
-    [19] = {{2,1,-2,-2,0,0,0,0}, 1, 1, 0, 1}, /* H */
-    [20] = {{0,0,0,0,1,0,0,0}, 1, 1, 5463, 20}, /* \xc2\xb0\x43 */
-    [21] = {{0,0,0,0,0,0,1,0}, 1, 1, 0, 1}, /* lm */
-    [22] = {{-2,0,0,0,0,0,1,0}, 1, 1, 0, 1}, /* lx */
-    [23] = {{0,0,-1,0,0,0,0,0}, 1, 1, 0, 1}, /* Bq */
-    [24] = {{2,0,-2,0,0,0,0,0}, 1, 1, 0, 1}, /* Gy */
-    [25] = {{2,0,-2,0,0,0,0,0}, 1, 1, 0, 1}, /* Sv */
-    [26] = {{0,0,-1,0,0,1,0,0}, 1, 1, 0, 1}, /* kat */
-    [27] = {{1,0,0,0,0,0,0,0}, 1000, 1, 0, 1}, /* km */
-    [28] = {{1,0,0,0,0,0,0,0}, 1, 100, 0, 1}, /* cm */
-    [29] = {{1,0,0,0,0,0,0,0}, 1, 1000, 0, 1}, /* mm */
-    [30] = {{1,0,0,0,0,0,0,0}, 1, 1000000, 0, 1}, /* \xc2\xb5m */
-    [31] = {{1,0,0,0,0,0,0,0}, 1, 1000000000, 0, 1}, /* nm */
-    [32] = {{1,0,0,0,0,0,0,0}, 1, 1000000000000, 0, 1}, /* pm */
-    [33] = {{0,1,0,0,0,0,0,0}, 1, 1000, 0, 1}, /* g */
-    [34] = {{0,1,0,0,0,0,0,0}, 1, 1000000, 0, 1}, /* mg */
-    [35] = {{0,1,0,0,0,0,0,0}, 1, 1000000000, 0, 1}, /* \xc2\xb5g */
-    [36] = {{0,1,0,0,0,0,0,0}, 1000, 1, 0, 1}, /* t */
-    [37] = {{0,0,1,0,0,0,0,0}, 1, 1000, 0, 1}, /* ms */
-    [38] = {{0,0,1,0,0,0,0,0}, 1, 1000000, 0, 1}, /* \xc2\xb5s */
-    [39] = {{0,0,1,0,0,0,0,0}, 1, 1000000000, 0, 1}, /* ns */
-    [40] = {{0,0,1,0,0,0,0,0}, 1, 1000000000000, 0, 1}, /* ps */
-    [41] = {{0,0,-1,0,0,0,0,0}, 1000, 1, 0, 1}, /* kHz */
-    [42] = {{0,0,-1,0,0,0,0,0}, 1000000, 1, 0, 1}, /* MHz */
-    [43] = {{0,0,-1,0,0,0,0,0}, 1000000000, 1, 0, 1}, /* GHz */
-    [44] = {{0,0,-1,0,0,0,0,0}, 1000000000000, 1, 0, 1}, /* THz */
-    [45] = {{2,1,-2,0,0,0,0,0}, 1000, 1, 0, 1}, /* kJ */
-    [46] = {{2,1,-2,0,0,0,0,0}, 1000000, 1, 0, 1}, /* MJ */
-    [47] = {{2,1,-2,0,0,0,0,0}, 1000000000, 1, 0, 1}, /* GJ */
-    [48] = {{2,1,-3,0,0,0,0,0}, 1000, 1, 0, 1}, /* kW */
-    [49] = {{2,1,-3,0,0,0,0,0}, 1000000, 1, 0, 1}, /* MW */
-    [50] = {{2,1,-3,0,0,0,0,0}, 1000000000, 1, 0, 1}, /* GW */
-    [51] = {{2,1,-2,0,0,0,0,0}, 3600000, 1, 0, 1}, /* kWh */
-    [52] = {{2,1,-2,0,0,0,0,0}, 3600000000, 1, 0, 1}, /* MWh */
-    [53] = {{0,0,0,1,0,0,0,0}, 1, 1000, 0, 1}, /* mA */
-    [54] = {{0,0,0,1,0,0,0,0}, 1, 1000000, 0, 1}, /* \xc2\xb5\x41 */
-    [55] = {{2,1,-3,-1,0,0,0,0}, 1000, 1, 0, 1}, /* kV */
-    [56] = {{2,1,-3,-1,0,0,0,0}, 1000000, 1, 0, 1}, /* MV */
-    [57] = {{-1,1,-2,0,0,0,0,0}, 1000, 1, 0, 1}, /* kPa */
-    [58] = {{-1,1,-2,0,0,0,0,0}, 1000000, 1, 0, 1}, /* MPa */
-    [59] = {{-1,1,-2,0,0,0,0,0}, 1000000000, 1, 0, 1}, /* GPa */
-    [60] = {{1,0,0,0,0,0,0,0}, 127, 5000, 0, 1}, /* in */
-    [61] = {{1,0,0,0,0,0,0,0}, 381, 1250, 0, 1}, /* ft */
-    [62] = {{1,0,0,0,0,0,0,0}, 1143, 1250, 0, 1}, /* yd */
-    [63] = {{1,0,0,0,0,0,0,0}, 201168, 125, 0, 1}, /* mi */
-    [64] = {{0,1,0,0,0,0,0,0}, 45359237, 1600000000, 0, 1}, /* oz */
-    [65] = {{0,1,0,0,0,0,0,0}, 45359237, 100000000, 0, 1}, /* lb */
-    [66] = {{3,0,0,0,0,0,0,0}, 473176473, 16000000000000, 0, 1}, /* fl oz */
-    [67] = {{3,0,0,0,0,0,0,0}, 473176473, 125000000000, 0, 1}, /* gal */
-    [68] = {{3,0,0,0,0,0,0,0}, 473176473, 500000000000, 0, 1}, /* qt */
-    [69] = {{3,0,0,0,0,0,0,0}, 473176473, 1000000000000, 0, 1}, /* pt */
-    [70] = {{2,0,0,0,0,0,0,0}, 1, 1, 0, 1}, /* m\xc2\xb2 */
-    [71] = {{2,0,0,0,0,0,0,0}, 1, 10000, 0, 1}, /* cm\xc2\xb2 */
-    [72] = {{2,0,0,0,0,0,0,0}, 1000000, 1, 0, 1}, /* km\xc2\xb2 */
-    [73] = {{2,0,0,0,0,0,0,0}, 10000, 1, 0, 1}, /* ha */
-    [74] = {{2,0,0,0,0,0,0,0}, 316160658, 78125, 0, 1}, /* acre */
-    [75] = {{2,0,0,0,0,0,0,0}, 145161, 1562500, 0, 1}, /* ft\xc2\xb2 */
-    [76] = {{3,0,0,0,0,0,0,0}, 1, 1, 0, 1}, /* m\xc2\xb3 */
-    [77] = {{3,0,0,0,0,0,0,0}, 1, 1000000, 0, 1}, /* cm\xc2\xb3 */
-    [78] = {{3,0,0,0,0,0,0,0}, 1, 1000, 0, 1}, /* L */
-    [79] = {{3,0,0,0,0,0,0,0}, 1, 1000000, 0, 1}, /* mL */
-    [80] = {{1,0,-1,0,0,0,0,0}, 1, 1, 0, 1}, /* m/s */
-    [81] = {{1,0,-1,0,0,0,0,0}, 5, 18, 0, 1}, /* km/h */
-    [82] = {{1,0,-1,0,0,0,0,0}, 1397, 3125, 0, 1}, /* mph */
-    [83] = {{1,0,-2,0,0,0,0,0}, 1, 1, 0, 1}, /* m/s\xc2\xb2 */
-    [84] = {{0,0,0,0,0,0,0,0}, 1, 1, 0, 1}, /* rad */
-    [85] = {{0,0,0,0,0,0,0,0}, 14964008, 857374503, 0, 1}, /* \xc2\xb0 */
-    [86] = {{0,0,0,0,0,0,0,0}, 1, 1, 0, 1}, /* sr */
-    [87] = {{0,0,0,0,1,0,0,0}, 5, 9, 45967, 180}, /* \xc2\xb0\x46 */
-    [88] = {{0,0,0,0,0,0,0,1}, 1, 8, 0, 1}, /* bit */
-    [89] = {{0,0,0,0,0,0,0,1}, 1, 1, 0, 1}, /* B */
-    [90] = {{0,0,0,0,0,0,0,1}, 1000, 1, 0, 1}, /* KB */
-    [91] = {{0,0,0,0,0,0,0,1}, 1000000, 1, 0, 1}, /* MB */
-    [92] = {{0,0,0,0,0,0,0,1}, 1000000000, 1, 0, 1}, /* GB */
-    [93] = {{0,0,0,0,0,0,0,1}, 1000000000000, 1, 0, 1}, /* TB */
-    [94] = {{0,0,0,0,0,0,0,0}, 0, 0, 0, 1}, /* PB */
-    [95] = {{0,0,0,0,0,0,0,1}, 1024, 1, 0, 1}, /* KiB */
-    [96] = {{0,0,0,0,0,0,0,1}, 1048576, 1, 0, 1}, /* MiB */
-    [97] = {{0,0,0,0,0,0,0,1}, 1073741824, 1, 0, 1}, /* GiB */
-    [98] = {{0,0,0,0,0,0,0,1}, 1099511627776, 1, 0, 1}, /* TiB */
-    [99] = {{2,1,-1,0,0,0,0,0}, 1, 1, 0, 1}, /* J\xc2\xb7s */
-    [100] = {{3,0,0,0,0,0,0,0}, 1, 1, 0, 1}, /* m\xc2\xb3/(kg\xc2\xb7s\xc2\xb2) */
-    [101] = {{0,0,0,0,0,-1,0,0}, 1, 1, 0, 1}, /* 1/mol */
-    [102] = {{2,1,-2,0,-1,0,0,0}, 1, 1, 0, 1}, /* J/K */
-    [103] = {{2,1,-2,0,0,0,0,0}, 1, 1, 0, 1}, /* J/(mol\xc2\xb7K) */
-    [104] = {{-3,-1,4,2,0,0,0,0}, 1, 1, 0, 1}, /* F/m */
-    [105] = {{1,1,-2,-2,0,0,0,0}, 1, 1, 0, 1}, /* N/A\xc2\xb2 */
-    [106] = {{2,1,-3,0,0,0,0,0}, 1, 1, 0, 1}, /* W/(m\xc2\xb2\xc2\xb7K\xe2\x81\xb4) */
-    [107] = {{0,0,0,0,0,0,0,0}, 0, 0, 0, 1}, /* eV */
-    [108] = {{2,1,-2,0,0,0,0,0}, 10467, 2500, 0, 1}, /* cal */
-    [109] = {{2,1,-2,0,0,0,0,0}, 20934, 5, 0, 1}, /* kcal */
-    [110] = {{-1,1,-2,0,0,0,0,0}, 101325, 1, 0, 1}, /* atm */
-    [111] = {{-1,1,-2,0,0,0,0,0}, 100000, 1, 0, 1}, /* bar */
-    [112] = {{-1,1,-2,0,0,0,0,0}, 100, 1, 0, 1}, /* mbar */
-    [113] = {{-1,1,-2,0,0,0,0,0}, 20265, 152, 0, 1}, /* Torr */
-    [114] = {{1,0,0,0,0,0,0,0}, 1852, 1, 0, 1}, /* nmi */
-    [115] = {{1,0,0,0,0,0,0,0}, 9460730472580800, 1, 0, 1}, /* ly */
-    [116] = {{1,0,0,0,0,0,0,0}, 149597870700, 1, 0, 1}, /* au */
-    [117] = {{1,0,0,0,0,0,0,0}, 30856775814914000, 1, 0, 1}, /* pc */
-    [118] = {{0,0,0,0,0,0,0,0}, 0, 0, 0, 1}, /* e\xe2\x82\x80 */
-    [119] = {{0,1,0,0,0,0,0,0}, 45359237, 100000000, 0, 1}, /* lbs */
-    [120] = {{2,0,0,0,0,0,0,0}, 145161, 1562500, 0, 1}, /* sqft */
-    [121] = {{2,0,0,0,0,0,0,0}, 1, 1, 0, 1}, /* sqm */
-    [122] = {{1,0,-1,0,0,0,0,0}, 1397, 3125, 0, 1}, /* mi/h */
-    [255] = {{0,0,0,0,0,0,0,0}, 0, 0, 0, 1}, /* % */
+typedef struct { int8_t dim[8]; int16_t custom_id; int8_t custom_exp; int64_t num; int64_t den; int16_t factor_scale; int64_t off_num; int64_t off_den; } WUnitInfo;
+static const char *custom_dimension_names[] = {
+    NULL,
+    "absorbed_dose",
+    "angle",
+    "apgar",
+    "beat",
+    "beaufort",
+    "beauty",
+    "bortle",
+    "co2e",
+    "css_root_font_size",
+    "cycle",
+    "decay",
+    "ef",
+    "em",
+    "entropy",
+    "equivalent_dose",
+    "exposure_value",
+    "e\xe2\x82\x80",
+    "f_stop",
+    "fame",
+    "flop",
+    "frame",
+    "fujita",
+    "glucose_concentration",
+    "hardness_brinell",
+    "hardness_mohs",
+    "hardness_rockwell",
+    "hardness_vickers",
+    "heap",
+    "heat_capacity",
+    "hole",
+    "hounsfield",
+    "illuminance",
+    "impulse",
+    "instant",
+    "instruction",
+    "io",
+    "iso_sensitivity",
+    "jelly",
+    "jiffy",
+    "linear_density",
+    "loudness",
+    "loudness_level",
+    "luminance",
+    "luminous_flux",
+    "luminous_intensity",
+    "mac",
+    "magnitude",
+    "magnitude_absolute",
+    "magnitude_apparent",
+    "magnitude_bolometric",
+    "moment",
+    "momentum",
+    "op",
+    "packet",
+    "peanutbutter",
+    "person",
+    "pitch",
+    "quality_adjusted_life",
+    "query",
+    "ratio",
+    "rbe",
+    "request",
+    "revolution",
+    "rotation",
+    "saffir_simpson",
+    "sample",
+    "solid_angle",
+    "specific_energy",
+    "spectral_efficiency",
+    "spectral_flux_density",
+    "story_point",
+    "temperature_delta",
+    "tick",
+    "token",
+    "torque",
+    "transaction",
+    "transfer",
+    "transport_co2e",
+    "viewport_height_percent",
+    "viewport_width_percent",
+};
+/* non-const: the custom region takes synthesized compound units at runtime */
+static WUnitInfo unit_info[W_UNIT_CAPACITY] = {
+    [0] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* m */
+    [1] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kg */
+    [2] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* s */
+    [3] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* A */
+    [4] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* K */
+    [5] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* mol */
+    [6] = {{0,0,0,0,0,0,1,0}, 45, 1, 1, 1, 0, 0, 1}, /* cd */
+    [7] = {{0,0,-1,0,0,0,0,0}, 10, 1, 1, 1, 0, 0, 1}, /* Hz */
+    [8] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* N */
+    [9] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* Pa */
+    [10] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* J */
+    [11] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* W */
+    [12] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* C */
+    [13] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* V */
+    [14] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* F */
+    [15] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* \xce\xa9 */
+    [16] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* S */
+    [17] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* Wb */
+    [18] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* T */
+    [19] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* H */
+    [20] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 0, 5463, 20}, /* \xc2\xb0\x43 */
+    [21] = {{0,0,0,0,0,0,1,0}, 44, 1, 1, 1, 0, 0, 1}, /* lm */
+    [22] = {{-2,0,0,0,0,0,1,0}, 32, 1, 1, 1, 0, 0, 1}, /* lx */
+    [23] = {{0,0,-1,0,0,0,0,0}, 11, 1, 1, 1, 0, 0, 1}, /* Bq */
+    [24] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, 0, 0, 1}, /* Gy */
+    [25] = {{2,0,-2,0,0,0,0,0}, 15, 1, 1, 1, 0, 0, 1}, /* Sv */
+    [26] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kat */
+    [27] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* km */
+    [28] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cm */
+    [29] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mm */
+    [30] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5m */
+    [31] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nm */
+    [32] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pm */
+    [33] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* g */
+    [34] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* mg */
+    [35] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* \xc2\xb5g */
+    [36] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* t */
+    [37] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* ms */
+    [38] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5s */
+    [39] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* ns */
+    [40] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* ps */
+    [41] = {{0,0,-1,0,0,0,0,0}, 10, 1, 1, 1, 3, 0, 1}, /* kHz */
+    [42] = {{0,0,-1,0,0,0,0,0}, 10, 1, 1, 1, 6, 0, 1}, /* MHz */
+    [43] = {{0,0,-1,0,0,0,0,0}, 10, 1, 1, 1, 9, 0, 1}, /* GHz */
+    [44] = {{0,0,-1,0,0,0,0,0}, 10, 1, 1, 1, 12, 0, 1}, /* THz */
+    [45] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kJ */
+    [46] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* MJ */
+    [47] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* GJ */
+    [48] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kW */
+    [49] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* MW */
+    [50] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* GW */
+    [51] = {{2,1,-2,0,0,0,0,0}, 0, 0, 36, 1, 5, 0, 1}, /* kWh */
+    [52] = {{2,1,-2,0,0,0,0,0}, 0, 0, 36, 1, 8, 0, 1}, /* MWh */
+    [53] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mA */
+    [54] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5\x41 */
+    [55] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kV */
+    [56] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* MV */
+    [57] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kPa */
+    [58] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* MPa */
+    [59] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* GPa */
+    [60] = {{1,0,0,0,0,0,0,0}, 0, 0, 127, 5, -3, 0, 1}, /* in */
+    [61] = {{1,0,0,0,0,0,0,0}, 0, 0, 381, 125, -1, 0, 1}, /* ft */
+    [62] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 125, -1, 0, 1}, /* yd */
+    [63] = {{1,0,0,0,0,0,0,0}, 0, 0, 201168, 125, 0, 0, 1}, /* mi */
+    [64] = {{0,1,0,0,0,0,0,0}, 0, 0, 45359237, 16, -8, 0, 1}, /* oz */
+    [65] = {{0,1,0,0,0,0,0,0}, 0, 0, 45359237, 1, -8, 0, 1}, /* lb */
+    [66] = {{3,0,0,0,0,0,0,0}, 0, 0, 473176473, 16, -12, 0, 1}, /* fl oz */
+    [67] = {{3,0,0,0,0,0,0,0}, 0, 0, 473176473, 125, -9, 0, 1}, /* gal */
+    [68] = {{3,0,0,0,0,0,0,0}, 0, 0, 473176473, 5, -11, 0, 1}, /* qt */
+    [69] = {{3,0,0,0,0,0,0,0}, 0, 0, 473176473, 1, -12, 0, 1}, /* pt */
+    [70] = {{2,0,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* m\xc2\xb2 */
+    [71] = {{2,0,0,0,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* cm\xc2\xb2 */
+    [72] = {{2,0,0,0,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* km\xc2\xb2 */
+    [73] = {{2,0,0,0,0,0,0,0}, 0, 0, 1, 1, 4, 0, 1}, /* ha */
+    [74] = {{2,0,0,0,0,0,0,0}, 0, 0, 316160658, 78125, 0, 0, 1}, /* acre */
+    [75] = {{2,0,0,0,0,0,0,0}, 0, 0, 145161, 15625, -2, 0, 1}, /* ft\xc2\xb2 */
+    [76] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* m\xc2\xb3 */
+    [77] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* cm\xc2\xb3 */
+    [78] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* L */
+    [79] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* mL */
+    [80] = {{1,0,-1,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* m/s */
+    [81] = {{1,0,-1,0,0,0,0,0}, 0, 0, 5, 18, 0, 0, 1}, /* km/h */
+    [82] = {{1,0,-1,0,0,0,0,0}, 0, 0, 1397, 3125, 0, 0, 1}, /* mph */
+    [83] = {{1,0,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* m/s\xc2\xb2 */
+    [84] = {{0,0,0,0,0,0,0,0}, 2, 1, 1, 1, 0, 0, 1}, /* rad */
+    [85] = {{0,0,0,0,0,0,0,0}, 2, 1, 14964008, 857374503, 0, 0, 1}, /* \xc2\xb0 */
+    [86] = {{0,0,0,0,0,0,0,0}, 67, 1, 1, 1, 0, 0, 1}, /* sr */
+    [87] = {{0,0,0,0,1,0,0,0}, 0, 0, 5, 9, 0, 45967, 180}, /* \xc2\xb0\x46 */
+    [88] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, 0, 0, 1}, /* bit */
+    [89] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 0, 0, 1}, /* B */
+    [90] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 3, 0, 1}, /* KB */
+    [91] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 6, 0, 1}, /* MB */
+    [92] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 9, 0, 1}, /* GB */
+    [93] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 12, 0, 1}, /* TB */
+    [94] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 15, 0, 1}, /* PB */
+    [95] = {{0,0,0,0,0,0,0,1}, 0, 0, 1024, 1, 0, 0, 1}, /* KiB */
+    [96] = {{0,0,0,0,0,0,0,1}, 0, 0, 1048576, 1, 0, 0, 1}, /* MiB */
+    [97] = {{0,0,0,0,0,0,0,1}, 0, 0, 1073741824, 1, 0, 0, 1}, /* GiB */
+    [98] = {{0,0,0,0,0,0,0,1}, 0, 0, 1099511627776, 1, 0, 0, 1}, /* TiB */
+    [99] = {{2,1,-1,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* J\xc2\xb7s */
+    [100] = {{3,-1,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* m\xc2\xb3/(kg\xc2\xb7s\xc2\xb2) */
+    [101] = {{0,0,0,0,0,-1,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* 1/mol */
+    [102] = {{2,1,-2,0,-1,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* J/K */
+    [103] = {{2,1,-2,0,-1,-1,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* J/(mol\xc2\xb7K) */
+    [104] = {{-3,-1,4,2,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* F/m */
+    [105] = {{1,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* N/A\xc2\xb2 */
+    [106] = {{0,1,-3,0,-4,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* W/(m\xc2\xb2\xc2\xb7K\xe2\x81\xb4) */
+    [107] = {{2,1,-2,0,0,0,0,0}, 0, 0, 160217663400000001, 1, -36, 0, 1}, /* eV */
+    [108] = {{2,1,-2,0,0,0,0,0}, 0, 0, 10467, 25, -2, 0, 1}, /* cal */
+    [109] = {{2,1,-2,0,0,0,0,0}, 0, 0, 20934, 5, 0, 0, 1}, /* kcal */
+    [110] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 101325, 1, 0, 0, 1}, /* atm */
+    [111] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 5, 0, 1}, /* bar */
+    [112] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* mbar */
+    [113] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 20265, 152, 0, 0, 1}, /* Torr */
+    [114] = {{1,0,0,0,0,0,0,0}, 0, 0, 1852, 1, 0, 0, 1}, /* nmi */
+    [115] = {{1,0,0,0,0,0,0,0}, 0, 0, 94607304725808, 1, 2, 0, 1}, /* ly */
+    [116] = {{1,0,0,0,0,0,0,0}, 0, 0, 1495978707, 1, 2, 0, 1}, /* au */
+    [117] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 3, 0, 1}, /* pc */
+    [118] = {{0,0,0,0,0,0,0,0}, 17, 1, 1, 1, 0, 0, 1}, /* e\xe2\x82\x80 */
+    [119] = {{0,1,0,0,0,0,0,0}, 0, 0, 45359237, 1, -8, 0, 1}, /* lbs */
+    [120] = {{2,0,0,0,0,0,0,0}, 0, 0, 145161, 15625, -2, 0, 1}, /* sqft */
+    [121] = {{2,0,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* sqm */
+    [122] = {{1,0,-1,0,0,0,0,0}, 0, 0, 1397, 3125, 0, 0, 1}, /* mi/h */
+    [255] = {{0,0,0,0,0,0,0,0}, 0, 0, 0, 0, 0, 0, 1}, /* % */
+    [256] = {{0,0,0,0,1,0,0,0}, 0, 0, 5, 9, 0, 0, 1}, /* \xc2\xb0R */
+    [257] = {{0,0,0,0,1,0,0,0}, 0, 0, -2, 3, 0, 7463, 20}, /* \xc2\xb0\x44\x65 */
+    [258] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 33, 2, 5463, 20}, /* \xc2\xb0N */
+    [259] = {{0,0,0,0,1,0,0,0}, 0, 0, 5, 4, 0, 5463, 20}, /* \xc2\xb0R\xc3\xa9 */
+    [260] = {{0,0,0,0,1,0,0,0}, 0, 0, 4, 21, 1, 36241, 140}, /* \xc2\xb0R\xc3\xb8 */
+    [261] = {{0,0,0,0,1,0,0,0}, 0, 0, 36111, 5, -2, 17063, 20}, /* \xc2\xb0W */
+    [262] = {{0,0,0,0,1,0,0,0}, 72, 1, 1, 1, 0, 0, 1}, /* \xce\x94K */
+    [263] = {{0,0,0,0,1,0,0,0}, 72, 1, 1, 1, 0, 0, 1}, /* \xce\x94\xc2\xb0\x43 */
+    [264] = {{0,0,0,0,1,0,0,0}, 72, 1, 5, 9, 0, 0, 1}, /* \xce\x94\xc2\xb0\x46 */
+    [265] = {{0,0,0,0,1,0,0,0}, 72, 1, 5, 9, 0, 0, 1}, /* \xce\x94\xc2\xb0R */
+    [266] = {{0,0,0,0,1,0,0,0}, 72, 1, -2, 3, 0, 0, 1}, /* \xce\x94\xc2\xb0\x44\x65 */
+    [267] = {{0,0,0,0,1,0,0,0}, 72, 1, 1, 33, 2, 0, 1}, /* \xce\x94\xc2\xb0N */
+    [268] = {{0,0,0,0,1,0,0,0}, 72, 1, 5, 4, 0, 0, 1}, /* \xce\x94\xc2\xb0R\xc3\xa9 */
+    [269] = {{0,0,0,0,1,0,0,0}, 72, 1, 4, 21, 1, 0, 1}, /* \xce\x94\xc2\xb0R\xc3\xb8 */
+    [270] = {{0,0,0,0,1,0,0,0}, 72, 1, 36111, 5, -2, 0, 1}, /* \xce\x94\xc2\xb0W */
+    [271] = {{1,0,0,0,0,0,0,0}, 0, 0, 25146, 125, 0, 0, 1}, /* fur */
+    [272] = {{1,0,0,0,0,0,0,0}, 0, 0, 12573, 25, -2, 0, 1}, /* rod */
+    [273] = {{1,0,0,0,0,0,0,0}, 0, 0, 12573, 625, 0, 0, 1}, /* ch */
+    [274] = {{1,0,0,0,0,0,0,0}, 0, 0, 8509, 5, -3, 0, 1}, /* smoot */
+    [275] = {{1,0,0,0,0,0,0,0}, 0, 0, 127, 125, -1, 0, 1}, /* hand */
+    [276] = {{1,0,0,0,0,0,0,0}, 0, 0, 603504, 125, 0, 0, 1}, /* league */
+    [277] = {{1,0,0,0,0,0,0,0}, 0, 0, 889, 2, -4, 0, 1}, /* RU */
+    [278] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -10, 0, 1}, /* \xc3\x85 */
+    [279] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 625, 0, 0, 1}, /* fathom */
+    [280] = {{1,0,0,0,0,0,0,0}, 0, 0, 926, 5, 0, 0, 1}, /* cable */
+    [281] = {{1,0,-1,0,0,0,0,0}, 0, 0, 463, 9, -2, 0, 1}, /* knot */
+    [282] = {{1,0,-1,0,0,0,0,0}, 0, 0, 5, 18, 0, 0, 1}, /* kph */
+    [283] = {{1,0,-1,0,0,0,0,0}, 0, 0, 16573, 5, -1, 0, 1}, /* mach */
+    [284] = {{1,0,0,0,0,0,0,0}, 0, 0, 299792458, 1, 0, 0, 1}, /* lightsecond */
+    [285] = {{1,0,0,0,0,0,0,0}, 0, 0, 1798754748, 1, 1, 0, 1}, /* lightminute */
+    [286] = {{1,0,0,0,0,0,0,0}, 0, 0, 10792528488, 1, 2, 0, 1}, /* lighthour */
+    [287] = {{1,0,0,0,0,0,0,0}, 0, 0, 16162550000000002, 1, -51, 0, 1}, /* \xe2\x84\x93\xe2\x82\x9a */
+    [288] = {{0,1,0,0,0,0,0,0}, 0, 0, 918413, 14173278532, 0, 0, 1}, /* gr */
+    [289] = {{0,1,0,0,0,0,0,0}, 0, 0, 4429613, 25, -8, 0, 1}, /* dr */
+    [290] = {{0,1,0,0,0,0,0,0}, 0, 0, 635029, 1, -5, 0, 1}, /* st */
+    [291] = {{0,1,0,0,0,0,0,0}, 0, 0, 635029, 5, -4, 0, 1}, /* qr */
+    [292] = {{0,1,0,0,0,0,0,0}, 0, 0, 1016047, 2, -4, 0, 1}, /* cwt */
+    [293] = {{0,1,0,0,0,0,0,0}, 0, 0, 56699, 125, -1, 0, 1}, /* CWT */
+    [294] = {{0,1,0,0,0,0,0,0}, 0, 0, 181437, 2, -2, 0, 1}, /* tn */
+    [295] = {{0,1,0,0,0,0,0,0}, 0, 0, 1016047, 1, -3, 0, 1}, /* LT */
+    [296] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* Da */
+    [297] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* u */
+    [298] = {{0,1,0,0,0,0,0,0}, 0, 0, 14593903, 1, -6, 0, 1}, /* slug */
+    [299] = {{0,1,0,0,0,0,0,0}, 0, 0, 18401, 845465564313, 0, 0, 1}, /* m\xe2\x82\x9a\xe2\x82\x97 */
+    [300] = {{0,1,0,0,0,0,0,0}, 0, 0, 2789239, 2152226789, 0, 0, 1}, /* \xe2\x84\x88 */
+    [301] = {{0,1,0,0,0,0,0,0}, 0, 0, 8367717, 2152226789, 0, 0, 1}, /* \xca\x92 */
+    [302] = {{0,1,0,0,0,0,0,0}, 0, 0, 19439673, 625, -6, 0, 1}, /* \xe2\x84\xa5 */
+    [303] = {{0,1,0,0,0,0,0,0}, 0, 0, 58319019, 15625, -4, 0, 1}, /* \xe2\x84\x94 */
+    [304] = {{0,1,0,0,0,0,0,0}, 0, 0, 62207, 2, -6, 0, 1}, /* troyounce */
+    [305] = {{0,1,0,0,0,0,0,0}, 0, 0, 155517, 1, -8, 0, 1}, /* pennyweight */
+    [306] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 5, -3, 0, 1}, /* carat */
+    [307] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* quintal */
+    [308] = {{0,0,1,0,0,0,0,0}, 0, 0, 6, 1, 1, 0, 1}, /* min */
+    [309] = {{0,0,1,0,0,0,0,0}, 0, 0, 36, 1, 2, 0, 1}, /* h */
+    [310] = {{0,0,1,0,0,0,0,0}, 0, 0, 864, 1, 2, 0, 1}, /* d */
+    [311] = {{0,0,1,0,0,0,0,0}, 0, 0, 6048, 1, 2, 0, 1}, /* week */
+    [312] = {{0,0,1,0,0,0,0,0}, 0, 0, 2629746, 1, 0, 0, 1}, /* month */
+    [313] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 0, 0, 1}, /* year */
+    [314] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 1, 0, 1}, /* decade */
+    [315] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 3, 0, 1}, /* millennium */
+    [316] = {{0,0,1,0,0,0,0,0}, 0, 0, 12096, 1, 2, 0, 1}, /* fortnight */
+    [317] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 2, 0, 1}, /* century */
+    [318] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -8, 0, 1}, /* shake */
+    [319] = {{0,0,1,0,0,0,0,0}, 0, 0, 3944768688, 125, 0, 0, 1}, /* siderealyear */
+    [320] = {{0,0,1,0,0,0,0,0}, 0, 0, 3944615652, 125, 0, 0, 1}, /* tropicalyear */
+    [321] = {{0,0,1,0,0,0,0,0}, 0, 0, 315576, 1, 2, 0, 1}, /* julianyear */
+    [322] = {{0,0,1,0,0,0,0,0}, 0, 0, 172328181, 2, -3, 0, 1}, /* siderealday */
+    [323] = {{0,0,1,0,0,0,0,0}, 0, 0, 63786096, 25, 0, 0, 1}, /* lunarmonth */
+    [324] = {{0,0,1,0,0,0,0,0}, 0, 0, 15778476, 1, 1, 0, 1}, /* lustrum */
+    [325] = {{0,0,1,0,0,0,0,0}, 0, 0, 4508136, 1, 0, 0, 1}, /* dogyear */
+    [326] = {{0,0,1,0,0,0,0,0}, 0, 0, 539124700000000066, 1, -61, 0, 1}, /* t\xe2\x82\x9a */
+    [327] = {{2,0,0,0,0,0,0,0}, 0, 0, 316160658, 78125, 0, 0, 1}, /* ac */
+    [328] = {{2,0,0,0,0,0,0,0}, 0, 0, 1, 1, -28, 0, 1}, /* barn */
+    [329] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* l */
+    [330] = {{3,0,0,0,0,0,0,0}, 0, 0, 473176473, 2, -12, 0, 1}, /* cup */
+    [331] = {{3,0,0,0,0,0,0,0}, 0, 0, 473176473, 4, -12, 0, 1}, /* gill */
+    [332] = {{3,0,0,0,0,0,0,0}, 0, 0, 473176473, 16, -12, 0, 1}, /* floz */
+    [333] = {{3,0,0,0,0,0,0,0}, 0, 0, 473176473, 128, -12, 0, 1}, /* fldr */
+    [334] = {{3,0,0,0,0,0,0,0}, 0, 0, 454609, 1, -8, 0, 1}, /* impgal */
+    [335] = {{3,0,0,0,0,0,0,0}, 0, 0, 220244188543, 625, -10, 0, 1}, /* bushel */
+    [336] = {{3,0,0,0,0,0,0,0}, 0, 0, 220244188543, 25, -12, 0, 1}, /* peck */
+    [337] = {{3,0,0,0,0,0,0,0}, 0, 0, 473176473, 32, -12, 0, 1}, /* tbsp */
+    [338] = {{3,0,0,0,0,0,0,0}, 0, 0, 157725491, 32, -12, 0, 1}, /* tsp */
+    [339] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 2, -7, 0, 1}, /* drop */
+    [340] = {{3,0,0,0,0,0,0,0}, 0, 0, 122699, 199149509426, 0, 0, 1}, /* dash */
+    [341] = {{3,0,0,0,0,0,0,0}, 0, 0, 122699, 398299018852, 0, 0, 1}, /* pinch */
+    [342] = {{3,0,0,0,0,0,0,0}, 0, 0, 61415, 398724264139, 0, 0, 1}, /* smidgen */
+    [343] = {{3,0,0,0,0,0,0,0}, 0, 0, 443603, 1, -10, 0, 1}, /* jigger */
+    [344] = {{3,0,0,0,0,0,0,0}, 0, 0, 4091481, 1, -8, 0, 1}, /* firkin */
+    [345] = {{3,0,0,0,0,0,0,0}, 0, 0, 3407, 5, -4, 0, 1}, /* rundlet */
+    [346] = {{3,0,0,0,0,0,0,0}, 0, 0, 7949, 5, -4, 0, 1}, /* tierce */
+    [347] = {{3,0,0,0,0,0,0,0}, 0, 0, 2981, 125, -2, 0, 1}, /* hogshead */
+    [348] = {{3,0,0,0,0,0,0,0}, 0, 0, 31797, 1, -5, 0, 1}, /* puncheon */
+    [349] = {{3,0,0,0,0,0,0,0}, 0, 0, 2981, 625, -1, 0, 1}, /* pipe */
+    [350] = {{3,0,0,0,0,0,0,0}, 0, 0, 2981, 3125, 0, 0, 1}, /* tun */
+    [351] = {{3,0,0,0,0,0,0,0}, 0, 0, 4091481, 5, -7, 0, 1}, /* kilderkin */
+    [352] = {{3,0,0,0,0,0,0,0}, 0, 0, 3, 16, -3, 0, 1}, /* split */
+    [353] = {{3,0,0,0,0,0,0,0}, 0, 0, 3, 4, -3, 0, 1}, /* bottle */
+    [354] = {{3,0,0,0,0,0,0,0}, 0, 0, 3, 2, -3, 0, 1}, /* magnum */
+    [355] = {{3,0,0,0,0,0,0,0}, 0, 0, 3, 1, -3, 0, 1}, /* jeroboam */
+    [356] = {{3,0,0,0,0,0,0,0}, 0, 0, 3, 5, -2, 0, 1}, /* methuselah */
+    [357] = {{3,0,0,0,0,0,0,0}, 0, 0, 3, 2, -2, 0, 1}, /* nebuchadnezzar */
+    [358] = {{3,0,0,0,0,0,0,0}, 0, 0, 3, 1, -2, 0, 1}, /* melchizedek */
+    [359] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* Ba */
+    [360] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 196133, 2, 0, 0, 1}, /* at */
+    [361] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 6894757, 1, -3, 0, 1}, /* psi */
+    [362] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 20265, 152, 0, 0, 1}, /* torr */
+    [363] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 66661, 5, -2, 0, 1}, /* mmHg */
+    [364] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 3386389, 1, -3, 0, 1}, /* inHg */
+    [365] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 196133, 2, -3, 0, 1}, /* cmH2O */
+    [366] = {{1,1,-2,0,0,0,0,0}, 0, 0, 8896443230521, 2, -12, 0, 1}, /* lbf */
+    [367] = {{1,1,-2,0,0,0,0,0}, 0, 0, 196133, 2, -4, 0, 1}, /* kgf */
+    [368] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -7, 0, 1}, /* erg */
+    [369] = {{2,1,-2,0,0,0,0,0}, 0, 0, 4085925351, 387271, -1, 0, 1}, /* BTU */
+    [370] = {{2,1,-2,0,0,0,0,0}, 0, 0, 52752792631, 5, -2, 0, 1}, /* therm */
+    [371] = {{2,1,-2,0,0,0,0,0}, 0, 0, 416402469, 3071227, -2, 0, 1}, /* ftlbf */
+    [372] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -5, 0, 1}, /* dyn */
+    [373] = {{2,1,-3,0,0,0,0,0}, 0, 0, 2068973376, 2774539, 0, 0, 1}, /* hp */
+    [374] = {{2,1,-3,0,0,0,0,0}, 0, 0, 588399, 8, -2, 0, 1}, /* PS */
+    [375] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* Ga */
+    [376] = {{0,0,-1,0,0,0,0,0}, 11, 1, 37, 1, 9, 0, 1}, /* Ci */
+    [377] = {{2,0,-2,0,0,0,0,0}, 15, 1, 1, 1, -2, 0, 1}, /* rem */
+    [378] = {{0,0,0,0,0,0,0,0}, 2, 1, 14964008, 857374503, 0, 0, 1}, /* deg */
+    [379] = {{0,0,0,0,0,0,0,0}, 2, 1, 1650943, 5675523967, 0, 0, 1}, /* arcmin */
+    [380] = {{0,0,0,0,0,0,0,0}, 2, 1, 286277, 59048869938, 0, 0, 1}, /* arcsec */
+    [381] = {{0,0,0,0,0,0,0,0}, 2, 1, 10906443, 694325726, 0, 0, 1}, /* gon */
+    [382] = {{0,0,0,0,0,0,0,0}, 2, 1, 411557987, 65501488, 0, 0, 1}, /* turn */
+    [383] = {{0,0,0,0,0,0,0,0}, 2, 1, 2752991, 2804173606, 0, 0, 1}, /* mil */
+    [384] = {{0,0,0,0,0,0,0,0}, 2, 1, 18369286, 748432043, 0, 0, 1}, /* brad */
+    [385] = {{1,0,-2,0,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* Gal */
+    [386] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, 0, 0, 1}, /* b */
+    [387] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 2, 0, 0, 1}, /* nibble */
+    [388] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 0, 0, 1}, /* o */
+    [389] = {{0,0,0,0,0,0,0,1}, 0, 0, 1125899906842624, 1, 0, 0, 1}, /* PiB */
+    [390] = {{0,0,0,0,0,0,0,1}, 0, 0, 1152921504606846976, 1, 0, 0, 1}, /* EiB */
+    [391] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, 0, 0, 1}, /* bps */
+    [392] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 0, 0, 1}, /* Bps */
+    [393] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, 0, 0, 1}, /* baud */
+    [394] = {{-1,1,-1,0,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* P */
+    [395] = {{-1,1,-1,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* cP */
+    [396] = {{2,0,-1,0,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* St */
+    [397] = {{2,0,-1,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* cSt */
+    [398] = {{0,1,0,0,0,0,0,0}, 0, 0, 198891999999999991, 1, 13, 0, 1}, /* solarmass */
+    [399] = {{0,1,0,0,0,0,0,0}, 0, 0, 597220000000000022, 1, 7, 0, 1}, /* earthmass */
+    [400] = {{0,1,0,0,0,0,0,0}, 0, 0, 189859999999999994, 1, 10, 0, 1}, /* jupitermass */
+    [401] = {{0,1,0,0,0,0,0,0}, 0, 0, 734199999999999969, 1, 5, 0, 1}, /* moonmass */
+    [402] = {{1,0,0,0,0,0,0,0}, 0, 0, 696, 1, 6, 0, 1}, /* solarradius */
+    [403] = {{1,0,0,0,0,0,0,0}, 0, 0, 6371, 1, 3, 0, 1}, /* earthradius */
+    [404] = {{1,0,0,0,0,0,0,0}, 0, 0, 176389, 5, -8, 0, 1}, /* point */
+    [405] = {{1,0,0,0,0,0,0,0}, 0, 0, 4233333, 1, -9, 0, 1}, /* pica */
+    [406] = {{1,0,0,0,0,0,0,0}, 0, 0, 127, 36135, -1, 0, 1}, /* texpt */
+    [407] = {{1,0,0,0,0,0,0,0}, 0, 0, 75213, 2, -8, 0, 1}, /* didot */
+    [408] = {{1,0,0,0,0,0,0,0}, 0, 0, 225639, 5, -7, 0, 1}, /* cicero */
+    [409] = {{1,0,0,0,0,0,0,0}, 0, 0, 33, 2, -1, 0, 1}, /* altuve */
+    [410] = {{2,0,0,0,0,0,0,0}, 0, 0, 100000000000000003, 1, -51, 0, 1}, /* outhouse */
+    [411] = {{2,0,0,0,0,0,0,0}, 0, 0, 10000000000000001, 1, -68, 0, 1}, /* shed */
+    [412] = {{3,0,0,0,0,0,0,0}, 0, 0, 2981, 25, -3, 0, 1}, /* barrel */
+    [413] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* stere */
+    [414] = {{3,0,0,0,0,0,0,0}, 0, 0, 906139, 25, -4, 0, 1}, /* cord */
+    [415] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 2, -8, 0, 1}, /* beard second */
+    [416] = {{3,0,0,0,0,0,0,0}, 0, 0, 180197, 58397870562, 0, 0, 1}, /* barn megaparsec */
+    [417] = {{2,0,-2,0,0,0,0,0}, 15, 1, 1, 1, -7, 0, 1}, /* banana */
+    [418] = {{0,0,0,0,0,0,0,0}, 19, 1, 15, 1, 0, 0, 1}, /* warhol */
+    [419] = {{0,0,0,0,0,0,0,0}, 19, 1, 15, 1, 3, 0, 1}, /* kilowarhol */
+    [420] = {{0,0,-1,0,0,0,0,0}, 63, 1, 1, 6, -1, 0, 1}, /* rpm */
+    [421] = {{0,0,-1,0,0,0,0,0}, 11, 1, 1, 1, 6, 0, 1}, /* rd */
+    [422] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -8, 0, 1}, /* Mx */
+    [423] = {{0,0,0,0,0,0,0,0}, 6, 1, 1, 1, 0, 0, 1}, /* millihelen */
+    [424] = {{-2,0,0,0,0,0,1,0}, 43, 1, 1, 1, 0, 0, 1}, /* nit */
+    [425] = {{-2,0,0,0,0,0,1,0}, 43, 1, 1, 1, 4, 0, 1}, /* sb */
+    [426] = {{-2,0,0,0,0,0,1,0}, 43, 1, 2898221063, 910503, 0, 0, 1}, /* La */
+    [427] = {{-2,0,0,0,0,0,1,0}, 43, 1, 330354972, 96418561, 0, 0, 1}, /* fL */
+    [428] = {{-2,0,0,0,0,0,1,0}, 43, 1, 78256779, 245850922, 0, 0, 1}, /* asb */
+    [429] = {{-2,0,0,0,0,0,1,0}, 43, 1, 2111208, 6632555543, 0, 0, 1}, /* sk */
+    [430] = {{0,0,0,0,0,0,0,0}, 13, 1, 1, 1, 0, 0, 1}, /* em */
+    [431] = {{0,0,0,0,0,0,0,0}, 13, 1, 1, 2, 0, 0, 1}, /* en */
+    [432] = {{0,0,0,0,0,0,0,0}, 13, 1, 2, 1, 0, 0, 1}, /* qquad */
+    [433] = {{0,0,0,0,0,0,0,0}, 55, 1, 1, 1, 0, 0, 1}, /* peanutbutter */
+    [434] = {{0,0,0,0,0,0,0,0}, 38, 1, 1, 1, 0, 0, 1}, /* jelly */
+    [435] = {{0,0,0,0,0,0,0,0}, 4, 1, 1, 1, 0, 0, 1}, /* beat */
+    [436] = {{0,0,0,0,0,0,0,0}, 10, 1, 1, 1, 0, 0, 1}, /* cycle */
+    [437] = {{0,0,0,0,0,0,0,0}, 21, 1, 1, 1, 0, 0, 1}, /* frame */
+    [438] = {{0,0,0,0,0,0,0,0}, 34, 1, 1, 1, 0, 0, 1}, /* instant */
+    [439] = {{0,0,0,0,0,0,0,0}, 39, 1, 1, 1, 0, 0, 1}, /* jiffy */
+    [440] = {{0,0,0,0,0,0,0,0}, 51, 1, 1, 1, 0, 0, 1}, /* moment */
+    [441] = {{0,0,0,0,0,0,0,0}, 66, 1, 1, 1, 0, 0, 1}, /* sample */
+    [442] = {{0,0,0,0,0,0,0,0}, 73, 1, 1, 1, 0, 0, 1}, /* tick */
+    [443] = {{0,0,0,0,0,0,0,0}, 63, 1, 1, 1, 0, 0, 1}, /* revolution */
+    [444] = {{0,0,0,0,0,0,0,0}, 11, 1, 1, 1, 0, 0, 1}, /* decay */
+    [445] = {{0,0,0,0,0,0,0,0}, 64, 1, 1, 1, 0, 0, 1}, /* rotation */
+    [446] = {{0,0,0,0,0,0,0,0}, 20, 1, 1, 1, 0, 0, 1}, /* flop */
+    [447] = {{0,0,0,0,0,0,0,0}, 53, 1, 1, 1, 0, 0, 1}, /* op */
+    [448] = {{0,0,0,0,0,0,0,0}, 46, 1, 1, 1, 0, 0, 1}, /* mac */
+    [449] = {{0,0,0,0,0,0,0,0}, 35, 1, 1, 1, 0, 0, 1}, /* instruction */
+    [450] = {{0,0,0,0,0,0,0,0}, 74, 1, 1, 1, 0, 0, 1}, /* tok */
+    [451] = {{0,0,0,0,0,0,0,0}, 77, 1, 1, 1, 0, 0, 1}, /* transfer */
+    [452] = {{0,0,0,0,0,0,0,0}, 59, 1, 1, 1, 0, 0, 1}, /* query */
+    [453] = {{0,0,0,0,0,0,0,0}, 62, 1, 1, 1, 0, 0, 1}, /* request */
+    [454] = {{0,0,0,0,0,0,0,0}, 76, 1, 1, 1, 0, 0, 1}, /* txn */
+    [455] = {{0,0,0,0,0,0,0,0}, 54, 1, 1, 1, 0, 0, 1}, /* packet */
+    [456] = {{0,0,0,0,0,0,0,0}, 36, 1, 1, 1, 0, 0, 1}, /* io */
+    [457] = {{0,0,0,0,0,0,0,1}, 0, 0, 51711048, 286746937, 0, 0, 1}, /* nat */
+    [458] = {{0,0,0,0,0,0,0,1}, 0, 0, 36741077, 8848133, -1, 0, 1}, /* ban */
+    [459] = {{0,0,0,0,0,0,0,1}, 0, 0, 34582415, 832827539, 0, 0, 1}, /* deciban */
+    [460] = {{0,0,0,0,0,0,0,0}, 60, 1, 1, 1, -6, 0, 1}, /* ppm */
+    [461] = {{0,0,0,0,0,0,0,0}, 60, 1, 1, 1, -9, 0, 1}, /* ppb */
+    [462] = {{0,0,0,0,0,0,0,0}, 60, 1, 1, 1, -12, 0, 1}, /* ppt */
+    [463] = {{0,0,0,0,0,0,0,0}, 60, 1, 1, 1, -8, 0, 1}, /* pphm */
+    [464] = {{0,0,0,0,0,0,0,0}, 41, 1, 1, 1, 0, 0, 1}, /* sone */
+    [465] = {{0,0,0,0,0,0,0,0}, 42, 1, 1, 1, 0, 0, 1}, /* phon */
+    [466] = {{0,0,0,0,0,0,0,0}, 70, 1, 1, 1, 0, 0, 1}, /* Jy */
+    [467] = {{0,0,0,0,0,0,0,0}, 49, 1, 1, 1, 0, 0, 1}, /* mag */
+    [468] = {{0,0,0,0,0,0,0,0}, 48, 1, 1, 1, 0, 0, 1}, /* Mag */
+    [469] = {{0,0,0,0,0,0,0,0}, 50, 1, 1, 1, 0, 0, 1}, /* M_bol */
+    [470] = {{2,0,0,0,0,0,0,0}, 0, 0, 100000000000000018, 1, -60, 0, 1}, /* femtobarn */
+    [471] = {{2,0,0,0,0,0,0,0}, 0, 0, 100000000000000012, 1, -63, 0, 1}, /* attobarn */
+    [472] = {{2,0,0,0,0,0,0,0}, 0, 0, 100000000000000003, 1, -57, 0, 1}, /* picobarn */
+    [473] = {{2,0,0,0,0,0,0,0}, 0, 0, 100000000000000017, 1, -54, 0, 1}, /* nanobarn */
+    [474] = {{-2,0,0,0,0,0,0,0}, 0, 0, 100000000000000001, 1, 26, 0, 1}, /* fb\xe2\x81\xbb\xc2\xb9 */
+    [475] = {{-2,0,0,0,0,0,0,0}, 0, 0, 999999999999999993, 1, 28, 0, 1}, /* ab\xe2\x81\xbb\xc2\xb9 */
+    [476] = {{-2,0,0,0,0,0,0,0}, 0, 0, 100000000000000003, 1, 23, 0, 1}, /* pb\xe2\x81\xbb\xc2\xb9 */
+    [477] = {{-2,0,0,0,0,0,0,0}, 0, 0, 999999999999999954, 1, 19, 0, 1}, /* nb\xe2\x81\xbb\xc2\xb9 */
+    [478] = {{-1,0,0,1,0,0,0,0}, 0, 0, 707761077, 8893988, 0, 0, 1}, /* Oe */
+    [479] = {{0,0,0,1,0,0,0,0}, 0, 0, 116522652, 146426683, 0, 0, 1}, /* Gb */
+    [480] = {{1,0,1,1,0,0,0,0}, 0, 0, 333564000000000034, 1, -47, 0, 1}, /* D */
+    [481] = {{2,0,0,1,0,0,0,0}, 0, 0, 927401007830000118, 1, -41, 0, 1}, /* \xce\xbc_B */
+    [482] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* micromort */
+    [483] = {{0,0,1,0,0,0,0,0}, 0, 0, 18, 1, 2, 0, 1}, /* microlife */
+    [484] = {{-1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* kayser */
+    [485] = {{0,0,0,0,0,0,0,0}, 25, 1, 1, 1, 0, 0, 1}, /* mohs */
+    [486] = {{0,0,0,0,0,0,0,0}, 27, 1, 1, 1, 0, 0, 1}, /* vickers */
+    [487] = {{0,0,0,0,0,0,0,0}, 26, 1, 1, 1, 0, 0, 1}, /* rockwell */
+    [488] = {{0,0,0,0,0,0,0,0}, 24, 1, 1, 1, 0, 0, 1}, /* brinell */
+    [489] = {{0,0,0,0,0,0,0,0}, 0, 0, 12, 1, 0, 0, 1}, /* dozen */
+    [490] = {{0,0,0,0,0,0,0,0}, 0, 0, 144, 1, 0, 0, 1}, /* gross */
+    [491] = {{0,0,0,0,0,0,0,0}, 0, 0, 1728, 1, 0, 0, 1}, /* great_gross */
+    [492] = {{0,0,0,0,0,0,0,0}, 0, 0, 2, 1, 1, 0, 1}, /* score */
+    [493] = {{0,0,0,0,0,0,0,0}, 0, 0, 13, 1, 0, 0, 1}, /* bakers_dozen */
+    [494] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, 100, 0, 1}, /* googol */
+    [495] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, 1000, 0, 1}, /* googolplex */
+    [496] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 25, -2, 0, 1}, /* cubit */
+    [497] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 5, -3, 0, 1}, /* span */
+    [498] = {{1,0,0,0,0,0,0,0}, 0, 0, 381, 5, -3, 0, 1}, /* handbreadth */
+    [499] = {{1,0,0,0,0,0,0,0}, 0, 0, 381, 2, -4, 0, 1}, /* fingerbreadth */
+    [500] = {{1,0,0,0,0,0,0,0}, 0, 0, 4572, 5, 0, 0, 1}, /* biblical_mil */
+    [501] = {{1,0,0,0,0,0,0,0}, 0, 0, 18288, 5, 0, 0, 1}, /* parsa */
+    [502] = {{1,0,0,0,0,0,0,0}, 0, 0, 4572, 5, 0, 0, 1}, /* techum */
+    [503] = {{3,0,0,0,0,0,0,0}, 0, 0, 27, 125, -2, 0, 1}, /* omer */
+    [504] = {{3,0,0,0,0,0,0,0}, 0, 0, 27, 125, -1, 0, 1}, /* ephah */
+    [505] = {{3,0,0,0,0,0,0,0}, 0, 0, 9, 25, -2, 0, 1}, /* hin */
+    [506] = {{3,0,0,0,0,0,0,0}, 0, 0, 27, 125, -1, 0, 1}, /* bath */
+    [507] = {{3,0,0,0,0,0,0,0}, 0, 0, 9, 125, -1, 0, 1}, /* seah */
+    [508] = {{3,0,0,0,0,0,0,0}, 0, 0, 27, 125, 0, 0, 1}, /* kor */
+    [509] = {{3,0,0,0,0,0,0,0}, 0, 0, 3, 25, -2, 0, 1}, /* kab */
+    [510] = {{0,1,0,0,0,0,0,0}, 0, 0, 23, 2, -3, 0, 1}, /* shekel */
+    [511] = {{0,1,0,0,0,0,0,0}, 0, 0, 23, 4, -1, 0, 1}, /* biblical_mina */
+    [512] = {{0,1,0,0,0,0,0,0}, 0, 0, 69, 2, 0, 0, 1}, /* biblical_talent */
+    [513] = {{0,1,0,0,0,0,0,0}, 0, 0, 23, 4, -4, 0, 1}, /* gerah */
+    [514] = {{0,1,0,0,0,0,0,0}, 0, 0, 23, 4, -3, 0, 1}, /* beka */
+    [515] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 3, 1, 0, 1}, /* helek */
+    [516] = {{0,0,1,0,0,0,0,0}, 0, 0, 76, 405, 0, 0, 1}, /* rega */
+    [517] = {{0,0,1,0,0,0,0,0}, 0, 0, 432, 1, 2, 0, 1}, /* onah */
+    [518] = {{0,0,1,0,0,0,0,0}, 0, 0, 15778476, 1, 2, 0, 1}, /* yovel */
+    [519] = {{0,0,1,0,0,0,0,0}, 0, 0, 220898664, 1, 0, 0, 1}, /* shmita */
+    [520] = {{1,0,-2,0,0,0,0,0}, 0, 0, 196133, 2, -4, 0, 1}, /* g\xe2\x82\x80 */
+    [521] = {{1,0,-2,0,0,0,0,0}, 0, 0, 196133, 2, -4, 0, 1}, /* g_n */
+    [522] = {{1,0,-2,0,0,0,0,0}, 0, 0, 196133, 2, -4, 0, 1}, /* gee */
+    [523] = {{-2,0,0,0,0,0,0,0}, 0, 0, 48, 112903, 9, 0, 1}, /* mpg */
+    [524] = {{-2,0,0,0,0,0,0,0}, 0, 0, 48, 112903, 9, 0, 1}, /* mpge */
+    [525] = {{2,0,0,0,0,0,0,0}, 0, 0, 1, 1, -8, 0, 1}, /* L/100km */
+    [526] = {{0,1,0,0,0,0,0,0}, 0, 0, 45359237, 4, -8, 0, 1}, /* stick */
+    [527] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* kiloton */
+    [528] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* megaton */
+    [529] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* gigaton */
+    [530] = {{3,0,0,0,0,0,0,0}, 0, 0, 41225904, 259303135, 0, 0, 1}, /* oil_barrel */
+    [531] = {{2,1,-2,0,0,0,0,0}, 0, 0, 6119, 1, 6, 0, 1}, /* BOE */
+    [532] = {{2,1,-2,0,0,0,0,0}, 0, 0, 2931, 1, 7, 0, 1}, /* TCE */
+    [533] = {{0,0,0,0,0,0,0,0}, 28, 1, 1, 1, 0, 0, 1}, /* heap */
+    [534] = {{0,0,0,0,0,0,0,0}, 30, 1, 1, 1, 0, 0, 1}, /* hole */
+    [535] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 33, 1, 0, 1}, /* shaku */
+    [536] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 33, 0, 0, 1}, /* sun */
+    [537] = {{1,0,0,0,0,0,0,0}, 0, 0, 432, 11, 1, 0, 1}, /* ri */
+    [538] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 33, 2, 0, 1}, /* jo */
+    [539] = {{2,0,0,0,0,0,0,0}, 0, 0, 4, 121, 2, 0, 1}, /* tsubo */
+    [540] = {{2,0,0,0,0,0,0,0}, 0, 0, 2, 121, 2, 0, 1}, /* tatami */
+    [541] = {{3,0,0,0,0,0,0,0}, 0, 0, 18039, 1, -5, 0, 1}, /* koku */
+    [542] = {{3,0,0,0,0,0,0,0}, 0, 0, 18039, 1, -8, 0, 1}, /* g\xc5\x8d */
+    [543] = {{0,1,0,0,0,0,0,0}, 0, 0, 3, 8, -2, 0, 1}, /* momme */
+    [544] = {{0,1,0,0,0,0,0,0}, 0, 0, 15, 4, 0, 0, 1}, /* kanme */
+    [545] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 3, 0, 0, 1}, /* chi */
+    [546] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 3, -1, 0, 1}, /* cun */
+    [547] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 3, -2, 0, 1}, /* fen */
+    [548] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 3, 1, 0, 1}, /* zhang */
+    [549] = {{1,0,0,0,0,0,0,0}, 0, 0, 5, 1, 2, 0, 1}, /* li_cn */
+    [550] = {{2,0,0,0,0,0,0,0}, 0, 0, 2, 3, 3, 0, 1}, /* mu */
+    [551] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 2, 0, 0, 1}, /* jin */
+    [552] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 2, -1, 0, 1}, /* liang */
+    [553] = {{0,1,0,0,0,0,0,0}, 0, 0, 5, 1, 1, 0, 1}, /* dan_cn */
+    [554] = {{1,0,0,0,0,0,0,0}, 0, 0, 5334, 5, 0, 0, 1}, /* verst */
+    [555] = {{1,0,0,0,0,0,0,0}, 0, 0, 889, 125, -1, 0, 1}, /* arshin */
+    [556] = {{1,0,0,0,0,0,0,0}, 0, 0, 2667, 125, -1, 0, 1}, /* sazhen */
+    [557] = {{1,0,0,0,0,0,0,0}, 0, 0, 889, 2, -4, 0, 1}, /* vershok */
+    [558] = {{0,1,0,0,0,0,0,0}, 0, 0, 32761, 2, -3, 0, 1}, /* pud */
+    [559] = {{0,1,0,0,0,0,0,0}, 0, 0, 40951241, 1, -8, 0, 1}, /* funt_ru */
+    [560] = {{3,0,0,0,0,0,0,0}, 0, 0, 20991, 1, -5, 0, 1}, /* chetvert */
+    [561] = {{1,0,0,0,0,0,0,0}, 0, 0, 1624203, 5, -6, 0, 1}, /* pied */
+    [562] = {{1,0,0,0,0,0,0,0}, 0, 0, 2707, 1, -5, 0, 1}, /* pouce */
+    [563] = {{1,0,0,0,0,0,0,0}, 0, 0, 487259, 25, -4, 0, 1}, /* toise */
+    [564] = {{2,0,0,0,0,0,0,0}, 0, 0, 341889, 1, -2, 0, 1}, /* arpent */
+    [565] = {{1,0,0,0,0,0,0,0}, 0, 0, 487259, 125, 0, 0, 1}, /* lieue_de_poste */
+    [566] = {{1,0,0,0,0,0,0,0}, 0, 0, 37, 125, 0, 0, 1}, /* pes */
+    [567] = {{1,0,0,0,0,0,0,0}, 0, 0, 37, 25, 0, 0, 1}, /* passus */
+    [568] = {{1,0,0,0,0,0,0,0}, 0, 0, 148, 1, 1, 0, 1}, /* mille_passuum */
+    [569] = {{2,0,0,0,0,0,0,0}, 0, 0, 251943, 1, -2, 0, 1}, /* iugerum */
+    [570] = {{0,1,0,0,0,0,0,0}, 0, 0, 16447, 5, -4, 0, 1}, /* libra_roma */
+    [571] = {{0,1,0,0,0,0,0,0}, 0, 0, 137, 5, -3, 0, 1}, /* uncia_roma */
+    [572] = {{3,0,0,0,0,0,0,0}, 0, 0, 82, 3125, 0, 0, 1}, /* amphora */
+    [573] = {{1,0,0,0,0,0,0,0}, 0, 0, 21, 4, -1, 0, 1}, /* royal_cubit */
+    [574] = {{1,0,0,0,0,0,0,0}, 0, 0, 3, 4, -1, 0, 1}, /* egypt_palm */
+    [575] = {{1,0,0,0,0,0,0,0}, 0, 0, 3, 16, -1, 0, 1}, /* digit */
+    [576] = {{1,0,0,0,0,0,0,0}, 0, 0, 105, 2, 0, 0, 1}, /* khet */
+    [577] = {{2,0,0,0,0,0,0,0}, 0, 0, 11025, 4, 0, 0, 1}, /* aroura */
+    [578] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 25, -2, 0, 1}, /* hath */
+    [579] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 125, -1, 0, 1}, /* gaz */
+    [580] = {{1,0,0,0,0,0,0,0}, 0, 0, 3219, 1, 0, 0, 1}, /* kos */
+    [581] = {{0,1,0,0,0,0,0,0}, 0, 0, 729, 625, -2, 0, 1}, /* tola */
+    [582] = {{0,1,0,0,0,0,0,0}, 0, 0, 9331, 1, -4, 0, 1}, /* seer */
+    [583] = {{0,1,0,0,0,0,0,0}, 0, 0, 186621, 5, -3, 0, 1}, /* maund */
+    [584] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 229371227839632473, 0, 0, 1}, /* hartree */
+    [585] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 458742455679275483, 0, 0, 1}, /* rydberg_unit */
+    [586] = {{1,0,0,0,0,0,0,0}, 0, 0, 1331, 25152254718769, 0, 0, 1}, /* bohr_radius */
+    [587] = {{1,0,0,0,0,0,0,0}, 0, 0, 244, 100564221388997, 0, 0, 1}, /* compton_e */
+    [588] = {{1,0,0,0,0,0,0,0}, 0, 0, 4, 3027069900897207, 0, 0, 1}, /* compton_p */
+    [589] = {{1,0,0,0,0,0,0,0}, 0, 0, 6, 4546863708731791, 0, 0, 1}, /* compton_n */
+    [590] = {{0,0,0,0,0,0,0,0}, 0, 0, 6648447, 911076577, 0, 0, 1}, /* fine_structure */
+    [591] = {{0,1,0,0,0,0,0,0}, 0, 0, 910938370150000167, 1, -48, 0, 1}, /* electron_mass */
+    [592] = {{0,1,0,0,0,0,0,0}, 0, 0, 167262192369000028, 1, -44, 0, 1}, /* proton_mass */
+    [593] = {{0,1,0,0,0,0,0,0}, 0, 0, 167492749804000019, 1, -44, 0, 1}, /* neutron_mass */
+    [594] = {{0,1,0,0,0,0,0,0}, 0, 0, 188353162700000022, 1, -45, 0, 1}, /* muon_mass */
+    [595] = {{2,1,-3,0,0,0,0,0}, 0, 0, 19619, 2, 0, 0, 1}, /* boiler_horsepower */
+    [596] = {{2,1,-3,0,0,0,0,0}, 0, 0, 746, 1, 0, 0, 1}, /* electric_horsepower */
+    [597] = {{2,1,-3,0,0,0,0,0}, 0, 0, 746043, 1, -3, 0, 1}, /* water_horsepower */
+    [598] = {{2,1,-3,0,0,0,0,0}, 0, 0, 25013, 1, -2, 0, 1}, /* donkeypower */
+    [599] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 4, -3, 0, 1}, /* metric_cup */
+    [600] = {{3,0,0,0,0,0,0,0}, 0, 0, 3, 2, -5, 0, 1}, /* metric_tbsp */
+    [601] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 5, -4, 0, 1}, /* australian_tbsp */
+    [602] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 5, -3, 0, 1}, /* japanese_cup */
+    [603] = {{3,0,0,0,0,0,0,0}, 0, 0, 825646, 1452933239, 0, 0, 1}, /* imperial_pint */
+    [604] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 4, 0, 0, 1}, /* crumb */
+    [605] = {{0,0,0,0,0,0,0,1}, 0, 0, 4, 1, 0, 0, 1}, /* dword */
+    [606] = {{0,0,0,0,0,0,0,1}, 0, 0, 8, 1, 0, 0, 1}, /* qword */
+    [607] = {{0,0,0,0,0,0,0,1}, 0, 0, 16, 1, 0, 0, 1}, /* paragraph */
+    [608] = {{0,0,0,0,0,0,0,1}, 0, 0, 512, 1, 0, 0, 1}, /* sector */
+    [609] = {{0,0,0,0,0,0,0,1}, 0, 0, 4096, 1, 0, 0, 1}, /* page */
+    [610] = {{0,0,0,0,0,0,0,1}, 0, 0, 1024, 1, 0, 0, 1}, /* block */
+    [611] = {{0,0,0,0,0,0,0,1}, 0, 0, 4096, 1, 0, 0, 1}, /* cluster */
+    [612] = {{0,0,0,0,0,0,0,0}, 16, 1, 1, 1, 0, 0, 1}, /* EV */
+    [613] = {{0,0,0,0,0,0,0,0}, 18, 1, 1, 1, 0, 0, 1}, /* f_stop */
+    [614] = {{0,0,0,0,0,0,0,0}, 37, 1, 1, 1, 0, 0, 1}, /* ISO_speed */
+    [615] = {{0,0,0,0,0,0,0,0}, 57, 1, 1, 1, 0, 0, 1}, /* cent_pitch */
+    [616] = {{0,0,0,0,0,0,0,0}, 57, 1, 1, 1, 2, 0, 1}, /* semitone */
+    [617] = {{0,0,0,0,0,0,0,0}, 57, 1, 1, 301, 3, 0, 1}, /* savart */
+    [618] = {{0,0,0,0,0,0,0,0}, 57, 1, 12, 1, 2, 0, 1}, /* octave */
+    [619] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* basis_point */
+    [620] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* tenth_cent */
+    [621] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* pip */
+    [622] = {{1,0,0,0,0,0,0,0}, 0, 0, 12573, 625, -2, 0, 1}, /* link_chain */
+    [623] = {{1,0,0,0,0,0,0,0}, 0, 0, 762, 125, 0, 0, 1}, /* rope */
+    [624] = {{1,0,0,0,0,0,0,0}, 0, 0, 12573, 25, -2, 0, 1}, /* perch */
+    [625] = {{1,0,0,0,0,0,0,0}, 0, 0, 127, 15, -3, 0, 1}, /* barleycorn */
+    [626] = {{1,0,0,0,0,0,0,0}, 0, 0, 381, 25, -2, 0, 1}, /* shaftment */
+    [627] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 25, -2, 0, 1}, /* english_cubit */
+    [628] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 2, -4, 0, 1}, /* nail_cloth */
+    [629] = {{1,0,0,0,0,0,0,0}, 0, 0, 926, 5, 0, 0, 1}, /* cable_length */
+    [630] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 196133, 2, -1, 0, 1}, /* mH2O */
+    [631] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 2490889, 1, -4, 0, 1}, /* inH2O */
+    [632] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 29890669, 1, -4, 0, 1}, /* ftH2O */
+    [633] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* pieze */
+    [634] = {{0,0,0,0,0,0,0,0}, 40, 1, 1, 9, -6, 0, 1}, /* denier */
+    [635] = {{0,0,0,0,0,0,0,0}, 40, 1, 1, 1, -6, 0, 1}, /* tex */
+    [636] = {{0,0,0,0,0,0,0,0}, 40, 1, 1, 1, -7, 0, 1}, /* decitex */
+    [637] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 3, -3, 0, 1}, /* french_gauge */
+    [638] = {{1,0,0,0,0,0,0,0}, 0, 0, 127, 1, -6, 0, 1}, /* mickey */
+    [639] = {{0,0,0,0,0,0,0,0}, 0, 0, 4, 1, 9, 0, 1}, /* sagan */
+    [640] = {{1,0,0,0,0,0,0,0}, 0, 0, 34420332, 114813869, 0, 0, 1}, /* light_nanosecond */
+    [641] = {{1,0,0,0,0,0,0,0}, 0, 0, 9, 5, -1, 0, 1}, /* banana_for_scale */
+    [642] = {{-3,1,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kg/m\xc2\xb3 */
+    [643] = {{3,0,-1,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* m\xc2\xb3/s */
+    [644] = {{3,0,-1,0,0,0,0,0}, 0, 0, 1, 6, -4, 0, 1}, /* L/min */
+    [645] = {{0,1,-1,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kg/s */
+    [646] = {{2,1,-2,0,-1,0,0,0}, 29, 1, 1, 1, 0, 0, 1}, /* heat_capacity */
+    [647] = {{2,1,-2,0,-1,0,0,0}, 14, 1, 1, 1, 0, 0, 1}, /* entropy */
+    [648] = {{2,0,-2,0,-1,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* J/kg/K */
+    [649] = {{1,1,-3,0,-1,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* W/m/K */
+    [650] = {{0,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* W/m\xc2\xb2 */
+    [651] = {{1,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* V/m */
+    [652] = {{-2,0,0,1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* A/m\xc2\xb2 */
+    [653] = {{3,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* \xce\xa9\xc2\xb7m */
+    [654] = {{-3,-1,3,2,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* S/m */
+    [655] = {{-3,0,1,1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* C/m\xc2\xb3 */
+    [656] = {{0,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* N/m */
+    [657] = {{-1,1,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kg/m */
+    [658] = {{-2,1,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kg/m\xc2\xb2 */
+    [659] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* J/m\xc2\xb3 */
+    [660] = {{2,0,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* J/kg */
+    [661] = {{2,0,-2,0,0,0,0,0}, 68, 1, 1, 1, 0, 0, 1}, /* specific_energy */
+    [662] = {{0,0,0,0,0,0,0,0}, 60, 1, 1, 1, 0, 0, 1}, /* mol/mol */
+    [663] = {{-3,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kat/m\xc2\xb3 */
+    [664] = {{-2,0,0,0,0,0,1,0}, 43, 1, 1, 1, 0, 0, 1}, /* cd/m\xc2\xb2 */
+    [665] = {{-2,0,1,0,0,0,1,0}, 32, 1, 1, 1, 0, 0, 1}, /* lx\xc2\xb7s */
+    [666] = {{0,0,1,0,0,0,1,0}, 44, 1, 1, 1, 0, 0, 1}, /* lm\xc2\xb7s */
+    [667] = {{0,0,-1,0,0,0,0,0}, 2, 1, 1, 1, 0, 0, 1}, /* rad/s */
+    [668] = {{0,0,-2,0,0,0,0,0}, 2, 1, 1, 1, 0, 0, 1}, /* rad/s\xc2\xb2 */
+    [669] = {{1,0,-3,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* m/s\xc2\xb3 */
+    [670] = {{1,1,-1,0,0,0,0,0}, 52, 1, 1, 1, 0, 0, 1}, /* kg\xc2\xb7m/s */
+    [671] = {{1,1,-1,0,0,0,0,0}, 33, 1, 1, 1, 0, 0, 1}, /* N\xc2\xb7s */
+    [672] = {{2,1,-2,0,0,0,0,0}, 75, 1, 1, 1, 0, 0, 1}, /* N\xc2\xb7m */
+    [673] = {{0,0,0,0,0,0,0,1}, 69, 1, 1, 8, 0, 0, 1}, /* bit/s/Hz */
+    [674] = {{2,1,-2,0,0,0,0,0}, 53, -1, 1, 1, 0, 0, 1}, /* J/op */
+    [675] = {{2,1,-2,0,0,0,0,0}, 74, -1, 1, 1, 0, 0, 1}, /* J/tok */
+    [676] = {{0,0,0,0,0,0,0,1}, 20, -1, 1, 1, 0, 0, 1}, /* B/flop */
+    [677] = {{0,1,0,0,0,0,0,0}, 8, 1, 1, 1, 0, 0, 1}, /* kgCO\xe2\x82\x82\x65 */
+    [678] = {{0,1,0,0,0,0,0,0}, 8, 1, 1, 1, -3, 0, 1}, /* gCO\xe2\x82\x82\x65 */
+    [679] = {{-2,0,2,0,0,0,0,0}, 8, 1, 1, 36, -8, 0, 1}, /* gCO\xe2\x82\x82\x65/kWh */
+    [680] = {{-1,1,0,0,0,0,0,0}, 78, 1, 1, 1, -6, 0, 1}, /* gCO\xe2\x82\x82\x65/pkm */
+    [681] = {{1,0,0,0,0,0,0,0}, 0, 0, 127, 48, -4, 0, 1}, /* px */
+    [682] = {{-1,0,0,0,0,0,0,0}, 0, 0, 5, 127, 3, 0, 1}, /* dpi */
+    [683] = {{-1,0,0,0,0,0,0,0}, 0, 0, 48, 127, 4, 0, 1}, /* dppx */
+    [684] = {{0,0,0,0,0,0,0,0}, 9, 1, 1, 1, 0, 0, 1}, /* rem_css */
+    [685] = {{0,0,0,0,0,0,0,0}, 80, 1, 1, 1, 0, 0, 1}, /* vw */
+    [686] = {{0,0,0,0,0,0,0,0}, 79, 1, 1, 1, 0, 0, 1}, /* vh */
+    [687] = {{0,0,1,0,0,0,0,0}, 56, 1, 36, 1, 2, 0, 1}, /* person_hour */
+    [688] = {{0,0,1,0,0,0,0,0}, 58, 1, 31556952, 1, 0, 0, 1}, /* QALY */
+    [689] = {{0,0,0,0,0,0,0,0}, 71, 1, 1, 1, 0, 0, 1}, /* story_point */
+    [690] = {{0,0,0,0,0,0,0,0}, 23, 1, 22203, 4, -5, 0, 1}, /* mg/dL_glucose */
+    [691] = {{0,0,0,0,0,0,0,0}, 23, 1, 1, 1, 0, 0, 1}, /* mmol/L_glucose */
+    [692] = {{1,0,-1,0,0,0,0,0}, 0, 0, 343, 1, 0, 0, 1}, /* mach_air_20C */
+    [693] = {{0,0,0,0,0,0,0,0}, 7, 1, 1, 1, 0, 0, 1}, /* bortle */
+    [694] = {{0,0,0,0,0,0,0,0}, 5, 1, 1, 1, 0, 0, 1}, /* beaufort */
+    [695] = {{0,0,0,0,0,0,0,0}, 65, 1, 1, 1, 0, 0, 1}, /* saffir_simpson */
+    [696] = {{0,0,0,0,0,0,0,0}, 22, 1, 1, 1, 0, 0, 1}, /* fujita */
+    [697] = {{0,0,0,0,0,0,0,0}, 12, 1, 1, 1, 0, 0, 1}, /* EF */
+    [698] = {{0,0,0,0,0,0,0,0}, 47, 1, 1, 1, 0, 0, 1}, /* richter */
+    [699] = {{0,0,0,0,0,0,0,0}, 47, 1, 1, 1, 0, 0, 1}, /* moment_magnitude */
+    [700] = {{0,0,0,0,0,0,0,0}, 3, 1, 1, 1, 0, 0, 1}, /* apgar */
+    [701] = {{0,0,0,0,0,0,0,0}, 61, 1, 1, 1, 0, 0, 1}, /* RBE */
+    [702] = {{0,0,0,0,0,0,0,0}, 31, 1, 1, 1, 0, 0, 1}, /* hounsfield_unit */
+    [703] = {{0,0,-1,0,0,0,0,0}, 4, 1, 1, 6, -1, 0, 1}, /* bpm */
+    [704] = {{0,0,-1,0,0,0,0,0}, 21, 1, 1, 1, 0, 0, 1}, /* fps */
+    [705] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 0, 0, 1}, /* flops */
+    [706] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 0, 0, 1}, /* FLOPS */
+    [707] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 3, 0, 1}, /* kflops */
+    [708] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 3, 0, 1}, /* kFLOPS */
+    [709] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 6, 0, 1}, /* Mflops */
+    [710] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 6, 0, 1}, /* MFLOPS */
+    [711] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 9, 0, 1}, /* Gflops */
+    [712] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 9, 0, 1}, /* GFLOPS */
+    [713] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 12, 0, 1}, /* Tflops */
+    [714] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 12, 0, 1}, /* TFLOPS */
+    [715] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 15, 0, 1}, /* Pflops */
+    [716] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 15, 0, 1}, /* PFLOPS */
+    [717] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 18, 0, 1}, /* Eflops */
+    [718] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 18, 0, 1}, /* EFLOPS */
+    [719] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 21, 0, 1}, /* Zflops */
+    [720] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 21, 0, 1}, /* ZFLOPS */
+    [721] = {{0,0,-1,0,0,0,0,0}, 20, 1, 999999999999999983, 1, 6, 0, 1}, /* Yflops */
+    [722] = {{0,0,-1,0,0,0,0,0}, 20, 1, 999999999999999983, 1, 6, 0, 1}, /* YFLOPS */
+    [723] = {{0,0,-1,0,0,0,0,0}, 53, 1, 1, 1, 0, 0, 1}, /* ops_per_s */
+    [724] = {{0,0,-1,0,0,0,0,0}, 53, 1, 1, 1, 3, 0, 1}, /* KOPS */
+    [725] = {{0,0,-1,0,0,0,0,0}, 53, 1, 1, 1, 6, 0, 1}, /* MOPS */
+    [726] = {{0,0,-1,0,0,0,0,0}, 53, 1, 1, 1, 9, 0, 1}, /* GOPS */
+    [727] = {{0,0,-1,0,0,0,0,0}, 53, 1, 1, 1, 12, 0, 1}, /* TOPS */
+    [728] = {{0,0,-1,0,0,0,0,0}, 53, 1, 1, 1, 15, 0, 1}, /* POPS */
+    [729] = {{0,0,-1,0,0,0,0,0}, 53, 1, 1, 1, 18, 0, 1}, /* EOPS */
+    [730] = {{0,0,-1,0,0,0,0,0}, 35, 1, 1, 1, 6, 0, 1}, /* MIPS */
+    [731] = {{0,0,-1,0,0,0,0,0}, 35, 1, 1, 1, 9, 0, 1}, /* GIPS */
+    [732] = {{0,0,-1,0,0,0,0,0}, 35, 1, 1, 1, 6, 0, 1}, /* DMIPS */
+    [733] = {{0,0,-1,0,0,0,0,0}, 46, 1, 1, 1, 0, 0, 1}, /* MAC/s */
+    [734] = {{0,0,-1,0,0,0,0,0}, 46, 1, 1, 1, 6, 0, 1}, /* MMAC/s */
+    [735] = {{0,0,-1,0,0,0,0,0}, 46, 1, 1, 1, 9, 0, 1}, /* GMAC/s */
+    [736] = {{0,0,-1,0,0,0,0,0}, 46, 1, 1, 1, 12, 0, 1}, /* TMAC/s */
+    [737] = {{0,0,-1,0,0,0,0,0}, 74, 1, 1, 1, 0, 0, 1}, /* tok/s */
+    [738] = {{0,0,-1,0,0,0,0,0}, 74, 1, 1, 1, 3, 0, 1}, /* ktok/s */
+    [739] = {{0,0,-1,0,0,0,0,0}, 74, 1, 1, 1, 6, 0, 1}, /* Mtok/s */
+    [740] = {{0,0,-1,0,0,0,0,0}, 74, 1, 1, 1, 9, 0, 1}, /* Gtok/s */
+    [741] = {{0,0,-1,0,0,0,0,0}, 77, 1, 1, 1, 0, 0, 1}, /* T/s */
+    [742] = {{0,0,-1,0,0,0,0,0}, 77, 1, 1, 1, 6, 0, 1}, /* MT/s */
+    [743] = {{0,0,-1,0,0,0,0,0}, 77, 1, 1, 1, 9, 0, 1}, /* GT/s */
+    [744] = {{0,0,-1,0,0,0,0,0}, 77, 1, 1, 1, 12, 0, 1}, /* TT/s */
+    [745] = {{0,0,-1,0,0,0,0,0}, 59, 1, 1, 1, 0, 0, 1}, /* qps */
+    [746] = {{0,0,-1,0,0,0,0,0}, 59, 1, 1, 1, 0, 0, 1}, /* QPS */
+    [747] = {{0,0,-1,0,0,0,0,0}, 62, 1, 1, 1, 0, 0, 1}, /* rps */
+    [748] = {{0,0,-1,0,0,0,0,0}, 62, 1, 1, 1, 0, 0, 1}, /* RPS */
+    [749] = {{0,0,-1,0,0,0,0,0}, 76, 1, 1, 1, 0, 0, 1}, /* tps */
+    [750] = {{0,0,-1,0,0,0,0,0}, 76, 1, 1, 1, 0, 0, 1}, /* TPS */
+    [751] = {{0,0,-1,0,0,0,0,0}, 54, 1, 1, 1, 0, 0, 1}, /* pps */
+    [752] = {{0,0,-1,0,0,0,0,0}, 54, 1, 1, 1, 0, 0, 1}, /* PPS */
+    [753] = {{0,0,-1,0,0,0,0,0}, 36, 1, 1, 1, 0, 0, 1}, /* iops */
+    [754] = {{0,0,-1,0,0,0,0,0}, 36, 1, 1, 1, 0, 0, 1}, /* IOPS */
+    [755] = {{-3,0,0,0,0,1,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* molar */
+    [756] = {{0,-1,0,0,0,1,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* molal */
 };
 /* --- END GENERATED: unit_info --- */
 
 void w_register_unit(int id, const char *name) {
-    if (id < 0 || id > 253) return;
+    if (id < 0 || id >= W_UNIT_CAPACITY || id == W_UNIT_PERCENT) return;
     /* Copy name string so it persists */
     size_t len = strlen(name);
     char *copy = malloc(len + 1);
@@ -4770,7 +7366,9 @@ void w_register_unit_wv(int id, WValue name) {
 
 WValue w_quantity(int unit_id, int64_t sig, int scale) {
     decimal_normalize(&sig, &scale);
-    if (w_quantity_fits(sig, scale))
+    /* IDs above 255 use the existing heap-domain representation; the compact
+     * nan-box layout and its percent sentinel remain unchanged. */
+    if (unit_id >= 0 && unit_id <= 255 && w_quantity_fits(sig, scale))
         return w_box_quantity(unit_id, sig, scale);
     return domain_heap_alloc(W_DOMAIN_QUANTITY, sig, scale, unit_id, 0);
 }
@@ -4853,19 +7451,25 @@ WValue w_quantity_parse(WValue num_v, WValue unit_v) {
     const char *unit = as_str(unit_v);
     int64_t sig; int scale;
     if (!parse_sig_scale_cstr(num, &sig, &scale)) dief("invalid quantity literal: %s", num);
-    int unit_id = -1;
-    for (int i = 0; i < 256; i++) {
-        if (unit_names[i] && strcmp(unit_names[i], unit) == 0) { unit_id = i; break; }
-    }
+    int unit_id = unit_lookup_id(unit);
     if (unit_id < 0) {
-        /* Unknown unit: register it in the first free custom slot (140..253)
+        /* Unknown unit: register it in the reserved custom region
          * so the value displays with its own name. */
-        for (int i = 140; i <= 253; i++) {
+        for (int i = W_UNIT_CUSTOM_BASE; i < W_UNIT_CAPACITY; i++) {
             if (!unit_names[i]) { w_register_unit(i, unit); unit_id = i; break; }
         }
         if (unit_id < 0) dief("too many custom units: %s", unit);
     }
     return w_quantity(unit_id, sig, scale);
+}
+
+WValue w_quantity_unit_name(WValue quantity) {
+    if (!is_quantity_any(quantity)) return W_NIL;
+    int unit, scale;
+    int64_t sig;
+    quantity_extract(quantity, &unit, &sig, &scale);
+    if (unit < 0 || unit >= W_UNIT_CAPACITY || !unit_names[unit]) return W_NIL;
+    return w_string(unit_names[unit]);
 }
 
 /* ---- Cross-unit conversion ----
@@ -4878,7 +7482,7 @@ WValue w_quantity_parse(WValue num_v, WValue unit_v) {
 static int quantity_dims_equal(const WUnitInfo *x, const WUnitInfo *y) {
     for (int i = 0; i < 8; i++)
         if (x->dim[i] != y->dim[i]) return 0;
-    return 1;
+    return x->custom_id == y->custom_id && x->custom_exp == y->custom_exp;
 }
 
 /* Round a rational n/d (d>0) into (sig, scale) with half-away rounding and
@@ -4907,7 +7511,8 @@ static int quantity_rat_to_decimal(__int128 n, __int128 d, int64_t *sig, int *sc
 
 static int quantity_convert(int64_t *sig, int *scale, int from_unit, int to_unit) {
     if (from_unit == to_unit) return 1;
-    if (from_unit < 0 || from_unit > 255 || to_unit < 0 || to_unit > 255) return 0;
+    if (from_unit < 0 || from_unit >= W_UNIT_CAPACITY ||
+        to_unit < 0 || to_unit >= W_UNIT_CAPACITY) return 0;
     const WUnitInfo *f = &unit_info[from_unit];
     const WUnitInfo *t = &unit_info[to_unit];
     if (f->den == 0 || t->den == 0) return 0;      /* no-conversion sentinel */
@@ -4918,6 +7523,9 @@ static int quantity_convert(int64_t *sig, int *scale, int from_unit, int to_unit
      * raw_to = (SI − t.off) × t.den/t.num. Purely-multiplicative units keep
      * the exact legacy path below. */
     if (f->off_num != 0 || t->off_num != 0) {
+        /* Current affine units all use unscaled rational factors. Keeping this
+         * guard makes any future prefixed affine definition fail explicitly. */
+        if (f->factor_scale != 0 || t->factor_scale != 0) return 0;
         /* raw = sig × 10^scale as a rational rn/rd */
         __int128 rn = *sig, rd = 1;
         if (*scale >= 0) { for (int k = 0; k < *scale; k++) rn *= 10; }
@@ -4944,7 +7552,91 @@ static int quantity_convert(int64_t *sig, int *scale, int from_unit, int to_unit
     /* value × (f.num/f.den) × (t.den/t.num) */
     __int128 n = (__int128)(*sig) * f->num * t->den;
     __int128 d = (__int128)f->den * t->num;
+    *scale += f->factor_scale - t->factor_scale;
     return quantity_rat_to_decimal(n, d, sig, scale);
+}
+
+/* Temperature points are affine coordinates; temperature differences are
+ * linear vectors. Their SI exponent is intentionally the same, but the delta
+ * kind is tagged so ordinary conversion cannot mix them accidentally. */
+static int quantity_is_temperature_point(int unit) {
+    if (unit < 0 || unit >= W_UNIT_CAPACITY) return 0;
+    const WUnitInfo *u = &unit_info[unit];
+    if (u->den == 0 || u->custom_id != 0 || u->custom_exp != 0) return 0;
+    for (int i = 0; i < 8; i++) {
+        int expected = i == 4 ? 1 : 0;
+        if (u->dim[i] != expected) return 0;
+    }
+    return 1;
+}
+
+static int quantity_is_temperature_delta(int unit) {
+    if (unit < 0 || unit >= W_UNIT_CAPACITY) return 0;
+    const WUnitInfo *u = &unit_info[unit];
+    if (u->custom_id <= 0 || u->custom_exp != 1) return 0;
+    if (u->custom_id >= (int)(sizeof(custom_dimension_names) / sizeof(custom_dimension_names[0]))) return 0;
+    return strcmp(custom_dimension_names[u->custom_id], "temperature_delta") == 0;
+}
+
+static int quantity_role(WValue v, int unit) {
+    int explicit_role = quantity_explicit_role(v);
+    if (explicit_role != 0) return explicit_role;
+    if (quantity_is_temperature_point(unit)) return W_QUANTITY_ROLE_POINT;
+    if (quantity_is_temperature_delta(unit)) return W_QUANTITY_ROLE_DELTA;
+    return 0;
+}
+
+WValue w_quantity_point_p(WValue quantity) {
+    int unit, scale;
+    int64_t sig;
+    quantity_extract(quantity, &unit, &sig, &scale);
+    return quantity_role(quantity, unit) == W_QUANTITY_ROLE_POINT ? W_TRUE : W_FALSE;
+}
+
+WValue w_quantity_delta_p(WValue quantity) {
+    int unit, scale;
+    int64_t sig;
+    quantity_extract(quantity, &unit, &sig, &scale);
+    return quantity_role(quantity, unit) == W_QUANTITY_ROLE_DELTA ? W_TRUE : W_FALSE;
+}
+
+static WValue quantity_result_with_role(WValue result, int role, WValue origin) {
+    return role == 0 ? result : quantity_with_role(result, role, origin);
+}
+
+static WValue quantity_combined_origin(WValue a, WValue b) {
+    WValue oa = quantity_origin_value(a);
+    WValue ob = quantity_origin_value(b);
+    if (oa != W_NIL && ob != W_NIL && oa != ob)
+        die("cannot combine points/deltas with different origins");
+    return oa != W_NIL ? oa : ob;
+}
+
+/* Convert only the interval size, deliberately ignoring affine offsets and
+ * the point/delta kind distinction. */
+static int quantity_convert_interval(int64_t *sig, int *scale, int from_unit, int to_unit) {
+    const WUnitInfo *f = &unit_info[from_unit];
+    const WUnitInfo *t = &unit_info[to_unit];
+    if (f->den == 0 || t->den == 0) return 0;
+    __int128 n = (__int128)(*sig) * f->num * t->den;
+    __int128 d = (__int128)f->den * t->num;
+    *scale += f->factor_scale - t->factor_scale;
+    return quantity_rat_to_decimal(n, d, sig, scale);
+}
+
+static int quantity_delta_unit_for_point(int point_unit) {
+    const char *name = unit_names[point_unit] ? unit_names[point_unit] : "";
+    const char *delta = "\xce\x94" "K";
+    if (strcmp(name, "K") == 0) delta = "\xce\x94" "K";
+    else if (strcmp(name, "\xc2\xb0" "C") == 0) delta = "\xce\x94\xc2\xb0" "C";
+    else if (strcmp(name, "\xc2\xb0" "F") == 0) delta = "\xce\x94\xc2\xb0" "F";
+    else if (strcmp(name, "\xc2\xb0" "R") == 0) delta = "\xce\x94\xc2\xb0" "R";
+    else if (strcmp(name, "\xc2\xb0" "De") == 0) delta = "\xce\x94\xc2\xb0" "De";
+    else if (strcmp(name, "\xc2\xb0" "N") == 0) delta = "\xce\x94\xc2\xb0" "N";
+    else if (strcmp(name, "\xc2\xb0" "R\xc3\xa9") == 0) delta = "\xce\x94\xc2\xb0" "R\xc3\xa9";
+    else if (strcmp(name, "\xc2\xb0" "R\xc3\xb8") == 0) delta = "\xce\x94\xc2\xb0" "R\xc3\xb8";
+    else if (strcmp(name, "\xc2\xb0" "W") == 0) delta = "\xce\x94\xc2\xb0" "W";
+    return unit_lookup_id(delta);
 }
 
 WValue w_quantity_add(WValue a, WValue b) {
@@ -4953,14 +7645,54 @@ WValue w_quantity_add(WValue a, WValue b) {
     int a_scale, b_scale;
     quantity_extract(a, &unit_a, &a_sig64, &a_scale);
     quantity_extract(b, &unit_b, &b_sig64, &b_scale);
-    if (unit_a != unit_b && !quantity_convert(&b_sig64, &b_scale, unit_b, unit_a)) {
+    const char *add_name_a = unit_names[unit_a] ? unit_names[unit_a] : "";
+    const char *add_name_b = unit_names[unit_b] ? unit_names[unit_b] : "";
+    if (a_sig64 == 1 && a_scale == 0 && b_sig64 == 1 && b_scale == 0 &&
+        ((strcmp(add_name_a, "PB") == 0 && strcmp(add_name_b, "J") == 0) ||
+         (strcmp(add_name_a, "J") == 0 && strcmp(add_name_b, "PB") == 0))) {
+        return w_string(
+            "\n"
+            "       \x1b[38;5;179m╭───────────────────────╮\x1b[0m\n"
+            "       \x1b[38;5;179m│░░░░░░░░ B R E A D ░░░░│\x1b[0m\n"
+            "       \x1b[38;5;179m╰───────────────────────╯\x1b[0m\n"
+            "       \x1b[38;5;130m▓▓▓▓ PEANUT  BUTTER ▓▓▓▓\x1b[0m\n"
+            "       \x1b[38;5;93m▒▒▒▒▒ GRAPE  JELLY ▒▒▒▒▒\x1b[0m\n"
+            "       \x1b[38;5;179m╭───────────────────────╮\x1b[0m\n"
+            "       \x1b[38;5;179m│░░░░░░░░ B R E A D ░░░░│\x1b[0m\n"
+            "       \x1b[38;5;179m╰───────────────────────╯\x1b[0m\n"
+            "\n    \x1b[38;5;213m♫\x1b[0m \x1b[1;38;5;220mIt's peanut butter jelly time!\x1b[0m \x1b[38;5;213m♫\x1b[0m\n");
+    }
+    int role_a = quantity_role(a, unit_a);
+    int role_b = quantity_role(b, unit_b);
+    int a_point = role_a == W_QUANTITY_ROLE_POINT;
+    int b_point = role_b == W_QUANTITY_ROLE_POINT;
+    int a_delta = role_a == W_QUANTITY_ROLE_DELTA;
+    int b_delta = role_b == W_QUANTITY_ROLE_DELTA;
+    WValue result_origin = quantity_combined_origin(a, b);
+    if (a_point && b_point) {
+        if (quantity_is_temperature_point(unit_a) && quantity_is_temperature_point(unit_b))
+            die("cannot add two absolute temperatures; add a temperature difference instead");
+        die("cannot add two points; add a delta to a point instead");
+    }
+    if (a_point && b_delta && quantity_is_temperature_point(unit_a) && quantity_is_temperature_delta(unit_b)) {
+        if (!quantity_convert_interval(&b_sig64, &b_scale, unit_b, unit_a))
+            die("cannot convert temperature difference");
+    } else if (a_delta && b_point && quantity_is_temperature_delta(unit_a) && quantity_is_temperature_point(unit_b)) {
+        if (!quantity_convert_interval(&a_sig64, &a_scale, unit_a, unit_b))
+            die("cannot convert temperature difference");
+        __int128 as = a_sig64, bs = b_sig64;
+        decimal_align(&as, &a_scale, &bs, &b_scale);
+        return quantity_result_with_role(w_quantity(unit_b, (int64_t)(as + bs), a_scale), W_QUANTITY_ROLE_POINT, result_origin);
+    } else if (unit_a != unit_b && !quantity_convert(&b_sig64, &b_scale, unit_b, unit_a)) {
         const char *na = unit_names[unit_a] ? unit_names[unit_a] : "?";
         const char *nb = unit_names[unit_b] ? unit_names[unit_b] : "?";
         dief("cannot add %s and %s (dimension mismatch)", na, nb);
     }
     __int128 a_sig = a_sig64, b_sig = b_sig64;
     decimal_align(&a_sig, &a_scale, &b_sig, &b_scale);
-    return w_quantity(unit_a, (int64_t)(a_sig + b_sig), a_scale);
+    int result_role = (a_point || b_point) ? W_QUANTITY_ROLE_POINT :
+                      ((a_delta || b_delta) ? W_QUANTITY_ROLE_DELTA : 0);
+    return quantity_result_with_role(w_quantity(unit_a, (int64_t)(a_sig + b_sig), a_scale), result_role, result_origin);
 }
 
 WValue w_quantity_sub(WValue a, WValue b) {
@@ -4969,14 +7701,40 @@ WValue w_quantity_sub(WValue a, WValue b) {
     int a_scale, b_scale;
     quantity_extract(a, &unit_a, &a_sig64, &a_scale);
     quantity_extract(b, &unit_b, &b_sig64, &b_scale);
-    if (unit_a != unit_b && !quantity_convert(&b_sig64, &b_scale, unit_b, unit_a)) {
+    int role_a = quantity_role(a, unit_a);
+    int role_b = quantity_role(b, unit_b);
+    int a_point = role_a == W_QUANTITY_ROLE_POINT;
+    int b_point = role_b == W_QUANTITY_ROLE_POINT;
+    int a_delta = role_a == W_QUANTITY_ROLE_DELTA;
+    int b_delta = role_b == W_QUANTITY_ROLE_DELTA;
+    WValue result_origin = quantity_combined_origin(a, b);
+    int result_unit = unit_a;
+    if (a_point && b_point && quantity_is_temperature_point(unit_a) && quantity_is_temperature_point(unit_b)) {
+        if (unit_a != unit_b && !quantity_convert(&b_sig64, &b_scale, unit_b, unit_a))
+            die("cannot convert absolute temperature");
+        result_unit = quantity_delta_unit_for_point(unit_a);
+        if (result_unit < 0) die("missing temperature-difference unit");
+    } else if (a_point && b_delta && quantity_is_temperature_point(unit_a) && quantity_is_temperature_delta(unit_b)) {
+        if (!quantity_convert_interval(&b_sig64, &b_scale, unit_b, unit_a))
+            die("cannot convert temperature difference");
+    } else if (!a_point && b_point) {
+        die("cannot subtract an absolute temperature from a temperature difference");
+    } else if (unit_a != unit_b && !quantity_convert(&b_sig64, &b_scale, unit_b, unit_a)) {
         const char *na = unit_names[unit_a] ? unit_names[unit_a] : "?";
         const char *nb = unit_names[unit_b] ? unit_names[unit_b] : "?";
         dief("cannot subtract %s and %s (dimension mismatch)", na, nb);
     }
     __int128 a_sig = a_sig64, b_sig = b_sig64;
     decimal_align(&a_sig, &a_scale, &b_sig, &b_scale);
-    return w_quantity(unit_a, (int64_t)(a_sig - b_sig), a_scale);
+    int64_t result_sig = (int64_t)(a_sig - b_sig);
+    if (a_point && b_point && quantity_is_temperature_point(unit_a) && quantity_is_temperature_point(unit_b) &&
+        !quantity_convert_interval(&result_sig, &a_scale, unit_a, result_unit))
+        die("cannot convert resulting temperature difference");
+    int result_role = 0;
+    if (a_point && b_point) result_role = W_QUANTITY_ROLE_DELTA;
+    else if (a_point) result_role = W_QUANTITY_ROLE_POINT;
+    else if (a_delta || b_delta) result_role = W_QUANTITY_ROLE_DELTA;
+    return quantity_result_with_role(w_quantity(result_unit, result_sig, a_scale), result_role, result_origin);
 }
 
 /* ---- Dimensional algebra: quantity × quantity, quantity ÷ quantity ----
@@ -4994,6 +7752,21 @@ static int quantity_dims_equal2(const int8_t *x, const int8_t *y) {
     for (int i = 0; i < 8; i++)
         if (x[i] != y[i]) return 0;
     return 1;
+}
+
+static int quantity_signature_equal(const int8_t *dim, int custom_id, int custom_exp,
+                                    const WUnitInfo *u) {
+    return quantity_dims_equal2(dim, u->dim) && custom_id == u->custom_id &&
+           custom_exp == u->custom_exp;
+}
+
+static int quantity_factor_equal(int64_t an, int64_t ad, int as,
+                                 int64_t bn, int64_t bd, int bs) {
+    long double a = ((long double)an / (long double)ad) * powl(10.0L, as);
+    long double b = ((long double)bn / (long double)bd) * powl(10.0L, bs);
+    if (a == b) return 1;
+    long double mag = fmaxl(fabsl(a), fabsl(b));
+    return mag != 0.0L && fabsl(a - b) <= mag * 1e-15L;
 }
 
 /* Reduced rational product an/ad × bn/bd → rn/rd; 0 on int64 overflow. */
@@ -5036,12 +7809,14 @@ static int apply_rational(int64_t *sig, int *scale, int64_t num, int64_t den) {
  * (kg·m/s, m/s², …); the dim/factor lands in unit_info so later arithmetic
  * keeps converting. Returns the unit id, or -1 if the custom region is full
  * or the name overflows. */
-static int quantity_synth_compound(const int8_t *dim, int64_t fn, int64_t fd) {
+static int quantity_synth_compound(const int8_t *dim, int custom_id, int custom_exp,
+                                   int64_t fn, int64_t fd, int factor_scale) {
     /* Reuse an existing custom entry with the same dim+factor. */
-    for (int i = 140; i <= 253; i++) {
+    for (int i = W_UNIT_CUSTOM_BASE; i < W_UNIT_CAPACITY; i++) {
         if (!unit_names[i] || unit_info[i].den == 0) continue;
-        if (!quantity_dims_equal2(dim, unit_info[i].dim)) continue;
-        if ((__int128)fn * unit_info[i].den == (__int128)unit_info[i].num * fd)
+        if (!quantity_signature_equal(dim, custom_id, custom_exp, &unit_info[i])) continue;
+        if (quantity_factor_equal(fn, fd, factor_scale, unit_info[i].num,
+                                  unit_info[i].den, unit_info[i].factor_scale))
             return i;
     }
     /* Conventional display order: mass, length, time, current, temp,
@@ -5051,6 +7826,12 @@ static int quantity_synth_compound(const int8_t *dim, int64_t fn, int64_t fd) {
     static const char *base_syms[8] = {"m", "kg", "s", "A", "K", "mol", "cd", "b"};
     char name[64];
     int pos = 0, wrote_num = 0;
+    if (custom_id > 0 && custom_exp > 0 &&
+        custom_id < (int)(sizeof(custom_dimension_names) / sizeof(custom_dimension_names[0]))) {
+        pos += snprintf(name + pos, sizeof(name) - pos, "%s", custom_dimension_names[custom_id]);
+        if (custom_exp != 1) pos += snprintf(name + pos, sizeof(name) - pos, "^%d", custom_exp);
+        wrote_num = 1;
+    }
     for (int oi = 0; oi < 8; oi++) {
         int axis = order[oi];
         int e = dim[axis];
@@ -5061,6 +7842,11 @@ static int quantity_synth_compound(const int8_t *dim, int64_t fn, int64_t fd) {
         else if (e == 3 && pos < 60) { memcpy(name + pos, "\xc2\xb3", 2); pos += 2; }
         else if (e > 3) pos += snprintf(name + pos, sizeof(name) - pos, "^%d", e);
         wrote_num = 1;
+    }
+    if (custom_id > 0 && custom_exp < 0 && pos < 60 &&
+        custom_id < (int)(sizeof(custom_dimension_names) / sizeof(custom_dimension_names[0]))) {
+        pos += snprintf(name + pos, sizeof(name) - pos, "/%s", custom_dimension_names[custom_id]);
+        if (custom_exp != -1) pos += snprintf(name + pos, sizeof(name) - pos, "^%d", -custom_exp);
     }
     if (!wrote_num && pos < 60) name[pos++] = '1';
     for (int oi = 0; oi < 8; oi++) {
@@ -5076,11 +7862,14 @@ static int quantity_synth_compound(const int8_t *dim, int64_t fn, int64_t fd) {
     }
     if (pos >= 60) return -1;
     name[pos] = '\0';
-    for (int i = 140; i <= 253; i++) {
+    for (int i = W_UNIT_CUSTOM_BASE; i < W_UNIT_CAPACITY; i++) {
         if (unit_names[i]) continue;
         w_register_unit(i, name);
         unit_info[i].num = fn;
         unit_info[i].den = fd;
+        unit_info[i].factor_scale = factor_scale;
+        unit_info[i].custom_id = custom_id;
+        unit_info[i].custom_exp = custom_exp;
         memcpy(unit_info[i].dim, dim, 8);
         return i;
     }
@@ -5092,12 +7881,17 @@ static WValue quantity_combine(WValue a, WValue b, int divide) {
     int64_t a_sig, b_sig;
     quantity_extract(a, &unit_a, &a_sig, &a_scale);
     quantity_extract(b, &unit_b, &b_sig, &b_scale);
+    if (quantity_role(a, unit_a) == W_QUANTITY_ROLE_POINT ||
+        quantity_role(b, unit_b) == W_QUANTITY_ROLE_POINT)
+        die("cannot multiply or divide a point; subtract points or operate on a delta");
     const char *na = unit_names[unit_a] ? unit_names[unit_a] : "?";
     const char *nb = unit_names[unit_b] ? unit_names[unit_b] : "?";
     const WUnitInfo *fa = &unit_info[unit_a], *fb = &unit_info[unit_b];
     const char *opname = divide ? "divide" : "multiply";
     if (fa->den == 0 || fb->den == 0)
         dief("cannot %s %s and %s (no conversion info)", opname, na, nb);
+    if (fa->off_num != 0 || fb->off_num != 0)
+        dief("cannot %s an affine absolute temperature; convert it to kelvin or use a temperature difference", opname);
 
     int8_t dim[8];
     int all_zero = 1;
@@ -5105,10 +7899,24 @@ static WValue quantity_combine(WValue a, WValue b, int divide) {
         dim[i] = (int8_t)(divide ? fa->dim[i] - fb->dim[i] : fa->dim[i] + fb->dim[i]);
         if (dim[i]) all_zero = 0;
     }
+    int custom_id = 0, custom_exp = 0;
+    if (fa->custom_id && fb->custom_id && fa->custom_id != fb->custom_id)
+        dief("cannot %s %s and %s (multiple custom dimensions)", opname, na, nb);
+    if (fa->custom_id) {
+        custom_id = fa->custom_id;
+        custom_exp = fa->custom_exp;
+    }
+    if (fb->custom_id) {
+        custom_id = fb->custom_id;
+        custom_exp += divide ? -fb->custom_exp : fb->custom_exp;
+    }
+    if (custom_exp == 0) custom_id = 0;
+    if (custom_id != 0) all_zero = 0;
     int64_t fn, fd;
     int ok = divide ? rat_mul64(fa->num, fa->den, fb->den, fb->num, &fn, &fd)
                     : rat_mul64(fa->num, fa->den, fb->num, fb->den, &fn, &fd);
     if (!ok) dief("factor overflow combining %s and %s", na, nb);
+    int factor_scale = fa->factor_scale + (divide ? -fb->factor_scale : fb->factor_scale);
 
     int64_t sig;
     int scale;
@@ -5129,32 +7937,35 @@ static WValue quantity_combine(WValue a, WValue b, int divide) {
 
     if (all_zero) {
         /* Dimensionless ratio: apply the residual factor, return a Decimal. */
+        scale += factor_scale;
         if (!apply_rational(&sig, &scale, fn, fd))
             dief("quantity overflow combining %s and %s", na, nb);
         return w_decimal(sig, scale);
     }
 
     /* Exact factor match first (10 ft × 10 ft → ft², not a converted m²). */
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < W_UNIT_CAPACITY; i++) {
         if (!unit_names[i] || unit_info[i].den == 0) continue;
-        if (!quantity_dims_equal2(dim, unit_info[i].dim)) continue;
-        if ((__int128)fn * unit_info[i].den == (__int128)unit_info[i].num * fd)
+        if (!quantity_signature_equal(dim, custom_id, custom_exp, &unit_info[i])) continue;
+        if (quantity_factor_equal(fn, fd, factor_scale, unit_info[i].num,
+                                  unit_info[i].den, unit_info[i].factor_scale))
             return w_quantity(i, sig, scale);
     }
     /* Any same-dimension unit, converting the factor ratio into it. */
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < W_UNIT_CAPACITY; i++) {
         if (!unit_names[i] || unit_info[i].den == 0) continue;
-        if (!quantity_dims_equal2(dim, unit_info[i].dim)) continue;
+        if (!quantity_signature_equal(dim, custom_id, custom_exp, &unit_info[i])) continue;
         int64_t cn, cd;
         if (!rat_mul64(fn, fd, unit_info[i].den, unit_info[i].num, &cn, &cd)) continue;
-        int64_t s2 = sig; int sc2 = scale;
+        int64_t s2 = sig;
+        int sc2 = scale + factor_scale - unit_info[i].factor_scale;
         if (apply_rational(&s2, &sc2, cn, cd))
             return w_quantity(i, s2, sc2);
     }
     /* No named unit — synthesize an anonymous compound (kg·m/s) in the
      * custom region so chained arithmetic carries its dimension until it
      * lands on a named one: (kg × m/s) × m/s ends at J. */
-    int synth = quantity_synth_compound(dim, fn, fd);
+    int synth = quantity_synth_compound(dim, custom_id, custom_exp, fn, fd, factor_scale);
     if (synth >= 0) return w_quantity(synth, sig, scale);
     dief("no unit for the %s of %s and %s", divide ? "quotient" : "product", na, nb);
     return W_NIL;
@@ -5170,10 +7981,7 @@ WValue w_quantity_div(WValue a, WValue b) { return quantity_combine(a, b, 1); }
 WValue w_quantity_pipe(WValue q, WValue unit_name_v, WValue digits_v) {
     if (!is_quantity_any(q)) dief("| unit conversion expects a quantity");
     const char *uname = as_str(unit_name_v);
-    int target = -1;
-    for (int i = 0; i < 256; i++) {
-        if (unit_names[i] && strcmp(unit_names[i], uname) == 0) { target = i; break; }
-    }
+    int target = unit_lookup_id(uname);
     if (target < 0) dief("unknown unit in | conversion: %s", uname);
     int unit, scale;
     int64_t sig;
@@ -5201,6 +8009,11 @@ WValue w_quantity_mul_scalar(WValue quantity, WValue scalar) {
     int64_t q_sig64;
     int q_scale;
     quantity_extract(quantity, &unit, &q_sig64, &q_scale);
+    int role = quantity_role(quantity, unit);
+    if (role == W_QUANTITY_ROLE_POINT)
+        die("cannot multiply a point; subtract points or operate on a delta");
+    if (unit_info[unit].off_num != 0)
+        die("cannot multiply an affine absolute temperature; convert it to kelvin or use a temperature difference");
     __int128 q_sig = q_sig64;
     if (w_is_int(scalar)) {
         q_sig *= w_as_int(scalar);
@@ -5212,7 +8025,7 @@ WValue w_quantity_mul_scalar(WValue quantity, WValue scalar) {
     } else {
         die("cannot multiply quantity by non-numeric");
     }
-    return w_quantity(unit, (int64_t)q_sig, q_scale);
+    return quantity_result_with_role(w_quantity(unit, (int64_t)q_sig, q_scale), role, quantity_origin_value(quantity));
 }
 
 WValue w_quantity_div_scalar(WValue quantity, WValue scalar) {
@@ -5220,6 +8033,11 @@ WValue w_quantity_div_scalar(WValue quantity, WValue scalar) {
     int64_t q_sig64;
     int q_scale;
     quantity_extract(quantity, &unit, &q_sig64, &q_scale);
+    int role = quantity_role(quantity, unit);
+    if (role == W_QUANTITY_ROLE_POINT)
+        die("cannot divide a point; subtract points or operate on a delta");
+    if (unit_info[unit].off_num != 0)
+        die("cannot divide an affine absolute temperature; convert it to kelvin or use a temperature difference");
     if (w_is_int(scalar)) {
         int64_t sv = w_as_int(scalar);
         if (sv == 0) die("division by zero");
@@ -5228,7 +8046,7 @@ WValue w_quantity_div_scalar(WValue quantity, WValue scalar) {
         q_sig *= (__int128)1000000000000LL;
         int result_scale = q_scale - 12;
         __int128 result_sig = q_sig / sv;
-        return w_quantity(unit, (int64_t)result_sig, result_scale);
+        return quantity_result_with_role(w_quantity(unit, (int64_t)result_sig, result_scale), role, quantity_origin_value(quantity));
     } else if (is_decimal_any(scalar)) {
         int64_t s_sig; int s_scale;
         decimal_extract(scalar, &s_sig, &s_scale);
@@ -5237,11 +8055,92 @@ WValue w_quantity_div_scalar(WValue quantity, WValue scalar) {
         q_sig *= (__int128)1000000000000LL;
         int result_scale = q_scale - s_scale - 12;
         __int128 result_sig = q_sig / s_sig;
-        return w_quantity(unit, (int64_t)result_sig, result_scale);
+        return quantity_result_with_role(w_quantity(unit, (int64_t)result_sig, result_scale), role, quantity_origin_value(quantity));
     } else {
         die("cannot divide quantity by non-numeric");
     }
     return W_NIL;
+}
+
+static double quantity_unit_factor_double(const WUnitInfo *u) {
+    return ((double)u->num / (double)u->den) * pow(10.0, (double)u->factor_scale);
+}
+
+static double quantity_unit_offset_double(const WUnitInfo *u) {
+    if (u->off_den == 0) return 0.0;
+    return (double)u->off_num / (double)u->off_den;
+}
+
+static int quantity_dim_is(const WUnitInfo *u, int length, int mass, int time, int temperature) {
+    int expected[8] = {length, mass, time, 0, temperature, 0, 0, 0};
+    for (int i = 0; i < 8; i++) if (u->dim[i] != expected[i]) return 0;
+    return u->custom_id == 0 && u->custom_exp == 0;
+}
+
+static int quantity_dim_is_frequency(const WUnitInfo *u) {
+    if (u->dim[2] != -1) return 0;
+    for (int i = 0; i < 8; i++) if (i != 2 && u->dim[i] != 0) return 0;
+    if (u->custom_id <= 0 || u->custom_exp != 1) return 0;
+    return strcmp(custom_dimension_names[u->custom_id], "cycle") == 0;
+}
+
+WValue w_quantity_equivalent(WValue quantity, WValue target_unit_v, WValue equivalence_v) {
+    int source_unit, source_scale;
+    int64_t source_sig;
+    quantity_extract(quantity, &source_unit, &source_sig, &source_scale);
+    const char *target_name = as_str(target_unit_v);
+    const char *kind = as_str(equivalence_v);
+    int target_unit = unit_lookup_id(target_name);
+    if (target_unit < 0) dief("unknown target unit for equivalence: %s", target_name);
+    const WUnitInfo *source = &unit_info[source_unit];
+    const WUnitInfo *target = &unit_info[target_unit];
+    double source_raw = (double)source_sig * pow(10.0, (double)source_scale);
+    double source_si = source_raw * quantity_unit_factor_double(source) + quantity_unit_offset_double(source);
+    double target_si = 0.0;
+
+    int source_mass = quantity_dim_is(source, 0, 1, 0, 0);
+    int target_mass = quantity_dim_is(target, 0, 1, 0, 0);
+    int source_energy = quantity_dim_is(source, 2, 1, -2, 0);
+    int target_energy = quantity_dim_is(target, 2, 1, -2, 0);
+    int source_length = quantity_dim_is(source, 1, 0, 0, 0);
+    int target_length = quantity_dim_is(target, 1, 0, 0, 0);
+    int source_frequency = quantity_dim_is_frequency(source);
+    int target_frequency = quantity_dim_is_frequency(target);
+    int source_temperature = quantity_dim_is(source, 0, 0, 0, 1);
+    int target_temperature = quantity_dim_is(target, 0, 0, 0, 1);
+
+    if (strcmp(kind, "mass_energy") == 0) {
+        const double c2 = 299792458.0 * 299792458.0;
+        if (source_mass && target_energy) target_si = source_si * c2;
+        else if (source_energy && target_mass) target_si = source_si / c2;
+        else die("mass_energy equivalence requires mass and energy");
+    } else if (strcmp(kind, "spectral") == 0) {
+        const double c = 299792458.0;
+        const double h = 6.62607015e-34;
+        if (source_length && target_frequency) target_si = c / source_si;
+        else if (source_frequency && target_length) target_si = c / source_si;
+        else if (source_length && target_energy) target_si = h * c / source_si;
+        else if (source_energy && target_length) target_si = h * c / source_si;
+        else if (source_frequency && target_energy) target_si = h * source_si;
+        else if (source_energy && target_frequency) target_si = source_si / h;
+        else die("spectral equivalence requires length, frequency, or photon energy");
+    } else if (strcmp(kind, "thermal") == 0) {
+        const double kb = 1.380649e-23;
+        if (source_temperature && target_energy) target_si = source_si * kb;
+        else if (source_energy && target_temperature) target_si = source_si / kb;
+        else die("thermal equivalence requires temperature and energy");
+    } else {
+        dief("unknown physical equivalence: %s", kind);
+    }
+
+    double target_raw = (target_si - quantity_unit_offset_double(target)) /
+                        quantity_unit_factor_double(target);
+    char number[64];
+    snprintf(number, sizeof(number), "%.15g", target_raw);
+    int64_t sig;
+    int scale;
+    if (!parse_sig_scale_cstr(number, &sig, &scale)) die("failed to represent equivalence result");
+    return w_quantity(target_unit, sig, scale);
 }
 
 /* ---- Duration ---- */
@@ -8905,7 +11804,10 @@ WValue w_date(int year, int month, int day, int hour, int min, int sec, int tz) 
 
 static int net_is_digit(char c) { return c >= '0' && c <= '9'; }
 
-static int64_t ccall_arg_i64(WValue v) {
+/* Numeric-to-machine boundary used by native core methods that keep their
+ * algorithm in Tungsten but preserve the historical Int/BigInt/Float
+ * coercion of a C ccall. */
+int64_t w_numeric_to_i64(WValue v) {
     if (w_is_int(v)) return w_as_int(v);
     if (w_is_bigint(v)) return integer_low_i64(v);
     if (w_is_double(v)) return (int64_t)w_as_double(v);
@@ -9005,7 +11907,7 @@ WValue w_ipv4_parse(WValue str_v) {
 
 WValue w_ipv4_from_octets(WValue a, WValue b, WValue c, WValue d, WValue prefix_v) {
     int64_t octets[4] = {
-        ccall_arg_i64(a), ccall_arg_i64(b), ccall_arg_i64(c), ccall_arg_i64(d)
+        w_numeric_to_i64(a), w_numeric_to_i64(b), w_numeric_to_i64(c), w_numeric_to_i64(d)
     };
     for (int i = 0; i < 4; i++) {
         if (octets[i] < 0 || octets[i] > 255) {
@@ -9013,7 +11915,7 @@ WValue w_ipv4_from_octets(WValue a, WValue b, WValue c, WValue d, WValue prefix_
             return W_NIL;
         }
     }
-    int prefix = w_is_nil(prefix_v) ? -1 : (int)ccall_arg_i64(prefix_v);
+    int prefix = w_is_nil(prefix_v) ? -1 : (int)w_numeric_to_i64(prefix_v);
     uint32_t addr = ((uint32_t)octets[0] << 24) | ((uint32_t)octets[1] << 16) |
                     ((uint32_t)octets[2] << 8) | (uint32_t)octets[3];
     return make_ipv4_addr(addr, prefix);
@@ -9024,26 +11926,8 @@ WValue w_ipv4_with_prefix(WValue ip, WValue prefix_v) {
         w_raise(w_string("IPv4#with_prefix requires an IPv4 address"));
         return W_NIL;
     }
-    int prefix = w_is_nil(prefix_v) ? -1 : (int)ccall_arg_i64(prefix_v);
+    int prefix = w_is_nil(prefix_v) ? -1 : (int)w_numeric_to_i64(prefix_v);
     return make_ipv4_addr(w_unbox_ipv4_addr(ip), prefix);
-}
-
-WValue w_ipv4_prefix(WValue ip) {
-    if (!w_is_ipv4(ip)) return W_NIL;
-    int prefix = w_unbox_ipv4_cidr(ip);
-    return prefix <= 32 ? w_int(prefix) : W_NIL;
-}
-
-WValue w_ipv4_cidr_p(WValue ip) {
-    return (w_is_ipv4(ip) && w_unbox_ipv4_cidr(ip) <= 32) ? W_TRUE : W_FALSE;
-}
-
-WValue w_ipv4_octet(WValue ip, WValue index_v) {
-    if (!w_is_ipv4(ip)) return W_NIL;
-    int64_t index = ccall_arg_i64(index_v);
-    if (index < 0 || index > 3) return W_NIL;
-    uint32_t addr = w_unbox_ipv4_addr(ip);
-    return w_int((addr >> (8 * (3 - index))) & 0xFF);
 }
 
 WValue w_ipv4_octets(WValue ip) {
@@ -9053,11 +11937,6 @@ WValue w_ipv4_octets(WValue ip) {
     for (int i = 0; i < 4; i++)
         w_array_push(arr, w_int((addr >> (8 * (3 - i))) & 0xFF));
     return arr;
-}
-
-WValue w_ipv4_to_i(WValue ip) {
-    if (!w_is_ipv4(ip)) return W_NIL;
-    return w_int((int64_t)w_unbox_ipv4_addr(ip));
 }
 
 WValue w_ipv4_network(WValue ip) {
@@ -9086,49 +11965,6 @@ WValue w_ipv4_in_cidr(WValue ip, WValue cidr) {
     int prefix         = ipv4_effective_prefix(cidr);
     uint32_t mask      = ipv4_mask_for_prefix(prefix);
     return (ip_addr & mask) == (cidr_addr & mask) ? W_TRUE : W_FALSE;
-}
-
-WValue w_ipv4_private_p(WValue ip) {
-    if (!w_is_ipv4(ip)) return W_FALSE;
-    uint32_t a = w_unbox_ipv4_addr(ip);
-    int yes = ((a & 0xFF000000u) == 0x0A000000u) ||
-              ((a & 0xFFF00000u) == 0xAC100000u) ||
-              ((a & 0xFFFF0000u) == 0xC0A80000u);
-    return yes ? W_TRUE : W_FALSE;
-}
-
-WValue w_ipv4_loopback_p(WValue ip) {
-    return (w_is_ipv4(ip) && ((w_unbox_ipv4_addr(ip) & 0xFF000000u) == 0x7F000000u)) ? W_TRUE : W_FALSE;
-}
-
-WValue w_ipv4_link_local_p(WValue ip) {
-    return (w_is_ipv4(ip) && ((w_unbox_ipv4_addr(ip) & 0xFFFF0000u) == 0xA9FE0000u)) ? W_TRUE : W_FALSE;
-}
-
-WValue w_ipv4_multicast_p(WValue ip) {
-    return (w_is_ipv4(ip) && ((w_unbox_ipv4_addr(ip) & 0xF0000000u) == 0xE0000000u)) ? W_TRUE : W_FALSE;
-}
-
-WValue w_ipv4_unspecified_p(WValue ip) {
-    return (w_is_ipv4(ip) && w_unbox_ipv4_addr(ip) == 0) ? W_TRUE : W_FALSE;
-}
-
-WValue w_ipv4_broadcast_p(WValue ip) {
-    return (w_is_ipv4(ip) && w_unbox_ipv4_addr(ip) == 0xFFFFFFFFu) ? W_TRUE : W_FALSE;
-}
-
-WValue w_ipv4_reserved_p(WValue ip) {
-    return (w_is_ipv4(ip) && ((w_unbox_ipv4_addr(ip) & 0xF0000000u) == 0xF0000000u)) ? W_TRUE : W_FALSE;
-}
-
-WValue w_ipv4_global_p(WValue ip) {
-    if (!w_is_ipv4(ip)) return W_FALSE;
-    if (w_ipv4_private_p(ip) == W_TRUE || w_ipv4_loopback_p(ip) == W_TRUE ||
-        w_ipv4_link_local_p(ip) == W_TRUE || w_ipv4_multicast_p(ip) == W_TRUE ||
-        w_ipv4_unspecified_p(ip) == W_TRUE || w_ipv4_broadcast_p(ip) == W_TRUE ||
-        w_ipv4_reserved_p(ip) == W_TRUE)
-        return W_FALSE;
-    return W_TRUE;
 }
 
 /* ---- IPv6 (Phase 6i.2: type byte 6 in W_SUBTAG_GENERIC bucket) ---- */
@@ -9307,7 +12143,7 @@ WValue w_ipv6_with_prefix(WValue ip, WValue prefix_v) {
         w_raise(w_string("IPv6#with_prefix requires an IPv6 address"));
         return W_NIL;
     }
-    int prefix = w_is_nil(prefix_v) ? -1 : (int)ccall_arg_i64(prefix_v);
+    int prefix = w_is_nil(prefix_v) ? -1 : (int)w_numeric_to_i64(prefix_v);
     WNetAddr *na = (WNetAddr *)w_as_ptr(ip);
     return w_ipv6(na->bytes, prefix);
 }
@@ -9326,7 +12162,7 @@ WValue w_ipv6_cidr_p(WValue ip) {
 
 WValue w_ipv6_byte(WValue ip, WValue index_v) {
     if (!w_is_ipv6(ip)) return W_NIL;
-    int64_t index = ccall_arg_i64(index_v);
+    int64_t index = w_numeric_to_i64(index_v);
     if (index < 0 || index > 15) return W_NIL;
     WNetAddr *na = (WNetAddr *)w_as_ptr(ip);
     return w_int(na->bytes[index]);
@@ -9475,7 +12311,7 @@ WValue w_mac_parse(WValue str_v) {
 
 WValue w_mac_byte(WValue mac, WValue index_v) {
     if (!w_is_mac(mac)) return W_NIL;
-    int64_t index = ccall_arg_i64(index_v);
+    int64_t index = w_numeric_to_i64(index_v);
     if (index < 0 || index > 5) return W_NIL;
     WNetAddr *na = (WNetAddr *)w_as_ptr(mac);
     return w_int(na->bytes[index]);
@@ -12894,168 +15730,6 @@ WValue w_read_line_stdin(void) {
     return s;
 }
 
-/* ---- Raw-terminal primitives (for the REPL line editor) ---- */
-static struct termios g_saved_termios;
-static int g_raw_active = 0;
-
-/* Put stdin into raw mode (no echo, no line-buffering, keypresses delivered one
- * at a time, Ctrl-C/Z/etc. delivered as bytes not signals). No-op on a non-tty
- * (piped input keeps cooked line reads). */
-WValue w_term_raw_enable(void) {
-    if (!isatty(0)) return W_NIL;
-    if (g_raw_active) return W_NIL;
-    if (tcgetattr(0, &g_saved_termios) != 0) return W_NIL;
-    struct termios raw = g_saved_termios;
-    raw.c_lflag &= ~((tcflag_t)(ECHO | ICANON | ISIG | IEXTEN));
-    raw.c_iflag &= ~((tcflag_t)(IXON | ICRNL | BRKINT | INPCK | ISTRIP));
-    raw.c_cc[VMIN] = 1;
-    raw.c_cc[VTIME] = 0;
-    /* TCSANOW (not TCSAFLUSH): apply immediately WITHOUT discarding pending
-     * input, so type-ahead entered before the prompt is preserved. */
-    if (tcsetattr(0, TCSANOW, &raw) != 0) return W_NIL;
-    g_raw_active = 1;
-    return W_NIL;
-}
-
-/* Restore the terminal to the mode saved by w_term_raw_enable. */
-WValue w_term_raw_disable(void) {
-    if (g_raw_active) {
-        tcsetattr(0, TCSADRAIN, &g_saved_termios);
-        g_raw_active = 0;
-    }
-    return W_NIL;
-}
-
-/* Read one byte/keypress from stdin. Returns the byte value (0..255), or -1 on
- * EOF. In raw mode this returns per keypress; escape sequences (arrow keys)
- * arrive as the bytes 27, '[', 'A'/'B'/'C'/'D' across successive calls. */
-WValue w_read_key(void) {
-    fflush(stdout);   /* flush the prompt / echoed chars before blocking */
-    unsigned char c;
-    ssize_t n = read(0, &c, 1);
-    if (n <= 0) return w_int(-1);
-    return w_int((int64_t)c);
-}
-
-/* True if stdin is a terminal (use the raw editor) vs a pipe/file (cooked). */
-WValue w_isatty_stdin(void) {
-    return w_bool(isatty(0) ? 1 : 0);
-}
-
-WValue w_isatty_stdout(void) {
-    return w_bool(isatty(1) ? 1 : 0);
-}
-
-/* Terminal width in columns (for line redraw); 80 if unavailable. */
-WValue w_term_cols(void) {
-    struct winsize ws;
-    if (ioctl(1, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) {
-        return w_int((int64_t)ws.ws_col);
-    }
-    return w_int(80);
-}
-
-/* ---- HID input multiplexing (Stream Deck + dials) ----------------------------
- * A background reader thread (runtime/hid_bridge.m on darwin) decodes USB-HID
- * reports into POD HIDEvent structs and pushes them into this lock-free SPSC
- * ring; the REPL main thread drains the ring in w_input_poll alongside stdin.
- * One producer (the HID callback thread) + one consumer (the main thread) makes
- * acquire/release sufficient — no mutex. The producer must never allocate
- * WValues; only the consumer boxes. A self-pipe lets the producer wake the
- * consumer's poll() so dial ticks have sub-millisecond latency. Cross-platform:
- * with no device the pipe stays -1 and w_input_poll just polls stdin. */
-#define HID_RING_CAP 256u                  /* power of two */
-static HIDEvent         g_hid_ring[HID_RING_CAP];
-static _Atomic uint32_t g_hid_head = 0;    /* consumer (main thread) */
-static _Atomic uint32_t g_hid_tail = 0;    /* producer (HID thread)  */
-int                     g_hid_pipe[2] = { -1, -1 };  /* see runtime.h */
-
-/* Producer side — called from the HID callback thread. POD only, no allocation.
- * On a full ring the newest event is dropped (one lost tick, harmless). */
-void w_hid_ring_push(HIDEvent ev) {
-    uint32_t tail = atomic_load_explicit(&g_hid_tail, memory_order_relaxed);
-    uint32_t next = (tail + 1u) & (HID_RING_CAP - 1u);
-    if (next == atomic_load_explicit(&g_hid_head, memory_order_acquire)) {
-        return;                            /* full → drop */
-    }
-    g_hid_ring[tail] = ev;
-    atomic_store_explicit(&g_hid_tail, next, memory_order_release);
-    if (g_hid_pipe[1] >= 0) {              /* best-effort wakeup (pipe is O_NONBLOCK) */
-        unsigned char b = 1;
-        ssize_t r = write(g_hid_pipe[1], &b, 1);
-        (void)r;
-    }
-}
-
-/* Consumer side — main thread only. Returns 1 and fills *out, or 0 if empty. */
-static int hid_ring_pop(HIDEvent *out) {
-    uint32_t head = atomic_load_explicit(&g_hid_head, memory_order_relaxed);
-    if (head == atomic_load_explicit(&g_hid_tail, memory_order_acquire)) {
-        return 0;                          /* empty */
-    }
-    *out = g_hid_ring[head];
-    atomic_store_explicit(&g_hid_head, (head + 1u) & (HID_RING_CAP - 1u),
-                          memory_order_release);
-    return 1;
-}
-
-/* Pack a decoded HID event into the tagged-int protocol below. kind >= 1 so the
- * result is always >= 0x10000, distinguishing it from keyboard bytes. */
-static int64_t hid_encode(HIDEvent ev) {
-    return ((int64_t)ev.kind << 16) | ((int64_t)ev.index << 8)
-           | (int64_t)((uint8_t)ev.value);   /* low8: ROTATE two's-complement int8; PRESS/KEY 0/1 */
-}
-
-/* Unified REPL input for the scrub loop. Returns the next event as a tagged int:
- *   -2          stdin EOF (Ctrl-D)
- *   -1          timeout / no event
- *   0..255      keyboard byte (same convention as w_read_key)
- *   >= 0x10000  device: (kind<<16) | (index<<8) | low8
- *                 kind 1 ROTATE: low8 = signed int8 tick delta (two's complement)
- *                 kind 2 PRESS : low8 = 0/1 (dial-button edge)
- *                 kind 3 KEY   : low8 = 0/1 (LCD-key edge)
- * Drains a queued dial event first (zero-latency path); otherwise blocks in ONE
- * poll() over both stdin and the HID self-pipe, up to timeout_ms (negative =
- * block forever). poll() before read() means VMIN=1 raw mode never blocks us. */
-WValue w_input_poll(int64_t timeout_ms) {
-    fflush(stdout);
-
-    HIDEvent ev;
-    if (hid_ring_pop(&ev)) return w_int(hid_encode(ev));
-
-    struct pollfd pfd[2];
-    pfd[0].fd = 0;             pfd[0].events = POLLIN; pfd[0].revents = 0;
-    pfd[1].fd = g_hid_pipe[0]; pfd[1].events = POLLIN; pfd[1].revents = 0;
-    nfds_t n = (g_hid_pipe[0] >= 0) ? 2 : 1;   /* keyboard-only when no device */
-
-    int r = poll(pfd, n, (int)timeout_ms);
-    if (r <= 0) return w_int(-1);              /* timeout or EINTR → nothing */
-
-    if (n == 2 && (pfd[1].revents & POLLIN)) { /* drain wake bytes (level-trigger) */
-        char drain[64];
-        while (read(g_hid_pipe[0], drain, sizeof drain) > 0) { }
-    }
-    if (hid_ring_pop(&ev)) return w_int(hid_encode(ev));
-
-    if (pfd[0].revents & POLLIN) {             /* fd 0 readable → read won't block */
-        unsigned char c;
-        ssize_t k = read(0, &c, 1);
-        if (k <= 0) return w_int(-2);          /* EOF (Ctrl-D) */
-        return w_int((int64_t)c);
-    }
-    return w_int(-1);
-}
-
-/* WEAK HID stubs (see the Metal stub block): real producer is hid_bridge.m,
- * linked only when the IR references bridge symbols; keyboard-only otherwise.
- * Original note: the real producer lives in hid_bridge.m,
- * which is compiled into the binary only on macOS. w_input_poll above still
- * works: g_hid_pipe stays {-1,-1}, so it polls stdin alone. */
-__attribute__((weak)) WValue w_hid_streamdeck_open(void)        { return W_NIL; }
-__attribute__((weak)) WValue w_hid_streamdeck_close(WValue dev) { (void)dev; return W_NIL; }
-__attribute__((weak)) WValue w_hid_device_present(WValue dev)   { (void)dev; return w_bool(0); }
-/* end HID stubs (weak) */
-
 /* ---- Dynamic loading (foundation for --jit / --hot eval backends) ----
  * Load freshly-compiled native code into the running process and call into it.
  * Handles and function pointers are passed as boxed ints; user pointers fit in
@@ -14501,6 +17175,7 @@ WValue __w_type(WValue v) {
     if (w_is_nil(v))    return w_string("Nil");
     if (w_is_bool(v))   return w_string("Boolean");
     if (w_is_int(v))    return w_string("Integer");
+    if (w_is_bigint(v)) return w_string("BigInt");
     if (w_is_double(v)) return w_string("Float");
     if (w_is_string(v) || w_is_rope(v)) return w_string("String");
     if (w_is_strbuf(v)) return w_string("StringBuffer");
@@ -19152,28 +21827,12 @@ static WValue w_ic_decimal_round(WValue r, WValue *a, int c) {
 
 static WValue w_ic_value_to_s(WValue r, WValue *a, int c) { (void)a; (void)c; return w_to_s(r); }
 
-static WValue w_ic_ipv4_to_i(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_to_i(r); }
-static WValue w_ic_ipv4_prefix(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_prefix(r); }
-static WValue w_ic_ipv4_cidr_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_cidr_p(r); }
 static WValue w_ic_ipv4_with_prefix(WValue r, WValue *a, int c) { return w_ipv4_with_prefix(r, c > 0 ? a[0] : W_NIL); }
-static WValue w_ic_ipv4_octet(WValue r, WValue *a, int c) { return w_ipv4_octet(r, c > 0 ? a[0] : W_NIL); }
 static WValue w_ic_ipv4_octets(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_octets(r); }
-static WValue w_ic_ipv4_a(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_octet(r, w_int(0)); }
-static WValue w_ic_ipv4_b(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_octet(r, w_int(1)); }
-static WValue w_ic_ipv4_c(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_octet(r, w_int(2)); }
-static WValue w_ic_ipv4_d(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_octet(r, w_int(3)); }
 static WValue w_ic_ipv4_network(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_network(r); }
 static WValue w_ic_ipv4_broadcast(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_broadcast(r); }
 static WValue w_ic_ipv4_netmask(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_netmask(r); }
 static WValue w_ic_ipv4_include(WValue r, WValue *a, int c) { return c > 0 ? w_ipv4_in_cidr(a[0], r) : W_FALSE; }
-static WValue w_ic_ipv4_private_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_private_p(r); }
-static WValue w_ic_ipv4_loopback_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_loopback_p(r); }
-static WValue w_ic_ipv4_link_local_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_link_local_p(r); }
-static WValue w_ic_ipv4_multicast_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_multicast_p(r); }
-static WValue w_ic_ipv4_unspecified_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_unspecified_p(r); }
-static WValue w_ic_ipv4_broadcast_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_broadcast_p(r); }
-static WValue w_ic_ipv4_reserved_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_reserved_p(r); }
-static WValue w_ic_ipv4_global_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_global_p(r); }
 
 static WValue w_ic_ipv6_prefix(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv6_prefix(r); }
 static WValue w_ic_ipv6_cidr_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv6_cidr_p(r); }
@@ -20013,31 +22672,14 @@ static WICEntry w_ic_decimal_table[] = {     /* 0xFFFD numeric tag */
 static WICEntry w_ic_ipv4_table[] = {
     {0, w_ic_value_to_s},
     {0, w_ic_value_to_s},
-    {0, w_ic_ipv4_to_i},
-    {0, w_ic_ipv4_prefix},
-    {0, w_ic_ipv4_cidr_q},
     {0, w_ic_ipv4_with_prefix},
-    {0, w_ic_ipv4_octet},
-    {0, w_ic_ipv4_octet},
     {0, w_ic_ipv4_octets},
-    {0, w_ic_ipv4_a},
-    {0, w_ic_ipv4_b},
-    {0, w_ic_ipv4_c},
-    {0, w_ic_ipv4_d},
     {0, w_ic_ipv4_network},
     {0, w_ic_ipv4_broadcast},
     {0, w_ic_ipv4_netmask},
     {0, w_ic_ipv4_netmask},
     {0, w_ic_ipv4_include},
     {0, w_ic_ipv4_include},
-    {0, w_ic_ipv4_private_q},
-    {0, w_ic_ipv4_loopback_q},
-    {0, w_ic_ipv4_link_local_q},
-    {0, w_ic_ipv4_multicast_q},
-    {0, w_ic_ipv4_unspecified_q},
-    {0, w_ic_ipv4_broadcast_q},
-    {0, w_ic_ipv4_reserved_q},
-    {0, w_ic_ipv4_global_q},
     {0, NULL}
 };
 
@@ -20366,31 +23008,14 @@ static void w_init_ic_tables(void) {
 
     w_ic_ipv4_table[0].name  = WN_to_s;
     w_ic_ipv4_table[1].name  = w_string("inspect");
-    w_ic_ipv4_table[2].name  = WN_to_i;
-    w_ic_ipv4_table[3].name  = w_string("prefix");
-    w_ic_ipv4_table[4].name  = w_string("cidr?");
-    w_ic_ipv4_table[5].name  = w_string("with_prefix");
-    w_ic_ipv4_table[6].name  = w_string("octet");
-    w_ic_ipv4_table[7].name  = WN_idx;
-    w_ic_ipv4_table[8].name  = w_string("octets");
-    w_ic_ipv4_table[9].name  = W_M1("a");
-    w_ic_ipv4_table[10].name = W_M1("b");
-    w_ic_ipv4_table[11].name = W_M1("c");
-    w_ic_ipv4_table[12].name = W_M1("d");
-    w_ic_ipv4_table[13].name = w_string("network");
-    w_ic_ipv4_table[14].name = w_string("broadcast");
-    w_ic_ipv4_table[15].name = w_string("netmask");
-    w_ic_ipv4_table[16].name = W_M4("mask");
-    w_ic_ipv4_table[17].name = WN_include_q;
-    w_ic_ipv4_table[18].name = w_string("contains?");
-    w_ic_ipv4_table[19].name = w_string("private?");
-    w_ic_ipv4_table[20].name = w_string("loopback?");
-    w_ic_ipv4_table[21].name = w_string("link_local?");
-    w_ic_ipv4_table[22].name = w_string("multicast?");
-    w_ic_ipv4_table[23].name = w_string("unspecified?");
-    w_ic_ipv4_table[24].name = w_string("broadcast?");
-    w_ic_ipv4_table[25].name = w_string("reserved?");
-    w_ic_ipv4_table[26].name = w_string("global?");
+    w_ic_ipv4_table[2].name  = w_string("with_prefix");
+    w_ic_ipv4_table[3].name  = w_string("octets");
+    w_ic_ipv4_table[4].name  = w_string("network");
+    w_ic_ipv4_table[5].name  = w_string("broadcast");
+    w_ic_ipv4_table[6].name  = w_string("netmask");
+    w_ic_ipv4_table[7].name  = W_M4("mask");
+    w_ic_ipv4_table[8].name  = WN_include_q;
+    w_ic_ipv4_table[9].name  = w_string("contains?");
 
     w_ic_ipv6_table[0].name  = WN_to_s;
     w_ic_ipv6_table[1].name  = w_string("inspect");
@@ -20499,8 +23124,24 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
     stack_args.cap = argc;
     WValue result = w_method_dispatch(recv, name, &stack_args, W_NIL);
 
-    /* Populate cache for user-class methods (builtins handled above). */
-    if (key >= 0x100 && w_is_instance(recv)) {
+    /* Populate the monomorphic cache for the packed IPv4 class used by this
+     * native-core migration. Keep this deliberately narrow: some other
+     * primitive keys have earlier special dispatch (notably Closure#call), so
+     * blindly caching their type-class method after the fact can change the
+     * second call's target. */
+    if (key == 0xE5) {
+        uint16_t cid_slot = g_type_class[key];
+        if (cid_slot) {
+            WClass *klass = g_class_table[cid_slot - 1];
+            WMethod *m = w_method_lookup_arity(klass, name, argc + 1);
+            if (!m) m = w_method_lookup(klass, name);
+            if (m) {
+                cache->type_key = key;
+                cache->fn_ptr = m->fn_ptr;
+                cache->arity = m->arity - 1; /* subtract self */
+            }
+        }
+    } else if (key >= 0x100 && w_is_instance(recv)) {
         /* Cache user class methods */
         WObject *obj = (WObject *)w_as_ptr(recv);
         WMethod *m = w_method_lookup_arity(g_class_table[obj->class_id], name, argc + 1);
@@ -22454,6 +25095,8 @@ WValue w_array_new_aligned(WValue element_bits_v, WValue size_v) {
     return w_box_ptr(a, W_SUBTAG_ARRAY);
 }
 
+
+
 /* Zero-copy view: WArray that borrows `slots` instead of owning it.
  * size == cap so push/grow paths don't try to realloc. Phase 4: views over
  * regions with >2^31 elements must go through `w_big_array_view` — this
@@ -22956,6 +25599,112 @@ static WValue array_elementwise_into(WValue out_v, WValue lhs, WValue rhs, EltOp
 /* Value-semantics wrapper: fresh result buffer each call. */
 static WValue array_elementwise(WValue lhs, WValue rhs, EltOp op) {
     return array_elementwise_into(W_NIL, lhs, rhs, op);
+}
+
+/* ---- Fused elementwise lowering support (compiler/lib/lowering/ops.w) ----
+ * The compiler fuses trees of float elementwise ops (.+ .- .* ./ and array
+ * sin/cos/sqrt) into one loop over raw f64 buffers. These two helpers give
+ * that loop allocation and size semantics identical to the kernels above. */
+
+WValue w_array_new_uninit_sized(int64_t element_bits, int64_t n) {
+    WValue v = w_array_new_uninit(element_bits, n);
+    WArray *a = (WArray *)w_as_ptr(v);
+    a->size = (int32_t)n;
+    return v;
+}
+
+WValue w_elementwise_size_check(WValue lhs, WValue rhs) {
+    WArray *la = (WArray *)w_as_ptr(lhs);
+    WArray *ra = (WArray *)w_as_ptr(rhs);
+    if (ra->size != la->size) {
+        w_raise(w_string("elementwise op: lhs.size != rhs.size"));
+    }
+    return W_NIL;
+}
+
+/* ---- Fused elementwise auto-parallelization ----
+ *
+ * The compiler outlines each fused loop body into a worker
+ *     int64_t __w_fuse_worker_N(int64_t blk, int64_t lo, int64_t hi)
+ * (blk = raw pointer to an i64 arg block: [out WValue, leaf-array WValues...,
+ * scalar f64 bit patterns...]) and gates on size at the site: below the
+ * threshold the loop runs inline single-core; at/above it,
+ * w_fused_parallel_run partitions [0, n) across OS threads.
+ *
+ * Thresholds are from the measured sweep in doc/scientific-computing/
+ * fusion.md (M-series, sin-chain): single-core wins below ~32k elements
+ * (pthread spawn+join floor ~30-60us), 4 threads win 32k-128k, 8 from
+ * ~128k up. Env overrides: TUNGSTEN_FUSED_MT_MIN, TUNGSTEN_FUSED_T8_MIN,
+ * TUNGSTEN_FUSED_THREADS (<=1 disables threading entirely). */
+
+typedef int64_t (*WFusedWorkerFn)(int64_t blk, int64_t lo, int64_t hi);
+
+static int64_t w_fused_mt_min_v = -1;
+static int64_t w_fused_t8_min_v = -1;
+static int64_t w_fused_max_threads_v = -1;
+
+static void w_fused_init_thresholds(void) {
+    if (w_fused_mt_min_v >= 0) return;
+    const char *e;
+    int64_t mt_min = 32768, t8_min = 131072, max_t = 8;
+    if ((e = getenv("TUNGSTEN_FUSED_MT_MIN")) && *e) mt_min = strtoll(e, NULL, 10);
+    if ((e = getenv("TUNGSTEN_FUSED_T8_MIN")) && *e) t8_min = strtoll(e, NULL, 10);
+    if ((e = getenv("TUNGSTEN_FUSED_THREADS")) && *e) max_t = strtoll(e, NULL, 10);
+    long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+    if (ncpu > 0 && max_t > ncpu) max_t = ncpu;
+    if (max_t > 16) max_t = 16;
+    if (max_t < 1) max_t = 1;
+    w_fused_t8_min_v = t8_min;
+    w_fused_max_threads_v = max_t;
+    /* max_t <= 1 disables the parallel path entirely (should_mt never fires) */
+    w_fused_mt_min_v = (max_t <= 1) ? INT64_MAX : mt_min;
+}
+
+int64_t w_fused_should_mt(int64_t n) {
+    w_fused_init_thresholds();
+    return n >= w_fused_mt_min_v ? 1 : 0;
+}
+
+typedef struct {
+    WFusedWorkerFn fn;
+    int64_t blk, lo, hi;
+} WFusedPart;
+
+static void *w_fused_part_main(void *p) {
+    WFusedPart *a = (WFusedPart *)p;
+    a->fn(a->blk, a->lo, a->hi);
+    return NULL;
+}
+
+int64_t w_fused_parallel_run(int64_t fn_addr, int64_t blk, int64_t n) {
+    w_fused_init_thresholds();
+    WFusedWorkerFn fn = (WFusedWorkerFn)(uintptr_t)fn_addr;
+    int64_t nt = (n >= w_fused_t8_min_v) ? 8 : 4;
+    if (nt > w_fused_max_threads_v) nt = w_fused_max_threads_v;
+    if (nt <= 1 || n < nt) {
+        fn(blk, 0, n);
+        return 0;
+    }
+    pthread_t th[16];
+    WFusedPart parts[16];
+    for (int64_t t = 0; t < nt; t++) {
+        parts[t].fn = fn;
+        parts[t].blk = blk;
+        parts[t].lo = n * t / nt;
+        parts[t].hi = n * (t + 1) / nt;
+    }
+    /* Partition 0 runs on the calling thread — one fewer spawn. */
+    for (int64_t t = 1; t < nt; t++) {
+        if (pthread_create(&th[t], NULL, w_fused_part_main, &parts[t]) != 0) {
+            /* Spawn failure: run the remainder inline. */
+            for (int64_t u = t; u < nt; u++) fn(blk, parts[u].lo, parts[u].hi);
+            nt = t;
+            break;
+        }
+    }
+    fn(blk, parts[0].lo, parts[0].hi);
+    for (int64_t t = 1; t < nt; t++) pthread_join(th[t], NULL);
+    return 0;
 }
 
 /* Destination-reuse wrapper. `*slot` holds the array currently bound to the
@@ -24762,6 +27511,133 @@ __attribute__((weak)) WValue w_blas_vexp_f32(WValue a, WValue o, WValue n) {
 }
 __attribute__((weak)) WValue w_blas_vtanh_f32(WValue a, WValue o, WValue n) {
     (void)a; (void)o; (void)n; w_raise(w_string("blas_vtanh: BLAS bridge not linked or no Accelerate")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_vlog_f32(WValue a, WValue o, WValue n) {
+    (void)a; (void)o; (void)n; w_raise(w_string("blas_vlog: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_vsqrt_f32(WValue a, WValue o, WValue n) {
+    (void)a; (void)o; (void)n; w_raise(w_string("blas_vsqrt: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_saxpy(WValue a, WValue x, WValue y, WValue n) {
+    (void)a; (void)x; (void)y; (void)n; w_raise(w_string("saxpy: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_sgemv_n(WValue a, WValue x, WValue y, WValue m, WValue n) {
+    (void)a; (void)x; (void)y; (void)m; (void)n; w_raise(w_string("sgemv: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_vadd_f32(WValue a, WValue b, WValue o, WValue n) {
+    (void)a; (void)b; (void)o; (void)n; w_raise(w_string("vadd: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_vmul_f32(WValue a, WValue b, WValue o, WValue n) {
+    (void)a; (void)b; (void)o; (void)n; w_raise(w_string("vmul: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_vsmul_f32(WValue a, WValue s, WValue o, WValue n) {
+    (void)a; (void)s; (void)o; (void)n; w_raise(w_string("vsmul: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_vfill_f32(WValue o, WValue s, WValue n) {
+    (void)o; (void)s; (void)n; w_raise(w_string("vfill: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_dgesv(WValue a, WValue b, WValue n) {
+    (void)a; (void)b; (void)n; w_raise(w_string("dgesv: BLAS/LAPACK bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_dpotrf(WValue a, WValue n) {
+    (void)a; (void)n; w_raise(w_string("dpotrf: BLAS/LAPACK bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_fft_f32(WValue re, WValue im, WValue n, WValue inv) {
+    (void)re; (void)im; (void)n; (void)inv;
+    w_raise(w_string("fft_f32: BLAS bridge not linked (vDSP FFT is macOS Accelerate)"));
+    return W_NIL;
+}
+
+/* ---- SparseBLAS / Sparse Solvers weak stubs (strong in sparse_bridge.c) ---- */
+__attribute__((weak)) WValue w_sparse_spmv_f32(WValue rows, WValue cols,
+    WValue indptr, WValue indices, WValue data, WValue x, WValue y) {
+    (void)rows; (void)cols; (void)indptr; (void)indices; (void)data; (void)x; (void)y;
+    w_raise(w_string("sparse_spmv: SparseBLAS bridge not linked (macOS Accelerate Sparse/BLAS)"));
+    return W_NIL;
+}
+__attribute__((weak)) WValue w_sparse_solve_qr_f64(WValue rows, WValue cols,
+    WValue row, WValue col, WValue data, WValue b, WValue x) {
+    (void)rows; (void)cols; (void)row; (void)col; (void)data; (void)b; (void)x;
+    w_raise(w_string("sparse_solve_qr: Sparse Solvers bridge not linked (macOS Accelerate Sparse/Solve)"));
+    return W_NIL;
+}
+__attribute__((weak)) WValue w_sparse_solve_chol_f64(WValue n,
+    WValue row, WValue col, WValue data, WValue b, WValue x) {
+    (void)n; (void)row; (void)col; (void)data; (void)b; (void)x;
+    w_raise(w_string("sparse_solve_chol: Sparse Solvers bridge not linked (macOS Accelerate Sparse/Solve)"));
+    return W_NIL;
+}
+
+/* ---- Scientific I/O (strong in sci_io_native.c when linked) ---- */
+__attribute__((weak)) WValue w_sci_fits_f32_be(WValue path, WValue off, WValue n) {
+    (void)path; (void)off; (void)n;
+    w_raise(w_string("SciIO FITS f32: link runtime/sci_io_native.c"));
+    return W_NIL;
+}
+__attribute__((weak)) WValue w_sci_mat_level5_ok(WValue path) {
+    (void)path; return w_int(0);
+}
+__attribute__((weak)) WValue w_sci_hdf5_write_f32_1d(WValue p, WValue d) {
+    (void)p; (void)d; w_raise(w_string("SciIO: link sci_io_native.c")); return W_NIL;
+}
+__attribute__((weak)) WValue w_sci_hdf5_read_f32_1d(WValue p) {
+    (void)p; w_raise(w_string("SciIO: link sci_io_native.c")); return W_NIL;
+}
+__attribute__((weak)) WValue w_sci_netcdf_write_f32_1d(WValue p, WValue d) {
+    (void)p; (void)d; w_raise(w_string("SciIO: link sci_io_native.c")); return W_NIL;
+}
+__attribute__((weak)) WValue w_sci_netcdf_read_f32_1d(WValue p) {
+    (void)p; w_raise(w_string("SciIO: link sci_io_native.c")); return W_NIL;
+}
+__attribute__((weak)) WValue w_sci_hdf5_write_datasets(WValue p, WValue n, WValue a) {
+    (void)p;(void)n;(void)a; w_raise(w_string("SciIO: link sci_io_native.c")); return W_NIL;
+}
+__attribute__((weak)) WValue w_sci_hdf5_list(WValue p) {
+    (void)p; w_raise(w_string("SciIO: link sci_io_native.c")); return W_NIL;
+}
+__attribute__((weak)) WValue w_sci_hdf5_read_named(WValue p, WValue n) {
+    (void)p;(void)n; w_raise(w_string("SciIO: link sci_io_native.c")); return W_NIL;
+}
+__attribute__((weak)) WValue w_sci_parquet_write_f32(WValue p, WValue n, WValue a) {
+    (void)p;(void)n;(void)a; w_raise(w_string("SciIO: link sci_io_native.c")); return W_NIL;
+}
+__attribute__((weak)) WValue w_sci_parquet_read_f32(WValue p, WValue n) {
+    (void)p;(void)n; w_raise(w_string("SciIO: link sci_io_native.c")); return W_NIL;
+}
+__attribute__((weak)) WValue w_sci_zarr_write_f32_1d(WValue d, WValue a) {
+    (void)d;(void)a; w_raise(w_string("SciIO: link sci_io_native.c")); return W_NIL;
+}
+__attribute__((weak)) WValue w_sci_zarr_read_f32_1d(WValue d) {
+    (void)d; w_raise(w_string("SciIO: link sci_io_native.c")); return W_NIL;
+}
+
+
+
+/* ---- CUDA host bridge weak stubs (strong defs in cuda_bridge.cu) ---- */
+__attribute__((weak)) WValue w_cuda_available(void) { return w_int(0); }
+__attribute__((weak)) WValue w_cuda_device_count(void) { return w_int(0); }
+__attribute__((weak)) WValue w_cuda_malloc(WValue n) {
+    (void)n; w_raise(w_string("cuda_malloc: CUDA bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_cuda_free(WValue p) {
+    (void)p; w_raise(w_string("cuda_free: CUDA bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_cuda_memcpy_h2d(WValue d, WValue s, WValue n) {
+    (void)d; (void)s; (void)n; w_raise(w_string("cuda_memcpy_h2d: CUDA bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_cuda_memcpy_d2h(WValue d, WValue s, WValue n) {
+    (void)d; (void)s; (void)n; w_raise(w_string("cuda_memcpy_d2h: CUDA bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_cuda_synchronize(void) {
+    w_raise(w_string("cuda_synchronize: CUDA bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_cuda_device_name(WValue i) {
+    (void)i; return w_string("no-cuda");
+}
+__attribute__((weak)) WValue w_cuda_launch(WValue name, WValue gx, WValue gy, WValue gz,
+                                           WValue bx, WValue by, WValue bz, WValue args) {
+    (void)name; (void)gx; (void)gy; (void)gz; (void)bx; (void)by; (void)bz; (void)args;
+    w_raise(w_string("cuda_launch: CUDA bridge not linked")); return W_NIL;
 }
 
 /* ---------------------------------------------------------------------
@@ -27877,6 +30753,13 @@ W_BRIDGE_STUB WValue w_metal_buffer_read_f16(WValue buffer, WValue index) {
     (void)buffer; (void)index;
     w_raise(w_string("Metal: not available on this platform"));
     return W_NIL;
+}
+/* Fused elementwise GPU auto-offload: no Metal linked → never offload,
+ * the site falls through to the CPU parallel path. */
+W_BRIDGE_STUB int64_t w_fused_gpu_run(int64_t site_id, WValue msl, int64_t blk,
+                                      int64_t n_arrs, int64_t n_scls, int64_t n) {
+    (void)site_id; (void)msl; (void)blk; (void)n_arrs; (void)n_scls; (void)n;
+    return 0;
 }
 W_BRIDGE_STUB WValue w_metal_buffer_write_i32(WValue buffer, WValue index, WValue value) {
     (void)buffer; (void)index; (void)value;

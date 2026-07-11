@@ -505,6 +505,27 @@ use hashing
   out << declare_fn("w_math_ldexp", wv, wv2)
   out << declare_fn("w_math_atan2", wv, wv2)
 
+  # Raw libm — targets of :call_libm_f64 (the Math.* fast path on unboxed
+  # operands). memory(none) is required for the loop vectorizer to widen
+  # these to -fveclib SIMD variants (_simd_sin_d2 & co.) — a call that may
+  # write memory only gets scalarized inside the vector loop. It is safe
+  # here even where libm sets errno on range errors (glibc exp/log/pow):
+  # Tungsten exposes no errno surface, so that write is never observable.
+  libm_attrs = "nounwind willreturn memory(none)"
+  dd = join_arg_types2("double", "double")
+  out << declare_fn_attrs("sin", "double", "double", libm_attrs)
+  out << declare_fn_attrs("cos", "double", "double", libm_attrs)
+  out << declare_fn_attrs("tan", "double", "double", libm_attrs)
+  out << declare_fn_attrs("exp", "double", "double", libm_attrs)
+  out << declare_fn_attrs("log", "double", "double", libm_attrs)
+  out << declare_fn_attrs("sqrt", "double", "double", libm_attrs)
+  out << declare_fn_attrs("floor", "double", "double", libm_attrs)
+  out << declare_fn_attrs("ceil", "double", "double", libm_attrs)
+  out << declare_fn_attrs("round", "double", "double", libm_attrs)
+  out << declare_fn_attrs("fabs", "double", "double", libm_attrs)
+  out << declare_fn_attrs("pow", "double", dd, libm_attrs)
+  out << declare_fn_attrs("atan2", "double", dd, libm_attrs)
+
   # Float bit-cast
   out << declare_fn("w_float_from_u32_bits", wv, wv)
   out << declare_fn("w_float_to_u32_bits", wv, wv)
@@ -739,6 +760,8 @@ use hashing
     # strings — neither appears as a :call_direct instruction.
     ["w_node_alloc", "w_ast_freeze_if_array"]
   when :call_direct_i64_ptr1, :call_direct_void_ptr1
+    [inst[:name]]
+  when :call_libm_f64
     [inst[:name]]
   when :call_loc_set_col
     ["__w_loc_set_col"]
@@ -2167,6 +2190,99 @@ use hashing
   # lhs/rhs/value operand fields for mem2reg/content-hash safety.
   when :fma_f64
     inst[:temp] + " = call double @llvm.fma.f64(double " + inst[:lhs] + ", double " + inst[:rhs] + ", double " + inst[:value] + ")"
+  # Raw libm call — Math.* fast path on unboxed operands (lowering/
+  # method_call.w). Unary rides on :value, binary (pow/atan2) on :lhs/:rhs —
+  # all three field names are walked by apply_subst and content_hash, so
+  # mem2reg promotion of the operand loads stays correct (see :fmuladd_f64).
+  when :call_libm_f64
+    if inst[:value] != nil
+      inst[:temp] + " = call double @" + inst[:name] + "(double " + inst[:value] + ")"
+    else
+      inst[:temp] + " = call double @" + inst[:name] + "(double " + inst[:lhs] + ", double " + inst[:rhs] + ")"
+
+  # Fused-elementwise loop ops (lowering/ops.w try_fuse_elementwise). The
+  # header decode is hoisted out of the fused loop deliberately: the loop
+  # body the fuser emits contains no push/clear/realloc, so slots/start are
+  # invariant for its duration — unlike typed_array_get_inline sites, which
+  # must re-read them per access. Operands ride on :value/:ptr/:index only
+  # (fields apply_subst and content_hash already walk).
+  when :ta_f64_elems_ptr
+    t = inst[:temp]
+    v = inst[:value]
+    parts = StringBuffer(420)
+    parts << t + ".hdr = and i64 " + v + ", -16\n  "
+    parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
+    parts << t + ".slp = getelementptr i8, ptr " + t + ".hp, i64 16\n  "
+    parts << t + ".slots = load ptr, ptr " + t + ".slp, align 8\n  "
+    parts << t + ".stp = getelementptr i8, ptr " + t + ".hp, i64 4\n  "
+    parts << t + ".st32 = load i32, ptr " + t + ".stp, align 4\n  "
+    parts << t + ".st = sext i32 " + t + ".st32 to i64\n  "
+    parts << t + " = getelementptr double, ptr " + t + ".slots, i64 " + t + ".st"
+    parts.to_s()
+  when :ta_size_raw
+    t = inst[:temp]
+    v = inst[:value]
+    parts = StringBuffer(240)
+    parts << t + ".hdr = and i64 " + v + ", -16\n  "
+    parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
+    parts << t + ".szp = getelementptr i8, ptr " + t + ".hp, i64 8\n  "
+    parts << t + ".sz32 = load i32, ptr " + t + ".szp, align 4\n  "
+    parts << t + " = sext i32 " + t + ".sz32 to i64"
+    parts.to_s()
+  when :load_f64_at
+    t = inst[:temp]
+    t + ".p = getelementptr double, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  " + t + " = load double, ptr " + t + ".p, align 8"
+  when :store_f64_at
+    t = inst[:temp]
+    t + " = getelementptr double, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  store double " + inst[:value] + ", ptr " + t + ", align 8"
+  # f32 variants: 4-byte stride, fpext on load / fptrunc on store so the
+  # fused per-element computation stays in f64 (matching the CPU kernels,
+  # which read f32 elements into doubles).
+  when :load_f32_at
+    t = inst[:temp]
+    t + ".p = getelementptr float, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  " + t + ".f32 = load float, ptr " + t + ".p, align 4\n  " + t + " = fpext float " + t + ".f32 to double"
+  when :store_f32_at
+    t = inst[:temp]
+    t + ".tr = fptrunc double " + inst[:value] + " to float\n  " + t + " = getelementptr float, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  store float " + t + ".tr, ptr " + t + ", align 4"
+  when :load_i64_at
+    t = inst[:temp]
+    t + ".p = getelementptr i64, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  " + t + " = load i64, ptr " + t + ".p, align 8"
+  # Element-0 address of a typed array as a raw i64 — the arg block handed
+  # to w_fused_parallel_run / w_fused_gpu_run. 8-byte stride (i64 blocks).
+  when :ta_data_addr
+    t = inst[:temp]
+    v = inst[:value]
+    parts = StringBuffer(400)
+    parts << t + ".hdr = and i64 " + v + ", -16\n  "
+    parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
+    parts << t + ".slp = getelementptr i8, ptr " + t + ".hp, i64 16\n  "
+    parts << t + ".slots = load ptr, ptr " + t + ".slp, align 8\n  "
+    parts << t + ".stp = getelementptr i8, ptr " + t + ".hp, i64 4\n  "
+    parts << t + ".st32 = load i32, ptr " + t + ".stp, align 4\n  "
+    parts << t + ".st = sext i32 " + t + ".st32 to i64\n  "
+    parts << t + ".ep = getelementptr i64, ptr " + t + ".slots, i64 " + t + ".st\n  "
+    parts << t + " = ptrtoint ptr " + t + ".ep to i64"
+    parts.to_s()
+  # f32 element-pointer decode (float stride) — sibling of :ta_f64_elems_ptr.
+  when :ta_f32_elems_ptr
+    t = inst[:temp]
+    v = inst[:value]
+    parts = StringBuffer(420)
+    parts << t + ".hdr = and i64 " + v + ", -16\n  "
+    parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
+    parts << t + ".slp = getelementptr i8, ptr " + t + ".hp, i64 16\n  "
+    parts << t + ".slots = load ptr, ptr " + t + ".slp, align 8\n  "
+    parts << t + ".stp = getelementptr i8, ptr " + t + ".hp, i64 4\n  "
+    parts << t + ".st32 = load i32, ptr " + t + ".stp, align 4\n  "
+    parts << t + ".st = sext i32 " + t + ".st32 to i64\n  "
+    parts << t + " = getelementptr float, ptr " + t + ".slots, i64 " + t + ".st"
+    parts.to_s()
+  when :inttoptr_i64
+    inst[:temp] + " = inttoptr i64 " + inst[:value] + " to ptr"
+  # Address of a module function as raw i64 — passed to the runtime fused
+  # partitioner, which calls it back as int64_t(*)(int64_t,int64_t,int64_t).
+  when :fn_addr_i64
+    inst[:temp] + " = ptrtoint ptr @" + inst[:name] + " to i64"
   when :fneg_f64
     inst[:temp] + " = fneg double " + inst[:value]
 

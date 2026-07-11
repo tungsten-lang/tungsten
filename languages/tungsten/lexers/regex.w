@@ -1,5 +1,10 @@
-# Legacy character-at-a-time Tungsten lexer.
-# The packed compiler lexer imports regex_base directly for shared scanner helpers.
+# Self-hosted reference port of the Ruby regex lexer's token semantics.
+#
+# Ruby implements the reference with StringScanner regular expressions; this
+# Tungsten version advances a codepoint cursor explicitly because it also acts
+# as an independent oracle for the packed production lexer. RegexBase owns the
+# literal scanners and generated unit-name table, while this file owns token
+# dispatch and contextual operator classification.
 
 use regex_base
 
@@ -229,7 +234,10 @@ use regex_base
     # Class name (uppercase start)
     if is_upper?(cp)
       word = scan_class_name()
-      emit(:NAME, word)
+      if constant_name?(word)
+        emit(:CONSTANT, word)
+      else
+        emit(:NAME, word)
       return nil
 
     # Signed currency literal: -$5.25, +€100, -C$10
@@ -347,6 +355,11 @@ use regex_base
       if two == "=>"
         @pos += 2
         emit(:FAT_ARROW, "=>")
+        return nil
+
+      if two == "<>"
+        @pos += 2
+        emit(:SWAP, "<>")
         return nil
 
       if two == "=="
@@ -625,6 +638,16 @@ use regex_base
       return nil
 
     # Greek/math symbols as identifiers: π, τ, ∞, etc.
+    if ch == "±"
+      @pos += 1
+      emit(:PLUS_MINUS, ch)
+      return nil
+
+    if ch == "√"
+      @pos += 1
+      emit(:SQRT, ch)
+      return nil
+
     if is_greek_math?(ch)
       word = StringBuffer(8)
       while @pos < @char_count && (is_greek_math?(@chars[@pos]) || is_subscript?(@chars[@pos]))
@@ -633,13 +656,24 @@ use regex_base
       emit(:ID, word.to_s())
       return nil
 
+    # Unicode middle dot is the dot-product / quantity-composition operator.
+    if ch == "·" || ch == "⋅"
+      @pos += 1
+      emit(:DOT_PRODUCT, ch)
+      return nil
+
     # Superscript digits: ⁰¹²³⁴⁵⁶⁷⁸⁹
     if is_superscript_digit?(ch)
       word = StringBuffer(8)
+      exponent = 0
       while @pos < @char_count && is_superscript_digit?(@chars[@pos])
+        exponent = exponent * 10 + superscript_value(@chars[@pos])
         word << @chars[@pos]
         @pos += 1
-      emit(:SUPERSCRIPT, word.to_s())
+      if is_value_type?(@last_token_type)
+        emit(:EXPONENT, exponent)
+      else
+        emit(:SUPERSCRIPT, word.to_s())
       return nil
 
     # Identifier or keyword
@@ -649,7 +683,11 @@ use regex_base
         raise {rt: :compile_error, code: :E_LEX_RESERVED_IDENT, message: "'__' is not allowed in identifiers (reserved for magic constants)", file: @file, row: @line, col: @col, span_length: word.size()}
       if word.starts_with?("_w_")
         raise {rt: :compile_error, code: :E_LEX_RESERVED_IDENT, message: "'_w_' prefix is reserved for internal use", file: @file, row: @line, col: @col, span_length: word.size()}
-      if is_keyword?(word)
+      if word == "and"
+        emit(:AND, word)
+      elsif word == "or"
+        emit(:OR, word)
+      elsif is_keyword?(word)
         use_statement = @last_token_type == nil || @last_token_type == :NEWLINE || @last_token_type == :INDENT || @last_token_type == :DEDENT || @last_token_type == :SEMICOLON
         if word == "use" && use_statement
           emit(:KEYWORD, word)
@@ -774,6 +812,17 @@ use regex_base
     if @pos < @char_count && (@chars[@pos] == "?" || @chars[@pos] == "!")
       word << @chars[@pos]
       @pos += 1
+    # Prime-property notation: x' is one identifier when the apostrophe
+    # cannot be opening a quoted string.
+    if @pos < @char_count && @chars[@pos] == "'"
+      next_pos = @pos + 1
+      joins = next_pos >= @char_count
+      if !joins
+        nc = @chars[next_pos]
+        joins = nc != "'" && nc != "\"" && !is_alpha?(@lc[next_pos]) && !is_digit?(@lc[next_pos]) && nc != "_"
+      if joins
+        word << "'"
+        @pos += 1
     # Arity suffix: /N, /*, /&
     if @pos < @char_count && @chars[@pos] == "/"
       nxt_pos = @pos + 1
@@ -790,6 +839,37 @@ use regex_base
             word << @chars[@pos]
             @pos += 1
     word.to_s()
+
+  -> constant_name?(word)
+    return false if word.size() == 0
+    i = 0
+    while i < word.size()
+      ch = word[i]
+      if !((ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_")
+        return false
+      i += 1
+    true
+
+  -> superscript_value(ch)
+    if ch == "¹"
+      return 1
+    if ch == "²"
+      return 2
+    if ch == "³"
+      return 3
+    if ch == "⁴"
+      return 4
+    if ch == "⁵"
+      return 5
+    if ch == "⁶"
+      return 6
+    if ch == "⁷"
+      return 7
+    if ch == "⁸"
+      return 8
+    if ch == "⁹"
+      return 9
+    0
 
   -> scan_class_name
     word = StringBuffer(16)

@@ -10,6 +10,11 @@ use ../languages/tungsten/lexers/regex
 use ../languages/tungsten/lexers/lex32
 use ../languages/tungsten/lexers/wtoken32
 
+# See compiler/lex_parity.w: keep the gated LexChar tables linked even though
+# String#lchs reaches the runtime through an unnamed inline-cache slot.
+-> lexchars_link_marker
+  nil
+
 args = argv()
 if args.size() == 0
   << "usage: bench_lex <file.w> [rounds]"

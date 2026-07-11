@@ -137,13 +137,68 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
   m["w_array_view_raw"] = true           # builds a new view wrapper
   m["w_array_as_metal_buffer"] = true    # creates an MTLBuffer wrap
 
-  # ---- BLAS bridges (write to caller's C buffer) ----
+  # ---- BLAS / LAPACK / FFT bridges (write to caller's C buffer) ----
   m["w_blas_sgemm_nn"] = true
   m["w_blas_dgemm_nn"] = true
+  m["w_blas_dgesv"] = true
+  m["w_blas_dpotrf"] = true
+  m["w_blas_fft_f32"] = true
+  m["w_blas_sum_f32"] = true
+  m["w_blas_dot_f32"] = true
+  m["w_blas_sumsq_f32"] = true
+  m["w_blas_vsin_f32"] = true
+  m["w_blas_vcos_f32"] = true
+  m["w_blas_vexp_f32"] = true
+  m["w_blas_vtanh_f32"] = true
+  m["w_blas_vlog_f32"] = true
+  m["w_blas_vsqrt_f32"] = true
+  m["w_blas_saxpy"] = true
+  m["w_blas_sgemv_n"] = true
+  m["w_blas_vadd_f32"] = true
+  m["w_blas_vmul_f32"] = true
+  m["w_blas_vsmul_f32"] = true
+  m["w_blas_vfill_f32"] = true
   m["w_mat4_mul_f32"] = true
   m["w_vec4_add_f32"] = true
   m["w_vec4_mul_f32"] = true
   m["w_vec4_dot_f32"] = true
+
+  m["w_sparse_spmv_f32"] = true
+  m["w_sparse_solve_qr_f64"] = true
+  m["w_sparse_solve_chol_f64"] = true
+
+  m["w_sci_fits_f32_be"] = true
+  m["w_sci_mat_level5_ok"] = true
+  m["w_sci_hdf5_superblock"] = true
+  m["w_sci_hdf5_write_f32_1d"] = true
+  m["w_sci_hdf5_read_f32_1d"] = true
+  m["w_sci_netcdf_write_f32_1d"] = true
+  m["w_sci_netcdf_read_f32_1d"] = true
+  m["w_sci_zarr_read_f32_1d"] = true
+  m["w_sci_zarr_write_f32_1d"] = true
+  m["w_sci_parquet_read_f32"] = true
+  m["w_sci_parquet_write_f32"] = true
+  m["w_sci_hdf5_read_named"] = true
+  m["w_sci_hdf5_list"] = true
+  m["w_sci_hdf5_write_datasets"] = true
+  m["w_tensor_zeros_f32"] = true
+  m["w_tensor_at_f32"] = true
+  m["w_tensor_set_f32"] = true
+  m["w_tensor_shape"] = true
+  m["w_tensor_rank"] = true
+  m["w_tensor_view_f32"] = true
+  m["w_tensor_slice0_f32"] = true
+
+  # ---- CUDA host bridge ----
+  m["w_cuda_available"] = true
+  m["w_cuda_device_count"] = true
+  m["w_cuda_malloc"] = true
+  m["w_cuda_free"] = true
+  m["w_cuda_memcpy_h2d"] = true
+  m["w_cuda_memcpy_d2h"] = true
+  m["w_cuda_synchronize"] = true
+  m["w_cuda_device_name"] = true
+  m["w_cuda_launch"] = true
 
   # ---- MLX bridges (graph nodes / GPU dispatches with side effects) ----
   m["w_mlx_sgemm_nn"] = true
@@ -156,6 +211,23 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
   m["w_mlxb_load_safetensors"] = true
   m["w_mlxb_quantized_matmul_nvfp4"] = true
   m["w_mlxb_tensor_count"] = true
+  m["w_mlx_add_f32"] = true
+  m["w_mlx_mul_f32"] = true
+  m["w_mlx_sub_f32"] = true
+  m["w_mlx_div_f32"] = true
+  m["w_mlx_exp_f32"] = true
+  m["w_mlx_log_f32"] = true
+  m["w_mlx_sqrt_f32"] = true
+  m["w_mlx_tanh_f32"] = true
+  m["w_mlx_sum_f32"] = true
+  m["w_mlx_max_f32"] = true
+  m["w_mlx_softmax_rows_f32"] = true
+  m["w_mlx_fft_f32"] = true
+  m["w_mlx_random_uniform_f32"] = true
+  m["w_mlx_random_normal_f32"] = true
+  m["w_mlx_eval"] = true
+  m["w_mlx_compile_begin"] = true
+  m["w_mlx_compile_end"] = true
 
   # ---- MPS / MPSGraph bridges ----
   m["w_mps_sgemm_nn"] = true

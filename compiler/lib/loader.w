@@ -423,6 +423,11 @@ use parser
     if t == :trait_include && node.name != nil
       consider_autoload_name(node.name, defined, registry, seen, pending)
     if t == :class_def
+      # `+ Name` is a reopen when Name is supplied by core. Load the core
+      # definition before the user's body even though collect_defined_names
+      # has already seen this declaration; otherwise the partial user class
+      # suppresses autoload and replaces the primitive dispatch surface.
+      consider_autoload_name(node.name, defined, registry, seen, pending, true)
       if node.superclass != nil
         consider_autoload_name(node.superclass, defined, registry, seen, pending)
       if node.body != nil
@@ -462,6 +467,12 @@ use parser
           ej2 += 1
     if t == :hash_literal
       consider_autoload_name("Hash", defined, registry, seen, pending)
+    # IPv4/CIDR literals carry their runtime type without naming the IPv4
+    # class in source. Once accessors and predicates have Tungsten bodies,
+    # their class definition must still be registered before a literal-only
+    # call such as `10.0.0.1.private?` reaches runtime dispatch.
+    if t == :ip4 || t == :cidr4
+      consider_autoload_name("IPv4", defined, registry, seen, pending)
     # A range literal `(a..b)` references no class name, but its numeric
     # machinery — and the elementwise methods (`sq`, `cube`, …) the fused
     # pipeline's closed-form recognizer resolves by AST — lives on Number.
@@ -547,10 +558,10 @@ use parser
       collect_autoload_refs(node.func, defined, registry, seen, pending)
     nil
 
-  -> consider_autoload_name(name, defined, registry, seen, pending)
+  -> consider_autoload_name(name, defined, registry, seen, pending, force = false)
     if name == nil
       return nil
-    if defined[name] == true
+    if defined[name] == true && !force
       return nil
     if seen[name] == true
       return nil
@@ -563,7 +574,7 @@ use parser
     nil
 
   -> cache_version
-    "loader-ast-v2"
+    "loader-ast-v3"
 
   -> cache_dir
     override = env("TUNGSTEN_CACHE_DIR")
@@ -732,7 +743,7 @@ use parser
       resolved += ".w"
 
     if file?(resolved)
-      return resolved
+      return normalize_load_path(resolved)
 
     # Bit resolution
     bit_name = path.split("/").first().downcase()
@@ -764,6 +775,32 @@ use parser
         return lib_candidate
 
     resolved
+
+  # Collapse `.` and `..` before recording a loaded file. Without this, the
+  # same shared source can arrive through two valid spellings (for example
+  # compiler/lib/../../languages/... and languages/...) and be parsed twice,
+  # producing duplicate top-level definitions. This matters for programs that
+  # intentionally load both the packed lexer and the reference RegexLexer.
+  -> normalize_load_path(path)
+    absolute = path.starts_with?("/")
+    input = path.split("/")
+    output = []
+    i = 0
+    while i < input.size()
+      part = input[i]
+      if part != "" && part != "."
+        if part == ".."
+          if output.size() > 0 && output.last() != ".."
+            output.pop()
+          elsif !absolute
+            output.push(part)
+        else
+          output.push(part)
+      i += 1
+    normalized = output.join("/")
+    if absolute
+      return "/" + normalized
+    normalized
 
   -> resolve_bit(bit_name, sub_path, bit_home)
     if sub_path == ""

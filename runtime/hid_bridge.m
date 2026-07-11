@@ -3,9 +3,10 @@
  * Reads the Stream Deck +'s four rotary dials (rotate + press), so the compiled
  * REPL's live "scrub" mode can bind each dial to a scrubbable field. This file
  * is ONLY the IOKit producer half; the cross-platform consumer half (the SPSC
- * ring, the self-pipe, w_input_poll, and non-darwin stubs) lives in runtime.c.
+ * ring, the self-pipe, w_input_poll, and non-darwin stubs) lives in
+ * terminal_input.c.
  *
- * Threading model (see runtime.c for the GC/allocation rules): the REPL main
+ * Threading model (see terminal_input.c for the allocation rules): the REPL main
  * thread blocks in poll() during scrubbing and so cannot pump a CFRunLoop. We
  * therefore run IOHIDManager on a dedicated pthread with its OWN CFRunLoopRun.
  * The input-report callback fires on that thread, decodes the report into POD

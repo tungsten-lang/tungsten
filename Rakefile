@@ -1,5 +1,6 @@
 require "colored"
 require "bundler"
+require "tmpdir"
 require_relative "lib/tungsten/external_dependencies"
 
 ROOT = __dir__
@@ -122,6 +123,22 @@ namespace :test do
   desc "Run WIRE pipeline parity tests"
   task :parity do
     run_command "bash", File.join(ROOT, "compiler/test/parity_test.sh")
+  end
+
+  desc "Exhaustively test the union of Ruby and compiled unit registries"
+  task :unit_registry_superset do
+    run_command "ruby", File.join(ROOT, "compiler/test/unit_registry_superset_test.rb")
+  end
+
+  desc "Compare the self-hosted RegexLexer with the production packed lexer"
+  task :regex_lexer_parity do
+    Dir.mktmpdir("tungsten-regex-lexer") do |dir|
+      binary = File.join(dir, "lex-parity")
+      run_command File.join(ROOT, "bin/tungsten"), "compile", "--no-lto",
+                  File.join(ROOT, "compiler/lex_parity.w"), "--out", binary
+      fixtures = Dir[File.join(ROOT, "compiler/test/fixtures/*.w")].sort
+      run_command binary, *fixtures
+    end
   end
 
   desc "Run compiled/interpreted Tungsten specs, including core runtime specs"

@@ -211,6 +211,9 @@ T_CIDR6           = 157
 # `%h<dim>-<type>[c0 c1 …]` hypercomplex literal, e.g. `%h4-f32[1 2 3 4]`.
 T_HYPER_ARRAY     = 158
 
+# Measurement constructor operator: `value ± standard_uncertainty`.
+T_PLUS_MINUS      = 159
+
 + Token
   # Force-load helper — referencing this from a caller triggers the
   # autoload pass to load core/token.w, which in turn registers Token

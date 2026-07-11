@@ -2147,3 +2147,182 @@ WValue w_metal4_dispatch_groups_3d(WValue queue_v, WValue allocator_v,
 }
 
 #endif  /* __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000 */
+
+/* ---- Fused elementwise GPU auto-offload ----
+ *
+ * The compiler's fused elementwise lowering (lowering/ops.w) generates a
+ * per-site MSL kernel for arithmetic-only f32 trees and calls this before
+ * the CPU parallel path. Returns 1 if the GPU executed the site (out array
+ * filled), 0 to fall through to CPU — below threshold, no device, too many
+ * args, compile failure, or dispatch error. The out array is only written
+ * on the success path, so a 0 return is always safe.
+ *
+ * blk layout matches the CPU worker's arg block:
+ *   blk[0]            out f32[] WValue
+ *   blk[1..n_arrs]    leaf f32[] WValues
+ *   blk[1+n_arrs..]   scalar f64 bit patterns
+ *
+ * Buffers are per-site cached MTLBuffers (grown as needed) with memcpy
+ * in/out — at the >=2M-element sizes where the GPU wins, the copies are
+ * bandwidth-trivial next to dispatch + compute, and copying avoids any
+ * page-alignment requirement on the source arrays. Threshold:
+ * TUNGSTEN_FUSED_GPU_MIN (default 2097152); TUNGSTEN_FUSED_GPU=0 disables. */
+
+#define W_FUSED_GPU_MAX_SITES 1024
+#define W_FUSED_GPU_MAX_ARRS  6
+#define W_FUSED_GPU_MAX_SCLS  16
+
+typedef struct {
+    void *pipeline;                          /* id<MTLComputePipelineState> */
+    int failed;                              /* MSL compile failed — never retry */
+    void *bufs[W_FUSED_GPU_MAX_ARRS + 1];    /* arrays + out */
+    int64_t caps[W_FUSED_GPU_MAX_ARRS + 1];  /* byte capacities */
+    void *scl_buf;
+    void *n_buf;
+} WFusedGpuSite;
+
+static WFusedGpuSite g_fused_sites[W_FUSED_GPU_MAX_SITES];
+static id<MTLDevice> g_fused_dev;
+static id<MTLCommandQueue> g_fused_queue;
+static int64_t g_fused_gpu_min = -1;
+static int64_t g_fused_gpu_max = 0;
+
+static void fused_gpu_init(void) {
+    if (g_fused_gpu_min >= 0) return;
+    /* Measured window (fusion.md sweep, zero-copy wraps): for the
+     * semantics-safe GPU candidates (arithmetic-only f32 trees) the GPU
+     * wins between ~2M and ~32M elements (1.1-1.4x); below that dispatch
+     * latency dominates, above it the per-dispatch VM wiring of fresh
+     * multi-GB outputs does (each fused execution allocates a new result
+     * array, so its zero-copy wrap re-maps those pages every call).
+     * Extending the window upward needs output-buffer reuse. f32 libm
+     * trees (where the GPU is ~30x at 10M) stay CPU-side pending the
+     * dtype-semantics decision: array .sin() promotes to f64 output and
+     * MSL has no double. Env: TUNGSTEN_FUSED_GPU=0 disables,
+     * TUNGSTEN_FUSED_GPU_MIN / _MAX move the window. */
+    const char *e = getenv("TUNGSTEN_FUSED_GPU");
+    if (e && *e && strtoll(e, NULL, 10) == 0) { g_fused_gpu_min = INT64_MAX; return; }
+    int64_t mn = 2097152, mx = 33554432;
+    e = getenv("TUNGSTEN_FUSED_GPU_MIN");
+    if (e && *e) mn = strtoll(e, NULL, 10);
+    e = getenv("TUNGSTEN_FUSED_GPU_MAX");
+    if (e && *e) mx = strtoll(e, NULL, 10);
+    g_fused_gpu_max = mx;
+    g_fused_gpu_min = mn;
+}
+
+/* Try a zero-copy wrap of a f32 array's storage. macOS large allocations
+ * (the only sizes where the GPU tier fires) come back page-aligned from
+ * calloc, so this usually succeeds; any failure returns nil and the caller
+ * uses the cached copy-buffer for that slot instead. */
+static id<MTLBuffer> fused_wrap_nocopy(WArray *a, int64_t bytes) {
+    void *base = (uint8_t *)a->slots + (int64_t)a->start * 4;
+    NSUInteger page = (NSUInteger)getpagesize();
+    if (((uintptr_t)base & (page - 1)) != 0) return nil;
+    id<MTLBuffer> buf = [g_fused_dev newBufferWithBytesNoCopy:base
+                                                       length:(NSUInteger)bytes
+                                                      options:MTLResourceStorageModeShared
+                                                  deallocator:nil];
+    return buf ? [buf autorelease] : nil;
+}
+
+int64_t w_fused_gpu_run(int64_t site_id, WValue msl_v, int64_t blk_addr,
+                        int64_t n_arrs, int64_t n_scls, int64_t n) {
+    fused_gpu_init();
+    if (n < g_fused_gpu_min || n > g_fused_gpu_max) return 0;
+    if (site_id < 0 || site_id >= W_FUSED_GPU_MAX_SITES) return 0;
+    if (n_arrs < 1 || n_arrs > W_FUSED_GPU_MAX_ARRS) return 0;
+    if (n_scls > W_FUSED_GPU_MAX_SCLS) return 0;
+    WFusedGpuSite *s = &g_fused_sites[site_id];
+    if (s->failed) return 0;
+    @autoreleasepool {
+        if (!g_fused_dev) {
+            g_fused_dev = MTLCreateSystemDefaultDevice();
+            if (!g_fused_dev) { g_fused_gpu_min = INT64_MAX; return 0; }
+            g_fused_queue = [g_fused_dev newCommandQueue];
+        }
+        if (!s->pipeline) {
+            NSString *src = [NSString stringWithUTF8String:metal_string_data(msl_v)];
+            NSError *err = nil;
+            MTLCompileOptions *opts = metal_make_compile_opts(0);
+            id<MTLLibrary> lib = [g_fused_dev newLibraryWithSource:src options:opts error:&err];
+            [opts release];
+            if (!lib) { s->failed = 1; return 0; }
+            id<MTLFunction> fn = [lib newFunctionWithName:@"fuse"];
+            if (!fn) { [lib release]; s->failed = 1; return 0; }
+            id<MTLComputePipelineState> ps =
+                [g_fused_dev newComputePipelineStateWithFunction:fn error:&err];
+            [fn release];
+            [lib release];
+            if (!ps) { s->failed = 1; return 0; }
+            s->pipeline = (void *)ps;
+            s->scl_buf = (void *)[g_fused_dev newBufferWithLength:W_FUSED_GPU_MAX_SCLS * 4
+                                                          options:MTLResourceStorageModeShared];
+            s->n_buf = (void *)[g_fused_dev newBufferWithLength:4
+                                                        options:MTLResourceStorageModeShared];
+        }
+        int64_t *blk = (int64_t *)(uintptr_t)blk_addr;
+        int64_t bytes = n * 4;
+        /* Zero-copy first: wrap each array's storage directly when page-
+         * aligned (unified memory — the GPU reads/writes the array's own
+         * pages, no copies at all). Fall back per-slot to the cached copy
+         * buffer. Slot 0..n_arrs-1: inputs; slot n_arrs: out. */
+        id<MTLBuffer> arg_bufs[W_FUSED_GPU_MAX_ARRS + 1];
+        int copied_out = 0;
+        for (int64_t k = 0; k <= n_arrs; k++) {
+            WArray *a = (WArray *)w_as_ptr((WValue)blk[k == n_arrs ? 0 : 1 + k]);
+            id<MTLBuffer> wrap = fused_wrap_nocopy(a, bytes);
+            if (wrap) {
+                arg_bufs[k] = wrap;
+                continue;
+            }
+            if (s->caps[k] < bytes) {
+                if (s->bufs[k]) [(id<MTLBuffer>)s->bufs[k] release];
+                s->bufs[k] = (void *)[g_fused_dev newBufferWithLength:(NSUInteger)bytes
+                                                              options:MTLResourceStorageModeShared];
+                if (!s->bufs[k]) { s->caps[k] = 0; return 0; }
+                s->caps[k] = bytes;
+            }
+            arg_bufs[k] = (id<MTLBuffer>)s->bufs[k];
+            if (k < n_arrs) {
+                float *src = (float *)a->slots + a->start;
+                memcpy([arg_bufs[k] contents], src, (size_t)bytes);
+            } else {
+                copied_out = 1;
+            }
+        }
+        float *scl = (float *)[(id<MTLBuffer>)s->scl_buf contents];
+        for (int64_t j = 0; j < n_scls; j++) {
+            double d;
+            memcpy(&d, &blk[1 + n_arrs + j], 8);
+            scl[j] = (float)d;
+        }
+        uint32_t n32 = (uint32_t)n;
+        memcpy([(id<MTLBuffer>)s->n_buf contents], &n32, 4);
+
+        id<MTLCommandBuffer> cmd = [g_fused_queue commandBuffer];
+        id<MTLComputeCommandEncoder> enc = [cmd computeCommandEncoder];
+        id<MTLComputePipelineState> ps = (id<MTLComputePipelineState>)s->pipeline;
+        [enc setComputePipelineState:ps];
+        for (int64_t k = 0; k <= n_arrs; k++) {
+            [enc setBuffer:arg_bufs[k] offset:0 atIndex:(NSUInteger)k];
+        }
+        [enc setBuffer:(id<MTLBuffer>)s->scl_buf offset:0 atIndex:(NSUInteger)(n_arrs + 1)];
+        [enc setBuffer:(id<MTLBuffer>)s->n_buf offset:0 atIndex:(NSUInteger)(n_arrs + 2)];
+        NSUInteger tpg = [ps maxTotalThreadsPerThreadgroup];
+        if (tpg > 256) tpg = 256;
+        [enc dispatchThreads:MTLSizeMake((NSUInteger)n, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(tpg, 1, 1)];
+        [enc endEncoding];
+        [cmd commit];
+        [cmd waitUntilCompleted];
+        if ([cmd status] == MTLCommandBufferStatusError) return 0;
+
+        if (copied_out) {
+            WArray *out = (WArray *)w_as_ptr((WValue)blk[0]);
+            float *dst = (float *)out->slots + out->start;
+            memcpy(dst, [arg_bufs[n_arrs] contents], (size_t)bytes);
+        }
+        return 1;
+    }
+}

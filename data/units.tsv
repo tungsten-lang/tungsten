@@ -1,5 +1,6 @@
-# Unit table — single source of truth for stages/tungsten/runtime/runtime.c
-# and stages/tungsten/lib/lowering.w
+# Legacy unit-ID table. These compact IDs are kept stable for inline WValue
+# compatibility; scripts/gen_units.rb appends the full Ruby unit registry and
+# aliases when generating the compiler and runtime tables.
 #
 # Format: id<TAB>name<TAB>category
 # Lines starting with # are comments. Blank lines are ignored.

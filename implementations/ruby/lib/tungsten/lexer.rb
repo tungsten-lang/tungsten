@@ -541,7 +541,7 @@ module Tungsten
 
       # Δ-prefixed identifier (delta notation: an undefined Δx reads as
       # `x - x'` — the interpreter resolves it; see visit_call).
-      elsif (text = scan(/Δ[a-z0-9_]*/))
+      elsif (text = scan(/Δ(?:°[\p{L}]+|K|[a-z0-9_]*)/))
         token :ID, text
 
       # Unit-prefix identifiers (°C, °F, etc.)
@@ -1031,7 +1031,7 @@ module Tungsten
       # Try scanning optional space + unit (not followed by '(' which means function call)
       saved_pos = pos
       space = skip_scan(/ /)
-      if (unit = scan(UNIT_STRING))
+      if (unit = scan(/Δ(?:°[\p{L}]+|K)/) || scan(UNIT_STRING))
         # "burned" prefix: "1 burned cord" → unit is "cord", flag burned
         burned = false
         if unit == "burned" && skip_scan(/ /) && (real_unit = scan(UNIT_STRING))

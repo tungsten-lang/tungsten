@@ -803,18 +803,23 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return true
   false
 
-# Conversion-pipe target: `| lb`, `| lb(2)`, `| J`, `| km/h`. Returns
-# {name, digits} when the RHS is a bare known-unit name — a var, PascalCase
-# class_ref, one-int-arg call, or a compound rate unit that parsed as a
-# `/`-map (`km/h` → Map(source=var km, func=call h) → "km/h"). Anything a
-# local/fn shadows lowers as ordinary bitwise-or / division instead.
+# Conversion-pipe target: `| lb`, `| lb(2)`, `| J`, or a quoted registry
+# spelling such as `| "metric cup"`. Returns
+# {name, digits} when the RHS is a quoted spelling or a bare known-unit name —
+# a var, PascalCase class_ref, one-int-arg call, or a compound rate unit that
+# parsed as a `/`-map. Anything a local/fn shadows lowers as ordinary
+# bitwise-or / division instead; quoted spellings are always explicit.
 -> pipe_unit_target(ctx, rhs)
   if !is_ast_node?(rhs)
     return nil
   name = nil
   digits = 0 - 1
+  quoted = false
   k = ast_kind(rhs)
-  if k == :var || k == :class_ref
+  if k == :string
+    name = ast_get(rhs, :value)
+    quoted = true
+  elsif k == :var || k == :class_ref
     name = ast_get(rhs, :name)
   elsif k == :call && rhs.receiver == nil
     cargs = rhs.args
@@ -838,9 +843,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return nil
   if !known_unit_name?(name)
     return nil
-  if ctx[:func][:var_slots][name] != nil || ctx[:bindings][name] != nil || ctx[:var_types][name] != nil
+  if !quoted && (ctx[:func][:var_slots][name] != nil || ctx[:bindings][name] != nil || ctx[:var_types][name] != nil)
     return nil
-  if ctx[:mod][:known_calls][name] != nil || ctx[:mod][:known_fn_param_counts][name] != nil
+  if !quoted && (ctx[:mod][:known_calls][name] != nil || ctx[:mod][:known_fn_param_counts][name] != nil)
     return nil
   {name: name, digits: digits}
 
@@ -885,6 +890,21 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   wfn = ctx[:func]
   op = node.op
 
+  # Reject dimensionally impossible additions/subtractions while compiling
+  # when both sides are statically known quantities. Dynamic and user-defined
+  # unit expressions retain the existing runtime check.
+  if op in (:PLUS :MINUS)
+    qleft = static_quantity_signature(ctx, node.left)
+    qright = static_quantity_signature(ctx, node.right)
+    pbj = false
+    if op == :PLUS && ast_kind(node.left) == :quantity && ast_kind(node.right) == :quantity
+      lu = node.left.unit
+      ru = node.right.unit
+      one_each = node.left.number_str.replace("_", "") == "1" && node.right.number_str.replace("_", "") == "1"
+      pbj = one_each && ((lu == "PB" && ru == "J") || (lu == "J" && ru == "PB"))
+    if qleft != nil && qright != nil && !static_quantity_add_compatible?(qleft, qright) && !pbj
+      raise compile_error_for_node(:E_LOWER_QUANTITY_DIMENSION, "quantity dimension mismatch in " + op.to_s(), ctx[:source_path], node)
+
   if op == :SLASH && ast_kind(node.left) == :range
     return lower_range_step(ctx, node.left, node.right)
 
@@ -910,6 +930,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # ebits split internally and broadcast scalar rhs. Phase 6 SIMD will
   # rewrite the float and 32-bit-integer paths to use NEON/AVX intrinsics.
   if op in (:DOT_PLUS :DOT_MINUS :DOT_STAR :DOT_SLASH :DOT_PIPE :DOT_AMP :DOT_CARET :DOT_LSHIFT :DOT_RSHIFT)
+    # f64 elementwise trees fuse into a single loop (see try_fuse_
+    # elementwise below); everything else keeps the runtime kernels.
+    fused = try_fuse_elementwise(ctx, node)
+    if fused != nil
+      return fused
     lhs_tv = lower_expression(ctx, node.left)
     rhs_tv = lower_expression(ctx, node.right)
     lhs_reg = ensure_i64_value(wfn, lhs_tv)
@@ -1088,7 +1113,12 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # guarded path and div/mod/bitwise fall through to the runtime fallback
   # (w_div/w_mod/w_bit_*), which dispatches BigInt-correctly.
   ovf_guard_arith = (ovf_mode_bo == :promote || ovf_mode_bo == :trap) && (lowering_int_op_map[op] != nil || lowering_cmp_op_map[op] != nil)
-  if (lhs_unboxed || rhs_unboxed) && !is_bigint_type(lt) && !is_bigint_type(rt) && !ovf_guard_arith
+  # A float (or decimal) operand must NOT take this raw-int shortcut:
+  # ensure_raw_int on a boxed float nanunbox-INTs it — `i + ~1.0` inside a
+  # loop silently became `i + 0`. Known-float operands fall through to the
+  # type-directed int×float path below (sitofp + fadd).
+  mixed_float_operand = is_machine_float_type(lt) || is_machine_float_type(rt) || lt == :decimal || rt == :decimal
+  if (lhs_unboxed || rhs_unboxed) && !mixed_float_operand && !is_bigint_type(lt) && !is_bigint_type(rt) && !ovf_guard_arith
     int_op = lowering_int_op_map[op]
     cmp_pred = lowering_cmp_op_map[op]
     if int_op != nil || cmp_pred != nil
@@ -1780,3 +1810,395 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     chain = Tungsten:AST:Or.new(chain, arm)
     i += 1
   lower_expression(ctx, chain)
+
+# ---------------------------------------------------------------------------
+# Fused elementwise lowering with automatic backend selection.
+#
+# A tree of float elementwise ops — `(x .* a .+ b).sin() .+ c` — historically
+# lowered to one runtime kernel call per node, each allocating a full
+# temporary array. When every array leaf is statically f64[] (or f32[], all
+# one type) and every scalar leaf is a float/int, the whole tree collapses
+# into ONE loop: load leaves, apply raw fadd/fmul/…/libm ops, store. No
+# temporaries, no boxing, and the loop body is plain scalar IR that LLVM's
+# vectorizer can work on (-fveclib turns the sin into _simd_sin_d2).
+#
+# The loop body is ALSO outlined into a worker function
+#     i64 __w_fuse_worker_N(i64 blk, i64 lo, i64 hi)
+# and the site gates on runtime size (w_fused_should_mt): below the measured
+# threshold the loop runs inline single-core; at/above it the runtime
+# partitions [0, n) across OS threads (w_fused_parallel_run). Thresholds are
+# from the size sweep in doc/scientific-computing/fusion.md; TUNGSTEN_FUSED_*
+# env vars override. The arg block is an i64[] of
+#     [out WValue, leaf-array WValues..., scalar f64 bit patterns...]
+#
+# Anything outside the fusable shape returns nil and falls back to the
+# kernel path, so kernel semantics are preserved exactly: lhs must be
+# array-valued, rhs arrays must match the lhs size (same raise text via
+# w_elementwise_size_check), scalars broadcast, int/mixed-dtype arrays keep
+# kernels.
+#
+# Fusion triggers only when it wins: a libm node in the tree (vector sin
+# beats a scalar kernel loop) or ≥2 elementwise ops (temporaries saved).
+# A single bare DOT op keeps the already-SIMD runtime kernel.
+
+# Classify `node` into a fusion spec tree, or nil if not fusable.
+#   {cls: :dot,    op:, left:, right:, odt:, ops:, libm:}
+#   {cls: :libm,   name:, recv:, odt:, ops:, libm:}
+#   {cls: :arr,    node:, etype:, odt:}   — f64[] / f32[] leaf
+#   {cls: :scalar, node:}                 — float/int scalar leaf
+# odt is the node's OUTPUT dtype under kernel semantics: a DOT op inherits
+# its lhs dtype (array_elementwise_into: out ebits = lhs ebits), and the
+# libm array methods always produce f64 (array_map_f64 allocates -64
+# regardless of input). Leaves may mix f32/f64 — kernels read either into
+# doubles — so computation is f64 throughout; only loads and the final
+# store are dtype-specific.
+-> fuse_ew_analyze(ctx, node)
+  k = ast_kind(node)
+  if k == :binary_op && node.op in (:DOT_PLUS :DOT_MINUS :DOT_STAR :DOT_SLASH)
+    l = fuse_ew_analyze(ctx, node.left)
+    # Kernel semantics: the lhs of a DOT op must be array-valued.
+    if l == nil || l[:cls] == :scalar
+      return nil
+    r = fuse_ew_analyze(ctx, node.right)
+    if r == nil
+      return nil
+    return {cls: :dot, op: node.op, left: l, right: r, odt: l[:odt], ops: l[:ops] + r[:ops] + 1, libm: l[:libm] + r[:libm]}
+  if k == :call && node.receiver != nil && node.name != nil && node.name in ("sin" "cos" "sqrt")
+    argc = 0
+    if node.args != nil
+      argc = node.args.size()
+    if argc == 0
+      rcv = fuse_ew_analyze(ctx, node.receiver)
+      # Scalar receivers (Float#sin etc.) keep normal dispatch.
+      if rcv != nil && rcv[:cls] != :scalar
+        return {cls: :libm, name: node.name, recv: rcv, odt: :f64, ops: rcv[:ops], libm: rcv[:libm] + 1}
+    return nil
+  t = infer_type(node, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+  if t == :typed_array_f64
+    return {cls: :arr, node: node, etype: :f64, odt: :f64, ops: 0, libm: 0}
+  if t == :typed_array_f32
+    return {cls: :arr, node: node, etype: :f32, odt: :f32, ops: 0, libm: 0}
+  if t == :float || t == :f64 || is_integer_like_type(t)
+    return {cls: :scalar, node: node, ops: 0, libm: 0}
+  nil
+
+# Per-element-type op/constant tables.
+-> fuse_ew_elems_ptr_op(etype)
+  etype == :f32 ? :ta_f32_elems_ptr : :ta_f64_elems_ptr
+
+-> fuse_ew_load_op(etype)
+  etype == :f32 ? :load_f32_at : :load_f64_at
+
+-> fuse_ew_store_op(etype)
+  etype == :f32 ? :store_f32_at : :store_f64_at
+
+-> fuse_ew_alloc_bits(etype)
+  etype == :f32 ? "-32" : "-64"
+
+# Lower the tree's leaves once, in source (DFS in-order) evaluation order —
+# the same order the unfused kernel path would evaluate them. Array leaves
+# get their boxed reg stashed on the spec and are collected into `arrs`;
+# scalar leaves are hoisted to a raw f64 and collected into `scls`.
+-> fuse_ew_lower_leaves(ctx, spec, arrs, scls)
+  wfn = ctx[:func]
+  cls = spec[:cls]
+  if cls == :arr
+    tv = lower_expression(ctx, spec[:node])
+    spec[:reg] = ensure_i64_value(wfn, tv)
+    spec[:ai] = arrs.size()
+    arrs.push(spec)
+    return nil
+  if cls == :scalar
+    tv = lower_expression(ctx, spec[:node])
+    spec[:raw] = ensure_raw_f64(wfn, tv)
+    spec[:sj] = scls.size()
+    scls.push(spec)
+    return nil
+  if cls == :libm
+    fuse_ew_lower_leaves(ctx, spec[:recv], arrs, scls)
+    return nil
+  fuse_ew_lower_leaves(ctx, spec[:left], arrs, scls)
+  fuse_ew_lower_leaves(ctx, spec[:right], arrs, scls)
+  nil
+
+# Emit the per-element scalar computation for one loop iteration.
+-> fuse_ew_emit_scalar(ctx, spec)
+  wfn = ctx[:func]
+  cls = spec[:cls]
+  if cls == :arr
+    return spec[:cur]
+  if cls == :scalar
+    return spec[:raw]
+  if cls == :libm
+    v = fuse_ew_emit_scalar(ctx, spec[:recv])
+    temp = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_libm_f64, temp: temp, name: spec[:name], value: v})
+    return temp
+  l = fuse_ew_emit_scalar(ctx, spec[:left])
+  r = fuse_ew_emit_scalar(ctx, spec[:right])
+  fop = :fadd_f64
+  if spec[:op] == :DOT_MINUS
+    fop = :fsub_f64
+  elsif spec[:op] == :DOT_STAR
+    fop = :fmul_f64
+  elsif spec[:op] == :DOT_SLASH
+    fop = :fdiv_f64
+  temp = next_temp(wfn)
+  emit_instruction(wfn, {op: fop, temp: temp, lhs: l, rhs: r, fp_flags: float_inst_flags(ctx)})
+  temp
+
+# Emit the [lo, hi) element loop into ctx[:func]. arrs[k][:base] must hold
+# element-base pointers valid in that function; scalar specs must have
+# [:raw] set to in-function raw f64 temps. Computation is f64 throughout —
+# f32 arrays fpext on load and fptrunc on store, matching the runtime
+# kernels (which read f32 elements into doubles).
+-> fuse_ew_emit_range_loop(ctx, spec, arrs, out_base, lo_val, hi_val, odt)
+  wfn = ctx[:func]
+  cond_label = next_label(wfn, "fuse.cond")
+  body_label = next_label(wfn, "fuse.body")
+  end_label = next_label(wfn, "fuse.end")
+  i_slot = ensure_var_slot(wfn, "__fuse_i." + cond_label, "i64")
+  emit_instruction(wfn, {op: :store_i64, value: lo_val, ptr: i_slot})
+  emit_instruction(wfn, {op: :br, label: cond_label})
+  start_block(wfn, cond_label)
+  iv = next_temp(wfn)
+  emit_instruction(wfn, {op: :load_i64, temp: iv, ptr: i_slot})
+  cmp = next_temp(wfn)
+  emit_instruction(wfn, {op: :icmp_i64, temp: cmp, pred: "slt", lhs: iv, rhs: hi_val})
+  emit_instruction(wfn, {op: :cond_br, cond: cmp, then_label: body_label, else_label: end_label})
+  start_block(wfn, body_label)
+  bi_v = next_temp(wfn)
+  emit_instruction(wfn, {op: :load_i64, temp: bi_v, ptr: i_slot})
+  ai = 0
+  while ai < arrs.size()
+    cur = next_temp(wfn)
+    emit_instruction(wfn, {op: fuse_ew_load_op(arrs[ai][:etype]), temp: cur, ptr: arrs[ai][:base], index: bi_v})
+    arrs[ai][:cur] = cur
+    ai += 1
+  result_raw = fuse_ew_emit_scalar(ctx, spec)
+  stw = next_temp(wfn)
+  emit_instruction(wfn, {op: fuse_ew_store_op(odt), temp: stw, ptr: out_base, index: bi_v, value: result_raw})
+  nxt = next_temp(wfn)
+  emit_instruction(wfn, {op: :add_i64, temp: nxt, lhs: bi_v, rhs: "1"})
+  emit_instruction(wfn, {op: :store_i64, value: nxt, ptr: i_slot})
+  emit_instruction(wfn, {op: :br, label: cond_label})
+  start_block(wfn, end_label)
+  nil
+
+# Store one i64 value into the arg block at a literal index.
+-> fuse_ew_block_store(wfn, blk_reg, idx_str, val_reg)
+  scratch = []
+  si = 0
+  while si < 10
+    scratch.push(next_temp(wfn))
+    si += 1
+  stw = next_temp(wfn)
+  emit_instruction(wfn, {op: :typed_array_set_inline, temp: stw, arr: blk_reg, idx: idx_str, idx_raw: true, value: val_reg, s: scratch, bits: 64, signed: true})
+  nil
+
+# ---- GPU offload (arithmetic-only f32 trees) ----
+# The libm array methods promote to f64 output (kernel semantics), and MSL
+# has no double at all, so only pure-arithmetic all-f32 trees are
+# GPU-eligible. Their MSL kernel is generated here at compile time; the
+# runtime (w_fused_gpu_run in metal.m) compiles it once per site, keeps
+# cached buffers, and only fires above TUNGSTEN_FUSED_GPU_MIN elements.
+
+-> fuse_ew_gpu_eligible?(spec, arrs)
+  if spec[:odt] != :f32
+    return false
+  if spec[:libm] != 0
+    return false
+  ai = 0
+  while ai < arrs.size()
+    if arrs[ai][:etype] != :f32
+      return false
+    ai += 1
+  true
+
+-> fuse_ew_msl_expr(spec)
+  cls = spec[:cls]
+  if cls == :arr
+    return "a" + spec[:ai].to_s() + "\[i]"
+  if cls == :scalar
+    return "s\[" + spec[:sj].to_s() + "]"
+  if cls == :libm
+    return spec[:name] + "(" + fuse_ew_msl_expr(spec[:recv]) + ")"
+  op_str = " + "
+  if spec[:op] == :DOT_MINUS
+    op_str = " - "
+  elsif spec[:op] == :DOT_STAR
+    op_str = " * "
+  elsif spec[:op] == :DOT_SLASH
+    op_str = " / "
+  "(" + fuse_ew_msl_expr(spec[:left]) + op_str + fuse_ew_msl_expr(spec[:right]) + ")"
+
+-> fuse_ew_msl_kernel(spec, n_arrs)
+  out = StringBuffer(640)
+  out << "#include <metal_stdlib>\nusing namespace metal;\nkernel void fuse("
+  k = 0
+  while k < n_arrs
+    out << "device const float* a" + k.to_s() + " \[\[buffer(" + k.to_s() + ")]], "
+    k += 1
+  out << "device float* outb \[\[buffer(" + n_arrs.to_s() + ")]], "
+  out << "constant float* s \[\[buffer(" + (n_arrs + 1).to_s() + ")]], "
+  out << "constant uint& n \[\[buffer(" + (n_arrs + 2).to_s() + ")]], "
+  out << "uint i \[\[thread_position_in_grid]]) {\n"
+  out << "  if (i < n) outb\[i] = " + fuse_ew_msl_expr(spec) + ";\n}\n"
+  out.to_s()
+
+# Build the outlined worker for the parallel path. The spec's per-leaf
+# bindings ([:base]/[:raw]) are temporarily rebound to worker-local temps
+# (loaded from the arg block) and restored afterwards so the site's inline
+# path still sees its own temps.
+-> fuse_ew_build_worker(ctx, spec, arrs, scls, odt, sid)
+  mod = ctx[:mod]
+  wname = "__w_fuse_worker_" + sid.to_s()
+  wfn2 = build_function(wname, ["__fw_blk", "__fw_lo", "__fw_hi"], "i64", false, [])
+  wfn2[:source_kind] = :fn_def
+  wfn2[:source_method] = wname
+  wfn2[:source_path] = ctx[:source_path]
+  wfn2[:source_line] = 0
+  mod[:functions].push(wfn2)
+
+  saved_raw = []
+  sj = 0
+  while sj < scls.size()
+    saved_raw.push(scls[sj][:raw])
+    sj += 1
+  saved_base = []
+  ai = 0
+  while ai < arrs.size()
+    saved_base.push(arrs[ai][:base])
+    ai += 1
+
+  blk_ptr = next_temp(wfn2)
+  emit_instruction(wfn2, {op: :inttoptr_i64, temp: blk_ptr, value: "%__fw_blk"})
+  out_wv = next_temp(wfn2)
+  emit_instruction(wfn2, {op: :load_i64_at, temp: out_wv, ptr: blk_ptr, index: "0"})
+  ai = 0
+  while ai < arrs.size()
+    wv = next_temp(wfn2)
+    emit_instruction(wfn2, {op: :load_i64_at, temp: wv, ptr: blk_ptr, index: (1 + ai).to_s()})
+    base = next_temp(wfn2)
+    emit_instruction(wfn2, {op: fuse_ew_elems_ptr_op(arrs[ai][:etype]), temp: base, value: wv})
+    arrs[ai][:base] = base
+    ai += 1
+  sj = 0
+  while sj < scls.size()
+    raw = next_temp(wfn2)
+    emit_instruction(wfn2, {op: :load_f64_at, temp: raw, ptr: blk_ptr, index: (1 + arrs.size() + sj).to_s()})
+    scls[sj][:raw] = raw
+    sj += 1
+  out_base = next_temp(wfn2)
+  emit_instruction(wfn2, {op: fuse_ew_elems_ptr_op(odt), temp: out_base, value: out_wv})
+
+  saved_func = ctx[:func]
+  ctx[:func] = wfn2
+  fuse_ew_emit_range_loop(ctx, spec, arrs, out_base, "%__fw_lo", "%__fw_hi", odt)
+  ctx[:func] = saved_func
+
+  emit_instruction(wfn2, {op: :ret_i64, value: "0"})
+  finalize_function(wfn2)
+
+  sj = 0
+  while sj < scls.size()
+    scls[sj][:raw] = saved_raw[sj]
+    sj += 1
+  ai = 0
+  while ai < arrs.size()
+    arrs[ai][:base] = saved_base[ai]
+    ai += 1
+  wname
+
+# Entry point: fuse `node` if it is a worthwhile elementwise tree.
+# Returns the result typed_value, or nil to fall back to the kernel path.
+-> try_fuse_elementwise(ctx, node)
+  spec = fuse_ew_analyze(ctx, node)
+  if spec == nil
+    return nil
+  if spec[:cls] != :dot && spec[:cls] != :libm
+    return nil
+  if spec[:libm] == 0 && spec[:ops] < 2
+    return nil
+  odt = spec[:odt]
+  if odt == nil
+    return nil
+  wfn = ctx[:func]
+  arrs = []
+  scls = []
+  fuse_ew_lower_leaves(ctx, spec, arrs, scls)
+  if arrs.size() == 0
+    return nil
+  arr0 = arrs[0]
+  size_reg = next_temp(wfn)
+  emit_instruction(wfn, {op: :ta_size_raw, temp: size_reg, value: arr0[:reg]})
+  ai = 1
+  while ai < arrs.size()
+    chk = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: chk, name: "w_elementwise_size_check", args: [arr0[:reg], arrs[ai][:reg]]})
+    ai += 1
+  out_reg = next_temp(wfn)
+  emit_instruction(wfn, {op: :call_direct_i64, temp: out_reg, name: "w_array_new_uninit_sized", args: [fuse_ew_alloc_bits(odt), size_reg]})
+
+  sid = ctx[:mod][:next_fuse_site]
+  if sid == nil
+    sid = 0
+  ctx[:mod][:next_fuse_site] = sid + 1
+  worker_name = fuse_ew_build_worker(ctx, spec, arrs, scls, odt, sid)
+
+  mt_label = next_label(wfn, "fuse.mt")
+  st_label = next_label(wfn, "fuse.st")
+  done_label = next_label(wfn, "fuse.done")
+  mt_reg = next_temp(wfn)
+  emit_instruction(wfn, {op: :call_direct_i64, temp: mt_reg, name: "w_fused_should_mt", args: [size_reg]})
+  mt_cmp = next_temp(wfn)
+  emit_instruction(wfn, {op: :icmp_i64, temp: mt_cmp, pred: "ne", lhs: mt_reg, rhs: "0"})
+  emit_instruction(wfn, {op: :cond_br, cond: mt_cmp, then_label: mt_label, else_label: st_label})
+
+  start_block(wfn, mt_label)
+  nslots = 1 + arrs.size() + scls.size()
+  blk_reg = next_temp(wfn)
+  emit_instruction(wfn, {op: :call_direct_i64, temp: blk_reg, name: "w_array_zeros", args: ["64", nslots.to_s()]})
+  fuse_ew_block_store(wfn, blk_reg, "0", out_reg)
+  ai = 0
+  while ai < arrs.size()
+    fuse_ew_block_store(wfn, blk_reg, (1 + ai).to_s(), arrs[ai][:reg])
+    ai += 1
+  sj = 0
+  while sj < scls.size()
+    bits = next_temp(wfn)
+    emit_instruction(wfn, {op: :bitcast_f64_i64, temp: bits, value: scls[sj][:raw]})
+    fuse_ew_block_store(wfn, blk_reg, (1 + arrs.size() + sj).to_s(), bits)
+    sj += 1
+  blk_addr = next_temp(wfn)
+  emit_instruction(wfn, {op: :ta_data_addr, temp: blk_addr, value: blk_reg})
+  if fuse_ew_gpu_eligible?(spec, arrs)
+    mtcpu_label = next_label(wfn, "fuse.mtcpu")
+    msl_tv = lower_string(ctx, Tungsten:AST:String.new(fuse_ew_msl_kernel(spec, arrs.size())))
+    msl_reg = ensure_i64_value(wfn, msl_tv)
+    gpu_reg = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: gpu_reg, name: "w_fused_gpu_run", args: [sid.to_s(), msl_reg, blk_addr, arrs.size().to_s(), scls.size().to_s(), size_reg]})
+    gpu_cmp = next_temp(wfn)
+    emit_instruction(wfn, {op: :icmp_i64, temp: gpu_cmp, pred: "ne", lhs: gpu_reg, rhs: "0"})
+    emit_instruction(wfn, {op: :cond_br, cond: gpu_cmp, then_label: done_label, else_label: mtcpu_label})
+    start_block(wfn, mtcpu_label)
+  fn_addr = next_temp(wfn)
+  emit_instruction(wfn, {op: :fn_addr_i64, temp: fn_addr, name: worker_name})
+  run_reg = next_temp(wfn)
+  emit_instruction(wfn, {op: :call_direct_i64, temp: run_reg, name: "w_fused_parallel_run", args: [fn_addr, blk_addr, size_reg]})
+  emit_instruction(wfn, {op: :br, label: done_label})
+
+  start_block(wfn, st_label)
+  out_base = next_temp(wfn)
+  emit_instruction(wfn, {op: fuse_ew_elems_ptr_op(odt), temp: out_base, value: out_reg})
+  ai = 0
+  while ai < arrs.size()
+    base = next_temp(wfn)
+    emit_instruction(wfn, {op: fuse_ew_elems_ptr_op(arrs[ai][:etype]), temp: base, value: arrs[ai][:reg]})
+    arrs[ai][:base] = base
+    ai += 1
+  fuse_ew_emit_range_loop(ctx, spec, arrs, out_base, "0", size_reg, odt)
+  emit_instruction(wfn, {op: :br, label: done_label})
+
+  start_block(wfn, done_label)
+  typed_value(:i64, out_reg)

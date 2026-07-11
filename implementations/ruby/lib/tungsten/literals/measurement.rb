@@ -16,16 +16,41 @@ module Tungsten
   #   negation: σ unchanged
   #   power x^n: σ_z/|z| = |n| · σ_x/|x|
   #
-  # These assume independent, Gaussian-distributed errors. For correlated or
-  # non-Gaussian errors, use a full Monte-Carlo library.
+  # First-order arithmetic uses declared correlations when present. The
+  # `.propagate` API provides deterministic-seed Monte-Carlo propagation for
+  # nonlinear models; asymmetric bounds and random/systematic components are
+  # retained as measurement metadata.
   class Measurement
     include Comparable
 
-    attr_reader :value, :uncertainty
+    attr_reader :value, :uncertainty, :lower_uncertainty, :upper_uncertainty,
+                :confidence, :coverage_factor, :degrees_of_freedom, :components,
+                :provenance
 
-    def initialize(value, uncertainty)
+    def initialize(value, uncertainty, lower_uncertainty: nil, upper_uncertainty: nil,
+                   confidence: nil, coverage_factor: 1.0, degrees_of_freedom: nil,
+                   components: nil, provenance: nil)
       @value = value
       @uncertainty = uncertainty.to_f.abs
+      @lower_uncertainty = (lower_uncertainty || @uncertainty).to_f.abs
+      @upper_uncertainty = (upper_uncertainty || @uncertainty).to_f.abs
+      @confidence = confidence
+      @coverage_factor = coverage_factor.to_f
+      @degrees_of_freedom = degrees_of_freedom
+      @components = (components || {}).transform_keys(&:to_sym).freeze
+      @provenance = Array(provenance).compact.freeze
+      @correlations = {}
+    end
+
+    def self.with_components(value, random: 0, systematic: 0, **options)
+      components = {random: random.to_f.abs, systematic: systematic.to_f.abs}
+      uncertainty = Math.sqrt(components.values.sum { |u| u**2 })
+      new(value, uncertainty, components:, **options)
+    end
+
+    def self.asymmetric(value, lower:, upper:, **options)
+      standard = (lower.to_f.abs + upper.to_f.abs) / 2.0
+      new(value, standard, lower_uncertainty: lower, upper_uncertainty: upper, **options)
     end
 
     # Concise notation: `2.1232442(2)` → value 2.1232442, uncertainty 2e-7.
@@ -44,10 +69,9 @@ module Tungsten
     def +(other)
       case other
       when Measurement
-        Measurement.new(@value + other.value,
-                        Math.sqrt(@uncertainty**2 + other.uncertainty**2))
+        derived(@value + other.value, variance_with(other, 1, 1))
       when Numeric
-        Measurement.new(@value + other, @uncertainty)
+        derived(@value + other, @uncertainty**2)
       else
         raise TypeError, "cannot add #{other.class} to Measurement"
       end
@@ -56,10 +80,9 @@ module Tungsten
     def -(other)
       case other
       when Measurement
-        Measurement.new(@value - other.value,
-                        Math.sqrt(@uncertainty**2 + other.uncertainty**2))
+        derived(@value - other.value, variance_with(other, 1, -1))
       when Numeric
-        Measurement.new(@value - other, @uncertainty)
+        derived(@value - other, @uncertainty**2)
       else
         raise TypeError, "cannot subtract #{other.class} from Measurement"
       end
@@ -69,11 +92,10 @@ module Tungsten
       case other
       when Measurement
         new_val = @value * other.value
-        return Measurement.new(0, 0) if new_val.zero?
-        rel_var = (@uncertainty.to_f / @value)**2 + (other.uncertainty.to_f / other.value)**2
-        Measurement.new(new_val, new_val.abs * Math.sqrt(rel_var))
+        variance = variance_with(other, other.value.to_f, @value.to_f)
+        derived(new_val, variance, other)
       when Numeric
-        Measurement.new(@value * other, @uncertainty * other.abs)
+        derived(@value * other, (@uncertainty * other.to_f.abs)**2)
       else
         raise TypeError, "cannot multiply Measurement by #{other.class}"
       end
@@ -83,11 +105,11 @@ module Tungsten
       case other
       when Measurement
         new_val = @value.to_f / other.value
-        return Measurement.new(new_val, 0) if @value.zero?
-        rel_var = (@uncertainty.to_f / @value)**2 + (other.uncertainty.to_f / other.value)**2
-        Measurement.new(new_val, new_val.abs * Math.sqrt(rel_var))
+        dx = 1.0 / other.value
+        dy = -@value.to_f / (other.value.to_f**2)
+        derived(new_val, variance_with(other, dx, dy), other)
       when Numeric
-        Measurement.new(@value.to_f / other, @uncertainty / other.abs)
+        derived(@value.to_f / other, (@uncertainty / other.to_f.abs)**2)
       else
         raise TypeError, "cannot divide Measurement by #{other.class}"
       end
@@ -97,13 +119,17 @@ module Tungsten
       raise TypeError, "Measurement exponent must be Numeric" unless exp.is_a?(Numeric)
       new_val = @value ** exp
       # σ_z/|z| = |n| · σ_x/|x|, only meaningful for non-zero base
-      return Measurement.new(new_val, 0) if @value.zero?
-      rel_unc = exp.abs * @uncertainty.to_f.abs / @value.abs
-      Measurement.new(new_val, new_val.abs * rel_unc)
+      derivative = @value.zero? ? 0 : exp * (@value.to_f ** (exp - 1))
+      derived(new_val, (derivative * @uncertainty)**2)
     end
 
     def -@
-      Measurement.new(-@value, @uncertainty)
+      Measurement.new(-@value, @uncertainty,
+                      lower_uncertainty: @upper_uncertainty,
+                      upper_uncertainty: @lower_uncertainty,
+                      confidence: @confidence, coverage_factor: @coverage_factor,
+                      degrees_of_freedom: @degrees_of_freedom,
+                      components: @components, provenance: @provenance)
     end
 
     def +@
@@ -111,7 +137,56 @@ module Tungsten
     end
 
     def abs
-      Measurement.new(@value.abs, @uncertainty)
+      derived(@value.abs, @uncertainty**2)
+    end
+
+    # Declare a correlation between two input measurements. Correlation is
+    # symmetric and is used by subsequent first-order propagation.
+    def correlate(other, coefficient)
+      raise TypeError, "can only correlate two Measurements" unless other.is_a?(Measurement)
+      rho = coefficient.to_f
+      raise ArgumentError, "correlation must be between -1 and 1" unless rho.between?(-1, 1)
+      @correlations[other.object_id] = rho
+      other.__send__(:set_correlation, self, rho)
+      self
+    end
+
+    def correlation_with(other)
+      @correlations.fetch(other.object_id, 0.0)
+    end
+
+    def interval
+      [@value - @lower_uncertainty * @coverage_factor,
+       @value + @upper_uncertainty * @coverage_factor]
+    end
+
+    def expanded(coverage_factor = 2.0, confidence: nil)
+      confidence = @confidence if confidence.nil?
+      self.class.new(@value, @uncertainty,
+                     lower_uncertainty: @lower_uncertainty,
+                     upper_uncertainty: @upper_uncertainty,
+                     confidence:, coverage_factor:,
+                     degrees_of_freedom: @degrees_of_freedom,
+                     components: @components, provenance: @provenance)
+    end
+
+    def calibrate(calibration)
+      calibration.apply(self)
+    end
+
+    # Monte-Carlo propagation for nonlinear measurement models. Inputs are
+    # sampled as independent Gaussians; correlated models should draw their
+    # own samples explicitly until a covariance-matrix sampler is added.
+    def self.propagate(*inputs, samples: 10_000, seed: nil, &model)
+      raise ArgumentError, "a propagation block is required" unless model
+      rng = ::Random.new(seed || ::Random.new_seed)
+      values = Array.new(samples) do
+        draws = inputs.map { |m| gaussian(rng, m.value.to_f, m.uncertainty) }
+        model.call(*draws).to_f
+      end
+      mean = values.sum / values.length
+      variance = values.sum { |v| (v - mean)**2 } / [values.length - 1, 1].max
+      new(mean, Math.sqrt(variance), provenance: ["Monte Carlo: #{samples} samples"])
     end
 
     # Rounding operations. These operate on the value and DROP uncertainty —
@@ -169,7 +244,13 @@ module Tungsten
     # Display as `5.0 ± 0.1`. If the uncertainty is zero, drop the ±0 noise.
     def to_s
       return @value.to_s if @uncertainty.zero?
-      "#{format_value(@value)} ± #{format_value(@uncertainty)}"
+      value_str, uncertainty_str = significant_pair
+      suffix = @coverage_factor == 1.0 ? "" : " (k=#{format_value(@coverage_factor)})"
+      if @lower_uncertainty != @upper_uncertainty
+        "#{value_str} +#{format_value(@upper_uncertainty)}/-#{format_value(@lower_uncertainty)}#{suffix}"
+      else
+        "#{value_str} ± #{uncertainty_str}#{suffix}"
+      end
     end
 
     def inspect
@@ -177,6 +258,47 @@ module Tungsten
     end
 
     private
+
+    def set_correlation(other, coefficient)
+      @correlations[other.object_id] = coefficient
+    end
+
+    def covariance_with(other)
+      correlation_with(other) * @uncertainty * other.uncertainty
+    end
+
+    def variance_with(other, derivative_self, derivative_other)
+      (derivative_self * @uncertainty)**2 +
+        (derivative_other * other.uncertainty)**2 +
+        2 * derivative_self * derivative_other * covariance_with(other)
+    end
+
+    def derived(new_value, variance, other = nil)
+      sources = @provenance + (other&.provenance || [])
+      Measurement.new(new_value, Math.sqrt([variance, 0.0].max), provenance: sources)
+    end
+
+    def significant_pair
+      return [format_value(@value), format_value(@uncertainty)] if @uncertainty.zero?
+      exponent = Math.log10(@uncertainty).floor
+      leading = (@uncertainty / (10.0**exponent)).floor
+      significant_digits = leading <= 2 ? 2 : 1
+      places = significant_digits - 1 - exponent
+      rounded_uncertainty = @uncertainty.round(places)
+      rounded_value = @value.to_f.round(places)
+      if places.positive?
+        [format("%.#{places}f", rounded_value), format("%.#{places}f", rounded_uncertainty)]
+      else
+        [rounded_value.to_i.to_s, rounded_uncertainty.to_i.to_s]
+      end
+    end
+
+    def self.gaussian(rng, mean, sigma)
+      return mean if sigma.zero?
+      u1 = [rng.rand, Float::MIN].max
+      u2 = rng.rand
+      mean + sigma * Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math::PI * u2)
+    end
 
     def format_value(v)
       case v

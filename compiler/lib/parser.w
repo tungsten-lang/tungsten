@@ -304,6 +304,7 @@ use ../../core/token
     when 149 then "CIDR4"
     when 156 then "IP6"
     when 157 then "CIDR6"
+    when 159 then "PLUS_MINUS"
     else nil
 
   # Exclusive end-of-span loc for the construct just parsed (AST task
@@ -1326,10 +1327,17 @@ use ../../core/token
       return left
     # Phase 4e dot-prefix elementwise: `.+ .-` share addition precedence
     # with their scalar counterparts. Julia convention.
-    while tok_type(@current_packed) in (T_PLUS T_MINUS T_DOT_PLUS T_DOT_MINUS)
-      op = advance_op_sym()
+    while tok_type(@current_packed) in (T_PLUS T_MINUS T_DOT_PLUS T_DOT_MINUS T_PLUS_MINUS)
+      measurement = at_type?(T_PLUS_MINUS)
+      if measurement
+        advance()
+      else
+        op = advance_op_sym()
       right = parse_shift()
-      left = Tungsten:AST:BinaryOp.new(left, op, right)
+      if measurement
+        left = Tungsten:AST:Call.new(Tungsten:AST:ClassRef.new("Measurement"), "new", [left, right], nil)
+      else
+        left = Tungsten:AST:BinaryOp.new(left, op, right)
     left
 
   -> parse_shift
@@ -1438,7 +1446,15 @@ use ../../core/token
         block = result[1]
         if args == nil
           args = []
-        expr = Tungsten:AST:Call.new(expr, name, args, block)
+        receiver = expr
+        expr = Tungsten:AST:Call.new(receiver, name, args, block)
+        # ClassRef nodes are interned by name, so sparse metadata written on
+        # `Tensor` would otherwise leak to every Tensor reference parsed later.
+        # Unit-bearing Tensor syntax belongs to this factory call, not the
+        # globally interned class leaf.
+        if ast_kind(receiver) == :class_ref && receiver.name == "Tensor" && receiver.type_args != nil
+          expr.type_args = receiver.type_args
+          receiver.type_args = nil
         expr.loc = name_loc
         expr.loc_end = make_end_loc()
       elsif at_type?(T_SAFE_NAV)
@@ -3386,22 +3402,28 @@ use ../../core/token
     if t1 != T_NAME && t1 != T_ID && t1 != T_CONSTANT && t1 != T_TYPE && t1 != T_INT
       return nil
     t2 = peek_type(2)
-    if t2 != T_GT && t2 != T_COMMA
+    if t2 != T_GT && t2 != T_COMMA && t2 != T_SLASH && t2 != T_STAR && t2 != T_DOT_PRODUCT
       return nil
     advance()
     params = []
+    current = ""
     while !at_type?(T_GT) && !at_type?(T_EOF)
-      if at_type?(T_NAME) || at_type?(T_CONSTANT) || at_type?(T_ID) || at_type?(T_TYPE)
-        params.push(advance_value())
-      elsif at_type?(T_INT)
-        # Numeric shape parameter (e.g., Mat<f32, 3, 4>). Captured as
-        # the source-form string so the mangle stays deterministic.
-        params.push(current_value().to_s())
+      if at_type?(T_COMMA)
+        if current == ""
+          raise compile_error_at(:E_PARSE_EXPECTED_TOKEN, "Empty generic type argument")
+        params.push(current)
+        current = ""
         advance()
       else
-        raise compile_error_at(:E_PARSE_EXPECTED_TOKEN, "Expected type-arg identifier or integer, got [current_desc()]")
-      if at_type?(T_COMMA)
+        # Preserve a type argument as compact source text. Besides ordinary
+        # names/shape integers this permits unit expressions in aggregate
+        # types: `Tensor<f64, m/s>`. The argument remains metadata unless the
+        # referenced class is an actual generic template.
+        current = current + current_value().to_s()
         advance()
+    if current == ""
+      raise compile_error_at(:E_PARSE_EXPECTED_TOKEN, "Empty generic type argument")
+    params.push(current)
     expect_type(T_GT)
     params
 

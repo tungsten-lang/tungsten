@@ -875,6 +875,64 @@ int main() {
         printf("  quantity arithmetic: OK\n");
     }
 
+    /* Expanded Ruby unit registry (IDs above the inline 8-bit range). */
+    {
+        WValue hour = w_quantity_parse(w_string("1"), w_string("hours"));
+        assert(w_is_domain_obj(hour));
+        assert(strcmp(str_val(w_to_s(hour)), "1 h") == 0);
+
+        WValue minutes = w_quantity_pipe(hour, w_string("min"), W_NIL);
+        assert(strcmp(str_val(w_to_s(minutes)), "60 min") == 0);
+
+        WValue psi = w_quantity_parse(w_string("1"), w_string("psi"));
+        WValue pa = w_quantity_pipe(psi, w_string("Pa"), W_NIL);
+        assert(strcmp(str_val(w_to_s(pa)), "6894.757 Pa") == 0);
+
+        WValue ev = w_quantity_parse(w_string("1"), w_string("eV"));
+        WValue joules = w_quantity_pipe(ev, w_string("J"), W_NIL);
+        WValue ev_roundtrip = w_quantity_pipe(joules, w_string("eV"), W_NIL);
+        assert(strcmp(str_val(w_to_s(ev_roundtrip)), "1 eV") == 0);
+
+        printf("  expanded quantity registry: OK\n");
+    }
+
+    /* Semantic kinds, temperature points/deltas, and modern quantities. */
+    {
+        WValue c30 = w_quantity_parse(w_string("30"), w_string("°C"));
+        WValue f68 = w_quantity_parse(w_string("68"), w_string("°F"));
+        WValue delta = w_quantity_sub(c30, f68);
+        assert(strcmp(str_val(w_to_s(delta)), "10 Δ°C") == 0);
+
+        WValue c20 = w_quantity_parse(w_string("20"), w_string("°C"));
+        WValue df18 = w_quantity_parse(w_string("18"), w_string("Δ°F"));
+        assert(strcmp(str_val(w_to_s(w_quantity_add(c20, df18))), "30 °C") == 0);
+        assert(strcmp(str_val(w_to_s(w_quantity_add(df18, c20))), "30 °C") == 0);
+
+        WValue glucose = w_quantity_parse(w_string("100"), w_string("mg/dL_glucose"));
+        WValue mmol = w_quantity_pipe(glucose, w_string("mmol/L_glucose"), W_NIL);
+        assert(strcmp(str_val(w_to_s(mmol)), "5.55075 mmol/L_glucose") == 0);
+
+        WValue dppx = w_quantity_parse(w_string("1"), w_string("dppx"));
+        WValue dpi = w_quantity_pipe(dppx, w_string("dpi"), W_NIL);
+        assert(strcmp(str_val(w_to_s(dpi)), "96 dpi") == 0);
+
+        WValue nit = w_quantity_parse(w_string("1"), w_string("nit"));
+        WValue candela_area = w_quantity_pipe(nit, w_string("cd/m²"), W_NIL);
+        assert(strcmp(str_val(w_to_s(candela_area)), "1 cd/m²") == 0);
+
+        printf("  semantic and contextual quantities: OK\n");
+    }
+
+    /* PB + J is shared by the Ruby and compiled runtimes. */
+    {
+        WValue pb = w_quantity_parse(w_string("1"), w_string("PB"));
+        WValue joule = w_quantity_parse(w_string("1"), w_string("J"));
+        WValue sandwich = w_quantity_add(pb, joule);
+        assert(w_is_string(sandwich));
+        assert(strstr(str_val(sandwich), "It's peanut butter jelly time!") != NULL);
+        printf("  PB + J sandwich: OK\n");
+    }
+
     /* Duration ns mode */
     {
         WValue v = w_duration_ns(1500);      /* 1.500µs */

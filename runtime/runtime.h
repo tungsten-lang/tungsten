@@ -226,6 +226,57 @@ typedef struct {
     WValue *slots;        /* base allocation pointer */
 } WArray;
 
+/* ---- Multi-D dense tensor header (CPU / shared-memory face) ----
+ *
+ * WArray is 1-D: size/cap/start over a flat element buffer.
+ * WTensor is N-D: same ebits + flat storage, plus shape/strides.
+ *
+ * Layout (all strides in *elements*, not bytes):
+ *   flat_index(i0,i1,…,ir-1) = offset + Σ_k i_k * strides[k]
+ * C-contiguous rank-2 [M,N]: strides = {N, 1}, offset = 0.
+ *
+ * offset: element index into `storage` where this view begins — for
+ * slices/subtensors without copying (e.g. A[10:20, :] shares storage with
+ * offset = 10*N). Not a byte offset; ebits defines element width.
+ *
+ * shape/strides: either inline for rank ≤ W_TENSOR_INLINE_RANK, or
+ * heap arrays pointed by shape_heap/strides_heap when rank is larger.
+ * rank == 0 is a scalar tensor (one element at offset).
+ *
+ * storage: owns or borrows a typed buffer. When borrow==0, free with the
+ * tensor; when borrow==1, storage is a view (e.g. onto a WArray or MTLBuffer
+ * shared via unified memory). Metal MTLTensor is a separate handle type
+ * (WMetalTensor); a Tungsten Tensor object may hold both a WTensor CPU face
+ * and a WMetalTensor GPU face over the same bytes.
+ */
+#define W_TENSOR_INLINE_RANK 4
+/* Boxed as W_SUBTAG_GENERIC + type = W_TYPE_WTENSOR (must lead with type). */
+#define W_TYPE_WTENSOR 25
+typedef struct WTensor {
+    uint8_t type;           /* W_TYPE_WTENSOR */
+    uint8_t flags;          /* W_FLAG_* (FROZEN, …) */
+    int8_t  ebits;          /* same codes as WArray */
+    uint8_t rank;           /* 0..255; > INLINE uses heap shape */
+    uint8_t borrow;         /* 1 = do not free storage */
+    uint8_t _pad[3];
+    int32_t offset;         /* element offset into storage */
+    int32_t shape_inline[W_TENSOR_INLINE_RANK];
+    int32_t strides_inline[W_TENSOR_INLINE_RANK];
+    int32_t *shape_heap;    /* non-NULL iff rank > INLINE */
+    int32_t *strides_heap;
+    void    *storage;       /* element bytes; interpret via ebits */
+    int64_t  storage_elems; /* capacity of storage in elements */
+} WTensor;
+
+/* CPU f32 tensor helpers (strong in runtime.c). */
+WValue w_tensor_zeros_f32(WValue shape_wv);
+WValue w_tensor_at_f32(WValue t_wv, WValue indices_wv);
+WValue w_tensor_set_f32(WValue t_wv, WValue indices_wv, WValue val_wv);
+WValue w_tensor_shape(WValue t_wv);
+WValue w_tensor_rank(WValue t_wv);
+WValue w_tensor_view_f32(WValue t_wv, WValue offset_wv, WValue shape_wv);
+WValue w_tensor_slice0_f32(WValue t_wv, WValue start_wv, WValue stop_wv);
+
 /* ---- Hash functions ---- */
 typedef uint64_t (*WHashFn)(const uint8_t *data, size_t len);
 
@@ -252,7 +303,8 @@ typedef struct {
 /* ---- Domain heap object (overflow for currency/quantity/duration/decimal) ---- */
 typedef struct {
     uint8_t domain_type;   /* W_DOMAIN_* discriminator */
-    uint8_t pad[7];        /* Alignment padding */
+    uint8_t domain_flags;  /* quantity point/delta metadata; zero otherwise */
+    uint8_t pad[6];        /* Alignment padding */
     int64_t sig;           /* Full-precision significand */
     int32_t scale;         /* Scale */
     int32_t extra;         /* symbol_id (currency), unit_id (quantity), mode (duration) */
@@ -292,6 +344,7 @@ typedef struct {
 /* ---- Boxing constructors (runtime functions) ---- */
 WValue w_int(int64_t v);
 int64_t w_to_i64(WValue v);
+int64_t w_numeric_to_i64(WValue v);
 int64_t w_range_bound_i64(WValue v);
 WValue w_range_bound_i64_w(WValue v);
 WValue w_u64(uint64_t v);
@@ -334,6 +387,7 @@ WValue w_quantity(int unit_id, int64_t sig, int scale);
 WValue w_decimal_parse(WValue str_v);
 WValue w_currency_parse(WValue amount_v, WValue prefix_v, WValue suffix_v);
 WValue w_quantity_parse(WValue num_v, WValue unit_v);
+WValue w_quantity_unit_name(WValue quantity);
 WValue w_quantity_add(WValue a, WValue b);
 WValue w_quantity_sub(WValue a, WValue b);
 WValue w_quantity_mul(WValue a, WValue b);
@@ -341,6 +395,12 @@ WValue w_quantity_div(WValue a, WValue b);
 WValue w_quantity_pipe(WValue q, WValue unit_name_v, WValue digits_v);
 WValue w_quantity_mul_scalar(WValue quantity, WValue scalar);
 WValue w_quantity_div_scalar(WValue quantity, WValue scalar);
+WValue w_quantity_point(WValue quantity, WValue origin);
+WValue w_quantity_delta(WValue quantity, WValue origin);
+WValue w_quantity_point_p(WValue quantity);
+WValue w_quantity_delta_p(WValue quantity);
+WValue w_quantity_origin(WValue quantity);
+WValue w_quantity_equivalent(WValue quantity, WValue target_unit, WValue equivalence);
 
 /* ---- Duration constructors (0xFFFF tag) ---- */
 WValue w_duration_ns(int64_t ns);
@@ -378,23 +438,11 @@ WValue w_ipv4(uint8_t a, uint8_t b, uint8_t c, uint8_t d, int cidr);
 WValue w_ipv4_parse(WValue str_v);
 WValue w_ipv4_from_octets(WValue a, WValue b, WValue c, WValue d, WValue prefix_v);
 WValue w_ipv4_with_prefix(WValue ip, WValue prefix_v);
-WValue w_ipv4_prefix(WValue ip);
-WValue w_ipv4_cidr_p(WValue ip);
-WValue w_ipv4_octet(WValue ip, WValue index_v);
 WValue w_ipv4_octets(WValue ip);
-WValue w_ipv4_to_i(WValue ip);
 WValue w_ipv4_network(WValue ip);
 WValue w_ipv4_broadcast(WValue ip);
 WValue w_ipv4_netmask(WValue ip);
 WValue w_ipv4_in_cidr(WValue ip, WValue cidr);
-WValue w_ipv4_private_p(WValue ip);
-WValue w_ipv4_loopback_p(WValue ip);
-WValue w_ipv4_link_local_p(WValue ip);
-WValue w_ipv4_multicast_p(WValue ip);
-WValue w_ipv4_unspecified_p(WValue ip);
-WValue w_ipv4_broadcast_p(WValue ip);
-WValue w_ipv4_reserved_p(WValue ip);
-WValue w_ipv4_global_p(WValue ip);
 WValue w_ipv6_from_string(const char *s, int cidr);  /* compiled path (ptr, i32) */
 WValue w_ipv6_parse(WValue str_v);                   /* interpreter path (boxed string) */
 WValue w_ipv6_with_prefix(WValue ip, WValue prefix_v);
@@ -473,9 +521,10 @@ WValue w_term_raw_enable(void);
 WValue w_term_raw_disable(void);
 WValue w_read_key(void);
 WValue w_isatty_stdin(void);
+WValue w_isatty_stdout(void);
 WValue w_term_cols(void);
 /* Unified REPL input: stdin keyboard bytes multiplexed with Stream Deck dial
- * events, returned as a tagged int (see the protocol comment in runtime.c).
+ * events, returned as a tagged int (see the protocol in terminal_input.c).
  * Used by the scrub loop so a keystroke OR a dial tick wakes one poll().
  * timeout_ms is a RAW machine int (ccall passes numeric args unboxed). */
 WValue w_input_poll(int64_t timeout_ms);
@@ -745,7 +794,7 @@ typedef struct WHIDDevice {
 
 /* HID→main self-pipe ([0]=read, [1]=write); both -1 when no device is open.
  * Created by w_hid_streamdeck_open (in hid_bridge.m), polled by w_input_poll
- * (in runtime.c) — shared across translation units, hence non-static. */
+ * (in terminal_input.c) — shared across translation units, hence non-static. */
 extern int g_hid_pipe[2];
 
 void   w_hid_ring_push(HIDEvent ev);     /* reader thread → SPSC ring */
@@ -1252,6 +1301,16 @@ WValue w_small_array_size(WValue arr);
 
 WValue w_array_new(int64_t element_bits, int64_t cap);
 WValue w_array_new_uninit(int64_t element_bits, int64_t cap);
+/* Fused elementwise lowering (compiler): uninit buffer with size = cap = n —
+ * the fused loop writes every element. */
+WValue w_array_new_uninit_sized(int64_t element_bits, int64_t n);
+/* Fused elementwise lowering: rhs/lhs size-parity guard, same raise text as
+ * array_elementwise_into. */
+WValue w_elementwise_size_check(WValue lhs, WValue rhs);
+/* Fused elementwise auto-parallelization: size gate + thread partitioner
+ * (thresholds from the measured sweep; TUNGSTEN_FUSED_* env overrides). */
+int64_t w_fused_should_mt(int64_t n);
+int64_t w_fused_parallel_run(int64_t fn_addr, int64_t blk, int64_t n);
 /* Phase 4e: T[N] constructor — size==cap, calloc-zeroed slots ready to
  * read. Callers that want the legacy "cap N, push to fill" semantics use
  * Array.new(ebits, cap: N) (lowers to w_array_new). */

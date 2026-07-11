@@ -185,7 +185,7 @@ case "$UNAME_S" in
   *)      EVENT_SRC=event_epoll.c;  METAL_SRCS="" ;;
 esac
 
-RUNTIME_SRCS=(runtime.c ssmr_witness.c lexchar_tables.c tls_stub.c aks.c slab_zstd.c "$EVENT_SRC")
+RUNTIME_SRCS=(runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c tls_stub.c aks.c slab_zstd.c "$EVENT_SRC")
 # shellcheck disable=SC2206
 for m in $METAL_SRCS; do RUNTIME_SRCS+=("$m"); done
 

@@ -567,3 +567,256 @@ WValue w_mlx_sgemm_nn_no_readback(
     mlx_array_free(y);
     return w_int(rc == 0 ? 1 : 0);
 }
+
+// ---- Elementwise / reduce / softmax / fft / rng / eval (opt-in with this TU) ----
+
+#include "mlx/c/fft.h"
+#include "mlx/c/random.h"
+
+static float *mlx_f32_slots(WValue wv, int64_t *len_out) {
+    WArray *a = (WArray *)w_as_ptr(wv);
+    *len_out = (int64_t)a->size;
+    if (a->size == 0 && a->cap > 0) *len_out = a->cap; /* f32_array often size=0 */
+    return (float *)a->slots + a->start;
+}
+
+static void mlx_bump_size(WValue wv, int64_t n) {
+    WArray *a = (WArray *)w_as_ptr(wv);
+    if (a->size < n) a->size = (int32_t)n;
+}
+
+static int mlx_bin_f32(WValue a_wv, WValue b_wv, WValue out_wv, WValue n_wv,
+                       int (*op)(mlx_array*, mlx_array, mlx_array, mlx_stream)) {
+    mlxb_init();
+    int64_t la, lb, lo;
+    float *a = mlx_f32_slots(a_wv, &la);
+    float *b = mlx_f32_slots(b_wv, &lb);
+    float *o = mlx_f32_slots(out_wv, &lo);
+    int n = (int)w_as_int(n_wv);
+    if (n <= 0) n = (int)(la < lb ? la : lb);
+    if (n > lo) n = (int)lo;
+    int shape[1] = { n };
+    mlx_array A = mlx_array_new_data(a, shape, 1, MLX_FLOAT32);
+    mlx_array B = mlx_array_new_data(b, shape, 1, MLX_FLOAT32);
+    mlx_array Y = mlx_array_new();
+    int rc = op(&Y, A, B, g_stream);
+    if (rc == 0) rc = mlx_array_eval(Y);
+    if (rc == 0) {
+        const float *src = mlx_array_data_float32(Y);
+        if (src) memcpy(o, src, sizeof(float) * (size_t)n);
+        mlx_bump_size(out_wv, n);
+    }
+    mlx_array_free(A); mlx_array_free(B); mlx_array_free(Y);
+    return rc == 0 ? 1 : 0;
+}
+
+static int mlx_unary_f32(WValue a_wv, WValue out_wv, WValue n_wv,
+                         int (*op)(mlx_array*, mlx_array, mlx_stream)) {
+    mlxb_init();
+    int64_t la, lo;
+    float *a = mlx_f32_slots(a_wv, &la);
+    float *o = mlx_f32_slots(out_wv, &lo);
+    int n = (int)w_as_int(n_wv);
+    if (n <= 0) n = (int)la;
+    if (n > lo) n = (int)lo;
+    int shape[1] = { n };
+    mlx_array A = mlx_array_new_data(a, shape, 1, MLX_FLOAT32);
+    mlx_array Y = mlx_array_new();
+    int rc = op(&Y, A, g_stream);
+    if (rc == 0) rc = mlx_array_eval(Y);
+    if (rc == 0) {
+        const float *src = mlx_array_data_float32(Y);
+        if (src) memcpy(o, src, sizeof(float) * (size_t)n);
+        mlx_bump_size(out_wv, n);
+    }
+    mlx_array_free(A); mlx_array_free(Y);
+    return rc == 0 ? 1 : 0;
+}
+
+WValue w_mlx_add_f32(WValue a, WValue b, WValue o, WValue n) {
+    return w_int(mlx_bin_f32(a, b, o, n, mlx_add));
+}
+WValue w_mlx_mul_f32(WValue a, WValue b, WValue o, WValue n) {
+    return w_int(mlx_bin_f32(a, b, o, n, mlx_multiply));
+}
+WValue w_mlx_sub_f32(WValue a, WValue b, WValue o, WValue n) {
+    return w_int(mlx_bin_f32(a, b, o, n, mlx_subtract));
+}
+WValue w_mlx_div_f32(WValue a, WValue b, WValue o, WValue n) {
+    return w_int(mlx_bin_f32(a, b, o, n, mlx_divide));
+}
+WValue w_mlx_exp_f32(WValue a, WValue o, WValue n) {
+    return w_int(mlx_unary_f32(a, o, n, mlx_exp));
+}
+WValue w_mlx_log_f32(WValue a, WValue o, WValue n) {
+    return w_int(mlx_unary_f32(a, o, n, mlx_log));
+}
+WValue w_mlx_sqrt_f32(WValue a, WValue o, WValue n) {
+    return w_int(mlx_unary_f32(a, o, n, mlx_sqrt));
+}
+WValue w_mlx_tanh_f32(WValue a, WValue o, WValue n) {
+    return w_int(mlx_unary_f32(a, o, n, mlx_tanh));
+}
+
+WValue w_mlx_sum_f32(WValue a_wv, WValue n_wv) {
+    mlxb_init();
+    int64_t la; float *a = mlx_f32_slots(a_wv, &la);
+    int n = (int)w_as_int(n_wv); if (n <= 0) n = (int)la;
+    int shape[1] = { n };
+    mlx_array A = mlx_array_new_data(a, shape, 1, MLX_FLOAT32);
+    mlx_array Y = mlx_array_new();
+    int rc = mlx_sum(&Y, A, false, g_stream);
+    if (rc == 0) rc = mlx_array_eval(Y);
+    float out = 0.0f;
+    if (rc == 0) {
+        const float *src = mlx_array_data_float32(Y);
+        if (src) out = src[0];
+    }
+    mlx_array_free(A); mlx_array_free(Y);
+    return w_float((double)out);
+}
+
+WValue w_mlx_max_f32(WValue a_wv, WValue n_wv) {
+    mlxb_init();
+    int64_t la; float *a = mlx_f32_slots(a_wv, &la);
+    int n = (int)w_as_int(n_wv); if (n <= 0) n = (int)la;
+    int shape[1] = { n };
+    mlx_array A = mlx_array_new_data(a, shape, 1, MLX_FLOAT32);
+    mlx_array Y = mlx_array_new();
+    int rc = mlx_max(&Y, A, false, g_stream);
+    if (rc == 0) rc = mlx_array_eval(Y);
+    float out = 0.0f;
+    if (rc == 0) {
+        const float *src = mlx_array_data_float32(Y);
+        if (src) out = src[0];
+    }
+    mlx_array_free(A); mlx_array_free(Y);
+    return w_float((double)out);
+}
+
+WValue w_mlx_softmax_rows_f32(WValue a_wv, WValue out_wv, WValue m_wv, WValue n_wv) {
+    mlxb_init();
+    int M = (int)w_as_int(m_wv);
+    int N = (int)w_as_int(n_wv);
+    int64_t la, lo;
+    float *a = mlx_f32_slots(a_wv, &la);
+    float *o = mlx_f32_slots(out_wv, &lo);
+    int shape[2] = { M, N };
+    mlx_array A = mlx_array_new_data(a, shape, 2, MLX_FLOAT32);
+    mlx_array Y = mlx_array_new();
+    int rc = mlx_softmax_axis(&Y, A, 1, true, g_stream);
+    if (rc == 0) rc = mlx_array_eval(Y);
+    if (rc == 0) {
+        const float *src = mlx_array_data_float32(Y);
+        if (src) memcpy(o, src, sizeof(float) * (size_t)M * (size_t)N);
+        mlx_bump_size(out_wv, (int64_t)M * N);
+    }
+    mlx_array_free(A); mlx_array_free(Y);
+    return w_int(rc == 0 ? 1 : 0);
+}
+
+/* Complex FFT: pack re/im into complex64, run mlx_fft_fft, unpack. */
+WValue w_mlx_fft_f32(WValue re_wv, WValue im_wv, WValue n_wv, WValue inv_wv) {
+    mlxb_init();
+    int n = (int)w_as_int(n_wv);
+    int inverse = (int)w_as_int(inv_wv);
+    int64_t lr, li;
+    float *re = mlx_f32_slots(re_wv, &lr);
+    float *im = mlx_f32_slots(im_wv, &li);
+    if (n <= 0) n = (int)lr;
+    /* Build interleaved complex as float[2n] view for complex64 */
+    float *packed = (float *)malloc(sizeof(float) * 2 * (size_t)n);
+    if (!packed) return w_int(0);
+    for (int i = 0; i < n; i++) {
+        packed[2 * i] = re[i];
+        packed[2 * i + 1] = im[i];
+    }
+    int shape[1] = { n };
+    mlx_array A = mlx_array_new_data(packed, shape, 1, MLX_COMPLEX64);
+    mlx_array Y = mlx_array_new();
+    int rc;
+    if (inverse)
+        rc = mlx_fft_ifft(&Y, A, n, -1, MLX_FFT_NORM_ORTHO, g_stream);
+    else
+        rc = mlx_fft_fft(&Y, A, n, -1, MLX_FFT_NORM_ORTHO, g_stream);
+    if (rc == 0) rc = mlx_array_eval(Y);
+    if (rc == 0) {
+        /* complex64 data as float pairs */
+        const float *src = (const float *)mlx_array_data_complex64(Y);
+        if (src) {
+            for (int i = 0; i < n; i++) {
+                re[i] = src[2 * i];
+                im[i] = src[2 * i + 1];
+            }
+        }
+        mlx_bump_size(re_wv, n);
+        mlx_bump_size(im_wv, n);
+    }
+    free(packed);
+    mlx_array_free(A); mlx_array_free(Y);
+    return w_int(rc == 0 ? 1 : 0);
+}
+
+WValue w_mlx_random_uniform_f32(WValue out_wv, WValue n_wv, WValue lo_wv, WValue hi_wv, WValue seed_wv) {
+    mlxb_init();
+    int n = (int)w_as_int(n_wv);
+    float lo = (float)w_as_double(lo_wv);
+    float hi = (float)w_as_double(hi_wv);
+    uint64_t seed = (uint64_t)w_as_int(seed_wv);
+    mlx_random_seed(seed);
+    int shape[1] = { n };
+    mlx_array low = mlx_array_new_float(lo);
+    mlx_array high = mlx_array_new_float(hi);
+    mlx_array key = mlx_array_new(); /* null key via empty? API says may be null - use key from seed */
+    mlx_array key_arr = mlx_array_new();
+    mlx_random_key(&key_arr, seed);
+    mlx_array Y = mlx_array_new();
+    int rc = mlx_random_uniform(&Y, low, high, shape, 1, MLX_FLOAT32, key_arr, g_stream);
+    if (rc == 0) rc = mlx_array_eval(Y);
+    int64_t lo_len; float *o = mlx_f32_slots(out_wv, &lo_len);
+    if (rc == 0) {
+        const float *src = mlx_array_data_float32(Y);
+        if (src) memcpy(o, src, sizeof(float) * (size_t)n);
+        mlx_bump_size(out_wv, n);
+    }
+    mlx_array_free(low); mlx_array_free(high); mlx_array_free(key_arr); mlx_array_free(Y);
+    (void)key;
+    return w_int(rc == 0 ? 1 : 0);
+}
+
+WValue w_mlx_random_normal_f32(WValue out_wv, WValue n_wv, WValue mean_wv, WValue std_wv, WValue seed_wv) {
+    mlxb_init();
+    int n = (int)w_as_int(n_wv);
+    float loc = (float)w_as_double(mean_wv);
+    float scale = (float)w_as_double(std_wv);
+    uint64_t seed = (uint64_t)w_as_int(seed_wv);
+    mlx_random_seed(seed);
+    int shape[1] = { n };
+    mlx_array key_arr = mlx_array_new();
+    mlx_random_key(&key_arr, seed);
+    mlx_array Y = mlx_array_new();
+    int rc = mlx_random_normal(&Y, shape, 1, MLX_FLOAT32, loc, scale, key_arr, g_stream);
+    if (rc == 0) rc = mlx_array_eval(Y);
+    int64_t lo_len; float *o = mlx_f32_slots(out_wv, &lo_len);
+    if (rc == 0) {
+        const float *src = mlx_array_data_float32(Y);
+        if (src) memcpy(o, src, sizeof(float) * (size_t)n);
+        mlx_bump_size(out_wv, n);
+    }
+    mlx_array_free(key_arr); mlx_array_free(Y);
+    return w_int(rc == 0 ? 1 : 0);
+}
+
+WValue w_mlx_eval(void) {
+    mlxb_init();
+    /* no-op graph-wide eval: callers already eval per-op. Placeholder for future. */
+    return w_int(1);
+}
+
+WValue w_mlx_compile_begin(void) {
+    return w_int(1); /* compile graph capture TBD */
+}
+
+WValue w_mlx_compile_end(void) {
+    return w_int(1);
+}

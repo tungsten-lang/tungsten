@@ -58,9 +58,9 @@ else
   TLS_IMPL =
 endif
 
-# Common runtime sources (runtime.c + event backend + TLS + optional AKS + Metal on darwin)
-RUNTIME_SRCS = runtime.c ssmr_witness.c lexchar_tables.c $(EVENT_SRC) tls_stub.c $(TLS_IMPL) aks.c $(METAL_SRC)
-RUNTIME_DEPS = runtime.c ssmr_witness.c runtime.h wvalue.h event_loop.h $(EVENT_SRC) tls_stub.c $(TLS_IMPL) aks.c $(METAL_SRC)
+# Common runtime sources (core + terminal input + event/TLS + optional companions)
+RUNTIME_SRCS = runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c $(EVENT_SRC) tls_stub.c $(TLS_IMPL) aks.c $(METAL_SRC)
+RUNTIME_DEPS = runtime.c terminal_input.c ssmr_witness.c runtime.h wvalue.h event_loop.h $(EVENT_SRC) tls_stub.c $(TLS_IMPL) aks.c $(METAL_SRC)
 RUNTIME_CFLAGS = $(WARN_FLAGS) $(GC_CFLAGS) $(TLS_CFLAGS) $(ONIG_CFLAGS)
 RUNTIME_LDFLAGS = $(GC_LDFLAGS) $(TLS_LDFLAGS) $(ONIG_LDFLAGS) $(PLATFORM_LDFLAGS)
 
@@ -68,12 +68,17 @@ RUNTIME_LDFLAGS = $(GC_LDFLAGS) $(TLS_LDFLAGS) $(ONIG_LDFLAGS) $(PLATFORM_LDFLAG
 # Produces an executable next to the .ll file
 compile: $(SRC:.ll=)
 
-%: %.ll $(RUNTIME_DIR)runtime.c $(RUNTIME_DIR)$(EVENT_SRC) $(RUNTIME_DIR)tls_stub.c $(RUNTIME_DIR)aks.c $(if $(TLS_IMPL),$(RUNTIME_DIR)$(TLS_IMPL)) $(addprefix $(RUNTIME_DIR),$(METAL_SRC))
-	$(CLANG) -O2 $(RUNTIME_CFLAGS) $(RUNTIME_DIR)runtime.c $(RUNTIME_DIR)$(EVENT_SRC) $(RUNTIME_DIR)tls_stub.c $(if $(TLS_IMPL),$(RUNTIME_DIR)$(TLS_IMPL)) $(RUNTIME_DIR)aks.c $(addprefix $(RUNTIME_DIR),$(METAL_SRC)) $< $(RUNTIME_LDFLAGS) -o $@
+%: %.ll $(RUNTIME_DIR)runtime.c $(RUNTIME_DIR)terminal_input.c $(RUNTIME_DIR)$(EVENT_SRC) $(RUNTIME_DIR)tls_stub.c $(RUNTIME_DIR)aks.c $(if $(TLS_IMPL),$(RUNTIME_DIR)$(TLS_IMPL)) $(addprefix $(RUNTIME_DIR),$(METAL_SRC))
+	$(CLANG) -O2 $(RUNTIME_CFLAGS) $(RUNTIME_DIR)runtime.c $(RUNTIME_DIR)terminal_input.c $(RUNTIME_DIR)$(EVENT_SRC) $(RUNTIME_DIR)tls_stub.c $(if $(TLS_IMPL),$(RUNTIME_DIR)$(TLS_IMPL)) $(RUNTIME_DIR)aks.c $(addprefix $(RUNTIME_DIR),$(METAL_SRC)) $< $(RUNTIME_LDFLAGS) -o $@
 
-# Build just the runtime object for linking
+# Build the split runtime objects for callers that do not use RUNTIME_SRCS.
+runtime-objects: runtime.o terminal_input.o
+
 runtime.o: $(RUNTIME_DEPS)
 	$(CLANG) -O2 $(RUNTIME_CFLAGS) -c runtime.c -o runtime.o
+
+terminal_input.o: terminal_input.c runtime.h wvalue.h
+	$(CLANG) -O2 $(RUNTIME_CFLAGS) -c terminal_input.c -o terminal_input.o
 
 # Build and run NaN-boxing tests
 test: test_nanbox
@@ -230,7 +235,7 @@ tests/test_node_arena: tests/test_node_arena.c $(RUNTIME_DEPS)
 test-all: test test-arena test-threads test-atomics test-sockets test-goroutines test-event-loop test-integration test-hash test-string-slab test-ivars test-node-arena
 
 clean:
-	rm -f runtime.o test_nanbox bench_wvalue bench_bigint bench_node bench_location bench_slab_init bench_before bench_http bench_http_before
+	rm -f runtime.o terminal_input.o test_nanbox bench_wvalue bench_bigint bench_node bench_location bench_slab_init bench_before bench_http bench_http_before
 	rm -f tests/test_goroutine_arena tests/test_threads tests/test_atomics tests/test_sockets tests/test_goroutines tests/test_event_loop tests/test_integration tests/test_hash tests/test_string_slab tests/test_ivars tests/test_node_arena
 
-.PHONY: compile clean test test-arena test-threads test-atomics test-sockets test-goroutines test-event-loop test-integration test-hash test-string-slab test-ivars test-node-arena test-all bench bench-bigint bench-node bench-location bench-slab-init bench-before bench-compare
+.PHONY: compile runtime-objects clean test test-arena test-threads test-atomics test-sockets test-goroutines test-event-loop test-integration test-hash test-string-slab test-ivars test-node-arena test-all bench bench-bigint bench-node bench-location bench-slab-init bench-before bench-compare

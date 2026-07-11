@@ -143,6 +143,7 @@ run_cuda_emit_spec() {
 
 compiled_specs=(
   spec/compiler/block_passthrough_spec.w
+  spec/compiler/elementwise_fusion_spec.w
   spec/compiler/recase_spec.w
   spec/compiler/typed_overload_spec.w
   spec/compiler/view_field_var_spec.w

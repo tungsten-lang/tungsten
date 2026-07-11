@@ -516,10 +516,12 @@ use lowering/definitions
     return :symbol
   when :var
     n = node.name
-    # $value lowers to the raw 64-bit content of self (see lower_var's
-    # $-branch). Surface that to infer_type so `($value >> N) & M` style
-    # bit extractions stay on the inline-int code path in lower_binary_op
-    # instead of dispatching through the receiver's class.
+    return var_types[n]
+  when :gvar
+    n = node.name
+    # `$value` is parsed as a GVar, then lower_gvar exposes the receiver's raw
+    # 64-bit content. Keep inference in agreement so `($value >> N) & M`
+    # lowers to native shifts/masks rather than polymorphic w_bit_* calls.
     if n == "$value"
       return :raw_i64
     return var_types[n]
@@ -553,7 +555,7 @@ use lowering/definitions
           return normalize_type_symbol(typed_rt)
       return fn_return_types[node.name]
 
-    if ast_kind(node.receiver) == :var
+    if ast_kind(node.receiver) in (:var :class_ref)
       static_rt = fn_return_types[node.receiver.name + "." + node.name]
       if static_rt != nil
         return normalize_type_symbol(static_rt)
@@ -596,6 +598,18 @@ use lowering/definitions
       return infer_lchs_return_type(node.args)
     if node.name == "to_i" && node.args != nil && node.args.size() == 0
       return :i64
+    # Math.* compiler intrinsics always yield a float: the w_math_*
+    # intercepts (lowering/method_call.w) wrap their result in w_float
+    # unconditionally. Without this, an expression like `Math.sin(x) + c`
+    # infers nil and the `+` falls back to a boxed w_add call instead of a
+    # raw fadd — the shared-inference twin of the raw libm fast path. This
+    # list covers ONLY the intercepted builtins, which have no .w
+    # definition to annotate; core/math.w methods (atan, tanh, hypot, …)
+    # carry `f64` return-type annotations and resolve through the
+    # static-receiver fn_return_types lookup above.
+    if node.receiver != nil && ast_kind(node.receiver) in (:var :class_ref :call) && node.receiver.name == "Math"
+      if node.name in ("exp" "log" "sin" "cos" "tan" "sqrt" "floor" "ceil" "round" "abs" "pow" "ldexp" "atan2")
+        return :float
     recv_t = infer_type(node.receiver, var_types, fn_return_types, infer_maps)
     # bool_array is its own legacy type and not in is_array_type?, so name it
      # explicitly: arr[i] returns :bool, lining up with `id_bool(x) (bool) bool`
@@ -1828,6 +1842,12 @@ use lowering/definitions
     return lower_method_call(ctx, setter_call)
 
   name = target.name
+
+  # Flow compile-time quantity signatures through ordinary local bindings.
+  # Reassignment to an unknown expression clears the fact conservatively.
+  if ctx[:quantity_dimensions] == nil
+    ctx[:quantity_dimensions] = {}
+  ctx[:quantity_dimensions][name] = static_quantity_signature(ctx, node.value)
 
   # Range-elision (#49): stash range-literal RHS so a later `r.each ...`
   # substitutes the range expression at the call site and routes through

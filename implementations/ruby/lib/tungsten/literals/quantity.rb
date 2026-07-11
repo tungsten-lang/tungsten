@@ -4,12 +4,47 @@ module Tungsten
   class Quantity
     include Comparable
 
-    attr_reader :value, :unit
+    attr_reader :value, :unit, :role, :origin, :semantic_kind
     attr_accessor :display_format # nil (default), Integer (decimal places), :rational
 
-    def initialize(value, unit)
+    def initialize(value, unit, role: nil, origin: nil, semantic_kind: nil)
       @value = value
       @unit = unit
+      @role = role
+      @origin = origin&.to_sym
+      @semantic_kind = semantic_kind&.to_sym
+    end
+
+    # Ordinary quantities are vectors. Point semantics are opt-in except for
+    # affine temperature units, which are points by definition.
+    def point(origin = :default)
+      copy_with(role: :point, origin:)
+    end
+
+    def delta(origin = @origin)
+      copy_with(role: :delta, origin:)
+    end
+
+    def point?
+      return @role == :point unless @role.nil?
+      temperature_point?
+    end
+
+    def delta?
+      return @role == :delta unless @role.nil?
+      temperature_delta?
+    end
+
+    def vector?
+      !point?
+    end
+
+    def as_kind(name)
+      copy_with(semantic_kind: name)
+    end
+
+    def calibrate(calibration)
+      calibration.apply(self)
     end
 
     # Sorites: a heap is closer to infinity than to any finite quantity.
@@ -37,7 +72,7 @@ module Tungsten
     # Wraps an arithmetic result so that hole-typed quantities snap to integer counts.
     def self.snap_hole(q)
       return q unless q.is_a?(Quantity) && q.hole?
-      Quantity.new(hole_count(q.value), q.unit)
+      q.__send__(:copy_with, value: hole_count(q.value))
     end
 
     def +(other)
@@ -46,11 +81,12 @@ module Tungsten
       result = case other
                when Quantity
                  return Sandwich.new if pbj_pair?(other)
+                 return add_temperature(other) if temperature_quantity?(other)
                  ensure_compatible!(other)
                  converted = convert_value(other)
-                 Quantity.new(@value + converted, @unit)
+                 addition_result(other, @value + converted)
                when Percentage
-                 Quantity.new(@value * (1 + other.ratio), @unit)
+                 copy_with(value: @value * (1 + other.ratio))
                when Duration
                  ensure_time_dimension!("add a Duration")
                  self + duration_as_seconds_quantity(other)
@@ -64,6 +100,10 @@ module Tungsten
     # Detects the PB+J pair via underlying components rather than display
     # symbols so aliases like `pb` and `j` resolve to their canonicals.
     def pbj_pair?(other)
+      # The compiled/runtime spelling joke: petabyte + joule gives PB + J.
+      symbols = [@unit.symbol, other.unit.symbol].sort
+      return true if symbols == ["J", "PB"] && @value == 1 && other.value == 1
+
       pair = [@unit.components.keys.sort, other.unit.components.keys.sort].sort
       pair == [["jelly"], ["peanutbutter"]]
     end
@@ -73,11 +113,12 @@ module Tungsten
       return other if other.is_a?(Quantity) && other.heap?
       result = case other
                when Quantity
+                 return subtract_temperature(other) if temperature_quantity?(other)
                  ensure_compatible!(other)
                  converted = convert_value(other)
-                 Quantity.new(@value - converted, @unit)
+                 subtraction_result(other, @value - converted)
                when Percentage
-                 Quantity.new(@value * (1 - other.ratio), @unit)
+                 copy_with(value: @value * (1 - other.ratio))
                when Duration
                  ensure_time_dimension!("subtract a Duration")
                  self - duration_as_seconds_quantity(other)
@@ -88,6 +129,8 @@ module Tungsten
     end
 
     def *(other)
+      ensure_non_affine_arithmetic!(other, "multiply")
+      ensure_not_point_arithmetic!(other, "multiply")
       if heap?
         return Quantity.new(0, @unit) if other.is_a?(Numeric) && other.zero?
         return Quantity.new(0, @unit) if other.is_a?(Quantity) && other.value.zero?
@@ -103,7 +146,7 @@ module Tungsten
                  new_value, new_unit = self.class.normalize_prefix_factor(@value * other.value, new_unit)
                  Quantity.new(new_value, new_unit).rescale
                when Numeric
-                 Quantity.new(@value * other, @unit).rescale
+                 copy_with(value: @value * other).rescale
                when Duration
                  self * duration_as_seconds_quantity(other)
                else
@@ -113,6 +156,8 @@ module Tungsten
     end
 
     def /(other)
+      ensure_non_affine_arithmetic!(other, "divide")
+      ensure_not_point_arithmetic!(other, "divide")
       if heap?
         if (other.is_a?(Numeric) && other.zero?) || (other.is_a?(Quantity) && other.value.zero?)
           raise DimensionError, "cannot divide a heap by zero"
@@ -131,7 +176,7 @@ module Tungsten
                  Quantity.new(new_value, new_unit).rescale
                when Numeric
                  new_value = coerce_division(@value, other)
-                 Quantity.new(new_value, @unit).rescale
+                 copy_with(value: new_value).rescale
                when Duration
                  self / duration_as_seconds_quantity(other)
                else
@@ -142,14 +187,20 @@ module Tungsten
 
     def **(exp)
       raise DimensionError, "can only raise Quantity to an integer power" unless exp.is_a?(Integer)
+      ensure_non_affine_arithmetic!(nil, "raise to a power") unless exp == 1
       new_components = @unit.components.transform_values { |e| e * exp }
       dim = Units::Dimension.zero
       factor = 1
-      exp.times { dim = dim * @unit.dimension; factor *= @unit.factor }
+      exp.abs.times { dim = dim * @unit.dimension; factor *= @unit.factor }
+      if exp.negative?
+        dim = Units::Dimension.zero / dim
+        factor = factor.is_a?(Float) ? 1.0 / factor : Rational(1, factor)
+      end
       new_unit = Units::CompoundUnit.simplify(
         Units::CompoundUnit.new(dimension: dim, factor: factor, components: new_components)
       )
-      Quantity.new(@value**exp, new_unit)
+      copy_with(value: @value**exp, unit: new_unit,
+                role: exp == 1 ? @role : nil, origin: exp == 1 ? @origin : nil)
     end
 
     # After multiplication or division, the unit's stored factor can carry
@@ -177,7 +228,7 @@ module Tungsten
     end
 
     def -@
-      Quantity.new(-@value, @unit)
+      copy_with(value: -@value)
     end
 
     def coerce(other)
@@ -227,7 +278,98 @@ module Tungsten
       end
       si_value = @value * @unit.factor + @unit.offset
       new_value = (si_value - target.offset) / target.factor
-      Quantity.new(new_value, target)
+      copy_with(value: new_value, unit: target)
+    end
+
+    # Convert through an explicitly named physical equivalence. These are
+    # deliberately separate from ordinary `to`, which remains dimensional.
+    def equivalent_to(target_str, using)
+      target = Units.parse(target_str)
+      source_si = to_si.to_f
+      target_si = case using.to_sym
+                  when :mass_energy
+                    mass_energy_equivalent(source_si, target.dimension)
+                  when :spectral
+                    spectral_equivalent(source_si, target.dimension)
+                  when :thermal
+                    thermal_equivalent(source_si, target.dimension)
+                  else
+                    raise ArgumentError, "unknown physical equivalence: #{using}"
+                  end
+      Quantity.new((target_si - target.offset) / target.factor, target)
+    end
+
+    alias_method :equivalent, :equivalent_to
+
+    TEMPERATURE_DELTA_FOR_POINT = {
+      "K" => "ΔK", "°C" => "Δ°C", "°F" => "Δ°F", "°R" => "Δ°R",
+      "°De" => "Δ°De", "°N" => "Δ°N", "°Ré" => "Δ°Ré", "°Rø" => "Δ°Rø", "°W" => "Δ°W"
+    }.freeze
+
+    def temperature_point?
+      @unit.dimension == Units::TEMPERATURE
+    end
+
+    def temperature_delta?
+      @unit.dimension == Units::TEMPERATURE_DELTA
+    end
+
+    def temperature_quantity?(other = nil)
+      mine = temperature_point? || temperature_delta?
+      return mine unless other
+      mine && (other.temperature_point? || other.temperature_delta?)
+    end
+
+    def add_temperature(other)
+      if point? && other.point?
+        raise DimensionError, "cannot add two absolute temperatures; add a temperature difference instead"
+      end
+      if point? && other.delta?
+        return copy_with(value: @value + delta_value_in(other, @unit),
+                         origin: @origin || other.origin)
+      end
+      if delta? && other.point?
+        return other.__send__(:copy_with,
+                              value: other.value + delta_value_in(self, other.unit),
+                              origin: other.origin || @origin)
+      end
+      ensure_compatible!(other)
+      Quantity.new(@value + convert_value(other), @unit)
+    end
+
+    def subtract_temperature(other)
+      if point? && other.point?
+        delta_symbol = TEMPERATURE_DELTA_FOR_POINT.fetch(@unit.symbol, "ΔK")
+        delta_unit = Units.parse(delta_symbol)
+        explicit_role = (@role == :point || other.role == :point) ? :delta : nil
+        return copy_with(value: (to_si - other.to_si) / delta_unit.factor,
+                         unit: delta_unit, role: explicit_role, origin: @origin || other.origin)
+      end
+      if point? && other.delta?
+        return copy_with(value: @value - delta_value_in(other, @unit),
+                         origin: @origin || other.origin)
+      end
+      if delta? && other.point?
+        raise DimensionError, "cannot subtract an absolute temperature from a temperature difference"
+      end
+      ensure_compatible!(other)
+      Quantity.new(@value - convert_value(other), @unit)
+    end
+
+    def delta_value_in(delta, point_unit)
+      delta.value * delta.unit.factor / point_unit.factor
+    end
+
+    def ensure_non_affine_arithmetic!(other, operation)
+      affine = point? && temperature_point? && !@unit.offset.zero?
+      affine ||= other.is_a?(Quantity) && other.point? && other.temperature_point? && !other.unit.offset.zero?
+      return unless affine
+      raise DimensionError, "cannot #{operation} an affine absolute temperature; convert it to kelvin or use a temperature difference"
+    end
+
+    def ensure_not_point_arithmetic!(other, operation)
+      return unless point? || (other.is_a?(Quantity) && other.point?)
+      raise DimensionError, "cannot #{operation} an affine point; subtract points or operate on a delta"
     end
 
     def to_s
@@ -249,7 +391,16 @@ module Tungsten
             when :rational then format_as_fraction(@value)
             else format_value(@value)
             end
-      "#{fmt} #{display_unit_symbol}"
+      rendered = "#{fmt} #{display_unit_symbol}"
+      if @role == :point
+        "(#{rendered}).point(:#{@origin || :default})"
+      elsif @role == :delta
+        @origin ? "(#{rendered}).delta(:#{@origin})" : "(#{rendered}).delta"
+      elsif @semantic_kind
+        "(#{rendered}).as_kind(:#{@semantic_kind})"
+      else
+        rendered
+      end
     end
 
     # Pluralizes the unit symbol when the displayed value isn't ±1 and the
@@ -286,7 +437,7 @@ module Tungsten
     # `compound:` controls how compound units render: :slash (default), :dot_negative
     # (`m·s⁻¹`), or :words (`meters per second`). Doesn't mutate the original.
     def display(compound: nil)
-      copy = Quantity.new(@value, @unit)
+      copy = copy_with
       copy.display_format = @display_format
       copy.instance_variable_set(:@display_compound, compound || @display_compound)
       copy
@@ -306,7 +457,7 @@ module Tungsten
       best = send(:rescale_candidate, si_value, candidates)
       return self unless best
       sym, factor, int_value = best
-      Quantity.new(int_value, Units::CompoundUnit.new(
+      copy_with(value: int_value, unit: Units::CompoundUnit.new(
         dimension: @unit.dimension, factor: factor, components: {sym => 1}
       ))
     end
@@ -325,6 +476,91 @@ module Tungsten
     end
 
     private
+
+    def copy_with(value: @value, unit: @unit, role: @role, origin: @origin, semantic_kind: @semantic_kind)
+      copy = Quantity.new(value, unit, role:, origin:, semantic_kind:)
+      copy.display_format = @display_format
+      copy.instance_variable_set(:@display_compound, @display_compound)
+      copy
+    end
+
+    def ensure_origins_compatible!(other)
+      return if @origin.nil? || other.origin.nil? || @origin == other.origin
+      raise DimensionError, "cannot combine points/deltas with origins #{@origin.inspect} and #{other.origin.inspect}"
+    end
+
+    def addition_result(other, value)
+      ensure_origins_compatible!(other)
+      if point? && other.point?
+        raise DimensionError, "cannot add two points; add a delta to a point instead"
+      end
+      if point?
+        return copy_with(value:, role: :point, origin: @origin || other.origin)
+      end
+      if other.point?
+        return other.__send__(:copy_with, value:, unit: @unit, role: :point, origin: other.origin || @origin)
+      end
+      role = (delta? || other.delta?) ? :delta : nil
+      copy_with(value:, role:, origin: @origin || other.origin)
+    end
+
+    def subtraction_result(other, value)
+      ensure_origins_compatible!(other)
+      if point? && other.point?
+        return copy_with(value:, role: :delta, origin: @origin || other.origin)
+      end
+      if point?
+        return copy_with(value:, role: :point, origin: @origin || other.origin)
+      end
+      if other.point?
+        raise DimensionError, "cannot subtract a point from a vector or delta"
+      end
+      role = (delta? || other.delta?) ? :delta : nil
+      copy_with(value:, role:, origin: @origin || other.origin)
+    end
+
+    def mass_energy_equivalent(source_si, target_dimension)
+      c2 = 299_792_458.0**2
+      return source_si * c2 if @unit.dimension == Units::MASS && target_dimension == Units::ENERGY
+      return source_si / c2 if @unit.dimension == Units::ENERGY && target_dimension == Units::MASS
+      raise DimensionError, "mass_energy equivalence requires mass and energy"
+    end
+
+    def spectral_equivalent(source_si, target_dimension)
+      c = 299_792_458.0
+      h = 6.626_070_15e-34
+      source_dimension = @unit.dimension
+      if source_dimension == Units::LENGTH
+        return c / source_si if frequency_dimension?(target_dimension)
+        return h * c / source_si if target_dimension == Units::ENERGY
+      elsif frequency_dimension?(source_dimension)
+        return c / source_si if target_dimension == Units::LENGTH
+        return h * source_si if target_dimension == Units::ENERGY
+      elsif source_dimension == Units::ENERGY
+        return h * c / source_si if target_dimension == Units::LENGTH
+        return source_si / h if frequency_dimension?(target_dimension)
+      end
+      raise DimensionError, "spectral equivalence requires length, frequency, or photon energy"
+    end
+
+    def thermal_equivalent(source_si, target_dimension)
+      boltzmann = 1.380_649e-23
+      if temperature_dimension?(@unit.dimension) && target_dimension == Units::ENERGY
+        return source_si * boltzmann
+      end
+      if @unit.dimension == Units::ENERGY && temperature_dimension?(target_dimension)
+        return source_si / boltzmann
+      end
+      raise DimensionError, "thermal equivalence requires temperature and energy"
+    end
+
+    def frequency_dimension?(dimension)
+      dimension == Units::FREQUENCY || dimension.customs.key?("cycle")
+    end
+
+    def temperature_dimension?(dimension)
+      dimension == Units::TEMPERATURE || dimension == Units::TEMPERATURE_DELTA
+    end
 
     # Convert a Duration to a Quantity[time] in seconds for arithmetic interop.
     # Rejects Durations with nominal months — month length depends on calendar
@@ -354,6 +590,9 @@ module Tungsten
     end
 
     def ensure_compatible!(other)
+      if @semantic_kind != other.semantic_kind && (@semantic_kind || other.semantic_kind)
+        raise DimensionError, "cannot combine semantic kinds #{@semantic_kind || :unspecified} and #{other.semantic_kind || :unspecified}"
+      end
       unless @unit.compatible?(other.unit)
         left_dim = Units.dimension_name(@unit.dimension)
         right_dim = Units.dimension_name(other.unit.dimension)
@@ -519,7 +758,7 @@ module Tungsten
 
       return self unless best
       sym, factor, new_value = best
-      Quantity.new(new_value, Units::CompoundUnit.new(
+      copy_with(value: new_value, unit: Units::CompoundUnit.new(
         dimension: @unit.dimension, factor: factor, components: {sym => 1}
       ))
     end

@@ -9,6 +9,7 @@ require "fileutils"
 PRINT_IR    = File.join(ROOT, "compiler/print_ir.w")
 RUNTIME_C   = File.join(ROOT, "runtime/runtime.c")
 RUNTIME_DIR = File.join(ROOT, "runtime")
+TERMINAL_INPUT_C = File.join(RUNTIME_DIR, "terminal_input.c")
 EVENT_SRCS  = Dir[File.join(RUNTIME_DIR, "event_*.c")]
 TLS_C       = File.join(RUNTIME_DIR, "tls.c")
 TLS_STUB_C  = File.join(RUNTIME_DIR, "tls_stub.c")
@@ -118,7 +119,7 @@ def compile_forge_app(source_path, output_path)
     ll_file = output_path + ".ll"
     File.write(ll_file, ir)
     ok = system("clang", *FORGE_CLANG_FLAGS, *FORGE_EXTRA_FLAGS, "-Wno-override-module",
-                RUNTIME_C, *EVENT_SRCS, *FORGE_EXTRA_SRCS, ll_file, "-o", output_path,
+                RUNTIME_C, TERMINAL_INPUT_C, *EVENT_SRCS, *FORGE_EXTRA_SRCS, ll_file, "-o", output_path,
                 err: File::NULL)
     File.delete(ll_file) if File.exist?(ll_file)
     ok

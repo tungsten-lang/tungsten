@@ -336,6 +336,12 @@ module Tungsten
         if def_obj.respond_to?(:description) && def_obj.description
           lines << inspection_header_line("description", def_obj.description)
         end
+        if def_obj.respond_to?(:etymology) && def_obj.etymology
+          lines << inspection_header_line("etymology", def_obj.etymology)
+        end
+        if def_obj.respond_to?(:history) && def_obj.history
+          lines << inspection_header_line("history", def_obj.history)
+        end
         if def_obj.respond_to?(:measured) && !def_obj.measured.nil? &&
            (def_obj.respond_to?(:year_defined) && def_obj.year_defined ||
             def_obj.respond_to?(:defining_source) && def_obj.defining_source)

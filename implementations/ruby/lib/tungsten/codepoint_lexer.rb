@@ -1834,7 +1834,7 @@ module Tungsten
     end
 
     def scan_unit_string
-      match = match_regex_at(Lexer::UNIT_STRING)
+      match = match_regex_at(/Δ(?:°[\p{L}]+|K)/) || match_regex_at(Lexer::UNIT_STRING)
       return nil unless match
 
       advance(match[0].bytesize)
@@ -2271,7 +2271,7 @@ module Tungsten
 
     def scan_unicode_identifier
       start_col = @col
-      match = match_regex_at(UNICODE_IDENTIFIER)
+      match = match_regex_at(/Δ(?:°[\p{L}]+|K)/) || match_regex_at(UNICODE_IDENTIFIER)
       return false unless match
 
       advance(match[0].bytesize)

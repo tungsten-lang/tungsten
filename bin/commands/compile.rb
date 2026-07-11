@@ -5,6 +5,7 @@ PRINT_AST   = File.join(ROOT, "compiler/print_ast.w")
 EMIT_IR     = File.join(ROOT, "compiler/print_ir.w")
 RUNTIME_C   = File.join(ROOT, "runtime/runtime.c")
 RUNTIME_DIR = File.join(ROOT, "runtime")
+TERMINAL_INPUT_C = File.join(RUNTIME_DIR, "terminal_input.c")
 SLAB_ZSTD_C = File.join(RUNTIME_DIR, "slab_zstd.c")
 TLS_C       = File.join(RUNTIME_DIR, "tls.c")
 TLS_STUB_C  = File.join(RUNTIME_DIR, "tls_stub.c")
@@ -62,9 +63,15 @@ MARCH_FLAGS = Tungsten::BuildFlags.march(RELEASE_MODE ? :portable : :native)
 CLANG_FLAGS = if ENV["CLANG_FLAGS"]
                 ENV["CLANG_FLAGS"].split
               elsif LINUX
+                # No -fveclib here: libmvec coverage varies by glibc version and
+                # arch; an unresolved _ZGV* symbol would break the link.
                 ["-O3", "-DNDEBUG", *MARCH_FLAGS, LTO_FLAG, "-lm"]
               else
-                ["-O3", "-DNDEBUG", *MARCH_FLAGS, LTO_FLAG, "-Wl,-dead_strip"]
+                # -fveclib lets LLVM's loop vectorizer replace scalar libm calls
+                # (sin/cos/exp/…) in vectorizable loops — e.g. the fused
+                # elementwise loops the compiler emits — with libsystem_m's NEON
+                # SIMD variants (_simd_sin_d2 & co., 2 lanes per call).
+                ["-O3", "-DNDEBUG", *MARCH_FLAGS, LTO_FLAG, "-fveclib=Darwin_libsystem_m", "-Wl,-dead_strip"]
               end
 
 # Helper: find a header in standard paths
@@ -216,12 +223,12 @@ EXTRA_FLAGS = TLS_FLAGS + HTTP2_FLAGS + HTTP3_FLAGS + URING_FLAGS
 BLAS_BRIDGE_C = File.join(RUNTIME_DIR, "blas_bridge.c")
 # The Apple GPU/HID bridges (and their frameworks, mostly via ObjC
 # autolinking) are linked ONLY when the program's IR references a bridge
-# symbol; otherwise runtime.c's W_NO_APPLE_BRIDGES stubs stand in and the
+# symbol; otherwise the runtime's W_NO_APPLE_BRIDGES stubs stand in and the
 # binary skips Metal/Foundation/IOKit/AppKit entirely (~2ms warm and far
 # cheaper first-run dyld closure).
 BRIDGE_SRCS = [(MACOS && File.exist?(METAL_M) ? METAL_M : nil), (MACOS && File.exist?(HID_M) ? HID_M : nil)].compact
 def ir_needs_apple_bridges?(ir)
-  MACOS && ir.match?(/@"?w_(metal|hid|gpu|gfx)_/)
+  MACOS && ir.match?(/@"?w_(metal|hid|gpu|gfx|fused_gpu)_/)
 end
 def ir_needs_blas?(ir)
   MACOS && ir.match?(/@"?w_blas_/)
@@ -683,7 +690,7 @@ when ".w"
 
     onig_cflags, onig_libs = onig_flags
     clang_flags = CLANG_FLAGS + EXTRA_FLAGS + onig_cflags + ["-I#{RUNTIME_DIR}"] + extra_clang_flags
-    clang_sources = [RUNTIME_C, *EVENT_SRCS, *EXTRA_SRCS, *extra_c_includes]
+    clang_sources = [RUNTIME_C, TERMINAL_INPUT_C, *EVENT_SRCS, *EXTRA_SRCS, *extra_c_includes]
     if ir_needs_apple_bridges?(ir)
       clang_flags += METAL_FRAMEWORK_FLAGS
       clang_sources += BRIDGE_SRCS

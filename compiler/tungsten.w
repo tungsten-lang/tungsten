@@ -238,7 +238,7 @@ while i < args.size()
 # Does the emitted module reference any Apple GPU/graphics/HID bridge symbol?
 # Only then are metal.m/graphics.m/hid_bridge.m (and, via their ObjC
 # autolinking, the Metal/AppKit/QuartzCore/IOKit frameworks) linked; other
-# programs use the weak stubs in runtime.c and start ~2ms warm with a far
+# programs use weak stubs in the runtime translation units and start ~2ms warm with a far
 # cheaper first-run dyld closure.
 -> ll_text_has(text, needle)
   if text == nil
@@ -252,6 +252,10 @@ while i < args.size()
     return true
   if ll_text_has(text, "@w_hid_")
     return true
+  # Fused elementwise GPU auto-offload (metal.m); the runtime.c weak stub
+  # keeps non-bridged links working, but the real impl needs metal.m.
+  if ll_text_has(text, "@w_fused_gpu_run")
+    return true
   ll_text_has(text, "@w_gpu_")
 
 # Accelerate BLAS is a separate conditional: a matmul program should not
@@ -259,6 +263,18 @@ while i < args.size()
 # Accelerate. Real impls in runtime/blas_bridge.c override the weak stubs.
 -> ll_needs_blas(text)
   ll_text_has(text, "@w_blas_")
+
+-> ll_needs_sparse(text)
+  ll_text_has(text, "@w_sparse_")
+
+-> ll_needs_sci_io(text)
+  ll_text_has(text, "@w_sci_")
+
+-> ll_needs_wtensor(text)
+  ll_text_has(text, "@w_tensor_")
+
+-> ll_needs_cuda(text)
+  ll_text_has(text, "@w_cuda_")
 
 # System library flag probes. Each shells out via capture() — fork+exec+pipe
 # is ~10-30ms per call, and we do 9 of them per compile. To skip them on
@@ -587,6 +603,10 @@ while i < args.size()
   ll_probe_text = read_file(ll_path)
   bridges_needed = ll_needs_apple_bridges(ll_probe_text)
   blas_needed = ll_needs_blas(ll_probe_text)
+  sparse_needed = ll_needs_sparse(ll_probe_text)
+  sci_io_needed = ll_needs_sci_io(ll_probe_text)
+  wtensor_needed = ll_needs_wtensor(ll_probe_text)
+  cuda_needed = ll_needs_cuda(ll_probe_text)
   # Data-table gating (weak twins in runtime.c make absence safe):
   #   prime    → ssmr_witness.c (512KB witness table; absent = exact 4-base
   #              fallback over its range)
@@ -646,6 +666,13 @@ while i < args.size()
       clang_cmd << "--sysroot=" + cross_sysroot + " "
     clang_cmd << "-fuse-ld=lld -Wl,--gc-sections -rdynamic "
   elsif detect_target()[:os] == "macos"
+    # -fveclib: the LLVM loop vectorizer may replace scalar libm calls in
+    # vectorizable loops (e.g. the compiler's fused elementwise loops) with
+    # libsystem_m's NEON SIMD variants (_simd_sin_d2 & co). Post-.ll clang
+    # flag — never affects stage1==stage2 identity. Linux is left alone:
+    # libmvec coverage varies by glibc version/arch and a missing _ZGV*
+    # symbol would break the link.
+    clang_cmd << "-fveclib=Darwin_libsystem_m "
     clang_cmd << "-Wl,-dead_strip -Wl,-stack_size,0x8000000 -Wl,-export_dynamic "
   else
     clang_cmd << "-fuse-ld=lld -Wl,--gc-sections -rdynamic "
@@ -675,6 +702,9 @@ while i < args.size()
   else
     clang_cmd << runtime_dir
     clang_cmd << "runtime.c "
+
+    clang_cmd << runtime_dir
+    clang_cmd << "terminal_input.c "
 
     clang_cmd << runtime_dir
     clang_cmd << runtime_event_source
@@ -707,6 +737,9 @@ while i < args.size()
     if blas_needed
       clang_cmd << gated_dir
       clang_cmd << "blas_bridge.c "
+    if sparse_needed
+      clang_cmd << gated_dir
+      clang_cmd << "sparse_bridge.c "
     if bridges_needed
       clang_cmd << gated_dir
       clang_cmd << "metal.m "
@@ -714,6 +747,25 @@ while i < args.size()
       clang_cmd << "graphics.m "
       clang_cmd << gated_dir
       clang_cmd << "hid_bridge.m "
+  # Pure-C sci I/O (no system HDF5/NetCDF/Arrow) — all platforms.
+  if sci_io_needed
+    clang_cmd << gated_dir
+    clang_cmd << "sci_io_native.c "
+  if wtensor_needed
+    clang_cmd << gated_dir
+    clang_cmd << "tensor_bridge.c "
+  on linux
+    if blas_needed
+      # Portable CBLAS (OpenBLAS). Requires libopenblas-dev (or equivalent).
+      clang_cmd << gated_dir
+      clang_cmd << "openblas_bridge.c "
+  # CUDA host bridge: only when IR needs it and nvcc is available.
+  # Linking .cu is done via a separate nvcc step when TUNGSTEN_CUDA=1.
+  if cuda_needed
+    # Named launch still uses weak stubs unless the user links
+    # runtime/cuda_bridge.cu via nvcc (see doc/scientific-computing/cuda.md).
+    # Device availability reports 0 without the bridge — that is intentional.
+    cuda_needed = cuda_needed
 
   includes = extra_c_includes
 
@@ -740,13 +792,15 @@ while i < args.size()
   on macos
     if bridges_needed
       clang_cmd << " -framework Metal -framework Foundation -framework AppKit -framework QuartzCore -framework CoreGraphics -framework IOKit -framework CoreFoundation"
-    if blas_needed
+    if blas_needed || sparse_needed
       clang_cmd << " -framework Accelerate"
 
   # Linux: libm is a separate library (macOS bundles it into libSystem), and
   # it must follow the objects that reference it.
   on linux
     clang_cmd << " -lm"
+    if blas_needed
+      clang_cmd << " -lopenblas"
 
   clang_cmd << " -o "
   clang_cmd << out_path
@@ -768,7 +822,7 @@ while i < args.size()
   evo = ev.replace(".c", ".o")
 
   # Freshness: reuse the cached archive iff it is newer than every base source.
-  bases = ["runtime.c", "runtime.h", "wvalue.h", ev, "aks.c", "tls_stub.c"]
+  bases = ["runtime.c", "terminal_input.c", "runtime.h", "wvalue.h", ev, "aks.c", "tls_stub.c"]
   fresh = StringBuffer(0)
   fresh << "test -e "
   fresh << archive
@@ -792,15 +846,15 @@ while i < args.size()
   cc << host_c_compiler()
   cc << " -O3 -DNDEBUG "
   cc << march_flags()
-  cc << " -c runtime.c "
+  cc << " -c runtime.c terminal_input.c "
   cc << ev
   cc << " aks.c tls_stub.c && "
   cc << archive_tool()
   cc << " rcs "
   cc << archive
-  cc << " runtime.o "
+  cc << " runtime.o terminal_input.o "
   cc << evo
-  cc << " aks.o tls_stub.o && rm -f runtime.o "
+  cc << " aks.o tls_stub.o && rm -f runtime.o terminal_input.o "
   cc << evo
   cc << " aks.o tls_stub.o"
   if system(cc.to_s()) != true
@@ -839,7 +893,7 @@ while i < args.size()
   if frame_pointers
     cc << "-fno-omit-frame-pointer "
 
-  cc << "-c runtime.c "
+  cc << "-c runtime.c terminal_input.c "
   cc << runtime_event_source
   cc << " ssmr_witness.c tls_stub.c aks.c "
 

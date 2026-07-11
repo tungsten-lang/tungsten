@@ -47,7 +47,9 @@
     reuse_sites:     [],
     next_reuse_site: 0,
     custom_units:    {},
-    next_custom_unit_id: 140
+    # IDs 256..2047 are generated from the Ruby reference unit registry.
+    # User-defined/unknown units live above that range and are heap-boxed.
+    next_custom_unit_id: 2048
   }
 
 -> next_call_site_id(mod)

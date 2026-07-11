@@ -18,6 +18,7 @@ use target
     @classes = {}
     @traits = {}
     @self_stack = [nil]
+    @method_stack = [nil]
     @signal = {type: nil, value: nil}
     @loaded_files = []
     @current_file = nil
@@ -166,8 +167,9 @@ use target
     @classes.keys().each -> (k)
       classes_copy[k] = @classes[k]
     stack_copy = @self_stack.copy(0, @self_stack.size())
+    method_stack_copy = @method_stack.copy(0, @method_stack.size())
     files_copy = @loaded_files.copy(0, @loaded_files.size())
-    {env: @env, classes: classes_copy, signal_type: @signal[:type], signal_value: @signal[:value], self_stack: stack_copy, loaded_files: files_copy, current_file: @current_file}
+    {env: @env, classes: classes_copy, signal_type: @signal[:type], signal_value: @signal[:value], self_stack: stack_copy, method_stack: method_stack_copy, loaded_files: files_copy, current_file: @current_file}
 
   -> restore_state(snapshot)
     @env = snapshot[:env]
@@ -175,6 +177,7 @@ use target
     @signal[:type] = snapshot[:signal_type]
     @signal[:value] = snapshot[:signal_value]
     @self_stack = snapshot[:self_stack]
+    @method_stack = snapshot[:method_stack]
     @loaded_files = snapshot[:loaded_files]
     @current_file = snapshot[:current_file]
 
@@ -1058,16 +1061,8 @@ use target
       return ccall("w_ipv4_parse", args[1])
     when "w_ipv4_from_octets"
       return ccall("w_ipv4_from_octets", args[1], args[2], args[3], args[4], args[5])
-    when "w_ipv4_to_i"
-      return ccall("w_ipv4_to_i", args[1])
-    when "w_ipv4_prefix"
-      return ccall("w_ipv4_prefix", args[1])
-    when "w_ipv4_cidr_p"
-      return ccall("w_ipv4_cidr_p", args[1])
     when "w_ipv4_with_prefix"
       return ccall("w_ipv4_with_prefix", args[1], args[2])
-    when "w_ipv4_octet"
-      return ccall("w_ipv4_octet", args[1], args[2])
     when "w_ipv4_octets"
       return ccall("w_ipv4_octets", args[1])
     when "w_ipv4_network"
@@ -1078,23 +1073,6 @@ use target
       return ccall("w_ipv4_netmask", args[1])
     when "w_ipv4_in_cidr"
       return ccall("w_ipv4_in_cidr", args[1], args[2])
-    when "w_ipv4_private_p"
-      return ccall("w_ipv4_private_p", args[1])
-    when "w_ipv4_loopback_p"
-      return ccall("w_ipv4_loopback_p", args[1])
-    when "w_ipv4_link_local_p"
-      return ccall("w_ipv4_link_local_p", args[1])
-    when "w_ipv4_multicast_p"
-      return ccall("w_ipv4_multicast_p", args[1])
-    when "w_ipv4_unspecified_p"
-      return ccall("w_ipv4_unspecified_p", args[1])
-    when "w_ipv4_broadcast_p"
-      return ccall("w_ipv4_broadcast_p", args[1])
-    when "w_ipv4_reserved_p"
-      return ccall("w_ipv4_reserved_p", args[1])
-    when "w_ipv4_global_p"
-      return ccall("w_ipv4_global_p", args[1])
-
     when "w_ipv6_parse"
       return ccall("w_ipv6_parse", args[1])
     when "w_ipv6_prefix"
@@ -1217,6 +1195,24 @@ use target
 
     raise "Unsupported ccall '[cname]' in interpreter"
 
+  # Raw-returning C helpers need an explicit tree-walker bridge. Keep this
+  # allowlisted like dispatch_interpreted_ccall: eval mode must not turn an
+  # arbitrary source-level string into an unrestricted native call.
+  -> dispatch_interpreted_ccall_nobox(args)
+    if args.size() == 0
+      raise "ccall_nobox requires a runtime function name"
+    cname = "" + args[0]
+    case cname
+    when "w_numeric_to_i64"
+      if args.size() != 2
+        raise "w_numeric_to_i64 expects one argument"
+      # The native helper returns an unboxed int64_t. Rebox it explicitly so
+      # the interpreter's value model receives an Integer rather than treating
+      # the raw bits as an already-tagged WValue.
+      return ccall("w_int", ccall_nobox("w_numeric_to_i64", args[1]))
+
+    raise "Unsupported ccall_nobox '[cname]' in interpreter"
+
   # Familiar names from other languages, mapped to the Tungsten idiom — only
   # consulted after every real lookup has failed. (The lowering pass keeps its
   # own copy for unknown compiled calls; use-order separates the two files.)
@@ -1261,7 +1257,18 @@ use target
   # unlike eval_var's undefined-name error path, since there's no
   # "did you mean a bare method call" ambiguity for a $-sigiled name.
   -> eval_gvar(node)
-    @globals[ast_get(node, :name)]
+    name = ast_get(node, :name)
+    # Inside a class method body `$value` is the receiver's exact 64-bit
+    # WValue, not a process global. The compiled path exposes the same bits as
+    # :raw_i64 in lower_gvar; box them here as an unsigned integer so the
+    # tree-walker can faithfully evaluate pure-Tungsten bit extraction such
+    # as `($value >> 12) & 0xFFFFFFFF` on packed values (IPv4, Token, ...).
+    # w_u64 preserves the entire bit pattern by promoting to BigInt when the
+    # high tag bits do not fit the immediate Integer payload.
+    current_method = @method_stack.last()
+    if name == "$value" && current_method != nil && current_method[:w_class] != nil
+      return ccall("w_u64", current_self())
+    @globals[name]
 
   # `receiver$field` — read a view-decl field off an explicit receiver.
   # The tree-walker models `- data` layout fields as accessor methods
@@ -1371,17 +1378,21 @@ use target
 
   # -- Binary operations --
 
-  # Conversion-pipe target for `| lb` / `| lb(2)` / `| J`: a bare known-unit
-  # name (var, PascalCase class_ref, or one-int-arg call) that isn't shadowed
-  # by a local. Mirrors lowering/ops.w pipe_unit_target.
+  # Conversion-pipe target for `| lb` / `| lb(2)` / `| J` / `| "metric cup"`:
+  # a known-unit spelling that isn't shadowed by a local. Mirrors
+  # lowering/ops.w pipe_unit_target.
   -> interp_pipe_unit_target(node, env)
     r = ast_get(node, :right)
     if !is_ast_node?(r)
       return nil
     uname = nil
     udigits = 0 - 1
+    quoted = false
     k = ast_kind(r)
-    if k == :var || k == :class_ref
+    if k == :string
+      uname = ast_get(r, :value)
+      quoted = true
+    elsif k == :var || k == :class_ref
       uname = ast_get(r, :name)
     elsif k == :call && ast_get(r, :receiver) == nil
       cargs = ast_get(r, :args)
@@ -1395,7 +1406,7 @@ use target
     uname = "" + uname.to_s()
     if !known_unit_name?(uname)
       return nil
-    if env.defined?(uname) || @env.defined?(uname)
+    if !quoted && (env.defined?(uname) || @env.defined?(uname))
       return nil
     {name: uname, digits: udigits}
 
@@ -1538,7 +1549,8 @@ use target
     raise "Unknown unary operator"
 
   -> apply_type_hint(value, hint)
-    if hint == nil || type(value) != "Integer"
+    value_type = type(value)
+    if hint == nil || !(value_type in ("Integer" "BigInt"))
       return value
     if hint == "u64"
       return wrap_unsigned_bits(value, 64)
@@ -1566,6 +1578,14 @@ use target
     wrapped
 
   -> pow2(bits)
+    # These are the only widths apply_type_hint requests. Spelling their
+    # moduli as BigInt literals prevents this compiler implementation's own
+    # native i64 loop inference from wrapping 2^64 to zero (which made any
+    # eval-mode `## i64` assignment die in `value % modulus`).
+    if bits == 64
+      return 18446744073709551616
+    if bits == 128
+      return 340282366920938463463374607431768211456
     result = 1
     i = 0
     while i < bits
@@ -1716,6 +1736,8 @@ use target
   -> dispatch_bare_call(name, args, block, env)
     if name == "ccall"
       return dispatch_interpreted_ccall(args)
+    if name == "ccall_nobox"
+      return dispatch_interpreted_ccall_nobox(args)
 
     # Explicit fused multiply-add. The tree-walker has no hardware FMA and no
     # runtime fma() to call, so it computes a*b+c directly — double-rounded,
@@ -2159,41 +2181,45 @@ use target
     # barrier); closures that capture method-locals keep write-through
     # because their block_env has no barrier and chains to this env.
     method_env = Environment.new(@env, true)
-
-    # Bind parameters
-    params = ast_get(method, :params)
-    i = 0
-    while i < params.size()
-      param = params[i]
-      value = nil
-      if i < args.size()
-        value = args[i]
-      elsif ast_get(param, :default) != nil
-        value = evaluate(ast_get(param, :default), method_env)
-
-      method_env.define(ast_get(param, :name), value)
-
-      # Auto-assign ivar params
-      if ast_get(param, :ivar_assign) && recv != nil && type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :object
-        recv[:ivars]["@" + ast_get(param, :name)] = value
-      i += 1
-
-    # Bind block
-    if block != nil
-      method_env.define("__block__", block)
-
     @self_stack.push(recv)
+    @method_stack.push(method)
     result = nil
     begin
-      result = evaluate_body(ast_get(method, :body), method_env)
-    rescue err
-      if err == "__SIGNAL__" && @signal[:type] == :return
-        result = @signal[:value]
-        @signal[:type] = nil
-      else
-        @self_stack.pop()
-        raise err
-    @self_stack.pop()
+      # Bind parameters after establishing the callee context: default
+      # expressions containing self/$value belong to the callee, not the
+      # caller whose method happened to invoke it.
+      params = ast_get(method, :params)
+      i = 0
+      while i < params.size()
+        param = params[i]
+        value = nil
+        if i < args.size()
+          value = args[i]
+        elsif ast_get(param, :default) != nil
+          value = evaluate(ast_get(param, :default), method_env)
+
+        method_env.define(ast_get(param, :name), value)
+
+        # Auto-assign ivar params
+        if ast_get(param, :ivar_assign) && recv != nil && type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :object
+          recv[:ivars]["@" + ast_get(param, :name)] = value
+        i += 1
+
+      # Bind block
+      if block != nil
+        method_env.define("__block__", block)
+
+      begin
+        result = evaluate_body(ast_get(method, :body), method_env)
+      rescue err
+        if err == "__SIGNAL__" && @signal[:type] == :return
+          result = @signal[:value]
+          @signal[:type] = nil
+        else
+          raise err
+    ensure
+      @method_stack.pop()
+      @self_stack.pop()
     result
 
   -> collect_free_vars(node, env, vars, seen)
@@ -2304,7 +2330,17 @@ use target
     # Class re-open: if a class with this name already exists, merge the
     # new methods into the existing class table with last-wins semantics
     # on name collisions. First-declaration wins for superclass.
-    w_class = @classes[ast_get(node, :name)]
+    # If the name belongs to core, load that base first; a partial user reopen
+    # must not suppress the primitive's standard methods. Do not recursively
+    # autoload a core file while evaluating that same file's class definition.
+    class_name = ast_get(node, :name)
+    registry = autoload_registry()
+    core_path = nil
+    if registry[class_name] != nil
+      core_path = core_dir() + "/core/" + registry[class_name] + ".w"
+    if core_path != nil && @current_file != core_path
+      try_autoload_class(class_name)
+    w_class = @classes[class_name]
     if w_class == nil
       superclass = nil
       if ast_get(node, :superclass) != nil
@@ -2314,7 +2350,7 @@ use target
         try_autoload_class(ast_get(node, :superclass))
         superclass = @classes[ast_get(node, :superclass)]
       w_class = {rt: :class, name: ast_get(node, :name), superclass: superclass, methods: {}, class_methods: {}}
-      @classes[ast_get(node, :name)] = w_class
+      @classes[class_name] = w_class
     if w_class[:class_methods] == nil
       w_class[:class_methods] = {}
 

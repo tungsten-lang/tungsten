@@ -15,61 +15,61 @@
 
   # tanh(x) = (e^(2x) - 1) / (e^(2x) + 1)
   # Stable form across the full f32 range; saturates at ±1 for |x| > ~9.
-  -> .tanh(x)
+  -> .tanh(x) f64
     e2x = Math.exp(~2.0 * x)
     (e2x - ~1.0) / (e2x + ~1.0)
 
   # sinh(x) = (e^x - e^-x) / 2
-  -> .sinh(x)
+  -> .sinh(x) f64
     ex = Math.exp(x)
     (ex - ~1.0 / ex) / ~2.0
 
   # cosh(x) = (e^x + e^-x) / 2
-  -> .cosh(x)
+  -> .cosh(x) f64
     ex = Math.exp(x)
     (ex + ~1.0 / ex) / ~2.0
 
   # Inverse hyperbolic.
 
   # asinh(x) = ln(x + sqrt(x² + 1))
-  -> .asinh(x)
+  -> .asinh(x) f64
     Math.log(x + Math.sqrt(x * x + ~1.0))
 
   # acosh(x) = ln(x + sqrt(x² - 1))   for x >= 1
-  -> .acosh(x)
+  -> .acosh(x) f64
     Math.log(x + Math.sqrt(x * x - ~1.0))
 
   # atanh(x) = 0.5 * ln((1 + x) / (1 - x))   for |x| < 1
-  -> .atanh(x)
+  -> .atanh(x) f64
     ~0.5 * Math.log((~1.0 + x) / (~1.0 - x))
 
   # Exp/log family (derived).
 
   # expm1(x) = e^x - 1. Note: less precise near x=0 than libm's expm1
   # (which is engineered to avoid the catastrophic cancellation).
-  -> .expm1(x)
+  -> .expm1(x) f64
     Math.exp(x) - ~1.0
 
   # log1p(x) = ln(1 + x). Same accuracy caveat as above near x=0.
-  -> .log1p(x)
+  -> .log1p(x) f64
     Math.log(~1.0 + x)
 
   # log2(x) = ln(x) / ln(2)
-  -> .log2(x)
+  -> .log2(x) f64
     Math.log(x) / ~0.6931471805599453
 
   # log10(x) = ln(x) / ln(10)
-  -> .log10(x)
+  -> .log10(x) f64
     Math.log(x) / ~2.302585092994046
 
   # log_b(x) = ln(x) / ln(b)
-  -> .log_base(x, b)
+  -> .log_base(x, b) f64
     Math.log(x) / Math.log(b)
 
   # Roots.
 
   # cbrt(x) = sign(x) * exp(ln|x| / 3). Sign-correct for negative x.
-  -> .cbrt(x)
+  -> .cbrt(x) f64
     if x == ~0.0
       ~0.0
     elsif x > ~0.0
@@ -79,11 +79,11 @@
 
   # hypot(a, b) = sqrt(a² + b²). Naive form — risks overflow when
   # |a|, |b| > ~2^63. For ML-scale inputs this is fine.
-  -> .hypot(a, b)
+  -> .hypot(a, b) f64
     Math.sqrt(a * a + b * b)
 
   # Truncation (round toward zero).
-  -> .trunc(x)
+  -> .trunc(x) f64
     if x >= ~0.0
       Math.floor(x)
     else
@@ -94,7 +94,7 @@
   # atan(x) — Bhaskara-style 6th-order polynomial in [−1, 1], range
   # reduction via atan(x) = π/2 − atan(1/x) for |x| > 1. Accurate to
   # ~1e-6 across the full f32 range. Plenty for ML angle work.
-  -> .atan(x)
+  -> .atan(x) f64
     if x < ~0.0
       ~0.0 - Math.atan(~0.0 - x)
     elsif x > ~1.0
@@ -105,15 +105,15 @@
       x * (~0.999866 + x2 * (~-0.330299 + x2 * (~0.180141 + x2 * (~-0.085133 + x2 * ~0.020835))))
 
   # asin(x) = atan(x / sqrt(1 - x²))   for |x| < 1
-  -> .asin(x)
+  -> .asin(x) f64
     Math.atan(x / Math.sqrt(~1.0 - x * x))
 
   # acos(x) = π/2 - asin(x)
-  -> .acos(x)
+  -> .acos(x) f64
     ~1.5707963267948966 - Math.asin(x)
 
   # atan2(y, x) — quadrant-correct atan(y/x).
-  -> .atan2(y, x)
+  -> .atan2(y, x) f64
     if x > ~0.0
       Math.atan(y / x)
     elsif x < ~0.0

@@ -173,3 +173,4 @@ benchmarks/matmul/metaflip/ff_gpu_*.txt
 benchmarks/matmul/metaflip/flipfleet_status.txt
 benchmarks/matmul/metaflip/gpu_sweep_results.txt
 benchmarks/matmul/metaflip/.ff_cwd.tmp
+.venv/

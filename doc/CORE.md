@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(84 total), grouped by area, with its declaration, a one-line
+(103 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -42,6 +42,21 @@ summary from the source header, and a link to the source.
 | `JSON` | `+ JSON` | JSON encoder/decoder — interface and default implementation. | [`core/json.w`](../core/json.w) |
 | `Math` | `+ Math` | Math — pure-Tungsten implementations of math functions derived from | [`core/math.w`](../core/math.w) |
 | `Matrix` | `+ Matrix<T> < Number` | Matrix — generic M×N matrices over a scalar type T. Storage is | [`core/matrix.w`](../core/matrix.w) |
+| `LinAlg` | `+ LinAlg` | LinAlg — dense linear algebra over nested lists / flat f64 storage. | [`core/linalg.w`](../core/linalg.w) |
+| `FFT` | `+ FFT` | FFT — discrete Fourier transform (native Cooley–Tukey radix-2). | [`core/fft.w`](../core/fft.w) |
+| `Special` | `+ Special` | Special — transcendental / special functions (SciPy `scipy.special` analogue). | [`core/special.w`](../core/special.w) |
+| `Stats` | — | Stats — distributions, descriptive stats, sampling. | [`core/stats.w`](../core/stats.w) |
+| `Tensor` | — | core/tensor.w — N-dimensional Tensor that shares memory with a Metal 4 | [`core/tensor.w`](../core/tensor.w) |
+| `Dual` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
+| `Tape` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
+| `Autodiff` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
+| `Solve` | `+ Solve` | Solve — initial-value ODE solvers (SciPy solve_ivp analogue). | [`core/solve.w`](../core/solve.w) |
+| `Optim` | `+ Optim` | Optim — scalar / vector optimization and root-finding (v0). | [`core/optim.w`](../core/optim.w) |
+| `Interpolate` | `+ Interpolate` | Interpolate — interpolation and numerical quadrature. | [`core/interpolate.w`](../core/interpolate.w) |
+| `SciIO` | `+ SciIO` | SciIO — scientific data interchange (no system libhdf5/netcdf/arrow). | [`core/io.w`](../core/io.w) |
+| `Plot` | `+ Plot` | Plot — terminal sparklines / heatmaps (zero-dep). | [`core/plot.w`](../core/plot.w) |
+| `Sparse` | — | Sparse — sparse **matrix** algebra (not a sparse multi-D tensor). | [`core/sparse.w`](../core/sparse.w) |
+| `CUDA` | `+ CUDA` | CUDA — host-side launch for `@gpu fn` kernels emitted as .cu. | [`core/cuda.w`](../core/cuda.w) |
 | `MAC` | `+ MAC` | — | [`core/mac.w`](../core/mac.w) |
 | `Module` | `+ Module` | — | [`core/module.w`](../core/module.w) |
 | `Nil` | `+ Nil` | — | [`core/nil.w`](../core/nil.w) |
@@ -49,6 +64,8 @@ summary from the source header, and a link to the source.
 | `Object` | `+ Object < BlankSlate` | Object is the default root of all Tungsten objects. Object inherits from BlankSlate (the | [`core/object.w`](../core/object.w) |
 | `Path` | `+ Path` | Path — immutable filesystem path | [`core/path.w`](../core/path.w) |
 | `Quantity` | `+ Quantity` | Quantity — numeric value with unit (tag 0xFFFD) | [`core/quantity.w`](../core/quantity.w) |
+| `Measurement` | `+ Measurement` | Measurement — a measured scalar and its standard uncertainty. | [`core/measurement.w`](../core/measurement.w) |
+| `Calibration` | `+ Calibration` | Calibration — polynomial measurement model with a standard-uncertainty | [`core/calibration.w`](../core/calibration.w) |
 | `Random` | `+ Random` | — | [`core/random.w`](../core/random.w) |
 | `Range` | `+ Range` | — | [`core/range.w`](../core/range.w) |
 | `Regex` | `+ Regex` | Regex — a homegrown regular-expression engine, written in Tungsten. | [`core/regex.w`](../core/regex.w) |
@@ -70,6 +87,8 @@ summary from the source header, and a link to the source.
 | Class | Defined as | Summary | Source |
 |-------|-----------|---------|--------|
 | `Hypercomplex` | `+ Hypercomplex<T> < Number` | Hypercomplex — the Cayley–Dickson algebras above the reals: | [`core/numeric/hypercomplex.w`](../core/numeric/hypercomplex.w) |
+| `Interval` | `+ Interval` | Interval — rigorous interval arithmetic over Float endpoints. | [`core/numeric/interval.w`](../core/numeric/interval.w) |
+| `IntervalF64` | `+ IntervalF64 < Interval` | — | [`core/numeric/intervalf64.w`](../core/numeric/intervalf64.w) |
 | `BF16` | — | — | [`core/numeric/bf16.w`](../core/numeric/bf16.w) |
 | `BigComplex` | `+ BigComplex < Complex` | — | [`core/numeric/big_complex.w`](../core/numeric/big_complex.w) |
 | `BigDecimal` | `+ BigDecimal < Decimal` | — | [`core/numeric/big_decimal.w`](../core/numeric/big_decimal.w) |

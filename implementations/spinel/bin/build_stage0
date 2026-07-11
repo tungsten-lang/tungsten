@@ -45,6 +45,7 @@ stage0_input_sha() {
     "$SPINEL_DIR/stage0" \
     "$ROOT/implementations/ruby/lib" \
     "$ROOT/runtime/runtime.c" \
+    "$ROOT/runtime/terminal_input.c" \
     "$ROOT/runtime/event_kqueue.c" \
     "$ROOT/runtime/aks.c" \
     "$ROOT/runtime/tls_stub.c" \
@@ -83,6 +84,7 @@ runtime_archive_stale() {
 
   for runtime_src in \
     "$ROOT/runtime/runtime.c" \
+    "$ROOT/runtime/terminal_input.c" \
     "$ROOT/runtime/event_kqueue.c" \
     "$ROOT/runtime/aks.c" \
     "$ROOT/runtime/tls_stub.c" \
@@ -107,11 +109,12 @@ rebuild_runtime_archive() {
     clang -O3 -DNDEBUG -march=native -mtune=native -flto=auto \
       -I"$ROOT/runtime" -I/opt/homebrew/include \
       -c "$ROOT/runtime/runtime.c" \
+         "$ROOT/runtime/terminal_input.c" \
          "$ROOT/runtime/event_kqueue.c" \
          "$ROOT/runtime/aks.c" \
          "$ROOT/runtime/tls_stub.c" \
          "$ROOT/runtime/slab_zstd.c"
-    ar rcs "$RUNTIME_ARCHIVE" runtime.o event_kqueue.o aks.o tls_stub.o slab_zstd.o
+    ar rcs "$RUNTIME_ARCHIVE" runtime.o terminal_input.o event_kqueue.o aks.o tls_stub.o slab_zstd.o
   )
 }
 

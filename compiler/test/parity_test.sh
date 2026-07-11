@@ -42,6 +42,7 @@ SUPPORTED=(
   unit_convert
   unit_dim_algebra
   unit_prefixed_convert
+  unit_registry_parity
   implicit_new
   unit_pipes
   goroutine_channel
@@ -205,6 +206,66 @@ for name in "${SUPPORTED[@]}"; do
   fi
 done
 echo "Interpreter: $IPASS pass, $IFAIL fail, $ISKIP known-skip"
+
+# Negative quantity cases need the native runtime to reject the operation.
+# They cannot be ordinary parity fixtures because successful output is not the
+# expected result.
+echo ""
+echo "==> Native quantity rejection cases..."
+for reject in unit_semantic_mismatch unit_temperature_point_add; do
+  cp "$FIXTURES/$reject.w" "$TMP/$reject.w"
+  if "$TUNGSTEN" compile --no-lto "$TMP/$reject.w" --out "$TMP/$reject" > "$TMP/$reject.build" 2>&1 &&
+     ! "$TMP/$reject" > "$TMP/$reject.out" 2>&1 &&
+     grep -Eq 'dimension mismatch|absolute temperatures' "$TMP/$reject.out"; then
+    echo "PASS  $reject"
+  else
+    echo "FAIL  $reject"
+    ERRORS="${ERRORS}\n--- $reject ---\n$(head -20 "$TMP/$reject.build" "$TMP/$reject.out" 2>/dev/null)"
+    FAIL=$((FAIL + 1))
+  fi
+done
+
+# The compiled REPL must read unit prose at runtime rather than baking it into
+# the compiler. Point it at a temporary metadata root with a unique sentinel;
+# seeing that sentinel proves both the feature and the external-file contract.
+echo ""
+echo "==> Compiled REPL external unit metadata..."
+META_ROOT="$TMP/metadata-root"
+mkdir -p "$META_ROOT/data"
+printf '# symbol<TAB>description<TAB>etymology<TAB>history<TAB>source<TAB>year<TAB>status\nm\tEXTERNAL-METADATA-SENTINEL\tfrom-test-etymology\tfrom-test-history\ttest-source\t2026\texact\n' \
+  > "$META_ROOT/data/unit_metadata.tsv"
+REPL_OUT="$TMP/repl-metadata.out"
+if printf '? 1 m\n' | TUNGSTEN_ROOT="$META_ROOT" "$ROOT/bin/tungsten-compiler" --repl > "$REPL_OUT" 2>&1 &&
+   grep -q 'EXTERNAL-METADATA-SENTINEL' "$REPL_OUT" &&
+   grep -q 'from-test-etymology' "$REPL_OUT" &&
+   grep -q 'from-test-history' "$REPL_OUT"; then
+  echo "PASS  compiled REPL external unit metadata"
+else
+  echo "FAIL  compiled REPL external unit metadata"
+  ERRORS="${ERRORS}\n--- compiled REPL metadata ---\n$(head -20 "$REPL_OUT")"
+  FAIL=$((FAIL + 1))
+fi
+
+echo ""
+echo "==> Exhaustive Ruby/compiled unit registry superset..."
+if ! ruby "$ROOT/compiler/test/unit_registry_superset_test.rb"; then
+  FAIL=$((FAIL + 1))
+  ERRORS="${ERRORS}\n--- exhaustive unit registry superset failed ---"
+fi
+
+echo ""
+echo "==> Self-hosted RegexLexer parity..."
+REGEX_PARITY_BIN="$TMP/regex-lexer-parity"
+REGEX_PARITY_LOG="$TMP/regex-lexer-parity.log"
+REGEX_FIXTURES=("$FIXTURES"/*.w)
+if "$TUNGSTEN" compile --no-lto "$ROOT/compiler/lex_parity.w" --out "$REGEX_PARITY_BIN" > "$REGEX_PARITY_LOG" 2>&1 &&
+   "$REGEX_PARITY_BIN" "${REGEX_FIXTURES[@]}" >> "$REGEX_PARITY_LOG" 2>&1; then
+  tail -1 "$REGEX_PARITY_LOG"
+else
+  echo "FAIL  self-hosted RegexLexer parity"
+  ERRORS="${ERRORS}\n--- RegexLexer parity ---\n$(tail -30 "$REGEX_PARITY_LOG")"
+  FAIL=$((FAIL + 1))
+fi
 
 if [ -n "$ERRORS" ]; then
   echo ""

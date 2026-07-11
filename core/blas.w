@@ -29,6 +29,10 @@
 -> f64_array(n)
   ccall("w_array_new_aligned", -64, n)
 
+# i32 typed array (ebits=33 — see runtime WArray signed int encoding).
+-> i32_array(n)
+  ccall("w_array_new_aligned", 33, n)
+
 # Single-precision matrix multiply: C = A · B (row-major, no transpose).
 # A is M×K, B is K×N, C is M×N. Returns the C array.
 fn sgemm(a, b, c, m, n, k)
@@ -88,3 +92,43 @@ fn vexp(a, out, n)
 
 fn vtanh(a, out, n)
   ccall("w_blas_vtanh_f32", a, out, n)
+
+fn vlog(a, out, n)
+  ccall("w_blas_vlog_f32", a, out, n)
+
+fn vsqrt(a, out, n)
+  ccall("w_blas_vsqrt_f32", a, out, n)
+
+# ---- BLAS 1 / 2 ----
+# y := a*x + y  (saxpy). In-place on y.
+fn saxpy(a, x, y, n)
+  ccall("w_blas_saxpy", a, x, y, n)
+
+# y := A x  for A M×N row-major f32, x length N, y length M.
+fn sgemv(a, x, y, m, n)
+  ccall("w_blas_sgemv_n", a, x, y, m, n)
+
+# ---- vDSP vector arithmetic ----
+fn vadd(a, b, out, n)
+  ccall("w_blas_vadd_f32", a, b, out, n)
+
+fn vmul(a, b, out, n)
+  ccall("w_blas_vmul_f32", a, b, out, n)
+
+fn vsmul(a, s, out, n)
+  ccall("w_blas_vsmul_f32", a, s, out, n)
+
+# Fill out[0..n) with scalar s (zeros-by-default: use s=0 after allocate).
+fn vfill(out, s, n)
+  ccall("w_blas_vfill_f32", out, s, n)
+
+# ---- Dense solve / Cholesky (pure C in blas_bridge — no clapack) ----
+fn dgesv(a, b, n)
+  ccall("w_blas_dgesv", a, b, n)
+
+fn dpotrf(a, n)
+  ccall("w_blas_dpotrf", a, n)
+
+# vDSP FFT on f32 re/im arrays, length n = power of 2. inverse: 0|1.
+fn fft_f32(re, im, n, inverse)
+  ccall("w_blas_fft_f32", re, im, n, inverse)

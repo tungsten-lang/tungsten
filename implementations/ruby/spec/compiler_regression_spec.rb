@@ -15,8 +15,10 @@ RSpec.describe "Compiler regressions" do
     skip "compiled compiler not available" unless File.executable?(TUNGSTEN_BOOTSTRAP)
 
     runtime_c = File.join(PROJECT_ROOT, "runtime/runtime.c")
+    terminal_input_c = File.join(PROJECT_ROOT, "runtime/terminal_input.c")
     metal_m   = File.join(PROJECT_ROOT, "runtime/metal.m")
     needs_rebuild = !File.exist?(RUNTIME_ARCHIVE) || File.mtime(runtime_c) > File.mtime(RUNTIME_ARCHIVE)
+    needs_rebuild ||= File.mtime(terminal_input_c) > File.mtime(RUNTIME_ARCHIVE)
     needs_rebuild ||= File.exist?(metal_m) && File.mtime(metal_m) > File.mtime(RUNTIME_ARCHIVE)
     if needs_rebuild
       zstd_cflags = `pkg-config --cflags libzstd 2>/dev/null`.strip
@@ -29,7 +31,7 @@ RSpec.describe "Compiler regressions" do
       # (kqueue is #ifdef __APPLE__, so it compiles to an empty object there),
       # breaking every link with "undefined symbol: w_event_register/init".
       event_src = RUBY_PLATFORM =~ /darwin/ ? "event_kqueue.c" : "event_epoll.c"
-      system("cd #{PROJECT_ROOT}/runtime && clang -O3 -DNDEBUG #{zstd_cflags} -c runtime.c #{event_src} tls_stub.c aks.c slab_zstd.c#{metal_cmd} && ar rcs runtime.a *.o && rm -f *.o")
+      system("cd #{PROJECT_ROOT}/runtime && clang -O3 -DNDEBUG #{zstd_cflags} -c runtime.c terminal_input.c #{event_src} tls_stub.c aks.c slab_zstd.c#{metal_cmd} && ar rcs runtime.a *.o && rm -f *.o")
     end
   end
 
@@ -457,6 +459,7 @@ RSpec.describe "Compiler regressions" do
 
       << ip.to_s
       << ip.octet(3)
+      << ip.octet(~1.9)
       << ip.octets.size
       << ip.private?
       << ip.global?
@@ -482,6 +485,7 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq(<<~OUT)
       192.168.1.42
       42
+      168
       4
       true
       false
@@ -535,6 +539,125 @@ RSpec.describe "Compiler regressions" do
       v4
       ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
     OUT
+  end
+
+  it "exposes packed receiver bits through $value under eval mode" do
+    source = <<~W
+      + IPv4
+        -> raw_address
+          ($value >> 12) & 0xFFFFFFFF
+
+        -> raw_prefix
+          ($value >> 6) & 0x3F
+
+      + Nil
+        -> raw_value
+          $value
+
+        -> raw_default(value = $value)
+          value
+
+      << 192.168.1.42.raw_address
+      << (10.0.0.0/8).raw_prefix
+      << nil.raw_value
+      << nil.raw_default
+    W
+
+    out, err, status = Open3.capture3(@compiler_path, "-e", source, chdir: PROJECT_ROOT)
+    expect(status.success?).to be(true), err
+    expect(out).to eq("3232235818\n8\n0\n0\n")
+  end
+
+  it "keeps a real $value global visible through a global function called by a method" do
+    source = <<~W
+      $value = 17
+
+      -> global_value
+        $value
+
+      + ValueReader
+        -> read
+          global_value()
+
+      << ValueReader.new.read
+    W
+
+    out, err, status = Open3.capture3(@compiler_path, "-e", source, chdir: PROJECT_ROOT)
+    expect(status.success?).to be(true), err
+    expect(out).to eq("17\n")
+  end
+
+  it "runs native-backed IPv4 Tungsten methods under eval mode" do
+    source = <<~W
+      ip = 192.168.1.42
+
+      << (10.0.0.0/8).prefix
+      << ip.private?
+      << 8.8.8.8.global?
+      << ip.octet(0)
+      << ip[3]
+      << (ip.octet(-1) == nil)
+      << (ip[4] == nil)
+    W
+
+    out, err, status = Open3.capture3(@compiler_path, "-e", source, chdir: PROJECT_ROOT)
+    expect(status.success?).to be(true), err
+    expect(out).to eq("8\ntrue\ntrue\n192\n42\ntrue\ntrue\n")
+  end
+
+  it "autoloads IPv4 methods for literal-only compiled calls" do
+    llvm = compile_to_llvm("ipv4_literal_autoload.w", <<~W)
+      << 10.0.0.1.private?
+      << (192.168.0.0/16).prefix
+      << 10.0.0.1.to_i
+    W
+
+    private_fn = symbol_for("__w_IPv4_private_Q__a1")
+    prefix_fn = symbol_for("__w_IPv4_prefix__a1")
+    to_i_fn = symbol_for("__w_IPv4_to_i__a1")
+    expect(llvm).to include("define internal i64 @#{private_fn}(")
+    expect(llvm).to include("define internal i64 @#{prefix_fn}(")
+    expect(llvm).to include("define internal i64 @#{to_i_fn}(")
+
+    [private_fn, prefix_fn, to_i_fn].each do |symbol|
+      body = llvm[/define internal i64 @#{Regexp.escape(symbol)}\(.*?\n}/m]
+      expect(body).not_to be_nil
+      expect(body).to match(/[al]shr i64/)
+      expect(body).to include("and i64")
+      expect(body).not_to include("@w_bit_shr")
+      expect(body).not_to include("@w_bit_and")
+      expect(body).not_to include("@w_eq")
+    end
+  end
+
+  it "loads the core IPv4 definition before a user reopen" do
+    out = compile_and_run("ipv4_core_reopen.w", <<~W)
+      + IPv4
+        -> marker
+          7
+
+      ip = 1.2.3.4
+      << ip.marker
+      << ip.to_i
+    W
+
+    expect(out).to eq("7\n16909060\n")
+  end
+
+  it "loads the core IPv4 definition before a user reopen under eval mode" do
+    source = <<~W
+      + IPv4
+        -> marker
+          7
+
+      ip = 1.2.3.4
+      << ip.marker
+      << ip.to_i
+    W
+
+    out, err, status = Open3.capture3(@compiler_path, "-e", source, chdir: PROJECT_ROOT)
+    expect(status.success?).to be(true), err
+    expect(out).to eq("7\n16909060\n")
   end
 
   it "dispatches the compiled crypto and UUID core surface" do
@@ -2512,6 +2635,60 @@ RSpec.describe "Compiler regressions" do
     W
 
     expect(out).to eq("99\n")
+  end
+
+  it "supports measurements, affine points, calibration, and equivalencies" do
+    out = compile_and_run("advanced_units_runtime.w", <<~W)
+      measurement = 10.0 ± 0.2
+      << measurement
+      location = (10 m).point(:map) + (2 m).delta(:map)
+      << location
+      << location.point?
+      calibration = Calibration.linear(~2.0, ~1.0, nil, nil, ~0.1, "CAL-42")
+      << calibration.apply(Measurement.new(~3.0, ~0.2))
+      << (1 kg).equivalent("J", :mass_energy)
+    W
+
+    expect(out).to include("10 ± 0.2\n", "12 m\ntrue\n", "7 ± 0.412311\n", "≈8.988×10¹⁶ J\n")
+  end
+
+  it "autoloads and constructs a unit-carrying f64 Tensor" do
+    out = compile_and_run("unit_tensor.w", <<~W)
+      velocity = Tensor<f64, m/s>.zeros([100, 100])
+      << velocity.dtype
+      << velocity.unit
+      << velocity.shape
+    W
+
+    expect(out).to eq("64\nm/s\n[100, 100]\n")
+  end
+
+  it "rejects known quantity dimension mismatches while compiling" do
+    source_path = File.join(@tmpdir, "static_quantity_mismatch.w")
+    bin_path = File.join(@tmpdir, "static_quantity_mismatch")
+    File.write(source_path, <<~W)
+      distance = 10 m
+      elapsed = 2 s
+      << distance + elapsed
+    W
+
+    args = [@compiler_path, "compile", source_path, "--out", bin_path]
+    args += ["--runtime", RUNTIME_ARCHIVE] if File.exist?(RUNTIME_ARCHIVE)
+    _out, err, status = Open3.capture3(*args, chdir: PROJECT_ROOT)
+    expect(status.success?).to be(false)
+    expect(err).to include("quantity dimension mismatch")
+  end
+
+  it "keeps the PB plus J easter egg in compiled programs" do
+    out = compile_and_run("compiled_pbj.w", "<< 1 PB + 1 J\n")
+    expect(out).to include("It's peanut butter jelly time!")
+  end
+
+  it "rejects two affine point annotations at runtime" do
+    err = compile_and_run_error("point_plus_point.w", <<~W)
+      << (10 m).point(:map) + (2 m).point(:map)
+    W
+    expect(err).to match(/cannot add two (?:absolute temperatures|points)/)
   end
 
   private

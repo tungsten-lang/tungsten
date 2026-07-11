@@ -314,6 +314,12 @@ use hashing
           replacement = rename_map[inst[:fn_name]]
           if replacement != nil
             inst[:fn_name] = replacement
+        # Fused-loop worker address (ptrtoint ptr @name) — the referenced
+        # worker gets compact-symbol renamed like any function.
+        if op == :fn_addr_i64
+          replacement = rename_map[inst[:name]]
+          if replacement != nil
+            inst[:name] = replacement
         if op in (:memo_call0_i64 :memo_call1_i64 :memo_call2_i64)
           replacement = rename_map[inst[:fn_name]]
           if replacement != nil

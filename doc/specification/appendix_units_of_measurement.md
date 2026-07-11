@@ -1,5 +1,34 @@
 # Appendix: Units of measurement
 
+## Normative quantity model
+
+A Tungsten dimension is an eight-axis SI exponent vector plus a sparse set of
+semantic exponents. Semantic axes are normative: equality requires both the SI
+and semantic portions to match. Angle is a semantic dimension; energy does not
+gain an angle exponent. Torque, heat capacity, entropy, dose, specific energy,
+activity, frequency, and named event rates may use semantic axes to prevent
+same-vector category errors.
+
+An unannotated `Quantity` is a vector. `.point(origin)` marks an affine
+coordinate and `.delta(origin)` marks a displacement. Point plus delta and
+delta plus point produce a point; point minus point produces a delta; adding
+two points is invalid. Origins, when both present, must compare equal. Absolute
+temperature units are points by default and delta-temperature units are
+vectors.
+
+The expression `value ± uncertainty` constructs a `Measurement`. Standard,
+expanded, asymmetric, correlated, component, and provenance metadata are part
+of the measurement model. Calibration applies an explicit measurement model
+and its uncertainty budget; it is not an ordinary unit conversion.
+
+Physical equivalencies are opt-in named operations. `:mass_energy`,
+`:spectral`, and `:thermal` are the initial standard bridges. The conversion
+operator must continue to reject cross-dimensional conversion.
+
+`Tensor<f64, m/s>.zeros(shape)` constructs a homogeneous tensor whose dtype and
+unit annotate the aggregate rather than each element. Addition and subtraction
+require matching tensor units.
+
 To do:
 
     Tetration: 2↑↑1000 = 2^2^2^2....1000 times (or hyper-4, repeated exponentiation)

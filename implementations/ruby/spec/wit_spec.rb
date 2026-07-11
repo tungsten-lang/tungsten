@@ -660,7 +660,7 @@ RSpec.describe Tungsten::REPL do
       expect(pb_output).to include("unit     pb (peanutbutter)")
       expect(pb_output).to include("dimension peanutbutter")
       expect(pb_output).to include("expanded 1 peanutbutter")
-      expect(pb_output).to include("aliases  pb, peanut butter, PB")
+      expect(pb_output).to include("aliases  pb, peanut butter")
       expect(pb_output).to include(%(wvalue   Quantity unit "peanutbutter" has no runtime WValue unit id))
       expect(pb_output).not_to include("not a self-contained immediate WValue")
 
@@ -682,6 +682,8 @@ RSpec.describe Tungsten::REPL do
       expect(output).to include("dimension energy (length²·mass/time²)")
       expect(output).to include("expanded 1 kg·m²/s²")
       expect(output).to include("converts eV, erg, cal, kcal, BTU, therm, kWh, ftlbf")
+      expect(output).to include("etymology Named for James Prescott Joule")
+      expect(output).to include("history  The joule became an international")
       expect(output).to include("u0xFFFDC28000000080")
       expect(output).to include("unit     bits 45..38  0x0A               unit id")
       expect(output).to include("note                                     exact immediate encoding")

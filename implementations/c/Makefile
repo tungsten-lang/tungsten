@@ -1,4 +1,6 @@
-CC ?= clang
+ifeq ($(origin CC), default)
+  CC := clang
+endif
 # Release CFLAGS tuned for end-to-end stage0+stage1 wallclock (the C VM
 # is built once per --c-vm bootstrap and used to compile compiler/tungsten.w
 # once). Re-benchmarked 2026-07-03 on the slab-AST workload (stage 1
@@ -39,14 +41,11 @@ CFLAGS ?= -O2 $(ARCH_FLAGS) -DNDEBUG -std=c11 -Wall -Wextra -Wpedantic
 # pointers to int on x86_64 and the VM segfaults at startup on Linux.
 # Darwin ignores the macro.
 CPPFLAGS ?= -Iinclude -I../../runtime -D_DEFAULT_SOURCE
-BUILD_DIR := build
+BUILD_DIR ?= build
 BIN := $(BUILD_DIR)/tungsten-c
 SRC := $(wildcard src/*.c)
-# .inc files are #included into the .c sources (e.g. vm_call_body.inc
-# into vm.c). Make them a prerequisite of every object, so editing an
-# .inc triggers a rebuild — otherwise the change is silently ignored.
-INC := $(wildcard src/*.inc)
 OBJ := $(SRC:src/%.c=$(BUILD_DIR)/%.o)
+DEP := $(OBJ:.o=.d)
 
 .PHONY: all bootstrap-lex bootstrap-parse bootstrap-tokens bootstrap-ast clean test
 
@@ -55,11 +54,13 @@ all: $(BIN)
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(BUILD_DIR)/%.o: src/%.c include/tc.h $(INC) | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+$(BUILD_DIR)/%.o: src/%.c include/tc.h | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
 $(BIN): $(OBJ)
 	$(CC) $(CFLAGS) $(OBJ) -o $@
+
+-include $(DEP)
 
 test: $(BIN)
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/smoke.w

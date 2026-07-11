@@ -2,6 +2,7 @@ require "tmpdir"
 require "fileutils"
 require "digest"
 require "find"
+require "etc"
 
 # Compiler source directory. Override via `--compiler-dir <name>`
 # (or the TUNGSTEN_COMPILER env var) to bootstrap from an alternate
@@ -123,10 +124,11 @@ FileUtils.mkdir_p(build_cache_dir)
 # clobber each other's in-flight stage1/stage2 output or emitted .ll —
 # that collision previously showed up as a spurious "stage 1 .ll !=
 # stage 2 .ll" mismatch, or a crash from one process linking against
-# the other's mid-write intermediate state. Not cleaned up on exit
-# (matches the previous behavior of leaving /tmp/tungsten* around);
-# `--force` sweeps stale ones from prior runs, see below.
+# the other's mid-write intermediate state. Clear a path left by a crashed
+# process before reuse: PIDs eventually wrap, and compiler freshness checks
+# must never accept another invocation's old output.
 build_scratch_dir = "/tmp/tungsten-build-#{Process.pid}"
+FileUtils.rm_rf(build_scratch_dir)
 FileUtils.mkdir_p(build_scratch_dir)
 
 FILE_DIGEST_CACHE_PATH = File.join(build_cache_dir, "file-digests.marshal")
@@ -174,7 +176,14 @@ end
 # new pkg-config files appearing. The block is only re-run when the
 # fingerprint changes.
 def cached_system_deps(name, marker_paths, &block)
-  fingerprint = marker_paths.map do |path|
+  common_markers = %w[
+    /opt/homebrew/include /opt/homebrew/lib /opt/homebrew/lib/pkgconfig
+    /usr/local/include /usr/local/lib /usr/local/lib/pkgconfig
+    /usr/local/share/pkgconfig /usr/include /usr/include/zstd.h
+    /usr/include/oniguruma.h /usr/lib /usr/lib/pkgconfig
+    /usr/share/pkgconfig
+  ] + Dir["/usr/lib/*/pkgconfig", "/usr/lib/*/pkgconfig/*.pc"]
+  path_fingerprint = (marker_paths + common_markers).uniq.map do |path|
     if File.exist?(path)
       stat = File.stat(path)
       "#{path}:#{stat.mtime.to_i}:#{stat.mtime.nsec}"
@@ -182,6 +191,11 @@ def cached_system_deps(name, marker_paths, &block)
       "#{path}:missing"
     end
   end.join("|")
+  probe_environment = %w[PATH PKG_CONFIG_PATH PKG_CONFIG_LIBDIR HOMEBREW_PREFIX].map do |key|
+    "#{key}=#{ENV[key]}"
+  end.join("|")
+  fingerprint = [path_fingerprint, probe_environment,
+                 tool_identity("pkg-config"), tool_identity("brew")].join("|")
 
   entry = $system_deps_cache[name]
   return entry[:value] if entry && entry[:fingerprint] == fingerprint
@@ -197,16 +211,35 @@ def file_sha(path)
   return "missing:#{path}" unless File.file?(full)
 
   stat = File.stat(full)
-  sig = [stat.size, stat.mtime.to_i, stat.mtime.nsec]
+  # ctime/inode close the same-size, restored-mtime hole without giving up the
+  # fast digest cache on the common unchanged-input path.
+  sig = [stat.size, stat.mtime.to_i, stat.mtime.nsec,
+         stat.ctime.to_i, stat.ctime.nsec, stat.ino]
   entry = $file_digest_cache[full]
-  if entry && entry[0] == sig[0] && entry[1] == sig[1] && entry[2] == sig[2]
-    return entry[3]
+  if entry && entry.first(sig.size) == sig
+    return entry[sig.size]
   end
 
   digest = Digest::SHA256.file(full).hexdigest
-  $file_digest_cache[full] = [sig[0], sig[1], sig[2], digest]
+  $file_digest_cache[full] = sig + [digest]
   $file_digest_cache_dirty = true
   digest
+end
+
+def atomic_copy(source, destination)
+  tmp = "#{destination}.#{$$}.tmp"
+  FileUtils.cp(source, tmp)
+  FileUtils.mv(tmp, destination)
+ensure
+  FileUtils.rm_f(tmp) if defined?(tmp) && tmp
+end
+
+def atomic_write(contents, destination)
+  tmp = "#{destination}.#{$$}.tmp"
+  File.binwrite(tmp, contents)
+  FileUtils.mv(tmp, destination)
+ensure
+  FileUtils.rm_f(tmp) if defined?(tmp) && tmp
 end
 
 def resolve_executable(command)
@@ -225,6 +258,24 @@ def sibling_tool(command, tool)
   File.executable?(candidate) ? candidate : nil
 end
 
+def tool_identity(command)
+  path = resolve_executable(command)
+  full = File.expand_path(path)
+  stat = File.stat(full)
+  [full, stat.size, stat.mtime.to_i, stat.mtime.nsec].join(":")
+rescue StandardError
+  path
+end
+
+TOOLCHAIN_ENV_KEYS = %w[
+  SDKROOT MACOSX_DEPLOYMENT_TARGET CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH
+  LIBRARY_PATH PKG_CONFIG_PATH PKG_CONFIG_LIBDIR
+].freeze
+
+def ambient_toolchain_identity
+  TOOLCHAIN_ENV_KEYS.map { |key| "#{key}=#{ENV[key]}" }.join("\0")
+end
+
 # ── Stage 0 (C VM): hash-based source cache ─────────────────────
 #
 # Hash every source the C VM build depends on. Source/header content,
@@ -237,41 +288,90 @@ c_vm_dependency_files = -> {
               File.join(C_INTERP_DIR, "include/*.h"),
               File.join(C_INTERP_DIR, "Makefile")]
   files << File.join(RUNTIME_DIR, "wvalue.h")
+  files << File.join(RUNTIME_DIR, "w_lexchar_cache.c")
   files.uniq.sort
 }
 
 c_vm_build_key = -> {
+  dependency_key = Digest::SHA256.new
+  c_vm_dependency_files.call.each do |path|
+    dependency_key.update(path.delete_prefix(ROOT + "/"))
+    dependency_key.update("\0")
+    dependency_key.update(file_sha(path))
+    dependency_key.update("\0")
+  end
+  cc = ENV["CC"].to_s.empty? ? "clang" : ENV["CC"]
+  make_assignments = ENV.fetch("MAKEFLAGS", "").split.select do |part|
+    part.include?("=") && !part.start_with?("--jobserver")
+  end.sort.join("\0")
   Digest::SHA256.hexdigest([
-    c_vm_dependency_files.call.map { |p| file_sha(p) }.join(":"),
+    dependency_key.hexdigest,
     RUBY_PLATFORM,
+    tool_identity(cc),
     ENV["CC"].to_s,
     ENV["CFLAGS"].to_s,
-    "clang"
+    ENV["CPPFLAGS"].to_s,
+    ENV["ARCH_FLAGS"].to_s,
+    ENV["LDFLAGS"].to_s,
+    ambient_toolchain_identity,
+    make_assignments
   ].join("\n"))
 }
 
-c_vm_stamp = File.join(build_cache_dir, "c-vm.sha")
+c_vm_make_args = lambda do
+  # Let an explicit MAKEFLAGS jobserver win. Otherwise cap at eight: this
+  # C VM has fourteen translation units and measurements flatten after -j8.
+  makeflags = ENV.fetch("MAKEFLAGS", "")
+  next [] if makeflags.match?(/(?:^|\s)(?:-j|--jobs)/)
 
-# Build the C VM if its binary is missing or any dependency has changed
-# since the last build. Returns [:cached|:built, elapsed_seconds].
+  requested = ENV.fetch("TUNGSTEN_BUILD_JOBS", Etc.nprocessors.to_s).to_i
+  requested = 1 if requested < 1
+  ["-j", [requested, 8].min.to_s]
+end
+
+# Build the C VM in a per-process object directory, then atomically publish its
+# binary into the identity cache. Concurrent misses never share writable files.
+# Returns [:cached|:built, elapsed_seconds, identity_binary, identity_key].
 ensure_c_interp = lambda do
   key = c_vm_build_key.call
-  if !force_build && File.executable?(C_INTERP) && File.exist?(c_vm_stamp) &&
-     File.read(c_vm_stamp).strip == key
-    return [:cached, 0.0]
+  cached_build_dir = File.join("build", "identity-#{key}")
+  cached_binary = File.join(C_INTERP_DIR, cached_build_dir, "tungsten-c")
+  scratch_build_dir = "#{cached_build_dir}-build-#{Process.pid}"
+  scratch_binary = File.join(C_INTERP_DIR, scratch_build_dir, "tungsten-c")
+  identity_binary = cached_binary
+  verb = :cached
+  elapsed = 0.0
+
+  if force_build || !File.executable?(cached_binary)
+    t_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    log_path = File.join(Dir.tmpdir, "tungsten-c-vm-build-#{Process.pid}.log")
+    FileUtils.rm_rf(File.join(C_INTERP_DIR, scratch_build_dir))
+    unless system("make", "-B", *c_vm_make_args.call, "-C", C_INTERP_DIR,
+                  "BUILD_DIR=#{scratch_build_dir}", [:out, :err] => log_path)
+      $stderr.puts File.read(log_path) if File.exist?(log_path)
+      FileUtils.rm_rf(File.join(C_INTERP_DIR, scratch_build_dir))
+      $stderr.puts "Failed to build implementations/c (make -C #{C_INTERP_DIR})"
+      exit 1
+    end
+    verb = :built
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t_start
+    FileUtils.mkdir_p(File.dirname(cached_binary))
+    atomic_copy(scratch_binary, cached_binary)
+    FileUtils.chmod(0o755, cached_binary)
+    FileUtils.rm_rf(File.join(C_INTERP_DIR, scratch_build_dir))
   end
 
-  t_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-  log_path = File.join(Dir.tmpdir, "tungsten-c-vm-build.log")
-  unless system("make", "-C", C_INTERP_DIR, [:out, :err] => log_path)
-    $stderr.puts File.read(log_path) if File.exist?(log_path)
-    $stderr.puts "Failed to build implementations/c (make -C #{C_INTERP_DIR})"
+  unless File.executable?(identity_binary)
+    $stderr.puts "C VM build produced no executable at #{identity_binary}"
     exit 1
   end
-  FileUtils.mkdir_p(File.dirname(c_vm_stamp))
-  File.write(c_vm_stamp, "#{key}\n")
-  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t_start
-  [:built, elapsed]
+  # Keep the conventional path useful for direct developer invocations. This
+  # is an atomic convenience publication; the build itself uses identity_binary.
+  unless same_file_content?(identity_binary, C_INTERP)
+    atomic_copy(identity_binary, C_INTERP)
+    FileUtils.chmod(0o755, C_INTERP)
+  end
+  [verb, elapsed, identity_binary, key]
 end
 
 # Phase 6: LTO mode for runtime compile + link.
@@ -326,49 +426,48 @@ def aligned_ms(seconds)
   format("%6s", ms(seconds))
 end
 
-# Install a freshly built compiler binary at COMPILER_BIN. Copies, marks
-# executable, and re-signs with an ad-hoc signature so macOS Sequoia's
-# runtime policy accepts the binary — without this, freshly built binaries
-# are SIGKILL'd on launch (~400µs, exit 137, no crash report).
+# Install through a content-addressed signed cache. This makes the requested
+# live compiler directly comparable to a stable artifact (no separate stamp
+# can lie after bootstrap.sh or another build replaces the live binary).
 install_compiler = lambda do |src, label = nil, announce: true|
   sidemap = "#{src}.sidemap"
-  install_stamp = File.join(ROOT, "build/cache", "compiler-install.sha")
   install_sha = Digest::SHA256.hexdigest([
     file_sha(src),
     File.exist?(sidemap) ? file_sha(sidemap) : "missing:sidemap"
   ].join(":"))
-  if File.executable?(COMPILER_BIN) && File.exist?(install_stamp) && File.read(install_stamp).strip == install_sha
+  install_cache_dir = File.join(ROOT, "build/cache/compiler-installs")
+  FileUtils.mkdir_p(install_cache_dir)
+  signed_cache = File.join(install_cache_dir, install_sha)
+  signed_sidemap_cache = "#{signed_cache}.sidemap"
+  installed_sidemap = "#{COMPILER_BIN}.sidemap"
+
+  unless File.executable?(signed_cache) && optional_cache_complete?(signed_sidemap_cache)
+    tmp_cache = "#{signed_cache}.#{Process.pid}.tmp"
+    FileUtils.cp(src, tmp_cache)
+    FileUtils.chmod(0o755, tmp_cache)
+    if RUBY_PLATFORM =~ /darwin/
+      unless system("codesign", "--force", "-s", "-", tmp_cache, out: File::NULL, err: File::NULL)
+        $stderr.puts "#{red}codesign failed for #{COMPILER_BIN}#{reset}"
+        FileUtils.rm_f(tmp_cache)
+        exit 1
+      end
+    end
+    FileUtils.mv(tmp_cache, signed_cache)
+    publish_optional_file(sidemap, signed_sidemap_cache)
+  end
+
+  sidemap_matches = if File.file?(signed_sidemap_cache)
+                      same_file_content?(signed_sidemap_cache, installed_sidemap)
+                    else
+                      !File.exist?(installed_sidemap)
+                    end
+  if File.executable?(COMPILER_BIN) && same_file_content?(signed_cache, COMPILER_BIN) && sidemap_matches
     next
   end
 
-  # Stage + codesign in a temp file next to COMPILER_BIN, then rename(2)
-  # into place. COMPILER_BIN is the live binary every `bin/tungsten`
-  # invocation on the machine runs — including other concurrent build/
-  # agent sessions mid-flight — so a direct `cp` onto it is a torn-write
-  # hazard: one process's copy can interleave with another's, producing
-  # a corrupted binary that fails in confusing ways (e.g. the parser
-  # losing the ability to parse core/tungsten.w). Same filesystem as
-  # COMPILER_BIN (both under this repo), so FileUtils.mv is an atomic
-  # rename, not a copy — readers only ever see a complete old or new file.
-  tmp_bin = "#{COMPILER_BIN}.tmp-#{Process.pid}"
-  FileUtils.cp(src, tmp_bin)
-  FileUtils.chmod(0o755, tmp_bin)
-  # codesign is a Darwin tool; Linux binaries don't need (or have) it.
-  if RUBY_PLATFORM =~ /darwin/
-    unless system("codesign", "--force", "-s", "-", tmp_bin, out: File::NULL, err: File::NULL)
-      $stderr.puts "#{red}codesign failed for #{COMPILER_BIN}#{reset}"
-      FileUtils.rm_f(tmp_bin)
-      exit 1
-    end
-  end
-  FileUtils.mv(tmp_bin, COMPILER_BIN)
-  if File.exist?(sidemap)
-    tmp_sidemap = "#{COMPILER_BIN}.sidemap.tmp-#{Process.pid}"
-    FileUtils.cp(sidemap, tmp_sidemap)
-    FileUtils.mv(tmp_sidemap, "#{COMPILER_BIN}.sidemap")
-  end
-  FileUtils.mkdir_p(File.dirname(install_stamp))
-  File.write(install_stamp, "#{install_sha}\n")
+  atomic_copy(signed_cache, COMPILER_BIN)
+  FileUtils.chmod(0o755, COMPILER_BIN)
+  restore_optional_file(signed_sidemap_cache, installed_sidemap)
   if announce
     suffix = label ? " #{dim}(#{label})#{reset}" : ""
     puts "    #{green}installed#{reset} #{COMPILER_BIN}#{suffix}"
@@ -490,39 +589,15 @@ def compile_bit(entry, out_bin, compiler, gem_exe, tungsten_w, runtime_archive, 
   true
 end
 
-# ── --force: wipe every pipeline output before any cache check ───
-#
-# Without this, stale outputs from a prior build (different bootstrap path,
-# different source tree, different flags) can survive into the new run and
-# masquerade as successful build products. That's how the C VM stub-binary
-# issue went undetected: stage 1 produced a stub, stage 2 ran the stub which
-# wrote nothing, and install_compiler picked up a stage2 binary left over
-# from a previous --spinel build. The pipeline LOOKED green but every byte
-# of the installed compiler came from a build that hadn't been requested.
-#
-# `--force` (and the implicit force-clean we run when nothing was found)
-# now removes:
-#   - stage 1/2 output binaries + emitted .ll (build_scratch_dir is fresh
-#     per-PID already, but old scratch dirs from prior interrupted/crashed
-#     runs — /tmp/tungsten-build-<pid> — accumulate and are swept here)
-#   - the runtime archive (/tmp/tungsten-runtime.a — the one genuinely
-#     cross-invocation-cached artifact still living outside build_cache_dir)
-#   - the installed compiler (bin/tungsten-compiler + .sidemap)
-#   - every cache-stamp under build/cache/
-#   - the C VM build dir (implementations/c/build)
-#
-# Anything not in this list is either source code (untouched) or external
-# (homebrew, system clang).
+# ── --force: bypass persistent cache hits ────────────────────────
+# Every force-aware phase rebuilds into PID/identity-scoped temporary output
+# and atomically publishes the result. Do not delete shared content-addressed
+# caches here: another concurrent build may be reading them, and identity keys
+# already prevent stale artifacts from masquerading as current output.
 if force_build
-  step_outputs = [
-    "/tmp/tungsten-runtime.a",
-    COMPILER_BIN, "#{COMPILER_BIN}.sidemap",
-    File.join(C_INTERP_DIR, "build"),
-    *Dir["/tmp/tungsten-build-*"].reject { |d| d == build_scratch_dir },
-    *Dir[File.join(build_cache_dir, "*")]
-  ]
-  step_outputs.each { |p| FileUtils.rm_rf(p) }
-  puts "#{dim}--force: cleaned #{step_outputs.size} step outputs#{reset}"
+  FileUtils.rm_rf(build_scratch_dir)
+  FileUtils.mkdir_p(build_scratch_dir)
+  puts "#{dim}--force: rebuilding all requested phases#{reset}"
 end
 
 # ── Runtime: compile C sources first (needed by Stage 1 linker) ───
@@ -531,7 +606,6 @@ puts
 puts "#{bold}==> Runtime: compiling C sources#{reset}"
 t_runtime_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-runtime_archive = "/tmp/tungsten-runtime.a"
 tls_enabled = ENV["TLS"] || ENV["TUNGSTEN_TLS"]
 runtime_srcs = %w[runtime.c ssmr_witness.c lexchar_tables.c tls_stub.c aks.c slab_zstd.c]
 runtime_srcs << platform_event_src if platform_event_src
@@ -605,7 +679,13 @@ zstd_cflags, zstd_libs = cached_system_deps("zstd_flags", [
   [cflags, libs]
 end
 
-cc_flags = %W[-O3 -DNDEBUG -pthread] + MARCH_FLAGS + %W[#{LTO_FLAG} -c] + tls_flags + http2_flags + onig_cflags + zstd_cflags
+# Stage 1 and stage 2 both link this archive with --no-lto. Keeping LLVM
+# bitcode here made clang reprocess the runtime during each supposedly
+# no-LTO link; native objects cut several seconds while preserving emitted IR.
+# Bit entry points still use LTO_FLAG independently in link_flags below.
+runtime_cache_schema = "runtime-cache-v1"
+cc_flags = %W[-O2 -DNDEBUG -pthread] + MARCH_FLAGS + %w[-c] + tls_flags + http2_flags + onig_cflags + zstd_cflags
+runtime_objc_flags = %W[-O2 -DNDEBUG] + MARCH_FLAGS + %w[-c -x objective-c]
 # Linux (validated on Ubuntu 24.04): without _DEFAULT_SOURCE, popen/pclose
 # prototypes are hidden under strict feature-test macros and the implicit
 # declarations segfault the stage-0 C VM at runtime.
@@ -614,7 +694,9 @@ cc_flags << "-D_DEFAULT_SOURCE" if RUBY_PLATFORM =~ /linux/
 # must be in the HASH inputs or edits to it never invalidate the cached runtime.
 runtime_dependency_files = (runtime_srcs.map { |src| File.join(RUNTIME_DIR, src) } +
                             Dir[File.join(RUNTIME_DIR, "*.h")] +
-                            [File.join(RUNTIME_DIR, "w_lexchar_cache.c")]).uniq.sort
+                            [File.join(RUNTIME_DIR, "w_lexchar_cache.c"),
+                             File.join(RUNTIME_DIR, "w_char_table.c"),
+                             File.join(RUNTIME_DIR, "generated/bigint_thresholds.h")]).uniq.sort
 
 # Pass the already-cached system-probe results to the compiler so it
 # doesn't have to re-run `capture("pkg-config ...")` etc. on every stage.
@@ -651,18 +733,35 @@ bootstrap_compiler_clang_opt =
     "-O0"
   end
 
+runtime_dependencies_key = Digest::SHA256.new
+runtime_dependency_files.each do |path|
+  runtime_dependencies_key.update(path.delete_prefix(ROOT + "/"))
+  runtime_dependencies_key.update("\0")
+  runtime_dependencies_key.update(file_sha(path))
+  runtime_dependencies_key.update("\0")
+end
 runtime_compile_key = Digest::SHA256.hexdigest([
-  runtime_dependency_files.map { |path| file_sha(path) }.join(":"),
+  runtime_cache_schema,
+  runtime_dependencies_key.hexdigest,
   cc_flags.join("\0"),
+  runtime_objc_flags.join("\0"),
   RUBY_PLATFORM,
-  runtime_cc,
-  runtime_ar,
-  runtime_ranlib
+  tool_identity(runtime_cc),
+  tool_identity(runtime_ar),
+  ambient_toolchain_identity
 ].join("\n"))
-runtime_archive_stamp = File.join(build_cache_dir, "runtime-archive.sha")
+runtime_archive = File.join(build_cache_dir, "runtime-#{runtime_compile_key}.a")
+runtime_env_contents = [
+  "runtime-env-v1",
+  zstd_cflags.join(" "), zstd_libs.join(" "),
+  onig_cflags.join(" "), onig_libs.join(" "),
+  compiler_probe_env.fetch("TUNGSTEN_OS"), runtime_cc, runtime_ar, runtime_ranlib
+].join("\n") + "\n"
+runtime_env_key = Digest::SHA256.hexdigest(runtime_env_contents)
+runtime_env_manifest = File.join(build_cache_dir, "runtime-env-#{runtime_env_key}.env")
+runtime_current_manifest = File.join(build_cache_dir, "runtime-current.manifest")
 
-if !force_build && File.file?(runtime_archive) && File.exist?(runtime_archive_stamp) &&
-   File.read(runtime_archive_stamp).strip == runtime_compile_key
+if !force_build && File.file?(runtime_archive)
   t_runtime_cached = Process.clock_gettime(Process::CLOCK_MONOTONIC)
   puts "    #{green}CACHED#{reset} runtime #{dim}#{aligned_ms(t_runtime_cached - t_runtime_start)}#{reset}"
 else
@@ -676,7 +775,7 @@ else
         # rejects on `.m` files (e.g. -mtune=native isn't an issue but
         # several C-only diagnostic flags would be).
         if src.end_with?(".m")
-          flags = %W[-O3 -DNDEBUG] + MARCH_FLAGS + %W[#{LTO_FLAG} -c -x objective-c]
+          flags = runtime_objc_flags
         end
         [src, obj_path, system(runtime_cc, *flags, src_path, "-o", obj_path)]
       end
@@ -688,29 +787,30 @@ else
       exit 1
     end
     objs = compiled.map { |(_src, obj, _ok)| obj }
-    # Archive + index into a per-invocation temp path first, then
-    # atomically rename into the shared runtime_archive location.
-    # runtime_archive is a genuine cross-invocation cache (unlike
-    # build_scratch_dir's contents) — concurrent builds legitimately
-    # race to (re)produce it, and `ar`/`ranlib` writing directly to a
-    # shared path let one process's linker read the other's
-    # half-written archive. rename(2) is atomic, so every reader sees
-    # either a complete old archive or a complete new one, never a torn one.
+    # Archive + index into a per-invocation temp path first, then atomically
+    # publish the immutable, content-addressed archive. Different worktrees
+    # no longer share /tmp/tungsten-runtime.a, and concurrent configurations
+    # cannot mismatch a mutable payload with a separate stamp.
     tmp_archive = File.join(dir, File.basename(runtime_archive))
     unless system(runtime_ar, "rcs", tmp_archive, *objs)
       $stderr.puts "#{red}Failed to archive runtime#{reset}"
       exit 1
     end
-    unless runtime_ranlib.empty? || system(runtime_ranlib, tmp_archive)
-      $stderr.puts "#{red}Failed to index runtime archive#{reset}"
-      exit 1
-    end
-    FileUtils.mv(tmp_archive, runtime_archive)
+    # `ar rcs` creates and indexes the archive; a second ranlib pass is
+    # redundant on both Apple and LLVM/GNU ar.
+    atomic_copy(tmp_archive, runtime_archive)
   end
-  File.write(runtime_archive_stamp, "#{runtime_compile_key}\n")
   t_runtime_built = Process.clock_gettime(Process::CLOCK_MONOTONIC)
   puts "    #{green}built#{reset}  runtime #{dim}#{aligned_ms(t_runtime_built - t_runtime_start)}#{reset}"
 end
+
+# Keep the environment beside its content-addressed archive, then publish one
+# atomic two-line discovery manifest. Benchmark readers can never combine the
+# archive from one concurrent build with another build's flags/toolchain.
+atomic_write(runtime_env_contents, runtime_env_manifest)
+atomic_write([
+  File.basename(runtime_archive), File.basename(runtime_env_manifest)
+].join("\n") + "\n", runtime_current_manifest)
 
 t_runtime_end = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
@@ -762,34 +862,6 @@ def tree_sha(*paths)
   sha.hexdigest[0..15]
 end
 
-# Cheaper sibling to tree_sha. Stats every source file under the given
-# paths and returns the largest mtime seen. No file contents are read.
-# Used for cache-staleness checks where "is the cached output newer
-# than every input?" is sufficient — typically faster than tree_sha by
-# the ratio of stat() to open()+read()+SHA256, which on macOS APFS is
-# roughly 10× per file.
-def tree_max_mtime(*paths)
-  max = 0.0
-  paths.each do |path|
-    full = path.start_with?("/") ? path : File.join(ROOT, path)
-    if File.directory?(full)
-      Find.find(full) do |f|
-        if File.directory?(f)
-          Find.prune if SOURCE_SKIP_DIRS.include?(File.basename(f))
-          next
-        end
-        next unless File.file?(f) && SOURCE_EXTENSIONS.include?(File.extname(f))
-        m = File.mtime(f).to_f
-        max = m if m > max
-      end
-    elsif File.file?(full)
-      m = File.mtime(full).to_f
-      max = m if m > max
-    end
-  end
-  max
-end
-
 bit_cache_dir = File.join(build_cache_dir, "bits")
 FileUtils.mkdir_p(bit_cache_dir)
 
@@ -818,6 +890,33 @@ def same_file_content?(left, right)
   system("cmp", "-s", left, right)
 end
 
+def optional_cache_complete?(path)
+  File.file?(path) || File.file?("#{path}.missing")
+end
+
+def publish_optional_file(source, cached)
+  marker = "#{cached}.missing"
+  if File.file?(source)
+    atomic_copy(source, cached)
+    FileUtils.rm_f(marker)
+  else
+    tmp = "#{marker}.#{$$}.tmp"
+    File.write(tmp, "missing\n")
+    FileUtils.rm_f(cached)
+    FileUtils.mv(tmp, marker)
+  end
+ensure
+  FileUtils.rm_f(tmp) if defined?(tmp) && tmp
+end
+
+def restore_optional_file(cached, destination)
+  if File.file?(cached)
+    atomic_copy(cached, destination)
+  else
+    FileUtils.rm_f(destination)
+  end
+end
+
 unless bit_only
   stage1 = File.join(build_scratch_dir, "tungsten.wc")
   stage2 = File.join(build_scratch_dir, "tungsten-self-hosted.wc")
@@ -836,93 +935,86 @@ unless bit_only
   stage2_ll = File.join(stage_ll_dir, "stage2-#{bootstrap_ll_tag}.ll")
   FileUtils.mkdir_p(stage_ll_dir)
 
-  # Only tungsten.w + lib/ are compile-time deps of the compiler binary —
-  # not compiler/test/ or the alternate exerciser .w files at the top
-  # level (bench_lex, dump_tokens, print_ast, print_ir, lex_parity).
-  stage1_input_sha = tree_sha("implementations/ruby",
-                              File.join(COMPILER_DIR_NAME, "tungsten.w"),
-                              File.join(COMPILER_DIR_NAME, "lib"),
-                              "runtime", "bin/tungsten", "bin/commands/build.rb")
-  stage1_sha = Digest::SHA256.hexdigest("#{stage1_input_sha}:#{runtime_compile_key}")[0..15]
-  stage1_cached = File.join(build_cache_dir, "stage1-#{stage1_sha}")
+  unless use_c_bootstrap
+    # Legacy Ruby/Spinel paths have broader interpreter/driver dependencies.
+    stage1_input_sha = tree_sha("implementations/ruby",
+                                File.join(COMPILER_DIR_NAME, "tungsten.w"),
+                                File.join(COMPILER_DIR_NAME, "lib"),
+                                "runtime", "bin/tungsten", "bin/commands/build.rb")
+    stage1_sha = Digest::SHA256.hexdigest("#{stage1_input_sha}:#{runtime_compile_key}")[0..15]
+    stage1_cached = File.join(build_cache_dir, "stage1-#{stage1_sha}")
+  end
 
   if use_c_bootstrap
+    c_stage_cache_schema = "c-stage-content-v1"
+    c_stage1_sources_sha = tree_sha(File.join(COMPILER_DIR_NAME, "tungsten.w"),
+                                    File.join(COMPILER_DIR_NAME, "lib"))
     puts
     puts "#{bold}==> Stage 0: implementations/c VM#{reset}"
-    verb, c_vm_elapsed = ensure_c_interp.call
+    verb, c_vm_elapsed, c_interp_for_build, c_vm_key_for_build = ensure_c_interp.call
     verb_str = verb == :cached ? "#{green}CACHED#{reset}" : "#{green}built #{reset}"
     puts "    #{verb_str} stage0 #{dim}#{aligned_ms(c_vm_elapsed)}#{reset}"
+
+    # Optional per-invocation discovery for tooling such as the C VM
+    # benchmark. Unlike a mutable `current` alias, this file belongs to the
+    # requesting process and binds the exact VM/runtime/environment trio.
+    requested_manifest = ENV["TUNGSTEN_BUILD_MANIFEST"].to_s
+    unless requested_manifest.empty?
+      requested_manifest = File.expand_path(requested_manifest, ROOT)
+      FileUtils.mkdir_p(File.dirname(requested_manifest))
+      atomic_write([
+        "tungsten-build-manifest-v1", c_interp_for_build,
+        runtime_archive, runtime_env_manifest
+      ].join("\n") + "\n", requested_manifest)
+    end
 
     puts
     puts "#{bold}==> Stage 1: implementations/c VM compiles tungsten.w#{reset}"
     stage1_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    # Cache key: every input that can affect stage 1 output.
-    # - implementations/c: the C VM's own .c/.h sources (drives stage 0
-    #   binary behavior and therefore stage 1 codegen — wvalue.h, tc.h,
-    #   vm.c, etc. all participate).
-    # - compiler: the .w sources being compiled (compiler/tungsten.w
-    #   + compiler/lib/*).
-    # - runtime: the runtime .c/.h that get linked into stage 1 (stage 1
-    #   binary depends on the archive's contents).
-    # - bin/tungsten + bin/commands/build.rb: the wrapper + driver flags.
-    #
-    # The cache slot name carries build *identity* only — which compiler
-    # dir is being bootstrapped (the default `compiler/`, or a
-    # `--compiler-dir` path). That is the one thing the mtime staleness
-    # check below cannot recover: it answers "are inputs newer?", never
-    # "are these the same inputs?", so distinct `--compiler-dir` trees must
-    # land in separate slots. Everything else is *staleness*, not
-    # identity, and is handled by the mtime comparison: the -O0 link
-    # flag is a hardcoded constant (never varies), and a runtime-config
-    # change rebuilds /tmp/tungsten-runtime.a — whose mtime is in
-    # shared_inputs_mtime below — so it trips the staleness check
-    # without needing to be in the slot name.
-    c_stage1_slot = COMPILER_DIR_NAME.gsub(%r{[^A-Za-z0-9._-]}, "_")
-    c_stage1_cached = File.join(build_cache_dir, "c-vm-stage1-#{c_stage1_slot}")
+    # Fixed-point builds always use the canonical parser. The C-native parser
+    # is a bootstrap.sh acceleration and intentionally emits a different
+    # stage-1 IR, so an ambient environment value must not leak in here.
+    lex_table_path = ENV.fetch("TUNGSTEN_LEX64_TABLE",
+                               File.join(ROOT, "languages/tungsten/tungsten.lex64"))
+    c_stage1_base_env = compiler_probe_env.merge(
+      "TUNGSTEN_C_FAST_PARSE" => "0",
+      "TUNGSTEN_CLANG_OPT" => "-O0",
+      "TUNGSTEN_LEX64_TABLE" => lex_table_path
+    )
+    # Immutable content identity: sources, actual stage-0 binary/toolchain,
+    # runtime archive identity, parser table, link flags, and probe results.
+    c_stage1_identity = Digest::SHA256.hexdigest([
+      c_stage1_sources_sha,
+      c_stage_cache_schema,
+      runtime_compile_key,
+      c_vm_key_for_build,
+      file_sha(c_interp_for_build),
+      file_sha(lex_table_path),
+      COMPILER_DIR_NAME,
+      STAGE_OPT_FLAG,
+      ENV["TUNGSTEN_MARCH_ARGS"].to_s,
+      ambient_toolchain_identity,
+      c_stage1_base_env.sort.map { |key, value| "#{key}=#{value}" }.join("\0")
+    ].join("\n"))
+    c_stage1_cached = File.join(build_cache_dir, "c-vm-stage1-#{c_stage1_identity}")
     c_stage1_cached_ll = "#{c_stage1_cached}.ll"
-    # Walk the shared sources (compiler/runtime/bins — read by both
-    # stages) once, and the C-VM sources separately. Stage 2 reuses the
-    # shared walk below.
-    #
-    # NOTE: only compiler/tungsten.w + compiler/lib/ are compile-time
-    # deps of the compiler binary — compiler/test/ and the top-level
-    # exercisers (bench_lex.w, dump_tokens.w, print_ast.w, print_ir.w,
-    # lex_parity.w) are separate programs that share compiler/lib but
-    # don't compile *into* tungsten.w. Likewise <root>/lib is the
-    # user-program stdlib (resolved by user `use base/io` calls), NOT
-    # a compiler-binary dependency — `use lib/lexer` inside
-    # compiler/tungsten.w resolves relative to its entry-point dir
-    # (compiler/lib/lexer), not <root>/lib.
-    #
-    # For runtime: we use the *compiled archive*'s mtime, not a walk
-    # of runtime/*.c. The runtime stage runs before this check and
-    # rebuilds the archive whenever any source-hashed input changed
-    # (see runtime_compile_key, line 551 — content-hash of the actual
-    # runtime_srcs + headers + cc flags). So /tmp/tungsten-runtime.a's
-    # mtime is a faithful fingerprint of "runtime state in the linked
-    # binary", and one stat() replaces ~35 stat()s on source files.
-    shared_inputs_mtime = tree_max_mtime(File.join(COMPILER_DIR_NAME, "tungsten.w"),
-                                         File.join(COMPILER_DIR_NAME, "lib"),
-                                         runtime_archive,
-                                         "bin/tungsten", "bin/commands/build.rb")
-    c_vm_inputs_mtime = tree_max_mtime("implementations/c")
-    c_stage1_inputs_mtime = [shared_inputs_mtime, c_vm_inputs_mtime].max
-    c_stage1_cached_mtime = File.exist?(c_stage1_cached) ? File.mtime(c_stage1_cached).to_f : 0.0
-    if !force_build && c_stage1_cached_mtime >= c_stage1_inputs_mtime && c_stage1_cached_mtime > 0
+    c_stage1_cached_sidemap = "#{c_stage1_cached}.sidemap"
+    if !force_build && File.executable?(c_stage1_cached) && File.file?(c_stage1_cached_ll) &&
+       optional_cache_complete?(c_stage1_cached_sidemap)
       FileUtils.cp(c_stage1_cached, stage1)
-      FileUtils.cp(c_stage1_cached_ll, stage1_ll) if File.exist?(c_stage1_cached_ll)
+      FileUtils.cp(c_stage1_cached_ll, stage1_ll)
+      restore_optional_file(c_stage1_cached_sidemap, "#{stage1}.sidemap")
       t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      puts "    #{green}CACHED#{reset} stage1 #{dim}#{aligned_ms(t1 - stage1_started)} (#{c_stage1_slot})#{reset}"
+      puts "    #{green}CACHED#{reset} stage1 #{dim}#{aligned_ms(t1 - stage1_started)} (#{c_stage1_identity[0, 16]})#{reset}"
     else
       FileUtils.rm_f(stage1_ll)
       # TUNGSTEN_CLANG_OPT=-O0 for the stage 1 link: stage 1's binary is
       # throwaway (only used to produce stage 2), and benchmarking showed
       # -O0 saves ~2s on the link with negligible cost to the stage 2
       # compiler run.
-      stage1_env = compiler_probe_env.merge(
+      stage1_env = c_stage1_base_env.merge(
         "TUNGSTEN_LL_DIR" => stage_ll_dir,
-        "TUNGSTEN_LL_PATH" => stage1_ll,
-        "TUNGSTEN_CLANG_OPT" => "-O0"
+        "TUNGSTEN_LL_PATH" => stage1_ll
       )
       stage1_log = File.join(Dir.tmpdir, "tungsten-c-stage1.log")
       # --runtime points clang at the pre-built runtime archive (cached up
@@ -932,17 +1024,21 @@ unless bit_only
       # disables full LTO at link — mixing -flto with the runtime archive's
       # thin-LTO bitcode crashes clang's linker (LLVM ERROR: Unexistent
       # dir). Spinel's stage 2 invocation uses the same combination.
-      unless system(stage1_env, C_INTERP, TUNGSTEN_W, "compile", TUNGSTEN_W, "--out", stage1, STAGE_OPT_FLAG,
+      unless system(stage1_env, c_interp_for_build, TUNGSTEN_W, "compile", TUNGSTEN_W, "--out", stage1, STAGE_OPT_FLAG,
                     "--runtime", runtime_archive, "--no-lto",
                     [:out, :err] => stage1_log)
         $stderr.puts File.read(stage1_log) if File.exist?(stage1_log)
         $stderr.puts "#{red}Stage 1 (C VM) failed#{reset}"
         exit 1
       end
-      system("codesign", "--force", "-s", "-", stage1, out: File::NULL, err: File::NULL)
-      FileUtils.cp(stage1, c_stage1_cached)
-      FileUtils.cp(stage1_ll, c_stage1_cached_ll) if File.exist?(stage1_ll)
-      c_stage1_cached_mtime = File.mtime(c_stage1_cached).to_f
+      if RUBY_PLATFORM =~ /darwin/ &&
+         !system("codesign", "--force", "-s", "-", stage1, out: File::NULL, err: File::NULL)
+        $stderr.puts "#{red}codesign failed for C VM stage 1#{reset}"
+        exit 1
+      end
+      atomic_copy(stage1, c_stage1_cached)
+      atomic_copy(stage1_ll, c_stage1_cached_ll) if File.exist?(stage1_ll)
+      publish_optional_file("#{stage1}.sidemap", c_stage1_cached_sidemap)
       t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       puts "    #{green}built #{reset} stage1 #{dim}#{aligned_ms(t1 - stage1_started)}#{reset}"
     end
@@ -954,32 +1050,36 @@ unless bit_only
       puts
       puts "#{bold}==> Stage 2: Stage-1 binary compiles tungsten.w#{reset}"
       stage2_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      # Stage 2 = stage 1 binary compiling compiler/tungsten.w. Inputs are:
-      # - which compiler dir is being built (COMPILER_DIR_NAME) — same
-      #   reason as stage 1: keep distinct `--compiler-dir` trees in
-      #   separate cache slots;
-      # - stage 1 binary (fingerprinted via its cached-file mtime, which
-      #   advances whenever stage 1 actually rebuilt);
-      # - the compiler/runtime sources stage 2 reads (NOT including
-      #   implementations/c — stage 2 is executed by the already-built
-      #   stage 1 binary, not by the C VM); we reuse the shared mtime
-      #   computed up at the stage 1 cache check;
-      # - the bootstrap link optimization level (the installed compiler's
-      #   own cflag dimension).
-      c_stage2_sha = Digest::SHA256.hexdigest("#{COMPILER_DIR_NAME}:#{c_stage1_cached_mtime}:#{shared_inputs_mtime}:#{bootstrap_compiler_clang_opt}")[0..15]
-      c_stage2_cached = File.join(build_cache_dir, "c-vm-stage2-#{c_stage2_sha}")
+      c_stage2_base_env = compiler_probe_env.merge(
+        "TUNGSTEN_CLANG_OPT" => bootstrap_compiler_clang_opt,
+        "TUNGSTEN_LEX64_TABLE" => lex_table_path
+      )
+      c_stage2_identity = Digest::SHA256.hexdigest([
+        c_stage1_identity,
+        file_sha(stage1),
+        c_stage1_sources_sha,
+        c_stage_cache_schema,
+        runtime_compile_key,
+        STAGE_OPT_FLAG,
+        ENV["TUNGSTEN_MARCH_ARGS"].to_s,
+        ambient_toolchain_identity,
+        c_stage2_base_env.sort.map { |key, value| "#{key}=#{value}" }.join("\0")
+      ].join("\n"))
+      c_stage2_cached = File.join(build_cache_dir, "c-vm-stage2-#{c_stage2_identity}")
       c_stage2_cached_ll = "#{c_stage2_cached}.ll"
-      if !force_build && File.executable?(c_stage2_cached)
+      c_stage2_cached_sidemap = "#{c_stage2_cached}.sidemap"
+      if !force_build && File.executable?(c_stage2_cached) && File.file?(c_stage2_cached_ll) &&
+         optional_cache_complete?(c_stage2_cached_sidemap)
         FileUtils.cp(c_stage2_cached, stage2)
-        FileUtils.cp(c_stage2_cached_ll, stage2_ll) if File.exist?(c_stage2_cached_ll)
+        FileUtils.cp(c_stage2_cached_ll, stage2_ll)
+        restore_optional_file(c_stage2_cached_sidemap, "#{stage2}.sidemap")
         t2 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        puts "    #{green}CACHED#{reset} stage2 #{dim}#{aligned_ms(t2 - stage2_started)} (#{c_stage2_sha})#{reset}"
+        puts "    #{green}CACHED#{reset} stage2 #{dim}#{aligned_ms(t2 - stage2_started)} (#{c_stage2_identity[0, 16]})#{reset}"
       else
         FileUtils.rm_f(stage2_ll)
-        stage2_env = compiler_probe_env.merge(
+        stage2_env = c_stage2_base_env.merge(
           "TUNGSTEN_LL_DIR" => stage_ll_dir,
-          "TUNGSTEN_LL_PATH" => stage2_ll,
-          "TUNGSTEN_CLANG_OPT" => bootstrap_compiler_clang_opt
+          "TUNGSTEN_LL_PATH" => stage2_ll
         )
         stage2_log = File.join(Dir.tmpdir, "tungsten-c-stage2.log")
         # Same --runtime + --no-lto combination as stage 1; the produced
@@ -1000,8 +1100,9 @@ unless bit_only
           $stderr.puts "    #{dim}C VM. Check #{stage2_log} for clang/runtime errors.#{reset}"
           exit 1
         end
-        FileUtils.cp(stage2, c_stage2_cached)
-        FileUtils.cp(stage2_ll, c_stage2_cached_ll) if File.exist?(stage2_ll)
+        atomic_copy(stage2, c_stage2_cached)
+        atomic_copy(stage2_ll, c_stage2_cached_ll) if File.exist?(stage2_ll)
+        publish_optional_file("#{stage2}.sidemap", c_stage2_cached_sidemap)
         puts "    #{green}built #{reset} stage2 #{dim}#{aligned_ms(t2 - stage2_started)}#{reset}"
       end
 
@@ -1176,10 +1277,13 @@ unless bit_only
         $stderr.puts "#{red}Stage 1 failed#{reset}"
         exit 1
       end
-      FileUtils.cp(stage1, stage1_cached)
       # Re-sign: macOS Sequoia SIGKILLs freshly-built binaries
-      system("codesign", "--force", "-s", "-", stage1, out: File::NULL, err: File::NULL)
-      system("codesign", "--force", "-s", "-", stage1_cached, out: File::NULL, err: File::NULL)
+      if RUBY_PLATFORM =~ /darwin/ &&
+         !system("codesign", "--force", "-s", "-", stage1, out: File::NULL, err: File::NULL)
+        $stderr.puts "#{red}codesign failed for stage 1#{reset}"
+        exit 1
+      end
+      atomic_copy(stage1, stage1_cached)
       t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       puts "    #{dim}Stage 1: #{aligned_ms(t1 - t0)}#{reset}"
     end

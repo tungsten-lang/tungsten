@@ -50,10 +50,12 @@ printf '%s\n\n' "$(c '\033[1m\033[33m' '✶ Tungsten Doctor')"
 
 check "Tungsten" "$VERSION" 1
 
+# Missing stage-1 is expected on a fresh clone; bootstrap builds it.
+# Report status but never fail doctor for this alone.
 if [ -x "$COMPILER" ]; then
   check "Compiler" "$COMPILER" 1
 else
-  check "Compiler" "not built — run: bin/tungsten bootstrap" 0
+  check "Compiler" "not built — run: bin/tungsten bootstrap" 1
 fi
 
 if tool_ok clang; then

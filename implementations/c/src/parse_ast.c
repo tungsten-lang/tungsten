@@ -1348,7 +1348,11 @@ static TcAstValue atom_node_ast(TcAstParser *p, size_t pos, TcError *err) {
         // vs stage2 .ll diff.
         node = node_hash(p, "nil_lit", pos, err);
       } else if (strcmp(text, "self") == 0) {
-        node = node_hash(p, "self", pos, err);
+        // Match Tungsten parser's `:self_ref` (Tungsten:AST:Self.new).
+        // Using `:self` left every method ending in bare `self` (e.g.
+        // Parser#set_chars) returning nil after lowering — stage1 then
+        // crashed with `undefined method 'parse' for nil`.
+        node = node_hash(p, "self_ref", pos, err);
       }
       break;
     default:

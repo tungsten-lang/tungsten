@@ -51,15 +51,63 @@ step() { printf '\n%s==> %s%s\n' "$bold" "$*" "$reset"; }
 ok()   { printf '    %s%s%s %s\n' "$green" "$1" "$reset" "${2:-}"; }
 die()  { printf '%serror:%s %s\n' "$red" "$reset" "$*" >&2; exit 1; }
 
+sha256_stdin() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+  else
+    openssl dgst -sha256 | awk '{print $NF}'
+  fi
+}
+
+sha256_file() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    openssl dgst -sha256 "$1" | awk '{print $NF}'
+  fi
+}
+
+sha256_path() {
+  if [ -f "$1" ]; then sha256_file "$1"; else printf 'missing'; fi
+}
+
+tool_identity() {
+  tool_path="$(command -v "$1" 2>/dev/null || printf '%s' "$1")"
+  tool_version="$("$1" --version 2>/dev/null | head -n 1 || true)"
+  printf '%s|%s' "$tool_path" "$tool_version"
+}
+
 C_INTERP_DIR="$ROOT/implementations/c"
-C_INTERP="$C_INTERP_DIR/build/tungsten-c"
+C_INTERP_DEFAULT="$C_INTERP_DIR/build/tungsten-c"
+C_INTERP="$C_INTERP_DEFAULT"
 COMPILER_W="$ROOT/compiler/tungsten.w"
 COMPILER_BIN="$ROOT/bin/tungsten-compiler"
 CACHE="$ROOT/build/cache"
 RUNTIME_DIR="$ROOT/runtime"
-RUNTIME_A="$CACHE/bootstrap-runtime.a"
-STAGE1="$CACHE/bootstrap-stage1"
+RUNTIME_A=""
+STAGE1=""
+BOOTSTRAP_CC="${TUNGSTEN_CC:-clang}"
+BOOTSTRAP_AR="${TUNGSTEN_AR:-ar}"
+TOOLCHAIN_ENV_ID="${SDKROOT:-}|${MACOSX_DEPLOYMENT_TARGET:-}|${CPATH:-}|${C_INCLUDE_PATH:-}|${CPLUS_INCLUDE_PATH:-}|${LIBRARY_PATH:-}|${PKG_CONFIG_PATH:-}|${PKG_CONFIG_LIBDIR:-}"
 mkdir -p "$CACHE"
+
+BUILD_JOBS="${TUNGSTEN_BUILD_JOBS:-}"
+if [ -z "$BUILD_JOBS" ]; then
+  BUILD_JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+fi
+case "$BUILD_JOBS" in
+  ''|*[!0-9]*) BUILD_JOBS=4 ;;
+esac
+if [ "$BUILD_JOBS" -lt 1 ]; then BUILD_JOBS=1; fi
+if [ "$BUILD_JOBS" -gt 8 ]; then BUILD_JOBS=8; fi
+MAKE_JOB_ARGS=(-j "$BUILD_JOBS")
+case " ${MAKEFLAGS:-} " in
+  *" --jobserver"*|*" -j"*) MAKE_JOB_ARGS=() ;;
+esac
 
 # ── 1. Doctor ───────────────────────────────────────────────────
 step "Doctor"
@@ -76,17 +124,57 @@ if [ "$(uname -s)" = Darwin ]; then
 else
   CVM_CFLAGS="$CVM_CFLAGS -mtune=generic"
 fi
-if [ "$FORCE" -eq 0 ] && [ -x "$C_INTERP" ]; then
+CVM_INPUTS=()
+while IFS= read -r path; do CVM_INPUTS+=("$path"); done < <(
+  find "$C_INTERP_DIR/src" "$C_INTERP_DIR/include" -type f \
+    \( -name '*.c' -o -name '*.inc' -o -name '*.h' \) -print | LC_ALL=C sort
+)
+CVM_INPUTS+=("$C_INTERP_DIR/Makefile" "$RUNTIME_DIR/wvalue.h" "$RUNTIME_DIR/w_lexchar_cache.c")
+cvm_config_identity="$({
+  printf '%s\n%s\n%s\n' "$CVM_CFLAGS" "$(tool_identity "$BOOTSTRAP_CC")" \
+    "${CPPFLAGS:-}|${ARCH_FLAGS:-}|${LDFLAGS:-}|$TOOLCHAIN_ENV_ID"
+} | sha256_stdin)"
+cvm_identity="$({
+  printf '%s\n' "$cvm_config_identity"
+  for path in "${CVM_INPUTS[@]}"; do
+    printf '%s\0%s\n' "${path#$ROOT/}" "$(sha256_file "$path")"
+  done
+} | sha256_stdin)"
+CVM_CACHE_BUILD_DIR="build/bootstrap-$cvm_identity"
+C_INTERP_CACHE="$C_INTERP_DIR/$CVM_CACHE_BUILD_DIR/tungsten-c"
+CVM_BUILD_DIR="$CVM_CACHE_BUILD_DIR-build-$$"
+C_INTERP="$C_INTERP_DIR/$CVM_BUILD_DIR/tungsten-c"
+if [ "$FORCE" -eq 0 ] && [ -x "$C_INTERP_CACHE" ]; then
+  C_INTERP="$C_INTERP_CACHE"
   ok "CACHED" "$C_INTERP"
 else
-  log_path="/tmp/tungsten-bootstrap-c-vm.log"
-  if ! make -C "$C_INTERP_DIR" CFLAGS="$CVM_CFLAGS" >"$log_path" 2>&1; then
+  log_path="/tmp/tungsten-bootstrap-c-vm-$$.log"
+  rm -rf "$C_INTERP_DIR/$CVM_BUILD_DIR"
+  if ! make -B "${MAKE_JOB_ARGS[@]}" -C "$C_INTERP_DIR" \
+      BUILD_DIR="$CVM_BUILD_DIR" CC="$BOOTSTRAP_CC" CFLAGS="$CVM_CFLAGS" \
+      >"$log_path" 2>&1; then
     cat "$log_path" >&2
+    rm -rf "$C_INTERP_DIR/$CVM_BUILD_DIR"
     die "failed to build C VM (make -C implementations/c)"
   fi
+  mkdir -p "$(dirname "$C_INTERP_CACHE")"
+  cvm_cache_tmp="$C_INTERP_CACHE.tmp-$$"
+  cp "$C_INTERP" "$cvm_cache_tmp"
+  chmod 755 "$cvm_cache_tmp"
+  mv "$cvm_cache_tmp" "$C_INTERP_CACHE"
+  rm -rf "$C_INTERP_DIR/$CVM_BUILD_DIR"
+  C_INTERP="$C_INTERP_CACHE"
   ok "built" "$C_INTERP"
 fi
 [ -x "$C_INTERP" ] || die "C VM missing at $C_INTERP"
+# Atomically refresh the conventional developer path, but never execute it in
+# this bootstrap; concurrent identities use their own immutable binaries.
+if ! cmp -s "$C_INTERP" "$C_INTERP_DEFAULT" 2>/dev/null; then
+  cvm_publish="$C_INTERP_DEFAULT.tmp-$$"
+  cp "$C_INTERP" "$cvm_publish"
+  chmod 755 "$cvm_publish"
+  mv "$cvm_publish" "$C_INTERP_DEFAULT"
+fi
 
 # ── 3. Runtime archive ──────────────────────────────────────────
 step "Runtime archive"
@@ -101,57 +189,86 @@ RUNTIME_SRCS=(runtime.c ssmr_witness.c lexchar_tables.c tls_stub.c aks.c slab_zs
 # shellcheck disable=SC2206
 for m in $METAL_SRCS; do RUNTIME_SRCS+=("$m"); done
 
-need_runtime=1
-if [ "$FORCE" -eq 0 ] && [ -f "$RUNTIME_A" ]; then
-  need_runtime=0
-  for src in "${RUNTIME_SRCS[@]}"; do
-    if [ "$RUNTIME_DIR/$src" -nt "$RUNTIME_A" ]; then
-      need_runtime=1
-      break
-    fi
-  done
+zstd_cflags="$(pkg-config --cflags libzstd 2>/dev/null || true)"
+if [ -z "$zstd_cflags" ] && [ -f /opt/homebrew/include/zstd.h ]; then
+  zstd_cflags="-I/opt/homebrew/include"
 fi
+zstd_libs="$(pkg-config --libs libzstd 2>/dev/null || true)"
+if [ -z "$zstd_libs" ]; then
+  if [ -f /opt/homebrew/lib/libzstd.a ] || [ -f /opt/homebrew/lib/libzstd.dylib ]; then
+    zstd_libs="-L/opt/homebrew/lib -lzstd"
+  else
+    zstd_libs="-lzstd"
+  fi
+fi
+cflags=(-O2 -DNDEBUG -pthread $zstd_cflags)
+if [ "$UNAME_S" = Linux ]; then cflags+=(-D_DEFAULT_SOURCE); fi
+runtime_objc_flags=(-O2 -DNDEBUG -c -x objective-c)
+
+RUNTIME_INPUTS=()
+for src in "${RUNTIME_SRCS[@]}"; do RUNTIME_INPUTS+=("$RUNTIME_DIR/$src"); done
+while IFS= read -r path; do RUNTIME_INPUTS+=("$path"); done < <(
+  find "$RUNTIME_DIR" -maxdepth 1 -type f \
+    \( -name '*.h' -o -name 'w_lexchar_cache.c' \) -print | LC_ALL=C sort
+)
+RUNTIME_INPUTS+=("$RUNTIME_DIR/w_char_table.c" "$RUNTIME_DIR/generated/bigint_thresholds.h")
+runtime_identity="$({
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+    "bootstrap-runtime-v1" "$UNAME_S" "${cflags[*]}" "${runtime_objc_flags[*]}" \
+    "$(tool_identity "$BOOTSTRAP_CC")" "$(tool_identity "$BOOTSTRAP_AR")" \
+    "$TOOLCHAIN_ENV_ID"
+  for path in "${RUNTIME_INPUTS[@]}"; do
+    printf '%s\0%s\n' "${path#$ROOT/}" "$(sha256_path "$path")"
+  done
+} | sha256_stdin)"
+RUNTIME_A="$CACHE/bootstrap-runtime-$runtime_identity.a"
+need_runtime=1
+if [ "$FORCE" -eq 0 ] && [ -f "$RUNTIME_A" ]; then need_runtime=0; fi
 
 if [ "$need_runtime" -eq 0 ]; then
   ok "CACHED" "$RUNTIME_A"
 else
   tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/tungsten-bootstrap-rt.XXXXXX")"
-  trap 'rm -rf "$tmpdir"' EXIT
-
-  zstd_cflags="$(pkg-config --cflags libzstd 2>/dev/null || true)"
-  if [ -z "$zstd_cflags" ] && [ -f /opt/homebrew/include/zstd.h ]; then
-    zstd_cflags="-I/opt/homebrew/include"
-  fi
-  zstd_libs="$(pkg-config --libs libzstd 2>/dev/null || true)"
-  if [ -z "$zstd_libs" ]; then
-    if [ -f /opt/homebrew/lib/libzstd.a ] || [ -f /opt/homebrew/lib/libzstd.dylib ]; then
-      zstd_libs="-L/opt/homebrew/lib -lzstd"
-    else
-      zstd_libs="-lzstd"
-    fi
-  fi
-
-  cflags=(-O2 -DNDEBUG -pthread $zstd_cflags)
-  if [ "$UNAME_S" = Linux ]; then
-    cflags+=(-D_DEFAULT_SOURCE)
-  fi
+  runtime_publish="$RUNTIME_A.tmp-$$"
+  trap 'rm -rf "$tmpdir"; rm -f "$runtime_publish"' EXIT
 
   objs=()
+  compile_pids=()
+  compile_names=()
+  wait_compile_batch() {
+    batch_failed=0
+    for i in "${!compile_pids[@]}"; do
+      if ! wait "${compile_pids[$i]}"; then
+        printf '%serror:%s failed to compile runtime/%s\n' \
+          "$red" "$reset" "${compile_names[$i]}" >&2
+        batch_failed=1
+      fi
+    done
+    compile_pids=()
+    compile_names=()
+    [ "$batch_failed" -eq 0 ]
+  }
   for src in "${RUNTIME_SRCS[@]}"; do
     base="$(basename "$src")"
     obj="$tmpdir/${base%.*}.o"
     if [[ "$src" == *.m ]]; then
-      clang -O2 -DNDEBUG -c -x objective-c "$RUNTIME_DIR/$src" -o "$obj" \
-        || die "failed to compile runtime/$src"
+      "$BOOTSTRAP_CC" "${runtime_objc_flags[@]}" "$RUNTIME_DIR/$src" -o "$obj" &
     else
-      clang "${cflags[@]}" -c "$RUNTIME_DIR/$src" -o "$obj" \
-        || die "failed to compile runtime/$src"
+      "$BOOTSTRAP_CC" "${cflags[@]}" -c "$RUNTIME_DIR/$src" -o "$obj" &
     fi
+    compile_pids+=("$!")
+    compile_names+=("$src")
     objs+=("$obj")
+    if [ "${#compile_pids[@]}" -ge "$BUILD_JOBS" ]; then
+      wait_compile_batch || die "runtime compilation failed"
+    fi
   done
+  wait_compile_batch || die "runtime compilation failed"
 
-  ar rcs "$RUNTIME_A" "${objs[@]}"
-  ranlib "$RUNTIME_A" 2>/dev/null || true
+  tmp_archive="$tmpdir/$(basename "$RUNTIME_A")"
+  "$BOOTSTRAP_AR" rcs "$tmp_archive" "${objs[@]}"
+  cp "$tmp_archive" "$runtime_publish"
+  mv "$runtime_publish" "$RUNTIME_A"
   ok "built" "$RUNTIME_A"
   rm -rf "$tmpdir"
   trap - EXIT
@@ -167,63 +284,119 @@ export TUNGSTEN_ROOT="$ROOT"
 # -O0 for the stage-1 *product* link: stage1 is only used to drive stage2 /
 # bootstrap install; -O1/-O2 cost ~3s wall for no bootstrap payoff.
 export TUNGSTEN_CLANG_OPT="${TUNGSTEN_CLANG_OPT:--O0}"
+# C-native Loader#load_program_ast (parse_ast.c). ~2–3× faster stage1 under
+# the C VM. Off for `tungsten build` so stage1/stage2 keep identical ASTs.
+export TUNGSTEN_C_FAST_PARSE="${TUNGSTEN_C_FAST_PARSE:-1}"
 
-# Always resolve zstd link flags here: the CACHED runtime path never sets
-# zstd_libs, and `set -u` rejects ${VAR:-$zstd_libs} when zstd_libs is unbound.
-if [ -z "${zstd_libs:-}" ]; then
-  zstd_libs="$(pkg-config --libs libzstd 2>/dev/null || true)"
-  if [ -z "$zstd_libs" ]; then
-    if [ -f /opt/homebrew/lib/libzstd.a ] || [ -f /opt/homebrew/lib/libzstd.dylib ]; then
-      zstd_libs="-L/opt/homebrew/lib -lzstd"
-    else
-      zstd_libs="-lzstd"
-    fi
-  fi
-fi
-if [ -z "${TUNGSTEN_ZSTD_LDFLAGS:-}" ]; then
-  export TUNGSTEN_ZSTD_LDFLAGS="$zstd_libs"
-fi
+if [ -z "${TUNGSTEN_ZSTD_CFLAGS:-}" ]; then export TUNGSTEN_ZSTD_CFLAGS="$zstd_cflags"; fi
+if [ -z "${TUNGSTEN_ZSTD_LDFLAGS:-}" ]; then export TUNGSTEN_ZSTD_LDFLAGS="$zstd_libs"; fi
+export TUNGSTEN_CC="${TUNGSTEN_CC:-$BOOTSTRAP_CC}"
+export TUNGSTEN_AR="${TUNGSTEN_AR:-$BOOTSTRAP_AR}"
+export TUNGSTEN_OS="${TUNGSTEN_OS:-$UNAME_S}"
+export TUNGSTEN_LEX64_TABLE="${TUNGSTEN_LEX64_TABLE:-$ROOT/languages/tungsten/tungsten.lex64}"
 
-skip_stage1=0
-if [ "$FORCE" -eq 0 ] && [ -x "$COMPILER_BIN" ]; then
-  # Any compiler .w, the C VM, or runtime archive newer than the install → rebuild.
-  if ! find "$ROOT/compiler" -name '*.w' -newer "$COMPILER_BIN" 2>/dev/null | head -1 | grep -q . \
-     && ! [ "$C_INTERP" -nt "$COMPILER_BIN" ] \
-     && ! [ "$RUNTIME_A" -nt "$COMPILER_BIN" ]; then
-    skip_stage1=1
-  fi
-fi
-
-if [ "$skip_stage1" -eq 1 ]; then
-  ok "CACHED" "$COMPILER_BIN (up to date)"
+STAGE1_INPUTS=("$COMPILER_W" "$TUNGSTEN_LEX64_TABLE")
+while IFS= read -r path; do STAGE1_INPUTS+=("$path"); done < <(
+  find "$ROOT/compiler/lib" -type f -name '*.w' -print | LC_ALL=C sort
+)
+stage1_identity="$({
+  printf '%s\n' \
+    "bootstrap-stage-content-v1" \
+    "$TUNGSTEN_CLANG_OPT" "$TUNGSTEN_C_FAST_PARSE" \
+    "$TUNGSTEN_ZSTD_CFLAGS" "$TUNGSTEN_ZSTD_LDFLAGS" \
+    "${TUNGSTEN_ONIG_CFLAGS:-}" "${TUNGSTEN_ONIG_LDFLAGS:-}" \
+    "${TUNGSTEN_MARCH_ARGS:-}" "$TUNGSTEN_OS" \
+    "$TOOLCHAIN_ENV_ID" \
+    "$(tool_identity "$TUNGSTEN_CC")" "$(tool_identity "$TUNGSTEN_AR")" \
+    "$(sha256_file "$C_INTERP")" "$(sha256_file "$RUNTIME_A")"
+  for path in "${STAGE1_INPUTS[@]}"; do
+    printf '%s\0%s\n' "${path#$ROOT/}" "$(sha256_file "$path")"
+  done
+} | sha256_stdin)"
+STAGE1="$CACHE/bootstrap-stage1-$stage1_identity"
+STAGE1_COMPLETE="$STAGE1.complete"
+stage1_cache_complete() {
+  [ -x "$STAGE1" ] && [ -f "$STAGE1_COMPLETE" ] || return 1
+  case "$(cat "$STAGE1_COMPLETE")" in
+    "ll=present sidemap=present")
+      [ -f "$STAGE1.ll" ] && [ -f "$STAGE1.sidemap" ] ;;
+    "ll=present sidemap=missing")
+      [ -f "$STAGE1.ll" ] && [ ! -e "$STAGE1.sidemap" ] ;;
+    "ll=missing sidemap=present")
+      [ ! -e "$STAGE1.ll" ] && [ -f "$STAGE1.sidemap" ] ;;
+    "ll=missing sidemap=missing")
+      [ ! -e "$STAGE1.ll" ] && [ ! -e "$STAGE1.sidemap" ] ;;
+    *) return 1 ;;
+  esac
+}
+if [ "$FORCE" -eq 0 ] && stage1_cache_complete; then
+  ok "CACHED" "$STAGE1"
 else
   stage1_log="/tmp/tungsten-bootstrap-stage1.log"
-  rm -f "$STAGE1" "$STAGE1.ll"
+  stage1_tmp="$CACHE/.bootstrap-stage1-$stage1_identity.$$"
+  rm -f "$stage1_tmp" "$stage1_tmp.ll" "$stage1_tmp.sidemap"
   # tungsten-c <compiler.w> compile <compiler.w> --out … --runtime … --no-lto
-  if ! "$C_INTERP" "$COMPILER_W" compile "$COMPILER_W" \
-      --out "$STAGE1" --native \
+  if ! TUNGSTEN_LL_PATH="$stage1_tmp.ll" \
+    "$C_INTERP" "$COMPILER_W" compile "$COMPILER_W" \
+      --out "$stage1_tmp" --native \
       --runtime "$RUNTIME_A" --no-lto \
       >"$stage1_log" 2>&1; then
     cat "$stage1_log" >&2
     die "stage 1 (C VM) failed — see $stage1_log"
   fi
-
-  if [ "$(uname -s)" = Darwin ]; then
-    codesign --force -s - "$STAGE1" >/dev/null 2>&1 || true
+  if [ "$UNAME_S" = Darwin ]; then
+    codesign --force -s - "$stage1_tmp" >/dev/null 2>&1 || \
+      die "failed to ad-hoc sign stage 1"
   fi
+  # Publish the completeness marker last. Concurrent readers will either use
+  # the old complete cache or rebuild; they never observe a binary whose
+  # optional outputs have only been partially published.
+  rm -f "$STAGE1_COMPLETE"
+  if [ -f "$stage1_tmp.ll" ]; then
+    mv "$stage1_tmp.ll" "$STAGE1.ll"
+    stage1_ll_state=present
+  else
+    rm -f "$STAGE1.ll"
+    stage1_ll_state=missing
+  fi
+  if [ -f "$stage1_tmp.sidemap" ]; then
+    mv "$stage1_tmp.sidemap" "$STAGE1.sidemap"
+    stage1_sidemap_state=present
+  else
+    rm -f "$STAGE1.sidemap"
+    stage1_sidemap_state=missing
+  fi
+  mv "$stage1_tmp" "$STAGE1"
+  stage1_complete_tmp="$STAGE1_COMPLETE.$$"
+  printf 'll=%s sidemap=%s\n' "$stage1_ll_state" "$stage1_sidemap_state" > "$stage1_complete_tmp"
+  mv "$stage1_complete_tmp" "$STAGE1_COMPLETE"
   ok "built" "$STAGE1"
+fi
 
+expected_compiler_digest="$(sha256_file "$STAGE1")"
+expected_compiler_sidemap="missing:sidemap"
+if [ -f "$STAGE1.sidemap" ]; then expected_compiler_sidemap="$(sha256_file "$STAGE1.sidemap")"; fi
+current_compiler_digest=""
+if [ -x "$COMPILER_BIN" ]; then current_compiler_digest="$(sha256_file "$COMPILER_BIN")"; fi
+current_compiler_sidemap="missing:sidemap"
+if [ -f "$COMPILER_BIN.sidemap" ]; then current_compiler_sidemap="$(sha256_file "$COMPILER_BIN.sidemap")"; fi
+
+if [ "$current_compiler_digest" = "$expected_compiler_digest" ] \
+   && [ "$current_compiler_sidemap" = "$expected_compiler_sidemap" ]; then
+  ok "CACHED" "$COMPILER_BIN (identity ${stage1_identity:0:16})"
+else
   # ── 5. Install compiler ─────────────────────────────────────────
   step "Install bin/tungsten-compiler"
   tmp_bin="$COMPILER_BIN.tmp-$$"
   cp "$STAGE1" "$tmp_bin"
   chmod 755 "$tmp_bin"
-  if [ "$(uname -s)" = Darwin ]; then
-    codesign --force -s - "$tmp_bin" >/dev/null 2>&1 || true
-  fi
   mv "$tmp_bin" "$COMPILER_BIN"
   if [ -f "$STAGE1.sidemap" ]; then
-    cp "$STAGE1.sidemap" "$COMPILER_BIN.sidemap"
+    tmp_sidemap="$COMPILER_BIN.sidemap.tmp-$$"
+    cp "$STAGE1.sidemap" "$tmp_sidemap"
+    mv "$tmp_sidemap" "$COMPILER_BIN.sidemap"
+  else
+    rm -f "$COMPILER_BIN.sidemap"
   fi
   ok "installed" "$COMPILER_BIN"
 fi

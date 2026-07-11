@@ -597,7 +597,7 @@ while i < args.size()
   # direct @w_string_to_lexchars ccall users
   lexchars_needed = ll_text_has(ll_probe_text, "lchs") || ll_text_has(ll_probe_text, "lexchars")
   link_started_at = clock
-  needs_zstd = ll_needs_zstd_path(ll_path)
+  needs_zstd = ll_needs_zstd_text(ll_probe_text)
   # LTO is opt-in: whole-program LTO (lean binary, slow link) only for
   # --release / --native / --lto; the default is a native-object runtime
   # archive (fatter binary, ~0.1s link vs ~5s recompiling the C runtime).

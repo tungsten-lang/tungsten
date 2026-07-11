@@ -33,13 +33,17 @@ typedef struct {
   size_t sp;
   TcValue *locals;
   TcRuntimeArray *argv;
-  // saved_locals_pool: contiguous buffer of 2048 * local_count slots.
-  // Slice at depth*local_count is the saved snapshot for that frame.
+  // Process-wide bootstrap option, read once before dispatch. Keeping it on
+  // the VM avoids an out-of-line flag probe at every interpreted CALL.
+  uint8_t fast_parse_enabled;
+  // saved_locals_pool: contiguous buffer of 2048 * saved_locals_stride
+  // slots. Each slice is the packed saved snapshot for one frame.
   // Replaces per-call malloc/free of the save buffer (was ~30% of CPU
   // in profile from libsystem_malloc). Bumped from 256 once we let the
   // C VM run the actual recursive-descent compiler/lib/parser.w —
   // parsing the full compiler/tungsten.w nests deeper than 256.
   TcValue *saved_locals_pool;
+  size_t saved_locals_stride;
   // Per-frame state packed AoS so a single call writes one cache line
   // instead of touching six parallel arrays. 32 bytes per frame; 2048
   // frames = 64KB total.
@@ -296,67 +300,54 @@ static const char *frame_function_name(const TcVm *vm, size_t back, size_t *len_
 }
 
 static int falsey(TcValue value) {
-  if (tc_kind(value) == TC_VAL_NIL) return 1;
-  return tc_kind(value) == TC_VAL_WVALUE && (tc_as_wvalue(value) == W_NIL || tc_as_wvalue(value) == W_FALSE);
+  return value == W_NIL || value == W_FALSE;
 }
 
 static int value_equal(TcValue a, TcValue b) {
-  // Bit-exact early out: covers nil/bool, integers in W_TAG_INT range,
-  // and — crucially for hash probes — interned symbols whose canonical
-  // bytes pointer makes the WValue itself identical when the symbols are
-  // equal. Skips the per-kind switch + memcmp on the common probe-hit case.
+  // Almost every WValue kind has canonical bit identity: singletons,
+  // inline ints, packed values, arrays/hashes/objects, and interned symbols.
+  // Only stringy values, heap ints, and scalar AST wrappers need content
+  // comparison after this raw-value miss. Staying on raw tags here avoids
+  // two tc_kind calls in this very hot hash-probe/equality path.
+  if (a == W_BIASED_NAN || b == W_BIASED_NAN) return 0;
   if (a == b) return 1;
-  if (tc_kind(a) != tc_kind(b)) {
-    // Post-flip the only mixed-kind equality that matters is string<->symbol
-    // (both stringy by tag, distinguished by the sym bit). The pre-flip
-    // TC_VAL_NIL/TC_VAL_WVALUE cross-checks were dead code under the new
-    // tag dispatch; same for value_is_int(a) && value_is_int(b) (both ints
-    // would route to the same kind).
-    if ((tc_kind(a) == TC_VAL_STRING || tc_kind(a) == TC_VAL_SYMBOL) &&
-        (tc_kind(b) == TC_VAL_STRING || tc_kind(b) == TC_VAL_SYMBOL)) {
-      if (tc_str_bytes_only(a) == tc_str_bytes_only(b) && tc_str_len(a) == tc_str_len(b)) return 1;
-      return tc_str_len(a) == tc_str_len(b) && memcmp(tc_str_bytes_only(a), tc_str_bytes_only(b), tc_str_len(a)) == 0;
-    }
-    return 0;
+  if (w_is_stringy(a) && w_is_stringy(b)) {
+    if (w_is_symbol(a) != w_is_symbol(b)) return 0;
+    if (tc_str_bytes_only(a) == tc_str_bytes_only(b) && tc_str_len(a) == tc_str_len(b)) return 1;
+    return tc_str_len(a) == tc_str_len(b) &&
+           memcmp(tc_str_bytes_only(a), tc_str_bytes_only(b), tc_str_len(a)) == 0;
   }
-  switch (tc_kind(a)) {
-    case TC_VAL_NIL:
+
+  // Different inline/packed values are already known unequal. Heap-backed
+  // values also compare by identity except for bigint contents and the
+  // bootstrap parser's scalar AST wrappers.
+  if (!w_is_obj(a) || !w_is_obj(b) || w_subtag(a) != w_subtag(b)) return 0;
+  if (w_subtag(a) == TC_TAG_HEAP_INT) {
+    return tc_as_int(a) == tc_as_int(b);
+  }
+  if (w_subtag(a) != TC_TAG_AST) return 0;
+
+  TcAstValue *ast_a = tc_as_ast_ptr(&a);
+  TcAstValue *ast_b = tc_as_ast_ptr(&b);
+  if (ast_a->kind != ast_b->kind) return 0;
+  switch (ast_a->kind) {
+    case TC_AST_NIL:
       return 1;
-    case TC_VAL_INT:
-      return tc_as_int(a) == tc_as_int(b);
-    case TC_VAL_WVALUE:
-      return tc_as_wvalue(a) == tc_as_wvalue(b);
-    case TC_VAL_STRING:
-    case TC_VAL_SYMBOL:
-      if (tc_str_bytes_only(a) == tc_str_bytes_only(b) && tc_str_len(a) == tc_str_len(b)) return 1;
-      return tc_str_len(a) == tc_str_len(b) && memcmp(tc_str_bytes_only(a), tc_str_bytes_only(b), tc_str_len(a)) == 0;
-    case TC_VAL_ARRAY:
-      return tc_as_array(a) == tc_as_array(b);
-    case TC_VAL_HASH:
-      return tc_as_hash(a) == tc_as_hash(b);
-    case TC_VAL_OBJECT:
-      return tc_as_object(a) == tc_as_object(b);
-    case TC_VAL_AST:
-      if (tc_as_ast_ptr(&a)->kind != tc_as_ast_ptr(&b)->kind) return 0;
-      switch (tc_as_ast_ptr(&a)->kind) {
-        case TC_AST_NIL:
-          return 1;
-        case TC_AST_BOOL:
-          return tc_as_ast_ptr(&a)->as.boolean == tc_as_ast_ptr(&b)->as.boolean;
-        case TC_AST_INT:
-          return tc_as_ast_ptr(&a)->as.integer == tc_as_ast_ptr(&b)->as.integer;
-        case TC_AST_STRING:
-        case TC_AST_SYMBOL:
-          if (tc_as_ast_ptr(&a)->as.string.bytes == tc_as_ast_ptr(&b)->as.string.bytes &&
-              tc_as_ast_ptr(&a)->as.string.len == tc_as_ast_ptr(&b)->as.string.len) return 1;
-          return tc_as_ast_ptr(&a)->as.string.len == tc_as_ast_ptr(&b)->as.string.len &&
-                 memcmp(tc_as_ast_ptr(&a)->as.string.bytes, tc_as_ast_ptr(&b)->as.string.bytes, tc_as_ast_ptr(&a)->as.string.len) == 0;
-        case TC_AST_ARRAY:
-          return tc_as_ast_ptr(&a)->as.array == tc_as_ast_ptr(&b)->as.array;
-        case TC_AST_HASH:
-          return tc_as_ast_ptr(&a)->as.hash == tc_as_ast_ptr(&b)->as.hash;
-      }
-      return 0;
+    case TC_AST_BOOL:
+      return ast_a->as.boolean == ast_b->as.boolean;
+    case TC_AST_INT:
+      return ast_a->as.integer == ast_b->as.integer;
+    case TC_AST_STRING:
+    case TC_AST_SYMBOL:
+      if (ast_a->as.string.bytes == ast_b->as.string.bytes &&
+          ast_a->as.string.len == ast_b->as.string.len) return 1;
+      return ast_a->as.string.len == ast_b->as.string.len &&
+             memcmp(ast_a->as.string.bytes, ast_b->as.string.bytes,
+                    ast_a->as.string.len) == 0;
+    case TC_AST_ARRAY:
+      return ast_a->as.array == ast_b->as.array;
+    case TC_AST_HASH:
+      return ast_a->as.hash == ast_b->as.hash;
   }
   return 0;
 }
@@ -377,6 +368,28 @@ static int value_text_compare(TcValue a, TcValue b, int *cmp_out) {
 }
 
 static int make_string_value(const char *bytes, size_t len, TcValue *out, TcError *err) {
+  /* Lexer#chars and String#[] create millions of immutable one-character
+   * strings while compiling the compiler. Reuse one interned value for each
+   * ASCII byte instead of allocating a TcHeapString for every occurrence. */
+  if (len == 1 && (unsigned char)bytes[0] < 128) {
+    static TcValue ascii_values[128];
+    static uint8_t ascii_ready[128];
+    unsigned char ch = (unsigned char)bytes[0];
+    if (!ascii_ready[ch]) {
+      // Keep a dedicated string header. tc_intern is shared with symbols,
+      // whose hash adds a type salt to the header's cached_hash; sharing that
+      // header would make string/symbol hash results depend on lookup order.
+      char *copy = tc_heap_string_alloc(1, 1, err);
+      if (!copy) return 0;
+      copy[0] = (char)ch;
+      ascii_values[ch] = tc_box_string_bytes(copy, 1, 0);
+      ascii_ready[ch] = 1;
+    }
+    if (ascii_ready[ch]) {
+      *out = ascii_values[ch];
+      return 1;
+    }
+  }
   char *copy = heap_string_alloc(len, err);
   if (!copy) return 0;
   if (len > 0) memcpy(copy, bytes, len);
@@ -693,7 +706,7 @@ static int value_to_string_copy(TcValue value, char **out, size_t *len_out, TcEr
   }
   if (tc_kind(value) == TC_VAL_ARRAY) {
     char buf[64];
-    int len = snprintf(buf, sizeof(buf), "[%zu item%s]", tc_as_array(value) ? tc_as_array(value)->size : 0,
+    int len = snprintf(buf, sizeof(buf), "[%zu item%s]", (size_t)(tc_as_array(value) ? tc_as_array(value)->size : 0),
                        tc_as_array(value) && tc_as_array(value)->size == 1 ? "" : "s");
     if (len < 0) {
       tc_error_set(err, "array string conversion failed");
@@ -703,7 +716,7 @@ static int value_to_string_copy(TcValue value, char **out, size_t *len_out, TcEr
   }
   if (tc_kind(value) == TC_VAL_HASH) {
     char buf[64];
-    int len = snprintf(buf, sizeof(buf), "{%zu pair%s}", tc_as_hash(value) ? tc_as_hash(value)->count : 0,
+    int len = snprintf(buf, sizeof(buf), "{%zu pair%s}", (size_t)(tc_as_hash(value) ? tc_as_hash(value)->count : 0),
                        tc_as_hash(value) && tc_as_hash(value)->count == 1 ? "" : "s");
     if (len < 0) {
       tc_error_set(err, "hash string conversion failed");
@@ -745,7 +758,7 @@ static int concat_values(TcValue a, TcValue b, TcValue *out, TcError *err) {
   // Fast path: both operands already carry directly-readable bytes
   // (string, symbol). Skip the two value_to_string_copy temp allocations
   // and write straight into the result buffer.
-  TcKind ka = tc_kind(a), kb = tc_kind(b);
+  TcValueKind ka = tc_kind(a), kb = tc_kind(b);
   int a_direct = (ka == TC_VAL_STRING || ka == TC_VAL_SYMBOL);
   int b_direct = (kb == TC_VAL_STRING || kb == TC_VAL_SYMBOL);
   if (a_direct && b_direct) {
@@ -1101,7 +1114,8 @@ static size_t hash_find_slot(TcRuntimeHash *hash, TcValue key, int *found) {
     }
     if (k == TC_HASH_TOMBSTONE) {
       if (first_tombstone == SIZE_MAX) first_tombstone = idx;
-    } else if (k == key || value_equal(k, key)) {
+    } else if (k == key ||
+               (!(w_is_symbol(k) && w_is_symbol(key)) && value_equal(k, key))) {
       // Bit-equal short-circuit: interned symbols and inline ints compare
       // equal at the WValue bit level, so the hot probe shape (sym key,
       // sym slot) hits without entering the function.
@@ -1381,7 +1395,7 @@ static int runtime_string_buffer_append(TcRuntimeObject *object, TcValue value, 
   // Fast paths: avoid the value_to_string_copy malloc for the dominant
   // shapes (string, symbol, int, nil, bool). Roughly 95% of stage 1
   // StringBuffer appends are strings or symbols.
-  TcKind k = tc_kind(value);
+  TcValueKind k = tc_kind(value);
   if (k == TC_VAL_STRING || k == TC_VAL_SYMBOL) {
     return string_buffer_append_bytes(object, tc_str_bytes_only(value), tc_str_len(value), err);
   }
@@ -1594,6 +1608,9 @@ static int ast_rt_cache_store(void *key, TcValue value, TcError *err) {
 // `mod[:known_classes][cname][:ivar_offsets] = ...` in the bootstrap and
 // forced the slow string-keyed ivar lookup path on every method body
 // (1183 w_ivar_get_wv calls in stage1.ll vs 1 in stage2).
+//
+// Also used by TUNGSTEN_C_FAST_PARSE (fast_load.c) to hand Loader a runtime
+// Program hash after C-side lex/parse of compiler sources.
 static int ast_to_runtime(TcAstValue *ast, TcValue *out, TcError *err) {
   switch (ast->kind) {
     case TC_AST_NIL:
@@ -1653,6 +1670,11 @@ static int ast_to_runtime(TcAstValue *ast, TcValue *out, TcError *err) {
   return 1;
 }
 
+/* Public wrapper for fast_load.c (TUNGSTEN_C_FAST_PARSE bootstrap path). */
+int tc_vm_ast_to_runtime(TcAstValue *ast, TcValue *out, TcError *err) {
+  return ast_to_runtime(ast, out, err);
+}
+
 static int ast_hash_lookup(TcAstValue ast, TcValue key, TcValue *out, TcError *err) {
   if (ast.kind != TC_AST_HASH || !ast.as.hash) {
     *out = tc_box_nil();
@@ -1707,15 +1729,14 @@ static int vm_call_function(TcVm *vm, TcFunction *fn, TcValue *args, uint32_t ar
   size_t local_count = vm->chunk->local_count;
   size_t depth = vm->call_depth;
   // Save only the slots this fn writes (precomputed at chunk finalize).
-  // Storage is depth*local_count slots; we pack {slot, value} into the
-  // pool sequentially. Falls back to full-locals memcpy if touched_slots
-  // wasn't computed (e.g. main, before finalize).
-  if (fn->touched_slots && fn->touched_slot_count > 0) {
+  // Values are packed sequentially into a fixed-width slice per depth.
+  // Falls back to a full-locals copy if analysis did not complete.
+  if (fn->touched_slots_analyzed && fn->touched_slot_count > 0) {
     // Combined save + reset: each touched slot is captured into the pool
     // and zeroed in the same iteration. Two passes used to walk the
     // touched_slots array twice — folding them halves the loop overhead
     // and keeps the load/store paired in the cpu's reorder buffer.
-    TcValue *slot_base = vm->saved_locals_pool + depth * local_count;
+    TcValue *slot_base = vm->saved_locals_pool + depth * vm->saved_locals_stride;
     TcValue nil_v = tc_box_nil();
     for (uint32_t i = 0; i < fn->touched_slot_count; i++) {
       uint32_t slot = fn->touched_slots[i];
@@ -1723,14 +1744,14 @@ static int vm_call_function(TcVm *vm, TcFunction *fn, TcValue *args, uint32_t ar
       vm->locals[slot] = nil_v;
     }
     vm->frames[depth].saved_locals_active = 1;
-  } else if (local_count > 0) {
-    memcpy(vm->saved_locals_pool + depth * local_count, vm->locals,
+  } else if (!fn->touched_slots_analyzed && local_count > 0) {
+    memcpy(vm->saved_locals_pool + depth * vm->saved_locals_stride, vm->locals,
            local_count * sizeof(TcValue));
     vm->frames[depth].saved_locals_active = 1;
   } else {
     vm->frames[depth].saved_locals_active = 0;
   }
-  if (!(fn->touched_slots && fn->touched_slot_count > 0) &&
+  if (!fn->touched_slots_analyzed &&
       vm->chunk->local_count > vm->chunk->global_count) {
     size_t first_local = vm->chunk->global_count;
     if (first_local > vm->chunk->local_count) first_local = vm->chunk->local_count;
@@ -1875,10 +1896,10 @@ void tc_value_print(TcValue value, FILE *out) {
       fwrite(tc_str_bytes_only(value), 1, tc_str_len(value), out);
       break;
     case TC_VAL_ARRAY:
-      fprintf(out, "[%zu item%s]", tc_as_array(value) ? tc_as_array(value)->size : 0, tc_as_array(value) && tc_as_array(value)->size == 1 ? "" : "s");
+      fprintf(out, "[%zu item%s]", (size_t)(tc_as_array(value) ? tc_as_array(value)->size : 0), tc_as_array(value) && tc_as_array(value)->size == 1 ? "" : "s");
       break;
     case TC_VAL_HASH:
-      fprintf(out, "{%zu pair%s}", tc_as_hash(value) ? tc_as_hash(value)->count : 0, tc_as_hash(value) && tc_as_hash(value)->count == 1 ? "" : "s");
+      fprintf(out, "{%zu pair%s}", (size_t)(tc_as_hash(value) ? tc_as_hash(value)->count : 0), tc_as_hash(value) && tc_as_hash(value)->count == 1 ? "" : "s");
       break;
     case TC_VAL_OBJECT:
       if (tc_as_object(value)) fprintf(out, "#<%.*s>", (int)tc_as_object(value)->class_name_len, tc_as_object(value)->class_name);
@@ -1905,6 +1926,7 @@ int tc_vm_run_args(const TcChunk *chunk, int argc, char **argv, TcValue *result,
   TcVm vm;
   memset(&vm, 0, sizeof(vm));
   vm.chunk = chunk;
+  vm.fast_parse_enabled = (uint8_t)tc_c_fast_parse_enabled();
   vm.locals = (TcValue *)calloc(chunk->local_count ? chunk->local_count : 1, sizeof(TcValue));
   if (!vm.locals) {
     tc_error_set(err, "local allocation failed");
@@ -1916,7 +1938,21 @@ int tc_vm_run_args(const TcChunk *chunk, int argc, char **argv, TcValue *result,
             free(vm.locals);
     return 0;
   }
-  size_t pool_slots = chunk->local_count ? chunk->local_count : 1;
+  // Derive the packed frame width here instead of trusting finalization:
+  // tc_vm_run_args is public and must remain safe for an unfinalized chunk.
+  // Any unanalyzed function needs room for the conservative full copy.
+  vm.saved_locals_stride = 0;
+  for (size_t i = 0; i < chunk->function_count; i++) {
+    const TcFunction *fn = &chunk->functions[i];
+    if (!fn->touched_slots_analyzed) {
+      vm.saved_locals_stride = chunk->local_count;
+      break;
+    }
+    if (fn->touched_slot_count > vm.saved_locals_stride) {
+      vm.saved_locals_stride = fn->touched_slot_count;
+    }
+  }
+  size_t pool_slots = vm.saved_locals_stride ? vm.saved_locals_stride : 1;
   vm.saved_locals_pool = (TcValue *)calloc(2048 * pool_slots, sizeof(TcValue));
   if (!vm.saved_locals_pool) {
     free(vm.saved_locals_pool);
@@ -2653,13 +2689,13 @@ int tc_vm_run_args(const TcChunk *chunk, int argc, char **argv, TcValue *result,
           vm.ip = vm.frames[depth].return_ip;
           if (vm.frames[depth].saved_locals_active) {
             const TcFunction *returning = vm.frames[depth].function;
-            if (returning && returning->touched_slots && returning->touched_slot_count > 0) {
-              const TcValue *slot_base = vm.saved_locals_pool + depth * vm.chunk->local_count;
+            if (returning && returning->touched_slots_analyzed) {
+              const TcValue *slot_base = vm.saved_locals_pool + depth * vm.saved_locals_stride;
               for (uint32_t i = 0; i < returning->touched_slot_count; i++) {
                 vm.locals[returning->touched_slots[i]] = slot_base[i];
               }
             } else {
-              memcpy(vm.locals, vm.saved_locals_pool + depth * vm.chunk->local_count,
+              memcpy(vm.locals, vm.saved_locals_pool + depth * vm.saved_locals_stride,
                      vm.chunk->local_count * sizeof(TcValue));
             }
             vm.frames[depth].saved_locals_active = 0;

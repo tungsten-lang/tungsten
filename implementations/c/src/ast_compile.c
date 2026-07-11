@@ -1350,7 +1350,7 @@ static int compile_expr(TcAstValue node, TcChunk *chunk, TcError *err) {
     return emit_const(chunk, tc_box_wvalue((value && value->as.boolean) ? W_TRUE : W_FALSE), err);
   }
   if (ast_node_is(node, "nil") || ast_node_is(node, "nil_lit")) return emit_nil(chunk, err);
-  if (ast_node_is(node, "self")) {
+  if (ast_node_is(node, "self") || ast_node_is(node, "self_ref")) {
     int slot = tc_chunk_local(chunk, "self", 4, err);
     if (slot < 0) return 0;
     return tc_emit_op_u32(chunk, TC_OP_LOAD_LOCAL, (uint32_t)slot, err);

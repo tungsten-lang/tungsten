@@ -608,6 +608,9 @@ typedef struct {
   // a few hundred bytes.
   uint32_t *touched_slots;
   uint32_t touched_slot_count;
+  // Distinguishes a successfully analyzed function that touches no slots
+  // from an analysis/allocation failure, which must use the full-save path.
+  uint8_t touched_slots_analyzed;
 } TcFunction;
 
 typedef struct {
@@ -665,6 +668,12 @@ typedef struct {
   // that resolves through `class#method` (which needs the dynamic
   // full-name construction in L_CALL — fast path doesn't apply).
   TcFunction **fn_for_const;
+  // Constructor fast path: a `Class.new` name_id resolves once at chunk
+  // finalization to Class#new plus its slab-role bit. AST construction is
+  // extremely hot during bootstrap; this avoids a class-table scan, a temp
+  // string allocation, and a full function-table scan on every node.
+  TcFunction **ctor_fn_for_const;
+  uint8_t *ctor_is_slab;
   // Implicit-self method dispatch IC: for each name_id, cache the last
   // resolved (class_name pointer, TcFunction*). Class names are interned
   // C strings so pointer equality is sufficient. Hit rate is near 100%
@@ -791,5 +800,10 @@ int tc_compile_ast_initializers(TcAstValue ast, TcChunk *chunk, TcError *err);
 int tc_vm_run(const TcChunk *chunk, TcValue *result, TcError *err);
 int tc_vm_run_args(const TcChunk *chunk, int argc, char **argv, TcValue *result, TcError *err);
 void tc_value_print(TcValue value, FILE *out);
+
+/* TUNGSTEN_C_FAST_PARSE: C-side Loader#load_program_ast (bootstrap only). */
+int tc_c_fast_parse_enabled(void);
+int tc_vm_fast_load_program_ast(const char *path, const char *from_file, TcValue *out, TcError *err);
+int tc_vm_ast_to_runtime(TcAstValue *ast, TcValue *out, TcError *err);
 
 #endif

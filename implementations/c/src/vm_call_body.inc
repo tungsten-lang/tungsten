@@ -540,19 +540,10 @@
           // classes inline their constructor body into .new without
           // the wrapper-object indirection that breaks ast_kind /
           // ast_get on the result.
-          int is_slab = tc_chunk_is_slab_class(chunk, name, class_len);
-          size_t init_len = class_len + 4;
-          char *init_name = (char *)malloc(init_len + 1);
-          if (!init_name) {
-            tc_error_set(err, "initializer name allocation failed");
-            FREE_ARGS();
-            goto cleanup_fail;
-          }
-          memcpy(init_name, name, class_len);
-          memcpy(init_name + class_len, "#new", 4);
-          init_name[init_len] = '\0';
-          TcFunction *fn = tc_chunk_find_function(chunk, init_name, init_len);
-          free(init_name);
+          int is_slab = chunk->ctor_is_slab ? chunk->ctor_is_slab[name_id] :
+                                                tc_chunk_is_slab_class(chunk, name, class_len);
+          TcFunction *fn = chunk->ctor_fn_for_const ? chunk->ctor_fn_for_const[name_id] :
+                                                       tc_chunk_find_method(chunk, name, class_len, "new", 3);
           if (!fn) {
             tc_error_set(err, "missing initializer for class: %.*s", (int)class_len, name);
             FREE_ARGS();
@@ -1244,13 +1235,74 @@
           }
           CNEXT();
         }
-        // Loader.load_program_ast intercept removed: stage 1 must run the
-        // exact same parser path as stage 2 (compiler/lib/lexer.w + parser.w
-        // via bytecode), so AST is byte-identical between stages. The
-        // intercept used parse_ast.c — a C reimplementation that drifted
-        // from the canonical Tungsten parser and produced subtly different
-        // ASTs (block-body attachment, :raise vs :call, etc.). The cost is
-        // a slower stage 1 bootstrap; the win is verifiable stage equivalence.
+        // Optional C-native Loader#load_program_ast (TUNGSTEN_C_FAST_PARSE=1).
+        // Speeds stage-1 bootstrap ~2× by using parse_ast.c for the entry
+        // file's full `use` flatten instead of Tungsten lexer/parser
+        // bytecode. Top-level only: after C parse we re-enter Tungsten
+        // Loader#autoload_pass so core classes (Array/Hash/…) still load.
+        // Nested load_program_ast (from autoload / use under Tungsten)
+        // falls through so @loaded_files tracking stays correct.
+        // MUST stay off for `tungsten build` stage1/stage2 identity —
+        // C AST can drift from the canonical parser.
+        if (vm.fast_parse_enabled && has_receiver &&
+            tc_kind(receiver) == TC_VAL_OBJECT &&
+            object_is_class(tc_as_object(receiver), "Loader", 6) && name_len == 16 &&
+            memcmp(name, "load_program_ast", 16) == 0 && argc >= 1 &&
+            !(argc >= 2 && (tc_kind(args[1]) == TC_VAL_STRING ||
+                            tc_kind(args[1]) == TC_VAL_SYMBOL) &&
+              tc_str_len(args[1]) > 0)) {
+          const char *path = NULL;
+          size_t path_len = 0;
+          if (tc_kind(args[0]) == TC_VAL_STRING || tc_kind(args[0]) == TC_VAL_SYMBOL) {
+            path = tc_str_bytes_only(args[0]);
+            path_len = tc_str_len(args[0]);
+          }
+          if (path && path_len > 0) {
+            char path_buf[4096];
+            if (path_len >= sizeof(path_buf)) {
+              tc_error_set(err, "load_program_ast: path too long");
+              FREE_ARGS();
+              goto cleanup_fail;
+            }
+            memcpy(path_buf, path, path_len);
+            path_buf[path_len] = '\0';
+            TcValue prog;
+            if (!tc_vm_fast_load_program_ast(path_buf, NULL, &prog, err)) {
+              FREE_ARGS();
+              goto cleanup_fail;
+            }
+            /* Re-enter Loader#autoload_pass(prog, path) so stdlib
+             * classes referenced by the compiler still materialize.
+             * Without this, stage1 IR is missing @class.Array/Hash/… */
+            static TcFunction *autoload_pass_fn = NULL;
+            static const TcChunk *autoload_pass_chunk = NULL;
+            if (autoload_pass_chunk != chunk) {
+              autoload_pass_fn = tc_chunk_find_function(
+                  chunk, "Loader#autoload_pass",
+                  sizeof("Loader#autoload_pass") - 1);
+              autoload_pass_chunk = chunk;
+            }
+            if (autoload_pass_fn && has_receiver) {
+              TcValue path_v;
+              if (!make_string_value(path_buf, path_len, &path_v, err)) {
+                FREE_ARGS();
+                goto cleanup_fail;
+              }
+              TcValue ap_args[2];
+              ap_args[0] = prog;
+              ap_args[1] = path_v;
+              FREE_ARGS();
+              if (!vm_call_function(&vm, autoload_pass_fn, ap_args, 2,
+                                    receiver, 1, tc_box_nil(), 0, err)) {
+                goto cleanup_fail;
+              }
+              NEXT();
+            }
+            FREE_ARGS();
+            if (!push(&vm, prog, err)) goto cleanup_fail;
+            CNEXT();
+          }
+        }
         if (has_receiver && tc_kind(receiver) == TC_VAL_OBJECT && tc_as_object(receiver)) {
           size_t full_len = tc_as_object(receiver)->class_name_len + 1 + name_len;
           char *full_name = (char *)malloc(full_len + 1);
@@ -1372,6 +1424,68 @@
             }
             FREE_ARGS();
             NEXT();
+          }
+        }
+
+        /* Hash AST dual-rep field methods (TUNGSTEN_C_FAST_PARSE path).
+         *
+         * The self-hosted compiler writes `node.expressions` /
+         * `node.name` / … which normally dispatch through
+         * Tungsten:AST:Node on W_PACKED_NODE. C parse_ast emits
+         * `{node: :program, expressions: [...]}` hashes; ast_get /
+         * ast_kind already handle the Hash branch, but method-style
+         * field access does not. Treat an AST-shaped Hash (has :node)
+         * like Node: zero-arg getters read hash[:field] (with
+         * `.kind` → `:node`), one-arg `field=` setters write it.
+         * Missing keys return nil, matching ast_get. */
+        if (vm.fast_parse_enabled && has_receiver &&
+            tc_kind(receiver) == TC_VAL_HASH && tc_as_hash(receiver) &&
+            (argc == 0 || (argc == 1 && name_len > 0 && name[name_len - 1] == '='))) {
+          TcRuntimeHash *h = tc_as_hash(receiver);
+          static const char *node_sym_bytes = NULL;
+          if (!node_sym_bytes) node_sym_bytes = tc_intern("node", 4);
+          int is_ast_hash = 0;
+          if (node_sym_bytes && h && h->cap > 0) {
+            TcValue node_key = tc_box_symbol_bytes(node_sym_bytes, 4, 0);
+            size_t node_slot = hash_find_slot(h, node_key, &is_ast_hash);
+            if (is_ast_hash && tc_kind(h->values[node_slot]) != TC_VAL_SYMBOL) {
+              is_ast_hash = 0;
+            }
+          }
+          if (is_ast_hash) {
+            if (argc == 0) {
+              const char *field = name;
+              size_t field_len = name_len;
+              /* Node#kind → ast_kind → hash[:node] */
+              if (name_len == 4 && name[0] == 'k' && name[1] == 'i' &&
+                  name[2] == 'n' && name[3] == 'd') {
+                field = "node";
+                field_len = 4;
+              }
+              const char *interned = tc_intern(field, field_len);
+              if (interned) {
+                TcValue key_v = tc_box_symbol_bytes(interned, field_len, 0);
+                TcValue out = hash_get_value(h, key_v);
+                FREE_ARGS();
+                if (!push(&vm, out, err)) goto cleanup_fail;
+                CNEXT();
+              }
+            } else {
+              /* field= → hash[:field] = value */
+              size_t field_len = name_len - 1;
+              const char *interned = tc_intern(name, field_len);
+              if (interned) {
+                TcValue key_v = tc_box_symbol_bytes(interned, field_len, 0);
+                TcValue set_val = args[0];
+                if (!hash_set_value(h, key_v, set_val, err)) {
+                  FREE_ARGS();
+                  goto cleanup_fail;
+                }
+                FREE_ARGS();
+                if (!push(&vm, set_val, err)) goto cleanup_fail;
+                CNEXT();
+              }
+            }
           }
         }
 

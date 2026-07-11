@@ -29,6 +29,8 @@ void tc_chunk_free(TcChunk *chunk) {
   }
   free(chunk->functions);
   free(chunk->fn_for_const);
+  free(chunk->ctor_fn_for_const);
+  free(chunk->ctor_is_slab);
   free(chunk->method_ic_class);
   free(chunk->method_ic_class_len);
   free(chunk->method_ic_fn);
@@ -323,6 +325,7 @@ int tc_chunk_add_function(TcChunk *chunk, const char *name, size_t name_len, uin
       .param_slots = slots,
       .touched_slots = NULL,
       .touched_slot_count = 0,
+      .touched_slots_analyzed = 0,
   };
   return 1;
 }
@@ -354,11 +357,6 @@ static size_t opcode_size(uint8_t op) {
   }
 }
 
-static int compare_u32(const void *a, const void *b) {
-  uint32_t ax = *(const uint32_t *)a, bx = *(const uint32_t *)b;
-  return (ax > bx) - (ax < bx);
-}
-
 void tc_chunk_compute_touched(TcChunk *chunk) {
   // Sort functions by entry so we can bound each fn's body by the next fn's
   // entry (or chunk end). Uses an index array — TcFunction itself is left
@@ -386,6 +384,15 @@ void tc_chunk_compute_touched(TcChunk *chunk) {
     return;
   }
   size_t bm_bytes = (chunk->local_count + 7) / 8;
+  // All functions share the chunk's local-name table, so resolve the
+  // implicit method receiver slot once rather than scanning for every fn.
+  int self_slot = -1;
+  for (size_t i = 0; i < chunk->local_count; i++) {
+    if (chunk->locals[i].len == 4 && memcmp(chunk->locals[i].name, "self", 4) == 0) {
+      self_slot = (int)i;
+      break;
+    }
+  }
 
   for (uint32_t k = 0; k < fn_count; k++) {
     TcFunction *fn = &chunk->functions[order[k]];
@@ -412,14 +419,6 @@ void tc_chunk_compute_touched(TcChunk *chunk) {
       if (s < chunk->local_count) bitmap[s >> 3] |= (uint8_t)(1u << (s & 7));
     }
     // Add `self` slot — methods read it implicitly even if they never STORE.
-    // The slot lookup is by name in the chunk's locals table; do it once.
-    int self_slot = -1;
-    for (size_t i = 0; i < chunk->local_count; i++) {
-      if (chunk->locals[i].len == 4 && memcmp(chunk->locals[i].name, "self", 4) == 0) {
-        self_slot = (int)i;
-        break;
-      }
-    }
     if (self_slot >= 0) bitmap[self_slot >> 3] |= (uint8_t)(1u << (self_slot & 7));
 
     // Materialize into fn->touched_slots, sorted ascending for predictable
@@ -428,44 +427,63 @@ void tc_chunk_compute_touched(TcChunk *chunk) {
     for (uint32_t s = 0; s < (uint32_t)chunk->local_count; s++) {
       if (bitmap[s >> 3] & (1u << (s & 7))) count++;
     }
-    if (count == 0) continue;
+    if (count == 0) {
+      fn->touched_slots_analyzed = 1;
+      continue;
+    }
     uint32_t *list = (uint32_t *)malloc(count * sizeof(uint32_t));
     if (!list) continue;  // best-effort; caller can fall back to full save
     uint32_t idx = 0;
     for (uint32_t s = 0; s < (uint32_t)chunk->local_count; s++) {
       if (bitmap[s >> 3] & (1u << (s & 7))) list[idx++] = s;
     }
-    qsort(list, count, sizeof(uint32_t), compare_u32);
+    // The ascending slot scan already materializes a sorted list.
     fn->touched_slots = list;
     fn->touched_slot_count = count;
+    fn->touched_slots_analyzed = 1;
   }
 
   free(bitmap);
   free(order);
 
   // CALL fast path: precompute name_id → TcFunction*. Each chunk const
-  // that's a STRING gets matched against the function name table; on
+  // that's a SYMBOL gets matched against the function name table; on
   // hit, fn_for_const[id] is the resolved function. The L_CALL handler
   // can then skip the per-call O(N) tc_chunk_find_function walk for
   // receiverless plain calls (the dominant user-fn dispatch shape —
   // `lower_var(ctx, node)` style — in compiler/lib/lowering.w).
   if (chunk->const_count > 0) {
     chunk->fn_for_const = (TcFunction **)calloc(chunk->const_count, sizeof(TcFunction *));
-    if (chunk->fn_for_const) {
-      for (size_t i = 0; i < chunk->const_count; i++) {
-        TcValue v = chunk->consts[i];
-        // Call names are TC_VAL_SYMBOL post-emit_call_op refactor.
-        // String consts (literal strings) aren't function names. Skip.
-        if (tc_kind(v) != TC_VAL_SYMBOL) continue;
-        // Linear walk over functions is O(N×M); only happens once per
-        // chunk, so it's fine. Breaking out of the inner loop on first
-        // match is the only reason this is even tolerable.
-        for (size_t j = 0; j < chunk->function_count; j++) {
-          if (chunk->functions[j].name_len == tc_str_len(v) &&
-              memcmp(chunk->functions[j].name, tc_str_bytes_only(v), tc_str_len(v)) == 0) {
-            chunk->fn_for_const[i] = &chunk->functions[j];
-            break;
-          }
+    chunk->ctor_fn_for_const = (TcFunction **)calloc(chunk->const_count, sizeof(TcFunction *));
+    chunk->ctor_is_slab = (uint8_t *)calloc(chunk->const_count, sizeof(uint8_t));
+    for (size_t i = 0; i < chunk->const_count; i++) {
+      TcValue v = chunk->consts[i];
+      // Call names are TC_VAL_SYMBOL post-emit_call_op refactor.
+      // String consts (literal strings) aren't function names. Skip.
+      if (tc_kind(v) != TC_VAL_SYMBOL) continue;
+      const char *call_name = tc_str_bytes_only(v);
+      size_t call_name_len = tc_str_len(v);
+      if (call_name_len > 4 && memcmp(call_name + call_name_len - 4, ".new", 4) == 0) {
+        size_t class_len = call_name_len - 4;
+        if (chunk->ctor_fn_for_const) {
+          chunk->ctor_fn_for_const[i] = tc_chunk_find_method(
+              chunk, call_name, class_len, "new", 3);
+        }
+        if (chunk->ctor_is_slab) {
+          chunk->ctor_is_slab[i] = (uint8_t)tc_chunk_is_slab_class(
+              chunk, call_name, class_len);
+        }
+        continue;
+      }
+      if (!chunk->fn_for_const) continue;
+      // Linear walk over functions is O(NxM); only happens once per
+      // chunk, so it's fine. Breaking out of the inner loop on first
+      // match is the only reason this is even tolerable.
+      for (size_t j = 0; j < chunk->function_count; j++) {
+        if (chunk->functions[j].name_len == call_name_len &&
+            memcmp(chunk->functions[j].name, call_name, call_name_len) == 0) {
+          chunk->fn_for_const[i] = &chunk->functions[j];
+          break;
         }
       }
     }

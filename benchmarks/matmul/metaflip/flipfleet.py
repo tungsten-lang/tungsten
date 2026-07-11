@@ -63,13 +63,15 @@ RECORD_SEEDS = {
     3: os.path.join(ROOT, "benchmarks", "matmul", "search", "scheme23.txt"),
     4: os.path.join(HERE, "matmul_4x4_rank47_d450_gf2.txt"),
     5: os.path.join(HERE, "matmul_5x5_rank93_d1168_gf2.txt"),
-    6: os.path.join(ROOT, "benchmarks", "matmul", "search", "seed_mp153.txt"),
+    6: os.path.join(HERE, "matmul_6x6_rank153_d2512_gf2.txt"),
 }
 C3_RECORD_SEEDS = {
     # The sparsest 5x5 leader is not C3-closed, so preserve a separate exact
     # frontier for orbit-split/polarization campaigns.
     5: os.path.join(HERE, "matmul_5x5_rank93_d1191_gf2.txt"),
-    6: RECORD_SEEDS[6],
+    # The GPU density leader is not required to remain C3-closed; retain the
+    # original symmetry-compatible rank-153 seed for orbit escapes.
+    6: os.path.join(ROOT, "benchmarks", "matmul", "search", "seed_mp153.txt"),
 }
 ESCAPE_KINDS = ("none", "split", "break", "orbit-split", "polarize")
 ESCAPE_TRIGGERS = ("startup", "cycleout", "both")

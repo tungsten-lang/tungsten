@@ -476,9 +476,21 @@ has `gpu.shared_i64` and 64-bit Metal buffer host accessors, and
 full-width RNG for 6×6.  Its generated default uses four walkers per
 threadgroup (rather than 16) so the three rank-cap arrays remain below 32 KiB.
 Both 5×5 and 6×6 sources compile through the self-hosted emitter to the expected
-MSL (`device int/long`, `threadgroup int/long`).  This Codex sandbox exposes no
-default Metal device and lacks the offline Metal toolchain, so on-device timing
-and execution remain a required pre-campaign gate; no speedup is claimed yet.
+MSL (`device int/long`, `threadgroup int/long`).  With unrestricted device
+access, the i64 shared-memory smoke passed on an Apple M5 Max and both relay
+formats completed real dispatches.
+
+The first bounded 6×6 grind was immediately productive.  Starting from the
+tracked exact rank-153 density-2574 scheme, an 8-lane × 1,000-move smoke found
+density 2559.  Three successive 1,024-lane × 100,000-move rounds over 256 exact
+split basins then found densities 2528, 2516, and **2512**; the fourth identical
+round was neutral.  Each improving candidate passed both the relay verifier and
+independent full tensor reconstruction.  A productive round took 5.90 seconds
+including process startup/runtime Metal compilation.  The final scheme has
+rank 153, 2,512 factor bits, and 2,323 no-CSE operations versus 2,574/2,385 for
+the previous seed.  `matmul_6x6_rank153_d2512_gf2.txt` is now the tracked 6×6
+cost leader.  This validates exact-basin diversity as a useful GPU role, but it
+does not improve tensor rank.
 
 Why not GPU SAT now: the current 4×4 large-k surgery model failed to solve even
 the known rank-47 SAT control in 280 seconds.  A GPU SAT/XOR solver would be a

@@ -23,6 +23,7 @@ class that produced the current records for several matmul tensor formats.
 | `matmul_4x4_rank47_d450_gf2.txt` | exact rank-47, density-450 default 4×4 frontier seed |
 | `matmul_5x5_rank93_d1168_gf2.txt` | exact rank-93, density-1168 default 5×5 frontier seed |
 | `matmul_5x5_rank93_d1191_gf2.txt` | exact C3 rank-93, density-1191 symmetry-escape seed |
+| `matmul_6x6_rank153_d2512_gf2.txt` | exact rank-153, density-2512 GPU escape-portfolio cost leader |
 
 ## The construction
 
@@ -229,6 +230,14 @@ SAT remains a CPU-side proof/search tool here: the existing 4×4 surgery model
 cannot solve even its known rank-47 SAT control quickly, so moving that model
 to the GPU is currently a larger solver project with a worse evidence base
 than spending GPU width on independent exact basins.
+
+The first on-device M5 Max validation chained the 6×6 frontier from density
+2574 → 2559 → 2528 → 2516 → **2512** in three improving 102.4M-move rounds
+(1,024 lanes × 100k moves, 256 exact split escapes); a fourth identical round
+was neutral.  Every intermediate and the final scheme passed independent full
+tensor reconstruction.  The final rank-153 scheme has 2,323 no-CSE operations
+and is now the default `--seed record` profile for 6×6.  This is a cost leader,
+not a tensor-rank record.
 
 The tracked 5×5/6×6 record components have now been attacked directly with
 these bridges.  Unconstrained C3 walks spent 6B moves per size and returned to

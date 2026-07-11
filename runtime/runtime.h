@@ -1389,6 +1389,15 @@ WValue w_array_sin_float(WValue arr);
 WValue w_array_sqrt_signed(WValue arr);
 WValue w_array_sqrt_unsigned(WValue arr);
 WValue w_array_sqrt_float(WValue arr);
+WValue w_array_exp_signed(WValue arr);
+WValue w_array_exp_unsigned(WValue arr);
+WValue w_array_exp_float(WValue arr);
+WValue w_array_log_signed(WValue arr);
+WValue w_array_log_unsigned(WValue arr);
+WValue w_array_log_float(WValue arr);
+WValue w_array_tan_signed(WValue arr);
+WValue w_array_tan_unsigned(WValue arr);
+WValue w_array_tan_float(WValue arr);
 WValue w_socket_read_exact(WValue sock, WValue n);
 WValue w_socket_write_bytes(WValue sock, WValue bytes);
 

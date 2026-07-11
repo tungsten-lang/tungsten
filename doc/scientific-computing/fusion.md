@@ -66,7 +66,7 @@ same f64 loop.
 
 Fusion also covers f32 (and mixed f32/f64) trees with kernel-exact
 dtype semantics: a DOT op inherits its lhs dtype, and the array
-libm methods promote to f64 output (`array_map_f64` allocates f64
+math.h-backed methods (sin/cos/sqrt/exp/log/tan) promote to f64 output (`array_map_f64` allocates f64
 regardless of input).
 
 **`## reuse` output buffers — the big allocation lever.** A fused

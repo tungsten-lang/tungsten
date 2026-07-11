@@ -1863,7 +1863,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     if r == nil
       return nil
     return {cls: :dot, op: node.op, left: l, right: r, odt: l[:odt], ops: l[:ops] + r[:ops] + 1, libm: l[:libm] + r[:libm]}
-  if k == :call && node.receiver != nil && node.name != nil && node.name in ("sin" "cos" "sqrt")
+  if k == :call && node.receiver != nil && node.name != nil && node.name in ("sin" "cos" "sqrt" "exp" "log" "tan")
     argc = 0
     if node.args != nil
       argc = node.args.size()

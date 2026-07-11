@@ -1206,7 +1206,7 @@
         fn_name = "w_array_scale_float_bang"
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: [receiver_reg, arg_reg]})
       return typed_value(:i64, temp)
-    if method_name in ("cos" "sin" "sqrt") && node.args.size() == 0
+    if method_name in ("cos" "sin" "sqrt" "exp" "log" "tan") && node.args.size() == 0
       # f64 receivers fuse into a single raw loop with a scalar libm call
       # per element (vectorizable); other dtypes keep the kernel.
       fused = try_fuse_elementwise(ctx, node)

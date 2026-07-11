@@ -17913,6 +17913,9 @@ WValue __w_prime_aks(WValue n) {
 #define WN_cos     W_M3("cos")
 #define WN_sin     W_M3("sin")
 #define WN_sqrt    W_M4("sqrt")
+#define WN_exp     W_M3("exp")
+#define WN_log     W_M3("log")
+#define WN_tan     W_M3("tan")
 #define WN_sq      W_M2("sq")
 #define WN_ceil    W_M4("ceil")
 #define WN_floor   W_M5("floor")
@@ -18652,6 +18655,27 @@ static WValue w_ic_array_sqrt(WValue r, WValue *a, int c) {
     return array_is_float(arr) ? w_array_sqrt_float(r)
          : array_is_signed_int(arr) ? w_array_sqrt_signed(r)
                                      : w_array_sqrt_unsigned(r);
+}
+static WValue w_ic_array_exp(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    WArray *arr = (WArray *)w_as_ptr(r);
+    return array_is_float(arr) ? w_array_exp_float(r)
+         : array_is_signed_int(arr) ? w_array_exp_signed(r)
+                                     : w_array_exp_unsigned(r);
+}
+static WValue w_ic_array_log(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    WArray *arr = (WArray *)w_as_ptr(r);
+    return array_is_float(arr) ? w_array_log_float(r)
+         : array_is_signed_int(arr) ? w_array_log_signed(r)
+                                     : w_array_log_unsigned(r);
+}
+static WValue w_ic_array_tan(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    WArray *arr = (WArray *)w_as_ptr(r);
+    return array_is_float(arr) ? w_array_tan_float(r)
+         : array_is_signed_int(arr) ? w_array_tan_signed(r)
+                                     : w_array_tan_unsigned(r);
 }
 static WValue w_ic_array_matvec_i8(WValue r, WValue *a, int c) {
     if (c < 3) die("matvec_i8 requires 3 arguments");
@@ -21936,6 +21960,9 @@ static WICEntry w_ic_array_table[] = {
     {0, w_ic_array_replace_byte},
     {0, w_ic_array_delete_at},
     {0, w_ic_array_slice},        /* ByteArray .slice — non-bytes Array uses .copy */
+    {0, w_ic_array_exp},
+    {0, w_ic_array_log},
+    {0, w_ic_array_tan},
     {0, NULL}
 };
 
@@ -22797,6 +22824,9 @@ static void w_init_ic_tables(void) {
     w_ic_array_table[64].name = WN_replace_byte_bang;
     w_ic_array_table[65].name = WN_delete_at;
     w_ic_array_table[66].name = WN_slice;
+    w_ic_array_table[67].name = WN_exp;
+    w_ic_array_table[68].name = WN_log;
+    w_ic_array_table[69].name = WN_tan;
     /* String */
     w_ic_string_table[0].name = WN_size;
     w_ic_string_table[1].name = WN_to_s;
@@ -27791,6 +27821,15 @@ WValue w_array_sin_float(WValue arr) { return array_map_f64(arr, 0, sin); }
 WValue w_array_sqrt_signed(WValue arr) { return array_map_f64(arr, 1, sqrt); }
 WValue w_array_sqrt_unsigned(WValue arr) { return array_map_f64(arr, 0, sqrt); }
 WValue w_array_sqrt_float(WValue arr) { return array_map_f64(arr, 0, sqrt); }
+WValue w_array_exp_signed(WValue arr) { return array_map_f64(arr, 1, exp); }
+WValue w_array_exp_unsigned(WValue arr) { return array_map_f64(arr, 0, exp); }
+WValue w_array_exp_float(WValue arr) { return array_map_f64(arr, 0, exp); }
+WValue w_array_log_signed(WValue arr) { return array_map_f64(arr, 1, log); }
+WValue w_array_log_unsigned(WValue arr) { return array_map_f64(arr, 0, log); }
+WValue w_array_log_float(WValue arr) { return array_map_f64(arr, 0, log); }
+WValue w_array_tan_signed(WValue arr) { return array_map_f64(arr, 1, tan); }
+WValue w_array_tan_unsigned(WValue arr) { return array_map_f64(arr, 0, tan); }
+WValue w_array_tan_float(WValue arr) { return array_map_f64(arr, 0, tan); }
 
 static int w_ta_cmp8(const void *a, const void *b)  { return (int)*(const uint8_t *)a - (int)*(const uint8_t *)b; }
 static int w_ta_cmp16(const void *a, const void *b) { uint16_t va = *(const uint16_t *)a, vb = *(const uint16_t *)b; return (va > vb) - (va < vb); }

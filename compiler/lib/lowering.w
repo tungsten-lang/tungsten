@@ -643,7 +643,7 @@ use lowering/definitions
     if is_typed_array_type?(recv_t) && node.name in ("matvec_i8" "matmul_i8")
       if recv_t in (:typed_array_i8 :typed_array_u8)
         return :typed_array_i32
-    if is_typed_array_type?(recv_t) && node.name in ("cos" "sin" "sqrt")
+    if is_typed_array_type?(recv_t) && node.name in ("cos" "sin" "sqrt" "exp" "log" "tan")
       return :typed_array_f64
     if recv_t == :string_buffer
       if node.name == "to_s"

@@ -126,3 +126,15 @@ while i < np
     ok = false
   i = i + 1
 << (ok ? "PASS fuse.reuse_out" : "FAIL fuse.reuse_out")
+
+# exp/log/tan array methods — same libm-direct criterion as sin/cos/sqrt
+# (their scalar Math.* counterparts are direct math.h intercepts, so array
+# and scalar stay bit-identical per element). Fused chains + bare calls.
+ex = (xf .* ~2.0).exp() .+ ~0.5
+<< (close?(ex[3], Math.exp(~2.0) + ~0.5) ? "PASS fuse.exp" : "FAIL fuse.exp")
+lg = (xf .+ ~1.0).log() .* ~2.0
+<< (close?(lg[3], Math.log(~2.0) * ~2.0) ? "PASS fuse.log" : "FAIL fuse.log")
+tn = (xf .* ~0.3).tan() .+ ~0.1
+<< (close?(tn[3], Math.tan(~0.3) + ~0.1) ? "PASS fuse.tan" : "FAIL fuse.tan")
+be = xf.exp()
+<< (close?(be[2], Math.exp(~0.75)) ? "PASS fuse.bare_exp" : "FAIL fuse.bare_exp")

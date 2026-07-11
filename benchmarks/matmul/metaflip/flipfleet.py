@@ -62,13 +62,13 @@ KNOWN_RECORDS = {3: 23, 4: 47, 5: 93, 6: 153}
 RECORD_SEEDS = {
     3: os.path.join(ROOT, "benchmarks", "matmul", "search", "scheme23.txt"),
     4: os.path.join(HERE, "matmul_4x4_rank47_d450_gf2.txt"),
-    5: os.path.join(HERE, "matmul_5x5_rank93_d1168_gf2.txt"),
+    5: os.path.join(HERE, "matmul_5x5_rank93_d1155_gf2.txt"),
     6: os.path.join(HERE, "matmul_6x6_rank153_d2512_gf2.txt"),
 }
 C3_RECORD_SEEDS = {
-    # The sparsest 5x5 leader is not C3-closed, so preserve a separate exact
-    # frontier for orbit-split/polarization campaigns.
-    5: os.path.join(HERE, "matmul_5x5_rank93_d1191_gf2.txt"),
+    # The GPU density leader returned to a C3-closed frontier with three fixed
+    # cubes, so it is eligible for both ordinary and symmetric escapes.
+    5: RECORD_SEEDS[5],
     # The GPU density leader is not required to remain C3-closed; retain the
     # original symmetry-compatible rank-153 seed for orbit escapes.
     6: os.path.join(ROOT, "benchmarks", "matmul", "search", "seed_mp153.txt"),
@@ -849,7 +849,8 @@ class Fleet:
             raise ValueError("initial scheme failed exact tensor verification")
         # If the requested profile is eligible for an enabled escape, do not
         # silently replace it with a denser/sparser but ineligible scheme at the
-        # same rank (notably C3 d1191 -> non-C3 d1168 on 5x5 resumes).
+        # same rank, where a lower-density tie may not satisfy the requested
+        # symmetry escape profile.
         preserve_escape_profile = (
             self.escape_kind != "none" and
             bridge_error(set(self.initial), self.n, self.escape_kind) is None)

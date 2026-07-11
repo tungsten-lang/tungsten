@@ -360,7 +360,7 @@ improved the same-rank cost again:
 `matmul_5x5_rank93_d1168_gf2.txt` is exact non-C3 rank 93, density 1168,
 13 shared-factor pairs, and 1,050 no-CSE operations.  Its SHA-256 is
 `10bacef79e1b43fdf1b494f2aebb6e6fa12afc5df00b5755c5915b7acfbbbb10` and it
-is now the default cost-oriented 5×5 frontier; `--seed c3-record` selects the
+was the default cost-oriented 5×5 frontier; `--seed c3-record` selected the
 density-1191 C3 scheme for orbit-split/polarization.  Rank and no-CSE base-case
 operation count remain separate objectives, so density gating must not prune a
 rank-record walk.  A final workspace scan parsed 214 rank-93 files and fully
@@ -491,6 +491,15 @@ rank 153, 2,512 factor bits, and 2,323 no-CSE operations versus 2,574/2,385 for
 the previous seed.  `matmul_6x6_rank153_d2512_gf2.txt` is now the tracked 6×6
 cost leader.  This validates exact-basin diversity as a useful GPU role, but it
 does not improve tensor rank.
+
+The same bounded protocol improved 5×5 from the prior density-1168 cost leader
+to 1160, 1157, and **1155** in three successive 102.4M-move rounds; the fourth
+was neutral.  Productive rounds took 3.64–3.71 seconds on the M5 Max.  The final
+scheme independently reconstructs the full tensor and has rank 93, 1,155
+factor bits, and 1,037 no-CSE operations (13 fewer than density 1168).
+`matmul_5x5_rank93_d1155_gf2.txt` is now the 5×5 cost leader.  It unexpectedly
+returned to C3 closure with three fixed cubes, so it is also the new symmetry-
+campaign default; density 1191 remains as a reproducible historical frontier.
 
 Why not GPU SAT now: the current 4×4 large-k surgery model failed to solve even
 the known rank-47 SAT control in 280 seconds.  A GPU SAT/XOR solver would be a

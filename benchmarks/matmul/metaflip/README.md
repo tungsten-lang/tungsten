@@ -21,8 +21,9 @@ class that produced the current records for several matmul tensor formats.
 | `../flipgraph_gpu_cal2zone.w` | Tungsten/Metal cal2zone walker with exact split-escape portfolios |
 | `../zoo/gpu_cal2zone_gen.py` | dimension/mask-width specializer, including native-i64 6×6 kernels |
 | `matmul_4x4_rank47_d450_gf2.txt` | exact rank-47, density-450 default 4×4 frontier seed |
-| `matmul_5x5_rank93_d1168_gf2.txt` | exact rank-93, density-1168 default 5×5 frontier seed |
-| `matmul_5x5_rank93_d1191_gf2.txt` | exact C3 rank-93, density-1191 symmetry-escape seed |
+| `matmul_5x5_rank93_d1155_gf2.txt` | exact rank-93, density-1155 GPU escape-portfolio cost leader |
+| `matmul_5x5_rank93_d1168_gf2.txt` | prior exact rank-93 cost leader from the CPU escape campaign |
+| `matmul_5x5_rank93_d1191_gf2.txt` | prior exact C3 rank-93 symmetry-escape seed |
 | `matmul_6x6_rank153_d2512_gf2.txt` | exact rank-153, density-2512 GPU escape-portfolio cost leader |
 
 ## The construction
@@ -239,6 +240,12 @@ tensor reconstruction.  The final rank-153 scheme has 2,323 no-CSE operations
 and is now the default `--seed record` profile for 6×6.  This is a cost leader,
 not a tensor-rank record.
 
+The matching 5×5 validation chained density 1168 → 1160 → 1157 → **1155**
+under the same 1,024-lane × 100k-move, 256-escape rounds; its fourth round was
+also neutral.  Productive rounds took 3.64–3.71 seconds.  The final exact
+rank-93 scheme has 1,037 no-CSE operations, remains C3-closed with three fixed
+cubes, and is now both the `record` and `c3-record` default.
+
 The tracked 5×5/6×6 record components have now been attacked directly with
 these bridges.  Unconstrained C3 walks spent 6B moves per size and returned to
 93/153 but found no 92/152.  Polarization plus one ordinary C3 flip constructs
@@ -253,8 +260,9 @@ The original escape campaign produced
 `matmul_5x5_rank93_d1191_gf2.txt`, an independently exact C3 rank-93 scheme
 with density 1191 and 21 shared-factor pairs.  The integrated orbit-split fleet
 then produced exact non-C3 rank 93 at density **1168** and 1,050 no-CSE
-operations; `matmul_5x5_rank93_d1168_gf2.txt` is now the default cost leader,
-while `--seed c3-record` retains the density-1191 seed for C3 escapes.  Neither
+operations; the later GPU portfolio reduced this to density 1155, now the
+default cost leader.  It is also C3-closed, so `--seed c3-record` now selects
+the same density-1155 scheme; density 1191 remains as campaign history.  None
 is a tensor-rank record.
 
 ## Broader context

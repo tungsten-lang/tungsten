@@ -365,7 +365,27 @@ class EscapeFleetTest(unittest.TestCase):
 
     def test_recovery_preserves_requested_c3_escape_profile(self):
         c3 = parse_scheme(C3_RECORD_SEEDS[5])
-        sparse_non_c3 = parse_scheme(RECORD_SEEDS[5])
+        # Apply an exact row-coordinate symmetry to break local C3 closure
+        # without changing rank or density.  Recovery must prefer the eligible
+        # C3 seed at this exact tie.
+        identity = tuple(range(5))
+        row_swap = (1, 0, 2, 3, 4)
+
+        def permute_mask(mask, row_perm, col_perm):
+            out = 0
+            for bit in range(25):
+                if mask >> bit & 1:
+                    row, col = divmod(bit, 5)
+                    out |= 1 << (row_perm[row] * 5 + col_perm[col])
+            return out
+
+        sparse_non_c3 = sorted(
+            (permute_mask(u, row_swap, identity),
+             permute_mask(v, identity, identity),
+             permute_mask(w, row_swap, identity))
+            for u, v, w in c3)
+        self.assertTrue(verify(sparse_non_c3, 5, 5, 5))
+        self.assertFalse(describe_escape(set(sparse_non_c3), 5)["c3"])
         with tempfile.TemporaryDirectory() as run_dir:
             first = Fleet(run_dir, 1, 0, n=5, m=5, p=5, record=93,
                           initial_terms=c3, escape_kind="orbit-split")

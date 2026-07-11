@@ -18,13 +18,20 @@ class that produced the current records for several matmul tensor formats.
 | `flipfleet.py`       | exact-gated coordinator; generates/compiles the hot Tungsten CPU and GPU walkers |
 | `sym_start.py`       | exact diagonal-partition starts for target-aligned symmetric search |
 | `sym_escape.py`      | standalone generic/C3 split and polarization escape identities |
+| `escape_portfolio.py` | exact mixed-family/depth-two escape banks with independent verification |
+| `hybrid_escape.py` | staged C3 Tungsten walk → exact symmetry break → ordinary Tungsten/Metal walk |
+| `identity_miner.py` | tensor-signature miner for 3-, 4-, and primitive 5-term zero circuits |
+| `mitm_surgery.py` | exact-gated restricted k→k−1 local surgery by XOR meet-in-the-middle |
 | `../flipgraph_gpu_cal2zone.w` | Tungsten/Metal cal2zone walker with exact split-escape portfolios |
+| `../flipgraph_gpu_simdgroup.w` | cooperative one-scheme-per-SIMDgroup Tungsten/Metal walker |
 | `../zoo/gpu_cal2zone_gen.py` | dimension/mask-width specializer, including native-i64 6×6 kernels |
+| `matmul_3x3_rank23_d139_gf2.txt` | exact rank-23, density-139 cooperative-GPU cost leader |
+| `matmul_3x3_rank23_d159_gf2.txt` | mined-escape intermediate that opened the new 3×3 basin |
 | `matmul_4x4_rank47_d450_gf2.txt` | exact rank-47, density-450 default 4×4 frontier seed |
 | `matmul_5x5_rank93_d1155_gf2.txt` | exact rank-93, density-1155 GPU escape-portfolio cost leader |
 | `matmul_5x5_rank93_d1168_gf2.txt` | prior exact rank-93 cost leader from the CPU escape campaign |
 | `matmul_5x5_rank93_d1191_gf2.txt` | prior exact C3 rank-93 symmetry-escape seed |
-| `matmul_6x6_rank153_d2512_gf2.txt` | exact rank-153, density-2512 GPU escape-portfolio cost leader |
+| `matmul_6x6_rank153_d2508_gf2.txt` | exact rank-153, density-2508 cooperative-GPU cost leader |
 
 ## The construction
 
@@ -196,6 +203,48 @@ preservation describes the injected seed, not all subsequent states.
 Recovery respects an enabled escape profile: a requested `c3-record` is not
 silently replaced by a lower-density non-C3 tie from the same run directory.
 
+### Mixed, staged, and mined escapes
+
+`escape_portfolio.py` generalizes the single-split launch portfolio to exact
+variable-rank seed banks.  Its default mix covers `split`, `break`,
+`orbit-split`, and `polarize`, plus normalized depth-two compositions.  Complete
+term sets are parity-canonicalized and independently reconstructed before they
+are serialized.  The tracked 5×5 and 6×6 banks each contain 48 exact slots,
+split between C3-closed and symmetry-breaking states.  See
+[`ESCAPE_PORTFOLIO.md`](ESCAPE_PORTFOLIO.md) for their recipes and real M5 Max
+handoff measurements.
+
+`hybrid_escape.py` gives those banks two hot-loop routes.  The `run` command
+does a generated C3 Tungsten walk, applies an exact fixed-cube break, and then
+hands the result to a generated ordinary Tungsten walker.  The `metal` command
+materializes any variable-rank bank slot into a generated Metal relay.  Python
+only coordinates stages and independently verifies handoffs; it is not in
+either move loop.
+
+`identity_miner.py` hashes expanded rank-one tensor signatures to discover
+three-term splits, four-term rectangles, and primitive five-term circuits via
+a disjoint pair/triple join.  A small eight-subset, 180-candidate pass found
+12/7/115 non-factor-constant five-circuits for 4×4/5×5/6×6 respectively.  For
+3×3 it instead found a distance-five multi-split escape with the same +1 rank
+cost as an ordinary distance-three split.  Mined outputs can be novelty-sampled
+directly into the verified bank format:
+
+```sh
+python3 identity_miner.py matmul_4x4_rank47_d450_gf2.txt 4 \
+  --bank /tmp/mined-4.jsonl --bank-count 48
+python3 escape_portfolio.py verify /tmp/mined-4.jsonl
+```
+
+`mitm_surgery.py` is the complementary rank-decreasing scout.  It selects a
+local k-term piece, builds a finite family from live factors and pairwise XORs,
+and joins tensor signatures to seek a k−1 replacement (up to 5→4).  Every hit
+is spliced and fully reconstructed.  Pair joins use a linear 128-bit XOR
+projection and full-signature collision checks; on the 6×6/pool-700 control
+this reduced peak RSS from about 955 MB to 91 MB.  Initial bounded passes missed on all four
+current records (3×3: 32 subsets/pool 700; 4×4: 16/pool 500; 5×5 and 6×6:
+8/pool 500).  Those finite-family misses are useful campaign data, not lower
+bounds or general local-minimality proofs.
+
 ### GPU exact-escape scout
 
 `--gpu` now gives the GPU a complementary job instead of cloning the CPU
@@ -237,14 +286,48 @@ The first on-device M5 Max validation chained the 6×6 frontier from density
 (1,024 lanes × 100k moves, 256 exact split escapes); a fourth identical round
 was neutral.  Every intermediate and the final scheme passed independent full
 tensor reconstruction.  The final rank-153 scheme has 2,323 no-CSE operations
-and is now the default `--seed record` profile for 6×6.  This is a cost leader,
-not a tensor-rank record.
+and became the default `--seed record` profile for 6×6 before the later
+cooperative-SIMDgroup improvement below.  This is cost history, not a
+tensor-rank record.
 
 The matching 5×5 validation chained density 1168 → 1160 → 1157 → **1155**
 under the same 1,024-lane × 100k-move, 256-escape rounds; its fourth round was
 also neutral.  Productive rounds took 3.64–3.71 seconds.  The final exact
 rank-93 scheme has 1,037 no-CSE operations, remains C3-closed with three fixed
 cubes, and is now both the `record` and `c3-record` default.
+
+The cooperative SIMD-group prototype gives one complete scheme to one Apple
+32-lane SIMDgroup and stripes partner, cancellation, duplicate, density, and
+copy scans across the lanes.  In a fair 512M-step A/B, cooperative scan reached
+351.4M steps/s on 5×5, while maintained hash chains reached 313.3M steps/s on
+6×6.  Scan was 50% faster than hashing at 5×5; hashing was 9.5% faster at 6×6,
+so the generator selects the lookup family by size.  The 6×6 run also improved
+the exact rank-153 cost leader from density 2512 to **2508** (2,319 no-CSE
+operations).  Full measurements and reproduction commands are in
+[`../zoo/gpu_simdgroup_results.md`](../zoo/gpu_simdgroup_results.md).
+
+For longer campaigns, `--gpu-policy adaptive` partitions the generated
+Tungsten/Metal relay into rank, density, escape, and novelty roles.  A bounded
+exact-gated Pareto archive tracks density, flip connectivity, and term-set
+distance; its retained schemes force-reseed the novelty role.  UCB-style
+allocation moves whole threadgroups while preserving a one-group exploration
+floor for every role.  The existing single relay remains the default and the
+short 3×3 A/B only established correct feedback/reallocation, not a search
+speedup.
+
+The first native campaign from a mined five-way 3×3 split was productive: a
+distance-five rank-24 escape returned to 23 within one second and reached exact
+density **159** in a 30-second/four-walker run (5.25B moves).  That is 127
+no-CSE operations versus the previous tracked seed's density 266; it did not
+find rank 22.  The analogous 4×4 primitive-five-circuit run returned to rank
+47/density 450 and found no rank-46 or cost improvement; a direct 4.096B-step
+cooperative-GPU pass on the d450 frontier was also neutral.  Chaining the new
+3×3 seed through the cooperative GPU then reduced 159 → 144 → **139** in two
+productive 4.096B-step rounds of about 9.2 seconds each; a third round was
+neutral.  The final exact scheme uses 107 no-CSE operations.  None of the
+12.288B chained cooperative attempts found rank 22.  Two newly mined d139
+escapes (rank 26/distance 5 and rank 30/distance 9) then received another
+8.192B attempts; both returned to the same rank-23/d139 frontier without 22.
 
 The tracked 5×5/6×6 record components have now been attacked directly with
 these bridges.  Unconstrained C3 walks spent 6B moves per size and returned to

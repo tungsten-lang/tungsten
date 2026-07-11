@@ -60,10 +60,10 @@ from sym_escape import (best_bridge, bridge_error, describe as describe_escape,
 CAP_MOVES = 50_000_000_000_000          # INTEGER — a float cap emits a float literal and nan-boxes
 KNOWN_RECORDS = {3: 23, 4: 47, 5: 93, 6: 153}
 RECORD_SEEDS = {
-    3: os.path.join(ROOT, "benchmarks", "matmul", "search", "scheme23.txt"),
+    3: os.path.join(HERE, "matmul_3x3_rank23_d139_gf2.txt"),
     4: os.path.join(HERE, "matmul_4x4_rank47_d450_gf2.txt"),
     5: os.path.join(HERE, "matmul_5x5_rank93_d1155_gf2.txt"),
-    6: os.path.join(HERE, "matmul_6x6_rank153_d2512_gf2.txt"),
+    6: os.path.join(HERE, "matmul_6x6_rank153_d2508_gf2.txt"),
 }
 C3_RECORD_SEEDS = {
     # The GPU density leader returned to a C3-closed frontier with three fixed
@@ -77,6 +77,21 @@ ESCAPE_KINDS = ("none", "split", "break", "orbit-split", "polarize")
 ESCAPE_TRIGGERS = ("startup", "cycleout", "both")
 ESCAPE_MAX_DELTA = {"none": 0, "split": 1, "break": 1,
                     "orbit-split": 5, "polarize": 7}
+GPU_POLICIES = ("single", "adaptive")
+GPU_ROLE_ORDER = ("rank", "density", "escape", "novelty")
+# These are deliberately schedule roles rather than claims about independent
+# algorithms.  They all run the same exact-preserving Tungsten kernel, but put
+# its lane budget into materially different parts of the cal2zone schedule.
+GPU_ROLE_PROFILES = {
+    "rank": {"reseed": 200, "margin": 4, "workq": 150_000,
+             "wanderq": 60_000, "wthr": 7, "escapes": "all"},
+    "density": {"reseed": 800, "margin": 1, "workq": 250_000,
+                "wanderq": 100_000, "wthr": 9, "escapes": 1},
+    "escape": {"reseed": 20, "margin": 8, "workq": 80_000,
+               "wanderq": 25_000, "wthr": 4, "escapes": "all"},
+    "novelty": {"reseed": 100, "margin": 3, "workq": 120_000,
+                "wanderq": 40_000, "wthr": 6, "escapes": 1},
+}
 
 
 # ---- scheme IO --------------------------------------------------------------
@@ -204,6 +219,9 @@ class Fleet:
         "cpu_*.log", "reseed_*.txt", "reseed_*.txt.tmp",
         "gpu_best.txt", "gpu_best.txt.tmp", "gpu_relay", "gpu_relay.w",
         "gpu_relay.ll", "gpu_relay.metal", "gpu_relay.sidemap", "gpu_relay.log",
+        "gpu_*_best.txt", "gpu_*_best.txt.tmp", "gpu_*_seed.txt",
+        "gpu_*_seed.txt.tmp", "gpu_*_live.txt", "gpu_*_live.txt.tmp",
+        "gpu_*_relay.log",
     )
 
     def __init__(self, run_dir, nwalkers, secs, n=5, m=5, p=5, record=93,
@@ -212,7 +230,8 @@ class Fleet:
                  stop_on_record=False, record_band_moves=None,
                  escape_kind="none", escape_at="both", escape_every=2,
                  escape_part=None, gpu=False, gpu_escapes=256,
-                 gpu_walkers=4096, gpu_steps=500_000):
+                 gpu_walkers=4096, gpu_steps=500_000, gpu_policy="single",
+                 gpu_novelty_size=32, gpu_adapt_secs=300):
         validate_format(n, m, p)
         if not isinstance(nwalkers, int) or nwalkers <= 0:
             raise ValueError("nwalkers must be positive")
@@ -253,6 +272,12 @@ class Fleet:
             raise ValueError("gpu_walkers must be positive")
         if not isinstance(gpu_steps, int) or gpu_steps <= 0:
             raise ValueError("gpu_steps must be positive")
+        if gpu_policy not in GPU_POLICIES:
+            raise ValueError(f"gpu_policy must be one of {GPU_POLICIES}")
+        if not isinstance(gpu_novelty_size, int) or gpu_novelty_size <= 0:
+            raise ValueError("gpu_novelty_size must be positive")
+        if (not isinstance(gpu_adapt_secs, int) or gpu_adapt_secs <= 0):
+            raise ValueError("gpu_adapt_secs must be positive")
         self.dir = run_dir
         self.nw = nwalkers
         self.secs = secs
@@ -281,10 +306,32 @@ class Fleet:
         self.gpu_escapes = gpu_escapes
         self.gpu_walkers = gpu_walkers
         self.gpu_steps = gpu_steps
+        self.gpu_policy = gpu_policy
+        self.gpu_novelty_size = gpu_novelty_size
+        self.gpu_adapt_secs = gpu_adapt_secs
         self.gpu_proc = None
         self.gpu_log = None
         self.gpu_invalid_digest = None
         self.gpu_exit_reported = False
+        self.gpu_procs = {}
+        self.gpu_logs = {}
+        self.gpu_role_allocations = {}
+        self.gpu_role_stats = {
+            role: {"epochs": 0, "lane_epochs": 0, "reward": 0.0,
+                   "epoch_reward": 0.0,
+                   "candidates": 0, "pareto": 0, "rank_drops": 0,
+                   "density_improvements": 0}
+            for role in GPU_ROLE_ORDER
+        }
+        self.gpu_role_seen = {}
+        self.gpu_role_invalid = {}
+        self.gpu_role_exit_reported = set()
+        self.gpu_last_adapt = 0.0
+        self.gpu_adapt_generation = 0
+        self.gpu_pareto = {}
+        self.gpu_pareto_admissions = 0
+        self.gpu_pareto_rejections = 0
+        self.gpu_pareto_evictions = 0
         default_bands = (250_000_000, 1_000_000_000, 10_000_000_000)
         bands = default_bands if record_band_moves is None else tuple(record_band_moves)
         if not bands or any(not isinstance(value, int) or value <= 0 for value in bands):
@@ -453,6 +500,11 @@ class Fleet:
         if nw <= 0:
             raise ValueError(f"gpu_walkers must be at least the generated WPG ({wpg})")
         self.gpu_walkers = nw
+        self.gpu_wpg = wpg
+        if self.gpu_policy == "adaptive" and nw < len(GPU_ROLE_ORDER) * wpg:
+            raise ValueError(
+                f"adaptive GPU policy needs at least {len(GPU_ROLE_ORDER) * wpg} "
+                f"walkers ({len(GPU_ROLE_ORDER)} roles times WPG={wpg})")
         srcp = os.path.join(self.dir, "gpu_relay.w")
         llp = os.path.join(self.dir, "gpu_relay.ll")
         binp = os.path.join(self.dir, "gpu_relay")
@@ -477,8 +529,138 @@ class Fleet:
         self.log(f"GPU relay compiled ({maxbits}-bit factors, WPG={wpg}, "
                  f"shared={shared_bytes}/32768B, escapes={self.gpu_escapes})")
 
+    def _gpu_role_profile(self, role):
+        profile = dict(GPU_ROLE_PROFILES[role])
+        profile["escapes"] = (self.gpu_escapes if profile["escapes"] == "all"
+                              else profile["escapes"])
+        return profile
+
+    def _gpu_role_live_path(self, role):
+        return os.path.join(self.dir, f"gpu_{role}_live.txt")
+
+    def _write_gpu_role_live(self, role):
+        profile = self._gpu_role_profile(role)
+        path = self._gpu_role_live_path(role)
+        body = (f"{self.gpu_steps} {profile['reseed']} {profile['margin']} "
+                f"{profile['workq']} {profile['wanderq']} {profile['wthr']} "
+                f"{self.gpu_adapt_generation}\n")
+        tmp = path + ".tmp"
+        with open(tmp, "w") as stream:
+            stream.write(body)
+        os.replace(tmp, path)
+        return path
+
+    def _gpu_role_seed_path(self, role):
+        if role == "novelty":
+            return os.path.join(self.dir, "gpu_novelty_seed.txt")
+        return os.path.join(self.dir, "best.txt")
+
+    def _initial_gpu_role_allocation(self):
+        chunks = self.gpu_walkers // self.gpu_wpg
+        base, extra = divmod(chunks, len(GPU_ROLE_ORDER))
+        return {role: (base + int(index < extra)) * self.gpu_wpg
+                for index, role in enumerate(GPU_ROLE_ORDER)}
+
+    def gpu_role_scores(self):
+        """UCB1 scores normalized by completed threadgroup-epochs.
+
+        A threadgroup-epoch with no exact candidate is still a zero-reward
+        pull.  Exposure normalization prevents an already-large role from
+        receiving free positive feedback merely because it had more lanes.
+        The exploration bonus and lane floor keep every role live, while rank
+        drops dominate the bounded novelty/density rewards.
+        """
+        total = sum(stats["lane_epochs"] for stats in self.gpu_role_stats.values())
+        scores = {}
+        for role in GPU_ROLE_ORDER:
+            stats = self.gpu_role_stats[role]
+            pulls = stats["lane_epochs"]
+            if pulls == 0:
+                scores[role] = float("inf")
+            else:
+                mean = stats["reward"] / pulls
+                bonus = math.sqrt(2.0 * math.log(max(2, total)) / pulls)
+                scores[role] = mean + bonus
+        return scores
+
+    def gpu_lane_allocation(self):
+        """Allocate WPG-sized chunks, with one exploration floor per role."""
+        chunks = self.gpu_walkers // self.gpu_wpg
+        if chunks < len(GPU_ROLE_ORDER):
+            raise ValueError("not enough GPU threadgroups for all adaptive roles")
+        allocation = {role: 1 for role in GPU_ROLE_ORDER}
+        scores = self.gpu_role_scores()
+        if any(math.isinf(value) for value in scores.values()):
+            # Cold start is balanced; it gives each role comparable evidence.
+            while sum(allocation.values()) < chunks:
+                role = min(GPU_ROLE_ORDER,
+                           key=lambda item: (allocation[item],
+                                             GPU_ROLE_ORDER.index(item)))
+                allocation[role] += 1
+        else:
+            # Diminishing returns prevents a single lucky role from consuming
+            # the entire GPU while still making productivity affect lane share.
+            while sum(allocation.values()) < chunks:
+                role = max(GPU_ROLE_ORDER,
+                           key=lambda item: (scores[item] /
+                                             math.sqrt(allocation[item]),
+                                             -GPU_ROLE_ORDER.index(item)))
+                allocation[role] += 1
+        return {role: value * self.gpu_wpg for role, value in allocation.items()}
+
+    def _launch_gpu_role(self, role, lanes):
+        seed_path = self._gpu_role_seed_path(role)
+        out_path = os.path.join(self.dir, f"gpu_{role}_best.txt")
+        open(out_path, "w").close()
+        log = open(os.path.join(self.dir, f"gpu_{role}_relay.log"), "a")
+        self.gpu_logs[role] = log
+        profile = self._gpu_role_profile(role)
+        live_path = self._write_gpu_role_live(role)
+        argv = [
+            self.gpu_bin, seed_path, out_path,
+            str(self.n), str(self.m), str(self.p), "x", "0",
+            str(self.gpu_steps), str(profile["reseed"]), str(profile["margin"]),
+            str(profile["workq"]), str(profile["wanderq"]), str(profile["wthr"]),
+            str(lanes), live_path, str(profile["escapes"]),
+        ]
+        try:
+            self.gpu_procs[role] = subprocess.Popen(
+                argv, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
+        except Exception:
+            self.gpu_logs.pop(role, None)
+            log.close()
+            raise
+
+    @staticmethod
+    def _stop_gpu_process(proc):
+        if proc is None or proc.poll() is not None:
+            return
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+
+    def _stop_gpu_role(self, role):
+        self._stop_gpu_process(self.gpu_procs.pop(role, None))
+        log = self.gpu_logs.pop(role, None)
+        if log is not None:
+            log.close()
+
     def launch_gpu_relay(self):
         best_path = os.path.join(self.dir, "best.txt")
+        if self.gpu_policy == "adaptive":
+            write_dump(self.best[1] if self.best else self.initial,
+                       self._gpu_role_seed_path("novelty"))
+            self.gpu_role_allocations = self._initial_gpu_role_allocation()
+            self.gpu_last_adapt = time.time()
+            for role, lanes in self.gpu_role_allocations.items():
+                self._launch_gpu_role(role, lanes)
+            detail = ", ".join(f"{role}={lanes}"
+                               for role, lanes in self.gpu_role_allocations.items())
+            self.log(f"GPU adaptive roles launched: {detail}")
+            return
         out_path = os.path.join(self.dir, "gpu_best.txt")
         open(out_path, "w").close()
         self.gpu_log = open(os.path.join(self.dir, "gpu_relay.log"), "w")
@@ -494,6 +676,172 @@ class Fleet:
             argv, cwd=ROOT, stdout=self.gpu_log, stderr=subprocess.STDOUT)
         self.log(f"GPU escape scout launched: {self.gpu_walkers} lanes across "
                  f"{self.gpu_escapes} exact split basins")
+
+    def _gpu_flip_pairs(self, terms):
+        """Count available equal-factor pair/axis choices in a scheme."""
+        pairs = 0
+        for left_index, left in enumerate(terms):
+            for right in terms[left_index + 1:]:
+                pairs += sum(a == b for a, b in zip(left, right))
+        return pairs
+
+    @staticmethod
+    def _gpu_dominates(left, right):
+        no_worse = (left["bits"] <= right["bits"] and
+                    left["flip_pairs"] >= right["flip_pairs"] and
+                    left["novelty"] >= right["novelty"])
+        strict = (left["bits"] < right["bits"] or
+                  left["flip_pairs"] > right["flip_pairs"] or
+                  left["novelty"] > right["novelty"])
+        return no_worse and strict
+
+    def _gpu_metrics(self, rank, terms):
+        termset = frozenset(terms)
+        references = []
+        if self.best is not None and self.best[0] == rank:
+            references.append(frozenset(self.best[1]))
+        references.extend(entry["termset"] for entry in self.gpu_pareto.values()
+                          if entry["rank"] == rank)
+        novelty = (min(self.scheme_distance(termset, reference)
+                       for reference in references)
+                   if references else 2 * rank)
+        return {"bits": self.score(rank, terms)["bits"],
+                "flip_pairs": self._gpu_flip_pairs(terms),
+                "novelty": novelty}
+
+    def gpu_pareto_admit(self, rank, terms, role):
+        """Retain a bounded nondominated set of exact GPU frontier outputs."""
+        if self.gpu_policy != "adaptive":
+            return False, None
+        if not self.exact_valid(rank, terms):
+            return False, None
+        key = self.canonical(terms)
+        if key in self.gpu_pareto:
+            return False, self.gpu_pareto[key]
+        metrics = self._gpu_metrics(rank, terms)
+        entry = {"rank": rank, "terms": list(terms), "termset": frozenset(terms),
+                 "role": role, **metrics}
+        ranks = {entry["rank"] for entry in self.gpu_pareto.values()}
+        if ranks and rank > min(ranks):
+            self.gpu_pareto_rejections += 1
+            return False, entry
+        if ranks and rank < min(ranks):
+            self.gpu_pareto = {
+                key: entry for key, entry in self.gpu_pareto.items()
+                if entry["rank"] == rank
+            }
+        if any(self._gpu_dominates(existing, entry)
+               for existing in self.gpu_pareto.values()):
+            self.gpu_pareto_rejections += 1
+            return False, entry
+        dominated = [existing_key for existing_key, existing in self.gpu_pareto.items()
+                     if self._gpu_dominates(entry, existing)]
+        for existing_key in dominated:
+            del self.gpu_pareto[existing_key]
+            self.gpu_pareto_evictions += 1
+        self.gpu_pareto[key] = entry
+        if len(self.gpu_pareto) > self.gpu_novelty_size:
+            # Deterministic diversity-biased truncation of an otherwise
+            # nondominated set: first sacrifice low novelty, then high density,
+            # then low connectivity.
+            victim = min(self.gpu_pareto,
+                         key=lambda item: (self.gpu_pareto[item]["novelty"],
+                                           -self.gpu_pareto[item]["bits"],
+                                           self.gpu_pareto[item]["flip_pairs"], item))
+            del self.gpu_pareto[victim]
+            self.gpu_pareto_evictions += 1
+            if victim == key:
+                self.gpu_pareto_rejections += 1
+                return False, entry
+        self.gpu_pareto_admissions += 1
+        write_dump(terms, self._gpu_role_seed_path("novelty"))
+        self.gpu_adapt_generation += 1
+        if "novelty" in self.gpu_procs:
+            self._write_gpu_role_live("novelty")
+        return True, entry
+
+    def _reward_gpu_role(self, role, rank, entry, admitted):
+        stats = self.gpu_role_stats[role]
+        stats["candidates"] += 1
+        best_rank = self.best[0] if self.best is not None else rank
+        rank_gain = max(0, best_rank - rank)
+        reward = 10.0 * rank_gain
+        if rank_gain:
+            stats["rank_drops"] += 1
+        elif self.best is not None and rank == best_rank:
+            current_bits = self.score(*self.best)["bits"]
+            bit_gain = max(0, current_bits - entry["bits"])
+            if bit_gain:
+                stats["density_improvements"] += 1
+                reward += min(2.0, 2.0 * bit_gain / max(1, current_bits))
+        if admitted:
+            stats["pareto"] += 1
+            reward += 1.0 + min(1.0, entry["novelty"] / max(1, 2 * rank))
+        stats["reward"] += reward
+        stats["epoch_reward"] += reward
+
+    def _adaptive_gpu_candidate(self, role, max_rank):
+        proc = self.gpu_procs.get(role)
+        if (proc is not None and proc.poll() is not None and
+                role not in self.gpu_role_exit_reported):
+            self.gpu_role_exit_reported.add(role)
+            self.log(f"GPU {role} relay exited with status {proc.returncode}; "
+                     f"see gpu_{role}_relay.log")
+        path = os.path.join(self.dir, f"gpu_{role}_best.txt")
+        rank, terms = read_dump(path)
+        if rank is None or rank > max_rank:
+            return None
+        digest = hashlib.sha256(repr((rank, terms)).encode()).hexdigest()
+        if not self.exact_valid(rank, terms):
+            if digest != self.gpu_role_invalid.get(role):
+                self.gpu_role_invalid[role] = digest
+                self.invalid_candidates += 1
+                self.log(f"REJECTED invalid rank={rank} from GPU/{role}")
+            return None
+        self.gpu_role_invalid.pop(role, None)
+        if digest == self.gpu_role_seen.get(role):
+            return None
+        self.gpu_role_seen[role] = digest
+        admitted, entry = self.gpu_pareto_admit(rank, terms, role)
+        self._reward_gpu_role(role, rank, entry, admitted)
+        return rank, 0, terms, f"gpu/{role}"
+
+    def gpu_candidates(self, max_rank):
+        if not self.gpu:
+            return []
+        if self.gpu_policy == "adaptive":
+            return [candidate for role in GPU_ROLE_ORDER
+                    for candidate in [self._adaptive_gpu_candidate(role, max_rank)]
+                    if candidate is not None]
+        candidate = self.gpu_candidate(max_rank)
+        return [candidate] if candidate is not None else []
+
+    def rebalance_gpu_roles(self, now=None, force=False):
+        if self.gpu_policy != "adaptive" or not self.gpu_procs:
+            return False
+        now = time.time() if now is None else now
+        if not force and now - self.gpu_last_adapt < self.gpu_adapt_secs:
+            return False
+        for role, stats in self.gpu_role_stats.items():
+            stats["epochs"] += 1
+            stats["lane_epochs"] += max(
+                1, self.gpu_role_allocations.get(role, self.gpu_wpg) // self.gpu_wpg)
+            stats["epoch_reward"] = 0.0
+        allocation = self.gpu_lane_allocation()
+        self.gpu_last_adapt = now
+        if allocation == self.gpu_role_allocations:
+            return False
+        old = dict(self.gpu_role_allocations)
+        self.gpu_adapt_generation += 1
+        for role in GPU_ROLE_ORDER:
+            if allocation[role] != old.get(role):
+                self._stop_gpu_role(role)
+                self._launch_gpu_role(role, allocation[role])
+        self.gpu_role_allocations = allocation
+        detail = ", ".join(f"{role}={old.get(role, 0)}->{allocation[role]}"
+                           for role in GPU_ROLE_ORDER)
+        self.log(f"GPU BANDIT rebalance: {detail}")
+        return True
 
     def gpu_candidate(self, max_rank):
         if not self.gpu:
@@ -897,9 +1245,7 @@ class Fleet:
             if rank is not None and rank <= old_best and self.exact_valid(rank, terms):
                 candidates.append((rank, i, terms, f"final/w{i}"))
         candidates.extend(self.drain_spool(old_best))
-        gpu_candidate = self.gpu_candidate(old_best)
-        if gpu_candidate is not None:
-            candidates.append(gpu_candidate)
+        candidates.extend(self.gpu_candidates(old_best))
         if not candidates:
             return
         frontier_rank = min(item[0] for item in candidates)
@@ -934,9 +1280,23 @@ class Fleet:
         return c
 
     def note_best(self, rank, terms, t):
+        previous_rank = self.best[0] if self.best is not None else None
         if not self.archive_candidate(rank, terms, source="new-best"):
             return False
         self.best = (rank, terms)
+        if (self.gpu_policy == "adaptive" and
+                previous_rank is not None and rank < previous_rank):
+            # The Pareto objectives only compare one frontier rank.  A strict
+            # CPU or GPU descent retires the old-rank set and gives the novelty
+            # role the new exact leader immediately.
+            self.gpu_pareto = {
+                key: entry for key, entry in self.gpu_pareto.items()
+                if entry["rank"] == rank
+            }
+            write_dump(terms, self._gpu_role_seed_path("novelty"))
+            self.gpu_adapt_generation += 1
+            if "novelty" in self.gpu_procs:
+                self._write_gpu_role_live("novelty")
         self.hydrate_archive(rank)
         self.new_bests += 1
         c = self.append_perf(rank, terms, t)
@@ -1082,9 +1442,8 @@ class Fleet:
                 # separate spool, so they remain visible even when the worker's
                 # personal rank never drops below its record-valued seed.
                 candidates.extend(self.drain_spool(old_best))
-                gpu_candidate = self.gpu_candidate(old_best)
-                if gpu_candidate is not None:
-                    candidates.append(gpu_candidate)
+                candidates.extend(self.gpu_candidates(old_best))
+                self.rebalance_gpu_roles(now)
 
                 frontier_rank = min((x[0] for x in candidates), default=old_best)
                 frontier = [x for x in candidates if x[0] == frontier_rank]
@@ -1151,13 +1510,9 @@ class Fleet:
             self.stop_requested.set()
             for i in range(1, self.nw + 1):
                 self.stop_process(i)
-            if self.gpu_proc is not None and self.gpu_proc.poll() is None:
-                self.gpu_proc.terminate()
-                try:
-                    self.gpu_proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self.gpu_proc.kill()
-                    self.gpu_proc.wait(timeout=5)
+            self._stop_gpu_process(self.gpu_proc)
+            for role in list(self.gpu_procs):
+                self._stop_gpu_role(role)
             try:
                 self.final_drain(start)
             except Exception as exc:
@@ -1218,7 +1573,21 @@ class Fleet:
                        "skipped": self.escape_skipped},
             "gpu": {"enabled": self.gpu, "walkers": self.gpu_walkers,
                     "escapes": self.gpu_escapes, "steps": self.gpu_steps,
-                    "running": bool(self.gpu_proc and self.gpu_proc.poll() is None)},
+                    "policy": self.gpu_policy,
+                    "running": (any(proc.poll() is None
+                                    for proc in self.gpu_procs.values())
+                                if self.gpu_policy == "adaptive" else
+                                bool(self.gpu_proc and self.gpu_proc.poll() is None)),
+                    "roles": {role: {**self.gpu_role_stats[role],
+                                     "lanes": self.gpu_role_allocations.get(role, 0)}
+                              for role in GPU_ROLE_ORDER}
+                    if self.gpu_policy == "adaptive" else {},
+                    "pareto": {"size": len(self.gpu_pareto),
+                               "capacity": self.gpu_novelty_size,
+                               "admissions": self.gpu_pareto_admissions,
+                               "rejections": self.gpu_pareto_rejections,
+                               "evictions": self.gpu_pareto_evictions}
+                    if self.gpu_policy == "adaptive" else {}},
             "best": {"rank": self.best[0], "bits": c.get("bits"), "ops": c.get("ops"),
                      "omega": omega} if self.best else {},
             "walkers": walkers,
@@ -1400,6 +1769,16 @@ def main():
     ap.add_argument(
         "--gpu-steps", type=int, default=500_000,
         help="moves per GPU dispatch and lane")
+    ap.add_argument(
+        "--gpu-policy", choices=GPU_POLICIES, default="single",
+        help=("single preserves the monolithic scout; adaptive divides lanes "
+              "among rank, density, escape, and novelty roles"))
+    ap.add_argument(
+        "--gpu-novelty-size", type=int, default=32,
+        help="bounded nondominated exact GPU archive (adaptive policy only)")
+    ap.add_argument(
+        "--gpu-adapt-secs", type=int, default=300,
+        help="seconds per adaptive GPU allocation epoch")
     ap.add_argument("--dir")
     ap.add_argument("--tui", action="store_true", help="run the search AND show the TUI")
     ap.add_argument("--attach", metavar="RUN_DIR", help="TUI only, attach to an existing run")
@@ -1446,6 +1825,8 @@ def main():
             raise ValueError("--migrate must be between zero and --walkers")
         if args.gpu_escapes <= 0 or args.gpu_walkers <= 0 or args.gpu_steps <= 0:
             raise ValueError("--gpu-escapes, --gpu-walkers, and --gpu-steps must be positive")
+        if args.gpu_novelty_size <= 0 or args.gpu_adapt_secs <= 0:
+            raise ValueError("--gpu-novelty-size and --gpu-adapt-secs must be positive")
     except ValueError as exc:
         ap.error(str(exc))
     if args.seed == "record":
@@ -1480,7 +1861,10 @@ def main():
                       escape_kind=args.escape_kind, escape_at=args.escape_at,
                       escape_every=args.escape_every, escape_part=args.escape_part,
                       gpu=args.gpu, gpu_escapes=args.gpu_escapes,
-                      gpu_walkers=args.gpu_walkers, gpu_steps=args.gpu_steps)
+                      gpu_walkers=args.gpu_walkers, gpu_steps=args.gpu_steps,
+                      gpu_policy=args.gpu_policy,
+                      gpu_novelty_size=args.gpu_novelty_size,
+                      gpu_adapt_secs=args.gpu_adapt_secs)
     except ValueError as exc:
         ap.error(str(exc))
     if args.tui:

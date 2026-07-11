@@ -27,6 +27,35 @@ from sym_start import (  # noqa: E402
 from sym_escape import best_bridge, describe as describe_escape  # noqa: E402
 
 
+def density_increasing_flip(terms, n):
+    """Return an exact same-rank flip that is denser than ``terms``."""
+    baseline = cost(terms, n, n, n)["bits"]
+    for left_index, left in enumerate(terms):
+        for right_index in range(left_index + 1, len(terms)):
+            right = terms[right_index]
+            for axis in range(3):
+                if left[axis] != right[axis]:
+                    continue
+                changed_left = list(left)
+                changed_right = list(right)
+                if axis == 0:
+                    changed_left[2] ^= right[2]
+                    changed_right[1] ^= left[1]
+                elif axis == 1:
+                    changed_left[2] ^= right[2]
+                    changed_right[0] ^= left[0]
+                else:
+                    changed_left[1] ^= right[1]
+                    changed_right[0] ^= left[0]
+                candidate = [term for index, term in enumerate(terms)
+                             if index not in (left_index, right_index)]
+                candidate.extend((tuple(changed_left), tuple(changed_right)))
+                if (len(candidate) == len(terms) and verify(candidate, n, n, n) and
+                        cost(candidate, n, n, n)["bits"] > baseline):
+                    return sorted(candidate)
+    raise AssertionError("fixture has no density-increasing exact flip")
+
+
 class DiagonalStartTest(unittest.TestCase):
     def test_published_and_target_aligned_starts(self):
         cases = (
@@ -84,6 +113,13 @@ class RecordSeedTest(unittest.TestCase):
             with self.subTest(n=n, path=path):
                 terms = parse_scheme(path)
                 self.assertTrue(verify(terms, n, n, n))
+
+    def test_default_record_cost_frontiers(self):
+        expected_bits = {3: 139, 4: 450, 5: 1155, 6: 2508}
+        for n, bits in expected_bits.items():
+            with self.subTest(n=n):
+                terms = parse_scheme(RECORD_SEEDS[n])
+                self.assertEqual(bits, cost(terms, n, n, n)["bits"])
 
 
 class ExactGateTest(unittest.TestCase):
@@ -213,12 +249,8 @@ class ExactGateTest(unittest.TestCase):
 
             open(resumed.curve_path, "w").close()
             resumed.best = (27, naive_scheme(3, 3, 3))
-            write_dump(record, resumed.dump_file(1))
-            left, right = record[11], record[2]
-            sparser = [term for index, term in enumerate(record)
-                       if index not in (2, 11)]
-            sparser.extend(((left[0], left[1] ^ right[1], left[2]),
-                            (right[0], right[1], left[2] ^ right[2])))
+            write_dump(density_increasing_flip(record, 3), resumed.dump_file(1))
+            sparser = record
             self.assertTrue(verify(sparser, 3, 3, 3))
             write_dump(sparser, os.path.join(resumed.spool, "tie1l1_1.txt"))
             resumed.final_drain(time.time())
@@ -495,6 +527,122 @@ class GpuEscapeScoutTest(unittest.TestCase):
             self.assertEqual(1, fleet.invalid_candidates)
 
 
+class AdaptiveGpuPolicyTest(unittest.TestCase):
+    @staticmethod
+    def _permuted_records(count):
+        base = parse_scheme(RECORD_SEEDS[3])
+
+        def permute_mask(mask, permutation):
+            out = 0
+            for bit in range(9):
+                if mask >> bit & 1:
+                    row, col = divmod(bit, 3)
+                    out |= 1 << (permutation[row] * 3 + col)
+            return out
+
+        variants = []
+        for permutation in itertools.permutations(range(3)):
+            terms = sorted((permute_mask(u, permutation), v,
+                            permute_mask(w, permutation))
+                           for u, v, w in base)
+            if terms not in variants:
+                variants.append(terms)
+        return variants[:count]
+
+    def test_adaptive_roles_partition_lanes_and_specialize_parameters(self):
+        record = parse_scheme(RECORD_SEEDS[3])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(run_dir, 1, 0, n=3, m=3, p=3, record=23,
+                          initial_terms=record, gpu=True, gpu_walkers=128,
+                          gpu_policy="adaptive")
+            fleet.best = (23, record)
+            fleet.gpu_bin = os.path.join(run_dir, "fake_gpu")
+            fleet.gpu_wpg = 16
+            processes = []
+            for _ in range(4):
+                process = mock.Mock(returncode=0)
+                process.poll.return_value = 0
+                processes.append(process)
+            with mock.patch("flipfleet.subprocess.Popen", side_effect=processes) as popen:
+                fleet.launch_gpu_relay()
+            self.assertEqual(4, popen.call_count)
+            self.assertEqual(128, sum(fleet.gpu_role_allocations.values()))
+            self.assertEqual({0}, {lanes % 16
+                                   for lanes in fleet.gpu_role_allocations.values()})
+            calls = {call.args[0][2].split("gpu_")[1].split("_best")[0]:
+                     call.args[0] for call in popen.call_args_list}
+            self.assertEqual("1", calls["density"][16])
+            self.assertEqual("1", calls["novelty"][16])
+            self.assertEqual(str(fleet.gpu_escapes), calls["rank"][16])
+            self.assertEqual(str(fleet.gpu_escapes), calls["escape"][16])
+            self.assertLess(int(calls["escape"][9]), int(calls["density"][9]))
+            for role in list(fleet.gpu_procs):
+                fleet._stop_gpu_role(role)
+
+    def test_ucb_feedback_gives_productive_role_more_lanes_but_keeps_floors(self):
+        record = parse_scheme(RECORD_SEEDS[3])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(run_dir, 1, 0, n=3, m=3, p=3, record=23,
+                          initial_terms=record, gpu=True, gpu_walkers=160,
+                          gpu_policy="adaptive")
+            fleet.gpu_wpg = 16
+            for stats in fleet.gpu_role_stats.values():
+                stats["epochs"] = 10
+                stats["lane_epochs"] = 10
+                stats["reward"] = 1.0
+            fleet.gpu_role_stats["rank"]["reward"] = 100.0
+            allocation = fleet.gpu_lane_allocation()
+            self.assertEqual(160, sum(allocation.values()))
+            self.assertGreater(allocation["rank"], allocation["density"])
+            self.assertTrue(all(lanes >= 16 for lanes in allocation.values()))
+
+    def test_exact_gate_precedes_pareto_and_role_reward(self):
+        record, variant = self._permuted_records(2)
+        self.assertNotEqual(record, variant)
+        self.assertTrue(verify(variant, 3, 3, 3))
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(run_dir, 1, 0, n=3, m=3, p=3, record=23,
+                          initial_terms=record, gpu=True, gpu_policy="adaptive")
+            fleet.best = (23, record)
+            write_dump(variant, os.path.join(run_dir, "gpu_rank_best.txt"))
+            candidates = fleet.gpu_candidates(23)
+            self.assertEqual([(23, 0, variant, "gpu/rank")], candidates)
+            self.assertEqual(1, len(fleet.gpu_pareto))
+            self.assertEqual(1, fleet.gpu_role_stats["rank"]["candidates"])
+            self.assertGreater(fleet.gpu_role_stats["rank"]["reward"], 0)
+
+            broken = list(variant)
+            u, v, w = broken[0]
+            broken[0] = (u ^ 1, v, w)
+            write_dump(broken, os.path.join(run_dir, "gpu_escape_best.txt"))
+            self.assertEqual([], fleet.gpu_candidates(23))
+            self.assertEqual(1, len(fleet.gpu_pareto))
+            self.assertEqual(0, fleet.gpu_role_stats["escape"]["candidates"])
+            self.assertEqual(1, fleet.invalid_candidates)
+
+    def test_pareto_discards_dominated_candidate_and_keeps_tradeoff(self):
+        variants = self._permuted_records(3)
+        self.assertEqual(3, len(variants))
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(run_dir, 1, 0, n=3, m=3, p=3, record=23,
+                          initial_terms=variants[0], gpu=True,
+                          gpu_policy="adaptive", gpu_novelty_size=4)
+            fleet.best = (23, variants[0])
+            metrics = [
+                {"bits": 100, "flip_pairs": 3, "novelty": 10},
+                {"bits": 90, "flip_pairs": 4, "novelty": 12},
+                {"bits": 80, "flip_pairs": 2, "novelty": 20},
+            ]
+            with mock.patch.object(fleet, "_gpu_metrics", side_effect=metrics):
+                self.assertTrue(fleet.gpu_pareto_admit(23, variants[0], "rank")[0])
+                self.assertTrue(fleet.gpu_pareto_admit(23, variants[1], "density")[0])
+                self.assertTrue(fleet.gpu_pareto_admit(23, variants[2], "novelty")[0])
+            self.assertEqual(2, len(fleet.gpu_pareto))
+            self.assertNotIn(fleet.canonical(variants[0]), fleet.gpu_pareto)
+            self.assertIn(fleet.canonical(variants[1]), fleet.gpu_pareto)
+            self.assertIn(fleet.canonical(variants[2]), fleet.gpu_pareto)
+
+
 class DiversityArchiveTest(unittest.TestCase):
     @staticmethod
     def _permute_mask(mask, rows, cols, row_perm, col_perm):
@@ -563,13 +711,8 @@ class DiversityArchiveTest(unittest.TestCase):
             self.assertEqual(3, len(resumed.archive))
 
     def test_same_rank_sparser_candidate_becomes_status_leader(self):
-        base = parse_scheme(RECORD_SEEDS[3])
-        left, right = base[11], base[2]
-        self.assertEqual(left[0], right[0])
-        replacement = [(left[0], left[1] ^ right[1], left[2]),
-                       (right[0], right[1], left[2] ^ right[2])]
-        tied = [term for index, term in enumerate(base) if index not in (2, 11)]
-        tied.extend(replacement)
+        tied = parse_scheme(RECORD_SEEDS[3])
+        base = density_increasing_flip(tied, 3)
         self.assertTrue(verify(tied, 3, 3, 3))
         self.assertLess(cost(tied, 3, 3, 3)["bits"], cost(base, 3, 3, 3)["bits"])
         with tempfile.TemporaryDirectory() as run_dir:

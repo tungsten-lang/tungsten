@@ -201,7 +201,31 @@ checkpointing. Three focused legacy DFS probes returned no proof:
 | 480 | 18 -> 19 | 1,000,000,000 | 386.9 s | 35.5 GB | no proof |
 | 492 | 19 -> 20 | 250,000,000 | 73.0 s | 11.6 GB | no proof |
 
-Their log SHA-256 hashes were
+A later selector-only `/tmp` patch tested the two previously untried root
+dependencies without repeating those probes.  Official upstream `main` was
+still exactly `efd22070269157e65aaf8d61a21da253a4000c61`; the trusted verifier
+again accepted the published rank-20 certificate in 2.01 seconds.
+
+| Orbit | Target | Step cap | Search time | Peak RSS | Result |
+|---:|---:|---:|---:|---:|---|
+| 493 | 19 -> 20 | 1,000,000,000 | 300.1 s | 36.1 GB | no proof |
+| 482 | 18 -> 19 | 100,000,000 | 19.7 s | 5.36 GB | no proof |
+
+The orbit-493 run first reproduced and verifier-checked the known orbit-478
+17→18 prerequisite, byte-for-byte matching the checkpoint hashes above.  Both
+new searches left that input certificate/BTP unchanged, so they are capped
+negatives, not failed certificates and not impossibility results.  Simple
+flatten/forced-product/degenerate passes recovered only 18 for orbit 493 and
+17 for orbit 482.
+
+The best next proof experiment is not a larger blind DFS.  Orbit 493 accounts
+for 7,472 remaining root states, yet unlike orbit 492 it has no child dependency
+profile.  A stabilizer-quotiented frontier/leaf pass for 493 should extract its
+hitting set first.  Orbit 482 is the fallback because it has dual leverage: it
+closes 144 root survivors directly and is one of orbit 492's five required
+dimension-two children.
+
+The three earlier 478/480/492 log SHA-256 hashes were
 `27623b33af382ada9d36566a0dd355467748fb308e30a29598905c430f75c139`,
 `034068dce495b1f194462789affc1b427d1b56230b1807289e33ed4d7aa897bc`,
 and

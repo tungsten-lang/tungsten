@@ -54,6 +54,15 @@ caps are not refutations.  The full soundness argument, hashes, upper
 bound checks, dependency chain, and certificate-format requirements are in
 [`proof_orbit/README.md`](proof_orbit/README.md).
 
+The final, deliberately-last lower-bound pass checked that official upstream
+was still the audited `efd2207` revision and re-verified Wang's certificate in
+2.01 seconds.  It then tried the two untested root dependencies: orbit 493
+19→20 for 1B legacy steps (300.1 s, 36.1 GB RSS) and orbit 482 18→19 for 100M
+steps (19.7 s, 5.36 GB).  Neither produced a checkpoint, so the rigorous 3×3
+lower bound remains 20.  The next sound experiment should profile a
+stabilizer-quotiented orbit-493 frontier to extract its child hitting set,
+not spend a larger blind DFS budget.
+
 ### FlipFleet audit and replacement path
 
 The native `flipfleet.w` retained several correctness and campaign defects:
@@ -500,6 +509,75 @@ factor bits, and 1,037 no-CSE operations (13 fewer than density 1168).
 `matmul_5x5_rank93_d1155_gf2.txt` is now the 5×5 cost leader.  It unexpectedly
 returned to C3 closure with three fixed cubes, so it is also the new symmetry-
 campaign default; density 1191 remains as a reproducible historical frontier.
+
+### 2026-07-11: cooperative GPU, adaptive roles, and mined escapes
+
+Ten follow-up ideas were implemented or bounded after the split-basin run.
+The strongest throughput change assigns one whole decomposition to one Apple
+SIMDgroup.  Partner, zero, duplicate, density, and copy scans are striped over
+32 lanes and reduced with SIMD intrinsics.  A fair 512M-attempt A/B on the M5
+Max measured:
+
+| format | cooperative scan | shared hash chain | selected |
+|---|---:|---:|---|
+| 5×5 i32 | 351.4M steps/s | 234.3M steps/s | scan (+50%) |
+| 6×6 i64 | 286.0M steps/s | 313.3M steps/s | hash (+9.5%) |
+
+Both modes made identical partner selections and emitted byte-identical,
+exhaustively tensor-verified results.  The 6×6 run improved the rank-153 cost
+frontier from density 2512 to **2508**, or 2,319 no-CSE operations.  The exact
+asset `matmul_6x6_rank153_d2508_gf2.txt` has SHA-256
+`994ac8e19b5bf2104ef3294ee31c83606e65aaaff9b888b9bba3d9468a2f3209`.
+It is now the ordinary 6×6 default; the density-2574 C3 seed remains separate
+for quotient walks.  This is not a tensor-rank improvement.
+
+FlipFleet also gained an opt-in adaptive GPU policy with four exact-gated
+Tungsten/Metal shards: rank, density, escape, and novelty.  A bounded Pareto
+archive over density, flip-pair connectivity, and term-set distance reseeds the
+novelty role; exposure-normalized UCB allocation moves whole threadgroups while
+retaining a one-group floor.  A short real 3×3 smoke reallocated live and had
+zero invalid candidates, but tied the single-policy control.  The mechanism is
+validated; no performance advantage is claimed yet.
+
+The escape family is no longer limited to one split.  Two independently
+verified 48-slot banks mix generic/fixed splits, C3 orbit splits,
+polarizations, and normalized depth-two sequences.  A staged coordinator runs
+a generated C3 Tungsten walker, applies an exact symmetry break, and hands off
+to a generated ordinary Tungsten or Metal walker.  Real 5×5 and native-i64 6×6
+smokes returned escaped ranks 98/158 to exact 93/153, but only to densities
+1156/2540, so neither beat the tracked cost frontiers.
+
+Tensor-signature joins found primitive five-term identities rather than only
+composed binary splits.  Eight small candidate subsets produced 12, 7, and 115
+non-factor-constant five-circuits for 4×4, 5×5, and 6×6; 3×3 instead supplied a
+distance-five five-way split with only a +1 rank delta.  A 30-second,
+four-walker Tungsten campaign from that 3×3 escape returned to rank 23 in one
+second and reduced density 266 → **159** over 5.25B moves.  The independently
+exact asset `matmul_3x3_rank23_d159_gf2.txt` has SHA-256
+`ee07f94185603f5b39532b0188d1df7fd08d6b5a9272dc3912a4e4104d731086`
+and 127 no-CSE operations.  No rank-22 scheme appeared.  The corresponding
+4×4 five-circuit campaign returned to rank 47/d450 without finding rank 46;
+a direct 4.096B-step cooperative-GPU pass on d450 was also neutral.
+Three subsequent cooperative-GPU rounds spent 4.096B attempts each on the new
+3×3 basin.  They reduced density 159 → 144 → **139**, then repeated 139; each
+round took about 9.2 seconds at 441–445M steps/s.  The final rank-23 scheme has
+107 no-CSE operations and SHA-256
+`9d4c649998137bcbe779cfcc57c16c7b4c0f54497687c3cf10b601be428afc80`.
+All outputs passed exhaustive tensor reconstruction, but none of the 12.288B
+attempts found rank 22.  `matmul_3x3_rank23_d139_gf2.txt` is now the ordinary
+3×3 default.  Remining that frontier produced 9,082 exact identities; fresh
+rank-26/distance-five and rank-30/distance-nine bank slots each received
+another 4.096B cooperative attempts.  Both returned to rank 23/d139 without a
+rank-22 hit, bringing the cooperative total for this new basin family to
+20.48B attempts.
+
+A restricted meet-in-the-middle surgery scout joined full tensor signatures
+for local 5→4 replacement.  It missed finite candidate families on all four
+tracked records (3×3: 32 subsets/pool 700; 4×4: 16/pool 500; 5×5 and 6×6:
+8/pool 500).  These are not local or global lower bounds.  Replacing full
+6×6 pair-sum dictionary keys with a linear 128-bit projection plus exact
+collision checks reduced the pool-700 control's peak RSS from about 955 MB to
+91 MB.
 
 Why not GPU SAT now: the current 4×4 large-k surgery model failed to solve even
 the known rank-47 SAT control in 280 seconds.  A GPU SAT/XOR solver would be a

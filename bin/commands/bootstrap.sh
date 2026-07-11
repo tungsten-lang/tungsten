@@ -154,8 +154,9 @@ fi
 step "Stage 1: C VM compiles compiler/tungsten.w"
 export TUNGSTEN_ROOT="$ROOT"
 export TUNGSTEN_CLANG_OPT="${TUNGSTEN_CLANG_OPT:--O0}"
-export TUNGSTEN_ZSTD_LDFLAGS="${TUNGSTEN_ZSTD_LDFLAGS:-$zstd_libs}"
-# zstd_libs may be unset if we took the CACHED runtime path — resolve again
+
+# Always resolve zstd link flags here: the CACHED runtime path never sets
+# zstd_libs, and `set -u` rejects ${VAR:-$zstd_libs} when zstd_libs is unbound.
 if [ -z "${zstd_libs:-}" ]; then
   zstd_libs="$(pkg-config --libs libzstd 2>/dev/null || true)"
   if [ -z "$zstd_libs" ]; then
@@ -165,6 +166,8 @@ if [ -z "${zstd_libs:-}" ]; then
       zstd_libs="-lzstd"
     fi
   fi
+fi
+if [ -z "${TUNGSTEN_ZSTD_LDFLAGS:-}" ]; then
   export TUNGSTEN_ZSTD_LDFLAGS="$zstd_libs"
 fi
 

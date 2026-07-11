@@ -148,8 +148,16 @@ For scientists, mathematicians, and anyone who thinks in code.
 
 **Prerequisites:** `git`, `clang`, `LLVM`, `make` (and `lld` + `libzstd` headers).
 
-Run `bin/tungsten doctor` to check your toolchain. Ruby is **not** required for
-normal use; it is only a developer bootstrap option (`--ruby`).
+Run `bin/tungsten doctor` to check your toolchain (bash; no compiler needed).
+On a fresh clone, get a stage-1 compiler with:
+
+```bash
+bin/tungsten bootstrap   # C VM → stage 1 → bin/tungsten-compiler (no Ruby)
+bin/tungsten build       # full self-host (stage1+stage2 + bits); still builds stage 1
+```
+
+Ruby is **not** required for normal use or for `bootstrap`; it is only needed
+for `build`'s orchestrator today and for the `--ruby` developer option.
 
 `bin/tungsten FILE.w` picks the fastest path automatically. When you want an
 explicit mode:

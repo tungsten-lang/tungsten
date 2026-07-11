@@ -165,71 +165,22 @@ MANPAGE = manpage_lines.join("\n")
     i = i + 1
   out
 
-# ---- doctor ----
-
--> doctor_check(name, detail, ok, passed, failed, use_color)
-  if ok
-    passed[0] = passed[0] + 1
-    line = "  " + c(use_color, "\e[32m", "✓") + " " + name
-    if detail != nil && detail != ""
-      line = line + " " + c(use_color, "\e[36m", detail)
-    << line
-  else
-    failed[0] = failed[0] + 1
-    line = "  " + c(use_color, "\e[91m", "✗") + " " + name
-    if detail != nil && detail != ""
-      line = line + " " + c(use_color, "\e[2m", detail)
-    << line
+# ---- doctor / bootstrap (bash; work without a compiler) ----
 
 -> run_doctor
-  use_color = color_on?()
-  << c(use_color, "\e[1m\e[33m", "✶ Tungsten Doctor")
-  << ""
+  if system("bash " + sh_quote(ROOT + "/bin/commands/doctor.sh"))
+    exit(0)
+  exit(1)
 
-  passed = [0]
-  failed = [0]
-
-  ver = VERSION
-  doctor_check("Tungsten", ver, true, passed, failed, use_color)
-
-  has_compiler = system("test -x " + sh_quote(COMPILER))
-  doctor_check("Compiler", has_compiler ? COMPILER : "not built — run bin/tungsten build", has_compiler, passed, failed, use_color)
-
-  has_clang = tool_on_path?("clang")
-  clang_ver = ""
-  if has_clang
-    clang_ver = capture("clang --version 2>/dev/null | head -1").strip
-  doctor_check("clang", clang_ver != "" ? clang_ver : "not found", has_clang, passed, failed, use_color)
-
-  has_make = tool_on_path?("make")
-  doctor_check("make", has_make ? "ok" : "not found", has_make, passed, failed, use_color)
-
-  # Functional lld check: can clang link with -fuse-ld=lld?
-  lld_ok = system("printf 'int main(void){return 0;}' | clang -fuse-ld=lld -x c - -o /tmp/tungsten-lld-check-$$ > /dev/null 2>&1 && rm -f /tmp/tungsten-lld-check-$$")
-  doctor_check("lld (clang -fuse-ld=lld)", lld_ok ? "ok" : "not found", lld_ok, passed, failed, use_color)
-
-  zstd_ok = system("printf '#include <zstd.h>\\n' | clang -I/opt/homebrew/include $(pkg-config --cflags libzstd 2>/dev/null) -E -x c - > /dev/null 2>&1")
-  doctor_check("libzstd (zstd.h)", zstd_ok ? "ok" : "not found", zstd_ok, passed, failed, use_color)
-
-  # Optional / developer
-  << ""
-  << c(use_color, "\e[2m", "Developer options (not required for normal use):")
-  has_ruby = tool_on_path?("ruby")
-  ruby_detail = has_ruby ? capture("ruby -v 2>/dev/null").strip : "not installed"
-  doctor_check("Ruby (--ruby bootstrap)", ruby_detail, true, passed, failed, use_color)
-
-  has_nvcc = tool_on_path?("nvcc")
-  doctor_check("nvcc (CUDA)", has_nvcc ? capture("nvcc --version 2>/dev/null | tail -1").strip : "not installed", true, passed, failed, use_color)
-
-  has_metal = system("command -v xcrun > /dev/null 2>&1 && xcrun -f metal > /dev/null 2>&1")
-  doctor_check("Metal toolchain", has_metal ? "ok" : "not on this host", true, passed, failed, use_color)
-
-  << ""
-  total = passed[0] + failed[0]
-  << c(use_color, "\e[2m", "" + passed[0].to_s + "/" + total.to_s + " required checks passed")
-  if failed[0] > 0
-    exit(1)
-  exit(0)
+-> run_bootstrap(tool_args)
+  cmd = "bash " + sh_quote(ROOT + "/bin/commands/bootstrap.sh")
+  i = 0
+  while i < tool_args.size
+    cmd = cmd + " " + sh_quote(tool_args[i])
+    i = i + 1
+  if system(cmd)
+    exit(0)
+  exit(1)
 
 # ---- start ----
 
@@ -264,7 +215,8 @@ MANPAGE = manpage_lines.join("\n")
   << "  tungsten " + c(use_color, "\e[33m", "run") + "     FILE.w   run a Tungsten program"
   << "  tungsten " + c(use_color, "\e[33m", "compile") + " FILE.w   compile a Tungsten program"
   << ""
-  << "  tungsten " + c(use_color, "\e[33m", "build") + "            build the self-hosted compiler"
+  << "  tungsten " + c(use_color, "\e[33m", "bootstrap") + "       stage-1 compiler (no Ruby; bash)"
+  << "  tungsten " + c(use_color, "\e[33m", "build") + "            full self-host (stage1+stage2 + bits)"
   << "  tungsten " + c(use_color, "\e[33m", "doctor") + "           diagnose environment issues"
   << ""
   << "  tungsten " + c(use_color, "\e[33m", "console") + "         interactive playground (also: wit)"
@@ -284,9 +236,10 @@ MANPAGE = manpage_lines.join("\n")
     << ""
     << "  " + c(use_color, "\e[32m", "tungsten console") + "    or: wit"
   else
-    << c(use_color, "\e[1m", "Next — build the compiler") + " " + c(use_color, "\e[2m", "(a fresh clone ships without one)")
+    << c(use_color, "\e[1m", "Next — bootstrap the compiler") + " " + c(use_color, "\e[2m", "(a fresh clone ships without one)")
     << ""
-    << "  " + c(use_color, "\e[32m", "bin/tungsten build")
+    << "  " + c(use_color, "\e[32m", "bin/tungsten bootstrap") + "  " + c(use_color, "\e[2m", "# stage 1, no Ruby")
+    << "  " + c(use_color, "\e[32m", "bin/tungsten build") + "      " + c(use_color, "\e[2m", "# full self-host + bits")
     << "  " + c(use_color, "\e[2m", "or one-line install:") + " " + c(use_color, "\e[32m", "curl -fsSL tungsten-lang.org/install | sh")
   << ""
   exit(0)
@@ -382,6 +335,9 @@ when "start"
 
 when "doctor"
   run_doctor()
+
+when "bootstrap"
+  run_bootstrap(tool_argv_after_command("bootstrap"))
 
 when "ai"
   run_command_w("bin/commands/ai.w", tool_argv_after_command("ai"))

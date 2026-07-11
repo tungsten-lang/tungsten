@@ -210,6 +210,7 @@ the harness expects.
 If you change `compiler/`:
 
 ```bash
+bin/tungsten bootstrap       # stage 1 only (bash, no Ruby)
 bin/tungsten build           # stage 1 + stage 2, identical .ll required
 bin/tungsten build --force   # ignore cached stage binaries
 ```

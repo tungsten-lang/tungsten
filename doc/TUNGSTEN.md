@@ -34,18 +34,22 @@ COMMANDS
     console              Interactive REPL (also: wit(1))
     start                First-run welcome: what Tungsten is + your next step
     new NAME             Scaffold a new project
-    build                Bootstrap the self-hosted compiler
-                         (stage 1 and stage 2 must emit byte-identical IR)
+    bootstrap            Stage-1 compiler via C VM (bash; no Ruby). Runs doctor
+                         first. Fresh-clone entry point.
+    build                Full self-host: stage 1 + stage 2 (byte-identical IR),
+                         install, bits. Same stage-1 path as before; not replaced
+                         by bootstrap.
     doctor               Check your toolchain (clang, make, lld, zstd, compiler)
+                         Implemented in bash — works without a built compiler.
     fmt FILE             Format .w source
     bit ...              The Bit package manager (install, new, search, ...)
     ai / symbolicate / forge / flame
                          Additional tools
 
-    compile, run, console, doctor, start, new, fmt, forge, flame, bit, ai, and
-    symbolicate execute in the compiled CLI (bin/tungsten.wc, option parsing via
-    Argon from this manpage). `build` still uses the bootstrap driver; see
-    DEVELOPER OPTIONS.
+    doctor and bootstrap are pure bash (bin/commands/*.sh) and work on a fresh
+    clone. compile, run, console, start, new, fmt, forge, flame, bit, ai, and
+    symbolicate use the compiled CLI when present. `build` still uses the
+    Ruby bootstrap driver for the full pipeline; see DEVELOPER OPTIONS.
 
     The REPL is started with `tungsten console` or the `wit` binary — not
     `tungsten --repl`.
@@ -55,6 +59,8 @@ EXAMPLES
     tungsten --check file.w
     tungsten -e "<< 'hello world'"
     tungsten start
+    tungsten bootstrap
+    tungsten build
     tungsten console
     wit
 

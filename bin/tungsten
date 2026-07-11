@@ -51,9 +51,18 @@ case "$1" in
       exec "$RUBY" "$RUBY_CLI" console "$@"
     fi
     ;;
+  # doctor + bootstrap are pure bash — work on a fresh clone with no compiler.
+  doctor)
+    shift
+    exec bash "$ROOT/bin/commands/doctor.sh" "$@"
+    ;;
+  bootstrap)
+    shift
+    exec bash "$ROOT/bin/commands/bootstrap.sh" "$@"
+    ;;
   # build still uses the bootstrap driver (Ruby orchestrator); --ruby/--spinel
-  # are developer options on that path. fmt/forge/flame/bit/ai/symbolicate are
-  # handled by bin/tungsten.wc (Tungsten CLI).
+  # are developer options on that path. Stage1+stage2 behavior unchanged.
+  # fmt/forge/flame/bit/ai/symbolicate are handled by bin/tungsten.wc.
   build)
     exec "$RUBY" "$RUBY_CLI" "$@"
     ;;
@@ -411,23 +420,20 @@ if [ -x "$COMPILER" ]; then
   fi
   exec "$WC" "$@"
 else
-  # Fresh clone: only `start` / `doctor` should work without a compiler.
-  # Prefer a tiny pure-shell fallback for start so the welcome is never blocked.
+  # Fresh clone: doctor/bootstrap are already handled above. start without a
+  # compiler gets a tiny pure-shell welcome (no Ruby).
   case "$1" in
-    start|doctor|new|--help|-h|-\?|--version|-v|--copyright)
-      # No compiled CLI yet — print a minimal pointer rather than requiring Ruby.
-      if [ "$1" = "start" ] || [ -z "$1" ]; then
-        echo "The Tungsten Programming Language"
-        echo
-        echo "  Next: bin/tungsten build    # bootstrap the self-hosted compiler"
-        echo "  Then: bin/tungsten doctor   # check clang / make / lld / zstd"
-        echo "  Docs: doc/getting-started/"
-        exit 0
-      fi
-      if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
-        echo "tungsten $(cat "$ROOT/VERSION" 2>/dev/null || echo dev)"
-        exit 0
-      fi
+    start|"")
+      echo "The Tungsten Programming Language"
+      echo
+      echo "  Next: bin/tungsten bootstrap  # stage-1 compiler (no Ruby)"
+      echo "        bin/tungsten build      # full self-host + bits"
+      echo "  Docs: doc/getting-started/"
+      exit 0
+      ;;
+    --version|-v)
+      echo "tungsten $(cat "$ROOT/VERSION" 2>/dev/null || echo dev)"
+      exit 0
       ;;
   esac
   exec "$RUBY" "$RUBY_CLI" "$@"

@@ -21,10 +21,12 @@ curl -fsSL https://tungsten-lang.org/install | sh
 git clone https://github.com/tungsten-lang/tungsten
 cd tungsten
 bin/tungsten doctor          # check git, clang, LLVM, make, ruby
-bin/tungsten build           # bootstrap the self-hosted compiler
+bin/tungsten bootstrap       # stage-1 compiler (C VM, no Ruby)
+bin/tungsten build           # full self-host: stage1+stage2 + bits
 ```
 
-`bin/tungsten build` is the central step: it boots a host implementation, then
+`bin/tungsten bootstrap` is the fresh-clone path (stage 1 only, bash).  
+`bin/tungsten build` still builds stage 1 as before, then stage 2 (byte-identical IR) and bits. It
 builds stage 1 and stage 2 of the compiler and checks that they emit
 **byte-identical LLVM IR** — proof the compiler self-hosts to a fixed point.
 
@@ -150,7 +152,7 @@ Full string and collection syntax is in [02 — Syntax](02-syntax.md).
 ## Checklist
 
 - [ ] `bin/tungsten doctor` is clean
-- [ ] `bin/tungsten build` finished (from source)
+- [ ] `bin/tungsten bootstrap` (or `build`) finished (from source)
 - [ ] `bin/tungsten -e '<< 1 + 1'` prints `2`
 - [ ] You can print with `<<` and know when to use `-o`
 

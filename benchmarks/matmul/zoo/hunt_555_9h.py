@@ -4,8 +4,9 @@ schedule + GPU add-on, fully unattended.
 Adapted from hunt_5_6_7.py (the canonical cal2zone hunt harness) to the specific
 run Erik asked for:
 
-  - ONE format: <5,5,5>, run for exactly 7 hours (25200s). World record = 93
-    (the 92 wall is SAT-certified rigid, per FINDINGS.md 2026-07-05).
+  - ONE format: <5,5,5>, run for exactly 7 hours (25200s). World record = 93.
+    The sampled rank-93 frontier is locally rigid under the tested moves, but
+    this is not a global SAT lower bound (see FINDINGS.md 2026-07-11).
   - 18 CPU cal2zone2 walkers: work zone +1 band / 2.5B moves, wander +12/500M,
     sawtooth wrap at band 60. wthr rises by ONE whenever a descent lands within
     one band of the threshold. After FOUR full cycles with no descent a walker

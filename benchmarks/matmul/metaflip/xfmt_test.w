@@ -1,4 +1,4 @@
--> parity(mask, vec, width) (i64 i64 i64)
+-> parity(mask, vec, width) (i64 i64 i64) i64
   pr = 0
   b = 0
   while b < width
@@ -7,7 +7,7 @@
         pr = (pr + 1) % 2
     b += 1
   pr
--> xor_insert(us, vs, ws, rank, u, v, w) (i64[] i64[] i64[] i64 i64 i64 i64)
+-> xor_insert(us, vs, ws, rank, u, v, w) (i64[] i64[] i64[] i64 i64 i64 i64) i64
   res = rank ## i64
   zero = 0 ## i64
   if u == 0
@@ -37,7 +37,7 @@
       ws[found] = ws[rank - 1]
       res = rank - 1
   res
--> widen_cols(mask, rows, oldc, newc, p2) (i64 i64 i64 i64 i64[])
+-> widen_cols(mask, rows, oldc, newc, p2) (i64 i64 i64 i64 i64[]) i64
   r = 0 ## i64
   b = 0 ## i64
   while b < rows * oldc
@@ -47,7 +47,7 @@
       r = r | p2[ii * newc + cc]
     b += 1
   r
--> drop_last_col(mask, rows, oldc, p2) (i64 i64 i64 i64[])
+-> drop_last_col(mask, rows, oldc, p2) (i64 i64 i64 i64[]) i64
   r = 0 ## i64
   b = 0 ## i64
   while b < rows * oldc
@@ -58,7 +58,7 @@
         r = r | p2[ii * (oldc - 1) + cc]
     b += 1
   r
--> extend(us, vs, ws, rank, n, mm, pp, p2) (i64[] i64[] i64[] i64 i64 i64 i64 i64[])
+-> extend(us, vs, ws, rank, n, mm, pp, p2) (i64[] i64[] i64[] i64 i64 i64 i64 i64[]) i64
   t = 0 ## i64
   while t < rank
     vs[t] = widen_cols(vs[t], mm, pp, pp + 1, p2)
@@ -75,7 +75,7 @@
       j += 1
     i += 1
   rank
--> project(us, vs, ws, rank, nus, nvs, nws, n, mm, pp, p2) (i64[] i64[] i64[] i64 i64[] i64[] i64[] i64 i64 i64 i64[])
+-> project(us, vs, ws, rank, nus, nvs, nws, n, mm, pp, p2) (i64[] i64[] i64[] i64 i64[] i64[] i64[] i64 i64 i64 i64[]) i64
   nq = 0 ## i64
   t = 0 ## i64
   while t < rank
@@ -90,7 +90,7 @@
     ws[k] = nws[k]
     k += 1
   nq
--> verify(us, vs, ws, rank, seed0, n, mm, pp) (i64[] i64[] i64[] i64 i64 i64 i64 i64)
+-> verify(us, vs, ws, rank, seed0, n, mm, pp) (i64[] i64[] i64[] i64 i64 i64 i64 i64) i64
   ok = 1
   s = seed0
   ab = n * mm ## i64

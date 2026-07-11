@@ -1,5 +1,13 @@
-# flipfleet.w — a threaded, in-process flip-graph matmul search with a live TUI,
-# written entirely in Tungsten (no Python, no walker subprocesses).
+# flipfleet.w — LEGACY 5x5 threaded experiment.
+#
+# New record campaigns should use flipfleet.py.  This native prototype does not
+# exact-gate adoption, does not retain the best decomposition across a cycle-out,
+# and converges every explorer onto one leader each round.  It remains here for
+# throughput comparisons and the Metal relay UI, not as the authoritative
+# world-record harness.  See FINDINGS.md (2026-07-11 audit).
+#
+# A threaded, in-process flip-graph matmul search with a live TUI, written
+# entirely in Tungsten (no Python, no walker subprocesses).
 #
 # Each walker is one OS thread (Thread.new) running walk_worker() — the full
 # hash-chain cal2zone2 walker (flipfleet_walker.w, generated from bucket_gen) —

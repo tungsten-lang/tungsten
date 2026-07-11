@@ -60,9 +60,11 @@ def out_add(S, t):                         # XOR-toggle (reduction) into a build
     S.discard(t) if t in S else S.add(t)
 
 def load_555_93():
+    import os
     import re
     us = {}; vs = {}; ws = {}
-    for line in open('/Users/erik/.mmwork/seed_mp93.txt'):
+    path = os.path.join(os.path.dirname(__file__), "..", "search", "seed_mp93.txt")
+    for line in open(path):
         mm = re.match(r'(us|vs|ws)\[(\d+)\] = (\d+)', line)
         if mm: {'us': us, 'vs': vs, 'ws': ws}[mm.group(1)][int(mm.group(2))] = int(mm.group(3))
     return set((us[r], vs[r], ws[r]) for r in range(len(us)))

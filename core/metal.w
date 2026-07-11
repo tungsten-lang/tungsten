@@ -106,6 +106,15 @@ fn metal_buffer_write_i32(buffer, i, value)
 fn metal_buffer_read_i32(buffer, i)
   ccall("w_metal_buffer_read_i32", buffer, i)
 
+# Signed 64-bit element access. These are required by GPU kernels whose exact
+# integer state does not fit in 32 bits (for example 6x6 matrix-multiplication
+# masks use 36 bits). Index 1 begins at byte 8.
+fn metal_buffer_write_i64(buffer, i, value)
+  ccall("w_metal_buffer_write_i64", buffer, i, value)
+
+fn metal_buffer_read_i64(buffer, i)
+  ccall("w_metal_buffer_read_i64", buffer, i)
+
 # bfloat16 element access (2 bytes per element, index = bf16 element index).
 # Write rounds f32→bf16 round-to-nearest-even; read widens back to f32. This
 # is the dominant ML weight format, so Tensor's CPU face routes bf16 here.

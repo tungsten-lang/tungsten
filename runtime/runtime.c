@@ -27888,6 +27888,16 @@ W_BRIDGE_STUB WValue w_metal_buffer_read_i32(WValue buffer, WValue index) {
     w_raise(w_string("Metal: not available on this platform"));
     return W_NIL;
 }
+W_BRIDGE_STUB WValue w_metal_buffer_write_i64(WValue buffer, WValue index, WValue value) {
+    (void)buffer; (void)index; (void)value;
+    w_raise(w_string("Metal: not available on this platform"));
+    return W_NIL;
+}
+W_BRIDGE_STUB WValue w_metal_buffer_read_i64(WValue buffer, WValue index) {
+    (void)buffer; (void)index;
+    w_raise(w_string("Metal: not available on this platform"));
+    return W_NIL;
+}
 W_BRIDGE_STUB WValue w_metal_queue_new(WValue device) {
     (void)device;
     w_raise(w_string("Metal: not available on this platform"));

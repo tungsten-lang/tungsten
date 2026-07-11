@@ -7,6 +7,365 @@ experiments already settled here. Where a finding was later corrected, only
 the corrected version is kept — see "corrections" at the end for what changed
 and why.
 
+## 2026-07-11 audit: rigorous bounds, FlipFleet successor, and aligned symmetry starts
+
+The global GF(2) intervals for the four requested square formats are now:
+
+| format | rigorous lower bound | best construction | next upper target |
+|---|---:|---:|---:|
+| ⟨3,3,3⟩ | **20** (Wang 2026) | 23 | 22 |
+| ⟨4,4,4⟩ | 34 (Bläser 2003) | 47 | 46 |
+| ⟨5,5,5⟩ | 53 (Bläser 2003) | 93 | 92 |
+| ⟨6,6,6⟩ | 76 (Bläser 2003) | 153 | 152 |
+
+Wang's current v9 paper and machine-checkable certificate raise the 3×3 bound
+from 19 to 20.  The published certificate was independently verified on this
+machine in about two seconds.  A new 100M-step-per-orbit pass also strengthened
+one dimension-2 child bound from 17 to 18 (32,307,892 backtracking leaves), and
+the resulting checkpoint verified, but the global bound remains 20.  Direct
+root searches through 1B steps did **not** prove 21; reaching a search cap is not
+a refutation.  Source and certificates:
+[`wcgbg/tensor-rank-lower-bound`](https://github.com/wcgbg/tensor-rank-lower-bound),
+paper [`arXiv:2603.07280`](https://arxiv.org/abs/2603.07280).
+
+The proof engine's highest-leverage next change is stabilizer-orbit pruning of
+candidate constraint forms.  At the 3×3 root it currently branches over 511
+nonzero forms although the full matrix symmetry has only three rank orbits; at
+4×4 the analogous counts are 65,535 versus four.  Cache equivalences recover
+values but do not shrink the certificate's exhaustive AND branch.  The paper
+estimates more than 1.6e11 constraint-subspace orbits for 4×4, so on-demand
+stabilizer orbits are likely prerequisite to moving that square lower bound.
+
+A sound stabilizer prototype was subsequently tested.  Merely replacing the
+511 root forms by three representatives is **not** sound in the legacy
+numeric-prefix DFS; instead the prototype enumerates multisets of possible
+A-forms modulo the base-subspace stabilizer and independently replays that
+frontier.  It reproduced the published 2×2 and 3×3 proofs, reducing the 3×3
+19→20 root layer from 511 cases to three.  For 20→21 its active frontiers were
+`1, 3, 27, 760, 43,300, 1,917,713` through depth five.  All but 179,954
+depth-five states closed, and those survivors were exactly one point short;
+raising constrained orbits 492 (19→20), 493 (19→20), and 482 (18→19) would
+close all of them.  Focused legacy searches still found no new proof: orbit
+478 failed at 1B steps, orbit 480 failed at 1B, and orbit 492 failed at 250M.
+The direct stabilizer traversal on orbit 478 reached 582,909 active depth-five
+states and left 395,553 unresolved, so it also did not prove 19; its 3.31 GB
+leaf-only pass quantified the barrier without constructing depth six.  These
+caps are not refutations.  The full soundness argument, hashes, upper
+bound checks, dependency chain, and certificate-format requirements are in
+[`proof_orbit/README.md`](proof_orbit/README.md).
+
+### FlipFleet audit and replacement path
+
+The native `flipfleet.w` retained several correctness and campaign defects:
+
+- it was hard-coded to 5×5;
+- a cycle-out retained only best rank/density scalars and discarded the actual
+  best decomposition;
+- CPU candidates were adopted before its randomized verifier ran, and validity
+  did not gate best bookkeeping;
+- a failed GPU load remained installed in the fleet;
+- every explorer was reset to one leader every 3M moves, collapsing diversity;
+- the claimed same-rank density archive read a snapshot updated only on strict
+  rank drops;
+- the structured plus transition was W-only.
+
+`flipfleet.py` is now the sound campaign driver for 3×3 through 6×6.  It builds
+the fast Tungsten hash-chain walker for the requested format, exact-verifies
+every candidate before adoption, atomically archives every distinct frontier
+snapshot surfaced to the coordinator, retains the full best scheme across restarts, defaults to persistent
+islands with partial migration, can start from the tracked record schemes, and
+uses random-axis plus transitions by default.  Same-rank density snapshots now
+flow through an exact-gated spool into that archive (rather than being silently
+ignored), and stale or repeatedly invalid worker dumps cannot steer migration.
+A ten-second, two-walker 3×3 run seeded at the record retained **42 distinct,
+exact-valid rank-23 schemes**, with zero invalid candidates; the old native
+status snapshot was still at rank 106 after 720 seconds on 5×5.
+
+The restart sample is now bounded and diversity-aware: all exact snapshots seen
+by the coordinator remain durable, while memory maintains an online max-min sample under
+term-set symmetric-difference distance and restarts from least-used entries.
+On a live rank-23 stream, an eight-slot archive made 9 replacements and retained
+minimum pairwise distance 34 (out of a maximum 46), rather than filling with
+near-duplicate ties.  Durable archives are exact-gated and rehydrated on a
+resumed run.
+The displayed/checkpointed leader is ordered by rank and then density, so an
+equal-rank improvement now updates `best.txt`, status cost, and the performance
+curve without collapsing the separated restart sample.
+
+Record scheduling also had a hidden trigger bug: its special dwell budget
+tested the transient live rank, normally 24--25 during an excursion, instead of
+the saved best rank 23.  That silently bypassed the requested record budget.
+The generated walker now tests `best_rank`, reads the budget at runtime, and
+the fleet assigns a mixed 250M/1B/10B portfolio so short-horizon islands recycle
+through term-set-separated seeds while other islands retain the original deep search.
+A forced short-budget smoke test produced four clean cycle-outs and three real
+frontier reseeds while remaining exact.
+
+Examples:
+
+```sh
+# From naive, persistent independent islands.
+python3 benchmarks/matmul/metaflip/flipfleet.py \
+  --size 3 --walkers 12 --strategy independent --secs 60
+
+# Push from the exact tracked frontier; stop only on a verified record.
+python3 benchmarks/matmul/metaflip/flipfleet.py \
+  --size 5 --seed record --walkers 12 --strategy islands --stop-on-record
+```
+
+### Symmetry starts must be target-aligned
+
+The Moosbauer--Poole symmetric search does **not** start from the naive scheme;
+it starts from a diagonal partition.  `sym_start.py` now constructs and exactly
+checks those starts.  The authors' reference solver removes its `f` invariant
+diagonal cubes from the mutable orbit set and freezes them, so that solver can
+only visit ranks `r ≡ f (mod 3)` under C3.  Its published 5×5 three-cube run
+therefore reaches 93 but would have to jump next to 90.  Frozen-cube starts
+aligned with the one-rank-lower targets are:
+
+| target | invariant cubes | example diagonal partition |
+|---:|---:|---|
+| 3×3 → 22 | 1 | `{1,2,3}` |
+| 4×4 → 46 | 1 | `{1,2,3,4}` |
+| 5×5 → 92 | 2 | `{1,2,4,5}, {3}` |
+| 6×6 → 152 | 2 | `{1,2,5,6}, {3,4}` |
+
+Using the authors' reference symmetric solver as a cross-check, the published
+5×5 three-cube seed reproduced rank 93 on attempt 11 (45 seconds total for 12
+attempts).  Target-aligned probes found no new record: 3×3 did 200 attempts /
+600,282,006 flips and always stopped at 25; 4×4 did 100 attempts / 200,188,455
+flips and reached 49 in 96 runs (usually then zero-neighbor); 5×5 did 100
+from-start attempts / 15,987,958,677 flips and reached 95 three times but not
+92.  Continuation did not unlock the smaller cases: 500 rank-25 continuations
+spent 48,850,273,812 flips and all remained at 25; 500 rank-49 continuations
+spent 50,000,001,000 flips and all remained at 49.  The stock reference solver
+crashed when a saved rank-49 local minimum had an empty ordinary-move list, so
+the latter batch used a separately compiled guard that enters the solver's
+existing plus-transition path when headroom is configured (the patched path
+passed an ASan/UBSan smoke test).  All twenty 3×3/4×4 waypoint files were
+independently expanded and were exact, C3-closed, byte-distinct, and had the
+intended one frozen cube.  Ten distinct rank-95 schemes were then
+retained from a larger seed-making batch; 500 continuation attempts with plus
+headroom through rank 101 spent 50,000,001,000 further flips and all 500
+remained at 95.  These are component-search results, not tensor-rank lower
+bounds.
+
+For 6×6, 200 target-aligned starts spent 30,212,067,072 flips and reached rank
+164 twice, but not 152.  One rank-164 waypoint was replayed and independently
+checked (164 distinct nonzero terms, exact tensor identity, two frozen cubes,
+and 27 mutable six-element symmetry orbits).  A further 500 continuations from
+it spent 50,000,001,000 flips; every attempt remained at 164, so no rank-158
+waypoint or rank-152 record was produced.
+
+This residue rule is **not** automatic for every C3-closed walker.  In the local
+`sym_gen2*` prototypes, orbit insertion can toggle a singleton cube and an
+any-axis plus can split it into generic orbits; ordinary flips can also touch
+one-hot singleton cubes.  These moves change both the fixed-orbit count and
+rank residue while remaining exact and C3-closed.  A campaign must
+either deliberately freeze those singleton terms or log their count; the
+partition alone does not constrain the local prototype forever.
+
+### Exact escape moves bridge the 3×3 frozen component
+
+In local storage let `rho(u,v,w)=(v,w^T,u^T)`,
+`O(t)={t,rho(t),rho^2(t)}`, and `C(x)=(x,x,x^T)`.  `sym_escape.py` now exposes
+three fixed-cube toggles plus a generic split of any term.  A fixed-cube
+one-axis split is an exact nominal +1 move into the full, non-C3 flip graph.
+The C3-preserving identity
+
+```text
+C(x) = O(y,x,x^T) + O(x+y,x,x^T)
+```
+
+normally replaces one fixed term by six generic terms (+5 rank).  Cubic
+polarization preserves C3 while deliberately changing fixed count and rank
+residue; its collision-free delta is +7, while existing cubes made the record
+campaign examples +5.  Exhaustive Python checks covered all **781,830**
+one-axis 3×3 fixed splits, all 260,610 nontrivial 3×3 orbit splits, and all
+130,305 unordered 3×3 polarizations; every identity expanded to the zero
+tensor.  Random applications and every CLI output were checked against the
+exact matrix-multiplication tensor.  Because these are parity toggles, actual
+rank deltas can differ when terms already exist and cancel.
+
+On the deterministic frozen waypoints above, the +1 split changed 3×3
+rank 25 / 15 ordinary shared-factor pairs into rank 26 / 20 pairs, and changed
+the zero-neighbor 4×4 rank-49 state into rank 50 with four pairs.  Twelve
+asymmetric continuations reached the known 3×3 rank 23 in about one second,
+then found no rank 22 over at least 23.2B reported moves.  The 4×4 version
+returned to rank 49 and found neither 47 nor 46 over at least 72.1B reported
+moves.
+
+The +5 C3 split changed the same waypoints to ranks 30 and 54, with 42 and 24
+ordinary pairs respectively.  Twelve 500M-move 3×3 continuations all reached
+rank 23 (first observed between 1M and 194M moves); all twelve final schemes
+were independently exact, C3-closed, and had two fixed terms.  Twelve analogous
+4×4 runs all returned to exact C3 rank 49 with one fixed term and found no rank
+46 over 6B moves.  These runs demonstrate a real component bridge—especially
+rank 25 to rank 23—not a new upper bound or a tensor-rank lower bound.
+
+### Escape moves are integrated into FlipFleet
+
+`flipfleet.py --escape-kind {split,break,orbit-split,polarize}` now injects the
+same exact identities without a separate seed-preparation step.  `split`
+selects any term and therefore covers the fixed-free tracked 3×3 and 4×4
+records; the other three retain their fixed-cube/C3 eligibility rules.
+`--escape-at` chooses startup, genuine cycle-out, or both, while
+`--escape-every N` deterministically interleaves escaped and base launches.
+
+The escape is strictly a one-launch excursion.  It is always derived from the
+unmodified frontier selected by the coordinator, never recursively from an
+escaped seed.  Escaped higher-rank seeds do not replace `initial`, `best.txt`,
+the density leader, the restart archive, or the configured world record.
+Migration, quarantine, and ordinary exits do not receive escapes.  Every
+generated seed passes factor bounds and full exact reconstruction before the
+native process can launch; C3-preserving kinds receive an additional closure
+check.  Dynamic ineligibility is an explicit logged fallback, while an
+ineligible startup fails before compilation.  Event provenance includes kind,
+trigger, base/output rank, fixed count, C3 state, selected factor/cube, part,
+axis, and canonical base digest; `status.json` reports
+considered/applied/bypassed/skipped counters.
+The compiled walker itself remains non-quotient, so it may leave C3 after a
+C3-preserving injection.  If identity collisions make an escape tie or beat
+the frontier, its published worker dump is still exact-gated and adopted as a
+normal candidate.  Recovery preserves the requested eligibility profile, so a
+C3 seed is not replaced by a non-C3 density tie before an orbit escape starts.
+
+A compiled 3×3 cycle-out smoke used `cycles=1`, a 1K-move record band, and
+`split@cycleout/every1`.  The initial native launch loaded rank 23.  Four
+genuine cycle-outs selected exact rank-24 escape seeds; three completed native
+launches logged `seed rank=24 verify=1`, descended back to exact rank 23, and
+two improved the same-rank density leader.  The fourth was launched at the time
+box and then quiesced.  Final coordinator state remained rank 23 with four
+escape applications, zero skips, zero invalid candidates, and no escaped seed
+admitted as a higher-rank frontier.  This checks the actual argv/runtime-seed
+path as well as the Python transformation.
+
+A compiled 5×5 `orbit-split@startup/every1` smoke loaded the density-1191 C3
+record as an exact rank-98/fixed-count-two seed (`seed rank=98 verify=1`).  The
+ordinary native walker descended 98→95→94→93 in 351 moves with no invalid
+candidate and produced an intermediate density-1189 leader, while the
+coordinator's frontier stayed rank 93 throughout.
+
+A final bounded portfolio ran 18 escaped startup walkers for 30 seconds.  All
+18 native processes loaded `seed rank=98 verify=1`; none found rank 92, but six
+successive exact-gated tie leaders reduced density to **1168** / 1,050 no-CSE
+operations.  The run retained 210 exact rank-93 frontier schemes, reported zero
+invalid candidates, and ended cleanly at rank 93.
+
+### Escaping the isolated AlphaTensor 4×4 record
+
+The exact AlphaTensor rank-47 seed has density 450 and no repeated U, V, or W
+factor, so it has zero ordinary flip partners.  For a term `(a,b,c)`, replacing
+its U factor by the exact GF(2) split
+`(x,b,c) + (a+x,b,c)` gives a rank-48 escape (and analogously on V or W).
+Restricting `x` so that both `x` and `a+x` already occur on that axis elsewhere
+in the seed produced **165 distinct exact rank-48 starts**.  Each initial escape
+has two external one-axis flip edges and a four-term connected component.  By
+comparison, the random structured-plus move always draws one existing factor,
+but its complementary factor is also present in only 330 of 6,486 ordered
+proposals (about 5.1%), so its usual initial component has only three terms.
+
+The complete ordinary-flip closure of all 165 starts, while forbidding rank
+above 48, contains just **3,210** states: 3,209 at rank 48 and the original
+isolated rank-47 scheme.  The closure has maximum ordinary distance 11 from an
+escape start; its richest states have seven one-axis edges and a connected
+component of size eight.  Every state was independently reconstructed as the
+4×4 multiplication tensor.  There is no rank-46 state in this closure, so at
+least a second plus identity or a rank-49-or-higher excursion is necessary for
+this route.
+
+Three bounded native campaigns then tested those exits:
+
+| policy | aggregate moves | observed result |
+|---|---:|---|
+| random-axis plus/2000, band 3 | 12 × 500M = 6B | exact rank 47 in all 12 |
+| complement-present plus/50, retained rank-48 anchor, band 4 | 12 × 500M = 6B | live ranks 47--51; no 46 |
+| complement-present plus/20, retained rank-48 anchor, band 12 | 12 × 500M = 6B | live ranks 47--59; no 46 |
+
+All final retained schemes were independently exact (12/12 in each policy),
+and no rank-46 artifact was emitted.  The last policy genuinely maintained
+multiple simultaneous split identities rather than merely collapsing each
+escape back to rank 47, but it still did not descend.  The 3,210-state result
+is an exhaustive statement only about the rank-at-most-48 ordinary component;
+the 18B-move continuation results are search negatives.  Neither is a global
+tensor-rank lower bound.
+
+A separate exact rank-neutral macro probe asked whether a selected `k`-term
+partial tensor has a distinct `k`-term decomposition, blocking the planted
+solution and exact-checking every splice.  Compressing each mode to the span of
+the selected factors made the 3×3 `k=3` scan exhaustive over all 1,771 chunks:
+it found 18 distinct rank-23 rewrites, 12 equal to one ordinary flip and the
+other six at ordinary-flip distance exactly two.  Thus it exposed no new
+component.  On the isolated 4×4 rank-47 seed, span-dimension-prioritized samples
+found no alternative model or timeout among 200 `k=3`, 2,000 `k=4`, and 500
+`k=5` chunks; a further 400 `k=3` chunks checked with unrestricted 16-bit
+factors also had no alternative or timeout.  Only the 3×3 factor-span scan was
+exhaustive; the 4×4 samples are scoped search negatives, not a tensor-rank
+lower bound.
+
+### Escaping the tracked 5×5 and 6×6 record components
+
+The tracked MP seeds are exact C3 schemes of ranks 93 and 153, each with three
+fixed terms.  Deterministic orbit splits produced exact C3 rank-98 and rank-158
+seeds with two fixed terms.  An unconstrained local C3 campaign used three
+policies (any-axis plus/200 with band 15, any-axis plus/50 with band 24, and
+W-only plus/200 with band 18), four walkers per policy.  Every walker undid the
+bridge and returned to the known record within the first million moves:
+
+| format | aggregate moves | final best-rank distribution | target |
+|---|---:|---:|---:|
+| 5×5 | 12 × 500M = 6B | `{93: 12}` | no 92 |
+| 6×6 | 12 × 500M = 6B | `{153: 12}` | no 152 |
+
+All 24 final dumps were independently reconstructed as exact, well-formed, and
+C3-closed with three fixed terms.  The tracked 6×6 record is also invariant
+under reversal, whereas the deterministic split is not; only one of the twelve
+final rank-153 dumps recovered reversal symmetry.  Thus the extra Z2 symmetry
+is not required for exactness or descent back to 153.  Dropping it enlarges the
+search space (a potential quotient-performance cost), but is what opens states
+outside the published C3×Z2 component.
+
+Polarization gave a better target-aligned bridge.  From the records it first
+made exact fixed-count-two ranks 98 and 158; a deterministic ordinary C3 flip
+then reached ranks 95 and 155, one three-term orbit above the targets.  A hard
+fixed-count-two guard inverse-toggled transitions that left that stratum.  An
+instrumented build compared the logical term set before and after 1,000
+rejected ordinary moves and 1,000 rejected plus moves, with zero mismatches.
+Periodic compiled checks and independent final reconstruction also remained
+exact.  The bounded hard-stratum results were:
+
+| format | aggregate moves | final distribution | rejected transitions |
+|---|---:|---:|---:|
+| 5×5 | 12 × 500M = 6B | `{95: 12}` | 116,812,167 |
+| 6×6 | 12 × 500M = 6B | `{155: 12}` | 73,426,310 |
+
+All final schemes were byte-identical to their exact starting waypoint; neither
+hard-stratum campaign found a lower saved frontier.  A final target-biased 5×5
+heuristic therefore allowed temporary fixed counts 0, 1, 2, and 3, but only
+accepted a lower saved best when `fixed_count == 2` and the compiled verifier
+passed.  Across 12 × 250M = 3B moves it skipped 12,948,533 lower-rank visits in
+other residues, yet all twelve saved frontiers remained independently exact
+rank 95; no rank 92 was found.  This is a biased search negative, not an
+exhaustive component result or a tensor-rank lower bound.
+
+The unconstrained 5×5 batch did produce a same-rank cost improvement:
+`matmul_5x5_rank93_d1191_gf2.txt` is exact C3 rank 93 with density 1191 and 21
+ordinary shared-factor pairs, versus density 1224 and 12 pairs for the tracked
+MP seed.  Its SHA-256 is
+`ead9069627a7f15b238fbd95643b2d0b66545b76844b917be5edc651bf359f45`.
+This is not a tensor-rank record, but it is both sparser and more connected and
+is retained as the preferred C3 frontier seed.  The integrated orbit-split
+smoke descended 98→95→94→93 in 351 moves, and the final 18-walker portfolio
+improved the same-rank cost again:
+`matmul_5x5_rank93_d1168_gf2.txt` is exact non-C3 rank 93, density 1168,
+13 shared-factor pairs, and 1,050 no-CSE operations.  Its SHA-256 is
+`10bacef79e1b43fdf1b494f2aebb6e6fa12afc5df00b5755c5915b7acfbbbb10` and it
+is now the default cost-oriented 5×5 frontier; `--seed c3-record` selects the
+density-1191 C3 scheme for orbit-split/polarization.  Rank and no-CSE base-case
+operation count remain separate objectives, so density gating must not prune a
+rank-record walk.  A final workspace scan parsed 214 rank-93 files and fully
+verified 190; density 1168 was the minimum, with 1191 next.
+
 ## Verified record table (GF(2), n,m,p ≤ 7)
 
 | format | naive | best known | source |
@@ -57,7 +416,7 @@ negative. Don't re-attempt any of these without a genuinely new idea:
   transpose): reaches the same records via a much smaller (exhaustible) state
   space; the symmetric rank-23 component for 3×3 was **fully exhausted** — no
   path to 22 exists via symmetric moves from that component.
-- **3×3 → 22 definitive negative**: ~1.5 trillion moves, full move-set stack
+- **3×3 → 22 strong search negative (not a lower bound)**: ~1.5 trillion moves, full move-set stack
   (free walk + structured plus + bucket reduction + motif injection), 22
   appeared zero times while 23 appeared 300k+ times. Consistent with the
   symmetric exhaustion above. This is why Laderman-23 has held since 1976.
@@ -81,8 +440,9 @@ negative. Don't re-attempt any of these without a genuinely new idea:
   was never the lever** for this class of workload — see the next section
   for what actually moved the needle instead.
 
-**Overall conclusion as of 2026-07-03**: the walls are structural, not a
-tuning or throughput problem. Every buildable lever on top of the *same*
+**Overall conclusion as of 2026-07-03**: the observed walls are structural
+within the tested move families, not merely a tuning or throughput problem.
+Every buildable lever on top of the *same*
 move-family (flip + plus + reduction, in any combination or schedule) lands
 on the same ranks. The one technique that ever changed the game was
 **symmetry** (made 3×3 exhaustible) — cancellation patterns *are* symmetries,
@@ -93,6 +453,39 @@ AlphaTensor) look the way they do.
 
 The naive CUDA-style port above is a dead end, but a **threadgroup-memory
 redesign** on Metal is not:
+
+### 2026-07-11: give breadth distinct exact basins
+
+The previous relay assigned every lane the same CPU frontier.  That duplicated
+the CPU fleet's basin and wasted the GPU's one genuine advantage: breadth.
+`flipgraph_gpu_cal2zone.w` now builds exact split escapes in its Tungsten host
+and lays them out as a seed portfolio; the kernel selects
+`seedid = tid % nseeds`.  `flipfleet.py --gpu` generates, compiles, launches,
+and exact-gates this relay.  The default is 256 basins; one restores the old
+single-seed experiment.  Portfolio construction is outside the move loop, and
+the kernel pays only a one-time seed offset at initialization/reset.
+
+The audit also found that the 5×5 plus move used a 16-bit modulus (`65535`) for
+25-bit factors.  The corrected kernel samples `1..2^25-1`; the specializer uses
+the actual maximum factor width for every format.  This is a search-space fix,
+not a micro-optimization.
+
+The former i32 kernel necessarily corrupted 6×6's 36-bit masks.  Tungsten now
+has `gpu.shared_i64` and 64-bit Metal buffer host accessors, and
+`gpu_cal2zone_gen.py` emits native-i64 buffers, scratch, mask temporaries, and
+full-width RNG for 6×6.  Its generated default uses four walkers per
+threadgroup (rather than 16) so the three rank-cap arrays remain below 32 KiB.
+Both 5×5 and 6×6 sources compile through the self-hosted emitter to the expected
+MSL (`device int/long`, `threadgroup int/long`).  This Codex sandbox exposes no
+default Metal device and lacks the offline Metal toolchain, so on-device timing
+and execution remain a required pre-campaign gate; no speedup is claimed yet.
+
+Why not GPU SAT now: the current 4×4 large-k surgery model failed to solve even
+the known rank-47 SAT control in 280 seconds.  A GPU SAT/XOR solver would be a
+new solver project, while exact-basin portfolios reuse the already measured
+11.6× threadgroup-memory kernel and diversify it at essentially zero hot-loop
+cost.  Grinding a single fleet best remains available with `--gpu-escapes 1`
+as the control arm.
 
 - **`flipgraph_gpu_tg.w`** (device-mem baseline is `flipgraph_gpu.w`):
   caching each walker's scheme in on-chip threadgroup shared memory
@@ -146,9 +539,9 @@ detour, kept here so they aren't re-discovered the hard way:
   via the schedule's own internal trigger) — a `firstinit` flag distinct
   from `doinit`, with schedule state persisting in the device `st` buffer
   across dispatches.
-- **A verification-gating bug produced a phantom "better than known-optimal"
-  reading twice** (GPU log briefly showed rank 22 for 3×3, below the known
-  23 optimum, and separately rank 46 for 4×4 below 47). Root cause: the
+- **A verification-gating bug produced a phantom "better than the current record"
+  reading twice** (GPU log briefly showed rank 22 for 3×3, below the current
+  rank-23 record, and separately rank 46 for 4×4 below 47). Root cause: the
   displayed running-minimum (`globalbest`) was updated *before* the
   correctness check ran, not gated the same way the actual write/report
   path is. Confirmed harmless both times — nothing was ever written to the
@@ -253,11 +646,13 @@ exact-validated (`recon==T`):
   proven working (105→93 in 12 consecutive valid reductions) — then stops dead.
 - `E = rank + λ·isolated` never beats rank-only (both reach 93, neither 92, no
   winning λ ∈ {0.05, 0.1, 0.25}); iso-greedy steering ≈ uniform.
-- **Meaning: 92 is not one reduction from ANY reachable 93.** This is why every
+- **Meaning within the 1.71M sampled reachable 93s: none was one reduction from
+  92.** This is why every
   from-93 push (incl. the earlier 54.6B-move seed-92 run) and every from-naive
-  descent fail — the entire reachable rank-93 level set is channel-free, and
-  flip-richness cannot manufacture a channel. The flip + plus + reduction family
-  is exhausted for 5×5 with a *structural* reason, not a budget one. (Scope: does
+  descent failed; the sampled rank-93 level set is channel-free, and
+  flip-richness did not manufacture a channel. This is strong structural evidence
+  against the tested flip + plus + reduction policies, not an exhaustive graph
+  proof or a tensor-rank lower bound. (Scope: does
   not cover the cross-format extend/project edges — already "mis-aimed" for
   squares per the meta-flip README.)
 
@@ -302,8 +697,8 @@ rank-47 in 280s (matches the literature: the analogous 3×3 rank-23 SAT cost
   coverage is beam-capped so these need not exhaust. The one live long-shot;
   a hit is the rank-46 record. *(Update with the k=7/8 verdict if/when it lands.)*
 
-**Net:** ⟨5,5,5⟩→92 is now more definitively closed for the flip-graph family
-(the 0-channel result supplies the structural reason); ⟨4,4,4⟩→46 remains a live
+**Net:** ⟨5,5,5⟩→92 has substantially stronger negative evidence for the tested
+flip-graph policies (the 0-channel sample supplies a structural reason); ⟨4,4,4⟩→46 remains a live
 long-shot only via large-k surgery. New durable tools: `sat_surgery_hik.py`,
 `sym_gen2_anyaxis.py`.
 

@@ -25,10 +25,10 @@
 #   nextesc - mv value at which to next check for band escalation
 # Any descent (rank < best) resets aband back to bstart(=1) immediately.
 #
-# Re-seeding: exactly like flipgraph_gpu_relay.w — every dispatch reads
-# whatever the CPU coordinator's file currently holds and re-inits every
-# walker from it (doinit=1 every round). "Always seed from current-best CPU
-# result", per instruction.
+# Re-seeding uses a portfolio of exact +1 split escapes derived from the CPU
+# frontier.  Each GPU lane selects `tid % nseeds`, so the GPU spends its width
+# in distinct basins instead of cloning the same seed thousands of times.
+# Set ESCAPE_SEEDS=1 for the historical single-seed behavior.
 
 ## i32[]: work_us
 ## i32[]: work_vs
@@ -53,8 +53,12 @@
   wqwander = params[6] ## i32
   wthr0 = params[7] ## i32
   firstinit = params[8] ## i32
+  nseeds = params[9] ## i32
+  seedstride = params[10] ## i32
   base = tid * cap ## i32
   sb = tid * 9 ## i32
+  seedid = tid % nseeds ## i32
+  seedbase = seedid * seedstride ## i32
   sus = gpu.shared_i32(2240)
   svs = gpu.shared_i32(2240)
   sws = gpu.shared_i32(2240)
@@ -96,12 +100,12 @@
   if doinit == 1
     i = 0
     while i < nterms
-      sus[i * 16 + ltid] = seed_us[i]
-      svs[i * 16 + ltid] = seed_vs[i]
-      sws[i * 16 + ltid] = seed_ws[i]
-      best_us[base + i] = seed_us[i]
-      best_vs[base + i] = seed_vs[i]
-      best_ws[base + i] = seed_ws[i]
+      sus[i * 16 + ltid] = seed_us[seedbase + i]
+      svs[i * 16 + ltid] = seed_vs[seedbase + i]
+      sws[i * 16 + ltid] = seed_ws[seedbase + i]
+      best_us[base + i] = seed_us[seedbase + i]
+      best_vs[base + i] = seed_vs[seedbase + i]
+      best_ws[base + i] = seed_ws[seedbase + i]
       i = i + 1
     st[sb] = nterms
     st[sb + 1] = nterms
@@ -141,7 +145,9 @@
           state = state * 1103515245 + 12345
           pt = ((state % rank) + rank) % rank
           state = state * 1103515245 + 12345
-          u1 = (((state % 65535) + 65535) % 65535) + 1
+          # 5x5 factors are 25 bits.  The old 65535 modulus silently confined
+          # every plus move to 16 bits and left nine coordinates unsampled.
+          u1 = (((state % 33554431) + 33554431) % 33554431) + 1
           state = state * 1103515245 + 12345
           paxis = ((state % 3) + 3) % 3
           pb = pt * 16 + ltid
@@ -371,18 +377,18 @@
           state = state * 1103515245 + 12345
           i = 0
           while i < nterms
-            sus[i * 16 + ltid] = seed_us[i]
-            svs[i * 16 + ltid] = seed_vs[i]
-            sws[i * 16 + ltid] = seed_ws[i]
+            sus[i * 16 + ltid] = seed_us[seedbase + i]
+            svs[i * 16 + ltid] = seed_vs[seedbase + i]
+            sws[i * 16 + ltid] = seed_ws[seedbase + i]
             i = i + 1
           rank = nterms
           best = nterms
           bestden = 999999
           ci = 0
           while ci < nterms
-            best_us[base + ci] = seed_us[ci]
-            best_vs[base + ci] = seed_vs[ci]
-            best_ws[base + ci] = seed_ws[ci]
+            best_us[base + ci] = seed_us[seedbase + ci]
+            best_vs[base + ci] = seed_vs[seedbase + ci]
+            best_ws[base + ci] = seed_ws[seedbase + ci]
             ci = ci + 1
       aband = nb
       if aband > wthr
@@ -495,6 +501,7 @@ MARGIN = 4
 WQWORK = 150000
 WQWANDER = 60000
 WTHR0 = 7
+ESCAPE_SEEDS = 256
 
 seedpath = "benchmarks/matmul/metaflip/runs/run_555/current_best.txt"
 gpubestpath = "benchmarks/matmul/metaflip/runs/run_555/gpu_best.txt"
@@ -537,13 +544,24 @@ if av0.size() > 13
 livepath = ""
 if av0.size() > 14
   livepath = av0[14]
+# av0[15] = exact split-escape portfolio size.  One restores the historical
+# behavior.  Values above NW are pointless because no lane can select them.
+if av0.size() > 15
+  ESCAPE_SEEDS = av0[15].to_i()
+if ESCAPE_SEEDS < 1
+  ESCAPE_SEEDS = 1
+if ESCAPE_SEEDS > NW
+  ESCAPE_SEEDS = NW
 live_gen = 0
-<< "GPU cfg: NW=" + NW.to_s() + " STEPS=" + STEPS.to_s() + " RESEED=" + RESEED_EVERY.to_s() + " MARGIN=" + MARGIN.to_s() + " WORKQ=" + WQWORK.to_s() + " WANDERQ=" + WQWANDER.to_s() + " WTHR=" + WTHR0.to_s()
+<< "GPU cfg: NW=" + NW.to_s() + " STEPS=" + STEPS.to_s() + " RESEED=" + RESEED_EVERY.to_s() + " MARGIN=" + MARGIN.to_s() + " WORKQ=" + WQWORK.to_s() + " WANDERQ=" + WQWANDER.to_s() + " WTHR=" + WTHR0.to_s() + " ESCAPES=" + ESCAPE_SEEDS.to_s()
 flush()
 
-seedu = i64[160]
-seedv = i64[160]
-seedw = i64[160]
+seedu = i64[160 * ESCAPE_SEEDS]
+seedv = i64[160 * ESCAPE_SEEDS]
+seedw = i64[160 * ESCAPE_SEEDS]
+baseu = i64[160]
+basev = i64[160]
+basew = i64[160]
 
 msl = read_file("benchmarks/matmul/flipgraph_gpu_cal2zone.metal")
 device = metal_device()
@@ -557,42 +575,103 @@ best_us = metal_buffer(device, NW * CAP * 4)
 best_vs = metal_buffer(device, NW * CAP * 4)
 best_ws = metal_buffer(device, NW * CAP * 4)
 st = metal_buffer(device, NW * 9 * 4)
-seed_us = metal_buffer(device, 160 * 4)
-seed_vs = metal_buffer(device, 160 * 4)
-seed_ws = metal_buffer(device, 160 * 4)
-params = metal_buffer(device, 9 * 4)
+seed_us = metal_buffer(device, 160 * ESCAPE_SEEDS * 4)
+seed_vs = metal_buffer(device, 160 * ESCAPE_SEEDS * 4)
+seed_ws = metal_buffer(device, 160 * ESCAPE_SEEDS * 4)
+params = metal_buffer(device, 11 * 4)
 queue = metal_queue(device)
 bufs = [work_us, work_vs, work_ws, best_us, best_vs, best_ws, st, seed_us, seed_vs, seed_ws, params]
 
 globalbest = 999
 rd = 0
+last_baserank = -1
+last_seedden = -1
 while rd < ROUNDS
   content = read_file(seedpath)
   lines = content.split("\n")
-  startrank = lines[0].to_i()
+  baserank = lines[0].to_i()
   ti2 = 0
-  while ti2 < startrank
+  while ti2 < baserank
     ln = lines[ti2 + 1]
     parts = ln.split(" ")
-    seedu[ti2] = parts[0].to_i()
-    seedv[ti2] = parts[1].to_i()
-    seedw[ti2] = parts[2].to_i()
+    baseu[ti2] = parts[0].to_i()
+    basev[ti2] = parts[1].to_i()
+    basew[ti2] = parts[2].to_i()
     ti2 += 1
-  ii = 0
-  while ii < startrank
-    metal_buffer_write_i32(seed_us, ii, seedu[ii])
-    metal_buffer_write_i32(seed_vs, ii, seedv[ii])
-    metal_buffer_write_i32(seed_ws, ii, seedw[ii])
-    ii += 1
+  # Build exact split identities natively.  Portfolio slot 0 is the base seed
+  # when ESCAPE_SEEDS=1.  Otherwise every slot replaces one term by two terms
+  # whose selected factors XOR back to the original, so tensor value is exact.
+  startrank = baserank
+  if ESCAPE_SEEDS > 1
+    startrank = baserank + 1
+  sid = 0
+  while sid < ESCAPE_SEEDS
+    soff = sid * 160
+    ii = 0
+    while ii < baserank
+      seedu[soff + ii] = baseu[ii]
+      seedv[soff + ii] = basev[ii]
+      seedw[soff + ii] = basew[ii]
+      ii += 1
+    if ESCAPE_SEEDS > 1
+      target = (sid * 37 + rd * 17) % baserank
+      axis = (sid / baserank) % 3
+      donor = (target + 1 + sid * 13) % baserank
+      oldfactor = baseu[target]
+      part = baseu[donor]
+      if axis == 1
+        oldfactor = basev[target]
+        part = basev[donor]
+      if axis == 2
+        oldfactor = basew[target]
+        part = basew[donor]
+      tries = 0
+      while (part == 0 || part == oldfactor) && tries < baserank
+        donor = (donor + 1) % baserank
+        part = baseu[donor]
+        if axis == 1
+          part = basev[donor]
+        if axis == 2
+          part = basew[donor]
+        tries += 1
+      # Every practical frontier has at least two factors on each live axis;
+      # retain a deterministic algebraic fallback for malformed portfolios.
+      if part == 0 || part == oldfactor
+        part = oldfactor ^ 1
+        if part == 0
+          part = 2
+      seedu[soff + baserank] = baseu[target]
+      seedv[soff + baserank] = basev[target]
+      seedw[soff + baserank] = basew[target]
+      if axis == 0
+        seedu[soff + target] = part
+        seedu[soff + baserank] = oldfactor ^ part
+      if axis == 1
+        seedv[soff + target] = part
+        seedv[soff + baserank] = oldfactor ^ part
+      if axis == 2
+        seedw[soff + target] = part
+        seedw[soff + baserank] = oldfactor ^ part
+    ii = 0
+    while ii < startrank
+      metal_buffer_write_i32(seed_us, soff + ii, seedu[soff + ii])
+      metal_buffer_write_i32(seed_vs, soff + ii, seedv[soff + ii])
+      metal_buffer_write_i32(seed_ws, soff + ii, seedw[soff + ii])
+      ii += 1
+    sid += 1
   # density (total mask popcount = base-case ops budget) of the current seed;
   # a same-rank GPU candidate only counts as an improvement if it beats this.
+  force_reseed = 0
   seedden = 0
   ii = 0
-  while ii < startrank
-    seedden = seedden + popcnt(seedu[ii]) + popcnt(seedv[ii]) + popcnt(seedw[ii])
+  while ii < baserank
+    seedden = seedden + popcnt(baseu[ii]) + popcnt(basev[ii]) + popcnt(basew[ii])
     ii += 1
+  if baserank != last_baserank || seedden != last_seedden
+    force_reseed = 1
+    last_baserank = baserank
+    last_seedden = seedden
   # poll the live-params file (restart-free sweep); a new GEN forces a reseed
-  force_reseed = 0
   if livepath != ""
     livec = read_file(livepath)
     if livec != nil
@@ -628,6 +707,8 @@ while rd < ROUNDS
   metal_buffer_write_i32(params, 6, WQWANDER)
   metal_buffer_write_i32(params, 7, WTHR0)
   metal_buffer_write_i32(params, 8, reseed)
+  metal_buffer_write_i32(params, 9, ESCAPE_SEEDS)
+  metal_buffer_write_i32(params, 10, 160)
   metal_dispatch_groups(queue, pipeline, bufs, NW / WPG, WPG)
   # pick the lexicographic (rank, density) best thread: lower rank wins; at equal
   # rank, lower density (fewer base-case ops) wins.
@@ -651,9 +732,9 @@ while rd < ROUNDS
     w += 1
   # improvement = lower rank than the seed, OR same rank at strictly lower density
   improved = 0
-  if localmin < startrank
+  if localmin < baserank
     improved = 1
-  if localmin == startrank
+  if localmin == baserank
     if localden < seedden
       improved = 1
   if improved == 1
@@ -668,7 +749,7 @@ while rd < ROUNDS
         body = body + uu.to_s() + " " + vv.to_s() + " " + ww.to_s() + "\n"
         di += 1
       write_file(gpubestpath, body)
-      << "round " + rd.to_s() + "  GPU IMPROVED  rank " + startrank.to_s() + " -> " + localmin.to_s() + "  density " + seedden.to_s() + " -> " + localden.to_s() + "  verify=" + vok.to_s()
+      << "round " + rd.to_s() + "  GPU IMPROVED  rank " + baserank.to_s() + " (launch " + startrank.to_s() + ") -> " + localmin.to_s() + "  density " + seedden.to_s() + " -> " + localden.to_s() + "  verify=" + vok.to_s()
       flush()
       if localmin < globalbest
         globalbest = localmin
@@ -676,7 +757,7 @@ while rd < ROUNDS
         if localmin <= recordtarget
           recordhit = recordhit + 1
           write_file(recordpath + "_" + recordhit.to_s() + ".txt", body)
-  << "round " + rd.to_s() + "/" + ROUNDS.to_s() + "  started_from=" + startrank.to_s() + "  seed_density=" + seedden.to_s() + "  round_best=" + localmin.to_s() + "  round_density=" + localden.to_s() + "  global_best=" + globalbest.to_s()
+  << "round " + rd.to_s() + "/" + ROUNDS.to_s() + "  base=" + baserank.to_s() + "  launch=" + startrank.to_s() + "  escapes=" + ESCAPE_SEEDS.to_s() + "  seed_density=" + seedden.to_s() + "  round_best=" + localmin.to_s() + "  round_density=" + localden.to_s() + "  global_best=" + globalbest.to_s()
   flush()
   rd += 1
 

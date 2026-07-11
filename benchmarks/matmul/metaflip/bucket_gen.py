@@ -29,8 +29,62 @@ Usage: python3 bucket_gen.py <n> <m> <p> <recv> [seed] [cap] [thr] [thrper] [plu
 """
 
 
+def _plus_transition_block(offsets, plusper, axes="w", indent="  "):
+    """Emit a tensor-preserving split on W or on a uniformly random axis."""
+    if axes not in ("w", "any"):
+        raise ValueError("plus_axes must be 'w' or 'any'")
+    o = offsets
+    i = indent
+    common = f"""{i}if (mv % {plusper}) == 0
+{i}  rng = (rng * 1103515245 + 12345) & 2147483647
+{i}  pd1 = (rng * rank) >> 31 ## i64
+{i}  pt1 = st[{o['LIVE']} + pd1] ## i64
+{i}  rng = (rng * 1103515245 + 12345) & 2147483647
+{i}  pd2 = (rng * rank) >> 31 ## i64
+{i}  pt2 = st[{o['LIVE']} + pd2] ## i64
+{i}  spu = st[{o['US']} + pt1] ## i64
+{i}  spv = st[{o['VS']} + pt1] ## i64
+{i}  spw = st[{o['WS']} + pt1] ## i64"""
+    if axes == "w":
+        return common + f"""
+{i}  wpr = st[{o['WS']} + pt2] ## i64
+{i}  if wpr != spw
+{i}    if wpr != 0
+{i}      spw2 = spw ^ wpr ## i64
+{i}      rank = ins_term(st, spu, spv, spw, rank) ## i64
+{i}      rank = ins_term(st, spu, spv, wpr, rank) ## i64
+{i}      rank = ins_term(st, spu, spv, spw2, rank) ## i64"""
+    return common + f"""
+{i}  rng = (rng * 1103515245 + 12345) & 2147483647
+{i}  paxis = (((rng >> 22) & 511) * 3) >> 9 ## i64
+{i}  if paxis == 0
+{i}    upr = st[{o['US']} + pt2] ## i64
+{i}    if upr != spu
+{i}      if upr != 0
+{i}        spu2 = spu ^ upr ## i64
+{i}        rank = ins_term(st, spu, spv, spw, rank) ## i64
+{i}        rank = ins_term(st, upr, spv, spw, rank) ## i64
+{i}        rank = ins_term(st, spu2, spv, spw, rank) ## i64
+{i}  if paxis == 1
+{i}    vpr = st[{o['VS']} + pt2] ## i64
+{i}    if vpr != spv
+{i}      if vpr != 0
+{i}        spv2 = spv ^ vpr ## i64
+{i}        rank = ins_term(st, spu, spv, spw, rank) ## i64
+{i}        rank = ins_term(st, spu, vpr, spw, rank) ## i64
+{i}        rank = ins_term(st, spu, spv2, spw, rank) ## i64
+{i}  if paxis == 2
+{i}    wpr = st[{o['WS']} + pt2] ## i64
+{i}    if wpr != spw
+{i}      if wpr != 0
+{i}        spw2 = spw ^ wpr ## i64
+{i}        rank = ins_term(st, spu, spv, spw, rank) ## i64
+{i}        rank = ins_term(st, spu, spv, wpr, rank) ## i64
+{i}        rank = ins_term(st, spu, spv, spw2, rank) ## i64"""
+
+
 def gen(n, m, p, recv, arr=200, cap=14000000000, seed=None, thr=6, thrper=300000, plusper=2000, band=10, adaptive_esc=None, stopat=None, randstart=False, z1max=4, z1q=100000000, workq=3000000000, wstep=10, wq=500000000, thr0=10, thrbump=2, rsmax=4, world_record=None, tiegap=2000, tiemax=500, record_bandq=None, runtime_seed=False,
-        worker=False):
+        worker=False, plus_axes="w"):
     thrspan = thr + 1
     AB, BB, CB = n*m, m*p, n*p
     MODA, MODB = 1 << AB, 1 << BB
@@ -117,6 +171,10 @@ while ni < {n}
     esc_block = ""
     impreset = ""
     cycles_read = ""   # cal2zone2: read sawtooth-cycles-before-CYCLEOUT from av0[5]
+    recordq_read = ""  # optional runtime record-band budget from av0[6]
+    recordq_reset = "" # post-improvement frontier budget override
+    cycleout_init = ""
+    cycleout_finish = "  mv += 1"
     if adaptive_esc == "wcal2":
         # start 1-4 @100M; work 5..wthr @3B; wander @+10/500M; wrap>60 -> bstart.
         # 2 wraps -> fresh RNG + FULL reset-to-seed (naive) incl. best arrays.
@@ -260,16 +318,23 @@ while ni < {n}
           st[{O['BWS']} + rci] = st[{O['WS']} + rsl]
           rci += 1"""
         cycle_reset = restart_naive if seed is None else ""
-        # Record-mode budget: while the LIVE scheme sits AT the world record
-        # (rank <= world_record), dwell record_bandq moves per band before
+        # Record-mode budget: while the walker's SAVED BEST is at the world
+        # record (best_rank <= world_record), dwell record_bandq moves per band
         # escalating (vs the 2B/500M zone quanta) — give a walker parked on the
         # frontier a much longer look at each band. Only injected when both a
         # world_record and a record_bandq are supplied.
         recordq_block = ""
         if world_record is not None and record_bandq is not None:
             recordq_block = f"""
-    if rank <= {world_record}
-      q = {record_bandq}"""
+    if best_rank <= {world_record}
+      q = recordqv"""
+            recordq_read = f"""recordqv = {record_bandq} ## i64
+if av0.size() > 6
+  recordqv = av0[6].to_i()
+if best_rank <= {world_record}
+  nextesc = recordqv
+<< "RECORDQ " + recordqv.to_s()
+flush()"""
         esc_block = f"""  if mv >= nextesc
     nb = aband + 1 ## i64
     if aband > wthr
@@ -308,12 +373,22 @@ while ni < {n}
         # (mv = cap); the orchestrator reseeds it from the fleet's current best
         # (random among ties) and relaunches. wthr rises by ONE whenever a descent
         # lands within one band of the threshold. Record budget (record_bandq):
-        # dwell that many moves per band while rank <= world_record.
+        # dwell that many moves per band while best_rank <= world_record.
         recordq_block = ""
         if world_record is not None and record_bandq is not None:
             recordq_block = f"""
-    if rank <= {world_record}
-      q = {record_bandq}"""
+      if best_rank <= {world_record}
+        q = recordqv"""
+            recordq_read = f"""recordqv = {record_bandq} ## i64
+if av0.size() > 6
+  recordqv = av0[6].to_i()
+if best_rank <= {world_record}
+  nextesc = recordqv
+<< "RECORDQ " + recordqv.to_s()
+flush()"""
+            recordq_reset = f"""
+    if best_rank <= {world_record}
+      nextesc = mv + recordqv"""
         # sawtooth cycles before a CYCLEOUT reseed: runtime-tunable via av0[5]
         # (default 4 when not supplied, so existing 5-arg callers are unchanged).
         cycles_read = """cyclesv = 4 ## i64
@@ -321,6 +396,11 @@ if av0.size() > 5
   cyclesv = av0[5].to_i()
 << "CYCLES " + cyclesv.to_s()
 flush()"""
+        cycleout_init = "cycleout = 0 ## i64"
+        cycleout_finish = f"""  if cycleout == 0
+    mv += 1
+  if cycleout == 1
+    mv = {cap}"""
         esc_block = f"""  if mv >= nextesc
     nb = aband + 1 ## i64
     if aband > wthr
@@ -331,14 +411,15 @@ flush()"""
       if wraps >= cyclesv
         << "CYCLEOUT rank=" + rank.to_s() + " mv=" + mv.to_s()
         flush()
-        mv = {cap}
-    aband = nb
-    q = 2500000000 ## i64
-    if aband > wthr
-      q = 500000000{recordq_block}
-    nextesc = mv + q
-    << "BAND band=" + aband.to_s() + " rank=" + rank.to_s() + " mv=" + mv.to_s()
-    flush()"""
+        cycleout = 1
+    if cycleout == 0
+      aband = nb
+      q = 2500000000 ## i64
+      if aband > wthr
+        q = 500000000{recordq_block}
+      nextesc = mv + q
+      << "BAND band=" + aband.to_s() + " rank=" + rank.to_s() + " mv=" + mv.to_s()
+      flush()"""
         impreset = f"""    if aband >= wthr - 1
       if aband <= wthr + 1
         wthr = wthr + 1
@@ -350,7 +431,8 @@ flush()"""
       aband = bstart
       << "BAND band=" + aband.to_s() + " rank=" + rank.to_s() + " mv=" + mv.to_s()
       flush()
-    nextesc = mv + 2500000000"""
+    wraps = 0
+    nextesc = mv + 2500000000{recordq_reset}"""
     elif adaptive_esc == "zones":
         # zone quanta: bands 1-4 -> +1/500M; 5-20 -> +1/2B; 21+ -> +5/1B; sawtooth at 60
         esc_block = """  if mv >= nextesc
@@ -472,6 +554,7 @@ prevrank = rank ## i64"""
 rng = (rng * 1103515245 + 12345) & 2147483647
 rng = (rng * 1103515245 + 12345) & 2147483647
 bstart = 1 + ((rng >> 27) % {rsmax}) ## i64"""
+    plus_block = _plus_transition_block(O, plusper, axes=plus_axes, indent="  ")
     return f'''st = i64[{TOT}]
 st[{O['P2']}] = 1
 kk = 1
@@ -708,9 +791,11 @@ nextesc = {z1q} ## i64
 wthr = {thr0} ## i64
 wraps = 0 ## i64
 {cycles_read}
+{recordq_read}
 << "BSTART " + bstart.to_s()
 flush()
 mv = 0 ## i64
+{cycleout_init}
 while mv < {cap}
   rng = (rng * 1103515245 + 12345) & 2147483647
   td = (rng * rank) >> 31 ## i64
@@ -767,23 +852,7 @@ while mv < {cap}
       rank = ins_term(st, uj, vj, wj, rank) ## i64
       rank = ins_term(st, au, av2, aw, rank) ## i64
       rank = ins_term(st, bu, bv, bw, rank) ## i64
-  if (mv % {plusper}) == 0
-    rng = (rng * 1103515245 + 12345) & 2147483647
-    pd1 = (rng * rank) >> 31 ## i64
-    pt1 = st[{O['LIVE']} + pd1] ## i64
-    rng = (rng * 1103515245 + 12345) & 2147483647
-    pd2 = (rng * rank) >> 31 ## i64
-    pt2 = st[{O['LIVE']} + pd2] ## i64
-    spu = st[{O['US']} + pt1] ## i64
-    spv = st[{O['VS']} + pt1] ## i64
-    spw = st[{O['WS']} + pt1] ## i64
-    wpr = st[{O['WS']} + pt2] ## i64
-    if wpr != spw
-      if wpr != 0
-        spw2 = spw ^ wpr ## i64
-        rank = ins_term(st, spu, spv, spw, rank) ## i64
-        rank = ins_term(st, spu, spv, wpr, rank) ## i64
-        rank = ins_term(st, spu, spv, spw2, rank) ## i64
+{plus_block}
   threshold = {thr} - ((mv / {thrper}) % {thrspan}) ## i64
 {esc_block}
   snapped = 0 ## i64
@@ -839,7 +908,7 @@ while mv < {cap}
     << "  mv=" + mv.to_s() + " best=" + best_rank.to_s() + " cur=" + rank.to_s() + " v=" + verify(st, {O['US']}, {O['VS']}, {O['WS']}, {O['LIVE']}, rank, 7).to_s()
     flush()
 {prevrank_update}
-  mv += 1
+{cycleout_finish}
 << "DONE best=" + best_rank.to_s() + " verify=" + verify(st, {O['BUS']}, {O['BVS']}, {O['BWS']}, {O['IDL']}, best_rank, 31).to_s()
 di = 0
 while di < best_rank
@@ -849,7 +918,7 @@ while di < best_rank
 
 
 def gen_worker(n, m, p, recv, world_record=None, cycles=4, thr=6, thrper=300000,
-               plusper=2000, arr=200):
+               plusper=2000, arr=200, plus_axes="w"):
     """Thread-worker form of the cal2zone2 walker for flipfleet.w.
 
     Emits a MODULE of functions (no standalone `main`) that operate on a caller-
@@ -895,16 +964,26 @@ def gen_worker(n, m, p, recv, world_record=None, cycles=4, thr=6, thrper=300000,
 
     # ---- reuse gen()'s io-free hash-chain helpers by slicing them out ----------
     full = gen(n, m, p, recv, adaptive_esc="cal2zone2", band=1, thr0=7,
-               world_record=None, thr=thr, thrper=thrper, plusper=plusper, arr=arr)
+               world_record=None, thr=thr, thrper=thrper, plusper=plusper, arr=arr,
+               plus_axes=plus_axes)
     helpers = full[full.index("-> hsh(x)"):full.index("\nrank = 0 ## i64")]
 
     thrspan = thr + 1
     # record budget: dwell 10B moves/band while at/under the world record
     recq = ""
+    recreset = ""
+    recseed = ""
     if world_record is not None:
         recq = f"""
-      if rank <= {world_record}
+      if best_rank <= {world_record}
         q = 10000000000"""
+        recreset = f"""
+      if best_rank <= {world_record}
+        nextesc = mv + 10000000000"""
+        recseed = f"""
+  if rank <= {world_record}
+    st[{S} + 7] = 10000000000"""
+    plus_block = _plus_transition_block(O, plusper, axes=plus_axes, indent="    ")
 
     return f'''{helpers}
 
@@ -966,6 +1045,7 @@ def gen_worker(n, m, p, recv, world_record=None, cycles=4, thr=6, thrper=300000,
   st[{S} + 5] = 0
   st[{S} + 6] = 0
   st[{S} + 7] = 100000000
+{recseed}
   st[{S} + 8] = cycles
   st[{S} + 9] = 0
   st[{S} + 10] = dslack
@@ -1045,23 +1125,7 @@ def gen_worker(n, m, p, recv, world_record=None, cycles=4, thr=6, thrper=300000,
         rank = ins_term(st, uj, vj, wj, rank) ## i64
         rank = ins_term(st, au, av2, aw, rank) ## i64
         rank = ins_term(st, bu, bv, bw, rank) ## i64
-    if (mv % {plusper}) == 0
-      rng = (rng * 1103515245 + 12345) & 2147483647
-      pd1 = (rng * rank) >> 31 ## i64
-      pt1 = st[{O['LIVE']} + pd1] ## i64
-      rng = (rng * 1103515245 + 12345) & 2147483647
-      pd2 = (rng * rank) >> 31 ## i64
-      pt2 = st[{O['LIVE']} + pd2] ## i64
-      spu = st[{O['US']} + pt1] ## i64
-      spv = st[{O['VS']} + pt1] ## i64
-      spw = st[{O['WS']} + pt1] ## i64
-      wpr = st[{O['WS']} + pt2] ## i64
-      if wpr != spw
-        if wpr != 0
-          spw2 = spw ^ wpr ## i64
-          rank = ins_term(st, spu, spv, spw, rank) ## i64
-          rank = ins_term(st, spu, spv, wpr, rank) ## i64
-          rank = ins_term(st, spu, spv, spw2, rank) ## i64
+{plus_block}
     threshold = {thr} - ((mv / {thrper}) % {thrspan}) ## i64
     if mv >= nextesc
       nb = aband + 1 ## i64
@@ -1106,7 +1170,8 @@ def gen_worker(n, m, p, recv, world_record=None, cycles=4, thr=6, thrper=300000,
             wthr = 58
       if aband != bstart
         aband = bstart
-      nextesc = mv + 500000000
+      wraps = 0
+      nextesc = mv + 500000000{recreset}
       ci = 0 ## i64
       while ci < rank
         sl = st[{O['LIVE']} + ci] ## i64
@@ -1186,6 +1251,7 @@ def gen_worker(n, m, p, recv, world_record=None, cycles=4, thr=6, thrper=300000,
   st[{S} + 5] = 0
   st[{S} + 6] = 0
   st[{S} + 7] = 100000000
+{recseed}
   st[{S} + 9] = 0
   0
 
@@ -1225,6 +1291,7 @@ def gen_worker(n, m, p, recv, world_record=None, cycles=4, thr=6, thrper=300000,
   st[{S} + 5] = 0
   st[{S} + 6] = 0
   st[{S} + 7] = 100000000
+{recseed}
   st[{S} + 9] = 0
   rank
 

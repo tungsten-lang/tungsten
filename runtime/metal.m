@@ -707,6 +707,32 @@ WValue w_metal_buffer_read_i32(WValue buffer_v, WValue index_v) {
     return w_int((int64_t)v);
 }
 
+WValue w_metal_buffer_write_i64(WValue buffer_v, WValue index_v, WValue value_v) {
+    WMetalBuffer *b = as_metal_buffer(buffer_v);
+    if (!b) w_raise(w_string("Metal.buffer.write_i64: not a buffer"));
+    int64_t i = w_to_i64(index_v);
+    int64_t off = i * (int64_t)sizeof(int64_t);
+    if (off < 0 || off + (int64_t)sizeof(int64_t) > b->size) {
+        w_raise(w_string("Metal.buffer.write_i64: index out of bounds"));
+    }
+    int64_t v = w_to_i64(value_v);
+    memcpy((char *)[(id<MTLBuffer>)b->handle contents] + off, &v, sizeof(int64_t));
+    return W_NIL;
+}
+
+WValue w_metal_buffer_read_i64(WValue buffer_v, WValue index_v) {
+    WMetalBuffer *b = as_metal_buffer(buffer_v);
+    if (!b) w_raise(w_string("Metal.buffer.read_i64: not a buffer"));
+    int64_t i = w_to_i64(index_v);
+    int64_t off = i * (int64_t)sizeof(int64_t);
+    if (off < 0 || off + (int64_t)sizeof(int64_t) > b->size) {
+        w_raise(w_string("Metal.buffer.read_i64: index out of bounds"));
+    }
+    int64_t v;
+    memcpy(&v, (char *)[(id<MTLBuffer>)b->handle contents] + off, sizeof(int64_t));
+    return w_int(v);
+}
+
 /* bfloat16: the top 16 bits of an IEEE float32 (1 sign, 8 exponent, 7 mantissa).
  * Write rounds f32→bf16 round-to-nearest-even; read widens bf16→f32 by zero-
  * filling the low 16 mantissa bits. Used by Tensor's CPU face for the bf16

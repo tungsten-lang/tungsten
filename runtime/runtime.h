@@ -975,6 +975,8 @@ WValue w_metal_buffer_write_f16(WValue buffer, WValue index, WValue value);
 WValue w_metal_buffer_read_f16(WValue buffer, WValue index);
 WValue w_metal_buffer_write_i32(WValue buffer, WValue index, WValue value);
 WValue w_metal_buffer_read_i32(WValue buffer, WValue index);
+WValue w_metal_buffer_write_i64(WValue buffer, WValue index, WValue value);
+WValue w_metal_buffer_read_i64(WValue buffer, WValue index);
 WValue w_metal_buffer_write_bf16(WValue buffer, WValue index, WValue value);
 WValue w_metal_buffer_read_bf16(WValue buffer, WValue index);
 /* Storage width in bits for a typed-array ebits code (e.g. -32→32, -116→16,

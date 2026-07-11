@@ -1253,13 +1253,20 @@ use ast
       out << sname
       out << ";\n"
       return nil
-    if vrecv != nil && is_ast_node?(vrecv) && ast_kind(vrecv) == :var && vrecv.name == "gpu" && (vname == "shared_f32" || vname == "shared_i32")
+    if vrecv != nil && is_ast_node?(vrecv) && ast_kind(vrecv) == :var && vrecv.name == "gpu" && (vname == "shared_f32" || vname == "shared_i32" || vname == "shared_i64")
       vargs = value.args
       if vargs == nil || vargs.size() != 1 || ast_kind(vargs[0]) != :int
         gpu_kernel_error(ctx[:node], "gpu." + vname + " takes one integer-literal size")
       sname = target.name
-      elt = vname == "shared_f32" ? "float" : "int"
-      ctx[:var_types][sname] = vname == "shared_f32" ? "f32\[]".to_sym() : "i32\[]".to_sym()
+      elt = "int"
+      atype = "i32\[]".to_sym()
+      if vname == "shared_f32"
+        elt = "float"
+        atype = "f32\[]".to_sym()
+      elsif vname == "shared_i64"
+        elt = "long"
+        atype = "i64\[]".to_sym()
+      ctx[:var_types][sname] = atype
       emit_indent(out, ctx)
       if ctx[:dialect] == "cuda"
         out << "__shared__ "

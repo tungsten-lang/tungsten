@@ -37,7 +37,8 @@ import time
 def parse_scheme(path):
     import re
     terms, us, vs, ws = [], {}, {}, {}
-    lines = open(path).read().splitlines()
+    with open(path) as f:
+        lines = f.read().splitlines()
     bare = lines and lines[0].strip().isdigit() and not lines[0].startswith(("us", "R"))
     for idx, ln in enumerate(lines):
         ln = ln.strip()

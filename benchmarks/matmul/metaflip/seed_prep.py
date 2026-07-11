@@ -25,7 +25,8 @@ from metaflip_proto2 import T, recon, extend, project
 def parse_terms(path):
     if path.endswith(".json"):
         return None, None  # handled by parse_perminov_json in main()
-    txt = open(path).read()
+    with open(path) as stream:
+        txt = stream.read()
     if re.search(r'^\s*(us|vs|ws)\[\d+\] = \d+', txt, re.M):
         us, vs, ws = {}, {}, {}
         for mm in re.finditer(r'(us|vs|ws)\[(\d+)\] = (\d+)', txt):

@@ -326,6 +326,7 @@ use hashing
   out << declare_fn("w_array_new", wv, "i64, i64")
   out << declare_fn("w_range_pow_sum", wv, "i64, i64, i64, i64")
   out << declare_fn("w_array_reuse_or_new", wv, "ptr")
+  out << declare_fn("w_fused_out_reuse_or_new", wv, "ptr, i64, i64")
   out << declare_fn("w_array_push", wv, wv2)
   out << declare_fn("w_array_get", wv, wv2)
   out << declare_fn("w_array_set", wv, wv3)
@@ -771,6 +772,8 @@ use hashing
     ["w_hash_reuse_or_new"]
   when :call_reuse_or_new_typed
     ["w_array_reuse_or_new"]
+  when :call_fused_out_reuse
+    ["w_fused_out_reuse_or_new"]
   when :call_reuse_or_new_strbuf
     ["w_strbuf_reuse_or_new"]
   when :call_reuse_and_drain_or_new_hash
@@ -2848,6 +2851,8 @@ use hashing
     inst[:temp] + " = call i64 @w_hash_reuse_or_new(ptr @" + inst[:slot] + ")"
   when :call_reuse_or_new_typed
     inst[:temp] + " = call i64 @w_array_reuse_or_new(ptr @" + inst[:slot] + ", i64 " + inst[:bits].to_s() + ", i64 " + inst[:cap] + ")"
+  when :call_fused_out_reuse
+    inst[:temp] + " = call i64 @w_fused_out_reuse_or_new(ptr @" + inst[:slot] + ", i64 " + inst[:bits].to_s() + ", i64 " + inst[:cap] + ")"
   when :call_reuse_or_new_strbuf
     inst[:temp] + " = call i64 @w_strbuf_reuse_or_new(ptr @" + inst[:slot] + ", i64 " + inst[:cap] + ")"
   when :call_reuse_and_drain_or_new_hash

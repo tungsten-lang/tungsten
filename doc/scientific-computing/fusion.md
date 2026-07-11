@@ -69,26 +69,34 @@ dtype semantics: a DOT op inherits its lhs dtype, and the array
 libm methods promote to f64 output (`array_map_f64` allocates f64
 regardless of input).
 
-**GPU tier**: on by default for arithmetic-only f32 trees, inside a
-measured window of **2M–32M elements** (`TUNGSTEN_FUSED_GPU=0`
-disables; `_MIN`/`_MAX` move the window). Buffers are zero-copy wraps
-of the arrays' own pages (`newBufferWithBytesNoCopy` — unified memory;
-a memcpy path remains as fallback for unaligned storage). The 500M
-sweep that set the window (2-input f32 chain, ms/iter):
+**`## reuse` output buffers — the big allocation lever.** A fused
+expression allocates a fresh result array per execution; in a loop
+that's a calloc plus page fault-in every iteration. `y = <fused expr>
+## reuse` (same user-assertion contract as `f64[n] ## reuse`) gives the
+site a persistent output buffer instead. Measured on the 2-input f32
+chain, CPU ladder, ms/iter — 1.3–4× at every size:
 
-| n | CPU 8t | GPU zero-copy |
-|---|--------|---------------|
-| 4M | 1.25 | **1.15** |
-| 16M | 4.5 | **3.2** |
-| 64M | **8.8** | 10.2 |
-| 256M | **24.3** | 42.7 |
-| 500M | **45.3** | 77.3 |
+| n | fresh out | `## reuse` |
+|---|-----------|------------|
+| 4M | 1.25 | **0.3** |
+| 16M | 4.5 | **1.4** |
+| 64M | 8.8 | **4.6** |
+| 256M | 24.3 | **17.3** |
+| 500M | 45.3 | **32** |
 
-Below the window, dispatch latency dominates; above it, per-dispatch VM
-wiring does — each fused execution allocates a fresh output array, so
-its multi-GB zero-copy wrap re-maps pages on every call, and GPU-side
-fault-in of fresh pages is costlier than CPU first-touch. Extending the
-window upward needs output-buffer reuse across executions.
+**GPU tier**: on by default for arithmetic-only f32 trees with
+**fresh outputs**, inside a measured window of **2M–32M elements**
+(`TUNGSTEN_FUSED_GPU=0` disables; `_MIN`/`_MAX` move the window).
+Buffers are zero-copy wraps of the arrays' own pages
+(`newBufferWithBytesNoCopy`, unified memory), cached per site keyed by
+(array identity, base, length) — stable inputs wire once. With the
+input-wrap cache, the fresh-out window measures ~2× over fresh-out CPU
+(0.75 vs 1.25 ms at 4M, 2.1 vs 4.5 at 16M). Outside the window the
+CPU ladder runs: below it dispatch latency dominates; above it the
+per-call VM wiring of the fresh multi-GB output does. When the output
+is **stable** (`## reuse`), the runtime skips the GPU entirely — the
+allocation-free CPU stream measured faster than the GPU at every size
+for arithmetic trees, so reuse sites always take the CPU ladder.
 
 The trees where the GPU wins ~30× (sin at 10M: 0.45 ms vs 23.6 ms)
 remain CPU-side, blocked by the f64-promotion semantics above (MSL has

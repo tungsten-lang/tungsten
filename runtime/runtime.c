@@ -18320,11 +18320,36 @@ void w_node_kind_class_register_wv(int32_t kind, WValue klass) {
     g_node_kind_class[kind & 0xFF] = c->class_id + 1;
 }
 
+static WMethod *w_type_class_method(uint16_t class_id, WValue name, int argc) {
+    WMethod *m = w_method_lookup_arity(g_class_table[class_id], name, argc + 1);
+    if (!m) m = w_method_lookup(g_class_table[class_id], name);
+    return m;
+}
+
+static WValue w_type_class_method_call(WMethod *m, WValue recv, WArray *args) {
+    int expected = m->arity - 1;
+    WValue a[8];
+    for (int i = 0; i < expected && i < 8; i++)
+        a[i] = (i < args->size) ? args->slots[i] : W_NIL;
+    typedef WValue (*fn0)(WValue);
+    typedef WValue (*fn1)(WValue, WValue);
+    typedef WValue (*fn2)(WValue, WValue, WValue);
+    typedef WValue (*fn3)(WValue, WValue, WValue, WValue);
+    typedef WValue (*fn4)(WValue, WValue, WValue, WValue, WValue);
+    switch (expected) {
+        case 0: return ((fn0)m->fn_ptr)(recv);
+        case 1: return ((fn1)m->fn_ptr)(recv, a[0]);
+        case 2: return ((fn2)m->fn_ptr)(recv, a[0], a[1]);
+        case 3: return ((fn3)m->fn_ptr)(recv, a[0], a[1], a[2]);
+        case 4: return ((fn4)m->fn_ptr)(recv, a[0], a[1], a[2], a[3]);
+        default: return W_UNDEF;
+    }
+}
+
 static WValue w_type_class_dispatch(uint16_t class_id, WValue recv, WValue name, WArray *args) {
     typedef WValue (*mm_fn1)(WValue, WValue);
     typedef WValue (*mm_fn2)(WValue, WValue, WValue);
-    WMethod *m = w_method_lookup_arity(g_class_table[class_id], name, args->size + 1);
-    if (!m) m = w_method_lookup(g_class_table[class_id], name);
+    WMethod *m = w_type_class_method(class_id, name, args->size);
     if (!m) {
         /* Ruby-style method_missing fallback: when the named method
          * isn't found anywhere in the class tree, walk the tree again
@@ -18372,23 +18397,7 @@ static WValue w_type_class_dispatch(uint16_t class_id, WValue recv, WValue name,
         }
         return W_UNDEF;
     }
-    int expected = m->arity - 1;
-    WValue a[8];
-    for (int i = 0; i < expected && i < 8; i++)
-        a[i] = (i < args->size) ? args->slots[i] : W_NIL;
-    typedef WValue (*fn0)(WValue);
-    typedef WValue (*fn1)(WValue, WValue);
-    typedef WValue (*fn2)(WValue, WValue, WValue);
-    typedef WValue (*fn3)(WValue, WValue, WValue, WValue);
-    typedef WValue (*fn4)(WValue, WValue, WValue, WValue, WValue);
-    switch (expected) {
-        case 0: return ((fn0)m->fn_ptr)(recv);
-        case 1: return ((fn1)m->fn_ptr)(recv, a[0]);
-        case 2: return ((fn2)m->fn_ptr)(recv, a[0], a[1]);
-        case 3: return ((fn3)m->fn_ptr)(recv, a[0], a[1], a[2]);
-        case 4: return ((fn4)m->fn_ptr)(recv, a[0], a[1], a[2], a[3]);
-        default: return W_UNDEF;
-    }
+    return w_type_class_method_call(m, recv, args);
 }
 
 static inline WValue w_try_type_class_dispatch(WValue recv, WValue name, WArray *args) {
@@ -25658,6 +25667,26 @@ static void w_fused_init_thresholds(void) {
     w_fused_max_threads_v = max_t;
     /* max_t <= 1 disables the parallel path entirely (should_mt never fires) */
     w_fused_mt_min_v = (max_t <= 1) ? INT64_MAX : mt_min;
+}
+
+/* ## reuse on a fused expression: per-site persistent output buffer.
+ * Same user-assertion contract as `f64[n] ## reuse` — the caller promises
+ * the previous result from this site is dead. Keeps the output base stable,
+ * which kills the per-execution calloc + fault-in on CPU and lets the GPU
+ * tier cache its zero-copy wrap. */
+WValue w_fused_out_reuse_or_new(WValue *slot, int64_t element_bits, int64_t n) {
+    WValue v = *slot;
+    if (v != W_NIL) {
+        WArray *a = (WArray *)w_as_ptr(v);
+        if (a->ebits == (int8_t)element_bits && a->cap >= n) {
+            a->start = 0;
+            a->size = (int32_t)n;
+            return v;
+        }
+    }
+    v = w_array_new_uninit_sized(element_bits, n);
+    *slot = v;
+    return v;
 }
 
 int64_t w_fused_should_mt(int64_t n) {

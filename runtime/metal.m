@@ -2175,8 +2175,20 @@ WValue w_metal4_dispatch_groups_3d(WValue queue_v, WValue allocator_v,
 typedef struct {
     void *pipeline;                          /* id<MTLComputePipelineState> */
     int failed;                              /* MSL compile failed — never retry */
-    void *bufs[W_FUSED_GPU_MAX_ARRS + 1];    /* arrays + out */
-    int64_t caps[W_FUSED_GPU_MAX_ARRS + 1];  /* byte capacities */
+    void *bufs[W_FUSED_GPU_MAX_ARRS + 1];    /* copy-fallback buffers */
+    int64_t caps[W_FUSED_GPU_MAX_ARRS + 1];  /* their byte capacities */
+    /* Cached zero-copy wraps, keyed by (array WValue, base, len): the same
+     * live array with unmoved storage means the pages are still mapped, so
+     * reusing the wrap is sound and skips the per-dispatch VM wiring. */
+    void *wraps[W_FUSED_GPU_MAX_ARRS + 1];   /* retained MTLBuffers */
+    WValue wrap_wv[W_FUSED_GPU_MAX_ARRS + 1];
+    void *wrap_base[W_FUSED_GPU_MAX_ARRS + 1];
+    int64_t wrap_len[W_FUSED_GPU_MAX_ARRS + 1];
+    /* Last-seen keys (even when no wrap was made): a repeat with identical
+     * keys marks the site's buffers as stable — worth wiring above the
+     * window ceiling because the wraps will be cached from then on. */
+    WValue seen_wv[W_FUSED_GPU_MAX_ARRS + 1];
+    void *seen_base[W_FUSED_GPU_MAX_ARRS + 1];
     void *scl_buf;
     void *n_buf;
 } WFusedGpuSite;
@@ -2229,7 +2241,7 @@ static id<MTLBuffer> fused_wrap_nocopy(WArray *a, int64_t bytes) {
 int64_t w_fused_gpu_run(int64_t site_id, WValue msl_v, int64_t blk_addr,
                         int64_t n_arrs, int64_t n_scls, int64_t n) {
     fused_gpu_init();
-    if (n < g_fused_gpu_min || n > g_fused_gpu_max) return 0;
+    if (n < g_fused_gpu_min) return 0;
     if (site_id < 0 || site_id >= W_FUSED_GPU_MAX_SITES) return 0;
     if (n_arrs < 1 || n_arrs > W_FUSED_GPU_MAX_ARRS) return 0;
     if (n_scls > W_FUSED_GPU_MAX_SCLS) return 0;
@@ -2263,16 +2275,48 @@ int64_t w_fused_gpu_run(int64_t site_id, WValue msl_v, int64_t blk_addr,
         }
         int64_t *blk = (int64_t *)(uintptr_t)blk_addr;
         int64_t bytes = n * 4;
-        /* Zero-copy first: wrap each array's storage directly when page-
-         * aligned (unified memory — the GPU reads/writes the array's own
-         * pages, no copies at all). Fall back per-slot to the cached copy
-         * buffer. Slot 0..n_arrs-1: inputs; slot n_arrs: out. */
+        /* Resolve buffers, zero-copy first. Slot 0..n_arrs-1: inputs;
+         * slot n_arrs: out. Pass 1 checks the wrap cache and whether the
+         * site's buffers are stable; above the window ceiling we only
+         * proceed when every slot is either cached or stable (the one-time
+         * wiring then amortizes across repeats). */
         id<MTLBuffer> arg_bufs[W_FUSED_GPU_MAX_ARRS + 1];
+        WValue wv_k[W_FUSED_GPU_MAX_ARRS + 1];
+        void *base_k[W_FUSED_GPU_MAX_ARRS + 1];
+        int cached[W_FUSED_GPU_MAX_ARRS + 1];
+        int out_stable;
+        for (int64_t k = 0; k <= n_arrs; k++) {
+            WValue wv = (WValue)blk[k == n_arrs ? 0 : 1 + k];
+            WArray *a = (WArray *)w_as_ptr(wv);
+            void *base = (uint8_t *)a->slots + (int64_t)a->start * 4;
+            wv_k[k] = wv;
+            base_k[k] = base;
+            cached[k] = (s->wraps[k] && s->wrap_wv[k] == wv &&
+                         s->wrap_base[k] == base && s->wrap_len[k] == bytes);
+        }
+        /* A stable output buffer (## reuse) means the CPU ladder streams
+         * with no allocation or fault-in — measured faster than the GPU at
+         * every size for arithmetic trees. The GPU's win is exactly the
+         * fresh-output window, where the CPU pays first-touch per call. */
+        out_stable = (s->seen_wv[n_arrs] == wv_k[n_arrs] &&
+                      s->seen_base[n_arrs] == base_k[n_arrs]);
+        s->seen_wv[n_arrs] = wv_k[n_arrs];
+        s->seen_base[n_arrs] = base_k[n_arrs];
+        if (out_stable || n > g_fused_gpu_max) return 0;
         int copied_out = 0;
         for (int64_t k = 0; k <= n_arrs; k++) {
-            WArray *a = (WArray *)w_as_ptr((WValue)blk[k == n_arrs ? 0 : 1 + k]);
+            if (cached[k]) {
+                arg_bufs[k] = (id<MTLBuffer>)s->wraps[k];
+                continue;
+            }
+            WArray *a = (WArray *)w_as_ptr(wv_k[k]);
             id<MTLBuffer> wrap = fused_wrap_nocopy(a, bytes);
             if (wrap) {
+                if (s->wraps[k]) [(id<MTLBuffer>)s->wraps[k] release];
+                s->wraps[k] = (void *)[wrap retain];
+                s->wrap_wv[k] = wv_k[k];
+                s->wrap_base[k] = base_k[k];
+                s->wrap_len[k] = bytes;
                 arg_bufs[k] = wrap;
                 continue;
             }

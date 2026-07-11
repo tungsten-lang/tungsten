@@ -84,6 +84,23 @@ while i < n
   i = i + 1
 << "tungsten_fused n=" + n.to_s() + " avg_ms=" + ms.to_s() + " sum=" + s.to_s()
 
+# ---- fused + ## reuse (persistent output buffer, no alloc per iteration) ----
+yr = (x .* a .+ b).sin() .+ c ## reuse
+t0 = ccall("__w_clock_ms")
+iters = 50
+k = 0
+while k < iters
+  yr = (x .* a .+ b).sin() .+ c ## reuse
+  k = k + 1
+t1 = ccall("__w_clock_ms")
+ms = (t1 - t0 + ~0.0) / (iters + ~0.0)
+s = ~0.0
+i = 0 ## i64
+while i < n
+  s = s + yr[i]
+  i = i + 1
+<< "tungsten_fused_reuse n=" + n.to_s() + " avg_ms=" + ms.to_s() + " sum=" + s.to_s()
+
 # ---- multithreaded typed loop ----
 NT = 8
 yt = f64[n]

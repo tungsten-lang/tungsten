@@ -2138,7 +2138,17 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_instruction(wfn, {op: :call_direct_i64, temp: chk, name: "w_elementwise_size_check", args: [arr0[:reg], arrs[ai][:reg]]})
     ai += 1
   out_reg = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: out_reg, name: "w_array_new_uninit_sized", args: [fuse_ew_alloc_bits(odt), size_reg]})
+  # `y = <fused expr> ## reuse` — per-site persistent output buffer (same
+  # user-assertion contract as `f64[n] ## reuse`). A stable output base
+  # also lets the GPU tier cache its zero-copy wrap across executions.
+  if ast_get(node, :reuse_safe) == true
+    rs_id = ctx[:mod][:next_reuse_site]
+    ctx[:mod][:next_reuse_site] = rs_id + 1
+    rs_name = "reuse.site." + rs_id.to_s()
+    ctx[:mod][:reuse_sites].push(rs_name)
+    emit_instruction(wfn, {op: :call_fused_out_reuse, temp: out_reg, slot: rs_name, bits: fuse_ew_alloc_bits(odt), cap: size_reg})
+  else
+    emit_instruction(wfn, {op: :call_direct_i64, temp: out_reg, name: "w_array_new_uninit_sized", args: [fuse_ew_alloc_bits(odt), size_reg]})
 
   sid = ctx[:mod][:next_fuse_site]
   if sid == nil

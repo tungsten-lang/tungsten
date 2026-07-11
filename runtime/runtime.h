@@ -1311,6 +1311,8 @@ WValue w_elementwise_size_check(WValue lhs, WValue rhs);
  * (thresholds from the measured sweep; TUNGSTEN_FUSED_* env overrides). */
 int64_t w_fused_should_mt(int64_t n);
 int64_t w_fused_parallel_run(int64_t fn_addr, int64_t blk, int64_t n);
+/* ## reuse fused-output slot (per-site persistent buffer). */
+WValue w_fused_out_reuse_or_new(WValue *slot, int64_t element_bits, int64_t n);
 /* Phase 4e: T[N] constructor — size==cap, calloc-zeroed slots ready to
  * read. Callers that want the legacy "cap N, push to fill" semantics use
  * Array.new(ebits, cap: N) (lowers to w_array_new). */

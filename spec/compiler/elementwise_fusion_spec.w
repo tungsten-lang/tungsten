@@ -110,3 +110,19 @@ yf32 = xf .* ~2.0 .+ ~0.5
 << (close?(yf32[3], ~2.5) ? "PASS fuse.f32_arith" : "FAIL fuse.f32_arith")
 yf64 = (xf .* ~2.0).sin() .+ ~0.1
 << (close?(yf64[3], Math.sin(~2.0) + ~0.1) ? "PASS fuse.f32_sin_promotes_f64" : "FAIL fuse.f32_sin_promotes_f64")
+
+# `## reuse` on a fused expression: per-site persistent output buffer.
+# Values must stay correct across repeated executions (buffer rewritten
+# in place each time).
+yr = xf
+k = 0
+while k < 3
+  yr = (xp .* a .+ b).sin() .+ c ## reuse
+  k = k + 1
+ok = true
+i = 0 ## i64
+while i < np
+  if !close?(yr[i], Math.sin(a * xp[i] + b) + c)
+    ok = false
+  i = i + 1
+<< (ok ? "PASS fuse.reuse_out" : "FAIL fuse.reuse_out")

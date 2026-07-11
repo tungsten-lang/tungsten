@@ -31,7 +31,9 @@ ifeq ($(UNAME_S),Darwin)
 else
   ARCH_FLAGS ?= -mtune=generic
 endif
-CFLAGS ?= -O2 $(ARCH_FLAGS) -DNDEBUG -g -std=c11 -Wall -Wextra -Wpedantic
+# No -g: this binary is a throwaway stage0 host. Debug info bloated the image
+# and did not pay for itself on the stage1 wallclock (measured 2026-07-10).
+CFLAGS ?= -O2 $(ARCH_FLAGS) -DNDEBUG -std=c11 -Wall -Wextra -Wpedantic
 # -D_DEFAULT_SOURCE: with strict -std=c11, glibc hides every POSIX prototype
 # (strdup, realpath, popen, …); implicit declarations truncate returned
 # pointers to int on x86_64 and the VM segfaults at startup on Linux.

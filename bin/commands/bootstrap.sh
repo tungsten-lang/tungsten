@@ -69,11 +69,18 @@ fi
 
 # ── 2. Stage 0: C VM ────────────────────────────────────────────
 step "Stage 0: C VM (implementations/c)"
+# Explicit CFLAGS: -O2 + native, no -g (stage0 is throwaway; -g costs i-cache).
+CVM_CFLAGS="-O2 -DNDEBUG -std=c11"
+if [ "$(uname -s)" = Darwin ]; then
+  CVM_CFLAGS="$CVM_CFLAGS -march=native -mtune=native"
+else
+  CVM_CFLAGS="$CVM_CFLAGS -mtune=generic"
+fi
 if [ "$FORCE" -eq 0 ] && [ -x "$C_INTERP" ]; then
   ok "CACHED" "$C_INTERP"
 else
   log_path="/tmp/tungsten-bootstrap-c-vm.log"
-  if ! make -C "$C_INTERP_DIR" >"$log_path" 2>&1; then
+  if ! make -C "$C_INTERP_DIR" CFLAGS="$CVM_CFLAGS" >"$log_path" 2>&1; then
     cat "$log_path" >&2
     die "failed to build C VM (make -C implementations/c)"
   fi
@@ -151,8 +158,14 @@ else
 fi
 
 # ── 4. Stage 1: C VM compiles the compiler ──────────────────────
+# Hot path is load+parse of ~45k lines of compiler .w (~4s) then lowering
+# (~2s). Flag knobs on the C VM (-O3/PGO/LTO) move this by noise (~0–2%).
+# Link of stage1 with -O0 is ~1.5s; -O1/-O2 add ~3s for a throwaway binary.
+# Skip entirely when the installed compiler is already newer than its inputs.
 step "Stage 1: C VM compiles compiler/tungsten.w"
 export TUNGSTEN_ROOT="$ROOT"
+# -O0 for the stage-1 *product* link: stage1 is only used to drive stage2 /
+# bootstrap install; -O1/-O2 cost ~3s wall for no bootstrap payoff.
 export TUNGSTEN_CLANG_OPT="${TUNGSTEN_CLANG_OPT:--O0}"
 
 # Always resolve zstd link flags here: the CACHED runtime path never sets
@@ -171,42 +184,59 @@ if [ -z "${TUNGSTEN_ZSTD_LDFLAGS:-}" ]; then
   export TUNGSTEN_ZSTD_LDFLAGS="$zstd_libs"
 fi
 
-stage1_log="/tmp/tungsten-bootstrap-stage1.log"
-rm -f "$STAGE1" "$STAGE1.ll"
-# tungsten-c <compiler.w> compile <compiler.w> --out … --runtime … --no-lto
-if ! "$C_INTERP" "$COMPILER_W" compile "$COMPILER_W" \
-    --out "$STAGE1" --native \
-    --runtime "$RUNTIME_A" --no-lto \
-    >"$stage1_log" 2>&1; then
-  cat "$stage1_log" >&2
-  die "stage 1 (C VM) failed — see $stage1_log"
+skip_stage1=0
+if [ "$FORCE" -eq 0 ] && [ -x "$COMPILER_BIN" ]; then
+  # Any compiler .w, the C VM, or runtime archive newer than the install → rebuild.
+  if ! find "$ROOT/compiler" -name '*.w' -newer "$COMPILER_BIN" 2>/dev/null | head -1 | grep -q . \
+     && ! [ "$C_INTERP" -nt "$COMPILER_BIN" ] \
+     && ! [ "$RUNTIME_A" -nt "$COMPILER_BIN" ]; then
+    skip_stage1=1
+  fi
 fi
 
-if [ "$(uname -s)" = Darwin ]; then
-  codesign --force -s - "$STAGE1" >/dev/null 2>&1 || true
-fi
-ok "built" "$STAGE1"
+if [ "$skip_stage1" -eq 1 ]; then
+  ok "CACHED" "$COMPILER_BIN (up to date)"
+else
+  stage1_log="/tmp/tungsten-bootstrap-stage1.log"
+  rm -f "$STAGE1" "$STAGE1.ll"
+  # tungsten-c <compiler.w> compile <compiler.w> --out … --runtime … --no-lto
+  if ! "$C_INTERP" "$COMPILER_W" compile "$COMPILER_W" \
+      --out "$STAGE1" --native \
+      --runtime "$RUNTIME_A" --no-lto \
+      >"$stage1_log" 2>&1; then
+    cat "$stage1_log" >&2
+    die "stage 1 (C VM) failed — see $stage1_log"
+  fi
 
-# ── 5. Install compiler ─────────────────────────────────────────
-step "Install bin/tungsten-compiler"
-tmp_bin="$COMPILER_BIN.tmp-$$"
-cp "$STAGE1" "$tmp_bin"
-chmod 755 "$tmp_bin"
-if [ "$(uname -s)" = Darwin ]; then
-  codesign --force -s - "$tmp_bin" >/dev/null 2>&1 || true
+  if [ "$(uname -s)" = Darwin ]; then
+    codesign --force -s - "$STAGE1" >/dev/null 2>&1 || true
+  fi
+  ok "built" "$STAGE1"
+
+  # ── 5. Install compiler ─────────────────────────────────────────
+  step "Install bin/tungsten-compiler"
+  tmp_bin="$COMPILER_BIN.tmp-$$"
+  cp "$STAGE1" "$tmp_bin"
+  chmod 755 "$tmp_bin"
+  if [ "$(uname -s)" = Darwin ]; then
+    codesign --force -s - "$tmp_bin" >/dev/null 2>&1 || true
+  fi
+  mv "$tmp_bin" "$COMPILER_BIN"
+  if [ -f "$STAGE1.sidemap" ]; then
+    cp "$STAGE1.sidemap" "$COMPILER_BIN.sidemap"
+  fi
+  ok "installed" "$COMPILER_BIN"
 fi
-mv "$tmp_bin" "$COMPILER_BIN"
-if [ -f "$STAGE1.sidemap" ]; then
-  cp "$STAGE1.sidemap" "$COMPILER_BIN.sidemap"
-fi
-ok "installed" "$COMPILER_BIN"
 
 # ── 6. Tungsten CLI (Argon) ─────────────────────────────────────
 step "CLI: bin/tungsten.wc"
 WC="$ROOT/bin/tungsten.w"
 WC_OUT="$ROOT/bin/tungsten.wc"
 if [ -f "$WC" ]; then
-  if BIT_HOME="$ROOT/bits" TUNGSTEN_ROOT="$ROOT" \
+  if [ "$FORCE" -eq 0 ] && [ -x "$WC_OUT" ] && [ ! "$WC" -nt "$WC_OUT" ] \
+     && [ ! "$COMPILER_BIN" -nt "$WC_OUT" ]; then
+    ok "CACHED" "$WC_OUT"
+  elif BIT_HOME="$ROOT/bits" TUNGSTEN_ROOT="$ROOT" \
       "$COMPILER_BIN" compile "$WC" --out "$WC_OUT" --no-lto \
       >/tmp/tungsten-bootstrap-cli.log 2>&1; then
     if [ "$(uname -s)" = Darwin ]; then

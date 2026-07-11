@@ -1442,8 +1442,8 @@ RSpec.describe Tungsten::Interpreter do
       expect(run("6 feet").to_s).to eq("6 feet")
     end
 
-    it "creates °C quantities" do
-      result = run("5 °C + 10 °C")
+    it "creates °C quantities and adds temperature differences" do
+      result = run("5 °C + 10 Δ°C")
       expect(result).to be_a(Tungsten::Quantity)
       expect(result.value).to eq(15)
       expect(result.to_s).to eq("15 °C")

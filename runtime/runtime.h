@@ -322,11 +322,17 @@ static inline WDomainHeap *w_as_domain(WValue v) {
 typedef struct {
     uint8_t  type;         /* W_TYPE_IPV6 or W_TYPE_MAC */
     uint8_t  len;          /* byte count: 16 = IPv6, 6 = MAC */
-    int8_t   prefix;       /* CIDR prefix (-1 = none) */
+    uint8_t  prefix;       /* CIDR prefix (255 = none; /128 stays representable) */
     uint8_t  _pad;         /* keep `bytes` aligned at offset 4 */
     uint8_t  bytes[16];    /* address bytes (16 for IPv6, 6 for MAC) */
     uint8_t  _pad2[12];    /* pad to 32 bytes for 16-byte alignment */
 } WNetAddr;
+
+_Static_assert(offsetof(WNetAddr, type)   == 0,  "WNetAddr type offset (drives dispatch_key)");
+_Static_assert(offsetof(WNetAddr, len)    == 1,  "WNetAddr len offset");
+_Static_assert(offsetof(WNetAddr, prefix) == 2,  "WNetAddr prefix offset");
+_Static_assert(offsetof(WNetAddr, bytes)  == 4,  "WNetAddr bytes offset");
+_Static_assert(sizeof(WNetAddr)           == 32, "WNetAddr size");
 
 /* ---- Encoded value heap object (Base32/58/64) ---- */
 /* Phase 6i.2: demoted to W_SUBTAG_GENERIC; `type` byte at offset 0 holds
@@ -437,36 +443,21 @@ WValue w_date(int year, int month, int day, int hour, int min, int sec, int tz);
 WValue w_ipv4(uint8_t a, uint8_t b, uint8_t c, uint8_t d, int cidr);
 WValue w_ipv4_parse(WValue str_v);
 WValue w_ipv4_from_octets(WValue a, WValue b, WValue c, WValue d, WValue prefix_v);
-WValue w_ipv4_with_prefix(WValue ip, WValue prefix_v);
 WValue w_ipv4_octets(WValue ip);
-WValue w_ipv4_network(WValue ip);
-WValue w_ipv4_broadcast(WValue ip);
-WValue w_ipv4_netmask(WValue ip);
 WValue w_ipv4_in_cidr(WValue ip, WValue cidr);
 WValue w_ipv6_from_string(const char *s, int cidr);  /* compiled path (ptr, i32) */
 WValue w_ipv6_parse(WValue str_v);                   /* interpreter path (boxed string) */
-WValue w_ipv6_with_prefix(WValue ip, WValue prefix_v);
-WValue w_ipv6_prefix(WValue ip);
-WValue w_ipv6_cidr_p(WValue ip);
-WValue w_ipv6_byte(WValue ip, WValue index_v);
-WValue w_ipv6_bytes(WValue ip);
-WValue w_ipv6_network(WValue ip);
+/* Storage-only boundaries used by source-defined IPv6 methods. */
+WValue w_ipv6_storage_clone(WValue ip, WValue prefix_v);
+WValue w_ipv6_storage_from_words(WValue word0, WValue word1, WValue word2,
+                                 WValue word3, WValue raw_prefix_v);
+/* Tree-walker mirrors of compiled fixed-inline-field loads. */
+WValue w_netaddr_raw_byte(WValue addr, WValue index_v);
+WValue w_netaddr_raw_prefix(WValue addr);
+WValue w_netaddr_ipv6_p(WValue addr);
 WValue w_ipv6_in_cidr(WValue ip, WValue cidr);
-WValue w_ipv6_unspecified_p(WValue ip);
-WValue w_ipv6_loopback_p(WValue ip);
-WValue w_ipv6_multicast_p(WValue ip);
-WValue w_ipv6_link_local_p(WValue ip);
-WValue w_ipv6_unique_local_p(WValue ip);
-WValue w_ipv6_global_p(WValue ip);
 WValue w_ip_in_cidr(WValue ip, WValue cidr);
 WValue w_mac_parse(WValue str_v);
-WValue w_mac_byte(WValue mac, WValue index_v);
-WValue w_mac_bytes(WValue mac);
-WValue w_mac_multicast_p(WValue mac);
-WValue w_mac_unicast_p(WValue mac);
-WValue w_mac_local_p(WValue mac);
-WValue w_mac_universal_p(WValue mac);
-WValue w_mac_broadcast_p(WValue mac);
 WValue w_rational(int32_t num, uint32_t den);
 WValue w_complex(int16_t real_sig, int real_scale, int16_t imag_sig, int imag_scale);
 WValue w_location_point(int32_t x, int32_t y);
@@ -563,6 +554,7 @@ WValue w_array_size(WValue arr);
 WValue w_array_shift(WValue arr);
 WValue w_array_unshift(WValue arr, WValue val);
 WValue w_array_cap(WValue arr);
+WValue w_native_data_field(WValue recv, WValue name);
 
 /* ---- Hash ---- */
 WValue w_hash_new(void);
@@ -1401,23 +1393,17 @@ WValue w_array_tan_float(WValue arr);
 WValue w_socket_read_exact(WValue sock, WValue n);
 WValue w_socket_write_bytes(WValue sock, WValue bytes);
 
-/* ---- Base64URL (Phase 8b) ---- */
-WValue w_base64url_encode(WValue data);
-WValue w_base64url_decode(WValue str);
-
 /* ---- View registry ---- */
 void w_register_view(WValue parent, WValue view);
 void w_views_after_realloc(WValue parent, WValue *old_slots, WValue *new_slots);
 
-/* ---- Base64 (RFC 4648 standard, with padding) ---- */
-WValue w_base64_encode(WValue data);
-WValue w_base64_decode(WValue str);
-
-/* ---- Tungsten-facing exposure wrappers ---- */
-WValue __w_base64_encode(WValue data);
-WValue __w_base64_decode(WValue str);
-WValue __w_base64url_encode(WValue data);
-WValue __w_base64url_decode(WValue str);
+/* ---- Base64 storage boundaries (algorithms live in core/base64.w) ---- */
+WValue w_base64_encode_input(WValue data);
+WValue w_base64_decode_input(WValue text);
+WValue w_string_from_byte_array(WValue bytes);
+int64_t w_u8_live_data_ptr(int64_t arr_wval);
+int64_t w_raw_load_u8(int64_t ptr, int64_t index);
+int64_t w_raw_store_u8(int64_t ptr, int64_t index, int64_t value);
 
 /* ---- Crypto digests and secure randomness ---- */
 WValue w_crypto_random_bytes(WValue length);
@@ -1425,7 +1411,6 @@ WValue w_crypto_md5_bytes(WValue data);
 WValue w_crypto_md5_hex(WValue data);
 WValue w_crypto_sha1_bytes(WValue data);
 WValue w_crypto_sha1_hex(WValue data);
-WValue w_crypto_sha1_base64(WValue data);
 WValue w_crypto_sha224_bytes(WValue data);
 WValue w_crypto_sha224_hex(WValue data);
 WValue w_crypto_sha256_bytes(WValue data);

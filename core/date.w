@@ -19,11 +19,40 @@
   -> today
   -> tomorrow
 
+  # Date is packed directly into a WValue. `$value` exposes the raw bits to
+  # compiled Tungsten, keeping these leaf accessors and calendar calculations
+  # allocation-free and equivalent to their former runtime.c IC handlers.
   -> day
+    ($value >> 24) & 0x1F
+
   -> week
+
   -> month
+    ($value >> 29) & 0xF
+
   -> quarter
+    ((($value >> 29) & 0xF) - 1) / 3 + 1
+
   -> year
+    raw_year = (($value >> 33) & 0xFFF) ## i64
+    raw_year >= 0x800 ? raw_year - 0x1000 : raw_year
+
+  -> hour
+    ($value >> 19) & 0x1F
+
+  -> minute
+    ($value >> 13) & 0x3F
+
+  -> second
+    ($value >> 7) & 0x3F
+
+  -> tz
+    raw_tz = ($value & 0x7F) ## i64
+    quarters = raw_tz ## i64
+    if quarters >= 0x40
+      quarters -= 0x80
+    quarters * 15
+
   -> decade
   -> century
   -> millenium
@@ -33,10 +62,99 @@
     strftime FORMATS[:ctime]
 
   -> cwday
+    y = (($value >> 33) & 0xFFF) ## i64
+    if y >= 0x800
+      y -= 0x1000
+    m = (($value >> 29) & 0xF) ## i64
+    d = (($value >> 24) & 0x1F) ## i64
+    a = ((14 - m) / 12) ## i64
+    yy = (y + 4800 - a) ## i64
+    mm = (m + 12 * a - 3) ## i64
+    jdn = (d + (153 * mm + 2) / 5 + 365 * yy + yy / 4 - yy / 100 + yy / 400 - 32045) ## i64
+    (((jdn % 7) + 7) % 7 + 1) ## i64
+
   -> cweek
+    y = (($value >> 33) & 0xFFF) ## i64
+    if y >= 0x800
+      y -= 0x1000
+    m = (($value >> 29) & 0xF) ## i64
+    d = (($value >> 24) & 0x1F) ## i64
+
+    a = ((14 - m) / 12) ## i64
+    yy = (y + 4800 - a) ## i64
+    mm = (m + 12 * a - 3) ## i64
+    jdn = (d + (153 * mm + 2) / 5 + 365 * yy + yy / 4 - yy / 100 + yy / 400 - 32045) ## i64
+    iso_wday = (((jdn % 7) + 7) % 7 + 1) ## i64
+
+    yday = d ## i64
+    if m > 1
+      yday += 31
+    if m > 2
+      leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+      yday += leap ? 29 : 28
+    if m > 3
+      yday += 31
+    if m > 4
+      yday += 30
+    if m > 5
+      yday += 31
+    if m > 6
+      yday += 30
+    if m > 7
+      yday += 31
+    if m > 8
+      yday += 31
+    if m > 9
+      yday += 30
+    if m > 10
+      yday += 31
+    if m > 11
+      yday += 30
+
+    week = ((yday - iso_wday + 10) / 7) ## i64
+    week_year = y ## i64
+    if week < 1
+      week_year = y - 1
+    elsif week > 52
+      week_year = y
+
+    jan_yy = (week_year + 4799) ## i64
+    jan_jdn = (307 + 365 * jan_yy + jan_yy / 4 - jan_yy / 100 + jan_yy / 400 - 32045) ## i64
+    jan_wday = (((jan_jdn % 7) + 7) % 7 + 1) ## i64
+    week_year_leap = (week_year % 4 == 0 && week_year % 100 != 0) || week_year % 400 == 0
+    weeks = 52 ## i64
+    if jan_wday == 4 || (week_year_leap && jan_wday == 3)
+      weeks = 53
+
+    if week < 1
+      return weeks
+    if week > weeks
+      return 1
+    week
+
   -> cwyear
+    week = cweek
+    m = (($value >> 29) & 0xF) ## i64
+    y = (($value >> 33) & 0xFFF) ## i64
+    if y >= 0x800
+      y -= 0x1000
+    if m == 1 && week >= 52
+      return y - 1
+    if m == 12 && week == 1
+      return y + 1
+    y
 
   -> wday
+    y = (($value >> 33) & 0xFFF) ## i64
+    if y >= 0x800
+      y -= 0x1000
+    m = (($value >> 29) & 0xF) ## i64
+    d = (($value >> 24) & 0x1F) ## i64
+    a = ((14 - m) / 12) ## i64
+    yy = (y + 4800 - a) ## i64
+    mm = (m + 12 * a - 3) ## i64
+    jdn = (d + (153 * mm + 2) / 5 + 365 * yy + yy / 4 - yy / 100 + yy / 400 - 32045) ## i64
+    ((((jdn + 1) % 7) + 7) % 7) ## i64
 
   -> day_abbr
     DAYS[day_of_week]
@@ -59,14 +177,103 @@
   -> decade_abbr
     "[decade]s"
 
-  alias_mistake :wday, :day_of_week
   -> day_of_week
+    y = (($value >> 33) & 0xFFF) ## i64
+    if y >= 0x800
+      y -= 0x1000
+    m = (($value >> 29) & 0xF) ## i64
+    d = (($value >> 24) & 0x1F) ## i64
+    a = ((14 - m) / 12) ## i64
+    yy = (y + 4800 - a) ## i64
+    mm = (m + 12 * a - 3) ## i64
+    jdn = (d + (153 * mm + 2) / 5 + 365 * yy + yy / 4 - yy / 100 + yy / 400 - 32045) ## i64
+    ((((jdn + 1) % 7) + 7) % 7) ## i64
+
   -> day_of_month
+    ($value >> 24) & 0x1F
+
   -> day_of_quarter
+
   -> day_of_year
+    y = (($value >> 33) & 0xFFF) ## i64
+    if y >= 0x800
+      y -= 0x1000
+    m = (($value >> 29) & 0xF) ## i64
+    yday = (($value >> 24) & 0x1F) ## i64
+    if m > 1
+      yday += 31
+    if m > 2
+      leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+      yday += leap ? 29 : 28
+    if m > 3
+      yday += 31
+    if m > 4
+      yday += 30
+    if m > 5
+      yday += 31
+    if m > 6
+      yday += 30
+    if m > 7
+      yday += 31
+    if m > 8
+      yday += 31
+    if m > 9
+      yday += 30
+    if m > 10
+      yday += 31
+    if m > 11
+      yday += 30
+    yday
+
+  -> yday
+    y = (($value >> 33) & 0xFFF) ## i64
+    if y >= 0x800
+      y -= 0x1000
+    m = (($value >> 29) & 0xF) ## i64
+    yday = (($value >> 24) & 0x1F) ## i64
+    if m > 1
+      yday += 31
+    if m > 2
+      leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+      yday += leap ? 29 : 28
+    if m > 3
+      yday += 31
+    if m > 4
+      yday += 30
+    if m > 5
+      yday += 31
+    if m > 6
+      yday += 30
+    if m > 7
+      yday += 31
+    if m > 8
+      yday += 31
+    if m > 9
+      yday += 30
+    if m > 10
+      yday += 31
+    if m > 11
+      yday += 30
+    yday
 
   -> days_in_month
+    y = (($value >> 33) & 0xFFF) ## i64
+    if y >= 0x800
+      y -= 0x1000
+    m = (($value >> 29) & 0xF) ## i64
+    if m == 2
+      leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+      return leap ? 29 : 28
+    # Bits 4, 6, 9, and 11 mark the four 30-day months. This avoids a
+    # four-way short-circuit chain on the hot non-February path.
+    31 - ((0xA50 >> m) & 1)
+
   -> days_in_year
+    y = (($value >> 33) & 0xFFF) ## i64
+    if y >= 0x800
+      y -= 0x1000
+    leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    leap ? 366 : 365
 
   -> first_of_week
   -> first_of_month
@@ -85,8 +292,27 @@
   -> last_of_millenium
 
   -> leap_year?
+    y = (($value >> 33) & 0xFFF) ## i64
+    if y >= 0x800
+      y -= 0x1000
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 
-  -> wday
+  -> leap?
+    y = (($value >> 33) & 0xFFF) ## i64
+    if y >= 0x800
+      y -= 0x1000
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+
+  -> jd
+    y = (($value >> 33) & 0xFFF) ## i64
+    if y >= 0x800
+      y -= 0x1000
+    m = (($value >> 29) & 0xF) ## i64
+    d = (($value >> 24) & 0x1F) ## i64
+    a = ((14 - m) / 12) ## i64
+    yy = (y + 4800 - a) ## i64
+    mm = (m + 12 * a - 3) ## i64
+    (d + (153 * mm + 2) / 5 + 365 * yy + yy / 4 - yy / 100 + yy / 400 - 32045) ## i64
 
   -> to_s
 

@@ -9,6 +9,7 @@
 # parameter is stored at slab slot i.
 
 use ast_schema
+use ../../core/ast_body
 
 # === AST:Node class ===
 #
@@ -1904,4 +1905,3 @@ in Tungsten:AST
 
   -> .new(subject, cidr)
     slab_alloc_init(KIND_CIDR_MATCH, SC_2, subject, cidr)
-

@@ -534,10 +534,6 @@ use hashing
   out << declare_fn("w_float_to_u64_bits", wv, wv)
   out << declare_fn("__w_system", wv, wv)
   out << declare_fn("__w_capture", wv, wv)
-  out << declare_fn("__w_base64_encode", wv, wv)
-  out << declare_fn("__w_base64_decode", wv, wv)
-  out << declare_fn("__w_base64url_encode", wv, wv)
-  out << declare_fn("__w_base64url_decode", wv, wv)
   out << declare_fn("__w_argv_count", wv, "")
   out << declare_fn("__w_argv_at", wv, wv)
   out << declare_fn("__w_clock_ms", wv, "")
@@ -817,10 +813,11 @@ use hashing
   when :symbol_i64
     ["w_string", "w_str_to_sym"]
   when :view_load_field, :view_load_byte, :view_load_bit
-    # Phase 6i follow-up: view-field/byte/bit loads use w_int_call_with_range
-    # to box small-int reads. Without this entry the declaration tracker
-    # misses w_int and the .ll file fails to link.
+    # View-field/byte/bit loads box small-int reads. Fixed inline bytes are a
+    # separate raw op and intentionally do not need w_int.
     ["w_int"]
+  when :view_load_inline_byte
+    []
   when :register_unit
     if string_wvs != nil && string_wvs[inst[:str_id]] != nil
       ["w_register_unit_wv"]
@@ -1795,6 +1792,11 @@ use hashing
     ep = inst[:temp] + ".ep"
     b = inst[:temp] + ".b"
     p + " = inttoptr i64 " + inst[:ptr] + " to ptr\n  " + ep + " = getelementptr i8, ptr " + p + ", i64 " + inst[:index] + "\n  " + b + " = load i8, ptr " + ep + ", align 1" + range_metadata_suffix(inst, "i8") + "\n  " + inst[:temp] + " = zext i8 " + b + " to i64"
+  when :store_u8_ptr
+    p = inst[:temp] + ".p"
+    ep = inst[:temp] + ".ep"
+    b = inst[:temp] + ".b"
+    p + " = inttoptr i64 " + inst[:ptr] + " to ptr\n  " + ep + " = getelementptr i8, ptr " + p + ", i64 " + inst[:index] + "\n  " + b + " = trunc i64 " + inst[:value] + " to i8\n  store i8 " + b + ", ptr " + ep + ", align 1\n  " + inst[:temp] + " = zext i8 " + b + " to i64"
   when :load_u32_ptr
     p = inst[:temp] + ".p"
     ep = inst[:temp] + ".ep"
@@ -2515,6 +2517,14 @@ use hashing
     byte_ptr = inst[:temp] + ".bp"
     byte_val = inst[:temp] + ".b"
     ptr_raw + " = and i64 " + inst[:ptr] + ", -16\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + inst[:index] + "\n  " + byte_val + " = load i8, ptr " + inst[:temp] + ".gep\n  " + inst[:temp] + ".zext = zext i8 " + byte_val + " to i64\n  " + w_int_call_with_range(inst[:temp], inst[:temp] + ".zext", 0, 256)
+
+  # Fixed inline u8[N] field: load at the statically known field offset plus
+  # the caller-checked dynamic index. No hidden bounds branch is emitted.
+  when :view_load_inline_byte
+    ptr_raw = inst[:temp] + ".ptr"
+    byte_ptr = inst[:temp] + ".bp"
+    byte_val = inst[:temp] + ".b"
+    ptr_raw + " = and i64 " + inst[:ptr] + ", -16\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".base = getelementptr i8, ptr " + byte_ptr + ", i64 " + inst[:offset].to_s() + "\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + inst[:temp] + ".base, i64 " + inst[:index] + "\n  " + byte_val + " = load i8, ptr " + inst[:temp] + ".gep\n  " + inst[:temp] + " = zext i8 " + byte_val + " to i64"
 
   # View access: load bit from raw object pointer
   when :view_load_bit

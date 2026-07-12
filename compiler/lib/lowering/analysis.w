@@ -310,6 +310,8 @@
     return int_shaped_node?(node.operand, declared_types)
   when :call
     name = node.name
+    if name == "wvalue_bits" && node.receiver == nil && node.args != nil && node.args.size() == 1
+      return true
     if name == "ccall_nobox"
       # Exclude w_node_alloc / w_node_field_load: their return is a
       # WValue (W_PACKED_NODE / arbitrary slab slot), not a raw int.
@@ -323,7 +325,7 @@
         if fname == "w_node_alloc" || fname == "w_node_field_load"
           return false
       return true
-    if name in ("raw_load_u8" "raw_load_u32" "raw_load_u64")
+    if name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8")
       return true
     # mulhi(a,b) returns a raw u64 (high half of a 64x64 product). Mark it
     # int-shaped so a loop-reassigned local `phi = mulhi(...)` stays unboxed and
@@ -514,13 +516,14 @@
     # `ccall_nobox("...", data_ptr, …)` un-promoted data_ptr/pos, boxing them
     # (w_int + corrupted nanbox of a raw pointer) and routing the packed-int
     # bit math through w_bit_or / w_bit_shl instead of native or/shl.
-    is_raw_ccall = name in ("ccall_nobox" "ccall_rawargs") && node.receiver == nil
-    # raw_load_u8/u32/u64(ptr, idx) consume both operands as raw machine ints
+    is_raw_ccall = name in ("ccall_nobox" "ccall_rawargs" "wvalue_from_bits") && node.receiver == nil
+    # raw_load_u8/u32/u64(ptr, idx) and raw_store_u8(ptr, idx, value) consume
+    # every operand as raw machine ints
     # (inline pointer loads — no WValue boundary), so an int-candidate local
     # used as the pointer or index does NOT escape. Without this, a parser's
     # `data`/`pos` locals un-promoted to boxed, then ensure_raw_machine_int
     # ran w_to_i64 on a raw pointer and died ("expected int, got object").
-    is_raw_load = name in ("raw_load_u8" "raw_load_u32" "raw_load_u64") && node.receiver == nil
+    is_raw_load = name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8") && node.receiver == nil
     args_are_values = is_index_call || is_raw_ccall || is_raw_load || ((name == "mulhi" || name == "addcarry" || name == "subborrow") && node.receiver == nil && node.args != nil && node.args.size() == 2)
     # Receiver of any method call needs WValue at the dispatch boundary.
     if node.receiver != nil

@@ -51,6 +51,20 @@
 
   runtime :[], :[]=
 
+  -> __enumerable_iteration_mode
+    1
+
+  # Storage-side half of Enumerable#flat_map. Keeping the indexed copy here
+  # avoids allocating and invoking a second iterator closure for every nested
+  # Array while the flattening algorithm itself remains in Enumerable.
+  -> __enumerable_append_to(out)
+    i = 0
+    n = self.size
+    while i < n
+      out.push(self[i])
+      i++
+    out
+
   # Array#[] handles the pointer math (e.g. $start + sizeof($ebits) * i)
   -> each/&
     $size -> &(self[i]) : self

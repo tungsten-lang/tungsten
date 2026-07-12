@@ -18,6 +18,9 @@
       u8   size
       u8[] slots
 
+  -> __enumerable_iteration_mode
+    1
+
   -> each/&
     $size -> &(self[i]) : self
 

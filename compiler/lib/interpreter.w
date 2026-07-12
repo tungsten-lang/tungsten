@@ -328,6 +328,18 @@ use target
     if t == :array
       return ast_get(node, :elements).map -> (e)
         evaluate(e, env)
+    if t == :word_array
+      # `%w[a b c]` is already stored on the AST as an Array of String
+      # values. Materialize a fresh Array for each evaluation, matching the
+      # compiled lower_word_or_symbol_array path instead of exposing the
+      # parser's mutable backing array.
+      words = ast_get(node, :words)
+      result = []
+      i = 0
+      while i < words.size()
+        result.push(words[i])
+        i += 1
+      return result
     if t in (:typed_array :typed_array_new)
       return eval_typed_array_new(node, env)
     if t == :hash_literal
@@ -371,6 +383,12 @@ use target
       return eval_and(node, env)
     if t == :or
       return eval_or(node, env)
+    if t == :passthrough
+      # `expression : value` evaluates the left side for its effects and
+      # returns the right side. Storage iterators use this to yield every item
+      # while returning self (`$size -> &(self[i]) : self`).
+      evaluate(ast_get(node, :expression), env)
+      return evaluate(ast_get(node, :value), env)
     if t == :if
       return eval_if(node, env)
     if t == :while
@@ -1056,70 +1074,36 @@ use target
     case cname
     when "w_to_s"
       return ccall("w_to_s", args[1])
+    when "w_base64_encode_input"
+      return ccall("w_base64_encode_input", args[1])
+    when "w_base64_decode_input"
+      return ccall("w_base64_decode_input", args[1])
+    when "w_string_from_byte_array"
+      return ccall("w_string_from_byte_array", args[1])
 
     when "w_ipv4_parse"
       return ccall("w_ipv4_parse", args[1])
     when "w_ipv4_from_octets"
       return ccall("w_ipv4_from_octets", args[1], args[2], args[3], args[4], args[5])
-    when "w_ipv4_with_prefix"
-      return ccall("w_ipv4_with_prefix", args[1], args[2])
     when "w_ipv4_octets"
       return ccall("w_ipv4_octets", args[1])
-    when "w_ipv4_network"
-      return ccall("w_ipv4_network", args[1])
-    when "w_ipv4_broadcast"
-      return ccall("w_ipv4_broadcast", args[1])
-    when "w_ipv4_netmask"
-      return ccall("w_ipv4_netmask", args[1])
     when "w_ipv4_in_cidr"
       return ccall("w_ipv4_in_cidr", args[1], args[2])
     when "w_ipv6_parse"
       return ccall("w_ipv6_parse", args[1])
-    when "w_ipv6_prefix"
-      return ccall("w_ipv6_prefix", args[1])
-    when "w_ipv6_cidr_p"
-      return ccall("w_ipv6_cidr_p", args[1])
-    when "w_ipv6_with_prefix"
-      return ccall("w_ipv6_with_prefix", args[1], args[2])
-    when "w_ipv6_byte"
-      return ccall("w_ipv6_byte", args[1], args[2])
-    when "w_ipv6_bytes"
-      return ccall("w_ipv6_bytes", args[1])
-    when "w_ipv6_network"
-      return ccall("w_ipv6_network", args[1])
+    when "w_ipv6_storage_clone"
+      return ccall("w_ipv6_storage_clone", args[1], args[2])
+    when "w_ipv6_storage_from_words"
+      return ccall("w_ipv6_storage_from_words", args[1], args[2], args[3], args[4], args[5])
+    when "w_netaddr_ipv6_p"
+      return ccall("w_netaddr_ipv6_p", args[1])
     when "w_ipv6_in_cidr"
       return ccall("w_ipv6_in_cidr", args[1], args[2])
-    when "w_ipv6_unspecified_p"
-      return ccall("w_ipv6_unspecified_p", args[1])
-    when "w_ipv6_loopback_p"
-      return ccall("w_ipv6_loopback_p", args[1])
-    when "w_ipv6_multicast_p"
-      return ccall("w_ipv6_multicast_p", args[1])
-    when "w_ipv6_link_local_p"
-      return ccall("w_ipv6_link_local_p", args[1])
-    when "w_ipv6_unique_local_p"
-      return ccall("w_ipv6_unique_local_p", args[1])
-    when "w_ipv6_global_p"
-      return ccall("w_ipv6_global_p", args[1])
     when "w_ip_in_cidr"
       return ccall("w_ip_in_cidr", args[1], args[2])
 
     when "w_mac_parse"
       return ccall("w_mac_parse", args[1])
-    when "w_mac_byte"
-      return ccall("w_mac_byte", args[1], args[2])
-    when "w_mac_bytes"
-      return ccall("w_mac_bytes", args[1])
-    when "w_mac_multicast_p"
-      return ccall("w_mac_multicast_p", args[1])
-    when "w_mac_unicast_p"
-      return ccall("w_mac_unicast_p", args[1])
-    when "w_mac_local_p"
-      return ccall("w_mac_local_p", args[1])
-    when "w_mac_universal_p"
-      return ccall("w_mac_universal_p", args[1])
-    when "w_mac_broadcast_p"
-      return ccall("w_mac_broadcast_p", args[1])
 
     when "w_crypto_random_bytes"
       return ccall("w_crypto_random_bytes", args[1])
@@ -1131,8 +1115,6 @@ use target
       return ccall("w_crypto_sha1_bytes", args[1])
     when "w_crypto_sha1_hex"
       return ccall("w_crypto_sha1_hex", args[1])
-    when "w_crypto_sha1_base64"
-      return ccall("w_crypto_sha1_base64", args[1])
     when "w_crypto_sha224_bytes"
       return ccall("w_crypto_sha224_bytes", args[1])
     when "w_crypto_sha224_hex"
@@ -1210,6 +1192,12 @@ use target
       # the interpreter's value model receives an Integer rather than treating
       # the raw bits as an already-tagged WValue.
       return ccall("w_int", ccall_nobox("w_numeric_to_i64", args[1]))
+    when "w_u8_live_data_ptr"
+      if args.size() != 2
+        raise "w_u8_live_data_ptr expects one argument"
+      # Preserve the raw pointer as an interpreter Integer. w_int promotes to
+      # BigInt if it exceeds i48; raw_load/store convert it back explicitly.
+      return ccall("w_int", ccall_nobox("w_u8_live_data_ptr", args[1]))
 
     raise "Unsupported ccall_nobox '[cname]' in interpreter"
 
@@ -1238,11 +1226,7 @@ use target
       return true
     if @env.defined?("__method__" + name)
       return true
-    s = current_self()
-    if s != nil && type(s) == "Hash" && s.has_key?(:rt) && s[:rt] == :object
-      if lookup_method(s[:w_class], name) != nil
-        return true
-    false
+    implicit_self_method(current_self(), name) != nil
 
   -> eval_ivar(node)
     obj = current_self()
@@ -1268,6 +1252,22 @@ use target
     current_method = @method_stack.last()
     if name == "$value" && current_method != nil && current_method[:w_class] != nil
       return ccall("w_u64", current_self())
+    # Heap-backed WNetAddr fields are direct struct reads in compiled code.
+    # The tree walker has no raw pointer view, so mirror the prefix byte through
+    # a narrow storage primitive (255 is the no-prefix sentinel).
+    if name == "$prefix" && current_method != nil && current_method[:w_class] != nil && current_method[:w_class][:name] in ("IPv6" "MAC")
+      return ccall("w_netaddr_raw_prefix", current_self())
+    # Array-tier storage iterators express their loop as `$size -> ...`. The
+    # compiled path reads the layout field directly; mirror that field at the
+    # tree-walker boundary instead of treating it as a process global.
+    if name == "$size" && current_method != nil && current_method[:w_class] != nil
+      cname = current_method[:w_class][:name]
+      if cname == "Array"
+        return ccall("w_array_size", current_self())
+      if cname == "BigArray"
+        return ccall("w_big_array_size", current_self())
+      if cname == "SmallArray"
+        return ccall("w_small_array_size", current_self())
     @globals[name]
 
   # `receiver$field` — read a view-decl field off an explicit receiver.
@@ -1279,6 +1279,13 @@ use target
   -> eval_view_field_var(node, env)
     recv = evaluate(ast_get(node, :receiver), env)
     field = ast_get(node, :field)
+    primitive_class = primitive_runtime_class(recv)
+    if primitive_class != nil
+      accessor = lookup_method(primitive_class, field)
+      if accessor != nil && accessor[:data_field] == true
+        if native_data_field_supported?(primitive_class, field)
+          return ccall("w_native_data_field", recv, field)
+        raise "native data field '[field]' is unavailable in the interpreter"
     dispatch_method(recv, field, [], nil, env)
 
   # -- Assignment --
@@ -1724,6 +1731,15 @@ use target
       evaluate(a, env)
 
     if ast_get(node, :receiver) != nil
+      # `$bytes[i]` on WNetAddr is an inline fixed-array load in compiled
+      # methods. Route the interpreted equivalent through the same storage
+      # boundary without materializing a temporary byte array.
+      recv_node = ast_get(node, :receiver)
+      if ast_get(node, :name) in ("\[]" "[]") && ast_kind(recv_node) == :gvar && ast_get(recv_node, :name) == "$bytes"
+        return ccall("w_netaddr_raw_byte", current_self(), args[0])
+      if ast_get(node, :name) in ("\[]" "[]") && ast_kind(recv_node) == :view_field_var && ast_get(recv_node, :field) == "bytes"
+        explicit_recv = evaluate(ast_get(recv_node, :receiver), env)
+        return ccall("w_netaddr_raw_byte", explicit_recv, args[0])
       recv = evaluate(ast_get(node, :receiver), env)
       result = dispatch_method(recv, ast_get(node, :name), args, block, env)
       if ast_kind(ast_get(node, :receiver)) == :var && type(recv) == "String"
@@ -1738,6 +1754,51 @@ use target
       return dispatch_interpreted_ccall(args)
     if name == "ccall_nobox"
       return dispatch_interpreted_ccall_nobox(args)
+    # Compiled packed values and their source-level raw representation are
+    # both i64, so these lower to no instructions. The tree walker needs an
+    # explicit bridge because its raw bits are represented as an Integer.
+    if name == "wvalue_bits"
+      if args.size() != 1
+        raise "wvalue_bits expects one argument"
+      return ccall("w_u64", args[0])
+    if name == "wvalue_from_bits"
+      if args.size() != 1
+        raise "wvalue_from_bits expects one argument"
+      bits = args[0]
+      # Immediate integers are the other source-defined user of this
+      # intrinsic. Sign-extend their 48-bit NaN-box payload into the tree
+      # walker's ordinary arbitrary-precision Integer representation.
+      if ((bits >> 48) & 0xFFFF) == 0xFFFA
+        payload = bits & 0xFFFFFFFFFFFF
+        if payload >= 0x800000000000
+          return payload - 0x1000000000000
+        return payload
+      # Decode packed IPv4 through the existing interpreter ccall allowlist;
+      # native code remains a zero-call i64 bit cast.
+      if ((bits >> 48) & 0xFFFF) == 0xFFFE && ((bits >> 45) & 0x7) == 5
+        address = (bits >> 12) & 0xFFFFFFFF
+        prefix_bits = (bits >> 6) & 0x3F
+        prefix = prefix_bits <= 32 ? prefix_bits : nil
+        return ccall("w_ipv4_from_octets",
+                     (address >> 24) & 0xFF,
+                     (address >> 16) & 0xFF,
+                     (address >> 8) & 0xFF,
+                     address & 0xFF,
+                     prefix)
+      raise "wvalue_from_bits: unsupported packed WValue"
+
+    # Tree-walker mirrors of the compiler's inline raw byte intrinsics. Pointer
+    # values are ordinary interpreter Integers here, so unbox all operands at
+    # this explicit allowlisted boundary before calling the runtime mirrors.
+    if name == "raw_load_u8" && args.size() == 2
+      ptr = ccall_nobox("w_numeric_to_i64", args[0]) ## i64
+      index = ccall_nobox("w_numeric_to_i64", args[1]) ## i64
+      return ccall("w_int", ccall_nobox("w_raw_load_u8", ptr, index))
+    if name == "raw_store_u8" && args.size() == 3
+      ptr = ccall_nobox("w_numeric_to_i64", args[0]) ## i64
+      index = ccall_nobox("w_numeric_to_i64", args[1]) ## i64
+      value = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
+      return ccall("w_int", ccall_nobox("w_raw_store_u8", ptr, index, value))
 
     # Explicit fused multiply-add. The tree-walker has no hardware FMA and no
     # runtime fma() to call, so it computes a*b+c directly — double-rounded,
@@ -1824,10 +1885,17 @@ use target
     # must resolve before `is_builtin?("max")`, which would otherwise call
     # dispatch_builtin with a hardcoded nil receiver and crash).
     s = current_self()
-    if s != nil && type(s) == "Hash" && s.has_key?(:rt) && s[:rt] == :object
-      m = lookup_method(s[:w_class], name)
-      if m != nil
-        return call_w_method(s, m, args, block, env)
+    m = implicit_self_method(s, name)
+    if m != nil
+      return call_w_method(s, m, args, block, env)
+
+    # Bare Base64 compatibility calls do not name the Base64 class, so trigger
+    # the same core/base64.w autoload that the compiled loader performs before
+    # consulting the global method table.
+    if name in ("base64_encode" "base64_decode" "base64url_encode" "base64url_decode")
+      method_key = "__method__" + name
+      if !@env.defined?(method_key)
+        try_autoload_class("Base64")
 
     # Global method
     method_key = "__method__" + name
@@ -1945,21 +2013,23 @@ use target
             return call_w_method(recv, m, [inst], block, env)
         return call_w_method(recv, m, args, block, env)
 
-    # Date runtime intrinsics (year/month/day/wday/day_of_week/…) have no
-    # Tungsten body in core/date.w — route them to the runtime date IC (key
-    # 0xE4) via w_method_call BEFORE the class lookup, so they don't resolve to
-    # an empty bodyless method. Bodied Date methods (day_name/month_name/
-    # strftime/…) fall through to the Date class below, and their internal
-    # intrinsic calls land back here.
-    if args.size() == 0 && w_type_name(recv) == "Date" && name in ("year" "month" "day" "hour" "minute" "second" "wday" "day_of_week" "day_of_month" "day_of_year" "yday" "cweek" "cwday" "days_in_month" "days_in_year" "leap?" "jd" "quarter" "tz")
-      return ccall("w_method_call", recv, "" + name, [])
-
     # Primitive values can be extended by core classes (Array, String, etc.).
     # Give those class methods first refusal before falling back to boot
     # builtins so traits such as Enumerable participate for primitive arrays.
     primitive_class = primitive_runtime_class(recv)
     if primitive_class != nil
       m = lookup_method(primitive_class, name)
+      # `- data` accessors model ivars for ordinary interpreted objects. A
+      # small set of runtime-backed classes expose scalar layout fields through
+      # w_native_data_field; fixed arrays and every other native layout stay on
+      # the ordinary accessor path. This keeps the tree walker from pretending
+      # it can decode layouts the storage boundary does not implement.
+      if m != nil && m[:data_field] == true
+        if native_data_field_supported?(primitive_class, name)
+          return ccall("w_native_data_field", recv, name)
+        # A generated storage accessor must not shadow a semantic runtime
+        # method with the same name (notably Hash#keys and Hash#values).
+        m = nil
       if m != nil
         return call_w_method(recv, m, args, block, env)
 
@@ -2119,7 +2189,54 @@ use target
         if @classes.has_key?(tn)
           return @classes[tn]
       return nil
+    # seed_primitive_class_stubs installs placeholders before any source is
+    # evaluated, so merely finding a class entry does not mean its core
+    # methods have been loaded. Let the registry's loaded-file guard make this
+    # a one-time lazy load before looking up methods on primitive receivers.
+    try_autoload_class(class_name)
     @classes[class_name]
+
+  # Scalar fields whose C layout is mirrored by w_native_data_field. Fixed
+  # arrays such as Array#_pad and IPv6#bytes are deliberately excluded: the
+  # compiled view-field operation treats them as raw scalar loads, not Arrays.
+  -> native_data_field_supported?(w_class, name)
+    if w_class == nil
+      return false
+    cname = w_class[:name]
+    if cname == "Array"
+      return name in ("flags" "ebits" "start" "size" "cap" "slots")
+    if cname == "BigArray"
+      return name in ("ebits" "flags" "start" "size" "cap" "slots")
+    if cname == "SmallArray"
+      return name in ("ebits" "size" "slots")
+    if cname == "Hash"
+      return name in ("count" "capacity" "flags")
+    if cname in ("IPv6" "MAC")
+      return name in ("len" "prefix" "_pad")
+    false
+
+  # Resolve only source-defined methods for a receiver-less call inside a
+  # method body. Runtime-backed values (Date/IPv4/IPv6/MAC/...) are not the
+  # Hash-backed :object shape used by ordinary user instances, but their core
+  # classes can still contain Tungsten method bodies that call sibling methods
+  # through implicit self (Date#cwyear -> cweek, for example).
+  #
+  # Keep this lookup narrow: dispatch_bare_call retains its existing global and
+  # builtin ordering, and does not recurse through dispatch_method (which would
+  # consult builtins and the runtime IC again).
+  -> implicit_self_method(recv, name)
+    if recv == nil
+      return nil
+    if type(recv) == "Hash" && recv.has_key?(:rt)
+      if recv[:rt] == :object
+        return lookup_method(recv[:w_class], name)
+      # Class/module sentinels are interpreter Hashes, not primitive Hash
+      # receivers. Do not accidentally dispatch Hash instance methods on them.
+      return nil
+    w_class = primitive_runtime_class(recv)
+    if w_class == nil
+      return nil
+    lookup_method(w_class, name)
 
   -> w_type_name(value)
     if value == nil
@@ -2184,6 +2301,7 @@ use target
     @self_stack.push(recv)
     @method_stack.push(method)
     result = nil
+    pending_error = nil
     begin
       # Bind parameters after establishing the callee context: default
       # expressions containing self/$value belong to the callee, not the
@@ -2216,10 +2334,16 @@ use target
           result = @signal[:value]
           @signal[:type] = nil
         else
-          raise err
+          # Defer the re-raise until the method's rescue frame has been fully
+          # popped. Re-raising from inside this rescue could target the same
+          # frame again, which made exceptions raised by interpreted methods
+          # disappear as a nil return value.
+          pending_error = err
     ensure
       @method_stack.pop()
       @self_stack.pop()
+    if pending_error != nil
+      raise pending_error
     result
 
   -> collect_free_vars(node, env, vars, seen)
@@ -2422,7 +2546,7 @@ use target
     layout[:fields].each -> (f)
       fname = f[:name]
       if fname != nil && !w_class[:methods].has_key?(fname)
-        accessor = {rt: :method, name: fname, params: [], body: [Tungsten:AST:Ivar.new("@" + fname)], w_class: w_class}
+        accessor = {rt: :method, name: fname, params: [], body: [Tungsten:AST:Ivar.new("@" + fname)], w_class: w_class, data_field: true}
         w_class[:methods][fname] = accessor
 
   -> eval_method_def(node, env)
@@ -2654,9 +2778,10 @@ use target
   -> eval_typed_array_new(node, env)
     etype = ast_get(node, :element_type)
     size = evaluate(ast_get(node, :size), env)
+    size_raw = ccall_nobox("w_numeric_to_i64", size) ## i64
     if etype == "bool"
-      return ccall("w_bool_array_new", size)
-    bits = 0
+      return ccall_rawargs("w_bool_array_new", size_raw)
+    bits = 0 ## i64
     if etype == "u1" || etype == "i1"
       bits = 1
     elsif etype == "u4"
@@ -2684,7 +2809,7 @@ use target
     elsif etype == "f64"
       bits = 0 - 64
     if bits != 0
-      return ccall("w_array_zeros", bits.to_s(), size)
+      return ccall_rawargs("w_array_zeros", bits, size_raw)
     ccall("w_array_new_empty")
 
   # -- String interpolation --

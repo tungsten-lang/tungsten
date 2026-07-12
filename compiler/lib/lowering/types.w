@@ -20,7 +20,7 @@
 #     `ast_get(...).each` chain lower as a machine-int receiver and
 #     corrupt the WValue.
 -> ccall_nobox_returns_wvalue?(fn_name)
-  fn_name in ("w_node_alloc" "w_node_field_load" "w_node_singleton" "w_ast_bool_cached" "w_node_inline_payload" "w_make_token_extern" "w_location_file" "w_location_file_offset" "w_ast_sparse_set" "w_ast_sparse_get" "w_ast_sparse_copy" "w_ast_intern_node" "w_ast_intern_str_of" "w_ast_freeze_if_array")
+  fn_name in ("w_node_alloc" "w_node_field_load" "w_node_singleton" "w_ast_bool_cached" "w_node_inline_payload" "w_make_token_extern" "w_location_file" "w_location_file_offset" "w_ast_sparse_set" "w_ast_sparse_get" "w_ast_sparse_copy" "w_ast_intern_node" "w_ast_intern_str_of" "w_ast_freeze_if_array" "w_body_arena_get")
 
 # -- Operator maps --
 
@@ -82,11 +82,11 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
     "Token"          => 0xD0
     "Char"           => 0xD3
     # W_PACKED subtypes — runtime's w_dispatch_key returns 0xE0|subtype
-    # when v >> 48 == 0xFFFE so each packed kind can register its own
-    # class. Currently only Tungsten:AST:Node is wired; the others remain free
-    # for color/date/ipv4 binding later.
+    # when v >> 48 == 0xFFFE so each packed kind can register its own class.
     "Tungsten:AST:Node"      => 0xE3
+    "Date"          => 0xE4
     "IPv4"          => 0xE5
+    "Tungsten:AST:Body"      => 0xE6
     "MAC"           => 0x85
     "Mac"           => 0x85
     => nil
@@ -134,6 +134,8 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
   # ---- typed-array allocators / wrappers ----
   m["w_array_new_aligned"] = true       # mmap-backed allocator
   m["w_array_new"] = true                # bumps an arena
+  m["w_ipv6_storage_clone"] = true       # allocates a WNetAddr clone
+  m["w_ipv6_storage_from_words"] = true  # allocates a WNetAddr from four u32 words
   m["w_array_view_raw"] = true           # builds a new view wrapper
   m["w_array_as_metal_buffer"] = true    # creates an MTLBuffer wrap
 

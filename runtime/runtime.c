@@ -3652,9 +3652,21 @@ static uint32_t g_ast_extra_arrays = 0;   /* stats: arrays frozen */
 
 /* Bump-allocate `n` slots; grows (realloc-double) on exhaustion. */
 static uint32_t w_body_arena_alloc(uint32_t n) {
-    if (g_body_arena_cursor + n > g_body_arena_cap) {
-        uint32_t new_cap = g_body_arena_cap ? g_body_arena_cap * 2 : 4096;
-        while (new_cap < g_body_arena_cursor + n) new_cap *= 2;
+    const uint32_t max_slots = (uint32_t)W_BODY_OFFSET_MASK + 1u;
+    uint64_t required = (uint64_t)g_body_arena_cursor + (uint64_t)n;
+    if ((uint64_t)n > W_BODY_LENGTH_MASK || required > max_slots) {
+        w_raise(w_string("AST body arena exceeds packed representation"));
+        return 0;
+    }
+    if (required > g_body_arena_cap) {
+        uint32_t new_cap = g_body_arena_cap ? g_body_arena_cap : 4096;
+        while ((uint64_t)new_cap < required) {
+            if (new_cap >= max_slots / 2u) {
+                new_cap = max_slots;
+                break;
+            }
+            new_cap *= 2u;
+        }
         WValue *nb = (WValue *)realloc(g_body_arena_base,
                                        (size_t)new_cap * sizeof(WValue));
         if (!nb) die("w_body_arena_alloc: realloc failed");
@@ -3674,9 +3686,8 @@ void w_ast_extra_reset(void) {
     g_ast_extra_arrays = 0;
 }
 
-/* Direct slot access for the runtime's array-method implementations
- * (w_array_get, w_ic_body_size/each). Bounds are the caller's
- * responsibility — mirrors w_node_field_load's contract. */
+/* Direct slot access for packed Body#read/#each and w_array_get. Bounds are
+ * the caller's responsibility — mirrors w_node_field_load's contract. */
 WValue w_body_arena_get(uint32_t offset, uint32_t i) {
     return g_body_arena_base[offset + i];
 }
@@ -3689,6 +3700,10 @@ WValue w_ast_freeze_if_array(WValue v) {
                                               * (views, GPU registries) */
     int32_t n = a->size;
     if (n == 0) return w_box_body(0, 0);     /* no allocation for empty lists */
+    if (n < 0 || (uint64_t)n > W_BODY_LENGTH_MASK) {
+        w_raise(w_string("AST body length exceeds packed representation"));
+        return W_NIL;
+    }
     uint32_t offset = w_body_arena_alloc((uint32_t)n);
     WValue *src = a->slots + a->start;
     for (int32_t i = 0; i < n; i++) {
@@ -8746,16 +8761,6 @@ WValue w_crypto_sha1_hex(WValue data) {
     return w_hex_from_bytes(digest, 20);
 }
 
-WValue w_crypto_sha1_base64(WValue data) {
-    const uint8_t *input;
-    size_t len;
-    char inline_buf[6];
-    uint8_t digest[20];
-    w_crypto_input_data(data, &input, &len, inline_buf);
-    w_sha1_digest(input, len, digest);
-    return w_base64_encode(w_bytes_from_data(digest, 20));
-}
-
 WValue w_crypto_sha224_bytes(WValue data) {
     const uint8_t *input;
     size_t len;
@@ -9827,6 +9832,33 @@ int64_t w_array_data_ptr(int64_t arr_wval) {
 
 int64_t w_typed_array_data_ptr(int64_t arr_wval) {
     return w_array_data_ptr(arr_wval);
+}
+
+/* Start-adjusted u8[] storage boundary for source-level byte codecs. Unlike
+ * w_typed_array_data_ptr, this returns the first LIVE byte of a shifted/view
+ * array. Callers hoist it once, then use raw_load_u8/raw_store_u8 intrinsics in
+ * their native loop. */
+int64_t w_u8_live_data_ptr(int64_t arr_wval) {
+    WValue value = (WValue)arr_wval;
+    if (!w_is_bytes(value))
+        w_raise(w_string("u8 data pointer: expected u8[]"));
+    WArray *a = (WArray *)w_as_ptr(value);
+    /* A zero-length borrowed view may legally carry NULL storage. Return it
+     * unchanged; source loops are size-guarded and never dereference it. */
+    if (a->size == 0)
+        return (int64_t)(uintptr_t)a->slots;
+    return (int64_t)(uintptr_t)((uint8_t *)a->slots + a->start);
+}
+
+/* Tree-walker mirrors for the compiler's raw byte load/store intrinsics. Native
+ * compiled codec loops do not call these functions; eval mode does. */
+int64_t w_raw_load_u8(int64_t ptr, int64_t index) {
+    return ((const uint8_t *)(uintptr_t)ptr)[index];
+}
+
+int64_t w_raw_store_u8(int64_t ptr, int64_t index, int64_t value) {
+    ((uint8_t *)(uintptr_t)ptr)[index] = (uint8_t)value;
+    return (uint8_t)value;
 }
 
 #ifdef __aarch64__
@@ -11809,14 +11841,29 @@ static int net_is_digit(char c) { return c >= '0' && c <= '9'; }
  * coercion of a C ccall. */
 int64_t w_numeric_to_i64(WValue v) {
     if (w_is_int(v)) return w_as_int(v);
-    if (w_is_bigint(v)) return integer_low_i64(v);
+    if (w_is_bigint(v)) {
+        WBigint *b = w_as_bigint(v);
+        int32_t abs_len = b->size < 0 ? -b->size : b->size;
+        if (abs_len == 0) return 0;
+        if (abs_len == 1) {
+            uint64_t magnitude = b->limbs[0];
+            if (b->size > 0 && magnitude <= (uint64_t)INT64_MAX)
+                return (int64_t)magnitude;
+            if (b->size < 0 && magnitude <= (1ULL << 63)) {
+                if (magnitude == (1ULL << 63)) return INT64_MIN;
+                return -(int64_t)magnitude;
+            }
+        }
+        w_raise(w_string("integer is out of range for i64"));
+        return 0;
+    }
     if (w_is_double(v)) return (int64_t)w_as_double(v);
     /* ccall lowers integer literals and raw machine ints as plain i64. */
     if (v <= 0x00007FFFFFFFFFFFULL) return (int64_t)v;
     return as_int(v);
 }
 
-static int normalize_ipv4_prefix(int cidr) {
+static int normalize_ipv4_prefix(int64_t cidr) {
     if (cidr < 0) return W_IPV4_NO_PREFIX;
     if (cidr <= 32) return cidr;
     if (cidr == W_IPV4_NO_PREFIX) return W_IPV4_NO_PREFIX;
@@ -11824,7 +11871,7 @@ static int normalize_ipv4_prefix(int cidr) {
     return W_IPV4_NO_PREFIX;
 }
 
-static int normalize_ipv6_prefix(int cidr) {
+static int normalize_ipv6_prefix(int64_t cidr) {
     if (cidr < 0) return -1;
     if (cidr <= 128) return cidr;
     w_raise(w_string("IPv6 prefix must be between 0 and 128"));
@@ -11842,7 +11889,7 @@ static int ipv4_effective_prefix(WValue v) {
     return cidr <= 32 ? cidr : 32;
 }
 
-static WValue make_ipv4_addr(uint32_t addr, int cidr) {
+static WValue make_ipv4_addr(uint32_t addr, int64_t cidr) {
     return w_box_ipv4(addr, normalize_ipv4_prefix(cidr), 0);
 }
 
@@ -11915,19 +11962,10 @@ WValue w_ipv4_from_octets(WValue a, WValue b, WValue c, WValue d, WValue prefix_
             return W_NIL;
         }
     }
-    int prefix = w_is_nil(prefix_v) ? -1 : (int)w_numeric_to_i64(prefix_v);
+    int64_t prefix = w_is_nil(prefix_v) ? -1 : w_numeric_to_i64(prefix_v);
     uint32_t addr = ((uint32_t)octets[0] << 24) | ((uint32_t)octets[1] << 16) |
                     ((uint32_t)octets[2] << 8) | (uint32_t)octets[3];
     return make_ipv4_addr(addr, prefix);
-}
-
-WValue w_ipv4_with_prefix(WValue ip, WValue prefix_v) {
-    if (!w_is_ipv4(ip)) {
-        w_raise(w_string("IPv4#with_prefix requires an IPv4 address"));
-        return W_NIL;
-    }
-    int prefix = w_is_nil(prefix_v) ? -1 : (int)w_numeric_to_i64(prefix_v);
-    return make_ipv4_addr(w_unbox_ipv4_addr(ip), prefix);
 }
 
 WValue w_ipv4_octets(WValue ip) {
@@ -11937,25 +11975,6 @@ WValue w_ipv4_octets(WValue ip) {
     for (int i = 0; i < 4; i++)
         w_array_push(arr, w_int((addr >> (8 * (3 - i))) & 0xFF));
     return arr;
-}
-
-WValue w_ipv4_network(WValue ip) {
-    if (!w_is_ipv4(ip)) return W_NIL;
-    int prefix = ipv4_effective_prefix(ip);
-    uint32_t mask = ipv4_mask_for_prefix(prefix);
-    return make_ipv4_addr(w_unbox_ipv4_addr(ip) & mask, w_unbox_ipv4_cidr(ip));
-}
-
-WValue w_ipv4_broadcast(WValue ip) {
-    if (!w_is_ipv4(ip)) return W_NIL;
-    int prefix = ipv4_effective_prefix(ip);
-    uint32_t mask = ipv4_mask_for_prefix(prefix);
-    return make_ipv4_addr(w_unbox_ipv4_addr(ip) | ~mask, w_unbox_ipv4_cidr(ip));
-}
-
-WValue w_ipv4_netmask(WValue ip) {
-    if (!w_is_ipv4(ip)) return W_NIL;
-    return make_ipv4_addr(ipv4_mask_for_prefix(ipv4_effective_prefix(ip)), -1);
 }
 
 WValue w_ipv4_in_cidr(WValue ip, WValue cidr) {
@@ -11973,8 +11992,67 @@ WValue w_ipv6(const uint8_t *bytes, int cidr) {
     na->type = W_TYPE_IPV6;
     memcpy(na->bytes, bytes, 16);
     na->len = 16;
-    na->prefix = (int8_t)normalize_ipv6_prefix(cidr);
+    int prefix = normalize_ipv6_prefix(cidr);
+    na->prefix = prefix < 0 ? UINT8_MAX : (uint8_t)prefix;
     return w_box_ptr(na, W_SUBTAG_GENERIC);
+}
+
+/* Narrow storage boundaries for the source-defined IPv6 class. Validation,
+ * masking, and CIDR behavior live in core/ipv6.w; these helpers only expose
+ * the heap representation that Tungsten cannot allocate directly yet. */
+WValue w_ipv6_storage_clone(WValue ip, WValue prefix_v) {
+    if (!w_is_ipv6(ip)) return W_NIL;
+    int64_t raw_prefix = w_is_nil(prefix_v) ? -1 : w_numeric_to_i64(prefix_v);
+    int prefix = normalize_ipv6_prefix(raw_prefix);
+    return w_ipv6(((WNetAddr *)w_as_ptr(ip))->bytes, prefix);
+}
+
+static uint32_t net_storage_u32(WValue value) {
+    if (w_is_int(value)) return (uint32_t)w_as_int(value);
+    if (w_is_double(value)) return (uint32_t)w_as_double(value);
+    /* Raw ccall machine integers are untagged; handle them before generic
+     * heap predicates, which would otherwise treat zero as a pointer. */
+    if (value <= 0x00007FFFFFFFFFFFULL) return (uint32_t)value;
+    if (w_is_bigint(value)) return (uint32_t)w_to_i64(value);
+    return (uint32_t)w_to_i64(value);
+}
+
+WValue w_ipv6_storage_from_words(WValue word0, WValue word1, WValue word2,
+                                 WValue word3, WValue raw_prefix_v) {
+    uint32_t words[4] = {
+        net_storage_u32(word0), net_storage_u32(word1),
+        net_storage_u32(word2), net_storage_u32(word3)
+    };
+    uint8_t bytes[16];
+    for (int w = 0; w < 4; w++) {
+        bytes[w * 4]     = (uint8_t)(words[w] >> 24);
+        bytes[w * 4 + 1] = (uint8_t)(words[w] >> 16);
+        bytes[w * 4 + 2] = (uint8_t)(words[w] >> 8);
+        bytes[w * 4 + 3] = (uint8_t)words[w];
+    }
+    int prefix = (int)net_storage_u32(raw_prefix_v);
+    if ((uint8_t)prefix == UINT8_MAX) prefix = -1;
+    return w_ipv6(bytes, prefix);
+}
+
+/* The compiled path lowers WNetAddr fixed inline fields to direct loads. The
+ * tree walker has no raw object-memory view, so it uses these exact storage
+ * mirrors while executing the same Tungsten method bodies. */
+WValue w_netaddr_raw_byte(WValue addr, WValue index_v) {
+    if (!w_is_ipv6(addr) && !w_is_mac(addr)) return W_NIL;
+    WNetAddr *na = (WNetAddr *)w_as_ptr(addr);
+    int64_t index = w_numeric_to_i64(index_v);
+    if (index < 0 || index >= na->len) return W_NIL;
+    return w_int(na->bytes[index]);
+}
+
+WValue w_netaddr_raw_prefix(WValue addr) {
+    if (!w_is_ipv6(addr) && !w_is_mac(addr)) return W_NIL;
+    return w_int((uint8_t)((WNetAddr *)w_as_ptr(addr))->prefix);
+}
+
+WValue w_netaddr_ipv6_p(WValue addr) {
+    return w_is_ipv6(addr) ? W_TRUE : W_FALSE;
 }
 
 WValue w_ipv6_to_s(WValue v) {
@@ -11991,7 +12069,7 @@ WValue w_ipv6_to_s(WValue v) {
         (unsigned)((na->bytes[14] << 8) | na->bytes[15]));
     /* Append the CIDR prefix for a CIDR value (prefix -1 = plain address).
      * Mirrors w_ipv4_to_s so "2001:db8::/32" prints its prefix. */
-    if (na->prefix >= 0 && n > 0 && n < (int)sizeof(buf))
+    if (na->prefix != UINT8_MAX && n > 0 && n < (int)sizeof(buf))
         snprintf(buf + n, sizeof(buf) - n, "/%d", na->prefix);
     return w_string(buf);
 }
@@ -12138,44 +12216,6 @@ WValue w_ipv6_parse(WValue str_v) {
     return w_ipv6_from_string(addr, cidr);
 }
 
-WValue w_ipv6_with_prefix(WValue ip, WValue prefix_v) {
-    if (!w_is_ipv6(ip)) {
-        w_raise(w_string("IPv6#with_prefix requires an IPv6 address"));
-        return W_NIL;
-    }
-    int prefix = w_is_nil(prefix_v) ? -1 : (int)w_numeric_to_i64(prefix_v);
-    WNetAddr *na = (WNetAddr *)w_as_ptr(ip);
-    return w_ipv6(na->bytes, prefix);
-}
-
-WValue w_ipv6_prefix(WValue ip) {
-    if (!w_is_ipv6(ip)) return W_NIL;
-    WNetAddr *na = (WNetAddr *)w_as_ptr(ip);
-    return na->prefix >= 0 ? w_int(na->prefix) : W_NIL;
-}
-
-WValue w_ipv6_cidr_p(WValue ip) {
-    if (!w_is_ipv6(ip)) return W_FALSE;
-    WNetAddr *na = (WNetAddr *)w_as_ptr(ip);
-    return na->prefix >= 0 ? W_TRUE : W_FALSE;
-}
-
-WValue w_ipv6_byte(WValue ip, WValue index_v) {
-    if (!w_is_ipv6(ip)) return W_NIL;
-    int64_t index = w_numeric_to_i64(index_v);
-    if (index < 0 || index > 15) return W_NIL;
-    WNetAddr *na = (WNetAddr *)w_as_ptr(ip);
-    return w_int(na->bytes[index]);
-}
-
-WValue w_ipv6_bytes(WValue ip) {
-    if (!w_is_ipv6(ip)) return W_NIL;
-    WNetAddr *na = (WNetAddr *)w_as_ptr(ip);
-    WValue arr = w_array_new_empty();
-    for (int i = 0; i < 16; i++) w_array_push(arr, w_int(na->bytes[i]));
-    return arr;
-}
-
 static void ipv6_network_bytes(const uint8_t in[16], int prefix, uint8_t out[16]) {
     for (int i = 0; i < 16; i++) {
         int bits = prefix - (i * 8);
@@ -12189,61 +12229,15 @@ static void ipv6_network_bytes(const uint8_t in[16], int prefix, uint8_t out[16]
     }
 }
 
-WValue w_ipv6_network(WValue ip) {
-    if (!w_is_ipv6(ip)) return W_NIL;
-    WNetAddr *na = (WNetAddr *)w_as_ptr(ip);
-    int prefix = na->prefix >= 0 ? na->prefix : 128;
-    uint8_t bytes[16];
-    ipv6_network_bytes(na->bytes, prefix, bytes);
-    return w_ipv6(bytes, na->prefix);
-}
-
 WValue w_ipv6_in_cidr(WValue ip, WValue cidr) {
     if (!w_is_ipv6(ip) || !w_is_ipv6(cidr)) return W_FALSE;
     WNetAddr *ipa = (WNetAddr *)w_as_ptr(ip);
     WNetAddr *net = (WNetAddr *)w_as_ptr(cidr);
-    int prefix = net->prefix >= 0 ? net->prefix : 128;
+    int prefix = net->prefix != UINT8_MAX ? net->prefix : 128;
     uint8_t ip_net[16], cidr_net[16];
     ipv6_network_bytes(ipa->bytes, prefix, ip_net);
     ipv6_network_bytes(net->bytes, prefix, cidr_net);
     return memcmp(ip_net, cidr_net, 16) == 0 ? W_TRUE : W_FALSE;
-}
-
-WValue w_ipv6_unspecified_p(WValue ip) {
-    if (!w_is_ipv6(ip)) return W_FALSE;
-    WNetAddr *na = (WNetAddr *)w_as_ptr(ip);
-    for (int i = 0; i < 16; i++) if (na->bytes[i] != 0) return W_FALSE;
-    return W_TRUE;
-}
-
-WValue w_ipv6_loopback_p(WValue ip) {
-    if (!w_is_ipv6(ip)) return W_FALSE;
-    WNetAddr *na = (WNetAddr *)w_as_ptr(ip);
-    for (int i = 0; i < 15; i++) if (na->bytes[i] != 0) return W_FALSE;
-    return na->bytes[15] == 1 ? W_TRUE : W_FALSE;
-}
-
-WValue w_ipv6_multicast_p(WValue ip) {
-    return (w_is_ipv6(ip) && ((WNetAddr *)w_as_ptr(ip))->bytes[0] == 0xFF) ? W_TRUE : W_FALSE;
-}
-
-WValue w_ipv6_link_local_p(WValue ip) {
-    if (!w_is_ipv6(ip)) return W_FALSE;
-    WNetAddr *na = (WNetAddr *)w_as_ptr(ip);
-    return (na->bytes[0] == 0xFE && (na->bytes[1] & 0xC0) == 0x80) ? W_TRUE : W_FALSE;
-}
-
-WValue w_ipv6_unique_local_p(WValue ip) {
-    return (w_is_ipv6(ip) && ((((WNetAddr *)w_as_ptr(ip))->bytes[0] & 0xFE) == 0xFC)) ? W_TRUE : W_FALSE;
-}
-
-WValue w_ipv6_global_p(WValue ip) {
-    if (!w_is_ipv6(ip)) return W_FALSE;
-    if (w_ipv6_unspecified_p(ip) == W_TRUE || w_ipv6_loopback_p(ip) == W_TRUE ||
-        w_ipv6_multicast_p(ip) == W_TRUE || w_ipv6_link_local_p(ip) == W_TRUE ||
-        w_ipv6_unique_local_p(ip) == W_TRUE)
-        return W_FALSE;
-    return W_TRUE;
 }
 
 WValue w_ip_in_cidr(WValue ip, WValue cidr) {
@@ -12258,7 +12252,7 @@ WValue w_mac(const uint8_t *bytes) {
     na->type = W_TYPE_MAC;
     memcpy(na->bytes, bytes, 6);
     na->len = 6;
-    na->prefix = -1;
+    na->prefix = UINT8_MAX;
     return w_box_ptr(na, W_SUBTAG_GENERIC);
 }
 
@@ -12307,45 +12301,6 @@ WValue w_mac_parse(WValue str_v) {
         return W_NIL;
     }
     return w_mac(bytes);
-}
-
-WValue w_mac_byte(WValue mac, WValue index_v) {
-    if (!w_is_mac(mac)) return W_NIL;
-    int64_t index = w_numeric_to_i64(index_v);
-    if (index < 0 || index > 5) return W_NIL;
-    WNetAddr *na = (WNetAddr *)w_as_ptr(mac);
-    return w_int(na->bytes[index]);
-}
-
-WValue w_mac_bytes(WValue mac) {
-    if (!w_is_mac(mac)) return W_NIL;
-    WNetAddr *na = (WNetAddr *)w_as_ptr(mac);
-    WValue arr = w_array_new_empty();
-    for (int i = 0; i < 6; i++) w_array_push(arr, w_int(na->bytes[i]));
-    return arr;
-}
-
-WValue w_mac_multicast_p(WValue mac) {
-    return (w_is_mac(mac) && (((WNetAddr *)w_as_ptr(mac))->bytes[0] & 0x01)) ? W_TRUE : W_FALSE;
-}
-
-WValue w_mac_unicast_p(WValue mac) {
-    return w_mac_multicast_p(mac) == W_TRUE ? W_FALSE : (w_is_mac(mac) ? W_TRUE : W_FALSE);
-}
-
-WValue w_mac_local_p(WValue mac) {
-    return (w_is_mac(mac) && (((WNetAddr *)w_as_ptr(mac))->bytes[0] & 0x02)) ? W_TRUE : W_FALSE;
-}
-
-WValue w_mac_universal_p(WValue mac) {
-    return w_mac_local_p(mac) == W_TRUE ? W_FALSE : (w_is_mac(mac) ? W_TRUE : W_FALSE);
-}
-
-WValue w_mac_broadcast_p(WValue mac) {
-    if (!w_is_mac(mac)) return W_FALSE;
-    WNetAddr *na = (WNetAddr *)w_as_ptr(mac);
-    for (int i = 0; i < 6; i++) if (na->bytes[i] != 0xFF) return W_FALSE;
-    return W_TRUE;
 }
 
 /* ---- Encoded value (Phase 6i.2: type byte 8 in W_SUBTAG_GENERIC bucket) ---- */
@@ -16389,6 +16344,52 @@ static WHash *as_hash(WValue v) {
     return (WHash *)w_as_ptr(v);
 }
 
+/* Tree-walker mirror for the explicitly allowlisted scalar `- data` accessors
+ * on runtime-backed primitive values. Fixed arrays are intentionally absent:
+ * compiled view loads treat those as raw scalar chunks, not byte arrays. */
+WValue w_native_data_field(WValue recv, WValue name_v) {
+    const char *name = as_str(name_v);
+
+    if (w_is_array(recv)) {
+        WArray *a = (WArray *)w_as_ptr(recv);
+        if (strcmp(name, "flags") == 0) return w_int(a->flags);
+        if (strcmp(name, "ebits") == 0) return w_int(a->ebits);
+        if (strcmp(name, "start") == 0) return w_int(a->start);
+        if (strcmp(name, "size") == 0) return w_int(a->size);
+        if (strcmp(name, "cap") == 0) return w_int(a->cap);
+        if (strcmp(name, "slots") == 0)
+            return w_int((int64_t)(uintptr_t)a->slots);
+    } else if (w_is_big_array(recv)) {
+        WBigArray *a = (WBigArray *)w_as_ptr(recv);
+        if (strcmp(name, "ebits") == 0) return w_int(a->ebits);
+        if (strcmp(name, "flags") == 0) return w_int(a->flags);
+        if (strcmp(name, "start") == 0) return w_int(a->start);
+        if (strcmp(name, "size") == 0) return w_int(a->size);
+        if (strcmp(name, "cap") == 0) return w_int(a->cap);
+        if (strcmp(name, "slots") == 0)
+            return w_int((int64_t)(uintptr_t)a->slots);
+    } else if (w_is_small_array(recv)) {
+        WSmallArray *a = (WSmallArray *)w_as_ptr(recv);
+        if (strcmp(name, "ebits") == 0) return w_int(a->ebits);
+        if (strcmp(name, "size") == 0) return w_int(a->size);
+        if (strcmp(name, "slots") == 0)
+            return w_int((int64_t)(uintptr_t)a->slots);
+    } else if (w_is_hash(recv)) {
+        WHash *h = (WHash *)w_as_ptr(recv);
+        if (strcmp(name, "count") == 0) return w_int(h->count);
+        if (strcmp(name, "capacity") == 0) return w_int(h->cap);
+        if (strcmp(name, "flags") == 0) return w_int(h->flags);
+    } else if (w_is_ipv6(recv) || w_is_mac(recv)) {
+        WNetAddr *a = (WNetAddr *)w_as_ptr(recv);
+        if (strcmp(name, "len") == 0) return w_int(a->len);
+        if (strcmp(name, "prefix") == 0) return w_int(a->prefix);
+        if (strcmp(name, "_pad") == 0) return w_int(a->_pad);
+    }
+
+    w_raise(w_string("native data field is unavailable"));
+    return W_NIL;
+}
+
 static void w_hash_allocate_storage(WHash *hash, int64_t cap) {
     hash->cap = cap;
     hash->count = 0;
@@ -17997,6 +17998,12 @@ static int w_type_name_eq_lit(const char *tn, size_t tn_len, const char *lit) {
 }
 
 static int w_primitive_is_a_type_name(WValue recv, const char *tn, size_t tn_len) {
+    if (w_is_ipv4(recv))
+        return w_type_name_eq_lit(tn, tn_len, "IPv4");
+    if (w_is_ipv6(recv))
+        return w_type_name_eq_lit(tn, tn_len, "IPv6");
+    if (w_is_mac(recv))
+        return w_type_name_eq_lit(tn, tn_len, "MAC");
     if (w_is_int(recv)) {
         return w_type_name_eq_lit(tn, tn_len, "Integer") ||
                w_type_name_eq_lit(tn, tn_len, "Int") ||
@@ -18128,11 +18135,10 @@ static void w_init_method_names(void) {
 
 static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue args_arr);
 
-/* Phase 4f follow-up forward decl: the body lives near the typed_array_*
- * inlines (around line 9760+). Iterators in w_method_dispatch (each, map,
- * select, reject, find, any?/all?/none?, compact, dup, uniq) call this
- * instead of reading arr->slots[i] directly so non-w64 typed arrays decode
- * properly per ebits before yielding to user closures. */
+/* Phase 4f follow-up forward decl: the body lives with the typed-array
+ * helpers. Native storage/leaf methods (each, any?/all?/none?, compact, dup,
+ * uniq, count/index) use it so non-w64 arrays decode per ebits. Enumerable
+ * combinators consume those decoded values through Array#each. */
 static WValue array_slot_load_decoded(WArray *a, int64_t i);
 static inline int array_is_float(const WArray *a);
 static inline int array_is_signed_int(const WArray *a);
@@ -18285,7 +18291,13 @@ WValue w_class_of(WValue v) {
         if (g_class_table[obj->class_id]) return w_box_ptr(g_class_table[obj->class_id], W_SUBTAG_CLASS);
     }
     uint64_t key = w_dispatch_key(v);
-    if (key < 256) {
+    /* Packed AST bodies use their own dispatch key so their read-only
+     * Tungsten methods can bypass Array storage. That representation detail
+     * is deliberately not public type identity: compiler code has always
+     * treated AST child lists as Arrays (see __w_type above). Skip the Body
+     * type-class registration here so `.class` follows that Array facade too.
+     * Method dispatch still uses the 0xE6 key in w_method_dispatch. */
+    if (!w_is_body(v) && key < 256) {
         uint16_t cid_slot = g_type_class[key];
         if (cid_slot) {
             WClass *klass = g_class_table[cid_slot - 1];
@@ -18826,7 +18838,7 @@ static WValue w_ic_array_delete_at(WValue r, WValue *a, int c) {
     return removed;
 }
 
-/* Phase 7+k: block-bearing iterators + leaf collection ops. */
+/* Array storage iterator and the leaf collection ops that remain native. */
 static WValue w_ic_array_each(WValue r, WValue *a, int c) {
     if (c < 1 || !w_is_closure(a[c - 1])) die("each requires a block");
     WClosure *cl = as_closure(a[c - 1]);
@@ -18834,47 +18846,6 @@ static WValue w_ic_array_each(WValue r, WValue *a, int c) {
     for (int32_t i = 0; i < arr->size; i++)
         call_closure_1(cl, array_slot_load_decoded(arr, i));
     return r;
-}
-static WValue w_ic_array_map(WValue r, WValue *a, int c) {
-    if (c < 1 || !w_is_closure(a[c - 1])) die("map requires a block");
-    WClosure *cl = as_closure(a[c - 1]);
-    WArray *arr = as_array(r);
-    WValue result = w_array_new_empty();
-    for (int32_t i = 0; i < arr->size; i++)
-        w_array_push(result, call_closure_1(cl, array_slot_load_decoded(arr, i)));
-    return result;
-}
-static WValue w_ic_array_select(WValue r, WValue *a, int c) {
-    if (c < 1 || !w_is_closure(a[c - 1])) die("select requires a block");
-    WClosure *cl = as_closure(a[c - 1]);
-    WArray *arr = as_array(r);
-    WValue result = w_array_new_empty();
-    for (int32_t i = 0; i < arr->size; i++) {
-        WValue v = array_slot_load_decoded(arr, i);
-        if (w_truthy(call_closure_1(cl, v))) w_array_push(result, v);
-    }
-    return result;
-}
-static WValue w_ic_array_reject(WValue r, WValue *a, int c) {
-    if (c < 1 || !w_is_closure(a[c - 1])) die("reject requires a block");
-    WClosure *cl = as_closure(a[c - 1]);
-    WArray *arr = as_array(r);
-    WValue result = w_array_new_empty();
-    for (int32_t i = 0; i < arr->size; i++) {
-        WValue v = array_slot_load_decoded(arr, i);
-        if (!w_truthy(call_closure_1(cl, v))) w_array_push(result, v);
-    }
-    return result;
-}
-static WValue w_ic_array_find(WValue r, WValue *a, int c) {
-    if (c < 1 || !w_is_closure(a[c - 1])) return W_NIL;
-    WClosure *cl = as_closure(a[c - 1]);
-    WArray *arr = as_array(r);
-    for (int32_t i = 0; i < arr->size; i++) {
-        WValue v = array_slot_load_decoded(arr, i);
-        if (w_truthy(call_closure_1(cl, v))) return v;
-    }
-    return W_NIL;
 }
 static WValue w_ic_array_any_q(WValue r, WValue *a, int c) {
     WArray *arr = as_array(r);
@@ -18930,87 +18901,6 @@ static WValue w_ic_array_dup(WValue r, WValue *a, int c) {
         w_array_push(result, array_slot_load_decoded(arr, i));
     return result;
 }
-static WValue w_ic_array_reduce(WValue r, WValue *a, int c) {
-    if (c < 2 || !w_is_closure(a[c - 1])) die("reduce requires (init, block)");
-    WValue cl_v = a[c - 1];
-    WValue acc = a[0];
-    WArray *arr = as_array(r);
-    for (int32_t i = 0; i < arr->size; i++)
-        acc = w_closure_call_2(cl_v, acc, array_slot_load_decoded(arr, i));
-    return acc;
-}
-static WValue w_ic_array_each_with_index(WValue r, WValue *a, int c) {
-    if (c < 1 || !w_is_closure(a[c - 1])) die("each_with_index requires a block");
-    WValue cl_v = a[c - 1];
-    WArray *arr = as_array(r);
-    for (int32_t i = 0; i < arr->size; i++)
-        w_closure_call_2(cl_v, array_slot_load_decoded(arr, i), w_int(i));
-    return r;
-}
-static WValue w_ic_array_group_by(WValue r, WValue *a, int c) {
-    if (c < 1 || !w_is_closure(a[c - 1])) die("group_by requires a block");
-    WClosure *cl = as_closure(a[c - 1]);
-    WArray *arr = as_array(r);
-    WValue result = w_hash_new();
-    for (int32_t i = 0; i < arr->size; i++) {
-        WValue v = array_slot_load_decoded(arr, i);
-        WValue k = call_closure_1(cl, v);
-        WValue bucket = w_hash_get(result, k);
-        if (bucket == W_NIL || !w_is_array(bucket)) {
-            bucket = w_array_new_empty();
-            w_hash_set(result, k, bucket);
-        }
-        w_array_push(bucket, v);
-    }
-    return result;
-}
-static WValue w_ic_array_partition(WValue r, WValue *a, int c) {
-    if (c < 1 || !w_is_closure(a[c - 1])) die("partition requires a block");
-    WClosure *cl = as_closure(a[c - 1]);
-    WArray *arr = as_array(r);
-    WValue yes = w_array_new_empty();
-    WValue no = w_array_new_empty();
-    for (int32_t i = 0; i < arr->size; i++) {
-        WValue v = array_slot_load_decoded(arr, i);
-        if (w_truthy(call_closure_1(cl, v))) w_array_push(yes, v);
-        else w_array_push(no, v);
-    }
-    WValue pair = w_array_new_empty();
-    w_array_push(pair, yes);
-    w_array_push(pair, no);
-    return pair;
-}
-static WValue w_ic_array_tally(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    WArray *arr = as_array(r);
-    WValue result = w_hash_new();
-    for (int32_t i = 0; i < arr->size; i++) {
-        WValue k = array_slot_load_decoded(arr, i);
-        WValue existing = w_hash_get(result, k);
-        if (existing == W_NIL) w_hash_set(result, k, w_int(1));
-        else w_hash_set(result, k, w_int(w_as_int(existing) + 1));
-    }
-    return result;
-}
-static WValue w_ic_array_flat_map(WValue r, WValue *a, int c) {
-    if (c < 1 || !w_is_closure(a[c - 1])) die("flat_map requires a block");
-    WClosure *cl = as_closure(a[c - 1]);
-    WArray *arr = as_array(r);
-    WValue result = w_array_new_empty();
-    for (int32_t i = 0; i < arr->size; i++) {
-        WValue sub = call_closure_1(cl, array_slot_load_decoded(arr, i));
-        if (w_is_array(sub)) {
-            WArray *sa = as_array(sub);
-            /* #62: decode-aware load — sub-array could be typed (e.g. u8). */
-            for (int32_t j = 0; j < sa->size; j++)
-                w_array_push(result, array_slot_load_decoded(sa, j));
-        } else {
-            w_array_push(result, sub);
-        }
-    }
-    return result;
-}
-
 /* Phase 7+j: uniq, take, drop, minmax. */
 static WValue w_ic_array_uniq(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -21360,23 +21250,12 @@ static WValue w_ic_int_abs(WValue r, WValue *a, int c) {
     return w_int(v < 0 ? -v : v);
 }
 
-/* Int#prev / #succ / #negative? — defined in core/numeric/int.w but not
- * dispatchable on a runtime (non-literal) int without an IC entry, so e.g.
- * `x.prev` or `@1.prev` (Hypercomplex#**) hit "undefined method". */
-static WValue w_ic_int_prev(WValue r, WValue *a, int c) { (void)a; (void)c; return w_box_int_checked(w_as_int(r) - 1); }
-static WValue w_ic_int_succ(WValue r, WValue *a, int c) { (void)a; (void)c; return w_box_int_checked(w_as_int(r) + 1); }
-static WValue w_ic_int_zero_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_bool(w_as_int(r) == 0); }
-static WValue w_ic_int_even_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_bool((w_as_int(r) & 1) == 0); }
-static WValue w_ic_int_odd_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_bool((w_as_int(r) & 1) != 0); }
-static WValue w_ic_int_negative_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_bool(w_as_int(r) < 0); }
-static WValue w_ic_int_positive_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_bool(w_as_int(r) > 0); }
 static WValue w_ic_int_sqrt(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_box_double(sqrt((double)w_as_int(r)));
 }
-/* Numeric#sq — self squared, README's `dx.sq`. w_mul handles every numeric
- * tag (int, bignum promotion, decimal, float), so one handler serves the
- * int, float, and decimal IC tables. */
+/* Numeric#sq — Float and Decimal retain this handler while the inline Integer
+ * route uses Number's native Tungsten body. */
 static WValue w_ic_num_sq(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_mul(r, r);
@@ -21770,17 +21649,6 @@ static WValue w_ic_hash_each(WValue r, WValue *a, int c) {
     }
     return r;
 }
-static WValue w_ic_hash_map(WValue r, WValue *a, int c) {
-    if (c < 1 || !w_is_closure(a[c - 1])) die("map requires a block");
-    WHash *hash = as_hash(r);
-    WValue cl_v = a[c - 1];
-    WValue result = w_array_new_empty();
-    for (int64_t i = 0; i < hash->cap; i++) {
-        if (hash->keys[i] != W_UNDEF && hash->keys[i] != W_MEMO_MISS)
-            w_array_push(result, w_closure_call_2(cl_v, hash->keys[i], hash->values[i]));
-    }
-    return result;
-}
 static WValue w_ic_hash_delete(WValue r, WValue *a, int c) {
     if (c < 1) die("delete requires 1 argument");
     return w_hash_delete(r, a[0]);
@@ -21860,34 +21728,7 @@ static WValue w_ic_decimal_round(WValue r, WValue *a, int c) {
 
 static WValue w_ic_value_to_s(WValue r, WValue *a, int c) { (void)a; (void)c; return w_to_s(r); }
 
-static WValue w_ic_ipv4_with_prefix(WValue r, WValue *a, int c) { return w_ipv4_with_prefix(r, c > 0 ? a[0] : W_NIL); }
 static WValue w_ic_ipv4_octets(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_octets(r); }
-static WValue w_ic_ipv4_network(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_network(r); }
-static WValue w_ic_ipv4_broadcast(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_broadcast(r); }
-static WValue w_ic_ipv4_netmask(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_netmask(r); }
-static WValue w_ic_ipv4_include(WValue r, WValue *a, int c) { return c > 0 ? w_ipv4_in_cidr(a[0], r) : W_FALSE; }
-
-static WValue w_ic_ipv6_prefix(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv6_prefix(r); }
-static WValue w_ic_ipv6_cidr_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv6_cidr_p(r); }
-static WValue w_ic_ipv6_with_prefix(WValue r, WValue *a, int c) { return w_ipv6_with_prefix(r, c > 0 ? a[0] : W_NIL); }
-static WValue w_ic_ipv6_byte(WValue r, WValue *a, int c) { return w_ipv6_byte(r, c > 0 ? a[0] : W_NIL); }
-static WValue w_ic_ipv6_bytes(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv6_bytes(r); }
-static WValue w_ic_ipv6_network(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv6_network(r); }
-static WValue w_ic_ipv6_include(WValue r, WValue *a, int c) { return c > 0 ? w_ipv6_in_cidr(a[0], r) : W_FALSE; }
-static WValue w_ic_ipv6_unspecified_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv6_unspecified_p(r); }
-static WValue w_ic_ipv6_loopback_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv6_loopback_p(r); }
-static WValue w_ic_ipv6_multicast_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv6_multicast_p(r); }
-static WValue w_ic_ipv6_link_local_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv6_link_local_p(r); }
-static WValue w_ic_ipv6_unique_local_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv6_unique_local_p(r); }
-static WValue w_ic_ipv6_global_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv6_global_p(r); }
-
-static WValue w_ic_mac_byte(WValue r, WValue *a, int c) { return w_mac_byte(r, c > 0 ? a[0] : W_NIL); }
-static WValue w_ic_mac_bytes(WValue r, WValue *a, int c) { (void)a; (void)c; return w_mac_bytes(r); }
-static WValue w_ic_mac_multicast_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_mac_multicast_p(r); }
-static WValue w_ic_mac_unicast_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_mac_unicast_p(r); }
-static WValue w_ic_mac_local_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_mac_local_p(r); }
-static WValue w_ic_mac_universal_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_mac_universal_p(r); }
-static WValue w_ic_mac_broadcast_q(WValue r, WValue *a, int c) { (void)a; (void)c; return w_mac_broadcast_p(r); }
 
 /* Resolution tables — WValue keys for O(1) integer compare */
 typedef struct { WValue name; WValue (*fn)(WValue, WValue*, int); } WICEntry;
@@ -21937,22 +21778,11 @@ static WICEntry w_ic_array_table[] = {
     {0, w_ic_array_drop},
     {0, w_ic_array_minmax},
     {0, w_ic_array_each},        /* Phase 7+k */
-    {0, w_ic_array_map},
-    {0, w_ic_array_select},
-    {0, w_ic_array_reject},
-    {0, w_ic_array_find},        /* WN_find */
-    {0, w_ic_array_find},        /* WN_detect — same handler */
     {0, w_ic_array_any_q},
     {0, w_ic_array_all_q},
     {0, w_ic_array_none_q},
     {0, w_ic_array_compact},
     {0, w_ic_array_dup},
-    {0, w_ic_array_reduce},
-    {0, w_ic_array_each_with_index},
-    {0, w_ic_array_group_by},
-    {0, w_ic_array_partition},
-    {0, w_ic_array_tally},
-    {0, w_ic_array_flat_map},
     {0, w_ic_array_count},        /* Phase 7+n */
     {0, w_ic_array_find_index},   /* WN_find_index */
     {0, w_ic_array_find_index},   /* WN_index — same handler */
@@ -21978,7 +21808,6 @@ static WICEntry w_ic_string_table[] = {
     {0, w_ic_string_concat},      /* WN_append — same handler */
     {0, w_ic_string_concat},      /* WN_lshift — same handler */
     {0, w_ic_string_prepend},
-    {0, w_ic_string_empty},       /* WN_empty_q */
     {0, w_ic_string_include},     /* WN_include_q */
     {0, w_ic_string_starts_with},
     {0, w_ic_string_ends_with},
@@ -22006,6 +21835,7 @@ static WICEntry w_ic_string_table[] = {
     {0, w_ic_string_rindex},    /* WN_rindex */
     {0, w_ic_string_reverse},   /* WN_reverse */
     {0, w_ic_string_length},    /* WN_length — alias for size */
+    {0, w_ic_string_empty},     /* dynamic-receiver fallback; source wins */
     {0, NULL}
 };
 
@@ -22022,18 +21852,9 @@ static WICEntry w_ic_int_table[] = {
                                 * a runtime-dispatched `n.each(block)` (e.g. the
                                 * block-passthrough rewrite `expr.each -> body`)
                                 * work when the int isn't statically known. */
-    {0, w_ic_int_prev},
-    {0, w_ic_int_succ},
-    {0, w_ic_int_succ},        /* next */
-    {0, w_ic_int_zero_q},
-    {0, w_ic_int_even_q},
-    {0, w_ic_int_odd_q},
-    {0, w_ic_int_negative_q},
-    {0, w_ic_int_positive_q},
     {0, w_ic_int_prime_q},
     {0, w_ic_int_prime_12k_q},
     {0, w_ic_int_prime_30k_q},
-    {0, w_ic_num_sq},
     {0, NULL}
 };
 
@@ -22142,47 +21963,6 @@ static WICEntry w_ic_channel_table[] = {   /* Phase 7+m */
     {0, NULL}
 };
 
-/* ---- Date accessor IC handlers (packed date, dispatch key 0xE4) ------------
- * core/date.w's Date#year/month/day/wday/day_of_week/day_of_year/cweek/… are
- * bodyless intrinsics; these back them (the bodied day_name/month_name/strftime
- * call these). Fields via w_unbox_date_*; weekday/yday/ISO-week from the JDN. */
-static int w_date_iso_weekday(int64_t jdn) {     /* 1=Mon … 7=Sun */
-    return (int)(((jdn % 7) + 7) % 7) + 1;
-}
-static int w_date_yday_of(WValue r) {
-    int y = w_unbox_date_year(r), m = w_unbox_date_month(r), yd = w_unbox_date_day(r);
-    for (int i = 1; i < m; i++) yd += days_in_month(y, i);
-    return yd;
-}
-static int w_date_weeks_in_year(int y) {
-    int wd = w_date_iso_weekday(date_to_jdn(w_box_date(y, 1, 1, 0, 0, 0, 0)));
-    return (wd == 4 || (is_leap_year(y) && wd == 3)) ? 53 : 52;
-}
-static int w_date_iso_week_of(WValue rv) {
-    int y = w_unbox_date_year(rv);
-    int wd = w_date_iso_weekday(date_to_jdn(rv));
-    int week = (w_date_yday_of(rv) - wd + 10) / 7;
-    if (week < 1) return w_date_weeks_in_year(y - 1);
-    if (week > w_date_weeks_in_year(y)) return 1;
-    return week;
-}
-static WValue w_ic_date_year(WValue r, WValue *a, int c)   { (void)a;(void)c; return w_int(w_unbox_date_year(r)); }
-static WValue w_ic_date_month(WValue r, WValue *a, int c)  { (void)a;(void)c; return w_int(w_unbox_date_month(r)); }
-static WValue w_ic_date_day(WValue r, WValue *a, int c)    { (void)a;(void)c; return w_int(w_unbox_date_day(r)); }
-static WValue w_ic_date_hour(WValue r, WValue *a, int c)   { (void)a;(void)c; return w_int(w_unbox_date_hour(r)); }
-static WValue w_ic_date_minute(WValue r, WValue *a, int c) { (void)a;(void)c; return w_int(w_unbox_date_min(r)); }
-static WValue w_ic_date_second(WValue r, WValue *a, int c) { (void)a;(void)c; return w_int(w_unbox_date_sec(r)); }
-static WValue w_ic_date_wday(WValue r, WValue *a, int c)   { (void)a;(void)c; return w_int((int)(((date_to_jdn(r) + 1) % 7 + 7) % 7)); }  /* 0=Sun */
-static WValue w_ic_date_yday(WValue r, WValue *a, int c)   { (void)a;(void)c; return w_int(w_date_yday_of(r)); }
-static WValue w_ic_date_cweek(WValue r, WValue *a, int c)  { (void)a;(void)c; return w_int(w_date_iso_week_of(r)); }
-static WValue w_ic_date_cwday(WValue r, WValue *a, int c)  { (void)a;(void)c; return w_int(w_date_iso_weekday(date_to_jdn(r))); }  /* 1=Mon */
-static WValue w_ic_date_dim(WValue r, WValue *a, int c)    { (void)a;(void)c; return w_int(days_in_month(w_unbox_date_year(r), w_unbox_date_month(r))); }
-static WValue w_ic_date_diy(WValue r, WValue *a, int c)    { (void)a;(void)c; return w_int(is_leap_year(w_unbox_date_year(r)) ? 366 : 365); }
-static WValue w_ic_date_leap(WValue r, WValue *a, int c)   { (void)a;(void)c; return is_leap_year(w_unbox_date_year(r)) ? W_TRUE : W_FALSE; }
-static WValue w_ic_date_jd(WValue r, WValue *a, int c)     { (void)a;(void)c; return w_int(date_to_jdn(r)); }
-static WValue w_ic_date_quarter(WValue r, WValue *a, int c){ (void)a;(void)c; return w_int((w_unbox_date_month(r) - 1) / 3 + 1); }
-static WValue w_ic_date_tz(WValue r, WValue *a, int c)    { (void)a;(void)c; return w_int(w_unbox_date_tz(r)); }
-
 /* Raw WValue bit views for the `? <value>` inspector's u0x breakdown panel.
  * Done in C so the 0xFFFE… top bits don't trip Tungsten's i64 sign handling.
  * The arg arrives as the raw WValue (immediates pass their bits through ccall). */
@@ -22269,7 +22049,7 @@ WValue w_value_fields(WValue vv) {
     }
     if (tag == 0xFFFE) {        /* packed */
         unsigned sub = (unsigned)((bits >> 45) & 0x7);
-        static const char *PK[8] = {"color", "complex", "rational", "reserved", "date", "ipv4", "reserved", "location"};
+        static const char *PK[8] = {"color", "complex", "rational", "reserved", "date", "ipv4", "body", "location"};
         w_fld(&p, e, "tag", "bits 63..48", "0xFFFE", "packed");
         snprintf(raw, sizeof raw, "%u", sub);
         w_fld(&p, e, "subtype", "bits 47..45", raw, PK[sub]);
@@ -22475,185 +22255,6 @@ WValue w_ip4_scene(WValue vv) {
     return w_string(buf);
 }
 
-static WICEntry w_ic_date_table[] = {
-    {0, w_ic_date_year},  {0, w_ic_date_month}, {0, w_ic_date_day},
-    {0, w_ic_date_hour},  {0, w_ic_date_minute}, {0, w_ic_date_second},
-    {0, w_ic_date_wday},  {0, w_ic_date_wday},  {0, w_ic_date_day},   /* wday, day_of_week, day_of_month */
-    {0, w_ic_date_yday},  {0, w_ic_date_yday},                        /* day_of_year, yday */
-    {0, w_ic_date_cweek}, {0, w_ic_date_cwday},
-    {0, w_ic_date_dim},   {0, w_ic_date_diy},   {0, w_ic_date_leap},
-    {0, w_ic_date_jd},    {0, w_ic_date_quarter}, {0, w_ic_date_tz},
-    {0, NULL}
-};
-
-/* Packed AST body reference (subtype 6, dispatch key 0xE6) — the
- * generic-dispatch counterpart to w_array_get/w_array_size's direct-call
- * handling above. Only .size/.each are registered: the empirical survey
- * behind this design (grep across compiler/lib for .body/.args/.expressions/
- * etc.) found zero map/select/reduce/push/[]=-style call sites on AST
- * child-list fields — if that's ever wrong, the missing method surfaces
- * immediately as a hard dispatch failure at self-host build time, not
- * silent corruption. */
-static WValue w_ic_body_size(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_int((int64_t)w_unbox_body_length(r));
-}
-static WValue w_ic_body_each(WValue r, WValue *a, int c) {
-    if (c < 1 || !w_is_closure(a[c - 1])) die("each requires a block");
-    WClosure *cl = as_closure(a[c - 1]);
-    uint32_t offset = w_unbox_body_offset(r);
-    uint32_t len = w_unbox_body_length(r);
-    for (uint32_t i = 0; i < len; i++)
-        call_closure_1(cl, w_body_arena_get(offset, i));
-    return r;
-}
-/* `[]`/`.size`/`.each` are only direct-called (bypassing IC dispatch
- * entirely) when static type inference proves recv_type == :array —
- * AST body-typed fields never infer that way (infer_type has no
- * :call-node case that returns :array), so EVERY access on these
- * fields reaches here, not the direct calls in w_array_get/w_array_size.
- * Delegate to those (not the unchecked w_array_idx) for correct
- * bounds/negative-index handling. */
-static WValue w_ic_body_idx(WValue r, WValue *a, int c) {
-    (void)c;
-    return w_array_get(r, a[0]);
-}
-static WValue w_ic_body_idxset(WValue r, WValue *a, int c) {
-    (void)c;
-    return w_array_set(r, a[0], a[1]);
-}
-static WValue w_ic_body_empty(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_unbox_body_length(r) == 0 ? W_TRUE : W_FALSE;
-}
-/* Read-only Enumerable methods — all build a fresh result (or return a
- * scalar), never mutate `r`, so they're safe against the immutable
- * packed-body representation the same way .each/.size are. */
-static WValue w_ic_body_map(WValue r, WValue *a, int c) {
-    if (c < 1 || !w_is_closure(a[c - 1])) die("map requires a block");
-    WClosure *cl = as_closure(a[c - 1]);
-    uint32_t offset = w_unbox_body_offset(r);
-    uint32_t len = w_unbox_body_length(r);
-    WValue result = w_array_new_empty();
-    for (uint32_t i = 0; i < len; i++)
-        w_array_push(result, call_closure_1(cl, w_body_arena_get(offset, i)));
-    return result;
-}
-static WValue w_ic_body_select(WValue r, WValue *a, int c) {
-    if (c < 1 || !w_is_closure(a[c - 1])) die("select requires a block");
-    WClosure *cl = as_closure(a[c - 1]);
-    uint32_t offset = w_unbox_body_offset(r);
-    uint32_t len = w_unbox_body_length(r);
-    WValue result = w_array_new_empty();
-    for (uint32_t i = 0; i < len; i++) {
-        WValue v = w_body_arena_get(offset, i);
-        if (w_truthy(call_closure_1(cl, v))) w_array_push(result, v);
-    }
-    return result;
-}
-static WValue w_ic_body_reject(WValue r, WValue *a, int c) {
-    if (c < 1 || !w_is_closure(a[c - 1])) die("reject requires a block");
-    WClosure *cl = as_closure(a[c - 1]);
-    uint32_t offset = w_unbox_body_offset(r);
-    uint32_t len = w_unbox_body_length(r);
-    WValue result = w_array_new_empty();
-    for (uint32_t i = 0; i < len; i++) {
-        WValue v = w_body_arena_get(offset, i);
-        if (!w_truthy(call_closure_1(cl, v))) w_array_push(result, v);
-    }
-    return result;
-}
-static WValue w_ic_body_find(WValue r, WValue *a, int c) {
-    if (c < 1 || !w_is_closure(a[c - 1])) return W_NIL;
-    WClosure *cl = as_closure(a[c - 1]);
-    uint32_t offset = w_unbox_body_offset(r);
-    uint32_t len = w_unbox_body_length(r);
-    for (uint32_t i = 0; i < len; i++) {
-        WValue v = w_body_arena_get(offset, i);
-        if (w_truthy(call_closure_1(cl, v))) return v;
-    }
-    return W_NIL;
-}
-static WValue w_ic_body_any_q(WValue r, WValue *a, int c) {
-    uint32_t offset = w_unbox_body_offset(r);
-    uint32_t len = w_unbox_body_length(r);
-    if (c >= 1 && w_is_closure(a[c - 1])) {
-        WClosure *cl = as_closure(a[c - 1]);
-        for (uint32_t i = 0; i < len; i++)
-            if (w_truthy(call_closure_1(cl, w_body_arena_get(offset, i)))) return W_TRUE;
-        return W_FALSE;
-    }
-    for (uint32_t i = 0; i < len; i++)
-        if (w_truthy(w_body_arena_get(offset, i))) return W_TRUE;
-    return W_FALSE;
-}
-static WValue w_ic_body_all_q(WValue r, WValue *a, int c) {
-    uint32_t offset = w_unbox_body_offset(r);
-    uint32_t len = w_unbox_body_length(r);
-    if (c >= 1 && w_is_closure(a[c - 1])) {
-        WClosure *cl = as_closure(a[c - 1]);
-        for (uint32_t i = 0; i < len; i++)
-            if (!w_truthy(call_closure_1(cl, w_body_arena_get(offset, i)))) return W_FALSE;
-        return W_TRUE;
-    }
-    for (uint32_t i = 0; i < len; i++)
-        if (!w_truthy(w_body_arena_get(offset, i))) return W_FALSE;
-    return W_TRUE;
-}
-static WValue w_ic_body_none_q(WValue r, WValue *a, int c) {
-    uint32_t offset = w_unbox_body_offset(r);
-    uint32_t len = w_unbox_body_length(r);
-    if (c >= 1 && w_is_closure(a[c - 1])) {
-        WClosure *cl = as_closure(a[c - 1]);
-        for (uint32_t i = 0; i < len; i++)
-            if (w_truthy(call_closure_1(cl, w_body_arena_get(offset, i)))) return W_FALSE;
-        return W_TRUE;
-    }
-    for (uint32_t i = 0; i < len; i++)
-        if (w_truthy(w_body_arena_get(offset, i))) return W_FALSE;
-    return W_TRUE;
-}
-static WValue w_ic_body_reduce(WValue r, WValue *a, int c) {
-    if (c < 2 || !w_is_closure(a[c - 1])) die("reduce requires (init, block)");
-    WValue cl_v = a[c - 1];
-    WValue acc = a[0];
-    uint32_t offset = w_unbox_body_offset(r);
-    uint32_t len = w_unbox_body_length(r);
-    for (uint32_t i = 0; i < len; i++)
-        acc = w_closure_call_2(cl_v, acc, w_body_arena_get(offset, i));
-    return acc;
-}
-static WValue w_ic_body_compact(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    uint32_t offset = w_unbox_body_offset(r);
-    uint32_t len = w_unbox_body_length(r);
-    WValue result = w_array_new_empty();
-    for (uint32_t i = 0; i < len; i++) {
-        WValue v = w_body_arena_get(offset, i);
-        if (v != W_NIL) w_array_push(result, v);
-    }
-    return result;
-}
-static WValue w_ic_body_dup(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    uint32_t offset = w_unbox_body_offset(r);
-    uint32_t len = w_unbox_body_length(r);
-    WValue result = w_array_new_empty();
-    for (uint32_t i = 0; i < len; i++)
-        w_array_push(result, w_body_arena_get(offset, i));
-    return result;
-}
-static WICEntry w_ic_body_table[] = {
-    {0, w_ic_body_size}, {0, w_ic_body_each},
-    {0, w_ic_body_idx}, {0, w_ic_body_idxset},
-    {0, w_ic_body_empty},
-    {0, w_ic_body_map}, {0, w_ic_body_select}, {0, w_ic_body_reject},
-    {0, w_ic_body_find}, {0, w_ic_body_any_q}, {0, w_ic_body_all_q},
-    {0, w_ic_body_none_q}, {0, w_ic_body_reduce},
-    {0, w_ic_body_compact}, {0, w_ic_body_dup},
-    {0, NULL}
-};
-
 static WICEntry w_ic_atomic_table[] = {    /* Phase 7+m */
     {0, w_ic_atomic_cas},
     {0, w_ic_atomic_get},
@@ -22671,7 +22272,6 @@ static WICEntry w_ic_hash_table[] = {      /* Phase 7+l */
     {0, w_ic_hash_values},
     {0, w_ic_hash_merge_bang},
     {0, w_ic_hash_each},
-    {0, w_ic_hash_map},
     {0, w_ic_hash_delete},
     {0, w_ic_hash_get},        /* WN_get */
     {0, w_ic_hash_get},        /* WN_idx — same handler */
@@ -22708,50 +22308,19 @@ static WICEntry w_ic_decimal_table[] = {     /* 0xFFFD numeric tag */
 static WICEntry w_ic_ipv4_table[] = {
     {0, w_ic_value_to_s},
     {0, w_ic_value_to_s},
-    {0, w_ic_ipv4_with_prefix},
     {0, w_ic_ipv4_octets},
-    {0, w_ic_ipv4_network},
-    {0, w_ic_ipv4_broadcast},
-    {0, w_ic_ipv4_netmask},
-    {0, w_ic_ipv4_netmask},
-    {0, w_ic_ipv4_include},
-    {0, w_ic_ipv4_include},
     {0, NULL}
 };
 
 static WICEntry w_ic_ipv6_table[] = {
     {0, w_ic_value_to_s},
     {0, w_ic_value_to_s},
-    {0, w_ic_ipv6_prefix},
-    {0, w_ic_ipv6_cidr_q},
-    {0, w_ic_ipv6_with_prefix},
-    {0, w_ic_ipv6_byte},
-    {0, w_ic_ipv6_byte},
-    {0, w_ic_ipv6_bytes},
-    {0, w_ic_ipv6_network},
-    {0, w_ic_ipv6_include},
-    {0, w_ic_ipv6_include},
-    {0, w_ic_ipv6_unspecified_q},
-    {0, w_ic_ipv6_loopback_q},
-    {0, w_ic_ipv6_multicast_q},
-    {0, w_ic_ipv6_link_local_q},
-    {0, w_ic_ipv6_unique_local_q},
-    {0, w_ic_ipv6_unique_local_q},
-    {0, w_ic_ipv6_global_q},
     {0, NULL}
 };
 
 static WICEntry w_ic_mac_table[] = {
     {0, w_ic_value_to_s},
     {0, w_ic_value_to_s},
-    {0, w_ic_mac_byte},
-    {0, w_ic_mac_byte},
-    {0, w_ic_mac_bytes},
-    {0, w_ic_mac_multicast_q},
-    {0, w_ic_mac_unicast_q},
-    {0, w_ic_mac_local_q},
-    {0, w_ic_mac_universal_q},
-    {0, w_ic_mac_broadcast_q},
     {0, NULL}
 };
 
@@ -22801,32 +22370,21 @@ static void w_init_ic_tables(void) {
     w_ic_array_table[41].name = WN_drop;
     w_ic_array_table[42].name = WN_minmax;
     w_ic_array_table[43].name = WN_each;        /* Phase 7+k */
-    w_ic_array_table[44].name = WN_map;
-    w_ic_array_table[45].name = WN_select;
-    w_ic_array_table[46].name = WN_reject;
-    w_ic_array_table[47].name = WN_find;
-    w_ic_array_table[48].name = WN_detect;
-    w_ic_array_table[49].name = WN_any_q;
-    w_ic_array_table[50].name = WN_all_q;
-    w_ic_array_table[51].name = WN_none_q;
-    w_ic_array_table[52].name = WN_compact;
-    w_ic_array_table[53].name = WN_dup;
-    w_ic_array_table[54].name = WN_reduce;
-    w_ic_array_table[55].name = WN_each_with_index;
-    w_ic_array_table[56].name = WN_group_by;
-    w_ic_array_table[57].name = WN_partition;
-    w_ic_array_table[58].name = WN_tally;
-    w_ic_array_table[59].name = WN_flat_map;
-    w_ic_array_table[60].name = WN_count;          /* Phase 7+n */
-    w_ic_array_table[61].name = WN_find_index;
-    w_ic_array_table[62].name = WN_index;
-    w_ic_array_table[63].name = WN_last_index;
-    w_ic_array_table[64].name = WN_replace_byte_bang;
-    w_ic_array_table[65].name = WN_delete_at;
-    w_ic_array_table[66].name = WN_slice;
-    w_ic_array_table[67].name = WN_exp;
-    w_ic_array_table[68].name = WN_log;
-    w_ic_array_table[69].name = WN_tan;
+    w_ic_array_table[44].name = WN_any_q;
+    w_ic_array_table[45].name = WN_all_q;
+    w_ic_array_table[46].name = WN_none_q;
+    w_ic_array_table[47].name = WN_compact;
+    w_ic_array_table[48].name = WN_dup;
+    w_ic_array_table[49].name = WN_count;          /* Phase 7+n */
+    w_ic_array_table[50].name = WN_find_index;
+    w_ic_array_table[51].name = WN_index;
+    w_ic_array_table[52].name = WN_last_index;
+    w_ic_array_table[53].name = WN_replace_byte_bang;
+    w_ic_array_table[54].name = WN_delete_at;
+    w_ic_array_table[55].name = WN_slice;
+    w_ic_array_table[56].name = WN_exp;
+    w_ic_array_table[57].name = WN_log;
+    w_ic_array_table[58].name = WN_tan;
     /* String */
     w_ic_string_table[0].name = WN_size;
     w_ic_string_table[1].name = WN_to_s;
@@ -22839,34 +22397,34 @@ static void w_init_ic_tables(void) {
     w_ic_string_table[8].name  = WN_append;
     w_ic_string_table[9].name  = WN_lshift;
     w_ic_string_table[10].name = WN_prepend;
-    w_ic_string_table[11].name = WN_empty_q;
-    w_ic_string_table[12].name = WN_include_q;
-    w_ic_string_table[13].name = WN_starts_with_q;
-    w_ic_string_table[14].name = WN_ends_with_q;
-    w_ic_string_table[15].name = WN_ascii_q;
-    w_ic_string_table[16].name = WN_valid_utf8_q;
-    w_ic_string_table[17].name = WN_repeat;
-    w_ic_string_table[18].name = WN_chars;        /* Phase 7+h */
-    w_ic_string_table[19].name = WN_codes;
-    w_ic_string_table[20].name = WN_lchs;
-    w_ic_string_table[21].name = WN_bytes;
-    w_ic_string_table[22].name = WN_slice;
-    w_ic_string_table[23].name = WN_strip;
-    w_ic_string_table[24].name = WN_ltrim;
-    w_ic_string_table[25].name = WN_rtrim;
-    w_ic_string_table[26].name = WN_ord;
-    w_ic_string_table[27].name = WN_to_i;
-    w_ic_string_table[28].name = WN_to_f;
-    w_ic_string_table[29].name = WN_to_sym;
-    w_ic_string_table[30].name = WN_split;
-    w_ic_string_table[31].name = WN_replace;
-    w_ic_string_table[32].name = WN_gsub;
-    w_ic_string_table[33].name = WN_index;
-    w_ic_string_table[34].name = WN_matchop;     /* Phase 7+q */
-    w_ic_string_table[35].name = WN_match_q;
-    w_ic_string_table[36].name = WN_rindex;
-    w_ic_string_table[37].name = WN_reverse;
-    w_ic_string_table[38].name = WN_length;
+    w_ic_string_table[11].name = WN_include_q;
+    w_ic_string_table[12].name = WN_starts_with_q;
+    w_ic_string_table[13].name = WN_ends_with_q;
+    w_ic_string_table[14].name = WN_ascii_q;
+    w_ic_string_table[15].name = WN_valid_utf8_q;
+    w_ic_string_table[16].name = WN_repeat;
+    w_ic_string_table[17].name = WN_chars;        /* Phase 7+h */
+    w_ic_string_table[18].name = WN_codes;
+    w_ic_string_table[19].name = WN_lchs;
+    w_ic_string_table[20].name = WN_bytes;
+    w_ic_string_table[21].name = WN_slice;
+    w_ic_string_table[22].name = WN_strip;
+    w_ic_string_table[23].name = WN_ltrim;
+    w_ic_string_table[24].name = WN_rtrim;
+    w_ic_string_table[25].name = WN_ord;
+    w_ic_string_table[26].name = WN_to_i;
+    w_ic_string_table[27].name = WN_to_f;
+    w_ic_string_table[28].name = WN_to_sym;
+    w_ic_string_table[29].name = WN_split;
+    w_ic_string_table[30].name = WN_replace;
+    w_ic_string_table[31].name = WN_gsub;
+    w_ic_string_table[32].name = WN_index;
+    w_ic_string_table[33].name = WN_matchop;     /* Phase 7+q */
+    w_ic_string_table[34].name = WN_match_q;
+    w_ic_string_table[35].name = WN_rindex;
+    w_ic_string_table[36].name = WN_reverse;
+    w_ic_string_table[37].name = WN_length;
+    w_ic_string_table[38].name = WN_empty_q;
     /* Int */
     w_ic_int_table[0].name    = WN_to_s;
     w_ic_int_table[1].name    = WN_abs;
@@ -22877,18 +22435,9 @@ static void w_init_ic_tables(void) {
     w_ic_int_table[6].name    = WN_times;     /* Phase 7+o — added below */
     w_ic_int_table[7].name    = WN_sqrt;
     w_ic_int_table[8].name    = WN_each;      /* each ≡ times for ints */
-    w_ic_int_table[9].name    = WN_prev;
-    w_ic_int_table[10].name   = WN_succ;
-    w_ic_int_table[11].name   = WN_next;
-    w_ic_int_table[12].name   = WN_zero_q;
-    w_ic_int_table[13].name   = WN_even_q;
-    w_ic_int_table[14].name   = WN_odd_q;
-    w_ic_int_table[15].name   = WN_negative_q;
-    w_ic_int_table[16].name   = WN_positive_q;
-    w_ic_int_table[17].name   = WN_prime_q;
-    w_ic_int_table[18].name   = WN_prime_12k_q;
-    w_ic_int_table[19].name   = WN_prime_30k_q;
-    w_ic_int_table[20].name   = WN_sq;
+    w_ic_int_table[9].name    = WN_prime_q;
+    w_ic_int_table[10].name   = WN_prime_12k_q;
+    w_ic_int_table[11].name   = WN_prime_30k_q;
     /* BigArray (Phase 7+p) */
     w_ic_big_array_table[0].name   = WN_size;
     w_ic_big_array_table[1].name   = WN_cap;
@@ -22981,12 +22530,11 @@ static void w_init_ic_tables(void) {
     w_ic_hash_table[3].name   = WN_values;
     w_ic_hash_table[4].name   = WN_merge_bang;
     w_ic_hash_table[5].name   = WN_each;
-    w_ic_hash_table[6].name   = WN_map;
-    w_ic_hash_table[7].name   = WN_delete;
-    w_ic_hash_table[8].name   = WN_get;
-    w_ic_hash_table[9].name   = WN_idx;
-    w_ic_hash_table[10].name  = WN_set;
-    w_ic_hash_table[11].name  = WN_idxset;
+    w_ic_hash_table[6].name   = WN_delete;
+    w_ic_hash_table[7].name   = WN_get;
+    w_ic_hash_table[8].name   = WN_idx;
+    w_ic_hash_table[9].name   = WN_set;
+    w_ic_hash_table[10].name  = WN_idxset;
     /* Float */
     w_ic_float_table[0].name  = WN_to_i;
     w_ic_float_table[1].name  = WN_to_f;
@@ -23007,84 +22555,15 @@ static void w_init_ic_tables(void) {
     w_ic_decimal_table[4].name = WN_round;
     w_ic_decimal_table[5].name = WN_sq;
 
-    /* Date accessors — w_string for canonical interning that matches both the
-     * compiled dispatch name and the interpreter's w_method_call("year",…). */
-    w_ic_date_table[0].name  = w_string("year");
-    w_ic_date_table[1].name  = w_string("month");
-    w_ic_date_table[2].name  = w_string("day");
-    w_ic_date_table[3].name  = w_string("hour");
-    w_ic_date_table[4].name  = w_string("minute");
-    w_ic_date_table[5].name  = w_string("second");
-    w_ic_date_table[6].name  = w_string("wday");
-    w_ic_date_table[7].name  = w_string("day_of_week");
-    w_ic_date_table[8].name  = w_string("day_of_month");
-    w_ic_date_table[9].name  = w_string("day_of_year");
-    w_ic_date_table[10].name = w_string("yday");
-    w_ic_date_table[11].name = w_string("cweek");
-    w_ic_date_table[12].name = w_string("cwday");
-    w_ic_date_table[13].name = w_string("days_in_month");
-    w_ic_date_table[14].name = w_string("days_in_year");
-    w_ic_date_table[15].name = w_string("leap?");
-    w_ic_date_table[16].name = w_string("jd");
-    w_ic_date_table[17].name = w_string("quarter");
-    w_ic_date_table[18].name = w_string("tz");
-
-    w_ic_body_table[0].name = WN_size;
-    w_ic_body_table[1].name = WN_each;
-    w_ic_body_table[2].name = WN_idx;
-    w_ic_body_table[3].name = WN_idxset;
-    w_ic_body_table[4].name = WN_empty_q;
-    w_ic_body_table[5].name = WN_map;
-    w_ic_body_table[6].name = WN_select;
-    w_ic_body_table[7].name = WN_reject;
-    w_ic_body_table[8].name = WN_find;
-    w_ic_body_table[9].name = WN_any_q;
-    w_ic_body_table[10].name = WN_all_q;
-    w_ic_body_table[11].name = WN_none_q;
-    w_ic_body_table[12].name = WN_reduce;
-    w_ic_body_table[13].name = WN_compact;
-    w_ic_body_table[14].name = WN_dup;
-
     w_ic_ipv4_table[0].name  = WN_to_s;
     w_ic_ipv4_table[1].name  = w_string("inspect");
-    w_ic_ipv4_table[2].name  = w_string("with_prefix");
-    w_ic_ipv4_table[3].name  = w_string("octets");
-    w_ic_ipv4_table[4].name  = w_string("network");
-    w_ic_ipv4_table[5].name  = w_string("broadcast");
-    w_ic_ipv4_table[6].name  = w_string("netmask");
-    w_ic_ipv4_table[7].name  = W_M4("mask");
-    w_ic_ipv4_table[8].name  = WN_include_q;
-    w_ic_ipv4_table[9].name  = w_string("contains?");
+    w_ic_ipv4_table[2].name  = w_string("octets");
 
     w_ic_ipv6_table[0].name  = WN_to_s;
     w_ic_ipv6_table[1].name  = w_string("inspect");
-    w_ic_ipv6_table[2].name  = w_string("prefix");
-    w_ic_ipv6_table[3].name  = w_string("cidr?");
-    w_ic_ipv6_table[4].name  = w_string("with_prefix");
-    w_ic_ipv6_table[5].name  = W_M4("byte");
-    w_ic_ipv6_table[6].name  = WN_idx;
-    w_ic_ipv6_table[7].name  = WN_bytes;
-    w_ic_ipv6_table[8].name  = w_string("network");
-    w_ic_ipv6_table[9].name  = WN_include_q;
-    w_ic_ipv6_table[10].name = w_string("contains?");
-    w_ic_ipv6_table[11].name = w_string("unspecified?");
-    w_ic_ipv6_table[12].name = w_string("loopback?");
-    w_ic_ipv6_table[13].name = w_string("multicast?");
-    w_ic_ipv6_table[14].name = w_string("link_local?");
-    w_ic_ipv6_table[15].name = w_string("unique_local?");
-    w_ic_ipv6_table[16].name = w_string("private?");
-    w_ic_ipv6_table[17].name = w_string("global?");
 
     w_ic_mac_table[0].name = WN_to_s;
     w_ic_mac_table[1].name = w_string("inspect");
-    w_ic_mac_table[2].name = W_M4("byte");
-    w_ic_mac_table[3].name = WN_idx;
-    w_ic_mac_table[4].name = WN_bytes;
-    w_ic_mac_table[5].name = w_string("multicast?");
-    w_ic_mac_table[6].name = w_string("unicast?");
-    w_ic_mac_table[7].name = w_string("local?");
-    w_ic_mac_table[8].name = w_string("universal?");
-    w_ic_mac_table[9].name = w_string("broadcast?");
 }
 
 static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WValue*, int) {
@@ -23113,9 +22592,7 @@ static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WV
         case 0x91: table = w_ic_mmap_table;    break;  /* 0x80 | W_TYPE_MMAP=17 */
         case 0x92: table = w_ic_big_array_table;   break;  /* 0x80 | W_TYPE_BIG_ARRAY=18 (Phase 7+p) */
         case 0x09: table = w_ic_small_array_table; break;  /* W_SUBTAG_SMALL_ARRAY=9 */
-        case 0xE4: table = w_ic_date_table;        break;  /* packed date subtype 4 */
         case 0xE5: table = w_ic_ipv4_table;        break;  /* packed IPv4 subtype 5 */
-        case 0xE6: table = w_ic_body_table;        break;  /* packed AST body subtype 6 */
         case 0x85: table = w_ic_mac_table;         break;  /* 0x80 | W_TYPE_MAC=5 */
         case 0x86: table = w_ic_ipv6_table;        break;  /* 0x80 | W_TYPE_IPV6=6 */
         default: return NULL;
@@ -23129,6 +22606,36 @@ static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WV
  * w_method_dispatch since they share the dispatch_ready flag). */
 static int w_dispatch_ready;
 static void w_dispatch_init(void);
+
+/* Resolve a Tungsten type-class method only when that method is the next
+ * dispatch target. This mirrors w_method_dispatch's early ordering instead
+ * of inferring the winner after the call: Closure#call and UUID#to_s keep
+ * their dedicated runtime paths, while arrays and packed AST nodes use the
+ * same specialized class slots as the dispatcher. A method_missing fallback
+ * is intentionally not cacheable because its call shape differs from the
+ * original method's shape. */
+static WMethod *w_cacheable_type_class_method(WValue recv, WValue name,
+                                               int argc, uint64_t key) {
+    uint16_t cid_slot = 0;
+
+    if (w_is_closure(recv) && name == WN_call) return NULL;
+
+    if (w_is_array(recv)) {
+        cid_slot = g_type_class[key];
+    } else if (w_is_node(recv)) {
+        cid_slot = g_node_kind_class[w_node_kind(recv) & 0xFF];
+    } else if (key < 256) {
+        if (name == WN_to_s && w_is_obj(recv) &&
+            w_subtag(recv) == W_SUBTAG_UUID)
+            return NULL;
+        cid_slot = g_type_class[key];
+    }
+
+    if (!cid_slot) return NULL;
+    WMethod *m = w_type_class_method(cid_slot - 1, name, argc);
+    if (!m || m->arity < 1 || m->arity > 5) return NULL;
+    return m;
+}
 
 /* Out-of-line slow path: cache miss → full dispatch + populate IC.
  * Only runs on first call per call site (or on type-change); the hot
@@ -23161,26 +22668,21 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
     stack_args.start = 0;
     stack_args.size = argc;
     stack_args.cap = argc;
+
+    /* Cache the exact Tungsten method selected by type-class dispatch. Doing
+     * this before the general dispatcher means we never populate from a
+     * merely-present method that an earlier special path actually handled. */
+    WMethod *type_method = w_cacheable_type_class_method(recv, name, argc, key);
+    if (type_method) {
+        cache->type_key = key;
+        cache->fn_ptr = type_method->fn_ptr;
+        cache->arity = type_method->arity - 1; /* subtract self */
+        return w_type_class_method_call(type_method, recv, &stack_args);
+    }
+
     WValue result = w_method_dispatch(recv, name, &stack_args, W_NIL);
 
-    /* Populate the monomorphic cache for the packed IPv4 class used by this
-     * native-core migration. Keep this deliberately narrow: some other
-     * primitive keys have earlier special dispatch (notably Closure#call), so
-     * blindly caching their type-class method after the fact can change the
-     * second call's target. */
-    if (key == 0xE5) {
-        uint16_t cid_slot = g_type_class[key];
-        if (cid_slot) {
-            WClass *klass = g_class_table[cid_slot - 1];
-            WMethod *m = w_method_lookup_arity(klass, name, argc + 1);
-            if (!m) m = w_method_lookup(klass, name);
-            if (m) {
-                cache->type_key = key;
-                cache->fn_ptr = m->fn_ptr;
-                cache->arity = m->arity - 1; /* subtract self */
-            }
-        }
-    } else if (key >= 0x100 && w_is_instance(recv)) {
+    if (key >= 0x100 && w_is_instance(recv)) {
         /* Cache user class methods */
         WObject *obj = (WObject *)w_as_ptr(recv);
         WMethod *m = w_method_lookup_arity(g_class_table[obj->class_id], name, argc + 1);
@@ -23391,14 +22893,15 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
         if (builtin) return builtin(recv, args->slots, args->size);
     }
 
-    /* Phase 7+b..n: every Array builtin lives in w_ic_array_table. */
+    /* Array storage, numeric kernels, and retained leaf operations live in
+     * w_ic_array_table; collection combinators resolve through Enumerable. */
 
-    /* Phase 7+l: hash size, has_key?, keys, values, merge!, each, map,
-     * delete, get/idx, set/idxset all live in w_ic_hash_table. */
+    /* Hash size, has_key?, keys, values, merge!, each, delete, get/idx, and
+     * set/idxset live in w_ic_hash_table. Hash#map comes from Enumerable. */
 
-    /* Phase 7+g/h/q: every String/Symbol method (idx, size, case,
-     * predicates, UTF-8/parse/convert, =~, match?, etc.) lives in
-     * w_ic_string_table. */
+    /* String/Symbol storage primitives (idx, size, case conversion,
+     * UTF-8/parse/convert, =~, match?, etc.) remain in w_ic_string_table.
+     * Derived methods such as empty? fall through to their Tungsten class. */
 
     /* Phase 7+o: Regex, Int.times, Thread, Socket, Mmap migrated to IC. */
 
@@ -23701,7 +23204,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
             w_is_double(recv) ? "Float" :
             w_is_string(recv) ? "String" :
             w_is_symbol(recv) ? "Symbol" :
-            w_is_array(recv) ? "Array" :
+            (w_is_array(recv) || w_is_body(recv)) ? "Array" :
             w_is_bool(recv) ? "Boolean" : NULL;
         /* Class-object target: walk the ancestry by class_id. */
         if (w_is_class(target)) {
@@ -26342,6 +25845,7 @@ WValue w_array_idx(WValue arr, WValue index) {
     if (array_is_float(a)) return w_float(array_read_float(a, a->start + i));
     /* Phase 6i.1b: ebits=1 (BoolArray) yields W_TRUE/W_FALSE. */
     if (a->ebits == 1) return array_read(a, a->start + i) ? W_TRUE : W_FALSE;
+    if (array_is_signed_int(a)) return w_int(array_read_signed(a, a->start + i));
     return w_int((int64_t)array_read(a, a->start + i));
 }
 
@@ -26407,8 +25911,8 @@ WValue w_array_size(WValue arr) {
     /* `.size` is only direct-called (bypassing IC dispatch) when static
      * type inference proves the receiver is :array — AST body-typed
      * fields never infer that way today, so they fall through to the
-     * generic w_ic_body_table path instead. Handled here too in case
-     * that ever changes, matching w_array_get's defensive symmetry. */
+     * Tungsten:AST:Body type class instead. Handled here too in case that
+     * ever changes, matching w_array_get's defensive symmetry. */
     if (w_is_body(arr)) return w_int(w_unbox_body_length(arr));
     WArray *a = (WArray *)w_as_ptr(arr);
     return w_int(a->size);
@@ -26528,6 +26032,9 @@ WValue w_big_array_get(WValue arr, WValue index) {
     if (array_is_float(&view)) {
         return w_float(array_read_float(&view, view.start + i));
     }
+    if (array_is_signed_int(&view)) {
+        return w_int(array_read_signed(&view, view.start + i));
+    }
     return w_int((int64_t)array_read(&view, view.start + i));
 }
 
@@ -26556,6 +26063,7 @@ WValue w_big_array_idx(WValue arr, WValue index) {
     WArray view = big_as_typed_view(a);
     if (array_is_wvalue(&view)) return (WValue)array_read(&view, view.start + i);
     if (array_is_float(&view)) return w_float(array_read_float(&view, view.start + i));
+    if (array_is_signed_int(&view)) return w_int(array_read_signed(&view, view.start + i));
     return w_int((int64_t)array_read(&view, view.start + i));
 }
 
@@ -28180,165 +27688,48 @@ WValue w_strbuf_to_s(WValue buf) {
     return w_string(sb->data);
 }
 
-/* ---- Base64URL encode/decode (Phase 8b) ---- */
+/* ---- Base64 storage boundaries ----
+ *
+ * The RFC 4648 transforms live in core/base64.w. These helpers expose String
+ * storage as a borrowed u8[] view and materialize the encoded u8[] as an
+ * immutable String. There is intentionally no C codec or public wrapper here:
+ * both Base64's class API and the legacy global functions execute the source
+ * loops. */
 
-static const char b64url_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+static WValue w_base64_string_bytes_view(WValue text) {
+    if (w_is_rope(text)) text = w_rope_flatten(text);
+    if (!w_is_stringy(text) || w_is_symbol(text))
+        die("base64 decode: expected String");
 
-WValue w_base64url_encode(WValue data) {
-    const uint8_t *input;
-    int64_t input_len;
-
-    if (w_is_bytes(data)) {
-        WArray *a = as_bytes_arr(data);
-        input = (const uint8_t *)a->slots;
-        input_len = a->size;
-    } else {
-        const char *s = as_str(data);
-        input = (const uint8_t *)s;
-        input_len = strlen(s);
+    char inline_buf[6];
+    const char *data;
+    size_t len;
+    w_str_data(text, inline_buf, &data, &len);
+    if (data == inline_buf) {
+        /* Inline String bytes live in the caller's stack buffer. Own this tiny
+         * payload instead of borrowing thread-local scratch: Base64's class
+         * can be reopened, so a digit helper may re-enter the codec and would
+         * otherwise overwrite an outer call's still-live input view. */
+        return w_bytes_from_data((const uint8_t *)inline_buf, (int64_t)len);
     }
-
-    /* Base64 output length: 4 chars per 3 bytes, no padding */
-    int64_t out_len = ((input_len + 2) / 3) * 4;
-    char *out = malloc(out_len + 1);
-    int64_t j = 0;
-
-    for (int64_t i = 0; i < input_len; i += 3) {
-        uint32_t triple = ((uint32_t)input[i]) << 16;
-        if (i + 1 < input_len) triple |= ((uint32_t)input[i + 1]) << 8;
-        if (i + 2 < input_len) triple |= ((uint32_t)input[i + 2]);
-
-        out[j++] = b64url_chars[(triple >> 18) & 0x3F];
-        out[j++] = b64url_chars[(triple >> 12) & 0x3F];
-        if (i + 1 < input_len)
-            out[j++] = b64url_chars[(triple >> 6) & 0x3F];
-        if (i + 2 < input_len)
-            out[j++] = b64url_chars[triple & 0x3F];
-    }
-    out[j] = '\0';
-    return w_string_take(out, j);
+    return w_array_view_raw((uint8_t *)data, 8, (int64_t)len);
 }
 
-static int b64url_decode_char(char c) {
-    if (c >= 'A' && c <= 'Z') return c - 'A';
-    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-    if (c >= '0' && c <= '9') return c - '0' + 52;
-    if (c == '-') return 62;
-    if (c == '_') return 63;
-    return -1;
+WValue w_base64_encode_input(WValue data) {
+    if (w_is_bytes(data)) return data;
+    return w_base64_string_bytes_view(data);
 }
 
-WValue w_base64url_decode(WValue str) {
-    const char *input = as_str(str);
-    int64_t input_len = strlen(input);
-
-    /* Strip any padding */
-    while (input_len > 0 && input[input_len - 1] == '=') input_len--;
-
-    int64_t out_len = (input_len * 3) / 4;
-    uint8_t *out = malloc(out_len > 0 ? out_len : 1);
-    int64_t j = 0;
-
-    for (int64_t i = 0; i < input_len; i += 4) {
-        int a = b64url_decode_char(input[i]);
-        int b = (i + 1 < input_len) ? b64url_decode_char(input[i + 1]) : 0;
-        int c = (i + 2 < input_len) ? b64url_decode_char(input[i + 2]) : 0;
-        int d = (i + 3 < input_len) ? b64url_decode_char(input[i + 3]) : 0;
-
-        if (a < 0 || b < 0 || c < 0 || d < 0) {
-            w_raise(w_string("base64url: invalid character"));
-        }
-
-        uint32_t triple = (a << 18) | (b << 12) | (c << 6) | d;
-        if (j < out_len) out[j++] = (triple >> 16) & 0xFF;
-        if (j < out_len) out[j++] = (triple >> 8) & 0xFF;
-        if (j < out_len) out[j++] = triple & 0xFF;
-    }
-
-    return w_bytes_from_data(out, out_len);
+WValue w_base64_decode_input(WValue text) {
+    return w_base64_string_bytes_view(text);
 }
 
-/* ---- Base64 (RFC 4648, standard alphabet with `=` padding) ---- */
-
-static const char b64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-WValue w_base64_encode(WValue data) {
-    const uint8_t *input;
-    int64_t input_len;
-
-    if (w_is_bytes(data)) {
-        WArray *a = as_bytes_arr(data);
-        input = (const uint8_t *)a->slots;
-        input_len = a->size;
-    } else {
-        const char *s = as_str(data);
-        input = (const uint8_t *)s;
-        input_len = strlen(s);
-    }
-
-    /* Standard base64: 4 chars per 3 bytes, `=`-padded to multiple of 4. */
-    int64_t out_len = ((input_len + 2) / 3) * 4;
-    char *out = malloc(out_len + 1);
-    int64_t j = 0;
-
-    for (int64_t i = 0; i < input_len; i += 3) {
-        uint32_t triple = ((uint32_t)input[i]) << 16;
-        if (i + 1 < input_len) triple |= ((uint32_t)input[i + 1]) << 8;
-        if (i + 2 < input_len) triple |= ((uint32_t)input[i + 2]);
-
-        out[j++] = b64_chars[(triple >> 18) & 0x3F];
-        out[j++] = b64_chars[(triple >> 12) & 0x3F];
-        out[j++] = (i + 1 < input_len) ? b64_chars[(triple >> 6) & 0x3F] : '=';
-        out[j++] = (i + 2 < input_len) ? b64_chars[triple & 0x3F] : '=';
-    }
-    out[j] = '\0';
-    return w_string_take(out, j);
+WValue w_string_from_byte_array(WValue bytes) {
+    WArray *a = as_bytes_arr(bytes);
+    if (a->size == 0) return w_string("");
+    const char *data = (const char *)a->slots + a->start;
+    return w_string_n(data, (size_t)a->size);
 }
-
-static int b64_decode_char(char c) {
-    if (c >= 'A' && c <= 'Z') return c - 'A';
-    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-    if (c >= '0' && c <= '9') return c - '0' + 52;
-    if (c == '+') return 62;
-    if (c == '/') return 63;
-    return -1;
-}
-
-WValue w_base64_decode(WValue str) {
-    const char *input = as_str(str);
-    int64_t input_len = strlen(input);
-
-    while (input_len > 0 && input[input_len - 1] == '=') input_len--;
-
-    int64_t out_len = (input_len * 3) / 4;
-    uint8_t *out = malloc(out_len > 0 ? out_len : 1);
-    int64_t j = 0;
-
-    for (int64_t i = 0; i < input_len; i += 4) {
-        int a = b64_decode_char(input[i]);
-        int b = (i + 1 < input_len) ? b64_decode_char(input[i + 1]) : 0;
-        int c = (i + 2 < input_len) ? b64_decode_char(input[i + 2]) : 0;
-        int d = (i + 3 < input_len) ? b64_decode_char(input[i + 3]) : 0;
-
-        if (a < 0 || b < 0 || c < 0 || d < 0) {
-            w_raise(w_string("base64: invalid character"));
-        }
-
-        uint32_t triple = (a << 18) | (b << 12) | (c << 6) | d;
-        if (j < out_len) out[j++] = (triple >> 16) & 0xFF;
-        if (j < out_len) out[j++] = (triple >> 8) & 0xFF;
-        if (j < out_len) out[j++] = triple & 0xFF;
-    }
-
-    return w_bytes_from_data(out, out_len);
-}
-
-/* Tungsten-facing wrappers — thin, kept here so the call surface for
-   compiled code matches the __w_ naming convention used elsewhere. */
-WValue __w_base64_encode(WValue data) { return w_base64_encode(data); }
-WValue __w_base64_decode(WValue str)  { return w_base64_decode(str); }
-WValue __w_base64url_encode(WValue d) { return w_base64url_encode(d); }
-WValue __w_base64url_decode(WValue s) { return w_base64url_decode(s); }
 
 /* ---- Goroutine Arena + Scheduler (Phase 4) ---- */
 

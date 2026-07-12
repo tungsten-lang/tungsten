@@ -59,7 +59,15 @@
   t = ast_kind(node)
   case t
   when :call
-    if ast_get(node, :receiver) != nil
+    if ast_get(node, :receiver) == nil
+      # A bare call whose name is an enclosing function parameter is a
+      # closure invocation, not an implicit-self method. Record it before
+      # lowering any branch so the captured parameter slot is initialized at
+      # function entry rather than on whichever closure literal appears first.
+      name = ast_get(node, :name)
+      if fn_params.include?(name) && !captures.include?(name)
+        captures.push(name)
+    else
       find_captured_params_in_node(ast_get(node, :receiver), captures, fn_params)
     if ast_get(node, :args) != nil
       i = 0
@@ -225,7 +233,13 @@
     find_vars_in_node(ast_get(node, :right), captures, block_params, outer_vars, fn_params)
     return nil
   when :call
-    if ast_get(node, :receiver) != nil
+    if ast_get(node, :receiver) == nil
+      # Local closures use ordinary call syntax (`callback(item)`). Capture
+      # the callee itself as well as the call arguments.
+      name = ast_get(node, :name)
+      if is_outer_var(name, outer_vars, fn_params) && block_params[name] == nil && !captures.include?(name)
+        captures.push(name)
+    else
       find_vars_in_node(ast_get(node, :receiver), captures, block_params, outer_vars, fn_params)
     if ast_get(node, :args) != nil
       i = 0
@@ -679,4 +693,3 @@
   closure = next_temp(wfn)
   emit_instruction(wfn, {op: :closure_new, temp: closure, fn_name: fn_name, captures_ptr: cap_ptr, capture_count: captures.size()})
   typed_value(:i64, closure)
-

@@ -502,6 +502,12 @@
   ast = mod[:class_method_asts][class_name + "." + method_name]
   if ast == nil
     return nil
+  # Phase C only knows how to replace :yield nodes. A method with an
+  # explicit named `&block` may invoke it as a local closure (`block(item)`),
+  # which is deliberately not represented as :yield. Stripping that block
+  # parameter would leave the closure call reading a nonexistent argument.
+  if !ast_contains_yield?(ast.body)
+    return nil
   base_mangled = mangled_specialized_name(class_name, method_name, recv_type)
   if base_mangled == nil
     return nil

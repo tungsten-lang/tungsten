@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RUNS="${RUNS:-5}"
 ITERS="${ITERS:-10000000}"
+COMPILER="${COMPILER:-$ROOT/bin/tungsten}"
 
 case "$RUNS" in
   ''|*[!0-9]*|0) echo "RUNS must be a positive integer" >&2; exit 2 ;;
@@ -26,7 +27,7 @@ cd "$ROOT"
 
 echo "Compiling benchmark (setup; excluded from timings)..."
 TUNGSTEN_C_INCLUDES="$SCRIPT_DIR/ipv4_ref.c" \
-  bin/tungsten compile "$SCRIPT_DIR/ipv4_ab.w" --release --out "$BIN" >/dev/null
+  "$COMPILER" compile "$SCRIPT_DIR/ipv4_ab.w" --release --out "$BIN" >/dev/null
 
 echo "Checking exact C/W behavior..."
 "$BIN" check
@@ -56,7 +57,8 @@ echo
 printf '%-14s %12s %12s %10s\n' "function" "C-method ns" "W-method ns" "W/C"
 printf '%-14s %12s %12s %10s\n' "--------------" "------------" "------------" "----------"
 
-for fn in 'to_i' 'prefix' 'cidr?' 'octet' 'a' 'b' 'c' 'd' '[]' 'private?' 'loopback?' \
+for fn in 'to_i' 'prefix' 'cidr?' 'with_prefix' 'octet' 'a' 'b' 'c' 'd' '[]' \
+          'network' 'broadcast' 'netmask' 'include?' 'contains?' 'private?' 'loopback?' \
           'link_local?' 'multicast?' 'unspecified?' 'broadcast?' 'reserved?' 'global?'; do
   c_med="$(awk -F'|' -v fn="$fn" '$1 == "RESULT" && $2 == fn { print $3 }' "$RAW" | median_stream)"
   w_med="$(awk -F'|' -v fn="$fn" '$1 == "RESULT" && $2 == fn { print $4 }' "$RAW" | median_stream)"

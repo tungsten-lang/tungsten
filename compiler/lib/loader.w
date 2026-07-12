@@ -8,6 +8,7 @@ use parser
     @cacheable = false
     @runtime_id = nil
     @service_bindings = parse_service_bindings(env("TUNGSTEN_SERVICE_BINDINGS"))
+    @service_bindings_id = canonical_service_bindings(@service_bindings)
     @autoload_registry = nil
     @autoload_loaded = {}
 
@@ -31,6 +32,16 @@ use parser
           bindings[key] = val
       i += 1
     bindings
+
+  -> canonical_service_bindings(bindings)
+    keys = bindings.keys().sort()
+    parts = []
+    i = 0
+    while i < keys.size()
+      key = keys[i]
+      parts.push(key + "=" + bindings[key])
+      i += 1
+    parts.join(",")
 
   -> load_program_ast(path, from_file = nil)
     resolved = resolve_path(path, from_file)
@@ -467,12 +478,51 @@ use parser
           ej2 += 1
     if t == :hash_literal
       consider_autoload_name("Hash", defined, registry, seen, pending)
+    # A direct ccall can construct a value whose runtime type is only visible
+    # after the call. When that type's methods live in a native core source
+    # class, the call result must register the class before method dispatch —
+    # just like the literal-driven Date/IP triggers below. Keep this scoped to
+    # exact, known value-producing symbols: unrelated ccalls must not pull in
+    # Date or the network classes merely because their result is later used.
+    if t == :call && node.receiver == nil && node.name == "ccall" && node.args != nil && node.args.size() > 0
+      target = node.args[0]
+      if target != nil && ast_kind(target) == :string
+        result_class = native_ccall_result_class(target.value)
+        if result_class != nil
+          consider_autoload_name(result_class, defined, registry, seen, pending)
+    # String#empty? has moved to the native source class. Only load it when the
+    # receiver expression is provably String/Symbol-producing; dynamic values
+    # retain the narrow runtime fallback. A method-name-only trigger bloats
+    # unrelated Array/Path/Body/user-class `.empty?` programs.
+    if t == :call && node.name == "empty?" && string_empty_receiver?(node.receiver)
+      consider_autoload_name("String", defined, registry, seen, pending)
     # IPv4/CIDR literals carry their runtime type without naming the IPv4
     # class in source. Once accessors and predicates have Tungsten bodies,
     # their class definition must still be registered before a literal-only
     # call such as `10.0.0.1.private?` reaches runtime dispatch.
     if t == :ip4 || t == :cidr4
       consider_autoload_name("IPv4", defined, registry, seen, pending)
+    # IPv6/CIDR literals likewise carry their heap type without spelling the
+    # class name; their accessors now require the source-defined type class.
+    if t == :ip6 || t == :cidr6
+      consider_autoload_name("IPv6", defined, registry, seen, pending)
+    # Date and Datetime literals share the packed Date runtime type. Their
+    # native accessors now live in core/date.w, so literal-only programs must
+    # register Date's 0xE4 type class even when they never name Date directly.
+    if t == :date || t == :datetime
+      consider_autoload_name("Date", defined, registry, seen, pending)
+    # Integer/Number leaf methods have native Tungsten bodies. Their receiver
+    # is commonly a literal or a local variable, neither of which names the
+    # runtime Integer class in source, so method use must pull in the numeric
+    # class chain before the C IC fallback can be removed.
+    if t == :call && node.name in ("prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq")
+      consider_autoload_name("Integer", defined, registry, seen, pending)
+    # The legacy Base64 global functions are source-defined in core/base64.w.
+    # A bare call contains no class reference, so make that call surface an
+    # explicit autoload trigger instead of letting lowering bypass the source
+    # implementation through a runtime symbol.
+    if t == :call && node.receiver == nil && node.name in ("base64_encode" "base64_decode" "base64url_encode" "base64url_decode")
+      consider_autoload_name("Base64", defined, registry, seen, pending)
     # A range literal `(a..b)` references no class name, but its numeric
     # machinery — and the elementwise methods (`sq`, `cube`, …) the fused
     # pipeline's closed-form recognizer resolves by AST — lives on Number.
@@ -558,6 +608,45 @@ use parser
       collect_autoload_refs(node.func, defined, registry, seen, pending)
     nil
 
+  # Native runtime entry points whose WValue result has source-defined methods.
+  # This is intentionally a return-type map, not a prefix match: helpers such
+  # as w_ipv4_octets and w_ipv6_in_cidr return Array/Bool, while w_date_scrub
+  # returns String, and must not autoload the address/Date classes.
+  -> native_ccall_result_class(name)
+    if name in ("w_date" "w_date_parse")
+      return "Date"
+    if name in ("w_ipv4" "w_ipv4_parse" "w_ipv4_from_octets")
+      return "IPv4"
+    if name in ("w_ipv6" "w_ipv6_from_string" "w_ipv6_parse" "w_ipv6_storage_clone" "w_ipv6_storage_from_words")
+      return "IPv6"
+    if name in ("w_mac" "w_mac_parse")
+      return "MAC"
+    nil
+
+  -> string_empty_receiver?(node)
+    if node == nil || !is_ast_node?(node)
+      return false
+    t = ast_kind(node)
+    if t == :string || t == :string_interp
+      return true
+    if t == :binary_op
+      if node.op == :PLUS
+        return string_empty_receiver?(node.left) || string_empty_receiver?(node.right)
+      if node.op == :STAR
+        return string_empty_receiver?(node.left)
+      return false
+    if t == :call
+      # Conversion is String-producing regardless of receiver type.
+      if node.name == "to_s"
+        return true
+      # These preserve/derive String storage when their receiver is known.
+      if node.name in ("slice" "strip" "ltrim" "rtrim" "upcase" "downcase" "swapcase" "capitalize" "concat" "append" "prepend" "replace" "gsub" "to_sym")
+        return string_empty_receiver?(node.receiver)
+      # Common dynamic String-producing boundaries.
+      if node.receiver == nil && node.name in ("read_file" "env" "gets")
+        return true
+    false
+
   -> consider_autoload_name(name, defined, registry, seen, pending, force = false)
     if name == nil
       return nil
@@ -574,7 +663,7 @@ use parser
     nil
 
   -> cache_version
-    "loader-ast-v3"
+    "loader-ast-v9"
 
   -> cache_dir
     override = env("TUNGSTEN_CACHE_DIR")
@@ -590,7 +679,7 @@ use parser
     if bit_home == nil
       bit_home = ""
     project_root = find_project_root("")
-    digest_sha256(cache_version() + "|" + resolved + "|" + bit_home + "|" + project_root + "|" + @runtime_id)
+    digest_sha256(cache_version() + "|" + resolved + "|" + bit_home + "|" + project_root + "|" + @runtime_id + "|" + @service_bindings_id)
 
   -> ast_cache_path(resolved)
     dir = cache_dir()
@@ -637,7 +726,7 @@ use parser
     # v2: include schema_hash so the loader rejects caches whose
     # KIND_*/SC_*/STRIDE_* schema doesn't match the running compiler.
     # See compiler/lib/ast_schema.w:w_ast_schema_hash_tungsten.
-    manifest = {version: cache_version(), runtime: @runtime_id, entry: resolved, files: @manifest_files, schema_hash: w_ast_schema_hash_tungsten()}
+    manifest = {version: cache_version(), runtime: @runtime_id, entry: resolved, service_bindings: @service_bindings_id, files: @manifest_files, schema_hash: w_ast_schema_hash_tungsten()}
     ast_written = cache_write(ast_path, ast)
     manifest_written = false
     if ast_written
@@ -669,6 +758,8 @@ use parser
     if manifest[:runtime] != @runtime_id
       return false
     if manifest[:entry] != resolved
+      return false
+    if manifest[:service_bindings] != @service_bindings_id
       return false
     if manifest[:schema_hash] != w_ast_schema_hash_tungsten()
       return false

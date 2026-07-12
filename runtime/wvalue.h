@@ -111,7 +111,7 @@
    011: (reserved)
    100: date       [12 year][4 month][5 day][5 hour][6 min][6 sec][6 tz]
    101: ipv4       [32 address][6 CIDR][6 flags]
-   110: (reserved)
+   110: body       [24 arena offset][21 element count]
    111: location   [1 mode][43 payload]
 
    ---- Duration (0xFFFF) — 1-bit mode in payload bit 47 ----
@@ -820,19 +820,23 @@ static inline uint32_t w_unbox_location_offset(WValue v) { return (uint32_t)(v &
  * self-compile needs ~97K slots across ~50K lists, each averaging
  * under 2 elements).
  *
- * `type()` reports "Array" for these values (see __w_type in
- * runtime.c) and `[]`/`.size`/`.each` all work transparently (see
- * w_array_get, w_ic_body_table) — every existing `type(x)=="Array"`
- * check and Enumerable call across the compiler works unchanged,
- * whether a field holds a real WArray or a packed body. `[]=`/`.push`/
- * etc. are NOT supported (raise) — packed bodies are immutable once
- * frozen; a rewrite that needs a different child list constructs a new
+ * Public introspection presents these values as Arrays: `type()` and
+ * `class_name` report "Array", `.class` returns Array, and `is_a?(Array)` is
+ * true (`is_a?(Tungsten:AST:Body)` is deliberately false). Bracket reads use
+ * w_array_get, while method dispatch privately routes through the read-only
+ * Tungsten:AST:Body Enumerable class (core/ast_body.w). Existing Array checks
+ * and Enumerable calls across the compiler therefore work unchanged whether
+ * a field holds a real WArray or a packed body.
+ * `[]=`/`.push`/etc. are NOT supported (raise) — packed bodies are immutable
+ * once frozen; a rewrite that needs a different child list constructs a new
  * one, same discipline as node-kind changes. */
 #define W_BODY_OFFSET_BITS  24
 #define W_BODY_LENGTH_BITS  21
 #define W_BODY_OFFSET_MASK  ((1ULL << W_BODY_OFFSET_BITS) - 1)
 #define W_BODY_LENGTH_MASK  ((1ULL << W_BODY_LENGTH_BITS) - 1)
 static inline WValue w_box_body(uint32_t offset, uint32_t length) {
+    assert((uint64_t)offset <= W_BODY_OFFSET_MASK);
+    assert((uint64_t)length <= W_BODY_LENGTH_MASK);
     return W_TAG_PACKED | ((uint64_t)W_PACKED_BODY << 45) |
            (((uint64_t)offset & W_BODY_OFFSET_MASK) << W_BODY_LENGTH_BITS) |
            ((uint64_t)length & W_BODY_LENGTH_MASK);

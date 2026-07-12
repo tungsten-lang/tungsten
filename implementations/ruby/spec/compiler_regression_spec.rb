@@ -568,6 +568,38 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("3232235818\n8\n0\n0\n")
   end
 
+  it "autoloads source-defined Integer methods under eval mode" do
+    source = <<~W
+      << 0.prev
+      << 0.succ
+      << 0.next
+      << 0.zero?
+      << (-1).negative?
+      << 1.positive?
+      << 3.sq
+      << 4.even?
+      << 5.odd?
+      << 140_737_488_355_327.succ
+      << (-140_737_488_355_328).prev
+    W
+
+    out, err, status = Open3.capture3(@compiler_path, "-e", source, chdir: PROJECT_ROOT)
+    expect(status.success?).to be(true), err
+    expect(out).to eq(<<~OUT)
+      -1
+      1
+      1
+      true
+      true
+      true
+      9
+      true
+      true
+      140737488355328
+      -140737488355329
+    OUT
+  end
+
   it "keeps a real $value global visible through a global function called by a method" do
     source = <<~W
       $value = 17
@@ -590,6 +622,7 @@ RSpec.describe "Compiler regressions" do
   it "runs native-backed IPv4 Tungsten methods under eval mode" do
     source = <<~W
       ip = 192.168.1.42
+      net = 192.168.1.42/24
 
       << (10.0.0.0/8).prefix
       << ip.private?
@@ -598,11 +631,35 @@ RSpec.describe "Compiler regressions" do
       << ip[3]
       << (ip.octet(-1) == nil)
       << (ip[4] == nil)
+      << ip.with_prefix(16).to_s
+      << (ip.with_prefix(nil).prefix == nil)
+      << net.network.to_s
+      << net.broadcast.to_s
+      << net.netmask.to_s
+      << net.include?(ip)
+      << net.contains?(192.168.2.1)
+      << net.include?(nil)
     W
 
     out, err, status = Open3.capture3(@compiler_path, "-e", source, chdir: PROJECT_ROOT)
     expect(status.success?).to be(true), err
-    expect(out).to eq("8\ntrue\ntrue\n192\n42\ntrue\ntrue\n")
+    expect(out).to eq(<<~OUT)
+      8
+      true
+      true
+      192
+      42
+      true
+      true
+      192.168.1.42/16
+      true
+      192.168.1.0/24
+      192.168.1.255/24
+      255.255.255.0
+      true
+      false
+      false
+    OUT
   end
 
   it "autoloads IPv4 methods for literal-only compiled calls" do
@@ -610,6 +667,11 @@ RSpec.describe "Compiler regressions" do
       << 10.0.0.1.private?
       << (192.168.0.0/16).prefix
       << 10.0.0.1.to_i
+      << (192.168.1.42/24).network.to_i
+      << (192.168.1.42/24).broadcast.to_i
+      << (192.168.1.42/24).netmask.to_i
+      << (192.168.1.0/24).include?(192.168.1.42)
+      << (192.168.1.0/24).contains?(192.168.2.1)
     W
 
     private_fn = symbol_for("__w_IPv4_private_Q__a1")
@@ -628,6 +690,65 @@ RSpec.describe "Compiler regressions" do
       expect(body).not_to include("@w_bit_and")
       expect(body).not_to include("@w_eq")
     end
+
+    native_value_fns = [
+      symbol_for("__w_IPv4_network__a1"),
+      symbol_for("__w_IPv4_broadcast__a1"),
+      symbol_for("__w_IPv4_netmask__a1"),
+      symbol_for("__w_IPv4_include_Q__a2"),
+      symbol_for("__w_IPv4_contains_Q__a2")
+    ].uniq
+    native_value_fns.each do |symbol|
+      body = llvm[/define internal i64 @#{Regexp.escape(symbol)}\(.*?\n}/m]
+      expect(body).not_to be_nil
+      expect(body).to match(/[al]shr i64/)
+      expect(body).to include("and i64")
+      expect(body).not_to include("@w_ipv4_")
+      expect(body).not_to include("@w_bit_")
+      expect(body).not_to include("@w_to_i64")
+    end
+  end
+
+  it "autoloads native Date methods for a compiled ccall result" do
+    out = compile_and_run("date_ccall_result_autoload.w", <<~W)
+      value = ccall("w_date", 2024, 2, 29, 0, 0, 0, 0)
+      << value.year
+      << value.leap?
+      << value.day_of_year
+    W
+
+    expect(out).to eq("2024\ntrue\n60\n")
+  end
+
+  it "autoloads native network methods for compiled ccall constructors and storage returns" do
+    out = compile_and_run("network_ccall_result_autoload.w", <<~W)
+      ip4 = ccall("w_ipv4_parse", "192.168.1.42/24")
+      ip6 = ccall("w_ipv6_storage_from_words", 0x20010DB8, 0, 0, 1, 64)
+      mac = ccall("w_mac_parse", "02:11:22:33:44:55")
+
+      << ip4.network.to_s
+      << ip6.prefix
+      << ip6.network.to_s
+      << mac.local?
+    W
+
+    expect(out).to eq("192.168.1.0/24\n64\n2001:db8:0:0:0:0:0:0/64\ntrue\n")
+  end
+
+  it "does not autoload native value classes for unrelated ccalls" do
+    compile_to_llvm("unrelated_ccall_autoload.w", <<~W)
+      << ccall("w_truthy", "truthy")
+    W
+
+    emitted_originals = last_sidemap.fetch("hashes").values.flat_map do |entry|
+      entry.fetch("originals").map { |item| item.fetch("symbol") }
+    end
+    expect(emitted_originals).not_to include(
+      "__w_Date_year__a1",
+      "__w_IPv4_prefix__a1",
+      "__w_IPv6_prefix__a1",
+      "__w_MAC_local_Q__a1"
+    )
   end
 
   it "loads the core IPv4 definition before a user reopen" do
@@ -968,6 +1089,31 @@ RSpec.describe "Compiler regressions" do
     expect(llvm).to match(/@__static_slab = private constant \[\d+ x i8\] c".*", align 8/)
     expect(llvm).to match(/@__static_slab = .*c"(?:\\00){32}\\01\\0bhello world/m)
     expect(llvm).not_to match(/@__static_slab = .*c"(?:\\00){40}\\0b\\01hello world/m)
+  end
+
+  it "keeps unrelated and dynamic empty? calls off the String autoload path" do
+    source = <<~W
+      text = ""
+      values = []
+      << text.empty?
+      << values.empty?
+    W
+
+    expect(compile_and_run("dynamic_empty_fallback.w", source)).to eq("true\ntrue\n")
+    compile_to_llvm("dynamic_empty_fallback.w", source)
+    expect(File.read(@last_sidemap_path)).not_to include("__w_String_empty_Q__a1")
+  end
+
+  it "autoloads the source String#empty? body for a proven String receiver" do
+    llvm = compile_to_llvm("literal_string_empty_autoload.w", <<~W)
+      << "".empty?
+    W
+
+    symbol = symbol_for("__w_String_empty_Q__a1")
+    body = llvm[/define internal i64 @#{Regexp.escape(symbol)}\(.*?^\}/m]
+    expect(body).not_to be_nil
+    expect(body).to include("and i64")
+    expect(body).not_to include("@w_method_call")
   end
 
   it "supports zstd-compressed static slab blobs" do
@@ -1342,7 +1488,10 @@ RSpec.describe "Compiler regressions" do
     expect(llvm).to include("call i64 @w_array_min_signed")
     expect(llvm).to include("call i64 @w_array_min_float")
     expect(llvm).to include("call i64 @w_array_cos_unsigned")
-    expect(llvm).to include("call i64 @w_array_sqrt_float")
+    # Elementwise sqrt now fuses into typed loops and calls libm directly;
+    # retaining the old whole-array runtime kernel would be a regression.
+    expect(llvm).to include("call double @sqrt(double")
+    expect(llvm).not_to include("call i64 @w_array_sqrt_float")
   end
 
   it "preserves stacktrace metadata through llvm.used" do
@@ -1772,6 +1921,23 @@ RSpec.describe "Compiler regressions" do
   ensure
     server&.close unless server&.closed?
     server_thread&.kill if server_thread&.alive?
+  end
+
+  it "stores bytes through the raw_store_u8 intrinsic without boxing pointers" do
+    out = compile_and_run("raw_store_u8.w", <<~W)
+      ptr = ccall_nobox("w_raw_malloc", 4) ## i64
+      first = raw_store_u8(ptr, 0, 0x141) ## i64
+      second = raw_store_u8(ptr, 1, 0x1FF) ## i64
+      loaded_first = raw_load_u8(ptr, 0) ## i64
+      loaded_second = raw_load_u8(ptr, 1) ## i64
+      ccall_nobox("w_raw_free", ptr)
+      << first.to_s
+      << second.to_s
+      << loaded_first.to_s
+      << loaded_second.to_s
+    W
+
+    expect(out).to eq("65\n255\n65\n255\n")
   end
 
   it "`## w64` hint annotates explicitly-boxed integer (Phase 4)" do
@@ -2635,6 +2801,58 @@ RSpec.describe "Compiler regressions" do
     W
 
     expect(out).to eq("99\n")
+  end
+
+  it "dispatches Array and Hash combinators through Enumerable bodies" do
+    out = compile_and_run("enumerable_trait_dispatch.w", <<~W)
+      typed = i16[3]
+      typed[0] = -2
+      typed[1] = 0
+      typed[2] = 7
+      << typed.map -> (value)
+        value + 5
+
+      hash = {a: 2, b: 5}
+      << hash.map -> (key, value)
+        key.to_s + value.to_s
+
+      selected = hash.select -> (key, value)
+        value >= 5
+      << selected.size
+      << selected[0][0]
+      << selected[0][1]
+    W
+
+    expect(out).to include("[3, 5, 12]\n", "a2", "b5", "1\nb\n5\n")
+
+    trait_source = File.read(File.join(PROJECT_ROOT, "core/traits/enumerable.w"))
+    array_source = File.read(File.join(PROJECT_ROOT, "core/array.w"))
+    hash_source = File.read(File.join(PROJECT_ROOT, "core/hash.w"))
+    runtime_source = File.read(File.join(PROJECT_ROOT, "runtime/runtime.c"))
+
+    expect(trait_source).to include(
+      "-> map(&block) []",
+      "-> select(&block) []",
+      "-> reduce(init, &block)",
+      "mode = __enumerable_iteration_mode"
+    )
+    expect(array_source).not_to match(/^\s+-> (?:map|select|reject|find|detect|reduce)\b/)
+    expect(hash_source).not_to match(/^\s+-> map\b/)
+    expect(runtime_source).not_to include("w_ic_array_map", "w_ic_array_select", "w_ic_hash_map")
+
+    llvm = compile_to_llvm("enumerable_adapter_ir.w", <<~W)
+      values = [1, 2, 3]
+      out = values.map -> (value)
+        value * 2
+      << out
+    W
+    map_symbol = symbol_for("__w_Array_map__a2")
+    map_body = llvm[/define internal i64 @#{Regexp.escape(map_symbol)}\(.*?^\}/m]
+    expect(map_body).not_to be_nil
+    # One mode query plus the pair- and ordinary-iterator fallbacks. Array's
+    # indexed mode bypasses both callback adapters and reads storage directly.
+    expect(map_body.scan("@w_method_call_cached").size).to eq(3)
+    expect(map_body).to include("@w_array_size", "@w_array_idx", "@w_closure_call_1")
   end
 
   it "supports measurements, affine points, calibration, and equivalencies" do

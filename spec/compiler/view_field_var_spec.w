@@ -27,3 +27,10 @@ total = 0
 a.each -> (x)
   total += x
 check("$field-on-self (Array#each) still works", total, 60)
+
+# Fixed inline u8[N] fields use field_offset + index (no hidden bounds branch)
+# and stay raw through integer expressions. WNetAddr.bytes begins at offset 4.
+ip = IPv6.parse("2001:db8::1") ## IPv6
+check("fixed inline byte first", ip$bytes[0], 0x20)
+check("fixed inline byte last", ip$bytes[15], 1)
+check("fixed inline bytes remain raw", (ip$bytes[0] << 8) | ip$bytes[1], 0x2001)

@@ -58,6 +58,22 @@
   receiver = node.receiver
   args = expand_kwargs(node.args)
 
+  # Low-level WValue bit casts used by source-defined packed value classes.
+  # Both representations are LLVM i64, so these are deliberately emit-free:
+  # `wvalue_bits` exposes an arbitrary boxed value as a raw machine integer,
+  # while `wvalue_from_bits` marks a raw bit pattern as an already-boxed
+  # WValue. Keeping this boundary in the compiler lets packed constructors
+  # move into core/*.w without replacing one runtime implementation with a
+  # one-line C identity helper.
+  if name == "wvalue_bits" && receiver == nil && args != nil && args.size() == 1
+    value = lower_expression(ctx, args[0])
+    return typed_value(:raw_i64, ensure_i64_value(wfn, value))
+
+  if name == "wvalue_from_bits" && receiver == nil && args != nil && args.size() == 1
+    value = lower_expression(ctx, args[0])
+    inferred = infer_type(args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    return typed_value(:i64, ensure_raw_machine_int(wfn, value, :i64, inferred))
+
   # Carry-primitive intrinsic: `mulhi(a, b)` = high 64 bits of the unsigned
   # 64x64->128 product, lowered to a single UMULH (arm64) / MULX (x86). Builtin
   # because the surface can't express the high half of a wide multiply; it's the
@@ -389,9 +405,23 @@
   # view_load_byte / view_load_bit ops with proper !range metadata.
   if receiver != nil && name in ("\[]" "[]") && args.size() == 1 && (ast_kind(receiver) == :var || ast_kind(receiver) == :gvar) && receiver.name != nil && receiver.name.starts_with?("$") && ctx[:class_name] != nil
     bare = receiver.name.slice(1, receiver.name.size() - 1)
-    # Skip if bare name matches a registered view_layouts field — that path
-    # is handled by lower_method_call's `:view_field` rewrite already.
     finfo = view_field_info(ctx, bare)
+    # Fixed inline arrays live at field_offset + index inside the receiver's
+    # backing struct. The containing method performs its own semantic bounds
+    # check; this lowering is deliberately a bounds-independent raw u8 load.
+    if finfo != nil && inline_u8_array_field?(finfo[:type])
+      self_tv = lower_var(ctx, Tungsten:AST:Var.new("__self"))
+      self_reg = ensure_i64_value(wfn, self_tv)
+      idx_tv = lower_expression(ctx, args[0])
+      idx_type = infer_type(args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+      idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
+      effective_offset = finfo[:offset]
+      if class_uses_implicit_type_byte?(ctx[:class_name])
+        effective_offset += 1
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :view_load_inline_byte, temp: temp, ptr: self_reg, offset: effective_offset, index: idx_raw})
+      return typed_value(:raw_int, temp)
+    # Unknown `$view[i]` names retain the older raw-object-relative behavior.
     if finfo == nil
       return lower_view_access(ctx, Tungsten:AST:ViewAccess.new(bare, args[0]))
 
@@ -409,6 +439,18 @@
 
   if receiver != nil && name in ("\[]" "[]") && args.size() == 1 && ast_kind(receiver) == :view_field
     info = view_field_info(ctx, receiver.field)
+    if info != nil && inline_u8_array_field?(info[:type])
+      self_tv = lower_var(ctx, Tungsten:AST:Var.new("__self"))
+      self_reg = ensure_i64_value(wfn, self_tv)
+      idx_tv = lower_expression(ctx, args[0])
+      idx_type = infer_type(args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+      idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
+      effective_offset = info[:offset]
+      if class_uses_implicit_type_byte?(ctx[:class_name])
+        effective_offset += 1
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :view_load_inline_byte, temp: temp, ptr: self_reg, offset: effective_offset, index: idx_raw})
+      return typed_value(:raw_int, temp)
     if info != nil && pointer_array_field?(info[:type])
       ptr_tv = lower_view_field(ctx, receiver)
       idx_tv = lower_expression(ctx, args[0])
@@ -420,6 +462,28 @@
       if elem_type == "w64"
         return typed_value(:i64, temp)
       return typed_value(:raw_int, temp)
+
+  # `value$bytes[i]` — explicit-receiver fixed inline field access. A named
+  # type hint on `value` selects the backing layout; the source method is
+  # responsible for checking the dynamic type before applying that hint.
+  if receiver != nil && name in ("\[]" "[]") && args.size() == 1 && ast_kind(receiver) == :view_field_var
+    recv_node = receiver.receiver
+    recv_type = infer_type(recv_node, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    layout_class = view_layout_class_for_type(ctx[:mod], recv_type)
+    if layout_class != nil
+      info = ctx[:mod][:view_layouts][layout_class][receiver.field]
+      if info != nil && inline_u8_array_field?(info[:type])
+        recv_tv = lower_expression(ctx, recv_node)
+        recv_reg = ensure_i64_value(wfn, recv_tv)
+        idx_tv = lower_expression(ctx, args[0])
+        idx_type = infer_type(args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+        idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
+        effective_offset = info[:offset]
+        if class_uses_implicit_type_byte?(layout_class)
+          effective_offset += 1
+        temp = next_temp(wfn)
+        emit_instruction(wfn, {op: :view_load_inline_byte, temp: temp, ptr: recv_reg, offset: effective_offset, index: idx_raw})
+        return typed_value(:raw_int, temp)
 
   # Fast `node.field` access: when the receiver's static type is a
   # specific AST kind AND `name` is a slab field on that kind AND
@@ -487,6 +551,24 @@
     idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
     temp = next_temp(wfn)
     emit_instruction(wfn, {op: :load_u8_ptr, temp: temp, ptr: ptr_raw, index: idx_raw})
+    return typed_value(:raw_int, temp)
+
+  # raw_store_u8(ptr, offset, value) → inline LLVM byte store to a raw
+  # pointer. Pointer/index/value are all machine integers; the returned value
+  # is the truncated byte. Byte codecs use this after hoisting a stable,
+  # start-adjusted data pointer from their preallocated u8[] output.
+  if name == "raw_store_u8" && args.size() == 3
+    ptr_tv = lower_expression(ctx, args[0])
+    idx_tv = lower_expression(ctx, args[1])
+    value_tv = lower_expression(ctx, args[2])
+    ptr_type = infer_type(args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    idx_type = infer_type(args[1], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    value_type = infer_type(args[2], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    ptr_raw = ensure_raw_machine_int(wfn, ptr_tv, :i64, ptr_type)
+    idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
+    value_raw = ensure_raw_machine_int(wfn, value_tv, :i64, value_type)
+    temp = next_temp(wfn)
+    emit_instruction(wfn, {op: :store_u8_ptr, temp: temp, ptr: ptr_raw, index: idx_raw, value: value_raw})
     return typed_value(:raw_int, temp)
 
   # raw_load_u32(ptr, offset) → inline unaligned little-endian u32 load from

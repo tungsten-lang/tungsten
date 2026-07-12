@@ -1016,6 +1016,17 @@ int main() {
         printf("  packed ipv4: OK\n");
     }
 
+    /* Packed type: AST Body — both fields retain their documented maxima. */
+    {
+        WValue v = w_box_body((uint32_t)W_BODY_OFFSET_MASK,
+                              (uint32_t)W_BODY_LENGTH_MASK);
+        assert(w_is_body(v));
+        assert(w_unbox_body_offset(v) == (uint32_t)W_BODY_OFFSET_MASK);
+        assert(w_unbox_body_length(v) == (uint32_t)W_BODY_LENGTH_MASK);
+
+        printf("  packed body limits: OK\n");
+    }
+
     /* Packed type: Rational */
     {
         WValue v = w_rational(22, 7);

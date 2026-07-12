@@ -2094,6 +2094,13 @@ module Tungsten
           skip_space
         end
 
+        # A space after `)` tentatively marks an inline body above, but that
+        # same space also introduces a return annotation. When the annotation
+        # ends the declaration line, the body is the following indented block.
+        if (param_types || return_type) && (@token.type?(:NL) || @token.type?(:";"))
+          inline_body = false
+        end
+
         # Phase 3 inline body introducer: `:` after annotations.
         if @token.type?(:":")
           next_token_skip_space

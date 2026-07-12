@@ -42,6 +42,44 @@ RSpec.describe "Compiled run" do
     expect(out).to eq("[0, 1]\n")
   end
 
+  it "autoloads native Date methods for literal eval and preserves calendar edges" do
+    source = <<~W
+      leap_day = 2024-02-29
+      << leap_day.year
+      << leap_day.month
+      << leap_day.day
+      << leap_day.quarter
+      << leap_day.leap?
+      << leap_day.days_in_month
+      << leap_day.day_of_year
+      << leap_day.cwday
+      << leap_day.cweek
+      << leap_day.jd
+      << 2016-01-01.cweek
+      << 2016-01-01.cwyear
+      << 2018-12-31.cweek
+      << 2018-12-31.cwyear
+    W
+
+    out, err, status = Open3.capture3(TUNGSTEN_BIN, "-e", source, chdir: PROJECT_ROOT)
+
+    expect(status.success?).to be(true), err
+    expect(out).to eq("2024\n2\n29\n1\ntrue\n29\n60\n4\n9\n2460370\n53\n2015\n1\n2019\n")
+  end
+
+  it "keeps Hash keys and values on their semantic dispatch path" do
+    source = <<~W
+      h = {a: 1}
+      << h.keys
+      << h.values
+    W
+
+    out, err, status = Open3.capture3(TUNGSTEN_BIN, "-e", source, chdir: PROJECT_ROOT)
+
+    expect(status.success?).to be(true), err
+    expect(out).to eq("[a]\n[1]\n")
+  end
+
   it "reports a formatted runtime error when compiled run raises" do
     path = write_program("undefined_method.w", <<~W)
       1.nope

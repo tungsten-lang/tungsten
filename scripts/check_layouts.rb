@@ -8,6 +8,7 @@
 #   core/array.w        - data (WArray)
 #   core/big_array.w    - data (WBigArray)
 #   core/small_array.w  - data (WSmallArray)
+#   core/{ipv6,mac}.w   - data (WNetAddr), shared identical layout
 
 require "fiddle"
 
@@ -20,13 +21,15 @@ REQUIRED_BACKED_STRUCTS = %w[
   WArray
   WBigArray
   WSmallArray
+  WNetAddr
 ].freeze
 
 # W_SUBTAG_GENERIC heap values carry a leading runtime type byte that the
 # user-visible Tungsten layout omits. The lowering adds this byte back when
 # producing C offsets.
 C_PREFIX_FIELDS = {
-  "WBigArray" => %w[type]
+  "WBigArray" => %w[type],
+  "WNetAddr" => %w[type]
 }.freeze
 
 LayoutField = Struct.new(:name, :type, :size, :align, :offset, keyword_init: true)
@@ -217,9 +220,19 @@ def validate_layout_set(layouts, failures)
     fail_with("Missing backed `- data (StructName)` layouts for: #{missing.join(', ')}", failures)
   end
 
-  duplicates = struct_names.group_by(&:itself).select { |_name, entries| entries.size > 1 }.keys
-  unless duplicates.empty?
-    fail_with("Duplicate backed layout declarations for: #{duplicates.join(', ')}", failures)
+  # Multiple runtime classes may deliberately share one backing C struct
+  # (IPv6 and MAC both use WNetAddr). Permit that only when their complete
+  # source-visible layouts are byte-for-byte identical.
+  conflicts = layouts.group_by(&:struct_name).filter_map do |name, entries|
+    next if entries.size == 1
+
+    signatures = entries.map do |entry|
+      [ entry.size, entry.fields.map { |field| [ field.name, field.type, field.size, field.align, field.offset ] } ]
+    end.uniq
+    name if signatures.size > 1
+  end
+  unless conflicts.empty?
+    fail_with("Conflicting backed layout declarations for: #{conflicts.join(', ')}", failures)
   end
 end
 

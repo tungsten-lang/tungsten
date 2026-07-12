@@ -470,6 +470,8 @@
     catch_label = next_label(new_fn, "blockret.catch")
     emit_instruction(new_fn, {op: :cond_br, cond: cmp, then_label: body_label, else_label: catch_label})
     start_block(new_fn, body_label)
+    block_return_slot = ensure_var_slot(new_fn, "__block_return_frame")
+    emit_instruction(new_fn, {op: :store_i64, value: block_return_bits, ptr: block_return_slot})
 
   # Apply type hints to params and local vars
   if node.type_hints != nil
@@ -1509,6 +1511,8 @@
     catch_label = next_label(new_fn, "blockret.catch")
     emit_instruction(new_fn, {op: :cond_br, cond: cmp, then_label: body_label, else_label: catch_label})
     start_block(new_fn, body_label)
+    block_return_slot = ensure_var_slot(new_fn, "__block_return_frame")
+    emit_instruction(new_fn, {op: :store_i64, value: block_return_bits, ptr: block_return_slot})
 
   # Unbox typed machine-int class-method parameters once at function entry.
   i = 0

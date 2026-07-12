@@ -142,15 +142,20 @@ run_cuda_emit_spec() {
 }
 
 compiled_specs=(
+  spec/compiler/ast_body_native_spec.w
   spec/compiler/block_passthrough_spec.w
   spec/compiler/elementwise_fusion_spec.w
   spec/compiler/recase_spec.w
   spec/compiler/typed_overload_spec.w
   spec/compiler/view_field_var_spec.w
   spec/core/basics_spec.w
+  spec/core/base64_native_spec.w
+  spec/core/string_native_spec.w
   spec/core/control_flow_spec.w
   spec/core/classes_spec.w
   spec/core/arrays_hashes_spec.w
+  spec/core/enumerable_native_spec.w
+  spec/core/network_native_spec.w
   spec/numeric/complex_spec.w
   spec/numeric/fp_math_mode_spec.w
   spec/numeric/matrix_spec.w
@@ -165,6 +170,7 @@ cuda_emit_specs=(
 
 interpreter_specs=(
   spec/interpreter/slab_decl_spec.w
+  spec/core/base64_native_spec.w
 )
 
 core_specs=(

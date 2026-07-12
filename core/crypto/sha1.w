@@ -15,4 +15,4 @@ in Crypto
     hexdigest(data)
 
   -> .base64digest(data)
-    ccall("w_crypto_sha1_base64", data)
+    Base64.encode(digest(data))

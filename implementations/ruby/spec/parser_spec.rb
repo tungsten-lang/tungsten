@@ -227,6 +227,13 @@ module Tungsten::AST
       expect(defn.name).to eq("string")
     end
 
+    it "parses a return annotation before an indented method body" do
+      result = described_class.parse("-> .tanh(x) f64\n  x")
+      defn = result.list[0]
+      expect(defn.return_type).to eq(:f64)
+      expect(defn.body.first).to eq("x".var)
+    end
+
     it "raises error for old -> self.method syntax" do
       expect {
         described_class.parse("-> self.foo")

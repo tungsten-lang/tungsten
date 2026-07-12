@@ -16,7 +16,7 @@ summary from the source header, and a link to the source.
 | Class | Defined as | Summary | Source |
 |-------|-----------|---------|--------|
 | `Array` | `+ Array` | Ordered, mutable collection of typed values. Element type chosen at | [`core/array.w`](../core/array.w) |
-| `Base64` | `+ Base64` | Base64 — RFC 4648 base64 encoding/decoding. | [`core/base64.w`](../core/base64.w) |
+| `Base64` | `+ Base64` | Base64 and Base64URL codecs (RFC 4648). | [`core/base64.w`](../core/base64.w) |
 | `BigArray` | `+ BigArray` | Same shape as Array, but i64 fields for >2^32 elements. Used for | [`core/big_array.w`](../core/big_array.w) |
 | `BlankSlate` | `+ BlankSlate` | BlankSlate is the parent class of all classes in Tungsten. It's an explicit blank class. | [`core/blank_slate.w`](../core/blank_slate.w) |
 | `Bool` | `+ Bool` | Bool — true (subtag 0x2) and false (subtag 0x1) singletons | [`core/bool.w`](../core/bool.w) |
@@ -36,9 +36,9 @@ summary from the source header, and a link to the source.
 | `Float` | `+ Float` | Float — IEEE 754 double (quiet NaN range) | [`core/float.w`](../core/float.w) |
 | `Hash` | `+ Hash` | — | [`core/hash.w`](../core/hash.w) |
 | `IPv4` | `+ IPv4` | IPv4 — packed IPv4 address with optional CIDR prefix. | [`core/ipv4.w`](../core/ipv4.w) |
-| `IPv6` | `+ IPv6` | IPv6 — heap-backed 128-bit IP address with optional CIDR prefix. | [`core/ipv6.w`](../core/ipv6.w) |
+| `IPv6` | `+ IPv6` | IPv6 — heap-backed 128-bit address with native CIDR and classification logic. | [`core/ipv6.w`](../core/ipv6.w) |
 | `Instant` | `+ Instant` | Instant — millisecond-precision timestamp (tag 0xFFFB). | [`core/instant.w`](../core/instant.w) |
-| `Integer` | `+ Integer` | Integer — 48-bit NaN-boxed signed integer (tag 0xFFFA) | [`core/integer.w`](../core/integer.w) |
+| `Integer` | `+ Integer < Real` | Integer — 48-bit NaN-boxed signed integer with exact BigInt promotion. | [`core/integer.w`](../core/integer.w) |
 | `JSON` | `+ JSON` | JSON encoder/decoder — interface and default implementation. | [`core/json.w`](../core/json.w) |
 | `Math` | `+ Math` | Math — pure-Tungsten implementations of math functions derived from | [`core/math.w`](../core/math.w) |
 | `Matrix` | `+ Matrix<T> < Number` | Matrix — generic M×N matrices over a scalar type T. Storage is | [`core/matrix.w`](../core/matrix.w) |
@@ -46,7 +46,7 @@ summary from the source header, and a link to the source.
 | `FFT` | `+ FFT` | FFT — discrete Fourier transform (native Cooley–Tukey radix-2). | [`core/fft.w`](../core/fft.w) |
 | `Special` | `+ Special` | Special — transcendental / special functions (SciPy `scipy.special` analogue). | [`core/special.w`](../core/special.w) |
 | `Stats` | — | Stats — distributions, descriptive stats, sampling. | [`core/stats.w`](../core/stats.w) |
-| `Tensor` | — | core/tensor.w — N-dimensional Tensor that shares memory with a Metal 4 | [`core/tensor.w`](../core/tensor.w) |
+| `Tensor` | — | core/tensor.w — N-dimensional dense Tensor (language type). | [`core/tensor.w`](../core/tensor.w) |
 | `Dual` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
 | `Tape` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
 | `Autodiff` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
@@ -57,7 +57,7 @@ summary from the source header, and a link to the source.
 | `Plot` | `+ Plot` | Plot — terminal sparklines / heatmaps (zero-dep). | [`core/plot.w`](../core/plot.w) |
 | `Sparse` | — | Sparse — sparse **matrix** algebra (not a sparse multi-D tensor). | [`core/sparse.w`](../core/sparse.w) |
 | `CUDA` | `+ CUDA` | CUDA — host-side launch for `@gpu fn` kernels emitted as .cu. | [`core/cuda.w`](../core/cuda.w) |
-| `MAC` | `+ MAC` | — | [`core/mac.w`](../core/mac.w) |
+| `MAC` | `+ MAC` | MAC — heap-backed 48-bit link-layer address with native byte predicates. | [`core/mac.w`](../core/mac.w) |
 | `Module` | `+ Module` | — | [`core/module.w`](../core/module.w) |
 | `Nil` | `+ Nil` | — | [`core/nil.w`](../core/nil.w) |
 | `Number` | `+ Number` | Number — root of the numeric tower. Every concrete number is either a | [`core/number.w`](../core/number.w) |
@@ -70,7 +70,7 @@ summary from the source header, and a link to the source.
 | `Range` | `+ Range` | — | [`core/range.w`](../core/range.w) |
 | `Regex` | `+ Regex` | Regex — a homegrown regular-expression engine, written in Tungsten. | [`core/regex.w`](../core/regex.w) |
 | `SmallArray` | `+ SmallArray` | Frozen, stack-allocatable, packed array. Up to 255 elements. | [`core/small_array.w`](../core/small_array.w) |
-| `String` | `+ String` | Tungsten strings are an immutable sequence of UTF-8 encoded codepoints. | [`core/string.w`](../core/string.w) |
+| `String` | `+ String` | Native String methods that are safe to express over the WValue itself. | [`core/string_native.w`](../core/string_native.w) |
 | `StringBuffer` | `+ string_buffer` | string_buffer - mutable UTF-8 string builder | [`core/string_buffer.w`](../core/string_buffer.w) |
 | `Symbol` | `+ Symbol` | — | [`core/symbol.w`](../core/symbol.w) |
 | `Thread` | `+ Thread` | Thread — a native OS thread (pthread). | [`core/thread.w`](../core/thread.w) |

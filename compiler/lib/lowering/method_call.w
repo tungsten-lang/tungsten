@@ -238,11 +238,11 @@
     # w_closure_call_1 function-call overhead.
     #
     # Only fires when:
-    #   - receiver is a simple :var (avoids re-evaluating expressions
-    #     with side effects like `make_arr().each(...)`)
+    #   - receiver is a simple :var or `self` (avoids re-evaluating
+    #     expressions with side effects like `make_arr().each(...)`)
     #   - block has exactly one explicit parameter (positional-ref
     #     blocks need different rewriting and aren't covered yet)
-    if ast_kind(recv_node) == :var && is_array_type?(recv_type) && call_has_ast_block?(node)
+    if ast_kind(recv_node) in (:var :self_ref) && is_array_type?(recv_type) && call_has_ast_block?(node)
       block = node.block
       bparams = block.params
       # Implicit-free-var shape (`arr.each -> << v`) parses as block with
@@ -848,6 +848,34 @@
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_str_concat", args: [arg_reg, receiver_reg]})
       return rebind_local_i64(ctx, recv_node.name, temp, :string)
 
+  # Inside an array-tier class method, `self` is known even when its concrete
+  # element type is only available at runtime. Route storage primitives
+  # directly through the tier's dynamic decoder; assigning the broad `:array`
+  # type here would be unsound because `array_get_inline` assumes w64 slots.
+  if ast_kind(recv_node) == :self_ref && ctx[:class_name] in ("Array" "BigArray" "SmallArray")
+    size_helper = "w_array_size"
+    idx_helper = "w_array_idx"
+    if ctx[:class_name] == "BigArray"
+      size_helper = "w_big_array_size"
+      idx_helper = "w_big_array_idx"
+    elsif ctx[:class_name] == "SmallArray"
+      size_helper = "w_small_array_size"
+      idx_helper = "w_small_array_idx"
+    if method_name == "size" && node.args.size() == 0
+      receiver_val = lower_expression(ctx, recv_node)
+      receiver_reg = ensure_i64_value(wfn, receiver_val)
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: size_helper, args: [receiver_reg]})
+      return typed_value(:i64, temp)
+    if method_name == "\[]" && node.args.size() == 1
+      receiver_val = lower_expression(ctx, recv_node)
+      receiver_reg = ensure_i64_value(wfn, receiver_val)
+      idx_val = lower_expression(ctx, node.args[0])
+      idx_reg = ensure_i64_value(wfn, idx_val)
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: idx_helper, args: [receiver_reg, idx_reg]})
+      return typed_value(:i64, temp)
+
   # Direct builtins for array operations — only when receiver is known to be an array
   if recv_type == :array
     if method_name == "push" && node.args.size() == 1
@@ -1407,11 +1435,21 @@
         method_ast = ctx[:mod][:class_method_asts][spec_class + "." + method_name]
     if method_ast != nil
       # Verify the block presence on the call matches the method's expectation.
-      # Mismatch (caller passes block to non-block method, or vice versa)
-      # bails to runtime dispatch — safer than guessing the right shape.
+      # A block parameter may also be supplied as the final positional closure
+      # (`values.map(mapper)`); that is the form benchmark harnesses and higher-
+      # order code use to reuse one closure without reallocating it per call.
       method_takes_block = method_lowering_analysis(method_ast)[:yield_block_name] != nil
       caller_has_block = call_has_ast_block?(node)
-      if method_takes_block == caller_has_block
+      positional_block_arg = false
+      if method_takes_block && !caller_has_block
+        positional_count = 0
+        mpi = 0
+        while mpi < method_ast.params.size()
+          if method_ast.params[mpi].block_param != true
+            positional_count += 1
+          mpi += 1
+        positional_block_arg = node.args.size() == positional_count + 1
+      if method_takes_block == caller_has_block || positional_block_arg
         # Flush pending SSA bindings (e.g. an accumulator `acc = init`) into
         # var_slots BEFORE the inline-safety check — find_captures reads
         # ctx[:func][:var_slots], so an unmaterialized local reads as captureless.

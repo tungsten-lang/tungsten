@@ -1808,6 +1808,13 @@ RSpec.describe Tungsten::Interpreter do
     end
   end
 
+  describe "Math core autoload" do
+    it "combines source-defined helpers with Ruby libm fallbacks" do
+      expect(run("Math.log_base(~8.0, ~2.0)")).to be_within(1e-12).of(3.0)
+      expect(run("Math.sqrt(~9.0)")).to eq(3.0)
+    end
+  end
+
   describe "unicode operators and constants" do
     it "uses · as multiplication" do
       expect(run("a = 3\nb = 4\na·b")).to eq(12)

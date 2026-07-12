@@ -27,6 +27,28 @@ assert_eq eval(":foo"), :foo
 test "evaluates arrays"
 assert_eq eval("\[1, 2, 3]"), [1, 2, 3]
 
+test "uses native storage accessors for runtime-backed arrays"
+assert_eq eval("\[1, 2, 3].size"), 3
+assert_eq eval("a = u8\[4]\na.size"), 4
+assert_true eval("a = \[1]\na$flags >= 0")
+
+test "only routes supported scalar native data fields"
+field_interp = Interpreter.new()
+assert_true field_interp.native_data_field_supported?({name: "Array"}, "flags")
+assert_true field_interp.native_data_field_supported?({name: "IPv6"}, "prefix")
+assert_false field_interp.native_data_field_supported?({name: "Array"}, "_pad")
+assert_false field_interp.native_data_field_supported?({name: "IPv6"}, "bytes")
+assert_false field_interp.native_data_field_supported?({name: "Hash"}, "keys")
+assert_false field_interp.native_data_field_supported?({name: "Hash"}, "values")
+assert_false field_interp.native_data_field_supported?({name: "UUID"}, "bytes")
+
+test "native Hash layout fields do not shadow semantic methods"
+assert_eq eval("h = {a: 1}\nh.keys"), [:a]
+assert_eq eval("h = {a: 1}\nh.values"), [1]
+
+test "evaluates word arrays as fresh string arrays"
+assert_eq eval("%w\[Sun Mon Tue]"), ["Sun", "Mon", "Tue"]
+
 test "evaluates hashes"
 result = eval("{a: 1, b: 2}")
 assert_eq result[:a], 1
@@ -61,6 +83,13 @@ assert_eq eval("x = 340282366920938463463374607431768211456 ## u128\nx"), 0
 
 test "evaluates unary minus"
 assert_eq eval("-5"), -5
+
+test "autoloads source-defined methods for primitive classes"
+code = "\[0.prev, 0.succ, 0.next, 0.zero?, (-1).negative?, 1.positive?, 3.sq, 4.even?, 5.odd?]"
+assert_eq eval(code), [-1, 1, 1, true, true, true, 9, true, true]
+
+test "dispatches bare source-defined helpers on runtime primitive self"
+assert_eq eval("2016-01-01.cwyear"), 2015
 
 test "respects precedence"
 assert_eq eval("2 + 3 * 4"), 14
@@ -125,6 +154,9 @@ test "blocks with each"
 code = "result = \[]\n\[1, 2, 3].each ->(x) { result.push(x) }\nresult"
 assert_eq eval(code), [1, 2, 3]
 
+test "passthrough iterators return their receiver"
+assert_eq eval("\[1, 2, 3].each ->(x) { x }"), [1, 2, 3]
+
 test "map with block"
 assert_eq eval("\[1, 2, 3].map ->(x) { x * 2 }"), [2, 4, 6]
 
@@ -149,6 +181,10 @@ assert_eq eval("\[10, 20, 30]\[1]"), 20
 
 test "array index assignment"
 assert_eq eval("a = \[1, 2, 3]\na\[0] = 10\na\[0]"), 10
+
+test "raw_store_u8 mirrors compiled byte stores"
+code = "a = u8\[2]\np = ccall_nobox(\"w_u8_live_data_ptr\", a)\nraw_store_u8(p, 0, 321)\nraw_store_u8(p, 1, 511)\na\[0] * 1000 + a\[1]"
+assert_eq eval(code), 65255
 
 test "begin/rescue"
 code = "result = begin\n  raise \"boom\"\nrescue err\n  \"caught: \[err]\"\nresult"

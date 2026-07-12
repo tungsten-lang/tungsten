@@ -58,7 +58,10 @@
   auto :Range,        "range"
   auto :Regex,        "regex"
   auto :SmallArray,   "small_array"
-  auto :String,       "string"
+  # string.w is the legacy API/design scaffold and is not accepted by the
+  # current parser. Runtime-backed String dispatch loads this small native
+  # implementation instead.
+  auto :String,       "string_native"
   auto :StringBuffer, "string_buffer"
   auto :Symbol,       "symbol"
   auto :Thread,       "thread"

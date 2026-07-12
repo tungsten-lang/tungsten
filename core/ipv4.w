@@ -31,8 +31,17 @@
   -> cidr?
     (($value >> 6) & 0x3F) <= 32
 
-  -> with_prefix(prefix)
-    ccall("w_ipv4_with_prefix", self, prefix)
+  -> with_prefix(prefix = nil)
+    p = 63 ## i64
+    if prefix != nil
+      p = ccall_nobox("w_numeric_to_i64", prefix) ## i64
+      if p < 0
+        p = 63
+      elsif p > 32 && p != 63
+        raise "IPv4 prefix must be between 0 and 32"
+    # Keep the packed IPv4 tag and address, but reset the six flag bits just
+    # like the old C constructor. The low 12 bits are prefix + flags.
+    wvalue_from_bits(($value & -4096) | (p << 6))
 
   -> octet(index)
     raw_index = ccall_nobox("w_numeric_to_i64", index) ## i64
@@ -64,22 +73,86 @@
     ($value >> 12) & 0xFF
 
   -> network
-    ccall("w_ipv4_network", self)
+    p = (($value >> 6) & 0x3F) ## i64
+    effective = 32 ## i64
+    if p <= 32
+      effective = p
+    mask = 0 ## i64
+    if effective >= 32
+      mask = 0xFFFFFFFF
+    elsif effective > 0
+      mask = (0xFFFFFFFF << (32 - effective)) & 0xFFFFFFFF
+    address = (($value >> 12) & 0xFFFFFFFF) ## i64
+    tag = ($value & -35184372088832) ## i64
+    wvalue_from_bits(tag | ((address & mask) << 12) | (p << 6))
 
   -> broadcast
-    ccall("w_ipv4_broadcast", self)
+    p = (($value >> 6) & 0x3F) ## i64
+    effective = 32 ## i64
+    if p <= 32
+      effective = p
+    mask = 0 ## i64
+    if effective >= 32
+      mask = 0xFFFFFFFF
+    elsif effective > 0
+      mask = (0xFFFFFFFF << (32 - effective)) & 0xFFFFFFFF
+    address = (($value >> 12) & 0xFFFFFFFF) ## i64
+    broadcast_address = (address | (mask ^ 0xFFFFFFFF)) ## i64
+    tag = ($value & -35184372088832) ## i64
+    wvalue_from_bits(tag | (broadcast_address << 12) | (p << 6))
 
   -> netmask
-    ccall("w_ipv4_netmask", self)
+    p = (($value >> 6) & 0x3F) ## i64
+    effective = 32 ## i64
+    if p <= 32
+      effective = p
+    mask = 0 ## i64
+    if effective >= 32
+      mask = 0xFFFFFFFF
+    elsif effective > 0
+      mask = (0xFFFFFFFF << (32 - effective)) & 0xFFFFFFFF
+    tag = ($value & -35184372088832) ## i64
+    # Netmasks are plain IPv4 values, represented by the no-prefix sentinel.
+    wvalue_from_bits(tag | (mask << 12) | (63 << 6))
 
   -> mask
     self.netmask
 
   -> include?(address)
-    ccall("w_ipv4_in_cidr", address, self)
+    candidate = wvalue_bits(address)
+    # Comparing tag+packed-subtype rejects non-IPv4 values without a runtime
+    # type lookup. `$value` is necessarily IPv4 inside this method.
+    if (candidate >> 45) != ($value >> 45)
+      return false
+    p = (($value >> 6) & 0x3F) ## i64
+    effective = 32 ## i64
+    if p <= 32
+      effective = p
+    mask = 0 ## i64
+    if effective >= 32
+      mask = 0xFFFFFFFF
+    elsif effective > 0
+      mask = (0xFFFFFFFF << (32 - effective)) & 0xFFFFFFFF
+    cidr_address = (($value >> 12) & 0xFFFFFFFF) ## i64
+    candidate_address = ((candidate >> 12) & 0xFFFFFFFF) ## i64
+    (candidate_address & mask) == (cidr_address & mask)
 
   -> contains?(address)
-    self.include?(address)
+    candidate = wvalue_bits(address)
+    if (candidate >> 45) != ($value >> 45)
+      return false
+    p = (($value >> 6) & 0x3F) ## i64
+    effective = 32 ## i64
+    if p <= 32
+      effective = p
+    mask = 0 ## i64
+    if effective >= 32
+      mask = 0xFFFFFFFF
+    elsif effective > 0
+      mask = (0xFFFFFFFF << (32 - effective)) & 0xFFFFFFFF
+    cidr_address = (($value >> 12) & 0xFFFFFFFF) ## i64
+    candidate_address = ((candidate >> 12) & 0xFFFFFFFF) ## i64
+    (candidate_address & mask) == (cidr_address & mask)
 
   -> private?
     address = (($value >> 12) & 0xFFFFFFFF) ## i64

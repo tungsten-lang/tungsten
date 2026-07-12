@@ -36,7 +36,7 @@ suffixes  = {"c": "_c", "rust": "_rs", "zig": "_zig", "odin": "_odin", "go": "_g
   if lang == "tungsten"
     return capture("test -x \"[tungsten]\" && echo yes || echo no").strip() == "yes"
   cmd = cmds[lang]
-  capture("command -v [cmd] 2>/dev/null").strip().length() > 0
+  capture("command -v [cmd] 2>/dev/null").strip().size() > 0
 
 # A benchmark only includes a language if its source file is present —
 # not every benchmark provides every language (e.g. polysum has rs/zig/

@@ -531,6 +531,10 @@ use lowering/definitions
     if node.receiver == nil
       if node.name == "StringBuffer"
         return :string_buffer
+      if node.name == "wvalue_bits"
+        return :raw_i64
+      if node.name == "wvalue_from_bits"
+        return :value
       if node.name == "ccall_nobox"
         # Whitelisted slab/sparse helpers return an already-boxed WValue
         # of unknown kind — type them :value so a chained call on the
@@ -542,7 +546,7 @@ use lowering/definitions
         if fa != nil && fa.size() >= 1 && is_ast_node?(fa[0]) && ast_kind(fa[0]) == :string && ccall_nobox_returns_wvalue?(fa[0].value)
           return :value
         return :i64
-      if node.name in ("raw_load_u8" "raw_load_u32" "raw_load_u64")
+      if node.name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8")
         return :i64
       if node.name == "ccall_rawargs"
         return :value
@@ -1022,10 +1026,6 @@ use lowering/definitions
   mod[:known_calls]["cache_write"] = "__w_cache_write"
   mod[:known_calls]["system"] = "__w_system"
   mod[:known_calls]["capture"] = "__w_capture"
-  mod[:known_calls]["base64_encode"] = "__w_base64_encode"
-  mod[:known_calls]["base64_decode"] = "__w_base64_decode"
-  mod[:known_calls]["base64url_encode"] = "__w_base64url_encode"
-  mod[:known_calls]["base64url_decode"] = "__w_base64url_decode"
   mod[:known_calls]["exit"] = "__w_exit"
   mod[:known_calls]["raise"] = "w_raise"
   mod[:known_calls]["type"] = "__w_type"
@@ -2116,6 +2116,13 @@ use lowering/definitions
   if pointer_array_field?(t)
     return t.slice(1, t.size() - 3)
   "w64"
+
+# A fixed inline array is storage embedded directly in the backing struct,
+# e.g. WNetAddr.bytes (`u8[16]`). It is distinct from `* u8[] slots`, whose
+# field contains a separately allocated pointer. v0 only indexes inline u8
+# fields; widening this predicate later keeps the load-size decision explicit.
+-> inline_u8_array_field?(t)
+  !t.starts_with?("*") && t.starts_with?("u8\[") && t.ends_with?("\]") && t != "u8\[]"
 
 -> view_field_info(ctx, field_name)
   class_name = ctx[:class_name]

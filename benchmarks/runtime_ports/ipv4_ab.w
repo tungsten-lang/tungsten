@@ -22,6 +22,9 @@ WARMUP_ITERS = 50_000
   -> __c_cidr?
     ccall("w_ref_ipv4_cidr_p", self)
 
+  -> __c_with_prefix(prefix = nil)
+    ccall("w_ref_ipv4_with_prefix", self, prefix)
+
   -> __c_octet(index)
     ccall("w_ref_ipv4_octet", self, index)
 
@@ -39,6 +42,21 @@ WARMUP_ITERS = 50_000
 
   -> __c_index(index)
     ccall("w_ref_ipv4_octet", self, index)
+
+  -> __c_network
+    ccall("w_ref_ipv4_network", self)
+
+  -> __c_broadcast
+    ccall("w_ref_ipv4_broadcast", self)
+
+  -> __c_netmask
+    ccall("w_ref_ipv4_netmask", self)
+
+  -> __c_include?(address)
+    ccall("w_ref_ipv4_in_cidr", address, self)
+
+  -> __c_contains?(address)
+    ccall("w_ref_ipv4_in_cidr", address, self)
 
   -> __c_private?
     ccall("w_ref_ipv4_private_p", self)
@@ -83,7 +101,11 @@ WARMUP_ITERS = 50_000
 # still including ordinary public addresses. Prefixes cycle through every
 # bit/byte boundary plus nil (the packed no-prefix sentinel).
 -> build_corpus
-  prefixes = [nil, 0, 1, 7, 8, 15, 16, 23, 24, 31, 32]
+  prefixes = [nil]
+  prefix = 0
+  while prefix <= 32
+    prefixes.push(prefix)
+    prefix += 1
   values = []
   state = 0x6D2B79F5
   i = 0
@@ -134,6 +156,11 @@ WARMUP_ITERS = 50_000
                    ~-1.0, ~-0.5, ~0.0, ~1.0, ~1.75,
                    ~2.0, ~3.0, ~3.99, ~4.0, ~4.75,
                    281_474_976_710_656, -281_474_976_710_656]
+  valid_prefixes = [nil, -100, -1, ~-1.75, 63, ~63.99]
+  prefix = 0
+  while prefix <= 32
+    valid_prefixes.push(prefix)
+    prefix += 1
   checked = 0
   i = 0
   while i < values.size()
@@ -141,6 +168,12 @@ WARMUP_ITERS = 50_000
     check_value("to_i", i, ip.to_i, ip.__c_to_i)
     check_value("prefix", i, ip.prefix, ip.__c_prefix)
     check_value("cidr?", i, ip.cidr?, ip.__c_cidr?)
+    j = 0
+    while j < valid_prefixes.size()
+      prefix_value = valid_prefixes[j]
+      check_value("with_prefix", i * valid_prefixes.size() + j,
+                  ip.with_prefix(prefix_value), ip.__c_with_prefix(prefix_value))
+      j += 1
     j = 0
     while j < octet_indexes.size()
       index = octet_indexes[j]
@@ -153,6 +186,21 @@ WARMUP_ITERS = 50_000
     check_value("b", i, ip.b, ip.__c_b)
     check_value("c", i, ip.c, ip.__c_c)
     check_value("d", i, ip.d, ip.__c_d)
+    check_value("network", i, ip.network, ip.__c_network)
+    check_value("broadcast", i, ip.broadcast, ip.__c_broadcast)
+    check_value("netmask", i, ip.netmask, ip.__c_netmask)
+    include_values = [ip,
+                      values[(i + 1) & CORPUS_MASK],
+                      values[(i + 17) & CORPUS_MASK],
+                      nil, 0, "not an ip"]
+    j = 0
+    while j < include_values.size()
+      candidate = include_values[j]
+      check_value("include?", i * include_values.size() + j,
+                  ip.include?(candidate), ip.__c_include?(candidate))
+      check_value("contains?", i * include_values.size() + j,
+                  ip.contains?(candidate), ip.__c_contains?(candidate))
+      j += 1
     check_value("private?", i, ip.private?, ip.__c_private?)
     check_value("loopback?", i, ip.loopback?, ip.__c_loopback?)
     check_value("link_local?", i, ip.link_local?, ip.__c_link_local?)
@@ -161,7 +209,29 @@ WARMUP_ITERS = 50_000
     check_value("broadcast?", i, ip.broadcast?, ip.__c_broadcast?)
     check_value("reserved?", i, ip.reserved?, ip.__c_reserved?)
     check_value("global?", i, ip.global?, ip.__c_global?)
-    checked += 51
+    checked += 51 + valid_prefixes.size() + 3 + include_values.size() * 2
+    i += 1
+
+  # Invalid prefixes must raise on both sides. Do this once per invalid value;
+  # exception setup is deliberately outside the performance measurements.
+  invalid_prefixes = [33, 62, 64, 1000, ~33.9, ~64.1]
+  i = 0
+  while i < invalid_prefixes.size()
+    prefix_value = invalid_prefixes[i]
+    c_raised = false
+    w_raised = false
+    begin
+      values[0].__c_with_prefix(prefix_value)
+    rescue error
+      c_raised = true
+    begin
+      values[0].with_prefix(prefix_value)
+    rescue error
+      w_raised = true
+    check_value("with_prefix invalid raise", i, w_raised, c_raised)
+    if !w_raised
+      fail_check("with_prefix invalid raise", i, false, true)
+    checked += 1
     i += 1
 
   << "correctness: ok ([checked] exact C/W comparisons)"
@@ -222,6 +292,26 @@ WARMUP_ITERS = 50_000
   start_ns = clock()
   while i < iters
     checksum += values[i & CORPUS_MASK].cidr? ? 1 : 0
+    i += 1
+  finish_timing(start_ns, checksum)
+
+-> time_with_prefix_c(values, iters)
+  checksum = 0
+  i = 0
+  start_ns = clock()
+  while i < iters
+    result = values[i & CORPUS_MASK].__c_with_prefix(i & 31)
+    checksum += result.d
+    i += 1
+  finish_timing(start_ns, checksum)
+
+-> time_with_prefix_w(values, iters)
+  checksum = 0
+  i = 0
+  start_ns = clock()
+  while i < iters
+    result = values[i & CORPUS_MASK].with_prefix(i & 31)
+    checksum += result.d
     i += 1
   finish_timing(start_ns, checksum)
 
@@ -332,6 +422,104 @@ WARMUP_ITERS = 50_000
   while i < iters
     ip = values[i & CORPUS_MASK]
     checksum += ip[i & 3]
+    i += 1
+  finish_timing(start_ns, checksum)
+
+-> time_network_c(values, iters)
+  checksum = 0
+  i = 0
+  start_ns = clock()
+  while i < iters
+    checksum += values[i & CORPUS_MASK].__c_network.d
+    i += 1
+  finish_timing(start_ns, checksum)
+
+-> time_network_w(values, iters)
+  checksum = 0
+  i = 0
+  start_ns = clock()
+  while i < iters
+    checksum += values[i & CORPUS_MASK].network.d
+    i += 1
+  finish_timing(start_ns, checksum)
+
+-> time_broadcast_value_c(values, iters)
+  checksum = 0
+  i = 0
+  start_ns = clock()
+  while i < iters
+    checksum += values[i & CORPUS_MASK].__c_broadcast.d
+    i += 1
+  finish_timing(start_ns, checksum)
+
+-> time_broadcast_value_w(values, iters)
+  checksum = 0
+  i = 0
+  start_ns = clock()
+  while i < iters
+    checksum += values[i & CORPUS_MASK].broadcast.d
+    i += 1
+  finish_timing(start_ns, checksum)
+
+-> time_netmask_c(values, iters)
+  checksum = 0
+  i = 0
+  start_ns = clock()
+  while i < iters
+    checksum += values[i & CORPUS_MASK].__c_netmask.to_i & 0xFFFF
+    i += 1
+  finish_timing(start_ns, checksum)
+
+-> time_netmask_w(values, iters)
+  checksum = 0
+  i = 0
+  start_ns = clock()
+  while i < iters
+    checksum += values[i & CORPUS_MASK].netmask.to_i & 0xFFFF
+    i += 1
+  finish_timing(start_ns, checksum)
+
+-> time_include_c(values, iters)
+  checksum = 0
+  i = 0
+  start_ns = clock()
+  while i < iters
+    cidr = values[i & CORPUS_MASK]
+    candidate = values[(i + 17) & CORPUS_MASK]
+    checksum += cidr.__c_include?(candidate) ? 1 : 0
+    i += 1
+  finish_timing(start_ns, checksum)
+
+-> time_include_w(values, iters)
+  checksum = 0
+  i = 0
+  start_ns = clock()
+  while i < iters
+    cidr = values[i & CORPUS_MASK]
+    candidate = values[(i + 17) & CORPUS_MASK]
+    checksum += cidr.include?(candidate) ? 1 : 0
+    i += 1
+  finish_timing(start_ns, checksum)
+
+-> time_contains_c(values, iters)
+  checksum = 0
+  i = 0
+  start_ns = clock()
+  while i < iters
+    cidr = values[i & CORPUS_MASK]
+    candidate = values[(i + 17) & CORPUS_MASK]
+    checksum += cidr.__c_contains?(candidate) ? 1 : 0
+    i += 1
+  finish_timing(start_ns, checksum)
+
+-> time_contains_w(values, iters)
+  checksum = 0
+  i = 0
+  start_ns = clock()
+  while i < iters
+    cidr = values[i & CORPUS_MASK]
+    candidate = values[(i + 17) & CORPUS_MASK]
+    checksum += cidr.contains?(candidate) ? 1 : 0
     i += 1
   finish_timing(start_ns, checksum)
 
@@ -496,6 +684,8 @@ WARMUP_ITERS = 50_000
   time_prefix_w(values, WARMUP_ITERS)
   time_cidr_c(values, WARMUP_ITERS)
   time_cidr_w(values, WARMUP_ITERS)
+  time_with_prefix_c(values, WARMUP_ITERS)
+  time_with_prefix_w(values, WARMUP_ITERS)
   time_octet_c(values, WARMUP_ITERS)
   time_octet_w(values, WARMUP_ITERS)
   time_a_c(values, WARMUP_ITERS)
@@ -508,6 +698,16 @@ WARMUP_ITERS = 50_000
   time_d_w(values, WARMUP_ITERS)
   time_index_c(values, WARMUP_ITERS)
   time_index_w(values, WARMUP_ITERS)
+  time_network_c(values, WARMUP_ITERS)
+  time_network_w(values, WARMUP_ITERS)
+  time_broadcast_value_c(values, WARMUP_ITERS)
+  time_broadcast_value_w(values, WARMUP_ITERS)
+  time_netmask_c(values, WARMUP_ITERS)
+  time_netmask_w(values, WARMUP_ITERS)
+  time_include_c(values, WARMUP_ITERS)
+  time_include_w(values, WARMUP_ITERS)
+  time_contains_c(values, WARMUP_ITERS)
+  time_contains_w(values, WARMUP_ITERS)
   time_private_c(values, WARMUP_ITERS)
   time_private_w(values, WARMUP_ITERS)
   time_loopback_c(values, WARMUP_ITERS)
@@ -550,6 +750,14 @@ WARMUP_ITERS = 50_000
     w_result = time_cidr_w(values, iters)
     c_result = time_cidr_c(values, iters)
   report_result("cidr?", c_result, w_result, iters)
+
+  if parity == 0
+    c_result = time_with_prefix_c(values, iters)
+    w_result = time_with_prefix_w(values, iters)
+  else
+    w_result = time_with_prefix_w(values, iters)
+    c_result = time_with_prefix_c(values, iters)
+  report_result("with_prefix", c_result, w_result, iters)
 
   if parity == 0
     c_result = time_octet_c(values, iters)
@@ -598,6 +806,46 @@ WARMUP_ITERS = 50_000
     w_result = time_index_w(values, iters)
     c_result = time_index_c(values, iters)
   report_result("[]", c_result, w_result, iters)
+
+  if parity == 0
+    c_result = time_network_c(values, iters)
+    w_result = time_network_w(values, iters)
+  else
+    w_result = time_network_w(values, iters)
+    c_result = time_network_c(values, iters)
+  report_result("network", c_result, w_result, iters)
+
+  if parity == 0
+    c_result = time_broadcast_value_c(values, iters)
+    w_result = time_broadcast_value_w(values, iters)
+  else
+    w_result = time_broadcast_value_w(values, iters)
+    c_result = time_broadcast_value_c(values, iters)
+  report_result("broadcast", c_result, w_result, iters)
+
+  if parity == 0
+    c_result = time_netmask_c(values, iters)
+    w_result = time_netmask_w(values, iters)
+  else
+    w_result = time_netmask_w(values, iters)
+    c_result = time_netmask_c(values, iters)
+  report_result("netmask", c_result, w_result, iters)
+
+  if parity == 0
+    c_result = time_include_c(values, iters)
+    w_result = time_include_w(values, iters)
+  else
+    w_result = time_include_w(values, iters)
+    c_result = time_include_c(values, iters)
+  report_result("include?", c_result, w_result, iters)
+
+  if parity == 0
+    c_result = time_contains_c(values, iters)
+    w_result = time_contains_w(values, iters)
+  else
+    w_result = time_contains_w(values, iters)
+    c_result = time_contains_c(values, iters)
+  report_result("contains?", c_result, w_result, iters)
 
   if parity == 0
     c_result = time_private_c(values, iters)

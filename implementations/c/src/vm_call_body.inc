@@ -688,7 +688,15 @@
           CNEXT();
         }
         if (has_receiver && name == NAME_SIZE) {
+          /* Fast path ONLY for receivers whose size this arm actually
+           * knows. Anything else (user objects with a `size` method, and
+           * notably StringBuffer) must FALL THROUGH to normal dispatch —
+           * the previous unconditional `size = 0` here silently answered
+           * 0 for StringBuffer, which emptied every `%w[...]` literal the
+           * self-hosted lexer scanned under stage 0 (the word-flush guard
+           * is `if word.size() > 0`) and broke stage1==stage2 identity. */
           int64_t size = 0;
+          int known = 1;
           if (tc_kind(receiver) == TC_VAL_STRING) size = (int64_t)tc_str_len(receiver);
           else if (tc_kind(receiver) == TC_VAL_ARRAY && tc_as_array(receiver)) size = (int64_t)tc_as_array(receiver)->size;
           else if (tc_kind(receiver) == TC_VAL_HASH && tc_as_hash(receiver)) size = (int64_t)tc_as_hash(receiver)->count;
@@ -696,12 +704,19 @@
             size = (int64_t)tc_as_ast_ptr(&receiver)->as.array->count;
           } else if (tc_kind(receiver) == TC_VAL_AST && tc_as_ast_ptr(&receiver)->kind == TC_AST_HASH && tc_as_ast_ptr(&receiver)->as.hash) {
             size = (int64_t)tc_as_ast_ptr(&receiver)->as.hash->count;
+          } else if (tc_kind(receiver) == TC_VAL_OBJECT && tc_as_object(receiver) &&
+                     object_is_class(tc_as_object(receiver), "StringBuffer", 12)) {
+            size = (int64_t)tc_as_object(receiver)->buffer_len;
+          } else {
+            known = 0;
           }
-          FREE_ARGS();
-          if (!push(&vm, int_value(size), err)) {
-            goto cleanup_fail;
+          if (known) {
+            FREE_ARGS();
+            if (!push(&vm, int_value(size), err)) {
+              goto cleanup_fail;
+            }
+            CNEXT();
           }
-          CNEXT();
         }
         if (has_receiver && name == NAME_BRACKETS_SET && argc == 2) {
           // Promote AST values before storing — see promote_ast_value

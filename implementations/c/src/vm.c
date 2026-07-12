@@ -2342,6 +2342,17 @@ int tc_vm_run_args(const TcChunk *chunk, int argc, char **argv, TcValue *result,
             if (tc_as_ast_ptr(&receiver)->kind == TC_AST_ARRAY && tc_as_ast_ptr(&receiver)->as.array) size = (int64_t)tc_as_ast_ptr(&receiver)->as.array->count;
             else if (tc_as_ast_ptr(&receiver)->kind == TC_AST_HASH && tc_as_ast_ptr(&receiver)->as.hash) size = (int64_t)tc_as_ast_ptr(&receiver)->as.hash->count;
             break;
+          case TC_VAL_OBJECT:
+            /* StringBuffer: buffer_len is the current byte length. The
+             * previous default:0 here answered 0 for every object —
+             * StringBuffer#size returning 0 emptied every %w[...] literal
+             * the self-hosted lexer scanned under stage 0 (word-flush is
+             * gated on `word.size() > 0`). */
+            if (tc_as_object(receiver) &&
+                object_is_class(tc_as_object(receiver), "StringBuffer", 12)) {
+              size = (int64_t)tc_as_object(receiver)->buffer_len;
+            }
+            break;
           default: break;
         }
         vm.stack[vm.sp - 1] = (tos = int_value(size));
@@ -2468,6 +2479,17 @@ int tc_vm_run_args(const TcChunk *chunk, int argc, char **argv, TcValue *result,
           case TC_VAL_AST:
             if (tc_as_ast_ptr(&receiver)->kind == TC_AST_ARRAY && tc_as_ast_ptr(&receiver)->as.array) size = (int64_t)tc_as_ast_ptr(&receiver)->as.array->count;
             else if (tc_as_ast_ptr(&receiver)->kind == TC_AST_HASH && tc_as_ast_ptr(&receiver)->as.hash) size = (int64_t)tc_as_ast_ptr(&receiver)->as.hash->count;
+            break;
+          case TC_VAL_OBJECT:
+            /* StringBuffer: buffer_len is the current byte length. The
+             * previous default:0 here answered 0 for every object —
+             * StringBuffer#size returning 0 emptied every %w[...] literal
+             * the self-hosted lexer scanned under stage 0 (word-flush is
+             * gated on `word.size() > 0`). */
+            if (tc_as_object(receiver) &&
+                object_is_class(tc_as_object(receiver), "StringBuffer", 12)) {
+              size = (int64_t)tc_as_object(receiver)->buffer_len;
+            }
             break;
           default: break;
         }

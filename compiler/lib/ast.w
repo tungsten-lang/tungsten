@@ -221,6 +221,13 @@ in Tungsten:AST
     ast_get(self, :format)
   -> from
     ast_get(self, :from)
+  # `func` is the per-element function of pipeline Map nodes (KIND_MAP slot
+  # 1). Without an explicit accessor, `node.func` resolves through dynamic
+  # dispatch, which found the schema field under the C VM but NOT under the
+  # compiled compiler — the autoload walker then saw pipeline-stage calls
+  # (`/sq`) on one host only.
+  -> func
+    ast_get(self, :func)
   -> guard
     ast_get(self, :guard)
   -> index

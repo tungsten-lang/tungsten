@@ -44,6 +44,10 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <spawn.h>
+#include <sys/wait.h>
+
+extern char **environ;
 
 /* GC removed — using malloc/calloc directly (no collection needed for server workloads) */
 #ifdef __APPLE__
@@ -17690,10 +17694,34 @@ WValue __w_cache_write(WValue path_val, WValue value) {
     return W_FALSE;
 }
 
+/* posix_spawn instead of system(3): system() sets SIGINT/SIGQUIT to SIG_IGN
+ * in THIS process for the child's whole lifetime, so a program with
+ * long-running children (flipfleet GPU epochs, clang links) becomes
+ * uninterruptible from the keyboard whenever any thread is inside system().
+ * Spawning leaves signal dispositions alone — Ctrl-C reaches the parent and
+ * the children together, like every other program. */
 WValue __w_system(WValue cmd_val) {
     const char *cmd = as_str(cmd_val);
-    int ret = system(cmd);
-    if (ret == 0) return W_TRUE;
+    char *spawn_argv[] = { "sh", "-c", (char *)cmd, NULL };
+    pid_t pid;
+    if (posix_spawn(&pid, "/bin/sh", NULL, NULL, spawn_argv, environ) != 0)
+        return W_FALSE;
+    int status;
+    while (waitpid(pid, &status, 0) == -1) {
+        if (errno != EINTR) return W_FALSE;
+    }
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) return W_TRUE;
+    return W_FALSE;
+}
+
+/* rename(2) from two WValue strings, for atomic publish of temp files
+ * without forking a shell. The first path is copied out before the second
+ * as_str() call so the thread-local ring buffer cannot alias the two. */
+WValue __w_rename(WValue old_val, WValue new_val) {
+    char oldp[4096];
+    snprintf(oldp, sizeof oldp, "%s", as_str(old_val));
+    const char *newp = as_str(new_val);
+    if (rename(oldp, newp) == 0) return W_TRUE;
     return W_FALSE;
 }
 
@@ -23715,6 +23743,33 @@ static void signal_handler_trampoline(int signum) {
         typedef WValue (*fn0_t)(WValue *);
         ((fn0_t)cl->fn_ptr)(cl->captures);
     }
+}
+
+/* Cooperative shutdown latch: a coordinator polls __w_interrupted() each
+ * round instead of dying mid-write. First SIGINT/SIGTERM latches, the second
+ * hard-exits (130) for a wedged loop. Async-signal-safe: the handler touches
+ * only a sig_atomic_t and _exit(). */
+static volatile sig_atomic_t w_interrupt_count = 0;
+
+static void w_interrupt_latch(int signum) {
+    (void)signum;
+    w_interrupt_count++;
+    if (w_interrupt_count >= 2) _exit(130);
+}
+
+WValue __w_trap_interrupts(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = w_interrupt_latch;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+    return W_TRUE;
+}
+
+WValue __w_interrupted(void) {
+    return w_int((int64_t)w_interrupt_count);
 }
 
 WValue w_signal_trap(int signum, WValue closure) {

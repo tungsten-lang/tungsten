@@ -66,10 +66,16 @@
     return 93
   if n == 6
     return 153
+  if n == 7
+    # Kauers-Wood meta flip-graph (arXiv:2510.19787).  Perminov claims 248
+    # (arXiv:2511.20317) but as of 2026-07-13 neither the 248 nor the 249
+    # scheme artifact is published anywhere; 249 is the accepted UB and any
+    # exact 249 we reach would be the best publicly available scheme.
+    return 249
   n * n * n
 
 -> ffp_record_known(n) (i64) i64
-  if n >= 3 && n <= 6
+  if n >= 3 && n <= 7
     return 1
   0
 
@@ -83,6 +89,10 @@
     return base + "matmul_5x5_rank93_d1155_gf2.txt"
   if n == 6
     return base + "matmul_6x6_rank153_d2502_gf2.txt"
+  if n == 7
+    # Perminov ternary m250 reduced mod 2 (the only public mod-2-valid 7x7
+    # scheme; the 249/248 artifacts are unpublished) — 1 above the UB.
+    return base + "matmul_7x7_rank250_d2966_gf2.txt"
   ""
 
 # Every checked-in exact scheme at the tracked frontier. The coordinator

@@ -26,6 +26,9 @@ use flipfleet_tui
 -> ffrc_shell_quote(text) (String)
   "'" + text.replace("'", "'\"'\"'") + "'"
 
+-> ffrc_thread_join_release(thread)
+  ccall("w_thread_join_release", thread)
+
 -> ffrc_file_nonempty(path) (String) i64
   body = read_file(path)
   if body != nil && body.size() > 0
@@ -110,10 +113,25 @@ use flipfleet_tui
     z = ccall("__w_sleep_ms", 10)
   0
 
+# A timed-out persistent worker must not survive a rectangular campaign
+# epoch. Killing the controller thread triggers the runtime's OS.system
+# cancellation cleanup, which terminates and waitpid-reaps that exact process
+# group; no process-name matching is involved.
+-> ffrc_persistent_force_stop(processes, active, process_lanes) i64
+  process = processes[0]
+  if process != nil
+    if process.alive?
+      z = process.kill
+    result = ffrc_thread_join_release(process)
+  processes[0] = nil
+  active[0] = 0
+  process_lanes[0] = 0
+  1
+
 -> ffrc_persistent_dispatch(base_command, log_path, run_tag, tensor, requested_lanes, steps, reseed, margin, workq, wanderq, wthr, escapes, processes, active, generations, process_lanes) i64
   process = processes[0]
   if active[0] != 0 && process != nil && process.alive? == false
-    result = process.join
+    result = ffrc_thread_join_release(process)
     processes[0] = nil
     active[0] = 0
     process_lanes[0] = 0
@@ -134,6 +152,7 @@ use flipfleet_tui
     process_lanes[0] = requested_lanes
     ready = ffrc_persistent_wait(ack_path, 0, "ready", 30000, process) ## i64
     if ready == 0
+      z = ffrc_persistent_force_stop(processes, active, process_lanes)
       return 0
     active[0] = 1
   if active[0] == 2
@@ -147,7 +166,10 @@ use flipfleet_tui
   published = ffpg_publish(command_path, body, run_tag + "-rect-run-" + generation.to_s()) ## i64
   if published == 0
     return 0
-  ffrc_persistent_wait(ack_path, generation, "done", 3600000, processes[0])
+  completed = ffrc_persistent_wait(ack_path, generation, "done", 120000, processes[0]) ## i64
+  if completed == 0
+    z = ffrc_persistent_force_stop(processes, active, process_lanes)
+  completed
 
 -> ffrc_persistent_stop(run_tag, tensor, processes, active, generations, process_lanes) i64
   if active[0] == 0
@@ -163,12 +185,18 @@ use flipfleet_tui
   if published == 1
     stopped = ffrc_persistent_wait(ack_path, generation, "stopped", 30000, process)
   if stopped == 1 && process != nil
-    result = process.join
+    result = ffrc_thread_join_release(process)
+    process = nil
   if process != nil && process.alive? == false
+    result = ffrc_thread_join_release(process)
+    process = nil
     stopped = 1
-  processes[0] = nil
-  active[0] = 0
-  process_lanes[0] = 0
+  if stopped == 0
+    stopped = ffrc_persistent_force_stop(processes, active, process_lanes)
+  if stopped != 0
+    processes[0] = nil
+    active[0] = 0
+    process_lanes[0] = 0
   stopped
 
 -> ffrc_status_body(state_name, sequence, tensor, record, record_known, best, cpu_lanes, cpu_moves, cpu_ms, gpu_requested, gpu_supported, gpu_ready, gpu_lanes, gpu_moves, gpu_ms, gpu_failures, exact_rejects, elapsed_s) (String i64 String i64 i64 i64[] i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64)

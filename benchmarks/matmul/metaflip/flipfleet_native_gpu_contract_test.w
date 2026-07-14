@@ -21,7 +21,7 @@ ffngc_expect("failed-start ownership cleared", source.include?("ready = ffn_pers
 ffngc_expect("bounded epoch wait", source.include?("ffn_persistent_wait(ack_path, generation, \"done\", 120000, processes\[slot\])"))
 ffngc_expect("timed-out slot force stop", source.include?("ffn_persistent_force_stop_slot") && source.include?("if ready == 0") && source.include?("if completed == 0"))
 ffngc_expect("forced exact process cleanup", source.include?("z = process.kill") && !source.include?("pkill -TERM -f") && !source.include?("pkill -KILL -f"))
-ffngc_expect("bounded final GPU drain", source.include?("-> ffn_thread_join_bounded") && source.include?("joined = thread.join(timeout_ms)") && source.include?("ffn_thread_join_bounded(gpu_threads\[gpu_slot], 5000)") && source.include?("ffn_thread_join_bounded(gpu_threads\[rect_slot], 5000)"))
+ffngc_expect("bounded final GPU drain", source.include?("-> ffn_thread_join_bounded(thread, timeout_ms) i64") && source.include?("joined = thread.join(timeout_ms)") && source.include?("late_join_ok = ffn_thread_join_bounded(gpu_threads\[gpu_slot], 5000)") && source.include?("late_rect_join_ok = ffn_thread_join_bounded(gpu_threads\[rect_slot], 5000)") && source.include?("returns a plain i64 0/1"))
 
 ffngc_expect("old MITM compiler removed", !source.include?("-> ffn_mitm_build"))
 ffngc_expect("old pool compiler removed", !source.include?("-> ffn_pool_worker_build"))
@@ -37,7 +37,7 @@ ffngc_expect("parent differential tracks exact nullspace core", source.include?(
 ffngc_expect("distance-qualified parents", source.include?("ffn_distance(left, right) >= required"))
 ffngc_expect("frontier escape banks integrated", source.include?("use flipfleet_frontier_escape_banks") && source.include?("fffeb_append_frontier_paths(REPO_ROOT, frontier_paths, best"))
 ffngc_expect("generic split rotates exact frontiers", source.include?("if role == 3 && archive.size() > 0") && source.include?("seed = archive\[epoch % archive.size()]"))
-ffngc_expect("final persistence exact gate", source.include?("final_exact = ffw_verify_best_exact(best, N)") && source.include?("if final_exact == 1\n  z = ffn_dump_trusted(best, BEST_PATH, RUN_TAG)"))
+ffngc_expect("final persistence exact gate", source.include?("final_exact = ffw_verify_best_exact(best, N)") && source.include?("dumped = ffn_dump_trusted(best, BEST_PATH, RUN_TAG)") && source.include?("if dumped < 1"))
 ffngc_expect("internal reject replay", source.include?("use flipfleet_gpu_reject") && source.include?("ffn_harvest_gpu_internal_reject") && source.include?("gpu_launch_nonces") && source.include?("internal-rejects=\" + gpu_internal_rejects.to_s()"))
 ffngc_expect("strict record target", source.include?("internal_target = ffw_best_rank(best) - 1"))
 ffngc_expect("4x4 evidence allocation", source.include?("ff7_allocate_pool_remainder_for_tensor(N") && source.include?("ffkp_mode_lane_budget_for_tensor(N"))

@@ -32,10 +32,12 @@ check("sqrt9", Math.sqrt(~9.0).to_i, 3)
 check("floor2.7", Math.floor(~2.7).to_i, 2)
 check("pow2,10", Math.pow(~2.0, ~10.0).to_i, 1024)
 
-# Complex `**` (operator → Hypercomplex#** via the `@1.prev -> body` loop).
+# Complex `**` (operator → Hypercomplex#** binary exponentiation).
 zp = Complex<f64>.new([~2.0, ~3.0])
 check("z**0.real", (zp ** 0).real.to_i, 1)
 check("z**1.real", (zp ** 1).real.to_i, 2)
 check("z**2.real", (zp ** 2).real.to_i, -5)
 check("z**3.real", (zp ** 3).real.to_i, -46)
 check("z**3.imag", (zp ** 3).imag.to_i, 9)
+check("z**13.real", (zp ** 13).real.to_i, 17021162)
+check("z**13.imag", (zp ** 13).imag.to_i, 3627003)

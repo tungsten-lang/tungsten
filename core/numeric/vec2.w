@@ -9,47 +9,86 @@
   ## Component accessors — geometry namespace.
 
   -> x
-    components[0]
+    @components[0]
   -> y
-    components[1]
+    @components[1]
+
+  # Fixed-width arithmetic avoids the generic Vector map/zip temporaries.
+
+  -> negate
+    a = @components
+    class.new([-a[0], -a[1]] ## T[2])
+
+  -> +/1
+    other = @1.components
+    a = @components
+    class.new([a[0] + other[0], a[1] + other[1]] ## T[2])
+
+  -> -/1
+    other = @1.components
+    a = @components
+    class.new([a[0] - other[0], a[1] - other[1]] ## T[2])
 
   -> */1(Vector)
     other = @1.components
-    class.new([components[0] * other[0], components[1] * other[1]] ## T[2])
+    a = @components
+    class.new([a[0] * other[0], a[1] * other[1]] ## T[2])
 
   -> */1(Number)
     s = @1
-    class.new([components[0] * s, components[1] * s] ## T[2])
+    a = @components
+    class.new([a[0] * s, a[1] * s] ## T[2])
 
   -> //1(Vector)
     other = @1.components
-    class.new([components[0] / other[0], components[1] / other[1]] ## T[2])
+    a = @components
+    class.new([a[0] / other[0], a[1] / other[1]] ## T[2])
 
   -> //1(Number)
     s = @1
-    class.new([components[0] / s, components[1] / s] ## T[2])
+    a = @components
+    class.new([a[0] / s, a[1] / s] ## T[2])
+
+  -> ⊙/1
+    other = @1.components
+    a = @components
+    class.new([a[0] * other[0], a[1] * other[1]] ## T[2])
+
+  -> dot/1
+    other = @1.components
+    a = @components
+    a[0] * other[0] + a[1] * other[1]
+
+  -> lerp/2
+    other = @1.components
+    t = @2
+    a = @components
+    class.new([
+      a[0] + (other[0] - a[0]) * t,
+      a[1] + (other[1] - a[1]) * t
+    ] ## T[2])
 
   ## Color namespace.
 
   -> r
-    components[0]
+    @components[0]
   -> g
-    components[1]
+    @components[1]
 
   ## Texture-coordinate namespace.
 
   -> s
-    components[0]
+    @components[0]
   -> t
-    components[1]
+    @components[1]
 
   ## SIMD swizzles — return Vec2<T>.
 
   -> xy
-    class.new(components)
+    class.new(@components)
   -> yx
-    class.new([components[1], components[0]] ## T[2])
+    class.new([@components[1], @components[0]] ## T[2])
   -> xx
-    class.new([components[0], components[0]] ## T[2])
+    class.new([@components[0], @components[0]] ## T[2])
   -> yy
-    class.new([components[1], components[1]] ## T[2])
+    class.new([@components[1], @components[1]] ## T[2])

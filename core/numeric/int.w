@@ -82,10 +82,12 @@
       a = t
     a
 
-  # Least common multiple. Caller is responsible for not overflowing
-  # `self * @1` — for safer big values, divide first: `(self / gcd(@1)) * @1`.
+  # Least common multiple. Divide out the gcd before multiplying so common
+  # factors do not create a needlessly large intermediate. By convention any
+  # lcm with zero is zero, including lcm(0, 0).
   -> lcm/1
-    (self * @1).abs / gcd(@1)
+    return 0 if self == 0 || @1 == 0
+    ((self / gcd(@1)) * @1).abs
 
   # Modular exponentiation: (self ** e) mod m, via square-and-multiply.
   # Operands stay reduced mod m, so cost is e.bit_length squarings — the
@@ -113,7 +115,7 @@
 
   # Like `prime?` but assumes the receiver is coprime to 6 (a 12m+{1,5,7,11}
   # wheel candidate); it skips the redundant ÷2/÷3 screen, then runs the shared
-  # inner test (prime-table trial division for n ≤ 1e7, Montgomery Miller-Rabin
+  # inner test (division-free prime-factor scan for n ≤ 1e6, Montgomery Miller-Rabin
   # above). ONLY valid for coprime-to-6 inputs — a multiple of 2 or 3 would be
   # misreported prime. u64-only. Same NaN-boxed-intrinsic story as `prime?`.
   -> prime_12k?

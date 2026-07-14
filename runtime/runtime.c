@@ -1730,7 +1730,7 @@ static void bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na,
     int32_t best_w; long best_L; uint64_t best_K;
     ssa_choose(na, nb, &best_w, &best_L, &best_K);
     if (!best_w) {
-        if (b) bigint_mul_schoolbook_into(out, a, na, b, nb);
+        bigint_mul_schoolbook_into(out, a, na, b ? b : a, nb);
         return;
     }
     int32_t w = best_w;
@@ -1742,7 +1742,7 @@ static void bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na,
 
     size_t total = (size_t)L * S * (b ? 2 : 1) + 3 * (size_t)S + (2 * (size_t)m + 2) + (size_t)m;
     uint64_t *ws = ssa_ws_get_zeroed(total);
-    if (!ws) { if (b) bigint_mul_schoolbook_into(out, a, na, b, nb); return; }
+    if (!ws) { bigint_mul_schoolbook_into(out, a, na, b ? b : a, nb); return; }
     uint64_t *fa = ws;
     uint64_t *fb = b ? fa + (size_t)L * S : NULL;
     uint64_t *t1 = fa + (size_t)L * S * (b ? 2 : 1);
@@ -18071,6 +18071,7 @@ WValue __w_prime_aks(WValue n) {
 #define WN_nan_q   W_M4("nan?")
 #define WN_chr     W_M3("chr")
 #define WN_gcd     W_M3("gcd")
+#define WN_lcm     W_M3("lcm")
 #define WN_times   W_M5("times")
 #define WN_read    W_M4("read")
 #define WN_cap     W_M3("cap")
@@ -19629,9 +19630,9 @@ static WValue w_ic_string_rindex(WValue r, WValue *a, int c) {
  * rather than to the `.w` method body in core/numeric/int.w. Tiers, fastest-
  * first by magnitude:
  *   • small-prime screen   — trial by the primes ≤ 37; settles every n < 1681.
- *   • prime trial division  — up to √n, for n ≤ 10⁶, using only prime divisors
- *     after the small screen (cutoff was 10⁸ before the MR tier went Montgomery
- *     + Forišek–Jančina; profiling selects a conservative 10⁶ boundary).
+ *   • prime-factor scan    — up to √n, for n ≤ 10⁶, using exact reciprocal
+ *     divisibility by prime candidates (no hardware division in the hot loop).
+ *     Profiling selects a conservative, mixed-distribution 10⁶ boundary.
  *   • Miller-Rabin (u64)    — O(log n) Montgomery arithmetic (division-free): a
  *     single hashed Forišek–Jančina base for n < 2³² (one round, exact), then a
  *     minimal deterministic witness ladder (3→4→5→6→7 bases) up to 2⁶⁴.
@@ -19725,49 +19726,47 @@ static const uint16_t W_PRIME_TRIAL_DIVISORS[] = {
     9973
 };
 
-/* Division-free exact divisibility for the 32-bit trial tier.  For d > 1,
- * m = ceil(2^32/d), and 0 <= n < 2^32, q = high32(n*m) is either floor(n/d)
- * or floor(n/d)+1.  It is exact whenever d divides n, so n == q*d iff d|n.
- * The reciprocal table mirrors W_PRIME_TRIAL_DIVISORS through 997, the largest
- * divisor reachable by the current 10^6 cutoff.  Keeping p itself in the
- * compact uint16 table avoids widening the much longer legacy tail. */
-#define W_RECIP32(d) ((uint32_t)(((UINT64_C(1) << 32) + (d) - 1) / (d)))
-static const uint32_t W_PRIME_TRIAL_RECIP32[] = {
-    W_RECIP32(41),W_RECIP32(43),W_RECIP32(47),W_RECIP32(53),W_RECIP32(59),W_RECIP32(61),W_RECIP32(67),W_RECIP32(71),
-    W_RECIP32(73),W_RECIP32(79),W_RECIP32(83),W_RECIP32(89),W_RECIP32(97),W_RECIP32(101),W_RECIP32(103),W_RECIP32(107),
-    W_RECIP32(109),W_RECIP32(113),W_RECIP32(127),W_RECIP32(131),W_RECIP32(137),W_RECIP32(139),W_RECIP32(149),W_RECIP32(151),
-    W_RECIP32(157),W_RECIP32(163),W_RECIP32(167),W_RECIP32(173),W_RECIP32(179),W_RECIP32(181),W_RECIP32(191),W_RECIP32(193),
-    W_RECIP32(197),W_RECIP32(199),W_RECIP32(211),W_RECIP32(223),W_RECIP32(227),W_RECIP32(229),W_RECIP32(233),W_RECIP32(239),
-    W_RECIP32(241),W_RECIP32(251),W_RECIP32(257),W_RECIP32(263),W_RECIP32(269),W_RECIP32(271),W_RECIP32(277),W_RECIP32(281),
-    W_RECIP32(283),W_RECIP32(293),W_RECIP32(307),W_RECIP32(311),W_RECIP32(313),W_RECIP32(317),W_RECIP32(331),W_RECIP32(337),
-    W_RECIP32(347),W_RECIP32(349),W_RECIP32(353),W_RECIP32(359),W_RECIP32(367),W_RECIP32(373),W_RECIP32(379),W_RECIP32(383),
-    W_RECIP32(389),W_RECIP32(397),W_RECIP32(401),W_RECIP32(409),W_RECIP32(419),W_RECIP32(421),W_RECIP32(431),W_RECIP32(433),
-    W_RECIP32(439),W_RECIP32(443),W_RECIP32(449),W_RECIP32(457),W_RECIP32(461),W_RECIP32(463),W_RECIP32(467),W_RECIP32(479),
-    W_RECIP32(487),W_RECIP32(491),W_RECIP32(499),W_RECIP32(503),W_RECIP32(509),W_RECIP32(521),W_RECIP32(523),W_RECIP32(541),
-    W_RECIP32(547),W_RECIP32(557),W_RECIP32(563),W_RECIP32(569),W_RECIP32(571),W_RECIP32(577),W_RECIP32(587),W_RECIP32(593),
-    W_RECIP32(599),W_RECIP32(601),W_RECIP32(607),W_RECIP32(613),W_RECIP32(617),W_RECIP32(619),W_RECIP32(631),W_RECIP32(641),
-    W_RECIP32(643),W_RECIP32(647),W_RECIP32(653),W_RECIP32(659),W_RECIP32(661),W_RECIP32(673),W_RECIP32(677),W_RECIP32(683),
-    W_RECIP32(691),W_RECIP32(701),W_RECIP32(709),W_RECIP32(719),W_RECIP32(727),W_RECIP32(733),W_RECIP32(739),W_RECIP32(743),
-    W_RECIP32(751),W_RECIP32(757),W_RECIP32(761),W_RECIP32(769),W_RECIP32(773),W_RECIP32(787),W_RECIP32(797),W_RECIP32(809),
-    W_RECIP32(811),W_RECIP32(821),W_RECIP32(823),W_RECIP32(827),W_RECIP32(829),W_RECIP32(839),W_RECIP32(853),W_RECIP32(857),
-    W_RECIP32(859),W_RECIP32(863),W_RECIP32(877),W_RECIP32(881),W_RECIP32(883),W_RECIP32(887),W_RECIP32(907),W_RECIP32(911),
-    W_RECIP32(919),W_RECIP32(929),W_RECIP32(937),W_RECIP32(941),W_RECIP32(947),W_RECIP32(953),W_RECIP32(967),W_RECIP32(971),
-    W_RECIP32(977),W_RECIP32(983),W_RECIP32(991),W_RECIP32(997),
+/* Lemire's exact divisibility test for odd 32-bit divisors: with inv=d^-1
+ * mod 2^32, d divides n iff (uint32_t)(n*inv) <= floor((2^32-1)/d).  Pack
+ * threshold:inverse so the hot loop needs one load, one low multiply and one
+ * compare instead of udiv.  Entries mirror W_PRIME_TRIAL_DIVISORS through 997,
+ * the largest divisor reachable at the current 10^6 cutoff. */
+static const uint64_t W_PRIME_TRIAL_RECIP32[] = {
+    UINT64_C(0x063e7063c18f9c19),UINT64_C(0x05f417d02fa0be83),UINT64_C(0x0572620a677d46cf),UINT64_C(0x04d4873e8c13521d),UINT64_C(0x0456c797a08ad8f3),UINT64_C(0x04325c53c10c9715),
+    UINT64_C(0x03d2263507a44c6b),UINT64_C(0x039b0ad1e327a977),UINT64_C(0x0381c0e0c7e3f1f9),UINT64_C(0x033d91d2613716af),UINT64_C(0x031597212b2e43db),UINT64_C(0x02e05c0bfa3f47e9),
+    UINT64_C(0x02a3a0fd5f02a3a1),UINT64_C(0x0288df0c7c32b16d),UINT64_C(0x027c4597d3431b57),UINT64_C(0x02647c698d28ac43),UINT64_C(0x02593f69da6c0965),UINT64_C(0x0243f6f00fdbc091),
+    UINT64_C(0x02040810efdfbf7f),UINT64_C(0x01f44659c9484e2b),UINT64_C(0x01de5d6e077975b9),UINT64_C(0x01d77b6570586723),UINT64_C(0x01b7d6c38ce2cabd),UINT64_C(0x01b20364bf937f27),
+    UINT64_C(0x01a16d3f2c0685b5),UINT64_C(0x01920fb4451ab30b),UINT64_C(0x01886e5fdb35a717),UINT64_C(0x017ad2200d516325),UINT64_C(0x016e1f76d962ae7b),UINT64_C(0x016a13cd10f8ed9d),
+    UINT64_C(0x01571ed3ee936f3f),UINT64_C(0x0153909490948f41),UINT64_C(0x014cab883d137e0d),UINT64_C(0x0149539eef46c0f7),UINT64_C(0x013698df6e68575b),UINT64_C(0x0125e227db43bb1f),
+    UINT64_C(0x0120b4709ba144cb),UINT64_C(0x011e2ef3478bbced),UINT64_C(0x011945381fdcd759),UINT64_C(0x0112358e437b2e0f),UINT64_C(0x010fef0110fef011),UINT64_C(0x0105197f9a020a33),
+    UINT64_C(0x00ff00ffff00ff01),UINT64_C(0x00f92fb270e99cb7),UINT64_C(0x00f3a0d56205b5c5),UINT64_C(0x00f1d48ba27acdef),UINT64_C(0x00ec979125e4463d),UINT64_C(0x00e939650749cb29),
+    UINT64_C(0x00e79372c9b97113),UINT64_C(0x00dfac1f84ce32ad),UINT64_C(0x00d578e9c74be1fb),UINT64_C(0x00d2ba08a7198487),UINT64_C(0x00d1615439409d09),UINT64_C(0x00cebcf86f71de15),
+    UINT64_C(0x00c5fe74bfce8063),UINT64_C(0x00c27806f61fe7b1),UINT64_C(0x00bcdd5370e046d3),UINT64_C(0x00bbc840f1545af5),UINT64_C(0x00b9a7869a7862a1),UINT64_C(0x00b68d312a128a57),
+    UINT64_C(0x00b2927cb7747d8f),UINT64_C(0x00afb321bb5e06dd),UINT64_C(0x00aceb0f12e9b5b3),UINT64_C(0x00ab1cbdec9dbe7f),UINT64_C(0x00a87917ec41cf4d),UINT64_C(0x00a513fdaec02945),
+    UINT64_C(0x00a36e718382df71),UINT64_C(0x00a03c1684b1c2a9),UINT64_C(0x009c691675eb3a0b),UINT64_C(0x009baadefa86fe2d),UINT64_C(0x00980e413f8df54f),UINT64_C(0x00975a750975a751),
+    UINT64_C(0x009548e4c3efac07),UINT64_C(0x0093efd1a8299b73),UINT64_C(0x0091f5bc9ba70e41),UINT64_C(0x008f67a123d9e879),UINT64_C(0x008e2917c494d305),UINT64_C(0x008d8be3ab67652f),
+    UINT64_C(0x008c5584fb10fe5b),UINT64_C(0x0088d180bf54fa1f),UINT64_C(0x00869222b98f81d7),UINT64_C(0x0085797be90f1ec3),UINT64_C(0x008355acbed87f3b),UINT64_C(0x00824a4e16e70fc7),
+    UINT64_C(0x0080c1219dece355),UINT64_C(0x007dc9f373f62c39),UINT64_C(0x007d4ecead46f9a3),UINT64_C(0x0079237d24e8d035),UINT64_C(0x0077cf532319bd8b),UINT64_C(0x0075a8acc7ed9da5),
+    UINT64_C(0x007467acfea2c8fb),UINT64_C(0x00732d70ce0f4c09),UINT64_C(0x0072c62a544986f3),UINT64_C(0x007194a155a10dc1),UINT64_C(0x006fa54985e33763),UINT64_C(0x006e8419d84886b1),
+    UINT64_C(0x006d68b531260967),UINT64_C(0x006d0b80d1ff25e9),UINT64_C(0x006bf7905b84d99f),UINT64_C(0x006ae9071335df6d),UINT64_C(0x006a379975d5add9),UINT64_C(0x0069dfbd3c619a43),
+    UINT64_C(0x0067dc4c04767747),UINT64_C(0x00663d8000663d81),UINT64_C(0x0065ec17671ddc2b),UINT64_C(0x00654ac8c1e12337),UINT64_C(0x00645c859cd09045),UINT64_C(0x0063729991496b9b),
+    UINT64_C(0x00632591c7d7b8bd),UINT64_C(0x006160ff9f006161),UINT64_C(0x0060cdb55e28152d),UINT64_C(0x005ff40100bfe803),UINT64_C(0x005ed79e9e907c7b),UINT64_C(0x005d7d4276528895),
+    UINT64_C(0x005c6f3501ce2c0d),UINT64_C(0x005b2618bed7c42f),UINT64_C(0x005a2553d4b010e7),UINT64_C(0x0059686c1ebbe575),UINT64_C(0x0058ae97b47b52cb),UINT64_C(0x0058345f64f3f0d7),
+    UINT64_C(0x005743d5316d6c0f),UINT64_C(0x005692c491c1195d),UINT64_C(0x00561e46a27b1f49),UINT64_C(0x005538ede508fd01),UINT64_C(0x0054c807133551cd),UINT64_C(0x005345ef2d8a3f1b),
+    UINT64_C(0x00523a75c34ad735),UINT64_C(0x005102370a714919),UINT64_C(0x0050cf1224eea383),UINT64_C(0x004fd31942ba771d),UINT64_C(0x004fa17007772287),UINT64_C(0x004f3ed65e69ddf3),
+    UINT64_C(0x004f0de53b4a6c15),UINT64_C(0x004e1caec606b677),UINT64_C(0x004cd47b46d3e1fd),UINT64_C(0x004c78ae484a14e9),UINT64_C(0x004c4b191ce874d3),UINT64_C(0x004bf0930473189f),
+    UINT64_C(0x004aba3c372b7e65),UINT64_C(0x004a63604f9e5d91),UINT64_C(0x004a383e446bd9bb),UINT64_C(0x0049e28fe777c647),UINT64_C(0x0048417bf61f0c23),UINT64_C(0x0047f043a5cbbb6f),
+    UINT64_C(0x00474ff269daac27),UINT64_C(0x00468b6f637aa061),UINT64_C(0x0045f13f1fb15099),UINT64_C(0x0045a522712c5825),UINT64_C(0x0045342cff30637b),UINT64_C(0x0044c4a201131289),
+    UINT64_C(0x0043c5c20f5acdf7),UINT64_C(0x00437e494d3f89e3),UINT64_C(0x0043142dd2253531),UINT64_C(0x0042ab5c7bf69fe7),UINT64_C(0x00422195cfb1781f),UINT64_C(0x0041bbb2318e81ed),
 };
-#undef W_RECIP32
 
-static int w_prime_trial_recip32(uint32_t n, uint64_t cutoff) {
+static int w_prime_trial_recip32(uint32_t n) {
     size_t reciprocal_count = sizeof(W_PRIME_TRIAL_RECIP32) / sizeof(W_PRIME_TRIAL_RECIP32[0]);
-    size_t divisor_count = sizeof(W_PRIME_TRIAL_DIVISORS) / sizeof(W_PRIME_TRIAL_DIVISORS[0]);
-    for (size_t i = 0; i < divisor_count; i++) {
+    for (size_t i = 0; i < reciprocal_count; i++) {
         uint32_t p = (uint32_t)W_PRIME_TRIAL_DIVISORS[i];
-        if ((uint64_t)p * p > n || n > cutoff) break;
-        if (i < reciprocal_count) {
-            uint32_t q = (uint32_t)(((uint64_t)n * W_PRIME_TRIAL_RECIP32[i]) >> 32);
-            if (n == q * p) return 0;
-        } else if (n % p == 0U) {
-            return 0;
-        }
+        if ((uint64_t)p * p > n) break;
+        uint64_t packed = W_PRIME_TRIAL_RECIP32[i];
+        if ((uint32_t)(n * (uint32_t)packed) <= (uint32_t)(packed >> 32)) return 0;
     }
     return 1;
 }
@@ -19934,14 +19933,14 @@ static int w_prime_test_u64_mr(uint64_t n) {
 }
 
 /* Tiers 2 & 3 shared by prime?: n has passed the small-prime screen (no factor
- * ≤ 37) and n ≥ 1681. Tier 2 trial-divides by a precomputed PRIME table up to
- * √n — only prime divisors, and at this cutoff no entry above 997 is visited.
+ * ≤ 37) and n ≥ 1681. Tier 2 scans a precomputed PRIME table up to √n using
+ * exact reciprocal divisibility; at this cutoff no entry above 997 is visited.
  * Cutoff is 10⁶, a conservative distribution-tuned boundary: worst-case primes
- * cross near 2.5·10⁵, while mixed inputs below 10⁶ still benefit from cheap
- * composite trial exits. Above 10⁶, one Montgomery FJ round wins. */
+ * cross near 5·10⁵, while mixed inputs through 10⁶ still benefit from cheap
+ * composite exits. Above 10⁶, one Montgomery FJ round wins. */
 static int w_prime_test_u64_post_screen(uint64_t n) {
     if (n <= 1000000ULL) {
-        return w_prime_trial_recip32((uint32_t)n, 1000000ULL);
+        return w_prime_trial_recip32((uint32_t)n);
     }
     return w_prime_test_u64_mr(n);
 }
@@ -20165,7 +20164,7 @@ static int w_prime_test_u64(uint64_t n) {
 /* prime_12k?: a FAST primality test for a candidate already known coprime to 6
  * (a 12m+{1,5,7,11} wheel offset). Skips only the 2 and 3 screen checks the
  * caller has guaranteed away, then runs the same fast inner test as prime?
- * (prime-table trial division ≤ 10⁶, Montgomery Miller-Rabin above). The wheel
+ * (division-free prime-factor scan ≤ 10⁶, Montgomery Miller-Rabin above). The wheel
  * lives in the CALLER's candidate generation, not here. CONTRACT: gcd(n,6)==1, n ≥ 5 —
  * a multiple of 2 or 3 would be misreported. u64-only. */
 static int w_prime_test_u64_12k(uint64_t n) {
@@ -21572,6 +21571,34 @@ static WValue w_ic_bigint_abs(WValue r, WValue *a, int c) {
     pos->size = n;
     return bigint_normalize(pos);
 }
+static WValue w_ic_integer_lcm(WValue r, WValue *a, int c) {
+    if (c < 1) die("lcm requires 1 argument");
+    WValue arg = a[0];
+    if (!w_is_integer_any(arg)) die("lcm requires an integer argument");
+
+    int r_zero = w_is_int(r) ? w_as_int(r) == 0 : w_as_bigint(r)->size == 0;
+    int a_zero = w_is_int(arg) ? w_as_int(arg) == 0 : w_as_bigint(arg)->size == 0;
+    if (r_zero || a_zero) return w_int(0);
+
+    WValue product;
+    if (w_is_int(r) && w_is_int(arg)) {
+        int64_t rv = w_as_int(r), av = w_as_int(arg);
+        uint64_t x = rv < 0 ? 0ULL - (uint64_t)rv : (uint64_t)rv;
+        uint64_t y = av < 0 ? 0ULL - (uint64_t)av : (uint64_t)av;
+        while (y != 0) { uint64_t t = y; y = x % y; x = t; }
+        /* x divides rv exactly. Dividing first avoids a needless BigInt
+         * intermediate whenever the operands share a large factor. */
+        WValue quotient = w_box_int_checked(rv / (int64_t)x);
+        product = w_mul(quotient, arg);
+    } else {
+        WValue divisor = bigint_gcd_any(r, arg);
+        product = w_mul(w_div(r, divisor), arg);
+    }
+
+    if (w_is_int(product))
+        return w_as_int(product) < 0 ? w_sub(w_int(0), product) : product;
+    return w_ic_bigint_abs(product, NULL, 0);
+}
 static WValue w_ic_bigint_prev(WValue r, WValue *a, int c) { (void)a; (void)c; return w_sub(r, w_int(1)); }
 static WValue w_ic_bigint_succ(WValue r, WValue *a, int c) { (void)a; (void)c; return w_add(r, w_int(1)); }
 static WValue w_ic_bigint_zero_q(WValue r, WValue *a, int c) {
@@ -22102,6 +22129,7 @@ static WICEntry w_ic_int_table[] = {
     {0, w_ic_int_prime_q},
     {0, w_ic_int_prime_12k_q},
     {0, w_ic_int_prime_30k_q},
+    {0, w_ic_integer_lcm},
     {0, NULL}
 };
 
@@ -22200,6 +22228,7 @@ static WICEntry w_ic_bigint_table[] = {    /* Phase 7+m */
     {0, w_ic_bigint_odd_q},
     {0, w_ic_bigint_negative_q},
     {0, w_ic_bigint_positive_q},
+    {0, w_ic_integer_lcm},
     {0, NULL}
 };
 
@@ -22685,6 +22714,7 @@ static void w_init_ic_tables(void) {
     w_ic_int_table[9].name    = WN_prime_q;
     w_ic_int_table[10].name   = WN_prime_12k_q;
     w_ic_int_table[11].name   = WN_prime_30k_q;
+    w_ic_int_table[12].name   = WN_lcm;
     /* BigArray (Phase 7+p) */
     w_ic_big_array_table[0].name   = WN_size;
     w_ic_big_array_table[1].name   = WN_cap;
@@ -22759,6 +22789,7 @@ static void w_init_ic_tables(void) {
     w_ic_bigint_table[11].name = WN_odd_q;
     w_ic_bigint_table[12].name = WN_negative_q;
     w_ic_bigint_table[13].name = WN_positive_q;
+    w_ic_bigint_table[14].name = WN_lcm;
     /* Channel (Phase 7+m) */
     w_ic_channel_table[0].name = WN_send;
     w_ic_channel_table[1].name = WN_recv;

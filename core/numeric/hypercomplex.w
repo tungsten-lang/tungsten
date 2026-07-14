@@ -122,15 +122,24 @@
     return scalar_div(@1) if scalar_like?(@1)
     self * @1.reciprocal
 
-  # Integer power via repeated multiplication.
+  # Integer power by binary exponentiation. Cayley-Dickson algebras are
+  # power-associative, so regrouping powers this way is valid even where the
+  # general product is non-associative. Concrete `sq` overrides make the
+  # squaring steps cheaper at Quaternion and above.
   -> **/1
     return one if @1 == 0
 
     return reciprocal ** -@1 if @1.negative?
 
-    result = self
-
-    @1.prev -> result *= self
+    result = one
+    base = self
+    exponent = @1
+    while exponent > 0
+      if exponent.odd?
+        result *= base
+      exponent = exponent / 2
+      if exponent > 0
+        base = base.sq
 
     result
 

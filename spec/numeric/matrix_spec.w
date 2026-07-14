@@ -11,13 +11,10 @@
 #
 # Run: `bin/tungsten -o /tmp/md spec/numeric/matrix_spec.w && /tmp/md`.
 #
-# Known gaps (tracked separately, NOT exercised here):
+# Known gap (tracked separately, NOT exercised here):
 #   - `.identity` / `.zero` elements stay integer (generic `## T` literal
 #     coercion is not applied during monomorphization), so identity-derived
 #     scalars are int-typed — checked with integer compares below.
-#   - The `*` operator (matrix·matrix, matrix·vector) mis-dispatches because
-#     Matrix IS-A Number, so both `*/1(Number)` and `*/1(Mat3)` overloads
-#     match. Left out until typed-overload specificity is fixed.
 
 -> check(name, got, want)
   if got == want
@@ -60,3 +57,18 @@ check("mat3.transpose.trace", tp.trace == (15.0 ## f64), true)
 inv = two.inverse
 check("mat3.inverse.det", inv.determinant == (0.125 ## f64), true)
 check("mat3.inverse.trace", inv.trace == (1.5 ## f64), true)
+
+# -- General Mat4 determinant regression. The old first-column expansion
+# returned -384 for this matrix; the correct determinant is 72. --
+m4 = Mat4<f64>.new([
+  1.0, 2.0, 3.0, 4.0,
+  5.0, 6.0, 7.0, 8.0,
+  2.0, 6.0, 4.0, 8.0,
+  3.0, 1.0, 1.0, 2.0
+] ## f64[16])
+check("mat4.general.det", m4.determinant == (72.0 ## f64), true)
+
+# One entry from the exact inverse is -1/6. This also catches an inverse
+# accidentally scaled by the old, incorrect determinant.
+m4inv = m4.inverse
+check("mat4.general.inverse", m4inv.at(0, 0) == ((-1.0 ## f64) / (6.0 ## f64)), true)

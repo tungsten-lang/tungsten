@@ -38,7 +38,7 @@
     out = (0...(M * N)).map -> 0 ## T
     (0...M).each ->
       r = i
-      (0...N).each -> out[r * N + j] = elements[j * M + r]
+      (0...N).each -> out[r * N + item] = elements[item * M + r]
     Mat<T, N, M>.new(out ## T[M * N])
 
   # Matrix-matrix product — shape constraint: self is M×N, other must

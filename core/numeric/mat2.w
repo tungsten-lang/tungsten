@@ -22,36 +22,75 @@
   # Column / row views.
 
   -> col(c)
-    Vec2.new([elements[c * 2], elements[c * 2 + 1]] ## T[2])
+    Vec2.new([@elements[c * 2], @elements[c * 2 + 1]] ## T[2])
 
   -> row(r)
-    Vec2.new([elements[r], elements[2 + r]] ## T[2])
+    Vec2.new([@elements[r], @elements[2 + r]] ## T[2])
+
+  # Fixed-width componentwise arithmetic avoids Matrix's map/zip temporaries.
+
+  -> negate
+    a = @elements
+    class.new([-a[0], -a[1], -a[2], -a[3]] ## T[4])
+
+  -> +/1
+    a = @elements
+    b = @1.elements
+    class.new([
+      a[0] + b[0], a[1] + b[1],
+      a[2] + b[2], a[3] + b[3]
+    ] ## T[4])
+
+  -> -/1
+    a = @elements
+    b = @1.elements
+    class.new([
+      a[0] - b[0], a[1] - b[1],
+      a[2] - b[2], a[3] - b[3]
+    ] ## T[4])
+
+  -> //1(Number)
+    a = @elements
+    s = @1
+    class.new([a[0] / s, a[1] / s, a[2] / s, a[3] / s] ## T[4])
+
+  -> ⊙/1
+    a = @elements
+    b = @1.elements
+    class.new([
+      a[0] * b[0], a[1] * b[1],
+      a[2] * b[2], a[3] * b[3]
+    ] ## T[4])
 
   # Linear algebra.
 
   -> transpose
+    a = @elements
     class.new([
-      elements[0], elements[2],
-      elements[1], elements[3]
+      a[0], a[2],
+      a[1], a[3]
     ] ## T[4])
 
   -> determinant
-    elements[0] * elements[3] - elements[2] * elements[1]
+    a = @elements
+    a[0] * a[3] - a[2] * a[1]
 
   -> trace
-    elements[0] + elements[3]
+    a = @elements
+    a[0] + a[3]
 
   # Inverse: (1/det) · [[ d, −b ], [ −c, a ]] for `[[a, b], [c, d]]`.
   -> inverse
-    d = determinant
+    a = @elements
+    d = a[0] * a[3] - a[2] * a[1]
     class.new([
-       elements[3] / d, -elements[1] / d,
-      -elements[2] / d,  elements[0] / d
+       a[3] / d, -a[1] / d,
+      -a[2] / d,  a[0] / d
     ] ## T[4])
 
   # Matrix-matrix product (column-major).
-  -> */1
-    a = elements
+  -> */1(Mat2)
+    a = @elements
     b = @1.elements
     class.new([
       a[0] * b[0] + a[2] * b[1],   a[1] * b[0] + a[3] * b[1],
@@ -59,9 +98,10 @@
     ] ## T[4])
 
   # Matrix-vector product.
-  -> */1
+  -> */1(Vec2)
     v = @1.components
+    a = @elements
     Vec2.new([
-      elements[0] * v[0] + elements[2] * v[1],
-      elements[1] * v[0] + elements[3] * v[1]
+      a[0] * v[0] + a[2] * v[1],
+      a[1] * v[0] + a[3] * v[1]
     ] ## T[2])

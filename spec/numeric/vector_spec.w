@@ -53,6 +53,8 @@ check("vec3.parallel.false", v.parallel?(u), false)
 # -- Componentwise add / subtract. --
 check("vec3.add.x", (v + w).x == (3.0 ## f64), true)
 check("vec3.sub.x", (w - v).x == (1.0 ## f64), true)
+check("vec3.negate.z", (-v).z == (-3.0 ## f64), true)
+check("vec3.lerp.y", v.lerp(w, 0.5 ## f64).y == (3.0 ## f64), true)
 
 # -- Vec3 cross product: x̂ × ŷ = ẑ. --
 e1 = Vec3<f64>.new([1.0, 0.0, 0.0] ## f64[3])

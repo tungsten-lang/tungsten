@@ -83,27 +83,33 @@
   -> e15
     components[15]
 
-  ## Cayley–Dickson product via octonion-pair structure (scalar-first).
+  ## Reference Cayley–Dickson product via octonion-pair structure
+  ## (scalar-first).
   ## Sedenion as (o_low, o_high) where each octonion is 8 contiguous
   ## components: components[0..7] and components[8..15]. Formula:
   ## (a, b) · (c, d) = (a·c − conj(d)·b, d·a + b·conj(c)).
   ##
   ## Sedenion's halves are scalar-first and so is Octonion — we can
   ## construct Octonion instances and reuse their arithmetic directly.
-  -> */1
+  -> mul_recursive/1
     return scale(@1) if scalar_like?(@1)
     a0 = half_class.new(components.slice(0, 8) ## T[8])
     a1 = half_class.new(components.slice(8, 8) ## T[8])
     b0 = half_class.new(@1.components.slice(0, 8) ## T[8])
     b1 = half_class.new(@1.components.slice(8, 8) ## T[8])
 
-    low  = a0 * b0 - b1.conjugate * a1
-    high = b1 * a0 + a1 * b0.conjugate
+    low  = a0.mul_recursive(b0) - b1.conjugate.mul_recursive(a1)
+    high = b1.mul_recursive(a0) + a1.mul_recursive(b0.conjugate)
 
     class.new(low.components.concat(high.components) ## T[16])
 
-  ## Direct coefficient product. Keeps the recursive */1 as the
-  ## default; callers can choose this when straight-line arithmetic wins.
+  ## The direct coefficient product avoids recursive half construction and
+  ## all intermediate hypercomplex values. Keep mul_recursive/1 as a compact
+  ## reference implementation for equivalence testing.
+  -> */1
+    mul_fast(@1)
+
+  ## Direct coefficient product used by the public multiplication operator.
   -> mul_fast/1
     return scale(@1) if scalar_like?(@1)
     a = components

@@ -58,8 +58,50 @@ mm = id * id
 check("mat3.matmul.diag", mm.at(0, 0).to_s(), "1")
 check("mat3.matmul.offdiag", mm.at(0, 1).to_s(), "0")
 
+# Mat2 used to declare two untyped */1 methods, allowing the later Vec2 body
+# to replace matrix multiplication. Both typed routes must remain live.
+m2 = Mat2<f64>.new([~1.0, ~3.0, ~2.0, ~4.0] ## f64[4])
+m2id = Mat2<f64>.new([~1.0, ~0.0, ~0.0, ~1.0] ## f64[4])
+m2m = m2 * m2id
+check("mat2.matmul.00", m2m.at(0, 0) == ~1.0, true)
+check("mat2.matmul.11", m2m.at(1, 1) == ~4.0, true)
+m2v = m2 * Vec2<f64>.new([~5.0, ~6.0] ## f64[2])
+check("mat2.matvec.x", m2v.x == ~17.0, true)
+check("mat2.matvec.y", m2v.y == ~39.0, true)
+
+# Fixed-width componentwise matrix paths avoid generic map/zip temporaries.
+cm3a = Mat3<f64>.new([
+  ~1.0, ~2.0, ~3.0,
+  ~4.0, ~5.0, ~6.0,
+  ~7.0, ~8.0, ~9.0
+] ## f64[9])
+cm3b = Mat3<f64>.new([
+  ~9.0, ~8.0, ~7.0,
+  ~6.0, ~5.0, ~4.0,
+  ~3.0, ~2.0, ~1.0
+] ## f64[9])
+check("mat3.add", (cm3a + cm3b).elements[4] == ~10.0, true)
+check("mat3.sub", (cm3a - cm3b).elements[0] == (~0.0 - ~8.0), true)
+check("mat3.hadamard", (cm3a ⊙ cm3b).elements[1] == ~16.0, true)
+
 # -- is_a? (the primitive the dispatcher is built on) --
 check("isa.vec3.vector", v.is_a?("Vector"), true)
 check("isa.vec3.vec3", v.is_a?("Vec3"), true)
 check("isa.vec3.not_mat3", v.is_a?("Mat3"), false)
 check("isa.scalar.not_vector", (2.0 ## f64).is_a?("Vector"), false)
+
+# -- Synthesized dispatch preserves subclass ancestry and the base fallback. --
++ DispatchAnimal
++ DispatchDog < DispatchAnimal
++ DispatchCat < DispatchAnimal
+
++ DispatchProbe
+  -> */1(DispatchDog)
+    "dog"
+
+  -> */1(DispatchAnimal)
+    "animal"
+
+probe = DispatchProbe.new
+check("dispatch.subclass", probe * DispatchDog.new, "dog")
+check("dispatch.ancestor", probe * DispatchCat.new, "animal")

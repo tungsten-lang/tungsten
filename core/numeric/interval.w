@@ -58,28 +58,53 @@
 
   -> *(other)
     if other.class != Interval
+      # Treat an exact zero scalar as the zero map, including for intervals
+      # with infinite endpoints (IEEE arithmetic would otherwise form 0*∞).
+      if other == ~0.0
+        return Interval.point(~0.0)
       if other >= ~0.0
         return Interval.new(@lo * other, @hi * other)
       return Interval.new(@hi * other, @lo * other)
-    # all four corners
-    a = @lo * other.lo
-    b = @lo * other.hi
-    c = @hi * other.lo
-    d = @hi * other.hi
-    lo = a
-    hi = a
-    if b < lo
-      lo = b
-    if c < lo
-      lo = c
-    if d < lo
-      lo = d
-    if b > hi
-      hi = b
-    if c > hi
-      hi = c
-    if d > hi
-      hi = d
+    a = @lo
+    b = @hi
+    c = other.lo
+    d = other.hi
+
+    # An exact zero interval annihilates the product. Besides skipping all
+    # remaining work, this keeps zero×unbounded intervals from manufacturing
+    # NaN endpoints through IEEE 0*∞.
+    if (a == ~0.0 && b == ~0.0) || (c == ~0.0 && d == ~0.0)
+      return Interval.point(~0.0)
+
+    # Sign classification needs only the two extremal products in eight of
+    # the nine cases. Only two intervals that both straddle zero require all
+    # four corners.
+    if a >= ~0.0
+      if c >= ~0.0
+        return Interval.new(a * c, b * d)
+      elsif d <= ~0.0
+        return Interval.new(b * c, a * d)
+      else
+        return Interval.new(b * c, b * d)
+    elsif b <= ~0.0
+      if c >= ~0.0
+        return Interval.new(a * d, b * c)
+      elsif d <= ~0.0
+        return Interval.new(b * d, a * c)
+      else
+        return Interval.new(a * d, a * c)
+    else
+      if c >= ~0.0
+        return Interval.new(a * d, b * d)
+      elsif d <= ~0.0
+        return Interval.new(b * c, a * c)
+
+    ac = a * c
+    ad = a * d
+    bc = b * c
+    bd = b * d
+    lo = ad < bc ? ad : bc
+    hi = ac > bd ? ac : bd
     Interval.new(lo, hi)
 
   -> /(other)

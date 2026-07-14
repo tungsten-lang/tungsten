@@ -159,6 +159,86 @@ static double bench_forced_ntt_sqr(int32_t limbs, int iters) {
     return elapsed * 1e9 / (double)iters;
 }
 
+/* Time the actual boxed public arithmetic route.  The raw dispatch benchmarks
+ * above are useful kernel measurements, but bigint_mul_any uses the
+ * capacity-aware entry points; a policy mismatch there can otherwise remain
+ * completely invisible in this benchmark.  Allocation and result release are
+ * intentionally included because callers pay both. */
+static double bench_value_mul(int32_t limbs, int iters, int square) {
+    WValue a = bench_bigint(limbs, 0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+    WValue b = square ? a : bench_bigint(limbs, 0x13198a2e03707344ULL ^ (uint64_t)limbs);
+
+    WValue warm = w_mul(a, b);
+    bench_sink ^= (uint64_t)integer_low_i64(warm);
+    bench_free_value(warm);
+
+    double best = 1e300;
+    for (int rep = 0; rep < 3; rep++) {
+        double start = bench_now();
+        for (int i = 0; i < iters; i++) {
+            WValue r = w_mul(a, b);
+            bench_sink ^= (uint64_t)integer_low_i64(r) + (uint64_t)i;
+            bench_free_value(r);
+        }
+        double elapsed = bench_now() - start;
+        if (elapsed < best) best = elapsed;
+    }
+    bench_free_value(a);
+    if (!square) bench_free_value(b);
+    return best * 1e9 / (double)iters;
+}
+
+/* Exact A/B for the former capacity-aware policy: allocate the same boxed
+ * result, but unconditionally run NTT once the public path is in this size
+ * band. */
+static double bench_value_forced_ntt(int32_t limbs, int iters, int square) {
+    WValue a = bench_bigint(limbs, 0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+    WValue b = square ? a : bench_bigint(limbs, 0x13198a2e03707344ULL ^ (uint64_t)limbs);
+    WBigint *ab = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+
+    double best = 1e300;
+    for (int rep = 0; rep < 3; rep++) {
+        double start = bench_now();
+        for (int i = 0; i < iters; i++) {
+            WBigint *r = bigint_alloc(2 * limbs + 2);
+            if (square) bn_ntt_sqr(r->limbs, ab->limbs, limbs);
+            else bn_ntt_mul(r->limbs, ab->limbs, bb->limbs, limbs);
+            r->size = 2 * limbs;
+            while (r->size > 0 && r->limbs[r->size - 1] == 0) r->size--;
+            bench_sink ^= r->limbs[0] + (uint64_t)i;
+            free(r);
+        }
+        double elapsed = bench_now() - start;
+        if (elapsed < best) best = elapsed;
+    }
+    bench_free_value(a);
+    if (!square) bench_free_value(b);
+    return best * 1e9 / (double)iters;
+}
+
+static void check_value_dispatch(int32_t limbs, int square) {
+    WValue a = bench_bigint(limbs, 0x6c8e9cf570932bd5ULL ^ (uint64_t)limbs);
+    WValue b = square ? a : bench_bigint(limbs, 0xa54ff53a5f1d36f1ULL ^ (uint64_t)limbs);
+    WBigint *ab = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    uint64_t *ref = (uint64_t *)calloc((size_t)(2 * limbs + 2), sizeof(uint64_t));
+    if (square) bigint_sqr_dispatch(ref, ab->limbs, limbs);
+    else bigint_mul_dispatch(ref, ab->limbs, limbs, bb->limbs, limbs);
+
+    WValue got = w_mul(a, b);
+    uint64_t scratch;
+    int32_t glen;
+    const uint64_t *glimbs = integer_limbs(got, &scratch, &glen);
+    if (glen != 2 * limbs || memcmp(ref, glimbs, (size_t)(2 * limbs) * sizeof(uint64_t)) != 0)
+        die("public BigInt transform dispatch mismatch");
+
+    free(ref);
+    bench_free_value(got);
+    bench_free_value(a);
+    if (!square) bench_free_value(b);
+}
+
 static double bench_mod_single(int32_t limbs, int iters) {
     WValue a = bench_bigint(limbs, 0x6a09e667f3bcc909ULL ^ (uint64_t)limbs);
     WValue d = w_u64(1000000007ULL);
@@ -427,6 +507,26 @@ int main(int argc, char **argv) {
       }
       printf("direct NTT output equivalence: %d/%d match%s\n", checked - bad, checked, bad ? "  *** MISMATCH ***" : "");
       if (bad) return 1;
+    }
+
+    printf("\npublic boxed top rung  policy mul  old NTT  speedup  policy sqr  old NTT  speedup  iters\n");
+    /* These are the SSA-selected windows; the 3072-limb NTT-selected control
+     * is already covered by direct NTT output equivalence above. */
+    const int32_t value_sizes[] = {2048, 4096, 8192, 16384};
+    for (size_t i = 0; i < sizeof(value_sizes) / sizeof(value_sizes[0]); i++) {
+        int32_t limbs = value_sizes[i];
+        /* The top-rung timings are short enough to be scheduler-sensitive at
+         * the generic iteration counts; use a longer sample for this A/B. */
+        int iters = bench_iters_for_limbs(limbs) * 5;
+        check_value_dispatch(limbs, 0);
+        check_value_dispatch(limbs, 1);
+        double policy_mul = bench_value_mul(limbs, iters, 0);
+        double old_mul = bench_value_forced_ntt(limbs, iters, 0);
+        double policy_sqr = bench_value_mul(limbs, iters, 1);
+        double old_sqr = bench_value_forced_ntt(limbs, iters, 1);
+        printf("%21d %11.1f %8.1f %7.2fx %11.1f %8.1f %7.2fx %6d\n",
+               limbs, policy_mul, old_mul, old_mul / policy_mul,
+               policy_sqr, old_sqr, old_sqr / policy_sqr, iters);
     }
 
     if (bench_gcd_equivalence()) return 1;

@@ -1,126 +1,295 @@
-/* prime_sweep — empirical trial-division-vs-Miller-Rabin data for Int#prime?.
+/* prime_sweep — reproducible Int#prime? cutoff benchmark.
  *
- * Replicates the two heavy u64 tiers of the runtime intrinsic
- * (runtime/runtime.c `w_prime_test_u64`) in isolation and times each on the
- * largest prime <= 10^k. These are worst-case inputs for trial division: the
- * divisor scan runs all the way to sqrt(n).
+ * This intentionally includes runtime.c so the benchmark exercises the exact
+ * private trial-division and Montgomery/FJ functions used by Int#prime?. Build
+ * and run it from the project root with:
  *
- *   cc -O3 -march=native -o prime_sweep prime_sweep.c && ./prime_sweep
+ *   make -C runtime bench-prime-sweep
  *
- * Result (Apple M-series): prime-divisor trial division is much faster than
- * the old 6k+-1 wheel below the 10^8 runtime cutoff, while the 3-base
- * Miller-Rabin tier wins once n is well into the 10^8-10^9 band. The runtime
- * keeps the 10^8 cutoff because sequential counting workloads below that
- * range benefit from early small factors and cheap trial exits.
+ * It reports worst-case primes and four input distributions, comparing the
+ * former 10,000,000 cutoff with candidate boundaries. Every sampled result is
+ * first checked against the production w_prime_test_u64 implementation.
  */
 #include <stdint.h>
 #include <stdio.h>
-#include <string.h>
 #include <time.h>
 
+#include "../../runtime/runtime.c"
+
+#define SAMPLE_COUNT 4096
+#define SAMPLE_ROUNDS 20
 #define NOINLINE __attribute__((noinline))
 
-static uint16_t trial_primes[4000];
-static size_t trial_prime_count = 0;
+typedef int (*PrimeFn)(uint64_t);
 
-static void init_trial_primes(void) {
-  enum { LIMIT = 31623 };
-  unsigned char composite[LIMIT + 1];
-  memset(composite, 0, sizeof(composite));
-  for (int p = 2; p * p <= LIMIT; p++) {
-    if (!composite[p]) {
-      for (int q = p * p; q <= LIMIT; q += p) composite[q] = 1;
-    }
-  }
-  for (int p = 41; p <= LIMIT; p++) {
-    if (!composite[p]) trial_primes[trial_prime_count++] = (uint16_t)p;
-  }
+static volatile uint64_t samples[SAMPLE_COUNT];
+static volatile uint64_t bench_sink;
+static uint64_t rng_state = 0x6a09e667f3bcc909ULL;
+
+static uint64_t now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
 }
 
-static NOINLINE uint64_t mulmod(uint64_t a, uint64_t b, uint64_t m) {
-  return (uint64_t)(((__uint128_t)a * b) % m);
+static uint64_t rng_next(void) {
+    uint64_t x = rng_state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    rng_state = x;
+    return x;
 }
 
-static NOINLINE uint64_t powmod(uint64_t b, uint64_t e, uint64_t m) {
-  uint64_t r = 1 % m;
-  b %= m;
-  while (e) {
-    if (e & 1) r = mulmod(r, b, m);
-    b = mulmod(b, b, m);
-    e >>= 1;
-  }
-  return r;
-}
-
-static NOINLINE int mr_round(uint64_t n, uint64_t d, int s, uint64_t a) {
-  uint64_t x = powmod(a, d, n);
-  if (x == 1 || x == n - 1) return 1;
-  for (int r = 1; r < s; r++) {
-    x = mulmod(x, x, n);
-    if (x == n - 1) return 1;
-  }
-  return 0;
-}
-
-static int mr_runtime_tier(uint64_t n) {
-  if (n < 2) return 0;
-  int s = __builtin_ctzll(n - 1);
-  uint64_t d = (n - 1) >> s;
-  if (n < 4759123141ULL) {
-    static const uint64_t b3[] = {2, 7, 61};
-    for (size_t i = 0; i < 3; i++) {
-      if (!mr_round(n, d, s, b3[i])) return 0;
+static int reciprocal_trial_post_screen(uint32_t n) {
+    if (!w_prime_trial_recip32(n)) return 0;
+    size_t i = sizeof(W_PRIME_TRIAL_RECIP32) / sizeof(W_PRIME_TRIAL_RECIP32[0]);
+    size_t count = sizeof(W_PRIME_TRIAL_DIVISORS) / sizeof(W_PRIME_TRIAL_DIVISORS[0]);
+    for (; i < count; i++) {
+        uint32_t p = W_PRIME_TRIAL_DIVISORS[i];
+        if ((uint64_t)p * p > n) break;
+        if (n % p == 0U) return 0;
     }
     return 1;
-  }
-  if (n < 1122004669633ULL) {
-    static const uint64_t b4[] = {2, 13, 23, 1662803};
-    for (size_t i = 0; i < 4; i++) {
-      if (!mr_round(n, d, s, b4[i])) return 0;
+}
+
+/* Same Tier-1 screen as w_prime_test_u64, with only the boundary selectable. */
+static int prime_with_cutoff(uint64_t n, uint64_t cutoff, int reciprocal) {
+    if (n < 2ULL) return 0;
+    static const uint64_t small[] = {2,3,5,7,11,13,17,19,23,29,31,37};
+    for (size_t i = 0; i < sizeof(small) / sizeof(small[0]); i++) {
+        if (n == small[i]) return 1;
+        if (n % small[i] == 0ULL) return 0;
+    }
+    if (n < 1681ULL) return 1;
+
+    if (n <= cutoff) {
+        if (reciprocal && n <= UINT32_MAX)
+            return reciprocal_trial_post_screen((uint32_t)n);
+        for (size_t i = 0;
+             i < sizeof(W_PRIME_TRIAL_DIVISORS) / sizeof(W_PRIME_TRIAL_DIVISORS[0]);
+             i++) {
+            uint64_t p = (uint64_t)W_PRIME_TRIAL_DIVISORS[i];
+            if (p * p > n) break;
+            if (n % p == 0ULL) return 0;
+        }
+        return 1;
+    }
+    return w_prime_test_u64_mr(n);
+}
+
+#define DEFINE_CUTOFF_WRAPPER(name, cutoff) \
+    static NOINLINE int name(uint64_t n) { return prime_with_cutoff(n, cutoff, 1); }
+#define DEFINE_DIVIDE_WRAPPER(name, cutoff) \
+    static NOINLINE int name(uint64_t n) { return prime_with_cutoff(n, cutoff, 0); }
+
+DEFINE_CUTOFF_WRAPPER(prime_100k,   100000ULL)
+DEFINE_CUTOFF_WRAPPER(prime_250k,   250000ULL)
+DEFINE_CUTOFF_WRAPPER(prime_500k,   500000ULL)
+DEFINE_CUTOFF_WRAPPER(prime_1m,    1000000ULL)
+DEFINE_CUTOFF_WRAPPER(prime_2m,    2000000ULL)
+DEFINE_CUTOFF_WRAPPER(prime_5m,    5000000ULL)
+DEFINE_CUTOFF_WRAPPER(prime_10m,  10000000ULL)
+DEFINE_DIVIDE_WRAPPER(prime_1m_divide,   1000000ULL)
+DEFINE_DIVIDE_WRAPPER(prime_10m_divide, 10000000ULL)
+
+static NOINLINE int trial_post_screen(uint64_t n) {
+    for (size_t i = 0;
+         i < sizeof(W_PRIME_TRIAL_DIVISORS) / sizeof(W_PRIME_TRIAL_DIVISORS[0]);
+         i++) {
+        uint64_t p = (uint64_t)W_PRIME_TRIAL_DIVISORS[i];
+        if (p * p > n) break;
+        if (n % p == 0ULL) return 0;
     }
     return 1;
-  }
-  static const uint64_t b7[] = {2, 325, 9375, 28178, 450775, 9780504, 1795265022};
-  for (size_t i = 0; i < 7; i++) {
-    uint64_t a = b7[i] % n;
-    if (a != 0 && !mr_round(n, d, s, a)) return 0;
-  }
-  return 1;
 }
 
-static int trial_only(uint64_t n) {
-  if (n < 2) return 0;
-  for (size_t i = 0; i < trial_prime_count; i++) {
-    uint64_t p = trial_primes[i];
-    if (p * p > n) break;
-    if (n % p == 0) return 0;
-  }
-  return 1;
+static NOINLINE int reciprocal_post_screen(uint64_t n) {
+    return reciprocal_trial_post_screen((uint32_t)n);
 }
 
-static double bench(int (*f)(uint64_t), uint64_t n, long iters) {
-  struct timespec t0, t1;
-  volatile int sink = 0;
-  volatile uint64_t vn = n;
-  clock_gettime(CLOCK_MONOTONIC, &t0);
-  for (long k = 0; k < iters; k++) sink ^= f(vn);
-  clock_gettime(CLOCK_MONOTONIC, &t1);
-  (void)sink;
-  return (t1.tv_sec - t0.tv_sec) * 1e9 + (t1.tv_nsec - t0.tv_nsec);
+static NOINLINE int fj_post_screen(uint64_t n) {
+    return w_prime_test_u64_mr(n);
 }
 
-int main(void) {
-  init_trial_primes();
-  uint64_t primes[] = {97ULL,997ULL,9973ULL,99991ULL,999983ULL,9999991ULL,
-                       99999989ULL,999999937ULL};
-  const char *lbl[] = {"1e2","1e3","1e4","1e5","1e6","1e7","1e8","1e9"};
-  printf("%-6s %14s %14s %10s  winner\n", "mag", "trial ns/op", "MR ns/op", "ratio");
-  for (int i = 0; i < 8; i++) {
-    uint64_t n = primes[i];
-    long it = 200000;
-    double t = bench(trial_only, n, it) / it;
-    double m = bench(mr_runtime_tier, n, it) / it;
-    printf("%-6s %14.1f %14.1f %10.2f  %s\n", lbl[i], t, m, t / m, t < m ? "trial" : "MR");
-  }
-  return 0;
+static double bench_once(PrimeFn fn, int rounds) {
+    uint64_t start = now_ns();
+    uint64_t sink = 0;
+    for (int r = 0; r < rounds; r++) {
+        for (int i = 0; i < SAMPLE_COUNT; i++) sink += (uint64_t)fn(samples[i]);
+    }
+    uint64_t elapsed = now_ns() - start;
+    bench_sink ^= sink;
+    return (double)elapsed / (double)(rounds * SAMPLE_COUNT);
+}
+
+static double bench_median(PrimeFn fn, int rounds) {
+    double a = bench_once(fn, rounds);
+    double b = bench_once(fn, rounds);
+    double c = bench_once(fn, rounds);
+    if (a > b) { double t = a; a = b; b = t; }
+    if (b > c) { double t = b; b = c; c = t; }
+    if (a > b) { double t = a; a = b; b = t; }
+    return b;
+}
+
+static void fill_same(uint64_t n) {
+    for (int i = 0; i < SAMPLE_COUNT; i++) samples[i] = n;
+}
+
+static void fill_random(uint64_t lo, uint64_t hi) {
+    uint64_t span = hi - lo + 1ULL;
+    for (int i = 0; i < SAMPLE_COUNT; i++) samples[i] = lo + rng_next() % span;
+}
+
+static void fill_coprime30(uint64_t lo, uint64_t hi) {
+    uint64_t span = hi - lo + 1ULL;
+    for (int i = 0; i < SAMPLE_COUNT; i++) {
+        uint64_t n;
+        do {
+            n = lo + rng_next() % span;
+        } while ((n & 1ULL) == 0ULL || n % 3ULL == 0ULL || n % 5ULL == 0ULL);
+        samples[i] = n;
+    }
+}
+
+static void fill_primes(uint64_t lo, uint64_t hi) {
+    uint64_t span = hi - lo + 1ULL;
+    for (int i = 0; i < SAMPLE_COUNT; i++) {
+        uint64_t n;
+        do {
+            n = lo + rng_next() % span;
+            n |= 1ULL;
+            if (n > hi) n -= 2ULL;
+        } while (!w_prime_test_u64(n));
+        samples[i] = n;
+    }
+}
+
+static const struct {
+    const char *label;
+    PrimeFn fn;
+} cutoffs[] = {
+    {"100k", prime_100k}, {"250k", prime_250k}, {"500k", prime_500k},
+    {"1m", prime_1m}, {"2m", prime_2m}, {"5m", prime_5m}, {"10m", prime_10m}
+};
+
+static void verify_samples(const char *label) {
+    for (int i = 0; i < SAMPLE_COUNT; i++) {
+        uint64_t n = samples[i];
+        int expected = w_prime_test_u64(n);
+        for (size_t j = 0; j < sizeof(cutoffs) / sizeof(cutoffs[0]); j++) {
+            int actual = cutoffs[j].fn(n);
+            if (actual != expected) {
+                fprintf(stderr, "%s mismatch: n=%llu cutoff=%s expected=%d got=%d\n",
+                        label, (unsigned long long)n, cutoffs[j].label, expected, actual);
+                exit(1);
+            }
+        }
+    }
+}
+
+static void verify_changed_range(void) {
+    for (uint64_t n = 0; n <= 1000000ULL; n++) {
+        int expected = prime_1m_divide(n);
+        int actual = w_prime_test_u64(n);
+        if (actual != expected) {
+            fprintf(stderr, "reciprocal mismatch: n=%llu divide=%d reciprocal=%d\n",
+                    (unsigned long long)n, expected, actual);
+            exit(1);
+        }
+    }
+    for (uint64_t n = 1000001ULL; n <= 10000000ULL; n++) {
+        int expected = prime_10m_divide(n);
+        int actual = prime_1m(n);
+        if (actual != expected) {
+            fprintf(stderr, "cutoff mismatch: n=%llu old=%d new=%d\n",
+                    (unsigned long long)n, expected, actual);
+            exit(1);
+        }
+    }
+}
+
+static void report_candidate_sweep(const char *label, size_t count) {
+    verify_samples(label);
+    printf("\n%s\n", label);
+    printf("  %-10s %12s\n", "cutoff", "ns/op");
+    for (size_t i = 0; i < count; i++) {
+        printf("  %-10s %12.1f\n", cutoffs[i].label,
+               bench_median(cutoffs[i].fn, SAMPLE_ROUNDS));
+    }
+}
+
+static void report_selected_vs_old(const char *label) {
+    verify_samples(label);
+    double selected = bench_median(prime_1m, SAMPLE_ROUNDS);
+    double old = bench_median(prime_10m_divide, SAMPLE_ROUNDS);
+    printf("\n%s\n", label);
+    printf("  %-10s %12s %10s\n", "cutoff", "ns/op", "old/new");
+    printf("  %-10s %12.1f %10.2f\n", "1m", selected, old / selected);
+    printf("  %-10s %12.1f %10s\n", "10m (old)", old, "-");
+}
+
+static void report_reciprocal_vs_divide(const char *label) {
+    verify_samples(label);
+    double reciprocal = bench_median(prime_1m, SAMPLE_ROUNDS);
+    double divide = bench_median(prime_1m_divide, SAMPLE_ROUNDS);
+    printf("\n%s\n", label);
+    printf("  %-12s %12s %10s\n", "trial", "ns/op", "div/recip");
+    printf("  %-12s %12.1f %10.2f\n", "reciprocal", reciprocal, divide / reciprocal);
+    printf("  %-12s %12.1f %10s\n", "division", divide, "-");
+}
+
+int main(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    static const struct { const char *label; uint64_t n; } worst[] = {
+        {"1e5", 99991ULL}, {"250k", 249989ULL}, {"500k", 499979ULL},
+        {"750k", 749993ULL}, {"1e6", 999983ULL},
+        {"1e7", 9999991ULL}, {"1e8", 99999989ULL}
+    };
+
+    verify_changed_range();
+
+    printf("Int#prime? trial/FJ cutoff sweep (median of 3)\n");
+    printf("%-6s %14s %14s %14s %10s\n",
+           "prime", "divide ns/op", "recip ns/op", "FJ ns/op", "recip/FJ");
+    for (size_t i = 0; i < sizeof(worst) / sizeof(worst[0]); i++) {
+        fill_same(worst[i].n);
+        double trial = bench_median(trial_post_screen, SAMPLE_ROUNDS);
+        double reciprocal = bench_median(reciprocal_post_screen, SAMPLE_ROUNDS);
+        double fj = bench_median(fj_post_screen, SAMPLE_ROUNDS);
+        printf("%-6s %14.1f %14.1f %14.1f %10.2f\n",
+               worst[i].label, trial, reciprocal, fj, reciprocal / fj);
+    }
+
+    fill_random(100000ULL, 1000000ULL);
+    report_candidate_sweep("random [100k, 1m]", 4);
+    report_reciprocal_vs_divide("trial implementation: random [100k, 1m]");
+
+    fill_coprime30(100000ULL, 1000000ULL);
+    report_reciprocal_vs_divide("trial implementation: coprime-to-30 [100k, 1m]");
+
+    fill_primes(100000ULL, 1000000ULL);
+    report_reciprocal_vs_divide("trial implementation: prime-only [100k, 1m]");
+
+    fill_random(1000001ULL, 10000000ULL);
+    report_candidate_sweep("reciprocal cutoff: random [1m, 10m]",
+                           sizeof(cutoffs) / sizeof(cutoffs[0]));
+    report_selected_vs_old("random [1m, 10m]");
+
+    fill_coprime30(1000001ULL, 10000000ULL);
+    report_candidate_sweep("reciprocal cutoff: coprime-to-30 [1m, 10m]",
+                           sizeof(cutoffs) / sizeof(cutoffs[0]));
+    report_selected_vs_old("coprime-to-30 [1m, 10m]");
+
+    fill_primes(1000001ULL, 10000000ULL);
+    report_candidate_sweep("reciprocal cutoff: prime-only [1m, 10m]",
+                           sizeof(cutoffs) / sizeof(cutoffs[0]));
+    report_selected_vs_old("prime-only [1m, 10m]");
+
+    printf("\ncorrectness: reciprocal/division match exhaustively on [0, 1m]; "
+           "1m/FJ and old 10m/division match exhaustively on (1m, 10m]; "
+           "all sampled candidates match production\n");
+    return bench_sink == UINT64_MAX ? 1 : 0;
 }

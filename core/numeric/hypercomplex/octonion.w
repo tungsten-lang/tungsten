@@ -68,7 +68,8 @@
   -> e7
     components[7]
 
-  ## Cayley–Dickson product via quaternion-pair structure. Octonion as
+  ## Reference Cayley–Dickson product via quaternion-pair structure.
+  ## Octonion as
   ## (q_low, q_high) where each Quaternion holds 4 contiguous scalar-
   ## first components. Octonion and (math) Quaternion both store
   ## scalar-first, so the recursive formula composes directly:
@@ -76,7 +77,7 @@
   ##
   ## (Use Quaternion<T> here, not QuaternionMetal<T> — the latter's
   ## scalar-LAST storage would mis-align the recursion.)
-  -> */1
+  -> mul_recursive/1
     return scale(@1) if scalar_like?(@1)
     a0 = half_class.new(components.slice(0, 4) ## T[4])
     a1 = half_class.new(components.slice(4, 4) ## T[4])
@@ -88,26 +89,35 @@
 
     class.new(low.components.concat(high.components) ## T[8])
 
-  ## Direct coefficient product using the same Cayley-Dickson orientation as */1.
-  ## Kept separate for benchmarking; */1 still uses the recursive quaternion-pair path.
+  ## The straight-line coefficient product avoids four half-array slices,
+  ## four temporary Quaternions, generic vector add/subtract temporaries, and
+  ## the final concat. The recursive reference above remains available for
+  ## equivalence testing.
+  -> */1
+    mul_direct(@1)
+
+  ## Direct coefficient product using the same Cayley-Dickson orientation as
+  ## mul_recursive/1. This is the public multiplication worker.
   -> mul_direct/1
     return scale(@1) if scalar_like?(@1)
-    a0 = components[0]
-    a1 = components[1]
-    a2 = components[2]
-    a3 = components[3]
-    a4 = components[4]
-    a5 = components[5]
-    a6 = components[6]
-    a7 = components[7]
-    b0 = @1.components[0]
-    b1 = @1.components[1]
-    b2 = @1.components[2]
-    b3 = @1.components[3]
-    b4 = @1.components[4]
-    b5 = @1.components[5]
-    b6 = @1.components[6]
-    b7 = @1.components[7]
+    a = components
+    b = @1.components
+    a0 = a[0]
+    a1 = a[1]
+    a2 = a[2]
+    a3 = a[3]
+    a4 = a[4]
+    a5 = a[5]
+    a6 = a[6]
+    a7 = a[7]
+    b0 = b[0]
+    b1 = b[1]
+    b2 = b[2]
+    b3 = b[3]
+    b4 = b[4]
+    b5 = b[5]
+    b6 = b[6]
+    b7 = b[7]
     class.new([
       a0 * b0 - a1 * b1 - a2 * b2 - a3 * b3 - a4 * b4 - a5 * b5 - a6 * b6 - a7 * b7,
       a0 * b1 + a1 * b0 + a2 * b3 - a3 * b2 + a4 * b5 - a5 * b4 - a6 * b7 + a7 * b6,

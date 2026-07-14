@@ -18,34 +18,86 @@
     ] ## T[9])
 
   -> .zero
-    class.new((0...9).map -> 0 ## T)
+    class.new([
+      0 ## T, 0 ## T, 0 ## T,
+      0 ## T, 0 ## T, 0 ## T,
+      0 ## T, 0 ## T, 0 ## T
+    ] ## T[9])
 
   # Column / row views.
 
   -> col(c)
-    Vec3.new([elements[c * 3], elements[c * 3 + 1], elements[c * 3 + 2]] ## T[3])
+    Vec3.new([@elements[c * 3], @elements[c * 3 + 1], @elements[c * 3 + 2]] ## T[3])
 
   -> row(r)
-    Vec3.new([elements[r], elements[3 + r], elements[6 + r]] ## T[3])
+    Vec3.new([@elements[r], @elements[3 + r], @elements[6 + r]] ## T[3])
+
+  # Fixed-width componentwise arithmetic avoids Matrix's map/zip temporaries.
+
+  -> negate
+    a = @elements
+    class.new([
+      -a[0], -a[1], -a[2],
+      -a[3], -a[4], -a[5],
+      -a[6], -a[7], -a[8]
+    ] ## T[9])
+
+  -> +/1
+    a = @elements
+    b = @1.elements
+    class.new([
+      a[0] + b[0], a[1] + b[1], a[2] + b[2],
+      a[3] + b[3], a[4] + b[4], a[5] + b[5],
+      a[6] + b[6], a[7] + b[7], a[8] + b[8]
+    ] ## T[9])
+
+  -> -/1
+    a = @elements
+    b = @1.elements
+    class.new([
+      a[0] - b[0], a[1] - b[1], a[2] - b[2],
+      a[3] - b[3], a[4] - b[4], a[5] - b[5],
+      a[6] - b[6], a[7] - b[7], a[8] - b[8]
+    ] ## T[9])
+
+  -> //1(Number)
+    a = @elements
+    s = @1
+    class.new([
+      a[0] / s, a[1] / s, a[2] / s,
+      a[3] / s, a[4] / s, a[5] / s,
+      a[6] / s, a[7] / s, a[8] / s
+    ] ## T[9])
+
+  -> ⊙/1
+    a = @elements
+    b = @1.elements
+    class.new([
+      a[0] * b[0], a[1] * b[1], a[2] * b[2],
+      a[3] * b[3], a[4] * b[4], a[5] * b[5],
+      a[6] * b[6], a[7] * b[7], a[8] * b[8]
+    ] ## T[9])
 
   # Linear algebra.
 
   -> transpose
+    a = @elements
     class.new([
-      elements[0], elements[3], elements[6],
-      elements[1], elements[4], elements[7],
-      elements[2], elements[5], elements[8]
+      a[0], a[3], a[6],
+      a[1], a[4], a[7],
+      a[2], a[5], a[8]
     ] ## T[9])
 
   # Determinant via cofactor expansion along column 0. Kept on one line:
   # Tungsten has no leading-operator line continuation, so a multiline form
   # would parse as three separate statements and return only the last term.
   -> determinant
-    a = elements
+    a = @elements
     a[0] * (a[4] * a[8] - a[5] * a[7]) - a[1] * (a[3] * a[8] - a[5] * a[6]) + a[2] * (a[3] * a[7] - a[4] * a[6])
 
   -> trace
-    elements[0] + elements[4] + elements[8]
+    a = @elements
+    a[0] + a[4] + a[8]
 
   # Inverse via cofactor / adjugate formula. Caller is responsible
   # for non-singularity (determinant != 0). For column-major
@@ -53,8 +105,7 @@
   # elements = [a, d, g, b, e, h, c, f, i]:
   #   inv = (1/det) · adjugate(M)
   -> inverse
-    a = elements
-    d = determinant
+    a = @elements
     # Cofactors at each (col, row) position.
     c00 =  (a[4] * a[8] - a[5] * a[7])
     c01 = -(a[3] * a[8] - a[5] * a[6])
@@ -65,6 +116,7 @@
     c20 =  (a[1] * a[5] - a[2] * a[4])
     c21 = -(a[0] * a[5] - a[2] * a[3])
     c22 =  (a[0] * a[4] - a[1] * a[3])
+    d = a[0] * c00 + a[1] * c01 + a[2] * c02
     # Adjugate = transpose(cofactor matrix); column-major store.
     class.new([
       c00 / d, c10 / d, c20 / d,
@@ -75,15 +127,16 @@
   # Matrix-vector product.
   -> */1(Vec3)
     v = @1.components
+    a = @elements
     Vec3.new([
-      elements[0] * v[0] + elements[3] * v[1] + elements[6] * v[2],
-      elements[1] * v[0] + elements[4] * v[1] + elements[7] * v[2],
-      elements[2] * v[0] + elements[5] * v[1] + elements[8] * v[2]
+      a[0] * v[0] + a[3] * v[1] + a[6] * v[2],
+      a[1] * v[0] + a[4] * v[1] + a[7] * v[2],
+      a[2] * v[0] + a[5] * v[1] + a[8] * v[2]
     ] ## T[3])
 
   # Matrix-matrix product (column-major: result[c, r] = Σₖ A[k, r] · B[c, k]).
   -> */1(Mat3)
-    a = elements
+    a = @elements
     b = @1.elements
     class.new([
       a[0] * b[0] + a[3] * b[1] + a[6] * b[2],

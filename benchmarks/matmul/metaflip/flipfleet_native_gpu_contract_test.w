@@ -1,0 +1,61 @@
+use flipfleet_gpu_worker_bundle
+use flipfleet_persistent_gpu
+
+-> ffngc_expect(label, condition)
+  if !condition
+    << "FAIL " + label
+    exit(1)
+
+source = read_file("benchmarks/matmul/metaflip/flipfleet_native.w")
+ffngc_expect("native source", source != nil)
+
+prepare_at = source.index("prepared = ffpg_prepare_mailboxes")
+launch_at = source.index("worker_command = ffpg_launch_command")
+redirect_at = source.index("worker_command = worker_command + \" >> \"")
+starting_at = source.index("active\[slot] = 2")
+ready_at = source.index("ready = ffn_persistent_wait")
+ffngc_expect("fresh mailbox before launch", prepare_at != nil && launch_at != nil && prepare_at < launch_at)
+ffngc_expect("mailbox argv before redirection", redirect_at != nil && launch_at < redirect_at)
+ffngc_expect("starting ownership precedes wait", starting_at != nil && ready_at != nil && starting_at < ready_at && source.include?("if active\[slot] == 2"))
+ffngc_expect("failed-start ownership cleared", source.include?("ready = ffn_persistent_wait") && source.include?("if ready == 0") && source.include?("ffn_persistent_force_stop_slot(run_tag, slot, processes, active, generations, lanes)"))
+ffngc_expect("bounded epoch wait", source.include?("ffn_persistent_wait(ack_path, generation, \"done\", 120000, processes\[slot\])"))
+ffngc_expect("timed-out slot force stop", source.include?("ffn_persistent_force_stop_slot") && source.include?("if ready == 0") && source.include?("if completed == 0"))
+ffngc_expect("forced exact process cleanup", source.include?("z = process.kill") && !source.include?("pkill -TERM -f") && !source.include?("pkill -KILL -f"))
+ffngc_expect("bounded final GPU drain", source.include?("-> ffn_thread_join_bounded") && source.include?("joined = thread.join(timeout_ms)") && source.include?("ffn_thread_join_bounded(gpu_threads\[gpu_slot], 5000)") && source.include?("ffn_thread_join_bounded(gpu_threads\[rect_slot], 5000)"))
+
+ffngc_expect("old MITM compiler removed", !source.include?("-> ffn_mitm_build"))
+ffngc_expect("old pool compiler removed", !source.include?("-> ffn_pool_worker_build"))
+ffngc_expect("MITM helper launch", source.include?("command = ffm_epoch_command"))
+ffngc_expect("constraint helper launch", source.include?("command = ffpc_epoch_command"))
+ffngc_expect("kxor helper launch", source.include?("command = ffx_epoch_command"))
+ffngc_expect("span helper launch", source.include?("command = ffsrp_epoch_command"))
+ffngc_expect("low-rank shear helper launch", source.include?("command = fflrsp_epoch_command"))
+ffngc_expect("span worker readiness", source.include?("gpu_span_ready") && source.include?("ready\[15\] = span_ready") && source.include?("ready\[16\] = span_ready"))
+ffngc_expect("low-rank shear readiness", source.include?("gpu_shear_ready") && source.include?("ready\[17\] = shear_ready"))
+ffngc_expect("surgery binaries on pool launches", source.split("DIFFERENTIAL_BINARY, SPAN_BINARY, SHEAR_BINARY").size() == 4)
+ffngc_expect("parent differential tracks exact nullspace core", source.include?("differential_nullspace") && source.include?("flipfleet_archive_nullspace.w") && source.include?("ffn_binary_fresh5(DIFFERENTIAL_BINARY"))
+ffngc_expect("distance-qualified parents", source.include?("ffn_distance(left, right) >= required"))
+ffngc_expect("frontier escape banks integrated", source.include?("use flipfleet_frontier_escape_banks") && source.include?("fffeb_append_frontier_paths(REPO_ROOT, frontier_paths, best"))
+ffngc_expect("generic split rotates exact frontiers", source.include?("if role == 3 && archive.size() > 0") && source.include?("seed = archive\[epoch % archive.size()]"))
+ffngc_expect("final persistence exact gate", source.include?("final_exact = ffw_verify_best_exact(best, N)") && source.include?("if final_exact == 1\n  z = ffn_dump_trusted(best, BEST_PATH, RUN_TAG)"))
+ffngc_expect("internal reject replay", source.include?("use flipfleet_gpu_reject") && source.include?("ffn_harvest_gpu_internal_reject") && source.include?("gpu_launch_nonces") && source.include?("internal-rejects=\" + gpu_internal_rejects.to_s()"))
+ffngc_expect("strict record target", source.include?("internal_target = ffw_best_rank(best) - 1"))
+ffngc_expect("4x4 evidence allocation", source.include?("ff7_allocate_pool_remainder_for_tensor(N") && source.include?("ffkp_mode_lane_budget_for_tensor(N"))
+
+mitm = ffm_epoch_command("/repo", "/tmp/mitm", "/tmp/seed", "/tmp/out", 7, 2, 32, 2, 9)
+constraint = ffpc_epoch_command("/repo", "/tmp/constraint", "/tmp/seed", "/tmp/out", 7, 1, 64, 100, 9)
+kxor = ffx_epoch_command("/repo", "/tmp/kxor", "/tmp/seed", "/tmp/out", 7, 8, 2, 16, 2, 9)
+span3 = ffsrp_epoch_command("/repo", "/tmp/span", "/tmp/seed", "/tmp/out", 7, 3, 4, 8, 9)
+span4 = ffsrp_epoch_command("/repo", "/tmp/span", "/tmp/seed", "/tmp/out", 7, 4, 3, 1, 9)
+shear = fflrsp_epoch_command("/repo", "/tmp/shear", "/tmp/seed", "/tmp/out", 5, 512, 9)
+ffngc_expect("MITM cached child", mitm.ends_with?(" '/tmp/mitm.metallib'"))
+ffngc_expect("constraint cached child", constraint.ends_with?(" '/tmp/constraint.metallib'"))
+ffngc_expect("kxor cached child", kxor.ends_with?(" '/tmp/kxor.metallib'"))
+ffngc_expect("span3 cached child", span3.ends_with?(" '/tmp/span.metallib'"))
+ffngc_expect("span4 cached child", span4.ends_with?(" '/tmp/span.metallib'"))
+ffngc_expect("shear cached child", shear.ends_with?(" '/tmp/shear.metallib'"))
+ffngc_expect("span4 memory guard", ffsrp_epoch_command("/repo", "/tmp/span", "/tmp/seed", "/tmp/out", 7, 4, 3, 2, 9) == "")
+ffngc_expect("shear tensor guard", fflrsp_epoch_command("/repo", "/tmp/shear", "/tmp/seed", "/tmp/out", 4, 512, 9) == "")
+ffngc_expect("shear pair guard", fflrsp_epoch_command("/repo", "/tmp/shear", "/tmp/seed", "/tmp/out", 5, 4096, 9) == "")
+
+<< "flipfleet_native_gpu_contract_test: all checks passed"

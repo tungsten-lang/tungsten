@@ -169,6 +169,18 @@ kernel void flipwalk(
           u1 = ((((state % 65535) + 65535) % 65535) + 1);
           state = ((state * 1103515245) + 12345);
           paxis = (((state % 3) + 3) % 3);
+          if ((paxis == 0)) {
+            u1 = (u1 & 65535);
+          }
+          if ((paxis == 1)) {
+            u1 = (u1 & 65535);
+          }
+          if ((paxis == 2)) {
+            u1 = (u1 & 65535);
+          }
+          if ((u1 == 0)) {
+            u1 = 1;
+          }
           pb = ((pt * 16) + ltid);
           if ((paxis == 0)) {
             if ((u1 != sus[pb])) {

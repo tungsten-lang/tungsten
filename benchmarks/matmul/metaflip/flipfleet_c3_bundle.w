@@ -12,6 +12,8 @@
 # The output file is cleared before dispatch and rewritten only after all three
 # candidate gates pass.
 
+use flipfleet_metallib_cache
+
 -> ffc3_supported(n) (i64) i64
   ok = 0 ## i64
   if n >= 3 && n <= 7
@@ -83,26 +85,31 @@
 -> ffc3_shell_quote(value) (String)
   "'" + value.replace("'", "'\"'\"'") + "'"
 
-# The compiler writes temporary LLVM/Metal products beside `binary`, while the
-# executable deliberately reads the checked-in sidecar named by its source.
+# The compiler writes the executable and an offline `.metallib` cache beside
+# `binary`; the checked-in sidecar remains the source of truth.
 -> ffc3_build_command(root, n, binary) (String i64 String)
   if ffc3_supported(n) == 0 || root == "" || binary == ""
     return ""
   llpath = binary + ".ll"
-  "cd " + ffc3_shell_quote(root) + " && TUNGSTEN_LL_PATH=" + ffc3_shell_quote(llpath) + " bin/tungsten -o " + ffc3_shell_quote(binary) + " " + ffc3_shell_quote(ffc3_source_rel(n)) + " --release --native --fast --lto"
+  "cd " + ffc3_shell_quote(root) + " && TUNGSTEN_LL_PATH=" + ffc3_shell_quote(llpath) + " TUNGSTEN_METAL_PATH=" + ffc3_shell_quote(ffmc_generated_source_path(binary)) + " bin/tungsten -o " + ffc3_shell_quote(binary) + " " + ffc3_shell_quote(ffc3_source_rel(n)) + " --release --native --fast --lto"
 
 -> ffc3_build(root, n, binary) (String i64 String) i64
   command = ffc3_build_command(root, n, binary)
   if command == ""
     return 0
   built = system(command)
-  result = 0 ## i64
-  if built
-    result = 1
-  result
+  if !built
+    return 0
+  ffmc_build(root, ffmc_generated_source_path(binary), binary)
+
+-> ffc3_metallib_path(binary) (String)
+  ffmc_library_path(binary)
+
+-> ffc3_metallib_fresh(root, n, binary) (String i64 String) i64
+  ffmc_fresh(ffmc_generated_source_path(binary), binary)
 
 # Positional C3 worker ABI:
-#   seed output walkers steps dispatches band plus_period
+#   seed output walkers steps dispatches band plus_period metallib
 #
 # `dispatches` bounds an adaptive scheduling epoch.  The API clamps every work
 # parameter to the same hard limits enforced again by the worker executable.
@@ -115,7 +122,7 @@
   epoch_dispatches = ffc3_clamp(dispatches, 1, ffc3_max_dispatches()) ## i64
   epoch_band = ffc3_clamp(band, 0, ffc3_cap(n) - 6) ## i64
   epoch_plus = ffc3_clamp(plus_period, 0, 1000000000) ## i64
-  "cd " + ffc3_shell_quote(root) + " && " + ffc3_shell_quote(binary) + " " + ffc3_shell_quote(seed_path) + " " + ffc3_shell_quote(output_path) + " " + epoch_walkers.to_s() + " " + epoch_steps.to_s() + " " + epoch_dispatches.to_s() + " " + epoch_band.to_s() + " " + epoch_plus.to_s()
+  "cd " + ffc3_shell_quote(root) + " && " + ffc3_shell_quote(binary) + " " + ffc3_shell_quote(seed_path) + " " + ffc3_shell_quote(output_path) + " " + epoch_walkers.to_s() + " " + epoch_steps.to_s() + " " + epoch_dispatches.to_s() + " " + epoch_band.to_s() + " " + epoch_plus.to_s() + " " + ffc3_shell_quote(ffc3_metallib_path(binary))
 
 -> ffc3_epoch(root, binary, n, seed_path, output_path, walkers, steps, dispatches, band, plus_period) (String String i64 String String i64 i64 i64 i64 i64) i64
   command = ffc3_epoch_command(root, binary, n, seed_path, output_path, walkers, steps, dispatches, band, plus_period)

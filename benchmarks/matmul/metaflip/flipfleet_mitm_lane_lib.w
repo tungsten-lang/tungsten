@@ -81,6 +81,7 @@
 
 use core/metal
 use metaflip_worker
+use flipfleet_gpu_worker_bundle
 
 -> ffm_plan_valid(n, subsets, pool, nearby, offset) (i64 i64 i64 i64 i64) i64
   ok = 1 ## i64
@@ -98,23 +99,6 @@ use metaflip_worker
 
 -> ffm_plan_threads(subsets, pool) (i64 i64) i64
   subsets * pool * pool
-
--> ffm_shell_quote(text) (String)
-  "'" + text.replace("'", "'\"'\"'") + "'"
-
-# Standalone build/launch glue for coordinators that keep GPU engines in child
-# processes.  In-process coordinators can call ffm_search directly instead.
--> ffm_build_command(root, binary) (String String)
-  source = "benchmarks/matmul/metaflip/flipfleet_mitm_lane.w"
-  "cd " + ffm_shell_quote(root) + " && TUNGSTEN_LL_PATH=" + ffm_shell_quote(binary + ".ll") + " bin/tungsten -o " + ffm_shell_quote(binary) + " " + ffm_shell_quote(source) + " --release --native --fast --lto"
-
--> ffm_build(root, binary) (String String) i64
-  system(ffm_build_command(root, binary))
-
--> ffm_epoch_command(root, binary, seed_path, output_path, n, subsets, pool, nearby, offset) (String String String String i64 i64 i64 i64 i64)
-  if ffm_plan_valid(n, subsets, pool, nearby, offset) == 0
-    return ""
-  "cd " + ffm_shell_quote(root) + " && " + ffm_shell_quote(binary) + " " + ffm_shell_quote(seed_path) + " " + ffm_shell_quote(output_path) + " " + n.to_s() + " " + subsets.to_s() + " " + pool.to_s() + " " + nearby.to_s() + " " + offset.to_s()
 
 -> ffm_contains(values, count, value) (i64[] i64 i64) i64
   found = 0 ## i64
@@ -750,7 +734,7 @@ fn ffm_build_table(hp0, hp1, hp2, hp3, used, ht0, ht1, ht2, ht3, hpair, hcount, 
     return nil
   state
 
--> ffm_search_loaded(state, output_path, n, subsets, pool, nearby, offset, explicit_subset, metal_path)
+-> ffm_search_loaded(state, output_path, n, subsets, pool, nearby, offset, explicit_subset, metal_path, metallib_path = "")
   rank = ffw_best_rank(state) ## i64
   cap = ffw_default_capacity(n) ## i64
   us = i64[cap]
@@ -759,11 +743,15 @@ fn ffm_build_table(hp0, hp1, hp2, hp3, used, ht0, ht1, ht2, ht3, hpair, hcount, 
   exported = ffw_export_best(state, us, vs, ws) ## i64
   if exported != rank
     return 0 - 10
-  msl = read_file(metal_path)
-  if msl == nil || msl.size() == 0
-    return 0 - 11
   device = metal_device()
-  library = metal_compile_source(device, msl)
+  library = nil
+  if metallib_path != ""
+    library = metal_load_library(device, metallib_path)
+  if library == nil
+    msl = read_file(metal_path)
+    if msl == nil || msl.size() == 0
+      return 0 - 11
+    library = metal_compile_source(device, msl)
   enum_pipeline = metal_pipeline(library, "ffm_enumerate_pairs")
   probe_pipeline = metal_pipeline(library, "ffm_probe_pairs")
   queue = metal_queue(device)
@@ -855,7 +843,7 @@ fn ffm_build_table(hp0, hp1, hp2, hp3, used, ht0, ht1, ht2, ht3, hpair, hcount, 
   << "GPU_MITM_NATIVE_RESULT dimension=" + n.to_s() + " rank=" + rank.to_s() + " tested=" + tested.to_s() + " candidates=" + total_candidates.to_s() + " pairs=" + total_pairs.to_s() + " enum_ms=" + total_enum_ms.to_s() + " table_ms=" + total_table_ms.to_s() + " probe_ms=" + total_probe_ms.to_s() + " fingerprint_hits=" + total_fp_hits.to_s() + " exact_checks=" + total_exact_checks.to_s() + " hit=" + hit.to_s() + " output_rank=" + hit_rank.to_s()
   hit
 
--> ffm_search(seed_path, output_path, n, subsets, pool, nearby, offset, metal_path)
+-> ffm_search(seed_path, output_path, n, subsets, pool, nearby, offset, metal_path, metallib_path = "")
   if ffm_plan_valid(n, subsets, pool, nearby, offset) == 0
     return 0 - 1
   if seed_path == output_path
@@ -865,9 +853,9 @@ fn ffm_build_table(hp0, hp1, hp2, hp3, used, ht0, ht1, ht2, ht3, hpair, hcount, 
   if state == nil
     return 0 - 2
   << "GPU_MITM_NATIVE_START dimension=" + n.to_s() + " rank=" + ffw_best_rank(state).to_s() + " subsets=" + subsets.to_s() + " pool=" + pool.to_s() + " nearby=" + nearby.to_s() + " offset=" + offset.to_s()
-  ffm_search_loaded(state, output_path, n, subsets, pool, nearby, offset, nil, metal_path)
+  ffm_search_loaded(state, output_path, n, subsets, pool, nearby, offset, nil, metal_path, metallib_path)
 
--> ffm_search_exact_subset(seed_path, output_path, n, pool, nearby, selected, metal_path)
+-> ffm_search_exact_subset(seed_path, output_path, n, pool, nearby, selected, metal_path, metallib_path = "")
   if ffm_plan_valid(n, 1, pool, nearby, 0) == 0
     return 0 - 1
   if seed_path == output_path
@@ -877,4 +865,4 @@ fn ffm_build_table(hp0, hp1, hp2, hp3, used, ht0, ht1, ht2, ht3, hpair, hcount, 
   if state == nil
     return 0 - 2
   << "GPU_MITM_NATIVE_START dimension=" + n.to_s() + " rank=" + ffw_best_rank(state).to_s() + " subsets=1 pool=" + pool.to_s() + " nearby=" + nearby.to_s() + " offset=explicit"
-  ffm_search_loaded(state, output_path, n, 1, pool, nearby, 0, selected, metal_path)
+  ffm_search_loaded(state, output_path, n, 1, pool, nearby, 0, selected, metal_path, metallib_path)

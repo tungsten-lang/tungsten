@@ -67,11 +67,9 @@
   if n == 6
     return 153
   if n == 7
-    # Kauers-Wood meta flip-graph (arXiv:2510.19787).  Perminov claims 248
-    # (arXiv:2511.20317) but as of 2026-07-13 neither the 248 nor the 249
-    # scheme artifact is published anywhere; 249 is the accepted UB and any
-    # exact 249 we reach would be the best publicly available scheme.
-    return 249
+    # Deterministic exact GF(2) Sedoglavic/Strassen-pad composition:
+    # 47 + 3*29 + 3*38 = 248. Fleet target is now rank 247.
+    return 248
   n * n * n
 
 -> ffp_record_known(n) (i64) i64
@@ -90,9 +88,8 @@
   if n == 6
     return base + "matmul_6x6_rank153_d2502_gf2.txt"
   if n == 7
-    # Perminov ternary m250 reduced mod 2 (the only public mod-2-valid 7x7
-    # scheme; the 249/248 artifacts are unpublished) — 1 above the UB.
-    return base + "matmul_7x7_rank250_d2966_gf2.txt"
+    # Lowest-density exhaustively verified composition placement.
+    return base + "matmul_7x7_rank248_d2952_sedoglavic_gf2.txt"
   ""
 
 # Every checked-in exact scheme at the tracked frontier. The coordinator
@@ -106,6 +103,7 @@
     paths.push(base + "matmul_3x3_rank23_d159_gf2.txt")
   if n == 4
     paths.push(base + "matmul_4x4_rank47_d450_gf2.txt")
+    paths.push(base + "matmul_4x4_rank47_d677_flips_gf2.txt")
   if n == 5
     paths.push(base + "matmul_5x5_rank93_d1155_gf2.txt")
     paths.push(base + "matmul_5x5_rank93_d1168_gf2.txt")
@@ -118,6 +116,10 @@
     paths.push(base + "matmul_6x6_rank153_d2508_gf2.txt")
     paths.push(base + "matmul_6x6_rank153_d2512_gf2.txt")
     paths.push(base + "matmul_6x6_rank153_d2574_c3_gf2.txt")
+  if n == 7
+    paths.push(base + "matmul_7x7_rank248_d2952_sedoglavic_gf2.txt")
+    paths.push(base + "matmul_7x7_rank248_d2958_sedoglavic_gf2.txt")
+    paths.push(base + "matmul_7x7_rank248_d3015_connectivity_sedoglavic_gf2.txt")
   paths
 
 -> ffp_c3_seed_path(n) (i64)
@@ -184,91 +186,93 @@
     return ffp_door_pattern(n, slot - lanes - pool)
   ffp_door_pattern(n, slot)
 
+# Door/zone/move tables are pure scalar lookups — never allocate a temporary
+# i64[] and return one element.  Under the campaign-lifetime allocator that
+# pattern retained every table forever (same class of leak as near-bank
+# overwrite OOM).
+
 -> ffp_door_pattern(n, slot) (i64 i64) i64
   if slot >= 12
     # Extra hardware-derived workers add breadth instead of repeating the
     # leader/anchor controls from the canonical 12-slot profile.
-    extension = i64[4]
-    extension[0] = 1
-    extension[1] = 5
-    extension[2] = 2
-    extension[3] = 3
-    return extension[(slot - 12) % 4]
+    e = (slot - 12) % 4 ## i64
+    if e == 0
+      return 1
+    if e == 1
+      return 5
+    if e == 2
+      return 2
+    return 3
   s = slot % 12 ## i64
   if n == 3
-    pattern = i64[12]
-    pattern[0] = 0
-    pattern[1] = 1
-    pattern[2] = 2
-    pattern[3] = 2
-    pattern[4] = 2
-    pattern[5] = 2
-    pattern[6] = 3
-    pattern[7] = 3
-    pattern[8] = 3
-    pattern[9] = 5
-    pattern[10] = 5
-    pattern[11] = 6
-    return pattern[s]
+    if s == 0
+      return 0
+    if s == 1
+      return 1
+    if s >= 2 && s <= 5
+      return 2
+    if s >= 6 && s <= 8
+      return 3
+    if s == 9 || s == 10
+      return 5
+    return 6
   if n == 4
-    pattern = i64[12]
-    pattern[0] = 0
-    pattern[1] = 2
-    pattern[2] = 2
-    pattern[3] = 2
-    pattern[4] = 2
-    pattern[5] = 2
-    pattern[6] = 3
-    pattern[7] = 3
-    pattern[8] = 3
-    pattern[9] = 3
-    pattern[10] = 5
-    pattern[11] = 6
-    return pattern[s]
+    # Keep one direct CPU island (slot 5) in the independent
+    # Kauers--Moosbauer/Flips rank-47 orbit instead of making every
+    # record-rank island descend from the AlphaTensor representative.
+    if s == 0
+      return 0
+    if s >= 1 && s <= 4
+      return 2
+    if s == 5
+      return 1
+    if s >= 6 && s <= 9
+      return 3
+    if s == 10
+      return 5
+    return 6
   if n == 5
-    pattern = i64[12]
-    pattern[0] = 0
-    pattern[1] = 1
-    pattern[2] = 2
-    pattern[3] = 2
-    pattern[4] = 3
-    pattern[5] = 3
-    pattern[6] = 4
-    pattern[7] = 4
-    pattern[8] = 4
-    pattern[9] = 5
-    pattern[10] = 5
-    pattern[11] = 6
-    return pattern[s]
+    if s == 0
+      return 0
+    if s == 1
+      return 1
+    if s == 2 || s == 3
+      return 2
+    if s == 4 || s == 5
+      return 3
+    if s >= 6 && s <= 8
+      return 4
+    if s == 9 || s == 10
+      return 5
+    return 6
   if n == 6
-    pattern = i64[12]
-    pattern[0] = 0
-    pattern[1] = 1
-    pattern[2] = 1
-    pattern[3] = 2
-    pattern[4] = 2
-    pattern[5] = 3
-    pattern[6] = 3
-    pattern[7] = 3
-    pattern[8] = 4
-    pattern[9] = 5
-    pattern[10] = 5
-    pattern[11] = 6
-    return pattern[s]
-  pattern = i64[12]
-  pattern[0] = 0
-  pattern[1] = 1
-  pattern[2] = 1
-  pattern[3] = 1
-  pattern[4] = 1
-  pattern[5] = 2
-  pattern[6] = 2
-  pattern[7] = 3
-  pattern[8] = 3
-  pattern[9] = 4
-  pattern[10] = 5
-  pattern[11] = 6
-  pattern[s]
+    if s == 0
+      return 0
+    if s == 1 || s == 2
+      return 1
+    if s == 3 || s == 4
+      return 2
+    if s >= 5 && s <= 7
+      return 3
+    if s == 8
+      return 4
+    if s == 9 || s == 10
+      return 5
+    return 6
+  # default / 7x7
+  if s == 0
+    return 0
+  if s >= 1 && s <= 4
+    return 1
+  if s == 5 || s == 6
+    return 2
+  if s == 7 || s == 8
+    return 3
+  if s == 9
+    return 4
+  if s == 10
+    return 5
+  6
 
 -> ffp_zone_name(code) (i64)
   if code == 0
@@ -281,84 +285,112 @@
 
 -> ffp_zone(slot) (i64) i64
   if slot >= 12
-    extension = i64[4]
-    extension[0] = 0
-    extension[1] = 1
-    extension[2] = 2
-    extension[3] = 1
-    return extension[(slot - 12) % 4]
-  pattern = i64[12]
-  pattern[0] = 1
-  pattern[1] = 0
-  pattern[2] = 1
-  pattern[3] = 2
-  pattern[4] = 0
-  pattern[5] = 1
-  pattern[6] = 2
-  pattern[7] = 3
-  pattern[8] = 0
-  pattern[9] = 1
-  pattern[10] = 2
-  pattern[11] = 3
-  pattern[slot % 12]
+    e = (slot - 12) % 4 ## i64
+    if e == 0
+      return 0
+    if e == 1
+      return 1
+    if e == 2
+      return 2
+    return 1
+  s = slot % 12 ## i64
+  if s == 0
+    return 1
+  if s == 1
+    return 0
+  if s == 2
+    return 1
+  if s == 3
+    return 2
+  if s == 4
+    return 0
+  if s == 5
+    return 1
+  if s == 6
+    return 2
+  if s == 7
+    return 3
+  if s == 8
+    return 0
+  if s == 9
+    return 1
+  if s == 10
+    return 2
+  3
 
 -> ffp_work_moves(n, zone) (i64 i64) i64
+  if zone < 0
+    zone = 0
+  if zone > 3
+    zone = 3
   if n == 3
-    vals = i64[4]
-    vals[0] = 25000000
-    vals[1] = 125000000
-    vals[2] = 625000000
-    vals[3] = 2500000000
-    return vals[zone]
+    if zone == 0
+      return 25000000
+    if zone == 1
+      return 125000000
+    if zone == 2
+      return 625000000
+    return 2500000000
   if n == 4
-    vals = i64[4]
-    vals[0] = 50000000
-    vals[1] = 250000000
-    vals[2] = 1250000000
-    vals[3] = 5000000000
-    return vals[zone]
+    if zone == 0
+      return 50000000
+    if zone == 1
+      return 250000000
+    if zone == 2
+      return 1250000000
+    return 5000000000
   if n == 7
-    vals = i64[4]
-    vals[0] = 200000000
-    vals[1] = 1000000000
-    vals[2] = 5000000000
-    vals[3] = 20000000000
-    return vals[zone]
-  vals = i64[4]
-  vals[0] = 100000000
-  vals[1] = 500000000
-  vals[2] = 2500000000
-  vals[3] = 10000000000
-  vals[zone]
+    if zone == 0
+      return 200000000
+    if zone == 1
+      return 1000000000
+    if zone == 2
+      return 5000000000
+    return 20000000000
+  if zone == 0
+    return 100000000
+  if zone == 1
+    return 500000000
+  if zone == 2
+    return 2500000000
+  10000000000
 
 -> ffp_wander_moves(n, zone) (i64 i64) i64
+  if zone < 0
+    zone = 0
+  if zone > 3
+    zone = 3
   if n == 3
-    vals = i64[4]
-    vals[0] = 6250000
-    vals[1] = 25000000
-    vals[2] = 125000000
-    vals[3] = 250000000
-    return vals[zone]
+    if zone == 0
+      return 6250000
+    if zone == 1
+      return 25000000
+    if zone == 2
+      return 125000000
+    return 250000000
   if n == 4
-    vals = i64[4]
-    vals[0] = 12500000
-    vals[1] = 50000000
-    vals[2] = 250000000
-    vals[3] = 500000000
-    return vals[zone]
+    if zone == 0
+      return 12500000
+    if zone == 1
+      return 50000000
+    if zone == 2
+      return 250000000
+    return 500000000
   if n == 7
-    vals = i64[4]
-    vals[0] = 50000000
-    vals[1] = 200000000
-    vals[2] = 1000000000
-    vals[3] = 2000000000
-    return vals[zone]
-  vals = i64[4]
-  vals[0] = 25000000
-  vals[1] = 100000000
-  vals[2] = 500000000
-  vals[3] = 1000000000
-  vals[zone]
+    if zone == 0
+      return 50000000
+    if zone == 1
+      return 200000000
+    if zone == 2
+      return 1000000000
+    return 2000000000
+  if zone == 0
+    return 25000000
+  if zone == 1
+    return 100000000
+  if zone == 2
+    return 500000000
+  1000000000
 
 # GPU role codes: rank, density, symmetry, split, break, orbit, polarize,
 # compose, novelty, cooperative SIMD, and the rotating kernel pool.

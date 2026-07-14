@@ -6,6 +6,7 @@
 # nondominated over density, ordinary-flip connectivity, and term-set novelty.
 
 use metaflip_worker
+use flipfleet_basin_identity
 
 -> ffbp_term_in(state, u, v, w) (i64[] i64 i64 i64) i64
   found = 0 ## i64
@@ -20,6 +21,8 @@ use metaflip_worker
   found
 
 -> ffbp_distance(left, right) (i64[] i64[]) i64
+  if ffbi_best_id(left) == ffbi_best_id(right)
+    return 0
   left_rank = ffw_best_rank(left) ## i64
   right_rank = ffw_best_rank(right) ## i64
   common = 0 ## i64
@@ -86,13 +89,10 @@ use metaflip_worker
 # not enter the hash, so coordinate relabelings with the same ordinary-flip
 # connectivity share a structural family.  Collisions only make the quota more
 # conservative; exactness and novelty are gated separately.
--> ffbp_structural_signature(state) (i64[]) i64
+-> ffbp_structural_signature_scratch(state, values, counts, axis_signatures) (i64[] i64[] i64[] i64[]) i64
   rank = ffw_best_rank(state) ## i64
-  signature = 17 ## i64
   axis = 0 ## i64
   while axis < 3
-    values = i64[rank]
-    counts = i64[rank]
     unique = 0 ## i64
     i = 0 ## i64
     while i < rank
@@ -125,13 +125,40 @@ use metaflip_worker
         j -= 1
       counts[j] = count
       i += 1
-    signature = (signature * 1000003 + axis * 8191 + unique) % 2147483647
+    signature = (17 * 1000003 + unique) % 2147483647 ## i64
     i = 0
     while i < unique
       signature = (signature * 1000003 + counts[i]) % 2147483647
       i += 1
+    axis_signatures[axis] = signature
+    axis += 1
+  i = 1
+  while i < 3
+    value = axis_signatures[i] ## i64
+    j = i ## i64
+    while j > 0 && axis_signatures[j - 1] > value
+      axis_signatures[j] = axis_signatures[j - 1]
+      j -= 1
+    axis_signatures[j] = value
+    i += 1
+  signature = 17 ## i64
+  axis = 0
+  while axis < 3
+    signature = (signature * 1000003 + axis_signatures[axis]) % 2147483647
     axis += 1
   signature
+
+# Prefer ffbp_structural_signature_scratch with caller-owned buffers.  This
+# fallback still allocates once per call and is only safe on cold paths; hot
+# admission must use scratch (see ffn_near_add_if_admitted).
+-> ffbp_structural_signature(state) (i64[]) i64
+  rank = ffw_best_rank(state) ## i64
+  if rank < 1
+    rank = 1
+  values = i64[rank]
+  counts = i64[rank]
+  axis_signatures = i64[3]
+  ffbp_structural_signature_scratch(state, values, counts, axis_signatures)
 
 -> ffbp_remove_at(items, index)
   i = index ## i64
@@ -154,12 +181,12 @@ use metaflip_worker
     i += 1
   nearest
 
-# Counters: admitted, evicted, novelty-rejected, duplicate, signature-rejected.
--> ffbp_near_add(bank, signatures, uses, successes, candidate, capacity, signature_quota, min_distance, counters)
+# Return 0 for rejection, 1 for append, or victim+2 for replacement. Counters:
+# admitted, evicted, novelty-rejected, duplicate, signature-rejected.
+-> ffbp_near_admission_action(bank, signatures, candidate, capacity, signature_quota, min_distance, counters, signature) i64
   if capacity < 1 || signature_quota < 1
     counters[2] = counters[2] + 1
     return 0
-  signature = ffbp_structural_signature(candidate) ## i64
   closest = 999999999 ## i64
   signature_count = 0 ## i64
   i = 0 ## i64
@@ -175,11 +202,6 @@ use metaflip_worker
     i += 1
 
   if bank.size() < capacity && signature_count < signature_quota && closest >= min_distance
-    bank.push(candidate)
-    signatures.push(signature)
-    uses.push(0)
-    successes.push(0)
-    counters[0] = counters[0] + 1
     return 1
 
   victim = 0 - 1 ## i64
@@ -239,13 +261,51 @@ use metaflip_worker
       counters[2] = counters[2] + 1
     return 0
 
-  bank[victim] = candidate
-  signatures[victim] = signature
-  uses[victim] = 0
-  successes[victim] = 0
-  counters[0] = counters[0] + 1
-  counters[1] = counters[1] + 1
-  1
+  victim + 2
+
+-> ffbp_near_commit(bank, signatures, uses, successes, candidate, signature, action, counters) i64
+  if action == 1
+    bank.push(candidate)
+    signatures.push(signature)
+    uses.push(0)
+    successes.push(0)
+    counters[0] = counters[0] + 1
+    return 1
+  if action >= 2
+    # Reseed into the victim so the previous full state is not orphaned under
+    # the campaign-lifetime allocator (reference overwrite was an OOM path).
+    victim = action - 2 ## i64
+    if victim < 0 || victim >= bank.size()
+      return 0
+    loaded = ffw_reseed_from(bank[victim], candidate, 1) ## i64
+    if loaded < 1
+      # Fallback only when layouts are incompatible: keep prior behavior.
+      bank[victim] = candidate
+    signatures[victim] = signature
+    uses[victim] = 0
+    successes[victim] = 0
+    counters[0] = counters[0] + 1
+    counters[1] = counters[1] + 1
+    return 1
+  0
+
+# Scratch form: no per-call signature allocations.  values/counts need at least
+# ffw_best_rank(candidate) slots; axis_signatures needs 3.
+-> ffbp_near_add_scratch(bank, signatures, uses, successes, candidate, capacity, signature_quota, min_distance, counters, values, counts, axis_signatures)
+  signature = ffbp_structural_signature_scratch(candidate, values, counts, axis_signatures) ## i64
+  action = ffbp_near_admission_action(bank, signatures, candidate, capacity, signature_quota, min_distance, counters, signature) ## i64
+  ffbp_near_commit(bank, signatures, uses, successes, candidate, signature, action, counters)
+
+-> ffbp_near_add(bank, signatures, uses, successes, candidate, capacity, signature_quota, min_distance, counters)
+  # Cold-path wrapper.  Allocates rank-sized scratch once; prefer
+  # ffbp_near_add_scratch on the campaign hot path.
+  rank = ffw_best_rank(candidate) ## i64
+  if rank < 1
+    rank = 1
+  values = i64[rank]
+  counts = i64[rank]
+  axis_signatures = i64[3]
+  ffbp_near_add_scratch(bank, signatures, uses, successes, candidate, capacity, signature_quota, min_distance, counters, values, counts, axis_signatures)
 
 -> ffbp_select_least_used(bank, uses, stable_key) i64
   if bank.size() == 0
@@ -351,40 +411,55 @@ use metaflip_worker
       counters[1] = counters[1] + 1
     i -= 1
 
-  states.push(candidate)
-  ranks.push(candidate_rank)
-  bits.push(candidate_bits)
-  pairs.push(candidate_pairs)
-  novelties.push(candidate_novelty)
-  roles.push(role)
-  uses.push(0)
+  if states.size() < capacity
+    states.push(candidate)
+    ranks.push(candidate_rank)
+    bits.push(candidate_bits)
+    pairs.push(candidate_pairs)
+    novelties.push(candidate_novelty)
+    roles.push(role)
+    uses.push(0)
+    counters[0] = counters[0] + 1
+    return 1
 
-  retained_index = states.size() - 1 ## i64
-  if states.size() > capacity
-    victim = 0 ## i64
-    i = 1
-    while i < states.size()
-      worse = 0 ## i64
-      if novelties[i] < novelties[victim]
+  # At capacity: reseed the worst victim in place instead of push+pop, which
+  # orphaned a full state every admission under the campaign allocator.
+  victim = 0 ## i64
+  i = 1
+  while i < states.size()
+    worse = 0 ## i64
+    if novelties[i] < novelties[victim]
+      worse = 1
+    if novelties[i] == novelties[victim]
+      if bits[i] > bits[victim]
         worse = 1
-      if novelties[i] == novelties[victim]
-        if bits[i] > bits[victim]
-          worse = 1
-        if bits[i] == bits[victim] && pairs[i] < pairs[victim]
-          worse = 1
-      if worse == 1
-        victim = i
-      i += 1
-    candidate_removed = 0 ## i64
-    if victim == retained_index
-      candidate_removed = 1
-    z = ffbp_pareto_remove(states, ranks, bits, pairs, novelties, roles, uses, victim) ## i64
-    counters[1] = counters[1] + 1
-    if candidate_removed == 1
+      if bits[i] == bits[victim] && pairs[i] < pairs[victim]
+        worse = 1
+    if worse == 1
+      victim = i
+    i += 1
+  # Only replace if candidate is not worse than the victim on the eviction key.
+  if novelties[victim] > candidate_novelty
+    counters[2] = counters[2] + 1
+    return 0
+  if novelties[victim] == candidate_novelty
+    if bits[victim] < candidate_bits
       counters[2] = counters[2] + 1
       return 0
-
+    if bits[victim] == candidate_bits && pairs[victim] > candidate_pairs
+      counters[2] = counters[2] + 1
+      return 0
+  loaded = ffw_reseed_from(states[victim], candidate, 1) ## i64
+  if loaded < 1
+    states[victim] = candidate
+  ranks[victim] = candidate_rank
+  bits[victim] = candidate_bits
+  pairs[victim] = candidate_pairs
+  novelties[victim] = candidate_novelty
+  roles[victim] = role
+  uses[victim] = 0
   counters[0] = counters[0] + 1
+  counters[1] = counters[1] + 1
   1
 
 -> ffbp_pareto_select(states, bits, pairs, novelties, uses, stable_key) i64

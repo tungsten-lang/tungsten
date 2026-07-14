@@ -10,7 +10,7 @@
 # Public API families:
 #   ff_tui_health, ff_tui_heartbeat_age_ms, ff_tui_heartbeat_due
 #   ff_tui_objective, ff_tui_record_badge
-#   ff_tui_cpu_island_row, ff_tui_gpu_role_row
+#   ff_tui_cpu_island_row, ff_tui_gpu_role_row, ff_tui_rect_engine_row
 #   ff_tui_frontier_diversity, ff_tui_shoulder_diversity
 #   ff_tui_symmetry_diversity, ff_tui_gpu_pareto_diversity
 #   ff_tui_cpu_effectiveness, ff_tui_gpu_effectiveness
@@ -543,6 +543,27 @@
   if seed_rank > 0
     seed = "r" + seed_rank.to_s
   row = ff_tui_pad_right(role, 9) + ff_tui_pad_left(lanes.to_s + "l", 6) + "  " + ff_tui_pad_right(seed, 5) + ff_tui_pad_right("cand " + ff_tui_compact(candidates), 10) + ff_tui_pad_right("P" + pareto_admissions.to_s, 4) + ff_tui_pad_right("drop" + rank_drops.to_s, 7) + ff_tui_pad_right("den" + density_improvements.to_s, 6)
+  if failures > 0
+    row = row + ff_tui_pad_right("fail" + failures.to_s, 7)
+  if failures <= 0
+    row = row + ff_tui_pad_right("", 7)
+  if retrying != 0
+    row = row + ff_tui_pad_right("retry", 6)
+  if retrying == 0
+    row = row + ff_tui_pad_right("", 6)
+  row = row + ff_tui_gpu_effectiveness(reward_milli, lane_epochs)
+  if recipe != ""
+    row = row + "  " + recipe
+  ff_tui_clip(row, width)
+
+# Rectangular Metal relay row: the GPU role grid without the Pareto column.
+# A first-class rectangular campaign has no novelty bank, so printing "P0"
+# would advertise an archive that does not exist.
+-> ff_tui_rect_engine_row(role, lanes, seed_rank, recipe, candidates, rank_drops, density_improvements, reward_milli, lane_epochs, failures, retrying, width) (String i64 i64 String i64 i64 i64 i64 i64 i64 i64 i64)
+  seed = "r?"
+  if seed_rank > 0
+    seed = "r" + seed_rank.to_s
+  row = ff_tui_pad_right(role, 9) + ff_tui_pad_left(lanes.to_s + "l", 6) + "  " + ff_tui_pad_right(seed, 5) + ff_tui_pad_right("cand " + ff_tui_compact(candidates), 10) + ff_tui_pad_right("drop" + rank_drops.to_s, 7) + ff_tui_pad_right("den" + density_improvements.to_s, 6)
   if failures > 0
     row = row + ff_tui_pad_right("fail" + failures.to_s, 7)
   if failures <= 0

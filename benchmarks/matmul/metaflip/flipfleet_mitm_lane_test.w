@@ -20,6 +20,7 @@ build_command = ffm_build_command("/repo path", "/tmp/mitm worker")
 failures += ffmt_check("native build command", build_command.include?("flipfleet_mitm_lane.w") && !build_command.include?("python"))
 epoch_command = ffm_epoch_command("/repo path", "/tmp/mitm worker", "/tmp/seed file", "/tmp/out file", 6, 4, 180, 2, 12)
 failures += ffmt_check("native epoch command", epoch_command.include?("'/tmp/seed file'") && epoch_command.include?(" 6 4 180 2 12") && !epoch_command.include?("python"))
+failures += ffmt_check("native cached library", epoch_command.ends_with?(" '/tmp/mitm worker.metallib'"))
 
 # Cross-language reference vector from xor_fingerprint(expand((3,5,9),9,9,9)).
 words = i64[4]

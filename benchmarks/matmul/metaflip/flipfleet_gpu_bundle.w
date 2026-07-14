@@ -10,6 +10,9 @@
 # `ffb_epoch_command` with different exact seed files and schedule values.  C3,
 # cooperative SIMD, and MITM retain their dedicated native engines.
 
+use flipfleet_metallib_cache
+use flipfleet_persistent_gpu
+
 -> ffb_supported(n) (i64) i64
   ok = 0 ## i64
   if n >= 3 && n <= 7
@@ -99,28 +102,36 @@
 -> ffb_shell_quote(text) (String)
   "'" + text.replace("'", "'\"'\"'") + "'"
 
-# Compiling emits a temporary .ll/.metal beside `binary`; the executable reads
-# the checked-in sidecar selected above.  This keeps build products in the run
-# directory and leaves the source bundle immutable during campaigns.
+# Compiling emits the native executable plus a source-fresh `.metallib` beside
+# `binary`; each child loads that cache instead of recompiling the checked-in
+# sidecar during every bounded epoch.
 -> ffb_build_command(root, n, binary) (String i64 String)
   if ffb_supported(n) == 0
     return ""
   llpath = binary + ".ll"
-  "cd " + ffb_shell_quote(root) + " && TUNGSTEN_LL_PATH=" + ffb_shell_quote(llpath) + " bin/tungsten -o " + ffb_shell_quote(binary) + " " + ffb_shell_quote(ffb_source_rel(n)) + " --release --native --fast --lto"
+  "cd " + ffb_shell_quote(root) + " && TUNGSTEN_LL_PATH=" + ffb_shell_quote(llpath) + " TUNGSTEN_METAL_PATH=" + ffb_shell_quote(ffmc_generated_source_path(binary)) + " bin/tungsten -o " + ffb_shell_quote(binary) + " " + ffb_shell_quote(ffb_source_rel(n)) + " --release --native --fast --lto"
 
 -> ffb_build(root, n, binary) (String i64 String) i64
   command = ffb_build_command(root, n, binary)
   if command == ""
     return 0
   built = system(command)
-  result = 0 ## i64
-  if built
-    result = 1
-  result
+  if !built
+    return 0
+  ffmc_build(root, ffmc_generated_source_path(binary), binary)
+
+-> ffb_metallib_path(binary) (String)
+  ffmc_library_path(binary)
+
+-> ffb_metallib_fresh(root, n, binary) (String i64 String) i64
+  ffmc_fresh(ffmc_generated_source_path(binary), binary)
+
+-> ffb_prepare_metallib(root, n, binary) (String i64 String) i64
+  ffmc_prepare(root, ffmc_generated_source_path(binary), binary)
 
 # Positional cal2zone ABI (the wrapper keeps it out of the coordinator):
 #   seed best n n n record target steps reseed margin workq wanderq wthr
-#   lanes live escapes rounds
+#   lanes live escapes rounds metallib
 #
 # `rounds` bounds one adaptive scheduling epoch.  All candidates written to
 # `best_path` have passed the relay's deterministic full-tensor host gate.
@@ -144,4 +155,4 @@
   epoch_rounds = rounds ## i64
   if epoch_rounds < 1
     epoch_rounds = 1
-  "cd " + ffb_shell_quote(root) + " && " + ffb_shell_quote(binary) + " " + ffb_shell_quote(seed_path) + " " + ffb_shell_quote(best_path) + " " + n.to_s() + " " + n.to_s() + " " + n.to_s() + " " + ffb_shell_quote(record_path) + " " + record_target.to_s() + " " + epoch_steps.to_s() + " " + epoch_reseed.to_s() + " " + margin.to_s() + " " + workq.to_s() + " " + wanderq.to_s() + " " + wthr.to_s() + " " + lanes.to_s() + " " + ffb_shell_quote(live_path) + " " + epoch_escapes.to_s() + " " + epoch_rounds.to_s()
+  "cd " + ffb_shell_quote(root) + " && " + ffb_shell_quote(binary) + " " + ffb_shell_quote(seed_path) + " " + ffb_shell_quote(best_path) + " " + n.to_s() + " " + n.to_s() + " " + n.to_s() + " " + ffb_shell_quote(record_path) + " " + record_target.to_s() + " " + epoch_steps.to_s() + " " + epoch_reseed.to_s() + " " + margin.to_s() + " " + workq.to_s() + " " + wanderq.to_s() + " " + wthr.to_s() + " " + lanes.to_s() + " " + ffb_shell_quote(live_path) + " " + epoch_escapes.to_s() + " " + epoch_rounds.to_s() + " " + ffb_shell_quote(ffb_metallib_path(binary))

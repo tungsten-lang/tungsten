@@ -20,15 +20,24 @@ i64 views to avoid boxed-integer truncation.
 Candidate adoption is deterministic: the host copies the candidate once,
 rejects zero or out-of-range factors, and reconstructs every tensor coordinate
 over GF(2). The old 40-random-evaluation check is not used by these assets.
+When that gate rejects a nominal improvement, the worker writes candidate,
+seed, and metadata sidecars (metadata last as the commit marker). The metadata
+contains the worker generation/round and the first exact syndrome coordinate;
+`flipfleet_native.w` independently verifies and freezes strict-target failures
+with its own launch nonce before reusing the physical slot.
 
-The final positional argument bounds the number of dispatch rounds in one
-adaptive epoch. Generic roles may use distinct exact seed files and schedules;
+The rounds argument bounds the number of dispatch rounds in one adaptive
+epoch; the following optional argument names an offline-compiled `.metallib`.
+Generic roles may use distinct exact seed files and schedules;
 C3-preserving, cooperative-SIMD, and MITM roles remain separate engines.
 `flipfleet_native.w` builds this bundle on demand and uses it for the active
 rank, density, split, fixed-cube, orbit, polarization, composition, and novelty
 roles. Its coordinator repeats the exhaustive gate before adoption.
 
 The assets are regenerated deliberately at development time with
-`benchmarks/matmul/zoo/gpu_cal2zone_gen.py`. Native campaigns only compile the
-checked-in `.w` source (when a cached binary is absent) and load its checked-in
-`.metal` sidecar.
+`benchmarks/matmul/zoo/gpu_cal2zone_gen.py`. Native campaigns compile the
+checked-in `.w` source and `.metal` sidecar once, cache the latter beside the
+worker as `worker.metallib`, and load that library in subsequent adaptive
+children. Stable generic allocations may additionally keep one worker alive
+through the generation-numbered mailbox protocol; lane or engine rotations
+restart it, while other engines retain bounded-child isolation.

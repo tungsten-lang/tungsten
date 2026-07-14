@@ -26,6 +26,7 @@ while n <= 7
     failures += expect("structural gate " + n.to_s(), source.include?("A duplicate pair cancels over GF(2)"))
     failures += expect("write gated " + n.to_s(), source.include?("if vok == 1\n  write_file(outpath, body)"))
     failures += expect("checked-in sidecar " + n.to_s(), source.include?(ffsimd_metal_rel(n)))
+    failures += expect("cached library " + n.to_s(), source.include?("metal_load_library(device, metallibpath)"))
   if metal != nil
     failures += expect("cooperative kernel " + n.to_s(), metal.include?("kernel void flipwalk_simd"))
     failures += expect("simd lane " + n.to_s(), metal.include?("thread_index_in_simdgroup"))
@@ -59,6 +60,7 @@ failures += expect("quoted root", build.include?("'/repo path'"))
 
 epoch = ffsimd_epoch_command("/repo", "/tmp/simd", 6, "/tmp/seed", "/tmp/best", 95, 100, 3, 4)
 failures += expect("epoch groups", epoch.include?("'/tmp/seed' '/tmp/best' 2 100 3 4 1"))
+failures += expect("cached epoch", epoch.ends_with?(" '/tmp/simd.metallib'"))
 failures += expect("epoch finite", epoch != "")
 
 if failures > 0

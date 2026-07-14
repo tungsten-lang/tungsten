@@ -9,6 +9,8 @@
 # per-trajectory counters.  The worker writes a candidate only after its host
 # exhaustively reconstructs every tensor coefficient over GF(2).
 
+use flipfleet_metallib_cache
+
 -> ffsimd_supported(n) (i64) i64
   ok = 0 ## i64
   if n >= 3 && n <= 7
@@ -109,17 +111,22 @@
   if ffsimd_supported(n) == 0
     return ""
   llpath = binary + ".ll"
-  "cd " + ffsimd_shell_quote(root) + " && TUNGSTEN_LL_PATH=" + ffsimd_shell_quote(llpath) + " bin/tungsten -o " + ffsimd_shell_quote(binary) + " " + ffsimd_shell_quote(ffsimd_source_rel(n)) + " --release --native --fast --lto"
+  "cd " + ffsimd_shell_quote(root) + " && TUNGSTEN_LL_PATH=" + ffsimd_shell_quote(llpath) + " TUNGSTEN_METAL_PATH=" + ffsimd_shell_quote(ffmc_generated_source_path(binary)) + " bin/tungsten -o " + ffsimd_shell_quote(binary) + " " + ffsimd_shell_quote(ffsimd_source_rel(n)) + " --release --native --fast --lto"
 
 -> ffsimd_build(root, n, binary) (String i64 String) i64
   command = ffsimd_build_command(root, n, binary)
   if command == ""
     return 0
   built = system(command)
-  result = 0 ## i64
-  if built
-    result = 1
-  result
+  if !built
+    return 0
+  ffmc_build(root, ffmc_generated_source_path(binary), binary)
+
+-> ffsimd_metallib_path(binary) (String)
+  ffmc_library_path(binary)
+
+-> ffsimd_metallib_fresh(root, n, binary) (String i64 String) i64
+  ffmc_fresh(ffmc_generated_source_path(binary), binary)
 
 -> ffsimd_epoch_valid(requested_lanes, steps, dispatches, margin) (i64 i64 i64 i64) i64
   ok = 1 ## i64
@@ -135,7 +142,7 @@
   ok
 
 # Positional worker ABI:
-#   seed output groups steps dispatches margin fixed_mode
+#   seed output groups steps dispatches margin fixed_mode metallib
 #
 # `requested_lanes` is the scheduler allocation, while `groups` is the number
 # of independent cooperative trajectories.  `dispatches` is the hard epoch
@@ -146,7 +153,7 @@
   if ffsimd_epoch_valid(requested_lanes, steps, dispatches, margin) == 0
     return ""
   groups = ffsimd_groups_for_lanes(requested_lanes) ## i64
-  "cd " + ffsimd_shell_quote(root) + " && " + ffsimd_shell_quote(binary) + " " + ffsimd_shell_quote(seed_path) + " " + ffsimd_shell_quote(best_path) + " " + groups.to_s() + " " + steps.to_s() + " " + dispatches.to_s() + " " + margin.to_s() + " " + ffsimd_mode(n).to_s()
+  "cd " + ffsimd_shell_quote(root) + " && " + ffsimd_shell_quote(binary) + " " + ffsimd_shell_quote(seed_path) + " " + ffsimd_shell_quote(best_path) + " " + groups.to_s() + " " + steps.to_s() + " " + dispatches.to_s() + " " + margin.to_s() + " " + ffsimd_mode(n).to_s() + " " + ffsimd_shell_quote(ffsimd_metallib_path(binary))
 
 -> ffsimd_epoch(root, binary, n, seed_path, best_path, requested_lanes, steps, dispatches, margin) (String String i64 String String i64 i64 i64 i64) i64
   command = ffsimd_epoch_command(root, binary, n, seed_path, best_path, requested_lanes, steps, dispatches, margin)

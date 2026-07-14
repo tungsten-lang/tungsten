@@ -197,7 +197,7 @@
     st[18] = wq
     st[19] = vq
     st[36] = 0                         # best bits
-    st[37] = 0                         # current bits cache
+    st[37] = 0                         # rolling current-term Zobrist digest
     st[38] = 0                         # last exact result
     st[40] = st[10]                    # band start
     st[41] = 60                        # maximum band
@@ -210,6 +210,17 @@
 -> ffw_hash(st, key) (i64[] i64) i64
   y = key ^ (key >> 21) ^ (key >> 42) ## i64
   ((y * 2654435761) >> 13) & st[43]
+
+# Order-independent live-state fingerprint.  It is deliberately telemetry,
+# never an exactness proof: XOR lets ffw_toggle maintain it in O(1), including
+# rejected moves whose reverse toggles restore the old value.
+-> ffw_term_zobrist(u, v, w) (i64 i64 i64) i64
+  # Telemetry hash, optimized for the accepted-state measurement lane.  The
+  # masking makes the intended wrapping arithmetic explicit to debug builds.
+  x = (u * 6364136223846793005 + v * 1442695040888963407 + w * 2862933555777941757) & 9223372036854775807 ## i64
+  x = x ^ (x >> 29)
+  x = (x * 3202034522624059733) & 9223372036854775807
+  x ^ (x >> 31)
 
 -> ffw_chain_link(st, head, nexto, prevo, slot, key) (i64[] i64 i64 i64 i64 i64) i64
   bucket = ffw_hash(st, key) ## i64
@@ -265,6 +276,8 @@
             z = ffw_chain_link(st, st[55], st[60], st[61], slot, w)
             st[st[50] + rank] = slot
             st[st[51] + slot] = rank
+            if (st[42] & 2) != 0
+              st[37] = st[37] ^ ffw_term_zobrist(u, v, w)
             result = rank + 1
           if free_top <= 0
             st[39] = st[39] + 1
@@ -280,6 +293,8 @@
           st[st[52] + free_top] = found
           st[62] = free_top + 1
           st[st[51] + found] = 0 - 1
+          if (st[42] & 2) != 0
+            st[37] = st[37] ^ ffw_term_zobrist(u, v, w)
           result = rank - 1
   result
 
@@ -486,7 +501,6 @@
     current = ffw_toggle(st, st[st[47] + i], st[st[48] + i], st[st[49] + i], current)
     i += 1
   st[6] = current
-  st[37] = st[36]
   st[26] = st[26] + 1
   current
 
@@ -870,7 +884,7 @@
     c = st[st[58] + slot]
   count
 
--> ffw_try_flip_core(st, mode, min_slot) (i64[] i64 i64) i64
+-> ffw_try_flip_controlled(st, mode, min_slot, pressure_ceiling, pressure_period) (i64[] i64 i64 i64 i64) i64
   st[20] = st[20] + 1
   result = 0 ## i64
   rank_before = st[6] ## i64
@@ -937,7 +951,13 @@
         accept = 1
       if rank == rank_before
         if mode == 0
-          pressure_slack = 6 - ((st[13] / 300000) % 7) ## i64
+          ceiling = pressure_ceiling ## i64
+          if ceiling < 0
+            ceiling = 0
+          period = pressure_period ## i64
+          if period < 1
+            period = 1
+          pressure_slack = ceiling - ((st[13] / period) % (ceiling + 1)) ## i64
           if new_pressure + pressure_slack >= old_pressure
             if new_bits <= old_bits + st[17]
               accept = 1
@@ -962,6 +982,9 @@
       if accept == 0
         st[6] = rank_before
   result
+
+-> ffw_try_flip_core(st, mode, min_slot) (i64[] i64 i64) i64
+  ffw_try_flip_controlled(st, mode, min_slot, 6, 300000)
 
 -> ffw_try_flip(st, mode) (i64[] i64) i64
   ffw_try_flip_core(st, mode, 0)
@@ -1037,19 +1060,19 @@
       st[6] = rank_before
   result
 
--> ffw_one(st, mode) (i64[] i64) i64
+-> ffw_one_controlled(st, mode, split_cadence, pressure_ceiling, pressure_period) (i64[] i64 i64 i64 i64) i64
   result = 0 ## i64
   do_split = 0 ## i64
   if mode != 0
     if st[13] > 0
-      if (st[13] % 2000) == 0
+      if split_cadence > 0 && (st[13] % split_cadence) == 0
         do_split = 1
   if do_split == 1
     result = ffw_try_split(st)
   if do_split == 0
-    result = ffw_try_flip(st, mode)
+    result = ffw_try_flip_controlled(st, mode, 0, pressure_ceiling, pressure_period)
   st[13] = st[13] + 1
-  st[42] = mode
+  st[42] = (st[42] & 2) | mode
   if mode == 0
     st[34] = st[34] + 1
   if mode != 0
@@ -1058,6 +1081,9 @@
     if st[6] > st[7] + st[10]
       z = ffw_restore_best(st) ## i64
   result
+
+-> ffw_one(st, mode) (i64[] i64) i64
+  ffw_one_controlled(st, mode, 2000, 6, 300000)
 
 -> ffw_work(st, steps) (i64[] i64) i64
   i = 0 ## i64
@@ -1073,11 +1099,17 @@
     i += 1
   st[7]
 
--> ffw_advance_zone(st) (i64[]) i64
+-> ffw_advance_zone_controlled(st, work_step, wander_step) (i64[] i64 i64) i64
   band = st[10] ## i64
-  next_band = band + 1 ## i64
+  work_delta = work_step ## i64
+  if work_delta < 1
+    work_delta = 1
+  wander_delta = wander_step ## i64
+  if wander_delta < 1
+    wander_delta = 1
+  next_band = band + work_delta ## i64
   if band > st[11]
-    next_band = band + 12
+    next_band = band + wander_delta
   if next_band > st[41]
     next_band = st[40]
     st[12] = st[12] + 1
@@ -1090,6 +1122,9 @@
   st[14] = st[13] + quota
   next_band
 
+-> ffw_advance_zone(st) (i64[]) i64
+  ffw_advance_zone_controlled(st, 1, 12)
+
 -> ffw_walk(st, steps) (i64[] i64) i64
   i = 0 ## i64
   while i < steps
@@ -1097,6 +1132,91 @@
     if st[10] > st[11]
       mode = 1
     z = ffw_one(st, mode) ## i64
+    if st[13] >= st[14]
+      z = ffw_advance_zone(st)
+    i += 1
+  st[7]
+
+# One bounded experiment lane may race these controls without changing the
+# default hot loop for the rest of the fleet. controls:
+#   split cadence, pressure ceiling, pressure period, work-band step,
+#   wander-band step, work/wander threshold, maximum band.
+-> ffw_walk_tuned(st, steps, controls) (i64[] i64 i64[]) i64
+  threshold = controls[5] ## i64
+  if threshold < 1
+    threshold = 1
+  max_band = controls[6] ## i64
+  if max_band <= threshold
+    max_band = threshold + 1
+  st[11] = threshold
+  st[41] = max_band
+  i = 0 ## i64
+  while i < steps
+    mode = 0 ## i64
+    if st[10] > st[11]
+      mode = 1
+    z = ffw_one_controlled(st, mode, controls[0], controls[1], controls[2]) ## i64
+    if st[13] >= st[14]
+      z = ffw_advance_zone_controlled(st, controls[3], controls[4])
+    i += 1
+  st[7]
+
+-> ffw_enable_cycle_hash(st) (i64[]) i64
+  st[42] = st[42] | 2
+  fingerprint = 0 ## i64
+  i = 0 ## i64
+  while i < st[6]
+    slot = st[st[50] + i] ## i64
+    fingerprint = fingerprint ^ ffw_term_zobrist(st[st[44] + slot], st[st[45] + slot], st[st[46] + slot])
+    i += 1
+  st[37] = fingerprint
+  fingerprint
+
+# Observe accepted-state recurrence on one measurement island. recent is a
+# fixed-size direct-mapped filter supplied by the coordinator; stats layout is cursor, count,
+# unique, repeats, immediate inverses, accepted observations, last hash,
+# previous hash, initialized. No rejection-path work is added.
+-> ffw_walk_cycle_watch(st, steps, recent, recent_capacity, stats) (i64[] i64 i64[] i64 i64[]) i64
+  if recent_capacity < 1
+    return ffw_walk(st, steps)
+  if stats[8] == 0
+    initial = ffw_enable_cycle_hash(st) ## i64
+    initial_slot = (initial ^ (initial >> 32)) & (recent_capacity - 1) ## i64
+    recent[initial_slot] = initial
+    stats[0] = 0
+    stats[1] = 1
+    stats[2] = 1
+    stats[3] = 0
+    stats[4] = 0
+    stats[5] = 0
+    stats[6] = initial
+    stats[7] = 0 - 1
+    stats[8] = 1
+  i = 0 ## i64
+  while i < steps
+    accepted_before = st[21] ## i64
+    mode = 0 ## i64
+    if st[10] > st[11]
+      mode = 1
+    z = ffw_one(st, mode) ## i64
+    if st[21] > accepted_before
+      fingerprint = st[37] ## i64
+      if stats[7] >= 0 && fingerprint == stats[7]
+        stats[4] = stats[4] + 1
+      found = 0 ## i64
+      filter_slot = (fingerprint ^ (fingerprint >> 32)) & (recent_capacity - 1) ## i64
+      if recent[filter_slot] == fingerprint
+        found = 1
+      if found == 1
+        stats[3] = stats[3] + 1
+      if found == 0
+        stats[2] = stats[2] + 1
+        if recent[filter_slot] == 0 && stats[1] < recent_capacity
+          stats[1] = stats[1] + 1
+        recent[filter_slot] = fingerprint
+      stats[5] = stats[5] + 1
+      stats[7] = stats[6]
+      stats[6] = fingerprint
     if st[13] >= st[14]
       z = ffw_advance_zone(st)
     i += 1
@@ -1121,7 +1241,7 @@
       mode = 1
     z = ffw_try_flip_core(st, mode, boundary) ## i64
     st[13] = st[13] + 1
-    st[42] = mode
+    st[42] = (st[42] & 2) | mode
     if mode == 0
       st[34] = st[34] + 1
     if mode != 0

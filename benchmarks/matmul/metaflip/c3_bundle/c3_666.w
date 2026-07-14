@@ -557,6 +557,9 @@ if av.size() > 5
   BAND = av[5].to_i()
 if av.size() > 6
   PLUSPER = av[6].to_i()
+metallibpath = ""
+if av.size() > 7
+  metallibpath = av[7]
 
 # A native fleet invokes this executable in bounded epochs.  Retain hard
 # limits here as well, so a malformed scheduler command cannot accidentally
@@ -636,9 +639,13 @@ if seed_c3 == 0
   << "C3GPU_ERROR seed_exact=1 seed_c3=0"
   exit(2)
 
-msl = read_file("benchmarks/matmul/metaflip/c3_bundle/c3_666.metal")
 device = metal_device()
-library = metal_compile_source(device, msl)
+library = nil
+if metallibpath != ""
+  library = metal_load_library(device, metallibpath)
+if library == nil
+  msl = read_file("benchmarks/matmul/metaflip/c3_bundle/c3_666.metal")
+  library = metal_compile_source(device, msl)
 pipeline = metal_pipeline(library, "c3_walk")
 work_us = metal_buffer(device, WALKERS * CAP * MASK_BYTES)
 work_vs = metal_buffer(device, WALKERS * CAP * MASK_BYTES)

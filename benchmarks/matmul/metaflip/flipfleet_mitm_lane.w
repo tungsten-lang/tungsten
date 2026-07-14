@@ -2,7 +2,7 @@
 #
 # ABI:
 #   flipfleet_mitm_lane seed out n [subsets=4] [pool=180] [nearby=2]
-#                       [offset=0] [i0,i1,i2,i3,i4]
+#                       [offset=0] [i0,i1,i2,i3,i4] [metallib]
 #
 # The optional explicit subset is intended for reproducible diagnostics and
 # planted tests.  Fleet campaigns omit it and advance `offset` across epochs.
@@ -43,15 +43,18 @@ if args.size() > 6
   offset = args[6].to_i()
 
 metal_path = "benchmarks/matmul/metaflip/flipfleet_mitm_lane.metal"
+metallib_path = ""
+if args.size() > 8
+  metallib_path = args[8]
 result = 0 ## i64
-if args.size() > 7
+if args.size() > 7 && args[7] != ""
   selected = ffm_parse_subset(args[7])
   if selected == nil
     << "GPU_MITM_NATIVE_ERROR invalid explicit subset"
     exit(2)
-  result = ffm_search_exact_subset(seed_path, output_path, n, pool, nearby, selected, metal_path)
+  result = ffm_search_exact_subset(seed_path, output_path, n, pool, nearby, selected, metal_path, metallib_path)
 else
-  result = ffm_search(seed_path, output_path, n, subsets, pool, nearby, offset, metal_path)
+  result = ffm_search(seed_path, output_path, n, subsets, pool, nearby, offset, metal_path, metallib_path)
 
 if result < 0
   << "GPU_MITM_NATIVE_ERROR code=" + result.to_s()

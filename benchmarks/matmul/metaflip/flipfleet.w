@@ -8,9 +8,12 @@
 #     --release --native --fast --lto
 #
 # GPU search is enabled by default with the adaptive mixed role portfolio.
-# Use --no-gpu for a CPU-only control and --tensor 3x3 ... --tensor 7x7 to
-# select the square matrix-multiplication tensor.  The complete coordinator,
-# runtime-generic CPU worker, exact escape banks, and native TUI live in the
-# modules imported by flipfleet_native.
+# Use --no-gpu for a CPU-only control. `--tensor` accepts square 3x3..7x7 and
+# the exact rectangular profiles 3x3x4, 3x3x5, 3x4x4, 3x4x5, 3x4x6,
+# 3x5x5, 4x4x5, 4x5x5, 4x4x6, 4x5x6, and 4x5x7.
+# Rectangular dispatch uses its own pure-Tungsten islands (and a specialized
+# Metal engine where available) before square state is allocated, and renders
+# the same styled TUI with the same keyboard controls (--no-tui for the
+# machine-parseable RECT_STATUS stream).
 
 use flipfleet_native

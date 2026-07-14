@@ -13,6 +13,7 @@
 #include "event_loop.h"
 #include <stdbool.h>
 #include <stddef.h>      /* offsetof — required for the WArray/WArray static-asserts below */
+#include <stdatomic.h>
 #include <pthread.h>
 #include <unistd.h>
 
@@ -689,6 +690,7 @@ typedef struct {
 } WInlineCache;
 
 WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc, WInlineCache *cache);
+WValue w_value_is_a(WValue recv, WValue target);
 
 /* ---- Memoization ---- */
 #define MEMO_MAX_ENTRIES 100000
@@ -725,13 +727,16 @@ typedef struct WThread {
     uint8_t type;        /* W_TYPE_THREAD */
     pthread_t handle;
     WValue closure;
-    volatile int alive;  /* 1 = running, 0 = finished */
-    volatile int cancel; /* 1 = cancellation requested */
+    _Atomic int alive;   /* 1 = running, 0 = finished */
+    _Atomic int cancel;  /* 1 = cancellation requested */
+    int joined;          /* pthread_join completed; closure snapshot released */
     WValue result;
 } WThread;
 
 WValue w_thread_spawn(WValue closure);
+WValue w_thread_spawn_slots(WValue closure);
 WValue w_thread_join(WValue thread);
+WValue w_thread_join_release(WValue thread);
 WValue w_thread_join_timeout(WValue thread, int64_t ms);
 WValue w_thread_sleep_ms(int64_t ms);
 WValue w_thread_alive(WValue thread);
@@ -741,8 +746,6 @@ WValue w_thread_kill(WValue thread);
 WValue w_signal_trap(int signum, WValue closure);
 
 /* ---- Atomic operations (Phase 2) ---- */
-#include <stdatomic.h>
-
 typedef struct WAtomic {
     /* Phase 6i.2: type byte removed — WAtomic now lives at its own subtag
      * (W_SUBTAG_ATOMIC), so no in-struct discriminator is needed. */
@@ -1000,6 +1003,8 @@ typedef struct WMetalQueue {
 
 WValue w_metal_device_default(void);
 WValue w_metal_compile_source(WValue device, WValue source);
+WValue w_metal_compile_source_opts(WValue device, WValue source, WValue math_mode);
+WValue w_metal_library_from_file(WValue device, WValue path);
 WValue w_metal_pipeline_for(WValue library, WValue name);
 WValue w_metal_buffer_new(WValue device, WValue byte_length);
 WValue w_metal_buffer_length(WValue buffer);
@@ -1475,9 +1480,11 @@ WValue w_socket_serve_http(WValue listener, WValue handler, int workers);
 void w_argv_init(int argc, char **argv);
 WValue __w_argv_count(void);
 WValue __w_argv_at(WValue index);
+WValue __w_system(WValue command);
 
 /* ---- Monotonic clock ---- */
 WValue __w_clock_ms(void);
+WValue __w_sleep_ms(int64_t milliseconds);
 WValue __w_clock(void);
 int64_t __w_clock_ticks_raw(void);
 int64_t __w_deadline_ticks_after_seconds(int64_t seconds);

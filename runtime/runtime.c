@@ -424,32 +424,39 @@ static WValue bigint_add_any(WValue a, WValue b) {
 }
 
 static WValue bigint_sub_any(WValue a, WValue b) {
-    /* Negate b, then add */
-    uint64_t sb;
-    int32_t blen;
-    integer_limbs(b, &sb, &blen);
+    uint64_t sa, sb;
+    int32_t alen, blen;
+    const uint64_t *al = integer_limbs(a, &sa, &alen);
+    const uint64_t *bl = integer_limbs(b, &sb, &blen);
 
-    /* Create negated b */
-    WValue neg_b;
-    if (w_is_int(b)) {
-        int64_t bv = w_as_int(b);
-        if (bv == 0) return a;
-        /* For inline ints, just negate and add */
-        if (bv > W_INT48_MIN) {
-            neg_b = w_box_int(-bv);
-        } else {
-            neg_b = bigint_from_i64(-bv);
-        }
-    } else {
-        /* For bigints, flip the sign of a copy */
-        WBigint *bb = w_as_bigint(b);
-        int32_t abs_len = bb->size < 0 ? -bb->size : bb->size;
-        WBigint *nb = bigint_alloc(abs_len);
-        for (int32_t i = 0; i < abs_len; i++) nb->limbs[i] = bb->limbs[i];
-        nb->size = -bb->size;
-        neg_b = bigint_box(nb);
+    int a_neg = alen < 0;
+    int effective_b_neg = blen >= 0; /* subtraction flips b's sign */
+    int32_t a_abs = a_neg ? -alen : alen;
+    int32_t b_abs = blen < 0 ? -blen : blen;
+
+    if (b_abs == 0) return a;
+    if (a_abs == 0) {
+        WBigint *r = mag_sub(bl, b_abs, al, 0);
+        if (effective_b_neg && r->size > 0) r->size = -r->size;
+        return bigint_normalize(r);
     }
-    return bigint_add_any(a, neg_b);
+
+    /* Dispatch directly on the effective signs instead of allocating and
+     * copying a sign-flipped b only to feed it back through bigint_add_any. */
+    if (a_neg == effective_b_neg) {
+        WBigint *r = mag_add(al, a_abs, bl, b_abs);
+        if (a_neg) r->size = -r->size;
+        return bigint_normalize(r);
+    }
+
+    int cmp = mag_cmp(al, a_abs, bl, b_abs);
+    if (cmp == 0) return w_box_int(0);
+    WBigint *r;
+    int result_neg;
+    if (cmp > 0) { r = mag_sub(al, a_abs, bl, b_abs); result_neg = a_neg; }
+    else         { r = mag_sub(bl, b_abs, al, a_abs); result_neg = effective_b_neg; }
+    if (result_neg && r->size > 0) r->size = -r->size;
+    return bigint_normalize(r);
 }
 
 /* ====================================================================
@@ -1987,6 +1994,18 @@ static void bigint_sqr_dispatch(uint64_t *out, const uint64_t *a, int32_t na) {
  * the caller owns a result buffer with that spare capacity, let NTT write there
  * directly and avoid the temporary product plus copy-back. */
 static void bigint_sqr_dispatch_cap(uint64_t *out, int32_t out_cap, const uint64_t *a, int32_t na) {
+    /* Keep the capacity-aware heap-BigInt path on the same SSA-vs-NTT policy
+     * as bigint_sqr_dispatch.  Previously every public square at/above the NTT
+     * threshold jumped straight to NTT here, even in the transform-length
+     * windows where the cost model (and measurements) select SSA.  SSA writes
+     * exactly 2*na limbs, so it needs no NTT carry-room special case. */
+    if (na >= BN_SSA_THRESHOLD && out_cap >= 2 * na) {
+        int32_t sw; long sL; uint64_t sK;
+        if (ssa_choose(na, na, &sw, &sL, &sK) < ntt_cost_est(na) && sw) {
+            bn_ssa_mul(out, a, na, NULL, 0);
+            return;
+        }
+    }
     if (na >= BN_NTT_THRESHOLD && out_cap >= 2 * na + 2) {
         bn_ntt_sqr(out, a, na);
         return;
@@ -2090,6 +2109,18 @@ static void bigint_mul_dispatch_cap(uint64_t *out, int32_t out_cap,
     int32_t lo = na < nb ? na : nb;
     int32_t hi = na < nb ? nb : na;
 
+    /* As above, capacity is an output-layout concern, not a reason to bypass
+     * the top-rung policy.  SSA emits exactly na+nb limbs and can therefore
+     * write directly to every valid caller buffer. */
+    if (lo > BN_KARA_THRESHOLD && hi <= 2 * lo && hi >= BN_SSA_THRESHOLD &&
+        out_cap >= na + nb) {
+        int32_t sw; long sL; uint64_t sK;
+        if (ssa_choose(na, nb, &sw, &sL, &sK) < ntt_cost_est(hi) && sw) {
+            bn_ssa_mul(out, a, na, b, nb);
+            return;
+        }
+    }
+
     if (lo > BN_KARA_THRESHOLD && hi <= 2 * lo && hi >= BN_NTT_THRESHOLD && out_cap >= 2 * hi + 2) {
         int32_t n = hi;
         if (na == n && nb == n) {
@@ -2163,6 +2194,33 @@ static WBigint *mag_div_single(const uint64_t *a, int32_t alen, uint64_t d, uint
 }
 
 static uint64_t mag_mod_single(const uint64_t *a, int32_t alen, uint64_t d) {
+    /* A 128/64 remainder lowers to a comparatively expensive compiler-runtime
+     * helper on targets without native 128-bit division.  Small divisors are
+     * common (hashing, primality screens, decimal conversions), so process each
+     * limb as two base-2^32 digits with a precomputed reciprocal; the hot loop
+     * then needs only multiply-high and one correction, with no division. */
+    if (d == 1) return 0;
+    if ((d & (d - 1)) == 0) return alen > 0 ? (a[0] & (d - 1)) : 0;
+    if (d <= UINT32_MAX) {
+        /* floor(2^64 / d).  For x < 2^64, high64(x * reciprocal)
+         * underestimates floor(x / d) by at most one, so one conditional
+         * subtraction completes an exact Barrett reduction. */
+        uint64_t reciprocal = UINT64_MAX / d;
+        if (UINT64_MAX % d == d - 1) reciprocal++;
+        uint64_t r = 0;
+        for (int32_t i = alen - 1; i >= 0; i--) {
+            uint64_t x = (r << 32) | (a[i] >> 32);
+            uint64_t q = (uint64_t)(((__uint128_t)x * reciprocal) >> 64);
+            r = x - q * d;
+            if (r >= d) r -= d;
+
+            x = (r << 32) | (a[i] & UINT32_MAX);
+            q = (uint64_t)(((__uint128_t)x * reciprocal) >> 64);
+            r = x - q * d;
+            if (r >= d) r -= d;
+        }
+        return r;
+    }
     __uint128_t r = 0;
     for (int32_t i = alen - 1; i >= 0; i--) {
         r = (r << 64) | a[i];
@@ -17694,23 +17752,78 @@ WValue __w_cache_write(WValue path_val, WValue value) {
     return W_FALSE;
 }
 
+typedef struct {
+    pid_t pid;
+} WSystemChild;
+
+/* A cancelled Thread must not strand the process it was waiting for.  Spawn
+ * each shell as a process-group leader, then terminate and reap that whole
+ * group from pthread cancellation cleanup.  GPU epoch commands often grow a
+ * shell -> flipfleet child tree, so killing only the shell is insufficient. */
+static void w_system_child_cleanup(void *arg) {
+    WSystemChild *child = (WSystemChild *)arg;
+    if (child->pid <= 0) return;
+
+    int old_cancel_state;
+    pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancel_state);
+
+    pid_t pid = child->pid;
+    int status;
+    kill(-pid, SIGTERM);
+    for (int attempt = 0; attempt < 10; attempt++) {
+        pid_t waited = waitpid(pid, &status, WNOHANG);
+        if (waited == pid || (waited == -1 && errno == ECHILD)) {
+            child->pid = -1;
+            pthread_setcancelstate(old_cancel_state, NULL);
+            return;
+        }
+        struct timespec grace = { .tv_sec = 0, .tv_nsec = 10000000 };
+        nanosleep(&grace, NULL);
+    }
+
+    kill(-pid, SIGKILL);
+    while (waitpid(pid, &status, 0) == -1 && errno == EINTR) {}
+    child->pid = -1;
+    pthread_setcancelstate(old_cancel_state, NULL);
+}
+
 /* posix_spawn instead of system(3): system() sets SIGINT/SIGQUIT to SIG_IGN
  * in THIS process for the child's whole lifetime, so a program with
  * long-running children (flipfleet GPU epochs, clang links) becomes
- * uninterruptible from the keyboard whenever any thread is inside system().
- * Spawning leaves signal dispositions alone — Ctrl-C reaches the parent and
- * the children together, like every other program. */
+ * uninterruptible from the keyboard whenever any thread is inside system(). */
 WValue __w_system(WValue cmd_val) {
     const char *cmd = as_str(cmd_val);
     char *spawn_argv[] = { "sh", "-c", (char *)cmd, NULL };
-    pid_t pid;
-    if (posix_spawn(&pid, "/bin/sh", NULL, NULL, spawn_argv, environ) != 0)
+    posix_spawnattr_t attr;
+    if (posix_spawnattr_init(&attr) != 0) return W_FALSE;
+    short flags = POSIX_SPAWN_SETPGROUP;
+    if (posix_spawnattr_setflags(&attr, flags) != 0 ||
+        posix_spawnattr_setpgroup(&attr, 0) != 0) {
+        posix_spawnattr_destroy(&attr);
         return W_FALSE;
-    int status;
-    while (waitpid(pid, &status, 0) == -1) {
-        if (errno != EINTR) return W_FALSE;
     }
-    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) return W_TRUE;
+
+    WSystemChild child = { .pid = -1 };
+    int spawn_error = posix_spawn(&child.pid, "/bin/sh", NULL, &attr,
+                                  spawn_argv, environ);
+    posix_spawnattr_destroy(&attr);
+    if (spawn_error != 0) return W_FALSE;
+
+    int status;
+    int wait_ok = 0;
+    pthread_cleanup_push(w_system_child_cleanup, &child);
+    for (;;) {
+        pid_t waited = waitpid(child.pid, &status, 0);
+        if (waited == child.pid) {
+            child.pid = -1;
+            wait_ok = 1;
+            break;
+        }
+        if (waited == -1 && errno != EINTR) break;
+    }
+    pthread_cleanup_pop(wait_ok ? 0 : 1);
+
+    if (wait_ok && WIFEXITED(status) && WEXITSTATUS(status) == 0) return W_TRUE;
     return W_FALSE;
 }
 
@@ -18056,6 +18169,64 @@ static int w_primitive_is_a_type_name(WValue recv, const char *tn, size_t tn_len
                w_type_name_eq_lit(tn, tn_len, "Number");
     }
     return 0;
+}
+
+/* Runtime ancestry primitive shared by public is_a? and compiler-generated
+ * typed-overload gates. Keeping the gate callable directly avoids hashing and
+ * looking up `is_a?` for every overloaded operator invocation. */
+WValue w_value_is_a(WValue recv, WValue target) {
+    /* Class-object target: walk instance ancestry by class_id. */
+    if (w_is_class(target)) {
+        WClass *tc = (WClass *)w_as_ptr(target);
+        if (w_is_instance(recv)) {
+            WClass *k = g_class_table[((WObject *)w_as_ptr(recv))->class_id];
+            while (k) {
+                if (k->class_id == tc->class_id) return w_bool(1);
+                k = k->superclass;
+            }
+            return w_bool(0);
+        }
+        if (w_is_class(recv)) return w_bool(0);
+        const char *pn =
+            w_is_int(recv) ? "Integer" :
+            w_is_double(recv) ? "Float" :
+            w_is_string(recv) ? "String" :
+            w_is_symbol(recv) ? "Symbol" :
+            (w_is_array(recv) || w_is_body(recv)) ? "Array" :
+            w_is_bool(recv) ? "Boolean" : NULL;
+        return w_bool((pn && strcmp(pn, tc->name) == 0) ||
+                      w_primitive_is_a_type_name(recv, tc->name, strlen(tc->name)));
+    }
+
+    /* String target: compare generic specializations by base name. Resolve
+     * instances first — the hot overload-gate path — before probing primitive
+     * tags or constructing a primitive type name. */
+    if (w_is_stringy(target)) {
+        char sbuf[6];
+        const char *tn;
+        size_t tn_len;
+        w_str_data(target, sbuf, &tn, &tn_len);
+        if (w_is_instance(recv)) {
+            WClass *k = g_class_table[((WObject *)w_as_ptr(recv))->class_id];
+            while (k) {
+                if (w_typename_base_eq(k->name, tn, tn_len)) return w_bool(1);
+                k = k->superclass;
+            }
+            return w_bool(0);
+        }
+        if (w_is_class(recv))
+            return w_bool(w_typename_base_eq(((WClass *)w_as_ptr(recv))->name, tn, tn_len));
+        const char *pn =
+            w_is_int(recv) ? "Integer" :
+            w_is_double(recv) ? "Float" :
+            w_is_string(recv) ? "String" :
+            w_is_symbol(recv) ? "Symbol" :
+            (w_is_array(recv) || w_is_body(recv)) ? "Array" :
+            w_is_bool(recv) ? "Boolean" : NULL;
+        return w_bool((pn && w_typename_base_eq(pn, tn, tn_len)) ||
+                      w_primitive_is_a_type_name(recv, tn, tn_len));
+    }
+    return w_bool(0);
 }
 
 static WValue WN_byte_at = 0;
@@ -19458,9 +19629,9 @@ static WValue w_ic_string_rindex(WValue r, WValue *a, int c) {
  * rather than to the `.w` method body in core/numeric/int.w. Tiers, fastest-
  * first by magnitude:
  *   • small-prime screen   — trial by the primes ≤ 37; settles every n < 1681.
- *   • prime trial division  — up to √n, for n ≤ 10⁷, using only prime divisors
+ *   • prime trial division  — up to √n, for n ≤ 10⁶, using only prime divisors
  *     after the small screen (cutoff was 10⁸ before the MR tier went Montgomery
- *     + Forišek–Jančina; trial now only wins below ~10⁷).
+ *     + Forišek–Jančina; profiling selects a conservative 10⁶ boundary).
  *   • Miller-Rabin (u64)    — O(log n) Montgomery arithmetic (division-free): a
  *     single hashed Forišek–Jančina base for n < 2³² (one round, exact), then a
  *     minimal deterministic witness ladder (3→4→5→6→7 bases) up to 2⁶⁴.
@@ -19553,6 +19724,53 @@ static const uint16_t W_PRIME_TRIAL_DIVISORS[] = {
     9833,9839,9851,9857,9859,9871,9883,9887,9901,9907,9923,9929,9931,9941,9949,9967,
     9973
 };
+
+/* Division-free exact divisibility for the 32-bit trial tier.  For d > 1,
+ * m = ceil(2^32/d), and 0 <= n < 2^32, q = high32(n*m) is either floor(n/d)
+ * or floor(n/d)+1.  It is exact whenever d divides n, so n == q*d iff d|n.
+ * The reciprocal table mirrors W_PRIME_TRIAL_DIVISORS through 997, the largest
+ * divisor reachable by the current 10^6 cutoff.  Keeping p itself in the
+ * compact uint16 table avoids widening the much longer legacy tail. */
+#define W_RECIP32(d) ((uint32_t)(((UINT64_C(1) << 32) + (d) - 1) / (d)))
+static const uint32_t W_PRIME_TRIAL_RECIP32[] = {
+    W_RECIP32(41),W_RECIP32(43),W_RECIP32(47),W_RECIP32(53),W_RECIP32(59),W_RECIP32(61),W_RECIP32(67),W_RECIP32(71),
+    W_RECIP32(73),W_RECIP32(79),W_RECIP32(83),W_RECIP32(89),W_RECIP32(97),W_RECIP32(101),W_RECIP32(103),W_RECIP32(107),
+    W_RECIP32(109),W_RECIP32(113),W_RECIP32(127),W_RECIP32(131),W_RECIP32(137),W_RECIP32(139),W_RECIP32(149),W_RECIP32(151),
+    W_RECIP32(157),W_RECIP32(163),W_RECIP32(167),W_RECIP32(173),W_RECIP32(179),W_RECIP32(181),W_RECIP32(191),W_RECIP32(193),
+    W_RECIP32(197),W_RECIP32(199),W_RECIP32(211),W_RECIP32(223),W_RECIP32(227),W_RECIP32(229),W_RECIP32(233),W_RECIP32(239),
+    W_RECIP32(241),W_RECIP32(251),W_RECIP32(257),W_RECIP32(263),W_RECIP32(269),W_RECIP32(271),W_RECIP32(277),W_RECIP32(281),
+    W_RECIP32(283),W_RECIP32(293),W_RECIP32(307),W_RECIP32(311),W_RECIP32(313),W_RECIP32(317),W_RECIP32(331),W_RECIP32(337),
+    W_RECIP32(347),W_RECIP32(349),W_RECIP32(353),W_RECIP32(359),W_RECIP32(367),W_RECIP32(373),W_RECIP32(379),W_RECIP32(383),
+    W_RECIP32(389),W_RECIP32(397),W_RECIP32(401),W_RECIP32(409),W_RECIP32(419),W_RECIP32(421),W_RECIP32(431),W_RECIP32(433),
+    W_RECIP32(439),W_RECIP32(443),W_RECIP32(449),W_RECIP32(457),W_RECIP32(461),W_RECIP32(463),W_RECIP32(467),W_RECIP32(479),
+    W_RECIP32(487),W_RECIP32(491),W_RECIP32(499),W_RECIP32(503),W_RECIP32(509),W_RECIP32(521),W_RECIP32(523),W_RECIP32(541),
+    W_RECIP32(547),W_RECIP32(557),W_RECIP32(563),W_RECIP32(569),W_RECIP32(571),W_RECIP32(577),W_RECIP32(587),W_RECIP32(593),
+    W_RECIP32(599),W_RECIP32(601),W_RECIP32(607),W_RECIP32(613),W_RECIP32(617),W_RECIP32(619),W_RECIP32(631),W_RECIP32(641),
+    W_RECIP32(643),W_RECIP32(647),W_RECIP32(653),W_RECIP32(659),W_RECIP32(661),W_RECIP32(673),W_RECIP32(677),W_RECIP32(683),
+    W_RECIP32(691),W_RECIP32(701),W_RECIP32(709),W_RECIP32(719),W_RECIP32(727),W_RECIP32(733),W_RECIP32(739),W_RECIP32(743),
+    W_RECIP32(751),W_RECIP32(757),W_RECIP32(761),W_RECIP32(769),W_RECIP32(773),W_RECIP32(787),W_RECIP32(797),W_RECIP32(809),
+    W_RECIP32(811),W_RECIP32(821),W_RECIP32(823),W_RECIP32(827),W_RECIP32(829),W_RECIP32(839),W_RECIP32(853),W_RECIP32(857),
+    W_RECIP32(859),W_RECIP32(863),W_RECIP32(877),W_RECIP32(881),W_RECIP32(883),W_RECIP32(887),W_RECIP32(907),W_RECIP32(911),
+    W_RECIP32(919),W_RECIP32(929),W_RECIP32(937),W_RECIP32(941),W_RECIP32(947),W_RECIP32(953),W_RECIP32(967),W_RECIP32(971),
+    W_RECIP32(977),W_RECIP32(983),W_RECIP32(991),W_RECIP32(997),
+};
+#undef W_RECIP32
+
+static int w_prime_trial_recip32(uint32_t n, uint64_t cutoff) {
+    size_t reciprocal_count = sizeof(W_PRIME_TRIAL_RECIP32) / sizeof(W_PRIME_TRIAL_RECIP32[0]);
+    size_t divisor_count = sizeof(W_PRIME_TRIAL_DIVISORS) / sizeof(W_PRIME_TRIAL_DIVISORS[0]);
+    for (size_t i = 0; i < divisor_count; i++) {
+        uint32_t p = (uint32_t)W_PRIME_TRIAL_DIVISORS[i];
+        if ((uint64_t)p * p > n || n > cutoff) break;
+        if (i < reciprocal_count) {
+            uint32_t q = (uint32_t)(((uint64_t)n * W_PRIME_TRIAL_RECIP32[i]) >> 32);
+            if (n == q * p) return 0;
+        } else if (n % p == 0U) {
+            return 0;
+        }
+    }
+    return 1;
+}
 
 static uint64_t w_prime_mulmod(uint64_t a, uint64_t b, uint64_t m) {
     return (uint64_t)(((__uint128_t)a * (__uint128_t)b) % m);
@@ -19659,7 +19877,7 @@ static const uint16_t W_FJ32_BASES[256] = {
     903,  109,12454, 1985, 8065,17637, 1645, 1404, 6106, 3661,  328, 6160,
    1602, 6601, 1491, 8657
 };
-/* FJ32 single-base test. Caller guarantees n odd, coprime to 2..37, and n > 10⁷
+/* FJ32 single-base test. Caller guarantees n odd, coprime to 2..37, and n > 10⁶
  * (⇒ n ≫ 97²). Extend the small-prime screen through 97 first: a composite with
  * a factor ≤ 97 is rejected by a few `% p == 0` (a multiply+compare each) instead
  * of paying Montgomery setup + a full modpow — measured ~6% on the fj32 range,
@@ -19689,7 +19907,7 @@ static int w_prime_ssmr(uint64_t n, const uint16_t *witness) {
     uint64_t base = (uint64_t)witness[w_ssmr_bucket(n)];
     return w_prime_mont_mr(n, &base, 1);
 }
-/* Tier 3 — deterministic Miller-Rabin for n > 10⁸, shared by every u64 variant.
+/* Tier 3 — deterministic Miller-Rabin for n > 10⁶, shared by every u64 variant.
  * Each range takes the smallest proven witness set — fewer bases = fewer modpows.
  * Bounds are exact (verified against the all-u64 Sinclair set):
  *   n < 2^32     Forišek–Jančina     1 hashed base (exhaustive proof over 2^32)
@@ -19717,19 +19935,13 @@ static int w_prime_test_u64_mr(uint64_t n) {
 
 /* Tiers 2 & 3 shared by prime?: n has passed the small-prime screen (no factor
  * ≤ 37) and n ≥ 1681. Tier 2 trial-divides by a precomputed PRIME table up to
- * √n — the minimal divisor set (only the 1229 primes < 10⁴, not all 6k±1).
- * Cutoff is 10⁷, not 10⁸: trial division only beats the Tier-3 test below ~10⁷.
- * Above it, one Montgomery FJ round (division-free, single hashed base) wins —
- * measured crossover after the MR path went Montgomery+FJ (it was ~10⁸ when the
- * MR tier was slow 3-base %-division). */
+ * √n — only prime divisors, and at this cutoff no entry above 997 is visited.
+ * Cutoff is 10⁶, a conservative distribution-tuned boundary: worst-case primes
+ * cross near 2.5·10⁵, while mixed inputs below 10⁶ still benefit from cheap
+ * composite trial exits. Above 10⁶, one Montgomery FJ round wins. */
 static int w_prime_test_u64_post_screen(uint64_t n) {
-    if (n <= 10000000ULL) {
-        for (size_t i = 0; i < sizeof(W_PRIME_TRIAL_DIVISORS)/sizeof(W_PRIME_TRIAL_DIVISORS[0]); i++) {
-            uint64_t p = (uint64_t)W_PRIME_TRIAL_DIVISORS[i];
-            if (p * p > n) break;
-            if (n % p == 0ULL) return 0;
-        }
-        return 1;
+    if (n <= 1000000ULL) {
+        return w_prime_trial_recip32((uint32_t)n, 1000000ULL);
     }
     return w_prime_test_u64_mr(n);
 }
@@ -19953,7 +20165,7 @@ static int w_prime_test_u64(uint64_t n) {
 /* prime_12k?: a FAST primality test for a candidate already known coprime to 6
  * (a 12m+{1,5,7,11} wheel offset). Skips only the 2 and 3 screen checks the
  * caller has guaranteed away, then runs the same fast inner test as prime?
- * (prime-table trial division ≤ 10⁷, Montgomery Miller-Rabin above). The wheel
+ * (prime-table trial division ≤ 10⁶, Montgomery Miller-Rabin above). The wheel
  * lives in the CALLER's candidate generation, not here. CONTRACT: gcd(n,6)==1, n ≥ 5 —
  * a multiple of 2 or 3 would be misreported. u64-only. */
 static int w_prime_test_u64_12k(uint64_t n) {
@@ -20228,6 +20440,13 @@ static void w_prime_modctx_fini(WPrimeModCtx *ctx) {
     if (ctx->r2b)  { free(ctx->r2b);  ctx->r2b  = NULL; }
     if (ctx->onemb) { free(ctx->onemb); ctx->onemb = NULL; }
     if (ctx->nm1mb) { free(ctx->nm1mb); ctx->nm1mb = NULL; }
+    /* Both values are minted by w_prime_modctx_init (the quotient from
+     * b^(2k)/n and b^(k+1), respectively).  They are not borrowed from the
+     * caller and were the two context-owned allocations missing above. */
+    if (w_is_bigint(ctx->mu)) free(w_as_bigint(ctx->mu));
+    if (w_is_bigint(ctx->bkp1)) free(w_as_bigint(ctx->bkp1));
+    ctx->mu = W_NIL;
+    ctx->bkp1 = W_NIL;
 }
 
 /* Copy the low `keep` limbs of magnitude u[0..ulen) into out[0..keep). */
@@ -22632,7 +22851,7 @@ static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WV
 
 /* Forward declarations for slow-path lazy init (definitions live below
  * w_method_dispatch since they share the dispatch_ready flag). */
-static int w_dispatch_ready;
+static _Atomic int w_dispatch_ready;
 static void w_dispatch_init(void);
 
 /* Resolve a Tungsten type-class method only when that method is the next
@@ -22676,7 +22895,8 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
      * reach here before w_method_dispatch has ever run — without this,
      * IC names are all 0 and w_resolve_ic always misses, breaking any
      * method that has been migrated out of the cascade. */
-    if (__builtin_expect(!w_dispatch_ready, 0)) w_dispatch_init();
+    if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
+        w_dispatch_init();
 
     /* Phase 7+a (#45): try IC resolve BEFORE the cascade. Builtin
      * methods registered in the per-type IC tables (Array, String, Int)
@@ -22884,17 +23104,23 @@ WValue w_string_repeat(WValue recv, WValue count_v) {
     return w_box_heap_str(ws);
 }
 
-static int w_dispatch_ready = 0;
-static void w_dispatch_init(void) {
-    if (w_dispatch_ready) return;
-    w_dispatch_ready = 1;
+static _Atomic int w_dispatch_ready = 0;
+static pthread_once_t w_dispatch_once = PTHREAD_ONCE_INIT;
+
+static void w_dispatch_init_once(void) {
     w_init_method_names();
     w_init_ic_tables();
+    atomic_store_explicit(&w_dispatch_ready, 1, memory_order_release);
+}
+
+static void w_dispatch_init(void) {
+    pthread_once(&w_dispatch_once, w_dispatch_init_once);
 }
 
 static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue args_arr) {
     (void)args_arr;
-    if (__builtin_expect(!w_dispatch_ready, 0)) w_dispatch_init();
+    if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
+        w_dispatch_init();
 
     /* Rope: flatten and dispatch as string */
     if (w_is_rope(recv)) recv = w_rope_flatten(recv);
@@ -23226,50 +23452,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
      * Backs the synthesized operator-overload dispatcher and is useful on its
      * own. A non-class argument or unrelated receiver answers false. */
     if (w_hash_key_eq(name, WN_is_a_q) && args->size >= 1) {
-        WValue target = args->slots[0];
-        const char *pn =
-            w_is_int(recv) ? "Integer" :
-            w_is_double(recv) ? "Float" :
-            w_is_string(recv) ? "String" :
-            w_is_symbol(recv) ? "Symbol" :
-            (w_is_array(recv) || w_is_body(recv)) ? "Array" :
-            w_is_bool(recv) ? "Boolean" : NULL;
-        /* Class-object target: walk the ancestry by class_id. */
-        if (w_is_class(target)) {
-            WClass *tc = (WClass *)w_as_ptr(target);
-            if (w_is_instance(recv)) {
-                WClass *k = g_class_table[((WObject *)w_as_ptr(recv))->class_id];
-                while (k) {
-                    if (k->class_id == tc->class_id) return w_bool(1);
-                    k = k->superclass;
-                }
-                return w_bool(0);
-            }
-            if (w_is_class(recv)) return w_bool(0);
-            return w_bool((pn && strcmp(pn, tc->name) == 0) ||
-                          w_primitive_is_a_type_name(recv, tc->name, strlen(tc->name)));
-        }
-        /* String target: walk the ancestry comparing base names (a generic
-         * specialization "Vector$f64" matches "Vector"). A ClassRef to a
-         * generic template resolves unreliably, so dispatchers pass the name. */
-        if (w_is_stringy(target)) {
-            char sbuf[6];
-            const char *tn; size_t tn_len;
-            w_str_data(target, sbuf, &tn, &tn_len);
-            if (w_is_instance(recv)) {
-                WClass *k = g_class_table[((WObject *)w_as_ptr(recv))->class_id];
-                while (k) {
-                    if (w_typename_base_eq(k->name, tn, tn_len)) return w_bool(1);
-                    k = k->superclass;
-                }
-                return w_bool(0);
-            }
-            if (w_is_class(recv))
-                return w_bool(w_typename_base_eq(((WClass *)w_as_ptr(recv))->name, tn, tn_len));
-            return w_bool((pn && w_typename_base_eq(pn, tn, tn_len)) ||
-                          w_primitive_is_a_type_name(recv, tn, tn_len));
-        }
-        return w_bool(0);
+        return w_value_is_a(recv, args->slots[0]);
     }
 
     const char *type_name =
@@ -23584,18 +23767,24 @@ void w_thread_unregister(void) {
 
 /* ---- Thread primitives (Phase 1) ---- */
 
+static void w_thread_mark_stopped(void *arg) {
+    WThread *t = (WThread *)arg;
+    t->alive = 0;
+}
+
 static void *thread_entry(void *arg) {
     WThread *t = (WThread *)arg;
 
     /* Each thread gets its own exception stack (__thread) */
     w_exception_stack = NULL;
 
-    /* Call the closure */
+    /* Call the closure.  Cancellation bypasses ordinary epilogues, so keep
+     * alive? accurate with a cleanup handler as well as on normal return. */
+    pthread_cleanup_push(w_thread_mark_stopped, t);
     WClosure *cl = (WClosure *)w_as_ptr(t->closure);
     typedef WValue (*fn0_t)(WValue *);
     t->result = ((fn0_t)cl->fn_ptr)(cl->captures);
-
-    t->alive = 0;
+    pthread_cleanup_pop(1);
     return NULL;
 }
 
@@ -23620,7 +23809,7 @@ static int w_capture_entry_looks_like_slot(WValue entry) {
     return 1;
 }
 
-static WValue w_thread_capture_snapshot(WValue closure) {
+static WValue w_thread_capture_snapshot(WValue closure, int captures_are_slots) {
     WClosure *src = (WClosure *)w_as_ptr(closure);
     WClosure *dst = calloc(1, sizeof(WClosure));
     dst->fn_ptr = src->fn_ptr;
@@ -23634,7 +23823,7 @@ static WValue w_thread_capture_snapshot(WValue closure) {
 
         for (int i = 0; i < count; i++) {
             WValue entry = src->captures[i];
-            if (w_capture_entry_looks_like_slot(entry)) {
+            if (captures_are_slots || w_capture_entry_looks_like_slot(entry)) {
                 WValue *slot = (WValue *)(uintptr_t)entry;
                 cells[i] = *slot;
                 caps[i] = (WValue)(uintptr_t)&cells[i];
@@ -23652,24 +23841,57 @@ static WValue w_thread_capture_snapshot(WValue closure) {
     return w_box_ptr(dst, W_SUBTAG_CLOSURE);
 }
 
-WValue w_thread_spawn(WValue closure) {
+static void w_thread_release_snapshot(WThread *t) {
+    if (t->closure == W_NIL || !w_is_closure(t->closure)) return;
+    WClosure *cl = (WClosure *)w_as_ptr(t->closure);
+    if (cl->capture_count > 0) free(cl->captures);
+    free(cl);
+    t->closure = W_NIL;
+}
+
+static WValue w_thread_spawn_impl(WValue closure, int captures_are_slots) {
     if (!w_is_closure(closure)) {
         w_raise(w_string("Thread.new requires a closure"));
     }
 
+    /* Thread.new is the other entrance to true parallelism besides `go`.
+     * Enable the slab/intern mutex before pthread_create can run user code;
+     * otherwise concurrent controller threads can publish one role's interned
+     * path bytes under another role's string slot.  Initialize on the parent
+     * first as the slab's lazy mmap/mutex setup is itself single-threaded. */
+    if (!g_string_slab.base) w_slab_init();
+    g_slab_needs_lock = 1;
+
     WThread *t = calloc(1, sizeof(WThread));
     t->type = W_TYPE_THREAD;
-    t->closure = w_thread_capture_snapshot(closure);
+    t->closure = w_thread_capture_snapshot(closure, captures_are_slots);
     t->alive = 1;
     t->cancel = 0;
+    t->joined = 0;
     t->result = W_NIL;
 
     int err = pthread_create(&t->handle, NULL, thread_entry, t);
     if (err != 0) {
+        w_thread_release_snapshot(t);
+        free(t);
         w_raise(w_string("Thread.new: pthread_create failed (EAGAIN)"));
     }
 
     return w_box_ptr(t, W_SUBTAG_GENERIC);
+}
+
+WValue w_thread_spawn(WValue closure) {
+    /* C callers historically provide either direct WValues or capture-cell
+     * pointers, so retain the compatibility heuristic for this public API. */
+    return w_thread_spawn_impl(closure, 0);
+}
+
+WValue w_thread_spawn_slots(WValue closure) {
+    /* Compiler-emitted closures always store pointers to lexical capture
+     * cells.  Avoid pointer/value guessing: raw i32/f32 cells may only be
+     * 4-byte aligned, and generic-object WValues are themselves aligned
+     * pointers.  The strict entry point snapshots every cell unambiguously. */
+    return w_thread_spawn_impl(closure, 1);
 }
 
 WValue w_thread_join(WValue thread) {
@@ -23677,8 +23899,22 @@ WValue w_thread_join(WValue thread) {
         w_raise(w_string("Thread.join requires a thread"));
     }
     WThread *t = (WThread *)w_as_ptr(thread);
-    pthread_join(t->handle, NULL);
+    if (!t->joined) {
+        pthread_join(t->handle, NULL);
+        t->joined = 1;
+        w_thread_release_snapshot(t);
+    }
     return t->result;
+}
+
+WValue w_thread_join_release(WValue thread) {
+    if (!w_is_thread(thread)) {
+        w_raise(w_string("Thread.join_release requires a thread"));
+    }
+    WThread *t = (WThread *)w_as_ptr(thread);
+    WValue result = w_thread_join(thread);
+    free(t);
+    return result;
 }
 
 WValue w_thread_join_timeout(WValue thread, int64_t ms) {
@@ -23702,11 +23938,27 @@ WValue w_thread_join_timeout(WValue thread, int64_t ms) {
     if (t->alive) {
         return W_FALSE;  /* timed out, thread still running */
     }
-    pthread_join(t->handle, NULL);
+    if (!t->joined) {
+        pthread_join(t->handle, NULL);
+        t->joined = 1;
+        w_thread_release_snapshot(t);
+    }
     return W_TRUE;
 }
 
 WValue w_thread_sleep_ms(int64_t ms) {
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (ms % 1000) * 1000000;
+    nanosleep(&ts, NULL);
+    return W_NIL;
+}
+
+/* Raw-i64 sleep used by native Tungsten coordinators that poll atomic file
+ * mailboxes. Plain ccall forwards machine-integer arguments without boxing. */
+WValue __w_sleep_ms(int64_t milliseconds) {
+    int64_t ms = milliseconds;
+    if (ms < 0) ms = 0;
     struct timespec ts;
     ts.tv_sec = ms / 1000;
     ts.tv_nsec = (ms % 1000) * 1000000;
@@ -30230,6 +30482,11 @@ W_BRIDGE_STUB WValue w_metal_compile_source(WValue device, WValue source) {
 }
 W_BRIDGE_STUB WValue w_metal_compile_source_opts(WValue device, WValue source, WValue math_mode) {
     (void)device; (void)source; (void)math_mode;
+    w_raise(w_string("Metal: not available on this platform"));
+    return W_NIL;
+}
+W_BRIDGE_STUB WValue w_metal_library_from_file(WValue device, WValue path) {
+    (void)device; (void)path;
     w_raise(w_string("Metal: not available on this platform"));
     return W_NIL;
 }

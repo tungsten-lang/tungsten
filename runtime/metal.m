@@ -248,7 +248,10 @@ WValue w_metal_compile_source_opts(WValue device_v, WValue source_v, WValue math
     [opts release];
     if (!lib) {
         const char *msg = err ? [[err localizedDescription] UTF8String] : "unknown error";
-        char buf[1024];
+        /* Large generated kernels can emit enough warnings to hide the actual
+         * MSL error behind the old 1 KiB truncation. Preserve the diagnostic
+         * tail so compiler extensions such as device atomics remain debuggable. */
+        char buf[8192];
         snprintf(buf, sizeof(buf), "Metal.compile_source: %s", msg);
         w_raise(w_string(buf));
     }
@@ -260,6 +263,38 @@ WValue w_metal_compile_source_opts(WValue device_v, WValue source_v, WValue math
 
 WValue w_metal_compile_source(WValue device_v, WValue source_v) {
     return w_metal_compile_source_opts(device_v, source_v, w_int(0));
+}
+
+/* Load an offline-compiled Metal library. Compiling MSL in every adaptive
+ * worker leaves the GPU idle and can serialize concurrent compiler
+ * invocations; a cached metallib moves that work to the build phase. */
+WValue w_metal_library_from_file(WValue device_v, WValue path_v) {
+    WMetalDevice *d = as_metal_device(device_v);
+    if (!d) {
+        w_raise(w_string("Metal.load_library: first arg must be a Metal device"));
+    }
+    if (!w_is_string(path_v)) {
+        w_raise(w_string("Metal.load_library: path must be a string"));
+    }
+    const char *path_c = metal_string_data(path_v);
+    if (!path_c || !path_c[0]) {
+        w_raise(w_string("Metal.load_library: path must not be empty"));
+    }
+    NSString *path = [NSString stringWithUTF8String:path_c];
+    NSURL *url = [NSURL fileURLWithPath:path];
+    NSError *err = nil;
+    id<MTLDevice> dev = (id<MTLDevice>)d->handle;
+    id<MTLLibrary> lib = [dev newLibraryWithURL:url error:&err];
+    if (!lib) {
+        const char *msg = err ? [[err localizedDescription] UTF8String] : "unknown error";
+        char buf[1024];
+        snprintf(buf, sizeof(buf), "Metal.load_library: %s: %s", path_c, msg);
+        w_raise(w_string(buf));
+    }
+    WMetalLibrary *w = (WMetalLibrary *)calloc(1, sizeof(WMetalLibrary));
+    w->type = W_TYPE_METAL_LIBRARY;
+    w->handle = (void *)lib;
+    return w_box_ptr(w, W_SUBTAG_GENERIC);
 }
 
 WValue w_metal_pipeline_for(WValue library_v, WValue name_v) {

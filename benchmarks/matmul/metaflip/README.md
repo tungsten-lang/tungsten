@@ -245,15 +245,30 @@ automatically when their Tungsten source or Metal sidecar is newer.  With the
 default one-round epochs, stable generic and rectangular roles retain their
 Metal process/pipeline through a command mailbox; rotating roles still use
 bounded children but load the same cache.  The native TUI is on by default.  Use
-`--no-tui` for ordinary progress output or `--quiet` for an unattended run.  `--status PATH` and
-`--best PATH` select the durable key/value heartbeat and exact best-scheme
-checkpoint.
+`--no-tui` for ordinary progress output or `--quiet` for an unattended run.
+Mutable fleet state is rooted at `--state-dir PATH`, then `METAFLIP_HOME`, then
+`$HOME/.tungsten/metaflip`.  For example, a default 5×5 campaign writes:
 
-By default the status path is unique to the run, while the exact best path is
-stable per tensor (`flipfleet_NxN_best.txt`) so a later campaign can recover
-the frontier.  `--run-tag TAG` controls the per-run scratch/status namespace.
-Certificate and heartbeat updates use temp-file plus atomic rename; malformed
-existing best checkpoints are never silently overwritten.
+- `checkpoints/gf2/5x5x5/best.txt`
+- `runs/gf2/5x5x5/<run-tag>/status.txt`
+- `banks/gf2/5x5x5/{near1,near2}/`
+
+under that root.  Square state names always use the full `NxNxN` shape;
+rectangular campaigns use their canonical `NxMxP` label.  `--run-tag TAG`
+controls the per-run status namespace.  `--status PATH`, `--best PATH`, and
+`--near-dir PATH` retain their exact explicit-path behavior and bypass the
+corresponding default location.  Certificate and heartbeat updates use
+temp-file plus atomic rename; malformed existing best checkpoints are never
+silently overwritten.
+
+`--self-test` uses a unique `/tmp/flipfleet_self_test_<run-tag>` state root
+unless `--state-dir` is explicit, so a smoke test never populates the normal
+user live store.
+
+This first path migration intentionally leaves cross-process checkpoint
+promotion/CAS, ternary state, and `/tmp` worker, metallib, reject, and scratch
+caches unchanged. Those require separate ownership and concurrency policies.
+The 7×7 rectangular component checkpoints do use the shared GF(2) live root.
 
 ```sh
 # Default: sticky mixed CPU islands, adaptive GPU portfolio, native TUI.
@@ -320,8 +335,8 @@ existing best checkpoints are never silently overwritten.
 Rectangular dispatch deliberately does not borrow unrelated leaves from a
 7×7 run. Use `--rect` when those shapes should share one host budget: it runs
 independent exact campaigns concurrently, rebalances only at clean epoch
-boundaries, and retains one durable `flipfleet_NxMxP_best.txt` checkpoint per
-shape. Single-shape campaigns emit `RECT_CAPABILITY`, `RECT_STATUS`, and
+boundaries, and retains one durable `checkpoints/gf2/NxMxP/best.txt`
+checkpoint per shape. Single-shape campaigns emit `RECT_CAPABILITY`, `RECT_STATUS`, and
 `RECT_RESULT`; the portfolio emits `RECT_PORTFOLIO*` records and an atomic
 schema-1 parent heartbeat plus one child status per shape. The portfolio TUI
 polls those child heartbeats for live rank/move/exposure updates; inactive rows

@@ -40,6 +40,7 @@ use flipfleet_syndrome_repair
 use flipfleet_global_isotropy
 use flipfleet_partial_automorphism_nullspace
 use flipfleet_profile_shoulders
+use flipfleet_live_store
 
 -> ffn_parse_tensor(text) (String) i64
   normalized = text.downcase
@@ -1967,19 +1968,23 @@ CPU_WORK_SPEC = ""
 CPU_WANDER_SPEC = ""
 SEED_PATH = ""
 SEED_NAIVE = 0 ## i64
+SELF_TEST = 0 ## i64
 RECORD_OVERRIDE = 0 ## i64
 STATUS_PATH = "flipfleet_status.txt"
 BEST_PATH = "flipfleet_best.txt"
 STATUS_EXPLICIT = 0 ## i64
 BEST_EXPLICIT = 0 ## i64
 RUN_TAG = ""
+STATE_DIR = ""
+STATE_DIR_EXPLICIT = 0 ## i64
 # When set, dump near1/near2 schemes under NEAR_DIR/{near1,near2}/ periodically
 # and on exit, and load any existing dumps there into the shoulder banks at
 # startup (after algebraic escape construction).
 NEAR_DIR = ""
+NEAR_EXPLICIT = 0 ## i64
 
 av = argv()
-value_options = ["--tensor", "--rect-shapes", "--rect-epoch-rounds", "-J", "--walkers", "--steps", "--rounds", "--secs", "-d", "--density", "--cycles", "--seed", "--record", "--gpu-walkers", "--gpu-policy", "--gpu-steps", "--gpu-epoch-rounds", "--gpu-binary", "--gpu-novelty-size", "--repo-root", "--strategy", "--migrate", "--archive-size", "--cpu-near-size", "--cpu-near-signature-quota", "--cpu-symmetry-seeds", "--cpu-work-moves", "--cpu-wander-moves", "--status", "--best", "--run-tag", "--near-dir"]
+value_options = ["--tensor", "--rect-shapes", "--rect-epoch-rounds", "-J", "--walkers", "--steps", "--rounds", "--secs", "-d", "--density", "--cycles", "--seed", "--record", "--gpu-walkers", "--gpu-policy", "--gpu-steps", "--gpu-epoch-rounds", "--gpu-binary", "--gpu-novelty-size", "--repo-root", "--state-dir", "--strategy", "--migrate", "--archive-size", "--cpu-near-size", "--cpu-near-signature-quota", "--cpu-symmetry-seeds", "--cpu-work-moves", "--cpu-wander-moves", "--status", "--best", "--run-tag", "--near-dir"]
 switch_options = ["--rect", "--rebuild-gpu", "--no-gpu", "--gpu", "--no-tui", "--tui", "--quiet", "--stop-on-record", "--self-test", "--naive"]
 ai = 0 ## i64
 while ai < av.size()
@@ -2061,6 +2066,10 @@ while ai < av.size()
   if arg == "--repo-root" && ai + 1 < av.size()
     REPO_ROOT = av[ai + 1]
     ai += 1
+  if arg == "--state-dir" && ai + 1 < av.size()
+    STATE_DIR = av[ai + 1]
+    STATE_DIR_EXPLICIT = 1
+    ai += 1
   if arg == "--rebuild-gpu"
     GPU_REBUILD = 1
   if arg == "--no-gpu"
@@ -2113,8 +2122,10 @@ while ai < av.size()
     ai += 1
   if arg == "--near-dir" && ai + 1 < av.size()
     NEAR_DIR = av[ai + 1]
+    NEAR_EXPLICIT = 1
     ai += 1
   if arg == "--self-test"
+    SELF_TEST = 1
     GPU = 0
     TUI = 0
     QUIET = 0
@@ -2205,21 +2216,46 @@ if RUN_TAG == ""
 if RUN_TAG.include?("/") || RUN_TAG.include?("..")
   << "flipfleet: --run-tag may not contain '/' or '..'"
   exit(2)
+if STATE_DIR_EXPLICIT != 0 && STATE_DIR == ""
+  << "flipfleet: --state-dir may not be empty"
+  exit(2)
+if SELF_TEST != 0 && STATE_DIR_EXPLICIT == 0
+  STATE_DIR = "/tmp/flipfleet_self_test_" + RUN_TAG
+STATE_DIR = ffls_root(STATE_DIR)
+if STATE_DIR == "" || STATE_DIR.include?("\n")
+  << "flipfleet: cannot resolve live state directory; set HOME, METAFLIP_HOME, or --state-dir PATH"
+  exit(2)
 if NEAR_DIR != ""
   if NEAR_DIR.include?("\n")
     << "flipfleet: --near-dir may not contain a newline"
     exit(2)
+STATE_SHAPE = ffls_shape_label(TENSOR_LABEL, 0)
+if RECT_PORTFOLIO == 0 && RECT_MODE == 0
+  STATE_SHAPE = ffls_shape_label(TENSOR_LABEL, N)
 if STATUS_EXPLICIT == 0
-  STATUS_PATH = "flipfleet_" + TENSOR_LABEL + "_" + RUN_TAG + "_status.txt"
+  STATUS_PATH = ffls_status_path(STATE_DIR, "gf2", STATE_SHAPE, RUN_TAG)
 if BEST_EXPLICIT == 0
-  BEST_PATH = "flipfleet_" + TENSOR_LABEL + "_best.txt"
+  BEST_PATH = ffls_best_path(STATE_DIR, "gf2", STATE_SHAPE)
+if NEAR_EXPLICIT == 0
+  NEAR_DIR = ffls_bank_dir(STATE_DIR, "gf2", STATE_SHAPE)
+
+state_dirs_ok = 1 ## i64
+if STATUS_EXPLICIT == 0
+  state_dirs_ok *= ffls_ensure_dir(ffls_run_dir(STATE_DIR, "gf2", STATE_SHAPE, RUN_TAG))
+if BEST_EXPLICIT == 0 && RECT_PORTFOLIO == 0
+  state_dirs_ok *= ffls_ensure_dir(ffls_checkpoint_dir(STATE_DIR, "gf2", STATE_SHAPE))
+if NEAR_EXPLICIT == 0 && RECT_PORTFOLIO == 0 && RECT_MODE == 0
+  state_dirs_ok *= ffls_ensure_dir(NEAR_DIR)
+if state_dirs_ok == 0
+  << "flipfleet: could not create default live-state directories under " + STATE_DIR
+  exit(2)
 
 # Rectangular profiles share this entry point, CLI, and styled dashboard but
 # not the square state layout.  Dispatch before allocating any square worker
 # structures, keeping ordinary 2x2..7x7 runs on their existing runtime hot
 # path; the rectangular coordinator renders the same TUI from its own loop.
 if RECT_PORTFOLIO == 1
-  result = ffrpo_run(RECT_SHAPES, REPO_ROOT, BEST_PATH, BEST_EXPLICIT, STATUS_PATH, RUN_TAG, J, STEPS, MAX_ROUNDS, MAX_SECS, RECT_EPOCH_ROUNDS, DSLACK, CYCLES, GPU, GPU_WALKERS, GPU_POLICY, GPU_STEPS, GPU_EPOCH_ROUNDS, GPU_BINARY, GPU_REBUILD, QUIET, TUI, STOP_ON_RECORD, SEED_NAIVE) ## i64
+  result = ffrpo_run(RECT_SHAPES, REPO_ROOT, STATE_DIR.to_s(), BEST_PATH, BEST_EXPLICIT, STATUS_PATH, STATUS_EXPLICIT, RUN_TAG, J, STEPS, MAX_ROUNDS, MAX_SECS, RECT_EPOCH_ROUNDS, DSLACK, CYCLES, GPU, GPU_WALKERS, GPU_POLICY, GPU_STEPS, GPU_EPOCH_ROUNDS, GPU_BINARY, GPU_REBUILD, QUIET, TUI, STOP_ON_RECORD, SEED_NAIVE) ## i64
   exit(result)
 
 if RECT_MODE == 1
@@ -2631,9 +2667,15 @@ rect_archive_334 = []
 rect_archive_344 = []
 rect_binaries = ["/tmp/flipfleet_rect_gpu_334", "/tmp/flipfleet_rect_gpu_344"]
 rect_asset_paths = [REPO_ROOT + "/benchmarks/matmul/metaflip/matmul_3x3x4_rank29_gf2.txt", REPO_ROOT + "/benchmarks/matmul/metaflip/matmul_3x4x4_rank38_gf2.txt"]
-rect_checkpoint_paths = ["flipfleet_3x3x4_best.txt", "flipfleet_3x4x4_best.txt"]
+rect_checkpoint_paths = [ffls_best_path(STATE_DIR, "gf2", "3x3x4"), ffls_best_path(STATE_DIR, "gf2", "3x4x4")]
 rect_candidate_states = []
 rect_reject_scratch = []
+if rect_enabled != 0
+  rect_dirs_ok = ffls_ensure_dir(ffls_checkpoint_dir(STATE_DIR, "gf2", "3x3x4")) ## i64
+  rect_dirs_ok *= ffls_ensure_dir(ffls_checkpoint_dir(STATE_DIR, "gf2", "3x4x4"))
+  if rect_dirs_ok == 0
+    << "flipfleet: could not create 7x7 component checkpoint directories under " + STATE_DIR
+    exit(2)
 rect_component = 0 ## i64
 while rect_component < 2
   rn = ffn_rect_n(rect_component) ## i64

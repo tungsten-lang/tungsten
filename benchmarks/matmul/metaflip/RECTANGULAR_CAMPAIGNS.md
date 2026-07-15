@@ -84,14 +84,24 @@ for CPU allocation and never make the portfolio DEGRADED merely because they
 lack Metal. `--gpu-policy single` assigns the GPU budget to one currently
 highest-scoring GPU shape; the default `adaptive` policy keeps several active.
 
-Default best files remain `flipfleet_<tensor>_best.txt`. With an explicit
-`--best PATH`, portfolio children use `PATH.<tensor>`. The parent `--status`
-file has `mode=rect-portfolio`; it receives an in-epoch heartbeat with live
-rank, move, exposure, health, and split CPU/GPU failure telemetry. Exact child
-telemetry is written beside it as `PATH.<tensor>`. Space queues an all-shape
-naive reset at the next exact epoch boundary, atomically replacing every
-selected shape checkpoint even when `J` is smaller than the shape count and
-clearing portfolio rank histories; q/Ctrl-C drains the active epoch and stops.
+Mutable state defaults to `--state-dir PATH`, then `METAFLIP_HOME`, then
+`$HOME/.tungsten/metaflip`. Each portfolio child uses
+`checkpoints/gf2/<tensor>/best.txt` and
+`runs/gf2/<tensor>/<run-tag>/status.txt` under that root. With an explicit
+`--best PATH`, portfolio children continue to use `PATH.<tensor>`; with an
+explicit `--status PATH`, exact child telemetry remains `PATH.<tensor>`. The
+parent status has `mode=rect-portfolio`; it receives an in-epoch heartbeat with
+live rank, move, exposure, health, and split CPU/GPU failure telemetry. Space
+queues an all-shape naive reset at the next exact epoch boundary, atomically
+replacing every selected shape checkpoint even when `J` is smaller than the
+shape count and clearing portfolio rank histories; q/Ctrl-C drains the active
+epoch and stops.
+
+This first live-store migration intentionally leaves cross-process checkpoint
+promotion/CAS, ternary campaign state, and `/tmp` worker, metallib, reject, and
+scratch caches unchanged. Those need separate ownership and concurrency
+policies rather than a path-only migration. The 7×7 rectangular component
+checkpoints do use the shared GF(2) live root.
 
 ## CPU campaign
 
@@ -190,8 +200,9 @@ q/Ctrl-C = cooperative stop, twice = force). CPU-only profiles show an
 explicit "CPU-only profile" section instead of pretending at a Metal engine.
 `--no-tui` keeps the machine-readable `RECT_STATUS` line stream, and the
 status file is written either way. Every profile defaults to its own durable
-`flipfleet_<tensor>_best.txt` checkpoint (for example,
-`flipfleet_3x4x5_best.txt`). The 346/347/356/357/445/455/446/456/457/458/
+`checkpoints/gf2/<tensor>/best.txt` checkpoint under the live-state root (for
+example, `checkpoints/gf2/3x4x5/best.txt`). The
+346/347/356/357/445/455/446/456/457/458/
 466/467/468/567 lanes are not
 silently inserted into a 7x7 campaign: those leaf shapes do not occur in the
 exact 7x7 block composition, so doing so would only reduce useful 7x7

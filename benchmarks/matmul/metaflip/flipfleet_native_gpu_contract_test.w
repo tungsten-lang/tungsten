@@ -51,6 +51,12 @@ ffngc_expect("rectangular reject GPU health", source.split("gpu_failures\[10\] =
 ffngc_expect("rectangular reject summary", source.include?("rect-internal-rejects=\" + rect_internal_rejects.to_s()"))
 ffngc_expect("strict record target", source.include?("internal_target = ffw_best_rank(best) - 1"))
 ffngc_expect("4x4 evidence allocation", source.include?("ff7_allocate_pool_remainder_for_tensor(N") && source.include?("ffkp_mode_lane_budget_for_tensor(N"))
+ffngc_expect("live-store module", source.include?("use flipfleet_live_store") && source.include?("--state-dir"))
+ffngc_expect("live-store root precedence", source.include?("STATE_DIR = ffls_root(STATE_DIR)"))
+ffngc_expect("self-test state isolation", source.include?("if SELF_TEST != 0 && STATE_DIR_EXPLICIT == 0") && source.include?("STATE_DIR = \"/tmp/flipfleet_self_test_\" + RUN_TAG"))
+ffngc_expect("canonical square live paths", source.include?("STATE_SHAPE = ffls_shape_label(TENSOR_LABEL, N)") && source.include?("BEST_PATH = ffls_best_path(STATE_DIR, \"gf2\", STATE_SHAPE)") && source.include?("STATUS_PATH = ffls_status_path(STATE_DIR, \"gf2\", STATE_SHAPE, RUN_TAG)"))
+ffngc_expect("default near bank", source.include?("NEAR_DIR = ffls_bank_dir(STATE_DIR, \"gf2\", STATE_SHAPE)"))
+ffngc_expect("7x7 component live checkpoints", source.include?("ffls_best_path(STATE_DIR, \"gf2\", \"3x3x4\")") && source.include?("ffls_best_path(STATE_DIR, \"gf2\", \"3x4x4\")"))
 
 mitm = ffm_epoch_command("/repo", "/tmp/mitm", "/tmp/seed", "/tmp/out", 7, 2, 32, 2, 9)
 constraint = ffpc_epoch_command("/repo", "/tmp/constraint", "/tmp/seed", "/tmp/out", 7, 1, 64, 100, 9)

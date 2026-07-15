@@ -23,7 +23,11 @@ failures += ffrpot_expect("unsupported rejected", ffrpo_parse_shapes("9x9x9", []
 body = "schema=1 cpu_moves=123 gpu_failures=2\n"
 failures += ffrpot_expect("status integer", ffrpo_status_i64(body, "cpu_moves", 0) == 123 && ffrpo_status_i64(body, "missing", 7) == 7)
 failures += ffrpot_expect("backoff bounded", ffrpo_backoff(1) == 2 && ffrpo_backoff(9) == 16)
-failures += ffrpot_expect("path isolation", ffrpo_best_path("/tmp/best", 1, "4x5x7") == "/tmp/best.4x5x7")
+path_root = "/tmp/flipfleet_rect_portfolio_state"
+failures += ffrpot_expect("explicit best path isolation", ffrpo_best_path("/tmp/best", 1, "4x5x7", path_root) == "/tmp/best.4x5x7")
+failures += ffrpot_expect("default best uses live root", ffrpo_best_path("ignored", 0, "4x5x7", path_root) == path_root + "/checkpoints/gf2/4x5x7/best.txt")
+failures += ffrpot_expect("explicit child status isolation", ffrpo_child_status_path("/tmp/status", 1, "4x5x7", path_root, "run-1") == "/tmp/status.4x5x7")
+failures += ffrpot_expect("default child status uses live root", ffrpo_child_status_path("ignored", 0, "4x5x7", path_root, "run-1") == path_root + "/runs/gf2/4x5x7/run-1/status.txt")
 
 tiny_metrics = i64[2]
 metrics_nonce = ccall("__w_clock_ms").to_s()
@@ -61,7 +65,7 @@ failures += ffrpot_expect("small-J GPU host", host_moved == 1 && gpu_host_alloca
 nonce = ccall("__w_clock_ms").to_s()
 best_base = "/tmp/flipfleet_rect_portfolio_test_best_" + nonce
 status_path = "/tmp/flipfleet_rect_portfolio_test_status_" + nonce
-result = ffrpo_run("3x3x4", ".", best_base, 1, status_path, "portfolio_test_" + nonce, 1, 200, 1, 0, 1, 4, 4, 0, 0, "adaptive", 10, 1, "", 0, 1, 0, 0, 0) ## i64
+result = ffrpo_run("3x3x4", ".", "/tmp/flipfleet_rect_portfolio_state_" + nonce, best_base, 1, status_path, 1, "portfolio_test_" + nonce, 1, 200, 1, 0, 1, 4, 4, 0, 0, "adaptive", 10, 1, "", 0, 1, 0, 0, 0) ## i64
 failures += ffrpot_expect("bounded coordinator returns", result == 0)
 portfolio_status = read_file(status_path)
 child_status = read_file(status_path + ".3x3x4")
@@ -77,7 +81,7 @@ failures += ffrpot_expect("portfolio checkpoint exact", ffrpo_load_metrics("3x3x
 reset_nonce = ccall("__w_clock_ms").to_s()
 reset_best = "/tmp/flipfleet_rect_portfolio_reset_best_" + reset_nonce
 reset_status = "/tmp/flipfleet_rect_portfolio_reset_status_" + reset_nonce
-reset_result = ffrpo_run("3x3x4,3x4x4", ".", reset_best, 1, reset_status, "portfolio_reset_" + reset_nonce, 1, 1, 1, 0, 1, 4, 4, 0, 0, "adaptive", 1, 1, "", 0, 1, 0, 0, 1) ## i64
+reset_result = ffrpo_run("3x3x4,3x4x4", ".", "/tmp/flipfleet_rect_portfolio_reset_state_" + reset_nonce, reset_best, 1, reset_status, 1, "portfolio_reset_" + reset_nonce, 1, 1, 1, 0, 1, 4, 4, 0, 0, "adaptive", 1, 1, "", 0, 1, 0, 0, 1) ## i64
 failures += ffrpot_expect("bounded all-shape reset returns", reset_result == 0)
 reset_metrics = i64[2]
 failures += ffrpot_expect("inactive shape checkpoint reset", ffrpo_load_metrics("3x4x4", ".", reset_best + ".3x4x4", 0, reset_metrics, 0) == 1 && reset_metrics[0] == 48)

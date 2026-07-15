@@ -50,8 +50,8 @@ path on every later restart.
 
 After a component improvement, native FlipFleet:
 
-1. atomically saves `flipfleet_3x3x4_best.txt` or
-   `flipfleet_3x4x4_best.txt`;
+1. atomically saves `checkpoints/gf2/3x3x4/best.txt` or
+   `checkpoints/gf2/3x4x4/best.txt` under the configured live-state root;
 2. recomposes the current rank-47 4x4 and both rectangular checkpoints with
    `ffsc_compose_files`;
 3. exhaustively reloads the resulting 7x7 scheme through the square worker;

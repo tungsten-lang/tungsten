@@ -10,6 +10,7 @@
 use flipfleet_rect_campaign
 use flipfleet_rect_portfolio_policy
 use flipfleet_rect_portfolio_tui
+use flipfleet_live_store
 
 -> ffrpo_shape_code(label) (String) i64
   normalized = label.strip().downcase
@@ -71,13 +72,15 @@ use flipfleet_rect_portfolio_tui
     i += 1
   delay
 
--> ffrpo_best_path(base, explicit, tensor) (String i64 String)
+-> ffrpo_best_path(base, explicit, tensor, state_dir) (String i64 String String)
   if explicit != 0
     return base + "." + tensor
-  "flipfleet_" + tensor + "_best.txt"
+  ffls_best_path(state_dir, "gf2", tensor)
 
--> ffrpo_child_status_path(parent, tensor)
-  parent + "." + tensor
+-> ffrpo_child_status_path(parent, explicit, tensor, state_dir, run_tag) (String i64 String String String)
+  if explicit != 0
+    return parent + "." + tensor
+  ffls_status_path(state_dir, "gf2", tensor, run_tag)
 
 -> ffrpo_gpu_binary(base, tensor)
   if base == ""
@@ -292,7 +295,7 @@ use flipfleet_rect_portfolio_tui
 # Run several exact rectangular campaigns concurrently. `max_epochs` counts
 # portfolio reallocations; each shape keeps its sticky islands for
 # `shape_epoch_rounds` ordinary rectangular rounds before the exact restart.
--> ffrpo_run(shape_spec, repo_root, best_base, best_explicit, status_path, run_tag, total_j, steps, max_epochs, max_secs, shape_epoch_rounds, dslack, cycles, gpu_requested, total_gpu_lanes, gpu_policy, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed) (String String String i64 String String i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 String i64 i64 i64 i64 i64) i64
+-> ffrpo_run(shape_spec, repo_root, state_dir, best_base, best_explicit, status_path, status_explicit, run_tag, total_j, steps, max_epochs, max_secs, shape_epoch_rounds, dslack, cycles, gpu_requested, total_gpu_lanes, gpu_policy, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed) (String String String String i64 String i64 String i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 String i64 i64 i64 i64 i64 i64) i64
   labels = []
   code_storage = i64[32]
   count = ffrpo_parse_shapes(shape_spec, labels, code_storage) ## i64
@@ -358,6 +361,11 @@ use flipfleet_rect_portfolio_tui
   best_paths = []
   child_status_paths = []
 
+  if status_explicit == 0
+    if ffls_ensure_dir(ffls_run_dir(state_dir, "gf2", "rect", run_tag)) == 0
+      << "RECT_PORTFOLIO_ERROR code=state-status-dir"
+      return 2
+
   start_ms = ccall("__w_clock_ms") ## i64
   valid = 0 ## i64
   metrics = i64[count * 2]
@@ -367,9 +375,18 @@ use flipfleet_rect_portfolio_tui
     n = ffrp_n(tensor) ## i64
     m = ffrp_m(tensor) ## i64
     p = ffrp_p(tensor) ## i64
-    path = ffrpo_best_path(best_base, best_explicit, tensor)
+    path = ffrpo_best_path(best_base, best_explicit, tensor, state_dir)
+    child_status_path = ffrpo_child_status_path(status_path, status_explicit, tensor, state_dir, run_tag)
+    if best_explicit == 0
+      if ffls_ensure_dir(ffls_checkpoint_dir(state_dir, "gf2", tensor)) == 0
+        << "RECT_PORTFOLIO_ERROR code=state-checkpoint-dir tensor=" + tensor
+        return 2
+    if status_explicit == 0
+      if ffls_ensure_dir(ffls_run_dir(state_dir, "gf2", tensor, run_tag)) == 0
+        << "RECT_PORTFOLIO_ERROR code=state-child-status-dir tensor=" + tensor
+        return 2
     best_paths.push(path)
-    child_status_paths.push(ffrpo_child_status_path(status_path, tensor))
+    child_status_paths.push(child_status_path)
     leverage[i] = ffrpp_default_leverage(shapes[i])
     gpu_supported[i] = ffrgb_supported(n, m, p)
     gpu_states[i] = 0 - 1

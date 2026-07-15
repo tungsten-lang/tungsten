@@ -24,6 +24,7 @@ while n <= 7
     failures += expect("bounded epochs " + n.to_s(), source.include?("ROUNDS = av0[16].to_i()"))
     failures += expect("cached library " + n.to_s(), source.include?("metal_load_library(device, metallibpath)"))
     failures += expect("persistent mailbox " + n.to_s(), source.include?("persistent_command_path") && source.include?("persistent_generation.to_s() + \" done \""))
+    failures += expect("persistent crash lease " + n.to_s(), source.include?("persistent_idle_timeout_ms = " + ffpg_worker_idle_timeout_ms().to_s()) && source.include?("persistent_generation.to_s() + \" expired \""))
     failures += expect("replayable internal reject " + n.to_s(), source.include?("verify_buf_error") && source.include?("internal_reject_candidate_path") && source.include?("internal_reject_seed_path") && source.include?("internal_reject_meta_path"))
   if metal != nil
     failures += expect("metal kernel " + n.to_s(), metal.include?("kernel void flipwalk"))
@@ -54,6 +55,7 @@ failures += expect("persistent mailbox args", persistent.ends_with?(" '/tmp/comm
 failures += expect("persistent mailbox reset", ffpg_prepare_mailboxes("/tmp/ffb-test-command", "/tmp/ffb-test-ack", "test") == 1)
 run_command = ffpg_command(7, 1, 20000, 100, 4, 120000, 40000, 6, 32)
 failures += expect("persistent command schema", run_command == "7 1 20000 100 4 120000 40000 6 32\n")
+failures += expect("persistent crash lease boundary", ffpg_worker_idle_expired(100, 100 + ffpg_worker_idle_timeout_ms() - 1) == 0 && ffpg_worker_idle_expired(100, 100 + ffpg_worker_idle_timeout_ms()) == 1)
 
 if failures > 0
   << "flipfleet_gpu_bundle_test: " + failures.to_s() + " failure(s)"

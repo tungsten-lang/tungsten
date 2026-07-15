@@ -507,6 +507,9 @@ while i < args.size()
     # deriving from ll_path left `-o` writing a temp .metal and running a stale
     # kernel. Now every rebuild of the source refreshes its companion .metal.
     metal_path = file_path.replace(".w", ".metal")
+    explicit_metal_path = env("TUNGSTEN_METAL_PATH")
+    if explicit_metal_path != nil && explicit_metal_path != ""
+      metal_path = explicit_metal_path
     write_file(metal_path, metal_text)
     if verbose
       << "Wrote " + metal_path + " (" + kernels.size().to_s() + " @gpu fn)"

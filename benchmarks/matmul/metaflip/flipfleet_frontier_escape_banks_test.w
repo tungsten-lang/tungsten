@@ -19,6 +19,32 @@ failures = 0 ## i64
     i += 1
   0
 
+-> fffebt_same_ids(left, right) i64
+  if left.size() != right.size()
+    return 0
+  i = 0 ## i64
+  while i < left.size()
+    if fffebt_contains_id(right, ffbi_best_id(left[i])) == 0
+      return 0
+    i += 1
+  1
+
+# The live scalar scheduler is finite and covers every source/kind/nonce cell
+# exactly once before refusing further work in that rank generation.
+schedule_sources = 10 ## i64
+schedule_target = fffeb_schedule_target(schedule_sources) ## i64
+schedule_seen = i64[schedule_target]
+schedule_out = i64[3]
+schedule_step = 0 ## i64
+while schedule_step < schedule_target
+  failures += fffebt_expect("finite schedule decode", fffeb_schedule_decode(schedule_step, schedule_sources, schedule_out) == 1)
+  schedule_cell = ((schedule_out[2] * 5 + schedule_out[1] - 1) * schedule_sources) + schedule_out[0] ## i64
+  failures += fffebt_expect("finite schedule unique", schedule_cell >= 0 && schedule_cell < schedule_target && schedule_seen[schedule_cell] == 0)
+  schedule_seen[schedule_cell] = 1
+  schedule_step += 1
+failures += fffebt_expect("finite schedule target", schedule_target == 300 && fffeb_schedule_target(16) == 480)
+failures += fffebt_expect("finite schedule stops", fffeb_schedule_decode(schedule_target, schedule_sources, schedule_out) == 0)
+
 root = "benchmarks/matmul/metaflip" ## String
 n = 4 ## i64
 capacity = 96 ## i64
@@ -68,6 +94,64 @@ i = 0
 while i < near2.size()
   failures += fffebt_expect("retained shoulder exact rank49", ffw_best_rank(near2[i]) == 49 && ffw_verify_best_exact(near2[i], n) == 1)
   i += 1
+
+# Six low-cadence one-nonce batches must enumerate the same exact candidate
+# support as one eager six-nonce call.  Loose caps/quotas make admission order
+# irrelevant so this is a direct coverage contract for the live scheduler.
+full_near1 = []
+full_near1_signatures = []
+full_near1_uses = []
+full_near1_successes = []
+full_near2 = []
+full_near2_signatures = []
+full_near2_uses = []
+full_near2_successes = []
+full_near_counters = i64[5]
+full_family_counters = i64[6]
+full_total = fffeb_append_source(d677, 47, 1, n, capacity, state_size, dslack, cycles, workq, wanderq, 6, full_near1, full_near1_signatures, full_near1_uses, full_near1_successes, 64, full_near2, full_near2_signatures, full_near2_uses, full_near2_successes, 64, 64, 2, full_near_counters, full_family_counters) ## i64
+
+lazy_near1 = []
+lazy_near1_signatures = []
+lazy_near1_uses = []
+lazy_near1_successes = []
+lazy_near2 = []
+lazy_near2_signatures = []
+lazy_near2_uses = []
+lazy_near2_successes = []
+lazy_near_counters = i64[5]
+lazy_family_counters = i64[6]
+lazy_total = 0 ## i64
+nonce = 0 ## i64
+while nonce < 6
+  lazy_total += fffeb_append_source_nonce(d677, 47, 1, nonce, n, capacity, state_size, dslack, cycles, workq, wanderq, lazy_near1, lazy_near1_signatures, lazy_near1_uses, lazy_near1_successes, 64, lazy_near2, lazy_near2_signatures, lazy_near2_uses, lazy_near2_successes, 64, 64, 2, lazy_near_counters, lazy_family_counters)
+  nonce += 1
+failures += fffebt_expect("lazy batches preserve constructed coverage", lazy_family_counters[2] == full_family_counters[2])
+failures += fffebt_expect("lazy batches preserve near1 set", fffebt_same_ids(full_near1, lazy_near1) == 1)
+failures += fffebt_expect("lazy batches preserve near2 set", fffebt_same_ids(full_near2, lazy_near2) == 1)
+failures += fffebt_expect("lazy batches preserve admissions", lazy_total == full_total)
+
+single_near1 = []
+single_near1_signatures = []
+single_near1_uses = []
+single_near1_successes = []
+single_near2 = []
+single_near2_signatures = []
+single_near2_uses = []
+single_near2_successes = []
+single_near_counters = i64[5]
+single_family_counters = i64[6]
+single_total = 0 ## i64
+nonce = 0
+while nonce < 6
+  kind = 1 ## i64
+  while kind <= 5
+    single_total += fffeb_append_source_kind_nonce(d677, 47, 1, kind, nonce, n, capacity, state_size, dslack, cycles, workq, wanderq, single_near1, single_near1_signatures, single_near1_uses, single_near1_successes, 64, single_near2, single_near2_signatures, single_near2_uses, single_near2_successes, 64, 64, 2, single_near_counters, single_family_counters)
+    kind += 1
+  nonce += 1
+failures += fffebt_expect("single-kind schedule preserves constructed coverage", single_family_counters[2] == full_family_counters[2])
+failures += fffebt_expect("single-kind schedule preserves near1 set", fffebt_same_ids(full_near1, single_near1) == 1)
+failures += fffebt_expect("single-kind schedule preserves near2 set", fffebt_same_ids(full_near2, single_near2) == 1)
+failures += fffebt_expect("single-kind schedule preserves admissions", single_total == full_total)
 
 # Exercise the path-level integration API and its per-source accounting.
 paths = []

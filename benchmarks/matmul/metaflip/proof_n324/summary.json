@@ -1,0 +1,238 @@
+{
+  "finite_geometry": {
+    "certificate_orbits": 31,
+    "covered_subspaces": 2825,
+    "group_order": 1008,
+    "root_rank1_A_orbit_size": 21,
+    "root_rank2_A_orbit_size": 42
+  },
+  "global_reduction": {
+    "aggregate_cases": 9,
+    "rankone_B_fixed_orbit_cases": 6,
+    "rankone_AB_exact_shards": 107,
+    "fixed_pair_shards": 226,
+    "missing_pair_orbit_representatives": [
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        4
+      ],
+      [
+        1,
+        8
+      ]
+    ],
+    "rank1_A_points": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8,
+      10,
+      12,
+      15,
+      16,
+      17,
+      20,
+      21,
+      32,
+      34,
+      40,
+      42,
+      48,
+      51,
+      60,
+      63
+    ],
+    "residual_pair_orbits": {
+      "1_2": 48,
+      "1_4": 80,
+      "1_8": 98
+    },
+    "root_open_size_19_witness": [
+      2,
+      4,
+      5,
+      8,
+      10,
+      12,
+      15,
+      16,
+      17,
+      20,
+      21,
+      32,
+      34,
+      40,
+      42,
+      48,
+      51,
+      60,
+      63
+    ]
+  },
+  "orbit29_capacity": {
+    "base": [
+      6
+    ],
+    "cnf_sha256": "96d7b3b591b7e15edd79fa4e5c5b9a98efdee49da0aeaecaa1802b19fd922de4",
+    "containing_subspaces": 374,
+    "maximum_open_size": 17,
+    "open_size_17_witness": [
+      11,
+      17,
+      19,
+      24,
+      25,
+      26,
+      27,
+      33,
+      35,
+      41,
+      43,
+      49,
+      50,
+      51,
+      56,
+      57,
+      59
+    ],
+    "proved_lb": 19,
+    "published_lb": 18,
+    "quotient_points": 31,
+    "xlrup_sha256": "a5ce61305607af51d84da7bc4336048e2c79148e2adb031c0a458aff05fe3932"
+  },
+  "rotated_n243_rank2_B_capacity": {
+    "base": [
+      18
+    ],
+    "certificate_orbits": 86,
+    "certificate_sha256": "7f7edeebaa8c54f9b392caf8b3a615c1dc1648ff4533e23ee3df7d8118496886",
+    "btp_sha256": "aca7d1985d90af3c3121b1f4cc5cf24dff2ae922a7d4544a415ff2c8b238ceba",
+    "capacity_table_sha256": "0e5343d8b0f0c9f8581fcf07677aa05a97f969a8c0f86a5431ed3aa86376d2b2",
+    "containing_subspaces": 29212,
+    "group_order": 576,
+    "nontrivial_capacity_inequalities": 28480,
+    "opb_bytes": 127966166,
+    "proof_bytes": 411824811,
+    "proof_shards": 46,
+    "proved_lb": 19,
+    "published_certificate_lb": 18,
+    "quotient_points": 127,
+    "verifier": "VeriPB 3.0.2, 46/46, zero assumptions or diagnostics"
+  },
+  "rankone_B_occurrence": {
+    "occurrence_table_rows": 56724,
+    "occurrence_table_sha256": "751c521c24e9f5e87085f4ed3e781edba71ae0c66a97cdbd0088a2e2d3b7f1f8",
+    "singleton_capacity": 2,
+    "rankone_B_forms": 45,
+    "fixed_B_symmetry_shards": 6,
+    "fixed_B_orbit_sizes": [
+      30,
+      15
+    ]
+  },
+  "gaussian_benders_experiment": {
+    "claim": "sound_pruning_only_not_unsat",
+    "audited_models": 300,
+    "audited_cuts": 7831,
+    "shards_visited": 6,
+    "shards_unsat": 0,
+    "native_timed_runs": 220,
+    "native_solve_seconds_range": [
+      1.5,
+      15.19
+    ],
+    "native_solve_seconds_median": 3.25,
+    "campaign_manifest_sha256": "2d3db41a4f7f83407a7e2e25516531dd398323b42981f436b629dd6c14c0385d",
+    "affine_left_null_benchmark": {
+      "samples_per_model": 512,
+      "matched_models": 25,
+      "direct_solver_seconds_mean": 5.01,
+      "affine_solver_seconds_mean": 3.09,
+      "affine_cut_generation_seconds": 1.08,
+      "direct_cuts_at_model_50": 1295,
+      "affine_cuts_at_model_50": 2292,
+      "result": "still_SAT_as_necessary_B_problem"
+    },
+    "block_C_system": {
+      "blocks": 12,
+      "block_rows": 48,
+      "block_columns": 19,
+      "audited_models": 300,
+      "block_rank_distribution": {
+        "19": 300
+      },
+      "full_rank": 228,
+      "block_and_576_row_witness_sets": "identical",
+      "coordinate_descent_benchmark": {
+        "restarts": 4,
+        "random_512_best_literals": 224,
+        "block_best_literals": 96,
+        "block_generation_seconds": 0.81,
+        "matched_models": 10,
+        "direct_solver_seconds_mean": 4.3,
+        "block_solver_seconds_mean": 2.71,
+        "result": "both_necessary_B_branches_still_SAT"
+      }
+    },
+    "residual_symmetry_lift": {
+      "full_group_orders": [
+        32256,
+        64512,
+        10752,
+        21504,
+        5376,
+        10752
+      ],
+      "selected_subgroup_order": 8,
+      "direct_cuts": 7831,
+      "lifted_cuts": 48555,
+      "lifted_case_results": [
+        "SAT",
+        "SAT",
+        "SAT",
+        "SAT",
+        "SAT",
+        "TIMELIMIT_60_SECONDS"
+      ],
+      "claim": "diversity_only_not_unsat"
+    },
+    "monolithic_exact_opb": {
+      "variables": 13647,
+      "constraints": 99424,
+      "native_time_limit_seconds": 120,
+      "result": "TIMELIMIT"
+    }
+  },
+  "quotient_rank_closure": {
+    "claim": "rank(<3,2,4>) over GF(2) is exactly 20",
+    "quotient_dimension": 36,
+    "necessary_rank_cap": 7,
+    "opb_variables": 7529,
+    "opb_constraints": 86487,
+    "symmetry_shards": 6,
+    "verified_unsat_shards": 6,
+    "proof_bytes_total": 1248204428,
+    "proof_checker": "VeriPB 3.0.2 forced checked-deletion mode, no warnings or errors",
+    "planted_encoding_audit": "ranks 0..7 SAT and rank 8 UNSAT under natural and reversed column orders",
+    "manifest": "n324_quotient_rank_manifest.json",
+    "manifest_sha256": "327223d5ab873d289bfd9e85dd471d4b6184b5166e467676d95bf987aa1c72c3"
+  },
+  "published": {
+    "btp_sha256": "875f7ce52ad6afc9ffbab70269cbaca25cdf205174da2c8e2edec2af5aff2e4d",
+    "certificate_sha256": "b1926bac436850d6c43c1c909a4bdfd9c84a073ed14b6359635944dfd694316d",
+    "prover_commit": "efd22070269157e65aaf8d61a21da253a4000c61"
+  },
+  "status": {
+    "global_n324_lb20": "proved_by_six_warning_free_quotient_rank_unsat_proofs",
+    "global_n324_rank": 20,
+    "orbit29_lb19": "proved_and_formally_checked",
+    "rotated_n243_rank2_B_lb19": "proved_and_independently_checked",
+    "rank19_residual": "closed_all_six_rankone_A_rankone_B_symmetry_shards_unsat"
+  }
+}

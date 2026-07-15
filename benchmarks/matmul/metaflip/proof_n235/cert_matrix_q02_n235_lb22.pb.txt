@@ -1,0 +1,331 @@
+problem_name: "matrix_q02_n235"
+characteristic: 2
+extension_degree: 1
+na: 6
+nb: 15
+nc: 10
+constrained_tensors {
+  constraints: "\001\002\004\010\020 "
+  rank_lower_bound: 0
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 1
+  constraints: "\001\002\004\010\020"
+  rank_lower_bound: 5
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 2
+  constraints: "\001\002\010\024 "
+  rank_lower_bound: 10
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 3
+  constraints: "\001\002\004\010"
+  rank_lower_bound: 10
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 4
+  constraints: "\001\002\010\020"
+  rank_lower_bound: 10
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 5
+  constraints: "\001\002\010\024"
+  rank_lower_bound: 15
+  rank_lower_bound_proof {
+    forced_product_proof {
+      projection_type: 1
+    }
+  }
+}
+constrained_tensors {
+  index: 6
+  constraints: "\001\002\010 "
+  rank_lower_bound: 10
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 7
+  constraints: "\001\002\014 "
+  rank_lower_bound: 15
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 8
+  constraints: "\001\010\024&"
+  rank_lower_bound: 15
+  rank_lower_bound_proof {
+    backtracking_proof {
+      proof_size: 31
+    }
+  }
+}
+constrained_tensors {
+  index: 9
+  constraints: "\001\n\024 "
+  rank_lower_bound: 15
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 10
+  constraints: "\001\002\004"
+  rank_lower_bound: 15
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 11
+  constraints: "\001\002\010"
+  rank_lower_bound: 15
+  rank_lower_bound_proof {
+    degenerate_proof {
+      extra_constraint: 20
+      transformation {
+        query_elem: 9
+        store_elem: 473
+      }
+    }
+  }
+}
+constrained_tensors {
+  index: 12
+  constraints: "\001\002\014"
+  rank_lower_bound: 20
+  rank_lower_bound_proof {
+    forced_product_proof {
+      projection_type: 2
+    }
+  }
+}
+constrained_tensors {
+  index: 13
+  constraints: "\001\002 "
+  rank_lower_bound: 15
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 14
+  constraints: "\001\010\024"
+  rank_lower_bound: 15
+  rank_lower_bound_proof {
+    degenerate_proof {
+      extra_constraint: 2
+      transformation {
+        query_elem: 9
+        store_elem: 473
+      }
+    }
+  }
+}
+constrained_tensors {
+  index: 15
+  constraints: "\001\n\020"
+  rank_lower_bound: 17
+  rank_lower_bound_proof {
+    backtracking_proof {
+      proof_size: 127
+    }
+  }
+}
+constrained_tensors {
+  index: 16
+  constraints: "\001\n\024"
+  rank_lower_bound: 18
+  rank_lower_bound_proof {
+    backtracking_proof {
+      proof_size: 1093
+    }
+  }
+}
+constrained_tensors {
+  index: 17
+  constraints: "\001\n "
+  rank_lower_bound: 18
+  rank_lower_bound_proof {
+    backtracking_proof {
+      proof_size: 1093
+    }
+  }
+}
+constrained_tensors {
+  index: 18
+  constraints: "\001\020$"
+  rank_lower_bound: 15
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 19
+  constraints: "\001\024&"
+  rank_lower_bound: 18
+  rank_lower_bound_proof {
+    backtracking_proof {
+      proof_size: 1093
+    }
+  }
+}
+constrained_tensors {
+  index: 20
+  constraints: "\n\024#"
+  rank_lower_bound: 18
+  rank_lower_bound_proof {
+    backtracking_proof {
+      proof_size: 1093
+    }
+  }
+}
+constrained_tensors {
+  index: 21
+  constraints: "\001\002"
+  rank_lower_bound: 20
+  rank_lower_bound_proof {
+    degenerate_proof {
+      extra_constraint: 12
+      transformation {
+        query_elem: 9
+        store_elem: 473
+      }
+    }
+  }
+}
+constrained_tensors {
+  index: 22
+  constraints: "\001\010"
+  rank_lower_bound: 17
+  rank_lower_bound_proof {
+    backtracking_proof {
+      proof_size: 1303
+    }
+  }
+}
+constrained_tensors {
+  index: 23
+  constraints: "\001\n"
+  rank_lower_bound: 20
+  rank_lower_bound_proof {
+    degenerate_proof {
+      extra_constraint: 4
+      transformation {
+        query_elem: 9
+        store_elem: 489
+      }
+    }
+  }
+}
+constrained_tensors {
+  index: 24
+  constraints: "\001\020"
+  rank_lower_bound: 18
+  rank_lower_bound_proof {
+    degenerate_proof {
+      extra_constraint: 12
+      transformation {
+        query_elem: 9
+        store_elem: 169
+      }
+    }
+  }
+}
+constrained_tensors {
+  index: 25
+  constraints: "\001\024"
+  rank_lower_bound: 20
+  rank_lower_bound_proof {
+    degenerate_proof {
+      extra_constraint: 2
+      transformation {
+        query_elem: 9
+        store_elem: 474
+      }
+    }
+  }
+}
+constrained_tensors {
+  index: 26
+  constraints: "\n\023"
+  rank_lower_bound: 19
+  rank_lower_bound_proof {
+    backtracking_proof {
+      proof_size: 19
+    }
+  }
+}
+constrained_tensors {
+  index: 27
+  constraints: "\n\024"
+  rank_lower_bound: 19
+  rank_lower_bound_proof {
+    backtracking_proof {
+      proof_size: 30
+    }
+  }
+}
+constrained_tensors {
+  index: 28
+  constraints: "\001"
+  rank_lower_bound: 20
+  rank_lower_bound_proof {
+    degenerate_proof {
+      extra_constraint: 2
+      transformation {
+        query_elem: 9
+        store_elem: 474
+      }
+    }
+  }
+}
+constrained_tensors {
+  index: 29
+  constraints: "\n"
+  rank_lower_bound: 21
+  rank_lower_bound_proof {
+    backtracking_proof {
+      proof_size: 63388
+    }
+  }
+}
+constrained_tensors {
+  index: 30
+  rank_lower_bound: 22
+  rank_lower_bound_proof {
+    backtracking_proof {
+      proof_size: 2996
+    }
+  }
+}

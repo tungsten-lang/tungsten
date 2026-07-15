@@ -1,0 +1,8 @@
+source	revision	role
+audit_date	2026-07-13	comparison date
+block_composition_unbalanced_audit.tsv	704563985a37c3d58779ce17eecab4007ddce6387ea50c56e24b60299ac36d4e	SHA-256 of persisted audit
+fmm_digest	5d9509fe745df670c3c2b4b29f5b95ae055c7cda	complete live Lille rank table
+matmulcatalog	0320f745d87e46c36259b03add05307429941680	S3-normalized all-field and GF(2) scheme audit
+fmm-17-32	deb0a6c5c6571c17c4fba27f34ded6af62d77ef0	S3-normalized integer-certificate audit
+rank-47 outer	matmul_4x4_rank47_d450_gf2.txt	exact-gated support-aware outer
+leaf pool	56 exact schemes for every sorted 3--8 shape	exact-gated stable GF(2) leaves

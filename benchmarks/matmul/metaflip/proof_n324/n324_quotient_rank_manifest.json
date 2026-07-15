@@ -1,0 +1,128 @@
+{
+  "schema": "n324-quotient-rank-proof-manifest-v1",
+  "claim": "The six rank-one-A/rank-one-B rank-19 residual shards are UNSAT; combined with the separately checked mode lemmas and symmetry cover, GF(2) rank(<3,2,4>) is 20.",
+  "occurrence_table_sha256": "751c521c24e9f5e87085f4ed3e781edba71ae0c66a97cdbd0088a2e2d3b7f1f8",
+  "solver": {
+    "path_name": "roundingsat",
+    "sha256": "2451312026c4d3308a1533a09c6911c26902e2214fd0941064c1498dd9da192b",
+    "expected": "RoundingSat 2 commit d4edbf7"
+  },
+  "veripb": {
+    "path_name": "veripb",
+    "sha256": "ab85d4a75ca24e8917c4f812e337756e69790ca5e836294a7c5f3a77a26dadb6",
+    "version_output": "Running VeriPB version 3.0.2\nveripb 3.0.2"
+  },
+  "audits": {
+    "fixed_B_orbit_cover": "PASS: 3 missing-A cases, 2 B orbits each",
+    "planted_rank_encoding": "PASS: ranks 0..7 SAT, rank 8 UNSAT, two orders",
+    "proof_deletions": "all unchecked deletion commands removed",
+    "veripb_checked_deletion_mode": "PASS without warnings"
+  },
+  "cases": [
+    {
+      "name": "m12b1",
+      "missing_A": [
+        1,
+        2
+      ],
+      "fixed_B": 1,
+      "term_order": "natural",
+      "formula": "m12b1.opb",
+      "formula_bytes": 83441933,
+      "formula_sha256": "9124fac23c66d01f32e8aae41abb8a3ceb1d9b5cab57de1a18e61b39d03919d6",
+      "proof": "m12b1.pbp",
+      "proof_bytes": 159429598,
+      "proof_sha256": "e7c55d22fd2bda6c533f13845d3263119ba2de0634d5d0fa62c14ed58277c226",
+      "veripb": "VERIFIED UNSATISFIABLE; no warning or error"
+    },
+    {
+      "name": "m12b17",
+      "missing_A": [
+        1,
+        2
+      ],
+      "fixed_B": 17,
+      "term_order": "natural",
+      "formula": "m12b17.opb",
+      "formula_bytes": 83441934,
+      "formula_sha256": "7411b71c45be1d57ddeb35bbd258103c77b68a520c86066c7447f29e8654b547",
+      "proof": "m12b17.pbp",
+      "proof_bytes": 27613854,
+      "proof_sha256": "0bf1c5953847e083f38cd152976567dc488546616a772fb039224984329ddff2",
+      "veripb": "VERIFIED UNSATISFIABLE; no warning or error"
+    },
+    {
+      "name": "m14b1",
+      "missing_A": [
+        1,
+        4
+      ],
+      "fixed_B": 1,
+      "term_order": "natural",
+      "formula": "m14b1.opb",
+      "formula_bytes": 83441964,
+      "formula_sha256": "3e1c9cecd67a321eeefdfa5fa581d958d5ee36c744139342ed6d27717e40f244",
+      "proof": "m14b1.pbp",
+      "proof_bytes": 359919856,
+      "proof_sha256": "d7adf933777aec1c16bb40051f500046bce3df5e2feeff805c3f1a37c40c0dd5",
+      "veripb": "VERIFIED UNSATISFIABLE; no warning or error"
+    },
+    {
+      "name": "m14b16",
+      "missing_A": [
+        1,
+        4
+      ],
+      "fixed_B": 16,
+      "term_order": "natural",
+      "formula": "m14b16.opb",
+      "formula_bytes": 83441965,
+      "formula_sha256": "465d7b67e7a4aadc92b13db4791452730a2bb05a286279bee4fadc3ceb6f17a5",
+      "proof": "m14b16.pbp",
+      "proof_bytes": 362935753,
+      "proof_sha256": "b81158beef16e8b16fbef6a1560ac47548ce758e3322a1268f0d6ca84b9eb61f",
+      "veripb": "VERIFIED UNSATISFIABLE; no warning or error"
+    },
+    {
+      "name": "m18b1",
+      "missing_A": [
+        1,
+        8
+      ],
+      "fixed_B": 1,
+      "term_order": "canonical-first",
+      "formula": "m18b1.opb",
+      "formula_bytes": 83442004,
+      "formula_sha256": "46ef6e82ea6d1a5e2d8063c9e65d6b6b9de2e6ef3b7656690a57f67aae268a8a",
+      "proof": "m18b1.pbp",
+      "proof_bytes": 254909338,
+      "proof_sha256": "b97089adfda4c94ddc3feed1465c5b5f32f5a047ebecb948cb84f88a17607430",
+      "veripb": "VERIFIED UNSATISFIABLE; no warning or error"
+    },
+    {
+      "name": "m18b17",
+      "missing_A": [
+        1,
+        8
+      ],
+      "fixed_B": 17,
+      "term_order": "canonical-first",
+      "formula": "m18b17.opb",
+      "formula_bytes": 83442004,
+      "formula_sha256": "473e302f6ff733eca852641c790001d737ecc839b42f7a1f3b27c8312054396a",
+      "proof": "m18b17.pbp",
+      "proof_bytes": 83396029,
+      "proof_sha256": "05e7d597feb1d2407bf388c6a68e6781c84eaea6b6c3e1c7f257db8124170664",
+      "veripb": "VERIFIED UNSATISFIABLE; no warning or error"
+    }
+  ],
+  "source_sha256": {
+    "n324_common.py": "097cb4cf316d4ee824692b12364c68cfc7a02fcfc56b5a81ab1fbd5e87c80b87",
+    "n324_rankone_b_assignment_opb.py": "83cc987b0881a26cfa3c531bb732b4369cf2d706ee78103742ad73c227b4a6fc",
+    "n324_quotient_rank.py": "7b9f31b186d06b34baa485f528d62c1d14a395c714a8e16150badb0b51872c5f",
+    "n324_quotient_rank_opb.py": "9024d6072e62917961abecb486cd5491fc6aa7d9852a920581eaf3a0d2b709d9",
+    "n324_quotient_encoding_audit.py": "67a2b3561dadfa69709b9d90ca1d550992aabc2148022ebb842ef5fe36378455",
+    "n324_verify_quotient_proofs.py": "ac4159603f0824a48a11789f7b82145a7e43b41228b014ce2bd3776612a40895",
+    "n324_b_orbit_audit.py": "8b5e4fe279d5e5ba4215eb67913d8d567e42b4bb9ddca8dd9aeb959e1ef31f2f"
+  }
+}

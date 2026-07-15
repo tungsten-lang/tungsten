@@ -468,6 +468,7 @@ use hashing
 
   # Threads
   out << declare_fn("w_thread_spawn", wv, wv)
+  out << declare_fn("w_thread_spawn_slots", wv, wv)
   out << declare_fn("w_thread_join", wv, wv)
 
   # Channels
@@ -537,6 +538,7 @@ use hashing
   out << declare_fn("__w_argv_count", wv, "")
   out << declare_fn("__w_argv_at", wv, wv)
   out << declare_fn("__w_clock_ms", wv, "")
+  out << declare_fn("__w_sleep_ms", wv, wv)
   out << declare_fn("__w_clock", wv, "")
   out << declare_fn("__w_prime_aks", wv, wv)
 

@@ -381,6 +381,85 @@
       return param_name_in_list?(value.name, params)
   false
 
+# Populate the type map that controls a definition's parameter lowering and
+# raw-call ABI decision.  This runs both in the module-wide ABI prepass and
+# again while lowering the body; keeping one implementation is essential
+# because callers and callees must agree on whether each i64 register contains
+# a raw machine integer or a boxed WValue.
+-> populate_definition_var_types(node, child_var_types)
+  if node.type_hints != nil
+    hint_names = node.type_hints.keys()
+    i = 0
+    while i < hint_names.size()
+      ht = node.type_hints[hint_names[i]]
+      hts = ht.to_s()
+      htl = hts.size()
+      if htl >= 3 && hts.slice(htl - 2, 2) == "\[]"
+        child_var_types[hint_names[i]] = typed_array_etype_to_sym(hts.slice(0, htl - 2))
+      else
+        child_var_types[hint_names[i]] = normalize_type_symbol(ht)
+      i += 1
+
+  if node.param_types != nil
+    pt = node.param_types
+    pti = 0
+    while pti < pt.size() && pti < node.params.size()
+      pname = param_runtime_name(node.params[pti])
+      pts = pt[pti].to_s()
+      ptsl = pts.size()
+      if ptsl >= 3 && pts.slice(ptsl - 2, 2) == "\[]"
+        child_var_types[pname] = typed_array_etype_to_sym(pts.slice(0, ptsl - 2))
+      else
+        child_var_types[pname] = normalize_type_symbol(pt[pti])
+      pti += 1
+
+  fname = node.name
+  if fname != nil && (fname.starts_with?("hot_") || fname.starts_with?("bench_"))
+    promotions = analyze_int_promotions(node.body, node.params, child_var_types)
+    promote_names = promotions.keys()
+    pj = 0
+    while pj < promote_names.size()
+      child_var_types[promote_names[pj]] = :i64
+      pj += 1
+  child_var_types
+
+# Return [raw-i64 ABI, narrow-int passthrough ABI] for one definition.  The
+# module prepass and body lowerer both call this exact predicate so source order
+# cannot make a forward call use the boxed ABI while its eventual callee uses
+# the raw ABI.
+-> definition_raw_abi_flags(node, top_level, fn_return_types, rt, child_var_types)
+  rt_int_ok = (rt == nil) || int_compatible_return_type?(rt)
+  body_int_ok = body_returns_only_int?(node.body, enrich_int_locals(node.body, child_var_types), fn_return_types)
+  raw_i64_sig = top_level && rt_int_ok && body_int_ok && (all_params_i64?(node.params, child_var_types) || mixed_raw_params?(node.params, child_var_types))
+  raw_int_sig = !raw_i64_sig && top_level && rt_int_ok && body_int_ok && all_params_machine_int?(node.params, child_var_types) && body_is_param_passthrough?(node.body, node.params)
+  [raw_i64_sig, raw_int_sig]
+
+# Decide every top-level definition's ABI before lowering any body.  Previously
+# raw_callable_fns was populated only as definitions were encountered, so a
+# typed forward call was emitted boxed even when the later callee was lowered
+# with a raw-i64 signature.  Both ABIs are LLVM i64, making the mismatch link
+# cleanly and then corrupt values at runtime.
+-> preregister_top_level_raw_abis(mod, expressions)
+  i = 0
+  while i < expressions.size()
+    node = expressions[i]
+    if ast_kind(node) in (:method_def :fn_def)
+      child_var_types = {}
+      populate_definition_var_types(node, child_var_types)
+      rt = nil
+      if node.return_type != nil
+        rt = normalize_type_symbol(node.return_type)
+      else
+        rt = infer_fn_return_type(node, lowering_infer_maps)
+      flags = definition_raw_abi_flags(node, true, mod[:fn_return_types], rt, child_var_types)
+      if flags[0] || flags[1]
+        call_key = method_call_key_for_def(node)
+        mod[:raw_callable_fns][call_key] = function_name_for_def(node)
+        if flags[0]
+          mod[:raw_fn_param_kinds][call_key] = raw_param_kinds(node.params, child_var_types)
+    i += 1
+  nil
+
 -> lower_method_def(ctx, node)
   mod = ctx[:mod]
   name = node.name
@@ -473,58 +552,9 @@
     block_return_slot = ensure_var_slot(new_fn, "__block_return_frame")
     emit_instruction(new_fn, {op: :store_i64, value: block_return_bits, ptr: block_return_slot})
 
-  # Apply type hints to params and local vars
-  if node.type_hints != nil
-    hint_names = node.type_hints.keys()
-    i = 0
-    while i < hint_names.size()
-      ht = node.type_hints[hint_names[i]]
-      # Normalize array type hints: i4[]/i8[]/i16[]/i32[]/i64[]/u4[]/u8[]/u16[]/u32[]/u64[]/f32[]/f64[] → :typed_array_<etype>
-      hts = ht.to_s()
-      htl = hts.size()
-      if htl >= 3 && hts.slice(htl - 2, 2) == "\[]"
-        child_var_types[hint_names[i]] = typed_array_etype_to_sym(hts.slice(0, htl - 2))
-      else
-        child_var_types[hint_names[i]] = normalize_type_symbol(ht)
-      i += 1
-
-  # Phase 3: apply inline param-type annotations from `(i64 i64)` form.
-  # Maps positional types to param names. Same destination as the
-  # existing `##` type-hint path — both converge on child_var_types so
-  # downstream lowering treats them identically. If both the inline
-  # signature and the `##` hint annotate the same param, the inline
-  # form wins (the `##` write at line 4125 is overwritten here).
-  #
-  # Array-typed params (`i64[]`, `u32[]`, etc.) are stored as symbols
-  # like `:"i64[]"` by the parser; normalize them here to the same
-  # `:typed_array_<etype>` form the `## i64[]: name` hint produces.
-  if node.param_types != nil
-    pt = node.param_types
-    ptl = pt.size()
-    pti = 0
-    while pti < ptl && pti < params.size()
-      pname = param_runtime_name(params[pti])
-      pts = pt[pti].to_s()
-      ptsl = pts.size()
-      if ptsl >= 3 && pts.slice(ptsl - 2, 2) == "\[]"
-        child_var_types[pname] = typed_array_etype_to_sym(pts.slice(0, ptsl - 2))
-      else
-        child_var_types[pname] = normalize_type_symbol(pt[pti])
-      pti += 1
-
-  # Phase 0.4b: auto-promote non-escaping local int vars to :i64.
-  # Opt-in by fn name prefix while the analyzer matures: any function whose
-  # name starts with `hot_` or `bench_` runs the pass. Once the analyzer has
-  # been broadened and validated against the full self-host bootstrap the
-  # gate is dropped and every function is analyzed.
-  fname_for_promote = node.name
-  if fname_for_promote != nil && (fname_for_promote.starts_with?("hot_") || fname_for_promote.starts_with?("bench_"))
-    promotions = analyze_int_promotions(body, params, child_var_types)
-    promote_names = promotions.keys()
-    pj = 0
-    while pj < promote_names.size()
-      child_var_types[promote_names[pj]] = :i64
-      pj += 1
+  # Apply declared parameter/local types through the same helper used by the
+  # module-wide raw-ABI prepass.
+  populate_definition_var_types(node, child_var_types)
 
   child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types)
 
@@ -550,10 +580,9 @@
   # and TRUNCATING values >2^48. When rt is nil, rely on body_int_ok below, which
   # is param-type-aware (walks returns via child_var_types). A non-nil rt must
   # still be machine-int.
-  rt_int_ok = (rt == nil) || int_compatible_return_type?(rt)
-  body_int_ok = body_returns_only_int?(body, enrich_int_locals(body, child_var_types), mod[:fn_return_types])
-  raw_i64_sig = (ctx[:class_name] == nil) && rt_int_ok && body_int_ok && (all_params_i64?(params, child_var_types) || mixed_raw_params?(params, child_var_types))
-  raw_int_sig = !raw_i64_sig && (ctx[:class_name] == nil) && rt_int_ok && body_int_ok && all_params_machine_int?(params, child_var_types) && body_is_param_passthrough?(body, params)
+  raw_abi_flags = definition_raw_abi_flags(node, ctx[:class_name] == nil, mod[:fn_return_types], rt, child_var_types)
+  raw_i64_sig = raw_abi_flags[0]
+  raw_int_sig = raw_abi_flags[1]
   if raw_i64_sig
     new_fn[:raw_i64_signature] = true
     # ensure_return_value reads raw_return_type — explicit `return X`

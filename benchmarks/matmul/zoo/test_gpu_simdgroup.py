@@ -75,6 +75,20 @@ class SimdgroupGeneratorTest(unittest.TestCase):
         self.assertIn("MODE = 1", src)
         self.assertNotIn("hashslot = int(", src)
 
+    def test_7x7_keeps_high_masks_on_raw_i64_host_paths(self) -> None:
+        src = GEN.generate(7, 360, "/tmp/simd777.ll")
+        self.assertIn("umask = uhi * 10000000 + ulo", src)
+        self.assertIn(
+            "seed_us_view = metal_buffer_view(seed_us, 66, CAP) ## i64[]",
+            src,
+        )
+        self.assertIn(
+            "best_us_view = metal_buffer_view(best_us, 66, GROUPS * CAP) ## i64[]",
+            src,
+        )
+        self.assertNotIn("seedu[ii] = parts[colbase].to_i()", src)
+        self.assertNotIn("metal_buffer_read_i64(best_us", src)
+
     def test_tracked_d2508_candidate_is_fully_exact(self) -> None:
         path = MATMUL / "metaflip" / "matmul_6x6_rank153_d2508_gf2.txt"
         terms = load_terms(path)

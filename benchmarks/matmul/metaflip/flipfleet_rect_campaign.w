@@ -14,6 +14,7 @@
 
 use metaflip_rect_worker
 use flipfleet_rect_gpu_bundle
+use flipfleet_rect_gpu_reject
 use flipfleet_tui
 
 -> ffrc_better(rank, bits, best_rank, best_bits) (i64 i64 i64 i64) i64
@@ -22,6 +23,27 @@ use flipfleet_tui
   if rank == best_rank && bits < best_bits
     return 1
   0
+
+# Return -1 for a fleet-best GPU epoch, otherwise the sticky CPU island whose
+# independently seeded best should feed this epoch. Nonleader doors receive
+# half the epochs in round-robin order; unsupported/single-door profiles keep
+# the historical fleet-best-only behavior.
+-> ffrc_gpu_seed_lane(round, frontier_count, walkers) (i64 i64 i64) i64
+  alternate_span = frontier_count - 1 ## i64
+  if alternate_span > walkers - 1
+    alternate_span = walkers - 1
+  if alternate_span > 0 && (round % 2) == 1
+    return 1 + ((round / 2) % alternate_span)
+  0 - 1
+
+-> ffrc_door_improvement(candidate, incumbent, n, m, p) (i64[] i64[] i64 i64 i64) i64
+  if candidate == nil || incumbent == nil
+    return 0
+  if ffr_verify_best_exact(candidate, n, m, p) != 1
+    return 0
+  if ffr_verify_best_exact(incumbent, n, m, p) != 1
+    return 0
+  ffrc_better(ffr_best_rank(candidate), ffr_best_bits(candidate), ffr_best_rank(incumbent), ffr_best_bits(incumbent))
 
 -> ffrc_shell_quote(text) (String)
   "'" + text.replace("'", "'\"'\"'") + "'"
@@ -81,6 +103,46 @@ use flipfleet_tui
     z = ffr_wander(state, wander)
     elapsed_ms[slot] = ccall("__w_clock_ms") - t0
     true
+
+# Balance the next rectangular CPU tranche against the measured Metal epoch.
+# A fixed small tranche can finish far before a wide cal2zone dispatch and
+# leave every CPU island idle at the join barrier. Adjustment is bounded to
+# 4x per observation and 32x from the caller's base, so a stalled/failing GPU
+# cannot create a minutes-long unresponsive CPU round. CPU-only profiles pass
+# gpu_ms=0 and retain the exact caller-supplied budget.
+-> ffrc_balanced_cpu_steps(current, cpu_ms, gpu_ms, base) (i64 i64 i64 i64) i64
+  if current < 1
+    current = 1
+  if base < 1
+    base = 1
+  if cpu_ms < 1 || gpu_ms < 1
+    return current
+  target_ms = gpu_ms ## i64
+  if target_ms > 2000
+    target_ms = 2000
+  proposed = current * target_ms / cpu_ms ## i64
+  low_change = current / 4 ## i64
+  if low_change < 1
+    low_change = 1
+  high_change = current * 4 ## i64
+  if proposed < low_change
+    proposed = low_change
+  if proposed > high_change
+    proposed = high_change
+  absolute_min = base / 4 ## i64
+  if absolute_min < 1
+    absolute_min = 1
+  absolute_max = base * 32 ## i64
+  if proposed < absolute_min
+    proposed = absolute_min
+  if proposed > absolute_max
+    proposed = absolute_max
+  next_steps = (current * 3 + proposed) / 4 ## i64
+  if next_steps < absolute_min
+    next_steps = absolute_min
+  if next_steps > absolute_max
+    next_steps = absolute_max
+  next_steps
 
 -> ffrc_binary_fresh(binary, source, metal, glue) (String String String String) i64
   binary_mtime = file_mtime_ns(binary)
@@ -213,7 +275,10 @@ use flipfleet_tui
       wr_status = "beats"
   body = "schema=1 mode=rect producer_state=" + state_name + " sequence=" + sequence.to_s()
   body = body + " tensor=" + tensor + " record=" + record.to_s() + " record_known=" + record_known.to_s()
-  body = body + " target=" + (record - 1).to_s() + " best_rank=" + best_rank.to_s() + " best_bits=" + ffr_best_bits(best).to_s()
+  target = record - 1 ## i64
+  if record_known != 0 && ffrp_proven_optimal(ffrp_n(tensor),ffrp_m(tensor),ffrp_p(tensor)) != 0
+    target = record
+  body = body + " target=" + target.to_s() + " best_rank=" + best_rank.to_s() + " best_bits=" + ffr_best_bits(best).to_s()
   body = body + " wr_gap=" + wr_gap.to_s() + " wr_status=" + wr_status
   body = body + " cpu_lanes=" + cpu_lanes.to_s() + " cpu_moves=" + cpu_moves.to_s() + " cpu_ms=" + cpu_ms.to_s()
   body = body + " gpu_requested=" + gpu_requested.to_s() + " gpu_supported=" + gpu_supported.to_s() + " gpu_ready=" + gpu_ready.to_s()
@@ -397,6 +462,11 @@ use flipfleet_tui
   if record_override > 0
     record = record_override
     record_known = 0
+  target = record - 1 ## i64
+  proven_optimal = 0 ## i64
+  if record_known != 0 && ffrp_proven_optimal(n,m,p) != 0
+    target = record
+    proven_optimal = 1
   # naive_seed still reports against the published WR; it only skips loading
   # record scheme files into the campaign inventory.
 
@@ -439,14 +509,44 @@ use flipfleet_tui
     << "RECT_ERROR code=checkpoint-write tensor=" + tensor + " path=" + best_path
     return 2
 
+  # Only implicit/profile starts draw from the checked-in frontier bank.
+  # An explicit --seed remains an exact experiment: no hidden alternate is
+  # injected, which also makes matched restart comparisons reproducible.
+  use_profile_frontier = 0 ## i64
+  if naive_seed == 0 && (seed_path == "" || seed_path == "record")
+    use_profile_frontier = 1
+  frontier_count = 1 ## i64
+  if use_profile_frontier != 0
+    frontier_count = ffrp_frontier_seed_count(n, m, p)
+
   states = []
+  initial_sources = []
   lane = 0 ## i64
   while lane < walkers
-    island = ffrc_clone_exact(best, n, m, p, capacity, 82001 + lane * 97, dslack, cycles, workq, wanderq)
+    island = nil
+    island_source = "record"
+    frontier_slot = 0 ## i64
+    if frontier_count > 1
+      frontier_slot = lane % frontier_count
+    if use_profile_frontier != 0 && frontier_slot > 0
+      frontier_rel = ffrp_frontier_seed_rel(n, m, p, frontier_slot)
+      frontier_path = repo_root + "/" + frontier_rel
+      frontier = i64[state_size]
+      frontier_rank = ffr_load_scheme_cap(frontier, frontier_path, n, m, p, capacity, 82001 + lane * 97, dslack, cycles, workq, wanderq) ## i64
+      if frontier_rank < 1 || ffr_verify_best_exact(frontier, n, m, p) != 1
+        << "RECT_ERROR code=frontier-seed tensor=" + tensor + " slot=" + frontier_slot.to_s() + " path=" + frontier_path
+        return 2
+      island = ffrc_clone_exact(frontier, n, m, p, capacity, 82501 + lane * 97, dslack, cycles, workq, wanderq)
+      island_source = "frontier" + frontier_slot.to_s()
+    if island == nil
+      island = ffrc_clone_exact(best, n, m, p, capacity, 82001 + lane * 97, dslack, cycles, workq, wanderq)
+      if use_profile_frontier != 0 && frontier_count > 1
+        island_source = "frontier0"
     if island == nil
       << "RECT_ERROR code=island-init tensor=" + tensor + " lane=" + lane.to_s()
       return 2
     states.push(island)
+    initial_sources.push(island_source)
     lane += 1
 
   # Per-island dashboard telemetry: seed provenance, move rates, and the age
@@ -464,7 +564,7 @@ use flipfleet_tui
   island_last_moves = i64[walkers]
   lane = 0
   while lane < walkers
-    island_sources.push(seed_door)
+    island_sources.push(initial_sources[lane])
     island_last_progress_ms[lane] = init_ms
     island_last_rank[lane] = ffr_best_rank(states[lane])
     island_last_bits[lane] = ffr_best_bits(states[lane])
@@ -474,6 +574,14 @@ use flipfleet_tui
   gpu_supported = ffrgb_supported(n, m, p) ## i64
   gpu_ready = 0 ## i64
   gpu_failures = 0 ## i64
+  mitm_supported = ffrmw_supported(n, m, p) ## i64
+  # A 5->4 surgery child can only seek a rank drop.  Once a profile's rank is
+  # proved optimal, retain generic density walking but retire this dead lane.
+  if proven_optimal != 0
+    mitm_supported = 0
+  mitm_ready = 0 ## i64
+  mitm_failures = 0 ## i64
+  mitm_binary = ""
   lanes = ffrgb_round_lanes(n, m, p, gpu_walkers) ## i64
   if gpu_requested == 0
     lanes = 0
@@ -502,21 +610,43 @@ use flipfleet_tui
       gpu_failures += 1
       lanes = 0
       << "RECT_ERROR code=gpu-build tensor=" + tensor + " fallback=cpu"
+  if gpu_requested != 0 && mitm_supported != 0
+    # Use a shape-specific child beside the cal2zone relay. Portfolio children
+    # can prepare different geometries concurrently without racing one cache.
+    if gpu_binary == ""
+      gpu_binary = "/tmp/flipfleet_rect_gpu_" + ffrgb_tag(n, m, p)
+    mitm_binary = gpu_binary + "_mitm"
+    mitm_needs_build = gpu_rebuild ## i64
+    if mitm_needs_build == 0 && ffrmw_fresh(repo_root, mitm_binary) == 0
+      mitm_needs_build = 1
+    if mitm_needs_build != 0
+      mitm_ready = ffrmw_build(repo_root, mitm_binary)
+    if mitm_needs_build == 0
+      mitm_ready = 1
+    if mitm_ready == 0
+      mitm_failures += 1
   if quiet == 0
     display = "status-lines"
     if tui != 0
       display = "tui"
-    << "RECT_CAPABILITY tensor=" + tensor + " cpu=1 cpu_lanes=" + walkers.to_s() + " gpu_supported=" + gpu_supported.to_s() + " gpu_ready=" + gpu_ready.to_s() + " gpu_lanes=" + lanes.to_s() + " display=" + display
+    << "RECT_CAPABILITY tensor=" + tensor + " cpu=1 cpu_lanes=" + walkers.to_s() + " gpu_supported=" + gpu_supported.to_s() + " gpu_ready=" + gpu_ready.to_s() + " gpu_lanes=" + lanes.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " display=" + display
     flush()
 
   phase_moves = i64[3]
-  z = ffrp_campaign_budgets(steps, phase_moves)
+  cpu_epoch_steps = steps ## i64
+  z = ffrp_campaign_budgets(cpu_epoch_steps, phase_moves)
   elapsed_cpu = i64[walkers]
   cpu_moves = 0 ## i64
   cpu_ms = 0 ## i64
   gpu_moves = 0 ## i64
   gpu_ms = 0 ## i64
+  mitm_attempts = 0 ## i64
+  mitm_pairs = 0 ## i64
+  mitm_ms = 0 ## i64
   exact_rejects = 0 ## i64
+  gpu_internal_rejects = 0 ## i64
+  gpu_reject_scratch = i64[state_size]
+  gpu_reject_status = i64[8]
   sequence = 0 ## i64
   round = 0 ## i64
   running = 1 ## i64
@@ -534,6 +664,7 @@ use flipfleet_tui
   gpu_candidates = 0 ## i64
   gpu_rank_drops = 0 ## i64
   gpu_density_improvements = 0 ## i64
+  gpu_door_adoptions = 0 ## i64
   gpu_reward_milli = 0 ## i64
   gpu_exposure = 0 ## i64
   timeline_times = i64[256]
@@ -558,13 +689,39 @@ use flipfleet_tui
   gpu_seed_path = "/tmp/flipfleet_rect_seed_" + run_tag + "_" + ffrgb_tag(n, m, p) + ".txt"
   gpu_output_path = "/tmp/flipfleet_rect_best_" + run_tag + "_" + ffrgb_tag(n, m, p) + ".txt"
   gpu_log_path = "/tmp/flipfleet_rect_log_" + run_tag + "_" + ffrgb_tag(n, m, p) + ".txt"
+  mitm_seed_path = "/tmp/flipfleet_rect_mitm_seed_" + run_tag + "_" + ffrgb_tag(n, m, p) + ".txt"
+  mitm_output_path = "/tmp/flipfleet_rect_mitm_best_" + run_tag + "_" + ffrgb_tag(n, m, p) + ".txt"
+  mitm_log_path = "/tmp/flipfleet_rect_mitm_log_" + run_tag + "_" + ffrgb_tag(n, m, p) + ".txt"
   persistent_processes = []
   persistent_processes.push(nil)
   persistent_active = i64[1]
   persistent_generations = i64[1]
   persistent_lanes = i64[1]
+  gpu_seed_source = "fleet-best"
 
   while running == 1
+    # Snapshot the next GPU seed before CPU island threads start mutating their
+    # private states. Half of the epochs keep grinding the fleet objective;
+    # the other half rotate only the nonleader checked-in frontier doors. This
+    # preserves the sticky-island basin policy on Metal instead of silently
+    # cloning the density leader into every GPU epoch.
+    seeded = 0 ## i64
+    cleared = false
+    sidecars_ready = 0 ## i64
+    gpu_seed_state = best
+    gpu_seed_source = "fleet-best"
+    alternate_lane = ffrc_gpu_seed_lane(round, frontier_count, walkers) ## i64
+    if alternate_lane >= 0
+      gpu_seed_state = states[alternate_lane]
+      gpu_seed_source = island_sources[alternate_lane]
+    if gpu_ready != 0 && lanes > 0
+      seeded = ffrc_dump_atomic(gpu_seed_state, gpu_seed_path, run_tag, round + 1000)
+      cleared = write_file(gpu_output_path, "")
+      sidecars_ready = ffrgr_prepare_worker_sidecars(gpu_output_path)
+      if seeded > 0
+        gpu_seed_rank = ffr_best_rank(gpu_seed_state)
+
+    round_cpu_steps = cpu_epoch_steps ## i64
     cpu_threads = []
     lane = 0
     while lane < walkers
@@ -575,11 +732,8 @@ use flipfleet_tui
     gpu_thread = nil
     gpu_elapsed = i64[1]
     if gpu_ready != 0 && lanes > 0
-      seeded = ffrc_dump_atomic(best, gpu_seed_path, run_tag, round + 1000) ## i64
-      cleared = write_file(gpu_output_path, "")
-      if seeded > 0 && cleared
-        gpu_seed_rank = ffr_best_rank(best)
-        command = ffrgb_epoch_command(repo_root, gpu_binary, n, m, p, gpu_seed_path, gpu_output_path, "", record - 1, gpu_steps, 200, dslack, workq, wanderq, 7, lanes, "", lanes, gpu_epoch_rounds)
+      if seeded > 0 && cleared && sidecars_ready != 0
+        command = ffrgb_epoch_command(repo_root, gpu_binary, n, m, p, gpu_seed_path, gpu_output_path, "", target, gpu_steps, 200, dslack, workq, wanderq, 7, lanes, "", lanes, gpu_epoch_rounds)
         if command != ""
           gpu_thread = Thread.new ->
             t0 = ccall("__w_clock_ms") ## i64
@@ -596,9 +750,12 @@ use flipfleet_tui
       if gpu_thread == nil
         gpu_failures += 1
 
+    slowest_cpu_ms = 0 ## i64
     lane = 0
     while lane < cpu_threads.size()
       result = cpu_threads[lane].join
+      if elapsed_cpu[lane] > slowest_cpu_ms
+        slowest_cpu_ms = elapsed_cpu[lane]
       lane += 1
     if gpu_thread != nil
       gpu_ok = gpu_thread.join
@@ -657,7 +814,14 @@ use flipfleet_tui
       else
         exact_rejects += 1
       lane += 1
-    cpu_moves += walkers * steps
+    cpu_moves += walkers * round_cpu_steps
+
+    # Tune only after both sides of the barrier have completed. The updated
+    # work/adaptive/wander split applies to the next round and never mutates a
+    # live worker. CPU-only profiles remain fixed because gpu_thread is nil.
+    if gpu_thread != nil && gpu_elapsed[0] > 0
+      cpu_epoch_steps = ffrc_balanced_cpu_steps(cpu_epoch_steps, slowest_cpu_ms, gpu_elapsed[0], steps)
+      z = ffrp_campaign_budgets(cpu_epoch_steps, phase_moves)
 
     if gpu_thread != nil && ffrc_file_nonempty(gpu_output_path) == 1
       gpu_candidate = i64[state_size]
@@ -678,6 +842,7 @@ use flipfleet_tui
             if density_reward > 2000
               density_reward = 2000
             gpu_reward_milli += density_reward
+        gpu_global_adopted = 0 ## i64
         if ffrc_better(gpu_rank, ffr_best_bits(gpu_candidate), ffr_best_rank(best), ffr_best_bits(best)) == 1
           gpu_clone = ffrc_clone_exact(gpu_candidate, n, m, p, capacity, 84011 + round * 139, dslack, cycles, workq, wanderq)
           if gpu_clone != nil
@@ -688,8 +853,91 @@ use flipfleet_tui
             timeline_count = ffrc_timeline_push(timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, gpu_rank)
             best = gpu_clone
             adopted = 1
+            gpu_global_adopted = 1
+        # A strict improvement over a nonleader seed is useful even when it
+        # cannot beat the fleet objective. Feed it back only to the island it
+        # came from, preserving every other sticky door and the fleet best.
+        # The per-door checkpoint makes this monotonic side frontier survive a
+        # graceful shutdown without changing the public best path.
+        if gpu_global_adopted == 0 && alternate_lane >= 0
+          if ffrc_door_improvement(gpu_candidate, states[alternate_lane], n, m, p) == 1
+            old_door_bits = ffr_best_bits(states[alternate_lane]) ## i64
+            door_clone = ffrc_clone_exact(gpu_candidate, n, m, p, capacity, 84201 + round * 149 + alternate_lane, dslack, cycles, workq, wanderq)
+            if door_clone != nil
+              states[alternate_lane] = door_clone
+              island_sources[alternate_lane] = island_sources[alternate_lane] + "/gpu-r" + gpu_rank.to_s()
+              island_last_rank[alternate_lane] = ffr_best_rank(door_clone)
+              island_last_bits[alternate_lane] = ffr_best_bits(door_clone)
+              island_last_moves[alternate_lane] = ffr_moves(door_clone)
+              island_last_progress_ms[alternate_lane] = now_ms
+              gpu_door_adoptions += 1
+              gpu_density_improvements += 1
+              door_bit_gain = old_door_bits - ffr_best_bits(door_clone) ## i64
+              if door_bit_gain > 0 && old_door_bits > 0
+                door_reward = (1000 * door_bit_gain) / old_door_bits ## i64
+                if door_reward < 1
+                  door_reward = 1
+                gpu_reward_milli += door_reward
+              door_saved = ffrc_dump_atomic(door_clone, best_path + ".gpu-door-" + alternate_lane.to_s() + ".txt", run_tag + "-gpu-door", round + 300000) ## i64
+              if door_saved < 1
+                status_degraded = 1
       else
         exact_rejects += 1
+
+    # The worker commits an internally rejected nominal improvement by
+    # publishing `.meta` last.  Harvest after every completed cal2zone epoch,
+    # including epochs whose ordinary output is empty.  A committed internal
+    # reject is both an exact rejection and a GPU failure; preservation occurs
+    # before the live marker is cleared.
+    if gpu_thread != nil
+      gpu_internal_rejects = ffrgr_harvest(gpu_output_path, gpu_seed_path, run_tag, n, m, p, 0, 0, 0 - 1, round, target, capacity, dslack, cycles, workq, wanderq, gpu_internal_rejects, gpu_reject_scratch, gpu_reject_status)
+      if gpu_reject_status[0] != 0
+        exact_rejects += 1
+        gpu_failures += 1
+        status_degraded = 1
+
+    # Exact 5 -> 4 surgery is deliberately sparse and sequential at the round
+    # boundary. It sees the freshest fleet best, rotates a disjoint bounded
+    # factor pool, and releases all Metal buffers when the child exits.
+    if mitm_ready != 0 && ffrmw_due(round, portfolio_child) != 0
+      launch_number = ffrmw_launch_number(run_tag, round, portfolio_child) ## i64
+      mitm_pool = ffrmw_pool(n, m, p) ## i64
+      mitm_nearby = ffrmw_nearby(launch_number) ## i64
+      mitm_offset = ffrmw_offset(launch_number) ## i64
+      mitm_subsets = 16 ## i64
+      mitm_seeded = ffrc_dump_atomic(best, mitm_seed_path, run_tag + "_mitm", round + 2000) ## i64
+      mitm_cleared = write_file(mitm_output_path, "")
+      mitm_command = ffrmw_epoch_command(repo_root, mitm_binary, mitm_seed_path, mitm_output_path, n, m, p, mitm_subsets, mitm_pool, mitm_nearby, mitm_offset)
+      if mitm_seeded > 0 && mitm_cleared && mitm_command != ""
+        mitm_attempts += 1
+        mitm_pairs += mitm_subsets * mitm_pool * (mitm_pool - 1) / 2
+        mitm_t0 = ccall("__w_clock_ms") ## i64
+        mitm_ok = system(mitm_command + " > " + ffrc_shell_quote(mitm_log_path) + " 2>&1")
+        mitm_elapsed = ccall("__w_clock_ms") - mitm_t0 ## i64
+        mitm_ms += mitm_elapsed
+        if !mitm_ok
+          mitm_failures += 1
+        if mitm_ok && ffrc_file_nonempty(mitm_output_path) == 1
+          mitm_candidate = i64[state_size]
+          mitm_rank = ffr_load_scheme_cap(mitm_candidate, mitm_output_path, n, m, p, capacity, 84503 + round * 149, dslack, cycles, workq, wanderq) ## i64
+          if mitm_rank > 0 && ffr_verify_best_exact(mitm_candidate, n, m, p) == 1
+            if ffrc_better(mitm_rank, ffr_best_bits(mitm_candidate), ffr_best_rank(best), ffr_best_bits(best)) == 1
+              mitm_clone = ffrc_clone_exact(mitm_candidate, n, m, p, capacity, 84509 + round * 151, dslack, cycles, workq, wanderq)
+              if mitm_clone != nil
+                if mitm_rank < ffr_best_rank(best)
+                  new_bests += 1
+                else
+                  tie_bests += 1
+                now_ms = ccall("__w_clock_ms")
+                elapsed_s = (now_ms - start_ms) / 1000
+                timeline_count = ffrc_timeline_push(timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, mitm_rank)
+                best = mitm_clone
+                adopted = 1
+          else
+            exact_rejects += 1
+            mitm_failures += 1
+      else
+        mitm_failures += 1
 
     if adopted != 0
       saved = ffrc_dump_atomic(best, best_path, run_tag, round + 1) ## i64
@@ -784,13 +1032,14 @@ use flipfleet_tui
 
     sequence += 1
     status = ffrc_status_body("running", sequence, tensor, record, record_known, best, walkers, cpu_moves, cpu_ms, gpu_requested, gpu_supported, gpu_ready, lanes, gpu_moves, gpu_ms, gpu_failures, exact_rejects, elapsed_s)
+    status = status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
     status_ok = ffrc_atomic_write(status_path, status, run_tag, sequence)
     if status_ok == 1
       last_status_ms = now_ms
     if status_ok == 0
       status_degraded = 1
     if quiet == 0 && tui == 0
-      << "RECT_STATUS tensor=" + tensor + " round=" + round.to_s() + " rank=" + ffr_best_rank(best).to_s() + " bits=" + ffr_best_bits(best).to_s() + " cpu_moves=" + cpu_moves.to_s() + " gpu_moves=" + gpu_moves.to_s() + " exact_rejects=" + exact_rejects.to_s()
+      << "RECT_STATUS tensor=" + tensor + " round=" + round.to_s() + " rank=" + ffr_best_rank(best).to_s() + " bits=" + ffr_best_bits(best).to_s() + " cpu_moves=" + cpu_moves.to_s() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " gpu_moves=" + gpu_moves.to_s() + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " exact_rejects=" + exact_rejects.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_degraded=" + status_degraded.to_s()
       flush()
     if tui != 0
       if ff_tui_heartbeat_due(last_render_ms, now_ms, 200) == 1
@@ -808,7 +1057,7 @@ use flipfleet_tui
       running = 0
     if max_secs > 0 && elapsed_s >= max_secs
       running = 0
-    if stop_on_record != 0 && ffr_best_rank(best) < record
+    if stop_on_record != 0 && ((proven_optimal == 0 && ffr_best_rank(best) < record) || (proven_optimal != 0 && ffr_best_rank(best) <= record))
       running = 0
     if stop_key != 0
       running = 0
@@ -828,6 +1077,7 @@ use flipfleet_tui
   final_ms = ccall("__w_clock_ms") ## i64
   final_elapsed_s = (final_ms - start_ms) / 1000 ## i64
   final_status = ffrc_status_body("stopped", sequence + 1, tensor, record, record_known, best, walkers, cpu_moves, cpu_ms, gpu_requested, gpu_supported, gpu_ready, lanes, gpu_moves, gpu_ms, gpu_failures, exact_rejects, final_elapsed_s)
+  final_status = final_status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
   status_ok = ffrc_atomic_write(status_path, final_status, run_tag, sequence + 1)
   saved = ffrc_dump_atomic(best, best_path, run_tag, sequence + 100000) ## i64
   if saved < 1

@@ -204,6 +204,10 @@ ENVIRONMENT
         Comma list of extra GPU dialect sidecars to emit for @gpu fn
         (e.g. cuda,wgsl). Metal is always emitted when kernels are present;
         CUDA is also emitted by default on non-Darwin hosts.
+    TUNGSTEN_METAL_PATH
+        Override the emitted Metal sidecar path for an @gpu native build.
+        Build systems use this to place generated MSL beside an output binary
+        without rewriting a checked-in source-adjacent sidecar.
 
 FEATURES
     Native literals

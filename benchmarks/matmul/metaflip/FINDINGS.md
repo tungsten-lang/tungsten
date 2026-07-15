@@ -28,6 +28,16 @@ a refutation.  Source and certificates:
 [`wcgbg/tensor-rank-lower-bound`](https://github.com/wcgbg/tensor-rank-lower-bound),
 paper [`arXiv:2603.07280`](https://arxiv.org/abs/2603.07280).
 
+The 2026-07-13 provenance recheck used upstream revision `efd22070269157e65aaf8d61a21da253a4000c61`
+and fetched the two official Git-LFS objects rather than a locally extended
+checkpoint.  Their SHA-256 values exactly match the tracked pointers:
+`25595a883ce877eecd802139ff4e07646e154b2797ad6fe7f9ec737ab0c6135d`
+for `cert_matrix_q02_n333.pb.txt` and
+`4e824eb13c235e69045881d173d8ababe622421055a238005afce413aabe3289`
+for its `.btp` proof archive.  The official verifier returned `OK` and the
+unconstrained bound 20 in 6.55 seconds (non-LTO build; Apple-Clang LTO objects
+trigger an unrelated `ld64.lld` stack-probing failure on this host).
+
 The proof engine's highest-leverage next change is stabilizer-orbit pruning of
 candidate constraint forms.  At the 3×3 root it currently branches over 511
 nonzero forms although the full matrix symmetry has only three rank orbits; at
@@ -63,63 +73,59 @@ lower bound remains 20.  The next sound experiment should profile a
 stabilizer-quotiented orbit-493 frontier to extract its child hitting set,
 not spend a larger blind DFS budget.
 
-### FlipFleet audit and replacement path
+### FlipFleet audit and pure-Tungsten replacement
 
-The native `flipfleet.w` retained several correctness and campaign defects:
+Early fleet prototypes exposed several correctness and campaign defects:
+hard-coded dimensions, scalar-only best retention across cycle-outs,
+probabilistic checks that did not gate adoption, failed GPU loads left active,
+fleet-wide leader resets that collapsed diversity, stale same-rank density
+snapshots, and a W-only structured plus transition.  Those observations are
+historical inputs to the current design, not the current runtime architecture.
 
-- it was hard-coded to 5×5;
-- a cycle-out retained only best rank/density scalars and discarded the actual
-  best decomposition;
-- CPU candidates were adopted before its randomized verifier ran, and validity
-  did not gate best bookkeeping;
-- a failed GPU load remained installed in the fleet;
-- every explorer was reset to one leader every 3M moves, collapsing diversity;
-- the claimed same-rank density archive read a snapshot updated only on strict
-  rank drops;
-- the structured plus transition was W-only.
+`flipfleet.w` is now the authoritative 3×3–7×7 entry and loads the pure
+Tungsten `flipfleet_native.w` driver.  The coordinator,
+runtime-generic CPU walker, exact escape banks, adaptive policy, candidate
+adoption, durable status/best checkpoints, and TUI are pure Tungsten.  Its GPU
+roles compile checked-in dimension-specialized Tungsten/Metal assets; Python
+generators and coordinators are not invoked during a campaign.
 
-`flipfleet.py` is now the sound campaign driver for 3×3 through 6×6.  It builds
-the fast Tungsten hash-chain walker for the requested format, exact-verifies
-every candidate before adoption, atomically archives every distinct frontier
-snapshot surfaced to the coordinator, retains the full best scheme across restarts, defaults to persistent
-islands with partial migration, can start from the tracked record schemes, and
-uses random-axis plus transitions by default.  Same-rank density snapshots now
-flow through an exact-gated spool into that archive (rather than being silently
-ignored), and stale or repeatedly invalid worker dumps cannot steer migration.
-A ten-second, two-walker 3×3 run seeded at the record retained **42 distinct,
-exact-valid rank-23 schemes**, with zero invalid candidates; the old native
-status snapshot was still at rank 106 after 720 seconds on 5×5.
+Every CPU or GPU result is exhaustively reconstructed before it can alter a
+bank or the rank-then-density leader.  GPU hosts gate before writing and the
+coordinator gates again.  The in-memory archive is bounded and max-min
+diversity-aware, while exact best+1/best+2 shoulders and C3-preserving escape
+states remain separate from the monotonic leader.  A ten-second 3×3 audit that
+motivated this policy retained 42 distinct exact rank-23 schemes; an eight-slot
+max-min sample had minimum term-set distance 34.
 
-The restart sample is now bounded and diversity-aware: all exact snapshots seen
-by the coordinator remain durable, while memory maintains an online max-min sample under
-term-set symmetric-difference distance and restarts from least-used entries.
-On a live rank-23 stream, an eight-slot archive made 9 replacements and retained
-minimum pairwise distance 34 (out of a maximum 46), rather than filling with
-near-duplicate ties.  Durable archives are exact-gated and rehydrated on a
-resumed run.
-The displayed/checkpointed leader is ordered by rank and then density, so an
-equal-rank improvement now updates `best.txt`, status cost, and the performance
-curve without collapsing the separated restart sample.
+CPU threads keep tensor-specific sticky doors—leader, frontier, best+1,
+best+2, symmetry, mixed escape, and anchor—and one of four independent
+work/wander zones.  A strict improvement therefore does not turn the whole
+fleet into follow-the-leader.  The default GPU policy is adaptive and `--no-gpu`
+is the explicit control.
 
-Record scheduling also had a hidden trigger bug: its special dwell budget
-tested the transient live rank, normally 24--25 during an excursion, instead of
-the saved best rank 23.  That silently bypassed the requested record budget.
-The generated walker now tests `best_rank`, reads the budget at runtime, and
-the fleet assigns a mixed 250M/1B/10B portfolio so short-horizon islands recycle
-through term-set-separated seeds while other islands retain the original deep search.
-A forced short-budget smoke test produced four clean cycle-outs and three real
-frontier reseeds while remaining exact.
+The frozen-core control originally received the same move quota as ordinary
+walkers.  At 5×5 it sustained 11.6M moves/s versus roughly 50M for ordinary
+walkers, and the synchronous join made every TUI row appear to run at the slow
+control rate.  Per-thread timing plus an adaptive time-balanced control quota
+raised measured 12-island throughput from 139M to 532M moves/s without removing
+the control experiment.
 
-Examples:
+The GPU portfolio keeps rank, density, C3, generic split, archive novelty, and
+cooperative SIMD continuously active.  Fixed-cube break, orbit split,
+polarization, and two-identity composition are discrete restarts and now rotate
+with the defect, MITM, XOR-join, lifted-identity, substitution, and XOR-SAT
+kernels instead of holding permanent lane floors.  Scalable pool epochs receive
+up to three eighths of the device; host-heavy joins use smaller saturation caps
+and return unused lanes to the continuous roles.
 
 ```sh
-# From naive, persistent independent islands.
-python3 benchmarks/matmul/metaflip/flipfleet.py \
-  --size 3 --walkers 12 --strategy independent --secs 60
+TUNGSTEN_LL_PATH=/tmp/flipfleet-native.ll \
+  bin/tungsten -o /tmp/flipfleet-native \
+  benchmarks/matmul/metaflip/flipfleet.w \
+  --release --native --fast --lto
 
-# Push from the exact tracked frontier; stop only on a verified record.
-python3 benchmarks/matmul/metaflip/flipfleet.py \
-  --size 5 --seed record --walkers 12 --strategy islands --stop-on-record
+/tmp/flipfleet-native --tensor 3x3 --secs 60
+/tmp/flipfleet-native --tensor 6x6 --no-gpu --secs 3600
 ```
 
 ### Symmetry starts must be target-aligned
@@ -214,30 +220,19 @@ rank 25 to rank 23—not a new upper bound or a tensor-rank lower bound.
 
 ### Escape moves are integrated into FlipFleet
 
-`flipfleet.py --escape-kind {split,break,orbit-split,polarize}` now injects the
-same exact identities without a separate seed-preparation step.  `split`
-selects any term and therefore covers the fixed-free tracked 3×3 and 4×4
-records; the other three retain their fixed-cube/C3 eligibility rules.
-`--escape-at` chooses startup, genuine cycle-out, or both, while
-`--escape-every N` deterministically interleaves escaped and base launches.
+`flipfleet_escape.w` implements generic split, fixed-cube break, orbit split,
+polarization, and two-split composition directly over the native fleet's
+parallel i64 factor buffers.  The coordinator builds mixed, best+1, best+2,
+and C3-preserving banks without a separate preparation process.  Fixed/C3
+families retain their eligibility checks, while generic split covers the
+fixed-free 3×3 and 4×4 frontiers.
 
-The escape is strictly a one-launch excursion.  It is always derived from the
-unmodified frontier selected by the coordinator, never recursively from an
-escaped seed.  Escaped higher-rank seeds do not replace `initial`, `best.txt`,
-the density leader, the restart archive, or the configured world record.
-Migration, quarantine, and ordinary exits do not receive escapes.  Every
-generated seed passes factor bounds and full exact reconstruction before the
-native process can launch; C3-preserving kinds receive an additional closure
-check.  Dynamic ineligibility is an explicit logged fallback, while an
-ineligible startup fails before compilation.  Event provenance includes kind,
-trigger, base/output rank, fixed count, C3 state, selected factor/cube, part,
-axis, and canonical base digest; `status.json` reports
-considered/applied/bypassed/skipped counters.
-The compiled walker itself remains non-quotient, so it may leave C3 after a
-C3-preserving injection.  If identity collisions make an escape tie or beat
-the frontier, its published worker dump is still exact-gated and adopted as a
-normal candidate.  Recovery preserves the requested eligibility profile, so a
-C3 seed is not replaced by a non-C3 density tie before an orbit escape starts.
+Escaped higher-rank states remain bank seeds; they do not replace the
+rank-then-density leader merely because they were constructed.  Every seed
+passes factor bounds and exhaustive reconstruction, C3-bank entries also pass
+closure, and every returned candidate is gated again before adoption.  A
+subsequent ordinary CPU walk may leave C3; only the dedicated C3 Metal engine
+preserves complete cyclic orbits at every step.
 
 A compiled 3×3 cycle-out smoke used `cycles=1`, a 1K-move record band, and
 `split@cycleout/every1`.  The initial native launch loaded rank 23.  Four
@@ -327,7 +322,7 @@ bridge and returned to the known record within the first million moves:
 | 6×6 | 12 × 500M = 6B | `{153: 12}` | no 152 |
 
 All 24 final dumps were independently reconstructed as exact, well-formed, and
-C3-closed with three fixed terms.  The tracked 6×6 record is also invariant
+C3-closed with three fixed terms.  The MP 6×6 seed is also invariant
 under reversal, whereas the deterministic split is not; only one of the twelve
 final rank-153 dumps recovered reversal symmetry.  Thus the extra Z2 symmetry
 is not required for exactness or descent back to 153.  Dropping it enlarges the
@@ -369,8 +364,8 @@ improved the same-rank cost again:
 `matmul_5x5_rank93_d1168_gf2.txt` is exact non-C3 rank 93, density 1168,
 13 shared-factor pairs, and 1,050 no-CSE operations.  Its SHA-256 is
 `10bacef79e1b43fdf1b494f2aebb6e6fa12afc5df00b5755c5915b7acfbbbb10` and it
-was the default cost-oriented 5×5 frontier; `--seed c3-record` selected the
-density-1191 C3 scheme for orbit-split/polarization.  Rank and no-CSE base-case
+was the default cost-oriented 5×5 frontier at that stage; the C3 campaign kept
+the density-1191 scheme for orbit-split/polarization.  Rank and no-CSE base-case
 operation count remain separate objectives, so density gating must not prune a
 rank-record walk.  A final workspace scan parsed 214 rank-93 files and fully
 verified 190; density 1168 was the minimum, with 1191 next.
@@ -383,15 +378,134 @@ verified 190; density 1168 was the minimum, with 1191 next.
 | ⟨4,4,4⟩ | 64 | **47** | AlphaTensor (DeepMind, Nature 2022 — deep RL, not flip-graph-discovered) |
 | ⟨5,5,5⟩ | 125 | **93** | Moosbauer–Poole symmetric flip-graph (arXiv:2502.04514) |
 | ⟨6,6,6⟩ | 216 | **153** | Moosbauer–Poole symmetric flip-graph |
-| ⟨7,7,7⟩ | 343 | 249 → **248** | Kauers–Wood meta flip-graph (arXiv:2510.19787) pushed 249→248 via Perminov's ternary meta flip-graph (arXiv:2511.20317, GPU population search, N=16384, 24-72 GPU-hours/run) |
+| ⟨7,7,7⟩ | 343 | **247** | weighted Strassen-outer isotropy plus support-aware 4/3 embedding; exact certificate in this repository |
 
-**Corrected note:** an earlier session mis-attributed "777=250" as a
-Perminov/GF(2)-flip-graph result — it is actually Sedoglavic 2017
-(arXiv:1712.07935), a general-ring algebraic construction unrelated to
-flip-graph search and not GF(2)-specific. It sits 2 ranks above the real
-frontier (249→248); an entire day's siege from a seed AT 250 (~1.5 trillion
-moves, zero descents) only shows Sedoglavic's construction is a local optimum
-for our move set — it says nothing about flip-graph reachability of 249/248.
+**Corrected note:** Sedoglavic 2017 (arXiv:1712.07935) supplies the general-ring
+seven-block identity. Its historical rank-250 specialization used the then
+available square leaf, but substituting the exact GF(2) ranks 47, 29, and 38
+gives 248 deterministically. Kauers--Wood's cited paper does not contain a
+7×7 result and must not be credited with rank 249. Perminov independently
+reports rank 248 from a direct GPU population search. The rank-247 construction
+below improves that GF(2) upper bound; it does not claim a characteristic-zero
+algorithm. The old ~1.5-trillion-move siege from a rank-250 seed only describes
+that seed's local component and says nothing about reachability from either the
+rank-248 or rank-247 frontier.
+
+### 2026-07-14: exact rank-247 7×7 by weighted outer isotropy
+
+`flipfleet_outer_isotropy_bench.w` exhausts all `6^3 = 216` images of the
+rank-7 Strassen outer scheme under `GL(2,2)^3` and all eight placements of the
+4/3 coordinate blocks. Every outer image is independently exact before it is
+scored. The scan covers 1,728 recipes; 480 tie at nominal rank 248 and are all
+materialized and fully reconstructed. Forty-eight of those recipes produce
+rank **247**.
+
+The winning recipe uses outer image codes `(I,A,B)` and allocation mask 3.
+Its nominal rectangular-leaf sum is 248. Support-aware embedding truncates
+exactly one leaf product to a zero factor; the other 247 products are distinct,
+and duplicate-parity cancellation contributes zero. Thus the improvement is a
+genuine weighted-support effect, not an accounting artifact. The checked-in
+certificate is `matmul_7x7_rank247_d3554_outer_isotropy_gf2.txt`, with SHA-256
+`cb18a91b28e9e8b452dde46f69d876638a5af733c1d419ea77185da1c2487ea3`.
+It has density 3554, 43 equal-factor pairs, and term-set distance 495 from the
+former density-2952 rank-248 leader.
+
+The formula-minimum audit took 20.73 seconds and about 71 MB RSS on the
+development machine. A second harness, `flipfleet_outer_isotropy_full_bench.w`,
+materialized all 1,728 recipes in 85.10 seconds to rule out a nominally more
+expensive recipe compacting further. Its exact-rank histogram was
+`247:48, 248:432, 250:480, 251:720, 253:48`; 576 recipes mapped one term to
+zero, none mapped more than one, and none had duplicate-parity cancellation.
+The certificate passed the Tungsten full tensor gate, serialize/
+reparse/full-gate, an independent Python dense reconstruction, and an
+independent sparse-parity reconstruction (`343` tensor ones and `4,668`
+pair-XOR contributions). As of the 2026-07-14 public-catalogue comparison,
+the discoverable GF(2) 7×7 frontier was rank 248, so rank 247 is a candidate
+current world record pending the usual external catalogue/reviewer check.
+
+The 48 winning recipes collapse to eight unique term sets. Three additional
+rank-247 structural seeds are retained beside the reproducing artifact; each
+has density 3554, 43 equal-factor pairs, and pairwise term-set distance 494.
+They are low-cadence same-rank restart doors, not synthetic novelty scores.
+
+Two alternate block families were closed as controls. The complete 46,656-row
+two-block scan over every `6+1`, `5+2`, and `4+3` split and every
+`GL(2,2)^3` outer image found formula minima 263, 256, and 248 respectively.
+All 1,008 competitive recipes involving a `5+2` axis were materialized: every
+one remained exact rank 256, with no mapped-zero or duplicate-parity
+compaction. Separately, a rank-23 3×3 outer with `3+2+2` blocks produced exact
+rank 273; steepest `GL(3,2)^3` walking improved some presentations by eight
+formula terms but did not beat 273. The latter audit imports and independently
+checks the GF(2) rank-11 `2x2x3` AlphaTensor leaf. These controls make the
+weighted `4+3` Strassen orbit the uniquely productive audited block family,
+without claiming an exhaustive theorem over all possible outer schemes.
+
+### 2026-07-14: directed whole-scheme isotropy lowers search cost
+
+An ambient matrix-multiplication isotropy applies an invertible basis change
+to every term, with the corresponding contragredient actions on the other
+factors. `flipfleet_global_isotropy.w` implements these actions using exact
+swaps and transvections, replays their inverses, and full-gates every
+materialized scheme. Random words were a negative result: on 4×4 they changed
+every raw basin ID without changing the actual `GL` orbit or producing a
+rank/density win, while on 5×5 they usually made the starting scheme denser.
+Raw D3/reversal IDs therefore overcount basis relabelings as basin diversity.
+
+Directed steepest descent over the same exact generators is strongly positive.
+It reduced the catalog AlphaEvolve 5×5 rank-93 seed from density 1057 to 983;
+two 24-island × 2M-move short-walk batches then reached density **968**.
+Against the old density-1155 seed, a paired 24 × 2M benchmark gave density
+wins in 24/24 trials versus 0/24 and minima 970 versus 1155. On 6×6, 1,024
+isotropy restarts reduced rank-153 density 2502 to 1878; 80M productive short
+walks reached **1860**, and another 64M audit moves were neutral. On the new
+7×7 rank-247 certificate, 1,024 restarts reduced 3554 to 3137. A two-island
+native continuation reached exact density **3098** after about 1.5B moves;
+another 1,024-restart descent found it locally normalized. The square assets
+at 5×5, 6×6, and 7×7 independently reconstruct exactly and have SHA-256:
+
+- `matmul_5x5_rank93_d968_global_isotropy_gf2.txt`:
+  `929262ed40c2978555a903377a62a76f9f68a92ae596cb82786dab1eb05fdc5b`;
+- `matmul_6x6_rank153_d1860_global_isotropy_gf2.txt`:
+  `f7e85eed357a54346ed5af061f0afbb5f9f66148a528b31c86f1d1678f1b86f7`;
+- `matmul_7x7_rank247_d3098_global_isotropy_gf2.txt`:
+  `ec097175450d3e67582ff5997051066e464cec3e7b16432253f3ded6b43fcc36`.
+
+The rectangular generalization independently acts on the three domain sizes.
+For ⟨2,3,4⟩, 256 directed restarts reduced the exact rank-20 catalog seed from
+density 136 to **130**; the new default has SHA-256
+`f9e858e97e84052d949e252a88885886146f3839275cbee615f03faf83658b72`.
+These are cost/search-surface improvements at fixed rank, not new rank upper
+bounds. Production FlipFleet now normalizes promising exact candidates before
+admission, generates bounded directed-isotropy archive images at startup, and
+adds a coarse `gi` orbit tag. That tag is telemetry: unequal values prove a
+difference in the measured invariant, but equality is not a complete orbit
+canonicalizer and never replaces full tensor reconstruction.
+
+### 2026-07-13: deterministic rank-248 composition and rectangular subfleets
+
+The pure-Tungsten `flipfleet_sedoglavic.w` composes exact schemes for
+⟨4,4,4⟩, ⟨3,3,4⟩, and ⟨3,4,4⟩ through the characteristic-two Strassen-pad
+identity. `ffsc_compose_files(path444, path334, path344, output, variant)`
+rejects malformed or inexact leaves, cancels duplicate GF(2) terms, checks
+every coefficient of the full 7×7 tensor, and writes only after that gate.
+For the checked-in ranks 47/29/38 it returns rank 248.
+
+The normalized rectangular leaves came from the addition-reduced ZT schemes
+in dronperminov/FastMatrixMultiplication, reduced modulo two and independently
+verified: `matmul_3x3x4_rank29_gf2.txt` has density 204 and
+`matmul_3x4x4_rank38_gf2.txt` has density 282. Three reproducible 7×7
+placements are retained:
+
+- variant 0, density **2952**, the default and density leader;
+- variant 1, density **2958**, the canonical sparse placement;
+- variant 2, density **3015**, a distinct coordinate placement with 53
+  shared-factor pairs across 78 terms, versus 44 pairs across 60 terms for
+  the canonical placement.
+
+All three rank-248 files were regenerated by the Tungsten composer, reloaded,
+and exhaustively verified. A rectangular improvement has threefold leverage:
+rank 28 for ⟨3,3,4⟩ or rank 37 for ⟨3,4,4⟩ would immediately recompose a
+rank-245 7×7 scheme.
 
 Two published thresholds exist per rectangular size on the 8/9 frontier —
 see the campaign memory for the ⟨8,8,9⟩/⟨8,9,9⟩/⟨9,9,9⟩ soft-target map if
@@ -469,10 +583,10 @@ The previous relay assigned every lane the same CPU frontier.  That duplicated
 the CPU fleet's basin and wasted the GPU's one genuine advantage: breadth.
 `flipgraph_gpu_cal2zone.w` now builds exact split escapes in its Tungsten host
 and lays them out as a seed portfolio; the kernel selects
-`seedid = tid % nseeds`.  `flipfleet.py --gpu` generates, compiles, launches,
-and exact-gates this relay.  The default is 256 basins; one restores the old
-single-seed experiment.  Portfolio construction is outside the move loop, and
-the kernel pays only a one-time seed offset at initialization/reset.
+`seedid = tid % nseeds`.  The native driver compiles the checked-in specialized
+worker on demand, launches finite adaptive epochs, and independently exact-
+gates its output.  Portfolio construction is outside the move loop, and the
+kernel pays only a one-time seed offset at initialization/reset.
 
 The audit also found that the 5×5 plus move used a 16-bit modulus (`65535`) for
 25-bit factors.  The corrected kernel samples `1..2^25-1`; the specializer uses
@@ -528,10 +642,34 @@ exhaustively tensor-verified results.  The 6×6 run improved the rank-153 cost
 frontier from density 2512 to **2508**, or 2,319 no-CSE operations.  The exact
 asset `matmul_6x6_rank153_d2508_gf2.txt` has SHA-256
 `994ac8e19b5bf2104ef3294ee31c83606e65aaaff9b888b9bba3d9468a2f3209`.
-It is now the ordinary 6×6 default; the density-2574 C3 seed remains separate
-for quotient walks.  This is not a tensor-rank improvement.
+It became the ordinary 6×6 default at that stage; the density-2574 C3 seed
+remained separate for quotient walks.  This was not a tensor-rank improvement.
 
-FlipFleet also gained an opt-in adaptive GPU policy with four exact-gated
+### 2026-07-12: native mixed CPU fleet reaches 6×6 density 2502
+
+The pure-Tungsten mixed CPU fleet subsequently improved the same rank-153
+frontier from density 2508 to **2502**, reducing the no-CSE base-case cost from
+2,319 to **2,313 operations**.  The candidate was checked independently of the
+search path: it has 153 distinct nonzero in-range terms and reconstructs all
+46,656 coefficients of the 6×6 matrix-multiplication tensor over GF(2).  It is
+also C3-closed with three fixed cubes.
+
+The new default asset is `matmul_6x6_rank153_d2502_gf2.txt`, SHA-256
+`df2750d583ce256321ad59a799171497d3b734fd5db7cc4190b852630c2a03d1`.
+The d2508 file remains tracked with its original cooperative-SIMD attribution;
+d2502 is its native mixed-CPU successor.  This is a cost improvement at the
+known rank, not a rank-152 construction.
+
+The discovery run was a bounded CPU-only native control (12 sticky islands,
+1M moves per round); it surfaced d2502 in the first 12M aggregate moves and
+remained the leader through 120M:
+
+```sh
+/tmp/flipfleet-native --tensor 6x6 --walkers 12 --steps 1000000 \
+  --rounds 10 --no-gpu --no-tui --best /tmp/flipfleet-6-best.txt
+```
+
+At that stage FlipFleet also gained an opt-in adaptive GPU policy with four exact-gated
 Tungsten/Metal shards: rank, density, escape, and novelty.  A bounded Pareto
 archive over density, flip-pair connectivity, and term-set distance reseeds the
 novelty role; exposure-normalized UCB allocation moves whole threadgroups while
@@ -579,12 +717,230 @@ tracked records (3×3: 32 subsets/pool 700; 4×4: 16/pool 500; 5×5 and 6×6:
 collision checks reduced the pool-700 control's peak RSS from about 955 MB to
 91 MB.
 
+### 2026-07-12: unified pure-Tungsten mixed/adaptive FlipFleet
+
+`flipfleet.w` loads the native driver that makes the mixed CPU portfolio and
+heterogeneous adaptive GPU policy the defaults; `--no-gpu` is the explicit
+off switch.  The
+`--tensor 3x3` through `--tensor 7x7` arguments select one pure-Tungsten
+driver. Every size uses a tracked exact frontier seed and honest known-record
+target. Size 7 now starts at rank 248 from the verified block composition;
+the signed-i64 factor ABI rejects 8x8.
+
+Eleven adaptive roles are active when eligible: rank, density, true
+C3-preserving walking, generic split, fixed-cube break, orbit split,
+polarization, depth-two composition, archive novelty, and cooperative
+SIMD-group walking, plus a bounded rotating GPU kernel pool.  The pool reserves
+one eighth of lanes and rotates projected R−1 defect search, exact
+5→4/6→5/7→6 XOR surgery, lifted identities, verified contraction-bound
+scouting, and XOR-SAT cube search.  They start from
+tensor-specific fractions derived from the campaigns above, then exchange
+whole 32-lane quanta under feedback normalized by measured worker wall time
+(one exposure unit per occupied 32-lane/100ms quantum).  Exact role banks rotate
+complete variable-rank schemes across restarts.  The generic-split role
+remains a pure +1 control through the cal2zone host's internal wide split
+portfolio.
+
+The archive-novelty source is now a genuine bounded nondominated set at the
+lowest returned frontier rank, trading off density, flip-pair connectivity,
+and minimum term-set distance.  It is not an alias for the ordinary
+rank/density archive.  C3 likewise keeps an
+independent branch leader even when that exact+C3 state trails the global
+leader; fixed-cube break can stage from it into the ordinary graph, while
+orbit split and polarization retain separate exact+C3 banks.  Transient GPU
+build, launch, or malformed-output failures use bounded exponential epoch
+backoff and retry instead of permanently erasing a role from the portfolio.
+
+C3 was not globally best.  The 5×5 and 6×6 campaigns show that it is a useful
+structural branch, while recent milestones came from mixed CPU exploration and
+cooperative SIMD.  The d2502 mixed-CPU successor happens to return to C3
+closure, but that does not make the C3-only lane universally best.  Therefore
+3×3/4×4 assign no default C3 lanes from their asymmetric record seeds, 5×5
+assigns 12%, and 6×6 assigns 6%.  A new Metal C3 engine preserves closure at
+every quotient flip and any-axis plus move.  A real 5×5 smoke ran 6,400 attempts at
+about 188k steps/s and passed independent exact+C3 gates; a real raw-i64 7×7
+smoke also passed.  The C3 branch keeps its own rank-then-density leader even
+when the ordinary global leader is sparser.  C3 walking, orbit split, and
+polarization now fail closed through distinct C3-base/orbit/polarization banks.
+In the all-role 5×5 smoke their launch seeds were independently exact and
+C3-closed at ranks 93, 98, and 100 respectively, rather than three aliases of
+one generic leader.
+
+The cooperative SIMD engine is a bounded relaunchable FlipFleet role using
+scan lookup through 5x5 and hash lookup at 6x6/7x7.  The separate checked-in
+pure-Tungsten MITM engine performs Metal pair enumeration and complement probes
+for bounded 5→4 surgery, then exact-verifies the local identity and complete
+spliced scheme.  Its planted 3×3 smoke produced an exact rank-27 output.  The
+native coordinator retains 5→4 inside role 10's pool and adds exact planted
+6→5 and 7→6 pair/triple joins.  Every fourth pool launch is forced rotation;
+the others use contextual UCB by tensor and rank debt.  A 64-cell MAP-Elites
+archive supplies structurally distinct pool seeds, and one CPU control freezes
+a consensus core while walking only an n²-term fringe.  Build or launch
+failure is reported as degraded coverage.
+
+### 2026-07-12: CPU islands keep different doors
+
+The follow-the-leader policy was too aggressive for the CPU fleet.  The old
+native driver reset every explorer to one leader every 3M moves; by contrast,
+the persistent-island audit retained 42 exact rank-23 schemes in ten seconds,
+and an eight-slot max-min sample had minimum raw term-set distance 34.  That is
+evidence for preserving basin diversity, not for sending every thread through
+the same seed after each improvement.
+
+CPU walkers now receive sticky, tensor-specific roles across rounds:
+leader exploitation, separated-frontier replay, exact best+1 and best+2
+shoulders, one-move C3 exploration where eligible, mixed algebraic escape, and
+the original anchor.  A strict rank drop can migrate one leader/frontier lane;
+it leaves the other doors alive.  Frontier doors use separated archive replay;
+the separate anchor door already preserves the campaign start.  The 4x4 mix
+deliberately gives more slots to +2
+shoulders because exhaustive single-split closure at rank at most 48 only
+returned to the isolated rank-47 component.  C3 is a minority branch for 5x5
+and 6x6, not a universal CPU policy.
+
+The default walker count is now hardware-derived. A July 12 sweep on the
+18-core M5 Max measured the default mixed profile at 438M, 517M, 569M, and
+567M CPU moves/s for J=10,12,14,16 respectively; J=14 (`active CPUs - 4`)
+keeps the best aggregate rate while leaving room for Metal compilation, GPU
+host command encoding, MITM hashing, the coordinator, and the OS. CPU-only
+peaked at J=16, so `--no-gpu` uses `active CPUs - 2`. Explicit `-J` remains
+authoritative. A strict drop migrates one leader/frontier island by default;
+the rest keep knocking on their assigned doors.
+
+### 2026-07-13: the 4×4 frontier has two inequivalent rank-47 orbits
+
+The previous 4×4 fleet initialized every record-rank island from the sparse
+AlphaTensor representative (`d450`).  The Kauers--Moosbauer scheme distributed
+with `jakobmoosbauer/flips` at commit
+`e31a0a0f0d2577cee5da047ca7dcae0c61992e40`
+(`solutions/444-47-mod2.exp`) converts to an independently exact GF(2)
+rank-47 scheme of density 677.  The conversion uses row-major bits for A and B
+and transposed row-major bits for the output factor, matching FlipFleet's W
+convention.  Both the native exhaustive gate and an independent sparse parity
+reconstruction recover precisely the 64 matrix-multiplication coefficients.
+
+This is not merely a dense relabeling of the existing seed.  The two schemes
+share no complete terms (raw term-set distance 94), and their unordered triples
+of factor-matrix ranks differ: the Flips scheme contains `(3,3,3)` and
+`(1,3,4)` terms absent from the AlphaTensor scheme, while AlphaTensor contains
+`(1,1,4)`.  Those triples are invariant under independent GL(4,2) sandwich
+actions and axis permutation, proving that the seeds lie in different such
+orbits.  Both are now exact-gated into the frontier archive, and the canonical
+12-worker 4×4 profile assigns one CPU frontier island directly to the distant
+orbit; MAP-Elites, parent differential, and GPU pool selection can draw from
+both.
+
+The two local closures are also quantitatively different.  The d450 record has
+165 complement-present one-split starts and 3,210 states in the canonical
+rank-at-most-48 ordinary-flip closure; d677 has 150 starts and 2,139 states.
+Neither closure reaches rank 46.  Moreover, the tensor-signature matrix of the
+94 terms in `d450 Δ d677` has rank 93, hence nullity one: its only zero
+dependency is the complete 94-term difference.  No proper raw parent-difference
+subcircuit exists at any size.  Differential surgery should therefore consume
+evolved descendants from MAP/archive rather than repeatedly matching the two
+untouched endpoints.
+
+As of this audit the rigorous interval over GF(2) remains
+**34 ≤ R(⟨4,4,4⟩) ≤ 47**.  The lower endpoint is
+[Bläser's arbitrary-field](https://arxiv.org/abs/cs/0201001)
+bound `2mn + 2n - m - 2`; no stronger published GF(2) certificate was found in
+the audited literature.  Public AlphaTensor, Flips, matmulcatalog, and
+FastMatrixMultiplication assets expose only these two rank-47 schemes, although
+[Kauers--Moosbauer](https://arxiv.org/abs/2212.01175) report generating more
+than 100,000 such schemes.  A global
+rank-46 UNSAT attempt is not a credible short campaign—the existing encoder did
+not solve even its known-SAT rank-47 control in 280 seconds.  Raising 34 needs a
+certificate-producing substitution/stabilizer engine; the current GPU
+contraction and XOR-SAT modes remain scouts and must not report a miss as a
+proof.
+
+### 2026-07-13: 988.5-billion-move two-basin 4×4 campaign
+
+The first long hardened profile completed normally after 9,002 seconds and
+988,501,306,802 fleet-reported moves (109.809M/s average).  It remained at the
+exact rank-47/density-450 frontier, retained both exact rank-47 parents and full
+32/32 rank+1/rank+2 banks, reported no degraded GPU epoch, and admitted no
+inexact coordinator candidate.  It did not find rank 46; this is a search
+negative, not a lower bound.
+
+The terminal traces confirm genuine parent diversity.  Generic split launched
+977 epochs from d450 and 976 from d677; archive novelty used d677 in 1,952 of
+1,953 epochs; and the rank lane returned exact descendants of both parents from
+26 shoulder densities.  Pool escapes returned 3,428 verified d450 and 614
+verified d677 schemes.  The plateau therefore cannot be explained by every
+lane following one leader.
+
+Six generic pool walks did reach an internal *nominal* rank 46, but full tensor
+verification failed, their worker `global_best` remained unset, and the
+coordinator never saw or admitted them.  They are not records.  The old logs
+did not retain enough seed/candidate/nonce state to replay those failures.  The
+next-build instrumentation now freezes raw seed and candidate files, worker
+round, physical-slot launch nonce, and a compact exact syndrome for every
+nominal-at-target rejection before the slot is reused.  Such candidates remain
+ineligible for admission and reward.  Dedicated density completed 1,953 epochs
+without beating d450; the defect/substitution/XOR-SAT scout family also returned
+no useful 4×4 candidate.  The 4×4 pool now keeps a 128-lane constraint floor in
+a 1,536-lane epoch and water-fills the released capacity toward high-debt
+generic escape and exact surgery, the only family that approached the target
+even nominally.  Other tensor profiles retain their previous allocation.
+
+Higher-rank waypoints are no longer discarded.  Exact best+1 and best+2
+schemes from synthesized identities and native workers enter bounded near-rank
+banks without changing the rank-then-density leader.  Admission limits each
+label-independent factor-reuse signature, term-set distance keeps the retained
+sample separated, and restarts prefer least-used slots.  A returned
+improvement is attributed to its shoulder source for campaign telemetry.  When the best rank drops, the bank
+rebases around it, carrying the old frontier forward when it becomes a useful
+shoulder and reclassifying still-relevant seeds.  Distinct C3-base, orbit-split,
+and polarization banks contain the exact C3 anchors and constructions; every
+entry passes tensor and closure gates.  They are separate because those identities
+normally cost more than two ranks.
+
+Work-zone and wander-zone dwell times are independently tuned native profiles.
+The earlier record override accidentally made a deep 10B cohort also spend 10B
+in every high wander band.  Four sticky pairs per tensor now range from
+`25m/6.25m` through `2.5b/250m` at 3x3, `50m/12.5m` through `5b/500m` at 4x4,
+`100m/25m` through `10b/1b` at 5x5 and 6x6, and `200m/50m` through `20b/2b` at
+7x7 (work/wander).  The shorter wander quota matches its twelve-band jumps and
+allows faster basin turnover.
+
+Rank alone was not enough to audit that turnover: every row could say `r93`
+while holding either twelve distinct schemes or twelve copies of one scheme.
+The native TUI now shows a live term-set digest and distance from the fleet
+leader on every CPU row, plus active unique/minimum/mean distance statistics.
+The 5×5 verification run held 12/12 distinct live term sets with minimum raw
+distance 14–20 even though all personal-best ranks displayed 93.
+
+Startup diversity is also concrete rather than synthesized only from one cost
+leader. FlipFleet exact-loads all checked-in same-rank schemes (six at rank 93
+for 5×5, including seeds at distance up to 186 from d1155), admits them to the
+max-min frontier/MAP archives, and selects each door by least use then maximum
+distance from active islands. Novel equal-frontier CPU returns now enter the
+raw-distance archive just like GPU returns. Short and balanced doors receive a
+separate one-work-plus-one-wander basin lease; high-band and marathon doors
+retain their deep multi-wrap leases.
+
+The native `cal2zone2` processes also stopped using phase shifts of one 31-bit
+LCG sequence.  Its 2^31 period was shorter than a multi-billion-move work
+dwell.  A process seed now chooses an odd-increment LCG modulo 2^63; with the
+PCG multiplier congruent to one modulo four, each parameterized stream has
+full 2^63 state period.  Selection still uses a 31-bit high word to keep the
+existing overflow-safe multiply-high mapping.  Worker logs expose the stream,
+and a sawtooth wrap changes to a new odd increment.  The change is confined to
+the standalone `cal2zone2` process used by FlipFleet; other generator modes and
+the embedded worker source remain byte-stable.
+
 Why not GPU SAT now: the current 4×4 large-k surgery model failed to solve even
 the known rank-47 SAT control in 280 seconds.  A GPU SAT/XOR solver would be a
 new solver project, while exact-basin portfolios reuse the already measured
 11.6× threadgroup-memory kernel and diversify it at essentially zero hot-loop
-cost.  Grinding a single fleet best remains available with `--gpu-escapes 1`
-as the control arm.
+cost.
+
+All of the preceding live scheduling, banking, escape construction, exact
+gates, adaptive allocation, C3/SIMD/pool launches, retry policy, and TUI state
+are implemented in Tungsten (with checked-in Metal kernels).  Python miners,
+generators, and SAT experiments remain offline evidence/reproduction tools;
+they are not subprocesses or control paths of `flipfleet.w`.
 
 - **`flipgraph_gpu_tg.w`** (device-mem baseline is `flipgraph_gpu.w`):
   caching each walker's scheme in on-chip threadgroup shared memory
@@ -803,10 +1159,1069 @@ long-shot only via large-k surgery. New durable tools: `sat_surgery_hik.py`,
 
 ## Corrections (superseded claims, kept for context)
 
-- "⟨7,7,7⟩ = 250 is the GF(2) record" — **wrong**, see the record table note
-  above (Sedoglavic 2017, not flip-graph, not GF(2)-specific).
+- "⟨7,7,7⟩ = 250 is the GF(2) record" — **wrong**. Sedoglavic's identity plus
+  the GF(2) 47/29/38 leaves gives 248 exactly; see the record-table note.
 - "5×5 record is 95" / "94 is the barrier" — an earlier session's
   literature check found 95/94 based on an incomplete record lookup; the
   verified, corrected record is 93 (Moosbauer-Poole), reflected in the table
   above. Anything referencing "95" or "94" for 5×5 elsewhere in old session
   logs is from before this correction.
+
+## 2026-07-12: CPU and Metal profiling audit
+
+A 12-walker 5×5 mixed-profile run sustains roughly 475–500 million CPU moves/s
+while the GPU portfolio is active. A five-second process sample is dominated
+by the intended inner operations (`ffw_try_flip_core`, `ffw_toggle`,
+`ffw_pressure`, and algebraic-seed adoption); allocation, scheduling, and
+coordinator work are negligible in the CPU workers.
+
+An Instruments Metal System Trace covering all child workers recorded 6.06 s
+of FlipFleet GPU work in a 10.64 s span (57% fleet occupancy; the whole system
+GPU was active 69.5% of the interval). Most active time was at the maximum GPU
+performance state and Metal reported no command-buffer errors. The trace did
+identify two sources of avoidable latency rather than bad shader work:
+
+- short-lived child processes compiled about 825 ms of MSL during the
+  ten-second capture; persistent workers or checked-in metallibs are the next
+  startup/rotation optimization;
+- the 5→4 MITM Metal enumeration/probe passes are short, while its exact
+  collision-preserving host table build costs about 0.34 s per 362-candidate
+  subset. Long multi-subset epochs should therefore be treated as a rotating
+  surgery probe, not a continuously saturated GPU lane.
+
+The audit also caught a real host fault in the experimental 7→6 XOR join.
+Its shared hash table was allocated as packed `u32` storage but an insertion
+helper declared it as `i64[]`, so optimized host indexing used an eight-byte
+stride and eventually crossed the mmap. The table is now one packed buffer,
+the helper is explicitly `u32[]`, and the GPU receives the same packed layout.
+Both planted 6→5 and 7→6 proofs pass, as do 20 sequential stress runs, eight
+concurrent real 5×5 workers, a 30-second mixed 5×5 run, and GPU smokes for
+3×3, 4×4, 6×6, and 7×7. No degraded status, process fault, command-buffer
+failure, or exhaustive-verification reject appeared after the correction.
+
+## 2026-07-13: live circuits, parent differentials, and staged large-k joins
+
+The rotating pure-Tungsten pool now extends the small exact-surgery family in
+three independent directions.  A Metal pair/triple or triple/triple join mines
+five- and six-term zero signatures from the live factor closure.  A hit is not
+trusted as a circuit merely because its 128-bit projection vanishes: the host
+reconstructs the complete tensor and every nonempty proper subset, then
+exhaustively verifies the scheme produced by toggling the primitive identity.
+
+A separate bounded CPU child uses the symmetric difference of two distant
+exact archive parents.  It hash-joins a primitive five-circuit and chooses the
+orientation with the most terms already in parent A, producing an exact hybrid
+when possible.  The scheduler caps this mode at one process/one logical
+quantum; it is a diversity probe, not a new CPU fleet.  A planted distance-10
+pair produced a third exact rank-27 3×3 scheme from two rank-32 parents.
+
+Finally, the XOR worker now stages 8→7 as a triple/quad join and 9→8 as a
+quad/quad join.  Regular count⁴ tuple enumeration runs on Metal while the
+candidate family is capped at 16.  Full local and whole-scheme reconstruction
+remain the admission gates, so these bounded searches do not imply local or
+global lower bounds.  Planted 6→5, 7→6, 8→7, and 9→8 regressions all recover
+the exact rank-27 parent from a rank-28 split seed before the new modes become
+campaign-ready.
+
+## 2026-07-13: persistent GPU path and bounded CPU search experiments
+
+The startup cost identified by the July 12 Metal trace is now addressed in
+the production path.  FlipFleet compiles emitted Metal to freshness-checked
+`.metallib` files before an engine becomes ready.  Stable generic square and
+rectangular roles additionally retain one worker process, Metal device,
+library, pipeline, queue, and buffer set across default one-round epochs; a
+generation-numbered mailbox supplies each new exact seed and bounded command.
+C3, cooperative SIMD, and rotating-pool workers remain bounded processes but
+load the cache.  Tiny 3×3 launch controls measured about 122 ms per
+source-compiling child, 64 ms per cached child, and 15–19 ms per persistent
+command (19 ms in the latest integration sample).  This closes most of the
+rotation gap; it does not change shader move throughput.
+
+The primitive miner has one live-frontier positive: from the exact 3×3
+rank-23/density-139 scheme it emitted an exhaustively checked rank-29 alternate
+escape.  The parent-differential and large-k positives remain planted
+regressions: exact rank-32 parents at distance ten produced an exact rank-27
+hybrid, and planted 8→7/9→8 joins recovered rank 27 from rank-28 split seeds.
+Those controls establish that the implementations can find and splice their
+intended identities.  They are not world-record improvements, local
+minimality results, or tensor-rank lower bounds.
+
+A separate equal-compute 6×6 comparison tested the stronger six-image
+C3×Z2 constraint (historically named D3 in this tree).  Four trials per arm,
+128 walkers × 5,000 steps each, left every C3 and C3×Z2 run at rank 153.  C3
+took 4.671 s for the combined 2.56M configured transitions; C3×Z2 took
+7.963 s, about 59% of C3 throughput, and did not improve density 2502.  The
+worker is therefore retained as a standalone experiment, not a default role
+or rotating-pool member.  Neither symmetry arm found rank 152.
+
+Search diversity is now measured with a 62-bit canonical orbit digest across
+the six tensor-axis automorphisms and simultaneous index reversal, augmented
+by sorted factor-matrix-rank histograms as a cheap GL invariant.  Equivalent
+images share a bank/MAP/lineage identity.  This digest is telemetry only;
+exhaustive tensor reconstruction remains the admission gate.  A persistent
+256-entry provenance registry carries direct-GPU, pool-mode, and rectangular
+origins through bank copies and CPU continuations.  The first exact CPU
+descendant can return delayed credit for rank reduction, same-rank density,
+and canonical novelty to the originating role and context; return to the
+origin basin is recorded as a separate hazard.
+
+Two deliberately bounded CPU lanes test changes without perturbing the rest
+of the sticky-door fleet.  One races eight work/wander, split-cadence,
+pressure, and band-growth arms, cold-rotating every arm before using rank drop,
+canonical novelty, and return hazard as integer utility.  A different island
+observes accepted-state recurrence with a rolling Zobrist digest and a
+512-entry direct-mapped recent filter.  On the 5×5 density-1155 seed, a 20M
+move comparison measured 36,900,369 moves/s baseline versus 37,174,721 watched
+(0% overhead at integer resolution). A final-audit rerun beside the live 7×7
+campaign measured 29,940,119 versus 29,542,097 moves/s (1%). Both observed
+871,604 unique fingerprints, 69,331 recent-filter hits, and 55,574 immediate
+inverses. The apparent speed gain in the first sample is noise: the useful
+result is 0–1% observed overhead while one lane quantifies reversible cycling.
+
+The complete design and evidence classification are in
+[`FLIPFLEET_SEARCH_EXPERIMENTS.md`](FLIPFLEET_SEARCH_EXPERIMENTS.md).  None of
+these nine additions has yet changed a rank upper bound or rigorous lower
+bound.
+
+## 2026-07-14: complete nullspace tunnels and rank-changing map audits
+
+The 7×7 rank-247 frontier has exact escape edges far beyond the old bounded
+partial-automorphism enumerator. Complete elimination of each elementary
+automorphism's `n^6` delta rows produced 155 genuine basis endpoints. Closing
+projected directions through depth four produced 1,040 graph-unique exact
+nodes, including two rank-247/density-3098 schemes with no terms in common
+with the source (distance 494, the maximum possible). Both are checked-in
+frontier seeds. A retained-workspace finder returned a genuine endpoint for
+all 189 rotated starts in 39 ms mean / 58 ms p95, so FlipFleet now runs it as
+a low-cadence coordinator escape rather than consuming a CPU or GPU lane.
+
+Several plausible rank-changing generalizations were also closed cleanly.
+Raw one-factor maps covered 7,056 complete kernels; paired raw maps retained
+the bilinear cross term and covered 5,760 kernels over fifteen presentations.
+Every real-frontier dependency was an individually fixed singleton, although
+the paired planted control recovered Strassen rank 11→7. A zero-admitting
+whole-window kernel-shear closure exhaustively tried up to 131,054 dependency
+combinations, correctly recovered a planted Strassen 8→7 drop, but found no
+drop on the 4×4–7×7 leaders or their tested alternate presentations. These
+families stay offline; their negative results prevent wasting live pool width.
+
+The corresponding production startup was also profiled rather than guessed.
+Loading and full-gating the ten 7x7 profiles cost 314 ms, directed global
+isotropy 357 ms, and the leader escape family 213 ms; eagerly expanding every
+frontier escape cost 89,207 ms by itself. FlipFleet now freezes one exact
+archive snapshot per rank generation and rotates one source/kind/nonce cell
+per minute through a finite `source_count*5*6` schedule. Fifty calls averaged
+24 ms (p90 41 ms, maximum 52 ms), and the default exact 7x7 startup smoke fell
+to about 2.3 seconds. The TUI renderer was not changed.
+
+A simultaneous coloured extension assigned each source term one of
+`identity`, `g`, `h`, or `hg`, then solved the complete delta nullspace with an
+explicit one-colour constraint. Across seven real frontiers, 28 generator
+pairs, 112,638 kernel vectors, and 86,764 fully compared sparse MITM hits, it
+full-gated 5,475 endpoints with zero failures. All 604 quotient survivors were
+staged compositions of binary partial-automorphism edges; none was genuinely
+cross-colour and none improved rank or density. A planted genuinely coupled
+rank-12 to rank-8 control passes, so this is a clean negative on the current
+frontiers. It remains offline; the binary beam's distance-494 doors are
+strictly stronger for production diversity.
+
+## 2026-07-14: a second constrained lower bound for `<3,2,4>`
+
+After permuting the tensor to `<2,4,3>`, the one-dimensional constraint
+generated by a rank-two `2x4` form now has a rigorous GF(2) lower bound 19, up
+from the verified search-certificate value 18. An independent audit expanded
+all 86 certificate orbits to all 417,199 subspaces of `F_2^8`, rebuilt 28,480
+capacity inequalities, and divided the residual by a 576-element stabilizer
+into 46 disjoint pseudo-Boolean shards. All 46 were proved UNSAT and replayed
+by VeriPB 3.0.2 with no assumption rules, warnings, or unjustified diagnostics.
+
+At that checkpoint this was only a constrained lemma, not a global 20 lower
+bound. It proved that every factor on the `2x4` axis of any hypothetical
+19-term `<3,2,4>` decomposition must be rank one. Combined with the earlier
+A-mode lemma, the remaining global case had 19 distinct rank-one `3x2` factors
+and 19 rank-one `2x4` factors. The quotient-rank result immediately below
+supersedes that claim boundary.
+
+## 2026-07-14: quotient-rank proofs close `<3,2,4>` at rank 20
+
+The claim boundary above has now advanced: the remaining six rank-one-A /
+rank-one-B symmetry cases are all proved UNSAT, so
+
+```text
+rank_GF(2)(<3,2,4>) = 20.
+```
+
+The key necessary condition comes from reordering
+`(x tensor y) tensor (p tensor z)` as
+`(x tensor z) tensor (y tensor p)`. The twelve target slices span
+`Q tensor <I_2>`. A hypothetical minimal 19-term presentation has nineteen
+independent `A tensor B` columns—any dependence absorbs one `C` factor and
+deletes a term—so quotienting the four-dimensional `y tensor p` factor by
+`<I_2>` must leave rank exactly `19 - 12 = 7`.
+
+Each fixed-B necessary instance received an exact 36-by-19 rank-at-most-seven
+factorization `V=UL`, with the seven rows of `L` in RREF to remove the
+`GL(7,2)` gauge. The six 7,529-variable / 86,487-constraint OPBs use untouched
+bases, not Benders cuts. RoundingSat proved all six UNSAT. Their filtered
+deletion-free logs total 1,248,204,428 bytes and all replay under VeriPB 3.0.2
+in forced checked-deletion mode with exactly one UNSAT conclusion and no
+warning, error, failure, unjustified step, or assumption diagnostic.
+
+An independent audit rebuilt all six OPBs byte-for-byte, checked the three
+missing-A by two fixed-B orbit cover, and tested fixed matrices of ranks zero
+through seven as SAT and rank eight as UNSAT under two column orders. Formula,
+proof, solver, checker, and source hashes are pinned in
+`proof_n324/n324_quotient_rank_manifest.json`. The earlier 300-model Benders
+campaign remains useful search history, but it is not part of the final six
+proofs. Rank-drop search for `<2,3,4>` is consequently retired; rank-20 density
+search remains meaningful.
+
+## 2026-07-14: genuine D3 doors and distance-494 campaign controls
+
+The transpose-aware tensor D3 maps expose exact edges that coordinate-index
+cycles miss. Across all 29 tracked 4x4--7x7 frontiers and eleven nonidentity
+D3-times-reversal maps, complete coefficient nullspaces examined 127,755
+combinations. They independently full-gated 13,794 endpoints with zero
+failures; 11,331 were proper partial moves and 10,132 lay outside the source
+D3 class. No endpoint improved rank or density. Five independently reloaded
+representatives were added as restart doors: one 5x5 rank-93 seed at source
+distance 32, two 6x6 rank-153 seeds at distances 8 and 16, and two 7x7
+rank-247 seeds at distance 216. Dense combination sampling revisited the same
+canonical classes at roughly three to four times the 7x7 admission cost, so
+generation remains an offline audit and only the exact endpoints enter the
+live frontier.
+
+The two one-core campaigns started from the term-disjoint distance-494 7x7
+partial-automorphism doors then completed 60.491B and 61.074B moves. Both
+finished at exact rank 247/density 3098. This is useful basin-specific search
+evidence, but it is neither a local-minimality proof nor a rank lower bound.
+Their freed slots were moved to the two D3-distinct rank-247 doors.
+
+## 2026-07-14: Metal lanes for the two smallest primitive rectangles
+
+The exact `<2,3,4>` and `<2,4,5>` campaigns now have dimension-specialized
+pure-Tungsten/Metal cal2zone workers instead of silently falling back to CPU.
+Their capacities/shared-memory geometries are 64/12,288 bytes and
+80/15,360 bytes, both with sixteen walkers per threadgroup. The generated
+host relays accept both public `R u v w` rows and FlipFleet rank-header
+checkpoints, retain the bounded persistent-process lease, and reconstruct any
+adopted candidate coefficient-by-coefficient.
+
+Production coordinator campaigns exercised 4.25984B `<2,3,4>` transitions
+from rank 20/density 130 and 2.4576B `<2,4,5>` transitions from rank 33/density 246,
+with zero exact rejects. Neither found rank 19 or rank 32. These are finite
+negative searches, not rank lower bounds; the value is that both primitive
+field-gap targets can now consume the adaptive GPU budget directly.
+
+## 2026-07-14: exact rectangular 5 -> 4 MITM surgery
+
+The two primitive rectangular campaigns now also run a distinct bounded
+5 -> 4 surgery worker. Metal enumerates and probes complementary candidate
+pairs; the Tungsten host performs the complete local identity check and then
+the rectangular worker independently reconstructs every coefficient before
+publishing. A checked-in exact rank-21 `2x3x4` shoulder plants a split in its
+first five terms; the end-to-end GPU test recovers rank 20 and reloads it
+through the full rectangular gate. The existing square rank-28 to rank-27
+planted control still passes.
+
+The audit exposed a shared performance defect rather than a tensor bug. The
+old 128-bit fingerprint hash discarded low bits from three words and produced
+long linear-probe clusters. A full-word rotate-and-avalanche hash reduced the
+planted pool-256 host table from 126 ms to 6 ms and a 16-subset `2x4x5`
+pool-256 table from roughly 3.1--3.8 seconds to 85--130 ms. Native Metal and
+metallib compilation pass with the exact `xcrun --find` toolchain.
+
+The finite frontier sweep covered 1,248 `2x3x4` windows / 108,128,448 pair
+enumerations and 1,312 `2x4x5` windows / 94,291,520 pair enumerations over
+pools 128--700, nearby depths 0/2/4/8, and the full bounded offset windows.
+It sent 3,660 and 54 fingerprint collisions respectively through the exact
+local gate, with no rank-19 or rank-32 result and no exact rejection. This is
+search evidence, not a lower bound. Production therefore keeps the lane
+sparse: pool 256 for `2x3x4`, pool 384 for `2x4x5`, sixteen windows per launch,
+rotating nearby depth and offset, every eight rounds in a single-shape run and
+once per four-round portfolio epoch. Its counters live in status telemetry;
+the TUI layout is unchanged.
+
+## 2026-07-14: support-guided overlapping block parity
+
+The planted overlapping-block identity has been extended into a bounded
+real-frontier audit in pure Tungsten. It builds index-mask banks from live term
+supports, complements, and bounded AND/OR/XOR closure, substitutes the lowest
+rank exact rectangular algorithm available in the checked-in 2--8 leaf pool,
+and hash-compacts each four-block zero macro. Twenty-two missing sorted
+minimum-dimension-two shapes through size 8 are generated by fully gated
+disjoint tensor splits; among them, 2x7x7 has rank 81. The exact term-set XOR rank is
+computed before endpoint allocation; every retained full-block best and every
+rank-neutral/lower endpoint then receives a complete tensor reconstruction.
+The planted test injects a nonempty exact zero macro above the rank-47 4x4
+scheme and the same bounded sampler recovers the original rank-47 endpoint.
+
+All coordinate-singleton four-cycles are algebraic no-ops after compaction:
+432 at 4x4, 4,050 at 6x6, and 9,261 at 7x7. The fixed singleton axis excludes
+every non-schoolbook rectangular leaf. The wider-mask run used 32 masks per
+axis, 512 deterministic samples per orientation, and a 32-macro pair-XOR
+frontier. Full-block replacement was complete modulo coordinate permutation
+because every mask cardinality was represented. Best fully gated full-block
+ranks were 54 from rank 47, 165 from rank 153, and 257 from both rank-247 7x7
+presentations. The corresponding best single/pair estimates were 54/61,
+160/164, and 262/267. Neither 7x7 presentation shared a term with its best
+local support macro; the best 6x6 macro shared four terms but still landed at
+rank 160. No rank-neutral or rank-lowering endpoint was found, so the strategy
+is not integrated into the live pool. The implementation, planted controls,
+and reproducible 4x4/6x6/7x7 comparison are in
+`flipfleet_overlapping_block_frontier.w`, its `_test.w`, and `_bench.w`.
+
+## 2026-07-14: signed cross-field projections
+
+An independent parser/gate audited pinned exact `{−1,0,1}` schemes before
+using them as GF(2) starts. It reconstructs the integer tensor, reduces signs
+modulo two, parity-compacts duplicate terms, transposes the trace-dual output
+factor into FlipFleet's `W` order, and then reconstructs every GF(2)
+coefficient. The two signed 5x5 rank-93 files are exactly the existing
+Kauers-A and Kauers-B term sets. Both distinct signed 6x6 rank-153 files reduce to the same existing
+C3 rank-153/density-2574 term set. Their nearest nonidentical zero relations
+are respectively two and twelve independent ordinary 2-to-2 flips, while
+their XORs with the density leaders are global distance-186/distance-306
+relations with no independently zero exact-factor component. They add neither
+a basin nor a move family.
+
+The public ZT JSONs produced one useful shoulder but no record. The 7x7
+rank-250/density-2966 projection is term-for-term identical to the already retained
+old-frontier certificate. The 4x4 projection is a new exact
+rank-49/density-432 presentation at orbit distance 96 from rank-47/d450. Its
+96-term leader XOR has no independently zero exact-factor component, so it is
+not a local tunnel. Complete 36-generator isotropy descent plus 256 conjugate
+restarts found no density below 432. The full-gated certificate is retained as a cold,
+file-backed +2 restart seed: coordinator startup/frontier rebuilds admit it
+through the ordinary novelty/signature policy, with no new CPU/GPU lane and no
+TUI change. Full source commits, hashes, commands, and negative boundaries are
+in `SIGNED_PROJECTION_AUDIT.md`.
+
+## 2026-07-14: separate exact ternary fleet
+
+`flipfleet_ternary.w` is now a separate pure-Tungsten CPU/GPU fleet over strict
+`{−1,0,1}` factors. It accepts `--tensor 4x4` through `7x7`, repeatable signed
+six-mask `--seed` files, wall/move bounds, `-J`, and durable best/status paths.
+Every distinct import and every published/final best receives the exhaustive
+integer `n^6` gate. Its own Metal breadth engine is on by default and can be
+disabled with `--no-gpu`; it does not touch the GF(2) coordinator, GPU policy,
+or TUI.
+
+Pinned public rank-49 4x4 and rank-250 7x7 ZT JSONs, plus rank-93 5x5 and two
+genuinely distinct rank-153 6x6 expression seeds, were parsed and expanded by
+an independent Python verifier before the pure-Tungsten import gate. Complete
+source commit/blob/file/certificate hashes are in
+`ternary_catalogue_sources.tsv`. Bounded two-island controls covered 55.1M
+moves apiece at 4x4/5x5/6x6 and 60.1M at 7x7 with zero rank drops and zero
+exact rejection. They found useful exact density doors at 5x5 (r93,
+1291→1249) and 6x6 (r153, 2574→2502), now checked in and included in default
+seed rotation. The 4x4/r49 and 7x7/r250 objectives did not improve; a 10M 7x7
+control returned an exact r250/d3069 door at term-set distance 64. That door is
+checked in and default-pooled, and the CLI now gates/archives up to sixteen
+novel equal-rank returns instead of discarding them at shutdown.
+
+The original one-hour CPU-only controls later completed at substantially
+larger bounds: 13,683,163,136 moves for 4x4, retaining r49/d432, and
+1,868,406,784 moves for 7x7, retaining r250/d2966. Both had zero exact rejects
+and no rank drop. This is an honest finite negative result for the implemented
+move portfolio, not a proof that either basin is globally infertile.
+
+A subsequent exact shared-factor GL(3) closure improved the 5x5 endpoint once
+more, r93/d1249→r93/d1248, and then exhausted all five genuinely three-way
+ternary matrix/inverse orbits, six source orders, and eight source gauges to a
+fixed point. The saved endpoint changes three terms (symmetric-difference and
+tested tensor-symmetry orbit distance six) and passes the complete integer
+gate. This particular density step is reachable by two legal pair flips, so it
+is a shortcut rather than a new 5x5 component. The move nevertheless has a
+separate planted subtotal whose legal pair-flip component is a singleton and
+whose nontrivial GL(3) endpoint is exact and ternary, establishing genuine
+tunneling capability. It runs at one probe per 65,536 ordinary signed moves;
+4x4/6x6 strict controls are empty and all 252 public-7x7 endpoints are denser
+by 8--20, so they remain wander doors.
+
+A larger direct shared-factor GL(4) lane was rejected before implementation:
+the maximum projective-factor bucket sizes of the pinned 4x4, 5x5, 6x6, and
+7x7 objective seeds are 1, 3, 2, and 3. A four-term probe would therefore be
+inert. `flipfleet_ternary_gl4_audit_test.w` keeps this negative executable.
+
+The broader `flipfleet_ternary_span_refactor.w` removes that shared-factor
+precondition. It exhaustively enumerates the strict signed generator span of
+a selected three- or four-term subtotal, hash-joins candidate rank-one terms,
+and coefficient-gates every modular match over the complete ambient integer
+subtotal. Planted tests recover exact 3-to-2, disjoint 3-to-3, 4-to-3, and
+external-cancellation 4-to-2 identities; a split Strassen shoulder also
+splices from rank eight back to a fully gated rank seven. On real leaders,
+however, 512 deterministic windows on each of six pinned 4x4--7x7
+presentations produced no 3-to-2; 96 three-term catalogues produced no
+disjoint 3-to-3; the same 96 collision windows represented no opposite external term;
+and six complete bounded 4-to-3 joins (156,426,570 candidate pairs) were all
+negative. The executable benchmark therefore remains offline and receives no
+fleet cadence until a real endpoint supplies positive evidence.
+
+The productive replacement is an exact global matrix-index isotropy in
+`flipfleet_ternary_index_shear.w`. For an elementary unimodular
+`P = I + sE_ab`, it applies P to one side of a contracted physical matrix
+index and `P^-T` to the other. All affected terms are preflighted before
+commit; every intermediate accepted endpoint and final factor remains in
+strict `{−1,0,1}`, and both Tungsten and independent Python reconstruct all
+`n^6` integer coefficients. This is normalization inside a known tensor
+isotropy orbit, not a new local tensor identity or a claim about disconnected
+components.
+
+Deterministic steepest normalization takes 5x5 r93/d1248 to r93/d997 in ten
+shears and 6x6 r153/d2502 to r153/d1938 in eleven. The endpoints share no
+canonical term with their inputs (term-set distances 186 and 306). Their
+certificate hashes are respectively
+`ab41aa831a566d86a46fcfb52e4d4eafaae6131cb229501704a825b564ab0298`
+and `610eadf30fd46004e6898bcb5d01e4776b0062e358af3e3fc39a47fcd101dde7`.
+The 4x4 and both 7x7 seeds are strict-descent fixed points.
+
+GPU breadth then compounded the normalized doors to 5x5 r93/d967 and 6x6
+r153/d1931 in 8,388,608 attempts each, with zero integer-gate rejects. Those
+certificates
+(`d63c756fef192ea7b0fe78bdc5378f2eb3af0f8cf63e6d3fb7b9f8110701c407`,
+`f58820f4b3c4f71f4a7fd5b2303e30fda382c352d3b059fed74a678072186c37`)
+are themselves fixed points of
+the complete shear descent. CPU admission normalizes deterministically while
+the raw d1245 and other seeds remain available to GPU lanes for structural
+diversity; the closure repeats only every 8,388,608 ordinary CPU moves, and
+production never publishes arbitrary isotropy-orbit novelty. It admits at
+most one non-recursive shallow positive shear (density debt at most eight) per
+normalized fingerprint to GPU seeds only, then closes every gated GPU return
+before archive/publication. A 9M-move
+one-island smoke at both sizes fired the rare closure and finished with d967
+and d1931, zero failures. Full GPU architecture and compound measurements are
+in `TERNARY_GPU_ENGINE.md`; exact move, audit, hashes, and reproduction details
+are in `TERNARY_FLIPFLEET.md`.
+
+Two additional 6x6 feedback paths preserve basin diversity without changing
+the objective leader. The distinct public Kauers seeds normalize to distinct
+d2208 doors; GPU breadth reaches two distinct d2148 endpoints; three more
+index shears reach two distinct d1953 fixed points. Dedicated 134,217,728-
+attempt GPU continuations from each d1953 gated 32 changed exact basins with
+zero rejects but stayed at d1953, so d1931 remains best. The durable d1953
+certificate hashes are
+`f0f06c9812ecdec7ca79ebd07a65f296dc044a32a433e0f845f0d60837aa760c`
+and `a38623255e9e7269b0d1ab681a2a0b39a48f91d94b4c741d1a3bdda6a6f7fcdd`.
+
+That bounded shallow policy found a real symmetry tunnel. The original 6x6
+d1931 fixed point takes a legal +6 global shear to d1937; 134,217,728 GPU
+attempts reached d1935; one deterministic closing shear then reached a second
+d1931 basin at term-set distance twelve from the original. The d1935 and new
+d1931 hashes are `78df6b6f0b08c82d737b3f1940f6442f85ab48e2f0a8550435cd0fe4aa05ef82`
+and `39d8782dffd33b988447982bb13632553734da4c5c70b36148670645eeda3801`.
+Another 134,217,728 mixed plus 134,217,728 downhill attempts from the new
+basin gated 39 changed exact returns with zero rejects but no density below
+1931. The 5x5 d974 shallow-door control likewise stayed d974 over 134,217,728
+attempts. `flipfleet_ternary_seed_variants.w` now automates exactly this capped
+one-door route, deduplicates it, never recurses it, and normalizes GPU returns.
+
+An independent support-sign CP-SAT filter at FastMatrixMultiplication commit
+`e0ec7db4cb7d7ca41abbb2c6e3bd8c7de75c7c64` accepted the public 4x4/r49 ZT
+shadow, but reported both saved GF(2) r47 supports and all saved 7x7 r248/r247
+supports infeasible for strict ternary signs. This is an audited computational
+filter, not a formal UNSAT proof. Reproduction commands, timings, scope, move
+identities, and remaining optimization work are in `TERNARY_FLIPFLEET.md`.
+
+Signed archive differences now have their own exact tunnel. A collision-free
+six-mask union, dual-prime stacked weighted-Gram rank certificate, and full
+integer basis gates found 6,228 proper exact splices across nine close 5x5,
+6x6, and 7x7 lineage pairs. Complete disjoint relation cubes prove all of them
+rank-neutral. Twelve representative children were distinct from both parents;
+five improved their own density in matched one-million-move continuations, but
+none beat the sparser parent and none dropped rank. The move therefore remains
+an offline or low-frequency archive-cadence option rather than a default lane.
+The proof-safe screen, 9.46-second audit, and replay commands are in
+`TERNARY_PARENT_NULLSPACE.md`.
+
+## 2026-07-14: external-cancellation completion of local refactors
+
+Several local replacement paths had the same GF(2) admission bug: they
+rejected a replacement term if it was already live outside the selected
+window. Such a collision is useful, not invalid, because the two copies
+cancel. A nominal local 3-to-4 replacement with one external collision is a
+global rank-minus-one move; a local 3-to-3 replacement with one collision is
+global rank-minus-two.
+
+The span-3/span-4 Metal join now searches collision-containing presentations
+before generic hits, parity-compacts the full symmetric difference, scores
+the actual global rank, and reconstructs the complete tensor before reward or
+publication. The same compact splice semantics now cover flattening-gauge,
+absorbed low-rank shear, and SAT destroy/repair. Planted regressions recover
+rank 23 from exact rank-27/28 3x3 shoulders through nominally neutral or
+rank-minus-one local substitutions with external cancellations.
+
+The real-frontier audit covered 7,334 independent tensor/cardinality/offset
+jobs over current 4x4--7x7 leaders, every retained rank-optimal 4x4/5x5
+presentation, and seven structurally distant 6x6/7x7 archives. It found zero
+external-collision hits and zero exact failures. The corrected search remains
+enabled at low priority because it closes a genuine completeness hole, but it
+has not earned a larger live allocation on the present basins.
+
+## 2026-07-14: reusable inner-dimension-two proof campaign
+
+The quotient argument that closed `<3,2,4>` now has a tensor-generic proof
+package for every GF(2) `<a,2,c>`. Regrouping the first two factor spaces gives
+`Q tensor R` with `dim(Q)=a*c` and `dim(R)=4`; exactness forces the target
+slice space `Q tensor <I_2>` into the term-column span. Therefore every
+rank-`r` decomposition must satisfy
+
+```text
+rank(pi(S)) <= r - a*c
+```
+
+after quotienting `R` by `<I_2>`. This condition does not assume that the
+displayed adjacent factors are rank one. Both native-XOR XNF and OPB encoders
+enforce the complete tensor equations and an exact low-rank factorization of
+the quotient matrix, with an RREF gauge to remove its `GL` symmetry.
+
+For a hypothetical rank-32 `<5,2,4>` decomposition, cyclically equivalent to
+`<2,4,5>`, the quotient is a 60-by-32 binary matrix of rank at most 12. The
+complete fixed-first-term campaign has five coarse rank/pairing cases and 148
+residual-factor stabilizer orbits; each case covers all 1,048,575 nonzero
+third factors. Independent tests reproduce Strassen, distinguish both
+rank-one pairing cases, and brute-force the full small stabilizer action.
+
+Short CryptoMiniSat and RoundingSat probes on `<5,2,4>`, `<4,2,4>`, and
+`<3,2,5>` were indeterminate. Consequently `proof_inner2/` is a sound
+distributed proof campaign and not a new lower bound: all shards would need
+checked UNSAT proofs before the corresponding rank claim changes.
+
+## 2026-07-14: projective-line matrix-pencil tunnel
+
+A maximal subtotal whose factors on one axis lie in `{a,b,a+b}` is a
+two-slice matrix pencil. Writing its slices as `X=A+C`, `Y=B+C` makes the
+complete within-plane CP refactor
+`min_D rank(X+D)+rank(Y+D)+rank(D)`. The new pure-Tungsten operator exhausts
+`D` in the combined complementary factor spans, minimally factors all three
+matrices, parity-compacts the splice, and runs the full `n^6` gate.
+
+This found six real rank-neutral 5x5/r93 tunnels beyond the span-4 and
+single-pair neighborhoods: three from d1155 (maximum term-set distance eight)
+and three from d968 (maximum distance ten). Two 4x4 archives had no five-term
+line bucket. A complete 128 MiB rank-table audit covered all 30 five-by-five
+coordinate pencils in two 6x6 archives plus the seven remaining d968 pencils,
+about 1.25 billion `D` values, with no changed 6x6 optimum, rank drop, or exact
+failure. None of the six selected maximum-distance 5x5 endpoints improved
+density.
+
+The structural result did not translate into fertility. A matched 900M-move
+continuation (12 seeds, 25M moves each, source versus distance-eight pencil
+versus one-pair restart) produced no rank drop and returned every pencil arm
+to the same r93/d1155 best as the source. The pencil arm's 72 best updates
+versus 12 for source merely record that unwind. The move remains an offline
+audit with no CPU/GPU lane. Exact derivation, tables, controls, and replay
+commands are in `MATRIX_PENCIL_TUNNEL.md`.
+
+## 2026-07-14: projective-plane quadrilateral tunnel
+
+The next projective generalization uses a full three-dimensional fixed-axis
+span. Each complement of a Fano line is a four-point circuit, so the same
+complementary matrix `D` can be toggled into all four factor buckets without
+changing the tensor. The new pure-Tungsten operator minimizes the sum of the
+four changed matrix ranks over all seven circuits. It completely exhausts
+`D` through 16 coordinate cells and uses exact bucket/bucket-XOR/rank-one
+candidates on larger planes; every result still receives local and full
+coefficient gates.
+
+The planted move makes a direct 5->4 drop while complete span-4 and line-pencil
+audits find no direct reduction. It is not a new algebraic component,
+however: a general flatten-gauge acts on the same factorization orbit, and the
+shipped bounded gauge already reproduces a drop on the tiny plant. The new
+coverage is structured rank-median optimization, not disconnection from
+`GL(k,2)` gauge words.
+
+Across 110,181 bounded planes on eight 4x4--7x7 frontiers, 5,439 qualifying
+groups evaluated 81,227,377 exact candidates. The audit found one neutral
+5x5/r93 endpoint at distance six and two neutral 7x7/r247 endpoints at
+distance eight, with zero rank or density wins and zero gate failures. A
+600M-move matched continuation produced more distinct descendants from the
+projective starts, but the source beat the projective arm 6/16 on 5x5 and 8/8
+on 7x7; all remaining 5x5 trials tied. The operator remains offline with no
+CPU/GPU pool allocation. Derivation, exact bounds, tables, and replay commands
+are in `PROJECTIVE_PLANE_TUNNEL.md`.
+
+## 2026-07-14: five-bucket projective-circuit tunnel
+
+A minimal dependency of five fixed-axis factors has rank four and XORs to
+zero. Therefore the same complementary rank-one matrix can be toggled into all
+five corresponding slice matrices without changing the tensor. The new
+pure-Tungsten operator enumerates these five-circuits, tests all 25
+selected-factor rank-one medians plus every nonzero matrix in the span of the
+five old slices, minimally refactors the five slices, and parity-compacts each
+endpoint before the caller's full tensor gate.
+
+The planted control performs a direct 5-to-4 reduction and restores the exact
+3x3 rank-23 scheme from a rank-32 circuit shoulder. Complete 4x4 audits found
+no changed low-debt endpoint. Complete 5x5 audits found 1,036 endpoints from
+d967 and 849 from d1155; their best shoulders were r94/d973 and r94/d1166.
+The higher-rank matrix-span family added 92 and 69 endpoints over the
+rank-one-only pass without improving debt or density.
+Bounded 6x6/7x7 audits found only `+2` shoulders. There were no exact-gate
+failures and no direct objective improvement.
+
+A matched 12-pair, 240M-move continuation compared the best circuit `+1`
+shoulder with an ordinary `+1` split. Both returned to rank 93 in every trial
+and neither beat d967, but the circuit arm retained novel rank-93 descendants
+in 12/12 trials versus 9/12 and averaged term-set distance 12 versus 9. It won
+the paired final objective 7-to-5. Consequently one quarter of 5x5
+`lifted-identity` launches now try a 256-circuit prefix and admit only exact
+`+1` shoulders; all other sizes stay offline. The experiment reuses the
+existing pool row and does not change the TUI. See
+`PROJECTIVE_CIRCUIT5_TUNNEL.md`.
+
+## 2026-07-14: checked `<2,3,5>` lower bound 23
+
+The new `proof_n235/` package proves
+
+```text
+23 <= R_GF(2)(<2,3,5>) <= 25.
+```
+
+The lower endpoint combines a complete 31-orbit Wang certificate at root
+bound 22, a multiplicity-aware capacity CNF for the rank-two first-factor
+case, and an independent incidence contradiction for the all-rank-one case.
+The 23,452-variable/46,455-clause CNF is accompanied by an XLRUP proof accepted
+by the formally verified CakeML checker. The independent replay expands all
+31 orbits to all 2,825 subspaces, regenerates the CNF byte for byte, and checks
+the 21-row incidence count. The unchanged upstream Wang verifier at pinned
+revision `efd22070269157e65aaf8d61a21da253a4000c61` accepts the base
+certificate.
+
+The upper endpoint is not a new rank record. FastMatrixMultiplication already
+publishes rank 25 for this shape. Its AlphaTensor `{−1,0,1}` scheme was pinned
+at checkout `e0ec7db4cb7d7ca41abbb2c6e3bd8c7de75c7c64`, reduced modulo two with
+the output-order transpose made explicit, and independently exact-gated as
+`matmul_2x3x5_rank25_d173_alphatensor_zt_mod2_gf2.txt`.
+
+Separately, a 16-seed pure-Tungsten sweep of 10M moves per seed from the
+elementary rank-26 block construction independently rediscovered rank 25 on
+seeds 235107 and 235110. Their d210 and d278 certificates share zero terms
+with each other or with the public d173 scheme. All three are retained as
+exact provenance; a subsequent 62M-move continuation reduced the public basin
+to d170 with one ordinary flip. A later five-island campaign reached d160 no
+later than 39.73B recorded moves. A separate one-move load/walk/dump replay
+accepted no move, reconstructed the complete tensor, and reproduced SHA-256
+`48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7`
+byte for byte. D160 shares three terms with d170/d173 and none with d210/d278,
+so d160/d170/d210/d278 are four distinct CPU restart doors and the profile
+continues to target rank 24. The proof
+does not claim exact rank, a lower bound above 23, or any result over the
+rationals. Full hashes, proof logic, replay commands, and the claim boundary
+are in `proof_n235/README.md`.
+
+The same profile now has a first-class generated pure-Tungsten/Metal
+cal2zone worker (`CAP=68`, `WPG=16`, 13,056 threadgroup bytes) beside its
+pool-384 exact 5→4 MITM child. A 4,096-lane, four-round standalone profile
+covered 1.6384B moves in 5.27 seconds (311M moves/s including setup under
+concurrent GPU load). The integrated coordinator smoke covered 10.24M
+cal2zone moves plus 1,176,576 MITM pairs from d160; both workers were ready,
+the final checkpoint remained exact rank 25/d160, and GPU failures, host exact
+rejects, and internal rejects were all zero. The earlier 64-batch MITM
+admission sweep covered 75,300,864 pairs with no fingerprint hit. These are
+bounded negative searches, not a rank-24 exclusion.
+
+## 2026-07-14: small primitive exact ranks and the `<2,2,5>` one-term gap
+
+Complete finite-geometry certificates, replayed with Wang's unchanged
+verifier at pinned revision `efd22070269157e65aaf8d61a21da253a4000c61`,
+close three primitive GF(2) ranks:
+
+```text
+R(<2,2,3>) = 11
+R(<2,2,4>) = 14
+R(<2,3,3>) = 15
+```
+
+For `<2,2,5>`, raising only the forced-product cap from `2^24` to `2^25`
+finishes the previously skipped 33,554,432-case child and raises the checked
+lower bound from 16 to 17. The exact block upper bound is 18, so the rigorous
+interval is now `17 <= R(<2,2,5>) <= 18`. Certificate/archive digests,
+11-orbit coverage, and one-command verifier replay are in
+`proof_inner2/SMALL_PRIMITIVE_FRONTIER.md`.
+
+`2x2x5` and `2x2x6` are now first-class CPU rectangular FlipFleet profiles,
+targeting 17 and 20 from exact ranks 18 and 21. The first 68M-move 225 smoke
+reduced density 95 to 88. A whole-scheme GL image supplied a zero-overlap
+second door, and the ensuing two-door run reached exact d84 after 3.17B
+moves. The retained d84/d88 schemes share no terms; their 36-column union has
+rank 35/nullity one, so no proper differential splice exists. Both independent
+tensor gates accept d84, whose SHA-256 is
+`bdce32ca89b5598e470fade86855904c283149ee4ec47d46fe6275afbd80225e`.
+The certified one-term 225 gap now has the highest static priority in the
+default `--rect` portfolio; 226 remains available explicitly.
+
+Independent block-local conjugation broadens that bank. A pure-Tungsten
+4,096-member scan applies unrelated GL words to the rank-11 `<2,2,3>` and
+rank-7 Strassen leaves before their `3+2` embedding. Every composition passed
+the full gate. The selected r18/d92 door has 16 equal-factor pairs, shares no
+term with d84 or d88, and has union nullity two with d84. Its proper 11↔11
+dependency materializes a second exact d84 presentation. A matched 800M-move
+screen of block door, splice, d84, and d88 found no rank or density gain, so
+the endpoints are diversity doors rather than an objective claim.
+
+The corrected rectangular GPU engine then demonstrated why nonleader seed
+rotation and source-island feedback matter.  From block-d92 it returned through
+d89/d86 to a fifth exact d84 scheme within the first 4.096 billion moves.  The
+host tensor gate accepted it, and its saved SHA-256 is
+`86b73a254dcafe6e39c1411d183a07cad43083bf5b6818a3f574996d103618a1`.
+Its distances from d84/d88/block/splice are `28/36/10/14`.  Expanding the
+complete block-parent audit to all five doors covered 20,479 nonidentical
+unions and all 52,575 dependencies, yielding 32,096 proper exact rank-18
+relations but no rank-17 projection.  All five now rotate across 225 islands;
+the complementary-hybrid closure is evaluated separately as a new tunnel move.
+
+That closure retained both children discarded by the old single-best selector,
+but saturated at seven rank-18 schemes and produced no rank 17. Eight matched
+20M-move continuations from each of the seven endpoints (1.12B moves total)
+made no objective progress, so the move remains an offline exact audit rather
+than a default lane. A stronger multi-parent affine solver then allowed a
+solution to mix terms from any three or more supplied schemes. It exhausted
+the five doors plus every single block parent, and all pairs and triples from a
+32-parent maximin archive: 11,942,176 affine masks and 232,978 independently
+gated rank-18 occurrences, with no rank-17 subset or gate failure. See
+`ARCHIVE_NULLSPACE_CLOSURE_225.md` and `MULTI_PARENT_NULLSPACE_225.md`.
+
+The next fixed-dictionary attack no longer caps the affine nullity. The
+pure-Tungsten builder deduplicates the five doors plus block-local parents,
+emits exact native tensor XORs with an unconditional `weight <= 17` sequential
+counter, and replay-gates every SAT model. The five-door, maximin-32, and full
+4,096-parent dictionaries contain respectively `55/625/3,321` terms, with
+column ranks `51/212/212`; their serialized-order SHA-256 values are pinned in
+`UNION_SUBSET_SAT_225.md`. An independent implementation reproduced every
+column, rank, XOR row, and cardinality clause. The five-door limit-18 control
+returned exact r18 and limit 17 was solver-reported UNSAT. Maximin-32 and full
+bank searches remained indeterminate after 300 seconds; Z3 `PbLe(17)` and the
+checked-lower-bound-gated `PbEq(17)` comparison also timed out. These are
+bounded search negatives, not a stronger lower bound.
+
+The associated all-parent affine audit exposed a scheduling obstruction more
+important than its negative search count. The 4,101 inputs reduce to 3,750
+distinct exact rank-18 schemes and affine-code dimension 1,625. Any odd XOR
+of even-cardinality parents still has even cardinality, so it cannot land at
+rank 17. A complete odd-triple audit made that boundary executable: for three
+18-sets, a result at most 17 must be at most 16 and must contain a parent pair
+overlapping in at least seven terms. Of 7,029,375 pairs, 218,571 passed that
+complete filter. The 819,204,108 completing-pair probes took 36.334 seconds
+in the original run and 13.088 seconds in the final release/native replay;
+triples with multiple qualifying pairs can be visited more than once. Minimum
+rank stayed 18. Five anchor scans covered another 35,128,130 generator pairs.
+The already checked lower bound 17 independently
+rules out the only possible even improvement, rank 16. Rank-18-only affine
+parents are therefore retired for this one-rank gap; the SAT dictionary stays
+offline pending a stronger nearest-code/cardinality solver or genuinely new
+terms outside the block-local family.
+
+The same independent-leaf construction was closed completely for the
+three-Strassen `<2,2,6>` upper scheme. All 4,096 parents were exact rank 21;
+4,026 were at the maximum distance 42 from the baseline. Crossing every
+parent with the baseline and all 496 pairs in a 32-parent diverse archive
+gave 4,522 nonempty unions, each with column rank 39/nullity three. All 31,654
+relations were enumerated and all 27,132 proper projections independently
+materialized as exact rank 21, with no rank-20 result or gate failure. Parent
+7 is retained because it is a zero-overlap r21/d108 door with the same 21
+equal-factor pairs as the baseline; its SHA-256 is
+`6c74b5bb150e2e9d6529c00edcd319baaed3d8b53792024c7d0f7d71198b5405`.
+Matched 100M-move baseline and door arms both stayed exact r21/d108, while
+only the door arm reached a distinct equal-density best.
+The finite nullspace family is retired, while the endpoint rotates as the
+second 226 CPU door. Full replay is in `BLOCK_GL_NULLSPACE_226.md`.
+
+The correlated follow-up is stronger than that pairwise count. Complete
+multi-parent hulls over both doors plus every single parent, every pair in the
+32-parent archive, and 4,956 of its 4,960 triples visited 52.67M additional
+affine masks and gated 728,999 exact rank-21 occurrences without finding rank
+20. The remaining four triple hulls had nullity 30, but a structural audit
+closes them and every larger union at once: all 86,016 generated term
+occurrences live in exactly one of three disjoint `<2,2,2>` output blocks.
+Since the checked rank of each block is seven, any exact subset of the entire
+dictionary needs at least `7+7+7=21` terms. This retires the whole block-local
+dictionary, not just the enumerated low-nullity slices.
+
+## 2026-07-14: a third independent `4x4x5` frontier
+
+Sparse two- and three-generator whole-scheme GL words plus complete
+parent-difference elimination found a proper 57-versus-57 splice. Ordinary
+continuation reduced its exact endpoint to rank 60/d662. It is distance 106
+from d628 and 120 from d919; each union has nullity one, so the new endpoint
+is independent of both prior doors and offers no further proper splice.
+
+The completed bounded audit covered 40,960 exact GL images, 81,920 complete
+pair eliminations, and 1,285 proper splices without finding rank 59. The saved
+certificate `matmul_4x4x5_rank60_d662_short_orbit_splice_gf2.txt` has SHA-256
+`2fc026e447cb503662f4d214c65ff862c75b45a615024e09c6231dc457781ee8`.
+It is now the third rotating CPU door; d628 remains the monotonic density
+leader. Deterministic replay, full coefficient gates, and matched controls
+are documented in `RECTANGULAR_CAMPAIGNS.md`.
+
+## 2026-07-14: exact residual closure and GPU parity-compaction repair
+
+The certified `2x2x5` gap received two complete correlated residual audits.
+The residual worm archived 633 collision-safe unit-floor states (556 distinct
+ordered term lists). Exhausting all 86,088 two-term repairs found no carrier
+of tensor rank at most two. Exhausting all 378,080 old-term triples then
+tested 35,213,136 `GL(3,2)` bases and 32,463 completing matrices, with no
+rank-at-most-three carrier and therefore no rank-17 child. An independent
+unit-to-unit scan covered 34,349,112 correlated carriers; its 14,439 exact
+rank-two decompositions formed only two isolated four-cell components and
+opened neither a bridge nor a new residual cell. These are complete negatives
+for the archived corpus, not sampling failures. Replay is in
+`RESIDUAL_WORM_225.md` and `THREE_TERM_REPAIR_225.md`.
+
+The first full-width 225 Metal launch exposed a separate implementation bug
+before its output could be trusted. When two equal GF(2) terms appeared, the
+kernel copied the tail into one duplicate, decremented rank, and then removed
+the other slot using the already-shortened tail. That could leave one duplicate
+while deleting an unrelated term, producing nominal low-rank candidates that
+the exhaustive host gate rejected. The corrected compactor orders the two
+indices, removes the higher slot first, then performs an independent lower-slot
+tail deletion. The source template and all fourteen checked-in square and
+rectangular workers were regenerated. A full-width 4,096-lane replay completed
+100 rounds of 20,000 moves—8,192,000,000 device moves—with zero internal
+rejects and zero false improvements. Generator tests assert the two-deletion
+shape in both Tungsten and emitted Metal for every asset.
+
+## 2026-07-14: affine four-cube tunnel audit
+
+The move lab now includes the exact sixteen-corner affine Segre identity over
+`GF(2)^4`. Five affinely independent live terms determine a candidate
+four-flat; toggling all sixteen corners preserves the tensor because a product
+of three affine coordinate functions has degree at most three. A planted
+rank-39 3×3 shoulder returns to the exact rank-23 scheme, so the operator and
+full reconstruction boundary are live.
+
+The real geometry supplied no tunnel. Complete enumeration on both 4×4
+rank-47 doors (1,533,939 bases each) and two 5×5 rank-93 doors (51,971,283
+bases each) found maximum circuit overlap exactly five: no generated four-flat
+contained even a sixth live term. Five-million-basis samples on the normalized
+6×6 and 7×7 leaders gave the same result. Every best endpoint therefore had
+rank debt +6; there were no neutral or lowering candidates. The implementation
+remains an offline regression and earns no fleet-pool share.
+
+## 2026-07-14: `2x4x5` fleet density 222
+
+The live pure-Tungsten `2x4x5` CPU fleet continued from the far-GL d241 door
+and first reached an exact rank-33/d222 presentation by 199.6 billion worker
+moves. A fresh one-move rectangular-worker replay reconstructed the complete
+tensor, reported rank 33/d222 with zero accepted move, and wrote a byte-for-byte
+identical file. The retained certificate is
+`matmul_2x4x5_rank33_d222_fleet_gf2.txt`, SHA-256
+`fb6d6d0a9ce859695cb8096c0e36fcdbe958190b29d3741d0bdb0c9c90d249a5`.
+
+The d222 leader shares seven terms with the prior d241 frontier (term-set
+distance 52) and no terms with the catalog presentation (distance 66). It is
+now the default, while d241 and the catalog seed remain separate restart
+doors. This is a cost and basin improvement at known rank 33, not a rank
+record; the GF(2) campaign still targets rank 32.
+
+## 2026-07-14: six-bucket projective-circuit closure
+
+The rank-five six-factor dependency was implemented with canonical triple-XOR
+hash matching, avoiding an `O(r^5)` scan. Planted 6-to-5 and full 3x3
+rank-34-to-23 controls pass. Complete all-axis audits on the sparse and
+alternate 4x4--7x7 doors covered 148,982 minimal circuits and 5,363,352 exact
+endpoint occurrences, with zero neutral endpoints and zero rank drops. Best
+debt was `+4` for 4x4 and `+2` for 5x5--7x7.
+
+The best 5x5 `+2` shoulder was continued against two ordinary splits for 12
+paired five-million-move trials. Both arms returned to rank 93 every time,
+neither improved density, and the circuit arm lost the paired objective 5-to-6
+with one tie despite averaging greater source distance (16 versus 13). The
+operator remains an offline scout with no CPU/GPU pool allocation. Full
+coverage, memory, timing, and replay are in `PROJECTIVE_CIRCUIT6.md`.
+
+## 2026-07-14: strict-ternary unit-dependency median
+
+The five-factor dependency median now has a separate integer implementation.
+It admits only coefficientwise-verified relations
+`sum s_i f_i = 0`, `s_i in {-1,+1}`, then applies
+`M_i -> M_i + delta*s_i*(y tensor z)`. A planted strict 5-to-4 subtotal and a
+full Laderman rank-32-to-23 shoulder pass integer reconstruction, while a real
+GF(2) five-circuit with no signed unit relation is rejected.
+
+Complete pair-versus-triple enumeration on the current 4x4--7x7 ternary
+frontiers found 515--5,995 unit relations per seed. The 5x5 and 7x7 archives
+contain exact `+1` shoulders, and 5x5/6x6 leaders contain `+2` shoulders, but
+the complete audited default/archive set has no neutral endpoint and no rank
+drop. The best selected endpoints are full-gated and lie at term-set distance
+six or seven from their parents.
+
+Matched continuation covered 168 million moves. The d432, d967, both d1931,
+and d2966 comparisons tied their ordinary split controls; d997 split the
+trials 6-to-6; the d3069 median lost 4-to-8. Neither 7x7 arm beat the d2966
+leader. This is a sound, fast source of changed signed shoulders but not a
+measured improvement, so it remains offline with no pool allocation. Details
+and replay are in `TERNARY_DEPENDENCY_MEDIAN.md`.
+
+## 2026-07-14: whole-bucket and polynomial GF(2) dependency medians
+
+The five-factor circuit now has a genuinely whole-bucket implementation. It
+captures every term under each circuit factor, enumerates all 31 nonempty
+bucket-matrix subset toggles, and factors physical matrices without a packed
+size limit. A planted five-bucket collection drops 10→9 although exhaustive
+representative-term search bottoms out at ten; a mapped zero relation also
+returns an exact 3x3 r42 shoulder to r23 under the full gate.
+
+The real-door result was negative. Complete 4x4/5x5 and bounded 2,048-circuit
+6x6/7x7 passes covered 11,758 circuits and 364,498 toggles. Minimum debt was
++3 on 4x4, +2 on both 5x5/6x6 doors and the sparse 7x7 door, and +1 exactly
+once on the alternate 7x7 door. That r248/d3562 shoulder used one term per
+bucket. In a 240M-move continuation it lost slightly to an ordinary split
+(3 wins, 4 losses, 5 ties; best d3510 versus d3508), so it remains offline.
+
+A second operator removes fixed circuit size for rank-one `D`. For each
+fixed-factor bucket it computes `rank(M xor D)-rank(M)`, solves arbitrary-size
+zero-sum dependencies by coordinate-recovering GF(2) elimination over the
+other nonpositive buckets, then permits one or two positive buckets for
+neutral/+1 debt. A minimal eight-factor plant drops 8→7 and a full r38
+shoulder returns to r23. Complete sparse/alternate 4x4--7x7 scans tested 3,240
+axis-local D values and full-gated 2,485 endpoints with no direct drop or gate
+failure. An all-D scan rejecting canonical witnesses shorter than six found
+nothing longer on all eight doors; alternate nullspace representations were
+not enumerated. Every recovered hit therefore belongs to known 3--5-bucket
+geometry. The strongest new shoulder was 6x6 r154/d1840, but in a 240M-move
+matched continuation it failed to return to rank 153 in 12/12 trials while
+every ordinary split returned; the paired result was 0--12. This broader
+tunnel also remains offline. Exact counts and replay are in
+`WHOLE_BUCKET_DEPENDENCY_MEDIANS.md`.
+
+## 2026-07-14: rank-two arbitrary-dependency median
+
+The arbitrary dependency operator now also constructs every unique physical
+`D=A xor B` from two distinct live rank-one complementary matrices. Exact
+hash deduplication and minimal physical factorization retain rank-one controls
+while allowing an audit to isolate rank-two values. An adversarial
+eight-bucket plant separates the families: every live rank-one `D` bottoms at
+16 terms, while a rank-two pair XOR gives an exact 16→13 refactor and restores
+a full exact 3x3 r39 shoulder to r23.
+
+Complete all-axis scans of both 4x4--7x7 doors evaluated 283,890 unique
+rank-two matrices. The 4x4, 6x6, and 7x7 doors had no admitted dependency.
+The two 5x5 doors produced 7 and 6 exact endpoints respectively, all
+three-bucket 5→6 replacements and all rank `+1`; there were no neutral
+endpoints, drops, or gate failures. Complete six-bucket-minimum passes on both
+5x5 doors found nothing. The best shoulder was r94/d975 from r93/d967.
+
+In a 240M-move matched continuation, both the rank-two and ordinary-split arms
+returned to rank 93 in all twelve trials. The rank-two arm lost the paired
+objective 1-to-11, found no density win, and reached best d973 versus d967 for
+the split arm. The implementation therefore remains an offline exact
+regression with no pool allocation. Details and replay are in
+`LOWRANK_DEPENDENCY_MEDIAN.md`.
+
+## 2026-07-14: complete two-wide composition seam and 40 exact promotions
+
+The production block leaf bank now covers all 28 sorted `<2,a,b>` shapes for
+`2 <= a <= b <= 8` in addition to all 56 sorted 3--8 shapes. Eighteen newly
+imported catalog leaves and the complete 84-shape pool passed independent
+dimension, factor-bound, duplicate, and coefficient reconstruction gates.
+The balanced rank-47 outer scan then closed all 1,154 sorted targets with one
+dimension 8--11 and the other two at most 32.
+
+Against explicit or integer-reducible GF(2) comparators, 129 formulas win,
+two tie, 382 lose, and 641 have no pinned comparator. A universal signed
+rank-49 outer control produces zero wins. Twenty-two conservative wins were
+materialized, led by 11x28x28 rank 4937 (gain 183) and 11x20x32 rank 4014
+(gain 146). Two direct `<2,3,5>` propagations give 8x11x20 rank 1119 and
+8x12x20 rank 1175. Two more exact upper bounds, 11x16x31 rank 3195 and
+11x16x32 rank 3255, beat the best pinned numerical values but remain labelled
+uncovered rather than records.
+
+Exact materialization then exposed mapped-zero removals that formula scoring
+cannot see. Exhausting all 14,362 formula-minimizing balanced allocation/S3
+ties improves 158 targets below formula rank and 53 beyond the deterministic
+first recipe; duplicate parity contributes nothing. The nominal 10x22x23
+rank-3073 formula falls to exact rank 3071, beating the pinned GF(2) rank 3072,
+and six other strict results improve by 1--12 terms. Seven further zero-pruned
+upper bounds beat every pinned numerical value but remain uncovered for lack
+of an explicit or reducible GF(2) comparator. The d677 alternate rank-47 outer
+has zero formula wins, 217 ties, and 937 losses against d450, and zero wins
+after selected-recipe exact materialization.
+
+The exact-equivalent bounded scorer precomputes pairwise outer support extents
+and a dense oriented leaf-rank table. It reduced the 129-winner ordered
+allocation closure from an unfinished two-hour run to 195.92 seconds, finding
+10x16x16 exact rank 1558. Eight shards then closed all 1,154 rows in two
+124--141-second waves: 38 formulas improve by 345 aggregate terms, and
+10x16x17 exact rank 1694 newly beats universal/GF(2) rank 1696 by two. Exact
+materialization of all 38 improved layouts found only two additional harmless
+cancellations and no hidden comparator win.
+
+The remaining unbalanced-tie loophole is now closed through a 12-term pinned
+GF(2) deficit. A pure-Tungsten pass rescored every ordered 2--8 allocation and
+unique S3 source ordering for 56 near-comparator targets, then
+parity-materialized all 648 recipes tied at the global bounded minimum. Only
+10x14x16 and 10x22x23 lose terms (two mapped-zero terms each); the former
+remains six behind, while the latter merely reproduces the already-published
+rank-3071 win through a different minimizing recipe. No recipe receives a
+duplicate-parity reduction, so this complete near-bound tie closure adds no
+new numerical record.
+
+The manifest now has 186 exact certificates: 176 strict apparent GF(2)
+records, one co-record, and nine uncovered upper bounds.
+
+The pure-Tungsten manifest gate reloaded all 186 certificates. A separate
+sparse Python verifier reconstructed 683,804 rank-one terms and 113,590,185
+`(U,V)` support pairs; Apple Python 3.9 and Homebrew Python emitted the same
+186-row audit, SHA-256
+`796f5f3cf7b1cd65551cb19d6aca85d3c6028710e6776a6de879a0626b050b2c`.
+
+Re-running downstream leaf sensitivity over all 186 materialized and 889
+strict audited formulas keeps 4x4x5 rank 60→59 as the highest-leverage saved
+target: 1,411 occurrences across 113 formulas, with 109 guaranteed
+improvements. The newly exposed two-wide leader is 2x5x6 rank 47→46: it would
+improve ten saved certificates by 82 guaranteed aggregate terms and 49 further strict
+audited formulas by 652 terms, with three more comparable shadows crossing to
+wins. FlipFleet now exposes this as a first-class rank-47→46 profile with an
+exact catalog seed, independent pure-Tungsten admission gate, sticky CPU
+islands, a capacity-92 cal2zone Metal worker, and low-cadence exact 5→4 MITM.
+
+A zero-debt rectangular orbit-door scan then fixed the profile's remaining
+single-presentation weakness. Among 512 exact sparse-GL/descent endpoints, 405
+returned to density at most 438; sample 3 produced a second exact rank-47/d438
+scheme at the maximum term-set distance 94 from the catalog leader, hence the
+two doors share no rank-one term. The independently reparsed certificate is
+`matmul_2x5x6_rank47_d438_orbit_door_gf2.txt`, SHA-256
+`9db0a90aa042a75dece6ea15a082c34de3f942ce3c90014bf50d25b9e0ec7704`.
+Implicit 2x5x6 starts now alternate the two sticky doors, and half the Metal
+epochs rotate the nonleader door; explicit `--seed` runs remain single-source
+controls.
+
+## 2026-07-14: two-hour `2x2x5` GPU plateau
+
+The specialized exact `2x2x5` campaign completed its planned 7,200 seconds at
+rank 18/density 84. Five CPU islands made 59.105 billion moves, 4,096 Metal
+lanes made 1.93675264 trillion moves, and the exact 5→4 MITM lane tested
+3,477,958,656 complementary pairs. Four GPU doors were adopted; device and
+host exact-reject counters remained zero. No rank-17 scheme appeared. This is
+a large negative search sample, not a lower-bound proof.
+
+## 2026-07-14: cubic three-factor raw-map tunnel
+
+The raw-map nullspace hierarchy now includes a genuinely cubic move. For
+independent linear maps on all three factor spaces, each live term contributes
+the complete old-XOR-product-image delta. A coefficient-kernel support can be
+replaced atomically, including zero-image omission and duplicate parity
+cancellation. The `a tensor b tensor c` cross term in the product expansion
+is absent from the existing one- and two-factor workers.
+
+The pure-Tungsten control supplies a proper-submap-resistant five-position
+5↔5 relation: the same selected support fails all three one-factor and all
+three two-factor maps. Adding its two disjoint sides to Strassen gives an
+exact rank-17 shoulder; applying the cubic move creates five duplicate pairs
+and returns to independently gated rank seven.
+
+The real-door audit is a clean negative. All 64 operation-family triples and
+eight support-guided coordinate variants were run on two presentations at
+each of 3×3, 4×4, 5×5, 6×6, and 7×7. Across 5,120 complete kernels, 576,512
+term rows, and 335,761 nullspace basis vectors, every dependency selected a
+set already invariant under the product map. There were zero changed
+endpoints, algebraic failures, or gate failures. Since invariant supports are
+closed under symmetric difference, no combination of those bases can produce
+a hidden endpoint for a tested plan.
+
+The 3×3--6×6 sweep took 0.93 wall seconds and at most 14.0 MB; two 7×7 doors
+took 1.66 seconds and at most 18.6 MB. The move stays as an offline regression
+for structurally new archives and receives no CPU/GPU pool allocation. The
+escape recipe and exact replay are in `THREE_FACTOR_MAP_NULLSPACE.md`; the TUI
+is unchanged.

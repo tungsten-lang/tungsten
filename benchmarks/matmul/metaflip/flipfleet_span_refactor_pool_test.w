@@ -79,6 +79,75 @@ sv44 = [1, 2, 4, 1]
 sw44 = [1, 2, 4, 8]
 z = ffsrp_test_expect("4<->4 planted", ffsrp_test_move("4<->4", su44, sv44, sw44, 4, 4, device, library, queue) == 4)
 
+# Collision-first host resolution: the selected subtotal A1+A2+C has the
+# equal three-term presentation B1+B2+C, while B1/B2 are already live outside
+# the window.  The local move is 3->3 but compact application would remove
+# four global terms.
+collision_su = i64[4]
+collision_sv = i64[4]
+collision_sw = i64[4]
+collision_su[0] = 1
+collision_su[1] = 2
+collision_su[2] = 4
+collision_sv[0] = 1
+collision_sv[1] = 2
+collision_sv[2] = 4
+collision_sw[0] = 1
+collision_sw[1] = 1
+collision_sw[2] = 4
+collision_capacity = ffsr_max_candidates(3) ## i64
+collision_cu = i64[collision_capacity]
+collision_cv = i64[collision_capacity]
+collision_cw = i64[collision_capacity]
+collision_signatures = i64[collision_capacity]
+collision_originals = i64[4]
+collision_build_meta = i64[12]
+collision_count = ffsr_build_candidates(collision_su,collision_sv,collision_sw,3,collision_cu,collision_cv,collision_cw,collision_signatures,collision_originals,collision_build_meta) ## i64
+collision_external_u = i64[2]
+collision_external_v = i64[2]
+collision_external_w = i64[2]
+collision_external_u[0] = 3
+collision_external_u[1] = 2
+collision_external_v[0] = 1
+collision_external_v[1] = 3
+collision_external_w[0] = 1
+collision_external_w[1] = 1
+collision_ids = i64[4]
+collision_stats = i64[4]
+collision_found = ffsrp_find_collision_ids(collision_cu,collision_cv,collision_cw,collision_signatures,collision_count,collision_build_meta[5],collision_originals,3,3,collision_external_u,collision_external_v,collision_external_w,2,collision_ids,collision_stats) ## i64
+z = ffsrp_test_expect("collision-first exact join", collision_found == 3 && collision_stats[2] == 2)
+collision_out_u = i64[4]
+collision_out_v = i64[4]
+collision_out_w = i64[4]
+collision_made = ffsr_materialize_ids(collision_cu,collision_cv,collision_cw,collision_count,collision_ids,collision_found,collision_out_u,collision_out_v,collision_out_w) ## i64
+z = ffsrp_test_expect("collision-first local identity", collision_made == 3 && ffsr_verify_local_replacement(collision_su,collision_sv,collision_sw,3,collision_out_u,collision_out_v,collision_out_w,3) == 1)
+
+door_u = i64[6]
+door_v = i64[6]
+door_w = i64[6]
+door_u[0] = 3
+door_v[0] = 1
+door_w[0] = 1
+door_u[1] = 1
+door_v[1] = 1
+door_w[1] = 1
+door_u[2] = 2
+door_v[2] = 2
+door_w[2] = 1
+door_u[3] = 4
+door_v[3] = 4
+door_w[3] = 4
+door_u[4] = 8
+door_v[4] = 8
+door_w[4] = 8
+door_u[5] = 16
+door_v[5] = 16
+door_w[5] = 16
+door_selected = i64[4]
+door_found = ffsrp_choose_external_span_door(door_u,door_v,door_w,6,3,0,door_selected) ## i64
+z = ffsrp_test_expect("external-span door selected", door_found == 3 && ffsr_contains(door_selected,3,0) == 0)
+z = ffsrp_test_expect("external-span door contains anchor", ffsrp_in_span3(door_u[door_selected[0]],door_u[door_selected[1]],door_u[door_selected[2]],door_u[0]) == 1 && ffsrp_in_span3(door_v[door_selected[0]],door_v[door_selected[1]],door_v[door_selected[2]],door_v[0]) == 1 && ffsrp_in_span3(door_w[door_selected[0]],door_w[door_selected[1]],door_w[door_selected[2]],door_w[0]) == 1)
+
 # Real 5x5 distance-six triangle shear from the rank-93 scheme.  All three
 # old terms change; no compatible two-term flip can explain this refactor.
 n5 = 5 ## i64

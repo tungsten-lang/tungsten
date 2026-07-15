@@ -140,7 +140,7 @@
     closure_tv = lower_block_closure(ctx, node.block)
     closure_reg = ensure_i64_value(wfn, closure_tv)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_thread_spawn", args: [closure_reg]})
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_thread_spawn_slots", args: [closure_reg]})
     return typed_value(:i64, temp)
 
   # `self.foo(...)` calls inside a class context dispatch directly when
@@ -1309,8 +1309,15 @@
         rhs_tv = lower_expression(ctx, fused_rhs_node)
         if rhs_tv[:type] in (:raw_int :raw_i64 :raw_u64)
           rhs_reg = rhs_tv[:value]
-        elsif rhs_tv[:type] == :int
-          rhs_reg = nanunbox_int_emit(wfn, ensure_i64_value(wfn, rhs_tv))
+        elsif rhs_tv[:type] in (:int :i64)
+          # A generic WValue may be a heap BigInt once its magnitude exceeds
+          # the immediate i48 payload. Shifting its tag bits is only valid for
+          # a known immediate integer; use the numeric boundary here so a
+          # boxed RHS contributes its value, not heap-pointer bits.
+          rhs_machine_type = :i64
+          if recv_type == :typed_array_u64
+            rhs_machine_type = :u64
+          rhs_reg = ensure_raw_machine_int(wfn,rhs_tv,rhs_machine_type,nil)
         else
           rhs_reg = ensure_i64_value(wfn, rhs_tv)
         scratch = []
@@ -1343,15 +1350,16 @@
         # the original bit pattern. Same fix as :raw_i64.
         val_reg = val_expr[:value]
       elsif val_expr[:type] in (:int :i64) && recv_type != :typed_array_w64
-        # Polymorphic Integer (`:int`) or boxed-WValue (`:i64` — a function
-        # return or a plain variable) value going into a typed-integer
-        # array: unbox at the store boundary. Without this the NaN-boxed
-        # i48 payload (`0xFFFA00000000XXXX`) gets written into the slot
-        # verbatim and reads see the high tag bits instead of the
-        # numeric value (e.g. `a[i] = f(x)` or `a[i] = local`). Skip for
-        # `w64` arrays — those intentionally store the boxed WValue
-        # (polymorphic slot).
-        val_reg = nanunbox_int_emit(wfn, ensure_i64_value(wfn, val_expr))
+        # Polymorphic Integer (`:int`) or boxed WValue (`:i64` — a dynamic
+        # function/method result or a plain boxed variable) going into a raw
+        # typed-integer array: convert at the store boundary. A tag shift is
+        # insufficient because integers outside i48 are heap BigInts; shifting
+        # such a WValue writes pointer-derived garbage. `w64[]` is deliberately
+        # excluded because its slots intentionally keep boxed WValue bits.
+        store_machine_type = :i64
+        if recv_type == :typed_array_u64
+          store_machine_type = :u64
+        val_reg = ensure_raw_machine_int(wfn,val_expr,store_machine_type,nil)
       else
         val_reg = ensure_i64_value(wfn, val_expr)
       scratch = []

@@ -29,6 +29,88 @@ SOURCE = os.path.abspath(os.path.join(
     os.path.dirname(__file__), "..", "flipgraph_gpu_cal2zone.w"))
 
 
+def _raw_i64_decimal_assignment(prefix, array, expression, indent="    "):
+    """Parse a potentially boxed decimal mask and store it through raw i64s.
+
+    Seven-by-seven factors can set bit 48.  ``String#to_i`` represents those
+    values as boxed BigInts, and assigning that method result directly to a
+    typed i64 array currently crosses a boxed/raw lowering path incorrectly.
+    Parsing two at-most-seven-digit chunks keeps every intermediate unboxed.
+    """
+    return "\n".join((
+        f"{indent}{prefix}text = {expression}",
+        f"{indent}{prefix}cut = {prefix}text.size() - 7",
+        f"{indent}{prefix}mask = 0 ## i64",
+        f"{indent}if {prefix}cut > 0",
+        f"{indent}  {prefix}hi = {prefix}text.slice(0, {prefix}cut).to_i() ## i64",
+        f"{indent}  {prefix}lo = {prefix}text.slice({prefix}cut, 7).to_i() ## i64",
+        f"{indent}  {prefix}mask = {prefix}hi * 10000000 + {prefix}lo",
+        f"{indent}if {prefix}cut <= 0",
+        f"{indent}  {prefix}mask = {prefix}text.to_i()",
+        f"{indent}{array} = {prefix}mask",
+    ))
+
+
+def _patch_raw_i64_host_path(src, seedcap):
+    """Keep 7x7 host seed/result traffic on typed raw-i64 views."""
+    old_parse = (
+        "    baseu[ti2] = parts[field_base].to_i()\n"
+        "    basev[ti2] = parts[field_base + 1].to_i()\n"
+        "    basew[ti2] = parts[field_base + 2].to_i()"
+    )
+    parse = "\n".join((
+        _raw_i64_decimal_assignment("u", "baseu[ti2]", "parts[field_base]"),
+        _raw_i64_decimal_assignment("v", "basev[ti2]", "parts[field_base + 1]"),
+        _raw_i64_decimal_assignment("w", "basew[ti2]", "parts[field_base + 2]"),
+    ))
+    assert old_parse in src, "cal2zone runtime-seed parser template changed"
+    src = src.replace(old_parse, parse)
+
+    allocation = "params = metal_buffer(device, 11 * 4)\n"
+    views = (
+        allocation +
+        f"seed_us_view = metal_buffer_view(seed_us, 66, {seedcap} * ESCAPE_SEEDS) ## i64[]\n"
+        f"seed_vs_view = metal_buffer_view(seed_vs, 66, {seedcap} * ESCAPE_SEEDS) ## i64[]\n"
+        f"seed_ws_view = metal_buffer_view(seed_ws, 66, {seedcap} * ESCAPE_SEEDS) ## i64[]\n"
+        "best_us_view = metal_buffer_view(best_us, 66, NW * CAP) ## i64[]\n"
+        "best_vs_view = metal_buffer_view(best_vs, 66, NW * CAP) ## i64[]\n"
+        "best_ws_view = metal_buffer_view(best_ws, 66, NW * CAP) ## i64[]\n"
+    )
+    assert allocation in src, "cal2zone Metal allocation template changed"
+    src = src.replace(allocation, views)
+
+    for axis in ("u", "v", "w"):
+        old = (f"metal_buffer_write_i64(seed_{axis}s, soff + ii, "
+               f"seed{axis}[soff + ii])")
+        new = f"seed_{axis}s_view[soff + ii] = seed{axis}[soff + ii]"
+        assert old in src, f"cal2zone seed-{axis} write template changed"
+        src = src.replace(old, new)
+
+        old = (f"metal_buffer_read_i64(best_{axis}s, "
+               "bestthread * CAP + di)")
+        new = f"best_{axis}s_view[bestthread * CAP + di]"
+        assert old in src, f"cal2zone best-{axis} read template changed"
+        src = src.replace(old, new)
+
+    for axis in ("u", "v", "w"):
+        src = src.replace(
+            f"metal_buffer_read_i64(buf{axis}, baseoff + t)",
+            f"buf{axis}[baseoff + t]",
+        )
+    old_verify = ("verify_buf(best_us, best_vs, best_ws, bestthread * CAP, "
+                  "localmin, 555, nn, mm, pp)")
+    new_verify = ("verify_buf(best_us_view, best_vs_view, best_ws_view, "
+                  "bestthread * CAP, localmin, 555, nn, mm, pp)")
+    assert old_verify in src, "cal2zone host verification template changed"
+    src = src.replace(old_verify, new_verify)
+    old_error = ("verify_buf_error(best_us, best_vs, best_ws, bestthread * CAP, "
+                 "localmin, 555, nn, mm, pp)")
+    new_error = ("verify_buf_error(best_us_view, best_vs_view, best_ws_view, "
+                 "bestthread * CAP, localmin, 555, nn, mm, pp)")
+    assert old_error in src, "cal2zone diagnostic verification template changed"
+    return src.replace(old_error, new_error)
+
+
 def gen(n, m, p, cap, wpg, seedcap, metal_ll_path, nw=4096, steps=500000, rounds=1000000,
         margin=4, wqwork=150000, wqwander=60000, wthr0=7):
     AB, BB, CB = n * m, m * p, n * p
@@ -72,6 +154,53 @@ def gen(n, m, p, cap, wpg, seedcap, metal_ll_path, nw=4096, steps=500000, rounds
     assert old_rng in src
     src = src.replace(old_rng, new_rng)
 
+    src = src.replace(
+        "# 5x5 factors are 25 bits.  The old 65535 modulus silently confined\n"
+        "          # every plus move to 16 bits and left nine coordinates unsampled.",
+        f"# <{n},{m},{p}> factors span {AB}/{BB}/{CB} bits.  Sample the "
+        f"{maxbits}-bit envelope, then trim it to the selected axis.",
+    )
+    src = src.replace(
+        "# supports square 3x3..7x7, whose largest configured CAP is below 512.",
+        f"# is specialized for <{n},{m},{p}>; its configured CAP is below 512.",
+    )
+
+    # The square fleet keeps its established escape ordering.  Rectangular
+    # lanes are often allocated in much smaller slices, where grouping a full
+    # baserank of U splits before V and W starves two axes.  Interleave axes and
+    # advance each axis through its own deterministic target permutation.
+    if n != m or m != p:
+        old_escape_map = (
+            "      target = (sid * 37 + rd * 17) % baserank\n"
+            "      axis = (sid / baserank) % 3"
+        )
+        new_escape_map = (
+            "      axis = sid % 3\n"
+            "      escape_index = sid / 3\n"
+            "      target = (escape_index * 37 + axis * 13 + rd * 17) % baserank"
+        )
+        assert old_escape_map in src, "cal2zone split-escape map changed"
+        src = src.replace(old_escape_map, new_escape_map)
+
+    # Rectangular factors have different widths.  The historical square
+    # template sampled one common max-width mask for every plus move, which
+    # can introduce out-of-range coordinates on the shorter axes.  Keep the
+    # inexpensive common RNG, then trim it after the random axis is known.
+    # For square tensors all three masks are equal, so generated square code
+    # retains identical behavior.
+    axis_line = "paxis = ((state % 3) + 3) % 3"
+    axis_masks = f"""paxis = ((state % 3) + 3) % 3
+          if paxis == 0
+            u1 = u1 & {(1 << AB) - 1}
+          if paxis == 1
+            u1 = u1 & {(1 << BB) - 1}
+          if paxis == 2
+            u1 = u1 & {(1 << CB) - 1}
+          if u1 == 0
+            u1 = 1"""
+    assert src.count(axis_line) == 1
+    src = src.replace(axis_line, axis_masks)
+
     src = src.replace("NW = 4096", f"NW = {nw}")
     src = src.replace("WPG = 16", f"WPG = {wpg}")
     src = src.replace("CAP = 140", f"CAP = {cap}")
@@ -106,6 +235,13 @@ def gen(n, m, p, cap, wpg, seedcap, metal_ll_path, nw=4096, steps=500000, rounds
         for name in ("bufu", "bufv", "bufw", "best_us", "best_vs", "best_ws"):
             src = src.replace(f"metal_buffer_read_i32({name}",
                               f"metal_buffer_read_i64({name}")
+
+        # A 7x7 mask may set bit 48, above the current inline-integer range.
+        # Keep parsing and Metal buffer access raw end-to-end.  The condition is
+        # width-based so equally wide rectangular formats receive the same fix;
+        # square sizes 3 through 6 remain byte-for-byte unchanged.
+        if maxbits >= 49:
+            src = _patch_raw_i64_host_path(src, seedcap)
 
     metal_path = metal_ll_path.replace(".ll", ".metal")
     src = src.replace(

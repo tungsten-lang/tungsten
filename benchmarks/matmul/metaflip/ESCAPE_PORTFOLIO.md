@@ -1,9 +1,9 @@
 # Mixed escape portfolios
 
-`escape_portfolio.py` builds rank-aware seed banks from exact GF(2)
-tensor-zero identities. It complements the fixed-rank split portfolio inside
-the Metal relay: each slot stores a complete scheme, so generic splits,
-fixed-cube breaks, C3 orbit-splits, polarizations, and depth-two compositions
+`flipfleet_escape.w` is the authoritative runtime implementation of rank-aware
+GF(2) tensor-zero identities.  `escape_portfolio.py` remains a development and
+historical-bank tool.  Each slot stores a complete scheme, so generic splits,
+fixed-cube breaks, C3 orbit splits, polarizations, and depth-two compositions
 can coexist even though their rank deltas differ.
 
 Every move is a parity toggle. Zero-factor terms vanish, duplicate terms
@@ -12,6 +12,41 @@ therefore normalized by their result: commuting paths, collision variants,
 and an involution followed by its inverse cannot occupy duplicate slots.
 Before a slot is serialized, `bench_decomp.verify` reconstructs the full
 matrix-multiplication tensor independently of the escape identity.
+
+## Pure Tungsten implementation
+
+`flipfleet_escape.w` is the runtime implementation used by the native fleet.
+It operates directly on three parallel `i64[]` factor buffers and exposes all
+five launch families through `ffe_apply`:
+
+| kind | native code | toggled zero identity | normal rank delta |
+|---|---:|---|---:|
+| generic split | 1 | `t + t[f=p] + t[f=f+p]` | +1 |
+| fixed-cube break | 2 | the same identity, restricted to `C(x)` | +1 |
+| orbit split | 3 | `C(x) + O(p,x,xT) + O(x+p,x,xT)` | +5 |
+| polarization | 4 | `C(x)+C(y)+C(x+y)+O(x,x,y)+O(x,y,y)` | +7 |
+| composition | 5 | two independently parameterized generic splits | +2 |
+
+All insertions are parity toggles, so collisions cancel and the reported
+delta is the actual delta, not the collision-free expectation.  Metadata
+records the family, before/after ranks, selected source, axis/part, C3 intent,
+and eligibility.  The native coordinator still sends every result through an
+independent exhaustive coefficient gate before it can enter a restart bank or
+replace the fleet best.
+
+`flipfleet_escape_test.w` constructs the exact naive tensor at every supported
+size, applies every family, and exhaustively reconstructs all tensor
+coefficients.  Build and run it without Python:
+
+```sh
+bin/tungsten -o /tmp/flipfleet-escape-test \
+  benchmarks/matmul/metaflip/flipfleet_escape_test.w \
+  --release --native --fast --lto
+/tmp/flipfleet-escape-test
+```
+
+The expected result is 25 passing identity checks (five families at each of
+3x3, 4x4, 5x5, 6x6, and 7x7).
 
 The default 48-slot mix contains the base plus four representatives of most
 families (three for the last family):
@@ -26,6 +61,33 @@ The public `entries_from_schemes(base, schemes, n, recipe_label)` function is
 the import path for identity miners and meet-in-the-middle surgery tools. It
 independently verifies, canonicalizes, and deduplicates arbitrary candidate
 schemes before `write_bank` serializes them.
+
+## Integrated FlipFleet scheduling
+
+`flipfleet_native.w` builds the portfolio in-process and uses it by default.
+Sticky CPU `mixed` doors rotate base, one-identity, and composition seeds, so
+rank is deliberately allowed to vary.  Other doors independently retain the
+leader, separated frontier, original anchor, or exact best+1/best+2 shoulders.
+The higher-rank banks never change the rank-then-density leader by themselves.
+C3-capable tensors additionally keep distinct C3-base, orbit-split, and
+polarization banks; every entry passes exhaustive tensor and closure gates.
+The three GPU roles fail closed instead of substituting the ordinary fleet
+leader, so their accounting continues to represent genuinely different
+algebraic components after a strict rank drop.
+
+The C3 base is an independent native branch leader, not just a snapshot of the
+global best.  Exact+C3 CPU or GPU returns can advance that branch while still
+trailing the ordinary rank/density leader.  Fixed-cube break may then stage
+from the C3 branch into the ordinary graph, while orbit split and polarization
+continue from separately verified C3 constructions.
+
+The native adaptive GPU policy gives fixed-cube break, orbit split,
+polarization, composition, and true C3 walking distinct accounting and seed
+selection.  The generic-split role is intentionally the exception: it starts
+from the base and lets the checked-in cal2zone Tungsten host build its wide +1
+portfolio.  Starting it from an already-split slot would silently turn the +1
+control into a composition.  GPU hosts exact-gate before writing and the native
+coordinator exact-gates again before archive or leader admission.
 
 ## Reproduce the tracked banks
 
@@ -43,9 +105,11 @@ python3 escape_portfolio.py verify escape_bank_6x6_mixed.jsonl
 
 Each bank has 25 C3-closed slots and 23 symmetry-breaking slots. The 5x5 bank
 spans ranks 93 through 107 and densities 1155 through 1374. The 6x6 bank spans
-ranks 153 through 167 and densities 2574 through 2766. The tracked 6x6 C3 seed
-is the pre-GPU rank-153, density-2574 frontier; the current density-2508 seed is
-exact but no longer C3-closed, so it cannot seed the quotient half by itself.
+ranks 153 through 167 and densities 2574 through 2766.  Those serialized banks
+preserve the pre-GPU density-2574 C3 campaign.  The authoritative runtime now
+builds fresh banks from its selected leader.  The current rank-153 density-2502
+leader is independently exact and C3-closed; density 2508 remains the prior
+cooperative-SIMD milestone.
 
 ## Hybrid and Metal runs
 
@@ -85,4 +149,5 @@ Measured results:
 
 These runs validate the hybrid route and native-i64 Metal path. They did not
 set a rank or density record: the tracked density leaders are 5x5 d1155 and
-6x6 d2508 after the later cooperative-SIMDgroup campaign.
+6x6 d2502.  The intervening d2508 leader retains its cooperative-SIMD
+attribution.

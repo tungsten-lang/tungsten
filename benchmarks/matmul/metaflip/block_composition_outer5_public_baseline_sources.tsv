@@ -1,0 +1,9 @@
+source	revision_or_sha256	role
+audit_date	2026-07-14	comparison date
+block_composition_outer5_public_baseline.tsv	9142ab2788e012f1f51e962e662bef5041e8d8c9429f736fb428b9add9947a06	SHA-256 of 1,140-row persisted baseline
+fmm_digest	5d9509fe745df670c3c2b4b29f5b95ae055c7cda	FMM-Lille rank snapshot
+fmm_digest/fmm_sota.json	be8ed8f5eebe58ccfc38929c7f7f0c94c510a86bc8205ae090305704b98d394a	parsed FMM rank source
+matmulcatalog	0320f745d87e46c36259b03add05307429941680	verified explicit all-field/F2 schemes
+matmulcatalog/docs/catalog.json	c5e301452fcf4f51f61a8f16086b446d6509f73f80f3e0f729fd4fd9a717e546	parsed catalog source
+fmm-17-32	deb0a6c5c6571c17c4fba27f34ded6af62d77ef0	integer rectangular frontier
+fmm-17-32/sota_char0_freeze.json	03533554b0521b70db527958682eae13e2c5808cef21367f40c00b3286cda822	parsed integer-rank source

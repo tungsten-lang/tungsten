@@ -26,6 +26,16 @@ contains the worker generation/round and the first exact syndrome coordinate;
 `flipfleet_native.w` independently verifies and freezes strict-target failures
 with its own launch nonce before reusing the physical slot.
 
+Duplicate terms are parity-cancelled by deleting both array slots. The higher
+index is removed first and the lower index second, with each tail copy made
+only after its corresponding rank decrement. This order matters: the former
+copy-then-double-decrement sequence could retain one duplicate while removing
+an unrelated term, creating nominal rank drops that the host exactness gate
+correctly rejected. The corrected template was regenerated into every square
+and rectangular asset. A 4,096-lane `2x2x5` device replay completed 100 rounds
+of 20,000 moves (8,192,000,000 moves total) with zero internal rejects, after
+the old kernel had reproduced the failure quickly at the same width.
+
 The rounds argument bounds the number of dispatch rounds in one adaptive
 epoch; the following optional argument names an offline-compiled `.metallib`.
 Generic roles may use distinct exact seed files and schedules;

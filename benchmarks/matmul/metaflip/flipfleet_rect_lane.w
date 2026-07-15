@@ -11,7 +11,7 @@ use metaflip_rect_worker
 args = argv()
 if args.size() != 5
   << "RECT_ERROR code=usage expected=5 got=" + args.size().to_s()
-  << "usage: flipfleet_rect_lane <3x3x4|3x3x5|3x4x4|3x4x5|3x4x6|3x5x5|4x4x5|4x5x5|4x4x6|4x5x6|4x5x7> <seed|record> <steps> <rng-seed> <out>"
+  << "usage: flipfleet_rect_lane <2x2x5|2x2x6|2x3x4|2x3x5|2x4x5|2x5x6|3x3x4|3x3x5|3x4x4|3x4x5|3x4x6|3x4x7|3x5x5|3x5x6|3x5x7|4x4x5|4x4x6|4x5x5|4x5x6|4x5x7|4x5x8|4x6x6|4x6x7|4x6x8|5x6x7> <seed|record> <steps> <rng-seed> <out>"
   exit(2)
 
 tensor = args[0]

@@ -31,10 +31,15 @@ use flipfleet_cpu_pool
 use flipfleet_metallib_cache
 use flipfleet_gpu_worker_bundle
 use flipfleet_gpu_reject
+use flipfleet_rect_gpu_reject
 use flipfleet_differential_bundle
 use flipfleet_frontier_escape_banks
 use flipfleet_frozen_fringe_sat_bundle
+use flipfleet_global_kernel_shear_bundle
 use flipfleet_syndrome_repair
+use flipfleet_global_isotropy
+use flipfleet_partial_automorphism_nullspace
+use flipfleet_profile_shoulders
 
 -> ffn_parse_tensor(text) (String) i64
   normalized = text.downcase
@@ -184,6 +189,29 @@ use flipfleet_syndrome_repair
   if loaded > 0
     out = candidate
   out
+
+# Freeze one generation's exact archive sources for lazy shoulder expansion.
+# Slots are allocated only until the configured archive high-water capacity;
+# later rank generations reseed those slots in place, so a long campaign does
+# not retain one full snapshot per generation under the lifetime allocator.
+-> ffn_snapshot_archive_into(snapshots, archive, capacity, state_size, seed) i64
+  limit = archive.size() ## i64
+  if limit > capacity
+    limit = capacity
+  copied = 0 ## i64
+  while copied < limit
+    loaded = 0 ## i64
+    if copied < snapshots.size()
+      loaded = ffw_reseed_from(snapshots[copied], archive[copied], seed + copied * 17)
+    else
+      stable = i64[state_size]
+      loaded = ffw_reseed_from(stable, archive[copied], seed + copied * 17)
+      if loaded > 0
+        snapshots.push(stable)
+    if loaded < 1
+      return copied
+    copied += 1
+  copied
 
 # Probe shoulder-bank admission on the live exact state, then either append a
 # fresh stable copy or reseed an existing bank slot in place.  Replacement must
@@ -799,6 +827,35 @@ use flipfleet_syndrome_repair
         kind += 1
   added
 
+# Add bounded, density-directed whole-scheme GL images to the generic restart
+# pool.  These are exact reparametrizations, not independent algebraic-basin
+# evidence; the cheap `gi` signature attached to CPU provenance below makes
+# that distinction visible without attempting a full GL canonicalizer.
+# counters: attempted seeds, improved images, admitted images, descent steps.
+-> ffn_add_global_isotropy_images(sources, mixed, n, capacity, state_size, dslack, cycles, workq, wanderq, counters) i64
+  source_count = sources.size() ## i64
+  admitted = 0 ## i64
+  i = 0 ## i64
+  while i < source_count
+    counters[0] = counters[0] + 1
+    candidate = i64[state_size]
+    stats = i64[4]
+    improved = ffgir_density_descent_state_into(sources[i], candidate, n, capacity, 57001 + counters[0] * 17, dslack, cycles, workq, wanderq, 32, stats) ## i64
+    if improved > 0
+      counters[1] = counters[1] + 1
+      counters[3] = counters[3] + stats[2]
+      if ffn_bank_add(mixed, candidate, 32, 2) == 1
+        counters[2] = counters[2] + 1
+        admitted += 1
+    i += 1
+  admitted
+
+-> ffn_global_isotropy_tag(state) (i64[])
+  signature = ffgir_orbit_signature(state) ## i64
+  if signature < 0
+    signature = 0 - signature
+  "gi" + (signature % 10000).to_s()
+
 -> ffn_pick_seed(door, best, anchor, archive, near1, near2, near1_uses, near2_uses, symmetry, mixed, active, cursor, stable_key)
   chosen = best
   pool = nil
@@ -1055,7 +1112,7 @@ use flipfleet_syndrome_repair
     return 1
   0
 
--> ffn_fill_pool_readiness(ready, generic_ready, mitm_ready, constraint_ready, kxor_ready, differential_ready, span_ready, shear_ready, frozen_sat_ready, parent_pair_ready, orbit_bank, polar_bank)
+-> ffn_fill_pool_readiness(ready, generic_ready, mitm_ready, constraint_ready, kxor_ready, differential_ready, span_ready, shear_ready, frozen_sat_ready, global_shear_ready, parent_pair_ready, orbit_bank, polar_bank)
   mode = 0 ## i64
   while mode < ffkp_mode_count()
     ready[mode] = 0
@@ -1082,6 +1139,7 @@ use flipfleet_syndrome_repair
   ready[16] = span_ready
   ready[17] = shear_ready
   ready[18] = frozen_sat_ready
+  ready[19] = global_shear_ready
   count = 0 ## i64
   mode = 0
   while mode < ffkp_mode_count()
@@ -1489,6 +1547,8 @@ use flipfleet_syndrome_repair
   write_ok = write_file(output_path, "")
   if write_ok == false
     return nil
+  if ffrgr_prepare_worker_sidecars(output_path) == 0
+    return nil
   n = ffn_rect_n(component) ## i64
   m = ffn_rect_m(component) ## i64
   p = ffn_rect_p(component) ## i64
@@ -1544,7 +1604,7 @@ use flipfleet_syndrome_repair
     elapsed_ms[slot] = ccall("__w_clock_ms") - t0
     ok
 
--> ffn_gpu_launch_pool(root, generic_binary, mitm_binary, constraint_binary, kxor_binary, differential_binary, span_binary, shear_binary, frozen_sat_binary, run_tag, n, slot, mode, lanes, steps, rounds, launch_number, seed_state, companion_state, elapsed_ms)
+-> ffn_gpu_launch_pool(root, generic_binary, mitm_binary, constraint_binary, kxor_binary, differential_binary, span_binary, shear_binary, frozen_sat_binary, global_shear_binary, run_tag, n, slot, mode, lanes, steps, rounds, launch_number, seed_state, companion_state, elapsed_ms)
   if mode == 1
     return ffn_gpu_launch_mitm(root, mitm_binary, run_tag, n, slot, lanes, steps, launch_number, seed_state, elapsed_ms)
   seed_path = ffn_gpu_seed_path(run_tag, n, slot)
@@ -1635,6 +1695,11 @@ use flipfleet_syndrome_repair
     # it can rotate with the pool without stealing a hot walker core.  The
     # child itself enforces n=4 and the clustered 16->15 exact query.
     command = fffsb_epoch_command(root, frozen_sat_binary, seed_path, output_path, 2, launch_number)
+  if mode == 19
+    # A whole-frontier exact CPU elimination, charged as one logical quantum.
+    # Production eligibility is 5x5-only, where 8/64 deterministic plans made
+    # verified beyond-one-flip endpoints in under one second total.
+    command = ffgksb_epoch_command(root, global_shear_binary, seed_path, output_path, launch_number)
   if mode == 4
     command = ffb_epoch_command(root, generic_binary, n, seed_path, output_path, "", 0, steps, ffp_gpu_reseed(7), ffp_gpu_margin(7), ffg_cal2zone_workq(7), ffg_cal2zone_wanderq(7), ffg_cal2zone_wthr(7), lanes, "", lanes, rounds)
   if mode == 7 || mode == 8 || mode == 9 || mode == 10
@@ -2068,8 +2133,8 @@ if RECT_PORTFOLIO != 0 && SEED_PATH != ""
 if RECT_PORTFOLIO != 0 && RECORD_OVERRIDE > 0
   << "flipfleet: --record is shape-specific and cannot be used with --rect"
   exit(2)
-if RECT_PORTFOLIO == 0 && RECT_MODE == 0 && (N < 3 || N > 7)
-  << "flipfleet: --tensor must be square 3x3 through 7x7 or a supported rectangular profile (3x3x4, 3x3x5, 3x4x4, 3x4x5, 3x4x6, 3x5x5, 4x4x5, 4x5x5, 4x4x6, 4x5x6, 4x5x7)"
+if RECT_PORTFOLIO == 0 && RECT_MODE == 0 && (N < 2 || N > 7)
+  << "flipfleet: --tensor must be square 2x2 through 7x7 or a supported rectangular profile (2x2x5, 2x2x6, 2x3x4, 2x3x5, 2x4x5, 2x5x6, 3x3x4, 3x3x5, 3x4x4, 3x4x5, 3x4x6, 3x4x7, 3x5x5, 3x5x6, 3x5x7, 4x4x5, 4x4x6, 4x5x5, 4x5x6, 4x5x7, 4x5x8, 4x6x6, 4x6x7, 4x6x8, 5x6x7)"
   exit(2)
 if RECT_PORTFOLIO != 0
   TENSOR_LABEL = "rect"
@@ -2151,7 +2216,7 @@ if BEST_EXPLICIT == 0
 
 # Rectangular profiles share this entry point, CLI, and styled dashboard but
 # not the square state layout.  Dispatch before allocating any square worker
-# structures, keeping ordinary 3x3..7x7 runs on their existing runtime hot
+# structures, keeping ordinary 2x2..7x7 runs on their existing runtime hot
 # path; the rectangular coordinator renders the same TUI from its own loop.
 if RECT_PORTFOLIO == 1
   result = ffrpo_run(RECT_SHAPES, REPO_ROOT, BEST_PATH, BEST_EXPLICIT, STATUS_PATH, RUN_TAG, J, STEPS, MAX_ROUNDS, MAX_SECS, RECT_EPOCH_ROUNDS, DSLACK, CYCLES, GPU, GPU_WALKERS, GPU_POLICY, GPU_STEPS, GPU_EPOCH_ROUNDS, GPU_BINARY, GPU_REBUILD, QUIET, TUI, STOP_ON_RECORD, SEED_NAIVE) ## i64
@@ -2293,9 +2358,15 @@ archive_min_cache = ffn_archive_min_distance(archive) ## i64
 # Algebraic escapes of the live best, then any file-backed shoulder inventory
 # under --near-dir (near1/near2 subdirs written by prior dumps).
 bank_count = ffn_build_escape_banks(best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, near1, near2, near1_signatures, near1_uses, near1_successes, near2_signatures, near2_uses, near2_successes, symmetry, mixed, orbit_bank, polar_bank, near1_capacity, near2_capacity, NEAR_SIGNATURE_QUOTA, SYMMETRY_CAP, near_counters) ## i64
+global_isotropy_counters = i64[4]
+bank_count += ffn_add_global_isotropy_images(archive, mixed, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, global_isotropy_counters)
 if SEED_NAIVE == 0
-  bank_count += fffeb_append_frontier_paths(REPO_ROOT, frontier_paths, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, 6, near1, near1_signatures, near1_uses, near1_successes, near1_capacity, near2, near2_signatures, near2_uses, near2_successes, near2_capacity, NEAR_SIGNATURE_QUOTA, 2, near_counters, frontier_escape_admissions, frontier_escape_counters)
+  # The archive already owns independently full-gated frontier states.  Their
+  # 300 derived escapes are expanded in rotating minute-scale batches below;
+  # doing all of them here cost roughly 89 seconds on 7x7 before round zero.
   z = ff7_add_known_7x7_shoulder(REPO_ROOT, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, near2, near2_signatures, near2_uses, near2_successes, near2_capacity, NEAR_SIGNATURE_QUOTA, near_counters) ## i64
+  z = ff7_add_known_7x7_rank247_shoulders(REPO_ROOT, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, near1, near1_signatures, near1_uses, near1_successes, near1_capacity, NEAR_SIGNATURE_QUOTA, near_counters) ## i64
+  bank_count += ffps_add_profile_near_seeds(REPO_ROOT, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, near1, near1_signatures, near1_uses, near1_successes, near1_capacity, near2, near2_signatures, near2_uses, near2_successes, near2_capacity, NEAR_SIGNATURE_QUOTA, near_counters) ## i64
 near_loaded = 0 ## i64
 if NEAR_DIR != ""
   near_loaded += ffn_load_near_bank(NEAR_DIR + "/near1", "near1", near1_capacity, N, CAPACITY, STATE_SIZE, 81001, DSLACK, CYCLES, balanced_work, balanced_wander, near1, near1_signatures, near1_uses, near1_successes, near1_capacity, NEAR_SIGNATURE_QUOTA, 2, near_counters)
@@ -2416,7 +2487,7 @@ while i < J
   if seed_debt > 0
     z = ffrd_launch(seed_debt, debt_launches)
   source_name = ffp_door_name(doors[i])
-  source_name = source_name + "/seed" + (ffn_current_basin_id(selected) % 100000).to_s()
+  source_name = source_name + "/seed" + (ffn_current_basin_id(selected) % 100000).to_s() + "/" + ffn_global_isotropy_tag(selected)
   if ffn_door_has_native_seed(doors[i], archive, near1, near2, symmetry, mixed) == 0
     source_name = source_name + "/leader-fallback"
   sources.push(source_name)
@@ -2484,24 +2555,27 @@ if STRATEGY == "islands" && J >= 4
     cycle_watch_index = candidate_index
 
 racer_controls = i64[7]
-racer_pulls = i64[8]
-racer_exposure = i64[8]
-racer_novel = i64[8]
-racer_returns = i64[8]
-racer_drops = i64[8]
+racer_pulls = i64[9]
+racer_exposure = i64[9]
+racer_novel = i64[9]
+racer_returns = i64[9]
+racer_drops = i64[9]
+racer_density = i64[9]
 racer_seen_ids = i64[64]
 racer_seen_count = 0 ## i64
 racer_epoch = 0 ## i64
 racer_arm = 0 ## i64
 racer_lease_start_moves = 0 ## i64
 racer_lease_start_rank = 0 ## i64
+racer_lease_start_bits = 0 ## i64
 racer_lease_origin_id = 0 ## i64
 racer_lease_novel = 0 ## i64
 if racer_index >= 0
-  racer_arm = ffcr_select_arm(racer_epoch, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops)
+  racer_arm = ffcr_select_arm(racer_epoch, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops, racer_density)
   z = ffcr_apply_arm(states[racer_index], racer_arm, cpu_work_moves[zones[racer_index]], cpu_wander_moves[zones[racer_index]], racer_controls) ## i64
   racer_lease_start_moves = ffw_moves(states[racer_index])
   racer_lease_start_rank = ffw_best_rank(states[racer_index])
+  racer_lease_start_bits = ffw_best_bits(states[racer_index])
   racer_lease_origin_id = ffbi_current_id(states[racer_index])
   racer_seen_ids[0] = racer_lease_origin_id
   racer_seen_count = 1
@@ -2559,6 +2633,7 @@ rect_binaries = ["/tmp/flipfleet_rect_gpu_334", "/tmp/flipfleet_rect_gpu_344"]
 rect_asset_paths = [REPO_ROOT + "/benchmarks/matmul/metaflip/matmul_3x3x4_rank29_gf2.txt", REPO_ROOT + "/benchmarks/matmul/metaflip/matmul_3x4x4_rank38_gf2.txt"]
 rect_checkpoint_paths = ["flipfleet_3x3x4_best.txt", "flipfleet_3x4x4_best.txt"]
 rect_candidate_states = []
+rect_reject_scratch = []
 rect_component = 0 ## i64
 while rect_component < 2
   rn = ffn_rect_n(rect_component) ## i64
@@ -2567,6 +2642,7 @@ while rect_component < 2
   rcap = ffr_default_capacity(rn, rm, rp) ## i64
   rect_capacities[rect_component] = rcap
   rect_candidate_states.push(i64[ffr_state_size(rcap)])
+  rect_reject_scratch.push(i64[ffr_state_size(rcap)])
   if rect_enabled != 0
     # rect_enabled is already gated off under --naive; this path only loads
     # published rectangular leaves and prior campaign checkpoints.
@@ -2717,6 +2793,7 @@ if GPU == 1
   gpu_span_ready = 0 ## i64
   gpu_shear_ready = 0 ## i64
   gpu_frozen_sat_ready = 0 ## i64
+  gpu_global_shear_ready = 0 ## i64
   gpu_pool_ready = 0 ## i64
   gpu_degraded = 0
 
@@ -2856,6 +2933,22 @@ if GPU == 1
       if frozen_sat_needs_build == 0
         gpu_frozen_sat_ready = 1
 
+    GLOBAL_SHEAR_BINARY = "/tmp/flipfleet_cpu_global_kernel_shear"
+    global_shear_worker = REPO_ROOT + "/benchmarks/matmul/metaflip/flipfleet_global_kernel_shear_pool.w"
+    global_shear_library = REPO_ROOT + "/benchmarks/matmul/metaflip/flipfleet_global_kernel_shear_pool_lib.w"
+    global_shear_core = REPO_ROOT + "/benchmarks/matmul/metaflip/flipfleet_kernel_shear.w"
+    global_shear_tunnel = REPO_ROOT + "/benchmarks/matmul/metaflip/flipfleet_tunnel_catalyst.w"
+    global_shear_span = REPO_ROOT + "/benchmarks/matmul/metaflip/flipfleet_span_refactor.w"
+    global_shear_worker_core = REPO_ROOT + "/benchmarks/matmul/metaflip/metaflip_worker.w"
+    if N == 5
+      global_shear_needs_build = GPU_REBUILD ## i64
+      if global_shear_needs_build == 0 && ffn_binary_fresh6(GLOBAL_SHEAR_BINARY, global_shear_worker, global_shear_library, global_shear_core, global_shear_tunnel, global_shear_span, global_shear_worker_core) == 0
+        global_shear_needs_build = 1
+      if global_shear_needs_build == 1
+        gpu_global_shear_ready = ffgksb_build(REPO_ROOT, GLOBAL_SHEAR_BINARY)
+      if global_shear_needs_build == 0
+        gpu_global_shear_ready = 1
+
     if rect_enabled != 0
       rect_component = 0
       while rect_component < 2
@@ -2879,7 +2972,7 @@ if GPU == 1
         rect_component += 1
 
     parent_pair_ready = ffn_has_parent_pair(map_states, archive, 12) ## i64
-    gpu_pool_ready = ffn_fill_pool_readiness(pool_mode_ready, gpu_generic_ready, gpu_mitm_ready, gpu_constraint_ready, gpu_kxor_ready, gpu_differential_ready, gpu_span_ready, gpu_shear_ready, gpu_frozen_sat_ready, parent_pair_ready, orbit_bank, polar_bank)
+    gpu_pool_ready = ffn_fill_pool_readiness(pool_mode_ready, gpu_generic_ready, gpu_mitm_ready, gpu_constraint_ready, gpu_kxor_ready, gpu_differential_ready, gpu_span_ready, gpu_shear_ready, gpu_frozen_sat_ready, gpu_global_shear_ready, parent_pair_ready, orbit_bank, polar_bank)
     rect_ready_count = rect_ready[0] + rect_ready[1] ## i64
     if gpu_pool_ready == 0 && rect_ready_count == 0
       gpu_eligible[10] = 0
@@ -2994,7 +3087,7 @@ if GPU == 1
           gpu_launch_lanes[gpu_slot] = pool_lanes
           gpu_elapsed_ms[gpu_slot] = 0
           gpu_launch_generation[gpu_slot] = fleet_generation
-          gpu_threads[gpu_slot] = ffn_gpu_launch_pool(REPO_ROOT, GPU_BINARY, MITM_BINARY, CONSTRAINT_BINARY, KXOR_BINARY, DIFFERENTIAL_BINARY, SPAN_BINARY, SHEAR_BINARY, FROZEN_SAT_BINARY, RUN_TAG, N, gpu_slot, pool_mode, pool_lanes, GPU_STEPS, GPU_EPOCH_ROUNDS, pool_launch_number, gpu_seed, gpu_companion, gpu_elapsed_ms)
+          gpu_threads[gpu_slot] = ffn_gpu_launch_pool(REPO_ROOT, GPU_BINARY, MITM_BINARY, CONSTRAINT_BINARY, KXOR_BINARY, DIFFERENTIAL_BINARY, SPAN_BINARY, SHEAR_BINARY, FROZEN_SAT_BINARY, GLOBAL_SHEAR_BINARY, RUN_TAG, N, gpu_slot, pool_mode, pool_lanes, GPU_STEPS, GPU_EPOCH_ROUNDS, pool_launch_number, gpu_seed, gpu_companion, gpu_elapsed_ms)
         if gpu_seed == nil || gpu_threads[gpu_slot] == nil
           gpu_failures[10] = gpu_failures[10] + 1
           gpu_degraded = 1
@@ -3058,6 +3151,12 @@ start_ms = ccall("__w_clock_ms") ## i64
 last_status_ms = 0 - 1 ## i64
 last_render_ms = 0 - 1 ## i64
 last_near_dump_ms = 0 - 1 ## i64
+frontier_escape_last_ms = start_ms ## i64
+frontier_escape_sources = []
+frontier_escape_source_count = ffn_snapshot_archive_into(frontier_escape_sources, archive, ARCHIVE_CAP, STATE_SIZE, 28801) ## i64
+frontier_escape_completed_batches = 0 ## i64
+frontier_escape_lazy_admissions = 0 ## i64
+frontier_escape_schedule = i64[3]
 sequence = 0 ## i64
 # First Ctrl-C latches a cooperative stop (drain GPU epochs, save state);
 # the second hard-exits inside the runtime latch.
@@ -3076,6 +3175,8 @@ new_bests = 0 ## i64
 tie_bests = 0 ## i64
 invalid_candidates = 0 ## i64
 gpu_internal_rejects = 0 ## i64
+rect_internal_rejects = 0 ## i64
+rect_reject_status = i64[8]
 cycleouts = 0 ## i64
 basin_rotations = 0 ## i64
 running = 1 ## i64
@@ -3110,12 +3211,39 @@ while i < J
 demoted_frontiers = []
 preserved_shoulders = []
 live_candidate_scratch = i64[STATE_SIZE]
+global_isotropy_scratch = i64[STATE_SIZE]
+global_isotropy_stats = i64[4]
 live_us_scratch = i64[CAPACITY]
 live_vs_scratch = i64[CAPACITY]
 live_ws_scratch = i64[CAPACITY]
 near_signature_values = i64[CAPACITY]
 near_signature_counts = i64[CAPACITY]
 near_axis_signatures = i64[3]
+
+# Whole-frontier partial-automorphism tunnels are unusually cheap at 7x7
+# (roughly 39ms mean with this retained workspace) and can replace all 247
+# terms at once.  Keep them out of the hot worker/GPU loops: the coordinator
+# rotates one elementary generator start per minute, independently n^6-gates
+# the endpoint inside the finder, then offers only a genuine quotient-novel
+# state to the ordinary archive/MAP admission policies.
+partial_auto_workspace_rank = 0 ## i64
+partial_auto_workspace = nil
+if N == 7
+  partial_auto_workspace_rank = ffw_best_rank(best)
+  partial_auto_workspace = FFPANWorkspace.new(partial_auto_workspace_rank, N, CAPACITY)
+partial_auto_us = i64[CAPACITY]
+partial_auto_vs = i64[CAPACITY]
+partial_auto_ws = i64[CAPACITY]
+partial_auto_out_u = i64[CAPACITY]
+partial_auto_out_v = i64[CAPACITY]
+partial_auto_out_w = i64[CAPACITY]
+partial_auto_state = i64[STATE_SIZE]
+partial_auto_meta = i64[18]
+partial_auto_last_ms = 0 - 1 ## i64
+partial_auto_nonce = 0 ## i64
+partial_auto_attempts = 0 ## i64
+partial_auto_hits = 0 ## i64
+partial_auto_admissions = 0 ## i64
 
 if QUIET == 0 && TUI == 0
   seed_note = "seed=record"
@@ -3253,9 +3381,13 @@ while running == 1
             archive.push(naive_archive)
           z = ffn_build_escape_banks(best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, near1, near2, near1_signatures, near1_uses, near1_successes, near2_signatures, near2_uses, near2_successes, symmetry, mixed, orbit_bank, polar_bank, near1_capacity, near2_capacity, NEAR_SIGNATURE_QUOTA, SYMMETRY_CAP, near_counters)
           frontier_escape_admissions.clear
+          frontier_escape_last_ms = now_ms
+          frontier_escape_source_count = ffn_snapshot_archive_into(frontier_escape_sources, archive, ARCHIVE_CAP, STATE_SIZE, 51801 + round * 131)
+          frontier_escape_completed_batches = 0
           if SEED_NAIVE == 0
-            z = fffeb_append_frontier_paths(REPO_ROOT, frontier_paths, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, 6, near1, near1_signatures, near1_uses, near1_successes, near1_capacity, near2, near2_signatures, near2_uses, near2_successes, near2_capacity, NEAR_SIGNATURE_QUOTA, 2, near_counters, frontier_escape_admissions, frontier_escape_counters)
             z = ff7_add_known_7x7_shoulder(REPO_ROOT, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, near2, near2_signatures, near2_uses, near2_successes, near2_capacity, NEAR_SIGNATURE_QUOTA, near_counters)
+            z = ff7_add_known_7x7_rank247_shoulders(REPO_ROOT, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, near1, near1_signatures, near1_uses, near1_successes, near1_capacity, NEAR_SIGNATURE_QUOTA, near_counters)
+            z = ffps_add_profile_near_seeds(REPO_ROOT, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, near1, near1_signatures, near1_uses, near1_successes, near1_capacity, near2, near2_signatures, near2_uses, near2_successes, near2_capacity, NEAR_SIGNATURE_QUOTA, near_counters)
           c3_base = nil
           if ffn_state_is_c3(best, N, CAPACITY) == 1
             c3_base = ffn_clone_trusted(best, STATE_SIZE, 50031 + round * 131)
@@ -3298,18 +3430,20 @@ while running == 1
               last_progress_ms[core_fringe_index] = now_ms
 
           if racer_index >= 0
-            racer_pulls = i64[8]
-            racer_exposure = i64[8]
-            racer_novel = i64[8]
-            racer_returns = i64[8]
-            racer_drops = i64[8]
+            racer_pulls = i64[9]
+            racer_exposure = i64[9]
+            racer_novel = i64[9]
+            racer_returns = i64[9]
+            racer_drops = i64[9]
+            racer_density = i64[9]
             racer_seen_ids = i64[64]
             racer_seen_count = 1
             racer_epoch = 0
-            racer_arm = ffcr_select_arm(0, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops)
+            racer_arm = ffcr_select_arm(0, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops, racer_density)
             z = ffcr_apply_arm(states[racer_index], racer_arm, cpu_work_moves[zones[racer_index]], cpu_wander_moves[zones[racer_index]], racer_controls)
             racer_lease_start_moves = ffw_moves(states[racer_index])
             racer_lease_start_rank = ffw_best_rank(states[racer_index])
+            racer_lease_start_bits = ffw_best_bits(states[racer_index])
             racer_lease_origin_id = ffbi_current_id(states[racer_index])
             racer_seen_ids[0] = racer_lease_origin_id
             racer_lease_novel = 0
@@ -3355,6 +3489,7 @@ while running == 1
           z = ffcr_apply_arm(states[racer_index], racer_arm, cpu_work_moves[zones[racer_index]], cpu_wander_moves[zones[racer_index]], racer_controls)
           racer_lease_start_moves = ffw_moves(states[racer_index])
           racer_lease_start_rank = ffw_best_rank(states[racer_index])
+          racer_lease_start_bits = ffw_best_bits(states[racer_index])
           racer_lease_origin_id = ffbi_current_id(states[racer_index])
           racer_lease_novel = 0
           sources[racer_index] = sources[racer_index] + "/race-a" + racer_arm.to_s()
@@ -3490,6 +3625,24 @@ while running == 1
               orbit_bank.clear
               polar_bank.clear
               z = ffn_add_c3_family(c3_base, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, symmetry, orbit_bank, polar_bank, SYMMETRY_CAP) ## i64
+        # Normalize a would-be fleet improvement within its exact global GL
+        # orbit before adoption.  This is a bounded coordinator task, never a
+        # random restart and never part of the hot worker loop.
+        if ffn_better(rank, bits, ffw_best_rank(best), ffw_best_bits(best)) == 1
+          normalized = ffgir_density_descent_state_into(state, global_isotropy_scratch, N, CAPACITY, 88001 + round * 31 + i, DSLACK, CYCLES, balanced_work, balanced_wander, 32, global_isotropy_stats) ## i64
+          if normalized == rank && ffw_best_bits(global_isotropy_scratch) < bits
+            old_signature = ffgir_orbit_signature(state) ## i64
+            if ffw_reseed_from(state, global_isotropy_scratch, 88101 + round * 31 + i) == rank
+              rank = ffw_best_rank(state)
+              bits = ffw_best_bits(state)
+              global_isotropy_counters[0] = global_isotropy_counters[0] + 1
+              global_isotropy_counters[1] = global_isotropy_counters[1] + 1
+              global_isotropy_counters[3] = global_isotropy_counters[3] + global_isotropy_stats[2]
+              # The invariant signature must survive every directed rewrite;
+              # a mismatch is telemetry only, but prevents a false provenance
+              # claim if this code is ever generalized incorrectly.
+              if old_signature == ffgir_orbit_signature(state)
+                sources[i] = sources[i] + "/" + ffn_global_isotropy_tag(state)
         if ffn_better(rank, bits, ffw_best_rank(best), ffw_best_bits(best)) == 1
           old_rank = ffw_best_rank(best) ## i64
           # On a rank drop, snapshot the previous leader before reseeding best
@@ -3873,6 +4026,24 @@ while running == 1
           if rect_rank <= 0 && rect_join_ok == 1
             if ffn_scheme_file_nonempty(raw_rect_output) == 1
               invalid_candidates += 1
+
+          # Rectangular cal2zone publishes inexact nominal improvements only
+          # through committed sidecars.  Harvest even when ordinary output is
+          # empty, preserve a shape-aware replay bundle, and account the event
+          # in both the exact-reject counter and GPU health telemetry.
+          rect_target = 0 ## i64
+          if rect_states[rect_component] != nil
+            rect_target = ffr_best_rank(rect_states[rect_component]) - 1
+          rect_nonce = rect_launch_number[rect_component] - 1 ## i64
+          if rect_nonce < 0
+            rect_nonce = 0
+          rect_internal_rejects = ffrgr_harvest(rect_output, ffn_rect_seed_path(RUN_TAG, rect_component), RUN_TAG, rect_n, rect_m, rect_p, rect_slot, 10, 0 - 1, rect_nonce, rect_target, rect_capacities[rect_component], DSLACK, CYCLES, balanced_work, balanced_wander, rect_internal_rejects, rect_reject_scratch[rect_component], rect_reject_status)
+          if rect_reject_status[0] != 0
+            invalid_candidates += 1
+            rect_failures[rect_component] = rect_failures[rect_component] + 1
+            gpu_failures[10] = gpu_failures[10] + 1
+            gpu_degraded = 1
+            rect_retry_round[rect_component] = round + ffn_gpu_retry_delay(rect_failures[rect_component])
           rect_clear_ok = write_file(rect_output, "")
           if rect_clear_ok == false
             rect_failures[rect_component] = rect_failures[rect_component] + 1
@@ -3990,7 +4161,7 @@ while running == 1
       pool_refill_allowed = 1
     if pool_refill_allowed != 0 && gpu_eligible[10] != 0 && gpu_disabled[10] == 0
       parent_pair_ready = ffn_has_parent_pair(map_states, archive, 12) ## i64
-      gpu_pool_ready = ffn_fill_pool_readiness(pool_mode_ready, gpu_generic_ready, gpu_mitm_ready, gpu_constraint_ready, gpu_kxor_ready, gpu_differential_ready, gpu_span_ready, gpu_shear_ready, gpu_frozen_sat_ready, parent_pair_ready, orbit_bank, polar_bank)
+      gpu_pool_ready = ffn_fill_pool_readiness(pool_mode_ready, gpu_generic_ready, gpu_mitm_ready, gpu_constraint_ready, gpu_kxor_ready, gpu_differential_ready, gpu_span_ready, gpu_shear_ready, gpu_frozen_sat_ready, gpu_global_shear_ready, parent_pair_ready, orbit_bank, polar_bank)
       pool_slot = 0
       while pool_slot < 3
         gpu_slot = 10 + pool_slot ## i64
@@ -4022,7 +4193,7 @@ while running == 1
               gpu_launch_lanes[gpu_slot] = pool_lanes
               gpu_elapsed_ms[gpu_slot] = 0
               gpu_launch_generation[gpu_slot] = fleet_generation
-              gpu_threads[gpu_slot] = ffn_gpu_launch_pool(REPO_ROOT, GPU_BINARY, MITM_BINARY, CONSTRAINT_BINARY, KXOR_BINARY, DIFFERENTIAL_BINARY, SPAN_BINARY, SHEAR_BINARY, FROZEN_SAT_BINARY, RUN_TAG, N, gpu_slot, pool_mode, pool_lanes, GPU_STEPS, GPU_EPOCH_ROUNDS, pool_launch_number, gpu_seed, gpu_companion, gpu_elapsed_ms)
+              gpu_threads[gpu_slot] = ffn_gpu_launch_pool(REPO_ROOT, GPU_BINARY, MITM_BINARY, CONSTRAINT_BINARY, KXOR_BINARY, DIFFERENTIAL_BINARY, SPAN_BINARY, SHEAR_BINARY, FROZEN_SAT_BINARY, GLOBAL_SHEAR_BINARY, RUN_TAG, N, gpu_slot, pool_mode, pool_lanes, GPU_STEPS, GPU_EPOCH_ROUNDS, pool_launch_number, gpu_seed, gpu_companion, gpu_elapsed_ms)
             if gpu_seed == nil || gpu_threads[gpu_slot] == nil
               gpu_failures[10] = gpu_failures[10] + 1
               gpu_degraded = 1
@@ -4058,6 +4229,15 @@ while running == 1
         rect_component += 1
 
   if strict_drop == 1
+    # GPU-originated rank drops reach this point without traversing the CPU
+    # candidate path above.  Normalize the final round leader once, before
+    # rebuilding frontier-relative banks.
+    normalized_best = ffgir_density_descent_state_into(best, global_isotropy_scratch, N, CAPACITY, 99001 + round * 47, DSLACK, CYCLES, balanced_work, balanced_wander, 32, global_isotropy_stats) ## i64
+    if normalized_best == ffw_best_rank(best) && ffw_best_bits(global_isotropy_scratch) < ffw_best_bits(best)
+      if ffw_reseed_from(best, global_isotropy_scratch, 99003 + round * 47) == normalized_best
+        global_isotropy_counters[0] = global_isotropy_counters[0] + 1
+        global_isotropy_counters[1] = global_isotropy_counters[1] + 1
+        global_isotropy_counters[3] = global_isotropy_counters[3] + global_isotropy_stats[2]
     # Rebase learned states around the final frontier reached this round.
     # The old frontier becomes a valuable R+1 shoulder after a one-rank drop;
     # prior R+1 shoulders can become R+2.  Obsolete archive ranks never remain
@@ -4076,10 +4256,13 @@ while running == 1
     if frontier_snapshot != nil
       z = ffn_archive_add(archive, frontier_snapshot, ARCHIVE_CAP, 4, archive_counters) ## i64
     z = ffn_build_escape_banks(best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, near1, near2, near1_signatures, near1_uses, near1_successes, near2_signatures, near2_uses, near2_successes, symmetry, mixed, orbit_bank, polar_bank, near1_capacity, near2_capacity, NEAR_SIGNATURE_QUOTA, SYMMETRY_CAP, near_counters) ## i64
+    z = ffn_add_global_isotropy_images(archive, mixed, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, global_isotropy_counters) ## i64
     frontier_escape_admissions.clear
+    frontier_escape_last_ms = now_ms
     if SEED_NAIVE == 0
-      z = fffeb_append_frontier_paths(REPO_ROOT, frontier_paths, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, 6, near1, near1_signatures, near1_uses, near1_successes, near1_capacity, near2, near2_signatures, near2_uses, near2_successes, near2_capacity, NEAR_SIGNATURE_QUOTA, 2, near_counters, frontier_escape_admissions, frontier_escape_counters) ## i64
       z = ff7_add_known_7x7_shoulder(REPO_ROOT, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, near2, near2_signatures, near2_uses, near2_successes, near2_capacity, NEAR_SIGNATURE_QUOTA, near_counters) ## i64
+      z = ff7_add_known_7x7_rank247_shoulders(REPO_ROOT, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, near1, near1_signatures, near1_uses, near1_successes, near1_capacity, NEAR_SIGNATURE_QUOTA, near_counters) ## i64
+      z = ffps_add_profile_near_seeds(REPO_ROOT, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, near1, near1_signatures, near1_uses, near1_successes, near1_capacity, near2, near2_signatures, near2_uses, near2_successes, near2_capacity, NEAR_SIGNATURE_QUOTA, near_counters) ## i64
     if ffn_state_is_c3(best, N, CAPACITY) == 1
       c3_base = ffn_clone_trusted(best, STATE_SIZE, 20003 + round * 47)
     z = ffn_add_c3_family(c3_base, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, symmetry, orbit_bank, polar_bank, SYMMETRY_CAP) ## i64
@@ -4221,6 +4404,67 @@ while running == 1
         migrated = 1
       i += 1
 
+    # Freeze the completed rank generation only after old same-rank archive
+    # members have been re-admitted.  Dynamic plateau admissions cannot extend
+    # this finite source_count*6*5 schedule; the next rank generation refreshes
+    # the same high-water storage in place.
+    frontier_escape_source_count = ffn_snapshot_archive_into(frontier_escape_sources, archive, ARCHIVE_CAP, STATE_SIZE, 21801 + round * 47)
+    frontier_escape_completed_batches = 0
+
+  # Expand one exact kind from one frozen frontier source per minute.  Source
+  # rotates fastest, then kind, then nonce.  This bounds a 10-seed 7x7
+  # generation to 300 independently gated calls and keeps the coordinator/TUI
+  # stall near one candidate rather than the measured ~1.5s five-kind batch.
+  frontier_escape_target_batches = fffeb_schedule_target(frontier_escape_source_count) ## i64
+  if frontier_escape_source_count > 0 && frontier_escape_completed_batches < frontier_escape_target_batches && now_ms - frontier_escape_last_ms >= 60000
+    z = fffeb_schedule_decode(frontier_escape_completed_batches, frontier_escape_source_count, frontier_escape_schedule) ## i64
+    lazy_source_index = frontier_escape_schedule[0] ## i64
+    lazy_kind = frontier_escape_schedule[1] ## i64
+    lazy_nonce = frontier_escape_schedule[2] ## i64
+    lazy_source = frontier_escape_sources[lazy_source_index]
+    lazy_admitted = fffeb_append_source_kind_nonce(lazy_source, ffw_best_rank(best), lazy_source_index, lazy_kind, lazy_nonce, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, near1, near1_signatures, near1_uses, near1_successes, near1_capacity, near2, near2_signatures, near2_uses, near2_successes, near2_capacity, NEAR_SIGNATURE_QUOTA, 2, near_counters, frontier_escape_counters) ## i64
+    frontier_escape_completed_batches += 1
+    frontier_escape_lazy_admissions += lazy_admitted
+    if lazy_admitted > 0
+      lazy_index = 0 ## i64
+      while lazy_index < near1.size()
+        z = ffme_add_copy(map_states, map_keys, map_uses, map_sources, near1[lazy_index], ffw_best_rank(best), N, MAP_CAPACITY, 1, STATE_SIZE, 29301 + round * 67 + lazy_index)
+        lazy_index += 1
+      lazy_index = 0
+      while lazy_index < near2.size()
+        z = ffme_add_copy(map_states, map_keys, map_uses, map_sources, near2[lazy_index], ffw_best_rank(best), N, MAP_CAPACITY, 2, STATE_SIZE, 29401 + round * 67 + lazy_index)
+        lazy_index += 1
+    frontier_escape_last_ms = now_ms
+
+  # Low-cadence exact tunneling for the only square frontier on which the
+  # complete elementary audit found genuine proper relations.  Recreate the
+  # workspace only if a naive reset exceeds its high-water rank.  Ordinary rank
+  # drops reuse the larger buffers under Tungsten's campaign-lifetime allocator.
+  if ffpan_tunnel_due(N, now_ms, partial_auto_last_ms, 60000) == 1
+    tunnel_rank = ffw_best_rank(best) ## i64
+    if partial_auto_workspace_rank != tunnel_rank
+      configured_rank = 0 ## i64
+      if partial_auto_workspace != nil
+        configured_rank = partial_auto_workspace.configure_rank(tunnel_rank)
+      if configured_rank != tunnel_rank
+        partial_auto_workspace = FFPANWorkspace.new(tunnel_rank, N, CAPACITY)
+      partial_auto_workspace_rank = tunnel_rank
+    partial_auto_last_ms = now_ms
+    partial_auto_attempts += 1
+    exported = ffw_export_best(best, partial_auto_us, partial_auto_vs, partial_auto_ws) ## i64
+    if exported == tunnel_rank
+      tunnel_found = ffpan_find_elementary_escape(partial_auto_us, partial_auto_vs, partial_auto_ws, tunnel_rank, N, CAPACITY, partial_auto_nonce, 5, partial_auto_workspace, partial_auto_out_u, partial_auto_out_v, partial_auto_out_w, partial_auto_meta) ## i64
+      partial_auto_nonce = ffpan_next_nonce(N, partial_auto_nonce, 37)
+      if tunnel_found == tunnel_rank && partial_auto_meta[6] == 1 && partial_auto_meta[15] == 0
+        tunnel_loaded = ffw_init_terms_cap(partial_auto_state, partial_auto_out_u, partial_auto_out_v, partial_auto_out_w, tunnel_found, N, CAPACITY, 29001 + round * 61 + partial_auto_nonce, DSLACK, CYCLES, balanced_work, balanced_wander) ## i64
+        if tunnel_loaded == tunnel_found && ffw_verify_best_exact(partial_auto_state, N) == 1
+          partial_auto_hits += 1
+          tunnel_admitted = ffn_archive_add_copy(archive, partial_auto_state, ARCHIVE_CAP, 4, archive_counters, STATE_SIZE, 29101 + round * 61 + partial_auto_nonce) ## i64
+          if tunnel_admitted == 1
+            partial_auto_admissions += 1
+            archive_min_cache = ffn_archive_min_distance(archive)
+            z = ffme_add_copy(map_states, map_keys, map_uses, map_sources, partial_auto_state, ffw_best_rank(best), N, MAP_CAPACITY, 0, STATE_SIZE, 29201 + round * 61 + partial_auto_nonce)
+
   # Individual cycle-outs preserve door and zone; there is no fleet-wide wrap.
   # Short and balanced islands also have a finite basin lease independent of
   # the four-wrap sawtooth cycle. This rotates reversible shoulder escapes in
@@ -4248,9 +4492,12 @@ while running == 1
         racer_drop = racer_lease_start_rank - ffw_best_rank(states[i]) ## i64
         if racer_drop < 0
           racer_drop = 0
-        z = ffcr_record_lease(racer_arm, racer_spent, racer_lease_novel, racer_returned, racer_drop, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops) ## i64
+        racer_density_gain = 0 ## i64
+        if ffw_best_rank(states[i]) == racer_lease_start_rank && ffw_best_bits(states[i]) < racer_lease_start_bits
+          racer_density_gain = racer_lease_start_bits - ffw_best_bits(states[i])
+        z = ffcr_record_lease(racer_arm, racer_spent, racer_lease_novel, racer_returned, racer_drop, racer_density_gain, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops, racer_density) ## i64
         racer_epoch += 1
-        racer_arm = ffcr_select_arm(racer_epoch, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops)
+        racer_arm = ffcr_select_arm(racer_epoch, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops, racer_density)
       # Equal-density frontier states are algebraically exact but were not
       # personal bests, so sample the live state through a fresh exhaustive
       # gate before the lease is recycled.
@@ -4299,7 +4546,7 @@ while running == 1
         sources[i] = ffp_door_name(doors[i]) + "/anchor-fallback"
         used_anchor_fallback = 1
       if z >= 1 && native_seed != 0 && used_anchor_fallback == 0
-        sources[i] = ffp_door_name(doors[i]) + "/seed" + (ffn_current_basin_id(selected) % 100000).to_s()
+        sources[i] = ffp_door_name(doors[i]) + "/seed" + (ffn_current_basin_id(selected) % 100000).to_s() + "/" + ffn_global_isotropy_tag(selected)
       if z >= 1 && native_seed == 0 && used_anchor_fallback == 0
         sources[i] = ffp_door_name(doors[i]) + "/leader-fallback"
       if z >= 1 && i == core_fringe_index
@@ -4330,6 +4577,7 @@ while running == 1
         z = ffcr_apply_arm(states[i], racer_arm, cpu_work_moves[zones[i]], cpu_wander_moves[zones[i]], racer_controls)
         racer_lease_start_moves = ffw_moves(states[i])
         racer_lease_start_rank = ffw_best_rank(states[i])
+        racer_lease_start_bits = ffw_best_bits(states[i])
         racer_lease_origin_id = ffbi_current_id(states[i])
         racer_lease_novel = 0
         sources[i] = sources[i] + "/race-a" + racer_arm.to_s()
@@ -4414,8 +4662,10 @@ while running == 1
                 gpu_shear_ready = fflrsp_build(REPO_ROOT, SHEAR_BINARY)
               if N == 4 && gpu_frozen_sat_ready == 0 && system("command -v cryptominisat5 >/dev/null 2>&1")
                 gpu_frozen_sat_ready = fffsb_build(REPO_ROOT, FROZEN_SAT_BINARY)
+              if N == 5 && gpu_global_shear_ready == 0
+                gpu_global_shear_ready = ffgksb_build(REPO_ROOT, GLOBAL_SHEAR_BINARY)
               parent_pair_ready = ffn_has_parent_pair(map_states, archive, 12) ## i64
-              gpu_pool_ready = ffn_fill_pool_readiness(pool_mode_ready, gpu_generic_ready, gpu_mitm_ready, gpu_constraint_ready, gpu_kxor_ready, gpu_differential_ready, gpu_span_ready, gpu_shear_ready, gpu_frozen_sat_ready, parent_pair_ready, orbit_bank, polar_bank)
+              gpu_pool_ready = ffn_fill_pool_readiness(pool_mode_ready, gpu_generic_ready, gpu_mitm_ready, gpu_constraint_ready, gpu_kxor_ready, gpu_differential_ready, gpu_span_ready, gpu_shear_ready, gpu_frozen_sat_ready, gpu_global_shear_ready, parent_pair_ready, orbit_bank, polar_bank)
             engine_ready = 0
             if gpu_pool_ready > 0 || rect_ready[0] != 0 || rect_ready[1] != 0
               engine_ready = 1
@@ -4432,7 +4682,7 @@ while running == 1
       if gpu_generic_ready == 1 || gpu_c3_ready == 1 || gpu_simd_ready == 1 || gpu_pool_ready > 0 || rect_ready[0] != 0 || rect_ready[1] != 0
         gpu_ready = 1
       parent_pair_ready = ffn_has_parent_pair(map_states, archive, 12) ## i64
-      gpu_pool_ready = ffn_fill_pool_readiness(pool_mode_ready, gpu_generic_ready, gpu_mitm_ready, gpu_constraint_ready, gpu_kxor_ready, gpu_differential_ready, gpu_span_ready, gpu_shear_ready, gpu_frozen_sat_ready, parent_pair_ready, orbit_bank, polar_bank)
+      gpu_pool_ready = ffn_fill_pool_readiness(pool_mode_ready, gpu_generic_ready, gpu_mitm_ready, gpu_constraint_ready, gpu_kxor_ready, gpu_differential_ready, gpu_span_ready, gpu_shear_ready, gpu_frozen_sat_ready, gpu_global_shear_ready, parent_pair_ready, orbit_bank, polar_bank)
       pool_count = 0
       rect_ready_count = ff7_fill_rect_sched_ready(round, rect_ready, rect_retry_round, rect_sched_ready) ## i64
       if gpu_eligible[10] != 0
@@ -4459,6 +4709,11 @@ while running == 1
         if gpu_disabled[health_role] != 0
           gpu_degraded = 1
         health_role += 1
+      health_rect = 0 ## i64
+      while health_rect < 2
+        if rect_ready[health_rect] != 0 && rect_states[health_rect] != nil && round < rect_retry_round[health_rect]
+          gpu_degraded = 1
+        health_rect += 1
       gpu_role = 0
       while gpu_role < 10
         gpu_lanes[gpu_role] = proposed_lanes[gpu_role]
@@ -4530,7 +4785,7 @@ while running == 1
             gpu_launch_lanes[gpu_slot] = pool_lanes
             gpu_elapsed_ms[gpu_slot] = 0
             gpu_launch_generation[gpu_slot] = fleet_generation
-            gpu_threads[gpu_slot] = ffn_gpu_launch_pool(REPO_ROOT, GPU_BINARY, MITM_BINARY, CONSTRAINT_BINARY, KXOR_BINARY, DIFFERENTIAL_BINARY, SPAN_BINARY, SHEAR_BINARY, FROZEN_SAT_BINARY, RUN_TAG, N, gpu_slot, pool_mode, pool_lanes, GPU_STEPS, GPU_EPOCH_ROUNDS, pool_launch_number, gpu_seed, gpu_companion, gpu_elapsed_ms)
+            gpu_threads[gpu_slot] = ffn_gpu_launch_pool(REPO_ROOT, GPU_BINARY, MITM_BINARY, CONSTRAINT_BINARY, KXOR_BINARY, DIFFERENTIAL_BINARY, SPAN_BINARY, SHEAR_BINARY, FROZEN_SAT_BINARY, GLOBAL_SHEAR_BINARY, RUN_TAG, N, gpu_slot, pool_mode, pool_lanes, GPU_STEPS, GPU_EPOCH_ROUNDS, pool_launch_number, gpu_seed, gpu_companion, gpu_elapsed_ms)
           if gpu_seed == nil || gpu_threads[gpu_slot] == nil
             gpu_failures[10] = gpu_failures[10] + 1
             gpu_degraded = 1
@@ -4756,6 +5011,21 @@ if GPU == 1 && gpu_ready == 1
       if late_rect_rank <= 0 && late_rect_join_ok == 1
         if ffn_scheme_file_nonempty(late_rect_raw) == 1
           invalid_candidates += 1
+      late_rect_n = ffn_rect_n(rect_component) ## i64
+      late_rect_m = ffn_rect_m(rect_component) ## i64
+      late_rect_p = ffn_rect_p(rect_component) ## i64
+      late_rect_target = 0 ## i64
+      if rect_states[rect_component] != nil
+        late_rect_target = ffr_best_rank(rect_states[rect_component]) - 1
+      late_rect_nonce = rect_launch_number[rect_component] - 1 ## i64
+      if late_rect_nonce < 0
+        late_rect_nonce = 0
+      rect_internal_rejects = ffrgr_harvest(late_rect_path, ffn_rect_seed_path(RUN_TAG, rect_component), RUN_TAG, late_rect_n, late_rect_m, late_rect_p, rect_slot, 10, 0 - 1, late_rect_nonce, late_rect_target, rect_capacities[rect_component], DSLACK, CYCLES, balanced_work, balanced_wander, rect_internal_rejects, rect_reject_scratch[rect_component], rect_reject_status)
+      if rect_reject_status[0] != 0
+        invalid_candidates += 1
+        rect_failures[rect_component] = rect_failures[rect_component] + 1
+        gpu_failures[10] = gpu_failures[10] + 1
+        gpu_degraded = 1
       cleared = write_file(late_rect_path, "")
       if cleared == false
         rect_failures[rect_component] = rect_failures[rect_component] + 1
@@ -4836,7 +5106,7 @@ if TUI == 1
     << "FAILED to persist final exact certificate/status"
 if TUI == 0
   if final_write_failed == 0
-    << "flipfleet native done: tensor=" + N.to_s() + "x" + N.to_s() + " best=" + ffw_best_rank(best).to_s() + " bits=" + ffw_best_bits(best).to_s() + " WR=" + RECORD.to_s() + " wr=" + final_wr + " moves=" + total_moves.to_s() + " rank-drops=" + new_bests.to_s() + " density-ties=" + tie_bests.to_s() + " exact-rejects=" + invalid_candidates.to_s() + " internal-rejects=" + gpu_internal_rejects.to_s()
+    << "flipfleet native done: tensor=" + N.to_s() + "x" + N.to_s() + " best=" + ffw_best_rank(best).to_s() + " bits=" + ffw_best_bits(best).to_s() + " WR=" + RECORD.to_s() + " wr=" + final_wr + " moves=" + total_moves.to_s() + " rank-drops=" + new_bests.to_s() + " density-ties=" + tie_bests.to_s() + " exact-rejects=" + invalid_candidates.to_s() + " internal-rejects=" + (gpu_internal_rejects + rect_internal_rejects).to_s() + " rect-internal-rejects=" + rect_internal_rejects.to_s() + " gliso=" + global_isotropy_counters[1].to_s() + "/" + global_isotropy_counters[2].to_s() + ":" + global_isotropy_counters[3].to_s()
   if final_write_failed != 0
     << "flipfleet native: FAILED to persist final exact certificate/status"
 flush()

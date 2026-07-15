@@ -28,6 +28,12 @@
   else
     ccall("w_metal_compile_source", device, source)
 
+# Load an offline-compiled `.metallib` from `path`.  This is the low-latency
+# startup path for short-lived GPU workers: source compilation belongs in the
+# build/cache phase, while each worker only creates its pipeline state.
+-> metal_load_library(device, path)
+  ccall("w_metal_library_from_file", device, path)
+
 # Look up a kernel by name in a compiled library, build a compute
 # pipeline state. Raises if the kernel isn't present.
 -> metal_pipeline(library, name)

@@ -1,0 +1,609 @@
+// Tungsten @gpu kernel output — do not edit by hand
+#include <metal_stdlib>
+#include <metal_simdgroup_matrix>
+using namespace metal;
+#pragma clang diagnostic ignored "-Wparentheses-equality"
+
+// Threadgroup-wide reductions across up to 1024 threads (32 simdgroups).
+inline float __tg_sum_f32(float v, threadgroup float *s, uint sl, uint si, uint n_simds) {
+  float sm = simd_sum(v);
+  if (sl == 0) { s[si] = sm; }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float partial = (sl < n_simds) ? s[sl] : 0.0f;
+  float total = (si == 0) ? simd_sum(partial) : 0.0f;
+  if (si == 0 && sl == 0) { s[0] = total; }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  return s[0];
+}
+inline float __tg_max_f32(float v, threadgroup float *s, uint sl, uint si, uint n_simds) {
+  float sm = simd_max(v);
+  if (sl == 0) { s[si] = sm; }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float partial = (sl < n_simds) ? s[sl] : -INFINITY;
+  float total = (si == 0) ? simd_max(partial) : -INFINITY;
+  if (si == 0 && sl == 0) { s[0] = total; }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  return s[0];
+}
+inline int __tg_min_i32(int v, threadgroup int *s, uint sl, uint si, uint n_simds) {
+  int sm = simd_min(v);
+  if (sl == 0) { s[si] = sm; }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  int partial = (sl < n_simds) ? s[sl] : INT_MAX;
+  int total = (si == 0) ? simd_min(partial) : INT_MAX;
+  if (si == 0 && sl == 0) { s[0] = total; }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  return s[0];
+}
+
+[[max_total_threads_per_threadgroup(1024)]]
+kernel void fftg_basis_walk(
+  device long *work_up [[buffer(0)]],
+  device long *work_un [[buffer(1)]],
+  device long *work_vp [[buffer(2)]],
+  device long *work_vn [[buffer(3)]],
+  device long *work_wp [[buffer(4)]],
+  device long *work_wn [[buffer(5)]],
+  device long *best_up [[buffer(6)]],
+  device long *best_un [[buffer(7)]],
+  device long *best_vp [[buffer(8)]],
+  device long *best_vn [[buffer(9)]],
+  device long *best_wp [[buffer(10)]],
+  device long *best_wn [[buffer(11)]],
+  device long *seed_up [[buffer(12)]],
+  device long *seed_un [[buffer(13)]],
+  device long *seed_vp [[buffer(14)]],
+  device long *seed_vn [[buffer(15)]],
+  device long *seed_wp [[buffer(16)]],
+  device long *seed_wn [[buffer(17)]],
+  device long *telemetry [[buffer(18)]],
+  device int *params [[buffer(19)]],
+  uint3 __tid [[thread_position_in_grid]],
+  uint3 __tid_in_tg [[thread_position_in_threadgroup]],
+  uint3 __tg_id [[threadgroup_position_in_grid]],
+  uint3 __tg_size [[threads_per_threadgroup]],
+  uint __simd_lane [[thread_index_in_simdgroup]],
+  uint __simd_id [[simdgroup_index_in_threadgroup]]
+) {
+  threadgroup float __tg_scratch_f[32];
+  threadgroup int   __tg_scratch_i[32];
+  uint __tg_total = __tg_size.x * __tg_size.y * __tg_size.z;
+  int tid = int(__tid.x);
+  int ltid = int(__tid_in_tg.x);
+  int rank = params[0];
+  int cap = params[1];
+  int steps = params[2];
+  int initialize = params[3];
+  int seed_density = params[4];
+  int policy = params[5];
+  int planted = params[6];
+  int planted_left = params[7];
+  int planted_right = params[8];
+  int planted_axis = params[9];
+  int planted_sign = params[10];
+  int seed_count = params[11];
+  int rotation = params[12];
+  int base = (tid * cap);
+  int sb = (tid * 10);
+  if ((seed_count < 1)) {
+    seed_count = 1;
+  }
+  int seed_id = ((tid + rotation) % seed_count);
+  int seed_base = (seed_id * cap);
+  threadgroup long sup[512];
+  threadgroup long sun[512];
+  threadgroup long svp[512];
+  threadgroup long svn[512];
+  threadgroup long swp[512];
+  threadgroup long swn[512];
+  int i = 0;
+  int at = 0;
+  long lane_seed_density = 0;
+  if ((initialize == 1)) {
+    while ((i < rank)) {
+      at = ((i * 2) + ltid);
+      sup[at] = seed_up[(seed_base + i)];
+      sun[at] = seed_un[(seed_base + i)];
+      svp[at] = seed_vp[(seed_base + i)];
+      svn[at] = seed_vn[(seed_base + i)];
+      swp[at] = seed_wp[(seed_base + i)];
+      swn[at] = seed_wn[(seed_base + i)];
+      best_up[(base + i)] = sup[at];
+      best_un[(base + i)] = sun[at];
+      best_vp[(base + i)] = svp[at];
+      best_vn[(base + i)] = svn[at];
+      best_wp[(base + i)] = swp[at];
+      best_wn[(base + i)] = swn[at];
+      long seed_pc = (sup[at] | sun[at]);
+      while ((seed_pc != 0)) {
+        seed_pc = (seed_pc & (seed_pc - 1));
+        lane_seed_density = (lane_seed_density + 1);
+      }
+      seed_pc = (svp[at] | svn[at]);
+      while ((seed_pc != 0)) {
+        seed_pc = (seed_pc & (seed_pc - 1));
+        lane_seed_density = (lane_seed_density + 1);
+      }
+      seed_pc = (swp[at] | swn[at]);
+      while ((seed_pc != 0)) {
+        seed_pc = (seed_pc & (seed_pc - 1));
+        lane_seed_density = (lane_seed_density + 1);
+      }
+      i = (i + 1);
+    }
+    telemetry[sb] = (((((tid + 1) + (rotation * 104729)) * 6364136223846793005) + 1442695040888963407) & 9223372036854775807);
+    telemetry[(sb + 1)] = 0;
+    telemetry[(sb + 2)] = 0;
+    telemetry[(sb + 3)] = 0;
+    telemetry[(sb + 4)] = 0;
+    telemetry[(sb + 5)] = lane_seed_density;
+    telemetry[(sb + 6)] = lane_seed_density;
+    telemetry[(sb + 7)] = 0;
+    telemetry[(sb + 8)] = 0;
+    telemetry[(sb + 9)] = 0;
+  }
+  if ((initialize == 0)) {
+    while ((i < rank)) {
+      at = ((i * 2) + ltid);
+      sup[at] = work_up[(base + i)];
+      sun[at] = work_un[(base + i)];
+      svp[at] = work_vp[(base + i)];
+      svn[at] = work_vn[(base + i)];
+      swp[at] = work_wp[(base + i)];
+      swn[at] = work_wn[(base + i)];
+      i = (i + 1);
+    }
+  }
+  long rng = telemetry[sb];
+  long attempts = telemetry[(sb + 1)];
+  long partners = telemetry[(sb + 2)];
+  long ternary_valid = telemetry[(sb + 3)];
+  long accepted = telemetry[(sb + 4)];
+  long current_density = telemetry[(sb + 5)];
+  long best_density = telemetry[(sb + 6)];
+  long best_move = telemetry[(sb + 7)];
+  long hotter_rejects = telemetry[(sb + 8)];
+  long no_partner = telemetry[(sb + 9)];
+  int mode = 0;
+  if ((policy == 0)) {
+    mode = (tid % 3);
+  }
+  if ((policy == 1)) {
+    mode = 0;
+  }
+  if ((policy == 2)) {
+    mode = 1;
+  }
+  if ((policy == 3)) {
+    mode = 2;
+  }
+  int li = 0;
+  int ri = 0;
+  long swap64 = 0;
+  long pu = 0;
+  long nu = 0;
+  int step = 0;
+  while ((step < steps)) {
+    attempts = (attempts + 1);
+    int left = 0;
+    int right = -(1);
+    int axis = 0;
+    int sign = 1;
+    if ((planted == 1)) {
+      left = planted_left;
+      right = planted_right;
+      axis = planted_axis;
+      sign = planted_sign;
+    }
+    if ((planted == 0)) {
+      rng = (((rng * 6364136223846793005) + 1442695040888963407) & 9223372036854775807);
+      left = ((rng >> 32) % rank);
+      rng = (((rng * 6364136223846793005) + 1442695040888963407) & 9223372036854775807);
+      axis = ((rng >> 32) % 3);
+      rng = (((rng * 6364136223846793005) + 1442695040888963407) & 9223372036854775807);
+      int start = ((rng >> 32) % rank);
+      int scan = 0;
+      while ((scan < rank)) {
+        int candidate = ((start + scan) % rank);
+        int relation_probe = 0;
+        int li = ((left * 2) + ltid);
+        int ri = ((candidate * 2) + ltid);
+        if ((candidate != left)) {
+          if ((axis == 0)) {
+            if ((sup[li] == sup[ri])) {
+              if ((sun[li] == sun[ri])) {
+                relation_probe = 1;
+              }
+            }
+          }
+          if ((axis == 1)) {
+            if ((svp[li] == svp[ri])) {
+              if ((svn[li] == svn[ri])) {
+                relation_probe = 1;
+              }
+            }
+          }
+          if ((axis == 2)) {
+            if ((swp[li] == swp[ri])) {
+              if ((swn[li] == swn[ri])) {
+                relation_probe = 1;
+              }
+            }
+            if ((swp[li] == swn[ri])) {
+              if ((swn[li] == swp[ri])) {
+                relation_probe = -(1);
+              }
+            }
+          }
+        }
+        if ((right < 0)) {
+          if ((relation_probe != 0)) {
+            right = candidate;
+          }
+        }
+        scan = (scan + 1);
+      }
+      rng = (((rng * 6364136223846793005) + 1442695040888963407) & 9223372036854775807);
+      if ((((rng >> 32) & 1) != 0)) {
+        sign = -(1);
+      }
+    }
+    int relation = 0;
+    int indices_ok = 0;
+    if ((right >= 0)) {
+      if ((left >= 0)) {
+        if ((left < rank)) {
+          if ((right < rank)) {
+            if ((right != left)) {
+              indices_ok = 1;
+            }
+          }
+        }
+      }
+    }
+    if ((indices_ok == 1)) {
+      li = ((left * 2) + ltid);
+      ri = ((right * 2) + ltid);
+      if ((axis == 0)) {
+        if ((sup[li] == sup[ri])) {
+          if ((sun[li] == sun[ri])) {
+            relation = 1;
+          }
+        }
+      }
+      if ((axis == 1)) {
+        if ((svp[li] == svp[ri])) {
+          if ((svn[li] == svn[ri])) {
+            relation = 1;
+          }
+        }
+      }
+      if ((axis == 2)) {
+        if ((swp[li] == swp[ri])) {
+          if ((swn[li] == swn[ri])) {
+            relation = 1;
+          }
+        }
+        if ((swp[li] == swn[ri])) {
+          if ((swn[li] == swp[ri])) {
+            relation = -(1);
+          }
+        }
+      }
+    }
+    if ((relation == 0)) {
+      no_partner = (no_partner + 1);
+    }
+    if ((relation != 0)) {
+      partners = (partners + 1);
+      li = ((left * 2) + ltid);
+      ri = ((right * 2) + ltid);
+      long aup = sup[li];
+      long aun = sun[li];
+      long avp = svp[li];
+      long avn = svn[li];
+      long awp = swp[li];
+      long awn = swn[li];
+      long bup = sup[ri];
+      long bun = sun[ri];
+      long bvp = svp[ri];
+      long bvn = svn[ri];
+      long bwp = swp[ri];
+      long bwn = swn[ri];
+      if ((axis == 2)) {
+        if ((relation < 0)) {
+          swap64 = bup;
+          bup = bun;
+          bun = swap64;
+          swap64 = bwp;
+          bwp = bwn;
+          bwn = swap64;
+        }
+      }
+      long x0p = 0;
+      long x0n = 0;
+      long x1p = 0;
+      long x1n = 0;
+      long ap0 = 0;
+      long an0 = 0;
+      long bp0 = 0;
+      long bn0 = 0;
+      long ap1 = 0;
+      long an1 = 0;
+      long bp1 = 0;
+      long bn1 = 0;
+      if ((axis == 0)) {
+        ap0 = avp;
+        an0 = avn;
+        bp0 = bvp;
+        bn0 = bvn;
+        ap1 = bwp;
+        an1 = bwn;
+        bp1 = awp;
+        bn1 = awn;
+      }
+      if ((axis == 1)) {
+        ap0 = aup;
+        an0 = aun;
+        bp0 = bup;
+        bn0 = bun;
+        ap1 = bwp;
+        an1 = bwn;
+        bp1 = awp;
+        bn1 = awn;
+      }
+      if ((axis == 2)) {
+        ap0 = aup;
+        an0 = aun;
+        bp0 = bup;
+        bn0 = bun;
+        ap1 = bvp;
+        an1 = bvn;
+        bp1 = avp;
+        bn1 = avn;
+      }
+      long xp = bp0;
+      long xn = bn0;
+      if ((sign < 0)) {
+        xp = bn0;
+        xn = bp0;
+      }
+      int valid = 1;
+      if (((ap0 & xp) != 0)) {
+        valid = 0;
+      }
+      if (((an0 & xn) != 0)) {
+        valid = 0;
+      }
+      if ((valid == 1)) {
+        pu = (ap0 | xp);
+        nu = (an0 | xn);
+        x0p = (pu ^ (pu & nu));
+        x0n = (nu ^ (pu & nu));
+      }
+      xp = bp1;
+      xn = bn1;
+      if ((sign > 0)) {
+        xp = bn1;
+        xn = bp1;
+      }
+      if ((sign < 0)) {
+        xp = bp1;
+        xn = bn1;
+      }
+      if ((valid == 1)) {
+        if (((ap1 & xp) != 0)) {
+          valid = 0;
+        }
+        if (((an1 & xn) != 0)) {
+          valid = 0;
+        }
+      }
+      if ((valid == 1)) {
+        pu = (ap1 | xp);
+        nu = (an1 | xn);
+        x1p = (pu ^ (pu & nu));
+        x1n = (nu ^ (pu & nu));
+      }
+      if (((x0p | x0n) == 0)) {
+        valid = 0;
+      }
+      if (((x1p | x1n) == 0)) {
+        valid = 0;
+      }
+      if ((valid == 1)) {
+        ternary_valid = (ternary_valid + 1);
+        long old_density = 0;
+        long new_density = 0;
+        long pc = (aup | aun);
+        while ((pc != 0)) {
+          pc = (pc & (pc - 1));
+          old_density = (old_density + 1);
+        }
+        pc = (avp | avn);
+        while ((pc != 0)) {
+          pc = (pc & (pc - 1));
+          old_density = (old_density + 1);
+        }
+        pc = (awp | awn);
+        while ((pc != 0)) {
+          pc = (pc & (pc - 1));
+          old_density = (old_density + 1);
+        }
+        pc = (sup[ri] | sun[ri]);
+        while ((pc != 0)) {
+          pc = (pc & (pc - 1));
+          old_density = (old_density + 1);
+        }
+        pc = (svp[ri] | svn[ri]);
+        while ((pc != 0)) {
+          pc = (pc & (pc - 1));
+          old_density = (old_density + 1);
+        }
+        pc = (swp[ri] | swn[ri]);
+        while ((pc != 0)) {
+          pc = (pc & (pc - 1));
+          old_density = (old_density + 1);
+        }
+        long nlu_p = aup;
+        long nlu_n = aun;
+        long nlv_p = avp;
+        long nlv_n = avn;
+        long nlw_p = awp;
+        long nlw_n = awn;
+        long nru_p = bup;
+        long nru_n = bun;
+        long nrv_p = bvp;
+        long nrv_n = bvn;
+        long nrw_p = bwp;
+        long nrw_n = bwn;
+        if ((axis == 0)) {
+          nlv_p = x0p;
+          nlv_n = x0n;
+          nrw_p = x1p;
+          nrw_n = x1n;
+        }
+        if ((axis == 1)) {
+          nlu_p = x0p;
+          nlu_n = x0n;
+          nrw_p = x1p;
+          nrw_n = x1n;
+        }
+        if ((axis == 2)) {
+          nlu_p = x0p;
+          nlu_n = x0n;
+          nrv_p = x1p;
+          nrv_n = x1n;
+        }
+        pc = (nlu_p | nlu_n);
+        while ((pc != 0)) {
+          pc = (pc & (pc - 1));
+          new_density = (new_density + 1);
+        }
+        pc = (nlv_p | nlv_n);
+        while ((pc != 0)) {
+          pc = (pc & (pc - 1));
+          new_density = (new_density + 1);
+        }
+        pc = (nlw_p | nlw_n);
+        while ((pc != 0)) {
+          pc = (pc & (pc - 1));
+          new_density = (new_density + 1);
+        }
+        pc = (nru_p | nru_n);
+        while ((pc != 0)) {
+          pc = (pc & (pc - 1));
+          new_density = (new_density + 1);
+        }
+        pc = (nrv_p | nrv_n);
+        while ((pc != 0)) {
+          pc = (pc & (pc - 1));
+          new_density = (new_density + 1);
+        }
+        pc = (nrw_p | nrw_n);
+        while ((pc != 0)) {
+          pc = (pc & (pc - 1));
+          new_density = (new_density + 1);
+        }
+        int take = 0;
+        if ((mode == 0)) {
+          take = 1;
+        }
+        if ((mode == 1)) {
+          if ((new_density <= (old_density + 2))) {
+            take = 1;
+          }
+        }
+        if ((mode == 2)) {
+          if ((new_density <= old_density)) {
+            take = 1;
+          }
+        }
+        if ((take == 0)) {
+          hotter_rejects = (hotter_rejects + 1);
+        }
+        if ((take == 1)) {
+          sup[li] = nlu_p;
+          sun[li] = nlu_n;
+          svp[li] = nlv_p;
+          svn[li] = nlv_n;
+          swp[li] = nlw_p;
+          swn[li] = nlw_n;
+          sup[ri] = nru_p;
+          sun[ri] = nru_n;
+          svp[ri] = nrv_p;
+          svn[ri] = nrv_n;
+          swp[ri] = nrw_p;
+          swn[ri] = nrw_n;
+          int canon = 0;
+          while ((canon < 2)) {
+            int ci = li;
+            if ((canon == 1)) {
+              ci = ri;
+            }
+            long allbits = (sup[ci] | sun[ci]);
+            long lowbit = (allbits & (0 - allbits));
+            if (((sup[ci] & lowbit) == 0)) {
+              swap64 = sup[ci];
+              sup[ci] = sun[ci];
+              sun[ci] = swap64;
+              swap64 = swp[ci];
+              swp[ci] = swn[ci];
+              swn[ci] = swap64;
+            }
+            allbits = (svp[ci] | svn[ci]);
+            lowbit = (allbits & (0 - allbits));
+            if (((svp[ci] & lowbit) == 0)) {
+              swap64 = svp[ci];
+              svp[ci] = svn[ci];
+              svn[ci] = swap64;
+              swap64 = swp[ci];
+              swp[ci] = swn[ci];
+              swn[ci] = swap64;
+            }
+            canon = (canon + 1);
+          }
+          accepted = (accepted + 1);
+          current_density = ((current_density + new_density) - old_density);
+          if ((current_density < best_density)) {
+            best_density = current_density;
+            best_move = attempts;
+            i = 0;
+            while ((i < rank)) {
+              at = ((i * 2) + ltid);
+              best_up[(base + i)] = sup[at];
+              best_un[(base + i)] = sun[at];
+              best_vp[(base + i)] = svp[at];
+              best_vn[(base + i)] = svn[at];
+              best_wp[(base + i)] = swp[at];
+              best_wn[(base + i)] = swn[at];
+              i = (i + 1);
+            }
+          }
+        }
+      }
+    }
+    step = (step + 1);
+  }
+  i = 0;
+  while ((i < rank)) {
+    at = ((i * 2) + ltid);
+    work_up[(base + i)] = sup[at];
+    work_un[(base + i)] = sun[at];
+    work_vp[(base + i)] = svp[at];
+    work_vn[(base + i)] = svn[at];
+    work_wp[(base + i)] = swp[at];
+    work_wn[(base + i)] = swn[at];
+    i = (i + 1);
+  }
+  telemetry[sb] = rng;
+  telemetry[(sb + 1)] = attempts;
+  telemetry[(sb + 2)] = partners;
+  telemetry[(sb + 3)] = ternary_valid;
+  telemetry[(sb + 4)] = accepted;
+  telemetry[(sb + 5)] = current_density;
+  telemetry[(sb + 6)] = best_density;
+  telemetry[(sb + 7)] = best_move;
+  telemetry[(sb + 8)] = hotter_rejects;
+  telemetry[(sb + 9)] = no_partner;
+}

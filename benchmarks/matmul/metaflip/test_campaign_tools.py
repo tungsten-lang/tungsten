@@ -15,7 +15,8 @@ sys.path.insert(0, HERE)
 
 from bench_decomp import cost, naive_scheme, parse_scheme, verify  # noqa: E402
 from bucket_gen import gen, gen_worker  # noqa: E402
-from flipfleet import (C3_RECORD_SEEDS, Fleet, RECORD_SEEDS, parse_move_budgets, read_dump,
+from flipfleet import (C3_RECORD_SEEDS, Fleet, RECORD_SEEDS, build_arg_parser,
+                       main as flipfleet_main, parse_move_budgets, read_dump,
                        write_dump)  # noqa: E402
 from metaflip_proto2 import recon  # noqa: E402
 from sym_start import (  # noqa: E402
@@ -25,6 +26,7 @@ from sym_start import (  # noqa: E402
     parse_partition,
 )
 from sym_escape import best_bridge, describe as describe_escape  # noqa: E402
+from tensor_profiles import profile_for_tensor  # noqa: E402
 
 
 def density_increasing_flip(terms, n):
@@ -90,10 +92,30 @@ class PlusTransitionTest(unittest.TestCase):
                              record_bandq=10_000_000_000, runtime_seed=True,
                              adaptive_esc="cal2zone2")
         self.assertIn("if av0.size() > 6", runtime_budget)
-        self.assertIn("q = recordqv", runtime_budget)
-        self.assertIn("if best_rank <= 23\n  nextesc = recordqv", runtime_budget)
+        self.assertIn("workqv = 10000000000 ## i64", runtime_budget)
+        self.assertIn("workqv = av0[6].to_i()", runtime_budget)
+        self.assertIn("wanderqv = 500000000 ## i64", runtime_budget)
+        self.assertIn("if av0.size() > 7", runtime_budget)
+        self.assertIn("wanderqv = av0[7].to_i()", runtime_budget)
+        self.assertIn(
+            '<< "ZONEQ work=" + workqv.to_s() + " wander=" + wanderqv.to_s()',
+            runtime_budget)
+        self.assertIn("nextesc = workqv", runtime_budget)
+        self.assertIn("      q = workqv ## i64\n      if aband > wthr\n"
+                      "        q = wanderqv", runtime_budget)
+        self.assertNotIn("recordqv", runtime_budget)
+        self.assertNotIn("RECORDQ", runtime_budget)
         self.assertIn("    if cycleout == 0\n      aband = nb", runtime_budget)
-        self.assertIn("    wraps = 0\n    nextesc = mv + 2500000000", runtime_budget)
+        self.assertIn("    wraps = 0\n    nextesc = mv + workqv", runtime_budget)
+
+        legacy_schedule = gen(
+            3, 3, 3, 22, cap=10, world_record=23,
+            record_bandq=10_000_000_000, runtime_seed=True,
+            adaptive_esc="cal2zone")
+        self.assertIn("recordqv = av0[6].to_i()", legacy_schedule)
+        self.assertIn("q = recordqv", legacy_schedule)
+        self.assertIn('<< "RECORDQ " + recordqv.to_s()', legacy_schedule)
+        self.assertNotIn("ZONEQ", legacy_schedule)
 
     def test_split_identity_on_every_axis(self):
         term = (0b101001, 0b11010, 0b100101)
@@ -115,7 +137,7 @@ class RecordSeedTest(unittest.TestCase):
                 self.assertTrue(verify(terms, n, n, n))
 
     def test_default_record_cost_frontiers(self):
-        expected_bits = {3: 139, 4: 450, 5: 1155, 6: 2508}
+        expected_bits = {3: 139, 4: 450, 5: 1155, 6: 2502}
         for n, bits in expected_bits.items():
             with self.subTest(n=n):
                 terms = parse_scheme(RECORD_SEEDS[n])
@@ -457,7 +479,7 @@ class EscapeFleetTest(unittest.TestCase):
                           escape_at="startup", escape_every=1)
             fleet.build_walker = lambda: setattr(fleet, "bin", "/unused")
 
-            def fake_launch(index, salt, seed):
+            def fake_launch(index, salt, seed, source=None):
                 launches.append(list(seed))
                 fleet.request_stop()
 
@@ -527,6 +549,166 @@ class GpuEscapeScoutTest(unittest.TestCase):
             self.assertEqual(1, fleet.invalid_candidates)
 
 
+class MixedDefaultsTest(unittest.TestCase):
+    def test_cli_defaults_to_mixed_adaptive_gpu_and_no_gpu_is_explicit(self):
+        parser = build_arg_parser()
+        defaults = parser.parse_args([])
+        self.assertTrue(defaults.gpu)
+        self.assertEqual("adaptive", defaults.gpu_policy)
+        self.assertEqual("mixed", defaults.escape_profile)
+        self.assertEqual(1, defaults.escape_every)
+        disabled = parser.parse_args(["--tensor", "7x7", "--no-gpu"])
+        self.assertFalse(disabled.gpu)
+        self.assertEqual((7, 7, 7), disabled.tensor.dimensions)
+
+    def test_7x7_cli_uses_the_saved_exact_rank247_composition(self):
+        with tempfile.TemporaryDirectory() as run_dir, \
+                mock.patch("flipfleet.Fleet") as fleet_class, \
+                mock.patch("builtins.print"):
+            flipfleet_main([
+                "--tensor", "7x7", "--no-gpu", "--secs", "1",
+                "--dir", run_dir,
+            ])
+        kwargs = fleet_class.call_args.kwargs
+        self.assertEqual((7, 7, 7), (kwargs["n"], kwargs["m"], kwargs["p"]))
+        self.assertEqual(247, kwargs["record"])
+        self.assertEqual(247, len(kwargs["initial_terms"]))
+        self.assertTrue(kwargs["record_known"])
+        with tempfile.TemporaryDirectory() as run_dir, \
+                mock.patch("flipfleet.Fleet") as explicit_fleet, \
+                mock.patch("builtins.print"):
+            flipfleet_main([
+                "--tensor", "7x7", "--record", "248", "--no-gpu",
+                "--secs", "1", "--dir", run_dir,
+            ])
+        self.assertEqual(248, explicit_fleet.call_args.kwargs["record"])
+        self.assertTrue(explicit_fleet.call_args.kwargs["record_known"])
+
+    def test_mixed_cpu_restarts_cycle_exact_variable_rank_slots(self):
+        record = parse_scheme(RECORD_SEEDS[3])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(
+                run_dir, 1, 0, n=3, m=3, p=3, record=23,
+                initial_terms=record, escape_profile="mixed",
+                escape_at="both", escape_every=1, escape_bank_count=13)
+            launches = [fleet.prepare_launch_seed(record, "startup")
+                        for _ in range(13)]
+            ranks = {len(terms) for terms, _ in launches}
+            recipes = {metadata["recipe_name"] for _, metadata in launches}
+            self.assertEqual({23, 24, 25}, ranks)
+            self.assertEqual({"base", "split", "split+split"}, recipes)
+            self.assertTrue(all(verify(terms, 3, 3, 3) for terms, _ in launches))
+
+    def test_tensor_profile_builds_rotating_role_specific_gpu_banks(self):
+        n = 5
+        record = parse_scheme(RECORD_SEEDS[n])
+        c3 = parse_scheme(C3_RECORD_SEEDS[n])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(
+                run_dir, 1, 0, n=n, m=n, p=n, record=93,
+                initial_terms=record, c3_terms=c3, gpu=True,
+                gpu_policy="adaptive", tensor_profile=profile_for_tensor(n),
+                escape_profile="mixed", escape_bank_count=24)
+            fleet.best = (93, record)
+            fleet.refresh_gpu_role_seeds(preserve_novelty=False)
+            self.assertEqual(set(fleet.gpu_roles), set(fleet.gpu_role_seed_banks))
+            self.assertGreater(len(fleet.gpu_role_seed_banks["compose"]), 1)
+            self.assertGreater(len(fleet.gpu_role_seed_banks["symmetry"]), 1)
+            self.assertGreater(
+                len({len(entry["terms"])
+                     for entry in fleet.gpu_role_seed_banks["symmetry"]}), 1)
+            for entry in fleet.gpu_role_seed_banks["symmetry"]:
+                self.assertTrue(describe_escape(set(entry["terms"]), n)["c3"])
+            allocation = fleet._initial_gpu_role_allocation()
+            self.assertEqual(fleet.gpu_walkers, sum(allocation.values()))
+            self.assertTrue(all(lanes >= 32 and lanes % 32 == 0
+                                for lanes in allocation.values()))
+
+    def test_c3_branch_rejects_sparser_non_c3_ordinary_leader(self):
+        n = 5
+        ordinary = parse_scheme(RECORD_SEEDS[n])
+        symmetric = parse_scheme(C3_RECORD_SEEDS[n])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(
+                run_dir, 1, 0, n=n, m=n, p=n, record=93,
+                initial_terms=ordinary, c3_terms=symmetric,
+                gpu=True, gpu_policy="adaptive")
+            fleet.best = (93, ordinary)
+            self.assertFalse(fleet._consider_c3_leader(93, ordinary, refresh=False))
+            self.assertTrue(describe_escape(set(fleet.c3_best[1]), n)["c3"])
+            self.assertNotEqual(ordinary, fleet.c3_best[1])
+            self.assertEqual(1155, fleet.score(*fleet.c3_best)["bits"])
+
+    def test_c3_compile_capacity_covers_every_rotating_symmetric_slot(self):
+        n = 5
+        record = parse_scheme(RECORD_SEEDS[n])
+        c3 = parse_scheme(C3_RECORD_SEEDS[n])
+        profile = profile_for_tensor(n)
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(
+                run_dir, 1, 0, n=n, m=n, p=n, record=93,
+                initial_terms=record, c3_terms=c3, gpu=True,
+                gpu_policy="adaptive", tensor_profile=profile,
+                escape_profile="mixed")
+            compiled = mock.Mock(returncode=0, stdout="", stderr="")
+            with mock.patch("flipfleet.subprocess.run", return_value=compiled), \
+                    mock.patch("flipfleet.CooperativeSimdRelay"), \
+                    mock.patch("flipfleet.C3GpuRelay") as c3_relay, \
+                    mock.patch("flipfleet.GpuMitmFleetAdapter"):
+                fleet.build_gpu_relay()
+            config = c3_relay.call_args.args[1]
+            max_rank = max(
+                len(entry.scheme) for entry in fleet._mixed_portfolio(c3)
+                if entry.profile["c3"])
+            self.assertGreaterEqual(config.cap, max_rank + config.band + 6)
+
+    def test_single_gpu_policy_does_not_build_unused_adapters(self):
+        n = 5
+        record = parse_scheme(RECORD_SEEDS[n])
+        c3_terms = parse_scheme(C3_RECORD_SEEDS[n])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(
+                run_dir, 1, 0, n=n, m=n, p=n, record=93,
+                initial_terms=record, c3_terms=c3_terms, gpu=True,
+                gpu_policy="single", tensor_profile=profile_for_tensor(n))
+            compiled = mock.Mock(returncode=0, stdout="", stderr="")
+            with mock.patch("flipfleet.subprocess.run", return_value=compiled), \
+                    mock.patch("flipfleet.CooperativeSimdRelay") as simd, \
+                    mock.patch("flipfleet.C3GpuRelay") as c3, \
+                    mock.patch("flipfleet.GpuMitmFleetAdapter") as mitm:
+                fleet.build_gpu_relay()
+            simd.assert_not_called()
+            c3.assert_not_called()
+            mitm.assert_not_called()
+
+    def test_missing_adaptive_role_is_repaired_even_without_reallocation(self):
+        record = parse_scheme(RECORD_SEEDS[3])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(
+                run_dir, 1, 0, n=3, m=3, p=3, record=23,
+                initial_terms=record, gpu=True, gpu_policy="adaptive",
+                gpu_walkers=128)
+            fleet.best = (23, record)
+            fleet.refresh_gpu_role_seeds(preserve_novelty=False)
+            fleet.gpu_role_allocations = fleet._initial_gpu_role_allocation()
+            alive = mock.Mock()
+            alive.poll.return_value = None
+            fleet.gpu_procs = {role: alive for role in fleet.gpu_roles
+                               if role != "rank"}
+            with mock.patch.object(fleet, "_launch_gpu_role") as launch:
+                fleet.repair_gpu_roles(now=time.time())
+            launch.assert_called_once_with(
+                "rank", fleet.gpu_role_allocations["rank"])
+            fleet.gpu_procs.pop("density", None)
+            fleet.request_stop()
+            with mock.patch.object(fleet, "_launch_gpu_role") as stopped_launch:
+                fleet.repair_gpu_roles(now=time.time())
+            stopped_launch.assert_not_called()
+            with mock.patch.object(fleet, "_launch_gpu_role") as drain_launch:
+                self.assertEqual([], fleet.gpu_candidates(23))
+            drain_launch.assert_not_called()
+
+
 class AdaptiveGpuPolicyTest(unittest.TestCase):
     @staticmethod
     def _permuted_records(count):
@@ -567,15 +749,15 @@ class AdaptiveGpuPolicyTest(unittest.TestCase):
                 fleet.launch_gpu_relay()
             self.assertEqual(4, popen.call_count)
             self.assertEqual(128, sum(fleet.gpu_role_allocations.values()))
-            self.assertEqual({0}, {lanes % 16
+            self.assertEqual({0}, {lanes % 32
                                    for lanes in fleet.gpu_role_allocations.values()})
             calls = {call.args[0][2].split("gpu_")[1].split("_best")[0]:
                      call.args[0] for call in popen.call_args_list}
             self.assertEqual("1", calls["density"][16])
             self.assertEqual("1", calls["novelty"][16])
-            self.assertEqual(str(fleet.gpu_escapes), calls["rank"][16])
-            self.assertEqual(str(fleet.gpu_escapes), calls["escape"][16])
-            self.assertLess(int(calls["escape"][9]), int(calls["density"][9]))
+            self.assertEqual("1", calls["rank"][16])
+            self.assertEqual(str(fleet.gpu_escapes), calls["split"][16])
+            self.assertLess(int(calls["split"][9]), int(calls["density"][9]))
             for role in list(fleet.gpu_procs):
                 fleet._stop_gpu_role(role)
 
@@ -594,7 +776,7 @@ class AdaptiveGpuPolicyTest(unittest.TestCase):
             allocation = fleet.gpu_lane_allocation()
             self.assertEqual(160, sum(allocation.values()))
             self.assertGreater(allocation["rank"], allocation["density"])
-            self.assertTrue(all(lanes >= 16 for lanes in allocation.values()))
+            self.assertTrue(all(lanes >= 32 for lanes in allocation.values()))
 
     def test_exact_gate_precedes_pareto_and_role_reward(self):
         record, variant = self._permuted_records(2)
@@ -614,10 +796,10 @@ class AdaptiveGpuPolicyTest(unittest.TestCase):
             broken = list(variant)
             u, v, w = broken[0]
             broken[0] = (u ^ 1, v, w)
-            write_dump(broken, os.path.join(run_dir, "gpu_escape_best.txt"))
+            write_dump(broken, os.path.join(run_dir, "gpu_split_best.txt"))
             self.assertEqual([], fleet.gpu_candidates(23))
             self.assertEqual(1, len(fleet.gpu_pareto))
-            self.assertEqual(0, fleet.gpu_role_stats["escape"]["candidates"])
+            self.assertEqual(0, fleet.gpu_role_stats["split"]["candidates"])
             self.assertEqual(1, fleet.invalid_candidates)
 
     def test_pareto_discards_dominated_candidate_and_keeps_tradeoff(self):
@@ -627,7 +809,7 @@ class AdaptiveGpuPolicyTest(unittest.TestCase):
             fleet = Fleet(run_dir, 1, 0, n=3, m=3, p=3, record=23,
                           initial_terms=variants[0], gpu=True,
                           gpu_policy="adaptive", gpu_novelty_size=4)
-            fleet.best = (23, variants[0])
+            fleet.best = None
             metrics = [
                 {"bits": 100, "flip_pairs": 3, "novelty": 10},
                 {"bits": 90, "flip_pairs": 4, "novelty": 12},
@@ -641,6 +823,265 @@ class AdaptiveGpuPolicyTest(unittest.TestCase):
             self.assertNotIn(fleet.canonical(variants[0]), fleet.gpu_pareto)
             self.assertIn(fleet.canonical(variants[1]), fleet.gpu_pareto)
             self.assertIn(fleet.canonical(variants[2]), fleet.gpu_pareto)
+
+    def test_bounded_engine_returning_its_seed_gets_no_productivity_reward(self):
+        record = parse_scheme(RECORD_SEEDS[3])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(run_dir, 1, 0, n=3, m=3, p=3, record=23,
+                          initial_terms=record, gpu=True, gpu_policy="adaptive")
+            fleet.best = (23, record)
+            admitted, entry = fleet.gpu_pareto_admit(23, record, "rank")
+            self.assertFalse(admitted)
+            fleet._reward_gpu_role("rank", 23, entry, admitted)
+            self.assertEqual(0.0, fleet.gpu_role_stats["rank"]["reward"])
+
+
+class CpuDiversityPolicyTest(unittest.TestCase):
+    def test_tensor_specific_zone_arms_and_sticky_doors(self):
+        record = parse_scheme(RECORD_SEEDS[5])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(run_dir, 12, 0, n=5, m=5, p=5, record=93,
+                          initial_terms=record)
+            self.assertEqual(
+                (100_000_000, 500_000_000, 2_500_000_000, 10_000_000_000),
+                fleet.work_zone_moves)
+            self.assertEqual(
+                (25_000_000, 100_000_000, 500_000_000, 1_000_000_000),
+                fleet.wander_zone_moves)
+            self.assertEqual(1, fleet.migrate)
+            self.assertEqual(1, fleet.cpu_door_roles.count("leader"))
+            self.assertEqual(3, fleet.cpu_door_roles.count("symmetry"))
+            self.assertEqual(2, fleet.cpu_door_roles.count("near1"))
+            self.assertEqual(2, fleet.cpu_door_roles.count("near2"))
+
+    def test_launch_passes_distinct_work_wander_and_near_spool(self):
+        record = parse_scheme(RECORD_SEEDS[3])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(run_dir, 1, 0, n=3, m=3, p=3, record=23,
+                          initial_terms=record)
+            fleet.best = (23, record)
+            fleet.bin = "/unused/walker"
+            process = mock.Mock(returncode=0)
+            process.poll.return_value = 0
+            with mock.patch("flipfleet.subprocess.Popen", return_value=process) as popen:
+                fleet.launch(1, 0, record)
+                first_argv = popen.call_args.args[0]
+                # A sticky leader can relaunch without moving any global
+                # frontier counter; launch_id must still select a fresh stream.
+                fleet.launch(1, 0, record)
+                second_argv = popen.call_args.args[0]
+            argv = first_argv
+            # Walker one is the balanced arm in the stable schedule order.
+            self.assertEqual("125000000", argv[7])
+            self.assertEqual("25000000", argv[8])
+            self.assertIn("near1l1", argv[9])
+            self.assertEqual("23", argv[10])
+            self.assertNotEqual(first_argv[1], second_argv[1])
+            fleet.logs[1].close()
+
+    def test_migration_only_uses_known_leader_frontier_lanes(self):
+        record = parse_scheme(RECORD_SEEDS[5])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(run_dir, 12, 0, n=5, m=5, p=5, record=93,
+                          initial_terms=record, migrate=2)
+            ranks = {index: 93 + index for index in range(1, 13)}
+            targets = fleet.migration_targets(12, ranks)
+            self.assertEqual(2, len(targets))
+            self.assertTrue(all(fleet.cpu_door_roles[index] in
+                                ("leader", "frontier") for index in targets))
+            # An unreadable leader is preserved rather than treated as worst.
+            ranks.pop(1)
+            self.assertNotIn(1, fleet.migration_targets(12, ranks))
+
+    def test_generated_worker_has_bounded_near_frontier_spool(self):
+        source = gen(3, 3, 3, 22, world_record=23,
+                     record_bandq=100, runtime_seed=True,
+                     adaptive_esc="cal2zone2")
+        self.assertIn("if av0.size() > 8", source)
+        self.assertIn("nearbase = av0[9].to_i()", source)
+        self.assertIn("if rank <= nearbase + 2", source)
+        self.assertIn("if nearhit < 8", source)
+
+    def test_exact_near_banks_feed_sticky_rank_specific_doors(self):
+        record = parse_scheme(RECORD_SEEDS[3])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(
+                run_dir, 7, 0, n=3, m=3, p=3, record=23,
+                initial_terms=record, escape_profile="mixed",
+                escape_every=1, escape_bank_count=24)
+            fleet.best = (23, record)
+            fleet.initialize_cpu_seed_banks()
+
+            self.assertEqual((23, record), fleet.best)
+            self.assertEqual(23, fleet.cpu_near_bank.best_rank)
+            self.assertGreater(len(fleet.cpu_near_bank.entries(1)), 0)
+            self.assertGreater(len(fleet.cpu_near_bank.entries(2)), 0)
+            for delta in (1, 2):
+                for entry in fleet.cpu_near_bank.entries(delta):
+                    self.assertEqual(23 + delta, entry.rank)
+                    self.assertTrue(verify(entry.terms, 3, 3, 3))
+
+            near1, source1, escape1 = fleet.cpu_launch_seed(3, "startup")
+            near2, source2, escape2 = fleet.cpu_launch_seed(7, "startup")
+            self.assertEqual(("near1", "near2"),
+                             (fleet.cpu_door_roles[3], fleet.cpu_door_roles[7]))
+            self.assertEqual(("near1", "near2"), (source1, source2))
+            self.assertEqual((24, 25), (len(near1), len(near2)))
+            self.assertTrue(verify(near1, 3, 3, 3))
+            self.assertTrue(verify(near2, 3, 3, 3))
+            self.assertIsNone(escape1)
+            self.assertIsNone(escape2)
+            self.assertEqual(fleet.canonical(near1),
+                             fleet.cpu_active_near_seed[3].terms)
+            self.assertEqual(fleet.canonical(near2),
+                             fleet.cpu_active_near_seed[7].terms)
+
+            fleet.write_status(time.time())
+            with open(fleet.status_path) as stream:
+                status = json.load(stream)
+            self.assertEqual(23, status["cpu"]["near"]["best_rank"])
+            self.assertGreater(status["cpu"]["near"]["tiers"]["+1"]["size"], 0)
+            self.assertGreater(status["cpu"]["near"]["tiers"]["+2"]["size"], 0)
+            self.assertEqual("near1", status["walkers"][2]["door"])
+            self.assertEqual("near2", status["walkers"][6]["door"])
+
+            # A direct convergence launch must not leave stale productivity
+            # credit attached to the shoulder process it replaces.
+            fleet.bin = "/unused/walker"
+            process = mock.Mock(returncode=0)
+            process.poll.return_value = 0
+            with mock.patch("flipfleet.subprocess.Popen", return_value=process):
+                fleet.launch(3, 0, record)
+            self.assertIsNone(fleet.cpu_active_near_seed[3])
+            fleet.logs[3].close()
+
+    def test_none_profile_keeps_shoulder_doors_unescaped(self):
+        record = parse_scheme(RECORD_SEEDS[3])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(run_dir, 3, 0, n=3, m=3, p=3, record=23,
+                          initial_terms=record, archive_reseed=1.0)
+            fleet.best = (23, record)
+            fleet.archive_candidate(23, record, source="fixture")
+            fleet.initialize_cpu_seed_banks()
+            seed, source, escape = fleet.cpu_launch_seed(3, "startup")
+            self.assertEqual(23, len(seed))
+            self.assertTrue(source.startswith("near1-fallback/"))
+            self.assertIsNone(escape)
+            self.assertEqual(0, fleet.cpu_near_bank.status()["size"])
+
+    def test_shoulder_doors_honor_one_sided_escape_triggers(self):
+        record = parse_scheme(RECORD_SEEDS[3])
+        for escape_at, startup_rank, cycleout_rank in (
+                ("cycleout", 23, 24), ("startup", 24, 23)):
+            with self.subTest(escape_at=escape_at), tempfile.TemporaryDirectory() as run_dir:
+                fleet = Fleet(
+                    run_dir, 3, 0, n=3, m=3, p=3, record=23,
+                    initial_terms=record, archive_reseed=1.0,
+                    escape_profile="mixed", escape_at=escape_at,
+                    escape_every=1)
+                fleet.best = (23, record)
+                fleet.archive_candidate(23, record, source="fixture")
+                fleet.initialize_cpu_seed_banks()
+                startup, _, _ = fleet.cpu_launch_seed(3, "startup")
+                cycleout, _, _ = fleet.cpu_launch_seed(3, "cycleout")
+                self.assertEqual(startup_rank, len(startup))
+                self.assertEqual(cycleout_rank, len(cycleout))
+
+    def test_shoulder_doors_honor_per_walker_escape_cadence(self):
+        record = parse_scheme(RECORD_SEEDS[3])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(
+                run_dir, 3, 0, n=3, m=3, p=3, record=23,
+                initial_terms=record, archive_reseed=1.0,
+                escape_profile="mixed", escape_every=2)
+            fleet.best = (23, record)
+            fleet.archive_candidate(23, record, source="fixture")
+            fleet.initialize_cpu_seed_banks()
+            scheduled, _, _ = fleet.cpu_launch_seed(3, "startup")
+            skipped, _, _ = fleet.cpu_launch_seed(3, "cycleout")
+            self.assertEqual(24, len(scheduled))
+            self.assertEqual(23, len(skipped))
+
+    def test_mixed_door_cadence_is_not_double_applied(self):
+        record = parse_scheme(RECORD_SEEDS[3])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(
+                run_dir, 10, 0, n=3, m=3, p=3, record=23,
+                initial_terms=record, escape_profile="mixed",
+                escape_every=2)
+            fleet.best = (23, record)
+            fleet.initialize_cpu_seed_banks()
+            first = fleet.cpu_launch_seed(10, "startup")
+            second = fleet.cpu_launch_seed(10, "cycleout")
+            third = fleet.cpu_launch_seed(10, "cycleout")
+            self.assertEqual("mixed", fleet.cpu_door_roles[10])
+            self.assertIsNotNone(first[2])
+            self.assertIsNone(second[2])
+            self.assertIsNotNone(third[2])
+            self.assertEqual(3, fleet.escape_considered)
+
+    def test_symmetry_door_uses_exact_one_move_c3_provenance(self):
+        record = parse_scheme(RECORD_SEEDS[5])
+        c3 = parse_scheme(C3_RECORD_SEEDS[5])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(
+                run_dir, 7, 0, n=5, m=5, p=5, record=93,
+                initial_terms=record, c3_terms=c3,
+                escape_profile="mixed", escape_every=1, escape_bank_count=4,
+                cpu_symmetry_seeds=2)
+            fleet.best = (93, record)
+            fleet.initialize_cpu_seed_banks()
+
+            seed, source, escape = fleet.cpu_launch_seed(7, "startup")
+            key = fleet.canonical(seed)
+            entry = next(entry for entry in fleet.cpu_symmetry_bank
+                         if entry.scheme == key)
+            self.assertEqual("symmetry", fleet.cpu_door_roles[7])
+            self.assertEqual("symmetry:" + "+".join(entry.recipe), source)
+            self.assertIn(entry.recipe, (("orbit-split",), ("polarize",)))
+            self.assertEqual(1, len(entry.moves))
+            self.assertEqual(entry.recipe[0], entry.moves[0].kind)
+            self.assertTrue(entry.profile["c3"])
+            self.assertTrue(check_c3(seed, 5))
+            self.assertTrue(verify(seed, 5, 5, 5))
+            self.assertIsNone(escape)
+
+    def test_note_best_rebases_old_frontier_into_near_tier(self):
+        record = parse_scheme(RECORD_SEEDS[3])
+        with tempfile.TemporaryDirectory() as run_dir:
+            fleet = Fleet(
+                run_dir, 7, 0, n=3, m=3, p=3, record=23,
+                initial_terms=record, escape_profile="mixed",
+                escape_every=1, escape_bank_count=6)
+            old_frontier = next(
+                list(entry.scheme) for entry in fleet._mixed_portfolio(record)
+                if len(entry.scheme) == 24)
+            fleet.best = (24, old_frontier)
+            self.assertTrue(fleet.archive_candidate(
+                24, old_frontier, source="old-frontier-fixture"))
+            fleet.initialize_cpu_seed_banks()
+
+            self.assertTrue(fleet.note_best(23, record, 0.1))
+            self.assertEqual(23, fleet.best[0])
+            self.assertEqual(23, fleet.cpu_near_bank.best_rank)
+            self.assertEqual(1, fleet.cpu_near_rebases)
+            carried = next(
+                entry for entry in fleet.cpu_near_bank.entries(1)
+                if entry.terms == fleet.canonical(old_frontier))
+            self.assertEqual("old-frontier", carried.source)
+            self.assertEqual(24, carried.metadata["frontier_rank"])
+            self.assertNotIn(fleet.canonical(old_frontier), fleet.archive)
+
+    def test_cpu_near_cli_knobs_parse_independently(self):
+        args = build_arg_parser().parse_args([
+            "--cpu-near-size", "10",
+            "--cpu-near-signature-quota", "3",
+            "--cpu-symmetry-seeds", "5",
+        ])
+        self.assertEqual(10, args.cpu_near_size)
+        self.assertEqual(3, args.cpu_near_signature_quota)
+        self.assertEqual(5, args.cpu_symmetry_seeds)
+        self.assertEqual(1.0, args.archive_reseed)
 
 
 class DiversityArchiveTest(unittest.TestCase):
@@ -717,15 +1158,21 @@ class DiversityArchiveTest(unittest.TestCase):
         self.assertLess(cost(tied, 3, 3, 3)["bits"], cost(base, 3, 3, 3)["bits"])
         with tempfile.TemporaryDirectory() as run_dir:
             fleet = Fleet(run_dir, 1, 0, n=3, m=3, p=3, record=23,
-                          initial_terms=base, archive_size=4)
+                          initial_terms=base, archive_size=4,
+                          escape_profile="mixed", escape_every=1)
             open(fleet.curve_path, "w").close()
             fleet.best = (23, base)
             fleet.archive_candidate(23, base, source="initial")
+            fleet.initialize_cpu_seed_banks()
+            old_admissions = fleet.cpu_near_admissions
             self.assertTrue(fleet.note_tie_leader(23, tied, 1.0))
             self.assertEqual(cost(tied, 3, 3, 3)["bits"],
                              fleet.score(*fleet.best)["bits"])
             self.assertEqual(1, fleet.tie_improvements)
             self.assertIn(fleet.canonical(tied), fleet.archive)
+            self.assertGreater(fleet.cpu_near_admissions, old_admissions)
+            self.assertIn("tie-frontier",
+                          {entry.source for entry in fleet.cpu_near_bank.entries()})
 
 
 class SchedulePortfolioTest(unittest.TestCase):

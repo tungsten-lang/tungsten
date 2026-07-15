@@ -259,6 +259,66 @@ if bad_u[0] == 0
 invalid = ffsr_apply_current(shoulder_state, selected_bad, 3, bad_u, bad_v, bad_w, 3) ## i64
 z = span_expect("invalid splice rolls back exactly", invalid < 0 && shoulder_state[6] == 23 && ffw_verify_current_exact(shoulder_state, n) == 1)
 
+# External collisions are not invalid over GF(2): they parity-cancel.  Add
+# both sides of a two-term flip identity to the rank-23 scheme, select one
+# side plus a retained live term, and replace it by the other side plus that
+# retained term.  Local cardinality is 3->3, but two external collisions make
+# the actual full-scheme move rank 27->23.
+compact_u = i64[capacity]
+compact_v = i64[capacity]
+compact_w = i64[capacity]
+i = 0
+while i < exported
+  compact_u[i] = base_u[i]
+  compact_v[i] = base_v[i]
+  compact_w[i] = base_w[i]
+  i += 1
+compact_u[exported] = 1
+compact_v[exported] = 1
+compact_w[exported] = 1
+compact_u[exported+1] = 2
+compact_v[exported+1] = 2
+compact_w[exported+1] = 1
+compact_u[exported+2] = 3
+compact_v[exported+2] = 1
+compact_w[exported+2] = 1
+compact_u[exported+3] = 2
+compact_v[exported+3] = 3
+compact_w[exported+3] = 1
+compact_state = i64[state_size]
+compact_loaded = ffw_init_terms_cap(compact_state,compact_u,compact_v,compact_w,exported+4,n,capacity,141421,4,2,1000,250) ## i64
+z = span_expect("collision zero-circuit shoulder exact", compact_loaded == 27 && ffw_verify_current_exact(compact_state,n) == 1)
+compact_selected = i64[4]
+compact_all_u = i64[capacity]
+compact_all_v = i64[capacity]
+compact_all_w = i64[capacity]
+compact_count = ffw_export_current(compact_state,compact_all_u,compact_all_v,compact_all_w) ## i64
+compact_selected[0] = ffsr_find_candidate_term(compact_all_u,compact_all_v,compact_all_w,compact_count,1,1,1)
+compact_selected[1] = ffsr_find_candidate_term(compact_all_u,compact_all_v,compact_all_w,compact_count,2,2,1)
+compact_selected[2] = ffsr_find_candidate_term(compact_all_u,compact_all_v,compact_all_w,compact_count,base_u[0],base_v[0],base_w[0])
+z = span_expect("collision source window located", compact_selected[0] >= 0 && compact_selected[1] >= 0 && compact_selected[2] >= 0)
+compact_out_u = i64[4]
+compact_out_v = i64[4]
+compact_out_w = i64[4]
+compact_out_u[0] = 3
+compact_out_v[0] = 1
+compact_out_w[0] = 1
+compact_out_u[1] = 2
+compact_out_v[1] = 3
+compact_out_w[1] = 1
+compact_out_u[2] = base_u[0]
+compact_out_v[2] = base_v[0]
+compact_out_w[2] = base_w[0]
+compact_su = i64[4]
+compact_sv = i64[4]
+compact_sw = i64[4]
+z = ffsr_capture_current(compact_state,compact_selected,3,compact_su,compact_sv,compact_sw)
+z = span_expect("selected collision replacement exact", ffsr_verify_local_replacement(compact_su,compact_sv,compact_sw,3,compact_out_u,compact_out_v,compact_out_w,3) == 1)
+legacy_collision = ffsr_apply_current(compact_state,compact_selected,3,compact_out_u,compact_out_v,compact_out_w,3) ## i64
+z = span_expect("nominal splice rejects collision", legacy_collision < 0 && compact_state[6] == 27)
+compact_drop = ffsr_apply_current_compact(compact_state,compact_selected,3,compact_out_u,compact_out_v,compact_out_w,3) ## i64
+z = span_expect("compact splice realizes global rank drop", compact_drop == 23 && ffw_verify_current_exact(compact_state,n) == 1)
+
 # A real 5x5 rank-93 relation that is not a compatible pair flip.  All three
 # old terms change (term-set distance six): the first two share W, their V
 # factors sum to the third V, and the coupled U/U/W shear cancels exactly.

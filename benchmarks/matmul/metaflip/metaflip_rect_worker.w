@@ -1,8 +1,10 @@
 # Runtime-generic pure-Tungsten metaflip worker for the canonical rectangular
 # campaign profiles.
 #
-# The square worker remains untouched and retains its specialized hot path.
-# This module reuses its representation, hash table, and generic flip engine,
+# The square campaign retains its specialized hot path and public 2..7 CLI;
+# its shared state envelope also admits n=2 for the rectangular 2x2x5,
+# 2x2x6, 2x3x4, 2x3x5, 2x4x5, and 2x5x6 profiles.
+# This module reuses that representation, hash table, and generic flip engine,
 # while supplying rectangular import, exhaustive verification, and axis-aware
 # split logic.  A rectangular state stores n,m,p packed into header word 3;
 # callers must use the ffr_* entry points for initialization, splitting, exact
@@ -31,17 +33,20 @@ use flipfleet_rect_profiles
   ffrp_supported(n, m, p)
 
 -> ffr_pack_shape(n, m, p) (i64 i64 i64) i64
-  packed = n + m * 8 + p * 64 ## i64
+  # Four bits per axis admit the p=8 sensitivity profiles while leaving ample
+  # room in one header word. This header is in-memory only; scheme files do
+  # not serialize it.
+  packed = n + m * 16 + p * 256 ## i64
   packed
 
 -> ffr_shape_n(st) (i64[]) i64
-  st[3] & 7
+  st[3] & 15
 
 -> ffr_shape_m(st) (i64[]) i64
-  (st[3] >> 3) & 7
+  (st[3] >> 4) & 15
 
 -> ffr_shape_p(st) (i64[]) i64
-  (st[3] >> 6) & 7
+  (st[3] >> 8) & 15
 
 -> ffr_u_width(st) (i64[]) i64
   ffr_shape_n(st) * ffr_shape_m(st)
@@ -294,6 +299,13 @@ use flipfleet_rect_profiles
         rank = lines.size()
         if rank > 0 && lines[rank - 1].size() == 0
           rank -= 1
+      # Some imported catalog files retain both a numeric rank header and
+      # `R u v w` row prefixes. Accept that unambiguous mixed spelling too;
+      # the rank header remains authoritative and every row is still checked.
+      if line_base == 1 && lines.size() > 1
+        first_row = lines[1].split(" ")
+        if first_row.size() >= 4 && first_row[0] == "R"
+          field_base = 1
       ok = 1 ## i64
       if rank < 1 || rank > capacity || lines.size() < rank + line_base
         ok = 0

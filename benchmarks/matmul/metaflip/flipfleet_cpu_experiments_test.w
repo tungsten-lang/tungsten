@@ -17,22 +17,26 @@ while i < ffcr_arm_count()
   i += 1
 ffcr_test_expect("flip-only disables split", ffcr_fill_arm(3, 1000, 250, controls, quotas) == 3 && controls[0] == 0)
 
-pulls = i64[8]
-exposure = i64[8]
-novel = i64[8]
-returns = i64[8]
-drops = i64[8]
+pulls = i64[9]
+exposure = i64[9]
+novel = i64[9]
+returns = i64[9]
+drops = i64[9]
+density = i64[9]
 i = 0
-while i < 8
-  ffcr_test_expect("untried rotation", ffcr_select_arm(i, pulls, exposure, novel, returns, drops) == i)
-  z = ffcr_record_lease(i, 1000000, 0, 0, 0, pulls, exposure, novel, returns, drops) ## i64
+while i < ffcr_arm_count()
+  ffcr_test_expect("untried rotation", ffcr_select_arm(i, pulls, exposure, novel, returns, drops, density) == i)
+  z = ffcr_record_lease(i, 1000000, 0, 0, 0, 0, pulls, exposure, novel, returns, drops, density) ## i64
   i += 1
 novel[5] = 3
 returns[5] = 0
 returns[2] = 4
-ffcr_test_expect("yield beats return hazard", ffcr_select_arm(8, pulls, exposure, novel, returns, drops) == 5)
+density[8] = 2
+ffcr_test_expect("density reward beats novelty", ffcr_select_arm(9, pulls, exposure, novel, returns, drops, density) == 8)
+density[8] = 0
+ffcr_test_expect("yield beats return hazard", ffcr_select_arm(10, pulls, exposure, novel, returns, drops, density) == 5)
 drops[3] = 1
-ffcr_test_expect("rank drop dominates", ffcr_select_arm(9, pulls, exposure, novel, returns, drops) == 3)
+ffcr_test_expect("rank drop dominates", ffcr_select_arm(11, pulls, exposure, novel, returns, drops, density) == 3)
 
 n = 3 ## i64
 capacity = ffw_default_capacity(n) ## i64
@@ -43,6 +47,12 @@ before = ffw_moves(state) ## i64
 z = ffw_walk_tuned(state, 2000, controls) ## i64
 ffcr_test_expect("tuned worker advances", ffw_moves(state) - before == 2000)
 ffcr_test_expect("tuned worker exact", ffw_verify_best_exact(state, n) == 1)
+
+shoulder = i64[ffw_state_size(capacity)]
+z = ffw_init_naive_cap(shoulder, n, capacity, 37, 6, 4, 1000, 250) ## i64
+base_rank = ffw_current_rank(shoulder) ## i64
+z = ffcr_apply_arm(shoulder, 8, 1000, 250, controls) ## i64
+ffcr_test_expect("four-split arm opens exact +4 shoulder", ffw_current_rank(shoulder) == base_rank + 4 && ffw_verify_current_exact(shoulder, n) == 1)
 
 recent = i64[64]
 stats = i64[9]

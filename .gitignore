@@ -66,6 +66,15 @@ runtime/tests/*.dSYM
 !compiler/lib/kernels/**/*.metal
 !bits/tungsten-llama/lib/kernels/**/*.metal
 !bits/tungsten-llama/lib/*.metal
+!benchmarks/matmul/metaflip/gpu_bundle/*.metal
+!benchmarks/matmul/metaflip/rect_gpu/*.metal
+!benchmarks/matmul/metaflip/simd_bundle/*.metal
+!benchmarks/matmul/metaflip/c3_bundle/*.metal
+!benchmarks/matmul/metaflip/d3_bundle/*.metal
+!benchmarks/matmul/metaflip/flipfleet_mitm_lane.metal
+!benchmarks/matmul/metaflip/flipfleet_kxor_pool.metal
+!benchmarks/matmul/metaflip/flipfleet_span_refactor_pool.metal
+!spec/core/metal_metallib_spec.metal
 # Compiler-emitted CUDA sidecars for @gpu fn (regenerated on compile)
 *.cu
 !benchmarks/cuda_add/host.cu
@@ -171,6 +180,10 @@ benchmarks/matmul/gpu_relay
 benchmarks/matmul/metaflip/flipfleet
 benchmarks/matmul/metaflip/ff_gpu_*.txt
 benchmarks/matmul/metaflip/flipfleet_status.txt
+benchmarks/matmul/metaflip/flipfleet_*_status.txt*
+benchmarks/matmul/metaflip/flipfleet_*_best.txt
 benchmarks/matmul/metaflip/gpu_sweep_results.txt
 benchmarks/matmul/metaflip/.ff_cwd.tmp
+/flipfleet_*_status.txt*
+/flipfleet_*_best.txt
 .venv/

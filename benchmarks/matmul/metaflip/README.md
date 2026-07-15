@@ -15,34 +15,93 @@ class that produced the current records for several matmul tensor formats.
 | `meta_gen.py`        | generates the full **meta-walk** in Tungsten, seeded from the MP-93 (5,5,5) record |
 | `matmul_bench.cu`    | B200 GPU benchmark of the flip-graph search |
 | `matmul_5x5_rank93_gf2.txt` | a verified, independently-found rank-93 decomposition of <5,5,5> over GF(2) |
-| `flipfleet_native.w` | authoritative pure-Tungsten 3×3–7×7 and rectangular-profile CPU/GPU fleet; square and rectangular campaigns share the native TUI |
-| `flipfleet_rect_campaign.w` | first-class sticky-island coordinator for the nine allowlisted rectangular `--tensor` profiles from `3x3x4` through CPU-only `4x5x7` |
+| `flipfleet_native.w` | authoritative pure-Tungsten 2×2–7×7 and rectangular-profile CPU/GPU fleet; square and rectangular campaigns share the native TUI |
+| `flipfleet_rect_campaign.w` | first-class sticky-island coordinator for twenty-five allowlisted rectangular `--tensor` profiles from the certified-gap `2x2x5` campaign through CPU-only `5x6x7` |
+| `flipfleet_rect_portfolio.w` / `flipfleet_rect_portfolio_policy.w` / `flipfleet_rect_portfolio_tui.w` | adaptive `--rect` multi-shape coordinator, exact worker/GPU allocation, and fixed-column portfolio dashboard |
 | `metaflip_worker.w` | runtime-generic exact CPU worker used in-process by the native fleet |
+| `flipfleet_ternary.w` / `flipfleet_ternary_worker.w` | separate pure-Tungsten 4×4–7×7 CPU/GPU fleet over exact integer coefficients `{−1,0,1}`; global index normalization, strict signed moves, provenance, and compound d967/d1931 results are in `TERNARY_FLIPFLEET.md` and `TERNARY_GPU_ENGINE.md` |
+| `flipfleet_ternary_span_refactor.w` / `_test.w` / `_bench.w` | exact bounded signed-generator-span 3→2, disjoint 3↔3, 4→3, and external-cancellation refactors; planted/full-Strassen controls pass, while the pinned 4×4–7×7 audit is an executable offline negative |
+| `flipfleet_ternary_parent_nullspace.w` / `_local_audit.w` | proof-safe two-prime stacked-Gram audit and exact signed two-parent splicing; 6,228 proper 5×5–7×7 splices are rank-neutral, so the move remains archive-cadence/offline |
+| `import_ternary_catalog.py` / `ternary_catalogue_sources.tsv` | independent `.exp`/JSON integer expansion and pinned source/blob/SHA-256 audit for the checked-in ternary certificates |
 | `flipfleet_escape.w` | exact generic/fixed/C3/composed escape identities over shared i64 buffers |
 | `flipfleet_bank_policy.w` | native structural shoulder banks, least-used replay/success attribution, and nondominated archive policy |
 | `flipfleet_gpu_bundle.w` / `gpu_bundle/` | checked-in generic adaptive GPU workers |
 | `flipfleet_c3_bundle.w` / `c3_bundle/` | checked-in C3-preserving GPU workers |
 | `flipfleet_simd_bundle.w` / `simd_bundle/` | checked-in cooperative SIMD-group workers |
 | `flipfleet_mitm_lane.w` | bounded pure-Tungsten/Metal 5→4 surgery engine |
+| `flipfleet_rect_mitm_lane.w` | unequal-factor 5→4 GPU surgery wrapper with rectangular local and full-tensor gates; scheduled sparsely for the live `2x2x5`, `2x3x5`, `2x4x5`, and `2x5x6` targets (retired for proven-optimal `2x3x4`) |
 | `flipfleet_constraint_pool.w` / `flipfleet_kxor_pool.w` / `flipfleet_differential_pool.w` | projected-defect/proof scouts, exact 6→5 through 9→8 joins, live circuits, and one-child parent differential |
-| `flipfleet_archive_nullspace.w` / `flipfleet_partial_automorphism.w` | exact archive-difference nullspace hybrids and bounded swap/GL-shear automorphism splices |
-| `flipfleet_span_refactor.w` / `flipfleet_span_refactor_pool.w` | complete exact 3/4-term factor-span refactors with 27/64-bit Metal joins and full-tensor admission |
+| `flipfleet_archive_nullspace.w` / `flipfleet_partial_automorphism.w` | exact archive-difference nullspace hybrids and bounded swap/GL-shear/direct-3-cycle automorphism splices |
+| `flipfleet_partial_automorphism_nullspace.w` / `flipfleet_partial_automorphism_nullspace_beam_bench.w` | complete arbitrary-cardinality partial-automorphism kernels, retained-workspace live finder, and depth-four quotient-graph closure; this is the source of the maximum-distance 7×7 restart doors |
+| `flipfleet_colored_automorphism_tunnel.w` | exact simultaneous `{identity,g,h,hg}` term-colour nullspace plus complete sparse support-4 MITM audit; planted coupled move passes, while current real frontiers reduce to staged binary tunnels, so it remains offline |
+| `flipfleet_odd_parent_affine_splice.w` | canonical GF(2) symmetric-difference closure of odd exact-parent banks; the complete Gray hull is an offline audit, while five independently gated 6×6/7×7 endpoints feed only the low-cadence restart archive |
+| `flipfleet_affine_code_descent.w` | large-bank exact-zero bitset code, randomized/tempered coefficient descent, and exhaustive correlated k-cubes; one independently gated 7×7 record-rank/density basin feeds the low-cadence restart archive |
+| `flipfleet_zero_relation_image.w` / `flipfleet_zero_relation_derivative_bench.w` | arbitrary raw linear images and first/second finite derivatives of archive zero relations; exact planted rank-drop controls pass, while bounded 6×6/7×7 audits remain offline negatives |
+| `flipfleet_factor_map_nullspace.w` / `flipfleet_two_factor_map_nullspace.w` | full-delta one- and two-factor raw-map audits, including singular images and bilinear cross terms (offline negative certificates on the current frontiers) |
+| `flipfleet_three_factor_map_nullspace.w` / `_test.w` / `_bench.w` | exact cubic-cross-term selected-subset raw-map tunnel; a proper-submap-resistant planted 5↔5 move full-gates, while 5,120 complete kernels on two 3×3--7×7 doors yield only set-invariant dependencies, so it remains offline (`THREE_FACTOR_MAP_NULLSPACE.md`) |
+| `flipfleet_kernel_shear_rankdrop.w` | zero-admitting, duplicate-cancelling whole-window kernel closure with exhaustive small-nullity combinations and planted rank-drop regression |
+| `flipfleet_leaf_conjugation.w` / `flipfleet_leaf_conjugation_bench.w` | exact sparse leaf-isotropy images and Pareto-scored 7×7 block-seed audit |
+| `flipfleet_outer_isotropy_bench.w` / `flipfleet_outer_isotropy_full_bench.w` / `flipfleet_outer_isotropy_pareto.w` | exhaustive weighted Strassen-outer rank-247 discovery, all-recipe closure, and eight-term-set restart-bank extraction |
+| `flipfleet_block_outer7_scan.w` | optimized support-aware seven-block audit of the rank-247 scheme; bounded record/band/multiple-of-seven scans and local unbalanced closure are offline negatives |
+| `flipfleet_block_outer5_scan.w` | single-threaded pure-Tungsten balanced scan of seven support-distinct rank-93 5x5 outers over all sorted 15--32 targets; no public/local frontier wins, with the closest miss at +30 |
+| `flipfleet_outer_unbalanced7_formula_bench.w` / `flipfleet_outer_3x3_split_bench.w` | exact alternate-block audits for all two-block splits of seven and the independent rank-23 `3+2+2` outer family |
+| `flipfleet_global_isotropy.w` / `flipfleet_rect_global_isotropy.w` / `flipfleet_rect_{global_isotropy,orbit_door}_cli.w` / `flipfleet_rect_orbit_door_test.w` | exact whole-scheme `GL` actions, directed density descent, coarse orbit telemetry, and complete-gated rectangular leader/far-door generators; the latter preserves and byte-replays equal-density orbit representatives for basin diversity |
+| `flipfleet_rect_archive_nullspace.w` / `_cli.w` | complete unequal-factor tensor-column elimination, proper two-parent splice materialization, and independent exact gating |
+| `flipfleet_rect_short_orbit_scout.w` / `flipfleet_rect_short_orbit_frontier_test.w` | bounded two/three-generator 4x4x5 GL scout and deterministic replay of the nullity-three path to the independent d662 CPU door |
+| `flipfleet_225_block_gl_bank.w` / `flipfleet_225_block_gl_parent_lib.w` / `flipfleet_225_block_nullspace_scan.w` | exact independent-GL `3+2` leaf family for the certified 225 gap; the complete 4,096-parent × five-door pairwise nullspace hull has no rank-17 relation and is documented in `BLOCK_GL_NULLSPACE_225.md` |
+| `flipfleet_rect_archive_nullspace.w` / `flipfleet_225_archive_nullspace_closure_bench.w` | complete low-nullity pair-hull enumeration with exact full-term-set deduplication; the five 225 doors close to seven r18 schemes, then saturate |
+| `flipfleet_rect_multi_parent_nullspace.w` / `flipfleet_225_multi_parent_{batch,pair_batch,triple_batch}.w` | complete affine-coset search for correlated dependencies spanning three or more exact rectangular parents; 11.94M masks across the 225 five-door/block-parent campaign contained no r17 subset |
+| `flipfleet_225_affine_decoder_lib.w` / `_test.w` / `_bench.w` | full 625-column, dimension-413 affine decoder for the certified 225 gap: complete radius-three Metal shells, sparse exact rank-band walks, and randomized Lee--Brickell information-set restarts; 685.31B exact candidates found no r17, while the walker demonstrated distance-36 same-rank tunnels |
+| `flipfleet_225_union_subset_sat.w` / `audit_225_union_subset_sat.py` / `solve_225_union_z3.py` / `flipfleet_225_union_affine_descent.w` | SHA-pinned fixed-dictionary `weight <= 17` native-XOR search and independent model audit for the 225 gap; the all-parent union has 3,321 terms/rank 212, bounded SAT arms are indeterminate, and the 3,750-scheme odd-parent family is parity-obstructed from rank 17 (`UNION_SUBSET_SAT_225.md`) |
+| `flipfleet_226_multi_parent_batch.w` / `flipfleet_226_multi_parent_k_batch.w` / `flipfleet_226_block_locality_test.w` | correlated affine search plus a three-block support certificate; the entire deterministic 226 block dictionary requires at least `7+7+7` terms, so it cannot contain r20 |
+| `flipfleet_226_block_gl_bank.w` / `flipfleet_226_block_gl_parent_lib.w` / `flipfleet_226_block_nullspace_scan.w` | exact independent-GL three-Strassen family for the 226 primitive target; all 31,654 relations in the 4,096-parent/bounded-archive hull stay rank 21, while the maximum-distance d108 parent is retained as a second CPU door (`BLOCK_GL_NULLSPACE_226.md`) |
+| `flipfleet_parent_chord.w` / `flipfleet_rank_ladder.w` | exact parent-guided chord shoulders and forced-rank-debt/structured-close experiments (measured controls, not scheduled lanes) |
+| `flipfleet_projection_replacement.w` / `flipfleet_projection_replacement_subspace_bench.w` | exact cross-format core replacement and exhaustive coordinate-pair audit; real-frontier endpoints reduce to no-ops or already-covered split circuits |
+| `flipfleet_syndrome_repair.w` | bounded exact CPU repair of GPU reject syndromes, invoked only after a nominal record fails its exhaustive gate |
+| `flipfleet_rect_residual_worm.w` / `_test.w` / `_bench.w` | exact offline rank-17 `<2,2,5>` sparse-carrier walk with incremental/rebuilt invariants, planted recovery, and a 36M-proposal matched negative audit documented in `RESIDUAL_WORM_225.md` |
+| `flipfleet_rect_two_term_repair.w` / `_test.w` / `_bench.w` | pure-Tungsten rank-at-most-two residual recognizer and exhaustive 136-pair repair sweep over collision-checked unit-floor worm archives; the 144M-proposal d84/d88 audit remains offline (`RESIDUAL_WORM_225.md`) |
+| `flipfleet_rect_three_term_repair.w` / `_test.w` / `_bench.w` | complete pure-Tungsten rank-at-most-three tensor recognizer and exhaustive 378,080-triple repair scan over 556 unique `<2,2,5>` unit-floor states; no rank-17 child, documented in `THREE_TERM_REPAIR_225.md` |
+| `flipfleet_rect_two_term_hop_bench.w` / `_test.w` | exhaustive correlated two-term unit-to-unit residual tunnel over all 633 saved floors and 400 target cells; 14,439 full-gated hops close each door's four-cell component but do not bridge or expand it, so the move stays offline |
+| `flipfleet_frozen_fringe_sat_pool.w` | support-clustered exact 16→15 frozen-fringe SAT child, rotating in the 4×4 constraint pool when CryptoMiniSat is available |
+| `flipfleet_span_refactor.w` / `flipfleet_span_refactor_pool.w` | complete exact 3/4-term factor-span refactors with 27/64-bit Metal joins, collision-directed external-span doors, GF(2) parity-compacting rank admission, and a full-tensor gate |
 | `flipfleet_low_rank_shear_search.w` / `flipfleet_low_rank_shear_pool.w` | exact q=2 rank-1/rank-2 correction absorption, with regular Metal tuple enumeration and full host admission |
+| `flipfleet_affine_4cube.w` / `_test.w` / `_bench.w` | exact sixteen-corner affine-Segre zero circuits fitted from live five-term affine bases; complete 4×4/5×5 closures find no sixth live corner, so this remains an offline planted regression |
+| `flipfleet_matrix_pencil.w` / `_test.w` / `_bench.w` | complete GF(2) projective-line `2 x b x c` refactor via `min_D(rank(D)+rank(X+D)+rank(Y+D))`; six real 5x5 neutral tunnels full-gate, but matched continuation is negative so it remains offline (`MATRIX_PENCIL_TUNNEL.md`) |
+| `flipfleet_projective_plane.w` / `_test.w` / `_bench.w` | exact Fano-plane four-bucket rank-median refactor; 5x5/7x7 neutral tunnels full-gate, but 600M matched continuation moves give diversity without objective reward, so it remains offline (`PROJECTIVE_PLANE_TUNNEL.md`) |
+| `flipfleet_projective_circuit5.w` / `_test.w` / `_bench.w` | exact five-bucket rank-four dependency median; real 5x5 `+1` shoulders improve matched endpoint novelty, so a bounded one-quarter cadence is folded into the existing `lifted-identity` pool row (`PROJECTIVE_CIRCUIT5_TUNNEL.md`) |
+| `flipfleet_projective_bucket5.w` / `_test.w` / `_bench.w` | exact whole-bucket five-circuit median over all 31 bucket-matrix subset toggles using full-width physical factorization; the planted 10→9 move is beyond representative-term search, but real doors give only one unrewarded 7x7 `+1` shoulder, so it remains offline (`WHOLE_BUCKET_DEPENDENCY_MEDIANS.md`) |
+| `flipfleet_gf2_dependency_median.w` / `_test.w` / `_bench.w` | polynomial arbitrary-size rank-one dependency tunnel via nonpositive-bucket GF(2) elimination and bounded positive debt; an eight-bucket 8→7 plant passes, while all real hits reduce to ≤5-bucket known geometry with no win, so it remains offline (`WHOLE_BUCKET_DEPENDENCY_MEDIANS.md`) |
+| `flipfleet_gf2_lowrank_dependency_median.w` / `_test.w` / `_bench.w` | arbitrary-size dependency tunnel with every live rank-one control and pair-XOR rank-two `D`; a genuine 16→13 rank-two-only plant passes, but 283,890 complete real-door candidates yield only 13 infertile 5x5 `+1` shoulders, so it remains offline (`LOWRANK_DEPENDENCY_MEDIAN.md`) |
+| `flipfleet_projective_circuit6.w` / `_test.w` / `_bench.w` | exact six-bucket rank-five dependency median with cubic triple-XOR discovery; 5.36M real endpoint occurrences contained no neutral/drop and matched `+2` continuation was unrewarded, so it remains offline (`PROJECTIVE_CIRCUIT6.md`) |
+| `flipfleet_ternary_dependency_median.w` / `_test.w` / `_bench.w` | integer-safe strict-ternary five-factor unit-dependency median; complete 4x4--7x7 audits find `+1/+2` shoulders but no neutral/drop, and 168M matched moves do not beat split controls, so it remains offline (`TERNARY_DEPENDENCY_MEDIAN.md`) |
 | `flipfleet_kernel_pool.w` / `flipfleet_map_elites.w` / `flipfleet_rank_debt.w` | pool rotation, contextual scheduling, MAP-Elites, and return-hazard policy |
 | `flipfleet_persistent_gpu.w` / `flipfleet_metallib_cache.w` | persistent generic/rectangular GPU command loop and offline Metal-library cache |
 | `flipfleet_basin_identity.w` / `flipfleet_lineage.w` | symmetry-canonical basin telemetry and delayed GPU→CPU descendant rewards |
 | `flipfleet_cpu_experiments.w` | one-island online parameter racer; the worker also exposes the one-island accepted-state cycle watch |
 | `flipfleet_d3.w` / `d3_bundle/` | standalone bounded 6×6 C3×Z2 experiment, retained off the default schedule |
 | `flipfleet_profiles.w` / `flipfleet_gpu_policy.w` | native tensor-specific CPU doors, zones, GPU weights, and adaptation |
+| `signed_projection_audit.py` / `flipfleet_profile_shoulders.w` | independent integer-to-GF(2) audit of pinned signed schemes and cold file-backed cross-field shoulder admission; provenance and negatives are in `SIGNED_PROJECTION_AUDIT.md` |
 | `flipfleet_sedoglavic.w` | pure-Tungsten rectangular-leaf composer with exhaustive input/output gates |
 | `flipfleet_block_composer.w` / `flipfleet_block_compose.w` | pure-Tungsten wide-factor support-aware composer and all-S3 CLI |
 | `flipfleet_block_formula_scan.w` / `flipfleet_block_formula_scan_wide.w` / `flipfleet_block_formula_scan_cross.w` / `flipfleet_block_variant_scan.w` | reproducible legacy, continuous 12--32, cross-band, exact-tie, and same-rank-leaf scans |
-| `catalog_gf2_import.py` | offline dense-catalog importer with W-order correction and independent GF(2) reconstruction |
+| `catalog_gf2_import.py` / `catalog_gf2_export.py` | independently reconstructing dense-catalog import and publishable GF(2) JSON export with explicit W-order correction |
 | `block_composition_cross_audit.tsv` / `block_composition_cross_audit_sources.tsv` | persisted 20/21 seam comparison and pinned source revisions/digest |
 | `block_composition_smallblock_audit.tsv` / `block_composition_smallblock_audit_sources.tsv` | bounded size-1/2/9 frontier audit, field-aware comparisons, and pinned leaf hashes |
+| `flipfleet_block_formula_scan_small_cross.w` / `flipfleet_block_small_cross_compose.w` / `BLOCK_COMPOSITION_SMALL_CROSS_AUDIT.md` | complete 84-leaf 8--11-by-32 scan, 40 materialized exact GF(2) upper bounds, field-aware comparison, and replay |
+| `flipfleet_block_small_cross_unbalanced_scan.w` / `flipfleet_block_bounded_fast_test.w` / `block_composition_small_cross_unbalanced_audit.tsv` | exact-equivalent precomputed-support bounded scorer and complete 129-target ordered-allocation closure; one new 10x16x16 rank-1558 formula |
+| `flipfleet_block_small_cross_unbalanced_full_scan.w` / `block_composition_small_cross_unbalanced_full_audit.tsv` | sharded exhaustive ordered-allocation closure of all 1,154 seam targets; 38 improved formulas and a new exact 10x16x17 rank-1694 result |
+| `flipfleet_block_small_cross_unbalanced_exact_scan.w` / `block_composition_small_cross_unbalanced_exact_audit.tsv` | full exact materialization of all 38 improved unbalanced layouts; two harmless extra cancellations and no hidden comparator win |
+| `flipfleet_block_small_cross_bounded_tie_exact.w` / `_test.w` / `block_composition_small_cross_bounded_tie_exact_audit.tsv` | all 648 formula-minimizing ordered 2--8 allocation/S3 ties within 12 of a pinned GF(2) comparator; no new numerical win beyond the known 10x22x23 rank 3071 |
+| `flipfleet_block_outer47_small_cross_{scan,exact,compose}.w` / `BLOCK_COMPOSITION_OUTER47_SMALL_CROSS_AUDIT.md` | full d450/d677 support control plus all 14,362 balanced formula-minimizing ties; d677 has zero wins, while mapped-zero closure promotes seven strict and seven uncovered certificates |
+| `block_composition_2wide_leaf_audit.tsv` / `block_composition_small_cross_audit.tsv` / `block_composition_small_cross_audit_sources.tsv` | independently reconstructed two-wide leaf pool, 1,154-target comparison, and pinned provenance |
+| `block_composition_leaf_sensitivity.py` / `BLOCK_COMPOSITION_LEAF_SENSITIVITY.md` | cross-runtime deterministic downstream leverage ranking over all 186 materialized and 889 strict audited formulas |
+| `block_composition_outer5_audit.tsv` / `block_composition_outer5_public_baseline.tsv` | complete seven-outer 15--32 summary and pinned 1,140-target public comparison used by the rank-93 outer audit |
 | `verify_block_composition_records.py` / `block_composition_independent_audit.tsv` | independent sparse-parity reconstruction of every manifest certificate |
 | `BLOCK_COMPOSITION.md` / `BLOCK_COMPOSITION_RECORDS.md` | composer design, reproducible commands, hashes, and dated apparent-record comparisons |
 | `FLIPFLEET_MOVE_LAB.md` | exact span/shear identities, measured evidence, and the prioritized next move families |
+| `proof_n324/` | independently replayable lower-bound package for `<3,2,4>`: two constrained mode lemmas plus six quotient-rank pseudo-Boolean proofs establish exact GF(2) rank 20 |
+| `proof_n235/` | checked-bound package for `<2,3,5>`: a verifier-accepted 31-orbit Wang certificate, formally checked multiset-capacity XLRUP proof, and independent rank-one incidence contradiction establish the lower endpoint; five exact rank-25 gates establish `23 <= R_GF(2) <= 25` |
+| `proof_inner2/` | reusable exact XNF/OPB quotient-rank campaign for every GF(2) `<a,2,c>` tensor plus complete Wang certificates closing `<2,2,3>` at 11, `<2,2,4>` at 14, and `<2,3,3>` at 15, and raising `<2,2,5>` to the interval 17--18 |
 | `flipfleet_tui.w` | native single-screen campaign dashboard helpers |
 | `flipfleet.py` | historical Python coordinator retained for experiment replay, not new campaigns |
 | `sym_start.py`       | exact diagonal-partition starts for target-aligned symmetric search |
@@ -62,17 +121,41 @@ class that produced the current records for several matmul tensor formats.
 | `matmul_3x3_rank23_d159_gf2.txt` | mined-escape intermediate that opened the new 3×3 basin |
 | `matmul_4x4_rank47_d450_gf2.txt` | exact rank-47, density-450 default 4×4 frontier seed |
 | `matmul_4x4_rank47_d677_flips_gf2.txt` | independent exact rank-47 Kauers–Moosbauer/Flips orbit retained for 4×4 basin diversity |
-| `matmul_5x5_rank93_d1155_gf2.txt` | exact rank-93, density-1155 GPU escape-portfolio cost leader |
+| `matmul_4x4_rank49_d432_signed_4x4x4_m49_zt_gf2.txt` | independent mod-2 projection of the public exact `{−1,0,1}` rank-49 scheme; a structurally distant, file-backed +2 shoulder, not a record |
+| `matmul_5x5_rank93_d967_four_split_control_gf2.txt` | exact rank-93 current density leader, reached by a four-split continuation from the d968 global-isotropy frontier |
+| `matmul_5x5_rank93_d968_global_isotropy_gf2.txt` | prior exact rank-93 global-isotropy density leader, retained as provenance for the d967 continuation |
+| `matmul_5x5_rank93_d1155_gf2.txt` | prior exact rank-93 C3/GPU escape-portfolio leader, retained for symmetry search |
 | `matmul_5x5_rank93_d1168_gf2.txt` | prior exact rank-93 cost leader from the CPU escape campaign |
 | `matmul_5x5_rank93_d1191_gf2.txt` | prior exact C3 rank-93 symmetry-escape seed |
-| `matmul_6x6_rank153_d2502_gf2.txt` | exact C3 rank-153, density-2502 current cost leader from the native mixed CPU fleet |
+| `matmul_6x6_rank153_d1860_global_isotropy_gf2.txt` | exact rank-153 current density leader after global-isotropy descent and short walking |
+| `matmul_6x6_rank153_d2502_gf2.txt` | prior exact C3 rank-153 leader retained for symmetry search and provenance |
 | `matmul_6x6_rank153_d2508_gf2.txt` | prior cooperative-SIMD density leader, retained for attribution and replay |
 | `matmul_3x3x4_rank29_gf2.txt` / `matmul_3x4x4_rank38_gf2.txt` | exact rectangular leaves used by the 7×7 subfleets and composer |
+| `matmul_2x2_rank7_strassen_gf2.txt` + 8 `matmul_2x2_rank7_d{36,40,42}_gl*_gf2.txt` | exact optimal rank-7 ⟨2,2,2⟩ Strassen seed and a curated leaf-local GL(2,2) orbit bank (densities 36/40/42); FlipFleet 2×2 frontier doors and composition leaf experiments. Full orbit is 216 members via `flipfleet_2x2_gl_leaf_bank.w` |
+| `matmul_2x2x3_rank11_catalog_gf2.txt` | exact AlphaTensor GF(2) leaf used by the independent `3+2+2` outer audit; catalog import independently reconstructed before check-in |
+| `matmul_2x3x4_rank20_d130_global_isotropy_gf2.txt` | exact rank-20 GF(2) density leader; the independently replayed quotient-rank proof establishes that rank 20 is optimal |
+| `matmul_2x3x5_rank25_d160_fleet_gf2.txt` / `matmul_2x3x5_rank25_d170_fleet_gf2.txt` / `matmul_2x3x5_rank25_d173_alphatensor_zt_mod2_gf2.txt` / `matmul_2x3x5_rank25_d210_fleet_gf2.txt` / `matmul_2x3x5_rank25_d278_fleet_gf2.txt` | exact rank-25 GF(2) frontiers: d160 is the byte-replayed density default; d170 retains the public-basin bridge to pinned d173; independent d210/d278 rediscoveries are disjoint from that basin and each other; establish `23 <= R_GF(2)(<2,3,5>) <= 25` and target rank 24 |
+| `matmul_2x3x5_rank26_block15_11_gf2.txt` | retained elementary `3+2` block predecessor used to seed the independent rank-25 rediscoveries |
+| `matmul_2x2x5_rank18_d84_gf2.txt` / `matmul_2x2x5_rank18_d88_gf2.txt` | exact zero-overlap core pair for the certified 17--18 primitive gap; d84 is the density leader and their union has only the full parent-difference relation |
+| `matmul_2x2x5_rank18_d92_far_gl_gf2.txt` | exact far-GL intermediate that opened the d84 basin, retained for provenance |
+| `matmul_2x2x5_rank18_d92_block_local_gl_gf2.txt` / `matmul_2x2x5_rank18_d84_block_splice_gf2.txt` / `matmul_2x2x5_rank18_d84_gpu_block_tunnel_gf2.txt` | independently conjugated `3+2` block door, its proper nullspace splice, and the corrected-GPU return from that component; complete the five-door primitive-gap rotation |
+| `matmul_2x2x6_rank21_strassen_blocks_gf2.txt` / `matmul_2x2x6_rank21_d108_block_local_gl_gf2.txt` | exact rank-21/d108 three-Strassen baseline and zero-overlap block-local GL door for the live rank-20 primitive campaign |
+| `matmul_2x4x5_rank33_d222_fleet_gf2.txt` / `matmul_2x4x5_rank33_d241_gl_frontier_gf2.txt` / `matmul_2x4x5_rank33_catalog_gf2.txt` | exact rank-33 GF(2) d222 fleet density leader plus far-GL and catalog restart doors; the known characteristic-zero rank-32 scheme is not valid over GF(2) |
+| `matmul_2x5x6_rank47_catalog_gf2.txt` / `matmul_2x5x6_rank47_d438_orbit_door_gf2.txt` / `flipfleet_256_bound_assets_test.w` | two exact rank-47/d438 GF(2) doors at maximum term-set distance 94, plus an independent 3,600-coefficient pure-Tungsten admission gate for the strict rank-46 target; one rank saved propagates through 10 saved and 49 strict-audited formulas |
 | `matmul_3x3x5_rank36_d287_gf2.txt` / `matmul_3x3x5_rank36_d304_gf2.txt` / `matmul_3x4x5_rank47_d386_gf2.txt` / `matmul_3x5x5_rank58_d518_gf2.txt` | exact composition leaves and rectangular-campaign density leaders; d287 is the current 3x3x5 default and d304 is retained provenance |
-| `matmul_4x4x5_rank60_gf2.txt` / `matmul_4x4x5_rank60_d919_gf2.txt` | imported exact rank-60 rectangular record and its native-GPU density-919 campaign descendant |
-| `matmul_4x5x5_rank76_gf2.txt` / `matmul_4x4x6_rank73_gf2.txt` / `matmul_4x5x7_rank104_catalog_gf2.txt` / `matmul_4x5x7_rank104_d1160_gf2.txt` | exact CPU-ready rectangular composition/product leaves; d1160 is the rank-104 4x5x7 campaign default |
-| `matmul_7x7_rank248_d2952_sedoglavic_gf2.txt` | exact rank-248 default, the lowest-density saved block placement |
+| `matmul_3x4x6_rank54_d488_gl_frontier_gf2.txt` / `matmul_3x4x7_rank64_d519_gl_frontier_gf2.txt` / `matmul_3x5x6_rank68_catalog_gf2.txt` / `matmul_3x5x7_rank79_d699_gf2.txt` | exact high-leverage CPU frontiers; 346/347 use far-GL density leaders and 347/356 replace 334/344 in the fixed-size default rectangular portfolio after matched throughput tests |
+| `matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt` / `matmul_4x4x5_rank60_d662_short_orbit_splice_gf2.txt` / `matmul_4x4x5_rank60_d655_global_isotropy_gf2.txt` / `matmul_4x4x5_rank60_d919_gf2.txt` | exact rank-60 rectangular frontiers; d628 remains the density default, d662 is an algebraically independent short-GL/splice CPU door, d655 preserves replay provenance, and the disjoint d919 presentation remains the legacy door |
+| `matmul_4x4x6_rank73_d690_gl_frontier_gf2.txt` / `matmul_4x5x6_rank90_d907_gl_frontier_gf2.txt` / `matmul_4x5x7_rank104_d1089_gl_frontier_gf2.txt` | exact far-GL defaults for high-leverage CPU rectangular campaigns; each retains its materially disjoint legacy seed as alternate door |
+| `matmul_4x5x8_rank118_d1283_gl_frontier_gf2.txt` / `matmul_4x6x6_rank105_d1197_gf2.txt` / `matmul_4x6x7_rank123_d1406_gl_frontier_gf2.txt` / `matmul_4x6x8_rank140_d1560_global_isotropy_gf2.txt` / `matmul_5x6x7_rank150_d1875_gl_frontier_gf2.txt` | exact CPU-only high-leverage density leaders; all far-GL profiles use a two-door default/legacy island bank |
+| `matmul_7x7_rank247_d3098_global_isotropy_gf2.txt` | exact rank-247 default and candidate GF(2) record, density-normalized then ground by the native fleet |
+| `matmul_7x7_rank247_d3554_outer_isotropy_gf2.json` | dense public-schema export of the reproducing rank-247 certificate; independently accepted by FastMatrixMultiplication's `Scheme.load(..., validate=True)` |
+| `matmul_7x7_rank247_d3098_partial_auto_beam_dense_gf2.txt` / `matmul_7x7_rank247_d3098_partial_auto_beam_far_gf2.txt` | exact rank-247/d3098 depth-four tunnel endpoints, each at the maximum possible distance 494 from the default (no shared terms); mutually distinct at distance 316 |
+| `matmul_7x7_rank247_d3098_affine_code_gf2.txt` | exact large-bank affine-code endpoint, distance 398 from the default and at least 56 from every one of its 165 generating inputs; D3/reversal-canonical novel, retained as a low-cadence restart door |
+| three `matmul_7x7_rank247_*partial_auto*gf2.txt` basis endpoints | exact complete-nullspace restart doors at source distances 38, 40, and 342, retained alongside the dynamic low-cadence finder |
+| `matmul_7x7_rank247_d3554_outer_isotropy_gf2.txt` and three `cNNN_mN` variants | exact weighted-outer rank-247 structural restart bank; the variants are pairwise distance 494 |
+| `matmul_7x7_rank248_d2952_sedoglavic_gf2.txt` | former rank-248 default, retained as a low-density +1 shoulder |
 | `matmul_7x7_rank248_d2958_sedoglavic_gf2.txt` | canonical reproducible rank-248 block placement |
+| `matmul_7x7_rank248_d2967_leaf_canonical_gf2.txt` | exact canonical-leaf embedding retained as a low-cadence frontier seed, 336 terms from the prior archive |
 | `matmul_7x7_rank248_d3015_connectivity_sedoglavic_gf2.txt` | distinct rank-248 placement selected for additional cross-seam shared factors |
 
 Rectangular CPU/GPU run commands, exact targets, and upstream licensing are in
@@ -133,10 +216,9 @@ Build once from any directory in the checkout:
 
 ```sh
 ROOT="$(git rev-parse --show-toplevel)"
-TUNGSTEN_LL_PATH=/tmp/flipfleet-native.ll \
-  "$ROOT/bin/tungsten" compile --release --lto \
-  -o /tmp/flipfleet-native \
-  "$ROOT/benchmarks/matmul/metaflip/flipfleet.w"
+"$ROOT/bin/tungsten" compile \
+  "$ROOT/benchmarks/matmul/metaflip/flipfleet.w" \
+  --out /tmp/flipfleet-native --release --lto --fast
 ```
 
 At runtime the fleet walks upward from the current directory to locate the
@@ -146,12 +228,14 @@ checkout, pass `--repo-root /path/to/tungsten`.
 
 Select the square format with `--tensor 3x3` through `--tensor 7x7`.  Every
 size loads its tracked exact rank/density leader.  The current 6×6 default is
-rank 153 at density **2502** (2,313 no-CSE operations); it independently
-reconstructs the complete tensor and is C3-closed.  The earlier density-2508
-file remains the attributed cooperative-SIMD milestone.  The 7×7 default is
-the exhaustively verified rank-248, density-2952 Sedoglavic/Strassen-pad
-composition. Its independently searched 3×3×4 and 3×4×4 leaves also run as
-dedicated rectangular subfleets and recompose immediately after an improvement.
+rank 153 at density **1860** (1,671 no-CSE operations); its complete tensor is
+independently reconstructed.  The C3 density-2502 file remains a structural
+restart seed.  The 7×7 default is the exhaustively verified rank-247,
+density-3098 weighted-outer descendant.  Three additional rank-247 outer
+representatives enter the archive at low cadence, while all four old rank-248
+compositions remain explicit +1 shoulders.  The independently searched 3×3×4
+and 3×4×4 leaves also run as dedicated rectangular subfleets and recompose
+immediately after an improvement.
 The signed-i64 factor ABI makes 7×7 the current maximum square size.
 
 The GPU is on by default and the policy is adaptive.  `--no-gpu` is the
@@ -181,11 +265,35 @@ existing best checkpoints are never silently overwritten.
 # CPU-only control with the same native sticky doors and exact escape banks.
 /tmp/flipfleet-native --tensor 6x6 --no-gpu --secs 3600
 
-# Default exact 7×7 rank-248 seed, direct plus rectangular GPU lanes.
+# Default exact 7×7 rank-247 seed, direct plus rectangular GPU lanes.
 /tmp/flipfleet-native --tensor 7x7 --secs 3600
 
 # First-class 4×4×5 campaign: sticky CPU islands plus its specialized GPU.
 /tmp/flipfleet-native --tensor 4x4x5 --secs 3600
+
+# Smallest field-gap campaign; exact rank-33 GF(2) seed, strict target 32.
+/tmp/flipfleet-native --tensor 2x4x5 --secs 3600
+
+# Highest-leverage two-wide primitive; exact rank-47 seed, strict target 46.
+/tmp/flipfleet-native --tensor 2x5x6 --secs 3600
+
+# Certified one-term primitive gap; five CPU doors plus cal2zone and exact
+# 5→4 MITM Metal lanes are enabled by default.
+/tmp/flipfleet-native --tensor 2x2x5 --secs 3600
+
+# Proven-optimal rank 20; explicit runs now search density and basin diversity only.
+/tmp/flipfleet-native --tensor 2x3x4 --secs 3600
+
+# Live primitive 23--25 interval; four CPU doors plus cal2zone and exact 5→4
+# MITM Metal lanes target rank 24.
+/tmp/flipfleet-native --tensor 2x3x5 --secs 3600
+
+# Adaptive multi-shape rectangular portfolio. -J is the total CPU budget;
+# GPU lanes are divided among currently supported rectangular Metal workers.
+/tmp/flipfleet-native --rect --secs 3600
+
+# Override the portfolio without launching separate processes by hand.
+/tmp/flipfleet-native --rect --rect-shapes 4x5x7,4x6x7,4x5x6,5x6x7,3x4x7,3x5x6,4x4x5 --secs 3600
 
 # Additional exact block-composition leaves, each with CPU and Metal lanes.
 /tmp/flipfleet-native --tensor 3x3x5 --secs 3600
@@ -196,20 +304,43 @@ existing best checkpoints are never silently overwritten.
 # the default GPU reports that capability and continues without DEGRADED.
 /tmp/flipfleet-native --tensor 4x5x5 --secs 3600
 /tmp/flipfleet-native --tensor 4x4x6 --secs 3600
+/tmp/flipfleet-native --tensor 3x4x6 --no-gpu --secs 3600
+/tmp/flipfleet-native --tensor 3x4x7 --no-gpu --secs 3600
+/tmp/flipfleet-native --tensor 3x5x6 --no-gpu --secs 3600
+/tmp/flipfleet-native --tensor 3x5x7 --no-gpu --secs 3600
+/tmp/flipfleet-native --tensor 4x5x6 --no-gpu --secs 3600
 /tmp/flipfleet-native --tensor 4x5x7 --no-gpu --secs 3600
+/tmp/flipfleet-native --tensor 4x5x8 --no-gpu --secs 3600
+/tmp/flipfleet-native --tensor 4x6x6 --no-gpu --secs 3600
+/tmp/flipfleet-native --tensor 4x6x7 --no-gpu --secs 3600
+/tmp/flipfleet-native --tensor 4x6x8 --no-gpu --secs 3600
+/tmp/flipfleet-native --tensor 5x6x7 --no-gpu --secs 3600
 ```
 
-Rectangular dispatch deliberately does not borrow lanes from a 7×7 run:
-`4x4x5`, `4x5x5`, `4x4x6`, and `4x5x7` cannot improve the 7×7 block formula. Run them
-as their own `--tensor` campaigns, then feed their durable
-`flipfleet_NxMxP_best.txt` checkpoints to the wide block composer. Rectangular
-campaigns emit `RECT_CAPABILITY`, `RECT_STATUS`, and `RECT_RESULT` lines plus
-an atomic schema-1 status file; the square TUI is unchanged.
+Rectangular dispatch deliberately does not borrow unrelated leaves from a
+7×7 run. Use `--rect` when those shapes should share one host budget: it runs
+independent exact campaigns concurrently, rebalances only at clean epoch
+boundaries, and retains one durable `flipfleet_NxMxP_best.txt` checkpoint per
+shape. Single-shape campaigns emit `RECT_CAPABILITY`, `RECT_STATUS`, and
+`RECT_RESULT`; the portfolio emits `RECT_PORTFOLIO*` records and an atomic
+schema-1 parent heartbeat plus one child status per shape. The portfolio TUI
+polls those child heartbeats for live rank/move/exposure updates; inactive rows
+remain dim and all fields keep fixed columns. A naive reset atomically resets
+every selected shape checkpoint, including shapes outside a small-`J` epoch.
 
 When `-J`/`--walkers` is omitted, FlipFleet detects active host CPUs and uses
 `max(1, CPUs-4)` walkers for both GPU and CPU-only campaigns, reserving four
 threads for coordination and child-host work. On the 18-core M5 Max the
 default is 14. An explicit `-J` always wins.
+
+For a single-shape rectangular GPU campaign, the CPU tranche is also
+time-balanced against the preceding Metal epoch. The controller preserves the
+work/adaptive/wander proportions, changes by at most 4× per observation, caps
+at 32× the requested `--steps`, and is inert for CPU-only profiles. This keeps
+sticky islands working instead of waiting at the CPU/GPU join. On 2x5x6 with
+five islands, the old fixed 500K tranche sustained 4.85M CPU moves/s over an
+1,109-second sample; the balanced 12-second full-width smoke sustained 57.6M/s
+with zero rejects. `cpu_epoch_steps` in status exposes the live budget.
 
 Every candidate that can affect the fleet passes exhaustive coefficient
 reconstruction.  The rank-then-density leader is monotonic and separate from
@@ -273,7 +404,8 @@ split, and novelty roles, the separate exact+C3-preserving engine, and the
 cooperative SIMD-group engine.  The rotating GPU kernel pool contains
 projected R−1 search, exact 5→4 through 9→8 joins, live primitive 5+
 zero-circuit mining, complete exact three/four-term factor-span refactors, one
-distant-parent differential child, lifted identities, contraction
+distant-parent differential child, one 5×5-only whole-frontier kernel-shear
+child, lifted identities, contraction
 lower-bound scouting, XOR-SAT cube search, fixed-cube break, orbit split,
 polarization, and two-identity composition.  Up to three independent pool
 workers run concurrently: one constraint/lower-bound kernel, one exact-surgery
@@ -345,10 +477,16 @@ Schemes go to stdout; before/after diagnostics go to stderr.
 ### Escape-enabled FlipFleet
 
 The same identities run directly inside `flipfleet_native.w` through
-`flipfleet_escape.w`.  At startup and after a new strict frontier, the native
-coordinator constructs exact generic splits, fixed-cube breaks, C3 orbit
-splits, polarizations, and two-split compositions in shared `i64[]` buffers.
-Collision cancellation is part of the move, so the actual rank delta is used.
+`flipfleet_escape.w`. The native coordinator constructs exact generic splits,
+fixed-cube breaks, C3 orbit splits, polarizations, and two-split compositions
+in shared `i64[]` buffers. Collision cancellation is part of the move, so the
+actual rank delta is used. The live leader family is available immediately;
+the complete archive-derived cross product is deliberately lazy. A frozen
+same-rank archive snapshot rotates one source, one of five kinds, and one of
+six nonces per minute, then stops after every cell has been visited once.
+This changed measured default 7x7 startup from about 90 seconds to about 2.3
+seconds. Fifty production-style lazy calls averaged 24 ms (p90 41 ms,
+maximum 52 ms), so the coordinator does not visibly stall the TUI.
 
 Mixed CPU doors rotate this variable-rank bank while leader, frontier,
 best+1/best+2, symmetry, and anchor doors retain independent sources.  C3
@@ -445,6 +583,8 @@ span-3 is capped at 256 while span-4 charges 128 but runs one memory-bounded
 complete neighborhood;
 low-rank shear is enabled for 5×5–7×7 at 256/128 logical lanes, based on a
 real 5×5 non-one-flip exact hit at source pair 504;
+whole-frontier kernel shear is one 32-lane-equivalent CPU child on 5×5, where
+8/64 plans yielded full-gated basin edges but no rank or density improvement;
 the unused quanta return to the six stable roles for those epochs.  Pool details,
 exact-admission rules, and planted smokes are in
 [`GPU_KERNEL_POOL.md`](GPU_KERNEL_POOL.md).
@@ -556,6 +696,9 @@ and complete spliced schemes are exhaustively verified.  Its planted 3×3
 smoke succeeds, and the native coordinator advances its subset offset across
 finite adaptive epochs.  See
 [`FLIPFLEET_MITM_NATIVE.md`](FLIPFLEET_MITM_NATIVE.md).
+The rectangular wrapper independently passes a planted `2x3x4` rank-21 to
+rank-20 recovery and rotates low-cadence pool-256/pool-384 windows on the two
+primitive rectangular frontiers.
 
 The first native campaign from a mined five-way 3×3 split was productive: a
 distance-five rank-24 escape returned to 23 within one second and reached exact
@@ -605,6 +748,15 @@ The rigorous GF(2) interval for 3×3 is now **20 ≤ R ≤ 23**: Wang's 2026
 certificate raises the lower bound from 19 to 20.  The larger square lower
 bounds remain 34, 53, and 76 for 4×4, 5×5, and 6×6.  Search exhaustion or local
 SAT surgery in this directory is not a global tensor-rank lower bound.
+
+For the primitive rectangular tensor `<3,2,4>`, the checked quotient-rank
+proof closes the former one-term gap: **rank_GF(2)(`<3,2,4>`) = 20**. This is a
+global exact result, not an inference from FlipFleet search exhaustion.
+
+The same independently replayable Wang pipeline closes three smaller cases:
+**R(`<2,2,3>`) = 11**, **R(`<2,2,4>`) = 14**, and
+**R(`<2,3,3>`) = 15** over GF(2). It also proves
+**17 <= R(`<2,2,5>`) <= 18**; rank 17 remains the one-term exact-search gap.
 
 **See [`FINDINGS.md`](FINDINGS.md) for the full consolidated campaign log** — every
 exhaustively-tested-negative result (don't re-try these), the GPU threadgroup-memory design

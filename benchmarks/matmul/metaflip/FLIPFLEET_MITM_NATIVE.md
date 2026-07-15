@@ -73,11 +73,21 @@ computed directly from rank-one support, so Tungsten never needs an n^6-bit
 boxed integer.
 
 No compiler extension is required for this lane. Device atomic compare/exchange
-would allow a future on-device table build. In the July 12 fleet profile, a
-362-candidate/65,341-pair subset spent about 4 ms enumerating on Metal, 343 ms
-building the collision-preserving table on the host, and 22 ms probing on
-Metal. The host build is therefore the dominant per-subset cost at practical
-pool sizes; keep epochs bounded so this experimental mode rotates promptly.
+would allow a future on-device table build. A July 14 audit found that the old
+shift-only table hash formed structured clusters by discarding low bits from
+three fingerprint words. The current rotate-and-avalanche hash reduced a
+planted pool-256 table from 126 ms to 6 ms and a real sixteen-subset pool-256
+rectangular batch from roughly 3.1--3.8 seconds to 85--130 ms. The host build
+still dominates large pools, so epochs remain bounded.
+
+`flipfleet_rect_mitm_lane.w` shares the pair kernels but fingerprints unequal
+`nm`, `mp`, and `np` factor spaces and admits output only through the complete
+rectangular reconstruction gate. Its planted `2x3x4` rank-21 to rank-20 GPU
+control passes. Production rotates pool 256 for `2x3x4` and pool 384 for
+`2x2x5`, `2x3x5`, and `2x4x5` at low cadence. The 235 allowlist was admitted
+after a 64-batch live sweep covered 1,024 subsets, 393,216 candidates, and
+75,300,864 complementary pairs with zero false hit. Their finite frontier
+audit is documented in `RECTANGULAR_CAMPAIGNS.md` and `FINDINGS.md`.
 
 ## Native verification
 

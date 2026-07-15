@@ -11,6 +11,8 @@
  */
 
 #include "../runtime.h"
+#include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -73,6 +75,11 @@ static WValue check_exception_stack_fn(WValue *captures) {
     (void)captures;
     /* In a new thread, exception stack should be NULL */
     return w_exception_stack == NULL ? W_TRUE : W_FALSE;
+}
+
+/* Block in __w_system so Thread.kill exercises its cancellation cleanup. */
+static WValue system_command_fn(WValue *captures) {
+    return __w_system(captures[0]);
 }
 
 /* ---- Tests ---- */
@@ -234,6 +241,55 @@ static void test_multiple_threads_exceptions(void) {
     #undef N_THREADS
 }
 
+static void test_cancel_reaps_system_child(void) {
+    printf("Test 7: cancelled system command reaps child process\n");
+
+    char pid_path[256];
+    char command[512];
+    snprintf(pid_path, sizeof(pid_path), "/tmp/tungsten-thread-child-%ld.pid",
+             (long)getpid());
+    unlink(pid_path);
+    snprintf(command, sizeof(command), "echo $$ > %s; exec sleep 30", pid_path);
+
+    WValue *caps = calloc(1, sizeof(WValue));
+    caps[0] = w_string(command);
+    WClosure *cl = calloc(1, sizeof(WClosure));
+    cl->fn_ptr = system_command_fn;
+    cl->captures = caps;
+    cl->capture_count = 1;
+    WValue thread = w_thread_spawn(w_box_ptr(cl, W_SUBTAG_CLOSURE));
+
+    pid_t child_pid = -1;
+    for (int attempt = 0; attempt < 100 && child_pid <= 0; attempt++) {
+        FILE *pid_file = fopen(pid_path, "r");
+        if (pid_file) {
+            long parsed = -1;
+            if (fscanf(pid_file, "%ld", &parsed) == 1) child_pid = (pid_t)parsed;
+            fclose(pid_file);
+        }
+        if (child_pid <= 0) usleep(10000);
+    }
+    ASSERT(child_pid > 0, "system child published its pid");
+
+    w_thread_kill(thread);
+    w_thread_join(thread);
+    ASSERT(w_thread_alive(thread) == W_FALSE,
+           "cancelled controller is no longer reported alive");
+
+    int gone = 0;
+    for (int attempt = 0; attempt < 100; attempt++) {
+        if (child_pid > 0 && kill(child_pid, 0) == -1 && errno == ESRCH) {
+            gone = 1;
+            break;
+        }
+        usleep(10000);
+    }
+    ASSERT(gone, "cancelled system child is terminated and waitpid-reaped");
+    unlink(pid_path);
+
+    printf("  System child cancellation cleanup: OK\n\n");
+}
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -246,6 +302,7 @@ int main(void) {
     test_thread_alive();
     test_thread_join_timeout();
     test_multiple_threads_exceptions();
+    test_cancel_reaps_system_child();
 
     printf("=== Results: %d/%d passed ===\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;

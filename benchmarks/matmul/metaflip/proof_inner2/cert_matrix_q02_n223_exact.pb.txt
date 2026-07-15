@@ -1,0 +1,116 @@
+problem_name: "matrix_q02_n223"
+characteristic: 2
+extension_degree: 1
+na: 4
+nb: 6
+nc: 6
+constrained_tensors {
+  constraints: "\001\002\004\010"
+  rank_lower_bound: 0
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 1
+  constraints: "\001\002\004"
+  rank_lower_bound: 3
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 2
+  constraints: "\001\006\010"
+  rank_lower_bound: 6
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 3
+  constraints: "\001\002"
+  rank_lower_bound: 6
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 4
+  constraints: "\001\004"
+  rank_lower_bound: 6
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 5
+  constraints: "\001\006"
+  rank_lower_bound: 9
+  rank_lower_bound_proof {
+    forced_product_proof {
+      projection_type: 1
+    }
+  }
+}
+constrained_tensors {
+  index: 6
+  constraints: "\001\010"
+  rank_lower_bound: 6
+  rank_lower_bound_proof {
+    flatten_matrix_proof {
+    }
+  }
+}
+constrained_tensors {
+  index: 7
+  constraints: "\006\013"
+  rank_lower_bound: 9
+  rank_lower_bound_proof {
+    backtracking_proof {
+      proof_size: 13
+    }
+  }
+}
+constrained_tensors {
+  index: 8
+  constraints: "\001"
+  rank_lower_bound: 9
+  rank_lower_bound_proof {
+    degenerate_proof {
+      extra_constraint: 6
+      transformation {
+        query_elem: 9
+        store_elem: 13
+      }
+    }
+  }
+}
+constrained_tensors {
+  index: 9
+  constraints: "\006"
+  rank_lower_bound: 9
+  rank_lower_bound_proof {
+    degenerate_proof {
+      extra_constraint: 1
+      transformation {
+        query_elem: 9
+        store_elem: 13
+      }
+    }
+  }
+}
+constrained_tensors {
+  index: 10
+  rank_lower_bound: 11
+  rank_lower_bound_proof {
+    backtracking_proof {
+      proof_size: 1303
+    }
+  }
+}

@@ -249,6 +249,7 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
   m["w_metal_buffer_read_f16"] = true
   m["w_metal_compile_source"] = true
   m["w_metal_compile_source_opts"] = true
+  m["w_metal_library_from_file"] = true
   m["w_metal_pipeline_for"] = true
   m["w_metal_queue_new"] = true
   m["w_metal_dispatch1"] = true

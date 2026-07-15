@@ -1,4 +1,4 @@
-# Evidence-guided native FlipFleet defaults for square tensors 3x3 through 7x7.
+# Evidence-guided native FlipFleet defaults for square tensors 2x2 through 7x7.
 
 # Default walker count is host cores minus four, whether or not a GPU is
 # present.  The reserved cores cover coordinator work and, with no GPU, the
@@ -58,6 +58,9 @@
   100 + role
 
 -> ffp_record(n) (i64) i64
+  if n == 2
+    # Strassen's algorithm: 7 multiplies (optimal over GF(2) as well).
+    return 7
   if n == 3
     return 23
   if n == 4
@@ -67,29 +70,32 @@
   if n == 6
     return 153
   if n == 7
-    # Deterministic exact GF(2) Sedoglavic/Strassen-pad composition:
-    # 47 + 3*29 + 3*38 = 248. Fleet target is now rank 247.
-    return 248
+    # Exact outer-Strassen isotropy/placement composition, independently
+    # exhaustive-gated.  Fleet target is now rank 246.
+    return 247
   n * n * n
 
 -> ffp_record_known(n) (i64) i64
-  if n >= 3 && n <= 7
+  if n >= 2 && n <= 7
     return 1
   0
 
 -> ffp_seed_path(n) (i64)
   base = "benchmarks/matmul/metaflip/"
+  if n == 2
+    return base + "matmul_2x2_rank7_strassen_gf2.txt"
   if n == 3
     return base + "matmul_3x3_rank23_d139_gf2.txt"
   if n == 4
     return base + "matmul_4x4_rank47_d450_gf2.txt"
   if n == 5
-    return base + "matmul_5x5_rank93_d1155_gf2.txt"
+    # Four-split continuation from the GL-normalized AlphaEvolve frontier.
+    return base + "matmul_5x5_rank93_d967_four_split_control_gf2.txt"
   if n == 6
-    return base + "matmul_6x6_rank153_d2502_gf2.txt"
+    # Exact whole-scheme GL normalization followed by productive short walks.
+    return base + "matmul_6x6_rank153_d1860_global_isotropy_gf2.txt"
   if n == 7
-    # Lowest-density exhaustively verified composition placement.
-    return base + "matmul_7x7_rank248_d2952_sedoglavic_gf2.txt"
+    return base + "matmul_7x7_rank247_d3098_global_isotropy_gf2.txt"
   ""
 
 # Every checked-in exact scheme at the tracked frontier. The coordinator
@@ -98,6 +104,19 @@
 -> ffp_frontier_seed_paths(n) (i64)
   base = "benchmarks/matmul/metaflip/"
   paths = []
+  if n == 2
+    # Strassen seed first, then curated leaf-local GL(2,2) orbit doors.  All
+    # are exact rank 7; densities 36/40/42 change support for composition and
+    # give FlipFleet distinct term-set presentations at the optimal rank.
+    paths.push(base + "matmul_2x2_rank7_strassen_gf2.txt")
+    paths.push(base + "matmul_2x2_rank7_d36_gl120_gf2.txt")
+    paths.push(base + "matmul_2x2_rank7_d36_gl190_gf2.txt")
+    paths.push(base + "matmul_2x2_rank7_d40_gl01_gf2.txt")
+    paths.push(base + "matmul_2x2_rank7_d40_gl108_gf2.txt")
+    paths.push(base + "matmul_2x2_rank7_d40_gl214_gf2.txt")
+    paths.push(base + "matmul_2x2_rank7_d42_gl08_gf2.txt")
+    paths.push(base + "matmul_2x2_rank7_d42_gl110_gf2.txt")
+    paths.push(base + "matmul_2x2_rank7_d42_gl207_gf2.txt")
   if n == 3
     paths.push(base + "matmul_3x3_rank23_d139_gf2.txt")
     paths.push(base + "matmul_3x3_rank23_d159_gf2.txt")
@@ -105,21 +124,94 @@
     paths.push(base + "matmul_4x4_rank47_d450_gf2.txt")
     paths.push(base + "matmul_4x4_rank47_d677_flips_gf2.txt")
   if n == 5
+    paths.push(base + "matmul_5x5_rank93_d967_four_split_control_gf2.txt")
+    paths.push(base + "matmul_5x5_rank93_d983_global_isotropy_gf2.txt")
     paths.push(base + "matmul_5x5_rank93_d1155_gf2.txt")
     paths.push(base + "matmul_5x5_rank93_d1168_gf2.txt")
     paths.push(base + "matmul_5x5_rank93_d1191_gf2.txt")
     paths.push(base + "matmul_5x5_rank93_d1661_gf2.txt")
     paths.push(base + "matmul_5x5_rank93_gf2.txt")
     paths.push(base + "matmul_5x5_rank93_sparse_gf2.txt")
+    # Independent catalog presentations become usable by the square worker's
+    # mixed `rank` + `R u v w` loader.  AlphaEvolve is omitted because d967 is
+    # descended from its directed global-isotropy frontier; these three add distinct raw
+    # and D3/reversal-canonical doors instead of another known GL image.
+    paths.push(base + "matmul_5x5_rank93_catalog_kauers_a_gf2.txt")
+    paths.push(base + "matmul_5x5_rank93_catalog_kauers_b_gf2.txt")
+    paths.push(base + "matmul_5x5_rank93_catalog_perminov_c843_gf2.txt")
+    # Exact genuine-D3 partial nullspace endpoint from Kauers A.  It is 32
+    # terms away from its source and outside every other frontier seed's
+    # D3/reversal-canonical class; the full n^6 gate is regression-tested.
+    paths.push(base + "matmul_5x5_rank93_d1291_d3_partial_nullspace_s8_gf2.txt")
   if n == 6
+    paths.push(base + "matmul_6x6_rank153_d1860_global_isotropy_gf2.txt")
+    paths.push(base + "matmul_6x6_rank153_d1878_global_isotropy_gf2.txt")
     paths.push(base + "matmul_6x6_rank153_d2502_gf2.txt")
     paths.push(base + "matmul_6x6_rank153_d2508_gf2.txt")
     paths.push(base + "matmul_6x6_rank153_d2512_gf2.txt")
     paths.push(base + "matmul_6x6_rank153_d2574_c3_gf2.txt")
+    # Two independently gated genuine-D3 partial nullspace endpoints.  They
+    # add distinct D3/reversal classes at source distances 8 and 16.
+    paths.push(base + "matmul_6x6_rank153_d2508_d3_partial_nullspace_s3_gf2.txt")
+    paths.push(base + "matmul_6x6_rank153_d2512_d3_partial_nullspace_s4_gf2.txt")
+    # Exact odd-parent affine closures.  These remain file-backed low-cadence
+    # archive/restart doors: the density leader stays first and no hot worker
+    # move enumerates parent combinations.  Triple/five density and canonical
+    # novelty representatives are independently full-gated.
+    paths.push(base + "matmul_6x6_rank153_d2506_odd_parent3_gf2.txt")
+    paths.push(base + "matmul_6x6_rank153_d2527_odd_parent3_novel_gf2.txt")
+    paths.push(base + "matmul_6x6_rank153_d2522_odd_parent5_gf2.txt")
+    paths.push(base + "matmul_6x6_rank153_d2533_odd_parent5_novel_gf2.txt")
   if n == 7
-    paths.push(base + "matmul_7x7_rank248_d2952_sedoglavic_gf2.txt")
-    paths.push(base + "matmul_7x7_rank248_d2958_sedoglavic_gf2.txt")
-    paths.push(base + "matmul_7x7_rank248_d3015_connectivity_sedoglavic_gf2.txt")
+    paths.push(base + "matmul_7x7_rank247_d3098_global_isotropy_gf2.txt")
+    # Exact partial-automorphism nullspace tunnels from the density leader.
+    # Each is independently n^6-gated and differs from both the source and
+    # the corresponding whole-scheme automorphism image.
+    paths.push(base + "matmul_7x7_rank247_d3098_partial_auto_max_distance_gf2.txt")
+    paths.push(base + "matmul_7x7_rank247_d3098_partial_auto_min_density_gf2.txt")
+    paths.push(base + "matmul_7x7_rank247_d3142_partial_auto_min_weight_gf2.txt")
+    # Depth-four compositions of genuine partial nullspace edges.  Both keep
+    # the d3098 density leader's rank/density while reaching the maximum
+    # possible set distance 2*247: their term supports are disjoint from it.
+    paths.push(base + "matmul_7x7_rank247_d3098_partial_auto_beam_dense_gf2.txt")
+    paths.push(base + "matmul_7x7_rank247_d3098_partial_auto_beam_far_gf2.txt")
+    # Three max-distance representatives from the eight unique weighted-outer
+    # term sets.  They are archive/frontier restart seeds only; the compact
+    # d3098 scheme above remains the default and therefore gets the hot path.
+    paths.push(base + "matmul_7x7_rank247_d3554_outer_isotropy_gf2.txt")
+    paths.push(base + "matmul_7x7_rank247_d3554_outer_isotropy_c013_m7_gf2.txt")
+    paths.push(base + "matmul_7x7_rank247_d3554_outer_isotropy_c021_m4_gf2.txt")
+    paths.push(base + "matmul_7x7_rank247_d3554_outer_isotropy_c024_m0_gf2.txt")
+    # Reflection-factor partial nullspace tunnels from the c013/c024 outer
+    # seeds.  Both exact endpoints are 216 terms from their source and are
+    # distinct from each other and the complete checked-in frontier archive.
+    paths.push(base + "matmul_7x7_rank247_d3554_d3_partial_nullspace_s7_gf2.txt")
+    paths.push(base + "matmul_7x7_rank247_d3554_d3_partial_nullspace_s9_gf2.txt")
+    # A record-rank/density affine triple at canonical distance 40 from the
+    # existing bank.  It is an archive/restart source only; the minute-scale
+    # frontier-source scheduler supplies its derived work lazily.
+    paths.push(base + "matmul_7x7_rank247_d3098_odd_parent3_gf2.txt")
+    # Large-bank affine-code descent over 164 exact-zero generators.  This
+    # independently gated record-rank/density endpoint is 398 terms from the
+    # density source, at least 56 terms from every generating-bank member, and
+    # outside all of their D3/reversal-canonical identities.  Keep it as a
+    # file-backed low-cadence restart door; no hot walker enumerates the code.
+    paths.push(base + "matmul_7x7_rank247_d3098_affine_code_gf2.txt")
+  paths
+
+# Independently exact, structurally distant cross-field shoulders.  These are
+# file-backed restart inventory only: they are loaded into the best+1/+2 banks
+# at coordinator boundaries and never participate in a hot move loop.  Keeping
+# the delta explicit prevents an old shoulder from being mislabeled after a
+# frontier rank drop.
+-> ffp_near_seed_paths(n, delta) (i64 i64)
+  base = "benchmarks/matmul/metaflip/"
+  paths = []
+  if n == 4 && delta == 2
+    # Public {-1,0,1} rank-49 scheme, independently integer-gated and reduced
+    # mod 2 with the trace-dual W factor transposed.  Its exact r49/d432
+    # projection is orbit-distance 96 from the r47 density leader.
+    paths.push(base + "matmul_4x4_rank49_d432_signed_4x4x4_m49_zt_gf2.txt")
   paths
 
 -> ffp_c3_seed_path(n) (i64)
@@ -170,22 +262,6 @@
     return ffp_strategy_seed_door(code - 100)
   code
 
--> ffp_door(n, slot) (i64 i64) i64
-  ffp_door_gpu(n, slot, 1)
-
-# When gpu_enabled == 0, pin the first strategy-lane + pool slots onto CPU
-# strategy doors, then fall through to the ordinary sticky pattern.
--> ffp_door_gpu(n, slot, gpu_enabled) (i64 i64 i64) i64
-  if gpu_enabled == 0
-    lanes = ffp_cpu_strategy_lane_count(n) ## i64
-    pool = ffp_cpu_strategy_pool_count() ## i64
-    if slot < lanes
-      return ffp_cpu_strategy_door(ffp_cpu_strategy_role_at(n, slot))
-    if slot < lanes + pool
-      return ffp_cpu_strategy_door(10)
-    return ffp_door_pattern(n, slot - lanes - pool)
-  ffp_door_pattern(n, slot)
-
 # Door/zone/move tables are pure scalar lookups — never allocate a temporary
 # i64[] and return one element.  Under the campaign-lifetime allocator that
 # pattern retained every table forever (same class of leak as near-bank
@@ -204,6 +280,19 @@
       return 2
     return 3
   s = slot % 12 ## i64
+  if n == 2
+    # Tiny tensor: keep most islands on leader/frontier; shoulders are thin.
+    if s == 0
+      return 0
+    if s >= 1 && s <= 4
+      return 1
+    if s == 5 || s == 6
+      return 2
+    if s == 7 || s == 8
+      return 3
+    if s == 9 || s == 10
+      return 5
+    return 6
   if n == 3
     if s == 0
       return 0
@@ -274,6 +363,24 @@
     return 5
   6
 
+# When gpu_enabled == 0, pin the first strategy-lane + pool slots onto CPU
+# strategy doors, then fall through to the ordinary sticky pattern. Define
+# dependencies before their wrappers so typed lowering sees raw-i64 signatures
+# at every call site rather than emitting boxed forward calls.
+-> ffp_door_gpu(n, slot, gpu_enabled) (i64 i64 i64) i64
+  if gpu_enabled != 0
+    return ffp_door_pattern(n, slot)
+  lanes = ffp_cpu_strategy_lane_count(n) ## i64
+  pool = ffp_cpu_strategy_pool_count() ## i64
+  if slot < lanes
+    return ffp_cpu_strategy_door(ffp_cpu_strategy_role_at(n, slot))
+  if slot < lanes + pool
+    return ffp_cpu_strategy_door(10)
+  return ffp_door_pattern(n, slot - lanes - pool)
+
+-> ffp_door(n, slot) (i64 i64) i64
+  return ffp_door_gpu(n, slot, 1)
+
 -> ffp_zone_name(code) (i64)
   if code == 0
     return "short"
@@ -323,6 +430,15 @@
     zone = 0
   if zone > 3
     zone = 3
+  if n == 2
+    # Short budgets: 2x2 saturates the rank-7 Strassen component quickly.
+    if zone == 0
+      return 5000000
+    if zone == 1
+      return 25000000
+    if zone == 2
+      return 125000000
+    return 500000000
   if n == 3
     if zone == 0
       return 25000000
@@ -360,6 +476,14 @@
     zone = 0
   if zone > 3
     zone = 3
+  if n == 2
+    if zone == 0
+      return 1250000
+    if zone == 1
+      return 5000000
+    if zone == 2
+      return 25000000
+    return 50000000
   if n == 3
     if zone == 0
       return 6250000
@@ -422,6 +546,20 @@
   # polarization, and composition rotate through role 10 instead of consuming
   # permanent floors; role 10's physical budget is reserved separately.
   vals = i64[11]
+  if n == 2
+    # No checked-in Metal cal2zone for 2x2; weights only matter if a host is added.
+    vals[0] = 20
+    vals[1] = 15
+    vals[2] = 0
+    vals[3] = 15
+    vals[4] = 0
+    vals[5] = 0
+    vals[6] = 0
+    vals[7] = 0
+    vals[8] = 15
+    vals[9] = 0
+    vals[10] = 10
+    return vals[role]
   if n == 3
     vals[0] = 18
     vals[1] = 15

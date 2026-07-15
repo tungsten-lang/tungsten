@@ -1,0 +1,21 @@
+target	formula_rank	exact_rank	live_fmm_rank	strongest_numerical_rank	strongest_source	existing_f2_rank	disposition
+8x8x8	329	329	336	316	matmulcatalog	329	exact_f2_corecord_numerical_loss
+8x8x9	393	393	388	388	FMM-Lille		rejected_live_stronger
+8x8x10	445	445	427	427	FMM-Lille		rejected_live_stronger
+8x8x11	485	485	475	475	FMM-Lille		rejected_live_stronger
+8x9x9	457	457	430	430	FMM-Lille		rejected_live_stronger
+8x9x10	509	509	482	482	FMM-Lille		rejected_live_stronger
+8x9x11	549	549	521	521	FMM-Lille		rejected_live_stronger
+8x10x10	561	561	528	528	FMM-Lille		rejected_live_stronger
+8x10x11	601	601	588	588	FMM-Lille		rejected_live_stronger
+8x11x11	645	645	641	641	FMM-Lille		rejected_live_stronger
+9x9x9	525	525	486	473	matmulcatalog		rejected_prior_stronger
+9x9x10	581	581	534	534	FMM-Lille		rejected_live_stronger
+9x9x11	625	625	576	576	FMM-Lille		rejected_live_stronger
+9x10x10	641	641	597	597	FMM-Lille		rejected_live_stronger
+9x10x11	693	692	651	651	FMM-Lille		rejected_live_stronger
+9x11x11	753	751	715	715	FMM-Lille		rejected_live_stronger
+10x10x10	717	715	651	595	matmulcatalog		rejected_prior_stronger
+10x10x11	769	767	719	719	FMM-Lille		rejected_live_stronger
+10x11x11	845	841	793	793	FMM-Lille		rejected_live_stronger
+11x11x11	925	919	873	831	matmulcatalog		rejected_prior_stronger

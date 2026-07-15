@@ -1,0 +1,33 @@
+{
+  "schema": "n235-rank2-quotient-capacity-sat-model-v1",
+  "field": "GF(2)",
+  "tensor": "<2,3,5>",
+  "fixed_rank_two_first_factor": 6,
+  "remaining_occurrences": 22,
+  "cnf_sha256": "7bcfff262ac0dc1930d7bb3787856c39f0bda0de999eaeab6b11ef83eb383636",
+  "solver": "CryptoMiniSat 5.14.7",
+  "solver_status": "SATISFIABLE",
+  "solver_model_sha256": "afdccdf291e1230b801579295760321ae596452a649eec900d1a0b196562180b",
+  "quotient_multiplicities": {
+    "1": 1,
+    "2": 2,
+    "3": 1,
+    "8": 1,
+    "10": 1,
+    "16": 1,
+    "19": 1,
+    "25": 1,
+    "26": 1,
+    "32": 1,
+    "35": 1,
+    "42": 1,
+    "43": 1,
+    "49": 1,
+    "50": 2,
+    "51": 1,
+    "56": 1,
+    "57": 1,
+    "58": 1,
+    "59": 1
+  }
+}

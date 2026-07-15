@@ -208,3 +208,26 @@ use flipfleet_bank_policy
   if shoulder_rank != 250
     return 0
   ffbp_near_add(near2, near2_signatures, near2_uses, near2_successes, shoulder, near2_capacity, signature_quota, 4, near_counters)
+
+# The rank-247 outer-isotropy composition makes all four independently exact
+# rank-248 presentations true +1 shoulders.  Keep them out of the same-rank
+# frontier list and admit them through ordinary structural quotas/max-min
+# replacement so the CPU/GPU restart banks retain their distinct doors.
+-> ff7_add_known_7x7_rank247_shoulders(root, best, n, capacity, state_size, dslack, cycles, workq, wanderq, near1, near1_signatures, near1_uses, near1_successes, near1_capacity, signature_quota, near_counters)
+  if n != 7 || ffw_best_rank(best) != 247
+    return 0
+  names = ["matmul_7x7_rank248_d2952_sedoglavic_gf2.txt",
+           "matmul_7x7_rank248_d2958_sedoglavic_gf2.txt",
+           "matmul_7x7_rank248_d2967_leaf_canonical_gf2.txt",
+           "matmul_7x7_rank248_d3015_connectivity_sedoglavic_gf2.txt"]
+  admitted = 0 ## i64
+  i = 0 ## i64
+  while i < names.size()
+    shoulder = i64[state_size]
+    path = root + "/benchmarks/matmul/metaflip/" + names[i]
+    rank = ffw_load_scheme_cap(shoulder, path, n, capacity, 39101 + i * 17, dslack, cycles, workq, wanderq) ## i64
+    if rank == 248 && ffw_verify_best_exact(shoulder, n) == 1
+      if ffbp_near_add(near1, near1_signatures, near1_uses, near1_successes, shoulder, near1_capacity, signature_quota, 4, near_counters) == 1
+        admitted += 1
+    i += 1
+  admitted

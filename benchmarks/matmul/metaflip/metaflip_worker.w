@@ -2,7 +2,7 @@
 #
 # This module is intentionally coordinator-free: it owns one self-describing
 # flat i64[] state and performs no Python/runtime subprocess work.  Tensor size
-# (3 <= n <= 7), rank, term capacity, and hash capacity are runtime values.
+# (2 <= n <= 7), rank, term capacity, and hash capacity are runtime values.
 # n <= 7 is the exact signed-i64 factor-mask envelope: n*n <= 49 bits.
 #
 # Stable public surface (all symbols are prefixed to coexist with the legacy
@@ -61,7 +61,7 @@
 -> ffw_layout(st, n, capacity) (i64[] i64 i64) i64
   ok = 1 ## i64
   dim = n * n ## i64
-  if n < 3
+  if n < 2
     ok = 0
   if n > 7
     ok = 0
@@ -132,7 +132,7 @@
     ok = 0
   if st[1] != 1
     ok = 0
-  if st[2] < 3
+  if st[2] < 2
     ok = 0
   if st[2] > 7
     ok = 0
@@ -380,7 +380,7 @@
   dim = n * n ## i64
   one = 1 ## i64
   factor_mask = (one << dim) - 1 ## i64
-  if n < 3
+  if n < 2
     error = 0 - 1
   if n > 7
     error = 0 - 2
@@ -689,6 +689,14 @@
           rank = lines.size()
           if lines[rank - 1].size() == 0
             rank = rank - 1
+      # Imported catalog files may retain both a numeric rank header and
+      # `R u v w` row prefixes.  The rectangular worker already accepts this
+      # unambiguous mixed spelling; keep square ingestion consistent.  The
+      # numeric header remains authoritative and every row is still gated.
+      if line_base == 1 && lines.size() > 1
+        first_row = lines[1].split(" ")
+        if first_row.size() >= 4 && first_row[0] == "R"
+          field_base = 1
       ok = 1 ## i64
       if rank < 1
         ok = 0

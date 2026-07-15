@@ -103,6 +103,9 @@ kernel void flipwalk(
   int a = 0;
   int bb = 0;
   int dup = 0;
+  int lo = 0;
+  int hi = 0;
+  int swap = 0;
   int ci = 0;
   int dchk = 0;
   int pb = 0;
@@ -302,14 +305,25 @@ kernel void flipwalk(
           bb = (bb + 1);
         }
         if ((dup >= 0)) {
-          sus[((dup * 16) + ltid)] = sus[(((rank - 1) * 16) + ltid)];
-          svs[((dup * 16) + ltid)] = svs[(((rank - 1) * 16) + ltid)];
-          sws[((dup * 16) + ltid)] = sws[(((rank - 1) * 16) + ltid)];
+          lo = a;
+          hi = dup;
+          if ((lo > hi)) {
+            swap = lo;
+            lo = hi;
+            hi = swap;
+          }
           rank = (rank - 1);
-          sus[((a * 16) + ltid)] = sus[(((rank - 1) * 16) + ltid)];
-          svs[((a * 16) + ltid)] = svs[(((rank - 1) * 16) + ltid)];
-          sws[((a * 16) + ltid)] = sws[(((rank - 1) * 16) + ltid)];
+          if ((hi < rank)) {
+            sus[((hi * 16) + ltid)] = sus[((rank * 16) + ltid)];
+            svs[((hi * 16) + ltid)] = svs[((rank * 16) + ltid)];
+            sws[((hi * 16) + ltid)] = sws[((rank * 16) + ltid)];
+          }
           rank = (rank - 1);
+          if ((lo < rank)) {
+            sus[((lo * 16) + ltid)] = sus[((rank * 16) + ltid)];
+            svs[((lo * 16) + ltid)] = svs[((rank * 16) + ltid)];
+            sws[((lo * 16) + ltid)] = sws[((rank * 16) + ltid)];
+          }
         }
       }
     }
@@ -333,14 +347,25 @@ kernel void flipwalk(
           bb = (bb + 1);
         }
         if ((dup >= 0)) {
-          sus[((dup * 16) + ltid)] = sus[(((rank - 1) * 16) + ltid)];
-          svs[((dup * 16) + ltid)] = svs[(((rank - 1) * 16) + ltid)];
-          sws[((dup * 16) + ltid)] = sws[(((rank - 1) * 16) + ltid)];
+          lo = a;
+          hi = dup;
+          if ((lo > hi)) {
+            swap = lo;
+            lo = hi;
+            hi = swap;
+          }
           rank = (rank - 1);
-          sus[((a * 16) + ltid)] = sus[(((rank - 1) * 16) + ltid)];
-          svs[((a * 16) + ltid)] = svs[(((rank - 1) * 16) + ltid)];
-          sws[((a * 16) + ltid)] = sws[(((rank - 1) * 16) + ltid)];
+          if ((hi < rank)) {
+            sus[((hi * 16) + ltid)] = sus[((rank * 16) + ltid)];
+            svs[((hi * 16) + ltid)] = svs[((rank * 16) + ltid)];
+            sws[((hi * 16) + ltid)] = sws[((rank * 16) + ltid)];
+          }
           rank = (rank - 1);
+          if ((lo < rank)) {
+            sus[((lo * 16) + ltid)] = sus[((rank * 16) + ltid)];
+            svs[((lo * 16) + ltid)] = svs[((rank * 16) + ltid)];
+            sws[((lo * 16) + ltid)] = sws[((rank * 16) + ltid)];
+          }
         }
       }
       a = fj;
@@ -362,14 +387,25 @@ kernel void flipwalk(
           bb = (bb + 1);
         }
         if ((dup >= 0)) {
-          sus[((dup * 16) + ltid)] = sus[(((rank - 1) * 16) + ltid)];
-          svs[((dup * 16) + ltid)] = svs[(((rank - 1) * 16) + ltid)];
-          sws[((dup * 16) + ltid)] = sws[(((rank - 1) * 16) + ltid)];
+          lo = a;
+          hi = dup;
+          if ((lo > hi)) {
+            swap = lo;
+            lo = hi;
+            hi = swap;
+          }
           rank = (rank - 1);
-          sus[((a * 16) + ltid)] = sus[(((rank - 1) * 16) + ltid)];
-          svs[((a * 16) + ltid)] = svs[(((rank - 1) * 16) + ltid)];
-          sws[((a * 16) + ltid)] = sws[(((rank - 1) * 16) + ltid)];
+          if ((hi < rank)) {
+            sus[((hi * 16) + ltid)] = sus[((rank * 16) + ltid)];
+            svs[((hi * 16) + ltid)] = svs[((rank * 16) + ltid)];
+            sws[((hi * 16) + ltid)] = sws[((rank * 16) + ltid)];
+          }
           rank = (rank - 1);
+          if ((lo < rank)) {
+            sus[((lo * 16) + ltid)] = sus[((rank * 16) + ltid)];
+            svs[((lo * 16) + ltid)] = svs[((rank * 16) + ltid)];
+            sws[((lo * 16) + ltid)] = sws[((rank * 16) + ltid)];
+          }
         }
       }
     }
@@ -392,14 +428,25 @@ kernel void flipwalk(
           bb = (bb + 1);
         }
         if ((dup >= 0)) {
-          sus[((dup * 16) + ltid)] = sus[(((rank - 1) * 16) + ltid)];
-          svs[((dup * 16) + ltid)] = svs[(((rank - 1) * 16) + ltid)];
-          sws[((dup * 16) + ltid)] = sws[(((rank - 1) * 16) + ltid)];
+          lo = a;
+          hi = dup;
+          if ((lo > hi)) {
+            swap = lo;
+            lo = hi;
+            hi = swap;
+          }
           rank = (rank - 1);
-          sus[((a * 16) + ltid)] = sus[(((rank - 1) * 16) + ltid)];
-          svs[((a * 16) + ltid)] = svs[(((rank - 1) * 16) + ltid)];
-          sws[((a * 16) + ltid)] = sws[(((rank - 1) * 16) + ltid)];
+          if ((hi < rank)) {
+            sus[((hi * 16) + ltid)] = sus[((rank * 16) + ltid)];
+            svs[((hi * 16) + ltid)] = svs[((rank * 16) + ltid)];
+            sws[((hi * 16) + ltid)] = sws[((rank * 16) + ltid)];
+          }
           rank = (rank - 1);
+          if ((lo < rank)) {
+            sus[((lo * 16) + ltid)] = sus[((rank * 16) + ltid)];
+            svs[((lo * 16) + ltid)] = svs[((rank * 16) + ltid)];
+            sws[((lo * 16) + ltid)] = sws[((rank * 16) + ltid)];
+          }
         }
         if ((dup < 0)) {
           a = (a + 1);

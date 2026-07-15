@@ -195,16 +195,17 @@ use flipfleet_low_rank_shear_search
   count
 
 -> fflrsp_has_global_collision(us, vs, ws, scheme_rank, selected, selected_count, out_u, out_v, out_w, out_count) (i64[] i64[] i64[] i64 i64[] i64 i64[] i64[] i64[] i64) i64
+  collisions = 0 ## i64
   out_index = 0 ## i64
   while out_index < out_count
     scan = 0 ## i64
     while scan < scheme_rank
       if ffsr_contains(selected, selected_count, scan) == 0
         if ffsm_same_term(us[scan], vs[scan], ws[scan], out_u[out_index], out_v[out_index], out_w[out_index]) == 1
-          return 1
+          collisions += 1
       scan += 1
     out_index += 1
-  0
+  collisions
 
 -> fflrsp_materialize_hit(us, vs, ws, scheme_rank, pair_first, pair_second, tid, nonce, code, selected, out_u, out_v, out_w, meta) (i64[] i64[] i64[] i64 i32[] i32[] i64 i64 i64 i64[] i64[] i64[] i64[] i64[]) i64
   if scheme_rank < 3 || tid < 0 || code < 1
@@ -275,11 +276,10 @@ use flipfleet_low_rank_shear_search
   selected[2] = carrier0
   if correction_rank == 2
     selected[3] = carrier1
-  # A locally exact replacement that duplicates an untouched global term
-  # would cancel under GF(2) set semantics and cannot be spliced at equal
-  # rank. Skip it here so the deterministic scan can inspect later matches.
-  if fflrsp_has_global_collision(us, vs, ws, scheme_rank, selected, total, out_u, out_v, out_w, total) != 0
-    return 0
+  # Untouched global matches are valuable, not invalid: each one parity-
+  # cancels and lowers the actual scheme rank by two beyond the nominal
+  # rank-neutral absorbed shear.
+  meta[6] = fflrsp_has_global_collision(us,vs,ws,scheme_rank,selected,total,out_u,out_v,out_w,total)
   meta[0] = correction_rank
   meta[1] = shift_axis
   meta[2] = factor_axis
@@ -377,11 +377,11 @@ use flipfleet_low_rank_shear_search
   stats = i64[8]
   made = fflrsp_find_gpu(device, library, queue, us, vs, ws, exported, nonce, pair_limit, selected, out_u, out_v, out_w, meta, stats) ## i64
   if made > 0
-    admitted = ffsr_apply_current(state, selected, made, out_u, out_v, out_w, made) ## i64
-    if admitted == scheme_rank && ffw_verify_current_exact(state, n) == 1
+    admitted = ffsr_apply_current_compact(state, selected, made, out_u, out_v, out_w, made) ## i64
+    if admitted > 0 && admitted <= scheme_rank && ffw_verify_current_exact(state, n) == 1
       written = ffw_dump_current(state, output_path) ## i64
       if written == admitted
-        << "GPU_POOL_LOW_RANK_SHEAR n=" + n.to_s() + " pairs=" + stats[0].to_s() + " work=" + stats[1].to_s() + " structural=" + stats[2].to_s() + " checked=" + stats[4].to_s() + " correction=" + meta[0].to_s() + " oneflip=" + meta[5].to_s() + " hit=1 rank=" + admitted.to_s()
+        << "GPU_POOL_LOW_RANK_SHEAR n=" + n.to_s() + " pairs=" + stats[0].to_s() + " work=" + stats[1].to_s() + " structural=" + stats[2].to_s() + " checked=" + stats[4].to_s() + " correction=" + meta[0].to_s() + " collisions=" + meta[6].to_s() + " oneflip=" + meta[5].to_s() + " hit=1 rank=" + admitted.to_s()
         return admitted
   << "GPU_POOL_LOW_RANK_SHEAR n=" + n.to_s() + " pairs=" + stats[0].to_s() + " work=" + stats[1].to_s() + " structural=" + stats[2].to_s() + " checked=" + stats[4].to_s() + " oneflip=" + meta[5].to_s() + " hit=0"
   0

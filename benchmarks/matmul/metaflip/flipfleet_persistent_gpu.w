@@ -5,6 +5,19 @@
 # the worker atomically acknowledges only after its candidate output is fully
 # written. The coordinator clears both mailboxes before launch; generation
 # numbers then reject delayed or duplicate contents within that session.
+#
+# The worker-side mailbox loops carry a ten-minute idle lease. Graceful
+# coordinators still publish `stopped`; the lease is the crash-only fallback
+# that prevents an abruptly orphaned Metal child from polling forever.
+
+-> ffpg_worker_idle_timeout_ms() i64
+  600000
+
+-> ffpg_worker_idle_expired(start_ms, now_ms) (i64 i64) i64
+  expired = 0 ## i64
+  if now_ms - start_ms >= ffpg_worker_idle_timeout_ms()
+    expired = 1
+  expired
 
 -> ffpg_shell_quote(text) (String)
   "'" + text.replace("'", "'\"'\"'") + "'"

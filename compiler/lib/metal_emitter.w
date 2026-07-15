@@ -1588,6 +1588,37 @@ use ast
     if name == "f4" && args != nil && args.size() == 4
       ctor = ctx[:dialect] == "cuda" ? "make_float4" : "float4"
       return ctor + "(" + emit_expr(ctx, args[0]) + ", " + emit_expr(ctx, args[1]) + ", " + emit_expr(ctx, args[2]) + ", " + emit_expr(ctx, args[3]) + ")"
+    # Device-scope relaxed i32 atomics. Arrays retain their ordinary pointer
+    # ABI; only the individual access is cast to an atomic pointer.
+    if name in ("atomic_load_i32" "atomic_store_i32" "atomic_exchange_i32" "atomic_fetch_add_i32" "atomic_min_i32")
+      expected = 2
+      if name == "atomic_store_i32" || name == "atomic_exchange_i32" || name == "atomic_fetch_add_i32" || name == "atomic_min_i32"
+        expected = 3
+      if args == nil || args.size() != expected
+        gpu_kernel_error(ctx[:node], "gpu." + name + " takes " + expected.to_s() + " args")
+      buffer = emit_expr(ctx, args[0])
+      index = emit_expr(ctx, args[1])
+      if ctx[:dialect] == "cuda"
+        pointer = "((int*)" + buffer + " + " + index + ")"
+        if name == "atomic_load_i32"
+          return "atomicAdd(" + pointer + ", 0)"
+        value = emit_expr(ctx, args[2])
+        if name == "atomic_store_i32" || name == "atomic_exchange_i32"
+          return "atomicExch(" + pointer + ", " + value + ")"
+        if name == "atomic_fetch_add_i32"
+          return "atomicAdd(" + pointer + ", " + value + ")"
+        return "atomicMin(" + pointer + ", " + value + ")"
+      pointer = "((device atomic_int*)" + buffer + " + " + index + ")"
+      if name == "atomic_load_i32"
+        return "atomic_load_explicit(" + pointer + ", memory_order_relaxed)"
+      value = emit_expr(ctx, args[2])
+      if name == "atomic_store_i32"
+        return "atomic_store_explicit(" + pointer + ", " + value + ", memory_order_relaxed)"
+      if name == "atomic_exchange_i32"
+        return "atomic_exchange_explicit(" + pointer + ", " + value + ", memory_order_relaxed)"
+      if name == "atomic_fetch_add_i32"
+        return "atomic_fetch_add_explicit(" + pointer + ", " + value + ", memory_order_relaxed)"
+      return "atomic_fetch_min_explicit(" + pointer + ", " + value + ", memory_order_relaxed)"
     if name == "thread_index_in_simdgroup"
       return "int(__simd_lane)"
     if name == "simdgroup_index_in_threadgroup"

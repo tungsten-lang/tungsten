@@ -23,9 +23,11 @@
 #     return `want` on discovery and materialize the replacement factors.
 #
 #   ffsr_apply_current(st,selected,k,out_u,out_v,out_w,out_count)
-#     reject zero/duplicate/no-op/global-collision replacements, splice the
-#     current metaflip_worker state, and exhaustively verify all n^6 tensor
-#     coefficients.  Failure rolls the current state back and returns -1.
+#     preserve nominal local cardinality by rejecting global collisions.
+#   ffsr_apply_current_compact(...)
+#     parity-compact external live-term collisions, return the actual global
+#     rank, and exhaustively verify all n^6 tensor coefficients. Failure rolls
+#     the current state back and returns -1.
 #
 # Requested move families are exactly 3->2, 3<->3, 3->4, 4->3, and 4<->4.
 # Pair search is complete.  The worst k=4, 4-term search has 3375 candidates
@@ -592,6 +594,99 @@ use metaflip_worker
           i += 1
         st[6] = rank
         z = ffw_verify_current_exact(st, st[2])
+  result
+
+# Exact parity-compacting splice.  The nominal helper above preserves the
+# local cardinality accounting and therefore rejects an output term that is
+# already live outside the selected window.  Over GF(2), that collision is a
+# legal cancellation and can turn k->k or k->k+1 locally into a global rank
+# drop.  This variant applies the full symmetric difference and returns the
+# actual compacted rank after an exhaustive tensor gate.
+-> ffsr_apply_current_compact(st, selected, k, out_u, out_v, out_w, out_count) (i64[] i64[] i64 i64[] i64[] i64[] i64) i64
+  result = 0 - 1 ## i64
+  valid = ffw_valid(st) ## i64
+  old_rank = 0 ## i64
+  if valid == 1
+    old_rank = st[6]
+    valid = ffsr_move_supported(k,out_count)
+  if valid == 1 && ffsr_selected_positions_valid(selected,k,old_rank) == 0
+    valid = 0
+  if valid == 1 && ffsr_output_well_formed(out_u,out_v,out_w,out_count) == 0
+    valid = 0
+  su = i64[4]
+  sv = i64[4]
+  sw = i64[4]
+  if valid == 1
+    valid = ffsr_capture_current(st,selected,k,su,sv,sw)
+  if valid == 1 && ffsr_terms_same_set(su,sv,sw,k,out_u,out_v,out_w,out_count) == 1
+    valid = 0
+  if valid == 1 && ffw_verify_current_exact(st,st[2]) == 0
+    valid = 0
+
+  rank = old_rank ## i64
+  if valid == 1
+    i = 0 ## i64
+    while i < k
+      next_rank = ffw_toggle(st,su[i],sv[i],sw[i],rank) ## i64
+      if next_rank != rank - 1
+        valid = 0
+      rank = next_rank
+      i += 1
+
+  collision = i64[4]
+  collisions = 0 ## i64
+  if valid == 1
+    i = 0
+    while i < out_count
+      if ffw_find_term(st,out_u[i],out_v[i],out_w[i]) >= 0
+        collision[i] = 1
+        collisions += 1
+      i += 1
+    final_rank = rank + out_count - 2*collisions ## i64
+    if final_rank < 1 || final_rank > st[4]
+      valid = 0
+
+  # Remove colliding external terms before inserting new outputs, minimizing
+  # transient capacity and making every expected rank change checkable.
+  if valid == 1
+    i = 0
+    while i < out_count
+      if collision[i] == 1
+        next_rank = ffw_toggle(st,out_u[i],out_v[i],out_w[i],rank) ## i64
+        if next_rank != rank - 1
+          valid = 0
+        rank = next_rank
+      i += 1
+    i = 0
+    while i < out_count
+      if collision[i] == 0
+        next_rank = ffw_toggle(st,out_u[i],out_v[i],out_w[i],rank) ## i64
+        if next_rank != rank + 1
+          valid = 0
+        rank = next_rank
+      i += 1
+    st[6] = rank
+    if valid == 1 && rank == final_rank && ffw_verify_current_exact(st,st[2]) == 1
+      result = rank
+
+  if result < 0 && rank != old_rank
+    i = 0
+    while i < out_count
+      if collision[i] == 0 && ffw_find_term(st,out_u[i],out_v[i],out_w[i]) >= 0
+        rank = ffw_toggle(st,out_u[i],out_v[i],out_w[i],rank)
+      i += 1
+    i = 0
+    while i < out_count
+      if collision[i] == 1 && ffw_find_term(st,out_u[i],out_v[i],out_w[i]) < 0
+        rank = ffw_toggle(st,out_u[i],out_v[i],out_w[i],rank)
+      i += 1
+    i = 0
+    while i < k
+      if ffw_find_term(st,su[i],sv[i],sw[i]) < 0
+        rank = ffw_toggle(st,su[i],sv[i],sw[i],rank)
+      i += 1
+    st[6] = rank
+    z = ffw_verify_current_exact(st,st[2]) ## i64
   result
 
 # Standalone exact checker for tests and GPU admission: rebuild the selected

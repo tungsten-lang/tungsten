@@ -87,6 +87,9 @@
   a = 0 ## i32
   bb = 0 ## i32
   dup = 0 ## i32
+  lo = 0 ## i32
+  hi = 0 ## i32
+  swap = 0 ## i32
   ci = 0 ## i32
   dchk = 0 ## i32
   pb = 0 ## i32
@@ -253,14 +256,22 @@
                   dup = bb
           bb = bb + 1
         if dup >= 0
-          sus[dup * 4 + ltid] = sus[(rank - 1) * 4 + ltid]
-          svs[dup * 4 + ltid] = svs[(rank - 1) * 4 + ltid]
-          sws[dup * 4 + ltid] = sws[(rank - 1) * 4 + ltid]
+          lo = a
+          hi = dup
+          if lo > hi
+            swap = lo
+            lo = hi
+            hi = swap
           rank = rank - 1
-          sus[a * 4 + ltid] = sus[(rank - 1) * 4 + ltid]
-          svs[a * 4 + ltid] = svs[(rank - 1) * 4 + ltid]
-          sws[a * 4 + ltid] = sws[(rank - 1) * 4 + ltid]
+          if hi < rank
+            sus[hi * 4 + ltid] = sus[rank * 4 + ltid]
+            svs[hi * 4 + ltid] = svs[rank * 4 + ltid]
+            sws[hi * 4 + ltid] = sws[rank * 4 + ltid]
           rank = rank - 1
+          if lo < rank
+            sus[lo * 4 + ltid] = sus[rank * 4 + ltid]
+            svs[lo * 4 + ltid] = svs[rank * 4 + ltid]
+            sws[lo * 4 + ltid] = sws[rank * 4 + ltid]
     if didplus == 0
       a = fi
       if a < rank
@@ -275,14 +286,22 @@
                     dup = bb
           bb = bb + 1
         if dup >= 0
-          sus[dup * 4 + ltid] = sus[(rank - 1) * 4 + ltid]
-          svs[dup * 4 + ltid] = svs[(rank - 1) * 4 + ltid]
-          sws[dup * 4 + ltid] = sws[(rank - 1) * 4 + ltid]
+          lo = a
+          hi = dup
+          if lo > hi
+            swap = lo
+            lo = hi
+            hi = swap
           rank = rank - 1
-          sus[a * 4 + ltid] = sus[(rank - 1) * 4 + ltid]
-          svs[a * 4 + ltid] = svs[(rank - 1) * 4 + ltid]
-          sws[a * 4 + ltid] = sws[(rank - 1) * 4 + ltid]
+          if hi < rank
+            sus[hi * 4 + ltid] = sus[rank * 4 + ltid]
+            svs[hi * 4 + ltid] = svs[rank * 4 + ltid]
+            sws[hi * 4 + ltid] = sws[rank * 4 + ltid]
           rank = rank - 1
+          if lo < rank
+            sus[lo * 4 + ltid] = sus[rank * 4 + ltid]
+            svs[lo * 4 + ltid] = svs[rank * 4 + ltid]
+            sws[lo * 4 + ltid] = sws[rank * 4 + ltid]
       a = fj
       if a < rank
         dup = -1
@@ -296,14 +315,22 @@
                     dup = bb
           bb = bb + 1
         if dup >= 0
-          sus[dup * 4 + ltid] = sus[(rank - 1) * 4 + ltid]
-          svs[dup * 4 + ltid] = svs[(rank - 1) * 4 + ltid]
-          sws[dup * 4 + ltid] = sws[(rank - 1) * 4 + ltid]
+          lo = a
+          hi = dup
+          if lo > hi
+            swap = lo
+            lo = hi
+            hi = swap
           rank = rank - 1
-          sus[a * 4 + ltid] = sus[(rank - 1) * 4 + ltid]
-          svs[a * 4 + ltid] = svs[(rank - 1) * 4 + ltid]
-          sws[a * 4 + ltid] = sws[(rank - 1) * 4 + ltid]
+          if hi < rank
+            sus[hi * 4 + ltid] = sus[rank * 4 + ltid]
+            svs[hi * 4 + ltid] = svs[rank * 4 + ltid]
+            sws[hi * 4 + ltid] = sws[rank * 4 + ltid]
           rank = rank - 1
+          if lo < rank
+            sus[lo * 4 + ltid] = sus[rank * 4 + ltid]
+            svs[lo * 4 + ltid] = svs[rank * 4 + ltid]
+            sws[lo * 4 + ltid] = sws[rank * 4 + ltid]
     dchk = step % 4096
     if dchk == 0
       a = 0
@@ -318,14 +345,22 @@
                   dup = bb
           bb = bb + 1
         if dup >= 0
-          sus[dup * 4 + ltid] = sus[(rank - 1) * 4 + ltid]
-          svs[dup * 4 + ltid] = svs[(rank - 1) * 4 + ltid]
-          sws[dup * 4 + ltid] = sws[(rank - 1) * 4 + ltid]
+          lo = a
+          hi = dup
+          if lo > hi
+            swap = lo
+            lo = hi
+            hi = swap
           rank = rank - 1
-          sus[a * 4 + ltid] = sus[(rank - 1) * 4 + ltid]
-          svs[a * 4 + ltid] = svs[(rank - 1) * 4 + ltid]
-          sws[a * 4 + ltid] = sws[(rank - 1) * 4 + ltid]
+          if hi < rank
+            sus[hi * 4 + ltid] = sus[rank * 4 + ltid]
+            svs[hi * 4 + ltid] = svs[rank * 4 + ltid]
+            sws[hi * 4 + ltid] = sws[rank * 4 + ltid]
           rank = rank - 1
+          if lo < rank
+            sus[lo * 4 + ltid] = sus[rank * 4 + ltid]
+            svs[lo * 4 + ltid] = svs[rank * 4 + ltid]
+            sws[lo * 4 + ltid] = sws[rank * 4 + ltid]
         if dup < 0
           a = a + 1
     # Capture best by lexicographic (rank, density): a strictly lower rank
@@ -704,11 +739,16 @@ rd = 0
 last_baserank = -1
 last_seedden = -1
 persistent_generation = 0 ## i64
+# A coordinator killed outside the graceful shutdown path cannot publish a
+# stop command. Bound the mailbox lease so its Metal-owning child eventually
+# self-reaps instead of polling forever as an orphan.
+persistent_idle_timeout_ms = 600000 ## i64
 if persistent_mode == 1
   z = gpu_mailbox_ack(persistent_ack_path, "0 ready 0\n")
 while rd < ROUNDS || persistent_mode == 1
   command_force_reseed = 0 ## i64
   if persistent_mode == 1
+    persistent_idle_started = ccall("__w_clock_ms") ## i64
     command_ready = 0 ## i64
     while command_ready == 0
       command_text = read_file(persistent_command_path)
@@ -746,17 +786,33 @@ while rd < ROUNDS || persistent_mode == 1
               z = gpu_mailbox_ack(gpubestpath, "")
               command_ready = 1
       if command_ready == 0
+        if ccall("__w_clock_ms") - persistent_idle_started >= persistent_idle_timeout_ms
+          z = gpu_mailbox_ack(persistent_ack_path, persistent_generation.to_s() + " expired " + rd.to_s() + "\n")
+          exit(0)
         z = ccall("__w_sleep_ms", 10)
   content = read_file(seedpath)
   lines = content.split("\n")
-  baserank = lines[0].to_i()
+  line_base = 1 ## i64
+  field_base = 0 ## i64
+  baserank = lines[0].to_i() ## i64
+  first_parts = lines[0].split(" ")
+  if first_parts.size() >= 4 && first_parts[0] == "R"
+    line_base = 0
+    field_base = 1
+    baserank = lines.size()
+    if lines[baserank - 1].size() == 0
+      baserank -= 1
+  if line_base == 1 && lines.size() > 1
+    first_row = lines[1].split(" ")
+    if first_row.size() >= 4 && first_row[0] == "R"
+      field_base = 1
   ti2 = 0
   while ti2 < baserank
-    ln = lines[ti2 + 1]
+    ln = lines[ti2 + line_base]
     parts = ln.split(" ")
-    baseu[ti2] = parts[0].to_i()
-    basev[ti2] = parts[1].to_i()
-    basew[ti2] = parts[2].to_i()
+    baseu[ti2] = parts[field_base].to_i()
+    basev[ti2] = parts[field_base + 1].to_i()
+    basew[ti2] = parts[field_base + 2].to_i()
     ti2 += 1
   # Build exact split identities natively.  Portfolio slot 0 is the base seed
   # when ESCAPE_SEEDS=1.  Otherwise every slot replaces one term by two terms
@@ -929,7 +985,8 @@ while rd < ROUNDS || persistent_mode == 1
       if candidate_written && seed_written
         reject_meta = "schema=1\nworker=generic-cal2zone\nworker_nonce=" + persistent_generation.to_s() + "\nworker_round=" + rd.to_s() + "\nseed_rank=" + baserank.to_s() + "\nnominal_rank=" + localmin.to_s() + "\nnominal_density=" + localden.to_s() + "\nexact_error=" + exact_error.to_s() + "\n"
         z = write_file(internal_reject_meta_path, reject_meta)
-      # Sidecars only — no console line (coordinator harvests quietly).
+      << "GPU_INTERNAL_REJECT_CANDIDATE worker=generic-cal2zone worker_nonce=" + persistent_generation.to_s() + " worker_round=" + rd.to_s() + " nominal_rank=" + localmin.to_s() + " exact_error=" + exact_error.to_s() + " candidate=" + internal_reject_candidate_path
+      flush()
   << "round " + rd.to_s() + "/" + ROUNDS.to_s() + "  base=" + baserank.to_s() + "  launch=" + startrank.to_s() + "  escapes=" + ESCAPE_SEEDS.to_s() + "  seed_density=" + seedden.to_s() + "  round_best=" + localmin.to_s() + "  round_density=" + localden.to_s() + "  global_best=" + globalbest.to_s()
   flush()
   rd += 1

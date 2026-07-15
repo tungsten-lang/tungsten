@@ -1,5 +1,6 @@
 use flipfleet_gpu_worker_bundle
 use flipfleet_persistent_gpu
+use flipfleet_global_kernel_shear_bundle
 
 -> ffngc_expect(label, condition)
   if !condition
@@ -30,15 +31,24 @@ ffngc_expect("constraint helper launch", source.include?("command = ffpc_epoch_c
 ffngc_expect("kxor helper launch", source.include?("command = ffx_epoch_command"))
 ffngc_expect("span helper launch", source.include?("command = ffsrp_epoch_command"))
 ffngc_expect("low-rank shear helper launch", source.include?("command = fflrsp_epoch_command"))
+ffngc_expect("global kernel shear helper launch", source.include?("command = ffgksb_epoch_command"))
 ffngc_expect("span worker readiness", source.include?("gpu_span_ready") && source.include?("ready\[15\] = span_ready") && source.include?("ready\[16\] = span_ready"))
 ffngc_expect("low-rank shear readiness", source.include?("gpu_shear_ready") && source.include?("ready\[17\] = shear_ready"))
+ffngc_expect("global kernel shear readiness", source.include?("gpu_global_shear_ready") && source.include?("ready\[19\] = global_shear_ready"))
+ffngc_expect("global kernel shear freshness", source.include?("ffn_binary_fresh6(GLOBAL_SHEAR_BINARY") && source.include?("global_shear_worker_core") && source.include?("metaflip_worker.w"))
 ffngc_expect("surgery binaries on pool launches", source.split("DIFFERENTIAL_BINARY, SPAN_BINARY, SHEAR_BINARY").size() == 4)
 ffngc_expect("parent differential tracks exact nullspace core", source.include?("differential_nullspace") && source.include?("flipfleet_archive_nullspace.w") && source.include?("ffn_binary_fresh5(DIFFERENTIAL_BINARY"))
 ffngc_expect("distance-qualified parents", source.include?("ffn_distance(left, right) >= required"))
-ffngc_expect("frontier escape banks integrated", source.include?("use flipfleet_frontier_escape_banks") && source.include?("fffeb_append_frontier_paths(REPO_ROOT, frontier_paths, best"))
+ffngc_expect("frontier escape banks integrated", source.include?("use flipfleet_frontier_escape_banks") && source.include?("fffeb_schedule_target(frontier_escape_source_count)") && source.include?("fffeb_append_source_kind_nonce(lazy_source"))
+ffngc_expect("frontier escapes are lazy", !source.include?("fffeb_append_frontier_paths(REPO_ROOT, frontier_paths, best"))
 ffngc_expect("generic split rotates exact frontiers", source.include?("if role == 3 && archive.size() > 0") && source.include?("seed = archive\[epoch % archive.size()]"))
 ffngc_expect("final persistence exact gate", source.include?("final_exact = ffw_verify_best_exact(best, N)") && source.include?("dumped = ffn_dump_trusted(best, BEST_PATH, RUN_TAG)") && source.include?("if dumped < 1"))
-ffngc_expect("internal reject replay", source.include?("use flipfleet_gpu_reject") && source.include?("ffn_harvest_gpu_internal_reject") && source.include?("gpu_launch_nonces") && source.include?("internal-rejects=\" + gpu_internal_rejects.to_s()"))
+ffngc_expect("internal reject replay", source.include?("use flipfleet_gpu_reject") && source.include?("ffn_harvest_gpu_internal_reject") && source.include?("gpu_launch_nonces") && source.include?("internal-rejects=\" + (gpu_internal_rejects + rect_internal_rejects).to_s()"))
+ffngc_expect("rectangular internal reject replay", source.include?("use flipfleet_rect_gpu_reject") && source.include?("ffrgr_prepare_worker_sidecars(output_path)") && source.split("rect_internal_rejects = ffrgr_harvest").size() == 3)
+ffngc_expect("rectangular reject scratch is isolated", source.include?("rect_reject_scratch.push") && source.split("rect_reject_scratch\[rect_component\], rect_reject_status").size() == 3)
+ffngc_expect("rectangular reject exact telemetry", source.split("rect_reject_status\[0\] != 0").size() == 3 && source.split("invalid_candidates += 1\n            rect_failures\[rect_component\]").size() >= 2)
+ffngc_expect("rectangular reject GPU health", source.split("gpu_failures\[10\] = gpu_failures\[10\] + 1").size() >= 3 && source.include?("round < rect_retry_round\[health_rect\]"))
+ffngc_expect("rectangular reject summary", source.include?("rect-internal-rejects=\" + rect_internal_rejects.to_s()"))
 ffngc_expect("strict record target", source.include?("internal_target = ffw_best_rank(best) - 1"))
 ffngc_expect("4x4 evidence allocation", source.include?("ff7_allocate_pool_remainder_for_tensor(N") && source.include?("ffkp_mode_lane_budget_for_tensor(N"))
 
@@ -48,12 +58,14 @@ kxor = ffx_epoch_command("/repo", "/tmp/kxor", "/tmp/seed", "/tmp/out", 7, 8, 2,
 span3 = ffsrp_epoch_command("/repo", "/tmp/span", "/tmp/seed", "/tmp/out", 7, 3, 4, 8, 9)
 span4 = ffsrp_epoch_command("/repo", "/tmp/span", "/tmp/seed", "/tmp/out", 7, 4, 3, 1, 9)
 shear = fflrsp_epoch_command("/repo", "/tmp/shear", "/tmp/seed", "/tmp/out", 5, 512, 9)
+global_shear = ffgksb_epoch_command("/repo", "/tmp/global-shear", "/tmp/seed", "/tmp/out", 9)
 ffngc_expect("MITM cached child", mitm.ends_with?(" '/tmp/mitm.metallib'"))
 ffngc_expect("constraint cached child", constraint.ends_with?(" '/tmp/constraint.metallib'"))
 ffngc_expect("kxor cached child", kxor.ends_with?(" '/tmp/kxor.metallib'"))
 ffngc_expect("span3 cached child", span3.ends_with?(" '/tmp/span.metallib'"))
 ffngc_expect("span4 cached child", span4.ends_with?(" '/tmp/span.metallib'"))
 ffngc_expect("shear cached child", shear.ends_with?(" '/tmp/shear.metallib'"))
+ffngc_expect("global shear CPU child", global_shear == "cd '/repo' && '/tmp/global-shear' '/tmp/seed' '/tmp/out' 9")
 ffngc_expect("span4 memory guard", ffsrp_epoch_command("/repo", "/tmp/span", "/tmp/seed", "/tmp/out", 7, 4, 3, 2, 9) == "")
 ffngc_expect("shear tensor guard", fflrsp_epoch_command("/repo", "/tmp/shear", "/tmp/seed", "/tmp/out", 4, 512, 9) == "")
 ffngc_expect("shear pair guard", fflrsp_epoch_command("/repo", "/tmp/shear", "/tmp/seed", "/tmp/out", 5, 4096, 9) == "")

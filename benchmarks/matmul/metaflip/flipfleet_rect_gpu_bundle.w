@@ -121,3 +121,97 @@ use flipfleet_rect_profiles
   if epoch_rounds < 1
     epoch_rounds = 1
   "cd " + ffrgb_shell_quote(root) + " && " + ffrgb_shell_quote(binary) + " " + ffrgb_shell_quote(seed_path) + " " + ffrgb_shell_quote(best_path) + " " + n.to_s() + " " + m.to_s() + " " + p.to_s() + " " + ffrgb_shell_quote(record_path) + " " + record_target.to_s() + " " + epoch_steps.to_s() + " " + epoch_reseed.to_s() + " " + margin.to_s() + " " + workq.to_s() + " " + wanderq.to_s() + " " + wthr.to_s() + " " + lanes.to_s() + " " + ffrgb_shell_quote(live_path) + " " + epoch_escapes.to_s() + " " + epoch_rounds.to_s() + " " + ffrgb_shell_quote(ffrgb_metallib_path(binary))
+
+# Low-cadence exact rectangular 5 -> 4 surgery worker. It is intentionally a
+# child process: the host hash table and Metal buffers are reclaimed after each
+# bounded epoch, while the main rectangular coordinator remains kernel-free.
+-> ffrmw_supported(n, m, p) (i64 i64 i64) i64
+  if n == 2 && m == 2 && p == 5
+    return 1
+  if n == 2 && m == 3 && p == 4
+    return 1
+  if n == 2 && m == 3 && p == 5
+    return 1
+  if n == 2 && m == 4 && p == 5
+    return 1
+  if n == 2 && m == 5 && p == 6
+    return 1
+  0
+
+-> ffrmw_source_rel()
+  "benchmarks/matmul/metaflip/flipfleet_rect_mitm_lane.w"
+
+-> ffrmw_library_rel()
+  "benchmarks/matmul/metaflip/flipfleet_rect_mitm_lane_lib.w"
+
+-> ffrmw_shared_library_rel()
+  "benchmarks/matmul/metaflip/flipfleet_mitm_lane_lib.w"
+
+-> ffrmw_build_command(root, binary) (String String)
+  "cd " + ffrgb_shell_quote(root) + " && TUNGSTEN_LL_PATH=" + ffrgb_shell_quote(binary + ".ll") + " TUNGSTEN_METAL_PATH=" + ffrgb_shell_quote(ffmc_generated_source_path(binary)) + " bin/tungsten -o " + ffrgb_shell_quote(binary) + " " + ffrgb_shell_quote(ffrmw_source_rel()) + " --release --native --fast --lto"
+
+-> ffrmw_build(root, binary) (String String) i64
+  built = system(ffrmw_build_command(root, binary))
+  if !built
+    return 0
+  ffmc_build(root, ffmc_generated_source_path(binary), binary)
+
+-> ffrmw_metallib_path(binary) (String)
+  ffmc_library_path(binary)
+
+-> ffrmw_fresh(root, binary) (String String) i64
+  binary_mtime = file_mtime_ns(binary)
+  worker_mtime = file_mtime_ns(root + "/" + ffrmw_source_rel())
+  library_mtime = file_mtime_ns(root + "/" + ffrmw_library_rel())
+  shared_mtime = file_mtime_ns(root + "/" + ffrmw_shared_library_rel())
+  bundle_mtime = file_mtime_ns(root + "/benchmarks/matmul/metaflip/flipfleet_gpu_worker_bundle.w")
+  if binary_mtime == nil || worker_mtime == nil || library_mtime == nil || shared_mtime == nil || bundle_mtime == nil
+    return 0
+  if binary_mtime < worker_mtime || binary_mtime < library_mtime || binary_mtime < shared_mtime || binary_mtime < bundle_mtime
+    return 0
+  ffmc_fresh(ffmc_generated_source_path(binary), binary)
+
+-> ffrmw_pool(n, m, p) (i64 i64 i64) i64
+  if n == 2 && m == 2 && p == 5
+    return 384
+  if n == 2 && m == 3 && p == 4
+    return 256
+  if n == 2 && m == 3 && p == 5
+    return 384
+  if n == 2 && m == 4 && p == 5
+    return 384
+  if n == 2 && m == 5 && p == 6
+    return 384
+  0
+
+-> ffrmw_due(round, portfolio_child) (i64 i64) i64
+  if portfolio_child != 0
+    if round == 0
+      return 1
+    return 0
+  if (round % 8) == 0
+    return 1
+  0
+
+-> ffrmw_epoch_from_tag(run_tag) (String) i64
+  parts = run_tag.split("_e")
+  if parts.size() > 1
+    return parts[parts.size() - 1].to_i()
+  0
+
+-> ffrmw_launch_number(run_tag, round, portfolio_child) (String i64 i64) i64
+  if portfolio_child != 0
+    return ffrmw_epoch_from_tag(run_tag)
+  round / 8
+
+-> ffrmw_nearby(launch_number) (i64) i64
+  (launch_number % 3) * 4
+
+-> ffrmw_offset(launch_number) (i64) i64
+  (launch_number * 32) % 256
+
+-> ffrmw_epoch_command(root, binary, seed_path, output_path, n, m, p, subsets, pool, nearby, offset) (String String String String i64 i64 i64 i64 i64 i64 i64)
+  if ffrmw_supported(n, m, p) == 0 || subsets < 1 || subsets > 16 || pool < 4 || pool > 700 || nearby < 0 || nearby > 8 || offset < 0
+    return ""
+  tensor = n.to_s() + "x" + m.to_s() + "x" + p.to_s()
+  "cd " + ffrgb_shell_quote(root) + " && " + ffrgb_shell_quote(binary) + " " + ffrgb_shell_quote(seed_path) + " " + ffrgb_shell_quote(output_path) + " " + tensor + " " + subsets.to_s() + " " + pool.to_s() + " " + nearby.to_s() + " " + offset.to_s() + " '' " + ffrgb_shell_quote(ffrmw_metallib_path(binary))

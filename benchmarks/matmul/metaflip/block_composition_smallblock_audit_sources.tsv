@@ -1,0 +1,16 @@
+source	revision_or_sha256	role
+audit_date	2026-07-13	comparison date
+block_composition_smallblock_audit.tsv	9d40d1e46dec1641822ab430dea552581b7dbda5decad54cbb3772e50ddeb4c5	SHA-256 of persisted three-candidate audit
+fmm-lille-version	ba70cfdde999efa9b59ad234edf9e32dc6602255	public noncommutative numerical comparison table; maximum dimension 32
+fmm-lille-homepage	3b849bf2552e6591b70fb8fc233fd2119b31bafef28b3e67ccc043c7b51c672b	SHA-256 fetched 2026-07-13
+matmulcatalog	0320f745d87e46c36259b03add05307429941680	verified field-labelled public certificates and docs/catalog.json
+matmulcatalog-docs-catalog	c5e301452fcf4f51f61a8f16086b446d6509f73f80f3e0f729fd4fd9a717e546	SHA-256 of docs/catalog.json at pinned revision
+matmulcatalog-2x3x3-json	7861d02832ebdce7c3d943fd1eff3097567b2bea87a45cfa70a94940c4dbc42d	SHA-256; Git blob 4d11cf485bea404109df5961d026c88aba89ae6f
+matmulcatalog-2x3x4-json	fa96a33a1a52b20c19538be67e11b7783afbb3a8a267414bb1342e382b1b5274	SHA-256; Git blob 9dcf0d550d991fa1b589048bfdd80fa5944b3154
+matmulcatalog-2x4x4-json	86944de555b23a52c64790c61a5ea698bf2a6ed11e9fc99af0ca77b8826794ea	SHA-256; Git blob ba32446ed4617b12eb3dee53b9f541db5adb2b0b
+converted-2x3x3-leaf	03d3957d466e75e42a629462ac112942358e0fdff63d46396da2ed313646d301	independently parity-verified rank-15 GF(2) leaf
+converted-2x3x4-leaf	12399a40da3e5a043fff4a8445599e879f765d3b17a7a6d5f987e26a0e5e98c8	independently parity-verified rank-20 GF(2) leaf
+converted-2x4x4-leaf	a82e9fb2ddc823af19d32ec6f79f91dc03ef5c4d74ff939f8b35a1fbe79880e5	independently parity-verified rank-26 GF(2) leaf
+rank-47-outer	6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a	SHA-256 of exact d450 outer
+size-9-bounded-scan	84 sorted targets 26..32	forced at least one size-9 block; every formula lost by at least 33
+size-1-or-2-bounded-scan	165 sorted targets 12..20	exactly two strict formula wins and one formula tie; all three materialized exactly

@@ -8,7 +8,7 @@
     return true
   if name in ("w_system" "w_exit" "w_raise" "w_env")
     return true
-  if name in ("w_goroutine_spawn" "w_thread_spawn" "w_flush" "w_read_bytes" "w_read_line_stdin")
+  if name in ("w_goroutine_spawn" "w_thread_spawn" "w_thread_spawn_slots" "w_flush" "w_read_bytes" "w_read_line_stdin")
     return true
   if name == "w_slab_freeze_safe"
     return true
@@ -18,7 +18,7 @@
     return true
   if name in ("__w_file_exists" "__w_cache_read" "__w_cache_write")
     return true
-  if name in ("__w_clock" "__w_clock_ms")
+  if name in ("__w_clock" "__w_clock_ms" "__w_sleep_ms")
     return true
   # Metal bridge — every w_metal_* call either allocates a retained
   # Obj-C object or mutates GPU-visible buffer state, so none of them
@@ -29,7 +29,7 @@
     return true
   if name in ("w_metal_buffer_read_f32" "w_metal_buffer_read_i32" "w_metal_buffer_read_f16")
     return true
-  if name in ("w_metal_compile_source" "w_metal_compile_source_opts" "w_metal_pipeline_for" "w_metal_queue_new")
+  if name in ("w_metal_compile_source" "w_metal_compile_source_opts" "w_metal_library_from_file" "w_metal_pipeline_for" "w_metal_queue_new")
     return true
   if name in ("w_metal_dispatch1" "w_metal_dispatch_n" "w_metal_dispatch_groups")
     return true

@@ -29,6 +29,22 @@ Usage: python3 bucket_gen.py <n> <m> <p> <recv> [seed] [cap] [thr] [thrper] [plu
 """
 
 
+def _raw_i64_decimal_local(name, expression, indent="  "):
+    """Emit a boxed-BigInt-safe decimal parse into a raw i64 local."""
+    return "\n".join((
+        f"{indent}{name}text = {expression}",
+        f"{indent}{name}cut = {name}text.size() - 7",
+        f"{indent}{name}mask = 0 ## i64",
+        f"{indent}if {name}cut > 0",
+        f"{indent}  {name}hi = {name}text.slice(0, {name}cut).to_i() ## i64",
+        f"{indent}  {name}lo = {name}text.slice({name}cut, 7).to_i() ## i64",
+        f"{indent}  {name}mask = {name}hi * 10000000 + {name}lo",
+        f"{indent}if {name}cut <= 0",
+        f"{indent}  {name}mask = {name}text.to_i()",
+        f"{indent}{name} = {name}mask ## i64",
+    ))
+
+
 def _plus_transition_block(offsets, plusper, axes="w", indent="  "):
     """Emit a tensor-preserving split on W or on a uniformly random axis."""
     if axes not in ("w", "any"):
@@ -83,12 +99,86 @@ def _plus_transition_block(offsets, plusper, axes="w", indent="  "):
 {i}        rank = ins_term(st, spu, spv, spw2, rank) ## i64"""
 
 
+# Standalone cal2zone2 uses a positive raw-i64 state modulo 2^63.  The PCG
+# multiplier is 1 (mod 4), and every process gets an odd increment, so each
+# parameterized LCG stream has the full 2^63 period.  Search selections still
+# consume a 31-bit high word: multiplying that word by the live rank cannot
+# overflow and preserves the existing multiply-high selection contract.
+_RNG63_MULT = 6364136223846793005
+_RNG63_MASK = 9223372036854775807
+_RNG63_SEED_MASK = 4611686018427387903
+_RNG31_MASK = 2147483647
+
+
+def _rng63_advance(indent, word="rngword"):
+    return "\n".join((
+        f"{indent}rng = (rng * {_RNG63_MULT} + rnginc) & {_RNG63_MASK}",
+        f"{indent}{word} = (rng >> 32) & {_RNG31_MASK} ## i64",
+    ))
+
+
+def _plus_transition_block_rng63(offsets, plusper, axes="w", indent="  "):
+    """The cal2zone2 plus transition driven by its long-period stream."""
+    if axes not in ("w", "any"):
+        raise ValueError("plus_axes must be 'w' or 'any'")
+    o = offsets
+    i = indent
+    draw = _rng63_advance(i + "  ")
+    common = f"""{i}if (mv % {plusper}) == 0
+{draw}
+{i}  pd1 = (rngword * rank) >> 31 ## i64
+{i}  pt1 = st[{o['LIVE']} + pd1] ## i64
+{draw}
+{i}  pd2 = (rngword * rank) >> 31 ## i64
+{i}  pt2 = st[{o['LIVE']} + pd2] ## i64
+{i}  spu = st[{o['US']} + pt1] ## i64
+{i}  spv = st[{o['VS']} + pt1] ## i64
+{i}  spw = st[{o['WS']} + pt1] ## i64"""
+    if axes == "w":
+        return common + f"""
+{i}  wpr = st[{o['WS']} + pt2] ## i64
+{i}  if wpr != spw
+{i}    if wpr != 0
+{i}      spw2 = spw ^ wpr ## i64
+{i}      rank = ins_term(st, spu, spv, spw, rank) ## i64
+{i}      rank = ins_term(st, spu, spv, wpr, rank) ## i64
+{i}      rank = ins_term(st, spu, spv, spw2, rank) ## i64"""
+    return common + f"""
+{draw}
+{i}  paxis = (((rngword >> 22) & 511) * 3) >> 9 ## i64
+{i}  if paxis == 0
+{i}    upr = st[{o['US']} + pt2] ## i64
+{i}    if upr != spu
+{i}      if upr != 0
+{i}        spu2 = spu ^ upr ## i64
+{i}        rank = ins_term(st, spu, spv, spw, rank) ## i64
+{i}        rank = ins_term(st, upr, spv, spw, rank) ## i64
+{i}        rank = ins_term(st, spu2, spv, spw, rank) ## i64
+{i}  if paxis == 1
+{i}    vpr = st[{o['VS']} + pt2] ## i64
+{i}    if vpr != spv
+{i}      if vpr != 0
+{i}        spv2 = spv ^ vpr ## i64
+{i}        rank = ins_term(st, spu, spv, spw, rank) ## i64
+{i}        rank = ins_term(st, spu, vpr, spw, rank) ## i64
+{i}        rank = ins_term(st, spu, spv2, spw, rank) ## i64
+{i}  if paxis == 2
+{i}    wpr = st[{o['WS']} + pt2] ## i64
+{i}    if wpr != spw
+{i}      if wpr != 0
+{i}        spw2 = spw ^ wpr ## i64
+{i}        rank = ins_term(st, spu, spv, spw, rank) ## i64
+{i}        rank = ins_term(st, spu, spv, wpr, rank) ## i64
+{i}        rank = ins_term(st, spu, spv, spw2, rank) ## i64"""
+
+
 def gen(n, m, p, recv, arr=200, cap=14000000000, seed=None, thr=6, thrper=300000, plusper=2000, band=10, adaptive_esc=None, stopat=None, randstart=False, z1max=4, z1q=100000000, workq=3000000000, wstep=10, wq=500000000, thr0=10, thrbump=2, rsmax=4, world_record=None, tiegap=2000, tiemax=500, record_bandq=None, runtime_seed=False,
         worker=False, plus_axes="w"):
     thrspan = thr + 1
     AB, BB, CB = n*m, m*p, n*p
     MODA, MODB = 1 << AB, 1 << BB
     maxbits = max(AB, BB, CB) + 1
+    raw_seed_masks = max(AB, BB, CB) >= 49
     seed_lines = None
     if seed is not None:
         seed_lines = [ln for ln in open(seed).read().splitlines()
@@ -127,6 +217,17 @@ def gen(n, m, p, recv, arr=200, cap=14000000000, seed=None, thr=6, thrper=300000
         # the orchestrator seed each walker at (re)launch time: naive on the first
         # launch, a random fleet-best after a CYCLEOUT. All string parsing happens
         # here at startup, never in the hot move loop.
+        if raw_seed_masks:
+            seed_assignments = "\n".join((
+                _raw_i64_decimal_local("rsu", "rsp[0]"),
+                _raw_i64_decimal_local("rsv", "rsp[1]"),
+                _raw_i64_decimal_local("rsw", "rsp[2]"),
+            ))
+        else:
+            # Keep the established 3x3--6x6 generated source byte-identical.
+            seed_assignments = """  rsu = rsp[0].to_i() ## i64
+  rsv = rsp[1].to_i() ## i64
+  rsw = rsp[2].to_i() ## i64"""
         seed_block = f"""sav = argv()
 rspath = sav[4]
 rscontent = read_file(rspath)
@@ -135,9 +236,7 @@ rsrank = rslines[0].to_i() ## i64
 rsi = 0 ## i64
 while rsi < rsrank
   rsp = rslines[rsi + 1].split(" ")
-  rsu = rsp[0].to_i() ## i64
-  rsv = rsp[1].to_i() ## i64
-  rsw = rsp[2].to_i() ## i64
+{seed_assignments}
   rank = ins_term(st, rsu, rsv, rsw, rank)
   rsi += 1"""
     elif seed_lines is not None:
@@ -171,8 +270,8 @@ while ni < {n}
     esc_block = ""
     impreset = ""
     cycles_read = ""   # cal2zone2: read sawtooth-cycles-before-CYCLEOUT from av0[5]
-    recordq_read = ""  # optional runtime record-band budget from av0[6]
-    recordq_reset = "" # post-improvement frontier budget override
+    recordq_read = ""  # optional runtime schedule quota initialization
+    recordq_reset = "" # post-improvement schedule quota override
     cycleout_init = ""
     cycleout_finish = "  mv += 1"
     if adaptive_esc == "wcal2":
@@ -370,25 +469,23 @@ flush()"""
         # cal2zone variant (2026-07-06): work zone (band <= wthr) +1 band / 2.5B
         # moves; wander zone (band > wthr) +12 / 500M; sawtooth wrap at band 60.
         # FOUR full cycles with no descent -> the walker prints CYCLEOUT and EXITS
-        # (mv = cap); the orchestrator reseeds it from the fleet's current best
-        # (random among ties) and relaunches. wthr rises by ONE whenever a descent
-        # lands within one band of the threshold. Record budget (record_bandq):
-        # dwell that many moves per band while best_rank <= world_record.
-        recordq_block = ""
-        if world_record is not None and record_bandq is not None:
-            recordq_block = f"""
-      if best_rank <= {world_record}
-        q = recordqv"""
-            recordq_read = f"""recordqv = {record_bandq} ## i64
+        # (mv = cap); the orchestrator selects a new exact seed and relaunches.
+        # wthr rises by ONE whenever a descent lands within one band of the
+        # threshold.  The two zone dwell quotas are independently runtime-
+        # tunable: argv[6] is work (band <= wthr), argv[7] is wander.  Existing
+        # seven-argument launches therefore keep controlling the work zone while
+        # an omitted wander argument retains the historical 500M default.
+        workq_default = (record_bandq if record_bandq is not None
+                         else 2_500_000_000)
+        recordq_read = f"""workqv = {workq_default} ## i64
 if av0.size() > 6
-  recordqv = av0[6].to_i()
-if best_rank <= {world_record}
-  nextesc = recordqv
-<< "RECORDQ " + recordqv.to_s()
+  workqv = av0[6].to_i()
+wanderqv = {wq} ## i64
+if av0.size() > 7
+  wanderqv = av0[7].to_i()
+nextesc = workqv
+<< "ZONEQ work=" + workqv.to_s() + " wander=" + wanderqv.to_s()
 flush()"""
-            recordq_reset = f"""
-    if best_rank <= {world_record}
-      nextesc = mv + recordqv"""
         # sawtooth cycles before a CYCLEOUT reseed: runtime-tunable via av0[5]
         # (default 4 when not supplied, so existing 5-arg callers are unchanged).
         cycles_read = """cyclesv = 4 ## i64
@@ -408,15 +505,20 @@ flush()"""
     if nb > 60
       nb = bstart
       wraps = wraps + 1
+      if rnginc < {_RNG63_MASK - 2}
+        rnginc = rnginc + 2
+      else
+        rnginc = 1
+      rng = (rng * {_RNG63_MULT} + rnginc) & {_RNG63_MASK}
       if wraps >= cyclesv
         << "CYCLEOUT rank=" + rank.to_s() + " mv=" + mv.to_s()
         flush()
         cycleout = 1
     if cycleout == 0
       aband = nb
-      q = 2500000000 ## i64
+      q = workqv ## i64
       if aband > wthr
-        q = 500000000{recordq_block}
+        q = wanderqv
       nextesc = mv + q
       << "BAND band=" + aband.to_s() + " rank=" + rank.to_s() + " mv=" + mv.to_s()
       flush()"""
@@ -432,7 +534,7 @@ flush()"""
       << "BAND band=" + aband.to_s() + " rank=" + rank.to_s() + " mv=" + mv.to_s()
       flush()
     wraps = 0
-    nextesc = mv + 2500000000{recordq_reset}"""
+    nextesc = mv + workqv"""
     elif adaptive_esc == "zones":
         # zone quanta: bands 1-4 -> +1/500M; 5-20 -> +1/2B; 21+ -> +5/1B; sawtooth at 60
         esc_block = """  if mv >= nextesc
@@ -495,6 +597,8 @@ flush()"""
     tie_helpers = ""
     tie_init = ""
     tie_check = ""
+    near_init = ""
+    near_write = ""
     prevrank_update = ""
     if world_record is not None:
         tie_helpers = f"""
@@ -522,6 +626,21 @@ tiehit = 0 ## i64
 last_tie_mv = 0 - {tiegap} - 1 ## i64
 best_tie_bits = 999999999 ## i64
 prevrank = rank ## i64"""
+        near_init = f"""
+neardir = ""
+if av0.size() > 8
+  neardir = av0[8]
+nearbase = {world_record} ## i64
+if av0.size() > 9
+  nearbase = av0[9].to_i()
+nearhit = 0 ## i64"""
+        near_write = """
+      if neardir.size() > 0
+        if rank > nearbase
+          if rank <= nearbase + 2
+            if nearhit < 8
+              nearhit = nearhit + 1
+              write_file(neardir + "_" + nearhit.to_s() + ".txt", dumpbody)"""
         tie_check = f"""
   if tiedir.size() > 0
     if tiehit < {tiemax}
@@ -555,6 +674,61 @@ rng = (rng * 1103515245 + 12345) & 2147483647
 rng = (rng * 1103515245 + 12345) & 2147483647
 bstart = 1 + ((rng >> 27) % {rsmax}) ## i64"""
     plus_block = _plus_transition_block(O, plusper, axes=plus_axes, indent="  ")
+    rng_init = "rng = base * 1009 + 12345 ## i64"
+    main_rng_block = f"""  rng = (rng * 1103515245 + 12345) & 2147483647
+  td = (rng * rank) >> 31 ## i64
+  ti = st[{O['LIVE']} + td] ## i64
+  ui = st[{O['US']} + ti] ## i64
+  vi = st[{O['VS']} + ti] ## i64
+  wi = st[{O['WS']} + ti] ## i64
+  rng = (rng * 1103515245 + 12345) & 2147483647
+  axis = (((rng >> 22) & 511) * 3) >> 9 ## i64
+  partner = 0 - 1 ## i64
+  rng = (rng * 1103515245 + 12345) & 2147483647
+  if axis == 0
+    partner = chain_rpick(st, {O['HU']}, {O['NXU']}, {O['US']}, ui, ti, rng)
+  if axis == 1
+    partner = chain_rpick(st, {O['HV']}, {O['NXV']}, {O['VS']}, vi, ti, rng)
+  if axis == 2
+    partner = chain_rpick(st, {O['HW']}, {O['NXW']}, {O['WS']}, wi, ti, rng)"""
+    if adaptive_esc == "cal2zone2":
+        rng_init = f"""rngseed = base & {_RNG63_SEED_MASK} ## i64
+rnginc = rngseed + rngseed + 1 ## i64
+rng = (rngseed ^ 1442695040888963407) & {_RNG63_MASK} ## i64
+rng = (rng * {_RNG63_MULT} + rnginc) & {_RNG63_MASK}
+rng = (rng * {_RNG63_MULT} + rnginc) & {_RNG63_MASK}
+<< "RNG63 stream=" + rnginc.to_s()
+flush()"""
+        if randstart:
+            draw = _rng63_advance("")
+            binit = f"""{draw}
+{draw}
+{draw}
+bstart = 1 + (rngword % {rsmax}) ## i64"""
+        plus_block = _plus_transition_block_rng63(
+            O, plusper, axes=plus_axes, indent="  ")
+        draw = _rng63_advance("  ")
+        main_rng_block = f"""{draw}
+  td = (rngword * rank) >> 31 ## i64
+  ti = st[{O['LIVE']} + td] ## i64
+  ui = st[{O['US']} + ti] ## i64
+  vi = st[{O['VS']} + ti] ## i64
+  wi = st[{O['WS']} + ti] ## i64
+{draw}
+  axis = (((rngword >> 22) & 511) * 3) >> 9 ## i64
+  partner = 0 - 1 ## i64
+{draw}
+  if axis == 0
+    partner = chain_rpick(st, {O['HU']}, {O['NXU']}, {O['US']}, ui, ti, rngword)
+  if axis == 1
+    partner = chain_rpick(st, {O['HV']}, {O['NXV']}, {O['VS']}, vi, ti, rngword)
+  if axis == 2
+    partner = chain_rpick(st, {O['HW']}, {O['NXW']}, {O['WS']}, wi, ti, rngword)"""
+    base_assignment = "  base = av0[0].to_i()"
+    if adaptive_esc == "cal2zone2":
+        # FlipFleet's launch nonce intentionally grows beyond the boxed integer
+        # range; keep the complete parameterized stream id in a raw i64 local.
+        base_assignment = _raw_i64_decimal_local("base", "av0[0]")
     return f'''st = i64[{TOT}]
 st[{O['P2']}] = 1
 kk = 1
@@ -777,13 +951,14 @@ recorddir = ""
 recordhit = 0 ## i64
 av0 = argv()
 if av0.size() > 0
-  base = av0[0].to_i()
+{base_assignment}
 if av0.size() > 1
   dumpfile = av0[1]
 if av0.size() > 2
   recorddir = av0[2]
 {tie_init}
-rng = base * 1009 + 12345 ## i64
+{near_init}
+{rng_init}
 threshold = {thr} ## i64
 {binit}
 aband = bstart ## i64
@@ -797,22 +972,7 @@ flush()
 mv = 0 ## i64
 {cycleout_init}
 while mv < {cap}
-  rng = (rng * 1103515245 + 12345) & 2147483647
-  td = (rng * rank) >> 31 ## i64
-  ti = st[{O['LIVE']} + td] ## i64
-  ui = st[{O['US']} + ti] ## i64
-  vi = st[{O['VS']} + ti] ## i64
-  wi = st[{O['WS']} + ti] ## i64
-  rng = (rng * 1103515245 + 12345) & 2147483647
-  axis = (((rng >> 22) & 511) * 3) >> 9 ## i64
-  partner = 0 - 1 ## i64
-  rng = (rng * 1103515245 + 12345) & 2147483647
-  if axis == 0
-    partner = chain_rpick(st, {O['HU']}, {O['NXU']}, {O['US']}, ui, ti, rng)
-  if axis == 1
-    partner = chain_rpick(st, {O['HV']}, {O['NXV']}, {O['VS']}, vi, ti, rng)
-  if axis == 2
-    partner = chain_rpick(st, {O['HW']}, {O['NXW']}, {O['WS']}, wi, ti, rng)
+{main_rng_block}
   if partner >= 0
     uj = st[{O['US']} + partner] ## i64
     vj = st[{O['VS']} + partner] ## i64
@@ -894,6 +1054,7 @@ while mv < {cap}
         if rank <= {recv}
           recordhit = recordhit + 1
           write_file(recorddir + "_" + recordhit.to_s() + ".txt", dumpbody)
+{near_write}
 {stop_block}
     if best_rank <= {recv}
       << "*** FOUND mv=" + mv.to_s() + " rank=" + rank.to_s() + " verify=" + verify(st, {O['US']}, {O['VS']}, {O['WS']}, {O['LIVE']}, rank, 7).to_s()
@@ -941,6 +1102,7 @@ def gen_worker(n, m, p, recv, world_record=None, cycles=4, thr=6, thrper=300000,
     AB, BB, CB = n * m, m * p, n * p
     MODA, MODB = 1 << AB, 1 << BB
     maxbits = max(AB, BB, CB) + 1
+    raw_seed_masks = max(AB, BB, CB) >= 49
     seed_rank = n * m * p
     arr = max(arr, seed_rank + 80)
     TS = 1
@@ -984,6 +1146,19 @@ def gen_worker(n, m, p, recv, world_record=None, cycles=4, thr=6, thrper=300000,
   if rank <= {world_record}
     st[{S} + 7] = 10000000000"""
     plus_block = _plus_transition_block(O, plusper, axes=plus_axes, indent="    ")
+    if raw_seed_masks:
+        load_scheme_assignments = "\n".join((
+            _raw_i64_decimal_local("lsu", "parts[0]", indent="    "),
+            _raw_i64_decimal_local("lsv", "parts[1]", indent="    "),
+            _raw_i64_decimal_local("lsw", "parts[2]", indent="    "),
+            "    rank = ins_term(st, lsu, lsv, lsw, rank)",
+        ))
+    else:
+        # Preserve the generated source for established <=6x6 workers.
+        load_scheme_assignments = (
+            "    rank = ins_term(st, parts[0].to_i(), parts[1].to_i(), "
+            "parts[2].to_i(), rank)"
+        )
 
     return f'''{helpers}
 
@@ -1274,7 +1449,7 @@ def gen_worker(n, m, p, recv, world_record=None, cycles=4, thr=6, thrper=300000,
   si = 0 ## i64
   while si < srank
     parts = lines[si + 1].split(" ")
-    rank = ins_term(st, parts[0].to_i(), parts[1].to_i(), parts[2].to_i(), rank)
+{load_scheme_assignments}
     si += 1
   ci = 0 ## i64
   while ci < rank

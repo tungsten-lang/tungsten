@@ -1,0 +1,115 @@
+use flipfleet_block_composer
+
+# Reproducible complete GF(2) leaf pool for every sorted 3--8 shape.  This is
+# kept as a library for the slower exhaustive-allocation tools; the production
+# composer retains its stable-first/checkpoint-aware loading policy.
+
+-> ffbcp_add(root, path, n, m, p, leaves)
+  leaf = ffbc_load_exact(root + path, n, m, p, 4096)
+  if leaf == nil
+    << "invalid or missing block leaf: " + root + path
+    exit(1)
+  leaves.push(leaf)
+  1
+
+-> ffbcp_stable_3_to_8(root) (String)
+  leaves = []
+  ffbcp_add(root, "matmul_3x3_rank23_d139_gf2.txt", 3, 3, 3, leaves)
+  ffbcp_add(root, "matmul_3x3x4_rank29_gf2.txt", 3, 3, 4, leaves)
+  ffbcp_add(root, "matmul_3x3x5_rank36_gf2.txt", 3, 3, 5, leaves)
+  ffbcp_add(root, "matmul_3x3x6_rank42_catalog_gf2.txt", 3, 3, 6, leaves)
+  ffbcp_add(root, "matmul_3x3x7_rank49_catalog_gf2.txt", 3, 3, 7, leaves)
+  ffbcp_add(root, "matmul_3x3x8_rank56_catalog_gf2.txt", 3, 3, 8, leaves)
+  ffbcp_add(root, "matmul_3x4x4_rank38_gf2.txt", 3, 4, 4, leaves)
+  ffbcp_add(root, "matmul_3x4x5_rank47_gf2.txt", 3, 4, 5, leaves)
+  ffbcp_add(root, "matmul_3x4x6_rank54_catalog_gf2.txt", 3, 4, 6, leaves)
+  ffbcp_add(root, "matmul_3x4x7_rank64_catalog_gf2.txt", 3, 4, 7, leaves)
+  ffbcp_add(root, "matmul_3x4x8_rank73_catalog_gf2.txt", 3, 4, 8, leaves)
+  ffbcp_add(root, "matmul_3x5x5_rank58_gf2.txt", 3, 5, 5, leaves)
+  ffbcp_add(root, "matmul_3x5x6_rank68_catalog_gf2.txt", 3, 5, 6, leaves)
+  ffbcp_add(root, "matmul_3x5x7_rank79_catalog_gf2.txt", 3, 5, 7, leaves)
+  ffbcp_add(root, "matmul_3x5x8_rank90_catalog_gf2.txt", 3, 5, 8, leaves)
+  ffbcp_add(root, "matmul_3x6x6_rank82_catalog_gf2.txt", 3, 6, 6, leaves)
+  ffbcp_add(root, "matmul_3x6x7_rank96_catalog_gf2.txt", 3, 6, 7, leaves)
+  ffbcp_add(root, "matmul_3x6x8_rank108_catalog_gf2.txt", 3, 6, 8, leaves)
+  ffbcp_add(root, "matmul_3x7x7_rank111_catalog_gf2.txt", 3, 7, 7, leaves)
+  ffbcp_add(root, "matmul_3x7x8_rank128_catalog_gf2.txt", 3, 7, 8, leaves)
+  ffbcp_add(root, "matmul_3x8x8_rank146_catalog_gf2.txt", 3, 8, 8, leaves)
+  ffbcp_add(root, "matmul_4x4_rank47_d450_gf2.txt", 4, 4, 4, leaves)
+  ffbcp_add(root, "matmul_4x4x5_rank60_catalog_gf2.txt", 4, 4, 5, leaves)
+  ffbcp_add(root, "matmul_4x4x6_rank73_catalog_gf2.txt", 4, 4, 6, leaves)
+  ffbcp_add(root, "matmul_4x4x7_rank85_catalog_gf2.txt", 4, 4, 7, leaves)
+  ffbcp_add(root, "matmul_4x4x8_rank96_catalog_gf2.txt", 4, 4, 8, leaves)
+  ffbcp_add(root, "matmul_4x5x5_rank76_catalog_gf2.txt", 4, 5, 5, leaves)
+  ffbcp_add(root, "matmul_4x5x6_rank90_catalog_gf2.txt", 4, 5, 6, leaves)
+  ffbcp_add(root, "matmul_4x5x7_rank104_catalog_gf2.txt", 4, 5, 7, leaves)
+  ffbcp_add(root, "matmul_4x5x8_rank118_catalog_gf2.txt", 4, 5, 8, leaves)
+  ffbcp_add(root, "matmul_4x6x6_rank105_catalog_gf2.txt", 4, 6, 6, leaves)
+  ffbcp_add(root, "matmul_4x6x7_rank123_catalog_gf2.txt", 4, 6, 7, leaves)
+  ffbcp_add(root, "matmul_4x6x8_rank140_catalog_gf2.txt", 4, 6, 8, leaves)
+  ffbcp_add(root, "matmul_4x7x7_rank144_catalog_gf2.txt", 4, 7, 7, leaves)
+  ffbcp_add(root, "matmul_4x7x8_rank161_catalog_gf2.txt", 4, 7, 8, leaves)
+  ffbcp_add(root, "matmul_4x8x8_rank180_catalog_gf2.txt", 4, 8, 8, leaves)
+  ffbcp_add(root, "matmul_5x5_rank93_catalog_perminov_c843_gf2.txt", 5, 5, 5, leaves)
+  ffbcp_add(root, "matmul_5x5x6_rank110_catalog_gf2.txt", 5, 5, 6, leaves)
+  ffbcp_add(root, "matmul_5x5x7_rank127_catalog_gf2.txt", 5, 5, 7, leaves)
+  ffbcp_add(root, "matmul_5x5x8_rank144_catalog_gf2.txt", 5, 5, 8, leaves)
+  ffbcp_add(root, "matmul_5x6x6_rank130_catalog_gf2.txt", 5, 6, 6, leaves)
+  ffbcp_add(root, "matmul_5x6x7_rank150_catalog_gf2.txt", 5, 6, 7, leaves)
+  ffbcp_add(root, "matmul_5x6x8_rank170_catalog_gf2.txt", 5, 6, 8, leaves)
+  ffbcp_add(root, "matmul_5x7x7_rank176_catalog_gf2.txt", 5, 7, 7, leaves)
+  ffbcp_add(root, "matmul_5x7x8_rank204_catalog_gf2.txt", 5, 7, 8, leaves)
+  ffbcp_add(root, "matmul_5x8x8_rank230_catalog_gf2.txt", 5, 8, 8, leaves)
+  ffbcp_add(root, "matmul_6x6_rank153_catalog_gf2.txt", 6, 6, 6, leaves)
+  ffbcp_add(root, "matmul_6x6x7_rank183_catalog_gf2.txt", 6, 6, 7, leaves)
+  ffbcp_add(root, "matmul_6x6x8_rank203_catalog_gf2.txt", 6, 6, 8, leaves)
+  ffbcp_add(root, "matmul_6x7x7_rank212_catalog_gf2.txt", 6, 7, 7, leaves)
+  ffbcp_add(root, "matmul_6x7x8_rank238_catalog_gf2.txt", 6, 7, 8, leaves)
+  ffbcp_add(root, "matmul_6x8x8_rank266_catalog_gf2.txt", 6, 8, 8, leaves)
+  ffbcp_add(root, "matmul_7x7_rank247_d3554_outer_isotropy_gf2.txt", 7, 7, 7, leaves)
+  ffbcp_add(root, "matmul_7x7x8_rank278_catalog_gf2.txt", 7, 7, 8, leaves)
+  ffbcp_add(root, "matmul_7x8x8_rank310_catalog_gf2.txt", 7, 8, 8, leaves)
+  ffbcp_add(root, "matmul_8x8_rank329_catalog_gf2.txt", 8, 8, 8, leaves)
+  leaves
+
+# Complete exact GF(2) pool for every sorted shape with block sizes 2--8.
+# The two-wide leaves are kept separate from `ffbcp_stable_3_to_8` so existing
+# 12--32 scans and their stable leaf indices do not drift.  This closes the
+# previously unsupported band where one target dimension contributes two-wide
+# outer blocks while the other two contribute blocks as large as eight.
+-> ffbcp_stable_2_to_8(root) (String)
+  leaves = []
+  ffbcp_add(root, "matmul_2x2_rank7_strassen_gf2.txt", 2, 2, 2, leaves)
+  ffbcp_add(root, "matmul_2x2x3_rank11_catalog_gf2.txt", 2, 2, 3, leaves)
+  ffbcp_add(root, "matmul_2x2x4_rank14_strassen_blocks_gf2.txt", 2, 2, 4, leaves)
+  ffbcp_add(root, "matmul_2x2x5_rank18_blocks_gf2.txt", 2, 2, 5, leaves)
+  ffbcp_add(root, "matmul_2x2x6_rank21_strassen_blocks_gf2.txt", 2, 2, 6, leaves)
+  ffbcp_add(root, "matmul_2x2x7_rank25_catalog_gf2.txt", 2, 2, 7, leaves)
+  ffbcp_add(root, "matmul_2x2x8_rank28_catalog_gf2.txt", 2, 2, 8, leaves)
+  ffbcp_add(root, "matmul_2x3x3_rank15_catalog_gf2.txt", 2, 3, 3, leaves)
+  ffbcp_add(root, "matmul_2x3x4_rank20_catalog_gf2.txt", 2, 3, 4, leaves)
+  ffbcp_add(root, "matmul_2x3x5_rank25_d160_fleet_gf2.txt", 2, 3, 5, leaves)
+  ffbcp_add(root, "matmul_2x3x6_rank30_catalog_gf2.txt", 2, 3, 6, leaves)
+  ffbcp_add(root, "matmul_2x3x7_rank35_catalog_gf2.txt", 2, 3, 7, leaves)
+  ffbcp_add(root, "matmul_2x3x8_rank40_catalog_gf2.txt", 2, 3, 8, leaves)
+  ffbcp_add(root, "matmul_2x4x4_rank26_catalog_gf2.txt", 2, 4, 4, leaves)
+  ffbcp_add(root, "matmul_2x4x5_rank33_catalog_gf2.txt", 2, 4, 5, leaves)
+  ffbcp_add(root, "matmul_2x4x6_rank39_catalog_gf2.txt", 2, 4, 6, leaves)
+  ffbcp_add(root, "matmul_2x4x7_rank45_catalog_gf2.txt", 2, 4, 7, leaves)
+  ffbcp_add(root, "matmul_2x4x8_rank51_catalog_gf2.txt", 2, 4, 8, leaves)
+  ffbcp_add(root, "matmul_2x5x5_rank40_catalog_gf2.txt", 2, 5, 5, leaves)
+  ffbcp_add(root, "matmul_2x5x6_rank47_catalog_gf2.txt", 2, 5, 6, leaves)
+  ffbcp_add(root, "matmul_2x5x7_rank55_catalog_gf2.txt", 2, 5, 7, leaves)
+  ffbcp_add(root, "matmul_2x5x8_rank63_catalog_gf2.txt", 2, 5, 8, leaves)
+  ffbcp_add(root, "matmul_2x6x6_rank56_catalog_gf2.txt", 2, 6, 6, leaves)
+  ffbcp_add(root, "matmul_2x6x7_rank66_catalog_gf2.txt", 2, 6, 7, leaves)
+  ffbcp_add(root, "matmul_2x6x8_rank75_catalog_gf2.txt", 2, 6, 8, leaves)
+  ffbcp_add(root, "matmul_2x7x7_rank76_catalog_gf2.txt", 2, 7, 7, leaves)
+  ffbcp_add(root, "matmul_2x7x8_rank88_catalog_gf2.txt", 2, 7, 8, leaves)
+  ffbcp_add(root, "matmul_2x8x8_rank100_catalog_gf2.txt", 2, 8, 8, leaves)
+  stable = ffbcp_stable_3_to_8(root)
+  i = 0 ## i64
+  while i < stable.size()
+    leaves.push(stable[i])
+    i += 1
+  leaves

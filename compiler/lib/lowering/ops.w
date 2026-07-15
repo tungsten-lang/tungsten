@@ -493,8 +493,30 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 -> lower_compound_assign(ctx, node)
   # Desugar: x += val  →  x = x op val
   target = node.target
-  name = target.name
   wfn = ctx[:func]
+
+  # Method/index compound assignment must dispatch through the setter while
+  # preserving the target's original arguments:
+  #
+  #   values[i] += rhs  →  values.[]=(i, values[i] + rhs)
+  #
+  # Treating a call target like a local variable creates a slot named `[]`
+  # and reads it before initialization.  Keeping the getter in the synthetic
+  # binary expression also lets typed-array lowering recognize its existing
+  # single-load compound-op fast path, so receiver and index are evaluated
+  # once for that path.
+  if ast_kind(target) == :call && target.receiver != nil
+    setter_args = []
+    ai = 0
+    while ai < target.args.size()
+      setter_args.push(target.args[ai])
+      ai += 1
+    setter_args.push(Tungsten:AST:BinaryOp.new(target, node.op, node.value))
+    setter_call = Tungsten:AST:Call.new(target.receiver, target.name + "=", setter_args, nil)
+    setter_call.loc = ast_get(target, :loc)
+    return lower_method_call(ctx, setter_call)
+
+  name = target.name
 
   # Ivar compound assignment: @name += val → @name = @name op val
   if ast_kind(target) == :ivar

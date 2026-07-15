@@ -20,6 +20,8 @@
 #  15 complete three-term factor-span refactoring
 #  16 complete four-term factor-span refactoring
 #  17 exact q=2 low-rank shear with correction absorption
+#  18 support-clustered frozen-fringe 16->15 SAT (one CPU child, 4x4)
+#  19 whole-frontier one-axis kernel shear (one CPU child, 5x5)
 #
 # One worker is selected from each complementary family.  Within a family,
 # every fourth launch is strict rotation and the others use contextual integer
@@ -30,9 +32,10 @@ use metaflip_worker
 use flipfleet_escape
 use flipfleet_beam_recipes
 use flipfleet_gpu_policy
+use flipfleet_projective_circuit5
 
 -> ffkp_mode_count() i64
-  18
+  20
 
 # Pool role 10 is one aggregate accounting role, but it may keep one child
 # from each of three complementary kernel families in flight.
@@ -45,9 +48,9 @@ use flipfleet_gpu_policy
 # 0: constraint and lower-bound scouts; 1: exact local surgery; 2: algebraic
 # escape construction followed by an ordinary GPU walk.
 -> ffkp_mode_group(mode) (i64) i64
-  if mode == 0 || mode == 5 || mode == 6
+  if mode == 0 || mode == 5 || mode == 6 || mode == 18
     return 0
-  if mode == 1 || mode == 2 || mode == 3 || mode == 12 || mode == 13 || mode == 14 || mode == 15 || mode == 16 || mode == 17
+  if mode == 1 || mode == 2 || mode == 3 || mode == 12 || mode == 13 || mode == 14 || mode == 15 || mode == 16 || mode == 17 || mode == 19
     return 1
   if mode == 4 || mode == 7 || mode == 8 || mode == 9 || mode == 10 || mode == 11
     return 2
@@ -93,13 +96,19 @@ use flipfleet_gpu_policy
     return "span-refactor-4"
   if mode == 17
     return "low-rank-shear"
+  if mode == 18
+    return "frozen-fringe-sat"
+  if mode == 19
+    return "global-kernel-shear"
   "invalid"
 
 -> ffkp_mode_kind(mode) (i64) i64
   # 0 constraint scout, 1 old MITM, 2 generalized XOR/circuit,
   # 3 generic cal2zone, 4 bounded single-CPU differential worker,
   # 5 complete local factor-span refactor with a Metal exact-signature join,
-  # 6 exact low-rank shear absorption with a regular Metal tuple scan.
+  # 6 exact low-rank shear absorption with a regular Metal tuple scan,
+  # 7 one bounded CPU frozen-fringe SAT child,
+  # 8 one bounded CPU whole-frontier kernel-shear child.
   if mode == 1
     return 1
   if mode == 2 || mode == 3 || mode == 11 || mode == 13 || mode == 14
@@ -110,6 +119,10 @@ use flipfleet_gpu_policy
     return 5
   if mode == 17
     return 6
+  if mode == 18
+    return 7
+  if mode == 19
+    return 8
   if mode == 4 || mode == 7 || mode == 8 || mode == 9 || mode == 10
     return 3
   0
@@ -139,6 +152,15 @@ use flipfleet_gpu_policy
   # Real full-tensor evidence exists at 5x5. Keep 4x4 off as a diagnostic
   # miss, while 6x6/7x7 retain bounded exploratory coverage.
   if mode == 17 && (n < 5 || n > 7 || rank < 3)
+    ok = 0
+  # The complete 16->15 Brent query is specific to a 4x4 fringe.  Larger
+  # tensors need a different decomposition of the SAT window before they can
+  # enter this bounded child.
+  if mode == 18 && (n != 4 || rank < 16)
+    ok = 0
+  # Full-frontier evidence is specific and recurring on 5x5 (8/64 exact
+  # beyond-one-flip endpoints), while 4x4, 6x6, and 7x7 scans were negative.
+  if mode == 19 && (n != 5 || rank < 3)
     ok = 0
   ok
 
@@ -198,6 +220,10 @@ use flipfleet_gpu_policy
     cap = 128
   if mode == 17
     cap = 256
+  if mode == 18
+    cap = 32
+  if mode == 19
+    cap = 32
   if budget > cap
     budget = cap
   budget
@@ -436,6 +462,23 @@ use flipfleet_gpu_policy
   rank = ffw_export_best(src, us, vs, ws) ## i64
   if rank < 1
     return nil
+
+  # One quarter of 5x5 lifted-identity launches first try the measured
+  # five-bucket projective tunnel.  A 256-circuit cap costs about 40--60 ms
+  # here; only a +1 endpoint is admitted, otherwise the ordinary lifted split
+  # recipe below remains the fallback.  This reuses the existing pool row and
+  # GPU continuation rather than adding another TUI strategy.
+  if n == 5 && (nonce % 4) == 1
+    projective_u = i64[capacity]
+    projective_v = i64[capacity]
+    projective_w = i64[capacity]
+    projective_meta = i64[14]
+    projective_rank = ffpc5_search(us,vs,ws,rank,256,nonce,projective_u,projective_v,projective_w,projective_meta) ## i64
+    if projective_rank == rank + 1
+      projective_state = i64[state_size]
+      projective_loaded = ffw_init_terms_cap(projective_state,projective_u,projective_v,projective_w,projective_rank,n,capacity,60901 + nonce,dslack,cycles,workq,wanderq) ## i64
+      if projective_loaded == projective_rank && ffw_verify_best_exact(projective_state,n) == 1
+        return projective_state
   subspace = ffkp_subspace_mask(n, nonce) ## i64
   moves = 2 + (nonce % 2) ## i64
   move = 0 ## i64

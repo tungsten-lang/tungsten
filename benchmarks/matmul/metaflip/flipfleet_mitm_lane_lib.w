@@ -52,7 +52,13 @@
     want1 = target_fp[1] ^ q1[left] ^ q1[right] ## u32
     want2 = target_fp[2] ^ q2[left] ^ q2[right] ## u32
     want3 = target_fp[3] ^ q3[left] ^ q3[right] ## u32
-    mixed = want0 ^ (want1 >> 7) ^ (want2 >> 13) ^ (want3 >> 19) ## u32
+    # Mix all 128 projected bits. The previous shift-only hash discarded the
+    # low bits of three words and formed long structured clusters on the small
+    # rectangular tensors, leaving the CPU table builder as the bottleneck.
+    mixed = want0 ^ (want1 << 7) ^ (want1 >> 25) ^ (want2 << 13) ^ (want2 >> 19) ^ (want3 << 19) ^ (want3 >> 13) ## u32
+    mixed = (mixed ^ (mixed >> 16)) * 73244475
+    mixed = (mixed ^ (mixed >> 16)) * 73244475
+    mixed = mixed ^ (mixed >> 16)
     slot_u = mixed & table_mask ## u32
     slot = slot_u ## i32
     scanned = 0 ## i32
@@ -453,22 +459,24 @@ use flipfleet_gpu_worker_bundle
 
 # Python's reference fingerprint XOR-folds 128-bit chunks with a 29-bit
 # rotation.  Compute the same linear projection directly from tensor support,
-# avoiding an n^6-bit host integer.  Four u32 words preserve all 128 bits.
--> ffm_fingerprint(u, v, w, dim, out) (i64 i64 i64 i64 i64[]) i64
+# avoiding a potentially large host integer. Four u32 words preserve all 128
+# bits. The shape-aware entry point is shared by square and rectangular MITM
+# lanes; the historical square wrapper remains source-compatible.
+-> ffm_fingerprint_shape(u, v, w, udim, vdim, wdim, out) (i64 i64 i64 i64 i64 i64 i64[]) i64
   out[0] = 0
   out[1] = 0
   out[2] = 0
   out[3] = 0
   ai = 0 ## i64
-  while ai < dim
+  while ai < udim
     if ((u >> ai) & 1) == 1
       bi = 0 ## i64
-      while bi < dim
+      while bi < vdim
         if ((v >> bi) & 1) == 1
           ci = 0 ## i64
-          while ci < dim
+          while ci < wdim
             if ((w >> ci) & 1) == 1
-              position = (ai * dim + bi) * dim + ci ## i64
+              position = (ai * vdim + bi) * wdim + ci ## i64
               chunk = position / 128 ## i64
               bit = position % 128 ## i64
               projected = (bit + ((chunk * 29) % 128)) % 128 ## i64
@@ -480,7 +488,10 @@ use flipfleet_gpu_worker_bundle
     ai += 1
   1
 
--> ffm_target_fingerprint(us, vs, ws, selected, dim, out) (i64[] i64[] i64[] i64[] i64 i64[]) i64
+-> ffm_fingerprint(u, v, w, dim, out) (i64 i64 i64 i64 i64[]) i64
+  ffm_fingerprint_shape(u, v, w, dim, dim, dim, out)
+
+-> ffm_target_fingerprint_shape(us, vs, ws, selected, udim, vdim, wdim, out) (i64[] i64[] i64[] i64[] i64 i64 i64 i64[]) i64
   out[0] = 0
   out[1] = 0
   out[2] = 0
@@ -488,7 +499,7 @@ use flipfleet_gpu_worker_bundle
   words = i64[4]
   i = 0 ## i64
   while i < 5
-    z = ffm_fingerprint(us[selected[i]], vs[selected[i]], ws[selected[i]], dim, words) ## i64
+    z = ffm_fingerprint_shape(us[selected[i]], vs[selected[i]], ws[selected[i]], udim, vdim, wdim, words) ## i64
     j = 0 ## i64
     while j < 4
       out[j] = out[j] ^ words[j]
@@ -496,15 +507,17 @@ use flipfleet_gpu_worker_bundle
     i += 1
   1
 
--> ffm_local_exact(us, vs, ws, selected, cu, cv, cw, indices, n) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
-  dim = n * n ## i64
+-> ffm_target_fingerprint(us, vs, ws, selected, dim, out) (i64[] i64[] i64[] i64[] i64 i64[]) i64
+  ffm_target_fingerprint_shape(us, vs, ws, selected, dim, dim, dim, out)
+
+-> ffm_local_exact_shape(us, vs, ws, selected, cu, cv, cw, indices, udim, vdim, wdim) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64) i64
   ok = 1 ## i64
   ai = 0 ## i64
-  while ai < dim && ok == 1
+  while ai < udim && ok == 1
     bi = 0 ## i64
-    while bi < dim && ok == 1
+    while bi < vdim && ok == 1
       ci = 0 ## i64
-      while ci < dim && ok == 1
+      while ci < wdim && ok == 1
         parity = 0 ## i64
         t = 0 ## i64
         while t < 5
@@ -528,6 +541,10 @@ use flipfleet_gpu_worker_bundle
       bi += 1
     ai += 1
   ok
+
+-> ffm_local_exact(us, vs, ws, selected, cu, cv, cw, indices, n) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
+  dim = n * n ## i64
+  ffm_local_exact_shape(us, vs, ws, selected, cu, cv, cw, indices, dim, dim, dim)
 
 -> ffm_toggle_plain(us, vs, ws, rank, cap, u, v, w) (i64[] i64[] i64[] i64 i64 i64 i64 i64) i64
   if u == 0 || v == 0 || w == 0
@@ -598,7 +615,7 @@ fn ffm_build_table(hp0, hp1, hp2, hp3, used, ht0, ht1, ht2, ht3, hpair, hcount, 
       p1 = hp1[pair_index]
       p2 = hp2[pair_index]
       p3 = hp3[pair_index]
-      mixed = p0 ^ (p1 >> 7) ^ (p2 >> 13) ^ (p3 >> 19)
+      mixed = ffm_hash4(p0, p1, p2, p3)
       slot = mixed & (hcap - 1)
       while used[slot] != 0
         slot = (slot + 1) & (hcap - 1)
@@ -611,6 +628,22 @@ fn ffm_build_table(hp0, hp1, hp2, hp3, used, ht0, ht1, ht2, ht3, hpair, hcount, 
       right += 1
     left += 1
   1
+
+# Match ffm_probe_pairs' u32 hash using nonnegative masked i64 arithmetic.
+# 4,294,967,295 * 73,244,475 stays comfortably within signed i64.
+fn ffm_hash4(p0, p1, p2, p3)
+  mask = 4294967295
+  x0 = p0 & mask
+  x1 = p1 & mask
+  x2 = p2 & mask
+  x3 = p3 & mask
+  r1 = ((x1 << 7) & mask) | (x1 >> 25)
+  r2 = ((x2 << 13) & mask) | (x2 >> 19)
+  r3 = ((x3 << 19) & mask) | (x3 >> 13)
+  mixed = (x0 ^ r1 ^ r2 ^ r3) & mask
+  mixed = ((mixed ^ (mixed >> 16)) * 73244475) & mask
+  mixed = ((mixed ^ (mixed >> 16)) * 73244475) & mask
+  (mixed ^ (mixed >> 16)) & mask
 
 # One exact subset dispatch.  metrics:
 # [candidates,pairs,table,enum_ms,table_ms,probe_ms,fingerprint_hits,exact_checks]

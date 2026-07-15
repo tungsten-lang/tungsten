@@ -131,6 +131,31 @@ before_wrong_n = near2.size() ## i64
 wrong_n_added = ff7_add_known_7x7_shoulder(root, leader, 6, capacity, state_size, 4, 4, 1000, 250, near2, signatures, uses, successes, 16, 8, counters) ## i64
 failures += ff7t_expect("rank250 shoulder gate", wrong_n_added == 0 && near2.size() == before_wrong_n)
 
+# New rank-247 leader retains every old rank-248 component as a +1 shoulder.
+leader247 = i64[state_size]
+leader247_path = root + "/benchmarks/matmul/metaflip/matmul_7x7_rank247_d3098_global_isotropy_gf2.txt"
+leader247_rank = ffw_load_scheme_cap(leader247, leader247_path, n, capacity, 751, 4, 4, 1000, 250) ## i64
+failures += ff7t_expect("rank247 leader exact", leader247_rank == 247 && ffw_verify_best_exact(leader247, n) == 1)
+frontier247 = ffp_frontier_seed_paths(7)
+failures += ff7t_expect("fourteen rank247 restart representatives", frontier247.size() == 14)
+frontier247_state = i64[state_size]
+i = 0 ## i64
+while i < frontier247.size()
+  frontier247_rank = ffw_load_scheme_cap(frontier247_state, root + "/" + frontier247[i], n, capacity, 761 + i, 4, 4, 1000, 250) ## i64
+  failures += ff7t_expect("rank247 restart exact", frontier247_rank == 247 && ffw_verify_best_exact(frontier247_state, n) == 1)
+  i += 1
+near1 = []
+signatures1 = []
+uses1 = []
+successes1 = []
+counters1 = i64[5]
+added1 = ff7_add_known_7x7_rank247_shoulders(root, leader247, n, capacity, state_size, 4, 4, 1000, 250, near1, signatures1, uses1, successes1, 16, 8, counters1) ## i64
+failures += ff7t_expect("four rank248 shoulders admitted", added1 == 4 && near1.size() == 4)
+i = 0
+while i < near1.size()
+  failures += ff7t_expect("rank248 +1 shoulder exact", ffw_best_rank(near1[i]) == 248 && ffw_verify_best_exact(near1[i], n) == 1)
+  i += 1
+
 if failures > 0
   << "flipfleet_7x7_pool_test: " + failures.to_s() + " failure(s)"
   exit(1)

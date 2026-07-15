@@ -9,15 +9,15 @@ use flipfleet_rank_debt
     exit(1)
   1
 
-z = kp_expect("mode count", ffkp_mode_count() == 18) ## i64
+z = kp_expect("mode count", ffkp_mode_count() == 20) ## i64
 z = kp_expect("group count", ffkp_group_count() == 3)
 z = kp_expect("parallel child slots", ffkp_parallel_slots() == 3)
-z = kp_expect("constraint group", ffkp_mode_group(0) == 0 && ffkp_mode_group(5) == 0 && ffkp_mode_group(6) == 0)
-z = kp_expect("surgery group", ffkp_mode_group(1) == 1 && ffkp_mode_group(2) == 1 && ffkp_mode_group(3) == 1 && ffkp_mode_group(12) == 1 && ffkp_mode_group(13) == 1 && ffkp_mode_group(14) == 1 && ffkp_mode_group(15) == 1 && ffkp_mode_group(16) == 1 && ffkp_mode_group(17) == 1)
+z = kp_expect("constraint group", ffkp_mode_group(0) == 0 && ffkp_mode_group(5) == 0 && ffkp_mode_group(6) == 0 && ffkp_mode_group(18) == 0)
+z = kp_expect("surgery group", ffkp_mode_group(1) == 1 && ffkp_mode_group(2) == 1 && ffkp_mode_group(3) == 1 && ffkp_mode_group(12) == 1 && ffkp_mode_group(13) == 1 && ffkp_mode_group(14) == 1 && ffkp_mode_group(15) == 1 && ffkp_mode_group(16) == 1 && ffkp_mode_group(17) == 1 && ffkp_mode_group(19) == 1)
 z = kp_expect("escape group", ffkp_mode_group(4) == 2 && ffkp_mode_group(7) == 2 && ffkp_mode_group(8) == 2 && ffkp_mode_group(9) == 2 && ffkp_mode_group(10) == 2 && ffkp_mode_group(11) == 2)
-z = kp_expect("invalid group", ffkp_mode_group(18) == -1)
-z = kp_expect("new names", ffkp_mode_name(10) == "beam-recipes" && ffkp_mode_name(11) == "primitive-5plus" && ffkp_mode_name(12) == "parent-diff" && ffkp_mode_name(13) == "xor-8to7" && ffkp_mode_name(14) == "xor-9to8" && ffkp_mode_name(15) == "span-refactor-3" && ffkp_mode_name(16) == "span-refactor-4" && ffkp_mode_name(17) == "low-rank-shear")
-z = kp_expect("new kinds", ffkp_mode_kind(11) == 2 && ffkp_mode_kind(12) == 4 && ffkp_mode_kind(13) == 2 && ffkp_mode_kind(14) == 2 && ffkp_mode_kind(15) == 5 && ffkp_mode_kind(16) == 5 && ffkp_mode_kind(17) == 6)
+z = kp_expect("invalid group", ffkp_mode_group(20) == -1)
+z = kp_expect("new names", ffkp_mode_name(10) == "beam-recipes" && ffkp_mode_name(11) == "primitive-5plus" && ffkp_mode_name(12) == "parent-diff" && ffkp_mode_name(13) == "xor-8to7" && ffkp_mode_name(14) == "xor-9to8" && ffkp_mode_name(15) == "span-refactor-3" && ffkp_mode_name(16) == "span-refactor-4" && ffkp_mode_name(17) == "low-rank-shear" && ffkp_mode_name(18) == "frozen-fringe-sat" && ffkp_mode_name(19) == "global-kernel-shear")
+z = kp_expect("new kinds", ffkp_mode_kind(11) == 2 && ffkp_mode_kind(12) == 4 && ffkp_mode_kind(13) == 2 && ffkp_mode_kind(14) == 2 && ffkp_mode_kind(15) == 5 && ffkp_mode_kind(16) == 5 && ffkp_mode_kind(17) == 6 && ffkp_mode_kind(18) == 7 && ffkp_mode_kind(19) == 8)
 z = kp_expect("budget small quantum", ffkp_lane_budget(64) == 32)
 z = kp_expect("budget three eighths", ffkp_lane_budget(4096) == 1536)
 z = kp_expect("budget cap", ffkp_lane_budget(65536) == 1536)
@@ -25,11 +25,15 @@ z = kp_expect("mitm saturation cap", ffkp_mode_lane_budget(4096, 1) == 512)
 z = kp_expect("kxor saturation cap", ffkp_mode_lane_budget(4096, 2) == 256)
 z = kp_expect("circuit saturation cap", ffkp_mode_lane_budget(4096, 11) == 256)
 z = kp_expect("single CPU differential cap", ffkp_mode_lane_budget(4096, 12) == 32)
+z = kp_expect("single CPU frozen SAT cap", ffkp_mode_lane_budget(4096, 18) == 32)
+z = kp_expect("single CPU global shear cap", ffkp_mode_lane_budget(4096, 19) == 32)
 z = kp_expect("large-k saturation cap", ffkp_mode_lane_budget(4096, 13) == 128 && ffkp_mode_lane_budget(4096, 14) == 128)
 z = kp_expect("large-k rank eligibility", ffkp_mode_eligible(13, 5, 7) == 0 && ffkp_mode_eligible(13, 5, 8) == 1 && ffkp_mode_eligible(14, 5, 8) == 0 && ffkp_mode_eligible(14, 5, 9) == 1)
 z = kp_expect("span saturation caps", ffkp_mode_lane_budget(4096, 15) == 256 && ffkp_mode_lane_budget(4096, 16) == 128)
 z = kp_expect("span rank eligibility", ffkp_mode_eligible(15, 5, 2) == 0 && ffkp_mode_eligible(15, 5, 3) == 1 && ffkp_mode_eligible(16, 5, 3) == 0 && ffkp_mode_eligible(16, 5, 4) == 1)
 z = kp_expect("shear evidence eligibility", ffkp_mode_eligible(17, 4, 47) == 0 && ffkp_mode_eligible(17, 5, 93) == 1 && ffkp_mode_eligible(17, 7, 250) == 1)
+z = kp_expect("frozen SAT 4x4-only eligibility", ffkp_mode_eligible(18, 4, 47) == 1 && ffkp_mode_eligible(18, 3, 23) == 0 && ffkp_mode_eligible(18, 5, 93) == 0)
+z = kp_expect("global shear 5x5-only eligibility", ffkp_mode_eligible(19, 5, 93) == 1 && ffkp_mode_eligible(19, 4, 47) == 0 && ffkp_mode_eligible(19, 6, 153) == 0)
 z = kp_expect("shear tensor caps", ffkp_mode_lane_budget_for_tensor(5, 4096, 17) == 256 && ffkp_mode_lane_budget_for_tensor(6, 4096, 17) == 128)
 beam_cap = ffw_default_capacity(3) ## i64
 beam_size = ffw_state_size(beam_cap) ## i64
@@ -137,7 +141,7 @@ exposure = i64[slots]
 seen = i64[ffkp_mode_count()]
 epoch = 0 ## i64
 last = ffkp_mode_count() - 1 ## i64
-while epoch < ffkp_mode_count()
+while epoch < ffkp_mode_count() - 1
   mode = ffkp_select_mode(epoch, last, 5, 93, 0, pulls, rewards) ## i64
   seen[mode] = 1
   z = ffkp_record_launch(mode, 5, 0, 4, pulls, exposure)
@@ -145,8 +149,35 @@ while epoch < ffkp_mode_count()
   epoch += 1
 mode = 0
 while mode < ffkp_mode_count()
-  z = kp_expect("cold rotation " + mode.to_s(), seen[mode] == 1)
+  if ffkp_mode_eligible(mode, 5, 93) == 1
+    z = kp_expect("cold rotation " + mode.to_s(), seen[mode] == 1)
+  if ffkp_mode_eligible(mode, 5, 93) == 0
+    z = kp_expect("tensor-ineligible mode excluded " + mode.to_s(), seen[mode] == 0)
   mode += 1
+
+# The 4x4 constraint family must actually cold-start the bounded SAT child;
+# eligibility/name coverage alone would not catch a selector omission.
+sat_ready = i64[ffkp_mode_count()]
+sat_pulls = i64[slots]
+sat_rewards = i64[slots]
+sat_last_modes = i64[ffkp_group_count()]
+sat_seen = i64[ffkp_mode_count()]
+group = 0 ## i64
+while group < ffkp_group_count()
+  sat_last_modes[group] = 0 - 1
+  group += 1
+mode = 0
+while mode < ffkp_mode_count()
+  sat_ready[mode] = 1
+  mode += 1
+epoch = 0
+while epoch < 4
+  mode = ffkp_select_group_mode_ready(epoch, 0, 4, 47, 0, sat_ready, sat_last_modes, sat_pulls, sat_rewards)
+  sat_seen[mode] = 1
+  z = ffkp_record_launch(mode, 4, 0, 1, sat_pulls, exposure)
+  sat_last_modes[0] = mode
+  epoch += 1
+z = kp_expect("4x4 constraint cold-start includes frozen SAT", sat_seen[18] == 1)
 
 # Each batch selects at most one child from every complementary kernel group.
 batch_ready = i64[ffkp_mode_count()]
@@ -165,7 +196,7 @@ group = 0 ## i64
 while group < ffkp_group_count()
   batch_last_modes[group] = 0 - 1
   group += 1
-while batch_epoch < 9
+while batch_epoch < 10
   batch_count = ffkp_select_group_modes_ready(batch_epoch, 5, 93, 0, 4096, batch_ready, batch_last_modes, batch_pulls, batch_rewards, batch_modes) ## i64
   z = kp_expect("batch fills three", batch_count == 3)
   batch_groups = i64[ffkp_group_count()]
@@ -190,7 +221,10 @@ while batch_epoch < 9
   batch_epoch += 1
 mode = 0
 while mode < ffkp_mode_count()
-  z = kp_expect("batched cold coverage " + mode.to_s(), batch_seen[mode] >= 1)
+  if ffkp_mode_eligible(mode, 5, 93) == 1
+    z = kp_expect("batched cold coverage " + mode.to_s(), batch_seen[mode] >= 1)
+  if ffkp_mode_eligible(mode, 5, 93) == 0
+    z = kp_expect("batched ineligible excluded " + mode.to_s(), batch_seen[mode] == 0)
   mode += 1
 
 # A small aggregate budget admits only one complete child SIMDgroup.
@@ -267,6 +301,14 @@ lifted = ffkp_lifted_state(base, 3, cap, size, 5, 4, 2, 1000, 250)
 z = kp_expect("lift exists", lifted != nil)
 z = kp_expect("lift exact", ffw_verify_best_exact(lifted, 3) == 1)
 z = kp_expect("lift changes rank", ffw_best_rank(lifted) > ffw_best_rank(base))
+
+pc5_cap = ffw_default_capacity(5) ## i64
+pc5_size = ffw_state_size(pc5_cap) ## i64
+pc5_source = i64[pc5_size]
+pc5_rank = ffw_load_scheme_cap(pc5_source,"benchmarks/matmul/metaflip/matmul_5x5_rank93_d967_four_split_control_gf2.txt",5,pc5_cap,8113,4,2,1000,250) ## i64
+pc5_lifted = ffkp_lifted_state(pc5_source,5,pc5_cap,pc5_size,13,4,2,1000,250)
+z = kp_expect("five-circuit lifted source",pc5_rank == 93 && ffw_verify_best_exact(pc5_source,5) == 1)
+z = kp_expect("five-circuit lifted exact",pc5_lifted != nil && ffw_best_rank(pc5_lifted) == 94 && ffw_verify_best_exact(pc5_lifted,5) == 1)
 
 fringe = i64[size]
 z = ffw_reseed_from(fringe, base, 91)

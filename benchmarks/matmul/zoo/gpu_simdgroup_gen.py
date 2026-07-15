@@ -30,6 +30,67 @@ MASK_BUFFERS = (
 )
 
 
+def _raw_i64_decimal_assignment(prefix: str, array: str, expression: str) -> str:
+    """Parse a potentially boxed decimal mask into a raw i64 array slot."""
+    return "\n".join((
+        f"  {prefix}text = {expression}",
+        f"  {prefix}cut = {prefix}text.size() - 7",
+        f"  {prefix}mask = 0 ## i64",
+        f"  if {prefix}cut > 0",
+        f"    {prefix}hi = {prefix}text.slice(0, {prefix}cut).to_i() ## i64",
+        f"    {prefix}lo = {prefix}text.slice({prefix}cut, 7).to_i() ## i64",
+        f"    {prefix}mask = {prefix}hi * 10000000 + {prefix}lo",
+        f"  if {prefix}cut <= 0",
+        f"    {prefix}mask = {prefix}text.to_i()",
+        f"  {array} = {prefix}mask",
+    ))
+
+
+def _patch_raw_i64_host_path(src: str) -> str:
+    """Keep 7x7 decimal parsing and Metal traffic raw end to end.
+
+    A 7x7 factor can set bit 48.  ``String#to_i`` then produces a boxed
+    BigInt, while direct assignment into a typed i64 array currently crosses a
+    boxed/raw lowering path that truncates the value.  Two small decimal chunks
+    and typed Metal buffer views avoid that path in the generated Tungsten.
+    """
+    old_parse = (
+        "  seedu[ii] = parts[colbase].to_i()\n"
+        "  seedv[ii] = parts[colbase + 1].to_i()\n"
+        "  seedw[ii] = parts[colbase + 2].to_i()\n"
+    )
+    replacement = "\n".join((
+        _raw_i64_decimal_assignment("u", "seedu[ii]", "parts[colbase]"),
+        _raw_i64_decimal_assignment("v", "seedv[ii]", "parts[colbase + 1]"),
+        _raw_i64_decimal_assignment("w", "seedw[ii]", "parts[colbase + 2]"),
+    )) + "\n"
+    assert old_parse in src, "SIMD-group runtime-seed parser template changed"
+    src = src.replace(old_parse, replacement)
+
+    allocation = "params = metal_buffer(device, 7 * 4)\n"
+    views = (
+        allocation +
+        "seed_us_view = metal_buffer_view(seed_us, 66, CAP) ## i64[]\n"
+        "seed_vs_view = metal_buffer_view(seed_vs, 66, CAP) ## i64[]\n"
+        "seed_ws_view = metal_buffer_view(seed_ws, 66, CAP) ## i64[]\n"
+        "best_us_view = metal_buffer_view(best_us, 66, GROUPS * CAP) ## i64[]\n"
+        "best_vs_view = metal_buffer_view(best_vs, 66, GROUPS * CAP) ## i64[]\n"
+        "best_ws_view = metal_buffer_view(best_ws, 66, GROUPS * CAP) ## i64[]\n"
+    )
+    assert allocation in src, "SIMD-group Metal allocation template changed"
+    src = src.replace(allocation, views)
+    for axis in ("u", "v", "w"):
+        src = src.replace(
+            f"  metal_buffer_write_i64(seed_{axis}s, ii, seed{axis}[ii])",
+            f"  seed_{axis}s_view[ii] = seed{axis}[ii]",
+        )
+        src = src.replace(
+            f"metal_buffer_read_i64(best_{axis}s, bestgroup * CAP + ii)",
+            f"best_{axis}s_view[bestgroup * CAP + ii]",
+        )
+    return src
+
+
 def generate(n: int, cap: int, metal_ll: str) -> str:
     if n < 2:
         raise ValueError("n must be at least 2")
@@ -91,6 +152,8 @@ def generate(n: int, cap: int, metal_ll: str) -> str:
             src = src.replace(
                 f"metal_buffer_read_i32({name}", f"metal_buffer_read_i64({name}"
             )
+        if bits >= 49:
+            src = _patch_raw_i64_host_path(src)
 
     seeds = {
         5: "benchmarks/matmul/metaflip/matmul_5x5_rank93_d1155_gf2.txt",

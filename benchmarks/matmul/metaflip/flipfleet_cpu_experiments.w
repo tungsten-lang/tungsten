@@ -4,10 +4,10 @@
 use metaflip_worker
 
 -> ffcr_arm_count() i64
-  8
+  9
 
 -> ffcr_arm_name(arm) (i64)
-  names = ["baseline", "quick-narrow", "slow-deep", "flip-only", "dense-work", "fast-band", "short-splits", "marathon"]
+  names = ["baseline", "quick-narrow", "slow-deep", "flip-only", "dense-work", "fast-band", "short-splits", "marathon", "four-split"]
   names[arm % names.size()]
 
 # controls is the seven-word ffw_walk_tuned ABI; quotas receives work/wander.
@@ -79,6 +79,19 @@ use metaflip_worker
     controls[6] = 84
     quotas[0] = base_work * 2
     quotas[1] = base_wander * 2
+  # The only measured density improvement in the three-anchor continuation
+  # study came from its ordinary four-split control (5x5 r93/d968 -> d967).
+  # Keep that evidence in exactly one bounded racer lane: open a +4 shoulder
+  # once at lease start, then let the ordinary tuned walker try to close it.
+  if selected == 8
+    controls[0] = 2000
+    controls[1] = 6
+    controls[2] = 600000
+    controls[4] = 12
+    controls[5] = 7
+    controls[6] = 60
+    quotas[0] = base_work
+    quotas[1] = base_wander
   if quotas[0] < 1
     quotas[0] = 1
   if quotas[1] < 1
@@ -91,11 +104,17 @@ use metaflip_worker
   z = ffw_set_zone_quotas(state, quotas[0], quotas[1]) ## i64
   state[11] = controls[5]
   state[41] = controls[6]
+  if selected == 8
+    target_rank = ffw_current_rank(state) + 4 ## i64
+    tries = 0 ## i64
+    while ffw_current_rank(state) < target_rank && tries < 16384
+      z = ffw_try_split(state) ## i64
+      tries += 1
   selected
 
 # Untried arms rotate first.  Afterwards rank drops dominate, canonical basin
 # yield is positive, and return-to-origin hazard is explicitly negative.
--> ffcr_select_arm(epoch, pulls, exposure, novel, returns, drops) (i64 i64[] i64[] i64[] i64[] i64[]) i64
+-> ffcr_select_arm(epoch, pulls, exposure, novel, returns, drops, density) (i64 i64[] i64[] i64[] i64[] i64[] i64[]) i64
   count = ffcr_arm_count() ## i64
   offset = 0 ## i64
   while offset < count
@@ -108,7 +127,7 @@ use metaflip_worker
   arm = 0
   while arm < count
     move_units = exposure[arm] / 1000000 + 1 ## i64
-    utility = drops[arm] * 2000000 + novel[arm] * 100000 - returns[arm] * 75000 ## i64
+    utility = drops[arm] * 2000000 + density[arm] * 250000 + novel[arm] * 100000 - returns[arm] * 75000 ## i64
     score = utility / move_units + 50000 / (pulls[arm] + 1) ## i64
     if score > best_score
       best = arm
@@ -116,7 +135,7 @@ use metaflip_worker
     arm += 1
   best
 
--> ffcr_record_lease(arm, moves, novel_yield, returned, rank_drop, pulls, exposure, novel, returns, drops) (i64 i64 i64 i64 i64 i64[] i64[] i64[] i64[] i64[]) i64
+-> ffcr_record_lease(arm, moves, novel_yield, returned, rank_drop, density_gain, pulls, exposure, novel, returns, drops, density) (i64 i64 i64 i64 i64 i64 i64[] i64[] i64[] i64[] i64[] i64[]) i64
   selected = arm % ffcr_arm_count() ## i64
   pulls[selected] = pulls[selected] + 1
   if moves > 0
@@ -127,5 +146,6 @@ use metaflip_worker
     returns[selected] = returns[selected] + 1
   if rank_drop > 0
     drops[selected] = drops[selected] + rank_drop
+  if density_gain > 0
+    density[selected] = density[selected] + density_gain
   selected
-

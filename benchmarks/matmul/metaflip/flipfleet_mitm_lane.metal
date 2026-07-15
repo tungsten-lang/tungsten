@@ -110,7 +110,10 @@ kernel void ffm_probe_pairs(
     uint want1 = ((target_fp[1] ^ q1[left]) ^ q1[right]);
     uint want2 = ((target_fp[2] ^ q2[left]) ^ q2[right]);
     uint want3 = ((target_fp[3] ^ q3[left]) ^ q3[right]);
-    uint mixed = (((want0 ^ (want1 >> 7)) ^ (want2 >> 13)) ^ (want3 >> 19));
+    uint mixed = ((((((want0 ^ (want1 << 7)) ^ (want1 >> 25)) ^ (want2 << 13)) ^ (want2 >> 19)) ^ (want3 << 19)) ^ (want3 >> 13));
+    mixed = ((mixed ^ (mixed >> 16)) * 73244475);
+    mixed = ((mixed ^ (mixed >> 16)) * 73244475);
+    mixed = (mixed ^ (mixed >> 16));
     uint slot_u = (mixed & table_mask);
     int slot = slot_u;
     int scanned = 0;

@@ -337,6 +337,12 @@ use lowering/definitions
   n = normalize_type_symbol(t)
   if n == nil
     return nil
+  # Plain array literals/allocations infer as :array, while an inline
+  # signature such as `(Array)` reaches here as :Array.  Canonicalize only the
+  # dispatch key: changing the general inferred type also changes generic
+  # class lowering and the established signature-mangled symbol spelling.
+  if n == :Array
+    return :array
   s = n.to_s()
   sl = s.size()
   if sl >= 3 && s.slice(sl - 2, 2) == "\[]"
@@ -1169,6 +1175,12 @@ use lowering/definitions
     # Not a hard error: inference bail-out just means those methods
     # get their current best-effort type (may be nil).
     << "warning: return-type inference didn't converge in [max_iter] passes; consider adding explicit return type annotations on recursive methods"
+
+  # Freeze every top-level function's boxed-vs-raw ABI before any body is
+  # lowered.  Forward typed calls must use the same ABI as callees declared
+  # earlier; discovering raw-callable functions incrementally made source
+  # order silently change the meaning of identical LLVM i64 parameters.
+  preregister_top_level_raw_abis(mod, ast.expressions)
 
   collect_top_level_static_types(mod, ast.expressions)
 

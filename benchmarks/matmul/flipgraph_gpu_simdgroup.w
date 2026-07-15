@@ -675,6 +675,30 @@ use core/metal
   ab = nn * mm
   bb = mm * pp
   cb = nn * pp
+  if rank < 1
+    return 0
+  one = 1 ## i64
+  amask = (one << ab) - 1 ## i64
+  bmask = (one << bb) - 1 ## i64
+  cmask = (one << cb) - 1 ## i64
+  t = 0 ## i64
+  while t < rank
+    if us[t] == 0 || vs[t] == 0 || ws[t] == 0
+      return 0
+    if (us[t] & amask) != us[t]
+      return 0
+    if (vs[t] & bmask) != vs[t]
+      return 0
+    if (ws[t] & cmask) != ws[t]
+      return 0
+    # A duplicate pair cancels over GF(2), so accepting one would advertise a
+    # rank that is two terms larger than the decomposition actually represents.
+    j = t + 1 ## i64
+    while j < rank
+      if us[t] == us[j] && vs[t] == vs[j] && ws[t] == ws[j]
+        return 0
+      j += 1
+    t += 1
   ok = 1
   ai = 0
   while ai < ab
@@ -736,6 +760,9 @@ if av.size() > 5
   MARGIN = av[5].to_i()
 if av.size() > 6
   MODE = av[6].to_i()
+metallibpath = ""
+if av.size() > 7
+  metallibpath = av[7]
 
 content = read_file(seedpath)
 lines = content.split("\n")
@@ -764,9 +791,13 @@ while ii < startrank
   seedden = seedden + popcnt(seedu[ii]) + popcnt(seedv[ii]) + popcnt(seedw[ii])
   ii += 1
 
-msl = read_file("benchmarks/matmul/flipgraph_gpu_simdgroup.metal")
 device = metal_device()
-library = metal_compile_source(device, msl)
+library = nil
+if metallibpath != ""
+  library = metal_load_library(device, metallibpath)
+if library == nil
+  msl = read_file("benchmarks/matmul/flipgraph_gpu_simdgroup.metal")
+  library = metal_compile_source(device, msl)
 pipeline = metal_pipeline(library, "flipwalk_simd")
 work_us = metal_buffer(device, GROUPS * CAP * MASK_BYTES)
 work_vs = metal_buffer(device, GROUPS * CAP * MASK_BYTES)

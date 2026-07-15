@@ -240,6 +240,136 @@ use flipfleet_span_refactor
     scanned += 1
   result
 
+# Prefer exact local replacements that contain one or more terms already live
+# outside the selected window.  Such terms cancel under GF(2) parity, so a
+# nominal 3->4 hit with one collision is an actual global 3->2 rank drop.
+# `stats` records external candidate ids, exact tuples examined, winning
+# collision count, and result cardinality.
+-> ffsrp_find_collision_ids_scratch(cu, cv, cw, signatures, count, target, original_ids, k, want, external_u, external_v, external_w, external_count, out_ids, stats, is_external, table) (i64[] i64[] i64[] i64[] i64 i64 i64[] i64 i64 i64[] i64[] i64[] i64 i64[] i64[] i64[] i32[]) i64
+  i = 0 ## i64
+  while i < 4
+    stats[i] = 0
+    i += 1
+  result = 0 ## i64
+  if ffsr_move_supported(k,want) == 0 || count < want || external_count < 1
+    return 0
+  capacity = ffsr_single_table_capacity(count) ## i64
+  if is_external.size() < count || table.size() < capacity
+    return 0
+  i = 0
+  while i < count
+    is_external[i] = 0
+    i += 1
+  i = 0
+  while i < capacity
+    table[i] = 0
+    i += 1
+  i = 0
+  while i < external_count
+    candidate = ffsr_find_candidate_term(cu,cv,cw,count,external_u[i],external_v[i],external_w[i]) ## i64
+    if candidate >= 0 && is_external[candidate] == 0
+      is_external[candidate] = 1
+      stats[0] += 1
+    i += 1
+  if stats[0] == 0
+    return 0
+
+  z = ffsr_build_single_table(signatures,count,table,capacity-1) ## i64
+  best_collisions = 0 ## i64
+  best_density = 9223372036854775807 ## i64
+  candidate_ids = i64[4]
+
+  if want == 2
+    a = 0 ## i64
+    while a < count
+      b = a + 1 ## i64
+      while b < count
+        if is_external[a] != 0 || is_external[b] != 0
+          stats[1] += 1
+          if (signatures[a] ^ signatures[b]) == target
+            candidate_ids[0] = a
+            candidate_ids[1] = b
+            if ffsr_accept_ids(candidate_ids,2,original_ids,k) == 1
+              collisions = is_external[a] + is_external[b] ## i64
+              density = ffw_popcount(cu[a]) + ffw_popcount(cv[a]) + ffw_popcount(cw[a]) + ffw_popcount(cu[b]) + ffw_popcount(cv[b]) + ffw_popcount(cw[b]) ## i64
+              if collisions > best_collisions || (collisions == best_collisions && density < best_density)
+                best_collisions = collisions
+                best_density = density
+                out_ids[0] = a
+                out_ids[1] = b
+                result = 2
+        b += 1
+      a += 1
+
+  if want == 3
+    a = 0
+    while a < count
+      b = a + 1
+      while b < count
+        third = ffsr_lookup_signature(signatures,table,capacity-1,target ^ signatures[a] ^ signatures[b]) ## i64
+        stats[1] += 1
+        if third > b
+          candidate_ids[0] = a
+          candidate_ids[1] = b
+          candidate_ids[2] = third
+          collisions = is_external[a] + is_external[b] + is_external[third] ## i64
+          if collisions > 0 && ffsr_accept_ids(candidate_ids,3,original_ids,k) == 1
+            density = ffw_popcount(cu[a]) + ffw_popcount(cv[a]) + ffw_popcount(cw[a]) + ffw_popcount(cu[b]) + ffw_popcount(cv[b]) + ffw_popcount(cw[b]) + ffw_popcount(cu[third]) + ffw_popcount(cv[third]) + ffw_popcount(cw[third]) ## i64
+            if collisions > best_collisions || (collisions == best_collisions && density < best_density)
+              best_collisions = collisions
+              best_density = density
+              out_ids[0] = a
+              out_ids[1] = b
+              out_ids[2] = third
+              result = 3
+        b += 1
+      a += 1
+
+  if want == 4
+    fixed = 0 ## i64
+    fixed_used = 0 ## i64
+    fixed_limit = 8 ## i64
+    if k == 3
+      fixed_limit = 32
+    while fixed < count && fixed_used < fixed_limit
+      if is_external[fixed] != 0
+        fixed_used += 1
+        a = 0
+        while a < count
+          b = a + 1
+          while b < count
+            if a != fixed && b != fixed
+              third = ffsr_lookup_signature(signatures,table,capacity-1,target ^ signatures[fixed] ^ signatures[a] ^ signatures[b]) ## i64
+              stats[1] += 1
+              if third >= 0 && third != fixed && third != a && third != b
+                candidate_ids[0] = fixed
+                candidate_ids[1] = a
+                candidate_ids[2] = b
+                candidate_ids[3] = third
+                collisions = is_external[fixed] + is_external[a] + is_external[b] + is_external[third] ## i64
+                if ffsr_accept_ids(candidate_ids,4,original_ids,k) == 1
+                  density = ffw_popcount(cu[fixed]) + ffw_popcount(cv[fixed]) + ffw_popcount(cw[fixed]) + ffw_popcount(cu[a]) + ffw_popcount(cv[a]) + ffw_popcount(cw[a]) + ffw_popcount(cu[b]) + ffw_popcount(cv[b]) + ffw_popcount(cw[b]) + ffw_popcount(cu[third]) + ffw_popcount(cv[third]) + ffw_popcount(cw[third]) ## i64
+                  if collisions > best_collisions || (collisions == best_collisions && density < best_density)
+                    best_collisions = collisions
+                    best_density = density
+                    out_ids[0] = fixed
+                    out_ids[1] = a
+                    out_ids[2] = b
+                    out_ids[3] = third
+                    result = 4
+            b += 1
+          a += 1
+      fixed += 1
+
+  stats[2] = best_collisions
+  stats[3] = result
+  result
+
+-> ffsrp_find_collision_ids(cu, cv, cw, signatures, count, target, original_ids, k, want, external_u, external_v, external_w, external_count, out_ids, stats) (i64[] i64[] i64[] i64[] i64 i64 i64[] i64 i64 i64[] i64[] i64[] i64 i64[] i64[]) i64
+  scratch_flags = i64[count]
+  scratch_table = i32[ffsr_single_table_capacity(count)]
+  ffsrp_find_collision_ids_scratch(cu,cv,cw,signatures,count,target,original_ids,k,want,external_u,external_v,external_w,external_count,out_ids,stats,scratch_flags,scratch_table)
+
 # Exact GPU join over one already-built complete span.  `stats` has capacity
 # six and records candidate count, query work, table entries/capacity, winning
 # query id, and result count.
@@ -419,7 +549,63 @@ use flipfleet_span_refactor
     attempt += 1
   found
 
--> ffsrp_search_current_subset(device, library, queue, state, selected, n, k, want, output_path, stats) i64
+-> ffsrp_in_span3(a, b, c, wanted) (i64 i64 i64 i64) i64
+  found = 0 ## i64
+  mask = 0 ## i64
+  while mask < 8 && found == 0
+    value = 0 ## i64
+    if (mask & 1) != 0
+      value = value ^ a
+    if (mask & 2) != 0
+      value = value ^ b
+    if (mask & 4) != 0
+      value = value ^ c
+    if value == wanted
+      found = 1
+    mask += 1
+  found
+
+# Pick a window whose three factor spans are guaranteed to contain one live
+# term left outside the window.  This is the necessary geometric condition
+# for a refactor output to parity-cancel globally.  A bounded deterministic
+# pair sample plus complete third-term scan keeps the selector cheap at 7x7.
+-> ffsrp_choose_external_span_door(us, vs, ws, rank, k, offset, selected) (i64[] i64[] i64[] i64 i64 i64 i64[]) i64
+  if rank <= k || (k != 3 && k != 4)
+    return 0
+  anchor = offset % rank ## i64
+  found = 0 ## i64
+  attempts = 0 ## i64
+  limit = rank * 16 ## i64
+  rng = (offset + 1) * 6364136223846793005 + 1442695040888963407 ## i64
+  while attempts < limit && found == 0
+    rng = rng * 6364136223846793005 + 1442695040888963407
+    a = (rng ^ (rng >> 29)) & 9223372036854775807 ## i64
+    a = a % rank
+    rng = rng * 6364136223846793005 + 1442695040888963407
+    b = (rng ^ (rng >> 31)) & 9223372036854775807 ## i64
+    b = b % rank
+    if a != anchor && b != anchor && a != b
+      c = 0 ## i64
+      while c < rank && found == 0
+        if c != anchor && c != a && c != b
+          if ffsrp_in_span3(us[a],us[b],us[c],us[anchor]) == 1
+            if ffsrp_in_span3(vs[a],vs[b],vs[c],vs[anchor]) == 1
+              if ffsrp_in_span3(ws[a],ws[b],ws[c],ws[anchor]) == 1
+                selected[0] = a
+                selected[1] = b
+                selected[2] = c
+                found = 3
+        c += 1
+    attempts += 1
+  if found == 3 && k == 4
+    d = (anchor + 1) % rank ## i64
+    while d == anchor || ffsr_contains(selected,3,d) == 1
+      d = (d + 1) % rank
+    selected[3] = d
+    found = 4
+  found
+
+-> ffsrp_search_current_subset(device, library, queue, state, selected, n, k, want, output_path, stats, collision_mode = 0) i64
   si = 0 ## i64
   while si < 6
     stats[si] = 0
@@ -442,7 +628,32 @@ use flipfleet_span_refactor
     stats[0] = 0 - 2
     return 0
   ids = i64[4]
-  found = ffsrp_find_ids_gpu(device, library, queue, signatures, count, meta[5], original_ids, k, want, ids, stats) ## i64
+  external_u = i64[state[4]]
+  external_v = i64[state[4]]
+  external_w = i64[state[4]]
+  external_count = 0 ## i64
+  position = 0 ## i64
+  while position < state[6]
+    if ffsr_position_selected(selected,k,position) == 0
+      slot = state[state[50]+position] ## i64
+      external_u[external_count] = state[state[44]+slot]
+      external_v[external_count] = state[state[45]+slot]
+      external_w[external_count] = state[state[46]+slot]
+      external_count += 1
+    position += 1
+  collision_stats = i64[4]
+  found = 0 ## i64
+  if collision_mode >= 0
+    found = ffsrp_find_collision_ids(cu,cv,cw,signatures,count,meta[5],original_ids,k,want,external_u,external_v,external_w,external_count,ids,collision_stats)
+  if found == want
+    stats[0] = count
+    stats[1] = collision_stats[1]
+    stats[4] = 0 - 1
+    stats[5] = found
+  if found != want && collision_mode > 0
+    return 0
+  if found != want && collision_mode <= 0
+    found = ffsrp_find_ids_gpu(device, library, queue, signatures, count, meta[5], original_ids, k, want, ids, stats)
   if found != want
     return 0
   out_u = i64[4]
@@ -453,9 +664,10 @@ use flipfleet_span_refactor
     return 0
   if ffsr_verify_local_replacement(su, sv, sw, k, out_u, out_v, out_w, made) == 0
     return 0
-  # ffsr_apply_current rejects no-ops/global collisions and performs the full
-  # n^6 pre/post verification.  Only a verified state is serialized.
-  rank = ffsr_apply_current(state, selected, k, out_u, out_v, out_w, made) ## i64
+  # The compact splice treats external term matches as the legal GF(2)
+  # cancellations they are and performs the full n^6 pre/post verification.
+  # Only a verified state is serialized.
+  rank = ffsr_apply_current_compact(state, selected, k, out_u, out_v, out_w, made) ## i64
   if rank < 1 || ffw_verify_current_exact(state, n) == 0
     return 0
   written = ffw_dump_current(state, output_path) ## i64
@@ -463,7 +675,7 @@ use flipfleet_span_refactor
     return 0
   rank
 
--> ffsrp_search(seed_path, output_path, n, k, want, subsets, offset, metal_path, metallib_path = "") i64
+-> ffsrp_search(seed_path, output_path, n, k, want, subsets, offset, metal_path, metallib_path = "", collision_only = 0) i64
   if n < 2 || n > 7 || ffsr_move_supported(k, want) == 0
     return 0 - 1
   if subsets < 1 || subsets > 8 || offset < 0
@@ -477,14 +689,16 @@ use flipfleet_span_refactor
     return 0 - 2
   device = metal_device()
   library = nil
-  if metallib_path != ""
-    library = metal_load_library(device, metallib_path)
-  if library == nil
-    msl = read_file(metal_path)
-    if msl == nil
-      return 0 - 3
-    library = metal_compile_source(device, msl)
-  queue = metal_queue(device)
+  queue = nil
+  if collision_only == 0
+    if metallib_path != ""
+      library = metal_load_library(device, metallib_path)
+    if library == nil
+      msl = read_file(metal_path)
+      if msl == nil
+        return 0 - 3
+      library = metal_compile_source(device, msl)
+    queue = metal_queue(device)
   cleared = write_file(output_path, "")
   if cleared == false
     return 0 - 4
@@ -492,33 +706,52 @@ use flipfleet_span_refactor
   vs = i64[capacity]
   ws = i64[capacity]
   exported = ffw_export_current(state, us, vs, ws) ## i64
-  s = 0 ## i64
-  while s < subsets
-    selected = i64[4]
-    chosen = 0 ## i64
-    door_offset = offset + s * 37 ## i64
-    # Equal-rank motif/generic pairs inspect the same anchor, measuring the
-    # selector rather than silently changing both selector and neighborhood.
-    if k == 3 && want == 3
-      door_offset = offset + (s / 2) * 37
-    # Interleave generic sticky doors with the real triangle-shear motif.
-    use_shear = 0 ## i64
-    if k == 3 && ((offset + s) & 1) != 0
-      use_shear = 1
-    # Equal-rank epochs are where the distance-six triangle family is most
-    # valuable.  Start them on a motif door, then alternate if batched.
-    if k == 3 && want == 3 && (s & 1) == 0
-      use_shear = 1
-    if use_shear == 1
-      chosen = ffsrp_choose_shear_triple(us, vs, ws, exported, door_offset, selected)
-    if chosen != k
-      chosen = ffsrp_choose_subset(us, vs, ws, exported, k, door_offset, selected)
-    if chosen == k
-      stats = i64[6]
-      hit = ffsrp_search_current_subset(device, library, queue, state, selected, n, k, want, output_path, stats) ## i64
-      if hit > 0
-        << "GPU_POOL_SPAN n=" + n.to_s() + " k=" + k.to_s() + " want=" + want.to_s() + " candidates=" + stats[0].to_s() + " table=" + stats[3].to_s() + " hit=1 rank=" + hit.to_s()
-        return hit
-    s += 1
+  # First inspect every scheduled neighborhood for parity-canceling outputs.
+  # Only after that pass may an ordinary noncollision refactor terminate the
+  # child, otherwise the first generic hit starves later rank-drop doors.
+  phase = 0 ## i64
+  phase_limit = 2 ## i64
+  if collision_only != 0
+    phase_limit = 1
+  while phase < phase_limit
+    s = 0 ## i64
+    while s < subsets
+      selected = i64[4]
+      chosen = 0 ## i64
+      door_offset = offset + s * 37 ## i64
+      # Equal-rank motif/generic pairs inspect the same anchor, measuring the
+      # selector rather than silently changing both selector and neighborhood.
+      if k == 3 && want == 3
+        door_offset = offset + (s / 2) * 37
+      # Interleave generic sticky doors with the real triangle-shear motif.
+      use_shear = 0 ## i64
+      if k == 3 && ((offset + s) & 1) != 0
+        use_shear = 1
+      # Equal-rank epochs are where the distance-six triangle family is most
+      # valuable.  Start them on a motif door, then alternate if batched.
+      if k == 3 && want == 3 && (s & 1) == 0
+        use_shear = 1
+      # Every third neighborhood is collision-directed: its selected factor
+      # spans deliberately contain one external live term.
+      if (s % 3) == 2 || (k == 4 && (offset % 3) == 2)
+        chosen = ffsrp_choose_external_span_door(us,vs,ws,exported,k,door_offset,selected)
+      if chosen != k && use_shear == 1
+        chosen = ffsrp_choose_shear_triple(us, vs, ws, exported, door_offset, selected)
+      if chosen != k
+        chosen = ffsrp_choose_subset(us, vs, ws, exported, k, door_offset, selected)
+      if chosen == k
+        stats = i64[6]
+        mode = 1 ## i64
+        if phase == 1
+          mode = 0 - 1
+        hit = ffsrp_search_current_subset(device, library, queue, state, selected, n, k, want, output_path, stats, mode) ## i64
+        if hit > 0
+          compact = 0 ## i64
+          if stats[4] < 0
+            compact = 1
+          << "GPU_POOL_SPAN n=" + n.to_s() + " k=" + k.to_s() + " want=" + want.to_s() + " candidates=" + stats[0].to_s() + " table=" + stats[3].to_s() + " compact=" + compact.to_s() + " hit=1 rank=" + hit.to_s()
+          return hit
+      s += 1
+    phase += 1
   << "GPU_POOL_SPAN n=" + n.to_s() + " k=" + k.to_s() + " want=" + want.to_s() + " subsets=" + subsets.to_s() + " hit=0"
   0

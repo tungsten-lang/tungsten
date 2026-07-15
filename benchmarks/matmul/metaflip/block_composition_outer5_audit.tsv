@@ -1,0 +1,8 @@
+outer	density	probe_16x23x31	targets	wins_rank47	ties_rank47	wins_effective	exact_wins	closest_delta_rank47	closest_delta_effective	largest_rank47_gain	strict_unique_best	dominated_by
+perminov	1054	6790	1140	10	2	0	0	-89	30	89	0	alpha
+alpha	1057	6790	1140	10	2	0	0	-89	30	89	17	-
+kauers-a	1291	6775	1140	10	3	0	0	-89	30	89	337	-
+kauers-b	1250	6837	1140	11	1	0	0	-89	30	89	2	-
+d967	967	6807	1140	11	1	0	0	-89	30	89	26	-
+d1155	1155	6794	1140	11	1	0	0	-89	30	89	317	-
+d1191	1191	6834	1140	11	1	0	0	-89	30	89	0	d1155

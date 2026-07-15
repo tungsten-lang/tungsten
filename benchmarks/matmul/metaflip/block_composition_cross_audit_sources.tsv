@@ -1,0 +1,9 @@
+source	revision	role
+audit_date	2026-07-13	comparison date
+block_composition_cross_audit.tsv	3155fb6198d83f5ec00e3d4c7190a59f961b9256cc028c7102c4cbbadcefe5aa	SHA-256 of persisted audit
+fmm_digest	5d9509fe745df670c3c2b4b29f5b95ae055c7cda	live FMM-Lille rank snapshot
+matmulcatalog	0320f745d87e46c36259b03add05307429941680	all-field and explicit-F2 certificates
+fmm-17-32	deb0a6c5c6571c17c4fba27f34ded6af62d77ef0	integer rectangular certificates
+FastMatrixMultiplication	e0ec7db4cb7d7ca41abbb2c6e3bd8c7de75c7c64	public scheme repository
+AlphaTensor	1949163da3bef7e3eb268a3ac015fd1c2dbfc767	prior-art implementation
+Flips	e31a0a0f0d2577cee5da047ca7dcae0c61992e40	prior-art implementation

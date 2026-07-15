@@ -90,6 +90,27 @@ else
   check "libzstd (zstd.h)" "not found" 0
 fi
 
+# Linux native links compile runtime/openblas_bridge.c only when IR needs BLAS
+# (@w_blas_*). Probe the exact header/library spelling used by the compiler;
+# OpenBLAS is optional for an ordinary bootstrap but required by those numeric
+# programs. macOS uses Accelerate instead.
+if [ "$(uname -s)" = Linux ]; then
+  cblas_tmp="/tmp/tungsten-cblas-check-$$"
+  if printf '#include <cblas.h>\nint main(void){return cblas_sdot(0, 0, 1, 0, 1) != 0.0f;}\n' \
+       | clang -x c - -lopenblas -o "$cblas_tmp" \
+         >/dev/null 2>&1; then
+    rm -f "$cblas_tmp"
+    check "OpenBLAS (cblas.h)" "ok" 1
+  else
+    rm -f "$cblas_tmp"
+    if printf '#include <cblas.h>\n' | clang -E -x c - >/dev/null 2>&1; then
+      check "OpenBLAS (optional)" "header found, -lopenblas unavailable" 1
+    else
+      check "OpenBLAS (optional)" "not installed — BLAS programs need libopenblas-dev" 1
+    fi
+  fi
+fi
+
 printf '\n%s\n' "$(c '\033[2m' 'Developer options (not required for normal use):')"
 
 if tool_ok ruby; then

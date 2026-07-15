@@ -29,6 +29,17 @@ case "$(uname -s)" in
 esac
 command -v clang >/dev/null 2>&1 || fail "clang is required (macOS: xcode-select --install; Debian/Ubuntu: apt install clang llvm)"
 command -v git   >/dev/null 2>&1 || fail "git is required"
+# Linux BLAS-backed numeric programs need the optional cblas.h + -lopenblas
+# bridge. Probe the exact command used by the compiler, but do not block an
+# ordinary bootstrap that never references @w_blas_. macOS uses Accelerate.
+if [ "$(uname -s)" = Linux ]; then
+  openblas_tmp="/tmp/tungsten-openblas-check-$$"
+  if ! printf '#include <cblas.h>\nint main(void){return cblas_sdot(0, 0, 1, 0, 1) != 0.0f;}\n' \
+       | clang -x c - -lopenblas -o "$openblas_tmp" >/dev/null 2>&1; then
+    say "NOTE: BLAS-backed numeric programs require OpenBLAS (Debian/Ubuntu: apt install libopenblas-dev)"
+  fi
+  rm -f "$openblas_tmp"
+fi
 
 # --- clone + build -----------------------------------------------------------
 if [ -d "$TUNGSTEN_HOME/.git" ]; then

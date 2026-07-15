@@ -11,13 +11,13 @@
 # Base: the official Ruby image (matches .ruby-version; bundles gcc/make/bundler
 # so the driver's native-extension gems build cleanly). We add the Tungsten
 # toolchain: clang + LLVM + lld (Linux links via -fuse-ld=lld) and the runtime's
-# C deps (oniguruma, zstd).
+# C deps (oniguruma, zstd, and OpenBLAS for Linux scientific programs).
 
 FROM ruby:4.0.5
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       clang llvm lld pkg-config \
-      libonig-dev libzstd-dev \
+      libonig-dev libzstd-dev libopenblas-dev \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tungsten

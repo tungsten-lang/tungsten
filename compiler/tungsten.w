@@ -818,48 +818,270 @@ while i < args.size()
 # archive is rebuilt whenever any base runtime source is newer than it. The
 # whole-program-LTO builds (--release / --native / --lto) skip this and rebuild
 # the runtime from source for a lean, cross-optimized binary.
+-> dev_runtime_shell_quote(text)
+  "'" + text.gsub("'", "'\\''") + "'"
+
+# Canonicalize the selected runtime root without making direct C-VM execution
+# depend on File.expand_path (the C VM intentionally implements only the small
+# bootstrap builtin set). Standard staged bootstrap passes --runtime and never
+# executes this path, but direct `tungsten-c compiler/tungsten.w compile ...`
+# should remain correct too.
+-> dev_runtime_source_identity(runtime_dir, runtime_kind)
+  if runtime_kind == "tungsten-c"
+    resolved = capture("cd " + dev_runtime_shell_quote(runtime_dir) + " && pwd -P 2>/dev/null").strip()
+    if resolved != ""
+      return resolved
+    if runtime_dir.starts_with?("/")
+      return runtime_dir
+    pwd = env("PWD")
+    if pwd != nil && pwd != ""
+      return pwd + "/" + runtime_dir
+    return runtime_dir
+  File.expand_path(runtime_dir)
+
+# Extract the first executable word without evaluating the configured command.
+# This covers quoted/escaped wrapper paths and command-plus-flags forms while
+# avoiding a second execution of user shell syntax merely to build a cache key.
+-> dev_runtime_first_command_word(command)
+  if command == nil
+    return nil
+  i = 0
+  while i < command.size()
+    ch = command.slice(i, 1)
+    break if !(ch in (" " "\t" "\n" "\r"))
+    i += 1
+  if i >= command.size()
+    return nil
+
+  out = StringBuffer(32)
+  quote = ""
+  escaped = false
+  while i < command.size()
+    ch = command.slice(i, 1)
+    if escaped
+      out << ch
+      escaped = false
+    elsif quote == "'"
+      if ch == "'"
+        quote = ""
+      else
+        out << ch
+    elsif quote == "\""
+      if ch == "\""
+        quote = ""
+      elsif ch == "\\"
+        escaped = true
+      else
+        out << ch
+    elsif ch in (" " "\t" "\n" "\r")
+      break
+    elsif ch == "'" || ch == "\""
+      quote = ch
+    elsif ch == "\\"
+      escaped = true
+    else
+      out << ch
+    i += 1
+
+  if quote != "" || escaped
+    return nil
+  word = out.to_s()
+  return nil if word == ""
+  word
+
+# Resolve the first executable of a compiler/archive command through PATH.
+# If a command cannot be resolved safely, the dev archive is disabled for that
+# invocation instead of reusing a cache with an incomplete identity.
+-> dev_runtime_resolve_tool(command, runtime_kind)
+  executable = dev_runtime_first_command_word(command)
+  if executable == nil
+    return nil
+
+  if runtime_kind == "tungsten-c"
+    resolved = capture("command -v " + dev_runtime_shell_quote(executable) + " 2>/dev/null").strip()
+    if resolved == ""
+      return nil
+    return resolved
+
+  if executable.index("/") != nil
+    if file?(executable)
+      return File.expand_path(executable)
+    return nil
+
+  raw_path = env("PATH")
+  if raw_path == nil
+    raw_path = ""
+  parts = raw_path.split(":")
+  i = 0
+  while i < parts.size()
+    dir = parts[i]
+    if dir == ""
+      dir = "."
+    candidate = dir + "/" + executable
+    if file?(candidate)
+      return File.expand_path(candidate)
+    i += 1
+  nil
+
+# A driver that already resolved/stat'ed a tool can avoid probing by exporting
+# its supplied identity. Native execution keys path + size + ns-mtime and adds
+# a content hash for small executables (normally wrappers). That catches even a
+# same-size wrapper rewrite with restored timestamps without hashing a 100MB+
+# compiler on every warm link. The rare C-VM path uses POSIX cksum instead.
+-> dev_runtime_tool_identity(command, runtime_kind, supplied_env)
+  supplied = env(supplied_env)
+  if supplied != nil && supplied != ""
+    return "supplied:" + supplied + "|command:" + command
+
+  resolved = dev_runtime_resolve_tool(command, runtime_kind)
+  if resolved == nil
+    return nil
+
+  if runtime_kind == "tungsten-c"
+    version = capture(dev_runtime_shell_quote(resolved) + " --version 2>/dev/null | head -n 1").strip()
+    checksum = capture("cksum " + dev_runtime_shell_quote(resolved) + " 2>/dev/null").strip()
+    return "cvm:" + command + "|" + resolved + "|" + version + "|" + checksum
+
+  size = File.size(resolved)
+  mtime = File.mtime_ns(resolved)
+  if size == nil || mtime == nil
+    return nil
+  content_identity = ""
+  if size <= 1048576
+    content = read_file(resolved)
+    if content != nil
+      content_identity = "|hash:" + wyhash64_hex_string(content)
+  "native:" + command + "|" + resolved + "|" + size.to_s() + "|" + mtime.to_s() + content_identity
+
+-> dev_runtime_cc_identity(command, runtime_kind)
+  dev_runtime_tool_identity(command, runtime_kind, "TUNGSTEN_CC_ID")
+
+-> dev_runtime_ar_identity(command, runtime_kind)
+  dev_runtime_tool_identity(command, runtime_kind, "TUNGSTEN_AR_ID")
+
+-> dev_runtime_append_env(config, name)
+  value = env(name)
+  if value == nil
+    value = ""
+  config << name
+  config << "="
+  config << value
+  config << "\n"
+
+-> dev_runtime_archive_path(runtime_root, cc_identity, ar_identity, compile_flags, event_source, generated_thresholds)
+  config = StringBuffer(0)
+  config << "dev-runtime-archive-v4\n"
+  config << runtime_root
+  config << "\ncc="
+  config << cc_identity
+  config << "\nar="
+  config << ar_identity
+  config << "\nflags="
+  config << compile_flags
+  config << "\n"
+  config << event_source
+  config << "\nthresholds="
+  config << generated_thresholds
+  config << "\n"
+  # Ambient compiler/header selection changes object code even when the clang
+  # path and explicit flags are unchanged. Keep this list synchronized with
+  # bin/commands/build.rb's ambient_toolchain_identity.
+  dev_runtime_append_env(config, "SDKROOT")
+  dev_runtime_append_env(config, "MACOSX_DEPLOYMENT_TARGET")
+  dev_runtime_append_env(config, "CPATH")
+  dev_runtime_append_env(config, "C_INCLUDE_PATH")
+  dev_runtime_append_env(config, "CPLUS_INCLUDE_PATH")
+  dev_runtime_append_env(config, "LIBRARY_PATH")
+  dev_runtime_append_env(config, "PKG_CONFIG_PATH")
+  dev_runtime_append_env(config, "PKG_CONFIG_LIBDIR")
+  "/tmp/tungsten-runtime-native-" + wyhash64_hex_string(config.to_s()) + ".a"
+
 -> dev_runtime_archive(verbose = false)
   runtime_dir = resolve_runtime_dir
-  archive = "/tmp/tungsten-runtime-native.a"
   ev = runtime_event_source
+  runtime_kind = runtime_identity()
+  runtime_root = dev_runtime_source_identity(runtime_dir, runtime_kind)
+  cc_command = host_c_compiler()
+  cc_identity = dev_runtime_cc_identity(cc_command, runtime_kind)
+  ar_command = archive_tool()
+  ar_identity = dev_runtime_ar_identity(ar_command, runtime_kind)
+  if cc_identity == nil || ar_identity == nil
+    return nil
+  compile_flags = "-O3 -DNDEBUG " + march_flags()
+  thresholds_path = runtime_root + "/generated/bigint_thresholds.h"
+  generated_thresholds = "absent"
+  if file?(thresholds_path)
+    generated_thresholds = "present"
+  archive = dev_runtime_archive_path(runtime_root, cc_identity, ar_identity, compile_flags, ev, generated_thresholds)
   evo = ev.replace(".c", ".o")
 
   # Freshness: reuse the cached archive iff it is newer than every base source.
-  bases = ["runtime.c", "terminal_input.c", "runtime.h", "wvalue.h", ev, "aks.c", "tls_stub.c"]
+  bases = ["runtime.c", "terminal_input.c", "runtime.h", "wvalue.h",
+           "event_loop.h", "ssmr_witness.h", "w_char_table.c", "aks.c", "tls_stub.c"]
+  if ev == "event_*.c"
+    bases.push("event_kqueue.c")
+    bases.push("event_epoll.c")
+    bases.push("event_iouring.c")
+  else
+    bases.push(ev)
+  if generated_thresholds == "present"
+    bases.push("generated/bigint_thresholds.h")
+
   fresh = StringBuffer(0)
   fresh << "test -e "
-  fresh << archive
+  fresh << dev_runtime_shell_quote(archive)
   bi = 0
   while bi < bases.size()
     fresh << " && test "
-    fresh << archive
+    fresh << dev_runtime_shell_quote(archive)
     fresh << " -nt "
-    fresh << runtime_dir
-    fresh << bases[bi]
+    fresh << dev_runtime_shell_quote(runtime_root + "/" + bases[bi])
     bi += 1
   if file?(archive) && system(fresh.to_s()) == true
     return archive
 
   if verbose
     << "Building native runtime archive (one-time)..."
+
+  # Compile in a per-process directory so concurrent roots/configurations can
+  # never exchange runtime.o files. Build the archive beside its final path and
+  # publish with one same-filesystem rename; linkers see either the complete old
+  # archive or the complete new one, never a partially written ar file.
+  event_source_arg = dev_runtime_shell_quote(runtime_root + "/" + ev)
+  event_object_arg = dev_runtime_shell_quote(evo)
+  if ev == "event_*.c"
+    event_source_arg = dev_runtime_shell_quote(runtime_root + "/event_") + "*.c"
+    event_object_arg = "event_*.o"
+
   cc = StringBuffer(0)
-  cc << "cd "
-  cc << runtime_dir
+  cc << "build_dir="
+  cc << dev_runtime_shell_quote(archive + ".build.")
+  cc << "$$; archive_tmp="
+  cc << dev_runtime_shell_quote(archive + ".tmp.")
+  cc << "$$; rm -rf \"$build_dir\" \"$archive_tmp\" && mkdir -p \"$build_dir\" && cd \"$build_dir\" && "
+  cc << cc_command
+  cc << " "
+  cc << compile_flags
+  cc << " -I"
+  cc << dev_runtime_shell_quote(runtime_root)
+  cc << " -c "
+  cc << dev_runtime_shell_quote(runtime_root + "/runtime.c")
+  cc << " "
+  cc << dev_runtime_shell_quote(runtime_root + "/terminal_input.c")
+  cc << " "
+  cc << event_source_arg
+  cc << " "
+  cc << dev_runtime_shell_quote(runtime_root + "/aks.c")
+  cc << " "
+  cc << dev_runtime_shell_quote(runtime_root + "/tls_stub.c")
   cc << " && "
-  cc << host_c_compiler()
-  cc << " -O3 -DNDEBUG "
-  cc << march_flags()
-  cc << " -c runtime.c terminal_input.c "
-  cc << ev
-  cc << " aks.c tls_stub.c && "
-  cc << archive_tool()
-  cc << " rcs "
-  cc << archive
+  cc << ar_command
+  cc << " rcs \"$archive_tmp\""
   cc << " runtime.o terminal_input.o "
-  cc << evo
-  cc << " aks.o tls_stub.o && rm -f runtime.o terminal_input.o "
-  cc << evo
-  cc << " aks.o tls_stub.o"
+  cc << event_object_arg
+  cc << " aks.o tls_stub.o && mv -f \"$archive_tmp\" "
+  cc << dev_runtime_shell_quote(archive)
+  cc << "; status=$?; rm -rf \"$build_dir\" \"$archive_tmp\"; exit $status"
   if system(cc.to_s()) != true
     return nil
   archive

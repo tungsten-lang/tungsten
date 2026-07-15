@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Compile once, verify exact behavior, then time String#empty? only.
+# Compile once, verify exact current-C/candidate-W behavior, then gate the
+# String#empty? candidate on the median paired W/C ratio.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-RUNS="${RUNS:-5}"
-ITERS="${ITERS:-2000000}"
+TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
+RUNS="${RUNS:-9}"
+ITERS="${ITERS:-50000000}"
+GATE="${GATE:-0.97}"
 
 case "$RUNS" in
   ''|*[!0-9]*|0) echo "RUNS must be a positive integer" >&2; exit 2 ;;
@@ -24,7 +27,7 @@ cd "$ROOT"
 
 echo "Compiling benchmark (setup; excluded from timings)..."
 TUNGSTEN_C_INCLUDES="$SCRIPT_DIR/string_ref.c" \
-  bin/tungsten compile "$SCRIPT_DIR/string_ab.w" --release --out "$BIN" >/dev/null
+  "$TUNGSTEN" compile "$SCRIPT_DIR/string_ab.w" --release --out "$BIN" >/dev/null
 
 echo "Checking exact C/W behavior..."
 "$BIN" check
@@ -53,11 +56,12 @@ median_stream() {
 c_med="$(awk -F'|' '$1 == "RESULT" { print $3 }' "$RAW" | median_stream)"
 w_med="$(awk -F'|' '$1 == "RESULT" { print $4 }' "$RAW" | median_stream)"
 ratio_med="$(awk -F'|' '$1 == "RESULT" { print $5 }' "$RAW" | median_stream)"
+decision="$(awk -v ratio="$ratio_med" -v gate="$GATE" 'BEGIN { print (ratio <= gate) ? "PASS" : "SKIP" }')"
 
 echo
-printf '%-10s %12s %12s %10s\n' "function" "C-method ns" "W-method ns" "W/C"
-printf '%-10s %12s %12s %10s\n' "----------" "------------" "------------" "----------"
-printf '%-10s %12.3f %12.3f %10.3f\n' "empty?" "$c_med" "$w_med" "$ratio_med"
+printf '%-10s %12s %12s %10s %8s\n' "function" "C-method ns" "W-candidate" "W/C" "gate"
+printf '%-10s %12s %12s %10s %8s\n' "----------" "------------" "------------" "----------" "--------"
+printf '%-10s %12.3f %12.3f %10.3f %8s\n' "empty?" "$c_med" "$w_med" "$ratio_med" "$decision"
 
 echo
-echo "Median of $RUNS paired, alternating samples; every timed loop checks an identical checksum."
+echo "Median of $RUNS paired alternating samples; PASS requires W/C <= $GATE. Every pair verifies an identical checksum."

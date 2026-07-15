@@ -1,0 +1,464 @@
+#!/usr/bin/env bash
+# Isolated correctness, identity, and matched-performance gate for routing
+# Parser's current-token type tests through a direct top-level helper.
+#
+# This script intentionally builds both trial compilers with one explicitly
+# supplied bootstrap executable, then makes both compilers consume one immutable
+# source snapshot. That keeps emitted-LLVM identity meaningful.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PREP_ROOT="${PREP_ROOT:-/tmp/tungsten-parser-at-type-prep}"
+BASELINE_ROOT="${BASELINE_ROOT:-$PREP_ROOT/baseline}"
+CANDIDATE_ROOT="${CANDIDATE_ROOT:-$PREP_ROOT/candidate}"
+SOURCE_ROOT="${SOURCE_ROOT:-$CANDIDATE_ROOT}"
+BOOTSTRAP_COMPILER="${BOOTSTRAP_COMPILER:-}"
+BASELINE_BIN="${BASELINE_BIN:-$BASELINE_ROOT/bin/tungsten-parser-at-type-trial}"
+CANDIDATE_BIN="${CANDIDATE_BIN:-$CANDIDATE_ROOT/bin/tungsten-parser-at-type-trial}"
+PAIRS="${PAIRS:-5}"
+GATE="${GATE:-0.97}"
+STATIC_ONLY="${STATIC_ONLY:-0}"
+SKIP_BUILD="${SKIP_BUILD:-0}"
+CHECK_ONLY="${CHECK_ONLY:-0}"
+RESULTS_OUT="${RESULTS_OUT:-}"
+
+absolute_dir() {
+  (cd "$1" && pwd)
+}
+
+for root in "$BASELINE_ROOT" "$CANDIDATE_ROOT" "$SOURCE_ROOT"; do
+  if [ ! -d "$root" ]; then
+    echo "missing isolated root: $root" >&2
+    exit 2
+  fi
+done
+
+BASELINE_ROOT="$(absolute_dir "$BASELINE_ROOT")"
+CANDIDATE_ROOT="$(absolute_dir "$CANDIDATE_ROOT")"
+SOURCE_ROOT="$(absolute_dir "$SOURCE_ROOT")"
+if [ "$BASELINE_ROOT" = "$CANDIDATE_ROOT" ]; then
+  echo "baseline and candidate roots must differ" >&2
+  exit 2
+fi
+
+case "$PAIRS" in
+  ''|*[!0-9]*|0)
+    echo "PAIRS must be a positive integer (use 5 for the declared 5+5 gate)" >&2
+    exit 2
+    ;;
+esac
+
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/tungsten-parser-at-type.XXXXXX")"
+cleanup() {
+  rm -rf "$TMP"
+}
+trap cleanup EXIT
+
+baseline_parser="$BASELINE_ROOT/compiler/lib/parser.w"
+candidate_parser="$CANDIDATE_ROOT/compiler/lib/parser.w"
+
+static_audit() {
+  local compiler_diff baseline_calls candidate_calls
+
+  for file in "$baseline_parser" "$candidate_parser"; do
+    if [ ! -f "$file" ]; then
+      echo "missing parser source: $file" >&2
+      return 1
+    fi
+  done
+
+  # The non-compiler inputs used to build the two trial binaries must match.
+  diff -qr "$BASELINE_ROOT/core" "$CANDIDATE_ROOT/core" >/dev/null
+  diff -qr "$BASELINE_ROOT/runtime" "$CANDIDATE_ROOT/runtime" >/dev/null
+  diff -qr "$BASELINE_ROOT/languages/tungsten" "$CANDIDATE_ROOT/languages/tungsten" >/dev/null
+
+  compiler_diff="$(diff -qr "$BASELINE_ROOT/compiler" "$CANDIDATE_ROOT/compiler" || true)"
+  if [ "$(printf '%s\n' "$compiler_diff" | awk 'NF {n += 1} END {print n + 0}')" -ne 1 ] ||
+     ! printf '%s\n' "$compiler_diff" | grep -Fq '/compiler/lib/parser.w'; then
+    echo "compiler trees differ outside the single parser candidate:" >&2
+    printf '%s\n' "$compiler_diff" >&2
+    return 1
+  fi
+
+  # Produce the exact expected candidate mechanically. Comment lines and the
+  # method declaration are excluded, then the compatibility body is delegated
+  # explicitly. Removing the named six-line helper block from the real
+  # candidate must leave byte-identical text.
+  perl -pe '
+    if (!/^\s*#/ && !/^\s*-> at_type\?/) {
+      s/(?<![A-Za-z0-9_.@])at_type\?\(/parser_at_type(\@current_packed, /g
+    }
+    s/^    parser_tok_type\(\@current_packed\) == type_id$/    parser_at_type(\@current_packed, type_id)/
+  ' "$baseline_parser" > "$TMP/expected-parser.w"
+
+  awk '
+    /^# Internal type tests are top-level for the same reason as the decoders above:$/ {
+      skipping = 1
+      next
+    }
+    skipping {
+      if ($0 == "") skipping = 0
+      next
+    }
+    { print }
+  ' "$candidate_parser" > "$TMP/candidate-without-helper.w"
+
+  if ! cmp -s "$TMP/expected-parser.w" "$TMP/candidate-without-helper.w"; then
+    echo "candidate is not the audited mechanical rewrite" >&2
+    diff -u "$TMP/expected-parser.w" "$TMP/candidate-without-helper.w" | sed -n '1,180p' >&2
+    return 1
+  fi
+
+  baseline_calls="$(awk '
+    !/^ *#/ && !/^ *-> at_type\?/ {
+      line = $0
+      while (match(line, /at_type\?\(/)) {
+        n += 1
+        line = substr(line, RSTART + RLENGTH)
+      }
+    }
+    END { print n + 0 }
+  ' "$baseline_parser")"
+  candidate_calls="$(awk '
+    !/^ *-> parser_at_type/ {
+      line = $0
+      while (match(line, /parser_at_type\(/)) {
+        n += 1
+        line = substr(line, RSTART + RLENGTH)
+      }
+    }
+    END { print n + 0 }
+  ' "$candidate_parser")"
+
+  # 429 executable bare calls become direct internal helper calls; the 430th
+  # candidate call is the retained Parser#at_type? wrapper.
+  if [ "$baseline_calls" -ne 429 ] || [ "$candidate_calls" -ne 430 ]; then
+    echo "unexpected call census: baseline=$baseline_calls candidate=$candidate_calls" >&2
+    return 1
+  fi
+
+  if grep -Eq '\.at_type\?\(' "$baseline_parser"; then
+    echo "explicit-receiver at_type? call found; the bare-call rewrite is unsafe" >&2
+    return 1
+  fi
+  if awk '!/^ *#/ && !/^ *-> at_type\?/ && /at_type\?\(/ { print; bad = 1 } END { exit bad ? 0 : 1 }' \
+      "$candidate_parser" | grep -q .; then
+    echo "executable at_type? call survived in candidate" >&2
+    return 1
+  fi
+  if [ "$(grep -c '^-> parser_at_type(p, type_id)$' "$candidate_parser")" -ne 1 ]; then
+    echo "candidate must define exactly one parser_at_type helper" >&2
+    return 1
+  fi
+
+  echo "PASS static audit: exact 429-call rewrite, no explicit receiver, comments and strings unchanged"
+}
+
+static_audit
+if [ "$STATIC_ONLY" = "1" ]; then
+  exit 0
+fi
+
+TRIAL_BUILD_SOURCE="$TMP/trial-build-source"
+TRIAL_BUILD_OUTPUT="$TMP/trial-compiler"
+TRIAL_BUILD_LL="$TMP/trial-build.ll"
+
+build_trial_compiler() {
+  local label="$1"
+  local root="$2"
+  local output="$3"
+  local ll="$TMP/$label-build.ll"
+  local log="$TMP/$label-build.log"
+
+  echo "Building $label trial compiler with common bootstrap..."
+  # Reuse one absolute source/output path for the two sequential builds. This
+  # prevents path strings, sidemap destinations, or source-path content hashes
+  # from becoming a second baseline/candidate difference.
+  rm -rf "$TRIAL_BUILD_SOURCE"
+  rm -f "$TRIAL_BUILD_OUTPUT" "$TRIAL_BUILD_OUTPUT.sidemap" "$TRIAL_BUILD_LL"
+  mkdir -p "$TRIAL_BUILD_SOURCE/languages"
+  cp -R "$root/compiler" "$TRIAL_BUILD_SOURCE/compiler"
+  cp -R "$root/core" "$TRIAL_BUILD_SOURCE/core"
+  cp -R "$root/runtime" "$TRIAL_BUILD_SOURCE/runtime"
+  cp -R "$root/languages/tungsten" "$TRIAL_BUILD_SOURCE/languages/tungsten"
+  if ! (
+    cd "$TRIAL_BUILD_SOURCE"
+    TUNGSTEN_ROOT="$TRIAL_BUILD_SOURCE" TUNGSTEN_LL_PATH="$TRIAL_BUILD_LL" \
+      "$BOOTSTRAP_COMPILER" compile "$TRIAL_BUILD_SOURCE/compiler/tungsten.w" \
+      --release --no-lto --verbose --out "$TRIAL_BUILD_OUTPUT" >"$log" 2>&1
+  ); then
+    echo "$label trial compiler build failed" >&2
+    sed -n '1,240p' "$log" >&2
+    return 1
+  fi
+  if [ ! -x "$TRIAL_BUILD_OUTPUT" ] || [ ! -s "$TRIAL_BUILD_LL" ]; then
+    echo "$label trial build did not produce its compiler or LLVM artifact" >&2
+    return 1
+  fi
+  if [ "$(uname -s)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
+    codesign --force -s - "$TRIAL_BUILD_OUTPUT" >/dev/null 2>&1
+  fi
+  cp "$TRIAL_BUILD_OUTPUT" "$output"
+  if [ -f "$TRIAL_BUILD_OUTPUT.sidemap" ]; then
+    cp "$TRIAL_BUILD_OUTPUT.sidemap" "$output.sidemap"
+  else
+    rm -f "$output.sidemap"
+  fi
+  cp "$TRIAL_BUILD_LL" "$ll"
+}
+
+if [ "$SKIP_BUILD" != "1" ]; then
+  if [ -z "$BOOTSTRAP_COMPILER" ] || [ ! -x "$BOOTSTRAP_COMPILER" ]; then
+    echo "set BOOTSTRAP_COMPILER to one executable used for both trial builds" >&2
+    exit 2
+  fi
+  BOOTSTRAP_COMPILER="$(cd "$(dirname "$BOOTSTRAP_COMPILER")" && pwd)/$(basename "$BOOTSTRAP_COMPILER")"
+  echo "Common bootstrap: $(shasum -a 256 "$BOOTSTRAP_COMPILER" | awk '{print $1}')"
+  build_trial_compiler baseline "$BASELINE_ROOT" "$BASELINE_BIN"
+  build_trial_compiler candidate "$CANDIDATE_ROOT" "$CANDIDATE_BIN"
+else
+  echo "Skipping builds; using explicitly retained isolated trial binaries."
+fi
+
+for bin in "$BASELINE_BIN" "$CANDIDATE_BIN"; do
+  if [ ! -x "$bin" ]; then
+    echo "missing trial compiler: $bin" >&2
+    exit 2
+  fi
+done
+
+run_focus_for_root() {
+  local label="$1"
+  local root="$2"
+  local compiler="$3"
+  local spec source_name out ll compiled_log interpreter_out compiled_out
+
+  for source_name in parser_at_type_direct_spec parser_packed_token_access_spec; do
+    spec="$root/spec/compiler/$source_name.w"
+    if [ ! -f "$spec" ]; then
+      echo "missing focused spec: $spec" >&2
+      return 1
+    fi
+
+    interpreter_out="$TMP/$label-$source_name.interpreter.out"
+    if ! (cd "$root" && TUNGSTEN_ROOT="$root" "$compiler" run "$spec") >"$interpreter_out" 2>&1; then
+      echo "$label interpreter failed $source_name" >&2
+      sed -n '1,220p' "$interpreter_out" >&2
+      return 1
+    fi
+    if grep -Eq '^FAIL([ :]|$)' "$interpreter_out"; then
+      echo "$label interpreter emitted a failed check for $source_name" >&2
+      sed -n '1,220p' "$interpreter_out" >&2
+      return 1
+    fi
+
+    out="$TMP/$label-$source_name"
+    ll="$TMP/$label-$source_name.ll"
+    compiled_log="$TMP/$label-$source_name.compile.log"
+    if ! (
+      cd "$root"
+      TUNGSTEN_ROOT="$root" TUNGSTEN_LL_PATH="$ll" \
+        "$compiler" compile "$spec" --no-lto --out "$out" >"$compiled_log" 2>&1
+    ); then
+      echo "$label compiler failed $source_name" >&2
+      sed -n '1,220p' "$compiled_log" >&2
+      return 1
+    fi
+    compiled_out="$TMP/$label-$source_name.compiled.out"
+    if ! "$out" >"$compiled_out" 2>&1; then
+      echo "$label compiled spec failed $source_name" >&2
+      sed -n '1,220p' "$compiled_out" >&2
+      return 1
+    fi
+    if grep -Eq '^FAIL([ :]|$)' "$compiled_out"; then
+      echo "$label compiled spec emitted a failed check for $source_name" >&2
+      sed -n '1,220p' "$compiled_out" >&2
+      return 1
+    fi
+  done
+}
+
+echo "Running focused compiled and interpreter gates..."
+run_focus_for_root baseline "$BASELINE_ROOT" "$BASELINE_BIN"
+run_focus_for_root candidate "$CANDIDATE_ROOT" "$CANDIDATE_BIN"
+for source_name in parser_at_type_direct_spec parser_packed_token_access_spec; do
+  cmp "$TMP/baseline-$source_name.interpreter.out" "$TMP/candidate-$source_name.interpreter.out"
+  cmp "$TMP/baseline-$source_name.compiled.out" "$TMP/candidate-$source_name.compiled.out"
+done
+echo "PASS focused semantics: baseline/candidate compiled and interpreter outputs match"
+
+if [ "$CHECK_ONLY" = "1" ]; then
+  exit 0
+fi
+
+# Freeze one source tree once. Both compilers below receive the same absolute
+# compiler/tungsten.w path, the same dependency paths, and the same cwd.
+FIXED="$TMP/fixed-source"
+mkdir -p "$FIXED/languages"
+cp -R "$SOURCE_ROOT/compiler" "$FIXED/compiler"
+cp -R "$SOURCE_ROOT/core" "$FIXED/core"
+cp -R "$SOURCE_ROOT/languages/tungsten" "$FIXED/languages/tungsten"
+PAYLOAD="$FIXED/compiler/tungsten.w"
+
+source_digest="$({
+  find "$FIXED/compiler" "$FIXED/core" "$FIXED/languages/tungsten" -type f | LC_ALL=C sort | while IFS= read -r file; do
+    shasum -a 256 "$file"
+  done
+} | shasum -a 256 | awk '{print $1}')"
+echo "Fixed source snapshot: $source_digest"
+
+run_once() {
+  local compiler="$1"
+  local label="$2"
+  local ll_path="$3"
+  local log_path="$TMP/$label.log"
+  local time_path="$TMP/$label.time"
+  local load total wall user
+
+  if ! (
+    cd "$FIXED"
+    /usr/bin/time -lp env \
+      -u TUNGSTEN_LL_DIR \
+      -u TUNGSTEN_LL_DONE_MARKER \
+      -u TUNGSTEN_STOP_AFTER_LOAD_PARSE \
+      TUNGSTEN_ROOT="$FIXED" \
+      TUNGSTEN_GPU_DIALECTS=none \
+      TUNGSTEN_LL_PATH="$ll_path" \
+      "$compiler" compile "$PAYLOAD" --release --emit-ll --verbose \
+      --out "$TMP/fixed-output" >"$log_path" 2>"$time_path"
+  ); then
+    echo "compiler run failed for $label" >&2
+    sed -n '1,240p' "$log_path" >&2
+    sed -n '1,120p' "$time_path" >&2
+    return 1
+  fi
+
+  load="$(awk '$2=="load+parse" {v=$1; sub(/s$/, "", v); print v}' "$log_path" | tail -1)"
+  total="$(awk '/TOTAL COMPILE TIME/ {v=$1; sub(/s$/, "", v); print v}' "$log_path" | tail -1)"
+  wall="$(awk '$1=="real" {print $2; exit} $2=="real" {print $1; exit}' "$time_path")"
+  user="$(awk '$1=="user" {print $2; exit} $2=="user" {print $1; exit}' "$time_path")"
+  if [ -z "$load" ] || [ -z "$total" ] || [ -z "$wall" ] || [ -z "$user" ] || [ ! -s "$ll_path" ]; then
+    echo "missing timing metric or LLVM output for $label" >&2
+    sed -n '1,240p' "$log_path" >&2
+    sed -n '1,120p' "$time_path" >&2
+    return 1
+  fi
+  printf '%s|%s|%s|%s\n' "$load" "$total" "$wall" "$user"
+}
+
+check_identity() {
+  local baseline_ll="$1"
+  local candidate_ll="$2"
+  local label="$3"
+  if ! cmp -s "$baseline_ll" "$candidate_ll"; then
+    echo "FAIL $label: baseline/candidate LLVM differs" >&2
+    shasum -a 256 "$baseline_ll" "$candidate_ll" >&2
+    return 1
+  fi
+}
+
+echo "Warming both compilers (excluded from samples)..."
+baseline_warm_ll="$TMP/baseline-warm.ll"
+candidate_warm_ll="$TMP/candidate-warm.ll"
+run_once "$BASELINE_BIN" baseline-warm "$baseline_warm_ll" >/dev/null
+run_once "$CANDIDATE_BIN" candidate-warm "$candidate_warm_ll" >/dev/null
+check_identity "$baseline_warm_ll" "$candidate_warm_ll" warmup
+
+RAW="$TMP/results.txt"
+: > "$RAW"
+echo "Running $PAIRS matched pairs ($PAIRS baseline + $PAIRS candidate legs)..."
+i=1
+while [ "$i" -le "$PAIRS" ]; do
+  baseline_ll="$TMP/baseline-$i.ll"
+  candidate_ll="$TMP/candidate-$i.ll"
+  if [ $((i % 2)) -eq 1 ]; then
+    echo "  pair $i/$PAIRS (baseline/candidate)" >&2
+    baseline_metrics="$(run_once "$BASELINE_BIN" "baseline-$i" "$baseline_ll")"
+    candidate_metrics="$(run_once "$CANDIDATE_BIN" "candidate-$i" "$candidate_ll")"
+  else
+    echo "  pair $i/$PAIRS (candidate/baseline)" >&2
+    candidate_metrics="$(run_once "$CANDIDATE_BIN" "candidate-$i" "$candidate_ll")"
+    baseline_metrics="$(run_once "$BASELINE_BIN" "baseline-$i" "$baseline_ll")"
+  fi
+  check_identity "$baseline_ll" "$candidate_ll" "pair $i"
+
+  IFS='|' read -r baseline_load baseline_total baseline_wall baseline_user <<< "$baseline_metrics"
+  IFS='|' read -r candidate_load candidate_total candidate_wall candidate_user <<< "$candidate_metrics"
+  load_ratio="$(awk -v c="$candidate_load" -v b="$baseline_load" 'BEGIN {print c / b}')"
+  total_ratio="$(awk -v c="$candidate_total" -v b="$baseline_total" 'BEGIN {print c / b}')"
+  wall_ratio="$(awk -v c="$candidate_wall" -v b="$baseline_wall" 'BEGIN {print c / b}')"
+  user_ratio="$(awk -v c="$candidate_user" -v b="$baseline_user" 'BEGIN {print c / b}')"
+  printf 'PAIR|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+    "$baseline_load" "$candidate_load" "$load_ratio" \
+    "$baseline_total" "$candidate_total" "$total_ratio" \
+    "$baseline_wall" "$candidate_wall" "$wall_ratio" \
+    "$baseline_user" "$candidate_user" "$user_ratio" >> "$RAW"
+  printf '    load %.3f/%.3f (%.3f), total %.3f/%.3f (%.3f), wall %.3f/%.3f (%.3f), user %.3f/%.3f (%.3f)\n' \
+    "$baseline_load" "$candidate_load" "$load_ratio" \
+    "$baseline_total" "$candidate_total" "$total_ratio" \
+    "$baseline_wall" "$candidate_wall" "$wall_ratio" \
+    "$baseline_user" "$candidate_user" "$user_ratio" >&2
+  i=$((i + 1))
+done
+
+median_stream() {
+  sort -n | awk '
+    { values[NR] = $1 }
+    END {
+      if (NR == 0) exit 1
+      if (NR % 2) print values[(NR + 1) / 2]
+      else print (values[NR / 2] + values[NR / 2 + 1]) / 2
+    }
+  '
+}
+
+summarize_metric() {
+  local name="$1"
+  local base_col="$2"
+  local candidate_col="$3"
+  local ratio_col="$4"
+  local baseline_median candidate_median ratio_median aggregate_ratio wins
+
+  baseline_median="$(awk -F'|' -v c="$base_col" '$1=="PAIR" {print $c}' "$RAW" | median_stream)"
+  candidate_median="$(awk -F'|' -v c="$candidate_col" '$1=="PAIR" {print $c}' "$RAW" | median_stream)"
+  ratio_median="$(awk -F'|' -v c="$ratio_col" '$1=="PAIR" {print $c}' "$RAW" | median_stream)"
+  aggregate_ratio="$(awk -F'|' -v b="$base_col" -v c="$candidate_col" '$1=="PAIR" {bs += $b; cs += $c} END {print cs / bs}' "$RAW")"
+  wins="$(awk -F'|' -v b="$base_col" -v c="$candidate_col" '$1=="PAIR" && $c < $b {n += 1} END {print n + 0}' "$RAW")"
+  printf '%-14s %10.3f %10.3f %10.3f %10.3f %5s\n' \
+    "$name" "$baseline_median" "$candidate_median" "$ratio_median" "$aggregate_ratio" "$wins/$PAIRS"
+  printf '%s|%s\n' "$ratio_median" "$aggregate_ratio" > "$TMP/$name.summary"
+}
+
+echo
+printf '%-14s %10s %10s %10s %10s %5s\n' metric baseline candidate paired aggregate wins
+summarize_metric load_parse 2 3 4
+summarize_metric total 5 6 7
+summarize_metric wall 8 9 10
+summarize_metric user 11 12 13
+
+IFS='|' read -r load_paired load_aggregate < "$TMP/load_parse.summary"
+IFS='|' read -r total_paired total_aggregate < "$TMP/total.summary"
+IFS='|' read -r wall_paired wall_aggregate < "$TMP/wall.summary"
+IFS='|' read -r user_paired user_aggregate < "$TMP/user.summary"
+decision="$(awk \
+  -v lp="$load_paired" -v la="$load_aggregate" \
+  -v tp="$total_paired" -v ta="$total_aggregate" \
+  -v wp="$wall_paired" -v wa="$wall_aggregate" \
+  -v up="$user_paired" -v ua="$user_aggregate" \
+  -v gate="$GATE" \
+  'BEGIN {
+    print (lp <= gate && la <= gate &&
+           tp <= 1.0 && ta <= 1.0 &&
+           wp <= 1.0 && wa <= 1.0 &&
+           up <= 1.0 && ua <= 1.0) ? "PASS" : "SKIP"
+  }')"
+
+echo "Retention gate: $decision"
+echo "All warmup and measured LLVM pairs were byte-identical."
+echo "PASS still requires an independent repeat with every aggregate ratio below 1.00."
+if [ -n "$RESULTS_OUT" ]; then
+  cp "$RAW" "$RESULTS_OUT"
+  echo "Raw paired metrics saved to $RESULTS_OUT"
+fi

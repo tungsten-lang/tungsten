@@ -1,17 +1,25 @@
-# Function-level A/B benchmark for String#empty? moved from a C IC handler to
-# core/string_native.w. The corpus covers inline, slab, heap, rope-flattened,
-# and Symbol representations plus operations that produce empty strings.
+# Function-level A/B benchmark for a candidate String#empty? move from the C
+# IC handler to core/string_native.w. The uniquely named __w_empty? method
+# prevents the current public C IC registration from shadowing the source
+# candidate. The corpus covers inline, slab, heap, rope-flattened, and Symbol
+# representations plus operations that produce empty strings.
 
 use ../../core/string_native
 
 CORPUS_SIZE = 16
 CORPUS_MASK = CORPUS_SIZE - 1
-DEFAULT_ITERS = 2_000_000
-WARMUP_ITERS = 20_000
+DEFAULT_ITERS = 50_000_000
+WARMUP_ITERS = 100_000
 
 + String
   -> __c_empty?
     ccall("w_ref_string_empty_p", self)
+
+  # Optimized candidate. The current core body computes
+  # `(($value >> 1) & 7) == 0`; testing the same three storage-mode bits in
+  # place removes the shift while preserving every representation case.
+  -> __w_empty?
+    ($value & 14) == 0
 
   -> __storage_mode
     ($value >> 1) & 7
@@ -37,7 +45,7 @@ WARMUP_ITERS = 20_000
 -> run_correctness(values)
   i = 0
   while i < values.size
-    check_value("empty?", i, values[i].empty?, values[i].__c_empty?)
+    check_value("empty?", i, values[i].__w_empty?, values[i].__c_empty?)
     i += 1
 
   # Confirm the representation assumptions behind the bit-level body. Rope
@@ -70,7 +78,7 @@ WARMUP_ITERS = 20_000
   i = 0
   start_ns = clock()
   while i < iters
-    checksum += values[i & CORPUS_MASK].empty? ? 1 : 0
+    checksum += values[i & CORPUS_MASK].__w_empty? ? 1 : 0
     i += 1
   finish_timing(start_ns, checksum)
 

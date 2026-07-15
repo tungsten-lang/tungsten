@@ -11,7 +11,7 @@
 # also ~7.1s) despite checking ~20% fewer candidates (8/30 vs 4/12). Dropping
 # the multiples of 5 saves nothing because prime_12k? already rejects them in one
 # extra modulo. Bigger wheels don't help: the cost is the per-survivor inner test
-# (prime-table trial division ≤ 1e7, single-base Miller-Rabin above), which is
+# (division-free prime-factor scan ≤ 1e6, single-base Miller-Rabin above), which is
 # identical and shared across every form. That test is now ~4× faster than the
 # original: division-free Montgomery arithmetic + a Forišek–Jančina single hashed
 # base for n < 2^32 (was ~28s). A segmented sieve is the next lever.

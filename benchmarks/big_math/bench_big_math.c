@@ -54,6 +54,18 @@ static WValue bench_bigint(int32_t n, uint64_t seed) {
     return bigint_box(b);
 }
 
+static WValue bench_clone_integer(WValue value) {
+    uint64_t scratch;
+    int32_t len;
+    const uint64_t *limbs = integer_limbs(value, &scratch, &len);
+    int32_t n = len < 0 ? -len : len;
+    if (n == 0) return w_box_int(0);
+    WBigint *copy = bigint_alloc(n);
+    memcpy(copy->limbs, limbs, (size_t)n * sizeof(uint64_t));
+    copy->size = len;
+    return bigint_box(copy);
+}
+
 static void bench_free_value(WValue value) {
     if (w_is_bigint(value)) free(w_as_bigint(value));
 }
@@ -68,10 +80,12 @@ static int bench_iters_for_limbs(int32_t limbs) {
 }
 
 static int bench_iters_for_mod(int32_t limbs) {
-    if (limbs <= 64) return 120;
-    if (limbs <= 256) return 30;
-    if (limbs <= 1024) return 6;
-    return 3;
+    if (limbs <= 4) return 200000;
+    if (limbs <= 16) return 50000;
+    if (limbs <= 64) return 10000;
+    if (limbs <= 256) return 1000;
+    if (limbs <= 1024) return 100;
+    return 30;
 }
 
 static void assert_same_limbs(const char *label, const uint64_t *a, const uint64_t *b, int32_t n) {
@@ -133,24 +147,54 @@ static double bench_tungsten_mod1(const uint64_t *a, int32_t limbs, int iters) {
     return (bench_now() - start) * 1e9 / (double)iters;
 }
 
+static uint64_t bench_mag_mod_single_ref(const uint64_t *a, int32_t limbs, uint64_t d) {
+    __uint128_t r = 0;
+    for (int32_t i = limbs - 1; i >= 0; i--) {
+        r = (r << 64) | a[i];
+        r %= d;
+    }
+    return (uint64_t)r;
+}
+
+static double bench_tungsten_mod1_ref(const uint64_t *a, int32_t limbs, int iters) {
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        bench_sink ^= bench_mag_mod_single_ref(a, limbs,
+                                               1000000007ULL + (uint64_t)(i & 1));
+    }
+    return (bench_now() - start) * 1e9 / (double)iters;
+}
+
 static double bench_tungsten_ctx_mulmod(int32_t limbs, int iters) {
     WValue a = bench_bigint(limbs, 0xbb67ae8584caa73bULL ^ (uint64_t)limbs);
     WValue b = bench_bigint(limbs, 0x3c6ef372fe94f82bULL ^ (uint64_t)limbs);
     WValue m = bench_bigint(limbs, 0xa54ff53a5f1d36f1ULL ^ (uint64_t)limbs);
     w_as_bigint(m)->limbs[0] |= 1ULL;
+    WValue reduced_a = w_mod(a, m);
+    WValue reduced_b = w_mod(b, m);
 
     WPrimeModCtx ctx;
     w_prime_modctx_init(&ctx, m);
-    WValue warm = w_prime_modctx_mul(&ctx, a, b);
-    bench_free_value(warm);
+    WValue mul_a = reduced_a, mul_b = reduced_b;
+    if (ctx.mont) {
+        mul_a = bench_clone_integer(w_prime_modctx_to_domain(&ctx, reduced_a));
+        mul_b = bench_clone_integer(w_prime_modctx_to_domain(&ctx, reduced_b));
+    }
+    (void)w_prime_modctx_mul(&ctx, mul_a, mul_b);
 
     double start = bench_now();
     for (int i = 0; i < iters; i++) {
-        WValue r = w_prime_modctx_mul(&ctx, a, b);
+        WValue r = w_prime_modctx_mul(&ctx, mul_a, mul_b);
         bench_sink ^= integer_low_i64(r) + (uint64_t)i;
-        bench_free_value(r);
     }
     double elapsed = bench_now() - start;
+    w_prime_modctx_fini(&ctx);
+    if (ctx.mont) {
+        bench_free_value(mul_a);
+        bench_free_value(mul_b);
+    }
+    if (reduced_a != a) bench_free_value(reduced_a);
+    if (reduced_b != b) bench_free_value(reduced_b);
     bench_free_value(a);
     bench_free_value(b);
     bench_free_value(m);
@@ -337,14 +381,38 @@ static void check_raw_against_gmp(int32_t limbs, const uint64_t *a, const uint64
     free(gm);
 }
 
+static void check_mod1_against_gmp(const uint64_t *a, int32_t limbs) {
+    static const uint64_t divisors[] = {
+        1ULL, 2ULL, 3ULL, 7ULL, 0xffffULL, 0x10000ULL,
+        0x7fffffffULL, 0x80000000ULL, 1000000007ULL,
+        0xfffffffbULL, 0xffffffffULL, 0x100000000ULL,
+        0x100000001ULL, 0x7fffffffffffffffULL, UINT64_MAX
+    };
+    for (size_t i = 0; i < sizeof(divisors) / sizeof(divisors[0]); i++) {
+        uint64_t tw = mag_mod_single(a, limbs, divisors[i]);
+        uint64_t gm = (uint64_t)mpn_mod_1((const mp_limb_t *)a,
+                                          (mp_size_t)limbs,
+                                          (mp_limb_t)divisors[i]);
+        if (tw != gm) die("single-limb remainder mismatch vs GMP");
+    }
+}
+
 static void check_mod_against_gmp(int32_t limbs) {
     WValue a = bench_bigint(limbs, 0xbb67ae8584caa73bULL ^ (uint64_t)limbs);
     WValue b = bench_bigint(limbs, 0x3c6ef372fe94f82bULL ^ (uint64_t)limbs);
     WValue m = bench_bigint(limbs, 0xa54ff53a5f1d36f1ULL ^ (uint64_t)limbs);
     w_as_bigint(m)->limbs[0] |= 1ULL;
+    WValue reduced_a = w_mod(a, m);
+    WValue reduced_b = w_mod(b, m);
     WPrimeModCtx ctx;
     w_prime_modctx_init(&ctx, m);
-    WValue tw = w_prime_modctx_mul(&ctx, a, b);
+    WValue mul_a = reduced_a, mul_b = reduced_b;
+    if (ctx.mont) {
+        mul_a = bench_clone_integer(w_prime_modctx_to_domain(&ctx, reduced_a));
+        mul_b = bench_clone_integer(w_prime_modctx_to_domain(&ctx, reduced_b));
+    }
+    WValue tw = w_prime_modctx_mul(&ctx, mul_a, mul_b);
+    if (ctx.mont) tw = w_prime_modctx_mul(&ctx, tw, w_box_int(1));
 
     mpz_t za, zb, zm, zr;
     mpz_inits(za, zb, zm, zr, NULL);
@@ -358,10 +426,16 @@ static void check_mod_against_gmp(int32_t limbs) {
     gmp_import_limbs(zm, limbs_m, len);
     mpz_mul(zr, za, zb);
     mpz_mod(zr, zr, zm);
-    if (!value_matches_mpz(tw, zr)) die("Barrett mulmod mismatch vs GMP");
+    if (!value_matches_mpz(tw, zr)) die("modctx mulmod mismatch vs GMP");
 
     mpz_clears(za, zb, zm, zr, NULL);
-    bench_free_value(tw);
+    w_prime_modctx_fini(&ctx);
+    if (ctx.mont) {
+        bench_free_value(mul_a);
+        bench_free_value(mul_b);
+    }
+    if (reduced_a != a) bench_free_value(reduced_a);
+    if (reduced_b != b) bench_free_value(reduced_b);
     bench_free_value(a);
     bench_free_value(b);
     bench_free_value(m);
@@ -392,6 +466,7 @@ int main(int argc, char **argv) {
         uint64_t *b = bench_limbs(limbs, 0xfedcba9876543210ULL ^ (uint64_t)limbs);
 #ifdef HAVE_GMP
         check_raw_against_gmp(limbs, a, b);
+        check_mod1_against_gmp(a, limbs);
 #endif
         double tw_mul = bench_tungsten_mul(a, b, limbs, iters);
         double tw_sqr = bench_tungsten_sqr(a, limbs, iters);
@@ -409,26 +484,29 @@ int main(int argc, char **argv) {
 
 #ifdef HAVE_GMP
     printf("\nsmall modulus and generic modular multiply\n");
-    printf("limbs  tungsten mod1  gmp mod1   gap  tungsten ctxmulmod gmp mulmod   gap\n");
+    printf("limbs  tungsten mod1  old mod1 speedup  gmp mod1   gap  tungsten ctxmulmod gmp mulmod   gap\n");
 #else
     printf("\nsmall modulus and generic modular multiply\n");
-    printf("limbs  tungsten mod1  tungsten ctxmulmod\n");
+    printf("limbs  tungsten mod1  old mod1 speedup  tungsten ctxmulmod\n");
 #endif
-    const int32_t mod_sizes[] = {64, 256, 1024, 2048};
+    const int32_t mod_sizes[] = {1, 2, 4, 16, 64, 256, 1024, 2048};
     for (size_t i = 0; i < sizeof(mod_sizes) / sizeof(mod_sizes[0]); i++) {
         int32_t limbs = mod_sizes[i];
         int iters = bench_iters_for_mod(limbs);
         uint64_t *a = bench_limbs(limbs, 0x6a09e667f3bcc909ULL ^ (uint64_t)limbs);
         double tw_mod1 = bench_tungsten_mod1(a, limbs, iters * 10);
+        double old_mod1 = bench_tungsten_mod1_ref(a, limbs, iters * 10);
         double tw_mulmod = bench_tungsten_ctx_mulmod(limbs, iters);
 #ifdef HAVE_GMP
         check_mod_against_gmp(limbs);
         double gm_mod1 = bench_gmp_mod1(a, limbs, iters * 10);
         double gm_mulmod = bench_gmp_mulmod(limbs, iters);
-        printf("%5d %14.1f %9.1f %5.2fx %19.1f %10.1f %5.2fx\n",
-               limbs, tw_mod1, gm_mod1, ratio(tw_mod1, gm_mod1), tw_mulmod, gm_mulmod, ratio(tw_mulmod, gm_mulmod));
+        printf("%5d %14.1f %9.1f %6.2fx %9.1f %5.2fx %19.1f %10.1f %5.2fx\n",
+               limbs, tw_mod1, old_mod1, ratio(old_mod1, tw_mod1), gm_mod1,
+               ratio(tw_mod1, gm_mod1), tw_mulmod, gm_mulmod, ratio(tw_mulmod, gm_mulmod));
 #else
-        printf("%5d %14.1f %19.1f\n", limbs, tw_mod1, tw_mulmod);
+        printf("%5d %14.1f %9.1f %6.2fx %19.1f\n",
+               limbs, tw_mod1, old_mod1, ratio(old_mod1, tw_mod1), tw_mulmod);
 #endif
         free(a);
     }

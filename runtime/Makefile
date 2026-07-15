@@ -98,7 +98,16 @@ bench-bigint: bench_bigint
 	./bench_bigint
 
 bench_bigint: bench_bigint.c $(RUNTIME_DEPS) w_char_table.c
-	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_bigint.c ssmr_witness.c $(EVENT_SRC) tls_stub.c $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_bigint
+	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_bigint.c terminal_input.c ssmr_witness.c $(EVENT_SRC) tls_stub.c $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_bigint
+
+# Benchmark the Int#prime? trial-division/Montgomery-FJ cutoff. The source
+# includes runtime.c directly so it can exercise the exact private tier helpers;
+# link only the companion runtime translation units here.
+bench-prime-sweep: bench_prime_sweep
+	./bench_prime_sweep
+
+bench_prime_sweep: ../benchmarks/primes/prime_sweep.c $(RUNTIME_DEPS) w_char_table.c
+	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) ../benchmarks/primes/prime_sweep.c terminal_input.c ssmr_witness.c lexchar_tables.c $(EVENT_SRC) tls_stub.c $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_prime_sweep
 
 tune-bigint:
 	../benchmarks/big_math/tune_bigint_thresholds.sh
@@ -242,7 +251,7 @@ tests/test_exception_frames: tests/test_exception_frames.c $(RUNTIME_DEPS)
 test-all: test test-arena test-threads test-atomics test-sockets test-goroutines test-event-loop test-integration test-hash test-string-slab test-ivars test-node-arena test-exception-frames
 
 clean:
-	rm -f runtime.o terminal_input.o test_nanbox bench_wvalue bench_bigint bench_node bench_location bench_slab_init bench_before bench_http bench_http_before
+	rm -f runtime.o terminal_input.o test_nanbox bench_wvalue bench_bigint bench_prime_sweep bench_node bench_location bench_slab_init bench_before bench_http bench_http_before
 	rm -f tests/test_goroutine_arena tests/test_threads tests/test_atomics tests/test_sockets tests/test_goroutines tests/test_event_loop tests/test_integration tests/test_hash tests/test_string_slab tests/test_ivars tests/test_node_arena tests/test_exception_frames
 
-.PHONY: compile runtime-objects clean test test-arena test-threads test-atomics test-sockets test-goroutines test-event-loop test-integration test-hash test-string-slab test-ivars test-node-arena test-exception-frames test-all bench bench-bigint bench-node bench-location bench-slab-init bench-before bench-compare
+.PHONY: compile runtime-objects clean test test-arena test-threads test-atomics test-sockets test-goroutines test-event-loop test-integration test-hash test-string-slab test-ivars test-node-arena test-exception-frames test-all bench bench-bigint bench-prime-sweep bench-node bench-location bench-slab-init bench-before bench-compare

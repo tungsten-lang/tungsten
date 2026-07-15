@@ -73,6 +73,50 @@ static int bench_iters_for_gcd(int32_t limbs) {
     return 1;
 }
 
+static int bench_iters_for_addsub(int32_t limbs) {
+    if (limbs <= 4) return 200000;
+    if (limbs <= 64) return 30000;
+    if (limbs <= 256) return 5000;
+    return 1000;
+}
+
+/* The pre-direct-subtraction implementation: copy b, flip its sign, then add.
+ * Keep it here as an A/B reference, but free the temporary it historically
+ * leaked so repeated benchmark runs do not grow without bound. */
+static WValue bench_sub_negate_add_ref(WValue a, WValue b) {
+    WBigint *bb = w_as_bigint(b);
+    int32_t n = bb->size < 0 ? -bb->size : bb->size;
+    WBigint *neg = bigint_alloc(n);
+    for (int32_t i = 0; i < n; i++) neg->limbs[i] = bb->limbs[i];
+    neg->size = -bb->size;
+    WValue result = bigint_add_any(a, bigint_box(neg));
+    free(neg);
+    return result;
+}
+
+static double bench_subtract(int32_t limbs, int iters, int negate_add_ref) {
+    WValue a = bench_bigint(limbs, 0x123456789abcdef0ULL ^ (uint64_t)limbs);
+    WValue b = bench_bigint(limbs, 0xfedcba9876543210ULL ^ (uint64_t)limbs);
+    if (bigint_compare(a, b) < 0) { WValue tmp = a; a = b; b = tmp; }
+
+    WValue expected = bench_sub_negate_add_ref(a, b);
+    WValue actual = bigint_sub_any(a, b);
+    if (w_eq(expected, actual) != W_TRUE) die("direct bigint subtraction mismatch");
+    bench_free_value(expected);
+    bench_free_value(actual);
+
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        WValue r = negate_add_ref ? bench_sub_negate_add_ref(a, b) : bigint_sub_any(a, b);
+        bench_sink ^= integer_low_i64(r) + (uint64_t)i;
+        bench_free_value(r);
+    }
+    double elapsed = bench_now() - start;
+    bench_free_value(a);
+    bench_free_value(b);
+    return elapsed * 1e9 / (double)iters;
+}
+
 static double bench_equal_mul(int32_t limbs, int iters) {
     uint64_t *a = bench_limbs(limbs, 0x123456789abcdef0ULL ^ (uint64_t)limbs);
     uint64_t *b = bench_limbs(limbs, 0xfedcba9876543210ULL ^ (uint64_t)limbs);
@@ -456,6 +500,17 @@ int main(int argc, char **argv) {
                bench_equal_mul(limbs, iters),
                bench_equal_sqr(limbs, iters),
                iters);
+    }
+
+    printf("\nbigint subtract limbs   direct  negate+add  speedup   iters\n");
+    const int32_t sub_sizes[] = {1, 4, 16, 64, 256, 1024};
+    for (size_t i = 0; i < sizeof(sub_sizes) / sizeof(sub_sizes[0]); i++) {
+        int32_t limbs = sub_sizes[i];
+        int iters = bench_iters_for_addsub(limbs);
+        double direct = bench_subtract(limbs, iters, 0);
+        double reference = bench_subtract(limbs, iters, 1);
+        printf("%21d %8.1f %11.1f %7.2fx %7d\n",
+               limbs, direct, reference, reference / direct, iters);
     }
 
     printf("\nunbalanced limbs     mul        ratio   iters\n");

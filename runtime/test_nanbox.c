@@ -25,6 +25,24 @@ static void overflow_fn(void) { w_int((1LL << 47)); }
 static void underflow_fn(void) { w_int(-(1LL << 47) - 1); }
 static void add_overflow_fn(void) { w_add(w_box_int((1LL << 47) - 1), w_box_int(1)); }
 
+/* Internal constructor exercised here so subtraction cases can span limbs. */
+extern WValue w_bigint_from_dec_str(WValue str);
+extern int64_t w_prime_test_i64(int64_t n);
+extern int64_t w_prime_test_i64_12k(int64_t n);
+extern int64_t w_prime_test_i64_30k(int64_t n);
+
+static WValue bigint_dec(const char *text) {
+    return w_bigint_from_dec_str(w_string(text));
+}
+
+static void assert_bigint_sub_eq(const char *a, const char *b, const char *expected) {
+    assert(w_eq(w_sub(bigint_dec(a), bigint_dec(b)), bigint_dec(expected)) == W_TRUE);
+}
+
+static void assert_bigint_mod_eq(const char *a, const char *b, const char *expected) {
+    assert(w_eq(w_mod(bigint_dec(a), bigint_dec(b)), bigint_dec(expected)) == W_TRUE);
+}
+
 /* Helper: extract C string from WValue (rotating buffer for safe strcmp) */
 static const char *str_val(WValue v) {
     static char bufs[4][6];
@@ -189,6 +207,22 @@ int main() {
         assert(w_as_double(w_sub(a, b)) == 2.0);
         assert(w_as_double(w_mul(a, b)) == 5.25);
         printf("  float arithmetic: OK\n");
+    }
+
+    /* Int#prime? trial-division/FJ boundary. The wheel variants share the
+     * cutoff and these values satisfy their coprimality contracts. */
+    {
+        assert(w_prime_test_i64(999983) == 1);   /* prime, below cutoff */
+        assert(w_prime_test_i64(999997) == 0);  /* composite, below cutoff */
+        assert(w_prime_test_i64(1000000) == 0); /* composite, at cutoff */
+        assert(w_prime_test_i64(1000001) == 0); /* composite, above cutoff */
+        assert(w_prime_test_i64(1000003) == 1); /* prime, above cutoff */
+
+        assert(w_prime_test_i64_12k(999983) == 1);
+        assert(w_prime_test_i64_12k(1000001) == 0);
+        assert(w_prime_test_i64_30k(999983) == 1);
+        assert(w_prime_test_i64_30k(1000001) == 0);
+        printf("  int prime cutoff boundary: OK\n");
     }
 
     /* Test comparison */
@@ -705,6 +739,45 @@ int main() {
         assert(!w_is_int(av));
 
         printf("  integer overflow promotion: OK\n");
+    }
+
+    /* BigInt subtraction: every sign/magnitude branch plus a cross-limb borrow. */
+    {
+        const char *p2_128 = "340282366920938463463374607431768211456";
+        const char *p2_128_m1 = "340282366920938463463374607431768211455";
+        const char *p2_128_p1 = "340282366920938463463374607431768211457";
+
+        assert_bigint_sub_eq(p2_128, "1", p2_128_m1);
+        assert_bigint_sub_eq("1", p2_128, "-340282366920938463463374607431768211455");
+        assert_bigint_sub_eq(p2_128, p2_128, "0");
+        assert_bigint_sub_eq(p2_128, "-1", p2_128_p1);
+        assert_bigint_sub_eq("-340282366920938463463374607431768211456", "1",
+                             "-340282366920938463463374607431768211457");
+        assert_bigint_sub_eq("-340282366920938463463374607431768211456", "-1",
+                             "-340282366920938463463374607431768211455");
+        assert_bigint_sub_eq("-1", "-340282366920938463463374607431768211456",
+                             p2_128_m1);
+        assert_bigint_sub_eq("0", p2_128, "-340282366920938463463374607431768211456");
+        assert_bigint_sub_eq("0", "-340282366920938463463374607431768211456", p2_128);
+
+        WValue same = bigint_dec(p2_128);
+        assert(w_sub(same, w_int(0)) == same);
+        printf("  bigint direct subtraction: OK\n");
+    }
+
+    /* BigInt single-limb remainder: reciprocal and power-of-two fast paths,
+     * their 32-bit boundary, and the original wide-divisor fallback. */
+    {
+        const char *n = "115792089237316195423570985008687907853269984665640564039457584007913129639747";
+        assert_bigint_mod_eq(n, "1", "0");
+        assert_bigint_mod_eq(n, "65536", "65347");
+        assert_bigint_mod_eq(n, "3", "1");
+        assert_bigint_mod_eq(n, "1000000007", "792845077");
+        assert_bigint_mod_eq(n, "4294967295", "4294967107");
+        assert_bigint_mod_eq(n, "4294967296", "4294967107");
+        assert_bigint_mod_eq(n, "4294967297", "4294967109");
+        assert_bigint_mod_eq(n, "18446744073709551615", "18446744073709551427");
+        printf("  bigint single-limb remainder: OK\n");
     }
 
     /* Pointer alignment: w_as_ptr strips sub-tag correctly */

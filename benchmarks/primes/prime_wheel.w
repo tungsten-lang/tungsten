@@ -8,7 +8,7 @@
 #
 # π(5e8) = 26 355 867. ~7.1s — about 15% under the idiomatic every-number form
 # `(2..N)/prime?:count` (~8.4s). The candidate wheel only trims cheap
-# rejections; the per-survivor test (prime-table trial division ≤ 1e7,
+# rejections; the per-survivor test (division-free prime-factor scan ≤ 1e6,
 # single-base Miller-Rabin above) dominates and is identical across every form.
 #
 # The mod-30 wheel (`prime_30k?`, 8 offsets per 30m: 1,7,11,13,17,19,23,29)

@@ -38,7 +38,7 @@ esac
 # shellcheck disable=SC2086
 "$CC" $CFLAGS $ONIG_CFLAGS $GMP_CFLAGS \
   "$DIR/toom_gmp_compare.c" \
-  "$EVENT_SRC" "$RUNTIME/tls_stub.c" "$RUNTIME/aks.c" $METAL_SRC \
+  "$EVENT_SRC" "$RUNTIME/terminal_input.c" "$RUNTIME/tls_stub.c" "$RUNTIME/aks.c" $METAL_SRC \
   $ONIG_LDFLAGS $GMP_LDFLAGS $PLATFORM_LDFLAGS \
   -o "$OUT"
 

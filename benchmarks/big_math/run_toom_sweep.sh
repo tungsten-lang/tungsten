@@ -32,7 +32,7 @@ esac
 # shellcheck disable=SC2086
 "$CC" $CFLAGS $ONIG_CFLAGS \
   "$DIR/toom_sweep.c" \
-  "$RUNTIME/ssmr_witness.c" "$EVENT_SRC" "$RUNTIME/tls_stub.c" "$RUNTIME/aks.c" $METAL_SRC \
+  "$RUNTIME/ssmr_witness.c" "$EVENT_SRC" "$RUNTIME/terminal_input.c" "$RUNTIME/tls_stub.c" "$RUNTIME/aks.c" $METAL_SRC \
   $ONIG_LDFLAGS $PLATFORM_LDFLAGS \
   -o "$OUT"
 

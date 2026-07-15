@@ -9,7 +9,8 @@ benchmarks/big_math/run.sh
 The benchmark includes:
 
 - balanced BigInt multiply and square
-- single-limb modulus
+- single-limb modulus, including an A/B against the former 128/64 division
+  loop and GMP checks across the 32-bit fast-path boundary
 - fixed-modulus BigInt multiply-mod
 - Mersenne square reduction, `s^2 mod (2^p - 1)`
 

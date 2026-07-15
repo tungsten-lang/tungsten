@@ -591,7 +591,7 @@ fi
 # shellcheck disable=SC2086
 "$CC" $CFLAGS $ONIG_CFLAGS -I"$RUNTIME" \
   "$WORK/tungsten_runtime.c" \
-  "$EVENT_SRC" "$RUNTIME/tls_stub.c" "$RUNTIME/aks.c" $METAL_SRC \
+  "$EVENT_SRC" "$RUNTIME/terminal_input.c" "$RUNTIME/tls_stub.c" "$RUNTIME/aks.c" $METAL_SRC \
   $ONIG_LDFLAGS $PLATFORM_LDFLAGS \
   -o "$WORK/tungsten_runtime"
 for bits in $SIZES; do "$WORK/tungsten_runtime" "$bits" "$(iters_for_bits "$bits")" >> "$RESULTS"; done

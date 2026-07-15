@@ -2855,6 +2855,23 @@ RSpec.describe "Compiler regressions" do
     expect(map_body).to include("@w_array_size", "@w_array_idx", "@w_closure_call_1")
   end
 
+  it "keeps Hash#size source-owned and lowers its count view directly" do
+    runtime_source = File.read(File.join(PROJECT_ROOT, "runtime/runtime.c"))
+    expect(runtime_source).not_to include("w_ic_hash_size")
+    expect(runtime_source).not_to match(/w_ic_hash_table\[\d+\]\.name\s*=\s*WN_size/)
+
+    llvm = compile_to_llvm("hash_size_view_field_ir.w", <<~W)
+      hash = {a: 1, b: 2}
+      << hash.size
+    W
+
+    size_symbol = symbol_for("__w_Hash_size__a1")
+    size_body = llvm[/define internal i64 @#{Regexp.escape(size_symbol)}\(.*?^\}/m]
+    expect(size_body).not_to be_nil
+    expect(size_body).to include("load i32")
+    expect(size_body).not_to include("call i64")
+  end
+
   it "supports measurements, affine points, calibration, and equivalencies" do
     out = compile_and_run("advanced_units_runtime.w", <<~W)
       measurement = 10.0 ± 0.2

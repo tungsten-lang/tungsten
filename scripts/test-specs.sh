@@ -148,6 +148,7 @@ compiled_specs=(
   spec/compiler/recase_spec.w
   spec/compiler/typed_overload_spec.w
   spec/compiler/view_field_var_spec.w
+  spec/interpreter/hash_size_view_field_spec.w
   spec/core/basics_spec.w
   spec/core/base64_native_spec.w
   spec/core/string_native_spec.w
@@ -172,6 +173,7 @@ cuda_emit_specs=(
 )
 
 interpreter_specs=(
+  spec/interpreter/hash_size_view_field_spec.w
   spec/interpreter/slab_decl_spec.w
   spec/core/base64_native_spec.w
 )

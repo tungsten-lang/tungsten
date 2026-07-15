@@ -2199,9 +2199,7 @@ use lowering/definitions
     op: :view_load_field, temp: temp, ptr: self_reg,
     offset: effective_offset, size: info[:size], field_type: info[:type]
   })
-  if info[:type].starts_with?("*")
-    return typed_value(:raw_i64, temp)
-  typed_value(:i64, temp)
+  typed_value(view_field_value_type(info[:type]), temp)
 
 # `receiver$field` — the explicit-receiver twin of lower_view_field. The
 # receiver expression's inferred type names a class with a `- data` view
@@ -2235,9 +2233,30 @@ use lowering/definitions
     op: :view_load_field, temp: temp, ptr: recv_reg,
     offset: effective_offset, size: info[:size], field_type: info[:type]
   })
-  if info[:type].starts_with?("*")
-    return typed_value(:raw_i64, temp)
-  typed_value(:i64, temp)
+  typed_value(view_field_value_type(info[:type]), temp)
+
+# Preserve scalar view fields in their machine representation until a real
+# WValue boundary. Previously u8/u16/u32 fields were boxed by the emitter and
+# then commonly unboxed again for comparisons, loop bounds, and indexes. The
+# declared field type also lets signed fields use sign extension and u64 use
+# the unsigned boxing bridge when a boxed value is eventually required.
+-> view_field_value_type(field_type)
+  if field_type.starts_with?("*")
+    return :raw_i64
+  if field_type in ("i1" "i4" "i8" "i16" "i32" "u1" "u4" "u8" "u16" "u32" "bool")
+    return :raw_int
+  case field_type
+    when "i64"
+      :raw_i64
+    when "u64"
+      :raw_u64
+    when "f32"
+      :raw_f32
+    when "f64"
+      :raw_f64
+    else
+      # w64 and named object fields already contain a WValue.
+      :i64
 
 # Resolve the class name (a view_layouts key) for an inferred receiver type.
 # User classes and explicit `## ClassName` hints carry the class name as the

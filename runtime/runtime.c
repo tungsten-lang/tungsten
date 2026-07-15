@@ -21888,10 +21888,6 @@ static WValue w_ic_strbuf_starts_with(WValue r, WValue *a, int c) {
 }
 
 /* Hash builtin wrappers */
-static WValue w_ic_hash_size(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_int(as_hash(r)->count);
-}
 static WValue w_ic_hash_has_key(WValue r, WValue *a, int c) {
     if (c < 1) die("has_key? requires 1 argument");
     return w_hash_has_key(r, a[0]);
@@ -22542,7 +22538,6 @@ static WICEntry w_ic_atomic_table[] = {    /* Phase 7+m */
 };
 
 static WICEntry w_ic_hash_table[] = {      /* Phase 7+l */
-    {0, w_ic_hash_size},
     {0, w_ic_hash_has_key},
     {0, w_ic_hash_keys},
     {0, w_ic_hash_values},
@@ -22802,17 +22797,16 @@ static void w_init_ic_tables(void) {
     w_ic_atomic_table[4].name  = WN_decrement;
     w_ic_atomic_table[5].name  = WN_add;
     /* Hash (Phase 7+l) */
-    w_ic_hash_table[0].name   = WN_size;
-    w_ic_hash_table[1].name   = WN_has_key_q;
-    w_ic_hash_table[2].name   = WN_keys;
-    w_ic_hash_table[3].name   = WN_values;
-    w_ic_hash_table[4].name   = WN_merge_bang;
-    w_ic_hash_table[5].name   = WN_each;
-    w_ic_hash_table[6].name   = WN_delete;
-    w_ic_hash_table[7].name   = WN_get;
-    w_ic_hash_table[8].name   = WN_idx;
-    w_ic_hash_table[9].name   = WN_set;
-    w_ic_hash_table[10].name  = WN_idxset;
+    w_ic_hash_table[0].name   = WN_has_key_q;
+    w_ic_hash_table[1].name   = WN_keys;
+    w_ic_hash_table[2].name   = WN_values;
+    w_ic_hash_table[3].name   = WN_merge_bang;
+    w_ic_hash_table[4].name   = WN_each;
+    w_ic_hash_table[5].name   = WN_delete;
+    w_ic_hash_table[6].name   = WN_get;
+    w_ic_hash_table[7].name   = WN_idx;
+    w_ic_hash_table[8].name   = WN_set;
+    w_ic_hash_table[9].name   = WN_idxset;
     /* Float */
     w_ic_float_table[0].name  = WN_to_i;
     w_ic_float_table[1].name  = WN_to_f;

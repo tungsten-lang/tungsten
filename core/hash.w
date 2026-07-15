@@ -12,6 +12,10 @@
   -> __enumerable_yields_pair?
     true
 
+  # Direct WHash view-field load; the u32 count is boxed inline as an Integer.
+  -> size
+    $count
+
   -> __enumerable_iteration_mode
     2
 

@@ -1252,22 +1252,16 @@ use target
     current_method = @method_stack.last()
     if name == "$value" && current_method != nil && current_method[:w_class] != nil
       return ccall("w_u64", current_self())
-    # Heap-backed WNetAddr fields are direct struct reads in compiled code.
-    # The tree walker has no raw pointer view, so mirror the prefix byte through
-    # a narrow storage primitive (255 is the no-prefix sentinel).
-    if name == "$prefix" && current_method != nil && current_method[:w_class] != nil && current_method[:w_class][:name] in ("IPv6" "MAC")
-      return ccall("w_netaddr_raw_prefix", current_self())
-    # Array-tier storage iterators express their loop as `$size -> ...`. The
-    # compiled path reads the layout field directly; mirror that field at the
-    # tree-walker boundary instead of treating it as a process global.
-    if name == "$size" && current_method != nil && current_method[:w_class] != nil
-      cname = current_method[:w_class][:name]
-      if cname == "Array"
-        return ccall("w_array_size", current_self())
-      if cname == "BigArray"
-        return ccall("w_big_array_size", current_self())
-      if cname == "SmallArray"
-        return ccall("w_small_array_size", current_self())
+    # Bare `$field` inside a method is a direct read from that class's native
+    # `- data` layout in compiled code. The tree walker cannot dereference the
+    # backing struct itself, so route the same allowlisted scalar fields through
+    # the narrow storage bridge used by explicit `receiver$field` reads. This
+    # also handles fields whose semantic accessor has the same name (IPv6's
+    # public `prefix`, for example), because `$field` bypasses that accessor.
+    if name.starts_with?("$") && current_method != nil && current_method[:w_class] != nil
+      field = name.slice(1, name.size() - 1)
+      if native_data_field_supported?(current_method[:w_class], field)
+        return ccall("w_native_data_field", current_self(), field)
     @globals[name]
 
   # `receiver$field` — read a view-decl field off an explicit receiver.

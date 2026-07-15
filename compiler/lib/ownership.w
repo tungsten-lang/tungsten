@@ -124,17 +124,17 @@ use runtime_types
           scope = scope_stack.pop()
           scope_locals[scope[:id]] = scope[:temps]
       elsif op == :phi_ssa
-        # Phi merge: escaped if any incoming is escaped.
-        # Also: all incoming values escape — the producer may only dominate
-        # one branch, so freeing at scope_pop would violate SSA dominance.
+        # Treat the phi and every incoming value as one escaping group.  An
+        # incoming producer may only dominate one branch, so freeing it at a
+        # scope_pop would violate SSA dominance.  Marking the result here too
+        # makes this independent of phi ordering, including loop backedges.
         incoming = inst[:incoming]
         if incoming != nil
+          escaped[inst[:temp]] = true
           pi = 0
           while pi < incoming.size()
             v = incoming[pi]
             escaped[v] = true
-            if escaped[v] == true
-              escaped[inst[:temp]] = true
             pi += 2
       else
         # Value producers: record and track in current scope
@@ -161,35 +161,6 @@ use runtime_types
 
       ii += 1
     bi += 1
-
-  # Second pass: propagate escapes through phi nodes.
-  # Phi incoming values are always escaped (see analysis pass), so we only
-  # need to propagate phi-temp escape forward if it somehow wasn't set.
-  changed = true
-  while changed
-    changed = false
-    bi = 0
-    while bi < blocks.size()
-      instrs = blocks[bi][:instructions]
-      ii = 0
-      while ii < instrs.size()
-        inst = instrs[ii]
-        if inst[:op] == :phi_ssa
-          incoming = inst[:incoming]
-          if incoming != nil
-            pi = 0
-            while pi < incoming.size()
-              v = incoming[pi]
-              if escaped[v] != true
-                escaped[v] = true
-                changed = true
-              pi += 2
-            if escaped[inst[:temp]] != true
-              escaped[inst[:temp]] = true
-              changed = true
-        ii += 1
-      bi += 1
-
 
   func[:ownership] = {escaped: escaped, producers: producers, scope_locals: scope_locals, func_scope: func_scope_temps}
 

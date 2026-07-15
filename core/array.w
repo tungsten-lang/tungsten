@@ -72,6 +72,49 @@
   -> to_a
     self
 
+  # Keep the separator overload before the zero-argument overload. Runtime
+  # dispatch selects exact arity first and otherwise falls back to the first
+  # method of this name, matching the former C handler's extra-argument
+  # truncation. A default parameter is not equivalent: explicit nil must be
+  # rejected, not replaced with the empty separator.
+  -> join(separator)
+    # Preserve the former C implementation's eager separator validation and
+    # exact strlen boundary without copying into throwaway buffers.
+    separator_length = ccall_nobox("w_stringy_c_length", separator) ## i64
+
+    # The first live-size pass validates every raw to_s result. Lengths remain
+    # deliberately unused: exact preallocation was slower than default growth.
+    i = 0
+    while i < $size
+      text = ccall("w_to_s", self[i])
+      text_length = ccall_nobox("w_stringy_c_length", text) ## i64
+      i += 1
+
+    # Allocate only the returned output buffer, after validation has finished.
+    out = StringBuffer() ## recycle
+    i = 0
+    while i < $size
+      if i > 0
+        ccall("w_strbuf_append", out, separator)
+      text = ccall("w_to_s", self[i])
+      ccall("w_strbuf_append", out, text)
+      i += 1
+
+    result = ccall("w_strbuf_to_s", out)
+    # w_string_take returned a fresh heap string for a 6..61-byte result once
+    # the static slab was frozen. StringBuffer#to_s can instead return the old
+    # slab value; append it to an empty string to mint the exact fresh mode-7
+    # representation in that one state.
+    if ((wvalue_bits(result) >> 1) & 7) == 6
+      slab_frozen = ccall_nobox("w_slab_is_frozen") ## i64
+      if slab_frozen == 1
+        fresh = ""
+        return fresh << result
+    result
+
+  -> join
+    join("")
+
   # Concatenation: a new array of self's elements followed by @1's. The
   # `## T[n]` at call sites re-types the polymorphic result. Non-mutating.
   # The hypercomplex tower's Cayley–Dickson `*` joins its two halves here.

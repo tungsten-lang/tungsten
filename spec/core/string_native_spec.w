@@ -37,4 +37,47 @@ check("rope", rope.empty?, false)
 check("empty symbol", "".to_sym.empty?, true)
 check("nonempty symbol", "x".to_sym.empty?, false)
 
+# String/Symbol#to_s is the exact low-bit clear shared by the 0xF9 runtime
+# representation. Check identity for every String storage tier and exact
+# Symbol -> String bits for both supported Symbol tiers.
+inline_values = ["", "a", "12345"]
+slab_values = ["123456", "a slab-backed string"]
+heap_values = ["".concat("h"), "h" * 80]
+
+si = 0
+while si < inline_values.size
+  value = inline_values[si]
+  check("inline to_s content", value.to_s, value)
+  check("inline to_s identity", wvalue_bits(value.to_s), wvalue_bits(value))
+  si += 1
+
+si = 0
+while si < slab_values.size
+  value = slab_values[si]
+  check("slab to_s content", value.to_s, value)
+  check("slab to_s identity", wvalue_bits(value.to_s), wvalue_bits(value))
+  si += 1
+
+si = 0
+while si < heap_values.size
+  value = heap_values[si]
+  check("heap to_s content", value.to_s, value)
+  check("heap to_s identity", wvalue_bits(value.to_s), wvalue_bits(value))
+  si += 1
+
+to_s_rope = ("l" * 40) + ("r" * 41)
+rope_first = to_s_rope.to_s
+rope_second = to_s_rope.to_s
+check("rope to_s content", rope_first, ("l" * 40) + ("r" * 41))
+check("rope to_s cached flat identity", wvalue_bits(rope_first), wvalue_bits(rope_second))
+check("rope to_s String result", type(rope_first), "String")
+
+inline_symbol = "abc".to_sym
+slab_symbol = "symbol-slab".to_sym
+check("inline symbol to_s content", inline_symbol.to_s, "abc")
+check("inline symbol bit clear", wvalue_bits(inline_symbol.to_s), wvalue_bits(inline_symbol) & -2)
+check("slab symbol to_s content", slab_symbol.to_s, "symbol-slab")
+check("slab symbol bit clear", wvalue_bits(slab_symbol.to_s), wvalue_bits(slab_symbol) & -2)
+check("symbol to_s result type", type(slab_symbol.to_s), "String")
+
 << "string_native_spec: all checks passed"

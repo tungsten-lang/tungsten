@@ -398,6 +398,9 @@ use hashing
   out << declare_fn("w_method_call", wv, wv3)
   out << declare_fn("w_method_call_fast", wv, wv2_ptr_i32)
   out << declare_fn("w_method_call_cached", wv, join_arg_types5(wv, wv, "ptr", "i32", "ptr"))
+  out << declare_fn("w_method_call_cached_0", wv, join_arg_types3(wv, wv, "ptr"))
+  out << declare_fn("w_method_call_cached_1", wv, join_arg_types4(wv, wv, wv, "ptr"))
+  out << declare_fn("w_value_is_a", wv, wv2)
 
   # Classes / objects
   out << declare_fn("w_class_new", wv, ptr_wv)
@@ -743,6 +746,12 @@ use hashing
 -> w_int_call_with_range(temp, raw, low, high)
   temp + " = call i64 @w_int(i64 " + raw + ")" + wvalue_int_range_metadata_suffix(low, high)
 
+# Lowering sets this bit only for an exact source-class receiver whose own
+# method table contains the one-argument target. Native and unknown receivers
+# retain the established pointer-plus-count dispatch ABI.
+-> scalar_source_one_call?(inst)
+  inst[:op] == :call_method_i64 && inst[:args] != nil && inst[:args].size() == 1 && inst[:scalar_source_argc1] == true
+
 # Return the runtime function names that an instruction will reference when rendered.
 -> runtime_fns_for_inst(inst, string_wvs = nil)
   case inst[:op]
@@ -860,7 +869,12 @@ use hashing
       ["w_string", "w_ivar_set_wv"]
 
   when :call_method_i64
-    ["w_method_call_cached"]
+    if inst[:args].size() == 0
+      ["w_method_call_cached_0"]
+    elsif scalar_source_one_call?(inst)
+      ["w_method_call_cached_1"]
+    else
+      ["w_method_call_cached"]
   when :closure_new
     ["w_closure_new"]
   when :free_value
@@ -1360,10 +1374,10 @@ use hashing
       cv = const_values[nm]
       if cv != nil
         globals_out << " = internal constant i64 "
-        # wvalue_literal_text formats as `u0xHEX16`, which LLVM accepts
+        # llvm_wvalue_literal formats as `u0xHEX16`, which LLVM accepts
         # for global initializers and avoids signed-overflow issues for
         # values > 2^63 (e.g. AST_NIL = u0xFFFE60CC00000000).
-        globals_out << wvalue_literal_text(cv)
+        globals_out << llvm_wvalue_literal(cv)
         globals_out << "\n"
       else
         # Match the storage width to the var's machine type. u128/i128
@@ -1372,7 +1386,7 @@ use hashing
         # mismatch (store i64 %iN where %iN is i128).
         gty = "i64"
         vt = var_types[nm]
-        if vt != nil && is_machine_int128_type(vt)
+        if vt == :i128 || vt == :u128
           gty = "i128"
         globals_out << " = internal global "
         globals_out << gty
@@ -1398,10 +1412,13 @@ use hashing
     if cvg_keys.size() > 0
       globals_out << "\n"
 
-  # Inline cache: single array of 24-byte slots, one per method call site
+  # Inline cache: one 24-byte slot per method call site and native thread.
+  # A shared cache races during first-use publication (type/fn/arity are three
+  # independent fields), which can send a concurrent Thread.new call through
+  # the wrong ABI.  Per-thread ICs also avoid polymorphic cache ping-pong.
   ic_count = mod[:next_ic]
   if ic_count > 0
-    globals_out << "@.ic = internal global \["
+    globals_out << "@.ic = internal thread_local global \["
     globals_out << ic_count.to_s()
     globals_out << " x \[24 x i8]] zeroinitializer, align 8\n\n"
 
@@ -1612,8 +1629,10 @@ use hashing
     while ji < blk[:instructions].size()
       inst = blk[:instructions][ji]
       if inst[:op] == :call_method_i64 && inst[:args] != nil
-        if inst[:args].size() > max_mcall_argc
-          max_mcall_argc = inst[:args].size()
+        argc = inst[:args].size()
+        needs_scratch = argc > 0 && !scalar_source_one_call?(inst)
+        if needs_scratch && argc > max_mcall_argc
+          max_mcall_argc = argc
       ji += 1
     bi += 1
 
@@ -2938,7 +2957,9 @@ use hashing
     if inst[:src_line] != nil
       call_keyword = "notail call"
     if argc == 0
-      parts << inst[:temp] + " = " + call_keyword + " i64 @w_method_call_cached(i64 " + inst[:receiver] + ", i64 " + name_val + ", ptr null, i32 0" + ic_arg + ")"
+      parts << inst[:temp] + " = " + call_keyword + " i64 @w_method_call_cached_0(i64 " + inst[:receiver] + ", i64 " + name_val + ic_arg + ")"
+    elsif scalar_source_one_call?(inst)
+      parts << inst[:temp] + " = " + call_keyword + " i64 @w_method_call_cached_1(i64 " + inst[:receiver] + ", i64 " + name_val + ", i64 " + inst[:args][0] + ic_arg + ")"
     else
       stack_arr = "%__mcall_args"
       i = 0

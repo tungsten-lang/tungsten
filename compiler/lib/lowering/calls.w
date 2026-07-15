@@ -58,6 +58,44 @@
   receiver = node.receiver
   args = expand_kwargs(node.args)
 
+  # Compiler-generated typed-overload dispatch. These calls never appear in
+  # user AST: definitions.w synthesizes them only after it has selected the
+  # exact worker set for a class. Keep both operations out of dynamic method
+  # dispatch — the former calls the runtime ancestry primitive directly and
+  # the latter calls the already-known internal worker symbol.
+  if name in ("__compiler_overload_is_a" "__compiler_overload_worker")
+    marker = ast_get(node, :compiler_intrinsic)
+    expected_marker = :overload_is_a
+    if name == "__compiler_overload_worker"
+      expected_marker = :overload_worker
+    if marker != expected_marker
+      raise compile_error_for_node(:E_LOWER_RESERVED_INTRINSIC, "reserved compiler intrinsic '" + name + "'", ctx[:source_path], node)
+
+  if name == "__compiler_overload_is_a" && receiver == nil && args != nil && args.size() == 2
+    recv_tv = lower_expression(ctx, args[0])
+    type_tv = lower_expression(ctx, args[1])
+    recv_reg = ensure_i64_value(wfn, recv_tv)
+    type_reg = ensure_i64_value(wfn, type_tv)
+    temp = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_value_is_a", args: [recv_reg, type_reg]})
+    return typed_value(:i64, temp)
+
+  if name == "__compiler_overload_worker" && receiver == nil && args != nil && args.size() >= 2
+    target_node = args[0]
+    if ast_kind(target_node) != :string
+      << "internal overload worker target must be a string literal"
+      exit(1)
+    target = target_node.value
+    call_args = []
+    i = 1
+    while i < args.size()
+      arg_tv = lower_expression(ctx, args[i])
+      call_args.push(ensure_i64_value(wfn, arg_tv))
+      i += 1
+    temp = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: target, args: call_args})
+    return typed_value(:i64, temp)
+
   # Low-level WValue bit casts used by source-defined packed value classes.
   # Both representations are LLVM i64, so these are deliberately emit-free:
   # `wvalue_bits` exposes an arbitrary boxed value as a raw machine integer,
@@ -1070,6 +1108,41 @@
 
   materialize_bindings(ctx)
 
+  # This loop is an inlined lexical block, not the enclosing function body.
+  # A block-local register (including a ## recycle temp) must not escape into
+  # the next sibling CFG and be materialized from a path it does not dominate.
+  # materialize_bindings leaves only pristine raw parameter registers live;
+  # preserve that uncommon map and otherwise let the body reuse the empty map.
+  # At exit the body map is discarded in O(1), avoiding a keys()/delete scan
+  # for every inlined iterator during self-host compilation.
+  outer_bindings = ctx[:bindings]
+  iterator_has_outer_bindings = outer_bindings.size() > 0
+  if iterator_has_outer_bindings
+    ctx[:bindings] = {}
+
+  # The block parameter's temporary unknown type must not overwrite an outer
+  # fact for the same name.
+  outer_var_types = ctx[:var_types]
+  iterator_absent_type = :__inline_iterator_absent_type
+  iterator_saved_param_type = iterator_absent_type
+  if param_name != nil && outer_var_types.has_key?(param_name)
+    iterator_saved_param_type = outer_var_types[param_name]
+
+  # An iterator parameter shadows an equally named unboxed variable from an
+  # enclosing while loop. Copy that normally tiny map only on an actual name
+  # collision; the overwhelmingly common path keeps the original by reference.
+  outer_unboxed_vars = ctx[:unboxed_vars]
+  if outer_unboxed_vars != nil && param_name != nil && outer_unboxed_vars[param_name] != nil
+    iterator_unboxed_vars = {}
+    unboxed_names = outer_unboxed_vars.keys()
+    uni = 0
+    while uni < unboxed_names.size()
+      unboxed_name = unboxed_names[uni]
+      if unboxed_name != param_name
+        iterator_unboxed_vars[unboxed_name] = outer_unboxed_vars[unboxed_name]
+      uni += 1
+    ctx[:unboxed_vars] = iterator_unboxed_vars
+
   pre_label = next_label(wfn, "array.iter.pre")
   header_label = next_label(wfn, "array.iter.hdr")
   body_label = next_label(wfn, "array.iter.body")
@@ -1089,6 +1162,9 @@
   emit_instruction(wfn, {op: :cond_br, cond: cmp, then_label: body_label, else_label: exit_label})
 
   start_block(wfn, body_label)
+  iterator_recycle_depth = wfn[:scope_recycle_stack].size()
+  iterator_sid = next_scope_id(wfn)
+  emit_scope_push(wfn, iterator_sid)
   idx_boxed = nanbox_int_emit(wfn, idx_raw)
   scratch = []
   si = 0
@@ -1103,7 +1179,7 @@
     ctx[:bindings][param_name] = nil
     ctx[:var_types][param_name] = nil
 
-  push_loop(wfn, exit_label, inc_label, nil)
+  push_loop_with_recycle_depth(wfn, exit_label, inc_label, nil, iterator_recycle_depth)
 
   body = block.body
   if body != nil && body.size() > 0
@@ -1123,6 +1199,7 @@
         bi += 1
       if !block_terminated(wfn)
         pred_val = lower_expression(ctx, body[body.size() - 1])
+      if !block_terminated(wfn)
         if pred_val[:type] == :i1
           pred_bool = pred_val[:value]
         else
@@ -1130,6 +1207,10 @@
           pred_bool = next_temp(wfn)
           emit_instruction(wfn, {op: :truthy_inline, temp: pred_bool, value: pred_reg})
 
+        # Predicate result and `elem` are now materialized. Recycle this
+        # iteration's lexical values once before either the continue or hit
+        # edge; no cleanup temp then leaks into the zero-iteration exit path.
+        emit_scope_pop(wfn, iterator_sid)
         hit_label = next_label(wfn, "array.iter.hit")
         if method_name == "all?"
           emit_instruction(wfn, {op: :cond_br, cond: pred_bool, then_label: inc_label, else_label: hit_label})
@@ -1155,12 +1236,28 @@
   pop_loop(wfn)
 
   if !block_terminated(wfn)
+    emit_scope_pop(wfn, iterator_sid)
     emit_instruction(wfn, {op: :br, label: inc_label})
+  else
+    # break/next/return already emitted runtime cleanup for the abandoned
+    # iteration; restore only the lowering stack before building sibling CFG.
+    restore_recycle_scope_depth(wfn, iterator_recycle_depth)
   start_block(wfn, inc_label)
   emit_instruction(wfn, {op: :add_i64, temp: idx_next, lhs: idx_raw, rhs: "1"})
   emit_instruction(wfn, {op: :br, label: header_label})
 
   start_block(wfn, exit_label)
+  if iterator_has_outer_bindings
+    ctx[:bindings] = outer_bindings
+  else
+    ctx[:bindings] = {}
+  if param_name != nil
+    if iterator_saved_param_type == iterator_absent_type
+      outer_var_types.delete(param_name)
+    else
+      outer_var_types[param_name] = iterator_saved_param_type
+  ctx[:var_types] = outer_var_types
+  ctx[:unboxed_vars] = outer_unboxed_vars
   if method_name == "each"
     return typed_value(:i64, receiver_reg)
   result = next_temp(wfn)

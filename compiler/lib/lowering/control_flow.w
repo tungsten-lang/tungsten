@@ -20,12 +20,15 @@
 
   if static_cond == :true
     # Lower then body inline, skip elsif/else entirely.
+    then_recycle_depth = wfn[:scope_recycle_stack].size()
     then_sid = next_scope_id(wfn)
     emit_scope_push(wfn, then_sid)
     lower_program(ctx, node.then_body)
     if !block_terminated(wfn)
       materialize_bindings(ctx)
       emit_scope_pop(wfn, then_sid)
+    else
+      restore_recycle_scope_depth(wfn, then_recycle_depth)
     return nil
 
   if static_cond == :false
@@ -41,12 +44,15 @@
       new_node = Tungsten:AST:If.new(first[0], first[1], rest, node.else_body)
       return lower_if(ctx, new_node)
     if node.else_body != nil && node.else_body.size() > 0
+      else_recycle_depth = wfn[:scope_recycle_stack].size()
       else_sid = next_scope_id(wfn)
       emit_scope_push(wfn, else_sid)
       lower_program(ctx, node.else_body)
       if !block_terminated(wfn)
         materialize_bindings(ctx)
         emit_scope_pop(wfn, else_sid)
+      else
+        restore_recycle_scope_depth(wfn, else_recycle_depth)
     return nil
 
   # Snapshot the bindings valid on entry, and the set of vars assigned in ANY
@@ -104,6 +110,7 @@
   # ctx[:bindings] to {} internally (wire.w:1799), so either path
   # leaves ctx[:bindings] clean for the next branch / merge.
   start_block(wfn, then_label)
+  then_recycle_depth = wfn[:scope_recycle_stack].size()
   then_sid = next_scope_id(wfn)
   emit_scope_push(wfn, then_sid)
   lower_program(ctx, node.then_body)
@@ -113,6 +120,7 @@
     emit_instruction(wfn, {op: :br, label: end_label})
   else
     ctx[:bindings] = {}
+    restore_recycle_scope_depth(wfn, then_recycle_depth)
 
   # Elsif branches
   if has_elsif
@@ -144,6 +152,7 @@
       emit_instruction(wfn, {op: :cond_br, cond: eb, then_label: ethen_label, else_label: next_else})
 
       start_block(wfn, ethen_label)
+      elsif_recycle_depth = wfn[:scope_recycle_stack].size()
       elsif_sid = next_scope_id(wfn)
       emit_scope_push(wfn, elsif_sid)
       lower_program(ctx, clause[1])
@@ -153,6 +162,7 @@
         emit_instruction(wfn, {op: :br, label: end_label})
       else
         ctx[:bindings] = {}
+        restore_recycle_scope_depth(wfn, elsif_recycle_depth)
 
       current_else = next_else
       i += 1
@@ -160,6 +170,7 @@
     # Else branch after elsifs
     if has_else
       start_block(wfn, current_else)
+      else_recycle_depth = wfn[:scope_recycle_stack].size()
       else_sid = next_scope_id(wfn)
       emit_scope_push(wfn, else_sid)
       lower_program(ctx, node.else_body)
@@ -169,9 +180,11 @@
         emit_instruction(wfn, {op: :br, label: end_label})
       else
         ctx[:bindings] = {}
+        restore_recycle_scope_depth(wfn, else_recycle_depth)
   elsif has_else
     # Simple if/else
     start_block(wfn, else_label)
+    else_recycle_depth = wfn[:scope_recycle_stack].size()
     else_sid = next_scope_id(wfn)
     emit_scope_push(wfn, else_sid)
     lower_program(ctx, node.else_body)
@@ -181,6 +194,7 @@
       emit_instruction(wfn, {op: :br, label: end_label})
     else
       ctx[:bindings] = {}
+      restore_recycle_scope_depth(wfn, else_recycle_depth)
 
   start_block(wfn, end_label)
 
@@ -458,14 +472,17 @@
 
   # Body
   start_block(wfn, body_label)
+  while_recycle_depth = wfn[:scope_recycle_stack].size()
   while_sid = next_scope_id(wfn)
   emit_scope_push(wfn, while_sid)
-  push_loop(wfn, end_label, cont_label, body_label)
+  push_loop_with_recycle_depth(wfn, end_label, cont_label, body_label, while_recycle_depth)
   lower_program(ctx, node.body)
   pop_loop(wfn)
   if !block_terminated(wfn)
     emit_scope_pop(wfn, while_sid)
     emit_instruction(wfn, {op: :br, label: cont_label})
+  else
+    restore_recycle_scope_depth(wfn, while_recycle_depth)
 
   start_block(wfn, end_label)
 
@@ -637,15 +654,18 @@
   # Set loop context: break to outermost exit, next to innermost inc
   outermost_exit = binding_info[0][:exit_label]
   innermost_inc = binding_info[binding_info.size() - 1][:inc_label]
+  with_recycle_depth = wfn[:scope_recycle_stack].size()
   with_sid = next_scope_id(wfn)
   emit_scope_push(wfn, with_sid)
-  push_loop(wfn, outermost_exit, innermost_inc, nil)
+  push_loop_with_recycle_depth(wfn, outermost_exit, innermost_inc, nil, with_recycle_depth)
 
   # Emit the body
   lower_program(ctx, node.body)
   pop_loop(wfn)
   if !block_terminated(wfn)
     emit_scope_pop(wfn, with_sid)
+  else
+    restore_recycle_scope_depth(wfn, with_recycle_depth)
 
   # Emit inc and exit blocks (inner to outer)
   i = binding_info.size() - 1
@@ -664,6 +684,10 @@
   wfn = ctx[:func]
   loop_info = current_loop(wfn)
   if loop_info != nil
+    recycle_depth = loop_info[:recycle_depth]
+    if recycle_depth == nil
+      recycle_depth = wfn[:scope_recycle_stack].size()
+    emit_recycles_above_depth(wfn, recycle_depth)
     emit_instruction(wfn, {op: :br, label: loop_info[:break_label]})
   nil
 
@@ -673,10 +697,17 @@
   # enclosing loop, which doesn't exist as a wire-level loop). The iterator
   # will continue to the next element. Matches Ruby semantics.
   if ctx[:is_block] == true
-    emit_instruction(wfn, {op: :ret_i64, value: w_nil.to_s()})
+    # The finalizer handles the function-body scope before this ret; flush only
+    # nested lexical scopes here so no value is recycled twice.
+    emit_recycles_above_depth(wfn, 1)
+    emit_return_instruction(wfn, {op: :ret_i64, value: w_nil.to_s()})
     return nil
   loop_info = current_loop(wfn)
   if loop_info != nil
+    recycle_depth = loop_info[:recycle_depth]
+    if recycle_depth == nil
+      recycle_depth = wfn[:scope_recycle_stack].size()
+    emit_recycles_above_depth(wfn, recycle_depth)
     emit_instruction(wfn, {op: :br, label: loop_info[:next_label]})
   nil
 
@@ -769,6 +800,9 @@
       val_reg = ensure_i64_value(wfn, val)
     else
       val_reg = w_nil.to_s()
+    # This longjmp never reaches the block function's ret/finalizer, so clean
+    # the function-body entry as well as all nested lexical scopes.
+    emit_recycles_above_depth(wfn, 0)
     emit_instruction(wfn, {op: :call_direct_void, name: "w_block_return_signal", args: [frame_reg, val_reg]})
     emit_instruction(wfn, {op: :unreachable})
     return nil
@@ -779,6 +813,10 @@
       val_reg = ensure_i64_value(wfn, val)
     else
       val_reg = w_nil.to_s()
+    # The common exit ret intentionally owns no recycle values: its catch edge
+    # is reached by a runtime unwind, while a normal return must clean the
+    # exact compile-time prefix live at this transfer before joining it.
+    emit_recycles_above_depth(wfn, 0)
     emit_instruction(wfn, {op: :store_i64, value: val_reg, ptr: wfn[:result_slot]})
     emit_instruction(wfn, {op: :br, label: wfn[:exit_label]})
     return nil
@@ -789,13 +827,17 @@
   else
     val_reg = default_return_value(wfn)
 
+  # Function-body values are injected once by insert_function_scope_recycles;
+  # this path-specific flush covers only nested scopes abandoned by return.
+  emit_recycles_above_depth(wfn, 1)
+
   if wfn[:return_type] == "i64"
-    emit_instruction(wfn, {op: :ret_i64, value: val_reg})
+    emit_return_instruction(wfn, {op: :ret_i64, value: val_reg})
   elsif wfn[:return_type] == "i32"
     # Truncate for main
     temp = next_temp(wfn)
     emit_instruction(wfn, {op: :trunc_i64_i32, temp: temp, value: val_reg})
-    emit_instruction(wfn, {op: :ret_i32, value: temp})
+    emit_return_instruction(wfn, {op: :ret_i32, value: temp})
   nil
 
 -> default_return_value(wfn)
@@ -1457,6 +1499,7 @@
 
   # Try block
   start_block(wfn, try_label)
+  try_recycle_depth = wfn[:scope_recycle_stack].size()
   try_sid = next_scope_id(wfn)
   emit_scope_push(wfn, try_sid)
   lower_program(ctx, node.body)
@@ -1469,6 +1512,8 @@
       materialize_bindings(ctx)
     if !block_terminated(wfn)
       emit_instruction(wfn, {op: :br, label: end_label})
+  else
+    restore_recycle_scope_depth(wfn, try_recycle_depth)
 
   # Rescue block
   start_block(wfn, rescue_label)
@@ -1479,6 +1524,7 @@
   if node.rescue_var != nil
     ptr = ensure_var_slot(wfn, node.rescue_var)
     emit_instruction(wfn, {op: :store_i64, value: err, ptr: ptr})
+  rescue_recycle_depth = wfn[:scope_recycle_stack].size()
   emit_scope_push(wfn, rescue_sid)
   if node.rescue_body != nil
     lower_program(ctx, node.rescue_body)
@@ -1490,6 +1536,8 @@
       materialize_bindings(ctx)
     if !block_terminated(wfn)
       emit_instruction(wfn, {op: :br, label: end_label})
+  else
+    restore_recycle_scope_depth(wfn, rescue_recycle_depth)
 
   start_block(wfn, end_label)
   nil

@@ -232,6 +232,12 @@ use parser
     # literal is provably used in that inlined-iterator-only shape, and true
     # for anything it can't prove (unknown node, escape, non-safe method).
     @array_needed = array_class_needed?(exprs)
+    # Array#join has no runtime fallback after its source migration, and an
+    # Array can enter through argv/a parameter without any literal or class
+    # reference. Scan call names only until the first join schedules Array.
+    # Later autoload iterations see Array in @autoload_loaded and skip even
+    # that first comparison.
+    @array_join_unresolved = defined["Array"] != true && registry["Array"] != nil && @autoload_loaded["Array"] != true
     seen = {}
     pending = []
     i = 0
@@ -446,18 +452,57 @@ use parser
         while bj < node.body.size()
           collect_autoload_refs(node.body[bj], defined, registry, seen, pending)
           bj += 1
-    # Phase 1.5: const/class-name receiver autoload. `Array.new(...)` and
-    # `ByteArray.from_array(...)` reach a class via a var receiver — when the
-    # name appears in the autoload registry and isn't already defined,
-    # pull the file in. Made safe by the tolerant-load block above: a
-    # broken stub (e.g. core/object.w) is silently skipped instead of
-    # blowing up the entire compile.
-    if t == :call && node.receiver != nil && ast_kind(node.receiver) == :var
-      consider_autoload_name(node.receiver.name, defined, registry, seen, pending)
-    # ClassRef receiver — always a class reference, autoload if the
-    # name is in the registry.
-    if t == :call && node.receiver != nil && ast_kind(node.receiver) == :class_ref
-      consider_autoload_name(node.receiver.name, defined, registry, seen, pending)
+    # Keep every call-specific autoload trigger in one arm. This walker visits
+    # the complete AST, so repeatedly fetching `receiver`/`name` in separate
+    # `t == :call` conditions is measurable on a self-host compile.
+    if t == :call
+      call_receiver = node.receiver
+      call_name = node.name
+
+      # Const/class-name receivers: `Array.new(...)` and
+      # `ByteArray.from_array(...)` reach a class via a var receiver. A broken
+      # core stub is handled by the tolerant-load block above.
+      if call_receiver != nil && ast_kind(call_receiver) == :var
+        consider_autoload_name(call_receiver.name, defined, registry, seen, pending)
+      # ClassRef receiver — always a class reference.
+      if call_receiver != nil && ast_kind(call_receiver) == :class_ref
+        consider_autoload_name(call_receiver.name, defined, registry, seen, pending)
+
+      # A direct ccall can construct a value whose runtime type is visible only
+      # after the call. Keep this scoped to exact known value-producing names.
+      if call_receiver == nil && call_name == "ccall" && node.args != nil && node.args.size() > 0
+        target = node.args[0]
+        if target != nil && ast_kind(target) == :string
+          result_class = native_ccall_result_class(target.value)
+          if result_class != nil
+            consider_autoload_name(result_class, defined, registry, seen, pending)
+
+      # String#empty? lives in the native source class. Load it only for a
+      # receiver expression proven String/Symbol-producing.
+      if call_name == "empty?" && string_empty_receiver?(call_receiver)
+        consider_autoload_name("String", defined, registry, seen, pending)
+
+      # String/Symbol#to_s now lives in the shared 0xF9 native source class.
+      # Name-gating covers dynamic receivers; loading this tiny class does not
+      # interfere with other built-in or user-defined to_s implementations.
+      if call_name == "to_s" && (node.args == nil || node.args.size() == 0)
+        consider_autoload_name("String", defined, registry, seen, pending)
+
+      # Array#join is source-defined after removal of its runtime IC. Arrays
+      # can arrive through argv, a parameter, or a native factory, so no
+      # receiver-shape test can soundly cover every use.
+      if @array_join_unresolved && call_name == "join"
+        consider_autoload_name("Array", defined, registry, seen, pending)
+        @array_join_unresolved = false
+
+      # Integer/Number leaf methods commonly receive literals or locals, which
+      # carry no explicit class reference.
+      if call_name in ("prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq")
+        consider_autoload_name("Integer", defined, registry, seen, pending)
+
+      # Legacy Base64 globals are source-defined bare calls.
+      if call_receiver == nil && call_name in ("base64_encode" "base64_decode" "base64url_encode" "base64url_decode")
+        consider_autoload_name("Base64", defined, registry, seen, pending)
     # Standalone ClassRef (Integer as a bare expression): same.
     if t == :class_ref
       consider_autoload_name(node.name, defined, registry, seen, pending)
@@ -478,24 +523,6 @@ use parser
           ej2 += 1
     if t == :hash_literal
       consider_autoload_name("Hash", defined, registry, seen, pending)
-    # A direct ccall can construct a value whose runtime type is only visible
-    # after the call. When that type's methods live in a native core source
-    # class, the call result must register the class before method dispatch —
-    # just like the literal-driven Date/IP triggers below. Keep this scoped to
-    # exact, known value-producing symbols: unrelated ccalls must not pull in
-    # Date or the network classes merely because their result is later used.
-    if t == :call && node.receiver == nil && node.name == "ccall" && node.args != nil && node.args.size() > 0
-      target = node.args[0]
-      if target != nil && ast_kind(target) == :string
-        result_class = native_ccall_result_class(target.value)
-        if result_class != nil
-          consider_autoload_name(result_class, defined, registry, seen, pending)
-    # String#empty? has moved to the native source class. Only load it when the
-    # receiver expression is provably String/Symbol-producing; dynamic values
-    # retain the narrow runtime fallback. A method-name-only trigger bloats
-    # unrelated Array/Path/Body/user-class `.empty?` programs.
-    if t == :call && node.name == "empty?" && string_empty_receiver?(node.receiver)
-      consider_autoload_name("String", defined, registry, seen, pending)
     # IPv4/CIDR literals carry their runtime type without naming the IPv4
     # class in source. Once accessors and predicates have Tungsten bodies,
     # their class definition must still be registered before a literal-only
@@ -511,18 +538,6 @@ use parser
     # register Date's 0xE4 type class even when they never name Date directly.
     if t == :date || t == :datetime
       consider_autoload_name("Date", defined, registry, seen, pending)
-    # Integer/Number leaf methods have native Tungsten bodies. Their receiver
-    # is commonly a literal or a local variable, neither of which names the
-    # runtime Integer class in source, so method use must pull in the numeric
-    # class chain before the C IC fallback can be removed.
-    if t == :call && node.name in ("prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq")
-      consider_autoload_name("Integer", defined, registry, seen, pending)
-    # The legacy Base64 global functions are source-defined in core/base64.w.
-    # A bare call contains no class reference, so make that call surface an
-    # explicit autoload trigger instead of letting lowering bypass the source
-    # implementation through a runtime symbol.
-    if t == :call && node.receiver == nil && node.name in ("base64_encode" "base64_decode" "base64url_encode" "base64url_decode")
-      consider_autoload_name("Base64", defined, registry, seen, pending)
     # A range literal `(a..b)` references no class name, but its numeric
     # machinery — and the elementwise methods (`sq`, `cube`, …) the fused
     # pipeline's closed-form recognizer resolves by AST — lives on Number.

@@ -366,6 +366,9 @@ WValue w_string(const char *s);
 WValue w_symbol(const char *s);
 WValue w_float(double v);
 WValue w_str_to_sym(WValue v);
+/* Interpreter-only checked rebox for source methods that construct an exact
+ * raw String WValue representation. */
+WValue w_string_from_bits(WValue bits);
 WValue w_regex_new(WValue pattern_val, WValue options_val);
 WValue w_regex_match(WValue regex_val, WValue subject_val);
 WValue w_regex_capture(WValue index_val);
@@ -492,6 +495,7 @@ WValue w_gte(WValue a, WValue b);
 WValue w_str_concat(WValue a, WValue b);
 WValue w_string_slice_raw(WValue str, int64_t start, int64_t len);
 WValue w_to_s(WValue v);
+int64_t w_stringy_c_length(WValue v);
 void w_str_data(WValue v, char buf[6], const char **out, size_t *len);
 WValue w_string_from_codepoint(WValue cp_v);
 WValue w_string_from_codes(WValue arr_v, WValue start_v, WValue len_v);
@@ -656,6 +660,7 @@ typedef struct WExceptionFrame {
 extern __thread WExceptionFrame *w_exception_stack;
 
 void *w_exception_push(void);
+void w_exception_frame_push(WExceptionFrame *frame);
 void w_exception_pop(void);
 void w_raise(WValue msg);
 WValue w_exception_error(void);
@@ -690,6 +695,8 @@ typedef struct {
 } WInlineCache;
 
 WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc, WInlineCache *cache);
+WValue w_method_call_cached_0(WValue recv, WValue name, WInlineCache *cache);
+WValue w_method_call_cached_1(WValue recv, WValue name, WValue arg, WInlineCache *cache);
 WValue w_value_is_a(WValue recv, WValue target);
 
 /* ---- Memoization ---- */

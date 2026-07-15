@@ -224,6 +224,164 @@
       ik += 1
     ck += 1
   mod[:ivar_types] = ivar_types
+  collect_exact_source_ivar_types(mod)
+
+# Return the fully-qualified class name when `node` constructs an ordinary
+# source WObject whose runtime class is exact. Runtime-backed classes, packed
+# AST nodes, and source classes with a static `.new` override can all return a
+# non-WObject representation, so they are deliberately excluded.
+-> normal_source_instance_class?(mod, cname)
+  if cname == nil
+    return false
+  class_node = mod[:known_classes][cname]
+  if class_node == nil || !is_ast_node?(class_node) || ast_kind(class_node) != :class_def
+    return false
+  # These names are intercepted by lower_method_call/runtime construction and
+  # produce native handles or packed storage even when their interface is a
+  # source class_def. Keep this list aligned with the constructor fast paths.
+  if cname in ("Atomic" "Channel" "Thread" "Response" "BigArray" "SmallArray" "ByteArray" "BoolArray")
+    return false
+  if mod[:builtin_class_names][cname] == true || type_dispatch_key(cname) != nil
+    return false
+  if mod[:fn_return_types][cname + ".new"] != nil
+    return false
+  if mod[:known_static_methods][cname + ".new"] != nil
+    return false
+  true
+
+-> resolve_exact_source_class_name(mod, enclosing, name)
+  if name == nil
+    return nil
+  cname = name
+  if mod[:known_classes][cname] == nil
+    cname = resolve_class_in_namespace(mod, enclosing, name)
+  if normal_source_instance_class?(mod, cname)
+    return cname
+  nil
+
+-> exact_source_class_from_value(node, enclosing, mod)
+  if node == nil || !is_ast_node?(node)
+    return nil
+  if ast_kind(node) == :call && node.name == "new" && node.receiver != nil
+    recv = node.receiver
+    if is_ast_node?(recv) && ast_kind(recv) in (:var :class_ref)
+      return resolve_exact_source_class_name(mod, enclosing, recv.name)
+  nil
+
+# This proof is intentionally separate from the general ivar type map above.
+# Every write must prove the same exact ordinary source class; an unknown,
+# compound, or destructuring write invalidates the fact for the entire class.
+# An existing assignment type hint is accepted as the compiler/user contract
+# for values recovered from containers (for example Interpreter's own saved
+# Environment snapshot).
+-> collect_exact_source_ivar_types(mod)
+  exact_types = {}
+  conflicts = {}
+  # A method compiled for a parent may execute with a subclass receiver, so a
+  # subclass-only writer can invalidate the parent's ivar fact. Conversely, a
+  # child method can observe writes performed by inherited parent methods.
+  # Until the proof is hierarchy-aware, conservatively exclude every class on
+  # either end of an inheritance edge. `class_super_names` records the
+  # namespace-resolved, first-declaration relationship used to create the
+  # runtime class; later reopens cannot hide it.
+  inheritance_classes = {}
+  super_names = mod[:class_super_names]
+  if super_names != nil
+    child_names = super_names.keys()
+    si = 0
+    while si < child_names.size()
+      child_name = child_names[si]
+      super_name = super_names[child_name]
+      if super_name != nil
+        inheritance_classes[child_name] = true
+        inheritance_classes[super_name] = true
+      si += 1
+  ast_keys = mod[:class_method_asts].keys()
+  ki = 0
+  while ki < ast_keys.size()
+    key = ast_keys[ki]
+    dot_idx = key.index(".")
+    cname = key.slice(0, dot_idx)
+    if exact_types[cname] == nil
+      exact_types[cname] = {}
+      conflicts[cname] = {}
+    if inheritance_classes[cname] != true
+      method_ast = mod[:class_method_asts][key]
+      # `-> new(@field)` is an implicit arbitrary caller-to-ivar write and has
+      # no assignment node in the body. It must invalidate an exact-class fact
+      # just like an explicit `@field = value`.
+      params = method_ast.params
+      if params != nil
+        pi = 0
+        while pi < params.size()
+          param = params[pi]
+          if param.ivar_assign == true
+            record_exact_source_ivar_write(cname, "@" + param.name, nil, exact_types, conflicts)
+          pi += 1
+      walk_exact_source_ivar_writes(method_ast.body, cname, exact_types, conflicts, mod)
+    ki += 1
+  mod[:exact_source_ivar_types] = exact_types
+
+-> record_exact_source_ivar_write(cname, iname, exact_class, exact_types, conflicts)
+  if conflicts[cname][iname] == true
+    return nil
+  if exact_class == nil
+    exact_types[cname][iname] = nil
+    conflicts[cname][iname] = true
+    return nil
+  existing = exact_types[cname][iname]
+  if existing != nil && existing != exact_class
+    exact_types[cname][iname] = nil
+    conflicts[cname][iname] = true
+  else
+    exact_types[cname][iname] = exact_class
+  nil
+
+-> invalidate_exact_source_ivar_targets(targets, cname, exact_types, conflicts)
+  if targets == nil
+    return nil
+  if is_ast_node?(targets)
+    if ast_kind(targets) == :ivar
+      record_exact_source_ivar_write(cname, targets.name, nil, exact_types, conflicts)
+      return nil
+    children = ast_children(targets)
+    ci = 0
+    while ci < children.size()
+      invalidate_exact_source_ivar_targets(children[ci], cname, exact_types, conflicts)
+      ci += 1
+    return nil
+  if type(targets) == "Array"
+    ti = 0
+    while ti < targets.size()
+      invalidate_exact_source_ivar_targets(targets[ti], cname, exact_types, conflicts)
+      ti += 1
+  nil
+
+-> walk_exact_source_ivar_writes(node, cname, exact_types, conflicts, mod)
+  if node == nil
+    return nil
+  if is_ast_node?(node)
+    nt = ast_kind(node)
+    if nt == :assign && node.target != nil && ast_kind(node.target) == :ivar
+      exact_class = exact_source_class_from_value(node.value, cname, mod)
+      if exact_class == nil && node.type_hint != nil
+        exact_class = resolve_exact_source_class_name(mod, cname, node.type_hint)
+      record_exact_source_ivar_write(cname, node.target.name, exact_class, exact_types, conflicts)
+    elsif nt == :compound_assign && node.target != nil && ast_kind(node.target) == :ivar
+      record_exact_source_ivar_write(cname, node.target.name, nil, exact_types, conflicts)
+    elsif nt == :multi_assign
+      invalidate_exact_source_ivar_targets(node.targets, cname, exact_types, conflicts)
+    children = ast_children(node)
+    ci = 0
+    while ci < children.size()
+      walk_exact_source_ivar_writes(children[ci], cname, exact_types, conflicts, mod)
+      ci += 1
+  elsif type(node) == "Array"
+    ai = 0
+    while ai < node.size()
+      walk_exact_source_ivar_writes(node[ai], cname, exact_types, conflicts, mod)
+      ai += 1
+  nil
 
 -> walk_ivar_assigns(node, cname, ivar_types, ivar_conflicts, mod)
   if node == nil

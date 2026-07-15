@@ -57,7 +57,7 @@ use target
     while i < names.size()
       name = names[i]
       if !@classes.has_key?(name)
-        @classes[name] = {rt: :class, name: name, methods: {}, class_methods: {}, parent: nil}
+        @classes[name] = {rt: :class, name: name, methods: {}, method_overloads: {}, class_methods: {}, parent: nil}
       i += 1
 
   # Directory that contains `core/` for stdlib autoload. Prefer cwd
@@ -137,7 +137,7 @@ use target
           nil
         @current_file = prev_file
     if !@classes.has_key?(name)
-      @classes[name] = {rt: :class, name: name, methods: {}, parent: nil}
+      @classes[name] = {rt: :class, name: name, methods: {}, method_overloads: {}, parent: nil}
     true
 
   -> run(source, file_path = nil)
@@ -172,7 +172,10 @@ use target
     {env: @env, classes: classes_copy, signal_type: @signal[:type], signal_value: @signal[:value], self_stack: stack_copy, method_stack: method_stack_copy, loaded_files: files_copy, current_file: @current_file}
 
   -> restore_state(snapshot)
-    @env = snapshot[:env]
+    # save_state stores this exact source instance through a Hash boundary;
+    # retain the trusted class contract so exact-ivar dispatch can prove the
+    # interpreter's hot Environment receiver without changing semantics.
+    @env = snapshot[:env] ## Environment
     @classes = snapshot[:classes]
     @signal[:type] = snapshot[:signal_type]
     @signal[:value] = snapshot[:signal_value]
@@ -545,7 +548,7 @@ use target
   -> class_class_singleton
     if @classes.has_key?("Class")
       return @classes["Class"]
-    cls = {rt: :class, name: "Class", methods: {}, class_methods: {}, parent: nil}
+    cls = {rt: :class, name: "Class", methods: {}, method_overloads: {}, class_methods: {}, parent: nil}
     @classes["Class"] = cls
     cls
 
@@ -945,7 +948,7 @@ use target
         if rt == :object
           obj_class = value[:w_class]
           # Try to call to_s
-          m = lookup_method(obj_class, "to_s")
+          m = lookup_method(obj_class, "to_s", 0)
           if m != nil
             return call_w_method(value, m, [], nil, @env)
           return obj_class[:name] + " instance"
@@ -1073,7 +1076,41 @@ use target
     cname = "" + args[0]
     case cname
     when "w_to_s"
-      return ccall("w_to_s", args[1])
+      # Source-defined objects exist only in this interpreter environment;
+      # native w_to_s cannot see their method table. Route through the tree
+      # walker's equivalent only for those objects so core methods retain
+      # custom to_s side effects. Native values must keep runtime conversion
+      # details such as w_to_s(nil) == "" (distinct from display/inspect nil).
+      value = args[1]
+      if type(value) == "Hash" && value.has_key?(:rt) && value[:rt] == :object
+        return w_to_s(value)
+      return ccall("w_to_s", value)
+    when "w_strbuf_append"
+      return ccall("w_strbuf_append", args[1], args[2])
+    when "w_strbuf_to_s"
+      return ccall("w_strbuf_to_s", args[1])
+    when "w_slab_freeze_safe"
+      if args.size() != 1
+        raise "w_slab_freeze_safe expects no arguments"
+      # Test/support bridge for representation-sensitive source methods. The
+      # helper returns a regular WValue and is safe to expose through the same
+      # narrow allowlist as StringBuffer storage calls.
+      return ccall("w_slab_freeze_safe")
+    when "w_hash_has_key"
+      # Storage-only Hash membership bridge used by source algorithms that
+      # keep their key-equivalence policy in Tungsten. Arity/type checks keep
+      # eval mode from turning the ccall string into a fatal native boundary.
+      if args.size() != 3
+        raise "w_hash_has_key expects two arguments"
+      if type(args[1]) != "Hash"
+        raise "w_hash_has_key expects a Hash receiver"
+      return ccall("w_hash_has_key", args[1], args[2])
+    when "w_hash_set"
+      if args.size() != 4
+        raise "w_hash_set expects three arguments"
+      if type(args[1]) != "Hash"
+        raise "w_hash_set expects a Hash receiver"
+      return ccall("w_hash_set", args[1], args[2], args[3])
     when "w_base64_encode_input"
       return ccall("w_base64_encode_input", args[1])
     when "w_base64_decode_input"
@@ -1185,6 +1222,10 @@ use target
       raise "ccall_nobox requires a runtime function name"
     cname = "" + args[0]
     case cname
+    when "w_slab_is_frozen"
+      if args.size() != 1
+        raise "w_slab_is_frozen expects no arguments"
+      return ccall("w_int", ccall_nobox("w_slab_is_frozen"))
     when "w_numeric_to_i64"
       if args.size() != 2
         raise "w_numeric_to_i64 expects one argument"
@@ -1198,6 +1239,13 @@ use target
       # Preserve the raw pointer as an interpreter Integer. w_int promotes to
       # BigInt if it exceeds i48; raw_load/store convert it back explicitly.
       return ccall("w_int", ccall_nobox("w_u8_live_data_ptr", args[1]))
+    when "w_stringy_c_length"
+      if args.size() != 2
+        raise "w_stringy_c_length expects one argument"
+      # Rebox the raw strlen result for the tree walker's value model. The
+      # native helper retains String/Symbol/rope validation and embedded-NUL
+      # behavior, so eval and compiled Array#join cross the same boundary.
+      return ccall("w_int", ccall_nobox("w_stringy_c_length", args[1]))
 
     raise "Unsupported ccall_nobox '[cname]' in interpreter"
 
@@ -1427,7 +1475,12 @@ use target
       left = evaluate(ast_get(node, :left), env)
       if type(left) == "String"
         right = evaluate(ast_get(node, :right), env)
-        result = left + w_to_s(right)
+        # Compiled String `<<` lowers to w_str_append. Calling the same helper
+        # here is observably important after the static slab freezes: `+` may
+        # return the already-interned right operand, while append must mint the
+        # fresh heap representation required by source ports such as
+        # Array#join.
+        result = ccall("w_str_append", left, w_to_s(right))
         env.set(ast_get(ast_get(node, :left), :name), result)
         return result
     left = evaluate(ast_get(node, :left), env)
@@ -1759,6 +1812,11 @@ use target
       if args.size() != 1
         raise "wvalue_from_bits expects one argument"
       bits = args[0]
+      # String/Symbol#to_s clears the Symbol marker directly on the raw
+      # WValue. Native lowering treats that word as already boxed; mirror the
+      # exact rebox through a checked String-only bridge in the tree walker.
+      if ((bits >> 48) & 0xFFFF) == 0xFFF9 && (bits & 1) == 0
+        return ccall("w_string_from_bits", bits)
       # Immediate integers are the other source-defined user of this
       # intrinsic. Sign-extend their 48-bit NaN-box payload into the tree
       # walker's ordinary arbitrary-precision Integer representation.
@@ -1879,7 +1937,7 @@ use target
     # must resolve before `is_builtin?("max")`, which would otherwise call
     # dispatch_builtin with a hardcoded nil receiver and crash).
     s = current_self()
-    m = implicit_self_method(s, name)
+    m = implicit_self_method(s, name, args.size())
     if m != nil
       return call_w_method(s, m, args, block, env)
 
@@ -1965,7 +2023,7 @@ use target
       cname = type(recv)
       if @classes.has_key?(cname)
         return @classes[cname]
-      stub = {rt: :class, name: cname, methods: {}, class_methods: {}, parent: nil}
+      stub = {rt: :class, name: cname, methods: {}, method_overloads: {}, class_methods: {}, parent: nil}
       @classes[cname] = stub
       return stub
     # `.name` on a class returns its name string (Integer.name -> "Integer").
@@ -1993,7 +2051,7 @@ use target
 
     # Method on object
     if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :object
-      m = lookup_method(recv[:w_class], name)
+      m = lookup_method(recv[:w_class], name, args.size())
       if m != nil
         # Implicit construction from the receiver's class: a one-param
         # method called with N>1 args builds its argument from the
@@ -2010,9 +2068,18 @@ use target
     # Primitive values can be extended by core classes (Array, String, etc.).
     # Give those class methods first refusal before falling back to boot
     # builtins so traits such as Enumerable participate for primitive arrays.
-    primitive_class = primitive_runtime_class(recv)
+    primitive_class = nil
+    # Compiled String and Symbol values share dispatch key 0xF9, so the
+    # source String method is also Symbol#to_s. The tree walker ordinarily
+    # distinguishes host Symbols from Strings; route this one shared method
+    # through String explicitly instead of loading the legacy Symbol scaffold.
+    if type(recv) == "Symbol" && name == "to_s" && args.size() == 0
+      try_autoload_class("String")
+      primitive_class = @classes["String"]
+    else
+      primitive_class = primitive_runtime_class(recv)
     if primitive_class != nil
-      m = lookup_method(primitive_class, name)
+      m = lookup_method(primitive_class, name, args.size())
       # `- data` accessors model ivars for ordinary interpreted objects. A
       # small set of runtime-backed classes expose scalar layout fields through
       # w_native_data_field; fixed arrays and every other native layout stay on
@@ -2218,19 +2285,19 @@ use target
   # Keep this lookup narrow: dispatch_bare_call retains its existing global and
   # builtin ordering, and does not recurse through dispatch_method (which would
   # consult builtins and the runtime IC again).
-  -> implicit_self_method(recv, name)
+  -> implicit_self_method(recv, name, argc = nil)
     if recv == nil
       return nil
     if type(recv) == "Hash" && recv.has_key?(:rt)
       if recv[:rt] == :object
-        return lookup_method(recv[:w_class], name)
+        return lookup_method(recv[:w_class], name, argc)
       # Class/module sentinels are interpreter Hashes, not primitive Hash
       # receivers. Do not accidentally dispatch Hash instance methods on them.
       return nil
     w_class = primitive_runtime_class(recv)
     if w_class == nil
       return nil
-    lookup_method(w_class, name)
+    lookup_method(w_class, name, argc)
 
   -> w_type_name(value)
     if value == nil
@@ -2265,9 +2332,41 @@ use target
       i = i + 1
     nil
 
-  -> lookup_method(w_class, name)
+  -> lookup_method_exact_arity(w_class, name, argc)
     if w_class == nil
       return nil
+    overload_map = w_class[:method_overloads]
+    if overload_map != nil && overload_map.has_key?(name)
+      overloads = overload_map[name]
+      i = overloads.size() - 1
+      while i >= 0
+        if overloads[i][:params].size() == argc
+          return overloads[i]
+        i -= 1
+    lookup_method_exact_arity(w_class[:superclass], name, argc)
+
+  -> lookup_method_fallback(w_class, name)
+    if w_class == nil
+      return nil
+    if w_class[:methods].has_key?(name)
+      overload_map = w_class[:method_overloads]
+      if overload_map != nil && overload_map.has_key?(name) && overload_map[name].size() > 0
+        return overload_map[name][0]
+      return w_class[:methods][name]
+    lookup_method_fallback(w_class[:superclass], name)
+
+  # The compiled runtime searches the full class chain for exact name+arity
+  # first, then performs a second name-only walk. The fallback selects the
+  # first registration for overloaded names; no-arity introspection retains
+  # the interpreter's established last-definition map.
+  -> lookup_method(w_class, name, argc = nil)
+    if w_class == nil
+      return nil
+    if argc != nil
+      exact = lookup_method_exact_arity(w_class, name, argc)
+      if exact != nil
+        return exact
+      return lookup_method_fallback(w_class, name)
     if w_class[:methods].has_key?(name)
       return w_class[:methods][name]
     # Check superclass
@@ -2444,6 +2543,32 @@ use target
         expanded.push(expr)
     expanded
 
+  # Single insertion path for interpreted instance methods. The name map
+  # preserves last-definition lookup for callers that do not carry arity;
+  # the side table mirrors compiled exact-arity selection and registration-
+  # order fallback. Reopening the same arity replaces its old slot so neither
+  # dynamic definitions nor generated accessors leave a stale overload.
+  -> register_instance_method(w_class, w_method)
+    method_name = w_method[:name]
+    w_class[:methods][method_name] = w_method
+    if w_class[:method_overloads] == nil
+      w_class[:method_overloads] = {}
+    overloads = w_class[:method_overloads][method_name]
+    if overloads == nil
+      overloads = []
+      w_class[:method_overloads][method_name] = overloads
+    replaced = false
+    i = 0
+    while i < overloads.size()
+      if overloads[i][:params].size() == w_method[:params].size()
+        overloads[i] = w_method
+        replaced = true
+        break
+      i += 1
+    if !replaced
+      overloads.push(w_method)
+    w_method
+
   -> eval_class_def(node, env)
     # Class re-open: if a class with this name already exists, merge the
     # new methods into the existing class table with last-wins semantics
@@ -2467,10 +2592,12 @@ use target
         # bare lookup below would otherwise miss a not-yet-referenced parent.
         try_autoload_class(ast_get(node, :superclass))
         superclass = @classes[ast_get(node, :superclass)]
-      w_class = {rt: :class, name: ast_get(node, :name), superclass: superclass, methods: {}, class_methods: {}}
+      w_class = {rt: :class, name: ast_get(node, :name), superclass: superclass, methods: {}, method_overloads: {}, class_methods: {}}
       @classes[class_name] = w_class
     if w_class[:class_methods] == nil
       w_class[:class_methods] = {}
+    if w_class[:method_overloads] == nil
+      w_class[:method_overloads] = {}
 
     expand_trait_includes(ast_get(node, :body)).each -> (expr)
       if ast_kind(expr) == :method_def
@@ -2479,7 +2606,7 @@ use target
         if ast_get(expr, :is_class_method) == true
           w_class[:class_methods][ast_get(expr, :name)] = w_method
         else
-          w_class[:methods][ast_get(expr, :name)] = w_method
+          register_instance_method(w_class, w_method)
       elsif ast_kind(expr) == :view_decl && ast_get(expr, :kind) == "struct"
         register_data_field_accessors(expr, w_class)
       else
@@ -2519,11 +2646,13 @@ use target
       if ast_get(p, :ivar_assign) == true
         fname = ast_get(p, :name)
         if !w_class[:methods].has_key?(fname)
-          w_class[:methods][fname] = {rt: :method, name: fname, params: [], body: [Tungsten:AST:Ivar.new("@" + fname)], w_class: w_class}
+          reader = {rt: :method, name: fname, params: [], body: [Tungsten:AST:Ivar.new("@" + fname)], w_class: w_class}
+          register_instance_method(w_class, reader)
         if marker == "rw"
           sname = fname + "="
           if !w_class[:methods].has_key?(sname)
-            w_class[:methods][sname] = {rt: :method, name: sname, params: [Tungsten:AST:Param.new("value", nil, false)], body: [Tungsten:AST:Assign.new(Tungsten:AST:Ivar.new("@" + fname), Tungsten:AST:Var.new("value"))], w_class: w_class}
+            writer = {rt: :method, name: sname, params: [Tungsten:AST:Param.new("value", nil, false)], body: [Tungsten:AST:Assign.new(Tungsten:AST:Ivar.new("@" + fname), Tungsten:AST:Var.new("value"))], w_class: w_class}
+            register_instance_method(w_class, writer)
       i += 1
     kept
 
@@ -2541,13 +2670,13 @@ use target
       fname = f[:name]
       if fname != nil && !w_class[:methods].has_key?(fname)
         accessor = {rt: :method, name: fname, params: [], body: [Tungsten:AST:Ivar.new("@" + fname)], w_class: w_class, data_field: true}
-        w_class[:methods][fname] = accessor
+        register_instance_method(w_class, accessor)
 
   -> eval_method_def(node, env)
     s = current_self()
     if s != nil && type(s) == "Hash" && s.has_key?(:rt) && s[:rt] == :object
       w_method = {rt: :method, name: ast_get(node, :name), params: ast_get(node, :params), body: ast_get(node, :body), w_class: s[:w_class]}
-      s[:w_class][:methods][ast_get(node, :name)] = w_method
+      register_instance_method(s[:w_class], w_method)
     else
       w_method = {rt: :method, name: ast_get(node, :name), params: ast_get(node, :params), body: ast_get(node, :body)}
       @env.define("__method__" + ast_get(node, :name), w_method)

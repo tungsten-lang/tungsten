@@ -238,8 +238,9 @@ use wire
   cfg = build_cfg(func)
   idom = compute_dominators(cfg)
   df = compute_dominance_frontiers(cfg, idom)
-  loops = find_loop_back_edges(cfg, idom)
-  {cfg: cfg, idom: idom, dominance_frontiers: df, loops: loops}
+  # Loop back-edges had no consumer; keep the analysis shape stable without
+  # walking every CFG edge and dominator chain solely to fill an unused key.
+  {cfg: cfg, idom: idom, dominance_frontiers: df, loops: []}
 
 # ── SSA Conversion (mem2reg) ──────────────────────────────────────────
 
@@ -648,16 +649,19 @@ use wire
 
 # Top-level SSA conversion entry point.
 
--> ssa_convert(func, cfg_analysis, profile = nil)
-  # Skip functions with overflow-checked ops (they expand into extra LLVM blocks)
-  if has_overflow_checked(func)
-    return nil
-  promotable_started_at = nil
-  if profile != nil
-    promotable_started_at = clock()
-  promotable = find_promotable_vars(func)
-  if profile != nil
-    profile[:promotable_secs] = profile[:promotable_secs] + (clock() - promotable_started_at)
+-> ssa_convert(func, cfg_analysis, profile = nil, precomputed_promotable = nil)
+  promotable = precomputed_promotable
+  if promotable == nil
+    # Standalone callers retain the original safety checks. The main compiler
+    # precomputes these before building the otherwise-unneeded CFG.
+    if has_overflow_checked(func)
+      return nil
+    promotable_started_at = nil
+    if profile != nil
+      promotable_started_at = clock()
+    promotable = find_promotable_vars(func)
+    if profile != nil
+      profile[:promotable_secs] = profile[:promotable_secs] + (clock() - promotable_started_at)
   if promotable.keys().size() == 0
     return nil
   if profile != nil
@@ -680,7 +684,7 @@ use wire
   # not yet live-in pruned. If a slot needs a merge phi, leave that slot in
   # memory until the phi pass grows proper liveness; otherwise a phi temp can
   # be pushed as the current def and later skipped during emission.
-  while phi_placements.keys().size() > 0
+  if phi_placements.keys().size() > 0
     phi_ptrs = {}
     phi_blocks = phi_placements.keys()
     pbi = 0
@@ -693,26 +697,22 @@ use wire
       pbi += 1
 
     pruned = {}
-    removed = false
     pkeys = promotable.keys().sort()
     pi = 0
     while pi < pkeys.size()
       ptr = pkeys[pi]
-      if phi_ptrs[ptr] == true
-        removed = true
-      else
+      if phi_ptrs[ptr] != true
         pruned[ptr] = promotable[ptr]
       pi += 1
-
-    if removed != true
-      break
 
     promotable = pruned
     if promotable.keys().size() == 0
       return nil
 
-    var_defs = find_var_defs(func, promotable)
-    phi_placements = place_phi_nodes(func, promotable, var_defs, df)
+    # Phi placement is independent per variable. Every variable with a phi
+    # was just removed, so the retained set cannot acquire a new placement;
+    # rescanning definitions/frontiers only rediscovers the empty set.
+    phi_placements = {}
 
   if profile != nil
     profile[:phi_secs] = profile[:phi_secs] + (clock() - phi_started_at)

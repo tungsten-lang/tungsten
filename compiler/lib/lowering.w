@@ -996,6 +996,12 @@ use lowering/definitions
   mod[:class_method_asts] = {}
   mod[:specialized_methods] = {}
   mod[:small_array_consts] = []
+  # First-declaration superclass links, resolved exactly as class creation
+  # resolves them.  Reopens intentionally cannot replace this structural
+  # relationship.  Exact-ivar proofs use the completed map to exclude both
+  # ends of every inheritance edge: a parent method can run on a child, and a
+  # child can inherit a parent writer.
+  mod[:class_super_names] = {}
   # Top-level user fns whose entire param list is `## i64:`-annotated.
   # Maps source-name → mangled fn name. Callers pass raw i64 args
   # directly (no nanbox at the call site, no nanunbox at fn entry,
@@ -1261,6 +1267,7 @@ use lowering/definitions
           ns_super = resolve_class_in_namespace(mod, cname, super_name)
           if ns_super != nil
             super_name = ns_super
+        mod[:class_super_names][cname] = super_name
         super_reg = nil
         if super_name != nil
           super_reg = next_temp(main_fn)

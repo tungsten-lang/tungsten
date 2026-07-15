@@ -146,6 +146,25 @@
 -> emit_instruction(f, instruction)
   current_block(f)[:instructions].push(instruction)
 
+# Early-return emitter. Ordinary implicit/final returns are emitted only after
+# their function body has been lowered and need no per-site metadata. Keeping
+# this work out of emit_instruction leaves the universal hot path unchanged.
+-> emit_return_instruction(f, instruction)
+  # Capture how many function-body values are live at THIS return site.
+  # Recording the prefix length now prevents a later sibling allocation from being
+  # retroactively inserted ahead of an earlier return where its temp neither
+  # exists nor dominates. The entries are append-only, so a count is enough;
+  # this avoids allocating a copied Array for every return. Nested scopes are
+  # handled at the transfer itself.
+  stack = f[:scope_recycle_stack]
+  count = 0
+  if stack.size() > 0 && stack[0] != nil && stack[0].size() > 0
+    count = stack[0].size()
+  # Zero is meaningful: a later sibling allocation must not be attached to
+  # this earlier return by the finalizer's ordinary full-list fallback.
+  instruction[:function_recycle_count] = count
+  emit_instruction(f, instruction)
+
 # -- Scope-aware push/pop with ## recycle tracking --
 # Each scope's recycle-tracked vars are emitted as w_*_recycle calls before
 # scope_pop. The top of scope_recycle_stack is the current scope's list.
@@ -154,31 +173,56 @@
   emit_instruction(f, {op: :scope_push, id: id})
   f[:scope_recycle_stack].push(nil)
 
+# Emit normal-path cleanup for every recycle value in scopes deeper than
+# `keep_depth`. The compile-time scope stack is deliberately left untouched:
+# control-flow lowerers use this immediately before a return/break/next, then
+# the enclosing lexical lowerer restores its own path-local stack snapshot.
+#
+# `keep_depth` is a COUNT, not an index. With the initial function-body entry
+# at depth 1, passing 1 cleans nested lexical scopes while leaving function-
+# body cleanup to the existing per-ret finalizer; passing 0 cleans everything
+# for a non-local block return, which never reaches a ret in this function.
+-> emit_recycles_above_depth(f, keep_depth)
+  stack = f[:scope_recycle_stack]
+  depth = keep_depth
+  if depth < 0
+    depth = 0
+  if depth > stack.size()
+    depth = stack.size()
+
+  si = stack.size() - 1
+  while si >= depth
+    entries = stack[si]
+    if entries != nil
+      # Both the scope stack and each scope's entries unwind in LIFO order.
+      ei = entries.size() - 1
+      while ei >= 0
+        entry = entries[ei]
+        emit_instruction(f, {op: :cleanup_pop})
+        emit_instruction(f, {op: recycle_op_for_kind(entry[:kind]), value: entry[:temp]})
+        ei -= 1
+    si -= 1
+
+# Restore only the compiler's lexical bookkeeping after a path terminates.
+# Runtime cleanup has already happened either at the explicit normal transfer
+# (return/break/next) or in w_raise's exception unwind. Emitting cleanup here
+# would duplicate it; failing to discard these entries poisons sibling paths.
+-> restore_recycle_scope_depth(f, depth)
+  stack = f[:scope_recycle_stack]
+  target = depth
+  if target < 1
+    target = 1
+  while stack.size() > target
+    stack.pop()
+
 -> emit_recycles_for_current_scope(f)
   stack = f[:scope_recycle_stack]
   if stack.size() == 0
     return nil
-  top = stack[stack.size() - 1]
-  if top == nil
+  # Preserve the old fast path for the overwhelmingly common empty scope.
+  if stack[stack.size() - 1] == nil
     return nil
-  # Iterate in LIFO order to match cleanup stack semantics.
-  i = top.size() - 1
-  while i >= 0
-    entry = top[i]
-    kind = entry[:kind]
-    op_name = :call_recycle_array
-    if kind == :hash
-      op_name = :call_recycle_hash
-    elsif kind == :typed
-      op_name = :call_recycle_typed
-    elsif kind == :strbuf
-      op_name = :call_recycle_strbuf
-    # Pop cleanup entry first — normal-path recycle fires next. If raise
-    # happens between these two calls the alloc leaks for this iter but
-    # no UAF (cleanup is already off the stack).
-    emit_instruction(f, {op: :cleanup_pop})
-    emit_instruction(f, {op: op_name, value: entry[:temp]})
-    i -= 1
+  emit_recycles_above_depth(f, stack.size() - 1)
 
 -> emit_scope_pop(f, id)
   emit_recycles_for_current_scope(f)
@@ -270,6 +314,11 @@
 
 -> push_loop(f, break_label, next_label, redo_label)
   f[:loop_stack].push({break_label: break_label, next_label: next_label, redo_label: redo_label})
+
+# Structured while/with loops introduce a lexical body scope. Record the
+# outer depth so break/next can clean every abandoned body/branch value.
+-> push_loop_with_recycle_depth(f, break_label, next_label, redo_label, recycle_depth)
+  f[:loop_stack].push({break_label: break_label, next_label: next_label, redo_label: redo_label, recycle_depth: recycle_depth})
 
 -> pop_loop(f)
   f[:loop_stack].pop()
@@ -378,21 +427,16 @@
 # the implicit fall-through return. Mirrors the free pass (insert_frees),
 # which injects :free_value ahead of each ret for the same reason: an explicit
 # `return` terminates its block without running the fall-through recycle code,
-# so its pooled buffers leaked. Only one ret executes per call, so inserting
-# the recycle ops before each ret is not a double-recycle. Each tracked temp
-# carries exactly one cleanup_push (emitted once at track time in the
-# entry region), so exactly one cleanup_pop runs on the taken path — balanced.
+# so its pooled buffers leaked. Explicit/early returns carry the function-body
+# prefix length captured when emitted; later sibling allocations are therefore
+# never inserted on a path where their temps do not dominate. Final/implicit
+# returns have no count and use the complete list after lowering. Nested lexical
+# values are cleaned at the transfer itself, so the sets do not overlap.
 -> insert_function_scope_recycles(f)
+  # Preserve the old overwhelmingly-common fast path: no function-body
+  # recycle declaration means no ret can carry a function_recycle_count.
   stack = f[:scope_recycle_stack]
-  if stack.size() == 0
-    return nil
-  # The function-body scope is the bottom entry (stack[0]) — the initial slot
-  # that is never emit_scope_pop'd. `## recycle` vars declared at function-body
-  # level are tracked there. It must be stack[0] specifically, not the top:
-  # a block that ends in an explicit `return` can leave nested scopes unpopped,
-  # so at finalize the top may be an empty inner scope.
-  fnbody = stack[0]
-  if fnbody == nil || fnbody.size() == 0
+  if stack.size() == 0 || stack[0] == nil || stack[0].size() == 0
     return nil
   bi = 0
   while bi < f[:blocks].size()
@@ -401,14 +445,19 @@
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      if inst[:op] in (:ret_i64 :ret_i32 :ret_void)
+      if inst[:op] == :ret_i64 || inst[:op] == :ret_i32 || inst[:op] == :ret_void
+        fnbody = stack[0]
+        recycle_count = inst[:function_recycle_count]
+        if recycle_count == nil
+          recycle_count = fnbody.size()
         # LIFO order, matching emit_recycles_for_current_scope.
-        ri = fnbody.size() - 1
-        while ri >= 0
-          entry = fnbody[ri]
-          new_instrs.push({op: :cleanup_pop})
-          new_instrs.push({op: recycle_op_for_kind(entry[:kind]), value: entry[:temp]})
-          ri -= 1
+        if fnbody != nil && recycle_count > 0
+          ri = recycle_count - 1
+          while ri >= 0
+            entry = fnbody[ri]
+            new_instrs.push({op: :cleanup_pop})
+            new_instrs.push({op: recycle_op_for_kind(entry[:kind]), value: entry[:temp]})
+            ri -= 1
       new_instrs.push(inst)
       ii += 1
     f[:blocks][bi][:instructions] = new_instrs

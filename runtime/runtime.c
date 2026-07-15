@@ -90,6 +90,15 @@ WValue w_str_to_sym(WValue v) {
     return w_box_symbol_from_str(v);
 }
 
+WValue w_string_from_bits(WValue bits_v) {
+    WValue bits = (WValue)w_to_u64(bits_v);
+    if (!w_is_string(bits)) {
+        w_raise(w_string("w_string_from_bits expects String WValue bits"));
+        return W_NIL;
+    }
+    return bits;
+}
+
 const char *w_symbol_name(uint64_t id) {
     /* id is now a slab index */
     if (id > 0 && id < g_string_slab.next_slot) {
@@ -13595,6 +13604,15 @@ static const char *as_str(WValue v) {
     return NULL;
 }
 
+/* Validate String/Symbol/rope storage and expose the C-string boundary used
+ * by legacy runtime algorithms. In particular, embedded NUL terminates the
+ * measured length exactly as strlen(as_str(...)) did in Array#join's sizing
+ * pass. The raw int64_t return keeps source-level validation-only callers
+ * from allocating an otherwise-unused Integer. */
+int64_t w_stringy_c_length(WValue v) {
+    return (int64_t)strlen(as_str(v));
+}
+
 static WArray *as_array(WValue v) {
     if (!w_is_array(v)) die("expected array");
     return (WArray *)w_as_ptr(v);
@@ -17008,6 +17026,7 @@ typedef struct WBlockReturnFrame {
     jmp_buf buf;
     struct WBlockReturnFrame *prev;
     WExceptionFrame *exception_stack;
+    int cleanup_depth;
     WValue value;
     int active;
 } WBlockReturnFrame;
@@ -17034,12 +17053,25 @@ void w_cleanup_pop(void) {
     if (g_cleanup_top > 0) g_cleanup_top--;
 }
 
-void *w_exception_push(void) {
-    WExceptionFrame *frame = calloc(1, sizeof(WExceptionFrame));
+static void w_cleanup_unwind_to(int target) {
+    if (target < 0) target = 0;
+    while (g_cleanup_top > target) {
+        g_cleanup_top--;
+        WCleanupEntry *entry = &g_cleanup_stack[g_cleanup_top];
+        entry->fn(entry->value);
+    }
+}
+
+void w_exception_frame_push(WExceptionFrame *frame) {
     frame->prev = w_exception_stack;
     frame->error = W_NIL;
     frame->cleanup_depth = g_cleanup_top;
     w_exception_stack = frame;
+}
+
+void *w_exception_push(void) {
+    WExceptionFrame *frame = calloc(1, sizeof(WExceptionFrame));
+    w_exception_frame_push(frame);
     return (void *)&frame->buf;
 }
 
@@ -17061,16 +17093,25 @@ void w_raise(WValue msg) {
         w_print_error_tail(16);
         exit(1);
     }
+    /* A block frame records the exception stack that was current when it was
+     * entered. If the target handler occurs in that saved stack's parent
+     * chain, the block is younger than the handler and this longjmp abandons
+     * it. Stop at the first older block: the handler was installed inside it,
+     * so that enclosing block remains valid. This reuses the block frame's
+     * existing snapshot and keeps exception-frame pushes at their old cost. */
+    while (w_block_return_stack) {
+        WExceptionFrame *saved = w_block_return_stack->exception_stack;
+        while (saved && saved != w_exception_stack) saved = saved->prev;
+        if (!saved) break;
+        w_block_return_stack->active = 0;
+        w_block_return_stack = w_block_return_stack->prev;
+    }
+
     /* Unwind recycle cleanup stack down to the frame's saved depth.
      * Each entry above the target is invoked in LIFO order. After this,
      * pool entries from abandoned scopes are returned to their pools so
      * exceptions don't leak them. */
-    int target = w_exception_stack->cleanup_depth;
-    while (g_cleanup_top > target) {
-        g_cleanup_top--;
-        WCleanupEntry *c = &g_cleanup_stack[g_cleanup_top];
-        c->fn(c->value);
-    }
+    w_cleanup_unwind_to(w_exception_stack->cleanup_depth);
     w_exception_stack->error = msg;
     _longjmp(w_exception_stack->buf, 1);
 }
@@ -17079,6 +17120,7 @@ void *w_block_return_push(void) {
     WBlockReturnFrame *frame = calloc(1, sizeof(WBlockReturnFrame));
     frame->prev = w_block_return_stack;
     frame->exception_stack = w_exception_stack;
+    frame->cleanup_depth = g_cleanup_top;
     frame->value = W_NIL;
     frame->active = 1;
     w_block_return_stack = frame;
@@ -17123,6 +17165,11 @@ void w_block_return_signal(uint64_t buf_bits, WValue value) {
     }
 
     w_exception_stack = target->exception_stack;
+    /* A non-local return abandons the target function and every intervening
+     * block frame. Recycle exactly the values pushed since that function's
+     * entry mark; the shared catch/exit block must not guess which conditional
+     * compile-time temps dominate this transfer. */
+    w_cleanup_unwind_to(target->cleanup_depth);
     target->value = value;
     _longjmp(target->buf, 1);
 }
@@ -19160,7 +19207,7 @@ static WValue w_ic_array_minmax(WValue r, WValue *a, int c) {
     return result_arr;
 }
 
-/* Phase 7+e: Array unshift/sort/reverse/join/copy migrated from cascade. */
+/* Phase 7+e: Array unshift/sort/reverse/copy migrated from cascade. */
 static WValue w_ic_array_unshift(WValue r, WValue *a, int c) {
     if (c < 1) die("unshift requires 1 argument");
     return w_array_unshift(r, a[0]);
@@ -19176,30 +19223,6 @@ static WValue w_ic_array_reverse(WValue r, WValue *a, int c) {
     for (int32_t i = arr->size - 1; i >= 0; i--)
         w_array_push(new_arr, array_slot_load_decoded(arr, i));
     return new_arr;
-}
-static WValue w_ic_array_join(WValue r, WValue *a, int c) {
-    WArray *arr = as_array(r);
-    /* Copy separator out of as_str's rotating buffer before iterating. */
-    const char *sep_tmp = "";
-    if (c > 0) sep_tmp = as_str(a[0]);
-    size_t sep_len = strlen(sep_tmp);
-    char *sep = malloc(sep_len + 1);
-    memcpy(sep, sep_tmp, sep_len + 1);
-    size_t total = 0;
-    for (int32_t i = 0; i < arr->size; i++) {
-        WValue s = w_to_s(array_slot_load_decoded(arr, i));
-        total += strlen(as_str(s));
-        if (i > 0) total += sep_len;
-    }
-    char *result = malloc(total + 1);
-    result[0] = '\0';
-    for (int32_t i = 0; i < arr->size; i++) {
-        if (i > 0) strcat(result, sep);
-        WValue s = w_to_s(array_slot_load_decoded(arr, i));
-        strcat(result, as_str(s));
-    }
-    free(sep);
-    return w_string_take(result, strlen(result));
 }
 static WValue w_ic_array_copy(WValue r, WValue *a, int c) {
     if (c < 1) die("copy requires at least 1 argument");
@@ -19232,13 +19255,6 @@ static WValue w_ic_string_length(WValue r, WValue *a, int c) {
     char buf[6]; const char *s; size_t len;
     w_str_data(r, buf, &s, &len);
     return w_int((int64_t)len);
-}
-static WValue w_ic_string_to_s(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    /* Symbols share the string dispatch table (same 0xFFF9 tag), so
-     * identity here would leak a Symbol out of sym.to_s — w_to_s is
-     * identity for strings and clears the symbol bit for symbols. */
-    return w_to_s(r);
 }
 /* Phase 7+g: String case-conversion and predicate methods. */
 static WValue w_ic_string_idx(WValue r, WValue *a, int c) {
@@ -22022,7 +22038,6 @@ static WICEntry w_ic_array_table[] = {
     {0, w_ic_array_unshift},  /* Phase 7+e */
     {0, w_ic_array_sort},     /* Phase 7+e */
     {0, w_ic_array_reverse},  /* Phase 7+e */
-    {0, w_ic_array_join},     /* Phase 7+e */
     {0, w_ic_array_copy},     /* Phase 7+e */
     {0, w_ic_array_fill},       /* Phase 7+f */
     {0, w_ic_array_view},
@@ -22068,7 +22083,6 @@ static WICEntry w_ic_array_table[] = {
 
 static WICEntry w_ic_string_table[] = {
     {0, w_ic_string_length},      /* WN_size */
-    {0, w_ic_string_to_s},
     {0, w_ic_string_idx},         /* Phase 7+g */
     {0, w_ic_string_upcase},
     {0, w_ic_string_downcase},
@@ -22615,87 +22629,85 @@ static void w_init_ic_tables(void) {
     w_ic_array_table[15].name = WN_unshift;   /* Phase 7+e */
     w_ic_array_table[16].name = WN_sort;
     w_ic_array_table[17].name = WN_reverse;
-    w_ic_array_table[18].name = WN_join;
-    w_ic_array_table[19].name = WN_copy;
-    w_ic_array_table[20].name = WN_fill;       /* Phase 7+f */
-    w_ic_array_table[21].name = WN_view;
-    w_ic_array_table[22].name = WN_slice_view;
-    w_ic_array_table[23].name = WN_data;
-    w_ic_array_table[24].name = WN_raw_ptr;
-    w_ic_array_table[25].name = WN_min;
-    w_ic_array_table[26].name = WN_max;
-    w_ic_array_table[27].name = WN_sum;
-    w_ic_array_table[28].name = WN_fastsum;
-    w_ic_array_table[29].name = WN_sumsq;
-    w_ic_array_table[30].name = WN_dot;
-    w_ic_array_table[31].name = WN_cross;
-    w_ic_array_table[32].name = WN_scale;
-    w_ic_array_table[33].name = WN_scale_bang;
-    w_ic_array_table[34].name = WN_cos;
-    w_ic_array_table[35].name = WN_sin;
-    w_ic_array_table[36].name = WN_sqrt;
-    w_ic_array_table[37].name = WN_matvec_i8;
-    w_ic_array_table[38].name = WN_matmul_i8;
-    w_ic_array_table[39].name = WN_uniq;        /* Phase 7+j */
-    w_ic_array_table[40].name = WN_take;
-    w_ic_array_table[41].name = WN_drop;
-    w_ic_array_table[42].name = WN_minmax;
-    w_ic_array_table[43].name = WN_each;        /* Phase 7+k */
-    w_ic_array_table[44].name = WN_any_q;
-    w_ic_array_table[45].name = WN_all_q;
-    w_ic_array_table[46].name = WN_none_q;
-    w_ic_array_table[47].name = WN_compact;
-    w_ic_array_table[48].name = WN_dup;
-    w_ic_array_table[49].name = WN_count;          /* Phase 7+n */
-    w_ic_array_table[50].name = WN_find_index;
-    w_ic_array_table[51].name = WN_index;
-    w_ic_array_table[52].name = WN_last_index;
-    w_ic_array_table[53].name = WN_replace_byte_bang;
-    w_ic_array_table[54].name = WN_delete_at;
-    w_ic_array_table[55].name = WN_slice;
-    w_ic_array_table[56].name = WN_exp;
-    w_ic_array_table[57].name = WN_log;
-    w_ic_array_table[58].name = WN_tan;
+    w_ic_array_table[18].name = WN_copy;
+    w_ic_array_table[19].name = WN_fill;       /* Phase 7+f */
+    w_ic_array_table[20].name = WN_view;
+    w_ic_array_table[21].name = WN_slice_view;
+    w_ic_array_table[22].name = WN_data;
+    w_ic_array_table[23].name = WN_raw_ptr;
+    w_ic_array_table[24].name = WN_min;
+    w_ic_array_table[25].name = WN_max;
+    w_ic_array_table[26].name = WN_sum;
+    w_ic_array_table[27].name = WN_fastsum;
+    w_ic_array_table[28].name = WN_sumsq;
+    w_ic_array_table[29].name = WN_dot;
+    w_ic_array_table[30].name = WN_cross;
+    w_ic_array_table[31].name = WN_scale;
+    w_ic_array_table[32].name = WN_scale_bang;
+    w_ic_array_table[33].name = WN_cos;
+    w_ic_array_table[34].name = WN_sin;
+    w_ic_array_table[35].name = WN_sqrt;
+    w_ic_array_table[36].name = WN_matvec_i8;
+    w_ic_array_table[37].name = WN_matmul_i8;
+    w_ic_array_table[38].name = WN_uniq;        /* Phase 7+j */
+    w_ic_array_table[39].name = WN_take;
+    w_ic_array_table[40].name = WN_drop;
+    w_ic_array_table[41].name = WN_minmax;
+    w_ic_array_table[42].name = WN_each;        /* Phase 7+k */
+    w_ic_array_table[43].name = WN_any_q;
+    w_ic_array_table[44].name = WN_all_q;
+    w_ic_array_table[45].name = WN_none_q;
+    w_ic_array_table[46].name = WN_compact;
+    w_ic_array_table[47].name = WN_dup;
+    w_ic_array_table[48].name = WN_count;          /* Phase 7+n */
+    w_ic_array_table[49].name = WN_find_index;
+    w_ic_array_table[50].name = WN_index;
+    w_ic_array_table[51].name = WN_last_index;
+    w_ic_array_table[52].name = WN_replace_byte_bang;
+    w_ic_array_table[53].name = WN_delete_at;
+    w_ic_array_table[54].name = WN_slice;
+    w_ic_array_table[55].name = WN_exp;
+    w_ic_array_table[56].name = WN_log;
+    w_ic_array_table[57].name = WN_tan;
     /* String */
     w_ic_string_table[0].name = WN_size;
-    w_ic_string_table[1].name = WN_to_s;
-    w_ic_string_table[2].name  = WN_idx;          /* Phase 7+g */
-    w_ic_string_table[3].name  = WN_upcase;
-    w_ic_string_table[4].name  = WN_downcase;
-    w_ic_string_table[5].name  = WN_swapcase;
-    w_ic_string_table[6].name  = WN_capitalize;
-    w_ic_string_table[7].name  = WN_concat;
-    w_ic_string_table[8].name  = WN_append;
-    w_ic_string_table[9].name  = WN_lshift;
-    w_ic_string_table[10].name = WN_prepend;
-    w_ic_string_table[11].name = WN_include_q;
-    w_ic_string_table[12].name = WN_starts_with_q;
-    w_ic_string_table[13].name = WN_ends_with_q;
-    w_ic_string_table[14].name = WN_ascii_q;
-    w_ic_string_table[15].name = WN_valid_utf8_q;
-    w_ic_string_table[16].name = WN_repeat;
-    w_ic_string_table[17].name = WN_chars;        /* Phase 7+h */
-    w_ic_string_table[18].name = WN_codes;
-    w_ic_string_table[19].name = WN_lchs;
-    w_ic_string_table[20].name = WN_bytes;
-    w_ic_string_table[21].name = WN_slice;
-    w_ic_string_table[22].name = WN_strip;
-    w_ic_string_table[23].name = WN_ltrim;
-    w_ic_string_table[24].name = WN_rtrim;
-    w_ic_string_table[25].name = WN_ord;
-    w_ic_string_table[26].name = WN_to_i;
-    w_ic_string_table[27].name = WN_to_f;
-    w_ic_string_table[28].name = WN_to_sym;
-    w_ic_string_table[29].name = WN_split;
-    w_ic_string_table[30].name = WN_replace;
-    w_ic_string_table[31].name = WN_gsub;
-    w_ic_string_table[32].name = WN_index;
-    w_ic_string_table[33].name = WN_matchop;     /* Phase 7+q */
-    w_ic_string_table[34].name = WN_match_q;
-    w_ic_string_table[35].name = WN_rindex;
-    w_ic_string_table[36].name = WN_reverse;
-    w_ic_string_table[37].name = WN_length;
-    w_ic_string_table[38].name = WN_empty_q;
+    w_ic_string_table[1].name  = WN_idx;          /* Phase 7+g */
+    w_ic_string_table[2].name  = WN_upcase;
+    w_ic_string_table[3].name  = WN_downcase;
+    w_ic_string_table[4].name  = WN_swapcase;
+    w_ic_string_table[5].name  = WN_capitalize;
+    w_ic_string_table[6].name  = WN_concat;
+    w_ic_string_table[7].name  = WN_append;
+    w_ic_string_table[8].name  = WN_lshift;
+    w_ic_string_table[9].name  = WN_prepend;
+    w_ic_string_table[10].name = WN_include_q;
+    w_ic_string_table[11].name = WN_starts_with_q;
+    w_ic_string_table[12].name = WN_ends_with_q;
+    w_ic_string_table[13].name = WN_ascii_q;
+    w_ic_string_table[14].name = WN_valid_utf8_q;
+    w_ic_string_table[15].name = WN_repeat;
+    w_ic_string_table[16].name = WN_chars;        /* Phase 7+h */
+    w_ic_string_table[17].name = WN_codes;
+    w_ic_string_table[18].name = WN_lchs;
+    w_ic_string_table[19].name = WN_bytes;
+    w_ic_string_table[20].name = WN_slice;
+    w_ic_string_table[21].name = WN_strip;
+    w_ic_string_table[22].name = WN_ltrim;
+    w_ic_string_table[23].name = WN_rtrim;
+    w_ic_string_table[24].name = WN_ord;
+    w_ic_string_table[25].name = WN_to_i;
+    w_ic_string_table[26].name = WN_to_f;
+    w_ic_string_table[27].name = WN_to_sym;
+    w_ic_string_table[28].name = WN_split;
+    w_ic_string_table[29].name = WN_replace;
+    w_ic_string_table[30].name = WN_gsub;
+    w_ic_string_table[31].name = WN_index;
+    w_ic_string_table[32].name = WN_matchop;     /* Phase 7+q */
+    w_ic_string_table[33].name = WN_match_q;
+    w_ic_string_table[34].name = WN_rindex;
+    w_ic_string_table[35].name = WN_reverse;
+    w_ic_string_table[36].name = WN_length;
+    w_ic_string_table[37].name = WN_empty_q;
     /* Int */
     w_ic_int_table[0].name    = WN_to_s;
     w_ic_int_table[1].name    = WN_abs;
@@ -23016,6 +23028,78 @@ WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc
     }
 
     return w_method_call_slow(recv, name, args_ptr, argc, cache, key);
+}
+
+/* Zero-argument method dispatch gets its own entry point because it is the
+ * most common dynamic call shape emitted by the compiler.  On a cached
+ * source-method hit, the generic dispatcher still has to enter an argument
+ * fill loop and switch on a runtime arity even though both the caller and the
+ * selected method have no explicit arguments.  Keep the same cache lookup,
+ * builtin-wrapper ABI, fallback behavior, and slow path, but make the arity-0
+ * source-method case a single direct call.  The nil-filled cases preserve the
+ * generic dispatcher's established behavior when a zero-argument call falls
+ * back to a method with a larger arity. */
+inline
+WValue w_method_call_cached_0(WValue recv, WValue name, WInlineCache *cache) {
+    /* Flatten ropes before dispatch so IC sees a string type. */
+    if (__builtin_expect(w_is_rope(recv), 0)) recv = w_rope_flatten(recv);
+
+    uint64_t key = w_dispatch_key(recv);
+
+    if (__builtin_expect(key == cache->type_key && cache->fn_ptr != NULL, 1)) {
+        if (cache->arity < 0) {
+            return ((WValue(*)(WValue, WValue*, int))cache->fn_ptr)(recv, NULL, 0);
+        }
+
+        typedef WValue (*fn0)(WValue);
+        typedef WValue (*fn1)(WValue, WValue);
+        typedef WValue (*fn2)(WValue, WValue, WValue);
+        typedef WValue (*fn3)(WValue, WValue, WValue, WValue);
+        typedef WValue (*fn4)(WValue, WValue, WValue, WValue, WValue);
+
+        if (__builtin_expect(cache->arity == 0, 1))
+            return ((fn0)cache->fn_ptr)(recv);
+
+        switch (cache->arity) {
+            case 1: return ((fn1)cache->fn_ptr)(recv, W_NIL);
+            case 2: return ((fn2)cache->fn_ptr)(recv, W_NIL, W_NIL);
+            case 3: return ((fn3)cache->fn_ptr)(recv, W_NIL, W_NIL, W_NIL);
+            case 4: return ((fn4)cache->fn_ptr)(recv, W_NIL, W_NIL, W_NIL, W_NIL);
+            default: break;
+        }
+    }
+
+    return w_method_call_slow(recv, name, NULL, 0, cache, key);
+}
+
+/* Every non-steady-state case reuses the canonical generic dispatcher. This
+ * keeps pointer formation for the vector ABI out of the source-instance hot
+ * helper and centralizes rope flattening, miss handling, nil padding, and
+ * native-wrapper behavior in the already-tested implementation. */
+__attribute__((noinline, cold))
+static WValue w_method_call_cached_1_compat(
+        WValue recv, WValue name, WValue arg, WInlineCache *cache) {
+    return w_method_call_cached(recv, name, &arg, 1, cache);
+}
+
+/* Scalar argc-one cached dispatch for a proven exact source class owning the
+ * target method. Its steady-state receiver is necessarily a WObject instance,
+ * so compute that cache key directly instead of running the full polymorphic
+ * WValue classifier. Conservative type metadata may still become stale across
+ * control flow; the outlined generic path above preserves exact semantics in
+ * that case. Cache contents stay in the canonical WInlineCache format. */
+inline
+WValue w_method_call_cached_1(WValue recv, WValue name, WValue arg,
+                              WInlineCache *cache) {
+    if (__builtin_expect(w_is_instance(recv), 1)) {
+        WObject *obj = (WObject *)w_as_ptr(recv);
+        uint64_t key = 0x100000000ULL | (uint64_t)obj->class_id;
+        if (__builtin_expect(key == cache->type_key &&
+                             cache->fn_ptr != NULL && cache->arity == 1, 1)) {
+            return ((WValue(*)(WValue, WValue))cache->fn_ptr)(recv, arg);
+        }
+    }
+    return w_method_call_cached_1_compat(recv, name, arg, cache);
 }
 
 /* Direct-call string builtins (bypass method dispatch) */
@@ -29638,9 +29722,7 @@ static void w_http1_connection_loop(WSocket *conn, WClosure *handler) {
          * Saves ~4% CPU on the hot path (setjmp was ~30ns per call). */
         WExceptionFrame *prev_stack = w_exception_stack;
         WExceptionFrame frame;
-        frame.prev = w_exception_stack;
-        frame.error = W_NIL;
-        w_exception_stack = &frame;
+        w_exception_frame_push(&frame);
         volatile int handler_error = 0;
 
         if (_setjmp(frame.buf) != 0) {
@@ -29936,9 +30018,7 @@ static WValue http_conn_goroutine_fn(WValue *captures, WValue arg) {
     if (w_tls_server_configured()) {
         WExceptionFrame *prev_stack = w_exception_stack;
         WExceptionFrame exc_frame;
-        exc_frame.prev = w_exception_stack;
-        exc_frame.error = W_NIL;
-        w_exception_stack = &exc_frame;
+        w_exception_frame_push(&exc_frame);
 
         if (_setjmp(exc_frame.buf) == 0) {
             WValue sock_val = w_box_ptr(a->conn, W_SUBTAG_GENERIC);

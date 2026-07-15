@@ -5,6 +5,14 @@
 # can register their 0xF9 type-class dispatch without loading that scaffold.
 
 + String
+  # Strings and Symbols share runtime dispatch key 0xF9. String WValues
+  # already have bit 0 clear; Symbol WValues use that bit as their only type
+  # distinction. This is identity for every String storage mode and the exact
+  # historical Symbol -> String conversion. Rope receivers are flattened at
+  # the established dispatch boundary before this body runs.
+  -> to_s
+    wvalue_from_bits($value & -2)
+
   # String modes 0..5 store their byte count directly in bits 1..3. Modes 6
   # and 7 are slab/heap strings and are only constructed for non-empty data;
   # rope receivers are flattened before String type-class dispatch. Therefore

@@ -742,6 +742,7 @@
         else
           result_reg = ensure_i64_value(new_fn, result)
         if new_fn[:exit_label] != nil && new_fn[:result_slot] != nil
+          emit_recycles_above_depth(new_fn, 0)
           emit_instruction(new_fn, {op: :store_i64, value: result_reg, ptr: new_fn[:result_slot]})
           emit_instruction(new_fn, {op: :br, label: new_fn[:exit_label]})
         else
@@ -751,6 +752,7 @@
 
   if needs_block_return
     if !block_terminated(new_fn)
+      emit_recycles_above_depth(new_fn, 0)
       emit_instruction(new_fn, {op: :store_i64, value: w_nil.to_s(), ptr: new_fn[:result_slot]})
       emit_instruction(new_fn, {op: :br, label: new_fn[:exit_label]})
 
@@ -764,7 +766,7 @@
     emit_instruction(new_fn, {op: :call_direct_void_ptr1, name: "w_block_return_pop", arg: block_return_buf})
     final_reg = next_temp(new_fn)
     emit_instruction(new_fn, {op: :load_i64, temp: final_reg, ptr: new_fn[:result_slot]})
-    emit_instruction(new_fn, {op: :ret_i64, value: final_reg})
+    emit_instruction(new_fn, {op: :ret_i64, value: final_reg, function_recycle_count: 0})
 
   finalize_function(new_fn)
   nil
@@ -893,26 +895,50 @@
   # (`Vector`, `Vec3`) resolves unreliably, but the runtime stores ancestry
   # under base names, so `is_a?("Vector")` is exact. The runtime is_a?
   # intercept accepts a string target and walks the ancestry by base name.
+  # This compiler-only intrinsic lowers to that ancestry check directly,
+  # avoiding a full dynamic send for every overload gate.
   tname = Tungsten:AST:String.new("" + ovl.param_types[0].to_s())
-  Tungsten:AST:Call.new(Tungsten:AST:Parg.new(1), "is_a?", [tname])
+  call = Tungsten:AST:Call.new(nil, "__compiler_overload_is_a", [Tungsten:AST:Parg.new(1), tname])
+  ast_set(call, :compiler_intrinsic, :overload_is_a)
+  call
 
--> overload_worker_call(name, ovl, arity)
+-> overload_worker_call(class_name, name, ovl, arity)
   iname = overload_internal_name("" + name, ovl.param_types)
-  Tungsten:AST:Call.new(Tungsten:AST:Self.new, iname, overload_dispatch_args(arity))
+  worker = ast_deep_clone(ovl)
+  worker.name = iname
+  # A body containing `yield` gains an implicit runtime block parameter that
+  # the synthesized dispatcher cannot forward. Preserve the old dynamic-call
+  # behavior for that unusual shape instead of emitting a mismatched direct
+  # call. Ordinary operator workers have exactly self + explicit arguments.
+  if method_runtime_arity(worker) != arity + 1
+    return Tungsten:AST:Call.new(Tungsten:AST:Self.new, iname, overload_dispatch_args(arity))
+  target = class_method_function_name(class_name, worker)
+  args = [Tungsten:AST:String.new(target), Tungsten:AST:Self.new]
+  dispatch_args = overload_dispatch_args(arity)
+  i = 0
+  while i < dispatch_args.size()
+    args.push(dispatch_args[i])
+    i += 1
+  # The dispatcher and workers are synthesized as one unit, so the target is
+  # known exactly. Lower it as a direct internal call instead of re-entering
+  # the runtime method table under the worker's private name.
+  call = Tungsten:AST:Call.new(nil, "__compiler_overload_worker", args)
+  ast_set(call, :compiler_intrinsic, :overload_worker)
+  call
 
--> build_overload_dispatcher(name, arity, gated, catch_all)
+-> build_overload_dispatcher(class_name, name, arity, gated, catch_all)
   first = gated[0]
   elsifs = []
   gi = 1
   while gi < gated.size()
     g = gated[gi]
-    elsifs.push([overload_is_a_cond(g), [overload_worker_call(name, g, arity)]])
+    elsifs.push([overload_is_a_cond(g), [overload_worker_call(class_name, name, g, arity)]])
     gi += 1
   if catch_all != nil
-    else_body = [overload_worker_call(name, catch_all, arity)]
+    else_body = [overload_worker_call(class_name, name, catch_all, arity)]
   else
     else_body = [Tungsten:AST:Super.new(overload_dispatch_args(arity))]
-  branch = Tungsten:AST:If.new(overload_is_a_cond(first), [overload_worker_call(name, first, arity)], elsifs, else_body)
+  branch = Tungsten:AST:If.new(overload_is_a_cond(first), [overload_worker_call(class_name, name, first, arity)], elsifs, else_body)
   params = []
   pi = 1
   while pi <= arity
@@ -1024,7 +1050,7 @@
             gated[gb] = tmp
           gb += 1
         ga += 1
-      new_body.push(build_overload_dispatcher("" + g[:name], g[:arity], gated, catch_all))
+      new_body.push(build_overload_dispatcher(class_name, "" + g[:name], g[:arity], gated, catch_all))
     oi += 1
   new_body
 
@@ -1372,16 +1398,34 @@
   expanded
 
 -> replace_or_append_function(mod, new_fn)
-  existing_fi = 0
-  existing_idx = -1
-  while existing_fi < mod[:functions].size()
-    if mod[:functions][existing_fi][:name] == new_fn[:name]
-      existing_idx = existing_fi
-    existing_fi += 1
-  if existing_idx >= 0
-    mod[:functions][existing_idx] = new_fn
-  else
-    mod[:functions].push(new_fn)
+  functions = mod[:functions]
+
+  # Class-heavy programs call this once per lowered method. Scanning the full
+  # function array each time made that path quadratic. Keep a name -> array
+  # index alongside it, lazily catching up with functions appended by the
+  # other lowering paths before each lookup. If a direct append introduced a
+  # duplicate name, the newest index wins exactly as the old full scan did.
+  function_index = mod[:function_index_by_name]
+  if function_index == nil
+    function_index = {}
+    mod[:function_index_by_name] = function_index
+    mod[:function_indexed_count] = 0
+  indexed_count = mod[:function_indexed_count]
+  while indexed_count < functions.size()
+    function_index[functions[indexed_count][:name]] = indexed_count
+    indexed_count += 1
+  mod[:function_indexed_count] = indexed_count
+
+  existing_idx = function_index[new_fn[:name]]
+  if existing_idx != nil
+    functions[existing_idx] = new_fn
+    return nil
+
+  new_idx = functions.size()
+  functions.push(new_fn)
+  function_index[new_fn[:name]] = new_idx
+  mod[:function_indexed_count] = new_idx + 1
+  nil
 
 -> lower_static_method_boxed_wrapper(ctx, class_name, node, raw_fn_name, wrapper_fn_name, child_var_types)
   mod = ctx[:mod]
@@ -1474,7 +1518,12 @@
   replace_or_append_function(mod, new_fn)
   if node.return_type != nil
     raw_return_type = normalize_type_symbol(node.return_type)
-    if is_raw_int_storage_type(raw_return_type)
+    # Runtime-dispatched instance methods are registered directly in the
+    # method table, whose ABI always returns a boxed WValue.  Returning a raw
+    # machine integer here makes values such as `1` look like the W_FALSE tag
+    # to w_method_call_cached.  Static methods may use a raw worker because
+    # register_static_method installs the boxed wrapper generated below.
+    if raw_abi && is_raw_int_storage_type(raw_return_type)
       new_fn[:raw_return_type] = raw_return_type
     # Static methods are called `Class.name(…)` — register the dotted key
     # infer_type's static-receiver lookup uses, so a declared return type
@@ -1651,6 +1700,7 @@
         result = lower_expression(child_ctx, last)
         result_reg = ensure_return_value(child_ctx, result, last)
         if new_fn[:exit_label] != nil && new_fn[:result_slot] != nil
+          emit_recycles_above_depth(new_fn, 0)
           emit_instruction(new_fn, {op: :store_i64, value: result_reg, ptr: new_fn[:result_slot]})
           emit_instruction(new_fn, {op: :br, label: new_fn[:exit_label]})
         else
@@ -1660,6 +1710,7 @@
 
   if needs_block_return
     if !block_terminated(new_fn)
+      emit_recycles_above_depth(new_fn, 0)
       emit_instruction(new_fn, {op: :store_i64, value: w_nil.to_s(), ptr: new_fn[:result_slot]})
       emit_instruction(new_fn, {op: :br, label: new_fn[:exit_label]})
 
@@ -1673,7 +1724,7 @@
     emit_instruction(new_fn, {op: :call_direct_void_ptr1, name: "w_block_return_pop", arg: block_return_buf})
     final_reg = next_temp(new_fn)
     emit_instruction(new_fn, {op: :load_i64, temp: final_reg, ptr: new_fn[:result_slot]})
-    emit_instruction(new_fn, {op: :ret_i64, value: final_reg})
+    emit_instruction(new_fn, {op: :ret_i64, value: final_reg, function_recycle_count: 0})
 
   finalize_function(new_fn)
   if raw_abi && wrapper_fn_name != nil && wrapper_fn_name != fn_name

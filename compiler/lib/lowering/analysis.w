@@ -699,28 +699,37 @@
 -> raw_int_candidate_map(body, declared_types)
   candidates = {}
   collect_raw_candidate_names_list(body, candidates, declared_types)
-  changed = true
-  while changed
-    changed = false
+
+  # Most scopes have no untyped local assignment at all.  The collection
+  # walk deliberately stops at nested definitions, but visit_promote_list's
+  # conservative fallback walks through them; returning here avoids a second
+  # full AST traversal (and, for class/main scopes, all nested method bodies)
+  # when there is nothing the promotion pass could retain.
+  candidate_names = candidates.keys()
+  if candidate_names.size() == 0
+    return candidates
+
+  # declared_types is immutable during this analysis.  Reuse its key list
+  # across fixed-point rounds instead of materializing it every time.
+  declared_names = declared_types.keys()
+  loop
     known = {}
-    dkeys = declared_types.keys()
     dki = 0
-    while dki < dkeys.size()
-      known[dkeys[dki]] = declared_types[dkeys[dki]]
+    while dki < declared_names.size()
+      known[declared_names[dki]] = declared_types[declared_names[dki]]
       dki += 1
-    ckeys = candidates.keys()
     cki = 0
-    while cki < ckeys.size()
-      known[ckeys[cki]] = :i64
+    while cki < candidate_names.size()
+      known[candidate_names[cki]] = :i64
       cki += 1
 
     records = {}
     visit_promote_list(body, records, known)
     next_candidates = {}
-    names = candidates.keys()
+    kept = 0
     i = 0
-    while i < names.size()
-      name = names[i]
+    while i < candidate_names.size()
+      name = candidate_names[i]
       rec = records[name]
       # Mirror analyze_int_promotions's filter: a var that escapes (passed to
       # a call, mutated inside a block, returned) crosses a WValue boundary,
@@ -732,22 +741,18 @@
       # fixed to walk slab nodes; see the gate there.)
       if rec != nil && rec[:has_int_assign] == true && rec[:has_other_assign] != true && rec[:has_escape] != true && declared_types[name] == nil
         next_candidates[name] = true
+        kept += 1
       i += 1
 
-    old_names = candidates.keys()
-    oi = 0
-    while oi < old_names.size()
-      if next_candidates[old_names[oi]] != true
-        changed = true
-      oi += 1
-    new_names = next_candidates.keys()
-    ni = 0
-    while ni < new_names.size()
-      if candidates[new_names[ni]] != true
-        changed = true
-      ni += 1
+    # next_candidates is constructed exclusively from candidate_names, so it
+    # is always a subset.  Equal cardinality therefore proves the fixed point;
+    # an empty subset is terminal too.  This replaces two key-list allocations
+    # and two membership scans per round, and avoids rescanning the body after
+    # the last candidate is removed.
+    if kept == 0 || kept == candidate_names.size()
+      return next_candidates
     candidates = next_candidates
-  candidates
+    candidate_names = candidates.keys()
 
 -> find_reassigned_params(body, param_names)
   if body == nil || param_names == nil || param_names.size() == 0

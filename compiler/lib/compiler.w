@@ -68,9 +68,16 @@ use target
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
     if func[:blocks].size() > 0
-      analysis = analyze_function(func)
-      func[:cfg_analysis] = analysis
-      ssa_convert(func, analysis)
+      # CFG/dominator/frontier construction exists only for mem2reg. Check
+      # the two cheap eligibility conditions first: roughly half of the
+      # self-hosted compiler's functions have no promotable slots, so eagerly
+      # analyzing every function wastes most of this phase's work.
+      if !has_overflow_checked(func)
+        promotable = find_promotable_vars(func)
+        if promotable.keys().size() > 0
+          analysis = analyze_function(func)
+          func[:cfg_analysis] = analysis
+          ssa_convert(func, analysis, nil, promotable)
       prune_empty_blocks(func)
     fi += 1
   t_cfg = clock() - cfg_started_at

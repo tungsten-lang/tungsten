@@ -2,6 +2,21 @@
 use ast
 use ../../core/token
 
+# Parser-internal packed-token decoders are top-level functions so hot parser
+# sites lower to direct calls instead of one-argument method inline caches.
+# The public Parser methods below remain as compatibility wrappers.
+-> parser_tok_type(p)
+  bits = ccall_nobox("w_numeric_to_i64", p)
+  (bits >> 38) & 0xFF
+
+-> parser_tok_off(p)
+  bits = ccall_nobox("w_numeric_to_i64", p)
+  (bits >> 2) & 0xFFFFFF
+
+-> parser_tok_len(p)
+  bits = ccall_nobox("w_numeric_to_i64", p)
+  (bits >> 26) & 0xFFF
+
 + Parser
   -> new(@token_count, @packed_tokens, @source, @values, @line_at, @col_at, @file)
     @pos = 0
@@ -46,20 +61,18 @@ use ../../core/token
   -> struct_name?(name)
     @struct_names[name] == true
 
-  # Inline-shift accessors for packed Tokens. Token's class methods
-  # (`.type`/`.offset`) route through W_TAG_CHAR subtype dispatch — the
-  # C VM stage 0 doesn't support that dispatch on Integer-typed values
-  # (Tungsten boxes packed i64s as Integer when read out of an Array).
-  # Calling these helpers instead does the bit-shift inline so both the
-  # C VM and the compiled binary see the same arithmetic.
+  # Raw accessors for packed Tokens. The token stream's signed W_TAG_CHAR bit
+  # pattern materializes as a BigInt when it crosses from i64[] into Array.
+  # Normalize that Int/BigInt value once, then keep shifts and masks unboxed;
+  # shifting the numeric object directly enters the allocating BigInt path.
   -> tok_type(p)
-    (p >> 38) & 0xFF
+    parser_tok_type(p)
 
   -> tok_off(p)
-    (p >> 2) & 0xFFFFFF
+    parser_tok_off(p)
 
   -> tok_len(p)
-    (p >> 26) & 0xFFF
+    parser_tok_len(p)
 
   # Set the codepoint array post-construction. The packed token's `off`
   # indexes this array (codepoint-indexed), NOT the byte-indexed
@@ -78,14 +91,18 @@ use ../../core/token
   # operators are all ASCII, so lit[i] (one codepoint) compares
   # directly to @chars[off+i] (one codepoint).
   -> tok_equal?(p, src, lit)
-    len = (p >> 26) & 0xFFF
+    # Decode once here rather than dynamically dispatching through tok_len
+    # and tok_off. Equality needs both fields from the same token, so two
+    # helper calls would repeat numeric normalization and IC dispatch.
+    bits = ccall_nobox("w_numeric_to_i64", p)
+    len = (bits >> 26) & 0xFFF
     if len != lit.size()
       return false
     # @chars is codepoint-indexed (= source.chars()), matching the token's
     # codepoint offset; @source.slice would be byte-indexed and misalign
     # after any multi-byte UTF-8 char earlier in the file. Keywords and
     # operators are ASCII, so a per-codepoint string compare is exact.
-    off = (p >> 2) & 0xFFFFFF
+    off = (bits >> 2) & 0xFFFFFF
     lit_cps = lit.chars()
     i = 0
     while i < len
@@ -100,7 +117,7 @@ use ../../core/token
     # giving disambiguators (e.g., `foo(x)` vs `foo (x)`) a single-bit
     # query without restructuring the grammar around explicit SP nodes.
     @sp_before = false
-    while @pos < @token_count && tok_type(@packed_tokens[@pos]) == T_SP
+    while @pos < @token_count && parser_tok_type(@packed_tokens[@pos]) == T_SP
       @sp_before = true
       @pos += 1
     if @pos < @token_count
@@ -128,19 +145,19 @@ use ../../core/token
   # the lexer-built tables. Each table is one entry per source
   # codepoint — large but already in memory, so the lookup is O(1).
   -> tok_line(packed_tok)
-    @line_at[tok_off(packed_tok)]
+    @line_at[parser_tok_off(packed_tok)]
 
   -> tok_col(packed_tok)
-    @col_at[tok_off(packed_tok)]
+    @col_at[parser_tok_off(packed_tok)]
 
   -> current_line
-    @line_at[tok_off(@current_packed)]
+    @line_at[parser_tok_off(@current_packed)]
 
   -> current_col
-    @col_at[tok_off(@current_packed)]
+    @col_at[parser_tok_off(@current_packed)]
 
   -> current_offset
-    tok_off(@current_packed)
+    parser_tok_off(@current_packed)
 
   # Compile-error helper — builds the runtime raise dict for a parse
   # error AT THE CURRENT POSITION, deriving file/row/col from @file
@@ -150,17 +167,17 @@ use ../../core/token
   # builds a plain Hash with row/col as ordinary Integers (no bit-
   # packing), so there's no truncation concern here to begin with.
   -> compile_error_at(code, message)
-    off = tok_off(@current_packed)
+    off = parser_tok_off(@current_packed)
     {rt: :compile_error, code: code, message: message, file: @file, row: @line_at[off], col: @col_at[off], span_length: 1}
 
   # Packed-loc for any packed Token. Used at AST-construction sites
   # that want the loc for a specific (peeked or saved) token rather
   # than @current_packed.
   -> make_loc_for(packed_tok)
-    make_loc_offset(tok_off(packed_tok))
+    make_loc_offset(parser_tok_off(packed_tok))
 
   -> make_loc_here
-    make_loc_offset(tok_off(@current_packed))
+    make_loc_offset(parser_tok_off(@current_packed))
 
   # Symbolic name for an integer token type id — used in error
   # messages where the human-friendly symbol name (e.g. "KEYWORD")
@@ -317,14 +334,14 @@ use ../../core/token
   # Formatted description of the current token for error messages:
   # "KEYWORD(if)" / "ID(x)" / "EOF()".
   -> current_desc
-    "[tok_type_name(tok_type(@current_packed))]([current_value()])"
+    "[tok_type_name(parser_tok_type(@current_packed))]([current_value()])"
 
   # Returns the operator symbol (:PLUS, :STAR, …) for the current
   # token, then advances. Replaces the legacy `advance()[:type]`
   # idiom in the binary-op while-loops. The symbol contract is the
   # same one lowering's `op == :PLUS` branches consume.
   -> advance_op_sym
-    sym = op_sym(tok_type(@current_packed))
+    sym = op_sym(parser_tok_type(@current_packed))
     advance()
     sym
 
@@ -378,7 +395,7 @@ use ../../core/token
     idx = @pos + 1
     seen = 0
     while idx < @token_count
-      if tok_type(@packed_tokens[idx]) != T_SP
+      if parser_tok_type(@packed_tokens[idx]) != T_SP
         seen += 1
         if seen == offset
           return @packed_tokens[idx]
@@ -392,7 +409,7 @@ use ../../core/token
     idx = @pos + 1
     seen = 0
     while idx < @token_count
-      if tok_type(@packed_tokens[idx]) != T_SP
+      if parser_tok_type(@packed_tokens[idx]) != T_SP
         seen += 1
         if seen == offset
           return idx
@@ -400,7 +417,7 @@ use ../../core/token
     -1
 
   -> peek_type(offset = 1)
-    tok_type(peek_packed(offset))
+    parser_tok_type(peek_packed(offset))
 
   # Pre-parsed value at `offset` non-SP positions ahead — reads from
   # @values, which mirrors the hash's :value slot. For ID/KEYWORD/TYPE
@@ -444,7 +461,7 @@ use ../../core/token
   # via Lexer.new → Token.make so its top-level T_X assignments are
   # in scope by the time the parser runs.
   -> at_type?(type_id)
-    tok_type(@current_packed) == type_id
+    parser_tok_type(@current_packed) == type_id
 
   -> minus_token?
     at_type?(T_MINUS)
@@ -454,17 +471,17 @@ use ../../core/token
 
   -> data_decl_ahead?
     idx = @pos + 1
-    while idx < @token_count && tok_type(@packed_tokens[idx]) == T_SP
+    while idx < @token_count && parser_tok_type(@packed_tokens[idx]) == T_SP
       idx += 1
     if idx >= @token_count
       return false
-    t = tok_type(@packed_tokens[idx])
+    t = parser_tok_type(@packed_tokens[idx])
     t == T_ID || t == T_TYPE
 
   # Integer-id companion of expect_type(T_SYM). Raises on mismatch.
   # No return value — all callers throw it away.
   -> expect_type(type_id)
-    if tok_type(@current_packed) != type_id
+    if parser_tok_type(@current_packed) != type_id
       raise compile_error_at(:E_PARSE_EXPECTED_TOKEN, "Expected [type_id], got [current_desc()]")
     advance()
 
@@ -472,7 +489,7 @@ use ../../core/token
   # `expect_type_value(T_X)`. Raises on type mismatch, otherwise
   # returns @values[pos] then advances.
   -> expect_type_value(type_id)
-    if tok_type(@current_packed) != type_id
+    if parser_tok_type(@current_packed) != type_id
       raise compile_error_at(:E_PARSE_EXPECTED_TOKEN, "Expected [type_id], got [current_desc()]")
     v = @values[@pos]
     advance()
@@ -498,7 +515,7 @@ use ../../core/token
     v
 
   -> at_kw?(kw)
-    tok_type(@current_packed) == T_KEYWORD && @values[@pos] == kw
+    parser_tok_type(@current_packed) == T_KEYWORD && @values[@pos] == kw
 
   -> expect_kw(kw)
     if !at_kw?(kw)
@@ -509,7 +526,7 @@ use ../../core/token
   # combos like `@gpu`, `@schedule` that disambiguate attribute
   # directives. Same pattern as at_kw? but parameterized on type.
   -> at_typed?(type_id, literal)
-    tok_type(@current_packed) == type_id && tok_equal?(@current_packed, @source, literal)
+    parser_tok_type(@current_packed) == type_id && tok_equal?(@current_packed, @source, literal)
 
   -> expect_typed(type_id, literal)
     if !at_typed?(type_id, literal)
@@ -517,7 +534,7 @@ use ../../core/token
     advance()
 
   -> expect_method_name
-    if tok_type(@current_packed) in (T_ID T_TYPE T_KEYWORD T_NAME T_CONSTANT)
+    if parser_tok_type(@current_packed) in (T_ID T_TYPE T_KEYWORD T_NAME T_CONSTANT)
       advance()
       return nil
     if at_type?(T_LBRACKET) && peek_type() == T_RBRACKET
@@ -526,7 +543,7 @@ use ../../core/token
       if at_type?(T_ASSIGN)
         advance()
       return nil
-    if tok_type(@current_packed) in (T_BANG T_PUTS_OP T_LSHIFT T_RSHIFT T_PLUS T_MINUS T_STAR T_POW T_SLASH T_PERCENT T_DOT_PRODUCT T_CROSS_PRODUCT T_HADAMARD T_KRONECKER T_EQ T_TRIPLE_EQ T_NEQ T_MATCH T_NMATCH T_LT T_GT T_LTE T_GTE T_SPACESHIP)
+    if parser_tok_type(@current_packed) in (T_BANG T_PUTS_OP T_LSHIFT T_RSHIFT T_PLUS T_MINUS T_STAR T_POW T_SLASH T_PERCENT T_DOT_PRODUCT T_CROSS_PRODUCT T_HADAMARD T_KRONECKER T_EQ T_TRIPLE_EQ T_NEQ T_MATCH T_NMATCH T_LT T_GT T_LTE T_GTE T_SPACESHIP)
       advance()
       return nil
     raise compile_error_at(:E_PARSE_EXPECTED_METHOD_NAME, "Expected method name, got [current_desc()]")
@@ -536,7 +553,7 @@ use ../../core/token
   # the surrounding hash. Used at AST-construction sites that only
   # need the name + an already-captured loc.
   -> expect_method_name_value
-    if tok_type(@current_packed) in (T_ID T_TYPE T_KEYWORD T_NAME T_CONSTANT)
+    if parser_tok_type(@current_packed) in (T_ID T_TYPE T_KEYWORD T_NAME T_CONSTANT)
       return advance_value()
     if at_type?(T_LBRACKET) && peek_type() == T_RBRACKET
       advance()
@@ -545,7 +562,7 @@ use ../../core/token
         advance()
         return "[]="
       return "[]"
-    if tok_type(@current_packed) in (T_BANG T_PUTS_OP T_LSHIFT T_RSHIFT T_PLUS T_MINUS T_STAR T_POW T_SLASH T_PERCENT T_DOT_PRODUCT T_CROSS_PRODUCT T_HADAMARD T_KRONECKER T_EQ T_TRIPLE_EQ T_NEQ T_MATCH T_NMATCH T_LT T_GT T_LTE T_GTE T_SPACESHIP)
+    if parser_tok_type(@current_packed) in (T_BANG T_PUTS_OP T_LSHIFT T_RSHIFT T_PLUS T_MINUS T_STAR T_POW T_SLASH T_PERCENT T_DOT_PRODUCT T_CROSS_PRODUCT T_HADAMARD T_KRONECKER T_EQ T_TRIPLE_EQ T_NEQ T_MATCH T_NMATCH T_LT T_GT T_LTE T_GTE T_SPACESHIP)
       return advance_value()
     # T_CLASS_DEF is the bare `+` token at line-start positions; after
     # `-> ` it's still the plus method name. Accept it here so
@@ -556,7 +573,7 @@ use ../../core/token
     ""
 
   -> identifier_name_token?
-    tok_type(@current_packed) == T_ID || tok_type(@current_packed) == T_TYPE || at_kw?("with")
+    parser_tok_type(@current_packed) == T_ID || parser_tok_type(@current_packed) == T_TYPE || at_kw?("with")
 
   -> keyword_label_token?
     (at_type?(T_ID) || at_kw?("with")) && peek_type() == T_COLON && peek_type(2) != T_COLON
@@ -581,13 +598,13 @@ use ../../core/token
 
   # Integer-id companion of match?(:SYM) — advances on match.
   -> match_type?(type_id)
-    if tok_type(@current_packed) != type_id
+    if parser_tok_type(@current_packed) != type_id
       return false
     advance()
     true
 
   -> skip_newlines
-    while tok_type(@current_packed) in (T_NEWLINE T_TYPE_HINT)
+    while parser_tok_type(@current_packed) in (T_NEWLINE T_TYPE_HINT)
       if at_type?(T_TYPE_HINT)
         @pending_type_hints.push(current_value())
       advance()
@@ -597,13 +614,13 @@ use ../../core/token
       advance()
 
   -> skip_statement_end
-    while tok_type(@current_packed) in (T_NEWLINE T_SEMICOLON T_TYPE_HINT)
+    while parser_tok_type(@current_packed) in (T_NEWLINE T_SEMICOLON T_TYPE_HINT)
       if at_type?(T_TYPE_HINT)
         @pending_type_hints.push(current_value())
       advance()
 
   -> skip_block_whitespace
-    while tok_type(@current_packed) in (T_NEWLINE T_SEMICOLON T_INDENT T_DEDENT)
+    while parser_tok_type(@current_packed) in (T_NEWLINE T_SEMICOLON T_INDENT T_DEDENT)
       advance()
 
   # -- Program & body parsing --
@@ -710,9 +727,9 @@ use ../../core/token
     # Token shape: KEYWORD("in") SP CONSTANT/NAME/ID SYMBOL* NL.
     if at_kw?("in")
       ns_pos = @pos + 1
-      while ns_pos < @token_count && tok_type(@packed_tokens[ns_pos]) == T_SP
+      while ns_pos < @token_count && parser_tok_type(@packed_tokens[ns_pos]) == T_SP
         ns_pos += 1
-      tt = tok_type(@packed_tokens[ns_pos])
+      tt = parser_tok_type(@packed_tokens[ns_pos])
       if tt == T_NAME || tt == T_CONSTANT || tt == T_TYPE || tt == T_ID
         advance()  # `in`
         skip_spaces()
@@ -803,7 +820,7 @@ use ../../core/token
       saved = @pos
       advance()
       skip_spaces()
-      if tok_type(@current_packed) in (T_ID T_TYPE)
+      if parser_tok_type(@current_packed) in (T_ID T_TYPE)
         name = advance_value()
         skip_spaces()
         # Optional `(StructName)` — the backing C-struct name for this
@@ -830,7 +847,7 @@ use ../../core/token
             # Raw byte layout: raw N
             advance()
             skip_spaces()
-            if tok_type(@current_packed) == T_INT
+            if parser_tok_type(@current_packed) == T_INT
               count = advance_value()
               skip_spaces()
               skip_newlines()
@@ -1297,7 +1314,7 @@ use ../../core/token
 
   -> parse_comparison
     left = parse_equality()
-    while tok_type(@current_packed) in (T_LT T_LTE T_GT T_GTE T_SPACESHIP)
+    while parser_tok_type(@current_packed) in (T_LT T_LTE T_GT T_GTE T_SPACESHIP)
       op = advance_op_sym()
       right = parse_equality()
       if op == :SPACESHIP
@@ -1311,7 +1328,7 @@ use ../../core/token
 
   -> parse_equality
     left = parse_addition()
-    while tok_type(@current_packed) in (T_EQ T_NEQ T_MATCH)
+    while parser_tok_type(@current_packed) in (T_EQ T_NEQ T_MATCH)
       op = advance_op_sym()
       right = parse_addition()
       left = Tungsten:AST:BinaryOp.new(left, op, right)
@@ -1327,7 +1344,7 @@ use ../../core/token
       return left
     # Phase 4e dot-prefix elementwise: `.+ .-` share addition precedence
     # with their scalar counterparts. Julia convention.
-    while tok_type(@current_packed) in (T_PLUS T_MINUS T_DOT_PLUS T_DOT_MINUS T_PLUS_MINUS)
+    while parser_tok_type(@current_packed) in (T_PLUS T_MINUS T_DOT_PLUS T_DOT_MINUS T_PLUS_MINUS)
       measurement = at_type?(T_PLUS_MINUS)
       if measurement
         advance()
@@ -1343,7 +1360,7 @@ use ../../core/token
   -> parse_shift
     left = parse_multiplication()
     # Phase 4e dot-prefix: `.<<` `.>>` share shift precedence.
-    while tok_type(@current_packed) in (T_LSHIFT T_RSHIFT T_DOT_LSHIFT T_DOT_RSHIFT)
+    while parser_tok_type(@current_packed) in (T_LSHIFT T_RSHIFT T_DOT_LSHIFT T_DOT_RSHIFT)
       op = advance_op_sym()
       right = parse_multiplication()
       left = Tungsten:AST:BinaryOp.new(left, op, right)
@@ -1353,7 +1370,7 @@ use ../../core/token
     left = parse_power()
     # Phase 4e dot-prefix elementwise: `.* ./` share multiplication
     # precedence with their scalar counterparts.
-    while tok_type(@current_packed) in (T_STAR T_SLASH T_PERCENT T_DOT_STAR T_DOT_SLASH T_DOT_PRODUCT T_CROSS_PRODUCT T_HADAMARD T_KRONECKER)
+    while parser_tok_type(@current_packed) in (T_STAR T_SLASH T_PERCENT T_DOT_STAR T_DOT_SLASH T_DOT_PRODUCT T_CROSS_PRODUCT T_HADAMARD T_KRONECKER)
       op = advance_op_sym()
       right = parse_power()
       left = Tungsten:AST:BinaryOp.new(left, op, right)
@@ -1448,11 +1465,11 @@ use ../../core/token
           args = []
         receiver = expr
         expr = Tungsten:AST:Call.new(receiver, name, args, block)
-        # ClassRef nodes are interned by name, so sparse metadata written on
-        # `Tensor` would otherwise leak to every Tensor reference parsed later.
-        # Unit-bearing Tensor syntax belongs to this factory call, not the
-        # globally interned class leaf.
-        if ast_kind(receiver) == :class_ref && receiver.name == "Tensor" && receiver.type_args != nil
+        # ClassRef nodes are interned by name, so sparse generic metadata must
+        # live on this distinct call node. Otherwise parsing `Mat<T, m, n>` in
+        # one source file can overwrite a user's later `Mat<f64, 2, 3>` (or
+        # vice versa) through the globally shared `Mat` leaf.
+        if ast_kind(receiver) == :class_ref && receiver.type_args != nil
           expr.type_args = receiver.type_args
           receiver.type_args = nil
         expr.loc = name_loc
@@ -2695,7 +2712,7 @@ use ../../core/token
     # Capture the name-token type BEFORE expect_method_name_value()
     # advances — the identifier-vs-operator distinction below depends
     # on it for arity suffix handling.
-    name_tok_type = tok_type(@current_packed)
+    name_tok_type = parser_tok_type(@current_packed)
     name = expect_method_name_value()
     # Setter methods: name= (e.g. cache_dir=)
     if at_type?(T_ASSIGN)
@@ -2763,7 +2780,7 @@ use ../../core/token
       advance()
       param_types = []
       while !at_type?(T_RPAREN)
-        if !is_param_type_token?(tok_type(@current_packed))
+        if !is_param_type_token?(parser_tok_type(@current_packed))
           raise compile_error_at(:E_PARSE_BAD_PARAM_TYPE, "Expected type name in param type list, got [current_desc()]")
         type_name = advance_value()
         # Optional `[]` suffix for typed-array params (e.g. `i64[]`).
@@ -3731,7 +3748,7 @@ use ../../core/token
     args
 
   -> bare_arg_start?
-    t = tok_type(@current_packed)
+    t = parser_tok_type(@current_packed)
     if t in (T_INT T_FLOAT T_STRING T_STRING_INTERP T_REGEX T_REGEX_CAPTURE T_SYMBOL)
       return true
     if t in (T_NAME T_CONSTANT T_IVAR T_BANG T_LPAREN T_LBRACKET T_BLOCK_CALL)

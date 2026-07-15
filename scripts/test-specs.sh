@@ -143,11 +143,29 @@ run_cuda_emit_spec() {
 
 compiled_specs=(
   spec/compiler/ast_body_native_spec.w
+  spec/compiler/array_join_autoload_spec.w
   spec/compiler/block_passthrough_spec.w
+  spec/compiler/cfg_ssa_pruning_spec.w
   spec/compiler/elementwise_fusion_spec.w
+  spec/compiler/forward_typed_raw_call_spec.w
+  spec/compiler/function_replacement_index_spec.w
+  spec/compiler/indexed_compound_assignment_parameter_spec.w
+  spec/compiler/ivar_typed_return_spec.w
+  spec/compiler/nested_i64_array_boxed_store_spec.w
+  spec/compiler/one_arg_cached_dispatch_emitter_spec.w
+  spec/compiler/ownership_phi_escape_spec.w
+  spec/compiler/parser_packed_token_access_spec.w
+  spec/compiler/raw_int_candidate_map_spec.w
   spec/compiler/recase_spec.w
+  spec/compiler/recycle_inline_iterator_validation_spec.w
+  spec/compiler/recycle_nonlocal_block_return_spec.w
+  spec/compiler/recycle_terminated_scope_spec.w
+  spec/compiler/source_argc1_exact_ivar_spec.w
+  spec/compiler/source_argc1_hint_compat_spec.w
+  spec/compiler/typed_helper_array_signature_spec.w
   spec/compiler/typed_overload_spec.w
   spec/compiler/view_field_var_spec.w
+  spec/compiler/zero_arg_cached_dispatch_spec.w
   spec/interpreter/hash_size_view_field_spec.w
   spec/core/basics_spec.w
   spec/core/base64_native_spec.w
@@ -175,6 +193,7 @@ cuda_emit_specs=(
 interpreter_specs=(
   spec/interpreter/hash_size_view_field_spec.w
   spec/interpreter/slab_decl_spec.w
+  spec/interpreter/string_to_s_native_spec.w
   spec/core/base64_native_spec.w
 )
 

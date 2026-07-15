@@ -1583,6 +1583,49 @@ RSpec.describe "Compiler regressions" do
     expect(main).not_to include("@w_method_call_cached")
   end
 
+  it "lowers synthesized operator-overload gates and workers as direct calls" do
+    llvm = compile_to_llvm("direct_operator_overload_dispatch.w", <<~W)
+      + DispatchAnimal
+      + DispatchDog < DispatchAnimal
+
+      + DispatchProbe
+        -> */1(DispatchDog)
+          11
+
+        -> */1(DispatchAnimal)
+          22
+
+      probe = DispatchProbe.new
+      << (probe * DispatchDog.new).to_s
+    W
+
+    dispatcher = symbol_for("__w_DispatchProbe__STAR__a2")
+    dog_worker = symbol_for("__w_DispatchProbe__STAR__ovl_DispatchDog__a2")
+    animal_worker = symbol_for("__w_DispatchProbe__STAR__ovl_DispatchAnimal__a2")
+    body = llvm[/define internal i64 @#{Regexp.escape(dispatcher)}.*?^}/m]
+
+    expect(body).to include("call i64 @w_value_is_a")
+    expect(body).to include("call i64 @#{dog_worker}")
+    expect(body).to include("call i64 @#{animal_worker}")
+    expect(body).not_to include("@w_method_call_cached")
+  end
+
+  it "rejects user calls to compiler-only overload intrinsics" do
+    source_path = File.join(@tmpdir, "overload_intrinsic_escape.w")
+    File.write(source_path, <<~W)
+      __compiler_overload_worker("w_puts", "owned")
+    W
+
+    compile_out, compile_err, compile_status = Open3.capture3(
+      {"NO_COLOR" => "1"}, @compiler_path, "compile", source_path,
+      "--out", File.join(@tmpdir, "overload_intrinsic_escape"),
+      chdir: PROJECT_ROOT
+    )
+
+    expect(compile_status.success?).to be(false)
+    expect(compile_err + compile_out).to include("reserved compiler intrinsic '__compiler_overload_worker'")
+  end
+
   it "extends compact symbol prefixes on collisions" do
     functions = 40.times.map do |idx|
       <<~W

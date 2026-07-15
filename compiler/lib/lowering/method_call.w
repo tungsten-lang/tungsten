@@ -1537,6 +1537,17 @@
   ic_id = ctx[:mod][:next_ic]
   ctx[:mod][:next_ic] = ic_id + 1
 
+  scalar_source_argc1 = false
+  if arg_regs.size() == 1 && recv_node != nil && ast_kind(recv_node) == :ivar && ctx[:class_name] != nil
+    exact_ivars = ctx[:mod][:exact_source_ivar_types][ctx[:class_name]]
+    source_class_name = nil
+    if exact_ivars != nil
+      source_class_name = exact_ivars[recv_node.name]
+    source_class = ctx[:mod][:known_classes][source_class_name]
+    if source_class != nil && is_ast_node?(source_class) && ast_kind(source_class) == :class_def
+      own_method = ctx[:mod][:class_method_asts][source_class_name + "." + method_name + "/1"]
+      scalar_source_argc1 = own_method != nil
+
   emit_instruction(wfn, {
     op: :call_method_i64,
     temp: temp,
@@ -1544,6 +1555,7 @@
     receiver: receiver_reg,
     method_name_val: method_name_val,
     args: arg_regs,
+    scalar_source_argc1: scalar_source_argc1,
     ic_id: ic_id,
     src_line: node.line,
     src_col: node.col

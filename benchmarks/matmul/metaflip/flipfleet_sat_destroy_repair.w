@@ -203,6 +203,117 @@ use flipfleet_span_refactor
   meta[5] = clauses
   "p cnf " + variables.to_s() + " " + clauses.to_s() + "\n" + body
 
+# Emit the exact same Brent-window encoding as ffsdr_emit_cnf, but as
+# (length, literal...) runs appended into an i64[] buffer instead of DIMACS
+# text, so the in-process CDCL solver (flipfleet_sat_cdcl) can ingest it
+# without string formatting or an external process.  Variable numbering is
+# shared verbatim with ffsdr_emit_cnf through ffsdr_primary_u/v/w,
+# ffsdr_product_var, and ffsdr_parity_var — the single numbering authority.
+# Literals use the CDCL encoding: DIMACS +x becomes 2*x, -x becomes 2*x + 1.
+# Returns the number of words written (> 0), or 0 on any bound/size failure.
+# meta[4]/meta[5] receive variables/clauses exactly like ffsdr_emit_cnf.
+-> ffsdr_emit_clauses(target, au, av, aw, want, max_cells, runs, meta) (i64[] i64 i64 i64 i64 i64 i64[] i64[]) i64
+  cells = au * av * aw ## i64
+  if au < 1 || av < 1 || aw < 1 || want < 1 || cells < 1 || cells > max_cells
+    return 0
+  if target.size() < ffsdr_tensor_words(cells)
+    return 0
+  primary = want * (au + av + aw) ## i64
+  parity_variables = 0 ## i64
+  if want > 1
+    parity_variables = cells * (want - 1)
+  variables = primary + cells * want + parity_variables ## i64
+  clauses_per_cell = want * 4 + 1 ## i64
+  if want > 1
+    clauses_per_cell += (want - 1) * 4
+  clauses = cells * clauses_per_cell ## i64
+  words_per_cell = want * 14 + 2 ## i64
+  if want > 1
+    words_per_cell += (want - 1) * 16
+  if runs.size() < cells * words_per_cell
+    return 0
+  written = 0 ## i64
+  cell = 0 ## i64
+  while cell < cells
+    wi = cell % aw ## i64
+    rest = cell / aw ## i64
+    vi = rest % av ## i64
+    ui = rest / av ## i64
+    term = 0 ## i64
+    while term < want
+      uvar = ffsdr_primary_u(term, ui, au, av, aw) ## i64
+      vvar = ffsdr_primary_v(term, vi, au, av, aw) ## i64
+      wvar = ffsdr_primary_w(term, wi, au, av, aw) ## i64
+      product = ffsdr_product_var(cell, term, want, primary) ## i64
+      runs[written] = 2
+      runs[written + 1] = 2 * product + 1
+      runs[written + 2] = 2 * uvar
+      written += 3
+      runs[written] = 2
+      runs[written + 1] = 2 * product + 1
+      runs[written + 2] = 2 * vvar
+      written += 3
+      runs[written] = 2
+      runs[written + 1] = 2 * product + 1
+      runs[written + 2] = 2 * wvar
+      written += 3
+      runs[written] = 4
+      runs[written + 1] = 2 * product
+      runs[written + 2] = 2 * uvar + 1
+      runs[written + 3] = 2 * vvar + 1
+      runs[written + 4] = 2 * wvar + 1
+      written += 5
+      term += 1
+    if want == 1
+      product = ffsdr_product_var(cell, 0, want, primary) ## i64
+      runs[written] = 1
+      if ffsdr_bit(target, cell) == 1
+        runs[written + 1] = 2 * product
+      else
+        runs[written + 1] = 2 * product + 1
+      written += 2
+    else
+      left = ffsdr_product_var(cell, 0, want, primary) ## i64
+      right = ffsdr_product_var(cell, 1, want, primary) ## i64
+      stage = 0 ## i64
+      while stage < want - 1
+        parity = ffsdr_parity_var(cell, stage, cells, want, primary) ## i64
+        if stage > 0
+          left = ffsdr_parity_var(cell, stage - 1, cells, want, primary)
+          right = ffsdr_product_var(cell, stage + 1, want, primary)
+        runs[written] = 3
+        runs[written + 1] = 2 * left
+        runs[written + 2] = 2 * right
+        runs[written + 3] = 2 * parity + 1
+        written += 4
+        runs[written] = 3
+        runs[written + 1] = 2 * left + 1
+        runs[written + 2] = 2 * right + 1
+        runs[written + 3] = 2 * parity + 1
+        written += 4
+        runs[written] = 3
+        runs[written + 1] = 2 * left
+        runs[written + 2] = 2 * right + 1
+        runs[written + 3] = 2 * parity
+        written += 4
+        runs[written] = 3
+        runs[written + 1] = 2 * left + 1
+        runs[written + 2] = 2 * right
+        runs[written + 3] = 2 * parity
+        written += 4
+        stage += 1
+      final_parity = ffsdr_parity_var(cell, want - 2, cells, want, primary) ## i64
+      runs[written] = 1
+      if ffsdr_bit(target, cell) == 1
+        runs[written + 1] = 2 * final_parity
+      else
+        runs[written + 1] = 2 * final_parity + 1
+      written += 2
+    cell += 1
+  meta[4] = variables
+  meta[5] = clauses
+  written
+
 -> ffsdr_shell_quote(text) (String)
   "'" + text.replace("'", "'\"'\"'") + "'"
 

@@ -423,12 +423,13 @@ use flipfleet_sat_cdcl
   aux = cells * (slots + 2) ## i64
   max_vars = prim + cells * slots + aux + 64 ## i64
   # Learnt clauses live in the same arena and are never reclaimed, so deep
-  # campaigns must size it with the conflict budget (~16 words per learnt
-  # clause) or the solver reports -2 on arena exhaustion long before the
-  # budget binds.
-  learnt_words = budget * 16 ## i64
-  if learnt_words > 32000000
-    learnt_words = 32000000
+  # campaigns must size it with the conflict budget.  Measured on the
+  # <2,5,2> rank-17 cells: ~77 words per learnt clause (wide XOR-chain
+  # conflicts), so budget * 96 with a 64M-word cap (~512 MB, one instance
+  # at a time).
+  learnt_words = budget * 96 ## i64
+  if learnt_words > 64000000
+    learnt_words = 64000000
   if learnt_words < 0
     learnt_words = 0
   clause_words = cells * slots * 30 + cells * (slots + 2) * 12 + (c + f) * (um + vm + wm + 8) * 4 + 300000 + learnt_words ## i64

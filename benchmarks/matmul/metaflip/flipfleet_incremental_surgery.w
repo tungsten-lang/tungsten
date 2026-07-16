@@ -191,7 +191,12 @@ use flipfleet_sat_cdcl
   prim = ffis_prim(pool, slots, nn) ## i64
   aux = cells * (slots + pool + 2) ## i64
   max_vars = prim + cells * slots + aux + 64 ## i64
-  clause_words = cells * slots * 30 + cells * (slots + pool + 4) * 12 + 300000 ## i64
+  learnt_words = conflict_budget * 32 ## i64
+  if learnt_words > 64000000
+    learnt_words = 64000000
+  if learnt_words < 0
+    learnt_words = 0
+  clause_words = cells * slots * 30 + cells * (slots + pool + 4) * 12 + 300000 + learnt_words ## i64
   sat = i64[ffcdcl_state_size(max_vars, clause_words)]
   if ffcdcl_init(sat, max_vars, seed) != 1
     return 0 - 2

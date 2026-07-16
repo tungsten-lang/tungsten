@@ -401,7 +401,12 @@ use flipfleet_sat_cdcl
   max_vars = prim + cells * slots + aux + 64 ## i64
   # Arena sizing: 4 AND clauses of <= 4 lits per (cell, slot) plus the XOR
   # Tseitin chains (~8 words per aux) plus guards and learnt headroom.
-  clause_words = cells * slots * 30 + cells * (slots + 2) * 10 + (want_j * 3 + want_c) * (nn + 6) + 200000 ## i64
+  learnt_words = budget * 96 ## i64
+  if learnt_words > 64000000
+    learnt_words = 64000000
+  if learnt_words < 0
+    learnt_words = 0
+  clause_words = cells * slots * 30 + cells * (slots + 2) * 10 + (want_j * 3 + want_c) * (nn + 6) + 200000 + learnt_words ## i64
   sat = i64[ffcdcl_state_size(max_vars, clause_words)]
   if ffcdcl_init(sat, max_vars, seed) != 1
     return 0 - 4

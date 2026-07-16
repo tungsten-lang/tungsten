@@ -248,7 +248,12 @@ use flipfleet_sat_cdcl
     width = bits
   aux = cells * (r + 2) ## i64
   max_vars = ffbs_counter_top(r, nn, cells, width) + aux + 64 ## i64
-  clause_words = cells * r * 40 + bits * width * 12 + cells * (r + 2) * 12 + r * 3 * nn * 8 + 300000 ## i64
+  learnt_words = budget * 96 ## i64
+  if learnt_words > 64000000
+    learnt_words = 64000000
+  if learnt_words < 0
+    learnt_words = 0
+  clause_words = cells * r * 40 + bits * width * 12 + cells * (r + 2) * 12 + r * 3 * nn * 8 + 300000 + learnt_words ## i64
   sat = i64[ffcdcl_state_size(max_vars, clause_words)]
   if ffcdcl_init(sat, max_vars, seed) != 1
     return 0 - 2

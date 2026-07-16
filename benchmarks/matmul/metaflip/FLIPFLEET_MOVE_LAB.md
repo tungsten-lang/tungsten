@@ -1308,3 +1308,42 @@ CPU/GPU pool lane. Exact recipe, per-size counts, and replay commands are in
 | 5×5 | global one-axis kernel shear after quotienting pair flips; atomic tunnels are already span-3 |
 | 6×6 | span-3/4 and flattening-gauge windows; quotient known flips before tangent closure |
 | 7×7 | overlapping block-parity swaps, leaf-local gauge/conjugation, then larger flattening windows |
+
+## Twelve-move intake (2026-07-16)
+
+Twelve new move lanes from the ranked ideation campaign, every one a
+pure-Tungsten implementation with planted regressions and a bounded
+real-frontier smoke (`flipfleet_<lane>_test.w`, all passing).  Shared
+infrastructure: `flipfleet_sat_cdcl.w`, an in-process incremental CDCL
+solver (watched literals, first-UIP learning, integer VSIDS, Luby
+restarts, assumption solving with failed-assumption cores, conflict
+budgets, clause mark/release), plus the additive `ffsdr_emit_clauses`
+run-buffer twin of the Brent-window DIMACS encoder.  Every lane keeps
+the standard rule: only a complete exact tensor reconstruction can enter
+a bank, and publication is dump -> re-parse -> re-gate.
+
+| lane | exact content and measured result | disposition |
+|---|---|---|
+| sandwich quotient (move 1, `flipfleet_sandwich_quotient.w`) | Index-permutation sandwich `u->PuQ^T, v->QvR^T, w->PwR^T` quotient walker with fail-closed fixed<->orbit conversion moves; naive census 25/9 five/three-orbits verified; all 124 shift triples fix naive; d1155 carries ZERO cyclic sandwich symmetry (the ideation's stated risk, measured); orbit flips fire but d-replicated density needs d-scaled slack | occasional lane; symmetrizability scan is the cheap trigger |
+| incremental surgery (move 2, `flipfleet_incremental_surgery.w`) | One persistent CDCL instance per (scheme, k): selector assumptions per subset, learned clauses persist across all C(P,k) subsets, bounded UNSAT-core banking with subsumption skipping; Strassen k=2 closes all 21 subsets in one instance; measured core-lift factor 1x on tiny pools (cores carry negative selectors) | occasional lane on 4x4 k=3 chunks |
+| sandwich ansatz (move 3, `flipfleet_sandwich_ansatz.w`) | Cyclic-sandwich invariant existence SAT (k orbit reps sharing variables through modular position maps + circulant fixed terms); **SAT: a gated rank-7 2x2 scheme invariant under (i,j,k)->(i+1,j+1,k+1)** (7 = 2*3+1, 3.8k conflicts); 3x3 encoding validated by a pinned naive-witness control at 38k vars | occasional lane rotating (k, f) cells |
+| psi quotient (move 4, `flipfleet_psi_quotient.w`) | psi(A,B,C) = (B^T, A^T, C^T) invariant existence for <n,m,n>; Strassen is psi-symmetric as-is (2 pairs + 3 fixed, re-derived and gated); **certified UNSAT: <2,5,2> rank-17 with 8 pairs + 1 fixed** (337 conflicts; the first exact closure inside the certified <2,2,5> gap; remaining (c,f) partitions are open cells) and 2x2 rank-7 with only one fixed term; encoding validated by a pinned rank-20 naive-witness control | occasional lane rotating the <2,5,2> partition cells |
+| equivariant surgery (move 5, `flipfleet_equivariant_surgery.w`) | C3-orbit excision with equivariant shared-variable replacement SAT; d1155 census confirmed (30 free orbits + 3 cubes); planted orbit/cube re-derivations SAT in 0 conflicts; excise-2-orbits -> (1 orbit + 2 cubes) certified UNSAT on naive 3x3 (217 conflicts) and on the LIVE d1155 frontier within a 3k budget; the 5x5-scale instance (62.5k vars / 281k clauses) solves its planted probe in 26 ms | occasional lane; the frontier orbit-drop cells are genuinely runnable |
+| carry compile (move 6, `flipfleet_carry_compile.w`) | 2-adic layer-by-layer certification of integer witnesses (level-0 odd reductions ARE the mod-2 scheme; deeper levels certify exactness over Z), GL(Z) sandwich transvection rebalance, vacuity guard (signless lifts flagged, never mis-emitted); rectangular <2,3,4> path gated | occasional lane; drop-in path `witness_int_2x4x5_rank32.txt` awaits the AlphaEvolve factors |
+| GF(4) walk (move 7, `flipfleet_gf4_walk.w`) | First field-extension state: factor = two GF(2) words over basis (1, w); projective gauge canonicalization; Frobenius-closure invariant; trace descent (rational -> 1 term, conjugate pair -> 3 by the derived Karatsuba identity `t + conj(t) = (p^q)x(r^s)x(x^y) + prx + qsy`); all-rational packing <n,m,p> -> <n,m,2p> reproduces the exact <2,2,4> rank-14 block record; Strassen measured flip-isolated over GF(4) too (gauge coarsening created no partners -- the ideation risk, confirmed) | occasional lane; non-rational packing is future work |
+| sector suture (move 8, `flipfleet_sector_suture.w`) | Two-parent sector swap with recognizer-minted rank<=2 sutures and multiset XOR splicing; planted rank-1/rank-2 defects repaired and gated; 4x4 d450xd677 (96 attempts) and <2,2,5> d84xd88 (68 attempts) sweeps: zero wins, zero off-dictionary equal-rank ties -- clean negatives with abstain accounting | occasional lane over door pairs |
+| sym anneal (move 9, `flipfleet_sym_anneal.w`) | Lock-pattern walker interpolating the C3 quotient and the free flip graph (orbit moves on locked triples, LOCK/UNLOCK/repair-LOCK with a +<=4 budget, collision auto-unlock); naive censuses proved (3x3: 3 cubes + 8 orbits; 5x5: 5 + 40); 50k-move gated walk clean (18,892 accepts, zero gate failures); d1155 loads fully locked (33 groups) | occasional lane; long-run floors are the open question |
+| pair lift (move 10, `flipfleet_pair_lift.w`) | Output-axis concatenation of two parents with shared u space; harvest = Kauers-Wood block projection; **the projection-unwind trap is now a planted regression** (one cross flip -> children == parents, distance 0), and the <2,2,5> door smoke unwinds completely even at mixing depth 4 -- escape needs interleaved same-block churn at band > 0 | occasional lane; unwind depth is the metric to move |
+| ball SAT (move 11, `flipfleet_ball_sat.w`) | Hamming-ball anchored rank descent: one instance per anchor, radii by Sinz counter-output assumptions; planted split-above-Strassen anchor certified UNSAT at radius 0 and descends to gated rank 7 at radius 1; naive 2x2 carries a certified slot-aligned rigidity radius of 4; verdicts labeled certified/indeterminate, never conflated | occasional lane on 4x4 anchors |
+| align/relink (move 12, `flipfleet_align_relink.w`) | Transporter alignment (ffgir-style words, term-overlap objective, contragredient partner updates) + elastic-band relink with beta escalation and saddle banking; planted orbit equivalence PROVEN by a length-1 word (union nullity 1 -> 7); d450xd677 honest negatives (overlap 0/47, closest approach 94 at beta <= 2 over 60k moves); fixed a stale-st[6] rank-header bug that corrupted long walks | occasional lane; barrier maps accrue as knowledge |
+
+`flipfleet_move_intake.w` is the scheduling instrument: a rotating
+occasional runner with the pool's dwell discipline (yield doubles dwell,
+eight dry pulls dim a lane to every sixteenth rotation), persistent
+accounting, and a strict YIELD (verified objective wins) versus CLOSURES
+(certified negative knowledge) split.  Two yields -- or one within the
+first four pulls -- print the promotion recipe pointing at the
+GPU_KERNEL_POOL.md registration sites; the runner never edits the pool
+itself.  Reproduce any lane with
+`bin/tungsten -o /tmp/t benchmarks/matmul/metaflip/flipfleet_<lane>_test.w && /tmp/t`
+from the repo root.

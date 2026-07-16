@@ -2787,3 +2787,48 @@ set-cover repair vary one or two spectator terms, and only then feed an exact
 replacement to the rank-two word compiler. This attacks the observed scarcity
 of cleanup endpoints directly instead of spending default lanes on forward
 walks toward a very thin two-doublet or four-line target set.
+
+## 2026-07-16: twelve-move intake wave and the in-process CDCL
+
+Twelve new move lanes from the ranked ideation campaign landed as
+pure-Tungsten move-lab intakes, every one with planted regressions and a
+bounded real-frontier smoke (all `flipfleet_<lane>_test.w` passing; the
+full table with measured numbers is FLIPFLEET_MOVE_LAB.md "Twelve-move
+intake").  Shared infrastructure: `flipfleet_sat_cdcl.w`, an in-process
+incremental CDCL solver with assumption cores and conflict budgets, so
+SAT lanes stop paying process + DIMACS costs per query and can narrow
+incrementally.
+
+New exact artifacts and certified closures banked by the intake tests:
+
+- **A gated rank-7 2x2 scheme invariant under the cyclic index rotation
+  (i,j,k) -> (i+1,j+1,k+1)** (7 = 2*3 + 1), found by the cyclic-sandwich
+  ansatz cell (3,1) in 3.8k conflicts.
+- **The <2,5,2> rank-17 psi-symmetric cell (8 pairs + 1 fixed) is
+  certified UNSAT** -- the first exact closure inside the certified
+  <2,2,5> gap (17 <= R <= 18).  The remaining (c, f) partitions of the
+  psi class are enumerable cells; the pinned naive-witness control
+  validates the encoding at target scale.  Strassen itself is
+  psi-symmetric (2 pairs + 3 fixed) and every psi-symmetric rank-7 2x2
+  scheme needs at least three fixed terms.
+- Equivariant surgery speaks the frontier's language: d1155's C3 census
+  (30 free orbits + 3 fixed cubes) confirmed; planted orbit and cube
+  re-derivations SAT instantly; the excise-2-orbits -> (1 orbit + 2
+  cubes) net-minus-one cell is certified UNSAT on naive 3x3 AND within a
+  3k-conflict budget on the live d1155 frontier; the 5x5-scale
+  equivariant instance (62.5k vars / 281k clauses) solves its planted
+  probe in 26 ms, so frontier orbit-drop cells are genuinely runnable.
+- Ball-SAT certifies slot-aligned rigidity radii (naive 2x2: radius 4)
+  and descends the planted split-above-Strassen anchor at radius 1.
+- Negative knowledge, measured where the ideation predicted risk: the
+  rank-93 presentations carry zero cyclic sandwich symmetry; Strassen
+  stays flip-isolated even over GF(4); pair-lift children unwind to
+  their parents through the block projection at mixing depth 4; the
+  incremental-surgery core-lift factor is 1x on tiny pools.
+
+Scheduling: `flipfleet_move_intake.w` rotates the twelve lanes as
+bounded occasional options with the pool's dwell discipline, persistent
+accounting, a strict yield-versus-closure split, and a promotion print
+that points at the GPU_KERNEL_POOL.md registration recipe once a lane
+earns pool width with verified wins.  None starts with live width -- the
+standing rule that negative experiments stay reproducible benchmarks.

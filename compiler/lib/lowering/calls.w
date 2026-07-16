@@ -723,6 +723,31 @@
       exit(1)
     fn_name = fn_node.value
     ctx[:mod][:ccall_fns][fn_name] = args.size() - 1
+
+    # Float rounding source methods spell their historical boundary as
+    #
+    #   ccall_nobox("w_numeric_to_i64", Math.floor/ceil/round(value))
+    #
+    # Generic lowering would box Math's f64 result, call back into C only to
+    # unbox it, then convert it. Recognize exactly that composition and keep
+    # it raw: unbox the original operand once, call the same libm function,
+    # and emit the same fptosi operation Clang uses for the old C handler's
+    # `(int64_t)` cast. The outer source-level w_int retains exact boxing.
+    if fn_name == "w_numeric_to_i64" && args.size() == 2
+      math_call = args[1]
+      if math_call != nil && ast_kind(math_call) == :call && math_call.block == nil && math_call.args != nil && math_call.args.size() == 1 && math_call.name in ("floor" "ceil" "round")
+        math_recv = math_call.receiver
+        math_recv_name = nil
+        if math_recv != nil && ast_kind(math_recv) in (:var :class_ref)
+          math_recv_name = math_recv.name
+        if math_recv_name == "Math"
+          operand = lower_expression(ctx, math_call.args[0])
+          raw_operand = ensure_raw_f64(wfn, operand)
+          rounded = next_temp(wfn)
+          emit_instruction(wfn, {op: :call_libm_f64, temp: rounded, name: math_call.name, value: raw_operand})
+          converted = next_temp(wfn)
+          emit_instruction(wfn, {op: :fptosi_f64_i64, temp: converted, value: rounded})
+          return typed_value(:raw_i64, converted)
     lowered_args = []
     i = 1
     while i < args.size()

@@ -1,3 +1,5 @@
+use core/mmap
+
 + File
   # Managed handles
   -> .open(path, *args)
@@ -173,21 +175,3 @@
 
   -> .extname(path)
     file_extname(path)
-
-# Mmap — return type of File.mmap. Borrowed view of file bytes.
-+ Mmap
-  -> size
-  -> byte_at(i)
-  -> [](i)
-  -> as_u8
-  -> as_u16
-  -> as_u32
-  -> as_u64
-  -> as_i8
-  -> as_i16
-  -> as_i32
-  -> as_i64
-  -> as_f32
-  -> as_f64
-  -> view_at(byte_offset, ebits, n_elements)
-  -> close

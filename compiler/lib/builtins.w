@@ -38,7 +38,10 @@
 
   # -- Type info --
   when "type"
-    type(recv)
+    # Bare type(value) arrives with the value in args and a nil top-level
+    # receiver; receiver-style dispatch has no explicit argument.
+    target = args.empty?() ? recv : args[0]
+    type(target)
 
   when "to_s"
     interp.w_to_s(recv)

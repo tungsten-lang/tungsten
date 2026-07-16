@@ -1,0 +1,11 @@
+# Runner template: substitute exactly one __METHOD__ and __SIZE__. Keeping
+# these programs independent proves every typed-view spelling schedules both
+# Mmap and its opaque BigArray result class on its own.
+m = ccall("w_mwr_fixture", 64)
+view = m.__METHOD__
+if view.size != __SIZE__
+  << "FAIL mmap wrapper __METHOD__-only autoload"
+  exit(1)
+ccall("w_mwr_release_view", view)
+ccall("w_mwr_release_mmap", m)
+<< "PASS mmap wrapper __METHOD__-only autoload"

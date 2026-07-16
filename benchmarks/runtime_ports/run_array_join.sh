@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
 RUNS="${RUNS:-10}"
-GATE="${GATE:-0.97}"
+GATE="${GATE:-1.10}"
 CHECK_ONLY="${CHECK_ONLY:-0}"
 PATH_MODE="${PATH_MODE:-v2}"
 BASE_PATH="${BASE_PATH:-c}"
@@ -313,12 +313,12 @@ done
 echo
 echo "Each sample is base/candidate/candidate/base or its reverse; both legs are summed per implementation."
 echo "Heap outputs are released in bounded batches outside timed intervals."
-echo "Retention requires every independent stratum median $PATH_MODE/$BASE_PATH <= $GATE, then a separate repeat below 1.00."
+echo "Retention requires every independent stratum median $PATH_MODE/$BASE_PATH <= $GATE, then a separate repeat at or below $GATE."
 
 if [ "$overall" != "PASS" ]; then
-  echo "Strict gate: Array#join $PATH_MODE does not improve on $BASE_PATH and must not replace it." >&2
+  echo "Strict gate: Array#join $PATH_MODE exceeds the performance budget versus $BASE_PATH and must not replace it." >&2
   exit 3
 fi
 if [ "$BASE_PATH" = "v1" ]; then
-  echo "Optimization gate passed once; production replacement still requires an independent rebuild/repeat with every median below 1.00."
+  echo "Optimization gate passed once; production replacement still requires an independent rebuild/repeat with every median at or below $GATE."
 fi

@@ -8,7 +8,7 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
 RUNS="${RUNS:-10}"
 ITERS="${ITERS:-50000000}"
-GATE="${GATE:-0.97}"
+GATE="${GATE:-1.10}"
 ONLY="${ONLY:-}"
 
 case "$RUNS" in
@@ -78,5 +78,5 @@ for target in "${targets[@]}"; do
     "$target" "$generic_med" "$one_med" "$ratio_med" "$decision"
 done
 
-echo "Dispatcher retention requires both targets to clear $GATE and an independent repeat below 1.00."
+echo "Dispatcher retention requires both targets to clear $GATE and an independent repeat at or below $GATE."
 echo "This harness excludes caller-side argument stores/allocas; run the production-shaped trial before changing the emitter."

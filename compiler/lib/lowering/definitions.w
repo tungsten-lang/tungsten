@@ -1074,9 +1074,17 @@
   body = node.body
   if body == nil
     return nil
-  body = expand_class_traits(mod, body)
-  body = expand_class_body_accessors(body)
-  body = synthesize_overload_dispatchers(mod, class_name, body)
+  prepared_body = nil
+  if mod[:prepared_class_bodies] != nil
+    prepared_body = mod[:prepared_class_bodies][node]
+  if prepared_body != nil
+    body = prepared_body
+  else
+    # Fallback for callers that lower an isolated class node without running
+    # lower_ast's module-wide registration prepass first.
+    body = expand_class_traits(mod, body)
+    body = expand_class_body_accessors(body)
+    body = synthesize_overload_dispatchers(mod, class_name, body)
 
   # Collect view layout declarations for $data.field access
   view_fields = collect_view_fields(body)

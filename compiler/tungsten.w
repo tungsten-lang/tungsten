@@ -1,3 +1,14 @@
+use core/integer
+use core/numeric/float
+use core/numeric/big_int
+# String/Symbol#size and #length are source methods on the shared 0xF9 facade.
+# Keep the self-host registration explicit for stage-0 loaders predating the
+# broad dynamic-receiver autoload gate.
+use core/string_native
+# The self-host uses StringBuffer pervasively. Keep this explicit so a stage-0
+# compiler whose loader predates the constructor-autoload trigger can build the
+# first source-size stage after the native IC is removed.
+use core/string_buffer
 use lib/lexer
 use lib/parser
 use lib/interpreter
@@ -582,6 +593,9 @@ while i < args.size()
 -> resolve_runtime_dir
   if file?("runtime/runtime.c")
     return "runtime/"
+  root = env("TUNGSTEN_ROOT")
+  if root != nil && root != "" && file?(root + "/runtime/runtime.c")
+    return root + "/runtime/"
   ccall("w_runtime_dir")
 
 # The portable ISA baseline for a distributed binary, so a release artifact never

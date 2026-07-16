@@ -5,6 +5,13 @@
     << "FAIL [name]: got=[got] want=[want]"
     exit(1)
 
+-> check_ipv4_octets(name, got, a, b, c, d)
+  check(name + " size", got.size, 4)
+  check(name + " a", got[0], a)
+  check(name + " b", got[1], b)
+  check(name + " c", got[2], c)
+  check(name + " d", got[3], d)
+
 ip = IPv6.parse("2001:db8:abcd:1234:5678:9abc:def0:1357")
 literal_ip = 2001:db8::1
 literal_net = 2001:db8::/32
@@ -44,6 +51,16 @@ rescue error
 check("ipv6 huge prefix raises", huge_ipv6_prefix_raised, true)
 
 ipv4 = IPv4.of(192, 0, 2, 1)
+ipv4_octets = ipv4.octets
+check_ipv4_octets("ipv4 octets", ipv4_octets, 192, 0, 2, 1)
+check_ipv4_octets("ipv4 prefixed octets",
+                  IPv4.of(255, 128, 1, 0, 17).octets,
+                  255, 128, 1, 0)
+check_ipv4_octets("ipv4 octets surplus arguments",
+                  ipv4.octets(123, "ignored"),
+                  192, 0, 2, 1)
+ipv4_octets[0] = 9
+check("ipv4 octets fresh allocation", ipv4.octets[0], 192)
 check("ipv4 of valid prefix", IPv4.of(192, 0, 2, 1, 24).prefix, 24)
 huge_ipv4_prefix_raised = false
 begin

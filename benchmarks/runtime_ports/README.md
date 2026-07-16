@@ -64,29 +64,291 @@ benchmark structure to compare C, first-source, and optimized-source versions.
 | Area | Harness | Status |
 |---|---|---|
 | Integer leaf methods | `run_integer.sh` | Migrated before this loop; retained benchmark |
-| Integer `to_i` | `int_to_i_port.md` | Skipped. An exact `self` body and removal of the real public native IC passed all signed-i48 bit identities, one/many surplus arguments, autoload, and trailing-block passthrough. A 15-pair 50M-call thread-CPU campaign measured source/C medians of 0.989 for varying Array receivers and 0.981 for compiler-inferred Integers (aggregate 0.994/0.986). An earlier wall-clock campaign was parity but scheduler-noisy. Neither important stratum cleared 0.97, so production remains unchanged. |
+| Integer `to_i` | `run_integer_to_i_public.sh`, `int_to_i_port.md` | Retained in the relaxed revisit. The exact `self` body emits a bare `ret`, and the C IC is removed. Two independent 12-pair x 50M thread-CPU campaigns measured 0.968--0.997 source/C across varying and compiler-inferred Integer strata; combined 24-pair medians were 0.995 and 0.984. Exact signed-i48 identity, surplus arguments, trailing blocks, autoload/bootstrap, interpreter, and reindexed-IC checks pass. |
 | Enumerable combinators | `run_enumerable.sh` | Migrated before this loop; retained benchmark |
 | Date and packed network values | `run_date.sh`, `run_ipv4.sh`, `run_network.sh` | Migrated before this loop; retained benchmark |
-| IPv4 `octets` | `run_ipv4_octets.sh` | Skipped. The direct packed-`$value` shifts with an ordinary cap-8 Array literal passed interpreter/WIRE and 4,096-address representation checks, but the balanced 10x5M unique-source median was 0.981 and did not clear the 0.97 gate. |
-| UUID `byte` | `uuid_byte_port.md` | Skipped after two independent 15-pair thread-CPU campaigns. The optimized source reduces bounds checking to one mask and direct u8 load; exact compiled/interpreted autoload, all 16 bytes, bounds, BigInt/low-i64 wrapping, surplus arguments, invalid Float parity, and receiver stability passed. Hot medians were 0.977 and 0.978, narrowly missing 0.97; BigInt fallback improved to 0.967/0.960. Production is untouched. |
+| IPv4 `octets` | `run_ipv4_octets.sh` | Retained in the relaxed revisit. The direct packed-`$value` shifts and ordinary cap-8 Array literal replace the C IC. Two balanced unique-name campaigns measured 0.991 and 0.984 source/C; after removing the real public IC, two thread-CPU campaigns measured 0.994 and 0.995. Interpreter/WIRE, 4,104-address representation, independent-allocation, prefix, surplus-argument, and cleanup checks pass. |
+| IPv4/IPv6/MAC `to_s` | `run_packed_network_format_revisit.sh`, `packed_network_format_revisit_audit.md` | Retained in the relaxed revisit. The existing direct `w_to_s` wrappers replace exactly three class-specific IC rows; native `inspect` aliases remain for opaque-return safety. Two rebuilt campaigns measured 0.985--1.008 across plain/CIDR IPv4, plain/CIDR IPv6, and MAC. Exact prefixes, storage identity, surplus arguments, blocks, autoload, interpreter, WIRE, and LLVM gates pass. |
+| UUID `byte` | `run_uuid_stringbuffer_revisit.sh`, `uuid_byte_port.md` | Retained in the relaxed revisit. The optimized source keeps the exact `w_to_i64` boundary, replaces two bounds tests with one mask, and loads the declared 16-byte view directly. Two rebuilt public campaigns measured 0.979/0.969 for ordinary indices and 0.985/0.978 for BigInt/wrapping fallback cases. Compiled code no longer calls `w_uuid_byte`; the C helper remains only as a narrow interpreter/storage bridge. |
 | Base64 methods | `run_base64.sh` | Migrated before this loop; retained benchmark |
-| String `empty?` | `run_string.sh` | Skipped. Exact source body measured 0.973 and the optimized bitmask body 0.985 in quiet 9x50M runs; neither cleared the 0.97 gate |
+| String `empty?` | `run_string.sh`, `run_string_public.sh` | Retained in the relaxed revisit. The optimized source is one `($value & 14) == 0` mask/compare and its C IC is removed. Two balanced unique-name campaigns measured 0.937 and 0.927. Two isolated public thread-CPU campaigns passed inline, slab, heap, rope, and Symbol strata at 0.853--0.956 source/C. Compiled and tree-walker representation checks pass; the interpreter now flattens ropes at the same String source-dispatch boundary and routes shared Symbol methods through String. |
 | String/Symbol `to_s` | `string_to_s_ab.w` | Retained. The shared 0xF9 source body clears only the Symbol marker (`wvalue_from_bits($value & -2)`), compiling to one `and` plus `ret`. Exact 48-value representation checks, compiled/interpreted autoload, fixed-point self-hosting, and two independent public-dispatch campaigns passed; ratios ranged from 0.844 to 0.966 across inline/slab/heap/rope String and inline/slab Symbol strata. Full evidence: `string_to_s_port.md`. |
+| String/Symbol `size`, `length` | `run_string_length_branchless_revisit.sh`, `string_length_branchless_revisit_audit.md` | Retained in the relaxed revisit. The checked source calls the canonical raw byte-length helper, tags the signed-i48 common arm directly, and preserves cold `w_int` fallback. Two independently rebuilt campaigns passed all 18 inline/slab/heap/rope/NUL strata: worst per-method source/C medians were 1.054 and 1.044. A branchless uint32-coupled variant also passed at 1.056/1.062 but was rejected because it offered no material win. Seventeen representation cases, twelve no-use/autoload seams, generated `map/select/reject/count(:size/:length)`, exact String/Symbol identity, WIRE/LLVM, and tree-walker gates pass. Both native IC rows are removed. |
 | AST-body accessors | `run_ast_body.sh` | Migrated before this loop; retained benchmark |
-| Array `size`, `cap`, `empty?`, `first`, `last` | `run_array_leaf.sh` | Skipped. After raw-field lowering, quiet 9x50M confirmations were `size` 0.985, `cap` 1.022, `first` 0.986; `empty?` and `last` also failed both earlier gates |
+| Array `size`, `cap`, `empty?`, `first`, `last` | `run_array_leaf.sh`, `run_array_leaf_public.sh` | Retained in the relaxed revisit. `size`/`cap` tag their u32 view fields directly, `empty?` compares raw size, and `first`/`last` retain ebits-aware indexed decoding behind one empty guard. Two independently rebuilt public thread-CPU campaigns passed all 12 ordinary, typed, shifted/view, and empty strata at median ratios 0.948--1.016. A dedicated 200M-call/leg audit put the noisy nonempty `empty?` stratum at 0.980. The five native IC rows are removed. |
 | Array `join` | `run_array_join.sh` | Migrated from its C IC to source, then optimized through retained v6. V6 replaces first-pass StringBuffer copies with the narrow raw `w_stringy_c_length` validation bridge and allocates one recycled buffer for pass 2. Two isolated candidate campaigns and two real-public campaigns cleared every workload. The final version also autoloads Array for runtime-only receivers through a one-shot unresolved-name guard and repairs frozen-slab freshness in both compiled and interpreted execution. Benchmark-only v3, v4, v5, and two unguarded loader scans were rejected. Full evidence is below. |
 | Array `uniq` | `run_array_uniq.sh` | Skipped after the complete interpreter/WIRE/compiled semantic gate. V1's literal quadratic source loop measured 0.984–1.772 and failed every workload. V2 safely hashes only String/rope/Symbol values and produced major text wins (0.940 repeated, 0.384 unique, 0.785 large), but empty/singleton/small, numeric, mixed, and typed strata measured 0.991–1.241. The C IC remains installed. The gate also exposed a compiler recycle-scope bug described below. |
-| Array `compact`, `dup` | `run_array_compact_dup.sh` | Both are skipped after passing the complete interpreter/WIRE/compiled corpus. `compact` missed the gate in all eleven strata (0.976–1.010). `dup` passed only medium arrays (0.937); empty, singleton, small, large, typed, and shifted measured 0.981–1.025 or narrowly above the exact 0.97 cutoff. Both production ICs remain installed. |
-| StringBuffer `size` | `run_string_buffer_size.sh` | Skipped: quiet 9x50M median W/C 1.023 |
-| Float `infinite?` | `run_float_infinite.sh` | Skipped after public-dispatch trial. The unique source body passed twice (0.959, 0.921), but after removing the C IC the public method measured 0.983, so the production migration was reverted |
-| Float `nan?` | `run_float_nan.sh` | Skipped after public-dispatch trial. The one-compare body passed an isolated balanced ABBA run at 0.958, but the real public method measured 1.057 with 10 balanced orientations and a long warmup |
-| Float `abs` | `run_float_abs.sh` | Skipped. The biased-word source body passed 88 exact-bit checks, including signed zero and raw noncanonical NaN payloads. In the first quiet balanced 10x50M unique-source campaign, finite/edge/NaN C/W medians in ns were 10.118/10.178, 10.110/10.112, and 10.227/10.237; paired-ratio medians were 0.988, 0.991, and 1.002. The independent rebuild measured 10.931/10.565 (0.982), 10.133/10.155 (0.996), and 10.357/10.401 (0.985). No stratum cleared the 0.97 gate, so production is untouched: the C IC remains and no public-dispatch trial was warranted. |
-| Float `to_f` | `/tmp/tungsten-float-to-f-{baseline,candidate}/benchmarks/runtime_ports/float_to_f_ab.w` | Skipped before a public-method trial. The exact identity body lowers to a bare `ret i64 %__self` and passed 66 exact-bit checks across signed zero, subnormals, finite extrema, infinities, canonical NaNs, and raw positive NaN payloads. Ten balanced 100M-call samples produced a median source/C ratio of about 0.987, which is faster but misses the strict 0.97 migration gate. The C IC remains installed and the experimental harness stays isolated in `/tmp`. |
+| Array `compact`, `dup` | `run_array_compact_dup.sh`, `run_array_compact_dup_public.sh` | Retained in the relaxed revisit. V2 snapshots the raw receiver size and keeps the allocation/decode/push loop in Tungsten. Two fresh unique-name campaigns and two isolated real-public campaigns passed every workload under the 1.10 budget; the public source paths ranged from 0.920 to 1.034 versus the native ICs. Both C handlers/table entries are removed. Runtime-only receivers autoload Array through the one-shot source-method guard, with dedicated `argv()` regressions for each method. |
+| StringBuffer `size` | `run_uuid_stringbuffer_revisit.sh`, `run_string_buffer_size.sh` | Retained in the relaxed revisit. The canonical `StringBuffer` view loads `$length`, performs a one-compare signed-i48 roundtrip test, tags the common Integer inline, and uses an exact cold `w_int` fallback. Two public campaigns measured 0.985/0.982 for realizable buffers and 0.998/1.001 for synthetic overflow headers. The native IC is removed. |
+| Float `infinite?` | `run_float_leaf_public.sh` | Retained in the relaxed revisit. The unbiased-magnitude equality body replaces the C IC. Two rebuilt public thread-CPU campaigns measured 0.981 and 0.996 source/C; exact compiled/meta-interpreter IEEE classification checks and WIRE audits pass. |
+| Float `nan?` | `run_float_leaf_public.sh` | Retained in the relaxed revisit. The unbiased magnitude is compared above infinity, covering every representable raw NaN payload rather than only the canonical word. Two rebuilt public campaigns measured 0.966 and 0.972 source/C. |
+| Float `abs` | `run_float_leaf_public.sh` | Retained in the relaxed revisit. The biased-word body clears the IEEE sign and canonicalizes NaNs exactly like `w_box_double(fabs(...))`. Public campaign ratios were 0.991/0.982 finite, 0.977/0.973 edge, and 0.978/0.978 NaN. All 100 individual comparisons passed; worst was 1.053. |
+| Float `to_f` | `run_identity_leaf_public.sh`, `identity_leaf_public.md` | Retained in the relaxed revisit. The source body is exact receiver identity and its native IC is removed. Two independently rebuilt public campaigns measured 0.982/0.998 for finite values and 1.007/0.979 for NaNs. Exact signed-zero, subnormal, finite-extreme, infinity, canonical/raw-positive-NaN, surplus-argument, block, autoload, bootstrap, and interpreter gates pass. |
+| Float `floor`, `ceil`, `round`, `sqrt`, `sq` | `run_float_remaining_public.sh`, `float_remaining_revisit_audit.md` | Retained after optimization. The first rounding source form regressed 12.95--16.11%, so it was rejected; a narrow raw-Math lowering rule removed its box/callback/unbox chain. Two fresh campaigns then measured floor 1.000/0.997, ceil 0.992/1.006, round 0.998/0.979, sqrt 1.015/1.025, and sq 1.004/1.003. All 32-encoding, WIRE/LLVM, surplus-argument, block, literal/native-factory autoload, and interpreter gates pass. The Float IC table now retains only `to_i` and `to_s`. |
 | Hash `size` | `run_hash_size.sh` | Retained in the relaxed revisit. The public source body is the direct `$count` view-field load and its C IC is removed. The public caller LLVM is identical; the source target is four ARM64 operations plus `ret`, while the C target first validates the Hash tag. Four balanced thread-CPU confirmations ranged from 0.959 to 0.992 source/C, so the old 1.105 result was host/harness noise rather than a generated-code loss. Compiled core checks and a focused interpreter regression pass; bare `$count` now uses the existing allowlisted native-field bridge instead of falling through to an unset global. |
-| BigArray `size` | `run_big_array_size.sh` | Skipped. The literal signed-header load plus `w_int` measured 0.972 for i48 values and 1.048 for overflow. V2 inlined exact signed-i48 tag construction with canonical `w_int` fallback, but measured 1.005/0.979. Both passed exact signed-i64, Int/BigInt representation, WIRE, arity/block, and receiver-stability checks; neither cleared both strata. Production is untouched. |
-| SmallArray `size`, `cap`, `empty?` | `/tmp/tungsten-small-array-leaf` | Skipped after exact checks over header sizes 0..255. `size` and `cap` lower to a byte load plus inline Int tag; the optimized `empty?` keeps the field raw through a single compare instead of calling generic equality. Balanced medians were about 0.999, 0.985, and 0.987 respectively. None cleared the 0.97 gate, so all three native IC entries remain installed. |
-| Mmap `size` | `mmap_size_validation.md` | Skipped after six source variants. The best real-domain body used a signed-i48 range test and measured about 0.947 for inline sizes, but its exact `w_int` overflow fallback measured about 0.990 in the longer four-leg campaign. All 16 signed-i64 boundary cases, representation, extra-argument, block, close, and ABI-layout checks passed. No variant cleared both strata; the C IC remains installed. The audit also found that removing it would require a new Mmap autoload/interpreter bridge, since Mmap is not currently registered by `core/tungsten.w`. |
-| BigInt leaf methods | `run_bigint_leaf.sh` | Skipped. Generic `to_i`, `prev`/`succ`/`next`, and five predicates failed or were unstable; raw `even?` failed its repeat (0.961 then 1.085). Corrected ABBA timing put raw `negative?` at 0.954 and three source-dispatch trials at 0.968, 0.977, and 0.992, but only one cleared the 0.97 gate. A fidelity audit also found that the real C IC uses the native arity `-1` cache branch while the in-process C reference uses ordinary arity 0, so the production migration was restored to C pending a true IC-vs-source harness. |
+| BigArray `size`, `cap`, `empty?` | `run_small_big_array_public.sh`, `run_big_array_cap_empty_revisit.sh` | Retained in the relaxed revisit. `size` and `cap` load signed view headers, construct canonical immediate Integers inline, and retain exact cold `w_int` BigInt fallbacks; `empty?` is one raw zero comparison. Two independently rebuilt campaigns measured exact parity on inline `cap` and every `empty?` stratum; positive/negative overflow `cap` ratios were 0.923--1.000. All three C IC rows are removed. |
+| SmallArray `size`, `cap`, `empty?` | `run_small_big_array_public.sh` | Retained in the relaxed revisit. `size` and `cap` compile to the u8 field load plus immediate tag, while `empty?` compares the raw field directly. Two public campaigns measured 1.000 for all three leaves. The three C IC rows are removed. |
+| Mmap `size` | `run_mmap_size_relaxed_audit.sh`, `mmap_size_relaxed_audit.md` | Retained in the relaxed revisit. The source view loads signed `$size`, tags the nonnegative i48 file-length domain directly, and keeps exact cold `w_int` fallback boxing. Two rebuilt campaigns measured 0.950/0.950 paired medians for ordinary mappings and 1.026/1.050 for overflow. The native size IC is removed. |
+| Mmap `as_u8/u16/u32/u64`, `as_i8/i16/i32/i64`, `as_f32/f64` | `run_mmap_wrapper_revisit.sh`, `mmap_wrapper_revisit_audit.md` | Retained in the relaxed revisit. Each source leaf makes one exact raw-i64 call to the lower typed-view primitive; the primitive ABI is explicitly widened from C `int` to `int64_t`. Two rebuilt 10-sample campaigns measured ratio-of-medians 0.957--1.083 and paired medians 0.957--1.050. Exact view headers/storage, errors, surplus arguments, blocks, autoload, interpreter, WIRE, and LLVM checks pass. `byte_at`, `[]`, `close`, and `view_at` remain native for diagnostic, provenance, or decoding parity. |
+| BigInt `to_i` | `run_identity_leaf_public.sh`, `identity_leaf_public.md` | Retained in the relaxed revisit. The source `self` body preserves exact heap identity and removes the native IC. Two rebuilt public campaigns measured 0.957/0.984 for one-limb values and 0.997/0.967 for multi-limb values. Twenty-six canonical/noncanonical layouts, surplus arguments, bounded real-syntax block parity, no-use autoload, old-bootstrap, and interpreter gates pass. |
+| BigInt `zero?`, `even?`, `odd?`, `negative?`, `positive?` | `run_bigint_predicate_relaxed.sh`, `bigint_predicate_relaxed_audit.md` | Retained in the relaxed revisit. The five source bodies read signed `$length` and, for parity only, raw `$limb0`; their native ICs are removed. Two independently rebuilt 10x26 public campaigns passed every stratum. Worst per-method paired medians were 0.994/1.001, 0.992/0.997, 0.969/0.969, 0.990/0.980, and 0.989/0.994. Exact 32-layout, WIRE/LLVM, surplus-argument, block, no-import autoload, and interpreter gates pass. |
+| Remaining BigInt leaf methods | `run_bigint_leaf.sh` | `prev`, `succ`, and `next` remain native pending a production-shaped relaxed-gate revisit. The historical strict-gate study was noisy and does not decide them. |
+
+### Remaining Float leaf relaxed revisit
+
+The hidden source bodies for `floor`, `ceil`, and `round` originally returned
+Float, unlike their public native handlers, which returned Integer. The
+retained forms state the old boundary explicitly: a Math libm operation,
+signed-i64 conversion, then checked `w_int` boxing. `sqrt` remains the direct
+Math primitive and `sq` is the exact universal product.
+
+The first complete source campaign exposed an avoidable compiler cost:
+rounding medians were 1.130, 1.157, and 1.161 versus C. Those versions were
+not retained. Lowering now recognizes only the exact
+`w_numeric_to_i64(Math.floor/ceil/round(x))` composition and emits raw libm
+plus LLVM `fptosi`; arbitrary numeric conversions keep their dynamic checks.
+After that optimization, two independently rebuilt 10-observation campaigns
+put every method within 2.6% of native. The gate also compares the historical
+C expressions across 32 IEEE encodings, including signed zeros, subnormals,
+i48/int64 boundaries, infinities, and multiple NaN forms. Full hashes and the
+excluded pre-optimization campaign are preserved in
+`float_remaining_revisit_audit.md`.
+
+### Float/BigInt identity relaxed revisit
+
+Both retained bodies are the logical optimization endpoint: one source-level
+`self`, lowering to `ret_i64 %__self` in both WIRE and LLVM. The public harness
+uses matched roots and fresh compilers, proves the exact native-table delta,
+and checks 22 Float encodings plus 26 signed BigInt layouts before timing. Its
+40M-call legs use direct per-thread CPU clocks and consume the public result's
+WValue bits, so neither optimizer dead-code elimination nor host-wide load can
+decide the result.
+
+The first/repeat source-to-C medians were 0.982/0.998 (finite Float),
+1.007/0.979 (Float NaN), 0.957/0.984 (one-limb BigInt), and 0.997/0.967
+(multi-limb BigInt). All 80 paired observations produced exactly 40,000,000
+identity hits. The gate includes signed zero, subnormal and finite extrema,
+infinities, canonical and dispatch-safe raw-positive NaNs, heap zero, both
+BigInt signs, sparse/spare-capacity layouts, i48 through 256-bit boundaries,
+surplus arguments, block behavior, no-use autoload, old-bootstrap, and the
+tree walker.
+
+This audit exposed two pre-existing lowering bugs rather than hiding them in
+the benchmark: assigning a heap-BigInt `to_i` result can inherit an Integer
+fact and nan-unbox its pointer, and implicit numeric result-`each` can use the
+same pointer-derived loop count. Direct WValue identity remains correct in
+both native and source roots; the real-syntax block parity probe breaks on its
+first entry so the known bug cannot run billions of iterations. These compiler
+issues are recorded for a separate fix and are not part of the identity port.
+
+### BigInt predicate relaxed revisit
+
+The retained source methods mirror `WBigint` directly. Signed `length` at
+offset 4 is zero/sign-tested by all five methods; `even?` and `odd?` first
+short-circuit heap zero, then load the low 64-bit limb at offset 16 and test
+one bit. The source declaration names that flexible-tail word `limb0`, avoiding
+an Array facade or generic numeric dispatch. LLVM checks require an `i32` load
+plus sign extension for length and a raw `i64` limb load.
+
+The exact gate covers 32 canonical and deliberately noncanonical heap layouts:
+zero with and without storage, spare capacity and garbage spare limbs, both
+signs and parities, leading-zero headers, and one through four limbs. It also
+checks exact Bool bits, receiver stability, surplus arguments, compiled block
+error parity, no-import autoload across literal/promotion/native boundaries,
+and tree-walker field access. Every one of 26 independently gated timing
+strata passed in both fresh 10-observation ABBA/BAAB campaigns. The complete
+52-row table and compiler hashes are preserved in
+`bigint_predicate_relaxed_audit.md`; isolated maximum-pair spikes are retained
+there as noise diagnostics but never used to average away a failing median.
+
+### Array leaf relaxed revisit
+
+The retained bodies operate on the declared `WArray` view instead of calling
+header helpers. `size` and `cap` load one u32 and OR it with the canonical
+immediate-Integer tag; `empty?` is one raw zero comparison. `first` and `last`
+guard the empty receiver and then use the compiler's ebits-aware Array index
+path, preserving ordinary WValues, packed signed and unsigned integers, u1,
+floats, shifted starts, and borrowed views.
+
+The production-shaped harness builds matched native-IC and source-method roots
+with one compiler, inspects all five public call sites and method bodies, and
+checks exact results across 16 fixtures plus surplus arguments and trailing
+blocks. It separately proves autoload from literals, typed constructors, exact
+C factories, `argv()`, and `ARGV`, then runs the same surface in the tree
+walker. The first 10-observation campaign's paired medians were 0.963--1.014;
+an independently rebuilt 12-observation repeat measured 0.948--1.016 across
+all 12 strata. Since one nonempty `empty?` pair was a wide host-noise outlier,
+a separate 12-pair campaign extended each leg to 200M calls and measured a
+0.980 median. Decisions use total `CLOCK_THREAD_CPUTIME_ID` nanoseconds rather
+than quantized whole nanoseconds per call or wall time.
+
+### String `empty?` relaxed revisit
+
+The old source candidate already encoded the storage-mode invariant correctly,
+but its shift-then-mask form missed the historical 0.97 gate. The retained
+version tests the three mode bits in place, so WIRE contains one `and_i64`, one
+comparison, and no shift, `w_str_data`, or native-handler fallback.
+
+The unique-name harness was strengthened from alternating two-leg timings to
+balanced C/W/W/C and W/C/C/W samples with a 5M-call warmup. Two fresh 8x50M
+campaigns measured 0.937 and 0.927 source/C. The production harness then used
+matched isolated roots and a benchmark-only thread CPU clock. It checked 80
+public calls per build across inline, slab, heap, flattened-rope, and Symbol
+representations plus surplus arguments. The first public campaign measured
+0.948, 0.930, 0.939, 0.920, and 0.853 by stratum; the independent rebuild
+measured 0.939, 0.942, 0.929, 0.956, and 0.855. The source method and removal
+of `w_ic_string_empty` are therefore retained.
+
+Compiled dispatch had always flattened a rope before invoking a String source
+method, while the tree walker initially exposed the rope object's pointer bits
+as `$value`. A focused interpreter regression caught the resulting false
+`empty?`. Primitive source dispatch now flattens only after it has found a
+String source method, so unrelated calls gain no new type check. Because String
+and Symbol share runtime key `0xF9`, the interpreter also routes both `to_s`
+and `empty?` through the shared String source class; the focused inline/slab/
+heap/rope/Symbol and surplus-argument matrix passes with the C IC absent.
+
+### IPv4 `octets` relaxed revisit
+
+The production source body reads the packed IPv4 word once and constructs an
+ordinary Array from four independent shifts and masks. The retained form keeps
+the C implementation's w64 element representation, size four, default capacity
+eight, and fresh allocation on every call; CIDR prefix bits do not enter any
+octet. Its emitted WIRE has four shifts, masks, pushes, and no call to
+`w_ipv4_octets` or generic method dispatch.
+
+Two balanced 8x5M unique-name campaigns measured 0.991 and 0.984 source/C.
+For the production-shaped trial, `w_ic_ipv4_octets` and its sole table row were
+removed in an isolated root while a byte-equivalent C reference stayed in the
+same release binary. The harness uses thread CPU time so concurrent search jobs
+cannot charge descheduling to either leg. Two corrected public campaigns
+measured 47.040/47.115 ns (0.994) and 47.149/47.089 ns (0.995), comfortably
+inside the 1.10 budget. The source implementation and C-IC removal are retained.
+
+The permanent gate covers eight fixed and 4,096 generated addresses, including
+all prefix forms, exact Array layout/capacity, result independence, mutation,
+and bounded cleanup. Focused compiled and tree-walker specs also cover ignored
+surplus arguments and run against an isolated compiler built with the old IC
+physically absent.
+
+### Float leaf relaxed revisit
+
+`abs`, `nan?`, and `infinite?` now operate directly on Float's biased WValue.
+Each body subtracts the 2^48 bias and masks the IEEE sign bit once. Classification
+then compares the magnitude with the infinity word; `abs` adds the bias back,
+with one cold branch that returns the same canonical positive qNaN produced by
+`w_box_double`. The earlier experimental `nan?` equality was semantically
+incomplete because a valid raw qNaN or sNaN need not equal the canonical word.
+
+The production-shaped harness compiles the same public calls against isolated
+native-IC and source-method roots and times with thread CPU time. Campaign one
+ratios were 0.991 (abs finite), 0.977 (abs edge), 0.978 (abs NaN), 0.966
+(`nan?`), and 0.981 (`infinite?`). After rebuilding both roots, the independent
+ratios were 0.982, 0.973, 0.978, 0.972, and 0.996. Every one of the 100 balanced
+four-leg comparisons passed the 1.10 gate; the worst individual ratio was
+1.053.
+
+Sixty exact public checks per build cover signed zeros, subnormals, finite
+extrema, infinities, canonical NaNs, and raw noncanonical positive qNaN/sNaN
+words. Emitted WIRE contains only integer unbias/mask/compare operations plus
+the `abs` add/canonicalization branch, with no C or generic-dispatch fallback.
+A compiled meta-interpreter runs the same 60 checks with all three ICs absent;
+its narrow `wvalue_from_bits` bridge decodes only the nonnegative Float-word
+range that source `abs` can return. All three source bodies and C-IC removals
+are retained.
+
+### SmallArray / BigArray leaf relaxed revisit
+
+The retained SmallArray bodies operate on the declared `WSmallArray` view:
+`size` and `cap` read the u8 header once and OR it into the canonical immediate
+Integer tag, and `empty?` keeps that field raw through one zero comparison.
+BigArray's signed-i64 header cannot always fit the immediate payload, so its
+source body inlines the signed-i48 range/tag arm and calls `w_int` only for the
+exact positive/negative overflow cases that must allocate a BigInt.
+
+The matched-root runner uses independently built compilers and root-local
+release/LTO runtime links, avoiding the shared development runtime archive.
+Two ten-observation thread-CPU campaigns measured source/native at 1.000 in
+both runs for SmallArray `size`, `cap`, and `empty?` and for BigArray inline
+`size`; BigArray overflow measured 0.962 and 0.961. Static gates require the
+old handlers/table names to be absent and pin the intended WIRE field/tag/
+comparison shapes with only the BigArray cold `w_int` fallback.
+
+Correctness covers every SmallArray size byte (0..255), all signed-i64 BigArray
+view headers including both signed-i48 edges and both i64 endpoints, exact
+Int/BigInt/Bool representation, surplus arguments, trailing-block behavior,
+views and receiver stability. Runtime-created receivers now autoload their
+source classes through an exact factory-result map for `ccall` and
+`ccall_rawargs`; the runtime and tree walker also report BigArray/SmallArray
+class identity explicitly. The no-`use` compiled gate and interpreter gate
+both run with all migrated IC rows physically absent.
+
+The follow-up `cap`/`empty?` campaign independently exercises ordinary and
+synthetic inline capacities, both overflow directions, and zero, positive,
+and negative raw sizes. In its first/repeat runs, all inline and Boolean
+strata were exact 1.000 parity; positive overflow measured 0.963/0.962 and
+negative overflow 0.923/1.000. Exact representation checks include both i48
+edges, the first values beyond them, both i64 endpoints, independently varied
+size/cap headers, view flags, surplus arguments, block behavior, four no-use
+factory paths, and the tree walker. Full protocol and raw summaries are in
+`big_array_cap_empty_revisit_audit.md`.
+
+### Mmap `size` relaxed revisit
+
+The retained facade moves Mmap into its own `core/mmap.w`, declares the exact
+`WMmap` view, and implements only `size`; its other methods remain explicit
+bodyless native declarations. Real mapping lengths are nonnegative, so one
+arithmetic shift recognizes the entire inline-i48 domain. Synthetic negative
+or enormous headers take the canonical `w_int` fallback, preserving exact
+BigInt sign and limb representation.
+
+Both independent ten-pair thread-CPU campaigns passed. Ordinary source/native
+paired medians were 0.9503 and 0.9501; positive overflow measured 1.0263 and
+1.0504. Correctness covers sixteen signed-i64 headers, both i48 and i64 edges,
+exact bits/limbs, surplus arguments, blocks, mapping close state, ABI offsets,
+separate File/native autoload paths, and retained primitives in the tree
+walker. Compiler dispatch key `0x91`, a narrow native field bridge, and Mmap
+type discovery make the source path independent of the removed IC. Production
+also uses a one-shot `size` name gate so an Mmap crossing an unknown parameter
+or native boundary cannot depend on a constructor being visible in the same
+AST. The full
+protocol, hashes, and allocator-noise diagnostics are in
+`mmap_size_relaxed_audit.md`.
+
+### UUID / StringBuffer relaxed revisit
+
+`UUID#byte` now declares the runtime allocation as a fixed `u8[16]` view. It
+keeps the former `w_to_i64` Int/BigInt conversion—including low-i64 wrapping
+for oversized BigInts—but recognizes 0..15 with one `(index & -16)` test and
+returns the inline byte load. The compiled public WIRE contains the conversion,
+mask, and view load with no `w_uuid_byte` or dynamic-call fallback. The old C
+function remains only for the tree walker's fixed-array storage bridge.
+
+Correctness covers all sixteen bytes, both adjacent bounds, positive and
+negative BigInt bounds, 2^64 wrapping to 0/15 and rejection at 16, surplus
+arguments, version/variant/type stability, and the exact invalid-Float error
+payload. UUID literals and the exact parse/factory calls now autoload the
+source class. Two ten-pair public thread-CPU campaigns measured 0.979/0.969 for
+hot indices and 0.985/0.978 for the fallback corpus; worst individual ratios
+were 1.074 and 1.052, both below the 1.10 budget.
+
+StringBuffer's core declaration now uses the runtime class name
+`StringBuffer`, allowing dispatch key 0x0B to register its source method. Its
+optimized `size` keeps `$length` raw, masks and sign-extends the low 48 bits,
+and compares that roundtrip with the original once. Matching values are ORed
+with the immediate Integer tag; only a synthetic out-of-range header calls
+`w_int`. This improves on the first source version, whose WIRE was merely a
+field load followed by `w_int`.
+
+The same matched-root runner checks empty, ASCII, and UTF-8 live byte lengths,
+surplus arguments, receiver/content stability, signed-i64 boundary headers,
+autoload/bootstrap, interpreter field access, exact WIRE, and IC removal.
+Normal buffers measured 0.985/0.982 source/native; the allocation-heavy corrupt
+header fallback measured 0.998/1.001. Individual overflow samples reached
+1.137 under allocator noise, but the independent median gates are neutral and
+the ordinary realizable path's worst sample was 1.008. The self-host imports
+the class explicitly so older stage-0 loaders can build the first source-size
+compiler after the IC disappears.
 
 ### Array `join` follow-up trials
 
@@ -220,22 +482,92 @@ and are freed outside the measured intervals. Each same-process sample is
 C/W/W/C or W/C/C/W, with 10 balanced orientations by default.
 
 The complete interpreter, WIRE, and 42-family compiled correctness gate passed.
-`compact` v2 then failed its first ten-run campaign in every stratum: empty
-1.010, all-nil 0.993, singleton 0.990, small dense 0.984, small sparse 0.976,
-medium dense 0.990, medium sparse 0.988, large dense 0.982, large sparse 1.001,
-typed 1.007, and shifted 1.003. It is therefore a strict skip with no repeat or
-public-method trial. `dup` v2 likewise failed its separate ten-run campaign:
-empty 0.988, singleton 1.002, small just above the exact 0.970 cutoff, medium
-0.937, large 0.981, typed 1.010, and shifted 1.025. Since six of seven strata
-failed, it is also a strict skip with no repeat or public-method trial. The
-benchmark-only `run_array_compact_dup_public.sh` is the final scaffold: it
-requires isolated baseline/candidate roots, audits native-IC versus public
-source shapes and WIRE, and repeats the full workload matrix through the real
-public name. It never patches either root itself. Shared `core/array.w` and the
-runtime IC table remain untouched until all three gates pass.
+Under the historical 0.97 gate, `compact` v2 measured 0.976--1.010 and `dup`
+v2 measured 0.937--1.025, so both were correctly skipped at the time.
+
+The 1.10 revisit rebuilt and reran both candidates rather than reclassifying
+the old numbers. The two balanced same-process campaigns measured
+`compact` at 0.970--1.014 and 0.976--1.005, and `dup` at 0.978--1.012 and
+0.960--1.007. The production-shaped isolated-root campaigns then compiled the
+same public-name benchmark against either the native IC or the source method.
+Their `compact` ratios were 0.920--1.024 and 0.933--1.034; `dup` was
+0.921--1.014 and 0.937--1.002. Every selected workload passed twice, so both
+methods and their optimized size snapshot are retained and the two C handlers
+and IC rows are removed.
+
+The public harness continues to require isolated baseline/candidate roots and
+audits the native-IC/source shapes, emitted WIRE, exact result layout, typed and
+view decoding, extras, trailing blocks, and bounded cleanup. Two additional
+compiled specs prove that `argv().compact` and `argv().dup` load Array without
+an Array literal or explicit `use`. Their shared one-shot loader guard was
+measured with matched compilers over eight alternating immutable self-host
+pairs: all 16 LLVM outputs were byte-identical, while candidate/baseline
+medians were 0.981 for load+parse, 1.015 for total compiler phases, and 0.994
+for both wall and user CPU.
+
+### Packed-network `to_s`
+
+IPv4, IPv6, and MAC already had direct source wrappers around the canonical
+`w_to_s` formatter, so this port removes only their three class-specific
+`to_s` IC rows. Their native `inspect` aliases remain: an arbitrary untyped
+native return can still receive `inspect` without giving the loader a class
+fact, while universal `to_s` has a sound runtime fallback. Exact output,
+receiver-bit/field stability, every IPv4 and IPv6 prefix, surplus arguments,
+trailing blocks, no-import autoload, interpreter behavior, WIRE, and LLVM all
+passed.
+
+Two independently rebuilt 10-observation campaigns measured source/native
+medians of 0.990/0.986 for plain IPv4, 0.989/0.999 for CIDR IPv4,
+0.987/0.989 for plain IPv6, 0.990/0.985 for CIDR IPv6, and 0.991/1.008 for
+MAC. All three methods clear the 1.10 gate and are retained. The initial
+check-only run also caught an ambiguity in the benchmark support ABI: raw
+`-1` aliases a reserved packed WValue, so no-prefix inputs now cross the mixed
+boundary as boxed `nil` and are converted outside the timed method.
+
+### Atomic / Channel / Thread wrapper revisit
+
+Four bounded synchronization leaves now live in the core facades:
+`Atomic#increment`, `Atomic#decrement`, `Channel#recv`, and `Thread#alive?`.
+They call the unchanged lower C primitives directly; storage, atomic ordering,
+channel scheduling, thread lifecycle, and all constructors remain native.
+`Atomic#cas/get/set/add`, `Channel#send/close`, and `Thread#join/kill` also keep
+their native IC rows because their names are too broad for a sound source-only
+autoload boundary or because their hard-fatal/mixed-ABI behavior is not exactly
+expressible by the facade.
+
+Two independently rebuilt 10-observation campaigns produced source/native
+ratios of 1.00461/0.996906 for Atomic increment, 1.00227/1.00141 for Atomic
+decrement, 0.974415/0.976986 for Channel recv, and 0.920427/0.918999 for Thread
+alive?. The worst fresh-cache load ratio was 1.0122 and compiler binary size was
+1.00006, all below the 1.10 gate. Narrow selector gates and exact native-factory
+provenance register the facades without changing public identity: all three
+opaque handle kinds still report `Unknown`. Full raw observations and parity
+coverage are in `sync_wrapper_revisit_audit.md` and its adjacent artifacts.
 
 ## Compiler work retained during this loop
 
+- ARGV discovery now rides the existing exhaustive builtin-runtime-class AST
+  walk instead of recursively traversing the complete compiler AST a second
+  time. The final v2 also inlines the two `ARGV`/`argv()` predicates, deleting
+  the old 175-line walker and its per-node helper calls while preserving the
+  Spinel stage-0 normalizer's intentional suppression. Common-bootstrap,
+  rebuilt, and self-host compilers emitted identical 13,580,943-byte LLVM
+  (`f874bfa3...e8e4bb`); nested `ARGV`, nested `argv()`, and no-ARGV fixtures
+  retained their exact entrypoint signatures and behavior. Two independent
+  eight-pair campaigns measured lowering at 0.988/0.989 and total compiler
+  time at 0.992/0.990; wall was 1.009/1.006 and user CPU 1.011/1.002. The
+  pooled 16-pair ratio-of-medians was 0.991 for lowering, 0.994 total, and
+  1.006 for both wall/user, with every warmup and measured LLVM pair
+  byte-identical.
+- Class lowering now caches the trait-expanded, accessor-synthesized, and
+  typed-overload-expanded body produced by its registration prepass and reuses
+  it in `lower_class_def`; isolated callers retain the old transformation
+  fallback. A self-host and a focused trait/accessor/overload/reopen fixture
+  emitted byte-identical LLVM, and six relevant specs passed. Across two
+  independent eight-pair campaigns, the combined paired medians were 0.993 for
+  lowering, 0.993 for total compiler phases, 1.001 for user CPU, and 1.004 for
+  wall time; aggregate ratios were 0.998, 0.996, 1.005, and 1.005. Every
+  individual metric pair remained within 1.10.
 - Recycle-scope lowering now restores lexical bookkeeping after terminated
   branches and emits balanced LIFO cleanup on return, break, and next without
   duplicating exception unwinds. Early returns record the prefix of live
@@ -262,8 +594,8 @@ runtime IC table remain untouched until all three gates pass.
   (`d8b0da5f...10851`).
 - Native view-field lowering now preserves signed/unsigned machine types,
   sign-extends narrow signed loads, and avoids eager integer boxing. This made
-  direct field candidates expressible and fixed BigInt's `length` layout/load
-  checks, although no newly tested public runtime port survived its gate.
+  direct field candidates expressible, fixed BigInt's `length` layout/load
+  checks, and now underpins the retained BigInt predicate source methods.
 - CFG/SSA setup now skips overflow/promotability analysis for ineligible
   functions, reuses the promotable-variable map, omits an unused backedge
   analysis, and performs one conservative phi-pruning pass. Alternating
@@ -337,11 +669,51 @@ runtime IC table remain untouched until all three gates pass.
   spaces, stale legacy archives, release bypass, and fixed point all passed.
   Twenty warm pairs were non-regressing (wall median 0.550 s versus 0.585 s).
 
+## Integrated verification snapshot (2026-07-15)
+
+- The combined compiler containing the retained runtime ports and fused ARGV
+  scan rebuilt successfully from the checked-in bootstrap. Two subsequent
+  self-host generations emitted byte-identical 13,656,142-byte LLVM modules
+  (`419fd5c23673452a8325a6c7d769eea6a0deb554630deb935bf80e478f9192a6`).
+- The full Spinel stage-0 bundle generated with `SPINEL_STAGE0_FULL=1` and
+  passed Ruby syntax validation. The SmallArray/BigArray benchmark's complete
+  `CHECK_ONLY` gate passed against the integrated compiler, as did the new
+  UUID, StringBuffer, and nested-ARGV compiled and interpreter specifications.
+- The complete spec run passed every migration and compiler-regression check.
+  Its only failures were the five pre-existing generic numeric specs
+  (`complex_spec`, `hypercomplex_mul_spec`, `matrix_spec`,
+  `operator_overload_spec`, and `vector_spec`). Each produced the identical
+  missing `new`, `basis`, or `identity` failure when independently compiled
+  and run from an untouched detached worktree at baseline commit `f62869b`;
+  none is attributable to this migration series.
+- After the String/Symbol `size`/`length` and public-identity merge, two newer
+  self-host generations again reached a byte-identical LLVM fixed point:
+  13,772,879 bytes with SHA-256 `54ea5a49d01a499f50d2357c64203c7eb445c46c86e77ef1e48c455934c17f29`.
+  The expanded suite again left only those same five baseline numeric failures;
+  all String representations, twelve no-use/generated-name gates, and compiled
+  plus interpreted identity checks passed.
+- After the synchronization-wrapper merge, the next two self-host generations
+  emitted byte-identical 13,819,933-byte LLVM modules with SHA-256
+  `613490a639145b20ecb377763353a568611bcc9223d982814d2d3b7f0c7293de`.
+  Focused source/native, WIRE/LLVM, factory-autoload, interpreter, fatal-parity,
+  and public-identity checks all passed. The full suite again left only the same
+  five detached-baseline numeric failures.
+
 ## Pending compiler trials
 
 No compiler trial in this section has yet cleared its first performance gate.
 
 ## Rejected compiler trials
+
+- Range iteration tried replacing unconditional canonical `w_int` boxing with
+  an inline signed-i48 membership test, direct NaN boxing on the hot arm, and
+  a cold BigInt call. Against the simpler unconditional call, 11 balanced
+  samples measured 0.999 for a long hot loop, 0.975 for four-item ranges,
+  1.009 for cold BigInt values, but 1.398 for one-item setup-heavy ranges.
+  The branch/merge overhead dominates precisely where loop setup is most
+  visible, so the checked boxer and its branch metadata were removed. Range
+  representation correctness is being retained separately and continues to
+  use unconditional `w_int` where a counter must become a boxed Integer.
 
 - The dedicated one-argument cached-dispatch ABI passed its dispatcher-only C
   microbenchmark strongly: source arity-one calls measured 0.858 and native

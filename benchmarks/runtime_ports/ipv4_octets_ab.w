@@ -12,6 +12,9 @@ BATCH_SIZE = 2048
 DEFAULT_ITERS = 5_000_000
 WARMUP_ITERS = 50_000
 
+-> thread_cpu_ns
+  ccall("w_runtime_port_thread_cpu_ns")
+
 + Array
   # The explicit Array hint gives compiled lowering a concrete view layout;
   # the tree walker routes the same receiver$field operation through its
@@ -163,13 +166,13 @@ WARMUP_ITERS = 50_000
     if count > BATCH_SIZE
       count = BATCH_SIZE
     i = 0
-    start_ns = clock()
+    start_ns = thread_cpu_ns()
     while i < count
       out = values[(completed + i) & CORPUS_MASK].__c_octets
       outputs[i] = out
       checksum += out[0] * 257 + out[3]
       i += 1
-    elapsed += clock() - start_ns
+    elapsed += thread_cpu_ns() - start_ns
     release_batch(outputs, count)
     completed += count
   [elapsed, checksum]
@@ -184,13 +187,13 @@ WARMUP_ITERS = 50_000
     if count > BATCH_SIZE
       count = BATCH_SIZE
     i = 0
-    start_ns = clock()
+    start_ns = thread_cpu_ns()
     while i < count
       out = values[(completed + i) & CORPUS_MASK].__w_octets
       outputs[i] = out
       checksum += out[0] * 257 + out[3]
       i += 1
-    elapsed += clock() - start_ns
+    elapsed += thread_cpu_ns() - start_ns
     release_batch(outputs, count)
     completed += count
   [elapsed, checksum]
@@ -205,13 +208,13 @@ WARMUP_ITERS = 50_000
     if count > BATCH_SIZE
       count = BATCH_SIZE
     i = 0
-    start_ns = clock()
+    start_ns = thread_cpu_ns()
     while i < count
       out = values[(completed + i) & CORPUS_MASK].octets
       outputs[i] = out
       checksum += out[0] * 257 + out[3]
       i += 1
-    elapsed += clock() - start_ns
+    elapsed += thread_cpu_ns() - start_ns
     release_batch(outputs, count)
     completed += count
   [elapsed, checksum]
@@ -240,9 +243,9 @@ WARMUP_ITERS = 50_000
   if c_result[1] != w_result[1]
     << "FAIL benchmark checksum octets.[path]: C=[c_result[1]] W=[w_result[1]]"
     exit(1)
-  c_ns = c_result[0] * 1_000_000_000 / (iters * 2)
-  w_ns = w_result[0] * 1_000_000_000 / (iters * 2)
-  ratio = w_result[0] / c_result[0]
+  c_ns = c_result[0] * ~1.0 / (iters * 2)
+  w_ns = w_result[0] * ~1.0 / (iters * 2)
+  ratio = w_result[0] * ~1.0 / c_result[0]
   << "RESULT|octets.[path]|[c_ns]|[w_ns]|[ratio]|[c_result[1]]"
 
 # Each process runs C/W/W/C or W/C/C/W.  Summing both legs per implementation

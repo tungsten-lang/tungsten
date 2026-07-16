@@ -1012,6 +1012,11 @@ use target
           return cs
     if env.defined?(name)
       return env.get(name)
+    # File is a compiler intrinsic rather than an autoload-registry entry.
+    # Its Mmap constructor needs the small core/mmap facade in the tree walker;
+    # loading the registered Mmap name defines both classes from that file.
+    if name == "File" && !@classes.has_key?("Mmap")
+      try_autoload_class("Mmap")
     if !@classes.has_key?(name)
       try_autoload_class(name)
     if @classes.has_key?(name)
@@ -1075,6 +1080,77 @@ use target
       raise "ccall requires a runtime function name"
     cname = "" + args[0]
     case cname
+    when "w_atomic_new"
+      if args.size() != 2
+        raise "w_atomic_new expects one argument"
+      return ccall("w_atomic_new", args[1])
+    when "w_atomic_increment"
+      if args.size() != 2
+        raise "w_atomic_increment expects one receiver"
+      return ccall("w_atomic_increment", args[1])
+    when "w_atomic_decrement"
+      if args.size() != 2
+        raise "w_atomic_decrement expects one receiver"
+      return ccall("w_atomic_decrement", args[1])
+    when "w_chan_new"
+      if args.size() != 2
+        raise "w_chan_new expects one capacity"
+      return ccall("w_chan_new", args[1])
+    when "w_chan_recv"
+      if args.size() != 2
+        raise "w_chan_recv expects one receiver"
+      return ccall("w_chan_recv", args[1])
+    when "w_thread_alive"
+      if args.size() != 2
+        raise "w_thread_alive expects one receiver"
+      if interpreted_thread?(args[1])
+        return args[1][:ivars]["@__thread_alive"]
+      return ccall("w_thread_alive", args[1])
+    when "__w_file_mmap"
+      if args.size() != 2
+        raise "__w_file_mmap expects one argument"
+      return ccall("__w_file_mmap", args[1])
+    when "__w_mmap_as_typed"
+      if args.size() != 3
+        raise "__w_mmap_as_typed expects two arguments"
+      # The public source leaves pass fixed raw-i64 encodings. Interpreter
+      # values are boxed, so make that one mixed-ABI conversion explicit here.
+      ebits = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
+      return ccall_rawargs("__w_mmap_as_typed", args[1], ebits)
+    when "w_int"
+      # A compiled source method uses w_int only to turn a raw signed i64 into
+      # its canonical immediate/BigInt WValue. Integers are already arbitrary
+      # precision values in the tree walker, so the exact mirror is identity.
+      if args.size() != 2 || !(type(args[1]) in ("Integer" "BigInt"))
+        raise "w_int expects one Integer argument"
+      return args[1]
+    when "w_small_array_new"
+      # Narrow fixture/constructor bridge for exercising runtime-backed
+      # SmallArray source methods under eval mode. Convert the public WValue
+      # arguments back to the raw C ABI explicitly.
+      if args.size() != 4
+        raise "w_small_array_new expects ebits, size, and bytes pointer"
+      ebits = ccall_nobox("w_numeric_to_i64", args[1]) ## i64
+      size = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
+      bytes = ccall_nobox("w_numeric_to_i64", args[3]) ## i64
+      return ccall_rawargs("w_small_array_new", ebits, size, bytes)
+    when "w_big_array_view"
+      # BigArray views are the public route that can carry the full signed-i64
+      # size header patterns needed to verify w_int overflow parity.
+      if args.size() != 4
+        raise "w_big_array_view expects data pointer, ebits, and length"
+      data = ccall_nobox("w_numeric_to_i64", args[1]) ## i64
+      ebits = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
+      length = ccall_nobox("w_numeric_to_i64", args[3]) ## i64
+      return ccall_rawargs("w_big_array_view", data, ebits, length)
+    when "w_executable_path"
+      if args.size() != 1
+        raise "w_executable_path expects no arguments"
+      return ccall("w_executable_path")
+    when "w_executable_dir"
+      if args.size() != 1
+        raise "w_executable_dir expects no arguments"
+      return ccall("w_executable_dir")
     when "w_to_s"
       # Source-defined objects exist only in this interpreter environment;
       # native w_to_s cannot see their method table. Route through the tree
@@ -1117,13 +1193,13 @@ use target
       return ccall("w_base64_decode_input", args[1])
     when "w_string_from_byte_array"
       return ccall("w_string_from_byte_array", args[1])
+    when "w_str_to_sym"
+      return ccall("w_str_to_sym", args[1])
 
     when "w_ipv4_parse"
       return ccall("w_ipv4_parse", args[1])
     when "w_ipv4_from_octets"
       return ccall("w_ipv4_from_octets", args[1], args[2], args[3], args[4], args[5])
-    when "w_ipv4_octets"
-      return ccall("w_ipv4_octets", args[1])
     when "w_ipv4_in_cidr"
       return ccall("w_ipv4_in_cidr", args[1], args[2])
     when "w_ipv6_parse"
@@ -1214,6 +1290,11 @@ use target
 
     raise "Unsupported ccall '[cname]' in interpreter"
 
+  -> interpreted_thread?(value)
+    if type(value) != "Hash" || !value.has_key?(:rt) || value[:rt] != :object
+      return false
+    value[:w_class] != nil && value[:w_class][:name] == "Thread" && value[:ivars].has_key?("@__thread_result")
+
   # Raw-returning C helpers need an explicit tree-walker bridge. Keep this
   # allowlisted like dispatch_interpreted_ccall: eval mode must not turn an
   # arbitrary source-level string into an unrestricted native call.
@@ -1233,6 +1314,12 @@ use target
       # the interpreter's value model receives an Integer rather than treating
       # the raw bits as an already-tagged WValue.
       return ccall("w_int", ccall_nobox("w_numeric_to_i64", args[1]))
+    when "w_to_i64"
+      if args.size() != 2
+        raise "w_to_i64 expects one argument"
+      # UUID#byte deliberately retains this narrower historical boundary:
+      # Int and BigInt are accepted, while other numeric kinds are rejected.
+      return ccall("w_int", ccall_nobox("w_to_i64", args[1]))
     when "w_u8_live_data_ptr"
       if args.size() != 2
         raise "w_u8_live_data_ptr expects one argument"
@@ -1246,6 +1333,13 @@ use target
       # native helper retains String/Symbol/rope validation and embedded-NUL
       # behavior, so eval and compiled Array#join cross the same boundary.
       return ccall("w_int", ccall_nobox("w_stringy_c_length", args[1]))
+    when "w_string_byte_length"
+      if args.size() != 2
+        raise "w_string_byte_length expects one argument"
+      # String#size/length source candidates use the exact stored-byte helper.
+      # Rebox its raw i64 result for the tree walker's arbitrary-precision
+      # Integer model, just as the compiled source body does explicitly.
+      return ccall("w_int", ccall_nobox("w_string_byte_length", args[1]))
 
     raise "Unsupported ccall_nobox '[cname]' in interpreter"
 
@@ -1778,14 +1872,19 @@ use target
       evaluate(a, env)
 
     if ast_get(node, :receiver) != nil
-      # `$bytes[i]` on WNetAddr is an inline fixed-array load in compiled
-      # methods. Route the interpreted equivalent through the same storage
-      # boundary without materializing a temporary byte array.
+      # `$bytes[i]` on WNetAddr/UUID is an inline fixed-array load in compiled
+      # methods. Route the interpreted equivalent through the corresponding
+      # narrow storage boundary without materializing a temporary byte array.
       recv_node = ast_get(node, :receiver)
       if ast_get(node, :name) in ("\[]" "[]") && ast_kind(recv_node) == :gvar && ast_get(recv_node, :name) == "$bytes"
+        current_method = @method_stack.last()
+        if current_method != nil && current_method[:w_class] != nil && current_method[:w_class][:name] == "UUID"
+          return ccall("w_uuid_byte", current_self(), args[0])
         return ccall("w_netaddr_raw_byte", current_self(), args[0])
       if ast_get(node, :name) in ("\[]" "[]") && ast_kind(recv_node) == :view_field_var && ast_get(recv_node, :field) == "bytes"
         explicit_recv = evaluate(ast_get(recv_node, :receiver), env)
+        if w_type_name(explicit_recv) == "UUID"
+          return ccall("w_uuid_byte", explicit_recv, args[0])
         return ccall("w_netaddr_raw_byte", explicit_recv, args[0])
       recv = evaluate(ast_get(node, :receiver), env)
       result = dispatch_method(recv, ast_get(node, :name), args, block, env)
@@ -1825,6 +1924,12 @@ use target
         if payload >= 0x800000000000
           return payload - 0x1000000000000
         return payload
+      # Float#abs emits a nonnegative biased Float word. Decode that exact
+      # range through the existing IEEE-u64 bridge; the compiled intrinsic is
+      # still an instruction-free identity on the already-boxed i64 word.
+      # The upper bound is the runtime's canonical positive NaN.
+      if bits >= 0x0001000000000000 && bits <= 0x7FF9000000000000
+        return ccall("w_float_from_u64_bits", bits - 0x0001000000000000)
       # Decode packed IPv4 through the existing interpreter ccall allowlist;
       # native code remains a zero-call i64 bit cast.
       if ((bits >> 48) & 0xFFFF) == 0xFFFE && ((bits >> 45) & 0x7) == 5
@@ -2047,7 +2152,32 @@ use target
 
     # Class.new constructor
     if name == "new" && type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :class
+      if recv[:name] == "Atomic"
+        if args.size() != 1
+          raise "Atomic.new expects one argument"
+        return ccall("w_atomic_new", args[0])
+      if recv[:name] == "Channel"
+        if args.size() != 1
+          raise "Channel.new expects one argument"
+        return ccall("w_chan_new", args[0])
+      if recv[:name] == "Thread"
+        if block == nil
+          raise "Thread.new requires a block"
+        result = call_block(block, [])
+        return {rt: :object, w_class: recv, ivars: {"@__thread_result" => result, "@__thread_alive" => false, "@__thread_killed" => false}}
       return instantiate(recv, args, env)
+
+    # Thread.new runs synchronously in the tree walker. Retained native
+    # join/kill declarations therefore need a small fake-handle equivalent.
+    if interpreted_thread?(recv)
+      if name == "join"
+        if args.size() > 0
+          return true
+        return recv[:ivars]["@__thread_result"]
+      if name == "kill"
+        recv[:ivars]["@__thread_alive"] = false
+        recv[:ivars]["@__thread_killed"] = true
+        return nil
 
     # Method on object
     if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :object
@@ -2065,21 +2195,58 @@ use target
             return call_w_method(recv, m, [inst], block, env)
         return call_w_method(recv, m, args, block, env)
 
+    # String/Symbol#to_sym remains a native String IC. Mirror it directly:
+    # routing through w_method_call would manufacture and recycle an argument
+    # Array inside the interpreter and has a mixed-ABI failure in self-hosts.
+    if type(recv) in ("String" "Symbol") && name == "to_sym"
+      # type(WRope) is String, but w_str_to_sym itself only sets the Symbol
+      # marker bit. Canonicalize first so an interpreted rope never turns its
+      # pointer word into a malformed Symbol value.
+      recv = ccall("w_rope_flatten", recv)
+      return ccall("w_str_to_sym", recv)
+
+    # String and Symbol share compiled method dispatch but not public type
+    # identity. Answer this before primitive-class autoload so a Symbol check
+    # never depends on parsing the legacy Symbol scaffold reentrantly.
+    if type(recv) in ("String" "Symbol") && name == "is_a?" && args.size() == 1
+      return is_a_class?(recv, args[0])
+
     # Primitive values can be extended by core classes (Array, String, etc.).
     # Give those class methods first refusal before falling back to boot
     # builtins so traits such as Enumerable participate for primitive arrays.
     primitive_class = nil
-    # Compiled String and Symbol values share dispatch key 0xF9, so the
-    # source String method is also Symbol#to_s. The tree walker ordinarily
-    # distinguishes host Symbols from Strings; route this one shared method
-    # through String explicitly instead of loading the legacy Symbol scaffold.
-    if type(recv) == "Symbol" && name == "to_s" && args.size() == 0
+    # Compiled String and Symbol values share dispatch key 0xF9, so the source
+    # String methods are also Symbol#to_s/#empty?/#size/#length. The tree walker
+    # ordinarily distinguishes host Symbols from Strings; route these shared
+    # methods through String instead of the legacy Symbol scaffold.
+    if type(recv) == "Symbol" && name in ("to_s" "empty?" "size" "length")
       try_autoload_class("String")
       primitive_class = @classes["String"]
     else
       primitive_class = primitive_runtime_class(recv)
     if primitive_class != nil
       m = lookup_method(primitive_class, name, args.size())
+      # StringBuffer's core file contains bodyless primitive declarations as
+      # well as the source-backed size body. After correcting the class name
+      # so its type class can register, those declarations must remain
+      # fallthroughs to the interpreter/runtime builtins rather than execute
+      # as empty source methods returning nil.
+      if m != nil && primitive_class[:name] == "StringBuffer"
+        method_body = m[:body]
+        if method_body == nil || method_body.size() == 0
+          m = nil
+      # Mmap likewise mixes one source leaf with retained native declarations.
+      # Empty declarations are runtime fallthroughs, not nil-returning bodies.
+      if m != nil && primitive_class[:name] == "Mmap"
+        method_body = m[:body]
+        if method_body == nil || method_body.size() == 0
+          m = nil
+      # Thread mixes the source-backed alive? leaf with retained native
+      # declarations. Empty declarations must likewise fall through.
+      if m != nil && primitive_class[:name] == "Thread"
+        method_body = m[:body]
+        if method_body == nil || method_body.size() == 0
+          m = nil
       # `- data` accessors model ivars for ordinary interpreted objects. A
       # small set of runtime-backed classes expose scalar layout fields through
       # w_native_data_field; fixed arrays and every other native layout stay on
@@ -2092,7 +2259,27 @@ use target
         # method with the same name (notably Hash#keys and Hash#values).
         m = nil
       if m != nil
+        # Compiled cached dispatch flattens ropes before invoking a String
+        # source method. Do this only after such a method was found so other
+        # interpreted primitive calls pay no new type check.
+        if m[:w_class] != nil && m[:w_class][:name] == "String"
+          recv = ccall("w_rope_flatten", recv)
         return call_w_method(recv, m, args, block, env)
+
+      # Error-sensitive byte_at, common-spelling close/subscript, and the
+      # mixed-decoder view_at remain native; only typed-view leaves use source.
+      if primitive_class[:name] == "Mmap" && name in ("close" "byte_at" "\[]" "[]" "view_at")
+        native_name = name == "\[]" ? "[]" : "" + name
+        return ccall("w_method_call", recv, native_name, args)
+
+      # The other synchronization selectors intentionally retain their native
+      # IC rows; route them there after giving the four source leaves priority.
+      if primitive_class[:name] == "Atomic" && name in ("cas" "get" "set" "add")
+        return ccall("w_method_call", recv, "" + name, args)
+      if primitive_class[:name] == "Channel" && name in ("send" "close")
+        return ccall("w_method_call", recv, "" + name, args)
+      if primitive_class[:name] == "Thread" && name in ("join" "kill")
+        return ccall("w_method_call", recv, "" + name, args)
 
     # Range methods
     if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :range
@@ -2240,8 +2427,27 @@ use target
       class_name = "Nil"
     elsif t == "TrueClass" || t == "FalseClass"
       class_name = "Bool"
+    # These handles remain publicly Unknown; the private numeric support
+    # boundary exists only so the tree walker can find their source facades.
+    if class_name == nil && t == "Unknown"
+      sync_kind = ccall("w_sync_handle_kind_support", recv)
+      if sync_kind == 1
+        class_name = "Atomic"
+      elsif sync_kind == 2
+        class_name = "Thread"
+      elsif sync_kind == 3
+        class_name = "Channel"
     if class_name == nil
       tn = w_type_name(recv)
+      # Generic-subtag runtime values report the host-level type "Object" to
+      # the tree walker even when their native discriminator names a registered
+      # core class (BigArray is one; SmallArray's object-like display follows
+      # the same path). Ask the runtime only for that ambiguous bucket so
+      # source methods on values created by a ccall can autoload normally.
+      if tn == "Object"
+        native_name = ccall("w_class_name", recv)
+        if native_name != nil && native_name != "Object" && native_name != "Unknown"
+          tn = native_name
       # Rich runtime literal types (Date/IPv4/IPv6/MAC/…) report their core
       # class through `type`. Literal syntax never names the class, so lazy
       # autoload may not have fired before a bodied helper is called.
@@ -2272,6 +2478,12 @@ use target
       return name in ("ebits" "size" "slots")
     if cname == "Hash"
       return name in ("count" "capacity" "flags")
+    if cname == "BigInt"
+      return name in ("length" "limb0")
+    if cname == "StringBuffer"
+      return name == "length"
+    if cname == "Mmap"
+      return name == "size"
     if cname in ("IPv6" "MAC")
       return name in ("len" "prefix" "_pad")
     false
@@ -2958,6 +3170,15 @@ use target
     is_builtin?(method_name)
 
   -> is_a_class?(recv, klass)
+    # String/Symbol share compiled method dispatch but retain distinct public
+    # primitive identities. Resolve their exact class/string targets without
+    # autoloading the legacy Symbol scaffold.
+    primitive_name = type(recv)
+    if primitive_name in ("String" "Symbol")
+      target_name = klass
+      if type(klass) == "Hash" && klass.has_key?(:rt) && klass[:rt] == :class
+        target_name = klass[:name]
+      return primitive_name == target_name
     w_class = nil
     if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :object
       w_class = recv[:w_class]

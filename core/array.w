@@ -54,6 +54,39 @@
   -> __enumerable_iteration_mode
     1
 
+  # size/cap are u32 header fields and therefore always fit the immediate Int
+  # payload. Build the canonical tag directly instead of calling w_int.
+  -> size
+    n = $size ## i64
+    tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+    wvalue_from_bits((tag | n) ## i64)
+
+  -> cap
+    n = $cap ## i64
+    tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+    wvalue_from_bits((tag | n) ## i64)
+
+  -> empty?
+    n = $size ## i64
+    if n == 0
+      return true
+    false
+
+  # Indexing stays behind Array's ebits-aware storage boundary. That preserves
+  # shifted starts, borrowed views, bool decoding, signed packed integers,
+  # floats, and polymorphic WValues while the branch/query logic lives here.
+  -> first
+    n = $size ## i64
+    if n == 0
+      return nil
+    self[0]
+
+  -> last
+    n = $size ## i64
+    if n == 0
+      return nil
+    self[n - 1]
+
   # Storage-side half of Enumerable#flat_map. Keeping the indexed copy here
   # avoids allocating and invoking a second iterator closure for every nested
   # Array while the flattening algorithm itself remains in Enumerable.
@@ -71,6 +104,30 @@
 
   -> to_a
     self
+
+  # Snapshot the receiver size once: indexed reads and pushes into the fresh
+  # result cannot mutate self, so rereading the header on every backedge only
+  # adds work. Both methods deliberately return ordinary polymorphic Arrays,
+  # matching the former runtime handlers for typed and view receivers.
+  -> compact
+    out = []
+    n = $size ## i64
+    i = 0
+    while i < n
+      value = self[i]
+      if value != nil
+        out.push(value)
+      i += 1
+    out
+
+  -> dup
+    out = []
+    n = $size ## i64
+    i = 0
+    while i < n
+      out.push(self[i])
+      i += 1
+    out
 
   # Keep the separator overload before the zero-argument overload. Runtime
   # dispatch selects exact arity first and otherwise falls back to the first

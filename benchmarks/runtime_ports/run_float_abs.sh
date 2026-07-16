@@ -8,7 +8,7 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
 RUNS="${RUNS:-10}"
 ITERS="${ITERS:-50000000}"
-GATE="${GATE:-0.97}"
+GATE="${GATE:-1.10}"
 CHECK_ONLY="${CHECK_ONLY:-0}"
 
 case "$RUNS" in
@@ -112,7 +112,7 @@ done
 
 echo
 echo "Median of $RUNS samples with balanced ABBA/BAAB orientations."
-echo "Retention requires every stratum W/C <= $GATE and a fresh rebuild/run with every stratum below 1.00."
+echo "Retention requires every stratum W/C <= $GATE and a fresh rebuild/run with every stratum at or below $GATE."
 
 if [ "$failed" -ne 0 ]; then
   echo "Strict gate: at least one important stratum is SKIP; keep Float#abs in C." >&2

@@ -447,7 +447,6 @@ WValue w_date(int year, int month, int day, int hour, int min, int sec, int tz);
 WValue w_ipv4(uint8_t a, uint8_t b, uint8_t c, uint8_t d, int cidr);
 WValue w_ipv4_parse(WValue str_v);
 WValue w_ipv4_from_octets(WValue a, WValue b, WValue c, WValue d, WValue prefix_v);
-WValue w_ipv4_octets(WValue ip);
 WValue w_ipv4_in_cidr(WValue ip, WValue cidr);
 WValue w_ipv6_from_string(const char *s, int cidr);  /* compiled path (ptr, i32) */
 WValue w_ipv6_parse(WValue str_v);                   /* interpreter path (boxed string) */
@@ -960,6 +959,10 @@ WValue w_chan_send(WValue ch, WValue val);
 WValue w_chan_recv(WValue ch);
 WValue w_chan_close(WValue ch);
 
+/* Private compiler tree-walker discrimination. Public type()/class_name for
+ * synchronization handles intentionally remains "Unknown". */
+WValue w_sync_handle_kind_support(WValue value) __attribute__((visibility("hidden")));
+
 /* ---- Freeze / Immutability (Phase 4) ---- */
 WValue w_freeze(WValue obj);
 WValue w_frozen_p(WValue obj);
@@ -1146,7 +1149,7 @@ WValue __w_file_mmap(WValue path);
 WValue __w_mmap_length(WValue mmap);
 WValue __w_mmap_byte_at(WValue mmap, WValue index);
 WValue __w_mmap_close(WValue mmap);
-WValue __w_mmap_as_typed(WValue mmap, int element_bits);
+WValue __w_mmap_as_typed(WValue mmap, int64_t element_bits);
 
 /* ---- Math.* libm wrappers ----
  * Each accepts any numeric WValue (int or float), returns a WValue
@@ -1488,6 +1491,10 @@ void w_argv_init(int argc, char **argv);
 WValue __w_argv_count(void);
 WValue __w_argv_at(WValue index);
 WValue __w_system(WValue command);
+
+/* ---- Process paths ---- */
+WValue w_executable_path(void);
+WValue w_executable_dir(void);
 
 /* ---- Monotonic clock ---- */
 WValue __w_clock_ms(void);

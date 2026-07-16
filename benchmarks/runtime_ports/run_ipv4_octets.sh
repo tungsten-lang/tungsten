@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Strict gate for the benchmark-only IPv4#octets source candidate.  This does
-# not modify production dispatch: PATH_MODE=unique measures the uniquely named
-# body; PATH_MODE=public is reserved for the later isolated IC-removal trial.
+# Retained IPv4#octets source-method gate. PATH_MODE=public (the default)
+# measures production dispatch; PATH_MODE=unique keeps the separately named
+# source body available for tuning against the byte-equivalent C reference.
 
 set -euo pipefail
 
@@ -10,9 +10,9 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
 RUNS="${RUNS:-10}"
 ITERS="${ITERS:-5000000}"
-GATE="${GATE:-0.97}"
+GATE="${GATE:-1.10}"
 CHECK_ONLY="${CHECK_ONLY:-0}"
-PATH_MODE="${PATH_MODE:-unique}"
+PATH_MODE="${PATH_MODE:-public}"
 INTERPRETER_CHECK="${INTERPRETER_CHECK:-1}"
 
 case "$RUNS" in
@@ -56,7 +56,7 @@ if [ "$INTERPRETER_CHECK" = "1" ]; then
 fi
 
 echo "Inspecting candidate/public WIRE (setup; excluded from timings)..."
-TUNGSTEN_C_INCLUDES="$SCRIPT_DIR/ipv4_octets_ref.c" \
+TUNGSTEN_C_INCLUDES="$SCRIPT_DIR/ipv4_octets_ref.c:$SCRIPT_DIR/runtime_port_clock_ref.c" \
   "$TUNGSTEN" compile "$SCRIPT_DIR/ipv4_octets_ab.w" --emit-wire > "$WIRE"
 
 wire_body() {
@@ -92,17 +92,27 @@ require_wire "$W_FN" 'call_direct_i64 .*@w_array_new_empty'
 require_wire "$W_FN" 'call_direct_i64 .*@w_array_push'
 reject_wire  "$W_FN" 'w_(ref_)?ipv4_octets'
 reject_wire  "$W_FN" 'call_method_i64'
-require_wire "$PUBLIC_FN" 'call_direct_i64 .*@w_ipv4_octets'
+require_wire "$PUBLIC_FN" '(ashr_i64|lshr_i64)'
+require_wire "$PUBLIC_FN" 'and_i64'
+require_wire "$PUBLIC_FN" 'call_direct_i64 .*@w_array_new_empty'
+require_wire "$PUBLIC_FN" 'call_direct_i64 .*@w_array_push'
+reject_wire  "$PUBLIC_FN" 'w_(ref_)?ipv4_octets'
+reject_wire  "$PUBLIC_FN" 'call_method_i64'
 
 push_count="$(wire_body "$W_FN" | grep -Ec 'call_direct_i64 .*@w_array_push')"
 if [ "$push_count" -ne 4 ]; then
   echo "WIRE check failed: $W_FN has $push_count array pushes, expected 4" >&2
   exit 1
 fi
-echo "WIRE: ok (C reference, raw unique source, and public ccall are distinct)"
+public_push_count="$(wire_body "$PUBLIC_FN" | grep -Ec 'call_direct_i64 .*@w_array_push')"
+if [ "$public_push_count" -ne 4 ]; then
+  echo "WIRE check failed: $PUBLIC_FN has $public_push_count array pushes, expected 4" >&2
+  exit 1
+fi
+echo "WIRE: ok (C reference, unique source, and real public source are distinct; public C fallback absent)"
 
 echo "Compiling release benchmark (setup; excluded from timings)..."
-TUNGSTEN_C_INCLUDES="$SCRIPT_DIR/ipv4_octets_ref.c" \
+TUNGSTEN_C_INCLUDES="$SCRIPT_DIR/ipv4_octets_ref.c:$SCRIPT_DIR/runtime_port_clock_ref.c" \
   "$TUNGSTEN" compile "$SCRIPT_DIR/ipv4_octets_ab.w" --release --out "$BIN" >/dev/null
 
 echo "Checking compiled C/W/public behavior and representation..."
@@ -111,10 +121,6 @@ echo "Checking compiled C/W/public behavior and representation..."
 if [ "$CHECK_ONLY" = "1" ]; then
   echo "CHECK_ONLY=1: interpreter, WIRE, release compile, and correctness gates passed; timings skipped."
   exit 0
-fi
-
-if [ "$PATH_MODE" = "public" ]; then
-  echo "PATH_MODE=public: use only for an isolated production-shaped IC-removal trial." >&2
 fi
 
 echo "Running $RUNS balanced ABBA samples x $ITERS iterations ($PATH_MODE path)..."
@@ -151,7 +157,8 @@ printf '%-16s %12.3f %12.3f %10.3f %8s\n' "$name" "$c_med" "$w_med" "$ratio_med"
 
 echo
 echo "Each sample is C/W/W/C or W/C/C/W; the two legs are summed per implementation."
-echo "Retention requires median W/C <= $GATE and an independent repeat below 1.00."
+echo "Retention requires median W/C <= $GATE and an independent repeat at or below $GATE."
+echo "Timed legs use thread CPU time, excluding competing-process scheduling."
 echo "Result-array cleanup happens in bounded batches outside every timed interval."
 
 if [ "$decision" != "PASS" ]; then

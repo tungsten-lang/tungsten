@@ -18,4 +18,25 @@
   # rope receivers are flattened before String type-class dispatch. Therefore
   # mode 0 is exactly the canonical empty string (and empty symbol) encoding.
   -> empty?
-    (($value >> 1) & 7) == 0
+    ($value & 14) == 0
+
+  # Preserve the runtime's canonical byte-count boundary, then reproduce
+  # w_int exactly. The current result is u32-sized, but the full signed-i48
+  # check keeps this source body correct if String storage grows later.
+  -> size
+    n = ccall_nobox("w_string_byte_length", self) ## i64
+    if n >= -140_737_488_355_328 && n <= 140_737_488_355_327
+      tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+      mask = 0xFFFFFFFFFFFF ## i64
+      return wvalue_from_bits((tag | (n & mask)) ## i64)
+    ccall("w_int", n)
+
+  # Keep both aliases independently dispatchable. Forwarding length to size
+  # would add another public method lookup to this leaf operation.
+  -> length
+    n = ccall_nobox("w_string_byte_length", self) ## i64
+    if n >= -140_737_488_355_328 && n <= 140_737_488_355_327
+      tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+      mask = 0xFFFFFFFFFFFF ## i64
+      return wvalue_from_bits((tag | (n & mask)) ## i64)
+    ccall("w_int", n)

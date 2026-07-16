@@ -21,6 +21,26 @@
   -> __enumerable_iteration_mode
     1
 
+  # Header size is a u8, so it always fits the immediate-Integer payload.
+  # Construct the canonical WValue tag in source and avoid an out-of-line
+  # w_int call on every public query.
+  -> size
+    n = $size ## i64
+    tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+    wvalue_from_bits((tag | n) ## i64)
+
+  # SmallArray is frozen: capacity is exactly its header size.
+  -> cap
+    n = $size ## i64
+    tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+    wvalue_from_bits((tag | n) ## i64)
+
+  -> empty?
+    n = $size ## i64
+    if n == 0
+      return true
+    false
+
   -> each/&
     $size -> &(self[i]) : self
 

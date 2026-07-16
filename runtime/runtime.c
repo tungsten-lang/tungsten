@@ -9679,6 +9679,14 @@ static const uint8_t *w_load_lang_flags(const char *lang, int bits) {
     snprintf(cp_path, sizeof(cp_path), "languages/%s/%s.%s", lang, lang, suffix);
     f = fopen(cp_path, "rb");
     if (!f) {
+        const char *root = getenv("TUNGSTEN_ROOT");
+        if (root && root[0] != '\0') {
+            snprintf(cp_path, sizeof(cp_path), "%s/languages/%s/%s.%s",
+                     root, lang, lang, suffix);
+            f = fopen(cp_path, "rb");
+        }
+    }
+    if (!f) {
         WValue rtdir = w_runtime_dir();
         snprintf(cp_path, sizeof(cp_path), "%s/../languages/%s/%s.%s",
                  as_str(rtdir), lang, lang, suffix);
@@ -9688,6 +9696,14 @@ static const uint8_t *w_load_lang_flags(const char *lang, int bits) {
     if (!f && bits == 64) {
         snprintf(cp_path, sizeof(cp_path), "languages/%s/%s.codepoints", lang, lang);
         f = fopen(cp_path, "rb");
+        if (!f) {
+            const char *root = getenv("TUNGSTEN_ROOT");
+            if (root && root[0] != '\0') {
+                snprintf(cp_path, sizeof(cp_path), "%s/languages/%s/%s.codepoints",
+                         root, lang, lang);
+                f = fopen(cp_path, "rb");
+            }
+        }
         if (!f) {
             WValue rtdir = w_runtime_dir();
             snprintf(cp_path, sizeof(cp_path), "%s/../languages/%s/%s.codepoints",
@@ -12037,15 +12053,6 @@ WValue w_ipv4_from_octets(WValue a, WValue b, WValue c, WValue d, WValue prefix_
     uint32_t addr = ((uint32_t)octets[0] << 24) | ((uint32_t)octets[1] << 16) |
                     ((uint32_t)octets[2] << 8) | (uint32_t)octets[3];
     return make_ipv4_addr(addr, prefix);
-}
-
-WValue w_ipv4_octets(WValue ip) {
-    if (!w_is_ipv4(ip)) return W_NIL;
-    WValue arr = w_array_new_empty();
-    uint32_t addr = w_unbox_ipv4_addr(ip);
-    for (int i = 0; i < 4; i++)
-        w_array_push(arr, w_int((addr >> (8 * (3 - i))) & 0xFF));
-    return arr;
 }
 
 WValue w_ipv4_in_cidr(WValue ip, WValue cidr) {
@@ -16459,6 +16466,20 @@ WValue w_native_data_field(WValue recv, WValue name_v) {
         if (strcmp(name, "count") == 0) return w_int(h->count);
         if (strcmp(name, "capacity") == 0) return w_int(h->cap);
         if (strcmp(name, "flags") == 0) return w_int(h->flags);
+    } else if (w_is_bigint(recv)) {
+        WBigint *b = w_as_bigint(recv);
+        if (strcmp(name, "length") == 0) return w_int(b->size);
+        /* `limb0` is the first u64 of WBigint's flexible tail. A size-zero
+         * synthetic BigInt has no semantic limb, so keep direct field reads
+         * safe even though the source predicates short-circuit first. */
+        if (strcmp(name, "limb0") == 0)
+            return b->size == 0 ? w_int(0) : w_u64(b->limbs[0]);
+    } else if (w_is_strbuf(recv)) {
+        WStrBuf *sb = (WStrBuf *)w_as_ptr(recv);
+        if (strcmp(name, "length") == 0) return w_int(sb->size);
+    } else if (w_is_mmap(recv)) {
+        WMmap *m = (WMmap *)w_as_ptr(recv);
+        if (strcmp(name, "size") == 0) return w_int(m->size);
     } else if (w_is_ipv6(recv) || w_is_mac(recv)) {
         WNetAddr *a = (WNetAddr *)w_as_ptr(recv);
         if (strcmp(name, "len") == 0) return w_int(a->len);
@@ -16694,6 +16715,21 @@ static WObject *as_object(WValue v) {
 
 WClass *g_class_table[W_MAX_CLASSES];
 uint16_t g_next_class_id = 0;
+/* Public identity is not always method-dispatch identity: String/Symbol share
+ * key 0xF9, while Atomic/Thread/Channel source classes are dispatch facades
+ * whose public type remains Unknown. Cache the final class WValue (including
+ * W_NIL) separately from g_type_class. The extra page is selected by bit 0,
+ * which distinguishes String from Symbol; other keys may use both aliases. */
+typedef struct {
+    WValue value;
+    uint8_t resolved;
+} WPublicClassEntry;
+static WPublicClassEntry g_public_type_class[512] = {0};
+
+static inline void w_public_class_cache(unsigned slot, WValue value) {
+    g_public_type_class[slot].value = value;
+    g_public_type_class[slot].resolved = 1;
+}
 
 static inline uint64_t w_method_name_hash(WValue name) {
     return w_hash_splitmix64(name);
@@ -16870,7 +16906,24 @@ WValue w_class_new(const char *name, WValue superclass) {
         klass->ivar_name_hashes = calloc(1, sizeof(uint64_t) * klass->ivar_capacity);
     }
     w_ivar_lookup_rebuild(klass, w_ivar_lookup_capacity_for(klass->ivar_count));
-    return w_box_ptr(klass, W_SUBTAG_CLASS);
+    WValue class_value = w_box_ptr(klass, W_SUBTAG_CLASS);
+    if (strcmp(name, "String") == 0) {
+        w_public_class_cache(0x0F9, class_value);
+    } else if (strcmp(name, "Symbol") == 0) {
+        w_public_class_cache(0x1F9, class_value);
+    } else if (strcmp(name, "Unknown") == 0 &&
+               (!g_public_type_class[0x101].resolved ||
+                !w_is_class(g_public_type_class[0x101].value))) {
+        /* Preserve the first explicit Unknown declaration. A prior cached nil
+         * means a handle was queried before the declaration and is replaced. */
+        w_public_class_cache(0x001, class_value);
+        w_public_class_cache(0x101, class_value);
+        w_public_class_cache(0x081, class_value);
+        w_public_class_cache(0x181, class_value);
+        w_public_class_cache(0x084, class_value);
+        w_public_class_cache(0x184, class_value);
+    }
+    return class_value;
 }
 
 WValue w_class_new_wv(WValue name, WValue superclass) {
@@ -17291,6 +17344,8 @@ WValue __w_type(WValue v) {
     if (w_is_strbuf(v)) return w_string("StringBuffer");
     if (w_is_symbol(v)) return w_string("Symbol");
     if (w_is_char(v))   return w_string("Char");
+    if (w_is_big_array(v)) return w_string("BigArray");
+    if (w_is_small_array(v)) return w_string("SmallArray");
     if (w_is_array(v) || w_is_body(v)) return w_string("Array");
     if (w_is_hash(v))   return w_string("Hash");
     if (w_is_range(v))  return w_string("Range");
@@ -17307,6 +17362,7 @@ WValue __w_type(WValue v) {
     if (w_is_ipv6(v))     return w_string("IPv6");
     if (w_is_mac(v))      return w_string("MAC");
     if (w_is_obj(v) && w_subtag(v) == W_SUBTAG_UUID) return w_string("UUID");
+    if (w_is_mmap(v))     return w_string("Mmap");
     if (w_is_domain_obj(v)) {
         switch (w_as_domain(v)->domain_type) {
             case W_DOMAIN_DECIMAL:  return w_string("Decimal");
@@ -17322,6 +17378,17 @@ WValue __w_type(WValue v) {
     }
     if (w_is_class(v)) return w_string("Class");
     return w_string("Unknown");
+}
+
+/* Compiler tree-walker support only. Keep synchronization-handle
+ * discrimination out of public type()/class_name behavior. Codes are private:
+ * 0=other, 1=Atomic, 2=Thread, 3=Channel. */
+__attribute__((visibility("hidden")))
+WValue w_sync_handle_kind_support(WValue v) {
+    if (w_is_atomic(v)) return w_int(1);
+    if (w_is_thread(v)) return w_int(2);
+    if (w_is_channel(v)) return w_int(3);
+    return w_int(0);
 }
 
 /* ---- File I/O ---- */
@@ -17462,7 +17529,7 @@ static inline int64_t array_storage_bits(int64_t bits);
  * u8 has ~5 G elements — well past i32). The view is zero-copy: the
  * caller's mmap MUST outlive every BigArray view of it. Documented
  * contract; not runtime-enforced. */
-WValue __w_mmap_as_typed(WValue mmap_val, int element_bits) {
+WValue __w_mmap_as_typed(WValue mmap_val, int64_t element_bits) {
     WMmap *m = as_mmap(mmap_val);
     if (!m) w_raise(w_string("Mmap#as_typed: not an mmap"));
     if (m->closed) w_raise(w_string("Mmap#as_typed: mmap is closed"));
@@ -17612,41 +17679,119 @@ WValue w_float_to_u64_bits(WValue f_v) {
     return w_int((int64_t)bits);
 }
 
+/* Resolve the canonical path of the currently running executable. Keep this
+ * independent of argv[0]: applications may be launched through PATH, a
+ * symlink, or from a different working directory. The caller owns the
+ * returned buffer. */
+static char *w_executable_path_alloc(void) {
+    char *path = NULL;
+#ifdef __APPLE__
+    uint32_t size = 1024;
+    path = (char *)malloc(size);
+    if (!path) return NULL;
+    if (_NSGetExecutablePath(path, &size) != 0) {
+        char *larger = (char *)realloc(path, size);
+        if (!larger) {
+            free(path);
+            return NULL;
+        }
+        path = larger;
+        if (_NSGetExecutablePath(path, &size) != 0) {
+            free(path);
+            return NULL;
+        }
+    }
+#elif defined(__linux__)
+    size_t size = 256;
+    for (;;) {
+        char *larger = (char *)realloc(path, size);
+        if (!larger) {
+            free(path);
+            return NULL;
+        }
+        path = larger;
+        ssize_t len = readlink("/proc/self/exe", path, size - 1);
+        if (len < 0) {
+            free(path);
+            return NULL;
+        }
+        if ((size_t)len < size - 1) {
+            path[len] = '\0';
+            break;
+        }
+        if (size > (1U << 20)) {
+            free(path);
+            return NULL;
+        }
+        size *= 2;
+    }
+#else
+    return NULL;
+#endif
+
+    char *resolved = realpath(path, NULL);
+    free(path);
+    return resolved;
+}
+
+/* Canonical absolute executable path, or an empty string if the platform
+ * cannot determine it. */
+WValue w_executable_path(void) {
+    char *path = w_executable_path_alloc();
+    if (!path) return w_string("");
+    return w_string_take(path, strlen(path));
+}
+
+/* Canonical absolute directory containing the executable, without a trailing
+ * slash except for the filesystem root. */
+WValue w_executable_dir(void) {
+    char *path = w_executable_path_alloc();
+    if (!path) return w_string("");
+
+    char *slash = strrchr(path, '/');
+    if (!slash) {
+        free(path);
+        return w_string("");
+    }
+    if (slash == path)
+        slash[1] = '\0';
+    else
+        slash[0] = '\0';
+    return w_string_take(path, strlen(path));
+}
+
 /* Return the runtime/ directory relative to the running executable.
  * e.g. binary at "/usr/local/tungsten/bin/tungsten-compiler"
  *      → returns "/usr/local/tungsten/runtime/"
  * Falls back to "runtime/" if path cannot be determined. */
 WValue w_runtime_dir(void) {
-    char path[4096];
-#ifdef __APPLE__
-    uint32_t size = sizeof(path);
-    if (_NSGetExecutablePath(path, &size) != 0) return w_string("runtime/");
-#else
-    ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
-    if (len <= 0) return w_string("runtime/");
-    path[len] = '\0';
-#endif
-    /* Resolve symlinks to get canonical path */
-    char resolved[4096];
-    if (!realpath(path, resolved)) return w_string("runtime/");
+    char *resolved = w_executable_path_alloc();
+    if (!resolved) return w_string("runtime/");
 
-    /* Strip binary name: /a/b/bin/tungsten-compiler → /a/b/bin/ */
+    /* Strip binary name: /a/b/bin/tungsten-compiler → /a/b/bin */
     char *slash = strrchr(resolved, '/');
-    if (!slash) return w_string("runtime/");
-    slash[1] = '\0';
-
-    /* Go up one directory: /a/b/bin/ → /a/b/ */
+    if (!slash || slash == resolved) {
+        free(resolved);
+        return w_string("runtime/");
+    }
     slash[0] = '\0';
+
+    /* Go up one directory: /a/b/bin → /a/b/ */
     slash = strrchr(resolved, '/');
-    if (!slash) return w_string("runtime/");
+    if (!slash) {
+        free(resolved);
+        return w_string("runtime/");
+    }
     slash[1] = '\0';
 
-    /* Append "runtime/" */
     size_t rlen = strlen(resolved);
-    if (rlen + 9 >= sizeof(resolved)) return w_string("runtime/");
-    memcpy(resolved + rlen, "runtime/", 9);  /* includes NUL */
-
-    return w_string(resolved);
+    char *with_runtime = (char *)realloc(resolved, rlen + 9);
+    if (!with_runtime) {
+        free(resolved);
+        return w_string("runtime/");
+    }
+    memcpy(with_runtime + rlen, "runtime/", 9);  /* includes NUL */
+    return w_string_take(with_runtime, rlen + 8);
 }
 
 WValue __w_file_exists(WValue path_val) {
@@ -18126,7 +18271,6 @@ WValue __w_prime_aks(WValue n) {
 #define WN_close   W_M5("close")
 #define WN_write   W_M5("write")
 #define WN_send    W_M4("send")
-#define WN_recv    W_M4("recv")
 #define WN_cas     W_M3("cas")
 #define WN_plus    W_M1("+")
 #define WN_lshift  W_M2("<<")
@@ -18139,7 +18283,7 @@ WValue __w_prime_aks(WValue n) {
 #define WN_clear   W_M5("clear")
 
 /* >5 byte method names — interned at first use via w_string() */
-static WValue WN_empty_q = 0, WN_include_q = 0, WN_has_q = 0, WN_reverse = 0, WN_length = 0;
+static WValue WN_empty_q = 0, WN_include_q = 0, WN_has_q = 0, WN_reverse = 0;
 static WValue WN_last_index = 0, WN_replace_byte_bang = 0;
 static WValue WN_select = 0, WN_values = 0, WN_delete = 0, WN_has_key_q = 0;
 static WValue WN_starts_with_q = 0, WN_ends_with_q = 0, WN_replace = 0;
@@ -18151,7 +18295,7 @@ static WValue WN_downcase = 0, WN_upcase = 0, WN_swapcase = 0, WN_capitalize = 0
 static WValue WN_ascii_q = 0, WN_valid_utf8_q = 0;
 static WValue WN_prepend = 0, WN_append = 0, WN_to_sym = 0, WN_infinite_q = 0;
 static WValue WN_accept = 0, WN_repeat = 0, WN_unshift = 0, WN_rindex = 0;
-static WValue WN_merge_bang = 0, WN_increment = 0, WN_decrement = 0, WN_alive_q = 0;
+static WValue WN_merge_bang = 0;
 static WValue WN_read_exact = 0, WN_write_bytes = 0, WN_shutdown = 0, WN_set_timeout = 0;
 static WValue WN_alpn_protocol = 0, WN_serve_http = 0, WN_concat = 0;
 static WValue WN_listen = 0, WN_connect = 0, WN_load_cert = 0;
@@ -18279,9 +18423,6 @@ WValue w_value_is_a(WValue recv, WValue target) {
 
 static WValue WN_byte_at = 0;
 static WValue WN_view_at = 0, WN_subview = 0;
-static WValue WN_as_u8 = 0, WN_as_u16 = 0, WN_as_u32 = 0, WN_as_u64 = 0;
-static WValue WN_as_i8 = 0, WN_as_i16 = 0, WN_as_i32 = 0, WN_as_i64 = 0;
-static WValue WN_as_f32 = 0, WN_as_f64 = 0;
 static WValue WN_reject = 0, WN_compact = 0, WN_minmax = 0;
 static WValue WN_detect = 0, WN_reduce = 0, WN_flat_map = 0;
 static WValue WN_group_by = 0, WN_partition = 0, WN_delete_at = 0;
@@ -18300,7 +18441,6 @@ static void w_init_method_names(void) {
     WN_last_index   = w_string("last_index");
     WN_replace_byte_bang = w_string("replace_byte!");
     WN_reverse      = w_string("reverse");
-    WN_length       = w_string("length");
     WN_select       = w_string("select");
     WN_reject       = w_string("reject");
     WN_compact      = w_string("compact");
@@ -18346,9 +18486,6 @@ static void w_init_method_names(void) {
     WN_accept       = w_string("accept");
     WN_repeat       = w_string("repeat");
     WN_merge_bang   = w_string("merge!");
-    WN_increment    = w_string("increment");
-    WN_decrement    = w_string("decrement");
-    WN_alive_q      = w_string("alive?");
     WN_read_exact   = w_string("read_exact");
     WN_write_bytes  = w_string("write_bytes");
     WN_shutdown     = w_string("shutdown");
@@ -18368,16 +18505,6 @@ static void w_init_method_names(void) {
     WN_byte_at      = w_string("byte_at");
     WN_view_at      = w_string("view_at");
     WN_subview      = w_string("subview");
-    WN_as_u8        = w_string("as_u8");
-    WN_as_u16       = w_string("as_u16");
-    WN_as_u32       = w_string("as_u32");
-    WN_as_u64       = w_string("as_u64");
-    WN_as_i8        = w_string("as_i8");
-    WN_as_i16       = w_string("as_i16");
-    WN_as_i32       = w_string("as_i32");
-    WN_as_i64       = w_string("as_i64");
-    WN_as_f32       = w_string("as_f32");
-    WN_as_f64       = w_string("as_f64");
 }
 
 static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue args_arr);
@@ -18493,13 +18620,39 @@ static inline uint64_t w_dispatch_key(WValue v) {
 /* ---- Type class table: dispatch key → class_id for Tungsten-defined methods ---- */
 static uint16_t g_type_class[256] = {0};
 
+static void w_public_type_class_register(uint8_t key, WClass *klass) {
+    /* These keys intentionally expose only method facades. Packed Body uses
+     * Array as its public identity and is resolved/cached by __w_type below. */
+    if (key == W_SUBTAG_ATOMIC || key == (0x80u | W_TYPE_THREAD) ||
+        key == (0x80u | W_TYPE_CHANNEL) || key == 0xE6)
+        return;
+    WValue class_value = w_box_ptr(klass, W_SUBTAG_CLASS);
+    if (key == 0xF9) {
+        if (strcmp(klass->name, "String") == 0)
+            w_public_class_cache(0x0F9, class_value);
+        else if (strcmp(klass->name, "Symbol") == 0)
+            w_public_class_cache(0x1F9, class_value);
+        return;
+    }
+    /* Most dispatch keys admit source aliases whose class name is not the
+     * public __w_type name (Array/ByteArray/BoolArray is one concrete set).
+     * Registration therefore invalidates both payload-parity pages and lets
+     * the next public query apply the existing name check before caching. */
+    g_public_type_class[key].resolved = 0;
+    g_public_type_class[0x100u | key].resolved = 0;
+}
+
 void w_type_class_register(uint8_t dispatch_key, uint16_t class_id) {
     g_type_class[dispatch_key] = class_id + 1;
+    if (g_class_table[class_id])
+        w_public_type_class_register(dispatch_key, g_class_table[class_id]);
 }
 
 void w_type_class_register_wv(int32_t dispatch_key, WValue klass) {
     WClass *c = as_class(klass);
-    g_type_class[dispatch_key & 0xFF] = c->class_id + 1;
+    uint8_t key = (uint8_t)(dispatch_key & 0xFF);
+    g_type_class[key] = c->class_id + 1;
+    w_public_type_class_register(key, c);
 }
 
 /* ---- .class / .class_name ----
@@ -18510,9 +18663,10 @@ void w_type_class_register_wv(int32_t dispatch_key, WValue klass) {
  * Resolution order:
  *   1. If v is itself a class, return it (class.class == self).
  *   2. If v is an instance, use WObject.class_id directly.
- *   3. Try g_type_class (populated by classes that opt in via the IC
- *      fast path's w_type_class_register_wv).
- *   4. Fallback: find a registered class whose name matches __w_type(v).
+ *   3. Try the exact public-identity cache, independently of method facades.
+ *   4. On a cold cache miss, accept g_type_class only if its class name agrees
+ *      with __w_type(v), then cache that exact public result.
+ *   5. Fallback: find a registered class whose name matches __w_type(v).
  *      Lets `4.class` return @class.Integer even when Integer hasn't
  *      (yet) registered a dispatch key. */
 /* Lazy singleton for the "Class" class — what .class returns when the
@@ -18544,23 +18698,43 @@ WValue w_class_of(WValue v) {
      * treated AST child lists as Arrays (see __w_type above). Skip the Body
      * type-class registration here so `.class` follows that Array facade too.
      * Method dispatch still uses the 0xE6 key in w_method_dispatch. */
-    if (!w_is_body(v) && key < 256) {
-        uint16_t cid_slot = g_type_class[key];
-        if (cid_slot) {
-            WClass *klass = g_class_table[cid_slot - 1];
-            if (klass) return w_box_ptr(klass, W_SUBTAG_CLASS);
-        }
+    int cacheable = !w_is_body(v) && key < 256;
+    unsigned public_slot = 0;
+    if (cacheable) {
+        public_slot = (unsigned)key | ((unsigned)(v & 1u) << 8);
+        WPublicClassEntry *cached = &g_public_type_class[public_slot];
+        if (cached->resolved) return cached->value;
     }
     WValue type_name = __w_type(v);
     const char *want = as_str(type_name);
+    if (cacheable) {
+        uint16_t cid_slot = g_type_class[key];
+        if (cid_slot) {
+            WClass *klass = g_class_table[cid_slot - 1];
+            if (klass && strcmp(klass->name, want) == 0) {
+                WValue result = w_box_ptr(klass, W_SUBTAG_CLASS);
+                w_public_class_cache(public_slot, result);
+                return result;
+            }
+        }
+    }
     for (int i = 0; i < g_next_class_id; i++) {
         WClass *k = g_class_table[i];
-        if (k && strcmp(k->name, want) == 0) return w_box_ptr(k, W_SUBTAG_CLASS);
+        if (k && strcmp(k->name, want) == 0) {
+            WValue result = w_box_ptr(k, W_SUBTAG_CLASS);
+            if (cacheable) w_public_class_cache(public_slot, result);
+            return result;
+        }
     }
     /* No class with this name registered (thin program that never autoloaded
      * the core class). Create a stub so `.class` is total — mirrors the
      * tree-walk interpreter, which conjures the same stub on demand. */
-    if (strcmp(want, "Unknown") != 0) return w_class_new(want, W_NIL);
+    if (strcmp(want, "Unknown") != 0) {
+        WValue result = w_class_new(want, W_NIL);
+        if (cacheable) w_public_class_cache(public_slot, result);
+        return result;
+    }
+    if (cacheable) w_public_class_cache(public_slot, W_NIL);
     return W_NIL;
 }
 
@@ -18676,7 +18850,6 @@ static WValue w_ic_array_push(WValue r, WValue *a, int c) {
     return w_array_push(r, a[0]);
 }
 static WValue w_ic_array_pop(WValue r, WValue *a, int c)     { (void)a; (void)c; return w_array_pop(r); }
-static WValue w_ic_array_length(WValue r, WValue *a, int c)  { (void)a; (void)c; return w_array_size(r); }
 /* Phase 7+d (#62 fix): use array_slot_load_decoded for the typed-array
  * cases (ebits ∈ {1, 4, 8, 16, 32, -32, -64} — anything packed narrower
  * than WValue). The earlier slots[i] direct-index was correct only for
@@ -18690,22 +18863,6 @@ static WValue w_ic_array_shift(WValue r, WValue *a, int c) {
     arr->start++;
     arr->size--;
     return first;
-}
-static WValue w_ic_array_first(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    WArray *arr = as_array(r);
-    if (arr->size == 0) return W_NIL;
-    return array_slot_load_decoded(arr, 0);
-}
-static WValue w_ic_array_last(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    WArray *arr = as_array(r);
-    if (arr->size == 0) return W_NIL;
-    return array_slot_load_decoded(arr, arr->size - 1);
-}
-static WValue w_ic_array_empty(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return as_array(r)->size == 0 ? W_TRUE : W_FALSE;
 }
 static WValue w_ic_array_get(WValue r, WValue *a, int c) {
     (void)c;
@@ -18724,10 +18881,6 @@ static WValue w_ic_array_idx(WValue r, WValue *a, int c) {
 static WValue w_ic_array_idxset(WValue r, WValue *a, int c) {
     (void)c;
     return w_array_idxset(r, a[0], a[1]);
-}
-static WValue w_ic_array_cap(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_int(((WArray *)w_as_ptr(r))->cap);
 }
 static WValue w_ic_array_clear(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -19130,24 +19283,6 @@ static WValue w_ic_array_none_q(WValue r, WValue *a, int c) {
         if (w_truthy(array_slot_load_decoded(arr, i))) return W_FALSE;
     return W_TRUE;
 }
-static WValue w_ic_array_compact(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    WArray *arr = as_array(r);
-    WValue result = w_array_new_empty();
-    for (int32_t i = 0; i < arr->size; i++) {
-        WValue v = array_slot_load_decoded(arr, i);
-        if (v != W_NIL) w_array_push(result, v);
-    }
-    return result;
-}
-static WValue w_ic_array_dup(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    WArray *arr = as_array(r);
-    WValue result = w_array_new_empty();
-    for (int32_t i = 0; i < arr->size; i++)
-        w_array_push(result, array_slot_load_decoded(arr, i));
-    return result;
-}
 /* Phase 7+j: uniq, take, drop, minmax. */
 static WValue w_ic_array_uniq(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -19250,12 +19385,6 @@ static WValue w_ic_array_slice(WValue r, WValue *a, int c) {
 }
 
 /* String builtin wrappers */
-static WValue w_ic_string_length(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    char buf[6]; const char *s; size_t len;
-    w_str_data(r, buf, &s, &len);
-    return w_int((int64_t)len);
-}
 /* Phase 7+g: String case-conversion and predicate methods. */
 static WValue w_ic_string_idx(WValue r, WValue *a, int c) {
     if (c < 1) die("[] requires 1 argument");
@@ -19310,12 +19439,6 @@ static WValue w_ic_string_concat(WValue r, WValue *a, int c) {
 static WValue w_ic_string_prepend(WValue r, WValue *a, int c) {
     if (c < 1) die("prepend requires 1 argument");
     return w_str_concat(a[0], r);
-}
-static WValue w_ic_string_empty(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    char buf[6]; const char *s; size_t len;
-    w_str_data(r, buf, &s, &len);
-    return w_bool(len == 0);
 }
 static WValue w_ic_string_include(WValue r, WValue *a, int c) {
     if (c < 1) die("include? requires 1 argument");
@@ -21501,7 +21624,6 @@ static WValue w_ic_int_to_s(WValue r, WValue *a, int c)  {
     int base = w_to_s_base_arg(a, c);
     return base == 10 ? w_to_s(r) : w_int_to_str_base_i64(w_as_int(r), base);
 }
-static WValue w_ic_int_to_i(WValue r, WValue *a, int c)  { (void)a; (void)c; return r; }
 static WValue w_ic_int_to_f(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_box_double((double)w_as_int(r));
@@ -21568,7 +21690,6 @@ static WValue w_ic_bigint_to_s(WValue r, WValue *a, int c) {
     int base = w_to_s_base_arg(a, c);
     return bigint_to_s_base_impl(w_as_bigint(r), base);
 }
-static WValue w_ic_bigint_to_i(WValue r, WValue *a, int c) { (void)a; (void)c; return r; }
 static WValue w_ic_bigint_to_f(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_box_double(bigint_to_double_impl(w_as_bigint(r)));
@@ -21617,46 +21738,17 @@ static WValue w_ic_integer_lcm(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_bigint_prev(WValue r, WValue *a, int c) { (void)a; (void)c; return w_sub(r, w_int(1)); }
 static WValue w_ic_bigint_succ(WValue r, WValue *a, int c) { (void)a; (void)c; return w_add(r, w_int(1)); }
-static WValue w_ic_bigint_zero_q(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_bool(w_as_bigint(r)->size == 0);
-}
-static WValue w_ic_bigint_even_q(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    WBigint *b = w_as_bigint(r);
-    int32_t n = b->size < 0 ? -b->size : b->size;
-    return w_bool(n == 0 || ((b->limbs[0] & 1ULL) == 0));
-}
-static WValue w_ic_bigint_odd_q(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    WBigint *b = w_as_bigint(r);
-    int32_t n = b->size < 0 ? -b->size : b->size;
-    return w_bool(n > 0 && ((b->limbs[0] & 1ULL) != 0));
-}
-static WValue w_ic_bigint_negative_q(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_bool(w_as_bigint(r)->size < 0);
-}
-static WValue w_ic_bigint_positive_q(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_bool(w_as_bigint(r)->size > 0);
-}
 
-/* Channel builtin wrappers (Phase 7+m) */
+/* Retained native synchronization wrappers. */
 static WValue w_ic_channel_send(WValue r, WValue *a, int c) {
     if (c < 1) die("channel.send requires 1 argument");
     return w_chan_send(r, a[0]);
-}
-static WValue w_ic_channel_recv(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_chan_recv(r);
 }
 static WValue w_ic_channel_close(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_chan_close(r);
 }
 
-/* Atomic builtin wrappers (Phase 7+m) */
 static WValue w_ic_atomic_cas(WValue r, WValue *a, int c) {
     if (c < 2) die("atomic.cas requires 2 arguments");
     return w_atomic_cas(r, a[0], a[1]);
@@ -21669,28 +21761,12 @@ static WValue w_ic_atomic_set(WValue r, WValue *a, int c) {
     if (c < 1) die("atomic.set requires 1 argument");
     return w_atomic_set(r, a[0]);
 }
-static WValue w_ic_atomic_increment(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_atomic_increment(r);
-}
-static WValue w_ic_atomic_decrement(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_atomic_decrement(r);
-}
 static WValue w_ic_atomic_add(WValue r, WValue *a, int c) {
     if (c < 1) die("atomic.add requires 1 argument");
     return w_atomic_add(r, a[0]);
 }
 
 /* Phase 7+p: BigArray and SmallArray inline fast paths. */
-static WValue w_ic_big_array_size(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_big_array_size(r);
-}
-static WValue w_ic_big_array_cap(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_int(((WBigArray *)w_as_ptr(r))->cap);
-}
 static WValue w_ic_big_array_idx(WValue r, WValue *a, int c) {
     if (c < 1) die("[] requires 1 argument");
     return w_big_array_idx(r, a[0]);
@@ -21711,20 +21787,12 @@ static WValue w_ic_big_array_push(WValue r, WValue *a, int c) {
     if (c < 1) die("push requires 1 argument");
     return w_big_array_push(r, a[0]);
 }
-static WValue w_ic_big_array_empty(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return ((WBigArray *)w_as_ptr(r))->size == 0 ? W_TRUE : W_FALSE;
-}
 WValue w_big_array_subview(WValue arr_val, int64_t lo, int64_t len);  /* fwd decl */
 static WValue w_ic_big_array_subview(WValue r, WValue *a, int c) {
     if (c < 2) die("BigArray#subview requires (lo, len)");
     return w_big_array_subview(r, w_as_int(a[0]), w_as_int(a[1]));
 }
 
-static WValue w_ic_small_array_size(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_small_array_size(r);
-}
 static WValue w_ic_small_array_idx(WValue r, WValue *a, int c) {
     if (c < 1) die("[] requires 1 argument");
     return w_small_array_idx(r, a[0]);
@@ -21741,12 +21809,7 @@ static WValue w_ic_small_array_set(WValue r, WValue *a, int c) {
     if (c < 2) die("set requires 2 arguments");
     return w_small_array_set(r, a[0], a[1]);
 }
-static WValue w_ic_small_array_empty(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return ((WSmallArray *)w_as_ptr(r))->size == 0 ? W_TRUE : W_FALSE;
-}
-
-/* Phase 7+o: Regex, Thread, Socket, Mmap, Int.times. */
+/* Regex, retained Thread wrappers, Socket, Mmap, and Int.times. */
 static WValue w_ic_regex_match(WValue r, WValue *a, int c) {
     if (c < 1) die("regex match requires 1 argument");
     return w_regex_match(r, a[0]);
@@ -21759,10 +21822,6 @@ static WValue w_ic_regex_to_s(WValue r, WValue *a, int c) {
 static WValue w_ic_thread_join(WValue r, WValue *a, int c) {
     if (c > 0) return w_thread_join_timeout(r, w_as_int(a[0]));
     return w_thread_join(r);
-}
-static WValue w_ic_thread_alive(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_thread_alive(r);
 }
 static WValue w_ic_thread_kill(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -21813,10 +21872,6 @@ static WValue w_ic_socket_serve_http(WValue r, WValue *a, int c) {
     return w_socket_serve_http(r, a[c - 1], workers);
 }
 
-static WValue w_ic_mmap_size(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return __w_mmap_length(r);
-}
 static WValue w_ic_mmap_close(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return __w_mmap_close(r);
@@ -21829,16 +21884,6 @@ static WValue w_ic_mmap_idx(WValue r, WValue *a, int c) {
     if (c < 1) die("Mmap#[] requires 1 argument");
     return __w_mmap_byte_at(r, a[0]);
 }
-static WValue w_ic_mmap_as_u8(WValue r, WValue *a, int c)  { (void)a; (void)c; return __w_mmap_as_typed(r, 8); }
-static WValue w_ic_mmap_as_u16(WValue r, WValue *a, int c) { (void)a; (void)c; return __w_mmap_as_typed(r, 16); }
-static WValue w_ic_mmap_as_u32(WValue r, WValue *a, int c) { (void)a; (void)c; return __w_mmap_as_typed(r, 32); }
-static WValue w_ic_mmap_as_u64(WValue r, WValue *a, int c) { (void)a; (void)c; return __w_mmap_as_typed(r, 64); }
-static WValue w_ic_mmap_as_i8(WValue r, WValue *a, int c)  { (void)a; (void)c; return __w_mmap_as_typed(r, 108); }
-static WValue w_ic_mmap_as_i16(WValue r, WValue *a, int c) { (void)a; (void)c; return __w_mmap_as_typed(r, 116); }
-static WValue w_ic_mmap_as_i32(WValue r, WValue *a, int c) { (void)a; (void)c; return __w_mmap_as_typed(r, 32); }
-static WValue w_ic_mmap_as_i64(WValue r, WValue *a, int c) { (void)a; (void)c; return __w_mmap_as_typed(r, 64); }
-static WValue w_ic_mmap_as_f32(WValue r, WValue *a, int c) { (void)a; (void)c; return __w_mmap_as_typed(r, -32); }
-static WValue w_ic_mmap_as_f64(WValue r, WValue *a, int c) { (void)a; (void)c; return __w_mmap_as_typed(r, -64); }
 static WValue w_ic_mmap_view_at(WValue r, WValue *a, int c) {
     if (c < 3) die("Mmap#view_at requires (byte_offset, ebits, n_elements)");
     int64_t byte_offset = w_as_int(a[0]);
@@ -21884,11 +21929,6 @@ static WValue w_ic_int_times(WValue r, WValue *a, int c) {
 static WValue w_ic_strbuf_to_s(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_strbuf_to_s(r);
-}
-static WValue w_ic_strbuf_size(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    WStrBuf *sb = (WStrBuf *)w_as_ptr(r);
-    return w_int(sb->size);
 }
 static WValue w_ic_strbuf_include(WValue r, WValue *a, int c) {
     if (c < 1) die("include? requires 1 argument");
@@ -21953,37 +21993,7 @@ static WValue w_ic_float_to_i(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_int((int64_t)w_as_double(r));
 }
-static WValue w_ic_float_to_f(WValue r, WValue *a, int c) { (void)a; (void)c; return r; }
 static WValue w_ic_float_to_s(WValue r, WValue *a, int c) { (void)a; (void)c; return w_to_s(r); }
-static WValue w_ic_float_abs(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_box_double(fabs(w_as_double(r)));
-}
-static WValue w_ic_float_sqrt(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_box_double(sqrt(w_as_double(r)));
-}
-static WValue w_ic_float_ceil(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_int((int64_t)ceil(w_as_double(r)));
-}
-static WValue w_ic_float_floor(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_int((int64_t)floor(w_as_double(r)));
-}
-static WValue w_ic_float_round(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_int((int64_t)round(w_as_double(r)));
-}
-static WValue w_ic_float_nan_q(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_bool(isnan(w_as_double(r)));
-}
-static WValue w_ic_float_infinite_q(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_bool(isinf(w_as_double(r)));
-}
-
 /* Decimal (0xFFFD "numeric" tag) numeric conversions. Decimals had no IC
  * table, so `8.0.to_i`, `Vector#length`'s sqrt, etc. missed the cache and
  * died with "undefined method ... for Object". A decimal isn't a raw double,
@@ -22012,9 +22022,13 @@ static WValue w_ic_decimal_round(WValue r, WValue *a, int c) {
     return w_int((int64_t)round(cmp_numeric_double(r)));
 }
 
-static WValue w_ic_value_to_s(WValue r, WValue *a, int c) { (void)a; (void)c; return w_to_s(r); }
-
-static WValue w_ic_ipv4_octets(WValue r, WValue *a, int c) { (void)a; (void)c; return w_ipv4_octets(r); }
+/* The packed-network inspect aliases remain native until a tiny, sound
+ * unknown-boundary autoload facade is proven not to regress compile/binary
+ * size. Their to_s rows migrate independently to the existing source bodies. */
+static WValue w_ic_value_to_s(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    return w_to_s(r);
+}
 
 /* Resolution tables — WValue keys for O(1) integer compare */
 typedef struct { WValue name; WValue (*fn)(WValue, WValue*, int); } WICEntry;
@@ -22022,15 +22036,10 @@ typedef struct { WValue name; WValue (*fn)(WValue, WValue*, int); } WICEntry;
 static WICEntry w_ic_array_table[] = {
     {0, w_ic_array_push},     /* WN_push — patched at init */
     {0, w_ic_array_pop},
-    {0, w_ic_array_length},   /* WN_size */
     {0, w_ic_array_shift},
-    {0, w_ic_array_first},
-    {0, w_ic_array_last},
-    {0, w_ic_array_empty},    /* WN_empty_q */
     {0, w_ic_array_idx},      /* WN_idx ([]) — unchecked (Phase 7+c fix) */
     {0, w_ic_array_idxset},   /* WN_idxset ([]=) — unchecked */
     {0, w_ic_array_include},  /* WN_has_q (canonical) — handler still named _include for now */
-    {0, w_ic_array_cap},      /* WN_cap (Phase 7+b: migrated from cascade) */
     {0, w_ic_array_clear},    /* WN_clear (Phase 7+b: migrated from cascade) */
     {0, w_ic_array_get},      /* WN_get — bounds-checked (Phase 7+c) */
     {0, w_ic_array_set},      /* WN_set — bounds-checked */
@@ -22066,8 +22075,6 @@ static WICEntry w_ic_array_table[] = {
     {0, w_ic_array_any_q},
     {0, w_ic_array_all_q},
     {0, w_ic_array_none_q},
-    {0, w_ic_array_compact},
-    {0, w_ic_array_dup},
     {0, w_ic_array_count},        /* Phase 7+n */
     {0, w_ic_array_find_index},   /* WN_find_index */
     {0, w_ic_array_find_index},   /* WN_index — same handler */
@@ -22082,7 +22089,6 @@ static WICEntry w_ic_array_table[] = {
 };
 
 static WICEntry w_ic_string_table[] = {
-    {0, w_ic_string_length},      /* WN_size */
     {0, w_ic_string_idx},         /* Phase 7+g */
     {0, w_ic_string_upcase},
     {0, w_ic_string_downcase},
@@ -22118,15 +22124,12 @@ static WICEntry w_ic_string_table[] = {
     {0, w_ic_string_matchop},   /* WN_match_q — same handler */
     {0, w_ic_string_rindex},    /* WN_rindex */
     {0, w_ic_string_reverse},   /* WN_reverse */
-    {0, w_ic_string_length},    /* WN_length — alias for size */
-    {0, w_ic_string_empty},     /* dynamic-receiver fallback; source wins */
     {0, NULL}
 };
 
 static WICEntry w_ic_int_table[] = {
     {0, w_ic_int_to_s},
     {0, w_ic_int_abs},
-    {0, w_ic_int_to_i},        /* Phase 7+i */
     {0, w_ic_int_to_f},
     {0, w_ic_int_chr},
     {0, w_ic_int_gcd},
@@ -22144,26 +22147,20 @@ static WICEntry w_ic_int_table[] = {
 };
 
 static WICEntry w_ic_big_array_table[] = { /* Phase 7+p */
-    {0, w_ic_big_array_size},
-    {0, w_ic_big_array_cap},
     {0, w_ic_big_array_idx},
     {0, w_ic_big_array_idxset},
     {0, w_ic_big_array_get},
     {0, w_ic_big_array_set},
     {0, w_ic_big_array_push},
-    {0, w_ic_big_array_empty},
     {0, w_ic_big_array_subview},
     {0, NULL}
 };
 
 static WICEntry w_ic_small_array_table[] = { /* Phase 7+p */
-    {0, w_ic_small_array_size},
-    {0, w_ic_small_array_size},   /* WN_cap aliased to size */
     {0, w_ic_small_array_idx},
     {0, w_ic_small_array_idxset},
     {0, w_ic_small_array_get},
     {0, w_ic_small_array_set},
-    {0, w_ic_small_array_empty},
     {0, NULL}
 };
 
@@ -22175,9 +22172,8 @@ static WICEntry w_ic_regex_table[] = {     /* Phase 7+o */
     {0, NULL}
 };
 
-static WICEntry w_ic_thread_table[] = {    /* Phase 7+o */
+static WICEntry w_ic_thread_table[] = {
     {0, w_ic_thread_join},
-    {0, w_ic_thread_alive},
     {0, w_ic_thread_kill},
     {0, NULL}
 };
@@ -22197,27 +22193,15 @@ static WICEntry w_ic_socket_table[] = {    /* Phase 7+o */
 };
 
 static WICEntry w_ic_mmap_table[] = {      /* Phase 7+o */
-    {0, w_ic_mmap_size},
     {0, w_ic_mmap_close},
     {0, w_ic_mmap_byte_at},
     {0, w_ic_mmap_idx},
-    {0, w_ic_mmap_as_u8},
-    {0, w_ic_mmap_as_u16},
-    {0, w_ic_mmap_as_u32},
-    {0, w_ic_mmap_as_u64},
-    {0, w_ic_mmap_as_i8},
-    {0, w_ic_mmap_as_i16},
-    {0, w_ic_mmap_as_i32},
-    {0, w_ic_mmap_as_i64},
-    {0, w_ic_mmap_as_f32},
-    {0, w_ic_mmap_as_f64},
     {0, w_ic_mmap_view_at},
     {0, NULL}
 };
 
 static WICEntry w_ic_strbuf_table[] = {    /* Phase 7+n */
     {0, w_ic_strbuf_to_s},
-    {0, w_ic_strbuf_size},
     {0, w_ic_strbuf_include},
     {0, w_ic_strbuf_starts_with},
     {0, NULL}
@@ -22225,7 +22209,6 @@ static WICEntry w_ic_strbuf_table[] = {    /* Phase 7+n */
 
 static WICEntry w_ic_bigint_table[] = {    /* Phase 7+m */
     {0, w_ic_bigint_to_s},
-    {0, w_ic_bigint_to_i},
     {0, w_ic_bigint_gcd},
     {0, w_ic_bigint_abs},
     {0, w_ic_bigint_prime_q},
@@ -22233,18 +22216,12 @@ static WICEntry w_ic_bigint_table[] = {    /* Phase 7+m */
     {0, w_ic_bigint_prev},
     {0, w_ic_bigint_succ},
     {0, w_ic_bigint_succ},      /* next */
-    {0, w_ic_bigint_zero_q},
-    {0, w_ic_bigint_even_q},
-    {0, w_ic_bigint_odd_q},
-    {0, w_ic_bigint_negative_q},
-    {0, w_ic_bigint_positive_q},
     {0, w_ic_integer_lcm},
     {0, NULL}
 };
 
-static WICEntry w_ic_channel_table[] = {   /* Phase 7+m */
+static WICEntry w_ic_channel_table[] = {
     {0, w_ic_channel_send},
-    {0, w_ic_channel_recv},
     {0, w_ic_channel_close},
     {0, NULL}
 };
@@ -22541,12 +22518,10 @@ WValue w_ip4_scene(WValue vv) {
     return w_string(buf);
 }
 
-static WICEntry w_ic_atomic_table[] = {    /* Phase 7+m */
+static WICEntry w_ic_atomic_table[] = {
     {0, w_ic_atomic_cas},
     {0, w_ic_atomic_get},
     {0, w_ic_atomic_set},
-    {0, w_ic_atomic_increment},
-    {0, w_ic_atomic_decrement},
     {0, w_ic_atomic_add},
     {0, NULL}
 };
@@ -22567,16 +22542,7 @@ static WICEntry w_ic_hash_table[] = {      /* Phase 7+l */
 
 static WICEntry w_ic_float_table[] = {     /* Phase 7+i */
     {0, w_ic_float_to_i},
-    {0, w_ic_float_to_f},
     {0, w_ic_float_to_s},
-    {0, w_ic_float_abs},
-    {0, w_ic_float_sqrt},
-    {0, w_ic_float_ceil},
-    {0, w_ic_float_floor},
-    {0, w_ic_float_round},
-    {0, w_ic_float_nan_q},
-    {0, w_ic_float_infinite_q},
-    {0, w_ic_num_sq},
     {0, NULL}
 };
 
@@ -22591,21 +22557,17 @@ static WICEntry w_ic_decimal_table[] = {     /* 0xFFFD numeric tag */
 };
 
 static WICEntry w_ic_ipv4_table[] = {
-    {0, w_ic_value_to_s},
-    {0, w_ic_value_to_s},
-    {0, w_ic_ipv4_octets},
+    {0, w_ic_value_to_s},        /* inspect */
     {0, NULL}
 };
 
 static WICEntry w_ic_ipv6_table[] = {
-    {0, w_ic_value_to_s},
-    {0, w_ic_value_to_s},
+    {0, w_ic_value_to_s},        /* inspect */
     {0, NULL}
 };
 
 static WICEntry w_ic_mac_table[] = {
-    {0, w_ic_value_to_s},
-    {0, w_ic_value_to_s},
+    {0, w_ic_value_to_s},        /* inspect */
     {0, NULL}
 };
 
@@ -22613,133 +22575,116 @@ static void w_init_ic_tables(void) {
     /* Array */
     w_ic_array_table[0].name  = WN_push;
     w_ic_array_table[1].name  = WN_pop;
-    w_ic_array_table[2].name  = WN_size;
-    w_ic_array_table[3].name  = WN_shift;
-    w_ic_array_table[4].name  = WN_first;
-    w_ic_array_table[5].name  = WN_last;
-    w_ic_array_table[6].name  = WN_empty_q;
-    w_ic_array_table[7].name  = WN_idx;
-    w_ic_array_table[8].name  = WN_idxset;
-    w_ic_array_table[9].name  = WN_has_q;     /* canonical Array#has? — IC fast path */
-    w_ic_array_table[10].name = WN_cap;       /* Phase 7+b */
-    w_ic_array_table[11].name = WN_clear;     /* Phase 7+b */
-    w_ic_array_table[12].name = WN_get;       /* Phase 7+c */
-    w_ic_array_table[13].name = WN_set;       /* Phase 7+c */
-    w_ic_array_table[14].name = WN_include_q; /* Phase 7+d: legacy alias for has? */
-    w_ic_array_table[15].name = WN_unshift;   /* Phase 7+e */
-    w_ic_array_table[16].name = WN_sort;
-    w_ic_array_table[17].name = WN_reverse;
-    w_ic_array_table[18].name = WN_copy;
-    w_ic_array_table[19].name = WN_fill;       /* Phase 7+f */
-    w_ic_array_table[20].name = WN_view;
-    w_ic_array_table[21].name = WN_slice_view;
-    w_ic_array_table[22].name = WN_data;
-    w_ic_array_table[23].name = WN_raw_ptr;
-    w_ic_array_table[24].name = WN_min;
-    w_ic_array_table[25].name = WN_max;
-    w_ic_array_table[26].name = WN_sum;
-    w_ic_array_table[27].name = WN_fastsum;
-    w_ic_array_table[28].name = WN_sumsq;
-    w_ic_array_table[29].name = WN_dot;
-    w_ic_array_table[30].name = WN_cross;
-    w_ic_array_table[31].name = WN_scale;
-    w_ic_array_table[32].name = WN_scale_bang;
-    w_ic_array_table[33].name = WN_cos;
-    w_ic_array_table[34].name = WN_sin;
-    w_ic_array_table[35].name = WN_sqrt;
-    w_ic_array_table[36].name = WN_matvec_i8;
-    w_ic_array_table[37].name = WN_matmul_i8;
-    w_ic_array_table[38].name = WN_uniq;        /* Phase 7+j */
-    w_ic_array_table[39].name = WN_take;
-    w_ic_array_table[40].name = WN_drop;
-    w_ic_array_table[41].name = WN_minmax;
-    w_ic_array_table[42].name = WN_each;        /* Phase 7+k */
-    w_ic_array_table[43].name = WN_any_q;
-    w_ic_array_table[44].name = WN_all_q;
-    w_ic_array_table[45].name = WN_none_q;
-    w_ic_array_table[46].name = WN_compact;
-    w_ic_array_table[47].name = WN_dup;
-    w_ic_array_table[48].name = WN_count;          /* Phase 7+n */
-    w_ic_array_table[49].name = WN_find_index;
-    w_ic_array_table[50].name = WN_index;
-    w_ic_array_table[51].name = WN_last_index;
-    w_ic_array_table[52].name = WN_replace_byte_bang;
-    w_ic_array_table[53].name = WN_delete_at;
-    w_ic_array_table[54].name = WN_slice;
-    w_ic_array_table[55].name = WN_exp;
-    w_ic_array_table[56].name = WN_log;
-    w_ic_array_table[57].name = WN_tan;
+    w_ic_array_table[2].name  = WN_shift;
+    w_ic_array_table[3].name  = WN_idx;
+    w_ic_array_table[4].name  = WN_idxset;
+    w_ic_array_table[5].name  = WN_has_q;     /* canonical Array#has? — IC fast path */
+    w_ic_array_table[6].name  = WN_clear;     /* Phase 7+b */
+    w_ic_array_table[7].name  = WN_get;       /* Phase 7+c */
+    w_ic_array_table[8].name  = WN_set;       /* Phase 7+c */
+    w_ic_array_table[9].name  = WN_include_q; /* Phase 7+d: legacy alias for has? */
+    w_ic_array_table[10].name = WN_unshift;   /* Phase 7+e */
+    w_ic_array_table[11].name = WN_sort;
+    w_ic_array_table[12].name = WN_reverse;
+    w_ic_array_table[13].name = WN_copy;
+    w_ic_array_table[14].name = WN_fill;       /* Phase 7+f */
+    w_ic_array_table[15].name = WN_view;
+    w_ic_array_table[16].name = WN_slice_view;
+    w_ic_array_table[17].name = WN_data;
+    w_ic_array_table[18].name = WN_raw_ptr;
+    w_ic_array_table[19].name = WN_min;
+    w_ic_array_table[20].name = WN_max;
+    w_ic_array_table[21].name = WN_sum;
+    w_ic_array_table[22].name = WN_fastsum;
+    w_ic_array_table[23].name = WN_sumsq;
+    w_ic_array_table[24].name = WN_dot;
+    w_ic_array_table[25].name = WN_cross;
+    w_ic_array_table[26].name = WN_scale;
+    w_ic_array_table[27].name = WN_scale_bang;
+    w_ic_array_table[28].name = WN_cos;
+    w_ic_array_table[29].name = WN_sin;
+    w_ic_array_table[30].name = WN_sqrt;
+    w_ic_array_table[31].name = WN_matvec_i8;
+    w_ic_array_table[32].name = WN_matmul_i8;
+    w_ic_array_table[33].name = WN_uniq;        /* Phase 7+j */
+    w_ic_array_table[34].name = WN_take;
+    w_ic_array_table[35].name = WN_drop;
+    w_ic_array_table[36].name = WN_minmax;
+    w_ic_array_table[37].name = WN_each;        /* Phase 7+k */
+    w_ic_array_table[38].name = WN_any_q;
+    w_ic_array_table[39].name = WN_all_q;
+    w_ic_array_table[40].name = WN_none_q;
+    w_ic_array_table[41].name = WN_count;          /* Phase 7+n */
+    w_ic_array_table[42].name = WN_find_index;
+    w_ic_array_table[43].name = WN_index;
+    w_ic_array_table[44].name = WN_last_index;
+    w_ic_array_table[45].name = WN_replace_byte_bang;
+    w_ic_array_table[46].name = WN_delete_at;
+    w_ic_array_table[47].name = WN_slice;
+    w_ic_array_table[48].name = WN_exp;
+    w_ic_array_table[49].name = WN_log;
+    w_ic_array_table[50].name = WN_tan;
     /* String */
-    w_ic_string_table[0].name = WN_size;
-    w_ic_string_table[1].name  = WN_idx;          /* Phase 7+g */
-    w_ic_string_table[2].name  = WN_upcase;
-    w_ic_string_table[3].name  = WN_downcase;
-    w_ic_string_table[4].name  = WN_swapcase;
-    w_ic_string_table[5].name  = WN_capitalize;
-    w_ic_string_table[6].name  = WN_concat;
-    w_ic_string_table[7].name  = WN_append;
-    w_ic_string_table[8].name  = WN_lshift;
-    w_ic_string_table[9].name  = WN_prepend;
-    w_ic_string_table[10].name = WN_include_q;
-    w_ic_string_table[11].name = WN_starts_with_q;
-    w_ic_string_table[12].name = WN_ends_with_q;
-    w_ic_string_table[13].name = WN_ascii_q;
-    w_ic_string_table[14].name = WN_valid_utf8_q;
-    w_ic_string_table[15].name = WN_repeat;
-    w_ic_string_table[16].name = WN_chars;        /* Phase 7+h */
-    w_ic_string_table[17].name = WN_codes;
-    w_ic_string_table[18].name = WN_lchs;
-    w_ic_string_table[19].name = WN_bytes;
-    w_ic_string_table[20].name = WN_slice;
-    w_ic_string_table[21].name = WN_strip;
-    w_ic_string_table[22].name = WN_ltrim;
-    w_ic_string_table[23].name = WN_rtrim;
-    w_ic_string_table[24].name = WN_ord;
-    w_ic_string_table[25].name = WN_to_i;
-    w_ic_string_table[26].name = WN_to_f;
-    w_ic_string_table[27].name = WN_to_sym;
-    w_ic_string_table[28].name = WN_split;
-    w_ic_string_table[29].name = WN_replace;
-    w_ic_string_table[30].name = WN_gsub;
-    w_ic_string_table[31].name = WN_index;
-    w_ic_string_table[32].name = WN_matchop;     /* Phase 7+q */
-    w_ic_string_table[33].name = WN_match_q;
-    w_ic_string_table[34].name = WN_rindex;
-    w_ic_string_table[35].name = WN_reverse;
-    w_ic_string_table[36].name = WN_length;
-    w_ic_string_table[37].name = WN_empty_q;
+    w_ic_string_table[0].name  = WN_idx;          /* Phase 7+g */
+    w_ic_string_table[1].name  = WN_upcase;
+    w_ic_string_table[2].name  = WN_downcase;
+    w_ic_string_table[3].name  = WN_swapcase;
+    w_ic_string_table[4].name  = WN_capitalize;
+    w_ic_string_table[5].name  = WN_concat;
+    w_ic_string_table[6].name  = WN_append;
+    w_ic_string_table[7].name  = WN_lshift;
+    w_ic_string_table[8].name  = WN_prepend;
+    w_ic_string_table[9].name  = WN_include_q;
+    w_ic_string_table[10].name = WN_starts_with_q;
+    w_ic_string_table[11].name = WN_ends_with_q;
+    w_ic_string_table[12].name = WN_ascii_q;
+    w_ic_string_table[13].name = WN_valid_utf8_q;
+    w_ic_string_table[14].name = WN_repeat;
+    w_ic_string_table[15].name = WN_chars;        /* Phase 7+h */
+    w_ic_string_table[16].name = WN_codes;
+    w_ic_string_table[17].name = WN_lchs;
+    w_ic_string_table[18].name = WN_bytes;
+    w_ic_string_table[19].name = WN_slice;
+    w_ic_string_table[20].name = WN_strip;
+    w_ic_string_table[21].name = WN_ltrim;
+    w_ic_string_table[22].name = WN_rtrim;
+    w_ic_string_table[23].name = WN_ord;
+    w_ic_string_table[24].name = WN_to_i;
+    w_ic_string_table[25].name = WN_to_f;
+    w_ic_string_table[26].name = WN_to_sym;
+    w_ic_string_table[27].name = WN_split;
+    w_ic_string_table[28].name = WN_replace;
+    w_ic_string_table[29].name = WN_gsub;
+    w_ic_string_table[30].name = WN_index;
+    w_ic_string_table[31].name = WN_matchop;     /* Phase 7+q */
+    w_ic_string_table[32].name = WN_match_q;
+    w_ic_string_table[33].name = WN_rindex;
+    w_ic_string_table[34].name = WN_reverse;
     /* Int */
     w_ic_int_table[0].name    = WN_to_s;
     w_ic_int_table[1].name    = WN_abs;
-    w_ic_int_table[2].name    = WN_to_i;       /* Phase 7+i */
-    w_ic_int_table[3].name    = WN_to_f;
-    w_ic_int_table[4].name    = WN_chr;
-    w_ic_int_table[5].name    = WN_gcd;
-    w_ic_int_table[6].name    = WN_times;     /* Phase 7+o — added below */
-    w_ic_int_table[7].name    = WN_sqrt;
-    w_ic_int_table[8].name    = WN_each;      /* each ≡ times for ints */
-    w_ic_int_table[9].name    = WN_prime_q;
-    w_ic_int_table[10].name   = WN_prime_12k_q;
-    w_ic_int_table[11].name   = WN_prime_30k_q;
-    w_ic_int_table[12].name   = WN_lcm;
+    w_ic_int_table[2].name    = WN_to_f;
+    w_ic_int_table[3].name    = WN_chr;
+    w_ic_int_table[4].name    = WN_gcd;
+    w_ic_int_table[5].name    = WN_times;     /* Phase 7+o — added below */
+    w_ic_int_table[6].name    = WN_sqrt;
+    w_ic_int_table[7].name    = WN_each;      /* each ≡ times for ints */
+    w_ic_int_table[8].name    = WN_prime_q;
+    w_ic_int_table[9].name    = WN_prime_12k_q;
+    w_ic_int_table[10].name   = WN_prime_30k_q;
+    w_ic_int_table[11].name   = WN_lcm;
     /* BigArray (Phase 7+p) */
-    w_ic_big_array_table[0].name   = WN_size;
-    w_ic_big_array_table[1].name   = WN_cap;
-    w_ic_big_array_table[2].name   = WN_idx;
-    w_ic_big_array_table[3].name   = WN_idxset;
-    w_ic_big_array_table[4].name   = WN_get;
-    w_ic_big_array_table[5].name   = WN_set;
-    w_ic_big_array_table[6].name   = WN_push;
-    w_ic_big_array_table[7].name   = WN_empty_q;
-    w_ic_big_array_table[8].name   = WN_subview;
+    w_ic_big_array_table[0].name   = WN_idx;
+    w_ic_big_array_table[1].name   = WN_idxset;
+    w_ic_big_array_table[2].name   = WN_get;
+    w_ic_big_array_table[3].name   = WN_set;
+    w_ic_big_array_table[4].name   = WN_push;
+    w_ic_big_array_table[5].name   = WN_subview;
     /* SmallArray (Phase 7+p) */
-    w_ic_small_array_table[0].name = WN_size;
-    w_ic_small_array_table[1].name = WN_cap;
-    w_ic_small_array_table[2].name = WN_idx;
-    w_ic_small_array_table[3].name = WN_idxset;
-    w_ic_small_array_table[4].name = WN_get;
-    w_ic_small_array_table[5].name = WN_set;
-    w_ic_small_array_table[6].name = WN_empty_q;
+    w_ic_small_array_table[0].name = WN_idx;
+    w_ic_small_array_table[1].name = WN_idxset;
+    w_ic_small_array_table[2].name = WN_get;
+    w_ic_small_array_table[3].name = WN_set;
     /* Regex (Phase 7+o) */
     w_ic_regex_table[0].name  = WN_case_eq;
     w_ic_regex_table[1].name  = WN_matchop;
@@ -22747,8 +22692,7 @@ static void w_init_ic_tables(void) {
     w_ic_regex_table[3].name  = WN_to_s;
     /* Thread (Phase 7+o) */
     w_ic_thread_table[0].name = WN_join;
-    w_ic_thread_table[1].name = WN_alive_q;
-    w_ic_thread_table[2].name = WN_kill;
+    w_ic_thread_table[1].name = WN_kill;
     /* Socket (Phase 7+o) */
     w_ic_socket_table[0].name = WN_accept;
     w_ic_socket_table[1].name = WN_read;
@@ -22761,53 +22705,32 @@ static void w_init_ic_tables(void) {
     w_ic_socket_table[8].name = WN_alpn_protocol;
     w_ic_socket_table[9].name = WN_serve_http;
     /* Mmap (Phase 7+o) */
-    w_ic_mmap_table[0].name   = WN_size;
-    w_ic_mmap_table[1].name   = WN_close;
-    w_ic_mmap_table[2].name   = WN_byte_at;
-    w_ic_mmap_table[3].name   = WN_idx;
-    w_ic_mmap_table[4].name   = WN_as_u8;
-    w_ic_mmap_table[5].name   = WN_as_u16;
-    w_ic_mmap_table[6].name   = WN_as_u32;
-    w_ic_mmap_table[7].name   = WN_as_u64;
-    w_ic_mmap_table[8].name   = WN_as_i8;
-    w_ic_mmap_table[9].name   = WN_as_i16;
-    w_ic_mmap_table[10].name  = WN_as_i32;
-    w_ic_mmap_table[11].name  = WN_as_i64;
-    w_ic_mmap_table[12].name  = WN_as_f32;
-    w_ic_mmap_table[13].name  = WN_as_f64;
-    w_ic_mmap_table[14].name  = WN_view_at;
+    w_ic_mmap_table[0].name   = WN_close;
+    w_ic_mmap_table[1].name   = WN_byte_at;
+    w_ic_mmap_table[2].name   = WN_idx;
+    w_ic_mmap_table[3].name   = WN_view_at;
     /* StringBuffer (Phase 7+n) */
     w_ic_strbuf_table[0].name  = WN_to_s;
-    w_ic_strbuf_table[1].name  = WN_size;
-    w_ic_strbuf_table[2].name  = WN_include_q;
-    w_ic_strbuf_table[3].name  = WN_starts_with_q;
+    w_ic_strbuf_table[1].name  = WN_include_q;
+    w_ic_strbuf_table[2].name  = WN_starts_with_q;
     /* Bigint (Phase 7+m) */
     w_ic_bigint_table[0].name  = WN_to_s;
-    w_ic_bigint_table[1].name  = WN_to_i;
-    w_ic_bigint_table[2].name  = WN_gcd;
-    w_ic_bigint_table[3].name  = WN_abs;
-    w_ic_bigint_table[4].name  = WN_prime_q;
-    w_ic_bigint_table[5].name  = WN_to_f;
-    w_ic_bigint_table[6].name  = WN_prev;
-    w_ic_bigint_table[7].name  = WN_succ;
-    w_ic_bigint_table[8].name  = WN_next;
-    w_ic_bigint_table[9].name  = WN_zero_q;
-    w_ic_bigint_table[10].name = WN_even_q;
-    w_ic_bigint_table[11].name = WN_odd_q;
-    w_ic_bigint_table[12].name = WN_negative_q;
-    w_ic_bigint_table[13].name = WN_positive_q;
-    w_ic_bigint_table[14].name = WN_lcm;
+    w_ic_bigint_table[1].name  = WN_gcd;
+    w_ic_bigint_table[2].name  = WN_abs;
+    w_ic_bigint_table[3].name  = WN_prime_q;
+    w_ic_bigint_table[4].name  = WN_to_f;
+    w_ic_bigint_table[5].name  = WN_prev;
+    w_ic_bigint_table[6].name  = WN_succ;
+    w_ic_bigint_table[7].name  = WN_next;
+    w_ic_bigint_table[8].name  = WN_lcm;
     /* Channel (Phase 7+m) */
     w_ic_channel_table[0].name = WN_send;
-    w_ic_channel_table[1].name = WN_recv;
-    w_ic_channel_table[2].name = WN_close;
+    w_ic_channel_table[1].name = WN_close;
     /* Atomic (Phase 7+m) */
     w_ic_atomic_table[0].name  = WN_cas;
     w_ic_atomic_table[1].name  = WN_get;
     w_ic_atomic_table[2].name  = WN_set;
-    w_ic_atomic_table[3].name  = WN_increment;
-    w_ic_atomic_table[4].name  = WN_decrement;
-    w_ic_atomic_table[5].name  = WN_add;
+    w_ic_atomic_table[3].name  = WN_add;
     /* Hash (Phase 7+l) */
     w_ic_hash_table[0].name   = WN_has_key_q;
     w_ic_hash_table[1].name   = WN_keys;
@@ -22821,16 +22744,7 @@ static void w_init_ic_tables(void) {
     w_ic_hash_table[9].name   = WN_idxset;
     /* Float */
     w_ic_float_table[0].name  = WN_to_i;
-    w_ic_float_table[1].name  = WN_to_f;
-    w_ic_float_table[2].name  = WN_to_s;
-    w_ic_float_table[3].name  = WN_abs;
-    w_ic_float_table[4].name  = WN_sqrt;
-    w_ic_float_table[5].name  = WN_ceil;
-    w_ic_float_table[6].name  = WN_floor;
-    w_ic_float_table[7].name  = WN_round;
-    w_ic_float_table[8].name  = WN_nan_q;
-    w_ic_float_table[9].name  = WN_infinite_q;
-    w_ic_float_table[10].name = WN_sq;
+    w_ic_float_table[1].name  = WN_to_s;
 
     w_ic_decimal_table[0].name = WN_to_i;
     w_ic_decimal_table[1].name = WN_sqrt;
@@ -22839,15 +22753,9 @@ static void w_init_ic_tables(void) {
     w_ic_decimal_table[4].name = WN_round;
     w_ic_decimal_table[5].name = WN_sq;
 
-    w_ic_ipv4_table[0].name  = WN_to_s;
-    w_ic_ipv4_table[1].name  = w_string("inspect");
-    w_ic_ipv4_table[2].name  = w_string("octets");
-
-    w_ic_ipv6_table[0].name  = WN_to_s;
-    w_ic_ipv6_table[1].name  = w_string("inspect");
-
-    w_ic_mac_table[0].name = WN_to_s;
-    w_ic_mac_table[1].name = w_string("inspect");
+    w_ic_ipv4_table[0].name = w_string("inspect");
+    w_ic_ipv6_table[0].name = w_string("inspect");
+    w_ic_mac_table[0].name = w_string("inspect");
 }
 
 static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WValue*, int) {
@@ -23256,39 +23164,40 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
         if (builtin) return builtin(recv, args->slots, args->size);
     }
 
-    /* Array storage, numeric kernels, and retained leaf operations live in
-     * w_ic_array_table; collection combinators resolve through Enumerable. */
+    /* Array storage and numeric kernels live in w_ic_array_table. Header and
+     * endpoint query leaves live in core/array.w; collection combinators
+     * resolve through Enumerable. */
 
     /* Hash size, has_key?, keys, values, merge!, each, delete, get/idx, and
      * set/idxset live in w_ic_hash_table. Hash#map comes from Enumerable. */
 
-    /* String/Symbol storage primitives (idx, size, case conversion,
+    /* String/Symbol storage primitives (idx, case conversion,
      * UTF-8/parse/convert, =~, match?, etc.) remain in w_ic_string_table.
-     * Derived methods such as empty? fall through to their Tungsten class. */
+     * size, length, and empty? fall through to their Tungsten class. */
 
-    /* Phase 7+o: Regex, Int.times, Thread, Socket, Mmap migrated to IC. */
+    /* Regex, Int.times, Socket, retained Mmap primitives, Atomic
+     * cas/get/set/add, Channel send/close, and Thread join/kill use ICs.
+     * The four bounded synchronization leaves fall through to core sources. */
 
     /* Phase 6i.1: ByteArray method dispatch removed — ByteArray is a
-     * WArray<u8> and reaches size/get/set/idx/idxset/copy/etc. through
-     * the standard array dispatch above. WN_concat is handled by the
-     * type-class table (Tungsten side) for consistency with other
-     * array tiers. */
+     * WArray<u8>. Header query leaves reach Array's Tungsten type class;
+     * get/set/idx/idxset/copy/etc. use the standard array IC above.
+     * WN_concat is likewise handled by the type-class table. */
 
-    /* Phase 6i.1b: BoolArray dispatch removed — BoolArray is a WArray<u1>
-     * and reaches size/idx/idxset/each through the standard array
-     * dispatch above. The array path's w_array_idx/idxset/iterators
-     * special-case ebits=1 to convert bit values ↔ W_TRUE/W_FALSE. */
+    /* Phase 6i.1b: BoolArray dispatch removed — BoolArray is a WArray<u1>.
+     * Query leaves reach Array's Tungsten type class; idx/idxset/each retain
+     * the standard array path, whose ebits=1 cases convert bits ↔ Bool. */
 
     /* Phase 7+p: BigArray (key 0x92) and SmallArray (key 0x09) inline fast
      * paths live in their IC tables. Methods not in IC fall through here;
      * the global type-class dispatch at the bottom catches user-defined
      * trait methods (each, map, etc. from core/big_array.w / small_array.w). */
 
-    /* Phase 7+f: typed-array methods (size, cap, fill, view, slice_view,
-     * data, raw_ptr, push, pop, shift, unshift, empty?, idx, idxset,
-     * get, set, min, max, sum, fastsum, sumsq, dot, cross, scale,
-     * scale!, cos, sin, sqrt, matvec_i8, matmul_i8, sort) all live in
-     * w_ic_array_table now. */
+    /* Phase 7+f: typed-array storage/mutation methods (fill, view,
+     * slice_view, data, raw_ptr, push, pop, shift, unshift, idx, idxset,
+     * get, set, min, max, sum, fastsum, sumsq, dot, cross, scale, scale!,
+     * cos, sin, sqrt, matvec_i8, matmul_i8, sort) live in the Array IC.
+     * size/cap/empty?/first/last fall through to core/array.w. */
 
     /* Per-kind node dispatch: packed AST nodes route to their specialized
      * class via g_node_kind_class[kind]. w_type_class_dispatch walks the
@@ -23507,8 +23416,8 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
     }
 
     /* ---- StringBuffer methods ---- */
-    /* Phase 7+n: StringBuffer methods (to_s, size, include?, starts_with?)
-     * live in w_ic_strbuf_table. */
+    /* Phase 7+n: retained StringBuffer primitives (to_s, include?,
+     * starts_with?) live in w_ic_strbuf_table; size is source-defined. */
 
     /* Universal to_s fallback for any type */
     if (name == WN_to_s) return w_to_s(recv);

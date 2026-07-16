@@ -10790,13 +10790,18 @@ final_use_methods = <<~RUBY
 
   def stage0_normalize_lowering_source(source)
     normalized = self.stage0_normalize_source(self.stage0_strip_inline_language_comments(source))
-    start_pos = normalized.index("-> ast_uses_argv")
-    end_pos = normalized.index("-> mark_builtin_runtime_class_uses")
-    if start_pos >= 0 && end_pos >= 0
-      normalized = normalized.slice(0, start_pos) +
-                   "-> ast_uses_argv(node)\\n  false\\n" +
-                   normalized.slice(end_pos, normalized.length - end_pos)
-    end
+    # Stage 0 deliberately disables entrypoint ARGV discovery. The normal
+    # compiler now fuses those checks into the builtin-runtime-use walk, so
+    # strip the two inline checks here instead of replacing the removed
+    # recursive ast_uses_argv helper.
+    normalized = normalized.split(
+      "    if t == \\"var\\" && mod[\\"uses_argv\\"] != true && node.name == \\"ARGV\\"\\n" \
+      "      mod[\\"uses_argv\\"] = true\\n"
+    ).join("")
+    normalized = normalized.split(
+      "    if mod[\\"uses_argv\\"] != true && node.receiver == nil && node.name == \\"argv\\"\\n" \
+      "      mod[\\"uses_argv\\"] = true\\n"
+    ).join("")
     profile_start = normalized.index("-> lower_ast_print_profile")
     profile_end = normalized.index("-> lower_ast(ast")
     if profile_start >= 0 && profile_end >= 0

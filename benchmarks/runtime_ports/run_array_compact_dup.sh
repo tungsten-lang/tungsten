@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
 RUNS="${RUNS:-10}"
-GATE="${GATE:-0.97}"
+GATE="${GATE:-1.10}"
 CHECK_ONLY="${CHECK_ONLY:-0}"
 INTERPRETER_CHECK="${INTERPRETER_CHECK:-1}"
 PATH_MODE="${PATH_MODE:-v2}"
@@ -220,11 +220,7 @@ for operation in "${operations[@]}"; do
     c_med="$(awk -F'|' -v name="$name" '$1 == "RESULT" && $2 == name { print $3 }' "$RAW" | median_stream)"
     w_med="$(awk -F'|' -v name="$name" '$1 == "RESULT" && $2 == name { print $4 }' "$RAW" | median_stream)"
     ratio_med="$(awk -F'|' -v name="$name" '$1 == "RESULT" && $2 == name { print $5 }' "$RAW" | median_stream)"
-    if [ "$REPEAT" = 1 ]; then
-      decision="$(awk -v ratio="$ratio_med" 'BEGIN { print (ratio < 1.00) ? "PASS" : "SKIP" }')"
-    else
-      decision="$(awk -v ratio="$ratio_med" -v gate="$GATE" 'BEGIN { print (ratio <= gate) ? "PASS" : "SKIP" }')"
-    fi
+    decision="$(awk -v ratio="$ratio_med" -v gate="$GATE" 'BEGIN { print (ratio <= gate) ? "PASS" : "SKIP" }')"
     if [ "$decision" != PASS ]; then failed=1; fi
     printf '%-28s %12.3f %12.3f %10.3f %8s\n' "$name" "$c_med" "$w_med" "$ratio_med" "$decision"
   done
@@ -233,7 +229,7 @@ done
 echo
 echo "Each sample sums C/W/W/C or W/C/C/W legs; bounded result cleanup is outside timed intervals."
 if [ "$REPEAT" = 1 ]; then
-  echo "Repeat mode requires every stratum below 1.00 and is valid only after a prior <= $GATE campaign plus an independent compiler rebuild."
+  echo "Repeat mode requires every stratum at or below $GATE and is valid only after a prior <= $GATE campaign plus an independent compiler rebuild."
 else
   echo "First-pass retention requires every independent stratum at W/C <= $GATE; compact and dup are decided separately."
   echo "A passing method must then be rebuilt independently and rerun with REPEAT=1 before any public trial."

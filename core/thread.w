@@ -30,6 +30,7 @@
 
   # Is the thread still running?
   -> alive?
+    ccall("w_thread_alive", self)
 
   # Request cancellation of the thread.
   -> kill

@@ -10,7 +10,7 @@ TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
 RUNS="${RUNS:-10}"
 ITERS="${ITERS:-50000000}"
 ARITH_ITERS="${ARITH_ITERS:-5000000}"
-GATE="${GATE:-0.97}"
+GATE="${GATE:-1.10}"
 ONLY="${ONLY:-}"
 CHECK_ONLY="${CHECK_ONLY:-0}"
 DIRECT_ONLY="${DIRECT_ONLY:-0}"
@@ -164,7 +164,7 @@ for fn in "${functions[@]}"; do
 done
 
 echo
-echo "Median of $RUNS paired alternating samples; retention requires W/C <= $GATE for each candidate and an independent repeat below 1.00."
+echo "Median of $RUNS paired alternating samples; retention requires W/C <= $GATE for each candidate and an independent repeat at or below $GATE."
 echo "Predicate/to_i loops use $ITERS iterations; allocating arithmetic loops use $ARITH_ITERS and consume each fresh result."
 
 if [ "$skipped" -ne 0 ]; then

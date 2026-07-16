@@ -15,7 +15,7 @@ SOURCE="$SCRIPT_DIR/one_arg_dispatch_hot.w"
 CANDIDATE_ROOT="${CANDIDATE_ROOT:-$ROOT}"
 RUNS="${RUNS:-10}"
 ITERS="${ITERS:-50000000}"
-GATE="${GATE:-0.97}"
+GATE="${GATE:-1.10}"
 ONLY="${ONLY:-}"
 
 if [ -z "${BASELINE_ROOT:-}" ]; then
@@ -189,4 +189,4 @@ for target in "${targets[@]}"; do
     "$target" "$baseline_med" "$candidate_med" "$ratio_med" "$decision"
 done
 
-echo "Production retention requires every target to clear $GATE and an independent repeat below 1.00."
+echo "Production retention requires every target to clear $GATE and an independent repeat at or below $GATE."

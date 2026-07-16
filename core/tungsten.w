@@ -1,4 +1,5 @@
 + Tungsten
+  auto :Atomic,       "atomic"
   auto :Array,        "array"
   auto :Base64,       "base64"
   auto :BigArray,     "big_array"
@@ -7,6 +8,7 @@
   auto :BoolArray,    "bool_array"
   auto :ByteArray,    "byte_array"
   auto :Char,         "char"
+  auto :Channel,      "channel"
   auto :Class,        "class"
   auto :Closure,      "closure"
   auto :CIDR,         "cidr"
@@ -29,6 +31,7 @@
   auto :JSON,         "json"
   auto :Math,         "math"
   auto :Matrix,       "matrix"
+  auto :Mmap,         "mmap"
   # Scientific stack (flat core/)
   auto :LinAlg,       "linalg"
   auto :FFT,          "fft"

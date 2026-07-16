@@ -485,6 +485,8 @@ use hashing
   out << declare_fn("__w_type", wv, wv)
   out << declare_fn_noreturn("__w_exit", wv, wv)
   out << declare_fn("__w_argv", wv, "")
+  out << declare_fn("w_executable_path", wv, "")
+  out << declare_fn("w_executable_dir", wv, "")
   out << declare_fn("w_runtime_dir", wv, "")
   out << declare_fn("__w_read_file", wv, wv)
   out << declare_fn("__w_read_file_bytes", wv, wv)
@@ -494,6 +496,7 @@ use hashing
   out << declare_fn("__w_mmap_length", wv, wv)
   out << declare_fn("__w_mmap_byte_at", wv, wv2)
   out << declare_fn("__w_mmap_close", wv, wv)
+  out << declare_fn("__w_mmap_as_typed", wv, wv2)
 
   # Math.* libm wrappers
   out << declare_fn("w_math_exp", wv, wv)
@@ -2173,6 +2176,8 @@ use hashing
     inst[:temp] + " = fpext float " + inst[:value] + " to double"
   when :fptrunc_f64_f32
     inst[:temp] + " = fptrunc double " + inst[:value] + " to float"
+  when :fptosi_f64_i64
+    inst[:temp] + " = fptosi double " + inst[:value] + " to i64"
   when :bitcast_i64_f64
     inst[:temp] + " = bitcast i64 " + inst[:value] + " to double"
   when :bitcast_f64_i64

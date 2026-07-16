@@ -51,6 +51,8 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
 -> type_dispatch_key(class_name)
   case class_name
     "Atomic"        => 0x01 # Phase 6i.2: promoted to W_SUBTAG_ATOMIC
+    "Thread"        => 0x81 # 0x80 | W_TYPE_THREAD
+    "Channel"       => 0x84 # 0x80 | W_TYPE_CHANNEL
     "Hash"          => 0x05
     "Closure"       => 0x06
     "Regex"         => 0x07
@@ -65,6 +67,7 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
     "ByteArray"     => 0x0A # Phase 6i.1: ByteArray is WArray<u8>
     "BoolArray"     => 0x0A # Phase 6i.1b: BoolArray is WArray<u1>
     "BigArray"      => 0x92 # Phase 3: 0x80 | W_TYPE_BIG_ARRAY (18)
+    "Mmap"          => 0x91 # 0x80 | W_TYPE_MMAP (17)
     "SmallArray"    => 0x09 # Phase 6h: own subtag (W_SUBTAG_SMALL_ARRAY); no type byte
     "BigInt"        => 0x8B # Phase 6i.2: 0x80 | W_TYPE_BIGINT (11)
     "Error"         => 0x93 # Phase 6i.2: 0x80 | W_TYPE_ERROR (19)
@@ -468,176 +471,6 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
     false
   false
 
--> ast_uses_argv(node)
-  if node == nil
-    return false
-
-  node_type = type(node)
-  if node_type == "Array"
-    i = 0
-    while i < node.size()
-      if ast_uses_argv(node[i])
-        return true
-      i += 1
-    return false
-
-  if !is_ast_node?(node)
-    return false
-
-  t = ast_kind(node)
-  if t in (:fastmath_block :strictmath_block :overflow_block)
-    return ast_uses_argv(node[:body])
-
-  case t
-  when :var
-    node.name == "ARGV"
-
-  when :call
-    if node.receiver == nil && node.name == "argv"
-      return true
-    if ast_uses_argv(node.receiver)
-      return true
-    if ast_uses_argv(node.args)
-      return true
-    ast_uses_argv(node.block)
-
-  when :program
-    ast_uses_argv(node.expressions)
-
-  when :array
-    ast_uses_argv(node.elements)
-
-  when :hash_literal
-    ast_uses_argv(node.entries)
-
-  when :string_interp, :byte_array_interp
-    ast_uses_argv(node.parts)
-
-  when :typed_array_new, :typed_array, :view_access
-    ast_uses_argv(node.size) || ast_uses_argv(node.index)
-
-  when :assign, :compound_assign
-    ast_uses_argv(node.target) || ast_uses_argv(node.value)
-
-  when :multi_assign
-    ast_uses_argv(node.targets) || ast_uses_argv(node.value)
-
-  when :binary_op, :and, :or, :target_and, :target_or
-    ast_uses_argv(node.left) || ast_uses_argv(node.right)
-
-  when :unary_op, :not
-    ast_uses_argv(node.operand)
-
-  when :target_not
-    ast_uses_argv(node.expression)
-
-  when :in_test
-    ast_uses_argv(node.lhs) || ast_uses_argv(node.elements)
-
-  when :passthrough
-    ast_uses_argv(node.expression) || ast_uses_argv(node.value)
-
-  when :range
-    ast_uses_argv(node.from) || ast_uses_argv(node.to)
-
-  when :if
-    if ast_uses_argv(node.condition)
-      return true
-    if ast_uses_argv(node.then_body)
-      return true
-    if ast_uses_argv(node.elsif_clauses)
-      return true
-    ast_uses_argv(node.else_body)
-
-  when :while
-    ast_uses_argv(node.condition) || ast_uses_argv(node.body)
-
-  when :with, :parallel_with
-    ast_uses_argv(node.bindings) || ast_uses_argv(node.body)
-
-  when :case
-    ast_uses_argv(node.whens) || ast_uses_argv(node.else_body)
-
-  when :when
-    ast_uses_argv(node.conditions) || ast_uses_argv(node.body)
-
-  when :case_value
-    if ast_uses_argv(node.subject)
-      return true
-    if ast_uses_argv(node.arms)
-      return true
-    ast_uses_argv(node.else_body)
-
-  when :case_arm
-    if ast_uses_argv(node.pattern)
-      return true
-    if ast_uses_argv(node.guard)
-      return true
-    ast_uses_argv(node.body)
-
-  when :safe_nav
-    if ast_uses_argv(node.receiver)
-      return true
-    if ast_uses_argv(node.args)
-      return true
-    ast_uses_argv(node.block)
-
-  when :rescue_expr
-    ast_uses_argv(node.body) || ast_uses_argv(node.fallback)
-
-  when :puts
-    vals = node.value
-    found = false
-    i = 0
-    while i < vals.size()
-      if ast_uses_argv(vals[i])
-        found = true
-      i += 1
-    found
-
-  when :return, :print, :raise, :recase
-    ast_uses_argv(node.value)
-
-  when :class_def, :module_def, :trait_def
-    ast_uses_argv(node.superclass) || ast_uses_argv(node.body)
-
-  when :method_def, :fn_def, :gpu_kernel_def
-    ast_uses_argv(node.params) || ast_uses_argv(node.body)
-
-  when :param
-    ast_uses_argv(node.default)
-
-  when :block
-    ast_uses_argv(node.params) || ast_uses_argv(node.body)
-
-  when :begin
-    if ast_uses_argv(node.body)
-      return true
-    if ast_uses_argv(node.rescue_body)
-      return true
-    ast_uses_argv(node.ensure_body)
-
-  when :yield, :super
-    ast_uses_argv(node.args)
-
-  when :go
-    ast_uses_argv(node.body)
-
-  when :schedule_def, :layout_def
-    ast_uses_argv(node.directives)
-
-  when :on_guard
-    ast_uses_argv(node.predicate) || ast_uses_argv(node.body)
-
-  when :regex_match
-    ast_uses_argv(node.regex) || ast_uses_argv(node.subject)
-
-  when :cidr_match
-    ast_uses_argv(node.subject) || ast_uses_argv(node.cidr)
-
-  else
-    false
-
 -> mark_builtin_runtime_class_uses(node, mod)
   if node == nil
     return
@@ -659,6 +492,8 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
     return
 
   if t in (:var :class_ref)
+    if t == :var && mod[:uses_argv] != true && node.name == "ARGV"
+      mod[:uses_argv] = true
     name = node.name
     if mod[:builtin_class_names][name] == true
       mark_builtin_class_used(mod, name)
@@ -666,6 +501,8 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
 
   case t
   when :call
+    if mod[:uses_argv] != true && node.receiver == nil && node.name == "argv"
+      mod[:uses_argv] = true
     mark_builtin_runtime_class_uses(node.receiver, mod)
     mark_builtin_runtime_class_uses(node.args, mod)
     mark_builtin_runtime_class_uses(node.block, mod)

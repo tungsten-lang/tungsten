@@ -42,12 +42,18 @@ run_compiled_spec() {
   local out
   local output
   local status
+  local -a compile_cmd
 
   name="$(basename "${path%.w}")"
   out="$TMP_ROOT/$name"
 
   echo "compile+run $path"
-  if ! "$TUNGSTEN" compile "$path" --out "$out" >/dev/null; then
+  if [[ "$path" == spec/compiler/big_array_cap_empty_no_use_*_spec.w ]]; then
+    compile_cmd=(env "TUNGSTEN_C_INCLUDES=$ROOT/benchmarks/runtime_ports/big_array_cap_empty_revisit_ref.c" "$TUNGSTEN")
+  else
+    compile_cmd=("$TUNGSTEN")
+  fi
+  if ! "${compile_cmd[@]}" compile "$path" --out "$out" >/dev/null; then
     echo "FAIL [$name] compile failed" >&2
     fail=1
     return
@@ -143,14 +149,27 @@ run_cuda_emit_spec() {
 
 compiled_specs=(
   spec/compiler/ast_body_native_spec.w
+  spec/compiler/array_compact_autoload_spec.w
+  spec/compiler/array_dup_autoload_spec.w
   spec/compiler/array_join_autoload_spec.w
+  spec/compiler/argv_nested_scan_spec.w
+  spec/compiler/big_array_cap_empty_no_use_new_spec.w
+  spec/compiler/big_array_cap_empty_no_use_range_spec.w
+  spec/compiler/big_array_cap_empty_no_use_subview_spec.w
+  spec/compiler/big_array_cap_empty_no_use_view_spec.w
+  benchmarks/runtime_ports/bigint_predicate_relaxed_autoload.w
+  spec/compiler/bigint_to_i_autoload_spec.w
   spec/compiler/block_passthrough_spec.w
   spec/compiler/cfg_ssa_pruning_spec.w
   spec/compiler/elementwise_fusion_spec.w
   spec/compiler/forward_typed_raw_call_spec.w
   spec/compiler/function_replacement_index_spec.w
+  benchmarks/runtime_ports/float_remaining_no_use_literal.w
   spec/compiler/indexed_compound_assignment_parameter_spec.w
+  spec/compiler/int_to_i_autoload_spec.w
   spec/compiler/ivar_typed_return_spec.w
+  spec/compiler/mmap_size_relaxed_autoload_spec.w
+  spec/compiler/mmap_size_relaxed_native_autoload_spec.w
   spec/compiler/nested_i64_array_boxed_store_spec.w
   spec/compiler/one_arg_cached_dispatch_emitter_spec.w
   spec/compiler/ownership_phi_escape_spec.w
@@ -162,11 +181,15 @@ compiled_specs=(
   spec/compiler/recycle_terminated_scope_spec.w
   spec/compiler/source_argc1_exact_ivar_spec.w
   spec/compiler/source_argc1_hint_compat_spec.w
+  spec/compiler/string_buffer_size_revisit_autoload_spec.w
   spec/compiler/typed_helper_array_signature_spec.w
   spec/compiler/typed_overload_spec.w
+  spec/compiler/uuid_byte_revisit_autoload_spec.w
   spec/compiler/view_field_var_spec.w
   spec/compiler/zero_arg_cached_dispatch_spec.w
   spec/interpreter/hash_size_view_field_spec.w
+  spec/interpreter/float_leaf_native_spec.w
+  spec/interpreter/ipv4_octets_native_spec.w
   spec/core/basics_spec.w
   spec/core/base64_native_spec.w
   spec/core/string_native_spec.w
@@ -175,6 +198,12 @@ compiled_specs=(
   spec/core/arrays_hashes_spec.w
   spec/core/enumerable_native_spec.w
   spec/core/network_native_spec.w
+  spec/core/system_spec.w
+  benchmarks/runtime_ports/array_leaf_no_use_factories.w
+  benchmarks/runtime_ports/array_leaf_no_use_literal.w
+  benchmarks/runtime_ports/array_leaf_no_use_typed.w
+  benchmarks/runtime_ports/small_big_array_no_use_autoload.w
+  benchmarks/runtime_ports/sync_wrapper_revisit_exact_factory.w
   spec/numeric/complex_spec.w
   spec/numeric/fp_math_mode_spec.w
   spec/numeric/hypercomplex_mul_spec.w
@@ -191,10 +220,25 @@ cuda_emit_specs=(
 )
 
 interpreter_specs=(
+  spec/interpreter/float_leaf_native_spec.w
+  spec/interpreter/big_array_cap_empty_revisit_spec.w
   spec/interpreter/hash_size_view_field_spec.w
+  spec/interpreter/int_to_i_native_spec.w
+  spec/interpreter/ipv4_octets_native_spec.w
+  spec/interpreter/mmap_size_relaxed_spec.w
   spec/interpreter/slab_decl_spec.w
+  spec/interpreter/string_buffer_size_revisit_spec.w
+  spec/interpreter/string_empty_native_spec.w
   spec/interpreter/string_to_s_native_spec.w
+  spec/interpreter/uuid_byte_revisit_spec.w
   spec/core/base64_native_spec.w
+  spec/core/system_spec.w
+  benchmarks/runtime_ports/array_leaf_interpreter.w
+  benchmarks/runtime_ports/bigint_predicate_relaxed_interpreter.w
+  benchmarks/runtime_ports/float_remaining_interpreter.w
+  benchmarks/runtime_ports/identity_leaf_interpreter.w
+  benchmarks/runtime_ports/small_big_array_interpreter.w
+  benchmarks/runtime_ports/sync_wrapper_revisit_interpreter.w
 )
 
 core_specs=(

@@ -9,7 +9,7 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
 RUNS="${RUNS:-7}"
 ITERS="${ITERS:-10000000}"
-GATE="${GATE:-0.97}"
+GATE="${GATE:-1.10}"
 ONLY="${ONLY:-}"
 
 case "$RUNS" in

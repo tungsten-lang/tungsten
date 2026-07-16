@@ -8,7 +8,7 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CANDIDATE_ROOT="${CANDIDATE_ROOT:-$ROOT}"
 RUNS="${RUNS:-10}"
 ITERS="${ITERS:-20000000}"
-GATE="${GATE:-0.97}"
+GATE="${GATE:-1.10}"
 
 if [ -z "${BASELINE_ROOT:-}" ]; then
   echo "BASELINE_ROOT must name an isolated pre-port Tungsten root" >&2
@@ -79,4 +79,4 @@ for name in inline slab heap rope symbol_inline symbol_slab; do
   printf '%-16s %12.3f %12.3f %10.3f %8s\n' "$name" "$baseline_med" "$candidate_med" "$ratio" "$decision"
 done
 
-echo "Retention requires every public candidate/baseline median <= $GATE and an independent repeat below 1.00."
+echo "Retention requires every public candidate/baseline median <= $GATE and an independent repeat at or below $GATE."

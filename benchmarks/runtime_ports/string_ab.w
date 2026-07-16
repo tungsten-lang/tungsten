@@ -9,7 +9,7 @@ use ../../core/string_native
 CORPUS_SIZE = 16
 CORPUS_MASK = CORPUS_SIZE - 1
 DEFAULT_ITERS = 50_000_000
-WARMUP_ITERS = 100_000
+WARMUP_ITERS = 5_000_000
 
 + String
   -> __c_empty?
@@ -82,21 +82,31 @@ WARMUP_ITERS = 100_000
     i += 1
   finish_timing(start_ns, checksum)
 
--> run_pair(values, iters, parity, emit = true)
+-> run_single_pair(values, iters, parity)
   if parity == 0
     c_result = time_empty_c(values, iters)
     w_result = time_empty_w(values, iters)
   else
     w_result = time_empty_w(values, iters)
     c_result = time_empty_c(values, iters)
+  [c_result, w_result]
+
+-> combine_timing(first, second)
+  [first[0] + second[0], first[1] + second[1]]
+
+-> run_pair(values, iters, parity, emit = true)
+  first = run_single_pair(values, iters, parity)
+  second = run_single_pair(values, iters, parity == 0 ? 1 : 0)
+  c_result = combine_timing(first[0], second[0])
+  w_result = combine_timing(first[1], second[1])
 
   if c_result[1] != w_result[1]
     << "FAIL benchmark checksum empty?: C=[c_result[1]] W=[w_result[1]]"
     exit(1)
 
   if emit
-    c_ns = c_result[0] * 1_000_000_000 / iters
-    w_ns = w_result[0] * 1_000_000_000 / iters
+    c_ns = c_result[0] * 1_000_000_000 / (iters * 2)
+    w_ns = w_result[0] * 1_000_000_000 / (iters * 2)
     ratio = w_result[0] / c_result[0]
     << "RESULT|empty?|[c_ns]|[w_ns]|[ratio]|[c_result[1]]"
 

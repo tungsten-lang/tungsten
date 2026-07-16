@@ -232,12 +232,42 @@ use parser
     # literal is provably used in that inlined-iterator-only shape, and true
     # for anything it can't prove (unknown node, escape, non-safe method).
     @array_needed = array_class_needed?(exprs)
-    # Array#join has no runtime fallback after its source migration, and an
-    # Array can enter through argv/a parameter without any literal or class
-    # reference. Scan call names only until the first join schedules Array.
-    # Later autoload iterations see Array in @autoload_loaded and skip even
-    # that first comparison.
-    @array_join_unresolved = defined["Array"] != true && registry["Array"] != nil && @autoload_loaded["Array"] != true
+    # Source-defined Array methods have no runtime fallback, and an Array can
+    # enter through argv/a parameter without any literal or class reference.
+    # Scan call names only until the first such method schedules Array. Later
+    # autoload iterations see Array in @autoload_loaded and skip the guard.
+    @array_source_method_unresolved = defined["Array"] != true && registry["Array"] != nil && @autoload_loaded["Array"] != true
+    # Source-defined Float leaves have no runtime fallback. A Float can arrive
+    # through a parameter or native call without a literal or class reference,
+    # so schedule its class on the first matching method name.
+    @float_source_method_unresolved = defined["Float"] != true && registry["Float"] != nil && @autoload_loaded["Float"] != true
+    # BigInt#to_i is likewise source-defined identity and a heap BigInt can
+    # cross a parameter/native boundary without a literal in this AST.
+    @bigint_to_i_unresolved = defined["BigInt"] != true && registry["BigInt"] != nil && @autoload_loaded["BigInt"] != true
+    # BigInts also cross literal, promotion, parameter, and native boundaries
+    # without a reliable receiver-class node. Their five representation-only
+    # predicates now live in source, so schedule BigInt on the first matching
+    # spelling and collapse the guard for the remainder of this walk/pass.
+    @bigint_predicates_unresolved = defined["BigInt"] != true && registry["BigInt"] != nil && @autoload_loaded["BigInt"] != true
+    # String and Symbol share runtime dispatch key 0xF9 and may arrive through
+    # parameters, native calls, or rope-producing expressions. Once both
+    # native length aliases are removed, a one-shot name gate is the sound
+    # registration boundary for their deliberately tiny source facade.
+    @string_length_unresolved = defined["String"] != true && registry["String"] != nil && @autoload_loaded["String"] != true
+    # Opaque synchronization handles have no reliable receiver-class evidence
+    # in the AST. Only the four bounded source leaves participate; ubiquitous
+    # or hard-fatal native selectors deliberately keep their IC fallback.
+    @atomic_source_method_unresolved = defined["Atomic"] != true && registry["Atomic"] != nil && @autoload_loaded["Atomic"] != true
+    @channel_source_method_unresolved = defined["Channel"] != true && registry["Channel"] != nil && @autoload_loaded["Channel"] != true
+    @thread_source_method_unresolved = defined["Thread"] != true && registry["Thread"] != nil && @autoload_loaded["Thread"] != true
+    # Keep Mmap call-name triggers separate. size is common but already retained
+    # under its deliberately tiny facade. The typed-view names are narrow
+    # enough to cover unknown native/parameter boundaries without the unsound
+    # provenance assumptions that `[]` or `close` would require.
+    @mmap_size_unresolved = defined["Mmap"] != true && registry["Mmap"] != nil && @autoload_loaded["Mmap"] != true
+    mmap_missing = defined["Mmap"] != true && registry["Mmap"] != nil && @autoload_loaded["Mmap"] != true
+    big_array_missing = defined["BigArray"] != true && registry["BigArray"] != nil && @autoload_loaded["BigArray"] != true
+    @mmap_typed_view_unresolved = mmap_missing || big_array_missing
     seen = {}
     pending = []
     i = 0
@@ -468,14 +498,30 @@ use parser
       if call_receiver != nil && ast_kind(call_receiver) == :class_ref
         consider_autoload_name(call_receiver.name, defined, registry, seen, pending)
 
+      # File's other operations stay compiler intrinsics and should not pull in
+      # its full source facade. Mmap#size uniquely needs the Mmap type class,
+      # which lives in core/mmap.w and is registered under Mmap itself.
+      if call_receiver != nil && ast_kind(call_receiver) in (:var :class_ref) && call_receiver.name == "File" && call_name == "mmap"
+        consider_autoload_name("Mmap", defined, registry, seen, pending)
+
       # A direct ccall can construct a value whose runtime type is visible only
       # after the call. Keep this scoped to exact known value-producing names.
-      if call_receiver == nil && call_name == "ccall" && node.args != nil && node.args.size() > 0
+      if call_receiver == nil && call_name in ("ccall" "ccall_rawargs") && node.args != nil && node.args.size() > 0
         target = node.args[0]
         if target != nil && ast_kind(target) == :string
           result_class = native_ccall_result_class(target.value)
           if result_class != nil
             consider_autoload_name(result_class, defined, registry, seen, pending)
+
+      # argv() returns the process Array without a literal or class reference.
+      if call_receiver == nil && call_name == "argv"
+        consider_autoload_name("Array", defined, registry, seen, pending)
+
+      # StringBuffer(...) is a compiler-recognized bare constructor rather
+      # than a class receiver call, so its spelling is the only source-level
+      # class reference. Its methods now include a source-defined size.
+      if call_receiver == nil && call_name == "StringBuffer"
+        consider_autoload_name("StringBuffer", defined, registry, seen, pending)
 
       # String#empty? lives in the native source class. Load it only for a
       # receiver expression proven String/Symbol-producing.
@@ -488,17 +534,60 @@ use parser
       if call_name == "to_s" && (node.args == nil || node.args.size() == 0)
         consider_autoload_name("String", defined, registry, seen, pending)
 
-      # Array#join is source-defined after removal of its runtime IC. Arrays
-      # can arrive through argv, a parameter, or a native factory, so no
-      # receiver-shape test can soundly cover every use.
-      if @array_join_unresolved && call_name == "join"
+      if @string_length_unresolved
+        if call_name in ("size" "length")
+          consider_autoload_name("String", defined, registry, seen, pending)
+          @string_length_unresolved = false
+        # Lowering synthesizes a per-element call for these Symbol-to-proc
+        # forms after this source-AST walk. Mirror that exact domain here so
+        # :size/:length cannot bypass String registration.
+        elsif call_name in ("map" "select" "reject" "count") && node.block == nil && call_receiver != nil && node.args != nil && node.args.size() == 1
+          iteratee = node.args[0]
+          if iteratee != nil && is_ast_node?(iteratee) && ast_kind(iteratee) == :symbol && iteratee.value in ("size" "length") && ast_kind(call_receiver) in (:range :array :var :call :map :calc)
+            consider_autoload_name("String", defined, registry, seen, pending)
+            @string_length_unresolved = false
+
+      if @atomic_source_method_unresolved && call_name in ("increment" "decrement")
+        consider_autoload_name("Atomic", defined, registry, seen, pending)
+        @atomic_source_method_unresolved = false
+      if @channel_source_method_unresolved && call_name == "recv"
+        consider_autoload_name("Channel", defined, registry, seen, pending)
+        @channel_source_method_unresolved = false
+      if @thread_source_method_unresolved && call_name == "alive?"
+        consider_autoload_name("Thread", defined, registry, seen, pending)
+        @thread_source_method_unresolved = false
+
+      # These methods are source-defined after removal of their runtime ICs.
+      # Arrays can arrive through argv, a parameter, or a native factory, so
+      # no receiver-shape test can soundly cover every use.
+      if @array_source_method_unresolved && call_name in ("join" "compact" "dup")
         consider_autoload_name("Array", defined, registry, seen, pending)
-        @array_join_unresolved = false
+        @array_source_method_unresolved = false
+
+      if @float_source_method_unresolved && call_name in ("to_f" "abs" "nan?" "infinite?" "sqrt" "ceil" "floor" "round" "sq")
+        consider_autoload_name("Float", defined, registry, seen, pending)
+        @float_source_method_unresolved = false
+
+      if @mmap_size_unresolved && call_name == "size"
+        consider_autoload_name("Mmap", defined, registry, seen, pending)
+        @mmap_size_unresolved = false
+
+      if @mmap_typed_view_unresolved && call_name in ("as_u8" "as_u16" "as_u32" "as_u64" "as_i8" "as_i16" "as_i32" "as_i64" "as_f32" "as_f64")
+        consider_autoload_name("Mmap", defined, registry, seen, pending)
+        consider_autoload_name("BigArray", defined, registry, seen, pending)
+        @mmap_typed_view_unresolved = false
 
       # Integer/Number leaf methods commonly receive literals or locals, which
-      # carry no explicit class reference.
-      if call_name in ("prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq")
+      # carry no explicit class reference. The to_i spelling is shared with
+      # source-only BigInt identity, so schedule that tiny class once as well.
+      if call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq")
         consider_autoload_name("Integer", defined, registry, seen, pending)
+        if call_name == "to_i" && @bigint_to_i_unresolved
+          consider_autoload_name("BigInt", defined, registry, seen, pending)
+          @bigint_to_i_unresolved = false
+        if @bigint_predicates_unresolved && call_name in ("zero?" "even?" "odd?" "negative?" "positive?")
+          consider_autoload_name("BigInt", defined, registry, seen, pending)
+          @bigint_predicates_unresolved = false
 
       # Legacy Base64 globals are source-defined bare calls.
       if call_receiver == nil && call_name in ("base64_encode" "base64_decode" "base64url_encode" "base64url_decode")
@@ -506,6 +595,10 @@ use parser
     # Standalone ClassRef (Integer as a bare expression): same.
     if t == :class_ref
       consider_autoload_name(node.name, defined, registry, seen, pending)
+      if node.name == "ARGV"
+        consider_autoload_name("Array", defined, registry, seen, pending)
+    if t == :var && node.name == "ARGV"
+      consider_autoload_name("Array", defined, registry, seen, pending)
     # Literal-driven autoload: an array literal `[...]` needs Array's
     # class def (for Enumerable methods like zip/uniq that the runtime
     # WArray doesn't provide); a hash literal `{...}` needs Hash. Without
@@ -521,6 +614,11 @@ use parser
         while ej2 < els.size()
           collect_autoload_refs(els[ej2], defined, registry, seen, pending)
           ej2 += 1
+    # Typed-array constructors lower directly to WArray factories and carry no
+    # Array class reference. Their public query leaves share Array's source
+    # method table, so register it before the first dynamic dispatch.
+    if t in (:typed_array :typed_array_new)
+      consider_autoload_name("Array", defined, registry, seen, pending)
     if t == :hash_literal
       consider_autoload_name("Hash", defined, registry, seen, pending)
     # IPv4/CIDR literals carry their runtime type without naming the IPv4
@@ -538,6 +636,11 @@ use parser
     # register Date's 0xE4 type class even when they never name Date directly.
     if t == :date || t == :datetime
       consider_autoload_name("Date", defined, registry, seen, pending)
+    # UUID literals carry the runtime subtag without a class reference. Once
+    # byte is source-defined, literal-only programs must register UUID's type
+    # class before public dispatch.
+    if t == :uuid
+      consider_autoload_name("UUID", defined, registry, seen, pending)
     # A range literal `(a..b)` references no class name, but its numeric
     # machinery — and the elementwise methods (`sq`, `cube`, …) the fused
     # pipeline's closed-form recognizer resolves by AST — lives on Number.
@@ -625,7 +728,7 @@ use parser
 
   # Native runtime entry points whose WValue result has source-defined methods.
   # This is intentionally a return-type map, not a prefix match: helpers such
-  # as w_ipv4_octets and w_ipv6_in_cidr return Array/Bool, while w_date_scrub
+  # as w_ipv6_in_cidr returns Bool, while w_date_scrub
   # returns String, and must not autoload the address/Date classes.
   -> native_ccall_result_class(name)
     if name in ("w_date" "w_date_parse")
@@ -636,6 +739,31 @@ use parser
       return "IPv6"
     if name in ("w_mac" "w_mac_parse")
       return "MAC"
+    if name in ("w_uuid_from_hex" "w_uuid_parse")
+      return "UUID"
+    if name == "w_strbuf_new"
+      return "StringBuffer"
+    if name == "w_atomic_new"
+      return "Atomic"
+    if name == "w_chan_new"
+      return "Channel"
+    if name in ("w_thread_spawn" "w_thread_spawn_slots")
+      return "Thread"
+    # Runtime-backed packed-array values can enter without a class reference
+    # through low-level C factories. Once their public leaves live in source,
+    # those exact value-producing calls must register the corresponding type
+    # class before the first dynamic method dispatch. Do not prefix-match:
+    # accessors such as w_big_array_size return Integer, not BigArray.
+    if name in ("w_big_array_new" "w_big_array_view" "w_big_array_subview" "w_big_array_view_range")
+      return "BigArray"
+    if name in ("w_small_array_new" "w_small_array_init")
+      return "SmallArray"
+    if name == "__w_file_mmap"
+      return "Mmap"
+    # Exact WArray-producing runtime entry points. Keep this a return-type map,
+    # not a prefix match: w_array_size/w_array_get/etc. return other types.
+    if name in ("w_array_new_empty" "w_array_new" "w_array_new_uninit" "w_array_new_uninit_sized" "w_array_new_aligned" "w_array_zeros" "w_array_view_raw" "w_array_view" "w_array_view_range" "w_array_reinterpret" "w_array_copy_range" "w_array_reuse_or_new_empty" "w_bytes_new" "w_bool_array_new")
+      return "Array"
     nil
 
   -> string_empty_receiver?(node)
@@ -678,7 +806,7 @@ use parser
     nil
 
   -> cache_version
-    "loader-ast-v9"
+    "loader-ast-v19"
 
   -> cache_dir
     override = env("TUNGSTEN_CACHE_DIR")

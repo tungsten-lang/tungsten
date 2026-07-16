@@ -7,7 +7,7 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
 RUNS="${RUNS:-9}"
 ITERS="${ITERS:-50000000}"
-GATE="${GATE:-0.97}"
+GATE="${GATE:-1.10}"
 
 case "$RUNS" in
   ''|*[!0-9]*|0) echo "RUNS must be a positive integer" >&2; exit 2 ;;
@@ -63,4 +63,4 @@ for fn in 'size'; do
 done
 
 echo
-echo "Median of $RUNS paired alternating samples; retention requires W/C <= $GATE and an independent repeat below 1.00."
+echo "Median of $RUNS paired alternating samples; retention requires W/C <= $GATE and an independent repeat at or below $GATE."

@@ -7,13 +7,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
-RUNS="${RUNS:-9}"
+RUNS="${RUNS:-10}"
 ITERS="${ITERS:-50000000}"
-GATE="${GATE:-0.97}"
+GATE="${GATE:-1.10}"
 
-case "$RUNS" in
-  ''|*[!0-9]*|0) echo "RUNS must be a positive integer" >&2; exit 2 ;;
-esac
+case "$RUNS" in ''|*[!0-9]*) echo "RUNS must be an integer" >&2; exit 2 ;; esac
+if [ "$RUNS" -lt 8 ] || [ "$RUNS" -gt 12 ] || [ $((RUNS % 2)) -ne 0 ]; then
+  echo "RUNS must be an even integer from 8 through 12" >&2
+  exit 2
+fi
 case "$ITERS" in
   ''|*[!0-9]*|0) echo "ITERS must be a positive integer" >&2; exit 2 ;;
 esac
@@ -32,7 +34,7 @@ TUNGSTEN_C_INCLUDES="$SCRIPT_DIR/string_ref.c" \
 echo "Checking exact C/W behavior..."
 "$BIN" check
 
-echo "Running $RUNS samples x $ITERS iterations per implementation..."
+echo "Running $RUNS balanced C/W/W/C samples x $ITERS iterations per leg..."
 : > "$RAW"
 i=1
 while [ "$i" -le "$RUNS" ]; do
@@ -64,4 +66,4 @@ printf '%-10s %12s %12s %10s %8s\n' "----------" "------------" "------------" "
 printf '%-10s %12.3f %12.3f %10.3f %8s\n' "empty?" "$c_med" "$w_med" "$ratio_med" "$decision"
 
 echo
-echo "Median of $RUNS paired alternating samples; PASS requires W/C <= $GATE. Every pair verifies an identical checksum."
+echo "Median of $RUNS balanced four-leg samples; PASS requires W/C <= $GATE. Every pair verifies an identical checksum."

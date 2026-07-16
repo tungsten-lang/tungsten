@@ -984,6 +984,7 @@ use lowering/definitions
   mod[:builtin_class_order] = builtin_classes
   mod[:builtin_class_names] = {}
   mod[:used_builtin_classes] = {}
+  mod[:uses_argv] = false
 
   # Phase 5: monomorphization registries.
   # - class_method_asts[Class.method] → original method_def AST node
@@ -996,6 +997,11 @@ use lowering/definitions
   mod[:class_method_asts] = {}
   mod[:specialized_methods] = {}
   mod[:small_array_consts] = []
+  # The class-registration prepass expands traits/accessors/typed overloads
+  # before body lowering needs the exact same transformed body. Keep that
+  # work by AST-node identity so lower_class_def can reuse it instead of
+  # rebuilding arrays and synthesized nodes a second time.
+  mod[:prepared_class_bodies] = {}
   # First-declaration superclass links, resolved exactly as class creation
   # resolves them.  Reopens intentionally cannot replace this structural
   # relationship.  Exact-ivar proofs use the completed map to exclude both
@@ -1076,7 +1082,6 @@ use lowering/definitions
   # Explicit `:return_type` annotations (from Phase 3 inline signatures)
   # are LOCKED IN on iteration 0 and never overwritten. Only inferred
   # (nil-annotated) methods get updated per iteration.
-  mod[:uses_argv] = ast_uses_argv(ast.expressions)
   # Generic class monomorphization runs BEFORE the main expressions walk
   # so specialized classes are visible to every downstream pass.
   monomorphize_generics(ast, mod)
@@ -1190,18 +1195,13 @@ use lowering/definitions
 
   collect_top_level_static_types(mod, ast.expressions)
 
-  # Build main with argc/argv only if the program actually needs argv.
-  main_extra = nil
-  if mod[:uses_argv]
-    main_extra = [{type: "i32", name: "%argc"}, {type: "ptr", name: "%argv"}]
-  main_fn = build_function("main", [], "i32", true, main_extra)
+  # ARGV use is discovered by the combined runtime-use walk below. Build the
+  # function first, then attach argc/argv before emission if that walk finds a
+  # use. No instructions are emitted between these points.
+  main_fn = build_function("main", [], "i32", true, nil)
   main_fn[:source_kind] = :entry
   main_fn[:source_path] = source_path
   mod[:functions].push(main_fn)
-
-  # Initialize argv subsystem only for programs that touch ARGV / argv().
-  if mod[:uses_argv]
-    emit_instruction(main_fn, {op: :argv_init})
 
   ctx = {
     mod: mod,
@@ -1219,6 +1219,11 @@ use lowering/definitions
   }
 
   mark_builtin_runtime_class_uses(ast.expressions, mod)
+
+  # Initialize argv subsystem only for programs that touch ARGV / argv().
+  if mod[:uses_argv]
+    main_fn[:extra_params] = [{type: "i32", name: "%argc"}, {type: "ptr", name: "%argv"}]
+    emit_instruction(main_fn, {op: :argv_init})
 
   # Initialize built-in runtime classes
   bci = 0
@@ -1318,6 +1323,7 @@ use lowering/definitions
       # registered here. The transform is deterministic, so the method names
       # registered match the function names lower_class_def later defines.
       class_body = synthesize_overload_dispatchers(mod, cname, class_body)
+      mod[:prepared_class_bodies][expr] = class_body
 
       # Phase 6i follow-up: populate view_layouts in this pre-pass so that
       # specialize_method's clone+re-lower (which can fire from user code
@@ -2293,8 +2299,8 @@ use lowering/definitions
 
 # Returns true for classes that live in the W_SUBTAG_GENERIC bucket and
 # therefore have an implicit type-byte at offset 0 of their heap struct
-# that the user-visible .w data block omits. Currently just BigArray
-# (key 0x92). Subtag-promoted classes (SmallArray, Array, Atomic,
+# that the user-visible .w data block omits. Currently BigArray and Mmap
+# (keys 0x92 and 0x91). Subtag-promoted classes (SmallArray, Array, Atomic,
 # StrBuf, …) keyed below 0x80 return false.
 -> class_uses_implicit_type_byte?(class_name)
   key = type_dispatch_key(class_name)

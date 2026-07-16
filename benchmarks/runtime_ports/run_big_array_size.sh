@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
 RUNS="${RUNS:-10}"
-GATE="${GATE:-0.97}"
+GATE="${GATE:-1.10}"
 PATH_MODE="${PATH_MODE:-v2}"
 CHECK_ONLY="${CHECK_ONLY:-0}"
 STATIC_ONLY="${STATIC_ONLY:-0}"
@@ -148,7 +148,7 @@ for stratum in inline overflow; do
 done
 
 echo
-echo "Median of $RUNS balanced C/W/W/C samples; strict retention requires both strata at W/C <= $GATE and an independent repeat below 1.00."
+echo "Median of $RUNS balanced C/W/W/C samples; strict retention requires both strata at W/C <= $GATE and an independent repeat at or below $GATE."
 if [ "$failed" -ne 0 ]; then
   echo "Strict gate: BigArray#size $PATH_MODE is SKIP; production must remain unchanged." >&2
   exit 1

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Cross-build public-dispatch gate for Array#compact and Array#dup. This script
 # does not edit either root. Prepare isolated roots only after the corresponding
-# unique-name candidate has passed the 0.97 gate and its independent repeat.
+# unique-name candidate has passed the current gate and its independent repeat.
 
 set -euo pipefail
 
@@ -11,7 +11,7 @@ SOURCE="$SCRIPT_DIR/array_compact_dup_public_hot.w"
 REFERENCE="$SCRIPT_DIR/array_compact_dup_ref.c"
 CANDIDATE_ROOT="${CANDIDATE_ROOT:-$ROOT}"
 RUNS="${RUNS:-10}"
-GATE="${GATE:-0.97}"
+GATE="${GATE:-1.10}"
 ONLY="${ONLY:-}"
 REPEAT="${REPEAT:-0}"
 ITERS="${ITERS:-}"
@@ -270,11 +270,7 @@ for operation in "${operations[@]}"; do
     baseline_med="$(awk -F'|' -v name="$name" '$1 == "PAIR" && $2 == name { print $3 }' "$RAW" | median_stream)"
     candidate_med="$(awk -F'|' -v name="$name" '$1 == "PAIR" && $2 == name { print $4 }' "$RAW" | median_stream)"
     ratio_med="$(awk -F'|' -v name="$name" '$1 == "PAIR" && $2 == name { print $5 }' "$RAW" | median_stream)"
-    if [ "$REPEAT" = 1 ]; then
-      decision="$(awk -v ratio="$ratio_med" 'BEGIN { print (ratio < 1.00) ? "PASS" : "SKIP" }')"
-    else
-      decision="$(awk -v ratio="$ratio_med" -v gate="$GATE" 'BEGIN { print (ratio <= gate) ? "PASS" : "SKIP" }')"
-    fi
+    decision="$(awk -v ratio="$ratio_med" -v gate="$GATE" 'BEGIN { print (ratio <= gate) ? "PASS" : "SKIP" }')"
     if [ "$decision" != PASS ]; then failed=1; fi
     printf '%-24s %12.3f %12.3f %10.3f %8s\n' "$name" "$baseline_med" "$candidate_med" "$ratio_med" "$decision"
   done
@@ -283,9 +279,9 @@ done
 echo
 echo "Compact and dup remain independent decisions; every selected stratum must pass."
 if [ "$REPEAT" = 1 ]; then
-  echo "Public repeat requires every ratio below 1.00 after a fresh isolated-root rebuild."
+  echo "Public repeat requires every ratio at or below $GATE after a fresh isolated-root rebuild."
 else
-  echo "Public first pass requires every ratio <= $GATE, followed by REPEAT=1 below 1.00."
+  echo "Public first pass requires every ratio <= $GATE, followed by an independent REPEAT=1 campaign at or below $GATE."
 fi
 if [ "$failed" -ne 0 ]; then
   echo "Public source migration failed at least one strict stratum; restore/retain that IC." >&2

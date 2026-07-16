@@ -37,6 +37,23 @@ check("rope", rope.empty?, false)
 check("empty symbol", "".to_sym.empty?, true)
 check("nonempty symbol", "x".to_sym.empty?, false)
 
+-> check_byte_length(name, value, want)
+  check("[name] size", value.size, want)
+  check("[name] length", value.length, want)
+  # The removed native IC ignored surplus arguments; source dispatch retains
+  # that public compatibility behavior.
+  check("[name] size extras", value.size(1, 2), want)
+  check("[name] length extras", value.length(1, 2), want)
+
+check_byte_length("inline empty", "", 0)
+check_byte_length("inline UTF-8 bytes", "é", 2)
+check_byte_length("slab UTF-8 bytes", "ééé", 6)
+check_byte_length("heap", heap_long, 80)
+check_byte_length("rope", rope, 80)
+check_byte_length("inline symbol", "sym".to_sym, 3)
+check_byte_length("slab symbol", "symbol".to_sym, 6)
+check_byte_length("heap symbol", heap_long.to_sym, 80)
+
 # String/Symbol#to_s is the exact low-bit clear shared by the 0xF9 runtime
 # representation. Check identity for every String storage tier and exact
 # Symbol -> String bits for both supported Symbol tiers.

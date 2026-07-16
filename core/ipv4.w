@@ -58,7 +58,11 @@
     (address >> ((3 - raw_index) * 8)) & 0xFF
 
   -> octets
-    ccall("w_ipv4_octets", self)
+    bits = $value ## i64
+    [(bits >> 36) & 0xFF,
+     (bits >> 28) & 0xFF,
+     (bits >> 20) & 0xFF,
+     (bits >> 12) & 0xFF]
 
   -> a
     ($value >> 36) & 0xFF

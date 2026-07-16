@@ -1,7 +1,9 @@
 + UUID
 
-  - data
-    raw 16
+  # UUID values are W_SUBTAG_UUID pointers whose payload is exactly the
+  # sixteen RFC bytes. The subtag lives in the WValue, not the allocation.
+  - data (WUUIDBytes)
+    u8[16] bytes
 
   -> .parse(text)
     ccall("w_uuid_parse", text)
@@ -72,7 +74,13 @@
       :reserved
 
   -> byte(index)
-    ccall("w_uuid_byte", self, index)
+    # Preserve the native Int/BigInt conversion, including its low-i64
+    # behavior for oversized BigInts. A signed i64 is in 0..15 iff every bit
+    # outside its low nibble is clear, so one mask replaces two bounds tests.
+    raw_index = ccall_nobox("w_to_i64", index) ## i64
+    if (raw_index & -16) != 0
+      return nil
+    return $bytes[raw_index]
 
   -> bytes
     ccall("w_uuid_bytes", self)

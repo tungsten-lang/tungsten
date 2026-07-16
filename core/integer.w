@@ -3,6 +3,9 @@
 # operators, so these methods stay exact at both i48 boundaries.
 + Integer < Real
 
+  -> to_i
+    self
+
   -> prev
     payload = ($value & 0xFFFFFFFFFFFF) ## i64
     if payload == 0x800000000000

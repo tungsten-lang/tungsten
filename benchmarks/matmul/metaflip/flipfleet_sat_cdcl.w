@@ -779,3 +779,44 @@
 
 -> ffcdcl_learnt_count(st) (i64[]) i64
   st[18]
+
+# Dump the ROOT clause database (learnt and released clauses excluded) as
+# plain DIMACS for an external industrial solver (cross-checking verdicts
+# and attacking cells that outgrow the in-process arena).  XOR rows were
+# Tseitin-encoded at ingestion, so plain DIMACS is exact.  Returns the
+# clause count written, or -1 on I/O failure.
+-> ffcdcl_dump_dimacs(st, path) (i64[] String) i64
+  base = st[46] ## i64
+  used = st[5] ## i64
+  body = "" ## String
+  chunk = "" ## String
+  in_chunk = 0 ## i64
+  count = 0 ## i64
+  c = base ## i64
+  while c < base + used
+    size = st[c] ## i64
+    flags = st[c + 1] ## i64
+    if (flags & 3) == 0
+      line = "" ## String
+      i = 0 ## i64
+      while i < size
+        lit = st[c + 4 + i] ## i64
+        v = lit / 2 ## i64
+        if (lit & 1) == 1
+          line = line + "-"
+        line = line + v.to_s() + " "
+        i += 1
+      chunk = chunk + line + "0\n"
+      in_chunk += 1
+      count += 1
+      if in_chunk >= 256
+        body = body + chunk
+        chunk = ""
+        in_chunk = 0
+    c = c + 4 + size
+  if in_chunk > 0
+    body = body + chunk
+  header = "p cnf " + st[4].to_s() + " " + count.to_s() + "\n" ## String
+  if write_file(path, header + body)
+    return count
+  0 - 1

@@ -203,6 +203,108 @@ use flipfleet_sat_cdcl
   vars[2] = base + um + cc
   1
 
+# Chained lexicographic ordering A <= B over two equal-width variable
+# blocks (standard SBP: prefix-equality auxiliaries allocated above the
+# current top variable).  Sound for interchangeable slots: any model
+# permutes into lex order, and UNSAT under the ordering still certifies
+# class UNSAT.  Returns 1, or 0 on arena failure.
+-> ffpsi_lex_chain(sat, base_a, base_b, width) (i64[] i64 i64 i64) i64
+  lits = i64[5]
+  if width < 1
+    return 1
+  lits[0] = 2 * (base_a + 0) + 1
+  lits[1] = 2 * (base_b + 0)
+  if ffcdcl_add_clause(sat, lits, 2) != 1
+    return 0
+  if width == 1
+    return 1
+  e = ffcdcl_top_var(sat) ## i64
+  i = 1 ## i64
+  while i < width
+    ev = e + i ## i64
+    prev = e + i - 1 ## i64
+    a = base_a + i - 1 ## i64
+    b = base_b + i - 1 ## i64
+    # e_1 hangs off position 0 directly; deeper links chain.
+    if i == 1
+      # e_1 -> (A_0 == B_0); (A_0 == B_0) -> e_1.
+      lits[0] = 2 * ev + 1
+      lits[1] = 2 * a + 1
+      lits[2] = 2 * b
+      if ffcdcl_add_clause(sat, lits, 3) != 1
+        return 0
+      lits[0] = 2 * ev + 1
+      lits[1] = 2 * a
+      lits[2] = 2 * b + 1
+      if ffcdcl_add_clause(sat, lits, 3) != 1
+        return 0
+      lits[0] = 2 * ev
+      lits[1] = 2 * a
+      lits[2] = 2 * b
+      if ffcdcl_add_clause(sat, lits, 3) != 1
+        return 0
+      lits[0] = 2 * ev
+      lits[1] = 2 * a + 1
+      lits[2] = 2 * b + 1
+      if ffcdcl_add_clause(sat, lits, 3) != 1
+        return 0
+    else
+      # e_i <-> e_{i-1} and (A_{i-1} == B_{i-1}).
+      lits[0] = 2 * ev + 1
+      lits[1] = 2 * prev
+      if ffcdcl_add_clause(sat, lits, 2) != 1
+        return 0
+      lits[0] = 2 * ev + 1
+      lits[1] = 2 * a + 1
+      lits[2] = 2 * b
+      if ffcdcl_add_clause(sat, lits, 3) != 1
+        return 0
+      lits[0] = 2 * ev + 1
+      lits[1] = 2 * a
+      lits[2] = 2 * b + 1
+      if ffcdcl_add_clause(sat, lits, 3) != 1
+        return 0
+      lits[0] = 2 * ev
+      lits[1] = 2 * prev + 1
+      lits[2] = 2 * a
+      lits[3] = 2 * b
+      if ffcdcl_add_clause(sat, lits, 4) != 1
+        return 0
+      lits[0] = 2 * ev
+      lits[1] = 2 * prev + 1
+      lits[2] = 2 * a + 1
+      lits[3] = 2 * b + 1
+      if ffcdcl_add_clause(sat, lits, 4) != 1
+        return 0
+    # Given prefix equality, A_i <= B_i.
+    lits[0] = 2 * ev + 1
+    lits[1] = 2 * (base_a + i) + 1
+    lits[2] = 2 * (base_b + i)
+    if ffcdcl_add_clause(sat, lits, 3) != 1
+      return 0
+    i += 1
+  1
+
+# Lex-order the interchangeable slots: consecutive pair representatives
+# over their full u|v|w blocks, consecutive fixed generators over u|w.
+# Emit AFTER the XOR rows (auxiliaries stack above everything).
+-> ffpsi_encode_sbps(sat, n, m, c, f) (i64[] i64 i64 i64 i64) i64
+  p = n ## i64
+  um = n * m ## i64
+  vm = m * p ## i64
+  wm = n * p ## i64
+  k = 0 ## i64
+  while k + 1 < c
+    if ffpsi_lex_chain(sat, ffpsi_pair_base(k, um, vm, wm), ffpsi_pair_base(k + 1, um, vm, wm), um + vm + wm) != 1
+      return 0
+    k += 1
+  q = 0 ## i64
+  while q + 1 < f
+    if ffpsi_lex_chain(sat, ffpsi_fixed_base(c, q, um, vm, wm), ffpsi_fixed_base(c, q + 1, um, vm, wm), um + wm) != 1
+      return 0
+    q += 1
+  1
+
 # Encode the (c, f) existence instance.  Returns 1, or 0 on arena failure.
 -> ffpsi_encode(sat, n, m, c, f) (i64[] i64 i64 i64 i64) i64
   p = n ## i64
@@ -420,7 +522,7 @@ use flipfleet_sat_cdcl
   cells = um * vm * wm ## i64
   slots = 2 * c + f ## i64
   prim = ffpsi_prim(c, f, um, vm, wm) ## i64
-  aux = cells * (slots + 2) ## i64
+  aux = cells * (slots + 2) + (c + f) * (um + vm + wm) + 64 ## i64
   max_vars = prim + cells * slots + aux + 64 ## i64
   # Learnt clauses live in the same arena and are never reclaimed, so deep
   # campaigns must size it with the conflict budget.  Measured on the
@@ -437,6 +539,8 @@ use flipfleet_sat_cdcl
   if ffcdcl_init(sat, max_vars, seed) != 1
     return 0 - 2
   if ffpsi_encode(sat, n, m, c, f) != 1
+    return 0 - 2
+  if ffpsi_encode_sbps(sat, n, m, c, f) != 1
     return 0 - 2
   meta[0] = ffcdcl_top_var(sat)
   meta[1] = ffcdcl_clause_count(sat)

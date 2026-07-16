@@ -43,6 +43,10 @@ static void assert_bigint_mod_eq(const char *a, const char *b, const char *expec
     assert(w_eq(w_mod(bigint_dec(a), bigint_dec(b)), bigint_dec(expected)) == W_TRUE);
 }
 
+static void assert_bigint_div_eq(const char *a, const char *b, const char *expected) {
+    assert(w_eq(w_div(bigint_dec(a), bigint_dec(b)), bigint_dec(expected)) == W_TRUE);
+}
+
 /* Helper: extract C string from WValue (rotating buffer for safe strcmp) */
 static const char *str_val(WValue v) {
     static char bufs[4][6];
@@ -778,6 +782,42 @@ int main() {
         assert_bigint_mod_eq(n, "4294967297", "4294967109");
         assert_bigint_mod_eq(n, "18446744073709551615", "18446744073709551427");
         printf("  bigint single-limb remainder: OK\n");
+    }
+
+    /* BigInt single-limb quotient: identity, shift, reciprocal, 32-bit
+     * boundary, wide fallback, and signed public-division semantics. */
+    {
+        const char *n = "115792089237316195423570985008687907853269984665640564039457584007913129639747";
+        const char *neg_n = "-115792089237316195423570985008687907853269984665640564039457584007913129639747";
+
+        assert_bigint_div_eq(n, "1", n);
+        assert_bigint_div_eq(n, "2",
+                             "57896044618658097711785492504343953926634992332820282019728792003956564819873");
+        assert_bigint_div_eq(n, "10",
+                             "11579208923731619542357098500868790785326998466564056403945758400791312963974");
+        assert_bigint_div_eq(n, "65535",
+                             "1766874025136433896750911497805568136923323180981774075523881651146915840");
+        assert_bigint_div_eq(n, "65536",
+                             "1766847064778384329583297500742918515827483896875618958121606201292619775");
+        assert_bigint_div_eq(n, "1000000007",
+                             "115792088426771576436169949955498258164782177512165321454300333827810");
+        assert_bigint_div_eq(n, "4294967295",
+                             "26959946673427741531515197488526605382048662297355296634326893985792");
+        assert_bigint_div_eq(n, "4294967296",
+                             "26959946667150639794667015087019630673637144422540572481103610249215");
+        assert_bigint_div_eq(n, "4294967297",
+                             "26959946660873538060741835960174461801791452538186943042387869433854");
+        assert_bigint_div_eq(n, "9223372036854775808",
+                             "12554203470773361527671578846415332832204710888928069025791");
+        assert_bigint_div_eq(n, "18446744073709551615",
+                             "6277101735386680764176071790128604879584176795969512275968");
+        assert_bigint_div_eq(neg_n, "10",
+                             "-11579208923731619542357098500868790785326998466564056403945758400791312963974");
+        assert_bigint_div_eq(n, "-10",
+                             "-11579208923731619542357098500868790785326998466564056403945758400791312963974");
+        assert_bigint_div_eq(neg_n, "-10",
+                             "11579208923731619542357098500868790785326998466564056403945758400791312963974");
+        printf("  bigint single-limb quotient: OK\n");
     }
 
     /* Pointer alignment: w_as_ptr strips sub-tag correctly */

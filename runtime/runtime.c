@@ -2190,13 +2190,59 @@ static WValue bigint_mul_any(WValue a, WValue b) {
 /* Divide bigint magnitude by a single uint64_t divisor. Returns quotient, writes remainder. */
 static WBigint *mag_div_single(const uint64_t *a, int32_t alen, uint64_t d, uint64_t *rem) {
     WBigint *q = bigint_alloc(alen);
-    __uint128_t r = 0;
-    for (int32_t i = alen - 1; i >= 0; i--) {
-        r = (r << 64) | a[i];
-        q->limbs[i] = (uint64_t)(r / d);
-        r = r % d;
+    if (d == 0) die("division by zero");
+
+    if (d == 1) {
+        for (int32_t i = 0; i < alen; i++) q->limbs[i] = a[i];
+        *rem = 0;
+    } else if ((d & (d - 1)) == 0) {
+        /* Dividing a base-2^64 magnitude by 2^k is just a cross-limb shift.
+         * Avoid the compiler's 128/64 division helper entirely; d == 1 was
+         * split out above so every shift count here is in [1, 63]. */
+        unsigned shift = (unsigned)__builtin_ctzll(d);
+        *rem = alen > 0 ? a[0] & (d - 1) : 0;
+        for (int32_t i = 0; i < alen; i++) {
+            uint64_t hi = i + 1 < alen ? a[i + 1] : 0;
+            q->limbs[i] = (a[i] >> shift) | (hi << (64 - shift));
+        }
+    } else if (d <= UINT32_MAX) {
+        /* Work in base 2^32 so (remainder << 32) | digit always fits in u64.
+         * For reciprocal=floor(2^64/d), multiply-high underestimates the exact
+         * digit quotient by at most one; the correction updates BOTH quotient
+         * and remainder. This replaces one 128/64 helper call per input limb
+         * with two multiply-high Barrett steps. */
+        uint64_t reciprocal = UINT64_MAX / d;
+        if (UINT64_MAX % d == d - 1) reciprocal++;
+        uint64_t r = 0;
+        for (int32_t i = alen - 1; i >= 0; i--) {
+            uint64_t x = (r << 32) | (a[i] >> 32);
+            uint64_t qhi = (uint64_t)(((__uint128_t)x * reciprocal) >> 64);
+            r = x - qhi * d;
+            if (r >= d) {
+                r -= d;
+                qhi++;
+            }
+
+            x = (r << 32) | (a[i] & UINT32_MAX);
+            uint64_t qlo = (uint64_t)(((__uint128_t)x * reciprocal) >> 64);
+            r = x - qlo * d;
+            if (r >= d) {
+                r -= d;
+                qlo++;
+            }
+            q->limbs[i] = (qhi << 32) | qlo;
+        }
+        *rem = r;
+    } else {
+        /* Wide non-power-of-two divisor: retain the exact 128/64 fallback. */
+        __uint128_t r = 0;
+        for (int32_t i = alen - 1; i >= 0; i--) {
+            r = (r << 64) | a[i];
+            q->limbs[i] = (uint64_t)(r / d);
+            r %= d;
+        }
+        *rem = (uint64_t)r;
     }
-    *rem = (uint64_t)r;
     q->size = alen;
     while (q->size > 0 && q->limbs[q->size - 1] == 0) q->size--;
     return q;

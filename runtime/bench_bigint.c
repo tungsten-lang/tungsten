@@ -80,6 +80,14 @@ static int bench_iters_for_addsub(int32_t limbs) {
     return 1000;
 }
 
+static int bench_iters_for_div_single(int32_t limbs) {
+    if (limbs <= 8) return 50000;
+    if (limbs <= 32) return 20000;
+    if (limbs <= 128) return 5000;
+    if (limbs <= 256) return 2000;
+    return 500;
+}
+
 /* The pre-direct-subtraction implementation: copy b, flip its sign, then add.
  * Keep it here as an A/B reference, but free the temporary it historically
  * leaked so repeated benchmark runs do not grow without bound. */
@@ -115,6 +123,118 @@ static double bench_subtract(int32_t limbs, int iters, int negate_add_ref) {
     bench_free_value(a);
     bench_free_value(b);
     return elapsed * 1e9 / (double)iters;
+}
+
+/* Former single-limb quotient loop: one exact 128/64 division per input limb.
+ * Keep it as both the A/B baseline and the randomized correctness oracle. */
+static WBigint *bench_div_single_ref(const uint64_t *a, int32_t alen,
+                                     uint64_t d, uint64_t *rem) {
+    WBigint *q = bigint_alloc(alen);
+    __uint128_t r = 0;
+    for (int32_t i = alen - 1; i >= 0; i--) {
+        r = (r << 64) | a[i];
+        q->limbs[i] = (uint64_t)(r / d);
+        r %= d;
+    }
+    *rem = (uint64_t)r;
+    q->size = alen;
+    while (q->size > 0 && q->limbs[q->size - 1] == 0) q->size--;
+    return q;
+}
+
+static WValue bench_div_single_ref_any(WValue a, WValue b) {
+    uint64_t sa, sb;
+    int32_t alen, blen;
+    const uint64_t *al = integer_limbs(a, &sa, &alen);
+    const uint64_t *bl = integer_limbs(b, &sb, &blen);
+    int result_neg = (alen < 0) != (blen < 0);
+    int32_t a_abs = alen < 0 ? -alen : alen;
+    int32_t b_abs = blen < 0 ? -blen : blen;
+    if (b_abs != 1) die("single-limb division benchmark received wide divisor");
+
+    uint64_t rem;
+    WBigint *q = bench_div_single_ref(al, a_abs, bl[0], &rem);
+    if (result_neg && q->size > 0) q->size = -q->size;
+    return bigint_normalize(q);
+}
+
+static int bench_div_single_equivalence(void) {
+    const uint64_t divisors[] = {
+        1ULL, 2ULL, 4ULL, 10ULL, 65535ULL, 65536ULL,
+        1000000007ULL, UINT32_MAX, 1ULL << 32, 1ULL << 63,
+        1000000000000000000ULL, UINT64_MAX
+    };
+    uint64_t state = 0x123456789abcdef0ULL;
+    int checked = 0;
+
+    for (size_t d = 0; d < sizeof(divisors) / sizeof(divisors[0]); d++) {
+        for (int sample = 0; sample < 5000; sample++) {
+            int32_t limbs = 1 + (int32_t)(bench_rng(&state) % 64);
+            uint64_t *a = bench_limbs(limbs, bench_rng(&state));
+            uint64_t ref_rem, got_rem;
+            WBigint *ref = bench_div_single_ref(a, limbs, divisors[d], &ref_rem);
+            WBigint *got = mag_div_single(a, limbs, divisors[d], &got_rem);
+            int mismatch = ref_rem != got_rem || ref->size != got->size ||
+                           memcmp(ref->limbs, got->limbs,
+                                  (size_t)limbs * sizeof(uint64_t)) != 0;
+            free(a);
+            free(ref);
+            free(got);
+            if (mismatch) {
+                fprintf(stderr, "single-limb div mismatch: divisor=%llu sample=%d\n",
+                        (unsigned long long)divisors[d], sample);
+                return 1;
+            }
+            checked++;
+        }
+    }
+
+    printf("single-limb div equivalence: %d/%d exact quotient+remainder matches\n",
+           checked, checked);
+    return 0;
+}
+
+static double bench_div_single_raw(int32_t limbs, uint64_t d, int iters,
+                                   int reference) {
+    uint64_t *a = bench_limbs(limbs, 0xa54ff53a5f1d36f1ULL ^
+                                      (uint64_t)limbs ^ d);
+    double best = 1e300;
+    for (int rep = 0; rep < 3; rep++) {
+        double start = bench_now();
+        for (int i = 0; i < iters; i++) {
+            uint64_t rem;
+            WBigint *q = reference ? bench_div_single_ref(a, limbs, d, &rem)
+                                   : mag_div_single(a, limbs, d, &rem);
+            bench_sink ^= q->limbs[(unsigned)i % (unsigned)limbs] ^ rem ^ (uint64_t)i;
+            free(q);
+        }
+        double elapsed = (bench_now() - start) * 1e9 / (double)iters;
+        if (elapsed < best) best = elapsed;
+    }
+    free(a);
+    return best;
+}
+
+static double bench_div_single_boxed(int32_t limbs, uint64_t d, int iters,
+                                     int reference) {
+    WValue a = bench_bigint(limbs, 0x6a09e667f3bcc909ULL ^
+                                   (uint64_t)limbs ^ d);
+    WValue divisor = w_u64(d);
+    double best = 1e300;
+    for (int rep = 0; rep < 3; rep++) {
+        double start = bench_now();
+        for (int i = 0; i < iters; i++) {
+            WValue q = reference ? bench_div_single_ref_any(a, divisor)
+                                 : bigint_div_any(a, divisor);
+            bench_sink ^= (uint64_t)integer_low_i64(q) ^ (uint64_t)i;
+            bench_free_value(q);
+        }
+        double elapsed = (bench_now() - start) * 1e9 / (double)iters;
+        if (elapsed < best) best = elapsed;
+    }
+    bench_free_value(a);
+    bench_free_value(divisor);
+    return best;
 }
 
 static double bench_equal_mul(int32_t limbs, int iters) {
@@ -511,6 +631,38 @@ int main(int argc, char **argv) {
         double reference = bench_subtract(limbs, iters, 1);
         printf("%21d %8.1f %11.1f %7.2fx %7d\n",
                limbs, direct, reference, reference / direct, iters);
+    }
+
+    if (bench_div_single_equivalence()) return 1;
+
+    printf("\nsingle-limb division (ns) divisor  limbs  old q+r  new q+r  speedup"
+           "   old boxed  new boxed  speedup\n");
+    const int32_t div_single_sizes[] = {8, 32, 128, 1024};
+    const struct { uint64_t value; const char *name; } div_single_divisors[] = {
+        {2ULL, "2"},
+        {10ULL, "10"},
+        {1000000007ULL, "1e9+7"},
+        {UINT32_MAX, "2^32-1"},
+        {1ULL << 32, "2^32"},
+        {1ULL << 63, "2^63"},
+        {1000000000000000000ULL, "1e18"}
+    };
+    for (size_t d = 0; d < sizeof(div_single_divisors) /
+                                  sizeof(div_single_divisors[0]); d++) {
+        for (size_t i = 0; i < sizeof(div_single_sizes) /
+                                      sizeof(div_single_sizes[0]); i++) {
+            int32_t limbs = div_single_sizes[i];
+            uint64_t divisor = div_single_divisors[d].value;
+            int iters = bench_iters_for_div_single(limbs);
+            double old_raw = bench_div_single_raw(limbs, divisor, iters, 1);
+            double new_raw = bench_div_single_raw(limbs, divisor, iters, 0);
+            double old_boxed = bench_div_single_boxed(limbs, divisor, iters, 1);
+            double new_boxed = bench_div_single_boxed(limbs, divisor, iters, 0);
+            printf("%34s %6d %8.1f %8.1f %7.2fx %11.1f %10.1f %7.2fx\n",
+                   div_single_divisors[d].name, limbs,
+                   old_raw, new_raw, old_raw / new_raw,
+                   old_boxed, new_boxed, old_boxed / new_boxed);
+        }
     }
 
     printf("\nunbalanced limbs     mul        ratio   iters\n");

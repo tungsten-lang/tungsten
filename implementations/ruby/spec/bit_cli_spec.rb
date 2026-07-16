@@ -332,8 +332,138 @@ RSpec.describe "tungsten-bit CLI" do
     expect(File).to exist(File.join(package_dir, "pkg/sample-0.1.0.bit.sha256"))
   end
 
+  it "builds manifest-declared executables and assets with a compiler override" do
+    package_dir = File.join(@tmpdir, "application-bit")
+    FileUtils.mkdir_p(File.join(package_dir, "lib"))
+    FileUtils.mkdir_p(File.join(package_dir, "runtime", "gpu"))
+    File.write(File.join(package_dir, "Bitfile"), <<~BITFILE)
+      tungsten "sample-app-0.1.0"
+      name "sample-app"
+      version "0.1.0"
+      executable "sample", source: "lib/main.w"
+      asset "runtime/gpu"
+      asset "lib"
+    BITFILE
+    File.write(File.join(package_dir, "lib", "main.w"), "<< \"hello\"\n")
+    File.write(File.join(package_dir, "runtime", "gpu", "kernel.metal"), "kernel fixture\n")
+
+    compiler_log = File.join(@tmpdir, "compiler.log")
+    fake_compiler = write_fake_compiler(File.join(@tmpdir, "override-tungsten"))
+    out, err, status = run_bit(
+      "build", "--release",
+      chdir: package_dir,
+      env: {"TUNGSTEN_COMPILER" => fake_compiler, "FAKE_COMPILER_LOG" => compiler_log}
+    )
+
+    expect(status.success?).to be(true), err
+    expect(out).to include("Built sample-app (1 files")
+    expect(File).to be_executable(File.join(package_dir, "build/bin/sample"))
+    expect(File.read(File.join(package_dir, "build/runtime/gpu/kernel.metal"))).to eq("kernel fixture\n")
+    expect(File.read(File.join(package_dir, "build/lib/main.w"))).to eq("<< \"hello\"\n")
+    invocation = File.read(compiler_log)
+    expect(invocation).to include("compile\nlib/main.w\n--out\nbuild/bin/sample\n--release\n")
+
+    _out, repeat_err, repeat_status = run_bit(
+      "build", "--release",
+      chdir: package_dir,
+      env: {"TUNGSTEN_COMPILER" => fake_compiler, "FAKE_COMPILER_LOG" => compiler_log}
+    )
+    expect(repeat_status.success?).to be(true), repeat_err
+    expect(File).not_to exist(File.join(package_dir, "build/lib/lib/main.w"))
+  end
+
+  it "finds the Tungsten driver on PATH when building outside a checkout" do
+    package_dir = File.join(@tmpdir, "path-application-bit")
+    tool_dir = File.join(@tmpdir, "tools")
+    FileUtils.mkdir_p(File.join(package_dir, "lib"))
+    FileUtils.mkdir_p(tool_dir)
+    File.write(File.join(package_dir, "Bitfile"), <<~BITFILE)
+      tungsten "path-app-0.1.0"
+      name "path-app"
+      version "0.1.0"
+      executable "path-app", source: "lib/path_app.w"
+    BITFILE
+    File.write(File.join(package_dir, "lib", "path_app.w"), "<< \"hello\"\n")
+
+    compiler_log = File.join(@tmpdir, "path-compiler.log")
+    write_fake_compiler(File.join(tool_dir, "tungsten"))
+    _out, err, status = run_bit(
+      "build",
+      chdir: package_dir,
+      env: {
+        "TUNGSTEN_COMPILER" => "",
+        "TUNGSTEN" => "",
+        "TUNGSTEN_ROOT" => "",
+        "FAKE_COMPILER_LOG" => compiler_log,
+        "PATH" => tool_dir + File::PATH_SEPARATOR + ENV.fetch("PATH")
+      }
+    )
+
+    expect(status.success?).to be(true), err
+    expect(File).to be_executable(File.join(package_dir, "build/bin/path-app"))
+    expect(File.read(compiler_log)).to include("lib/path_app.w")
+  end
+
+  it "packs declared assets and common dual-license files" do
+    package_dir = File.join(@tmpdir, "asset-bit")
+    FileUtils.mkdir_p(File.join(package_dir, "lib"))
+    FileUtils.mkdir_p(File.join(package_dir, "assets", "seeds"))
+    FileUtils.mkdir_p(File.join(package_dir, "runtime", "gpu"))
+    File.write(File.join(package_dir, "Bitfile"), <<~BITFILE)
+      tungsten "asset-bit-0.1.0"
+      name "asset-bit"
+      version "0.1.0"
+      executable "asset-bit", source: "lib/asset_bit.w"
+      asset "runtime/gpu"
+    BITFILE
+    File.write(File.join(package_dir, "lib", "asset_bit.w"), "# fixture\n")
+    File.write(File.join(package_dir, "assets", "seeds", "seed.txt"), "seed\n")
+    File.write(File.join(package_dir, "runtime", "gpu", "kernel.metal"), "kernel\n")
+    File.write(File.join(package_dir, "LICENSE-MIT"), "MIT\n")
+    File.write(File.join(package_dir, "LICENSE-APACHE"), "Apache-2.0\n")
+    File.write(File.join(package_dir, "NOTICE"), "notice\n")
+    File.write(File.join(package_dir, "THIRD_PARTY.md"), "third-party notices\n")
+
+    _out, err, status = run_bit("pack", chdir: package_dir)
+    expect(status.success?).to be(true), err
+
+    archive = File.join(package_dir, "pkg/asset-bit-0.1.0.bit")
+    entries, tar_err, tar_status = Open3.capture3("tar", "-tf", archive)
+    expect(tar_status.success?).to be(true), tar_err
+    expect(entries.lines.map(&:chomp)).to include(
+      "LICENSE-MIT",
+      "LICENSE-APACHE",
+      "NOTICE",
+      "THIRD_PARTY.md",
+      "assets/seeds/seed.txt",
+      "runtime/gpu/kernel.metal"
+    )
+  end
+
   def run_bit(*args, chdir: PROJECT_ROOT, env: {})
     Open3.capture3({"BIT_HOME" => BITS_ROOT}.merge(env), @bit_bin, *args, chdir: chdir)
+  end
+
+  def write_fake_compiler(path)
+    File.write(path, <<~SH)
+      #!/bin/sh
+      set -eu
+      printf '%s\n' "$@" >> "$FAKE_COMPILER_LOG"
+      output=""
+      while [ "$#" -gt 0 ]; do
+        if [ "$1" = "--out" ]; then
+          shift
+          output="$1"
+        fi
+        shift
+      done
+      test -n "$output"
+      mkdir -p "$(dirname "$output")"
+      printf '#!/bin/sh\nexit 0\n' > "$output"
+      chmod +x "$output"
+    SH
+    FileUtils.chmod(0o755, path)
+    path
   end
 
   def write_local_bit(registry, dir_name:, name:, version:, summary: "#{name} #{version}")

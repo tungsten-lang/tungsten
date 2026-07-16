@@ -1,0 +1,14 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-metaflip"
+version     "0.1.0"
+summary     "Adaptive GF(2) matrix-multiplication decomposition search"
+description "Pure-Tungsten CPU and Metal search fleets for exact square and rectangular matrix-multiplication tensor decompositions over GF(2)."
+license     "MIT OR Apache-2.0 WITH LLVM-exception"
+authors     ["Erik Peterson"]
+
+executable  "metaflip", source: "bin/metaflip.w"
+# Metaflip compiles specialized workers at run time, so installed builds
+# retain the namespaced pure-Tungsten sources and operational seed schemes as
+# one relocatable runtime subtree. Generated GPU artifacts stay in the cache.
+asset       "lib"

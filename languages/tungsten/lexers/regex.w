@@ -809,9 +809,16 @@ use regex_base
       word << @chars[@pos]
       @pos += 1
     # Trailing ? or !
-    if @pos < @char_count && (@chars[@pos] == "?" || @chars[@pos] == "!")
+    if @pos < @char_count && @chars[@pos] == "?"
       word << @chars[@pos]
       @pos += 1
+    elsif @pos < @char_count && @chars[@pos] == "!"
+      next_char = ""
+      if @pos + 1 < @char_count
+        next_char = @chars[@pos + 1]
+      if next_char != "=" && next_char != "~"
+        word << @chars[@pos]
+        @pos += 1
     # Prime-property notation: x' is one identifier when the apostrophe
     # cannot be opening a quoted string.
     if @pos < @char_count && @chars[@pos] == "'"
@@ -823,21 +830,13 @@ use regex_base
       if joins
         word << "'"
         @pos += 1
-    # Arity suffix: /N, /*, /&
-    if @pos < @char_count && @chars[@pos] == "/"
-      nxt_pos = @pos + 1
-      if nxt_pos < @char_count
-        nxt = @chars[nxt_pos]
-        if nxt == "&" || nxt == "*"
-          word << "/"
-          word << nxt
-          @pos += 2
-        elsif nxt >= "0" && nxt <= "9"
-          word << "/"
-          @pos += 1
-          while @pos < @char_count && @chars[@pos] >= "0" && @chars[@pos] <= "9"
-            word << @chars[@pos]
-            @pos += 1
+    # Numeric `/N` stays separate for ordinary expression division. Keep the
+    # block/splat forms bundled because the operator scanner treats `/&` and
+    # `/*` as one maximal operator chunk.
+    if @pos + 1 < @char_count && @chars[@pos] == "/" && (@chars[@pos + 1] == "&" || @chars[@pos + 1] == "*")
+      word << "/"
+      word << @chars[@pos + 1]
+      @pos += 2
     word.to_s()
 
   -> constant_name?(word)

@@ -1,0 +1,9 @@
+/build/
+/pkg/
+/metaflip
+*.sidemap
+*.metal
+*.air
+*.metallib
+*.cu
+*.ll

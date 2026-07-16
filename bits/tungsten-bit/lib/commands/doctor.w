@@ -61,15 +61,11 @@ in Tungsten:Bit:Commands
       check(label, false, name + " not found on PATH")
 
   -> check_tungsten_tool
-    path = tool_path("tungsten-compiler")
-    if path == "" && File.exists?("bin/tungsten-compiler")
-      path = "bin/tungsten-compiler"
-    if path == ""
-      path = tool_path("tungsten")
-    if path != ""
+    path = tungsten_compiler_command()
+    if path != nil && path != ""
       check("tungsten toolchain", true, path)
     else
-      check("tungsten toolchain", false, "tungsten-compiler not found on PATH")
+      check("tungsten toolchain", false, "set TUNGSTEN_COMPILER or add tungsten to PATH")
 
   -> check_sha256_tool
     shasum = tool_path("shasum")

@@ -102,6 +102,15 @@ static int is_value_kind(TcKind kind) {
   }
 }
 
+static int is_value_keyword(const TcSource *source, WValue token, TcKind kind) {
+  if (kind != TC_K_KEYWORD) return 0;
+  return token_text_is(source, token, "self") ||
+         token_text_is(source, token, "super") ||
+         token_text_is(source, token, "nil") ||
+         token_text_is(source, token, "true") ||
+         token_text_is(source, token, "false");
+}
+
 static TcKind classify_id(const TcSource *source, WValue token) {
   if (token_text_starts_with(source, token, "$")) return TC_K_GLOBAL;
 
@@ -119,11 +128,12 @@ static TcKind classify_magic(const TcSource *source, WValue token) {
   return TC_K_MAGIC_DIR;
 }
 
-static TcKind classify_op(const TcSource *source, WValue token, TcKind last_kind) {
+static TcKind classify_op(const TcSource *source, WValue token, TcKind last_kind, WValue last_token) {
+  int follows_value = is_value_kind(last_kind) || is_value_keyword(source, last_token, last_kind);
   if (token_text_is(source, token, "->")) return TC_K_ARROW;
   if (token_text_starts_with(source, token, "->/")) return TC_K_LAMBDA_ARITY;
-  if (token_text_is(source, token, "<<")) return is_value_kind(last_kind) ? TC_K_LSHIFT : TC_K_PUTS_OP;
-  if (token_text_is(source, token, "+")) return is_value_kind(last_kind) ? TC_K_PLUS : TC_K_CLASS_DEF;
+  if (token_text_is(source, token, "<<")) return follows_value ? TC_K_LSHIFT : TC_K_PUTS_OP;
+  if (token_text_is(source, token, "+")) return follows_value ? TC_K_PLUS : TC_K_CLASS_DEF;
 
   if (token_text_is(source, token, "/") && !is_value_kind(last_kind)) {
     uint32_t off = tc_token_offset(token);
@@ -191,7 +201,7 @@ static TcKind classify_op(const TcSource *source, WValue token, TcKind last_kind
   return TC_K_UNKNOWN;
 }
 
-static TcKind classify_one(const TcSource *source, WValue token, TcKind last_kind) {
+static TcKind classify_one(const TcSource *source, WValue token, TcKind last_kind, WValue last_token) {
   switch (tc_token_type(token)) {
     case TC_T_ID: return classify_id(source, token);
     case TC_T_NAME: return TC_K_NAME;
@@ -203,7 +213,7 @@ static TcKind classify_one(const TcSource *source, WValue token, TcKind last_kin
     case TC_T_NEWLINE: return TC_K_NEWLINE;
     case TC_T_INDENT: return TC_K_INDENT;
     case TC_T_DEDENT: return TC_K_DEDENT;
-    case TC_T_OP: return classify_op(source, token, last_kind);
+    case TC_T_OP: return classify_op(source, token, last_kind, last_token);
     case TC_T_IVAR: return TC_K_IVAR;
     case TC_T_CVAR: return TC_K_CVAR;
     case TC_T_PARG: return TC_K_PARG;
@@ -256,12 +266,14 @@ const char *tc_kind_name(TcKind kind) {
 int tc_syntax_tokens_build(const TcSource *source, const TcTokens *tokens, TcSyntaxTokens *out, TcError *err) {
   memset(out, 0, sizeof(*out));
   TcKind last_kind = TC_K_UNKNOWN;
+  WValue last_token = 0;
 
   for (size_t i = 0; i < tokens->count; i++) {
     WValue packed = tokens->items[i];
-    TcKind kind = classify_one(source, packed, last_kind);
+    TcKind kind = classify_one(source, packed, last_kind, last_token);
     if (!token_push(out, kind, packed, err)) return 0;
     last_kind = kind;
+    last_token = packed;
   }
 
   return 1;

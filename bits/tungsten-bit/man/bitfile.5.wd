@@ -31,6 +31,35 @@ immediately. Sources may be marked trusted to allow immediate feature upgrades:
 Git/GitHub dependencies built from source should only bypass cooldown when the
 source is explicitly trusted.
 
+## EXECUTABLES
+
+Application bits can declare one or more executable entry points. Paths are
+relative to the bit root.
+
+    executable "metaflip", source: "lib/metaflip.w"
+
+`bit build` compiles each entry point and writes it to `build/bin/NAME`. When
+`source:` is omitted, it defaults to `lib/NAME.w`. Bits without an
+`executable` directive retain the library-bit behavior of compiling the
+Tungsten sources under `lib/`.
+
+The compiler can be selected with `TUNGSTEN_COMPILER` (or `TUNGSTEN`). The
+build command also checks `TUNGSTEN_ROOT`, an in-tree toolchain, and `tungsten`
+or `tungsten-compiler` on `PATH`.
+
+## ASSETS
+
+Package-relative files and directories can be copied into build output and
+included in `.bit` archives with repeatable `asset` directives:
+
+    asset "assets/gpu"
+    asset "data/seed-bank"
+
+The conventional `assets/` directory is included automatically when present.
+Absolute paths and paths containing a parent (`..`) component are rejected.
+Archives also include conventional license and notice files, including
+`LICENSE-MIT`, `LICENSE-APACHE`, `LICENSE-APACHE-2.0`, and `NOTICE` variants.
+
 ## INCLUDES
 
 Bits that need extra C sources at link time can declare them in the `Bitfile`.

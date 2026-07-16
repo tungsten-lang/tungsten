@@ -63,6 +63,10 @@ tokens = lex("==")
 assert_eq tokens[0][:type], :EQ
 tokens = lex("!=")
 assert_eq tokens[0][:type], :NEQ
+tokens = lex("value!=1")
+assert_eq tokens[0][:type], :ID
+assert_eq tokens[0][:value], "value"
+assert_eq tokens[1][:type], :NEQ
 tokens = lex("<=")
 assert_eq tokens[0][:type], :LTE
 tokens = lex(">=")
@@ -237,6 +241,14 @@ assert_eq tokens[0][:type], :MAP
 test "MAP vs SLASH after value"
 tokens = lex("x / to_s")
 assert_eq tokens[1][:type], :SLASH
+
+test "identifier slash integer is division, not an arity-bearing identifier"
+tokens = lex("moves/10")
+assert_eq tokens[0][:type], :ID
+assert_eq tokens[0][:value], "moves"
+assert_eq tokens[1][:type], :SLASH
+assert_eq tokens[2][:type], :INT
+assert_eq tokens[2][:value], "10"
 
 # Lambda arity
 test "tokenizes lambda arity"

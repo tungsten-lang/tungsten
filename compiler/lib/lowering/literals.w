@@ -117,6 +117,23 @@
     return typed_value(:i64, w_true.to_s())
   typed_value(:i64, w_false.to_s())
 
+# `__DIR__` is a deployment anchor, unlike the diagnostic spelling preserved
+# by `__FILE__`.  Resolve a relative entry/import path while the compiler still
+# has the invocation cwd; a native executable launched elsewhere cannot recover
+# that cwd later.  `pwd -P` also gives the real directory semantics expected of
+# the magic constant when the source arrived through a symlinked checkout.
+-> magic_source_dir(source_path)
+  parts = source_path.split("/")
+  parts.pop()
+  dir = parts.join("/")
+  if dir == ""
+    dir = "."
+  quoted = "'" + dir.replace("'", "'\"'\"'") + "'"
+  absolute = capture("cd " + quoted + " 2>/dev/null && pwd -P").strip()
+  if absolute != ""
+    return absolute
+  dir
+
 -> lower_magic_constant(ctx, node)
   # Locations use FileOffset mode, so the payload carries a file id and source
   # offset rather than an inline line number. Resolve it through the registered
@@ -130,10 +147,7 @@
   when "FILE"
     lower_string(ctx, Tungsten:AST:String.new(ctx[:source_path]))
   when "DIR"
-    parts = ctx[:source_path].split("/")
-    parts.pop()
-    dir = parts.join("/")
-    lower_string(ctx, Tungsten:AST:String.new(dir))
+    lower_string(ctx, Tungsten:AST:String.new(magic_source_dir(ctx[:source_path])))
   when "LINE"
     lower_int(ctx, Tungsten:AST:Int.new(line))
   else

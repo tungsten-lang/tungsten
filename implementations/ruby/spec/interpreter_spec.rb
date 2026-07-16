@@ -32,6 +32,15 @@ RSpec.describe Tungsten::Interpreter do
     end
   end
 
+  it "resolves namespaced bit submodules" do
+    interpreter = described_class.new
+    interpreter.instance_variable_set(:@current_file, File.join(PROJECT_ROOT, "spec", "namespaced_bit_probe.w"))
+
+    resolved = interpreter.send(:resolve_use_path, "metaflip/scheme")
+
+    expect(resolved).to eq(File.join(PROJECT_ROOT, "bits", "tungsten-metaflip", "lib", "metaflip", "scheme.w"))
+  end
+
   it "evaluates integers" do
     expect(run("42")).to eq(42)
   end

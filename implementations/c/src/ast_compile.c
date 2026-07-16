@@ -201,6 +201,23 @@ static int compile_var(TcAstValue node, TcChunk *chunk, TcError *err) {
   return tc_emit_op_u32(chunk, TC_OP_LOAD_LOCAL, (uint32_t)slot, err);
 }
 
+static int compile_parg(TcAstValue node, TcChunk *chunk, TcError *err) {
+  TcAstValue *index = ast_get(node, "index");
+  if (!index || index->kind != TC_AST_INT || index->as.integer <= 0) {
+    tc_error_set(err, "invalid positional argument AST");
+    return 0;
+  }
+  char name[32];
+  int len = snprintf(name, sizeof(name), "__arg%lld", (long long)index->as.integer);
+  if (len <= 0 || (size_t)len >= sizeof(name)) {
+    tc_error_set(err, "positional argument index too large");
+    return 0;
+  }
+  int slot = tc_chunk_local(chunk, name, (size_t)len, err);
+  if (slot < 0) return 0;
+  return tc_emit_op_u32(chunk, TC_OP_LOAD_LOCAL, (uint32_t)slot, err);
+}
+
 static uint8_t binary_opcode(TcAstValue op) {
   if (ast_text_eq(op, "PLUS")) return TC_OP_ADD;
   if (ast_text_eq(op, "MINUS")) return TC_OP_SUB;
@@ -1463,6 +1480,7 @@ static int compile_expr(TcAstValue node, TcChunk *chunk, TcError *err) {
     return tc_emit_op(chunk, TC_OP_RETURN, err);
   }
   if (ast_node_is(node, "var") || ast_node_is(node, "ivar") || ast_node_is(node, "cvar")) return compile_var(node, chunk, err);
+  if (ast_node_is(node, "parg")) return compile_parg(node, chunk, err);
   if (ast_node_is(node, "binary_op")) return compile_binary(node, chunk, err);
   if (ast_node_is(node, "assign")) return compile_assign(node, chunk, err);
   if (ast_node_is(node, "compound_assign")) return compile_compound_assign(node, chunk, err);
@@ -1491,7 +1509,20 @@ static int compile_expr(TcAstValue node, TcChunk *chunk, TcError *err) {
 
   TcAstValue *node_name = ast_get(node, "node");
   if (node_name && (node_name->kind == TC_AST_STRING || node_name->kind == TC_AST_SYMBOL)) {
-    tc_error_set(err, "unsupported AST node: %.*s", (int)node_name->as.string.len, node_name->as.string.bytes);
+    TcAstValue *source = ast_get(node, "source");
+    TcAstValue *line = ast_get(node, "line");
+    if (source && source->kind == TC_AST_STRING && line && line->kind == TC_AST_INT) {
+      tc_error_set(err, "unsupported AST node: %.*s at line %lld: %.*s",
+                   (int)node_name->as.string.len, node_name->as.string.bytes,
+                   (long long)line->as.integer,
+                   (int)source->as.string.len, source->as.string.bytes);
+    } else if (source && source->kind == TC_AST_STRING) {
+      tc_error_set(err, "unsupported AST node: %.*s: %.*s",
+                   (int)node_name->as.string.len, node_name->as.string.bytes,
+                   (int)source->as.string.len, source->as.string.bytes);
+    } else {
+      tc_error_set(err, "unsupported AST node: %.*s", (int)node_name->as.string.len, node_name->as.string.bytes);
+    }
   } else {
     tc_error_set(err, "unsupported AST node");
   }
@@ -1531,7 +1562,20 @@ static int compile_function_def(TcAstValue node, const char *prefix, size_t pref
   }
   if (prefix_len > 0 && tc_chunk_local(chunk, "self", 4, err) < 0) return 0;
 
-  size_t arity = params->as.array->count;
+  size_t param_count = params->as.array->count;
+  size_t arity = param_count;
+  TcAstValue *arity_suffix = ast_get(node, "arity");
+  if (param_count == 0 && arity_suffix && arity_suffix->kind == TC_AST_STRING &&
+      arity_suffix->as.string.len > 0) {
+    char buf[32];
+    if (arity_suffix->as.string.len < sizeof(buf)) {
+      memcpy(buf, arity_suffix->as.string.bytes, arity_suffix->as.string.len);
+      buf[arity_suffix->as.string.len] = '\0';
+      char *end = NULL;
+      unsigned long parsed = strtoul(buf, &end, 10);
+      if (end && *end == '\0') arity = (size_t)parsed;
+    }
+  }
   if (arity > UINT32_MAX) {
     tc_error_set(err, "method arity too large");
     return 0;
@@ -1543,14 +1587,30 @@ static int compile_function_def(TcAstValue node, const char *prefix, size_t pref
   }
 
   for (size_t i = 0; i < arity; i++) {
-    TcAstValue param = params->as.array->items[i];
-    TcAstValue *param_name = ast_get(param, "name");
-    if (!param_name || param_name->kind != TC_AST_STRING) {
-      free(param_slots);
-      tc_error_set(err, "method param missing name");
-      return 0;
+    const char *param_bytes = NULL;
+    size_t param_len = 0;
+    char synthetic[32];
+    if (i < param_count) {
+      TcAstValue param = params->as.array->items[i];
+      TcAstValue *param_name = ast_get(param, "name");
+      if (!param_name || param_name->kind != TC_AST_STRING) {
+        free(param_slots);
+        tc_error_set(err, "method param missing name");
+        return 0;
+      }
+      param_bytes = param_name->as.string.bytes;
+      param_len = param_name->as.string.len;
+    } else {
+      int len = snprintf(synthetic, sizeof(synthetic), "__arg%zu", i + 1);
+      if (len <= 0 || (size_t)len >= sizeof(synthetic)) {
+        free(param_slots);
+        tc_error_set(err, "method positional arity too large");
+        return 0;
+      }
+      param_bytes = synthetic;
+      param_len = (size_t)len;
     }
-    int slot = tc_chunk_local(chunk, param_name->as.string.bytes, param_name->as.string.len, err);
+    int slot = tc_chunk_local(chunk, param_bytes, param_len, err);
     if (slot < 0) {
       free(param_slots);
       return 0;
@@ -1598,7 +1658,7 @@ static int compile_function_def(TcAstValue node, const char *prefix, size_t pref
   // EQ pushes `slot == nil` (a real bool); JUMP_IF_FALSE then skips the
   // default when the slot was *not* nil. `false` no longer triggers the
   // default branch.
-  for (size_t i = 0; i < arity; i++) {
+  for (size_t i = 0; i < param_count; i++) {
     TcAstValue param = params->as.array->items[i];
     TcAstValue *def = ast_get(param, "default");
     if (!def || def->kind == TC_AST_NIL) continue;
@@ -1627,7 +1687,7 @@ static int compile_function_def(TcAstValue node, const char *prefix, size_t pref
   // Method `-> new(@verbose = false)` is the canonical site — the loader
   // and every Tungsten class with a constructor relies on this. We do
   // it via [LOAD_LOCAL slot, IVAR_SET name, POP] for each ivar param.
-  for (size_t i = 0; i < arity; i++) {
+  for (size_t i = 0; i < param_count; i++) {
     TcAstValue param = params->as.array->items[i];
     TcAstValue *flag = ast_get(param, "ivar_assign");
     if (!flag || flag->kind != TC_AST_BOOL || !flag->as.boolean) continue;

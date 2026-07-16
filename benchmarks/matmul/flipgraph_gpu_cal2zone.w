@@ -292,6 +292,8 @@
             svs[lo * 16 + ltid] = svs[rank * 16 + ltid]
             sws[lo * 16 + ltid] = sws[rank * 16 + ltid]
       a = fj
+      if a < 0
+        a = rank
       if a < rank
         dup = -1
         bb = 0

@@ -95,6 +95,84 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   else
     DEFAULT_REGISTRY
 
+-> executable_file?(path)
+  system("test -x " + shell_quote(path))
+
+# Resolve the Tungsten driver used by `bit build`. Application bits are often
+# built outside the Tungsten source checkout, so a checkout-local compiler
+# cannot be the only option. Explicit overrides win; source-checkout paths stay
+# ahead of PATH to preserve the historical in-tree behavior.
+-> tungsten_compiler_command
+  override = env("TUNGSTEN_COMPILER")
+  if override != nil && override.strip() != ""
+    return override.strip()
+
+  override = env("TUNGSTEN")
+  if override != nil && override.strip() != ""
+    return override.strip()
+
+  root = env("TUNGSTEN_ROOT")
+  if root != nil && root.strip() != ""
+    driver = File.join(root.strip(), "bin/tungsten")
+    return driver if executable_file?(driver)
+    compiler = File.join(root.strip(), "bin/tungsten-compiler")
+    return compiler if executable_file?(compiler)
+
+  return "bin/tungsten" if executable_file?("bin/tungsten")
+  return "bin/tungsten-compiler" if executable_file?("bin/tungsten-compiler")
+
+  path = capture("command -v tungsten 2>/dev/null").strip()
+  return path if path != ""
+
+  path = capture("command -v tungsten-compiler 2>/dev/null").strip()
+  return path if path != ""
+
+  nil
+
+-> safe_package_path?(path)
+  value = path.to_s.strip()
+  return false if value == ""
+  return false if value.starts_with?("/")
+  return false if value == ".." || value.starts_with?("../")
+  return false if value.index("/../") != nil || value.ends_with?("/..")
+  true
+
+-> path_parent(path)
+  parts = path.to_s.split("/")
+  if parts.size() <= 1
+    return "."
+  parts.pop()
+  parts.join("/")
+
+-> append_unique(values, value)
+  if value != nil && !values.include?(value)
+    values.push(value)
+
+-> package_path_within?(path, parent)
+  path == parent || path.starts_with?(parent + "/")
+
+-> append_uncovered_path(paths, path)
+  covered = false
+  paths.each -> (existing)
+    if package_path_within?(path, existing)
+      covered = true
+  if covered
+    return paths
+
+  kept = []
+  paths.each -> (existing)
+    if !package_path_within?(existing, path)
+      kept.push(existing)
+  kept.push(path)
+  kept
+
+-> packaged_asset_paths(bitfile)
+  paths = []
+  paths = append_uncovered_path(paths, "assets") if File.exists?("assets")
+  bitfile.assets.each -> (path)
+    paths = append_uncovered_path(paths, path)
+  paths
+
 -> bit_config_home
   env("BIT_CONFIG_HOME") || File.join(env("HOME") || ".", ".bit")
 
@@ -642,6 +720,12 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   -> immediate?
     @trusted == true || @cooldown_days.to_i <= 0
 
++ BitExecutable
+  ro :name
+  ro :source
+
+  -> new(@name, @source)
+
 + Bitfile
   ro :name
   ro :version
@@ -651,9 +735,11 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   ro :source_policies
   ro :tungsten_requirement
   ro :dependencies
+  ro :executables
+  ro :assets
   ro :path
 
-  -> new(name = "unknown", version = "0.0.0", summary = "", license = "", source = nil, dependencies = nil, path = nil, tungsten_requirement = nil)
+  -> new(name = "unknown", version = "0.0.0", summary = "", license = "", source = nil, dependencies = nil, path = nil, tungsten_requirement = nil, executables = nil, assets = nil)
     @name = name
     @version = version
     @summary = summary
@@ -663,6 +749,8 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
     @source_policies[@source] = SourcePolicy.new(@source, 0, false)
     @tungsten_requirement = tungsten_requirement
     @dependencies = dependencies || []
+    @executables = executables || []
+    @assets = assets || []
     @path = path
     @group_stack = []
 
@@ -805,6 +893,15 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
       @license = value if value
     elsif line.starts_with?("tungsten ")
       @tungsten_requirement = value if value
+    elsif line.starts_with?("executable ")
+      executable_name = value
+      if executable_name != nil
+        executable_source = option_value(line, "source")
+        if executable_source == nil || executable_source == ""
+          executable_source = "lib/" + executable_name + ".w"
+        @executables.push(BitExecutable.new(executable_name, executable_source))
+    elsif line.starts_with?("asset ")
+      append_unique(@assets, value) if value
     elsif line.starts_with?("bit ") || line.starts_with?("dependency ")
       dep_name = value
       dep_version = second_quoted(line)
@@ -1049,17 +1146,31 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
 
 + Compiler
   ro :elapsed
+  ro :command
 
   -> new(@config)
     @started = clock()
     @compiled = []
+    @command = tungsten_compiler_command()
     FileUtils.mkdir_p(@config.output)
 
-  -> compile(source)
-    name = source.split("/").last
-    out = File.join(@config.output, name.replace(".w", ""))
+  -> available?
+    @command != nil && @command != ""
+
+  -> compile(source, output = nil)
+    if !available?
+      return false
+
+    out = output
+    if out == nil
+      name = source.split("/").last
+      out = File.join(@config.output, name.replace(".w", ""))
+    FileUtils.mkdir_p(path_parent(out))
     @compiled.push(out)
-    system("bin/tungsten-compiler compile " + shell_quote(source) + " --out " + shell_quote(out))
+    command = shell_quote(@command) + " compile " + shell_quote(source) + " --out " + shell_quote(out)
+    if @config.release
+      command = command + " --release"
+    system(command)
 
   -> link
     @elapsed = ((clock() - @started) * 1000).to_i
@@ -1089,10 +1200,38 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
     FileUtils.mkdir_p("pkg")
     path = "pkg/" + @bitfile.name + "-" + @bitfile.version + ".bit"
     members = ["Bitfile"]
-    members.push("README.md") if File.exists?("README.md")
-    members.push("LICENSE") if File.exists?("LICENSE")
-    members.push("lib") if Dir.exists?("lib")
-    members.push("spec") if Dir.exists?("spec")
+    conventional_files = [
+      "README.md", "README.txt",
+      "LICENSE", "LICENSE.md", "LICENSE.txt",
+      "LICENSE-MIT", "LICENSE-MIT.md", "LICENSE-MIT.txt",
+      "LICENSE-APACHE", "LICENSE-APACHE.md", "LICENSE-APACHE.txt",
+      "LICENSE-APACHE-2.0", "LICENSE-APACHE-2.0.md", "LICENSE-APACHE-2.0.txt",
+      "COPYING", "COPYING.LESSER",
+      "NOTICE", "NOTICE.md", "NOTICE.txt",
+      "THIRD_PARTY", "THIRD_PARTY.md", "THIRD_PARTY.txt",
+      "COPYRIGHT", "COPYRIGHT.md", "COPYRIGHT.txt"
+    ]
+    conventional_files.each -> (member)
+      append_unique(members, member) if File.exists?(member)
+
+    append_unique(members, "lib") if Dir.exists?("lib")
+    append_unique(members, "spec") if Dir.exists?("spec")
+
+    @bitfile.executables.each -> (executable)
+      source = executable.source
+      if !source.starts_with?("lib/") && source != "lib"
+        unless safe_package_path?(source)
+          <! "Executable source must be a package-relative path: " + source.to_s
+        unless File.exists?(source)
+          <! "Executable source not found: " + source.to_s
+        append_unique(members, source)
+
+    packaged_asset_paths(@bitfile).each -> (asset)
+      unless safe_package_path?(asset)
+        <! "Asset must be a package-relative path: " + asset.to_s
+      unless File.exists?(asset)
+        <! "Declared asset not found: " + asset.to_s
+      append_unique(members, asset)
 
     cmd = "tar -cf " + shell_quote(path)
     i = 0

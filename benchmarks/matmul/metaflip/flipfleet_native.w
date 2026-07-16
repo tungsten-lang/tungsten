@@ -1937,7 +1937,10 @@ TENSOR_LABEL = "5x5"
 RECT_MODE = 0 ## i64
 RECT_PORTFOLIO = 0 ## i64
 RECT_SHAPES = ""
-RECT_EPOCH_ROUNDS = 4 ## i64
+# Base rectangular rounds per portfolio epoch before reallocation. Fast shapes
+# may run additional fill rounds until the slowest shape finishes this quota.
+# Clamp remains 1..64 via CLI validation below.
+RECT_EPOCH_ROUNDS = 16 ## i64
 TENSOR_EXPLICIT = 0 ## i64
 J = 0 ## i64
 J_EXPLICIT = 0 ## i64

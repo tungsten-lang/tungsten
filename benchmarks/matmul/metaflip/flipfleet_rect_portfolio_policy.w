@@ -92,13 +92,13 @@
   if shape == 457
     return 2043
   if shape == 346
-    return 1417
+    return 1679
   if shape == 347
-    return 1342
+    return 1458
   if shape == 456
     return 1683
   if shape == 445
-    return 1067
+    return 1411
   if shape == 334
     return 3
   if shape == 344
@@ -110,7 +110,7 @@
   if shape == 355
     return 485
   if shape == 356
-    return 1277
+    return 1638
   if shape == 357
     return 1223
   if shape == 455

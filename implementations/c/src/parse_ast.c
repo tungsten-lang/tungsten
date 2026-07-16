@@ -1320,6 +1320,17 @@ static TcAstValue atom_node_ast(TcAstParser *p, size_t pos, TcError *err) {
         node = tc_ast_nil();
       }
       break;
+    case TC_K_PARG: {
+      int64_t index = 0;
+      if (text_len > 1 && text[0] == '@') index = strtoll(text + 1, NULL, 10);
+      node = node_hash(p, "parg", pos, err);
+      if (node.kind == TC_AST_HASH &&
+          !tc_ast_hash_set(node, "index", tc_ast_int(index), err)) {
+        tc_ast_free(node);
+        node = tc_ast_nil();
+      }
+      break;
+    }
     case TC_K_ID:
     case TC_K_NAME:
     case TC_K_TYPE:
@@ -2105,6 +2116,30 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
     return node;
   }
 
+  /* Expression-local type ascription, mirroring Parser#parse_expression.
+   * Assignment handles its own trailing hint above so allocation hints keep
+   * their special semantics; here we cover parenthesized/argument forms such
+   * as `($value ## i64)` by attaching the hint to the underlying node. */
+  if (end > start && p->tokens->items[end - 1].kind == TC_K_TYPE_HINT) {
+    TcAstValue value = parse_expr_span_ast(p, start, end - 1, err);
+    if (value.kind == TC_AST_HASH) {
+      char *hint = NULL;
+      size_t hint_len = 0;
+      if (!token_text_at_ast(p, end - 1, &hint, &hint_len, err)) {
+        tc_ast_free(value);
+        return tc_ast_nil();
+      }
+      TcAstValue hint_value = tc_ast_string_copy(hint, hint_len, err);
+      free(hint);
+      if (hint_value.kind == TC_AST_NIL ||
+          !tc_ast_hash_set(value, "type_hint", hint_value, err)) {
+        tc_ast_free(value);
+        return tc_ast_nil();
+      }
+    }
+    return value;
+  }
+
   size_t arrow_pos = 0;
   if (top_level_token_ast(p, start, end, TC_K_ARROW, &arrow_pos, 0) && arrow_pos > start) {
     return arrow_call_or_block_ast(p, start, end, arrow_pos, err);
@@ -2724,7 +2759,8 @@ static void split_method_arity(char *name, size_t *name_len, const char **arity,
 static int method_name_token_ast(TcAstParser *p) {
   TcKind kind = current_ast(p).kind;
   return name_token_ast(p) || kind == TC_K_PLUS || kind == TC_K_MINUS || kind == TC_K_STAR || kind == TC_K_SLASH ||
-         kind == TC_K_EQ || kind == TC_K_LT || kind == TC_K_GT || kind == TC_K_LBRACKET;
+         kind == TC_K_EQ || kind == TC_K_LT || kind == TC_K_GT || kind == TC_K_LBRACKET ||
+         kind == TC_K_PUTS_OP || kind == TC_K_CLASS_DEF;
 }
 
 static int looks_like_return_type_ast(TcAstParser *p) {
@@ -2765,6 +2801,30 @@ static int parse_method_def_ast(TcAstParser *p, TcAstValue type_hints, TcAstValu
     }
     if (match_ast(p, TC_K_ASSIGN) && !append_bytes(&name, &name_len, "=", 1, err)) {
       free(name);
+      return 0;
+    }
+  }
+
+  /* Current lexers leave method arity as separate `/` + suffix tokens so
+   * ordinary `value/10` remains expression division. Reconstruct the legacy
+   * bundled spelling here, then reuse split_method_arity below. */
+  if (match_ast(p, TC_K_SLASH)) {
+    TcKind suffix_kind = current_ast(p).kind;
+    if (suffix_kind == TC_K_INT || suffix_kind == TC_K_STAR || suffix_kind == TC_K_AMPERSAND) {
+      char *suffix = NULL;
+      size_t suffix_len = 0;
+      if (!current_token_text(p, &suffix, &suffix_len, err) ||
+          !append_bytes(&name, &name_len, "/", 1, err) ||
+          !append_bytes(&name, &name_len, suffix, suffix_len, err)) {
+        free(suffix);
+        free(name);
+        return 0;
+      }
+      free(suffix);
+      advance_ast(p);
+    } else {
+      free(name);
+      parse_ast_error(p, err, "expected method arity after '/'");
       return 0;
     }
   }

@@ -145,6 +145,13 @@
               result = int_value((int64_t)w_unbox_token_offset(args[1]));
             } else if (fn_len == 21 && memcmp(fn, "w_token_length_extern", 21) == 0 && argc == 2) {
               result = int_value((int64_t)w_unbox_token_length(args[1]));
+            } else if (fn_len == 16 && memcmp(fn, "w_numeric_to_i64", 16) == 0 && argc == 2) {
+              /* Packed lexical tokens use the full 64-bit WValue pattern and
+               * may materialize as BigInt-like values in the source parser.
+               * The production parser normalizes them through this runtime
+               * helper before shifts; stage 0 must mirror that ccall_nobox. */
+              int64_t raw = value_is_int(args[1]) ? value_as_int(args[1]) : (int64_t)args[1];
+              result = int_value(raw);
             } else if (fn_len == 18 && memcmp(fn, "w_is_ast_node_full", 18) == 0 && argc == 3) {
               // Fused is_ast_node? check (fix #5): nil/W_PACKED_NODE/
               // Hash-with-:node in a single dispatch. Mirrors
@@ -700,6 +707,10 @@
           if (tc_kind(receiver) == TC_VAL_STRING) size = (int64_t)tc_str_len(receiver);
           else if (tc_kind(receiver) == TC_VAL_ARRAY && tc_as_array(receiver)) size = (int64_t)tc_as_array(receiver)->size;
           else if (tc_kind(receiver) == TC_VAL_HASH && tc_as_hash(receiver)) size = (int64_t)tc_as_hash(receiver)->count;
+          else if (tc_kind(receiver) == TC_VAL_OBJECT && tc_as_object(receiver) &&
+                   object_is_class(tc_as_object(receiver), "StringBuffer", 12)) {
+            size = (int64_t)tc_as_object(receiver)->buffer_len;
+          }
           else if (tc_kind(receiver) == TC_VAL_AST && tc_as_ast_ptr(&receiver)->kind == TC_AST_ARRAY && tc_as_ast_ptr(&receiver)->as.array) {
             size = (int64_t)tc_as_ast_ptr(&receiver)->as.array->count;
           } else if (tc_kind(receiver) == TC_VAL_AST && tc_as_ast_ptr(&receiver)->kind == TC_AST_HASH && tc_as_ast_ptr(&receiver)->as.hash) {
@@ -749,6 +760,15 @@
               goto cleanup_fail;
             }
           }
+          FREE_ARGS();
+          if (!push(&vm, out, err)) {
+            goto cleanup_fail;
+          }
+          CNEXT();
+        }
+        if (has_receiver && name == NAME_DELETE && argc == 1 &&
+            tc_kind(receiver) == TC_VAL_HASH && tc_as_hash(receiver)) {
+          TcValue out = hash_delete_value(tc_as_hash(receiver), args[0]);
           FREE_ARGS();
           if (!push(&vm, out, err)) {
             goto cleanup_fail;

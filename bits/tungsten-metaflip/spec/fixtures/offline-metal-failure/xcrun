@@ -1,0 +1,4 @@
+#!/bin/sh
+# Deterministic regression fixture: model a host whose runtime Metal.framework
+# works but whose command-line Metal toolchain is unavailable.
+exit 1

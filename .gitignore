@@ -187,3 +187,8 @@ benchmarks/matmul/metaflip/.ff_cwd.tmp
 /flipfleet_*_status.txt*
 /flipfleet_*_best.txt
 .venv/
+
+# Local AWS inventory / host IPs (never commit)
+benchmarks/matmul/metaflip/ember-holdco-*.json
+benchmarks/matmul/metaflip/monster-*.json
+benchmarks/matmul/metaflip/**/aws/

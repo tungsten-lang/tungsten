@@ -1046,15 +1046,33 @@ use parser
       candidate = bit_home + "/" + bit_name + "/lib/" + entry_file
       if file?(candidate)
         return candidate
+      # Application-sized bits may keep internal modules under the same
+      # namespace as their public entry, e.g. tungsten-metaflip exposes
+      # lib/metaflip.w and lib/metaflip/scheme.w. Preserve the historical flat
+      # lookup above, then admit that physical namespace for submodules.
+      if sub_path != ""
+        namespace = bit_name.replace("tungsten-", "")
+        candidate = bit_home + "/" + bit_name + "/lib/" + namespace + "/" + sub_path + ".w"
+        if file?(candidate)
+          return candidate
 
     # Try exact: bit_home/<name>/lib/<name>.w
     exact = bit_home + "/" + bit_name + "/lib/" + entry_file
     if file?(exact)
       return exact
+    if sub_path != ""
+      namespace = bit_name.replace("tungsten-", "")
+      namespaced = bit_home + "/" + bit_name + "/lib/" + namespace + "/" + sub_path + ".w"
+      if file?(namespaced)
+        return namespaced
     # Try tungsten-prefixed: bit_home/tungsten-<name>/lib/<name>.w
     prefixed = bit_home + "/tungsten-" + bit_name + "/lib/" + entry_file
     if file?(prefixed)
       return prefixed
+    if sub_path != ""
+      namespaced = bit_home + "/tungsten-" + bit_name + "/lib/" + bit_name + "/" + sub_path + ".w"
+      if file?(namespaced)
+        return namespaced
     nil
 
   -> find_project_root(dir)

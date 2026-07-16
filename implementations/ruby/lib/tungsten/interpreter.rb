@@ -2587,8 +2587,9 @@ module Tungsten
     # 2. Relative to the current file
     # 3. bits/<name>/lib/<name>.w (exact bit match)
     # 4. bits/tungsten-<name>/lib/<name>.w (tungsten-prefixed bit)
-    # 5. core/<path>.w (stdlib fallback for bare names)
-    # 6. lib/<path>.w (legacy stdlib, backward compat during migration)
+    # 5. namespaced bit modules: bits/tungsten-<name>/lib/<name>/<path>.w
+    # 6. core/<path>.w (stdlib fallback for bare names)
+    # 7. lib/<path>.w (legacy stdlib, backward compat during migration)
     #
     # For paths like "tungsten-hammer", strips the prefix for the entry point:
     #   bits/tungsten-hammer/lib/hammer.w
@@ -2621,15 +2622,27 @@ module Tungsten
           entry_file = sub_path.empty? ? "#{entry}.w" : "#{sub_path}.w"
           bit_path = File.join(project_root, "bits", bit_name, "lib", entry_file)
           return bit_path if File.exist?(bit_path)
+          unless sub_path.empty?
+            namespaced_path = File.join(project_root, "bits", bit_name, "lib", entry, "#{sub_path}.w")
+            return namespaced_path if File.exist?(namespaced_path)
+          end
         else
           # Try exact bit match first: bits/<name>/lib/<name>.w
           entry_file = sub_path.empty? ? "#{bit_name}.w" : "#{sub_path}.w"
           exact_path = File.join(project_root, "bits", bit_name, "lib", entry_file)
           return exact_path if File.exist?(exact_path)
+          unless sub_path.empty?
+            namespaced_exact = File.join(project_root, "bits", bit_name, "lib", bit_name, "#{sub_path}.w")
+            return namespaced_exact if File.exist?(namespaced_exact)
+          end
 
           # Then try tungsten-prefixed: bits/tungsten-<name>/lib/<name>.w
           prefixed_path = File.join(project_root, "bits", "tungsten-#{bit_name}", "lib", entry_file)
           return prefixed_path if File.exist?(prefixed_path)
+          unless sub_path.empty?
+            namespaced_prefixed = File.join(project_root, "bits", "tungsten-#{bit_name}", "lib", bit_name, "#{sub_path}.w")
+            return namespaced_prefixed if File.exist?(namespaced_prefixed)
+          end
         end
 
         # Core library: core/<path>.w

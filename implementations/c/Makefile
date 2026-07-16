@@ -57,6 +57,12 @@ $(BUILD_DIR):
 $(BUILD_DIR)/%.o: src/%.c include/tc.h | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
+# vm_call_body.inc is included twice by vm.c for the cached/non-cached call
+# paths. The generic object rule cannot discover that dependency until vm.c is
+# compiled, and older .d files did not list it, so an edited dispatch body
+# could otherwise leave a stale stage-0 VM even under `tungsten build --force`.
+$(BUILD_DIR)/vm.o: src/vm_call_body.inc
+
 $(BIN): $(OBJ)
 	$(CC) $(CFLAGS) $(OBJ) -o $@
 
@@ -64,6 +70,16 @@ $(BIN): $(OBJ)
 
 test: $(BIN)
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/smoke.w
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/hash_delete.w | \
+		diff -u tests/hash_delete.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/positional_arity.w | \
+		diff -u tests/positional_arity.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/string_buffer_size.w | \
+		diff -u tests/string_buffer_size.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --check-ast tests/parenthesized_type_hint.w
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --check-ast tests/operator_method_name.w
+	cd ../.. && TUNGSTEN_LEX64_TABLE=languages/tungsten/tungsten.lex64 \
+		implementations/c/build/tungsten-c implementations/c/tests/project_relative_use.w
 
 bootstrap-lex: $(BIN)
 	@for f in ../../compiler/tungsten.w ../../compiler/lib/*.w; do \

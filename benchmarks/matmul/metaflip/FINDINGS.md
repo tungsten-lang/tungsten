@@ -2225,3 +2225,565 @@ took 1.66 seconds and at most 18.6 MB. The move stays as an offline regression
 for structurally new archives and receives no CPU/GPU pool allocation. The
 escape recipe and exact replay are in `THREE_FACTOR_MAP_NULLSPACE.md`; the TUI
 is unchanged.
+
+## 2026-07-15: persistent rectangular doors, faster gates, and negative audits
+
+Rectangular best checkpoints now have a persistent, bounded archive of up to
+four nonleader side doors. Save and load both pass through the full rectangular
+exact gate; writes use temporary-file rename, retained ranks are limited to the
+leader through leader plus two, and exact duplicates are excluded. Portfolio
+restarts keep lane zero on the leader and rotate the remaining lanes through
+the archive. One malformed slot cannot poison the others, and `--naive`
+physically clears every stale side door before publishing the schoolbook reset.
+
+The support-major exact verifier accepted all 106 packaged GF(2) seeds and
+rejected all 424 controlled corruptions, including the bit-63/last-word
+boundary. Against the former coefficient-major reconstruction it took
+15.3--15.5 ms instead of 0.85--0.87 s over the complete seed set, a 55--56x
+aggregate gain with the same first-mismatch result. The independent sparse
+oracle agreed, and the scheme hot-path test passed 30K square plus 30K
+rectangular flips and 200 square plus 200 rectangular splits with periodic
+exact/density checks and external rectangular adoption.
+
+Two exact same-rank density records are now the packaged rectangular defaults:
+`3x4x4` r38/d280
+(`a08fc5382ac7da3e0fd09b3c1e389138feada0f91a6be5a0e06e75aa07668855`)
+and `4x5x6` r90/d906
+(`ba4a024752247b156b92bebe0a5bdfb644e44f3702323896bcb3a785625abdaa`).
+The prior exact presentations remain in each frontier. A targeted campaign over
+`2x5x6`, `3x4x6`, `4x4x5`, and `4x5x7` then consumed about 19.3 billion
+aggregate moves with zero exact rejects and no rank or density gain. This is a
+search plateau, not a lower bound.
+
+The deliberate split-braid-merge “Rubik” macro split one labelled term, braided
+exact pair flips at r+1, and merged a different pair back at r. It returned 209
+full-gated endpoints beyond ordinary one-flip/span-4 coverage with zero gate
+failures and no rank win. Density improved only on the superseded 5x5 d983
+source, to d980 in five-term windows and d979 in six-term windows; the current
+5x5 d967 and rectangular leaders did not improve. It remains an offline deterministic replay,
+not a production lane.
+
+The nonflip rectangular decision audit tested triangle shear, low-rank shear,
+span refactor, and flatten gauge on `2x5x6`, `3x4x6`, `4x4x5`, and `4x5x7`.
+It found 280 changed exact endpoints, zero gate failures, and no rank or density
+win. Another 416M paired continuation moves found no rank drop, including
+8x10M moves per arm for each of the two neutral `4x5x7` doors. These operators
+also remain offline; the negative is bounded search evidence only.
+
+Generated generic and rectangular GPU workers now map a failed equal-factor
+partner scan to the rank sentinel before duplicate compaction, eliminating the
+possible slot-`-1` access. The packaged fleet defaults to adaptive GPU scheduling
+with 8,192 walkers and 40,000 steps per epoch, while retaining CLI overrides.
+Rectangular portfolio epochs now use 16 base rounds (range 1--64), with
+one-round straggler fill for shapes that can finish more work before the slowest
+base quota. Package-layout coverage checks the guard in every generated worker
+and pins both promoted density defaults.
+
+The four rectangular side slots are now selected after gathering every exact
+unique endpoint, rather than truncating in discovery order. Present `R`,
+`R+1`, and `R+2` bands are reserved, and deterministic max-min term-set
+distance fills the remaining slots. Exact term lists confirm any fingerprint
+match. An adversarial order-invariance test retained a distance-37 prior door
+over four distance-3 near copies while covering all three rank bands; 22-way
+selection took 15 microseconds at island exit.
+
+The low-cadence 5-to-4 MITM lane now snapshots the round-start best and runs
+concurrently with CPU and cal2zone work, then joins and passes the full exact
+gate at the existing barrier. A matched `<2,5,6>` epoch with 4,096 GPU lanes
+and a 16-by-384 MITM table dropped from 1.43 s sequential median to 0.99 s
+concurrent median (30.8%), with rank 47/density 438 unchanged, 1,176,576 pairs
+tested, and zero failures or rejects. Bounded joins kill and reap a timed-out
+child, and portfolio status now accounts failed-segment work monotonically in
+both per-shape and total move fields. A 120-second four-target control completed
+28 healthy epochs without a rank or density change.
+
+Blind Rubik-style commutators do not transfer cleanly because an ordinary
+tensor flip is a state-dependent partial involution. `ABA`/`ABAB` controls
+returned 284 exact 5x5 endpoints and 444 exact 4x4x5 endpoints, all within
+span-4 coverage. Setup-trigger-inverse ribbons tested 202,368 and 842,112
+trigger positions without restoring the requested close. They remain offline;
+the useful formulation is a labelled shoulder search toward a specified pair
+of factor equalities, with exact visited-state deduplication and replay.
+
+The resulting goal-directed beam searched depth 5--8 connected flip words on
+the labelled `R+1` shoulder. Full gates accepted ten beyond-span-4 endpoints
+on 5x5 and ten on 4x4x5, with no failures; 2x5x6 returned no endpoint. There
+were no rank or density wins. The best 5x5 door was r93/d975 against d967 and
+lost all eight matched 2M-move continuations. The best 4x4x5 door was r60/d641
+against d628; after continuation both arms tied at d628 in all eight trials.
+The full scan took about 0.56 s and roughly 305 MB peak RSS. Goal-directed
+words therefore do reach exact states outside the current span-4 envelope,
+but this generation stays offline because its new basins showed no objective
+or continuation value.
+
+A chosen-core variant dynamically selected the merge partner and axis at each
+partial state, required the close to absorb the selected label, and confirmed
+that its original triple vanished. Novelty mode found six beyond-span-4 5x5
+doors and four 4x4x5 doors with zero target or exact-gate failures. Best density
+was d975 versus d967 and d640 versus d628; the first lost all eight matched 2M
+continuations and the second tied all eight. Objective mode produced only
+span-4-covered endpoints, and 2x5x6 had no close. It remains offline.
+
+Portfolio-child live status is now capped at 200 ms while first, retry-after-
+failure, standalone, and final writes retain their prior guarantees. A matched
+128M-move 4x5x7 control improved wall median 4.55 s to 4.36 s (4.2%) and CPU
+median 2.95 s to 2.68 s (9.2%); system time fell 0.37 s to 0.11 s. Parent status
+now exposes cumulative CPU/GPU moves and MITM attempts/pairs/ms both per shape
+and in total. Live/unjoined projection, terminal commit, failed work, and naive
+reset have focused regressions; the TUI layout is unchanged.
+
+A subsequent 300-second campaign made 30,507,167,270 CPU moves and
+96,247,680,000 GPU moves plus 105,891,840 MITM pairs in 90 launches. All four
+leaders and 16 side doors passed independent gates, with zero failures/rejects
+and no objective change: 2x5x6 r47/d438, 4x4x5 r60/d628, 3x4x6 r54/d488, and
+4x5x7 r104/d1089.
+
+The 2x2x6 r21 profile now has a specialized pure-Tungsten/Metal cal2zone
+worker (4/12/12-bit factors, 64-term capacity, 12,288 bytes shared memory) and
+rectangular 5-to-4 MITM support. Packaged build/dispatch passed. A 100-round
+8192-lane control made 32.768B moves in 45.32 s with no rank/density gain; one
+MITM pass tested 1,176,576 pairs in 0.52 s without a hit. It joins the default
+rectangular portfolio as a distinct underexplored frontier, not because this
+short control supplied positive evidence.
+
+Three high-leverage default shapes that had still been CPU-only now have the
+same generated, full-gated Metal coverage. `<3,4,6>` uses CAP104/WPG16 and
+19,968 threadgroup bytes for 12/24/18-bit factors; 327.68M moves took 1.09 s,
+about 301M/s. `<3,4,7>` uses CAP116 and 22,272 bytes for 12/28/21-bit factors;
+the same work took 1.30 s, about 252M/s. `<3,5,6>` uses CAP122 and 23,424 bytes
+for 15/30/18-bit factors; it took 1.43 s, about 229M/s. The last seed genuinely
+sets bit 29, and the worst 30-bit normalization sum remains two below signed
+`INT_MAX`. Packaged 16-lane smokes and full-width replays passed every internal
+and host exact gate. None of the three short bring-ups changed rank or density;
+they expand productive GPU breadth rather than claim a search result. Larger
+default shapes remain CPU-only pending an occupancy/throughput case.
+
+Parent telemetry now carries MITM failures separately from cal2zone failures.
+An injected real MITM child failure made parent health degraded and retained
+the failed attempt/pair count without disabling its healthy cal2zone relay; a
+later clean accelerator epoch recovered health while cumulative failure history
+remained visible. A real straggler-fill control also committed exactly 25M
+moves from 10M base plus 15M base/fill work, closing the terminal-status replay
+double-count boundary.
+
+The endpoint-first version of the Rubik analogy is now a concrete offline
+rectangular solver. Instead of guessing a word in state-dependent flips, it
+chooses six or seven local terms, enumerates candidate factors, and hash-joins
+an exact five- or six-term replacement on Metal. Unequal factor widths enter
+the fingerprint, local tensor equality is exhaustive, and a complete
+rectangular certificate gate precedes every output. Constructed controls split
+one term of the exact `<2,5,6>` r47 scheme into an r48 shoulder; both 6-to-5
+and 7-to-6 joins returned exactly one fingerprint/local/full candidate and
+recovered an independently reloaded r47 certificate.
+
+The real-frontier decision is still negative. At pool 256, 128 unique 6-to-5
+subsets on each of `<2,5,6>`, `<3,4,6>`, and `<4,4,5>` covered 1.061 billion
+canonical queries with zero fingerprint hit, hence zero local or certificate
+gate. Search wall was 3.4--6.3 seconds per frontier and reusable scratch held
+peak RSS near 45 MB. The 7-to-6 triple/triple join remained host-table-bound.
+Both stay offline: 6-to-5 is now a fast valid local rewrite compiler, but it
+has no frontier-value evidence, and neither engine yet synthesizes an ordinary-
+move path to its endpoint.
+
+The final relocation audit found one compiler-level deployment bug rather than
+a Metaflip path heuristic: native `__DIR__` preserved a relative entry path.
+A binary compiled from `bin/metaflip.w` could therefore lose both its packaged
+runtime and its compiler fallback after being moved or launched from another
+directory. Native lowering now resolves `__DIR__` to the source directory's
+canonical absolute path at compile time while leaving diagnostic `__FILE__`
+spelling unchanged. The regression compiled through the canonical driver from
+a relative source path, moved the executable to `/tmp`, removed every Metaflip
+and Tungsten override plus `tungsten` from `PATH`, and launched from an unrelated
+directory. A cold 32-lane worker/Metal-library rebuild completed with exact
+verification and `gpu_degraded=0`; the relocated package-layout and CPU
+self-tests also passed.
+
+## 2026-07-15: 2-wide rectangular fronts, unbiased GPU doors, and resolved macros
+
+This pass added explicit exact GF(2) checkpoints for `<2,2,7>` at r25/d132
+and `<2,2,8>` at r28/d160.  They are normalized reductions of the
+FastMatrixMultiplication `2x2x7_tensor.mpl` and `2x2x8_tensor.mpl` files at
+revision `e0ec7db4cb7d7ca41abbb2c6e3bd8c7de75c7c64`, with normalized SHA-256
+digests `d81e851f6d642be561e18072e890d9fab955621dcac066781e3a18b58cfbd939`
+and `a3d33adb4c20429ebaa2d1883f702d0c5b90e13de3112017e6b0bcf4b159d823`.
+Because the catalogue does not identify an unambiguous original discoverer,
+the import is conservatively attributed to the matmulcatalog contributors.
+Erik Peterson's 2026 exact factor splits supply controlled restart shoulders
+at r26/d135 and r27/d137 for `<2,2,7>`, and r29/d165 and r30/d169 for
+`<2,2,8>`.  These are certified `R+1`/`R+2` presentations, not rank or density
+records.  Their text-certificate hashes, in that order, are
+`1b695890ecc86cee9ce7186da735a462b348f7a03b800069a9d2f8d5cb8085c9`,
+`679ccfca924921b5b9c8ed514a69cc40bac643a60c99cd45e4a23670698bc52b`,
+`4421ed9c520fc5e745a74db749498df93bd5113e2fa8f30df6449c8c849f4818`,
+and `c0e2f152a1f0c1fc2678cd0cca0903ed0883b4b7818d29a3d9a5a3ade94d75ec`.
+
+The curated public results tree now gives `<2,2,9>` the same three-band
+corpus: Perminov's imported r32/d156 certificate, two exact simultaneous
+coordinate permutations at the same rank and density, and an exact split
+shoulder from each presentation at r33 and r34.  Thus the public corpus has
+three `R`, three `R+1`, and three `R+2` doors, each with explicit parent and
+move provenance.  The r33 densities are 159/162/162 and the r34 densities are
+162/165/165.  Only the r32 algorithm is a best-rank checkpoint; the coordinate
+permutations are alternate presentations and the higher ranks are synthetic
+diversity seeds.
+
+All 18 generated rectangular Metal workers now permute the full-period LCG
+state through unsigned PCG RXS-M-XS before masking a factor.  They reject zero
+and redraw instead of remapping zero to one, so every nonzero power-of-two-width
+mask has the same conditional probability.  A deterministic 300K accepted
+four-bit audit needed 19,754 retries, had a maximum-minus-minimum bin count of
+528, and the 8,192-lane check covered all 225 adjacent nonzero pairs.  The old
+folded sampler's measured correlation reached about +/-0.565; the PCG path
+stayed within about +/-0.014.  An aggregate timing control was neutral
+(26.97 seconds versus 27.05 seconds), and the specialized 229 worker's profile
+capacity was corrected from 80 to the actual 64 terms.
+
+The host-generated `+1` split doors had a second diversity defect: both target
+and donor were affine functions of the same lane id, so 8,192 nominal 227
+shoulders collapsed to at most about `3R` presentations (75 on the r25 source).
+The replacement divides doors between donor-factor splits and systematic
+enumeration of every other nonzero factor mask, with the epoch rotating the
+enumeration.  Consecutive 8,192-lane epochs produced 5,201 and 5,441 distinct
+227 doors, and 5,507 and 5,776 distinct 228 doors.  Thirty-two reconstructed
+shoulders passed exact gates, and a source-consistency guard covered all 18
+worker copies; generation throughput did not regress.
+
+The default `--rect` portfolio now contains 13 fronts:
+`225,226,227,228,229,457,346,456,446,445,256,347,356`.  With the measured
+12-worker CPU default it visits 12 distinct shapes per epoch and rotates the
+omitted shape, instead of duplicating a front.  The rectangular CPU query path
+now batches the two widest unequal factor spaces.  On 229 this raised median
+throughput from 27.128 to 29.367 M moves/s (8.25%); the balanced 5x5 control was
+neutral and RSS remained flat.  The coordinator also no longer sleeps after
+its final portfolio child has exited.  A three-shape, three-worker, 10M-move
+control fell from a 0.47-second to a 0.42-second median (10.6%).
+
+The resulting search evidence was negative:
+
+| Shape | Exact checkpoint | GPU moves | CPU moves | Result |
+|---|---:|---:|---:|---|
+| `<2,2,5>` | r18/d84 | 32.768B | -- | no rank or density change |
+| `<2,2,7>` | r25/d132 | at least 68.8B | 4.070B | no rank or density change |
+| `<2,2,8>` | r28/d160 | 36.0448B | 3.950B | no rank or density change |
+| `<2,2,9>` | r32/d156 | 32.768B | 4.030B | no rank or density change |
+
+The CPU runs deliberately rotated through the exact `R`, `R+1`, and `R+2`
+bands where available.  The GPU totals are stated conservatively and do not
+count every sampler or smoke run.  These are bounded failed campaigns, not
+lower-bound certificates.
+
+The endpoint-first k-XOR engine was then made collision-complete and its subset
+selector was fixed: the old retry cap returned only 163 of 256 requested 227
+subsets, while the new bounded cap returned all 256 in 329 attempts.  Every
+real screen below selected 256 unique subsets.  Each 6-to-5 screen used a
+384-factor pool, eight nearby factors, and 2,397,077,504 canonical query
+triples; each 7-to-6 screen used a 192-factor pool, eight nearby factors, and
+297,287,680 queries.
+
+| Door | 6-to-5 fingerprint/local checks; wall | 7-to-6 checks; wall |
+|---|---:|---:|
+| 227 r25 | 1,300; 34.211 s | 680; 20.867 s |
+| 228 r28 | 10; 3.541 s | 0; 2.147 s |
+| 229 r32 base | 380; 26.667 s | 320; 12.578 s |
+| 229 r32 cycle | 5,210; 54.900 s | 23,300; 57.991 s |
+| 229 r32 reverse | 70; 35.002 s | 540; 12.965 s |
+
+Collision-rich doors required additional ordinal probe dispatches, so physical
+GPU thread counts exceeded the 13.4718B canonical queries.  No checked
+fingerprint candidate satisfied local tensor equality, no candidate reached
+the full certificate gate, and every output file was empty.  Planted rank-drop
+and collision-ordinal controls still passed.  Sparse table compaction reduced
+the otherwise identical 227 6-to-5 wall time from 45.328 to 34.211 seconds
+(24.5%).  The engine remains an offline prescribed-rewrite tool rather than a
+fleet lane.
+
+The Rubik analogy also produced two replayable, state-dependent words.  The
+literal form is `A C D B D C A` with an optional trailing `B`; the resolved
+form is `A C D B X Y Z`, where `X/Y/Z` are chosen against the post-trigger
+state instead of pretending that fixed flips are global group generators.
+Replayed move prefixes preserve the exact tensor, and successful endpoints
+return to the source rank; the planted construction temporarily carried at
+most three extra local terms and produced a distance-10 endpoint with density
+seven lower after 957,432 cleanup candidates.  On the real 5x5 r93 source,
+all 16 selected resolved endpoints passed the full gate, 11 lay beyond complete
+four-term-span coverage, and maximum term-set distance was 10.  On 229 r32, a
+focused literal run returned 40/40 full-gated beyond-span-4 endpoints, ten
+unique, again at distance at most 10.
+
+Novel endpoints were not fertile.  Eight matched 20M-move continuations per
+arm from the selected 5x5 d971 door gave the macro arm zero wins, the ordinary
+arm two, and six ties; final basin diversity was two versus three.  The 229
+d171 control gave zero macro wins, one ordinary win, seven ties, and diversity
+one versus two.  Neither shape dropped rank.  Peak RSS for the focused bench
+was reduced from 4.01 GB to 296 MB, but the strategy remains offline because
+the matched continuation supplied negative value evidence.
+
+Finally, the native profiler path no longer calls Ruby's nonexistent-in-
+Tungsten `String#rstrip`: `tungsten symbolicate` now uses `String#rtrim`, and
+both stdin backtrace and direct-token symbolication pass.  This loop found no
+new exact rank record, no same-rank density record, and no provable lower bound;
+its durable gains are better certified seed diversity, less biased and more
+varied GPU work, faster rectangular execution, and two tested ways to request
+a specific local change without mistaking search failure for impossibility.
+
+## 2026-07-15: balanced doors, direct rank-drop goals, and final rectangular screens
+
+The rectangular CPU scheduler now assigns its seven basin roles with an
+independent staggered round-robin ticket instead of deriving both the role and
+restart randomness from the same nonce.  In the first 28 assignments, the old
+role counts were `3/0/3/7/4/5/6` for 227, `6/2/9/2/2/2/5` for 228, and
+`3/5/3/5/3/4/5` for 229.  Every new count is `4/4/4/4/4/4/4`, and every
+complete sliding window is balanced.  The side archive now treats all exact
+checked-in frontier doors as fixed max-min anchors, rejects their duplicates,
+and reuses the already gated states when cloning lanes.  An adversarial archive
+test retained a distance-37 prior door over distance-3 near copies regardless
+of input order.  A real 229 run retained ranks `[32,33,34,32]`; direct worker
+telemetry showed the rank-33 and rank-34 shoulders actually scheduled as `+1`
+and `+2`, rather than merely present on disk.
+
+Multiworker windows now advance by their side-worker width instead of one
+door.  On 229 with one leader, four side workers, four saved doors, and four
+built-in side roles, two epochs expose all eight roles exactly once; the old
+stride revisited three saved doors and exposed only five roles.  Four-epoch
+counts are exactly two each, while one-worker and two-worker schedules retain
+their prior behavior.  Four more ambitious productive-rebase adaptations were
+neutral or worse on adoption-rich controls and were reverted.
+
+The runnable bit was missing those 229 shoulders even though the curated public
+corpus already contained them.  It now packages the exact r33/d159 and r34/d165
+splits descended from the r32/d156 base.  Thus all of 227, 228, and 229 really
+offer `R`, `R+1`, and `R+2` restart strata.  The added text certificates have
+SHA-256 digests
+`c0aebc2a46306692704943203d01a0e3f7e44826701e0e5dc839f699e9793676`
+and
+`888941431ee4f7a99999991eb18bda10ca015fe127e7cb1b4cb01bc659b03e6e`.
+
+Three small changes accelerated all 18 generated rectangular Metal workers
+without changing their trajectories.  The cyclic match scan uses one add and
+conditional subtraction instead of variable remainder; paired endpoints were
+byte-identical and 225/227/229 improved 3.5--4.8%.  An unmatched proposal now
+skips zero and touched-slot duplicate scans while preserving the 4,096-step
+audit, scheduled density capture, RNG, escape cadence, and step accounting.
+The step-63-improvement/step-64-capture regression passes, paired logs remain
+byte-identical, and this second stage improved the already optimized workers a
+further 5.25%, 6.17%, and 4.68% on 225, 227, and 229 respectively.  Finally,
+six signed random-coordinate mappings use one remainder plus a conditional
+addition instead of two remainders.  Exhaustive equivalence holds for every
+positive modulus through 122; warmed paired runs remained byte-identical and
+improved the three workers another 1.34%, 1.16%, and 1.07%.  Early scan exit
+and a split zero-scan shortcut were rejected because they were slower or not
+repeatable.
+
+A tempting CPU change was deliberately rejected.  Trying other factor axes
+when the selected axis had no partner cut 227's miss rate from 66.47% to 1.19%
+and raised accepted exact transitions from 10.10M/s to 12.69M/s, but total
+attempt throughput fell from 30.82M/s to 13.15M/s.  Equal-wall continuation
+showed no fertility advantage: a 1.5-second `+1/+2` comparison lost 5--3 and
+produced 149 useful updates versus 230, with the same 12 rank drops.  The 229
+comparisons all tied.  The fallback was reverted; more legal motion was not
+more useful motion.
+
+A 120-second three-shape campaign then executed 82,840,721,134 moves with zero
+CPU, GPU, MITM, internal, or full-gate failure.  The totals and final exact
+states were:
+
+| Shape | CPU moves | GPU moves | Final state |
+|---|---:|---:|---:|
+| 227 | 657,488,542 | 30,146,560,000 | r25/d132 |
+| 228 | 633,779,904 | 27,197,440,000 | r28/d160 |
+| 229 | 612,492,688 | 23,592,960,000 | r32/d156 |
+
+No rank, density, or lower-bound objective changed.
+
+The newly optimized wider workers also received equal standalone search
+budgets: 4,096 lanes times 500,000 steps times two continuous rounds, or
+4.096B configured GPU lane-moves per shape.  The exact-gated 346 r54/d488,
+347 r64/d519, and 356 r68/d634 fronts stayed unchanged after about 11.061,
+19.347, and 22.775 seconds.  No improvement file or internal reject was produced.
+
+The Rubik-style experiment was extended from finding a novel word to compiling
+a requested rank drop.  Starting from an exact `R+1` split, a bounded connected
+beam searches for two labelled terms that become equal on all three factors;
+cancelling that duplicate pair would finish at at most `R-1`.  A planted
+rank-3-to-rank-2 construction succeeded at depth two after 1,192 visited states
+and 1,352 revisits, with every replay prefix exact.  Real depth-2-through-8
+searches were negative: 227 checked 78 windows and 7,011,522 codes, 229 checked
+81 and 7,509,348, and 3x3 checked 88 and 5,407,416.  None reached the
+three-factor equality goal, so this remains an offline exact macro.
+
+When an endpoint is known, the middle word can now be compiled rather than
+guessed.  A new offline wrapper lifts a supplied `k->k-1` replacement back to
+`k` terms by splitting its intended cleanup term, runs the exact bidirectional
+endpoint BFS, and appends the resolved merge.  It automatically proposes final
+merge pairs before bounded factor-mask fallbacks.  On the retained real 227
+control it found the shortest two-move word after exploring 22 states from
+each side:
+
+1. flip the shared-U pair
+   `(2,128,129),(2,512,516)` into
+   `(2,512,645),(2,640,129)`;
+2. merge `(4,2,768),(4,256,768)` along V into `(4,258,768)`.
+
+The intermediate rank-26 local tensor, resolved undo word, and every prefix
+are exact.  Grafting the replay into the packaged r26 shoulder independently
+reconstructs and verifies the complete r25 matrix-multiplication certificate.
+This closes the endpoint-to-algorithm loop for a real k-XOR result, although
+that endpoint remains an ordinary neighbor rather than a new basin.
+
+The endpoint-first k-XOR engine now also asks the direct-record questions
+`7->5`, `6->4`, and `5->3`.  The first uses a collision-complete pair/triple
+join; the latter two use pair and single tables against canonical pair probes.
+Every fingerprint hit must pass
+exhaustive local equality and complete rectangular verification.  Known-parent
+endpoints and every endpoint within symmetric term distance four are filtered,
+covering all immediate ordinary two-for-two flips while continuing later hash
+collision ordinals.  Planted double-split r49-to-r47 controls recovered the
+original exact 2x5x6 term set for both objectives; adversarial all-collision
+controls preserved 20 triple, 15 pair, and six single-table ordinals.
+
+The first apparent 227 same-rank result, hash
+`836f9f44512600de8b095f1e3785df6438f46dbf1a370268f1653e482286f8fa`,
+was correctly demoted to a control.  Its complete difference from the parent
+was the single ordinary U-pivot flip
+`(2,128,129),(2,512,516) -> (2,512,645),(2,640,129)`.  The certificate and
+replay provenance are retained under `~/.tungsten/metaflip/controls/`, but it
+is neither a new record nor a new basin.
+
+Full direct-record screens were clean negative evidence.  The 6-to-4 engine
+tested 256 unique pool-384 subsets for each shape, with 18,825,216 canonical
+table and query pairs per shape.  It produced 36 local checks on 227 and none
+on 228/229, but zero full candidate; wall times were 1.200, 0.418, and 1.421
+seconds.  A deep 227 7-to-5 pass processed 98,304 candidates, 18,825,216 table
+pairs, 2,397,077,504 canonical triple queries, and 2,434,531,840 dispatched
+threads in 14.978 seconds.  All 70 fingerprint hits failed before the full
+gate.  These engines are exact, collision-complete, and practical for bounded
+offline screens, but the production GPU pool and TUI remain unchanged because
+there is no frontier-value evidence.  The cheaper 5-to-3 objective also tested
+256 unique pool-384 subsets per shape: each issued 18,825,216 canonical pair
+queries.  The 227 run made nine local checks, 228/229 made none, and all full
+gates remained empty in 246, 256, and 284 ms.  A direct 4-to-2 kernel was not
+added because the same relation is represented by 5-to-3 plus one protected
+spectator, and the broader screen had zero yield.
+
+This pass found no new exact rank record, same-rank density record, or provable
+lower bound.  Its retained gains are balanced independent basins, genuinely
+anchored archives, real 229 rank-debt strata, faster byte-equivalent Metal
+walkers, an endpoint-to-exact-word compiler, and stronger ways to formulate a
+deliberate rank-drop goal.
+
+The automatic cleanup scaffolds were also audited as restart doors rather than
+credited from their raw count.  Its 64-candidate 227 control produced 11 exact
+compiles, but canonical sorting of each complete r26 term set collapsed them to
+only five distinct shoulders; six hits were duplicate presentations of the
+same split.  All five are exact split preimages of one exact r25 endpoint (that
+endpoint is not term-set-identical to the packaged catalogue presentation).
+Each was paired with a distinct ordinary r25 split at exactly the same initial
+density; controls used the same parent and axis where possible and otherwise a
+deterministic exact-density split elsewhere in the same scheme.  Every
+door/trial pair had a unique seed, the two arms shared that seed, and both ran
+the production 10% focused / 70% adaptive / 20% wander phase mix.
+
+At 32 trials per door and 2M moves per arm (160 pairs, 640M total moves), the
+structured shoulders lost 42--96 with 22 ties.  Neither arm reached r24;
+structured shoulders returned to r25 in 156/160 trials versus 159/160 controls,
+with mean final densities 153 versus 147.  Their best endpoints were r25/d134
+versus r25/d132, and exact canonical endpoint diversity was 142 versus 141
+(15 shared), so novelty did not translate into fertility.  An 8-trial-per-door
+10M continuation likewise lost 12--20 with eight ties, no r24, and mean density
+150 versus 145.  These preimages therefore remain out of the production restart
+inventory.  The decision runs were compiled with
+`tungsten compile --release --native --lto --fast` and invoked as
+`rank_debt_preimage_probe 32 2000000` and
+`rank_debt_preimage_probe 8 10000000`; the temporary probe was removed after
+the audit rather than shipped in the bit.
+
+## 2026-07-15: complete default GPU coverage and coupled cleanup goals
+
+The last three CPU-only fronts in the default rectangular mix now have
+specialized pure-Tungsten Metal workers.  `<4,4,6>` uses CAP128, 16 threads per
+group, and 24,576 threadgroup bytes; `<4,5,6>` uses CAP152, 16 threads, and
+29,184 bytes; the full-width `<4,5,7>` worker uses shared `i64` masks, CAP168,
+eight threads, and 32,256 bytes.  Measured search rates were approximately
+161.4M, 129.9M, and 80.3M moves/s respectively.  A 2.048B-move decision run on
+each left the exact r73/d690, r90/d906, and r104/d1089 leaders unchanged.  The
+default 13-shape portfolio is consequently fully GPU-backed, but this coverage
+gain is not a record.
+
+The worker cache also no longer equates a missing offline `metal`/`metallib`
+toolchain with a missing GPU.  Generic, C3, SIMD-group, rectangular, MITM, and
+pool bundles can dispatch the compiler-emitted sibling MSL through runtime
+Metal.  An injected `xcrun` failure completed a real 446 dispatch through that
+path; an empty sibling source still failed hard.  Absence of the optional
+offline cache tier therefore no longer marks the GPU DEGRADED, while real
+build, source, or dispatch failures still do.
+
+The direct-rank-two k-XOR screen was widened from the three 2-wide controls to
+the full rectangular seed set.  Across 48,128 bounded subset evaluations
+(46,330 distinct selected index sets), the GPU enumerated 1,156,497,408 table
+tuples and 11,478,204,416 query tuples.  `5->3` covered all 21 supported
+fronts; `6->4` and `7->5` covered the 13 primitive or high-composition-leverage
+fronts for which those objectives were meaningful.  Six 128-bit fingerprint
+matches appeared, all in the 227 `6->4` screen, and all six failed exact local
+tensor equality.  No full certificate check or accepted rank drop followed.
+This is a broad sampled miss, not a lower-bound proof.
+
+Two more literal Rubik-style cleanup compilers tested whether temporary rank
+debt can expose a prescribed two-rank close.  The four-line catalyst adds the
+cancelling pair `C+C`, walks the exact fixed-rank flip graph, then removes four
+terms sharing two factors whose remaining factors XOR to zero.  Positive
+controls verify exact `3->1`, `5->3`, `6->4`, and `7->5` envelopes; the
+nontrivial `3->1` plant closes after three flips at catalyst ordinal 5 and BFS
+node 89.  On real seeds, depth-three searches over `q=5,6,7` across all 21
+fronts visited 20,323,645 orbit states and tested 717,708,537 flip codes.  A
+depth-four census on 227/228/229 added 48,379,342 states and 1,690,981,920
+codes.  None of the combined 68,702,987 states exposed a four-term zero line.
+
+The coupled double-annihilation macro instead splits two distinct source terms
+(`R -> R+2`), resolves a state-dependent ordinary-flip word, and asks for two
+different duplicate pairs whose cancellation would finish at `R-2`.  Its
+explicit rank-4-to-rank-2 fixture uses setup splits on source labels 0 and 1,
+then the exact forward codes `36,40,35` and independently resolved undo codes
+`35,40,36`; all prefixes verify, and BFS finds the endpoint after 911 states
+and 2,198 legal edges.  The real depth-one-through-six census used 3,072 setup
+searches on 225, 227, 229, 256, 346, 445, 456, and 457.  It visited 11,721,598
+states, tested 370,312,434 codes, admitted 46,936,086 legal edges, and found no
+two-doublet goal.  Reusing one BFS workspace reduced the earlier prototype's
+peak RSS from about 2.927 GB to 24.56 MB; the current eight-front run completed
+in about 7.7 seconds.  Both cleanup compilers remain exact offline scouts, not
+production lanes.
+
+Two coordinator lifetime costs were removed without changing search
+trajectories.  Rectangular CPU islands now keep one OS thread for the campaign
+lifetime and synchronize through a round barrier; each parked worker reloads
+its state slot, so fleet-best rebases still take effect.  Exact output and
+counters matched the prior implementation on 225 and on 100-round
+229/256/446/456/457 controls.  Ordinary throughput stayed within about 3%, RSS
+fell 5--9%, and a 10,000-tiny-round stress fell from 107 to 95.3 MB and from
+30.6B to 22.9B retired instructions.  Separately, one byte-level pass now
+parses all child-status fields.  Fifty thousand full parses fell from 1,231 ms
+and 948.4 MB of allocation to 33 ms and 2.36 MB with identical values and
+fallback semantics.
+
+The new strategy sources also exposed two compiler/bootstrap ambiguities.
+`moves/10` was lexed as one arity-bearing identifier instead of identifier,
+slash, and integer, while the bang in `value!=1` could be swallowed into the
+identifier. Numeric `/N` arity is now recognized only after a method name, and
+bang suffixes stop before `!=` and `!~`. The C bootstrap gained the matching
+positional-argument, nested-type-hint, packed-numeric, and hash-delete support.
+A remaining stage-identity failure was traced to the generic `size` fast path
+returning zero for `StringBuffer`, which made stage 1 empty `%w[...]` literals;
+the correct buffer length plus an explicit dependency on the shared VM call
+body restored a verified byte-identical stage-1/stage-2 LLVM fixed point.
+
+No experiment in this section found a new exact rank record, same-rank density
+record, or provable lower bound.  The retained result is infrastructural:
+complete GPU coverage, a reliable runtime-MSL fallback, cheaper long-lived CPU
+coordination, and two exact formulations of the desired coupled rank drop whose
+bounded real-frontier searches were negative.
+
+The next clean experiment should therefore be endpoint-first: retain the
+lowest-weight syndromes from near-miss k-XOR joins, let a small CPU SAT or
+set-cover repair vary one or two spectator terms, and only then feed an exact
+replacement to the rank-two word compiler. This attacks the observed scarcity
+of cleanup endpoints directly instead of spending default lanes on forward
+walks toward a very thin two-doublet or four-line target set.

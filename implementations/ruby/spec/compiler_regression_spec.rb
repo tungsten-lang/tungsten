@@ -5,6 +5,7 @@ require "json"
 require "tmpdir"
 require "open3"
 require "socket"
+require "fileutils"
 
 RSpec.describe "Compiler regressions" do
   TUNGSTEN_SOURCE = File.join(PROJECT_ROOT, "compiler/tungsten.w")
@@ -55,6 +56,35 @@ RSpec.describe "Compiler regressions" do
     W
 
     expect(out).to eq("2\n")
+  end
+
+  it "uses TUNGSTEN_ROOT when a relocated compiler runs from a bit directory" do
+    relocated_dir = File.join(@tmpdir, "relocated")
+    relocated_compiler = File.join(relocated_dir, "tungsten-compiler")
+    bit_dir = File.join(@tmpdir, "nested-bit")
+    source_path = File.join(bit_dir, "commented.w")
+    bin_path = File.join(@tmpdir, "commented")
+
+    FileUtils.mkdir_p(relocated_dir)
+    FileUtils.mkdir_p(bit_dir)
+    FileUtils.cp(@compiler_path, relocated_compiler, preserve: true)
+    File.write(File.join(bit_dir, "Bitfile"), "name \"nested-bit\"\n")
+    File.write(source_path, "# Metaflip command-line entry point.\n\n<< \"ok\"\n")
+
+    env = {
+      "TUNGSTEN_ROOT" => PROJECT_ROOT,
+      "TUNGSTEN_GPU_DIALECTS" => "none"
+    }
+    _out, err, status = Open3.capture3(
+      env, relocated_compiler, "compile", source_path, "--out", bin_path,
+      "--no-lto",
+      chdir: bit_dir
+    )
+
+    expect(status.success?).to be(true), err
+    out, run_err, run_status = Open3.capture3(bin_path)
+    expect(run_status.success?).to be(true), run_err
+    expect(out).to eq("ok\n")
   end
 
   it "treats trailing elsif chains as implicit return expressions" do
@@ -403,6 +433,27 @@ RSpec.describe "Compiler regressions" do
     expect(llvm).to include("declare void @w_argv_init(i32, ptr) nounwind")
     expect(llvm).to match(/define i32 @main\(i32 %argc, ptr %argv\) #\d+ \{/)
     expect(llvm).to include("call void @w_argv_init(i32 %argc, ptr %argv)")
+  end
+
+  it "finds argv use nested inside method and block bodies" do
+    sources = {
+      "nested_argv_call.w" => <<~W,
+        -> nested
+          [0].map -> argv().size
+        << "ok"
+      W
+      "nested_argv_constant.w" => <<~W,
+        -> nested
+          [0].map -> ARGV.size
+        << "ok"
+      W
+    }
+
+    sources.each do |name, source|
+      llvm = compile_to_llvm(name, source)
+      expect(llvm).to match(/define i32 @main\(i32 %argc, ptr %argv\) #\d+ \{/)
+      expect(llvm).to include("call void @w_argv_init(i32 %argc, ptr %argv)")
+    end
   end
 
   it "dispatches the compiled Int convenience surface through runtime ICs" do

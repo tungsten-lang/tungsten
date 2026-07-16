@@ -890,6 +890,19 @@ use ../../core/token
     start_line = current_line()
     expr = parse_assignment()
 
+    # Expression-local type ascription. Assignment already consumes a
+    # trailing `## type` into Assign#type_hint; this companion handles the
+    # same syntax inside parentheses and arguments, e.g. `($value ## i64)`.
+    # Keeping it here gives the ascription lower precedence than arithmetic
+    # while still consuming it before the enclosing `)` / `,` delimiter.
+    if at_type?(T_TYPE_HINT)
+      hint = current_value()
+      comment_pos = hint.index("#")
+      if comment_pos != nil
+        hint = hint.slice(0, comment_pos)
+      expr.type_hint = hint.strip()
+      advance()
+
     # Implicit each: expr -> block (must be same line)
     t = ast_kind(expr)
     if t != :method_def && t != :fn_def && current_line() == start_line && (at_type?(T_ARROW) || at_type?(T_LBRACE))
@@ -2719,15 +2732,10 @@ use ../../core/token
       advance()
       name = name + "="
 
-    # Method-name arity (`/N`, `/*`, `/&`). Two shapes reach here:
-    #   * identifier names — the lexer bundles the suffix into the name
-    #     token (`divmod/1`). An identifier cannot contain `/`, so the
-    #     first `/` is unambiguously the suffix separator.
-    #   * operator names (`<=>`, `==`, `/`, …) — the operator scanner
-    #     stops at the operator, so any suffix arrives as its own tokens.
-    # Splitting only the identifier token, and reading operator arity
-    # straight from the token stream, means a method literally named `/`
-    # or `//` is never mistaken for a name carrying an arity suffix.
+    # Method-name arity (`/N`, `/*`, `/&`). Current lexers emit the suffix as
+    # operator tokens so `value/10` remains ordinary division outside a
+    # definition. The bundled-name branch is retained for one bootstrap:
+    # an older stage-0 lexer may still hand this parser `divmod/1` as one ID.
     arity = nil
     base_name = name
     if name_tok_type in (T_ID T_TYPE T_KEYWORD)
@@ -2741,7 +2749,7 @@ use ../../core/token
           arity = :splat
         else
           arity = suffix.to_i()
-    elsif at_type?(T_SLASH)
+    if arity == nil && at_type?(T_SLASH)
       advance()
       if at_type?(T_STAR)
         advance()

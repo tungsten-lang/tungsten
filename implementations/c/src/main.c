@@ -78,8 +78,36 @@ static char *resolve_use_path(const char *from_path, const char *use_path, size_
       break;
     }
   }
-  size_t total = dir_len + 1 + use_len + (has_ext ? 0 : 2);
-  char *path = (char *)malloc(total + 1);
+
+  /* These namespaces are rooted at the project cwd, just as they are in the
+   * fast loader. Other paths remain relative to the file containing `use`. */
+  int project_relative = (use_len > 0 && use_path[0] == '/') ||
+                         (use_len >= 5 && memcmp(use_path, "core/", 5) == 0) ||
+                         (use_len >= 9 && memcmp(use_path, "compiler/", 9) == 0) ||
+                         (use_len >= 10 && memcmp(use_path, "languages/", 10) == 0);
+
+  size_t total;
+  char *path;
+  if (project_relative || dir_len == 0) {
+    total = use_len + (has_ext ? 0 : 2);
+    path = (char *)malloc(total + 1);
+    if (!path) {
+      tc_error_set(err, "resolved use path allocation failed");
+      return NULL;
+    }
+    memcpy(path, use_path, use_len);
+    if (!has_ext) {
+      path[use_len] = '.';
+      path[use_len + 1] = 'w';
+      path[use_len + 2] = '\0';
+    } else {
+      path[use_len] = '\0';
+    }
+    return path;
+  }
+
+  total = dir_len + 1 + use_len + (has_ext ? 0 : 2);
+  path = (char *)malloc(total + 1);
   if (!path) {
     tc_error_set(err, "resolved use path allocation failed");
     return NULL;

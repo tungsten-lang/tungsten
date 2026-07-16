@@ -6,6 +6,12 @@
 # duration of the epoch. Reallocation happens only after every child reaches a
 # clean round boundary. The next epoch is an intentional exact restart from
 # that shape's checkpoint, refreshing basins without unsafe live migration.
+#
+# Within an epoch, every shape first runs `shape_epoch_rounds` ordinary rounds
+# (default four). Fast shapes then keep taking one extra round at a time while
+# their observed average round wall-time still fits before the predicted finish
+# of the slowest shape's base quota — straggler-fill instead of sitting idle at
+# the portfolio join.
 
 use flipfleet_rect_campaign
 use flipfleet_rect_portfolio_policy
@@ -58,6 +64,37 @@ use flipfleet_live_store
       return field.slice(prefix.size(), field.size() - prefix.size()).to_i()
     i += 1
   fallback
+
+# Predicted wall-clock ms when a shape will complete `min_rounds` island rounds.
+# `rounds_done` is live status sequence while the base quota is still running;
+# once base is complete, `base_wall_ms` is the measured wall time for that quota.
+-> ffrpo_predict_base_finish_ms(epoch_start_ms, now_ms, min_rounds, rounds_done, base_complete, base_wall_ms) (i64 i64 i64 i64 i64 i64) i64
+  if min_rounds < 1
+    min_rounds = 1
+  if base_complete != 0
+    finish = epoch_start_ms + base_wall_ms ## i64
+    if finish < epoch_start_ms
+      return epoch_start_ms
+    return finish
+  if rounds_done < 1
+    return 0
+  wall = now_ms - epoch_start_ms ## i64
+  if wall < 1
+    wall = 1
+  finish = epoch_start_ms + wall * min_rounds / rounds_done ## i64
+  finish
+
+# Start one more fill round when the shape's average round still fits before the
+# predicted portfolio base deadline (slowest shape finishing its min rounds).
+-> ffrpo_should_fill_round(avg_round_ms, now_ms, deadline_ms) (i64 i64 i64) i64
+  if avg_round_ms < 1
+    return 0
+  remaining = deadline_ms - now_ms ## i64
+  if remaining < 1
+    return 0
+  if avg_round_ms < remaining
+    return 1
+  0
 
 -> ffrpo_backoff(failures) (i64) i64
   count = failures ## i64
@@ -288,7 +325,7 @@ use flipfleet_live_store
     rows.push(section[i])
     i += 1
   rows.push("")
-  footer = ff_tui_clip("allocations change only at exact epoch boundaries · space=reset every shape to naive · q/Ctrl-C stops after the current epoch", inner)
+  footer = ff_tui_clip("allocations change only at exact epoch boundaries · fast shapes fill until slowest base rounds finish · space=reset every shape to naive · q/Ctrl-C stops after the current epoch", inner)
   rows.push("  " + ff_tui_dim(footer))
   rows
 
@@ -508,12 +545,41 @@ use flipfleet_live_store
       flush()
 
     threads = []
+    # Per-shape epoch accounting for base quota + optional straggler-fill rounds.
+    segment_joined = i64[count]
+    base_complete = i64[count]
+    base_wall_ms = i64[count]
+    total_rounds = i64[count]
+    total_wall_ms = i64[count]
+    acc_cpu_moves = i64[count]
+    acc_gpu_moves = i64[count]
+    acc_cpu_ms = i64[count]
+    acc_gpu_ms = i64[count]
+    acc_gpu_failures = i64[count]
+    acc_exact_rejects = i64[count]
+    fill_serial = i64[count]
+    launched = i64[count]
+    child_gpu_flags = i64[count]
     i = 0
     while i < count
       exit_codes[i] = 0
       child_elapsed_ms[i] = 0
       reset_children[i] = 0
       active[i] = 0
+      segment_joined[i] = 1
+      base_complete[i] = 0
+      base_wall_ms[i] = 0
+      total_rounds[i] = 0
+      total_wall_ms[i] = 0
+      acc_cpu_moves[i] = 0
+      acc_gpu_moves[i] = 0
+      acc_cpu_ms[i] = 0
+      acc_gpu_ms[i] = 0
+      acc_gpu_failures[i] = 0
+      acc_exact_rejects[i] = 0
+      fill_serial[i] = 0
+      launched[i] = 0
+      child_gpu_flags[i] = 0
       thread = nil
       if cpu_allocation[i] > 0 && ready[i] != 0
         reset_children[i] = reset_pending[i]
@@ -521,22 +587,116 @@ use flipfleet_live_store
         child_gpu = 0 ## i64
         if gpu_allocation[i] > 0 && gpu_sched_ready[i] != 0
           child_gpu = 1
+        child_gpu_flags[i] = child_gpu
         rebuild = 0 ## i64
         if epoch == 0 && gpu_rebuild != 0
           rebuild = 1
         cleared = write_file(child_status_paths[i], "")
         if cleared
           active[i] = 1
+          launched[i] = 1
+          segment_joined[i] = 0
           thread = ffrpo_spawn_shape(labels[i], repo_root, best_paths[i], child_status_paths[i], child_tag, cpu_allocation[i], steps, shape_epoch_rounds, child_max_secs, dslack, cycles, child_gpu, gpu_allocation[i], gpu_steps, gpu_epoch_rounds, ffrpo_gpu_binary(gpu_binary, labels[i]), rebuild, stop_on_record, reset_children[i], exit_codes, child_elapsed_ms, i)
         if cleared == false
           exit_codes[i] = 2
+          launched[i] = 1
+          segment_joined[i] = 1
+          base_complete[i] = 1
       threads.push(thread)
       i += 1
 
     epoch_started_ms = ccall("__w_clock_ms") ## i64
-    while ffrpo_any_alive(threads) != 0
+    epoch_running = 1 ## i64
+    while epoch_running != 0
       now_ms = ccall("__w_clock_ms") ## i64
       elapsed_s = (now_ms - start_ms) / 1000
+
+      # Harvest finished segments and optionally start one-round straggler fills.
+      deadline_ms = epoch_started_ms ## i64
+      i = 0
+      while i < count
+        if launched[i] != 0
+          thread = threads[i]
+          if thread != nil && thread.alive? == false && segment_joined[i] == 0
+            joined = thread.join
+            segment_joined[i] = 1
+            segment_ms = child_elapsed_ms[i] ## i64
+            if segment_ms < 0
+              segment_ms = 0
+            total_wall_ms[i] += segment_ms
+            body = read_file(child_status_paths[i])
+            seg_rounds = shape_epoch_rounds ## i64
+            if base_complete[i] != 0
+              seg_rounds = 1
+            if body != nil && body.size() > 0
+              seq = ffrpo_status_i64(body, "sequence", 0) ## i64
+              if seq > 0
+                if base_complete[i] == 0
+                  if seq < shape_epoch_rounds
+                    seg_rounds = seq
+                  if seq >= shape_epoch_rounds
+                    seg_rounds = shape_epoch_rounds
+                if base_complete[i] != 0
+                  seg_rounds = 1
+              acc_cpu_moves[i] += ffrpo_status_i64(body, "cpu_moves", 0)
+              acc_gpu_moves[i] += ffrpo_status_i64(body, "gpu_moves", 0)
+              acc_cpu_ms[i] += ffrpo_status_i64(body, "cpu_ms", segment_ms * cpu_allocation[i])
+              acc_gpu_ms[i] += ffrpo_status_i64(body, "gpu_ms", 0)
+              acc_gpu_failures[i] += ffrpo_status_i64(body, "gpu_failures", 0)
+              acc_exact_rejects[i] += ffrpo_status_i64(body, "exact_rejects", 0)
+            total_rounds[i] += seg_rounds
+            if base_complete[i] == 0
+              base_complete[i] = 1
+              base_wall_ms[i] = segment_ms
+          if base_complete[i] != 0
+            finish = epoch_started_ms + base_wall_ms[i] ## i64
+            if finish > deadline_ms
+              deadline_ms = finish
+          live_thread = threads[i]
+          if base_complete[i] == 0 && live_thread != nil && live_thread.alive?
+            live_body = read_file(child_status_paths[i])
+            live_rounds = ffrpo_status_i64(live_body, "sequence", 0) ## i64
+            predicted = ffrpo_predict_base_finish_ms(epoch_started_ms, now_ms, shape_epoch_rounds, live_rounds, 0, 0) ## i64
+            if predicted > deadline_ms
+              deadline_ms = predicted
+        i += 1
+
+      now_ms = ccall("__w_clock_ms") ## i64
+      i = 0
+      while i < count
+        do_fill = 1 ## i64
+        if launched[i] == 0 || base_complete[i] == 0 || segment_joined[i] == 0
+          do_fill = 0
+        if exit_codes[i] != 0 || acc_exact_rejects[i] > 0 || stop_requested != 0
+          do_fill = 0
+        if ccall("__w_interrupted") != 0
+          do_fill = 0
+        avg_round = 0 ## i64
+        if do_fill != 0 && total_rounds[i] > 0
+          avg_round = total_wall_ms[i] / total_rounds[i]
+        if do_fill != 0 && avg_round < 1 && total_wall_ms[i] > 0
+          avg_round = total_wall_ms[i]
+        if do_fill != 0 && ffrpo_should_fill_round(avg_round, now_ms, deadline_ms) == 0
+          do_fill = 0
+        if do_fill != 0
+          fill_serial[i] += 1
+          shape_label = labels[i]
+          shape_tag = "shape"
+          if shape_label != nil
+            shape_tag = shape_label.replace("x", "")
+          child_tag = run_tag + "_" + shape_tag + "_e" + epoch.to_s() + "_f" + fill_serial[i].to_s()
+          remain_secs = child_max_secs ## i64
+          if max_secs > 0
+            remain_secs = max_secs - (now_ms - start_ms) / 1000
+            if remain_secs < 1
+              remain_secs = 1
+          cleared = write_file(child_status_paths[i], "")
+          if cleared
+            child_elapsed_ms[i] = 0
+            segment_joined[i] = 0
+            threads[i] = ffrpo_spawn_shape(shape_label, repo_root, best_paths[i], child_status_paths[i], child_tag, cpu_allocation[i], steps, 1, remain_secs, dslack, cycles, child_gpu_flags[i], gpu_allocation[i], gpu_steps, gpu_epoch_rounds, ffrpo_gpu_binary(gpu_binary, shape_label), 0, stop_on_record, 0, exit_codes, child_elapsed_ms, i)
+        i += 1
+
       active_j = 0 ## i64
       active_gpu = 0 ## i64
       ready_count = ffrpp_ready_count(ready, count) ## i64
@@ -572,12 +732,12 @@ use flipfleet_live_store
           display_elapsed[i] = run_elapsed[i]
           if active[i] != 0
             display_elapsed[i] += (now_ms - epoch_started_ms) / 1000
-          if active[i] == 0 && threads[i] != nil
-            display_elapsed[i] += child_elapsed_ms[i] / 1000
+          if active[i] == 0 && launched[i] != 0
+            display_elapsed[i] += total_wall_ms[i] / 1000
+          display_total_moves += acc_cpu_moves[i] + acc_gpu_moves[i]
 
-          # Child status is cleared before launch, so a non-empty body belongs
-          # to this exact epoch. Poll it for honest live ranks/moves instead of
-          # showing a frozen dashboard until all four child rounds drain.
+          # Child status is cleared before each segment, so a non-empty body
+          # belongs to the active segment of this epoch.
           if threads[i] != nil
             live_body = read_file(child_status_paths[i])
             if live_body != nil && live_body.size() > 0
@@ -593,8 +753,8 @@ use flipfleet_live_store
               live_gpu_quanta = 0 ## i64
               if gpu_allocation[i] > 0 && live_gpu_ms > 0
                 live_gpu_quanta = ((gpu_allocation[i] + 31) / 32) * ((live_gpu_ms + 99) / 100)
-              display_exposure[i] += live_cpu_quanta + live_gpu_quanta
-              display_gpu_failures[i] += live_gpu_failures
+              display_exposure[i] += live_cpu_quanta + live_gpu_quanta + (acc_cpu_ms[i] + 99) / 100
+              display_gpu_failures[i] += live_gpu_failures + acc_gpu_failures[i]
               display_failures[i] = display_cpu_failures[i] + display_gpu_failures[i]
               if live_rank > 0
                 display_ranks[i] = live_rank
@@ -645,6 +805,40 @@ use flipfleet_live_store
           key = ccall("w_input_poll", 0)
       if ccall("__w_interrupted") != 0
         stop_requested = 1
+
+      still = ffrpo_any_alive(threads) ## i64
+      if still == 0
+        # One more harvest/fill pass may have been needed after the last join.
+        # Stop only when nothing is alive and no fill was just scheduled.
+        pending_join = 0 ## i64
+        i = 0
+        while i < count
+          if launched[i] != 0 && segment_joined[i] == 0
+            pending_join = 1
+          i += 1
+        if pending_join == 0
+          # Recompute deadline and see if any idle base-complete shape still fills.
+          can_fill = 0 ## i64
+          now2 = ccall("__w_clock_ms") ## i64
+          dl = epoch_started_ms ## i64
+          i = 0
+          while i < count
+            if launched[i] != 0 && base_complete[i] != 0
+              finish = epoch_started_ms + base_wall_ms[i] ## i64
+              if finish > dl
+                dl = finish
+            i += 1
+          i = 0
+          while i < count
+            if launched[i] != 0 && base_complete[i] != 0 && segment_joined[i] != 0 && exit_codes[i] == 0 && acc_exact_rejects[i] == 0 && stop_requested == 0
+              avg_round = 0 ## i64
+              if total_rounds[i] > 0
+                avg_round = total_wall_ms[i] / total_rounds[i]
+              if ffrpo_should_fill_round(avg_round, now2, dl) != 0
+                can_fill = 1
+            i += 1
+          if can_fill == 0
+            epoch_running = 0
       ccall("__w_sleep_ms", 50)
 
     i = 0
@@ -652,6 +846,24 @@ use flipfleet_live_store
       thread = threads[i]
       if thread != nil
         joined = thread.join
+        segment_joined[i] = 1
+        if child_elapsed_ms[i] > 0 && launched[i] != 0
+          # Final unharvested segment (should be rare after the loop).
+          total_wall_ms[i] += child_elapsed_ms[i]
+          body = read_file(child_status_paths[i])
+          if body != nil && body.size() > 0
+            acc_cpu_moves[i] += ffrpo_status_i64(body, "cpu_moves", 0)
+            acc_gpu_moves[i] += ffrpo_status_i64(body, "gpu_moves", 0)
+            acc_cpu_ms[i] += ffrpo_status_i64(body, "cpu_ms", child_elapsed_ms[i] * cpu_allocation[i])
+            acc_gpu_ms[i] += ffrpo_status_i64(body, "gpu_ms", 0)
+            acc_gpu_failures[i] += ffrpo_status_i64(body, "gpu_failures", 0)
+            acc_exact_rejects[i] += ffrpo_status_i64(body, "exact_rejects", 0)
+          if base_complete[i] == 0
+            base_complete[i] = 1
+            base_wall_ms[i] = child_elapsed_ms[i]
+            total_rounds[i] += shape_epoch_rounds
+          if base_complete[i] != 0 && total_rounds[i] < shape_epoch_rounds
+            total_rounds[i] = shape_epoch_rounds
       active[i] = 0
       i += 1
 
@@ -661,15 +873,18 @@ use flipfleet_live_store
     i = 0
     while i < count
       if cpu_allocation[i] > 0 && ready[i] != 0
-        child_body = read_file(child_status_paths[i])
-        cpu_moves_epoch = ffrpo_status_i64(child_body, "cpu_moves", 0) ## i64
-        gpu_moves_epoch = ffrpo_status_i64(child_body, "gpu_moves", 0) ## i64
-        cpu_ms_epoch = ffrpo_status_i64(child_body, "cpu_ms", child_elapsed_ms[i] * cpu_allocation[i]) ## i64
-        gpu_ms_epoch = ffrpo_status_i64(child_body, "gpu_ms", 0) ## i64
-        gpu_failure_epoch = ffrpo_status_i64(child_body, "gpu_failures", 0) ## i64
-        exact_rejects_epoch = ffrpo_status_i64(child_body, "exact_rejects", 0) ## i64
+        cpu_moves_epoch = acc_cpu_moves[i] ## i64
+        gpu_moves_epoch = acc_gpu_moves[i] ## i64
+        cpu_ms_epoch = acc_cpu_ms[i] ## i64
+        if cpu_ms_epoch < 1 && total_wall_ms[i] > 0
+          cpu_ms_epoch = total_wall_ms[i] * cpu_allocation[i]
+        gpu_ms_epoch = acc_gpu_ms[i] ## i64
+        gpu_failure_epoch = acc_gpu_failures[i] ## i64
+        exact_rejects_epoch = acc_exact_rejects[i] ## i64
         failed = 0 ## i64
-        if exit_codes[i] != 0 || child_body == nil || child_body.size() == 0 || exact_rejects_epoch > 0
+        if launched[i] == 0 || exit_codes[i] != 0 || exact_rejects_epoch > 0
+          failed = 1
+        if failed == 0 && total_wall_ms[i] < 1 && acc_cpu_moves[i] < 1
           failed = 1
         if failed == 0
           new_metrics = ffrpo_load_metrics(labels[i], repo_root, best_paths[i], 0, metrics, i * 2) ## i64
@@ -689,7 +904,7 @@ use flipfleet_live_store
           if gpu_allocation[i] > 0 && gpu_ms_epoch > 0
             gpu_quanta = ((gpu_allocation[i] + 31) / 32) * ((gpu_ms_epoch + 99) / 100)
           exposure[i] += cpu_quanta + gpu_quanta
-          run_elapsed[i] += child_elapsed_ms[i] / 1000
+          run_elapsed[i] += total_wall_ms[i] / 1000
           if gpu_allocation[i] > 0
             if gpu_failure_epoch > 0
               gpu_failures[i] += gpu_failure_epoch

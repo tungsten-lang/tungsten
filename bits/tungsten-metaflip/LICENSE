@@ -1,0 +1,13 @@
+Except where otherwise noted, Tungsten Metaflip is available under your
+choice of either:
+
+  * the MIT License; or
+  * the Apache License, Version 2.0, with the LLVM Exception.
+
+The complete texts are in LICENSE-MIT and LICENSE-APACHE. In SPDX terms:
+
+  MIT OR Apache-2.0 WITH LLVM-exception
+
+Imported decomposition data is not relicensed by this notice. See
+THIRD_PARTY.md for provenance and release requirements that apply to bundled
+seed assets.

@@ -92,6 +92,7 @@ static TcRuntimeHash *cvar_table = NULL;
   X(PUSH,           "push")          \
   X(POP,            "pop")           \
   X(SHIFT,          "shift")         \
+  X(DELETE,         "delete")        \
   X(TO_S,           "to_s")          \
   X(TO_I,           "to_i")          \
   X(TO_SYM,         "to_sym")        \
@@ -1195,6 +1196,18 @@ static TcValue hash_get_value(TcRuntimeHash *hash, TcValue key) {
   int found = 0;
   size_t slot = hash_find_slot(hash, key, &found);
   return found ? hash->values[slot] : tc_box_nil();
+}
+
+static TcValue hash_delete_value(TcRuntimeHash *hash, TcValue key) {
+  if (!hash || hash->cap == 0) return tc_box_nil();
+  int found = 0;
+  size_t slot = hash_find_slot(hash, key, &found);
+  if (!found) return tc_box_nil();
+  TcValue removed = hash->values[slot];
+  hash->keys[slot] = TC_HASH_TOMBSTONE;
+  hash->values[slot] = tc_box_nil();
+  hash->count--;
+  return removed;
 }
 
 
@@ -2338,6 +2351,12 @@ int tc_vm_run_args(const TcChunk *chunk, int argc, char **argv, TcValue *result,
           case TC_VAL_STRING: size = (int64_t)tc_str_len(receiver); break;
           case TC_VAL_ARRAY:  size = tc_as_array(receiver) ? (int64_t)tc_as_array(receiver)->size : 0; break;
           case TC_VAL_HASH:   size = tc_as_hash(receiver) ? (int64_t)tc_as_hash(receiver)->count : 0; break;
+          case TC_VAL_OBJECT:
+            if (tc_as_object(receiver) &&
+                object_is_class(tc_as_object(receiver), "StringBuffer", 12)) {
+              size = (int64_t)tc_as_object(receiver)->buffer_len;
+            }
+            break;
           case TC_VAL_AST:
             if (tc_as_ast_ptr(&receiver)->kind == TC_AST_ARRAY && tc_as_ast_ptr(&receiver)->as.array) size = (int64_t)tc_as_ast_ptr(&receiver)->as.array->count;
             else if (tc_as_ast_ptr(&receiver)->kind == TC_AST_HASH && tc_as_ast_ptr(&receiver)->as.hash) size = (int64_t)tc_as_ast_ptr(&receiver)->as.hash->count;
@@ -2476,6 +2495,12 @@ int tc_vm_run_args(const TcChunk *chunk, int argc, char **argv, TcValue *result,
           case TC_VAL_STRING: size = (int64_t)tc_str_len(receiver); break;
           case TC_VAL_ARRAY:  size = tc_as_array(receiver) ? (int64_t)tc_as_array(receiver)->size : 0; break;
           case TC_VAL_HASH:   size = tc_as_hash(receiver) ? (int64_t)tc_as_hash(receiver)->count : 0; break;
+          case TC_VAL_OBJECT:
+            if (tc_as_object(receiver) &&
+                object_is_class(tc_as_object(receiver), "StringBuffer", 12)) {
+              size = (int64_t)tc_as_object(receiver)->buffer_len;
+            }
+            break;
           case TC_VAL_AST:
             if (tc_as_ast_ptr(&receiver)->kind == TC_AST_ARRAY && tc_as_ast_ptr(&receiver)->as.array) size = (int64_t)tc_as_ast_ptr(&receiver)->as.array->count;
             else if (tc_as_ast_ptr(&receiver)->kind == TC_AST_HASH && tc_as_ast_ptr(&receiver)->as.hash) size = (int64_t)tc_as_ast_ptr(&receiver)->as.hash->count;

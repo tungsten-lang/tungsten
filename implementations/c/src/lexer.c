@@ -294,7 +294,20 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
         pos += 2;
         while (pos < count && is_space_cp(cp_at(source, pos))) pos++;
         size_t start = pos;
-        while (pos < count && !is_newline_cp(cp_at(source, pos))) pos++;
+        int type_bracket_depth = 0;
+        while (pos < count && !is_newline_cp(cp_at(source, pos))) {
+          uint32_t c2 = cp_at(source, pos);
+          if (c2 == '[') {
+            type_bracket_depth++;
+          } else if (c2 == ']') {
+            if (type_bracket_depth == 0 && paren_depth > 0) break;
+            type_bracket_depth--;
+          } else if (paren_depth > 0 &&
+                     (c2 == ')' || c2 == ',' || c2 == ';' || c2 == ':' || c2 == '?')) {
+            break;
+          }
+          pos++;
+        }
         if (!token_push(tokens, token_new(TC_T_TYPE_HINT, start, pos, 0), err)) return 0;
         continue;
       }

@@ -173,6 +173,9 @@ external "ruby",    "4.0.2"
 external "llvm",    "current"
 external "openssl", "current"
 
+executable "my-tool", source: "lib/my_tool.w"
+asset "assets"
+
 bit "tungsten-carbide", "~> 0.0.1"
 bit "tungsten-parser",  local: true
 
@@ -196,6 +199,15 @@ marked trusted.
 
 **`tungsten CONSTRAINT`** — Which Tungsten versions this bit supports. The registry runs your test suite against its Tungsten version matrix and auto-flags incompatible versions.
 
+**`executable NAME, source: PATH`** — Build a runnable application entry point.
+Repeat the directive for multiple programs. `bit build` writes each program to
+`build/bin/NAME`; when `source:` is omitted it defaults to `lib/NAME.w`.
+
+**`asset PATH`** — Include a package-relative file or directory in archives and
+copy it to the same relative path under `build/`. Repeat it for multiple paths.
+The conventional `assets/` directory is included automatically when present.
+Absolute paths and paths containing `..` are rejected.
+
 **`bit NAME, CONSTRAINT, [options]`** — A dependency. Options:
 
 | Option | Effect |
@@ -213,6 +225,11 @@ marked trusted.
 **`constant_alias NAME`** — Short constant alias for the bit's top-level module.
 
 See `Bitfile(5)` for the complete reference.
+
+`bit build` locates the compiler through `TUNGSTEN_COMPILER` (or `TUNGSTEN`),
+`TUNGSTEN_ROOT`, an in-tree `bin/tungsten`, or `tungsten` on `PATH`, in that
+order. Archives preserve common single- and dual-license files such as
+`LICENSE`, `LICENSE-MIT`, `LICENSE-APACHE`, `NOTICE`, and `THIRD_PARTY`.
 
 ## The Bitfile.lock
 

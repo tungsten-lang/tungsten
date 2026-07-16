@@ -51,7 +51,7 @@ duplicate-free list:
 /tmp/flipfleet --rect --secs 86400
 /tmp/flipfleet --rect \
   --rect-shapes 4x5x7,4x6x7,4x5x6,5x6x7,3x4x7,3x5x6,4x4x5 \
-  -J 188 --rect-epoch-rounds 4 --secs 86400
+  -J 188 --rect-epoch-rounds 16 --secs 86400
 ```
 
 Every ready shape receives a starvation floor when the host has enough
@@ -70,8 +70,15 @@ Shapes run simultaneously during an epoch. Reallocation waits for their exact
 round boundaries; the next epoch deliberately refreshes each active shape's
 sticky-island population from its own verified checkpoint. This avoids unsafe
 live thread migration while preserving independent bests and run-level rank
-histories. `--rect-epoch-rounds` controls the work between exact restarts and
-defaults to four.
+histories. `--rect-epoch-rounds` controls the **base** work between exact
+restarts and defaults to **16** (was 4; range 1–64).
+
+Within an epoch, every shape first runs that base quota. Faster shapes then
+keep taking one extra round at a time while their observed average round
+wall-time still fits before the predicted finish of the slowest shape's base
+quota (straggler-fill). That keeps CPU islands busy instead of idling at the
+portfolio join when tensor sizes differ. On large hosts, prefer a higher base
+(e.g. 16–32) so reallocation and exact restarts are less frequent.
 
 `--secs` is propagated into every child as the remaining portfolio time. Both
 levels stop only at exact rectangular round boundaries, so the limit can

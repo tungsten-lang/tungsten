@@ -289,11 +289,13 @@
     i += 1
   true
 
-# Mixed raw ABI: i64/u64 scalars pass raw, typed-array params pass their
+# Typed-array raw ABI: i64/u64 scalars pass raw, typed-array params pass their
 # boxed handle unchanged (an array WValue is already the i64 the callee
 # subscripts through — nothing to unbox). Eligibility mirrors
-# all_params_i64? plus typed-array params; requires at least one of each
-# (all-scalar is the plain raw ABI, all-array gains nothing). Profiling
+# all_params_i64? plus typed-array params and requires at least one array
+# (all-scalar is the plain raw ABI). All-array signatures still benefit on the
+# return boundary: an integer result remains raw instead of taking a w_int /
+# w_to_i64 round trip at every statically resolved call. Profiling
 # motivation (flip-graph walkers, 2026-07-02): boxed calls to
 # (arrays..., scalars...) fns spent ~45% of runtime in w_int/w_to_i64
 # round-trips, w_add on boxed returns, and bigint alloc/free churn for
@@ -317,7 +319,7 @@
     else
       return false
     i += 1
-  has_scalar && has_array
+  has_array
 
 -> raw_param_kinds(params, child_var_types)
   kinds = []

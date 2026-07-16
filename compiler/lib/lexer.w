@@ -243,11 +243,25 @@ use ../../languages/tungsten/lexers/regex_helpers
           has_lower = 1
         pos++
 
-      # Trailing ? or !, plus arity suffixes: /N, /*, /&.
+      # Trailing ? or !. Numeric method arity is left as `/` + integer tokens;
+      # the parser consumes it only after `-> name`. Keeping `/N` out of an
+      # identifier makes ordinary `moves/10` division unambiguous everywhere
+      # else and preserves normal multiplication/power precedence. Block and
+      # splat suffixes stay bundled so `/&` and `/*` do not become raw ops.
       if pos < count
         c2 = (lc[pos] >> 18) & cp_mask
-        if c2 == :-? || c2 == :-!
+        if c2 == :-?
           pos++
+        elsif c2 == :-!
+          # `empty!` is an identifier, but `x!=y` and `x!~pattern` start
+          # operators. Do not swallow their leading bang into the name.
+          bang_suffix = 1
+          if pos + 1 < count
+            c3 = (lc[pos + 1] >> 18) & cp_mask
+            if c3 == :-= || c3 == :-~
+              bang_suffix = 0
+          if bang_suffix != 0
+            pos++
       # Trailing prime: `x'` — the same-named property on the first
       # argument (README's prime notation; the parser desugars it to
       # `@1.x`). Consumed into the identifier only when the `'` (cp 39)
@@ -265,11 +279,6 @@ use ../../languages/tungsten/lexers/regex_helpers
           c2 = (lc[pos + 1] >> 18) & cp_mask
           if c2 == :-* || c2 == :-&
             pos += 2
-          elsif (lc[pos + 1] & 0x01) != 0
-            pos += 1
-            while pos < count && (lc[pos] & 0x01) != 0
-              pos++
-
       len = pos - start
       match = 0
       if len == 8

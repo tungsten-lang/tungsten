@@ -23,6 +23,15 @@ failures += ffrpot_expect("unsupported rejected", ffrpo_parse_shapes("9x9x9", []
 body = "schema=1 cpu_moves=123 gpu_failures=2\n"
 failures += ffrpot_expect("status integer", ffrpo_status_i64(body, "cpu_moves", 0) == 123 && ffrpo_status_i64(body, "missing", 7) == 7)
 failures += ffrpot_expect("backoff bounded", ffrpo_backoff(1) == 2 && ffrpo_backoff(9) == 16)
+# Straggler-fill helpers: predict slowest base quota finish; fill while one
+# average round wall-time still fits before that deadline.
+failures += ffrpot_expect("base finish from measured wall", ffrpo_predict_base_finish_ms(1000, 5000, 4, 4, 1, 800) == 1800)
+failures += ffrpot_expect("base finish from live rate", ffrpo_predict_base_finish_ms(1000, 3000, 4, 2, 0, 0) == 5000)
+failures += ffrpot_expect("base finish unknown before first round", ffrpo_predict_base_finish_ms(1000, 1500, 4, 0, 0, 0) == 0)
+failures += ffrpot_expect("fill when avg fits remaining", ffrpo_should_fill_round(100, 1000, 1500) == 1)
+failures += ffrpot_expect("no fill when avg exceeds remaining", ffrpo_should_fill_round(100, 1000, 1050) == 0)
+failures += ffrpot_expect("no fill at or past deadline", ffrpo_should_fill_round(50, 2000, 2000) == 0)
+failures += ffrpot_expect("no fill with zero avg", ffrpo_should_fill_round(0, 1000, 2000) == 0)
 path_root = "/tmp/flipfleet_rect_portfolio_state"
 failures += ffrpot_expect("explicit best path isolation", ffrpo_best_path("/tmp/best", 1, "4x5x7", path_root) == "/tmp/best.4x5x7")
 failures += ffrpot_expect("default best uses live root", ffrpo_best_path("ignored", 0, "4x5x7", path_root) == path_root + "/checkpoints/gf2/4x5x7/best.txt")

@@ -117,7 +117,10 @@ if tokens.size == 0
     << "Usage: tungsten symbolicate SIDEMAP token..."
     exit(1)
   while line != nil
-    << line.rstrip
+    # Tungsten exposes the right-trim operation as String#rtrim. `rstrip` is
+    # Ruby-only and made the native profiler path fail precisely when reading
+    # a backtrace from stdin.
+    << line.rtrim
     i = 0
     while i < line.size
       if i + 5 <= line.size && line.slice(i, 5) == "__wy_"

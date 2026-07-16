@@ -422,7 +422,16 @@ use flipfleet_sat_cdcl
   prim = ffpsi_prim(c, f, um, vm, wm) ## i64
   aux = cells * (slots + 2) ## i64
   max_vars = prim + cells * slots + aux + 64 ## i64
-  clause_words = cells * slots * 30 + cells * (slots + 2) * 12 + (c + f) * (um + vm + wm + 8) * 4 + 300000 ## i64
+  # Learnt clauses live in the same arena and are never reclaimed, so deep
+  # campaigns must size it with the conflict budget (~16 words per learnt
+  # clause) or the solver reports -2 on arena exhaustion long before the
+  # budget binds.
+  learnt_words = budget * 16 ## i64
+  if learnt_words > 32000000
+    learnt_words = 32000000
+  if learnt_words < 0
+    learnt_words = 0
+  clause_words = cells * slots * 30 + cells * (slots + 2) * 12 + (c + f) * (um + vm + wm + 8) * 4 + 300000 + learnt_words ## i64
   sat = i64[ffcdcl_state_size(max_vars, clause_words)]
   if ffcdcl_init(sat, max_vars, seed) != 1
     return 0 - 2

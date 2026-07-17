@@ -39,9 +39,10 @@ use flipfleet_sym_anneal
 use flipfleet_pair_lift
 use flipfleet_ball_sat
 use flipfleet_align_relink
+use flipfleet_psi252_descent_lib
 
 -> ffmi_lane_count() i64
-  12
+  13
 
 -> ffmi_lane_name(lane) (i64)
   if lane == 0
@@ -68,6 +69,8 @@ use flipfleet_align_relink
     return "ball-sat"
   if lane == 11
     return "align-relink"
+  if lane == 12
+    return "psi-descent"
   "unknown"
 
 # ---------------------------------------------------------------------------
@@ -77,7 +80,7 @@ use flipfleet_align_relink
 #   3 dry streak, 4 dwell, 5 promoted, 6 total ms, 7 last result
 
 -> ffmi_state_size() i64
-  16 + 12 * 8
+  16 + 13 * 8
 
 -> ffmi_state_init(st) (i64[]) i64
   i = 0 ## i64
@@ -85,10 +88,10 @@ use flipfleet_align_relink
     st[i] = 0
     i += 1
   st[0] = 1179015525
-  st[1] = 1
-  st[2] = 12
+  st[1] = 2
+  st[2] = 13
   lane = 0 ## i64
-  while lane < 12
+  while lane < 13
     st[16 + lane * 8 + 4] = 1
     lane += 1
   1
@@ -128,7 +131,7 @@ use flipfleet_align_relink
 -> ffmi_pick(st) (i64[]) i64
   tries = 0 ## i64
   while tries < 24
-    lane = st[3] % 12 ## i64
+    lane = st[3] % 13 ## i64
     st[3] = st[3] + 1
     base = ffmi_lane_base(lane) ## i64
     if st[base + 4] > 0
@@ -136,7 +139,7 @@ use flipfleet_align_relink
     if st[4] % 16 == 0
       return lane
     tries += 1
-  st[3] % 12
+  st[3] % 13
 
 # ---------------------------------------------------------------------------
 # Persistence (space-separated decimal words).
@@ -164,7 +167,7 @@ use flipfleet_align_relink
   while i < ffmi_state_size()
     st[i] = parts[i].to_i()
     i += 1
-  if st[0] != 1179015525 || st[2] != 12
+  if st[0] != 1179015525 || st[2] != 13
     return 0
   1
 
@@ -391,6 +394,38 @@ use flipfleet_align_relink
         score = 1000
       if overlap > 0
         out[0] = 0
+  if lane == 12
+    # Bounded psi-equivariant descent from the checked-in rank-18 witness:
+    # a hit is a psi-symmetric rank-17 <2,2,5> record candidate; every
+    # certified-UNSAT residual extends the local-rigidity certificate.
+    content = read_file("benchmarks/matmul/metaflip/matmul_2x5x2_rank18_psi_symmetric_gf2.txt")
+    if content != nil
+      wl = content.split("\n")
+      wrank = wl[0].to_i() ## i64
+      if wrank >= 2 && wrank <= 60
+        wu = i64[wrank + 2]
+        wv = i64[wrank + 2]
+        ww = i64[wrank + 2]
+        t = 0 ## i64
+        while t < wrank
+          parts = wl[1 + t].split(" ")
+          wu[t] = parts[0].to_i()
+          wv[t] = parts[1].to_i()
+          ww[t] = parts[2].to_i()
+          t += 1
+        dmeta = i64[8]
+        depth_p = 1 ## i64
+        depth_f = 1 ## i64
+        dbudget = 20000 ## i64
+        if budget_class > 0
+          depth_p = 2
+          depth_f = 2
+          dbudget = 150000
+        dh = ffpds_sweep(wu, wv, ww, wrank, depth_p, depth_f, dbudget, seed, "/tmp/ffmi_psi_descent_hit.txt", dmeta) ## i64
+        if dh > 0
+          score = 1000
+        if dh >= 0
+          out[0] = dmeta[1]
   out[1] = ccall("__w_clock_ms") - started
   score
 

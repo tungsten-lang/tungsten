@@ -18,7 +18,7 @@ use flipfleet_move_intake
 # --- accounting policies on synthetic results -------------------------------------
 st = i64[ffmi_state_size()]
 z = ffmi_state_init(st)
-z = ffmit_expect("init magic", st[0] == 1179015525 && st[2] == 12)
+z = ffmit_expect("init magic", st[0] == 1179015525 && st[2] == 13)
 base = ffmi_lane_base(3) ## i64
 z = ffmi_account(st, 3, 0, 1, 5)
 z = ffmit_expect("dry pull counted", st[base] == 1 && st[base + 1] == 0 && st[base + 2] == 1 && st[base + 3] == 1)
@@ -67,14 +67,14 @@ z = ffmit_expect("picker skips dimmed lane", picked != 5)
 live = i64[ffmi_state_size()]
 z = ffmi_state_init(live)
 step = 0 ## i64
-while step < 12
+while step < 13
   lane = ffmi_step(live, 24601 + step * 7, 0)
   step += 1
 lane = 0
-while lane < 12
+while lane < 13
   z = ffmit_expect("every lane ran once", live[ffmi_lane_base(lane)] == 1)
   lane += 1
-z = ffmit_expect("twelve steps recorded", live[4] == 12)
+z = ffmit_expect("thirteen steps recorded", live[4] == 13)
 z = ffmit_expect("state persists after rotation", ffmi_save(live, path) == 1)
 
 << "flipfleet_move_intake_test: all checks passed"

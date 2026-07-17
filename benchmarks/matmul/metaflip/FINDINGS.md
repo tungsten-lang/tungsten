@@ -2875,3 +2875,17 @@ against every one-fewer-term psi-invariant replacement profile: all
 seconds each.  The witness is psi-locally rigid at excision depth
 (2,2) -- the psi-analog of k-local minimality, and a genuinely new
 certificate class for the campaign.
+
+### 2026-07-17 loop postscript: steady state
+
+The rank-18 witness hunt closed out: (8,2), (7,4), (5,8) all
+indeterminate at hour-scale cryptominisat, so the psi rank-18 class
+stands at one checked-in witness, (9,0) certified empty, three cells
+open.  psi-descent now runs in the thirteen-lane intake rotation
+(depth (2,2) per occasional pull, ~170 certified residuals each);
+deeper progress on the rank-17 gap needs day-scale solver budgets on
+the four balanced cells or a new structural idea (psi x C2 combined
+quotients, descent from non-rigid witnesses yet to be found).
+Reproduce: /tmp-built drivers flipfleet_psi252_{campaign,export,
+export_xnf,decode,descent} and flipfleet_move_intake_run, all
+checked in.

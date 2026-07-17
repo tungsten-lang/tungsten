@@ -2832,3 +2832,25 @@ accounting, a strict yield-versus-closure split, and a promotion print
 that points at the GPU_KERNEL_POOL.md registration recipe once a lane
 earns pool width with verified wins.  None starts with live width -- the
 standing rule that negative experiments stay reproducible benchmarks.
+
+## 2026-07-16 (evening): psi rank-17 class 5/9 closed, two pair-lift doors
+
+The <2,5,2> (rotated <2,2,5>) rank-17 psi-symmetric class now has FIVE of
+its nine (pairs, fixed) partition cells certified UNSAT: (8,1), (2,13),
+(1,15), (0,17) by the in-process CDCL (flipfleet_psi252_campaign, lex
+SBPs, budget-scaled arenas), and (3,11) by cryptominisat5 in 68 seconds
+on the exact DIMACS export (ffcdcl_dump_dimacs) -- the first
+independent-solver confirmation lane.  The four open cells (7,3), (6,5),
+(5,7), (4,9) resisted 600-818k in-process conflicts AND 30-minute
+cryptominisat slots each; the hardness concentrates where the pair and
+fixed counts balance.  Next levers: XNF export with native x-lines so
+Gaussian elimination sees the row structure, and hour-scale timeouts.
+A full 9/9 would prove no psi-symmetric <2,2,5> rank-17 scheme exists;
+any SAT is an outright record.
+
+The pair-lift crossover is now a working door factory: two new exact
+<2,2,5> rank-18 doors checked in (d87 at distance 4 from d84; d91 at
+distance 4 from d88; mutually far), both regenerated deterministically
+and re-gated from file bytes.  The twelve-lane intake runner promoted
+pair-lift on its first verified yield; suture sweeps over the new door
+pairs are logged clean negatives with informative defect-rank profiles.

@@ -305,8 +305,30 @@ use flipfleet_sat_cdcl
     q += 1
   1
 
-# Encode the (c, f) existence instance.  Returns 1, or 0 on arena failure.
--> ffpsi_encode(sat, n, m, c, f) (i64[] i64 i64 i64 i64) i64
+# Bit of a dense cell-indexed GF(2) target (cell = (a*vm + b)*wm + cc).
+-> ffpsi_target_bit(target, cell) (i64[] i64) i64
+  (target[cell / 64] >> (cell % 64)) & 1
+
+# XOR a rank-one tensor into a dense cell-indexed target.
+-> ffpsi_xor_outer(target, u, v, w, um, vm, wm) (i64[] i64 i64 i64 i64 i64 i64) i64
+  a = 0 ## i64
+  while a < um
+    if ((u >> a) & 1) == 1
+      b = 0 ## i64
+      while b < vm
+        if ((v >> b) & 1) == 1
+          cc = 0 ## i64
+          while cc < wm
+            if ((w >> cc) & 1) == 1
+              cell = (a * vm + b) * wm + cc ## i64
+              target[cell / 64] = target[cell / 64] ^ (1 << (cell % 64))
+            cc += 1
+        b += 1
+    a += 1
+  1
+
+# Guards, symmetry, and Tseitin products (everything except the rows).
+-> ffpsi_encode_structure(sat, n, m, c, f) (i64[] i64 i64 i64 i64) i64
   p = n ## i64
   um = n * m ## i64
   vm = m * p ## i64
@@ -402,30 +424,59 @@ use flipfleet_sat_cdcl
         return 0
       slot += 1
     cell += 1
-  # Pass 2: one XOR row per cell (rhs = matmul coefficient).
-  cell = 0
+  1
+
+# Encode a (c, f) psi-invariant instance whose rows equal an ARBITRARY
+# psi-invariant target tensor (dense bitset over the cell index
+# (a*vm + b)*wm + cc) -- the matmul target for whole-scheme existence, or
+# an excision residual for descent surgery.  Returns 1, or 0 on arena
+# failure.
+-> ffpsi_encode_target(sat, n, m, c, f, target) (i64[] i64 i64 i64 i64 i64[]) i64
+  p = n ## i64
+  um = n * m ## i64
+  vm = m * p ## i64
+  wm = n * p ## i64
+  cells = um * vm * wm ## i64
+  prim = ffpsi_prim(c, f, um, vm, wm) ## i64
+  slots = 2 * c + f ## i64
+  xvars = i64[slots + 2]
+  if ffpsi_encode_structure(sat, n, m, c, f) != 1
+    return 0
+  cell = 0 ## i64
+  while cell < cells
+    slot = 0 ## i64
+    while slot < slots
+      xvars[slot] = ffpsi_product_var(prim, slots, cell, slot)
+      slot += 1
+    if ffcdcl_add_xor(sat, xvars, slots, ffpsi_target_bit(target, cell)) != 1
+      return 0
+    cell += 1
+  1
+
+# Whole-scheme existence: rows equal the matmul tensor.
+-> ffpsi_encode(sat, n, m, c, f) (i64[] i64 i64 i64 i64) i64
+  p = n ## i64
+  um = n * m ## i64
+  vm = m * p ## i64
+  wm = n * p ## i64
+  cells = um * vm * wm ## i64
+  target = i64[cells / 64 + 2]
+  cell = 0 ## i64
   while cell < cells
     cc = cell % wm ## i64
     rest = cell / wm ## i64
     b = rest % vm ## i64
     a = rest / vm ## i64
-    slot = 0
-    while slot < slots
-      xvars[slot] = ffpsi_product_var(prim, slots, cell, slot)
-      slot += 1
     i = a / m ## i64
     j = a % m ## i64
     j2 = b / p ## i64
     k2 = b % p ## i64
     i2 = cc / p ## i64
     kk = cc % p ## i64
-    want = 0 ## i64
     if j == j2 && i == i2 && k2 == kk
-      want = 1
-    if ffcdcl_add_xor(sat, xvars, slots, want) != 1
-      return 0
+      target[cell / 64] = target[cell / 64] | (1 << (cell % 64))
     cell += 1
-  1
+  ffpsi_encode_target(sat, n, m, c, f, target)
 
 # Decode a model into the expanded term list (2c + f raw terms; caller
 # parity-compacts through toggles or accepts the raw list -- distinct

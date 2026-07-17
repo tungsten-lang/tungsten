@@ -2854,3 +2854,24 @@ distance 4 from d88; mutually far), both regenerated deterministically
 and re-gated from file bytes.  The twelve-lane intake runner promoted
 pair-lift on its first verified yield; suture sweeps over the new door
 pairs are logged clean negatives with informative defect-rank profiles.
+
+## 2026-07-17: psi-symmetric rank-18 witness and its local rigidity
+
+cryptominisat found the (6 pairs, 6 fixed) rank-18 cell SATISFIABLE on
+the exact export; the decoded, gated witness is checked in as
+`matmul_2x5x2_rank18_psi_symmetric_gf2.txt` (density 110) -- the first
+psi-symmetric <2,5,2> rank-18 scheme.  The psi class is therefore
+INHABITED at 18, so the five certified rank-17 cell closures speak
+about rank, not vacuous symmetry.  The four open rank-17 cells
+((7,3), (6,5), (5,7), (4,9)) also survived hour-long cryptominisat
+runs on native-XOR (XNF) exports with Gaussian elimination -- parked as
+deeply hard.
+
+psi-equivariant descent surgery (flipfleet_psi252_descent, the
+equivariant-surgery pattern transplanted to the transpose involution)
+then swept every (<= 2 pairs, <= 2 fixed) excision of the witness
+against every one-fewer-term psi-invariant replacement profile: all
+156 residual instances CERTIFIED UNSAT with zero indeterminates, in
+seconds each.  The witness is psi-locally rigid at excision depth
+(2,2) -- the psi-analog of k-local minimality, and a genuinely new
+certificate class for the campaign.

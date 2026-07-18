@@ -272,6 +272,26 @@ within the 10% bar. Confirmed C-VM constraint: compiler source cannot use
 <<~ heredocs (implementations/c stage-0 lexer has none); they work only in
 the self-hosted compiler + user programs. 20 builtins ported.
 
+## Perf-loop round (2026-07-18): JSON encode win + parse negative
+
+WIN: JSON.encode_string fast path (49da264) — skip the s.chars array +
+per-char append when no char needs escaping (include? SIMD check), wrap
+whole. String-heavy JSON.encode -62%.
+
+NEGATIVE (don't re-try): a symmetric parse_string_chars "fast path"
+(scan for closing quote, then chars.slice(start,len).join("")) REGRESSED
+~25%. The pristine one-pass StringBuffer per-char append is already
+efficient; the scan is a wasted second pass and slice+join adds two
+allocations. A real parse win needs byte-indexed parsing to avoid the
+upfront s.chars array entirely (s.slice is byte-indexed, chars array is
+codepoint-indexed — they don't align, so it's a full refactor, not a slot
+job). Also: benchmarking JSON.parse fights aggressive DCE — the compiler
+elides the parse unless a data-dependent value (a parsed string field
+that varies per iteration) is consumed.
+
+Bignum wins this loop: schoolbook pre-zero via bn_mul_1 (785b1c5, -10%);
+base conversion chunked by base^k (f89414e, ~14x on to_s(16)).
+
 ## The blocking finding: fixed method-call overhead
 
 Every failed port lost to the same tax: a dispatched Tungsten type-class

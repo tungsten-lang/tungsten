@@ -23,8 +23,17 @@
 
 + JSON
   -> .parse(s)
-    chars = s.chars
-    result = parse_value_chars(s, chars, 0)
+    # Byte-indexed parse: a borrowed u8[] view of the input replaces the old
+    # s.chars array (which allocated one String per codepoint of the whole
+    # document). Structural bytes are ASCII (< 0x80) and UTF-8 lead/
+    # continuation bytes are all >= 0x80, so scanning bytes for the ASCII
+    # delimiters never trips on multibyte content; string/number values are
+    # sliced out of s (s.slice is byte-indexed, so it stays multibyte-exact).
+    # The view is threaded through (not a raw pointer) so it can't be freed
+    # underneath the recursion.
+    view = ccall("w_string_bytes_view", s) ## u8[]
+    n = view.size
+    result = parse_value_b(s, view, n, 0)
     result[0]
 
   -> .encode(value)
@@ -96,128 +105,135 @@
 
   # -- Internal parsing --
 
-  -> .skip_ws(s, pos)
-    skip_ws_chars(s.chars, pos)
+  # Byte helpers. Structural JSON bytes (ASCII): " 34, \ 92, { 123, } 125,
+  # [ 91, ] 93, : 58, , 44, - 45, . 46, 0..9 48..57, space 32, tab 9, LF 10,
+  # CR 13, t 116, f 102, n 110, / 47, escapes r 114.
 
-  -> .skip_ws_chars(chars, pos)
-    while pos < chars.size
-      ch = chars[pos]
-      if ch != " " && ch != "\t" && ch != "\n" && ch != "\r"
+  -> .skip_ws_b(view, n, pos)
+    while pos < n
+      b = view[pos]
+      if b != 32 && b != 9 && b != 10 && b != 13
         return pos
       pos += 1
     pos
 
-  -> .parse_value(s, pos)
-    parse_value_chars(s, s.chars, pos)
+  -> .parse_value_b(s, view, n, pos)
+    pos = skip_ws_b(view, n, pos)
+    b = view[pos]
 
-  -> .parse_value_chars(s, chars, pos)
-    pos = skip_ws_chars(chars, pos)
-    ch = chars[pos]
-
-    if ch == "\""
-      return parse_string_chars(chars, pos)
-    if ch == "{"
-      return parse_object_chars(s, chars, pos)
-    if ch == "\["
-      return parse_array_chars(s, chars, pos)
-    if ch == "t"
+    if b == 34
+      return parse_string_b(s, view, n, pos)
+    if b == 123
+      return parse_object_b(s, view, n, pos)
+    if b == 91
+      return parse_array_b(s, view, n, pos)
+    if b == 116
       return [true, pos + 4]
-    if ch == "f"
+    if b == 102
       return [false, pos + 5]
-    if ch == "n"
+    if b == 110
       return [nil, pos + 4]
 
     # Number
-    parse_number_chars(s, chars, pos)
+    parse_number_b(s, view, n, pos)
 
-  -> .parse_string(s, pos)
-    parse_string_chars(s.chars, pos)
-
-  -> .parse_string_chars(chars, pos)
-    pos += 1  # skip opening "
+  -> .parse_string_b(s, view, n, pos)
+    start = pos + 1  # first content byte, past opening "
+    # Fast scan for the closing quote; if no backslash escape appears, the
+    # value is one byte-range slice of s — no StringBuffer, no per-char work.
+    e = start
+    while e < n
+      b = view[e]
+      if b == 34
+        return [s.slice(start, e - start), e + 1]
+      if b == 92
+        e = n  # escape present — fall to the slow builder below
+      else
+        e += 1
+    # Slow path (has escapes): copy non-escape byte-runs whole, decode escapes.
     out = StringBuffer(32)
-    while pos < chars.size
-      ch = chars[pos]
-      if ch == "\""
-        return [out.to_s, pos + 1]
-      if ch == "\\"
-        pos += 1
-        esc = chars[pos]
-        if esc == "n"
+    run_start = start
+    p = start
+    while p < n
+      b = view[p]
+      if b == 34
+        if p > run_start
+          out << s.slice(run_start, p - run_start)
+        return [out.to_s, p + 1]
+      if b == 92
+        if p > run_start
+          out << s.slice(run_start, p - run_start)
+        p += 1
+        esc = view[p]
+        if esc == 110
           out << "\n"
-        elsif esc == "r"
+        elsif esc == 114
           out << "\r"
-        elsif esc == "t"
+        elsif esc == 116
           out << "\t"
-        elsif esc == "\\"
+        elsif esc == 92
           out << "\\"
-        elsif esc == "\""
+        elsif esc == 34
           out << "\""
-        elsif esc == "/"
+        elsif esc == 47
           out << "/"
         else
-          out << esc
+          out << s.slice(p, 1)
+        p += 1
+        run_start = p
       else
-        out << ch
-      pos += 1
-    [out.to_s, pos]
+        p += 1
+    if p > run_start
+      out << s.slice(run_start, p - run_start)
+    [out.to_s, p]
 
-  -> .parse_number(s, pos)
-    parse_number_chars(s, s.chars, pos)
-
-  -> .parse_number_chars(s, chars, pos)
+  -> .parse_number_b(s, view, n, pos)
     start = pos
-    if chars[pos] == "-"
+    if view[pos] == 45
       pos += 1
-    while pos < chars.size && chars[pos] >= "0" && chars[pos] <= "9"
+    while pos < n && view[pos] >= 48 && view[pos] <= 57
       pos += 1
-    if pos < chars.size && chars[pos] == "."
+    if pos < n && view[pos] == 46
       pos += 1
-      while pos < chars.size && chars[pos] >= "0" && chars[pos] <= "9"
+      while pos < n && view[pos] >= 48 && view[pos] <= 57
         pos += 1
       return [s.slice(start, pos - start).to_f, pos]
     [s.slice(start, pos - start).to_i, pos]
 
-  -> .parse_object(s, pos)
-    parse_object_chars(s, s.chars, pos)
-
-  -> .parse_object_chars(s, chars, pos)
+  -> .parse_object_b(s, view, n, pos)
     pos += 1  # skip {
     result = {}
-    pos = skip_ws_chars(chars, pos)
-    if chars[pos] == "}"
+    pos = skip_ws_b(view, n, pos)
+    if view[pos] == 125
       return [result, pos + 1]
     while true
-      pos = skip_ws_chars(chars, pos)
-      key_result = parse_string_chars(chars, pos)
+      pos = skip_ws_b(view, n, pos)
+      key_result = parse_string_b(s, view, n, pos)
       key = key_result[0]
       pos = key_result[1]
-      pos = skip_ws_chars(chars, pos)
+      pos = skip_ws_b(view, n, pos)
       pos += 1  # skip :
-      val_result = parse_value_chars(s, chars, pos)
+      val_result = parse_value_b(s, view, n, pos)
       result[key] = val_result[0]
       pos = val_result[1]
-      pos = skip_ws_chars(chars, pos)
-      if chars[pos] == "}"
+      pos = skip_ws_b(view, n, pos)
+      if view[pos] == 125
         return [result, pos + 1]
       pos += 1  # skip ,
     [result, pos]
 
-  -> .parse_array(s, pos)
-    parse_array_chars(s, s.chars, pos)
-
-  -> .parse_array_chars(s, chars, pos)
+  -> .parse_array_b(s, view, n, pos)
     pos += 1  # skip [
     result = []
-    pos = skip_ws_chars(chars, pos)
-    if chars[pos] == "\]"
+    pos = skip_ws_b(view, n, pos)
+    if view[pos] == 93
       return [result, pos + 1]
     while true
-      val_result = parse_value_chars(s, chars, pos)
+      val_result = parse_value_b(s, view, n, pos)
       result.push(val_result[0])
       pos = val_result[1]
-      pos = skip_ws_chars(chars, pos)
-      if chars[pos] == "\]"
+      pos = skip_ws_b(view, n, pos)
+      if view[pos] == 93
         return [result, pos + 1]
       pos += 1  # skip ,
     [result, pos]

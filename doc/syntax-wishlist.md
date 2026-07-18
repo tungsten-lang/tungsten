@@ -45,3 +45,38 @@ pain. Each entry notes the workaround used today.
    method" only in programs that never touch a trigger method. Wish: the
    registry could be generated from the class files themselves (the
    manifest already knows class -> file).
+
+## From rounds 5-12 of the C-builtin ports (2026-07-18)
+
+8. **Inline-string construction is raw bit assembly.** Building a small
+   result String in `$value` bits (swapcase, capitalize, chr, to_s, reverse,
+   chars) means hand-assembling `tag | (len << 1) | (byte << (4 + 8*i))` with
+   the magic tag `-1_970_324_836_974_592` (0xFFF9…) repeated in every method.
+   Wish: a `String.from_bytes(b0, b1, …)` / `String.inline(bytes, len)`
+   builder, or literal hex WValue tags (`0xFFF9_0000_0000_0000` as an i64
+   literal) so the mask isn't a hand-computed signed decimal.
+
+9. **Signed-decimal masks for bit ops.** Clearing a payload needs
+   `& -281474976710641` (0xFFFF00000000000F as signed i64). Writing masks as
+   negative decimals is unreadable and error-prone. Wish: unsigned/hex i64
+   literals usable directly in `&`/`|` without the two's-complement hand-conversion.
+
+10. **`u8[]`-to-steal costs a WArray header.** Building a byte buffer to hand
+   to `w_string_take_byte_array` allocates a full WArray (header + slots), so
+   it only wins when it replaces the C handler's own allocation; when C built
+   in place on a bare malloc (String#reverse slab path), the Tungsten port
+   had to delegate the tail to C. Wish: a bare-buffer type (owned `u8*` with
+   length, no WArray header) for transient byte assembly.
+
+11. **New ccall primitives must be hand-registered in the interpreter.** Any
+   `ccall`/`ccall_nobox` name a core method uses must be added to a giant
+   `when "name"` allowlist in interpreter.w or `-e`/eval dies with
+   "Unsupported ccall" while the compiled path works (hit twice:
+   w_string_take_byte_array, w_string_bytes_view). Wish: a single declarative
+   whitelist table shared by the interpreter and lowering, or auto-derivation
+   from the ccall sites.
+
+12. **`0.0` is Decimal, `~0.0` is Float — silent in arithmetic.** A bench
+   accumulator `t = 0.0` then `t += clock()-t0` died with "numeric + double"
+   because bare `0.0` is a Decimal literal. Wish: clearer diagnostics, or a
+   lint when a Decimal and Float mix in `+`.

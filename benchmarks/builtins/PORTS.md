@@ -249,6 +249,19 @@ lowering.w --ll -8%; full compiler build -13% (~14.5s -> 12.6s).
 Session tally: 17 builtins ported (all >= C) + 8 compiler speedups.
 lowering.w --ll from ~3.65s at session start to ~2.88s (~21% total).
 
+## Round 13 (2026-07-18) — String#bytes (+ confirmed compiler is well-optimized)
+
+Profiled the WHOLE-compiler compile (~11.9s, a much better window than
+lowering.w's 2.9s): autoload walker gone (round-12 win holds), remaining
+main-thread cost is fundamental (w_eq, hash lookups, dispatch, strbuf
+growth memmove) and near-optimal — strbuf grows 2x already. The compiler
+is in good shape (~21% faster than session start).
+
+Ported String#bytes: inline receivers read bytes from $value (no view
+alloc), slab/heap via data-ptr. First cut used a uniform u8[] view and
+lost ~20% to the WArray-header alloc; the split flipped it to ~56ns vs C
+~62ns (-10%). 18 builtins ported, all >= C.
+
 ## The blocking finding: fixed method-call overhead
 
 Every failed port lost to the same tax: a dispatched Tungsten type-class

@@ -238,6 +238,17 @@ result below), and reordering the out-of-line w_eq is discouraged by its
 own comment. type()/hash/array-access hot spots are handled. Session net:
 15 builtins ported (all >= C), lowering.w compile ~3.65s -> ~3.14s.
 
+## Round 12 (2026-07-18) — incremental autoload walk (biggest compiler win)
+
+autoload_pass re-walked the whole growing AST every fixpoint iteration;
+collect_autoload_refs was the #1 hot compiler fn (~7%). Now deep-walks
+only newly-appended expressions each iteration. Proven safe by
+byte-identical --ll across 4 compiler modules + stage1==stage2 + specs.
+lowering.w --ll -8%; full compiler build -13% (~14.5s -> 12.6s).
+
+Session tally: 17 builtins ported (all >= C) + 8 compiler speedups.
+lowering.w --ll from ~3.65s at session start to ~2.88s (~21% total).
+
 ## The blocking finding: fixed method-call overhead
 
 Every failed port lost to the same tax: a dispatched Tungsten type-class

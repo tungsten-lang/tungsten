@@ -2978,17 +2978,42 @@ static WValue bigint_to_s_base_impl(WBigint *b, int base) {
     char *buf = (char *)malloc(cap);
     if (!buf) die("out of memory converting bigint to string");
 
+    /* Chunk k digits per full-magnitude divide instead of one, exactly as the
+     * base-10 path does: divide by base^k (the largest power of base that fits
+     * a u64), then split each u64 remainder into k base-digits. k× fewer
+     * O(wlen) divide passes — e.g. 15× for base 16, 63× for base 2 — turning
+     * the former one-digit-per-pass loop from ~O(n²) into ~O(n²/k). */
+    uint64_t chunk = 1;
+    int k = 0;
+    while (chunk <= (uint64_t)0xFFFFFFFFFFFFFFFFULL / (uint64_t)base) {
+        chunk *= (uint64_t)base;
+        k++;
+    }
     int32_t wlen = abs_len;
     size_t pos = 0;
     while (wlen > 0) {
         __uint128_t rem = 0;
         for (int32_t i = wlen - 1; i >= 0; i--) {
             __uint128_t cur = (rem << 64) | work[i];
-            work[i] = (uint64_t)(cur / (uint64_t)base);
-            rem = cur % (uint64_t)base;
+            work[i] = (uint64_t)(cur / chunk);
+            rem = cur % chunk;
         }
-        buf[pos++] = digits[(int)rem];
         while (wlen > 0 && work[wlen - 1] == 0) wlen--;
+        uint64_t r = (uint64_t)rem;
+        if (wlen > 0) {
+            /* Interior chunk: emit exactly k digits (LSB first), zero-padded
+             * so higher chunks line up. */
+            for (int d = 0; d < k; d++) {
+                buf[pos++] = digits[(int)(r % (uint64_t)base)];
+                r /= (uint64_t)base;
+            }
+        } else {
+            /* Most-significant chunk: no leading zeros. */
+            do {
+                buf[pos++] = digits[(int)(r % (uint64_t)base)];
+                r /= (uint64_t)base;
+            } while (r != 0);
+        }
     }
 
     if (b->size < 0) buf[pos++] = '-';

@@ -201,6 +201,16 @@ of the buffer — fine when it replaces the C handler's own allocation
 on a bare malloc. For those, delegate the tail to a factored-out C
 helper and keep only the zero-alloc inline path in Tungsten.
 
+## Round 11 (2026-07-18) — String#chars (another shelved candidate, cracked)
+
+Round 9 shelved String#chars as "array of allocations". Cracked it: each
+element codepoint is <= 4 bytes, so build each single-char String inline
+in $value bits (zero per-char heap alloc) rather than w_string-per-char.
+Source via one w_string_bytes_view. 65ns vs C 88ns (-26%). 17 builtins
+ported. (Gotcha: w_string_bytes_view had to be added to the interpreter
+ccall allowlist — it was reachable only via the base64 wrapper before, so
+the compiled path worked but -e/eval raised "Unsupported ccall".)
+
 ## Round 9 (2026-07-18) — remaining candidates surveyed, ruled out
 
 Went looking for the next clean port; each remaining C handler was

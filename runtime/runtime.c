@@ -13624,6 +13624,15 @@ static int w_hash_key_eq(WValue a, WValue b) {
     if (a == b) return 1;
     if ((w_is_rope(a) || w_is_stringy(a)) && (w_is_rope(b) || w_is_stringy(b))) {
         if (w_is_symbol(a) != w_is_symbol(b)) return 0;
+        /* Inline (mode 0-5) and slab (mode 6) strings/symbols are canonical
+         * by bit pattern: equal content interns to one identity, so a != b
+         * (checked above) within the same storage class means unequal — no
+         * content compare. This is w_eq's fast path, and it matters most
+         * exactly here: colliding hash keys (both slab-interned method names
+         * / AST field symbols in the compiler) were paying a full memcmp per
+         * probe step to conclude "different". */
+        if ((w_is_inline(a) && w_is_inline(b)) || (w_is_slab(a) && w_is_slab(b)))
+            return 0;
         return w_string_compare(a, b) == 0;
     }
     if (is_decimal_any(a) && is_decimal_any(b))

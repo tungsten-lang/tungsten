@@ -17419,50 +17419,86 @@ WValue w_switch_canonical(WValue v) {
 
 /* ---- Type introspection ---- */
 
+/* Cached type-name WValues. type() is called constantly by the compiler's
+ * slab-AST walkers, and w_string() on a name >= 6 bytes ("String",
+ * "Integer", "Symbol", "Unknown", …) re-interns it — a wyhash + slab probe
+ * — every call. These names are constant, so intern each once and return the
+ * cached WValue thereafter. Lazily filled on first __w_type call (the slab
+ * must be up); the sentinel is g_typenames_ready, since a valid WValue can
+ * be 0 only for W_NIL which no name equals. */
+static int g_typenames_ready = 0;
+static WValue g_tn_nil, g_tn_bool, g_tn_int, g_tn_bigint, g_tn_float,
+    g_tn_string, g_tn_strbuf, g_tn_symbol, g_tn_char, g_tn_big_array,
+    g_tn_small_array, g_tn_array, g_tn_hash, g_tn_range, g_tn_regex,
+    g_tn_decimal, g_tn_currency, g_tn_quantity, g_tn_duration, g_tn_date,
+    g_tn_complex, g_tn_rational, g_tn_color, g_tn_ipv4, g_tn_ipv6, g_tn_mac,
+    g_tn_uuid, g_tn_mmap, g_tn_object, g_tn_class, g_tn_unknown;
+
+static void w_typenames_init(void) {
+    g_tn_nil = w_string("Nil");            g_tn_bool = w_string("Boolean");
+    g_tn_int = w_string("Integer");        g_tn_bigint = w_string("BigInt");
+    g_tn_float = w_string("Float");        g_tn_string = w_string("String");
+    g_tn_strbuf = w_string("StringBuffer");g_tn_symbol = w_string("Symbol");
+    g_tn_char = w_string("Char");          g_tn_big_array = w_string("BigArray");
+    g_tn_small_array = w_string("SmallArray"); g_tn_array = w_string("Array");
+    g_tn_hash = w_string("Hash");          g_tn_range = w_string("Range");
+    g_tn_regex = w_string("Regex");        g_tn_decimal = w_string("Decimal");
+    g_tn_currency = w_string("Currency");  g_tn_quantity = w_string("Quantity");
+    g_tn_duration = w_string("Duration");  g_tn_date = w_string("Date");
+    g_tn_complex = w_string("Complex");    g_tn_rational = w_string("Rational");
+    g_tn_color = w_string("Color");        g_tn_ipv4 = w_string("IPv4");
+    g_tn_ipv6 = w_string("IPv6");          g_tn_mac = w_string("MAC");
+    g_tn_uuid = w_string("UUID");          g_tn_mmap = w_string("Mmap");
+    g_tn_object = w_string("Object");      g_tn_class = w_string("Class");
+    g_tn_unknown = w_string("Unknown");
+    g_typenames_ready = 1;
+}
+
 WValue __w_type(WValue v) {
-    if (w_is_nil(v))    return w_string("Nil");
-    if (w_is_bool(v))   return w_string("Boolean");
-    if (w_is_int(v))    return w_string("Integer");
-    if (w_is_bigint(v)) return w_string("BigInt");
-    if (w_is_double(v)) return w_string("Float");
-    if (w_is_string(v) || w_is_rope(v)) return w_string("String");
-    if (w_is_strbuf(v)) return w_string("StringBuffer");
-    if (w_is_symbol(v)) return w_string("Symbol");
-    if (w_is_char(v))   return w_string("Char");
-    if (w_is_big_array(v)) return w_string("BigArray");
-    if (w_is_small_array(v)) return w_string("SmallArray");
-    if (w_is_array(v) || w_is_body(v)) return w_string("Array");
-    if (w_is_hash(v))   return w_string("Hash");
-    if (w_is_range(v))  return w_string("Range");
-    if (w_is_regex(v))  return w_string("Regex");
-    if (w_is_decimal(v))  return w_string("Decimal");
-    if (w_is_currency(v)) return w_string("Currency");
-    if (w_is_quantity(v)) return w_string("Quantity");
-    if (w_is_duration(v)) return w_string("Duration");
-    if (w_is_date(v))     return w_string("Date");
-    if (w_is_complex(v))  return w_string("Complex");
-    if (w_is_rational(v)) return w_string("Rational");
-    if (w_is_color(v))    return w_string("Color");
-    if (w_is_ipv4(v))     return w_string("IPv4");
-    if (w_is_ipv6(v))     return w_string("IPv6");
-    if (w_is_mac(v))      return w_string("MAC");
-    if (w_is_obj(v) && w_subtag(v) == W_SUBTAG_UUID) return w_string("UUID");
-    if (w_is_mmap(v))     return w_string("Mmap");
+    if (__builtin_expect(!g_typenames_ready, 0)) w_typenames_init();
+    if (w_is_nil(v))    return g_tn_nil;
+    if (w_is_bool(v))   return g_tn_bool;
+    if (w_is_int(v))    return g_tn_int;
+    if (w_is_bigint(v)) return g_tn_bigint;
+    if (w_is_double(v)) return g_tn_float;
+    if (w_is_string(v) || w_is_rope(v)) return g_tn_string;
+    if (w_is_strbuf(v)) return g_tn_strbuf;
+    if (w_is_symbol(v)) return g_tn_symbol;
+    if (w_is_char(v))   return g_tn_char;
+    if (w_is_big_array(v)) return g_tn_big_array;
+    if (w_is_small_array(v)) return g_tn_small_array;
+    if (w_is_array(v) || w_is_body(v)) return g_tn_array;
+    if (w_is_hash(v))   return g_tn_hash;
+    if (w_is_range(v))  return g_tn_range;
+    if (w_is_regex(v))  return g_tn_regex;
+    if (w_is_decimal(v))  return g_tn_decimal;
+    if (w_is_currency(v)) return g_tn_currency;
+    if (w_is_quantity(v)) return g_tn_quantity;
+    if (w_is_duration(v)) return g_tn_duration;
+    if (w_is_date(v))     return g_tn_date;
+    if (w_is_complex(v))  return g_tn_complex;
+    if (w_is_rational(v)) return g_tn_rational;
+    if (w_is_color(v))    return g_tn_color;
+    if (w_is_ipv4(v))     return g_tn_ipv4;
+    if (w_is_ipv6(v))     return g_tn_ipv6;
+    if (w_is_mac(v))      return g_tn_mac;
+    if (w_is_obj(v) && w_subtag(v) == W_SUBTAG_UUID) return g_tn_uuid;
+    if (w_is_mmap(v))     return g_tn_mmap;
     if (w_is_domain_obj(v)) {
         switch (w_as_domain(v)->domain_type) {
-            case W_DOMAIN_DECIMAL:  return w_string("Decimal");
-            case W_DOMAIN_CURRENCY: return w_string("Currency");
-            case W_DOMAIN_QUANTITY: return w_string("Quantity");
-            case W_DOMAIN_DURATION: return w_string("Duration");
+            case W_DOMAIN_DECIMAL:  return g_tn_decimal;
+            case W_DOMAIN_CURRENCY: return g_tn_currency;
+            case W_DOMAIN_QUANTITY: return g_tn_quantity;
+            case W_DOMAIN_DURATION: return g_tn_duration;
         }
     }
     if (w_is_instance(v)) {
         WObject *obj = (WObject *)w_as_ptr(v);
         if (g_class_table[obj->class_id]) return w_string(g_class_table[obj->class_id]->name);
-        return w_string("Object");
+        return g_tn_object;
     }
-    if (w_is_class(v)) return w_string("Class");
-    return w_string("Unknown");
+    if (w_is_class(v)) return g_tn_class;
+    return g_tn_unknown;
 }
 
 /* Compiler tree-walker support only. Keep synchronization-handle

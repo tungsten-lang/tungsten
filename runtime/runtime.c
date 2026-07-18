@@ -16777,38 +16777,43 @@ static inline void w_public_class_cache(unsigned slot, WValue value) {
     g_public_type_class[slot].resolved = 1;
 }
 
+/* Method names are hashed by CONTENT (w_hash_value), matching w_hash_key_eq.
+ * Insert-only open addressing with no tombstones, so probing from the content
+ * hash to the first empty slot is authoritative — a probe miss means the name
+ * is not in the table, even when the caller's WValue is a freshly-synthesized
+ * string/symbol that doesn't share slab-interned pointer identity. */
 static inline uint64_t w_method_name_hash(WValue name) {
-    return w_hash_splitmix64(name);
+    return w_hash_value(name);
 }
 
 static WMethod *w_method_table_probe(WMethod *table, int cap, WValue name, uint64_t hash) {
+    if (cap == 0) return NULL;
     uint64_t mask = (uint64_t)cap - 1;
     uint64_t idx = hash & mask;
     while (table[idx].name != 0) {
-        if (table[idx].name == name) return &table[idx];
+        if (w_hash_key_eq(table[idx].name, name)) return &table[idx];
         idx = (idx + 1) & mask;
     }
     return NULL;
 }
 
-static WMethod *w_method_table_find_by_content(WMethod *table, int cap, WValue name) {
-    for (int i = 0; i < cap; i++) {
-        if (table[i].name != 0 && w_hash_key_eq(table[i].name, name)) return &table[i];
+static WMethod *w_method_table_probe_arity(WMethod *table, int cap, WValue name, uint64_t hash, int arity) {
+    if (cap == 0) return NULL;
+    uint64_t mask = (uint64_t)cap - 1;
+    uint64_t idx = hash & mask;
+    while (table[idx].name != 0) {
+        if (table[idx].arity == arity && w_hash_key_eq(table[idx].name, name)) return &table[idx];
+        idx = (idx + 1) & mask;
     }
     return NULL;
 }
 
 static WMethod *w_method_table_lookup(WMethod *table, int cap, WValue name) {
-    WMethod *m = w_method_table_probe(table, cap, name, w_method_name_hash(name));
-    if (m) return m;
-    return w_method_table_find_by_content(table, cap, name);
+    return w_method_table_probe(table, cap, name, w_method_name_hash(name));
 }
 
 static WMethod *w_method_table_lookup_arity(WMethod *table, int cap, WValue name, int arity) {
-    for (int i = 0; i < cap; i++) {
-        if (table[i].name != 0 && table[i].arity == arity && w_hash_key_eq(table[i].name, name)) return &table[i];
-    }
-    return NULL;
+    return w_method_table_probe_arity(table, cap, name, w_method_name_hash(name), arity);
 }
 
 static WMethod *w_method_table_insert_slot(WMethod *table, int cap, WValue name, uint64_t hash) {
@@ -16866,7 +16871,7 @@ static WMethod *w_method_table_upsert_slot_arity(WMethod **table_ptr, int *count
 }
 
 static inline uint64_t w_ivar_name_hash(WValue name) {
-    return w_hash_splitmix64(name);
+    return w_hash_value(name);
 }
 
 static int w_ivar_lookup_capacity_for(int count) {
@@ -16900,7 +16905,7 @@ static int w_ivar_lookup_probe(WClass *klass, WValue name) {
     uint64_t mask = (uint64_t)klass->ivar_lookup_capacity - 1;
     uint64_t idx = w_ivar_name_hash(name) & mask;
     while (klass->ivar_lookup_names[idx] != 0) {
-        if (klass->ivar_lookup_names[idx] == name)
+        if (w_hash_key_eq(klass->ivar_lookup_names[idx], name))
             return klass->ivar_lookup_indices[idx];
         idx = (idx + 1) & mask;
     }
@@ -17092,8 +17097,9 @@ WValue w_ivar_set_idx(WValue obj_val, int idx, WValue val) {
 }
 
 static WMethod *w_method_lookup(WClass *klass, WValue name) {
+    uint64_t hash = w_method_name_hash(name);
     while (klass) {
-        WMethod *m = w_method_table_lookup(klass->methods, klass->method_capacity, name);
+        WMethod *m = w_method_table_probe(klass->methods, klass->method_capacity, name, hash);
         if (m) return m;
         klass = klass->superclass;
     }
@@ -17101,8 +17107,9 @@ static WMethod *w_method_lookup(WClass *klass, WValue name) {
 }
 
 static WMethod *w_method_lookup_arity(WClass *klass, WValue name, int arity) {
+    uint64_t hash = w_method_name_hash(name);
     while (klass) {
-        WMethod *m = w_method_table_lookup_arity(klass->methods, klass->method_capacity, name, arity);
+        WMethod *m = w_method_table_probe_arity(klass->methods, klass->method_capacity, name, hash, arity);
         if (m) return m;
         klass = klass->superclass;
     }

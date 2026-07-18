@@ -87,3 +87,9 @@ da9 = []
 << "rv6 " << "exactly a slab sized string ok".reverse
 << "rv7 " << "aβcδe".reverse
 << "rv8 " << "ab".reverse
+<< "ch1 " << "".chars
+<< "ch2 " << "a".chars
+<< "ch3 " << "hello".chars
+<< "ch4 " << "abé🎉".chars
+<< "ch5 " << "aβcδe".chars
+<< "ch6 " << "a longer ascii string here ok".chars.size

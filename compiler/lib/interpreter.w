@@ -1187,6 +1187,8 @@ use target
       if type(args[1]) != "Hash"
         raise "w_hash_set expects a Hash receiver"
       return ccall("w_hash_set", args[1], args[2], args[3])
+    when "w_string_bytes_view"
+      return ccall("w_string_bytes_view", args[1])
     when "w_base64_encode_input"
       return ccall("w_base64_encode_input", args[1])
     when "w_base64_decode_input"

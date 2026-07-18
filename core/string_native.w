@@ -147,3 +147,37 @@
     # allocation per call that pushes long strings over budget vs the former
     # handler; the inline fast path above already wins the common short case.
     ccall("w_string_reverse", self)
+
+  # Split into an Array of single-codepoint Strings, ported from the former C
+  # IC handler. Each codepoint is at most 4 bytes, so every element is built
+  # directly as an inline-mode String in register bits (tag 0xFFF9 | len<<1 |
+  # bytes) — no per-character heap allocation, where the C handler called
+  # w_string per char. Source bytes come through one borrowed u8[] view
+  # (w_string_bytes_view; inline receivers get an owned copy). Lead byte gives
+  # each codepoint's length, clamped to the remaining bytes like the C loop.
+  -> chars
+    ch_src = ccall("w_string_bytes_view", self) ## u8[]
+    ch_n = ch_src.size ## i64
+    ch_p = ccall_nobox("w_u8_live_data_ptr", ch_src) ## i64
+    out = []
+    ch_i = 0
+    while ch_i < ch_n
+      ch_b0 = raw_load_u8(ch_p, ch_i) ## i64
+      ch_clen = 1
+      if ch_b0 >= 240
+        ch_clen = 4
+      elsif ch_b0 >= 224
+        ch_clen = 3
+      elsif ch_b0 >= 192
+        ch_clen = 2
+      if ch_clen > ch_n - ch_i
+        ch_clen = ch_n - ch_i
+      ch_tag = -1_970_324_836_974_592 ## i64  # 0xFFF9000000000000
+      ch_val = (ch_tag | (ch_clen << 1)) ## i64
+      ch_k = 0
+      while ch_k < ch_clen
+        ch_val = ch_val | (raw_load_u8(ch_p, ch_i + ch_k) << (4 + 8 * ch_k))
+        ch_k += 1
+      out.push(wvalue_from_bits(ch_val))
+      ch_i += ch_clen
+    out

@@ -22789,7 +22789,7 @@ static void w_init_ic_tables(void) {
     w_ic_string_table[12].name = WN_ascii_q;
     w_ic_string_table[13].name = WN_valid_utf8_q;
     w_ic_string_table[14].name = WN_repeat;
-    w_ic_string_table[15].name = WN_chars;        /* Phase 7+h */
+    /* Slot 15 (chars) retired to core/string_native.w. */
     w_ic_string_table[16].name = WN_codes;
     w_ic_string_table[17].name = WN_lchs;
     w_ic_string_table[18].name = WN_bytes;

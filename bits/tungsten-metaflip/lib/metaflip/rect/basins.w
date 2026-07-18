@@ -90,3 +90,17 @@
     width = choices
   base = ffrcb_scheduled_door_choice(ticket, choices) ## i64
   (base * width) % choices
+
+# A plateau with no repeated factor on any axis has no ordinary pair-flip
+# edge. Alternate exact +1/+2 braided shoulders across lanes, and reverse the
+# parity on each portfolio restart, so a one-worker child also sees both debt
+# depths. A negative ticket preserves deterministic standalone lane ordering.
+-> ffrcb_initial_debt_depth(partnerable_incidences, lane, ticket) (i64 i64 i64) i64
+  if partnerable_incidences > 0
+    return 0
+  if lane < 0
+    lane = 0
+  phase = 0 ## i64
+  if ticket >= 0
+    phase = ticket & 1
+  1 + ((lane + phase) & 1)

@@ -330,6 +330,189 @@ use seeds/rect
           st[39] = st[39] + 1
   result
 
+# Count current-view (term,axis) incidences that have at least one ordinary
+# flip partner.  Zero is stronger than a low acceptance rate: every focused
+# pair-flip attempt is then a provable no-op until some rank-debt move creates
+# factor reuse.  This O(3R) audit runs only while constructing CPU islands.
+-> ffr_partnerable_incidences(st) (i64[]) i64
+  if ffr_valid(st) != 1 || st[6] < 2
+    return 0
+  incidences = 0 ## i64
+  index = 0 ## i64
+  while index < st[6]
+    slot = st[st[50] + index] ## i64
+    axis = 0 ## i64
+    while axis < 3
+      head = st[53] ## i64
+      nexto = st[56] ## i64
+      factoro = st[44] ## i64
+      if axis == 1
+        head = st[54]
+        nexto = st[58]
+        factoro = st[45]
+      if axis == 2
+        head = st[55]
+        nexto = st[60]
+        factoro = st[46]
+      key = st[factoro + slot] ## i64
+      if ffw_chain_count_min(st, head, nexto, factoro, key, slot, 0) > 0
+        incidences += 1
+      axis += 1
+    index += 1
+  incidences
+
+-> ffr_same_term(u0, v0, w0, u1, v1, w1) (i64 i64 i64 i64 i64 i64) i64
+  if u0 == u1 && v0 == v1 && w0 == w1
+    return 1
+  0
+
+# Apply one exact donor-aligned split followed by one forced braid, but retain
+# the resulting +1 shoulder instead of immediately merging it back.  For the
+# U-axis orientation, two source terms S=(us,vs,ws), D=(ud,vd,wd) become
+#
+#   (us^ud,vs,ws), (ud,vs,ws^wd), (ud,vs^vd,wd).
+#
+# Expanding those three rank-one tensors over GF(2) cancels the two interior
+# cross terms and yields S+D.  V/W are axis permutations.  Unlike a raw split,
+# this shoulder has two distinct continuation edges and cannot unwind through
+# the literal split inverse in one move.  Return the new rank, or zero without
+# leaving a partial mutation.
+-> ffr_braided_debt_step(st, nonce) (i64[] i64) i64
+  rank_before = st[6] ## i64
+  if rank_before < 2 || rank_before >= st[4]
+    return 0
+  code_count = rank_before * (rank_before - 1) * 3 ## i64
+  start = (nonce & 9223372036854775807) % code_count ## i64
+  attempt = 0 ## i64
+  while attempt < code_count
+    code = start + attempt ## i64
+    if code >= code_count
+      code -= code_count
+    axis = code % 3 ## i64
+    pair_code = code / 3 ## i64
+    source_index = pair_code / (rank_before - 1) ## i64
+    donor_index = pair_code % (rank_before - 1) ## i64
+    if donor_index >= source_index
+      donor_index += 1
+    source_slot = st[st[50] + source_index] ## i64
+    donor_slot = st[st[50] + donor_index] ## i64
+    su = st[st[44] + source_slot] ## i64
+    sv = st[st[45] + source_slot] ## i64
+    sw = st[st[46] + source_slot] ## i64
+    du = st[st[44] + donor_slot] ## i64
+    dv = st[st[45] + donor_slot] ## i64
+    dw = st[st[46] + donor_slot] ## i64
+
+    # All three inequalities hold automatically on a zero-partner plateau.
+    # Keep the guard so a second +1 step can safely choose from its shoulder.
+    if su != du && sv != dv && sw != dw
+      au = su ^ du ## i64
+      av = sv ## i64
+      aw = sw ## i64
+      bu = du ## i64
+      bv = sv ## i64
+      bw = sw ^ dw ## i64
+      cu = du ## i64
+      cv = sv ^ dv ## i64
+      cw = dw ## i64
+      if axis == 1
+        au = su
+        av = sv ^ dv
+        aw = sw
+        bu = su ^ du
+        bv = dv
+        bw = sw
+        cu = du
+        cv = dv
+        cw = sw ^ dw
+      if axis == 2
+        au = su
+        av = sv
+        aw = sw ^ dw
+        bu = su
+        bv = sv ^ dv
+        bw = dw
+        cu = su ^ du
+        cv = dv
+        cw = dw
+
+      distinct = 1 ## i64
+      if au == 0 || av == 0 || aw == 0 || bu == 0 || bv == 0 || bw == 0 || cu == 0 || cv == 0 || cw == 0
+        distinct = 0
+      if distinct == 1 && ffr_same_term(au,av,aw,bu,bv,bw) == 1
+        distinct = 0
+      if distinct == 1 && ffr_same_term(au,av,aw,cu,cv,cw) == 1
+        distinct = 0
+      if distinct == 1 && ffr_same_term(bu,bv,bw,cu,cv,cw) == 1
+        distinct = 0
+      # Precluding cancellation makes the requested rank debt explicit rather
+      # than relying on parity compaction to happen to produce +1.
+      if distinct == 1 && ffw_find_term(st, au, av, aw) >= 0
+        distinct = 0
+      if distinct == 1 && ffw_find_term(st, bu, bv, bw) >= 0
+        distinct = 0
+      if distinct == 1 && ffw_find_term(st, cu, cv, cw) >= 0
+        distinct = 0
+      if distinct == 1
+        old_bits = ffw_popcount(su) + ffw_popcount(sv) + ffw_popcount(sw) ## i64
+        old_bits += ffw_popcount(du) + ffw_popcount(dv) + ffw_popcount(dw)
+        new_bits = ffw_popcount(au) + ffw_popcount(av) + ffw_popcount(aw) ## i64
+        new_bits += ffw_popcount(bu) + ffw_popcount(bv) + ffw_popcount(bw)
+        new_bits += ffw_popcount(cu) + ffw_popcount(cv) + ffw_popcount(cw)
+        rank = rank_before ## i64
+        rank = ffw_toggle(st, su, sv, sw, rank)
+        rank = ffw_toggle(st, du, dv, dw, rank)
+        rank = ffw_toggle(st, au, av, aw, rank)
+        rank = ffw_toggle(st, bu, bv, bw, rank)
+        rank = ffw_toggle(st, cu, cv, cw, rank)
+        if rank == rank_before + 1
+          st[6] = rank
+          st[64] = st[64] + new_bits - old_bits
+          return rank
+        # An unexpected toggle result means an invariant above was incomplete.
+        # Fail closed on the exhaustively gated best rather than continuing
+        # from a partially applied setup word.
+        z = ffw_restore_best(st) ## i64
+        return 0
+    attempt += 1
+  0
+
+# Seed a verified R+1 or R+2 current shoulder while retaining the original
+# rank-R island best.  This is an initialization primitive, not a hot move:
+# every step is exhaustively exact-gated and any failure restores the best.
+-> ffr_seed_braided_debt(st, depth, nonce) (i64[] i64 i64) i64
+  if depth < 1 || depth > 2 || ffr_valid(st) != 1
+    return 0
+  base_rank = st[7] ## i64
+  if base_rank < 2 || st[6] != base_rank || base_rank + depth > st[4]
+    return 0
+  n = ffr_shape_n(st) ## i64
+  m = ffr_shape_m(st) ## i64
+  p = ffr_shape_p(st) ## i64
+  if ffr_verify_best_exact(st, n, m, p) != 1 || ffr_verify_current_exact(st, n, m, p) != 1
+    return 0
+  step = 0 ## i64
+  while step < depth
+    step_nonce = (nonce + (step + 1) * 104729) & 9223372036854775807 ## i64
+    rank = ffr_braided_debt_step(st, step_nonce) ## i64
+    if rank != base_rank + step + 1
+      z = ffw_restore_best(st) ## i64
+      return 0
+    if ffr_verify_current_exact(st, n, m, p) != 1
+      z = ffw_restore_best(st)
+      return 0
+    step += 1
+  # A +2 shoulder must start in a band that admits it; otherwise ffr_one's
+  # post-move guard would silently restore the best after its first proposal.
+  if st[10] < depth
+    st[10] = depth
+  if st[40] < depth
+    st[40] = depth
+  if st[41] < depth
+    st[41] = depth
+  st[64] = ffw_view_bits(st, st[44], st[45], st[46], st[50], st[6]) - st[36]
+  st[6]
+
 -> ffr_try_split(st) (i64[]) i64
   st[20] = st[20] + 1
   st[27] = st[27] + 1

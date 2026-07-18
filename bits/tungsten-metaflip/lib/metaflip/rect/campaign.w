@@ -145,6 +145,25 @@ use doors
     return nil
   dst
 
+# Turn only a provably edge-free current view into a verified braided debt
+# shoulder. Callers decide whether profile automation is allowed; explicit
+# --seed experiments intentionally never enter this helper.
+-> ffrc_seed_profile_debt(state, lane, ticket, nonce) (i64[] i64 i64 i64) i64
+  partnerable = ffr_partnerable_incidences(state) ## i64
+  depth = ffrcb_initial_debt_depth(partnerable, lane, ticket) ## i64
+  if depth > 0
+    rank = ffr_seed_braided_debt(state, depth, nonce) ## i64
+    if rank == ffr_best_rank(state) + depth
+      return depth
+    # A failed +2 transaction restores the exact best. Retain a productive
+    # lane by retrying the independently useful +1 setup with another word.
+    if depth == 2 && ffr_current_rank(state) == ffr_best_rank(state)
+      retry_nonce = (nonce + 32452843) & 9223372036854775807 ## i64
+      rank = ffr_seed_braided_debt(state, 1, retry_nonce)
+      if rank == ffr_best_rank(state) + 1
+        return 1
+  0
+
 # Run a bounded child command on a coordinator thread and retain its own wall
 # time.  The caller still owns the round barrier: joining this thread before
 # harvest guarantees that output publication and exact verification cannot
@@ -665,6 +684,15 @@ use doors
     if island == nil
       << "RECT_ERROR code=island-init tensor=" + tensor + " lane=" + lane.to_s()
       return 2
+    # Some exact record presentations have no repeated factor on any axis, so
+    # their focused pair-flip phase is provably inert. Default/profile starts
+    # put those islands directly on verified braided R+1/R+2 shoulders. Keep
+    # explicit --seed experiments byte-for-byte reproducible and unmodified.
+    if use_profile_frontier != 0
+      debt_nonce = ffrcb_seed(82703 + lane * 193, restart_nonce, lane, door_seed_slot) ## i64
+      debt_depth = ffrc_seed_profile_debt(island, lane, restart_door_ticket, debt_nonce) ## i64
+      if debt_depth > 0
+        island_source = island_source + "/braid+" + debt_depth.to_s()
     states.push(island)
     initial_sources.push(island_source)
     lane += 1
@@ -1034,8 +1062,16 @@ use doors
             old_door_bits = ffr_best_bits(states[alternate_lane]) ## i64
             door_clone = ffrc_clone_exact(gpu_candidate, n, m, p, capacity, 84201 + round * 149 + alternate_lane, dslack, cycles, workq, wanderq)
             if door_clone != nil
+              door_debt = 0 ## i64
+              if use_profile_frontier != 0
+                door_ticket = restart_door_ticket ## i64
+                if door_ticket >= 0
+                  door_ticket += round
+                door_debt = ffrc_seed_profile_debt(door_clone, alternate_lane, door_ticket, 84203 + round * 151 + alternate_lane * 193)
               states[alternate_lane] = door_clone
               island_sources[alternate_lane] = island_sources[alternate_lane] + "/gpu-r" + gpu_rank.to_s()
+              if door_debt > 0
+                island_sources[alternate_lane] = island_sources[alternate_lane] + "/braid+" + door_debt.to_s()
               island_last_rank[alternate_lane] = ffr_best_rank(door_clone)
               island_last_bits[alternate_lane] = ffr_best_bits(door_clone)
               island_last_moves[alternate_lane] = ffr_moves(door_clone)
@@ -1100,8 +1136,16 @@ use doors
       rebase_lane = round % walkers ## i64
       rebased = ffrc_clone_exact(best, n, m, p, capacity, 85001 + round * 149, dslack, cycles, workq, wanderq)
       if rebased != nil
+        rebase_debt = 0 ## i64
+        if use_profile_frontier != 0
+          rebase_ticket = restart_door_ticket ## i64
+          if rebase_ticket >= 0
+            rebase_ticket += round
+          rebase_debt = ffrc_seed_profile_debt(rebased, rebase_lane, rebase_ticket, 85003 + round * 157 + rebase_lane * 197)
         states[rebase_lane] = rebased
         island_sources[rebase_lane] = seed_door + "/rebase-r" + ffr_best_rank(best).to_s()
+        if rebase_debt > 0
+          island_sources[rebase_lane] = island_sources[rebase_lane] + "/braid+" + rebase_debt.to_s()
         island_last_rank[rebase_lane] = ffr_best_rank(rebased)
         island_last_bits[rebase_lane] = ffr_best_bits(rebased)
         island_last_moves[rebase_lane] = ffr_moves(rebased)
@@ -1160,8 +1204,16 @@ use doors
           while rw < walkers
             reseeded = ffrc_clone_exact(anchor, n, m, p, capacity, 87001 + round * 163 + rw * 991, dslack, cycles, workq, wanderq)
             if reseeded != nil
+              reseed_debt = 0 ## i64
+              if use_profile_frontier != 0
+                reseed_ticket = restart_door_ticket ## i64
+                if reseed_ticket >= 0
+                  reseed_ticket += round
+                reseed_debt = ffrc_seed_profile_debt(reseeded, rw, reseed_ticket, 87003 + round * 167 + rw * 997)
               states[rw] = reseeded
               island_sources[rw] = seed_door + "/manual-anchor"
+              if reseed_debt > 0
+                island_sources[rw] = island_sources[rw] + "/braid+" + reseed_debt.to_s()
               island_last_rank[rw] = ffr_best_rank(reseeded)
               island_last_bits[rw] = ffr_best_bits(reseeded)
               island_last_moves[rw] = ffr_moves(reseeded)

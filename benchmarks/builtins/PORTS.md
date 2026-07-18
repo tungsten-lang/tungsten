@@ -292,6 +292,26 @@ that varies per iteration) is consumed.
 Bignum wins this loop: schoolbook pre-zero via bn_mul_1 (785b1c5, -10%);
 base conversion chunked by base^k (f89414e, ~14x on to_s(16)).
 
+## Perf-loop survey (2026-07-18): verified already-fast (skip these)
+
+Probed and found well-optimized / not worth touching this round:
+- String#split, Array#flatten, Array#sort, Integer#** (square-and-multiply
+  already), bignum modpow (Montgomery REDC) / gcd — all fast or LICM-folded.
+- Compiler hot path (whole-compiler --ll profile): top C leaves are w_eq,
+  hash lookups (w_ic_hash_get/w_hash_value/w_hash_key_eq), method dispatch,
+  __w_type — all already tuned this session. Top SOURCE fn is
+  render_instruction; its cost is per-field hash lookups on the instruction
+  Hash + '+'-chain string building. Both need refactors (instructions are
+  Hashes, not structs; a StringBuffer/interp rewrite of every case), not a
+  slot-sized change.
+- Remaining big-refactor opportunities: JSON byte-indexed parse (avoid the
+  upfront codepoint chars array); instruction-Hash -> struct for O(1) field
+  access in render_instruction. Each is a focused project, not a 5m fire.
+
+Benchmarking note: the compiler aggressively DCE/LICM-folds pure ops with
+constant/loop-invariant inputs — vary the input AND consume a data-dependent
+result, or the workload measures nothing.
+
 ## The blocking finding: fixed method-call overhead
 
 Every failed port lost to the same tax: a dispatched Tungsten type-class

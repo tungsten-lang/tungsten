@@ -13,6 +13,11 @@
 << "swap2 " << "aB".swapcase
 << "swap3 " << "Hello, World! 123".swapcase
 << "swap4 " << "tiny".swapcase
+<< "swap5 " << "six4U!".swapcase
+<< "swap6 " << :aB.swapcase
+<< "swap7 " << "exactly slab sized str".swapcase
+<< "cap7 " << "sixCHR".capitalize
+<< "cap8 " << :abC.capitalize
 rev_empty = []
 << "rev1 " << rev_empty.reverse
 << "rev2 " << [1].reverse

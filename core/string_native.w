@@ -40,3 +40,70 @@
       mask = 0xFFFFFFFFFFFF ## i64
       return wvalue_from_bits((tag | (n & mask)) ## i64)
     ccall("w_int", n)
+
+  # ASCII case transforms, ported from the former runtime IC handlers.
+  # Inline-mode receivers (modes 0..5: length in bits 1..3, byte i at bits
+  # 4+8i) transform entirely in registers — no allocation at all, where the
+  # C handler malloc'd even for "a". Slab/heap receivers walk the raw bytes
+  # into one u8[n+1] buffer whose storage the result String then steals
+  # (w_string_take_byte_array), matching the C handler's single-buffer
+  # cost. Multibyte UTF-8 (bytes >= 0x80) passes through untouched, and a
+  # Symbol receiver yields a String (bit 0 cleared), byte-identical to the
+  # former C loops.
+  -> swapcase
+    sw_v = ($value & -2) ## i64
+    sw_mode = (sw_v >> 1) & 7
+    if sw_mode <= 5
+      sw_i = 0
+      while sw_i < sw_mode
+        sw_sh = 4 + 8 * sw_i
+        sw_b = (sw_v >> sw_sh) & 0xFF
+        if (sw_b >= 97 && sw_b <= 122) || (sw_b >= 65 && sw_b <= 90)
+          sw_v = sw_v ^ (32 << sw_sh)
+        sw_i += 1
+      return wvalue_from_bits(sw_v)
+    sw_n = ccall_nobox("w_string_byte_length", self) ## i64
+    sw_out = u8[sw_n + 1]
+    sw_src = ccall_nobox("w_string_data_ptr", self) ## i64
+    sw_dst = ccall_nobox("w_u8_live_data_ptr", sw_out) ## i64
+    sw_i = 0
+    while sw_i < sw_n
+      sw_b = raw_load_u8(sw_src, sw_i) ## i64
+      if sw_b >= 97 && sw_b <= 122
+        sw_b -= 32
+      elsif sw_b >= 65 && sw_b <= 90
+        sw_b += 32
+      raw_store_u8(sw_dst, sw_i, sw_b)
+      sw_i += 1
+    ccall("w_string_take_byte_array", sw_out, sw_n)
+
+  # First byte upcased, every later byte downcased — the former C handler's
+  # exact ASCII semantics ("hello World" -> "Hello world").
+  -> capitalize
+    cp_v = ($value & -2) ## i64
+    cp_mode = (cp_v >> 1) & 7
+    if cp_mode <= 5
+      cp_i = 0
+      while cp_i < cp_mode
+        cp_sh = 4 + 8 * cp_i
+        cp_b = (cp_v >> cp_sh) & 0xFF
+        if cp_i == 0 && cp_b >= 97 && cp_b <= 122
+          cp_v = cp_v ^ (32 << cp_sh)
+        elsif cp_i > 0 && cp_b >= 65 && cp_b <= 90
+          cp_v = cp_v ^ (32 << cp_sh)
+        cp_i += 1
+      return wvalue_from_bits(cp_v)
+    cp_n = ccall_nobox("w_string_byte_length", self) ## i64
+    cp_out = u8[cp_n + 1]
+    cp_src = ccall_nobox("w_string_data_ptr", self) ## i64
+    cp_dst = ccall_nobox("w_u8_live_data_ptr", cp_out) ## i64
+    cp_i = 0
+    while cp_i < cp_n
+      cp_b = raw_load_u8(cp_src, cp_i) ## i64
+      if cp_i == 0 && cp_b >= 97 && cp_b <= 122
+        cp_b -= 32
+      elsif cp_i > 0 && cp_b >= 65 && cp_b <= 90
+        cp_b += 32
+      raw_store_u8(cp_dst, cp_i, cp_b)
+      cp_i += 1
+    ccall("w_string_take_byte_array", cp_out, cp_n)

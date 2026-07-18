@@ -534,6 +534,11 @@ use parser
       if call_name == "to_s" && (node.args == nil || node.args.size() == 0)
         consider_autoload_name("String", defined, registry, seen, pending)
 
+      # ASCII case transforms are source-defined after removal of their
+      # runtime ICs, same story as the Array group below.
+      if call_name in ("swapcase" "capitalize")
+        consider_autoload_name("String", defined, registry, seen, pending)
+
       if @string_length_unresolved
         if call_name in ("size" "length")
           consider_autoload_name("String", defined, registry, seen, pending)

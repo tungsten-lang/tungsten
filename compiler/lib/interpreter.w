@@ -1193,6 +1193,8 @@ use target
       return ccall("w_base64_decode_input", args[1])
     when "w_string_from_byte_array"
       return ccall("w_string_from_byte_array", args[1])
+    when "w_string_take_byte_array"
+      return ccall("w_string_take_byte_array", args[1], args[2])
     when "w_str_to_sym"
       return ccall("w_str_to_sym", args[1])
 
@@ -1340,6 +1342,12 @@ use target
       # Rebox its raw i64 result for the tree walker's arbitrary-precision
       # Integer model, just as the compiled source body does explicitly.
       return ccall("w_int", ccall_nobox("w_string_byte_length", args[1]))
+    when "w_string_data_ptr"
+      if args.size() != 2
+        raise "w_string_data_ptr expects one argument"
+      # Raw byte pointer of a slab/heap String, reboxed like the u8 data-ptr
+      # case above; raw_load/store convert it back explicitly.
+      return ccall("w_int", ccall_nobox("w_string_data_ptr", args[1]))
 
     raise "Unsupported ccall_nobox '[cname]' in interpreter"
 

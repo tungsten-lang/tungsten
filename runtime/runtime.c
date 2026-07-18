@@ -22688,8 +22688,7 @@ static void w_init_ic_tables(void) {
     w_ic_string_table[0].name  = WN_idx;          /* Phase 7+g */
     w_ic_string_table[1].name  = WN_upcase;
     w_ic_string_table[2].name  = WN_downcase;
-    w_ic_string_table[3].name  = WN_swapcase;
-    w_ic_string_table[4].name  = WN_capitalize;
+    /* Slots 3-4 (swapcase/capitalize) retired to core/string_native.w. */
     w_ic_string_table[5].name  = WN_concat;
     w_ic_string_table[6].name  = WN_append;
     w_ic_string_table[7].name  = WN_lshift;
@@ -28153,6 +28152,47 @@ WValue w_string_from_byte_array(WValue bytes) {
     if (a->size == 0) return w_string("");
     const char *data = (const char *)a->slots + a->start;
     return w_string_n(data, (size_t)a->size);
+}
+
+/* Raw byte pointer of a slab/heap String (modes 6-7), for core source
+ * methods that walk string bytes without materializing a view. Inline
+ * modes (0-5) have no stable storage — their bytes live in the WValue
+ * itself and callers transform them via $value bit ops instead. Ropes
+ * flatten first. */
+int64_t w_string_data_ptr(WValue v) {
+    if (w_is_rope(v)) v = w_rope_flatten(v);
+    if (!w_is_stringy(v)) die("w_string_data_ptr: expected String");
+    size_t mode = (v >> 1) & 7;
+    if (mode == 6) {
+        size_t len;
+        return (int64_t)(intptr_t)w_slab_read((uint32_t)((v >> 4) & 0xFFFFFF), &len);
+    }
+    if (mode == 7) {
+        WString *ws = w_as_heap_str(v);
+        return (int64_t)(intptr_t)ws->data;
+    }
+    die("w_string_data_ptr: inline-mode string has no stable storage");
+    return 0;
+}
+
+/* Mint a String by STEALING a u8 array's slot buffer — the no-copy twin of
+ * w_string_from_byte_array for core string transforms. The caller allocates
+ * u8[len+1] (one spare byte for the NUL) and passes the payload length; the
+ * array is left empty with its buffer relinquished to w_string_take. Any
+ * shape this can't own safely (view, shifted start, undersized) falls back
+ * to the copying constructor. */
+WValue w_string_take_byte_array(WValue bytes, WValue len_wv) {
+    WArray *a = as_bytes_arr(bytes);
+    int64_t len = w_as_int(len_wv);
+    if (len < 0) len = 0;
+    if (len >= a->size || a->start != 0 || (a->flags & W_FLAG_OWNED) == 0)
+        return w_string_n((const char *)a->slots + a->start, (size_t)len);
+    char *buf = (char *)a->slots;
+    buf[len] = '\0';
+    a->slots = NULL;
+    a->size = 0;
+    a->cap = 0;
+    return w_string_take(buf, (size_t)len);
 }
 
 /* ---- Goroutine Arena + Scheduler (Phase 4) ---- */

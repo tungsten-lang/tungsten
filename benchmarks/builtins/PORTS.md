@@ -116,6 +116,29 @@ wider IC catalog (string split/replace/include?/chars/reverse, int
 chr/to_s(base), hash merge!/each). The compare + array fast paths are
 global codegen wins — re-baseline any future port measurements.
 
+## Round 5 results (2026-07-18) — original 9-method slate complete
+
+String#swapcase/#capitalize landed at parity (603a632): inline-mode
+receivers (<= 5 bytes) transform in registers on $value with ZERO
+allocations (C malloc'd even for "a"); slab/heap receivers walk raw bytes
+(new `w_string_data_ptr`) into one u8[len+1] buffer stolen by the result
+via `w_string_take_byte_array` (no-copy twin of w_string_from_byte_array).
+swapcase 24.2ns vs C 25.4 (-4%); capitalize 24.9 vs 24.6 (+1%).
+
+Two reusable primitives now exist for any byte-producing string port:
+`w_string_data_ptr` (raw read pointer, modes 6-7) and
+`w_string_take_byte_array(bytes, len)` (buffer steal, u8[len+1] contract).
+New-primitive checklist grew one entry: the INTERPRETER's ccall /
+ccall_nobox allowlists (compiler/lib/interpreter.w ~1200/~1350) must gain
+every new name, or -e/eval dies with "Unsupported ccall" while compiled
+code works.
+
+All nine round-1 targets are now Tungsten. Next candidates from the
+original catalog: String#include?/starts_with/ends_with (strstr/strncmp
+one-liners — port likely loses to SIMD strstr on long strings; measure),
+String#chars/reverse (UTF-8 walks), Integer#chr (UTF-8 encode, buildable
+on the inline-string bit pattern), Int#to_s(base), Hash#merge!/each.
+
 ## The blocking finding: fixed method-call overhead
 
 Every failed port lost to the same tax: a dispatched Tungsten type-class

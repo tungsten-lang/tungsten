@@ -110,9 +110,22 @@ use parser
       expressions.push(e)
     user_count = expressions.size()
     iteration = 0
+    # Deep autoload walk watermark: each iteration only recurses into
+    # expressions appended since the last one. Re-walking already-scanned
+    # expressions is pure waste — any autoload name they reference was either
+    # collected in an earlier iteration (and is now loaded or marked in
+    # @autoload_loaded, so consider_autoload_name filters it) or was never in
+    # the registry. New pending names can only come from newly-loaded files.
+    # The lighter whole-program passes (collect_defined_names, the array-
+    # necessity analysis inside collect_unresolved_autoload_names) still see
+    # everything. This turns the fixpoint from O(iterations x total AST) into
+    # a single pass over each expression — the autoload walker was the hottest
+    # function in a compile.
+    walked = 0
     while iteration < 64
       defined = collect_defined_names(expressions)
-      pending = collect_unresolved_autoload_names(expressions, defined, registry)
+      pending = collect_unresolved_autoload_names(expressions, walked, defined, registry)
+      walked = expressions.size()
       if pending.size() == 0
         break
       pi = 0
@@ -219,7 +232,7 @@ use parser
       i += 1
     defined
 
-  -> collect_unresolved_autoload_names(exprs, defined, registry)
+  -> collect_unresolved_autoload_names(exprs, start, defined, registry)
     # Decide whether an array literal should pull in the Array class. The
     # literal alone needs Array only for class/Enumerable methods the runtime
     # WArray and the compiler's inline-iterator lowering don't cover (uniq,
@@ -270,7 +283,7 @@ use parser
     @mmap_typed_view_unresolved = mmap_missing || big_array_missing
     seen = {}
     pending = []
-    i = 0
+    i = start
     while i < exprs.size()
       collect_autoload_refs(exprs[i], defined, registry, seen, pending)
       i += 1

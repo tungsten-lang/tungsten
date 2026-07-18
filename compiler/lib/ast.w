@@ -384,74 +384,87 @@ in Tungsten:AST
 -> ast_get(node, sym)
   if node == nil
     return nil
+  # Slab W_PACKED_NODE fast path first (the common case): one w_is_node tag
+  # compare, versus __w_type's ~30 sequential tag tests that the old
+  # `type(node) == "Hash"` guard ran on every slab access.
+  if ccall_nobox("w_is_node_extern", node) == 1
+    # Bare W_PACKED_NODE WValue path. Slab field via schema if mapped;
+    # sparse via side-table otherwise.
+    k = ast_kind(node)
+    if k == nil
+      return nil
+    offset = slab_offset_for(k, sym)
+    if offset != nil
+      # OFFSET_INLINE = 256 sentinel: int payload lives in the W_PACKED_
+      # NODE's offset bits. OFFSET_INTERN = 257: offset bits hold a dense
+      # id into the C-side string-intern table.
+      if offset == 256
+        return ccall_nobox("w_node_offset_extern", node)
+      if offset == 257
+        return ccall_nobox("w_ast_intern_str_of", node)
+      return ccall_nobox("w_node_field_load", node, offset)
+    # C-side sparse store; returns W_NIL (0) for absent, which IS nil.
+    return ccall_nobox("w_ast_sparse_get", node, sym)
   if type(node) == "Hash"
     # Plain hash path: parser tokens, error records, and the small
     # number of hand-built hash AST node literals in lowering.w
     # (`ast_var(...)` etc. — they don't carry a :_slab
     # wrapper and aren't bumped through the slab arenas).
     return node[sym]
-  # Bare W_PACKED_NODE WValue path. Slab field via schema if mapped;
-  # sparse via side-table otherwise.
-  k = ast_kind(node)
-  if k == nil
-    return nil
-  offset = slab_offset_for(k, sym)
-  if offset != nil
-    # OFFSET_INLINE = 256 sentinel: int payload lives in the W_PACKED_
-    # NODE's offset bits (fix #3 inline encoding for :char /
-    # :lambda_arity / :superscript / :parg / :regex_capture). The
-    # schema literal in ast_schema.w marks these with 256 instead of
-    # a real slot index, so ast_get's hot path is the same shape as
-    # the schema-backed kinds — one branch on offset value.
-    #
-    # OFFSET_INTERN = 257 sentinel: offset bits hold a dense id into
-    # the C-side string-intern table (var/ivar/cvar :name, symbol/
-    # string :value). w_ast_intern_str_of maps the id back to the
-    # interned string — same content for every same-named node.
-    if offset == 256
-      return ccall_nobox("w_node_offset_extern", node)
-    if offset == 257
-      return ccall_nobox("w_ast_intern_str_of", node)
-    return ccall_nobox("w_node_field_load", node, offset)
-  # C-side sparse store; returns W_NIL (0) for absent, which IS nil.
-  ccall_nobox("w_ast_sparse_get", node, sym)
+  # Non-node, non-hash: not an AST node, so no field to read. (The old code
+  # fell into the slab branch here, where ast_kind returned nil and the
+  # function returned nil anyway — same result, without the wasted probe.)
+  nil
 
 -> ast_set(node, sym, value)
   if node == nil
     return nil
+  # Slab W_PACKED_NODE fast path first (see ast_kind): one w_is_node tag
+  # compare instead of __w_type's ~30 tag tests behind `type == "Hash"`.
+  if ccall_nobox("w_is_node_extern", node) == 1
+    # Bare W_PACKED_NODE WValue path. Schema-mapped → slab slot; else
+    # sparse-meta side-table (lazy-init inner hash on first write so
+    # empty nodes don't consume any side-table storage).
+    k = ast_kind(node)
+    if k == nil
+      return value
+    offset = slab_offset_for(k, sym)
+    if offset != nil
+      # OFFSET_INLINE (256) / OFFSET_INTERN (257) mean the field lives
+      # in the offset bits. ast_set on these kinds is a no-op — the
+      # value is part of the W_PACKED_NODE identity, not a mutable
+      # field. Constructors (ast_char, Var.new, …) bake it in at
+      # creation; a rename means constructing a replacement node.
+      if offset < 256
+        ccall_nobox("w_node_field_store", node, offset, value)
+    else
+      ccall_nobox("w_ast_sparse_set", node, sym, value)
+    return value
   if type(node) == "Hash"
     node[sym] = value
     return value
-  # Bare W_PACKED_NODE WValue path. Schema-mapped → slab slot; else
-  # sparse-meta side-table (lazy-init inner hash on first write so
-  # empty nodes don't consume any side-table storage).
-  k = ast_kind(node)
-  if k == nil
-    return value
-  offset = slab_offset_for(k, sym)
-  if offset != nil
-    # OFFSET_INLINE (256) / OFFSET_INTERN (257) mean the field lives
-    # in the offset bits. ast_set on these kinds is a no-op — the
-    # value is part of the W_PACKED_NODE identity, not a mutable
-    # field. Constructors (ast_char, Var.new, …) bake it in at
-    # creation; a rename means constructing a replacement node.
-    if offset < 256
-      ccall_nobox("w_node_field_store", node, offset, value)
-  else
-    ccall_nobox("w_ast_sparse_set", node, sym, value)
   value
 
 -> ast_kind(node)
   if node == nil
     return nil
+  # Cheap W_PACKED_NODE tag check first — the overwhelmingly common node
+  # shape. The old `type(node) == "Hash"` guard ran __w_type's ~30
+  # sequential tag tests on every slab node just to rule out Hash; a single
+  # w_is_node tag compare replaces them. ast_get/ast_set do the same, and
+  # this helper is called all over lowering/emitter, so the saving compounds.
+  if ccall_nobox("w_is_node_extern", node) == 1
+    # Bare W_PACKED_NODE WValue path. Fused extract + table lookup in C
+    # avoids: (a) the w_int boxing call between w_node_kind_extern's
+    # raw-int result and kind_sym_for_id's boxed param, and (b) the
+    # kind_sym_for_id function-call boundary itself. `w_int` is an
+    # extern (non-static-inline) function, so even -O3 -flto leaves it
+    # as a real `bl _w_int` instruction in the compiled binary.
+    return ccall("w_node_kind_sym", node, kind_sym_table_data)
+  # Plain hash path: hand-built `{node: :foo, …}` literals in lowering.
   if type(node) == "Hash"
     return node[:node]
-  # Bare W_PACKED_NODE WValue path. Fused extract + table lookup in C
-  # avoids: (a) the w_int boxing call between w_node_kind_extern's
-  # raw-int result and kind_sym_for_id's boxed param, and (b) the
-  # kind_sym_for_id function-call boundary itself. `w_int` is an
-  # extern (non-static-inline) function, so even -O3 -flto leaves it
-  # as a real `bl _w_int` instruction in the compiled binary.
+  # Non-node, non-hash: preserve the historical fallthrough exactly.
   ccall("w_node_kind_sym", node, kind_sym_table_data)
 
 # AST task #5 — shallow-body accessors. Return the raw body/expressions

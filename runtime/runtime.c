@@ -22694,8 +22694,7 @@ static void w_init_ic_tables(void) {
     w_ic_array_table[9].name  = WN_include_q; /* Phase 7+d: legacy alias for has? */
     w_ic_array_table[10].name = WN_unshift;   /* Phase 7+e */
     w_ic_array_table[11].name = WN_sort;
-    /* Slot 12 (reverse) retired to core/array.w. */
-    w_ic_array_table[13].name = WN_copy;
+    /* Slots 12-13 (reverse, copy) retired to core/array.w. */
     w_ic_array_table[14].name = WN_fill;       /* Phase 7+f */
     w_ic_array_table[15].name = WN_view;
     w_ic_array_table[16].name = WN_slice_view;

@@ -49,3 +49,15 @@ mm_empty = []
 << "tos3 " << 100000.to_s << " " << 123456789.to_s << " " << (0 - 140737488355328).to_s << " " << 140737488355327.to_s
 << "tos4 " << 255.to_s(16) << " " << 255.to_s(2) << " " << (0 - 255).to_s(16) << " " << 35.to_s(36) << " " << 0.to_s(7)
 << "tos5 " << 123456.to_s(10) << " " << 140737488355327.to_s(36)
+cp_arr = [10, 20, 30, 40, 50]
+<< "cp1 " << cp_arr.copy(0)
+<< "cp2 " << cp_arr.copy(2)
+<< "cp3 " << cp_arr.copy(0 - 2)
+<< "cp4 " << cp_arr.copy(1, 2)
+<< "cp5 " << cp_arr.copy(0, 99)
+<< "cp6 " << cp_arr.copy(3, 0)
+<< "cp7 " << cp_arr.copy(0 - 99, 2)
+<< "cp8 " << cp_arr.copy(2, 0 - 5)
+<< "cp9 " << cp_arr.copy(5)
+cp_empty = []
+<< "cp10 " << cp_empty.copy(0)

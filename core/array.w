@@ -164,6 +164,36 @@
       i -= 1
     out
 
+  # Value-copy of a sub-range (the copying counterpart to the zero-copy
+  # `slice` view), ported from the former C IC handler with its exact
+  # clamping: a negative start wraps from the end then floors at 0, and the
+  # length is capped so start+len never exceeds size. The one-argument form
+  # copies to the end; note len is computed from the ORIGINAL (pre-wrap)
+  # start, matching the handler, so copy(-2) on a size-5 array copies the
+  # last two elements.
+  -> copy(start)
+    copy(start, size - start)
+
+  -> copy(start, count)
+    out = []
+    n = $size ## i64
+    s = start ## i64
+    if s < 0
+      s = n + s
+    if s < 0
+      s = 0
+    len = count ## i64
+    if len < 0
+      len = 0
+    if s + len > n
+      len = n - s
+    stop = s + len
+    i = s
+    while i < stop
+      out.push(self[i])
+      i += 1
+    out
+
   # Quadratic seen-scan over the result, matching the former C handler: `==`
   # equality, first occurrence wins. A hash-set would change which values
   # collapse together (hash-key equality), so this stays faithful.

@@ -565,7 +565,7 @@ use parser
       # These methods are source-defined after removal of their runtime ICs.
       # Arrays can arrive through argv, a parameter, or a native factory, so
       # no receiver-shape test can soundly cover every use.
-      if @array_source_method_unresolved && call_name in ("join" "compact" "dup" "take" "drop" "reverse" "uniq" "minmax")
+      if @array_source_method_unresolved && call_name in ("join" "compact" "dup" "take" "drop" "reverse" "uniq" "minmax" "copy")
         consider_autoload_name("Array", defined, registry, seen, pending)
         @array_source_method_unresolved = false
 

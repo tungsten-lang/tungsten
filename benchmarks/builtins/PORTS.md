@@ -69,6 +69,26 @@ copy — needs a buffer-stealing `w_string_take_byte_array`), Array#reverse/
 uniq/minmax (per-element `w_int(i)` + `w_array_idx` calls — needs an
 ebits-aware raw `self[i]` fast path inside Array class bodies).
 
+## Round 3 results (2026-07-18)
+
+Raw-index array-load twins landed (9354ed2): `w_array_idx_i64` /
+`w_array_get_i64`, emitted whenever the index is already a raw machine
+int — every promoted loop var qualifies. Ports re-measured:
+
+| method | C ns/op | Tungsten ns/op | verdict |
+|---|---|---|---|
+| Array#reverse | 284 | 260 | **kept** (8% FASTER) |
+| Array#take | 156 | 148 | kept, improved |
+| Array#drop | 150 | 140 | kept, improved |
+| Array#uniq | 3649 | 5264 | re-reverted |
+| Array#minmax | 167 | 253 | re-reverted |
+
+uniq/minmax's remaining gap (~1.2-1.4ns/element) is the element load
+being an out-of-line call vs C's inline `array_slot_load_decoded` in the
+scan loops. Closing it needs an ebits-aware inline load (an
+:array_get_inline variant that handles non-w64 receivers + bounds/wrap
+semantics), or C-style locals kept out of alloca slots. Next lever.
+
 ## The blocking finding: fixed method-call overhead
 
 Every failed port lost to the same tax: a dispatched Tungsten type-class

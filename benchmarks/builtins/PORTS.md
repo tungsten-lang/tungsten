@@ -89,6 +89,33 @@ scan loops. Closing it needs an ebits-aware inline load (an
 :array_get_inline variant that handles non-w64 receivers + bounds/wrap
 semantics), or C-style locals kept out of alloca slots. Next lever.
 
+## Round 4 results (2026-07-18) — campaign targets complete
+
+Two inline-fast-path families landed (1334067), emitted as private
+alwaysinline IR helpers per module: raw-index array reads (round 3's
+call twins now fold into call sites) and int-int comparisons (op map
+routes eq/neq/lt/gt/lte/gte through guards; non-int pairs still call the
+runtime ladder). Profiling minmax had shown w_lt+w_gt at 60% of runtime;
+the C handlers' only edge was clang intra-TU inlining of
+w_value_compare.
+
+Final scoreboard — every kept port now BEATS its retired C handler:
+
+| method | C ns/op | Tungsten ns/op | delta |
+|---|---|---|---|
+| Array#take | 156 | 122 | -22% |
+| Array#drop | 150 | 123 | -18% |
+| Array#reverse | 284 | 237 | -16% |
+| Array#uniq | 3649 | 2381 | -35% |
+| Array#minmax | 167 | 114 | -32% |
+| Integer#gcd | 28.1 | 27.2 | parity |
+| Integer#lcm | 23.9 | 10.0 | -58% |
+
+Still open: String#capitalize/swapcase (buffer-steal primitive), and the
+wider IC catalog (string split/replace/include?/chars/reverse, int
+chr/to_s(base), hash merge!/each). The compare + array fast paths are
+global codegen wins — re-baseline any future port measurements.
+
 ## The blocking finding: fixed method-call overhead
 
 Every failed port lost to the same tax: a dispatched Tungsten type-class

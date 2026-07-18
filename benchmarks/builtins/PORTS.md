@@ -34,6 +34,41 @@ best-of-3 ns/op with a printed checksum); behavioral goldens in
 | Array#uniq | 3649 | 7133 | reverted |
 | Array#minmax | 167 | 250 | reverted |
 
+## Round 2 results (2026-07-18, later the same day)
+
+The "fixed method-call overhead" below was diagnosed and **fixed**: it was
+never dispatch. The raw-int promotion analysis (lowering/analysis.w) was
+blind to `## i64` assign hints, so loop temps assigned FROM hinted vars
+(`t = b`, `r = a % b`) stayed boxed — one `w_int` + one `w_to_i64` runtime
+call per loop iteration. Two analysis fixes landed:
+
+1. `## i64`-style hints now seed the promotion fixed point as authoritative
+   machine-int facts (plus `$value` counts as int-shaped).
+2. Raw-consuming intrinsics (`wvalue_from_bits`, `ccall_nobox`, raw loads)
+   no longer force-box their operands in escape positions (`return
+   wvalue_from_bits(tag | x)` was boxing `x`).
+
+With those, a same-binary A/B (IC `gcd` vs type-class `gcd2`, identical
+bodies) closed from 27.5/40.5 to 27.3/27.9 — **dispatch is ~2% overhead,
+not 50%**.
+
+| method | C ns/op | Tungsten ns/op | verdict |
+|---|---|---|---|
+| Integer#gcd | 28.1 | 27.4 | **kept** (parity) |
+| Integer#lcm | 23.9 | 10.1 | **kept** (2.3x FASTER — raw inlined-gcd path) |
+
+Diagnosis recipe that worked: same-binary A/B via a twin method name with
+no IC entry (forces type-class dispatch, no rebuild needed), `sample` the
+hot loop, then read the method's emitted `.ll` — `w_int`/`w_to_i64` pairs
+inside a loop body are the smoking gun. Watch for: ternaries defeat
+promotion (`x = c ? a : b` boxes x — use `if`), and any var read inside a
+`return <non-exempt call>(...)` gets escape-boxed.
+
+Still open for future rounds: String#capitalize/swapcase (extra buffer
+copy — needs a buffer-stealing `w_string_take_byte_array`), Array#reverse/
+uniq/minmax (per-element `w_int(i)` + `w_array_idx` calls — needs an
+ebits-aware raw `self[i]` fast path inside Array class bodies).
+
 ## The blocking finding: fixed method-call overhead
 
 Every failed port lost to the same tax: a dispatched Tungsten type-class

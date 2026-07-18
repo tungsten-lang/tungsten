@@ -22727,14 +22727,14 @@ static void w_init_ic_tables(void) {
     w_ic_int_table[1].name    = WN_abs;
     w_ic_int_table[2].name    = WN_to_f;
     w_ic_int_table[3].name    = WN_chr;
-    w_ic_int_table[4].name    = WN_gcd;
+    /* Slot 4 (gcd) retired to core/integer.w; bigint receivers keep theirs. */
     w_ic_int_table[5].name    = WN_times;     /* Phase 7+o — added below */
     w_ic_int_table[6].name    = WN_sqrt;
     w_ic_int_table[7].name    = WN_each;      /* each ≡ times for ints */
     w_ic_int_table[8].name    = WN_prime_q;
     w_ic_int_table[9].name    = WN_prime_12k_q;
     w_ic_int_table[10].name   = WN_prime_30k_q;
-    w_ic_int_table[11].name   = WN_lcm;
+    /* Slot 11 (lcm) retired to core/integer.w; bigint receivers keep theirs. */
     /* BigArray (Phase 7+p) */
     w_ic_big_array_table[0].name   = WN_idx;
     w_ic_big_array_table[1].name   = WN_idxset;

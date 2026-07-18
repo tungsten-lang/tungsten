@@ -142,6 +142,13 @@
 
   case t
   when :call
+    # Raw-consuming intrinsics take their arguments as machine ints with no
+    # WValue boundary — mirror visit_promote_node's is_raw_ccall/is_raw_load
+    # exemption here, so operands inside an escape position (e.g. `return
+    # wvalue_from_bits(tag | x)`) are not force-boxed. wvalue_bits is NOT
+    # exempt: its argument is a boxed WValue read.
+    if node.receiver == nil && node.name in ("ccall_nobox" "ccall_rawargs" "wvalue_from_bits" "raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "mulhi" "addcarry" "subborrow")
+      return nil
     mark_subtree_escape(node.receiver, records)
     mark_subtree_escape(node.args, records)
     mark_subtree_escape(node.block, records)
@@ -306,6 +313,10 @@
   when :var
     vt = declared_types[node.name]
     return is_machine_int_type(vt) || vt in (:i32 :u32 :i16 :u16 :i8 :u8 :i4 :u4)
+  # `$value` is the receiver's raw NaN-boxed word — always a machine int in
+  # compiled method bodies. Other gvars hold boxed WValues and stay non-int.
+  when :gvar
+    return node.name == "$value"
   when :unary_op
     return int_shaped_node?(node.operand, declared_types)
   when :call
@@ -347,22 +358,32 @@
   else
     false
 
--> collect_raw_candidate_names_list(nodes, names, declared_types)
+# `## i64`-style inline hints arrive here as raw strings on assign nodes —
+# this analysis runs before lowering normalizes them. Decode the machine-int
+# spellings; anything else (floats, big, typed arrays) is not an int hint.
+-> assign_int_hint_type(hint)
+  if hint == nil
+    return nil
+  if hint in ("i64" "u64" "w64" "i32" "u32" "i16" "u16" "i8" "u8" "i4" "u4" "char")
+    return :i64
+  nil
+
+-> collect_raw_candidate_names_list(nodes, names, hints, declared_types)
   if nodes == nil
     return nil
   i = 0
   while i < nodes.size()
-    collect_raw_candidate_names_node(nodes[i], names, declared_types)
+    collect_raw_candidate_names_node(nodes[i], names, hints, declared_types)
     i += 1
 
--> collect_raw_candidate_names_node(node, names, declared_types)
+-> collect_raw_candidate_names_node(node, names, hints, declared_types)
   if node == nil
     return nil
   if !is_ast_node?(node)
     return nil
   t = ast_kind(node)
   if t in (:fastmath_block :strictmath_block :overflow_block)
-    collect_raw_candidate_names_list(node[:body], names, declared_types)
+    collect_raw_candidate_names_list(node[:body], names, hints, declared_types)
     return nil
 
 
@@ -371,29 +392,36 @@
     target = node.target
     if target != nil && ast_kind(target) == :var
       vname = target.name
+      # A `x = <expr> ## i64` hint types the slot authoritatively at its
+      # assignment, exactly like a declared type. Recording it here lets the
+      # promotion fixed point see hinted vars as machine ints, so unhinted
+      # temps assigned FROM them (`t = b` / `r = a % b`) still promote
+      # instead of paying a boxed w_int/w_to_i64 round-trip per loop pass.
+      if t == :assign && assign_int_hint_type(node.type_hint) != nil
+        hints[vname] = true
       if declared_types[vname] == nil
         names[vname] = true
     if node.value != nil
-      collect_raw_candidate_names_node(node.value, names, declared_types)
+      collect_raw_candidate_names_node(node.value, names, hints, declared_types)
     return nil
 
   when :if
-    collect_raw_candidate_names_node(node.condition, names, declared_types)
-    collect_raw_candidate_names_list(node.then_body, names, declared_types)
-    collect_raw_candidate_names_list(node.else_body, names, declared_types)
+    collect_raw_candidate_names_node(node.condition, names, hints, declared_types)
+    collect_raw_candidate_names_list(node.then_body, names, hints, declared_types)
+    collect_raw_candidate_names_list(node.else_body, names, hints, declared_types)
     if node.elsif_clauses != nil
       j = 0
       while j < node.elsif_clauses.size()
         clause = node.elsif_clauses[j]
         if clause != nil && type(clause) == "Array" && clause.size() >= 2
-          collect_raw_candidate_names_node(clause[0], names, declared_types)
-          collect_raw_candidate_names_list(clause[1], names, declared_types)
+          collect_raw_candidate_names_node(clause[0], names, hints, declared_types)
+          collect_raw_candidate_names_list(clause[1], names, hints, declared_types)
         j += 1
     return nil
 
   when :while
-    collect_raw_candidate_names_node(node.condition, names, declared_types)
-    collect_raw_candidate_names_list(node.body, names, declared_types)
+    collect_raw_candidate_names_node(node.condition, names, hints, declared_types)
+    collect_raw_candidate_names_list(node.body, names, hints, declared_types)
     return nil
 
   when :case
@@ -405,50 +433,50 @@
           if w.conditions != nil
             k = 0
             while k < w.conditions.size()
-              collect_raw_candidate_names_node(w.conditions[k], names, declared_types)
+              collect_raw_candidate_names_node(w.conditions[k], names, hints, declared_types)
               k += 1
-          collect_raw_candidate_names_list(w.body, names, declared_types)
+          collect_raw_candidate_names_list(w.body, names, hints, declared_types)
         j += 1
-    collect_raw_candidate_names_list(node.else_body, names, declared_types)
+    collect_raw_candidate_names_list(node.else_body, names, hints, declared_types)
     return nil
 
   when :case_value
-    collect_raw_candidate_names_node(node.subject, names, declared_types)
+    collect_raw_candidate_names_node(node.subject, names, hints, declared_types)
     if node.arms != nil
       j = 0
       while j < node.arms.size()
         arm = node.arms[j]
         if arm != nil
-          collect_raw_candidate_names_node(arm.pattern, names, declared_types)
-          collect_raw_candidate_names_node(arm.guard, names, declared_types)
-          collect_raw_candidate_names_list(arm.body, names, declared_types)
+          collect_raw_candidate_names_node(arm.pattern, names, hints, declared_types)
+          collect_raw_candidate_names_node(arm.guard, names, hints, declared_types)
+          collect_raw_candidate_names_list(arm.body, names, hints, declared_types)
         j += 1
-    collect_raw_candidate_names_list(node.else_body, names, declared_types)
+    collect_raw_candidate_names_list(node.else_body, names, hints, declared_types)
     return nil
 
   when :binary_op
-    collect_raw_candidate_names_node(node.left, names, declared_types)
-    collect_raw_candidate_names_node(node.right, names, declared_types)
+    collect_raw_candidate_names_node(node.left, names, hints, declared_types)
+    collect_raw_candidate_names_node(node.right, names, hints, declared_types)
     return nil
 
   when :unary_op, :not
-    collect_raw_candidate_names_node(node.operand, names, declared_types)
+    collect_raw_candidate_names_node(node.operand, names, hints, declared_types)
     return nil
 
   when :and, :or
-    collect_raw_candidate_names_node(node.left, names, declared_types)
-    collect_raw_candidate_names_node(node.right, names, declared_types)
+    collect_raw_candidate_names_node(node.left, names, hints, declared_types)
+    collect_raw_candidate_names_node(node.right, names, hints, declared_types)
     return nil
 
   when :call
-    collect_raw_candidate_names_node(node.receiver, names, declared_types)
+    collect_raw_candidate_names_node(node.receiver, names, hints, declared_types)
     if node.args != nil
       i = 0
       while i < node.args.size()
-        collect_raw_candidate_names_node(node.args[i], names, declared_types)
+        collect_raw_candidate_names_node(node.args[i], names, hints, declared_types)
         i += 1
     if node.block != nil
-      collect_raw_candidate_names_node(node.block, names, declared_types)
+      collect_raw_candidate_names_node(node.block, names, hints, declared_types)
     return nil
 
   else
@@ -698,7 +726,8 @@
 
 -> raw_int_candidate_map(body, declared_types)
   candidates = {}
-  collect_raw_candidate_names_list(body, candidates, declared_types)
+  hinted = {}
+  collect_raw_candidate_names_list(body, candidates, hinted, declared_types)
 
   # Most scopes have no untyped local assignment at all.  The collection
   # walk deliberately stops at nested definitions, but visit_promote_list's
@@ -712,12 +741,20 @@
   # declared_types is immutable during this analysis.  Reuse its key list
   # across fixed-point rounds instead of materializing it every time.
   declared_names = declared_types.keys()
+  hinted_names = hinted.keys()
   loop
     known = {}
     dki = 0
     while dki < declared_names.size()
       known[declared_names[dki]] = declared_types[declared_names[dki]]
       dki += 1
+    # `## i64`-hinted assigns are authoritative machine-int facts, like
+    # declared types — they persist across rounds rather than competing as
+    # candidates.
+    hki = 0
+    while hki < hinted_names.size()
+      known[hinted_names[hki]] = :i64
+      hki += 1
     cki = 0
     while cki < candidate_names.size()
       known[candidate_names[cki]] = :i64

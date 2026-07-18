@@ -64,6 +64,14 @@
     encode_string(value.to_s)
 
   -> .encode_string(s)
+    # Fast path: when no character needs escaping (the common case), wrap the
+    # whole string in quotes and skip the per-character chars-array + append
+    # loop below. The escape set checked here matches that loop exactly —
+    # double-quote, backslash, newline, carriage return, tab — so behavior is
+    # unchanged; only the allocation-heavy path is avoided. includes? is the
+    # SIMD strstr, far cheaper than materializing s.chars.
+    if !s.include?("\"") && !s.include?("\\") && !s.include?("\n") && !s.include?("\r") && !s.include?("\t")
+      return "\"" + s + "\""
     out = StringBuffer(s.size + 2)
     out << "\""
     chars = s.chars

@@ -534,13 +534,16 @@ use parser
       if call_name == "to_s" && (node.args == nil || node.args.size() == 0)
         consider_autoload_name("String", defined, registry, seen, pending)
 
-      # ASCII case transforms are source-defined after removal of their
-      # runtime ICs, same story as the Array group below.
-      if call_name in ("swapcase" "capitalize" "reverse")
-        consider_autoload_name("String", defined, registry, seen, pending)
-
       if @string_length_unresolved
-        if call_name in ("size" "length")
+        # size/length and the source-defined transforms (swapcase/capitalize/
+        # reverse) all just need String's tiny facade scheduled once. Gating
+        # them behind this latch — false from the start whenever String is
+        # already loaded, which is nearly always — keeps the per-call-node
+        # autoload walk from re-testing these names on every compile after
+        # String is in. reverse also names an Array method; over-scheduling
+        # String on an array.reverse is harmless (matches the prior
+        # unconditional behavior) and only happens while String is unresolved.
+        if call_name in ("size" "length" "swapcase" "capitalize" "reverse")
           consider_autoload_name("String", defined, registry, seen, pending)
           @string_length_unresolved = false
         # Lowering synthesizes a per-element call for these Symbol-to-proc

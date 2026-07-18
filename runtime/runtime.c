@@ -13635,15 +13635,17 @@ static int w_hash_key_eq(WValue a, WValue b) {
     if (a == b) return 1;
     if ((w_is_rope(a) || w_is_stringy(a)) && (w_is_rope(b) || w_is_stringy(b))) {
         if (w_is_symbol(a) != w_is_symbol(b)) return 0;
-        /* Inline (mode 0-5) and slab (mode 6) strings/symbols are canonical
-         * by bit pattern: equal content interns to one identity, so a != b
-         * (checked above) within the same storage class means unequal — no
-         * content compare. This is w_eq's fast path, and it matters most
-         * exactly here: colliding hash keys (both slab-interned method names
-         * / AST field symbols in the compiler) were paying a full memcmp per
-         * probe step to conclude "different". */
-        if ((w_is_inline(a) && w_is_inline(b)) || (w_is_slab(a) && w_is_slab(b)))
-            return 0;
+        /* The three non-rope storage modes hold disjoint byte-length ranges
+         * (inline 0-5, slab 6-61, heap 62+) and inline/slab are canonical by
+         * bit pattern, so two DISTINCT non-rope strings/symbols can be equal
+         * only when both are heap (mode 7). Everything else is unequal with
+         * no content compare — the payoff case for the compiler, whose
+         * colliding hash keys are interned method names / AST field symbols
+         * that were each paying a full memcmp per probe step to conclude
+         * "different". Ropes fall through to the content comparator. */
+        if (!w_is_rope(a) && !w_is_rope(b)) {
+            if (((a >> 1) & 7) != 7 || ((b >> 1) & 7) != 7) return 0;
+        }
         return w_string_compare(a, b) == 0;
     }
     if (is_decimal_any(a) && is_decimal_any(b))
@@ -14880,12 +14882,22 @@ WValue w_eq(WValue a, WValue b) {
     }
 
     /* Strings and symbols compare by content, but only within the same type.
-     * Ropes are string values, so compare them directly without flattening. */
-    if ((w_is_rope(a) || w_is_string(a)) && (w_is_rope(b) || w_is_string(b)))
+     * Ropes are string values, so compare them directly without flattening.
+     * Past the inline/slab canonical early-out above, two distinct non-rope
+     * strings/symbols can be equal only when both are heap (mode 7) — the
+     * storage modes hold disjoint byte-length ranges (0-5 / 6-61 / 62+), so a
+     * cross-mode pair never matches. Skip the content compare otherwise. */
+    if ((w_is_rope(a) || w_is_string(a)) && (w_is_rope(b) || w_is_string(b))) {
+        if (!w_is_rope(a) && !w_is_rope(b) && (((a >> 1) & 7) != 7 || ((b >> 1) & 7) != 7))
+            return W_FALSE;
         return w_bool(w_string_compare(a, b) == 0);
+    }
 
-    if (w_is_symbol(a) && w_is_symbol(b))
+    if (w_is_symbol(a) && w_is_symbol(b)) {
+        if (((a >> 1) & 7) != 7 || ((b >> 1) & 7) != 7)
+            return W_FALSE;
         return w_bool(w_string_compare(a, b) == 0);
+    }
 
     /* Rational equality: reduce both and compare */
     if (w_is_rational(a) && w_is_rational(b)) {

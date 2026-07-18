@@ -186,6 +186,21 @@ that both reads AND writes self[i] needs both raw twins to beat C.
 
 14 builtins ported, all at-or-faster than C.
 
+## Round 10 (2026-07-18) — String#reverse (a "ruled out" candidate, cracked)
+
+Round 9 shelved String#reverse as a UTF-8 walk. Cracked it with the
+hybrid inline+C-tail shape: inline receivers (<=5 bytes) reverse
+codepoints in $value bits (zero alloc, 13.5ns vs C 27ns, -50%); slab/heap
+delegate to the exported w_string_reverse (one malloc + intern) because a
+Tungsten u8[] port adds a WArray-header alloc per call (+18% on long
+strings). Long case 118ns vs 127ns (-7%). 16 builtins ported now.
+
+Lesson: building a u8[] to steal costs a WArray HEADER allocation on top
+of the buffer — fine when it replaces the C handler's own allocation
+(swapcase/capitalize/to_s tail), but a net add when C reversed in place
+on a bare malloc. For those, delegate the tail to a factored-out C
+helper and keep only the zero-alloc inline path in Tungsten.
+
 ## Round 9 (2026-07-18) — remaining candidates surveyed, ruled out
 
 Went looking for the next clean port; each remaining C handler was

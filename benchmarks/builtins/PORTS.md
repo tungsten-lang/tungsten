@@ -171,6 +171,21 @@ attempt (== identity short-circuit in __w_eq_fast) was a verified
 negative — the compiler's symbol == is usually false, so it only added a
 failed compare before w_eq. Reverted; recorded so it isn't re-tried.
 
+## Round 8 results (2026-07-18) — Array#delete_at + write fast path
+
+| method | C ns/op | Tungsten ns/op | delta |
+|---|---|---|---|
+| Array#delete_at | 48.5 | 31.4 | -35% |
+
+delete_at first lost 70% (82ns): self[i]=v fell through to generic method
+dispatch. Fixed by adding the WRITE twin of the raw-index array reads —
+the self-ref []= path now direct-calls w_array_set / w_array_set_i64
+(raw index) instead of dispatching. That flipped it to a 35% win and
+speeds every in-Array-body mutation. Pattern confirmed: an in-class op
+that both reads AND writes self[i] needs both raw twins to beat C.
+
+14 builtins ported, all at-or-faster than C.
+
 ## The blocking finding: fixed method-call overhead
 
 Every failed port lost to the same tax: a dispatched Tungsten type-class

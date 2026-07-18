@@ -181,3 +181,26 @@
       out.push(wvalue_from_bits(ch_val))
       ch_i += ch_clen
     out
+
+  # Array of the raw byte values (0..255) as Ints, ported from the former C
+  # IC handler. Inline receivers (<= 5 bytes) read straight from $value bits
+  # — no view allocation, the overhead C avoids via a stack buffer; slab/heap
+  # read through the raw data pointer. Each byte pushes as an immediate Int
+  # (no heap per element). Multibyte UTF-8 yields its individual bytes.
+  -> bytes
+    by_v = ($value & -2) ## i64
+    by_mode = (by_v >> 1) & 7
+    out = []
+    if by_mode <= 5
+      by_i = 0
+      while by_i < by_mode
+        out.push((by_v >> (4 + 8 * by_i)) & 0xFF)
+        by_i += 1
+      return out
+    by_n = ccall_nobox("w_string_byte_length", self) ## i64
+    by_p = ccall_nobox("w_string_data_ptr", self) ## i64
+    by_i = 0
+    while by_i < by_n
+      out.push(raw_load_u8(by_p, by_i))
+      by_i += 1
+    out

@@ -93,3 +93,8 @@ da9 = []
 << "ch4 " << "abé🎉".chars
 << "ch5 " << "aβcδe".chars
 << "ch6 " << "a longer ascii string here ok".chars.size
+<< "by1 " << "".bytes
+<< "by2 " << "A".bytes
+<< "by3 " << "hi".bytes
+<< "by4 " << "é".bytes
+<< "by5 " << "aβ".bytes

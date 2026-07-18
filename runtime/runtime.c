@@ -22792,7 +22792,7 @@ static void w_init_ic_tables(void) {
     /* Slot 15 (chars) retired to core/string_native.w. */
     w_ic_string_table[16].name = WN_codes;
     w_ic_string_table[17].name = WN_lchs;
-    w_ic_string_table[18].name = WN_bytes;
+    /* Slot 18 (bytes) retired to core/string_native.w. */
     w_ic_string_table[19].name = WN_slice;
     w_ic_string_table[20].name = WN_strip;
     w_ic_string_table[21].name = WN_ltrim;

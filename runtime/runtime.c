@@ -640,14 +640,38 @@ static uint64_t bn_submul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_
 #define bn_submul_1 bn_submul_1_ref
 #endif
 
+/* mul_1: rp[0..n) = up[0..n)·v (WRITE, not add); returns the high word.
+ * The write-not-accumulate twin of addmul_1, used for the first row of a
+ * schoolbook product so the result buffer needs no pre-zeroing there. */
+static uint64_t bn_mul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v) {
+    uint64_t carry = 0;
+    for (int32_t i = 0; i < n; i++) {
+        __uint128_t p = (__uint128_t)up[i] * v + carry;
+        rp[i] = (uint64_t)p;
+        carry = (uint64_t)(p >> 64);
+    }
+    return carry;
+}
+
 /* out[0..na+nb) = a[0..na) * b[0..nb)  (plain O(n*m) schoolbook).
- * out must be zeroed by the caller is NOT required: we initialise it. */
+ * The caller need not zero out. The first multiplier row is written with
+ * mul_1 (not addmul into a zeroed buffer), so only the high limbs above that
+ * first partial product are zeroed — eliminating the O(na+nb) pre-zero pass
+ * that dominated bignum×small products (factorial's inner multiply). */
 static void bigint_mul_schoolbook_into(uint64_t *out,
                                         const uint64_t *a, int32_t na,
                                         const uint64_t *b, int32_t nb) {
     int32_t tot = na + nb;
-    for (int32_t k = 0; k < tot; k++) out[k] = 0;
-    for (int32_t i = 0; i < na; i++)
+    if (na <= 0 || nb <= 0) {
+        for (int32_t k = 0; k < tot; k++) out[k] = 0;
+        return;
+    }
+    /* Row 0: write b·a[0] into out[0..nb), carry into out[nb]. */
+    out[nb] = bn_mul_1(out, b, nb, a[0]);
+    /* Zero only the limbs above row 0 that later addmul rows accumulate into. */
+    for (int32_t k = nb + 1; k < tot; k++) out[k] = 0;
+    /* Rows 1..na-1: accumulate as usual. */
+    for (int32_t i = 1; i < na; i++)
         out[i + nb] = bn_addmul_1(out + i, b, nb, a[i]);
 }
 

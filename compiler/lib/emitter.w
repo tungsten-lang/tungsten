@@ -1663,22 +1663,38 @@ use hashing
       decls_out = decls_out + cmp_fast_helper_ir(cf[0], cf[1], cf[2], cf[3]) + "\n"
     cfi += 1
 
-  # Emit declarations for call targets not defined in this module
+  # Emit declarations for call targets not defined in this module. The
+  # already-declared check was a decls_out.index(search_str) — a full strstr
+  # over the growing declaration string PER ccall target, i.e. O(targets x
+  # decls length). Scan the declaration/definition lines once into a name set
+  # (the declared name is the first @token on a `declare`/`define` line) and
+  # test membership in O(1) instead; emit_artifact was a top compile fn and
+  # this strstr its hottest leaf.
+  declared_names = {}
+  decl_lines = decls_out.split("\n")
+  dli = 0
+  while dli < decl_lines.size()
+    dl = decl_lines[dli]
+    if dl.starts_with?("declare") || dl.starts_with?("define")
+      at = dl.index("@")
+      if at != nil
+        paren = dl.index("(")
+        if paren != nil && paren > at
+          declared_names[dl.slice(at + 1, paren - at - 1)] = true
+    dli += 1
   ccall_keys = ccall_needed.keys().sort()
   ck = 0
   while ck < ccall_keys.size()
     iname = ccall_keys[ck]
-    if !known_fns.has_key?(iname)
-      search_str = "@" + iname + "("
-      already = decls_out.index(search_str)
-      if already == nil
-        argc = ccall_needed[iname]
-        params = []
-        pi = 0
-        while pi < argc
-          params.push("i64")
-          pi += 1
-        decls_out = decls_out + "declare i64 @" + iname + "(" + params.join(", ") + ") nounwind\n"
+    if !known_fns.has_key?(iname) && !declared_names.has_key?(iname)
+      argc = ccall_needed[iname]
+      params = []
+      pi = 0
+      while pi < argc
+        params.push("i64")
+        pi += 1
+      decls_out = decls_out + "declare i64 @" + iname + "(" + params.join(", ") + ") nounwind\n"
+      declared_names[iname] = true
     ck += 1
   if decls_out != ""
     decls_out = decls_out + "\n"

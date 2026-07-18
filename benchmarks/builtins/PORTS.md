@@ -159,6 +159,18 @@ beats both "all Tungsten" (a u8-buffer allocation the C path avoids) and
 identically compiled/interpreted with no raw-marshaling — prefer them
 over ccall_nobox when an arg or the return is a WValue.
 
+## Round 7 results (2026-07-18) — Array#copy
+
+| method | C ns/op | Tungsten ns/op | delta |
+|---|---|---|---|
+| Array#copy | 144 | 122 | -15% (raw-index loads) |
+
+13 builtins ported, all at-or-faster than C. Compiler-perf side this
+session added a 3-part string hash/eq sweep (~10% on lowering.w); one
+attempt (== identity short-circuit in __w_eq_fast) was a verified
+negative — the compiler's symbol == is usually false, so it only added a
+failed compare before w_eq. Reverted; recorded so it isn't re-tried.
+
 ## The blocking finding: fixed method-call overhead
 
 Every failed port lost to the same tax: a dispatched Tungsten type-class

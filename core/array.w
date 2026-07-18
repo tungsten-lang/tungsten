@@ -129,6 +129,32 @@
       i += 1
     out
 
+  # take/drop are ports of the former runtime IC handlers (Phase 7+j),
+  # keeping their exact clamping semantics (negative counts clamp to 0,
+  # oversized counts to $size). Like compact/dup they return ordinary
+  # polymorphic Arrays for typed and view receivers. Benchmarked at parity
+  # with the retired C handlers; see benchmarks/builtins/.
+  -> take(count)
+    out = []
+    n = $size ## i64
+    n = count if count < n
+    i = 0
+    while i < n
+      out.push(self[i])
+      i += 1
+    out
+
+  -> drop(count)
+    out = []
+    n = $size ## i64
+    i = count ## i64
+    if i < 0
+      i = 0
+    while i < n
+      out.push(self[i])
+      i += 1
+    out
+
   # Keep the separator overload before the zero-argument overload. Runtime
   # dispatch selects exact arity first and otherwise falls back to the first
   # method of this name, matching the former C handler's extra-argument

@@ -22668,8 +22668,9 @@ static void w_init_ic_tables(void) {
     w_ic_array_table[31].name = WN_matvec_i8;
     w_ic_array_table[32].name = WN_matmul_i8;
     w_ic_array_table[33].name = WN_uniq;        /* Phase 7+j */
-    w_ic_array_table[34].name = WN_take;
-    w_ic_array_table[35].name = WN_drop;
+    /* Slots 34-35 (take/drop) are retired: their implementations moved to
+     * core/array.w, so the names stay unregistered and dispatch falls
+     * through to the Tungsten type-class bodies. */
     w_ic_array_table[36].name = WN_minmax;
     w_ic_array_table[37].name = WN_each;        /* Phase 7+k */
     w_ic_array_table[38].name = WN_any_q;
@@ -28082,32 +28083,32 @@ WValue w_strbuf_to_s(WValue buf) {
  * both Base64's class API and the legacy global functions execute the source
  * loops. */
 
-static WValue w_base64_string_bytes_view(WValue text) {
+/* Borrowed u8[] view of a String's bytes — the generic storage boundary for
+ * core source methods that loop over string bytes (base64, case transforms).
+ * Inline-mode strings are copied into an owned buffer: their bytes live in
+ * the caller's stack scratch, and source-level classes can be reopened, so a
+ * re-entrant call would otherwise overwrite an outer call's live view. */
+WValue w_string_bytes_view(WValue text) {
     if (w_is_rope(text)) text = w_rope_flatten(text);
     if (!w_is_stringy(text) || w_is_symbol(text))
-        die("base64 decode: expected String");
+        die("string bytes view: expected String");
 
     char inline_buf[6];
     const char *data;
     size_t len;
     w_str_data(text, inline_buf, &data, &len);
-    if (data == inline_buf) {
-        /* Inline String bytes live in the caller's stack buffer. Own this tiny
-         * payload instead of borrowing thread-local scratch: Base64's class
-         * can be reopened, so a digit helper may re-enter the codec and would
-         * otherwise overwrite an outer call's still-live input view. */
+    if (data == inline_buf)
         return w_bytes_from_data((const uint8_t *)inline_buf, (int64_t)len);
-    }
     return w_array_view_raw((uint8_t *)data, 8, (int64_t)len);
 }
 
 WValue w_base64_encode_input(WValue data) {
     if (w_is_bytes(data)) return data;
-    return w_base64_string_bytes_view(data);
+    return w_string_bytes_view(data);
 }
 
 WValue w_base64_decode_input(WValue text) {
-    return w_base64_string_bytes_view(text);
+    return w_string_bytes_view(text);
 }
 
 WValue w_string_from_byte_array(WValue bytes) {

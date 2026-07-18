@@ -22726,7 +22726,7 @@ static void w_init_ic_tables(void) {
     w_ic_array_table[43].name = WN_index;
     w_ic_array_table[44].name = WN_last_index;
     w_ic_array_table[45].name = WN_replace_byte_bang;
-    w_ic_array_table[46].name = WN_delete_at;
+    /* Slot 46 (delete_at) retired to core/array.w. */
     w_ic_array_table[47].name = WN_slice;
     w_ic_array_table[48].name = WN_exp;
     w_ic_array_table[49].name = WN_log;
@@ -26239,17 +26239,9 @@ WValue w_array_get_i64(WValue arr, int64_t i) {
     return w_int((int64_t)array_read(a, a->start + i));
 }
 
-WValue w_array_set(WValue arr, WValue index, WValue val) {
-    /* Mirrors w_array_get's unconditional-call situation — `[]=` also
-     * has no recv_type gate. Packed AST body references are immutable
-     * once frozen (a rewrite constructs a new list, same discipline as
-     * node-kind changes), so raise rather than corrupt if this is ever
-     * hit; the audited call sites never do. */
-    if (w_is_body(arr)) {
-        w_raise(w_string("[]=: cannot mutate an AST body reference (immutable once frozen)"));
-    }
-    WArray *a = (WArray *)w_as_ptr(arr);
-    int64_t i = w_as_int(index);
+/* Shared core of the `[]=` writers: negative-index normalization, cap
+ * bounds, ebits-aware store, and size bump. `arr` is a validated WArray. */
+static WValue w_array_write_at(WArray *a, int64_t i, WValue val) {
     if (i < 0) i += a->size;
     if (i < 0 || i >= a->cap) return val;
     if (array_is_wvalue(a)) {
@@ -26292,6 +26284,26 @@ WValue w_array_set(WValue arr, WValue index, WValue val) {
     array_write(a, a->start + i, (uint64_t)w_to_i64(val));
     if (i >= a->size) a->size = i + 1;
     return val;
+}
+
+WValue w_array_set(WValue arr, WValue index, WValue val) {
+    /* Mirrors w_array_get's unconditional-call situation — `[]=` also
+     * has no recv_type gate. Packed AST body references are immutable
+     * once frozen (a rewrite constructs a new list, same discipline as
+     * node-kind changes), so raise rather than corrupt if this is ever
+     * hit; the audited call sites never do. */
+    if (w_is_body(arr)) {
+        w_raise(w_string("[]=: cannot mutate an AST body reference (immutable once frozen)"));
+    }
+    return w_array_write_at((WArray *)w_as_ptr(arr), w_as_int(index), val);
+}
+
+/* Raw-index twin of w_array_set: the compiler emits this for `self[i] = v`
+ * with a raw machine-int index inside an Array-tier class method, where self
+ * is always a real WArray (never a packed body ref), so the body check and
+ * the w_as_int unbox both drop out. Saves the w_int box at the call site too. */
+WValue w_array_set_i64(WValue arr, int64_t i, WValue val) {
+    return w_array_write_at((WArray *)w_as_ptr(arr), i, val);
 }
 
 /* Phase 6a: unchecked WN_idx / WN_idxset for Array tier. No negative-

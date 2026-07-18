@@ -332,6 +332,7 @@ use hashing
   out << declare_fn("w_array_get_i64", wv, "i64, i64")
   out << declare_fn("w_array_idx_i64", wv, "i64, i64")
   out << declare_fn("w_array_set", wv, wv3)
+  out << declare_fn("w_array_set_i64", wv, "i64, i64, i64")
   out << declare_fn("w_array_size", wv, wv)
   out << declare_fn("w_array_pop", wv, wv)
   out << declare_fn("w_array_shift", wv, wv)

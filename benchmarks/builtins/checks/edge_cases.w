@@ -61,3 +61,21 @@ cp_arr = [10, 20, 30, 40, 50]
 << "cp9 " << cp_arr.copy(5)
 cp_empty = []
 << "cp10 " << cp_empty.copy(0)
+da1 = [10, 20, 30, 40, 50]
+<< "da1 " << da1.delete_at(0) << " " << da1
+da2 = [10, 20, 30, 40, 50]
+<< "da2 " << da2.delete_at(2) << " " << da2
+da3 = [10, 20, 30, 40, 50]
+<< "da3 " << da3.delete_at(4) << " " << da3
+da4 = [10, 20, 30, 40, 50]
+<< "da4 " << da4.delete_at(0 - 1) << " " << da4
+da5 = [10, 20, 30, 40, 50]
+<< "da5 " << da5.delete_at(0 - 5) << " " << da5
+da6 = [10, 20, 30, 40, 50]
+<< "da6 " << da6.delete_at(5) << " " << da6
+da7 = [10, 20, 30, 40, 50]
+<< "da7 " << da7.delete_at(0 - 6) << " " << da7
+da8 = [99]
+<< "da8 " << da8.delete_at(0) << " " << da8 << " " << da8.size
+da9 = []
+<< "da9 " << da9.delete_at(0) << " " << da9

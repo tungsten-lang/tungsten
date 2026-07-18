@@ -164,6 +164,26 @@
       i -= 1
     out
 
+  # Remove and return the element at idx, shifting the tail down and
+  # shrinking by one — the former C IC handler's exact semantics: a negative
+  # idx wraps from the end, and an out-of-range idx (after wrap) returns nil
+  # without mutating. The shift writes through `[]=` (direct-call
+  # w_array_set/w_array_set_i64 in an Array class body) and the size
+  # decrement rides on `pop`.
+  -> delete_at(idx)
+    n = $size ## i64
+    i = idx ## i64
+    if i < 0
+      i = n + i
+    if i < 0 || i >= n
+      return nil
+    removed = self[i]
+    while i < n - 1
+      self[i] = self[i + 1]
+      i += 1
+    pop
+    removed
+
   # Value-copy of a sub-range (the copying counterpart to the zero-copy
   # `slice` view), ported from the former C IC handler with its exact
   # clamping: a negative start wraps from the end then floors at 0, and the

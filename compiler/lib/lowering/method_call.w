@@ -884,6 +884,27 @@
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: idx_helper, args: [receiver_reg, idx_reg]})
       return typed_value(:i64, temp)
 
+    # `self[i] = v` inside an Array class body. Without this it fell through
+    # to generic method dispatch (w_method_call_cached), the tax that made a
+    # source-level delete_at shift-loop lose to the C handler. Direct-call
+    # w_array_set, or its raw-index twin when the index is a promoted machine
+    # int. Big/Small tiers keep their existing dispatch (no raw twin yet).
+    if method_name == "\[]=" && node.args.size() == 2 && idx_helper == "w_array_idx"
+      receiver_val = lower_expression(ctx, recv_node)
+      receiver_reg = ensure_i64_value(wfn, receiver_val)
+      idx_val = lower_expression(ctx, node.args[0])
+      val_expr = lower_expression(ctx, node.args[1])
+      val_reg = ensure_i64_value(wfn, val_expr)
+      if idx_val[:type] in (:raw_int :raw_i64 :raw_u64)
+        idx_raw = ensure_raw_int(wfn, idx_val)
+        temp = next_temp(wfn)
+        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_set_i64", args: [receiver_reg, idx_raw, val_reg]})
+        return typed_value(:i64, temp)
+      idx_reg = ensure_i64_value(wfn, idx_val)
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_set", args: [receiver_reg, idx_reg, val_reg]})
+      return typed_value(:i64, temp)
+
   # Direct builtins for array operations — only when receiver is known to be an array
   if recv_type == :array
     if method_name == "push" && node.args.size() == 1

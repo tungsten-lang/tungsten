@@ -139,6 +139,26 @@ one-liners — port likely loses to SIMD strstr on long strings; measure),
 String#chars/reverse (UTF-8 walks), Integer#chr (UTF-8 encode, buildable
 on the inline-string bit pattern), Int#to_s(base), Hash#merge!/each.
 
+## Round 6 results (2026-07-18) — Integer#chr / #to_s / #to_s(base)
+
+First entries from the wider IC catalog, all kept:
+
+| method | C ns/op | Tungsten ns/op | delta |
+|---|---|---|---|
+| Integer#chr | 10.0 | 9.0 | -10% (inline UTF-8, zero alloc) |
+| Integer#to_s | 146 | 137 | -6% (inline small; delegate tail) |
+| Integer#to_s(base) | 46.5 | 48.5 | +4% (delegates digit loop) |
+
+Pattern refined this round: **hybrid inline + C-tail delegation**. The
+common case (small ints for to_s, all codepoints for chr) transforms in
+registers on $value with no allocation; the rare/large tail delegates to
+a boxed-in/boxed-out C wrapper (w_int_to_str_boxed etc.) via plain ccall,
+matching the former handler's stack-buffer-then-intern cost exactly. This
+beats both "all Tungsten" (a u8-buffer allocation the C path avoids) and
+"all C" (loses the zero-alloc small-int win). Plain-ccall wrappers work
+identically compiled/interpreted with no raw-marshaling — prefer them
+over ccall_nobox when an arg or the return is a WValue.
+
 ## The blocking finding: fixed method-call overhead
 
 Every failed port lost to the same tax: a dispatched Tungsten type-class

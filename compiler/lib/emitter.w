@@ -652,6 +652,10 @@ use hashing
 # at +1, start at +4, size at +8, slots ptr at +16) are locked by the
 # _Static_asserts in runtime.h.
 -> array_fast_helpers_ir()
+  # NOTE: written as explicit `out <<` appends, not a `<<~` heredoc: this is
+  # compiler source, which the C VM stage-0 bootstrap (implementations/c) must
+  # parse, and that lexer has no heredoc support. Heredocs work only in the
+  # self-hosted compiler and user programs.
   out = StringBuffer(2200)
   out << "define private i64 @__w_array_get_i64_fast(i64 %arr, i64 %i) alwaysinline nounwind {\n"
   out << "entry:\n"

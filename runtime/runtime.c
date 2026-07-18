@@ -22776,8 +22776,8 @@ static void w_init_ic_tables(void) {
     w_ic_array_table[50].name = WN_tan;
     /* String */
     w_ic_string_table[0].name  = WN_idx;          /* Phase 7+g */
-    w_ic_string_table[1].name  = WN_upcase;
-    w_ic_string_table[2].name  = WN_downcase;
+    /* Slot 1 (upcase) retired to core/string_native.w. */
+    /* Slot 2 (downcase) retired to core/string_native.w. */
     /* Slots 3-4 (swapcase/capitalize) retired to core/string_native.w. */
     w_ic_string_table[5].name  = WN_concat;
     w_ic_string_table[6].name  = WN_append;

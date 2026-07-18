@@ -204,3 +204,59 @@
       out.push(raw_load_u8(by_p, by_i))
       by_i += 1
     out
+
+  # ASCII uppercase (a-z -> A-Z); bytes >= 0x80 pass through, so multibyte
+  # UTF-8 is unchanged — the former C handler's w_string_ascii_case(_, 1)
+  # semantics. Inline receivers flip case bits in $value (zero alloc); slab/
+  # heap transform into one u8[n+1] buffer the result steals. Same shape as
+  # swapcase, one-directional.
+  -> upcase
+    uc_v = ($value & -2) ## i64
+    uc_mode = (uc_v >> 1) & 7
+    if uc_mode <= 5
+      uc_i = 0
+      while uc_i < uc_mode
+        uc_sh = 4 + 8 * uc_i
+        uc_b = (uc_v >> uc_sh) & 0xFF
+        if uc_b >= 97 && uc_b <= 122
+          uc_v = uc_v ^ (32 << uc_sh)
+        uc_i += 1
+      return wvalue_from_bits(uc_v)
+    uc_n = ccall_nobox("w_string_byte_length", self) ## i64
+    uc_out = u8[uc_n + 1]
+    uc_src = ccall_nobox("w_string_data_ptr", self) ## i64
+    uc_dst = ccall_nobox("w_u8_live_data_ptr", uc_out) ## i64
+    uc_i = 0
+    while uc_i < uc_n
+      uc_b = raw_load_u8(uc_src, uc_i) ## i64
+      if uc_b >= 97 && uc_b <= 122
+        uc_b -= 32
+      raw_store_u8(uc_dst, uc_i, uc_b)
+      uc_i += 1
+    ccall("w_string_take_byte_array", uc_out, uc_n)
+
+  # ASCII lowercase (A-Z -> a-z); mirror of upcase.
+  -> downcase
+    dc_v = ($value & -2) ## i64
+    dc_mode = (dc_v >> 1) & 7
+    if dc_mode <= 5
+      dc_i = 0
+      while dc_i < dc_mode
+        dc_sh = 4 + 8 * dc_i
+        dc_b = (dc_v >> dc_sh) & 0xFF
+        if dc_b >= 65 && dc_b <= 90
+          dc_v = dc_v ^ (32 << dc_sh)
+        dc_i += 1
+      return wvalue_from_bits(dc_v)
+    dc_n = ccall_nobox("w_string_byte_length", self) ## i64
+    dc_out = u8[dc_n + 1]
+    dc_src = ccall_nobox("w_string_data_ptr", self) ## i64
+    dc_dst = ccall_nobox("w_u8_live_data_ptr", dc_out) ## i64
+    dc_i = 0
+    while dc_i < dc_n
+      dc_b = raw_load_u8(dc_src, dc_i) ## i64
+      if dc_b >= 65 && dc_b <= 90
+        dc_b += 32
+      raw_store_u8(dc_dst, dc_i, dc_b)
+      dc_i += 1
+    ccall("w_string_take_byte_array", dc_out, dc_n)

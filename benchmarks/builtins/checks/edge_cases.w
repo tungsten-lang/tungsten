@@ -98,3 +98,10 @@ da9 = []
 << "by3 " << "hi".bytes
 << "by4 " << "é".bytes
 << "by5 " << "aβ".bytes
+<< "uc1 " << "".upcase << " " << "abc".upcase << " " << "Héllo WÖRLD 123".upcase
+<< "uc2 " << "tiny".upcase << " " << "MixEd".upcase
+<< "dc1 " << "".downcase << " " << "ABC".downcase << " " << "Héllo WÖRLD 123".downcase
+<< "dc2 " << "TINY".downcase << " " << "MixEd".downcase
+<< "or1 " << "A".ord << " " << "z".ord << " " << "0".ord
+<< "or2 " << "".ord << " " << "é".ord << " " << "β".ord << " " << "🎉".ord
+<< "or3 " << "abc".ord

@@ -262,6 +262,16 @@ alloc), slab/heap via data-ptr. First cut used a uniform u8[] view and
 lost ~20% to the WArray-header alloc; the split flipped it to ~56ns vs C
 ~62ns (-10%). 18 builtins ported, all >= C.
 
+## Round 14 (2026-07-18) — upcase/downcase (-13%); ord reverted; heredoc blocked
+
+String#upcase/#downcase ported (inline $value case-bit flip; slab/heap
+u8-buffer steal) — ~24.5ns vs C ~28ns (-13%). String#ord prototyped and
+REVERTED: at ~8ns it is too cheap to absorb the ~2-3ns type-class dispatch
+overhead (~37% over budget) — very cheap ops (ord/abs) can't be ported
+within the 10% bar. Confirmed C-VM constraint: compiler source cannot use
+<<~ heredocs (implementations/c stage-0 lexer has none); they work only in
+the self-hosted compiler + user programs. 20 builtins ported.
+
 ## The blocking finding: fixed method-call overhead
 
 Every failed port lost to the same tax: a dispatched Tungsten type-class

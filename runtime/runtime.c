@@ -19639,8 +19639,10 @@ static WValue w_ic_string_chars(WValue r, WValue *a, int c) {
 /* Reverse by codepoint, not by byte — a byte-reverse would scramble every
  * multi-byte UTF-8 character (mirrors the codepoint-boundary walk in
  * w_ic_string_chars just above). */
-static WValue w_ic_string_reverse(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
+/* Codepoint-reverse of a String, exported so core/string_native.w can
+ * delegate its slab/heap case here (one malloc + intern, no WArray-header
+ * allocation) while owning the zero-alloc inline fast path itself. */
+WValue w_string_reverse(WValue r) {
     char buf[6]; const char *str; size_t str_len;
     w_str_data(r, buf, &str, &str_len);
     char *out = malloc(str_len + 1);
@@ -19662,6 +19664,11 @@ static WValue w_ic_string_reverse(WValue r, WValue *a, int c) {
     WValue result = w_string_n(out, str_len);
     free(out);
     return result;
+}
+
+static WValue w_ic_string_reverse(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    return w_string_reverse(r);
 }
 
 static WValue w_ic_string_codes(WValue r, WValue *a, int c) {
@@ -22801,7 +22808,7 @@ static void w_init_ic_tables(void) {
     w_ic_string_table[31].name = WN_matchop;     /* Phase 7+q */
     w_ic_string_table[32].name = WN_match_q;
     w_ic_string_table[33].name = WN_rindex;
-    w_ic_string_table[34].name = WN_reverse;
+    /* Slot 34 (reverse) retired to core/string_native.w. */
     /* Int */
     /* Slot 0 (to_s, both arities) retired to core/integer.w. */
     w_ic_int_table[1].name    = WN_abs;

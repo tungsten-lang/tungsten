@@ -1195,6 +1195,8 @@ use target
       return ccall("w_string_from_byte_array", args[1])
     when "w_string_take_byte_array"
       return ccall("w_string_take_byte_array", args[1], args[2])
+    when "w_string_reverse"
+      return ccall("w_string_reverse", args[1])
     when "w_int_to_str_boxed"
       return ccall("w_int_to_str_boxed", args[1])
     when "w_int_to_str_base_boxed"

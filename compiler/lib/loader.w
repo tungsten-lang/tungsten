@@ -536,7 +536,7 @@ use parser
 
       # ASCII case transforms are source-defined after removal of their
       # runtime ICs, same story as the Array group below.
-      if call_name in ("swapcase" "capitalize")
+      if call_name in ("swapcase" "capitalize" "reverse")
         consider_autoload_name("String", defined, registry, seen, pending)
 
       if @string_length_unresolved

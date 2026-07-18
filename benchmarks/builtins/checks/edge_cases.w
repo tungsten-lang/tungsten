@@ -79,3 +79,11 @@ da8 = [99]
 << "da8 " << da8.delete_at(0) << " " << da8 << " " << da8.size
 da9 = []
 << "da9 " << da9.delete_at(0) << " " << da9
+<< "rv1 " << "".reverse
+<< "rv2 " << "a".reverse
+<< "rv3 " << "hello".reverse
+<< "rv4 " << "héllo".reverse
+<< "rv5 " << "🎉ab".reverse
+<< "rv6 " << "exactly a slab sized string ok".reverse
+<< "rv7 " << "aβcδe".reverse
+<< "rv8 " << "ab".reverse

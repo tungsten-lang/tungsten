@@ -107,3 +107,43 @@
       raw_store_u8(cp_dst, cp_i, cp_b)
       cp_i += 1
     ccall("w_string_take_byte_array", cp_out, cp_n)
+
+  # Reverse by CODEPOINT (multibyte UTF-8 sequences keep their byte order),
+  # ported from the former C IC handler. Inline receivers (<= 5 bytes)
+  # rebuild the reversed payload directly in $value bits — no allocation;
+  # slab/heap receivers walk raw bytes into one u8[n+1] buffer the result
+  # steals. The lead byte gives each codepoint's length (0xF0+ = 4, 0xE0+ =
+  # 3, 0xC0+ = 2, else 1), clamped to the remaining bytes exactly as the C
+  # loop did, so malformed tails degrade identically.
+  -> reverse
+    rv_v = ($value & -2) ## i64
+    rv_mode = (rv_v >> 1) & 7
+    if rv_mode <= 5
+      rv_res = 0 ## i64
+      rv_i = 0
+      rv_w = rv_mode
+      while rv_i < rv_mode
+        rv_b0 = (rv_v >> (4 + 8 * rv_i)) & 0xFF
+        rv_clen = 1
+        if rv_b0 >= 240
+          rv_clen = 4
+        elsif rv_b0 >= 224
+          rv_clen = 3
+        elsif rv_b0 >= 192
+          rv_clen = 2
+        if rv_clen > rv_mode - rv_i
+          rv_clen = rv_mode - rv_i
+        rv_w -= rv_clen
+        rv_k = 0
+        while rv_k < rv_clen
+          rv_byte = (rv_v >> (4 + 8 * (rv_i + rv_k))) & 0xFF
+          rv_res = rv_res | (rv_byte << (4 + 8 * (rv_w + rv_k)))
+          rv_k += 1
+        rv_i += rv_clen
+      rv_base = (rv_v & -281474976710641) ## i64  # keep tag(48-63) + low nibble(0-3), clear payload
+      return wvalue_from_bits((rv_base | rv_res) ## i64)
+    # Slab/heap: delegate the codepoint walk to C, which reverses on a single
+    # malloc + intern. Building a Tungsten u8[] here would add a WArray-header
+    # allocation per call that pushes long strings over budget vs the former
+    # handler; the inline fast path above already wins the common short case.
+    ccall("w_string_reverse", self)

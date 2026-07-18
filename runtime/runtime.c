@@ -13606,6 +13606,17 @@ static uint64_t w_hash_value(WValue v) {
         return h;
     }
     if (w_is_stringy(v)) {
+        /* Inline (mode 0-5) and slab (mode 6) strings/symbols are canonical
+         * by bit pattern: equal content interns to one WValue, so the bits
+         * alone determine the value — including symbol-ness in bit 0. Hash
+         * them directly with splitmix64 instead of reading the bytes and
+         * running wyhash; this is the compiler's hottest hashing path (keys
+         * are interned method names / AST field symbols) and skips both the
+         * w_str_data copy/slab-read and the wyhash. Mode-7 heap strings are
+         * NOT canonical (two allocations can share content), so they must
+         * content-hash to stay consistent with w_hash_key_eq. */
+        if (((v >> 1) & 7) <= 6)
+            return w_hash_splitmix64(v);
         char buf[6]; const char *s; size_t len;
         w_str_data(v, buf, &s, &len);
         uint64_t h = w_hash_wyhash((const uint8_t *)s, len);

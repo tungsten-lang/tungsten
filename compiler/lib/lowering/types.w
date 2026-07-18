@@ -33,13 +33,16 @@
   m[:POW]       = "w_pow"
   m[:SLASH]     = "w_div"
   m[:PERCENT]   = "w_mod"
-  m[:EQ]        = "w_eq"
-  m[:NEQ]       = "w_neq"
+  # Comparisons route through private alwaysinline IR wrappers (emitter.w
+  # cmp_fast_helper_ir): the both-immediate-Int case folds to an inline
+  # icmp at every call site, everything else tail-calls the runtime op.
+  m[:EQ]        = "__w_eq_fast"
+  m[:NEQ]       = "__w_neq_fast"
   m[:MATCH]     = "w_regex_match"
-  m[:LT]        = "w_lt"
-  m[:GT]        = "w_gt"
-  m[:LTE]       = "w_lte"
-  m[:GTE]       = "w_gte"
+  m[:LT]        = "__w_lt_fast"
+  m[:GT]        = "__w_gt_fast"
+  m[:LTE]       = "__w_lte_fast"
+  m[:GTE]       = "__w_gte_fast"
   m[:AMPERSAND] = "w_bit_and"
   m[:PIPE]      = "w_bit_or"
   m[:CARET]     = "w_bit_xor"

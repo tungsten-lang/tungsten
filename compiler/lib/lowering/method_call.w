@@ -877,7 +877,7 @@
       if idx_helper == "w_array_idx" && idx_val[:type] in (:raw_int :raw_i64 :raw_u64)
         idx_raw = ensure_raw_int(wfn, idx_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_idx_i64", args: [receiver_reg, idx_raw]})
+        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_array_idx_i64_fast", args: [receiver_reg, idx_raw]})
         return typed_value(:i64, temp)
       idx_reg = ensure_i64_value(wfn, idx_val)
       temp = next_temp(wfn)
@@ -937,7 +937,7 @@
         idx_raw = ensure_raw_int(wfn, idx_val)
         temp = next_temp(wfn)
         emit_instruction(wfn, {
-          op: :call_direct_i64, temp: temp, name: "w_array_get_i64",
+          op: :call_direct_i64, temp: temp, name: "__w_array_get_i64_fast",
           args: [receiver_reg, idx_raw],
           src_line: node.line, src_col: node.col, loc_site_id: cs_id
         })

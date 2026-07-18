@@ -164,6 +164,44 @@
       i -= 1
     out
 
+  # Quadratic seen-scan over the result, matching the former C handler: `==`
+  # equality, first occurrence wins. A hash-set would change which values
+  # collapse together (hash-key equality), so this stays faithful.
+  -> uniq
+    out = []
+    n = $size ## i64
+    i = 0
+    while i < n
+      value = self[i]
+      seen = false
+      m = out.size ## i64
+      j = 0
+      while j < m
+        if out[j] == value
+          seen = true
+          j = m
+        else
+          j += 1
+      if !seen
+        out.push(value)
+      i += 1
+    out
+
+  # Empty receiver yields [nil, nil], matching the former C handler.
+  -> minmax
+    n = $size ## i64
+    if n == 0
+      return [nil, nil]
+    lo = self[0]
+    hi = lo
+    i = 1
+    while i < n
+      value = self[i]
+      lo = value if value < lo
+      hi = value if value > hi
+      i += 1
+    [lo, hi]
+
   # Keep the separator overload before the zero-argument overload. Runtime
   # dispatch selects exact arity first and otherwise falls back to the first
   # method of this name, matching the former C handler's extra-argument

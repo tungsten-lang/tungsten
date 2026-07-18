@@ -53,7 +53,7 @@
 
 # Known pure builtins (read-only, no side effects, args don't escape)
 -> is_pure_builtin(name)
-  name in ("w_add" "w_sub" "w_mul" "w_div" "w_mod" "w_eq" "w_neq" "w_lt" "w_gt" "w_lte" "w_gte" "w_bit_and" "w_bit_or" "w_bit_xor" "w_bit_shl" "w_bit_shr" "w_negate" "w_not" "w_to_s" "w_to_i" "w_to_f" "w_string" "w_str_to_sym" "w_str_concat" "w_str_length" "__w_type" "w_hash_new" "w_array_new" "w_box_int_checked")
+  name in ("w_add" "w_sub" "w_mul" "w_div" "w_mod" "w_eq" "w_neq" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_bit_and" "w_bit_or" "w_bit_xor" "w_bit_shl" "w_bit_shr" "w_negate" "w_not" "w_to_s" "w_to_i" "w_to_f" "w_string" "w_str_to_sym" "w_str_concat" "w_str_length" "__w_type" "w_hash_new" "w_array_new" "w_box_int_checked")
 
 # Analyze one function: determine which params escape and whether it's pure.
 -> escape_analyze(func, mod, fn_escs)

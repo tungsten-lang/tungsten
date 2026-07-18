@@ -22667,11 +22667,9 @@ static void w_init_ic_tables(void) {
     w_ic_array_table[30].name = WN_sqrt;
     w_ic_array_table[31].name = WN_matvec_i8;
     w_ic_array_table[32].name = WN_matmul_i8;
-    w_ic_array_table[33].name = WN_uniq;        /* Phase 7+j */
-    /* Slots 34-35 (take/drop) are retired: their implementations moved to
-     * core/array.w, so the names stay unregistered and dispatch falls
-     * through to the Tungsten type-class bodies. */
-    w_ic_array_table[36].name = WN_minmax;
+    /* Slots 33-36 (uniq/take/drop/minmax, Phase 7+j) are retired: their
+     * implementations moved to core/array.w, so the names stay unregistered
+     * and dispatch falls through to the Tungsten type-class bodies. */
     w_ic_array_table[37].name = WN_each;        /* Phase 7+k */
     w_ic_array_table[38].name = WN_any_q;
     w_ic_array_table[39].name = WN_all_q;

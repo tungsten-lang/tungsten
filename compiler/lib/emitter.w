@@ -643,6 +643,122 @@ use hashing
   tail.slice(0, lparen)
 
 # Filter runtime declarations to only those in the used_fns set.
+# Inline fast-path helpers for raw-index array reads, emitted as private
+# alwaysinline IR functions so LLVM folds the polymorphic-array (ebits=65)
+# fast path into every call site without needing LTO. Packed body refs,
+# typed arrays, and out-of-bounds indexes branch to the full runtime
+# decoders, which own those semantics. Layout facts (tag nibble 0xA, ebits
+# at +1, start at +4, size at +8, slots ptr at +16) are locked by the
+# _Static_asserts in runtime.h.
+-> array_fast_helpers_ir()
+  out = StringBuffer(2200)
+  out << "define private i64 @__w_array_get_i64_fast(i64 %arr, i64 %i) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %hi = lshr i64 %arr, 48\n"
+  out << "  %lo0 = icmp eq i64 %hi, 0\n"
+  out << "  %ge16 = icmp uge i64 %arr, 16\n"
+  out << "  %obj = and i1 %lo0, %ge16\n"
+  out << "  %sub = and i64 %arr, 15\n"
+  out << "  %isarr = icmp eq i64 %sub, 10\n"
+  out << "  %objarr = and i1 %obj, %isarr\n"
+  out << "  br i1 %objarr, label %hdr, label %slow\n"
+  out << "hdr:\n"
+  out << "  %base = and i64 %arr, -16\n"
+  out << "  %p = inttoptr i64 %base to ptr\n"
+  out << "  %ebp = getelementptr i8, ptr %p, i64 1\n"
+  out << "  %eb = load i8, ptr %ebp, align 1\n"
+  out << "  %is65 = icmp eq i8 %eb, 65\n"
+  out << "  br i1 %is65, label %rng, label %slow\n"
+  out << "rng:\n"
+  out << "  %szp = getelementptr i8, ptr %p, i64 8\n"
+  out << "  %sz32 = load i32, ptr %szp, align 4\n"
+  out << "  %sz = sext i32 %sz32 to i64\n"
+  out << "  %neg = icmp slt i64 %i, 0\n"
+  out << "  %iw = add i64 %i, %sz\n"
+  out << "  %ix = select i1 %neg, i64 %iw, i64 %i\n"
+  out << "  %inb = icmp ult i64 %ix, %sz\n"
+  out << "  br i1 %inb, label %fast, label %slow\n"
+  out << "fast:\n"
+  out << "  %stp = getelementptr i8, ptr %p, i64 4\n"
+  out << "  %st32 = load i32, ptr %stp, align 4\n"
+  out << "  %st = sext i32 %st32 to i64\n"
+  out << "  %eff = add i64 %st, %ix\n"
+  out << "  %slp = getelementptr i8, ptr %p, i64 16\n"
+  out << "  %slots = load ptr, ptr %slp, align 8\n"
+  out << "  %ep = getelementptr i64, ptr %slots, i64 %eff\n"
+  out << "  %v = load i64, ptr %ep, align 8\n"
+  out << "  ret i64 %v\n"
+  out << "slow:\n"
+  out << "  %sv = call i64 @w_array_get_i64(i64 %arr, i64 %i)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out << "define private i64 @__w_array_idx_i64_fast(i64 %arr, i64 %i) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %hi = lshr i64 %arr, 48\n"
+  out << "  %lo0 = icmp eq i64 %hi, 0\n"
+  out << "  %ge16 = icmp uge i64 %arr, 16\n"
+  out << "  %obj = and i1 %lo0, %ge16\n"
+  out << "  %sub = and i64 %arr, 15\n"
+  out << "  %isarr = icmp eq i64 %sub, 10\n"
+  out << "  %objarr = and i1 %obj, %isarr\n"
+  out << "  br i1 %objarr, label %hdr, label %slow\n"
+  out << "hdr:\n"
+  out << "  %base = and i64 %arr, -16\n"
+  out << "  %p = inttoptr i64 %base to ptr\n"
+  out << "  %ebp = getelementptr i8, ptr %p, i64 1\n"
+  out << "  %eb = load i8, ptr %ebp, align 1\n"
+  out << "  %is65 = icmp eq i8 %eb, 65\n"
+  out << "  br i1 %is65, label %fast, label %slow\n"
+  out << "fast:\n"
+  out << "  %stp = getelementptr i8, ptr %p, i64 4\n"
+  out << "  %st32 = load i32, ptr %stp, align 4\n"
+  out << "  %st = sext i32 %st32 to i64\n"
+  out << "  %eff = add i64 %st, %i\n"
+  out << "  %slp = getelementptr i8, ptr %p, i64 16\n"
+  out << "  %slots = load ptr, ptr %slp, align 8\n"
+  out << "  %ep = getelementptr i64, ptr %slots, i64 %eff\n"
+  out << "  %v = load i64, ptr %ep, align 8\n"
+  out << "  ret i64 %v\n"
+  out << "slow:\n"
+  out << "  %sv = call i64 @w_array_idx_i64(i64 %arr, i64 %i)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
+# Inline comparison fast paths, same private-alwaysinline scheme as the
+# array helpers below: when BOTH operands are immediate Ints (tag 0xFFFA),
+# the compare folds to an inline icmp at the call site; anything else
+# (floats, BigInts, strings, chars, decimals) calls the runtime operator,
+# which owns the full type ladder. eq/neq compare full bits (equal tags
+# make payload equality bit equality); ordered compares sign-extend the
+# 48-bit payloads first.
+-> cmp_fast_helper_ir(fast_name, slow_name, pred, sext_payload)
+  out = StringBuffer(760)
+  out << "define private i64 @" + fast_name + "(i64 %a, i64 %b) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %ta = lshr i64 %a, 48\n"
+  out << "  %ia = icmp eq i64 %ta, 65530\n"
+  out << "  %tb = lshr i64 %b, 48\n"
+  out << "  %ib = icmp eq i64 %tb, 65530\n"
+  out << "  %both = and i1 %ia, %ib\n"
+  out << "  br i1 %both, label %fast, label %slow\n"
+  out << "fast:\n"
+  if sext_payload
+    out << "  %sa = shl i64 %a, 16\n"
+    out << "  %pa = ashr i64 %sa, 16\n"
+    out << "  %sb = shl i64 %b, 16\n"
+    out << "  %pb = ashr i64 %sb, 16\n"
+    out << "  %c = icmp " + pred + " i64 %pa, %pb\n"
+  else
+    out << "  %c = icmp " + pred + " i64 %a, %b\n"
+  out << "  %r = select i1 %c, i64 2, i64 1\n"
+  out << "  ret i64 %r\n"
+  out << "slow:\n"
+  out << "  %sv = call i64 @" + slow_name + "(i64 %a, i64 %b)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
 -> filter_runtime_decls(decls, used_fns)
   lines = decls.split("\n")
   out = StringBuffer(decls.size())
@@ -732,7 +848,7 @@ use hashing
   direct_range_metadata_suffix("i64", w_tag_char + subtype_span * 3, w_tag_char + subtype_span * 4)
 
 -> wvalue_bool_call?(name)
-  name in ("w_bool" "w_eq" "w_neq" "w_lt" "w_gt" "w_lte" "w_gte" "w_hash_has_key" "__w_file_exists" "__w_write_file" "w_ipv4_in_cidr")
+  name in ("w_bool" "w_eq" "w_neq" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_hash_has_key" "__w_file_exists" "__w_write_file" "w_ipv4_in_cidr")
 
 -> known_call_range_metadata_suffix(inst, llvm_type)
   suffix = range_metadata_suffix(inst, llvm_type)
@@ -1515,6 +1631,36 @@ use hashing
     decls_out = "@g_node_arena = external global \[4 x { ptr, i32, i32 }]\n@g_node_stride = external constant \[4 x i32]\n\n" + decls_out
   if decls_out != ""
     decls_out = decls_out + "\n"
+
+  # Inline array-read fast paths: inject the private alwaysinline helper
+  # definitions (plus their slow-path externs, unless already declared)
+  # before the auto-declare loop below — its decls_out dedupe then skips
+  # re-declaring the helper names.
+  if ccall_needed.has_key?("__w_array_get_i64_fast") || ccall_needed.has_key?("__w_array_idx_i64_fast")
+    if decls_out.index("@w_array_get_i64(") == nil
+      decls_out = decls_out + "declare i64 @w_array_get_i64(i64, i64) nounwind\n"
+    if decls_out.index("@w_array_idx_i64(") == nil
+      decls_out = decls_out + "declare i64 @w_array_idx_i64(i64, i64) nounwind\n"
+    decls_out = decls_out + array_fast_helpers_ir() + "\n"
+
+  # Inline comparison fast paths — same injection scheme, one helper per
+  # comparison actually used by this module.
+  cmp_fast_specs = [
+    ["__w_eq_fast", "w_eq", "eq", false],
+    ["__w_neq_fast", "w_neq", "ne", false],
+    ["__w_lt_fast", "w_lt", "slt", true],
+    ["__w_gt_fast", "w_gt", "sgt", true],
+    ["__w_lte_fast", "w_lte", "sle", true],
+    ["__w_gte_fast", "w_gte", "sge", true]
+  ]
+  cfi = 0
+  while cfi < cmp_fast_specs.size()
+    cf = cmp_fast_specs[cfi]
+    if ccall_needed.has_key?(cf[0])
+      if decls_out.index("@" + cf[1] + "(") == nil
+        decls_out = decls_out + "declare i64 @" + cf[1] + "(i64, i64) nounwind\n"
+      decls_out = decls_out + cmp_fast_helper_ir(cf[0], cf[1], cf[2], cf[3]) + "\n"
+    cfi += 1
 
   # Emit declarations for call targets not defined in this module
   ccall_keys = ccall_needed.keys().sort()

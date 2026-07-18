@@ -186,6 +186,33 @@ that both reads AND writes self[i] needs both raw twins to beat C.
 
 14 builtins ported, all at-or-faster than C.
 
+## Round 9 (2026-07-18) — remaining candidates surveyed, ruled out
+
+Went looking for the next clean port; each remaining C handler was
+verified NOT a >10%-safe win, with the reason:
+
+- Array#fill — C hoists the element encode out of the loop and splats /
+  memsets; a per-element Tungsten write can't match.
+- Array#include?/index/count — SIMD-backed (w_u64_scan_eq / w_u1_index /
+  byte_scan_threaded); a w_eq loop loses.
+- Array#clear — sets header start/size=0; no Tungsten truncate primitive.
+- Array#unshift / push / pop / shift — deque/storage header ops.
+- Array#sort — mergesort, already partly Tungsten (array_mergesort).
+- String#include?/starts_with/ends_with — strstr/strncmp; likely lose to
+  SIMD strstr on long inputs.
+- String#reverse / chars / split — UTF-8 boundary walks + allocation.
+- String#center/ljust/rjust — NOT C builtins; undefined even in interp
+  (string.w scaffold unwired). Adding them is a feature, not a port.
+- Hash#merge! / each — need slot iteration; a closure-per-entry Tungsten
+  version loses to C's direct slot loop.
+
+Compiler side: w_eq is the standing #1 hot leaf but is now high-volume-
+cheap after the canonical/mode fast paths — growing the alwaysinline
+__w_eq_fast to catch it regressed (icache/codesize; see the negative
+result below), and reordering the out-of-line w_eq is discouraged by its
+own comment. type()/hash/array-access hot spots are handled. Session net:
+15 builtins ported (all >= C), lowering.w compile ~3.65s -> ~3.14s.
+
 ## The blocking finding: fixed method-call overhead
 
 Every failed port lost to the same tax: a dispatched Tungsten type-class

@@ -21664,6 +21664,15 @@ static int w_to_s_base_arg(WValue *a, int c) {
     return (int)base;
 }
 
+/* Boundary wrappers for core/integer.w's to_s ports: build the string on a
+ * stack buffer (no heap array) and intern once, matching the former C IC
+ * handler exactly. The Tungsten body owns dispatch + the zero-alloc inline
+ * fast path for small values; these format the tail. Boxed receiver in,
+ * boxed String out — plain ccall, so they work identically compiled and
+ * interpreted with no raw-marshaling mismatch. */
+WValue w_int_to_str_boxed(WValue r);
+WValue w_int_to_str_base_boxed(WValue r, WValue base);
+
 static WValue w_int_to_str_base_i64(int64_t n, int base) {
     static const char digits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
     char tmp[70];
@@ -21678,6 +21687,13 @@ static WValue w_int_to_str_base_i64(int64_t n, int base) {
     for (int i = 0; i < pos; i++) out[i] = tmp[pos - 1 - i];
     out[pos] = '\0';
     return w_string(out);
+}
+
+WValue w_int_to_str_boxed(WValue r) {
+    return w_int_to_str(w_as_int(r));
+}
+WValue w_int_to_str_base_boxed(WValue r, WValue base) {
+    return w_int_to_str_base_i64(w_as_int(r), (int)w_as_int(base));
 }
 
 /* Int builtin wrappers */
@@ -22720,10 +22736,10 @@ static void w_init_ic_tables(void) {
     w_ic_string_table[33].name = WN_rindex;
     w_ic_string_table[34].name = WN_reverse;
     /* Int */
-    w_ic_int_table[0].name    = WN_to_s;
+    /* Slot 0 (to_s, both arities) retired to core/integer.w. */
     w_ic_int_table[1].name    = WN_abs;
     w_ic_int_table[2].name    = WN_to_f;
-    w_ic_int_table[3].name    = WN_chr;
+    /* Slot 3 (chr) retired to core/integer.w. */
     /* Slot 4 (gcd) retired to core/integer.w; bigint receivers keep theirs. */
     w_ic_int_table[5].name    = WN_times;     /* Phase 7+o — added below */
     w_ic_int_table[6].name    = WN_sqrt;

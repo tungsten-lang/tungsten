@@ -58,6 +58,99 @@
   -> sq
     self * self
 
+  # UTF-8 encode of the receiver's codepoint. The result is at most four
+  # bytes, so it is BUILT IN REGISTERS as an inline-mode String (length in
+  # bits 1..3, byte i at bits 4+8i) — no allocation at all, where the
+  # former C handler malloc'd via w_string. Its w_string(strlen) quirks are
+  # kept exactly: chr(0), and any negative whose low byte is zero, yield ""
+  # (the NUL lead byte read as an empty C string), and out-of-range lead
+  # bytes truncate to 8 bits like the C char store did.
+  -> chr
+    ch_c = ($value & 0xFFFFFFFFFFFF) ## i64
+    if (ch_c & 0x800000000000) != 0
+      ch_c -= 281_474_976_710_656
+    ch_tag = -1_970_324_836_974_592 ## i64  # 0xFFF9000000000000
+    if ch_c < 128
+      ch_b = ch_c & 0xFF
+      if ch_b == 0
+        return ""
+      return wvalue_from_bits((ch_tag | 2 | (ch_b << 4)) ## i64)
+    if ch_c < 2048
+      ch_b0 = 192 | (ch_c >> 6)
+      ch_b1 = 128 | (ch_c & 63)
+      return wvalue_from_bits((ch_tag | 4 | (ch_b0 << 4) | (ch_b1 << 12)) ## i64)
+    if ch_c < 65536
+      ch_b0 = 224 | (ch_c >> 12)
+      ch_b1 = 128 | ((ch_c >> 6) & 63)
+      ch_b2 = 128 | (ch_c & 63)
+      return wvalue_from_bits((ch_tag | 6 | (ch_b0 << 4) | (ch_b1 << 12) | (ch_b2 << 20)) ## i64)
+    ch_b0 = (240 | (ch_c >> 18)) & 0xFF
+    ch_b1 = 128 | ((ch_c >> 12) & 63)
+    ch_b2 = 128 | ((ch_c >> 6) & 63)
+    ch_b3 = 128 | (ch_c & 63)
+    wvalue_from_bits((ch_tag | 8 | (ch_b0 << 4) | (ch_b1 << 12) | (ch_b2 << 20) | (ch_b3 << 28)) ## i64)
+
+  # Decimal digits. Results of up to five characters (all |n| < 100_000
+  # positives, |n| < 10_000 negatives) build inline in registers with no
+  # allocation; anything longer writes one u8 buffer whose storage the
+  # result String steals. BigInt receivers keep their own IC handler.
+  -> to_s
+    ts_n = ($value & 0xFFFFFFFFFFFF) ## i64
+    if (ts_n & 0x800000000000) != 0
+      ts_n -= 281_474_976_710_656
+    ts_tag = -1_970_324_836_974_592 ## i64  # 0xFFF9000000000000
+    if ts_n >= 0 && ts_n < 100_000
+      ts_len = 1
+      if ts_n >= 10
+        ts_len += 1
+      if ts_n >= 100
+        ts_len += 1
+      if ts_n >= 1000
+        ts_len += 1
+      if ts_n >= 10_000
+        ts_len += 1
+      ts_v = (ts_tag | (ts_len << 1)) ## i64
+      ts_m = ts_n
+      ts_i = ts_len - 1
+      while ts_i >= 0
+        ts_v = ts_v | ((ts_m % 10 + 48) << (4 + 8 * ts_i))
+        ts_m = ts_m / 10
+        ts_i -= 1
+      return wvalue_from_bits(ts_v)
+    if ts_n < 0 && ts_n > (0 - 10_000)
+      ts_a = 0 - ts_n
+      ts_len = 2
+      if ts_a >= 10
+        ts_len += 1
+      if ts_a >= 100
+        ts_len += 1
+      if ts_a >= 1000
+        ts_len += 1
+      ts_v = (ts_tag | (ts_len << 1) | (45 << 4)) ## i64
+      ts_i = ts_len - 1
+      while ts_i >= 1
+        ts_v = ts_v | ((ts_a % 10 + 48) << (4 + 8 * ts_i))
+        ts_a = ts_a / 10
+        ts_i -= 1
+      return wvalue_from_bits(ts_v)
+    # Longer results (6..15 digits): format on a C stack buffer and intern
+    # once, exactly as the former IC handler's w_int_to_str did — cheaper
+    # than allocating a Tungsten u8 buffer to steal.
+    ccall("w_int_to_str_boxed", self)
+
+  # Base-N digits, 2..36, lowercase letters past 9 — the former C handler's
+  # exact loop (including its argument validation message). Base 10 shares
+  # the buffer path rather than duplicating the inline fast case: explicit
+  # to_s(10) is rare.
+  # Base-N digits, 2..36. The digit loop and stack-buffer formatting stay in
+  # C (w_int_to_str_base_boxed) — base conversion is rare and the native loop
+  # is already allocation-lean — but the arity-2 dispatch and validation live
+  # here in the class, so the method is source-defined like its siblings.
+  -> to_s(base)
+    if base < 2 || base > 36
+      raise "to_s base must be between 2 and 36"
+    ccall("w_int_to_str_base_boxed", self, base)
+
   # Greatest common divisor — iterative Euclidean, exact for negatives. An
   # Integer receiver is always a NaN-boxed immediate (BigInt is its own
   # class), so when the argument is one too the loop runs on raw i64 at the

@@ -585,7 +585,7 @@ use parser
       # Integer/Number leaf methods commonly receive literals or locals, which
       # carry no explicit class reference. The to_i spelling is shared with
       # source-only BigInt identity, so schedule that tiny class once as well.
-      if call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq" "gcd" "lcm")
+      if call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq" "gcd" "lcm" "chr" "to_s")
         consider_autoload_name("Integer", defined, registry, seen, pending)
         if call_name == "to_i" && @bigint_to_i_unresolved
           consider_autoload_name("BigInt", defined, registry, seen, pending)

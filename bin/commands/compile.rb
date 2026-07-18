@@ -628,10 +628,12 @@ when ".w"
     if HAVE_COMPILER
       Dir.mktmpdir("tungsten-ll") do |dir|
         staged_bin = File.join(dir, File.basename(script, ".w"))
-        staged_ll = File.join("/tmp/tungsten", File.basename(script, ".w") + ".ll")
-        File.delete(staged_ll) if File.exist?(staged_ll)
+        staged_ll = File.join(dir, File.basename(script, ".w") + ".ll")
         cmd = [COMPILER, "compile", script, "--out", staged_bin, "--intern", intern_algo] + MATH_MODE_FLAGS
-        out, err, status = Open3.capture3(*cmd)
+        # The compiled backend normally isolates implicit LLVM scratch files.
+        # This compatibility mode needs a durable path until the child exits,
+        # so make that ownership explicit inside this invocation's temp dir.
+        out, err, status = Open3.capture3({ "TUNGSTEN_LL_PATH" => staged_ll }, *cmd)
         unless status.success? && File.exist?(staged_ll)
           # Surface the compiler's real diagnostic from whichever stream it used.
           # capture3 splits stdout/stderr, and the error formatter writes to

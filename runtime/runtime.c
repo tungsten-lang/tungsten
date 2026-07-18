@@ -17439,6 +17439,11 @@ WValue w_sync_handle_kind_support(WValue v) {
 
 /* ---- File I/O ---- */
 
+/* Defined with the other ownership helpers below.  `__w_read_file` copies the
+ * temporary byte array into an immutable String, so the fresh array is dead
+ * immediately and must not be retained for the process lifetime. */
+void w_value_free(WValue v);
+
 static WValue w_read_file_bytes_path(const char *path) {
     int fd = open(path, O_RDONLY);
     if (fd < 0) return W_NIL;
@@ -17467,6 +17472,7 @@ static WValue w_read_file_bytes_path(const char *path) {
         if (n < 0) {
             if (errno == EINTR) continue;
             close(fd);
+            w_value_free(bytes);
             return W_NIL;
         }
         if (n == 0) break;
@@ -17486,7 +17492,9 @@ WValue __w_read_file(WValue path_val) {
     if (bytes == W_NIL) return W_NIL;
     WArray *a = (WArray *)w_as_ptr(bytes);
     const char *data = (const char *)a->slots + a->start;
-    return w_string_n(data, (size_t)a->size);
+    WValue result = w_string_n(data, (size_t)a->size);
+    w_value_free(bytes);
+    return result;
 }
 
 /* ---- File.mmap ----

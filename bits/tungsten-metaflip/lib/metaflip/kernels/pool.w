@@ -22,6 +22,9 @@
 #  17 exact q=2 low-rank shear with correction absorption
 #  18 support-clustered frozen-fringe 16->15 SAT (one CPU child, 4x4)
 #  19 whole-frontier one-axis kernel shear (one CPU child, 5x5)
+#  20 mode-locked one-factor exact closer (one CPU child)
+#  21 exact rank-debt MITM closer (one CPU child)
+#  22 live-neighborhood dynamic syzygy (one CPU child, 7x7)
 #
 # One worker is selected from each complementary family.  Within a family,
 # every fourth launch is strict rotation and the others use contextual integer
@@ -35,7 +38,7 @@ use policy
 use ../strategies/projective_circuit
 
 -> ffkp_mode_count() i64
-  20
+  23
 
 # Pool role 10 is one aggregate accounting role, but it may keep one child
 # from each of three complementary kernel families in flight.
@@ -50,9 +53,9 @@ use ../strategies/projective_circuit
 -> ffkp_mode_group(mode) (i64) i64
   if mode == 0 || mode == 5 || mode == 6 || mode == 18
     return 0
-  if mode == 1 || mode == 2 || mode == 3 || mode == 12 || mode == 13 || mode == 14 || mode == 15 || mode == 16 || mode == 17 || mode == 19
+  if mode == 1 || mode == 2 || mode == 3 || mode == 12 || mode == 13 || mode == 14 || mode == 15 || mode == 16 || mode == 17 || mode == 19 || mode == 20 || mode == 21
     return 1
-  if mode == 4 || mode == 7 || mode == 8 || mode == 9 || mode == 10 || mode == 11
+  if mode == 4 || mode == 7 || mode == 8 || mode == 9 || mode == 10 || mode == 11 || mode == 22
     return 2
   0 - 1
 
@@ -100,6 +103,12 @@ use ../strategies/projective_circuit
     return "frozen-fringe-sat"
   if mode == 19
     return "global-kernel-shear"
+  if mode == 20
+    return "mode-cpals"
+  if mode == 21
+    return "debt-mitm"
+  if mode == 22
+    return "dynamic-syzygy"
   "invalid"
 
 -> ffkp_mode_kind(mode) (i64) i64
@@ -108,7 +117,8 @@ use ../strategies/projective_circuit
   # 5 complete local factor-span refactor with a Metal exact-signature join,
   # 6 exact low-rank shear absorption with a regular Metal tuple scan,
   # 7 one bounded CPU frozen-fringe SAT child,
-  # 8 one bounded CPU whole-frontier kernel-shear child.
+  # 8 one bounded CPU whole-frontier kernel-shear child,
+  # 9 one bounded CPU exact algebraic-move child.
   if mode == 1
     return 1
   if mode == 2 || mode == 3 || mode == 11 || mode == 13 || mode == 14
@@ -123,6 +133,8 @@ use ../strategies/projective_circuit
     return 7
   if mode == 19
     return 8
+  if mode == 20 || mode == 21 || mode == 22
+    return 9
   if mode == 4 || mode == 7 || mode == 8 || mode == 9 || mode == 10
     return 3
   0
@@ -161,6 +173,15 @@ use ../strategies/projective_circuit
   # Full-frontier evidence is specific and recurring on 5x5 (8/64 exact
   # beyond-one-flip endpoints), while 4x4, 6x6, and 7x7 scans were negative.
   if mode == 19 && (n != 5 || rank < 3)
+    ok = 0
+  if mode == 20 && rank < 2
+    ok = 0
+  if mode == 21 && rank < 5
+    ok = 0
+  # The first genuine plateau improvement from the live-neighborhood circuit
+  # builder was 7x7 rank 247, density 3098 -> 3096.  Keep it evidence-gated
+  # until another tensor earns permanent rotation time.
+  if mode == 22 && (n != 7 || rank < 3)
     ok = 0
   ok
 
@@ -223,6 +244,8 @@ use ../strategies/projective_circuit
   if mode == 18
     cap = 32
   if mode == 19
+    cap = 32
+  if mode == 20 || mode == 21 || mode == 22
     cap = 32
   if budget > cap
     budget = cap

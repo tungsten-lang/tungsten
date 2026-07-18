@@ -6,6 +6,7 @@ use ../lib/metaflip/kernels/bundles/generic
 use ../lib/metaflip/kernels/bundles/c3
 use ../lib/metaflip/kernels/bundles/simd
 use ../lib/metaflip/kernels/bundles/rect
+use ../lib/metaflip/kernels/bundles/pooled_exact
 use ../lib/metaflip/kernels/metallib_cache
 use ../lib/metaflip/paths
 
@@ -33,6 +34,9 @@ failures += package_expect("relative runtime root canonicalizes", canonical_runt
 
 failures += package_expect("square seed is packaged", read_file(runtime_root + "/" + ffp_seed_path(5)) != nil)
 failures += package_expect("rectangular seed is packaged", read_file(runtime_root + "/" + ffrp_seed_rel(3, 4, 6)) != nil)
+failures += package_expect("227 d128 is the packaged default", ffrp_seed_rel(2, 2, 7).ends_with?("matmul_2x2x7_rank25_d128_rect_portfolio_gf2.txt"))
+failures += package_expect("227 preserves d132 and +1/+2 doors", ffrp_frontier_seed_count(2, 2, 7) == 4 && ffrp_frontier_seed_rel(2, 2, 7, 1).ends_with?("matmul_2x2x7_rank25_catalog_gf2.txt") && ffrp_frontier_seed_rel(2, 2, 7, 2).ends_with?("rank26_isotropy_split_plus1_gf2.txt") && ffrp_frontier_seed_rel(2, 2, 7, 3).ends_with?("rank27_isotropy_split_plus2_gf2.txt"))
+failures += package_expect("227 d128 seed is packaged", read_file(runtime_root + "/" + ffrp_seed_rel(2, 2, 7)) != nil)
 failures += package_expect("229 preserves R/R+1/R+2 doors", ffrp_frontier_seed_count(2, 2, 9) == 5 && ffrp_frontier_seed_rel(2, 2, 9, 3).ends_with?("rank33_d159_isotropy_split_plus1_gf2.txt") && ffrp_frontier_seed_rel(2, 2, 9, 4).ends_with?("rank34_d165_isotropy_split_plus2_gf2.txt"))
 failures += package_expect("229 rank-debt doors are packaged", read_file(runtime_root + "/" + ffrp_frontier_seed_rel(2, 2, 9, 3)) != nil && read_file(runtime_root + "/" + ffrp_frontier_seed_rel(2, 2, 9, 4)) != nil)
 package_sums = read_file(runtime_root + "/SHA256SUMS")
@@ -93,11 +97,19 @@ failures += package_expect_rect_partner_guard(runtime_root, "355")
 failures += package_expect_rect_partner_guard(runtime_root, "445")
 failures += package_expect("seed provenance manifest is packaged", read_file(runtime_root + "/manifests/seeds.tsv") != nil)
 failures += package_expect("CLI source is packaged", read_file(package_root + "/bin/metaflip.w") != nil)
+launcher_source = read_file(package_root + "/bin/metaflip")
+failures += package_expect("source-checkout launcher targets CLI entry", launcher_source != nil && launcher_source.include?("metaflip.w") && launcher_source.include?("metaflip-cli"))
 failures += package_expect("public library entry is packaged", read_file(package_root + "/lib/metaflip.w") != nil)
 failures += package_expect("rank-down endpoint compiler is packaged", read_file(runtime_root + "/strategies/rect_endpoint_rankdown.w") != nil)
 failures += package_expect("rank-two endpoint compiler is packaged", read_file(runtime_root + "/strategies/rect_endpoint_rankdown2.w") != nil)
 failures += package_expect("four-line catalyst compiler is packaged", read_file(runtime_root + "/strategies/rect_catalyst_lift2.w") != nil)
 failures += package_expect("double-annihilation macro is packaged", read_file(runtime_root + "/strategies/macro_double_annihilation.w") != nil)
+failures += package_expect("block-interior selector is packaged", read_file(runtime_root + "/strategies/block_interior.w") != nil)
+failures += package_expect("pooled exact strategies are packaged", read_file(runtime_root + "/strategies/mode_locked.w") != nil && read_file(runtime_root + "/strategies/debt_mitm.w") != nil && read_file(runtime_root + "/strategies/dynamic_syzygy.w") != nil)
+failures += package_expect("pooled exact worker is packaged", read_file(runtime_root + "/kernels/workers/pooled_exact.w") != nil && read_file(runtime_root + "/kernels/pooled_exact.w") != nil && read_file(runtime_root + "/kernels/bundles/pooled_exact.w") != nil)
+failures += package_expect("best provenance module is packaged", read_file(runtime_root + "/fleet/provenance.w") != nil)
+fleet_source = read_file(runtime_root + "/fleet.w")
+failures += package_expect("block selector participates in worker freshness", fleet_source != nil && fleet_source.include?("span_block_interior"))
 rect_campaign_source = read_file(runtime_root + "/rect/campaign.w")
 failures += package_expect("persistent rectangular CPU pool is packaged and linked", read_file(runtime_root + "/rect/cpu_pool.w") != nil && rect_campaign_source != nil && rect_campaign_source.include?("use cpu_pool"))
 failures += package_expect("generated CUDA is not packaged", read_file(runtime_root + "/kernels/generic/cal2zone_555.cu") == nil)
@@ -111,6 +123,8 @@ failures += package_expect("build command has no monorepo path", !build_command.
 failures += package_expect("native flag removed", !build_command.include?("--native"))
 failures += package_expect("runtime compile suppresses incidental dialects", build_command.include?("TUNGSTEN_GPU_DIALECTS=none"))
 failures += package_expect("runtime Metal output uses worker cache", build_command.include?("/tmp/metaflip_layout_test_worker.metal"))
+exact_build_command = ffpeb_build_command(runtime_root, "/tmp/metaflip_layout_test_exact")
+failures += package_expect("pooled exact build is pure Tungsten CPU", exact_build_command.include?("kernels/workers/pooled_exact.w") && exact_build_command.include?("TUNGSTEN_GPU_DIALECTS=none") && !exact_build_command.include?("benchmarks/matmul/metaflip"))
 
 if failures > 0
   << "metaflip package layout: " + failures.to_s() + " failure(s)"

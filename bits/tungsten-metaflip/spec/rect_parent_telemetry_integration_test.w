@@ -14,7 +14,10 @@ runtime_root = __DIR__ + "/../lib/metaflip"
 best_base = "/tmp/" + tag + "_best"
 status_path = "/tmp/" + tag + "_status"
 
-result = ffrpo_run("2x5x6,4x4x5", runtime_root, "", best_base, 1, status_path, 1, tag, 2, 20000, 2, 0, 1, 4, 4, 0, 0, "adaptive", 100, 1, "", 0, 1, 0, 0, 0) ## i64
+# This embedding test has no Metaflip CLI main to re-exec, so select the
+# documented in-process fallback. The production CLI passes its executable
+# path and is covered by rect_process_isolation_test.w.
+result = ffrpo_run("2x5x6,4x4x5", runtime_root, "", best_base, 1, status_path, 1, tag, 2, 20000, 2, 0, 1, 4, 4, 0, 0, "adaptive", 100, 1, "", 0, 1, 0, 0, 0, "") ## i64
 body = read_file(status_path)
 failures_count += rect_parent_integration_expect("two-epoch portfolio succeeds", result == 0 && body != nil && body.size() > 0)
 

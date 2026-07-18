@@ -18,12 +18,24 @@
   walkers
 
 # When Metal/CUDA is unavailable, continuous GPU roles become sticky CPU
-# strategy lanes. Count roles 0-9 with positive weight and clamp to 4..10.
+# strategy lanes. Count tensor-ready roles 0-9 with positive weight and clamp
+# to 4..10.
+-> ffp_cpu_strategy_role_available(n, role) (i64 i64) i64
+  if ffp_gpu_weight(n, role) <= 0
+    return 0
+  # CPU role mirrors must apply the same physical eligibility gate as the GPU
+  # scheduler.  Only 5x5 and 6x6 currently have an exact C3 seed; scheduling
+  # role 2 at 7x7 merely produced a mislabeled second leader walk.
+  if role == 2 || role == 5 || role == 6
+    if n != 5 && n != 6
+      return 0
+  1
+
 -> ffp_cpu_strategy_lane_count(n) (i64) i64
   count = 0 ## i64
   role = 0 ## i64
   while role < 10
-    if ffp_gpu_weight(n, role) > 0
+    if ffp_cpu_strategy_role_available(n, role) != 0
       count += 1
     role += 1
   if count < 4
@@ -42,7 +54,7 @@
   seen = 0 ## i64
   role = 0 ## i64
   while role < 10
-    if ffp_gpu_weight(n, role) > 0
+    if ffp_cpu_strategy_role_available(n, role) != 0
       if seen == lane
         return role
       seen += 1
@@ -97,7 +109,10 @@
     # Exact whole-scheme GL normalization followed by productive short walks.
     return base + "matmul_6x6_rank153_d1860_global_isotropy_gf2.txt"
   if n == 7
-    return base + "matmul_7x7_rank247_d3098_global_isotropy_gf2.txt"
+    # A NUMA-local CPU island exposed a four-flip path from d3096 to d3095.
+    # Its first three flips already reach d3094; the fourth costs one density
+    # bit and is omitted. The endpoint is a three-term exchange (distance six).
+    return base + "matmul_7x7_rank247_d3094_three_flip_density_gf2.txt"
   ""
 
 # Every checked-in exact scheme at the tracked frontier. The coordinator
@@ -165,21 +180,27 @@
     paths.push(base + "matmul_6x6_rank153_d2522_odd_parent5_gf2.txt")
     paths.push(base + "matmul_6x6_rank153_d2533_odd_parent5_novel_gf2.txt")
   if n == 7
+    # The d3094 three-flip endpoint is the density leader and hot default.
+    # Retain the nearby d3096 parent and a distant d3098 presentation as
+    # distinct restart doors.
+    paths.push(base + "matmul_7x7_rank247_d3094_three_flip_density_gf2.txt")
+    paths.push(base + "matmul_7x7_rank247_d3096_dynamic_syzygy_gf2.txt")
     paths.push(base + "matmul_7x7_rank247_d3098_global_isotropy_gf2.txt")
-    # Exact partial-automorphism nullspace tunnels from the density leader.
+    # Exact partial-automorphism nullspace tunnels from the former d3098
+    # density leader.
     # Each is independently n^6-gated and differs from both the source and
     # the corresponding whole-scheme automorphism image.
     paths.push(base + "matmul_7x7_rank247_d3098_partial_auto_max_distance_gf2.txt")
     paths.push(base + "matmul_7x7_rank247_d3098_partial_auto_min_density_gf2.txt")
     paths.push(base + "matmul_7x7_rank247_d3142_partial_auto_min_weight_gf2.txt")
     # Depth-four compositions of genuine partial nullspace edges.  Both keep
-    # the d3098 density leader's rank/density while reaching the maximum
+    # the former d3098 density leader's rank/density while reaching the maximum
     # possible set distance 2*247: their term supports are disjoint from it.
     paths.push(base + "matmul_7x7_rank247_d3098_partial_auto_beam_dense_gf2.txt")
     paths.push(base + "matmul_7x7_rank247_d3098_partial_auto_beam_far_gf2.txt")
     # Three max-distance representatives from the eight unique weighted-outer
-    # term sets.  They are archive/frontier restart seeds only; the compact
-    # d3098 scheme above remains the default and therefore gets the hot path.
+    # term sets. They are archive/frontier restart seeds only; the compact
+    # d3094 scheme above is the default and therefore gets the hot path.
     paths.push(base + "matmul_7x7_rank247_d3554_outer_isotropy_gf2.txt")
     paths.push(base + "matmul_7x7_rank247_d3554_outer_isotropy_c013_m7_gf2.txt")
     paths.push(base + "matmul_7x7_rank247_d3554_outer_isotropy_c021_m4_gf2.txt")
@@ -360,7 +381,12 @@
   if s == 7 || s == 8
     return 3
   if s == 9
-    return 4
+    # There is no exact C3 rank-247 seed.  A symmetry door therefore fell
+    # straight through to a second leader/balanced walk.  The bounded role
+    # audit found the mixed bank closed its +1/+2 debt in every replicated
+    # trial while retaining twelve distinct exact starts and frontier-novel
+    # endpoints, so spend this otherwise duplicate lane on mixed/balanced.
+    return 5
   if s == 10
     return 5
   6

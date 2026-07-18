@@ -1,6 +1,7 @@
 /build/
 /pkg/
 /metaflip
+!/bin/metaflip
 *.sidemap
 *.metal
 *.air

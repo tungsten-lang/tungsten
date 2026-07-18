@@ -1,4 +1,5 @@
 use ../lib/metaflip/rect/basins
+use ../lib/metaflip/rect/doors
 use ../lib/metaflip/seeds/rect
 
 -> ffrbct_expect(label, condition) (String bool) i64
@@ -98,7 +99,7 @@ legacy_p9_five = ffrbct_legacy_counts(4, p9_initial_choices, 10)
 z = ffrbct_expect("229 profile exposes five checked-in doors", p9_initial_choices == 5)
 z = ffrbct_expect("captured p9 five-door plateau skew", legacy_p9_five[0] == 4 && legacy_p9_five[1] == 3 && legacy_p9_five[2] == 0 && legacy_p9_five[3] == 1 && legacy_p9_five[4] == 2)
 
-# Once all four durable slots exist p7/p8 have seven choices. The old p7
+# Under the legacy four-slot archive p7/p8 had seven choices. The old p7
 # schedule still completely missed one door after 28 base epochs; p8 heavily
 # favored one door. Retain these measurements as an executable audit.
 legacy_p7_seven = ffrbct_legacy_counts(2, 7, 28)
@@ -138,9 +139,8 @@ while slot <= 3
   z = ffrbct_expect("fill segments cover every door slot " + slot.to_s(), ffrbct_all(fills, 1) == 1)
   slot += 1
 
-# Four durable doors expand p9's five checked-in choices to nine. The
-# low-discrepancy ticket must cover every one exactly once in any complete
-# window; this is the production shape that carries the new R+1/R+2 seeds.
+# Four legacy durable doors expanded p9's five checked-in choices to nine.
+# Retain the exact old trace as a regression for the low-discrepancy ticket.
 p9_full_choices = p9_initial_choices + 4 ## i64
 legacy_p9_nine = ffrbct_legacy_counts(4, p9_full_choices, 36)
 scheduled_p9_five = ffrbct_scheduled_counts(4, p9_initial_choices, 10)
@@ -170,7 +170,7 @@ while segment < p9_full_choices
   segment += 1
 z = ffrbct_expect("p9 fill segments cover every door", ffrbct_all(p9_fills, 1) == 1)
 
-# With four persisted doors, p9 has eight side choices beside the leader. A
+# With the legacy four persisted doors, p9 had eight side choices beside the leader. A
 # five-worker child assigns four side roles per epoch. The old +1 window
 # repeated three roles at the next restart and needed five epochs to expose all
 # eight; block stepping covers all eight in two and is exactly balanced in
@@ -181,6 +181,25 @@ p9_new_four = ffrbct_multiworker_counts(4, 8, 5, 4, 1)
 z = ffrbct_expect("old p9 J5 window exposes only five side doors", ffrbct_seen(p9_old_two) == 5)
 z = ffrbct_expect("blocked p9 J5 window exposes all side doors", ffrbct_seen(p9_new_two) == 8)
 z = ffrbct_expect("blocked p9 J5 windows stay balanced", ffrbct_all(p9_new_four, 2) == 1)
+
+# The production eight-slot archive expands p7 to twelve total starts (the
+# d128 leader, retained d132 same-rank door, and +1/+2 shoulders) and p9 to
+# thirteen. Complete windows remain exactly balanced. At the active cloud
+# widths, one child epoch touches every nonleader source: J14 covers all twelve
+# p9 side doors, and J15 covers all nine side doors of a profile such as 4x6x7
+# that has one checked-in nonleader plus the eight persisted doors.
+current_p7_choices = ffrp_frontier_seed_count(2, 2, 7) + ffrda_cap() ## i64
+current_p9_choices = ffrp_frontier_seed_count(2, 2, 9) + ffrda_cap() ## i64
+current_p7 = ffrbct_scheduled_counts(2, current_p7_choices, current_p7_choices * 4)
+current_p9 = ffrbct_scheduled_counts(4, current_p9_choices, current_p9_choices * 4)
+z = ffrbct_expect("eight-slot p7 choices", current_p7_choices == 12 && ffrbct_all(current_p7, 4) == 1)
+z = ffrbct_expect("eight-slot p9 choices", current_p9_choices == 13 && ffrbct_all(current_p9, 4) == 1)
+p9_current_side = current_p9_choices - 1 ## i64
+p9_current_workers = ffrbct_multiworker_counts(4, p9_current_side, 14, 1, 1)
+z = ffrbct_expect("J14 reaches every p9 side door", ffrbct_seen(p9_current_workers) == p9_current_side)
+p467_current_side = ffrp_frontier_seed_count(4, 6, 7) - 1 + ffrda_cap() ## i64
+p467_current_workers = ffrbct_multiworker_counts(2, p467_current_side, 15, 1, 1)
+z = ffrbct_expect("J15 reaches every p467 side door", p467_current_side == 9 && ffrbct_seen(p467_current_workers) == p467_current_side)
 
 # Two workers have a one-door window, so their exact historical schedule and
 # replay remain unchanged.

@@ -18,6 +18,29 @@ failures = 0 ## i64
     return true
   false
 
+-> hot_hash_mix(hash, value) (i64 i64) i64
+  x = (hash ^ value) & 9223372036854775807 ## i64
+  (((x << 13) & 9223372036854775807) ^ (x >> 7) ^ ((x << 3) & 9223372036854775807)) & 9223372036854775807
+
+-> hot_trajectory_hash(st) (i64[]) i64
+  digest = 7809847782465536322 ## i64
+  i = 0 ## i64
+  while i < st[6]
+    slot = st[st[50] + i] ## i64
+    digest = hot_hash_mix(digest, st[st[44] + slot])
+    digest = hot_hash_mix(digest, st[st[45] + slot])
+    digest = hot_hash_mix(digest, st[st[46] + slot])
+    i += 1
+  digest = hot_hash_mix(digest, st[6])
+  digest = hot_hash_mix(digest, st[7])
+  digest = hot_hash_mix(digest, st[8])
+  digest = hot_hash_mix(digest, st[13])
+  digest = hot_hash_mix(digest, st[21])
+  digest = hot_hash_mix(digest, st[22])
+  digest = hot_hash_mix(digest, st[23])
+  digest = hot_hash_mix(digest, st[36])
+  hot_hash_mix(digest, st[64])
+
 -> hot_pressure_reference(st, u, v, w) (i64[] i64 i64 i64) i64
   count = 0 ## i64
   i = 0 ## i64
@@ -68,6 +91,54 @@ failures = 0 ## i64
     ok = 0
   ok != 0
 
+# Baseline two-pass partner selection retained in the regression test so the
+# singleton-bucket shortcut is checked against every live slot, including
+# buckets that contain unrelated hash collisions and core min-slot filters.
+-> hot_partner_reference(st, axis, slot, random_word, min_slot) (i64[] i64 i64 i64 i64) i64
+  head = st[53] ## i64
+  nexto = st[56] ## i64
+  factoro = st[44] ## i64
+  if axis == 1
+    head = st[54]
+    nexto = st[58]
+    factoro = st[45]
+  if axis == 2
+    head = st[55]
+    nexto = st[60]
+    factoro = st[46]
+  key = st[factoro + slot] ## i64
+  count = ffw_chain_count_min(st,head,nexto,factoro,key,slot,min_slot) ## i64
+  if count > 0
+    want = (random_word * count) >> 31 ## i64
+    return ffw_chain_pick_min(st,head,nexto,factoro,key,slot,want,min_slot)
+  0 - 1
+
+-> hot_partner_suite(st) (i64[]) bool
+  i = 0 ## i64
+  while i < st[6]
+    slot = st[st[50] + i] ## i64
+    axis = 0 ## i64
+    while axis < 3
+      sample = 0 ## i64
+      while sample < 4
+        word = 0 ## i64
+        min_slot = 0 ## i64
+        if sample == 1
+          word = 715827882
+        if sample == 2
+          word = 2147483647
+        if sample == 3
+          word = 1431655765
+          min_slot = st[4] / 3
+        expected = hot_partner_reference(st,axis,slot,word,min_slot) ## i64
+        actual = ffw_pick_partner_min(st,axis,slot,word,min_slot) ## i64
+        if actual != expected
+          return false
+        sample += 1
+      axis += 1
+    i += 1
+  true
+
 # Exercise accepted and rejected rank-neutral flips plus rank-raising splits.
 square_cap = ffw_default_capacity(3) ## i64
 square = i64[ffw_state_size(square_cap)]
@@ -75,6 +146,7 @@ square_rank = ffw_init_naive_cap(square, 3, square_cap, 1701, 8, 3, 5000, 2000) 
 failures += hot_expect("square initializes", square_rank == 27)
 failures += hot_expect("square initial density", hot_density_consistent(square))
 failures += hot_expect("square pressure plans", hot_pressure_suite(square))
+failures += hot_expect("square partner selection", hot_partner_suite(square))
 
 i = 0 ## i64
 while i < 30000
@@ -98,6 +170,8 @@ while i < 200
 failures += hot_expect("square final current exact", ffw_verify_current_exact(square, 3) != 0)
 failures += hot_expect("square final best exact", ffw_verify_best_exact(square, 3) != 0)
 failures += hot_expect("square final pressure plans", hot_pressure_suite(square))
+failures += hot_expect("square final partner selection", hot_partner_suite(square))
+failures += hot_expect("square fixed trajectory", hot_trajectory_hash(square) == 5608517473452130838)
 
 # Rectangular walking uses the same flip transaction and its own split path.
 rect_cap = ffr_default_capacity(2, 2, 5) ## i64
@@ -106,6 +180,7 @@ rect_rank = ffr_init_naive_cap(rect, 2, 2, 5, rect_cap, 1907, 8, 3, 5000, 2000) 
 failures += hot_expect("rect initializes", rect_rank == 20)
 failures += hot_expect("rect initial density", hot_density_consistent(rect))
 failures += hot_expect("rect pressure plans", hot_pressure_suite(rect))
+failures += hot_expect("rect partner selection", hot_partner_suite(rect))
 
 i = 0
 while i < 30000
@@ -150,6 +225,8 @@ failures += hot_expect("external rect density refresh", hot_density_consistent(r
 failures += hot_expect("rect final current exact", ffr_verify_current_exact(rect, 2, 2, 5) != 0)
 failures += hot_expect("rect final best exact", ffr_verify_best_exact(rect, 2, 2, 5) != 0)
 failures += hot_expect("rect final pressure plans", hot_pressure_suite(rect))
+failures += hot_expect("rect final partner selection", hot_partner_suite(rect))
+failures += hot_expect("rect fixed trajectory", hot_trajectory_hash(rect) == 4244222856608978680)
 
 if failures > 0
   << "metaflip scheme hot path: " + failures.to_s() + " failure(s)"

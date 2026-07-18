@@ -2889,3 +2889,73 @@ quotients, descent from non-rigid witnesses yet to be found).
 Reproduce: /tmp-built drivers flipfleet_psi252_{campaign,export,
 export_xnf,decode,descent} and flipfleet_move_intake_run, all
 checked in.
+
+## 2026-07-17: cloud density campaign and support-component peeling
+
+A six-phase NUMA-sharded 7x7 CPU campaign on one `m8i.96xlarge` executed
+11,493,501,799,890 supervised moves.  One n4 shard, started from the exact
+rank-247/density-3096 dynamic-syzygy door, first reported an exact d3095
+checkpoint at 735,308,184,180 cumulative shard moves.  The preceding
+checkpoint was d3096 at 732,405,155,878 moves, so the winning reporting
+interval was at most 2,903,028,302 moves.  No shard reached rank 246, and the
+final two d3094-seeded phases added 3,724,378,944,384 moves without improving
+rank 247/density 3094.  Every supervisor stopped by an explicit signal or
+deadline; final OOM and stale-worker counters were zero.
+
+The important result was hidden inside the live endpoint.  Reconstructing the
+four legal flips from d3096 to d3095 showed that the first three already reach
+an exact rank-247/density-3094 scheme, while the fourth is disjoint and worsens
+density by one.  The retained endpoint shares 244 of 247 terms with d3096,
+has symmetric support distance six, and has axis densities `1020/1022/1052`.
+Its certificate SHA-256 is
+`56277df5a94ebfa161e25d34d82c0479f2a8ad07e51a224cdb772fcba7a935b5`.
+Independent host and pure-Tungsten reconstructions agree on all `7^6`
+coefficients; a deterministic pure-Tungsten replay gates every intermediate.
+The affected three-term component has only eight ordinary-flip states, and
+d3094 is density-minimal within it.  This is a same-rank density improvement,
+not a new rank bound.
+
+That audit yielded a reusable move.  For two exact parents `A` and `B`, their
+symmetric difference is a zero tensor.  Connect two delta terms only when
+their Cartesian supports intersect on all three axes.  Disconnected graph
+components occupy disjoint tensor cells, so every component is independently
+a zero relation and may be toggled without taking the full parent difference.
+The d3096/d3095 delta has ten terms and splits `6+4`; peeling the six-term
+component deterministically produces d3094.  The implementation independently
+gates both parents, every component relation, all materialized children, and
+the winner.  One hundred fully gated 7x7 calls averaged about 1.5--1.7 ms.
+It now runs only on cold same-rank-density intake and in the single
+differential child before general nullspace elimination; the differential
+threshold is six while ordinary archive novelty policy is unchanged.  CPU,
+GPU, and late-GPU adoptions record the component and origin in durable best
+provenance.  Ordinary worker loops pay no additional cost.
+
+The A40 companion campaign exercised five independent 7x7 roots through
+leader, original, and descendant roles.  Across five production phases it
+executed 1,195,540,480,000 CUDA attempts and 93,616,304,225 compatible-partner
+checks in 5,974.468 kernel-seconds.  It emitted 592 exact candidate events
+with zero exact rejects, maintained a 32-door archive, and finished at
+rank 247/density 3094; it did not find rank 246 or a denser rank-247 endpoint.
+ECC counters remained zero through shutdown.
+
+The rectangular half of the CPU campaign found an exact `<2,2,7>` rank-25
+density-128 presentation, improving the packaged d132 density leader.  The
+first reporting barrier with d128 was at 25.469 billion cumulative shape-local
+moves, and the previous d130 barrier was at 25.357 billion; the full discovery
+cost is therefore at most 25.469 billion moves and the final reporting interval
+at most 112 million.  The certificate hash is
+`bf071351b20e442a1d3b532bff5bf534a1b22b00ac75f657c3da4c2265d5515c`,
+and its support distance from d132 is 42.  Metaflip now starts 227 from d128
+but retains d132 and the rank-26/rank-27 controlled-debt shoulders.  Matched
+wide-front controls also justified increasing rectangular side-door capacity
+from four to eight: 467 and 466 filled all eight with no material throughput
+loss, while 346 correctly retained only four eligible doors.  The final
+4,200-second structural portfolio executed 10,784,929,500,000 moves with
+zero failures and found no additional rank or density improvement.
+
+Operationally, square bests now have additive machine-readable provenance in
+the status heartbeat and an atomically replaced `<best>.provenance` sidecar.
+The record covers seed/recovery, CPU island, dedicated and pooled GPU, live and
+late rectangular composition, late GPU drain, reset, and global-isotropy
+postprocessing.  Telemetry failures remain nonfatal, and neither square nor
+rectangular TUI rendering changed.

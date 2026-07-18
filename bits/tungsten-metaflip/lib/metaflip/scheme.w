@@ -383,6 +383,12 @@
     nexto = st[60]
     factoro = st[46]
   key = st[factoro + slot] ## i64
+  # A factor that occupies its hash bucket alone cannot have a legal partner.
+  # This is the dominant outcome on record plateaus, and proving it from the
+  # already-known source slot avoids entering the general collision scan.
+  bucket = ffw_hash(st, key) ## i64
+  if st[head + bucket] == slot + 1 && st[nexto + slot] == 0
+    return 0 - 1
   count = ffw_chain_count_min(st, head, nexto, factoro, key, slot, min_slot) ## i64
   found = 0 - 1 ## i64
   if count > 0

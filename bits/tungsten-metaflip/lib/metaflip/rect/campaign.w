@@ -92,22 +92,38 @@ use doors
   1
 
 -> ffrc_atomic_write(path, body, run_tag, nonce) (String String String i64) i64
-  tmp = path + ".tmp." + run_tag + "." + nonce.to_s()
+  tmp_buffer = StringBuffer(path.size() + run_tag.size() + 48) ## reuse
+  tmp_buffer << path
+  tmp_buffer << ".tmp."
+  tmp_buffer << run_tag
+  tmp_buffer << "."
+  tmp_buffer << nonce
+  tmp = tmp_buffer.to_s()
+  result = 0 ## i64
   wrote = write_file(tmp, body)
   if wrote
     moved = ccall("__w_rename", tmp, path)
     if moved
-      return 1
-  0
+      result = 1
+  ccall("w_value_free", tmp)
+  result
 
 -> ffrc_dump_atomic(state, path, run_tag, nonce) (i64[] String String i64) i64
-  tmp = path + ".tmp." + run_tag + "." + nonce.to_s()
+  tmp_buffer = StringBuffer(path.size() + run_tag.size() + 48) ## reuse
+  tmp_buffer << path
+  tmp_buffer << ".tmp."
+  tmp_buffer << run_tag
+  tmp_buffer << "."
+  tmp_buffer << nonce
+  tmp = tmp_buffer.to_s()
+  result = 0 - 1 ## i64
   rank = ffr_dump_best(state, tmp) ## i64
   if rank > 0
     moved = ccall("__w_rename", tmp, path)
     if moved
-      return rank
-  0 - 1
+      result = rank
+  ccall("w_value_free", tmp)
+  result
 
 # Clone through the rectangular initializer rather than ffw_reseed_from:
 # square reseeding interprets state word 3 as one factor width, whereas a

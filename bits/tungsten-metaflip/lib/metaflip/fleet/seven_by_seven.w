@@ -1,4 +1,4 @@
-# Pure policy helpers for Metaflip's 7x7 rectangular-component subfleet.
+# Pure policy helpers for Metaflip's 7x7 campaign and rectangular subfleet.
 #
 # Keeping these decisions outside the coordinator makes the lane budget,
 # backoff, contextual accounting, TUI cells, and retained rank-250 shoulder
@@ -7,6 +7,30 @@
 use ../kernels/pool
 use ../tui
 use banks
+use archive
+use map_elites
+
+# Independently admit one already exact-gated partial-automorphism endpoint to
+# the global max-min frontier archive and MAP-Elites.  These are complementary
+# policies: archive rejection must not suppress a novel MAP niche.  `stats`
+# receives the raw archive result (0/1) and MAP result (0/1/2); the return mask
+# uses bit 0 for archive change and bit 1 for any MAP change.
+-> ff7_partial_auto_admit(archive_states, archive_capacity, archive_min_distance, archive_counters, map_states, map_keys, map_uses, map_sources, map_capacity, candidate, frontier_rank, n, state_size, source, seed, stats) i64
+  if stats.size() < 2
+    return 0
+  stats[0] = 0
+  stats[1] = 0
+  if n != 7 || candidate == nil || ffw_best_rank(candidate) != frontier_rank
+    return 0
+  archive_changed = ffn_archive_add_copy(archive_states, candidate, archive_capacity, archive_min_distance, archive_counters, state_size, seed) ## i64
+  # Deliberately unconditional on archive_changed.
+  map_changed = ffme_add_copy(map_states, map_keys, map_uses, map_sources, candidate, frontier_rank, n, map_capacity, source, state_size, seed + 1009) ## i64
+  stats[0] = archive_changed
+  stats[1] = map_changed
+  result = archive_changed ## i64
+  if map_changed > 0
+    result += 2
+  result
 
 # Malformed canonical checkpoints are renamed out of the way before the
 # coordinator atomically reseeds the canonical path.  The run tag makes the
@@ -220,11 +244,12 @@ use banks
            "matmul_7x7_rank248_d2958_sedoglavic_gf2.txt",
            "matmul_7x7_rank248_d2967_leaf_canonical_gf2.txt",
            "matmul_7x7_rank248_d3015_connectivity_sedoglavic_gf2.txt"]
+  base = root + "/seeds/gf2/"
   admitted = 0 ## i64
   i = 0 ## i64
   while i < names.size()
     shoulder = i64[state_size]
-    path = root + "/" + names[i]
+    path = base + names[i]
     rank = ffw_load_scheme_cap(shoulder, path, n, capacity, 39101 + i * 17, dslack, cycles, workq, wanderq) ## i64
     if rank == 248 && ffw_verify_best_exact(shoulder, n) == 1
       if ffbp_near_add(near1, near1_signatures, near1_uses, near1_successes, shoulder, near1_capacity, signature_quota, 4, near_counters) == 1

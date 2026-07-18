@@ -1,0 +1,227 @@
+# NVIDIA CUDA 7x7 relay
+
+This is a narrow cloud harness for Metaflip's cooperative 7x7 GF(2) walker.
+It is separate from `bin/metaflip`: the production fleet currently dispatches
+Metal, while this relay launches one exact scheme per 32-lane CUDA warp.
+
+The CUDA kernel is not a hand-maintained fork. `build_777.sh` extracts the
+`@gpu` section from the packaged
+`lib/metaflip/kernels/simd/simdgroup_777.w` source and asks Tungsten to emit a
+temporary CUDA sidecar. The C++ host supplies the buffer protocol, NVIDIA warp
+reductions, multiple restart doors, seeded term-order diversification,
+an exhaustive 7^6 coefficient gate, and atomic checkpoints. A device claim
+that fails the host tensor or density gate is preserved as `.reject...` and
+terminates the process nonzero.
+
+## Build
+
+Use an x86-64 CUDA-devel image. On Runpod, for example:
+
+```sh
+apt-get update
+apt-get install -y git clang llvm lld make pkg-config libonig-dev libzstd-dev rsync
+cd /workspace/tungsten
+bin/tungsten bootstrap
+bits/tungsten-metaflip/cloud/cuda/build_777.sh \
+  --out /workspace/metaflip-cuda-777
+```
+
+`METAFLIP_TUNGSTEN` selects another compiler. `NVCC` selects another CUDA
+compiler. `METAFLIP_CUDA_ARCH` defaults to `native`; set it to a concrete
+architecture when cross-compiling.  An RTX 4090 is Ada (`sm_89`), so the
+recommended reproducible 4090 build is:
+
+```sh
+METAFLIP_CUDA_ARCH=sm_89 \
+  bits/tungsten-metaflip/cloud/cuda/build_777.sh \
+  --out /workspace/metaflip-cuda-777
+```
+
+The host gate has a CPU-only regression that can run before provisioning a
+GPU:
+
+```sh
+bits/tungsten-metaflip/cloud/cuda/test_777_host.sh
+```
+
+The host regression exact-gates all five campaign roots, proves that objective
+ordering selects the d3094 certificate as leader, and checks fair rotation over
+the other four roots plus the descendant role.
+
+The relay launch is deliberately one 32-thread warp per CUDA block.  During
+the cloud build, the script fail-closed checks the emitted barrier inventory
+and specializes Tungsten's conservative block barriers to warp barriers.
+This preserves all shared-memory ordering while avoiding full-block barrier
+machinery in the hot walk loop.
+
+To inspect the generated CUDA without requiring `nvcc` or a device:
+
+```sh
+bits/tungsten-metaflip/cloud/cuda/build_777.sh --emit-only
+```
+
+## RTX 4090 smoke
+
+Run two deliberately tiny epochs before spending a two-hour allocation.  The
+two epochs exercise scan and hash mode respectively, and reuse the same exact
+checkpoint/archive paths as the long run.
+
+```bash
+cd /workspace/tungsten
+mkdir -p /workspace/results
+set -o pipefail
+/workspace/metaflip-cuda-777 \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3094_three_flip_density_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3096_dynamic_syzygy_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3098_partial_auto_beam_far_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3554_outer_isotropy_c013_m7_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3098_affine_code_gf2.txt \
+  --out /workspace/results/best.txt \
+  --status /workspace/results/status.txt \
+  --archive-dir /workspace/results/archive \
+  --epochs 2 --seconds 60 --groups 256 --steps 100 --dispatches 1 \
+  --mode alternate --stop-rank 246 --device 0 \
+  2>&1 | tee /workspace/results/smoke.log
+rc=${PIPESTATUS[0]}
+printf '%s\n' "$rc" > /workspace/results/smoke.exit.code
+if [ "$rc" -ne 0 ]; then exit "$rc"; fi
+grep -qx 'phase=done' /workspace/results/status.txt || exit 2
+grep -qx 'exact_rejects=0' /workspace/results/status.txt || exit 2
+```
+
+## Two-hour RTX 4090 campaign
+
+Use structurally different exact rank-247 doors. Half of all epochs grind the
+current fleet-best checkpoint, one quarter rotates fairly through the other
+command-line roots, and one quarter rotates through diversity-admitted
+descendants. The relay permutes term order on every visit so CUDA RNG streams
+do not repeat. Production uses the faster scan specialization; explicit
+`--mode alternate` remains useful in the smoke test because it exercises both
+kernels independently within every scheduling role.
+
+```bash
+cd /workspace/tungsten
+mkdir -p /workspace/results
+set -o pipefail
+/workspace/metaflip-cuda-777 \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3094_three_flip_density_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3096_dynamic_syzygy_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3098_partial_auto_beam_far_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3554_outer_isotropy_c013_m7_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3098_affine_code_gf2.txt \
+  --out /workspace/results/best.txt \
+  --status /workspace/results/status.txt \
+  --archive-dir /workspace/results/archive \
+  --seconds 7200 --groups 8192 --steps 20000 --dispatches 5 \
+  --mode scan --stop-rank 246 --device 0 \
+  2>&1 | tee /workspace/results/run.log
+rc=${PIPESTATUS[0]}
+printf '%s\n' "$rc" > /workspace/results/exit.code
+exit "$rc"
+```
+
+Each process chooses a fresh diversification seed, so restarting a neutral
+campaign does not replay the same term permutations. Add `--run-seed N` to
+reproduce a run exactly; the selected value is printed and included in every
+status snapshot. An existing exact `--out` checkpoint is re-gated and admitted
+as the leader role. Exact entries in the archive are all re-gated after an
+interruption; raw support distance then rebuilds the bounded descendant bank
+farthest-first instead of accepting files by pathname order. Live descendants
+must have support distance at least 12 from every retained door, and a full
+bank changes only when a replacement strictly raises its exact max-min score.
+Use `--door-min-distance N` to override that measured default. The checkpoint
+is preserved unless a strictly better result appears.
+
+The 8192-group launch allocates 141,828,572 bytes (135.3 MiB) of explicit
+device buffers.  CUDA context and driver allocations make the process total
+shown by `nvidia-smi` larger, but it should remain comfortably below 1 GiB on
+a 24 GiB RTX 4090.  The relay also refuses a launch whose explicit buffers
+would consume more than 80% of currently free VRAM.
+
+The status file is replaced atomically after every completed CUDA dispatch,
+not merely at epoch end.  While the first long dispatch is running, inspect
+the GPU and then use its measured completion time as the heartbeat baseline:
+
+```sh
+nvidia-smi --query-gpu=index,name,memory.used,memory.total,utilization.gpu,power.draw \
+  --format=csv,noheader
+cat /workspace/results/status.txt
+tail -n 5 /workspace/results/run.log
+```
+
+The additive `policy_leader_epochs`, `policy_original_epochs`, and
+`policy_descendant_epochs` status fields count selected epoch roles;
+`selected_role` and `selected_source` identify the active launch. At every
+completed prefix, leader epochs must be at least half of their sum. Epoch log
+lines repeat the selected role/source and cumulative `policy=L/O/D` counts.
+
+The build mechanically emits constant scan and hash specializations from the
+same canonical Tungsten kernel. Structural guards reject changed mode geometry,
+and startup refuses to search unless compiled static shared memory is exactly
+8,688 bytes for scan and 19,152 bytes for hash. This lets scan avoid reserving
+the 10,464 bytes of hash tables it never touches without maintaining a second
+hand-written walker.
+
+With the campaign's CUDA 11.8 `nvcc -O3 -arch=sm_86` toolchain, `ptxas`
+reports scan at 82 registers/thread and 8,688 bytes shared, and hash at 78
+registers/thread and 19,152 bytes shared; both use zero stack and zero spills.
+On the 84-SM A40 the runtime occupancy calculation reports 10 versus 5
+one-warp blocks per SM (840 versus 420 resident groups), reducing an
+8,192-group scan launch from 20 backlog waves to 10. Treat register counts as toolchain measurements,
+not portable constants; static shared-byte checks remain fail-closed.
+
+A deterministic A40 ABBA check (8,192 groups, four 10,000-step epochs,
+327.68M attempts/run) reproduced every per-epoch partner count exactly between
+the old combined kernel and these specializations. Scan fell from a 5.980s
+mean to 3.034s (54.8M to 108.0M attempts/s, 1.97x); hash fell from 4.715s to a
+4.456s mean (69.5M to 73.5M attempts/s, 1.06x). This is a trajectory-preserving
+resource optimization, not a changed move distribution.
+
+The distant d3554 outer root confirms the choice of scan as the production
+default: the same deterministic four-epoch test produced identical partners,
+four identical exact candidates, and the same d3520 endpoint, while scan took
+1.375s versus hash's 1.955s (1.42x). Hash remains an explicit diagnostic and
+performance fallback, not a diversity role—the two kernels intentionally
+choose the same first matching partner.
+
+The initial `CUDA777_CONFIG` line preserves the original hash-compatible
+resource fields and also reports `scan_*` and `hash_*` shared bytes, registers,
+local bytes, active warps per SM, resident groups, and backlog waves. Preserve
+that line with the smoke log. The build enables the `ptxas` resource report for
+both kernels; preserve each function's register, spill, and shared-memory lines,
+or save an Nsight Compute launch summary, before changing capacity or hash
+geometry. In particular, do not lower the 360-term capacity merely from the
+static shared-memory estimate: register allocation or the lane-zero serial hash
+path may be the actual limiter.
+
+Do not classify a status file as stale while the CUDA process exists and GPU
+utilization remains nonzero: a heartbeat cannot be written from inside a
+kernel dispatch.  A campaign has failed if the process disappears before
+`phase=done`, `exit.code` is nonzero, the log contains `CUDA_OOM`,
+`CUDA_ERROR`, or `CUDA777_FATAL`, status says `phase=exact-reject` or reports a
+nonzero `exact_rejects`, or the status mtime exceeds three times the longest
+observed dispatch while GPU utilization is zero on three consecutive checks.
+Also treat a kernel-log OOM kill or NVIDIA Xid as fatal.  Preserve `best.txt`,
+`archive/`, `status.txt`, `run.log`, any `best.txt.reject.*`, and the exit-code
+files before deleting the pod.
+
+Treat 8192 groups as the breadth setting, not a knob to keep increasing.  It
+already leaves a deep backlog of independent one-warp schemes on a 4090.  Use
+the first completed long dispatch to tune only `--steps`: target roughly
+10--60 seconds between status updates; halve 20000 if a dispatch takes more
+than two minutes, or double it if dispatches take only a few seconds.  Keep
+five dispatches when possible so each door receives a 100000-step trajectory
+before rotation.
+
+For any alternate unattended wrapper, save the real pipeline exit code:
+
+```bash
+set -o pipefail
+/workspace/metaflip-cuda-777 ... 2>&1 | tee /workspace/results/run.log
+printf '%s\n' "${PIPESTATUS[0]}" > /workspace/results/exit.code
+```
+
+An exit code of 2, a `CUDA_OOM`/`CUDA_ERROR`/`CUDA777_FATAL` line, an
+`exact-reject` status, or a stale status combined with zero GPU utilization is
+a failed campaign. Copy `/workspace/results` off the pod before terminating
+it. A normal wall-limit or signal drain writes `phase=done`.

@@ -15,7 +15,14 @@
 
 use kxor
 use ../strategies/archive_nullspace
+use ../strategies/delta_components
 use metallib_cache
+
+# Six is the smallest useful proper zero-relation exchange.  Keep this local
+# to the one-child differential worker; ordinary archive novelty thresholds
+# remain unchanged.
+-> ffpd_component_min_distance() i64
+  6
 
 -> ffpd_shell_quote(text) (String)
   "'" + text.replace("'", "'\"'\"'") + "'"
@@ -84,6 +91,30 @@ use metallib_cache
         return hit
   0
 
+# Fast first refusal for a close parent pair whose exact delta separates by
+# tensor support.  This is cheaper and more interpretable than a general
+# nullspace search, while the latter remains the fallback for overlapping
+# algebraic relations.
+-> ffpd_try_components(state_a, state_b, output_path, n, capacity, pool, distance) (i64[] i64[] String i64 i64 i64 i64) i64
+  if distance > pool
+    return 0
+  child = i64[ffw_state_size(capacity)]
+  meta = i64[12]
+  hit = ffdc_crossover_best_states(state_a, state_b, n, pool, child, capacity, 96011 + distance, 0, 1, 1, 1, meta) ## i64
+  if hit > 0
+    parent_rank = ffw_best_rank(state_a) ## i64
+    parent_bits = ffw_best_bits(state_a) ## i64
+    if ffdc_better(ffw_best_rank(state_b), ffw_best_bits(state_b), parent_rank, parent_bits) == 1
+      parent_rank = ffw_best_rank(state_b)
+      parent_bits = ffw_best_bits(state_b)
+    if ffdc_better(hit, ffw_best_bits(child), parent_rank, parent_bits) == 1
+      if ffw_verify_best_exact(child, n) == 1
+        dumped = ffw_dump_best(child, output_path) ## i64
+        if dumped == hit
+          << "CPU_POOL_PARENT_DIFF n=" + n.to_s() + " strategy=support-components distance=" + distance.to_s() + " components=" + meta[1].to_s() + " relation=" + meta[10].to_s() + " rank=" + parent_rank.to_s() + "->" + hit.to_s() + " density=" + parent_bits.to_s() + "->" + ffw_best_bits(child).to_s()
+          return hit
+  0
+
 -> ffpd_search(parent_a, parent_b, output_path, n, pool, offset, min_distance) (String String String i64 i64 i64 i64) i64
   if n < 3 || n > 7 || pool < 5
     return 0 - 1
@@ -114,12 +145,18 @@ use metallib_cache
   dw = i64[dcap]
   drank = ffpd_difference(au, av, aw, arank, bu, bv, bw, brank, du, dv, dw, dcap) ## i64
   required = min_distance ## i64
-  if required < 6
-    required = 6
+  if required < ffpd_component_min_distance()
+    required = ffpd_component_min_distance()
   if drank < required
     return 0
 
-  # Exact archive-nullspace crossover gets first refusal.  It only runs when
+  # Peel tensor-support components before paying for complete elimination.
+  # The d3096/d3095 regression is d10=6+4 and takes this path to d3094.
+  component_hit = ffpd_try_components(state_a, state_b, output_path, n, cap, pool, drank) ## i64
+  if component_hit > 0
+    return component_hit
+
+  # Exact archive-nullspace crossover gets second refusal.  It only runs when
   # the entire symmetric difference fits `pool`; otherwise the bounded
   # primitive-five fallback below still rotates through local windows.
   nullspace_hit = ffpd_try_nullspace(state_a, state_b, output_path, n, cap, pool, drank) ## i64

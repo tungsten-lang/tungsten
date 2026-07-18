@@ -13,7 +13,13 @@ benchmarks, and the full certificate collection remain outside this bit.
 ```text
 tungsten-metaflip/
 ├── Bitfile
-├── bin/metaflip.w
+├── bin/
+│   ├── metaflip
+│   └── metaflip.w
+├── cloud/cuda/
+│   ├── build_777.sh
+│   ├── metaflip_cuda_777.cpp
+│   └── test_777_host.sh
 ├── lib/metaflip.w
 ├── lib/metaflip/
 │   ├── scheme.w
@@ -37,6 +43,16 @@ A Tungsten compiler is required both to build the coordinator and, for the
 current release, at run time when the fleet materializes specialized workers.
 Worker builds resolve the driver through `METAFLIP_TUNGSTEN`, `TUNGSTEN_BIN`,
 `TUNGSTEN`, `TUNGSTEN_ROOT`, and finally `tungsten` on `PATH`.
+From a source checkout, the stable launcher compiles the pure-Tungsten CLI to
+the user cache when needed and then reuses it:
+
+```sh
+bin/metaflip --tensor 5x5
+```
+
+Set `METAFLIP_TUNGSTEN=/path/to/tungsten` to select its compiler or
+`TUNGSTEN_METAFLIP_CACHE_DIR=/path` to relocate the launcher cache.
+
 From a checkout of this bit:
 
 ```sh
@@ -89,6 +105,67 @@ Square campaigns select their tensor explicitly:
 ./metaflip --tensor 7x7 --no-gpu
 ```
 
+Independent square-fleet shards can use `--seed-nonce N`.  Nonce zero is the
+default and preserves the historical seed choices and RNG trajectory exactly;
+different nonzero values rotate tied seed-bank choices and mix every CPU
+island's initial and restart streams.  This avoids duplicating work when the
+same command is launched in several processes.
+
+For explicitly wide CPU fleets (`-J` greater than 32), `--steps` is the
+nominal worker chunk rather than a forced coordinator cadence.  After the
+first measured epoch, each non-fringe island adapts toward about three seconds
+of parallel work, capped at 64 nominal chunks, before the serial exact-intake
+and archive pass.  Fleets of 32 or fewer walkers are unchanged.  Status files
+report `cpu_seed_nonce`, `cpu_epoch_target_ms`, and the live
+`cpu_epoch_steps_min`/`cpu_epoch_steps_max` range so cloud campaigns can audit
+both diversity and cadence.
+
+The packaged 7x7 campaign starts from the exact rank-247, density-3094
+frontier. Its d3096 parent came from dynamic exact syzygy mining over a live
+term window and bounded one-factor XOR neighbors. A subsequent NUMA-local CPU
+shard found a four-flip path to d3095 after about 735.3 billion moves. Replaying
+the legal path exposed that its first three flips already reach d3094, while
+the fourth costs one density bit; the packaged endpoint therefore omits that
+last move. It is a three-term exchange at term-support distance six from
+d3096. Metaflip keeps d3094 as the hot default while retaining the nearby
+d3096 parent and structurally distant rank-247 restart doors. Every endpoint
+was checked against all 7^6 target coefficients; d3094 additionally passed
+independent pure-Tungsten and host-side verifiers before packaging.
+
+That discovery also produced a reusable exact move, **support-component
+peeling**. For two exact parents `A` and `B`, Metaflip forms `D = A xor B` and
+joins changed terms only when their rank-one tensor supports overlap on all
+three axes. Separate graph components occupy disjoint tensor cells, so each
+component of the zero tensor `D` is itself a zero relation. The bounded worker
+tests every proper component from both parents, with full coefficient gates on
+the parents, relation, materialized children, and winner. The live d3096/d3095
+delta has ten terms split `6+4`; peeling the six-term component recovers d3094
+directly. Same-rank density improvements receive this cold intake pass at
+`d<=64`, while the one-child differential pool uses the same move before its
+general nullspace fallback. Ordinary move loops and archive novelty policy are
+unchanged; only that worker's launch floor is reduced from distance 12 to 6.
+
+The 7x7 coordinator also runs a low-duty exact partial-automorphism portfolio.
+Every fifteen seconds it rotates across the frozen record-rank frontier and a
+per-source elementary-generator cycle; `--seed-nonce` phases both dimensions,
+so three independent shards begin in disjoint generator arcs. Each endpoint is
+fully gated before intake. The max-min frontier archive and MAP-Elites then
+make independent admission decisions, preserving a useful MAP niche even when
+it is too close to improve the sixteen-state archive. Live status exposes
+`partial_auto_attempts`, `partial_auto_hits`, `partial_auto_archive`, and
+`partial_auto_map` so sharded campaigns can verify useful intake directly.
+
+The adaptive pool now includes three bounded host-side exact workers alongside
+its Metal kernels: `mode-cpals` (one-factor affine re-solve), `debt-mitm`
+(direct 6-to-4 and split-assisted closing), and `dynamic-syzygy`. Each costs
+one logical 32-lane quantum and rotates under the same contextual policy;
+dynamic syzygy is currently 7x7-only because that is its only demonstrated
+plateau win. The strongest planted-debt move, block-interior refactoring, is a
+permanent selector inside both exact `span-refactor-3` and
+`span-refactor-4`: one quarter of their neighborhoods target composition
+seams, including the 7x7 4+3 cut, without duplicating the expensive join or
+adding a fourth physical pool slot.
+
 The executable normally locates `lib/metaflip/` beside its installed build
 tree. `--runtime-root PATH` or `METAFLIP_RUNTIME_ROOT` can select an unpacked
 bit explicitly. `--asset-root`, `--repo-root`, `METAFLIP_ROOT`, and
@@ -105,12 +182,18 @@ budgets can run one additional shape per 8,192 walkers. `--gpu-walkers` and
 `--gpu-steps` override those defaults. The default portfolio includes the
 explicit `2x2x7`, `2x2x8`, and `2x2x9` fronts; each has exact `R`, `R+1`, and
 `R+2` restart strata, and the rank-24, rank-27, and rank-31 targets are
-evaluated independently.
+evaluated independently. The `2x2x7` leader is the exact rank-25/density-128
+scheme found by the rectangular CPU portfolio; its former density-132 catalog
+leader remains a support-distance-42 rank-25 restart door.
 
-Rectangular checkpoints retain a small exact-gated side archive at ranks
-`R`, `R+1`, and `R+2`. Slots are selected for term-set distance as well as
-rank, so restarts preserve genuinely different doors instead of four nearby
-copies of the leader. Metal alternates fleet-best epochs with the exact door
+Rectangular checkpoints retain eight exact-gated side doors at ranks `R`,
+`R+1`, and `R+2`. Slots are selected for structural class and term-set
+distance as well as rank, so restarts preserve genuinely different basins
+instead of nearby copies of the leader. When full, the eight-slot archive lets
+a 15-lane child start from ten distinct sources on profiles with one built-in
+frontier door; a controlled 4x6x7 continuation retained all eight distinct
+structural signatures with no measurable throughput loss. Metal alternates
+fleet-best epochs with the exact door
 scheduled for that shape's CPU host, including one-host portfolio allocations;
 this prevents a broad portfolio from silently sending every GPU epoch back to
 the leader. CPU islands likewise retain their OS threads for the campaign
@@ -126,6 +209,14 @@ files report CPU moves, GPU moves, MITM attempts/pairs/time, and MITM failures
 separately per shape and in total, including work completed by a segment that
 later exits unsuccessfully.
 
+Each bounded portfolio segment runs in a disposable OS process. The child
+keeps its islands and accelerator helpers persistent within the segment, then
+the kernel reclaims its complete state arena at the exact epoch boundary.
+This process boundary is important on long, high-core-count runs: Tungsten's
+native arrays are campaign-lifetime allocations, so repeatedly constructing
+shape campaigns in coordinator threads would otherwise retain every completed
+epoch until the whole portfolio exited.
+
 Use `--no-gpu` on machines without a supported GPU. The CPU fleet requires a
 64-bit Tungsten target. GPU acceleration currently requires macOS on Apple
 Silicon and runtime Metal shader compilation. Discoverable `metal` and
@@ -133,6 +224,13 @@ Silicon and runtime Metal shader compilation. Discoverable `metal` and
 offline library when possible, but a missing or broken offline toolchain falls
 back to the compiler-generated sibling MSL without degrading the GPU engine.
 `METAFLIP_FORCE_RUNTIME_MSL=1` forces that path for diagnostics.
+
+The production mixed fleet is still Metal-only. For an NVIDIA cloud campaign,
+[`cloud/cuda/`](cloud/cuda/README.md) contains a deliberately narrow 7x7
+relay: it emits CUDA from the canonical Tungsten cooperative kernel, rotates
+several exact rank-247 doors, exhaustively host-gates every device claim, and
+writes atomic status/checkpoint files. It is a fail-closed campaign harness,
+not a second implementation of the full adaptive fleet.
 
 ## Files and state
 
@@ -156,6 +254,14 @@ and curated results separate:
 - `~/.tungsten/metaflip/` is the default live store for checkpoints, run
   status, near-rank banks, and newly discovered candidates. Override it with
   `METAFLIP_HOME` or `--state-dir PATH`.
+- Every square-fleet status heartbeat includes bounded `best_source_kind`,
+  `best_source`, `best_strategy`, worker/slot, round, parent identity/quality,
+  basin distance, and candidate identity/quality fields. After an exact best
+  checkpoint is committed, Metaflip also atomically replaces
+  `<best>.provenance` with the same one-line adoption event. Match its
+  `best_id`, rank, and density to the certificate when harvesting after an
+  abrupt stop; a missing or stale telemetry sidecar never invalidates the
+  independently exact certificate.
 - `tungsten-metaflip-results` is the separate curated public repository for
   verified certificates, known bests, attribution, and durable research
   artifacts. Promote a live result there only after independent verification.

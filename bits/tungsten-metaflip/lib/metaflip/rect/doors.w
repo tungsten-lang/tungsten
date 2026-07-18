@@ -1,6 +1,6 @@
 # Small persisted near-door archive for rectangular portfolio children.
 #
-# Four independent exact scheme files sit beside the durable best checkpoint.
+# Eight independent exact scheme files sit beside the durable best checkpoint.
 # There is deliberately no manifest or mutable index: every slot is loaded
 # through the full rectangular reconstruction gate, and every replacement is
 # a temp-file + rename.  A partial process stop can therefore leave a mixture
@@ -9,7 +9,7 @@
 use ../rect
 
 -> ffrda_cap() i64
-  4
+  8
 
 -> ffrda_path(best_path, slot) (String i64)
   best_path + ".side-door-" + slot.to_s() + ".txt"
@@ -112,8 +112,8 @@ use ../rect
   bank.push(candidate)
   1
 
-# Exit collection must not inherit the four-slot persistence cap.  Admit every
-# exact, distinct R..R+2 shoulder first; the selector below decides which four
+# Exit collection must not inherit the eight-slot persistence cap. Admit every
+# exact, distinct R..R+2 shoulder first; the selector below decides which eight
 # survive only after it has seen current endpoints, island bests, and old
 # archive slots together.
 -> ffrda_collect_unique(bank, candidate, leader, n, m, p)
@@ -158,6 +158,178 @@ use ../rect
     common += ffrda_best_contains(right, left[left[47] + i], left[left[48] + i], left[left[49] + i])
     i += 1
   left_rank + right_rank - common - common
+
+# Cold-path structural fingerprint for side-door selection.  Unlike the exact
+# term-set fingerprint above, this intentionally forgets the numeric names of
+# factor masks.  It starts each factor at (axis, term degree, observed XOR-
+# triangle degree), then color-refines the tripartite term-incidence graph.
+# Independent linear coordinate changes therefore keep the fingerprint while
+# presentations with genuinely different factor-sharing structure normally do
+# not.  This is only a diversity preference: collisions never reject a door,
+# and the selector always falls back to exact term-set distance.
+-> ffrda_factor_search(values, offset, count, wanted) (i64[] i64 i64 i64) i64
+  low = 0 ## i64
+  high = count ## i64
+  while low < high
+    middle = low + (high - low) / 2 ## i64
+    value = values[offset + middle] ## i64
+    if value < wanted
+      low = middle + 1
+    if value >= wanted
+      high = middle
+  if low < count && values[offset + low] == wanted
+    return low
+  0 - 1
+
+-> ffrda_structural_hash(a, b, c) (i64 i64 i64) i64
+  ffw_term_zobrist(a ^ 7046029254386353131, b ^ 3202034522624059733, c ^ 1442695040888963407)
+
+-> ffrda_structural_signature(state) (i64[]) i64
+  rank = ffr_best_rank(state) ## i64
+  if rank < 1
+    return 0
+  mask = 9223372036854775807 ## i64
+  values = i64[rank * 3]
+  counts = i64[3]
+  axis = 0 ## i64
+  while axis < 3
+    offset = axis * rank ## i64
+    i = 0 ## i64
+    while i < rank
+      value = state[state[47 + axis] + i] ## i64
+      found = 0 ## i64
+      j = 0 ## i64
+      while j < counts[axis]
+        if values[offset + j] == value
+          found = 1
+        j += 1
+      if found == 0
+        values[offset + counts[axis]] = value
+        counts[axis] += 1
+      i += 1
+
+    # A sorted factor support makes XOR-triangle membership O(log R) rather
+    # than a cubic scan.  Arrival order and internal term order disappear.
+    i = 1
+    while i < counts[axis]
+      value = values[offset + i]
+      j = i
+      while j > 0 && values[offset + j - 1] > value
+        values[offset + j] = values[offset + j - 1]
+        j -= 1
+      values[offset + j] = value
+      i += 1
+    axis += 1
+
+  degrees = i64[rank * 3]
+  xor_degrees = i64[rank * 3]
+  term_nodes = i64[rank * 3]
+  axis = 0
+  while axis < 3
+    offset = axis * rank ## i64
+    i = 0
+    while i < rank
+      value = state[state[47 + axis] + i] ## i64
+      local = ffrda_factor_search(values, offset, counts[axis], value) ## i64
+      if local < 0
+        return 0
+      node = offset + local ## i64
+      term_nodes[offset + i] = node
+      degrees[node] += 1
+      i += 1
+    a = 0 ## i64
+    while a < counts[axis]
+      b = a + 1 ## i64
+      while b < counts[axis]
+        completing = values[offset + a] ^ values[offset + b] ## i64
+        c = ffrda_factor_search(values, offset, counts[axis], completing) ## i64
+        # Sorted a<b<c records every nonzero XOR triple exactly once.
+        if c > b
+          xor_degrees[offset + a] += 1
+          xor_degrees[offset + b] += 1
+          xor_degrees[offset + c] += 1
+        b += 1
+      a += 1
+    axis += 1
+
+  colors = i64[rank * 3]
+  next_colors = i64[rank * 3]
+  total_nodes = counts[0] + counts[1] + counts[2] ## i64
+  axis = 0
+  while axis < 3
+    offset = axis * rank ## i64
+    i = 0
+    while i < counts[axis]
+      node = offset + i ## i64
+      colors[node] = ffrda_structural_hash(axis + 1, degrees[node], xor_degrees[node])
+      i += 1
+    axis += 1
+
+  term_colors = i64[rank]
+  incident_xor = i64[rank * 3]
+  incident_sum = i64[rank * 3]
+  iteration = 0 ## i64
+  while iteration < 6
+    axis = 0
+    while axis < 3
+      offset = axis * rank ## i64
+      i = 0
+      while i < counts[axis]
+        incident_xor[offset + i] = 0
+        incident_sum[offset + i] = 0
+        i += 1
+      axis += 1
+    i = 0
+    while i < rank
+      unode = term_nodes[i] ## i64
+      vnode = term_nodes[rank + i] ## i64
+      wnode = term_nodes[rank * 2 + i] ## i64
+      color = ffrda_structural_hash(colors[unode], colors[vnode], colors[wnode]) ## i64
+      term_colors[i] = color
+      incident_xor[unode] = incident_xor[unode] ^ color
+      incident_xor[vnode] = incident_xor[vnode] ^ color
+      incident_xor[wnode] = incident_xor[wnode] ^ color
+      incident_sum[unode] = (incident_sum[unode] + color) & mask
+      incident_sum[vnode] = (incident_sum[vnode] + color) & mask
+      incident_sum[wnode] = (incident_sum[wnode] + color) & mask
+      i += 1
+    axis = 0
+    while axis < 3
+      offset = axis * rank ## i64
+      i = 0
+      while i < counts[axis]
+        node = offset + i ## i64
+        base = ffrda_structural_hash(colors[node], degrees[node], xor_degrees[node]) ## i64
+        next_colors[node] = ffrda_structural_hash(base, incident_xor[node], incident_sum[node])
+        i += 1
+      axis += 1
+    old = colors
+    colors = next_colors
+    next_colors = old
+    iteration += 1
+
+  signature = ffrda_structural_hash(rank, counts[0] + counts[1] * 1024 + counts[2] * 1048576, total_nodes) ## i64
+  axis = 0
+  while axis < 3
+    offset = axis * rank ## i64
+    color_xor = 0 ## i64
+    color_sum = 0 ## i64
+    i = 0
+    while i < counts[axis]
+      color_xor = color_xor ^ colors[offset + i]
+      color_sum = (color_sum + colors[offset + i]) & mask
+      i += 1
+    axis_signature = ffrda_structural_hash(axis + 11, color_xor, color_sum) ## i64
+    signature = ffrda_structural_hash(signature, axis_signature, counts[axis])
+    axis += 1
+  term_xor = 0 ## i64
+  term_sum = 0 ## i64
+  i = 0
+  while i < rank
+    term_xor = term_xor ^ term_colors[i]
+    term_sum = (term_sum + term_colors[i]) & mask
+    i += 1
+  ffrda_structural_hash(signature, term_xor, term_sum)
 
 -> ffrda_term_less(au, av, aw, bu, bv, bw) (i64 i64 i64 i64 i64 i64) i64
   if au < bu
@@ -266,7 +438,7 @@ use ../rect
   ffrda_min_anchor_distance_anchored(candidate, leader, anchors, selected)
 
 # Pick the max-min candidate in one rank band. Fixed anchors are checked-in
-# frontier doors that remain outside the four persisted slots. A negative
+# frontier doors that remain outside the eight persisted slots. A negative
 # delta means any admitted R..R+2 band. Equal distances use canonical order.
 -> ffrda_farthest_index_anchored(candidates, leader, anchors, selected, delta) i64
   leader_rank = ffr_best_rank(leader) ## i64
@@ -300,26 +472,111 @@ use ../rect
   anchors = []
   ffrda_farthest_index_anchored(candidates, leader, anchors, selected, delta)
 
+-> ffrda_structural_seen(rank, signature, represented_ranks, represented_signatures, represented_count) (i64 i64 i64[] i64[] i64) i64
+  i = 0 ## i64
+  while i < represented_count
+    if represented_ranks[i] == rank && represented_signatures[i] == signature
+      return 1
+    i += 1
+  0
+
+# Farthest-first selection restricted to a previously unseen structural class.
+# The caller retries without this restriction when no such candidate exists,
+# so this helper can influence ordering but can never reduce archive capacity.
+-> ffrda_farthest_structural_index_anchored(candidates, candidate_signatures, leader, anchors, selected, represented_ranks, represented_signatures, represented_count, delta, require_novel) i64
+  leader_rank = ffr_best_rank(leader) ## i64
+  chosen = 0 - 1 ## i64
+  chosen_distance = 0 - 1 ## i64
+  i = 0 ## i64
+  while i < candidates.size()
+    candidate = candidates[i]
+    rank = ffr_best_rank(candidate) ## i64
+    admitted = 1 ## i64
+    if rank < leader_rank || rank > leader_rank + 2
+      admitted = 0
+    if delta >= 0 && rank != leader_rank + delta
+      admitted = 0
+    if ffrda_same_best(candidate, leader) == 1 || ffrda_already_selected(anchors, candidate) == 1 || ffrda_already_selected(selected, candidate) == 1
+      admitted = 0
+    if require_novel == 1 && ffrda_structural_seen(rank, candidate_signatures[i], represented_ranks, represented_signatures, represented_count) == 1
+      admitted = 0
+    if admitted == 1
+      distance = ffrda_min_anchor_distance_anchored(candidate, leader, anchors, selected) ## i64
+      better = 0 ## i64
+      if chosen < 0 || distance > chosen_distance
+        better = 1
+      if chosen >= 0 && distance == chosen_distance && ffrda_canonical_before(candidate, candidates[chosen]) == 1
+        better = 1
+      if better == 1
+        chosen = i
+        chosen_distance = distance
+    i += 1
+  chosen
+
 # Deterministic bounded diversity selection from an already exact/unique exit
 # pool. First reserve one slot for every present rank band R, R+1, R+2; then
 # fill remaining slots by farthest-first max-min distance from the leader,
-# checked-in anchors, and all selected doors. The fixed band order plus
+# checked-in anchors, and all selected doors. Within each rank band, prefer a
+# structural signature not yet represented in that band. If none exists, retry
+# the exact same choice without the preference. The fixed band order plus
 # canonical tie break makes contents and order independent of arrival order.
 -> ffrda_select_diverse_anchored(candidates, leader, anchors, capacity_limit, selected) i64
   limit = capacity_limit ## i64
   if limit < 0
     limit = 0
+  candidate_capacity = candidates.size() ## i64
+  if candidate_capacity < 1
+    candidate_capacity = 1
+  candidate_signatures = i64[candidate_capacity]
+  i = 0 ## i64
+  while i < candidates.size()
+    candidate_signatures[i] = ffrda_structural_signature(candidates[i])
+    i += 1
+
+  represented_capacity = 1 + anchors.size() + selected.size() + limit ## i64
+  if represented_capacity < 1
+    represented_capacity = 1
+  represented_ranks = i64[represented_capacity]
+  represented_signatures = i64[represented_capacity]
+  represented_count = 0 ## i64
+  if leader != nil
+    represented_ranks[represented_count] = ffr_best_rank(leader)
+    represented_signatures[represented_count] = ffrda_structural_signature(leader)
+    represented_count += 1
+  i = 0
+  while i < anchors.size()
+    represented_ranks[represented_count] = ffr_best_rank(anchors[i])
+    represented_signatures[represented_count] = ffrda_structural_signature(anchors[i])
+    represented_count += 1
+    i += 1
+  i = 0
+  while i < selected.size()
+    represented_ranks[represented_count] = ffr_best_rank(selected[i])
+    represented_signatures[represented_count] = ffrda_structural_signature(selected[i])
+    represented_count += 1
+    i += 1
+
   delta = 0 ## i64
   while delta <= 2 && selected.size() < limit
-    chosen = ffrda_farthest_index_anchored(candidates, leader, anchors, selected, delta) ## i64
+    chosen = ffrda_farthest_structural_index_anchored(candidates, candidate_signatures, leader, anchors, selected, represented_ranks, represented_signatures, represented_count, delta, 1) ## i64
+    if chosen < 0
+      chosen = ffrda_farthest_structural_index_anchored(candidates, candidate_signatures, leader, anchors, selected, represented_ranks, represented_signatures, represented_count, delta, 0)
     if chosen >= 0
       selected.push(candidates[chosen])
+      represented_ranks[represented_count] = ffr_best_rank(candidates[chosen])
+      represented_signatures[represented_count] = candidate_signatures[chosen]
+      represented_count += 1
     delta += 1
   while selected.size() < limit
-    chosen = ffrda_farthest_index_anchored(candidates, leader, anchors, selected, 0 - 1) ## i64
+    chosen = ffrda_farthest_structural_index_anchored(candidates, candidate_signatures, leader, anchors, selected, represented_ranks, represented_signatures, represented_count, 0 - 1, 1) ## i64
+    if chosen < 0
+      chosen = ffrda_farthest_structural_index_anchored(candidates, candidate_signatures, leader, anchors, selected, represented_ranks, represented_signatures, represented_count, 0 - 1, 0)
     if chosen < 0
       return selected.size()
     selected.push(candidates[chosen])
+    represented_ranks[represented_count] = ffr_best_rank(candidates[chosen])
+    represented_signatures[represented_count] = candidate_signatures[chosen]
+    represented_count += 1
   selected.size()
 
 -> ffrda_select_diverse(candidates, leader, capacity_limit, selected) i64

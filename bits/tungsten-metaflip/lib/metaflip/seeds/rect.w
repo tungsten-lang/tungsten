@@ -62,19 +62,48 @@
     ok = 1
   ok
 
+-> ffrp_label_axis(label, axis) (String i64) i64
+  if label == nil || axis < 0 || axis > 2
+    return 0
+  length = ccall_nobox("w_string_byte_length", label) ## i64
+  ptr = ccall_nobox("w_string_byte_ptr", label) ## i64
+  current_axis = 0 ## i64
+  value = 0 ## i64
+  digits = 0 ## i64
+  cursor = 0 ## i64
+  while cursor < length
+    byte = raw_load_u8(ptr, cursor) ## i64
+    if byte == 120
+      if digits < 1
+        return 0
+      if current_axis == axis
+        return value
+      current_axis += 1
+      value = 0
+      digits = 0
+    elsif byte >= 48 && byte <= 57
+      value = value * 10 + byte - 48
+      digits += 1
+    else
+      return 0
+    cursor += 1
+  if current_axis == axis && digits > 0
+    return value
+  0
+
 -> ffrp_n(label) (String) i64
   if ffrp_supported_label(label) == 1
-    return label.split("x")[0].to_i()
+    return ffrp_label_axis(label, 0)
   0
 
 -> ffrp_m(label) (String) i64
   if ffrp_supported_label(label) == 1
-    return label.split("x")[1].to_i()
+    return ffrp_label_axis(label, 1)
   0
 
 -> ffrp_p(label) (String) i64
   if ffrp_supported_label(label) == 1
-    return label.split("x")[2].to_i()
+    return ffrp_label_axis(label, 2)
   0
 
 -> ffrp_label(n, m, p) (i64 i64 i64)
@@ -164,7 +193,7 @@
   if n == 2 && m == 2 && p == 6
     return base + "matmul_2x2x6_rank21_strassen_blocks_gf2.txt"
   if n == 2 && m == 2 && p == 7
-    return base + "matmul_2x2x7_rank25_catalog_gf2.txt"
+    return base + "matmul_2x2x7_rank25_d128_rect_portfolio_gf2.txt"
   if n == 2 && m == 2 && p == 8
     return base + "matmul_2x2x8_rank28_catalog_gf2.txt"
   if n == 2 && m == 2 && p == 9
@@ -226,8 +255,10 @@
 # component to a fifth exact d84 presentation. The 2x2x6 block-local door
 # likewise shares no terms with its
 # three-Strassen baseline while preserving the same rank and density.
-# The 2x2x7, 2x2x8, and 2x2x9 profiles additionally retain certified +1/+2
-# split shoulders from the public corpus. They implement the fleet policy of keeping
+# The 2x2x7 profile keeps its former rank-25/density-132 catalog seed beside
+# the rank-25/density-128 portfolio leader; their support distance is 42. The
+# 2x2x7, 2x2x8, and 2x2x9 profiles additionally retain certified +1/+2 split
+# shoulders from the public corpus. They implement the fleet policy of keeping
 # controlled rank debt near a frontier instead of making every CPU island
 # knock on the same rank-R door. Other retained rectangular pairs are at
 # distance 56--300, so rotating these doors prevents a fresh multiwalker
@@ -239,7 +270,9 @@
     return 5
   if n == 2 && m == 2 && p == 6
     return 2
-  if n == 2 && m == 2 && (p == 7 || p == 8)
+  if n == 2 && m == 2 && p == 7
+    return 4
+  if n == 2 && m == 2 && p == 8
     return 3
   if n == 2 && m == 2 && p == 9
     return 5
@@ -281,8 +314,10 @@
   if n == 2 && m == 2 && p == 6 && slot == 1
     return "seeds/gf2/matmul_2x2x6_rank21_d108_block_local_gl_gf2.txt"
   if n == 2 && m == 2 && p == 7 && slot == 1
-    return "seeds/gf2/matmul_2x2x7_rank26_isotropy_split_plus1_gf2.txt"
+    return "seeds/gf2/matmul_2x2x7_rank25_catalog_gf2.txt"
   if n == 2 && m == 2 && p == 7 && slot == 2
+    return "seeds/gf2/matmul_2x2x7_rank26_isotropy_split_plus1_gf2.txt"
+  if n == 2 && m == 2 && p == 7 && slot == 3
     return "seeds/gf2/matmul_2x2x7_rank27_isotropy_split_plus2_gf2.txt"
   if n == 2 && m == 2 && p == 8 && slot == 1
     return "seeds/gf2/matmul_2x2x8_rank29_isotropy_split_plus1_gf2.txt"

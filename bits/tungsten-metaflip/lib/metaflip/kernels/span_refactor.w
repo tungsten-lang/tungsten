@@ -160,6 +160,7 @@
 
 use core/metal
 use ../strategies/span_refactor
+use ../strategies/block_interior
 
 # This hash is intentionally expressed with signed-i64 operations on both the
 # host and Metal.  The final mask uses at most 23 bits, so arithmetic right
@@ -731,9 +732,20 @@ use ../strategies/span_refactor
       # valuable.  Start them on a motif door, then alternate if batched.
       if k == 3 && want == 3 && (s & 1) == 0
         use_shear = 1
+      # One quarter of all scheduled neighborhoods permanently use the
+      # composition-seam selector.  It shares this exact span join rather
+      # than registering a duplicate pool mode or Metal kernel.  For odd
+      # square sizes the upper half is first, matching the checked-in 4+3
+      # placement used by the 7x7 block compositions.
+      use_block = 0 ## i64
+      if ((offset + s) % 4) == 0
+        use_block = 1
+      if use_block == 1
+        block_cut = ffbir_default_cut(n) ## i64
+        chosen = ffbir_choose_window(us,vs,ws,exported,n,n,n,block_cut,block_cut,block_cut,k,door_offset,selected)
       # Every third neighborhood is collision-directed: its selected factor
       # spans deliberately contain one external live term.
-      if (s % 3) == 2 || (k == 4 && (offset % 3) == 2)
+      if chosen != k && ((s % 3) == 2 || (k == 4 && (offset % 3) == 2))
         chosen = ffsrp_choose_external_span_door(us,vs,ws,exported,k,door_offset,selected)
       if chosen != k && use_shear == 1
         chosen = ffsrp_choose_shear_triple(us, vs, ws, exported, door_offset, selected)

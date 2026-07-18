@@ -291,3 +291,42 @@ use ../strategies/escape
   if ffbi_best_id(best) == ffbi_current_id(current)
     same = 1
   same
+
+# Exact max-min seed selection is valuable for the canonical twelve-island
+# profile, but its cost grows as pool_size * active_islands * rank.  Extra
+# hardware-derived islands already add breadth through independent RNG streams;
+# after the canonical profile is populated, balance their source usage without
+# rescanning every live term set.  Keep these scalar helpers here so the large-
+# host policy is independently testable without loading the CLI coordinator.
+-> ffbi_exact_seed_selection_limit() i64
+  12
+
+-> ffbi_rotating_seed_index(size, stable_key) (i64 i64) i64
+  if size < 1
+    return 0 - 1
+  index = stable_key % size ## i64
+  if index < 0
+    index += size
+  index
+
+# Least-used first, with a stable rotating tie break. Missing usage entries are
+# treated as zero, matching the coordinator's historical selector.
+-> ffbi_least_used_seed_index(uses, size, stable_key) (i64[] i64 i64) i64
+  if size < 1
+    return 0 - 1
+  start = ffbi_rotating_seed_index(size, stable_key) ## i64
+  best = start ## i64
+  best_uses = 0 ## i64
+  if best < uses.size()
+    best_uses = uses[best]
+  offset = 1 ## i64
+  while offset < size
+    index = (start + offset) % size ## i64
+    count = 0 ## i64
+    if index < uses.size()
+      count = uses[index]
+    if count < best_uses
+      best = index
+      best_uses = count
+    offset += 1
+  best

@@ -87,6 +87,38 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("ok\n")
   end
 
+  it "isolates concurrent LLVM scratch files for equal source basenames" do
+    left_dir = File.join(@tmpdir, "left")
+    right_dir = File.join(@tmpdir, "right")
+    scratch_dir = File.join(@tmpdir, "llvm-scratch")
+    FileUtils.mkdir_p([left_dir, right_dir, scratch_dir])
+    left_source = File.join(left_dir, "same.w")
+    right_source = File.join(right_dir, "same.w")
+    left_bin = File.join(@tmpdir, "left-bin")
+    right_bin = File.join(@tmpdir, "right-bin")
+    File.write(left_source, "<< \"left\"\n")
+    File.write(right_source, "<< \"right\"\n")
+
+    env = {
+      "TUNGSTEN_ROOT" => PROJECT_ROOT,
+      "TUNGSTEN_LL_DIR" => scratch_dir,
+      "TUNGSTEN_GPU_DIALECTS" => "none"
+    }
+    builds = [[left_source, left_bin], [right_source, right_bin]].map do |source, output|
+      Thread.new do
+        Open3.capture3(env, @compiler_path, "compile", source, "--out", output, "--no-lto")
+      end
+    end.map(&:value)
+
+    builds.each do |_out, err, status|
+      expect(status.success?).to be(true), err
+    end
+    expect(Open3.capture3(left_bin).first).to eq("left\n")
+    expect(Open3.capture3(right_bin).first).to eq("right\n")
+    expect(File).to exist(File.join(scratch_dir, "same.ll"))
+    expect(Dir.glob(File.join(scratch_dir, "compile.*"))).to be_empty
+  end
+
   it "treats trailing elsif chains as implicit return expressions" do
     out = compile_and_run("elsif_implicit_return.w", <<~W)
       -> f(x)

@@ -9,6 +9,11 @@ Metaflip executable:
   `rect/cpu_pool.w` keeps one OS thread per rectangular island across campaign
   epochs; workers reread their state slot after each barrier so rebases and
   reseeds remain visible without thread churn.
+- `fleet/provenance.w` defines the bounded square-best lineage record used by
+  additive status fields and the atomic `<best>.provenance` latest-event
+  sidecar. It records CPU island/door/zone and worker moves, GPU slot/role/pool
+  mode and launch seed, or rectangular composition source without changing
+  the native TUI.
 - `strategies/rect_catalyst_lift2.w` and
   `strategies/macro_double_annihilation.w` retain the exact target-directed
   setup/trigger/cleanup compilers. They are bounded offline scouts, not default
@@ -16,7 +21,7 @@ Metaflip executable:
 - `kernels/` contains the canonical pure-Tungsten runtime workers. Generated
   Metal sources and libraries are redirected to the writable worker cache and
   must never appear here.
-- `seeds/gf2/` holds the 117 exact starting, frontier, and shoulder schemes
+- `seeds/gf2/` holds the 118 exact starting, frontier, and shoulder schemes
   selected by the square and rectangular production profiles.
 - `manifests/seeds.tsv` maps every operational seed to its digest and attributed
   path in the separately curated `tungsten-metaflip-results` corpus.
@@ -26,3 +31,27 @@ Metaflip executable:
 These seeds are operational inputs, not a second results corpus. New fleet
 discoveries belong in `~/.tungsten/metaflip/` until independently verified and
 promoted to the public results repository.
+
+The 7x7 hot default is the exact rank-247, density-3094 three-flip endpoint.
+A NUMA-local CPU shard found a four-flip d3096→d3095 path after about 735.3
+billion moves. Its first three legal flips already give d3094, so the final
+density-worsening move is omitted. The result is a three-term exchange at
+support distance six from d3096. Independent pure-Tungsten and host-side full
+coefficient gates agree on rank and density. The d3096 parent and a
+structurally distant d3098 scheme remain the next frontier seeds so lower
+density does not erase basin diversity.
+
+`strategies/delta_components.w` implements support-component peeling. It
+builds the bounded symmetric difference of two independently exact-gated
+parents, connects terms whose Cartesian supports intersect on all three axes,
+and tests each proper component from both bases. Every component relation and
+child is reconstructed over all `n^6` coefficients. The d3096/d3095 fixture is
+a ten-term `6+4` split and deterministically yields the packaged d3094 term
+set. The coordinator invokes it only for a same-rank density improvement with
+at most 64 changed terms; the single differential child invokes it before
+full nullspace elimination. There is no ordinary CPU or GPU hot-loop cost.
+
+The heterogeneous adaptive pool also rotates the mode-locked exact closer and
+the debt MITM worker. Block-interior selection is permanently folded into the
+existing exact three- and four-term span engines, where one quarter of
+neighborhoods are cut/seam-directed rather than paying for a duplicate worker.

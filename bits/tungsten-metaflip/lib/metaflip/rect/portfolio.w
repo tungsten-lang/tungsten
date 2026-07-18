@@ -223,6 +223,42 @@ use ../paths
           seen = seen | flag
   seen
 
+# The final child record is the only status record whose best metrics may be
+# used as the exact epoch handoff.  Keep this check allocation-free: these
+# files are polled at 50 ms cadence on large hosts, so even one split/string
+# per poll becomes visible parent RSS over a long campaign.
+-> ffrpo_child_status_stopped(body) (String) i64
+  if body == nil
+    return 0
+  length = ccall_nobox("w_string_byte_length", body) ## i64
+  ptr = ccall_nobox("w_string_byte_ptr", body) ## i64
+  cursor = 0 ## i64
+  while cursor < length
+    token_start = cursor ## i64
+    while cursor < length && raw_load_u8(ptr, cursor) != 32
+      cursor += 1
+    token_finish = cursor ## i64
+    if cursor < length
+      cursor += 1
+    while token_start < token_finish && ffrpo_status_space(raw_load_u8(ptr, token_start)) != 0
+      token_start += 1
+    while token_finish > token_start && ffrpo_status_space(raw_load_u8(ptr, token_finish - 1)) != 0
+      token_finish -= 1
+    if ffrpo_raw_key_equal(ptr, token_start, token_finish - token_start, "producer_state=stopped") != 0
+      return 1
+  0
+
+# Child campaigns exact-gate every accepted candidate and exit successfully
+# only after atomically replacing their checkpoint.  The terminal status can
+# therefore carry rank/density between most portfolio epochs.  Reparse and
+# independently verify every checkpoint at a fixed cadence (and whenever the
+# terminal handoff is missing), keeping the optimization fail-closed without
+# retaining thirteen split-heavy scheme parses per epoch.
+-> ffrpo_metric_audit_due(epoch) (i64) i64
+  if epoch < 1 || epoch % 64 == 0
+    return 1
+  0
+
 -> ffrpo_parsed_status_i64(values, seen, slot, fallback) (i64[] i64 i64 i64) i64
   if slot < 0 || slot >= values.size() || (seen & (1 << slot)) == 0
     return fallback
@@ -317,32 +353,210 @@ use ../paths
     return ""
   base + "_" + tensor.replace("x", "")
 
+-> ffrpo_raw_scheme_decimal(ptr, start, finish, output, slot) (i64 i64 i64 i64[] i64) i64
+  if slot < 0 || slot >= output.size()
+    return 0
+  cursor = start ## i64
+  sign = 1 ## i64
+  if cursor < finish && raw_load_u8(ptr, cursor) == 45
+    sign = 0 - 1
+    cursor += 1
+  elsif cursor < finish && raw_load_u8(ptr, cursor) == 43
+    cursor += 1
+  digits = 0 ## i64
+  value = 0 ## i64
+  while cursor < finish
+    byte = raw_load_u8(ptr, cursor) ## i64
+    if byte < 48 || byte > 57
+      return 0
+    value = value * 10 + byte - 48
+    digits += 1
+    cursor += 1
+  if digits < 1
+    return 0
+  output[slot] = value * sign
+  1
+
+-> ffrpo_raw_scheme_r_prefix(ptr, start, finish) (i64 i64 i64) i64
+  cursor = start ## i64
+  while cursor < finish && ffrpo_status_space(raw_load_u8(ptr, cursor)) != 0
+    cursor += 1
+  token_start = cursor ## i64
+  while cursor < finish && ffrpo_status_space(raw_load_u8(ptr, cursor)) == 0
+    cursor += 1
+  if cursor - token_start == 1 && raw_load_u8(ptr, token_start) == 82
+    return 1
+  0
+
+# Parse one `u v w` or `R u v w` row without allocating token strings.
+-> ffrpo_raw_scheme_row(ptr, start, finish, prefixed, output) (i64 i64 i64 i64 i64[]) i64
+  cursor = start ## i64
+  while cursor < finish && ffrpo_status_space(raw_load_u8(ptr, cursor)) != 0
+    cursor += 1
+  if prefixed != 0
+    if cursor >= finish || raw_load_u8(ptr, cursor) != 82
+      return 0
+    cursor += 1
+    if cursor < finish && ffrpo_status_space(raw_load_u8(ptr, cursor)) == 0
+      return 0
+  field = 0 ## i64
+  while field < 3
+    while cursor < finish && ffrpo_status_space(raw_load_u8(ptr, cursor)) != 0
+      cursor += 1
+    token_start = cursor ## i64
+    while cursor < finish && ffrpo_status_space(raw_load_u8(ptr, cursor)) == 0
+      cursor += 1
+    if ffrpo_raw_scheme_decimal(ptr, token_start, cursor, output, field) == 0
+      return 0
+    field += 1
+  while cursor < finish && ffrpo_status_space(raw_load_u8(ptr, cursor)) != 0
+    cursor += 1
+  if cursor != finish
+    return 0
+  1
+
+# Parent-only allocation-free checkpoint loader.  Child search processes keep
+# the general catalog loader; the long-lived portfolio uses this equivalent
+# parser so its periodic independent exact audits do not retain every line and
+# field produced by String#split.
+-> ffrpo_load_scheme_cap_raw(state, path, n, m, p, capacity, seed, dslack, cycles, workq, wanderq) (i64[] String i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
+  result = 0 - 1 ## i64
+  content = read_file(path)
+  scratch = i64[3]
+  if content != nil
+    length = ccall_nobox("w_string_byte_length", content) ## i64
+    ptr = ccall_nobox("w_string_byte_ptr", content) ## i64
+    data_finish = length ## i64
+    # Match String#split's treatment of one ordinary terminal line ending.
+    if data_finish > 0 && raw_load_u8(ptr, data_finish - 1) == 10
+      data_finish -= 1
+      if data_finish > 0 && raw_load_u8(ptr, data_finish - 1) == 13
+        data_finish -= 1
+    first_finish = 0 ## i64
+    while first_finish < data_finish && raw_load_u8(ptr, first_finish) != 10
+      first_finish += 1
+    first_content_finish = first_finish ## i64
+    if first_content_finish > 0 && raw_load_u8(ptr, first_content_finish - 1) == 13
+      first_content_finish -= 1
+    prefixed = ffrpo_raw_scheme_r_prefix(ptr, 0, first_content_finish) ## i64
+    rank = 0 - 1 ## i64
+    row_start = first_finish + 1 ## i64
+    if prefixed != 0
+      row_start = 0
+      if data_finish > 0
+        rank = 1
+        cursor = 0 ## i64
+        while cursor < data_finish
+          if raw_load_u8(ptr, cursor) == 10
+            rank += 1
+          cursor += 1
+    if prefixed == 0
+      token_start = 0 ## i64
+      while token_start < first_content_finish && ffrpo_status_space(raw_load_u8(ptr, token_start)) != 0
+        token_start += 1
+      token_finish = token_start ## i64
+      while token_finish < first_content_finish && ffrpo_status_space(raw_load_u8(ptr, token_finish)) == 0
+        token_finish += 1
+      if ffrpo_raw_scheme_decimal(ptr, token_start, token_finish, scratch, 0) != 0
+        rank = scratch[0]
+      # The attributed corpus also contains numeric headers followed by
+      # `R u v w` rows; preserve the general loader's mixed-format support.
+      if row_start < data_finish
+        next_finish = row_start ## i64
+        while next_finish < data_finish && raw_load_u8(ptr, next_finish) != 10
+          next_finish += 1
+        prefixed = ffrpo_raw_scheme_r_prefix(ptr, row_start, next_finish)
+    ok = 1 ## i64
+    if rank < 1 || rank > capacity || row_start > data_finish
+      ok = 0
+    if ok != 0
+      ok = ffr_prepare(state, n, m, p, capacity, seed, dslack, cycles, workq, wanderq)
+    if ok != 0
+      umask = ffr_factor_mask(n * m) ## i64
+      vmask = ffr_factor_mask(m * p) ## i64
+      wmask = ffr_factor_mask(n * p) ## i64
+      current = 0 ## i64
+      row = 0 ## i64
+      while row < rank
+        if row_start > data_finish
+          ok = 0
+        row_finish = row_start ## i64
+        while row_finish < data_finish && raw_load_u8(ptr, row_finish) != 10
+          row_finish += 1
+        content_finish = row_finish ## i64
+        if content_finish > row_start && raw_load_u8(ptr, content_finish - 1) == 13
+          content_finish -= 1
+        if ok != 0 && ffrpo_raw_scheme_row(ptr, row_start, content_finish, prefixed, scratch) == 0
+          ok = 0
+        if ok != 0
+          u = scratch[0] ## i64
+          v = scratch[1] ## i64
+          w = scratch[2] ## i64
+          if u <= 0 || (u & umask) != u
+            ok = 0
+          if v <= 0 || (v & vmask) != v
+            ok = 0
+          if w <= 0 || (w & wmask) != w
+            ok = 0
+          if ok != 0
+            current = ffw_toggle(state, u, v, w, current)
+        if row_finish < data_finish
+          row_start = row_finish + 1
+        else
+          row_start = data_finish + 1
+        row += 1
+      state[6] = current
+      if current != rank
+        ok = 0
+      if ok != 0
+        adopted = ffr_adopt_current(state, 1) ## i64
+        if adopted > 0
+          state[31] = state[31] + 1
+          result = current
+        if adopted <= 0
+          ok = 0
+      if ok == 0
+        state[39] = state[39] + 1
+  if content != nil
+    ccall("w_value_free", content)
+  ccall("w_value_free", scratch)
+  result
+
 # Load the exact checkpoint when present, otherwise the profile seed.  The
 # output row is [rank,bits].  Under --naive the schoolbook seed is used only
 # for epoch zero; later epochs recover the portfolio's own durable checkpoint.
--> ffrpo_load_metrics(tensor, repo_root, best_path, naive, output, offset) (String String String i64 i64[] i64) i64
+-> ffrpo_load_metrics_reuse(tensor, repo_root, best_path, naive, state, output, offset) (String String String i64 i64[] i64[] i64) i64
   n = ffrp_n(tensor) ## i64
   m = ffrp_m(tensor) ## i64
   p = ffrp_p(tensor) ## i64
   if ffr_supported(n, m, p) == 0 || output.size() < offset + 2
     return 0
   capacity = ffr_default_capacity(n, m, p) ## i64
-  state = i64[ffr_state_size(capacity)]
+  if state == nil || state.size() < ffr_state_size(capacity)
+    return 0
   rank = 0 - 1 ## i64
   if naive != 0
     rank = ffr_init_naive_cap(state, n, m, p, capacity, 91001 + offset, 4, 4, 1000, 250)
   if naive == 0
-    checkpoint = read_file(best_path)
-    if checkpoint != nil && checkpoint.size() > 0
-      rank = ffr_load_scheme_cap(state, best_path, n, m, p, capacity, 91003 + offset, 4, 4, 1000, 250)
-    if checkpoint == nil || checkpoint.size() == 0
+    checkpoint_size = file_size(best_path)
+    if checkpoint_size != nil && checkpoint_size > 0
+      rank = ffrpo_load_scheme_cap_raw(state, best_path, n, m, p, capacity, 91003 + offset, 4, 4, 1000, 250)
+    if checkpoint_size == nil || checkpoint_size < 1
       seed_path = repo_root + "/" + ffrp_seed_rel(n, m, p)
-      rank = ffr_load_scheme_cap(state, seed_path, n, m, p, capacity, 91007 + offset, 4, 4, 1000, 250)
+      rank = ffrpo_load_scheme_cap_raw(state, seed_path, n, m, p, capacity, 91007 + offset, 4, 4, 1000, 250)
   if rank < 1 || ffr_verify_best_exact(state, n, m, p) == 0
     return 0
   output[offset] = ffr_best_rank(state)
   output[offset + 1] = ffr_best_bits(state)
   1
+
+-> ffrpo_load_metrics(tensor, repo_root, best_path, naive, output, offset) (String String String i64 i64[] i64) i64
+  n = ffrp_n(tensor) ## i64
+  m = ffrp_m(tensor) ## i64
+  p = ffrp_p(tensor) ## i64
+  capacity = ffr_default_capacity(n, m, p) ## i64
+  state = i64[ffr_state_size(capacity)]
+  ffrpo_load_metrics_reuse(tensor, repo_root, best_path, naive, state, output, offset)
 
 # Reset one durable shape checkpoint to the exact schoolbook scheme.  The
 # coordinator does this for every selected shape at the boundary, even when J
@@ -370,7 +584,176 @@ use ../paths
     return 0
   1
 
--> ffrpo_spawn_shape(tensor, repo_root, best_path, status_path, child_tag, walkers, steps, epoch_rounds, max_secs, dslack, cycles, gpu_requested, gpu_lanes, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, stop_on_record, naive_seed, restart_nonce, restart_door_ticket, exit_codes, elapsed_ms, slot) (String String String String String i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 i64 i64 i64 i64[] i64[] i64)
+# Build the private single-shape invocation used by a portfolio segment.  A
+# rectangular campaign allocates one state arena per island plus frontier,
+# archive, and accelerator scratch. Tungsten deliberately has no tracing GC,
+# so running bounded segments as ordinary threads retained every completed
+# arena until the coordinator exited. At large host counts that grew by
+# hundreds of GiB over a long portfolio run. Executing the same coordinator in
+# a child process gives each segment an allocation lifetime the OS can reclaim
+# at its exact epoch boundary.
+-> ffrpo_shell_quote_append(command, text)
+  if text == nil
+    text = ""
+  command << "'"
+  length = ccall_nobox("w_string_byte_length", text) ## i64
+  ptr = ccall_nobox("w_string_byte_ptr", text) ## i64
+  has_quote = 0 ## i64
+  scan = 0 ## i64
+  while scan < length
+    if raw_load_u8(ptr, scan) == 39
+      has_quote = 1
+    scan += 1
+  if has_quote == 0
+    command << text
+    command << "'"
+    return 1
+  chunk_start = 0 ## i64
+  cursor = 0 ## i64
+  while cursor < length
+    if raw_load_u8(ptr, cursor) == 39
+      if cursor > chunk_start
+        chunk = text.slice(chunk_start, cursor - chunk_start)
+        command << chunk
+        ccall("w_value_free", chunk)
+      command << "'\"'\"'"
+      chunk_start = cursor + 1
+    cursor += 1
+  if chunk_start < length
+    chunk = text.slice(chunk_start, length - chunk_start)
+    command << chunk
+    ccall("w_value_free", chunk)
+  command << "'"
+  1
+
+-> ffrpo_child_tag(run_tag, shape_code, epoch, fill_serial) (String i64 i64 i64)
+  tag = StringBuffer(96) ## reuse
+  tag << run_tag
+  tag << "_"
+  tag << shape_code
+  tag << "_e"
+  tag << epoch
+  if fill_serial >= 0
+    tag << "_f"
+    tag << fill_serial
+  result = tag.to_s()
+  result
+
+-> ffrpo_child_command(worker_binary, tensor, repo_root, best_path, status_path, child_tag, walkers, steps, epoch_rounds, max_secs, dslack, cycles, gpu_requested, gpu_lanes, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, stop_on_record, naive_seed, restart_nonce, restart_door_ticket)
+  if worker_binary == nil || worker_binary == ""
+    return ""
+  command = StringBuffer(768) ## reuse
+  z = ffrpo_shell_quote_append(command, worker_binary)
+  command << " --tensor "
+  z = ffrpo_shell_quote_append(command, tensor)
+  command << " --runtime-root "
+  z = ffrpo_shell_quote_append(command, repo_root)
+  command << " --best "
+  z = ffrpo_shell_quote_append(command, best_path)
+  command << " --status "
+  z = ffrpo_shell_quote_append(command, status_path)
+  command << " --run-tag "
+  z = ffrpo_shell_quote_append(command, child_tag)
+  command << " -J "
+  command << walkers
+  command << " --steps "
+  command << steps
+  command << " --rounds "
+  command << epoch_rounds
+  command << " --secs "
+  command << max_secs
+  command << " -d "
+  command << dslack
+  command << " --cycles "
+  command << cycles
+  command << " --gpu-walkers "
+  command << gpu_lanes
+  command << " --gpu-steps "
+  command << gpu_steps
+  command << " --gpu-epoch-rounds "
+  command << gpu_epoch_rounds
+  if gpu_binary != nil && gpu_binary != ""
+    command << " --gpu-binary "
+    z = ffrpo_shell_quote_append(command, gpu_binary)
+  if gpu_requested != 0
+    command << " --gpu"
+  if gpu_requested == 0
+    command << " --no-gpu"
+  if gpu_rebuild != 0
+    command << " --rebuild-gpu"
+  if stop_on_record != 0
+    command << " --stop-on-record"
+  if naive_seed != 0
+    command << " --naive"
+  command << " --quiet --no-tui --rect-portfolio-child"
+  command << " --rect-restart-nonce "
+  restart_nonce_text = restart_nonce.to_s()
+  command << restart_nonce_text
+  ccall("w_value_free", restart_nonce_text)
+  command << " --rect-door-ticket "
+  command << restart_door_ticket
+  # Keep diagnostics out of the parent's TUI while retaining the most recent
+  # failed child output next to the machine-readable status file.
+  command << " > "
+  child_log_path = status_path + ".child.log"
+  z = ffrpo_shell_quote_append(command, child_log_path)
+  ccall("w_value_free", child_log_path)
+  command << " 2>&1"
+  result = command.to_s()
+  result
+
+# One launcher per shape stays alive for the portfolio lifetime. Besides
+# avoiding pthread setup at every epoch, this bounds parent-side TLS/stack
+# caches that otherwise grew by roughly 95 KiB per short segment even after
+# the search arena itself moved into a child process.
+-> ffrpo_start_process_launcher(commands, states, exit_codes, elapsed_ms, slot)
+  Thread.new ->
+    while states[slot] >= 0
+      if states[slot] == 1
+        command = commands[slot]
+        started = ccall("__w_clock_ms") ## i64
+        ok = system(command)
+        code = 2 ## i64
+        if ok
+          code = 0
+        exit_codes[slot] = code
+        elapsed_ms[slot] = ccall("__w_clock_ms") - started
+        # The command is an exact one-shot handoff. Clear the shared slot
+        # before releasing its heap string, then publish completion last.
+        commands[slot] = ""
+        ccall("w_value_free", command)
+        states[slot] = 2
+      if states[slot] != 1 && states[slot] >= 0
+        ccall("__w_sleep_ms", 2)
+    true
+
+-> ffrpo_dispatch_shape(worker_binary, launcher_threads, launcher_commands, launcher_states, tensor, repo_root, best_path, status_path, child_tag, walkers, steps, epoch_rounds, max_secs, dslack, cycles, gpu_requested, gpu_lanes, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, stop_on_record, naive_seed, restart_nonce, restart_door_ticket, exit_codes, elapsed_ms, slot)
+  if worker_binary != nil && worker_binary != ""
+    if launcher_states[slot] != 0 || launcher_threads[slot] == nil
+      return nil
+    command = ffrpo_child_command(worker_binary, tensor, repo_root, best_path, status_path, child_tag, walkers, steps, epoch_rounds, max_secs, dslack, cycles, gpu_requested, gpu_lanes, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, stop_on_record, naive_seed, restart_nonce, restart_door_ticket)
+    if command == ""
+      return nil
+    launcher_commands[slot] = command
+    launcher_states[slot] = 1
+    return launcher_threads[slot]
+  ffrpo_spawn_shape("", tensor, repo_root, best_path, status_path, child_tag, walkers, steps, epoch_rounds, max_secs, dslack, cycles, gpu_requested, gpu_lanes, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, stop_on_record, naive_seed, restart_nonce, restart_door_ticket, exit_codes, elapsed_ms, slot)
+
+-> ffrpo_spawn_shape(worker_binary, tensor, repo_root, best_path, status_path, child_tag, walkers, steps, epoch_rounds, max_secs, dslack, cycles, gpu_requested, gpu_lanes, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, stop_on_record, naive_seed, restart_nonce, restart_door_ticket, exit_codes, elapsed_ms, slot) (String String String String String String i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 i64 i64 i64 i64[] i64[] i64)
+  command = ffrpo_child_command(worker_binary, tensor, repo_root, best_path, status_path, child_tag, walkers, steps, epoch_rounds, max_secs, dslack, cycles, gpu_requested, gpu_lanes, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, stop_on_record, naive_seed, restart_nonce, restart_door_ticket)
+  if command != ""
+    return Thread.new ->
+      started = ccall("__w_clock_ms") ## i64
+      ok = system(command)
+      code = 2 ## i64
+      if ok
+        code = 0
+      exit_codes[slot] = code
+      elapsed_ms[slot] = ccall("__w_clock_ms") - started
+      true
+  # Retain an explicit in-process fallback for small embedding tests that
+  # import `portfolio.w` without compiling the Metaflip CLI as their main
+  # executable. Production always supplies System.executable_path().
   Thread.new ->
     started = ccall("__w_clock_ms") ## i64
     code = ffrc_run_seeded(tensor, repo_root, "", best_path, status_path, child_tag, walkers, steps, epoch_rounds, max_secs, dslack, cycles, 0, gpu_requested, gpu_lanes, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, 1, 0, stop_on_record, naive_seed, 1, restart_nonce, restart_door_ticket) ## i64
@@ -378,14 +761,85 @@ use ../paths
     elapsed_ms[slot] = ccall("__w_clock_ms") - started
     true
 
--> ffrpo_any_alive(threads)
+-> ffrpo_segment_alive(worker_binary, thread, launcher_states, slot) i64
+  if worker_binary != nil && worker_binary != ""
+    if launcher_states[slot] == 1
+      return 1
+    return 0
+  if thread != nil && thread.alive?
+    return 1
+  0
+
+-> ffrpo_segment_finished(worker_binary, thread, launcher_states, slot) i64
+  if worker_binary != nil && worker_binary != ""
+    if launcher_states[slot] == 2
+      return 1
+    return 0
+  if thread != nil && thread.alive? == false
+    return 1
+  0
+
+-> ffrpo_finish_segment(worker_binary, thread, launcher_states, slot) i64
+  if worker_binary != nil && worker_binary != ""
+    if launcher_states[slot] != 2
+      return 0
+    launcher_states[slot] = 0
+    return 1
+  joined = ffrc_thread_join_release(thread)
+  if joined == true
+    return 1
+  0
+
+-> ffrpo_any_alive(threads, worker_binary, launcher_states)
   i = 0 ## i64
   while i < threads.size()
     thread = threads[i]
-    if thread != nil && thread.alive?
+    if ffrpo_segment_alive(worker_binary, thread, launcher_states, i) != 0
       return 1
     i += 1
   0
+
+# A terminal interrupt cancels the wait thread, whose runtime cleanup owns and
+# reaps the shell's entire process group. This makes SIGINT/SIGTERM prompt and
+# prevents a second signal or supervisor timeout from orphaning a rectangular
+# Metaflip child. TUI `q` remains the graceful drain path.
+-> ffrpo_cancel_active_segments(worker_binary, threads, launcher_threads, launcher_states, segment_joined, exit_codes) i64
+  cancelled = 0 ## i64
+  i = 0 ## i64
+  while i < threads.size()
+    thread = threads[i]
+    alive = ffrpo_segment_alive(worker_binary, thread, launcher_states, i) ## i64
+    if thread != nil && alive != 0
+      z = thread.kill
+      joined = ffrc_thread_join_release(thread)
+      threads[i] = nil
+      segment_joined[i] = 1
+      exit_codes[i] = 2
+      if worker_binary != nil && worker_binary != ""
+        launcher_threads[i] = nil
+        launcher_states[i] = 0 - 2
+      cancelled += 1
+    i += 1
+  cancelled
+
+-> ffrpo_stop_process_launchers(worker_binary, launcher_threads, launcher_states) i64
+  if worker_binary == nil || worker_binary == ""
+    return 0
+  stopped = 0 ## i64
+  i = 0 ## i64
+  while i < launcher_threads.size()
+    if launcher_threads[i] != nil
+      launcher_states[i] = 0 - 1
+    i += 1
+  i = 0
+  while i < launcher_threads.size()
+    launcher = launcher_threads[i]
+    if launcher != nil
+      joined = ffrc_thread_join_release(launcher)
+      launcher_threads[i] = nil
+      stopped += 1
+    i += 1
+  stopped
 
 -> ffrpo_commit_operational(shape_cpu_moves, shape_gpu_moves, shape_mitm_attempts, shape_mitm_pairs, shape_mitm_ms, shape_mitm_failures, slot, cpu_moves, gpu_moves, mitm_attempts, mitm_pairs, mitm_ms, mitm_failures, failed)
   # Work counters describe computation that happened, not whether the segment
@@ -414,7 +868,6 @@ use ../paths
   cpu_moves + gpu_moves
 
 -> ffrpo_status_body(state_name, sequence, epoch, elapsed_s, total_j, total_gpu, total_moves, degraded, labels, ready, cpu_allocation, gpu_allocation, ranks, bits, rank_drops, density_gains, shape_moves, shape_cpu_moves, shape_gpu_moves, shape_mitm_attempts, shape_mitm_pairs, shape_mitm_ms, shape_mitm_failures, exposure, failures, gpu_failures, scores, side_loaded, side_seeded, side_saved, side_rejects, side_write_failures)
-  body = "schema=1 mode=rect-portfolio producer_state=" + state_name + " sequence=" + sequence.to_s()
   health = "ok"
   if degraded != 0
     health = "degraded"
@@ -433,18 +886,95 @@ use ../paths
     total_mitm_ms += shape_mitm_ms[i]
     total_mitm_failures += shape_mitm_failures[i]
     i += 1
-  body = body + " epoch=" + epoch.to_s() + " elapsed=" + elapsed_s.to_s() + " cpu_lanes=" + total_j.to_s() + " gpu_lanes=" + total_gpu.to_s() + " shapes=" + labels.size().to_s() + " total_moves=" + total_moves.to_s()
-  body = body + " total_cpu_moves=" + total_cpu_moves.to_s() + " total_gpu_moves=" + total_gpu_moves.to_s() + " total_mitm_attempts=" + total_mitm_attempts.to_s() + " total_mitm_pairs=" + total_mitm_pairs.to_s() + " total_mitm_ms=" + total_mitm_ms.to_s() + " total_mitm_failures=" + total_mitm_failures.to_s() + " health=" + health + "\n"
+  body = StringBuffer(512 + labels.size() * 512) ## reuse
+  body << "schema=1 mode=rect-portfolio producer_state="
+  body << state_name
+  body << " sequence="
+  body << sequence
+  body << " epoch="
+  body << epoch
+  body << " elapsed="
+  body << elapsed_s
+  body << " cpu_lanes="
+  body << total_j
+  body << " gpu_lanes="
+  body << total_gpu
+  body << " shapes="
+  body << labels.size()
+  body << " total_moves="
+  body << total_moves
+  body << " total_cpu_moves="
+  body << total_cpu_moves
+  body << " total_gpu_moves="
+  body << total_gpu_moves
+  body << " total_mitm_attempts="
+  body << total_mitm_attempts
+  body << " total_mitm_pairs="
+  body << total_mitm_pairs
+  body << " total_mitm_ms="
+  body << total_mitm_ms
+  body << " total_mitm_failures="
+  body << total_mitm_failures
+  body << " health="
+  body << health
+  body << "\n"
   i = 0 ## i64
   while i < labels.size()
     combined_failures = failures[i] + gpu_failures[i] + shape_mitm_failures[i] ## i64
-    body = body + "shape=" + labels[i] + " ready=" + ready[i].to_s() + " cpu=" + cpu_allocation[i].to_s() + " gpu=" + gpu_allocation[i].to_s()
-    body = body + " rank=" + ranks[i].to_s() + " bits=" + bits[i].to_s() + " drops=" + rank_drops[i].to_s() + " density=" + density_gains[i].to_s() + " moves=" + shape_moves[i].to_s()
-    body = body + " cpu_moves=" + shape_cpu_moves[i].to_s() + " gpu_moves=" + shape_gpu_moves[i].to_s() + " mitm_attempts=" + shape_mitm_attempts[i].to_s() + " mitm_pairs=" + shape_mitm_pairs[i].to_s() + " mitm_ms=" + shape_mitm_ms[i].to_s() + " mitm_failures=" + shape_mitm_failures[i].to_s()
-    body = body + " exposure=" + exposure[i].to_s() + " failures=" + combined_failures.to_s() + " cpu_failures=" + failures[i].to_s() + " gpu_failures=" + gpu_failures[i].to_s() + " score=" + scores[i].to_s()
-    body = body + " side_archive_loaded=" + side_loaded[i].to_s() + " side_archive_seeded=" + side_seeded[i].to_s() + " side_archive_saved=" + side_saved[i].to_s() + " side_archive_rejects=" + side_rejects[i].to_s() + " side_archive_write_failures=" + side_write_failures[i].to_s() + "\n"
+    body << "shape="
+    body << labels[i]
+    body << " ready="
+    body << ready[i]
+    body << " cpu="
+    body << cpu_allocation[i]
+    body << " gpu="
+    body << gpu_allocation[i]
+    body << " rank="
+    body << ranks[i]
+    body << " bits="
+    body << bits[i]
+    body << " drops="
+    body << rank_drops[i]
+    body << " density="
+    body << density_gains[i]
+    body << " moves="
+    body << shape_moves[i]
+    body << " cpu_moves="
+    body << shape_cpu_moves[i]
+    body << " gpu_moves="
+    body << shape_gpu_moves[i]
+    body << " mitm_attempts="
+    body << shape_mitm_attempts[i]
+    body << " mitm_pairs="
+    body << shape_mitm_pairs[i]
+    body << " mitm_ms="
+    body << shape_mitm_ms[i]
+    body << " mitm_failures="
+    body << shape_mitm_failures[i]
+    body << " exposure="
+    body << exposure[i]
+    body << " failures="
+    body << combined_failures
+    body << " cpu_failures="
+    body << failures[i]
+    body << " gpu_failures="
+    body << gpu_failures[i]
+    body << " score="
+    body << scores[i]
+    body << " side_archive_loaded="
+    body << side_loaded[i]
+    body << " side_archive_seeded="
+    body << side_seeded[i]
+    body << " side_archive_saved="
+    body << side_saved[i]
+    body << " side_archive_rejects="
+    body << side_rejects[i]
+    body << " side_archive_write_failures="
+    body << side_write_failures[i]
+    body << "\n"
     i += 1
-  body
+  result = body.to_s()
+  result
 
 # A rectangular cal2zone child reaches full occupancy at about 8192 logical
 # walkers on the reference Apple GPU. Splitting that width between several
@@ -693,7 +1223,7 @@ use ../paths
 # Run several exact rectangular campaigns concurrently. `max_epochs` counts
 # portfolio reallocations; each shape keeps its sticky islands for
 # `shape_epoch_rounds` ordinary rectangular rounds before the exact restart.
--> ffrpo_run(shape_spec, repo_root, state_dir, best_base, best_explicit, status_path, status_explicit, run_tag, total_j, steps, max_epochs, max_secs, shape_epoch_rounds, dslack, cycles, gpu_requested, total_gpu_lanes, gpu_policy, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed) (String String String String i64 String i64 String i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 String i64 i64 i64 i64 i64 i64) i64
+-> ffrpo_run(shape_spec, repo_root, state_dir, best_base, best_explicit, status_path, status_explicit, run_tag, total_j, steps, max_epochs, max_secs, shape_epoch_rounds, dslack, cycles, gpu_requested, total_gpu_lanes, gpu_policy, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, worker_binary) (String String String String i64 String i64 String i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 String i64 i64 i64 i64 i64 String) i64
   labels = []
   code_storage = i64[32]
   count = ffrpo_parse_shapes(shape_spec, labels, code_storage) ## i64
@@ -778,6 +1308,7 @@ use ../paths
   child_status_values = i64[19]
   best_paths = []
   child_status_paths = []
+  metric_states = []
 
   if status_explicit == 0
     if ffls_ensure_dir(ffls_run_dir(state_dir, "gf2", "rect", run_tag)) == 0
@@ -805,12 +1336,15 @@ use ../paths
         return 2
     best_paths.push(path)
     child_status_paths.push(child_status_path)
+    metric_capacity = ffr_default_capacity(n, m, p) ## i64
+    metric_state = i64[ffr_state_size(metric_capacity)]
+    metric_states.push(metric_state)
     leverage[i] = ffrpp_default_leverage(shapes[i])
     gpu_supported[i] = ffrgb_supported(n, m, p)
     gpu_states[i] = 0 - 1
     if gpu_supported[i] != 0
       gpu_states[i] = 1
-    loaded = ffrpo_load_metrics(tensor, repo_root, path, naive_seed, metrics, i * 2) ## i64
+    loaded = ffrpo_load_metrics_reuse(tensor, repo_root, path, naive_seed, metric_state, metrics, i * 2) ## i64
     if loaded != 0
       ready[i] = 1
       ranks[i] = metrics[i * 2]
@@ -851,6 +1385,50 @@ use ../paths
   last_render_ms = 0 - 1 ## i64
   last_parent_status_ms = 0 - 1 ## i64
   flash_text = ""
+  portfolio_write_tag = run_tag + "_portfolio"
+  launcher_commands = []
+  launcher_states = i64[count]
+  launcher_threads = []
+  i = 0
+  while i < count
+    launcher_commands.push("")
+    launcher = nil
+    if worker_binary != nil && worker_binary != ""
+      launcher = ffrpo_start_process_launcher(launcher_commands, launcher_states, exit_codes, child_elapsed_ms, i)
+    launcher_threads.push(launcher)
+    i += 1
+
+  # Reuse the complete epoch-accounting workspace. These arrays are tiny next
+  # to a search state, but allocating a new set at every portfolio boundary
+  # still made a no-work stress test grow linearly after the large verifier
+  # arena was fixed.
+  threads = []
+  segment_joined = i64[count]
+  base_complete = i64[count]
+  base_wall_ms = i64[count]
+  total_rounds = i64[count]
+  total_wall_ms = i64[count]
+  acc_cpu_moves = i64[count]
+  acc_gpu_moves = i64[count]
+  acc_cpu_ms = i64[count]
+  acc_gpu_ms = i64[count]
+  acc_mitm_attempts = i64[count]
+  acc_mitm_pairs = i64[count]
+  acc_mitm_ms = i64[count]
+  acc_mitm_failures = i64[count]
+  acc_child_degraded = i64[count]
+  acc_gpu_failures = i64[count]
+  acc_exact_rejects = i64[count]
+  reported_ranks = i64[count]
+  reported_bits = i64[count]
+  reported_terminal = i64[count]
+  fill_serial = i64[count]
+  launched = i64[count]
+  child_gpu_flags = i64[count]
+  i = 0
+  while i < count
+    threads.push(nil)
+    i += 1
 
   while running != 0
     now_ms = ccall("__w_clock_ms") ## i64
@@ -925,6 +1503,7 @@ use ../paths
       if tui != 0
         ccall("w_term_raw_disable")
       << "RECT_PORTFOLIO_ERROR code=cpu-allocation"
+      stopped_launchers = ffrpo_stop_process_launchers(worker_binary, launcher_threads, launcher_states) ## i64
       return 2
     if total_gpu_lanes > 0 && gpu_requested != 0
       z = ffrpo_ensure_gpu_host(epoch, gpu_sched_ready, cpu_allocation, scores) ## i64
@@ -939,27 +1518,7 @@ use ../paths
       << "RECT_PORTFOLIO_CAPABILITY state=launch epoch=" + epoch.to_s() + " cpu=" + allocated.to_s() + " gpu=" + gpu_allocated.to_s()
       flush()
 
-    threads = []
     # Per-shape epoch accounting for base quota + optional straggler-fill rounds.
-    segment_joined = i64[count]
-    base_complete = i64[count]
-    base_wall_ms = i64[count]
-    total_rounds = i64[count]
-    total_wall_ms = i64[count]
-    acc_cpu_moves = i64[count]
-    acc_gpu_moves = i64[count]
-    acc_cpu_ms = i64[count]
-    acc_gpu_ms = i64[count]
-    acc_mitm_attempts = i64[count]
-    acc_mitm_pairs = i64[count]
-    acc_mitm_ms = i64[count]
-    acc_mitm_failures = i64[count]
-    acc_child_degraded = i64[count]
-    acc_gpu_failures = i64[count]
-    acc_exact_rejects = i64[count]
-    fill_serial = i64[count]
-    launched = i64[count]
-    child_gpu_flags = i64[count]
     i = 0
     while i < count
       exit_codes[i] = 0
@@ -982,13 +1541,16 @@ use ../paths
       acc_child_degraded[i] = 0
       acc_gpu_failures[i] = 0
       acc_exact_rejects[i] = 0
+      reported_ranks[i] = 0 - 1
+      reported_bits[i] = 0 - 1
+      reported_terminal[i] = 0
       fill_serial[i] = 0
       launched[i] = 0
       child_gpu_flags[i] = 0
       thread = nil
       if cpu_allocation[i] > 0 && ready[i] != 0
         reset_children[i] = reset_pending[i]
-        child_tag = run_tag + "_" + labels[i].replace("x", "") + "_e" + epoch.to_s()
+        child_tag = ffrpo_child_tag(run_tag, shapes[i], epoch, 0 - 1)
         child_gpu = 0 ## i64
         if gpu_allocation[i] > 0 && gpu_sched_ready[i] != 0
           child_gpu = 1
@@ -1003,13 +1565,19 @@ use ../paths
           segment_joined[i] = 0
           restart_nonce = ffrcb_portfolio_nonce(epoch, i, 0) ## i64
           restart_door_ticket = ffrcb_portfolio_door_ticket(epoch, i, 0) ## i64
-          thread = ffrpo_spawn_shape(labels[i], repo_root, best_paths[i], child_status_paths[i], child_tag, cpu_allocation[i], steps, shape_epoch_rounds, child_max_secs, dslack, cycles, child_gpu, gpu_allocation[i], gpu_steps, gpu_epoch_rounds, ffrpo_gpu_binary(gpu_binary, labels[i]), rebuild, stop_on_record, reset_children[i], restart_nonce, restart_door_ticket, exit_codes, child_elapsed_ms, i)
+          thread = ffrpo_dispatch_shape(worker_binary, launcher_threads, launcher_commands, launcher_states, labels[i], repo_root, best_paths[i], child_status_paths[i], child_tag, cpu_allocation[i], steps, shape_epoch_rounds, child_max_secs, dslack, cycles, child_gpu, gpu_allocation[i], gpu_steps, gpu_epoch_rounds, ffrpo_gpu_binary(gpu_binary, labels[i]), rebuild, stop_on_record, reset_children[i], restart_nonce, restart_door_ticket, exit_codes, child_elapsed_ms, i)
+          if thread == nil
+            exit_codes[i] = 2
+            segment_joined[i] = 1
+            base_complete[i] = 1
         if cleared == false
           exit_codes[i] = 2
           launched[i] = 1
           segment_joined[i] = 1
           base_complete[i] = 1
-      threads.push(thread)
+        if worker_binary != nil && worker_binary != ""
+          ccall("w_value_free", child_tag)
+      threads[i] = thread
       i += 1
 
     epoch_started_ms = ccall("__w_clock_ms") ## i64
@@ -1024,8 +1592,8 @@ use ../paths
       while i < count
         if launched[i] != 0
           thread = threads[i]
-          if thread != nil && thread.alive? == false && segment_joined[i] == 0
-            joined = ffrc_thread_join_release(thread)
+          if thread != nil && ffrpo_segment_finished(worker_binary, thread, launcher_states, i) != 0 && segment_joined[i] == 0
+            joined = ffrpo_finish_segment(worker_binary, thread, launcher_states, i) ## i64
             threads[i] = nil
             segment_joined[i] = 1
             segment_ms = child_elapsed_ms[i] ## i64
@@ -1066,6 +1634,15 @@ use ../paths
               side_degraded[i] = 0
               if segment_side_failures > 0
                 side_degraded[i] = 1
+              if ffrpo_child_status_stopped(body) != 0
+                terminal_rank = ffrpo_parsed_status_i64(child_status_values, child_status_seen, 17, 0 - 1) ## i64
+                terminal_bits = ffrpo_parsed_status_i64(child_status_values, child_status_seen, 18, 0 - 1) ## i64
+                if terminal_rank > 0 && terminal_bits >= 0
+                  reported_ranks[i] = terminal_rank
+                  reported_bits[i] = terminal_bits
+                  reported_terminal[i] = 1
+            if body != nil
+              ccall("w_value_free", body)
             total_rounds[i] += seg_rounds
             if base_complete[i] == 0
               base_complete[i] = 1
@@ -1075,13 +1652,15 @@ use ../paths
             if finish > deadline_ms
               deadline_ms = finish
           live_thread = threads[i]
-          if base_complete[i] == 0 && live_thread != nil && live_thread.alive?
+          if base_complete[i] == 0 && live_thread != nil && ffrpo_segment_alive(worker_binary, live_thread, launcher_states, i) != 0
             live_body = read_file(child_status_paths[i])
             child_status_seen = ffrpo_parse_child_status(live_body, child_status_values) ## i64
             live_rounds = ffrpo_parsed_status_i64(child_status_values, child_status_seen, 0, 0) ## i64
             predicted = ffrpo_predict_base_finish_ms(epoch_started_ms, now_ms, shape_epoch_rounds, live_rounds, 0, 0) ## i64
             if predicted > deadline_ms
               deadline_ms = predicted
+            if live_body != nil
+              ccall("w_value_free", live_body)
         i += 1
 
       now_ms = ccall("__w_clock_ms") ## i64
@@ -1104,10 +1683,7 @@ use ../paths
         if do_fill != 0
           fill_serial[i] += 1
           shape_label = labels[i]
-          shape_tag = "shape"
-          if shape_label != nil
-            shape_tag = shape_label.replace("x", "")
-          child_tag = run_tag + "_" + shape_tag + "_e" + epoch.to_s() + "_f" + fill_serial[i].to_s()
+          child_tag = ffrpo_child_tag(run_tag, shapes[i], epoch, fill_serial[i])
           remain_secs = child_max_secs ## i64
           if max_secs > 0
             remain_secs = max_secs - (now_ms - start_ms) / 1000
@@ -1119,7 +1695,12 @@ use ../paths
             segment_joined[i] = 0
             restart_nonce = ffrcb_portfolio_nonce(epoch, i, fill_serial[i]) ## i64
             restart_door_ticket = ffrcb_portfolio_door_ticket(epoch, i, fill_serial[i]) ## i64
-            threads[i] = ffrpo_spawn_shape(shape_label, repo_root, best_paths[i], child_status_paths[i], child_tag, cpu_allocation[i], steps, 1, remain_secs, dslack, cycles, child_gpu_flags[i], gpu_allocation[i], gpu_steps, gpu_epoch_rounds, ffrpo_gpu_binary(gpu_binary, shape_label), 0, stop_on_record, 0, restart_nonce, restart_door_ticket, exit_codes, child_elapsed_ms, i)
+            threads[i] = ffrpo_dispatch_shape(worker_binary, launcher_threads, launcher_commands, launcher_states, shape_label, repo_root, best_paths[i], child_status_paths[i], child_tag, cpu_allocation[i], steps, 1, remain_secs, dslack, cycles, child_gpu_flags[i], gpu_allocation[i], gpu_steps, gpu_epoch_rounds, ffrpo_gpu_binary(gpu_binary, shape_label), 0, stop_on_record, 0, restart_nonce, restart_door_ticket, exit_codes, child_elapsed_ms, i)
+            if threads[i] == nil
+              exit_codes[i] = 2
+              segment_joined[i] = 1
+          if worker_binary != nil && worker_binary != ""
+            ccall("w_value_free", child_tag)
         i += 1
 
       active_j = 0 ## i64
@@ -1129,7 +1710,7 @@ use ../paths
       while i < count
         thread = threads[i]
         active[i] = 0
-        if thread != nil && thread.alive?
+        if thread != nil && ffrpo_segment_alive(worker_binary, thread, launcher_states, i) != 0
           active[i] = 1
           active_j += cpu_allocation[i]
           active_gpu += gpu_allocation[i]
@@ -1223,13 +1804,16 @@ use ../paths
                   display_density_gains[i] += live_bit_gain
                   display_rewards[i] += live_bit_gain * 100
                   display_ages[i] = 0
+            if live_body != nil
+              ccall("w_value_free", live_body)
           i += 1
 
         degraded = ffrpo_degraded_state(permanent_failure, hard_degraded, gpu_degraded, side_degraded, display_child_degraded)
         if heartbeat_due != 0
           sequence += 1
           live_status = ffrpo_status_body("running", sequence, epoch, elapsed_s, total_j, total_gpu_lanes, display_total_moves, degraded, labels, ready, cpu_allocation, gpu_allocation, display_ranks, display_bits, display_rank_drops, display_density_gains, display_shape_moves, display_shape_cpu_moves, display_shape_gpu_moves, display_shape_mitm_attempts, display_shape_mitm_pairs, display_shape_mitm_ms, display_shape_mitm_failures, display_exposure, display_cpu_failures, display_gpu_failures, scores, side_loaded, side_seeded, side_saved, side_rejects, side_write_failures)
-          status_ok = ffrc_atomic_write(status_path, live_status, run_tag + "_portfolio", sequence)
+          status_ok = ffrc_atomic_write(status_path, live_status, portfolio_write_tag, sequence)
+          ccall("w_value_free", live_status)
           last_parent_status_ms = now_ms
           if status_ok == 0
             status_degraded = 1
@@ -1260,8 +1844,9 @@ use ../paths
           key = ccall("w_input_poll", 0)
       if ccall("__w_interrupted") != 0
         stop_requested = 1
+        cancelled = ffrpo_cancel_active_segments(worker_binary, threads, launcher_threads, launcher_states, segment_joined, exit_codes) ## i64
 
-      still = ffrpo_any_alive(threads) ## i64
+      still = ffrpo_any_alive(threads, worker_binary, launcher_states) ## i64
       if still == 0
         # One more harvest/fill pass may have been needed after the last join.
         # Stop only when nothing is alive and no fill was just scheduled.
@@ -1309,7 +1894,7 @@ use ../paths
       # already joined status doubles moves, reward exposure, and archive
       # counters.
       if thread != nil && segment_joined[i] == 0
-        joined = ffrc_thread_join_release(thread)
+        joined = ffrpo_finish_segment(worker_binary, thread, launcher_states, i) ## i64
         threads[i] = nil
         segment_joined[i] = 1
         if child_elapsed_ms[i] > 0 && launched[i] != 0
@@ -1337,6 +1922,15 @@ use ../paths
             side_degraded[i] = 0
             if segment_side_failures > 0
               side_degraded[i] = 1
+            if ffrpo_child_status_stopped(body) != 0
+              terminal_rank = ffrpo_parsed_status_i64(child_status_values, child_status_seen, 17, 0 - 1) ## i64
+              terminal_bits = ffrpo_parsed_status_i64(child_status_values, child_status_seen, 18, 0 - 1) ## i64
+              if terminal_rank > 0 && terminal_bits >= 0
+                reported_ranks[i] = terminal_rank
+                reported_bits[i] = terminal_bits
+                reported_terminal[i] = 1
+          if body != nil
+            ccall("w_value_free", body)
           if base_complete[i] == 0
             base_complete[i] = 1
             base_wall_ms[i] = child_elapsed_ms[i]
@@ -1370,9 +1964,24 @@ use ../paths
         if failed == 0 && total_wall_ms[i] < 1 && acc_cpu_moves[i] < 1
           failed = 1
         if failed == 0
-          new_metrics = ffrpo_load_metrics(labels[i], repo_root, best_paths[i], 0, metrics, i * 2) ## i64
-          if new_metrics == 0
+          checkpoint_size = file_size(best_paths[i])
+          if checkpoint_size == nil || checkpoint_size < 1
             failed = 1
+        if failed == 0
+          audit_due = ffrpo_metric_audit_due(epoch) ## i64
+          terminal_ok = reported_terminal[i] ## i64
+          if terminal_ok != 0 && (reported_ranks[i] < 1 || reported_bits[i] < 0)
+            terminal_ok = 0
+          if audit_due == 0 && terminal_ok != 0
+            metrics[i * 2] = reported_ranks[i]
+            metrics[i * 2 + 1] = reported_bits[i]
+          if audit_due != 0 || terminal_ok == 0
+            new_metrics = ffrpo_load_metrics_reuse(labels[i], repo_root, best_paths[i], 0, metric_states[i], metrics, i * 2) ## i64
+            if new_metrics == 0
+              failed = 1
+            if new_metrics != 0 && terminal_ok != 0
+              if metrics[i * 2] != reported_ranks[i] || metrics[i * 2 + 1] != reported_bits[i]
+                failed = 1
         if failed != 0
           failures[i] += 1
           retry_epoch[i] = epoch + ffrpo_backoff(failures[i]) + 1
@@ -1434,7 +2043,8 @@ use ../paths
     sequence += 1
     degraded = ffrpo_degraded_state(permanent_failure, hard_degraded, gpu_degraded, side_degraded, status_degraded)
     status = ffrpo_status_body("running", sequence, epoch, elapsed_s, total_j, total_gpu_lanes, total_moves, degraded, labels, ready, cpu_allocation, gpu_allocation, ranks, bits, rank_drops, density_gains, shape_moves, shape_cpu_moves, shape_gpu_moves, shape_mitm_attempts, shape_mitm_pairs, shape_mitm_ms, shape_mitm_failures, exposure, failures, gpu_failures, scores, side_loaded, side_seeded, side_saved, side_rejects, side_write_failures)
-    status_ok = ffrc_atomic_write(status_path, status, run_tag + "_portfolio", sequence)
+    status_ok = ffrc_atomic_write(status_path, status, portfolio_write_tag, sequence)
+    ccall("w_value_free", status)
     last_parent_status_ms = now_ms
     if status_ok == 0
       status_degraded = 1
@@ -1462,6 +2072,7 @@ use ../paths
     if ffrpp_ready_count(ready, count) == 0 && running != 0
       ccall("__w_sleep_ms", 100)
 
+  stopped_launchers = ffrpo_stop_process_launchers(worker_binary, launcher_threads, launcher_states) ## i64
   if tui != 0
     ccall("w_term_raw_disable")
     << ""
@@ -1469,7 +2080,9 @@ use ../paths
   final_elapsed_s = (final_ms - start_ms) / 1000 ## i64
   degraded = ffrpo_degraded_state(permanent_failure, hard_degraded, gpu_degraded, side_degraded, status_degraded)
   final_status = ffrpo_status_body("stopped", sequence + 1, epoch, final_elapsed_s, total_j, total_gpu_lanes, total_moves, degraded, labels, ready, cpu_allocation, gpu_allocation, ranks, bits, rank_drops, density_gains, shape_moves, shape_cpu_moves, shape_gpu_moves, shape_mitm_attempts, shape_mitm_pairs, shape_mitm_ms, shape_mitm_failures, exposure, failures, gpu_failures, scores, side_loaded, side_seeded, side_saved, side_rejects, side_write_failures)
-  z = ffrc_atomic_write(status_path, final_status, run_tag + "_portfolio", sequence + 1)
+  z = ffrc_atomic_write(status_path, final_status, portfolio_write_tag, sequence + 1)
+  ccall("w_value_free", final_status)
+  ccall("w_value_free", portfolio_write_tag)
   result = "RECT_PORTFOLIO_RESULT epoch=" + epoch.to_s() + " elapsed=" + final_elapsed_s.to_s()
   i = 0
   while i < count

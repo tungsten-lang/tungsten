@@ -14,7 +14,7 @@ use partial_automorphism
   (count + 63) / 64
 
 # Production policy helpers live beside the algebra so the coordinator's
-# minute-scale gate and generator rotation can be contract-tested without
+# low-cadence gate and generator rotation can be contract-tested without
 # importing the executable `fleet.w` coordinator.
 -> ffpan_tunnel_due(n, now_ms, last_ms, cooldown_ms) (i64 i64 i64 i64) i64
   if n != 7
@@ -41,6 +41,48 @@ use partial_automorphism
   if step < 0
     step += total
   (current + step) % total
+
+# The retained 7x7 workspace measures about 5--6 ms for the algebraic finder
+# on the reference host.  Full archive + MAP intake is the dominant cost at
+# roughly 0.2 s when both gates execute, so a fifteen-second coordinator
+# cadence keeps this exact tunnel portfolio near one percent duty without
+# leaving a two-hour campaign with only a handful of source visits.
+-> ffpan_tunnel_cooldown_ms(n) (i64) i64
+  if n == 7
+    return 15000
+  60000
+
+# Deterministic source x generator portfolio for low-cadence 7x7 tunneling.
+#
+# The previous production loop always scanned the density leader and advanced
+# one global nonce.  Rotating sources with that same global nonce would visit
+# only 63 of 189 generator starts per source (15*37 mod 189 has gcd 3).  Decode
+# instead derives a per-source visit number, so every retained frontier sees
+# the full coprime stride-37 cycle.
+#
+# `campaign_nonce` phases both the source order and one of three disjoint
+# 63-start generator arcs.  The AWS three-shard supervisor supplies nonces
+# 1,2,3, so equal frontier snapshots do useful complementary work from their
+# first call while nonce zero preserves the historical first source/start.
+# out = source index, generator start nonce, per-source visit number.
+-> ffpan_portfolio_decode(n, source_count, completed, campaign_nonce, out) (i64 i64 i64 i64 i64[]) i64
+  if n != 7 || source_count < 1 || completed < 0 || out.size() < 3
+    return 0
+  total = ffpan_elementary_count(n) ## i64
+  if total < 1 || (total % 3) != 0
+    return 0
+  source_phase = campaign_nonce % source_count ## i64
+  shard_phase = campaign_nonce % 3 ## i64
+  if source_phase < 0
+    source_phase += source_count
+  if shard_phase < 0
+    shard_phase += 3
+  visit = completed / source_count ## i64
+  source_offset = completed % source_count ## i64
+  out[0] = (source_offset + source_phase) % source_count
+  out[1] = (shard_phase * (total / 3) + visit * 37) % total
+  out[2] = visit
+  1
 
 -> ffpan_clear(row, length) (i64[] i64) i64
   i = 0 ## i64

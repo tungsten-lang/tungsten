@@ -413,6 +413,43 @@ while i < args.size()
   ir = ir.replace(old_call, new_call)
   ir.replace("declare void @w_slab_init_static(ptr, i32)", "declare void @w_slab_init_static_zstd(ptr, i32, i32)")
 
+# Ordinary native compiles used to share `/tmp/tungsten/<basename>.ll`.
+# Distinct entry points such as `bin/metaflip.w` and `lib/metaflip.w` could
+# therefore overwrite one another between IR emission and clang opening the
+# file. Give every compiler process an atomically-created private directory;
+# after the link we publish the complete IR back to the historical diagnostic
+# path so existing tooling that reads `/tmp/tungsten/<basename>.ll` keeps
+# working. Explicit TUNGSTEN_LL_PATH and `--ll` paths remain caller-owned.
+-> implicit_ll_root
+  ll_dir = env("TUNGSTEN_LL_DIR")
+  if ll_dir == nil || ll_dir == ""
+    ll_dir = "/tmp/tungsten"
+  if system("mkdir -p " + dev_runtime_shell_quote(ll_dir)) != true
+    raise "Could not create LLVM scratch directory " + ll_dir
+  ll_dir
+
+-> implicit_ll_path(file_path)
+  ll_dir = implicit_ll_root()
+  build_dir = capture("mktemp -d " + dev_runtime_shell_quote(ll_dir + "/compile.XXXXXX") + " 2>/dev/null").strip()
+  if build_dir == ""
+    raise "Could not create a private LLVM scratch directory under " + ll_dir
+  build_dir + "/" + file_path.split("/").last().replace(".w", ".ll")
+
+-> uses_implicit_ll_path
+  explicit = env("TUNGSTEN_LL_PATH")
+  (explicit == nil || explicit == "") && !keep_ll
+
+-> publish_implicit_ll_path(ll_path, file_path)
+  stable_path = implicit_ll_root() + "/" + file_path.split("/").last().replace(".w", ".ll")
+  ok = system("mv -f " + dev_runtime_shell_quote(ll_path) + " " + dev_runtime_shell_quote(stable_path)) == true
+  done_path = ll_path + ".done"
+  if file?(done_path)
+    ok = system("mv -f " + dev_runtime_shell_quote(done_path) + " " + dev_runtime_shell_quote(stable_path + ".done")) == true && ok
+  parts = ll_path.split("/")
+  parts.pop()
+  z = system("rmdir " + dev_runtime_shell_quote(parts.join("/")) + " 2>/dev/null")
+  ok
+
 -> emit_ir(file_path, emit_wire, verbose, intern_algo, sidemap_path = nil, emit_ll_only_arg = false, build_defines = nil, no_static_slab = false)
   # Emit LLVM IR (or WIRE text) for a single file, return ll_path or nil
   loader = Loader.new(verbose)
@@ -481,11 +518,7 @@ while i < args.size()
   elsif keep_ll
     ll_path = file_path.replace(".w", ".ll")
   else
-    ll_dir = env("TUNGSTEN_LL_DIR")
-    if ll_dir == nil || ll_dir == ""
-      ll_dir = "/tmp/tungsten"
-    system("mkdir -p " + ll_dir)
-    ll_path = ll_dir + "/" + file_path.split("/").last().replace(".w", ".ll")
+    ll_path = implicit_ll_path(file_path)
 
   write_started_at = clock
   write_file(ll_path, ir)
@@ -1299,6 +1332,7 @@ while i < args.size()
   if out_path == nil
     out_path = file_path.replace(".w", ".wc")
 
+  implicit_ll = uses_implicit_ll_path() ## bool
   sidemap_path = out_path + ".sidemap"
   ll_path = emit_ir(file_path, emit_wire, verbose, intern_algo, sidemap_path, emit_ll_only_arg, build_defines)
 
@@ -1306,9 +1340,13 @@ while i < args.size()
     return true
 
   if emit_ll_only_arg
+    if implicit_ll && !publish_implicit_ll_path(ll_path, file_path)
+      return false
     return true
 
   ok = link_binary(ll_path, out_path, runtime_archive, verbose)
+  if implicit_ll && !publish_implicit_ll_path(ll_path, file_path)
+    ok = false
 
   if ok
     << ""
@@ -1444,9 +1482,10 @@ elsif command == "compile-batch"
     bin = fp.replace(".w", ".wc")
     << "--- Compiling [fp] ---"
     begin
+      implicit_ll = uses_implicit_ll_path() ## bool
       ll_path = emit_ir(fp, emit_wire, verbose, intern_algo, bin + ".sidemap")
       if ll_path != nil
-        ll_jobs.push({ll: ll_path, bin: bin})
+        ll_jobs.push({ll: ll_path, bin: bin, source: fp, implicit_ll: implicit_ll})
         if ll_needs_zstd_path(ll_path)
           needs_zstd_runtime = true
       else
@@ -1466,10 +1505,15 @@ elsif command == "compile-batch"
 
     if runtime_objs == nil
       << "Failed to compile runtime"
+      ll_jobs -> (job)
+        if job[:implicit_ll]
+          z = publish_implicit_ll_path(job[:ll], job[:source])
       exit 1
 
   ll_jobs -> (job)
     ok = link_binary(job[:ll], job[:bin], runtime_objs, verbose)
+    if job[:implicit_ll] && !publish_implicit_ll_path(job[:ll], job[:source])
+      ok = false
     if !ok
       fail_count += 1
 

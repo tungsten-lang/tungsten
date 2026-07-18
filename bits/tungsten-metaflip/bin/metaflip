@@ -1,0 +1,58 @@
+#!/bin/sh
+# Stable source-checkout launcher for the pure-Tungsten Metaflip CLI.
+
+set -eu
+
+SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$SELF_DIR/.." && pwd)
+ENTRY="$SELF_DIR/metaflip.w"
+
+TUNGSTEN_CMD=${METAFLIP_TUNGSTEN:-}
+if [ -z "$TUNGSTEN_CMD" ] && [ -x "$ROOT/../../bin/tungsten" ]; then
+  TUNGSTEN_CMD="$ROOT/../../bin/tungsten"
+fi
+if [ -z "$TUNGSTEN_CMD" ] && command -v tungsten >/dev/null 2>&1; then
+  TUNGSTEN_CMD=$(command -v tungsten)
+fi
+if [ -z "$TUNGSTEN_CMD" ] || { [ ! -x "$TUNGSTEN_CMD" ] && ! command -v "$TUNGSTEN_CMD" >/dev/null 2>&1; }; then
+  echo "metaflip: Tungsten compiler not found; set METAFLIP_TUNGSTEN=/path/to/tungsten" >&2
+  exit 127
+fi
+
+DEFAULT_CACHE_ROOT=${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}
+CACHE_DIR=${TUNGSTEN_METAFLIP_CACHE_DIR:-$DEFAULT_CACHE_ROOT/tungsten-metaflip}
+if ! mkdir -p "$CACHE_DIR" 2>/dev/null || ! : >"$CACHE_DIR/.write-test.$$" 2>/dev/null; then
+  CACHE_DIR="${TMPDIR:-/tmp}/tungsten-metaflip-$(id -u)"
+  mkdir -p "$CACHE_DIR"
+else
+  rm -f "$CACHE_DIR/.write-test.$$"
+fi
+
+# A distinct cache basename prevents library-entry builds named `metaflip`
+# from ever replacing the runnable coordinator again.
+BINARY="$CACHE_DIR/metaflip-cli"
+NEEDS_BUILD=0
+if [ ! -x "$BINARY" ]; then
+  NEEDS_BUILD=1
+elif find "$ROOT/lib" "$ENTRY" "$SELF_DIR/metaflip" -type f -newer "$BINARY" -print -quit | grep -q .; then
+  NEEDS_BUILD=1
+fi
+
+if [ "$NEEDS_BUILD" -eq 1 ]; then
+  TMP_BINARY="$BINARY.tmp.$$"
+  TMP_LL="$CACHE_DIR/metaflip-cli.tmp.$$.ll"
+  trap 'rm -f "$TMP_BINARY" "$TMP_BINARY.sidemap" "$TMP_LL"' 0 1 2 15
+  echo "metaflip: compiling pure-Tungsten coordinator (first run or sources changed)..." >&2
+  # Older Tungsten compilers keyed their implicit LLVM temporary only by the
+  # source basename. Keep this launch isolated from a concurrent library build.
+  env TUNGSTEN_LL_PATH="$TMP_LL" "$TUNGSTEN_CMD" compile "$ENTRY" --release --fast --lto --out "$TMP_BINARY"
+  chmod 755 "$TMP_BINARY"
+  mv -f "$TMP_BINARY" "$BINARY"
+  if [ -f "$TMP_BINARY.sidemap" ]; then
+    mv -f "$TMP_BINARY.sidemap" "$BINARY.sidemap"
+  fi
+  rm -f "$TMP_LL"
+  trap - 0 1 2 15
+fi
+
+exec "$BINARY" "$@"

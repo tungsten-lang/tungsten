@@ -1,6 +1,6 @@
 # From local flips to wide matrix multiplication
 
-*Draft status: 2026-07-14. All rank claims in this article are over GF(2)
+*Draft status: 2026-07-17. All rank claims in this article are over GF(2)
 unless stated otherwise.*
 
 The latest phase of the matrix-multiplication project produced several very
@@ -11,7 +11,7 @@ different kinds of result, and keeping them separate is essential:
 | 3x3 rank is at least 20 | official proof certificate, independently replayed | a rigorous lower bound, due to Chengu Wang |
 | `<3,2,4>` rank is exactly 20 | two constrained mode lemmas plus six quotient-rank pseudo-Boolean proofs, independently replayed | a new exact GF(2) tensor rank, closing the former 19--20 gap |
 | 186 saved block compositions | two separate complete tensor reconstructions and pinned certificate hashes | exact GF(2) upper bounds; 176 are strict apparent GF(2) records, one is a co-record, and nine lack a pinned GF(2) comparator |
-| 7x7 rank 247 | exhaustive weighted-outer orbit scan plus three independent exact reconstructions | an exact GF(2) upper bound, improving the audited public rank-248 frontier |
+| 7x7 rank 247, current saved density 3094 | exhaustive weighted-outer orbit scan plus independent exact reconstructions; later density endpoints are full-gated | an exact GF(2) upper bound, improving the audited public rank-248 frontier |
 | 4x4 remained at rank 47 after 988.5 billion fleet-reported moves | a completed diversified search campaign | a large search negative, **not** a lower bound |
 
 The lower-bound result closes the bottom of an interval. The compositions
@@ -275,6 +275,81 @@ rank-neutral or rank-lowering endpoints that ordinary term-local flips never
 visit. Because the outer orbit is tiny, it is practical to maintain several
 distant exact rank-247 images as restart doors rather than following one
 leader.
+
+### A four-flip trace hides a better three-flip endpoint
+
+A later NUMA-local CPU campaign did not lower rank 247, but it exposed a
+useful example of sequence-aware density search. Starting from the exact
+density-3096 frontier, one shard reported density 3095 after
+735,308,184,180 child moves. The raw checkpoint passed both the pure-Tungsten
+and independent host coefficient gates. Its term set differs from d3096 by
+five removed and five added terms.
+
+Reconstructing that delta showed that it is exactly four ordinary legal
+flips. The following is a commuting reconstruction, not a claim that the AWS
+walker performed the flips in this order. Tuples are `(U,V,W)` masks in
+decimal, and every intermediate was independently reconstructed as the full
+7x7 matrix-multiplication tensor.
+
+1. Shared `W=269484032`:
+   `(2203335041024,87961198665728,269484032)` and
+   `(2164278273,35651650,269484032)` become
+   `(2203335041024,87961234317378,269484032)` and
+   `(2205465764865,35651650,269484032)`. Density `3096 -> 3103`.
+2. Shared `V=87961234317378`:
+   `(16777216,87961234317378,278921216)` and
+   `(2203335041024,87961234317378,269484032)` become
+   `(16777216,87961234317378,11534336)` and
+   `(2203318263808,87961234317378,269484032)`. Density `3103 -> 3102`.
+3. Shared `W=269484032`:
+   `(2203318263808,87961234317378,269484032)` and
+   `(2205465764865,35651650,269484032)` become
+   `(2203318263808,87961198665728,269484032)` and
+   `(2147501057,35651650,269484032)`. Density `3102 -> 3094`.
+4. A disjoint shared-`U=2199023255552` flip replaces
+   `(2199023255552,17592186044416,467197129033448)` and
+   `(2199023255552,422212532174880,141836999987232)` with
+   `(2199023255552,17592186044416,327559152309960)` and
+   `(2199023255552,439804718219296,141836999987232)`. It worsens density
+   `3094 -> 3095` and is therefore omitted from the retained endpoint.
+
+The first three flips give an exact rank-247, density-3094 scheme with 244 of
+247 terms shared with d3096. Its axis densities are `1020/1022/1052`, versus
+`1022/1022/1052` for d3096. A deterministic pure-Tungsten replay used the
+production flip formula and full-gated all four intermediates; its three-flip
+term set exactly matches the retained d3094 certificate, and its four-flip
+term set exactly matches the AWS d3095 checkpoint. The affected rank-three
+component has eight ordinary-flip states, of which d3094 is density-minimal;
+an exhaustive immediate-flip scan found no further density win or rank drop.
+
+This is the small, concrete version of the Rubik's-cube intuition behind move
+words. The profitable three-move word must first accept a seven-bit density
+debt before its closing move pays back eight. Ranking only individual moves
+would reject the entrance. Conversely, retaining every step of a useful word
+without auditing its prefixes would have kept the unnecessary fourth move and
+missed one more density bit.
+
+The same delta also suggested a more general exact crossover.  If two exact
+schemes represent the same tensor, their symmetric difference is a zero
+tensor.  Join two delta terms when their Cartesian supports overlap on every
+axis; disconnected graph components then touch disjoint coefficient cells,
+so each component is independently a zero relation.  The d3096/d3095
+difference splits into components of sizes six and four, and toggling the
+six-term component yields d3094 directly.  The pure-Tungsten implementation
+full-gates both parents, every relation, all children, and its winner, taking
+about 1.5--1.7 ms on this 7x7 fixture.  Metaflip now applies this
+support-component peel only to rare same-rank density intake and to its single
+cross-parent differential worker, before the general nullspace fallback.
+Thus the discovery became a reusable tunneling move without adding overhead
+to ordinary CPU or GPU move loops.
+
+The complete cloud follow-up was a useful negative control.  Six sharded CPU
+phases executed 11.494 trillion supervised 7x7 moves, including 3.724 trillion
+after d3094 became the seed frontier, without reaching rank 246 or density
+below 3094.  A five-root A40 campaign added 1.196 trillion CUDA attempts and
+93.616 billion compatible-partner checks, also with no lower endpoint and zero
+exact rejects or ECC errors.  These totals measure the bounded campaigns; they
+are evidence about the tested portfolio, not a lower-bound proof.
 
 ### Exact tunnels that replace the entire 247-term support
 
@@ -1331,3 +1406,42 @@ send only exact repaired replacements to the rank-two word compiler. That
 pipeline concentrates compute on the missing endpoint, then uses the
 Rubik-style machinery for what it now demonstrably does well—compiling and
 verifying the path.
+
+## 2026-07-17: a rectangular density win and wider side archives
+
+A 188-vCPU rectangular portfolio produced a new density leader for
+`<2,2,7>` over GF(2): rank 25, density 128, improving the packaged density-132
+catalog presentation at the same rank. The first exact portfolio barrier
+reported d128 at 25.469 billion cumulative shape-specific CPU moves, so 25.469
+billion is an upper bound on the discovery cost. The immediately preceding
+barrier was d130 at 25.357 billion moves, bounding the final d130-to-d128
+reporting interval by 112 million moves. The campaign later harvested the same
+certificate after 92.683 billion moves on that shape and 1.509 trillion moves
+across all thirteen fronts, with zero CPU, accelerator, MITM, or exact-gate
+failure. Those later totals are continuation work, not the cost of finding the
+scheme.
+
+The d128 certificate passed independent full reconstruction of all 784 tensor
+coefficients. Its SHA-256 is
+`bf071351b20e442a1d3b532bff5bf534a1b22b00ac75f657c3da4c2265d5515c`.
+It is at symmetric term-set distance 42 from d132 and has a different
+structural signature. Metaflip therefore uses d128 as the hot default while
+retaining d132 as a same-rank restart door beside the existing rank-26 and
+rank-27 controlled-debt shoulders. This is a density record inside the search
+corpus, not a tensor-rank improvement or lower-bound proof.
+
+The same run exposed a diversity bottleneck on the wider fronts. With only
+four persisted side doors, a 15-lane 4x6x7 child had six distinct starting
+sources—leader, one checked-in nonleader, and four saved doors—so the other
+lanes repeated those basins. A controlled cap-4/cap-8 replay began from
+identical checkpoints and trajectories. In the first 7.5 million moves the
+larger archive retained eight independently exact, structurally distinct
+doors; after twelve additional 30-million-move continuations it still held all
+eight, including several presentations at support distance 246 from the
+leader. The matched final tranche took 599 ms with four slots and 606 ms with
+eight. A second 4x6x6 control filled all eight slots in 28 million moves and
+was slightly faster (422 versus 429 ms); 3x4x6 generated only four eligible
+doors, so unused capacity remained empty rather than admitting weak or
+inexact states. Rectangular checkpoints now persist up to eight exact side
+doors, raising the full 4x6x7 child from six to ten distinct initial sources
+without forcing every shape to manufacture eight.

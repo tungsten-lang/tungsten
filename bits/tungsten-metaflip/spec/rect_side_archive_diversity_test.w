@@ -114,6 +114,7 @@ z = ffrdvt_expect("exact rank-18 leader", rank == 18 && ffr_verify_best_exact(le
 prior = i64[ffr_state_size(capacity)]
 prior_rank = ffr_load_scheme_cap(prior, root + "matmul_2x2x5_rank18_d92_block_local_gl_gf2.txt", n, m, p, capacity, 96003, dslack, cycles, workq, wanderq) ## i64
 z = ffrdvt_expect("exact distinct prior door", prior_rank == rank && ffr_verify_best_exact(prior, n, m, p) == 1 && ffrda_same_best(prior, leader) == 0)
+z = ffrdvt_expect("eight persisted side doors", ffrda_cap() == 8)
 
 # Four independently materialized current endpoints lie one local split from
 # the leader. The old door is split into the same rank band but remains far
@@ -146,10 +147,20 @@ while i < near.size()
 same_band.push(far_prior)
 same_band_selected = []
 selected_count = ffrda_select_diverse(same_band, leader, ffrda_cap(), same_band_selected) ## i64
-z = ffrdvt_expect("far prior survives four near current doors", selected_count == 4 && ffrdvt_contains(same_band_selected, far_prior) == 1)
+z = ffrdvt_expect("far prior survives four near current doors", selected_count == same_band.size() && ffrdvt_contains(same_band_selected, far_prior) == 1)
 
-# Present every allowed band. Coverage consumes three slots; the fourth is a
-# normal max-min fill. Reversing arrival order must produce identical slots.
+# Expand the pool beyond the production cap. This models a wide child whose
+# exit barrier sees more exact endpoints than it can persist and ensures all
+# eight slots participate in the deterministic diversity selection.
+while near.size() < ffrda_cap() + 2 && variant < 512
+  candidate = ffrdvt_split_shoulder(leader, n, m, p, capacity, 1, variant, dslack, cycles, workq, wanderq)
+  action = ffrda_collect_unique(near, candidate, leader, n, m, p) ## i64
+  variant += 1
+z = ffrdvt_expect("wide child supplies more candidates than slots", near.size() > ffrda_cap())
+
+# Present every allowed band. Coverage consumes three slots; the remaining
+# five are normal max-min fills. Reversing arrival order must produce identical
+# slots.
 plus_two = ffrdvt_split_shoulder(leader, n, m, p, capacity, 2, 307, dslack, cycles, workq, wanderq)
 z = ffrdvt_expect("exact +2 shoulder", plus_two != nil && ffr_best_rank(plus_two) == rank + 2 && ffr_verify_best_exact(plus_two, n, m, p) == 1)
 
@@ -171,7 +182,7 @@ selected_forward = []
 selected_reverse = []
 forward_count = ffrda_select_diverse(pool_forward, leader, ffrda_cap(), selected_forward) ## i64
 reverse_count = ffrda_select_diverse(pool_reverse, leader, ffrda_cap(), selected_reverse) ## i64
-z = ffrdvt_expect("selector fills cap", forward_count == 4 && reverse_count == 4)
+z = ffrdvt_expect("selector fills cap", forward_count == ffrda_cap() && reverse_count == ffrda_cap())
 z = ffrdvt_expect("rank band zero covered", ffrdvt_has_delta(selected_forward, leader, 0) == 1)
 z = ffrdvt_expect("rank band one covered", ffrdvt_has_delta(selected_forward, leader, 1) == 1)
 z = ffrdvt_expect("rank band two covered", ffrdvt_has_delta(selected_forward, leader, 2) == 1)
@@ -189,7 +200,7 @@ anchored_forward = []
 anchored_reverse = []
 anchored_forward_count = ffrda_select_diverse_anchored(pool_forward, leader, fixed_anchors, ffrda_cap(), anchored_forward) ## i64
 anchored_reverse_count = ffrda_select_diverse_anchored(pool_reverse, leader, fixed_anchors, ffrda_cap(), anchored_reverse) ## i64
-z = ffrdvt_expect("anchored selector fills cap", anchored_forward_count == 4 && anchored_reverse_count == 4)
+z = ffrdvt_expect("anchored selector fills cap", anchored_forward_count == ffrda_cap() && anchored_reverse_count == ffrda_cap())
 z = ffrdvt_expect("fixed anchor excluded from saved roles", ffrdvt_contains(anchored_forward, near[0]) == 0)
 i = 0
 while i < anchored_forward.size()

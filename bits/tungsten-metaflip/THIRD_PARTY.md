@@ -87,6 +87,15 @@ rank claims. Their SHA-256 digests are, in rank order,
 `4421ed9c520fc5e745a74db749498df93bd5113e2fa8f30df6449c8c849f4818`,
 and `c0e2f152a1f0c1fc2678cd0cca0903ed0883b4b7818d29a3d9a5a3ade94d75ec`.
 
+`matmul_2x2x7_rank25_d128_rect_portfolio_gf2.txt` is a density improvement
+found by Erik Peterson's Metaflip rectangular CPU portfolio in 2026 while
+walking from the normalized rank-25/density-132 catalog frontier. The new
+scheme remains rank 25, has density 128, and is at term-set distance 42 from
+that parent, which remains packaged as a restart door. Exhaustive
+reconstruction verifies all 784 target coefficients over GF(2). The normalized
+certificate SHA-256 is
+`bf071351b20e442a1d3b532bff5bf534a1b22b00ac75f657c3da4c2265d5515c`.
+
 ## Release rule
 
 Keep an imported scheme outside the bit when its redistribution status is not

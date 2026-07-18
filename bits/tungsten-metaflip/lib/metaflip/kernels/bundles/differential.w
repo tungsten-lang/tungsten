@@ -4,6 +4,11 @@
 
 use ../metallib_cache
 
+# Scoped to this one-child worker.  Ordinary archive novelty thresholds stay
+# unchanged; d6 is the smallest proper component exchange worth launching.
+-> ffdb_min_distance() i64
+  6
+
 -> ffdb_shell_quote(text) (String)
   "'" + text.replace("'", "'\"'\"'") + "'"
 

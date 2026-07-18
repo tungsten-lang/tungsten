@@ -871,6 +871,14 @@
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       idx_val = lower_expression(ctx, node.args[0])
+      # A raw machine-int index (promoted loop var) skips the w_int box +
+      # w_as_int unbox pair via the raw-index runtime twin — the dominant
+      # per-element cost of core/array.w method loops.
+      if idx_helper == "w_array_idx" && idx_val[:type] in (:raw_int :raw_i64 :raw_u64)
+        idx_raw = ensure_raw_int(wfn, idx_val)
+        temp = next_temp(wfn)
+        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_idx_i64", args: [receiver_reg, idx_raw]})
+        return typed_value(:i64, temp)
       idx_reg = ensure_i64_value(wfn, idx_val)
       temp = next_temp(wfn)
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: idx_helper, args: [receiver_reg, idx_reg]})
@@ -920,11 +928,22 @@
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       idx_val = lower_expression(ctx, node.args[0])
-      idx_reg = ensure_i64_value(wfn, idx_val)
-      temp = next_temp(wfn)
       cs_id = nil
       if node.line != nil
         cs_id = next_call_site_id(ctx[:mod])
+      # Raw machine-int index: same negative-wrap/nil-on-OOB semantics via
+      # the raw twin, minus the per-element box/unbox pair.
+      if idx_val[:type] in (:raw_int :raw_i64 :raw_u64)
+        idx_raw = ensure_raw_int(wfn, idx_val)
+        temp = next_temp(wfn)
+        emit_instruction(wfn, {
+          op: :call_direct_i64, temp: temp, name: "w_array_get_i64",
+          args: [receiver_reg, idx_raw],
+          src_line: node.line, src_col: node.col, loc_site_id: cs_id
+        })
+        return typed_value(:i64, temp)
+      idx_reg = ensure_i64_value(wfn, idx_val)
+      temp = next_temp(wfn)
       emit_instruction(wfn, {
         op: :call_direct_i64, temp: temp, name: "w_array_get",
         args: [receiver_reg, idx_reg],

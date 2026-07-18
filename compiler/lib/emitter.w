@@ -329,6 +329,8 @@ use hashing
   out << declare_fn("w_fused_out_reuse_or_new", wv, "ptr, i64, i64")
   out << declare_fn("w_array_push", wv, wv2)
   out << declare_fn("w_array_get", wv, wv2)
+  out << declare_fn("w_array_get_i64", wv, "i64, i64")
+  out << declare_fn("w_array_idx_i64", wv, "i64, i64")
   out << declare_fn("w_array_set", wv, wv3)
   out << declare_fn("w_array_size", wv, wv)
   out << declare_fn("w_array_pop", wv, wv)

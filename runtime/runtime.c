@@ -22646,7 +22646,7 @@ static void w_init_ic_tables(void) {
     w_ic_array_table[9].name  = WN_include_q; /* Phase 7+d: legacy alias for has? */
     w_ic_array_table[10].name = WN_unshift;   /* Phase 7+e */
     w_ic_array_table[11].name = WN_sort;
-    w_ic_array_table[12].name = WN_reverse;
+    /* Slot 12 (reverse) retired to core/array.w. */
     w_ic_array_table[13].name = WN_copy;
     w_ic_array_table[14].name = WN_fill;       /* Phase 7+f */
     w_ic_array_table[15].name = WN_view;
@@ -26168,6 +26168,33 @@ WValue w_array_get(WValue arr, WValue index) {
     return w_int((int64_t)array_read(a, a->start + i));
 }
 
+/* Raw-index twin of w_array_get, same negative-wrap and nil-on-OOB
+ * semantics — emitted when the index is already a raw machine int. */
+WValue w_array_get_i64(WValue arr, int64_t i) {
+    if (w_is_body(arr)) {
+        uint32_t len = w_unbox_body_length(arr);
+        if (i < 0) i += len;
+        if (i < 0 || (uint32_t)i >= len) return W_NIL;
+        return w_body_arena_get(w_unbox_body_offset(arr), (uint32_t)i);
+    }
+    WArray *a = (WArray *)w_as_ptr(arr);
+    if (i < 0) i += a->size;
+    if (i < 0 || i >= a->size) return W_NIL;
+    if (array_is_wvalue(a)) {
+        return (WValue)array_read(a, a->start + i);
+    }
+    if (array_is_float(a)) {
+        return w_float(array_read_float(a, a->start + i));
+    }
+    if (a->ebits == 1) {
+        return array_read(a, a->start + i) ? W_TRUE : W_FALSE;
+    }
+    if (array_is_signed_int(a)) {
+        return w_int(array_read_signed(a, a->start + i));
+    }
+    return w_int((int64_t)array_read(a, a->start + i));
+}
+
 WValue w_array_set(WValue arr, WValue index, WValue val) {
     /* Mirrors w_array_get's unconditional-call situation — `[]=` also
      * has no recv_type gate. Packed AST body references are immutable
@@ -26231,6 +26258,18 @@ WValue w_array_idx(WValue arr, WValue index) {
     if (array_is_wvalue(a)) return (WValue)array_read(a, a->start + i);
     if (array_is_float(a)) return w_float(array_read_float(a, a->start + i));
     /* Phase 6i.1b: ebits=1 (BoolArray) yields W_TRUE/W_FALSE. */
+    if (a->ebits == 1) return array_read(a, a->start + i) ? W_TRUE : W_FALSE;
+    if (array_is_signed_int(a)) return w_int(array_read_signed(a, a->start + i));
+    return w_int((int64_t)array_read(a, a->start + i));
+}
+
+/* Raw-index twin of w_array_idx: the compiler emits this when the index is
+ * already a raw machine int, saving a w_int box + w_as_int unbox per element
+ * in hot array loops (core/array.w method bodies). */
+WValue w_array_idx_i64(WValue arr, int64_t i) {
+    WArray *a = (WArray *)w_as_ptr(arr);
+    if (array_is_wvalue(a)) return (WValue)array_read(a, a->start + i);
+    if (array_is_float(a)) return w_float(array_read_float(a, a->start + i));
     if (a->ebits == 1) return array_read(a, a->start + i) ? W_TRUE : W_FALSE;
     if (array_is_signed_int(a)) return w_int(array_read_signed(a, a->start + i));
     return w_int((int64_t)array_read(a, a->start + i));

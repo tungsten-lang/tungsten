@@ -155,6 +155,15 @@
       i += 1
     out
 
+  -> reverse
+    out = []
+    n = $size ## i64
+    i = n - 1
+    while i >= 0
+      out.push(self[i])
+      i -= 1
+    out
+
   # Keep the separator overload before the zero-argument overload. Runtime
   # dispatch selects exact arity first and otherwise falls back to the first
   # method of this name, matching the former C handler's extra-argument

@@ -43,6 +43,37 @@
     else
       (s[mid - 1] + s[mid]).to_f / 2.to_f
 
+  # True when the first non-nil value is numeric (Integer or Float).
+  # False for an empty or all-nil array. type() names agree across
+  # engines (verified: Integer/Float/String/Symbol/Nil/Boolean).
+  -> .numeric?(values)
+    first = nil
+    values.each -> (v)
+      first = v if first == nil && v != nil
+    t = type(first)
+    out = false
+    out = true if t == "Integer"
+    out = true if t == "Float"
+    out
+
+  # Most frequent non-nil value; ties break to the first seen. Works
+  # for strings/symbols too. nil for an empty or all-nil array.
+  -> .mode(values)
+    clean = self.clean(values)
+    best = nil
+    best_count = 0
+    seen = []
+    clean.each -> (v)
+      if !seen.include?(v)
+        seen.push(v)
+        count = 0
+        clean.each -> (u)
+          count += 1 if u == v
+        if count > best_count
+          best = v
+          best_count = count
+    best
+
   -> .min(values)
     clean = self.clean(values)
     return nil if clean.size == 0

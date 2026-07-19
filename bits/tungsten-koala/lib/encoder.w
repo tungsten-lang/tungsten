@@ -1,98 +1,114 @@
-# Encoder — categorical encoding transformers
-# Convert categorical features into numeric representations for ML.
+# Encoder — categorical encoding with the fit/transform pattern
 #
-#     enc = Encoder.new(:one_hot, columns: [:color, :size])
-#     enc = Encoder.new(:label, columns: [:grade])
-#     enc = Encoder.new(:ordinal, columns: [:size], order: { small: 0, medium: 1, large: 2 })
-#     enc = Encoder.new(:target, columns: [:category])
+#     enc = Encoder.new(:label, [:color])    # category -> index
+#     enc = Encoder.new(:one_hot, [:color])  # category -> 0/1 columns
+#
+# Categories are collected at fit time in FIRST-SEEN order (Array#sort
+# is not portable across engines — the Pivot convention) and nil is
+# never a category.
+#
+# :label replaces each fitted column with the category's index; a nil
+# or never-seen value encodes to nil. :one_hot replaces each fitted
+# column IN PLACE with one 0/1 column per category, named
+# "<col>_<cat>" (string names, like Pivot's value-named columns), in
+# category order; a nil cell is 0 in every category column. Surrounding
+# column order is preserved. columns = nil encodes every column.
+# transform before fit returns nil.
+#
+# Fitted state lives in parallel arrays (@fit_names / @fit_cats) — hash
+# iteration order is not guaranteed across engines.
+#
+# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
+# interpreter cannot resolve @ivars from a block body.
++ Encoder
+  ro :kind
 
-in Tungsten:Koala
+  -> new(kind = :label, columns = nil)
+    @kind = kind
+    @columns = columns
+    @fitted = false
+    @fit_names = []
+    @fit_cats = []
 
-+ Encoder < Transformer
-  ro :kind      # :one_hot, :label, :ordinal, :target, :binary, :frequency
-  ro :columns
+  -> fitted?
+    @fitted
 
-  -> new(@kind, columns: nil, **options)
-    super()
-    @columns  = columns&.map(&:to_sym)
-    @options  = options
-    @mappings = {}
-
-  -> fit(df, target: nil)
-    cols = @columns || self.detect_categorical(df)
-    cols.each -> (col)
-      values = df[col].to_a.uniq.reject(&:nil?).sort
-
-      case @kind
-      => :one_hot ->
-        @mappings[col] = values
-      => :label ->
-        @mappings[col] = values.each_with_index.map(-> (v, i) [v, i]).to_h
-      => :ordinal ->
-        order = @options[:order]
-        @mappings[col] = order || values.each_with_index.map(-> (v, i) [v, i]).to_h
-      => :target ->
-        <! TransformerError, "Target encoding requires a target Series" unless target
-        target_vals = target.to_a
-        source_vals = df[col].to_a
-        group_means = {}
+  # Collect first-seen category lists from df (only @columns when given).
+  -> fit(df)
+    wanted = @columns
+    wanted = df.column_names if wanted == nil
+    names = []
+    cats = []
+    wanted.each -> (name)
+      values = df.column_values(name)
+      if values != nil
+        seen = []
         values.each -> (v)
-          indices = source_vals.each_with_index.select(-> (sv, _) sv == v).map(&:last)
-          group_means[v] = indices.map(-> (i) target_vals[i]).sum.to_f / indices.size
-        @mappings[col] = group_means
-      => :binary ->
-        @mappings[col] = values.each_with_index.map(-> (v, i) [v, i]).to_h
-      => :frequency ->
-        counts = df[col].to_a.tally
-        total = df[col].count.to_f
-        @mappings[col] = counts.map(-> (v, c) [v, c / total]).to_h
-
+          seen.push(v) if v != nil && !seen.include?(v)
+        names.push(name)
+        cats.push(seen)
+    @fit_names = names
+    @fit_cats = cats
     @fitted = true
     self
 
+  # The fitted category list for a column; nil when it was not fitted.
+  -> categories(name)
+    fit_names = @fit_names
+    i = -1
+    j = 0
+    fit_names.each -> (n)
+      i = j if n == name
+      j += 1
+    return nil if i == -1
+    @fit_cats[i]
+
+  # New DataFrame with fitted columns encoded; nil before fit.
   -> transform(df)
-    <! TransformerError, "Not fitted" unless @fitted
-    result = df
+    out = nil
+    if @fitted
+      kind = @kind
+      fit_names = @fit_names
+      fit_cats = @fit_cats
+      pairs = []
+      df.column_names.each -> (name)
+        values = df.column_values(name)
+        i = -1
+        j = 0
+        fit_names.each -> (n)
+          i = j if n == name
+          j += 1
+        if i == -1
+          pairs.push([name, values])
+        else
+          cats = fit_cats[i]
+          if kind == :one_hot
+            cats.each -> (cat)
+              flags = []
+              values.each -> (v)
+                if v == cat
+                  flags.push(1)
+                else
+                  flags.push(0)
+              pairs.push([name.to_s + "_" + cat.to_s, flags])
+          else
+            codes = []
+            values.each -> (v)
+              codes.push(Encoder.code_for(cats, v))
+            pairs.push([name, codes])
+      out = DataFrame.new(pairs)
+    out
 
-    @mappings.each -> (col, mapping)
-      case @kind
-      => :one_hot ->
-        mapping.each -> (val)
-          col_name = "[col]_[val]".to_sym
-          result = result.assign(**{ col_name => df[col].map(-> (v) v == val ? 1 : 0).to_a })
-        result = result.drop(col)
-      => :label, :ordinal, :target, :frequency ->
-        result = result.transform(col, -> (v) mapping[v])
-      => :binary ->
-        # Encode as binary digits
-        n_bits = Math.log2(mapping.size).ceil.to_i
-        n_bits = [n_bits, 1].max
-        mapping.each -> (val, idx)
-          n_bits.times -> (bit)
-            col_name = "[col]_bit[bit]".to_sym
-            result = result.assign(**{ col_name => df[col].map(-> (v)
-              mapping[v] ? (mapping[v] >> bit) & 1 : 0
-            ).to_a }) unless result.columns.include?(col_name)
-        result = result.drop(col)
+  -> fit_transform(df)
+    self.fit(df)
+    self.transform(df)
 
-    result
-
-  # Reverse label/ordinal encoding.
-  -> inverse_transform(df)
-    <! TransformerError, "Not fitted" unless @fitted
-    result = df
-    @mappings.each -> (col, mapping)
-      case @kind
-      => :label, :ordinal ->
-        reverse = mapping.map(-> (k, v) [v, k]).to_h
-        result = result.transform(col, -> (v) reverse[v])
-    result
-
-  -> params { kind: @kind, mappings: @mappings }
-
-  [private]
-
-  -> detect_categorical(df)
-    df.columns.select -> (col)
-      sample = df[col].to_a.reject(&:nil?).first
-      sample.is_a?(String) || sample.is_a?(Symbol)
+  # Index of v in the category list; nil when v is nil or unseen.
+  -> .code_for(cats, v)
+    out = nil
+    if v != nil
+      i = 0
+      cats.each -> (c)
+        out = i if c == v
+        i += 1
+    out

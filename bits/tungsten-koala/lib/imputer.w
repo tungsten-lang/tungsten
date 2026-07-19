@@ -1,115 +1,122 @@
-# Imputer — missing value imputation
-# Fill missing (nil) values using statistical strategies.
+# Imputer — fill missing (nil) cells with the fit/transform pattern
 #
-#     imp = Imputer.new(strategy: :median)
-#     imp = Imputer.new(strategy: :constant, fill_value: 0)
-#     imp = Imputer.new(strategy: :knn, k: 5)
+#     imp = Imputer.new(:mean)               # per-column mean
+#     imp = Imputer.new(:median, [:x])       # only column :x
+#     imp = Imputer.new(:constant, nil, 0)   # every nil -> 0
+#
+# Strategies: :mean, :median (Stats over the non-nil values), :mode
+# (most frequent non-nil value, first-seen tie break — works for
+# strings too), :constant (the fill_value argument). Fill values are
+# learned at fit time and reused for every transform — imputing a test
+# frame uses the TRAINING statistics. columns = nil fits every column;
+# a column whose fill value comes out nil (e.g. all-nil under :mean)
+# passes through unchanged, and :mean/:median skip non-numeric columns
+# (see fit). transform before fit returns nil.
+#
+# Fitted state lives in parallel arrays (@fit_names / @fit_fills) —
+# hash iteration order is not guaranteed across engines.
+#
+# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
+# interpreter cannot resolve @ivars from a block body.
++ Imputer
+  ro :strategy
 
-in Tungsten:Koala
-
-+ Imputer < Transformer
-  ro :strategy   # :mean, :median, :most_frequent, :constant, :knn, :forward, :backward
-  ro :columns
-
-  -> new(strategy: :mean, columns: nil, fill_value: nil, k: 5)
-    super()
-    @strategy   = strategy
-    @columns    = columns&.map(&:to_sym)
+  -> new(strategy = :mean, columns = nil, fill_value = nil)
+    @strategy = strategy
+    @columns = columns
     @fill_value = fill_value
-    @k          = k
-    @fill_map   = {}
+    @fitted = false
+    @fit_names = []
+    @fit_fills = []
 
-  -> fit(df, target: nil)
-    cols = @columns || df.columns
+  -> fitted?
+    @fitted
 
-    cols.each -> (col)
-      values = df[col].to_a
-
-      case @strategy
-      => :mean ->
-        clean = values.reject(&:nil?)
-        @fill_map[col] = clean.empty? ? 0.0 : Stats.mean(clean)
-      => :median ->
-        clean = values.reject(&:nil?)
-        @fill_map[col] = clean.empty? ? 0.0 : Stats.median(clean)
-      => :most_frequent ->
-        clean = values.reject(&:nil?)
-        @fill_map[col] = clean.empty? ? nil : Stats.mode(clean).first
-      => :constant ->
-        @fill_map[col] = @fill_value
-      => :knn ->
-        @fill_map[col] = :knn  # handled at transform time
-        @train_data = df       # store training data for KNN lookup
-      => :forward, :backward ->
-        @fill_map[col] = @strategy  # directional fill, no pre-computation
-
+  # Learn per-column fill values from df (only @columns when given).
+  # :mean and :median never fit a non-numeric column (Stats.numeric?):
+  # averaging strings is meaningless, so a mixed frame imputes cleanly
+  # with columns = nil. :mode and :constant fit any column.
+  -> fit(df)
+    strategy = @strategy
+    fill_value = @fill_value
+    wanted = @columns
+    wanted = df.column_names if wanted == nil
+    needs_numeric = false
+    needs_numeric = true if strategy == :mean
+    needs_numeric = true if strategy == :median
+    names = []
+    fills = []
+    wanted.each -> (name)
+      values = df.column_values(name)
+      usable = false
+      usable = true if values != nil
+      if usable && needs_numeric
+        usable = Stats.numeric?(values)
+      if usable
+        names.push(name)
+        fills.push(Imputer.fill_for(strategy, values, fill_value))
+    @fit_names = names
+    @fit_fills = fills
     @fitted = true
     self
 
+  # New DataFrame with nils replaced by fitted fills; nil before fit.
   -> transform(df)
-    <! TransformerError, "Not fitted" unless @fitted
-    result = df
+    out = nil
+    if @fitted
+      fit_names = @fit_names
+      fit_fills = @fit_fills
+      pairs = []
+      df.column_names.each -> (name)
+        values = df.column_values(name)
+        i = -1
+        j = 0
+        fit_names.each -> (n)
+          i = j if n == name
+          j += 1
+        fill = nil
+        fill = fit_fills[i] if i != -1
+        if fill == nil
+          pairs.push([name, values])
+        else
+          filled = []
+          values.each -> (v)
+            if v == nil
+              filled.push(fill)
+            else
+              filled.push(v)
+          pairs.push([name, filled])
+      out = DataFrame.new(pairs)
+    out
 
-    @fill_map.each -> (col, fill)
-      case fill
-      => :knn ->
-        result = self.knn_impute(result, col)
-      => :forward ->
-        result = self.forward_fill(result, col)
-      => :backward ->
-        result = self.backward_fill(result, col)
-      => _ ->
-        result = result.transform(col, -> (v) v || fill)
+  -> fit_transform(df)
+    self.fit(df)
+    self.transform(df)
 
-    result
+  # Fitted fill values as ordered [name, fill] pairs.
+  -> params
+    fit_names = @fit_names
+    fit_fills = @fit_fills
+    out = []
+    i = 0
+    fit_names.each -> (n)
+      out.push([n, fit_fills[i]])
+      i += 1
+    out
 
-  -> params { strategy: @strategy, fill_map: @fill_map }
-
-  [private]
-
-  -> knn_impute(df, col)
-    values = df[col].to_a
-    other_cols = df.columns.reject(-> (c) c == col)
-
-    filled = values.each_with_index.map -> (v, i)
-      next v unless v == nil
-
-      # Find k nearest neighbors using other columns
-      distances = df.row_count.times
-        .reject(-> (j) j == i || df[col].to_a[j] == nil)
-        .map -> (j)
-          dist = other_cols.map -> (c)
-            a = df[c].to_a[i]
-            b = df[c].to_a[j]
-            (a && b) ? (a - b) ** 2 : 0
-          .sum
-          [Math.sqrt(dist), j]
-        .sort_by(&:first)
-        .take(@k)
-
-      neighbor_vals = distances.map(-> (_, j) df[col].to_a[j])
-      neighbor_vals.sum.to_f / neighbor_vals.size
-
-    df.assign(**{ col => filled })
-
-  -> forward_fill(df, col)
-    values = df[col].to_a
-    last = nil
-    filled = values.map -> (v)
-      if v != nil
-        last = v
-        v
-      else
-        last
-    df.assign(**{ col => filled })
-
-  -> backward_fill(df, col)
-    values = df[col].to_a.reverse
-    last = nil
-    filled = values.map -> (v)
-      if v != nil
-        last = v
-        v
-      else
-        last
-    df.assign(**{ col => filled.reverse })
+  # The fill value a strategy learns from one column's values.
+  #
+  # NOTE: sequential block-ifs assigning `out` — `return Stats.mean(...)`
+  # under an if segfaults the interpreter when the returned value is a
+  # cross-class static call (same as Pivot.aggregate).
+  -> .fill_for(strategy, values, fill_value)
+    out = nil
+    if strategy == :mean
+      out = Stats.mean(values)
+    if strategy == :median
+      out = Stats.median(values)
+    if strategy == :mode
+      out = Stats.mode(values)
+    if strategy == :constant
+      out = fill_value
+    out

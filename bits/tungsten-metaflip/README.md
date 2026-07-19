@@ -122,6 +122,12 @@ side archive on process exit, so a bounded cloud tranche retains useful
 nonleader endpoints instead of preserving only its fleet best. Explicit
 `--seed` experiments remain isolated from that archive.
 
+Wide salted shards reserve enough lanes to touch every available side door,
+then split surplus width between the fleet best and side exploration. In the
+standard `J64` six-leaf campaign this is 32 independent leader streams and 32
+balanced side-door streams, rather than concentrating 63 lanes on a handful
+of shoulders.
+
 For explicitly wide CPU fleets (`-J` greater than 32), `--steps` is the
 nominal worker chunk rather than a forced coordinator cadence.  After the
 first measured epoch, each non-fringe island adapts toward about three seconds

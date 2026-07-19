@@ -84,6 +84,36 @@ use ../lib/metaflip/seeds/rect
     i += 1
   seen
 
+-> ffrbct_budget_counts(choices, walkers, ticket) (i64 i64 i64)
+  counts = i64[choices]
+  side_budget = ffrcb_side_lane_budget(walkers, choices) ## i64
+  if side_budget > 0
+    offset = ffrcb_multiworker_door_offset(ticket, choices, side_budget + 1) ## i64
+    lane = 1 ## i64
+    while lane <= side_budget
+      counts[(offset + lane - 1) % choices] += 1
+      lane += 1
+  counts
+
+z = ffrbct_expect("J1 keeps its one scheduled lane outside the multiworker budget", ffrcb_side_lane_budget(1, 8) == 0)
+z = ffrbct_expect("J2 keeps one leader and one side lane", ffrcb_side_lane_budget(2, 8) == 1)
+z = ffrbct_expect("J5 retains four side lanes when doors exceed width", ffrcb_side_lane_budget(5, 8) == 4)
+z = ffrbct_expect("J14 covers twelve sides and keeps two leaders", ffrcb_side_lane_budget(14, 12) == 12)
+z = ffrbct_expect("J15 covers nine sides and keeps six leaders", ffrcb_side_lane_budget(15, 9) == 9)
+z = ffrbct_expect("J64 splits surplus width evenly", ffrcb_side_lane_budget(64, 2) == 32 && ffrcb_side_lane_budget(64, 12) == 32)
+
+wide_side_counts = [2,3,5,3,3,3]
+wide_shape = 0 ## i64
+while wide_shape < wide_side_counts.size()
+  side_count = wide_side_counts[wide_shape] ## i64
+  side_budget = ffrcb_side_lane_budget(64, side_count) ## i64
+  counts = ffrbct_budget_counts(side_count, 64, wide_shape)
+  z = ffrbct_expect("J64 shape " + wide_shape.to_s() + " keeps 32 leader lanes", 64 - side_budget == 32)
+  z = ffrbct_expect("J64 shape " + wide_shape.to_s() + " uses 32 side lanes", side_budget == 32)
+  z = ffrbct_expect("J64 shape " + wide_shape.to_s() + " reaches every side", ffrbct_seen(counts) == side_count)
+  z = ffrbct_expect("J64 shape " + wide_shape.to_s() + " balances side exposure", ffrbct_spread(counts) <= 1)
+  wide_shape += 1
+
 # In the default portfolio, 2x2x7, 2x2x8, and 2x2x9 occupy slots 2, 3, 4.
 # Before any durable side doors exist p7/p8 choose among leader/R+1/R+2.
 # The mixed-nonce selector was reachable but badly imbalanced in short

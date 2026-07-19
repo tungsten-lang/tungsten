@@ -657,8 +657,16 @@ use doors
   side_archive_loaded = side_archive.size() ## i64
   side_archive_seeded = 0 ## i64
 
+  builtin_side_count = frontier_count - 1 ## i64
+  combined_side_count = side_archive_loaded + builtin_side_count ## i64
+  side_lane_budget = 0 ## i64
+  if archive_enabled != 0
+    side_lane_budget = ffrcb_side_lane_budget(walkers, combined_side_count)
+
   states = []
   initial_sources = []
+  cpu_leader_lanes = 0 ## i64
+  cpu_side_lanes = 0 ## i64
   lane = 0 ## i64
   while lane < walkers
     island = nil
@@ -672,15 +680,13 @@ use doors
     # child rotates across leader + all doors from its independent epoch ticket.
     if archive_enabled != 0 && (side_archive_loaded > 0 || frontier_count > 1)
       frontier_slot = 0
-      builtin_side_count = frontier_count - 1 ## i64
-      combined_side_count = side_archive_loaded + builtin_side_count ## i64
       chosen_side = 0 - 1 ## i64
       if walkers == 1
         scheduled = ffrcb_scheduled_door_choice(restart_door_ticket, combined_side_count + 1) ## i64
         if scheduled > 0
           chosen_side = scheduled - 1
-      if walkers > 1 && lane > 0
-        offset = ffrcb_multiworker_door_offset(restart_door_ticket, combined_side_count, walkers) ## i64
+      if walkers > 1 && lane > 0 && lane <= side_lane_budget
+        offset = ffrcb_multiworker_door_offset(restart_door_ticket, combined_side_count, side_lane_budget + 1) ## i64
         chosen_side = (offset + lane - 1) % combined_side_count
       if chosen_side >= 0 && chosen_side < side_archive_loaded
         saved_slot = chosen_side
@@ -706,6 +712,10 @@ use doors
     if island == nil
       << "RECT_ERROR code=island-init tensor=" + tensor + " lane=" + lane.to_s()
       return 2
+    if saved_slot >= 0 || frontier_slot > 0
+      cpu_side_lanes += 1
+    else
+      cpu_leader_lanes += 1
     # Some exact record presentations have no repeated factor on any axis, so
     # their focused pair-flip phase is provably inert. Default/profile starts
     # put those islands directly on verified braided R+1/R+2 shoulders. Keep
@@ -1264,7 +1274,7 @@ use doors
     status_due = ffrc_live_status_due(portfolio_child, last_status_ms, now_ms) ## i64
     if status_due != 0
       status = ffrc_status_body("running", sequence, tensor, record, record_known, best, walkers, cpu_moves, cpu_ms, gpu_requested, gpu_supported, gpu_ready, lanes, gpu_moves, gpu_ms, gpu_failures, exact_rejects, elapsed_s)
-      status = status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
+      status = status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " cpu_leader_lanes=" + cpu_leader_lanes.to_s() + " cpu_side_lanes=" + cpu_side_lanes.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
       status = status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
       status_ok = ffrc_atomic_write(status_path, status, run_tag, sequence)
       if status_ok == 1
@@ -1350,7 +1360,7 @@ use doors
   final_ms = ccall("__w_clock_ms") ## i64
   final_elapsed_s = (final_ms - start_ms) / 1000 ## i64
   final_status = ffrc_status_body("stopped", sequence + 1, tensor, record, record_known, best, walkers, cpu_moves, cpu_ms, gpu_requested, gpu_supported, gpu_ready, lanes, gpu_moves, gpu_ms, gpu_failures, exact_rejects, final_elapsed_s)
-  final_status = final_status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
+  final_status = final_status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " cpu_leader_lanes=" + cpu_leader_lanes.to_s() + " cpu_side_lanes=" + cpu_side_lanes.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
   final_status = final_status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
   status_ok = ffrc_atomic_write(status_path, final_status, run_tag, sequence + 1)
   saved = ffrc_dump_atomic(best, best_path, run_tag, sequence + 100000) ## i64

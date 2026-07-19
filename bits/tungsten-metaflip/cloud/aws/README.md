@@ -93,6 +93,9 @@ restart nonce and door ticket. The launcher rejects unsupported/square shapes,
 duplicates, unequal shape/node counts, absent NUMA nodes, and a native
 binary/runtime mismatch before starting a fleet. Children are CPU-only and
 headless; the supervisor owns the wall deadline so all leaves drain together.
+At the default `J64` width, each leaf keeps 32 independently salted streams on
+the current best and balances the other 32 across its checked-in and durable
+side doors.
 
 The normal two-hour launch is:
 

@@ -37,6 +37,7 @@ run_rect() {
 
 run_rect public_nonce --seed-nonce 17
 grep -q 'cpu_seed_nonce=17 cpu_door_ticket=-1' "$TMP_ROOT/public_nonce/status.txt"
+grep -q 'cpu_leader_lanes=1 cpu_side_lanes=1' "$TMP_ROOT/public_nonce/status.txt"
 grep -q 'RECT_RESULT tensor=3x3x4 rank=29 bits=204 exact=1' "$TMP_ROOT/public_nonce/output.txt"
 
 run_rect explicit_schedule --rect-restart-nonce 19 --rect-door-ticket 3
@@ -48,6 +49,27 @@ run_rect explicit_schedule --rect-restart-nonce 20 --rect-door-ticket 4
 grep -q 'cpu_seed_nonce=20 cpu_door_ticket=4' "$TMP_ROOT/explicit_schedule/status.txt"
 grep -Eq 'side_archive_loaded=[1-9][0-9]*' "$TMP_ROOT/explicit_schedule/status.txt"
 grep -Eq 'side_archive_seeded=[1-9][0-9]*' "$TMP_ROOT/explicit_schedule/status.txt"
+
+wide_state="$TMP_ROOT/wide_schedule"
+mkdir -p "$wide_state"
+"$BINARY" \
+  --tensor 3x3x4 \
+  --runtime-root "$RUNTIME" \
+  --state-dir "$wide_state" \
+  --best "$wide_state/best.txt" \
+  --status "$wide_state/status.txt" \
+  --run-tag wide_schedule \
+  -J 64 \
+  --steps 20 \
+  --rounds 1 \
+  --no-gpu \
+  --no-tui \
+  --quiet \
+  --rect-restart-nonce 23 \
+  --rect-door-ticket 5 \
+  > "$wide_state/output.txt"
+grep -q 'cpu_leader_lanes=32 cpu_side_lanes=32' "$wide_state/status.txt"
+grep -q 'RECT_RESULT tensor=3x3x4 rank=29 bits=204 exact=1' "$wide_state/output.txt"
 
 if "$BINARY" \
   --tensor 3x3x4 \

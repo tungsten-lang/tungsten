@@ -91,6 +91,23 @@
   base = ffrcb_scheduled_door_choice(ticket, choices) ## i64
   (base * width) % choices
 
+# Preserve one leader lane, cover every side door whenever the worker width
+# permits it, then split any surplus width evenly between leader exploitation
+# and side-door exploration. Without this cap a J64 shard assigned 63 lanes to
+# as few as two synthetic shoulders and only one lane to the fleet best.
+-> ffrcb_side_lane_budget(walkers, side_count) (i64 i64) i64
+  if walkers <= 1 || side_count <= 0
+    return 0
+  available = walkers - 1 ## i64
+  if side_count >= available
+    return available
+  budget = walkers / 2 ## i64
+  if budget < side_count
+    budget = side_count
+  if budget > available
+    budget = available
+  budget
+
 # A plateau with no repeated factor on any axis has no ordinary pair-flip
 # edge. Alternate exact +1/+2 braided shoulders across lanes, and reverse the
 # parity on each portfolio restart, so a one-worker child also sees both debt

@@ -24412,6 +24412,18 @@ static int w_deadline_timeout_ms(int64_t deadline_ticks, int default_ms) {
     return (int)ms;
 }
 
+/* Absolute deadline (monotonic ticks) `ms` milliseconds from now. */
+static int64_t w_deadline_ticks_after_ms(int64_t ms) {
+#ifdef __APPLE__
+    static mach_timebase_info_data_t tb;
+    if (tb.denom == 0) mach_timebase_info(&tb);
+    uint64_t ticks_per_ms = (1000000ULL * (uint64_t)tb.denom) / (uint64_t)tb.numer;
+    return __w_clock_ticks_raw() + ms * (int64_t)ticks_per_ms;
+#else
+    return __w_clock_ticks_raw() + ms * 1000000LL;
+#endif
+}
+
 static void g_deadline_add(WGoroutine *g) {
     if (g->wait_deadline_ticks <= 0 || g->deadline_linked) return;
     pthread_mutex_lock(&g_wait_deadline_lock);
@@ -24460,6 +24472,29 @@ static int g_wake_expired_deadlines(WEventLoop *loop, WGoroutine **out, int max_
 
     pthread_mutex_unlock(&g_wait_deadline_lock);
     return count;
+}
+
+/* Milliseconds until the nearest pending park deadline for `loop`
+ * (NULL = any loop); -1 when none is pending. Used to clamp blocking
+ * event polls: a poll that blocks past the nearest deadline would starve
+ * g_wake_expired_deadlines, so park deadlines on fds that never become
+ * ready must bound the poll timeout (classic event-loop pattern). */
+static int g_next_deadline_timeout_ms(WEventLoop *loop) {
+    if (!g_wait_deadline_head) return -1;
+
+    int64_t nearest = 0;
+    pthread_mutex_lock(&g_wait_deadline_lock);
+    for (WGoroutine *g = g_wait_deadline_head; g; g = g->deadline_next) {
+        if (g->state != G_WAITING || g->wait_deadline_ticks <= 0) continue;
+        if (loop != NULL && g->wait_loop != loop) continue;
+        if (nearest == 0 || g->wait_deadline_ticks < nearest) {
+            nearest = g->wait_deadline_ticks;
+        }
+    }
+    pthread_mutex_unlock(&g_wait_deadline_lock);
+
+    if (nearest == 0) return -1;
+    return w_deadline_timeout_ms(nearest, -1);
 }
 
 /* Park the current goroutine on an fd until events are ready.
@@ -24661,6 +24696,13 @@ WValue w_socket_read(WValue sock, WValue buf_size) {
     int64_t n = w_as_int(buf_size);
     if (n <= 0) n = 4096;
 
+    /* Read deadline (Socket#set_timeout): computed once per read call.
+     * 0 = no deadline (park indefinitely, as before). */
+    int64_t deadline_ticks = 0;
+    if (s->read_timeout_ms > 0) {
+        deadline_ticks = w_deadline_ticks_after_ms(s->read_timeout_ms);
+    }
+
     WString *ws = malloc(sizeof(WString) + (size_t)n + 1);
 
 #ifdef TUNGSTEN_TLS
@@ -24692,7 +24734,10 @@ WValue w_socket_read(WValue sock, WValue buf_size) {
         /* bytes < 0 */
         if (errno == EINTR) continue;
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            w_socket_park(s->fd, W_EVENT_READ);
+            if (!w_socket_park_until(s->fd, W_EVENT_READ, deadline_ticks)) {
+                free(ws);
+                return W_NIL;  /* read deadline expired (set_timeout) */
+            }
             continue;
         }
         if (errno == ECONNRESET) {
@@ -24827,6 +24872,10 @@ WValue w_socket_set_timeout(WValue sock, int64_t ms) {
     tv.tv_usec = (ms % 1000) * 1000;
     setsockopt(s->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(s->fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    /* SO_RCVTIMEO never fires on a non-blocking fd (runtime sockets are all
+     * non-blocking), so also record the timeout as a park deadline:
+     * w_socket_read parks with it and returns nil when it expires. */
+    s->read_timeout_ms = ms > 0 ? ms : 0;
     return W_NIL;
 }
 
@@ -29003,6 +29052,17 @@ void w_scheduler_run(void) {
                     timeout = -1;         /* server idle: block until event */
                 else
                     timeout = 1;          /* batch mode: 1ms then exit */
+
+                /* Clamp any blocking poll to the nearest pending park
+                 * deadline. Without this, persistent mode's -1 blocks
+                 * until an fd event, so w_socket_park_until deadlines on
+                 * quiet sockets would never fire (the expiry sweep below
+                 * only runs after the poll returns). */
+                if (timeout != 0) {
+                    int deadline_ms = g_next_deadline_timeout_ms(g_coop_event_loop);
+                    if (deadline_ms >= 0 && (timeout < 0 || deadline_ms < timeout))
+                        timeout = deadline_ms;
+                }
 
                 WGoroutine *woken[256];
                 int n = w_event_poll(g_coop_event_loop, timeout, woken, 256);

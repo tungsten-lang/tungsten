@@ -812,6 +812,7 @@ typedef struct WSocket {
     int closed;
     void *ssl;       /* NULL for plain, SSL* for TLS (Phase 8) */
     int ktls;        /* 1 = kernel TLS active, use read/write instead of SSL_* */
+    int64_t read_timeout_ms; /* >0: Socket#read deadline from set_timeout; 0 = none */
 } WSocket;
 
 WValue w_socket_tcp_listen(const char *host, int port, int backlog);

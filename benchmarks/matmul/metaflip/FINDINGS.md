@@ -2959,3 +2959,61 @@ The record covers seed/recovery, CPU island, dedicated and pooled GPU, live and
 late rectangular composition, late GPU drain, reset, and global-isotropy
 postprocessing.  Telemetry failures remain nonfatal, and neither square nor
 rectangular TUI rendering changed.
+
+## 2026-07-18: cyclic braid-collision closure audit
+
+The pure-Tungsten offline audit exhaustively tested the three corrected cyclic
+braid paths for every eligible ordered source/donor pair in 108 exact
+record-rank frontier seeds: 53 square seeds across six shapes and 55
+rectangular seeds across 28 shapes.  Six packaged rank-debt shoulders were
+excluded.  The scan covered 1,636,532 ordered pairs, 1,632,542 pairs whose
+factors differ on every axis, and 4,897,626 U/V/W paths.  All paths had zero
+generated outputs already live (`c=0`): there were no direct-edge collisions,
+middle-output neutral-then-merge collisions, or `c=2/3` closures.
+
+Three planted `3x3` rank-24 shoulders, one per cyclic orientation, each
+recovered the exact rank-23 source through a middle-only `c=1` collision and
+passed the complete coefficient gate.  The release audit took 0.40 seconds
+wall time (about 29.3 million paths/second).  Keep this closure as a cheap
+offline intake audit for newly banked schemes; the present corpus does not
+justify a production CPU or GPU lane.
+
+## 2026-07-18: rectangular braided re-arm is reversible churn
+
+A paired pure-Tungsten benchmark compared the current init/rebase-only braided
+debt policy with conditional `+1/+2` re-arming whenever a `3x4x6` island reached
+`current == best` with zero partnerable incidences.  Across both checked-in
+rank-54 doors, 32 trials x 32 production-shaped rounds x 500,000 moves gave
+1.024 billion matched moves per arm.  All 1,984 re-arms were exact, but both
+arms had zero rank wins, zero density wins, one endpoint per door, and zero
+term-set distance from their source.  Re-arming increased accepted moves by
+19% and 55%, but only as reversible churn; guard plus setup cost 0.61% and
+1.35% of phase time.  Five-million-move rounds and a higher-frequency
+128-round stress test likewise produced no distinct endpoint or useful win.
+
+A separate 1,024-nonce lifetime audit found that more than 93% of both `+1`
+and `+2` shoulders collapsed back to the exact zero-partner wall within 1,000
+focused moves; every GL-frontier shoulder closed by 109,755 moves.  Keep
+braided debt at initialization and explicit rebase only.  If revisited, place
+a structurally deeper escape after the focused-work bookend rather than at a
+round boundary where focused work immediately unwinds it.
+
+## 2026-07-18: post-focus braided debt also collapses
+
+The suggested post-focus alternative was screened in pure Tungsten with
+independently re-keyed focused, adaptive, and wander phases.  Across both
+checked-in `3x4x6` rank-54 zero-partner doors, eight trials of all seven
+control/init/post-focus/re-arm schedules at 100 million moves executed 11.2
+billion matched, exact-gated moves.  Every schedule had zero rank wins, zero
+density wins, one final current endpoint, one best endpoint, and zero exact
+failures.  All 63 eligible post-focus/re-arm injections collapsed to the
+identical rank-54 wall.  A preceding 10-million-move screen observed another
+253 successful injections with the same null result.
+
+The six live leaf targets are not eligible: their 11 checked-in
+presentations have 8--38 partnerable incidences, and focused work reached an
+exact zero-partner best/current wall in zero of 88 matched trials (including
+`3x3x4` and both `3x4x4` doors).  Reject post-focus braided injection for
+production; retain init/rebase-only braid on genuinely zero-edge starts.  The
+reproducible decision benchmark is
+`spec/rect_post_focus_braid_bench.w`; no production or TUI path changed.

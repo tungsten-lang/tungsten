@@ -1025,15 +1025,42 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   -> new(@bitfile, @lockfile, @allow_prerelease = false)
 
   -> resolve(bits)
+    # BFS: top-level Bitfile deps, then each resolved bit's own Bitfile deps.
     resolved = []
     seen = {}
     if bits == nil
       return resolved
-
+    queue = []
     bits.each -> (bit)
-      if bit != nil && seen[bit.name] != true
-        seen[bit.name] = true
-        resolved.push(resolve_one(bit))
+      if bit != nil
+        queue.push(bit)
+    qi = 0
+    while qi < queue.size()
+      bit = queue[qi]
+      qi += 1
+      if bit == nil || seen[bit.name] == true
+        next
+      seen[bit.name] = true
+      one = resolve_one(bit)
+      resolved.push(one)
+      # Transitive: load the installed/source Bitfile and enqueue its deps.
+      child_path = one.path
+      if child_path != nil && child_path != ""
+        bf_path = nil
+        if child_path.ends_with?("Bitfile") && file?(child_path)
+          bf_path = child_path
+        elsif file?(child_path + "/Bitfile")
+          bf_path = child_path + "/Bitfile"
+        if bf_path != nil
+          begin
+            child_bf = Bitfile.load(bf_path)
+            if child_bf != nil && child_bf.dependencies != nil
+              child_bf.dependencies.each -> (dep)
+                if dep != nil && seen[dep.name] != true
+                  queue.push(dep)
+          rescue err
+            # Missing or unreadable nested Bitfile — skip transitive for that node
+            nil
     resolved
 
   -> resolve_one(bit)
@@ -1446,8 +1473,19 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
       i += 1
     best
 
+  # Scan a local directory registry. Prefer the client URL when it is a
+  # filesystem path (Bitfile `source "/path"` or BIT_HOME); otherwise
+  # fall back to $BIT_HOME / "bits".
+  -> local_registry_root
+    if @url != nil && @url != "" && !remote_url?(@url)
+      u = "" + @url
+      if u.starts_with?("file://")
+        u = u.slice(7, u.size() - 7)
+      return u
+    bit_home()
+
   -> local_bitfiles
-    bitfile_paths_under(bit_home)
+    bitfile_paths_under(local_registry_root())
 
   -> push(archive, tag: "latest", otp: nil, release_type: "feature")
     if @url.starts_with?("file://")

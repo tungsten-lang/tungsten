@@ -158,15 +158,12 @@ echo "Results: $PASS pass, $FAIL fail, $SKIP skip (${#SUPPORTED[@]} total)"
 # compiler divergence can only shrink.
 INTERP_SKIP=(
   argv_clock          # argv differs under `run`
-  goroutine_basic     # `go` not dispatched by the interpreter yet
+  goroutine_basic     # go is queued/drained; re-verify channel fixtures next
   goroutine_channel
-  func_if             # interpreter gaps as of 2026-06-09 — shrink this list,
-  fn_fib              # never grow it: fn_def dispatch missing
-  class_var           # "Invalid assignment target" on @@cvar assign
-  array               # subscript-assign through alias reads back nil
-  with                # :with node not dispatched
-  duration            # :duration node not dispatched
-  block_item_shadow   # implicit-item map not supported by the interpreter
+  array               # subscript-assign through alias still diverges
+  # Shrink only — never grow. Cleared 2026-07: fn_fib, class_var, with,
+  # duration, block_item_shadow, func_if (fn_def / @@cvar / with / duration /
+  # standalone ro accessors / StringBuffer.append).
 )
 
 interp_skipped() {

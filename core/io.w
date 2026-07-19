@@ -287,12 +287,19 @@
   # ---- HDF5 / NetCDF / Parquet / MAT — bridge-backed ----
 
   # ---- HDF5 (in-tree; no libhdf5) ----
-  # Superblock + object-header walk for contiguous datasets is implemented
-  # incrementally in pure Tungsten / small C in runtime/sci_io_native.c.
+  # TH5C/TH5D = fast Tungsten↔Tungsten payloads under the HDF5 signature.
+  # Foreign files: pure-C OHDR walk for contiguous numeric datasets
+  # (f32/f64/integers; no chunks/filters yet). See runtime/sci_io_native.c.
   -> .read_hdf5(path)
     sb = ccall("w_sci_hdf5_superblock", path)
+    names = nil
+    begin
+      names = ccall("w_sci_hdf5_list", path)
+    rescue err
+      names = []
     {:format => :hdf5, :path => path, :superblock => sb, :version => sb[0],
-     :note => "use read_hdf5_f32 for TH5C contiguous body"}
+     :datasets => names,
+     :note => "TH5C/TH5D or foreign contiguous; use hdf5_read / read_hdf5_f32"}
 
   # Write 1-D f32 as sniffable HDF5 signature + TH5C body (no libhdf5).
   -> .write_hdf5_f32(path, values)
@@ -301,7 +308,7 @@
   -> .read_hdf5_f32(path)
     ccall("w_sci_hdf5_read_f32_1d", path)
 
-  # Multi-named datasets (TH5D)
+  # Multi-named datasets (TH5D) or foreign OHDR names
   -> .write_hdf5_datasets(path, names, arrays)
     ccall("w_sci_hdf5_write_datasets", path, names, arrays)
 

@@ -114,6 +114,8 @@
     recv.concat(args[0])
 
   when "append"
+    # StringBuffer is handled in interpreter dispatch_method before builtins;
+    # other receivers (String) use concat.
     recv.concat(args[0])
 
   when "prepend"

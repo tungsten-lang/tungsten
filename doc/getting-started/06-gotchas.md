@@ -50,17 +50,17 @@ RNGs, checksums, and compilers — type the width.
 | Native compile | `bin/tungsten -o out file.w` | Full language; production path |
 | Ruby interpreter | `bin/tungsten --ruby file.w` | Bootstrap / fallback tree-walk |
 
-**Constructs that currently need the compiled path** (or are incomplete under
-quick run) include:
+Most everyday language surface now works under **quick run** as well as
+compile (`fn`, `with`, duration literals, `@@` class vars, standalone
+`ro`/`rw`, `StringBuffer.append`, `@1`/`@2` arity args). Remaining
+interpreter gaps are smaller:
 
 | Construct | Notes |
 | --------- | ----- |
-| `fn name(...)` | Pure / memoized functions |
-| `@1` / `@2` arity args | With `-> name/N` |
-| Standalone `ro :x` / `rw :x` | Constructor trailing `ro`/`rw` is the common path |
-| Trait method dispatch | `is Trait` methods |
-| `reduce(init, fn)` | Some collection folds |
-| `StringBuffer.append` | Mutable string builder |
+| Trait autoload | Local `trait` bodies work; some `is Trait` paths need autoload |
+| `go` / channels | Basic `go` drains at end of program; channel fixtures may still diverge |
+| Array `[]=` via alias | A few alias/subscript cases still differ from compiled |
+| GPU / `@gpu fn` | Compile + Metal/CUDA path only |
 
 When an example "doesn't work," try:
 

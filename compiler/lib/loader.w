@@ -1011,21 +1011,30 @@ use parser
     sub_parts.shift()
     sub_path = sub_parts.join("/")
 
-    bit_home = env("BIT_HOME")
-    if bit_home == nil
-      project_root = find_project_root(base_dir)
-      if project_root != ""
-        bit_home = project_root + "/bits"
+    # Bit search order for `use`:
+    #   1. project_root/vendor/bits  — `bit install` destination
+    #   2. $BIT_HOME                — monorepo / local registry of bit sources
+    #   3. project_root/bits        — in-tree bits layout
+    project_root = find_project_root(base_dir)
+    if project_root != ""
+      found = resolve_bit(bit_name, sub_path, project_root + "/vendor/bits")
+      if found != nil
+        return found
 
+    bit_home = env("BIT_HOME")
     if bit_home != nil
       found = resolve_bit(bit_name, sub_path, bit_home)
+      if found != nil
+        return found
+
+    if project_root != ""
+      found = resolve_bit(bit_name, sub_path, project_root + "/bits")
       if found != nil
         return found
 
     # Standard library: project_root/core/<path>.w first (new canonical
     # location), then project_root/lib/<path>.w as backward-compat
     # fallback during the lib/ → core/ migration.
-    project_root = find_project_root(base_dir)
     if project_root != ""
       core_candidate = project_root + "/core/" + path + ".w"
       if file?(core_candidate)

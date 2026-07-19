@@ -210,9 +210,40 @@ ensure
 
 ## Engines
 
-`bin/tungsten -o` (native compile) is the most complete engine — everything
-above runs there. The quick-run interpreter (`bin/tungsten file.w`) does not
-yet support the constructs marked *(compiled)*: `fn` definitions, `@1`/`@2`
-arity args, standalone `ro :x`/`rw :x`, trait method dispatch,
-`reduce(init, fn)`, and `StringBuffer.append`. When generating a program that
-uses these, emit the compile command, not the quick-run one.
+Both engines share the same surface for everyday code:
+
+| Path | Command |
+| ---- | ------- |
+| Quick run (tree-walk) | `bin/tungsten file.w` or `bin/tungsten -e '…'` |
+| Native compile | `bin/tungsten -o out file.w && ./out` |
+
+Supported under quick run: `fn`, `with`, duration literals, `@@` class vars,
+standalone `ro`/`rw`, `StringBuffer.append`, `@1`/`@2`, classes, traits (local
+bodies), pipelines, units, currency. Prefer compile for `@gpu fn`, full channel
+/`go` concurrency edge cases, and maximum performance.
+
+`implementations/c` and `implementations/ruby` are **bootstrap hosts only** —
+they build the self-hosted compiler; they are not the product runtime.
+
+## Tooling for agents
+
+```bash
+bin/tungsten start --agent          # this primer + absolute doc paths
+bin/tungsten -c file.w              # syntax / lower check (exit code)
+bin/tungsten --ast file.w           # AST dump
+bin/tungsten --lex file.w           # tokens
+bin/tungsten --ll file.w            # LLVM IR
+TUNGSTEN_ERROR_FORMAT=json bin/tungsten -c file.w   # structured errors
+bin/tungsten --explain E_PARSE_…    # lesson from doc/explain.md
+```
+
+Structured compile errors (internal hash and JSON export) include:
+`code`, `message`, `file`, `row`, `col`, `span_length`.
+
+**MCP / LSP:** `bits/tungsten-lsp/` — symbols, hover, definition, references,
+completions, and `tungsten_diagnose`. Build with the monorepo bit build.
+
+**Packages:** `bit install` vendors deps into `vendor/bits/`; `use` resolves
+`vendor/bits` → `$BIT_HOME` → `bits/` automatically.
+
+**Gotchas:** `doc/getting-started/06-gotchas.md` · **stdlib index:** `doc/CORE.md`

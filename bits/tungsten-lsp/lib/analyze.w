@@ -412,7 +412,7 @@ project_index = {}
   line0 = 0 if line0 < 0
   char0 = 0 if char0 < 0
   span = 1 if span < 1
-  {
+  out = {
     "range": {
       "start": {"line": line0, "character": char0},
       "end": {"line": line0, "character": char0 + span}
@@ -421,6 +421,9 @@ project_index = {}
     "source": "tungsten",
     "message": msg
   }
+  if type(err) == "Hash" && err[:code] != nil
+    out["code"] = err[:code].to_s
+  out
 
 # -- Cross-file helpers --
 

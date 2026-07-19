@@ -18,17 +18,17 @@
 
 ## Finish HDF5 format support
 
-Today SciIO only implements **TH5C/TH5D** — Tungsten-native payloads under the
-HDF5 file signature (single or multi-named contiguous f32). That is not full
-HDF5. Remaining work:
+**Done (subset):** pure-C foreign path in `runtime/sci_io_native.c` after TH5
+magic check — superblock v0/v2, OHDR v1/v2, symbol-table + compact link
+messages, contiguous f32/f64/integer datasets (LE/BE). TH5C/TH5D unchanged.
 
-- Walk real HDF5 object headers (OHDR), B-trees, local/fractal heaps, and
-  links so foreign files from h5py / `h5dump` / NetCDF-4-on-HDF5 can be read.
-- Groups, attributes, named datatypes, and soft/external links.
-- Datatypes beyond contiguous little-endian f32 (f64, integers, strings,
-  compound types; endianness).
-- Chunked layouts, compression filters, and virtual datasets.
-- Decide whether to grow the pure-C walker in `runtime/sci_io_native.c` or
-  add an optional `libhdf5` bridge (currently not linked by default).
-- Keep TH5 as a fast interop subset for Tungsten↔Tungsten; do not break
-  existing TH5C/TH5D readers when adding the full path.
+**Still remaining:**
+
+- Nested groups (multi-level paths), attributes, named datatypes, soft/external
+  links.
+- Chunked layouts, compression filters (gzip/shuffle), virtual datasets.
+- Compound / string / variable-length types; multi-D shape metadata on the
+  SciIO surface (today values are flattened to 1-D Arrays).
+- Golden fixtures from h5py/`h5dump` under `spec/sci/fixtures/`.
+- Optional `libhdf5` bridge (`runtime/sci_io_bridge.c`) remains unlinked —
+  only if the pure walker stalls on exotic files.

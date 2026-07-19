@@ -1389,7 +1389,7 @@ if eval_code != nil
     interp.run(eval_code, "(eval)")
   rescue err
     if type(err) == "Hash" && err[:rt] == :compile_error
-      ccall("w_eputs", format_compile_error(err))
+      ccall("w_eputs", emit_compile_error(err))
       exit 1
     if type(err) == "String"
       ccall("w_eputs", format_runtime_error(err, "(eval)"))
@@ -1437,7 +1437,7 @@ if command == "run"
     interp.run(source, file_path)
   rescue err
     if type(err) == "Hash" && err[:rt] == :compile_error
-      ccall("w_eputs", format_compile_error(err))
+      ccall("w_eputs", emit_compile_error(err))
       exit 1
     if type(err) == "String"
       ccall("w_eputs", format_runtime_error(err, file_path))
@@ -1452,7 +1452,7 @@ elsif command == "compile"
       dump_ast_stats()
   rescue err
     if type(err) == "Hash" && err[:rt] == :compile_error
-      ccall("w_eputs", format_compile_error(err))
+      ccall("w_eputs", emit_compile_error(err))
       exit 1
     raise err
 
@@ -1493,7 +1493,7 @@ elsif command == "compile-batch"
     rescue err
       fail_count += 1
       if type(err) == "Hash" && err[:rt] == :compile_error
-        ccall("w_eputs", format_compile_error(err))
+        ccall("w_eputs", emit_compile_error(err))
       else
         << "Unhandled exception compiling [fp]: [err]"
 

@@ -172,6 +172,53 @@
       out << line
     i += 1
 
+# Machine-readable compile error for agents/CI.
+# Enable with TUNGSTEN_ERROR_FORMAT=json (or --json on the CLI when wired).
+-> format_compile_error_json(err)
+  code = err[:code]
+  if code == nil
+    code = "E_UNKNOWN"
+  msg = err[:message]
+  if msg == nil
+    msg = ""
+  # Escape for a one-line JSON object (no dependency on full JSON encoder).
+  esc = "" + msg.to_s()
+  esc = esc.replace("\\", "\\\\")
+  esc = esc.replace("\"", "\\\"")
+  esc = esc.replace("\n", "\\n")
+  esc = esc.replace("\r", "\\r")
+  file = err[:file]
+  if file == nil
+    file = ""
+  else
+    file = "" + shorten_path(file).to_s()
+    file = file.replace("\\", "\\\\")
+    file = file.replace("\"", "\\\"")
+  row = err[:row]
+  col = err[:col]
+  span = err[:span_length]
+  if span == nil
+    span = 1
+  row_s = "null"
+  if row != nil
+    row_s = row.to_s()
+  col_s = "null"
+  if col != nil
+    col_s = col.to_s()
+  "{\"rt\":\"compile_error\",\"code\":\"" + code.to_s() + "\",\"message\":\"" + esc + "\",\"file\":\"" + file + "\",\"row\":" + row_s + ",\"col\":" + col_s + ",\"span_length\":" + span.to_s() + "}"
+
+-> error_format_is_json?
+  fmt = env("TUNGSTEN_ERROR_FORMAT")
+  if fmt == nil
+    return false
+  fmt = "" + fmt
+  fmt == "json" || fmt == "JSON"
+
+-> emit_compile_error(err)
+  if error_format_is_json?
+    return format_compile_error_json(err)
+  format_compile_error(err)
+
 -> format_compile_error(err)
   color = error_formatter_use_color()
 

@@ -127,6 +127,18 @@ use ../lib/analyze
         },
         "required": ["file", "line", "character"]
       }
+    },
+    {
+      "name": "tungsten_diagnose",
+      "description": "Parse/check a Tungsten .w file and return diagnostics (message, range, error code)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {"type": "string", "description": "Path to the .w file"},
+          "text": {"type": "string", "description": "Optional source text (if omitted, file is read)"}
+        },
+        "required": ["file"]
+      }
     }
   ]
 
@@ -222,6 +234,26 @@ use ../lib/analyze
         lines.push(item["label"] + detail)
       else
         lines.push(item["label"])
+    return {"content": [{"type": "text", "text": lines.join("\n")}]}
+
+  if name == "tungsten_diagnose"
+    file = args["file"]
+    text = args["text"]
+    if text == nil
+      return {"content": [{"type": "text", "text": "File not found: " + file}], "isError": true} unless file?(file)
+      text = read_file(file)
+    diags = diagnose(text)
+    if diags == nil || diags.size == 0
+      return {"content": [{"type": "text", "text": "OK (0 diagnostics)"}]}
+    lines = []
+    diags ->(d)
+      r = d["range"]
+      start = r["start"]
+      code = d["code"]
+      code_s = ""
+      if code != nil
+        code_s = " [" + code.to_s + "]"
+      lines.push((start["line"] + 1).to_s + ":" + (start["character"] + 1).to_s + code_s + " " + d["message"].to_s)
     return {"content": [{"type": "text", "text": lines.join("\n")}]}
 
   {"content": [{"type": "text", "text": "Unknown tool: " + name}], "isError": true}

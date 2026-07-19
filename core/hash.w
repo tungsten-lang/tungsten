@@ -43,3 +43,51 @@
 
   -> update(other)
     merge!(other)
+
+  # New hash with the same keys and each value mapped through the block.
+  # Uses the anonymous `&` block form (callable as `&(...)`), which the
+  # self-hosted interpreter resolves too — a named `&block` param is not
+  # callable on the interp path.
+  -> transform_values(&)
+    result = {}
+    self.each -> (k, v)
+      result[k] = &(v)
+    result
+
+  # New hash with each key mapped through the block; values unchanged. On a
+  # key collision the last-written value wins (Ruby semantics).
+  -> transform_keys(&)
+    result = {}
+    self.each -> (k, v)
+      result[&(k)] = v
+    result
+
+  # Predicate alias for has_key? (Ruby Hash#key?).
+  -> key?(k)
+    has_key?(k)
+
+  # Value for key, or raise if absent (Ruby Hash#fetch/1).
+  -> fetch(k)
+    if has_key?(k)
+      return self[k]
+    raise "key not found: " + k.to_s
+
+  # Value for key, or the supplied default if absent (Ruby Hash#fetch/2).
+  -> fetch(k, default)
+    if has_key?(k)
+      return self[k]
+    default
+
+  # New hash mapping each value back to its key (Ruby Hash#invert). On
+  # duplicate values the last key iterated wins.
+  -> invert
+    result = {}
+    self.each -> (k, v)
+      result[v] = k
+    result
+
+  # Iterate (key, value) pairs, returning self (Ruby Hash#each_pair).
+  -> each_pair(&)
+    self.each -> (k, v)
+      &(k, v)
+    self

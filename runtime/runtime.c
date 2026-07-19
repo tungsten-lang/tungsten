@@ -19210,7 +19210,10 @@ static WValue w_ic_array_max(WValue r, WValue *a, int c) {
                                      : w_array_max_unsigned(r);
 }
 static WValue w_ic_array_sum(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
+    /* sum(init): when an argument is supplied, seed the accumulator with it
+     * (Ruby Enumerable#sum(init)); previously the arg was discarded, so
+     * sum(10) == sum() and [].sum(5) == 0. */
+    WValue init = (c >= 1) ? a[0] : w_box_int(0);
     WArray *arr = (WArray *)w_as_ptr(r);
     if (arr->ebits == 64 || arr->ebits == 65) {
         /* Polymorphic / boxed array (WValue-stride storage). Elements may be
@@ -19218,15 +19221,18 @@ static WValue w_ic_array_sum(WValue r, WValue *a, int c) {
          * promotes int+float and handles every numeric type. The old
          * `total += w_as_int(elem)` read float/decimal WValue bits as an int
          * and returned garbage (e.g. [1.0,2.0,3.0].sum -> 768). w_add starts
-         * from a small int 0 and widens as needed. */
-        WValue acc = w_box_int(0);
+         * from `init` (a small int 0 with no arg) and widens as needed. */
+        WValue acc = init;
         for (int32_t i = 0; i < arr->size; i++)
             acc = w_add(acc, array_slot_load_decoded(arr, i));
         return acc;
     }
-    return array_is_float(arr) ? w_array_sum_float(r)
-         : array_is_signed_int(arr) ? w_array_sum_signed(r)
-                                     : w_array_sum_unsigned(r);
+    WValue total = array_is_float(arr) ? w_array_sum_float(r)
+                 : array_is_signed_int(arr) ? w_array_sum_signed(r)
+                                            : w_array_sum_unsigned(r);
+    /* Fold in the seed for the typed fast paths too; keep the no-arg path
+     * byte-identical (return the raw total) to avoid perturbing the hot case. */
+    return (c >= 1) ? w_add(init, total) : total;
 }
 static WValue w_ic_array_fastsum(WValue r, WValue *a, int c) {
     (void)a; (void)c;

@@ -721,11 +721,11 @@
       child_ctx[:enclosing_stmt_idx] = body.size() - 1
       last = body[body.size() - 1]
       last_t = ast_kind(last)
-      # Some nodes are statements that don't produce values
-      # Note: :if with else/elsif is an expression (returns a value), but a bare
-      # if with no else/elsif is statement-only and yields nil.
-      is_if_stmt = last_t == :if && (last.else_body == nil || last.else_body.size() == 0) && (last.elsif_clauses == nil || last.elsif_clauses.size() == 0)
-      if last_t in (:puts :print :while :method_def :fn_def :begin :raise) || is_if_stmt
+      # Some nodes are statements that don't produce values. A bare tail `if`
+      # (no else/elsif) is NOT one of them — it yields its then-value or nil,
+      # so it must go through lower_expression (lower_if_expr), not
+      # lower_statement, or the implicit return is always nil.
+      if last_t in (:puts :print :while :method_def :fn_def :begin :raise)
         lower_statement(child_ctx, last)
       elsif last_t == :return
         lower_statement(child_ctx, last)
@@ -1701,8 +1701,7 @@
       child_ctx[:enclosing_stmt_idx] = body.size() - 1
       last = body[body.size() - 1]
       last_t = ast_kind(last)
-      is_if_stmt = last_t == :if && (last.else_body == nil || last.else_body.size() == 0) && (last.elsif_clauses == nil || last.elsif_clauses.size() == 0)
-      if last_t in (:puts :print :while :method_def :fn_def :begin :raise) || is_if_stmt
+      if last_t in (:puts :print :while :method_def :fn_def :begin :raise)
         lower_statement(child_ctx, last)
       elsif last_t == :return
         lower_statement(child_ctx, last)

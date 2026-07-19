@@ -1453,8 +1453,7 @@
 
   last = body[body.size() - 1]
   last_t = ast_kind(last)
-  is_if_stmt = last_t == :if && (last.else_body == nil || last.else_body.size() == 0) && (last.elsif_clauses == nil || last.elsif_clauses.size() == 0)
-  if last_t in (:return :puts :print :raise :while :method_def :fn_def :class_def :begin) || is_if_stmt
+  if last_t in (:return :puts :print :raise :while :method_def :fn_def :class_def :begin)
     lower_statement(ctx, last)
     return typed_value(:i64, w_nil.to_s())
   lower_expression(ctx, last)

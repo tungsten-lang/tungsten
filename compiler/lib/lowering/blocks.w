@@ -619,8 +619,7 @@
     if !block_terminated(new_fn)
       last = body[body.size() - 1]
       last_t = ast_kind(last)
-      is_if_stmt = last_t == :if && (last.else_body == nil || last.else_body.size() == 0) && (last.elsif_clauses == nil || last.elsif_clauses.size() == 0)
-      if last_t in (:puts :print :while :method_def :fn_def :begin :raise) || is_if_stmt
+      if last_t in (:puts :print :while :method_def :fn_def :begin :raise)
         lower_statement(child_ctx, last)
       elsif last_t == :return
         lower_statement(child_ctx, last)

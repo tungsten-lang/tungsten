@@ -544,18 +544,29 @@ slab_offset_table_arr = build_slab_offset_arr(slab_offset_table_data)
 
 slab_keys_table = build_slab_keys_arr(slab_offset_table_arr)
 
--> slab_offset_for(kind, sym)
-  kid = kind
-  if type(kind) == "Symbol"
-    kid = kind_id_table[kind]
-    if kid == nil
-      return nil
+-> slab_offset_for_id(kid, sym)
+  # Raw integer-kind-id variant of slab_offset_for. The caller already holds
+  # the kind id (from w_node_kind_extern), so this skips the type()=="Symbol"
+  # probe and the kind_id_table reverse lookup that slab_offset_for pays on
+  # every call. ast_get/ast_set drive slab-node field access through here --
+  # ~15 probes per node in the autoload walker, the top codegen hotspot -- so
+  # avoiding the symbol round-trip (node -> id -> symbol -> id) matters.
   if kid < 1 || kid > KIND_MAX
     return nil
   k = slab_offset_table_arr[kid]
   if k == nil
     return nil
   k[sym]
+
+-> slab_offset_for(kind, sym)
+  # Symbol-or-int entry point (parser/builder callers pass a kind symbol).
+  # Resolve to the integer id once, then share slab_offset_for_id's body.
+  kid = kind
+  if type(kind) == "Symbol"
+    kid = kind_id_table[kind]
+    if kid == nil
+      return nil
+  slab_offset_for_id(kid, sym)
 
 # === KIND → size class lookup ===
 #

@@ -389,11 +389,11 @@ in Tungsten:AST
   # `type(node) == "Hash"` guard ran on every slab access.
   if ccall_nobox("w_is_node_extern", node) == 1
     # Bare W_PACKED_NODE WValue path. Slab field via schema if mapped;
-    # sparse via side-table otherwise.
-    k = ast_kind(node)
-    if k == nil
-      return nil
-    offset = slab_offset_for(k, sym)
+    # sparse via side-table otherwise. Use the raw kind id (not the kind
+    # symbol) so slab_offset_for_id skips the symbol round-trip and the
+    # type()=="Symbol" probe -- this is the hottest field-access path.
+    kid = ccall_nobox("w_node_kind_extern", node)
+    offset = slab_offset_for_id(kid, sym)
     if offset != nil
       # OFFSET_INLINE = 256 sentinel: int payload lives in the W_PACKED_
       # NODE's offset bits. OFFSET_INTERN = 257: offset bits hold a dense
@@ -424,11 +424,10 @@ in Tungsten:AST
   if ccall_nobox("w_is_node_extern", node) == 1
     # Bare W_PACKED_NODE WValue path. Schema-mapped → slab slot; else
     # sparse-meta side-table (lazy-init inner hash on first write so
-    # empty nodes don't consume any side-table storage).
-    k = ast_kind(node)
-    if k == nil
-      return value
-    offset = slab_offset_for(k, sym)
+    # empty nodes don't consume any side-table storage). Raw kind id skips
+    # the symbol round-trip (see ast_get).
+    kid = ccall_nobox("w_node_kind_extern", node)
+    offset = slab_offset_for_id(kid, sym)
     if offset != nil
       # OFFSET_INLINE (256) / OFFSET_INTERN (257) mean the field lives
       # in the offset bits. ast_set on these kinds is a no-op — the

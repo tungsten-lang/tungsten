@@ -46,6 +46,14 @@ use target
     # ("WC" → "Tungsten:Carbide"). eval_class_ref expands the first
     # segment of a qualified reference through this map.
     @constant_aliases = {}
+    # The most recent user-level `raise` value + its message string. The
+    # host raise only carries a message; eval_begin re-pairs the caught
+    # message with this value so `rescue e` binds the raised OBJECT (an
+    # error instance, say) exactly as the compiled engine does. A host
+    # (interpreter-internal) raise never matches @raised_message and
+    # binds the plain message string as before.
+    @raised_value = nil
+    @raised_message = nil
     seed_primitive_class_stubs()
 
   -> argv
@@ -433,7 +441,16 @@ use target
     if t == :cvar
       return eval_cvar(node)
     if t == :block
-      return [env, node]
+      # A closure captures the creating frame's `self` so `self`/`@ivar`
+      # inside the block body resolve to the enclosing method's receiver —
+      # not whatever receiver happens to be on the dispatch stack when the
+      # block is invoked (Array#each's own array receiver, for example).
+      # Mirrors compiled closures, which capture self as an ordinary value.
+      # The capture rides a wrapper Environment so the closure value keeps
+      # its established [env, node] pair shape.
+      benv = Environment.new(env)
+      benv.define("__block_self__", current_self())
+      return [benv, node]
     if t == :puts
       return eval_puts(node, env)
     if t == :print
@@ -450,7 +467,13 @@ use target
         return signal_recase(evaluate(val_node, env), true)
       return signal_recase(nil, false)
     if t == :raise
-      raise w_to_s(evaluate(ast_get(node, :value), env))
+      err_val = evaluate(ast_get(node, :value), env)
+      err_msg = w_to_s(err_val)
+      # Keep the raised VALUE so `rescue e` can bind the error object; the
+      # host raise below only transports the message string (see eval_begin).
+      @raised_value = err_val
+      @raised_message = err_msg
+      raise err_msg
     if t == :super
       return eval_super(node, env)
     if t == :use
@@ -779,6 +802,11 @@ use target
     if block != nil
       return call_block(block, [elem])
     if args != nil && args.size() >= 1
+      # A closure argument is the iteratee itself (paren-lambda spelling);
+      # anything else is a method name to send (symbol-to-proc).
+      cand = args[0]
+      if type(cand) == "Array" && cand.size() == 2 && is_ast_node?(cand[1]) && ast_kind(cand[1]) == :block
+        return call_block(cand, [elem])
       return dispatch_method(elem, "" + args[0].to_s(), [], nil, @env)
     raise "expected a block or a method symbol"
 
@@ -2775,7 +2803,19 @@ use target
         elsif ast_get(param, :default) != nil
           value = evaluate(ast_get(param, :default), method_env)
 
+        # `&blk` binds the attached trailing block (a lambda passed
+        # positionally already arrived through args above). Mirrors the
+        # compiled engine, where both spellings reach the block param.
+        if value == nil && block != nil && ast_get(param, :block_param) == true
+          value = block
+
         method_env.define(ast_get(param, :name), value)
+
+        # A closure bound to a block param must also serve `yield` /
+        # `&(...)` inside the body when it arrived positionally (no
+        # attached block to bind below).
+        if ast_get(param, :block_param) == true && block == nil && value != nil
+          method_env.define("__block__", value)
 
         # Auto-assign ivar params
         if ast_get(param, :ivar_assign) && recv != nil && type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :object
@@ -2871,13 +2911,27 @@ use target
         while i < params.size()
           block_env.define(params[i], args[i])
           i += 1
+      # Evaluate the body under the closure's captured self (see the :block
+      # arm of evaluate). Interpreter-built [env, node] pairs carry no
+      # capture; they keep the current self unchanged.
+      captured_self = current_self()
+      if blk_env.defined?("__block_self__")
+        captured_self = blk_env.get("__block_self__")
+      @self_stack.push(captured_self)
+      result = nil
+      pending_error = nil
       begin
-        return evaluate_body(ast_get(blk_node, :body), block_env)
+        result = evaluate_body(ast_get(blk_node, :body), block_env)
       rescue err
         if err == "__SIGNAL__" && @signal[:type] == :next
           @signal[:type] = nil
-          return nil
-        raise err
+        else
+          pending_error = err
+      ensure
+        @self_stack.pop()
+      if pending_error != nil
+        raise pending_error
+      return result
     nil
 
   # -- Class/method definitions --
@@ -3444,21 +3498,42 @@ use target
 
   # -- Begin/rescue/ensure --
 
+  # Spec 4.6.5: evaluate the body; a raised error binds/runs the rescue
+  # clause if present; the ensure body runs whether the body completed, was
+  # rescued, raised unrescued, or was exited by a control signal — and an
+  # unrescued error (or signal) propagates AFTER ensure. The pending-error
+  # shape keeps the re-raise outside this frame's own rescue.
   -> eval_begin(node, env)
     result = nil
+    pending = nil
     begin
       result = evaluate_body(ast_get(node, :body), env)
     rescue err
       if err == "__SIGNAL__"
-        raise err
-      if ast_get(node, :rescue_body) != nil
+        pending = err
+      elsif ast_get(node, :rescue_body) != nil
+        # Bind the raised VALUE when this message matches the most recent
+        # user-level raise (error objects survive rescue); otherwise the
+        # host message string is all there is.
+        bound = err
+        if @raised_value != nil && @raised_message == err
+          bound = @raised_value
+        @raised_value = nil
+        @raised_message = nil
         if ast_get(node, :rescue_var) != nil
-          env.set(ast_get(node, :rescue_var), err)
-        result = evaluate_body(ast_get(node, :rescue_body), env)
+          env.set(ast_get(node, :rescue_var), bound)
+        begin
+          result = evaluate_body(ast_get(node, :rescue_body), env)
+        rescue err2
+          # The rescue clause itself raised (or signaled): ensure still
+          # runs, then the new error propagates.
+          pending = err2
       else
-        raise err
+        pending = err
     if ast_get(node, :ensure_body) != nil
       evaluate_body(ast_get(node, :ensure_body), env)
+    if pending != nil
+      raise pending
     result
 
   # -- Yield --

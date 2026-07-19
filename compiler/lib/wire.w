@@ -91,6 +91,13 @@
     next_var:     0,
     next_scope:   0,
     loop_stack:   [],
+    # Number of lexically-open begin/rescue exception frames at the current
+    # lowering position. Every control transfer that leaves a protected try
+    # region without reaching its fall-through pop (return/break/next/recase)
+    # must emit one w_exception_pop per abandoned frame, or the frame goes
+    # stale on w_exception_stack and a later raise longjmps into a dead
+    # stack frame (SIGSEGV / corrupted dispatch).
+    eh_depth:     0,
     # Stack of enclosing `case` contexts that contain a `recase`. Each entry:
     # {subj_ptr, subject_node, redispatch_label}. `recase` targets the top.
     case_stack:   [],
@@ -317,13 +324,16 @@
 
 # -- Loop context --
 
+# Both loop pushes record the exception-frame depth at loop entry so
+# break/next can pop the frames of any begin/rescue regions they abandon
+# (frames opened inside the loop body enclosing the break/next).
 -> push_loop(f, break_label, next_label, redo_label)
-  f[:loop_stack].push({break_label: break_label, next_label: next_label, redo_label: redo_label})
+  f[:loop_stack].push({break_label: break_label, next_label: next_label, redo_label: redo_label, eh_depth: f[:eh_depth]})
 
 # Structured while/with loops introduce a lexical body scope. Record the
 # outer depth so break/next can clean every abandoned body/branch value.
 -> push_loop_with_recycle_depth(f, break_label, next_label, redo_label, recycle_depth)
-  f[:loop_stack].push({break_label: break_label, next_label: next_label, redo_label: redo_label, recycle_depth: recycle_depth})
+  f[:loop_stack].push({break_label: break_label, next_label: next_label, redo_label: redo_label, recycle_depth: recycle_depth, eh_depth: f[:eh_depth]})
 
 -> pop_loop(f)
   f[:loop_stack].pop()
@@ -337,6 +347,9 @@
 # -- Case context (for `recase`) --
 
 -> push_case(f, info)
+  # Record the exception-frame depth so `recase` (a branch back to the case
+  # header) can pop frames of begin regions it abandons within the case arms.
+  info[:eh_depth] = f[:eh_depth]
   f[:case_stack].push(info)
 
 -> pop_case(f)

@@ -3,6 +3,18 @@
 # The interp parameter is the Interpreter instance.
 
 -> dispatch_builtin(interp, name, recv, args, block)
+  # A lambda passed as the last positional argument to a block-taking
+  # builtin IS the block — `arr.reject(-> (s) s.empty?)` and the trailing
+  # form `arr.reject -> (s) s.empty?` are the same call in the compiled
+  # engine; mirror that here. Closure values are [Environment, block-node]
+  # pairs (see the :block arm of Interpreter#evaluate). Only block-taking
+  # names promote: a lambda pushed with `arr.push(f)` must stay an argument.
+  if block == nil && args.size() > 0 && name in ("each" "map" "select" "reject" "reduce" "each_with_index" "map_with_index" "any?" "all?" "find" "count" "times")
+    cand = args[args.size() - 1]
+    if type(cand) == "Array" && cand.size() == 2 && is_ast_node?(cand[1]) && ast_kind(cand[1]) == :block
+      block = cand
+      args = args.copy(0, args.size() - 1)
+
   case name
   # -- I/O --
   when "puts"

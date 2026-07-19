@@ -306,6 +306,52 @@ trait Enumerable
           seen = true
     best
 
+  # [element with the smallest key, element with the largest key], computed in
+  # a single pass (Ruby Enumerable#minmax_by). Empty enumerable -> [nil, nil].
+  -> minmax_by(&block)
+    lo = nil
+    hi = nil
+    lo_key = nil
+    hi_key = nil
+    seen = false
+    mode = __enumerable_iteration_mode
+    if mode == 2
+      self.each -> (first, second)
+        k = block(first, second)
+        it = [first, second]
+        if !seen || k < lo_key
+          lo = it
+          lo_key = k
+        if !seen || k > hi_key
+          hi = it
+          hi_key = k
+        seen = true
+    elsif mode == 1
+      i = 0
+      n = self.size
+      while i < n
+        item = self[i]
+        k = block(item)
+        if !seen || k < lo_key
+          lo = item
+          lo_key = k
+        if !seen || k > hi_key
+          hi = item
+          hi_key = k
+        seen = true
+        i++
+    else
+      self.each -> (item)
+        k = block(item)
+        if !seen || k < lo_key
+          lo = item
+          lo_key = k
+        if !seen || k > hi_key
+          hi = item
+          hi_key = k
+        seen = true
+    [lo, hi]
+
   # Sort ascending by the key each element maps to under the block. Decorate
   # each element as [key, index, item], sort by the natural (lexicographic)
   # order of those triples, then undecorate. The key block runs once per

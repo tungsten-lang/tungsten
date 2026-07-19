@@ -5,11 +5,39 @@
   # BigInt (< Int) without any of its inherited methods. Use the param form.
   -> +(other)
 
+  # Base-10 digits, least-significant first (Ruby Integer#digits): 1234 ->
+  # [4,3,2,1], 0 -> [0]. The former `to_s.split` returned nil (split needs a
+  # separator). Rides the promoting % / / so it is exact for BigInt (Int is
+  # BigInt's base), which now reaches this after the dispatch fix.
   -> digits
-    to_s.split
+    if self < 0
+      raise "Int#digits: negative receiver"
+    if self == 0
+      return [0]
+    dg_out = []
+    dg_n = self
+    while dg_n > 0
+      dg_out.push(dg_n % 10)
+      dg_n = dg_n / 10
+    dg_out
 
-  -> each_digit
-    to_s.split.each_char
+  -> digits(base)
+    if self < 0
+      raise "Int#digits: negative receiver"
+    if self == 0
+      return [0]
+    db_out = []
+    db_n = self
+    while db_n > 0
+      db_out.push(db_n % base)
+      db_n = db_n / base
+    db_out
+
+  # Yield each base-10 digit (least-significant first), returning self.
+  -> each_digit(&)
+    digits.each -> (d)
+      &(d)
+    self
 
   ## Small-integer predicates. Universal `zero?` and `one?` live on Number;
   ## these are integer-only because they're only meaningful for discrete
@@ -106,6 +134,14 @@
       b = (b * b) % m
       x = x / 2
     r
+
+  # Ruby-style Integer#pow: pow(e) == self ** e; pow(e, m) == modpow(e, m).
+  # Matches Integer#pow on small ints so `n.pow(e, m)` works for any integer.
+  -> pow(e)
+    self ** e
+
+  -> pow(e, m)
+    modpow(e, m)
 
   # Is this a prime number? Tiered by magnitude in the runtime intrinsic
   # `w_ic_int_prime_q` (runtime/runtime.c): a small-prime screen for tiny n,

@@ -150,7 +150,11 @@
   # cares about (a) the receiver being self_ref and (b) we're in a
   # known class. Untyped instance methods aren't registered so they
   # naturally fall through to w_method_call_cached.
-  if recv_node != nil && ast_kind(recv_node) == :self_ref && ctx[:class_name] != nil
+  # Calls WITH an attached block skip the direct path: it has no block-slot
+  # plumbing (the block would be silently dropped and the & param padded
+  # with nil). The generic dynamic path below appends the block closure as
+  # a positional arg, which is the established compiled binding for these.
+  if recv_node != nil && ast_kind(recv_node) == :self_ref && ctx[:class_name] != nil && node.block == nil
     static_key = ctx[:class_name] + "." + method_name
     static_info = ctx[:mod][:known_static_methods][static_key]
     if static_info != nil
@@ -384,8 +388,41 @@
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_small_array_new", args: [ebits_raw, size_raw, "0"]})
       return typed_value(:i64, temp)
 
-    static_key = recv_name + "." + method_name
-    static_info = ctx[:mod][:known_static_methods][static_key]
+    # Direct static dispatch — only for calls WITHOUT an attached block:
+    # lower_direct_static_method_call has no block-slot plumbing (the block
+    # would be dropped and the & param padded with nil). Calls with a block
+    # fall through to the generic dynamic path, which appends the block
+    # closure as a positional arg (the established compiled binding).
+    static_info = nil
+    if node.block == nil
+      static_key = recv_name + "." + method_name
+      static_info = ctx[:mod][:known_static_methods][static_key]
+    if static_info == nil && node.block == nil && method_name != "new" && ctx[:mod][:known_classes][recv_name] != nil
+      # Class methods are inherited: on a miss for a KNOWN class receiver,
+      # walk the superclass chain (compile-time; the hierarchy is closed at
+      # lowering) and direct-call the defining ancestor's static. The
+      # ORIGINAL receiver still lowers as __self below, so `class.new` /
+      # `self.new` inside the inherited body instantiates the subclass the
+      # call was made on. Mirrors the interpreter's lookup_class_method and
+      # the runtime w_static_method_lookup superclass walk. The walk uses
+      # class_super_names (namespace-resolved name strings) — known_classes
+      # values mix AST class_def nodes with plain builtin-marker hashes, so
+      # field access on them is not uniform. Only is_static entries
+      # participate: the registry also holds typed-instance-method entries
+      # for `self.foo` dispatch, which a class receiver must not bind to.
+      # `new` is excluded — constructors keep the builtin
+      # allocate-then-dispatch path.
+      cur = recv_name
+      guard = 0
+      while static_info == nil && guard < 64
+        sup = ctx[:mod][:class_super_names][cur]
+        if sup == nil
+          break
+        cur = sup
+        candidate = ctx[:mod][:known_static_methods][cur + "." + method_name]
+        if candidate != nil && candidate[:is_static] == true
+          static_info = candidate
+        guard += 1
     if static_info != nil
       return lower_direct_static_method_call(ctx, static_info, recv_node, node.args)
 

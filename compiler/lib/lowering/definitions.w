@@ -1289,13 +1289,18 @@
   return_type = nil
   if node.return_type != nil
     return_type = normalize_type_symbol(node.return_type)
+  # is_static marks a REAL class method (`-> .name`), as opposed to the
+  # typed-instance-method entries lowering.w also stores in this registry
+  # for `self.foo` fast dispatch. The inherited-static walk-up in
+  # method_call.w only follows the superclass chain into is_static entries.
   mod[:known_static_methods][cname + "." + mname] = {
     fn_name: mfn_name,
     method_fn_name: method_fn_name,
     arity: arity,
     return_type: return_type,
     param_types: normalized_static_param_types(node),
-    raw_abi: raw_abi
+    raw_abi: raw_abi,
+    is_static: true
   }
   mstr_id = module_string_constant(mod, mname)
   mbyte_len = utf8_byte_length(mname) + 1

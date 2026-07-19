@@ -684,12 +684,17 @@
   wfn = ctx[:func]
   loop_info = current_loop(wfn)
   if loop_info != nil
-    # Pop the frames of begin/rescue try regions opened inside the loop
-    # body that this break abandons.
+    # Run the ensure bodies and pop the frames of begin regions opened
+    # inside the loop body that this break abandons (spec 4.6.5).
     base_eh = loop_info[:eh_depth]
     if base_eh == nil
       base_eh = wfn[:eh_depth]
-    emit_eh_pops(wfn, wfn[:eh_depth] - base_eh)
+    ensure_base = loop_info[:ensure_base]
+    if ensure_base == nil
+      ensure_base = wfn[:ensure_stack].size()
+    emit_transfer_unwind(ctx, wfn, ensure_base, base_eh)
+    if block_terminated(wfn)
+      return nil
     recycle_depth = loop_info[:recycle_depth]
     if recycle_depth == nil
       recycle_depth = wfn[:scope_recycle_stack].size()
@@ -703,8 +708,11 @@
   # enclosing loop, which doesn't exist as a wire-level loop). The iterator
   # will continue to the next element. Matches Ruby semantics.
   if ctx[:is_block] == true
-    # Leaving the block function abandons any begin frames opened inside it.
-    emit_eh_pops(wfn, wfn[:eh_depth])
+    # Leaving the block function runs the ensure bodies of and abandons the
+    # frames of any begin regions opened inside it (spec 4.6.5).
+    emit_transfer_unwind(ctx, wfn, 0, 0)
+    if block_terminated(wfn)
+      return nil
     # The finalizer handles the function-body scope before this ret; flush only
     # nested lexical scopes here so no value is recycled twice.
     emit_recycles_above_depth(wfn, 1)
@@ -712,12 +720,17 @@
     return nil
   loop_info = current_loop(wfn)
   if loop_info != nil
-    # Pop the frames of begin/rescue try regions opened inside the loop
-    # body that this next abandons.
+    # Run the ensure bodies and pop the frames of begin regions opened
+    # inside the loop body that this next abandons (spec 4.6.5).
     base_eh = loop_info[:eh_depth]
     if base_eh == nil
       base_eh = wfn[:eh_depth]
-    emit_eh_pops(wfn, wfn[:eh_depth] - base_eh)
+    ensure_base = loop_info[:ensure_base]
+    if ensure_base == nil
+      ensure_base = wfn[:ensure_stack].size()
+    emit_transfer_unwind(ctx, wfn, ensure_base, base_eh)
+    if block_terminated(wfn)
+      return nil
     recycle_depth = loop_info[:recycle_depth]
     if recycle_depth == nil
       recycle_depth = wfn[:scope_recycle_stack].size()
@@ -752,12 +765,18 @@
   else
     # Bare recase on a subject-less cond-case: just re-test the conditions.
     materialize_bindings(ctx)
-  # Branching back to the case header abandons any begin/rescue try regions
-  # opened between the header and this recase; pop their frames.
+  # Branching back to the case header abandons any begin regions opened
+  # between the header and this recase; run their ensure bodies and pop
+  # their frames (spec 4.6.5).
   base_eh = info[:eh_depth]
   if base_eh == nil
     base_eh = wfn[:eh_depth]
-  emit_eh_pops(wfn, wfn[:eh_depth] - base_eh)
+  ensure_base = info[:ensure_base]
+  if ensure_base == nil
+    ensure_base = wfn[:ensure_stack].size()
+  emit_transfer_unwind(ctx, wfn, ensure_base, base_eh)
+  if block_terminated(wfn)
+    return typed_value(:i64, w_nil.to_s())
   emit_instruction(wfn, {op: :br, label: info[:redispatch_label]})
   typed_value(:i64, w_nil.to_s())
 
@@ -820,6 +839,14 @@
       val_reg = ensure_i64_value(wfn, val)
     else
       val_reg = w_nil.to_s()
+    # Run the ensure bodies of begin regions opened inside this block
+    # function that the non-local return abandons (spec 4.6.5). eh_base is
+    # the current depth: only interleaved pops are needed here — the
+    # signal's longjmp restores w_exception_stack to the target frame's
+    # snapshot itself.
+    emit_transfer_unwind(ctx, wfn, 0, wfn[:eh_depth])
+    if block_terminated(wfn)
+      return nil
     # This longjmp never reaches the block function's ret/finalizer, so clean
     # the function-body entry as well as all nested lexical scopes.
     emit_recycles_above_depth(wfn, 0)
@@ -833,9 +860,12 @@
       val_reg = ensure_i64_value(wfn, val)
     else
       val_reg = w_nil.to_s()
-    # Returning from inside begin/rescue try regions abandons their frames;
-    # pop them all — the fall-through pops are never reached on this path.
-    emit_eh_pops(wfn, wfn[:eh_depth])
+    # Returning from inside begin regions runs their ensure bodies and
+    # abandons their frames (spec 4.6.5) — the fall-through pops/ensures
+    # are never reached on this path.
+    emit_transfer_unwind(ctx, wfn, 0, 0)
+    if block_terminated(wfn)
+      return nil
     # The common exit ret intentionally owns no recycle values: its catch edge
     # is reached by a runtime unwind, while a normal return must clean the
     # exact compile-time prefix live at this transfer before joining it.
@@ -850,8 +880,11 @@
   else
     val_reg = default_return_value(wfn)
 
-  # Pop the frames of any begin/rescue try regions this return abandons.
-  emit_eh_pops(wfn, wfn[:eh_depth])
+  # Run the ensure bodies of and pop the frames of any begin regions this
+  # return abandons (spec 4.6.5).
+  emit_transfer_unwind(ctx, wfn, 0, 0)
+  if block_terminated(wfn)
+    return nil
   # Function-body values are injected once by insert_function_scope_recycles;
   # this path-specific flush covers only nested scopes abandoned by return.
   emit_recycles_above_depth(wfn, 1)
@@ -1512,6 +1545,38 @@
     i += 1
   nil
 
+# Unwind emission for a control transfer (return/break/next/recase) that
+# abandons enclosing begin regions. Spec 4.6.5: every exit path runs the
+# ensure bodies of the regions it leaves, innermost first, AFTER the
+# transfer's value has been computed. Each region's exception frame is
+# popped BEFORE its ensure body is lowered so an error raised inside an
+# ensure propagates to handlers OUTSIDE its begin (never its own rescue).
+# Unwinds down to ensure-stack size `ensure_base` and frame depth `eh_base`;
+# compile-time bookkeeping is restored before returning because this
+# sequence is emitted on one branch while lowering continues lexically.
+# An ensure body may itself terminate the block (unconditional raise or
+# return — those override the in-flight transfer, matching the
+# interpreter's pending-error shape); emission stops there and the caller
+# must check block_terminated before emitting the transfer itself.
+-> emit_transfer_unwind(ctx, wfn, ensure_base, eh_base)
+  stack = wfn[:ensure_stack]
+  saved_depth = wfn[:eh_depth]
+  saved = []
+  while stack.size() > ensure_base && !block_terminated(wfn)
+    entry = stack.pop()
+    saved.push(entry)
+    emit_eh_pops(wfn, wfn[:eh_depth] - entry[:eh_base])
+    wfn[:eh_depth] = entry[:eh_base]
+    lower_program(ctx, entry[:body])
+  if !block_terminated(wfn)
+    emit_eh_pops(wfn, wfn[:eh_depth] - eh_base)
+  i = saved.size() - 1
+  while i >= 0
+    stack.push(saved[i])
+    i -= 1
+  wfn[:eh_depth] = saved_depth
+  nil
+
 -> lower_begin(ctx, node)
   wfn = ctx[:func]
 
@@ -1535,12 +1600,24 @@
 
   # Try block. The frame is live for exactly the try body's lowering:
   # return/break/next/recase lowered inside it consult eh_depth to pop it.
+  # An `ensure` clause additionally guards both the try and rescue bodies:
+  # its entry sits on ensure_stack while they lower, so any control
+  # transfer out of them replays the ensure body at the transfer site
+  # (emit_transfer_unwind). It is OFF the stack while the ensure body
+  # itself lowers — an exit from inside ensure must not re-run it.
   start_block(wfn, try_label)
   try_recycle_depth = wfn[:scope_recycle_stack].size()
   try_sid = next_scope_id(wfn)
   emit_scope_push(wfn, try_sid)
+  ensure_entry = nil
+  if node.ensure_body != nil
+    ensure_entry = {body: node.ensure_body, eh_base: wfn[:eh_depth]}
   wfn[:eh_depth] = wfn[:eh_depth] + 1
+  if ensure_entry != nil
+    wfn[:ensure_stack].push(ensure_entry)
   lower_program(ctx, node.body)
+  if ensure_entry != nil
+    wfn[:ensure_stack].pop()
   wfn[:eh_depth] = wfn[:eh_depth] - 1
   if !block_terminated(wfn)
     materialize_bindings(ctx)
@@ -1566,7 +1643,13 @@
   rescue_recycle_depth = wfn[:scope_recycle_stack].size()
   emit_scope_push(wfn, rescue_sid)
   if node.rescue_body != nil
+    # The ensure clause guards the rescue body too (its frame is already
+    # consumed by this landing pad, so eh_base == the current depth).
+    if ensure_entry != nil
+      wfn[:ensure_stack].push(ensure_entry)
     lower_program(ctx, node.rescue_body)
+    if ensure_entry != nil
+      wfn[:ensure_stack].pop()
   if !block_terminated(wfn)
     materialize_bindings(ctx)
     emit_scope_pop(wfn, rescue_sid)

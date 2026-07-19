@@ -17222,12 +17222,26 @@ static WMethod *w_method_lookup_arity(WClass *klass, WValue name, int arity) {
     return NULL;
 }
 
+/* Static (class-side) methods are inherited: walk the superclass chain
+ * like the instance lookups above. The caller keeps the ORIGINAL receiver
+ * class as the method's __self, so `class.new` inside an inherited static
+ * instantiates the subclass it was called on. */
 static WMethod *w_static_method_lookup(WClass *klass, WValue name) {
-    return w_method_table_lookup(klass->static_methods, klass->static_method_capacity, name);
+    while (klass) {
+        WMethod *m = w_method_table_lookup(klass->static_methods, klass->static_method_capacity, name);
+        if (m) return m;
+        klass = klass->superclass;
+    }
+    return NULL;
 }
 
 static WMethod *w_static_method_lookup_arity(WClass *klass, WValue name, int arity) {
-    return w_method_table_lookup_arity(klass->static_methods, klass->static_method_capacity, name, arity);
+    while (klass) {
+        WMethod *m = w_method_table_lookup_arity(klass->static_methods, klass->static_method_capacity, name, arity);
+        if (m) return m;
+        klass = klass->superclass;
+    }
+    return NULL;
 }
 
 /* ---- Exceptions ---- */

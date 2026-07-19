@@ -492,6 +492,14 @@ typedef struct HammerH2Session {
     int outstanding;   /* active streams */
     int max_concurrent;
     int terminated;    /* peer closed or fatal error */
+    /* Whether this goroutine ever received a single response (a :status
+     * header) across its whole lifetime — the session struct outlives
+     * reconnects. Mirrors served_any in the HTTP/1.x goroutine: a goroutine
+     * that ends with served_any == 0 spent the entire benchmark talking to a
+     * server that never replied (blackhole), so its deadline expiry is a
+     * timeout, not the benign mid-flight cutoff a healthy connection sees at
+     * shutdown. */
+    int served_any;
     const char *authority;
     size_t authority_len;
     const char *path;
@@ -542,6 +550,7 @@ static int hammer_h2_on_header_cb(nghttp2_session *session,
     HammerH2Session *s = (HammerH2Session *)user_data;
     if (frame->hd.type != NGHTTP2_HEADERS) return 0;
     if (namelen == 7 && memcmp(name, ":status", 7) == 0) {
+        s->served_any = 1;
         int status = 0;
         for (size_t i = 0; i < valuelen; i++) status = status * 10 + (value[i] - '0');
         if (status >= 200 && status < 300) s->stats->status_2xx++;
@@ -645,9 +654,35 @@ static WValue hammer_h2_goroutine_fn(WValue *captures) {
 
     while (!past_deadline()) {
         s.fd = hammer_connect(cfg);
-        if (s.fd < 0) { stats->connect_errors++; w_goroutine_yield(); continue; }
+        if (s.fd < 0) {
+            /* A connect that never completed before the deadline is a timeout,
+             * not an error (blackhole that drops SYNs) — same rule as the
+             * HTTP/1.x goroutine. Fast failures (ECONNREFUSED) before the
+             * deadline stay connect_errors. */
+            if (past_deadline()) {
+                if (!s.served_any) stats->timeouts++;
+                break;
+            }
+            stats->connect_errors++;
+            w_goroutine_yield();
+            continue;
+        }
         s.ssl = hammer_h2_tls_handshake(s.fd, cfg->host);
-        if (!s.ssl) { close(s.fd); stats->errors++; continue; }
+        if (!s.ssl) {
+            close(s.fd);
+            s.fd = -1;
+            /* A TLS handshake still parked when the deadline expires means the
+             * server accepted the TCP connection but never handshook — a
+             * blackhole, so count a timeout (once, for a goroutine that never
+             * served anything). Pre-deadline handshake failures (bad ALPN,
+             * TLS alert) remain errors. */
+            if (past_deadline()) {
+                if (!s.served_any) stats->timeouts++;
+                break;
+            }
+            stats->errors++;
+            continue;
+        }
 
         nghttp2_session_callbacks *cbs;
         nghttp2_session_callbacks_new(&cbs);
@@ -687,6 +722,13 @@ static WValue hammer_h2_goroutine_fn(WValue *captures) {
         s.ssl = NULL;
         close(s.fd);
         s.fd = -1;
+
+        /* Session ended at the deadline without this goroutine ever seeing a
+         * response: TLS + ALPN completed but the server never answered a
+         * single stream — a blackhole. Counted here (the loop exits right
+         * after), mirroring the HTTP/1.x read-path rule. Pre-deadline session
+         * endings (GOAWAY, EOF, errors) just reconnect. */
+        if (past_deadline() && !s.served_any) stats->timeouts++;
     }
 
     HammerWorkerShared *shared = arg->shared;

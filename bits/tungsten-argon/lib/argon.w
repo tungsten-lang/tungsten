@@ -5,6 +5,14 @@
 # (--verbose), negatable flags (--\[no-]color), and value options (-o FILE) are
 # all recognized automatically from the manpage text.
 #
+# Parsing follows common getopt conventions:
+#   * Short-flag bundling: "-abc" == "-a -b -c". A value-taking letter in a
+#     bundle consumes the rest of the bundle as its value ("-ovalue" == "-o
+#     value"); if it is the last letter, the next argv token is the value.
+#   * Negative numbers: "-5" / "--offset -5" are values/positionals, not flags,
+#     unless "5" is itself a defined short flag. Array options accept negative
+#     numbers as elements and stop only at genuine flags.
+#
 # Usage:
 #
 #   cli = Argon.new(MANPAGE)
@@ -81,13 +89,13 @@
             if defn[:array]
               i = i + 1
               vals = []
-              while i < argv.size() && !argv[i].starts_with?("-")
+              while i < argv.size() && value_like_token?(argv[i])
                 vals.push(cast(argv[i]))
                 i = i + 1
               store_option(options, key, vals)
             elsif defn[:optional_value]
               next_arg = argv[i + 1]
-              if next_arg != "--" && !next_arg.starts_with?("-")
+              if value_like_token?(next_arg)
                 store_option(options, key, cast_option(key, next_arg))
                 i = i + 2
               else
@@ -104,6 +112,67 @@
           i = i + 1
         next
 
+      # A "-<digit>..." token is a negative number, not a short flag —
+      # unless its leading digit is a defined short flag (getopt treats
+      # "-5" as an option only when "5" is documented). It becomes a
+      # positional here; an option expecting a value picks it up earlier
+      # via value_like_token?.
+      if negative_number_token?(arg)
+        positional.push(arg)
+        i = i + 1
+        next
+
+      # Short-flag bundle: "-abc" == "-a -b -c" (getopt bundling). Letters
+      # are processed left to right. A value-taking letter consumes the REST
+      # of the bundle as its value ("-ovalue" == "-o value", "-o5" == "-o 5");
+      # if nothing follows it in the bundle, the next argv token is the value.
+      # An unrecognized letter is recorded as a set flag — the same lenient
+      # path as an unknown single short flag. (Negative numbers are handled
+      # above, so a leading digit never reaches here.)
+      if arg.starts_with?("-") && !arg.starts_with?("--") && arg.size() > 2
+        chars = arg.slice(1, arg.size())
+        ci = 0
+        i = i + 1
+        while ci < chars.size()
+          letter = chars.slice(ci, 1)
+          defn = find_short(letter)
+          if defn && defn[:takes_value]
+            key = defn[:key]
+            remainder = chars.slice(ci + 1, chars.size())
+            if remainder.size() > 0
+              if defn[:array]
+                store_option(options, key, [cast(remainder)])
+              else
+                store_option(options, key, cast_option(key, remainder))
+              ci = chars.size()
+            else
+              if defn[:array]
+                vals = []
+                while i < argv.size() && value_like_token?(argv[i])
+                  vals.push(cast(argv[i]))
+                  i = i + 1
+                store_option(options, key, vals)
+              elsif defn[:optional_value]
+                if i < argv.size() && value_like_token?(argv[i])
+                  store_option(options, key, cast_option(key, argv[i]))
+                  i = i + 1
+                else
+                  options[key] = true
+              else
+                if i < argv.size()
+                  store_option(options, key, cast_option(key, argv[i]))
+                  i = i + 1
+                else
+                  options[key] = true
+              ci = chars.size()
+          elsif defn
+            flags[defn[:key]] = true
+            ci = ci + 1
+          else
+            flags[letter] = true
+            ci = ci + 1
+        next
+
       if arg.starts_with?("-") && arg.size() == 2
         short = arg.slice(1, 2)
         defn = find_short(short)
@@ -115,13 +184,13 @@
               if defn[:array]
                 i = i + 1
                 vals = []
-                while i < argv.size() && !argv[i].starts_with?("-")
+                while i < argv.size() && value_like_token?(argv[i])
                   vals.push(cast(argv[i]))
                   i = i + 1
                 store_option(options, key, vals)
               elsif defn[:optional_value]
                 next_arg = argv[i + 1]
-                if next_arg != "--" && !next_arg.starts_with?("-")
+                if value_like_token?(next_arg)
                   store_option(options, key, cast_option(key, next_arg))
                   i = i + 2
                 else
@@ -360,6 +429,32 @@
         return casted
       return [cast(val)]
     cast(val)
+
+  # A "value-like" token is one an option is willing to consume as a value:
+  # a plain positional, a bare "-" (stdin convention), or a negative number.
+  # A genuine flag ("-v", "--out", "--") is NOT value-like and stops
+  # array/optional-value consumption.
+  -> value_like_token?(arg)
+    if arg == "-"
+      return true
+    if !arg.starts_with?("-")
+      return true
+    negative_number_token?(arg)
+
+  # True when `arg` is a negative number ("-5", "-5.5", "-42") rather than a
+  # short flag. Following getopt, "-5" is only an option when "5" is itself a
+  # defined short flag; otherwise the leading-digit token is a value/positional.
+  -> negative_number_token?(arg)
+    if !arg.starts_with?("-")
+      return false
+    if arg.size() < 2
+      return false
+    c = arg.slice(1, 1)
+    if c >= "0" && c <= "9"
+      if find_short(c)
+        return false
+      return true
+    false
 
   -> find_by_key(key)
     i = 0

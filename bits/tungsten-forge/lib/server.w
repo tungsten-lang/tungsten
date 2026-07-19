@@ -45,6 +45,7 @@
     @port       = config.port
     @running    = false
     @socket     = nil
+    @handler    = nil
 
   # Bind and serve until stop is called (or the process is killed).
   # The accept loop runs in a goroutine; the main thread becomes the
@@ -211,11 +212,14 @@
     found
 
   # Middleware chain wrapping the router. Path normalization (downcase,
-  # trailing-slash strip) happens inside Router#resolve.
+  # trailing-slash strip) happens inside Router#resolve. The chain is
+  # invariant after startup, so build it once on first dispatch instead
+  # of reconstructing chain + closure per request (profiling follow-up).
   -> dispatch(request)
-    target = self
-    handler = @middleware.build(-> (req) target.route(req))
-    handler.call(request)
+    if @handler == nil
+      target = self
+      @handler = @middleware.build(-> (req) target.route(req))
+    @handler.call(request)
 
   -> route(request)
     match = @router.resolve(request.method, request.path)

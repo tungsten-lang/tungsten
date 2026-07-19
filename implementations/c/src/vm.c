@@ -2356,12 +2356,6 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
           case TC_VAL_STRING: size = (int64_t)tc_str_len(receiver); break;
           case TC_VAL_ARRAY:  size = tc_as_array(receiver) ? (int64_t)tc_as_array(receiver)->size : 0; break;
           case TC_VAL_HASH:   size = tc_as_hash(receiver) ? (int64_t)tc_as_hash(receiver)->count : 0; break;
-          case TC_VAL_OBJECT:
-            if (tc_as_object(receiver) &&
-                object_is_class(tc_as_object(receiver), "StringBuffer", 12)) {
-              size = (int64_t)tc_as_object(receiver)->buffer_len;
-            }
-            break;
           case TC_VAL_AST:
             if (tc_as_ast_ptr(&receiver)->kind == TC_AST_ARRAY && tc_as_ast_ptr(&receiver)->as.array) size = (int64_t)tc_as_ast_ptr(&receiver)->as.array->count;
             else if (tc_as_ast_ptr(&receiver)->kind == TC_AST_HASH && tc_as_ast_ptr(&receiver)->as.hash) size = (int64_t)tc_as_ast_ptr(&receiver)->as.hash->count;
@@ -2500,12 +2494,6 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
           case TC_VAL_STRING: size = (int64_t)tc_str_len(receiver); break;
           case TC_VAL_ARRAY:  size = tc_as_array(receiver) ? (int64_t)tc_as_array(receiver)->size : 0; break;
           case TC_VAL_HASH:   size = tc_as_hash(receiver) ? (int64_t)tc_as_hash(receiver)->count : 0; break;
-          case TC_VAL_OBJECT:
-            if (tc_as_object(receiver) &&
-                object_is_class(tc_as_object(receiver), "StringBuffer", 12)) {
-              size = (int64_t)tc_as_object(receiver)->buffer_len;
-            }
-            break;
           case TC_VAL_AST:
             if (tc_as_ast_ptr(&receiver)->kind == TC_AST_ARRAY && tc_as_ast_ptr(&receiver)->as.array) size = (int64_t)tc_as_ast_ptr(&receiver)->as.array->count;
             else if (tc_as_ast_ptr(&receiver)->kind == TC_AST_HASH && tc_as_ast_ptr(&receiver)->as.hash) size = (int64_t)tc_as_ast_ptr(&receiver)->as.hash->count;

@@ -214,7 +214,9 @@
     return lower_case_value(ctx, node)
   when :block
     materialize_bindings(ctx)
-    return lower_block_closure(ctx, node)
+    # A bare lambda in expression position (assignment RHS, argument, tail
+    # expression) can outlive this frame — capture slots must be heap cells.
+    return lower_block_closure(ctx, node, nil, true)
   when :unary_op
     return lower_unary_op(ctx, node)
   when :map, :calc

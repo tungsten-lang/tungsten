@@ -137,7 +137,8 @@
   # runtime primitive, so bypass class lookup here just like Atomic.new.
   if recv_node != nil && ast_kind(recv_node) in (:var :call :class_ref) && recv_node.name == "Thread" && method_name == "new" && node.block != nil
     materialize_bindings(ctx)
-    closure_tv = lower_block_closure(ctx, node.block)
+    # OS threads run concurrently with (and beyond) this frame — escaping.
+    closure_tv = lower_block_closure(ctx, node.block, nil, true)
     closure_reg = ensure_i64_value(wfn, closure_tv)
     temp = next_temp(wfn)
     emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_thread_spawn_slots", args: [closure_reg]})
@@ -285,8 +286,11 @@
           range_each = Tungsten:AST:Call.new(range_node, "each", [], new_block)
           return lower_method_call(ctx, range_each)
 
-  # Range.each with block → lower as with-loop (scope-stack, no closure allocation)
-  if recv_node != nil && ast_kind(recv_node) == :range && method_name == "each" && node.block != nil
+  # Range.each with block → lower as with-loop (scope-stack, no closure allocation).
+  # Skipped when the body creates an escaping closure (go / bare lambda /
+  # Thread.new): the with-loop collapses the per-iteration param into one
+  # enclosing-frame slot, so every closure would alias the last value.
+  if recv_node != nil && ast_kind(recv_node) == :range && method_name == "each" && node.block != nil && !block_spawns_escaping_closure?(node.block)
     block = node.block
     params = block.params
     if params == nil || params.size() == 0
@@ -602,8 +606,12 @@
         emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: bitcast_fn, args: [arg_reg]})
         return typed_value(:i64, temp)
 
-  # range.each(block) → inline for-loop (no array allocation)
-  if recv_node != nil && ast_kind(recv_node) == :range && method_name == "each" && node.block != nil
+  # range.each(block) → inline for-loop (no array allocation).
+  # Skipped when the body creates an escaping closure (go / bare lambda /
+  # Thread.new): inlining would collapse the per-iteration param into one
+  # shared slot and every closure would alias the last value. The generic
+  # dispatch below keeps a fresh block frame per iteration instead.
+  if recv_node != nil && ast_kind(recv_node) == :range && method_name == "each" && node.block != nil && !block_spawns_escaping_closure?(node.block)
     range_node = recv_node
     block = node.block
 

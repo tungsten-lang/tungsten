@@ -1109,6 +1109,12 @@
     return nil
   if !inline_array_iterator_method?(method_name)
     return nil
+  # Inlining collapses the per-invocation block param into one enclosing
+  # frame slot. If the body creates an escaping closure (go / bare lambda /
+  # Thread.new) capturing it, every closure would alias the LAST iteration's
+  # value. Fall back to the real closure path (fresh frame per element).
+  if block_spawns_escaping_closure?(block)
+    return nil
 
   wfn = ctx[:func]
   param_name = inline_block_param_name(block, ctx)

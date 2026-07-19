@@ -1866,12 +1866,20 @@
 -> lower_go(ctx, node)
   wfn = ctx[:func]
 
+  # Flush pending bindings into real slots first — find_captures only sees
+  # var_slots + fn_params, so a local still living in ctx[:bindings] would
+  # be invisible to capture discovery and the body's reference would lower
+  # as a bogus implicit-self method call. (Same as the Thread.new and
+  # bare-lambda paths.)
+  materialize_bindings(ctx)
+
   # Go bodies are zero-arg closures. Use an unused synthetic param to prevent
   # lower_block_closure's iterator shorthand from promoting free vars to params.
   # Must be a real Block node — lower_block_closure's is_ast_node? guard
   # silently returns nil for a plain {params:, body:} hash (slab-AST era).
   block = Tungsten:AST:Block.new(["__go_unused"], node.body)
-  closure_tv = lower_block_closure(ctx, block)
+  # Goroutines run after the spawning frame may have returned — escaping.
+  closure_tv = lower_block_closure(ctx, block, nil, true)
   closure_reg = ensure_i64_value(wfn, closure_tv)
 
   temp = next_temp(wfn)

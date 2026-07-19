@@ -641,6 +641,7 @@ typedef struct {
     int capture_count;
 } WClosure;
 
+void *w_closure_cell_new(void);
 WValue w_closure_new(void *fn, WValue *captures, int count);
 WValue w_closure_call_0(WValue closure_val);
 WValue w_closure_call_1(WValue closure_val, WValue arg);

@@ -472,6 +472,11 @@
     return false
   if find_captures(block, ctx).size() != 0
     return false
+  # Yield-substitution binds the block param to a callee local — one slot.
+  # A body that creates an escaping closure (go / bare lambda / Thread.new)
+  # capturing it would alias the last yielded value; keep the closure path.
+  if block_spawns_escaping_closure?(block)
+    return false
   block_has_unsafe_jumps?(body[0]) == false
 
 -> block_has_unsafe_jumps?(node)

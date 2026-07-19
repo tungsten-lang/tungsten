@@ -850,3 +850,68 @@
           j += 1
       scan_assigns_for_params(node.else_body, assigned)
     i += 1
+
+# ── Escaping-closure detection (iterator-inline gate) ─────────────────
+# True when the subtree creates a closure that can OUTLIVE the enclosing
+# frame: a `go` body, a bare `-> (…)` lambda in expression position
+# (assignment RHS, argument, element, tail), or a Thread.new trailing
+# block. Iterator-inline paths (array.each inline, range.each with-loop,
+# monomorphize yield-substitution) must not inline a block whose body
+# creates such a closure: inlining collapses the per-invocation block
+# param into ONE enclosing-frame slot, so every escaping closure would
+# alias the last iteration's value instead of its own.
+#
+# Ordinary trailing blocks of calls are NOT flagged (they run within the
+# call and per-invocation frames keep captures fresh), but their bodies
+# are still walked — a `go` nested inside an inner `.each` still poisons
+# the outer inline.
+-> spawns_escaping_closure?(node)
+  if node == nil || !is_ast_node?(node)
+    return false
+  k = ast_kind(node)
+  if k == :go
+    return true
+  if k == :block
+    return true
+  if k == :call
+    blk = ast_get(node, :block)
+    if blk != nil && is_ast_node?(blk)
+      recv = ast_get(node, :receiver)
+      # Thread.new's trailing block escapes to an OS thread.
+      if ast_get(node, :name) == "new" && recv != nil && ast_kind(recv) in (:var :call :class_ref) && ast_get(recv, :name) == "Thread"
+        return true
+      if spawns_escaping_closure_in_body?(ast_get(blk, :body))
+        return true
+      if spawns_escaping_closure?(recv)
+        return true
+      args = ast_get(node, :args)
+      if args != nil && type(args) == "Array"
+        ai = 0
+        while ai < args.size()
+          if spawns_escaping_closure?(args[ai])
+            return true
+          ai += 1
+      return false
+  kids = ast_children(node)
+  ki = 0
+  while ki < kids.size()
+    if spawns_escaping_closure?(kids[ki])
+      return true
+    ki += 1
+  false
+
+-> spawns_escaping_closure_in_body?(body)
+  if body == nil || type(body) != "Array"
+    return false
+  i = 0
+  while i < body.size()
+    if spawns_escaping_closure?(body[i])
+      return true
+    i += 1
+  false
+
+# Convenience gate for a block literal: walks only its body.
+-> block_spawns_escaping_closure?(blk)
+  if blk == nil || !is_ast_node?(blk)
+    return false
+  spawns_escaping_closure_in_body?(ast_get(blk, :body))

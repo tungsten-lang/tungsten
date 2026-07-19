@@ -443,6 +443,7 @@ use hashing
 
   # Closures
   out << declare_fn("w_closure_new", wv, ptr_ptr_i32)
+  out << declare_fn("w_closure_cell_new", "ptr", "")
   out << declare_fn("w_closure_call_0", wv, wv)
   out << declare_fn("w_closure_call_1", wv, wv2)
   out << declare_fn("w_closure_call_2", wv, wv3)
@@ -1440,6 +1441,10 @@ use hashing
             ri += 1
         ii += 1
       bi += 1
+    # Heap capture cells are materialized at render time (entry-block slot
+    # emission), not as WIRE instructions, so the scan above cannot see them.
+    if wfunc[:heap_slot_names] != nil
+      used_runtime_fns["w_closure_cell_new"] = true
     fi += 1
   globals_out = StringBuffer(4096)
 
@@ -1825,22 +1830,31 @@ use hashing
     # Entry block: emit allocas for non-promoted var slots
     if i == 0
       if slots != nil
+        heap_slots = f[:heap_slot_names]
         slot_names = slots.keys().sort()
         j = 0
         while j < slot_names.size()
           ptr = slots[slot_names[j]]
           if ptr.starts_with?("%v") && (promoted == nil || promoted[ptr] == nil)
-            slot_type = "i64"
-            if slot_types != nil && slot_types[slot_names[j]] != nil
-              slot_type = slot_types[slot_names[j]]
-            out << "  "
-            out << ptr
-            out << " = alloca "
-            out << slot_type
-            if slot_type == "i128"
-              out << ", align 16\n"
+            if heap_slots != nil && heap_slots[slot_names[j]] == true
+              # Slot captured by an escaping closure: heap cell, not alloca,
+              # so the capture's by-reference pointer outlives this frame.
+              # The 16-byte zeroed cell covers every slot type incl. i128.
+              out << "  "
+              out << ptr
+              out << " = call ptr @w_closure_cell_new()\n"
             else
-              out << ", align 8\n"
+              slot_type = "i64"
+              if slot_types != nil && slot_types[slot_names[j]] != nil
+                slot_type = slot_types[slot_names[j]]
+              out << "  "
+              out << ptr
+              out << " = alloca "
+              out << slot_type
+              if slot_type == "i128"
+                out << ", align 16\n"
+              else
+                out << ", align 8\n"
           j += 1
       if max_mcall_argc > 0
         out << "  %__mcall_args = alloca i64, i32 "

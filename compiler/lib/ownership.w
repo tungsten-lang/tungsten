@@ -53,6 +53,12 @@ use runtime_types
     escaped[inst[:value]] = true
     return nil
 
+  # Inline ivar store (constructor fast path: raw gep + store). Same
+  # semantics as :ivar_set — the stored value now lives in the object.
+  if op == :ivar_set_idx
+    escaped[inst[:value]] = true
+    return nil
+
   if op == :store_global
     escaped[inst[:value]] = true
     return nil

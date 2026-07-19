@@ -17393,6 +17393,16 @@ static WClosure *as_closure(WValue v) {
     return (WClosure *)w_as_ptr(v);
 }
 
+/* Heap cell backing a variable captured by an ESCAPING closure (bare
+ * lambda in expression position, `go` body, Thread.new block). The
+ * lowering retargets the variable's frame slot from an entry-block
+ * alloca to this cell, so the capture array's by-reference pointer
+ * stays valid after the creating frame returns. 16 zeroed bytes covers
+ * every slot type (i64/double/i128). */
+void *w_closure_cell_new(void) {
+    return calloc(1, 16);
+}
+
 WValue w_closure_new(void *fn, WValue *captures, int count) {
     WClosure *cl = calloc(1, sizeof(WClosure));
     cl->fn_ptr = fn;

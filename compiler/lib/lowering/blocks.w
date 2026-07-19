@@ -57,6 +57,16 @@
     merge_capture_names(captures, find_captured_params_in_body(ast_get(ast_get(node, :block), :body), fn_params))
 
   t = ast_kind(node)
+  # Bare lambda in argument / assignment / element position: same treatment
+  # as a call's trailing block above, so params it captures get their slot
+  # initialized at function entry.
+  if t == :block
+    block_ctx = {func: {var_slots: {}, params: fn_params}}
+    merge_capture_names(captures, find_captures(node, block_ctx))
+    if fn_params.include?("__self") && !captures.include?("__self")
+      captures.push("__self")
+    merge_capture_names(captures, find_captured_params_in_body(ast_get(node, :body), fn_params))
+    return nil
   case t
   when :call
     if ast_get(node, :receiver) == nil
@@ -353,6 +363,28 @@
         find_vars_in_node(entry[1], captures, block_params, outer_vars, fn_params)
         i += 1
     return nil
+  when :block
+    # Bare nested lambda (argument / assignment / element position — not a
+    # call's trailing block, which the :call case walks). Free vars inside
+    # it that resolve to this frame must be captured by the ENCLOSING
+    # closure too, so the nested closure can chain through its passthrough
+    # slot. Without this the nested body's name lowers as an implicit-self
+    # method call and dies at runtime. The nested block's own params shadow.
+    nested_params = {}
+    bpk = block_params.keys()
+    bi = 0
+    while bi < bpk.size()
+      nested_params[bpk[bi]] = true
+      bi += 1
+    nbp = ast_get(node, :params)
+    if nbp in (nil false)
+      nbp = []
+    bi = 0
+    while bi < nbp.size()
+      nested_params[nbp[bi]] = true
+      bi += 1
+    find_vars_in_body(ast_get(node, :body), captures, nested_params, outer_vars, fn_params)
+    return nil
   when :ivar
     return nil
   else
@@ -482,7 +514,14 @@
   else
     nil
 
--> lower_block_closure(ctx, block, expected_param_types = nil)
+# `escaping` — true when the closure value can outlive the frame that
+# creates it: a bare lambda in expression position (assignment RHS, plain
+# argument, tail expression), a `go` body, or a Thread.new block. For those,
+# each captured variable's frame slot is retargeted from an entry-block
+# alloca to a heap cell (w_closure_cell_new), so the by-reference capture
+# pointer stays valid after the creating frame returns. Trailing iterator
+# blocks keep the plain alloca fast path.
+-> lower_block_closure(ctx, block, expected_param_types = nil, escaping = false)
   mod = ctx[:mod]
   wfn = ctx[:func]
 
@@ -555,6 +594,18 @@
     cap_ptr = next_temp(new_fn)
     emit_instruction(new_fn, {op: :i64_to_ptr, temp: cap_ptr, value: load_temp})
     new_fn[:var_slots][cap_name] = cap_ptr
+    # Record which frame OWNS this captured name's storage, chaining through
+    # nested blocks (a passthrough capture inherits the outer block's origin).
+    # An escaping closure deeper in the nest uses this to retarget the owning
+    # frame's slot to a heap cell.
+    origin = nil
+    if wfn[:capture_origins] != nil
+      origin = wfn[:capture_origins][cap_name]
+    if origin == nil
+      origin = {owner: wfn, name: cap_name}
+    if new_fn[:capture_origins] == nil
+      new_fn[:capture_origins] = {}
+    new_fn[:capture_origins][cap_name] = origin
     ci += 1
 
   # Child context for block body
@@ -639,6 +690,23 @@
     ci = 0
     while ci < captures.size()
       cap_name = captures[ci]
+      if escaping
+        # The capture array holds the ADDRESS of the variable's frame slot.
+        # For a closure that outlives this frame, that slot must live on the
+        # heap: mark it on the frame that owns the variable (chase the
+        # passthrough chain when we are ourselves a nested block). The
+        # emitter then materializes the slot as w_closure_cell_new instead
+        # of an entry-block alloca — same shared-mutation semantics, heap
+        # lifetime.
+        owner_fn = wfn
+        owner_name = cap_name
+        if wfn[:capture_origins] != nil && wfn[:capture_origins][cap_name] != nil
+          origin = wfn[:capture_origins][cap_name]
+          owner_fn = origin[:owner]
+          owner_name = origin[:name]
+        if owner_fn[:heap_slot_names] == nil
+          owner_fn[:heap_slot_names] = {}
+        owner_fn[:heap_slot_names][owner_name] = true
       cap_slot = wfn[:var_slots][cap_name]
       if cap_slot == nil
         raw_type = ctx[:var_types][cap_name]

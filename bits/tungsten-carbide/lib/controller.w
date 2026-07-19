@@ -50,6 +50,24 @@
     status = options[:status] || 422
     render_json({errors: errors}, {status: status})
 
+  # HTML page via the Template engine (template.w). Accepts a compiled
+  # Template (compile once, render per request) or a raw template
+  # string (compiled on the spot). options: {status:} — explicit hash,
+  # not kwargs. A malformed template renders a plain-text 500 —
+  # Template.compile returns nil for bad sources, and a broken view
+  # must not take the process down.
+  #
+  #   render_template(page_template, {title: "Tasks", tasks: rows})
+  -> render_template(template, params = {}, options = {})
+    t = template
+    if type(template) == "String"
+      t = Template.compile(template)
+    if t == nil
+      Response.new({status: 500, headers: {"Content-Type" => "text/plain"}, body: "template compile error"})
+    else
+      status = options[:status] || 200
+      Response.html(t.render(params), {status: status})
+
   -> redirect(location)
     Response.redirect(location)
 

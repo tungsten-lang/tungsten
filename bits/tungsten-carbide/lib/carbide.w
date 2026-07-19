@@ -3,20 +3,23 @@
 #
 # Carbide's working core: routing (route.w), controllers (controller.w),
 # models with validations + an in-memory store (model.w), JSON
-# serialization (serializer.w), and live serving through forge
-# (application.w). Everything loaded here runs on BOTH engines and is
-# spec-covered (spec/*.w).
+# serialization (serializer.w), mustache-style view templates
+# (template.w), and live serving through forge (application.w).
+# Everything loaded here runs on BOTH engines and is spec-covered
+# (spec/*.w).
 
 in Tungsten:Carbide
 
-# application pulls the working core: forge (cross-bit), route, controller.
+# template first (no deps); application pulls the rest of the working
+# core: forge (cross-bit), route, controller.
+use template
 use application
 use model
 use serializer
 
-# The remaining modules under lib/ (view, migration, worker, mailer,
+# The remaining modules under lib/ (migration, worker, mailer,
 # request, channel, event, notifier, policy, config, facade, job,
-# validator, middleware, decorator, engine, resource, template,
+# validator, middleware, decorator, engine, resource,
 # transform, adapter, traits/paginated, bit/*) are unported design
 # drafts — they lean on Ruby-isms (define_method, method_missing,
 # instance_eval, **kwargs, &., Time.now) that Tungsten does not have,
@@ -51,8 +54,8 @@ VERSION = "0.1.0"
   << "  selftest   Run the framework's built-in smoke checks"
   << "  help       Show this help"
 
-# Pure-logic smoke checks over the routing + model core. Returns a list
-# of failure messages (empty = healthy).
+# Pure-logic smoke checks over the routing + model + template core.
+# Returns a list of failure messages (empty = healthy).
 -> selftest_failures
   failures = []
 
@@ -77,6 +80,13 @@ VERSION = "0.1.0"
   failures.push("serializer should encode the record") unless encoded.include?("\"id\":1") && encoded.include?("\"name\":\"smoke\"")
   Model.reset_all
 
+  # Template engine: compile/render round-trip + escaping + error path.
+  tpl = Template.compile("{{#each xs}}<li>{{this}}</li>{{/each}}")
+  failures.push("template should compile") if tpl == nil
+  if tpl != nil
+    failures.push("template should render an escaped list") unless tpl.render({xs: ["a&b"]}) == "<li>a&amp;b</li>"
+  failures.push("malformed template should compile to nil") unless Template.compile("{{#if x}}oops") == nil
+
   failures
 
 # Run one recognized CLI command. carbide.w doubles as the bit manifest,
@@ -94,7 +104,7 @@ VERSION = "0.1.0"
   elsif cmd == "selftest"
     failures = selftest_failures
     if failures.empty?
-      << "PASS — routing + model core healthy"
+      << "PASS — routing + model + template core healthy"
     else
       failures.each -> (f)
         << "FAIL: [f]"

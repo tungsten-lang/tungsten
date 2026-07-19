@@ -7,6 +7,7 @@
 #   /tmp/carbide_crud 18200
 #
 # Then:
+#   curl -i http://127.0.0.1:18200/                                # -> 200 HTML task list
 #   curl -i -X POST -H 'Content-Type: application/json' \
 #        -d '{"title": "buy milk"}' http://127.0.0.1:18200/tasks   # -> 201
 #   curl -i -X POST -H 'Content-Type: application/json' \
@@ -96,12 +97,33 @@ use carbide
       task.destroy
       render_json({deleted: true})
 
+# Server-rendered HTML through the Template engine (the V in MVC):
+# GET / lists the tasks as an HTML page. The template compiles once
+# (class-level cache) and re-renders per request with fresh Model rows.
++ TasksPageController < Controller
+  @@page = nil
+
+  -> page_template
+    if @@page == nil
+      src = "<!doctype html>\n<html><head><title>{{title}}</title></head>\n<body><h1>{{title}}</h1>\n{{#if has_tasks}}<ul>\n{{#each tasks}}<li>#{{this.id}} {{this.title}}</li>\n{{/each}}</ul>\n{{/if}}{{#if empty}}<p>No tasks yet — POST /tasks to add one.</p>\n{{/if}}<p>{{count}} task(s)</p></body></html>\n"
+      @@page = Template.compile(src)
+    @@page
+
+  # GET /
+  -> index
+    rows = []
+    Model.all(Task).each -> (t)
+      rows.push(t.to_h)
+    has = rows.size > 0
+    render_template(page_template, {title: "Tasks", has_tasks: has, empty: !has, tasks: rows, count: rows.size})
+
 port = 18200
 args = argv()
 if args.size > 0
   port = args[0].to_i
 
 routes = Carbide.instance.routes
+routes.get("/", TasksPageController, -> (c) c.index)
 routes.get("/tasks", TasksController, -> (c) c.index)
 routes.post("/tasks", TasksController, -> (c) c.create)
 routes.get("/tasks/:id", TasksController, -> (c) c.show)

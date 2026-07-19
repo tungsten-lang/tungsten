@@ -1,6 +1,16 @@
-# Carbide::Route — DSL for defining HTTP routes
-# Maps URL patterns to controller actions with support for
-# RESTful resources, namespaces, scopes, and constraints.
+# Carbide::Route — HTTP routes mapped to controller actions.
+#
+# A Route pairs a URL pattern with a controller class and an action
+# lambda. Route:Set holds the routes and resolves/dispatches requests;
+# it duck-types the forge Router interface (#resolve(method, path) ->
+# match with .params and .handler), so forge's HTTP/1.1 Server can use a
+# Route:Set as its router directly.
+#
+# The action is a lambda taking the controller instance — the closest
+# thing Tungsten has to a method reference (Object#send is bodyless in
+# both engines):
+#
+#   set.get("/users/:id", UsersController, -> (c) c.show)
 #
 # Top-level (no `in` namespace): namespaced bit classes are unreachable
 # from consumers and specs — same convention as forge and koala.
@@ -22,7 +32,7 @@
 
   # Check if this route matches a given request
   -> matches?(request)
-    return false unless @method == request.method || @method == :any
+    return false unless @method == request.method || @method == :ANY
 
     match_path?(request.path)
 
@@ -61,7 +71,7 @@
         {type: :literal, value: part}
 
 
-# Route::Set — the router that holds all routes and dispatches requests
+# Route::Set — holds all routes; resolves and dispatches requests.
 + Route:Set
   ro :routes
 
@@ -69,105 +79,78 @@
     @routes = []
     @named  = {}
 
-  -> draw(&block)
-    dsl = Route:DSL.new(self)
-    dsl.instance_eval(&block)
-
   -> add(method, path, controller, action, options = {})
     route = Route.new(method, path, controller, action, options)
     @routes.push(route)
     @named[options[:name]] = route if options[:name]
     route
 
-  -> dispatch(request, response)
-    route = @routes.find(-> (r) r.matches?(request))
+  # --- HTTP verb sugar ---
 
-    unless route
-      response.status = 404
-      response.body = "Not Found"
-      return response
+  -> get(path, controller, action, options = {})
+    self.add(:GET, path, controller, action, options)
 
-    # Extract URL params and merge with request params
-    url_params = route.extract_params(request.path)
-    request.merge_params(url_params)
+  -> post(path, controller, action, options = {})
+    self.add(:POST, path, controller, action, options)
 
-    # Instantiate controller and dispatch action
-    controller = route.controller.new(request, response)
-    controller.dispatch(route.action)
-    response
+  -> put(path, controller, action, options = {})
+    self.add(:PUT, path, controller, action, options)
+
+  -> patch(path, controller, action, options = {})
+    self.add(:PATCH, path, controller, action, options)
+
+  -> delete(path, controller, action, options = {})
+    self.add(:DELETE, path, controller, action, options)
+
+  # --- Resolution ---
+
+  # forge Router duck-type: the forge Server calls
+  # router.resolve(request.method, request.path) and expects nil or a
+  # match exposing .params and .handler (handler.call(request) -> Response).
+  -> resolve(method, path)
+    found = nil
+    @routes.each -> (route)
+      if found == nil && (route.method == method || route.method == :ANY)
+        if route.match_path?(path)
+          found = route
+    result = nil
+    if found != nil
+      result = Route:Match.new(found, found.extract_params(path))
+    result
+
+  # Pure request -> response dispatch (no sockets): mirrors what the
+  # forge Server does with a resolved match. Used by specs and by
+  # Carbide#dispatch.
+  -> dispatch(request)
+    match = self.resolve(request.method, request.path)
+    result = nil
+    if match == nil
+      result = Response.not_found("Not Found: " + request.path)
+    else
+      request.params = match.params
+      handler = match.handler
+      result = handler.call(request)
+    result
 
 
-# Route::DSL — the block DSL for config/routes.w
-+ Route:DSL
-  -> new(@set, prefix: "", namespace: nil)
+# Route::Match — a resolved route plus its extracted path params.
+# The match is itself the request handler (Rack-style callable object):
+# the forge Server invokes match.handler.call(request), and #handler
+# returns self. A callable object rather than a closure on purpose —
+# compiled closures capturing per-request state (class values
+# especially) miscompile today (corrupted captures / segfaults on later
+# calls), while plain method dispatch is solid in both engines.
++ Route:Match
+  ro :route
+  ro :params
 
-  # HTTP verb methods
-  -> get(path, to:, name: nil, **opts)
-    full = "#{@prefix}#{path}"
-    controller, action = parse_target(to)
-    @set.add(:GET, full, controller, action, name: name, **opts)
+  -> new(@route, @params)
 
-  -> post(path, to:, name: nil, **opts)
-    full = "#{@prefix}#{path}"
-    controller, action = parse_target(to)
-    @set.add(:POST, full, controller, action, name: name, **opts)
+  -> handler
+    self
 
-  -> put(path, to:, name: nil, **opts)
-    full = "#{@prefix}#{path}"
-    controller, action = parse_target(to)
-    @set.add(:PUT, full, controller, action, name: name, **opts)
-
-  -> patch(path, to:, name: nil, **opts)
-    full = "#{@prefix}#{path}"
-    controller, action = parse_target(to)
-    @set.add(:PATCH, full, controller, action, name: name, **opts)
-
-  -> delete(path, to:, name: nil, **opts)
-    full = "#{@prefix}#{path}"
-    controller, action = parse_target(to)
-    @set.add(:DELETE, full, controller, action, name: name, **opts)
-
-  # RESTful resource routing — generates all 7 standard routes
-  -> resources(name, only: nil, except: nil, &block)
-    controller = name.to_s.classify + "Controller"
-    actions = [:index, :show, :new, :create, :edit, :update, :destroy]
-    actions = actions.select(-> (a) only.include?(a)) if only
-    actions = actions.reject(-> (a) except.include?(a)) if except
-
-    prefix = "#{@prefix}/#{name}"
-
-    actions.each -> (action)
-      case action
-        :index   => @set.add(:GET,    prefix,              controller, :index,   name: name)
-        :show    => @set.add(:GET,    "#{prefix}/:id",     controller, :show,    name: "#{name}_show")
-        :new     => @set.add(:GET,    "#{prefix}/new",     controller, :new,     name: "#{name}_new")
-        :create  => @set.add(:POST,   prefix,              controller, :create,  name: "#{name}_create")
-        :edit    => @set.add(:GET,    "#{prefix}/:id/edit", controller, :edit,   name: "#{name}_edit")
-        :update  => @set.add(:PATCH,  "#{prefix}/:id",     controller, :update,  name: "#{name}_update")
-        :destroy => @set.add(:DELETE, "#{prefix}/:id",     controller, :destroy, name: "#{name}_destroy")
-
-    # Nested resources via block
-    if block
-      nested = Route:DSL.new(@set, prefix: "#{prefix}/:#{name.to_s.singularize}_id")
-      nested.instance_eval(&block)
-
-  # Namespace — adds a URL prefix and module namespace
-  -> namespace(name, &block)
-    nested = Route:DSL.new(@set, prefix: "#{@prefix}/#{name}", namespace: name)
-    nested.instance_eval(&block)
-
-  # Scope — adds a URL prefix without module namespace
-  -> scope(path, &block)
-    nested = Route:DSL.new(@set, prefix: "#{@prefix}#{path}")
-    nested.instance_eval(&block)
-
-  # Root route
-  -> root(to:)
-    controller, action = parse_target(to)
-    @set.add(:GET, "/", controller, action, name: :root)
-
-  -> parse_target(target)
-    parts = target.split("#")
-    controller = parts[0].classify + "Controller"
-    action = parts[1].to_sym
-    [controller, action]
+  # Instantiate the route's controller with the request and invoke the
+  # route's action lambda on it.
+  -> call(request)
+    controller = @route.controller.new(request)
+    controller.dispatch(@route.action)

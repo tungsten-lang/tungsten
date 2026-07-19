@@ -6,10 +6,9 @@
 
 in Tungsten:Carbide
 
+# application pulls the working core: forge (cross-bit), route, controller.
 use application
-use controller
 use model
-use route
 use view
 use migration
 use serializer

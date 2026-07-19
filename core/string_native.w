@@ -260,3 +260,36 @@
       raw_store_u8(dc_dst, dc_i, dc_b)
       dc_i += 1
     ccall("w_string_take_byte_array", dc_out, dc_n)
+
+  # Padding / alignment. Width is measured in BYTES (like size), so these
+  # align ASCII exactly — the dominant use (tables, columns, CLI output). A
+  # multi-byte `pad` is repeated then truncated to the exact fill width, and
+  # a receiver already at/over `width` is returned unchanged (Ruby semantics).
+  -> lpad(width, pad = " ")
+    pl_n = size
+    if pl_n >= width
+      return to_s
+    pl_need = width - pl_n
+    pl_fill = (pad * pl_need).slice(0, pl_need)
+    pl_fill + to_s
+
+  -> rpad(width, pad = " ")
+    pr_n = size
+    if pr_n >= width
+      return to_s
+    pr_need = width - pr_n
+    pr_fill = (pad * pr_need).slice(0, pr_need)
+    to_s + pr_fill
+
+  # Center within `width`; when the total padding is odd the extra byte goes
+  # on the right, matching Ruby String#center.
+  -> center(width, pad = " ")
+    ce_n = size
+    if ce_n >= width
+      return to_s
+    ce_total = width - ce_n
+    ce_left = ce_total / 2
+    ce_right = ce_total - ce_left
+    ce_lf = (pad * ce_left).slice(0, ce_left)
+    ce_rf = (pad * ce_right).slice(0, ce_right)
+    ce_lf + to_s + ce_rf

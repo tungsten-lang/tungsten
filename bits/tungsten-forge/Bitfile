@@ -6,5 +6,3 @@ summary     "High-performance HTTP server for Tungsten"
 description "Forge is a multi-threaded, work-stealing HTTP server with TLS by default, HTTP/3 support, and automatic certificate provisioning. Built for Tungsten Carbide applications."
 license     "MIT OR Apache-2.0"
 authors     ["Tungsten Language Project"]
-
-dependency "tungsten-carbide", "~> 0.1"

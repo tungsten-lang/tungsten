@@ -6,3 +6,5 @@ summary     "Full-stack web framework for Tungsten"
 license     "MIT OR Apache-2.0"
 
 constant_alias "WC"
+
+requires ["tungsten-forge"]

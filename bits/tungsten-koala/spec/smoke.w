@@ -1,0 +1,100 @@
+# Koala smoke spec — runnable today on BOTH engines:
+#
+#     bin/tungsten bits/tungsten-koala/spec/smoke.w
+#     bin/tungsten -o /tmp/koala_smoke bits/tungsten-koala/spec/smoke.w && /tmp/koala_smoke
+#
+# Exit code 0 = all checks pass. Mirrors spec/koala_spec.w, which needs the
+# tungsten-spec runner (not executable yet on either engine).
+#
+# Comparisons go through .to_s / .join — compiled Array == is identity-based,
+# and string-array to_s differs between engines (quotes), so string columns
+# are compared via join.
+
+use koala
+
++ KoalaSmoke
+  ro :checks
+  ro :failures
+
+  -> new
+    @checks = 0
+    @failures = 0
+
+  -> check(label, got, want)
+    @checks += 1
+    g = got.to_s
+    w = want.to_s
+    if g == w
+      << "  ok - " + label
+    else
+      @failures += 1
+      << "  FAIL - " + label + ": got " + g + ", want " + w
+
+  -> run
+    # --- Series ---
+    s = Series.new([3, 1, 4, 1, 5, 9, 2, 6], "digits")
+    self.check("series size", s.size, 8)
+    self.check("series sum", s.sum, 31)
+    self.check("series mean", s.mean, "3.875")
+    self.check("series median", s.median, "3.5")
+    self.check("series min", s.min, 1)
+    self.check("series max", s.max, 9)
+    self.check("series std", s.std, "2.74838")
+
+    doubled = s.map -> (v) v * 2
+    self.check("series map", doubled.to_a, "\[6, 2, 8, 2, 10, 18, 4, 12\]")
+    big = s.select -> (v) v > 3
+    self.check("series select", big.to_a, "\[4, 5, 9, 6\]")
+    self.check("series unique", s.unique.to_a, "\[3, 1, 4, 5, 9, 2, 6\]")
+
+    gaps = Series.new([1, nil, 3], "gaps")
+    self.check("fillna", gaps.fillna(0).to_a, "\[1, 0, 3\]")
+    self.check("dropna", gaps.dropna.to_a, "\[1, 3\]")
+    self.check("count skips nil", gaps.count, 2)
+
+    # --- DataFrame ---
+    df = DataFrame.new([
+      [:name, ["Alice", "Bob", "Carol", "Dan", "Eve"]],
+      [:dept, ["eng", "sales", "eng", "sales", "eng"]],
+      [:age, [30, 25, 35, 28, 41]],
+      [:salary, [80, 65, 95, 70, 120]]
+    ])
+    self.check("shape", df.shape, "\[5, 4\]")
+    self.check("column order", df.column_names.join(","), "name,dept,age,salary")
+    self.check("column sum", df[:age].sum, 159)
+    self.check("row access", df.row(1)[:name], "Bob")
+
+    seniors = df.where -> (row) row[:age] >= 30
+    self.check("where row_count", seniors.row_count, 3)
+    self.check("where names", seniors.column_values(:name).join(","), "Alice,Carol,Eve")
+
+    slim = df.select_columns([:name, :salary])
+    self.check("select_columns shape", slim.shape, "\[5, 2\]")
+    self.check("head", df.head(2).row_count, 2)
+
+    # --- GroupBy ---
+    g = df.group_by(:dept)
+    self.check("group count", g.size, 2)
+    self.check("group keys", g.keys.join(","), "eng,sales")
+    self.check("group sizes", g.count.column_values(:count), "\[3, 2\]")
+    self.check("group mean", g.mean(:salary).column_values(:salary).join(","), "98.3333,67.5")
+    self.check("group max", g.max(:age).column_values(:age), "\[41, 28\]")
+    self.check("group sum", g.sum(:salary).column_values(:salary), "\[295, 135\]")
+
+    # --- Koala facade ---
+    kf = Koala.frame([[:x, [1, 2, 3]]])
+    self.check("Koala.frame", kf.shape, "\[3, 1\]")
+
+    # --- Metrics ---
+    self.check("accuracy", Metrics.accuracy([1, 0, 1, 1, 0], [1, 0, 0, 1, 0]), "0.8")
+    self.check("mse", Metrics.mse([2, 4, 6], [1, 5, 7]), "1")
+    self.check("rmse", Metrics.rmse([2, 4, 6], [1, 5, 7]), "1")
+    self.check("mae", Metrics.mae([2, 4, 6], [1, 5, 7]), "1")
+    self.check("r2", Metrics.r2([2, 4, 6], [1, 5, 7]), "0.839286")
+
+t = KoalaSmoke.new
+t.run
+if t.failures > 0
+  << "KOALA SMOKE: FAIL ([t.failures] of [t.checks] checks)"
+  exit(1)
+<< "KOALA SMOKE: PASS ([t.checks] checks)"

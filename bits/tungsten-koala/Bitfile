@@ -7,6 +7,5 @@ description "Koala is a friendlier pandas — DataFrames, linear algebra, matrix
 license     "MIT OR Apache-2.0"
 authors     ["Tungsten Language Project"]
 
-dependency "tungsten-math", "~> 0.1"
 dependency "tungsten-json", "~> 0.1"
 dependency "tungsten-pg",   "~> 0.1", optional: true

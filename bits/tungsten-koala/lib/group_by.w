@@ -1,110 +1,74 @@
-# GroupBy — split-apply-combine operations on DataFrames
-
-in Tungsten:Koala
+# GroupBy — split-apply-combine on a single DataFrame column
+#
+#     df.group_by(:dept).mean(:salary)   # => DataFrame [dept, salary]
+#     df.group_by(:dept).count           # => DataFrame [dept, count]
+#
+# NOTE: inside `-> (x)` blocks this file deliberately uses locals hoisted
+# from ivars — the interpreter cannot resolve @ivars from a block body.
 
 + GroupBy
-  ro :source
-  ro :keys
-  ro :groups  # lazy — computed on first access
+  ro :df
+  ro :col
+  ro :group_keys   # distinct key values, first-seen order
+  ro :buckets      # parallel array of row-index arrays
 
-  -> new(@source, @keys)
-    @groups = nil
+  -> new(df, col)
+    @df = df
+    @col = col
+    gkeys = []
+    buckets = []
+    values = df.column_values(col)
+    i = 0
+    values.each -> (v)
+      pos = -1
+      j = 0
+      gkeys.each -> (k)
+        pos = j if k == v
+        j += 1
+      if pos == -1
+        gkeys.push(v)
+        buckets.push([i])
+      else
+        buckets[pos].push(i)
+      i += 1
+    @group_keys = gkeys
+    @buckets = buckets
 
-  # Aggregate grouped data.
-  #
-  #     df.group_by(:department).agg(
-  #       avg_salary: mean(:salary),
-  #       headcount:  count(:name),
-  #       max_age:    max(:age)
-  #     )
-  -> agg(**aggregations)
-    result_columns = {}
-    @keys.each -> (key)
-      result_columns[key] = self.computed_groups.keys.map(-> (g) g[key])
+  -> size
+    @group_keys.size
 
-    aggregations.each -> (result_name, agg_fn)
-      result_columns[result_name] = self.computed_groups.map -> (group_key, indices)
-        values = indices.map(-> (i) @source.store[agg_fn.column].to_a[i])
-        agg_fn.apply(values)
+  -> keys
+    @group_keys
 
-    DataFrame.new(**result_columns)
-
-  # Count rows per group.
   -> count
-    result = {}
-    @keys.each -> (key)
-      result[key] = self.computed_groups.keys.map(-> (g) g[key])
-    result[:count] = self.computed_groups.values.map(&:size)
-    DataFrame.new(**result)
+    counts = []
+    @buckets.each -> (b)
+      counts.push(b.size)
+    DataFrame.new([[@col, @group_keys], [:count, counts]])
 
-  # Sum a column per group.
+  # Aggregate a column per group with a lambda over each group's values.
+  -> aggregate(col, f)
+    vals = @df.column_values(col)
+    out = []
+    @buckets.each -> (b)
+      group_vals = []
+      b.each -> (i)
+        group_vals.push(vals[i])
+      out.push(f.call(group_vals))
+    DataFrame.new([[@col, @group_keys], [col, out]])
+
   -> sum(col)
-    self.apply_simple(col, -> (values) values.sum)
+    f = -> (vs) Stats.sum(vs)
+    self.aggregate(col, f)
 
-  # Mean a column per group.
   -> mean(col)
-    self.apply_simple(col, -> (values) values.sum.to_f / values.size)
+    f = -> (vs) Stats.mean(vs)
+    self.aggregate(col, f)
 
-  # Max / min per group.
-  -> max(col) self.apply_simple(col, -> (values) values.max)
-  -> min(col) self.apply_simple(col, -> (values) values.min)
+  -> min(col)
+    f = -> (vs) Stats.min(vs)
+    self.aggregate(col, f)
 
-  # Apply a custom function to each group.
-  #
-  #     df.group_by(:dept).apply -> (group_df)
-  #       group_df.assign(rank: group_df[:score].rank)
-  -> apply(&block)
-    frames = self.computed_groups.map -> (_, indices)
-      group_df = @source.take(indices)
-      block.call(group_df)
-    # Concatenate all result frames
-    frames.reduce(-> (a, b) a.concat(b))
-
-  # Iterate over groups.
-  -> each(&block)
-    self.computed_groups.each -> (key, indices)
-      block.call(key, @source.take(indices))
-
-  -> size self.computed_groups.size
-
-  [private]
-
-  -> computed_groups
-    @groups ||= begin
-      groups = {}
-      @source.row_count.times -> (i)
-        key = @keys.map(-> (k) [k, @source.store[k].to_a[i]]).to_h
-        groups[key] ||= []
-        groups[key].push(i)
-      groups
-
-  -> apply_simple(col, fn)
-    result = {}
-    @keys.each -> (key)
-      result[key] = self.computed_groups.keys.map(-> (g) g[key])
-    result[col] = self.computed_groups.map -> (_, indices)
-      values = indices.map(-> (i) @source.store[col].to_a[i])
-      fn.call(values)
-    DataFrame.new(**result)
-
-
-# Aggregation function descriptors — used in .agg() calls
-+ AggFn
-  ro :column
-  ro :func
-
-  -> new(@column, @func)
-  -> apply(values) @func.call(values)
-
-# Convenience constructors for agg expressions:
-#   df.group_by(:dept).agg(avg_salary: mean(:salary))
--> mean(col)  AggFn.new(col, -> (vs) vs.sum.to_f / vs.size)
--> sum(col)   AggFn.new(col, -> (vs) vs.sum)
--> count(col) AggFn.new(col, -> (vs) vs.reject(&:nil?).size)
--> max(col)   AggFn.new(col, -> (vs) vs.max)
--> min(col)   AggFn.new(col, -> (vs) vs.min)
--> std(col)   AggFn.new(col, -> (vs) Stats.std(vs))
--> var(col)   AggFn.new(col, -> (vs) Stats.var(vs))
--> median(col) AggFn.new(col, -> (vs) Stats.median(vs))
--> first(col) AggFn.new(col, -> (vs) vs.first)
--> last(col)  AggFn.new(col, -> (vs) vs.last)
+  -> max(col)
+    f = -> (vs) Stats.max(vs)
+    self.aggregate(col, f)

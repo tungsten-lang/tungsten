@@ -19,10 +19,10 @@
 # goroutine. Runtime sockets are non-blocking: reads/accepts that would
 # block park only their own goroutine on the event loop, so an idle or
 # dead client stalls its own connection goroutine, never the server.
-# (Socket#set_timeout is a no-op here: SO_RCVTIMEO never fires on a
-# non-blocking fd, so the idle guard is goroutine isolation plus the
-# per-connection request cap; a closed/reset peer surfaces as a nil
-# read and ends the connection goroutine.)
+# Idle clients are reaped via Socket#set_timeout (a real read deadline
+# since the runtime park-deadline fix): expiry surfaces as a nil read —
+# the same signal a peer close produces — ending the connection
+# goroutine cleanly. Config#idle_timeout (seconds) sets the budget.
 #
 # Socket is a compiled-runtime builtin (compiler/lib/lowering/types.w
 # builtin_runtime_classes) — the live path runs COMPILED only. The
@@ -71,6 +71,7 @@
   -> accept_loop
     while @running
       conn = @socket.accept
+      conn.set_timeout(@config.idle_timeout * 1000)
       Server.spawn_connection(self, conn)
 
   # Spawn the per-connection goroutine. This MUST stay a separate method:

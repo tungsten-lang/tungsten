@@ -4234,6 +4234,14 @@ static WValue w_string_take(char *s, size_t len) {
         return v;
     }
 
+    /* Lazy slab init on first use — matches w_string_n. Without this, a
+     * program whose only static strings are short (<=5 bytes, stored inline,
+     * so the slab is never populated at startup) leaves g_string_slab.base
+     * NULL; interning a runtime-built string here then mprotect()s a NULL
+     * base and dies with "string slab: mprotect failed" (e.g. `"ab" * 3` at
+     * top level). Interning also keeps the result comparable to slab literals. */
+    if (!g_string_slab.base) w_slab_init();
+
     if (g_string_slab.frozen || len > W_SLAB_SSO2_MAX) {
         WString *ws = malloc(sizeof(WString) + len + 1);
         ws->len = (uint32_t)len;

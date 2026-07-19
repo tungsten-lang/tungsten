@@ -1,8 +1,9 @@
 # Carbide::Route — DSL for defining HTTP routes
 # Maps URL patterns to controller actions with support for
 # RESTful resources, namespaces, scopes, and constraints.
-
-in Tungsten:Carbide
+#
+# Top-level (no `in` namespace): namespaced bit classes are unreachable
+# from consumers and specs — same convention as forge and koala.
 
 + Route
   ro :method
@@ -12,9 +13,11 @@ in Tungsten:Carbide
   ro :name
   ro :constraints
 
-  -> new(@method, @path, @controller, @action, name: nil, constraints: {})
-    @name = name
-    @constraints = constraints
+  # options: {name:, constraints:} — explicit hash, not kwargs (kwargs
+  # diverge between engines and break interp constructor dispatch).
+  -> new(@method, @path, @controller, @action, options = {})
+    @name = options[:name]
+    @constraints = options[:constraints] || {}
     @segments = parse_segments(@path)
 
   # Check if this route matches a given request
@@ -26,7 +29,7 @@ in Tungsten:Carbide
   # Extract named parameters from a matched path
   -> extract_params(request_path)
     params = {}
-    request_parts = request_path.split("/").reject(-> (s) s.empty?)
+    request_parts = request_path.split("/").reject -> (s) s.empty?
 
     @segments.each_with_index -> (segment, i)
       if segment[:type] == :param || segment[:type] == :glob
@@ -34,17 +37,22 @@ in Tungsten:Carbide
 
     params
 
+  # No early returns: the self-hosted interpreter mis-executes an early
+  # `return` from a method that also contains block closures
+  # ("expected string or symbol" dispatch crash on a later call).
   -> match_path?(request_path)
-    request_parts = request_path.split("/").reject(-> (s) s.empty?)
-    return false unless request_parts.size == @segments.size
+    request_parts = request_path.split("/").reject -> (s) s.empty?
+    matched = request_parts.size == @segments.size
 
-    @segments.each_with_index -> (segment, i)
-      if segment[:type] == :literal && segment[:value] != request_parts[i]
-        return false
-    true
+    if matched
+      @segments.each_with_index -> (segment, i)
+        if segment[:type] == :literal && segment[:value] != request_parts[i]
+          matched = false
+    matched
 
   -> parse_segments(path)
-    path.split("/").reject(-> (s) s.empty?).map -> (part)
+    parts = path.split("/").reject -> (s) s.empty?
+    parts.map -> (part)
       if part.starts_with?(":")
         {type: :param, name: part.slice(1, part.size - 1).to_sym}
       elsif part.starts_with?("*")
@@ -65,8 +73,8 @@ in Tungsten:Carbide
     dsl = Route:DSL.new(self)
     dsl.instance_eval(&block)
 
-  -> add(method, path, controller, action, **options)
-    route = Route.new(method, path, controller, action, **options)
+  -> add(method, path, controller, action, options = {})
+    route = Route.new(method, path, controller, action, options)
     @routes.push(route)
     @named[options[:name]] = route if options[:name]
     route

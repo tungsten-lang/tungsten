@@ -48,13 +48,13 @@ VERSION = "0.1.0"
 -> selftest_failures
   failures = []
 
-  r = Tungsten:Carbide:Route.new(:GET, "/users/:id", "UsersController", :show)
+  r = Route.new(:GET, "/users/:id", "UsersController", :show)
   failures.push("param route should match /users/42") unless r.match_path?("/users/42")
   failures.push("param route should not match /users") if r.match_path?("/users")
   failures.push("literal segment should not match /posts/42") if r.match_path?("/posts/42")
   failures.push("extract_params should capture :id") unless r.extract_params("/users/42")[:id] == "42"
 
-  glob = Tungsten:Carbide:Route.new(:GET, "/files/*path", "FilesController", :show)
+  glob = Route.new(:GET, "/files/*path", "FilesController", :show)
   failures.push("glob route should match /files/a") unless glob.match_path?("/files/a")
 
   failures

@@ -1,14 +1,11 @@
-# Carbide::Route specs — pure routing logic (pattern: bits/tungsten-forge/spec/)
-#
-# NOTE: the spec runner (bits/tungsten-spec) does not currently compile
-# (`parent: .` at lib/context.w:27 is a parse error), so this spec cannot
-# run yet. The same assertions are executable today via `carbide selftest`,
-# which is wired to Route in lib/carbide.w.
+# Carbide::Route specs — pure routing logic.
+# Run: bin/tungsten bits/tungsten-carbide/spec/route_spec.w
+# (The same assertions also run via `carbide selftest`.)
 
 use spec
 use carbide
 
-describe Carbide:Route ->
+describe "Route" ->
   describe "path matching" ->
     it "matches a param segment" ->
       r = Route.new(:GET, "/users/:id", "UsersController", :show)
@@ -36,3 +33,5 @@ describe Carbide:Route ->
       set = Route:Set.new
       set.add(:GET, "/health", "HealthController", :index)
       expect(set.routes.size).to eq(1)
+
+spec_summary

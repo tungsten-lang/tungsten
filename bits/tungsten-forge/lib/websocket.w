@@ -1,8 +1,6 @@
 # Forge::WebSocket — WebSocket upgrade and handling
 # RFC 6455 compliant with ping/pong and fragmentation support
 
-in Tungsten:Forge
-
 + WebSocket
 
   + Handler

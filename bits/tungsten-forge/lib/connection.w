@@ -1,8 +1,6 @@
 # Forge::Connection — connection handling
 # Keep-alive, HTTP/2 multiplexing, graceful close
 
-in Tungsten:Forge
-
 + Connection
   ro :socket
   ro :config

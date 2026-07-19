@@ -1,7 +1,5 @@
-# Forge::Response — HTTP response building
+# Forge Response — HTTP response building
 # Fluent interface for constructing responses with headers and body
-
-in Tungsten:Forge
 
 + Response
   rw :status
@@ -9,44 +7,45 @@ in Tungsten:Forge
   rw :body
   rw :stream
 
-  -> new(status: 200, headers: {}, body: "")
-    @status  = status
+  -> new(options = {})
+    @status  = options[:status] || 200
     @headers = {"Content-Type" => "text/html; charset=utf-8"}
-    @headers.merge!(headers)
-    @body    = body
+    @headers.merge!(options[:headers]) if options[:headers]
+    @body    = options[:body] || ""
     @stream  = nil
 
   # --- Factory methods ---
 
-  -> .ok(body, content_type: "text/html; charset=utf-8")
-    self.new(status: 200, headers: {"Content-Type" => content_type}, body: body)
+  -> .ok(body, options = {})
+    content_type = options[:content_type] || "text/html; charset=utf-8"
+    self.new({status: 200, headers: {"Content-Type" => content_type}, body: body})
 
-  -> .json(data, status: 200)
+  -> .json(data, options = {})
     body = JSON.encode(data)
-    self.new(status: status, headers: {"Content-Type" => "application/json"}, body: body)
+    self.new({status: options[:status] || 200, headers: {"Content-Type" => "application/json"}, body: body})
 
-  -> .html(body, status: 200)
-    self.new(status: status, headers: {"Content-Type" => "text/html; charset=utf-8"}, body: body)
+  -> .html(body, options = {})
+    self.new({status: options[:status] || 200, headers: {"Content-Type" => "text/html; charset=utf-8"}, body: body})
 
-  -> .text(body, status: 200)
-    self.new(status: status, headers: {"Content-Type" => "text/plain"}, body: body)
+  -> .text(body, options = {})
+    self.new({status: options[:status] || 200, headers: {"Content-Type" => "text/plain"}, body: body})
 
-  -> .redirect(location, status: 302)
-    self.new(status: status, headers: {"Location" => location}, body: "")
+  -> .redirect(location, options = {})
+    self.new({status: options[:status] || 302, headers: {"Location" => location}, body: ""})
 
   -> .not_found(body = "Not Found")
-    self.new(status: 404, body: body)
+    self.new({status: 404, body: body})
 
-  -> .error(body = "Internal Server Error", status: 500)
-    self.new(status: status, body: body)
+  -> .error(body = "Internal Server Error", options = {})
+    self.new({status: options[:status] || 500, body: body})
 
   -> .no_content
-    self.new(status: 204, body: "")
+    self.new({status: 204, body: ""})
 
-  -> .created(body = "", location: nil)
+  -> .created(body = "", options = {})
     headers = {}
-    headers["Location"] = location if location
-    self.new(status: 201, headers: headers, body: body)
+    headers["Location"] = options[:location] if options[:location]
+    self.new({status: 201, headers: headers, body: body})
 
   # --- Fluent interface ---
 
@@ -58,8 +57,9 @@ in Tungsten:Forge
     @headers["Content-Type"] = type
     self
 
-  -> cache(max_age:, public: true)
-    visibility = if public then "public" else "private"
+  -> cache(max_age, options = {})
+    visibility = "public"
+    visibility = "private" if options[:public] == false
     @headers["Cache-Control"] = "[visibility], max-age=[max_age]"
     self
 
@@ -71,7 +71,7 @@ in Tungsten:Forge
     @headers["ETag"] = "\"" + value + "\""
     self
 
-  -> cookie(name, value, **options)
+  -> cookie(name, value, options = {})
     parts = ["[name]=[value]"]
     parts.push("Path=[options[:path]]") if options[:path]
     parts.push("Max-Age=[options[:max_age]]") if options[:max_age]
@@ -84,25 +84,14 @@ in Tungsten:Forge
   # --- Serialization ---
 
   -> to_http
-    body_len = @body.size()
+    body_len = @body.size
     @headers["Content-Length"] = body_len.to_s unless @stream
 
-    out = StringBuffer(128 + body_len)
-    out << "HTTP/1.1 "
-    out << @status
-    out << " "
-    out << self.status_text
-    out << "\r\n"
-
+    out = "HTTP/1.1 [@status] [self.status_text]\r\n"
     @headers.each -> (key, value)
-      out << key
-      out << ": "
-      out << value
-      out << "\r\n"
+      out = out + key + ": " + value + "\r\n"
 
-    out << "\r\n"
-    out << @body
-    out.to_s
+    out + "\r\n" + @body
 
   -> status_text
     case @status

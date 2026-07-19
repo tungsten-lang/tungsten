@@ -1,0 +1,77 @@
+# Forge smoke check — runs under BOTH engines and self-verifies:
+#   interpreted:  bin/tungsten bits/tungsten-forge/spec/compiled_smoke.w
+#   compiled:     bin/tungsten -o /tmp/forge_smoke bits/tungsten-forge/spec/compiled_smoke.w && /tmp/forge_smoke
+#
+# Guards the spec-covered surface (Router resolution, Response building,
+# Config validation) against compiled/interpreted divergence. Prints
+# "SMOKE OK <n> checks" and exits 0 on success; exits 1 on any failure.
+
+use forge
+
+$smoke_fail = 0
+$smoke_total = 0
+
+-> check(name, ok)
+  $smoke_total += 1
+  if ok != true
+    $smoke_fail += 1
+    << "SMOKE FAIL: " + name
+
+router = Router.new
+router.get("/users", -> (req) Response.ok("users"))
+router.get("/users/:id", -> (req) Response.text("user"))
+router.post("/users", -> (req) Response.text("created"))
+
+check("exact path resolves", router.resolve(:GET, "/users") != nil)
+check("unknown path is nil", router.resolve(:GET, "/zzz") == nil)
+check("method mismatch is nil", router.resolve(:DELETE, "/users") == nil)
+check("case-insensitive match", router.resolve(:GET, "/USERS") != nil)
+check("trailing slash stripped", router.resolve(:GET, "/users/") != nil)
+
+m = router.resolve(:GET, "/users/42")
+check("dynamic segment matches", m != nil)
+check("dynamic segment captured", m.params[:id] == "42")
+
+invoked = m.handler.call(nil)
+check("handler invocable", invoked != nil)
+check("handler response body", invoked.body == "user")
+check("handler response status", invoked.status == 200)
+
+api = Router.new
+api.get("/bits", -> (req) Response.text("bits"))
+root = Router.new
+root.mount("/api/v1", api)
+check("mounted route resolves", root.resolve(:GET, "/api/v1/bits") != nil)
+
+r = Response.ok("hello")
+check("ok status", r.status == 200)
+check("ok body", r.body == "hello")
+check("ok content type", r.headers["Content-Type"] == "text/html; charset=utf-8")
+
+r2 = Response.not_found
+check("not_found status", r2.status == 404)
+
+r3 = Response.text("plain")
+check("text content type", r3.headers["Content-Type"] == "text/plain")
+
+http = r.to_http
+check("to_http status line", http.starts_with?("HTTP/1.1 200 OK"))
+check("to_http carries body", http.ends_with?("hello"))
+
+config = Config.new
+check("default port", config.port == 443)
+check("default host", config.host == "0.0.0.0")
+check("workers positive", config.workers > 0)
+
+config.port = -1
+raised = false
+begin
+  config.validate!
+rescue e
+  raised = true
+check("validate! raises on bad port", raised)
+
+if $smoke_fail > 0
+  << "SMOKE FAILED: [$smoke_fail] of [$smoke_total] checks"
+  exit 1
+<< "SMOKE OK [$smoke_total] checks"

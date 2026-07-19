@@ -1,8 +1,6 @@
 # Forge::ThreadPool — work-stealing thread pool
 # Each worker has a local deque; idle workers steal from busy workers
 
-in Tungsten:Forge
-
 + ThreadPool
   ro :workers
   ro :max_queue

@@ -1,8 +1,6 @@
 # Forge::Request — HTTP request parsing
 # Parses HTTP/1.1, HTTP/2, and HTTP/3 requests into a unified object
 
-in Tungsten:Forge
-
 + Request
   ro :method
   ro :path

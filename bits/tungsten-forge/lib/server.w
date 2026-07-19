@@ -2,8 +2,6 @@
 # Goroutine-per-connection with graceful shutdown
 # Supports HTTP/1.1 (request-response loop) and HTTP/2 (session-based multiplexing)
 
-in Tungsten:Forge
-
 + Server
   ro :listener
   ro :router

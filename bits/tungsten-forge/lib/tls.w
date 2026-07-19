@@ -1,8 +1,6 @@
 # Forge::TLS — TLS configuration and auto-cert (Let's Encrypt)
 # TLS 1.3 by default with ALPN negotiation for HTTP/2
 
-in Tungsten:Forge
-
 + TLS
   -> .build_context(config, protocols)
     ctx = SSL:Context.new

@@ -1,8 +1,6 @@
 # Forge::Static — static file serving with etag/cache-control
 # Zero-copy sendfile for performance, automatic content-type detection
 
-in Tungsten:Forge
-
 + Static
 
   -> .serve(request, config)

@@ -1,8 +1,6 @@
 # Forge::Listener — socket listener with goroutines
 # Uses compiled runtime Socket.listen + non-blocking I/O + goroutine parking
 
-in Tungsten:Forge
-
 + Listener
   ro :host
   ro :port

@@ -25907,10 +25907,18 @@ WValue w_array_view_range(WValue arr, WValue from_v, WValue to_v, WValue exclusi
     }
     WArray *src = (WArray *)w_as_ptr(arr);
     int64_t from = w_as_int(from_v);
-    int64_t to   = w_as_int(to_v);
     int     excl = (exclusive_v == W_TRUE);
+    int64_t to;
+    if (w_is_nil(to_v)) {
+        /* Right-unbounded range (`arr[n..]`): slice through the end. Use an
+         * exclusive size bound so the `!excl` adjustment below is skipped. */
+        to   = src->size;
+        excl = 1;
+    } else {
+        to = w_as_int(to_v);
+        if (to < 0) to = src->size + to;
+    }
     if (from < 0) from = src->size + from;
-    if (to   < 0) to   = src->size + to;
     if (from < 0) from = 0;
     if (!excl) to += 1;          /* inclusive → exclusive end */
     if (to > src->size) to = src->size;

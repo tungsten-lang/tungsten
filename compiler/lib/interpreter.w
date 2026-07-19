@@ -2468,9 +2468,14 @@ use target
           asz = recv.size()
           af = idx[:from]
           af = af < 0 ? af + asz : af
-          at = idx[:to] == nil ? asz - 1 : idx[:to]
-          at = at < 0 ? at + asz : at
-          at = idx[:exclusive] == true ? at - 1 : at
+          # Unbounded upper (`a[n..]` / `a[n...]`) runs through the end; the
+          # `...` exclusivity only trims an EXPLICIT upper bound, so it must not
+          # apply when there is none.
+          if idx[:to] == nil
+            at = asz - 1
+          else
+            at = idx[:to] < 0 ? idx[:to] + asz : idx[:to]
+            at = idx[:exclusive] == true ? at - 1 : at
           out = []
           k = af
           while k <= at && k < asz

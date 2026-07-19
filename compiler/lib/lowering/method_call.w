@@ -731,8 +731,13 @@
     range_node = node.args[0]
     from_val = lower_expression(ctx, range_node.from)
     from_reg = ensure_i64_value(wfn, from_val)
-    to_val = lower_expression(ctx, range_node.to)
-    to_reg = ensure_i64_value(wfn, to_val)
+    # Right-unbounded range (`arr[n..]`): range.to is nil. Pass w_nil as the
+    # sentinel so w_array_view_range slices through the end — lowering nil would
+    # yield 0, giving `arr[n..0]` (empty, or a 1-element slice for n==0).
+    to_reg = w_nil.to_s()
+    if range_node.to != nil
+      to_val = lower_expression(ctx, range_node.to)
+      to_reg = ensure_i64_value(wfn, to_val)
     excl_reg = w_false.to_s()
     if range_node.exclusive in (true 2)
       excl_reg = w_true.to_s()

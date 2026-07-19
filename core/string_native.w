@@ -325,3 +325,29 @@
         sqs_out << c
       sqs_prev = c
     sqs_out.to_s
+
+  # Translate characters: each character in `from` maps to the one at the same
+  # position in `to`; a shorter `to` repeats its last character, an empty `to`
+  # deletes (Ruby String#tr). Literal character lists only — the range (a-z)
+  # and negation (^x) shorthands are not yet supported.
+  -> tr(from, to)
+    tr_from = from.chars
+    tr_to = to.chars
+    tr_out = StringBuffer(size)
+    self.chars.each -> (c)
+      tr_idx = -1
+      tr_fi = 0
+      while tr_fi < tr_from.size
+        if tr_from[tr_fi] == c
+          tr_idx = tr_fi
+          tr_fi = tr_from.size
+        else
+          tr_fi += 1
+      if tr_idx < 0
+        tr_out << c
+      elsif tr_to.size > 0
+        tr_ti = tr_idx
+        if tr_ti >= tr_to.size
+          tr_ti = tr_to.size - 1
+        tr_out << tr_to[tr_ti]
+    tr_out.to_s

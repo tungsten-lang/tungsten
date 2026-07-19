@@ -22,6 +22,7 @@
   ro :action
   ro :name
   ro :constraints
+  ro :segments
 
   # options: {name:, constraints:} — explicit hash, not kwargs (kwargs
   # diverge between engines and break interp constructor dispatch).
@@ -84,6 +85,27 @@
     @routes.push(route)
     @named[options[:name]] = route if options[:name]
     route
+
+  # Generate the URL for a named route, substituting :param segments
+  # from the params hash. nil for unknown names or missing params.
+  -> path_for(name, params = {})
+    route = @named[name]
+    result = nil
+    if route != nil
+      parts = []
+      ok = true
+      route.segments.each -> (segment)
+        if segment[:type] == :literal
+          parts.push(segment[:value])
+        else
+          value = params[segment[:name]]
+          if value == nil
+            ok = false
+          else
+            parts.push(value.to_s)
+      if ok
+        result = "/" + parts.join("/")
+    result
 
   # --- HTTP verb sugar ---
 

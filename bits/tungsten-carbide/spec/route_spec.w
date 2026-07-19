@@ -34,4 +34,21 @@ describe "Route" ->
       set.add(:GET, "/health", "HealthController", :index)
       expect(set.routes.size).to eq(1)
 
+  describe "named routes" ->
+    it "generates a URL for a named route with params" ->
+      set = Route:Set.new
+      set.add(:GET, "/users/:id/posts/:post_id", "PostsController", :show, {name: :user_post})
+      expect(set.path_for(:user_post, {id: 7, post_id: 42})).to eq("/users/7/posts/42")
+
+    it "generates a literal-only URL" ->
+      set = Route:Set.new
+      set.add(:GET, "/health", "HealthController", :index, {name: :health})
+      expect(set.path_for(:health)).to eq("/health")
+
+    it "returns nil for unknown names and missing params" ->
+      set = Route:Set.new
+      set.add(:GET, "/users/:id", "UsersController", :show, {name: :user})
+      expect(set.path_for(:nope)).to be_nil
+      expect(set.path_for(:user)).to be_nil
+
 spec_summary

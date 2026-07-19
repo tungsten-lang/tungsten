@@ -383,3 +383,43 @@
       else
         out.push(x)
     out
+
+  # Transpose a rectangular array of rows (array of equal-length arrays):
+  # result[c][r] == self[r][c]. Empty receiver returns []. Assumes rows are
+  # equal length (uses the first row's width), matching typical matrix/table
+  # use.
+  -> transpose
+    if size == 0
+      return []
+    tr_cols = self[0].size
+    tr_out = []
+    tr_c = 0
+    while tr_c < tr_cols
+      tr_row = []
+      self.each -> (r)
+        tr_row.push(r[tr_c])
+      tr_out.push(tr_row)
+      tr_c += 1
+    tr_out
+
+  # Split into runs of consecutive elements: a new chunk begins whenever the
+  # block returns false for an adjacent (previous, current) pair (Ruby
+  # Enumerable#chunk_while). e.g. [1,2,4,5,7].chunk_while -> (a, b) b - a == 1
+  # => [[1,2],[4,5],[7]]. Uses the anonymous `&` form so it also runs under
+  # the interpreter.
+  -> chunk_while(&)
+    cw_n = size
+    if cw_n == 0
+      return []
+    cw_out = []
+    cw_cur = [self[0]]
+    cw_i = 1
+    while cw_i < cw_n
+      if &(self[cw_i - 1], self[cw_i])
+        cw_cur.push(self[cw_i])
+      else
+        cw_out.push(cw_cur)
+        cw_cur = [self[cw_i]]
+      cw_i += 1
+    cw_out.push(cw_cur)
+    cw_out

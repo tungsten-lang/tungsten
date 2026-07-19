@@ -556,7 +556,7 @@ use parser
         # String is in. reverse also names an Array method; over-scheduling
         # String on an array.reverse is harmless (matches the prior
         # unconditional behavior) and only happens while String is unresolved.
-        if call_name in ("size" "length" "swapcase" "capitalize" "reverse" "chars" "bytes" "upcase" "downcase")
+        if call_name in ("size" "length" "swapcase" "capitalize" "reverse" "chars" "bytes" "upcase" "downcase" "lpad" "rpad" "center")
           consider_autoload_name("String", defined, registry, seen, pending)
           @string_length_unresolved = false
         # Lowering synthesizes a per-element call for these Symbol-to-proc

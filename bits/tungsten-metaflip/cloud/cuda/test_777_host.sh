@@ -102,6 +102,20 @@ if "$TEST_BIN" --seed "$PRIMARY_SEED" \
   exit 1
 fi
 
+# Multi-group harvesting is deliberately bounded: K=1 preserves the original
+# path and at most eight 360-term endpoints may cross the device boundary.
+for HARVEST_TOP_K in 0 9; do
+  if "$TEST_BIN" --seed "$PRIMARY_SEED" --out /tmp/unused \
+      --harvest-top-k "$HARVEST_TOP_K" >"$ERROR_LOG" 2>&1; then
+    echo "CUDA777_SELF_TEST invalid harvest top-K was accepted" >&2
+    exit 1
+  fi
+  if ! grep -q -- '--harvest-top-k must be between 1 and 8' "$ERROR_LOG"; then
+    echo "CUDA777_SELF_TEST harvest top-K produced the wrong failure" >&2
+    exit 1
+  fi
+done
+
 # Status and archive files must not be able to alias and overwrite the exact
 # objective checkpoint.  Exercise both direct and lexically equivalent paths.
 if "$TEST_BIN" --seed "$PRIMARY_SEED" \

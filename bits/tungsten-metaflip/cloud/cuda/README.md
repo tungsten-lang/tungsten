@@ -86,7 +86,8 @@ The host regression exact-gates all five campaign roots, proves that objective
 ordering selects the d3094 certificate as leader, and checks the 25% leader
 floor, adaptive role and original-root allocation, productive-role preference,
 deterministic replay, bounded no-starvation exploration, descendant rotation,
-and source-aware density-chain admission.
+source-aware density-chain admission, deterministic top-K group selection,
+the K=1 compatibility path, transfer bounds, and harvest-counter lifecycle.
 
 The relay launch is deliberately one 32-thread warp per CUDA block.  During
 the cloud build, the script fail-closed checks the emitted barrier inventory
@@ -195,6 +196,27 @@ does not regress to its worse archived parent after restart.
 Use `--door-min-distance N` to override that measured default. The checkpoint
 is preserved unless a strictly better result appears.
 
+`--harvest-top-k N` (1 through 8, default 1) optionally preserves more of the
+independent group work already completed by an epoch. After the one fixed
+group-state download, the host orders valid completed endpoints by rank,
+density, then ascending group ID. It transfers only the first `N` endpoints
+that strictly improve the launch door. `N=1` is the original path: it selects
+the same absolute group, performs the same factor transfer, and makes the same
+archive, door, reward, and fleet-best decisions. For `N>1`, every selected
+scheme passes the exhaustive tensor gate and the published rank/density check
+before any scheme from that epoch is archived or admitted. Canonical scheme
+keys then remove duplicates—the compact device state intentionally identifies
+groups, not full scheme equality.
+
+Auxiliary exact-novel schemes are archived for restart evidence, but do not
+enter the live descendant bank and do not score adaptive-role reward. Only the
+absolute objective winner retains those effects. This keeps scheduling
+semantics independent of K while measuring whether otherwise-discarded group
+endpoints provide useful basin diversity. At rank 247, K=8 transfers at most
+47,424 factor bytes total per productive epoch; the capacity-wide hard
+bound is 69,120 bytes. Neutral epochs transfer none, and neither setting adds
+device buffers or changes the kernel.
+
 The 8192-group launch allocates 141,828,572 bytes (135.3 MiB) of explicit
 device buffers.  CUDA context and driver allocations make the process total
 shown by `nvidia-smi` larger, but it should remain comfortably below 1 GiB on
@@ -229,7 +251,7 @@ visits do not change it.
 they reset while the next epoch is in flight. The epoch log mirrors them as
 `epoch_door_action`, `epoch_door_score`, and `epoch_door_source_replace`.
 
-The relay also reports the breadth hidden behind its single-candidate harvest.
+The relay also reports the breadth available to candidate harvesting.
 `harvest_epoch_completed_groups` counts completed cooperative groups in the
 most recently downloaded epoch, while `harvest_epoch_improved_groups` counts
 the groups whose retained rank/density strictly beats that epoch's launch
@@ -241,8 +263,16 @@ this process only; they reset on process restart and are not reconstructed
 from the archive. Epoch fields are zero in `ready` and while a new epoch is in
 flight (the relay publishes a pre-launch `dispatch=0` status), become final
 after its state download, and remain visible in `done` if no later epoch starts.
-These counters do not affect winner selection, exact gating, archive admission,
-or adaptive-role reward.
+`harvest_top_k` reports the configured cap. The
+`harvest_epoch_selected_groups`, `harvest_epoch_downloaded_schemes`,
+`harvest_epoch_exact_schemes`, `harvest_epoch_novel_schemes`, and
+`harvest_epoch_transfer_bytes` fields audit the opt-in host path; matching
+`harvest_total_*` fields accumulate them for the process. The epoch log emits
+the same values in compact form. Candidate epoch counters reset alongside the
+group counters before the next dispatch, and totals remain additive. Group
+breadth counters do not affect selection. Candidate counters observe work
+already performed; only the exact-gated absolute winner affects live admission,
+fleet best, or adaptive-role reward.
 
 The build mechanically emits constant scan and hash specializations from the
 same canonical Tungsten kernel. Structural guards reject changed mode geometry,

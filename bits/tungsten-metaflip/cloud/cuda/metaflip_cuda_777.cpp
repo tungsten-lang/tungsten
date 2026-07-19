@@ -75,6 +75,7 @@ namespace {
 constexpr int kN = 7;
 constexpr int kFactorBits = kN * kN;
 constexpr int kCap = 360;
+constexpr int kMaxHarvestTopK = 8;
 constexpr uint64_t kFactorMask = (uint64_t{1} << kFactorBits) - 1;
 constexpr int kScanSharedBytes = 3 * kCap * static_cast<int>(sizeof(int64_t)) +
                                  6 * static_cast<int>(sizeof(int64_t));
@@ -301,6 +302,20 @@ VerifyResult verify_exact(const Scheme& scheme) {
     if (parity[cell] != 0) {
       return {false, "tensor mismatch at flattened coefficient " + std::to_string(cell)};
     }
+  }
+  return {true, "exact"};
+}
+
+VerifyResult verify_device_candidate(const Scheme& scheme, int published_rank,
+                                     int published_density) {
+  if (published_rank <= 0 || published_rank > kCap ||
+      scheme.terms.size() != static_cast<size_t>(published_rank)) {
+    return {false, "device/host rank disagreement"};
+  }
+  const VerifyResult verified = verify_exact(scheme);
+  if (!verified.exact) return verified;
+  if (density(scheme) != published_density) {
+    return {false, "device/host density disagreement"};
   }
   return {true, "exact"};
 }
@@ -904,10 +919,17 @@ int self_test(const std::string& seed_path) {
     std::cerr << "CUDA777_SELF_TEST unexpected seed objective\n";
     return 1;
   }
+  if (!verify_device_candidate(seed, 247, density(seed)).exact ||
+      verify_device_candidate(seed, 246, density(seed)).exact ||
+      verify_device_candidate(seed, 247, density(seed) + 1).exact) {
+    std::cerr << "CUDA777_SELF_TEST device-candidate metadata gate failed\n";
+    return 1;
+  }
 
   Scheme corrupt = seed;
   corrupt.terms[0].u ^= 1;
-  if (verify_exact(corrupt).exact) {
+  if (verify_exact(corrupt).exact ||
+      verify_device_candidate(corrupt, 247, density(corrupt)).exact) {
     std::cerr << "CUDA777_SELF_TEST controlled corruption was accepted\n";
     return 1;
   }
@@ -1447,6 +1469,7 @@ void usage(const char* program) {
       << "  --mode scan|hash|alternate  cooperative partner mode (scan)\n"
       << "  --max-doors N          in-memory restart-door cap (32)\n"
       << "  --door-min-distance N  descendant support-distance floor (12)\n"
+      << "  --harvest-top-k N      exact-gate/archive top improving groups, 1..8 (1)\n"
       << "  --stop-rank N          stop after an exact rank at most N (246)\n"
       << "  --run-seed N           reproducible host diversification seed (random)\n"
       << "  --device N             CUDA device index (0)\n";
@@ -1465,6 +1488,7 @@ struct Config {
   int margin = 4;
   int max_doors = 32;
   int door_min_distance = 12;
+  int harvest_top_k = 1;
   int stop_rank = 246;
   int device = 0;
   uint64_t run_seed = 0;
@@ -1507,6 +1531,7 @@ Config parse_config(int argc, char** argv) {
     else if (arg == "--margin") config.margin = parse_int(value(arg), arg);
     else if (arg == "--max-doors") config.max_doors = parse_int(value(arg), arg);
     else if (arg == "--door-min-distance") config.door_min_distance = parse_int(value(arg), arg);
+    else if (arg == "--harvest-top-k") config.harvest_top_k = parse_int(value(arg), arg);
     else if (arg == "--stop-rank") config.stop_rank = parse_int(value(arg), arg);
     else if (arg == "--run-seed") {
       config.run_seed = parse_u64(value(arg), arg);
@@ -1539,6 +1564,9 @@ Config parse_config(int argc, char** argv) {
   if (config.seconds > LLONG_MAX / 1000) {
     throw std::runtime_error("--seconds is too large");
   }
+  if (config.harvest_top_k < 1 || config.harvest_top_k > kMaxHarvestTopK) {
+    throw std::runtime_error("--harvest-top-k must be between 1 and 8");
+  }
   if (config.epochs < 0 || config.groups < 1 || config.groups > 262144 ||
       config.steps < 1 || config.dispatches < 1 || config.margin < 0 ||
       config.max_doors < 1 || config.door_min_distance < 0 || config.device < 0) {
@@ -1565,15 +1593,94 @@ struct GroupHarvestSummary {
   unsigned long long capture_sum = 0;
 };
 
-// Summarize the fixed eight-i32 record published by every cooperative group.
-// This is telemetry only: the production winner scan below remains the sole
-// authority for candidate selection, download, exact gating, and admission.
-GroupHarvestSummary summarize_group_harvest(const std::vector<int32_t>& states,
-                                            int groups, int launch_rank,
-                                            int launch_density) {
+struct GroupHarvestEndpoint {
+  int group = -1;
+  int rank = 0;
+  int density = 0;
+};
+
+struct GroupHarvestSelection {
+  bool has_absolute = false;
+  GroupHarvestEndpoint absolute;
+  std::vector<GroupHarvestEndpoint> selected;
+};
+
+struct CandidateHarvestSummary {
+  unsigned long long selected_groups = 0;
+  unsigned long long downloaded_schemes = 0;
+  unsigned long long exact_schemes = 0;
+  unsigned long long novel_schemes = 0;
+  unsigned long long transfer_bytes = 0;
+};
+
+void require_group_state_buffer(const std::vector<int32_t>& states, int groups) {
   if (groups < 0 || states.size() < static_cast<size_t>(groups) * 8) {
     throw std::invalid_argument("group harvest state buffer is too short");
   }
+}
+
+bool group_harvest_endpoint_better(const GroupHarvestEndpoint& left,
+                                   const GroupHarvestEndpoint& right) {
+  return std::tie(left.rank, left.density, left.group) <
+         std::tie(right.rank, right.density, right.group);
+}
+
+// Select a bounded sorted prefix in one pass over the downloaded fixed-size
+// state records. Group ID is the final tie break, matching the old ascending
+// winner scan exactly. The host retains at most eight endpoints rather than
+// sorting or allocating in proportion to --groups. Scheme identity is checked
+// later, after these selected slots are downloaded and canonicalized; the
+// compact state record intentionally has no fingerprint.
+GroupHarvestSelection select_group_harvest_endpoints(
+    const std::vector<int32_t>& states, int groups, int launch_rank,
+    int launch_density, int top_k) {
+  if (top_k < 1 || top_k > kMaxHarvestTopK) {
+    throw std::invalid_argument("group harvest top-K is outside 1..8");
+  }
+  require_group_state_buffer(states, groups);
+  GroupHarvestSelection selection;
+  selection.selected.reserve(static_cast<size_t>(top_k));
+  for (int group = 0; group < groups; ++group) {
+    const size_t base = static_cast<size_t>(group) * 8;
+    if (states[base + 7] != 1) continue;
+    const GroupHarvestEndpoint endpoint{group, states[base + 1], states[base + 3]};
+    if (endpoint.rank <= 0 || endpoint.rank > kCap) continue;
+    if (!selection.has_absolute ||
+        group_harvest_endpoint_better(endpoint, selection.absolute)) {
+      selection.has_absolute = true;
+      selection.absolute = endpoint;
+    }
+    const bool improves = endpoint.rank < launch_rank ||
+                          (endpoint.rank == launch_rank &&
+                           endpoint.density < launch_density);
+    if (!improves) continue;
+    const auto position = std::lower_bound(
+        selection.selected.begin(), selection.selected.end(), endpoint,
+        group_harvest_endpoint_better);
+    selection.selected.insert(position, endpoint);
+    if (selection.selected.size() > static_cast<size_t>(top_k)) {
+      selection.selected.pop_back();
+    }
+  }
+  return selection;
+}
+
+unsigned long long group_endpoint_transfer_bytes(
+    const GroupHarvestEndpoint& endpoint) {
+  if (endpoint.rank <= 0 || endpoint.rank > kCap) {
+    throw std::invalid_argument("group harvest endpoint rank is outside capacity");
+  }
+  return 3ULL * static_cast<unsigned long long>(endpoint.rank) * sizeof(int64_t);
+}
+
+// Summarize the fixed eight-i32 record published by every cooperative group.
+// These counts are telemetry only; select_group_harvest_endpoints owns the
+// deterministic candidate ordering, and the exhaustive host gate remains the
+// authority for archive and admission.
+GroupHarvestSummary summarize_group_harvest(const std::vector<int32_t>& states,
+                                            int groups, int launch_rank,
+                                            int launch_density) {
+  require_group_state_buffer(states, groups);
 
   GroupHarvestSummary summary;
   for (int group = 0; group < groups; ++group) {
@@ -1605,6 +1712,15 @@ void accumulate_group_harvest(GroupHarvestSummary& total,
   total.capture_sum += epoch.capture_sum;
 }
 
+void accumulate_candidate_harvest(CandidateHarvestSummary& total,
+                                  const CandidateHarvestSummary& epoch) {
+  total.selected_groups += epoch.selected_groups;
+  total.downloaded_schemes += epoch.downloaded_schemes;
+  total.exact_schemes += epoch.exact_schemes;
+  total.novel_schemes += epoch.novel_schemes;
+  total.transfer_bytes += epoch.transfer_bytes;
+}
+
 struct PolicyTelemetry {
   std::array<unsigned long long, 3> role_epochs{};
   unsigned long long adaptive_role_slots = 0;
@@ -1618,12 +1734,16 @@ struct PolicyTelemetry {
   int epoch_door_score = -1;
   bool epoch_door_source_replacement = false;
   bool has_selection = false;
+  int harvest_top_k = 1;
   GroupHarvestSummary harvest_epoch;
   GroupHarvestSummary harvest_total;
+  CandidateHarvestSummary candidate_harvest_epoch;
+  CandidateHarvestSummary candidate_harvest_total;
 };
 
 void begin_group_harvest_epoch(PolicyTelemetry& policy) {
   policy.harvest_epoch = {};
+  policy.candidate_harvest_epoch = {};
 }
 
 void complete_group_harvest_epoch(PolicyTelemetry& policy,
@@ -1632,6 +1752,12 @@ void complete_group_harvest_epoch(PolicyTelemetry& policy,
   policy.harvest_epoch =
       summarize_group_harvest(states, groups, launch_rank, launch_density);
   accumulate_group_harvest(policy.harvest_total, policy.harvest_epoch);
+}
+
+void complete_candidate_harvest_epoch(PolicyTelemetry& policy,
+                                      const CandidateHarvestSummary& epoch) {
+  policy.candidate_harvest_epoch = epoch;
+  accumulate_candidate_harvest(policy.candidate_harvest_total, epoch);
 }
 
 [[maybe_unused]] void sync_policy_telemetry(PolicyTelemetry& policy,
@@ -1691,6 +1817,7 @@ void complete_group_harvest_epoch(PolicyTelemetry& policy,
         << "\nepoch_door_score=" << policy->epoch_door_score
         << "\nepoch_door_source_replacement="
         << (policy->epoch_door_source_replacement ? 1 : 0)
+        << "\nharvest_top_k=" << policy->harvest_top_k
         << "\nharvest_epoch_completed_groups="
         << policy->harvest_epoch.completed_groups
         << "\nharvest_epoch_improved_groups="
@@ -1704,7 +1831,27 @@ void complete_group_harvest_epoch(PolicyTelemetry& policy,
         << policy->harvest_total.improved_groups
         << "\nharvest_total_capture_groups="
         << policy->harvest_total.capture_groups
-        << "\nharvest_total_capture_sum=" << policy->harvest_total.capture_sum << '\n';
+        << "\nharvest_total_capture_sum=" << policy->harvest_total.capture_sum
+        << "\nharvest_epoch_selected_groups="
+        << policy->candidate_harvest_epoch.selected_groups
+        << "\nharvest_epoch_downloaded_schemes="
+        << policy->candidate_harvest_epoch.downloaded_schemes
+        << "\nharvest_epoch_exact_schemes="
+        << policy->candidate_harvest_epoch.exact_schemes
+        << "\nharvest_epoch_novel_schemes="
+        << policy->candidate_harvest_epoch.novel_schemes
+        << "\nharvest_epoch_transfer_bytes="
+        << policy->candidate_harvest_epoch.transfer_bytes
+        << "\nharvest_total_selected_groups="
+        << policy->candidate_harvest_total.selected_groups
+        << "\nharvest_total_downloaded_schemes="
+        << policy->candidate_harvest_total.downloaded_schemes
+        << "\nharvest_total_exact_schemes="
+        << policy->candidate_harvest_total.exact_schemes
+        << "\nharvest_total_novel_schemes="
+        << policy->candidate_harvest_total.novel_schemes
+        << "\nharvest_total_transfer_bytes="
+        << policy->candidate_harvest_total.transfer_bytes << '\n';
   }
   if (!detail.empty()) out << "detail=" << detail << '\n';
   return out.str();
@@ -1729,11 +1876,14 @@ int policy_status_self_test() {
   policy.epoch_door_score = 19;
   policy.epoch_door_source_replacement = true;
   policy.has_selection = true;
+  policy.harvest_top_k = 8;
   policy.harvest_epoch = {8, 3, 4, 11};
   policy.harvest_total = {4096, 37, 41, 123};
+  policy.candidate_harvest_epoch = {8, 8, 8, 5, 47424};
+  policy.candidate_harvest_total = {64, 64, 64, 17, 379392};
   const std::string body = status_body("epoch", 66, 5, 1234, best, 16, 99, 100, 10,
                                        4, 0, "exact-novel", &policy);
-  const std::array<std::string, 23> required = {
+  const std::array<std::string, 34> required = {
       "policy_leader_epochs=18\n", "policy_original_epochs=31\n",
       "policy_descendant_epochs=18\n", "policy_adaptive_role_slots=50\n",
       "policy_role_explore_every=4\n",
@@ -1745,12 +1895,21 @@ int policy_status_self_test() {
       "2:v13,n3,b1,p11,last16\n",
       "selected_source=7\n", "selected_kernel=hash\n", "epoch_door_action=4\n",
       "epoch_door_score=19\n", "epoch_door_source_replacement=1\n",
+      "harvest_top_k=8\n",
       "harvest_epoch_completed_groups=8\n",
       "harvest_epoch_improved_groups=3\n",
       "harvest_epoch_capture_groups=4\n", "harvest_epoch_capture_sum=11\n",
       "harvest_total_completed_groups=4096\n",
       "harvest_total_improved_groups=37\n",
-      "harvest_total_capture_groups=41\n", "harvest_total_capture_sum=123\n"};
+      "harvest_total_capture_groups=41\n", "harvest_total_capture_sum=123\n",
+      "harvest_epoch_selected_groups=8\n",
+      "harvest_epoch_downloaded_schemes=8\n",
+      "harvest_epoch_exact_schemes=8\n", "harvest_epoch_novel_schemes=5\n",
+      "harvest_epoch_transfer_bytes=47424\n",
+      "harvest_total_selected_groups=64\n",
+      "harvest_total_downloaded_schemes=64\n",
+      "harvest_total_exact_schemes=64\n", "harvest_total_novel_schemes=17\n",
+      "harvest_total_transfer_bytes=379392\n"};
   for (const auto& field : required) {
     if (body.find(field) == std::string::npos) {
       throw std::runtime_error("policy status telemetry field is missing");
@@ -1781,6 +1940,68 @@ int group_harvest_self_test() {
     throw std::runtime_error("group harvest summary miscounted synthetic records");
   }
 
+  const GroupHarvestSelection ranked =
+      select_group_harvest_endpoints(states, 6, kCap, INT_MAX, 8);
+  if (!ranked.has_absolute || ranked.absolute.group != 2 ||
+      ranked.selected.size() != 4 || ranked.selected[0].group != 2 ||
+      ranked.selected[0].rank != 246 || ranked.selected[0].density != 4000 ||
+      ranked.selected[1].group != 1 || ranked.selected[2].group != 0 ||
+      ranked.selected[3].group != 4) {
+    throw std::runtime_error("group harvest objective ordering is wrong");
+  }
+  const GroupHarvestSelection selected_one =
+      select_group_harvest_endpoints(states, 6, 247, 3094, 1);
+  const GroupHarvestSelection selected_eight =
+      select_group_harvest_endpoints(states, 6, 247, 3094, 8);
+  if (!selected_one.has_absolute || selected_one.absolute.group != 2 ||
+      selected_one.selected.size() != 1 || selected_one.selected[0].group != 2 ||
+      selected_eight.selected.size() != 2 || selected_eight.selected[0].group != 2 ||
+      selected_eight.selected[1].group != 1) {
+    throw std::runtime_error("group harvest top-K prefix changed the absolute winner");
+  }
+
+  // Equal objectives retain ascending group order. Incomplete and invalid-rank
+  // records cannot displace a valid endpoint, and neutral endpoints are not
+  // transferred merely because K has spare capacity.
+  std::vector<int32_t> tie_states(7 * 8, 0);
+  auto publish_tie = [&](int group, int rank, int den, int completed) {
+    const size_t base = static_cast<size_t>(group) * 8;
+    tie_states[base + 1] = rank;
+    tie_states[base + 3] = den;
+    tie_states[base + 7] = completed;
+  };
+  publish_tie(0, 247, 3093, 1);
+  publish_tie(1, 246, 4000, 1);
+  publish_tie(2, 246, 3999, 1);
+  publish_tie(3, 246, 4000, 1);
+  publish_tie(4, 245, 1, 0);
+  publish_tie(5, 0, -1, 1);
+  publish_tie(6, 247, 3094, 1);
+  const GroupHarvestSelection tie_selected =
+      select_group_harvest_endpoints(tie_states, 7, 247, 3094, 8);
+  const std::array<int, 4> expected_groups = {2, 1, 3, 0};
+  if (!tie_selected.has_absolute || tie_selected.absolute.group != 2 ||
+      tie_selected.selected.size() != expected_groups.size()) {
+    throw std::runtime_error("group harvest selected the wrong top-K size");
+  }
+  for (size_t i = 0; i < expected_groups.size(); ++i) {
+    if (tie_selected.selected[i].group != expected_groups[i]) {
+      throw std::runtime_error("group harvest tie break is not deterministic");
+    }
+  }
+  if (group_endpoint_transfer_bytes({0, kCap, 0}) * kMaxHarvestTopK != 69120ULL) {
+    throw std::runtime_error("group harvest transfer bound changed unexpectedly");
+  }
+  for (const int invalid_top_k : {0, kMaxHarvestTopK + 1}) {
+    bool rejected = false;
+    try {
+      (void)select_group_harvest_endpoints(states, 6, 247, 3094, invalid_top_k);
+    } catch (const std::invalid_argument&) {
+      rejected = true;
+    }
+    if (!rejected) throw std::runtime_error("group harvest accepted invalid top-K");
+  }
+
   auto require_status_value = [](const std::string& body, const std::string& field,
                                  unsigned long long expected) {
     const std::string needle = field + "=" + std::to_string(expected) + "\n";
@@ -1806,38 +2027,83 @@ int group_harvest_self_test() {
                          expected_total.capture_groups);
     require_status_value(body, "harvest_total_capture_sum", expected_total.capture_sum);
   };
+  auto require_candidate_summary = [&](const std::string& body,
+                                       const CandidateHarvestSummary& expected_epoch,
+                                       const CandidateHarvestSummary& expected_total) {
+    require_status_value(body, "harvest_epoch_selected_groups",
+                         expected_epoch.selected_groups);
+    require_status_value(body, "harvest_epoch_downloaded_schemes",
+                         expected_epoch.downloaded_schemes);
+    require_status_value(body, "harvest_epoch_exact_schemes",
+                         expected_epoch.exact_schemes);
+    require_status_value(body, "harvest_epoch_novel_schemes",
+                         expected_epoch.novel_schemes);
+    require_status_value(body, "harvest_epoch_transfer_bytes",
+                         expected_epoch.transfer_bytes);
+    require_status_value(body, "harvest_total_selected_groups",
+                         expected_total.selected_groups);
+    require_status_value(body, "harvest_total_downloaded_schemes",
+                         expected_total.downloaded_schemes);
+    require_status_value(body, "harvest_total_exact_schemes",
+                         expected_total.exact_schemes);
+    require_status_value(body, "harvest_total_novel_schemes",
+                         expected_total.novel_schemes);
+    require_status_value(body, "harvest_total_transfer_bytes",
+                         expected_total.transfer_bytes);
+  };
 
   PolicyTelemetry lifecycle;
   Scheme best;
   const GroupHarvestSummary zero;
+  const CandidateHarvestSummary candidate_zero;
+  const CandidateHarvestSummary candidate_epoch{2, 2, 2, 1, 11832};
   const std::string ready =
       status_body("ready", 0, 0, 0, best, 1, 7, 0, 0, 0, 0, "", &lifecycle);
   require_status_summary(ready, zero, zero);
+  require_candidate_summary(ready, candidate_zero, candidate_zero);
 
   complete_group_harvest_epoch(lifecycle, states, 6, 247, 3094);
+  complete_candidate_harvest_epoch(lifecycle, candidate_epoch);
   const std::string first_epoch =
       status_body("epoch", 0, 1, 1, best, 1, 7, 0, 0, 0, 0, "", &lifecycle);
   require_status_summary(first_epoch, epoch, epoch);
+  require_candidate_summary(first_epoch, candidate_epoch, candidate_epoch);
 
   begin_group_harvest_epoch(lifecycle);
   const std::string next_dispatch =
       status_body("dispatch", 1, 0, 2, best, 1, 7, 0, 0, 0, 0, "", &lifecycle);
   require_status_summary(next_dispatch, zero, epoch);
+  require_candidate_summary(next_dispatch, candidate_zero, candidate_epoch);
   if (next_dispatch.find("phase=dispatch\n") == std::string::npos ||
       next_dispatch.find("dispatch=0\n") == std::string::npos) {
     throw std::runtime_error("group harvest lifecycle did not publish dispatch zero");
   }
 
   complete_group_harvest_epoch(lifecycle, states, 6, 247, 3094);
+  complete_candidate_harvest_epoch(lifecycle, candidate_epoch);
   const GroupHarvestSummary twice{10, 4, 8, 20};
+  const CandidateHarvestSummary candidate_twice{4, 4, 4, 2, 23664};
   const std::string done =
       status_body("done", 2, 0, 3, best, 1, 7, 0, 0, 0, 0, "", &lifecycle);
   require_status_summary(done, epoch, twice);
+  require_candidate_summary(done, candidate_epoch, candidate_twice);
   if (lifecycle.harvest_total.completed_groups != twice.completed_groups ||
       lifecycle.harvest_total.improved_groups != twice.improved_groups ||
       lifecycle.harvest_total.capture_groups != twice.capture_groups ||
       lifecycle.harvest_total.capture_sum != twice.capture_sum) {
     throw std::runtime_error("group harvest cumulative summary did not add once per epoch");
+  }
+  if (lifecycle.candidate_harvest_total.selected_groups !=
+          candidate_twice.selected_groups ||
+      lifecycle.candidate_harvest_total.downloaded_schemes !=
+          candidate_twice.downloaded_schemes ||
+      lifecycle.candidate_harvest_total.exact_schemes !=
+          candidate_twice.exact_schemes ||
+      lifecycle.candidate_harvest_total.novel_schemes !=
+          candidate_twice.novel_schemes ||
+      lifecycle.candidate_harvest_total.transfer_bytes !=
+          candidate_twice.transfer_bytes) {
+    throw std::runtime_error("candidate harvest cumulative summary did not add once per epoch");
   }
 
   bool short_buffer_rejected = false;
@@ -2077,6 +2343,10 @@ int run_campaign(const Config& config) {
             << " roots=" << original_roots.size()
             << " descendants=" << descendants.size()
             << " door_min_distance=" << config.door_min_distance
+            << " harvest_top_k=" << config.harvest_top_k
+            << " harvest_transfer_bound_bytes="
+            << (3ULL * static_cast<unsigned long long>(kCap) * sizeof(int64_t) *
+                static_cast<unsigned long long>(config.harvest_top_k))
             << " run_seed=" << run_seed << std::endl;
 
   std::signal(SIGINT, request_stop);
@@ -2089,6 +2359,7 @@ int run_campaign(const Config& config) {
   unsigned long long aggregate_partners = 0;
   LaunchScheduler scheduler;
   PolicyTelemetry policy;
+  policy.harvest_top_k = config.harvest_top_k;
   scheduler.original_stats.resize(original_roots.size());
   sync_policy_telemetry(policy, scheduler);
 
@@ -2195,110 +2466,153 @@ int run_campaign(const Config& config) {
     std::vector<int32_t> states(state_values);
     cuda_check(cudaMemcpy(states.data(), device.state, state_bytes, cudaMemcpyDeviceToHost),
                "state download");
-    int best_group = -1;
-    int best_rank = INT_MAX;
-    int best_density = INT_MAX;
     unsigned long long epoch_attempts = 0;
     unsigned long long epoch_partners = 0;
     for (int group = 0; group < config.groups; ++group) {
       const size_t base = static_cast<size_t>(group) * 8;
       if (states[base + 7] != 1) continue;
-      const int rank = states[base + 1];
-      const int den = states[base + 3];
       epoch_attempts += static_cast<unsigned int>(states[base + 4]);
       epoch_partners += static_cast<unsigned int>(states[base + 5]);
-      if (rank > 0 && rank <= kCap &&
-          (rank < best_rank || (rank == best_rank && den < best_density))) {
-        best_group = group;
-        best_rank = rank;
-        best_density = den;
-      }
     }
-    if (best_group < 0) throw std::runtime_error("no CUDA group published a completed state");
+    const GroupHarvestSelection harvest_selection =
+        select_group_harvest_endpoints(
+            states, config.groups, static_cast<int>(launch.terms.size()),
+            launch_density, config.harvest_top_k);
+    if (!harvest_selection.has_absolute) {
+      throw std::runtime_error("no CUDA group published a completed state");
+    }
+    const GroupHarvestEndpoint& absolute_endpoint = harvest_selection.absolute;
+    const int best_rank = absolute_endpoint.rank;
+    const int best_density = absolute_endpoint.density;
+    const std::vector<GroupHarvestEndpoint>& selected_endpoints =
+        harvest_selection.selected;
     complete_group_harvest_epoch(policy, states, config.groups,
                                  static_cast<int>(launch.terms.size()), launch_density);
     aggregate_attempts += epoch_attempts;
     aggregate_partners += epoch_partners;
 
-    bool claimed_improvement = best_rank < static_cast<int>(launch.terms.size()) ||
-                               (best_rank == static_cast<int>(launch.terms.size()) &&
-                                best_density < launch_density);
+    CandidateHarvestSummary candidate_harvest;
+    candidate_harvest.selected_groups = selected_endpoints.size();
     std::string outcome = "neutral";
     DoorAdmission door_admission;
     bool epoch_exact_novel = false;
     bool epoch_fleet_best = false;
-    if (claimed_improvement) {
+
+    struct DownloadedCandidate {
+      GroupHarvestEndpoint endpoint;
+      Scheme scheme;
+      int computed_density = 0;
+    };
+    std::vector<DownloadedCandidate> downloaded_candidates;
+    downloaded_candidates.reserve(selected_endpoints.size());
+
+    // Download exactly the selected top-K prefix. Every scheme passes the
+    // exhaustive host tensor and metadata gate before this epoch mutates the
+    // archive, door bank, adaptive reward, or fleet best.
+    for (const GroupHarvestEndpoint& endpoint : selected_endpoints) {
       Scheme candidate;
-      candidate.source = "cuda epoch " + std::to_string(epoch);
-      candidate.terms.resize(static_cast<size_t>(best_rank));
-      std::vector<int64_t> out_u(best_rank), out_v(best_rank), out_w(best_rank);
-      const size_t offset = static_cast<size_t>(best_group) * kCap;
+      candidate.source = "cuda epoch " + std::to_string(epoch) + " group " +
+                         std::to_string(endpoint.group);
+      candidate.terms.resize(static_cast<size_t>(endpoint.rank));
+      std::vector<int64_t> out_u(endpoint.rank), out_v(endpoint.rank),
+          out_w(endpoint.rank);
+      const size_t offset = static_cast<size_t>(endpoint.group) * kCap;
       cuda_check(cudaMemcpy(out_u.data(), device.best_u + offset,
-                            static_cast<size_t>(best_rank) * sizeof(int64_t),
+                            static_cast<size_t>(endpoint.rank) * sizeof(int64_t),
                             cudaMemcpyDeviceToHost),
                  "candidate U download");
       cuda_check(cudaMemcpy(out_v.data(), device.best_v + offset,
-                            static_cast<size_t>(best_rank) * sizeof(int64_t),
+                            static_cast<size_t>(endpoint.rank) * sizeof(int64_t),
                             cudaMemcpyDeviceToHost),
                  "candidate V download");
       cuda_check(cudaMemcpy(out_w.data(), device.best_w + offset,
-                            static_cast<size_t>(best_rank) * sizeof(int64_t),
+                            static_cast<size_t>(endpoint.rank) * sizeof(int64_t),
                             cudaMemcpyDeviceToHost),
                  "candidate W download");
-      for (int i = 0; i < best_rank; ++i) {
+      ++candidate_harvest.downloaded_schemes;
+      candidate_harvest.transfer_bytes += group_endpoint_transfer_bytes(endpoint);
+      for (int i = 0; i < endpoint.rank; ++i) {
         candidate.terms[static_cast<size_t>(i)] =
             {static_cast<uint64_t>(out_u[i]), static_cast<uint64_t>(out_v[i]),
              static_cast<uint64_t>(out_w[i])};
       }
 
-      const VerifyResult verified = verify_exact(candidate);
+      const VerifyResult verified =
+          verify_device_candidate(candidate, endpoint.rank, endpoint.density);
       const int computed_density = density(candidate);
-      if (!verified.exact || computed_density != best_density) {
+      if (!verified.exact) {
         ++exact_rejects;
-        const std::string reject_path = config.out_path + ".reject.epoch-" +
-                                        std::to_string(epoch) + ".txt";
+        std::string reject_path = config.out_path + ".reject.epoch-" +
+                                  std::to_string(epoch);
+        if (config.harvest_top_k > 1) {
+          reject_path += ".group-" + std::to_string(endpoint.group);
+        }
+        reject_path += ".txt";
         write_text_atomic(reject_path, serialize_scheme(candidate));
+        complete_candidate_harvest_epoch(policy, candidate_harvest);
         const long long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                                       std::chrono::steady_clock::now() - started)
                                       .count();
-        const std::string reason = !verified.exact
-                                       ? verified.reason
-                                       : "device/host density disagreement";
         write_text_atomic(config.status_path,
                           status_body("exact-reject", epoch, config.dispatches, elapsed,
                                       global_best,
                                       scheduled_door_count(original_roots, descendants,
                                                            global_best),
                                       run_seed, aggregate_attempts, aggregate_partners,
-                                      candidates, exact_rejects, reason, &policy));
+                                      candidates, exact_rejects, verified.reason, &policy));
         throw std::runtime_error("GPU exact gate rejected epoch " + std::to_string(epoch) +
-                                 ": " + reason);
+                                 " group " + std::to_string(endpoint.group) + ": " +
+                                 verified.reason);
       }
-
+      ++candidate_harvest.exact_schemes;
       ++candidates;
+      downloaded_candidates.push_back(
+          {endpoint, std::move(candidate), computed_density});
+    }
+
+    for (size_t candidate_index = 0;
+         candidate_index < downloaded_candidates.size(); ++candidate_index) {
+      DownloadedCandidate& downloaded = downloaded_candidates[candidate_index];
+      Scheme& candidate = downloaded.scheme;
+      const bool absolute_winner = candidate_index == 0;
       const std::string key = canonical_key(candidate);
-      if (known.insert(key).second) {
-        epoch_exact_novel = true;
+      const bool novel = known.insert(key).second;
+      if (novel) {
+        ++candidate_harvest.novel_schemes;
         std::ostringstream name;
         const uint64_t digest = key_digest(key);
-        name << config.archive_dir << "/epoch-" << std::setw(8) << std::setfill('0') << epoch
-             << "-r" << candidate.terms.size() << "-d" << computed_density << "-h"
+        name << config.archive_dir << "/epoch-" << std::setw(8) << std::setfill('0') << epoch;
+        if (config.harvest_top_k > 1) {
+          name << "-g" << std::setw(6) << std::setfill('0')
+               << downloaded.endpoint.group;
+        }
+        name << "-r" << candidate.terms.size() << "-d" << downloaded.computed_density << "-h"
              << std::hex << std::setw(16) << std::setfill('0') << digest << ".txt";
         write_scheme_atomic(name.str(), candidate);
-        door_admission = admit_descendant_from_source(
-            original_roots, descendants, candidate, descendant_capacity,
-            config.door_min_distance, choice.role, choice.source_index);
-        outcome = "exact-novel";
-      } else {
-        outcome = "exact-duplicate";
       }
-      if (objective_better(candidate, global_best)) {
-        epoch_fleet_best = true;
-        global_best = candidate;
-        write_scheme_atomic(config.out_path, global_best);
-        outcome = "fleet-best";
+
+      // Auxiliary top-K artifacts are archive evidence only. The absolute
+      // objective winner alone may alter live doors, fleet best, and the
+      // scheduler's exact-novel/fleet-best reward, preserving K=1 semantics.
+      if (absolute_winner) {
+        epoch_exact_novel = novel;
+        if (novel) {
+          door_admission = admit_descendant_from_source(
+              original_roots, descendants, candidate, descendant_capacity,
+              config.door_min_distance, choice.role, choice.source_index);
+          outcome = "exact-novel";
+        } else {
+          outcome = "exact-duplicate";
+        }
+        if (objective_better(candidate, global_best)) {
+          epoch_fleet_best = true;
+          global_best = candidate;
+          write_scheme_atomic(config.out_path, global_best);
+          outcome = "fleet-best";
+        }
       }
     }
+    complete_candidate_harvest_epoch(policy, candidate_harvest);
 
     scheduler.observe(choice, epoch_exact_novel, epoch_fleet_best);
     sync_policy_telemetry(policy, scheduler);
@@ -2342,6 +2656,27 @@ int run_campaign(const Config& config) {
               << " harvest_total_capture_groups="
               << policy.harvest_total.capture_groups
               << " harvest_total_capture_sum=" << policy.harvest_total.capture_sum
+              << " harvest_top_k=" << policy.harvest_top_k
+              << " harvest_epoch_selected="
+              << policy.candidate_harvest_epoch.selected_groups
+              << " harvest_epoch_downloaded="
+              << policy.candidate_harvest_epoch.downloaded_schemes
+              << " harvest_epoch_exact="
+              << policy.candidate_harvest_epoch.exact_schemes
+              << " harvest_epoch_novel="
+              << policy.candidate_harvest_epoch.novel_schemes
+              << " harvest_epoch_bytes="
+              << policy.candidate_harvest_epoch.transfer_bytes
+              << " harvest_total_selected="
+              << policy.candidate_harvest_total.selected_groups
+              << " harvest_total_downloaded="
+              << policy.candidate_harvest_total.downloaded_schemes
+              << " harvest_total_exact="
+              << policy.candidate_harvest_total.exact_schemes
+              << " harvest_total_novel="
+              << policy.candidate_harvest_total.novel_schemes
+              << " harvest_total_bytes="
+              << policy.candidate_harvest_total.transfer_bytes
               << " original_sources="
               << original_source_stats_text(policy.original_stats)
               << " result=" << outcome << std::endl;
@@ -2366,6 +2701,17 @@ int run_campaign(const Config& config) {
             << " harvest_total_capture_groups="
             << policy.harvest_total.capture_groups
             << " harvest_total_capture_sum=" << policy.harvest_total.capture_sum
+            << " harvest_top_k=" << policy.harvest_top_k
+            << " harvest_total_selected="
+            << policy.candidate_harvest_total.selected_groups
+            << " harvest_total_downloaded="
+            << policy.candidate_harvest_total.downloaded_schemes
+            << " harvest_total_exact="
+            << policy.candidate_harvest_total.exact_schemes
+            << " harvest_total_novel="
+            << policy.candidate_harvest_total.novel_schemes
+            << " harvest_total_bytes="
+            << policy.candidate_harvest_total.transfer_bytes
             << std::endl;
   return 0;
 }

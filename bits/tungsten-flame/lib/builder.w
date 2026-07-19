@@ -15,9 +15,9 @@ in Tungsten:Flame
   # Compile `source_path` to a native binary at `out_path`. Returns true
   # on success, false on failure. Caller is responsible for checking.
   -> .compile(source_path, out_path)
-    compiler = Builder.compiler_bin()
-    src_q = Builder.shell_quote(source_path)
-    out_q = Builder.shell_quote(out_path)
+    compiler = self.compiler_bin()
+    src_q = self.shell_quote(source_path)
+    out_q = self.shell_quote(out_path)
     cmd = compiler + " compile --frame-pointers " + src_q + " --out " + out_q
     system(cmd)
 
@@ -25,7 +25,7 @@ in Tungsten:Flame
   # falls back to bare `tungsten-compiler` on $PATH so a deployment that
   # installs the binary elsewhere still works.
   -> .compiler_bin()
-    root = Builder.project_root()
+    root = self.project_root()
     candidate = root + "/bin/tungsten-compiler"
     if file?(candidate)
       candidate

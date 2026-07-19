@@ -19,27 +19,24 @@ in Tungsten:Flame
 
 + XctraceXml
 
-  -> .collapse(xml_text, binary_path)
+  -> .collapse(xml_text, binary_path, load_addr)
     # 1. Build id → addresses dict from inline kperf-bt blocks.
-    addrs_by_id = XctraceXml.parse_kperf_bts(xml_text)
+    addrs_by_id = self.parse_kperf_bts(xml_text)
 
     # 2. Walk rows, accumulate folded stacks (still as hex addresses).
+    # Split once (see parse_kperf_bts for why find_from scans are out).
     folded = {}
-    rows_text = xml_text
-    cur = 0
-    while true
-      row_start = XctraceXml.find_from(rows_text, "<row>", cur)
-      if row_start == nil
-        break
-      row_end = XctraceXml.find_from(rows_text, "</row>", row_start)
-      if row_end == nil
-        break
-      row = rows_text.slice(row_start, row_end - row_start)
-      cur = row_end + 6
+    row_chunks = xml_text.split("<row>")
+    ri = 1
+    while ri < row_chunks.size()
+      chunk = row_chunks[ri]
+      row_end = chunk.index("</row>")
+      row = row_end != nil ? chunk.slice(0, row_end) : chunk
+      ri = ri + 1
 
-      addrs = XctraceXml.row_user_stack(row, addrs_by_id)
+      addrs = self.row_user_stack(row, addrs_by_id)
       if addrs != nil && addrs.size() > 0
-        folded_stack = XctraceXml.reverse(addrs).join(";")
+        folded_stack = self.reverse(addrs).join(";")
         if folded.has_key?(folded_stack)
           folded[folded_stack] = folded[folded_stack] + 1
         else
@@ -48,10 +45,10 @@ in Tungsten:Flame
     # 3. Symbolicate via atos. Collect every unique address that appears
     #    in any folded stack, run `atos -o BIN` in one batch, build a
     #    dict, then rewrite each folded stack with symbol names.
-    sym = XctraceXml.symbolicate(folded.keys(), binary_path)
+    sym = self.symbolicate(folded.keys(), binary_path, load_addr)
 
     out = []
-    keys = XctraceXml.sort_strings(folded.keys())
+    keys = self.sort_strings(folded.keys())
     i = 0
     while i < keys.size()
       raw_stack = keys[i]
@@ -73,7 +70,10 @@ in Tungsten:Flame
   # a dict mapping address-string → symbol-name. Addresses that atos can't
   # resolve (kernel, system libs without dSYMs) stay out of the dict so
   # the caller falls back to the raw hex.
-  -> .symbolicate(stack_keys, binary_path)
+  # `load_addr` is the binary's runtime __TEXT load address ("0x...", or
+  # "" when unknown) — trace addresses are ASLR-slid, so atos needs -l
+  # to map them back into the binary.
+  -> .symbolicate(stack_keys, binary_path, load_addr)
     result = {}
     if binary_path == nil || binary_path == ""
       return result
@@ -91,8 +91,10 @@ in Tungsten:Flame
     if addrs.size() == 0
       return result
     # Build batch atos command
-    bin_q = Builder.shell_quote(binary_path)
+    bin_q = Tungsten:Flame:Builder.shell_quote(binary_path)
     cmd = "atos -o " + bin_q
+    if load_addr != nil && load_addr != ""
+      cmd = cmd + " -l " + load_addr
     j = 0
     while j < addrs.size()
       cmd = cmd + " " + addrs[j]
@@ -124,8 +126,8 @@ in Tungsten:Flame
   # Counter values are cumulative per-(thread, core). When a thread moves
   # cores, the new core's counter reading isn't comparable to the prior
   # one — we treat that as "no baseline yet" and start fresh for that key.
-  -> .collapse_counters(xml_text, binary_path, metric_names)
-    addrs_by_id = XctraceXml.parse_kperf_bts(xml_text)
+  -> .collapse_counters(xml_text, binary_path, load_addr, metric_names)
+    addrs_by_id = self.parse_kperf_bts(xml_text)
     n_metrics = metric_names.size()
 
     # Per-(thread:core) previous counter snapshot.
@@ -143,31 +145,30 @@ in Tungsten:Flame
     # subsequent rows reference the id via `<thread-state ref="N"/>`.
     running_ids = {}
 
-    cur = 0
+    row_chunks = xml_text.split("<row>")
+    ri = 0
     while true
-      row_start = XctraceXml.find_from(xml_text, "<row>", cur)
-      if row_start == nil
+      ri = ri + 1
+      if ri >= row_chunks.size()
         break
-      row_end = XctraceXml.find_from(xml_text, "</row>", row_start)
-      if row_end == nil
-        break
-      row = xml_text.slice(row_start, row_end - row_start)
-      cur = row_end + 6
+      chunk = row_chunks[ri]
+      row_end = chunk.index("</row>")
+      row = row_end != nil ? chunk.slice(0, row_end) : chunk
 
-      ts_key = XctraceXml.extract_tag_key(row, "<thread-state")
-      if row.includes?("fmt=\"Running\"")
+      ts_key = self.extract_tag_key(row, "<thread-state")
+      if row.include?("fmt=\"Running\"")
         running_ids[ts_key] = true
 
       if running_ids.has_key?(ts_key)
-        thread_key = XctraceXml.extract_tag_key(row, "<thread")
-        core_key   = XctraceXml.extract_tag_key(row, "<core")
-        pmc_vals   = XctraceXml.extract_pmc_values(row)
+        thread_key = self.extract_tag_key(row, "<thread")
+        core_key   = self.extract_tag_key(row, "<core")
+        pmc_vals   = self.extract_pmc_values(row)
         if pmc_vals.size() >= n_metrics
-          addrs = XctraceXml.row_user_stack(row, addrs_by_id)
+          addrs = self.row_user_stack(row, addrs_by_id)
           key = thread_key + ":" + core_key
           if addrs != nil && addrs.size() > 0 && prev_vals.has_key?(key)
             prev = prev_vals[key]
-            folded_stack = XctraceXml.reverse(addrs).join(";")
+            folded_stack = self.reverse(addrs).join(";")
             m = 0
             while m < n_metrics
               delta = pmc_vals[m] - prev[m]
@@ -189,14 +190,14 @@ in Tungsten:Flame
       fd.keys().each -> (k)
         all_keys.push(k)
       mi = mi + 1
-    sym = XctraceXml.symbolicate(all_keys, binary_path)
+    sym = self.symbolicate(all_keys, binary_path, load_addr)
 
     result = {}
     mi = 0
     while mi < n_metrics
       name = metric_names[mi]
       fd = folded_by_metric[name]
-      keys = XctraceXml.sort_strings(fd.keys())
+      keys = self.sort_strings(fd.keys())
       lines = []
       ki = 0
       while ki < keys.size()
@@ -224,7 +225,7 @@ in Tungsten:Flame
     pos = row.index(tag_prefix)
     if pos == nil
       return "?"
-    gt = XctraceXml.find_from(row, ">", pos)
+    gt = self.find_from(row, ">", pos)
     if gt == nil
       return "?"
     tag = row.slice(pos, gt - pos + 1)
@@ -249,10 +250,10 @@ in Tungsten:Flame
     pos = row.index("<pmc-events")
     if pos == nil
       return []
-    gt = XctraceXml.find_from(row, ">", pos)
+    gt = self.find_from(row, ">", pos)
     if gt == nil
       return []
-    close = XctraceXml.find_from(row, "</pmc-events>", gt)
+    close = self.find_from(row, "</pmc-events>", gt)
     if close == nil
       return []
     text = row.slice(gt + 1, close - gt - 1)
@@ -266,41 +267,101 @@ in Tungsten:Flame
       pi = pi + 1
     out
 
-  # Walk all `<kperf-bt id="N" ...><text-addresses ...>A B C</text-addresses>...</kperf-bt>`
-  # blocks and return { N => [A, B, C] }.
+  # Walk all inline `<kperf-bt id="N" ...>...</kperf-bt>` blocks and
+  # return { N => [frames, leaf first] }.
+  #
+  # Inside a kperf-bt:
+  #   - `<text-address ...>` (singular) is the sample PC — the leaf frame.
+  #     Its fmt attribute already carries the hex form ("0x...").
+  #   - `<text-addresses ...>` (plural) holds the caller frames as
+  #     space-separated decimal values, zero-terminated. Repeated stacks
+  #     share it via `<text-addresses ref="N"/>`, so inline definitions
+  #     are memoized in ta_by_id / pc_by_id and refs resolved from there.
+  #   - Single-frame stacks duplicate the PC in the plural list, so a
+  #     leading caller equal to the PC is dropped.
   -> .parse_kperf_bts(xml)
+    # Split once instead of scanning with find_from — find_from copies
+    # the remaining string per call, which is O(n^2) over a multi-MB
+    # export. kperf-bt blocks never nest, so each piece holds one block.
+    ta_by_id = {}
+    pc_by_id = {}
     result = {}
-    cur = 0
-    while true
-      ks = XctraceXml.find_from(xml, "<kperf-bt id=\"", cur)
-      if ks == nil
-        break
-      id_start = ks + 14  # past "<kperf-bt id=\""
-      id_end = XctraceXml.find_from(xml, "\"", id_start)
-      if id_end == nil
-        break
-      id_str = xml.slice(id_start, id_end - id_start)
+    pieces = xml.split("<kperf-bt id=\"")
+    i = 1
+    while i < pieces.size()
+      piece = pieces[i]
+      q = piece.index("\"")
+      close = piece.index("</kperf-bt>")
+      if q != nil && close != nil
+        id_str = piece.slice(0, q)
+        block = piece.slice(q, close - q)
+        result[id_str] = self.block_stack(block, ta_by_id, pc_by_id)
+      i = i + 1
+    result
 
-      # Find <text-addresses ...>ADDRS</text-addresses> inside this kperf-bt
-      ta_open = XctraceXml.find_from(xml, "<text-addresses", id_end)
-      gt = (ta_open != nil) ? XctraceXml.find_from(xml, ">", ta_open) : nil
-      ta_close = (gt != nil) ? XctraceXml.find_from(xml, "</text-addresses>", gt) : nil
-      if ta_close == nil
-        cur = id_end + 1
-      else
-        addrs_str = xml.slice(gt + 1, ta_close - gt - 1)
-        addrs = []
-        parts = addrs_str.split(" ")
+  # Resolve one kperf-bt block's frame list (leaf first). Memoizes any
+  # inline text-address(es) definitions into pc_by_id / ta_by_id.
+  -> .block_stack(block, ta_by_id, pc_by_id)
+    # Leaf PC: inline `<text-address id="N" fmt="0x...">` or `<text-address ref="N"/>`.
+    pc = nil
+    ip = block.index("<text-address id=\"")
+    if ip != nil
+      id_s = ip + 18
+      id_e = self.find_from(block, "\"", id_s)
+      fm = (id_e != nil) ? self.find_from(block, "fmt=\"", id_e) : nil
+      if fm != nil
+        v_s = fm + 5
+        v_e = self.find_from(block, "\"", v_s)
+        if v_e != nil
+          pc = block.slice(v_s, v_e - v_s)
+          pc_by_id[block.slice(id_s, id_e - id_s)] = pc
+    else
+      rp = block.index("<text-address ref=\"")
+      if rp != nil
+        r_s = rp + 19
+        r_e = self.find_from(block, "\"", r_s)
+        if r_e != nil
+          rid = block.slice(r_s, r_e - r_s)
+          if pc_by_id.has_key?(rid)
+            pc = pc_by_id[rid]
+
+    # Caller frames: inline `<text-addresses id="N" ...>VALS</...>` or ref.
+    callers = []
+    tp = block.index("<text-addresses id=\"")
+    if tp != nil
+      id_s = tp + 20
+      id_e = self.find_from(block, "\"", id_s)
+      gt = (id_e != nil) ? self.find_from(block, ">", id_e) : nil
+      ta_close = (gt != nil) ? self.find_from(block, "</text-addresses>", gt) : nil
+      if ta_close != nil
+        parts = block.slice(gt + 1, ta_close - gt - 1).split(" ")
         pi = 0
         while pi < parts.size()
           p = parts[pi].strip()
           if p.size() > 0 && p != "0"
-            addrs.push("0x" + XctraceXml.dec_to_hex(p))
+            callers.push("0x" + self.dec_to_hex(p))
           pi = pi + 1
-        result[id_str] = addrs
-        cur = ta_close + 16
+        ta_by_id[block.slice(id_s, id_e - id_s)] = callers
+    else
+      rp = block.index("<text-addresses ref=\"")
+      if rp != nil
+        r_s = rp + 21
+        r_e = self.find_from(block, "\"", r_s)
+        if r_e != nil
+          rid = block.slice(r_s, r_e - r_s)
+          if ta_by_id.has_key?(rid)
+            callers = ta_by_id[rid]
 
-    result
+    frames = []
+    if pc != nil
+      frames.push(pc)
+    ci = 0
+    while ci < callers.size()
+      c = callers[ci]
+      if !(ci == 0 && pc != nil && c == pc)
+        frames.push(c)
+      ci = ci + 1
+    frames
 
   # For a <row>...</row> chunk, return the user-stack as a list of
   # address strings, or nil if unresolvable.
@@ -308,7 +369,7 @@ in Tungsten:Flame
     # First check for an inline kperf-bt with text-addresses — these
     # ARE the user-stack (the inline form). Take the LAST one in the
     # row (kernel comes first, user second).
-    bts = XctraceXml.all_kperf_refs(row)
+    bts = self.all_kperf_refs(row)
     if bts.size() == 0
       return nil
     last = bts[bts.size() - 1]
@@ -322,11 +383,11 @@ in Tungsten:Flame
     refs = []
     cur = 0
     while true
-      pos = XctraceXml.find_from(row, "<kperf-bt", cur)
+      pos = self.find_from(row, "<kperf-bt", cur)
       if pos == nil
         break
       # Look for id="N" or ref="N"
-      gt = XctraceXml.find_from(row, ">", pos)
+      gt = self.find_from(row, ">", pos)
       if gt == nil
         break
       tag = row.slice(pos, gt - pos + 1)

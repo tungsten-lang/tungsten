@@ -51,7 +51,7 @@ in Tungsten:Flame
           count = 0
         stacks.push({ stack: stack, count: count })
         total = total + count
-        if stack.includes?("kevent") || stack.includes?("poll")
+        if stack.include?("kevent") || stack.include?("poll")
           idle = idle + count
       i = i + 1
 
@@ -67,7 +67,7 @@ in Tungsten:Flame
       entry = stacks[i]
       stack = entry[:stack]
       count = entry[:count]
-      if !stack.includes?("kevent") && !stack.includes?("poll")
+      if !stack.include?("kevent") && !stack.include?("poll")
         frames = stack.split(";")
         leaf = frames.last()
         plus_idx = leaf.rindex(" + ")
@@ -91,7 +91,7 @@ in Tungsten:Flame
       skip = false
       j = 0
       while j < infra_names.size()
-        if func_name.includes?(infra_names[j])
+        if func_name.include?(infra_names[j])
           skip = true
           break
         j = j + 1
@@ -115,66 +115,66 @@ in Tungsten:Flame
 
     # Categorize samples
     -> matches_general(frame)
-      if frame.includes?("w_method_call") || frame.includes?("w_method_dispatch") || frame.includes?("call_closure")
+      if frame.include?("w_method_call") || frame.include?("w_method_dispatch") || frame.include?("call_closure")
         return "method call"
-      if frame.includes?("GC_") || frame.includes?("w_gc_") || frame.includes?("w_alloc") || frame.includes?("malloc") || frame.includes?("realloc") || frame.includes?("calloc") || frame.includes?("w_array_push")
+      if frame.include?("GC_") || frame.include?("w_gc_") || frame.include?("w_alloc") || frame.include?("malloc") || frame.include?("realloc") || frame.include?("calloc") || frame.include?("w_array_push")
         return "allocation"
-      if frame.includes?("w_str_") || frame.includes?("w_string") || frame.includes?("strlen") || frame.includes?("memcpy") || frame.includes?("memmove") || frame.includes?("w_strbuf")
+      if frame.include?("w_str_") || frame.include?("w_string") || frame.include?("strlen") || frame.include?("memcpy") || frame.include?("memmove") || frame.include?("w_strbuf")
         return "string ops"
-      if frame.includes?("w_int") || frame.includes?("w_add") || frame.includes?("w_sub") || frame.includes?("w_mul")
+      if frame.include?("w_int") || frame.include?("w_add") || frame.include?("w_sub") || frame.include?("w_mul")
         return "integer ops"
-      if frame.includes?("w_eq") || frame.includes?("w_cmp") || frame.includes?("w_lt") || frame.includes?("w_gt")
+      if frame.include?("w_eq") || frame.include?("w_cmp") || frame.include?("w_lt") || frame.include?("w_gt")
         return "comparison"
-      if frame.includes?("w_hash") || frame.includes?("w_map") || frame.includes?("w_dict") || frame.includes?("w_table")
+      if frame.include?("w_hash") || frame.include?("w_map") || frame.include?("w_dict") || frame.include?("w_table")
         return "hash/map"
-      if frame.includes?("libsystem_kernel")
+      if frame.include?("libsystem_kernel")
         return "syscall"
       nil
 
     -> matches_lexer(frame)
-      if frame.includes?("tokenize")
+      if frame.include?("tokenize")
         return "tokenize"
-      if frame.includes?("w_str_") || frame.includes?("w_string") || frame.includes?("strlen") || frame.includes?("memcpy") || frame.includes?("memmove") || frame.includes?("w_strbuf")
+      if frame.include?("w_str_") || frame.include?("w_string") || frame.include?("strlen") || frame.include?("memcpy") || frame.include?("memmove") || frame.include?("w_strbuf")
         return "string ops"
-      if frame.includes?("w_method_call") || frame.includes?("w_method_dispatch") || frame.includes?("call_closure")
+      if frame.include?("w_method_call") || frame.include?("w_method_dispatch") || frame.include?("call_closure")
         return "method call"
-      if frame.includes?("GC_") || frame.includes?("w_gc_") || frame.includes?("w_alloc") || frame.includes?("malloc") || frame.includes?("realloc") || frame.includes?("calloc") || frame.includes?("w_array_push")
+      if frame.include?("GC_") || frame.include?("w_gc_") || frame.include?("w_alloc") || frame.include?("malloc") || frame.include?("realloc") || frame.include?("calloc") || frame.include?("w_array_push")
         return "allocation"
-      if frame.includes?("w_eq") || frame.includes?("w_cmp") || frame.includes?("w_lt") || frame.includes?("w_gt")
+      if frame.include?("w_eq") || frame.include?("w_cmp") || frame.include?("w_lt") || frame.include?("w_gt")
         return "comparison"
-      if frame.includes?("w_hash") || frame.includes?("w_map") || frame.includes?("w_dict") || frame.includes?("w_table")
+      if frame.include?("w_hash") || frame.include?("w_map") || frame.include?("w_dict") || frame.include?("w_table")
         return "hash/map"
-      if frame.includes?("w_int") || frame.includes?("w_add") || frame.includes?("w_sub") || frame.includes?("w_mul")
+      if frame.include?("w_int") || frame.include?("w_add") || frame.include?("w_sub") || frame.include?("w_mul")
         return "integer ops"
       nil
 
     -> matches_ruby(frame)
-      if frame.includes?("(garbage collection)") || frame.includes?("GC")
+      if frame.include?("(garbage collection)") || frame.include?("GC")
         return "gc"
-      if frame.includes?("Tungsten::Lexer#") || frame.includes?("Tungsten::Parser#") || frame.includes?("parse_with_file")
+      if frame.include?("Tungsten::Lexer#") || frame.include?("Tungsten::Parser#") || frame.include?("parse_with_file")
         return "parse/lex"
-      if frame.includes?("Tungsten::Interpreter#evaluate") || frame.includes?("Tungsten::Interpreter#visit_") || frame.includes?("Tungsten::Interpreter#call_") || frame.includes?("Tungsten::Interpreter#invoke_block") || frame.includes?("Tungsten::Interpreter#run")
+      if frame.include?("Tungsten::Interpreter#evaluate") || frame.include?("Tungsten::Interpreter#visit_") || frame.include?("Tungsten::Interpreter#call_") || frame.include?("Tungsten::Interpreter#invoke_block") || frame.include?("Tungsten::Interpreter#run")
         return "interpreter"
-      if frame.includes?("Tungsten::Environment#")
+      if frame.include?("Tungsten::Environment#")
         return "environment"
-      if frame.includes?("Array#") || frame.includes?("Hash#") || frame.includes?("String#") || frame.includes?("Enumerable#")
+      if frame.include?("Array#") || frame.include?("Hash#") || frame.include?("String#") || frame.include?("Enumerable#")
         return "ruby core"
-      if frame.includes?("Kernel#require")
+      if frame.include?("Kernel#require")
         return "require"
       nil
 
     -> matches_external(frame)
-      if frame.includes?("malloc") || frame.includes?("realloc") || frame.includes?("calloc") || frame.includes?("free") || frame.includes?("operator new")
+      if frame.include?("malloc") || frame.include?("realloc") || frame.include?("calloc") || frame.include?("free") || frame.include?("operator new")
         return "allocation"
-      if frame.includes?("GC") || frame.includes?("mark") || frame.includes?("sweep")
+      if frame.include?("GC") || frame.include?("mark") || frame.include?("sweep")
         return "gc"
-      if frame.includes?("vm_") || frame.includes?("rb_") || frame.includes?("Py") || frame.includes?("objc_msgSend") || frame.includes?("swift_")
+      if frame.include?("vm_") || frame.include?("rb_") || frame.include?("Py") || frame.include?("objc_msgSend") || frame.include?("swift_")
         return "runtime/vm"
-      if frame.includes?("libsystem_kernel") || frame.includes?("kevent") || frame.includes?("poll") || frame.includes?("futex") || frame.includes?("epoll")
+      if frame.include?("libsystem_kernel") || frame.include?("kevent") || frame.include?("poll") || frame.include?("futex") || frame.include?("epoll")
         return "syscall"
-      if frame.includes?("strlen") || frame.includes?("strcmp") || frame.includes?("memcpy") || frame.includes?("memmove") || frame.includes?("memset")
+      if frame.include?("strlen") || frame.include?("strcmp") || frame.include?("memcpy") || frame.include?("memmove") || frame.include?("memset")
         return "string ops"
-      if frame.includes?("pthread") || frame.includes?("mutex") || frame.includes?("lock")
+      if frame.include?("pthread") || frame.include?("mutex") || frame.include?("lock")
         return "locking"
       nil
 
@@ -184,7 +184,7 @@ in Tungsten:Flame
       entry = stacks[i]
       stack = entry[:stack]
       count = entry[:count]
-      if !stack.includes?("kevent") && !stack.includes?("poll")
+      if !stack.include?("kevent") && !stack.include?("poll")
         frames = stack.split(";")
         matched = false
         fi = frames.size() - 1
@@ -265,7 +265,7 @@ in Tungsten:Flame
         entry = stacks[i]
         stack = entry[:stack]
         count = entry[:count]
-        if !stack.includes?("kevent") && !stack.includes?("poll")
+        if !stack.include?("kevent") && !stack.include?("poll")
           frames = stack.split(";")
           fi = 0
           while fi < frames.size()
@@ -441,7 +441,7 @@ in Tungsten:Flame
         else
           stack = line
           count = 0
-        if !stack.includes?("kevent") && !stack.includes?("poll")
+        if !stack.include?("kevent") && !stack.include?("poll")
           frames = stack.split(";")
           leaf = frames.last()
           plus_idx = leaf.rindex(" + ")

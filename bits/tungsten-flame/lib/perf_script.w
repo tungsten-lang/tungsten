@@ -28,23 +28,23 @@ in Tungsten:Flame
       line = lines[i]
       stripped = line.strip()
       if stripped.size() == 0
-        PerfScript.flush(current, stacks)
+        self.flush(current, stacks)
         current = []
       else
         first_char = line.slice(0, 1)
         if first_char != "\t" && first_char != " "
           # Header line for a new sample — flush whatever we accumulated.
-          PerfScript.flush(current, stacks)
+          self.flush(current, stacks)
           current = []
         else
-          frame = PerfScript.parse_frame(stripped)
+          frame = self.parse_frame(stripped)
           if frame != nil
             current.push(frame)
       i = i + 1
-    PerfScript.flush(current, stacks)
+    self.flush(current, stacks)
 
     keys = stacks.keys()
-    sorted_keys = PerfScript.sort_strings(keys)
+    sorted_keys = self.sort_strings(keys)
     out = []
     j = 0
     while j < sorted_keys.size()

@@ -4,18 +4,17 @@
 # Entrypoint: parses argv via Argon, dispatches to a profile mode,
 # runs Builder → Sampler → FlameAnalyzer.
 
+# NOTE: the worker classes live in the Tungsten:Flame namespace, and
+# top-level statements do NOT inherit an `in` scope (in either engine),
+# so every cross-class call below must be fully qualified
+# (Tungsten:Flame:Sampler etc.). Argon is a root-namespace class.
+
 use argon
 use analyzer
 use perf_script
 use xctrace_xml
 use builder
 use sampler
-
-# Boot marker (also forces top-level statements after uses).
-# << "flame boot"
-
-module Flame
-  VERSION = "0.3.0"
 
 # ---- Read and parse the manpage ----
 # Prefer TUNGSTEN_ROOT (set by the CLI); __DIR__ is not always populated
@@ -111,11 +110,11 @@ if !file?(source)
   << "tungsten flame: source not found: " + source
   exit(1)
 
-tmpdir = Sampler.mktmpdir
+tmpdir = Tungsten:Flame:Sampler.mktmpdir
 
 if fl_build_only
-  build_out = (fl_output != "") ? fl_output : ("flame_" + Sampler.basename_noext(source))
-  ok = Builder.compile(source, build_out)
+  build_out = (fl_output != "") ? fl_output : ("flame_" + Tungsten:Flame:Sampler.basename_noext(source))
+  ok = Tungsten:Flame:Builder.compile(source, build_out)
   if !ok
     << "tungsten flame: build failed"
     exit(1)
@@ -123,12 +122,12 @@ if fl_build_only
   exit(0)
 
 bin_path = tmpdir + "/flame_bin"
-build_ok = Builder.compile(source, bin_path)
+build_ok = Tungsten:Flame:Builder.compile(source, bin_path)
 if !build_ok
   << "tungsten flame: build failed"
   exit(1)
 
-metrics = Sampler.profile(bin_path, fl_duration, fl_rate)
+metrics = Tungsten:Flame:Sampler.profile(bin_path, fl_duration, fl_rate)
 metric_names = metrics.keys
 if metric_names.size == 0
   << "tungsten flame: profiling produced no samples"
@@ -152,14 +151,14 @@ while i < metric_names.size
   i = i + 1
 
 # Full breakdown for primary metric (Top + caller/callee + categories).
-FlameAnalyzer.display(tmpdir + "/" + primary + ".folded", fl_top, "general", fl_focus, use_color)
+Tungsten:Flame:FlameAnalyzer.display(tmpdir + "/" + primary + ".folded", fl_top, "general", fl_focus, use_color)
 
 # Compact Top-N per secondary metric.
 i = 0
 while i < metric_names.size
   m = metric_names[i]
   if m != primary
-    FlameAnalyzer.display_top_only(tmpdir + "/" + m + ".folded", fl_top, m, use_color)
+    Tungsten:Flame:FlameAnalyzer.display_top_only(tmpdir + "/" + m + ".folded", fl_top, m, use_color)
   i = i + 1
 
 exit(0)

@@ -351,11 +351,32 @@
   -> shuffle!(*opts)
     array_shuffle!(self, *opts)
 
+  # Return a copy with elements rotated left by `count` (Ruby Array#rotate):
+  # [1,2,3,4].rotate -> [2,3,4,1], rotate(2) -> [3,4,1,2], rotate(-1) ->
+  # [4,1,2,3]. Pure Tungsten (the former `array_rotate` intrinsic does not
+  # exist). `%` is C-style here, so normalize a negative offset into [0, n).
   -> rotate(count = 1)
-    array_rotate(self, count)
+    ro_n = size
+    if ro_n == 0
+      return []
+    ro_k = count % ro_n
+    if ro_k < 0
+      ro_k = ro_k + ro_n
+    ro_out = []
+    ro_i = 0
+    while ro_i < ro_n
+      ro_out.push(self[(ro_i + ro_k) % ro_n])
+      ro_i += 1
+    ro_out
 
+  # In-place rotate: overwrite self with the rotated order and return self.
   -> rotate!(count = 1)
-    array_rotate!(self, count)
+    ro_r = rotate(count)
+    ro_j = 0
+    while ro_j < size
+      self[ro_j] = ro_r[ro_j]
+      ro_j += 1
+    self
 
   # Recursively flatten nested arrays into a single flat array. Each element
   # that is itself an Array is expanded (at every depth); non-Array elements

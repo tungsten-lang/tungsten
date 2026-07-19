@@ -2,7 +2,7 @@
 #
 # Run: bin/tungsten bits/tungsten-flame/spec/parsing_spec.w
 
-use spec_helper
+use spec
 use builder
 use perf_script
 use xctrace_xml

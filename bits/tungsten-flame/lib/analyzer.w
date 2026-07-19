@@ -2,9 +2,10 @@
 #
 # Takes a folded-stacks file path, a top_n cutoff, a category set name
 # ("general" / "lexer" / "ruby" / "external"), an optional focus function
-# name (empty string to auto-pick the top function when >40% self), and a
-# color flag. Prints a profile breakdown — Top Functions, caller/callee
-# breakdown, category bars — to stdout.
+# name (empty string to auto-pick the top function when >40% self), a
+# color flag, and the metric the folded counts measure. Prints a profile
+# breakdown — Top Functions, caller/callee breakdown, category bars — to
+# stdout.
 #
 # Invoked by:
 #   - flame.w's legacy FLAME_MODE=display path (called from runner.rb)
@@ -14,8 +15,22 @@ in Tungsten:Flame
 
 + FlameAnalyzer
 
+  # Legacy 5-arg surface (pinned by the golden spec in
+  # implementations/ruby/spec/flame_analyzer_spec.rb): assumes the folded
+  # counts are time-profile samples.
   -> .display(stacks_file, top_n, category_set, focus_in, color)
+    self.display_metric(stacks_file, top_n, category_set, focus_in, color, "samples")
+
+  # Full breakdown for one metric. `metric` names what a folded count IS:
+  # "samples" (macOS time profile) and "cycles" (Linux perf) count
+  # samples; every other metric is a PMC counter whose counts are summed
+  # event deltas — the header must not call those "samples".
+  -> .display_metric(stacks_file, top_n, category_set, focus_in, color, metric)
     focus = focus_in
+
+    unit = "samples"
+    if metric != "samples" && metric != "cycles"
+      unit = "events"
 
     bold  = color ? "\e[1m" : ""
     dim   = color ? "\e[2m" : ""
@@ -57,7 +72,7 @@ in Tungsten:Flame
 
     active = total - idle
     if active == 0
-      << "No active samples."
+      << "No active " + unit + "."
       return
 
     # Count leaf-only (self time) for top functions
@@ -84,18 +99,35 @@ in Tungsten:Flame
           leaf_counts[leaf] = count
       i = i + 1
 
-    # Filter out infrastructure frames
-    infra_names = ["start", "main", "dyld", "_pthread", "Thread_", "DispatchQueue", "_ctx_start", "g_body_entry"]
+    # Filter infrastructure frames out of Top Functions. The filter's job
+    # is to hide process scaffolding — dyld bootstrap, pthread/dispatch
+    # machinery, host-VM fiber entry — whose self time isn't the profiled
+    # program's own work. Two rules keep it from eating real functions:
+    #   - Match anchored (exact name, or family prefix), never substring:
+    #     substring "start"/"main" also swallowed user functions such as
+    #     "restart_worker" or "domain_of".
+    #   - `main` is NOT infrastructure: a compiled Tungsten program's top
+    #     level lowers into main, so leaf samples in main are genuine
+    #     self time (tiny programs inline entirely into it — filtering
+    #     main left their primary Top Functions empty).
+    -> infra_leaf?(name)
+      infra_exact = ["start", "thread_start", "_ctx_start", "g_body_entry"]
+      infra_prefix = ["dyld", "_dyld", "_pthread", "Thread_", "DispatchQueue"]
+      j = 0
+      while j < infra_exact.size()
+        if name == infra_exact[j]
+          return true
+        j = j + 1
+      j = 0
+      while j < infra_prefix.size()
+        if name.starts_with?(infra_prefix[j])
+          return true
+        j = j + 1
+      false
+
     filtered = {}
     leaf_counts.keys().each -> (func_name)
-      skip = false
-      j = 0
-      while j < infra_names.size()
-        if func_name.include?(infra_names[j])
-          skip = true
-          break
-        j = j + 1
-      if !skip
+      if !infra_leaf?(func_name)
         filtered[func_name] = leaf_counts[func_name]
 
     # Sort by count descending — build sorted pairs
@@ -228,9 +260,13 @@ in Tungsten:Flame
       sorted_cats[k + 1] = key_pair
       j = j + 1
 
-    # Print breakdown
+    # Print breakdown. Name the metric unless it's the plain time-profile
+    # default, and use the honest unit for the counts.
+    metric_suffix = ""
+    if metric != "samples"
+      metric_suffix = " — " + metric
     << ""
-    << "  " + bold + "Profile Breakdown" + reset + "  " + dim + "(" + active.to_s() + " active / " + idle.to_s() + " idle samples)" + reset
+    << "  " + bold + "Profile Breakdown" + metric_suffix + reset + "  " + dim + "(" + active.to_s() + " active / " + idle.to_s() + " idle " + unit + ")" + reset
     << ""
 
     << "  " + bold + "Top Functions" + reset
@@ -460,7 +496,7 @@ in Tungsten:Flame
       i = i + 1
 
     if total == 0
-      << "  " + bold + "Top " + label + reset + "  (no samples)"
+      << "  " + bold + "Top " + label + reset + "  (no data)"
       return
 
     sorted = []

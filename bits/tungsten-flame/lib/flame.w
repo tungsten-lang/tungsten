@@ -135,13 +135,18 @@ if metric_names.size == 0
 
 use_color = !fl_silent
 
-# Primary metric: prefer "cycles" (Linux) then "samples" (macOS), else
-# fall back to first key.
+# Primary metric: prefer "cycles" (Linux) then "samples" (macOS time
+# profile) then "branches" (slot 0 of the counter template — the
+# steadiest time proxy of the PMC set); else fall back to the first key.
+# The explicit chain matters: metrics.keys comes back in hash order, so
+# metric_names[0] alone would make the primary pick nondeterministic.
 primary = "cycles"
 if !metrics.has_key?(primary)
   primary = "samples"
   if !metrics.has_key?(primary)
-    primary = metric_names[0]
+    primary = "branches"
+    if !metrics.has_key?(primary)
+      primary = metric_names[0]
 
 # Write each metric to its own folded file under tmpdir.
 i = 0
@@ -151,7 +156,7 @@ while i < metric_names.size
   i = i + 1
 
 # Full breakdown for primary metric (Top + caller/callee + categories).
-Tungsten:Flame:FlameAnalyzer.display(tmpdir + "/" + primary + ".folded", fl_top, "general", fl_focus, use_color)
+Tungsten:Flame:FlameAnalyzer.display_metric(tmpdir + "/" + primary + ".folded", fl_top, "general", fl_focus, use_color, primary)
 
 # Compact Top-N per secondary metric.
 i = 0

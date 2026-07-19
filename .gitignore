@@ -50,6 +50,10 @@ benchmarks/**/*_cr
 benchmarks/**/*_w
 benchmarks/**/*.dwarf
 benchmarks/**/build/**/*
+# Compiled big_math benchmark binaries (built from the tracked *.c sources).
+benchmarks/big_math/bench_big_math
+benchmarks/big_math/toom_sweep
+benchmarks/big_math/toom_gmp_compare
 scripts/.ucd_cache/
 runtime/test_nanbox
 runtime/test_nanbox_debug

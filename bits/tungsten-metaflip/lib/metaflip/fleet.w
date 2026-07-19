@@ -1902,7 +1902,8 @@ RECT_PORTFOLIO = 0 ## i64
 RECT_SHAPES = ""
 # Base rectangular rounds per portfolio epoch before reallocation. Fast shapes
 # may run additional fill rounds until the slowest shape finishes this quota.
-# Clamp remains 1..64 via CLI validation below.
+# The generic interactive portfolio stays responsive at 16; single-shape cloud
+# parents can explicitly amortize their process boundary up to 256 rounds.
 RECT_EPOCH_ROUNDS = 16 ## i64
 RECT_PORTFOLIO_CHILD = 0 ## i64
 RECT_RESTART_NONCE = 0 ## i64
@@ -2180,8 +2181,8 @@ if GPU_EPOCH_ROUNDS < 1
   GPU_EPOCH_ROUNDS = 1
 if GPU_EPOCH_ROUNDS > 64
   GPU_EPOCH_ROUNDS = 64
-if RECT_EPOCH_ROUNDS < 1 || RECT_EPOCH_ROUNDS > 64
-  << "metaflip: --rect-epoch-rounds must be 1 through 64"
+if RECT_EPOCH_ROUNDS < 1 || RECT_EPOCH_ROUNDS > 256
+  << "metaflip: --rect-epoch-rounds must be 1 through 256"
   exit(2)
 if GPU_WALKERS < 32
   GPU_WALKERS = 32

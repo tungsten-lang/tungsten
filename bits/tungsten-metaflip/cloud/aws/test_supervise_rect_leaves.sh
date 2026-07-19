@@ -25,6 +25,7 @@ mkdir -p "$RUNTIME" "$FAKE_TOOLS" "$NUMA_ROOT/node0" "$NUMA_ROOT/node1"
 cat > "$RUNTIME/fleet.w" <<'EOF'
 switch_options = ["--rect", "--rect-portfolio-child"]
 value_options = ["--rect-shapes", "--rect-epoch-rounds", "--rect-restart-nonce", "--rect-door-ticket"]
+lease_contract = "--rect-epoch-rounds must be 1 through 256"
 EOF
 
 cat > "$FAKE_TOOLS/setsid" <<'EOF'
@@ -53,6 +54,7 @@ cat > "$FAKE_BINARY" <<'EOF'
 #!/usr/bin/env bash
 # Native marker fixtures: --rect --rect-shapes --rect-epoch-rounds
 # --rect-portfolio-child --rect-restart-nonce --rect-door-ticket
+# --rect-epoch-rounds must be 1 through 256
 set -eu
 shape=""
 status=""
@@ -253,8 +255,8 @@ expect 'explicit CPU walker and step budgets survive construction' grep -q -- '-
 expect 'parents are CPU-only, headless, and record-stopping' grep -q -- '--no-gpu --quiet --no-tui --stop-on-record' "$DRY_OUTPUT"
 portfolio_count=$(grep -c -- '--rect --rect-shapes' "$DRY_OUTPUT" || true)
 expect 'every command uses a single-shape portfolio parent' test "$portfolio_count" -eq 2
-lease_count=$(grep -c -- '--rect-epoch-rounds 64' "$DRY_OUTPUT" || true)
-expect 'every parent rotates finite 64-round leases by default' test "$lease_count" -eq 2
+lease_count=$(grep -c -- '--rect-epoch-rounds 256' "$DRY_OUTPUT" || true)
+expect 'every parent rotates finite 256-round leases by default' test "$lease_count" -eq 2
 expect 'private child schedule is owned by each parent' sh -c '! grep -q -- "--rect-portfolio-child" "$1"' sh "$DRY_OUTPUT"
 expect 'supervisor, not parents, owns the wall deadline' grep -q -- '--secs 0' "$DRY_OUTPUT"
 expect 'parent epoch count cannot terminate a normal campaign' grep -q -- '--rounds 2000000000' "$DRY_OUTPUT"
@@ -304,14 +306,14 @@ fi
 expect 'duplicate NUMA assignments are rejected' test "$duplicate_node_rc" -eq 2
 
 if supervisor_env "$VMSTAT_DRY" "$DRY_SHUTDOWN_LOG" \
-  "${COMMON_ARGS[@]}" --lease-rounds 65 --dry-run \
+  "${COMMON_ARGS[@]}" --lease-rounds 257 --dry-run \
   > "$INVALID_OUTPUT" 2>&1; then
   invalid_lease_rc=0
 else
   invalid_lease_rc=$?
 fi
 expect 'lease widths above the runtime limit are rejected' test "$invalid_lease_rc" -eq 2
-expect 'lease-width rejection reports the 1..64 contract' grep -q -- '--lease-rounds must be 1 through 64' "$INVALID_OUTPUT"
+expect 'lease-width rejection reports the 1..256 contract' grep -q -- '--lease-rounds must be 1 through 256' "$INVALID_OUTPUT"
 
 OLD_BINARY="$TMP_ROOT/metaflip-without-rect-leaf-options"
 printf '#!/bin/sh\nexit 0\n' > "$OLD_BINARY"
@@ -325,6 +327,25 @@ else
 fi
 expect 'runtime/old-binary rectangular option mismatch is rejected' test "$old_binary_rc" -eq 2
 expect 'binary mismatch names the absent parent option' grep -q -- 'native binary does not advertise required rectangular option' "$INVALID_OUTPUT"
+
+OLD_CAP_BINARY="$TMP_ROOT/metaflip-with-64-round-cap"
+cat > "$OLD_CAP_BINARY" <<'EOF'
+#!/bin/sh
+# --rect --rect-shapes --rect-epoch-rounds --rect-portfolio-child
+# --rect-restart-nonce --rect-door-ticket
+# --rect-epoch-rounds must be 1 through 64
+exit 0
+EOF
+chmod +x "$OLD_CAP_BINARY"
+if supervisor_env "$VMSTAT_DRY" "$DRY_SHUTDOWN_LOG" \
+  "${COMMON_ARGS[@]}" --binary "$OLD_CAP_BINARY" --dry-run \
+  > "$INVALID_OUTPUT" 2>&1; then
+  old_cap_rc=0
+else
+  old_cap_rc=$?
+fi
+expect 'stale 64-round native binary is rejected before launch' test "$old_cap_rc" -eq 2
+expect 'stale-cap rejection names the 1..256 lease contract' grep -q -- 'native binary does not advertise the required 1..256 rectangular lease contract' "$INVALID_OUTPUT"
 expect 'validation failures never invoke shutdown' test ! -e "$DRY_SHUTDOWN_LOG"
 
 # Lock and orphan admission precede all legacy-state migration. Simulate a
@@ -381,7 +402,7 @@ expect_token 'deadline status is stopped' "$DEADLINE_STATUS" 'producer_state=sto
 expect_token 'deadline reason is durable' "$DEADLINE_STATUS" 'reason=deadline'
 expect_token 'both parent heartbeats were aggregated' "$DEADLINE_STATUS" 'status_count=2'
 expect_token 'final status has no running parents' "$DEADLINE_STATUS" 'running_count=0'
-expect_token 'default lease width is explicit in cumulative status' "$DEADLINE_STATUS" 'lease_rounds=64'
+expect_token 'default lease width is explicit in cumulative status' "$DEADLINE_STATUS" 'lease_rounds=256'
 expect_token 'clean leases have no cumulative failures' "$DEADLINE_STATUS" 'lease_failure_count=0'
 expect_token 'both parents used the expected status protocol' "$DEADLINE_STATUS" 'protocol_error_count=0'
 expect_token 'moves are summed across parents' "$DEADLINE_STATUS" 'total_moves=246'

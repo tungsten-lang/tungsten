@@ -26,7 +26,7 @@ SHAPES_CSV="3x3x4,3x4x4,2x3x5,3x4x5,4x5x5,5x6x7"
 NODES_CSV="0,1,2,3,4,5"
 WALKERS=64
 STEPS=500000
-LEASE_ROUNDS=64
+LEASE_ROUNDS=256
 POLL_SECONDS=2
 DRAIN_SECONDS=120
 STATUS_TIMEOUT=900
@@ -39,7 +39,7 @@ usage() {
 Usage: supervise_rect_leaves.sh --binary PATH [OPTIONS]
 
 Launch one long-lived, CPU-only, single-shape rectangular portfolio parent per
-NUMA node. Each parent rotates finite 64-round child leases by default. The
+NUMA node. Each parent rotates finite 256-round child leases by default. The
 default six-parent campaign is the measured retarget for an m8i.96xlarge.
 
 Required:
@@ -57,8 +57,8 @@ Topology and work:
   --nodes CSV                Distinct NUMA nodes, one per shape
   -J, --walkers N            CPU walkers per parent/lease (default: 64)
   --steps N                  Moves per worker epoch (default: 500000)
-  --lease-rounds N           Finite rounds per child lease (default: 64;
-                             valid range: 1..64)
+  --lease-rounds N           Finite rounds per child lease (default: 256;
+                             valid range: 1..256)
 
 Health and host policy:
   --poll-seconds N           Supervisor heartbeat interval (default: 2)
@@ -217,8 +217,8 @@ require_uint --drain-seconds "$DRAIN_SECONDS"
 require_uint --status-timeout "$STATUS_TIMEOUT"
 [ "$WALKERS" -gt 0 ] || die "--walkers must be positive"
 [ "$STEPS" -gt 0 ] || die "--steps must be positive"
-[ "$LEASE_ROUNDS" -ge 1 ] && [ "$LEASE_ROUNDS" -le 64 ] || \
-  die "--lease-rounds must be 1 through 64"
+[ "$LEASE_ROUNDS" -ge 1 ] && [ "$LEASE_ROUNDS" -le 256 ] || \
+  die "--lease-rounds must be 1 through 256"
 [ "$POLL_SECONDS" -gt 0 ] || die "--poll-seconds must be positive"
 [ "$DRAIN_SECONDS" -gt 0 ] || die "--drain-seconds must be positive"
 [ "$STATUS_TIMEOUT" -gt 0 ] || die "--status-timeout must be positive"
@@ -362,6 +362,11 @@ for rect_option in --rect --rect-shapes --rect-epoch-rounds --rect-portfolio-chi
   strings "$BINARY" 2>/dev/null | grep -F -- "$rect_option" >/dev/null || \
     die "native binary does not advertise required rectangular option $rect_option"
 done
+lease_contract='--rect-epoch-rounds must be 1 through 256'
+grep -F -- "$lease_contract" "$RUNTIME_ROOT/fleet.w" >/dev/null 2>&1 || \
+  die "runtime does not advertise the required 1..256 rectangular lease contract"
+strings "$BINARY" 2>/dev/null | grep -F -- "$lease_contract" >/dev/null || \
+  die "native binary does not advertise the required 1..256 rectangular lease contract"
 
 build_parent_command() {
   local child_index=$1 shape node shape_state best_path status_path archive_prefix tag

@@ -95,16 +95,24 @@ density/basin run for that profile instead.
 
 Every NUMA process is a long-lived `--rect --rect-shapes SHAPE` parent, not an
 eternal private child. By default the parent gives its node to one finite
-64-round child lease, exact-gates and checkpoints the result, then starts a new
+256-round child lease, exact-gates and checkpoints the result, then starts a new
 lease with the portfolio scheduler's fresh high-entropy restart nonce and
 low-discrepancy door ticket. The checkpoint and eight exact side-door files are
 reloaded at each boundary, so a restart changes the walk without throwing away
-useful basins. `--lease-rounds N` exposes the runtime's `1..64` range; 64 is the
-production default. A matched 5x6x7/J12/500k benchmark over 1.92 billion moves
-measured 6.18 seconds at 16 rounds per lease, 5.46 seconds at 32, and 4.95
-seconds at 64 (4.61 seconds without lease boundaries). The 64-round default
-therefore recovered 25% throughput over 16 while still loading/saving all eight
-doors and seeding 32 saved-door lanes in the five-lease sample.
+useful basins. `--lease-rounds N` exposes the runtime's `1..256` range; 256 is
+the AWS default. The generic interactive multi-shape portfolio remains at 16
+rounds so it can reallocate promptly.
+
+Three counter-ordered local runs per point, each covering 3.072 billion moves
+at J12/500k, measured median 64/128/256-round times of 5.00/4.72/4.61 seconds
+for 3x3x4 and 8.15/7.63/7.38 seconds for 5x6x7. Every run loaded and saved all
+eight doors with zero failures, rejects, or write failures. A live J64
+64-round AWS sample sustained 5.75 billion moves/second and about 10,200
+completed leases/hour across six shapes. Scaling only by the local wall-time
+ratios projects roughly 6.3 billion moves/second and 2,800 leases/hour fleet-wide
+at 256 rounds (about 360–530 per shape per hour); these are projections, not a
+measured 256-round cloud result. That cadence still rotates every shape hundreds
+of times per hour while letting each lane work one door for 128 million moves.
 
 The launcher rejects unsupported/square shapes, duplicates, unequal
 shape/node counts, absent NUMA nodes, and a native binary/runtime mismatch

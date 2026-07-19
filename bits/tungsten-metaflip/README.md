@@ -191,8 +191,12 @@ bit explicitly. `--asset-root`, `--repo-root`, `METAFLIP_ROOT`, and
 The same binary accepts the bundled rectangular profiles using full labels
 such as `2x2x5`, `2x2x6`, `2x2x9`, `2x5x6`, and `4x5x7`. `--rect` runs the adaptive multi-shape
 portfolio. Thread and lane counts have hardware-aware defaults; use `-J` and
-`--gpu-walkers` only when an experiment needs fixed allocation. The current
-Metal throughput knee is 8,192 walkers with 40,000 trajectory steps per
+`--gpu-walkers` only when an experiment needs fixed allocation. The generic
+portfolio default is 16 base rounds per allocation epoch. Explicit
+`--rect-epoch-rounds N` values from 1 through 256 are accepted for bounded
+experiments and single-shape cloud parents; raising the ceiling does not change
+the interactive default. The current Metal throughput knee is 8,192 walkers
+with 40,000 trajectory steps per
 scheduler epoch. Adaptive rectangular scheduling keeps each active child at
 that occupancy floor and rotates shapes between epochs; larger explicit lane
 budgets can run one additional shape per 8,192 walkers. `--gpu-walkers` and

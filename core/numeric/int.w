@@ -143,6 +143,22 @@
   -> pow(e, m)
     modpow(e, m)
 
+  # Integer square root: largest k with k*k <= self (Ruby Integer#isqrt).
+  # Newton's method from a digit-count overestimate; exact for BigInt via the
+  # promoting / and ** operators. Mirrors Integer#isqrt so it works for any
+  # integer (Integer < Real and Int are separate classes).
+  -> isqrt
+    if self < 0
+      raise "Int#isqrt: negative receiver"
+    if self < 2
+      return self
+    sq_x = 10 ** ((self.to_s.size + 1) / 2)
+    sq_y = (sq_x + self / sq_x) / 2
+    while sq_y < sq_x
+      sq_x = sq_y
+      sq_y = (sq_x + self / sq_x) / 2
+    sq_x
+
   # Is this a prime number? Tiered by magnitude in the runtime intrinsic
   # `w_ic_int_prime_q` (runtime/runtime.c): a small-prime screen for tiny n,
   # prime trial division for moderate n, deterministic Miller-Rabin for

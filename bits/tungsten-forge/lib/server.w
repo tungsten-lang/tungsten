@@ -1,139 +1,133 @@
-# Forge::Server — HTTP server core
-# Goroutine-per-connection with graceful shutdown
-# Supports HTTP/1.1 (request-response loop) and HTTP/2 (session-based multiplexing)
+# Forge Server — HTTP/1.1 server core (v1: blocking accept loop).
+#
+# Real, working live path: binds via the compiled runtime's Socket class
+# (Socket.listen / accept / read / write / close — see runtime/runtime.c),
+# reads one request per connection, parses it with Request.parse,
+# dispatches through the middleware chain + Router, and writes the
+# serialized Response back. Connections are closed after each response
+# (Connection: close); keep-alive, goroutine-per-connection concurrency,
+# TLS, and HTTP/2+ are future work (see listener.w / connection.w /
+# thread_pool.w / tls.w for the aspirational designs).
+#
+# Socket is a compiled-runtime builtin (compiler/lib/lowering/types.w
+# builtin_runtime_classes) — the live path runs COMPILED only. The
+# self-hosted interpreter can load this file but cannot resolve Socket
+# at runtime.
 
 + Server
-  ro :listener
   ro :router
   ro :middleware
   ro :config
-  ro :connections
+  ro :host
+  ro :port
   ro :running
 
-  -> new(listener:, router:, middleware:, config:)
-    @listener    = listener
-    @router      = router
-    @middleware   = middleware
-    @config      = config
-    @connections  = ConnectionTracker.new(config.max_connections)
-    @running      = false
+  -> new(router, middleware, config)
+    @router     = router
+    @middleware = middleware
+    @config     = config
+    @host       = config.host
+    @port       = config.port
+    @running    = false
+    @socket     = nil
 
+  # Bind and serve until stop is called (or the process is killed).
   -> start
     @running = true
-
-    # Register signal handlers for graceful shutdown
-    Signal.trap(:INT)  -> self.shutdown(:graceful)
-    Signal.trap(:TERM) -> self.shutdown(:graceful)
-
-    @listener.start -> (socket)
-      if @connections.accept?
-        conn = Connection.new(socket, config: @config)
-        @connections.track(conn)
-
-        go ->
-          begin
-            self.handle_connection(conn)
-          ensure
-            @connections.release(conn)
+    @socket = Socket.listen(@host, @port, 128)
+    while @running
+      conn = @socket.accept
+      self.serve_connection(conn)
 
   -> stop
-    self.shutdown(:immediate)
-
-  -> shutdown(mode = :graceful)
     @running = false
-    Logger.info("Shutdown mode: [mode]")
+    if @socket
+      @socket.close
+      @socket = nil
 
-    case mode
-      :graceful =>
-        # Wait for in-flight goroutines to complete
-        @connections.drain(timeout: 30)
-      :immediate =>
-        # Force close all connections immediately
-        @connections.force_close
+  # Handle one connection, turning handler exceptions into a 500 rather
+  # than letting them kill the accept loop.
+  -> serve_connection(conn)
+    failed = nil
+    begin
+      self.handle_connection(conn)
+    rescue e
+      failed = e
+    if failed != nil
+      begin
+        conn.write(Response.error.to_http)
+        conn.close
+      rescue e2
+        nil
 
-    @listener.stop
-
+  # Read one request, dispatch it, write the response, close.
   -> handle_connection(conn)
-    case conn.protocol
-      :h2 =>
-        self.handle_h2_connection(conn)
-      :http11 =>
-        self.handle_http11_connection(conn)
+    raw = self.read_request_raw(conn)
+    if raw.index("\r\n\r\n") != nil
+      raw = self.read_remaining_body(conn, raw)
+      request = Request.parse(raw)
+      if request == nil
+        conn.write(Response.error("Bad Request", {status: 400}).to_http)
+      else
+        response = self.dispatch(request)
+        response.header("Connection", "close")
+        conn.write(response.to_http)
+    conn.close
 
-  -> handle_http11_connection(conn)
-    loop
-      break unless @running
-      request = conn.read_request
-      break unless request
+  # Accumulate reads until the header terminator arrives (or EOF).
+  -> read_request_raw(conn)
+    raw = ""
+    reading = true
+    while reading
+      if raw.index("\r\n\r\n") != nil
+        reading = false
+      else
+        chunk = conn.read(8192)
+        if chunk == nil
+          reading = false
+        else
+          raw = raw + chunk
+    raw
 
-      # Normalize path if configured
-      if @config.normalize_paths
-        request.normalize_path!
+  # Headers are complete; keep reading until Content-Length bytes of
+  # body have arrived (or the peer closes).
+  -> read_remaining_body(conn, raw)
+    separator = raw.index("\r\n\r\n")
+    result = raw
+    needed = self.content_length_in(raw.slice(0, separator))
+    body_have = result.size - (separator + 4)
+    while body_have < needed
+      chunk = conn.read(8192)
+      if chunk == nil
+        body_have = needed
+      else
+        result = result + chunk
+        body_have = body_have + chunk.size
+    result
 
-      # Build the handler: middleware wrapping the router
-      handler = @middleware.build -> (req)
-        self.dispatch(req)
+  # Scan a raw header block for Content-Length (case-insensitive).
+  -> content_length_in(head)
+    found = 0
+    head.split("\r\n").each -> (line)
+      colon = line.index(": ")
+      if colon
+        key = line.slice(0, colon).downcase
+        if key == "content-length"
+          value_start = colon + 2
+          found = line.slice(value_start, line.size - value_start).strip.to_i
+    found
 
-      response = handler.call(request)
-      conn.write_response(response)
-
-      # Keep-alive or close
-      break unless conn.keep_alive? && @running
-
-  -> handle_h2_connection(conn)
-    # HTTP/2: delegate to session which handles multiplexing internally
-    # The session spawns goroutines per-stream — no request/response loop needed
-    handler = @middleware.build -> (req)
-      self.dispatch(req)
-
-    conn.run_h2(handler)
-
+  # Middleware chain wrapping the router. Path normalization (downcase,
+  # trailing-slash strip) happens inside Router#resolve.
   -> dispatch(request)
-    # Try static files first
-    if @config.static_dir
-      static = Static.serve(request, @config)
-      return static if static
+    target = self
+    handler = @middleware.build(-> (req) target.route(req))
+    handler.call(request)
 
-    # Route to application
+  -> route(request)
     match = @router.resolve(request.method, request.path)
-
     if match
       request.params = match.params
       match.handler.call(request)
     else
-      Response.not_found("Not Found: [request.path]")
-
-
-  # --- Connection tracking ---
-
-  + ConnectionTracker
-    ro :max
-    ro :count
-
-    -> new(@max)
-      @count = Atomic.new(0)
-      @connections = ConcurrentSet.new
-
-    -> accept?
-      @count.get < @max
-
-    -> track(conn)
-      @count.increment
-      @connections.add(conn)
-
-    -> release(conn)
-      @connections.remove(conn)
-      @count.decrement
-
-    -> drain(timeout: 30)
-      deadline = Time.now + timeout
-      loop
-        break if @connections.empty? || Time.now > deadline
-        Goroutine.yield
-
-      # Force-close remaining connections
-      self.force_close
-
-    -> force_close
-      @connections.each -> (conn)
-        conn.close
+      Response.not_found("Not Found: " + request.path)

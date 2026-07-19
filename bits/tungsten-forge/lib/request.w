@@ -11,14 +11,18 @@
   ro :remote_addr
   rw :params
 
-  -> new(method:, path:, headers: {}, body: nil, version: "HTTP/1.1", remote_addr: nil)
-    @method       = method.to_s.upcase.to_sym
-    @path         = path
-    @query_string = self.extract_query(path)
-    @headers      = Headers.new(headers)
-    @body         = body
-    @version      = version
-    @remote_addr  = remote_addr
+  # Options-hash constructor (like Response.new): kwarg constructors
+  # diverge between engines (the interpreter passes them as one hash,
+  # compiled passes them positionally), so an explicit hash is the only
+  # form that behaves identically in both.
+  -> new(options = {})
+    @method       = options[:method].to_s.upcase.to_sym
+    @path         = options[:path]
+    @query_string = self.extract_query(options[:path])
+    @headers      = Headers.new(options[:headers] || {})
+    @body         = options[:body]
+    @version      = options[:version] || "HTTP/1.1"
+    @remote_addr  = options[:remote_addr]
     @params       = {}
 
   -> normalize_path!
@@ -56,51 +60,43 @@
 
   # --- Parsing ---
 
+  # Parse a raw HTTP/1.1 request (request line + headers + optional body).
+  # Split-based: String#index(needle, offset) diverges between engines
+  # (the self-hosted interpreter ignores the offset argument), so parsing
+  # never uses the offset form. Returns nil for a malformed request line.
   -> .parse(raw)
-    line_end = raw.index("\r\n")
-    request_line = raw.slice(0, line_end)
-    sp1 = request_line.index(" ")
-    sp2 = request_line.index(" ", sp1 + 1)
-
-    method = request_line.slice(0, sp1)
-    path_start = sp1 + 1
-    path = request_line.slice(path_start, sp2 - path_start)
-    version_start = sp2 + 1
-    version = request_line.slice(version_start, request_line.size() - version_start)
-
     separator = raw.index("\r\n\r\n")
-    header_end = raw.size()
-    if separator
-      header_end = separator
-
-    headers = {}
-    pos = line_end + 2
-    while pos < header_end
-      next_end = raw.index("\r\n", pos)
-      if !next_end || next_end > header_end
-        next_end = header_end
-
-      colon = raw.index(": ", pos)
-      if colon && colon < next_end
-        key = raw.slice(pos, colon - pos)
-        value_start = colon + 2
-        value = raw.slice(value_start, next_end - value_start)
-        headers[key] = value
-
-      pos = next_end + 2
-
+    head = raw
     body = nil
     if separator
+      head = raw.slice(0, separator)
       body_start = separator + 4
       body = raw.slice(body_start, raw.size() - body_start)
 
-    self.new(
-      method: method,
-      path: path,
-      headers: headers,
-      body: body,
-      version: version
-    )
+    lines = head.split("\r\n")
+    result = nil
+    if lines.size > 0
+      parts = lines[0].split(" ")
+      if parts.size >= 3
+        headers = {}
+        i = 1
+        while i < lines.size
+          line = lines[i]
+          colon = line.index(": ")
+          if colon
+            key = line.slice(0, colon)
+            value_start = colon + 2
+            headers[key] = line.slice(value_start, line.size - value_start)
+          i += 1
+
+        result = self.new({
+          method: parts[0],
+          path: parts[1],
+          headers: headers,
+          body: body,
+          version: parts[2]
+        })
+    result
 
   -> extract_query(path)
     idx = path.index("?")

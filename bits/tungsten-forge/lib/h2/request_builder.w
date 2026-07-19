@@ -40,13 +40,13 @@ in Tungsten:Forge:H2
     body = if data && data.size > 0
       data.to_s
 
-    Forge:Request.new(
+    Forge:Request.new({
       method:  method,
       path:    path,
       headers: regular,
       body:    body,
       version: "HTTP/2"
-    )
+    })
 
 
 + H2Error < StandardError

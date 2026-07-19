@@ -58,6 +58,24 @@ http = r.to_http
 check("to_http status line", http.starts_with?("HTTP/1.1 200 OK"))
 check("to_http carries body", http.ends_with?("hello"))
 
+# Request.parse — the live server's wire-in point (split-based parser;
+# must behave identically in both engines).
+raw = "GET /users/42?x=1 HTTP/1.1\r\nHost: localhost\r\nX-Test: yes\r\n\r\n"
+req = Request.parse(raw)
+check("parse method", req.method == :GET)
+check("parse path", req.path == "/users/42")
+check("parse query string", req.query_string == "x=1")
+check("parse version", req.version == "HTTP/1.1")
+check("parse header", req.headers.get("host") == "localhost")
+check("parse second header", req.headers.get("X-TEST") == "yes")
+
+post = Request.parse("POST /echo HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello")
+check("parse post method", post.method == :POST)
+check("parse post body", post.body == "hello")
+
+bad = Request.parse("GARBAGE\r\n\r\n")
+check("parse malformed is nil", bad == nil)
+
 config = Config.new
 check("default port", config.port == 443)
 check("default host", config.host == "0.0.0.0")

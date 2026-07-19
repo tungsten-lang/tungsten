@@ -32,18 +32,31 @@ use server
     @@instance = nil
 
   # Forge.configure -> (config) ... — yields the Config object.
-  -> .configure(&)
-    self.instance.configure(-> (c) &(c))
+  # Dual-form like Router#get: block binding diverges between engines
+  # (interp binds trailing blocks to &, compiled binds positional
+  # lambdas), so accept either a positional setup lambda or a block.
+  -> .configure(setup = nil, &)
+    if setup == nil
+      setup = -> (c) &(c)
+    self.instance.configure(setup)
 
   # Forge.routes -> (r) ... — yields the Router object.
-  -> .routes(&)
-    self.instance.router.draw(-> (r) &(r))
+  -> .routes(registrar = nil, &)
+    if registrar == nil
+      registrar = -> (r) &(r)
+    self.instance.router.draw(registrar)
 
   -> .use(middleware, options = {})
     self.instance.middleware_chain.add(middleware, options)
 
   -> .start
     self.instance.start
+
+  # Minimal live-server API: bind host:port and serve HTTP/1.1 with the
+  # routes registered via Forge.routes. Compiled-only (Socket is a
+  # compiled-runtime builtin). Blocks until the process is stopped.
+  -> .run(host = "127.0.0.1", port = 8080)
+    self.instance.run(host, port)
 
   -> .stop
     self.instance.stop
@@ -65,34 +78,20 @@ use server
     setup.call(@config)
     self
 
+  -> run(host, port)
+    @config.host = host
+    @config.port = port
+    self.start
+
+  # v1 live path: single-threaded HTTP/1.1 Server (see server.w).
+  # ThreadPool / Listener / TLS wiring returns when those layers land.
   -> start
     @config.validate!
 
-    pool = ThreadPool.new(
-      workers: @config.workers,
-      max_queue: @config.max_connections
-    )
-
-    listener = Listener.new(
-      host: @config.host,
-      port: @config.port,
-      tls: @config.tls_config,
-      protocols: @config.protocols
-    )
-
-    @server = Server.new(
-      listener: listener,
-      pool: pool,
-      router: @router,
-      middleware: @middleware_chain,
-      config: @config
-    )
-
-    @started_at = Time.now
-    << "Forge [Version.string] ignited on [@config.host]:[@config.port]"
-    << "  Workers: [@config.workers]"
-    << "  TLS: [@config.tls_description]"
-    << "  Protocols: [@config.protocols.join(", ")]"
+    @server = Server.new(@router, @middleware_chain, @config)
+    # NOTE: no wall-clock stamp — Time/Instant.now are not implemented in
+    # either engine yet, so @started_at stays nil and uptime reports 0.
+    << "Forge [Version.string] listening on http://[@config.host]:[@config.port] (HTTP/1.1)"
 
     @server.start
 

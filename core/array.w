@@ -356,3 +356,30 @@
 
   -> rotate!(count = 1)
     array_rotate!(self, count)
+
+  # Recursively flatten nested arrays into a single flat array. Each element
+  # that is itself an Array is expanded (at every depth); non-Array elements
+  # pass through. Returns a new array; the receiver is untouched.
+  -> flatten
+    out = []
+    self.each -> (x)
+      if x.is_a?(Array)
+        x.flatten.each -> (y)
+          out.push(y)
+      else
+        out.push(x)
+    out
+
+  # Flatten only `depth` levels of nesting (Ruby-style). depth <= 0 is a
+  # shallow copy; each level peels one layer of Array nesting.
+  -> flatten(depth)
+    if depth <= 0
+      return dup
+    out = []
+    self.each -> (x)
+      if x.is_a?(Array)
+        x.flatten(depth - 1).each -> (y)
+          out.push(y)
+      else
+        out.push(x)
+    out

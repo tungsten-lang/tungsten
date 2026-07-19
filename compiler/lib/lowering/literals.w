@@ -331,6 +331,12 @@
     set_temp = next_temp(wfn)
     emit_instruction(wfn, {op: :call_direct_i64, temp: set_temp, name: "w_hash_set", args: [hash_reg, key_reg, val_reg]})
     i += 1
+  # A call-site kwargs group (`f(a: 1)`) passes as ONE hash argument marked
+  # W_HASH_FLAG_KWARGS; keyword-param callees rebind it by name at entry
+  # (w_kwargs_remap12 prologue), everyone else receives a plain hash.
+  if node.from_kwargs == true
+    mark_temp = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: mark_temp, name: "w_hash_mark_kwargs", args: [hash_reg]})
   typed_value(:i64, hash_reg)
 
 -> lower_symbol(ctx, node)

@@ -47,6 +47,83 @@
     return nil
   "__block"
 
+# -- Keyword-argument entry prologue --
+# Call sites pass a kwargs group (`f(x, align: "r")`) as ONE hash argument
+# marked W_HASH_FLAG_KWARGS (literals.w; the interpreter marks in eval). A
+# callee that declares keyword params (`align: "l"`) rebinds its slots by
+# NAME at entry through the shared runtime algorithm (w_kwargs_remap12 in
+# runtime.c, mirrored by interpreter.w call_w_method): positional args
+# before the group keep their slots, a trailing closure right-aligns, each
+# keyword slot takes hash[name] (else nil, so the existing default guard
+# fires), and leftover keys form a residual hash placed at the first free
+# non-keyword slot. Signatures without keyword params emit nothing — the
+# group stays an ordinary trailing hash (`options = {}` collapse).
+#
+# arg_slot_names are the value-receiving LLVM params in declaration order
+# (declared params plus any implicit __block; __self excluded). Rebinding
+# goes through child_ctx bindings plus a kw_rebound map that the unbox /
+# ivar-assign / default-guard emitters consult for their inputs.
+-> emit_kwargs_prologue(child_ctx, new_fn, params, arg_slot_names)
+  has_kw = false
+  i = 0
+  while i < params.size()
+    if is_ast_node?(params[i]) && params[i].keyword == true
+      has_kw = true
+    i += 1
+  if !has_kw
+    return nil
+  n = arg_slot_names.size()
+  if n > 12
+    return nil
+  blk = -1
+  i = 0
+  while i < params.size()
+    if params[i].block_param == true
+      blk = i
+    i += 1
+  if blk == -1 && n > params.size()
+    blk = params.size()
+  pairs = ""
+  i = 0
+  while i < params.size()
+    if params[i].keyword == true
+      if pairs != ""
+        pairs = pairs + ","
+      pairs = pairs + i.to_s() + ":" + params[i].name
+    i += 1
+  spec = n.to_s() + ";" + pairs + ";" + blk.to_s()
+  spec_tv = lower_string(child_ctx, Tungsten:AST:String.new(spec))
+  spec_reg = ensure_i64_value(new_fn, spec_tv)
+  remap_args = [spec_reg]
+  i = 0
+  while i < 12
+    if i < n
+      remap_args.push("%" + arg_slot_names[i])
+    else
+      remap_args.push(w_nil.to_s())
+    i += 1
+  did = next_temp(new_fn)
+  emit_instruction(new_fn, {op: :call_direct_i64, temp: did, name: "w_kwargs_remap12", args: remap_args})
+  kw_rebound = {}
+  i = 0
+  while i < n
+    slot_temp = next_temp(new_fn)
+    emit_instruction(new_fn, {op: :call_direct_i64, temp: slot_temp, name: "w_kwargs_slot_" + i.to_s(), args: [did, "%" + arg_slot_names[i]]})
+    kw_rebound[arg_slot_names[i]] = slot_temp
+    child_ctx[:bindings][arg_slot_names[i]] = slot_temp
+    i += 1
+  child_ctx[:kw_rebound] = kw_rebound
+  nil
+
+# The remapped entry value for a param slot: the kwargs-prologue rebind
+# when one was emitted, the raw %param otherwise. Inputs for the unbox /
+# ivar-assign / default-guard emitters.
+-> kwargs_param_input(child_ctx, pname)
+  kw_rebound = child_ctx[:kw_rebound]
+  if kw_rebound != nil && kw_rebound[pname] != nil
+    return kw_rebound[pname]
+  "%" + pname
+
 -> method_lowering_analysis(node)
   cached = ast_get(node, :lowering_analysis)
   if cached != nil
@@ -276,7 +353,7 @@
   i = 0
   while i < params.size()
     p = params[i]
-    if is_ast_node?(p) && (p.block_param == true || p.default != nil)
+    if is_ast_node?(p) && (p.block_param == true || p.default != nil || p.keyword == true)
       return false
     pname = param_runtime_name(p)
     pt = child_var_types[pname]
@@ -308,7 +385,7 @@
   i = 0
   while i < params.size()
     p = params[i]
-    if is_ast_node?(p) && (p.block_param == true || p.default != nil)
+    if is_ast_node?(p) && (p.block_param == true || p.default != nil || p.keyword == true)
       return false
     pname = param_runtime_name(p)
     pt = child_var_types[pname]
@@ -346,7 +423,7 @@
   i = 0
   while i < params.size()
     p = params[i]
-    if is_ast_node?(p) && (p.block_param == true || p.default != nil)
+    if is_ast_node?(p) && (p.block_param == true || p.default != nil || p.keyword == true)
       return false
     pname = param_runtime_name(p)
     pt = child_var_types[pname]
@@ -604,6 +681,13 @@
     new_fn[:raw_return_type] = normalize_type_symbol(rt)
     mod[:raw_callable_fns][call_key] = fn_name
 
+  # Keyword-param rebind runs first: it must precede unboxing, ivar
+  # assignment, and default guards, all of which read the entry values.
+  # Raw ABIs are exempt (raw callers pass machine ints, never a kwargs
+  # hash; keyword signatures are excluded from raw eligibility).
+  if !raw_i64_sig && !raw_int_sig
+    emit_kwargs_prologue(child_ctx, new_fn, params, param_names)
+
   # Unbox ## i64 parameters once at function entry — skipped when this
   # fn has the raw-i64 ABI (callers pass already-raw values). The
   # binding still maps the pname to the raw register, so downstream
@@ -622,10 +706,10 @@
         # (49-bit flip-graph masks: dup-scan missed, walk crippled). The
         # runtime w_to_i64/w_to_u64 handles inline and bigint boxes both.
         raw = next_temp(new_fn)
-        emit_instruction(new_fn, {op: :call_direct_i64, temp: raw, name: machine_unbox_fn(pt), args: ["%" + pname], arg_types: ["i64"]})
+        emit_instruction(new_fn, {op: :call_direct_i64, temp: raw, name: machine_unbox_fn(pt), args: [kwargs_param_input(child_ctx, pname)], arg_types: ["i64"]})
         child_ctx[:bindings][pname] = raw
       else
-        raw = nanunbox_int_emit(new_fn, "%" + pname)
+        raw = nanunbox_int_emit(new_fn, kwargs_param_input(child_ctx, pname))
         child_ctx[:bindings][pname] = raw
     i += 1
 
@@ -636,7 +720,7 @@
     p = params[i]
     if p.default != nil
       pname = param_runtime_name(p)
-      param_reg = "%" + pname
+      param_reg = kwargs_param_input(child_ctx, pname)
       # Check if param is nil (W_NIL = 0)
       is_nil = next_temp(new_fn)
       emit_instruction(new_fn, {op: :icmp_i64, temp: is_nil, pred: "eq", lhs: param_reg, rhs: w_nil.to_s()})
@@ -1607,6 +1691,18 @@
     block_return_slot = ensure_var_slot(new_fn, "__block_return_frame")
     emit_instruction(new_fn, {op: :store_i64, value: block_return_bits, ptr: block_return_slot})
 
+  # Keyword-param rebind runs first: it must precede unboxing, ivar
+  # assignment, and default guards, all of which read the entry values.
+  # The value-receiving slots are param_names minus the leading __self.
+  if !raw_abi
+    kwargs_slot_names = []
+    i = 0
+    while i < param_names.size()
+      if i > 0
+        kwargs_slot_names.push(param_names[i])
+      i += 1
+    emit_kwargs_prologue(child_ctx, new_fn, params, kwargs_slot_names)
+
   # Unbox typed machine-int class-method parameters once at function entry.
   i = 0
   while i < params.size()
@@ -1616,25 +1712,21 @@
       if raw_abi && is_machine_int64_type(pt)
         child_ctx[:bindings][pname] = "%" + pname
       else
-        raw = nanunbox_int_emit(new_fn, "%" + pname)
+        raw = nanunbox_int_emit(new_fn, kwargs_param_input(child_ctx, pname))
         child_ctx[:bindings][pname] = raw
     i += 1
 
-  # Handle ivar_assign params (-> new(@name) assigns @name = name)
+  # Per-param entry sequence, mirroring the interpreter's binding loop:
+  # the default guard runs first (nil is the missing-argument sentinel),
+  # then the @ivar store uses the guarded value. Historically the ivar
+  # stores ran before ALL the guards, so `-> new(@scale: 2)` stored nil
+  # into @scale whenever the argument was omitted.
   i = 0
   while i < params.size()
     p = params[i]
-    if p.ivar_assign == true
-      lower_ivar_set_expr(child_ctx, "@" + p.name, typed_value(:i64, "%" + p.name))
-    i += 1
-
-  # Emit default parameter guards for class methods
-  i = 0
-  while i < params.size()
-    p = params[i]
+    pname = param_runtime_name(p)
     if p.default != nil
-      pname = param_runtime_name(p)
-      param_reg = "%" + pname
+      param_reg = kwargs_param_input(child_ctx, pname)
       is_nil = next_temp(new_fn)
       emit_instruction(new_fn, {op: :icmp_i64, temp: is_nil, pred: "eq", lhs: param_reg, rhs: w_nil.to_s()})
       default_val = lower_expression(child_ctx, p.default)
@@ -1642,6 +1734,11 @@
       result = next_temp(new_fn)
       emit_instruction(new_fn, {op: :select_i64, temp: result, cond: is_nil, then_val: default_reg, else_val: param_reg})
       child_ctx[:bindings][pname] = result
+    if p.ivar_assign == true
+      ivar_value = kwargs_param_input(child_ctx, p.name)
+      if p.default != nil && child_ctx[:bindings][p.name] != nil
+        ivar_value = child_ctx[:bindings][p.name]
+      lower_ivar_set_expr(child_ctx, "@" + p.name, typed_value(:i64, ivar_value))
     i += 1
 
   # Pre-scan body for parameter reassignment

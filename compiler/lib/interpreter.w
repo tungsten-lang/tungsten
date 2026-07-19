@@ -2774,6 +2774,88 @@ use target
       return class_methods[name]
     lookup_class_method(w_class[:superclass], name)
 
+  # Mirror of the compiled engine's keyword-argument entry remap
+  # (w_kwargs_remap12 in runtime.c; prologue emitted by
+  # lowering/definitions.w). A call-site kwargs group arrives as ONE
+  # hash marked W_HASH_FLAG_KWARGS (eval_hash). When the callee declares
+  # keyword params, rebind by NAME: positional args before the group keep
+  # their slots, trailing non-nil post args (a positionally passed
+  # closure) right-align, each keyword slot at/after the group takes
+  # hash[name] when present (else nil so the default fires), and leftover
+  # keys form a fresh unmarked residual hash placed at the first free
+  # non-keyword slot. Callees without keyword params keep the group as an
+  # ordinary trailing hash (`options = {}` collapse).
+  -> kwargs_remap_args(params, args)
+    if params == nil || args == nil || args.size() == 0
+      return args
+    has_kw = false
+    i = 0
+    while i < params.size()
+      if ast_get(params[i], :keyword) == true
+        has_kw = true
+      i += 1
+    if !has_kw
+      return args
+    n = params.size()
+    k = -1
+    i = 0
+    while i < args.size() && i < n
+      if args[i] != nil && ccall("w_hash_is_kwargs", args[i]) == true
+        k = i
+        break
+      i += 1
+    if k == -1
+      return args
+    kwh = args[k]
+    kwkeys = kwh.keys()
+    out = []
+    i = 0
+    while i < n
+      if i < k
+        out.push(args[i])
+      else
+        out.push(nil)
+      i += 1
+    post = []
+    i = k + 1
+    while i < args.size() && i < n
+      if args[i] != nil
+        post.push(args[i])
+      i += 1
+    i = 0
+    while i < post.size()
+      out[n - post.size() + i] = post[i]
+      i += 1
+    consumed = {}
+    i = 0
+    while i < n
+      if i >= k && ast_get(params[i], :keyword) == true
+        keyname = ast_get(params[i], :name)
+        j = 0
+        while j < kwkeys.size()
+          if kwkeys[j].to_s() == keyname
+            out[i] = kwh[kwkeys[j]]
+            consumed[keyname] = true
+            break
+          j += 1
+      i += 1
+    residual = {}
+    rcount = 0
+    j = 0
+    while j < kwkeys.size()
+      if consumed[kwkeys[j].to_s()] == nil
+        residual[kwkeys[j]] = kwh[kwkeys[j]]
+        rcount += 1
+      j += 1
+    if rcount > 0
+      j = k
+      while j < n
+        if out[j] == nil && ast_get(params[j], :keyword) != true && ast_get(params[j], :block_param) != true
+          out[j] = residual
+          break
+        j += 1
+    out
+
   -> call_w_method(recv, method, args, block, env)
     # Barrier scope: a method/function body is lexically isolated from the
     # top-level (and caller) locals. Without the barrier, a callee that
@@ -2794,13 +2876,18 @@ use target
       # expressions containing self/$value belong to the callee, not the
       # caller whose method happened to invoke it.
       params = ast_get(method, :params)
+      args = kwargs_remap_args(params, args)
       i = 0
       while i < params.size()
         param = params[i]
         value = nil
         if i < args.size()
           value = args[i]
-        elsif ast_get(param, :default) != nil
+        # nil is the missing-argument sentinel, exactly as in the compiled
+        # engine (call sites pad with nil; the default guard selects on
+        # nil). A nil-valued slot — absent, padded, or left empty by the
+        # kwargs remap — takes the declared default.
+        if value == nil && ast_get(param, :default) != nil
           value = evaluate(ast_get(param, :default), method_env)
 
         # `&blk` binds the attached trailing block (a lambda passed
@@ -3574,6 +3661,12 @@ use target
       k = evaluate(entry[0], env)
       v = evaluate(entry[1], env)
       result[k] = v
+    # A call-site kwargs group carries the runtime kwargs mark so
+    # call_w_method can rebind declared keyword params by name — the
+    # same W_HASH_FLAG_KWARGS protocol the compiled engine uses
+    # (literals.w mark + w_kwargs_remap12 prologue).
+    if ast_get(node, :from_kwargs) == true
+      ccall("w_hash_mark_kwargs", result)
     result
 
   # `bool[N]` / `i32[N]` / etc. — zero-filled typed array. Mirrors

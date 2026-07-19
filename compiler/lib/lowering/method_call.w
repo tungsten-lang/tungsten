@@ -428,7 +428,7 @@
 
     # File module methods → direct runtime calls
     if recv_name == "File"
-      args = expand_kwargs(node.args)
+      args = node.args
       if method_name == "read" && args.size() == 1
         path_val = lower_expression(ctx, args[0])
         path_reg = ensure_i64_value(wfn, path_val)
@@ -503,7 +503,7 @@
         return typed_value(:i64, temp)
 
     if recv_name == "OS"
-      args = expand_kwargs(node.args)
+      args = node.args
       os_target = nil
       if method_name == "capture"
         os_target = "__w_capture"
@@ -539,7 +539,7 @@
         return typed_value(:i64, temp)
 
     if recv_name == "Digest"
-      args = expand_kwargs(node.args)
+      args = node.args
       digest_target = nil
       if method_name == "bytes64"
         digest_target = "__w_digest_bytes64"
@@ -556,7 +556,7 @@
 
     # Math.* libm wrappers — direct runtime calls.
     if recv_name == "Math"
-      args = expand_kwargs(node.args)
+      args = node.args
       math_unary = nil
       if method_name == "exp"
         math_unary = "w_math_exp"
@@ -626,7 +626,7 @@
     # reinterpret integer bits as a float (or back). Needed for GGUF
     # dequant and any other binary-format work.
     if recv_name == "Float"
-      args = expand_kwargs(node.args)
+      args = node.args
       bitcast_fn = nil
       if method_name == "from_u32_bits"
         bitcast_fn = "w_float_from_u32_bits"
@@ -1602,7 +1602,7 @@
   receiver_reg = ensure_i64_value(wfn, receiver_val)
 
   # Lower args
-  call_args = expand_kwargs(node.args)
+  call_args = node.args
   arg_regs = []
   i = 0
   while i < call_args.size()

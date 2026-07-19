@@ -16713,6 +16713,7 @@ static inline void w_hash_reset(WHash *hash) {
         hash->values[i] = W_NIL;
     }
     hash->count = 0;
+    hash->flags &= ~W_HASH_FLAG_KWARGS;
 }
 
 /* Call-site reuse hash allocation. See w_array_reuse_or_new. */
@@ -16803,6 +16804,156 @@ WValue w_hash_has_key(WValue hash_val, WValue key) {
     (void)w_hash_find_slot(hash, key, &found);
     return found ? W_TRUE : W_FALSE;
 }
+
+/* ---- Keyword arguments ----
+ *
+ * A call-site kwargs group (`f(a: 1, b: 2)`) evaluates to ONE trailing Hash
+ * argument marked W_HASH_FLAG_KWARGS. Callees that declare keyword params
+ * (`-> f(x, align: "l")`) rebind them by NAME at entry via w_kwargs_remap12;
+ * callees without keyword params receive the group as an ordinary Hash
+ * (options = {} collapse). Both engines share these primitives: compiled
+ * method prologues call them directly, the tree-walking interpreter mirrors
+ * the same algorithm over the same runtime flag.
+ */
+#define W_KWARGS_MAX_SLOTS 12
+static __thread WValue g_kwargs_scratch[W_KWARGS_MAX_SLOTS];
+
+static inline int w_hash_kwargs_flag(WValue v) {
+    if (!w_is_hash(v)) return 0;
+    return (((WHash *)w_as_ptr(v))->flags & W_HASH_FLAG_KWARGS) != 0;
+}
+
+WValue w_hash_mark_kwargs(WValue h) {
+    if (w_is_hash(h)) ((WHash *)w_as_ptr(h))->flags |= W_HASH_FLAG_KWARGS;
+    return h;
+}
+
+WValue w_hash_is_kwargs(WValue v) {
+    return w_hash_kwargs_flag(v) ? W_TRUE : W_FALSE;
+}
+
+/* Remap the incoming parameter slots of a keyword-param callee.
+ *
+ * spec is an interned string "N;slot:name[,slot:name...];B" where N is the
+ * callee's slot count (declared params plus any implicit block slot), each
+ * slot:name pair names a declared keyword param, and B is the block-param
+ * slot index (-1 if none).
+ *
+ * Algorithm (mirrored by the interpreter's call_w_method):
+ *   - k = index of the first kwargs-marked hash among the N slots; if none,
+ *     return 0 (no remap; slot fns pass originals through).
+ *   - slots before k keep their positional values (positional fill wins).
+ *   - non-nil slots after k (the appended block closure) right-align into
+ *     the tail slots.
+ *   - each declared keyword slot >= k takes hash[name] when the key is
+ *     present (else stays nil so the default guard fires).
+ *   - leftover keys form a fresh UNMARKED residual hash placed at the first
+ *     still-nil non-keyword slot >= k (dropped when no such slot exists).
+ * Results land in thread-local scratch; the emitted prologue reads them back
+ * immediately via w_kwargs_slot_<i> with no intervening calls. */
+WValue w_kwargs_remap12(WValue spec,
+                        WValue p0, WValue p1, WValue p2, WValue p3,
+                        WValue p4, WValue p5, WValue p6, WValue p7,
+                        WValue p8, WValue p9, WValue p10, WValue p11) {
+    WValue args[W_KWARGS_MAX_SLOTS] = {p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11};
+    const char *s = as_str(spec);
+    int n = 0;
+    while (*s >= '0' && *s <= '9') { n = n * 10 + (*s - '0'); s++; }
+    if (n > W_KWARGS_MAX_SLOTS) n = W_KWARGS_MAX_SLOTS;
+    if (*s == ';') s++;
+    int k = -1;
+    for (int i = 0; i < n; i++) {
+        if (w_hash_kwargs_flag(args[i])) { k = i; break; }
+    }
+    if (k < 0) return (WValue)0;
+    WValue kwh = args[k];
+    WHash *hh = (WHash *)w_as_ptr(kwh);
+    WValue out[W_KWARGS_MAX_SLOTS];
+    for (int i = 0; i < n; i++) out[i] = (i < k) ? args[i] : W_NIL;
+    /* Right-align trailing non-nil post args (the appended block closure). */
+    int m = 0;
+    for (int i = k + 1; i < n; i++) if (args[i] != W_NIL) m++;
+    int pos = n - m;
+    for (int i = k + 1; i < n; i++) if (args[i] != W_NIL) out[pos++] = args[i];
+    /* Bind labels to keyword slots at/after k. */
+    WValue consumed[W_KWARGS_MAX_SLOTS];
+    int nconsumed = 0;
+    uint32_t kw_slot_mask = 0;
+    while (*s && *s != ';') {
+        int slot = 0;
+        while (*s >= '0' && *s <= '9') { slot = slot * 10 + (*s - '0'); s++; }
+        if (*s == ':') s++;
+        char name[128];
+        int ni = 0;
+        while (*s && *s != ',' && *s != ';' && ni < 127) name[ni++] = *s++;
+        name[ni] = 0;
+        if (slot < n) kw_slot_mask |= (1u << slot);
+        if (slot >= k && slot < n) {
+            WValue key = w_symbol(name);
+            if (w_hash_has_key(kwh, key) == W_TRUE) {
+                out[slot] = w_hash_get(kwh, key);
+                if (nconsumed < W_KWARGS_MAX_SLOTS) consumed[nconsumed++] = key;
+            }
+        }
+        if (*s == ',') s++;
+    }
+    int blk = -1;
+    if (*s == ';') {
+        s++;
+        if (*s == '-') {
+            blk = -1;
+        } else {
+            int b = 0;
+            while (*s >= '0' && *s <= '9') { b = b * 10 + (*s - '0'); s++; }
+            blk = b;
+        }
+    }
+    /* Residual: unconsumed keys -> fresh unmarked hash at the first free
+     * non-keyword slot >= k. */
+    if ((int64_t)nconsumed < (int64_t)hh->count) {
+        int slot = -1;
+        for (int j = k; j < n; j++) {
+            if (out[j] != W_NIL) continue;
+            if (kw_slot_mask & (1u << j)) continue;
+            if (j == blk) continue;
+            slot = j;
+            break;
+        }
+        if (slot >= 0) {
+            WValue residual = w_hash_new();
+            for (int64_t i = 0; i < hh->cap; i++) {
+                WValue key = hh->keys[i];
+                if (key == W_UNDEF || key == W_MEMO_MISS) continue;
+                int is_consumed = 0;
+                for (int c = 0; c < nconsumed; c++) {
+                    if (w_hash_key_eq(consumed[c], key)) { is_consumed = 1; break; }
+                }
+                if (!is_consumed) w_hash_set(residual, key, hh->values[i]);
+            }
+            out[slot] = residual;
+        }
+    }
+    for (int i = 0; i < n; i++) g_kwargs_scratch[i] = out[i];
+    return (WValue)1;
+}
+
+#define W_KWARGS_SLOT_FN(i) \
+    WValue w_kwargs_slot_##i(WValue did, WValue orig) { \
+        return did ? g_kwargs_scratch[i] : orig; \
+    }
+W_KWARGS_SLOT_FN(0)
+W_KWARGS_SLOT_FN(1)
+W_KWARGS_SLOT_FN(2)
+W_KWARGS_SLOT_FN(3)
+W_KWARGS_SLOT_FN(4)
+W_KWARGS_SLOT_FN(5)
+W_KWARGS_SLOT_FN(6)
+W_KWARGS_SLOT_FN(7)
+W_KWARGS_SLOT_FN(8)
+W_KWARGS_SLOT_FN(9)
+W_KWARGS_SLOT_FN(10)
+W_KWARGS_SLOT_FN(11)
+#undef W_KWARGS_SLOT_FN
 
 WValue w_hash_keys(WValue hash_val) {
     WHash *hash = as_hash(hash_val);
@@ -19845,6 +19996,12 @@ static WValue w_ic_string_lchs(WValue r, WValue *a, int c) {
         const char *lang = as_str(a[0]);
         int bits = 64;
         if (c >= 2) {
+            /* `lchs("tungsten", bits: 32)` — the kwargs group arrives as one
+             * marked hash; unwrap the documented `bits:` key. */
+            if (w_hash_is_kwargs(a[1]) == W_TRUE) {
+                WValue bv = w_hash_get(a[1], w_symbol("bits"));
+                if (bv != W_NIL) a[1] = bv;
+            }
             if (!w_is_int(a[1])) die("lchs: bits argument must be an integer (16, 32, or 64)");
             bits = (int)w_as_int(a[1]);
             if (bits != 16 && bits != 32 && bits != 64)

@@ -291,6 +291,7 @@ typedef uint64_t (*WHashFn)(const uint8_t *data, size_t len);
 /* ---- Hash table ---- */
 #define W_HASH_FLAG_FROZEN  (1u << 0)
 #define W_HASH_FLAG_POOLED  (1u << 1)  /* set when hash is in the recycle pool */
+#define W_HASH_FLAG_KWARGS  (1u << 2)  /* hash born from a call-site kwargs group */
 
 typedef struct {
     uint32_t count;
@@ -570,6 +571,12 @@ WValue w_hash_new_with_fn(int64_t fn_id);
 WValue w_hash_set(WValue hash, WValue key, WValue val);
 WValue w_hash_get(WValue hash, WValue key);
 WValue w_hash_has_key(WValue hash, WValue key);
+WValue w_hash_mark_kwargs(WValue h);
+WValue w_hash_is_kwargs(WValue v);
+WValue w_kwargs_remap12(WValue spec,
+                        WValue p0, WValue p1, WValue p2, WValue p3,
+                        WValue p4, WValue p5, WValue p6, WValue p7,
+                        WValue p8, WValue p9, WValue p10, WValue p11);
 WValue w_hash_keys(WValue hash);
 WValue w_hash_values(WValue hash);
 WValue w_hash_delete(WValue hash, WValue key);

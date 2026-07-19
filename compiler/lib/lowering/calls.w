@@ -8,27 +8,17 @@
 # directives — see pass_registry.w.
 
 
-# Expand trailing kwargs hash literal into positional args.
-# pad("hi", 10, align: "right") has args = ["hi", 10, {hash: [[":align", "right"]]}]
-# → expanded to ["hi", 10, "right"] (values in source order)
--> expand_kwargs(args)
+# Kwargs at a call site are NOT expanded positionally: the parser's
+# from_kwargs hash literal lowers as ONE runtime-marked hash argument
+# (literals.w), and keyword-param callees rebind it by name at entry
+# (the w_kwargs_remap12 prologue in definitions.w). Callees without
+# keyword params receive the group as an ordinary trailing hash — the
+# `options = {}` collapse. This matches the tree-walking interpreter.
+-> call_args_has_kwargs?(args)
   if args == nil || args.size() == 0
-    return args
+    return false
   last = args[args.size() - 1]
-  if last == nil || ast_kind(last) != :hash_literal || last.from_kwargs != true
-    return args
-  expanded = []
-  i = 0
-  while i < args.size() - 1
-    expanded.push(args[i])
-    i += 1
-  entries = last.entries
-  if entries != nil
-    i = 0
-    while i < entries.size()
-      expanded.push(entries[i][1])
-      i += 1
-  expanded
+  last != nil && is_ast_node?(last) && ast_kind(last) == :hash_literal && last.from_kwargs == true
 
 # -- Calls --
 
@@ -56,7 +46,7 @@
   wfn = ctx[:func]
   name = node.name
   receiver = node.receiver
-  args = expand_kwargs(node.args)
+  args = node.args
 
   # Compiler-generated typed-overload dispatch. These calls never appear in
   # user AST: definitions.w synthesizes them only after it has selected the
@@ -1020,9 +1010,12 @@
     result_tv = nanbox_int_emit(wfn, xor_raw)
     return result_tv
 
-  # Memoized pure function call (fn keyword, arity <= 2)
+  # Memoized pure function call (fn keyword, arity <= 2).
+  # Kwargs calls skip the memo: the group is a hash whose WValue identity
+  # (pointer) is not a stable memo key — a reuse-site hash literal keeps
+  # its pointer across iterations while its contents change.
   pure_target = ctx[:mod][:known_pure_calls][name]
-  if pure_target != nil && arg_regs.size() <= 2
+  if pure_target != nil && arg_regs.size() <= 2 && !call_args_has_kwargs?(node.args)
     memo_global = ctx[:mod][:fn_memo_tables][name]
     mark_memo_table_used(ctx[:mod], name)
     memo_ptr = next_temp(wfn)
@@ -1052,7 +1045,7 @@
   wfn = ctx[:func]
   receiver_val = lower_expression(ctx, recv_node)
   receiver_reg = ensure_i64_value(wfn, receiver_val)
-  call_args = expand_kwargs(args)
+  call_args = args
   if call_args == nil
     call_args = []
 
@@ -1076,7 +1069,7 @@
   # applicable when arity ≤ 2 (the runtime exposes memo_call0/1/2_i64
   # variants); over that, fall back to a direct call.
   static_key = nil
-  if static_info[:from_fn] == true && arg_regs.size() <= 2
+  if static_info[:from_fn] == true && arg_regs.size() <= 2 && !call_args_has_kwargs?(args)
     keys = ctx[:mod][:known_pure_calls].keys()
     ki = 0
     while ki < keys.size()

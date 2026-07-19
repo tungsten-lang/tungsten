@@ -293,3 +293,35 @@
     ce_lf = (pad * ce_left).slice(0, ce_left)
     ce_rf = (pad * ce_right).slice(0, ce_right)
     ce_lf + to_s + ce_rf
+
+  # Remove every character that appears in `set` (Ruby String#delete). `set`
+  # is a character SET, not a substring — "hello".delete("lo") -> "he".
+  # Codepoint-based via chars, so multibyte content is preserved.
+  -> delete(set)
+    del_out = StringBuffer(size)
+    self.chars.each -> (c)
+      if !set.include?(c)
+        del_out << c
+    del_out.to_s
+
+  # Collapse runs of the same character to one (Ruby String#squeeze):
+  # "aaabbbcc" -> "abc".
+  -> squeeze
+    sq_out = StringBuffer(size)
+    sq_prev = nil
+    self.chars.each -> (c)
+      if c != sq_prev
+        sq_out << c
+      sq_prev = c
+    sq_out.to_s
+
+  # Squeeze only runs of characters that appear in `set`
+  # ("aaabbb".squeeze("a") -> "abbb").
+  -> squeeze(set)
+    sqs_out = StringBuffer(size)
+    sqs_prev = nil
+    self.chars.each -> (c)
+      if !(c == sqs_prev && set.include?(c))
+        sqs_out << c
+      sqs_prev = c
+    sqs_out.to_s

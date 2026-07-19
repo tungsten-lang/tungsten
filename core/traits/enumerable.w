@@ -506,6 +506,21 @@ trait Enumerable
     __enumerable_each(consumer)
     memo
 
+  # Map, then keep only truthy results, in a single pass (Ruby filter_map).
+  # A block result of nil or false is dropped; everything else (incl. 0, "",
+  # []) is kept, matching Tungsten's nil/false-only falsiness.
+  -> filter_map(&block) []
+    pairs = __enumerable_yields_pair?
+    consumer = -> (first, second)
+      item = first
+      if pairs
+        item = [first, second]
+      fm_r = block(item)
+      if fm_r
+        out.push(fm_r)
+
+    __enumerable_each(consumer)
+
   -> empty?
     consumer = -> (first, second)
       return false

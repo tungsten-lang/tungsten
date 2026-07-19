@@ -1,6 +1,9 @@
 + Int < Real
-  # @todo other operators
-  -> +/1
+  # @todo other operators. NB: the bodyless `-> +/1` arity-suffix form does
+  # NOT parse for an operator name (only `-> name/N` on identifiers does), so
+  # it silently failed to load this whole file — leaving Int undefined and
+  # BigInt (< Int) without any of its inherited methods. Use the param form.
+  -> +(other)
 
   -> digits
     to_s.split
@@ -69,7 +72,7 @@
   ## Number-theoretic.
 
   # n! — product of 1..n. 0! = 1! = 1.
-  -> factorial 1
+  -> factorial() 1
     (2..self).each -> acc *= item
 
   # Greatest common divisor — iterative Euclidean.

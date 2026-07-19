@@ -115,6 +115,8 @@ bin/*.new
 # external builder must run the generator.
 implementations/spinel/build/*
 implementations/c/build/*
+# Debug build of the C VM stage0 (tungsten-c binary + *.d dep files).
+implementations/c/build-debug/*
 # Symbol/type sidemaps dumped to the repo root from the stage0 bundle (generated).
 /tungsten_stage0_bundle.symbols.json
 /tungsten_stage0_bundle.types.json

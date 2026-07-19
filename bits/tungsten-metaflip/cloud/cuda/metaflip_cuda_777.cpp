@@ -448,7 +448,17 @@ struct OriginalSourceStats {
   bool visited = false;
 };
 
+struct DescendantSourceStats {
+  unsigned long long epochs = 0;
+  unsigned long long exact_novel = 0;
+  unsigned long long fleet_best = 0;
+  unsigned long long last_slot = 0;
+  unsigned long long generation = 0;
+  bool visited = false;
+};
+
 constexpr unsigned long long kOriginalExploreEvery = 4;
+constexpr unsigned long long kDescendantExploreEvery = 4;
 constexpr unsigned long long kRoleExploreEvery = 4;
 
 struct RoleStats {
@@ -471,6 +481,10 @@ unsigned long long original_reward_points(const OriginalSourceStats& stats) {
   return reward_points(stats.exact_novel, stats.fleet_best);
 }
 
+unsigned long long descendant_reward_points(const DescendantSourceStats& stats) {
+  return reward_points(stats.exact_novel, stats.fleet_best);
+}
+
 unsigned long long role_reward_points(const RoleStats& stats) {
   return reward_points(stats.exact_novel, stats.fleet_best);
 }
@@ -482,6 +496,23 @@ std::string original_source_stats_text(const std::vector<OriginalSourceStats>& s
     out << i << ":v" << stats[i].epochs << ",n" << stats[i].exact_novel
         << ",b" << stats[i].fleet_best << ",p"
         << original_reward_points(stats[i]) << ",last";
+    if (stats[i].visited) {
+      out << stats[i].last_slot;
+    } else {
+      out << '-';
+    }
+  }
+  return out.str();
+}
+
+std::string descendant_source_stats_text(
+    const std::vector<DescendantSourceStats>& stats) {
+  std::ostringstream out;
+  for (size_t i = 0; i < stats.size(); ++i) {
+    if (i != 0) out << ';';
+    out << i << ":g" << stats[i].generation << ",v" << stats[i].epochs
+        << ",n" << stats[i].exact_novel << ",b" << stats[i].fleet_best
+        << ",p" << descendant_reward_points(stats[i]) << ",last";
     if (stats[i].visited) {
       out << stats[i].last_slot;
     } else {
@@ -514,8 +545,8 @@ std::string role_stats_text(const std::array<RoleStats, 3>& stats) {
 // floor while allowing productive original or descendant basins to consume
 // the 75% that the old fixed 50/25/25 schedule could not reallocate.
 struct LaunchScheduler {
-  size_t descendant_cursor = 0;
-  std::vector<unsigned long long> descendant_visits;
+  unsigned long long descendant_slots = 0;
+  std::vector<DescendantSourceStats> descendant_stats;
   unsigned long long original_slots = 0;
   unsigned long long adaptive_role_slots = 0;
   std::array<RoleStats, 3> role_stats{};
@@ -577,6 +608,89 @@ struct LaunchScheduler {
     ++stats.epochs;
     ++original_slots;
     return {&original_roots[index], LaunchRole::kOriginal, index};
+  }
+
+  void sync_descendant_stats(size_t count) {
+    descendant_stats.resize(count);
+  }
+
+  size_t choose_descendant(size_t count) {
+    sync_descendant_stats(count);
+    for (size_t index = 0; index < count; ++index) {
+      if (!descendant_stats[index].visited) return index;
+    }
+
+    // One in every four descendant-role slots is oldest-first exploration.
+    // With D continuously live slots, every slot is revisited within 4D
+    // descendant launches.  Other slots compare exact-gated useful yield per
+    // visit, so a fertile promoted child earns more work without starving a
+    // newly admitted or temporarily neutral basin.  Integer cross products
+    // and stable age/index ties keep --run-seed replay deterministic.
+    const bool explore = (descendant_slots % kDescendantExploreEvery) == 0;
+    size_t best = 0;
+    for (size_t candidate = 1; candidate < count; ++candidate) {
+      bool take = false;
+      if (explore) {
+        take = descendant_stats[candidate].last_slot <
+               descendant_stats[best].last_slot;
+      } else {
+        const unsigned __int128 candidate_reward =
+            static_cast<unsigned __int128>(
+                descendant_reward_points(descendant_stats[candidate])) *
+            descendant_stats[best].epochs;
+        const unsigned __int128 best_reward =
+            static_cast<unsigned __int128>(
+                descendant_reward_points(descendant_stats[best])) *
+            descendant_stats[candidate].epochs;
+        if (candidate_reward != best_reward) {
+          take = candidate_reward > best_reward;
+        } else {
+          take = descendant_stats[candidate].last_slot <
+                 descendant_stats[best].last_slot;
+        }
+      }
+      if (!take && descendant_stats[candidate].last_slot ==
+                       descendant_stats[best].last_slot) {
+        take = candidate < best;
+      }
+      if (take) best = candidate;
+    }
+    return best;
+  }
+
+  LaunchChoice select_descendant(size_t index,
+                                 const std::vector<Scheme>& descendants) {
+    DescendantSourceStats& stats = descendant_stats[index];
+    stats.visited = true;
+    stats.last_slot = descendant_slots;
+    ++stats.epochs;
+    ++descendant_slots;
+    return {&descendants[index], LaunchRole::kDescendant, index};
+  }
+
+  // Admission action 1 appends a new slot; action 2+s replaces slot s. The
+  // just-finished launch is observed before this hook, crediting its outcome
+  // to the parent that actually produced it. A replacement then receives a
+  // new generation with no inherited visits, reward, or partner-mode parity.
+  // Call this once for every absolute and auxiliary top-K bank mutation.
+  void note_descendant_admission(int action, size_t count) {
+    if (action == 0) return;
+    if (action == 1) {
+      if (count == 0 || count < descendant_stats.size()) {
+        throw std::runtime_error("invalid descendant append statistics action");
+      }
+      sync_descendant_stats(count);
+      return;
+    }
+
+    const size_t slot = static_cast<size_t>(action - 2);
+    if (slot >= count) {
+      throw std::runtime_error("descendant replacement statistics slot is out of range");
+    }
+    sync_descendant_stats(count);
+    const unsigned long long generation = descendant_stats[slot].generation + 1;
+    descendant_stats[slot] = {};
+    descendant_stats[slot].generation = generation;
   }
 
   LaunchRole choose_adaptive_role(const std::vector<LaunchRole>& eligible) const {
@@ -644,13 +758,7 @@ struct LaunchScheduler {
       choice = select_original(choose_original(originals), original_roots);
     } else {
       if (descendants.empty()) throw std::runtime_error("selected unavailable descendant role");
-      if (descendant_visits.size() < descendants.size()) {
-        descendant_visits.resize(descendants.size());
-      }
-      const size_t index = descendant_cursor % descendants.size();
-      ++descendant_cursor;
-      ++descendant_visits[index];
-      choice = {&descendants[index], role, index};
+      choice = select_descendant(choose_descendant(descendants.size()), descendants);
     }
 
     RoleStats& stats = role_stats[static_cast<size_t>(role)];
@@ -697,6 +805,14 @@ struct LaunchScheduler {
       OriginalSourceStats& stats = original_stats[choice.source_index];
       if (exact_novel) ++stats.exact_novel;
       if (fleet_best) ++stats.fleet_best;
+    } else if (choice.role == LaunchRole::kDescendant) {
+      if (choice.source_index >= descendant_stats.size() ||
+          !descendant_stats[choice.source_index].visited) {
+        throw std::runtime_error("descendant-source outcome has no scheduled visit");
+      }
+      DescendantSourceStats& stats = descendant_stats[choice.source_index];
+      if (exact_novel) ++stats.exact_novel;
+      if (fleet_best) ++stats.fleet_best;
     }
   }
 };
@@ -715,12 +831,12 @@ int scheduled_partner_mode(long long, const LaunchChoice& choice,
     return static_cast<int>(scheduler.original_stats[choice.source_index].epochs & 1ULL);
   }
   if (choice.role == LaunchRole::kDescendant) {
-    if (choice.source_index >= scheduler.descendant_visits.size() ||
-        scheduler.descendant_visits[choice.source_index] == 0) {
+    if (choice.source_index >= scheduler.descendant_stats.size() ||
+        scheduler.descendant_stats[choice.source_index].epochs == 0) {
       throw std::runtime_error("descendant source has no visit parity");
     }
-    return static_cast<int>((scheduler.descendant_visits[choice.source_index] - 1ULL) &
-                            1ULL);
+    return static_cast<int>(
+        (scheduler.descendant_stats[choice.source_index].epochs - 1ULL) & 1ULL);
   }
   const RoleStats& role = scheduler.role_stats[static_cast<size_t>(choice.role)];
   if (role.epochs == 0) throw std::runtime_error("role has no visit parity");
@@ -1791,6 +1907,8 @@ struct PolicyTelemetry {
   std::array<RoleStats, 3> role_stats{};
   unsigned long long original_slots = 0;
   std::vector<OriginalSourceStats> original_stats;
+  unsigned long long descendant_slots = 0;
+  std::vector<DescendantSourceStats> descendant_stats;
   LaunchRole selected_role = LaunchRole::kLeader;
   size_t selected_source = 0;
   int selected_mode = -1;
@@ -1833,6 +1951,8 @@ void complete_candidate_harvest_epoch(PolicyTelemetry& policy,
   policy.role_stats = scheduler.role_stats;
   policy.original_slots = scheduler.original_slots;
   policy.original_stats = scheduler.original_stats;
+  policy.descendant_slots = scheduler.descendant_slots;
+  policy.descendant_stats = scheduler.descendant_stats;
 }
 
 [[maybe_unused]] std::string status_body(const std::string& phase, long long epoch,
@@ -1861,6 +1981,10 @@ void complete_candidate_harvest_epoch(PolicyTelemetry& policy,
         << "\npolicy_original_slots=" << policy->original_slots
         << "\npolicy_original_explore_every=" << kOriginalExploreEvery
         << "\noriginal_source_stats=" << original_source_stats_text(policy->original_stats)
+        << "\npolicy_descendant_slots=" << policy->descendant_slots
+        << "\npolicy_descendant_explore_every=" << kDescendantExploreEvery
+        << "\ndescendant_source_stats="
+        << descendant_source_stats_text(policy->descendant_stats)
         << "\nselected_role="
         << (policy->has_selection ? launch_role_name(policy->selected_role) : "none")
         << "\nselected_source=";
@@ -1937,6 +2061,11 @@ int policy_status_self_test() {
   policy.original_stats.resize(3);
   policy.original_stats[1] = {4, 0, 0, 12, true};
   policy.original_stats[2] = {13, 3, 1, 16, true};
+  policy.descendant_slots = 18;
+  policy.descendant_stats.resize(3);
+  policy.descendant_stats[0] = {4, 0, 0, 12, 0, true};
+  policy.descendant_stats[1] = {13, 3, 1, 16, 2, true};
+  policy.descendant_stats[2] = {0, 0, 0, 0, 1, false};
   policy.selected_role = LaunchRole::kDescendant;
   policy.selected_source = 7;
   policy.selected_mode = 1;
@@ -1951,7 +2080,7 @@ int policy_status_self_test() {
   policy.candidate_harvest_total = {64, 64, 64, 17, 9, 379392};
   const std::string body = status_body("epoch", 66, 5, 1234, best, 16, 99, 100, 10,
                                        4, 0, "exact-novel", &policy);
-  const std::array<std::string, 36> required = {
+  const std::array<std::string, 39> required = {
       "policy_leader_epochs=18\n", "policy_original_epochs=31\n",
       "policy_descendant_epochs=18\n", "policy_adaptive_role_slots=50\n",
       "policy_role_explore_every=4\n",
@@ -1961,6 +2090,9 @@ int policy_status_self_test() {
       "policy_original_slots=17\n", "policy_original_explore_every=4\n",
       "original_source_stats=0:v0,n0,b0,p0,last-;1:v4,n0,b0,p0,last12;"
       "2:v13,n3,b1,p11,last16\n",
+      "policy_descendant_slots=18\n", "policy_descendant_explore_every=4\n",
+      "descendant_source_stats=0:g0,v4,n0,b0,p0,last12;"
+      "1:g2,v13,n3,b1,p11,last16;2:g1,v0,n0,b0,p0,last-\n",
       "selected_source=7\n", "selected_kernel=hash\n", "epoch_door_action=4\n",
       "epoch_door_score=19\n", "epoch_door_source_replacement=1\n",
       "harvest_top_k=8\n",
@@ -2588,6 +2720,7 @@ int run_campaign(const Config& config) {
     candidate_harvest.selected_groups = selected_endpoints.size();
     std::string outcome = "neutral";
     DoorAdmission door_admission;
+    std::vector<std::pair<int, size_t>> descendant_stats_actions;
     bool epoch_exact_novel = false;
     bool epoch_fleet_best = false;
 
@@ -2695,6 +2828,10 @@ int run_campaign(const Config& config) {
               original_roots, descendants, candidate, descendant_capacity,
               config.door_min_distance, true, true, choice.role,
               choice.source_index);
+          if (door_admission.action != 0) {
+            descendant_stats_actions.push_back(
+                {door_admission.action, descendants.size()});
+          }
           outcome = "exact-novel";
         } else {
           outcome = "exact-duplicate";
@@ -2712,12 +2849,21 @@ int run_campaign(const Config& config) {
             choice.source_index);
         if (auxiliary_admission.action != 0) {
           ++candidate_harvest.auxiliary_door_admissions;
+          descendant_stats_actions.push_back(
+              {auxiliary_admission.action, descendants.size()});
         }
       }
     }
     complete_candidate_harvest_epoch(policy, candidate_harvest);
 
+    // Credit only the exact-gated absolute endpoint to the door that launched
+    // this epoch. Then synchronize every bank mutation, including auxiliary
+    // top-K admissions: a replaced slot must not lend its parent's reward or
+    // scan/hash parity to the newly promoted child.
     scheduler.observe(choice, epoch_exact_novel, epoch_fleet_best);
+    for (const auto& action : descendant_stats_actions) {
+      scheduler.note_descendant_admission(action.first, action.second);
+    }
     sync_policy_telemetry(policy, scheduler);
     policy.epoch_door_action = door_admission.action;
     policy.epoch_door_score = door_admission.score;
@@ -2786,6 +2932,8 @@ int run_campaign(const Config& config) {
               << policy.candidate_harvest_total.transfer_bytes
               << " original_sources="
               << original_source_stats_text(policy.original_stats)
+              << " descendant_sources="
+              << descendant_source_stats_text(policy.descendant_stats)
               << " result=" << outcome << std::endl;
 
     ++epoch;

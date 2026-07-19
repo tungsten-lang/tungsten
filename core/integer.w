@@ -288,3 +288,18 @@
       sq_x = sq_y
       sq_y = (sq_x + self / sq_x) / 2
     sq_x
+
+  # n! — product of 1..n; 0! == 1. Uses reduce (not a `while` loop) so the
+  # accumulator keeps promoting to BigInt past the inline range — a while-loop
+  # accumulator becomes an unboxed i64 loop var and silently wraps (25! then
+  # comes out mod 2^64). Small ints are class Integer (separate from Int,
+  # which has its own factorial), so this must live here for `5.factorial`.
+  -> factorial
+    if self < 0
+      raise "Integer#factorial: negative receiver"
+    (2..self).reduce(1) -> (acc, it) acc * it
+
+  # Ruby-style alias: modpow(e, m) == pow(e, m). Gives small ints the same
+  # name Int/BigInt use, so `n.modpow(e, m)` works for any integer.
+  -> modpow(e, m)
+    pow(e, m)

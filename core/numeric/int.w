@@ -143,6 +143,17 @@
   -> pow(e, m)
     modpow(e, m)
 
+  # Number of bits in the two's-complement representation, excluding sign
+  # (Ruby Integer#bit_length): 0 -> 0, 255 -> 8, 256 -> 9, -256 -> 8. Halving
+  # `/ 2` (not `>>`, which is i64-only) keeps it exact for BigInt receivers.
+  -> bit_length
+    bl_n = self < 0 ? self.abs - 1 : self
+    bl = 0
+    while bl_n > 0
+      bl_n = bl_n / 2
+      bl += 1
+    bl
+
   # Integer square root: largest k with k*k <= self (Ruby Integer#isqrt).
   # Newton's method from a digit-count overestimate; exact for BigInt via the
   # promoting / and ** operators. Mirrors Integer#isqrt so it works for any

@@ -303,3 +303,15 @@
   # name Int/BigInt use, so `n.modpow(e, m)` works for any integer.
   -> modpow(e, m)
     pow(e, m)
+
+  # Number of bits in the two's-complement representation, excluding sign
+  # (Ruby Integer#bit_length): 0.bit_length == 0, 255 -> 8, 256 -> 9,
+  # -256 -> 8. Halving `/ 2` (not `>>`, which is i64-only) keeps it exact for
+  # BigInt. `bl` only counts bits so it never overflows i64.
+  -> bit_length
+    bl_n = self < 0 ? self.abs - 1 : self
+    bl = 0
+    while bl_n > 0
+      bl_n = bl_n / 2
+      bl += 1
+    bl

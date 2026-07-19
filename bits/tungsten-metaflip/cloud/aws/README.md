@@ -77,10 +77,11 @@ bits/tungsten-metaflip/cloud/aws/test_supervise_7x7.sh
 The test uses synthetic structural fixtures and dry-run mode; it launches no
 fleet and performs no cloud action.
 
-## Rectangular leaf campaigns
+## Rectangular leased campaigns
 
-`supervise_rect_leaves.sh` maps one independent rectangular profile to each
-listed NUMA node. Its defaults preserve the six-leaf AWS retarget:
+`supervise_rect_leaves.sh` maps one independent, single-shape rectangular
+portfolio parent to each listed NUMA node. Its defaults preserve the six-node
+AWS retarget:
 
 ```text
 shape    3x3x4  3x4x4  2x3x5  3x4x5  4x5x5  5x6x7
@@ -88,14 +89,26 @@ node         0      1      2      3      4      5
 walkers     64     64     64     64     64     64
 ```
 
-Every command is a true rectangular portfolio leaf, with a distinct positive
-restart nonce and door ticket. The launcher rejects unsupported/square shapes,
-duplicates, unequal shape/node counts, absent NUMA nodes, and a native
-binary/runtime mismatch before starting a fleet. Children are CPU-only and
-headless; the supervisor owns the wall deadline so all leaves drain together.
-At the default `J64` width, each leaf keeps 32 independently salted streams on
-the current best and balances the other 32 across its checked-in and durable
-side doors.
+This launcher is specifically a strict-record campaign. It rejects `2x3x4`,
+whose GF(2) rank is already proven optimal at 20; use an explicit standalone
+density/basin run for that profile instead.
+
+Every NUMA process is a long-lived `--rect --rect-shapes SHAPE` parent, not an
+eternal private child. By default the parent gives its node to one finite
+16-round child lease, exact-gates and checkpoints the result, then starts a new
+lease with the portfolio scheduler's fresh high-entropy restart nonce and
+low-discrepancy door ticket. The checkpoint and eight exact side-door files are
+reloaded at each boundary, so a restart changes the walk without throwing away
+useful basins. `--lease-rounds N` exposes the runtime's `1..64` range; 16 is the
+production default.
+
+The launcher rejects unsupported/square shapes, duplicates, unequal
+shape/node counts, absent NUMA nodes, and a native binary/runtime mismatch
+before starting a fleet. Parents and their leased children are CPU-only and
+headless; the supervisor owns the wall deadline so all NUMA groups drain
+together. At the default `J64` width, each lease keeps 32 independently salted
+streams on the current best and balances the other 32 across its checked-in
+and durable side doors.
 
 The normal two-hour launch is:
 
@@ -110,14 +123,33 @@ bits/tungsten-metaflip/cloud/aws/supervise_rect_leaves.sh \
 
 The supervisor atomically updates
 `STATE_ROOT/supervisor/status.txt`. `best_by_shape` keeps the heterogeneous
-rank/density objectives separate; `total_moves` sums the production
-`cpu_moves` and `gpu_moves` fields, while child health, stale-heartbeat counts,
-and kernel/cgroup OOM counters are aggregated. Any unexpected early child
-exit, stale heartbeat, or OOM drains the entire campaign. A child exiting zero
-after `--stop-on-record` is successful only when its final status names the
-same shape and proves `best_rank <= target` or `wr_status=beats`; the aggregate
-reason becomes `record-SHAPE`, sibling leaves drain, and the supervisor exits
-zero after preserving the shape's durable best.
+rank/density objectives separate; `total_moves` sums each parent's cumulative
+portfolio counter. `lease_rounds`, `lease_failure_count`, and
+`protocol_error_count` make the new boundary explicit alongside stale-
+heartbeat and kernel/cgroup OOM counters. `progress_stale_count` separately
+tracks a fresh parent heartbeat whose cumulative `total_moves` has not advanced
+for `--status-timeout`; a responsive parent therefore cannot mask a wedged
+private lease, and a counter that moves backward is a protocol error. A failed
+private lease remains fail-closed even though the portfolio coordinator could
+retry it: any cumulative `cpu_failures`, frozen work, unexpected parent exit,
+malformed parent status, stale heartbeat, or OOM drains the entire campaign.
+
+A parent exiting zero after `--stop-on-record` is successful only when its
+fresh final one-shape portfolio status and durable checkpoint agree on a rank
+at or below the independently curated target. The aggregate reason becomes
+`record-SHAPE`, sibling parents drain, and the supervisor exits zero after
+preserving the shape's durable best.
+
+Mutable state now uses the normal live-state layout below each shape:
+
+```text
+STATE_ROOT/SHAPE/checkpoints/gf2/SHAPE/best.txt
+STATE_ROOT/SHAPE/checkpoints/gf2/SHAPE/best.txt.side-door-{0..7}.txt
+```
+
+On first launch, an older `STATE_ROOT/SHAPE/best.txt` and any adjacent side
+doors are atomically copied into that layout if the destination does not
+already exist. Existing portfolio state always wins.
 
 This AWS launcher requests `sudo shutdown -h now` after every terminal result,
 including a failed campaign, so an instance configured to terminate on guest
@@ -139,8 +171,10 @@ bits/tungsten-metaflip/cloud/aws/supervise_rect_leaves.sh \
 
 The fast local contract test replaces `setsid`, `numactl`, `flock`, Metaflip,
 the OOM counters, and shutdown with fixtures. It covers the clean deadline,
-verified record stop, unexpected child exit, and OOM drains and can never
-invoke the host shutdown tool:
+legacy archive migration, verified record stop, a failed private lease, an
+active lease hidden behind a responsive parent, a regressed cumulative counter,
+an unexpected parent exit, and OOM drains and can never invoke the host
+shutdown tool:
 
 ```sh
 bits/tungsten-metaflip/cloud/aws/test_supervise_rect_leaves.sh

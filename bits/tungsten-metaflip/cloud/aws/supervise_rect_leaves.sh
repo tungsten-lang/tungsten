@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# NUMA-local, fail-closed supervisor for independent rectangular Metaflip leaves.
-# The defaults map one selected rectangular profile to each NUMA node of an
-# m8i.96xlarge.  The supervisor owns the wall deadline and, by default, shuts
-# the AWS host down after every terminal campaign outcome so Spot spend stops.
+# NUMA-local, fail-closed supervisor for independent rectangular Metaflip
+# portfolio parents. The defaults map one selected rectangular profile to each
+# NUMA node of an m8i.96xlarge. Each parent repeatedly leases its node to a
+# finite private child, refreshing restart diversity at every exact boundary.
+# The supervisor owns the wall deadline and, by default, shuts the AWS host
+# down after every terminal campaign outcome so Spot spend stops.
 
 set -Eeuo pipefail
 set -f
@@ -24,8 +26,7 @@ SHAPES_CSV="3x3x4,3x4x4,2x3x5,3x4x5,4x5x5,5x6x7"
 NODES_CSV="0,1,2,3,4,5"
 WALKERS=64
 STEPS=500000
-RESTART_NONCE_BASE=1
-DOOR_TICKET_BASE=0
+LEASE_ROUNDS=16
 POLL_SECONDS=2
 DRAIN_SECONDS=120
 STATUS_TIMEOUT=900
@@ -37,8 +38,9 @@ usage() {
   cat <<'EOF'
 Usage: supervise_rect_leaves.sh --binary PATH [OPTIONS]
 
-Launch one long-lived, CPU-only rectangular Metaflip leaf per NUMA node. The
-default six-leaf campaign is the measured retarget for an m8i.96xlarge.
+Launch one long-lived, CPU-only, single-shape rectangular portfolio parent per
+NUMA node. Each parent rotates finite 16-round child leases by default. The
+default six-parent campaign is the measured retarget for an m8i.96xlarge.
 
 Required:
   --binary PATH              Native Metaflip coordinator executable
@@ -53,15 +55,16 @@ Campaign paths and lifetime:
 Topology and work:
   --shapes CSV               Supported rectangular tensors, one per node
   --nodes CSV                Distinct NUMA nodes, one per shape
-  -J, --walkers N            CPU walkers per leaf (default: 64)
+  -J, --walkers N            CPU walkers per parent/lease (default: 64)
   --steps N                  Moves per worker epoch (default: 500000)
-  --restart-nonce-base N     First private rect restart nonce (default: 1)
-  --door-ticket-base N       First private rect door ticket (default: 0)
+  --lease-rounds N           Finite rounds per child lease (default: 16;
+                             valid range: 1..64)
 
 Health and host policy:
   --poll-seconds N           Supervisor heartbeat interval (default: 2)
   --drain-seconds N          TERM grace before KILL (default: 120)
-  --status-timeout N         Fail on a stale child heartbeat (default: 900)
+  --status-timeout N         Fail on a stale parent heartbeat or frozen
+                             cumulative lease progress (default: 900)
   --shutdown                 Shut the host down after drain (default)
   --no-shutdown              Leave the host running after drain
   --shutdown-command PATH    Invoke PATH with no arguments instead of the
@@ -71,13 +74,16 @@ Other:
   --dry-run                  Validate and print commands; write nothing
   -h, --help                 Show this help
 
-Every child is an explicit rectangular portfolio leaf. The supervisor refuses
-square/unknown tensors, duplicate shapes or nodes, unequal shape/node counts,
-and runtime/binary pairs missing the three private rectangular-leaf options.
-An unexpected child exit, stale heartbeat, or observable kernel/cgroup OOM
-drains all leaves. A clean exit is a successful record stop only when its final
-status proves `best_rank <= target` or `wr_status=beats`. Supervisor status is
-atomically replaced at:
+Every NUMA process is an explicit one-shape rectangular portfolio parent. Its
+finite children reuse the durable best/side-door archive and receive a fresh
+nonce and door ticket from the portfolio scheduler on every lease. The
+supervisor refuses square/unknown tensors, duplicate shapes or nodes, unequal
+shape/node counts, and runtime/binary pairs missing the parent/private-child
+protocol. An unexpected parent exit, failed child lease, stale heartbeat, or
+observable kernel/cgroup OOM drains all parents. A clean parent exit is a
+successful record stop only when its fresh final status and durable checkpoint
+agree on a rank at or below the curated target. Supervisor status is atomically
+replaced at:
 
   STATE_ROOT/supervisor/status.txt
 
@@ -151,14 +157,9 @@ while [ "$#" -gt 0 ]; do
       STEPS=$2
       shift 2
       ;;
-    --restart-nonce-base)
-      [ "$#" -ge 2 ] || die "--restart-nonce-base requires N"
-      RESTART_NONCE_BASE=$2
-      shift 2
-      ;;
-    --door-ticket-base)
-      [ "$#" -ge 2 ] || die "--door-ticket-base requires N"
-      DOOR_TICKET_BASE=$2
+    --lease-rounds)
+      [ "$#" -ge 2 ] || die "--lease-rounds requires N"
+      LEASE_ROUNDS=$2
       shift 2
       ;;
     --poll-seconds)
@@ -210,14 +211,14 @@ done
 require_uint --seconds "$DURATION"
 require_uint --walkers "$WALKERS"
 require_uint --steps "$STEPS"
-require_uint --restart-nonce-base "$RESTART_NONCE_BASE"
-require_uint --door-ticket-base "$DOOR_TICKET_BASE"
+require_uint --lease-rounds "$LEASE_ROUNDS"
 require_uint --poll-seconds "$POLL_SECONDS"
 require_uint --drain-seconds "$DRAIN_SECONDS"
 require_uint --status-timeout "$STATUS_TIMEOUT"
 [ "$WALKERS" -gt 0 ] || die "--walkers must be positive"
 [ "$STEPS" -gt 0 ] || die "--steps must be positive"
-[ "$RESTART_NONCE_BASE" -gt 0 ] || die "--restart-nonce-base must be positive"
+[ "$LEASE_ROUNDS" -ge 1 ] && [ "$LEASE_ROUNDS" -le 64 ] || \
+  die "--lease-rounds must be 1 through 64"
 [ "$POLL_SECONDS" -gt 0 ] || die "--poll-seconds must be positive"
 [ "$DRAIN_SECONDS" -gt 0 ] || die "--drain-seconds must be positive"
 [ "$STATUS_TIMEOUT" -gt 0 ] || die "--status-timeout must be positive"
@@ -262,18 +263,56 @@ fi
 [ -n "$LOG_ROOT" ] || die "--log-root may not be empty"
 case "$LOG_ROOT" in *"$NEWLINE"*) die "--log-root may not contain a newline" ;; esac
 
-# The allowlist mirrors lib/metaflip/seeds/rect.w. Admission means the package
-# has a checked-in exact frontier and an explicit record target, not merely
-# that the three dimensions can be parsed by the generic worker.
+# The allowlist mirrors the strict-record subset of lib/metaflip/seeds/rect.w.
+# Admission means the package has a checked-in exact frontier and an explicit
+# lower target, not merely that the dimensions can be parsed by the worker.
 supported_rect_shape() {
   case "$1" in
-    2x2x5|2x2x6|2x2x7|2x2x8|2x2x9|2x3x4|2x3x5|2x4x5|2x5x6|\
+    2x2x5|2x2x6|2x2x7|2x2x8|2x2x9|2x3x5|2x4x5|2x5x6|\
     3x3x4|3x3x5|3x4x4|3x4x5|3x4x6|3x4x7|3x5x5|3x5x6|3x5x7|\
     4x4x5|4x4x6|4x5x5|4x5x6|4x5x7|4x5x8|4x6x6|4x6x7|4x6x8|5x6x7)
       return 0
       ;;
   esac
   return 1
+}
+
+# A clean portfolio parent exits early only for --stop-on-record. Keep the
+# shell-side authorization independent of the parent's claim: its stopped
+# status and durable checkpoint must agree at or below this curated target.
+# The proven-optimal 2x3x4 profile is excluded from this strict-record
+# campaign, so every admitted shape has one reachable rank-minus-one target.
+rect_target_rank() {
+  case "$1" in
+    2x2x5) printf '17\n' ;;
+    2x2x6) printf '20\n' ;;
+    2x2x7) printf '24\n' ;;
+    2x2x8) printf '27\n' ;;
+    2x2x9) printf '31\n' ;;
+    2x3x5) printf '24\n' ;;
+    2x4x5) printf '32\n' ;;
+    2x5x6) printf '46\n' ;;
+    3x3x4) printf '28\n' ;;
+    3x3x5) printf '35\n' ;;
+    3x4x4) printf '37\n' ;;
+    3x4x5) printf '46\n' ;;
+    3x4x6) printf '53\n' ;;
+    3x4x7) printf '63\n' ;;
+    3x5x5) printf '57\n' ;;
+    3x5x6) printf '67\n' ;;
+    3x5x7) printf '78\n' ;;
+    4x4x5) printf '59\n' ;;
+    4x4x6) printf '72\n' ;;
+    4x5x5) printf '75\n' ;;
+    4x5x6) printf '89\n' ;;
+    4x5x7) printf '103\n' ;;
+    4x5x8) printf '117\n' ;;
+    4x6x6) printf '104\n' ;;
+    4x6x7) printf '122\n' ;;
+    4x6x8) printf '139\n' ;;
+    5x6x7) printf '149\n' ;;
+    *) return 1 ;;
+  esac
 }
 
 case "$SHAPES_CSV" in ''|,*|*,|*,,*) die "--shapes must be a non-empty CSV without empty entries" ;; esac
@@ -292,8 +331,10 @@ IFS=$OLD_IFS
 index=0
 while [ "$index" -lt "${#SHAPES[@]}" ]; do
   shape=${SHAPES[$index]}
+  [ "$shape" != 2x3x4 ] || \
+    die "rectangular shape '2x3x4' is proven optimal at rank 20 and has no strict record target"
   supported_rect_shape "$shape" || \
-    die "unsupported rectangular shape '$shape' (square and uncurated tensors are not leaves)"
+    die "unsupported rectangular shape '$shape' (square and uncurated tensors are not portfolio parents)"
   prior=0
   while [ "$prior" -lt "$index" ]; do
     [ "${SHAPES[$prior]}" != "$shape" ] || die "duplicate rectangular shape $shape"
@@ -311,58 +352,53 @@ while [ "$index" -lt "${#SHAPES[@]}" ]; do
 done
 
 # A mismatched runtime and warm native binary can otherwise accept some of the
-# constructed command and reject the private leaf schedule only after spend
-# begins. Require all three markers on both sides before launching anything.
+# constructed parent command and reject its private lease schedule only after
+# spend begins. Require both parent and private-child markers on both sides
+# before launching anything.
 command -v strings >/dev/null 2>&1 || die "strings is required to validate the native binary"
-for rect_option in --rect-portfolio-child --rect-restart-nonce --rect-door-ticket; do
+for rect_option in --rect --rect-shapes --rect-epoch-rounds --rect-portfolio-child --rect-restart-nonce --rect-door-ticket; do
   grep -F -- "\"$rect_option\"" "$RUNTIME_ROOT/fleet.w" >/dev/null 2>&1 || \
     die "runtime does not advertise required rectangular option $rect_option"
   strings "$BINARY" 2>/dev/null | grep -F -- "$rect_option" >/dev/null || \
     die "native binary does not advertise required rectangular option $rect_option"
 done
 
-build_child_command() {
-  local child_index=$1 shape node nonce ticket shape_state best_path status_path near_path tag
+build_parent_command() {
+  local child_index=$1 shape node shape_state best_path status_path archive_prefix tag
   shape=${SHAPES[$child_index]}
   node=${NODES[$child_index]}
-  nonce=$((RESTART_NONCE_BASE + child_index))
-  ticket=$((DOOR_TICKET_BASE + child_index))
   shape_state="$STATE_ROOT/$shape"
-  best_path="$shape_state/best.txt"
+  best_path="$shape_state/checkpoints/gf2/$shape/best.txt"
   status_path="$shape_state/status.txt"
-  near_path="$shape_state/near"
+  archive_prefix="$best_path.side-door-"
   tag="${CAMPAIGN_TAG}_${shape}_n${node}"
 
   CHILD_COMMAND=(
     setsid numactl "--cpunodebind=$node" "--membind=$node"
     "$BINARY"
-    --tensor "$shape"
+    --rect
+    --rect-shapes "$shape"
+    --rect-epoch-rounds "$LEASE_ROUNDS"
     --runtime-root "$RUNTIME_ROOT"
     --state-dir "$shape_state"
-    --best "$best_path"
     --status "$status_path"
-    --near-dir "$near_path"
     --run-tag "$tag"
     -J "$WALKERS"
     --steps "$STEPS"
+    --rounds 2000000000
     --secs 0
     --no-gpu
     --quiet
     --no-tui
     --stop-on-record
-    --rect-portfolio-child
-    --rect-restart-nonce "$nonce"
-    --rect-door-ticket "$ticket"
   )
 
   BUILT_SHAPE=$shape
   BUILT_NODE=$node
-  BUILT_NONCE=$nonce
-  BUILT_TICKET=$ticket
   BUILT_STATE=$shape_state
   BUILT_BEST=$best_path
   BUILT_STATUS=$status_path
-  BUILT_NEAR=$near_path
+  BUILT_ARCHIVE_PREFIX=$archive_prefix
   BUILT_LOG="$LOG_ROOT/$shape.log"
 }
 
@@ -375,14 +411,14 @@ print_command() {
 }
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  printf 'DRY_RUN campaign=%s leaves=%d shapes=%s nodes=%s walkers=%d steps=%d seconds=%d shutdown=%d\n' \
-    "$CAMPAIGN_TAG" "${#SHAPES[@]}" "$SHAPES_CSV" "$NODES_CSV" "$WALKERS" "$STEPS" "$DURATION" "$SHUTDOWN_ON_EXIT"
+  printf 'DRY_RUN campaign=%s parents=%d shapes=%s nodes=%s walkers=%d steps=%d lease_rounds=%d seconds=%d shutdown=%d\n' \
+    "$CAMPAIGN_TAG" "${#SHAPES[@]}" "$SHAPES_CSV" "$NODES_CSV" "$WALKERS" "$STEPS" "$LEASE_ROUNDS" "$DURATION" "$SHUTDOWN_ON_EXIT"
   index=0
   while [ "$index" -lt "${#SHAPES[@]}" ]; do
-    build_child_command "$index"
-    printf 'DRY_RUN leaf=%s node=%s nonce=%s ticket=%s state=%s best=%s status=%s near=%s log=%s\n' \
-      "$BUILT_SHAPE" "$BUILT_NODE" "$BUILT_NONCE" "$BUILT_TICKET" "$BUILT_STATE" \
-      "$BUILT_BEST" "$BUILT_STATUS" "$BUILT_NEAR" "$BUILT_LOG"
+    build_parent_command "$index"
+    printf 'DRY_RUN parent=%s node=%s lease_rounds=%s state=%s best=%s status=%s archive_prefix=%s log=%s\n' \
+      "$BUILT_SHAPE" "$BUILT_NODE" "$LEASE_ROUNDS" "$BUILT_STATE" \
+      "$BUILT_BEST" "$BUILT_STATUS" "$BUILT_ARCHIVE_PREFIX" "$BUILT_LOG"
     print_command "${CHILD_COMMAND[@]}"
     index=$((index + 1))
   done
@@ -421,11 +457,44 @@ if [ "$SHUTDOWN_ON_EXIT" -eq 1 ]; then
 fi
 
 mkdir -p "$STATE_ROOT/supervisor" "$LOG_ROOT"
-index=0
-while [ "$index" -lt "${#SHAPES[@]}" ]; do
-  mkdir -p "$STATE_ROOT/${SHAPES[$index]}" "$STATE_ROOT/${SHAPES[$index]}/near"
-  index=$((index + 1))
-done
+
+# The previous launcher kept its checkpoint directly at SHAPE/best.txt. Move
+# an immutable copy into the standard live-state layout on first use, together
+# with any exact side-door slots. Existing portfolio state always wins.
+copy_if_absent() {
+  local source=$1 destination=$2 tmp
+  [ -f "$source" ] || return 0
+  [ ! -e "$destination" ] || return 0
+  tmp="$destination.tmp.migrate.$$"
+  cp -p -- "$source" "$tmp" || return 1
+  if ln -- "$tmp" "$destination" 2>/dev/null; then
+    rm -f -- "$tmp"
+    return 0
+  fi
+  # link(2) is the no-clobber publication primitive. A destination created
+  # after our first check wins; any other failure remains fatal.
+  if [ -e "$destination" ]; then
+    rm -f -- "$tmp"
+    return 0
+  fi
+  rm -f -- "$tmp"
+  return 1
+}
+
+migrate_legacy_shape_state() {
+  local shape=$1 legacy_best current_best slot legacy_side current_side
+  legacy_best="$STATE_ROOT/$shape/best.txt"
+  current_best="$STATE_ROOT/$shape/checkpoints/gf2/$shape/best.txt"
+  mkdir -p "${current_best%/*}"
+  copy_if_absent "$legacy_best" "$current_best" || return 1
+  slot=0
+  while [ "$slot" -lt 8 ]; do
+    legacy_side="$legacy_best.side-door-$slot.txt"
+    current_side="$current_best.side-door-$slot.txt"
+    copy_if_absent "$legacy_side" "$current_side" || return 1
+    slot=$((slot + 1))
+  done
+}
 
 exec 9>"$STATE_ROOT/supervisor/lock"
 if ! flock -n 9; then
@@ -435,14 +504,15 @@ fi
 PIDS=()
 CHILD_SHAPES=()
 CHILD_NODES=()
-CHILD_NONCES=()
-CHILD_TICKETS=()
 CHILD_BESTS=()
 CHILD_STATUSES=()
 CHILD_LOGS=()
 CHILD_LAUNCH_EPOCHS=()
 CHILD_REAPED=()
 CHILD_EXIT_CODES=()
+CHILD_PROGRESS_MOVES=()
+CHILD_PROGRESS_EPOCHS=()
+CHILD_PROGRESS_SEEN=()
 LAUNCHED=0
 CLEAN_EXIT=0
 REQUESTED_REASON=""
@@ -564,14 +634,47 @@ TOTAL_MOVES=0
 RUNNING_COUNT=0
 STATUS_COUNT=0
 STALE_COUNT=0
+LEASE_FAILURE_COUNT=0
+PROTOCOL_ERROR_COUNT=0
+PROGRESS_STALE_COUNT=0
 BEST_BY_SHAPE="none"
 
+SNAPSHOT_HEADER=""
+SNAPSHOT_SHAPE=""
+
+# Read one rename-stable inode exactly once, then split the required two-line
+# parent protocol in memory. Reopening for the shape row could combine header
+# generation N with row generation N+1 across an atomic replacement.
+load_parent_snapshot() {
+  local path=$1 body rest newline
+  SNAPSHOT_HEADER=""
+  SNAPSHOT_SHAPE=""
+  [ -s "$path" ] || return 1
+  body=$(< "$path") || return 1
+  newline=$'\n'
+  case "$body" in *"$newline"*) ;; *) return 1 ;; esac
+  SNAPSHOT_HEADER=${body%%"$newline"*}
+  rest=${body#*"$newline"}
+  [ -n "$SNAPSHOT_HEADER" ] && [ -n "$rest" ] || return 1
+  case "$rest" in *"$newline"*) return 1 ;; esac
+  SNAPSHOT_SHAPE=$rest
+  return 0
+}
+
+is_uint() {
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  return 0
+}
+
 refresh_metrics() {
-  local now=$1 i=0 line="" rank="" bits="" moves="" cpu_moves="" gpu_moves="" mtime="" age="" summary=""
+  local now=$1 i=0 line="" shape_line="" schema="" mode="" producer_state="" health="" shape_count="" sequence="" epoch="" reported_shape="" ready="" rank="" bits="" moves="" total_cpu_moves="" total_gpu_moves="" shape_moves="" cpu_moves="" gpu_moves="" failures="" lease_failures="" gpu_failures="" mitm_failures="" side_write_failures="" protocol_ok=1 mtime="" age="" summary=""
   TOTAL_MOVES=0
   RUNNING_COUNT=0
   STATUS_COUNT=0
   STALE_COUNT=0
+  LEASE_FAILURE_COUNT=0
+  PROTOCOL_ERROR_COUNT=0
+  PROGRESS_STALE_COUNT=0
   while [ "$i" -lt "$LAUNCHED" ]; do
     if [ "${CHILD_REAPED[$i]}" -eq 0 ] && process_alive "${PIDS[$i]}"; then
       RUNNING_COUNT=$((RUNNING_COUNT + 1))
@@ -580,23 +683,93 @@ refresh_metrics() {
     bits=""
     moves=0
     if [ -s "${CHILD_STATUSES[$i]}" ]; then
-      IFS= read -r line < "${CHILD_STATUSES[$i]}" || true
       STATUS_COUNT=$((STATUS_COUNT + 1))
-      rank=$(field_from_line "$line" best_rank || true)
-      bits=$(field_from_line "$line" best_bits || true)
-      moves=$(field_from_line "$line" moves || true)
-      case "$moves" in
-        ''|*[!0-9]*)
-          # Rectangular child status is schema=1 and reports its CPU/GPU
-          # counters separately. Retain `moves` support for older/general
-          # coordinators, but only fall back when that field is absent/bad.
-          cpu_moves=$(field_from_line "$line" cpu_moves || true)
-          gpu_moves=$(field_from_line "$line" gpu_moves || true)
-          case "$cpu_moves" in ''|*[!0-9]*) cpu_moves=0 ;; esac
-          case "$gpu_moves" in ''|*[!0-9]*) gpu_moves=0 ;; esac
-          moves=$((cpu_moves + gpu_moves))
-          ;;
-      esac
+      line=""
+      shape_line=""
+      if load_parent_snapshot "${CHILD_STATUSES[$i]}"; then
+        line=$SNAPSHOT_HEADER
+        shape_line=$SNAPSHOT_SHAPE
+      fi
+      if [ -n "$line" ] && [ -n "$shape_line" ]; then
+        schema=$(field_from_line "$line" schema || true)
+        mode=$(field_from_line "$line" mode || true)
+        producer_state=$(field_from_line "$line" producer_state || true)
+        health=$(field_from_line "$line" health || true)
+        shape_count=$(field_from_line "$line" shapes || true)
+        sequence=$(field_from_line "$line" sequence || true)
+        epoch=$(field_from_line "$line" epoch || true)
+        reported_shape=$(field_from_line "$shape_line" shape || true)
+        ready=$(field_from_line "$shape_line" ready || true)
+        rank=$(field_from_line "$shape_line" rank || true)
+        bits=$(field_from_line "$shape_line" bits || true)
+        moves=$(field_from_line "$line" total_moves || true)
+        total_cpu_moves=$(field_from_line "$line" total_cpu_moves || true)
+        total_gpu_moves=$(field_from_line "$line" total_gpu_moves || true)
+        shape_moves=$(field_from_line "$shape_line" moves || true)
+        cpu_moves=$(field_from_line "$shape_line" cpu_moves || true)
+        gpu_moves=$(field_from_line "$shape_line" gpu_moves || true)
+        failures=$(field_from_line "$shape_line" failures || true)
+        lease_failures=$(field_from_line "$shape_line" cpu_failures || true)
+        gpu_failures=$(field_from_line "$shape_line" gpu_failures || true)
+        mitm_failures=$(field_from_line "$shape_line" mitm_failures || true)
+        side_write_failures=$(field_from_line "$shape_line" side_archive_write_failures || true)
+        protocol_ok=1
+        [ "$schema" = 1 ] || protocol_ok=0
+        [ "$mode" = rect-portfolio ] || protocol_ok=0
+        [ "$health" = ok ] || protocol_ok=0
+        [ "$shape_count" = 1 ] || protocol_ok=0
+        case "$producer_state" in running|stopped) ;; *) protocol_ok=0 ;; esac
+        for numeric in "$sequence" "$epoch" "$rank" "$bits" "$moves" "$total_cpu_moves" "$total_gpu_moves" "$shape_moves" "$cpu_moves" "$gpu_moves" "$failures" "$lease_failures" "$gpu_failures" "$mitm_failures" "$side_write_failures"; do
+          is_uint "$numeric" || protocol_ok=0
+        done
+        [ "$ready" = 1 ] || protocol_ok=0
+        if is_uint "$rank"; then [ "$rank" -gt 0 ] || protocol_ok=0; fi
+        if ! is_uint "$lease_failures"; then lease_failures=0; fi
+        LEASE_FAILURE_COUNT=$((LEASE_FAILURE_COUNT + lease_failures))
+        [ "$reported_shape" = "${CHILD_SHAPES[$i]}" ] || protocol_ok=0
+        if is_uint "$moves" && is_uint "$total_cpu_moves" && is_uint "$total_gpu_moves"; then
+          [ "$moves" -eq $((total_cpu_moves + total_gpu_moves)) ] || protocol_ok=0
+        fi
+        if is_uint "$shape_moves" && is_uint "$cpu_moves" && is_uint "$gpu_moves"; then
+          [ "$shape_moves" -eq $((cpu_moves + gpu_moves)) ] || protocol_ok=0
+        fi
+        if is_uint "$moves" && is_uint "$shape_moves"; then [ "$moves" -eq "$shape_moves" ] || protocol_ok=0; fi
+        if is_uint "$total_cpu_moves" && is_uint "$cpu_moves"; then [ "$total_cpu_moves" -eq "$cpu_moves" ] || protocol_ok=0; fi
+        if is_uint "$total_gpu_moves" && is_uint "$gpu_moves"; then [ "$total_gpu_moves" -eq "$gpu_moves" ] || protocol_ok=0; fi
+        if is_uint "$failures" && is_uint "$lease_failures" && is_uint "$gpu_failures" && is_uint "$mitm_failures"; then
+          [ "$failures" -eq $((lease_failures + gpu_failures + mitm_failures)) ] || protocol_ok=0
+          [ "$failures" -eq 0 ] || protocol_ok=0
+        fi
+        if is_uint "$side_write_failures"; then [ "$side_write_failures" -eq 0 ] || protocol_ok=0; fi
+        case "$moves" in
+          ''|*[!0-9]*) ;;
+          *)
+            if [ "${CHILD_PROGRESS_SEEN[$i]}" -eq 0 ]; then
+              CHILD_PROGRESS_SEEN[$i]=1
+              CHILD_PROGRESS_MOVES[$i]=$moves
+              # A first heartbeat with no completed work is not progress.
+              # Preserve the launch epoch so a late zero-work snapshot cannot
+              # buy the wedged lease a second full timeout window.
+              if [ "$moves" -gt 0 ]; then
+                CHILD_PROGRESS_EPOCHS[$i]=$now
+              fi
+            elif [ "$moves" -lt "${CHILD_PROGRESS_MOVES[$i]}" ]; then
+              protocol_ok=0
+            elif [ "$moves" -gt "${CHILD_PROGRESS_MOVES[$i]}" ]; then
+              CHILD_PROGRESS_MOVES[$i]=$moves
+              CHILD_PROGRESS_EPOCHS[$i]=$now
+            fi
+            ;;
+        esac
+        [ "$protocol_ok" -eq 1 ] || PROTOCOL_ERROR_COUNT=$((PROTOCOL_ERROR_COUNT + 1))
+      else
+        # The launched command is always a portfolio parent; a missing second
+        # row, extra row, or other malformed snapshot is terminal protocol
+        # failure. Best-path fallback below keeps diagnostics useful.
+        moves=0
+        PROTOCOL_ERROR_COUNT=$((PROTOCOL_ERROR_COUNT + 1))
+      fi
+      is_uint "$moves" || moves=0
       TOTAL_MOVES=$((TOTAL_MOVES + moves))
       mtime=$(file_mtime "${CHILD_STATUSES[$i]}" || true)
       case "$mtime" in ''|*[!0-9]*) mtime=$now ;; esac
@@ -604,6 +777,10 @@ refresh_metrics() {
       [ "$age" -le "$STATUS_TIMEOUT" ] || STALE_COUNT=$((STALE_COUNT + 1))
     elif [ $((now - START_EPOCH)) -gt "$STATUS_TIMEOUT" ]; then
       STALE_COUNT=$((STALE_COUNT + 1))
+    fi
+    if [ "${CHILD_PROGRESS_SEEN[$i]}" -ne 0 ] \
+       && [ $((now - CHILD_PROGRESS_EPOCHS[$i])) -gt "$STATUS_TIMEOUT" ]; then
+      PROGRESS_STALE_COUNT=$((PROGRESS_STALE_COUNT + 1))
     fi
     case "$rank" in ''|*[!0-9]*) rank=$(first_rank "${CHILD_BESTS[$i]}" || true) ;; esac
     case "$rank" in ''|*[!0-9]*) rank=0 ;; esac
@@ -622,7 +799,7 @@ write_supervisor_status() {
   STATUS_SEQUENCE=$((STATUS_SEQUENCE + 1))
   tmp="$SUPERVISOR_STATUS.tmp.$$.$STATUS_SEQUENCE"
   printf '%s\n' \
-    "schema=1 producer_state=$producer_state updated_epoch=$now sequence=$STATUS_SEQUENCE campaign=$CAMPAIGN_TAG elapsed=$elapsed deadline_epoch=$DEADLINE_EPOCH shape_count=${#SHAPES[@]} launched_count=$LAUNCHED running_count=$RUNNING_COUNT status_count=$STATUS_COUNT stale_count=$STALE_COUNT total_moves=$TOTAL_MOVES shapes=$SHAPES_CSV nodes=$NODES_CSV best_by_shape=$BEST_BY_SHAPE oom_vm=$VM_OOM_NOW oom_cgroup=$CG_OOM_NOW oom_kill_cgroup=$CG_OOM_KILL_NOW reason=$reason" \
+    "schema=1 producer_state=$producer_state updated_epoch=$now sequence=$STATUS_SEQUENCE campaign=$CAMPAIGN_TAG elapsed=$elapsed deadline_epoch=$DEADLINE_EPOCH shape_count=${#SHAPES[@]} launched_count=$LAUNCHED running_count=$RUNNING_COUNT status_count=$STATUS_COUNT stale_count=$STALE_COUNT progress_stale_count=$PROGRESS_STALE_COUNT lease_rounds=$LEASE_ROUNDS lease_failure_count=$LEASE_FAILURE_COUNT protocol_error_count=$PROTOCOL_ERROR_COUNT total_moves=$TOTAL_MOVES shapes=$SHAPES_CSV nodes=$NODES_CSV best_by_shape=$BEST_BY_SHAPE oom_vm=$VM_OOM_NOW oom_cgroup=$CG_OOM_NOW oom_kill_cgroup=$CG_OOM_KILL_NOW reason=$reason" \
     > "$tmp"
   mv -f -- "$tmp" "$SUPERVISOR_STATUS"
 }
@@ -631,9 +808,9 @@ write_pid_manifest() {
   local tmp="$PIDS_PATH.tmp.$$" i=0
   : > "$tmp"
   while [ "$i" -lt "$LAUNCHED" ]; do
-    printf 'shape=%s pid=%s node=%s nonce=%s ticket=%s best=%s status=%s log=%s\n' \
-      "${CHILD_SHAPES[$i]}" "${PIDS[$i]}" "${CHILD_NODES[$i]}" "${CHILD_NONCES[$i]}" \
-      "${CHILD_TICKETS[$i]}" "${CHILD_BESTS[$i]}" "${CHILD_STATUSES[$i]}" "${CHILD_LOGS[$i]}" >> "$tmp"
+    printf 'shape=%s pid=%s node=%s lease_rounds=%s best=%s status=%s log=%s\n' \
+      "${CHILD_SHAPES[$i]}" "${PIDS[$i]}" "${CHILD_NODES[$i]}" "$LEASE_ROUNDS" \
+      "${CHILD_BESTS[$i]}" "${CHILD_STATUSES[$i]}" "${CHILD_LOGS[$i]}" >> "$tmp"
     i=$((i + 1))
   done
   mv -f -- "$tmp" "$PIDS_PATH"
@@ -652,29 +829,54 @@ reap_child() {
 }
 
 record_stop_from_status() {
-  local child_index=$1 line tensor producer_state rank target wr_status mtime
+  local child_index=$1 line shape_line schema mode producer_state health shape_count tensor rank bits moves shape_moves cpu_moves gpu_moves failures lease_failures gpu_failures mitm_failures side_write_failures target checkpoint_rank mtime
   [ -s "${CHILD_STATUSES[$child_index]}" ] || return 1
   mtime=$(file_mtime "${CHILD_STATUSES[$child_index]}" || true)
   case "$mtime" in ''|*[!0-9]*) return 1 ;; esac
   [ "$mtime" -ge "${CHILD_LAUNCH_EPOCHS[$child_index]}" ] || return 1
-  IFS= read -r line < "${CHILD_STATUSES[$child_index]}" || return 1
-  tensor=$(field_from_line "$line" tensor || true)
+  load_parent_snapshot "${CHILD_STATUSES[$child_index]}" || return 1
+  line=$SNAPSHOT_HEADER
+  shape_line=$SNAPSHOT_SHAPE
+  schema=$(field_from_line "$line" schema || true)
+  mode=$(field_from_line "$line" mode || true)
   producer_state=$(field_from_line "$line" producer_state || true)
-  rank=$(field_from_line "$line" best_rank || true)
-  target=$(field_from_line "$line" target || true)
-  wr_status=$(field_from_line "$line" wr_status || true)
+  health=$(field_from_line "$line" health || true)
+  shape_count=$(field_from_line "$line" shapes || true)
+  moves=$(field_from_line "$line" total_moves || true)
+  [ "$schema" = 1 ] || return 1
+  [ "$mode" = rect-portfolio ] || return 1
+  [ "$health" = ok ] || return 1
+  [ "$shape_count" = 1 ] || return 1
+  tensor=$(field_from_line "$shape_line" shape || true)
+  rank=$(field_from_line "$shape_line" rank || true)
+  bits=$(field_from_line "$shape_line" bits || true)
+  shape_moves=$(field_from_line "$shape_line" moves || true)
+  cpu_moves=$(field_from_line "$shape_line" cpu_moves || true)
+  gpu_moves=$(field_from_line "$shape_line" gpu_moves || true)
+  failures=$(field_from_line "$shape_line" failures || true)
+  lease_failures=$(field_from_line "$shape_line" cpu_failures || true)
+  gpu_failures=$(field_from_line "$shape_line" gpu_failures || true)
+  mitm_failures=$(field_from_line "$shape_line" mitm_failures || true)
+  side_write_failures=$(field_from_line "$shape_line" side_archive_write_failures || true)
   [ "$tensor" = "${CHILD_SHAPES[$child_index]}" ] || return 1
   [ "$producer_state" = stopped ] || return 1
-  case "$rank" in ''|*[!0-9]*) return 1 ;; esac
+  for numeric in "$rank" "$bits" "$moves" "$shape_moves" "$cpu_moves" "$gpu_moves" "$failures" "$lease_failures" "$gpu_failures" "$mitm_failures" "$side_write_failures"; do
+    is_uint "$numeric" || return 1
+  done
+  [ "$moves" -eq "$shape_moves" ] || return 1
+  [ "$shape_moves" -eq $((cpu_moves + gpu_moves)) ] || return 1
+  [ "$failures" -eq $((lease_failures + gpu_failures + mitm_failures)) ] || return 1
+  [ "$failures" -eq 0 ] || return 1
+  [ "$side_write_failures" -eq 0 ] || return 1
   [ "$rank" -gt 0 ] || return 1
-  if [ "$wr_status" = beats ]; then
-    return 0
-  fi
+  checkpoint_rank=$(first_rank "${CHILD_BESTS[$child_index]}" || true)
+  [ "$checkpoint_rank" = "$rank" ] || return 1
+  target=$(rect_target_rank "$tensor" || true)
   case "$target" in ''|*[!0-9]*) return 1 ;; esac
   [ "$target" -gt 0 ] && [ "$rank" -le "$target" ]
 }
 
-unexpected_child_exit() {
+unexpected_parent_exit() {
   local i=0 rc log
   while [ "$i" -lt "$LAUNCHED" ]; do
     if [ "${CHILD_REAPED[$i]}" -eq 0 ] && ! process_alive "${PIDS[$i]}"; then
@@ -685,9 +887,9 @@ unexpected_child_exit() {
         CHILD_EXIT_REASON="record-${CHILD_SHAPES[$i]}"
       elif [ "$rc" -eq 137 ] || [ "$rc" -eq 9 ] \
          || grep -Eiq 'out of memory|oom-kill|oom killer|cannot allocate memory|std::bad_alloc|Killed process' "$log" 2>/dev/null; then
-        CHILD_EXIT_REASON="oom-child-${CHILD_SHAPES[$i]}-exit-$rc"
+        CHILD_EXIT_REASON="oom-parent-${CHILD_SHAPES[$i]}-exit-$rc"
       else
-        CHILD_EXIT_REASON="child-${CHILD_SHAPES[$i]}-exit-$rc"
+        CHILD_EXIT_REASON="parent-${CHILD_SHAPES[$i]}-exit-$rc"
       fi
       return 0
     fi
@@ -711,7 +913,7 @@ drain_all() {
     sleep "$POLL_SECONDS" || true
   done
   if [ "$RUNNING_COUNT" -gt 0 ]; then
-    printf '%s: drain grace expired; KILLing %d remaining leaf/leaves\n' "$PROGRAM" "$RUNNING_COUNT" >&2
+    printf '%s: drain grace expired; KILLing %d remaining parent/parents\n' "$PROGRAM" "$RUNNING_COUNT" >&2
     terminate_groups KILL
   fi
   i=0
@@ -724,12 +926,74 @@ drain_all() {
   refresh_metrics "$(date +%s)"
 }
 
+audit_terminal_statuses() {
+  local i=0 errors=0 line producer_state mtime
+  while [ "$i" -lt "$LAUNCHED" ]; do
+    if ! load_parent_snapshot "${CHILD_STATUSES[$i]}"; then
+      errors=$((errors + 1))
+    else
+      line=$SNAPSHOT_HEADER
+      producer_state=$(field_from_line "$line" producer_state || true)
+      mtime=$(file_mtime "${CHILD_STATUSES[$i]}" || true)
+      if [ "$producer_state" != stopped ]; then
+        errors=$((errors + 1))
+      elif ! is_uint "$mtime" || [ "$mtime" -lt "${CHILD_LAUNCH_EPOCHS[$i]}" ]; then
+        errors=$((errors + 1))
+      fi
+    fi
+    i=$((i + 1))
+  done
+  if [ "$errors" -gt "$PROTOCOL_ERROR_COUNT" ]; then
+    PROTOCOL_ERROR_COUNT=$errors
+  fi
+}
+
+terminal_exit_failure() {
+  local i=0 rc log
+  while [ "$i" -lt "$LAUNCHED" ]; do
+    rc=${CHILD_EXIT_CODES[$i]}
+    if [ "$rc" -ne 0 ]; then
+      log=${CHILD_LOGS[$i]}
+      if [ "$rc" -eq 137 ] || [ "$rc" -eq 9 ] \
+         || grep -Eiq 'out of memory|oom-kill|oom killer|cannot allocate memory|std::bad_alloc|Killed process' "$log" 2>/dev/null; then
+        TERMINAL_AUDIT_REASON="oom-parent-${CHILD_SHAPES[$i]}-exit-$rc"
+      else
+        TERMINAL_AUDIT_REASON="parent-${CHILD_SHAPES[$i]}-exit-$rc"
+      fi
+      return 0
+    fi
+    i=$((i + 1))
+  done
+  return 1
+}
+
+audit_terminal_outcome() {
+  TERMINAL_AUDIT_REASON=""
+  # drain_all has reaped every parent and refreshed its final snapshot.
+  audit_terminal_statuses
+  if detect_system_oom; then
+    TERMINAL_AUDIT_REASON=oom-counter-increased
+  elif [ "$LEASE_FAILURE_COUNT" -gt 0 ]; then
+    TERMINAL_AUDIT_REASON="lease-failure-count-$LEASE_FAILURE_COUNT"
+  elif [ "$PROTOCOL_ERROR_COUNT" -gt 0 ]; then
+    TERMINAL_AUDIT_REASON="parent-protocol-error-count-$PROTOCOL_ERROR_COUNT"
+  elif [ "$PROGRESS_STALE_COUNT" -gt 0 ]; then
+    TERMINAL_AUDIT_REASON="frozen-progress-count-$PROGRESS_STALE_COUNT"
+  elif [ "$STALE_COUNT" -gt 0 ]; then
+    TERMINAL_AUDIT_REASON="stale-heartbeat-count-$STALE_COUNT"
+  else
+    terminal_exit_failure || true
+  fi
+  [ -z "$TERMINAL_AUDIT_REASON" ] || return 1
+  return 0
+}
+
 emergency_cleanup() {
   local rc=$?
   trap - EXIT INT TERM HUP
   set +e
   if [ "$CLEAN_EXIT" -eq 0 ] && [ "$LAUNCHED" -gt 0 ]; then
-    printf '%s: emergency fail-closed drain of %d launched leaves\n' "$PROGRAM" "$LAUNCHED" >&2
+    printf '%s: emergency fail-closed drain of %d launched parents\n' "$PROGRAM" "$LAUNCHED" >&2
     terminate_groups TERM
     sleep 2
     terminate_groups KILL
@@ -760,14 +1024,24 @@ if [ -s "$PIDS_PATH" ]; then
     case "$prior_pid" in ''|*[!0-9]*) continue ;; esac
     if kill -0 "$prior_pid" 2>/dev/null && [ -r "/proc/$prior_pid/cmdline" ] \
        && tr '\000' ' ' < "/proc/$prior_pid/cmdline" | grep -F -- "$STATE_ROOT/" >/dev/null; then
-      die "prior leaf PID $prior_pid is still live; inspect $PIDS_PATH before restarting"
+      die "prior parent PID $prior_pid is still live; inspect $PIDS_PATH before restarting"
     fi
   done < "$PIDS_PATH"
 fi
 
+# Only the exclusive supervisor may migrate durable state, and a manifested
+# live orphan is rejected before any destination is created.
 index=0
 while [ "$index" -lt "${#SHAPES[@]}" ]; do
-  build_child_command "$index"
+  mkdir -p "$STATE_ROOT/${SHAPES[$index]}"
+  migrate_legacy_shape_state "${SHAPES[$index]}" || \
+    die "could not migrate durable state for ${SHAPES[$index]}"
+  index=$((index + 1))
+done
+
+index=0
+while [ "$index" -lt "${#SHAPES[@]}" ]; do
+  build_parent_command "$index"
   if [ -e "$BUILT_STATUS" ]; then
     mv -f -- "$BUILT_STATUS" "$BUILT_STATUS.previous.$CAMPAIGN_TAG"
   fi
@@ -782,27 +1056,35 @@ while [ "$index" -lt "${#SHAPES[@]}" ]; do
   PIDS[$LAUNCHED]=$pid
   CHILD_SHAPES[$LAUNCHED]=$BUILT_SHAPE
   CHILD_NODES[$LAUNCHED]=$BUILT_NODE
-  CHILD_NONCES[$LAUNCHED]=$BUILT_NONCE
-  CHILD_TICKETS[$LAUNCHED]=$BUILT_TICKET
   CHILD_BESTS[$LAUNCHED]=$BUILT_BEST
   CHILD_STATUSES[$LAUNCHED]=$BUILT_STATUS
   CHILD_LOGS[$LAUNCHED]=$BUILT_LOG
   CHILD_LAUNCH_EPOCHS[$LAUNCHED]=$child_launch_epoch
   CHILD_REAPED[$LAUNCHED]=0
   CHILD_EXIT_CODES[$LAUNCHED]=-1
+  CHILD_PROGRESS_MOVES[$LAUNCHED]=0
+  CHILD_PROGRESS_EPOCHS[$LAUNCHED]=$child_launch_epoch
+  CHILD_PROGRESS_SEEN[$LAUNCHED]=0
   LAUNCHED=$((LAUNCHED + 1))
   write_pid_manifest
-  printf '%s: launched %s pid=%s node=%s J=%s steps=%s nonce=%s ticket=%s\n' \
-    "$PROGRAM" "$BUILT_SHAPE" "$pid" "$BUILT_NODE" "$WALKERS" "$STEPS" "$BUILT_NONCE" "$BUILT_TICKET" >&2
+  printf '%s: launched parent %s pid=%s node=%s J=%s steps=%s lease_rounds=%s\n' \
+    "$PROGRAM" "$BUILT_SHAPE" "$pid" "$BUILT_NODE" "$WALKERS" "$STEPS" "$LEASE_ROUNDS" >&2
 
   if [ -n "$REQUESTED_REASON" ]; then
     drain_all "$REQUESTED_REASON"
-    refresh_metrics "$(date +%s)"
-    write_supervisor_status stopped "$REQUESTED_REASON"
+    launch_terminal_reason=$REQUESTED_REASON
+    launch_terminal_state=stopped
     CLEAN_EXIT=1
     trap - EXIT INT TERM HUP
     signal_exit=0
     [ "$REQUESTED_REASON" != signal-int ] || signal_exit=130
+    if ! audit_terminal_outcome; then
+      launch_terminal_reason=$TERMINAL_AUDIT_REASON
+      launch_terminal_state=failed
+      signal_exit=70
+      case "$launch_terminal_reason" in oom-*) signal_exit=71 ;; esac
+    fi
+    write_supervisor_status "$launch_terminal_state" "$launch_terminal_reason"
     if request_host_shutdown; then
       exit "$signal_exit"
     else
@@ -814,11 +1096,11 @@ while [ "$index" -lt "${#SHAPES[@]}" ]; do
   index=$((index + 1))
 done
 
-[ "$LAUNCHED" -eq "${#SHAPES[@]}" ] || die "launched $LAUNCHED of ${#SHAPES[@]} leaves"
+[ "$LAUNCHED" -eq "${#SHAPES[@]}" ] || die "launched $LAUNCHED of ${#SHAPES[@]} parents"
 
 CHILD_EXIT_REASON=""
 FINAL_REASON=""
-printf '%s: campaign %s running %d leaves across nodes %s; status %s\n' \
+printf '%s: campaign %s running %d parents across nodes %s; status %s\n' \
   "$PROGRAM" "$CAMPAIGN_TAG" "$LAUNCHED" "$NODES_CSV" "$SUPERVISOR_STATUS" >&2
 
 while :; do
@@ -827,8 +1109,14 @@ while :; do
 
   if detect_system_oom; then
     FINAL_REASON=oom-counter-increased
-  elif unexpected_child_exit; then
+  elif unexpected_parent_exit; then
     FINAL_REASON=$CHILD_EXIT_REASON
+  elif [ "$LEASE_FAILURE_COUNT" -gt 0 ]; then
+    FINAL_REASON="lease-failure-count-$LEASE_FAILURE_COUNT"
+  elif [ "$PROTOCOL_ERROR_COUNT" -gt 0 ]; then
+    FINAL_REASON="parent-protocol-error-count-$PROTOCOL_ERROR_COUNT"
+  elif [ "$PROGRESS_STALE_COUNT" -gt 0 ]; then
+    FINAL_REASON="frozen-progress-count-$PROGRESS_STALE_COUNT"
   elif [ "$STALE_COUNT" -gt 0 ]; then
     FINAL_REASON="stale-heartbeat-count-$STALE_COUNT"
   elif [ -n "$REQUESTED_REASON" ]; then
@@ -843,6 +1131,18 @@ while :; do
 done
 
 drain_all "$FINAL_REASON"
+
+# A nominal deadline/record/signal is not successful until the drain itself is
+# audited. Cancellation may expose an OOM, failed lease, malformed final
+# snapshot, stale/frozen work, or nonzero parent exit that was not observable
+# when the terminal request was chosen.
+case "$FINAL_REASON" in
+  deadline|record-*|signal-int|signal-term|signal-hup)
+    if ! audit_terminal_outcome; then
+      FINAL_REASON=$TERMINAL_AUDIT_REASON
+    fi
+    ;;
+esac
 
 FINAL_STATE=failed
 EXIT_CODE=70

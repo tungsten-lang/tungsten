@@ -78,6 +78,7 @@
   auto :BigComplex,   "numeric/big_complex"
   auto :BigDecimal,   "numeric/big_decimal"
   auto :BigInt,       "numeric/big_int"
+  auto :Int,          "numeric/int"
 
   # Hypercomplex tower — concrete subclasses live in the sibling
   # `numeric/hypercomplex/` directory; the abstract `Hypercomplex<T>`

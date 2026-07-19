@@ -229,6 +229,21 @@ visits do not change it.
 they reset while the next epoch is in flight. The epoch log mirrors them as
 `epoch_door_action`, `epoch_door_score`, and `epoch_door_source_replace`.
 
+The relay also reports the breadth hidden behind its single-candidate harvest.
+`harvest_epoch_completed_groups` counts completed cooperative groups in the
+most recently downloaded epoch, while `harvest_epoch_improved_groups` counts
+the groups whose retained rank/density strictly beats that epoch's launch
+door. `harvest_epoch_capture_groups` and `harvest_epoch_capture_sum` count
+groups with at least one strict device capture and all such captures,
+respectively. These are device telemetry, not substitutes for the host exact
+gate. The corresponding `harvest_total_*` fields add completed epochs from
+this process only; they reset on process restart and are not reconstructed
+from the archive. Epoch fields are zero in `ready` and while a new epoch is in
+flight (the relay publishes a pre-launch `dispatch=0` status), become final
+after its state download, and remain visible in `done` if no later epoch starts.
+These counters do not affect winner selection, exact gating, archive admission,
+or adaptive-role reward.
+
 The build mechanically emits constant scan and hash specializations from the
 same canonical Tungsten kernel. Structural guards reject changed mode geometry,
 and startup refuses to search unless compiled static shared memory is exactly

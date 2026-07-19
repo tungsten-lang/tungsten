@@ -1558,6 +1558,53 @@ volatile sig_atomic_t stop_requested = 0;
 
 [[maybe_unused]] void request_stop(int) { stop_requested = 1; }
 
+struct GroupHarvestSummary {
+  unsigned long long completed_groups = 0;
+  unsigned long long improved_groups = 0;
+  unsigned long long capture_groups = 0;
+  unsigned long long capture_sum = 0;
+};
+
+// Summarize the fixed eight-i32 record published by every cooperative group.
+// This is telemetry only: the production winner scan below remains the sole
+// authority for candidate selection, download, exact gating, and admission.
+GroupHarvestSummary summarize_group_harvest(const std::vector<int32_t>& states,
+                                            int groups, int launch_rank,
+                                            int launch_density) {
+  if (groups < 0 || states.size() < static_cast<size_t>(groups) * 8) {
+    throw std::invalid_argument("group harvest state buffer is too short");
+  }
+
+  GroupHarvestSummary summary;
+  for (int group = 0; group < groups; ++group) {
+    const size_t base = static_cast<size_t>(group) * 8;
+    if (states[base + 7] != 1) continue;
+    ++summary.completed_groups;
+
+    const int rank = states[base + 1];
+    const int den = states[base + 3];
+    if (rank > 0 && rank <= kCap &&
+        (rank < launch_rank || (rank == launch_rank && den < launch_density))) {
+      ++summary.improved_groups;
+    }
+
+    const int captures = states[base + 6];
+    if (captures > 0) {
+      ++summary.capture_groups;
+      summary.capture_sum += static_cast<unsigned int>(captures);
+    }
+  }
+  return summary;
+}
+
+void accumulate_group_harvest(GroupHarvestSummary& total,
+                              const GroupHarvestSummary& epoch) {
+  total.completed_groups += epoch.completed_groups;
+  total.improved_groups += epoch.improved_groups;
+  total.capture_groups += epoch.capture_groups;
+  total.capture_sum += epoch.capture_sum;
+}
+
 struct PolicyTelemetry {
   std::array<unsigned long long, 3> role_epochs{};
   unsigned long long adaptive_role_slots = 0;
@@ -1571,7 +1618,21 @@ struct PolicyTelemetry {
   int epoch_door_score = -1;
   bool epoch_door_source_replacement = false;
   bool has_selection = false;
+  GroupHarvestSummary harvest_epoch;
+  GroupHarvestSummary harvest_total;
 };
+
+void begin_group_harvest_epoch(PolicyTelemetry& policy) {
+  policy.harvest_epoch = {};
+}
+
+void complete_group_harvest_epoch(PolicyTelemetry& policy,
+                                  const std::vector<int32_t>& states, int groups,
+                                  int launch_rank, int launch_density) {
+  policy.harvest_epoch =
+      summarize_group_harvest(states, groups, launch_rank, launch_density);
+  accumulate_group_harvest(policy.harvest_total, policy.harvest_epoch);
+}
 
 [[maybe_unused]] void sync_policy_telemetry(PolicyTelemetry& policy,
                                             const LaunchScheduler& scheduler) {
@@ -1629,7 +1690,21 @@ struct PolicyTelemetry {
     out << "\nepoch_door_action=" << policy->epoch_door_action
         << "\nepoch_door_score=" << policy->epoch_door_score
         << "\nepoch_door_source_replacement="
-        << (policy->epoch_door_source_replacement ? 1 : 0) << '\n';
+        << (policy->epoch_door_source_replacement ? 1 : 0)
+        << "\nharvest_epoch_completed_groups="
+        << policy->harvest_epoch.completed_groups
+        << "\nharvest_epoch_improved_groups="
+        << policy->harvest_epoch.improved_groups
+        << "\nharvest_epoch_capture_groups="
+        << policy->harvest_epoch.capture_groups
+        << "\nharvest_epoch_capture_sum=" << policy->harvest_epoch.capture_sum
+        << "\nharvest_total_completed_groups="
+        << policy->harvest_total.completed_groups
+        << "\nharvest_total_improved_groups="
+        << policy->harvest_total.improved_groups
+        << "\nharvest_total_capture_groups="
+        << policy->harvest_total.capture_groups
+        << "\nharvest_total_capture_sum=" << policy->harvest_total.capture_sum << '\n';
   }
   if (!detail.empty()) out << "detail=" << detail << '\n';
   return out.str();
@@ -1654,9 +1729,11 @@ int policy_status_self_test() {
   policy.epoch_door_score = 19;
   policy.epoch_door_source_replacement = true;
   policy.has_selection = true;
+  policy.harvest_epoch = {8, 3, 4, 11};
+  policy.harvest_total = {4096, 37, 41, 123};
   const std::string body = status_body("epoch", 66, 5, 1234, best, 16, 99, 100, 10,
                                        4, 0, "exact-novel", &policy);
-  const std::array<std::string, 15> required = {
+  const std::array<std::string, 23> required = {
       "policy_leader_epochs=18\n", "policy_original_epochs=31\n",
       "policy_descendant_epochs=18\n", "policy_adaptive_role_slots=50\n",
       "policy_role_explore_every=4\n",
@@ -1667,12 +1744,116 @@ int policy_status_self_test() {
       "original_source_stats=0:v0,n0,b0,p0,last-;1:v4,n0,b0,p0,last12;"
       "2:v13,n3,b1,p11,last16\n",
       "selected_source=7\n", "selected_kernel=hash\n", "epoch_door_action=4\n",
-      "epoch_door_score=19\n", "epoch_door_source_replacement=1\n"};
+      "epoch_door_score=19\n", "epoch_door_source_replacement=1\n",
+      "harvest_epoch_completed_groups=8\n",
+      "harvest_epoch_improved_groups=3\n",
+      "harvest_epoch_capture_groups=4\n", "harvest_epoch_capture_sum=11\n",
+      "harvest_total_completed_groups=4096\n",
+      "harvest_total_improved_groups=37\n",
+      "harvest_total_capture_groups=41\n", "harvest_total_capture_sum=123\n"};
   for (const auto& field : required) {
     if (body.find(field) == std::string::npos) {
       throw std::runtime_error("policy status telemetry field is missing");
     }
   }
+  return 0;
+}
+
+int group_harvest_self_test() {
+  std::vector<int32_t> states(6 * 8, 0);
+  auto publish = [&](int group, int rank, int den, int captures, int completed) {
+    const size_t base = static_cast<size_t>(group) * 8;
+    states[base + 1] = rank;
+    states[base + 3] = den;
+    states[base + 6] = captures;
+    states[base + 7] = completed;
+  };
+  publish(0, 247, 3094, 0, 1);  // Completed, but tied and never captured.
+  publish(1, 247, 3093, 2, 1);  // Same-rank density improvement.
+  publish(2, 246, 4000, 1, 1);  // Rank improvement dominates density.
+  publish(3, 245, 1000, 7, 0);  // Incomplete records never contribute.
+  publish(4, 248, 3000, 3, 1);  // Capture telemetry is independent of objective.
+  publish(5, 0, 0, 4, 1);      // Invalid ranks cannot claim improvement.
+
+  const GroupHarvestSummary epoch = summarize_group_harvest(states, 6, 247, 3094);
+  if (epoch.completed_groups != 5 || epoch.improved_groups != 2 ||
+      epoch.capture_groups != 4 || epoch.capture_sum != 10) {
+    throw std::runtime_error("group harvest summary miscounted synthetic records");
+  }
+
+  auto require_status_value = [](const std::string& body, const std::string& field,
+                                 unsigned long long expected) {
+    const std::string needle = field + "=" + std::to_string(expected) + "\n";
+    if (body.find(needle) == std::string::npos) {
+      throw std::runtime_error("group harvest lifecycle status field is wrong: " + field);
+    }
+  };
+  auto require_status_summary = [&](const std::string& body,
+                                    const GroupHarvestSummary& expected_epoch,
+                                    const GroupHarvestSummary& expected_total) {
+    require_status_value(body, "harvest_epoch_completed_groups",
+                         expected_epoch.completed_groups);
+    require_status_value(body, "harvest_epoch_improved_groups",
+                         expected_epoch.improved_groups);
+    require_status_value(body, "harvest_epoch_capture_groups",
+                         expected_epoch.capture_groups);
+    require_status_value(body, "harvest_epoch_capture_sum", expected_epoch.capture_sum);
+    require_status_value(body, "harvest_total_completed_groups",
+                         expected_total.completed_groups);
+    require_status_value(body, "harvest_total_improved_groups",
+                         expected_total.improved_groups);
+    require_status_value(body, "harvest_total_capture_groups",
+                         expected_total.capture_groups);
+    require_status_value(body, "harvest_total_capture_sum", expected_total.capture_sum);
+  };
+
+  PolicyTelemetry lifecycle;
+  Scheme best;
+  const GroupHarvestSummary zero;
+  const std::string ready =
+      status_body("ready", 0, 0, 0, best, 1, 7, 0, 0, 0, 0, "", &lifecycle);
+  require_status_summary(ready, zero, zero);
+
+  complete_group_harvest_epoch(lifecycle, states, 6, 247, 3094);
+  const std::string first_epoch =
+      status_body("epoch", 0, 1, 1, best, 1, 7, 0, 0, 0, 0, "", &lifecycle);
+  require_status_summary(first_epoch, epoch, epoch);
+
+  begin_group_harvest_epoch(lifecycle);
+  const std::string next_dispatch =
+      status_body("dispatch", 1, 0, 2, best, 1, 7, 0, 0, 0, 0, "", &lifecycle);
+  require_status_summary(next_dispatch, zero, epoch);
+  if (next_dispatch.find("phase=dispatch\n") == std::string::npos ||
+      next_dispatch.find("dispatch=0\n") == std::string::npos) {
+    throw std::runtime_error("group harvest lifecycle did not publish dispatch zero");
+  }
+
+  complete_group_harvest_epoch(lifecycle, states, 6, 247, 3094);
+  const GroupHarvestSummary twice{10, 4, 8, 20};
+  const std::string done =
+      status_body("done", 2, 0, 3, best, 1, 7, 0, 0, 0, 0, "", &lifecycle);
+  require_status_summary(done, epoch, twice);
+  if (lifecycle.harvest_total.completed_groups != twice.completed_groups ||
+      lifecycle.harvest_total.improved_groups != twice.improved_groups ||
+      lifecycle.harvest_total.capture_groups != twice.capture_groups ||
+      lifecycle.harvest_total.capture_sum != twice.capture_sum) {
+    throw std::runtime_error("group harvest cumulative summary did not add once per epoch");
+  }
+
+  bool short_buffer_rejected = false;
+  try {
+    (void)summarize_group_harvest(std::vector<int32_t>(7, 0), 1, 247, 3094);
+  } catch (const std::invalid_argument&) {
+    short_buffer_rejected = true;
+  }
+  if (!short_buffer_rejected) {
+    throw std::runtime_error("group harvest summary accepted a short state buffer");
+  }
+
+  std::cout << "CUDA777_HARVEST_SELF_TEST ok completed=" << epoch.completed_groups
+            << " improved=" << epoch.improved_groups
+            << " capture_groups=" << epoch.capture_groups
+            << " capture_sum=" << epoch.capture_sum << '\n';
   return 0;
 }
 
@@ -1925,6 +2106,9 @@ int run_campaign(const Config& config) {
     if (config.epochs > 0 && epoch >= config.epochs) break;
     if (config.seconds > 0 && epoch > 0 && elapsed_before >= config.seconds * 1000) break;
 
+    // Epoch harvest fields describe only a completed state download. Clear
+    // them before launching the next epoch; cumulative fields remain additive.
+    begin_group_harvest_epoch(policy);
     const LaunchChoice choice = scheduler.choose(epoch, original_roots, descendants, global_best);
     if (choice.scheme == nullptr) throw std::runtime_error("scheduler selected a null door");
     policy.selected_role = choice.role;
@@ -1965,6 +2149,16 @@ int run_campaign(const Config& config) {
                          config.margin, launch_density, mode};
     cuda_check(cudaMemcpy(device.params, params, sizeof(params), cudaMemcpyHostToDevice),
                "parameter upload");
+
+    const long long launch_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now() - started)
+                                         .count();
+    write_text_atomic(config.status_path,
+                      status_body("dispatch", epoch, 0, launch_elapsed, global_best,
+                                  scheduled_door_count(original_roots, descendants,
+                                                       global_best),
+                                  run_seed, aggregate_attempts, aggregate_partners,
+                                  candidates, exact_rejects, "", &policy));
 
     for (int dispatch = 0; dispatch < config.dispatches; ++dispatch) {
       if (mode == 0) {
@@ -2021,6 +2215,8 @@ int run_campaign(const Config& config) {
       }
     }
     if (best_group < 0) throw std::runtime_error("no CUDA group published a completed state");
+    complete_group_harvest_epoch(policy, states, config.groups,
+                                 static_cast<int>(launch.terms.size()), launch_density);
     aggregate_attempts += epoch_attempts;
     aggregate_partners += epoch_partners;
 
@@ -2134,6 +2330,18 @@ int run_campaign(const Config& config) {
               << " epoch_door_score=" << door_admission.score
               << " epoch_door_source_replace="
               << (door_admission.source_replacement ? 1 : 0)
+              << " harvest_epoch_completed="
+              << policy.harvest_epoch.completed_groups
+              << " harvest_epoch_improved=" << policy.harvest_epoch.improved_groups
+              << " harvest_epoch_capture_groups="
+              << policy.harvest_epoch.capture_groups
+              << " harvest_epoch_capture_sum=" << policy.harvest_epoch.capture_sum
+              << " harvest_total_completed="
+              << policy.harvest_total.completed_groups
+              << " harvest_total_improved=" << policy.harvest_total.improved_groups
+              << " harvest_total_capture_groups="
+              << policy.harvest_total.capture_groups
+              << " harvest_total_capture_sum=" << policy.harvest_total.capture_sum
               << " original_sources="
               << original_source_stats_text(policy.original_stats)
               << " result=" << outcome << std::endl;
@@ -2153,6 +2361,11 @@ int run_campaign(const Config& config) {
   std::cout << "CUDA777_DONE epochs=" << epoch << " elapsed_ms=" << elapsed
             << " best=r" << global_best.terms.size() << "/d" << density(global_best)
             << " candidates=" << candidates << " exact_rejects=" << exact_rejects
+            << " harvest_total_completed=" << policy.harvest_total.completed_groups
+            << " harvest_total_improved=" << policy.harvest_total.improved_groups
+            << " harvest_total_capture_groups="
+            << policy.harvest_total.capture_groups
+            << " harvest_total_capture_sum=" << policy.harvest_total.capture_sum
             << std::endl;
   return 0;
 }
@@ -2171,7 +2384,9 @@ int main(int argc, char** argv) {
       for (int i = 2; i < argc; ++i) recipe_paths.emplace_back(argv[i]);
       const int result = policy_self_test(recipe_paths);
       if (result != 0) return result;
-      return policy_status_self_test();
+      const int status_result = policy_status_self_test();
+      if (status_result != 0) return status_result;
+      return group_harvest_self_test();
     }
     Config config = parse_config(argc, argv);
 #ifdef METAFLIP_HOST_ONLY_TEST

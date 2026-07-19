@@ -31,6 +31,11 @@ if ! printf '%s\n' "$POLICY_OUTPUT" | \
   echo "CUDA777_SELF_TEST five-root recipe did not select the d3094 objective leader" >&2
   exit 1
 fi
+if ! printf '%s\n' "$POLICY_OUTPUT" | \
+    grep -qx 'CUDA777_HARVEST_SELF_TEST ok completed=5 improved=2 capture_groups=4 capture_sum=10'; then
+  echo "CUDA777_SELF_TEST group-harvest telemetry regression did not run" >&2
+  exit 1
+fi
 
 # The CUDA relay is permanently one warp per block.  Its build must specialize
 # every conservative Tungsten block barrier, and must fail rather than silently

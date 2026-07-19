@@ -15021,6 +15021,14 @@ WValue w_lt(WValue a, WValue b) {
     return w_bool(as_int(a) < as_int(b));
 }
 
+/* Lexicographic order on two boxed arrays: element-by-element via
+ * w_value_compare; first differing element decides, else the shorter array
+ * sorts first (Ruby Array#<=> semantics). Shared by w_spaceship (Array#<=>)
+ * and w_value_compare (Array#sort / sort_by's decorated pairs) so both order
+ * arrays by content instead of by heap-pointer bits. Defined after
+ * w_value_compare (which it recurses into); forward-declared here. */
+static int w_array_lex_compare(WValue a, WValue b);
+
 /* Comparable spaceship: -1 / 0 / 1 as an Int, or nil for incomparable
  * operands (NaN, or unlike types) — Ruby semantics. Mirrors w_lt's
  * type-dispatch ladder so `a <=> b` orders the same values `<`/`>` do.
@@ -15053,6 +15061,10 @@ WValue w_spaceship(WValue a, WValue b) {
     if ((w_is_rope(a) || w_is_stringy(a)) && (w_is_rope(b) || w_is_stringy(b))) {
         if (w_is_symbol(a) != w_is_symbol(b)) return W_NIL;
         int c = w_string_compare(a, b);
+        return w_int(c < 0 ? -1 : (c > 0 ? 1 : 0));
+    }
+    if (w_is_array(a) && w_is_array(b)) {
+        int c = w_array_lex_compare(a, b);
         return w_int(c < 0 ? -1 : (c > 0 ? 1 : 0));
     }
     return W_NIL;
@@ -18720,8 +18732,29 @@ static int w_value_compare(const void *ap, const void *bp) {
     if (w_is_string(a) && w_is_string(b)) {
         return strcmp(as_str(a), as_str(b));
     }
+    /* Both arrays: order lexicographically by content (so `[[k,v],…].sort`
+     * and sort_by's decorated pairs order by their first element / key). */
+    if (w_is_array(a) && w_is_array(b)) {
+        return w_array_lex_compare(a, b);
+    }
     /* Fallback: compare raw bits for stable sort */
     return (a > b) - (a < b);
+}
+
+/* See the forward declaration above w_spaceship. Recurses into
+ * w_value_compare per element; arrays being sorted are small (decorated
+ * pairs), so the per-element w_int index boxing is negligible. */
+static int w_array_lex_compare(WValue a, WValue b) {
+    int64_t na = (int64_t)((WArray *)w_as_ptr(a))->size;
+    int64_t nb = (int64_t)((WArray *)w_as_ptr(b))->size;
+    int64_t n = na < nb ? na : nb;
+    for (int64_t i = 0; i < n; i++) {
+        WValue ea = w_array_get(a, w_int(i));
+        WValue eb = w_array_get(b, w_int(i));
+        int c = w_value_compare(&ea, &eb);
+        if (c != 0) return c;
+    }
+    return (na > nb) - (na < nb);
 }
 
 WValue w_method_call(WValue recv, WValue method_name, WValue args_arr) {

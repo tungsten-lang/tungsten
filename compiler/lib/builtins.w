@@ -199,16 +199,32 @@
     recv
 
   when "map"
-    recv.map -> (elem)
-      interp.apply_iteratee(block, args, elem)
+    # Hash#map yields (key, value) — forward both, like Hash#each above; a
+    # single-param wrapper drops the value and a `-> (k, v)` block then sees
+    # v == nil (crashes on `v * 2`). Non-hash receivers keep the iteratee path
+    # (symbol iteratees like map(:to_s) resolve there).
+    if type(recv) == "Hash"
+      recv.map -> (k, v)
+        interp.call_block(block, [k, v])
+    else
+      recv.map -> (elem)
+        interp.apply_iteratee(block, args, elem)
 
   when "select"
-    recv.select -> (elem)
-      interp.truthy?(interp.apply_iteratee(block, args, elem))
+    if type(recv) == "Hash"
+      recv.select -> (k, v)
+        interp.truthy?(interp.call_block(block, [k, v]))
+    else
+      recv.select -> (elem)
+        interp.truthy?(interp.apply_iteratee(block, args, elem))
 
   when "reject"
-    recv.reject -> (elem)
-      interp.truthy?(interp.apply_iteratee(block, args, elem))
+    if type(recv) == "Hash"
+      recv.reject -> (k, v)
+        interp.truthy?(interp.call_block(block, [k, v]))
+    else
+      recv.reject -> (elem)
+        interp.truthy?(interp.apply_iteratee(block, args, elem))
 
   when "reduce"
     if args.empty?()

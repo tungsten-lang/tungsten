@@ -1,313 +1,385 @@
-# Spec::Matchers — built-in matcher functions
-# Each function returns a matcher object with matches?/failure_message.
+# Spec matchers — each matcher function returns an object answering
+# matches?(actual) / failure_message(actual) / negated_failure_message(actual).
 #
-# Usage:
-#   expect(5).to eq(5)
-#   expect(list).to include(3)
-#   expect(nil).to be_nil
-#   expect_block(-> <! "boom").to raise_error
+# Every matcher is a concrete class with plain methods — NO stored lambdas.
+# Calling a closure inside a matcher method and then unwinding an error
+# through that method chain segfaults the interpreter today (see spec.w
+# header), so the lambda-table style of the original design is off-limits.
 
-in Tungsten:Spec
+# Structural equality helper: compiled Array == is identity-based, so fall
+# back to comparing to_s renderings (same approach as the argon specs).
+-> spec_values_equal(actual, expected)
+  if actual == expected
+    return true
+  if actual != nil && expected != nil
+    return actual.to_s == expected.to_s
+  false
 
 # --- Equality ---
 
-[pure]
 -> eq(expected)
-  Matcher.new(
-    name: "eq",
-    matches: actual -> actual == expected,
-    message: actual -> "expected #{actual.inspect} to equal #{expected.inspect}",
-    negated: actual -> "expected #{actual.inspect} not to equal #{expected.inspect}"
-  )
+  EqMatcher.new(expected)
 
-[pure]
+# eql/equal/be(value) — v1 aliases of eq (no separate identity semantics)
 -> eql(expected)
-  Matcher.new(
-    name: "eql",
-    matches: actual -> actual.eql?(expected),
-    message: actual -> "expected #{actual.inspect} to eql #{expected.inspect}",
-    negated: actual -> "expected #{actual.inspect} not to eql #{expected.inspect}"
-  )
+  EqMatcher.new(expected)
 
-[pure]
 -> equal(expected)
-  Matcher.new(
-    name: "equal",
-    matches: actual -> actual.equal?(expected),
-    message: actual -> "expected #{actual.inspect} to be the same object as #{expected.inspect}",
-    negated: actual -> "expected #{actual.inspect} not to be the same object as #{expected.inspect}"
-  )
+  EqMatcher.new(expected)
 
-# --- Identity / truthiness ---
-
-[pure]
 -> be(expected)
-  Matcher.new(
-    name: "be",
-    matches: actual -> actual.equal?(expected),
-    message: actual -> "expected #{actual.inspect} to be #{expected.inspect}",
-    negated: actual -> "expected #{actual.inspect} not to be #{expected.inspect}"
-  )
+  EqMatcher.new(expected)
 
-[pure]
++ EqMatcher
+  ro :expected
+
+  -> new(@expected)
+
+  -> matches?(actual)
+    spec_values_equal(actual, @expected)
+
+  -> failure_message(actual)
+    "expected [@expected] but got [actual]"
+
+  -> negated_failure_message(actual)
+    "expected anything but [@expected]"
+
+# --- Truthiness / nil ---
+
 -> be_nil
-  Matcher.new(
-    name: "be_nil",
-    matches: actual -> actual.nil?,
-    message: actual -> "expected #{actual.inspect} to be nil",
-    negated: actual -> "expected nil not to be nil"
-  )
+  BeNilMatcher.new
 
-[pure]
++ BeNilMatcher
+  -> new
+
+  -> matches?(actual)
+    actual == nil
+
+  -> failure_message(actual)
+    "expected nil but got [actual]"
+
+  -> negated_failure_message(actual)
+    "expected a value, got nil"
+
+-> be_true
+  BeTrueMatcher.new
+
++ BeTrueMatcher
+  -> new
+
+  -> matches?(actual)
+    actual == true
+
+  -> failure_message(actual)
+    "expected true but got [actual]"
+
+  -> negated_failure_message(actual)
+    "expected anything but true"
+
+-> be_false
+  BeFalseMatcher.new
+
++ BeFalseMatcher
+  -> new
+
+  -> matches?(actual)
+    actual == false
+
+  -> failure_message(actual)
+    "expected false but got [actual]"
+
+  -> negated_failure_message(actual)
+    "expected anything but false"
+
 -> be_truthy
-  Matcher.new(
-    name: "be_truthy",
-    matches: actual -> !!actual,
-    message: actual -> "expected #{actual.inspect} to be truthy",
-    negated: actual -> "expected #{actual.inspect} to be falsy"
-  )
+  BeTruthyMatcher.new
 
-[pure]
++ BeTruthyMatcher
+  -> new
+
+  -> matches?(actual)
+    actual != nil && actual != false
+
+  -> failure_message(actual)
+    "expected [actual] to be truthy"
+
+  -> negated_failure_message(actual)
+    "expected [actual] to be falsy"
+
 -> be_falsy
-  Matcher.new(
-    name: "be_falsy",
-    matches: actual -> !actual,
-    message: actual -> "expected #{actual.inspect} to be falsy",
-    negated: actual -> "expected #{actual.inspect} to be truthy"
-  )
+  BeFalsyMatcher.new
 
-[pure]
++ BeFalsyMatcher
+  -> new
+
+  -> matches?(actual)
+    actual == nil || actual == false
+
+  -> failure_message(actual)
+    "expected [actual] to be falsy"
+
+  -> negated_failure_message(actual)
+    "expected [actual] to be truthy"
+
 -> be_empty
-  Matcher.new(
-    name: "be_empty",
-    matches: actual -> actual.empty?,
-    message: actual -> "expected #{actual.inspect} to be empty",
-    negated: actual -> "expected #{actual.inspect} not to be empty"
-  )
+  BeEmptyMatcher.new
 
-# --- Type checking ---
++ BeEmptyMatcher
+  -> new
 
-[pure]
+  -> matches?(actual)
+    actual.empty?
+
+  -> failure_message(actual)
+    "expected [actual] to be empty"
+
+  -> negated_failure_message(actual)
+    "expected [actual] not to be empty"
+
+# --- Type ---
+
 -> be_a(expected_class)
-  Matcher.new(
-    name: "be_a",
-    matches: actual -> actual.is_a?(expected_class),
-    message: actual -> "expected #{actual.inspect} to be a #{expected_class}",
-    negated: actual -> "expected #{actual.inspect} not to be a #{expected_class}"
-  )
+  BeAMatcher.new(expected_class)
 
-[pure]
--> be_an(expected_class) = be_a(expected_class)
+-> be_an(expected_class)
+  BeAMatcher.new(expected_class)
+
++ BeAMatcher
+  ro :expected_class
+
+  -> new(@expected_class)
+
+  -> matches?(actual)
+    actual.is_a?(@expected_class)
+
+  -> failure_message(actual)
+    "expected [actual] to be a [@expected_class]"
+
+  -> negated_failure_message(actual)
+    "expected [actual] not to be a [@expected_class]"
 
 # --- Comparisons ---
 
-[pure]
 -> be_gt(expected)
-  Matcher.new(
-    name: "be >",
-    matches: actual -> actual > expected,
-    message: actual -> "expected #{actual} to be > #{expected}",
-    negated: actual -> "expected #{actual} not to be > #{expected}"
-  )
+  CompareMatcher.new(:gt, ">", expected)
 
-[pure]
 -> be_lt(expected)
-  Matcher.new(
-    name: "be <",
-    matches: actual -> actual < expected,
-    message: actual -> "expected #{actual} to be < #{expected}",
-    negated: actual -> "expected #{actual} not to be < #{expected}"
-  )
+  CompareMatcher.new(:lt, "<", expected)
 
-[pure]
 -> be_gte(expected)
-  Matcher.new(
-    name: "be >=",
-    matches: actual -> actual >= expected,
-    message: actual -> "expected #{actual} to be >= #{expected}",
-    negated: actual -> "expected #{actual} not to be >= #{expected}"
-  )
+  CompareMatcher.new(:gte, ">=", expected)
 
-[pure]
 -> be_lte(expected)
-  Matcher.new(
-    name: "be <=",
-    matches: actual -> actual <= expected,
-    message: actual -> "expected #{actual} to be <= #{expected}",
-    negated: actual -> "expected #{actual} not to be <= #{expected}"
-  )
+  CompareMatcher.new(:lte, "<=", expected)
 
-[pure]
--> be_between(min, max)
-  Matcher.new(
-    name: "be_between",
-    matches: actual -> actual >= min && actual <= max,
-    message: actual -> "expected #{actual} to be between #{min} and #{max}",
-    negated: actual -> "expected #{actual} not to be between #{min} and #{max}"
-  )
++ CompareMatcher
+  ro :op
+  ro :op_text
+  ro :expected
 
-# --- Collection matchers ---
-
-[pure]
--> include(*expected)
-  Matcher.new(
-    name: "include",
-    matches: actual -> expected.all?(e -> actual.include?(e)),
-    message: actual -> "expected #{actual.inspect} to include #{expected.inspect}",
-    negated: actual -> "expected #{actual.inspect} not to include #{expected.inspect}"
-  )
-
-[pure]
--> contain_exactly(*expected)
-  Matcher.new(
-    name: "contain_exactly",
-    matches: actual -> actual.sort == expected.sort,
-    message: actual -> "expected #{actual.inspect} to contain exactly #{expected.inspect}",
-    negated: actual -> "expected #{actual.inspect} not to contain exactly #{expected.inspect}"
-  )
-
-[pure]
--> have_key(key)
-  Matcher.new(
-    name: "have_key",
-    matches: actual -> actual.has_key?(key),
-    message: actual -> "expected #{actual.inspect} to have key #{key.inspect}",
-    negated: actual -> "expected #{actual.inspect} not to have key #{key.inspect}"
-  )
-
-[pure]
--> have_length(n)
-  Matcher.new(
-    name: "have_length",
-    matches: actual -> actual.size == n,
-    message: actual -> "expected #{actual.inspect} to have length #{n}, got #{actual.size}",
-    negated: actual -> "expected #{actual.inspect} not to have length #{n}"
-  )
-
-# --- String matchers ---
-
-[pure]
--> match(pattern)
-  Matcher.new(
-    name: "match",
-    matches: actual -> actual.to_s.match?(pattern),
-    message: actual -> "expected #{actual.inspect} to match #{pattern.inspect}",
-    negated: actual -> "expected #{actual.inspect} not to match #{pattern.inspect}"
-  )
-
-[pure]
--> start_with(expected)
-  Matcher.new(
-    name: "start_with",
-    matches: actual -> actual.to_s.starts_with?(expected),
-    message: actual -> "expected #{actual.inspect} to start with #{expected.inspect}",
-    negated: actual -> "expected #{actual.inspect} not to start with #{expected.inspect}"
-  )
-
-[pure]
--> end_with(expected)
-  Matcher.new(
-    name: "end_with",
-    matches: actual -> actual.to_s.ends_with?(expected),
-    message: actual -> "expected #{actual.inspect} to end with #{expected.inspect}",
-    negated: actual -> "expected #{actual.inspect} not to end with #{expected.inspect}"
-  )
-
-# --- Respond to ---
-
-[pure]
--> respond_to(*methods)
-  Matcher.new(
-    name: "respond_to",
-    matches: actual -> methods.all?(m -> actual.respond_to?(m)),
-    message: actual -> "expected #{actual.inspect} to respond to #{methods.inspect}",
-    negated: actual -> "expected #{actual.inspect} not to respond to #{methods.inspect}"
-  )
-
-# --- Error matchers (for block expectations) ---
-
-[pure]
--> raise_error(expected_class = nil, message: nil)
-  BlockMatcher.new(
-    name: "raise_error",
-    matches_block: block ->
-      begin
-        block.call
-        false
-      rescue error
-        class_ok = expected_class.nil? || error.is_a?(expected_class)
-        msg_ok   = message.nil? || error.message.include?(message)
-        class_ok && msg_ok,
-    message: _block -> "expected block to raise #{expected_class || 'an error'}",
-    negated: _block -> "expected block not to raise #{expected_class || 'an error'}"
-  )
-
-# --- Change matcher ---
-
--> change(object = nil, method = nil, &block)
-  ChangeMatcher.new(object, method, block)
-
-+ ChangeMatcher
-  ro :object
-  ro :method_name
-  ro :value_fn
-
-  -> new(@object, @method_name, @value_fn)
-
-  -> by(amount)
-    ChainedChangeMatcher.new(self, :by, amount)
-
-  -> from(value)
-    ChainedChangeMatcher.new(self, :from, value)
-
-  -> matches_block?(block)
-    before = current_value
-    block.call
-    after = current_value
-    before != after
-
-  -> current_value
-    if @value_fn
-      @value_fn.call
-    else
-      @object.send(@method_name)
-
-
-# --- Matcher base ---
-
-+ Matcher
-  ro :name
-
-  -> new(name:, matches:, message:, negated:)
-    @name    = name
-    @test    = matches
-    @msg     = message
-    @neg_msg = negated
+  -> new(@op, @op_text, @expected)
 
   -> matches?(actual)
-    @test.call(actual)
+    if @op == :gt
+      return actual > @expected
+    if @op == :lt
+      return actual < @expected
+    if @op == :gte
+      return actual >= @expected
+    if @op == :lte
+      return actual <= @expected
+    false
 
   -> failure_message(actual)
-    @msg.call(actual)
+    "expected [actual] to be [@op_text] [@expected]"
 
   -> negated_failure_message(actual)
-    @neg_msg.call(actual)
+    "expected [actual] not to be [@op_text] [@expected]"
 
+-> be_between(min, max)
+  BeBetweenMatcher.new(min, max)
 
-+ BlockMatcher
-  ro :name
++ BeBetweenMatcher
+  ro :min
+  ro :max
 
-  -> new(name:, matches_block:, message:, negated:)
-    @name       = name
-    @test       = matches_block
-    @msg        = message
-    @neg_msg    = negated
+  -> new(@min, @max)
 
-  -> matches_block?(block)
-    @test.call(block)
+  -> matches?(actual)
+    actual >= @min && actual <= @max
 
-  -> failure_message_for_block(block)
-    @msg.call(block)
+  -> failure_message(actual)
+    "expected [actual] to be between [@min] and [@max]"
 
-  -> negated_failure_message_for_block(block)
-    @neg_msg.call(block)
+  -> negated_failure_message(actual)
+    "expected [actual] not to be between [@min] and [@max]"
+
+# --- Collections / strings ---
+
+-> include(expected)
+  IncludeMatcher.new(expected)
+
++ IncludeMatcher
+  ro :expected
+
+  -> new(@expected)
+
+  -> matches?(actual)
+    actual.include?(@expected)
+
+  -> failure_message(actual)
+    "expected [actual] to include [@expected]"
+
+  -> negated_failure_message(actual)
+    "expected [actual] not to include [@expected]"
+
+# v1: takes an array argument; order-insensitive via sort
+-> contain_exactly(expected)
+  ContainExactlyMatcher.new(expected)
+
++ ContainExactlyMatcher
+  ro :expected
+
+  -> new(@expected)
+
+  -> matches?(actual)
+    spec_values_equal(actual.sort, @expected.sort)
+
+  -> failure_message(actual)
+    "expected [actual] to contain exactly [@expected]"
+
+  -> negated_failure_message(actual)
+    "expected [actual] not to contain exactly [@expected]"
+
+-> have_key(key)
+  HaveKeyMatcher.new(key)
+
++ HaveKeyMatcher
+  ro :key
+
+  -> new(@key)
+
+  -> matches?(actual)
+    actual.has_key?(@key)
+
+  -> failure_message(actual)
+    "expected [actual] to have key [@key]"
+
+  -> negated_failure_message(actual)
+    "expected [actual] not to have key [@key]"
+
+-> have_length(count)
+  HaveLengthMatcher.new(count)
+
+-> have_size(count)
+  HaveLengthMatcher.new(count)
+
++ HaveLengthMatcher
+  ro :count
+
+  -> new(@count)
+
+  -> matches?(actual)
+    actual.size == @count
+
+  -> failure_message(actual)
+    "expected [actual] to have length [@count], got [actual.size]"
+
+  -> negated_failure_message(actual)
+    "expected [actual] not to have length [@count]"
+
+# v1: substring match on to_s renderings (no regex objects here yet)
+-> match(pattern)
+  SubstringMatcher.new(pattern)
+
++ SubstringMatcher
+  ro :pattern
+
+  -> new(@pattern)
+
+  -> matches?(actual)
+    actual.to_s.include?(@pattern.to_s)
+
+  -> failure_message(actual)
+    "expected [actual] to match [@pattern]"
+
+  -> negated_failure_message(actual)
+    "expected [actual] not to match [@pattern]"
+
+-> start_with(expected)
+  StartWithMatcher.new(expected)
+
++ StartWithMatcher
+  ro :expected
+
+  -> new(@expected)
+
+  -> matches?(actual)
+    actual.to_s.starts_with?(@expected)
+
+  -> failure_message(actual)
+    "expected [actual] to start with [@expected]"
+
+  -> negated_failure_message(actual)
+    "expected [actual] not to start with [@expected]"
+
+-> end_with(expected)
+  EndWithMatcher.new(expected)
+
++ EndWithMatcher
+  ro :expected
+
+  -> new(@expected)
+
+  -> matches?(actual)
+    actual.to_s.ends_with?(@expected)
+
+  -> failure_message(actual)
+    "expected [actual] to end with [@expected]"
+
+  -> negated_failure_message(actual)
+    "expected [actual] not to end with [@expected]"
+
+-> respond_to(method_name)
+  RespondToMatcher.new(method_name)
+
++ RespondToMatcher
+  ro :method_name
+
+  -> new(@method_name)
+
+  -> matches?(actual)
+    actual.respond_to?(@method_name)
+
+  -> failure_message(actual)
+    "expected [actual] to respond to [@method_name]"
+
+  -> negated_failure_message(actual)
+    "expected [actual] not to respond to [@method_name]"
+
+# --- Errors ---
+# The interpreter surfaces raised errors to `rescue` as message strings, so
+# the raised CLASS cannot be checked yet; this verifies that the call raised.
+# The class argument is kept for API compatibility.
+
+-> raise_error(expected_class = nil)
+  RaiseErrorMatcher.new(expected_class)
+
++ RaiseErrorMatcher
+  ro :expected_class
+
+  -> new(@expected_class)
+
+  -> matches?(actual)
+    raised = false
+    begin
+      actual.call
+    rescue e
+      raised = true
+    raised
+
+  -> failure_message(actual)
+    "expected the block to raise, but nothing was raised"
+
+  -> negated_failure_message(actual)
+    "expected the block not to raise, but it raised"

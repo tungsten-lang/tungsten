@@ -1,195 +1,120 @@
-# Spec::Runner — discovers, orders, and executes spec files
-# Reports results via pluggable formatters.
+# Spec runner state and reporting.
+# Examples run immediately as the spec file evaluates; this file holds the
+# global counters, per-example reporting, and the end-of-run summary.
+#
+# There is no at_exit in the language yet, so a spec file must end with
+# `spec_summary` (or `TungstenSpec.done`) to print totals and exit non-zero
+# on failure.
 
-in Tungsten:Spec
+$spec_pass = 0
+$spec_fail = 0
+$spec_pending_count = 0
+$spec_depth = 0
+$spec_failures = []
+$spec_current_failure = nil
 
-+ Runner
-  ro :config
-  ro :results
+# First failed expectation of the running example (see expectation.w for
+# why failures are flagged rather than raised).
+-> spec_flag_failure(msg)
+  if $spec_current_failure == nil
+    $spec_current_failure = msg
+  nil
 
-  @@contexts = []
+-> spec_clear_failure
+  $spec_current_failure = nil
+  nil
 
-  -> .register(context)
-    @@contexts.push(context)
+-> spec_indent
+  s = ""
+  i = 0
+  while i < $spec_depth
+    s = s + "  "
+    i += 1
+  s
+
+# Depth mutators — a `$global` statement directly after a dedent misparses
+# (parser bug: `$name` binds as a view-field postfix), so callers use these
+# helpers where the `$` mutation is safely the first statement of a body.
+-> spec_depth_up
+  $spec_depth += 1
+  nil
+
+-> spec_depth_down
+  $spec_depth -= 1
+  nil
+
+-> spec_record_pass(desc)
+  $spec_pass += 1
+  << spec_indent + "PASS " + desc
+
+-> spec_record_fail(desc, err)
+  $spec_fail += 1
+  $spec_failures.push("[desc] — [err]")
+  << spec_indent + "FAIL " + desc + " — " + "[err]"
+
+-> spec_record_pending(desc)
+  $spec_pending_count += 1
+  << spec_indent + "PEND " + desc
+  nil
+
+# Print cumulative counts; exit 1 when anything failed.
+-> spec_summary
+  << ""
+  if $spec_failures.size > 0
+    << "Failures:"
+    i = 0
+    while i < $spec_failures.size
+      n = i + 1
+      << "  [n]) " + $spec_failures[i]
+      i += 1
+    << ""
+  total = $spec_pass + $spec_fail
+  line = "[total] examples: [$spec_pass] passed, [$spec_fail] failed"
+  if $spec_pending_count > 0
+    line = line + ", [$spec_pending_count] pending"
+  << line
+  if $spec_fail > 0
+    exit 1
+  true
+
+# Reset all counters (for running multiple suites in one process).
+-> spec_reset
+  $spec_pass = 0
+  $spec_fail = 0
+  $spec_pending_count = 0
+  $spec_depth = 0
+  $spec_failures = []
+  nil
+
+# Configuration entry point — runs the block immediately; use it to
+# register global hooks:
+#   spec_configure() ->
+#     before_each() -> ...
+# Works on both engines (engine-split block capture, see hooks.w).
+-> spec_configure(&block)
+  if block != nil
+    block.call
+    return nil
+  &()
+  nil
+
+# Class-shaped facade kept for the documented API:
+#   TungstenSpec.configure -> ...   (runs the block; use before_each inside)
+#   TungstenSpec.done               (summary + exit code)
++ TungstenSpec
+  # INTERPRETER-ONLY: compiled class-static methods never receive an
+  # attached block (verified by probe — the named param arrives nil and
+  # `&()` aborts with "expected closure"). Compiled specs must use the
+  # top-level `spec_configure() -> ...` instead.
+  -> .configure(&)
+    &()
+    nil
+
+  -> .done
+    spec_summary
+
+  -> .summary
+    spec_summary
 
   -> .reset
-    @@contexts = []
-
-  -> new(@config)
-    @results   = []
-    @formatter = resolve_formatter(@config.format)
-
-  -> run
-    contexts = @@contexts
-    contexts = filter_by_tags(contexts) if @config.filter_tags.any?
-
-    # Randomize order if seed is set
-    if @config.seed
-      Random.seed(@config.seed)
-      contexts = contexts.shuffle
-
-    @formatter.start(contexts)
-
-    contexts.each -> (ctx)
-      run_context(ctx)
-
-    @formatter.finish(@results)
-
-    # Return summary
-    Summary.new(@results)
-
-  -> run_context(ctx)
-    # Run before_all hooks
-    ctx.collected_hooks(:before_all).each(h -> h.call)
-
-    # Run each example
-    ctx.examples.each -> (example)
-      run_example(ctx, example)
-
-    # Recurse into children
-    ctx.children.each -> (child)
-      run_context(child)
-
-    # Run after_all hooks
-    ctx.collected_hooks(:after_all).each(h -> h.call)
-
-  -> run_example(ctx, example)
-    # Build execution environment with let bindings
-    env = ExampleEnvironment.new(ctx.collected_lets)
-
-    # Run before_each hooks
-    ctx.collected_hooks(:before_each).each(h -> env.instance_eval(&h))
-
-    # Run the example
-    result = example.run(env)
-    @results.push(result)
-
-    @formatter.report(result)
-
-    # Bail on first failure if configured
-    if result.failed? && @config.fail_fast
-      @formatter.finish(@results)
-      exit 1
-
-    # Run after_each hooks
-    ctx.collected_hooks(:after_each).each(h -> env.instance_eval(&h))
-
-  -> filter_by_tags(contexts)
-    contexts.select -> (ctx)
-      @config.filter_tags.any?(tag -> ctx.tags.include?(tag))
-
-  -> resolve_formatter(format)
-    case format
-      :dots => DotsFormatter.new(@config.color)
-      :doc  => DocFormatter.new(@config.color)
-      :json => JsonFormatter.new
-      =>      DotsFormatter.new(@config.color)
-
-
-# Environment for running examples — provides let bindings
-+ ExampleEnvironment
-  -> new(lets)
-    @lets    = lets
-    @memo    = {}
-
-  -> method_missing(name, *args)
-    if @lets.has_key?(name)
-      @memo[name] ||= instance_eval(&@lets[name])
-    else
-      super
-
-
-# --- Formatters ---
-
-+ DotsFormatter
-  -> new(@color)
-
-  -> start(contexts)
-    # nothing
-
-  -> report(result)
-    case result.status
-      :passed  => <- colorize(".", :green)
-      :failed  => <- colorize("F", :red)
-      :pending => <- colorize("*", :yellow)
-      :skipped => <- colorize("-", :cyan)
-
-  -> finish(results)
-    << ""
-    << ""
-
-    # Print failures
-    failures = results.select(r -> r.failed?)
-    if failures.any?
-      << "Failures:\n"
-      failures.each_with_index -> (result, i)
-        << "  #{i + 1}) #{result.description}"
-        << "     #{colorize(result.error.message, :red)}"
-        << ""
-
-    # Print summary line
-    total   = results.size
-    passed  = results.count(r -> r.passed?)
-    failed  = results.count(r -> r.failed?)
-    pending = results.count(r -> r.pending?)
-
-    summary = "#{total} examples, #{failed} failures"
-    summary += ", #{pending} pending" if pending > 0
-    color = if failed > 0 then :red else :green
-    << colorize(summary, color)
-
-  -> colorize(text, color)
-    return text unless @color
-    code = case color
-      :red    => "31"
-      :green  => "32"
-      :yellow => "33"
-      :cyan   => "36"
-      =>        "0"
-    "\e[#{code}m#{text}\e[0m"
-
-
-+ DocFormatter
-  -> new(@color)
-    @indent = 0
-
-  -> start(contexts)
-    # nothing
-
-  -> report(result)
-    prefix = "  " * @indent
-    case result.status
-      :passed  => << "#{prefix}#{result.description}"
-      :failed  => << "#{prefix}#{result.description} (FAILED)"
-      :pending => << "#{prefix}#{result.description} (PENDING)"
-      :skipped => << "#{prefix}#{result.description} (SKIPPED)"
-
-  -> finish(results)
-    << ""
-    total  = results.size
-    failed = results.count(r -> r.failed?)
-    << "#{total} examples, #{failed} failures"
-
-
-+ JsonFormatter
-  -> start(contexts) = nil
-  -> report(result)  = nil
-
-  -> finish(results)
-    data = results.map -> (r)
-      {description: r.description, status: r.status, error: r.error&.message}
-    << data |> JSON.encode
-
-
-# Summary of a spec run
-+ Summary
-  ro :results
-
-  -> new(@results)
-
-  -> total     = @results.size
-  -> passed    = @results.count(r -> r.passed?)
-  -> failed    = @results.count(r -> r.failed?)
-  -> pending   = @results.count(r -> r.pending?)
-  -> exit_code = if failed > 0 then 1 else 0
-  -> success?  = failed == 0
+    spec_reset

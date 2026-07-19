@@ -462,16 +462,12 @@ use paths
   out
 
 -> ffn_current_term_in(state, u, v, w) (i64[] i64 i64 i64) i64
-  found = 0 ## i64
-  rank = ffw_current_rank(state) ## i64
-  i = 0 ## i64
-  while i < rank
-    if ffw_read_current_u(state, i) == u && ffw_read_current_v(state, i) == v && ffw_read_current_w(state, i) == w
-      found = 1
-      i = rank
-    else
-      i += 1
-  found
+  # Live states already maintain an exact three-factor hash index. Basin
+  # telemetry runs at the status heartbeat, so use it instead of rescanning a
+  # peer's complete term set for every term in every island pair.
+  if ffw_find_term(state, u, v, w) >= 0
+    return 1
+  0
 
 # Raw term-set distance between two live working states. Unlike the personal
 # best rank shown historically by the TUI, this distinguishes active basins.
@@ -1696,17 +1692,21 @@ use paths
     return 0
   best_rank - record
 
--> ffn_status(path, run_tag, producer_state, updated_ms, sequence, n, record, record_known, seed_nonce, cpu_epoch_target_ms, cpu_epoch_steps_min, cpu_epoch_steps_max, best, best_provenance, best_source, best_strategy, moves, elapsed_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_archive, partial_auto_map, gpu_enabled, gpu_degraded) i64
+-> ffn_status(path, run_tag, producer_state, updated_ms, sequence, n, record, record_known, seed_nonce, cpu_epoch_target_ms, cpu_epoch_steps_min, cpu_epoch_steps_max, best, states, basin_stats, best_provenance, best_source, best_strategy, moves, elapsed_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_archive, partial_auto_map, gpu_enabled, gpu_degraded) i64
   best_rank = ffw_best_rank(best) ## i64
   best_bits = ffw_best_bits(best) ## i64
   wr_gap = ffn_wr_gap(best_rank, record) ## i64
   wr_status = ffn_wr_status(best_rank, record, record_known)
+  z = ffn_active_basin_stats(states, best, basin_stats)
   body = "schema=4 producer_state=" + producer_state + " updated_ms=" + updated_ms.to_s() + " sequence=" + sequence.to_s()
   body = body + " tensor=" + n.to_s() + "x" + n.to_s()
   body = body + " record=" + record.to_s() + " record_known=" + record_known.to_s()
   body = body + " cpu_seed_nonce=" + seed_nonce.to_s()
   body = body + " cpu_epoch_target_ms=" + cpu_epoch_target_ms.to_s()
   body = body + " cpu_epoch_steps_min=" + cpu_epoch_steps_min.to_s() + " cpu_epoch_steps_max=" + cpu_epoch_steps_max.to_s()
+  body = body + " cpu_islands=" + states.size().to_s() + " cpu_unique_term_sets=" + basin_stats[0].to_s()
+  body = body + " cpu_min_pair_distance=" + basin_stats[1].to_s() + " cpu_on_leader=" + basin_stats[2].to_s()
+  body = body + " cpu_mean_leader_distance=" + basin_stats[3].to_s()
   body = body + " best_rank=" + best_rank.to_s() + " best_bits=" + best_bits.to_s()
   body = body + fflp_status_fields(best_provenance, best_source, best_strategy)
   body = body + " wr_gap=" + wr_gap.to_s() + " wr_status=" + wr_status
@@ -3272,6 +3272,7 @@ start_ms = ccall("__w_clock_ms") ## i64
 last_status_ms = 0 - 1 ## i64
 last_render_ms = 0 - 1 ## i64
 last_near_dump_ms = 0 - 1 ## i64
+status_basin_stats = i64[4]
 frontier_escape_last_ms = start_ms ## i64
 frontier_escape_sources = []
 frontier_escape_source_count = ffn_snapshot_archive_into(frontier_escape_sources, archive, ARCHIVE_CAP, STATE_SIZE, 28801) ## i64
@@ -5092,7 +5093,7 @@ while running == 1
   if ff_tui_heartbeat_due(last_status_ms, now_ms, 500) == 1
     sequence += 1
     z = ffcp_round_step_range(cpu_round_steps, J, cpu_epoch_range) ## i64
-    z = ffn_status(STATUS_PATH, RUN_TAG, "LIVE", now_ms, sequence, N, RECORD, RECORD_KNOWN, SEED_NONCE, cpu_epoch_target_ms, cpu_epoch_range[0], cpu_epoch_range[1], best, best_provenance, best_source, best_strategy, total_moves, elapsed_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_admissions, partial_auto_map_admissions, GPU, gpu_degraded)
+    z = ffn_status(STATUS_PATH, RUN_TAG, "LIVE", now_ms, sequence, N, RECORD, RECORD_KNOWN, SEED_NONCE, cpu_epoch_target_ms, cpu_epoch_range[0], cpu_epoch_range[1], best, states, status_basin_stats, best_provenance, best_source, best_strategy, total_moves, elapsed_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_admissions, partial_auto_map_admissions, GPU, gpu_degraded)
     if z == 0
       gpu_degraded = 1
     if z == 1
@@ -5383,7 +5384,7 @@ final_state = "DONE"
 if final_write_failed != 0
   final_state = "FAILED"
 z = ffcp_round_step_range(cpu_round_steps, J, cpu_epoch_range) ## i64
-status_ok = ffn_status(STATUS_PATH, RUN_TAG, final_state, final_ms, sequence + 1, N, RECORD, RECORD_KNOWN, SEED_NONCE, cpu_epoch_target_ms, cpu_epoch_range[0], cpu_epoch_range[1], best, best_provenance, best_source, best_strategy, total_moves, final_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_admissions, partial_auto_map_admissions, GPU, gpu_degraded) ## i64
+status_ok = ffn_status(STATUS_PATH, RUN_TAG, final_state, final_ms, sequence + 1, N, RECORD, RECORD_KNOWN, SEED_NONCE, cpu_epoch_target_ms, cpu_epoch_range[0], cpu_epoch_range[1], best, states, status_basin_stats, best_provenance, best_source, best_strategy, total_moves, final_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_admissions, partial_auto_map_admissions, GPU, gpu_degraded) ## i64
 if status_ok == 0
   final_write_failed = 1
 final_wr = ffn_wr_status(ffw_best_rank(best), RECORD, RECORD_KNOWN)

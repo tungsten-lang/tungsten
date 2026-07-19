@@ -26,7 +26,7 @@ SHAPES_CSV="3x3x4,3x4x4,2x3x5,3x4x5,4x5x5,5x6x7"
 NODES_CSV="0,1,2,3,4,5"
 WALKERS=64
 STEPS=500000
-LEASE_ROUNDS=16
+LEASE_ROUNDS=64
 POLL_SECONDS=2
 DRAIN_SECONDS=120
 STATUS_TIMEOUT=900
@@ -39,7 +39,7 @@ usage() {
 Usage: supervise_rect_leaves.sh --binary PATH [OPTIONS]
 
 Launch one long-lived, CPU-only, single-shape rectangular portfolio parent per
-NUMA node. Each parent rotates finite 16-round child leases by default. The
+NUMA node. Each parent rotates finite 64-round child leases by default. The
 default six-parent campaign is the measured retarget for an m8i.96xlarge.
 
 Required:
@@ -57,7 +57,7 @@ Topology and work:
   --nodes CSV                Distinct NUMA nodes, one per shape
   -J, --walkers N            CPU walkers per parent/lease (default: 64)
   --steps N                  Moves per worker epoch (default: 500000)
-  --lease-rounds N           Finite rounds per child lease (default: 16;
+  --lease-rounds N           Finite rounds per child lease (default: 64;
                              valid range: 1..64)
 
 Health and host policy:

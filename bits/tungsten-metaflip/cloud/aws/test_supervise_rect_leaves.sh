@@ -222,7 +222,6 @@ COMMON_ARGS=(
   --nodes 0,1
   -J 3
   --steps 77
-  --lease-rounds 16
   --poll-seconds 1
   --drain-seconds 1
   --status-timeout 30
@@ -254,8 +253,8 @@ expect 'explicit CPU walker and step budgets survive construction' grep -q -- '-
 expect 'parents are CPU-only, headless, and record-stopping' grep -q -- '--no-gpu --quiet --no-tui --stop-on-record' "$DRY_OUTPUT"
 portfolio_count=$(grep -c -- '--rect --rect-shapes' "$DRY_OUTPUT" || true)
 expect 'every command uses a single-shape portfolio parent' test "$portfolio_count" -eq 2
-lease_count=$(grep -c -- '--rect-epoch-rounds 16' "$DRY_OUTPUT" || true)
-expect 'every parent rotates finite 16-round leases' test "$lease_count" -eq 2
+lease_count=$(grep -c -- '--rect-epoch-rounds 64' "$DRY_OUTPUT" || true)
+expect 'every parent rotates finite 64-round leases by default' test "$lease_count" -eq 2
 expect 'private child schedule is owned by each parent' sh -c '! grep -q -- "--rect-portfolio-child" "$1"' sh "$DRY_OUTPUT"
 expect 'supervisor, not parents, owns the wall deadline' grep -q -- '--secs 0' "$DRY_OUTPUT"
 expect 'parent epoch count cannot terminate a normal campaign' grep -q -- '--rounds 2000000000' "$DRY_OUTPUT"
@@ -382,7 +381,7 @@ expect_token 'deadline status is stopped' "$DEADLINE_STATUS" 'producer_state=sto
 expect_token 'deadline reason is durable' "$DEADLINE_STATUS" 'reason=deadline'
 expect_token 'both parent heartbeats were aggregated' "$DEADLINE_STATUS" 'status_count=2'
 expect_token 'final status has no running parents' "$DEADLINE_STATUS" 'running_count=0'
-expect_token 'lease width is explicit in cumulative status' "$DEADLINE_STATUS" 'lease_rounds=16'
+expect_token 'default lease width is explicit in cumulative status' "$DEADLINE_STATUS" 'lease_rounds=64'
 expect_token 'clean leases have no cumulative failures' "$DEADLINE_STATUS" 'lease_failure_count=0'
 expect_token 'both parents used the expected status protocol' "$DEADLINE_STATUS" 'protocol_error_count=0'
 expect_token 'moves are summed across parents' "$DEADLINE_STATUS" 'total_moves=246'

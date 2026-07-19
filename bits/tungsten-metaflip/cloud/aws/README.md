@@ -95,12 +95,16 @@ density/basin run for that profile instead.
 
 Every NUMA process is a long-lived `--rect --rect-shapes SHAPE` parent, not an
 eternal private child. By default the parent gives its node to one finite
-16-round child lease, exact-gates and checkpoints the result, then starts a new
+64-round child lease, exact-gates and checkpoints the result, then starts a new
 lease with the portfolio scheduler's fresh high-entropy restart nonce and
 low-discrepancy door ticket. The checkpoint and eight exact side-door files are
 reloaded at each boundary, so a restart changes the walk without throwing away
-useful basins. `--lease-rounds N` exposes the runtime's `1..64` range; 16 is the
-production default.
+useful basins. `--lease-rounds N` exposes the runtime's `1..64` range; 64 is the
+production default. A matched 5x6x7/J12/500k benchmark over 1.92 billion moves
+measured 6.18 seconds at 16 rounds per lease, 5.46 seconds at 32, and 4.95
+seconds at 64 (4.61 seconds without lease boundaries). The 64-round default
+therefore recovered 25% throughput over 16 while still loading/saving all eight
+doors and seeding 32 saved-door lanes in the five-lease sample.
 
 The launcher rejects unsupported/square shapes, duplicates, unequal
 shape/node counts, absent NUMA nodes, and a native binary/runtime mismatch

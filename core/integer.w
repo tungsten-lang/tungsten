@@ -219,3 +219,28 @@
     return 0 if self == 0 || other == 0
     r = (self / gcd(other)) * other
     r < 0 ? 0 - r : r
+
+  # Modular exponentiation: (self ** exp) mod modulus, via square-and-multiply
+  # in O(log exp) modular multiplications. The naive `(self ** exp) % modulus`
+  # first materializes the full self**exp -- astronomically large for the
+  # exponents used in RSA / Diffie-Hellman / Miller-Rabin -- so this is the
+  # only tractable route. Every step rides the promoting *, %, / operators, so
+  # it stays exact for BigInt bases, exponents, and moduli; the exponent is
+  # bit-walked with % 2 / / 2 (not bitwise &/>>) so a BigInt exponent works too.
+  -> pow(exp, modulus)
+    if exp < 0
+      raise "Integer#pow: negative exponent needs a modular inverse (unsupported)"
+    if modulus == 1
+      return 0
+    result = 1
+    base = self % modulus
+    if base < 0
+      base = base + modulus
+    e = exp
+    while e > 0
+      if e % 2 == 1
+        result = (result * base) % modulus
+      e = e / 2
+      if e > 0
+        base = (base * base) % modulus
+    result

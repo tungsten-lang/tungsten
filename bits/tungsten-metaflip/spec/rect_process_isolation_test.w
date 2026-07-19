@@ -41,6 +41,25 @@ finished = ffrpo_finish_segment("/usr/bin/true", dispatched, launcher_states, 0)
 stopped = ffrpo_stop_process_launchers("/usr/bin/true", launcher_threads, launcher_states) ## i64
 failures += rect_process_expect("persistent launcher dispatches and returns idle", dispatched == launcher && finished == 1 && launcher_exit_codes[0] == 0 && launcher_states[0] == 0 - 1 && stopped == 1)
 
+cancel_threads = []
+cancel_thread = Thread.new ->
+  ccall("__w_sleep_ms", 10000)
+  true
+cancel_threads.push(cancel_thread)
+cancel_launcher_threads = [nil]
+cancel_launcher_states = i64[1]
+cancel_joined = i64[1]
+cancel_exit_codes = i64[1]
+cancel_markers = i64[1]
+cancelled = ffrpo_cancel_active_segments("", cancel_threads, cancel_launcher_threads, cancel_launcher_states, cancel_joined, cancel_exit_codes, cancel_markers) ## i64
+failures += rect_process_expect("parent cancellation is explicitly marked", cancelled == 1 && cancel_threads[0] == nil && cancel_joined[0] == 1 && cancel_exit_codes[0] == 2 && cancel_markers[0] == 1)
+
+failures += rect_process_expect("marked parent cancellation is not a lease failure", ffrpo_segment_precheck_failed(1, 2, 0, 0, 0, 1) == 0)
+failures += rect_process_expect("genuine child exit remains fail closed", ffrpo_segment_precheck_failed(1, 2, 0, 0, 0, 0) == 1)
+failures += rect_process_expect("cancellation cannot mask an exact reject", ffrpo_segment_precheck_failed(1, 2, 1, 0, 0, 1) == 1)
+failures += rect_process_expect("empty natural lease remains a failure", ffrpo_segment_precheck_failed(1, 0, 0, 0, 0, 0) == 1)
+failures += rect_process_expect("ordinary completed lease remains healthy", ffrpo_segment_precheck_failed(1, 0, 0, 1, 1, 0) == 0)
+
 if failures != 0
   << "FAIL rectangular process isolation failures=" + failures.to_s()
   exit(1)

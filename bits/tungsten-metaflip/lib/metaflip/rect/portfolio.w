@@ -802,8 +802,10 @@ use ../paths
 # A terminal interrupt cancels the wait thread, whose runtime cleanup owns and
 # reaps the shell's entire process group. This makes SIGINT/SIGTERM prompt and
 # prevents a second signal or supervisor timeout from orphaning a rectangular
-# Metaflip child. TUI `q` remains the graceful drain path.
--> ffrpo_cancel_active_segments(worker_binary, threads, launcher_threads, launcher_states, segment_joined, exit_codes) i64
+# Metaflip child. Record which leases the parent deliberately cancelled: that
+# synthetic exit code is not a failed finite lease. TUI `q` remains the
+# graceful drain path.
+-> ffrpo_cancel_active_segments(worker_binary, threads, launcher_threads, launcher_states, segment_joined, exit_codes, parent_cancelled) i64
   cancelled = 0 ## i64
   i = 0 ## i64
   while i < threads.size()
@@ -815,6 +817,7 @@ use ../paths
       threads[i] = nil
       segment_joined[i] = 1
       exit_codes[i] = 2
+      parent_cancelled[i] = 1
       if worker_binary != nil && worker_binary != ""
         launcher_threads[i] = nil
         launcher_states[i] = 0 - 2
@@ -840,6 +843,22 @@ use ../paths
       stopped += 1
     i += 1
   stopped
+
+# First-stage terminal gate for a private lease. An exit synthesized by the
+# portfolio parent while responding to TERM/INT/HUP is a cancellation, not a
+# failed finite lease. Cancellation only relaxes the two observations that the
+# parent itself manufactured (nonzero exit and no harvested work); exact
+# rejects and every later checkpoint/exact audit remain fail-closed.
+-> ffrpo_segment_precheck_failed(launched, exit_code, exact_rejects, wall_ms, cpu_moves, parent_cancelled) (i64 i64 i64 i64 i64 i64) i64
+  if launched == 0
+    return 1
+  if exit_code != 0 && parent_cancelled == 0
+    return 1
+  if exact_rejects > 0
+    return 1
+  if wall_ms < 1 && cpu_moves < 1 && parent_cancelled == 0
+    return 1
+  0
 
 -> ffrpo_commit_operational(shape_cpu_moves, shape_gpu_moves, shape_mitm_attempts, shape_mitm_pairs, shape_mitm_ms, shape_mitm_failures, slot, cpu_moves, gpu_moves, mitm_attempts, mitm_pairs, mitm_ms, mitm_failures, failed)
   # Work counters describe computation that happened, not whether the segment
@@ -1404,6 +1423,7 @@ use ../paths
   # arena was fixed.
   threads = []
   segment_joined = i64[count]
+  parent_cancelled = i64[count]
   base_complete = i64[count]
   base_wall_ms = i64[count]
   total_rounds = i64[count]
@@ -1526,6 +1546,7 @@ use ../paths
       reset_children[i] = 0
       active[i] = 0
       segment_joined[i] = 1
+      parent_cancelled[i] = 0
       base_complete[i] = 0
       base_wall_ms[i] = 0
       total_rounds[i] = 0
@@ -1844,7 +1865,7 @@ use ../paths
           key = ccall("w_input_poll", 0)
       if ccall("__w_interrupted") != 0
         stop_requested = 1
-        cancelled = ffrpo_cancel_active_segments(worker_binary, threads, launcher_threads, launcher_states, segment_joined, exit_codes) ## i64
+        cancelled = ffrpo_cancel_active_segments(worker_binary, threads, launcher_threads, launcher_states, segment_joined, exit_codes, parent_cancelled) ## i64
 
       still = ffrpo_any_alive(threads, worker_binary, launcher_states) ## i64
       if still == 0
@@ -1958,11 +1979,12 @@ use ../paths
         gpu_ms_epoch = acc_gpu_ms[i] ## i64
         gpu_failure_epoch = acc_gpu_failures[i] ## i64
         exact_rejects_epoch = acc_exact_rejects[i] ## i64
-        failed = 0 ## i64
-        if launched[i] == 0 || exit_codes[i] != 0 || exact_rejects_epoch > 0
-          failed = 1
-        if failed == 0 && total_wall_ms[i] < 1 && acc_cpu_moves[i] < 1
-          failed = 1
+        # `thread.kill` reports exit code 2 for a lease that this parent
+        # intentionally cancelled while handling TERM/INT/HUP.  Do not turn
+        # that synthetic code into a cumulative lease failure.  All genuine
+        # child exits still take the normal fail-closed path, and the durable
+        # checkpoint is exact-audited below even for a cancelled lease.
+        failed = ffrpo_segment_precheck_failed(launched[i], exit_codes[i], exact_rejects_epoch, total_wall_ms[i], acc_cpu_moves[i], parent_cancelled[i]) ## i64
         if failed == 0
           checkpoint_size = file_size(best_paths[i])
           if checkpoint_size == nil || checkpoint_size < 1

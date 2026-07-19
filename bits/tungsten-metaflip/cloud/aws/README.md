@@ -145,6 +145,10 @@ private lease, and a counter that moves backward is a protocol error. A failed
 private lease remains fail-closed even though the portfolio coordinator could
 retry it: any cumulative `cpu_failures`, frozen work, unexpected parent exit,
 malformed parent status, stale heartbeat, or OOM drains the entire campaign.
+When the supervisor itself ends a healthy campaign, the parent's deliberate
+cancellation of its active private lease is tracked separately from a child
+failure. The exact durable checkpoint is still audited, but the synthetic
+launcher exit produced by TERM does not increment `cpu_failures`.
 
 A parent exiting zero after `--stop-on-record` is successful only when its
 fresh final one-shape portfolio status and durable checkpoint agree on a rank
@@ -190,4 +194,13 @@ shutdown tool:
 
 ```sh
 bits/tungsten-metaflip/cloud/aws/test_supervise_rect_leaves.sh
+```
+
+The lifecycle regression compiles a real Tungsten Metaflip binary and drives a
+real portfolio parent/private-child pair through the supervisor deadline. It
+proves that the terminal status stays healthy with zero lease failures while
+the independent failure cases above remain fail-closed:
+
+```sh
+bits/tungsten-metaflip/cloud/aws/test_rect_portfolio_deadline.sh
 ```

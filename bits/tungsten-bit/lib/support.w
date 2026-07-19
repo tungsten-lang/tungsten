@@ -1094,7 +1094,7 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
     bit.resolved?(version, path, summary)
 
   -> find_allowed(name, requirement, allow_prerelease, policy, source_url)
-    client = Registry:Client.new(source_url)
+    client = Tungsten:Bit:Registry:Client.new(source_url)
     results = client.versions(name, allow_prerelease)
     results.each -> (candidate)
       if version_satisfies?(candidate.version, requirement) && cooldown_elapsed?(candidate, policy)

@@ -740,6 +740,23 @@ use ../../core/token
         @namespace_prefix = ns
         return Tungsten:AST:NamespaceDecl.new(ns)
 
+    # `constant_alias "WC"` bit directive: parsed here (not as a generic
+    # bare call) so the file's active `in` namespace rides along as a
+    # second string argument — lowering and the tree-walker register
+    # alias → namespace from the args alone, with no file context.
+    # Token shape: ID("constant_alias") SP STRING NL. With no active
+    # namespace (or a non-literal argument) it parses as an ordinary
+    # call, which both engines treat as a no-op.
+    if at_typed?(T_ID, "constant_alias") && @namespace_prefix != nil
+      str_pos = @pos + 1
+      while str_pos < @token_count && parser_tok_type(@packed_tokens[str_pos]) == T_SP
+        str_pos += 1
+      if str_pos < @token_count && parser_tok_type(@packed_tokens[str_pos]) == T_STRING
+        advance()
+        skip_spaces()
+        alias_name = advance_value()
+        return Tungsten:AST:Call.new(nil, "constant_alias", [Tungsten:AST:String.new(alias_name), Tungsten:AST:String.new(@namespace_prefix)], nil)
+
     # @fastmath / @strictmath scoped math-mode blocks.
     # Syntax: `@fastmath ->\n  body...` or inline `@fastmath -> expr`.
     # Lowering temporarily overrides ctx[:math_mode_override] to :fast/:strict
@@ -3327,9 +3344,14 @@ use ../../core/token
     collected_constraints = @pending_class_constraints
     @pending_class_constraints = prev_constraints
 
-    # Apply file-level `in NAMESPACE` prefix to the class name.
+    # Apply file-level `in NAMESPACE` prefix to the class name. Qualified
+    # declarations (`+ Registry:Client`) are prefixed like their bare
+    # siblings — under `in Tungsten:Bit` both `+ Registry` and
+    # `+ Registry:Client` register inside the namespace. A declaration
+    # that already spells the active prefix (`+ Tungsten:LRUCache` under
+    # `in Tungsten`) passes through unchanged.
     if @namespace_prefix != nil
-      if !name.include?(":")
+      if !name.starts_with?(@namespace_prefix + ":")
         name = @namespace_prefix + ":" + name
 
     # Ruby-style constant lookup for the superclass: walk the

@@ -832,7 +832,9 @@ use parser
     nil
 
   -> cache_version
-    "loader-ast-v19"
+    # v20: constant_alias directive parsed with a stamped namespace arg;
+    # qualified class names under `in` get the namespace prefix.
+    "loader-ast-v20"
 
   -> cache_dir
     override = env("TUNGSTEN_CACHE_DIR")

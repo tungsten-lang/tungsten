@@ -19,6 +19,11 @@
     # an unconditional branch — no runtime global load.
     build_defines:    {},
     known_classes:    {},
+    # `constant_alias "WC"` directives, collected in lowering's
+    # registration prepass: alias → namespace ("WC" → "Tungsten:Carbide").
+    # lower_var rewrites the first segment of a qualified class reference
+    # through this map before the exact known_classes lookup.
+    constant_aliases: {},
     known_traits:     {},
     known_calls:      {},
     block_method_names: {},

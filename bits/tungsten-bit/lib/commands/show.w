@@ -15,7 +15,7 @@ in Tungsten:Bit:Commands
     registry = option(:registry) || (current ? current.source : DEFAULT_REGISTRY)
     lockfile = Lockfile.load("Bitfile.lock")
     locked = lockfile.find_dependency(name)
-    client = Registry:Client.new(registry)
+    client = Tungsten:Bit:Registry:Client.new(registry)
     available = client.versions(name, true)
     bitfile = installed_bit_named(name)
     location = "installed"

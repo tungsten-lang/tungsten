@@ -105,7 +105,7 @@ in Tungsten:Carbide
 
       =>
         # Default: compile as .w.html template
-        Template:Compiler.compile(source)
+        Tungsten:Carbide:Template:Compiler.compile(source)
 
 
 # Compiled template — evaluates embedded Tungsten expressions
@@ -149,4 +149,4 @@ in Tungsten:Carbide
           parts.push({type: :text, value: scanner.rest})
           scanner.terminate
 
-    Template:Compiled.new(parts)
+    Tungsten:Carbide:Template:Compiled.new(parts)

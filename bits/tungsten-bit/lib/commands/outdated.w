@@ -55,7 +55,7 @@ in Tungsten:Bit:Commands
     nil
 
   -> latest_allowed(bitfile, dep)
-    client = Registry:Client.new(source_url_for(bitfile, dep))
+    client = Tungsten:Bit:Registry:Client.new(source_url_for(bitfile, dep))
     policy = source_policy_for(bitfile, dep)
     client.versions(dep.name, flag?(:pre)).each -> (candidate)
       if version_satisfies?(candidate.version, dep.version) && cooldown_elapsed?(candidate, policy)

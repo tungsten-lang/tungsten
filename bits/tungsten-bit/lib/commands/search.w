@@ -13,7 +13,7 @@ in Tungsten:Bit:Commands
     abort "Please provide a search query" if query.empty?
 
     registry = option(:registry, default_bit_source())
-    client = Registry:Client.new(registry)
+    client = Tungsten:Bit:Registry:Client.new(registry)
 
     results = client.search(
       query,

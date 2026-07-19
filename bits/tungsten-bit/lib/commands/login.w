@@ -23,7 +23,7 @@ in Tungsten:Bit:Commands
     abort "Handle/email is required" unless handle
     abort "Password is required" unless password
 
-    response = Registry:Client.new(registry).login(handle, password)
+    response = Tungsten:Bit:Registry:Client.new(registry).login(handle, password)
     if response.status == :ok
       Auth.save_token(response.message, registry)
       say "Logged in to " + registry

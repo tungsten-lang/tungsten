@@ -42,6 +42,10 @@ use target
     @goroutines = []
     # Class currently being defined (for `@@cvar` in class body statements).
     @defining_class = nil
+    # `constant_alias "WC"` registrations: alias → namespace
+    # ("WC" → "Tungsten:Carbide"). eval_class_ref expands the first
+    # segment of a qualified reference through this map.
+    @constant_aliases = {}
     seed_primitive_class_stubs()
 
   -> argv
@@ -527,6 +531,13 @@ use target
   -> eval_class_ref(node, env)
     name = ast_get(node, :name)
     if !@classes.has_key?(name)
+      # Bit constant alias: rewrite the first segment (`WC:Route` →
+      # `Tungsten:Carbide:Route`) and resolve exactly — mirrors
+      # constant_alias_expand on the compiled path.
+      expanded = expand_constant_alias(name)
+      if expanded != nil
+        name = expanded
+    if !@classes.has_key?(name)
       try_autoload_class(name)
     if @classes.has_key?(name)
       return @classes[name]
@@ -534,6 +545,21 @@ use target
     if hint != nil
       raise "Undefined class '[name]' — [hint]"
     raise "Undefined class '[name]'"
+
+  # First-segment constant-alias substitution: "WC:Route" with alias
+  # WC → Tungsten:Carbide gives "Tungsten:Carbide:Route". Returns nil
+  # for unqualified names and unregistered heads (no suffix matching,
+  # no namespace walking).
+  -> expand_constant_alias(name)
+    if @constant_aliases.size() == 0
+      return nil
+    c = name.index(":")
+    if c == nil
+      return nil
+    target = @constant_aliases[name.slice(0, c)]
+    if target == nil
+      return nil
+    target + name.slice(c, name.size() - c)
 
   -> eval_magic_constant(node)
     name = ast_get(node, :name)
@@ -1033,6 +1059,12 @@ use target
       try_autoload_class(name)
     if @classes.has_key?(name)
       return @classes[name]
+    # Bit constant alias: an all-caps head lexes as a constant, so
+    # `WC:Migration` arrives here as a :var rather than a :class_ref.
+    # Same first-segment substitution as eval_class_ref.
+    expanded = expand_constant_alias(name)
+    if expanded != nil && @classes.has_key?(expanded)
+      return @classes[expanded]
     if @env.defined?(name)
       return @env.get(name)
     # Try as bare method call
@@ -1972,6 +2004,15 @@ use target
       return dispatch_interpreted_ccall(args)
     if name == "ccall_nobox"
       return dispatch_interpreted_ccall_nobox(args)
+    # `constant_alias "WC"` bit directive. The parser stamped the declaring
+    # file's `in` namespace as a second argument (parser.w), so registration
+    # needs no file context; the single-arg form (no active namespace at the
+    # declaration site) is a no-op. Mirrors the compiled path: prepass
+    # registration in lowering.w + expansion in eval_class_ref here.
+    if name == "constant_alias"
+      if args.size() == 2 && type(args[0]) == "String" && type(args[1]) == "String"
+        @constant_aliases[args[0]] = args[1]
+      return nil
     # Compiled packed values and their source-level raw representation are
     # both i64, so these lower to no instructions. The tree walker needs an
     # explicit bridge because its raw bits are represented as an Integer.

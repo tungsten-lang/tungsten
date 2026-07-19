@@ -14,7 +14,7 @@ in Tungsten:Bit:Commands
 
     registry = option(:registry, DEFAULT_REGISTRY)
     auth = Auth.load
-    client = Registry:Client.new(registry, auth)
+    client = Tungsten:Bit:Registry:Client.new(registry, auth)
 
     say "Publishing " + bitfile.name + " " + bitfile.version + "..."
 

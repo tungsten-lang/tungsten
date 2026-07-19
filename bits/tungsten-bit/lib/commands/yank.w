@@ -18,7 +18,7 @@ in Tungsten:Bit:Commands
     auth = Auth.load
     abort "Not logged in. Run `bit login`." unless auth.valid?
     registry = option(:registry, auth.registry || DEFAULT_REGISTRY)
-    response = Registry:Client.new(registry, auth).yank(name, version)
+    response = Tungsten:Bit:Registry:Client.new(registry, auth).yank(name, version)
     if response.status == :ok
       say "Yanked " + name + " " + version
     else

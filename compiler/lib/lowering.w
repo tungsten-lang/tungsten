@@ -1096,6 +1096,15 @@ use lowering/definitions
   ei = 0
   while ei < ast.expressions.size()
     expr = ast.expressions[ei]
+    # `constant_alias "WC"` — the parser stamped the declaring file's `in`
+    # namespace as a second string arg (parser.w), so registration needs no
+    # file context. Collected in this prepass so aliases resolve in every
+    # method body regardless of statement order; the statement itself stays
+    # a no-op in lower_statement (pass_registry.w).
+    if ast_kind(expr) == :call && expr.receiver == nil && expr.name == "constant_alias"
+      ca_args = expr.args
+      if ca_args != nil && ca_args.size() == 2 && ast_kind(ca_args[0]) == :string && ast_kind(ca_args[1]) == :string
+        mod[:constant_aliases][ca_args[0].value] = ca_args[1].value
     if ast_kind(expr) == :trait_def
       mod[:known_traits][expr.name] = expr
     if ast_kind(expr) in (:method_def :fn_def)
@@ -1532,6 +1541,23 @@ use lowering/definitions
     segments.pop()
   nil
 
+# Bit constant alias expansion (`constant_alias "WC"` in a bit's entry
+# file). A registered alias is a straight first-segment substitution —
+# `WC:Route` → `Tungsten:Carbide:Route` — no suffix matching and no
+# namespace walking. Unqualified names and unregistered heads return nil
+# so callers fall through to their existing behavior.
+-> constant_alias_expand(mod, name)
+  aliases = mod[:constant_aliases]
+  if aliases == nil || aliases.size() == 0
+    return nil
+  c = name.index(":")
+  if c == nil
+    return nil
+  target = aliases[name.slice(0, c)]
+  if target == nil
+    return nil
+  target + name.slice(c, name.size() - c)
+
 # Materialize all temp bindings to var slots. Called before control flow
 # (if, while, case, etc.) and closures so that cross-block reads and
 # capture analysis find values in var_slots.
@@ -1697,6 +1723,17 @@ use lowering/definitions
     temp = next_temp(wfn)
     emit_instruction(wfn, {op: :load_class, temp: temp, class_name: name})
     return typed_value(:i64, temp)
+
+  # Bit constant alias: a qualified reference whose first segment is a
+  # registered `constant_alias` resolves by substitution — `WC:Route`
+  # under `use carbide` loads `Tungsten:Carbide:Route`. Exact lookup
+  # only; unmatched names fall through unchanged.
+  if name.include?(":")
+    aliased = constant_alias_expand(ctx[:mod], name)
+    if aliased != nil && ctx[:mod][:known_classes][aliased] != nil
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :load_class, temp: temp, class_name: aliased})
+      return typed_value(:i64, temp)
 
   # Unqualified class reference resolved via the enclosing namespace
   # chain (Ruby-style). A bare `Clean` inside a method of

@@ -11,6 +11,7 @@
 # full lexer/parser (this module has no `use` directives). Directives:
 #   name "..."                → :name
 #   version "..."             → :version
+#   constant_alias "WC"       → :constant_alias  (short module alias)
 #   includes ["a.c", "b.c"]   → :includes  (C files, array of strings)
 #   requires ["bit", ...]     → :requires  (bit deps, array of strings)
 #   Tungsten[:sym] = "bit"    → :service_bindings[sym] = {bit:, line:}
@@ -77,7 +78,7 @@
 # file yields the empty-but-shaped result (all fields present, none set), so
 # callers never nil-check individual fields.
 -> parse_bitfile(path)
-  result = {name: nil, version: nil, includes: [], requires: [], service_bindings: {}}
+  result = {name: nil, version: nil, constant_alias: nil, includes: [], requires: [], service_bindings: {}}
   source = read_file(path)
   if source == nil
     return result
@@ -94,6 +95,8 @@
       result[:name] = bitfile_first_string(line)
     elsif tok == "version"
       result[:version] = bitfile_first_string(line)
+    elsif tok == "constant_alias"
+      result[:constant_alias] = bitfile_first_string(line)
     elsif tok == "includes"
       result[:includes] = bitfile_string_list(line)
     elsif tok == "requires"

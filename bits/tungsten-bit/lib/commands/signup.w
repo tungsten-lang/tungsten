@@ -49,7 +49,7 @@ in Tungsten:Bit:Commands
     password = option(:password) || prompt_line("Password", nil, false)
     abort "Password is required for remote signup" unless password
 
-    response = Registry:Client.new(registry).signup(handle, email, password, public_key, github_email)
+    response = Tungsten:Bit:Registry:Client.new(registry).signup(handle, email, password, public_key, github_email)
     if response.status == :ok
       Auth.save_token(response.message, registry)
       say "Created profile and saved registry token"

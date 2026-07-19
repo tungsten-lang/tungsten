@@ -2335,7 +2335,11 @@ use target
       # the ordinary accessor path. This keeps the tree walker from pretending
       # it can decode layouts the storage boundary does not implement.
       if m != nil && m[:data_field] == true
-        if native_data_field_supported?(primitive_class, name)
+        # Only a bare field access (no block, no args) reads the raw storage
+        # scalar. `h.count -> (k, v)` / `h.count(:sym)` are Enumerable calls,
+        # not the `count` storage field — they must fall through to the builtin
+        # instead of returning the element count and ignoring the block.
+        if block == nil && args.empty?() && native_data_field_supported?(primitive_class, name)
           return ccall("w_native_data_field", recv, name)
         # A generated storage accessor must not shadow a semantic runtime
         # method with the same name (notably Hash#keys and Hash#values).

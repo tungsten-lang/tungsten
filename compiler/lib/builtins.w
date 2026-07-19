@@ -245,16 +245,28 @@
       interp.call_block(block, [elem, idx])
 
   when "any?"
-    recv.any? -> (elem)
-      interp.truthy?(interp.apply_iteratee(block, args, elem))
+    if type(recv) == "Hash" && block != nil
+      recv.any? -> (k, v)
+        interp.truthy?(interp.call_block(block, [k, v]))
+    else
+      recv.any? -> (elem)
+        interp.truthy?(interp.apply_iteratee(block, args, elem))
 
   when "all?"
-    recv.all? -> (elem)
-      interp.truthy?(interp.apply_iteratee(block, args, elem))
+    if type(recv) == "Hash" && block != nil
+      recv.all? -> (k, v)
+        interp.truthy?(interp.call_block(block, [k, v]))
+    else
+      recv.all? -> (elem)
+        interp.truthy?(interp.apply_iteratee(block, args, elem))
 
   when "find"
-    recv.find -> (elem)
-      interp.truthy?(interp.apply_iteratee(block, args, elem))
+    if type(recv) == "Hash" && block != nil
+      recv.find -> (k, v)
+        interp.truthy?(interp.call_block(block, [k, v]))
+    else
+      recv.find -> (elem)
+        interp.truthy?(interp.apply_iteratee(block, args, elem))
 
   when "count"
     # No block/arg: number of elements. With a block or a method symbol
@@ -262,9 +274,14 @@
     if block == nil && args.empty?()
       return recv.size()
     n = 0
-    recv.each -> (elem)
-      if interp.truthy?(interp.apply_iteratee(block, args, elem))
-        n = n + 1
+    if type(recv) == "Hash" && block != nil
+      recv.each -> (k, v)
+        if interp.truthy?(interp.call_block(block, [k, v]))
+          n = n + 1
+    else
+      recv.each -> (elem)
+        if interp.truthy?(interp.apply_iteratee(block, args, elem))
+          n = n + 1
     n
 
   when "sum"

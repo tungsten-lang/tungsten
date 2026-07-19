@@ -244,3 +244,47 @@
       if e > 0
         base = (base * base) % modulus
     result
+
+  # Base-10 digits, least-significant first (Ruby Integer#digits): 1234 ->
+  # [4, 3, 2, 1], 0 -> [0]. Rides the promoting % / / so it is exact for
+  # BigInt receivers. Negative receivers raise (Ruby does too).
+  -> digits
+    if self < 0
+      raise "Integer#digits: negative receiver"
+    if self == 0
+      return [0]
+    dg_out = []
+    dg_n = self
+    while dg_n > 0
+      dg_out.push(dg_n % 10)
+      dg_n = dg_n / 10
+    dg_out
+
+  # Digits in an arbitrary base, least-significant first.
+  -> digits(base)
+    if self < 0
+      raise "Integer#digits: negative receiver"
+    if self == 0
+      return [0]
+    db_out = []
+    db_n = self
+    while db_n > 0
+      db_out.push(db_n % base)
+      db_n = db_n / base
+    db_out
+
+  # Integer square root: the largest k with k*k <= self (Ruby Integer#isqrt).
+  # Newton's method from an overestimate (10^ceil(digits/2) >= sqrt), so it
+  # descends monotonically to the floor; exact for BigInt via the promoting
+  # / and ** operators.
+  -> isqrt
+    if self < 0
+      raise "Integer#isqrt: negative receiver"
+    if self < 2
+      return self
+    sq_x = 10 ** ((self.to_s.size + 1) / 2)
+    sq_y = (sq_x + self / sq_x) / 2
+    while sq_y < sq_x
+      sq_x = sq_y
+      sq_y = (sq_x + self / sq_x) / 2
+    sq_x

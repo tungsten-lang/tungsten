@@ -15,6 +15,7 @@
 use ../rect
 use ../kernels/bundles/rect
 use ../kernels/rect_reject
+use ../strategies/rect_block_interior
 use ../tui
 use basins
 use cpu_pool
@@ -834,6 +835,9 @@ use doors
   mitm_attempts = 0 ## i64
   mitm_pairs = 0 ## i64
   mitm_ms = 0 ## i64
+  block_stats = i64[7]
+  block_ms = 0 ## i64
+  block_period = 1 ## i64
   exact_rejects = 0 ## i64
   gpu_internal_rejects = 0 ## i64
   gpu_reject_scratch = i64[state_size]
@@ -893,6 +897,30 @@ use doors
   gpu_seed_source = "fleet-best"
 
   while running == 1
+    # One block-interior probe snapshots a rotating sticky island while all
+    # states are quiescent, then runs on the coordinator-reserved core beside
+    # the ordinary CPU/GPU tranche.  The result is harvested only after every
+    # producer joins; a neutral endpoint replaces one island, never the fleet.
+    block_thread = nil
+    block_results = []
+    block_results.push(nil)
+    block_elapsed_round = i64[1]
+    block_lane = 0 - 1 ## i64
+    block_rejects_before = block_stats[6] ## i64
+    if round % block_period == 0
+      block_phase = restart_nonce % 1000003 ## i64
+      # Advance selectors, cuts, arity, and islands by completed probe count,
+      # not wall rounds: adaptive period-two/four cadence must not lock the
+      # resident forever onto one parity or subset of islands.
+      block_nonce = block_stats[0] + block_phase ## i64
+      block_lane = (block_stats[0] + block_phase + 1) % walkers
+      block_source = ffrbi_copy_state(states[block_lane])
+      block_thread = Thread.new ->
+        block_t0 = ccall("__w_clock_ms") ## i64
+        block_results[0] = ffrbi_try(block_source, n, m, p, block_nonce, block_stats)
+        block_elapsed_round[0] = ccall("__w_clock_ms") - block_t0
+        true
+
     # Snapshot the next GPU seed before CPU island threads start mutating their
     # private states. Half of the epochs keep grinding the fleet objective;
     # the other half rotate only the nonleader checked-in frontier doors. This
@@ -1006,6 +1034,20 @@ use doors
         mitm_failures += 1
         status_degraded = 1
 
+    block_candidate = nil
+    if block_thread != nil
+      block_ok = ffrc_thread_join_release(block_thread)
+      block_ms += block_elapsed_round[0]
+      block_period = ffrbi_next_period(block_period, block_elapsed_round[0], slowest_cpu_ms)
+      new_block_rejects = block_stats[6] - block_rejects_before ## i64
+      if new_block_rejects > 0
+        exact_rejects += new_block_rejects
+        status_degraded = 1
+      if block_ok == true && block_results[0] != nil && block_lane >= 0
+        block_candidate = block_results[0]
+      if block_ok != true
+        status_degraded = 1
+
     now_ms = ccall("__w_clock_ms") ## i64
     elapsed_s = (now_ms - start_ms) / 1000 ## i64
     adopted = 0 ## i64
@@ -1047,6 +1089,35 @@ use doors
       else
         exact_rejects += 1
       lane += 1
+
+    # The resident started from a pre-round snapshot.  Harvest every ordinary
+    # CPU endpoint before installing it, otherwise the selected lane can lose
+    # a record breakthrough made during this tranche.  Compare the exact block
+    # endpoint independently, then reset that lane's display bookkeeping so a
+    # snapshot rewind cannot double-count moves or inherit a misleading age.
+    if block_candidate != nil && block_lane >= 0
+      block_rank = ffr_best_rank(block_candidate) ## i64
+      block_bits = ffr_best_bits(block_candidate) ## i64
+      if ffrc_better(block_rank, block_bits, ffr_best_rank(best), ffr_best_bits(best)) == 1
+        block_clone = ffrc_clone_exact(block_candidate, n, m, p, capacity, 83503 + round * 133 + block_lane, dslack, cycles, workq, wanderq)
+        if block_clone != nil
+          if block_rank < ffr_best_rank(best)
+            new_bests += 1
+            cpu_drops += 1
+          else
+            tie_bests += 1
+            cpu_ties += 1
+          timeline_count = ffrc_timeline_push(timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, block_rank)
+          best = block_clone
+          adopted = 1
+      states[block_lane] = block_candidate
+      if !island_sources[block_lane].include?("/block")
+        island_sources[block_lane] = island_sources[block_lane] + "/block"
+      island_last_moves[block_lane] = ffr_moves(block_candidate)
+      island_last_rank[block_lane] = block_rank
+      island_last_bits[block_lane] = block_bits
+      island_last_progress_ms[block_lane] = now_ms
+      island_ages[block_lane] = 0
     cpu_moves += walkers * round_cpu_steps
 
     # Tune only after both sides of the barrier have completed. The updated
@@ -1274,7 +1345,7 @@ use doors
     status_due = ffrc_live_status_due(portfolio_child, last_status_ms, now_ms) ## i64
     if status_due != 0
       status = ffrc_status_body("running", sequence, tensor, record, record_known, best, walkers, cpu_moves, cpu_ms, gpu_requested, gpu_supported, gpu_ready, lanes, gpu_moves, gpu_ms, gpu_failures, exact_rejects, elapsed_s)
-      status = status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " cpu_leader_lanes=" + cpu_leader_lanes.to_s() + " cpu_side_lanes=" + cpu_side_lanes.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
+      status = status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " cpu_leader_lanes=" + cpu_leader_lanes.to_s() + " cpu_side_lanes=" + cpu_side_lanes.to_s() + " block_attempts=" + block_stats[0].to_s() + " block_local=" + block_stats[1].to_s() + " block_exact=" + block_stats[2].to_s() + " block_drops=" + block_stats[3].to_s() + " block_density=" + block_stats[4].to_s() + " block_neutral=" + block_stats[5].to_s() + " block_ms=" + block_ms.to_s() + " block_period=" + block_period.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
       status = status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
       status_ok = ffrc_atomic_write(status_path, status, run_tag, sequence)
       if status_ok == 1
@@ -1282,7 +1353,7 @@ use doors
       if status_ok == 0
         status_degraded = 1
     if quiet == 0 && tui == 0
-      << "RECT_STATUS tensor=" + tensor + " round=" + round.to_s() + " rank=" + ffr_best_rank(best).to_s() + " bits=" + ffr_best_bits(best).to_s() + " cpu_moves=" + cpu_moves.to_s() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " gpu_moves=" + gpu_moves.to_s() + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " side_archive=" + side_archive_loaded.to_s() + "/" + side_archive_seeded.to_s() + "/" + side_archive_stats[2].to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " exact_rejects=" + exact_rejects.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_degraded=" + status_degraded.to_s()
+      << "RECT_STATUS tensor=" + tensor + " round=" + round.to_s() + " rank=" + ffr_best_rank(best).to_s() + " bits=" + ffr_best_bits(best).to_s() + " cpu_moves=" + cpu_moves.to_s() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " block=" + block_stats[2].to_s() + "/" + block_stats[0].to_s() + "/p" + block_period.to_s() + " gpu_moves=" + gpu_moves.to_s() + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " side_archive=" + side_archive_loaded.to_s() + "/" + side_archive_seeded.to_s() + "/" + side_archive_stats[2].to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " exact_rejects=" + exact_rejects.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_degraded=" + status_degraded.to_s()
       flush()
     if tui != 0
       if ff_tui_heartbeat_due(last_render_ms, now_ms, 200) == 1
@@ -1360,7 +1431,7 @@ use doors
   final_ms = ccall("__w_clock_ms") ## i64
   final_elapsed_s = (final_ms - start_ms) / 1000 ## i64
   final_status = ffrc_status_body("stopped", sequence + 1, tensor, record, record_known, best, walkers, cpu_moves, cpu_ms, gpu_requested, gpu_supported, gpu_ready, lanes, gpu_moves, gpu_ms, gpu_failures, exact_rejects, final_elapsed_s)
-  final_status = final_status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " cpu_leader_lanes=" + cpu_leader_lanes.to_s() + " cpu_side_lanes=" + cpu_side_lanes.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
+  final_status = final_status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " cpu_leader_lanes=" + cpu_leader_lanes.to_s() + " cpu_side_lanes=" + cpu_side_lanes.to_s() + " block_attempts=" + block_stats[0].to_s() + " block_local=" + block_stats[1].to_s() + " block_exact=" + block_stats[2].to_s() + " block_drops=" + block_stats[3].to_s() + " block_density=" + block_stats[4].to_s() + " block_neutral=" + block_stats[5].to_s() + " block_ms=" + block_ms.to_s() + " block_period=" + block_period.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
   final_status = final_status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
   status_ok = ffrc_atomic_write(status_path, final_status, run_tag, sequence + 1)
   saved = ffrc_dump_atomic(best, best_path, run_tag, sequence + 100000) ## i64

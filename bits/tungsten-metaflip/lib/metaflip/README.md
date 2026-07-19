@@ -9,6 +9,10 @@ Metaflip executable:
   `rect/cpu_pool.w` keeps one OS thread per rectangular island across campaign
   epochs; workers reread their state slot after each barrier so rebases and
   reseeds remain visible without thread churn.
+  `strategies/rect_block_interior.w` runs one exact seam/shared-factor probe on
+  a rotating snapshot beside each rectangular CPU tranche. Its adaptive
+  cadence bounds join overhead while rank-neutral endpoints replace only that
+  island, preserving the rest of the sticky-door population.
 - `fleet/provenance.w` defines the bounded square-best lineage record used by
   additive status fields and the atomic `<best>.provenance` latest-event
   sidecar. It records CPU island/door/zone and worker moves, GPU slot/role/pool

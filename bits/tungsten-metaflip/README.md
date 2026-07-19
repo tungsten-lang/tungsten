@@ -223,15 +223,22 @@ this prevents a broad portfolio from silently sending every GPU epoch back to
 the leader. CPU islands likewise retain their OS threads for the campaign
 lifetime and reload their coordinator-owned state slots after each round
 barrier, avoiding repeated thread allocation without weakening sticky-door
-independence. The low-cadence 5-to-4 meet-in-the-middle lane runs
+independence. One additional coordinator-resident block-interior probe snapshots
+a rotating island at the barrier and runs concurrently with the ordinary
+tranche. It recovered planted +1 debt across the tested square and rectangular
+profiles and exposes exact rank-neutral doors on real rectangular plateaus;
+its 1..16-round cadence adapts to measured probe/CPU wall time so a large span
+join cannot become the portfolio barrier. The low-cadence 5-to-4
+meet-in-the-middle lane runs
 concurrently with CPU islands and Metal walking; its output is joined and
 fully verified at the epoch barrier. Every shape in the default mix now has a
 specialized cal2zone worker, including `4x4x6`, `4x5x6`, and the full-width
 i64 `4x5x7` lane; 5-to-4 MITM is also enabled for the validated small
 `2x2x6` profile. Rectangular status
-files report CPU moves, GPU moves, MITM attempts/pairs/time, and MITM failures
-separately per shape and in total, including work completed by a segment that
-later exits unsuccessfully.
+child files report block-interior attempts/exact endpoints/drops/cadence;
+portfolio files report CPU moves, GPU moves, MITM attempts/pairs/time, and
+MITM failures separately per shape and in total, including work completed by a
+segment that later exits unsuccessfully.
 
 Each bounded portfolio segment runs in a disposable OS process. The child
 keeps its islands and accelerator helpers persistent within the segment, then

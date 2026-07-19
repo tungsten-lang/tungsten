@@ -14768,8 +14768,13 @@ WValue w_bit_shl(WValue a, WValue b) {
     /* String << x is the coercing append (builder semantics) — it can't
      * ride w_add anymore now that strict `+` raises on non-text operands. */
     if (w_is_string(a) || w_is_rope(a)) return w_str_append(a, b);
+    /* Array << x is the in-place append (Ruby Array#<<): push the single
+     * element and return the (mutated) array. It must NOT fall through to
+     * w_add, whose array branch (w_array_add_elem) does an ELEMENTWISE add and
+     * returns a NEW array, so `a << x` left `a` unchanged. */
+    if (w_is_array(a)) { w_array_push(a, b); return a; }
     /* Non-integer LHS or non-int shift count: preserve the overloaded `<<`
-     * fallback (e.g. collection appends route through w_add). */
+     * fallback. */
     if (!w_is_integer_any(a) || !w_is_int(b)) return w_add(a, b);
     int64_t k = w_as_int(b);
     if (k < 0) return bignum_shr(a, -k);  /* negative left shift == right shift */

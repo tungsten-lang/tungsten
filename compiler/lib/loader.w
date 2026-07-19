@@ -601,12 +601,17 @@ use parser
       # Integer/Number leaf methods commonly receive literals or locals, which
       # carry no explicit class reference. The to_i spelling is shared with
       # source-only BigInt identity, so schedule that tiny class once as well.
-      if call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq" "gcd" "lcm" "chr" "pow" "digits" "isqrt" "to_s")
+      if call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq" "gcd" "lcm" "chr" "pow" "modpow" "digits" "isqrt" "to_s")
         consider_autoload_name("Integer", defined, registry, seen, pending)
         if call_name == "to_i" && @bigint_to_i_unresolved
           consider_autoload_name("BigInt", defined, registry, seen, pending)
           @bigint_to_i_unresolved = false
-        if @bigint_predicates_unresolved && call_name in ("zero?" "even?" "odd?" "negative?" "positive?")
+        # BigInt (and its base Int) supply the source bodies for these on a
+        # bigint receiver. even?/odd?/... already loaded BigInt widely, so the
+        # incremental cost of also loading it for the integer methods is small,
+        # and it makes a standalone bigint-method program (e.g. `n.modpow(...)`
+        # with no predicate) resolve instead of dispatching to Object.
+        if @bigint_predicates_unresolved && call_name in ("zero?" "even?" "odd?" "negative?" "positive?" "gcd" "lcm" "pow" "modpow" "digits" "isqrt")
           consider_autoload_name("BigInt", defined, registry, seen, pending)
           @bigint_predicates_unresolved = false
 

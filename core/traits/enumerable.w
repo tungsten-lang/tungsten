@@ -306,6 +306,40 @@ trait Enumerable
           seen = true
     best
 
+  # Sort ascending by the key each element maps to under the block. Decorate
+  # each element as [key, index, item], sort by the natural (lexicographic)
+  # order of those triples, then undecorate. The key block runs once per
+  # element (O(n)), not once per comparison. The index makes it STABLE (equal
+  # keys keep input order) and guarantees the item itself is never compared,
+  # so elements need no ordering of their own — only the keys must be
+  # comparable. Relies on Array#<=> / w_value_compare ordering arrays by
+  # content (the [key, index, …] prefix).
+  -> sort_by(&block)
+    decorated = []
+    idx = 0
+    mode = __enumerable_iteration_mode
+    if mode == 2
+      self.each -> (first, second)
+        decorated.push([block(first, second), idx, [first, second]])
+        idx = idx + 1
+    elsif mode == 1
+      i = 0
+      n = self.size
+      while i < n
+        item = self[i]
+        decorated.push([block(item), idx, item])
+        idx = idx + 1
+        i++
+    else
+      self.each -> (item)
+        decorated.push([block(item), idx, item])
+        idx = idx + 1
+    sorted = decorated.sort
+    out = []
+    sorted.each -> (triple)
+      out.push(triple[2])
+    out
+
   -> first
     pairs = __enumerable_yields_pair?
     consumer = -> (first, second)

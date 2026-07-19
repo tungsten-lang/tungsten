@@ -272,11 +272,12 @@ workers     = opts.get("workers")
 pipeline    = opts.get("batch")
 
 # Protocol: h10/1.0 → 0, h11/1.1 → 1, h2/2 → 2
-proto = opts.get("protocol")
+# Argon casts option values (-p 2 → Int, -p 1.0 → Float); normalize to string.
+proto = opts.get("protocol").to_s
 case proto
-  when "h10", "1.0" then protocol = 0
-  when "h11", "1.1" then protocol = 1
-  when "h2", "2"    then protocol = 2
+  when "h10", "1.0", "1" then protocol = 0  # cast turns "1.0" into Float; to_s gives "1"
+  when "h11", "1.1"      then protocol = 1
+  when "h2", "2"         then protocol = 2
   else
     << "Unknown protocol: " + proto
     << "Supported: h10, h11, h2"
@@ -300,4 +301,6 @@ if opts.flag?("tungsten")
     exit(1)
   Hammer.run_tungsten(url, connections, duration, workers, pipeline)
 else
-  ccall("w_hammer_run", url, connections, duration, workers, protocol, pipeline, forge_mode, max_mode)
+  # w_hammer_run returns req/s on success, nil on failure (bad URL, DNS, ...)
+  result = ccall("w_hammer_run", url, connections, duration, workers, protocol, pipeline, forge_mode, max_mode)
+  exit(1) if result == nil

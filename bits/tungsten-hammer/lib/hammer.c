@@ -164,6 +164,10 @@ static time_t monotonic_now(void) {
 }
 #endif
 
+/* Benchmark deadline in runtime scheduler ticks — lets socket parks time out
+ * at the deadline instead of hanging on servers that accept but never respond. */
+static int64_t g_hammer_deadline_ticks;
+
 /* Non-blocking connect with goroutine parking */
 static int hammer_connect(HammerConfig *cfg) {
     int fd = socket(cfg->addr.ss_family, SOCK_STREAM, 0);
@@ -183,11 +187,12 @@ static int hammer_connect(HammerConfig *cfg) {
     if (ret == 0) return fd;
 
     if (errno == EINPROGRESS) {
-        w_socket_park(fd, W_EVENT_WRITE);
-        int err = 0;
-        socklen_t errlen = sizeof(err);
-        getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &errlen);
-        if (err == 0) return fd;
+        if (w_socket_park_until(fd, W_EVENT_WRITE, g_hammer_deadline_ticks)) {
+            int err = 0;
+            socklen_t errlen = sizeof(err);
+            getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &errlen);
+            if (err == 0) return fd;
+        }
     }
 
     close(fd);
@@ -205,11 +210,11 @@ static int hammer_write(int fd, void *ssl, const char *buf, int len) {
             if (n <= 0) {
                 int err = SSL_get_error((SSL *)ssl, (int)n);
                 if (err == SSL_ERROR_WANT_WRITE) {
-                    w_socket_park(fd, W_EVENT_WRITE);
+                    if (!w_socket_park_until(fd, W_EVENT_WRITE, g_hammer_deadline_ticks)) return -1;
                     continue;
                 }
                 if (err == SSL_ERROR_WANT_READ) {
-                    w_socket_park(fd, W_EVENT_READ);
+                    if (!w_socket_park_until(fd, W_EVENT_READ, g_hammer_deadline_ticks)) return -1;
                     continue;
                 }
                 return -1;
@@ -222,7 +227,7 @@ static int hammer_write(int fd, void *ssl, const char *buf, int len) {
             n = write(fd, buf + written, len - written);
             if (n > 0) { written += (int)n; continue; }
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                w_socket_park(fd, W_EVENT_WRITE);
+                if (!w_socket_park_until(fd, W_EVENT_WRITE, g_hammer_deadline_ticks)) return -1;
                 continue;
             }
             return -1;
@@ -249,11 +254,11 @@ static int hammer_read(int fd, void *ssl, char *buf, int max) {
             if (n > 0) return (int)n;
             int err = SSL_get_error((SSL *)ssl, (int)n);
             if (err == SSL_ERROR_WANT_READ) {
-                w_socket_park(fd, W_EVENT_READ);
+                if (!w_socket_park_until(fd, W_EVENT_READ, g_hammer_deadline_ticks)) return -1;
                 continue;
             }
             if (err == SSL_ERROR_WANT_WRITE) {
-                w_socket_park(fd, W_EVENT_WRITE);
+                if (!w_socket_park_until(fd, W_EVENT_WRITE, g_hammer_deadline_ticks)) return -1;
                 continue;
             }
             if (err == SSL_ERROR_ZERO_RETURN) return 0;
@@ -266,7 +271,7 @@ static int hammer_read(int fd, void *ssl, char *buf, int max) {
         if (n > 0) return (int)n;
         if (n == 0) return 0;
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            w_socket_park(fd, W_EVENT_READ);
+            if (!w_socket_park_until(fd, W_EVENT_READ, g_hammer_deadline_ticks)) return -1;
             continue;
         }
         return -1;
@@ -501,8 +506,16 @@ static ssize_t hammer_h2_send_cb(nghttp2_session *session, const uint8_t *data,
         int n = SSL_write(s->ssl, data, (int)length);
         if (n > 0) return n;
         int err = SSL_get_error(s->ssl, n);
-        if (err == SSL_ERROR_WANT_WRITE) { w_socket_park(s->fd, W_EVENT_WRITE); continue; }
-        if (err == SSL_ERROR_WANT_READ)  { w_socket_park(s->fd, W_EVENT_READ);  continue; }
+        if (err == SSL_ERROR_WANT_WRITE) {
+            if (!w_socket_park_until(s->fd, W_EVENT_WRITE, g_hammer_deadline_ticks))
+                return NGHTTP2_ERR_CALLBACK_FAILURE;
+            continue;
+        }
+        if (err == SSL_ERROR_WANT_READ) {
+            if (!w_socket_park_until(s->fd, W_EVENT_READ, g_hammer_deadline_ticks))
+                return NGHTTP2_ERR_CALLBACK_FAILURE;
+            continue;
+        }
         return NGHTTP2_ERR_CALLBACK_FAILURE;
     }
 }
@@ -590,8 +603,14 @@ static SSL *hammer_h2_tls_handshake(int fd, const char *host) {
         int ret = SSL_connect(ssl);
         if (ret == 1) break;
         int err = SSL_get_error(ssl, ret);
-        if (err == SSL_ERROR_WANT_READ)  { w_socket_park(fd, W_EVENT_READ);  continue; }
-        if (err == SSL_ERROR_WANT_WRITE) { w_socket_park(fd, W_EVENT_WRITE); continue; }
+        if (err == SSL_ERROR_WANT_READ) {
+            if (!w_socket_park_until(fd, W_EVENT_READ, g_hammer_deadline_ticks)) { SSL_free(ssl); return NULL; }
+            continue;
+        }
+        if (err == SSL_ERROR_WANT_WRITE) {
+            if (!w_socket_park_until(fd, W_EVENT_WRITE, g_hammer_deadline_ticks)) { SSL_free(ssl); return NULL; }
+            continue;
+        }
         SSL_free(ssl);
         return NULL;
     }
@@ -678,6 +697,34 @@ static WValue hammer_h2_goroutine_fn(WValue *captures) {
 }
 #endif /* TUNGSTEN_HTTP2 && TUNGSTEN_TLS */
 
+/* Record one latency sample: elapsed since req_start, amortized over n responses. */
+static void hammer_record_latency(HammerWorkerStats *stats,
+#ifdef __APPLE__
+                                  uint64_t req_start,
+#else
+                                  const struct timespec *req_start,
+#endif
+                                  int n) {
+    if (n <= 0) return;
+#ifdef __APPLE__
+    uint64_t req_end = mach_absolute_time();
+    uint64_t latency_us = (uint64_t)((double)(req_end - req_start) * g_mach_to_ns / 1000.0) / (uint64_t)n;
+#else
+    struct timespec req_end;
+    clock_gettime(CLOCK_MONOTONIC, &req_end);
+    uint64_t latency_us = (uint64_t)timespec_diff_us(&req_end, req_start) / (uint64_t)n;
+#endif
+    if (stats->latency_count < stats->latency_cap) {
+        stats->latencies[stats->latency_count++] = latency_us;
+    }
+}
+
+#ifdef __APPLE__
+#define HAMMER_RECORD_LATENCY(stats, start, n) hammer_record_latency((stats), (start), (n))
+#else
+#define HAMMER_RECORD_LATENCY(stats, start, n) hammer_record_latency((stats), &(start), (n))
+#endif
+
 static WValue hammer_goroutine_fn(WValue *captures) {
     HammerGoroutineArg *arg = (HammerGoroutineArg *)w_as_ptr(captures[0]);
     HammerConfig *cfg = arg->config;
@@ -699,8 +746,8 @@ static WValue hammer_goroutine_fn(WValue *captures) {
         /* Connect */
         fd = hammer_connect(cfg);
         if (fd < 0) {
+            if (past_deadline()) break;  /* deadline park-timeout, not an error */
             stats->connect_errors++;
-            if (past_deadline()) break;
             /* Brief yield before retry */
             w_goroutine_yield();
             continue;
@@ -721,6 +768,7 @@ static WValue hammer_goroutine_fn(WValue *captures) {
          * A single read() from the kernel may return data spanning multiple responses. */
         int buf_pos = 0;   /* start of unconsumed data */
         int buf_end = 0;   /* end of valid data */
+        int conn_ok = 0;   /* responses served on this connection */
 
         /* Request loop: write N requests (one writev), read N responses */
         while (!past_deadline()) {
@@ -734,15 +782,18 @@ static WValue hammer_goroutine_fn(WValue *captures) {
             if (!cfg->max_mode) clock_gettime(CLOCK_MONOTONIC, &req_start);
 #endif
 
-            /* Send batch of requests */
+            /* Send batch of requests. A write failure on a connection that has
+             * already served responses is the normal stale keep-alive race (the
+             * server closed between requests) — reconnect silently; only a
+             * connection that never served anything counts as an error. */
             if (pipeline > 1) {
                 if (hammer_write_pipeline(fd, ssl, cfg, pipeline) < 0) {
-                    stats->errors++;
+                    if (conn_ok == 0 && !past_deadline()) stats->errors++;
                     break;
                 }
             } else {
                 if (hammer_write(fd, ssl, cfg->request, cfg->request_len) < 0) {
-                    stats->errors++;
+                    if (conn_ok == 0 && !past_deadline()) stats->errors++;
                     break;
                 }
             }
@@ -796,6 +847,24 @@ static WValue hammer_goroutine_fn(WValue *captures) {
                     int n = hammer_read(fd, ssl, buf + buf_end, space);
                     if (n <= 0) {
                         if (n == 0 && header_len >= 0) break;
+                        if (past_deadline()) {
+                            /* Benchmark over — a park-timeout or late failure
+                             * during shutdown is not an error. */
+                            resp_ok = 0;
+                            goto reconnect;
+                        }
+                        if (buf_end == buf_pos && conn_ok > 0) {
+                            /* Disconnect (FIN or RST) at a response boundary on a
+                             * connection that already served responses: the server
+                             * closed a keep-alive connection (HTTP/1.0,
+                             * Connection: close, keep-alive limits). Normal HTTP,
+                             * not an error — record the responses we did get,
+                             * then reconnect. Mid-response disconnects and
+                             * virgin-connection disconnects still count. */
+                            if (!cfg->max_mode) HAMMER_RECORD_LATENCY(stats, req_start, p);
+                            resp_ok = 0;
+                            goto reconnect;
+                        }
                         stats->errors++;
                         resp_ok = 0;
                         goto reconnect;
@@ -806,6 +875,7 @@ static WValue hammer_goroutine_fn(WValue *captures) {
                 /* Account for this response */
                 stats->total_requests++;
                 stats->total_bytes += (uint64_t)response_len;
+                conn_ok++;
 
                 if (server_goroutines >= 0) {
                     stats->last_server_goroutines = server_goroutines;
@@ -829,18 +899,7 @@ static WValue hammer_goroutine_fn(WValue *captures) {
 
             /* Record latency (amortized across pipeline batch) */
             if (!cfg->max_mode) {
-#ifdef __APPLE__
-                uint64_t req_end = mach_absolute_time();
-                uint64_t latency_us = (uint64_t)((double)(req_end - req_start) * g_mach_to_ns / 1000.0) / pipeline;
-#else
-                struct timespec req_end;
-                clock_gettime(CLOCK_MONOTONIC, &req_end);
-                uint64_t latency_us = (uint64_t)timespec_diff_us(&req_end, &req_start) / pipeline;
-#endif
-
-                if (stats->latency_count < stats->latency_cap) {
-                    stats->latencies[stats->latency_count++] = latency_us;
-                }
+                HAMMER_RECORD_LATENCY(stats, req_start, pipeline);
             }
 
             /* HTTP/1.0: must reconnect */
@@ -911,8 +970,11 @@ static void *hammer_worker_thread(void *raw_arg) {
         w_goroutine_spawn(closure);
     }
 
-    /* Persistent scheduler — last goroutine flips to non-persistent when done */
-    w_scheduler_set_persistent(1);
+    /* Non-persistent scheduler: it keeps running while this worker's goroutines
+     * are live and exits when they finish. Persistent mode would block the
+     * event poll indefinitely, starving w_socket_park_until deadline sweeps —
+     * a server that accepts but never responds would hang the benchmark. */
+    w_scheduler_set_persistent(0);
     w_scheduler_run();
 
     w_event_destroy(el);
@@ -943,6 +1005,10 @@ static int parse_url(const char *url, ParsedURL *out) {
         out->port = 80;
         p += 7;
     } else {
+        /* Reject unsupported schemes (ftp://, ws://, ...) instead of
+         * treating "scheme:" as a host with a garbage port. */
+        const char *sep = strstr(p, "://");
+        if (sep && strchr(p, '/') == sep + 1) return -1;
         out->use_tls = 0;
         out->port = 80;
     }
@@ -959,6 +1025,7 @@ static int parse_url(const char *url, ParsedURL *out) {
     if (colon) {
         host_len = (int)(colon - p);
         out->port = atoi(colon + 1);
+        if (out->port <= 0 || out->port > 65535) return -1;
         const char *s = colon + 1;
         while (*s >= '0' && *s <= '9') s++;
         if (*s == '/') slash = s;
@@ -967,6 +1034,8 @@ static int parse_url(const char *url, ParsedURL *out) {
     } else {
         host_len = (int)strlen(p);
     }
+
+    if (host_len <= 0) return -1;
 
     out->host = malloc(host_len + 1);
     memcpy(out->host, p, host_len);
@@ -1378,7 +1447,7 @@ WValue w_hammer_run(WValue url_val, WValue conns_val, WValue duration_val,
 
     ParsedURL parsed;
     if (parse_url(url_copy, &parsed) < 0) {
-        fprintf(stderr, "hammer: invalid URL: %s\n", url_copy);
+        fprintf(stderr, "hammer: invalid URL: %s (expected http://host[:port][/path] or https://...)\n", url_copy);
         free(url_copy);
         return W_NIL;
     }
@@ -1440,6 +1509,7 @@ WValue w_hammer_run(WValue url_val, WValue conns_val, WValue duration_val,
 #else
     g_hammer_deadline = monotonic_now() + duration_secs;
 #endif
+    g_hammer_deadline_ticks = __w_deadline_ticks_after_seconds(duration_secs);
 
     /* Print banner (skip in forge mode — it has its own) */
     const char *proto_name = protocol == HAMMER_PROTOCOL_H10 ? "HTTP/1.0" :

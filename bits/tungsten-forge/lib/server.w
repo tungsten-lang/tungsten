@@ -188,15 +188,25 @@
     result
 
   # Scan a raw header block for Content-Length (case-insensitive).
+  # Single-pass: one downcase + one rindex, instead of the previous
+  # split("\r\n") + per-line index/slice/downcase — that allocated an
+  # array plus a string per header line on every framed request, and
+  # profiling under load showed this method at ~5% of total server time
+  # (strstr / malloc / slab-intern leaves). rindex preserves the old
+  # each-loop's last-match-wins semantics for duplicate headers, and the
+  # leading "\r\n" in the needle anchors the match to a line start (the
+  # request line is never a header, so a header match always follows one).
   -> .content_length_in(head)
     found = 0
-    head.split("\r\n").each -> (line)
-      colon = line.index(": ")
-      if colon
-        key = line.slice(0, colon).downcase
-        if key == "content-length"
-          value_start = colon + 2
-          found = line.slice(value_start, line.size - value_start).strip.to_i
+    lower = head.downcase
+    marker = lower.rindex("\r\ncontent-length: ")
+    if marker != nil
+      value_start = marker + 18
+      rest = lower.slice(value_start, lower.size - value_start)
+      stop = rest.index("\r\n")
+      if stop == nil
+        stop = rest.size
+      found = rest.slice(0, stop).strip.to_i
     found
 
   # Middleware chain wrapping the router. Path normalization (downcase,

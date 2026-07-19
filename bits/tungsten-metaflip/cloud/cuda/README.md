@@ -83,8 +83,8 @@ bits/tungsten-metaflip/cloud/cuda/test_777_host.sh
 ```
 
 The host regression exact-gates all five campaign roots, proves that objective
-ordering selects the d3094 certificate as leader, and checks the fixed role
-quota, initial original-root exploration, productive-root preference,
+ordering selects the d3094 certificate as leader, and checks the 25% leader
+floor, adaptive role and original-root allocation, productive-role preference,
 deterministic replay, bounded no-starvation exploration, descendant rotation,
 and source-aware density-chain admission.
 
@@ -131,23 +131,26 @@ grep -qx 'exact_rejects=0' /workspace/results/status.txt || exit 2
 
 ## Two-hour RTX 4090 campaign
 
-Use structurally different exact rank-247 doors. Half of all epochs grind the
-current fleet-best checkpoint, one quarter adaptively selects among the other
-command-line roots, and one quarter rotates through diversity-admitted
-descendants. Every eligible original is tried once before reward selection.
-Thereafter one of every four original-role slots explores the least-recently
-visited source, bounding a continuously eligible source's visit gap by four
-times the eligible-root count. The remaining slots select the best exact-gated
-reward rate: an exact-novel artifact earns one point and a fleet-best earns
-eight additional points. Yield ties go to the least-recent source and then the
-lowest source index, so a fixed run remains deterministic. The relay permutes
-term order on every visit so CUDA RNG streams do not repeat. Production uses
-the faster scan specialization; explicit
+Use structurally different exact rank-247 doors. One epoch in every four
+unconditionally grinds the current fleet-best checkpoint. The other three
+slots adapt across the leader, other command-line roots, and diversity-admitted
+descendants. Every available nonleader role is tried before reward selection;
+thereafter one in every four adaptive slots explores the least-recently used
+nonleader role. Reward slots select the best exact-gated useful-yield rate. This
+keeps a 25% leader floor while reallocating the remaining 75% according to the
+yield of the original and descendant families. Within the original role, every
+eligible root is likewise tried once, then one in every four original slots is
+oldest-first exploration. Both levels score an exact-novel artifact as one
+point and a fleet-best as eight additional points. Deterministic age and source
+ties make a fixed run reproducible. The relay permutes term order on every
+visit so CUDA RNG streams do not repeat. Production uses the faster scan
+specialization; explicit
 `--mode alternate` remains useful in the smoke test because it exercises both
-kernels independently within every scheduling role. In alternate mode, each
-original source selects scan/hash from its own visit parity rather than the
-global epoch, so adaptive preference cannot alias a fertile root onto only one
-kernel.
+kernels independently within every scheduling role. In alternate mode, the
+leader role, every original source, and every descendant slot own independent
+scan/hash visit parity rather than inheriting the global epoch. Adaptive
+preference and even-sized door rotation therefore cannot pin a fertile source
+to only one kernel.
 
 ```bash
 cd /workspace/tungsten
@@ -212,8 +215,12 @@ tail -n 5 /workspace/results/run.log
 The additive `policy_leader_epochs`, `policy_original_epochs`, and
 `policy_descendant_epochs` status fields count selected epoch roles;
 `selected_role` and `selected_source` identify the active launch. At every
-completed prefix, leader epochs must be at least half of their sum. Epoch log
-lines repeat the selected role/source and cumulative `policy=L/O/D` counts.
+completed prefix, leader epochs must be at least one quarter of their sum.
+`policy_adaptive_role_slots`, `policy_role_explore_every`, and `role_stats`
+make the outer reward schedule auditable. Epoch log lines repeat the selected
+role/source, cumulative `policy=L/O/D` counts, and role statistics. In
+`role_stats`, `lastA` is the role's last adaptive slot; fixed leader-floor
+visits do not change it.
 `original_source_stats` serializes each source as
 `INDEX:vVISITS,nNOVEL,bBEST,pPOINTS,lastSLOT`; `policy_original_slots` and
 `policy_original_explore_every` make the exploration cadence auditable.

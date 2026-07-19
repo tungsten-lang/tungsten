@@ -1,171 +1,150 @@
-# Vector — mathematical vector with GPU acceleration
-# Supports dot product (·), cross product (×), tensor product (⊗), and standard arithmetic.
-
-in Tungsten:Koala
-
+# Vector — a plain dense numeric vector (pure Tungsten, CPU-only)
+#
+#     v = Vector.new([1, 2, 3])
+#     v.dot(Vector.new([4, 5, 6]))   # => 32
+#     v.norm                         # => L2 length
+#
+# Shape rule: every two-operand op returns nil when the sizes differ
+# (same convention as DataFrame#column for a missing column).
+# normalize returns nil for the zero vector.
+#
+# NOTE: this Vector intentionally shadows core's generic Vector<T>
+# (the numeric-tower / Metal-adjacent type) inside programs that
+# `use koala`. Interop with core Vec/Mat types is a follow-up.
+#
+# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
+# interpreter cannot resolve @ivars from a block body — and methods
+# that contain closures avoid early `return` (see stats.w).
 + Vector
   ro :values
-  ro :device
 
-  -> new(values, device: nil)
-    @values = values.to_a
-    @device = Device.resolve(device, elements: @values.size)
-    @buffer = nil
-    self.upload if @device.gpu?
+  -> new(values)
+    @values = values
 
-  -> size      @values.size
-  -> length    self.size
-  -> dim       self.size
-  -> [](index) @values[index]
+  -> size
+    @values.size
 
-  -> to_a   @values.dup
-  -> to_s   "Vector([values.join(", ")])"
-  -> inspect "Vector([values.join(", ")], device: [device.kind])"
+  -> empty?
+    @values.size == 0
 
-  # --- Arithmetic ---
+  -> to_a
+    @values
 
-  # Element-wise addition.
-  -> +(other)
-    case other
-    => Vector  -> self.class.new(@values.zip(other.values).map(-> (a, b) a + b), device: @device)
-    => Numeric -> self.class.new(@values.map(-> (v) v + other), device: @device)
+  -> [](i)
+    @values[i]
 
-  # Element-wise subtraction.
-  -> -(other)
-    case other
-    => Vector  -> self.class.new(@values.zip(other.values).map(-> (a, b) a - b), device: @device)
-    => Numeric -> self.class.new(@values.map(-> (v) v - other), device: @device)
+  # --- Elementwise arithmetic ---
 
-  # Element-wise multiplication.
-  -> *(other)
-    case other
-    => Vector  -> self.class.new(@values.zip(other.values).map(-> (a, b) a * b), device: @device)
-    => Numeric -> self.class.new(@values.map(-> (v) v * other), device: @device)
+  # Apply f(a, b) pairwise; nil when sizes differ.
+  -> zip_with(other, f)
+    out = nil
+    if @values.size == other.size
+      a = @values
+      b = other.to_a
+      acc = []
+      i = 0
+      a.each -> (x)
+        acc.push(f.call(x, b[i]))
+        i += 1
+      out = Vector.new(acc)
+    out
 
-  # Element-wise division.
-  -> /(other)
-    case other
-    => Vector  -> self.class.new(@values.zip(other.values).map(-> (a, b) a / b), device: @device)
-    => Numeric -> self.class.new(@values.map(-> (v) v / other), device: @device)
+  -> add(other)
+    f = -> (x, y) x + y
+    self.zip_with(other, f)
 
-  # Dot product — `a · b` (U+00B7 middle dot)
-  #
-  #     a = vector [1, 2, 3]
-  #     b = vector [4, 5, 6]
-  #     a · b  # => 32
-  -> ·(other)
-    <! DimensionError, "Dot product requires equal dimensions" unless self.size == other.size
-    @values.zip(other.values).map(-> (a, b) a * b).sum
+  -> sub(other)
+    f = -> (x, y) x - y
+    self.zip_with(other, f)
 
-  # Dot product — ASCII alias.
-  -> dot(other) self · other
+  # Elementwise (Hadamard) product.
+  -> mul(other)
+    f = -> (x, y) x * y
+    self.zip_with(other, f)
 
-  # Cross product — `a × b` (U+00D7)
-  # Only defined for 3D vectors.
-  #
-  #     a = vector [1, 0, 0]
-  #     b = vector [0, 1, 0]
-  #     a × b  # => Vector(0, 0, 1)
-  -> ×(other)
-    <! DimensionError, "Cross product requires 3D vectors" unless self.size == 3 && other.size == 3
-    self.class.new([
-      @values[1] * other[2] - @values[2] * other[1],
-      @values[2] * other[0] - @values[0] * other[2],
-      @values[0] * other[1] - @values[1] * other[0]
-    ])
+  # Elementwise division (always float).
+  -> div(other)
+    f = -> (x, y) x.to_f / y.to_f
+    self.zip_with(other, f)
 
-  # Cross product — ASCII alias.
-  -> cross(other) self × other
+  # Multiply every element by scalar k.
+  -> scale(k)
+    vals = @values
+    acc = []
+    vals.each -> (v)
+      acc.push(v * k)
+    Vector.new(acc)
 
-  # Tensor product — `a ⊗ b` (U+2297)
-  # Returns a Matrix (outer product of two vectors).
-  #
-  #     a = vector [1, 2]
-  #     b = vector [3, 4]
-  #     a ⊗ b  # => matrix [3 4; 6 8]
-  -> ⊗(other)
-    rows = @values.map -> (vi)
-      other.values.map(-> (vj) vi * vj)
-    Matrix.new(rows)
+  # --- Products, norms, geometry ---
 
-  # Tensor product — ASCII alias.
-  -> outer(other) self ⊗ other
+  # Dot product; nil when sizes differ.
+  -> dot(other)
+    p = self.mul(other)
+    out = nil
+    out = Stats.sum(p.to_a) if p != nil
+    out
 
-  # --- Norms & distance ---
-
-  # Euclidean norm (L2).
+  # Euclidean (L2) norm.
   -> norm
-    Math.sqrt(@values.map(-> (v) v * v).sum)
+    Math.sqrt(self.dot(self))
 
-  # L1 norm (Manhattan).
+  # L1 (Manhattan) norm, as a float.
   -> norm_l1
-    @values.map(&:abs).sum
+    vals = @values
+    total = 0.to_f
+    vals.each -> (v)
+      x = v.to_f
+      x = 0.to_f - x if x < 0
+      total += x
+    total
 
-  # Lp norm.
-  -> norm_lp(p)
-    @values.map(-> (v) v.abs ** p).sum ** (1.0 / p)
-
-  # Normalize to unit length.
+  # Unit-length copy; nil for the zero vector.
   -> normalize
     n = self.norm
-    <! ZeroDivisionError, "Cannot normalize zero vector" if n == 0
-    self / n
+    out = nil
+    out = self.scale(1.to_f / n) if n > 0
+    out
 
-  # Euclidean distance to another vector.
+  # Euclidean distance; nil when sizes differ.
   -> distance(other)
-    (self - other).norm
+    d = self.sub(other)
+    out = nil
+    out = d.norm if d != nil
+    out
 
-  # Cosine similarity.
+  # Cosine similarity; nil when sizes differ or either vector is zero.
   -> cosine_similarity(other)
-    (self · other) / (self.norm * other.norm)
-
-  # Angle between vectors (radians).
-  -> angle(other)
-    Math.acos(self.cosine_similarity(other).clamp(-1.0, 1.0))
-
-  # --- Projections ---
-
-  # Project self onto other.
-  -> project_onto(other)
-    other * ((self · other) / (other · other))
-
-  # Component of self perpendicular to other.
-  -> reject_from(other)
-    self - self.project_onto(other)
-
-  # --- Predicates ---
+    d = self.dot(other)
+    out = nil
+    if d != nil
+      na = self.norm
+      nb = other.norm
+      out = d.to_f / (na * nb) if na > 0 && nb > 0
+    out
 
   -> zero?
-    @values.all?(-> (v) v == 0)
-
-  -> parallel?(other)
-    return true if self.zero? || other.zero?
-    self.normalize == other.normalize || self.normalize == other.normalize * -1
-
-  -> orthogonal?(other)
-    (self · other).abs < 1e-10
+    vals = @values
+    all = true
+    vals.each -> (v)
+      all = false if v != 0
+    all
 
   # --- Conversion ---
 
-  -> to_matrix
+  -> to_series(name = "vector")
+    Series.new(@values, name)
+
+  # 1×n Matrix.
+  -> to_row_matrix
     Matrix.new([@values])
 
-  -> to_column_matrix
-    Matrix.new(@values.map(-> (v) [v]))
+  # n×1 Matrix.
+  -> to_col_matrix
+    vals = @values
+    rows = []
+    vals.each -> (v)
+      rows.push([v])
+    Matrix.new(rows)
 
-  -> to_series(name: nil)
-    Series.new(@values, name: name)
-
-  # --- Device management ---
-
-  # Transfer vector to a different device.
-  -> to(target_device)
-    self.class.new(@values, device: target_device)
-
-  [private]
-
-  -> upload
-    @buffer = DeviceMemory.alloc(@device, @values.size * 8)
-    # Transfer data from CPU to GPU
-    cpu_mem = DeviceMemory.new(Device.cpu, @values.data_pointer, @values.size * 8)
-    DeviceMemory.transfer(cpu_mem, @device)
+  -> to_s
+    "Vector(n=[@values.size]): " + @values.to_s

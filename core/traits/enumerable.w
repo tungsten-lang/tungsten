@@ -479,6 +479,23 @@ trait Enumerable
         out.push(item)
 
     __enumerable_each(consumer)
+
+  # Like uniq, but two elements are duplicates when the block maps them to
+  # the same key. Keeps the first element seen for each key (order-preserving).
+  # The key block runs once per element; keys are compared via the seen hash.
+  -> uniq_by(&block) []
+    pairs = __enumerable_yields_pair?
+    seen = {}
+    consumer = -> (first, second)
+      item = first
+      if pairs
+        item = [first, second]
+      k = block(item)
+      if !seen.has_key?(k)
+        seen[k] = true
+        out.push(item)
+
+    __enumerable_each(consumer)
   -> group_by(&block) groups={}
     mode = __enumerable_iteration_mode
     if mode == 2

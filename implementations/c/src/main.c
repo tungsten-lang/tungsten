@@ -435,7 +435,8 @@ int main(int argc, char **argv) {
   if (dump_bytecode) tc_dump_bytecode(&chunk);
 
   TcValue result;
-  int ok = tc_vm_run_args(&chunk, script_argc, script_argv, &result, &err);
+  int process_status = 0;
+  int ok = tc_vm_run_args_status(&chunk, script_argc, script_argv, &result, &process_status, &err);
 
   tc_chunk_free(&chunk);
   tc_syntax_tokens_free(&syntax_tokens);
@@ -443,7 +444,7 @@ int main(int argc, char **argv) {
   tc_source_free(&source);
   free(flags);
   if (!ok) goto fail_no_flags;
-  return 0;
+  return process_status;
 
 fail:
   free(flags);

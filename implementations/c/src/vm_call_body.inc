@@ -314,6 +314,12 @@
           CNEXT();
         }
         if (!has_receiver && name == NAME_EXIT) {
+          if (argc > 0 && !value_is_int(args[0])) {
+            FREE_ARGS();
+            tc_error_set(err, "exit status must be integer");
+            goto cleanup_fail;
+          }
+          vm.process_status = argc > 0 ? (int)value_as_int(args[0]) : 0;
           FREE_ARGS();
           *result = tc_box_nil();
           goto cleanup_ok;

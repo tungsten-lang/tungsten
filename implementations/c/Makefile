@@ -70,6 +70,12 @@ $(BIN): $(OBJ)
 
 test: $(BIN)
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/smoke.w
+	@TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/exit_status.w; \
+		status=$$?; \
+		if [ "$$status" -ne 37 ]; then \
+			echo "exit status regression: expected 37, got $$status" >&2; \
+			exit 1; \
+		fi
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/hash_delete.w | \
 		diff -u tests/hash_delete.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/positional_arity.w | \
@@ -80,6 +86,7 @@ test: $(BIN)
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --check-ast tests/operator_method_name.w
 	cd ../.. && TUNGSTEN_LEX64_TABLE=languages/tungsten/tungsten.lex64 \
 		implementations/c/build/tungsten-c implementations/c/tests/project_relative_use.w
+	bash ../../scripts/test-bootstrap-stage1-artifact.sh
 
 bootstrap-lex: $(BIN)
 	@for f in ../../compiler/tungsten.w ../../compiler/lib/*.w; do \

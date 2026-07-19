@@ -13,6 +13,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
+. "$ROOT/bin/commands/bootstrap_helpers.sh"
 
 FORCE=0
 for arg in "$@"; do
@@ -343,6 +344,10 @@ else
       >"$stage1_log" 2>&1; then
     cat "$stage1_log" >&2
     die "stage 1 (C VM) failed — see $stage1_log"
+  fi
+  if ! bootstrap_require_executable "$stage1_tmp" "$stage1_log" "stage 1 (C VM)"; then
+    rm -f "$stage1_tmp" "$stage1_tmp.ll" "$stage1_tmp.sidemap"
+    exit 1
   fi
   if [ "$UNAME_S" = Darwin ]; then
     codesign --force -s - "$stage1_tmp" >/dev/null 2>&1 || \

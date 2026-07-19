@@ -799,6 +799,8 @@ int tc_compile_ast_definitions(TcAstValue ast, TcChunk *chunk, TcError *err);
 int tc_compile_ast_initializers(TcAstValue ast, TcChunk *chunk, TcError *err);
 int tc_vm_run(const TcChunk *chunk, TcValue *result, TcError *err);
 int tc_vm_run_args(const TcChunk *chunk, int argc, char **argv, TcValue *result, TcError *err);
+int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *result,
+                          int *process_status, TcError *err);
 void tc_value_print(TcValue value, FILE *out);
 
 /* TUNGSTEN_C_FAST_PARSE: C-side Loader#load_program_ast (bootstrap only). */

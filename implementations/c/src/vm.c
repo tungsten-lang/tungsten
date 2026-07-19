@@ -36,6 +36,9 @@ typedef struct {
   // Process-wide bootstrap option, read once before dispatch. Keeping it on
   // the VM avoids an out-of-line flag probe at every interpreted CALL.
   uint8_t fast_parse_enabled;
+  // Status requested by Tungsten's `exit N`. The VM unwinds through its
+  // ordinary cleanup path; main returns this value to the host process.
+  int process_status;
   // saved_locals_pool: contiguous buffer of 2048 * saved_locals_stride
   // slots. Each slice is the packed saved snapshot for one frame.
   // Replaces per-call malloc/free of the save buffer (was ~30% of CPU
@@ -1934,7 +1937,9 @@ void tc_value_print(TcValue value, FILE *out) {
   }
 }
 
-int tc_vm_run_args(const TcChunk *chunk, int argc, char **argv, TcValue *result, TcError *err) {
+int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *result,
+                          int *process_status, TcError *err) {
+  if (process_status) *process_status = 0;
   if (!builtin_names_ready && !intern_builtin_names(err)) return 0;
   TcVm vm;
   memset(&vm, 0, sizeof(vm));
@@ -2765,6 +2770,7 @@ int tc_vm_run_args(const TcChunk *chunk, int argc, char **argv, TcValue *result,
   }
 #undef NEXT
 cleanup_ok:
+  if (process_status) *process_status = vm.process_status;
   runtime_array_free(vm.argv);
   free(vm.saved_locals_pool);
   free(vm.locals);
@@ -2774,6 +2780,10 @@ cleanup_fail:
   free(vm.saved_locals_pool);
   free(vm.locals);
   return 0;
+}
+
+int tc_vm_run_args(const TcChunk *chunk, int argc, char **argv, TcValue *result, TcError *err) {
+  return tc_vm_run_args_status(chunk, argc, argv, result, NULL, err);
 }
 
 int tc_vm_run(const TcChunk *chunk, TcValue *result, TcError *err) {

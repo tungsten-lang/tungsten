@@ -89,7 +89,12 @@ namespace :test do
   desc "Run all default non-hardware test suites"
   task all: %i[ruby tungsten remaining]
 
-  multitask remaining: %i[wvalue parity]
+  multitask remaining: %i[wvalue parity c_vm]
+
+  desc "Run the stage-0 C VM and bootstrap contract tests"
+  task :c_vm do
+    run_command "make", "test", chdir: File.join(ROOT, "implementations/c")
+  end
 
   desc "Run implementations/ruby specs (RSpec)"
   task :ruby do

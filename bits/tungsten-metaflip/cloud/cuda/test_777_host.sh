@@ -36,6 +36,10 @@ if ! printf '%s\n' "$POLICY_OUTPUT" | \
   echo "CUDA777_SELF_TEST group-harvest telemetry regression did not run" >&2
   exit 1
 fi
+if ! "$TEST_BIN" --help | grep -q -- 'top improving groups, 1..8 (8)$'; then
+  echo "CUDA777_SELF_TEST evidence-backed harvest top-K default is not eight" >&2
+  exit 1
+fi
 
 # The CUDA relay is permanently one warp per block.  Its build must specialize
 # every conservative Tungsten block barrier, and must fail rather than silently

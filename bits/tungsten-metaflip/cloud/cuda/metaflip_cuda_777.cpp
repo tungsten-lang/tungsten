@@ -76,6 +76,7 @@ constexpr int kN = 7;
 constexpr int kFactorBits = kN * kN;
 constexpr int kCap = 360;
 constexpr int kMaxHarvestTopK = 8;
+constexpr int kDefaultHarvestTopK = kMaxHarvestTopK;
 constexpr uint64_t kFactorMask = (uint64_t{1} << kFactorBits) - 1;
 constexpr int kScanSharedBytes = 3 * kCap * static_cast<int>(sizeof(int64_t)) +
                                  6 * static_cast<int>(sizeof(int64_t));
@@ -819,6 +820,23 @@ DoorAdmission admit_descendant_from_source(const std::vector<Scheme>& roots,
           descendant_bank_score(roots, descendants), true};
 }
 
+// The absolute endpoint retains the source-aware density-chain exception.
+// Additional top-K endpoints did not launch from the selected descendant, so
+// they may enter only through the ordinary all-door distance gate. Duplicate
+// archive artifacts cannot provide a new live basin and are skipped here.
+DoorAdmission admit_harvested_descendant(
+    const std::vector<Scheme>& roots, std::vector<Scheme>& descendants,
+    const Scheme& candidate, size_t capacity, int min_distance,
+    bool absolute_winner, bool exact_novel, LaunchRole launch_role,
+    size_t source_index) {
+  if (!exact_novel) return {};
+  if (absolute_winner) {
+    return admit_descendant_from_source(roots, descendants, candidate, capacity,
+                                        min_distance, launch_role, source_index);
+  }
+  return admit_descendant(roots, descendants, candidate, capacity, min_distance);
+}
+
 // Restart replay is a structural farthest-first rebuild, not lexicographic
 // first-come admission.  Canonical keys break equal-distance ties only after
 // exact support distance has chosen the most novel remaining artifact.
@@ -1336,6 +1354,41 @@ int policy_self_test(const std::vector<std::string>& recipe_paths) {
     throw std::runtime_error("source-aware replacement escaped its descendant role");
   }
 
+  // Top-K auxiliary artifacts are useful only when they are exact-novel and
+  // independently satisfy the normal diversity floor. They must not inherit
+  // the absolute winner's one-parent density-chain exception.
+  chain_bank = {chain_parent, chain_other};
+  DoorAdmission harvested_admission = admit_harvested_descendant(
+      bank_roots, chain_bank, chain_child, 2, 12, true, true,
+      LaunchRole::kDescendant, 0);
+  if (harvested_admission.action != 2 ||
+      !harvested_admission.source_replacement ||
+      chain_bank[0].terms != chain_child.terms) {
+    throw std::runtime_error("absolute harvest lost source-aware replacement");
+  }
+
+  std::vector<Scheme> harvested_bank;
+  harvested_admission = admit_harvested_descendant(
+      bank_roots, harvested_bank, child_a, 2, 12, false, true,
+      LaunchRole::kDescendant, 0);
+  if (harvested_admission.action != 1 || harvested_bank.size() != 1 ||
+      harvested_admission.source_replacement) {
+    throw std::runtime_error("novel auxiliary harvest did not enter the door bank");
+  }
+  harvested_admission = admit_harvested_descendant(
+      bank_roots, harvested_bank, child_a, 2, 12, false, false,
+      LaunchRole::kDescendant, 0);
+  if (harvested_admission.action != 0 || harvested_bank.size() != 1) {
+    throw std::runtime_error("duplicate auxiliary harvest changed the door bank");
+  }
+  harvested_admission = admit_harvested_descendant(
+      bank_roots, harvested_bank, near_a, 2, 12, false, true,
+      LaunchRole::kDescendant, 0);
+  if (harvested_admission.action != 0 || harvested_bank.size() != 1 ||
+      harvested_admission.source_replacement) {
+    throw std::runtime_error("auxiliary harvest bypassed the normal distance floor");
+  }
+
   std::vector<Scheme> replay_forward;
   std::vector<Scheme> replay_reverse;
   rebuild_descendants_diverse(bank_roots, {child_a, near_a, child_b, child_c},
@@ -1469,7 +1522,7 @@ void usage(const char* program) {
       << "  --mode scan|hash|alternate  cooperative partner mode (scan)\n"
       << "  --max-doors N          in-memory restart-door cap (32)\n"
       << "  --door-min-distance N  descendant support-distance floor (12)\n"
-      << "  --harvest-top-k N      exact-gate/archive top improving groups, 1..8 (1)\n"
+      << "  --harvest-top-k N      gate/archive/admit top improving groups, 1..8 (8)\n"
       << "  --stop-rank N          stop after an exact rank at most N (246)\n"
       << "  --run-seed N           reproducible host diversification seed (random)\n"
       << "  --device N             CUDA device index (0)\n";
@@ -1488,7 +1541,7 @@ struct Config {
   int margin = 4;
   int max_doors = 32;
   int door_min_distance = 12;
-  int harvest_top_k = 1;
+  int harvest_top_k = kDefaultHarvestTopK;
   int stop_rank = 246;
   int device = 0;
   uint64_t run_seed = 0;
@@ -1610,6 +1663,7 @@ struct CandidateHarvestSummary {
   unsigned long long downloaded_schemes = 0;
   unsigned long long exact_schemes = 0;
   unsigned long long novel_schemes = 0;
+  unsigned long long auxiliary_door_admissions = 0;
   unsigned long long transfer_bytes = 0;
 };
 
@@ -1718,6 +1772,7 @@ void accumulate_candidate_harvest(CandidateHarvestSummary& total,
   total.downloaded_schemes += epoch.downloaded_schemes;
   total.exact_schemes += epoch.exact_schemes;
   total.novel_schemes += epoch.novel_schemes;
+  total.auxiliary_door_admissions += epoch.auxiliary_door_admissions;
   total.transfer_bytes += epoch.transfer_bytes;
 }
 
@@ -1734,7 +1789,7 @@ struct PolicyTelemetry {
   int epoch_door_score = -1;
   bool epoch_door_source_replacement = false;
   bool has_selection = false;
-  int harvest_top_k = 1;
+  int harvest_top_k = kDefaultHarvestTopK;
   GroupHarvestSummary harvest_epoch;
   GroupHarvestSummary harvest_total;
   CandidateHarvestSummary candidate_harvest_epoch;
@@ -1840,6 +1895,8 @@ void complete_candidate_harvest_epoch(PolicyTelemetry& policy,
         << policy->candidate_harvest_epoch.exact_schemes
         << "\nharvest_epoch_novel_schemes="
         << policy->candidate_harvest_epoch.novel_schemes
+        << "\nharvest_epoch_auxiliary_door_admissions="
+        << policy->candidate_harvest_epoch.auxiliary_door_admissions
         << "\nharvest_epoch_transfer_bytes="
         << policy->candidate_harvest_epoch.transfer_bytes
         << "\nharvest_total_selected_groups="
@@ -1850,6 +1907,8 @@ void complete_candidate_harvest_epoch(PolicyTelemetry& policy,
         << policy->candidate_harvest_total.exact_schemes
         << "\nharvest_total_novel_schemes="
         << policy->candidate_harvest_total.novel_schemes
+        << "\nharvest_total_auxiliary_door_admissions="
+        << policy->candidate_harvest_total.auxiliary_door_admissions
         << "\nharvest_total_transfer_bytes="
         << policy->candidate_harvest_total.transfer_bytes << '\n';
   }
@@ -1879,11 +1938,11 @@ int policy_status_self_test() {
   policy.harvest_top_k = 8;
   policy.harvest_epoch = {8, 3, 4, 11};
   policy.harvest_total = {4096, 37, 41, 123};
-  policy.candidate_harvest_epoch = {8, 8, 8, 5, 47424};
-  policy.candidate_harvest_total = {64, 64, 64, 17, 379392};
+  policy.candidate_harvest_epoch = {8, 8, 8, 5, 3, 47424};
+  policy.candidate_harvest_total = {64, 64, 64, 17, 9, 379392};
   const std::string body = status_body("epoch", 66, 5, 1234, best, 16, 99, 100, 10,
                                        4, 0, "exact-novel", &policy);
-  const std::array<std::string, 34> required = {
+  const std::array<std::string, 36> required = {
       "policy_leader_epochs=18\n", "policy_original_epochs=31\n",
       "policy_descendant_epochs=18\n", "policy_adaptive_role_slots=50\n",
       "policy_role_explore_every=4\n",
@@ -1905,10 +1964,12 @@ int policy_status_self_test() {
       "harvest_epoch_selected_groups=8\n",
       "harvest_epoch_downloaded_schemes=8\n",
       "harvest_epoch_exact_schemes=8\n", "harvest_epoch_novel_schemes=5\n",
+      "harvest_epoch_auxiliary_door_admissions=3\n",
       "harvest_epoch_transfer_bytes=47424\n",
       "harvest_total_selected_groups=64\n",
       "harvest_total_downloaded_schemes=64\n",
       "harvest_total_exact_schemes=64\n", "harvest_total_novel_schemes=17\n",
+      "harvest_total_auxiliary_door_admissions=9\n",
       "harvest_total_transfer_bytes=379392\n"};
   for (const auto& field : required) {
     if (body.find(field) == std::string::npos) {
@@ -1919,6 +1980,11 @@ int policy_status_self_test() {
 }
 
 int group_harvest_self_test() {
+  if (Config{}.harvest_top_k != kDefaultHarvestTopK ||
+      kDefaultHarvestTopK != kMaxHarvestTopK) {
+    throw std::runtime_error("group harvest evidence-backed default is not top-K=8");
+  }
+
   std::vector<int32_t> states(6 * 8, 0);
   auto publish = [&](int group, int rank, int den, int captures, int completed) {
     const size_t base = static_cast<size_t>(group) * 8;
@@ -2038,6 +2104,8 @@ int group_harvest_self_test() {
                          expected_epoch.exact_schemes);
     require_status_value(body, "harvest_epoch_novel_schemes",
                          expected_epoch.novel_schemes);
+    require_status_value(body, "harvest_epoch_auxiliary_door_admissions",
+                         expected_epoch.auxiliary_door_admissions);
     require_status_value(body, "harvest_epoch_transfer_bytes",
                          expected_epoch.transfer_bytes);
     require_status_value(body, "harvest_total_selected_groups",
@@ -2048,6 +2116,8 @@ int group_harvest_self_test() {
                          expected_total.exact_schemes);
     require_status_value(body, "harvest_total_novel_schemes",
                          expected_total.novel_schemes);
+    require_status_value(body, "harvest_total_auxiliary_door_admissions",
+                         expected_total.auxiliary_door_admissions);
     require_status_value(body, "harvest_total_transfer_bytes",
                          expected_total.transfer_bytes);
   };
@@ -2056,7 +2126,7 @@ int group_harvest_self_test() {
   Scheme best;
   const GroupHarvestSummary zero;
   const CandidateHarvestSummary candidate_zero;
-  const CandidateHarvestSummary candidate_epoch{2, 2, 2, 1, 11832};
+  const CandidateHarvestSummary candidate_epoch{2, 2, 2, 1, 1, 11832};
   const std::string ready =
       status_body("ready", 0, 0, 0, best, 1, 7, 0, 0, 0, 0, "", &lifecycle);
   require_status_summary(ready, zero, zero);
@@ -2082,7 +2152,7 @@ int group_harvest_self_test() {
   complete_group_harvest_epoch(lifecycle, states, 6, 247, 3094);
   complete_candidate_harvest_epoch(lifecycle, candidate_epoch);
   const GroupHarvestSummary twice{10, 4, 8, 20};
-  const CandidateHarvestSummary candidate_twice{4, 4, 4, 2, 23664};
+  const CandidateHarvestSummary candidate_twice{4, 4, 4, 2, 2, 23664};
   const std::string done =
       status_body("done", 2, 0, 3, best, 1, 7, 0, 0, 0, 0, "", &lifecycle);
   require_status_summary(done, epoch, twice);
@@ -2101,6 +2171,8 @@ int group_harvest_self_test() {
           candidate_twice.exact_schemes ||
       lifecycle.candidate_harvest_total.novel_schemes !=
           candidate_twice.novel_schemes ||
+      lifecycle.candidate_harvest_total.auxiliary_door_admissions !=
+          candidate_twice.auxiliary_door_admissions ||
       lifecycle.candidate_harvest_total.transfer_bytes !=
           candidate_twice.transfer_bytes) {
     throw std::runtime_error("candidate harvest cumulative summary did not add once per epoch");
@@ -2591,15 +2663,17 @@ int run_campaign(const Config& config) {
         write_scheme_atomic(name.str(), candidate);
       }
 
-      // Auxiliary top-K artifacts are archive evidence only. The absolute
-      // objective winner alone may alter live doors, fleet best, and the
-      // scheduler's exact-novel/fleet-best reward, preserving K=1 semantics.
+      // The absolute endpoint alone owns fleet-best and scheduler reward.
+      // Exact-novel auxiliaries may still become independent restart basins,
+      // but only through the strict normal distance gate; they never inherit
+      // the source-aware one-parent exception.
       if (absolute_winner) {
         epoch_exact_novel = novel;
         if (novel) {
-          door_admission = admit_descendant_from_source(
+          door_admission = admit_harvested_descendant(
               original_roots, descendants, candidate, descendant_capacity,
-              config.door_min_distance, choice.role, choice.source_index);
+              config.door_min_distance, true, true, choice.role,
+              choice.source_index);
           outcome = "exact-novel";
         } else {
           outcome = "exact-duplicate";
@@ -2609,6 +2683,14 @@ int run_campaign(const Config& config) {
           global_best = candidate;
           write_scheme_atomic(config.out_path, global_best);
           outcome = "fleet-best";
+        }
+      } else if (novel) {
+        const DoorAdmission auxiliary_admission = admit_harvested_descendant(
+            original_roots, descendants, candidate, descendant_capacity,
+            config.door_min_distance, false, true, choice.role,
+            choice.source_index);
+        if (auxiliary_admission.action != 0) {
+          ++candidate_harvest.auxiliary_door_admissions;
         }
       }
     }
@@ -2665,6 +2747,8 @@ int run_campaign(const Config& config) {
               << policy.candidate_harvest_epoch.exact_schemes
               << " harvest_epoch_novel="
               << policy.candidate_harvest_epoch.novel_schemes
+              << " harvest_epoch_aux_doors="
+              << policy.candidate_harvest_epoch.auxiliary_door_admissions
               << " harvest_epoch_bytes="
               << policy.candidate_harvest_epoch.transfer_bytes
               << " harvest_total_selected="
@@ -2675,6 +2759,8 @@ int run_campaign(const Config& config) {
               << policy.candidate_harvest_total.exact_schemes
               << " harvest_total_novel="
               << policy.candidate_harvest_total.novel_schemes
+              << " harvest_total_aux_doors="
+              << policy.candidate_harvest_total.auxiliary_door_admissions
               << " harvest_total_bytes="
               << policy.candidate_harvest_total.transfer_bytes
               << " original_sources="
@@ -2710,6 +2796,8 @@ int run_campaign(const Config& config) {
             << policy.candidate_harvest_total.exact_schemes
             << " harvest_total_novel="
             << policy.candidate_harvest_total.novel_schemes
+            << " harvest_total_aux_doors="
+            << policy.candidate_harvest_total.auxiliary_door_admissions
             << " harvest_total_bytes="
             << policy.candidate_harvest_total.transfer_bytes
             << std::endl;

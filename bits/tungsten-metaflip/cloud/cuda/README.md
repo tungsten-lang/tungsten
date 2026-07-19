@@ -196,7 +196,7 @@ does not regress to its worse archived parent after restart.
 Use `--door-min-distance N` to override that measured default. The checkpoint
 is preserved unless a strictly better result appears.
 
-`--harvest-top-k N` (1 through 8, default 1) optionally preserves more of the
+`--harvest-top-k N` (1 through 8, default 8) preserves more of the
 independent group work already completed by an epoch. After the one fixed
 group-state download, the host orders valid completed endpoints by rank,
 density, then ascending group ID. It transfers only the first `N` endpoints
@@ -208,14 +208,30 @@ before any scheme from that epoch is archived or admitted. Canonical scheme
 keys then remove duplicates—the compact device state intentionally identifies
 groups, not full scheme equality.
 
-Auxiliary exact-novel schemes are archived for restart evidence, but do not
-enter the live descendant bank and do not score adaptive-role reward. Only the
-absolute objective winner retains those effects. This keeps scheduling
-semantics independent of K while measuring whether otherwise-discarded group
-endpoints provide useful basin diversity. At rank 247, K=8 transfers at most
-47,424 factor bytes total per productive epoch; the capacity-wide hard
-bound is 69,120 bytes. Neutral epochs transfer none, and neither setting adds
-device buffers or changes the kernel.
+The absolute objective winner alone may improve the fleet best, use the
+source-aware one-parent density-chain exception, or score adaptive-role
+reward. Auxiliary exact-novel schemes are archived and offered to the live
+descendant bank through the ordinary all-door distance gate. They cannot waive
+distance to their launch source. This turns independently discovered basins
+into future GPU doors without allowing top-K multiplicity to distort reward.
+`harvest_epoch_auxiliary_door_admissions` and its cumulative `harvest_total_*`
+counter report how often that strict gate retained an auxiliary. K=1 remains
+behaviorally identical to the original winner-only path. At rank 247, K=8
+transfers at most 47,424 factor bytes total per productive epoch; the
+capacity-wide hard bound is 69,120 bytes. Neutral epochs transfer none, and
+neither setting adds device buffers or changes the kernel.
+
+The first deterministic RTX 4090 K=8/K=1 validation used the distant d3554
+root, run seed 778, and identical three-epoch GPU work (2.4576B attempts and
+186.7246M partners). K=1 exact-gated three candidates, all novel, in 9.535s;
+K=8 exact-gated 24 candidates and retained 18 novel schemes in 9.772s. That is
+six times the novel evidence for 237ms (2.5%) added wall time, with zero exact
+rejects and the same d3522 objective endpoint. Under the distance-12 production
+gate, all seven auxiliary novel artifacts from the first epoch formed valid
+doors in objective order, while its absolute density winner was too close to
+the root. Production therefore defaults to `--harvest-top-k 8`; pass
+`--harvest-top-k 1` only for winner-only trajectory controls or direct legacy
+comparisons.
 
 The 8192-group launch allocates 141,828,572 bytes (135.3 MiB) of explicit
 device buffers.  CUDA context and driver allocations make the process total
@@ -250,6 +266,8 @@ visits do not change it.
 `epoch_door_source_replacement` report the current epoch's archive decision;
 they reset while the next epoch is in flight. The epoch log mirrors them as
 `epoch_door_action`, `epoch_door_score`, and `epoch_door_source_replace`.
+Those singular fields describe the absolute endpoint; auxiliary top-K door
+changes are counted separately by `harvest_epoch_auxiliary_door_admissions`.
 
 The relay also reports the breadth available to candidate harvesting.
 `harvest_epoch_completed_groups` counts completed cooperative groups in the
@@ -265,14 +283,16 @@ flight (the relay publishes a pre-launch `dispatch=0` status), become final
 after its state download, and remain visible in `done` if no later epoch starts.
 `harvest_top_k` reports the configured cap. The
 `harvest_epoch_selected_groups`, `harvest_epoch_downloaded_schemes`,
-`harvest_epoch_exact_schemes`, `harvest_epoch_novel_schemes`, and
+`harvest_epoch_exact_schemes`, `harvest_epoch_novel_schemes`,
+`harvest_epoch_auxiliary_door_admissions`, and
 `harvest_epoch_transfer_bytes` fields audit the opt-in host path; matching
 `harvest_total_*` fields accumulate them for the process. The epoch log emits
 the same values in compact form. Candidate epoch counters reset alongside the
 group counters before the next dispatch, and totals remain additive. Group
 breadth counters do not affect selection. Candidate counters observe work
-already performed; only the exact-gated absolute winner affects live admission,
-fleet best, or adaptive-role reward.
+already performed; auxiliary door admission changes only future restart
+selection, while the exact-gated absolute winner alone affects fleet best and
+adaptive-role reward.
 
 The build mechanically emits constant scan and hash specializations from the
 same canonical Tungsten kernel. Structural guards reject changed mode geometry,

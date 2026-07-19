@@ -56,8 +56,8 @@ trait Associable
 
 
 + Model
-  use Validatable
-  use Associable
+  is Validatable
+  is Associable
 
   ro :id
   ro :attributes

@@ -26,31 +26,31 @@ in Tungsten:Carbide
   # Extract named parameters from a matched path
   -> extract_params(request_path)
     params = {}
-    request_parts = request_path.split("/").reject(s -> s.empty?)
+    request_parts = request_path.split("/").reject(-> (s) s.empty?)
 
-    @segments.zip(request_parts).each -> (segment, part)
-      case segment
-        {type: :param, name: name} => params[name] = part
-        {type: :glob, name: name}  => params[name] = part  # simplified
+    @segments.each_with_index -> (segment, i)
+      if segment[:type] == :param || segment[:type] == :glob
+        params[segment[:name]] = request_parts[i]
 
     params
 
   -> match_path?(request_path)
-    request_parts = request_path.split("/").reject(s -> s.empty?)
+    request_parts = request_path.split("/").reject(-> (s) s.empty?)
     return false unless request_parts.size == @segments.size
 
-    @segments.zip(request_parts).all? -> (segment, part)
-      case segment
-        {type: :literal, value: v} => v == part
-        {type: :param}             => true
-        {type: :glob}              => true
+    @segments.each_with_index -> (segment, i)
+      if segment[:type] == :literal && segment[:value] != request_parts[i]
+        return false
+    true
 
   -> parse_segments(path)
-    path.split("/").reject(s -> s.empty?).map -> (part)
-      case part
-        /^:(.+)$/  => {type: :param, name: $1.to_sym}
-        /^\*(.+)$/ => {type: :glob, name: $1.to_sym}
-        =>           {type: :literal, value: part}
+    path.split("/").reject(-> (s) s.empty?).map -> (part)
+      if part.starts_with?(":")
+        {type: :param, name: part.slice(1, part.size - 1).to_sym}
+      elsif part.starts_with?("*")
+        {type: :glob, name: part.slice(1, part.size - 1).to_sym}
+      else
+        {type: :literal, value: part}
 
 
 # Route::Set — the router that holds all routes and dispatches requests
@@ -72,7 +72,7 @@ in Tungsten:Carbide
     route
 
   -> dispatch(request, response)
-    route = @routes.find(r -> r.matches?(request))
+    route = @routes.find(-> (r) r.matches?(request))
 
     unless route
       response.status = 404
@@ -123,8 +123,8 @@ in Tungsten:Carbide
   -> resources(name, only: nil, except: nil, &block)
     controller = name.to_s.classify + "Controller"
     actions = [:index, :show, :new, :create, :edit, :update, :destroy]
-    actions = actions.select(a -> only.include?(a)) if only
-    actions = actions.reject(a -> except.include?(a)) if except
+    actions = actions.select(-> (a) only.include?(a)) if only
+    actions = actions.reject(-> (a) except.include?(a)) if except
 
     prefix = "#{@prefix}/#{name}"
 

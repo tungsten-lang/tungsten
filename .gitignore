@@ -86,6 +86,9 @@ bin/commands/symbolicate
 bin/commands/forge
 bits/*/bin/*
 !bits/*/bin/.gitkeep
+# Per-bit build output dirs (compiled bit + sidemap); the tracked entry point
+# is bin/<bit> (a source-checkout launcher), not these build artifacts.
+bits/*/build/
 
 # dSYM debug symbol bundles (Xcode/clang)
 *.dSYM

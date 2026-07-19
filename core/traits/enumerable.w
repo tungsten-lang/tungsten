@@ -238,6 +238,74 @@ trait Enumerable
   -> minmax
     [min, max]
 
+  # Element for which the block returns the smallest / largest value. The key
+  # block runs once per element; comparison is on the keys via `<` / `>`. A
+  # `seen` flag (not `best == nil`) so an enumerable containing nil elements
+  # still compares correctly. Returns nil when empty.
+  -> min_by(&block)
+    best = nil
+    best_key = nil
+    seen = false
+    mode = __enumerable_iteration_mode
+    if mode == 2
+      self.each -> (first, second)
+        k = block(first, second)
+        if !seen || k < best_key
+          best = [first, second]
+          best_key = k
+          seen = true
+    elsif mode == 1
+      i = 0
+      n = self.size
+      while i < n
+        item = self[i]
+        k = block(item)
+        if !seen || k < best_key
+          best = item
+          best_key = k
+          seen = true
+        i++
+    else
+      self.each -> (item)
+        k = block(item)
+        if !seen || k < best_key
+          best = item
+          best_key = k
+          seen = true
+    best
+
+  -> max_by(&block)
+    best = nil
+    best_key = nil
+    seen = false
+    mode = __enumerable_iteration_mode
+    if mode == 2
+      self.each -> (first, second)
+        k = block(first, second)
+        if !seen || k > best_key
+          best = [first, second]
+          best_key = k
+          seen = true
+    elsif mode == 1
+      i = 0
+      n = self.size
+      while i < n
+        item = self[i]
+        k = block(item)
+        if !seen || k > best_key
+          best = item
+          best_key = k
+          seen = true
+        i++
+    else
+      self.each -> (item)
+        k = block(item)
+        if !seen || k > best_key
+          best = item
+          best_key = k
+          seen = true
+    best
+
   -> first
     pairs = __enumerable_yields_pair?
     consumer = -> (first, second)

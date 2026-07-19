@@ -1743,7 +1743,13 @@ use ../../languages/tungsten/lexers/regex_helpers
       break if !allowed
       candidate += ch
       @pos += 1
-      if known_unit_name?(candidate)
+      # Only commit a unit match at a word boundary: if the next char is an
+      # ASCII letter, `candidate` is a prefix of a longer identifier/keyword
+      # (e.g. "u" inside "unless", "m" inside "min") and must not be taken as
+      # a unit. The scan continues, so a full-word unit ("min", "meters") is
+      # still matched; a bare keyword after a number ("2 unless x") is not.
+      next_is_letter = @pos < @chars.size() && is_alpha?(@lc[@pos])
+      if known_unit_name?(candidate) && !next_is_letter
         last_unit = "" + candidate
         last_pos = @pos
     if last_unit != nil

@@ -1,4 +1,3 @@
-use core/numeric/int
 
 + BigInt < Int
   - data

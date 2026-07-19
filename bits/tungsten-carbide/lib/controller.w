@@ -36,6 +36,20 @@
   -> render_html(body)
     Response.html(body)
 
+  # JSON body via carbide's Serializer (both engines; core JSON.encode
+  # is compiled-only). options: {status:} — explicit hash, not kwargs.
+  #
+  #   render_json(task.to_h)
+  #   render_json({errors: task.errors}, {status: 422})
+  -> render_json(data, options = {})
+    status = options[:status] || 200
+    Response.new({status: status, headers: {"Content-Type" => "application/json"}, body: Serializer.encode(data)})
+
+  # Validation-failure convenience: 422 with an {"errors": [...]} body.
+  -> render_errors(errors, options = {})
+    status = options[:status] || 422
+    render_json({errors: errors}, {status: status})
+
   -> redirect(location)
     Response.redirect(location)
 

@@ -1,20 +1,29 @@
 # Tungsten Carbide — a web application framework for Tungsten
 # Named for the hardest compound of tungsten — strong, sharp, built to cut.
 #
-# Carbide provides the full stack: routing, controllers, models, views,
-# migrations, background jobs, mailers, and serializers.
+# Carbide's working core: routing (route.w), controllers (controller.w),
+# models with validations + an in-memory store (model.w), JSON
+# serialization (serializer.w), and live serving through forge
+# (application.w). Everything loaded here runs on BOTH engines and is
+# spec-covered (spec/*.w).
 
 in Tungsten:Carbide
 
 # application pulls the working core: forge (cross-bit), route, controller.
 use application
 use model
-use view
-use migration
 use serializer
-use worker
-use mailer
-use request
+
+# The remaining modules under lib/ (view, migration, worker, mailer,
+# request, channel, event, notifier, policy, config, facade, job,
+# validator, middleware, decorator, engine, resource, template,
+# transform, adapter, traits/paginated, bit/*) are unported design
+# drafts — they lean on Ruby-isms (define_method, method_missing,
+# instance_eval, **kwargs, &., Time.now) that Tungsten does not have,
+# and have never run. They are not loaded. Realize one into the
+# manifest above only after `bin/tungsten -c` passes on it AND it runs
+# on both engines with spec coverage (see model.w for the porting
+# pattern: top-level class, options hashes, flag-style flow).
 
 constant_alias "WC"
 
@@ -42,8 +51,8 @@ VERSION = "0.1.0"
   << "  selftest   Run the framework's built-in smoke checks"
   << "  help       Show this help"
 
-# Pure-logic smoke checks over the routing core. Returns a list of
-# failure messages (empty = healthy).
+# Pure-logic smoke checks over the routing + model core. Returns a list
+# of failure messages (empty = healthy).
 -> selftest_failures
   failures = []
 
@@ -56,10 +65,28 @@ VERSION = "0.1.0"
   glob = Route.new(:GET, "/files/*path", "FilesController", :show)
   failures.push("glob route should match /files/a") unless glob.match_path?("/files/a")
 
+  # Model + Serializer: create/find/where round-trip on the base Model.
+  Model.reset_all
+  rec = Model.create(Model, {name: "smoke"})
+  failures.push("create should persist") unless rec.persisted?
+  failures.push("find should round-trip") if Model.find(Model, rec.id) == nil
+  failures.push("where should match attributes") unless Model.where(Model, {name: "smoke"}).size == 1
+  blank_error = Model.new({}).validation_error(Model.presence(:name))
+  failures.push("presence validation should flag a blank attribute") if blank_error == nil
+  encoded = Serializer.record(rec)
+  failures.push("serializer should encode the record") unless encoded.include?("\"id\":1") && encoded.include?("\"name\":\"smoke\"")
+  Model.reset_all
+
   failures
 
+# Run one recognized CLI command. carbide.w doubles as the bit manifest,
+# so `use carbide` consumers execute this top-level call too — it
+# therefore acts ONLY on a recognized first argument and is a silent
+# no-op otherwise (a consumer's own argv — ports, file paths — must not
+# be swallowed, and no am-I-the-main-program signal exists today).
+# Consequence: bare `carbide` prints nothing; use `carbide help`.
 -> run_cli(args)
-  cmd = "help"
+  cmd = nil
   cmd = args[0] if args.size > 0
 
   if cmd == "version" || cmd == "--version" || cmd == "-v"
@@ -67,17 +94,12 @@ VERSION = "0.1.0"
   elsif cmd == "selftest"
     failures = selftest_failures
     if failures.empty?
-      << "PASS — routing core healthy"
+      << "PASS — routing + model core healthy"
     else
       failures.each -> (f)
         << "FAIL: [f]"
       exit(1)
   elsif cmd == "help" || cmd == "--help" || cmd == "-h"
     print_usage
-  else
-    << "carbide: unknown command '[cmd]'"
-    << ""
-    print_usage
-    exit(1)
 
 run_cli(argv())

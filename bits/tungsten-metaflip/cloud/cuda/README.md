@@ -13,18 +13,55 @@ an exhaustive 7^6 coefficient gate, and atomic checkpoints. A device claim
 that fails the host tensor or density gate is preserved as `.reject...` and
 terminates the process nonzero.
 
-## Build
+## Provision and build
 
-Use an x86-64 CUDA-devel image. On Runpod, for example:
+Use an x86-64 CUDA-devel image with a working remote entrypoint. A bare
+`nvidia/cuda:*` image contains CUDA but does not configure Runpod SSH merely
+because `runpodctl pod create --ssh` is present. Prefer Runpod's official,
+SSH-ready PyTorch template:
 
 ```sh
-apt-get update
-apt-get install -y git clang llvm lld make pkg-config libonig-dev libzstd-dev rsync
+runpodctl pod create \
+  --name metaflip-4090-gate \
+  --template-id runpod-torch-v240 \
+  --gpu-id 'NVIDIA GeForce RTX 4090' --gpu-count 1 \
+  --cloud-type SECURE --data-center-ids EU-RO-1 \
+  --container-disk-in-gb 40 \
+  --volume-in-gb 20 --volume-mount-path /workspace \
+  --ssh
+runpodctl ssh info POD_ID
+```
+
+The official Ubuntu 22.04 template has CUDA installed, but its default
+`clang` is 14 and `/usr/local/cuda/bin/nvcc` is not necessarily on `PATH`.
+Clang 15 also cannot consume this checkout's current LLVM IR; the helper pins
+the proven Clang 18 toolchain. The native compiler link
+also needs `libopenblas-dev`, which was absent from the former ad-hoc package
+list. After transferring or cloning the source, run the checked setup helper
+as the container's root user:
+
+```sh
 cd /workspace/tungsten
-bin/tungsten bootstrap
-bits/tungsten-metaflip/cloud/cuda/build_777.sh \
+bits/tungsten-metaflip/cloud/cuda/setup_runpod.sh
+bits/tungsten-metaflip/cloud/cuda/setup_runpod.sh --check
+bin/tungsten build --no-bits
+bits/tungsten-metaflip/cloud/cuda/test_777_host.sh
+METAFLIP_CUDA_ARCH=sm_89 \
+  bits/tungsten-metaflip/cloud/cuda/build_777.sh \
   --out /workspace/metaflip-cuda-777
 ```
+
+The helper pins LLVM 18 from the signed apt.llvm.org repository, installs the
+complete Tungsten/OpenBLAS self-host dependencies (including Ruby), exposes
+the image's existing CUDA compiler as `/usr/local/bin/nvcc`, and functionally
+probes clang/lld, zstd, Oniguruma, OpenBLAS, Ruby, and `nvcc`. It is
+idempotent. Use `--dry-run` to inspect its package/link plan without changing
+the image.
+
+Use the full stage-one/stage-two `build --no-bits` above, not only
+`bootstrap`: the CUDA source exercises compiler paths that need the installed
+self-hosted stage-two compiler. The resulting pod emission is checked against
+the canonical Tungsten kernel before `nvcc` runs.
 
 `METAFLIP_TUNGSTEN` selects another compiler. `NVCC` selects another CUDA
 compiler. `METAFLIP_CUDA_ARCH` defaults to `native`; set it to a concrete
@@ -41,6 +78,7 @@ The host gate has a CPU-only regression that can run before provisioning a
 GPU:
 
 ```sh
+bits/tungsten-metaflip/cloud/cuda/test_setup_runpod.sh
 bits/tungsten-metaflip/cloud/cuda/test_777_host.sh
 ```
 

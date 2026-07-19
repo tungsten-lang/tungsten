@@ -145,7 +145,7 @@ fi
 
 NVCC=${NVCC:-$(command -v nvcc 2>/dev/null || true)}
 if [ -z "$NVCC" ] || [ ! -x "$NVCC" ]; then
-  echo "build_777.sh: nvcc not found (use a CUDA-devel Runpod image)" >&2
+  echo "build_777.sh: nvcc not found; use a CUDA-devel image and run cloud/cuda/setup_runpod.sh" >&2
   exit 1
 fi
 

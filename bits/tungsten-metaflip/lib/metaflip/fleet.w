@@ -677,7 +677,7 @@ use paths
         accepted = 1
   accepted
 
--> ffn_build_escape_banks(base, n, capacity, state_size, dslack, cycles, near1, near2, near1_signatures, near1_uses, near1_successes, near2_signatures, near2_uses, near2_successes, symmetry, mixed, orbit_bank, polar_bank, near1_capacity, near2_capacity, signature_quota, symmetry_capacity, near_counters)
+-> ffn_build_escape_banks(base, n, capacity, state_size, dslack, cycles, near1, near2, near1_signatures, near1_uses, near1_successes, near2_signatures, near2_uses, near2_successes, symmetry, mixed, orbit_bank, polar_bank, near1_capacity, near2_capacity, signature_quota, symmetry_capacity, near_counters, campaign_nonce)
   near1.clear
   near2.clear
   near1_signatures.clear
@@ -701,7 +701,8 @@ use paths
   while kind <= 5
     nonce = 0 ## i64
     while nonce < 6
-      c = ffn_escape_state(base, kind, nonce, n, capacity, state_size, 1009 + kind * 97 + nonce, dslack, cycles, work_q, wander_q, 0)
+      identity_nonce = ffcp_campaign_identity_nonce(nonce, campaign_nonce) ## i64
+      c = ffn_escape_state(base, kind, identity_nonce, n, capacity, state_size, ffcp_campaign_seed(1009 + kind * 97 + nonce, campaign_nonce), dslack, cycles, work_q, wander_q, 0)
       if c != nil
         rank = ffw_best_rank(c) ## i64
         z = ffn_bank_add(mixed, c, 32, 2) ## i64
@@ -710,7 +711,7 @@ use paths
         if rank == base_rank + 2
           z = ffbp_near_add_scratch(near2, near2_signatures, near2_uses, near2_successes, c, near2_capacity, signature_quota, 2, near_counters, sig_values, sig_counts, sig_axes)
       if kind == 3 || kind == 4
-        s = ffn_escape_state(base, kind, nonce, n, capacity, state_size, 4001 + kind * 97 + nonce, dslack, cycles, work_q, wander_q, 1)
+        s = ffn_escape_state(base, kind, identity_nonce, n, capacity, state_size, ffcp_campaign_seed(4001 + kind * 97 + nonce, campaign_nonce), dslack, cycles, work_q, wander_q, 1)
         if s != nil
           z = ffn_bank_add(symmetry, s, symmetry_capacity, 2)
           if kind == 3
@@ -725,7 +726,7 @@ use paths
 # The base and every derived state are already exact-gated by the loader or the
 # escape constructor; the explicit C3 checks keep the three algebraic GPU roles
 # from silently falling back to an asymmetric component after a fleet drop.
--> ffn_add_c3_family(base, n, capacity, state_size, dslack, cycles, workq, wanderq, symmetry, orbit_bank, polar_bank, symmetry_capacity)
+-> ffn_add_c3_family(base, n, capacity, state_size, dslack, cycles, workq, wanderq, symmetry, orbit_bank, polar_bank, symmetry_capacity, campaign_nonce)
   added = 0 ## i64
   if base != nil
     if ffn_state_is_c3(base, n, capacity) == 1
@@ -735,7 +736,8 @@ use paths
       while kind <= 4
         nonce = 0 ## i64
         while nonce < 6
-          escaped = ffn_escape_state(base, kind, nonce, n, capacity, state_size, 5003 + kind * 71 + nonce, dslack, cycles, workq, wanderq, 1)
+          identity_nonce = ffcp_campaign_identity_nonce(nonce, campaign_nonce) ## i64
+          escaped = ffn_escape_state(base, kind, identity_nonce, n, capacity, state_size, ffcp_campaign_seed(5003 + kind * 71 + nonce, campaign_nonce), dslack, cycles, workq, wanderq, 1)
           if escaped != nil
             if ffn_bank_add(symmetry, escaped, symmetry_capacity, 2) == 1
               added += 1
@@ -752,7 +754,7 @@ use paths
 # evidence; the cheap `gi` signature attached to CPU provenance below makes
 # that distinction visible without attempting a full GL canonicalizer.
 # counters: attempted seeds, improved images, admitted images, descent steps.
--> ffn_add_global_isotropy_images(sources, mixed, n, capacity, state_size, dslack, cycles, workq, wanderq, counters) i64
+-> ffn_add_global_isotropy_images(sources, mixed, n, capacity, state_size, dslack, cycles, workq, wanderq, counters, campaign_nonce) i64
   source_count = sources.size() ## i64
   admitted = 0 ## i64
   i = 0 ## i64
@@ -760,7 +762,10 @@ use paths
     counters[0] = counters[0] + 1
     candidate = i64[state_size]
     stats = i64[4]
-    improved = ffgir_density_descent_state_into(sources[i], candidate, n, capacity, 57001 + counters[0] * 17, dslack, cycles, workq, wanderq, 32, stats) ## i64
+    image_seed = ffcp_campaign_seed(57001 + counters[0] * 17, campaign_nonce) ## i64
+    improved = ffgir_density_descent_state_into(sources[i], candidate, n, capacity, image_seed, dslack, cycles, workq, wanderq, 32, stats) ## i64
+    if improved > 0 && campaign_nonce != 0
+      improved = ffgir_coordinate_image_state_into(candidate, candidate, n, capacity, image_seed, dslack, cycles, workq, wanderq, 3)
     if improved > 0
       counters[1] = counters[1] + 1
       counters[3] = counters[3] + stats[2]
@@ -2435,9 +2440,9 @@ while frontier_index < frontier_paths.size()
 archive_min_cache = ffn_archive_min_distance(archive) ## i64
 # Algebraic escapes of the live best, then any file-backed shoulder inventory
 # under --near-dir (near1/near2 subdirs written by prior dumps).
-bank_count = ffn_build_escape_banks(best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, near1, near2, near1_signatures, near1_uses, near1_successes, near2_signatures, near2_uses, near2_successes, symmetry, mixed, orbit_bank, polar_bank, near1_capacity, near2_capacity, NEAR_SIGNATURE_QUOTA, SYMMETRY_CAP, near_counters) ## i64
+bank_count = ffn_build_escape_banks(best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, near1, near2, near1_signatures, near1_uses, near1_successes, near2_signatures, near2_uses, near2_successes, symmetry, mixed, orbit_bank, polar_bank, near1_capacity, near2_capacity, NEAR_SIGNATURE_QUOTA, SYMMETRY_CAP, near_counters, SEED_NONCE) ## i64
 global_isotropy_counters = i64[4]
-bank_count += ffn_add_global_isotropy_images(archive, mixed, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, global_isotropy_counters)
+bank_count += ffn_add_global_isotropy_images(archive, mixed, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, global_isotropy_counters, SEED_NONCE)
 if SEED_NAIVE == 0
   # The archive already owns independently full-gated frontier states.  Their
   # 300 derived escapes are expanded in rotating minute-scale batches below;
@@ -2489,7 +2494,7 @@ while archive_index < archive.size()
       c3_base = ffn_clone_trusted(c3, STATE_SIZE, 37 + archive_index)
   archive_index += 1
 
-z = ffn_add_c3_family(c3_base, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, symmetry, orbit_bank, polar_bank, SYMMETRY_CAP) ## i64
+z = ffn_add_c3_family(c3_base, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, symmetry, orbit_bank, polar_bank, SYMMETRY_CAP, SEED_NONCE) ## i64
 
 # Sticky CPU islands.
 states = []
@@ -3524,7 +3529,7 @@ while running == 1
           naive_archive = ffn_clone_trusted(best, STATE_SIZE, 50029 + round * 131)
           if naive_archive != nil
             archive.push(naive_archive)
-          z = ffn_build_escape_banks(best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, near1, near2, near1_signatures, near1_uses, near1_successes, near2_signatures, near2_uses, near2_successes, symmetry, mixed, orbit_bank, polar_bank, near1_capacity, near2_capacity, NEAR_SIGNATURE_QUOTA, SYMMETRY_CAP, near_counters)
+          z = ffn_build_escape_banks(best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, near1, near2, near1_signatures, near1_uses, near1_successes, near2_signatures, near2_uses, near2_successes, symmetry, mixed, orbit_bank, polar_bank, near1_capacity, near2_capacity, NEAR_SIGNATURE_QUOTA, SYMMETRY_CAP, near_counters, SEED_NONCE)
           frontier_escape_admissions.clear
           frontier_escape_last_ms = now_ms
           frontier_escape_source_count = ffn_snapshot_archive_into(frontier_escape_sources, archive, ARCHIVE_CAP, STATE_SIZE, 51801 + round * 131)
@@ -3538,7 +3543,7 @@ while running == 1
           c3_base = nil
           if ffn_state_is_c3(best, N, CAPACITY) == 1
             c3_base = ffn_clone_trusted(best, STATE_SIZE, 50031 + round * 131)
-          z = ffn_add_c3_family(c3_base, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, symmetry, orbit_bank, polar_bank, SYMMETRY_CAP)
+          z = ffn_add_c3_family(c3_base, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, symmetry, orbit_bank, polar_bank, SYMMETRY_CAP, SEED_NONCE)
 
           reset_map_pool = archive
           reset_map_source = 0 ## i64
@@ -3794,7 +3799,7 @@ while running == 1
               symmetry.clear
               orbit_bank.clear
               polar_bank.clear
-              z = ffn_add_c3_family(c3_base, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, symmetry, orbit_bank, polar_bank, SYMMETRY_CAP) ## i64
+              z = ffn_add_c3_family(c3_base, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, symmetry, orbit_bank, polar_bank, SYMMETRY_CAP, SEED_NONCE) ## i64
         # Normalize a would-be fleet improvement within its exact global GL
         # orbit before adoption.  This is a bounded coordinator task, never a
         # random restart and never part of the hot worker loop.
@@ -4041,7 +4046,7 @@ while running == 1
                   symmetry.clear
                   orbit_bank.clear
                   polar_bank.clear
-                  z = ffn_add_c3_family(c3_base, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, symmetry, orbit_bank, polar_bank, SYMMETRY_CAP) ## i64
+                  z = ffn_add_c3_family(c3_base, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, symmetry, orbit_bank, polar_bank, SYMMETRY_CAP, SEED_NONCE) ## i64
                   c3_branch_reward = 1000
                   if old_c3_rank > 0 && gpu_rank < old_c3_rank
                     c3_branch_reward = (old_c3_rank - gpu_rank) * 5000
@@ -4487,8 +4492,8 @@ while running == 1
     frontier_snapshot = ffn_clone_trusted(best, STATE_SIZE, 20001 + round * 47)
     if frontier_snapshot != nil
       z = ffn_archive_add(archive, frontier_snapshot, ARCHIVE_CAP, 4, archive_counters) ## i64
-    z = ffn_build_escape_banks(best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, near1, near2, near1_signatures, near1_uses, near1_successes, near2_signatures, near2_uses, near2_successes, symmetry, mixed, orbit_bank, polar_bank, near1_capacity, near2_capacity, NEAR_SIGNATURE_QUOTA, SYMMETRY_CAP, near_counters) ## i64
-    z = ffn_add_global_isotropy_images(archive, mixed, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, global_isotropy_counters) ## i64
+    z = ffn_build_escape_banks(best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, near1, near2, near1_signatures, near1_uses, near1_successes, near2_signatures, near2_uses, near2_successes, symmetry, mixed, orbit_bank, polar_bank, near1_capacity, near2_capacity, NEAR_SIGNATURE_QUOTA, SYMMETRY_CAP, near_counters, SEED_NONCE) ## i64
+    z = ffn_add_global_isotropy_images(archive, mixed, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, global_isotropy_counters, SEED_NONCE) ## i64
     frontier_escape_admissions.clear
     frontier_escape_last_ms = now_ms
     if SEED_NAIVE == 0
@@ -4497,7 +4502,7 @@ while running == 1
       z = ffps_add_profile_near_seeds(RUNTIME_ROOT, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, near1, near1_signatures, near1_uses, near1_successes, near1_capacity, near2, near2_signatures, near2_uses, near2_successes, near2_capacity, NEAR_SIGNATURE_QUOTA, near_counters) ## i64
     if ffn_state_is_c3(best, N, CAPACITY) == 1
       c3_base = ffn_clone_trusted(best, STATE_SIZE, 20003 + round * 47)
-    z = ffn_add_c3_family(c3_base, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, symmetry, orbit_bank, polar_bank, SYMMETRY_CAP) ## i64
+    z = ffn_add_c3_family(c3_base, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, symmetry, orbit_bank, polar_bank, SYMMETRY_CAP, SEED_NONCE) ## i64
     if GPU == 1
       special_policy = 1 ## i64
       if GPU_POLICY == "single"
@@ -4655,6 +4660,7 @@ while running == 1
     lazy_source_index = frontier_escape_schedule[0] ## i64
     lazy_kind = frontier_escape_schedule[1] ## i64
     lazy_nonce = frontier_escape_schedule[2] ## i64
+    lazy_nonce = ffcp_campaign_identity_nonce(lazy_nonce, SEED_NONCE)
     lazy_source = frontier_escape_sources[lazy_source_index]
     lazy_admitted = fffeb_append_source_kind_nonce(lazy_source, ffw_best_rank(best), lazy_source_index, lazy_kind, lazy_nonce, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, near1, near1_signatures, near1_uses, near1_successes, near1_capacity, near2, near2_signatures, near2_uses, near2_successes, near2_capacity, NEAR_SIGNATURE_QUOTA, 2, near_counters, frontier_escape_counters) ## i64
     frontier_escape_completed_batches += 1

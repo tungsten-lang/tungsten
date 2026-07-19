@@ -49,6 +49,37 @@ use ../fleet/basins
       made += 1
   made
 
+# Build a density-neutral global-isotropy word. Coordinate swaps preserve
+# Hamming weight while changing the concrete embedding seen by local flips,
+# which makes them suitable for campaign-specific restart diversification.
+-> ffgir_make_coordinate_word(n, seed, length, operations, domains, sources, targets) (i64 i64 i64 i64[] i64[] i64[] i64[]) i64
+  if n < 2 || n > 7 || length < 1
+    return 0
+  rng = i64[1]
+  rng[0] = (seed ^ (n * 7046029254386353131)) & 9223372036854775807
+  made = 0 ## i64
+  while made < length
+    domain = ffgir_next(rng) % 3 ## i64
+    source = ffgir_next(rng) % n ## i64
+    target = ffgir_next(rng) % (n - 1) ## i64
+    if target >= source
+      target += 1
+    if source > target
+      swap = source ## i64
+      source = target
+      target = swap
+    duplicate = 0 ## i64
+    if made > 0
+      if domains[made - 1] == domain && sources[made - 1] == source && targets[made - 1] == target
+        duplicate = 1
+    if duplicate == 0
+      operations[made] = 0
+      domains[made] = domain
+      sources[made] = source
+      targets[made] = target
+      made += 1
+  made
+
 -> ffgir_apply_generator(us, vs, ws, rank, n, operation, domain, source, target) (i64[] i64[] i64[] i64 i64 i64 i64 i64 i64) i64
   if rank < 1
     return 0
@@ -274,6 +305,33 @@ use ../fleet/basins
     return 0
   loaded = ffw_init_terms_cap(destination, us, vs, ws, rank, n, capacity, seed, dslack, cycles, workq, wanderq) ## i64
   if loaded != rank || ffw_best_bits(destination) != final_density || ffw_verify_best_exact(destination, n) != 1
+    return 0
+  rank
+
+# Re-embed an exact scheme with a deterministic word of coordinate swaps.
+# Rank and density are invariant; a fresh full gate remains authoritative.
+# `source` and `destination` may alias because terms are exported first.
+-> ffgir_coordinate_image_state_into(source, destination, n, capacity, seed, dslack, cycles, workq, wanderq, length) (i64[] i64[] i64 i64 i64 i64 i64 i64 i64 i64) i64
+  if length < 1
+    return 0
+  if ffw_valid(source) != 1 || ffw_n(source) != n || ffw_verify_best_exact(source, n) != 1
+    return 0
+  rank = ffw_best_rank(source) ## i64
+  before_density = ffw_best_bits(source) ## i64
+  us = i64[capacity]
+  vs = i64[capacity]
+  ws = i64[capacity]
+  if ffw_export_best(source, us, vs, ws) != rank
+    return 0
+  operations = i64[length]
+  domains = i64[length]
+  sources = i64[length]
+  targets = i64[length]
+  made = ffgir_make_coordinate_word(n, seed, length, operations, domains, sources, targets) ## i64
+  if made != length || ffgir_apply_word(us, vs, ws, rank, n, operations, domains, sources, targets, made, 0) != rank
+    return 0
+  loaded = ffw_init_terms_cap(destination, us, vs, ws, rank, n, capacity, seed, dslack, cycles, workq, wanderq) ## i64
+  if loaded != rank || ffw_best_bits(destination) != before_density || ffw_verify_best_exact(destination, n) != 1
     return 0
   rank
 

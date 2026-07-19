@@ -119,6 +119,17 @@
   mixed = (mixed ^ (mixed >> 23) ^ (mixed << 17)) & mask
   (base_seed ^ mixed) & mask
 
+# Offset finite algebraic-identity portfolios as well as their later worker
+# RNG streams.  Without this, separate cloud processes built byte-identical
+# +1/+2 shoulder banks even when --seed-nonce differed.  Keep the offset small
+# enough that escape identities using nonce multiplication cannot overflow;
+# nonce zero remains the historical 0,1,2,... enumeration exactly.
+-> ffcp_campaign_identity_nonce(local_nonce, campaign_nonce) (i64 i64) i64
+  if campaign_nonce == 0
+    return local_nonce
+  offset = (ffcp_campaign_seed(70001, campaign_nonce) % 104729) + 1 ## i64
+  local_nonce + offset
+
 -> ffcp_round_step_range(round_steps, workers, output) (i64[] i64 i64[]) i64
   if workers < 1
     output[0] = 0

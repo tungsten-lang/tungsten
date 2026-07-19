@@ -107,9 +107,11 @@ Square campaigns select their tensor explicitly:
 
 Independent square-fleet shards can use `--seed-nonce N`.  Nonce zero is the
 default and preserves the historical seed choices and RNG trajectory exactly;
-different nonzero values rotate tied seed-bank choices and mix every CPU
-island's initial and restart streams.  This avoids duplicating work when the
-same command is launched in several processes.
+different nonzero values phase the finite +1/+2 algebraic-escape identities,
+apply distinct exact coordinate embeddings to density-normalized seeds, rotate
+tied seed-bank choices, and mix every CPU island's initial and restart streams.
+This avoids duplicating both shoulder banks and later walks when the same
+command is launched in several processes.
 
 The same `--seed-nonce N` control applies to one explicit rectangular
 `--tensor`. It phases every rectangular island's proposal stream while nonce

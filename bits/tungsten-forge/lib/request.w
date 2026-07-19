@@ -32,22 +32,40 @@
   -> content_type
     @headers.get("Content-Type")
 
+  # NOTE: no `&.` below — the self-hosted interpreter does not implement
+  # safe navigation (`Unknown AST node type: safe_nav`; it segfaults when
+  # reached inside a method), so every nil check is written out plainly.
+
   -> content_length
-    @headers.get("Content-Length")&.to_i
+    value = @headers.get("Content-Length")
+    return nil if value == nil
+    value.to_i
 
   -> json?
-    content_type&.include?("application/json")
+    ct = self.content_type
+    return false if ct == nil
+    ct.include?("application/json")
 
   -> form?
-    content_type&.include?("application/x-www-form-urlencoded")
+    ct = self.content_type
+    return false if ct == nil
+    ct.include?("application/x-www-form-urlencoded")
 
   -> websocket_upgrade?
-    @headers.get("Upgrade")&.downcase == "websocket"
+    upgrade = @headers.get("Upgrade")
+    return false if upgrade == nil
+    upgrade.downcase == "websocket"
 
+  # HTTP/1.1 defaults to keep-alive ("Connection: close" opts out);
+  # HTTP/1.0 defaults to close ("Connection: keep-alive" opts in).
   -> keep_alive?
-    case @version
-      "HTTP/1.0" => @headers.get("Connection")&.downcase == "keep-alive"
-      => @headers.get("Connection")&.downcase != "close"
+    token = ""
+    value = @headers.get("Connection")
+    if value != nil
+      token = value.downcase
+    if @version == "HTTP/1.0"
+      return token == "keep-alive"
+    token != "close"
 
   -> json_body
     JSON.parse(@body) if @body && self.json?

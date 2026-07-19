@@ -76,6 +76,28 @@ check("parse post body", post.body == "hello")
 bad = Request.parse("GARBAGE\r\n\r\n")
 check("parse malformed is nil", bad == nil)
 
+# Keep-alive semantics — the server's connection-loop wire-in. (Never
+# chain off a `?` method: `keep_alive?.to_s` lexes as safe navigation,
+# which the interpreter lacks — bind to a local first.)
+ka = Request.parse("GET / HTTP/1.1\r\nHost: x\r\n\r\n").keep_alive?
+check("http11 defaults to keep-alive", ka == true)
+ka = Request.parse("GET / HTTP/1.1\r\nConnection: Close\r\n\r\n").keep_alive?
+check("http11 Connection: close honored", ka == false)
+ka = Request.parse("GET / HTTP/1.0\r\nHost: x\r\n\r\n").keep_alive?
+check("http10 defaults to close", ka == false)
+ka = Request.parse("GET / HTTP/1.0\r\nConnection: keep-alive\r\n\r\n").keep_alive?
+check("http10 keep-alive opt-in", ka == true)
+
+# Request framing (Server.request_length) — buffer carry across reads.
+get1 = "GET /a HTTP/1.1\r\nHost: x\r\n\r\n"
+post1 = "POST /e HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello"
+check("framing empty buffer", Server.request_length("") == 0)
+check("framing partial header", Server.request_length("GET / HTTP/1.1\r\nHost:") == 0)
+check("framing bare GET", Server.request_length(get1) == get1.size)
+check("framing with body", Server.request_length(post1) == post1.size)
+check("framing body incomplete", Server.request_length("POST /e HTTP/1.1\r\nContent-Length: 5\r\n\r\nhel") == 0)
+check("framing pipelined first only", Server.request_length(get1 + post1) == get1.size)
+
 config = Config.new
 check("default port", config.port == 443)
 check("default host", config.host == "0.0.0.0")

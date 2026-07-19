@@ -35,8 +35,8 @@ while i < paths.size()
   z = ffme_add_copy(map_states, map_keys, map_uses, map_sources, state, 247, 7, 64, 0, state_size, 95001 + i) ## i64
   i += 1
 
-failures += ffpait_expect("curated archive starts below cap", archive.size() == 15)
-failures += ffpait_expect("curated MAP descriptors distinct", map_states.size() == 15)
+failures += ffpait_expect("curated archive fills cap", archive.size() == 16)
+failures += ffpait_expect("curated MAP descriptors distinct", map_states.size() == 16)
 
 us = i64[capacity]
 vs = i64[capacity]

@@ -152,7 +152,8 @@ fi
 mkdir -p "$(dirname -- "$OUT")"
 CUDA_ARCH=${METAFLIP_CUDA_ARCH:-native}
 "$NVCC" -x cu -std=c++17 -O3 -lineinfo --ptxas-options=-v -arch="$CUDA_ARCH" \
-  -Xcompiler -Wall -Xcompiler -Wextra -I"$BUILD_DIR" "$HOST_SOURCE" -o "$OUT"
+  -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -Werror \
+  -I"$BUILD_DIR" "$HOST_SOURCE" -o "$OUT"
 
 # This path exercises parsing, exhaustive 7^6 reconstruction, controlled
 # corruption rejection, and atomic checkpoint round-trip without touching the

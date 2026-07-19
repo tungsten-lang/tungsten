@@ -9,9 +9,9 @@ PRIMARY_SEED="$SEED_DIR/matmul_7x7_rank247_d3094_three_flip_density_gf2.txt"
 SEEDS="
 $PRIMARY_SEED
 $SEED_DIR/matmul_7x7_rank247_d3096_dynamic_syzygy_gf2.txt
-$SEED_DIR/matmul_7x7_rank247_d3098_partial_auto_beam_far_gf2.txt
+$SEED_DIR/matmul_7x7_rank247_d3096_partial_auto_beam_far_cuda_epoch1849_gf2.txt
 $SEED_DIR/matmul_7x7_rank247_d3554_outer_isotropy_c013_m7_gf2.txt
-$SEED_DIR/matmul_7x7_rank247_d3098_affine_code_gf2.txt
+$SEED_DIR/matmul_7x7_rank247_d3096_affine_code_cuda_epoch3306_gf2.txt
 "
 TEST_BIN=${TMPDIR:-/tmp}/metaflip-cuda-777-host-test-$$
 ERROR_LOG=${TMPDIR:-/tmp}/metaflip-cuda-777-host-test-error-$$
@@ -19,7 +19,7 @@ EMIT_DIR=${TMPDIR:-/tmp}/metaflip-cuda-777-emit-test-$$
 trap 'rm -f "$TEST_BIN" "$ERROR_LOG"; rm -rf "$EMIT_DIR"' EXIT HUP INT TERM
 
 CXX=${CXX:-c++}
-"$CXX" -x c++ -std=c++17 -O2 -Wall -Wextra -DMETAFLIP_HOST_ONLY_TEST \
+"$CXX" -x c++ -std=c++17 -O2 -Wall -Wextra -Werror -DMETAFLIP_HOST_ONLY_TEST \
   "$HOST_SOURCE" -o "$TEST_BIN"
 for SEED in $SEEDS; do
   "$TEST_BIN" --self-test "$SEED"

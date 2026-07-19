@@ -138,12 +138,23 @@ leader247_rank = ffw_load_scheme_cap(leader247, leader247_path, n, capacity, 751
 failures += ff7t_expect("rank247 leader exact", leader247_rank == 247 && ffw_verify_best_exact(leader247, n) == 1)
 frontier247 = ffp_frontier_seed_paths(7)
 failures += ff7t_expect("fourteen rank247 restart representatives", frontier247.size() == 14)
+beam_child_active = 0 ## i64
+affine_child_active = 0 ## i64
+dominated_parent_active = 0 ## i64
 frontier247_state = i64[state_size]
 i = 0 ## i64
 while i < frontier247.size()
+  if frontier247[i].ends_with?("matmul_7x7_rank247_d3096_partial_auto_beam_far_cuda_epoch1849_gf2.txt")
+    beam_child_active = 1
+  if frontier247[i].ends_with?("matmul_7x7_rank247_d3096_affine_code_cuda_epoch3306_gf2.txt")
+    affine_child_active = 1
+  if frontier247[i].ends_with?("matmul_7x7_rank247_d3098_partial_auto_beam_far_gf2.txt") || frontier247[i].ends_with?("matmul_7x7_rank247_d3098_affine_code_gf2.txt")
+    dominated_parent_active = 1
   frontier247_rank = ffw_load_scheme_cap(frontier247_state, root + "/" + frontier247[i], n, capacity, 761 + i, 4, 4, 1000, 250) ## i64
   failures += ff7t_expect("rank247 restart exact", frontier247_rank == 247 && ffw_verify_best_exact(frontier247_state, n) == 1)
   i += 1
+failures += ff7t_expect("promoted CUDA children active", beam_child_active == 1 && affine_child_active == 1)
+failures += ff7t_expect("dominated provenance parents inactive", dominated_parent_active == 0)
 near1 = []
 signatures1 = []
 uses1 = []

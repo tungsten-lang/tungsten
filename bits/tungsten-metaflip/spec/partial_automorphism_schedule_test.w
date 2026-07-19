@@ -16,7 +16,8 @@ failures += ffpasst_expect("first call due", ffpan_tunnel_due(7, 100, 0 - 1, ffp
 failures += ffpasst_expect("cooldown blocks early call", ffpan_tunnel_due(7, 15099, 100, ffpan_tunnel_cooldown_ms(7)) == 0)
 failures += ffpasst_expect("cooldown opens boundary", ffpan_tunnel_due(7, 15100, 100, ffpan_tunnel_cooldown_ms(7)) == 1)
 
-source_count = 15 ## i64
+source_count = ffp_frontier_seed_paths(7).size() ## i64
+failures += ffpasst_expect("schedule covers full active frontier", source_count == 16)
 generator_count = ffpan_elementary_count(7) ## i64
 schedule = i64[3]
 seen = i64[source_count * generator_count]
@@ -42,8 +43,8 @@ while source_index < source_count
   source_index += 1
 
 # Three supervisor nonces receive disjoint generator starts for the first 32
-# visits to each source (two hours at the 15-second cadence is 32 visits/source
-# for a 15-state frontier). Source phases may reorder calls but not coverage.
+# visits to each source (just over two hours at the 15-second cadence for the
+# current 16-state frontier). Source phases may reorder calls but not coverage.
 cross_seen = i64[source_count * generator_count]
 cross_duplicates = 0 ## i64
 campaign_nonce = 1 ## i64
@@ -69,7 +70,7 @@ failures += ffpasst_expect("non-7x7 schedule rejected", ffpan_portfolio_decode(6
 # rotation and phased nonces through the real arbitrary-cardinality finder.
 root = __DIR__ + "/../lib/metaflip/seeds/gf2/"
 paths = ["matmul_7x7_rank247_d3096_dynamic_syzygy_gf2.txt",
-         "matmul_7x7_rank247_d3098_affine_code_gf2.txt",
+         "matmul_7x7_rank247_d3096_affine_code_cuda_epoch3306_gf2.txt",
          "matmul_7x7_rank247_d3098_global_isotropy_gf2.txt"]
 capacity = 320 ## i64
 state_size = ffw_state_size(capacity) ## i64

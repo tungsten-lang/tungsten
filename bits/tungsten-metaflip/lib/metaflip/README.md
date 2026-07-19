@@ -21,7 +21,8 @@ Metaflip executable:
 - `kernels/` contains the canonical pure-Tungsten runtime workers. Generated
   Metal sources and libraries are redirected to the writable worker cache and
   must never appear here.
-- `seeds/gf2/` holds the 118 exact starting, frontier, and shoulder schemes
+- `seeds/gf2/` holds the exact starting, frontier, shoulder, and explicitly
+  experimental schemes
   selected by the square and rectangular production profiles.
 - `manifests/seeds.tsv` maps every operational seed to its digest and attributed
   path in the separately curated `tungsten-metaflip-results` corpus.
@@ -40,6 +41,15 @@ support distance six from d3096. Independent pure-Tungsten and host-side full
 coefficient gates agree on rank and density. The d3096 parent and a
 structurally distant d3098 scheme remain the next frontier seeds so lower
 density does not erase basin diversity.
+
+The active beam-far and affine-code frontier slots are d3096 presentations
+harvested by the CUDA relay at Runpod epochs 1849 and 3306. Each is a
+three-term exchange at distance six from its retained d3098 provenance parent
+and saves two density bits. The two children have disjoint term supports, so
+the strict density improvements preserve their two independent basins.
+The independently exact d3492 c013 descendant is packaged through
+`ffp_experimental_seed_paths(7)` only: c013 remains active, and the descendant
+does not automatically consume a CPU frontier slot before a continuation A/B.
 
 `strategies/delta_components.w` implements support-component peeling. It
 builds the bounded symmetric difference of two independently exact-gated

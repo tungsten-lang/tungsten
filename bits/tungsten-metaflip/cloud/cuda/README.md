@@ -114,9 +114,9 @@ set -o pipefail
 /workspace/metaflip-cuda-777 \
   --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3094_three_flip_density_gf2.txt \
   --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3096_dynamic_syzygy_gf2.txt \
-  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3098_partial_auto_beam_far_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3096_partial_auto_beam_far_cuda_epoch1849_gf2.txt \
   --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3554_outer_isotropy_c013_m7_gf2.txt \
-  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3098_affine_code_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3096_affine_code_cuda_epoch3306_gf2.txt \
   --out /workspace/results/best.txt \
   --status /workspace/results/status.txt \
   --archive-dir /workspace/results/archive \
@@ -153,6 +153,47 @@ scan/hash visit parity rather than inheriting the global epoch. Adaptive
 preference and even-sized door rotation therefore cannot pin a fertile source
 to only one kernel.
 
+The active beam-far and affine-code roots are exact rank-247/d3096 children
+harvested at epochs 1849 and 3306 of Runpod campaign `7h2j3f0tfwjv0p` from
+source commit `fd25c71`. Their SHA-256 digests are respectively
+`6b308083887f1bab57ddf476afdf4e6ec6f5fca28cc477e6e62e89b413cb3e64` and
+`b8af658635eae896fe7111666925bbd4c6bb65ac1b64a47db8ff3bbb65387b92`.
+Independent support-major and coefficient-major Tungsten gates accept both.
+Each is a three-term exchange at support distance six from its former d3098
+root and saves two density bits. The children are mutually disjoint (distance
+494), so the two strict improvements preserve basin diversity. The old roots
+remain packaged for provenance but must not be launched alongside their
+near-duplicate children.
+
+The exact three-for-three support exchanges are recorded here so the density
+steps can be replayed without relying on archive term order:
+
+```text
+epoch 1849 removes
+  (16777216, 21994569474368, 4330618880)
+  (2164294658, 41951488, 4294967360)
+  (2203335008257, 21994527522880, 4294967360)
+and adds
+  (16777216, 21994569474368, 35651648)
+  (2147517442, 41951488, 4294967360)
+  (2203318231041, 21994527522880, 4294967360)
+
+epoch 3306 removes
+  (67108864, 22578644156672, 41945088)
+  (1099578806276, 584116633600, 2050)
+  (2216270235650, 21994527523072, 2050)
+and adds
+  (67108864, 22578644156672, 41943042)
+  (1099511697412, 584116633600, 2050)
+  (2216203126786, 21994527523072, 2050)
+```
+
+The same campaign's epoch-67 d3492 c013 descendant is packaged as
+`matmul_7x7_rank247_d3492_outer_isotropy_c013_cuda_epoch67_experimental_gf2.txt`.
+It is an explicit continuation experiment, not part of the command below:
+c013 remains the productive root, and the child does not consume an automatic
+CPU frontier slot until its own fertility is measured.
+
 ```bash
 cd /workspace/tungsten
 mkdir -p /workspace/results
@@ -160,9 +201,9 @@ set -o pipefail
 /workspace/metaflip-cuda-777 \
   --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3094_three_flip_density_gf2.txt \
   --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3096_dynamic_syzygy_gf2.txt \
-  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3098_partial_auto_beam_far_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3096_partial_auto_beam_far_cuda_epoch1849_gf2.txt \
   --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3554_outer_isotropy_c013_m7_gf2.txt \
-  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3098_affine_code_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3096_affine_code_cuda_epoch3306_gf2.txt \
   --out /workspace/results/best.txt \
   --status /workspace/results/status.txt \
   --archive-dir /workspace/results/archive \

@@ -193,11 +193,14 @@
     paths.push(base + "matmul_7x7_rank247_d3098_partial_auto_max_distance_gf2.txt")
     paths.push(base + "matmul_7x7_rank247_d3098_partial_auto_min_density_gf2.txt")
     paths.push(base + "matmul_7x7_rank247_d3142_partial_auto_min_weight_gf2.txt")
-    # Depth-four compositions of genuine partial nullspace edges.  Both keep
-    # the former d3098 density leader's rank/density while reaching the maximum
-    # possible set distance 2*247: their term supports are disjoint from it.
+    # Depth-four compositions of genuine partial nullspace edges. Beam-dense
+    # remains at d3098. The beam-far slot uses the independently dual-gated
+    # d3096 CUDA descendant from Runpod epoch 1849: its three-term exchange is
+    # distance six from the old parent, preserves distance 494 from every
+    # other root except beam-dense (316), and strictly saves two density bits.
+    # The dominated d3098 parent remains packaged for provenance, not active.
     paths.push(base + "matmul_7x7_rank247_d3098_partial_auto_beam_dense_gf2.txt")
-    paths.push(base + "matmul_7x7_rank247_d3098_partial_auto_beam_far_gf2.txt")
+    paths.push(base + "matmul_7x7_rank247_d3096_partial_auto_beam_far_cuda_epoch1849_gf2.txt")
     # Three max-distance representatives from the eight unique weighted-outer
     # term sets. They are archive/frontier restart seeds only; the compact
     # d3094 scheme above is the default and therefore gets the hot path.
@@ -214,12 +217,24 @@
     # existing bank.  It is an archive/restart source only; the minute-scale
     # frontier-source scheduler supplies its derived work lazily.
     paths.push(base + "matmul_7x7_rank247_d3098_odd_parent3_gf2.txt")
-    # Large-bank affine-code descent over 164 exact-zero generators.  This
-    # independently gated record-rank/density endpoint is 398 terms from the
-    # density source, at least 56 terms from every generating-bank member, and
-    # outside all of their D3/reversal-canonical identities.  Keep it as a
-    # file-backed low-cadence restart door; no hot walker enumerates the code.
-    paths.push(base + "matmul_7x7_rank247_d3098_affine_code_gf2.txt")
+    # The affine-code slot likewise uses its independently dual-gated d3096
+    # CUDA child from epoch 3306. It is a three-term exchange at distance six
+    # from the d3098 affine-code parent but distance 494 from the beam-far
+    # child, so replacing both dominated parents preserves rather than narrows
+    # the two basins. Keep the old affine-code root packaged for provenance.
+    paths.push(base + "matmul_7x7_rank247_d3096_affine_code_cuda_epoch3306_gf2.txt")
+  paths
+
+# Exact artifacts retained for explicit experiments but deliberately omitted
+# from `ffp_frontier_seed_paths`: they do not consume an automatic CPU archive
+# slot. The d3492 endpoint is a distance-32, 62-bit density descent from c013,
+# whose high-density parent remains active because its measured CUDA novelty
+# yield is exceptional and the child's continuation fertility is not yet known.
+-> ffp_experimental_seed_paths(n) (i64)
+  base = "seeds/gf2/"
+  paths = []
+  if n == 7
+    paths.push(base + "matmul_7x7_rank247_d3492_outer_isotropy_c013_cuda_epoch67_experimental_gf2.txt")
   paths
 
 # Independently exact, structurally distant cross-field shoulders.  These are

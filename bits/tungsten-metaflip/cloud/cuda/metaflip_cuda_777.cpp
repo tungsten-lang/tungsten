@@ -77,6 +77,10 @@ constexpr int kFactorBits = kN * kN;
 constexpr int kCap = 360;
 constexpr int kMaxHarvestTopK = 8;
 constexpr int kDefaultHarvestTopK = kMaxHarvestTopK;
+constexpr size_t kGroupStateWords = 8;
+constexpr size_t kGroupStateCompletedOffset = 7;
+static_assert(kGroupStateCompletedOffset + 1 == kGroupStateWords,
+              "group completion sentinel must end its state record");
 constexpr uint64_t kFactorMask = (uint64_t{1} << kFactorBits) - 1;
 constexpr int kScanSharedBytes = 3 * kCap * static_cast<int>(sizeof(int64_t)) +
                                  6 * static_cast<int>(sizeof(int64_t));
@@ -1668,7 +1672,8 @@ struct CandidateHarvestSummary {
 };
 
 void require_group_state_buffer(const std::vector<int32_t>& states, int groups) {
-  if (groups < 0 || states.size() < static_cast<size_t>(groups) * 8) {
+  if (groups < 0 ||
+      states.size() < static_cast<size_t>(groups) * kGroupStateWords) {
     throw std::invalid_argument("group harvest state buffer is too short");
   }
 }
@@ -1695,8 +1700,8 @@ GroupHarvestSelection select_group_harvest_endpoints(
   GroupHarvestSelection selection;
   selection.selected.reserve(static_cast<size_t>(top_k));
   for (int group = 0; group < groups; ++group) {
-    const size_t base = static_cast<size_t>(group) * 8;
-    if (states[base + 7] != 1) continue;
+    const size_t base = static_cast<size_t>(group) * kGroupStateWords;
+    if (states.at(base + kGroupStateCompletedOffset) != 1) continue;
     const GroupHarvestEndpoint endpoint{group, states[base + 1], states[base + 3]};
     if (endpoint.rank <= 0 || endpoint.rank > kCap) continue;
     if (!selection.has_absolute ||
@@ -1738,8 +1743,12 @@ GroupHarvestSummary summarize_group_harvest(const std::vector<int32_t>& states,
 
   GroupHarvestSummary summary;
   for (int group = 0; group < groups; ++group) {
-    const size_t base = static_cast<size_t>(group) * 8;
-    if (states[base + 7] != 1) continue;
+    const size_t base = static_cast<size_t>(group) * kGroupStateWords;
+    // Keep the record-boundary read checked even though the aggregate buffer
+    // guard above is authoritative. This makes a future host/kernel layout
+    // mismatch fail closed and avoids GCC treating the deliberate short-buffer
+    // self-test as a reachable unchecked read.
+    if (states.at(base + kGroupStateCompletedOffset) != 1) continue;
     ++summary.completed_groups;
 
     const int rank = states[base + 1];
@@ -1985,13 +1994,13 @@ int group_harvest_self_test() {
     throw std::runtime_error("group harvest evidence-backed default is not top-K=8");
   }
 
-  std::vector<int32_t> states(6 * 8, 0);
+  std::vector<int32_t> states(6 * kGroupStateWords, 0);
   auto publish = [&](int group, int rank, int den, int captures, int completed) {
-    const size_t base = static_cast<size_t>(group) * 8;
+    const size_t base = static_cast<size_t>(group) * kGroupStateWords;
     states[base + 1] = rank;
     states[base + 3] = den;
     states[base + 6] = captures;
-    states[base + 7] = completed;
+    states[base + kGroupStateCompletedOffset] = completed;
   };
   publish(0, 247, 3094, 0, 1);  // Completed, but tied and never captured.
   publish(1, 247, 3093, 2, 1);  // Same-rank density improvement.
@@ -2029,12 +2038,12 @@ int group_harvest_self_test() {
   // Equal objectives retain ascending group order. Incomplete and invalid-rank
   // records cannot displace a valid endpoint, and neutral endpoints are not
   // transferred merely because K has spare capacity.
-  std::vector<int32_t> tie_states(7 * 8, 0);
+  std::vector<int32_t> tie_states(7 * kGroupStateWords, 0);
   auto publish_tie = [&](int group, int rank, int den, int completed) {
-    const size_t base = static_cast<size_t>(group) * 8;
+    const size_t base = static_cast<size_t>(group) * kGroupStateWords;
     tie_states[base + 1] = rank;
     tie_states[base + 3] = den;
-    tie_states[base + 7] = completed;
+    tie_states[base + kGroupStateCompletedOffset] = completed;
   };
   publish_tie(0, 247, 3093, 1);
   publish_tie(1, 246, 4000, 1);
@@ -2180,12 +2189,23 @@ int group_harvest_self_test() {
 
   bool short_buffer_rejected = false;
   try {
-    (void)summarize_group_harvest(std::vector<int32_t>(7, 0), 1, 247, 3094);
+    (void)summarize_group_harvest(
+        std::vector<int32_t>(kGroupStateWords - 1, 0), 1, 247, 3094);
   } catch (const std::invalid_argument&) {
     short_buffer_rejected = true;
   }
   if (!short_buffer_rejected) {
     throw std::runtime_error("group harvest summary accepted a short state buffer");
+  }
+
+  std::vector<int32_t> boundary_state(kGroupStateWords, 0);
+  boundary_state[1] = 247;
+  boundary_state[3] = 3094;
+  boundary_state[kGroupStateCompletedOffset] = 1;
+  const GroupHarvestSummary boundary =
+      summarize_group_harvest(boundary_state, 1, 247, 3094);
+  if (boundary.completed_groups != 1 || boundary.improved_groups != 0) {
+    throw std::runtime_error("group harvest rejected one complete state record");
   }
 
   std::cout << "CUDA777_HARVEST_SELF_TEST ok completed=" << epoch.completed_groups
@@ -2355,7 +2375,8 @@ int run_campaign(const Config& config) {
 
   const size_t scheme_values = static_cast<size_t>(config.groups) * kCap;
   const size_t scheme_bytes = scheme_values * sizeof(int64_t);
-  const size_t state_values = static_cast<size_t>(config.groups) * 8;
+  const size_t state_values =
+      static_cast<size_t>(config.groups) * kGroupStateWords;
   const size_t state_bytes = state_values * sizeof(int32_t);
   const size_t seed_bytes = static_cast<size_t>(kCap) * sizeof(int64_t);
   const size_t required = 6 * scheme_bytes + state_bytes + 3 * seed_bytes + 7 * sizeof(int32_t);
@@ -2541,8 +2562,8 @@ int run_campaign(const Config& config) {
     unsigned long long epoch_attempts = 0;
     unsigned long long epoch_partners = 0;
     for (int group = 0; group < config.groups; ++group) {
-      const size_t base = static_cast<size_t>(group) * 8;
-      if (states[base + 7] != 1) continue;
+      const size_t base = static_cast<size_t>(group) * kGroupStateWords;
+      if (states.at(base + kGroupStateCompletedOffset) != 1) continue;
       epoch_attempts += static_cast<unsigned int>(states[base + 4]);
       epoch_partners += static_cast<unsigned int>(states[base + 5]);
     }

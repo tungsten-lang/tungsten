@@ -116,7 +116,115 @@ in Tungsten:Flame
         if line.size() > 0
           result[addrs[k]] = line
       k = k + 1
+
+    # Second pass: addresses the main-binary atos couldn't name are
+    # almost always dyld-shared-cache addresses (system libraries).
+    # The shared cache is mapped at one per-boot-constant slide in
+    # EVERY process, so symbolicating those addresses against our own
+    # live process resolves them correctly — one batched
+    # `atos -p <own pid>` call, no dSYMs or runtime helpers needed.
+    # Addresses outside the cache (the profiled binary's private ASLR
+    # range) echo back as bare hex and simply stay unresolved.
+    unresolved = []
+    u = 0
+    while u < addrs.size()
+      if !result.has_key?(addrs[u]) && self.shared_cache_addr?(addrs[u])
+        unresolved.push(addrs[u])
+      u = u + 1
+    if unresolved.size() > 0
+      pid = self.own_pid()
+      if pid != ""
+        cmd2 = "atos -p " + pid
+        j = 0
+        while j < unresolved.size()
+          cmd2 = cmd2 + " " + unresolved[j]
+          j = j + 1
+        out2 = capture(cmd2 + " 2>/dev/null")
+        if out2 != nil
+          lines2 = out2.split("\n")
+          k = 0
+          while k < lines2.size() && k < unresolved.size()
+            name = self.parse_atos_system_line(lines2[k])
+            if name != nil
+              result[unresolved[k]] = name
+            k = k + 1
     result
+
+  # Our own PID. capture() runs its command via `sh -c`, so $PPID
+  # inside that shell is this process.
+  -> .own_pid()
+    capture("echo $PPID").strip()
+
+  # Hex "0x..." string → integer value. Returns 0 when malformed or
+  # longer than 12 hex digits (2^48) — kernel pointers ("0xfffffe...")
+  # would overflow boxed-Int accumulation, and no user-space address
+  # we care about is that high.
+  -> .hex_to_int(s)
+    if !s.starts_with?("0x") || s.size() > 14
+      return 0
+    n = 0
+    i = 2
+    while i < s.size()
+      c = s.slice(i, 1)
+      d = nil
+      if c >= "0" && c <= "9"
+        d = c.to_i()
+      elsif c == "a" || c == "A"
+        d = 10
+      elsif c == "b" || c == "B"
+        d = 11
+      elsif c == "c" || c == "C"
+        d = 12
+      elsif c == "d" || c == "D"
+        d = 13
+      elsif c == "e" || c == "E"
+        d = 14
+      elsif c == "f" || c == "F"
+        d = 15
+      if d == nil
+        return 0
+      n = n * 16 + d
+      i = i + 1
+    n
+
+  # True when `addr_str` lies inside the arm64 dyld shared region
+  # (base 0x180000000, well under 0x1000000000). Only these addresses
+  # are safe to hand to `atos -p <own pid>`: the shared region sits at
+  # one per-boot-constant slide in every process, while anything else
+  # (the profiled binary, its on-disk dyld) lives at that process's
+  # private ASLR slide — resolving those against our own mappings
+  # could produce confidently wrong names. On non-arm64 hosts nothing
+  # matches and the second pass simply never runs.
+  -> .shared_cache_addr?(addr_str)
+    n = self.hex_to_int(addr_str)
+    n >= 6442450944 && n < 68719476736
+
+  # One `atos -p` output line → frame name, or nil when unresolved
+  # (atos echoes unresolvable addresses back as bare hex).
+  #   "kevent (in libsystem_kernel.dylib) + 8"
+  #     → "libsystem_kernel.dylib`kevent"
+  # The lib`symbol form is the Instruments convention the analyzer
+  # already strips for display (rindex("`")) while categorizers still
+  # see the library name in the raw frame (e.g. libsystem_kernel →
+  # the syscall category).
+  -> .parse_atos_system_line(line)
+    s = line.strip()
+    if s.size() == 0 || s.starts_with?("0x")
+      return nil
+    paren = s.index(" (in ")
+    if paren == nil
+      # Named but no library info — keep the symbol up to any " (".
+      p2 = s.index(" (")
+      if p2 != nil
+        return s.slice(0, p2)
+      return s
+    sym = s.slice(0, paren)
+    rest = s.slice(paren + 5, s.size())
+    close = rest.index(")")
+    if close == nil
+      return sym
+    lib = rest.slice(0, close)
+    lib + "`" + sym
 
   # Multi-metric collapse over the kdebug-counters-with-time-sample schema.
   # `metric_names` maps slot index N to a user-facing metric label.

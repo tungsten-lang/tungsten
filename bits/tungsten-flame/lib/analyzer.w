@@ -15,6 +15,26 @@ in Tungsten:Flame
 
 + FlameAnalyzer
 
+  # Noise threshold for Top Functions lists: an unresolved hex-only
+  # leaf (frame still a raw "0x..." address) under 0.1% of `active` is
+  # dropped from the list — its counts stay in every total — and
+  # tallied so the caller can print an honest "(+N minor unresolved
+  # frames)" note. Named frames and large hex frames always stay.
+  # `sorted_pairs` is a list of [name, count]; returns
+  # [kept_pairs, dropped_count].
+  -> .noise_split(sorted_pairs, active)
+    kept = []
+    dropped = 0
+    i = 0
+    while i < sorted_pairs.size()
+      pair = sorted_pairs[i]
+      if pair[0].starts_with?("0x") && pair[1] * 1000 / active < 1
+        dropped = dropped + 1
+      else
+        kept.push(pair)
+      i = i + 1
+    [kept, dropped]
+
   # Legacy 5-arg surface (pinned by the golden spec in
   # implementations/ruby/spec/flame_analyzer_spec.rb): assumes the folded
   # counts are time-profile samples.
@@ -144,6 +164,11 @@ in Tungsten:Flame
         k = k - 1
       sorted_fns[k + 1] = key_pair
       j = j + 1
+
+    # Drop sub-0.1% unresolved hex leaves from the list (not the totals).
+    noise = self.noise_split(sorted_fns, active)
+    sorted_fns = noise[0]
+    minor_unresolved = noise[1]
 
     # Categorize samples
     -> matches_general(frame)
@@ -281,6 +306,8 @@ in Tungsten:Flame
       fn_color = color ? "\e[38;5;67m" : ""
       << "    " + bold + pct_str + "%" + reset + "  " + fn_color + func_name + reset
       i = i + 1
+    if minor_unresolved > 0
+      << "    " + dim + "(+" + minor_unresolved.to_s() + " minor unresolved frames)" + reset
 
     # Auto-focus: if top function is over 40% and no explicit focus, auto-set
     if focus == "" && sorted_fns.size() > 0
@@ -449,6 +476,7 @@ in Tungsten:Flame
   # + category bars that .display emits for the primary metric.
   -> .display_top_only(stacks_file, top_n, label, color)
     bold  = color ? "\e[1m" : ""
+    dim   = color ? "\e[2m" : ""
     reset = color ? "\e[0m" : ""
     fn_color = color ? "\e[38;5;67m" : ""
 
@@ -512,6 +540,11 @@ in Tungsten:Flame
       sorted[k + 1] = kp
       j = j + 1
 
+    # Drop sub-0.1% unresolved hex leaves from the list (not the totals).
+    noise = self.noise_split(sorted, total)
+    sorted = noise[0]
+    minor_unresolved = noise[1]
+
     << ""
     << "  " + bold + "Top " + label + reset
     limit = top_n
@@ -522,3 +555,5 @@ in Tungsten:Flame
       pct = tpfmt_pct(sorted[i][1], total)
       << "    " + bold + pct + "%" + reset + "  " + fn_color + sorted[i][0] + reset
       i = i + 1
+    if minor_unresolved > 0
+      << "    " + dim + "(+" + minor_unresolved.to_s() + " minor unresolved frames)" + reset

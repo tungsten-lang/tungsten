@@ -10,6 +10,7 @@
 # (Tungsten:Flame:Sampler etc.). Argon is a root-namespace class.
 
 use argon
+use sidemap
 use analyzer
 use perf_script
 use xctrace_xml
@@ -148,11 +149,16 @@ if !metrics.has_key?(primary)
     if !metrics.has_key?(primary)
       primary = metric_names[0]
 
-# Write each metric to its own folded file under tmpdir.
+# Map deduped `__wy_*` symbols back to real names via the sidemap the
+# compiler wrote next to the binary we just built, then write each
+# metric to its own folded file under tmpdir. Rewriting the folded
+# text itself (not just the display) means SVG flame graphs and any
+# later consumer of the .folded files inherit the real names too.
+wy_names = Tungsten:Flame:Sidemap.load(bin_path + ".sidemap")
 i = 0
 while i < metric_names.size
   m = metric_names[i]
-  write_file(tmpdir + "/" + m + ".folded", metrics[m])
+  write_file(tmpdir + "/" + m + ".folded", Tungsten:Flame:Sidemap.rewrite_folded(metrics[m], wy_names))
   i = i + 1
 
 # Full breakdown for primary metric (Top + caller/callee + categories).

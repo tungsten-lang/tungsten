@@ -55,7 +55,7 @@
         raw = arg.slice(2, arg.size)
         defn = find_long(raw)
         if !defn || defn[:negatable]
-          key = arg.slice(5, arg.size).gsub("-", "_")
+          key = replace_all(arg.slice(5, arg.size), "-", "_")
           flags[key] = false
           i = i + 1
           next
@@ -66,13 +66,13 @@
         # --key=value form
         eq = raw.index("=")
         if eq
-          key = raw.slice(0, eq).gsub("-", "_")
+          key = replace_all(raw.slice(0, eq), "-", "_")
           val = raw.slice(eq + 1, raw.size)
           store_option(options, key, cast_option(key, val))
           i = i + 1
           next
 
-        key = raw.gsub("-", "_")
+        key = replace_all(raw, "-", "_")
         defn = find_long(raw)
 
         if defn && defn[:takes_value]
@@ -154,7 +154,7 @@
       existing = options[key]
       if existing
         if val.is_a?(Array)
-          val.each(-> (v) existing.push(v))
+          val.each -> (v) existing.push(v)
         else
           existing.push(val)
       else
@@ -170,6 +170,18 @@
     @manpage
 
   # ---- Private ----
+
+  # Replace every occurrence of `from` in `s` with `to`.
+  # (Pure Tungsten so Argon also runs under the interpreter, which has no gsub.)
+  -> replace_all(s, from, to)
+    out = ""
+    rest = s
+    idx = rest.index(from)
+    while idx
+      out = out + rest.slice(0, idx) + to
+      rest = rest.slice(idx + from.size(), rest.size())
+      idx = rest.index(from)
+    out + rest
 
   -> section_heading(line)
     stripped = line.strip()
@@ -286,19 +298,23 @@
     # Check for decimal: digits with exactly one dot
     dot = s.index(".")
     if dot
-      # Verify all chars are digits or the one dot
+      # Verify all chars are digits plus exactly one dot
+      # (so "1.2.3" stays a string instead of truncating to 1.2)
       ok = true
+      dots = 0
       start = 0
       if s.starts_with?("-")
         start = 1
       i = start
       while i < s.size()
         c = s[i]
-        if c != "." && (c < "0" || c > "9")
+        if c == "."
+          dots = dots + 1
+        elsif c < "0" || c > "9"
           ok = false
           break
         i = i + 1
-      if ok && s.size() > start + 1
+      if ok && dots == 1 && s.size() > start + 1
         return s.to_f()
       return s
     # Check for integer: all digits, optionally with leading -
@@ -357,7 +373,7 @@
       long = d[:long]
       if long
         # Strip --\[no-] prefix for matching
-        clean = long.gsub("\[no-]", "")
+        clean = replace_all(long, "\[no-]", "")
         if clean == name || long == name
           return d
       i = i + 1
@@ -465,14 +481,17 @@
     array = false
 
     # Check for array syntax: [PLACEHOLDER ...]
-    bracket = line.index("\[")
+    # The [no-] of a negatable flag (--\[no-]color) is not a value bracket,
+    # so scan a copy with negation markers removed.
+    scan = replace_all(replace_all(line, "\[no-]", ""), "\[no]", "")
+    bracket = scan.index("\[")
     if bracket
-      ellipsis = line.index("...")
+      ellipsis = scan.index("...")
       if ellipsis && ellipsis > bracket
         array = true
         takes_value = true
       else
-        close = line.index("]")
+        close = scan.index("]")
         if close && close > bracket
           optional_value = true
           takes_value = true
@@ -495,11 +514,11 @@
           raw = flag.slice(2, flag.size())
           if raw.starts_with?("\[no-]") || raw.starts_with?("\[no]")
             negatable = true
-            raw = raw.gsub("\[no-]", "").gsub("\[no]", "")
+            raw = replace_all(replace_all(raw, "\[no-]", ""), "\[no]", "")
             long = raw
           else
             long = raw
-          key = raw.gsub("-", "_")
+          key = replace_all(raw, "-", "_")
 
           # Check for value placeholder (uppercase word after flag)
           if !array && tokens.size() > 1

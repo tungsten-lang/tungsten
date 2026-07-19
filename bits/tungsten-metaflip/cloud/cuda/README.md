@@ -83,8 +83,10 @@ bits/tungsten-metaflip/cloud/cuda/test_777_host.sh
 ```
 
 The host regression exact-gates all five campaign roots, proves that objective
-ordering selects the d3094 certificate as leader, and checks fair rotation over
-the other four roots plus the descendant role.
+ordering selects the d3094 certificate as leader, and checks the fixed role
+quota, initial original-root exploration, productive-root preference,
+deterministic replay, bounded no-starvation exploration, descendant rotation,
+and source-aware density-chain admission.
 
 The relay launch is deliberately one 32-thread warp per CUDA block.  During
 the cloud build, the script fail-closed checks the emitted barrier inventory
@@ -130,12 +132,22 @@ grep -qx 'exact_rejects=0' /workspace/results/status.txt || exit 2
 ## Two-hour RTX 4090 campaign
 
 Use structurally different exact rank-247 doors. Half of all epochs grind the
-current fleet-best checkpoint, one quarter rotates fairly through the other
+current fleet-best checkpoint, one quarter adaptively selects among the other
 command-line roots, and one quarter rotates through diversity-admitted
-descendants. The relay permutes term order on every visit so CUDA RNG streams
-do not repeat. Production uses the faster scan specialization; explicit
+descendants. Every eligible original is tried once before reward selection.
+Thereafter one of every four original-role slots explores the least-recently
+visited source, bounding a continuously eligible source's visit gap by four
+times the eligible-root count. The remaining slots select the best exact-gated
+reward rate: an exact-novel artifact earns one point and a fleet-best earns
+eight additional points. Yield ties go to the least-recent source and then the
+lowest source index, so a fixed run remains deterministic. The relay permutes
+term order on every visit so CUDA RNG streams do not repeat. Production uses
+the faster scan specialization; explicit
 `--mode alternate` remains useful in the smoke test because it exercises both
-kernels independently within every scheduling role.
+kernels independently within every scheduling role. In alternate mode, each
+original source selects scan/hash from its own visit parity rather than the
+global epoch, so adaptive preference cannot alias a fertile root onto only one
+kernel.
 
 ```bash
 cd /workspace/tungsten
@@ -167,6 +179,16 @@ interruption; raw support distance then rebuilds the bounded descendant bank
 farthest-first instead of accepting files by pathname order. Live descendants
 must have support distance at least 12 from every retained door, and a full
 bank changes only when a replacement strictly raises its exact max-min score.
+There is one narrow density-chain fallback after normal admission rejects: an
+objectively better candidate launched from descendant slot `s` may replace
+that same slot while ignoring only its distance to its own parent. It must
+still meet the configured distance floor against every original root and every
+other descendant. Normal append/replacement always takes precedence, and
+`epoch_door_source_replacement=1` distinguishes this fallback from an ordinary
+`epoch_door_action=2+s` replacement. Archive replay first performs the normal
+farthest-first/max-min rebuild, then deterministically advances objective-better
+parent/child chains under the same one-parent exception. Thus a retained child
+does not regress to its worse archived parent after restart.
 Use `--door-min-distance N` to override that measured default. The checkpoint
 is preserved unless a strictly better result appears.
 
@@ -192,6 +214,13 @@ The additive `policy_leader_epochs`, `policy_original_epochs`, and
 `selected_role` and `selected_source` identify the active launch. At every
 completed prefix, leader epochs must be at least half of their sum. Epoch log
 lines repeat the selected role/source and cumulative `policy=L/O/D` counts.
+`original_source_stats` serializes each source as
+`INDEX:vVISITS,nNOVEL,bBEST,pPOINTS,lastSLOT`; `policy_original_slots` and
+`policy_original_explore_every` make the exploration cadence auditable.
+`epoch_door_action`, `epoch_door_score`, and
+`epoch_door_source_replacement` report the current epoch's archive decision;
+they reset while the next epoch is in flight. The epoch log mirrors them as
+`epoch_door_action`, `epoch_door_score`, and `epoch_door_source_replace`.
 
 The build mechanically emits constant scan and hash specializations from the
 same canonical Tungsten kernel. Structural guards reject changed mode geometry,

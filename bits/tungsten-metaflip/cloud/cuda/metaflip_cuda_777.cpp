@@ -420,19 +420,103 @@ struct LaunchChoice {
   size_t source_index = 0;
 };
 
+struct OriginalSourceStats {
+  unsigned long long epochs = 0;
+  unsigned long long exact_novel = 0;
+  unsigned long long fleet_best = 0;
+  unsigned long long last_slot = 0;
+  bool visited = false;
+};
+
+constexpr unsigned long long kOriginalExploreEvery = 4;
+
+unsigned long long original_reward_points(const OriginalSourceStats& stats) {
+  // A world-record improvement is deliberately worth substantially more than
+  // a novel restart door, but both are measured only after the host exact gate.
+  return stats.exact_novel + 8ULL * stats.fleet_best;
+}
+
+std::string original_source_stats_text(const std::vector<OriginalSourceStats>& stats) {
+  std::ostringstream out;
+  for (size_t i = 0; i < stats.size(); ++i) {
+    if (i != 0) out << ';';
+    out << i << ":v" << stats[i].epochs << ",n" << stats[i].exact_novel
+        << ",b" << stats[i].fleet_best << ",p"
+        << original_reward_points(stats[i]) << ",last";
+    if (stats[i].visited) {
+      out << stats[i].last_slot;
+    } else {
+      out << '-';
+    }
+  }
+  return out.str();
+}
+
 // Four fixed epoch roles avoid the old `epoch % doors.size()` feedback bug:
 // appending a productive door used to change the modulus and repeatedly select
-// the same root.  Two slots grind the fleet best, one rotates fairly over the
-// other command-line roots, and one rotates over diversity-admitted children.
+// the same root.  Two slots grind the fleet best, one adaptively selects among
+// the other command-line roots, and one rotates over diversity-admitted children.
 // Empty roles fall back to the leader, so the leader share can rise but can
 // never fall below one half.
 struct LaunchScheduler {
-  size_t original_cursor = 0;
   size_t descendant_cursor = 0;
+  unsigned long long original_slots = 0;
+  std::vector<OriginalSourceStats> original_stats;
+
+  size_t choose_original(const std::vector<size_t>& eligible) {
+    for (const size_t index : eligible) {
+      if (!original_stats[index].visited) return index;
+    }
+
+    // Reserve one in every four original-role slots for oldest-first
+    // exploration.  With E eligible roots, this bounds the gap between visits
+    // to any continuously eligible root by 4E original slots.  Reward slots
+    // use exact-gated yield per visit; oldest-first and then source index make
+    // every tie deterministic and retain round-robin behavior when all yields
+    // are neutral.
+    const bool explore = (original_slots % kOriginalExploreEvery) == 0;
+    size_t best = eligible.front();
+    for (size_t position = 1; position < eligible.size(); ++position) {
+      const size_t candidate = eligible[position];
+      bool take = false;
+      if (explore) {
+        take = original_stats[candidate].last_slot < original_stats[best].last_slot;
+      } else {
+        const unsigned __int128 candidate_reward =
+            static_cast<unsigned __int128>(original_reward_points(original_stats[candidate])) *
+            original_stats[best].epochs;
+        const unsigned __int128 best_reward =
+            static_cast<unsigned __int128>(original_reward_points(original_stats[best])) *
+            original_stats[candidate].epochs;
+        if (candidate_reward != best_reward) {
+          take = candidate_reward > best_reward;
+        } else {
+          take = original_stats[candidate].last_slot < original_stats[best].last_slot;
+        }
+      }
+      if (!take && original_stats[candidate].last_slot == original_stats[best].last_slot) {
+        take = candidate < best;
+      }
+      if (take) best = candidate;
+    }
+    return best;
+  }
+
+  LaunchChoice select_original(size_t index, const std::vector<Scheme>& original_roots) {
+    OriginalSourceStats& stats = original_stats[index];
+    stats.visited = true;
+    stats.last_slot = original_slots;
+    ++stats.epochs;
+    ++original_slots;
+    return {&original_roots[index], LaunchRole::kOriginal, index};
+  }
 
   LaunchChoice choose(long long epoch, const std::vector<Scheme>& original_roots,
                       const std::vector<Scheme>& descendants,
                       const Scheme& global_best) {
+    if (original_stats.size() < original_roots.size()) {
+      original_stats.resize(original_roots.size());
+    }
     const int phase = static_cast<int>(epoch & 3LL);
     if (phase == 0 || phase == 2) {
       return {&global_best, LaunchRole::kLeader, 0};
@@ -445,9 +529,7 @@ struct LaunchScheduler {
         if (canonical_key(original_roots[i]) != leader_key) eligible.push_back(i);
       }
       if (!eligible.empty()) {
-        const size_t index = eligible[original_cursor % eligible.size()];
-        ++original_cursor;
-        return {&original_roots[index], LaunchRole::kOriginal, index};
+        return select_original(choose_original(eligible), original_roots);
       }
       return {&global_best, LaunchRole::kLeader, 0};
     }
@@ -459,6 +541,17 @@ struct LaunchScheduler {
     }
     return {&global_best, LaunchRole::kLeader, 0};
   }
+
+  void observe(const LaunchChoice& choice, bool exact_novel, bool fleet_best) {
+    if (choice.role != LaunchRole::kOriginal) return;
+    if (choice.source_index >= original_stats.size() ||
+        !original_stats[choice.source_index].visited) {
+      throw std::runtime_error("original-source outcome has no scheduled visit");
+    }
+    OriginalSourceStats& stats = original_stats[choice.source_index];
+    if (exact_novel) ++stats.exact_novel;
+    if (fleet_best) ++stats.fleet_best;
+  }
 };
 
 // Role phases are four epochs wide.  Alternate within each role's own visit
@@ -468,6 +561,19 @@ int alternating_partner_mode(long long epoch) {
   const int phase = static_cast<int>(epoch & 3LL);
   if (phase == 0 || phase == 2) return static_cast<int>((epoch / 2) & 1LL);
   return 1 ^ static_cast<int>((epoch / 4) & 1LL);
+}
+
+int scheduled_partner_mode(long long epoch, const LaunchChoice& choice,
+                           const LaunchScheduler& scheduler) {
+  if (choice.role != LaunchRole::kOriginal) return alternating_partner_mode(epoch);
+  if (choice.source_index >= scheduler.original_stats.size() ||
+      scheduler.original_stats[choice.source_index].epochs == 0) {
+    throw std::runtime_error("original source has no visit parity");
+  }
+  // The first visit uses hash (preserving the two-epoch scan/hash smoke), then
+  // every source alternates independently. Adaptive exploitation can therefore
+  // never strand a fertile source on only one partner kernel.
+  return static_cast<int>(scheduler.original_stats[choice.source_index].epochs & 1ULL);
 }
 
 // Score only the replaceable portion of the door bank.  Root/root distances
@@ -496,6 +602,9 @@ struct DoorAdmission {
   // 0 rejects, 1 appends, and 2+ replaces descendant slot action-2.
   int action = 0;
   int score = -1;
+  // True only when an objectively better child replaced its own launch slot
+  // after normal max-min admission rejected it.
+  bool source_replacement = false;
 };
 
 DoorAdmission admit_descendant(const std::vector<Scheme>& roots,
@@ -534,6 +643,36 @@ DoorAdmission admit_descendant(const std::vector<Scheme>& roots,
   return {best_slot + 2, best_score};
 }
 
+DoorAdmission admit_descendant_from_source(const std::vector<Scheme>& roots,
+                                           std::vector<Scheme>& descendants,
+                                           const Scheme& candidate, size_t capacity,
+                                           int min_distance, LaunchRole launch_role,
+                                           size_t source_index) {
+  DoorAdmission admission =
+      admit_descendant(roots, descendants, candidate, capacity, min_distance);
+  if (admission.action != 0 || launch_role != LaunchRole::kDescendant ||
+      source_index >= descendants.size() || capacity == 0) {
+    return admission;
+  }
+
+  // A density/rank improvement can be close to the descendant that produced
+  // it by construction.  Permit that one edge in the chain, but never waive
+  // distance to an immutable root or any other live descendant.
+  if (!objective_better(candidate, descendants[source_index])) return admission;
+  for (const auto& root : roots) {
+    if (support_distance(candidate, root) < min_distance) return admission;
+  }
+  for (size_t i = 0; i < descendants.size(); ++i) {
+    if (i != source_index && support_distance(candidate, descendants[i]) < min_distance) {
+      return admission;
+    }
+  }
+
+  descendants[source_index] = candidate;
+  return {static_cast<int>(source_index) + 2,
+          descendant_bank_score(roots, descendants), true};
+}
+
 // Restart replay is a structural farthest-first rebuild, not lexicographic
 // first-come admission.  Canonical keys break equal-distance ties only after
 // exact support distance has chosen the most novel remaining artifact.
@@ -541,6 +680,7 @@ void rebuild_descendants_diverse(const std::vector<Scheme>& roots,
                                  std::vector<Scheme> candidates,
                                  std::vector<Scheme>& descendants,
                                  size_t capacity, int min_distance) {
+  std::vector<Scheme> chain_candidates = candidates;
   descendants.clear();
   std::sort(candidates.begin(), candidates.end(),
             [](const Scheme& left, const Scheme& right) {
@@ -573,6 +713,39 @@ void rebuild_descendants_diverse(const std::vector<Scheme>& roots,
     for (const auto& candidate : candidates) {
       (void)admit_descendant(roots, descendants, candidate, capacity, min_distance);
     }
+  }
+
+  // Max-min replay intentionally prefers far support, which can otherwise
+  // resurrect a worse parent over its archived density/rank-chain child. Run a
+  // deterministic objective-best pass after the normal rebuild. A candidate
+  // may replace exactly one live door inside the floor (its inferred parent),
+  // and must retain the floor to every root and every other descendant.
+  std::sort(chain_candidates.begin(), chain_candidates.end(),
+            [](const Scheme& left, const Scheme& right) {
+              if (objective_better(left, right)) return true;
+              if (objective_better(right, left)) return false;
+              return canonical_key(left) < canonical_key(right);
+            });
+  for (const auto& candidate : chain_candidates) {
+    bool root_ok = true;
+    for (const auto& root : roots) {
+      if (support_distance(candidate, root) < min_distance) {
+        root_ok = false;
+        break;
+      }
+    }
+    if (!root_ok) continue;
+
+    size_t below_slot = descendants.size();
+    int below_count = 0;
+    for (size_t slot = 0; slot < descendants.size(); ++slot) {
+      if (support_distance(candidate, descendants[slot]) < min_distance) {
+        below_slot = slot;
+        ++below_count;
+      }
+    }
+    if (below_count != 1 || !objective_better(candidate, descendants[below_slot])) continue;
+    descendants[below_slot] = candidate;
   }
 }
 
@@ -653,27 +826,37 @@ int policy_self_test(const std::vector<std::string>& recipe_paths) {
   std::array<std::array<int, 2>, 3> role_modes{};
   std::array<int, 5> root_counts{};
   std::vector<std::pair<int, size_t>> trace;
+  std::vector<int> mode_trace;
+  std::vector<size_t> initial_originals;
   LaunchScheduler scheduler;
   for (long long epoch = 0; epoch < 67; ++epoch) {
     const LaunchChoice choice = scheduler.choose(epoch, roots, scheduled_descendants, root0);
     if (choice.scheme == nullptr) throw std::runtime_error("policy selected a null scheme");
+    const int partner_mode = scheduled_partner_mode(epoch, choice, scheduler);
     ++role_counts[static_cast<size_t>(choice.role)];
     ++role_modes[static_cast<size_t>(choice.role)]
-                [static_cast<size_t>(alternating_partner_mode(epoch))];
-    if (choice.role == LaunchRole::kOriginal) ++root_counts[choice.source_index];
+                [static_cast<size_t>(partner_mode)];
+    if (choice.role == LaunchRole::kOriginal) {
+      ++root_counts[choice.source_index];
+      if (initial_originals.size() < 4) initial_originals.push_back(choice.source_index);
+    }
     trace.push_back({static_cast<int>(choice.role), choice.source_index});
+    mode_trace.push_back(partner_mode);
   }
   if (role_counts[0] != 34 || role_counts[1] != 17 || role_counts[2] != 16 ||
       root_counts[0] != 0 || root_counts[1] != 5 || root_counts[2] != 4 ||
       root_counts[3] != 4 || root_counts[4] != 4) {
     throw std::runtime_error("67-epoch role quota regression");
   }
+  if (initial_originals != std::vector<size_t>({1, 2, 3, 4})) {
+    throw std::runtime_error("adaptive originals skipped initial exploration");
+  }
   for (const auto& modes : role_modes) {
     if (std::abs(modes[0] - modes[1]) > 1) {
       throw std::runtime_error("role became coupled to one partner mode");
     }
   }
-  if (alternating_partner_mode(0) != 0 || alternating_partner_mode(1) != 1) {
+  if (mode_trace[0] != 0 || mode_trace[1] != 1) {
     throw std::runtime_error("two-epoch smoke no longer covers scan and hash");
   }
 
@@ -683,6 +866,10 @@ int policy_self_test(const std::vector<std::string>& recipe_paths) {
     if (trace[static_cast<size_t>(epoch)] !=
         std::make_pair(static_cast<int>(choice.role), choice.source_index)) {
       throw std::runtime_error("role schedule is not deterministic");
+    }
+    if (mode_trace[static_cast<size_t>(epoch)] !=
+        scheduled_partner_mode(epoch, choice, replay)) {
+      throw std::runtime_error("partner-mode schedule is not deterministic");
     }
   }
 
@@ -712,6 +899,87 @@ int policy_self_test(const std::vector<std::string>& recipe_paths) {
       std::max({long_roots[1], long_roots[2], long_roots[3], long_roots[4]});
   if (root_max - root_min > 1) throw std::runtime_error("original roots were not fair");
 
+  // Reproduce the observed campaign shape: source 3 emits three exact-novel
+  // artifacts (including one fleet best), while every other original stays
+  // neutral.  The productive source must win exploitation slots, but the
+  // fixed exploration cadence must bound every neutral source's visit gap.
+  constexpr long long kAdaptiveEpochs = 4099;
+  constexpr unsigned long long kEligibleOriginals = 4;
+  constexpr unsigned long long kMaxOriginalGap =
+      kOriginalExploreEvery * kEligibleOriginals;
+  LaunchScheduler adaptive;
+  std::array<unsigned long long, 5> adaptive_counts{};
+  std::array<unsigned long long, 5> last_visit{};
+  std::array<bool, 5> seen_visit{};
+  std::array<std::array<unsigned long long, 2>, 5> adaptive_modes{};
+  std::vector<std::pair<int, size_t>> adaptive_trace;
+  std::vector<int> adaptive_mode_trace;
+  for (long long adaptive_epoch = 0; adaptive_epoch < kAdaptiveEpochs; ++adaptive_epoch) {
+    const LaunchChoice choice =
+        adaptive.choose(adaptive_epoch, roots, scheduled_descendants, root0);
+    adaptive_trace.push_back({static_cast<int>(choice.role), choice.source_index});
+    const int partner_mode = scheduled_partner_mode(adaptive_epoch, choice, adaptive);
+    adaptive_mode_trace.push_back(partner_mode);
+    if (choice.role != LaunchRole::kOriginal) continue;
+    const unsigned long long slot = adaptive.original_slots - 1;
+    if (seen_visit[choice.source_index] &&
+        slot - last_visit[choice.source_index] > kMaxOriginalGap) {
+      throw std::runtime_error("adaptive original exploration starved a source");
+    }
+    seen_visit[choice.source_index] = true;
+    last_visit[choice.source_index] = slot;
+    ++adaptive_counts[choice.source_index];
+    ++adaptive_modes[choice.source_index][static_cast<size_t>(partner_mode)];
+    // Source 3 is deliberately fertile only in scan mode. Its independent
+    // visit parity must still expose that mode even after reward exploitation
+    // changes the global epoch cadence.
+    const bool exact_novel =
+        choice.source_index == 3 && partner_mode == 0 &&
+        adaptive.original_stats[3].exact_novel < 3;
+    const bool fleet_best = exact_novel && adaptive.original_stats[3].exact_novel == 1;
+    adaptive.observe(choice, exact_novel, fleet_best);
+  }
+  for (size_t source = 1; source < roots.size(); ++source) {
+    if (!seen_visit[source] ||
+        (adaptive.original_slots - 1) - last_visit[source] > kMaxOriginalGap) {
+      throw std::runtime_error("adaptive original exploration has an unbounded tail");
+    }
+    if (adaptive_modes[source][0] == 0 || adaptive_modes[source][1] == 0 ||
+        std::abs(static_cast<long long>(adaptive_modes[source][0]) -
+                 static_cast<long long>(adaptive_modes[source][1])) > 1) {
+      throw std::runtime_error("adaptive source became coupled to one partner mode");
+    }
+  }
+  if (adaptive_counts[3] <= 2 * std::max({adaptive_counts[1], adaptive_counts[2],
+                                          adaptive_counts[4]}) ||
+      adaptive.original_stats[3].exact_novel != 3 ||
+      adaptive.original_stats[3].fleet_best != 1) {
+    throw std::runtime_error("productive original did not earn preferential scheduling");
+  }
+
+  LaunchScheduler adaptive_replay;
+  for (long long adaptive_epoch = 0; adaptive_epoch < kAdaptiveEpochs; ++adaptive_epoch) {
+    const LaunchChoice choice =
+        adaptive_replay.choose(adaptive_epoch, roots, scheduled_descendants, root0);
+    if (adaptive_trace[static_cast<size_t>(adaptive_epoch)] !=
+        std::make_pair(static_cast<int>(choice.role), choice.source_index)) {
+      throw std::runtime_error("adaptive reward schedule is not deterministic");
+    }
+    const int partner_mode =
+        scheduled_partner_mode(adaptive_epoch, choice, adaptive_replay);
+    if (adaptive_mode_trace[static_cast<size_t>(adaptive_epoch)] != partner_mode) {
+      throw std::runtime_error("adaptive partner-mode replay is not deterministic");
+    }
+    if (choice.role == LaunchRole::kOriginal) {
+      const bool exact_novel =
+          choice.source_index == 3 && partner_mode == 0 &&
+          adaptive_replay.original_stats[3].exact_novel < 3;
+      adaptive_replay.observe(
+          choice, exact_novel,
+          exact_novel && adaptive_replay.original_stats[3].exact_novel == 1);
+    }
+  }
+
   const Scheme bank_root0 = policy_test_scheme({1, 2, 3, 4, 5, 6, 7, 8, 9, 10});
   const Scheme bank_root1 =
       policy_test_scheme({101, 102, 103, 104, 105, 106, 107, 108, 109, 110});
@@ -737,9 +1005,58 @@ int policy_self_test(const std::vector<std::string>& recipe_paths) {
   if (admission.action != 1 || admission.score != 12 || bank.size() != 2) {
     throw std::runtime_error("max-min policy boundary admission failed");
   }
-  admission = admit_descendant(bank_roots, bank, child_c, 2, 12);
-  if (admission.action != 2 || admission.score != 20 || bank[0].terms != child_c.terms) {
+  admission = admit_descendant_from_source(bank_roots, bank, child_c, 2, 12,
+                                            LaunchRole::kDescendant, 0);
+  if (admission.action != 2 || admission.score != 20 || admission.source_replacement ||
+      bank[0].terms != child_c.terms) {
     throw std::runtime_error("max-min policy failed deterministic diversity eviction");
+  }
+
+  const Scheme chain_parent =
+      policy_test_scheme({601, 602, 603, 604, 605, 606, 607, 608, 609, 610});
+  const Scheme chain_other =
+      policy_test_scheme({701, 702, 703, 704, 705, 706, 707, 708, 709, 710});
+  const Scheme chain_child =
+      policy_test_scheme({601, 602, 603, 604, 605, 606, 607, 608, 609});
+  std::vector<Scheme> chain_bank = {chain_parent, chain_other};
+  admission = admit_descendant_from_source(bank_roots, chain_bank, chain_child, 2, 12,
+                                            LaunchRole::kDescendant, 0);
+  if (admission.action != 2 || !admission.source_replacement || admission.score != 19 ||
+      chain_bank[0].terms != chain_child.terms) {
+    throw std::runtime_error("source-aware density chain did not replace its parent");
+  }
+
+  const Scheme too_close_to_other =
+      policy_test_scheme({701, 702, 703, 704, 705, 706, 707, 708, 709});
+  chain_bank = {chain_parent, chain_other};
+  admission = admit_descendant_from_source(bank_roots, chain_bank, too_close_to_other, 2, 12,
+                                            LaunchRole::kDescendant, 0);
+  if (admission.action != 0 || admission.source_replacement ||
+      chain_bank[0].terms != chain_parent.terms) {
+    throw std::runtime_error("source-aware replacement waived another-door distance");
+  }
+
+  chain_bank = {chain_parent, chain_other};
+  admission = admit_descendant_from_source(bank_roots, chain_bank, chain_parent, 2, 12,
+                                            LaunchRole::kDescendant, 0);
+  if (admission.action != 0 || admission.source_replacement) {
+    throw std::runtime_error("source-aware replacement accepted a non-improvement");
+  }
+
+  const Scheme too_close_to_root =
+      policy_test_scheme({1, 2, 3, 4, 5, 6, 7, 8, 9});
+  chain_bank = {chain_parent, chain_other};
+  admission = admit_descendant_from_source(bank_roots, chain_bank, too_close_to_root, 2, 12,
+                                            LaunchRole::kDescendant, 0);
+  if (admission.action != 0 || admission.source_replacement) {
+    throw std::runtime_error("source-aware replacement waived a root distance");
+  }
+
+  chain_bank = {chain_parent, chain_other};
+  admission = admit_descendant_from_source(bank_roots, chain_bank, chain_child, 2, 12,
+                                            LaunchRole::kOriginal, 0);
+  if (admission.action != 0 || admission.source_replacement) {
+    throw std::runtime_error("source-aware replacement escaped its descendant role");
   }
 
   std::vector<Scheme> replay_forward;
@@ -755,6 +1072,50 @@ int policy_self_test(const std::vector<std::string>& recipe_paths) {
   if (replay_forward.size() != 2 || forward_keys != reverse_keys ||
       descendant_bank_score(bank_roots, replay_forward) != 20) {
     throw std::runtime_error("archive replay was path-order-dependent or non-diverse");
+  }
+
+  std::vector<Scheme> chain_replay_forward;
+  std::vector<Scheme> chain_replay_reverse;
+  rebuild_descendants_diverse(bank_roots, {chain_parent, chain_child, chain_other},
+                              chain_replay_forward, 2, 12);
+  rebuild_descendants_diverse(bank_roots, {chain_other, chain_child, chain_parent},
+                              chain_replay_reverse, 2, 12);
+  std::set<std::string> chain_forward_keys;
+  std::set<std::string> chain_reverse_keys;
+  for (const auto& item : chain_replay_forward) {
+    chain_forward_keys.insert(canonical_key(item));
+  }
+  for (const auto& item : chain_replay_reverse) {
+    chain_reverse_keys.insert(canonical_key(item));
+  }
+  const std::set<std::string> expected_chain_keys = {
+      canonical_key(chain_child), canonical_key(chain_other)};
+  if (chain_forward_keys != expected_chain_keys ||
+      chain_reverse_keys != expected_chain_keys ||
+      descendant_bank_score(bank_roots, chain_replay_forward) != 19) {
+    throw std::runtime_error("archive replay resurrected a density-chain parent");
+  }
+
+  const Scheme close_to_parent_and_other =
+      policy_test_scheme({601, 602, 603, 604, 701, 702, 703, 704, 705});
+  std::vector<Scheme> guarded_replay;
+  rebuild_descendants_diverse(
+      bank_roots, {chain_parent, chain_other, close_to_parent_and_other},
+      guarded_replay, 2, 12);
+  std::set<std::string> guarded_keys;
+  for (const auto& item : guarded_replay) guarded_keys.insert(canonical_key(item));
+  const std::set<std::string> expected_parent_keys = {
+      canonical_key(chain_parent), canonical_key(chain_other)};
+  if (guarded_keys != expected_parent_keys) {
+    throw std::runtime_error("archive chain advancement waived a second-door distance");
+  }
+
+  rebuild_descendants_diverse(bank_roots, {chain_parent, chain_other, too_close_to_root},
+                              guarded_replay, 2, 12);
+  guarded_keys.clear();
+  for (const auto& item : guarded_replay) guarded_keys.insert(canonical_key(item));
+  if (guarded_keys != expected_parent_keys) {
+    throw std::runtime_error("archive chain advancement waived a root distance");
   }
 
   if (!recipe_paths.empty()) {
@@ -800,6 +1161,10 @@ int policy_self_test(const std::vector<std::string>& recipe_paths) {
             << " originals=" << role_counts[1] << " descendants=" << role_counts[2]
             << " root_counts=" << root_counts[1] << ',' << root_counts[2] << ','
             << root_counts[3] << ',' << root_counts[4]
+            << " adaptive_counts=" << adaptive_counts[1] << ',' << adaptive_counts[2]
+            << ',' << adaptive_counts[3] << ',' << adaptive_counts[4]
+            << " adaptive_reward=" << original_reward_points(adaptive.original_stats[3])
+            << " max_gap=" << kMaxOriginalGap << " source_replace=1"
             << " min_distance=12 eviction_score=" << admission.score << '\n';
   return 0;
 }
@@ -935,11 +1300,22 @@ volatile sig_atomic_t stop_requested = 0;
 
 struct PolicyTelemetry {
   std::array<unsigned long long, 3> role_epochs{};
+  unsigned long long original_slots = 0;
+  std::vector<OriginalSourceStats> original_stats;
   LaunchRole selected_role = LaunchRole::kLeader;
   size_t selected_source = 0;
   int selected_mode = -1;
+  int epoch_door_action = 0;
+  int epoch_door_score = -1;
+  bool epoch_door_source_replacement = false;
   bool has_selection = false;
 };
+
+[[maybe_unused]] void sync_original_telemetry(PolicyTelemetry& policy,
+                                              const LaunchScheduler& scheduler) {
+  policy.original_slots = scheduler.original_slots;
+  policy.original_stats = scheduler.original_stats;
+}
 
 [[maybe_unused]] std::string status_body(const std::string& phase, long long epoch,
                                          int dispatch, long long elapsed_ms,
@@ -961,6 +1337,9 @@ struct PolicyTelemetry {
     out << "policy_leader_epochs=" << policy->role_epochs[0]
         << "\npolicy_original_epochs=" << policy->role_epochs[1]
         << "\npolicy_descendant_epochs=" << policy->role_epochs[2]
+        << "\npolicy_original_slots=" << policy->original_slots
+        << "\npolicy_original_explore_every=" << kOriginalExploreEvery
+        << "\noriginal_source_stats=" << original_source_stats_text(policy->original_stats)
         << "\nselected_role="
         << (policy->has_selection ? launch_role_name(policy->selected_role) : "none")
         << "\nselected_source=";
@@ -977,7 +1356,10 @@ struct PolicyTelemetry {
     } else {
       out << "none";
     }
-    out << '\n';
+    out << "\nepoch_door_action=" << policy->epoch_door_action
+        << "\nepoch_door_score=" << policy->epoch_door_score
+        << "\nepoch_door_source_replacement="
+        << (policy->epoch_door_source_replacement ? 1 : 0) << '\n';
   }
   if (!detail.empty()) out << "detail=" << detail << '\n';
   return out.str();
@@ -987,16 +1369,27 @@ int policy_status_self_test() {
   const Scheme best = policy_test_scheme({1, 2, 3});
   PolicyTelemetry policy;
   policy.role_epochs = {34, 17, 16};
+  policy.original_slots = 17;
+  policy.original_stats.resize(3);
+  policy.original_stats[1] = {4, 0, 0, 12, true};
+  policy.original_stats[2] = {13, 3, 1, 16, true};
   policy.selected_role = LaunchRole::kDescendant;
   policy.selected_source = 7;
   policy.selected_mode = 1;
+  policy.epoch_door_action = 4;
+  policy.epoch_door_score = 19;
+  policy.epoch_door_source_replacement = true;
   policy.has_selection = true;
   const std::string body = status_body("epoch", 66, 5, 1234, best, 16, 99, 100, 10,
                                        4, 0, "exact-novel", &policy);
-  const std::array<std::string, 6> required = {
+  const std::array<std::string, 12> required = {
       "policy_leader_epochs=34\n", "policy_original_epochs=17\n",
       "policy_descendant_epochs=16\n", "selected_role=descendant\n",
-      "selected_source=7\n", "selected_kernel=hash\n"};
+      "policy_original_slots=17\n", "policy_original_explore_every=4\n",
+      "original_source_stats=0:v0,n0,b0,p0,last-;1:v4,n0,b0,p0,last12;"
+      "2:v13,n3,b1,p11,last16\n",
+      "selected_source=7\n", "selected_kernel=hash\n", "epoch_door_action=4\n",
+      "epoch_door_score=19\n", "epoch_door_source_replacement=1\n"};
   for (const auto& field : required) {
     if (body.find(field) == std::string::npos) {
       throw std::runtime_error("policy status telemetry field is missing");
@@ -1237,6 +1630,8 @@ int run_campaign(const Config& config) {
   unsigned long long aggregate_partners = 0;
   LaunchScheduler scheduler;
   PolicyTelemetry policy;
+  scheduler.original_stats.resize(original_roots.size());
+  sync_original_telemetry(policy, scheduler);
 
   write_text_atomic(config.status_path,
                     status_body("ready", 0, 0, 0, global_best,
@@ -1258,6 +1653,10 @@ int run_campaign(const Config& config) {
     policy.selected_source = choice.source_index;
     policy.has_selection = true;
     ++policy.role_epochs[static_cast<size_t>(choice.role)];
+    policy.epoch_door_action = 0;
+    policy.epoch_door_score = -1;
+    policy.epoch_door_source_replacement = false;
+    sync_original_telemetry(policy, scheduler);
     const uint64_t source_tag =
         (static_cast<uint64_t>(static_cast<int>(choice.role)) << 32) ^ choice.source_index;
     const uint64_t salt = run_seed ^ 0x9e3779b97f4a7c15ULL ^
@@ -1280,7 +1679,8 @@ int run_campaign(const Config& config) {
 
     int mode = 0;
     if (config.mode == "hash" ||
-        (config.mode == "alternate" && alternating_partner_mode(epoch) != 0)) {
+        (config.mode == "alternate" &&
+         scheduled_partner_mode(epoch, choice, scheduler) != 0)) {
       mode = 1;
     }
     policy.selected_mode = mode;
@@ -1352,6 +1752,8 @@ int run_campaign(const Config& config) {
                                 best_density < launch_density);
     std::string outcome = "neutral";
     DoorAdmission door_admission;
+    bool epoch_exact_novel = false;
+    bool epoch_fleet_best = false;
     if (claimed_improvement) {
       Scheme candidate;
       candidate.source = "cuda epoch " + std::to_string(epoch);
@@ -1403,24 +1805,33 @@ int run_campaign(const Config& config) {
       ++candidates;
       const std::string key = canonical_key(candidate);
       if (known.insert(key).second) {
+        epoch_exact_novel = true;
         std::ostringstream name;
         const uint64_t digest = key_digest(key);
         name << config.archive_dir << "/epoch-" << std::setw(8) << std::setfill('0') << epoch
              << "-r" << candidate.terms.size() << "-d" << computed_density << "-h"
              << std::hex << std::setw(16) << std::setfill('0') << digest << ".txt";
         write_scheme_atomic(name.str(), candidate);
-        door_admission = admit_descendant(original_roots, descendants, candidate,
-                                           descendant_capacity, config.door_min_distance);
+        door_admission = admit_descendant_from_source(
+            original_roots, descendants, candidate, descendant_capacity,
+            config.door_min_distance, choice.role, choice.source_index);
         outcome = "exact-novel";
       } else {
         outcome = "exact-duplicate";
       }
       if (objective_better(candidate, global_best)) {
+        epoch_fleet_best = true;
         global_best = candidate;
         write_scheme_atomic(config.out_path, global_best);
         outcome = "fleet-best";
       }
     }
+
+    scheduler.observe(choice, epoch_exact_novel, epoch_fleet_best);
+    sync_original_telemetry(policy, scheduler);
+    policy.epoch_door_action = door_admission.action;
+    policy.epoch_door_score = door_admission.score;
+    policy.epoch_door_source_replacement = door_admission.source_replacement;
 
     const long long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                                   std::chrono::steady_clock::now() - started)
@@ -1440,8 +1851,12 @@ int run_campaign(const Config& config) {
               << " attempts=" << epoch_attempts << " partners=" << epoch_partners
               << " policy=" << policy.role_epochs[0] << '/' << policy.role_epochs[1]
               << '/' << policy.role_epochs[2]
-              << " door_action=" << door_admission.action
-              << " door_score=" << door_admission.score
+              << " epoch_door_action=" << door_admission.action
+              << " epoch_door_score=" << door_admission.score
+              << " epoch_door_source_replace="
+              << (door_admission.source_replacement ? 1 : 0)
+              << " original_sources="
+              << original_source_stats_text(policy.original_stats)
               << " result=" << outcome << std::endl;
 
     ++epoch;

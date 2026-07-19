@@ -458,6 +458,54 @@ trait Enumerable
       i++
 
     __enumerable_each(consumer)
+
+  # Prefix of elements for which the block holds; stops collecting at the
+  # first element that fails (the `taking` latch mirrors Ruby's take_while).
+  -> take_while(&block) []
+    pairs = __enumerable_yields_pair?
+    taking = true
+    consumer = -> (first, second)
+      if taking
+        item = first
+        if pairs
+          item = [first, second]
+        if block(item)
+          out.push(item)
+        else
+          taking = false
+
+    __enumerable_each(consumer)
+
+  # Suffix of elements from the first one that fails the block onward. Drops
+  # while the block holds, then keeps everything (Ruby drop_while).
+  -> drop_while(&block) []
+    pairs = __enumerable_yields_pair?
+    dropping = true
+    consumer = -> (first, second)
+      item = first
+      if pairs
+        item = [first, second]
+      if !dropping
+        out.push(item)
+      elsif !block(item)
+        dropping = false
+        out.push(item)
+
+    __enumerable_each(consumer)
+
+  # Call block(element, memo) for each element and return memo — the standard
+  # accumulate-into-a-mutable-object fold (Ruby each_with_object).
+  -> each_with_object(memo, &block)
+    pairs = __enumerable_yields_pair?
+    consumer = -> (first, second)
+      item = first
+      if pairs
+        item = [first, second]
+      block(item, memo)
+
+    __enumerable_each(consumer)
+    memo
+
   -> empty?
     consumer = -> (first, second)
       return false

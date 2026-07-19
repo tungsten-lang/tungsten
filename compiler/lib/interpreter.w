@@ -40,6 +40,8 @@ use target
     # (mirrors the compiled path's end-of-main drain). Single-threaded, so
     # they run to completion in spawn order — cooperative, not preemptive.
     @goroutines = []
+    # Class currently being defined (for `@@cvar` in class body statements).
+    @defining_class = nil
     seed_primitive_class_stubs()
 
   -> argv
@@ -412,10 +414,20 @@ use target
       return eval_call(node, env)
     if t == :method_def
       return eval_method_def(node, env)
+    if t == :fn_def
+      return eval_fn_def(node, env)
     if t == :class_def
       return eval_class_def(node, env)
     if t == :trait_def
       return eval_trait_def(node, env)
+    if t == :with || t == :parallel_with
+      # Tree-walker runs with/parallel_with serially (no real parallel
+      # scheduler); same output as lower_with's nested range loops.
+      return eval_with(node, env)
+    if t == :duration
+      return eval_duration(node)
+    if t == :cvar
+      return eval_cvar(node)
     if t == :block
       return [env, node]
     if t == :puts
@@ -1395,6 +1407,46 @@ use target
       return obj[:ivars][name]
     nil
 
+  # Class variables (`@@name`). Stored on the WClass under :cvars (stripped
+  # of the `@@` prefix). Resolve the owning class from the method being
+  # executed, the class currently under definition, or a class-method self.
+  -> cvar_owner_class
+    m = @method_stack.last()
+    if m != nil && m[:w_class] != nil
+      return m[:w_class]
+    s = current_self()
+    if s != nil && type(s) == "Hash"
+      if s.has_key?(:w_class)
+        return s[:w_class]
+      if s.has_key?(:rt) && s[:rt] == :class
+        return s
+    if @defining_class != nil
+      return @defining_class
+    nil
+
+  -> cvar_key(name)
+    if name.starts_with?("@@")
+      return name.slice(2, name.size() - 2)
+    name
+
+  -> eval_cvar(node)
+    w_class = cvar_owner_class()
+    if w_class == nil
+      raise "class variable outside of a class"
+    key = cvar_key(ast_get(node, :name))
+    if w_class[:cvars] == nil
+      return nil
+    w_class[:cvars][key]
+
+  -> set_cvar(name, value)
+    w_class = cvar_owner_class()
+    if w_class == nil
+      raise "class variable assignment outside of a class"
+    if w_class[:cvars] == nil
+      w_class[:cvars] = {}
+    w_class[:cvars][cvar_key(name)] = value
+    value
+
   # An unset $global reads as nil (matches Ruby) rather than raising —
   # unlike eval_var's undefined-name error path, since there's no
   # "did you mean a bare method call" ambiguity for a $-sigiled name.
@@ -1460,6 +1512,10 @@ use target
       if obj == nil || type(obj) != "Hash" || !obj.has_key?(:rt) || obj[:rt] != :object
         raise "Instance variable assignment outside of object context"
       obj[:ivars][ast_get(target, :name)] = value
+      return value
+
+    if ast_kind(target) == :cvar
+      set_cvar(ast_get(target, :name), value)
       return value
 
     if ast_kind(target) == :call
@@ -2250,6 +2306,16 @@ use target
       if m != nil && primitive_class[:name] == "StringBuffer"
         method_body = m[:body]
         if method_body == nil || method_body.size() == 0
+          # Bodyless native declarations fall through to runtime. `append`
+          # must mutate via w_strbuf_append (not String#concat).
+          if name == "append" && args.size() == 1
+            ccall("w_strbuf_append", recv, w_to_s(args[0]))
+            return recv
+          if name == "<<" && args.size() == 1
+            ccall("w_strbuf_append", recv, w_to_s(args[0]))
+            return recv
+          if name == "to_s" && args.size() == 0
+            return ccall("w_strbuf_to_s", recv)
           m = nil
       # Mmap likewise mixes one source leaf with retained native declarations.
       # Empty declarations are runtime fallthroughs, not nil-returning bodies.
@@ -2391,8 +2457,30 @@ use target
     if is_builtin?(name)
       return dispatch_builtin(self, name, recv, args, block)
 
-    # Index operators
+    # Index operators. Arrays need Ruby `[]` semantics the tree-walker's host
+    # `recv[idx]` does not reproduce here: a negative index wraps from the end
+    # and a Range argument returns a sub-array slice (both work on the compiled
+    # path via w_array_get / a runtime slice, but returned nil/empty under -e).
     if name == "\[]"
+      if type(recv) == "Array" && args.size() == 1
+        idx = args[0]
+        if type(idx) == "Hash" && idx.has_key?(:rt) && idx[:rt] == :range
+          asz = recv.size()
+          af = idx[:from]
+          af = af < 0 ? af + asz : af
+          at = idx[:to] == nil ? asz - 1 : idx[:to]
+          at = at < 0 ? at + asz : at
+          at = idx[:exclusive] == true ? at - 1 : at
+          out = []
+          k = af
+          while k <= at && k < asz
+            out.push(recv[k]) if k >= 0
+            k += 1
+          return out
+        if type(idx) == "Integer" && idx < 0
+          nidx = idx + recv.size()
+          return nil if nidx < 0
+          return recv[nidx]
       return recv[args[0]]
     if name == "\[]="
       recv[args[0]] = args[1]
@@ -2827,6 +2915,10 @@ use target
     if w_class[:method_overloads] == nil
       w_class[:method_overloads] = {}
 
+    prev_defining = @defining_class
+    @defining_class = w_class
+    if w_class[:cvars] == nil
+      w_class[:cvars] = {}
     expand_trait_includes(ast_get(node, :body)).each -> (expr)
       if ast_kind(expr) == :method_def
         mbody = register_trailing_accessors(expr, ast_get(expr, :body), w_class)
@@ -2837,6 +2929,10 @@ use target
           register_instance_method(w_class, w_method)
       elsif ast_kind(expr) == :view_decl && ast_get(expr, :kind) == "struct"
         register_data_field_accessors(expr, w_class)
+      elsif ast_kind(expr) == :call && ast_get(expr, :receiver) == nil && (ast_get(expr, :name) == "ro" || ast_get(expr, :name) == "rw")
+        # Standalone class-body `ro :name` / `rw :name` — synthesize accessors
+        # (mirrors expand_class_body_accessors / lower_accessors).
+        register_class_body_accessors(expr, w_class)
       else
         # Declarative class-body pragmas (noncommutative / noassoc / runtime …)
         # are bare receiver-less calls the interpreter has no handler for. The
@@ -2846,7 +2942,48 @@ use target
         # leaves the class a method-less husk (autoload's rescue then hides it).
         if !(ast_kind(expr) == :call && ast_get(expr, :receiver) == nil)
           evaluate(expr, env)
+    @defining_class = prev_defining
     w_class
+
+  # Standalone `ro :x, :y` / `rw :x` in a class body → getter (and setter for
+  # rw) methods reading `@x` ivars. Args are Symbol nodes (`:name`).
+  -> register_class_body_accessors(expr, w_class)
+    writable = ast_get(expr, :name) == "rw"
+    args = ast_get(expr, :args)
+    default_expr = ast_get(expr, :default)
+    if args == nil
+      return nil
+    i = 0
+    while i < args.size()
+      arg = args[i]
+      field = nil
+      if is_ast_node?(arg)
+        if ast_kind(arg) == :symbol
+          field = "" + ast_get(arg, :value).to_s()
+        elsif ast_kind(arg) == :var
+          field = "" + ast_get(arg, :name).to_s()
+        else
+          field = "" + evaluate(arg, Environment.new()).to_s()
+      else
+        field = "" + arg.to_s()
+      # Symbol may print as ":name" — strip leading colon
+      if field.starts_with?(":")
+        field = field.slice(1, field.size() - 1)
+      ivar = "@" + field
+      if !w_class[:methods].has_key?(field)
+        getter_body = [Tungsten:AST:Ivar.new(ivar)]
+        if default_expr != nil
+          default_check = Tungsten:AST:If.new(Tungsten:AST:BinaryOp.new(Tungsten:AST:Ivar.new(ivar), :EQ, Tungsten:AST:Nil.new), [Tungsten:AST:Assign.new(Tungsten:AST:Ivar.new(ivar), default_expr)], [], nil)
+          getter_body = [default_check, Tungsten:AST:Ivar.new(ivar)]
+        reader = {rt: :method, name: field, params: [], body: getter_body, w_class: w_class}
+        register_instance_method(w_class, reader)
+      if writable
+        sname = field + "="
+        if !w_class[:methods].has_key?(sname)
+          writer = {rt: :method, name: sname, params: [Tungsten:AST:Param.new("value", nil, false)], body: [Tungsten:AST:Assign.new(Tungsten:AST:Ivar.new(ivar), Tungsten:AST:Var.new("value"))], w_class: w_class}
+          register_instance_method(w_class, writer)
+      i += 1
+    nil
 
   # `-> new(@x, @y) ro` — a bare ro/rw body statement marks the @-bound
   # params for accessor generation (readers; rw adds writers). Registers the
@@ -2909,6 +3046,193 @@ use target
       w_method = {rt: :method, name: ast_get(node, :name), params: ast_get(node, :params), body: ast_get(node, :body)}
       @env.define("__method__" + ast_get(node, :name), w_method)
     ast_get(node, :name)
+
+  # `fn name(args) ...` — pure/memoized at compile time; the tree-walker
+  # registers the same global method table entry as `-> name` without memo
+  # tables (correct results; memo is an optimization, not a semantic require).
+  -> eval_fn_def(node, env)
+    w_method = {rt: :method, name: ast_get(node, :name), params: ast_get(node, :params), body: ast_get(node, :body)}
+    @env.define("__method__" + ast_get(node, :name), w_method)
+    ast_get(node, :name)
+
+  # `with i in 1..3` / `parallel_with` — bind each range (or array) element and
+  # run the body. Nested bindings form nested loops (outer → inner).
+  -> eval_with(node, env)
+    bindings = ast_get(node, :bindings)
+    body = ast_get(node, :body)
+    if bindings == nil || bindings.size() == 0
+      return evaluate_body(body, env)
+    eval_with_bindings(bindings, 0, body, env)
+
+  -> eval_with_bindings(bindings, index, body, env)
+    if index >= bindings.size()
+      return evaluate_body(body, env)
+    binding = bindings[index]
+    var_node = binding[0]
+    collection = binding[1]
+    name = ast_get(var_node, :name)
+    last = nil
+    # Range form
+    if is_ast_node?(collection) && ast_kind(collection) == :range
+      from_v = evaluate(ast_get(collection, :from), env)
+      exclusive = ast_get(collection, :exclusive) == true
+      to_node = ast_get(collection, :to)
+      if to_node == nil
+        # Right-unbounded: iterate until break
+        i = from_v
+        while true
+          env.set(name, i)
+          begin
+            last = eval_with_bindings(bindings, index + 1, body, env)
+          rescue err
+            if err == "__SIGNAL__" && @signal[:type] == :break
+              @signal[:type] = nil
+              return @signal[:value]
+            if err == "__SIGNAL__" && @signal[:type] == :next
+              @signal[:type] = nil
+              i += 1
+              next
+            raise err
+          i += 1
+        return last
+      to_v = evaluate(to_node, env)
+      i = from_v
+      while (exclusive && i < to_v) || (!exclusive && i <= to_v)
+        env.set(name, i)
+        begin
+          last = eval_with_bindings(bindings, index + 1, body, env)
+        rescue err
+          if err == "__SIGNAL__" && @signal[:type] == :break
+            @signal[:type] = nil
+            return @signal[:value]
+          if err == "__SIGNAL__" && @signal[:type] == :next
+            @signal[:type] = nil
+            i += 1
+            next
+          raise err
+        i += 1
+      return last
+    # Evaluated range object or array
+    coll = evaluate(collection, env)
+    if type(coll) == "Hash" && coll.has_key?(:rt) && coll[:rt] == :range
+      from_v = coll[:from]
+      to_v = coll[:to]
+      exclusive = coll[:exclusive] == true
+      if to_v == nil
+        i = from_v
+        while true
+          env.set(name, i)
+          begin
+            last = eval_with_bindings(bindings, index + 1, body, env)
+          rescue err
+            if err == "__SIGNAL__" && @signal[:type] == :break
+              @signal[:type] = nil
+              return @signal[:value]
+            if err == "__SIGNAL__" && @signal[:type] == :next
+              @signal[:type] = nil
+              i += 1
+              next
+            raise err
+          i += 1
+        return last
+      i = from_v
+      while (exclusive && i < to_v) || (!exclusive && i <= to_v)
+        env.set(name, i)
+        begin
+          last = eval_with_bindings(bindings, index + 1, body, env)
+        rescue err
+          if err == "__SIGNAL__" && @signal[:type] == :break
+            @signal[:type] = nil
+            return @signal[:value]
+          if err == "__SIGNAL__" && @signal[:type] == :next
+            @signal[:type] = nil
+            i += 1
+            next
+          raise err
+        i += 1
+      return last
+    # Array / enumerable
+    items = coll
+    if type(items) != "Array"
+      raise "with: expected range or array"
+    j = 0
+    while j < items.size()
+      env.set(name, items[j])
+      begin
+        last = eval_with_bindings(bindings, index + 1, body, env)
+      rescue err
+        if err == "__SIGNAL__" && @signal[:type] == :break
+          @signal[:type] = nil
+          return @signal[:value]
+        if err == "__SIGNAL__" && @signal[:type] == :next
+          @signal[:type] = nil
+          j += 1
+          next
+        raise err
+      j += 1
+    last
+
+  # Duration literal (`2h30m`, `500ms`) → runtime Duration WValue.
+  -> eval_duration(node)
+    raw = "" + ast_get(node, :raw).to_s()
+    parsed = interp_parse_duration(raw)
+    if parsed[:mode] == 0
+      return ccall("w_duration_ns", parsed[:ns])
+    ccall("w_duration_months_ms", parsed[:months], parsed[:ms])
+
+  # Mirror of lowering/literals.w parse_duration — kept local so the
+  # interpreter does not depend on the lowering chain.
+  -> interp_parse_duration(raw)
+    total_months = 0
+    total_ms = 0
+    total_ns = 0
+    has_calendar = false
+    has_ns = false
+    pos = 0
+    chars = raw.chars()
+    while pos < chars.size()
+      num_str = ""
+      while pos < chars.size() && chars[pos] >= "0" && chars[pos] <= "9"
+        num_str += chars[pos]
+        pos += 1
+      num = num_str.to_i()
+      if pos + 1 < chars.size() && chars[pos] == "m" && chars[pos + 1] == "o"
+        total_months += num
+        has_calendar = true
+        pos += 2
+      elsif pos + 1 < chars.size() && chars[pos] == "m" && chars[pos + 1] == "s"
+        total_ms += num
+        pos += 2
+      elsif pos + 1 < chars.size() && chars[pos] == "n" && chars[pos + 1] == "s"
+        total_ns += num
+        has_ns = true
+        pos += 2
+      elsif pos < chars.size() && chars[pos] == "y"
+        total_months += num * 12
+        has_calendar = true
+        pos += 1
+      elsif pos < chars.size() && chars[pos] == "w"
+        total_ms += num * 7 * 24 * 3600 * 1000
+        pos += 1
+      elsif pos < chars.size() && chars[pos] == "d"
+        total_ms += num * 24 * 3600 * 1000
+        pos += 1
+      elsif pos < chars.size() && chars[pos] == "h"
+        total_ms += num * 3600 * 1000
+        pos += 1
+      elsif pos < chars.size() && chars[pos] == "m"
+        total_ms += num * 60 * 1000
+        pos += 1
+      elsif pos < chars.size() && chars[pos] == "s"
+        total_ms += num * 1000
+        pos += 1
+      else
+        raise "Invalid duration unit in '[raw]'"
+    if has_calendar || (!has_ns && total_ms > 0)
+      return {mode: 1, months: total_months, ms: total_ms}
+    if has_ns || total_ns > 0
+      return {mode: 0, ns: total_ns + total_ms * 1000000}
+    {mode: 1, months: 0, ms: total_ms}
 
   -> eval_on_guard(node, env)
     target = detect_target()
@@ -3000,20 +3324,26 @@ use target
     sub_parts.shift()
     sub_path = sub_parts.join("/")
 
-    bit_home = env("BIT_HOME")
-    if bit_home == nil
-      project_root = find_use_project_root(base_dir)
-      if project_root != ""
-        bit_home = project_root + "/bits"
+    # Same order as loader.w: vendor/bits (bit install) → BIT_HOME → bits/
+    project_root = find_use_project_root(base_dir)
+    if project_root != ""
+      found = resolve_use_bit(bit_name, sub_path, project_root + "/vendor/bits")
+      if found != nil
+        return found
 
+    bit_home = env("BIT_HOME")
     if bit_home != nil
       found = resolve_use_bit(bit_name, sub_path, bit_home)
       if found != nil
         return found
 
+    if project_root != ""
+      found = resolve_use_bit(bit_name, sub_path, project_root + "/bits")
+      if found != nil
+        return found
+
     # Standard library: project_root/core/<path>.w first, then
     # project_root/lib/<path>.w for backward compat during migration.
-    project_root = find_use_project_root(base_dir)
     if project_root != ""
       core_candidate = project_root + "/core/" + use_path + ".w"
       if read_file(core_candidate) != nil

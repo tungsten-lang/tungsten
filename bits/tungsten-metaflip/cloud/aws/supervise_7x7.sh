@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NUMA-local, fail-closed supervisor for a sharded 7x7 GF(2) Metaflip hunt.
+# NUMA-local, fail-closed supervisor for a sharded square GF(2) Metaflip hunt.
 # Target host: m8i.96xlarge (six NUMA nodes, 64 logical CPUs per node).
 
 set -Eeuo pipefail
@@ -12,7 +12,8 @@ PACKAGE_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 PROGRAM=${0##*/}
 BINARY=${METAFLIP_BINARY:-}
 RUNTIME_INPUT=${METAFLIP_RUNTIME_ROOT:-"$PACKAGE_ROOT/lib/metaflip"}
-STATE_ROOT=${METAFLIP_STATE_ROOT:-"${XDG_STATE_HOME:-${HOME:-/tmp}/.local/state}/metaflip/7x7-sharded"}
+STATE_ROOT=${METAFLIP_STATE_ROOT:-}
+STATE_ROOT_EXPLICIT=0
 LOG_ROOT=${METAFLIP_LOG_ROOT:-}
 LOG_ROOT_EXPLICIT=0
 SEED_DIR=""
@@ -32,15 +33,20 @@ SEED_NONCE_MODE=auto
 DRY_RUN=0
 CAMPAIGN_TAG=""
 
-TARGET_RANK=246
+TENSOR=7x7
 RECORD_RANK=247
+TARGET_RANK=246
+
+case "$STATE_ROOT" in '') ;; *) STATE_ROOT_EXPLICIT=1 ;; esac
+case "$LOG_ROOT" in '') ;; *) LOG_ROOT_EXPLICIT=1 ;; esac
 
 usage() {
   cat <<'EOF'
 Usage: supervise_7x7.sh --binary PATH [OPTIONS]
 
-Launch and supervise NUMA-local 7x7 CPU shards. Defaults are tuned for the
-upper half (nodes 3,4,5) of a six-node m8i.96xlarge:
+Launch and supervise NUMA-local square CPU shards for GF(2) matrix
+multiplication. The default remains the 7x7 campaign tuned for the upper half
+(nodes 3,4,5) of a six-node m8i.96xlarge:
 
   1 shard per node, -J 64 per shard, 2 hours, CPU only
   node 3/4/5 step budgets 48000011/50000021/52000031
@@ -49,10 +55,11 @@ Required:
   --binary PATH              Native Metaflip coordinator executable
 
 Campaign paths and duration:
+  --tensor NxN               Square tensor, 2x2 through 7x7 (default: 7x7)
   --runtime-root PATH        Package, lib, or lib/metaflip root
   --state-root PATH          Parent for state/, best/, status/, near/, winner/
   --log-root PATH            Shard logs (default: STATE_ROOT/log)
-  --seed-dir PATH            Curated exact rank-247 seed directory
+  --seed-dir PATH            Curated exact record-rank seed directory
   --seconds N                Supervisor wall deadline; 0 means no deadline
   --campaign-tag TAG         Durable tag (default includes UTC timestamp + PID)
 
@@ -75,6 +82,9 @@ Other:
 
 Every child exact-gates its explicit seed. Any malformed/inexact seed, early
 child exit, stale heartbeat, or observable OOM drains the entire campaign.
+
+Built-in GF(2) record ranks are 7, 23, 47, 93, 153, and 247 for 2x2 through
+7x7 respectively. A winner is any exact scheme one rank below that baseline.
 EOF
 }
 
@@ -102,9 +112,15 @@ while [ "$#" -gt 0 ]; do
       RUNTIME_INPUT=$2
       shift 2
       ;;
+    --tensor)
+      [ "$#" -ge 2 ] || die "--tensor requires NxN"
+      TENSOR=$2
+      shift 2
+      ;;
     --state-root)
       [ "$#" -ge 2 ] || die "--state-root requires PATH"
       STATE_ROOT=$2
+      STATE_ROOT_EXPLICIT=1
       shift 2
       ;;
     --log-root)
@@ -193,6 +209,21 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+case "$TENSOR" in
+  2x2) RECORD_RANK=7 ;;
+  3x3) RECORD_RANK=23 ;;
+  4x4) RECORD_RANK=47 ;;
+  5x5) RECORD_RANK=93 ;;
+  6x6) RECORD_RANK=153 ;;
+  7x7) RECORD_RANK=247 ;;
+  *) die "--tensor must be square 2x2 through 7x7 (got '$TENSOR')" ;;
+esac
+TARGET_RANK=$((RECORD_RANK - 1))
+
+if [ "$STATE_ROOT_EXPLICIT" -eq 0 ]; then
+  STATE_ROOT="${XDG_STATE_HOME:-${HOME:-/tmp}/.local/state}/metaflip/${TENSOR}-sharded"
+fi
+
 require_uint --seconds "$DURATION"
 require_uint --shards-per-node "$SHARDS_PER_NODE"
 require_uint --walkers "$WALKERS"
@@ -216,7 +247,7 @@ case "$CAMPAIGN_TAG" in
   *[!A-Za-z0-9_.-]*) die "--campaign-tag may contain only letters, digits, '.', '_', and '-'" ;;
 esac
 if [ -z "$CAMPAIGN_TAG" ]; then
-  CAMPAIGN_TAG="aws_7x7_sharded_$(date -u +%Y%m%dT%H%M%SZ)_$$"
+  CAMPAIGN_TAG="aws_${TENSOR}_sharded_$(date -u +%Y%m%dT%H%M%SZ)_$$"
 fi
 
 [ -n "$BINARY" ] || die "--binary PATH is required (use a native release build)"
@@ -346,21 +377,33 @@ SEEDS=()
 # Globbing is disabled globally so status tokens and CSV values cannot expand
 # against the working directory. Enable it only for this quoted seed prefix.
 set +f
-for candidate in "$SEED_DIR"/matmul_7x7_rank247*_gf2.txt; do
+for candidate in "$SEED_DIR"/matmul_"$TENSOR"_rank"$RECORD_RANK"*_gf2.txt; do
   [ -f "$candidate" ] || continue
   rank=$(scheme_declared_rank "$candidate")
-  [ "$rank" -eq "$RECORD_RANK" ] || die "rank-247 seed has structural rank $rank: $candidate"
+  [ "$rank" -eq "$RECORD_RANK" ] || \
+    die "$TENSOR rank-$RECORD_RANK seed has structural rank $rank: $candidate"
   SEEDS[${#SEEDS[@]}]=$candidate
 done
 set -f
-[ "${#SEEDS[@]}" -gt 0 ] || die "no matmul_7x7_rank247*_gf2.txt seeds in $SEED_DIR"
+[ "${#SEEDS[@]}" -gt 0 ] || \
+  die "no matmul_${TENSOR}_rank${RECORD_RANK}*_gf2.txt seeds in $SEED_DIR"
 TOTAL_CHILDREN=$(( ${#NODES[@]} * SHARDS_PER_NODE ))
-required_seeds=$SHARDS_PER_NODE
-if [ "${#NODES[@]}" -gt "$required_seeds" ]; then
-  required_seeds=${#NODES[@]}
+# A small square may have fewer curated record representatives than NUMA
+# nodes. Unique shard nonces (or the legacy per-node step jitter) still give
+# repeated anchors independent streams. Without nonce support, multiple
+# shards on one node need distinct seeds because their node cadence is shared.
+required_seeds=1
+if [ "$TENSOR" = 7x7 ]; then
+  # Preserve the original 7x7 launcher's stronger anchor-diversity gate.
+  required_seeds=$SHARDS_PER_NODE
+  if [ "${#NODES[@]}" -gt "$required_seeds" ]; then
+    required_seeds=${#NODES[@]}
+  fi
+elif [ "$seed_nonce_available" -eq 0 ] && [ "$SHARDS_PER_NODE" -gt 1 ]; then
+  required_seeds=$SHARDS_PER_NODE
 fi
 [ "${#SEEDS[@]}" -ge "$required_seeds" ] || \
-  die "need at least $required_seeds rank-247 seeds for distinct default node anchors and same-node starts (found ${#SEEDS[@]})"
+  die "need at least $required_seeds $TENSOR rank-$RECORD_RANK seeds for this topology (found ${#SEEDS[@]})"
 
 shard_id_for() {
   printf 'n%s-s%02d' "$1" "$2"
@@ -386,7 +429,7 @@ build_child_command() {
   CHILD_COMMAND=(
     setsid numactl "--cpunodebind=$node" "--membind=$node"
     "$BINARY"
-    --tensor 7x7
+    --tensor "$TENSOR"
     --runtime-root "$RUNTIME_ROOT"
     --seed "$seed"
     -J "$WALKERS"
@@ -430,8 +473,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
   else
     diversity=per-node-steps
   fi
-  printf 'DRY_RUN campaign=%s children=%d nodes=%s shards_per_node=%d walkers=%d seconds=%d diversity=%s seeds=%d\n' \
-    "$CAMPAIGN_TAG" "$TOTAL_CHILDREN" "$NODES_CSV" "$SHARDS_PER_NODE" "$WALKERS" "$DURATION" "$diversity" "${#SEEDS[@]}"
+  printf 'DRY_RUN campaign=%s tensor=%s record_rank=%d target_rank=%d children=%d nodes=%s shards_per_node=%d walkers=%d seconds=%d diversity=%s seeds=%d\n' \
+    "$CAMPAIGN_TAG" "$TENSOR" "$RECORD_RANK" "$TARGET_RANK" "$TOTAL_CHILDREN" "$NODES_CSV" "$SHARDS_PER_NODE" "$WALKERS" "$DURATION" "$diversity" "${#SEEDS[@]}"
   global_shard=0
   node_index=0
   while [ "$node_index" -lt "${#NODES[@]}" ]; do
@@ -726,7 +769,7 @@ write_supervisor_status() {
   STATUS_SEQUENCE=$((STATUS_SEQUENCE + 1))
   tmp="$SUPERVISOR_STATUS.tmp.$$.$STATUS_SEQUENCE"
   printf '%s\n' \
-    "schema=1 producer_state=$producer_state updated_epoch=$now sequence=$STATUS_SEQUENCE campaign=$CAMPAIGN_TAG tensor=7x7 target_rank=$TARGET_RANK elapsed=$elapsed deadline_epoch=$deadline child_count=$LAUNCHED expected_count=$TOTAL_CHILDREN running_count=$RUNNING_COUNT status_count=$STATUS_COUNT stale_count=$STALE_COUNT total_moves=$TOTAL_MOVES best_rank=$AGG_BEST best_bits=$AGG_BEST_BITS best_count=$AGG_BEST_COUNT winner_count=$WINNER_PRESERVED oom_vm=$VM_OOM_NOW oom_cgroup=$CG_OOM_NOW oom_kill_cgroup=$CG_OOM_KILL_NOW reason=$reason" \
+    "schema=1 producer_state=$producer_state updated_epoch=$now sequence=$STATUS_SEQUENCE campaign=$CAMPAIGN_TAG tensor=$TENSOR record_rank=$RECORD_RANK target_rank=$TARGET_RANK elapsed=$elapsed deadline_epoch=$deadline child_count=$LAUNCHED expected_count=$TOTAL_CHILDREN running_count=$RUNNING_COUNT status_count=$STATUS_COUNT stale_count=$STALE_COUNT total_moves=$TOTAL_MOVES best_rank=$AGG_BEST best_bits=$AGG_BEST_BITS best_count=$AGG_BEST_COUNT winner_count=$WINNER_PRESERVED oom_vm=$VM_OOM_NOW oom_cgroup=$CG_OOM_NOW oom_kill_cgroup=$CG_OOM_KILL_NOW reason=$reason" \
     > "$tmp"
   mv -f -- "$tmp" "$SUPERVISOR_STATUS"
 }

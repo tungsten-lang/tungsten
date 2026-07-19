@@ -14,6 +14,8 @@ FAKE_BINARY="$TMP_ROOT/metaflip"
 OUTPUT="$TMP_ROOT/dry-run.txt"
 NONCE_OUTPUT="$TMP_ROOT/dry-run-nonce.txt"
 MISMATCH_OUTPUT="$TMP_ROOT/dry-run-mismatch.txt"
+SQUARE_OUTPUT="$TMP_ROOT/dry-run-4x4.txt"
+INVALID_OUTPUT="$TMP_ROOT/invalid-tensor.txt"
 
 mkdir -p "$SEEDS"
 : > "$RUNTIME/fleet.w"
@@ -32,6 +34,21 @@ while [ "$seed" -lt 3 ]; do
   fi
   row=0
   while [ "$row" -lt 247 ]; do
+    printf '1 1 1\n' >> "$path"
+    row=$((row + 1))
+  done
+  seed=$((seed + 1))
+done
+
+# A smaller square deliberately has fewer curated anchors than the six-node
+# production topology. The generic supervisor must rotate them while shard
+# nonces keep repeated anchors independent.
+seed=0
+while [ "$seed" -lt 2 ]; do
+  path=$(printf '%s/matmul_4x4_rank47_fixture%02d_gf2.txt' "$SEEDS" "$seed")
+  printf '47\n' > "$path"
+  row=0
+  while [ "$row" -lt 47 ]; do
     printf '1 1 1\n' >> "$path"
     row=$((row + 1))
   done
@@ -109,6 +126,45 @@ nonce_count=$(grep -c -- '--seed-nonce ' "$NONCE_OUTPUT" || true)
 expect 'all three shards receive unique nonce arguments' test "$nonce_count" -eq 3
 common_count=$(grep -c -- '--steps 500000' "$NONCE_OUTPUT" || true)
 expect 'nonce mode uses common adaptive nominal steps' test "$common_count" -eq 3
+
+# Exercise the generic square contract through a 4x4 campaign with more NUMA
+# shards than curated record representatives. No paths are created in dry-run.
+XDG_STATE_HOME="$TMP_ROOT/xdg" "$SUPERVISOR" \
+  --dry-run \
+  --binary "$FAKE_BINARY" \
+  --runtime-root "$RUNTIME" \
+  --tensor 4x4 \
+  --nodes 0,1,2,3,4,5 \
+  --seconds 19 \
+  --campaign-tag square-campaign \
+  > "$SQUARE_OUTPUT"
+expect '4x4 selects the GF(2) record and strict improvement target' \
+  grep -q -- 'tensor=4x4 record_rank=47 target_rank=46' "$SQUARE_OUTPUT"
+square_count=$(grep -c '^DRY_RUN shard=' "$SQUARE_OUTPUT" || true)
+expect '4x4 emits one shard on each requested NUMA node' test "$square_count" -eq 6
+square_tensor_count=$(grep -c -- '--tensor 4x4' "$SQUARE_OUTPUT" || true)
+expect 'every 4x4 child receives the selected tensor' test "$square_tensor_count" -eq 6
+square_nonce_count=$(grep -c -- '--seed-nonce ' "$SQUARE_OUTPUT" || true)
+expect 'repeated 4x4 anchors still receive unique shard nonces' test "$square_nonce_count" -eq 6
+square_seed_count=$(grep '^DRY_RUN shard=' "$SQUARE_OUTPUT" | sed 's/.* seed=\([^ ]*\) state=.*/\1/' | sort -u | wc -l | tr -d ' ')
+expect '4x4 rotates both curated record representatives' test "$square_seed_count" -eq 2
+expect '4x4 derives an isolated default state root' \
+  grep -q -- "state=$TMP_ROOT/xdg/metaflip/4x4-sharded/state/" "$SQUARE_OUTPUT"
+expect 'generic dry-run writes no default state root' test ! -e "$TMP_ROOT/xdg"
+
+if "$SUPERVISOR" \
+  --dry-run \
+  --binary "$FAKE_BINARY" \
+  --runtime-root "$RUNTIME" \
+  --tensor 4x5 \
+  > "$INVALID_OUTPUT" 2>&1; then
+  invalid_rc=0
+else
+  invalid_rc=$?
+fi
+expect 'nonsquare tensor is rejected before launch' test "$invalid_rc" -eq 2
+expect 'nonsquare rejection is explicit' \
+  grep -q -- '--tensor must be square 2x2 through 7x7' "$INVALID_OUTPUT"
 
 if [ "$failures" -ne 0 ]; then
   printf 'FAIL: %d supervisor dry-run assertion(s)\n' "$failures" >&2

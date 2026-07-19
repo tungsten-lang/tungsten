@@ -1,8 +1,9 @@
-# AWS 7x7 sharded CPU campaign
+# AWS sharded square CPU campaigns
 
-`supervise_7x7.sh` runs a fail-closed, NUMA-local portfolio of independent
-Metaflip coordinators. Its defaults target a six-NUMA-node `m8i.96xlarge` and
-use the upper half of the machine:
+`supervise_7x7.sh` is the fail-closed, NUMA-local square-campaign supervisor.
+The historical filename remains compatible; `--tensor` selects any supported
+square from `2x2` through `7x7`. Its no-argument tensor default remains `7x7`,
+targeting a six-NUMA-node `m8i.96xlarge` and the upper half of the machine:
 
 - nodes `3,4,5`;
 - one full-NUMA shard per node (three independent fleets total);
@@ -25,8 +26,25 @@ moves, the best rank/density, counts of live/healthy shards, and OOM counters.
 An early child exit, stale status, or observable kernel/cgroup OOM drains the
 whole campaign. `INT`, `TERM`, `HUP`, and the wall deadline first request a
 clean epoch-boundary stop, then use `KILL` only after the drain grace expires.
-Any rank at most 246 is copied immediately to `winner/` before the other shards
-are drained.
+Any rank at or below the selected target is copied immediately to `winner/`
+before the other shards are drained.
+
+For a selected square, the supervisor chooses the corresponding GF(2) record
+and strict-improvement target:
+
+```text
+tensor       2x2  3x3  4x4  5x5  6x6  7x7
+record rank    7   23   47   93  153  247
+target rank    6   22   46   92  152  246
+```
+
+Only record-rank files matching `matmul_NxN_rankR*_gf2.txt` are eligible as
+anchors, and each child exact-gates its chosen file. Smaller tensors may have
+fewer curated representatives than NUMA nodes. The supervisor rotates those
+anchors; current binaries give every shard a unique `--seed-nonce`, while the
+legacy fallback uses distinct per-node step budgets. State defaults to a
+tensor-specific path such as `~/.local/state/metaflip/4x4-sharded`, so campaigns
+for different squares cannot resume one another accidentally.
 
 ## Launch on the large host
 
@@ -38,6 +56,20 @@ bits/tungsten-metaflip/cloud/aws/supervise_7x7.sh \
   --runtime-root /home/ubuntu/tungsten/bits/tungsten-metaflip \
   --state-root /var/lib/metaflip/7x7-sharded \
   --log-root /var/log/metaflip/7x7-sharded \
+  --seconds 7200
+```
+
+For a full-machine 4x4 record hunt on all six NUMA nodes, add the tensor and
+topology explicitly:
+
+```sh
+bits/tungsten-metaflip/cloud/aws/supervise_7x7.sh \
+  --binary /home/ubuntu/tungsten/build/cloud/metaflip-next \
+  --runtime-root /home/ubuntu/tungsten/bits/tungsten-metaflip \
+  --tensor 4x4 \
+  --nodes 0,1,2,3,4,5 \
+  --state-root /var/lib/metaflip/4x4-sharded \
+  --log-root /var/log/metaflip/4x4-sharded \
   --seconds 7200
 ```
 
@@ -74,7 +106,9 @@ silently entering the portfolio.
 bits/tungsten-metaflip/cloud/aws/test_supervise_7x7.sh
 ```
 
-The test uses synthetic structural fixtures and dry-run mode; it launches no
+The test uses synthetic 7x7 and 4x4 structural fixtures and dry-run mode. It
+checks legacy defaults, record/target selection, repeated-anchor nonces,
+tensor-specific state isolation, and invalid-shape rejection; it launches no
 fleet and performs no cloud action.
 
 ## Rectangular leased campaigns

@@ -1907,6 +1907,8 @@ RECT_EPOCH_ROUNDS = 16 ## i64
 RECT_PORTFOLIO_CHILD = 0 ## i64
 RECT_RESTART_NONCE = 0 ## i64
 RECT_DOOR_TICKET = 0 - 1 ## i64
+RECT_RESTART_EXPLICIT = 0 ## i64
+RECT_DOOR_EXPLICIT = 0 ## i64
 TENSOR_EXPLICIT = 0 ## i64
 J = 0 ## i64
 J_EXPLICIT = 0 ## i64
@@ -1996,9 +1998,11 @@ while ai < av.size()
     RECT_PORTFOLIO_CHILD = 1
   if arg == "--rect-restart-nonce" && ai + 1 < av.size()
     RECT_RESTART_NONCE = av[ai + 1].to_i()
+    RECT_RESTART_EXPLICIT = 1
     ai += 1
   if arg == "--rect-door-ticket" && ai + 1 < av.size()
     RECT_DOOR_TICKET = av[ai + 1].to_i()
+    RECT_DOOR_EXPLICIT = 1
     ai += 1
   if (arg == "-J" || arg == "--walkers") && ai + 1 < av.size()
     J = av[ai + 1].to_i()
@@ -2138,6 +2142,18 @@ if RECT_PORTFOLIO_CHILD != 0 && (BEST_EXPLICIT == 0 || STATUS_EXPLICIT == 0)
 if RECT_PORTFOLIO_CHILD != 0 && (RECT_RESTART_NONCE < 1 || RECT_DOOR_TICKET < 0)
   << "metaflip: invalid private rectangular restart schedule"
   exit(2)
+if RECT_RESTART_EXPLICIT != 0 && (RECT_MODE == 0 || RECT_PORTFOLIO != 0)
+  << "metaflip: --rect-restart-nonce requires one explicit rectangular --tensor"
+  exit(2)
+if RECT_DOOR_EXPLICIT != 0 && (RECT_MODE == 0 || RECT_PORTFOLIO != 0)
+  << "metaflip: --rect-door-ticket requires one explicit rectangular --tensor"
+  exit(2)
+if RECT_RESTART_NONCE < 0
+  << "metaflip: --rect-restart-nonce must be nonnegative"
+  exit(2)
+if RECT_DOOR_TICKET < 0 && RECT_DOOR_EXPLICIT != 0
+  << "metaflip: --rect-door-ticket must be nonnegative"
+  exit(2)
 if RECT_PORTFOLIO == 0 && RECT_MODE == 0 && (N < 2 || N > 7)
   << "metaflip: --tensor must be square 2x2 through 7x7 or a supported rectangular profile (2x2x5, 2x2x6, 2x3x4, 2x3x5, 2x4x5, 2x5x6, 3x3x4, 3x3x5, 3x4x4, 3x4x5, 3x4x6, 3x4x7, 3x5x5, 3x5x6, 3x5x7, 4x4x5, 4x4x6, 4x5x5, 4x5x6, 4x5x7, 4x5x8, 4x6x6, 4x6x7, 4x6x8, 5x6x7)"
   exit(2)
@@ -2202,9 +2218,14 @@ if SEED_NAIVE == 1 && SEED_PATH != ""
 if SEED_NONCE < 0
   << "metaflip: --seed-nonce must be nonnegative"
   exit(2)
-if SEED_NONCE != 0 && (RECT_PORTFOLIO != 0 || RECT_MODE != 0)
-  << "metaflip: --seed-nonce currently applies to square fleets; rectangular campaigns use their restart nonce schedule"
+if SEED_NONCE != 0 && (RECT_PORTFOLIO != 0 || RECT_PORTFOLIO_CHILD != 0)
+  << "metaflip: --seed-nonce cannot override a rectangular portfolio's restart schedule"
   exit(2)
+if SEED_NONCE != 0 && RECT_MODE != 0
+  if RECT_RESTART_EXPLICIT != 0 && RECT_RESTART_NONCE != SEED_NONCE
+    << "metaflip: conflicting --seed-nonce and --rect-restart-nonce values"
+    exit(2)
+  RECT_RESTART_NONCE = SEED_NONCE
 
 RUNTIME_ROOT = ffn_discover_runtime_root(RUNTIME_ROOT)
 if RUNTIME_ROOT == ""
@@ -2262,7 +2283,7 @@ if RECT_MODE == 1
   if RECT_PORTFOLIO_CHILD != 0
     result = ffrc_run_seeded(TENSOR_LABEL, RUNTIME_ROOT, SEED_PATH, BEST_PATH, STATUS_PATH, RUN_TAG, J, STEPS, MAX_ROUNDS, MAX_SECS, DSLACK, CYCLES, RECORD_OVERRIDE, GPU, GPU_WALKERS, GPU_STEPS, GPU_EPOCH_ROUNDS, GPU_BINARY, GPU_REBUILD, QUIET, TUI, STOP_ON_RECORD, SEED_NAIVE, 1, RECT_RESTART_NONCE, RECT_DOOR_TICKET) ## i64
     exit(result)
-  result = ffrc_run(TENSOR_LABEL, RUNTIME_ROOT, SEED_PATH, BEST_PATH, STATUS_PATH, RUN_TAG, J, STEPS, MAX_ROUNDS, MAX_SECS, DSLACK, CYCLES, RECORD_OVERRIDE, GPU, GPU_WALKERS, GPU_STEPS, GPU_EPOCH_ROUNDS, GPU_BINARY, GPU_REBUILD, QUIET, TUI, STOP_ON_RECORD, SEED_NAIVE, 0) ## i64
+  result = ffrc_run_seeded(TENSOR_LABEL, RUNTIME_ROOT, SEED_PATH, BEST_PATH, STATUS_PATH, RUN_TAG, J, STEPS, MAX_ROUNDS, MAX_SECS, DSLACK, CYCLES, RECORD_OVERRIDE, GPU, GPU_WALKERS, GPU_STEPS, GPU_EPOCH_ROUNDS, GPU_BINARY, GPU_REBUILD, QUIET, TUI, STOP_ON_RECORD, SEED_NAIVE, 0, RECT_RESTART_NONCE, RECT_DOOR_TICKET) ## i64
   exit(result)
 
 RECORD = ffp_record(N) ## i64

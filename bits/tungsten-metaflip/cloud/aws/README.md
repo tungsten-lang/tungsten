@@ -76,3 +76,69 @@ bits/tungsten-metaflip/cloud/aws/test_supervise_7x7.sh
 
 The test uses synthetic structural fixtures and dry-run mode; it launches no
 fleet and performs no cloud action.
+
+## Rectangular leaf campaigns
+
+`supervise_rect_leaves.sh` maps one independent rectangular profile to each
+listed NUMA node. Its defaults preserve the six-leaf AWS retarget:
+
+```text
+shape    3x3x4  3x4x4  2x3x5  3x4x5  4x5x5  5x6x7
+node         0      1      2      3      4      5
+walkers     64     64     64     64     64     64
+```
+
+Every command is a true rectangular portfolio leaf, with a distinct positive
+restart nonce and door ticket. The launcher rejects unsupported/square shapes,
+duplicates, unequal shape/node counts, absent NUMA nodes, and a native
+binary/runtime mismatch before starting a fleet. Children are CPU-only and
+headless; the supervisor owns the wall deadline so all leaves drain together.
+
+The normal two-hour launch is:
+
+```sh
+bits/tungsten-metaflip/cloud/aws/supervise_rect_leaves.sh \
+  --binary /home/ubuntu/tungsten/build/cloud/metaflip-next \
+  --runtime-root /home/ubuntu/tungsten/bits/tungsten-metaflip \
+  --state-root /var/lib/metaflip/rect-leaves \
+  --log-root /var/log/metaflip/rect-leaves \
+  --seconds 7200
+```
+
+The supervisor atomically updates
+`STATE_ROOT/supervisor/status.txt`. `best_by_shape` keeps the heterogeneous
+rank/density objectives separate; `total_moves` sums the production
+`cpu_moves` and `gpu_moves` fields, while child health, stale-heartbeat counts,
+and kernel/cgroup OOM counters are aggregated. Any unexpected early child
+exit, stale heartbeat, or OOM drains the entire campaign. A child exiting zero
+after `--stop-on-record` is successful only when its final status names the
+same shape and proves `best_rank <= target` or `wr_status=beats`; the aggregate
+reason becomes `record-SHAPE`, sibling leaves drain, and the supervisor exits
+zero after preserving the shape's durable best.
+
+This AWS launcher requests `sudo shutdown -h now` after every terminal result,
+including a failed campaign, so an instance configured to terminate on guest
+shutdown stops accruing Spot compute charges. Pass `--no-shutdown` for
+an interactive host. `--shutdown-command` exists for test harnesses and must
+name one executable; it is never evaluated as shell text.
+
+Inspect a custom topology without writes or shutdown:
+
+```sh
+bits/tungsten-metaflip/cloud/aws/supervise_rect_leaves.sh \
+  --dry-run \
+  --binary /home/ubuntu/tungsten/build/cloud/metaflip-next \
+  --runtime-root /home/ubuntu/tungsten/bits/tungsten-metaflip \
+  --shapes 3x4x6,4x5x7 \
+  --nodes 0,1 \
+  -J 64
+```
+
+The fast local contract test replaces `setsid`, `numactl`, `flock`, Metaflip,
+the OOM counters, and shutdown with fixtures. It covers the clean deadline,
+verified record stop, unexpected child exit, and OOM drains and can never
+invoke the host shutdown tool:
+
+```sh
+bits/tungsten-metaflip/cloud/aws/test_supervise_rect_leaves.sh
+```

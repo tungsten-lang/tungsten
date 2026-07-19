@@ -42,7 +42,7 @@ failures += package_expect("229 rank-debt doors are packaged", read_file(runtime
 package_sums = read_file(runtime_root + "/SHA256SUMS")
 failures += package_expect("229 rank-debt doors are checksummed", package_sums != nil && package_sums.include?("matmul_2x2x9_rank33_d159_isotropy_split_plus1_gf2.txt") && package_sums.include?("matmul_2x2x9_rank34_d165_isotropy_split_plus2_gf2.txt"))
 failures += package_expect("344 d280 is the packaged default", ffrp_seed_rel(3, 4, 4).ends_with?("matmul_3x4x4_rank38_d280_live_density_leader_gf2.txt"))
-failures += package_expect("344 preserves its older door", ffrp_frontier_seed_count(3, 4, 4) == 2 && ffrp_frontier_seed_rel(3, 4, 4, 1).ends_with?("matmul_3x4x4_rank38_gf2.txt"))
+failures += package_expect("344 preserves R/R+1/R+2 doors", ffrp_frontier_seed_count(3, 4, 4) == 4 && ffrp_frontier_seed_rel(3, 4, 4, 1).ends_with?("matmul_3x4x4_rank38_gf2.txt") && ffrp_frontier_seed_rel(3, 4, 4, 2).include?("rank39_peterson_2026_isotropy_split_plus1") && ffrp_frontier_seed_rel(3, 4, 4, 3).include?("rank40_peterson_2026_isotropy_split_plus2"))
 failures += package_expect("344 d280 seed is packaged", read_file(runtime_root + "/" + ffrp_seed_rel(3, 4, 4)) != nil)
 failures += package_expect("456 d906 is the packaged default", ffrp_seed_rel(4, 5, 6).ends_with?("matmul_4x5x6_rank90_d906_rect_portfolio_gf2.txt"))
 failures += package_expect("456 preserves three doors", ffrp_frontier_seed_count(4, 5, 6) == 3 && ffrp_frontier_seed_rel(4, 5, 6, 1).ends_with?("matmul_4x5x6_rank90_d907_gl_frontier_gf2.txt") && ffrp_frontier_seed_rel(4, 5, 6, 2).ends_with?("matmul_4x5x6_rank90_catalog_gf2.txt"))

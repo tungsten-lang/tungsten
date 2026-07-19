@@ -111,6 +111,17 @@ different nonzero values rotate tied seed-bank choices and mix every CPU
 island's initial and restart streams.  This avoids duplicating work when the
 same command is launched in several processes.
 
+The same `--seed-nonce N` control applies to one explicit rectangular
+`--tensor`. It phases every rectangular island's proposal stream while nonce
+zero preserves the historical trajectory. Advanced sharded launchers may
+also pass `--rect-door-ticket N` to rotate a one-lane or multi-lane shard
+through checked-in side doors independently of the RNG nonce. The adaptive
+`--rect` portfolio owns both schedules itself and therefore rejects manual
+nonce overrides. Salted profile shards also load and save the exact eight-slot
+side archive on process exit, so a bounded cloud tranche retains useful
+nonleader endpoints instead of preserving only its fleet best. Explicit
+`--seed` experiments remain isolated from that archive.
+
 For explicitly wide CPU fleets (`-J` greater than 32), `--steps` is the
 nominal worker chunk rather than a forced coordinator cadence.  After the
 first measured epoch, each non-fringe island adapts toward about three seconds
@@ -186,8 +197,9 @@ evaluated independently. The `2x2x7` leader is the exact rank-25/density-128
 scheme found by the rectangular CPU portfolio; its former density-132 catalog
 leader remains a support-distance-42 rank-25 restart door.
 
-Rectangular checkpoints retain eight exact-gated side doors at ranks `R`,
-`R+1`, and `R+2`. Slots are selected for structural class and term-set
+Rectangular portfolio children and explicitly salted profile shards retain
+eight exact-gated side doors at ranks `R`, `R+1`, and `R+2`. Slots are selected
+for structural class and term-set
 distance as well as rank, so restarts preserve genuinely different basins
 instead of nearby copies of the leader. When full, the eight-slot archive lets
 a 15-lane child start from ten distinct sources on profiles with one built-in

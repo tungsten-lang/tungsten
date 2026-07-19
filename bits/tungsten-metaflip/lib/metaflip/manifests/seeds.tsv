@@ -32,6 +32,8 @@ lib/metaflip/seeds/gf2/matmul_2x3x5_rank25_d160_fleet_gf2.txt	48f567ce264b996cb6
 lib/metaflip/seeds/gf2/matmul_2x3x5_rank25_d170_fleet_gf2.txt	31abed1367f41e93a4d35f11cd295b05bc494394793714627d42fff2a26b31df	schemes/GF(2)/2x3x5/r25/peterson-2026-d170-fleet.txt
 lib/metaflip/seeds/gf2/matmul_2x3x5_rank25_d210_fleet_gf2.txt	7b6faf104b1bb0520ef3a266846b0ae087fb965628e1318e9c2a11a85a325613	schemes/GF(2)/2x3x5/r25/peterson-2026-d210-fleet.txt
 lib/metaflip/seeds/gf2/matmul_2x3x5_rank25_d278_fleet_gf2.txt	8d6ea17a0c13686ffd282df65165bd54ce9178f2a7f4fdb2a2d59933dafb4cac	schemes/GF(2)/2x3x5/r25/peterson-2026-d278-fleet.txt
+lib/metaflip/seeds/gf2/matmul_2x3x5_rank26_peterson_2026_block15_11_gf2.txt	737502807cc620cc9fa11018145a4b3044a7a4c182dcf0f696499addf1caf41e	schemes/GF(2)/2x3x5/r26/peterson-2026-block15-11.txt
+lib/metaflip/seeds/gf2/matmul_2x3x5_rank27_peterson_2026_isotropy_split_plus2_parent_06df603ec6_gf2.txt	2acafd7d0c94c9cdcd6272042b7790035fa574f0b0e5ed786b5784238e07d60b	schemes/GF(2)/2x3x5/r27/peterson-2026-isotropy-split-plus2-parent-06df603ec6.txt
 lib/metaflip/seeds/gf2/matmul_2x4x5_rank33_catalog_gf2.txt	77f5ed66bb5c14d958e20e029680e73d9b5484a250d786df0a38269944da89bb	schemes/GF(2)/2x4x5/r33/matmulcatalog-2026-catalog.txt
 lib/metaflip/seeds/gf2/matmul_2x4x5_rank33_d222_fleet_gf2.txt	fb6d6d0a9ce859695cb8096c0e36fcdbe958190b29d3741d0bdb0c9c90d249a5	schemes/GF(2)/2x4x5/r33/peterson-2026-d222-fleet.txt
 lib/metaflip/seeds/gf2/matmul_2x4x5_rank33_d241_gl_frontier_gf2.txt	45a74cf6cfb2d0ac8cd4bd7abe024ae8593a652a9d08f969b7691382be351389	schemes/GF(2)/2x4x5/r33/peterson-2026-d241-gl-frontier.txt
@@ -40,10 +42,17 @@ lib/metaflip/seeds/gf2/matmul_2x5x6_rank47_d438_orbit_door_gf2.txt	9db0a90aa042a
 lib/metaflip/seeds/gf2/matmul_3x3_rank23_d139_gf2.txt	9d4c649998137bcbe779cfcc57c16c7b4c0f54497687c3cf10b601be428afc80	schemes/GF(2)/3x3x3/r23/laderman-1976--peterson-2026-d139.txt
 lib/metaflip/seeds/gf2/matmul_3x3_rank23_d159_gf2.txt	ee07f94185603f5b39532b0188d1df7fd08d6b5a9272dc3912a4e4104d731086	schemes/GF(2)/3x3x3/r23/laderman-1976--peterson-2026-d159.txt
 lib/metaflip/seeds/gf2/matmul_3x3x4_rank29_gf2.txt	26e842f4c87a932f59791b5c551084b8e8bd22ede9abb9858f19ace9ee4a12e9	schemes/GF(2)/3x3x4/r29/peterson-2026-gf2.txt
+lib/metaflip/seeds/gf2/matmul_3x3x4_rank30_peterson_2026_isotropy_split_plus1_parent_5314db3816_gf2.txt	d800aa108612f23668b426d1c881597e6079cc006722f63b0e9d866b9edf4334	schemes/GF(2)/3x3x4/r30/peterson-2026-isotropy-split-plus1-parent-5314db3816.txt
+lib/metaflip/seeds/gf2/matmul_3x3x4_rank31_peterson_2026_isotropy_split_plus2_parent_5314db3816_gf2.txt	cc922cf38c4bb50cc2c06920bd2bb1784d34c9caf9bcc8cf3ef53f0348fadd7a	schemes/GF(2)/3x3x4/r31/peterson-2026-isotropy-split-plus2-parent-5314db3816.txt
 lib/metaflip/seeds/gf2/matmul_3x3x5_rank36_d287_gf2.txt	f749a7ab90b623177b9830d5f490c84446b85dca9de080e42beec80c35bf1a40	schemes/GF(2)/3x3x5/r36/peterson-2026-d287.txt
 lib/metaflip/seeds/gf2/matmul_3x4x4_rank38_d280_live_density_leader_gf2.txt	a08fc5382ac7da3e0fd09b3c1e389138feada0f91a6be5a0e06e75aa07668855	schemes/GF(2)/3x4x4/r38/peterson-2026-d280-live-density-leader.txt
 lib/metaflip/seeds/gf2/matmul_3x4x4_rank38_gf2.txt	dc94274c7532b6792e6175b4555825b4af018991ea3540f98929637f5f7287ea	schemes/GF(2)/3x4x4/r38/peterson-2026-gf2.txt
+lib/metaflip/seeds/gf2/matmul_3x4x4_rank39_peterson_2026_isotropy_split_plus1_parent_91bff8b09f_gf2.txt	45b4520befe815b8c19483a0127c0bf1156663435ac2da1d826e03aaf28a4991	schemes/GF(2)/3x4x4/r39/peterson-2026-isotropy-split-plus1-parent-91bff8b09f.txt
+lib/metaflip/seeds/gf2/matmul_3x4x4_rank40_peterson_2026_isotropy_split_plus2_parent_8aa9879491_gf2.txt	a6614f684d6a628a3efa8d577c21950e12b5aa199043a9c5163184ca4e2cf7aa	schemes/GF(2)/3x4x4/r40/peterson-2026-isotropy-split-plus2-parent-8aa9879491.txt
 lib/metaflip/seeds/gf2/matmul_3x4x5_rank47_d386_gf2.txt	b6093096f8ad2ccbad9ab24c3b88742c013d409168c900e549fa0e85c6d704c4	schemes/GF(2)/3x4x5/r47/peterson-2026-d386.txt
+lib/metaflip/seeds/gf2/matmul_3x4x5_rank47_d396_peterson_2026_gf2.txt	23859d363d0424f8e0589f7283f0bb146d917d42a20d001035f4531ae1e9931a	schemes/GF(2)/3x4x5/r47/peterson-2026-gf2.txt
+lib/metaflip/seeds/gf2/matmul_3x4x5_rank48_peterson_2026_isotropy_split_plus1_parent_7cd768a07f_gf2.txt	33cb55b1a5980327fde716fe3a0179740533d7f91a0ca6a4b2232ceff2613e8f	schemes/GF(2)/3x4x5/r48/peterson-2026-isotropy-split-plus1-parent-7cd768a07f.txt
+lib/metaflip/seeds/gf2/matmul_3x4x5_rank49_peterson_2026_isotropy_split_plus2_parent_50f10726e4_gf2.txt	daea4c450957305a61b3bcc7a3d85e30ff371d9452a984c9cecdaf98ebf94f62	schemes/GF(2)/3x4x5/r49/peterson-2026-isotropy-split-plus2-parent-50f10726e4.txt
 lib/metaflip/seeds/gf2/matmul_3x4x6_rank54_catalog_gf2.txt	8cd49512a068c5b577dedf43e6c0079e028f395555540ce53e83165b52759ec9	schemes/GF(2)/3x4x6/r54/matmulcatalog-2026-catalog.txt
 lib/metaflip/seeds/gf2/matmul_3x4x6_rank54_d488_gl_frontier_gf2.txt	948ee56484fef065ebf0e90775d9dc8e76c714a9139ac167ebbc766efab1b470	schemes/GF(2)/3x4x6/r54/peterson-2026-d488-gl-frontier.txt
 lib/metaflip/seeds/gf2/matmul_3x4x7_rank64_d519_gl_frontier_gf2.txt	0207f24c72e416eed1f7e05e3d993ded82de3f7e30576205167c717b8cc208f7	schemes/GF(2)/3x4x7/r64/peterson-2026-d519-gl-frontier.txt
@@ -59,7 +68,10 @@ lib/metaflip/seeds/gf2/matmul_4x4x5_rank60_d662_short_orbit_splice_gf2.txt	2fc02
 lib/metaflip/seeds/gf2/matmul_4x4x5_rank60_d919_gf2.txt	196faff03add76b4b1a86908a5a9d2e13d25aae88afdf17a24dd6ab69875a467	schemes/GF(2)/4x4x5/r60/peterson-2026-d919.txt
 lib/metaflip/seeds/gf2/matmul_4x4x6_rank73_d690_gl_frontier_gf2.txt	c3d543a4b6ddf6575c2420d6528e99d08619279d8fa426a4313383e915dbda5c	schemes/GF(2)/4x4x6/r73/peterson-2026-d690-gl-frontier.txt
 lib/metaflip/seeds/gf2/matmul_4x4x6_rank73_gf2.txt	6dbec3749d3d21f1d24538f78c31df7af3bf26b3e03b604c43e7991cd4c63fa0	schemes/GF(2)/4x4x6/r73/peterson-2026-gf2.txt
+lib/metaflip/seeds/gf2/matmul_4x5x5_rank76_d721_matmulcatalog_2026_gf2.txt	6ea9cba3b9782f16f0e8615e4bf9488b8e59e5dd7719fa747bc92512fac3c366	schemes/GF(2)/4x5x5/r76/matmulcatalog-2026-catalog.txt
 lib/metaflip/seeds/gf2/matmul_4x5x5_rank76_gf2.txt	880e56b3f1025e1c31740c8ddaed0cb0b50a10ee1c18add11fb5e40d135171cd	schemes/GF(2)/4x5x5/r76/peterson-2026-gf2.txt
+lib/metaflip/seeds/gf2/matmul_4x5x5_rank77_peterson_2026_isotropy_split_plus1_parent_2a74e4371e_gf2.txt	505d10b816908ddfa66c4d99471ab3d17ef3b997f66e7091bfecc095f66049f6	schemes/GF(2)/4x5x5/r77/peterson-2026-isotropy-split-plus1-parent-2a74e4371e.txt
+lib/metaflip/seeds/gf2/matmul_4x5x5_rank78_peterson_2026_isotropy_split_plus2_parent_f95eb7bc99_gf2.txt	ed491af7bf2e1441a3b78f3f797a6bde7d2636b55abf795d7d68d1f7f67b4945	schemes/GF(2)/4x5x5/r78/peterson-2026-isotropy-split-plus2-parent-f95eb7bc99.txt
 lib/metaflip/seeds/gf2/matmul_4x5x6_rank90_catalog_gf2.txt	6c77383ee4b0eb1308b42545ad1ded7b47cfe2abac82e2638e5343b61deeef86	schemes/GF(2)/4x5x6/r90/matmulcatalog-2026-catalog.txt
 lib/metaflip/seeds/gf2/matmul_4x5x6_rank90_d906_rect_portfolio_gf2.txt	ba4a024752247b156b92bebe0a5bdfb644e44f3702323896bcb3a785625abdaa	schemes/GF(2)/4x5x6/r90/peterson-2026-d906-rect-portfolio.txt
 lib/metaflip/seeds/gf2/matmul_4x5x6_rank90_d907_gl_frontier_gf2.txt	6ffffef39fc50910827858fa09a2a2d3cb3c6945c8c6ecb62d11db67e418e0ac	schemes/GF(2)/4x5x6/r90/peterson-2026-d907-gl-frontier.txt
@@ -86,6 +98,8 @@ lib/metaflip/seeds/gf2/matmul_5x5_rank93_gf2.txt	c04afa329a615e035d88e971db15d56
 lib/metaflip/seeds/gf2/matmul_5x5_rank93_sparse_gf2.txt	2a60bdc1b92bfef295bc0cf77f24deff79bb634a72c3af64d18dbe87abf5f8e0	schemes/GF(2)/5x5x5/r93/moosbauer-poole-2025--peterson-2026-sparse.txt
 lib/metaflip/seeds/gf2/matmul_5x6x7_rank150_catalog_gf2.txt	dee43e30776cc62b16618cc91b70b5acd400332f362d8b7f1bfe99e56d8da2d0	schemes/GF(2)/5x6x7/r150/matmulcatalog-2026-catalog.txt
 lib/metaflip/seeds/gf2/matmul_5x6x7_rank150_d1875_gl_frontier_gf2.txt	e3166e8664e9af1bc13a52618413e4e56f771dcdaa94abcf647044ca11c693d4	schemes/GF(2)/5x6x7/r150/peterson-2026-d1875-gl-frontier.txt
+lib/metaflip/seeds/gf2/matmul_5x6x7_rank151_peterson_2026_isotropy_split_plus1_parent_58d60803a6_gf2.txt	12d764ec276ce57c78bda7225740ce42d9dce9d307384b400c07e234bb770fbf	schemes/GF(2)/5x6x7/r151/peterson-2026-isotropy-split-plus1-parent-58d60803a6.txt
+lib/metaflip/seeds/gf2/matmul_5x6x7_rank152_peterson_2026_isotropy_split_plus2_parent_806ac40bca_gf2.txt	c56214355fc4e89cf57f5513d1cfd38945a71479a020cba09b963238c3c68a5c	schemes/GF(2)/5x6x7/r152/peterson-2026-isotropy-split-plus2-parent-806ac40bca.txt
 lib/metaflip/seeds/gf2/matmul_6x6_rank153_d1860_global_isotropy_gf2.txt	f7e85eed357a54346ed5af061f0afbb5f9f66148a528b31c86f1d1678f1b86f7	schemes/GF(2)/6x6x6/r153/moosbauer-poole-2025--peterson-2026-d1860-global-isotropy.txt
 lib/metaflip/seeds/gf2/matmul_6x6_rank153_d1878_global_isotropy_gf2.txt	d2e9e96cff842bfdeb848629c82c24b921ddf476634e4722613d6e9d33eee9c3	schemes/GF(2)/6x6x6/r153/moosbauer-poole-2025--peterson-2026-d1878-global-isotropy.txt
 lib/metaflip/seeds/gf2/matmul_6x6_rank153_d2502_gf2.txt	df2750d583ce256321ad59a799171497d3b734fd5db7cc4190b852630c2a03d1	schemes/GF(2)/6x6x6/r153/moosbauer-poole-2025--peterson-2026-d2502.txt

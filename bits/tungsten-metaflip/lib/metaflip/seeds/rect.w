@@ -263,6 +263,13 @@
 # knock on the same rank-R door. Other retained rectangular pairs are at
 # distance 56--300, so rotating these doors prevents a fresh multiwalker
 # campaign from cloning one presentation across every CPU island.
+#
+# The curated public corpus also retains verified R+1/R+2 shoulders for the
+# six larger leaf campaigns below.  Their parents are coordinate-isotropy
+# images, so in the runtime coordinates they are far from the density leader
+# rather than merely exposing its one-step split inverse.  Keep the discoverer,
+# year, construction, and parent digest in each filename; the public metadata
+# remains the authoritative full provenance record.
 -> ffrp_frontier_seed_count(n, m, p) (i64 i64 i64) i64
   if ffrp_supported(n, m, p) == 0
     return 0
@@ -277,15 +284,19 @@
   if n == 2 && m == 2 && p == 9
     return 5
   if n == 2 && m == 3 && p == 5
-    return 4
+    return 6
   if n == 2 && m == 4 && p == 5
     return 3
   if n == 2 && m == 5 && p == 6
     return 2
   if n == 3 && m == 4 && (p == 6 || p == 7)
     return 2
+  if n == 3 && m == 3 && p == 4
+    return 3
   if n == 3 && m == 4 && p == 4
-    return 2
+    return 4
+  if n == 3 && m == 4 && p == 5
+    return 4
   if n == 4 && m == 4 && p == 5
     return 3
   if n == 4 && m == 4 && p == 6
@@ -296,8 +307,10 @@
     return 2
   if n == 4 && m == 6 && (p == 7 || p == 8)
     return 2
+  if n == 4 && m == 5 && p == 5
+    return 4
   if n == 5 && m == 6 && p == 7
-    return 2
+    return 4
   1
 
 -> ffrp_frontier_seed_rel(n, m, p, slot) (i64 i64 i64 i64)
@@ -337,6 +350,10 @@
     return "seeds/gf2/matmul_2x3x5_rank25_d210_fleet_gf2.txt"
   if n == 2 && m == 3 && p == 5 && slot == 3
     return "seeds/gf2/matmul_2x3x5_rank25_d278_fleet_gf2.txt"
+  if n == 2 && m == 3 && p == 5 && slot == 4
+    return "seeds/gf2/matmul_2x3x5_rank26_peterson_2026_block15_11_gf2.txt"
+  if n == 2 && m == 3 && p == 5 && slot == 5
+    return "seeds/gf2/matmul_2x3x5_rank27_peterson_2026_isotropy_split_plus2_parent_06df603ec6_gf2.txt"
   if n == 2 && m == 5 && p == 6 && slot == 1
     return "seeds/gf2/matmul_2x5x6_rank47_d438_orbit_door_gf2.txt"
   if n == 4 && m == 4 && p == 5 && slot == 1
@@ -353,6 +370,26 @@
     return "seeds/gf2/matmul_3x4x7_rank64_d576_gf2.txt"
   if n == 3 && m == 4 && p == 4 && slot == 1
     return "seeds/gf2/matmul_3x4x4_rank38_gf2.txt"
+  if n == 3 && m == 3 && p == 4 && slot == 1
+    return "seeds/gf2/matmul_3x3x4_rank30_peterson_2026_isotropy_split_plus1_parent_5314db3816_gf2.txt"
+  if n == 3 && m == 3 && p == 4 && slot == 2
+    return "seeds/gf2/matmul_3x3x4_rank31_peterson_2026_isotropy_split_plus2_parent_5314db3816_gf2.txt"
+  if n == 3 && m == 4 && p == 4 && slot == 2
+    return "seeds/gf2/matmul_3x4x4_rank39_peterson_2026_isotropy_split_plus1_parent_91bff8b09f_gf2.txt"
+  if n == 3 && m == 4 && p == 4 && slot == 3
+    return "seeds/gf2/matmul_3x4x4_rank40_peterson_2026_isotropy_split_plus2_parent_8aa9879491_gf2.txt"
+  if n == 3 && m == 4 && p == 5 && slot == 1
+    return "seeds/gf2/matmul_3x4x5_rank47_d396_peterson_2026_gf2.txt"
+  if n == 3 && m == 4 && p == 5 && slot == 2
+    return "seeds/gf2/matmul_3x4x5_rank48_peterson_2026_isotropy_split_plus1_parent_7cd768a07f_gf2.txt"
+  if n == 3 && m == 4 && p == 5 && slot == 3
+    return "seeds/gf2/matmul_3x4x5_rank49_peterson_2026_isotropy_split_plus2_parent_50f10726e4_gf2.txt"
+  if n == 4 && m == 5 && p == 5 && slot == 1
+    return "seeds/gf2/matmul_4x5x5_rank76_d721_matmulcatalog_2026_gf2.txt"
+  if n == 4 && m == 5 && p == 5 && slot == 2
+    return "seeds/gf2/matmul_4x5x5_rank77_peterson_2026_isotropy_split_plus1_parent_2a74e4371e_gf2.txt"
+  if n == 4 && m == 5 && p == 5 && slot == 3
+    return "seeds/gf2/matmul_4x5x5_rank78_peterson_2026_isotropy_split_plus2_parent_f95eb7bc99_gf2.txt"
   if n == 4 && m == 4 && p == 6 && slot == 1
     return "seeds/gf2/matmul_4x4x6_rank73_gf2.txt"
   if n == 4 && m == 5 && p == 6 && slot == 1
@@ -369,6 +406,10 @@
     return "seeds/gf2/matmul_4x6x8_rank140_d1748_gf2.txt"
   if n == 5 && m == 6 && p == 7 && slot == 1
     return "seeds/gf2/matmul_5x6x7_rank150_catalog_gf2.txt"
+  if n == 5 && m == 6 && p == 7 && slot == 2
+    return "seeds/gf2/matmul_5x6x7_rank151_peterson_2026_isotropy_split_plus1_parent_58d60803a6_gf2.txt"
+  if n == 5 && m == 6 && p == 7 && slot == 3
+    return "seeds/gf2/matmul_5x6x7_rank152_peterson_2026_isotropy_split_plus2_parent_806ac40bca_gf2.txt"
   ffrp_seed_rel(n, m, p)
 
 # GPU geometry is intentionally present only for profiles with a specialized

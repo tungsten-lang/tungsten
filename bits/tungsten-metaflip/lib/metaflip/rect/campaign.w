@@ -27,6 +27,25 @@ use doors
     return 1
   0
 
+# Portfolio children always preserve their endpoint doors. Explicitly salted
+# standalone shards do the same so a long NUMA/cloud run does not discard all
+# exact nonleader basins when its process exits. Unsalted standalone replay
+# remains byte-for-byte historical.
+-> ffrc_side_archive_enabled(portfolio_child, restart_nonce, restart_door_ticket, profile_start) (i64 i64 i64 i64) i64
+  if profile_start == 0
+    return 0
+  if portfolio_child != 0 || restart_nonce != 0 || restart_door_ticket >= 0
+    return 1
+  0
+
+# Checked-in frontiers are published relative to the current record, while a
+# durable checkpoint may already have improved it. Never reintroduce a fixed
+# shoulder more than two ranks above the actual run leader.
+-> ffrc_frontier_rank_eligible(frontier_rank, best_rank) (i64 i64) i64
+  if frontier_rank < best_rank || frontier_rank > best_rank + 2
+    return 0
+  1
+
 # Return -1 for a fleet-best GPU epoch, otherwise the sticky CPU island whose
 # independently seeded best should feed this epoch. `door_count` includes the
 # leader, built-in frontier, and any durable side doors. Nonleader doors
@@ -519,8 +538,8 @@ use doors
 # 0 on a clean bounded/interrupt stop and 2 for an invalid seed/checkpoint.
 # naive_seed != 0 starts from the schoolbook (n*m*p-term) scheme instead of
 # the checked-in rectangular record (same meaning as square --naive).
-# restart_nonce is nonzero only for portfolio epoch/fill restarts; standalone
-# runs retain the historical deterministic seed streams through `ffrc_run`.
+# restart_nonce is nonzero for explicit standalone shards or portfolio
+# epoch/fill restarts; zero retains the historical standalone seed streams.
 # restart_door_ticket is an independent low-discrepancy schedule ordinal; it
 # must not replace the mixed nonce used for proposal RNG streams.
 -> ffrc_run_seeded(tensor, repo_root, seed_path, best_path, status_path, run_tag, walkers, steps, max_rounds, max_secs, dslack, cycles, record_override, gpu_requested, gpu_walkers, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, portfolio_child, restart_nonce, restart_door_ticket) (String String String String String String i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 i64 i64 i64 i64 i64 i64) i64
@@ -613,23 +632,26 @@ use doors
       if frontier_rank < 1 || ffr_verify_best_exact(frontier, n, m, p) != 1
         << "RECT_ERROR code=frontier-seed tensor=" + tensor + " slot=" + frontier_slot.to_s() + " path=" + frontier_path
         return 2
-      duplicate_frontier = ffrda_same_best(frontier, best) ## i64
-      if duplicate_frontier == 0
-        duplicate_frontier = ffrda_already_selected(frontier_anchors, frontier)
-      if duplicate_frontier != 0
-        << "RECT_ERROR code=frontier-duplicate tensor=" + tensor + " slot=" + frontier_slot.to_s() + " path=" + frontier_path
-        return 2
-      frontier_anchors.push(frontier)
+      if ffrc_frontier_rank_eligible(frontier_rank, ffr_best_rank(best)) != 0
+        duplicate_frontier = ffrda_same_best(frontier, best) ## i64
+        if duplicate_frontier == 0
+          duplicate_frontier = ffrda_already_selected(frontier_anchors, frontier)
+        if duplicate_frontier != 0
+          << "RECT_ERROR code=frontier-duplicate tensor=" + tensor + " slot=" + frontier_slot.to_s() + " path=" + frontier_path
+          return 2
+        frontier_anchors.push(frontier)
       frontier_slot += 1
     frontier_count = frontier_anchors.size() + 1
 
   # Portfolio children are reconstructed at every allocation boundary. Keep a
   # tiny exact near-door bank beside the durable leader so those boundaries do
-  # not erase every nonleader basin. Standalone and explicit naive campaigns
-  # retain their historical initialization exactly.
+  # not erase every nonleader basin. Salted standalone shards use the same
+  # durable bank; unsalted standalone and explicit naive campaigns retain
+  # their historical initialization exactly.
   side_archive = []
   side_archive_stats = i64[4] # loaded, rejected, saved, write-failures
-  if portfolio_child != 0 && naive_seed == 0
+  archive_enabled = ffrc_side_archive_enabled(portfolio_child, restart_nonce, restart_door_ticket, use_profile_frontier) ## i64
+  if archive_enabled != 0 && naive_seed == 0
     side_seed = ffrcb_seed(81201, restart_nonce, 0, 0) ## i64
     side_count = ffrda_load_anchored(best_path, best, frontier_anchors, n, m, p, capacity, side_seed, dslack, cycles, workq, wanderq, side_archive, side_archive_stats) ## i64
   side_archive_loaded = side_archive.size() ## i64
@@ -648,7 +670,7 @@ use doors
     # Once saved doors exist, lane zero remains on the fleet leader while the
     # remaining lanes rotate across saved and checked-in side doors. A one-lane
     # child rotates across leader + all doors from its independent epoch ticket.
-    if portfolio_child != 0 && (side_archive_loaded > 0 || frontier_count > 1)
+    if archive_enabled != 0 && (side_archive_loaded > 0 || frontier_count > 1)
       frontier_slot = 0
       builtin_side_count = frontier_count - 1 ## i64
       combined_side_count = side_archive_loaded + builtin_side_count ## i64
@@ -872,9 +894,12 @@ use doors
     gpu_seed_state = best
     gpu_seed_source = "fleet-best"
     gpu_door_count = frontier_count ## i64
-    if portfolio_child != 0
+    if archive_enabled != 0
       gpu_door_count += side_archive_loaded
-    alternate_lane = ffrc_gpu_seed_lane(round, gpu_door_count, walkers, portfolio_child) ## i64
+    rotate_lane_zero = portfolio_child ## i64
+    if restart_door_ticket >= 0
+      rotate_lane_zero = 1
+    alternate_lane = ffrc_gpu_seed_lane(round, gpu_door_count, walkers, rotate_lane_zero) ## i64
     if alternate_lane >= 0
       gpu_seed_state = states[alternate_lane]
       gpu_seed_source = island_sources[alternate_lane]
@@ -1290,7 +1315,7 @@ use doors
   # coverage, then maximizes term-set distance from the leader, checked-in
   # frontiers, and already selected doors; arrival order can no longer evict a
   # distinct old basin or save a built-in again under another role name.
-  if portfolio_child != 0
+  if archive_enabled != 0 && naive_seed == 0
     exit_doors = []
     selected_doors = []
     si = 0 ## i64

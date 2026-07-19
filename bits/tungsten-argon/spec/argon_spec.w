@@ -144,6 +144,52 @@ t.eq("manpage (default: N) is used", opts.get(:jobs), 8)
 t.eq("explicit default beats nil", opts.get(:out, "a.out"), "a.out")
 t.eq("missing option with no default is nil", opts.get(:tag) == nil, true)
 
+# ---- Inline defaults ----
+# "(default: N)" on the option line itself (hammer-style manpages).
+# Precedence is inline-first: an option-line default beats one in the
+# description lines below.
+MAN2 = "NAME
+    inline -- exercise inline (default: N) extraction
+
+SYNOPSIS
+    inline \[options] file
+
+OPTIONS
+    -c, --connections N  Connections to open (default: 100)
+
+    -m, --mode NAME  Operating mode (default: fast)
+
+    -r, --rate HZ  Sample rate (default: 2.5)
+
+    --\[no-]cache  Enable the cache (default: 1)
+
+    -j, --jobs N  Parallel jobs (default: 8)
+        Description-line default loses to the inline one (default: 4).
+
+    -o, --out FILE
+        Write output to FILE (default: a.out).
+"
+
+cli2 = Argon.new(MAN2)
+
+opts = cli2.parse([])
+t.eq("inline int default", opts.get(:connections), 100)
+t.eq("inline string default", opts.get(:mode), "fast")
+t.eq("inline float default", opts.get(:rate), 2.5)
+t.eq("inline default on a negatable flag line", opts.get(:cache), 1)
+t.eq("inline default beats description-line default", opts.get(:jobs), 8)
+t.eq("description-line default still extracted when no inline", opts.get(:out), "a.out")
+
+cache = cli2.find_by_key("cache")
+t.eq("inline text keeps flag negatable", cache[:negatable], true)
+t.eq("inline text does not make a flag take a value", cache[:takes_value], false)
+
+opts = cli2.parse(["--connections", "9"])
+t.eq("explicit value overrides inline default", opts.get(:connections), 9)
+
+opts = cli2.parse(["--no-cache"])
+t.eq("negation still parses with inline default present", opts.negated?(:cache), true)
+
 # ---- Array options ----
 opts = cli.parse(["--files", "a", "b", "c"])
 t.eq("array option consumes following args", opts.get(:files), ["a", "b", "c"])

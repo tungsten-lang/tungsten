@@ -335,6 +335,18 @@
       return s.to_i()
     s
 
+  # Extract a "(default: VALUE)" annotation from text and cast it with the
+  # same rules as parsed option values. Returns nil when absent.
+  -> extract_default(text)
+    di = text.index("(default:")
+    if di == nil
+      return nil
+    after = text.slice(di + 9, text.size()).strip()
+    paren = after.index(")")
+    if paren == nil
+      return nil
+    cast(after.slice(0, paren).strip())
+
   # Cast a parsed value based on its option_def
   -> cast_option(key, val)
     defn = find_by_key(key)
@@ -456,13 +468,17 @@
               j = j + 1
 
             defn[:description] = desc
-            # Extract default from description: (default: VALUE)
-            di = desc.index("(default:")
-            if di
-              after = desc.slice(di + 9, desc.size()).strip()
-              paren = after.index(")")
-              if paren
-                defn[:default] = cast(after.slice(0, paren).strip())
+            # Extract default: (default: VALUE). An inline default on the
+            # option line itself ("-c, --connections N  Open N (default: 100)")
+            # wins over one in the description lines below — the annotation
+            # sitting on the option line is the most specific.
+            inline_default = extract_default(stripped)
+            if inline_default != nil
+              defn[:default] = inline_default
+            else
+              below_default = extract_default(desc)
+              if below_default != nil
+                defn[:default] = below_default
             defs.push(defn)
 
       i = i + 1

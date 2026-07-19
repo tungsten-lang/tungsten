@@ -740,13 +740,27 @@ static WValue hammer_goroutine_fn(WValue *captures) {
 
     int fd = -1;
     void *ssl = NULL;
+    /* Whether this goroutine ever received a single response across its whole
+     * lifetime. A goroutine that finishes with served_any == 0 spent the entire
+     * benchmark talking to a server that accepted (or refused) but never
+     * replied — a blackhole — so its deadline expiry is a timeout, not the
+     * benign mid-flight cutoff a healthy connection sees at shutdown. */
+    int served_any = 0;
 
     /* Outer loop: connect → request loop → reconnect on error */
     while (!past_deadline()) {
         /* Connect */
         fd = hammer_connect(cfg);
         if (fd < 0) {
-            if (past_deadline()) break;  /* deadline park-timeout, not an error */
+            /* A connect that never completed before the deadline is a timeout,
+             * not an error (blackhole that drops SYNs, or an overloaded server
+             * that never finishes the handshake). Only count it when this
+             * goroutine never got a response at all, so healthy reconnects
+             * caught mid-handshake at shutdown stay silent. */
+            if (past_deadline()) {
+                if (!served_any) stats->timeouts++;
+                break;
+            }
             stats->connect_errors++;
             /* Brief yield before retry */
             w_goroutine_yield();
@@ -849,7 +863,12 @@ static WValue hammer_goroutine_fn(WValue *captures) {
                         if (n == 0 && header_len >= 0) break;
                         if (past_deadline()) {
                             /* Benchmark over — a park-timeout or late failure
-                             * during shutdown is not an error. */
+                             * during shutdown is not an error. A goroutine that
+                             * never delivered a single response across its whole
+                             * lifetime is a timeout (blackhole that accepts but
+                             * never replies); one that already served responses
+                             * was simply cut off mid-flight, which is expected. */
+                            if (!served_any) stats->timeouts++;
                             resp_ok = 0;
                             goto reconnect;
                         }
@@ -876,6 +895,7 @@ static WValue hammer_goroutine_fn(WValue *captures) {
                 stats->total_requests++;
                 stats->total_bytes += (uint64_t)response_len;
                 conn_ok++;
+                served_any = 1;
 
                 if (server_goroutines >= 0) {
                     stats->last_server_goroutines = server_goroutines;
@@ -1608,7 +1628,7 @@ WValue w_hammer_run(WValue url_val, WValue conns_val, WValue duration_val,
     /* Aggregate stats */
     uint64_t total_reqs = 0, total_bytes = 0;
     uint64_t s2xx = 0, s3xx = 0, s4xx = 0, s5xx = 0;
-    uint64_t errors = 0, connect_errors = 0;
+    uint64_t errors = 0, connect_errors = 0, timeouts = 0;
     uint64_t total_latency_count = 0;
 
     int64_t peak_server_goroutines = -1, peak_server_queue_depth = -1;
@@ -1623,6 +1643,7 @@ WValue w_hammer_run(WValue url_val, WValue conns_val, WValue duration_val,
         s5xx += all_stats[i].status_5xx;
         errors += all_stats[i].errors;
         connect_errors += all_stats[i].connect_errors;
+        timeouts += all_stats[i].timeouts;
         total_latency_count += all_stats[i].latency_count;
         if (all_stats[i].max_server_goroutines > peak_server_goroutines)
             peak_server_goroutines = all_stats[i].max_server_goroutines;
@@ -1706,6 +1727,7 @@ WValue w_hammer_run(WValue url_val, WValue conns_val, WValue duration_val,
         if (s2xx || s3xx || s4xx || s5xx) printf("\n");
         if (errors) printf("    \033[31merrors: %llu\033[0m\n", (unsigned long long)errors);
         if (connect_errors) printf("    \033[31mconnect errors: %llu\033[0m\n", (unsigned long long)connect_errors);
+        if (timeouts) printf("    \033[33mtimeouts: %llu\033[0m\n", (unsigned long long)timeouts);
         if (has_capacity) {
             printf("\n  \033[1mServer Capacity\033[0m  \033[2m(Forge handshake)\033[0m\n");
             printf("    goroutines  %lld peak, %lld last\n",
@@ -1736,6 +1758,7 @@ WValue w_hammer_run(WValue url_val, WValue conns_val, WValue duration_val,
         if (s2xx || s3xx || s4xx || s5xx) printf("\n");
         if (errors) printf("  errors: %llu\n", (unsigned long long)errors);
         if (connect_errors) printf("  connect errors: %llu\n", (unsigned long long)connect_errors);
+        if (timeouts) printf("  timeouts: %llu\n", (unsigned long long)timeouts);
         if (has_capacity) {
             printf("\nServer Capacity (Forge handshake):\n");
             printf("  goroutines  %lld peak, %lld last\n",

@@ -7,12 +7,16 @@ use series
 use data_frame
 use group_by
 use metrics
+use rolling
+use join
+use pivot
 
-# The remaining modules under lib/ (matrix, vector, tensor, linalg, join,
-# pivot, rolling, resample, pipeline, transformer, estimator, scaler,
-# encoder, imputer, splitter, index, sparse, gpu, device) are unported
-# design drafts — they do not parse as Tungsten yet and are not loaded.
-# Port one into the manifest above only after `bin/tungsten -c` passes on it.
+# The remaining modules under lib/ (matrix, vector, tensor, linalg,
+# resample, pipeline, transformer, estimator, scaler, encoder, imputer,
+# splitter, index, sparse, gpu, device) are unported design drafts — they
+# do not parse as Tungsten yet and are not loaded. Port one into the
+# manifest above only after `bin/tungsten -c` passes on it AND it runs
+# on both engines (spec coverage in spec/koala_spec.w).
 
 + Koala
   # Create a DataFrame from ordered [name, values] column pairs.

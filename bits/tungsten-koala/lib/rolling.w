@@ -1,48 +1,76 @@
-# Rolling — rolling window calculations for Series
-
-in Tungsten:Koala
-
+# Rolling — trailing-window calculations over a Series
+#
+#     s = Series.new([1, 2, 3, 4, 5], "v")
+#     s.rolling(3).sum         # => Series [1, 3, 6, 9, 12]
+#     s.rolling(3, 3).sum      # => Series [nil, nil, 6, 9, 12]
+#
+# Window i covers the last `window` values ending at index i. nils are
+# dropped from each window; a cell is nil until the window holds at least
+# `min_periods` non-nil values (default 1; pandas defaults to `window` —
+# pass it explicitly for that behavior).
+#
+# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
+# interpreter cannot resolve @ivars from a block body.
 + Rolling
   ro :series
   ro :window
   ro :min_periods
 
-  -> new(@series, window:, min_periods: 1)
+  -> new(series, window, min_periods = 1)
+    @series = series
     @window = window
     @min_periods = min_periods
 
-  # Rolling mean.
-  -> mean self.apply(-> (w) w.sum.to_f / w.size)
-
-  # Rolling sum.
-  -> sum self.apply(-> (w) w.sum)
-
-  # Rolling standard deviation.
-  -> std self.apply(-> (w) Stats.std(w))
-
-  # Rolling variance.
-  -> var self.apply(-> (w) Stats.var(w))
-
-  # Rolling min.
-  -> min self.apply(-> (w) w.min)
-
-  # Rolling max.
-  -> max self.apply(-> (w) w.max)
-
-  # Rolling median.
-  -> median self.apply(-> (w) Stats.median(w))
-
-  # Rolling count of non-nil values.
-  -> count self.apply(-> (w) w.reject(&:nil?).size)
-
-  # Apply a custom function over the rolling window.
-  -> apply(fn)
+  # Apply f — a lambda over an array of the window's non-nil values —
+  # at every position of the series.
+  -> apply(f)
     values = @series.to_a
-    result = values.size.times.map -> (i)
-      start = [0, i - @window + 1].max
-      window = values[start..i].reject(&:nil?)
-      if window.size >= @min_periods
-        fn.call(window)
+    width = @window
+    needed = @min_periods
+    out = []
+    values.size.times -> (i)
+      start = i - width + 1
+      start = 0 if start < 0
+      win = []
+      span = i - start + 1
+      span.times -> (k)
+        v = values[start + k]
+        win.push(v) if v != nil
+      if win.size >= needed
+        out.push(f.call(win))
       else
-        nil
-    Series.new(result, name: @series.name)
+        out.push(nil)
+    Series.new(out, @series.name)
+
+  -> sum
+    f = -> (w) Stats.sum(w)
+    self.apply(f)
+
+  -> mean
+    f = -> (w) Stats.mean(w)
+    self.apply(f)
+
+  -> median
+    f = -> (w) Stats.median(w)
+    self.apply(f)
+
+  -> min
+    f = -> (w) Stats.min(w)
+    self.apply(f)
+
+  -> max
+    f = -> (w) Stats.max(w)
+    self.apply(f)
+
+  -> std
+    f = -> (w) Stats.std(w)
+    self.apply(f)
+
+  -> var
+    f = -> (w) Stats.var(w)
+    self.apply(f)
+
+  # Count of non-nil values in each window.
+  -> count
+    f = -> (w) w.size
+    self.apply(f)

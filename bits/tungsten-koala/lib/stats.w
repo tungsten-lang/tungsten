@@ -53,16 +53,23 @@
     return nil if clean.size == 0
     clean.max
 
-  # Sample variance (n - 1 denominator).
+  # Sample variance (n - 1 denominator); 0.0 for fewer than 2 values.
+  #
+  # NOTE: no early return here — an early `return` from a method that
+  # also contains a block closure corrupts interpreter dispatch when the
+  # return path is taken (verified: the old `return 0.to_f if size <= 1`
+  # guard made Stats.var([1]) die with "expected string or symbol").
   -> .var(values)
     clean = self.clean(values)
-    return 0.to_f if clean.size <= 1
-    m = self.mean(clean)
-    total = 0.to_f
-    clean.each -> (v)
-      d = v.to_f - m
-      total += d * d
-    total / (clean.size - 1).to_f
+    out = 0.to_f
+    if clean.size > 1
+      m = self.mean(clean)
+      total = 0.to_f
+      clean.each -> (v)
+        d = v.to_f - m
+        total += d * d
+      out = total / (clean.size - 1).to_f
+    out
 
   -> .std(values)
     Math.sqrt(self.var(values))

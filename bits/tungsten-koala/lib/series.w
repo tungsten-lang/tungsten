@@ -91,5 +91,11 @@
   -> dropna
     Series.new(Stats.clean(@values), @name)
 
+  # --- Windows ---
+
+  # Trailing-window calculations: s.rolling(3).mean (see rolling.w).
+  -> rolling(window, min_periods = 1)
+    Rolling.new(self, window, min_periods)
+
   -> to_s
     "Series([@name], n=[@values.size]): " + @values.to_s

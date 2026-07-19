@@ -1,11 +1,11 @@
-# Koala specs — Series / DataFrame / GroupBy / Metrics vertical slice.
+# Koala specs — Series / DataFrame / GroupBy / Metrics / Rolling / Join /
+# Pivot, on the tungsten-spec framework.
 #
-# Follows the bits/tungsten-forge/spec pattern (use spec + describe/it).
-# NOTE: tungsten-spec's runner cannot execute yet on either engine — its
-# classes live under `in Tungsten:Spec`, and namespaced classes are not
-# resolvable from user scripts (forge's specs fail the same way, with
-# "Undefined class 'Context'"). Until that lands, run spec/smoke.w, which
-# asserts the same behavior and passes today interpreted AND compiled.
+# Run from the repo root (both engines, exit 0 = green):
+#   bin/tungsten bits/tungsten-koala/spec/koala_spec.w
+#   bin/tungsten -o /tmp/koala_spec bits/tungsten-koala/spec/koala_spec.w && /tmp/koala_spec
+#
+# spec/smoke.w asserts the same core behavior without the framework.
 
 use spec
 use koala
@@ -60,3 +60,109 @@ describe "Metrics" ->
     expect(Metrics.accuracy([1, 0, 1], [1, 0, 0]).to_s).to eq("0.666667")
     expect(Metrics.mse([2, 4, 6], [1, 5, 7]).to_s).to eq("1")
     expect(Metrics.r2([2, 4, 6], [1, 5, 7]).to_s).to eq("0.839286")
+
+describe "Rolling" ->
+  it "computes trailing-window aggregations" ->
+    s = Series.new([1, 2, 3, 4, 5], "v")
+    r = s.rolling(3)
+    expect(r.sum.to_a.to_s).to eq("\[1, 3, 6, 9, 12\]")
+    expect(r.mean.to_a.join(",")).to eq("1,1.5,2,3,4")
+    expect(r.median.to_a.join(",")).to eq("1,1.5,2,3,4")
+    expect(r.min.to_a.to_s).to eq("\[1, 1, 1, 2, 3\]")
+    expect(r.max.to_a.to_s).to eq("\[1, 2, 3, 4, 5\]")
+    expect(r.count.to_a.to_s).to eq("\[1, 2, 3, 3, 3\]")
+    expect(r.var.to_a.join(",")).to eq("0,0.5,1,1,1")
+    expect(r.std.to_a[2].to_s).to eq("1")
+
+  it "respects min_periods" ->
+    s = Series.new([1, 2, 3, 4, 5], "v")
+    out = s.rolling(3, 3).sum.to_a
+    expect(out[0]).to be_nil
+    expect(out[1]).to be_nil
+    expect(out[2]).to eq(6)
+    expect(out[4]).to eq(12)
+
+  it "drops nils from windows" ->
+    s = Series.new([1, nil, 3], "gaps")
+    r = s.rolling(2)
+    expect(r.sum.to_a.to_s).to eq("\[1, 1, 3\]")
+    expect(r.count.to_a.to_s).to eq("\[1, 1, 1\]")
+
+describe "Join" ->
+  it "inner joins on a key column" ->
+    left = DataFrame.new([[:id, [1, 2, 3]], [:name, ["a", "b", "c"]]])
+    right = DataFrame.new([[:id, [2, 3, 4]], [:score, [20, 30, 40]]])
+    j = left.join(right, :id)
+    expect(j.row_count).to eq(2)
+    expect(j.column_names.join(",")).to eq("id,name,score")
+    expect(j.column_values(:id).to_s).to eq("\[2, 3\]")
+    expect(j.column_values(:name).join(",")).to eq("b,c")
+    expect(j.column_values(:score).to_s).to eq("\[20, 30\]")
+    expect(Join.inner(left, right, :id).row_count).to eq(2)
+
+  it "left joins keep unmatched rows with nil cells" ->
+    left = DataFrame.new([[:id, [1, 2, 3]], [:name, ["a", "b", "c"]]])
+    right = DataFrame.new([[:id, [2, 3, 4]], [:score, [20, 30, 40]]])
+    j = left.join(right, :id, :left)
+    expect(j.row_count).to eq(3)
+    expect(j.column_values(:id).to_s).to eq("\[1, 2, 3\]")
+    scores = j.column_values(:score)
+    expect(scores[0]).to be_nil
+    expect(scores[1]).to eq(20)
+    expect(scores[2]).to eq(30)
+    expect(Join.left(left, right, :id).row_count).to eq(3)
+
+  it "emits one row per duplicate right match" ->
+    left = DataFrame.new([[:id, [2]], [:name, ["b"]]])
+    right = DataFrame.new([[:id, [2, 2]], [:score, [7, 8]]])
+    j = left.join(right, :id)
+    expect(j.row_count).to eq(2)
+    expect(j.column_values(:score).to_s).to eq("\[7, 8\]")
+
+  it "suffixes colliding right column names" ->
+    left = DataFrame.new([[:id, [1]], [:v, [10]]])
+    right = DataFrame.new([[:id, [1]], [:v, [99]]])
+    j = left.join(right, :id)
+    expect(j.column_names.join(",")).to eq("id,v,v_right")
+    expect(j.column_values("v_right").to_s).to eq("\[99\]")
+
+describe "Pivot" ->
+  it "builds a sum pivot table" ->
+    df = DataFrame.new([
+      [:city, ["nyc", "nyc", "sf", "sf", "nyc"]],
+      [:product, ["a", "b", "a", "b", "a"]],
+      [:sales, [1, 2, 3, 4, 5]]
+    ])
+    pt = df.pivot(:city, :product, :sales)
+    expect(pt.shape.to_s).to eq("\[2, 3\]")
+    expect(pt.column_names.join(",")).to eq("city,a,b")
+    expect(pt.column_values(:city).join(",")).to eq("nyc,sf")
+    expect(pt.column_values("a").to_s).to eq("\[6, 3\]")
+    expect(pt.column_values("b").to_s).to eq("\[2, 4\]")
+
+  it "supports the other aggregations" ->
+    df = DataFrame.new([
+      [:city, ["nyc", "nyc", "sf", "sf", "nyc"]],
+      [:product, ["a", "b", "a", "b", "a"]],
+      [:sales, [1, 2, 3, 4, 5]]
+    ])
+    expect(df.pivot(:city, :product, :sales, :mean).column_values("a").join(",")).to eq("3,3")
+    expect(df.pivot(:city, :product, :sales, :median).column_values("a").join(",")).to eq("3,3")
+    expect(df.pivot(:city, :product, :sales, :count).column_values("a").to_s).to eq("\[2, 1\]")
+    expect(df.pivot(:city, :product, :sales, :min).column_values("a").to_s).to eq("\[1, 3\]")
+    expect(df.pivot(:city, :product, :sales, :max).column_values("a").to_s).to eq("\[5, 3\]")
+    expect(df.pivot(:city, :product, :sales, :first).column_values("a").to_s).to eq("\[1, 3\]")
+    expect(df.pivot(:city, :product, :sales, :last).column_values("a").to_s).to eq("\[5, 3\]")
+
+  it "leaves missing cells nil" ->
+    df = DataFrame.new([
+      [:k, ["x", "y"]],
+      [:c, ["p", "q"]],
+      [:v, [1, 2]]
+    ])
+    pt = Pivot.table(df, :k, :c, :v)
+    q = pt.column_values("q")
+    expect(q[0]).to be_nil
+    expect(q[1]).to eq(2)
+
+spec_summary

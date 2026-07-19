@@ -143,6 +143,22 @@
   -> group_by(col)
     GroupBy.new(self, col)
 
+  # --- Combining / reshaping ---
+
+  # Merge with another frame on a key column (see join.w).
+  #
+  #     df.join(other, :id)           # inner join
+  #     df.join(other, :id, :left)    # left join
+  -> join(other, key, how = :inner)
+    Join.perform(self, other, key, how)
+
+  # Pivot table (see pivot.w).
+  #
+  #     df.pivot(:city, :product, :sales)          # agg defaults to :sum
+  #     df.pivot(:city, :product, :sales, :mean)
+  -> pivot(index_col, columns_col, values_col, agg = :sum)
+    Pivot.table(self, index_col, columns_col, values_col, agg)
+
   # --- Display ---
 
   -> to_s

@@ -3,8 +3,8 @@
 #     bin/tungsten bits/tungsten-koala/spec/smoke.w
 #     bin/tungsten -o /tmp/koala_smoke bits/tungsten-koala/spec/smoke.w && /tmp/koala_smoke
 #
-# Exit code 0 = all checks pass. Mirrors spec/koala_spec.w, which needs the
-# tungsten-spec runner (not executable yet on either engine).
+# Exit code 0 = all checks pass. Framework-free mirror of spec/koala_spec.w
+# (which runs on the tungsten-spec runner, also on both engines).
 #
 # Comparisons go through .to_s / .join — compiled Array == is identity-based,
 # and string-array to_s differs between engines (quotes), so string columns
@@ -84,6 +84,32 @@ use koala
     # --- Koala facade ---
     kf = Koala.frame([[:x, [1, 2, 3]]])
     self.check("Koala.frame", kf.shape, "\[3, 1\]")
+
+    # --- Stats edge cases ---
+    self.check("var of one value", Stats.var([1]), "0")
+    self.check("var of pair", Stats.var([1, 3]), "2")
+
+    # --- Rolling ---
+    rs = Series.new([1, 2, 3, 4, 5], "v")
+    self.check("rolling sum", rs.rolling(3).sum.to_a, "\[1, 3, 6, 9, 12\]")
+    self.check("rolling mean", rs.rolling(3).mean.to_a.join(","), "1,1.5,2,3,4")
+    self.check("rolling min_periods", rs.rolling(3, 3).sum.to_a[1] == nil, true)
+
+    # --- Join ---
+    jl = DataFrame.new([[:id, [1, 2, 3]], [:who, ["a", "b", "c"]]])
+    jr = DataFrame.new([[:id, [2, 3, 4]], [:score, [20, 30, 40]]])
+    self.check("inner join rows", jl.join(jr, :id).row_count, 2)
+    self.check("inner join scores", jl.join(jr, :id).column_values(:score), "\[20, 30\]")
+    self.check("left join rows", jl.join(jr, :id, :left).row_count, 3)
+
+    # --- Pivot ---
+    pdf = DataFrame.new([
+      [:city, ["nyc", "nyc", "sf", "sf", "nyc"]],
+      [:product, ["a", "b", "a", "b", "a"]],
+      [:sales, [1, 2, 3, 4, 5]]
+    ])
+    self.check("pivot shape", pdf.pivot(:city, :product, :sales).shape, "\[2, 3\]")
+    self.check("pivot cells", pdf.pivot(:city, :product, :sales).column_values("a"), "\[6, 3\]")
 
     # --- Metrics ---
     self.check("accuracy", Metrics.accuracy([1, 0, 1, 1, 0], [1, 0, 0, 1, 0]), "0.8")

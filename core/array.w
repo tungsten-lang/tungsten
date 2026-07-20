@@ -316,28 +316,114 @@
   -> normalize
     self / pythagorean
 
+  # Sorted copy. Blockless `sort` is ascending `<=>` order; a Ruby-style
+  # comparator block (returning negative/zero/positive) picks the order.
+  #
+  # Dispatch note: on the compiled engine the WN_sort IC row intercepts
+  # every `sort` call before this body — blockless calls ride the typed
+  # qsort fast paths (w_array_sort), comparator calls ride the stable
+  # bottom-up mergesort (w_array_sort_block). The interpreter mirrors the
+  # blockless row natively and tree-walks this body for the comparator
+  # form, so __mergesort_copy below must stay in lockstep with
+  # w_array_sort_block. (The Ruby engine has its own builtin twins.)
   -> sort(&)
     if block_given?
-      array_mergesort(self) -> (a, b)
+      self.__mergesort_copy -> (a, b)
         &(a, b)
     else
-      array_mergesort(self)
+      self.__mergesort_copy -> (a, b)
+        a <=> b
 
+  # In-place counterparts: sort into a copy through the same machinery,
+  # then write the ordered elements back through `[]=` (preserves the
+  # receiver's identity and typed storage). The `array_mergesort!` extern
+  # these used to call only ever existed as a Ruby-engine builtin — on
+  # the other two engines it was an undefined method since inception.
   -> sort!
-    mergesort!
+    self.__replace_elements(self.sort)
 
   -> sort!(&)
-    mergesort! -> (a, b)
+    sorted = self.sort -> (a, b)
       &(a, b)
+    self.__replace_elements(sorted)
 
   # Stable in-place sort. Uses `<=>` by default and accepts a Ruby-style
-  # comparator block returning negative/zero/positive.
+  # comparator block returning negative/zero/positive. Unlike blockless
+  # `sort!` (whose compiled fast path is an unstable qsort), this
+  # spelling guarantees stability on every path.
   -> mergesort!
-    array_mergesort!(self)
+    sorted = self.__mergesort_copy -> (a, b)
+      a <=> b
+    self.__replace_elements(sorted)
 
   -> mergesort!(&)
-    array_mergesort!(self) -> (a, b)
+    sorted = self.__mergesort_copy -> (a, b)
       &(a, b)
+    self.__replace_elements(sorted)
+
+  # Stable bottom-up merge sort returning a fresh polymorphic Array,
+  # ordered by the required comparator block. Tree-walked twin of the
+  # runtime's w_array_sort_block and the Ruby engine's
+  # Runtime::Builtins.array_mergesort_copy.
+  -> __mergesort_copy(&)
+    n = size
+    src = []
+    i = 0
+    while i < n
+      src.push(self[i])
+      i += 1
+    if n < 2
+      return src
+    dst = []
+    i = 0
+    while i < n
+      dst.push(nil)
+      i += 1
+    width = 1
+    while width < n
+      left = 0
+      while left < n
+        mid = left + width
+        if mid > n
+          mid = n
+        right = left + width * 2
+        if right > n
+          right = n
+        i = left
+        j = mid
+        k = left
+        while i < mid && j < right
+          if &(src[i], src[j]) <= 0
+            dst[k] = src[i]
+            i += 1
+          else
+            dst[k] = src[j]
+            j += 1
+          k += 1
+        while i < mid
+          dst[k] = src[i]
+          i += 1
+          k += 1
+        while j < right
+          dst[k] = src[j]
+          j += 1
+          k += 1
+        left += width * 2
+      swap = src
+      src = dst
+      dst = swap
+      width *= 2
+    src
+
+  # Overwrite self element-by-element from `other` (same length assumed;
+  # used by the in-place sorts, whose copies preserve the length).
+  -> __replace_elements(other)
+    n = size
+    i = 0
+    while i < n
+      self[i] = other[i]
+      i += 1
+    self
 
   # Random shuffle when called with no positional index list, preserving the
   # existing indexed-gather overload below. `random:` may be any object with

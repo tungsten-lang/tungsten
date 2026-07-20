@@ -314,7 +314,13 @@
     n
 
   when "sum"
+    # sum(init) seeds the accumulator (Ruby Enumerable#sum(init)) —
+    # mirrors the compiled engine's w_ic_array_sum, whose same
+    # dropped-arg bug was fixed in e857a36. Previously sum(10) == sum()
+    # and [].sum(5) == 0 here.
     total = 0
+    if args.size() > 0
+      total = args[0]
     recv.each -> (elem)
       total = total + elem
     total

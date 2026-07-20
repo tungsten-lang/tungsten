@@ -12,6 +12,12 @@
 #                           recursed)
 #   floor_and_gsub        — bodyless Decimal facade methods "ran" as empty
 #                           bodies (3.7.floor crashed); gsub missing interp
+#   sort_bang             — sort!/mergesort! called the never-implemented
+#                           array_mergesort! extern (undefined method on
+#                           BOTH engines); comparator blocks on sort were
+#                           silently ignored (both engines sorted ascending)
+#   sum_init              — interp Array#sum(init) builtin discarded init
+#                           (compiled twin was fixed in e857a36)
 # Every repro runs COMPILED and INTERPRETED, checks sentinels, and requires
 # the two engines' outputs to be byte-identical.
 set -u
@@ -114,6 +120,23 @@ run_repro floor_and_gsub \
   "gsub2=hell0 w0rld" \
   "gsub3=ba" \
   "gsub-miss=abc"
+
+run_repro sort_bang \
+  "sort_bang=[1, 2, 3]" \
+  "sort_bang_chain=[1, 2]" \
+  "sort_desc=[3, 2, 1]" \
+  "sort_src_unchanged=[3, 1, 2]" \
+  "sort_bang_desc=[3, 2, 1]" \
+  "mergesort_bang=[1, 4, 5, 9]" \
+  "mergesort_bang_desc=[9, 5, 4, 1]" \
+  "stable_sort=b,d,cc,aa,ee" \
+  "stable_mergesort_bang=b,d,cc,aa,ee"
+
+run_repro sum_init \
+  "sum_init=16" \
+  "sum_plain=6" \
+  "sum_empty_init=5" \
+  "sum_float_init=5"
 
 if [ "$FAIL" -ne 0 ]; then
   echo "interp_gaps repros: FAILURES"

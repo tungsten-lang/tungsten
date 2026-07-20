@@ -103,10 +103,11 @@
   # Element at (i, j); nil out of range. (Multi-arg `m[i, j]` bracket
   # calls do not parse today, hence a named accessor.)
   #
-  # TODO(engine): bounds are checked with integer compares, not `r != nil`
-  # — an out-of-range read on a NESTED array returns garbage interpreted
-  # ([[1,2],[3,4]][9] => 2) while compiled returns nil. Root cause is the
-  # interpreter's nested-array out-of-range read; flat arrays are fine.
+  # Note: the engine bug that once forced integer-compare bounds checks —
+  # nested-array out-of-range reads returning garbage ([[1,2],[3,4]][9]
+  # => 2) — was fixed at the runtime root in 3637550 (generic [] / []=
+  # IC rows now ride the checked get/set). The explicit checks stay
+  # anyway: they deliberately normalize negative/invalid indices to nil.
   -> at(i, j)
     out = nil
     if i >= 0 && i < @entries.size

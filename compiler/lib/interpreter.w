@@ -2209,7 +2209,7 @@ use target
     # must resolve before `is_builtin?("max")`, which would otherwise call
     # dispatch_builtin with a hardcoded nil receiver and crash).
     s = current_self()
-    m = implicit_self_method(s, name, args.size())
+    m = implicit_self_method(s, name, args.size(), block != nil)
     if m != nil
       return call_w_method(s, m, args, block, env)
 
@@ -2348,7 +2348,7 @@ use target
 
     # Method on object
     if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :object
-      m = lookup_method(recv[:w_class], name, args.size())
+      m = lookup_method(recv[:w_class], name, args.size(), block != nil)
       if m != nil
         # Implicit construction from the receiver's class: a one-param
         # method called with N>1 args builds its argument from the
@@ -2392,15 +2392,16 @@ use target
     else
       primitive_class = primitive_runtime_class(recv)
     if primitive_class != nil
-      # Array#sort's source body calls the compiled-only extern
-      # array_mergesort — dead code on BOTH engines: the native WN_sort IC
-      # row intercepts every compiled `sort` dispatch before the type-class
-      # body is consulted. Mirror that interception here (host .sort() rides
-      # the same IC row). A comparator block is ignored, exactly like the
-      # compiled engine today.
-      if primitive_class[:name] == "Array" && name == "sort" && type(recv) == "Array" && args.empty?()
+      # The native WN_sort IC row intercepts every compiled blockless
+      # `sort` dispatch before the type-class body is consulted. Mirror
+      # that interception here (host .sort() rides the same IC row). A
+      # comparator block must NOT take this shortcut: it falls through to
+      # Array#sort(&), whose source body tree-walks the stable
+      # __mergesort_copy (the compiled engine's IC row routes its blocked
+      # calls to the runtime twin, w_array_sort_block).
+      if primitive_class[:name] == "Array" && name == "sort" && type(recv) == "Array" && args.empty?() && block == nil
         return recv.sort()
-      m = lookup_method(primitive_class, name, args.size())
+      m = lookup_method(primitive_class, name, args.size(), block != nil)
       # For names the interpreter implements as builtins, a TRAIT DEFAULT
       # must not preempt the builtin: the builtins mirror the compiled
       # engine's native IC rows and proven host semantics (Enumerable's
@@ -2725,19 +2726,19 @@ use target
   # Keep this lookup narrow: dispatch_bare_call retains its existing global and
   # builtin ordering, and does not recurse through dispatch_method (which would
   # consult builtins and the runtime IC again).
-  -> implicit_self_method(recv, name, argc = nil)
+  -> implicit_self_method(recv, name, argc = nil, has_block = false)
     if recv == nil
       return nil
     if type(recv) == "Hash" && recv.has_key?(:rt)
       if recv[:rt] == :object
-        return lookup_method(recv[:w_class], name, argc)
+        return lookup_method(recv[:w_class], name, argc, has_block)
       # Class/module sentinels are interpreter Hashes, not primitive Hash
       # receivers. Do not accidentally dispatch Hash instance methods on them.
       return nil
     w_class = primitive_runtime_class(recv)
     if w_class == nil
       return nil
-    lookup_method(w_class, name, argc)
+    lookup_method(w_class, name, argc, has_block)
 
   -> w_type_name(value)
     if value == nil
@@ -2772,18 +2773,53 @@ use target
       i = i + 1
     nil
 
-  -> lookup_method_exact_arity(w_class, name, argc)
+  # A method "takes a block" when any declared parameter is a `&` block
+  # param — anonymous `(&)`, named `(&name)`, or the arity form `-> m/&`
+  # (whose parser records `&` FIRST, so scan rather than peek at the tail).
+  -> method_takes_block?(m)
+    params = m[:params]
+    if params == nil
+      return false
+    i = 0
+    while i < params.size()
+      if ast_get(params[i], :block_param) == true
+        return true
+      i += 1
+    false
+
+  -> lookup_method_exact_arity(w_class, name, argc, has_block = false)
     if w_class == nil
       return nil
     overload_map = w_class[:method_overloads]
     if overload_map != nil && overload_map.has_key?(name)
       overloads = overload_map[name]
+      # Block-aware pass first: prefer the overload whose declared block
+      # parameter matches the call site's block presence, at the arity
+      # net of that block param. This mirrors the compiled engine's
+      # method_takes_block == caller_has_block specialization gate, so
+      # `-> sort!` / `-> sort!(&)` pairs dispatch the same way on both
+      # engines (previously the blocked call matched the blockless
+      # definition and silently dropped its comparator).
+      i = overloads.size() - 1
+      while i >= 0
+        m = overloads[i]
+        takes_block = method_takes_block?(m)
+        arity = m[:params].size()
+        if takes_block
+          arity -= 1
+        if arity == argc && takes_block == has_block
+          return m
+        i -= 1
+      # Legacy positional pass: a closure may also arrive positionally in
+      # a `&` slot (lambda passed as an ordinary argument), so keep the
+      # historical raw params-count match as the tie-breaker for every
+      # call shape the pass above does not cover.
       i = overloads.size() - 1
       while i >= 0
         if overloads[i][:params].size() == argc
           return overloads[i]
         i -= 1
-    lookup_method_exact_arity(w_class[:superclass], name, argc)
+    lookup_method_exact_arity(w_class[:superclass], name, argc, has_block)
 
   -> lookup_method_fallback(w_class, name)
     if w_class == nil
@@ -2799,11 +2835,11 @@ use target
   # first, then performs a second name-only walk. The fallback selects the
   # first registration for overloaded names; no-arity introspection retains
   # the interpreter's established last-definition map.
-  -> lookup_method(w_class, name, argc = nil)
+  -> lookup_method(w_class, name, argc = nil, has_block = false)
     if w_class == nil
       return nil
     if argc != nil
-      exact = lookup_method_exact_arity(w_class, name, argc)
+      exact = lookup_method_exact_arity(w_class, name, argc, has_block)
       if exact != nil
         return exact
       return lookup_method_fallback(w_class, name)

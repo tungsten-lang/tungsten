@@ -58,26 +58,50 @@
   -> each/&
     $size -> &(self[i]) : self
 
-  -> sort(&)
-    if block_given?
-      array_mergesort(self) -> (a, b)
-        &(a, b)
-    else
-      array_mergesort(self)
+  # Sorted copy, delegated to Array's working sort machinery (the
+  # `array_mergesort` extern the old bodies called only ever existed as a
+  # Ruby-engine builtin). Returns a plain polymorphic Array. Unlike
+  # Array, BigArray has no native sort IC row, so these bodies are live
+  # on the compiled engine — which is also why blockless/comparator are
+  # separate definitions: compiled block dispatch specializes per
+  # call-site block presence and `block_given?` is not implemented there.
+  -> sort
+    self.to_a.sort
 
+  -> sort(&)
+    self.to_a.sort -> (a, b)
+      &(a, b)
+
+  # In-place: sort into a copy, then write back through `[]=`.
   -> sort!
-    mergesort!
+    self.__replace_elements(self.sort)
 
   -> sort!(&)
-    mergesort! -> (a, b)
+    sorted = self.sort -> (a, b)
       &(a, b)
+    self.__replace_elements(sorted)
 
+  # Stable in-place sort (`<=>` by default, Ruby-style comparator block
+  # optional) via Array#mergesort!'s guaranteed-stable path.
   -> mergesort!
-    array_mergesort!(self)
+    items = self.to_a
+    items.mergesort!
+    self.__replace_elements(items)
 
   -> mergesort!(&)
-    array_mergesort!(self) -> (a, b)
+    items = self.to_a
+    items.mergesort! -> (a, b)
       &(a, b)
+    self.__replace_elements(items)
+
+  # Overwrite self element-by-element from `other` (same length assumed).
+  -> __replace_elements(other)
+    n = size
+    i = 0
+    while i < n
+      self[i] = other[i]
+      i += 1
+    self
 
   -> shuffle(*opts)
     array_shuffle(self, *opts)

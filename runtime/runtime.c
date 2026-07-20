@@ -19758,7 +19758,11 @@ static WValue w_ic_array_unshift(WValue r, WValue *a, int c) {
     return w_array_unshift(r, a[0]);
 }
 static WValue w_ic_array_sort(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
+    /* A trailing closure is a comparator block (`arr.sort -> (a, b) …`):
+     * route to the stable block mergesort. Previously the block was
+     * silently ignored and the result came back ascending. */
+    if (c >= 1 && w_is_closure(a[c - 1]))
+        return w_array_sort_block(r, a[c - 1]);
     return w_array_sort(r);
 }
 static WValue w_ic_array_reverse(WValue r, WValue *a, int c) {
@@ -28252,6 +28256,63 @@ WValue w_array_sort(WValue arr) {
             break;
         }
     }
+    return result;
+}
+
+/* Comparator sort — sign of the block's verdict for a pair. Ruby-style
+ * contract: the block returns negative/zero/positive (any Int, or a Float
+ * whose sign is used). Mirrors the Ruby engine's
+ * Runtime::Builtins.array_compare, which also rejects non-numeric results
+ * loudly instead of mis-sorting. */
+static int w_sort_block_sign(WValue block, WValue x, WValue y) {
+    WValue v = w_closure_call_2(block, x, y);
+    if (w_is_int(v)) {
+        int64_t s = w_as_int(v);
+        return (s > 0) - (s < 0);
+    }
+    if (w_is_double(v)) {
+        double d = w_as_double(v);
+        return (d > 0) - (d < 0);
+    }
+    w_raise(w_string("sort: comparator block must return a negative/zero/positive number"));
+    return 0;
+}
+
+/* `arr.sort -> (a, b) …` — stable bottom-up mergesort ordered by the
+ * comparator block. The WN_sort IC row routes here whenever the call
+ * carries a block; the blockless form keeps w_array_sort's typed qsort
+ * fast paths above. Elements are decoded to WValues for the block calls
+ * and re-encoded into a fresh array of the receiver's ebits, so typed
+ * receivers (u8[], f64[], …) sort into typed results. Twin of the Ruby
+ * engine's Runtime::Builtins.array_mergesort_copy. */
+WValue w_array_sort_block(WValue arr, WValue block) {
+    WArray *sa = (WArray *)w_as_ptr(arr);
+    int64_t n = sa->size;
+    WValue result = w_array_new(sa->ebits, n);
+    WArray *da = (WArray *)w_as_ptr(result);
+    da->size = sa->size;
+    if (n == 0) return result;
+    WValue *src = malloc((size_t)n * sizeof(WValue));
+    WValue *dst = malloc((size_t)n * sizeof(WValue));
+    for (int64_t i = 0; i < n; i++) src[i] = array_slot_load_decoded(sa, i);
+    for (int64_t width = 1; width < n; width *= 2) {
+        for (int64_t left = 0; left < n; left += width * 2) {
+            int64_t mid = left + width;
+            if (mid > n) mid = n;
+            int64_t right = left + width * 2;
+            if (right > n) right = n;
+            int64_t i = left, j = mid, k = left;
+            while (i < mid && j < right)
+                dst[k++] = (w_sort_block_sign(block, src[i], src[j]) <= 0)
+                             ? src[i++] : src[j++];
+            while (i < mid) dst[k++] = src[i++];
+            while (j < right) dst[k++] = src[j++];
+        }
+        WValue *t = src; src = dst; dst = t;
+    }
+    for (int64_t i = 0; i < n; i++) w_array_set(result, w_int(i), src[i]);
+    free(src);
+    free(dst);
     return result;
 }
 

@@ -40,6 +40,20 @@ Splitter.train_test(df, 30)          # => [train, test]; last 30% tests
 Splitter.train_test(df, 30, 42)      # seeded shuffle — same seed, same split
 pipe = Pipeline.new([Imputer.new(:mean), Scaler.new(:standard)])
 pipe.fit_transform(df)               # chained; transform replays train params
+
+# Estimation — LinearRegression, normal equations on LinAlg.solve
+model = LinearRegression.new
+model.fit([0, 1, 2, 3], [1, 3, 5, 7])  # x: DataFrame | Matrix | rows | flat
+model.coefficients                   # => [2]   (y: Series | Vector | array)
+model.intercept                      # => 1
+model.predict([[5], [6]])            # => [11, 13]
+model.score([0, 1], [1, 3])          # => 1 (R² via Metrics.r2)
+
+# ... or as a pipeline tail: transform features, then fit/predict
+pipe = Pipeline.new([Scaler.new(:standard), LinearRegression.new])
+pipe.fit(df_features, y)             # nil (unfitted) on collinear features
+pipe.predict(test_df)                # scale with train params, then predict
+pipe.score(test_df, y_test)          # the estimator's R² on the chain
 ```
 
 Live modules: `Series`, `DataFrame`, `GroupBy`, `Stats`, `Metrics`,
@@ -47,18 +61,29 @@ Live modules: `Series`, `DataFrame`, `GroupBy`, `Stats`, `Metrics`,
 pairs — column order is preserved, which a hash would not guarantee),
 dense linear algebra: `Vector`, `Matrix`, `LinAlg` (pure Tungsten,
 CPU-only; ops with a shape requirement return nil when it is not met),
-and ML preprocessing: `Scaler`, `Encoder`, `Imputer`, `Splitter`,
+ML preprocessing: `Scaler`, `Encoder`, `Imputer`, `Splitter`,
 `Pipeline` (fit/transform with per-instance fitted state; transform
 before fit returns nil; splitting is deterministic — unseeded calls
 keep row order, and the seeded shuffle is a built-in MINSTD generator,
 so the same seed gives the same split on both engines; `test_pct` is an
-integer percent).
+integer percent), and estimation: `LinearRegression` (ordinary least
+squares by normal equations through `LinAlg.solve`, with an internal
+intercept column; x may be a DataFrame — numeric columns only — a
+Matrix, an array of row arrays, or a flat single-feature array, and y
+a Series, Vector, or array; a singular X^T X — collinear features —
+makes fit return nil and `fitted?` stay false, and `predict`/`score`
+return nil before a successful fit). A `Pipeline` whose LAST step is
+an estimator is fitted with `pipe.fit(df, y)` and answers
+`pipe.predict(x)` / `pipe.score(x, y)` by transforming through every
+step but the last.
 
 Verify with `bin/tungsten bits/tungsten-koala/spec/koala_spec.w`,
-`spec/linalg_spec.w`, and `spec/preprocessing_spec.w` (the
-tungsten-spec suites) or `spec/smoke.w` (framework-free) — all pass
-interpreted and compiled.
+`spec/linalg_spec.w`, `spec/preprocessing_spec.w`, and
+`spec/estimator_spec.w` (the tungsten-spec suites) or `spec/smoke.w`
+(framework-free) — all pass interpreted and compiled.
 
 The remaining files under `lib/` (tensor, resample, transformer,
 estimator, index, sparse, gpu, device) are unported design drafts and
-are not loaded by `use koala` yet (see the list in `lib/koala.w`).
+are not loaded by `use koala` yet (see the list in `lib/koala.w`);
+estimator.w's linear-regression payoff shipped as
+`lib/linear_regression.w`.

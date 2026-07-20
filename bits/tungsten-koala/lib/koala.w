@@ -1,7 +1,9 @@
 # Koala — data science and machine learning for Tungsten
 # A friendlier pandas: Series, DataFrame, group_by, stats, metrics,
-# dense linear algebra (Vector / Matrix / LinAlg), and ML
-# preprocessing (Scaler / Encoder / Imputer / Splitter / Pipeline).
+# dense linear algebra (Vector / Matrix / LinAlg), ML preprocessing
+# (Scaler / Encoder / Imputer / Splitter / Pipeline), and estimation
+# (LinearRegression — fit / predict / score, alone or as a Pipeline
+# tail).
 
 use version
 use stats
@@ -15,6 +17,7 @@ use pivot
 use vector
 use matrix
 use linalg
+use linear_regression
 use scaler
 use encoder
 use imputer
@@ -23,9 +26,12 @@ use pipeline
 
 # The remaining modules under lib/ (tensor, resample, transformer,
 # estimator, index, sparse, gpu, device) are unported design drafts —
-# they do not parse as Tungsten yet and are not loaded. Port one into
-# the manifest above only after `bin/tungsten -c` passes on it AND it
-# runs on both engines (spec coverage in spec/*.w).
+# they do not parse as Tungsten yet and are not loaded. estimator.w's
+# linear-regression payoff shipped as linear_regression.w above; the
+# draft stays only as the sketch for ridge / logistic / knn / tree
+# follow-ups. Port a draft into the manifest above only after
+# `bin/tungsten -c` passes on it AND it runs on both engines (spec
+# coverage in spec/*.w).
 
 + Koala
   # Create a DataFrame from ordered [name, values] column pairs.

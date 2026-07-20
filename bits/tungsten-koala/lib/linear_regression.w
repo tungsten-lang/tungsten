@@ -1,0 +1,149 @@
+# LinearRegression — ordinary least squares via the normal equations
+# (pure Tungsten, CPU-only; koala's first estimator: fit / predict /
+# score with per-instance fitted state, sklearn-style)
+#
+#     model = LinearRegression.new
+#     model.fit(x, y)          # self when fitted, nil when unfittable
+#     model.coefficients       # per-feature slopes (array of floats)
+#     model.intercept          # bias term (float)
+#     model.predict(x)         # plain array of float predictions
+#     model.score(x, y)        # R² of predict(x) against y (Metrics.r2)
+#
+# Accepted shapes, normalized in one place (feature_rows /
+# target_values): x is a DataFrame (numeric columns only, in column
+# order — string/symbol columns are skipped, see DataFrame#to_matrix),
+# a Matrix (rows are samples), an array of row arrays, or a flat
+# numeric array (one single-feature row per value). y is a Series, a
+# Vector, or a plain array. nil cells are NOT handled — run an
+# Imputer first.
+#
+# fit builds the design matrix X with a leading all-ones intercept
+# column and solves the normal equations (X^T X) beta = X^T y through
+# LinAlg.solve (Gaussian elimination with partial pivoting). Singular
+# X^T X — collinear features, or fewer samples than features — makes
+# solve return nil, so fit returns nil and fitted? stays false: the
+# bit's shape-error convention. predict/score return nil before a
+# successful fit, and predict returns nil when a row's width differs
+# from the fitted feature count.
+#
+# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
+# interpreter cannot resolve @ivars from a block body — and methods
+# containing closures avoid early `return` (see stats.w). No float
+# literals appear here: every float derives from the data via .to_f.
++ LinearRegression
+  ro :coefficients   # per-feature slopes after a successful fit; nil before
+  ro :intercept      # bias term after a successful fit; nil before
+
+  -> new
+    @fitted = false
+    @coefficients = nil
+    @intercept = nil
+
+  -> fitted?
+    @fitted
+
+  # Learn coefficients and intercept from x/y. Returns self, or nil —
+  # fitted? stays false — when the shapes are unusable (empty x,
+  # ragged rows, y size mismatch) or X^T X is singular.
+  -> fit(x, y)
+    rows = LinearRegression.feature_rows(x)
+    yvals = LinearRegression.target_values(y)
+    ok = rows != nil && yvals != nil
+    ok = rows.size > 0 && rows.size == yvals.size if ok
+    ok = rows[0].size > 0 if ok
+    if ok
+      width = rows[0].size
+      rows.each -> (r)
+        ok = false if r.size != width
+    out = nil
+    if ok
+      # design matrix: leading all-ones intercept column, then features
+      design = []
+      rows.each -> (r)
+        row = [1]
+        r.each -> (v)
+          row.push(v)
+        design.push(row)
+      xm = Matrix.new(design)
+      xt = xm.transpose
+      beta = LinAlg.solve(xt.matmul(xm), xt.matvec(Vector.new(yvals)))
+      if beta != nil
+        b = beta.to_a
+        coefs = []
+        i = 0
+        b.each -> (v)
+          coefs.push(v) if i > 0
+          i += 1
+        @intercept = b[0]
+        @coefficients = coefs
+        @fitted = true
+        out = self
+    out
+
+  # Predictions for x as a plain array of floats (Metrics-ready).
+  # nil before fit, and nil when x's rows do not match the fitted
+  # feature count.
+  -> predict(x)
+    rows = nil
+    rows = LinearRegression.feature_rows(x) if @fitted
+    out = nil
+    if rows != nil
+      coefs = @coefficients
+      base = @intercept
+      nf = coefs.size
+      ok = true
+      rows.each -> (r)
+        ok = false if r.size != nf
+      if ok
+        preds = []
+        rows.each -> (r)
+          total = base.to_f
+          nf.times -> (j)
+            total += coefs[j].to_f * r[j].to_f
+          preds.push(total)
+        out = preds
+    out
+
+  # R² (Metrics.r2) of self's predictions on x against y; nil before
+  # fit or when the shapes do not line up.
+  -> score(x, y)
+    preds = self.predict(x)
+    yvals = LinearRegression.target_values(y)
+    out = nil
+    if preds != nil && yvals != nil
+      out = Metrics.r2(preds, yvals) if preds.size == yvals.size && preds.size > 0
+    out
+
+  # --- Input coercion (every accepted shape, one place) ---
+
+  # x as plain feature rows: a Matrix or DataFrame goes through its
+  # to_matrix (numeric columns only for a frame — nil when it has
+  # none), an array of arrays is taken as-is, and a flat array becomes
+  # one single-feature row per value.
+  -> .feature_rows(x)
+    out = nil
+    if type(x) == "Array"
+      if x.size == 0
+        out = []
+      else
+        if type(x[0]) == "Array"
+          out = x
+        else
+          rows = []
+          x.each -> (v)
+            rows.push([v])
+          out = rows
+    else
+      m = x.to_matrix
+      out = m.to_a if m != nil
+    out
+
+  # y as a plain array of target values: Series / Vector -> to_a, a
+  # plain array is taken as-is.
+  -> .target_values(y)
+    out = nil
+    if type(y) == "Array"
+      out = y
+    else
+      out = y.to_a
+    out

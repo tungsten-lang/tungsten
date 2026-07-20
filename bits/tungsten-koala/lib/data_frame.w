@@ -159,6 +159,30 @@
   -> pivot(index_col, columns_col, values_col, agg = :sum)
     Pivot.table(self, index_col, columns_col, values_col, agg)
 
+  # --- Conversion ---
+
+  # Numeric columns (Stats.numeric?) as a Matrix, one row per frame
+  # row, column order preserved; string/symbol columns are skipped.
+  # nil when the frame has no numeric column. nil cells pass through
+  # unchanged — run an Imputer first if the Matrix feeds arithmetic.
+  -> to_matrix
+    cols = @cols
+    keep = []
+    i = 0
+    cols.each -> (c)
+      keep.push(i) if Stats.numeric?(c)
+      i += 1
+    out = nil
+    if keep.size > 0
+      rows = []
+      self.row_count.times -> (r)
+        row = []
+        keep.each -> (j)
+          row.push(cols[j][r])
+        rows.push(row)
+      out = Matrix.new(rows)
+    out
+
   # --- Display ---
 
   -> to_s

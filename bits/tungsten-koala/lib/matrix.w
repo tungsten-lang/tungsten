@@ -281,6 +281,12 @@
 
   # --- Conversion ---
 
+  # Already a Matrix — self. (The estimator input convention: every
+  # tabular type answers to_matrix, so LinearRegression.feature_rows
+  # coerces DataFrame and Matrix through one polymorphic call.)
+  -> to_matrix
+    self
+
   # 1×n or n×1 matrix as a Vector; nil otherwise.
   -> to_vector
     out = nil

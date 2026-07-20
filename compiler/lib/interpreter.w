@@ -1452,6 +1452,10 @@ use target
       => nil
 
   -> callable?(name)
+    # Paren-less `block_given?` arrives as a bare :var; route it to
+    # dispatch_bare_call's handler.
+    if name == "block_given?"
+      return true
     if is_builtin?(name)
       return true
     if @env.defined?("__method__" + name)
@@ -1632,6 +1636,19 @@ use target
         old = 0
       result = apply_compound_op(op, old, new_val)
       obj[:ivars][ast_get(target, :name)] = result
+      return result
+
+    # `h[k] += v` / `a[i] -= v` — the parser hands the target over as an
+    # index-read call (name "[]", one index arg). Read through the same
+    # dispatch the standalone `h[k]` expression uses, apply the operator,
+    # and write back through "[]=". No missing-key default: the compiled
+    # engine lets `nil + v` raise, so the tree walker must too.
+    if ast_kind(target) == :call && ast_get(target, :name) == "\[]"
+      recv = evaluate(ast_get(target, :receiver), env)
+      idx = evaluate(ast_get(target, :args)[0], env)
+      old = dispatch_method(recv, "\[]", [idx], nil, env)
+      result = apply_compound_op(op, old, new_val)
+      dispatch_method(recv, "\[]=", [idx, result], nil, env)
       return result
 
     raise "Invalid compound assignment target"
@@ -2032,6 +2049,15 @@ use target
       return dispatch_interpreted_ccall(args)
     if name == "ccall_nobox"
       return dispatch_interpreted_ccall_nobox(args)
+    # `block_given?` — true iff the innermost enclosing method call carries a
+    # block (attached trailing block, or a closure bound to its `&` param).
+    # Every call_w_method frame owns a __block__ slot (nil when no block), so
+    # the nearest binding is authoritative and a caller's block cannot leak
+    # through the environment chain.
+    if name == "block_given?" && args.size() == 0
+      if !env.defined?("__block__")
+        return false
+      return env.get("__block__") != nil
     # `constant_alias "WC"` bit directive. The parser stamped the declaring
     # file's `in` namespace as a second argument (parser.w), so registration
     # needs no file context; the single-arg form (no active namespace at the
@@ -2366,7 +2392,25 @@ use target
     else
       primitive_class = primitive_runtime_class(recv)
     if primitive_class != nil
+      # Array#sort's source body calls the compiled-only extern
+      # array_mergesort — dead code on BOTH engines: the native WN_sort IC
+      # row intercepts every compiled `sort` dispatch before the type-class
+      # body is consulted. Mirror that interception here (host .sort() rides
+      # the same IC row). A comparator block is ignored, exactly like the
+      # compiled engine today.
+      if primitive_class[:name] == "Array" && name == "sort" && type(recv) == "Array" && args.empty?()
+        return recv.sort()
       m = lookup_method(primitive_class, name, args.size())
+      # For names the interpreter implements as builtins, a TRAIT DEFAULT
+      # must not preempt the builtin: the builtins mirror the compiled
+      # engine's native IC rows and proven host semantics (Enumerable's
+      # include?, for one, mis-executes under the tree walker's closure
+      # `return`). A class's OWN source method still wins over the builtin,
+      # exactly as before traits were spliced for autoloaded core classes;
+      # trait defaults serve only the names no builtin covers (sort_by,
+      # min_by, max_by, …).
+      if m != nil && m[:trait_default] == true && is_builtin?(name)
+        m = nil
       # StringBuffer's core file contains bodyless primitive declarations as
       # well as the source-backed size body. After correcting the class name
       # so its type class can register, those declarations must remain
@@ -2386,15 +2430,17 @@ use target
           if name == "to_s" && args.size() == 0
             return ccall("w_strbuf_to_s", recv)
           m = nil
-      # Mmap likewise mixes one source leaf with retained native declarations.
-      # Empty declarations are runtime fallthroughs, not nil-returning bodies.
-      if m != nil && primitive_class[:name] == "Mmap"
-        method_body = m[:body]
-        if method_body == nil || method_body.size() == 0
-          m = nil
-      # Thread mixes the source-backed alive? leaf with retained native
-      # declarations. Empty declarations must likewise fall through.
-      if m != nil && primitive_class[:name] == "Thread"
+      # A bodyless `-> name` on a runtime-backed receiver is a native/
+      # abstract DECLARATION, never a nil-returning empty body — the
+      # compiled engine dispatches these to the runtime's handlers. Fall
+      # through to the builtin/runtime delegation below instead of
+      # "executing" nothing. This generalizes the former Mmap/Thread
+      # special cases and covers every all-facade core class (Decimal's
+      # floor/round declarations were being run as empty bodies, which
+      # crashed evaluating their `digits = scale` default). data_field
+      # accessors are exempt: they are handled by the dedicated branch
+      # underneath.
+      if m != nil && m[:data_field] != true
         method_body = m[:body]
         if method_body == nil || method_body.size() == 0
           m = nil
@@ -2867,6 +2913,11 @@ use target
     # barrier); closures that capture method-locals keep write-through
     # because their block_env has no barrier and chains to this env.
     method_env = Environment.new(@env, true)
+    # Own a __block__ slot per frame (nil when no block arrives) so
+    # block_given? answers for THIS call — without the slot, the lookup
+    # would walk past the barrier into a caller frame's binding. The
+    # param-binding and block-binding paths below overwrite it.
+    method_env.define("__block__", nil)
     @self_stack.push(recv)
     @method_stack.push(method)
     result = nil
@@ -3036,18 +3087,32 @@ use target
   # `is TraitName` line, depending on source order) and simply overwrite the
   # trait's entry in w_class[:methods] via eval_class_def's last-wins
   # assignment — so the trait acts as a set of defaults, not an override.
-  # An unresolvable trait name is left as a bare :trait_include, which the
-  # main evaluate() dispatcher no-ops (see its :trait_include case).
+  # A trait not seen yet is autoloaded through the same registry as classes
+  # (core/tungsten.w registers `auto :Enumerable, "traits/enumerable"` etc.)
+  # — without this, a lazily autoloaded core class like Array dropped its
+  # `is Enumerable` on the floor and sort_by/min_by/max_by never existed
+  # interpreted. An unresolvable trait name is left as a bare
+  # :trait_include, which the main evaluate() dispatcher no-ops (see its
+  # :trait_include case).
+  # Returns [expr, from_trait] pairs so eval_class_def can mark spliced
+  # methods as trait DEFAULTS (see register_instance_method's shadowing
+  # rule).
   -> expand_trait_includes(body)
     if body == nil
-      return body
+      return []
     expanded = []
     body.each -> (expr)
-      if is_ast_node?(expr) && ast_kind(expr) == :trait_include && @traits.has_key?(ast_get(expr, :name))
-        @traits[ast_get(expr, :name)].each -> (m)
-          expanded.push(m)
+      if is_ast_node?(expr) && ast_kind(expr) == :trait_include
+        trait_name = ast_get(expr, :name)
+        if !@traits.has_key?(trait_name)
+          try_autoload_class(trait_name)
+        if @traits.has_key?(trait_name)
+          @traits[trait_name].each -> (m)
+            expanded.push([m, true])
+        else
+          expanded.push([expr, false])
       else
-        expanded.push(expr)
+        expanded.push([expr, false])
     expanded
 
   # Single insertion path for interpreted instance methods. The name map
@@ -3057,13 +3122,36 @@ use target
   # dynamic definitions nor generated accessors leave a stale overload.
   -> register_instance_method(w_class, w_method)
     method_name = w_method[:name]
-    w_class[:methods][method_name] = w_method
     if w_class[:method_overloads] == nil
       w_class[:method_overloads] = {}
     overloads = w_class[:method_overloads][method_name]
     if overloads == nil
       overloads = []
       w_class[:method_overloads][method_name] = overloads
+    # A trait-spliced method is a DEFAULT: a class's own method of the same
+    # name shadows it at EVERY arity, not just its own. Exact-arity lookup
+    # otherwise lets a trait method win a call the class meant to own —
+    # Enumerable#sort (arity 0, body `to_a.sort`) beat Array#sort(&)
+    # (arity 1) for `arr.sort`, and Array#to_a returns self, so dispatch
+    # recursed until the stack died. Own methods purge same-name defaults;
+    # a default arriving after an own method is dropped.
+    if w_method[:trait_default] == true
+      i = 0
+      while i < overloads.size()
+        if overloads[i][:trait_default] != true
+          return w_method
+        i += 1
+    else
+      kept = []
+      i = 0
+      while i < overloads.size()
+        if overloads[i][:trait_default] != true
+          kept.push(overloads[i])
+        i += 1
+      if kept.size() != overloads.size()
+        overloads = kept
+        w_class[:method_overloads][method_name] = overloads
+    w_class[:methods][method_name] = w_method
     replaced = false
     i = 0
     while i < overloads.size()
@@ -3110,10 +3198,12 @@ use target
     @defining_class = w_class
     if w_class[:cvars] == nil
       w_class[:cvars] = {}
-    expand_trait_includes(ast_get(node, :body)).each -> (expr)
+    expand_trait_includes(ast_get(node, :body)).each -> (entry)
+      expr = entry[0]
+      from_trait = entry[1]
       if ast_kind(expr) == :method_def
         mbody = register_trailing_accessors(expr, ast_get(expr, :body), w_class)
-        w_method = {rt: :method, name: ast_get(expr, :name), params: ast_get(expr, :params), body: mbody, w_class: w_class, file: @current_file}
+        w_method = {rt: :method, name: ast_get(expr, :name), params: ast_get(expr, :params), body: mbody, w_class: w_class, file: @current_file, trait_default: from_trait}
         if ast_get(expr, :is_class_method) == true
           w_class[:class_methods][ast_get(expr, :name)] = w_method
         else

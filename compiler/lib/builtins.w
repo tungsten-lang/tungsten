@@ -117,10 +117,25 @@
     recv.include?(args[0])
 
   when "index"
+    # Optional second arg is the search start offset (String#index(needle,
+    # offset)); the compiled engine honors it (w_ic_string_index), so forward
+    # it rather than silently searching from 0.
+    if args.size() == 2
+      return recv.index(args[0], args[1])
     recv.index(args[0])
 
   when "rindex"
+    # Optional second arg caps the match start (Ruby rindex semantics),
+    # mirroring the compiled w_ic_string_rindex.
+    if args.size() == 2
+      return recv.rindex(args[0], args[1])
     recv.rindex(args[0])
+
+  when "gsub"
+    # Plain-string patterns only — identical to the compiled engine, whose
+    # gsub IC row routes to the same literal replace-all handler as replace
+    # (w_ic_string_replace); neither engine does regex substitution here.
+    recv.replace(args[0], args[1])
 
   when "concat"
     recv.concat(args[0])
@@ -401,7 +416,7 @@ builtin_names = [
   "puts", "print", "read_file", "file?", "file_mtime_ns", "cache_read", "cache_write",
   "exit", "type", "to_s", "to_i", "class",
   "length", "size", "chars", "split", "strip", "ltrim", "rtrim", "ascii?", "valid_utf8?", "replace", "starts_with?",
-  "ends_with?", "upcase", "downcase", "swapcase", "capitalize", "include?", "index", "rindex", "concat",
+  "ends_with?", "upcase", "downcase", "swapcase", "capitalize", "include?", "index", "rindex", "gsub", "concat",
   "append", "prepend",
   "reverse", "slice", "copy", "push", "pop", "first", "last", "empty?", "nil?",
   "join", "sort", "flatten", "uniq", "delete", "each", "map", "select",

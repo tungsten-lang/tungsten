@@ -19271,15 +19271,20 @@ static WValue w_ic_array_set(WValue r, WValue *a, int c) {
     (void)c;
     return w_array_set(r, a[0], a[1]);
 }
-/* Phase 7+c: unchecked variants — `[]` and `[]=` from Phase 6a's split.
- * The bounds-checked w_ic_array_get / _set above stay for `.get` / `.set`. */
+/* `[]` / `[]=` reached through GENERIC dispatch must be bounds-checked:
+ * w_array_idx/w_array_idxset carry a "caller proves bounds" contract that
+ * only direct-emitted call sites (core array internals lowering proven
+ * loops) can honor. An IC hit has no such proof — the unchecked twins here
+ * read/wrote adjacent heap on OOB indices ([[1,2],[3,4]][9] returned a
+ * neighboring allocation's word). Route through the checked getters, which
+ * also supply the negative-index wrap the typed compiled path has. */
 static WValue w_ic_array_idx(WValue r, WValue *a, int c) {
     (void)c;
-    return w_array_idx(r, a[0]);
+    return w_array_get(r, a[0]);
 }
 static WValue w_ic_array_idxset(WValue r, WValue *a, int c) {
     (void)c;
-    return w_array_idxset(r, a[0], a[1]);
+    return w_array_set(r, a[0], a[1]);
 }
 static WValue w_ic_array_clear(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -22201,13 +22206,16 @@ static WValue w_ic_atomic_add(WValue r, WValue *a, int c) {
 }
 
 /* Phase 7+p: BigArray and SmallArray inline fast paths. */
+/* Generic-dispatch `[]` / `[]=` must be bounds-checked — the unchecked
+ * idx twins are for direct-emitted call sites with proven bounds (see
+ * w_ic_array_idx). */
 static WValue w_ic_big_array_idx(WValue r, WValue *a, int c) {
     if (c < 1) die("[] requires 1 argument");
-    return w_big_array_idx(r, a[0]);
+    return w_big_array_get(r, a[0]);
 }
 static WValue w_ic_big_array_idxset(WValue r, WValue *a, int c) {
     if (c < 2) die("[]= requires 2 arguments");
-    return w_big_array_idxset(r, a[0], a[1]);
+    return w_big_array_set(r, a[0], a[1]);
 }
 static WValue w_ic_big_array_get(WValue r, WValue *a, int c) {
     if (c < 1) die("get requires 1 argument");
@@ -22229,11 +22237,11 @@ static WValue w_ic_big_array_subview(WValue r, WValue *a, int c) {
 
 static WValue w_ic_small_array_idx(WValue r, WValue *a, int c) {
     if (c < 1) die("[] requires 1 argument");
-    return w_small_array_idx(r, a[0]);
+    return w_small_array_get(r, a[0]);
 }
 static WValue w_ic_small_array_idxset(WValue r, WValue *a, int c) {
     if (c < 2) die("[]= requires 2 arguments");
-    return w_small_array_idxset(r, a[0], a[1]);
+    return w_small_array_set(r, a[0], a[1]);
 }
 static WValue w_ic_small_array_get(WValue r, WValue *a, int c) {
     if (c < 1) die("get requires 1 argument");

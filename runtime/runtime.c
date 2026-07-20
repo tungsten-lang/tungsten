@@ -22451,6 +22451,26 @@ static WValue w_ic_decimal_to_i(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_int((int64_t)cmp_numeric_double(r));
 }
+/* Decimal#to_f — a decimal literal (`0.1`, `10.0`) is an exact Decimal, not a
+ * Float (`~10.0`). Converting to a Float is the sanctioned way to cross into
+ * IEEE-754 arithmetic (Decimal×Float arithmetic deliberately does not
+ * auto-promote — see cmp_numeric_double). Without this IC row, `(0.1).to_f`
+ * missed the cache and died "undefined method 'to_f'", which is why decimal
+ * literals could not cross method boundaries. */
+static WValue w_ic_decimal_to_f(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    return w_box_double(cmp_numeric_double(r));
+}
+/* Decimal#abs — magnitude with the significand's sign cleared, staying an
+ * exact Decimal (mirrors Integer#abs's exactness rather than Float#abs). */
+static WValue w_ic_decimal_abs(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    int64_t sig;
+    int scale;
+    decimal_extract(r, &sig, &scale);
+    if (sig < 0) sig = -sig;
+    return w_decimal(sig, scale);
+}
 static WValue w_ic_decimal_sqrt(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_box_double(sqrt(cmp_numeric_double(r)));
@@ -22999,6 +23019,8 @@ static WICEntry w_ic_decimal_table[] = {     /* 0xFFFD numeric tag */
     {0, w_ic_decimal_ceil},
     {0, w_ic_decimal_round},
     {0, w_ic_num_sq},
+    {0, w_ic_decimal_to_f},
+    {0, w_ic_decimal_abs},
     {0, NULL}
 };
 
@@ -23195,6 +23217,8 @@ static void w_init_ic_tables(void) {
     w_ic_decimal_table[3].name = WN_ceil;
     w_ic_decimal_table[4].name = WN_round;
     w_ic_decimal_table[5].name = WN_sq;
+    w_ic_decimal_table[6].name = WN_to_f;
+    w_ic_decimal_table[7].name = WN_abs;
 
     w_ic_ipv4_table[0].name = w_string("inspect");
     w_ic_ipv6_table[0].name = w_string("inspect");

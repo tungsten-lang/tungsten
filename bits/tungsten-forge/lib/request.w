@@ -14,12 +14,20 @@
   # Options-hash constructor (like Response.new): kwarg constructors
   # diverge between engines (the interpreter passes them as one hash,
   # compiled passes them positionally), so an explicit hash is the only
-  # form that behaves identically in both.
+  # form that behaves identically in both. options[:headers] may be a
+  # plain hash (normalized here) or an already-built Headers (the parse
+  # fast path — no second walk).
   -> new(options = {})
     @method       = options[:method].to_s.upcase.to_sym
     @path         = options[:path]
     @query_string = self.extract_query(options[:path])
-    @headers      = Headers.new(options[:headers] || {})
+    given = options[:headers]
+    if given == nil
+      given = {}
+    if given.is_a?(Headers)
+      @headers = given
+    else
+      @headers = Headers.new(given)
     @body         = options[:body]
     @version      = options[:version] || "HTTP/1.1"
     @remote_addr  = options[:remote_addr]
@@ -79,41 +87,79 @@
   # --- Parsing ---
 
   # Parse a raw HTTP/1.1 request (request line + headers + optional body).
-  # Split-based: String#index(needle, offset) diverges between engines
-  # (the self-hosted interpreter ignores the offset argument), so parsing
-  # never uses the offset form. Returns nil for a malformed request line.
+  #
+  # Single forward scan (profile-guided rewrite): the split("\r\n")
+  # parser it replaces allocated a line array plus a string per header
+  # line, then Headers.new re-walked the finished hash to build a
+  # downcased twin — Request#parse was 13.9% of server time under hammer
+  # load, the top forge-code cost. Now each boundary is found once with
+  # index(needle, offset) (offset honored by both engines since 3637550),
+  # header names are downcased straight into the one normalized hash
+  # Headers wraps, and the body honors Content-Length, so a pipelined
+  # remainder is never swallowed (the old parser returned everything
+  # after the blank line; without a Content-Length that remains the
+  # fallback). Value bytes keep their original case.
+  #
+  # Returns nil for a malformed request line — exactly the old cases: a
+  # first line with fewer than three single-space-separated fields
+  # (split(" ") was literal, so "GET  / HTTP/1.1" still parses, with an
+  # empty path). Header lines without ": " are skipped, the first ": "
+  # in a line wins, and duplicate header names keep the LAST value
+  # (matching the old normalize-last-wins and content_length_in's
+  # rindex scan).
   -> .parse(raw)
-    separator = raw.index("\r\n\r\n")
-    head = raw
-    body = nil
-    if separator
-      head = raw.slice(0, separator)
-      body_start = separator + 4
-      body = raw.slice(body_start, raw.size() - body_start)
-
-    lines = head.split("\r\n")
+    size = raw.size
+    line_end = raw.index("\r\n")
+    if line_end == nil
+      line_end = size
+    sp1 = raw.index(" ")
+    sp2 = nil
+    if sp1 != nil && sp1 < line_end
+      sp2 = raw.index(" ", sp1 + 1)
     result = nil
-    if lines.size > 0
-      parts = lines[0].split(" ")
-      if parts.size >= 3
-        headers = {}
-        i = 1
-        while i < lines.size
-          line = lines[i]
-          colon = line.index(": ")
-          if colon
-            key = line.slice(0, colon)
-            value_start = colon + 2
-            headers[key] = line.slice(value_start, line.size - value_start)
-          i += 1
+    if sp2 != nil && sp2 < line_end
+      vend = raw.index(" ", sp2 + 1)
+      if vend == nil || vend > line_end
+        vend = line_end
 
-        result = self.new({
-          method: parts[0],
-          path: parts[1],
-          headers: headers,
-          body: body,
-          version: parts[2]
-        })
+      headers = {}
+      body = nil
+      pos = line_end + 2
+      while pos < size
+        eol = raw.index("\r\n", pos)
+        if eol == pos
+          # Blank line — the body follows, bounded by Content-Length.
+          body_start = pos + 2
+          body_len = size - body_start
+          cl = headers["content-length"]
+          if cl != nil
+            n = cl.to_i
+            if n < body_len
+              body_len = n
+            if body_len < 0
+              body_len = 0
+          body = raw.slice(body_start, body_len)
+          pos = size
+        else
+          stop = eol
+          if stop == nil
+            stop = size
+          # index scans past `stop` when a line lacks ": " — the guard
+          # below rejects those matches, so the line is just skipped.
+          colon = raw.index(": ", pos)
+          if colon != nil && colon < stop
+            name = raw.slice(pos, colon - pos).downcase
+            headers[name] = raw.slice(colon + 2, stop - colon - 2)
+          pos = stop + 2
+
+      built = Headers.new(headers, true)
+      result = self.new({
+        method: raw.slice(0, sp1),
+        path: raw.slice(sp1 + 1, sp2 - sp1 - 1),
+        headers: built,
+        body: body,
+        version: raw.slice(sp2 + 1, vend - sp2 - 1)
+      })
     result
 
   -> extract_query(path)
@@ -127,27 +173,37 @@
 
 
 # --- Case-insensitive header access ---
+#
+# One hash, keys downcased at insertion. (The previous shape kept the
+# raw-cased hash AND a normalized twin, so every request paid a second
+# full walk; nothing in forge or carbide ever read the raw casing.)
+# each / to_h / raw therefore expose normalized lowercase names.
 
 + Headers
-  ro :raw
-
-  -> new(@raw = {})
-    @normalized = {}
-    @raw.each -> (key, value)
-      @normalized[key.downcase] = value
+  # `normalized: true` trusts that `raw`'s keys are already lowercase —
+  # Request.parse builds its hash that way in its single scan.
+  -> new(raw = {}, normalized = false)
+    if normalized == true
+      @h = raw
+    else
+      @h = {}
+      raw.each -> (key, value)
+        @h[key.downcase] = value
 
   -> get(name)
-    @normalized[name.downcase]
+    @h[name.downcase]
 
   -> set(name, value)
-    @raw[name] = value
-    @normalized[name.downcase] = value
+    @h[name.downcase] = value
 
   -> has?(name)
-    @normalized.key?(name.downcase)
+    @h.key?(name.downcase)
 
   -> each(&block)
-    @raw.each(&block)
+    @h.each(&block)
 
   -> to_h
-    @raw
+    @h
+
+  -> raw
+    @h

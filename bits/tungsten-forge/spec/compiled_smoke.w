@@ -58,8 +58,8 @@ http = r.to_http
 check("to_http status line", http.starts_with?("HTTP/1.1 200 OK"))
 check("to_http carries body", http.ends_with?("hello"))
 
-# Request.parse — the live server's wire-in point (split-based parser;
-# must behave identically in both engines).
+# Request.parse — the live server's wire-in point (single-pass
+# index(needle, offset) scanner; must behave identically in both engines).
 raw = "GET /users/42?x=1 HTTP/1.1\r\nHost: localhost\r\nX-Test: yes\r\n\r\n"
 req = Request.parse(raw)
 check("parse method", req.method == :GET)
@@ -75,6 +75,57 @@ check("parse post body", post.body == "hello")
 
 bad = Request.parse("GARBAGE\r\n\r\n")
 check("parse malformed is nil", bad == nil)
+
+# Parse edges — the single-pass scanner's torture set. Malformed means
+# exactly what it meant for the old split parser: a request line with
+# fewer than three single-space-separated fields.
+check("parse missing version is nil", Request.parse("GET /\r\n\r\n") == nil)
+check("parse method only is nil", Request.parse("GET\r\n\r\n") == nil)
+check("parse empty is nil", Request.parse("") == nil)
+check("parse leading blank line is nil", Request.parse("\r\nGET / HTTP/1.1\r\n\r\n") == nil)
+
+colonv = Request.parse("GET / HTTP/1.1\r\nX-Weird: a: b\r\n\r\n")
+check("parse ': ' in header value", colonv.headers.get("x-weird") == "a: b")
+emptyv = Request.parse("GET / HTTP/1.1\r\nX-Empty: \r\n\r\n")
+check("parse empty header value", emptyv.headers.get("x-empty") == "")
+nospace = Request.parse("GET / HTTP/1.1\r\nX-Odd:nospace\r\nHost: h\r\n\r\n")
+check("parse colon-no-space line skipped", nospace.headers.get("x-odd") == nil)
+check("parse line after skipped line kept", nospace.headers.get("Host") == "h")
+
+# Duplicate headers: LAST value wins (matches the old normalized-hash
+# behavior and Server.content_length_in's rindex scan).
+dup = Request.parse("GET / HTTP/1.1\r\nHost: a\r\nHOST: b\r\n\r\n")
+check("parse duplicate header last-wins", dup.headers.get("host") == "b")
+
+# Body honors Content-Length: a pipelined remainder is not swallowed.
+pipe = Request.parse("POST /e HTTP/1.1\r\nContent-Length: 5\r\n\r\nhelloGET /next HTTP/1.1\r\n\r\n")
+check("parse body stops at content-length", pipe.body == "hello")
+short = Request.parse("POST /e HTTP/1.1\r\nContent-Length: 99\r\n\r\nshort")
+check("parse body capped at available", short.body == "short")
+nocl = Request.parse("POST /e HTTP/1.1\r\nHost: x\r\n\r\nrest")
+check("parse no content-length keeps rest", nocl.body == "rest")
+
+# CRLF edges: truncated head parses with body nil; a bare request line
+# (no CRLF anywhere) parses too.
+trunc = Request.parse("GET / HTTP/1.1\r\nHost: x")
+check("parse truncated head header", trunc.headers.get("host") == "x")
+check("parse truncated head body nil", trunc.body == nil)
+barel = Request.parse("GET / HTTP/1.1")
+check("parse bare request line", barel.version == "HTTP/1.1")
+check("parse bare request line body nil", barel.body == nil)
+noblank = Request.parse("GET / HTTP/1.1\r\n\r\n")
+check("parse empty body is empty string", noblank.body == "")
+
+# Literal-split parity: split(" ") never collapsed runs, so extra fields
+# ride along and a fourth field is ignored.
+four = Request.parse("GET / HTTP/1.1 extra\r\n\r\n")
+check("parse fourth field ignored", four.version == "HTTP/1.1")
+
+# Headers mutation contract (RequestIdMiddleware): set then get, any case.
+mut = Request.parse("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+mut.headers.set("X-Request-Id", "abc")
+check("headers set/get roundtrip", mut.headers.get("x-request-id") == "abc")
+check("headers has? case-insensitive", mut.headers.has?("HOST") == true)
 
 # Keep-alive semantics — the server's connection-loop wire-in. (Never
 # chain off a `?` method: `keep_alive?.to_s` lexes as safe navigation,

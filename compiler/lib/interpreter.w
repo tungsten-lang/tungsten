@@ -1300,6 +1300,9 @@ use target
     when "w_mac_parse"
       return ccall("w_mac_parse", args[1])
 
+    when "w_array_shuffle"
+      return ccall("w_array_shuffle", args[1])
+
     when "w_crypto_random_bytes"
       return ccall("w_crypto_random_bytes", args[1])
     when "w_crypto_md5_bytes"

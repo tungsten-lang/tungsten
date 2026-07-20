@@ -51,8 +51,10 @@
     else
       to_a.sort
 
-  -> shuffle(*opts)
-    to_a.shuffle(*opts)
+  # Delegate to Array's working shuffle (the former `*opts` splat could not
+  # pack on the compiled/self-hosted engines; a bare `shuffle` needs none).
+  -> shuffle
+    to_a.shuffle
 
   -> rotate(count = 1)
     to_a.rotate(count)

@@ -1379,6 +1379,7 @@ WValue w_array_set(WValue arr, WValue index, WValue val);
 WValue w_array_size(WValue arr);
 WValue w_array_sort(WValue arr);
 WValue w_array_sort_block(WValue arr, WValue block);
+WValue w_array_shuffle(WValue arr);
 WValue w_array_min_signed(WValue arr);
 WValue w_array_min_unsigned(WValue arr);
 WValue w_array_min_float(WValue arr);

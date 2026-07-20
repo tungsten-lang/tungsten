@@ -425,17 +425,39 @@
       i += 1
     self
 
-  # Random shuffle when called with no positional index list, preserving the
-  # existing indexed-gather overload below. `random:` may be any object with
-  # `rand(limit)` or `random_number(limit)`.
-  -> shuffle(*args)
-    if args.size > 0 && !args[0].is_a?(Hash)
-      args[0].map -> self[item]
+  # Random shuffle. Called with no argument this returns a fresh randomly
+  # ordered copy through the runtime's secure unbiased Fisher-Yates
+  # (w_array_shuffle) — typed receivers shuffle into typed results. Passing a
+  # leading Array of indexes keeps the existing indexed-gather overload
+  # (gathers those positions in order).
+  #
+  # Two same-disease bugs used to block this on the compiled and self-hosted
+  # engines: (1) the body called `array_shuffle`, an extern that only ever
+  # existed as a Ruby-engine builtin (undefined method on the other two
+  # engines since inception); and (2) the parameter was a `*args` splat, but
+  # variadic splat packing is not implemented on those engines — a splat binds
+  # nil for zero args instead of `[]`, so `args.size` raised before the extern
+  # was even reached. Rewriting to a plain optional `sel` sidesteps the splat
+  # gap (documented as a follow-up) and routes the random path through the
+  # runtime. On the Ruby engine this source is shadowed by that engine's own
+  # `shuffle` method builtin, so the ccall never runs there.
+  #
+  # No seeding: the `random:` custom-RNG option the Ruby engine accepts is not
+  # honored here — there is no seeded RNG in the runtime, so consumers needing
+  # reproducibility build their own (e.g. koala's Splitter LCG). A non-Array
+  # argument (such as an options Hash) is treated as the random path.
+  -> shuffle(sel = nil)
+    if sel != nil && sel.is_a?(Array)
+      sel.map -> (idx)
+        self[idx]
     else
-      array_shuffle(self, *args)
+      ccall("w_array_shuffle", self)
 
-  -> shuffle!(*opts)
-    array_shuffle!(self, *opts)
+  # In-place shuffle: permute a fresh copy through the same secure machinery,
+  # then write the elements back through `[]=` (preserves the receiver's
+  # identity and typed storage, like sort!). Returns self.
+  -> shuffle!
+    self.__replace_elements(self.shuffle)
 
   # Return a copy with elements rotated left by `count` (Ruby Array#rotate):
   # [1,2,3,4].rotate -> [2,3,4,1], rotate(2) -> [3,4,1,2], rotate(-1) ->

@@ -103,14 +103,20 @@
       i += 1
     self
 
-  -> shuffle(*opts)
-    array_shuffle(self, *opts)
+  # Random shuffle / rotate, delegated to Array's working machinery (the
+  # `array_shuffle`/`array_rotate` externs these bodies used to call only ever
+  # existed as Ruby-engine builtins — undefined on the compiled and self-hosted
+  # engines since inception). The copy forms return a plain polymorphic Array;
+  # the in-place forms write the result back through `[]=`, preserving the
+  # BigArray receiver. No seeding (see Array#shuffle).
+  -> shuffle
+    self.to_a.shuffle
 
-  -> shuffle!(*opts)
-    array_shuffle!(self, *opts)
+  -> shuffle!
+    self.__replace_elements(self.to_a.shuffle)
 
   -> rotate(count = 1)
-    array_rotate(self, count)
+    self.to_a.rotate(count)
 
   -> rotate!(count = 1)
-    array_rotate!(self, count)
+    self.__replace_elements(self.rotate(count))

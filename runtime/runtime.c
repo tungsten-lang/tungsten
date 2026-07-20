@@ -28316,6 +28316,48 @@ WValue w_array_sort_block(WValue arr, WValue block) {
     return result;
 }
 
+/* Unbiased uniform random integer in [0, limit) drawn from the platform
+ * secure RNG (w_secure_random_fill — arc4random on Apple/BSD, getrandom or
+ * /dev/urandom on Linux). Rejection-samples the top of the 64-bit range so
+ * the modulo is bias-free, exactly like arc4random_uniform. `limit` must be
+ * positive; a limit of 0 or 1 always yields 0. */
+static uint64_t w_secure_uniform(uint64_t limit) {
+    if (limit <= 1) return 0;
+    uint64_t min = (uint64_t)(-limit) % limit; /* 2^64 mod limit */
+    uint64_t r;
+    do {
+        w_secure_random_fill((uint8_t *)&r, sizeof(r));
+    } while (r < min);
+    return r % limit;
+}
+
+/* Fisher-Yates shuffle returning a fresh array of the receiver's ebits, so
+ * typed receivers (u8[], f64[], …) shuffle into typed results. Elements are
+ * decoded to WValues, permuted with the secure unbiased RNG above, then
+ * re-encoded — the same decode/operate/re-encode shape as w_array_sort_block.
+ * Twin of the Ruby engine's Runtime::Builtins.array_shuffle_copy. There is
+ * NO seeded variant: the `random:` custom-RNG option the Ruby builtin accepts
+ * is not honored on this path (documented in core/array.w). */
+WValue w_array_shuffle(WValue arr) {
+    WArray *sa = (WArray *)w_as_ptr(arr);
+    int64_t n = sa->size;
+    WValue result = w_array_new(sa->ebits, n);
+    WArray *da = (WArray *)w_as_ptr(result);
+    da->size = sa->size;
+    if (n == 0) return result;
+    WValue *buf = malloc((size_t)n * sizeof(WValue));
+    for (int64_t i = 0; i < n; i++) buf[i] = array_slot_load_decoded(sa, i);
+    for (int64_t i = n - 1; i > 0; i--) {
+        int64_t j = (int64_t)w_secure_uniform((uint64_t)(i + 1));
+        WValue t = buf[i];
+        buf[i] = buf[j];
+        buf[j] = t;
+    }
+    for (int64_t i = 0; i < n; i++) w_array_set(result, w_int(i), buf[i]);
+    free(buf);
+    return result;
+}
+
 /* Binary socket I/O — reads exactly n bytes into a ByteArray (WArray<u8>) */
 WValue w_socket_read_exact(WValue sock, WValue n_val) {
     WSocket *s = as_socket(sock);

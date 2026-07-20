@@ -18,6 +18,15 @@
 #                           silently ignored (both engines sorted ascending)
 #   sum_init              — interp Array#sum(init) builtin discarded init
 #                           (compiled twin was fixed in e857a36)
+#   shuffle_rotate        — Array#shuffle/#shuffle! called the never-defined
+#                           array_shuffle extern (Ruby-engine-only builtin)
+#                           AND used a *args splat, which does not pack on the
+#                           compiled/self-hosted engines (binds nil for zero
+#                           args); both raised. Now: runtime w_array_shuffle
+#                           (secure unbiased Fisher-Yates) + plain optional
+#                           param. rotate already worked; pinned as a guard.
+#                           Assertions are permutation properties, never a
+#                           fixed random order.
 # Every repro runs COMPILED and INTERPRETED, checks sentinels, and requires
 # the two engines' outputs to be byte-identical.
 set -u
@@ -137,6 +146,24 @@ run_repro sum_init \
   "sum_plain=6" \
   "sum_empty_init=5" \
   "sum_float_init=5"
+
+run_repro shuffle_rotate \
+  "shuffle_perm=true" \
+  "shuffle_size=8" \
+  "shuffle_src_unchanged=[1, 2, 3, 4, 5, 6, 7, 8]" \
+  "shuffle_randomizes=true" \
+  "shuffle_bang_perm=true" \
+  "shuffle_bang_returns_self=true" \
+  "gather=[9, 7, 8]" \
+  "shuffle_empty=[]" \
+  "shuffle_one=[42]" \
+  "rotate1=[2, 3, 4, 1]" \
+  "rotate2=[3, 4, 1, 2]" \
+  "rotate_neg=[4, 1, 2, 3]" \
+  "rotate_wrap=[3, 4, 1, 2]" \
+  "rotate0=[1, 2, 3, 4]" \
+  "rotate_bang=[2, 3, 4, 1]" \
+  "rotate_bang_returns_self=true"
 
 if [ "$FAIL" -ne 0 ]; then
   echo "interp_gaps repros: FAILURES"

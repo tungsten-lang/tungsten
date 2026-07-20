@@ -2941,6 +2941,20 @@ use target
         j += 1
     out
 
+  # Collect the middle args for a `*rest` param at `splat_index` in a method
+  # declaring `nparams` params. count = args.size - (nparams - 1), floored at
+  # 0, so trailing fixed params keep their share and an exhausted splat is [].
+  -> splat_collect(args, splat_index, nparams)
+    count = args.size() - nparams + 1
+    if count < 0
+      count = 0
+    out = []
+    i = 0
+    while i < count
+      out.push(args[splat_index + i])
+      i += 1
+    out
+
   -> call_w_method(recv, method, args, block, env)
     # Barrier scope: a method/function body is lexically isolated from the
     # top-level (and caller) locals. Without the barrier, a callee that
@@ -2967,12 +2981,36 @@ use target
       # caller whose method happened to invoke it.
       params = ast_get(method, :params)
       args = kwargs_remap_args(params, args)
+      # Locate a `*rest` splat param (at most one). When present, the arg
+      # binder switches from positional-with-nil-pad to Ruby's splat model:
+      # fixed params before the splat keep their slots, the splat slot
+      # collects the middle args into a real array ([] when none remain
+      # after satisfying trailing fixed params), and trailing fixed params
+      # right-align against the end of args.
+      splat_index = -1
+      nparams = params.size()
+      i = 0
+      while i < nparams
+        if ast_get(params[i], :splat) == true
+          splat_index = i
+          break
+        i += 1
       i = 0
       while i < params.size()
         param = params[i]
         value = nil
-        if i < args.size()
-          value = args[i]
+        if splat_index == -1
+          if i < args.size()
+            value = args[i]
+        elsif i < splat_index
+          if i < args.size()
+            value = args[i]
+        elsif i == splat_index
+          value = splat_collect(args, splat_index, nparams)
+        else
+          idx = args.size() - nparams + i
+          if idx >= 0 && idx < args.size()
+            value = args[idx]
         # nil is the missing-argument sentinel, exactly as in the compiled
         # engine (call sites pad with nil; the default guard selects on
         # nil). A nil-valued slot — absent, padded, or left empty by the

@@ -1,13 +1,31 @@
-# LinearRegression — ordinary least squares via the normal equations
-# (pure Tungsten, CPU-only; koala's first estimator: fit / predict /
-# score with per-instance fitted state, sklearn-style)
+# LinearRegression — least squares via the normal equations, with
+# optional ridge regularization (pure Tungsten, CPU-only; koala's
+# first estimator: fit / predict / score with per-instance fitted
+# state, sklearn-style)
 #
 #     model = LinearRegression.new
+#     model = LinearRegression.new(12)   # ridge, alpha = 12
 #     model.fit(x, y)          # self when fitted, nil when unfittable
 #     model.coefficients       # per-feature slopes (array of floats)
 #     model.intercept          # bias term (float)
 #     model.predict(x)         # plain array of float predictions
 #     model.score(x, y)        # R² of predict(x) against y (Metrics.r2)
+#
+# alpha is the ridge strength: fit solves (X^T X + alpha*I') beta =
+# X^T y where I' is the identity with a ZERO in the intercept slot —
+# the standard penalty shrinks every feature coefficient toward zero
+# but never the bias. alpha = 0 (the default) is plain OLS, bit-for-bit.
+# With alpha > 0 the penalized matrix is positive definite, so inputs
+# whose plain X^T X is singular (collinear features) fit fine.
+#
+# alpha honesty (verified by probe on both engines): pass an INTEGER
+# (`LinearRegression.new(12)`), or a data-derived float built with
+# .to_f arithmetic (`LinearRegression.new(1.to_f / 2.to_f)`). Never
+# write a float LITERAL for it — a float literal anywhere in a program
+# (even `a / 10.0` in an unrelated top-level line) corrupts later
+# method-call arguments on BOTH engines today ("undefined method for
+# Object (numeric 0xfffd...)"), so fractional alpha must come from
+# integer .to_f division.
 #
 # Accepted shapes, normalized in one place (feature_rows /
 # target_values): x is a DataFrame (numeric columns only, in column
@@ -18,11 +36,12 @@
 # Imputer first.
 #
 # fit builds the design matrix X with a leading all-ones intercept
-# column and solves the normal equations (X^T X) beta = X^T y through
-# LinAlg.solve (Gaussian elimination with partial pivoting). Singular
-# X^T X — collinear features, or fewer samples than features — makes
-# solve return nil, so fit returns nil and fitted? stays false: the
-# bit's shape-error convention. predict/score return nil before a
+# column and solves the (possibly ridge-penalized) normal equations
+# (X^T X + alpha*I') beta = X^T y through LinAlg.solve (Gaussian
+# elimination with partial pivoting). A singular penalized matrix —
+# collinear features or fewer samples than features, with alpha = 0 —
+# makes solve return nil, so fit returns nil and fitted? stays false:
+# the bit's shape-error convention. predict/score return nil before a
 # successful fit, and predict returns nil when a row's width differs
 # from the fitted feature count.
 #
@@ -33,11 +52,13 @@
 + LinearRegression
   ro :coefficients   # per-feature slopes after a successful fit; nil before
   ro :intercept      # bias term after a successful fit; nil before
+  ro :alpha          # ridge strength; 0 = plain OLS
 
-  -> new
+  -> new(alpha = 0)
     @fitted = false
     @coefficients = nil
     @intercept = nil
+    @alpha = alpha
 
   -> fitted?
     @fitted
@@ -66,7 +87,16 @@
         design.push(row)
       xm = Matrix.new(design)
       xt = xm.transpose
-      beta = LinAlg.solve(xt.matmul(xm), xt.matvec(Vector.new(yvals)))
+      xtx = xt.matmul(xm)
+      # ridge: add alpha to every diagonal entry EXCEPT the intercept's
+      # (row 0 of the design is the all-ones column — the bias is never
+      # penalized). alpha = 0 adds nothing, so OLS results are untouched.
+      alpha = @alpha
+      ents = xtx.to_a
+      n = ents.size
+      n.times -> (k)
+        ents[k][k] = ents[k][k] + alpha if k > 0
+      beta = LinAlg.solve(xtx, xt.matvec(Vector.new(yvals)))
       if beta != nil
         b = beta.to_a
         coefs = []

@@ -2,8 +2,8 @@
 # A friendlier pandas: Series, DataFrame, group_by, stats, metrics,
 # dense linear algebra (Vector / Matrix / LinAlg), ML preprocessing
 # (Scaler / Encoder / Imputer / Splitter / Pipeline), and estimation
-# (LinearRegression — fit / predict / score, alone or as a Pipeline
-# tail).
+# (LinearRegression — fit / predict / score with optional ridge alpha,
+# alone or as a Pipeline tail).
 
 use version
 use stats

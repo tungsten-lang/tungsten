@@ -146,5 +146,11 @@
       rows.push([v])
     Matrix.new(rows)
 
+  # n×1 Matrix — the estimator input convention (see matrix.w): any
+  # non-array x answers to_matrix, so a Vector is one single-feature
+  # column to LinearRegression.feature_rows.
+  -> to_matrix
+    self.to_col_matrix
+
   -> to_s
     "Vector(n=[@values.size]): " + @values.to_s

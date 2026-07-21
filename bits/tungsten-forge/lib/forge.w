@@ -2,6 +2,7 @@
 # TLS by default, HTTP/3 (QUIC), work-stealing thread pool
 
 use version
+use query_string
 use request
 use response
 use router

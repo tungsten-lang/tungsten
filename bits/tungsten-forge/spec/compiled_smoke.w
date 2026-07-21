@@ -139,6 +139,33 @@ check("http10 defaults to close", ka == false)
 ka = Request.parse("GET / HTTP/1.0\r\nConnection: keep-alive\r\n\r\n").keep_alive?
 check("http10 keep-alive opt-in", ka == true)
 
+# QueryString — the parser Request#query_params / #form_body delegate to.
+# String keys, first-'=' split, '+'->space, ASCII percent-decode.
+qs = QueryString.parse("a=1&b=hello+world&flag&dup=x&dup=y")
+check("qs basic value", qs["a"] == "1")
+check("qs plus is space", qs["b"] == "hello world")
+check("qs valueless key empty", qs["flag"] == "")
+check("qs duplicate last-wins", qs["dup"] == "y")
+check("qs percent ascii decode", QueryString.parse("p=%2Fx%3Dy")["p"] == "/x=y")
+check("qs first '=' splits, rest kept", QueryString.parse("t=a=b")["t"] == "a=b")
+check("qs empty input empty hash", QueryString.parse("").size == 0)
+check("qs nil input empty hash", QueryString.parse(nil).size == 0)
+check("qs decode leaves bad escape", QueryString.decode("z%ZZ") == "z%ZZ")
+
+qreq = Request.parse("GET /s?name=John+Doe&n=%32 HTTP/1.1\r\nHost: x\r\n\r\n")
+qp = qreq.query_params
+check("query_params decodes plus", qp["name"] == "John Doe")
+check("query_params decodes percent", qp["n"] == "2")
+noq = Request.parse("GET /plain HTTP/1.1\r\nHost: x\r\n\r\n").query_params
+check("query_params nil without query", noq == nil)
+
+freq = Request.parse("POST /f HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 11\r\n\r\na=1&b=two+3")
+fb = freq.form_body
+check("form_body parses field", fb["a"] == "1")
+check("form_body decodes plus", fb["b"] == "two 3")
+notform = Request.parse("POST /f HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 3\r\n\r\na=1").form_body
+check("form_body nil for non-form", notform == nil)
+
 # Request framing (Server.request_length) — buffer carry across reads.
 get1 = "GET /a HTTP/1.1\r\nHost: x\r\n\r\n"
 post1 = "POST /e HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello"

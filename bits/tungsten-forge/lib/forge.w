@@ -11,6 +11,7 @@ use forwarded
 use http_date
 use conditional
 use cache_control
+use authorization
 use request
 use response
 use router

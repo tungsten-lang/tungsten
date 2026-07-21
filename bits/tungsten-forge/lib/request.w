@@ -271,6 +271,35 @@
   -> cache_control
     CacheControl.parse(@headers.get("Cache-Control"))
 
+  # --- Authentication (see lib/authorization.w) ---
+
+  # The parsed `Authorization` header as a Credentials (scheme +
+  # credentials), or nil when the request carries no Authorization header.
+  # See Credentials for the Bearer (#token) and Basic (#username / #password
+  # / #basic_credentials) conveniences.
+  -> authorization
+    Credentials.parse(@headers.get("Authorization"))
+
+  # The parsed `Proxy-Authorization` header (RFC 7235), or nil. Same shape
+  # as #authorization, for credentials aimed at an intermediary.
+  -> proxy_authorization
+    Credentials.parse(@headers.get("Proxy-Authorization"))
+
+  # The RFC 6750 Bearer token from the Authorization header, or nil when the
+  # request carries no Bearer credential.
+  -> bearer_token
+    creds = self.authorization
+    return nil if creds == nil
+    creds.token
+
+  # Basic (RFC 7617) credentials as {username:, password:}, or nil when the
+  # Authorization header is absent, not Basic, or carries malformed base64.
+  # `password` is nil when the decoded credential had no colon.
+  -> basic_auth
+    creds = self.authorization
+    return nil if creds == nil
+    creds.basic_credentials
+
   # --- Parsing ---
 
   # Parse a raw HTTP/1.1 request (request line + headers + optional body).

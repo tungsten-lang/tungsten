@@ -128,6 +128,38 @@ cc.get("max-age")      # raw directive value, or nil
 
 Directive names are case-insensitive, `no-cache="Set-Cookie"` values are unquoted, and a comma inside a quoted-string is not a separator. `Response#cache_control` reads back whatever `#cache` / `#no_cache` (or a raw `#header`) wrote — the read counterpart to the response writers.
 
+## Authentication
+
+Forge parses the `Authorization` (and `Proxy-Authorization`) header into a structured `Credentials`, with conveniences for the two schemes almost every app reads — Bearer tokens and Basic credentials. The Basic base64 decode is a pure Tungsten codec, so it behaves identically whether a route runs compiled or interpreted:
+
+```tungsten
+get "/api/data" -> (request)
+  token = request.bearer_token         # RFC 6750 Bearer token, or nil
+  return Response.new(status: 401) if token == nil
+  Response.json(lookup(token))
+
+get "/admin" -> (request)
+  creds = request.basic_auth           # {username:, password:} (RFC 7617), or nil
+  if creds == nil || !authenticate(creds[:username], creds[:password])
+    Response.new(status: 401).header("WWW-Authenticate", "Basic realm=\"admin\"")
+  else
+    Response.ok("welcome")
+```
+
+`request.authorization` returns the raw `Credentials` for any scheme:
+
+```tungsten
+creds = request.authorization    # nil when no Authorization header
+creds.scheme                     # downcased scheme token ("bearer", "basic", "digest", …)
+creds.scheme?("Bearer")          # case-insensitive scheme test
+creds.credentials                # the raw token68 / base64 / auth-param string
+creds.token                      # the Bearer token, or nil when not Bearer
+creds.username / creds.password  # decoded Basic userid / password, or nil
+creds.basic_credentials          # {username:, password:} for Basic, else nil
+```
+
+Basic credentials split on the **first** colon (a userid may not contain one; a password may). Malformed base64, or a non-matching scheme, yields nil rather than raising. `Base64Codec.decode` is available directly for any standard-alphabet base64 the request surface hands you.
+
 ## Static Files
 
 ```tungsten

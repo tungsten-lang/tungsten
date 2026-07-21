@@ -166,6 +166,23 @@ check("form_body decodes plus", fb["b"] == "two 3")
 notform = Request.parse("POST /f HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 3\r\n\r\na=1").form_body
 check("form_body nil for non-form", notform == nil)
 
+# Authorization / Base64Codec — the pure base64 decode + Integer#chr
+# reassembly must produce identical bytes compiled and interpreted.
+check("base64 decode Man", Base64Codec.decode("TWFu") == "Man")
+check("base64 decode padded", Base64Codec.decode("TQ==") == "M")
+check("base64 decode creds", Base64Codec.decode("dXNlcjpwYXNz") == "user:pass")
+check("base64 malformed nil", Base64Codec.decode("!!!!") == nil)
+bearer = Request.parse("GET / HTTP/1.1\r\nAuthorization: Bearer abc.def\r\n\r\n")
+check("bearer scheme", bearer.authorization.scheme == "bearer")
+check("bearer token", bearer.bearer_token == "abc.def")
+basic = Request.parse("GET / HTTP/1.1\r\nAuthorization: Basic dXNlcjpwYXNz\r\n\r\n")
+ba = basic.basic_auth
+check("basic username", ba[:username] == "user")
+check("basic password", ba[:password] == "pass")
+check("basic bearer_token nil", basic.bearer_token == nil)
+noauth = Request.parse("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+check("no auth header nil", noauth.authorization == nil)
+
 # Request framing (Server.request_length) — buffer carry across reads.
 get1 = "GET /a HTTP/1.1\r\nHost: x\r\n\r\n"
 post1 = "POST /e HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello"

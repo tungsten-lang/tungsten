@@ -219,6 +219,60 @@ t.eq("max of empty sample is 0", Hammer.stat_max(empty), 0)
 t.eq("sum of empty sample is 0", Hammer.stat_sum(empty), 0)
 t.eq("mean of empty sample is 0", Hammer.stat_mean(empty), 0)
 
+# ---- variance and standard deviation ----
+# Reference values hand-checked from Σ(xᵢ−μ)² == N·Σx² − (Σx)². The population
+# variance divides that by N, the sample variance by N−1, and each standard
+# deviation is the integer floor of √variance.
+
+# stat_sum_squares (Σx²), order-independent.
+t.eq("sum of squares of deca", Hammer.stat_sum_squares(deca), 38500)   # 10²+20²+…+100²
+t.eq("sum of squares of quad", Hammer.stat_sum_squares(quad), 3000)    # 100+400+900+1600
+t.eq("sum of squares of empty is 0", Hammer.stat_sum_squares(empty), 0)
+
+# isqrt (floor of the integer square root).
+t.eq("isqrt of 0", Hammer.isqrt(0), 0)
+t.eq("isqrt of 1", Hammer.isqrt(1), 1)
+t.eq("isqrt of 2 floors to 1", Hammer.isqrt(2), 1)
+t.eq("isqrt of a perfect square 4", Hammer.isqrt(4), 2)
+t.eq("isqrt of a perfect square 9", Hammer.isqrt(9), 3)
+t.eq("isqrt of 15 floors to 3", Hammer.isqrt(15), 3)
+t.eq("isqrt of a perfect square 16", Hammer.isqrt(16), 4)
+t.eq("isqrt of 99 floors to 9", Hammer.isqrt(99), 9)
+t.eq("isqrt of a perfect square 100", Hammer.isqrt(100), 10)
+t.eq("isqrt of 825 floors to 28", Hammer.isqrt(825), 28)   # 28²=784 ≤ 825 < 841=29²
+t.eq("isqrt of a negative is 0", Hammer.isqrt(-5), 0)
+
+# Population variance = (N·Σx² − (Σx)²)/N².
+two = [10, 20]
+constant = [5, 5, 5, 5]
+t.eq("population variance of deca", Hammer.stat_variance(deca), 825)     # (10·38500−550²)/100
+t.eq("population variance of quad", Hammer.stat_variance(quad), 125)     # (4·3000−100²)/16
+t.eq("population variance of two", Hammer.stat_variance(two), 25)        # (2·500−30²)/4
+t.eq("population variance of a constant sample is 0", Hammer.stat_variance(constant), 0)
+t.eq("population variance of a single sample is 0", Hammer.stat_variance(one), 0)
+t.eq("population variance of empty is 0", Hammer.stat_variance(empty), 0)
+
+# Sample variance = (N·Σx² − (Σx)²)/(N·(N−1)), truncated toward zero.
+t.eq("sample variance of deca truncates", Hammer.stat_variance_sample(deca), 916)   # 82500/90 = 916.67
+t.eq("sample variance of quad truncates", Hammer.stat_variance_sample(quad), 166)   # 2000/12 = 166.67
+t.eq("sample variance of two", Hammer.stat_variance_sample(two), 50)                # 100/2
+t.eq("sample variance needs two samples", Hammer.stat_variance_sample(one), 0)
+t.eq("sample variance of empty is 0", Hammer.stat_variance_sample(empty), 0)
+
+# Population standard deviation = floor(√population-variance).
+t.eq("population stddev of deca", Hammer.stat_stddev(deca), 28)      # √825 = 28.72
+t.eq("population stddev of quad", Hammer.stat_stddev(quad), 11)      # √125 = 11.18
+t.eq("population stddev of two", Hammer.stat_stddev(two), 5)         # √25 = 5
+t.eq("population stddev of a constant sample is 0", Hammer.stat_stddev(constant), 0)
+t.eq("population stddev of empty is 0", Hammer.stat_stddev(empty), 0)
+
+# Sample standard deviation = floor(√sample-variance) (Bessel's correction).
+t.eq("sample stddev of deca", Hammer.stat_stddev_sample(deca), 30)   # √916 = 30.26
+t.eq("sample stddev of quad", Hammer.stat_stddev_sample(quad), 12)   # √166 = 12.88
+t.eq("sample stddev of two", Hammer.stat_stddev_sample(two), 7)      # √50 = 7.07
+t.eq("sample stddev needs two samples", Hammer.stat_stddev_sample(one), 0)
+t.eq("sample stddev of empty is 0", Hammer.stat_stddev_sample(empty), 0)
+
 # ---- HTTP status-line classification ----
 # status_code reads the token after the first space of the status line
 # (RFC 7230 §3.1.2), bounded by the next space or CR. Reference values are the

@@ -302,6 +302,70 @@
     return 0 if n == 0
     stat_sum(samples) / n
 
+  # ---- variance and standard deviation ----
+  # wrk reports a latency standard deviation next to its percentiles (the
+  # "Thread Stats ... Stdev" column); these complete the latency-stats family
+  # begun by percentile/min/max/mean. Like stat_sum/stat_mean they are
+  # order-independent — they need only Σx and Σx² — so they accept an unsorted
+  # sample. Both a population form (÷N) and a sample form (÷(N−1), Bessel's
+  # correction, which is what wrk reports) are provided. Every result is
+  # integer-exact via the identity Σ(xᵢ−μ)² == N·Σx² − (Σx)², so no
+  # pre-rounded mean enters the computation and no floating point is used; the
+  # final divide truncates toward zero like the rest of this file. Empty (and,
+  # for the sample forms, single-element) samples return 0, so callers need no
+  # emptiness guard.
+
+  # Sum of the squares of all samples, Σx² (order-independent).
+  -> .stat_sum_squares(samples)
+    n = samples.size
+    total = 0 ## i64
+    i = 0 ## i64
+    while i < n
+      v = samples[i] ## i64
+      total += v * v
+      i += 1
+    total
+
+  # Floor of the integer square root of n (n<=0 -> 0), by Newton's method. This
+  # is the integer basis for the standard deviations below: stddev == √variance
+  # with no floating-point sqrt.
+  -> .isqrt(n) (i64) i64
+    return 0 if n <= 0
+    x = n ## i64
+    y = (x + 1) / 2 ## i64
+    while y < x
+      x = y
+      y = (x + n / x) / 2
+    x
+
+  # Population variance: the mean squared deviation Σ(xᵢ−μ)²/N, computed exactly
+  # as (N·Σx² − (Σx)²)/N² and truncated. 0 for an empty sample.
+  -> .stat_variance(samples)
+    n = samples.size
+    return 0 if n == 0
+    sum = stat_sum(samples) ## i64
+    sq = stat_sum_squares(samples) ## i64
+    (n * sq - sum * sum) / (n * n)
+
+  # Sample variance (Bessel's correction): Σ(xᵢ−μ)²/(N−1), computed as
+  # (N·Σx² − (Σx)²)/(N·(N−1)) and truncated. Needs at least two samples; a
+  # sample of fewer than two returns 0 (the N−1 divisor would be zero).
+  -> .stat_variance_sample(samples)
+    n = samples.size
+    return 0 if n < 2
+    sum = stat_sum(samples) ## i64
+    sq = stat_sum_squares(samples) ## i64
+    (n * sq - sum * sum) / (n * (n - 1))
+
+  # Population standard deviation: floor(√population-variance), integer-valued.
+  -> .stat_stddev(samples)
+    isqrt(stat_variance(samples))
+
+  # Sample standard deviation (Bessel's correction, as wrk reports):
+  # floor(√sample-variance). 0 for fewer than two samples.
+  -> .stat_stddev_sample(samples)
+    isqrt(stat_variance_sample(samples))
+
   # ---- HTTP status-line classification ----
   # A benchmark must distinguish responses the server actually served from ones
   # it rejected: a load test against an endpoint returning 500 to every request

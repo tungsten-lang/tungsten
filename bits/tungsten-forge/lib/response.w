@@ -89,6 +89,31 @@
     @headers["ETag"] = "\"" + value + "\""
     self
 
+  # Append a Web Linking entry to the Link header (RFC 8288) — the
+  # standard way to hand a client pagination, canonical, preload or
+  # discovery URLs:
+  #
+  #   Response.json(page).link(next_url, {rel: "next"})
+  #                      .link(last_url, {rel: "last", title: "End"})
+  #
+  # Params take Symbol or String keys and are emitted as quoted-strings.
+  # Entries already on the header are preserved (it is reparsed and
+  # rebuilt), and an existing header keeps whatever casing it was set
+  # with. See lib/link.w.
+  -> link(target, params = {})
+    key = "Link"
+    @headers.each -> (name, value)
+      key = name if name.downcase == "link"
+    links = Link.parse(@headers[key])
+    links.add(target, params)
+    @headers[key] = links.to_s
+    self
+
+  # The response's own Link header parsed into an ordered Link (empty
+  # when unset). The read counterpart to #link.
+  -> links
+    Link.parse(self.header_value("Link"))
+
   -> cookie(name, value, options = {})
     parts = ["[name]=[value]"]
     parts.push("Path=[options[:path]]") if options[:path]

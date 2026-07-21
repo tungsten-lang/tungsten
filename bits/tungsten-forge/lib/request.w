@@ -300,6 +300,17 @@
     return nil if creds == nil
     creds.basic_credentials
 
+  # --- Web Linking (see lib/link.w) ---
+
+  # The request's `Link` header (RFC 8288) as an ordered Link: the
+  # entries in header order, with lookup by relation type
+  # (`request.links.href("next")`). Always a Link — empty when the header
+  # is absent — so callers never nil-guard. A Link header on a REQUEST
+  # states relations for the request's own representation (e.g. a PUT
+  # body's `rel="describedby"` profile).
+  -> links
+    Link.parse(@headers.get("Link"))
+
   # --- Parsing ---
 
   # Parse a raw HTTP/1.1 request (request line + headers + optional body).

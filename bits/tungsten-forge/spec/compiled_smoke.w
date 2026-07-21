@@ -183,6 +183,25 @@ check("basic bearer_token nil", basic.bearer_token == nil)
 noauth = Request.parse("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
 check("no auth header nil", noauth.authorization == nil)
 
+# Web Linking (RFC 8288) — the angle/quote-aware split and the quoted
+# rebuild must behave identically compiled and interpreted.
+lheader = "</p?ids=1,2>; rel=\"next\"; title=\"A, B\", </p?page=1>; rel=\"first prev\""
+llinks = Link.parse(lheader)
+check("link entry count", llinks.size == 2)
+check("link comma inside target kept", llinks[0].target == "/p?ids=1,2")
+check("link comma inside quoted value kept", llinks[0].title == "A, B")
+check("link href by rel", llinks.href("next") == "/p?ids=1,2")
+check("link multi-valued rel matches", llinks.href("prev") == "/p?page=1")
+check("link unknown rel nil", llinks.href("last") == nil)
+check("link malformed entry skipped", Link.parse("junk, </a>; rel=\"next\"").size == 1)
+check("link absent header empty", Link.parse(nil).empty?)
+check("link build round trip", Link.parse(Link.new.add("/a", {rel: "next"}).to_s).href("next") == "/a")
+lreq = Request.parse("GET / HTTP/1.1\r\nLink: </schema>; rel=\"describedby\"\r\n\r\n")
+check("request links delegator", lreq.links.href("describedby") == "/schema")
+lresp = Response.ok("x").link("/p?page=2", {rel: "next"})
+check("response link writer", lresp.headers["Link"] == "</p?page=2>; rel=\"next\"")
+check("response links reader", lresp.links.size == 1)
+
 # Request framing (Server.request_length) — buffer carry across reads.
 get1 = "GET /a HTTP/1.1\r\nHost: x\r\n\r\n"
 post1 = "POST /e HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello"

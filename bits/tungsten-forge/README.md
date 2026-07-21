@@ -160,6 +160,40 @@ creds.basic_credentials          # {username:, password:} for Basic, else nil
 
 Basic credentials split on the **first** colon (a userid may not contain one; a password may). Malformed base64, or a non-matching scheme, yields nil rather than raising. `Base64Codec.decode` is available directly for any standard-alphabet base64 the request surface hands you.
 
+## Web Linking (`Link`)
+
+The `Link` header (RFC 8288) is how a resource points at other resources — pagination, canonical URLs, preload hints, API discovery. Forge parses it into ordered entries with lookup by relation type, and builds one back:
+
+```tungsten
+get "/items" -> (request)
+  Response.json(page)
+    .link("/items?page=3", {rel: "next"})
+    .link("/items?page=9", {rel: "last", title: "End"})
+# Link: </items?page=3>; rel="next", </items?page=9>; rel="last"; title="End"
+
+links = request.links               # a Link (never nil)
+links.href("next")                  # target URI of the first rel="next", or nil
+links.find("next")                  # the LinkValue itself, or nil
+links.all("alternate")              # every entry with that rel, in header order
+links.rels                          # every distinct relation type, first-seen order
+links.size / links.empty? / links[0]
+```
+
+Each entry is a `LinkValue`:
+
+```tungsten
+v = links[0]
+v.target                 # the URI-Reference between < and >, verbatim
+v.rel                    # raw rel value ("prev index"), or nil
+v.rels                   # ["prev", "index"] — downcased, split
+v.rel?("index")          # case-insensitive, matches any of a multi-valued rel
+v.title / v.type / v.hreflang / v.media / v.anchor
+v.param("nopush")        # any param: String, `true` for a valueless one, or nil
+v.to_s                   # back to a conformant link-value
+```
+
+The split honours both angle brackets and quotes, so a `,` or `;` inside the target URI or inside a quoted value is not a separator. Param names are case-insensitive, duplicates keep the first occurrence (as RFC 8288 requires), and a malformed entry is **skipped** rather than raised — one bad entry from a proxy must not cost the client the rest of the header. Build side: `Link.new.add(url, {rel: "next"})` and `Response#link`, which appends to whatever is already on the header.
+
 ## Static Files
 
 ```tungsten

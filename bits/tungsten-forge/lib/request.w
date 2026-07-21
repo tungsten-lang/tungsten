@@ -262,6 +262,15 @@
   -> preconditions(etag = nil, last_modified = nil)
     Conditional.evaluate(self, etag, last_modified)
 
+  # --- Cache-Control (see lib/cache_control.w) ---
+
+  # The request's Cache-Control directives as a structured CacheControl
+  # (no_cache?, no_store?, max_age, max_stale, min_fresh, only_if_cached?,
+  # …). Always a CacheControl — empty when the header is absent — so
+  # callers can query it without a nil-guard.
+  -> cache_control
+    CacheControl.parse(@headers.get("Cache-Control"))
+
   # --- Parsing ---
 
   # Parse a raw HTTP/1.1 request (request line + headers + optional body).

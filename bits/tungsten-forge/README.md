@@ -99,6 +99,35 @@ get "/whoami" -> (request)
 
 `request.forwarded` returns the structured RFC 7239 elements (each a hash of `for`/`by`/`host`/`proto`). **Security:** these headers are client-forgeable — trust `client_ip` only when a proxy you control sanitizes the inbound value.
 
+## Caching
+
+Forge parses `Cache-Control` into structured directives on both the request and response surface, so handlers can honour a client's freshness demands and a cache layer can read back the lifetime a response declares:
+
+```tungsten
+get "/data" -> (request)
+  cc = request.cache_control        # a CacheControl (never nil)
+
+  if cc.no_cache? || cc.max_age == 0
+    revalidate                      # client forced a fresh check
+
+  Response.json(payload).cache(3600)
+```
+
+`CacheControl` exposes the RFC 7234 directive set as query methods:
+
+```tungsten
+cc = request.cache_control
+cc.no_cache?           # / no_store? / no_transform? / only_if_cached?
+cc.public?             # / private? / must_revalidate? / proxy_revalidate? / immutable?
+cc.max_age             # delta-seconds as an Integer, or nil (also s_maxage,
+                       # min_fresh, stale_while_revalidate, stale_if_error)
+cc.max_stale           # nil / :any (no bound) / an Integer bound
+cc.no_cache_fields     # field-name list from no-cache="…" (and private_fields)
+cc.get("max-age")      # raw directive value, or nil
+```
+
+Directive names are case-insensitive, `no-cache="Set-Cookie"` values are unquoted, and a comma inside a quoted-string is not a separator. `Response#cache_control` reads back whatever `#cache` / `#no_cache` (or a raw `#header`) wrote — the read counterpart to the response writers.
+
 ## Static Files
 
 ```tungsten

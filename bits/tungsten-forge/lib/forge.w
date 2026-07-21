@@ -10,6 +10,7 @@ use byte_range
 use forwarded
 use http_date
 use conditional
+use cache_control
 use request
 use response
 use router

@@ -67,6 +67,24 @@
     @headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     self
 
+  # The response's own Cache-Control directives as a structured
+  # CacheControl (public?, private?, max_age, s_maxage, immutable?, …).
+  # Reads the header case-insensitively — set by #cache / #no_cache or a
+  # raw #header call — and always returns a CacheControl (empty when
+  # unset). The read counterpart to the writers above; see
+  # lib/cache_control.w.
+  -> cache_control
+    CacheControl.parse(self.header_value("Cache-Control"))
+
+  # A response header value looked up case-insensitively (@headers keeps
+  # the author's casing), or nil when no header matches.
+  -> header_value(name)
+    target = name.downcase
+    found = nil
+    @headers.each -> (key, value)
+      found = value if key.downcase == target
+    found
+
   -> etag(value)
     @headers["ETag"] = "\"" + value + "\""
     self

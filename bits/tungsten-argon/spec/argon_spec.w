@@ -687,4 +687,57 @@ t.eq("spaced-ellipsis operand keeps its name", pd9[0][:key], "file")
 opts = cli9.parse(["-f", "a", "b"])
 t.eq("spaced-ellipsis variadic collects operands", opts.positional(:file), ["a", "b"])
 
+# ---- Generated usage synopsis ----
+# Argon generates an argparse/getopt-style "usage:" line straight from the
+# parsed option and operand definitions, so it can never drift from what the
+# parser accepts. Options appear in manpage order, bracketed unless "(required)":
+# value options show their metavar, array options an ellipsis, optional-value
+# options a nested bracket. Named operands from the SYNOPSIS follow, bracketed
+# when optional and suffixed "..." when variadic. It is reachable from both the
+# parser and the parse result (the latter delegates), ideal for prefixing errors.
+
+# The value placeholder ("metavar") is now captured from the option line.
+t.eq("value option captures its metavar", cli.find_by_key("out")[:value_name], "FILE")
+t.eq("single-letter metavar captured", cli.find_by_key("jobs")[:value_name], "N")
+t.eq("array option captures its bracketed metavar", cli.find_by_key("files")[:value_name], "FILE")
+t.eq("optional-value option captures its metavar", cli.find_by_key("profile")[:value_name], "MODE")
+t.eq("negatable flag has no metavar", cli.find_by_key("color")[:value_name] == nil, true)
+t.eq("boolean flag has no metavar", cli.find_by_key("debug")[:value_name] == nil, true)
+
+# The full synopsis for the probe manpage, exact form.
+t.eq("full usage synopsis is generated in manpage order", cli.usage(), "usage: probe \[-C] \[-d] \[-o FILE] \[-j N] \[-t VERSION] \[-r HZ] \[--files FILE...] \[-p \[MODE]] file")
+
+# It begins with "usage:" and the program name.
+t.eq("usage line names the program", cli.usage().starts_with?("usage: probe"), true)
+
+# Short form is preferred when present; long form used when there is no short.
+t.eq("short form preferred in usage", cli.usage().index("\[-o FILE]") != nil, true)
+t.eq("long form used when no short flag exists", cli.usage().index("\[--files FILE...]") != nil, true)
+
+# Optional-value options render a nested bracket.
+t.eq("optional-value option renders nested brackets", cli.usage().index("\[-p \[MODE]]") != nil, true)
+
+# The required operand "file" trails, unbracketed.
+t.eq("required operand trails the usage line unbracketed", cli.usage().ends_with?(" file"), true)
+
+# The parse result delegates to the same generated usage.
+t.eq("result usage delegates to the parser", cli.parse([]).usage(), cli.usage())
+
+# A "(required)" option is shown WITHOUT brackets; optionals keep theirs.
+t.eq("required option is unbracketed in usage", cli4.usage().index("-i FILE") != nil, true)
+t.eq("required option has no leading bracket", cli4.usage().index("\[-i FILE]") == nil, true)
+t.eq("non-required option stays bracketed alongside a required one", cli4.usage().index("\[-o FILE]") != nil, true)
+
+# Named operands: required bare, optional bracketed, variadic suffixed "...".
+t.eq("required operand appears bare in usage", cli7.usage().index(" TARGET ") != nil, true)
+t.eq("optional operand is bracketed in usage", cli7.usage().index("\[OUTPUT]") != nil, true)
+t.eq("variadic operand is suffixed with an ellipsis", cli7.usage().index("\[FILE...]") != nil, true)
+
+# A required variadic operand (bare-ellipsis SYNOPSIS) is unbracketed + "...".
+t.eq("required variadic operand is unbracketed with ellipsis", cli8.usage().ends_with?(" DEST..."), true)
+
+# Array metavar renders with an ellipsis mid-line, ahead of the operand.
+t.eq("array metavar renders inline with an ellipsis", cli3.usage().index("\[--nums N...]") != nil, true)
+t.eq("operand still trails after an array option", cli3.usage().ends_with?(" file"), true)
+
 t.done

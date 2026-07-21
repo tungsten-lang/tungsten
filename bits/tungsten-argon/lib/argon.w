@@ -31,6 +31,12 @@
 #   opts.args                 # => \["file.w", "arg1"]
 #   opts.command              # => "compile" (first positional before --)
 #
+# A compact usage synopsis is generated from the option and operand definitions
+# (always in sync with what the parser accepts), ready to prefix error output:
+#
+#   cli.usage()   # => "usage: probe \[-C] \[-d] \[-o FILE] ... \[-p \[MODE]] file"
+#   opts.usage()  # same, reachable from the parse result
+#
 # Operands named in the SYNOPSIS are reachable by name and arrive typed. Given
 # "SYNOPSIS: build \[options] TARGET \[OUTPUT] \[FILE ...]":
 #
@@ -268,6 +274,61 @@
   # Print formatted help from the manpage
   -> help
     @manpage
+
+  # A compact, always-in-sync usage synopsis generated from the parsed option
+  # and operand definitions (the argparse/getopt-style "usage:" line). Options
+  # appear in manpage order, each wrapped in brackets unless "(required)":
+  # value options show their metavar ("\[-o FILE]"), array options an ellipsis
+  # ("\[--files FILE...]"), optional-value options a nested bracket
+  # ("\[-p \[MODE]]"). Named operands from the SYNOPSIS follow, bracketed when
+  # optional and suffixed "..." when variadic. Because it is derived from the
+  # same defs `parse` uses, it can never drift from what the parser accepts —
+  # ideal for prefixing error output.
+  -> usage
+    out = "usage: " + @name
+    i = 0
+    while i < @option_defs.size()
+      out = out + " " + option_usage(@option_defs[i])
+      i = i + 1
+    p = 0
+    while p < @positional_defs.size()
+      out = out + " " + positional_usage(@positional_defs[p])
+      p = p + 1
+    out
+
+  # Render one option as it appears in the usage synopsis (see `usage`).
+  -> option_usage(d)
+    label = usage_flag_label(d)
+    inner = label
+    if d[:takes_value]
+      vn = d[:value_name]
+      if vn == nil
+        vn = "VALUE"
+      if d[:array]
+        inner = label + " " + vn + "..."
+      elsif d[:optional_value]
+        inner = label + " \[" + vn + "]"
+      else
+        inner = label + " " + vn
+    if d[:required]
+      return inner
+    "\[" + inner + "]"
+
+  # The short form ("-o") when the option has one, else the long form ("--out").
+  -> usage_flag_label(d)
+    if d[:short] != nil
+      return "-" + d[:short]
+    "--" + d[:long]
+
+  # Render one named operand for the usage synopsis: bare when required,
+  # bracketed when optional, suffixed "..." when variadic.
+  -> positional_usage(d)
+    s = d[:name]
+    if d[:variadic]
+      s = s + "..."
+    if d[:required]
+      return s
+    "\[" + s + "]"
 
   # ---- Private ----
 
@@ -542,6 +603,31 @@
   # how option long-names become keys.
   -> positional_key(name)
     replace_all(name.downcase(), "-", "_")
+
+  # Normalize an option's value placeholder ("metavar") to a bare token: strip
+  # surrounding brackets/angles and a trailing ellipsis, so "\[MODE]" and "\[FILE"
+  # both reduce to their operand name. Used to render usage synopses.
+  -> clean_value_name(tok)
+    s = tok.strip()
+    while s.starts_with?("\[") || s.starts_with?("<")
+      s = s.slice(1, s.size())
+    while s.ends_with?("]") || s.ends_with?(">")
+      s = s.slice(0, s.size() - 1)
+    if s.ends_with?("...")
+      s = s.slice(0, s.size() - 3)
+    s.strip()
+
+  # Pull the placeholder out of an array option's "\[NAME ...]" bracket, e.g.
+  # "--files \[FILE ...]" yields "FILE". Returns nil when no bracket is present.
+  -> array_value_name(line)
+    bi = line.index("\[")
+    if bi == nil
+      return nil
+    after = line.slice(bi + 1, line.size()).strip()
+    sp = after.index(" ")
+    if sp
+      after = after.slice(0, sp)
+    clean_value_name(after)
 
   # Auto-cast a string value: "123" → 123, "3.14" → 3.14, else string
   -> cast(val)
@@ -885,6 +971,7 @@
     optional_value = false
     negatable = false
     array = false
+    value_name = nil
 
     # Check for array syntax: [PLACEHOLDER ...]
     # The [no-] of a negatable flag (--\[no-]color) is not a value bracket,
@@ -931,6 +1018,8 @@
             val_name = tokens[1]
             if val_name == val_name.upcase() && val_name.size() > 0
               takes_value = true
+              if value_name == nil
+                value_name = clean_value_name(val_name)
         elsif flag.starts_with?("-") && flag.size() == 2
           short = flag.slice(1, 2)
           if !key
@@ -941,11 +1030,18 @@
             val_name = tokens[1]
             if val_name == val_name.upcase() && val_name.size() > 0
               takes_value = true
+              if value_name == nil
+                value_name = clean_value_name(val_name)
 
       j = j + 1
 
+    # Array placeholders ("--files \[FILE ...]") sit inside a bracket the token
+    # scan above skips, so pull the metavar straight out of the bracket.
+    if array && value_name == nil
+      value_name = array_value_name(line)
+
     if key
-      return { short: short, long: long, key: key, takes_value: takes_value, optional_value: optional_value, negatable: negatable, array: array }
+      return { short: short, long: long, key: key, takes_value: takes_value, optional_value: optional_value, negatable: negatable, array: array, value_name: value_name }
     nil
 
 
@@ -1251,6 +1347,11 @@
     if k.size() == 1
       return "-" + k
     "--" + @parser.replace_all(k, "_", "-")
+
+  # The generated usage synopsis for this CLI (delegates to the parser). Handy
+  # for prefixing error output: `<< opts.usage()` then `opts.errors`.
+  -> usage
+    @parser.usage()
 
   # Print help and exit
   -> help!

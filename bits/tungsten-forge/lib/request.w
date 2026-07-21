@@ -105,6 +105,36 @@
   -> cookie(name)
     self.cookies[name]
 
+  # --- Content negotiation (see lib/negotiation.w) ---
+
+  # Does the client's Accept header accept this media type? Honours media
+  # ranges ("text/*", "*/*") and explicit ";q=0" refusals. An absent
+  # Accept header accepts everything.
+  -> accepts?(media_type)
+    Negotiation.accepts?(@headers.get("Accept"), media_type, :media)
+
+  # Given the media types this endpoint can produce, the client's most
+  # preferred, or nil when it accepts none of them. Ties go to the
+  # server's ordering (offered first = server preference).
+  -> preferred_type(offered)
+    Negotiation.best(@headers.get("Accept"), offered, :media)
+
+  # The client's preferred language from those offered (Accept-Language),
+  # or nil. A range "en" matches an offered tag "en-US".
+  -> preferred_language(offered)
+    Negotiation.best(@headers.get("Accept-Language"), offered, :lang)
+
+  # The client's preferred content-coding from those offered
+  # (Accept-Encoding), or nil. Honours ";q=0" refusals — unlike a bare
+  # header substring check.
+  -> preferred_encoding(offered)
+    Negotiation.best(@headers.get("Accept-Encoding"), offered, :token)
+
+  # The media ranges the client accepts, best-first (descending quality;
+  # ";q=0" refusals dropped). Empty when there is no Accept header.
+  -> accepted_media_types
+    Negotiation.ranked(@headers.get("Accept"))
+
   # --- Parsing ---
 
   # Parse a raw HTTP/1.1 request (request line + headers + optional body).

@@ -5,6 +5,7 @@ use version
 use query_string
 use cookie
 use multipart
+use negotiation
 use request
 use response
 use router

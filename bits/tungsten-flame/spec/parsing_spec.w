@@ -12,6 +12,7 @@ use flame_svg
 use flame_diff
 use speedscope
 use hot_frames
+use flame_filter
 
 describe "PerfScript" ->
   it "collapses perf script samples into sorted folded stacks" ->
@@ -388,5 +389,42 @@ describe "HotFrames" ->
     r = Tungsten:Flame:HotFrames.report("", 5, false)
     expect(r.include?("no samples")).to eq(true)
     expect(Tungsten:Flame:HotFrames.rank("").size()).to eq(0)
+
+describe "FlameFilter" ->
+  it "matches a stack when any frame contains the pattern as a substring" ->
+    expect(Tungsten:Flame:FlameFilter.stack_matches("main;parse;lex", "parse")).to eq(true)
+    expect(Tungsten:Flame:FlameFilter.stack_matches("main;libsystem_kernel.dylib`kevent + 8", "kevent")).to eq(true)
+    expect(Tungsten:Flame:FlameFilter.stack_matches("main;run;emit", "parse")).to eq(false)
+
+  it "keeps only whole stacks passing through the pattern (grep/include)" ->
+    kept = Tungsten:Flame:FlameFilter.keep("main;parse;lex 10\nmain;run;gc 5\nmain;parse;fold 3", "parse")
+    expect(kept).to eq("main;parse;fold 3\nmain;parse;lex 10")
+
+  it "drops whole stacks touching the pattern (prune/exclude)" ->
+    pruned = Tungsten:Flame:FlameFilter.drop("main;parse;lex 10\nmain;run;gc 5\nmain;parse;gc 3", "gc")
+    expect(pruned).to eq("main;parse;lex 10")
+
+  it "re-roots the profile at the pattern and sums the subtree (zoom)" ->
+    focused = Tungsten:Flame:FlameFilter.focus("main;a;parse;lex 10\nmain;b;parse;fold 4\nmain;run 7", "parse")
+    expect(focused).to eq("parse;fold 4\nparse;lex 10")
+
+  it "sums distinct callers that collapse onto the same subtree when zooming" ->
+    focused = Tungsten:Flame:FlameFilter.focus("root;x;work 6\nroot;y;work 4", "work")
+    expect(focused).to eq("work 10")
+
+  it "aggregates duplicate stacks and sorts output deterministically" ->
+    kept = Tungsten:Flame:FlameFilter.keep("z;hot 2\na;hot 3\nz;hot 4", "hot")
+    expect(kept).to eq("a;hot 3\nz;hot 6")
+
+  it "chains include then exclude, subtree winning over grep, via apply" ->
+    text = "main;parse;lex 10\nmain;parse;gc 5\nmain;run;gc 8"
+    expect(Tungsten:Flame:FlameFilter.apply(text, "parse", "gc", "")).to eq("main;parse;lex 10")
+    expect(Tungsten:Flame:FlameFilter.apply(text, "", "", "parse")).to eq("parse;gc 5\nparse;lex 10")
+    expect(Tungsten:Flame:FlameFilter.apply(text, "parse", "", "run")).to eq("run;gc 8")
+
+  it "counts non-empty folded stacks and treats empty input as zero" ->
+    expect(Tungsten:Flame:FlameFilter.stack_count("a;b 3\nc;d 4")).to eq(2)
+    expect(Tungsten:Flame:FlameFilter.stack_count("")).to eq(0)
+    expect(Tungsten:Flame:FlameFilter.keep("", "x")).to eq("")
 
 spec_summary

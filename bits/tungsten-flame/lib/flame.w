@@ -20,6 +20,7 @@ use flame_svg
 use flame_diff
 use speedscope
 use hot_frames
+use flame_filter
 
 # ---- Read and parse the manpage ----
 # Prefer TUNGSTEN_ROOT (set by the CLI); __DIR__ is not always populated
@@ -71,6 +72,15 @@ if fl_pid_raw != ""
 fl_focus = opts.get("focus")
 if fl_focus == nil
   fl_focus = ""
+fl_grep = opts.get("grep")
+if fl_grep == nil
+  fl_grep = ""
+fl_prune = opts.get("prune")
+if fl_prune == nil
+  fl_prune = ""
+fl_subtree = opts.get("subtree")
+if fl_subtree == nil
+  fl_subtree = ""
 fl_output = opts.get("output")
 if fl_output == nil
   fl_output = ""
@@ -138,6 +148,29 @@ if fl_hot
     combined = combined + ftext
     hi = hi + 1
   << Tungsten:Flame:HotFrames.report(combined, fl_top, !fl_silent)
+  exit(0)
+
+# Filter mode: reshape one folded profile before viewing it — include
+# (`--grep PAT`), exclude (`--prune PAT`), or zoom into a subtree
+# (`--subtree PAT`). Like --diff / --hot, a pure folded-text mode (no compile,
+# no profiling) that works on any folded stacks. Emits folded text — pipe it
+# into another view (`flame --grep parse x.folded > sub.folded`). With -o the
+# result is written to the file instead of stdout.
+if fl_grep != "" || fl_prune != "" || fl_subtree != ""
+  if fl_files.size < 1
+    << "tungsten flame: filter needs one folded file"
+    exit(1)
+  ftext = read_file(fl_files[0])
+  if ftext == nil
+    << "tungsten flame: cannot read " + fl_files[0]
+    exit(1)
+  filtered = Tungsten:Flame:FlameFilter.apply(ftext, fl_grep, fl_prune, fl_subtree)
+  if fl_output != ""
+    write_file(fl_output, filtered)
+    if !fl_silent
+      << "wrote filtered folded: " + fl_output + " (" + Tungsten:Flame:FlameFilter.stack_count(filtered).to_s() + " stacks)"
+  else
+    << filtered
   exit(0)
 
 if fl_pid != nil

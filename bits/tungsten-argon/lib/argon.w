@@ -253,10 +253,10 @@
     else
       counts[key] = 1
 
-  # Store an option value, appending to arrays for repeated array options
+  # Store an option value, appending to arrays for repeated array/list options
   -> store_option(options, key, val)
     defn = find_by_key(key)
-    if defn && defn[:array]
+    if defn && (defn[:array] || defn[:list])
       existing = options[key]
       if existing
         if val.is_a?(Array)
@@ -766,6 +766,13 @@
   -> extract_required(text)
     text.index("(required)") != nil
 
+  # Detect a "(list)" annotation: the option's value is a single comma-separated
+  # token split into a typed array ("--tags a,b,c" => \["a", "b", "c"]). Unlike an
+  # "\[NAME ...]" array option, which consumes multiple argv tokens, a list arrives
+  # in one token — the common comma-list idiom ("--tags=a,b,c" too).
+  -> extract_list(text)
+    text.index("(list)") != nil
+
   # Extract an "(env: VAR)" annotation naming the environment variable an
   # option falls back to when it is absent from argv. Returns the variable
   # name (a plain string) or nil. Same extraction shape as extract_default.
@@ -858,7 +865,25 @@
           i = i + 1
         return casted
       return [cast(val)]
+    if defn && defn[:list]
+      return cast_list(val)
     cast(val)
+
+  # Split a single comma-separated token ("a,b,c") into a typed array, casting
+  # each element with the usual rules and trimming surrounding whitespace so
+  # "a, b, c" parses like "a,b,c" — the common "--tags a,b,c" list idiom. A list
+  # option only ever reaches this with a single token (it takes the plain
+  # one-value path in `parse`), so no multi-token handling is needed here.
+  -> cast_list(val)
+    if val == nil
+      return []
+    parts = val.to_s().split(",")
+    out = []
+    i = 0
+    while i < parts.size()
+      out.push(cast(parts[i].strip()))
+      i = i + 1
+    out
 
   # A "value-like" token is one an option is willing to consume as a value:
   # a plain positional, a bare "-" (stdin convention), or a negative number.
@@ -1029,6 +1054,13 @@
               defn[:conflicts] = inline_conflicts
             else
               defn[:conflicts] = extract_conflicts(desc)
+            # Comma-separated list value: "(list)". A single token like "a,b,c"
+            # is split on commas into a typed array (distinct from an
+            # "\[NAME ...]" array option, which spans multiple argv tokens). A
+            # list always takes a value, even when its metavar is omitted.
+            defn[:list] = extract_list(stripped) || extract_list(desc)
+            if defn[:list]
+              defn[:takes_value] = true
             defs.push(defn)
 
       i = i + 1

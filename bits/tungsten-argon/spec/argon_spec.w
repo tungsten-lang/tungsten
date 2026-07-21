@@ -796,4 +796,85 @@ cli10 = Argon.new(MAN10)
 t.eq("no-options help body is the usage line alone", cli10.help_text(), cli10.usage())
 t.eq("no-options help body has no Options heading", cli10.help_text().index("Options:") == nil, true)
 
+# ---- Comma-separated list values ("(list)") ----
+# An option annotated "(list)" takes a single comma-separated token and splits
+# it into a typed array (the common "--tags a,b,c" idiom). This differs from an
+# "\[NAME ...]" array option, which consumes multiple argv tokens; a list travels
+# in one token. Elements are cast with the usual rules and whitespace-trimmed,
+# repeated uses accumulate, and it works across every value form (=, space,
+# short, attached-short) and composes with choices validation.
+
+MAN11 = "NAME
+    tagger -- exercise comma-separated list values
+
+SYNOPSIS
+    tagger \[options] file
+
+OPTIONS
+    -t, --tags LIST
+        Comma-separated tags. (list)
+
+    -p, --ports LIST
+        Comma-separated ports. (list)
+
+    -m, --mode MODE
+        Operating mode. (list) (one of: fast, slow)
+
+    -b, --bare
+        A list option declared without a metavar. (list)
+
+    -o, --out FILE
+        A plain, non-list value option.
+"
+
+cli11 = Argon.new(MAN11)
+
+# Annotation extraction.
+t.eq("(list) annotation marks an option as a list", cli11.find_by_key("tags")[:list], true)
+t.eq("a plain value option is not a list", cli11.find_by_key("out")[:list], false)
+t.eq("(list) with no metavar still takes a value", cli11.find_by_key("bare")[:takes_value], true)
+t.eq("a list option is not an \[NAME ...] array", cli11.find_by_key("tags")[:array], false)
+
+# Splitting a single token into a typed array across every value form.
+opts = cli11.parse(["--tags", "a,b,c"])
+t.eq("space form splits a comma list", opts.get(:tags), ["a", "b", "c"])
+
+opts = cli11.parse(["--tags=a,b,c"])
+t.eq("=value form splits a comma list", opts.get(:tags), ["a", "b", "c"])
+
+opts = cli11.parse(["-t", "a,b,c"])
+t.eq("short form splits a comma list", opts.get(:tags), ["a", "b", "c"])
+
+opts = cli11.parse(["-ta,b,c"])
+t.eq("attached-short form splits a comma list", opts.get(:tags), ["a", "b", "c"])
+
+# Elements are cast with the usual rules; whitespace around each is trimmed.
+opts = cli11.parse(["--ports", "8080,9090,443"])
+t.eq("list elements are cast to their types", opts.get(:ports), [8080, 9090, 443])
+
+opts = cli11.parse(["--tags", "a, b , c"])
+t.eq("list elements are whitespace-trimmed", opts.get(:tags), ["a", "b", "c"])
+
+# A single element (no comma) still yields a one-element array.
+opts = cli11.parse(["--tags", "solo"])
+t.eq("a single value is a one-element list", opts.get(:tags), ["solo"])
+
+# A list travels in one token — it does NOT swallow following positionals.
+opts = cli11.parse(["--tags", "a,b", "file.w"])
+t.eq("a list consumes one token, leaving positionals", opts.args, ["file.w"])
+
+# Repeated list options accumulate their elements.
+opts = cli11.parse(["--tags", "a,b", "--tags", "c,d"])
+t.eq("repeated list options accumulate elements", opts.get(:tags), ["a", "b", "c", "d"])
+
+# A list composes with choices validation, checked element-wise.
+t.eq("list with all-valid choice elements is valid", cli11.parse(["--mode", "fast,slow"]).valid?, true)
+t.eq("list with an invalid choice element is invalid", cli11.parse(["--mode", "fast,nope"]).valid?, false)
+
+# An absent list option falls through to its (here nil) default.
+t.eq("absent list option is nil", cli11.parse([]).get(:tags) == nil, true)
+
+# A list option renders as a plain value option in the usage synopsis.
+t.eq("list option appears with its metavar in usage", cli11.usage().index("\[-t LIST]") != nil, true)
+
 t.done

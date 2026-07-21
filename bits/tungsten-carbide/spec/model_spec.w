@@ -111,6 +111,12 @@ use carbide
   -> table
     "spec_ranked"
 
+# --- Model exercising dirty tracking. No validations, so every save succeeds
+# and the dirty state (changes/previous_changes/restore) is what's under test.
++ SpecDirty < Model
+  -> table
+    "spec_dirty"
+
 describe "Model" ->
   describe "construction" ->
     it "builds from an attributes hash" ->
@@ -515,5 +521,107 @@ describe "Model" ->
         expect(names.size).to eq(2)
         expect(names[0]).to eq("a")
         expect(names[1]).to eq("b")
+
+  describe "dirty tracking" ->
+    it "reports a new record's set attributes as changed from nil" ->
+      d = SpecDirty.new({name: "a"})
+      expect(d.changed?).to be_true
+      expect(d.changed.include?(:name)).to be_true
+      expect(d.attribute_was(:name)).to be_nil
+
+    it "records the old and new values in changes" ->
+      d = SpecDirty.new({name: "a"})
+      pair = d.changes[:name]
+      expect(pair[0]).to be_nil
+      expect(pair[1]).to eq("a")
+
+    it "has empty previous_changes before any save" ->
+      d = SpecDirty.new({name: "a"})
+      expect(d.previous_changes.empty?).to be_true
+
+    it "goes clean after a successful save" ->
+      Model.reset_all
+      d = Model.create(SpecDirty, {name: "a"})
+      expect(d.changed?).to be_false
+      expect(d.changed.size).to eq(0)
+
+    it "tracks a change made after save" ->
+      Model.reset_all
+      d = Model.create(SpecDirty, {name: "a"})
+      d.set(:name, "b")
+      expect(d.changed?).to be_true
+      expect(d.changes[:name][0]).to eq("a")
+      expect(d.changes[:name][1]).to eq("b")
+
+    it "answers attribute_was with the pre-change value" ->
+      Model.reset_all
+      d = Model.create(SpecDirty, {name: "a"})
+      d.set(:name, "b")
+      expect(d.attribute_was(:name)).to eq("a")
+
+    it "answers attribute_changed? per attribute" ->
+      Model.reset_all
+      d = Model.create(SpecDirty, {name: "a", role: "x"})
+      d.set(:name, "b")
+      expect(d.attribute_changed?(:name)).to be_true
+      expect(d.attribute_changed?(:role)).to be_false
+
+    it "exposes changed_attributes as attr to original value" ->
+      Model.reset_all
+      d = Model.create(SpecDirty, {name: "a"})
+      d.set(:name, "b")
+      expect(d.changed_attributes[:name]).to eq("a")
+
+    it "clears changes again after re-saving" ->
+      Model.reset_all
+      d = Model.create(SpecDirty, {name: "a"})
+      d.set(:name, "b")
+      d.save
+      expect(d.changed?).to be_false
+
+    it "records previous_changes from the last save" ->
+      Model.reset_all
+      d = Model.create(SpecDirty, {name: "a"})
+      d.set(:name, "b")
+      d.save
+      expect(d.previous_changes[:name][0]).to eq("a")
+      expect(d.previous_changes[:name][1]).to eq("b")
+
+    it "answers attribute_previously_changed? after a save" ->
+      Model.reset_all
+      d = Model.create(SpecDirty, {name: "a"})
+      d.set(:name, "b")
+      d.save
+      expect(d.attribute_previously_changed?(:name)).to be_true
+
+    it "leaves previous_changes untouched on a no-op re-save" ->
+      Model.reset_all
+      d = Model.create(SpecDirty, {name: "a"})
+      d.set(:name, "b")
+      d.save
+      d.save
+      expect(d.previous_changes[:name][1]).to eq("b")
+
+    it "reflects an update as a persisted change then goes clean" ->
+      Model.reset_all
+      d = Model.create(SpecDirty, {name: "a"})
+      d.update({name: "c"})
+      expect(d.changed?).to be_false
+      expect(d.previous_changes[:name][1]).to eq("c")
+
+    it "restore_attributes reverts unsaved changes to the baseline" ->
+      Model.reset_all
+      d = Model.create(SpecDirty, {name: "a"})
+      d.set(:name, "b")
+      d.restore_attributes
+      expect(d.get(:name)).to eq("a")
+      expect(d.changed?).to be_false
+
+    it "restore_attributes drops attributes added since the baseline" ->
+      Model.reset_all
+      d = Model.create(SpecDirty, {name: "a"})
+      d.set(:extra, "z")
+      d.restore_attributes
+      expect(d.get(:extra)).to be_nil
 
 spec_summary

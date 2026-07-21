@@ -345,6 +345,11 @@
     @errors    = []
     @id        = nil
     @persisted = false
+    # Dirty-tracking baselines (see the Dirty tracking section). A brand-new
+    # record's clean baseline is empty, so every seeded attribute reads as a
+    # change from nil until the first save snapshots the current state.
+    @saved_attributes = {}
+    @previous_changes = {}
 
   # Override in concrete models — the store key for this class.
   -> table
@@ -453,6 +458,15 @@
         Model.rows(table).push(self)
         @persisted = true
       result = true
+    # On a successful save the record becomes clean: capture what just changed
+    # into previous_changes (only when something did — a no-op re-save leaves
+    # the prior previous_changes untouched, matching Rails), then re-snapshot
+    # the current attributes as the new clean baseline so changed? goes false.
+    if result
+      diff = changes
+      if !diff.empty?
+        @previous_changes = diff
+      @saved_attributes = copy_hash(@attributes)
     result
 
   # Merge attrs, then save. Returns save's result; attrs stay merged
@@ -486,6 +500,110 @@
       if own[k] != v
         ok = false
     ok
+
+  # --- Dirty tracking (ActiveModel::Dirty subset) ---
+  #
+  # Which attributes differ from the last-saved (clean) state, computed by
+  # diffing the live @attributes hash against a snapshot (@saved_attributes)
+  # taken at construction ({} — so a new record's set attributes read as
+  # changes from nil) and re-taken after every successful save. Nothing hooks
+  # the setters: because the diff is derived lazily from the two hashes, it is
+  # correct however an attribute was mutated — set, update, or the ctor seed:
+  #
+  #   post = Post.new({title: "a"})
+  #   post.changed?              # true  (title: nil -> "a")
+  #   post.save
+  #   post.changed?              # false (baseline re-snapshotted)
+  #   post.set(:title, "b")
+  #   post.changed?              # true
+  #   post.changes               # {title: ["a", "b"]}
+  #   post.attribute_was(:title) # "a"
+  #   post.save
+  #   post.changed?              # false
+  #   post.previous_changes      # {title: ["a", "b"]}
+  #   post.attribute_previously_changed?(:title)  # true
+  #
+  # Design notes (same constraints as the rest of Model):
+  #   - Snapshots are fresh copies (copy_hash), never aliases of @attributes —
+  #     otherwise a later mutation would silently rewrite the baseline. The diff
+  #     compares scalar attribute values with !=; an Array-valued attribute
+  #     compares by identity (compiled Array == is identity), so an in-place
+  #     array mutation is not detected — assign a new value to track it.
+  #   - Attributes only ever grow (no attribute delete), so diffing over the
+  #     live keys is complete; a value set to nil that had a baseline still
+  #     registers as a change because the key is present.
+  #   - previous_changes is only advanced when a save actually changed
+  #     something; a no-op re-save leaves the previous save's record intact.
+
+  # Fresh shallow copy of a hash — snapshots must not alias the live store.
+  -> copy_hash(source)
+    out = {}
+    source.each -> (k, v)
+      out[k] = v
+    out
+
+  # {attr => [old, new]} for every attribute differing from the clean baseline.
+  -> changes
+    base = @saved_attributes
+    diff = {}
+    @attributes.each -> (k, v)
+      old = base[k]
+      if old != v
+        pair = []
+        pair.push(old)
+        pair.push(v)
+        diff[k] = pair
+    diff
+
+  # Any unsaved change since the last clean state?
+  -> changed?
+    !changes.empty?
+
+  # Names of the changed attributes, in attribute order.
+  -> changed
+    out = []
+    changes.each -> (k, pair)
+      out.push(k)
+    out
+
+  # {attr => original_value} — the pre-change value of each changed attribute.
+  -> changed_attributes
+    out = {}
+    changes.each -> (k, pair)
+      out[k] = pair[0]
+    out
+
+  # Has this specific attribute changed since the last clean state?
+  -> attribute_changed?(name)
+    found = false
+    changes.each -> (k, pair)
+      if k == name
+        found = true
+    found
+
+  # The attribute's value as of the last clean state (its pre-change value when
+  # dirty; the current value when unchanged). nil when never set/saved.
+  -> attribute_was(name)
+    @saved_attributes[name]
+
+  # {attr => [old, new]} that the most recent successful save persisted — for
+  # after-save logic ("did the email change on this save?").
+  -> previous_changes
+    @previous_changes
+
+  # Did this attribute change on the most recent successful save?
+  -> attribute_previously_changed?(name)
+    found = false
+    @previous_changes.each -> (k, pair)
+      if k == name
+        found = true
+    found
+
+  # Discard every unsaved change, reverting attributes to the clean baseline.
+  # Returns self.
+  -> restore_attributes
+    @attributes = copy_hash(@saved_attributes)
+    self
 
   # --- Serialization ---
 

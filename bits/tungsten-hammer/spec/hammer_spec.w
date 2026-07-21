@@ -73,6 +73,27 @@ t.eq("explicit multi-segment path", Hammer.url_path("http://a.com/foo/bar"), "/f
 t.eq("path with port present", Hammer.url_path("http://a.com:81/q"), "/q")
 t.eq("root slash path", Hammer.url_path("http://a.com/"), "/")
 
+# ---- IPv6 bracketed hosts (RFC 3986 §3.2.2) ----
+# Brackets are escaped in the source URLs so the lexer does not treat them as
+# string interpolation; the parsed host is the bare address, no brackets.
+t.eq("IPv6 host strips brackets", Hammer.url_host("http://\[::1\]:8080/p"), "::1")
+t.eq("IPv6 explicit port after bracket", Hammer.url_port("http://\[::1\]:8080/p"), 8080)
+t.eq("IPv6 host without port", Hammer.url_host("http://\[2001:db8::1\]/p"), "2001:db8::1")
+t.eq("IPv6 default port when absent", Hammer.url_port("http://\[2001:db8::1\]/p"), 80)
+t.eq("IPv6 https default port", Hammer.url_port("https://\[::1\]/p"), 443)
+t.eq("IPv6 host with no path", Hammer.url_host("http://\[::1\]:8080"), "::1")
+t.eq("IPv6 path is unaffected by the address", Hammer.url_path("http://\[::1\]:8080/foo"), "/foo")
+
+# ---- userinfo (user[:pass]@) is stripped from the authority ----
+t.eq("userinfo stripped from host", Hammer.url_host("http://user:pass@h.com/p"), "h.com")
+t.eq("userinfo does not shadow the port", Hammer.url_port("http://user:pass@h.com:9000/p"), 9000)
+t.eq("user-only userinfo stripped", Hammer.url_host("http://user@h.com/p"), "h.com")
+t.eq("userinfo path is unaffected", Hammer.url_path("http://user:pass@h.com/deep/path"), "/deep/path")
+
+# ---- userinfo + IPv6 combined ----
+t.eq("userinfo before IPv6 host", Hammer.url_host("http://user:pass@\[::1\]:8080/p"), "::1")
+t.eq("userinfo before IPv6 port", Hammer.url_port("http://user:pass@\[::1\]:8080/p"), 8080)
+
 # ---- request_batch ----
 batch1 = Hammer.request_batch("h.com", "/p", 1)
 t.eq("request line present", batch1.index("GET /p HTTP/1.1") == 0, true)

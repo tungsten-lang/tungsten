@@ -20,32 +20,53 @@
       return url.slice(8, url.size - 8)
     url
 
-  -> .url_host(url)
+  # The authority is the "[userinfo@]host[:port]" segment between the scheme
+  # and the path. Strip the path (at the first '/') and any userinfo (through
+  # the first '@'); what remains is host[:port], IPv6 hosts still bracketed.
+  -> .url_authority(url) (string) string
     rest = url_without_scheme(url)
     slash = rest.index("/")
     if slash != nil
       rest = rest.slice(0, slash)
-    colon = rest.index(":")
-    if colon != nil
-      return rest.slice(0, colon)
+    at = rest.index("@")
+    if at != nil
+      rest = rest.slice(at + 1, rest.size - at - 1)
     rest
+
+  # Host from an authority: the bracket-enclosed literal for an IPv6 address
+  # ("[::1]:80" -> "::1"), otherwise everything before the port colon.
+  -> .authority_host(auth) (string) string
+    if auth.starts_with?("\[")
+      close = auth.index("\]")
+      return auth.slice(1, close - 1) if close != nil
+    colon = auth.index(":")
+    return auth.slice(0, colon) if colon != nil
+    auth
+
+  # Port from an authority, or default_port when none is given. For an IPv6
+  # host the delimiting colon is the one after the closing bracket, never a
+  # colon inside the address itself.
+  -> .authority_port(auth, default_port) (string i64) i64
+    if auth.starts_with?("\[")
+      close = auth.index("\]")
+      return default_port if close == nil
+      port_pos = close + 1
+      return default_port if port_pos >= auth.size
+      return default_port if auth.slice(port_pos, 1) != ":"
+      return auth.slice(port_pos + 1, auth.size - port_pos - 1).to_i
+    colon = auth.index(":")
+    return default_port if colon == nil
+    auth.slice(colon + 1, auth.size - colon - 1).to_i
+
+  -> .url_host(url) (string) string
+    authority_host(url_authority(url))
 
   -> .url_port(url) (string) i64
     if url.starts_with?("https://")
       default_port = 443
     else
       default_port = 80
-
-    rest = url_without_scheme(url)
-    slash = rest.index("/")
-
-    if slash != nil
-      rest = rest.slice(0, slash)
-    colon = rest.index(":")
-
-    return default_port if colon == nil
-
-    rest.slice(colon + 1, rest.size - colon - 1).to_i
+    authority_port(url_authority(url), default_port)
 
   -> .url_path(url)
     rest = url_without_scheme(url)

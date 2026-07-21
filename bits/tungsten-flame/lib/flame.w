@@ -18,6 +18,7 @@ use builder
 use sampler
 use flame_svg
 use flame_diff
+use speedscope
 
 # ---- Read and parse the manpage ----
 # Prefer TUNGSTEN_ROOT (set by the CLI); __DIR__ is not always populated
@@ -80,6 +81,7 @@ fl_execution   = opts.flag?("execution")
 fl_build_only  = opts.flag?("build_only")
 fl_silent      = opts.flag?("silent")
 fl_diff        = opts.flag?("diff")
+fl_speedscope  = opts.flag?("speedscope")
 fl_files       = opts.args
 fl_passthrough = opts.passthrough
 
@@ -191,11 +193,23 @@ while i < metric_names.size
   write_file(tmpdir + "/" + m + ".folded", Tungsten:Flame:Sidemap.rewrite_folded(metrics[m], wy_names))
   i = i + 1
 
-# Flame graph SVG — the namesake output. Rendered from the primary
-# metric's sidemap-rewritten folded stacks (so frames carry real names),
-# written to --output when given. `-o` with no extension still produces a
-# valid SVG; callers who want a specific name pass one.
-if fl_output != ""
+# Interactive output for the primary metric, from its sidemap-rewritten
+# folded stacks (so frames carry real names).
+#
+# --speedscope exports a speedscope.app JSON profile (Time-Order,
+# Left-Heavy, and Sandwich views in the standard web viewer) — to
+# --output when given, else a default `<base>.speedscope.json`. Otherwise
+# -o writes the self-contained SVG flame graph (the namesake output; `-o`
+# with no extension still produces a valid SVG).
+if fl_speedscope
+  ss_path = (fl_output != "") ? fl_output : ("flame_" + Tungsten:Flame:Sampler.basename_noext(source) + ".speedscope.json")
+  primary_folded = read_file(tmpdir + "/" + primary + ".folded")
+  ss_name = Tungsten:Flame:Sampler.basename_noext(source) + " (" + primary + ")"
+  write_file(ss_path, Tungsten:Flame:Speedscope.export(primary_folded, ss_name))
+  if !fl_silent
+    << "wrote speedscope profile: " + ss_path
+    << "open at https://www.speedscope.app"
+elsif fl_output != ""
   svg_path = fl_output
   primary_folded = read_file(tmpdir + "/" + primary + ".folded")
   svg_title = "Flame Graph — " + Tungsten:Flame:Sampler.basename_noext(source) + " (" + primary + ")"

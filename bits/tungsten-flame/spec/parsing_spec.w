@@ -10,6 +10,7 @@ use sidemap
 use analyzer
 use flame_svg
 use flame_diff
+use speedscope
 
 describe "PerfScript" ->
   it "collapses perf script samples into sorted folded stacks" ->
@@ -268,5 +269,47 @@ describe "FlameDiff" ->
     expect(r.include?("after 5")).to eq(true)
     expect(r.include?("Improved (cooler)")).to eq(true)
     expect(r.include?("(none)")).to eq(true)
+
+describe "Speedscope" ->
+  it "exports a valid speedscope sampled profile document" ->
+    ss = Tungsten:Flame:Speedscope.export("main;a;b 10\nmain;a;c 5\nmain;d 3", "demo")
+    expect(ss.include?("\"$schema\":\"https://www.speedscope.app/file-format-schema.json\"")).to eq(true)
+    expect(ss.include?("\"type\":\"sampled\"")).to eq(true)
+    expect(ss.include?("\"unit\":\"none\"")).to eq(true)
+
+  it "builds a deduped, sorted, first-seen frame table" ->
+    ss = Tungsten:Flame:Speedscope.export("main;a;b 10\nmain;a;c 5\nmain;d 3", "demo")
+    expect(ss.include?("\"frames\":\[{\"name\":\"main\"},{\"name\":\"a\"},{\"name\":\"b\"},{\"name\":\"c\"},{\"name\":\"d\"}\]")).to eq(true)
+
+  it "emits index-array samples with parallel weights, root to leaf" ->
+    ss = Tungsten:Flame:Speedscope.export("main;a;b 10\nmain;a;c 5\nmain;d 3", "demo")
+    expect(ss.include?("\"samples\":\[\[0,1,2\],\[0,1,3\],\[0,4\]\]")).to eq(true)
+    expect(ss.include?("\"weights\":\[10,5,3\]")).to eq(true)
+
+  it "sums the total sample weight into endValue" ->
+    ss = Tungsten:Flame:Speedscope.export("main;a;b 10\nmain;a;c 5\nmain;d 3", "demo")
+    expect(ss.include?("\"endValue\":18")).to eq(true)
+
+  it "sums duplicate stacks into one weighted sample" ->
+    ss = Tungsten:Flame:Speedscope.export("foo;bar 3\nfoo;bar 2\nfoo;baz 5", "d")
+    expect(ss.include?("\"samples\":\[\[0,1\],\[0,2\]\]")).to eq(true)
+    expect(ss.include?("\"weights\":\[5,5\]")).to eq(true)
+    expect(ss.include?("\"endValue\":10")).to eq(true)
+
+  it "JSON-escapes quotes and backslashes in frame names" ->
+    ss = Tungsten:Flame:Speedscope.export("a\"b\\c 4", "t")
+    expect(ss.include?("{\"name\":\"a\\\"b\\\\c\"}")).to eq(true)
+
+  it "ignores lines with no positive count" ->
+    ss = Tungsten:Flame:Speedscope.export("main;a 5\nbroken\nmain;b 0", "x")
+    expect(ss.include?("\"endValue\":5")).to eq(true)
+    expect(ss.include?("\"frames\":\[{\"name\":\"main\"},{\"name\":\"a\"}\]")).to eq(true)
+
+  it "handles empty input as a valid empty profile" ->
+    ss = Tungsten:Flame:Speedscope.export("", "empty")
+    expect(ss.include?("\"frames\":\[\]")).to eq(true)
+    expect(ss.include?("\"samples\":\[\]")).to eq(true)
+    expect(ss.include?("\"weights\":\[\]")).to eq(true)
+    expect(ss.include?("\"endValue\":0")).to eq(true)
 
 spec_summary

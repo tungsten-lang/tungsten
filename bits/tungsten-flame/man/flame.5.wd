@@ -30,6 +30,7 @@ tungsten-flame(1) -- Make flame graphs
 
     --silent           No live output
     --keeper [N]       Enable animation and select keeper (default: random)
+    --speedscope       Export a speedscope.app JSON profile instead of SVG
 -o, --output FILE      Output path
 
 ## FUTURE CONSIDERATION

@@ -72,6 +72,13 @@ pipe = Pipeline.new([Scaler.new(:standard), LinearRegression.new])
 pipe.fit(df_features, y)             # nil (unfitted) on collinear features
 pipe.predict(test_df)                # scale with train params, then predict
 pipe.score(test_df, y_test)          # the estimator's R² on the chain
+
+# Model evaluation — k-fold cross-validation, re-fit per fold
+KFold.new(5).split(10)               # 5 contiguous [train, test] index pairs
+KFold.new(5, 42).split(10)           # ... over a seeded MINSTD shuffle first
+scores = CrossValidation.cross_val_score(LinearRegression.new, x, y, 5)
+                                     # => [1, 1, 1, 1, 1]  (per-fold R²)
+CrossValidation.cross_val_mean(KNNClassifier.new(3), x, y, 4)  # mean fold score
 ```
 
 ## The train/test workflow, end to end
@@ -177,7 +184,17 @@ distance and vote ties break deterministically to the earlier training
 row, so both engines agree; k defaults to 5). A `Pipeline` whose LAST step is
 an estimator is fitted with `pipe.fit(df, y)` and answers
 `pipe.predict(x)` / `pipe.score(x, y)` by transforming through every
-step but the last.
+step but the last. Model evaluation: `KFold` and `CrossValidation`
+(k-fold cross-validation — `KFold.new(k).split(n)` returns k
+`[train, test]` index pairs, partitioning `0...n` with scikit-learn's
+fold sizes: the first `n mod k` folds are one larger, folds are
+contiguous blocks unshuffled and a seed shuffles first through
+Splitter's MINSTD generator so the same seed gives the same folds on
+both engines; `CrossValidation.cross_val_score(model, x, y, k)` re-fits
+the estimator on each fold's training rows and returns the array of
+held-out scores — the estimators' `.score` is R² for LinearRegression
+and accuracy for KNNClassifier — and `cross_val_mean` averages them,
+sharing the estimators' accepted input shapes).
 
 Verify with `bin/tungsten bits/tungsten-koala/spec/koala_spec.w`,
 `spec/linalg_spec.w`, `spec/preprocessing_spec.w`, and

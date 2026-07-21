@@ -141,6 +141,26 @@ use koala
     self.check("knn default k", KNNClassifier.new.k, 5)
     self.check("knn nil before fit", KNNClassifier.new(3).predict([[1, 1]]) == nil, true)
 
+    # --- Cross-validation (KFold / CrossValidation) ---
+    cv5 = KFold.new(5).split(10)
+    self.check("kfold count", cv5.size, 5)
+    self.check("kfold f0 test", cv5[0][1], "\[0, 1\]")
+    self.check("kfold f0 train", cv5[0][0], "\[2, 3, 4, 5, 6, 7, 8, 9\]")
+    cv3 = KFold.new(3).split(10)
+    self.check("kfold uneven f0", cv3[0][1], "\[0, 1, 2, 3\]")
+    self.check("kfold uneven f2", cv3[2][1], "\[7, 8, 9\]")
+    seeded = KFold.new(5, 42).split(10)
+    self.check("kfold seeded f1", seeded[1][1], "\[4, 3\]")
+    self.check("kfold bad k nil", KFold.new(1).split(10) == nil, true)
+    cvx = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    cvy = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
+    self.check("cross_val_score linear", CrossValidation.cross_val_score(LinearRegression.new, cvx, cvy, 5), "\[1, 1, 1, 1, 1\]")
+    self.check("cross_val_mean linear", CrossValidation.cross_val_mean(LinearRegression.new, cvx, cvy, 5), 1)
+    ckx = [[1, 1], [2, 2], [3, 3], [6, 6], [7, 7], [8, 8]]
+    cky = [0, 0, 0, 1, 1, 1]
+    self.check("cross_val knn", CrossValidation.cross_val_score(KNNClassifier.new(1), ckx, cky, 3), "\[1, 1, 1\]")
+    self.check("cross_val nil mismatch", CrossValidation.cross_val_score(LinearRegression.new, [1, 2, 3], [1, 2]) == nil, true)
+
 t = KoalaSmoke.new
 t.run
 if t.failures > 0

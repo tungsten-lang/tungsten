@@ -313,4 +313,73 @@ describe "KNNClassifier" ->
     expect(r != nil).to be_true
     expect(model.predict([[1]])).to be_nil
 
+describe "KFold" ->
+  # Shuffle-free folds are contiguous blocks of 0...n, scikit-learn's
+  # KFold(shuffle=False): 10 samples in 5 folds are five [0,1] .. [8,9]
+  # test slices, each fold's train set the other eight indices in order.
+  it "partitions 0...n into k contiguous folds (shuffle-free)" ->
+    folds = KFold.new(5).split(10)
+    expect(folds.size).to eq(5)
+    expect(folds[0][1].to_s).to eq("\[0, 1\]")
+    expect(folds[0][0].to_s).to eq("\[2, 3, 4, 5, 6, 7, 8, 9\]")
+    expect(folds[4][1].to_s).to eq("\[8, 9\]")
+
+  # scikit-learn puts the remainder in the FIRST folds: n=10, k=3 gives
+  # fold sizes 4, 3, 3 (floor 3, one extra on fold 0); every index lands
+  # in exactly one test fold.
+  it "makes the first n mod k folds larger, like scikit-learn" ->
+    folds = KFold.new(3).split(10)
+    expect(folds[0][1].to_s).to eq("\[0, 1, 2, 3\]")
+    expect(folds[1][1].to_s).to eq("\[4, 5, 6\]")
+    expect(folds[2][1].to_s).to eq("\[7, 8, 9\]")
+    f7 = KFold.new(3).split(7)
+    expect(f7[0][1].size).to eq(3)
+    expect(f7[1][1].size).to eq(2)
+    expect(f7[2][1].size).to eq(2)
+
+  it "returns nil when k is out of range" ->
+    expect(KFold.new(1).split(10)).to be_nil
+    expect(KFold.new(11).split(10)).to be_nil
+    expect(KFold.new(3).split(0)).to be_nil
+
+  # A seed shuffles the indices first through koala's MINSTD generator
+  # (Splitter.indices) — seed 42 permutes 0..9 to [0,1,4,3,8,9,7,5,6,2],
+  # the same permutation Splitter documents — then folds them contiguously,
+  # so the same seed gives the same folds on both engines.
+  it "shuffles deterministically with a seed" ->
+    folds = KFold.new(5, 42).split(10)
+    expect(folds[1][1].to_s).to eq("\[4, 3\]")
+    expect(folds[2][1].to_s).to eq("\[8, 9\]")
+    again = KFold.new(5, 42).split(10)
+    expect(folds[3][1].to_s).to eq(again[3][1].to_s)
+
+describe "CrossValidation" ->
+  # y = 2x + 1 is exactly linear, so every 8-row training fold recovers
+  # slope 2 / intercept 1 and predicts its two held-out rows exactly:
+  # R² = 1 on all five folds, and on their mean.
+  it "scores each fold of an exact linear fit as 1" ->
+    x = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    y = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
+    scores = CrossValidation.cross_val_score(LinearRegression.new, x, y, 5)
+    expect(scores.size).to eq(5)
+    expect(scores.to_s).to eq("\[1, 1, 1, 1, 1\]")
+    expect(CrossValidation.cross_val_mean(LinearRegression.new, x, y, 5).to_s).to eq("1")
+
+  # Two separated clusters, k = 1 nearest neighbour, three contiguous
+  # folds: each held-out point's nearest surviving training point shares
+  # its class, so every fold's accuracy is 1 (hand-checked against the
+  # squared-Euclidean distances in cross_validation.w).
+  it "cross-validates a classifier by accuracy" ->
+    x = [[1, 1], [2, 2], [3, 3], [6, 6], [7, 7], [8, 8]]
+    y = [0, 0, 0, 1, 1, 1]
+    scores = CrossValidation.cross_val_score(KNNClassifier.new(1), x, y, 3)
+    expect(scores.to_s).to eq("\[1, 1, 1\]")
+    expect(CrossValidation.cross_val_mean(KNNClassifier.new(1), x, y, 3).to_s).to eq("1")
+
+  it "returns nil for unusable inputs" ->
+    m = LinearRegression.new
+    expect(CrossValidation.cross_val_score(m, [1, 2, 3], [1, 2])).to be_nil
+    expect(CrossValidation.cross_val_score(m, [1, 2, 3], [1, 2, 3], 5)).to be_nil
+    expect(CrossValidation.cross_val_mean(m, [1, 2, 3], [1, 2], 2)).to be_nil
+
 spec_summary

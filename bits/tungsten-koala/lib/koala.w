@@ -1,10 +1,12 @@
 # Koala — data science and machine learning for Tungsten
 # A friendlier pandas: Series, DataFrame, group_by, stats, metrics,
 # dense linear algebra (Vector / Matrix / LinAlg), ML preprocessing
-# (Scaler / Encoder / Imputer / Splitter / Pipeline), and estimation
+# (Scaler / Encoder / Imputer / Splitter / Pipeline), estimation
 # (LinearRegression — fit / predict / score with optional ridge alpha,
 # alone or as a Pipeline tail; KNNClassifier — k-nearest-neighbors
-# classification, the companion classifier to Metrics.accuracy / f1).
+# classification, the companion classifier to Metrics.accuracy / f1), and
+# model evaluation (KFold / CrossValidation — k-fold cross-validation
+# that re-fits an estimator on each fold and averages the held-out score).
 
 use version
 use stats
@@ -25,6 +27,7 @@ use encoder
 use imputer
 use splitter
 use pipeline
+use cross_validation
 
 # The remaining modules under lib/ (tensor, resample, transformer,
 # estimator, index, sparse, gpu, device) are unported design drafts —

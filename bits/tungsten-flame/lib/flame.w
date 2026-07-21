@@ -24,6 +24,7 @@ use trace_event
 use hot_frames
 use flame_filter
 use flame_threshold
+use flame_normalize
 
 # ---- Read and parse the manpage ----
 # Prefer TUNGSTEN_ROOT (set by the CLI); __DIR__ is not always populated
@@ -87,6 +88,9 @@ if fl_subtree == nil
 fl_threshold = opts.get("threshold")
 if fl_threshold == nil
   fl_threshold = ""
+fl_rewrite = opts.get("rewrite")
+if fl_rewrite == nil
+  fl_rewrite = ""
 fl_output = opts.get("output")
 if fl_output == nil
   fl_output = ""
@@ -100,6 +104,7 @@ fl_silent      = opts.flag?("silent")
 fl_diff        = opts.flag?("diff")
 fl_hot         = opts.flag?("hot")
 fl_collapse_sample = opts.flag?("collapse_sample")
+fl_collapse_recursion = opts.flag?("collapse_recursion")
 fl_speedscope  = opts.flag?("speedscope")
 fl_trace_event = opts.flag?("trace_event")
 fl_files       = opts.args
@@ -228,14 +233,17 @@ if fl_trace_event
 
 # Filter mode: reshape one folded profile before viewing it — include
 # (`--grep PAT`), exclude (`--prune PAT`), zoom into a subtree
-# (`--subtree PAT`), or fold the sub-PCT% long tail into an "(other)" node
-# (`--threshold PCT`). Like --diff / --hot, a pure folded-text mode (no
-# compile, no profiling) that works on any folded stacks. The steps compose
-# (pattern filters first, then the threshold collapse), so
-# `flame --subtree parse --threshold 1 x.folded` zooms then de-noises. Emits
-# folded text — pipe it into another view (`flame --grep parse x.folded >
-# sub.folded`). With -o the result is written to the file instead of stdout.
-if fl_grep != "" || fl_prune != "" || fl_subtree != "" || fl_threshold != ""
+# (`--subtree PAT`), canonicalize it (collapse recursion with
+# `--collapse-recursion`, merge frame-name variants with `--rewrite RULES`),
+# or fold the sub-PCT% long tail into an "(other)" node (`--threshold PCT`).
+# Like --diff / --hot, a pure folded-text mode (no compile, no profiling) that
+# works on any folded stacks. The steps compose in a fixed order (pattern
+# filters, then normalize, then the threshold collapse), so
+# `flame --subtree parse --collapse-recursion --threshold 1 x.folded` zooms,
+# folds the recursive staircase, then de-noises. Emits folded text — pipe it
+# into another view (`flame --grep parse x.folded > sub.folded`). With -o the
+# result is written to the file instead of stdout.
+if fl_grep != "" || fl_prune != "" || fl_subtree != "" || fl_threshold != "" || fl_rewrite != "" || fl_collapse_recursion
   if fl_files.size < 1
     << "tungsten flame: filter needs one folded file"
     exit(1)
@@ -244,6 +252,8 @@ if fl_grep != "" || fl_prune != "" || fl_subtree != "" || fl_threshold != ""
     << "tungsten flame: cannot read " + fl_files[0]
     exit(1)
   filtered = Tungsten:Flame:FlameFilter.apply(ftext, fl_grep, fl_prune, fl_subtree)
+  if fl_rewrite != "" || fl_collapse_recursion
+    filtered = Tungsten:Flame:FlameNormalize.apply(filtered, fl_collapse_recursion, fl_rewrite)
   if fl_threshold != ""
     filtered = Tungsten:Flame:FlameThreshold.collapse(filtered, Tungsten:Flame:FlameThreshold.parse_pct_x10(fl_threshold))
   if fl_output != ""

@@ -16,6 +16,7 @@ use trace_event
 use hot_frames
 use flame_filter
 use flame_threshold
+use flame_normalize
 
 describe "PerfScript" ->
   it "collapses perf script samples into sorted folded stacks" ->
@@ -585,5 +586,71 @@ describe "TraceEvent" ->
     expect(te.include?("\"traceEvents\":\[")).to eq(true)
     expect(te.include?("\"ph\":\"X\"")).to eq(false)
     expect(te.ends_with?("}")).to eq(true)
+
+describe "FlameNormalize" ->
+  it "collapses runs of consecutive identical frames" ->
+    expect(Tungsten:Flame:FlameNormalize.collapse_recursion("a;b;b;b;c 5")).to eq("a;b;c 5")
+
+  it "collapses recursion at the leaf" ->
+    expect(Tungsten:Flame:FlameNormalize.collapse_recursion("main;rec;rec;rec 7")).to eq("main;rec 7")
+
+  it "preserves non-consecutive repeats" ->
+    expect(Tungsten:Flame:FlameNormalize.collapse_recursion("a;b;a;b 3")).to eq("a;b;a;b 3")
+
+  it "merges stacks that collapse to the same path, summing counts" ->
+    expect(Tungsten:Flame:FlameNormalize.collapse_recursion("a;a;b 2\na;b 3")).to eq("a;b 5")
+
+  it "preserves the grand total when collapsing (nothing dropped)" ->
+    folded = Tungsten:Flame:FlameNormalize.collapse_recursion("x;x;x 4\ny 1")
+    expect(Tungsten:Flame:FlameNormalize.parse_folded(folded)[:total]).to eq(5)
+
+  it "re-aggregates and sorts a recursion-free profile unchanged" ->
+    expect(Tungsten:Flame:FlameNormalize.collapse_recursion("z;b 2\na;b 3")).to eq("a;b 3\nz;b 2")
+
+  it "treats empty input as no stacks when collapsing" ->
+    expect(Tungsten:Flame:FlameNormalize.collapse_recursion("")).to eq("")
+
+  it "dedup_consecutive drops only adjacent duplicates" ->
+    expect(Tungsten:Flame:FlameNormalize.dedup_consecutive(["a", "a", "b", "a"]).join(";")).to eq("a;b;a")
+
+  it "merges monomorphized variants via rewrite rules, summing counts" ->
+    folded = Tungsten:Flame:FlameNormalize.rewrite("main;Vec<i32> 3\nmain;Vec<u64> 2", "Vec<i32>=>Vec<T>;Vec<u64>=>Vec<T>")
+    expect(folded).to eq("main;Vec<T> 5")
+
+  it "elides a substring when the replacement is empty" ->
+    expect(Tungsten:Flame:FlameNormalize.rewrite("app::main;app::work 4", "app::=>")).to eq("main;work 4")
+
+  it "drops a frame a rule empties entirely" ->
+    expect(Tungsten:Flame:FlameNormalize.rewrite("main;thunk;work 6", "thunk=>")).to eq("main;work 6")
+
+  it "applies multiple rules in sequence to a frame" ->
+    expect(Tungsten:Flame:FlameNormalize.rewrite("foo 1", "foo=>bar;bar=>baz")).to eq("baz 1")
+
+  it "re-aggregates and sorts under an empty rule spec, renaming nothing" ->
+    expect(Tungsten:Flame:FlameNormalize.rewrite("z 2\na 3", "")).to eq("a 3\nz 2")
+
+  it "replace_all replaces every occurrence without rescanning inserted text" ->
+    expect(Tungsten:Flame:FlameNormalize.replace_all("path/to/x", "/", "::")).to eq("path::to::x")
+    expect(Tungsten:Flame:FlameNormalize.replace_all("aaa", "a", "aa")).to eq("aaaaaa")
+
+  it "replace_all treats an empty search string as a no-op" ->
+    expect(Tungsten:Flame:FlameNormalize.replace_all("abc", "", "X")).to eq("abc")
+
+  it "parse_rules parses old=>new pairs and skips empty-pattern rules" ->
+    rules = Tungsten:Flame:FlameNormalize.parse_rules("a=>b;=>skip;c=>d")
+    expect(rules.size()).to eq(2)
+    r0 = rules[0]
+    expect(r0[0]).to eq("a")
+    expect(r0[1]).to eq("b")
+    r1 = rules[1]
+    expect(r1[0]).to eq("c")
+    expect(r1[1]).to eq("d")
+
+  it "apply rewrites frame names then collapses the resulting recursion" ->
+    folded = Tungsten:Flame:FlameNormalize.apply("parse_expr;parse_term;leaf 3", true, "parse_expr=>parse;parse_term=>parse")
+    expect(folded).to eq("parse;leaf 3")
+
+  it "apply with neither operation is an identity passthrough" ->
+    expect(Tungsten:Flame:FlameNormalize.apply("a;b 2", false, "")).to eq("a;b 2")
 
 spec_summary

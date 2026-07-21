@@ -15,6 +15,7 @@ use analyzer
 use perf_script
 use xctrace_xml
 use sample_collapse
+use dtrace_collapse
 use builder
 use sampler
 use flame_svg
@@ -104,6 +105,7 @@ fl_silent      = opts.flag?("silent")
 fl_diff        = opts.flag?("diff")
 fl_hot         = opts.flag?("hot")
 fl_collapse_sample = opts.flag?("collapse_sample")
+fl_collapse_dtrace = opts.flag?("collapse_dtrace")
 fl_collapse_recursion = opts.flag?("collapse_recursion")
 fl_speedscope  = opts.flag?("speedscope")
 fl_trace_event = opts.flag?("trace_event")
@@ -188,6 +190,40 @@ if fl_collapse_sample
         combined = combined + "\n"
       combined = combined + folded_one
     ci = ci + 1
+  if fl_output != ""
+    write_file(fl_output, combined)
+    if !fl_silent
+      << "wrote folded stacks: " + fl_output
+  else
+    << combined
+  exit(0)
+
+# Collapse mode (DTrace): convert DTrace ustack()/stack() aggregation output
+# into folded stacks (`flame --collapse-dtrace out.txt`). DTrace is the tracer
+# on macOS, FreeBSD, illumos and Solaris — the systems profiler none of the
+# other parsers (Linux perf, Instruments xctrace, macOS sample) reach; this is
+# the analogue of FlameGraph's original `stackcollapse.pl`. Like
+# --collapse-sample, a pure text mode (no compile, no profiling); several files
+# collapse and concatenate (downstream views dedupe). Emits folded text — pipe
+# it into any other view (`flame --collapse-dtrace x.txt | ...`, or
+# `-o out.folded`).
+if fl_collapse_dtrace
+  if fl_files.size < 1
+    << "tungsten flame --collapse-dtrace: need a DTrace aggregation output file"
+    exit(1)
+  combined = ""
+  di = 0
+  while di < fl_files.size
+    dtext = read_file(fl_files[di])
+    if dtext == nil
+      << "tungsten flame: cannot read " + fl_files[di]
+      exit(1)
+    folded_one = Tungsten:Flame:DtraceCollapse.collapse(dtext)
+    if folded_one != ""
+      if combined != ""
+        combined = combined + "\n"
+      combined = combined + folded_one
+    di = di + 1
   if fl_output != ""
     write_file(fl_output, combined)
     if !fl_silent

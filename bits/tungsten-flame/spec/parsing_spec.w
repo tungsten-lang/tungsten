@@ -7,6 +7,7 @@ use builder
 use perf_script
 use xctrace_xml
 use sample_collapse
+use dtrace_collapse
 use sidemap
 use analyzer
 use flame_svg
@@ -491,6 +492,73 @@ describe "SampleCollapse" ->
     lines.push("  0x1 - 0x2 demo (in demo)")
     expect(Tungsten:Flame:SampleCollapse.collapse(lines.join("\n"))).to eq("foo 5")
     expect(Tungsten:Flame:SampleCollapse.collapse("")).to eq("")
+
+describe "DtraceCollapse" ->
+  it "strips a +0x hex offset but keeps the module and symbol" ->
+    expect(Tungsten:Flame:DtraceCollapse.parse_frame_name("libc.so.1`__forkx+0xb")).to eq("libc.so.1`__forkx")
+    expect(Tungsten:Flame:DtraceCollapse.parse_frame_name("bash`main+0xaa5")).to eq("bash`main")
+
+  it "strips a bare decimal offset" ->
+    expect(Tungsten:Flame:DtraceCollapse.parse_frame_name("unix`mutex_enter+18")).to eq("unix`mutex_enter")
+
+  it "keeps a frame with no offset and a bare unresolved address" ->
+    expect(Tungsten:Flame:DtraceCollapse.parse_frame_name("a.out`main")).to eq("a.out`main")
+    expect(Tungsten:Flame:DtraceCollapse.parse_frame_name("0x7fff5fbff000")).to eq("0x7fff5fbff000")
+
+  it "does not treat a trailing symbol + as an offset" ->
+    expect(Tungsten:Flame:DtraceCollapse.parse_frame_name("libfoo`operator+")).to eq("libfoo`operator+")
+
+  it "classifies frame lines by backtick or 0x prefix, rejecting noise" ->
+    expect(Tungsten:Flame:DtraceCollapse.frame_line?("bash`main+0xaa5")).to eq(true)
+    expect(Tungsten:Flame:DtraceCollapse.frame_line?("0x7fff5fbff000")).to eq(true)
+    expect(Tungsten:Flame:DtraceCollapse.frame_line?("dtrace: description matched 1 probe")).to eq(false)
+    expect(Tungsten:Flame:DtraceCollapse.frame_line?("CPU ID FUNCTION:NAME")).to eq(false)
+
+  it "recognizes decimal counts and hex offsets" ->
+    expect(Tungsten:Flame:DtraceCollapse.all_digits?("12")).to eq(true)
+    expect(Tungsten:Flame:DtraceCollapse.all_digits?("0x1a")).to eq(false)
+    expect(Tungsten:Flame:DtraceCollapse.all_hex?("1a2f")).to eq(true)
+    expect(Tungsten:Flame:DtraceCollapse.all_hex?("xyz")).to eq(false)
+    expect(Tungsten:Flame:DtraceCollapse.is_offset?("0xb")).to eq(true)
+    expect(Tungsten:Flame:DtraceCollapse.is_offset?("18")).to eq(true)
+    expect(Tungsten:Flame:DtraceCollapse.is_offset?("")).to eq(false)
+
+  it "collapses leaf-first blocks into root-first folded stacks" ->
+    lines = []
+    lines.push("dtrace: description 'profile-997 ' matched 1 probe")
+    lines.push("CPU     ID                    FUNCTION:NAME")
+    lines.push("")
+    lines.push("              libc.so.1`__forkx+0xb")
+    lines.push("              bash`make_child+0x17b")
+    lines.push("              bash`main+0xaa5")
+    lines.push("              bash`_start+0x83")
+    lines.push("                1")
+    lines.push("")
+    lines.push("              libc.so.1`__read+0xb")
+    lines.push("              bash`main+0xaa5")
+    lines.push("              bash`_start+0x83")
+    lines.push("               12")
+    folded = Tungsten:Flame:DtraceCollapse.collapse(lines.join("\n"))
+    expect(folded).to eq("bash`_start;bash`main;bash`make_child;libc.so.1`__forkx 1\nbash`_start;bash`main;libc.so.1`__read 12")
+
+  it "sums stacks that collapse to the same frames after offset stripping" ->
+    lines = []
+    lines.push("              a.out`work+0x4")
+    lines.push("              a.out`main+0x8")
+    lines.push("                3")
+    lines.push("")
+    lines.push("              a.out`work+0x10")
+    lines.push("              a.out`main+0x8")
+    lines.push("                5")
+    folded = Tungsten:Flame:DtraceCollapse.collapse(lines.join("\n"))
+    expect(folded).to eq("a.out`main;a.out`work 8")
+
+  it "drops an incomplete trailing stack and treats empty input as no stacks" ->
+    lines = []
+    lines.push("              a.out`main+0x8")
+    lines.push("              a.out`_start+0x0")
+    expect(Tungsten:Flame:DtraceCollapse.collapse(lines.join("\n"))).to eq("")
+    expect(Tungsten:Flame:DtraceCollapse.collapse("")).to eq("")
 
 describe "FlameThreshold" ->
   it "parses percentage strings into tenths of a percent" ->

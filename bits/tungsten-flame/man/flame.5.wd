@@ -27,6 +27,7 @@ tungsten-flame(1) -- Make flame graphs
     --diff             Diff two folded files: flame --diff BEFORE AFTER
     --hot              Flat self-vs-total report from folded file(s): flame --hot FILE...
     --collapse-sample  Convert macOS sample/spindump output to folded stacks
+    --collapse-dtrace  Convert DTrace ustack()/stack() aggregation to folded stacks
     --trace-event      Export folded stacks as chrome://tracing / Perfetto JSON
     --grep PATTERN     Keep only folded stacks passing through PATTERN
     --prune PATTERN    Drop folded stacks touching PATTERN (mute noise)

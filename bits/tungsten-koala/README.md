@@ -25,6 +25,7 @@ df[:salary].quantile(75)             # => 3rd-quartile salary (linear interp)
 
 Metrics.rmse([2, 4, 6], [1, 5, 7])   # => 1
 Metrics.f1([1, 1, 0], [1, 0, 0])     # => 0.666667 (also precision / recall)
+Metrics.classification_report(preds, actual)  # multiclass P/R/F1 + macro/weighted avg
 
 v = Vector.new([1, 2, 3])
 v.dot(Vector.new([4, 5, 6]))         # => 32

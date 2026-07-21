@@ -118,6 +118,90 @@ describe "Metrics" ->
     expect(Metrics.precision([0, 0], [1, 0]).to_s).to eq("0")
     expect(Metrics.f1([0, 0], [0, 0]).to_s).to eq("0")
 
+describe "ConfusionMatrix" ->
+  # pred vs actual, three classes. Rows are ACTUAL, columns PREDICTED,
+  # classes in first-seen order over actual (0, 2, 1) then predictions:
+  #        p0 p2 p1
+  #   a0 [  2  0  1 ]   two 0s hit, one 0 called 1
+  #   a2 [  0  2  0 ]   both 2s hit
+  #   a1 [  0  1  0 ]   the lone 1 called 2
+  it "tabulates actual-vs-predicted counts" ->
+    pred = [0, 1, 2, 2, 2, 0]
+    actual = [0, 0, 2, 2, 1, 0]
+    cm = Metrics.confusion_matrix(pred, actual)
+    expect(cm.labels.join(",")).to eq("0,2,1")
+    expect(cm.matrix.to_s).to eq("\[\[2, 0, 1\], \[0, 2, 0\], \[0, 1, 0\]\]")
+    expect(cm.count(0, 0)).to eq(2)
+    expect(cm.count(2, 1)).to eq(0)
+    expect(cm.count(1, 2)).to eq(1)
+    expect(cm.count(9, 9)).to eq(0)
+
+  it "reads back as a DataFrame keyed by predicted label" ->
+    # pred [1,0,1] vs actual [1,1,0]: matrix [[1, 1], [1, 0]] over
+    # labels [1, 0]; each predicted-label column is one matrix column.
+    cm = Metrics.confusion_matrix([1, 0, 1], [1, 1, 0])
+    df = cm.to_df
+    expect(df.column_names.join(",")).to eq("actual,1,0")
+    expect(df.column_values(:actual).join(",")).to eq("1,0")
+    expect(df.column_values(1).to_s).to eq("\[1, 1\]")
+    expect(df.column_values(0).to_s).to eq("\[1, 0\]")
+
+describe "ClassificationReport" ->
+  # Same 3-class case as ConfusionMatrix above. Per-class one-vs-rest:
+  #   class 0: P 2/2 = 1,   R 2/3,       F1 0.8,  support 3
+  #   class 2: P 2/3,       R 2/2 = 1,   F1 0.8,  support 2
+  #   class 1: P 0,         R 0,         F1 0,    support 1
+  it "generalizes precision/recall/f1 to every class" ->
+    pred = [0, 1, 2, 2, 2, 0]
+    actual = [0, 0, 2, 2, 1, 0]
+    rep = Metrics.classification_report(pred, actual)
+    tol = 1.to_f / 100000.to_f
+    expect(rep.labels.join(",")).to eq("0,2,1")
+    expect(LinAlg.fabs(rep.accuracy - 2.to_f / 3.to_f) < tol).to be_true
+    expect(rep.precision(0).to_s).to eq("1")
+    expect(LinAlg.fabs(rep.recall(0) - 2.to_f / 3.to_f) < tol).to be_true
+    expect(rep.f1(0).to_s).to eq("0.8")
+    expect(rep.support(0)).to eq(3)
+    expect(LinAlg.fabs(rep.precision(2) - 2.to_f / 3.to_f) < tol).to be_true
+    expect(rep.recall(2).to_s).to eq("1")
+    expect(rep.support(2)).to eq(2)
+    expect(rep.precision(1).to_s).to eq("0")
+    expect(rep.f1(1).to_s).to eq("0")
+    expect(rep.support(1)).to eq(1)
+    expect(rep.precision(99)).to be_nil
+
+  # macro = unweighted mean over classes; weighted = weighted by support.
+  #   macro P/R = (1 + 2/3 + 0)/3 = 5/9;  macro F1 = (0.8+0.8+0)/3 = 8/15
+  #   weighted P = (1*3 + 2/3*2 + 0)/6 = 13/18;  weighted R/F1 = 4/6 = 2/3
+  it "averages across classes (macro and weighted)" ->
+    pred = [0, 1, 2, 2, 2, 0]
+    actual = [0, 0, 2, 2, 1, 0]
+    rep = Metrics.classification_report(pred, actual)
+    tol = 1.to_f / 100000.to_f
+    expect(rep.total).to eq(6)
+    expect(LinAlg.fabs(rep.macro_precision - 5.to_f / 9.to_f) < tol).to be_true
+    expect(LinAlg.fabs(rep.macro_recall - 5.to_f / 9.to_f) < tol).to be_true
+    expect(LinAlg.fabs(rep.macro_f1 - 8.to_f / 15.to_f) < tol).to be_true
+    expect(LinAlg.fabs(rep.weighted_precision - 13.to_f / 18.to_f) < tol).to be_true
+    expect(LinAlg.fabs(rep.weighted_recall - 2.to_f / 3.to_f) < tol).to be_true
+    expect(LinAlg.fabs(rep.weighted_f1 - 2.to_f / 3.to_f) < tol).to be_true
+
+  # The report's per-class scores must equal the binary Metrics with that
+  # class as pos_label — the very case tested in the Metrics block above.
+  it "agrees with the binary Metrics per class" ->
+    pred = [1, 1, 1, 0, 0, 1]
+    actual = [1, 0, 0, 0, 1, 1]
+    rep = Metrics.classification_report(pred, actual)
+    tol = 1.to_f / 100000.to_f
+    expect(LinAlg.fabs(rep.precision(1) - Metrics.precision(pred, actual, 1)) < tol).to be_true
+    expect(LinAlg.fabs(rep.recall(1) - Metrics.recall(pred, actual, 1)) < tol).to be_true
+    expect(LinAlg.fabs(rep.f1(1) - Metrics.f1(pred, actual, 1)) < tol).to be_true
+    expect(LinAlg.fabs(rep.precision(0) - Metrics.precision(pred, actual, 0)) < tol).to be_true
+    expect(LinAlg.fabs(rep.recall(0) - Metrics.recall(pred, actual, 0)) < tol).to be_true
+    expect(rep.accuracy.to_s).to eq("0.5")
+    expect(rep.to_df.column_values(:label).join(",")).to eq("1,0,accuracy,macro avg,weighted avg")
+    expect(rep.to_df.column_values(:support).to_s).to eq("\[3, 3, 6, 6, 6\]")
+
 describe "Rolling" ->
   it "computes trailing-window aggregations" ->
     s = Series.new([1, 2, 3, 4, 5], "v")

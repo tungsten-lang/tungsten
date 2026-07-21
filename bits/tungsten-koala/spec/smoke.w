@@ -161,6 +161,28 @@ use koala
     self.check("cross_val knn", CrossValidation.cross_val_score(KNNClassifier.new(1), ckx, cky, 3), "\[1, 1, 1\]")
     self.check("cross_val nil mismatch", CrossValidation.cross_val_score(LinearRegression.new, [1, 2, 3], [1, 2]) == nil, true)
 
+    # --- Multiclass metrics (ConfusionMatrix / ClassificationReport) ---
+    cpred = [0, 1, 2, 2, 2, 0]
+    cact = [0, 0, 2, 2, 1, 0]
+    cm = Metrics.confusion_matrix(cpred, cact)
+    self.check("confusion labels", cm.labels.join(","), "0,2,1")
+    self.check("confusion matrix", cm.matrix, "\[\[2, 0, 1\], \[0, 2, 0\], \[0, 1, 0\]\]")
+    self.check("confusion count 0,0", cm.count(0, 0), 2)
+    self.check("confusion count 1,2", cm.count(1, 2), 1)
+    self.check("confusion df cols", cm.to_df.column_names.join(","), "actual,0,2,1")
+    rep = Metrics.classification_report(cpred, cact)
+    self.check("report accuracy", rep.accuracy, "0.666667")
+    self.check("report precision 0", rep.precision(0), "1")
+    self.check("report recall 0", rep.recall(0), "0.666667")
+    self.check("report f1 0", rep.f1(0), "0.8")
+    self.check("report support 0", rep.support(0), 3)
+    self.check("report f1 class1 zero", rep.f1(1), "0")
+    self.check("report macro f1", rep.macro_f1, "0.533333")
+    self.check("report weighted precision", rep.weighted_precision, "0.722222")
+    self.check("report total", rep.total, 6)
+    self.check("report unknown nil", rep.precision(99) == nil, true)
+    self.check("report df labels", rep.to_df.column_values(:label).join(","), "0,2,1,accuracy,macro avg,weighted avg")
+
 t = KoalaSmoke.new
 t.run
 if t.failures > 0

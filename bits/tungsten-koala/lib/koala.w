@@ -14,6 +14,7 @@ use series
 use data_frame
 use group_by
 use metrics
+use classification
 use rolling
 use join
 use pivot

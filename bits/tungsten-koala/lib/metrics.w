@@ -84,6 +84,23 @@
       i += 1
     total / predictions.size.to_f
 
+  # --- Multiclass / report (see classification.w) ---
+
+  # Confusion matrix as a ConfusionMatrix: .matrix[i][j] counts rows with
+  # actual == labels[i] and predicted == labels[j]; .labels lists classes
+  # in first-seen order (actual, then predictions). .count(actual, pred)
+  # and .to_df read it back. Generalizes accuracy/precision/recall/f1 to
+  # any number of classes.
+  -> .confusion_matrix(predictions, actual)
+    ConfusionMatrix.new(predictions, actual)
+
+  # A ClassificationReport: per-class precision / recall / f1 / support
+  # (each metric one-vs-rest, the binary metrics above per class), plus
+  # overall accuracy and macro / support-weighted averages — scikit-learn's
+  # classification_report, in koala's (predictions, actual) argument order.
+  -> .classification_report(predictions, actual)
+    ClassificationReport.new(predictions, actual)
+
   # R² (coefficient of determination).
   -> .r2(predictions, actual)
     m = Stats.mean(actual)

@@ -3,7 +3,8 @@
 # dense linear algebra (Vector / Matrix / LinAlg), ML preprocessing
 # (Scaler / Encoder / Imputer / Splitter / Pipeline), and estimation
 # (LinearRegression — fit / predict / score with optional ridge alpha,
-# alone or as a Pipeline tail).
+# alone or as a Pipeline tail; KNNClassifier — k-nearest-neighbors
+# classification, the companion classifier to Metrics.accuracy / f1).
 
 use version
 use stats
@@ -18,6 +19,7 @@ use vector
 use matrix
 use linalg
 use linear_regression
+use knn
 use scaler
 use encoder
 use imputer
@@ -27,9 +29,10 @@ use pipeline
 # The remaining modules under lib/ (tensor, resample, transformer,
 # estimator, index, sparse, gpu, device) are unported design drafts —
 # they do not parse as Tungsten yet and are not loaded. estimator.w's
-# linear-regression payoff shipped as linear_regression.w above; the
-# draft stays only as the sketch for ridge / logistic / knn / tree
-# follow-ups. Port a draft into the manifest above only after
+# linear-regression payoff shipped as linear_regression.w above, and
+# its k-NN sketch shipped as knn.w; the draft stays only as the sketch
+# for the logistic / decision-tree follow-ups. Port a draft into the
+# manifest above only after
 # `bin/tungsten -c` passes on it AND it runs on both engines (spec
 # coverage in spec/*.w).
 

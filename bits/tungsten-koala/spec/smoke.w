@@ -121,6 +121,17 @@ use koala
     self.check("recall", Metrics.recall([1, 1, 1, 0, 0, 1], [1, 0, 0, 0, 1, 1]), "0.666667")
     self.check("f1", Metrics.f1([1, 1, 1, 0, 0, 1], [1, 0, 0, 0, 1, 1]), "0.571429")
 
+    # --- KNNClassifier ---
+    kx = [[1, 1], [2, 2], [3, 3], [6, 6], [7, 7], [8, 8]]
+    ky = [:a, :a, :a, :b, :b, :b]
+    knn = KNNClassifier.new(3)
+    self.check("knn fit self", knn.fit(kx, ky) != nil, true)
+    self.check("knn fitted?", knn.fitted?, true)
+    self.check("knn predict", knn.predict([[2, 3], [7, 6]]).join(","), "a,b")
+    self.check("knn train score", knn.score(kx, ky), 1)
+    self.check("knn default k", KNNClassifier.new.k, 5)
+    self.check("knn nil before fit", KNNClassifier.new(3).predict([[1, 1]]) == nil, true)
+
 t = KoalaSmoke.new
 t.run
 if t.failures > 0

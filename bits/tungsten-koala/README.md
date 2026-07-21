@@ -59,6 +59,12 @@ half = LinearRegression.new(1.to_f / 2.to_f)  # fractional alpha: derive it —
                                      # float LITERALS corrupt call arguments
                                      # on both engines (see linear_regression.w)
 
+# Classification — KNNClassifier, majority vote of the k nearest rows
+knn = KNNClassifier.new(3)           # k neighbours (defaults to 5, sklearn)
+knn.fit([[1, 1], [2, 2], [6, 6], [7, 7]], [:a, :a, :b, :b])
+knn.predict([[2, 3], [7, 6]])        # => [:a, :b]  (Euclidean nearest)
+knn.score(x_test, y_test)            # => accuracy; labels feed Metrics.f1
+
 # ... or as a pipeline tail: transform features, then fit/predict
 pipe = Pipeline.new([Scaler.new(:standard), LinearRegression.new])
 pipe.fit(df_features, y)             # nil (unfitted) on collinear features
@@ -151,7 +157,15 @@ be a DataFrame — numeric columns only — a Matrix, a Vector or Series —
 one feature column — an array of row arrays, or a flat single-feature
 array, and y a Series, Vector, or array; a singular system — collinear
 features at alpha = 0 — makes fit return nil and `fitted?` stay false,
-and `predict`/`score` return nil before a successful fit). A `Pipeline` whose LAST step is
+and `predict`/`score` return nil before a successful fit), and
+classification: `KNNClassifier` (k-nearest-neighbors, koala's companion
+classifier to the regression estimator — a lazy learner: `fit` stores
+the training rows, `predict` returns the majority label among the k
+rows closest in squared-Euclidean distance, `score` is accuracy; it
+shares LinearRegression's accepted input shapes and produces the label
+arrays that `Metrics.accuracy`/`precision`/`recall`/`f1` consume;
+distance and vote ties break deterministically to the earlier training
+row, so both engines agree; k defaults to 5). A `Pipeline` whose LAST step is
 an estimator is fitted with `pipe.fit(df, y)` and answers
 `pipe.predict(x)` / `pipe.score(x, y)` by transforming through every
 step but the last.

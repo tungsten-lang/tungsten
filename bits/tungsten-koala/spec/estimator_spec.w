@@ -229,4 +229,88 @@ describe "Pipeline estimator tail" ->
     expect(pipe.score(df, [1, 2, 3])).to be_nil
     expect(pipe.transform(df).column_values(:x).join(",")).to eq("-1,0,1")
 
+describe "KNNClassifier" ->
+  # Two well-separated 2-D clusters, symbol-labelled. Squared Euclidean
+  # distances are exact on integer inputs, so each query's three nearest
+  # are unambiguous:
+  #   (2,3): (2,2) d²=1, (3,3) d²=1, (1,1) d²=5  -> all :a
+  #   (7,6): (6,6) d²=1, (7,7) d²=1, (8,8) d²=5  -> all :b
+  it "classifies by majority vote of the k nearest (k = 3)" ->
+    x = [[1, 1], [2, 2], [3, 3], [6, 6], [7, 7], [8, 8]]
+    y = [:a, :a, :a, :b, :b, :b]
+    model = KNNClassifier.new(3)
+    expect(model.k).to eq(3)
+    expect(model.fitted?).to be_false
+    r = model.fit(x, y)
+    expect(r != nil).to be_true
+    expect(model.fitted?).to be_true
+    expect(model.predict([[2, 3], [7, 6]]).to_s).to eq("\[a, b\]")
+    expect(model.score(x, y).to_s).to eq("1")
+
+  # k defaults to 5 (scikit-learn's n_neighbors). At k = 1 the model is
+  # a pure memorizer: every training row's nearest neighbour is itself
+  # (distance 0), so training accuracy is exactly 1.
+  it "defaults k to 5 and memorizes the training set at k = 1" ->
+    expect(KNNClassifier.new.k).to eq(5)
+    x = [[0], [1], [2], [10], [11], [12]]
+    y = [0, 0, 0, 1, 1, 1]
+    one = KNNClassifier.new(1)
+    one.fit(x, y)
+    expect(one.score(x, y).to_s).to eq("1")
+
+  # A genuine 2-1 vote (query (4,4): nearest three are (3,3) and (2,2)
+  # of class 0 against (6,6) of class 1 -> 0), and integer labels flow
+  # straight into the binary metrics from Metrics.
+  it "takes the majority label and feeds Metrics.accuracy" ->
+    x = [[1, 1], [2, 2], [3, 3], [6, 6], [7, 7], [8, 8]]
+    y = [0, 0, 0, 1, 1, 1]
+    model = KNNClassifier.new(3)
+    model.fit(x, y)
+    expect(model.predict([[4, 4]]).to_s).to eq("\[0\]")
+    preds = model.predict([[2, 3], [7, 6]])
+    expect(Metrics.accuracy(preds, [0, 1]).to_s).to eq("1")
+    expect(Metrics.accuracy(preds, [1, 1]).to_s).to eq("0.5")
+
+  # Distance ties break to the lower training index (a strict `<` keeps
+  # the first-seen minimum): (1,0):a and (0,1):b are both d²=1 from the
+  # origin, so k = 1 returns :a, the earlier row.
+  it "breaks distance ties toward the earlier training row" ->
+    model = KNNClassifier.new(1)
+    model.fit([[1, 0], [0, 1], [5, 5]], [:a, :b, :a])
+    expect(model.predict([[0, 0]]).to_s).to eq("\[a\]")
+
+  # Same accepted shapes as LinearRegression, through the shared
+  # feature_rows / target_values: DataFrame (numeric columns only —
+  # :name is skipped), Series/Vector single-feature columns.
+  it "accepts DataFrame, Series and Vector inputs" ->
+    df = DataFrame.new([
+      [:name, ["p", "q", "r", "s"]],
+      [:f1, [0, 0, 9, 9]],
+      [:f2, [0, 1, 9, 8]]
+    ])
+    labels = Series.new([:lo, :lo, :hi, :hi], :cls)
+    model = KNNClassifier.new(1)
+    model.fit(df, labels)
+    test = DataFrame.new([[:name, ["t", "u"]], [:f1, [1, 8]], [:f2, [0, 9]]])
+    expect(model.predict(test).to_s).to eq("\[lo, hi\]")
+    expect(model.score(df, labels).to_s).to eq("1")
+    xs = Series.new([0, 1, 2, 20, 21, 22], :x)
+    ms = KNNClassifier.new(3)
+    ms.fit(xs, [0, 0, 0, 1, 1, 1])
+    expect(ms.predict(Vector.new([1, 21])).to_s).to eq("\[0, 1\]")
+
+  # Unusable shapes and premature calls all return nil and leave fitted?
+  # false — the bit's shape-error convention, matching LinearRegression.
+  it "returns nil for unusable shapes and before fit" ->
+    model = KNNClassifier.new(3)
+    expect(model.predict([[1, 2]])).to be_nil
+    expect(model.score([[1, 2]], [0])).to be_nil
+    expect(model.fit([], [])).to be_nil
+    expect(model.fit([[1, 2], [3]], [0, 1])).to be_nil
+    expect(model.fit([[1], [2]], [0, 1, 2])).to be_nil
+    expect(model.fitted?).to be_false
+    r = model.fit([[1, 2], [3, 4]], [:x, :y])
+    expect(r != nil).to be_true
+    expect(model.predict([[1]])).to be_nil
+
 spec_summary

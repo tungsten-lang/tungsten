@@ -8,6 +8,7 @@ use perf_script
 use xctrace_xml
 use sidemap
 use analyzer
+use flame_svg
 
 describe "PerfScript" ->
   it "collapses perf script samples into sorted folded stacks" ->
@@ -148,5 +149,69 @@ describe "FlameAnalyzer" ->
     res = Tungsten:Flame:FlameAnalyzer.noise_split(pairs, 2000)
     expect(res[0].size()).to eq(1)
     expect(res[1]).to eq(0)
+
+describe "FlameSvg" ->
+  it "merges shared prefixes and accumulates inclusive counts" ->
+    root = Tungsten:Flame:FlameSvg.build_tree("main;a;b 10\nmain;a;c 5\nmain;d 3")
+    expect(root[:count]).to eq(18)
+    expect(root[:children].size()).to eq(1)
+    main = root[:children][0]
+    expect(main[:name]).to eq("main")
+    expect(main[:count]).to eq(18)
+    a = Tungsten:Flame:FlameSvg.find_child(main, "a")
+    expect(a[:count]).to eq(15)
+    d = Tungsten:Flame:FlameSvg.find_child(main, "d")
+    expect(d[:count]).to eq(3)
+
+  it "reports the deepest stack depth" ->
+    root = Tungsten:Flame:FlameSvg.build_tree("main;a;b 10\nmain;d 3")
+    expect(Tungsten:Flame:FlameSvg.max_depth(root)).to eq(2)
+
+  it "ignores lines with no positive count" ->
+    root = Tungsten:Flame:FlameSvg.build_tree("main;a 5\nbroken\nmain;b 0")
+    expect(root[:count]).to eq(5)
+
+  it "formats percentages with one decimal via integer math" ->
+    expect(Tungsten:Flame:FlameSvg.fmt_pct(1, 3)).to eq("33.3")
+    expect(Tungsten:Flame:FlameSvg.fmt_pct(18, 18)).to eq("100.0")
+
+  it "encodes sample-space bounds as parseable fractions" ->
+    expect(Tungsten:Flame:FlameSvg.frac_str(0, 18)).to eq("0")
+    expect(Tungsten:Flame:FlameSvg.frac_str(18, 18)).to eq("1")
+    expect(Tungsten:Flame:FlameSvg.frac_str(15, 18)).to eq("0.833333")
+
+  it "escapes XML metacharacters" ->
+    expect(Tungsten:Flame:FlameSvg.xml_escape("a<b>&\"c")).to eq("a&lt;b&gt;&amp;&quot;c")
+
+  it "truncates labels to the frame width" ->
+    expect(Tungsten:Flame:FlameSvg.fit_label("main", 1180)).to eq("main")
+    expect(Tungsten:Flame:FlameSvg.fit_label("verylongfunctionname", 100)).to eq("verylongfun..")
+    expect(Tungsten:Flame:FlameSvg.fit_label("x", 8)).to eq("")
+
+  it "gives each frame name a stable warm color" ->
+    c1 = Tungsten:Flame:FlameSvg.color_for("main")
+    c2 = Tungsten:Flame:FlameSvg.color_for("main")
+    expect(c1).to eq(c2)
+    expect(c1.starts_with?("rgb(")).to eq(true)
+
+  it "renders a self-contained interactive SVG document" ->
+    svg = Tungsten:Flame:FlameSvg.render("main;a;b 10\nmain;a;c 5\nmain;d 3", "T")
+    expect(svg.include?("<svg xmlns=\"http://www.w3.org/2000/svg\"")).to eq(true)
+    expect(svg.include?("</svg>")).to eq(true)
+    expect(svg.include?("<title>main (18 samples, 100.0%)</title>")).to eq(true)
+    expect(svg.include?("<title>b (10 samples, 55.5%)</title>")).to eq(true)
+    expect(svg.include?("data-name=\"a\"")).to eq(true)
+    expect(svg.include?("<script>")).to eq(true)
+    expect(svg.include?("function zoom(")).to eq(true)
+
+  it "escapes markup in the title and shows the sample total" ->
+    svg = Tungsten:Flame:FlameSvg.render("main 4", "P<0> & Q")
+    expect(svg.include?(">P&lt;0&gt; &amp; Q</text>")).to eq(true)
+    expect(svg.include?("4 samples</text>")).to eq(true)
+
+  it "handles empty input without crashing" ->
+    svg = Tungsten:Flame:FlameSvg.render("", "Empty")
+    expect(svg.include?("no samples")).to eq(true)
+    expect(svg.include?("</svg>")).to eq(true)
 
 spec_summary

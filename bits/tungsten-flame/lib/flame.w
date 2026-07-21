@@ -16,6 +16,7 @@ use perf_script
 use xctrace_xml
 use builder
 use sampler
+use flame_svg
 
 # ---- Read and parse the manpage ----
 # Prefer TUNGSTEN_ROOT (set by the CLI); __DIR__ is not always populated
@@ -160,6 +161,18 @@ while i < metric_names.size
   m = metric_names[i]
   write_file(tmpdir + "/" + m + ".folded", Tungsten:Flame:Sidemap.rewrite_folded(metrics[m], wy_names))
   i = i + 1
+
+# Flame graph SVG — the namesake output. Rendered from the primary
+# metric's sidemap-rewritten folded stacks (so frames carry real names),
+# written to --output when given. `-o` with no extension still produces a
+# valid SVG; callers who want a specific name pass one.
+if fl_output != ""
+  svg_path = fl_output
+  primary_folded = read_file(tmpdir + "/" + primary + ".folded")
+  svg_title = "Flame Graph — " + Tungsten:Flame:Sampler.basename_noext(source) + " (" + primary + ")"
+  write_file(svg_path, Tungsten:Flame:FlameSvg.render(primary_folded, svg_title))
+  if !fl_silent
+    << "wrote flame graph: " + svg_path
 
 # Full breakdown for primary metric (Top + caller/callee + categories).
 Tungsten:Flame:FlameAnalyzer.display_metric(tmpdir + "/" + primary + ".folded", fl_top, "general", fl_focus, use_color, primary)

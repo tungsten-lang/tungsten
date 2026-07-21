@@ -61,6 +61,21 @@ describe "Metrics" ->
     expect(Metrics.mse([2, 4, 6], [1, 5, 7]).to_s).to eq("1")
     expect(Metrics.r2([2, 4, 6], [1, 5, 7]).to_s).to eq("0.839286")
 
+  it "computes precision, recall and F1 for a binary classifier" ->
+    # preds = [1,1,1,0,0,1] vs actual = [1,0,0,0,1,1]:
+    # TP=2, FP=2, FN=1 -> P = 2/4 = 0.5, R = 2/3, F1 = 4/7.
+    preds = [1, 1, 1, 0, 0, 1]
+    act = [1, 0, 0, 0, 1, 1]
+    expect(Metrics.precision(preds, act).to_s).to eq("0.5")
+    expect(Metrics.recall(preds, act).to_s).to eq("0.666667")
+    expect(Metrics.f1(preds, act).to_s).to eq("0.571429")
+    # pos_label = 0 flips the positive class: TP=1, FP=1, FN=2.
+    expect(Metrics.precision(preds, act, 0).to_s).to eq("0.5")
+    expect(Metrics.recall(preds, act, 0).to_s).to eq("0.333333")
+    # scikit-learn zero-division convention: 0.0, never a divide error.
+    expect(Metrics.precision([0, 0], [1, 0]).to_s).to eq("0")
+    expect(Metrics.f1([0, 0], [0, 0]).to_s).to eq("0")
+
 describe "Rolling" ->
   it "computes trailing-window aggregations" ->
     s = Series.new([1, 2, 3, 4, 5], "v")

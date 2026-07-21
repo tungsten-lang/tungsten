@@ -117,6 +117,9 @@ use koala
     self.check("rmse", Metrics.rmse([2, 4, 6], [1, 5, 7]), "1")
     self.check("mae", Metrics.mae([2, 4, 6], [1, 5, 7]), "1")
     self.check("r2", Metrics.r2([2, 4, 6], [1, 5, 7]), "0.839286")
+    self.check("precision", Metrics.precision([1, 1, 1, 0, 0, 1], [1, 0, 0, 0, 1, 1]), "0.5")
+    self.check("recall", Metrics.recall([1, 1, 1, 0, 0, 1], [1, 0, 0, 0, 1, 1]), "0.666667")
+    self.check("f1", Metrics.f1([1, 1, 1, 0, 0, 1], [1, 0, 0, 0, 1, 1]), "0.571429")
 
 t = KoalaSmoke.new
 t.run

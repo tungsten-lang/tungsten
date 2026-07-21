@@ -22,6 +22,7 @@ df.join(other, :dept)                # => inner join (:left for left join)
 df.pivot(:dept, :name, :salary)      # => pivot table, agg defaults to :sum
 
 Metrics.rmse([2, 4, 6], [1, 5, 7])   # => 1
+Metrics.f1([1, 1, 0], [1, 0, 0])     # => 0.666667 (also precision / recall)
 
 v = Vector.new([1, 2, 3])
 v.dot(Vector.new([4, 5, 6]))         # => 32

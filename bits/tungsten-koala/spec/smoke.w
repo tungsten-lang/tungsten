@@ -72,6 +72,15 @@ use koala
     self.check("select_columns shape", slim.shape, "\[5, 2\]")
     self.check("head", df.head(2).row_count, 2)
 
+    # describe: numeric columns only (:name and :dept skipped)
+    desc = df.describe
+    self.check("describe cols", desc.column_names.join(","), "statistic,age,salary")
+    self.check("describe rows", desc.row_count, 8)
+    self.check("describe stat labels", desc.column_values(:statistic).join(","), "count,mean,std,min,25%,50%,75%,max")
+    # age = [30,25,35,28,41]: count 5, mean 31.8, sample std 6.30079,
+    # min 25, quartiles 28/30(=median)/35, max 41
+    self.check("describe age", desc.column_values(:age).join(","), "5,31.8,6.30079,25,28,30,35,41")
+
     # --- GroupBy ---
     g = df.group_by(:dept)
     self.check("group count", g.size, 2)

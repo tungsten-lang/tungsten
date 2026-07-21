@@ -43,6 +43,32 @@
     else
       (s[mid - 1] + s[mid]).to_f / 2.to_f
 
+  # The p-th percentile as a float, p an INTEGER percent in 0..100.
+  # Linear interpolation between the two nearest order statistics —
+  # numpy's default 'linear' method (a.k.a. R type-7 / Excel
+  # PERCENTILE.INC), so 25/50/75 match pandas' quartiles and 50 equals
+  # the median. nils are dropped first; nil for an empty (or all-nil)
+  # array. p is an integer percent, never a float fraction, so no float
+  # literal is needed at the call site (float literals corrupt call args).
+  #
+  # The 0-based fractional rank p/100*(n-1) is split into an integer
+  # floor and remainder with pure integer arithmetic, so only the final
+  # interpolation touches floats:
+  #   rank = span/100 where span = p*(n-1); floor = span/100 (int div),
+  #   frac = (span % 100)/100.
+  -> .percentile(values, p)
+    s = self.sorted(self.clean(values))
+    n = s.size
+    out = nil
+    if n > 0
+      span = p * (n - 1)
+      lo = span / 100
+      frac = (span % 100).to_f / 100.to_f
+      hi = lo + 1
+      hi = n - 1 if hi > n - 1
+      out = s[lo].to_f + frac * (s[hi].to_f - s[lo].to_f)
+    out
+
   # True when the first non-nil value is numeric (Integer or Float).
   # False for an empty or all-nil array. type() names agree across
   # engines (verified: Integer/Float/String/Symbol/Nil/Boolean).

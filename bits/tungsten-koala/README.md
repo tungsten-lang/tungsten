@@ -20,6 +20,8 @@ df.group_by(:dept).mean(:salary)     # => DataFrame [dept, salary]
 df[:salary].rolling(2).mean          # => Series of trailing-window means
 df.join(other, :dept)                # => inner join (:left for left join)
 df.pivot(:dept, :name, :salary)      # => pivot table, agg defaults to :sum
+df.describe                          # => summary frame: count/mean/std/min/25%/50%/75%/max
+df[:salary].quantile(75)             # => 3rd-quartile salary (linear interp)
 
 Metrics.rmse([2, 4, 6], [1, 5, 7])   # => 1
 Metrics.f1([1, 1, 0], [1, 0, 0])     # => 0.666667 (also precision / recall)
@@ -138,7 +140,14 @@ so running it *is* the determinism check.
 
 Live modules: `Series`, `DataFrame`, `GroupBy`, `Stats`, `Metrics`,
 `Rolling`, `Join`, `Pivot` (constructors take ordered `[name, values]`
-pairs — column order is preserved, which a hash would not guarantee),
+pairs — column order is preserved, which a hash would not guarantee;
+`df.describe` returns a pandas-style summary frame — a `:statistic`
+column of count/mean/std/min/25%/50%/75%/max labels plus one column per
+numeric source column, std being the sample n−1 standard deviation and
+the quartiles linear-interpolation percentiles, so the 50% row is the
+median; `Stats.percentile(values, p)` and `Series#quantile(p)` take an
+integer percent 0..100 and interpolate linearly, matching numpy's
+default and pandas),
 dense linear algebra: `Vector`, `Matrix`, `LinAlg` (pure Tungsten,
 CPU-only; ops with a shape requirement return nil when it is not met),
 ML preprocessing: `Scaler`, `Encoder`, `Imputer`, `Splitter`,

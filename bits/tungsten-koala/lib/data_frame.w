@@ -183,6 +183,41 @@
       out = Matrix.new(rows)
     out
 
+  # --- Summary ---
+
+  # Per-column summary statistics, pandas-style. Returns a DataFrame
+  # whose leading :statistic column labels the rows count / mean / std /
+  # min / 25% / 50% / 75% / max, with one further column per NUMERIC
+  # source column, in column order (non-numeric columns are skipped, as
+  # pandas' default describe does). count is the non-nil count; std is
+  # the sample standard deviation (n - 1 denominator), matching pandas;
+  # the quartiles use linear-interpolation percentiles (Stats.percentile,
+  # so the 50% row equals the median). An empty frame, or one with no
+  # numeric column, yields just the :statistic column.
+  #
+  # NOTE: locals hoisted from ivars before the block; no early return.
+  -> describe
+    names = @names
+    cols = @cols
+    labels = ["count", "mean", "std", "min", "25%", "50%", "75%", "max"]
+    pairs = [[:statistic, labels]]
+    i = 0
+    names.each -> (n)
+      c = cols[i]
+      if Stats.numeric?(c)
+        stats = []
+        stats.push(Stats.clean(c).size)
+        stats.push(Stats.mean(c))
+        stats.push(Stats.std(c))
+        stats.push(Stats.min(c).to_f)
+        stats.push(Stats.percentile(c, 25))
+        stats.push(Stats.percentile(c, 50))
+        stats.push(Stats.percentile(c, 75))
+        stats.push(Stats.max(c).to_f)
+        pairs.push([n, stats])
+      i += 1
+    DataFrame.new(pairs)
+
   # --- Display ---
 
   -> to_s

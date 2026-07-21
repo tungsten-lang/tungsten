@@ -33,6 +33,12 @@ describe "Series" ->
     expect(s.dropna.to_a.to_s).to eq("\[1, 3\]")
     expect(s.count).to eq(2)
 
+  it "computes quantiles by linear interpolation" ->
+    s = Series.new([1, 2, 3, 4], "q")
+    expect(s.quantile(25).to_s).to eq("1.75")
+    expect(s.quantile(50).to_s).to eq("2.5")
+    expect(s.quantile(75).to_s).to eq("3.25")
+
 describe "DataFrame" ->
   it "constructs from ordered column pairs" ->
     df = DataFrame.new([[:a, [1, 2]], [:b, [3, 4]]])
@@ -43,6 +49,42 @@ describe "DataFrame" ->
     df = DataFrame.new([[:age, [30, 25, 35]]])
     kept = df.where -> (row) row[:age] >= 30
     expect(kept.row_count).to eq(2)
+
+  it "summarizes numeric columns with describe" ->
+    # :name is non-numeric, so describe skips it (pandas' default).
+    df = DataFrame.new([
+      [:a, [1, 2, 3, 4]],
+      [:name, ["x", "y", "z", "w"]],
+      [:b, [10, 20, 30, 40]]
+    ])
+    d = df.describe
+    expect(d.column_names.join(",")).to eq("statistic,a,b")
+    expect(d.row_count).to eq(8)
+    expect(d.column_values(:statistic).join(",")).to eq("count,mean,std,min,25%,50%,75%,max")
+    # a = [1,2,3,4]: count 4, mean 2.5, sample std sqrt(5/3)=1.29099,
+    # min 1, quartiles 1.75 / 2.5 / 3.25 (numpy 'linear'), max 4.
+    expect(d.column_values(:a).join(",")).to eq("4,2.5,1.29099,1,1.75,2.5,3.25,4")
+    # b = 10*a, so std scales 10x (12.9099) and the quartiles shift.
+    expect(d.column_values(:b).join(",")).to eq("4,25,12.9099,10,17.5,25,32.5,40")
+
+describe "Stats.percentile" ->
+  it "interpolates linearly like numpy and pandas" ->
+    # 0-based fractional rank p/100*(n-1); [1,2,3,4] -> 1.75/2.5/3.25.
+    expect(Stats.percentile([1, 2, 3, 4], 25).to_s).to eq("1.75")
+    expect(Stats.percentile([1, 2, 3, 4], 50).to_s).to eq("2.5")
+    expect(Stats.percentile([1, 2, 3, 4], 75).to_s).to eq("3.25")
+    # odd length lands on exact order statistics
+    expect(Stats.percentile([1, 2, 3, 4, 5], 25).to_s).to eq("2")
+    expect(Stats.percentile([1, 2, 3, 4, 5], 75).to_s).to eq("4")
+    # p = 50 equals the median; p = 0/100 are min/max (unsorted input)
+    expect(Stats.percentile([5, 1, 9, 3], 50).to_s).to eq(Stats.median([5, 1, 9, 3]).to_s)
+    expect(Stats.percentile([5, 1, 9, 3], 0).to_s).to eq("1")
+    expect(Stats.percentile([5, 1, 9, 3], 100).to_s).to eq("9")
+
+  it "drops nils and handles small inputs" ->
+    expect(Stats.percentile([1, nil, 2, 3, 4], 25).to_s).to eq("1.75")
+    expect(Stats.percentile([7], 25).to_s).to eq("7")
+    expect(Stats.percentile([], 50)).to be_nil
 
 describe "GroupBy" ->
   it "counts and aggregates per group" ->

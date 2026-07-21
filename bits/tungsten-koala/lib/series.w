@@ -44,6 +44,11 @@
   -> median
     Stats.median(@values)
 
+  # The p-th percentile (p an integer 0..100, linear interpolation;
+  # p = 50 equals the median). See Stats.percentile.
+  -> quantile(p)
+    Stats.percentile(@values, p)
+
   -> min
     Stats.min(@values)
 

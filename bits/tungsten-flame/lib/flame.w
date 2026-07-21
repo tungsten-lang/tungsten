@@ -20,6 +20,7 @@ use sampler
 use flame_svg
 use flame_diff
 use speedscope
+use trace_event
 use hot_frames
 use flame_filter
 use flame_threshold
@@ -100,6 +101,7 @@ fl_diff        = opts.flag?("diff")
 fl_hot         = opts.flag?("hot")
 fl_collapse_sample = opts.flag?("collapse_sample")
 fl_speedscope  = opts.flag?("speedscope")
+fl_trace_event = opts.flag?("trace_event")
 fl_files       = opts.args
 fl_passthrough = opts.passthrough
 
@@ -187,6 +189,41 @@ if fl_collapse_sample
       << "wrote folded stacks: " + fl_output
   else
     << combined
+  exit(0)
+
+# Trace Event mode: export folded stacks as a chrome://tracing / Perfetto
+# Trace Event Format JSON profile (`flame --trace-event FILE.folded`). Drop
+# the result on https://ui.perfetto.dev (or chrome://tracing) for a
+# track-based timeline / flame-chart view with marquee zoom and SQL query —
+# the trace-viewer ecosystem the static SVG and speedscope export do not
+# reach. Like --diff / --hot / --collapse-sample, a pure folded-text mode (no
+# compile, no profiling) that works on any folded stacks; several files
+# concatenate and their stacks sum, aggregating N runs into one trace. Emits
+# JSON to -o, else stdout.
+if fl_trace_event
+  if fl_files.size < 1
+    << "tungsten flame --trace-event: need at least one folded file"
+    exit(1)
+  combined = ""
+  ti = 0
+  while ti < fl_files.size
+    ftext = read_file(fl_files[ti])
+    if ftext == nil
+      << "tungsten flame: cannot read " + fl_files[ti]
+      exit(1)
+    if combined != ""
+      combined = combined + "\n"
+    combined = combined + ftext
+    ti = ti + 1
+  te_name = Tungsten:Flame:Sampler.basename_noext(fl_files[0])
+  te_json = Tungsten:Flame:TraceEvent.export(combined, te_name)
+  if fl_output != ""
+    write_file(fl_output, te_json)
+    if !fl_silent
+      << "wrote trace event profile: " + fl_output
+      << "open at https://ui.perfetto.dev or chrome://tracing"
+  else
+    << te_json
   exit(0)
 
 # Filter mode: reshape one folded profile before viewing it — include

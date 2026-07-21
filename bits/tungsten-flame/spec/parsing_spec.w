@@ -12,6 +12,7 @@ use analyzer
 use flame_svg
 use flame_diff
 use speedscope
+use trace_event
 use hot_frames
 use flame_filter
 use flame_threshold
@@ -526,5 +527,63 @@ describe "FlameThreshold" ->
 
   it "treats empty input as no stacks" ->
     expect(Tungsten:Flame:FlameThreshold.collapse("", 200)).to eq("")
+
+describe "TraceEvent" ->
+  it "merges shared prefixes into a tree with inclusive counts" ->
+    root = Tungsten:Flame:TraceEvent.build_tree("main;a;b 10\nmain;a;c 5\nmain;d 3")
+    expect(root[:count]).to eq(18)
+    expect(root[:children].size()).to eq(1)
+    main = root[:children][0]
+    expect(main[:name]).to eq("main")
+    expect(main[:count]).to eq(18)
+    a = Tungsten:Flame:TraceEvent.find_child(main, "a")
+    expect(a[:count]).to eq(15)
+    d = Tungsten:Flame:TraceEvent.find_child(main, "d")
+    expect(d[:count]).to eq(3)
+
+  it "ignores lines with no positive count" ->
+    root = Tungsten:Flame:TraceEvent.build_tree("main;a 5\nbroken\nmain;b 0")
+    expect(root[:count]).to eq(5)
+
+  it "exports a valid Trace Event Format object with a timeline unit" ->
+    te = Tungsten:Flame:TraceEvent.export("main;a;b 10\nmain;a;c 5\nmain;d 3", "demo")
+    expect(te.include?("\"displayTimeUnit\":\"ns\"")).to eq(true)
+    expect(te.include?("\"traceEvents\":\[")).to eq(true)
+    expect(te.starts_with?("{")).to eq(true)
+    expect(te.ends_with?("}")).to eq(true)
+
+  it "labels the process and thread tracks with metadata events" ->
+    te = Tungsten:Flame:TraceEvent.export("main 4", "demo")
+    expect(te.include?("{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":1,\"args\":{\"name\":\"demo\"}}")).to eq(true)
+    expect(te.include?("{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":1,\"tid\":1,\"args\":{\"name\":\"samples\"}}")).to eq(true)
+
+  it "lays merged frames out as nested slices left-to-right by inclusive count" ->
+    te = Tungsten:Flame:TraceEvent.export("main;a;b 10\nmain;a;c 5\nmain;d 3", "demo")
+    expect(te.include?("{\"name\":\"main\",\"ph\":\"X\",\"ts\":0,\"dur\":18,\"pid\":1,\"tid\":1}")).to eq(true)
+    expect(te.include?("{\"name\":\"a\",\"ph\":\"X\",\"ts\":0,\"dur\":15,\"pid\":1,\"tid\":1}")).to eq(true)
+    expect(te.include?("{\"name\":\"b\",\"ph\":\"X\",\"ts\":0,\"dur\":10,\"pid\":1,\"tid\":1}")).to eq(true)
+    expect(te.include?("{\"name\":\"c\",\"ph\":\"X\",\"ts\":10,\"dur\":5,\"pid\":1,\"tid\":1}")).to eq(true)
+    expect(te.include?("{\"name\":\"d\",\"ph\":\"X\",\"ts\":15,\"dur\":3,\"pid\":1,\"tid\":1}")).to eq(true)
+
+  it "lays sibling roots out consecutively along the timeline" ->
+    te = Tungsten:Flame:TraceEvent.export("a 3\nb 2", "t")
+    expect(te.include?("{\"name\":\"a\",\"ph\":\"X\",\"ts\":0,\"dur\":3,\"pid\":1,\"tid\":1}")).to eq(true)
+    expect(te.include?("{\"name\":\"b\",\"ph\":\"X\",\"ts\":3,\"dur\":2,\"pid\":1,\"tid\":1}")).to eq(true)
+
+  it "sums duplicate stacks into one slice span" ->
+    te = Tungsten:Flame:TraceEvent.export("foo;bar 3\nfoo;bar 2\nfoo;baz 5", "d")
+    expect(te.include?("{\"name\":\"foo\",\"ph\":\"X\",\"ts\":0,\"dur\":10,\"pid\":1,\"tid\":1}")).to eq(true)
+    expect(te.include?("{\"name\":\"bar\",\"ph\":\"X\",\"ts\":0,\"dur\":5,\"pid\":1,\"tid\":1}")).to eq(true)
+    expect(te.include?("{\"name\":\"baz\",\"ph\":\"X\",\"ts\":5,\"dur\":5,\"pid\":1,\"tid\":1}")).to eq(true)
+
+  it "JSON-escapes quotes and backslashes in frame names" ->
+    te = Tungsten:Flame:TraceEvent.export("a\"b\\c 4", "t")
+    expect(te.include?("{\"name\":\"a\\\"b\\\\c\",\"ph\":\"X\"")).to eq(true)
+
+  it "handles empty input as a valid slice-less trace" ->
+    te = Tungsten:Flame:TraceEvent.export("", "empty")
+    expect(te.include?("\"traceEvents\":\[")).to eq(true)
+    expect(te.include?("\"ph\":\"X\"")).to eq(false)
+    expect(te.ends_with?("}")).to eq(true)
 
 spec_summary

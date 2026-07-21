@@ -56,9 +56,16 @@
     matched = request_parts.size == @segments.size
 
     if matched
+      me   = self
+      cons = @constraints
       @segments.each_with_index -> (segment, i)
-        if segment[:type] == :literal && segment[:value] != request_parts[i]
-          matched = false
+        if segment[:type] == :literal
+          if segment[:value] != request_parts[i]
+            matched = false
+        else
+          c = cons[segment[:name]]
+          if c != nil && !me.constraint_pass?(c, request_parts[i])
+            matched = false
     matched
 
   -> parse_segments(path)
@@ -70,6 +77,53 @@
         {type: :glob, name: part.slice(1, part.size - 1).to_sym}
       else
         {type: :literal, value: part}
+
+  # --- Param constraints ----------------------------------------------
+  #
+  # A route only matches when every constrained param segment satisfies
+  # its constraint (Rails-style). Constraints ride in via
+  # options[:constraints] — a {param_name => spec} hash — and are checked
+  # in match_path?, so a request whose param violates a constraint falls
+  # through to the next matching route (or 404) instead of dispatching.
+  # This lets two patterns share a prefix, e.g. GET "/users/:id"
+  # constrained :int alongside GET "/users/:name" constrained :alpha.
+  #
+  # `spec` is one of:
+  #   :int    — one or more digits              ("42" ok, "4a" no, "" no)
+  #   :alpha  — one or more ASCII letters
+  #   :alnum  — one or more ASCII letters/digits
+  #   :slug   — lowercase letters/digits/hyphens (blog-style slugs)
+  #   [a, b]  — an explicit allow-list of exact segment values (an enum)
+  # An unknown spec is permissive (never blocks) so a typo can't silently
+  # make a route unreachable. Regex is deliberately NOT used: regex
+  # literals do not run on the embedded interpreter, and carbide's core
+  # must behave identically on the interpreter and the compiled binary.
+  -> constraint_pass?(spec, value)
+    v    = value.to_s
+    pass = true
+    if type(spec) == "Array"
+      pass = spec.include?(v)
+    elsif spec == :int
+      pass = digits_only?(v)
+    elsif spec == :alpha
+      pass = alpha_only?(v)
+    elsif spec == :alnum
+      pass = alnum_only?(v)
+    elsif spec == :slug
+      pass = slug_only?(v)
+    pass
+
+  -> digits_only?(s)
+    s.size > 0 && s.chars.all? -> (c) c >= "0" && c <= "9"
+
+  -> alpha_only?(s)
+    s.size > 0 && s.chars.all? -> (c) (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")
+
+  -> alnum_only?(s)
+    s.size > 0 && s.chars.all? -> (c) (c >= "0" && c <= "9") || (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")
+
+  -> slug_only?(s)
+    s.size > 0 && s.chars.all? -> (c) (c >= "0" && c <= "9") || (c >= "a" && c <= "z") || c == "-"
 
 
 # Route::Set — holds all routes; resolves and dispatches requests.

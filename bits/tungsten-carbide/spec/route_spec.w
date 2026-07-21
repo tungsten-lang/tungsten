@@ -51,4 +51,40 @@ describe "Route" ->
       expect(set.path_for(:nope)).to be_nil
       expect(set.path_for(:user)).to be_nil
 
+  describe "param constraints" ->
+    it "matches a param that satisfies an :int constraint" ->
+      r = Route.new(:GET, "/users/:id", "UsersController", :show, {constraints: {id: :int}})
+      expect(r.match_path?("/users/42")).to be_true
+
+    it "rejects a param that violates an :int constraint" ->
+      r = Route.new(:GET, "/users/:id", "UsersController", :show, {constraints: {id: :int}})
+      expect(r.match_path?("/users/abc")).to be_false
+
+    it "enforces an :alpha constraint" ->
+      r = Route.new(:GET, "/u/:name", "UsersController", :show, {constraints: {name: :alpha}})
+      expect(r.match_path?("/u/bob")).to be_true
+      expect(r.match_path?("/u/b0b")).to be_false
+
+    it "enforces a :slug constraint" ->
+      r = Route.new(:GET, "/posts/:slug", "PostsController", :show, {constraints: {slug: :slug}})
+      expect(r.match_path?("/posts/hello-world")).to be_true
+      expect(r.match_path?("/posts/Hello")).to be_false
+
+    it "enforces an allow-list (enum) constraint" ->
+      r = Route.new(:GET, "/p/:fmt", "PostsController", :show, {constraints: {fmt: ["json", "xml"]}})
+      expect(r.match_path?("/p/json")).to be_true
+      expect(r.match_path?("/p/yaml")).to be_false
+
+    it "treats an unknown constraint as permissive" ->
+      r = Route.new(:GET, "/x/:id", "XController", :show, {constraints: {id: :bogus}})
+      expect(r.match_path?("/x/anything")).to be_true
+
+    it "disambiguates prefix-sharing routes by constraint at resolve time" ->
+      set = Route:Set.new
+      set.add(:GET, "/users/:id", "IntController", :show, {constraints: {id: :int}})
+      set.add(:GET, "/users/:name", "AlphaController", :show, {constraints: {name: :alpha}})
+      expect(set.resolve(:GET, "/users/42").route.controller).to eq("IntController")
+      expect(set.resolve(:GET, "/users/bob").route.controller).to eq("AlphaController")
+      expect(set.resolve(:GET, "/users/!!")).to be_nil
+
 spec_summary

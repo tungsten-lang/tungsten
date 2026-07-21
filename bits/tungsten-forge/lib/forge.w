@@ -6,6 +6,7 @@ use query_string
 use cookie
 use multipart
 use negotiation
+use byte_range
 use request
 use response
 use router

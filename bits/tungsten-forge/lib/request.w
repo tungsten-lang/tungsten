@@ -135,6 +135,20 @@
   -> accepted_media_types
     Negotiation.ranked(@headers.get("Accept"))
 
+  # --- Byte ranges (see lib/byte_range.w) ---
+
+  # The raw Range request header value, or nil when it is absent.
+  -> range_header
+    @headers.get("Range")
+
+  # The byte ranges requested for a representation of `total` bytes
+  # (RFC 7233). Returns nil when there is no usable Range header (serve the
+  # full 200 body), :unsatisfiable when a valid bytes range-set fits none
+  # of the resource (reply 416), or an Array of satisfiable ByteRanges in
+  # request order (reply 206). See ByteRange for the resolved offsets.
+  -> ranges(total)
+    ByteRange.resolve(@headers.get("Range"), total)
+
   # --- Parsing ---
 
   # Parse a raw HTTP/1.1 request (request line + headers + optional body).

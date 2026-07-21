@@ -105,4 +105,43 @@ t.eq("truncated body is not yet framed", Hammer.response_length(truncated), 0)
 # Too-short buffer (< 15 bytes) can't hold a status line — returns 0.
 t.eq("too-short buffer is not framed", Hammer.response_length("HTTP/1.1"), 0)
 
+# ---- chunked transfer-encoding framing (RFC 7230 §4.1) ----
+# A chunked body has no Content-Length; the frame runs from the status line
+# through the terminating zero-length chunk and its blank line.
+chunked1 = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+t.eq("chunked response frames to its full byte size", Hammer.response_length(chunked1), chunked1.size)
+t.eq("chunked response length is header + chunk framing", Hammer.response_length(chunked1), 62)
+
+# The header name and the "chunked" token are matched case-insensitively.
+chunked_ci = "HTTP/1.1 200 OK\r\ntransfer-encoding: Chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+t.eq("chunked detection is case-insensitive", Hammer.response_length(chunked_ci), 62)
+
+# A hex chunk size larger than one digit ('b' == 11) frames the 11-byte body.
+chunked_hex = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nb\r\nhello world\r\n0\r\n\r\n"
+t.eq("chunked hex size frames the full body", Hammer.response_length(chunked_hex), chunked_hex.size)
+
+# Multiple data chunks are summed through the terminator.
+chunked_two = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nfoo\r\n3\r\nbar\r\n0\r\n\r\n"
+t.eq("multiple chunks are summed", Hammer.response_length(chunked_two), chunked_two.size)
+
+# Chunk extensions (";foo=bar" on the size line) are skipped.
+chunked_ext = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5;foo=bar\r\nhello\r\n0\r\n\r\n"
+t.eq("chunk extensions are skipped", Hammer.response_length(chunked_ext), chunked_ext.size)
+
+# A trailer header after the last chunk is consumed up to the blank line.
+chunked_trailer = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\nX-Sum: abc\r\n\r\n"
+t.eq("chunked trailers are consumed", Hammer.response_length(chunked_trailer), chunked_trailer.size)
+
+# An incomplete chunked body is not framed yet (caller must read more).
+chunked_partial = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhel"
+t.eq("chunked body truncated mid-chunk is not framed", Hammer.response_length(chunked_partial), 0)
+chunked_noterm = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n"
+t.eq("chunked body missing terminator is not framed", Hammer.response_length(chunked_noterm), 0)
+
+# On a keep-alive connection, framing must stop exactly at the terminator so
+# the next pipelined response is not swallowed.
+chunked_pipelined = chunked1 + "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+t.eq("chunked framing stops at the terminator, not buffer end", Hammer.response_length(chunked_pipelined), 62)
+t.eq("chunked frame is shorter than the pipelined buffer", Hammer.response_length(chunked_pipelined) < chunked_pipelined.size, true)
+
 t.done

@@ -132,7 +132,104 @@
         p += 1
       p++
 
+    # No Content-Length header: a chunked transfer-encoding body is the other
+    # framing servers use when the length is not known up front. A real response
+    # carries exactly one of the two, so we only pay for this scan when
+    # Content-Length is absent. Chunked framing sums the chunk sizes through the
+    # terminating zero-length chunk; an incomplete body returns 0 (read more).
+    te = raw_find_ci(data, start, header_end, "transfer-encoding:")
+    if te >= 0
+      value_line_end = raw_line_end(data, te, header_end)
+      if raw_find_ci(data, te, value_line_end, "chunked") >= 0
+        chunk_end = chunked_length_raw(data, length, header_end + 4)
+        return chunk_end - start if chunk_end > 0
+        return 0
+
     header_end - start + 4
+
+  # ---- chunked transfer-encoding framing (RFC 7230 §4.1) ----
+
+  # Case-insensitively compare lit.size bytes at data+pos against lit (which
+  # must already be lowercase). Returns 1 on a full match, else 0.
+  -> .raw_ci_eq(data, pos, lit) (i64 i64 string) i64
+    lit_ptr = ccall_nobox("w_string_byte_ptr", lit)
+    lit_len = ccall_nobox("w_string_byte_length", lit) ## i64
+    i = 0 ## i64
+    while i < lit_len
+      b = raw_load_u8(data, pos + i) ## i64
+      if b >= :-A && b <= :-Z
+        b = b + 32
+      return 0 if b != raw_load_u8(lit_ptr, i)
+      i += 1
+    1
+
+  # Case-insensitive search for lit within data[from, to); index or -1.
+  -> .raw_find_ci(data, from, to, lit) (i64 i64 i64 string) i64
+    lit_len = ccall_nobox("w_string_byte_length", lit) ## i64
+    limit = to - lit_len ## i64
+    p = from ## i64
+    while p <= limit
+      return p if raw_ci_eq(data, p, lit) == 1
+      p += 1
+    -1
+
+  # Index of the next LF (\n) in data[from, cap), or cap if none is present.
+  -> .raw_line_end(data, from, cap) (i64 i64 i64) i64
+    p = from ## i64
+    while p < cap
+      return p if raw_load_u8(data, p) == :-\n
+      p += 1
+    cap
+
+  # Hex-digit value of byte c, or -1 if c is not a hex digit.
+  -> .hex_digit_val(c) (i64) i64
+    return c - :-0 if c >= :-0 && c <= :-9
+    return c - :-a + 10 if c >= :-a && c <= :-f
+    return c - :-A + 10 if c >= :-A && c <= :-F
+    -1
+
+  # Total bytes of a chunked body beginning at body_start: the absolute end
+  # position one byte past the final terminating CRLF. Returns 0 when the
+  # chunked body is not yet complete within data[.., length).
+  -> .chunked_length_raw(data, length, body_start) (i64 i64 i64) i64
+    pos = body_start ## i64
+    loop
+      # Parse the chunk-size line (hex digits, stopping at the first non-hex
+      # byte — a ';' introducing chunk extensions or the size line's CR).
+      size = 0 ## i64
+      seen = 0 ## i64
+      loop
+        break if pos >= length
+        hv = hex_digit_val(raw_load_u8(data, pos)) ## i64
+        break if hv < 0
+        size = size * 16 + hv
+        seen += 1
+        pos += 1
+      return 0 if seen == 0
+
+      # Consume the remainder of the size line up to and including its LF.
+      nl = raw_line_end(data, pos, length) ## i64
+      return 0 if nl >= length
+      pos = nl + 1
+
+      if size == 0
+        # Last chunk: skip any trailer header lines, stopping at the blank line
+        # (a bare CRLF or LF) that terminates the message.
+        loop
+          return 0 if pos >= length
+          b = raw_load_u8(data, pos) ## i64
+          if b == 13
+            return 0 if pos + 1 >= length
+            return pos + 2 if raw_load_u8(data, pos + 1) == :-\n
+          return pos + 1 if b == :-\n
+          tnl = raw_line_end(data, pos, length) ## i64
+          return 0 if tnl >= length
+          pos = tnl + 1
+
+      # Data chunk: consume `size` payload bytes plus the trailing CRLF.
+      chunk_end = pos + size + 2 ## i64
+      return 0 if chunk_end > length
+      pos = chunk_end
 
   -> .tungsten_connection(host, port, request_batch, pipeline, duration, total, errors) (string i64 string i64 i64)
     deadline_ticks = ccall_nobox("__w_deadline_ticks_after_seconds", duration)

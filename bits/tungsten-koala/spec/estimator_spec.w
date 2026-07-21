@@ -409,6 +409,23 @@ describe "LogisticRegression" ->
     expect(r != nil).to be_true
     expect(model.predict([[1, 2]])).to be_nil
 
+  # The payoff of predict_proba: its scores feed Metrics.roc_auc for
+  # threshold-free evaluation. The two clusters are linearly separable, so
+  # the fitted probabilities rank every class-1 row above every class-0
+  # row — a perfect ranking, AUC exactly 1 — while the hard-label accuracy
+  # (score) is also 1. Opaque labels pass their positive label as
+  # pos_label, exactly as predict_proba scores classes[1].
+  it "feeds predict_proba into Metrics.roc_auc (AUC 1 on separable data)" ->
+    x = [[0, 0], [1, 0], [0, 1], [3, 3], [4, 3], [3, 4]]
+    y = [0, 0, 0, 1, 1, 1]
+    model = LogisticRegression.new
+    model.fit(x, y)
+    expect(Metrics.roc_auc(model.predict_proba(x), y).to_s).to eq("1")
+    ys = [:a, :a, :a, :b, :b, :b]
+    ms = LogisticRegression.new
+    ms.fit(x, ys)
+    expect(Metrics.roc_auc(ms.predict_proba(x), ys, :b).to_s).to eq("1")
+
 describe "KFold" ->
   # Shuffle-free folds are contiguous blocks of 0...n, scikit-learn's
   # KFold(shuffle=False): 10 samples in 5 folds are five [0,1] .. [8,9]

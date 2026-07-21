@@ -306,4 +306,68 @@ describe "Pivot" ->
     expect(q[0]).to be_nil
     expect(q[1]).to eq(2)
 
+describe "RocCurve" ->
+  # scikit-learn's own roc_curve docstring example:
+  #   y = [1, 1, 2, 2], scores = [0.1, 0.4, 0.35, 0.8], pos_label = 2
+  #   -> fpr = [0, 0, 0.5, 0.5, 1], tpr = [0, 0.5, 0.5, 1, 1], AUC = 0.75.
+  # Every float derives from integers via .to_f (float literals corrupt
+  # call arguments); 0.75 is exactly representable, so an exact string.
+  it "matches the scikit-learn roc_curve reference example" ->
+    scores = [1.to_f / 10.to_f, 4.to_f / 10.to_f, 35.to_f / 100.to_f, 8.to_f / 10.to_f]
+    actual = [1, 1, 2, 2]
+    c = Metrics.roc_curve(scores, actual, 2)
+    expect(c != nil).to be_true
+    expect(c.fpr.to_s).to eq("\[0, 0, 0.5, 0.5, 1\]")
+    expect(c.tpr.to_s).to eq("\[0, 0.5, 0.5, 1, 1\]")
+    expect(c.auc.to_s).to eq("0.75")
+    expect(Metrics.roc_auc(scores, actual, 2).to_s).to eq("0.75")
+
+  # The curve carries one point per distinct score plus a leading
+  # reject-all point at the origin, so all three arrays share a length,
+  # the first fpr/tpr are 0, and the leading threshold is max(score) + 1.
+  it "prepends a reject-all point and aligns fpr / tpr / thresholds" ->
+    scores = [8.to_f / 10.to_f, 6.to_f / 10.to_f, 3.to_f / 10.to_f]
+    actual = [1, 0, 0]
+    c = Metrics.roc_curve(scores, actual)
+    expect(c.fpr.size).to eq(c.tpr.size)
+    expect(c.fpr.size).to eq(c.thresholds.size)
+    expect(c.fpr[0].to_s).to eq("0")
+    expect(c.tpr[0].to_s).to eq("0")
+    expect(c.thresholds[0].to_s).to eq("1.8")
+
+  # AUC is the probability a random positive outranks a random negative,
+  # crediting ties half (Mann-Whitney U). scores = [0.8, 0.6, 0.6, 0.3]
+  # with actual = [1, 1, 0, 0] has one cross-class tie at 0.6, so of the
+  # 4 positive/negative pairs 3 are ordered and 1 is a half -> 3.5/4 =
+  # 0.875, and it equals the trapezoidal auc(fpr, tpr).
+  it "credits tied scores half, matching auc(fpr, tpr)" ->
+    scores = [8.to_f / 10.to_f, 6.to_f / 10.to_f, 6.to_f / 10.to_f, 3.to_f / 10.to_f]
+    actual = [1, 1, 0, 0]
+    c = Metrics.roc_curve(scores, actual)
+    expect(c.auc.to_s).to eq("0.875")
+    tol = 1.to_f / 1000000.to_f
+    expect(LinAlg.fabs(c.auc - Metrics.auc(c.fpr, c.tpr)) < tol).to be_true
+
+  # A perfect ranking scores 1, a perfectly inverted one 0, and all-tied
+  # scores 0.5 (the chance diagonal) — the AUC extremes.
+  it "scores perfect 1, inverted 0, all-tied 0.5" ->
+    perfect = [1.to_f / 10.to_f, 2.to_f / 10.to_f, 8.to_f / 10.to_f, 9.to_f / 10.to_f]
+    inverted = [9.to_f / 10.to_f, 8.to_f / 10.to_f, 2.to_f / 10.to_f, 1.to_f / 10.to_f]
+    tied = [5.to_f / 10.to_f, 5.to_f / 10.to_f, 5.to_f / 10.to_f, 5.to_f / 10.to_f]
+    labels = [0, 0, 1, 1]
+    expect(Metrics.roc_auc(perfect, labels).to_s).to eq("1")
+    expect(Metrics.roc_auc(inverted, labels).to_s).to eq("0")
+    expect(Metrics.roc_auc(tied, labels).to_s).to eq("0.5")
+
+  # nil (koala's requirement-not-met convention) when a class is absent —
+  # AUC is undefined with no positives or no negatives — or when scores
+  # and actual do not line up, or are empty.
+  it "returns nil when a class is absent or inputs are misaligned" ->
+    scores = [1.to_f / 10.to_f, 9.to_f / 10.to_f]
+    expect(Metrics.roc_auc(scores, [1, 1])).to be_nil
+    expect(Metrics.roc_auc(scores, [0, 0])).to be_nil
+    expect(Metrics.roc_curve(scores, [1, 1])).to be_nil
+    expect(Metrics.roc_auc(scores, [1])).to be_nil
+    expect(Metrics.roc_auc([], [])).to be_nil
+
 spec_summary

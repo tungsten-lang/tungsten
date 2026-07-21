@@ -26,6 +26,8 @@ df[:salary].quantile(75)             # => 3rd-quartile salary (linear interp)
 Metrics.rmse([2, 4, 6], [1, 5, 7])   # => 1
 Metrics.f1([1, 1, 0], [1, 0, 0])     # => 0.666667 (also precision / recall)
 Metrics.classification_report(preds, actual)  # multiclass P/R/F1 + macro/weighted avg
+Metrics.roc_auc(scores, actual)      # => 0.75  area under the ROC curve
+Metrics.roc_curve(scores, actual)    # => RocCurve: .fpr / .tpr / .thresholds / .auc
 
 v = Vector.new([1, 2, 3])
 v.dot(Vector.new([4, 5, 6]))         # => 32
@@ -75,6 +77,8 @@ lr.coefficients                      # => per-feature weights (floats)
 lr.intercept                         # => bias term (float)
 lr.predict([[0, 1], [4, 4]])         # => [0, 1]  (P >= 0.5 -> classes[1])
 lr.predict_proba([[0, 1], [4, 4]])   # => P(classes[1]) in (0, 1)
+Metrics.roc_auc(lr.predict_proba(x_test), y_test, lr.classes[1])
+                                     # => threshold-free ranking quality
 lr.classes                           # => two labels, first-seen order
 lr.score(x_test, y_test)             # => accuracy; labels feed Metrics.f1
                                      # opaque labels map to 0/1: fit two,
@@ -213,7 +217,21 @@ defaults to 0.1 / 1000 — the default rate is derived as `1.to_f/10.to_f`
 because a float literal corrupts call arguments, so a caller wanting a
 fractional rate derives it the same way. It shares LinearRegression's
 accepted input shapes, and `Math.exp`/`Math.log` agree bit-for-bit on
-both engines, so it is deterministic). A `Pipeline` whose LAST step is
+both engines, so it is deterministic). Those probabilities feed
+threshold-free evaluation: `Metrics.roc_auc(scores, actual, pos_label)`
+is the area under the ROC curve — the probability the model ranks a
+random positive above a random negative, crediting ties half (the
+Mann-Whitney U statistic), 1 perfect / 0.5 random / 0 inverted — and
+`Metrics.roc_curve` returns a `RocCurve` carrying the full step curve's
+`.fpr` / `.tpr` / `.thresholds` arrays (one point per distinct score plus
+a leading reject-all point, scikit-learn's `drop_intermediate=False`)
+plus its `.auc`; both take `scores` (a probabilistic classifier's
+`P(positive)`, e.g. `LogisticRegression#predict_proba`) and `actual`,
+with `pos_label` naming the positive class (default 1, the
+precision/recall convention), and return nil when a class is absent
+(AUC undefined) or the arrays are misaligned. `Metrics.auc(x, y)` is the
+underlying trapezoidal area under any curve, so `roc_auc == auc(fpr,
+tpr)`. A `Pipeline` whose LAST step is
 an estimator is fitted with `pipe.fit(df, y)` and answers
 `pipe.predict(x)` / `pipe.score(x, y)` by transforming through every
 step but the last. Model evaluation: `KFold` and `CrossValidation`

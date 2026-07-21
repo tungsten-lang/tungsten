@@ -15,6 +15,7 @@ use data_frame
 use group_by
 use metrics
 use classification
+use roc
 use rolling
 use join
 use pivot

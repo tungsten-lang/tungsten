@@ -94,6 +94,36 @@
   -> .confusion_matrix(predictions, actual)
     ConfusionMatrix.new(predictions, actual)
 
+  # --- ROC analysis (probabilistic classifier scores; see roc.w) ---
+
+  # ROC curve as a RocCurve: .fpr / .tpr arrays (one point per distinct
+  # score plus a leading reject-all point at the origin), .thresholds
+  # (descending score cuts) and .auc. scores are the model's P(positive)
+  # — e.g. LogisticRegression#predict_proba — and actual the true labels;
+  # pos_label names the positive class (default 1, matching precision /
+  # recall / f1). nil when the arrays are misaligned or empty, or when one
+  # class is absent (TPR / FPR undefined). Full curve, no intermediate
+  # points dropped, so integrating it gives the exact AUC.
+  -> .roc_curve(scores, actual, pos_label = 1)
+    RocCurve.from(scores, actual, pos_label)
+
+  # ROC AUC: the area under the ROC curve, a probabilistic classifier's
+  # threshold-free ranking quality — the probability it scores a random
+  # positive above a random negative (ties count half). 1 is perfect, 0.5
+  # random, 0 perfectly inverted. nil under the same conditions as
+  # roc_curve.
+  -> .roc_auc(scores, actual, pos_label = 1)
+    curve = RocCurve.from(scores, actual, pos_label)
+    out = nil
+    out = curve.auc if curve != nil
+    out
+
+  # Trapezoidal area under a curve given its x and y point arrays
+  # (scikit-learn's metrics.auc), integrated in point order:
+  # roc_auc = auc(curve.fpr, curve.tpr).
+  -> .auc(x, y)
+    RocCurve.trapezoid(x, y)
+
   # A ClassificationReport: per-class precision / recall / f1 / support
   # (each metric one-vs-rest, the binary metrics above per class), plus
   # overall accuracy and macro / support-weighted averages — scikit-learn's

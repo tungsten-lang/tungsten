@@ -207,6 +207,23 @@ use koala
     self.check("report total", rep.total, 6)
     self.check("report unknown nil", rep.precision(99) == nil, true)
     self.check("report df labels", rep.to_df.column_values(:label).join(","), "0,2,1,accuracy,macro avg,weighted avg")
+    # ROC analysis — scikit-learn roc_curve reference example (pos_label 2)
+    rscores = [1.to_f / 10.to_f, 4.to_f / 10.to_f, 35.to_f / 100.to_f, 8.to_f / 10.to_f]
+    ract = [1, 1, 2, 2]
+    rc = Metrics.roc_curve(rscores, ract, 2)
+    self.check("roc fpr", rc.fpr, "\[0, 0, 0.5, 0.5, 1\]")
+    self.check("roc tpr", rc.tpr, "\[0, 0.5, 0.5, 1, 1\]")
+    self.check("roc auc", rc.auc, "0.75")
+    self.check("roc_auc scalar", Metrics.roc_auc(rscores, ract, 2), "0.75")
+    # tied cross-class scores get half credit (Mann-Whitney) -> 0.875
+    tscores = [8.to_f / 10.to_f, 6.to_f / 10.to_f, 6.to_f / 10.to_f, 3.to_f / 10.to_f]
+    self.check("roc auc tie", Metrics.roc_auc(tscores, [1, 1, 0, 0]), "0.875")
+    # extremes and the auc(x, y) trapezoid helper
+    self.check("roc auc perfect", Metrics.roc_auc([1.to_f, 2.to_f, 8.to_f, 9.to_f], [0, 0, 1, 1]), "1")
+    self.check("roc auc inverted", Metrics.roc_auc([9.to_f, 8.to_f, 2.to_f, 1.to_f], [0, 0, 1, 1]), "0")
+    self.check("auc helper", Metrics.auc([0.to_f, 1.to_f], [0.to_f, 1.to_f]), "0.5")
+    self.check("roc nil one class", Metrics.roc_auc([1.to_f, 9.to_f], [1, 1]) == nil, true)
+    self.check("roc nil misaligned", Metrics.roc_curve([1.to_f, 9.to_f], [1]) == nil, true)
 
 t = KoalaSmoke.new
 t.run

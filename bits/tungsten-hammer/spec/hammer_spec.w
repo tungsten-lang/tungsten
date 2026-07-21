@@ -165,4 +165,58 @@ chunked_pipelined = chunked1 + "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
 t.eq("chunked framing stops at the terminator, not buffer end", Hammer.response_length(chunked_pipelined), 62)
 t.eq("chunked frame is shorter than the pipelined buffer", Hammer.response_length(chunked_pipelined) < chunked_pipelined.size, true)
 
+# ---- latency statistics (nearest-rank percentiles + summary) ----
+# All percentile/min/max inputs are ascending-sorted. Values below are hand
+# checked against the NIST nearest-rank definition: rank = ceil(p*N/100),
+# taking the 1-based sample at that rank.
+
+# Ten evenly-spaced samples (N=10): p*N/100 is a whole number, so the rank is
+# exactly p/10 and the value is that multiple of 10.
+deca = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+t.eq("p50 of 10 samples", Hammer.percentile(deca, 50), 50)     # ceil(500/100)=5 -> deca[4]
+t.eq("p90 of 10 samples", Hammer.percentile(deca, 90), 90)     # ceil(900/100)=9 -> deca[8]
+t.eq("p99 of 10 samples", Hammer.percentile(deca, 99), 100)    # ceil(990/100)=10 -> deca[9]
+t.eq("p25 of 10 samples", Hammer.percentile(deca, 25), 30)     # ceil(250/100)=3 -> deca[2]
+t.eq("p75 of 10 samples", Hammer.percentile(deca, 75), 80)     # ceil(750/100)=8 -> deca[7]
+t.eq("p0 clamps to the minimum", Hammer.percentile(deca, 0), 10)
+t.eq("p100 clamps to the maximum", Hammer.percentile(deca, 100), 100)
+t.eq("p above 100 clamps to the maximum", Hammer.percentile(deca, 150), 100)
+t.eq("negative percentile clamps to the minimum", Hammer.percentile(deca, -5), 10)
+t.eq("min of sorted samples", Hammer.stat_min(deca), 10)
+t.eq("max of sorted samples", Hammer.stat_max(deca), 100)
+t.eq("sum of samples", Hammer.stat_sum(deca), 550)
+t.eq("mean of samples", Hammer.stat_mean(deca), 55)
+
+# Seven samples (N=7): ceil rounds the fractional ranks up. p50 -> rank 4 = 35
+# (the true median of an odd count), p90/p99 both -> rank 7 = 65.
+hepta = [5, 15, 25, 35, 45, 55, 65]
+t.eq("p50 of 7 samples is the median", Hammer.percentile(hepta, 50), 35)  # ceil(350/100)=4
+t.eq("p90 of 7 samples rounds up", Hammer.percentile(hepta, 90), 65)      # ceil(630/100)=7
+t.eq("p99 of 7 samples rounds up", Hammer.percentile(hepta, 99), 65)      # ceil(693/100)=7
+t.eq("mean of 7 samples", Hammer.stat_mean(hepta), 35)                    # 245/7
+
+# Even count (N=4): nearest-rank p50 is the lower-middle sample (20), not the
+# interpolated 25 — this is the defining behavior of the nearest-rank method.
+quad = [10, 20, 30, 40]
+t.eq("nearest-rank p50 of even count is lower-middle", Hammer.percentile(quad, 50), 20)  # ceil(200/100)=2
+t.eq("p25 of 4 samples", Hammer.percentile(quad, 25), 10)  # ceil(100/100)=1
+t.eq("p75 of 4 samples", Hammer.percentile(quad, 75), 30)  # ceil(300/100)=3
+
+# Single sample: every percentile is that one value.
+one = [42]
+t.eq("p50 of a single sample", Hammer.percentile(one, 50), 42)
+t.eq("p99 of a single sample", Hammer.percentile(one, 99), 42)
+t.eq("mean of a single sample", Hammer.stat_mean(one), 42)
+
+# Mean truncates toward zero (integer division): 5 / 3 == 1.
+t.eq("mean truncates to an integer", Hammer.stat_mean([1, 2, 2]), 1)
+
+# Empty sample: all summaries are 0, so callers need no emptiness guard.
+empty = []
+t.eq("percentile of empty sample is 0", Hammer.percentile(empty, 50), 0)
+t.eq("min of empty sample is 0", Hammer.stat_min(empty), 0)
+t.eq("max of empty sample is 0", Hammer.stat_max(empty), 0)
+t.eq("sum of empty sample is 0", Hammer.stat_sum(empty), 0)
+t.eq("mean of empty sample is 0", Hammer.stat_mean(empty), 0)
+
 t.done

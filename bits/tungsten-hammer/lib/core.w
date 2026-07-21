@@ -252,6 +252,56 @@
       return 0 if chunk_end > length
       pos = chunk_end
 
+  # ---- latency statistics ----
+  # Per-request latencies (integer tick/nanosecond counts) are summarized into
+  # the distribution a benchmark reports (min/mean/max + p50/p90/p99), which the
+  # man page advertises. All of `percentile`, `stat_min`, and `stat_max` take an
+  # ALREADY-SORTED ascending sample array; `stat_sum`/`stat_mean` accept any
+  # order. Every helper returns 0 for an empty sample so callers need no guard.
+
+  # Nearest-rank percentile (NIST convention, as used by wrk-style reporters):
+  # for percentile p in [0,100] over N sorted samples the rank is ceil(p*N/100)
+  # and the p-th percentile is the 1-based sample at that rank, clamped to the
+  # sample range. p<=0 yields the minimum and p>=100 the maximum. Rank is
+  # computed with integer arithmetic — ceil(p*N/100) == (p*N + 99) / 100 — so the
+  # result is exact with no floating-point rounding.
+  -> .percentile(sorted, p)
+    n = sorted.size
+    return 0 if n == 0
+    return sorted[0] if p <= 0
+    return sorted[n - 1] if p >= 100
+    rank = (p * n + 99) / 100 ## i64
+    rank = 1 if rank < 1
+    rank = n if rank > n
+    sorted[rank - 1]
+
+  # Smallest sample (first element of an ascending-sorted array).
+  -> .stat_min(sorted)
+    return 0 if sorted.size == 0
+    sorted[0]
+
+  # Largest sample (last element of an ascending-sorted array).
+  -> .stat_max(sorted)
+    n = sorted.size
+    return 0 if n == 0
+    sorted[n - 1]
+
+  # Sum of all samples (order-independent).
+  -> .stat_sum(samples)
+    n = samples.size
+    total = 0 ## i64
+    i = 0 ## i64
+    while i < n
+      total += samples[i]
+      i += 1
+    total
+
+  # Arithmetic mean, truncated to an integer (order-independent).
+  -> .stat_mean(samples)
+    n = samples.size
+    return 0 if n == 0
+    stat_sum(samples) / n
+
   -> .tungsten_connection(host, port, request_batch, pipeline, duration, total, errors) (string i64 string i64 i64)
     deadline_ticks = ccall_nobox("__w_deadline_ticks_after_seconds", duration)
     local_total = 0 ## i64

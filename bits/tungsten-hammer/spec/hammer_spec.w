@@ -273,6 +273,46 @@ t.eq("sample stddev of two", Hammer.stat_stddev_sample(two), 7)      # √50 = 7
 t.eq("sample stddev needs two samples", Hammer.stat_stddev_sample(one), 0)
 t.eq("sample stddev of empty is 0", Hammer.stat_stddev_sample(empty), 0)
 
+# ---- latency histogram (fixed-bucket distribution) ----
+# bucket_index returns the first index i with value < bounds[i] (half-open
+# [lower, upper) buckets, so a value equal to a boundary lands in the upper
+# bucket), or bounds.size for a value at or above every cut point. histogram
+# returns one count per bucket (bounds.size + 1 of them), and the counts always
+# sum to samples.size. Every reference value is hand-classified against `edges`.
+edges = [10, 50, 100]   # 4 buckets: <10, [10,50), [50,100), >=100
+
+# bucket_index — each value hand-placed against the edges above.
+t.eq("below the first edge is bucket 0", Hammer.bucket_index(5, edges), 0)
+t.eq("value equal to an edge lands in the upper bucket", Hammer.bucket_index(10, edges), 1)
+t.eq("value inside the first band is bucket 1", Hammer.bucket_index(25, edges), 1)
+t.eq("value equal to the middle edge is bucket 2", Hammer.bucket_index(50, edges), 2)
+t.eq("value just under the last edge is bucket 2", Hammer.bucket_index(99, edges), 2)
+t.eq("value equal to the last edge is the final bucket", Hammer.bucket_index(100, edges), 3)
+t.eq("value above every edge is the final bucket", Hammer.bucket_index(500, edges), 3)
+t.eq("zero falls in bucket 0", Hammer.bucket_index(0, edges), 0)
+# With no edges every value shares the single bucket 0.
+t.eq("no edges puts every value in bucket 0", Hammer.bucket_index(999, []), 0)
+
+# histogram — counts per bucket, length bounds.size + 1.
+mixed = [5, 10, 25, 50, 99, 100, 500]
+t.eq("histogram counts per bucket", Hammer.histogram(mixed, edges), [1, 2, 2, 2])
+# The count vector sums to the sample count (every sample lands in one bucket).
+t.eq("histogram counts sum to N", Hammer.stat_sum(Hammer.histogram(mixed, edges)), 7)
+# Order-independent: the same multiset in any order yields the same counts.
+reordered = [500, 100, 99, 50, 25, 10, 5]
+t.eq("histogram is order-independent", Hammer.histogram(reordered, edges), [1, 2, 2, 2])
+# No edges: a single bucket holding every sample (deca has ten).
+t.eq("histogram with no edges is one bucket of all samples", Hammer.histogram(deca, []), [10])
+# Empty sample: every bucket is 0, and the length is still bounds.size + 1.
+t.eq("histogram of empty samples is all-zero buckets", Hammer.histogram(empty, edges), [0, 0, 0, 0])
+# A boundary value lands in the upper bucket, not the lower one.
+t.eq("boundary sample lands in the upper bucket", Hammer.histogram([10, 20], [20]), [1, 1])
+# All samples below a single high edge fill the low bucket.
+t.eq("all samples below one edge fill the low bucket", Hammer.histogram(quad, [100]), [4, 0])
+# A realistic microsecond latency histogram: <100us, 100us-1ms, 1ms-10ms, >=10ms.
+latencies = [50, 150, 250, 1500, 8000, 25000]
+t.eq("microsecond latency histogram", Hammer.histogram(latencies, [100, 1000, 10000]), [1, 2, 2, 1])
+
 # ---- HTTP status-line classification ----
 # status_code reads the token after the first space of the status line
 # (RFC 7230 §3.1.2), bounded by the next space or CR. Reference values are the

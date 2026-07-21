@@ -366,6 +366,50 @@
   -> .stat_stddev_sample(samples)
     isqrt(stat_variance_sample(samples))
 
+  # ---- latency histogram (fixed-bucket distribution) ----
+  # Percentiles and stddev summarize the latency distribution as scalars; a
+  # histogram shows its *shape* — how many requests landed in each latency band
+  # — the way vegeta's histogram reporter (`-buckets "[0,10ms,50ms,100ms]"`) and
+  # the latency distributions of hey/bombardier do. Given an ascending array of
+  # B interior cut points, every sample is classified into one of B+1 half-open
+  # [lower, upper) buckets: bucket 0 is `sample < bounds[0]`, bucket i (for
+  # 1 <= i <= B-1) is `bounds[i-1] <= sample < bounds[i]`, and the final bucket B
+  # is `sample >= bounds[B-1]`. A sample equal to a boundary lands in the upper
+  # bucket. Each sample falls in exactly one bucket, so the returned counts
+  # always sum to samples.size (Σ counts == N — composable with stat_sum). The
+  # scan is order-independent and reads each sample once; empty bounds yield a
+  # single bucket holding every sample.
+
+  # Index of the bucket a single value falls in, given ascending interior cut
+  # points: the first index i with value < bounds[i], or bounds.size when the
+  # value is at or above every cut point (the final, unbounded bucket).
+  -> .bucket_index(value, bounds)
+    b = bounds.size
+    i = 0 ## i64
+    while i < b
+      return i if value < bounds[i]
+      i += 1
+    b
+
+  # Per-bucket counts for `samples` over ascending cut points `bounds`: an array
+  # of bounds.size + 1 integers, counts[i] being the number of samples in bucket
+  # i. Built with a literal + push (Array.new(n, fill) is unbound in a thin
+  # `use` program), then accumulated in a single pass over the samples.
+  -> .histogram(samples, bounds)
+    counts = []
+    nb = bounds.size + 1 ## i64
+    j = 0 ## i64
+    while j < nb
+      counts.push(0)
+      j += 1
+    n = samples.size
+    i = 0 ## i64
+    while i < n
+      idx = bucket_index(samples[i], bounds) ## i64
+      counts[idx] = counts[idx] + 1
+      i += 1
+    counts
+
   # ---- HTTP status-line classification ----
   # A benchmark must distinguish responses the server actually served from ones
   # it rejected: a load test against an endpoint returning 500 to every request

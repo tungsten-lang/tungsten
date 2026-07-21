@@ -14,6 +14,7 @@ use sidemap
 use analyzer
 use perf_script
 use xctrace_xml
+use sample_collapse
 use builder
 use sampler
 use flame_svg
@@ -93,6 +94,7 @@ fl_build_only  = opts.flag?("build_only")
 fl_silent      = opts.flag?("silent")
 fl_diff        = opts.flag?("diff")
 fl_hot         = opts.flag?("hot")
+fl_collapse_sample = opts.flag?("collapse_sample")
 fl_speedscope  = opts.flag?("speedscope")
 fl_files       = opts.args
 fl_passthrough = opts.passthrough
@@ -148,6 +150,39 @@ if fl_hot
     combined = combined + ftext
     hi = hi + 1
   << Tungsten:Flame:HotFrames.report(combined, fl_top, !fl_silent)
+  exit(0)
+
+# Collapse mode: convert macOS `sample(1)` / `spindump` call-graph output into
+# folded stacks (`flame --collapse-sample sample.txt`). macOS's built-in
+# profiler is the one every Mac already has — no setup, no template — so this
+# complements the internal Linux `perf script` and Instruments xctrace parsers
+# with the profiler most reachable to a developer. Like --diff / --hot, a pure
+# text mode (no compile, no profiling); several files collapse and concatenate
+# (downstream views dedupe). Emits folded text — pipe it into any other view
+# (`flame --collapse-sample x.txt | ...`, or `-o out.folded`).
+if fl_collapse_sample
+  if fl_files.size < 1
+    << "tungsten flame --collapse-sample: need a `sample`/`spindump` output file"
+    exit(1)
+  combined = ""
+  ci = 0
+  while ci < fl_files.size
+    stext = read_file(fl_files[ci])
+    if stext == nil
+      << "tungsten flame: cannot read " + fl_files[ci]
+      exit(1)
+    folded_one = Tungsten:Flame:SampleCollapse.collapse(stext)
+    if folded_one != ""
+      if combined != ""
+        combined = combined + "\n"
+      combined = combined + folded_one
+    ci = ci + 1
+  if fl_output != ""
+    write_file(fl_output, combined)
+    if !fl_silent
+      << "wrote folded stacks: " + fl_output
+  else
+    << combined
   exit(0)
 
 # Filter mode: reshape one folded profile before viewing it — include

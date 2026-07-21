@@ -6,6 +6,7 @@ use spec
 use builder
 use perf_script
 use xctrace_xml
+use sample_collapse
 use sidemap
 use analyzer
 use flame_svg
@@ -426,5 +427,66 @@ describe "FlameFilter" ->
     expect(Tungsten:Flame:FlameFilter.stack_count("a;b 3\nc;d 4")).to eq(2)
     expect(Tungsten:Flame:FlameFilter.stack_count("")).to eq(0)
     expect(Tungsten:Flame:FlameFilter.keep("", "x")).to eq("")
+
+describe "SampleCollapse" ->
+  it "extracts a symbol name from decorated sample and spindump frames" ->
+    expect(Tungsten:Flame:SampleCollapse.extract_symbol("start (in dyld) + 462  \[0x18a0b5f50\]")).to eq("start")
+    expect(Tungsten:Flame:SampleCollapse.extract_symbol("start + 462 (dyld + 25627) \[0x100\]")).to eq("start")
+    expect(Tungsten:Flame:SampleCollapse.extract_symbol("Thread_2b0e   DispatchQueue_1: com.apple.main-thread  (serial)")).to eq("Thread_2b0e")
+    expect(Tungsten:Flame:SampleCollapse.extract_symbol("plainname")).to eq("plainname")
+
+  it "measures indent depth from leading spaces and tree markers" ->
+    expect(Tungsten:Flame:SampleCollapse.leading_indent("    + 2276 start")).to eq(6)
+    expect(Tungsten:Flame:SampleCollapse.leading_indent("2276 main")).to eq(0)
+    expect(Tungsten:Flame:SampleCollapse.leading_indent("        30 work")).to eq(8)
+
+  it "recognizes only non-empty decimal count runs" ->
+    expect(Tungsten:Flame:SampleCollapse.all_digits?("2276")).to eq(true)
+    expect(Tungsten:Flame:SampleCollapse.all_digits?("22a")).to eq(false)
+    expect(Tungsten:Flame:SampleCollapse.all_digits?("")).to eq(false)
+    expect(Tungsten:Flame:SampleCollapse.is_digit?("7")).to eq(true)
+    expect(Tungsten:Flame:SampleCollapse.is_digit?("")).to eq(false)
+
+  it "collapses a sample call graph into per-leaf folded stacks" ->
+    lines = []
+    lines.push("Call graph:")
+    lines.push("    2276 Thread_2b0e   DispatchQueue_1: com.apple.main-thread  (serial)")
+    lines.push("    + 2276 start (in dyld) + 462  \[0x1\]")
+    lines.push("    +   2276 main (in demo) + 40  \[0x2\]")
+    lines.push("    +     2000 compute (in demo) + 20  \[0x3\]")
+    lines.push("    +       2000 inner (in demo) + 8  \[0x4\]")
+    lines.push("    +     276 helper (in demo) + 12  \[0x5\]")
+    lines.push("Total number in stack (recursive counted multiple, when >=5):")
+    folded = Tungsten:Flame:SampleCollapse.collapse(lines.join("\n"))
+    expect(folded).to eq("Thread_2b0e;start;main;compute;inner 2000\nThread_2b0e;start;main;helper 276")
+
+  it "derives self time as inclusive minus children, emitting parent-self stacks" ->
+    lines = []
+    lines.push("  12 main (in x) + 0  \[0x1\]")
+    lines.push("    6 foo (in x) + 0  \[0x2\]")
+    lines.push("    4 bar (in x) + 0  \[0x3\]")
+    folded = Tungsten:Flame:SampleCollapse.collapse(lines.join("\n"))
+    expect(folded).to eq("main 2\nmain;bar 4\nmain;foo 6")
+
+  it "separates threads as distinct folded roots" ->
+    lines = []
+    lines.push("Call graph:")
+    lines.push("    30 Thread_1   DispatchQueue_1: main  (serial)")
+    lines.push("    + 30 start (in dyld) + 0  \[0x1\]")
+    lines.push("    +   30 work (in x) + 0  \[0x2\]")
+    lines.push("    5 Thread_2")
+    lines.push("    + 5 spin (in y) + 0  \[0x3\]")
+    lines.push("Total number in stack (recursive counted multiple, when >=5):")
+    folded = Tungsten:Flame:SampleCollapse.collapse(lines.join("\n"))
+    expect(folded).to eq("Thread_1;start;work 30\nThread_2;spin 5")
+
+  it "stops at trailing sections and treats empty input as no stacks" ->
+    lines = []
+    lines.push("Call graph:")
+    lines.push("  5 foo (in x) + 0  \[0x1\]")
+    lines.push("Binary Images:")
+    lines.push("  0x1 - 0x2 demo (in demo)")
+    expect(Tungsten:Flame:SampleCollapse.collapse(lines.join("\n"))).to eq("foo 5")
+    expect(Tungsten:Flame:SampleCollapse.collapse("")).to eq("")
 
 spec_summary

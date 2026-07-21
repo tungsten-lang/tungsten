@@ -84,6 +84,87 @@
       i += 1
     total / predictions.size.to_f
 
+  # Median absolute error — the median of the absolute residuals,
+  # scikit-learn's median_absolute_error. The mean/median/max of the
+  # absolute-residual distribution are mae / median_absolute_error /
+  # max_error respectively; the median is the robust one, unmoved by a
+  # single large residual, so it reports typical error where mae is
+  # dragged up by outliers.
+  -> .median_absolute_error(predictions, actual)
+    resid = []
+    i = 0
+    predictions.each -> (p)
+      d = p.to_f - actual[i].to_f
+      d = 0.to_f - d if d < 0
+      resid.push(d)
+      i += 1
+    Stats.median(resid)
+
+  # Max error — the largest absolute residual, scikit-learn's max_error:
+  # the worst single-point miss, a hard upper bound on prediction error.
+  # Always >= 0; 0 exactly when every prediction is exact.
+  -> .max_error(predictions, actual)
+    worst = 0.to_f
+    i = 0
+    predictions.each -> (p)
+      d = p.to_f - actual[i].to_f
+      d = 0.to_f - d if d < 0
+      worst = d if d > worst
+      i += 1
+    worst
+
+  # Mean absolute percentage error (MAPE) — scikit-learn's
+  # mean_absolute_percentage_error: the mean of |actual - pred| / |actual|,
+  # a scale-free RELATIVE error (a fraction, not a percent; multiply by 100
+  # for a percentage). Each actual is guarded by a small eps = 1e-15 so a
+  # zero target does not divide by zero — the term explodes instead,
+  # matching scikit-learn (which guards with machine epsilon), so MAPE is
+  # only meaningful when the targets stay away from zero. Where mse / mae
+  # weight absolute error, MAPE weights error relative to the target's
+  # magnitude, so a miss of 1 on a target of 2 counts far more than the
+  # same miss on a target of 100.
+  -> .mape(predictions, actual)
+    kilo = 1000.to_f
+    eps = 1.to_f / (kilo * kilo * kilo * kilo * kilo)
+    total = 0.to_f
+    i = 0
+    predictions.each -> (p)
+      denom = actual[i].to_f
+      denom = 0.to_f - denom if denom < 0
+      denom = eps if denom < eps
+      d = p.to_f - actual[i].to_f
+      d = 0.to_f - d if d < 0
+      total += d / denom
+      i += 1
+    total / predictions.size.to_f
+
+  # Explained variance score — scikit-learn's explained_variance_score:
+  #
+  #     1 - Var(actual - pred) / Var(actual)
+  #
+  # r2's mean-corrected sibling. Where r2 divides the raw residual sum of
+  # squares by the total, explained variance divides the residual VARIANCE
+  # (which subtracts the mean residual first) by the target variance, so it
+  # ignores a constant bias in the predictions: the two are equal exactly
+  # when the mean residual is zero, and explained variance exceeds r2 when a
+  # systematic offset inflates r2's residual term. 1 is perfect. When the
+  # target is constant (Var(actual) = 0) the score is 1 if the residual
+  # variance is also 0, else 0 — scikit-learn's convention.
+  -> .explained_variance(predictions, actual)
+    resid = []
+    i = 0
+    predictions.each -> (p)
+      resid.push(actual[i].to_f - p.to_f)
+      i += 1
+    numer = Stats.var(resid)
+    denom = Stats.var(actual)
+    out = 1.to_f
+    if denom == 0
+      out = 0.to_f if numer != 0
+    else
+      out = 1.to_f - numer / denom
+    out
+
   # --- Multiclass / report (see classification.w) ---
 
   # Confusion matrix as a ConfusionMatrix: .matrix[i][j] counts rows with

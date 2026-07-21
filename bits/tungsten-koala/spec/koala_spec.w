@@ -118,6 +118,44 @@ describe "Metrics" ->
     expect(Metrics.precision([0, 0], [1, 0]).to_s).to eq("0")
     expect(Metrics.f1([0, 0], [0, 0]).to_s).to eq("0")
 
+describe "Metrics regression family" ->
+  # koala takes (predictions, actual); scikit-learn's y_pred / y_true.
+  # Shared example: pred = [2,4,6] vs actual = [1,5,7], residuals
+  # actual-pred = [-1,1,1].
+  it "scores median_absolute_error, max_error and MAPE" ->
+    pred = [2, 4, 6]
+    act = [1, 5, 7]
+    # |residuals| = [1,1,1]: median 1, max 1.
+    expect(Metrics.median_absolute_error(pred, act).to_s).to eq("1")
+    expect(Metrics.max_error(pred, act).to_s).to eq("1")
+    # MAPE = mean(1/1, 1/5, 1/7) = 0.447619 (scikit-learn reference).
+    expect(Metrics.mape(pred, act).to_s).to eq("0.447619")
+
+  it "makes the median robust and max_error the worst miss" ->
+    # |residuals| = [1,2,3,4,100]: mae is dragged to 22 by the outlier,
+    # the median stays at the typical 3, max_error catches the 100.
+    pred = [0, 0, 0, 0, 0]
+    act = [1, 2, 3, 4, 100]
+    expect(Metrics.mae(pred, act).to_s).to eq("22")
+    expect(Metrics.median_absolute_error(pred, act).to_s).to eq("3")
+    expect(Metrics.max_error(pred, act).to_s).to eq("100")
+
+  it "scores explained_variance as r2's mean-corrected sibling" ->
+    # residuals [-1,1,1] have a nonzero mean, so explained variance
+    # (0.857143, scikit-learn) exceeds r2 (0.839286): it discounts the
+    # constant offset r2's residual sum of squares still charges for.
+    expect(Metrics.explained_variance([2, 4, 6], [1, 5, 7]).to_s).to eq("0.857143")
+    expect(Metrics.r2([2, 4, 6], [1, 5, 7]).to_s).to eq("0.839286")
+    # When residuals are mean-centered ([1,0,-1] here) the two coincide.
+    expect(Metrics.explained_variance([1, 4, 7], [2, 4, 6]).to_s).to eq("0.75")
+    expect(Metrics.r2([1, 4, 7], [2, 4, 6]).to_s).to eq("0.75")
+
+  it "is exact for a perfect fit" ->
+    expect(Metrics.median_absolute_error([1, 2, 3], [1, 2, 3]).to_s).to eq("0")
+    expect(Metrics.max_error([1, 2, 3], [1, 2, 3]).to_s).to eq("0")
+    expect(Metrics.mape([1, 2, 3], [1, 2, 3]).to_s).to eq("0")
+    expect(Metrics.explained_variance([1, 2, 3], [1, 2, 3]).to_s).to eq("1")
+
 describe "ConfusionMatrix" ->
   # pred vs actual, three classes. Rows are ACTUAL, columns PREDICTED,
   # classes in first-seen order over actual (0, 2, 1) then predictions:

@@ -23,7 +23,11 @@ df.pivot(:dept, :name, :salary)      # => pivot table, agg defaults to :sum
 df.describe                          # => summary frame: count/mean/std/min/25%/50%/75%/max
 df[:salary].quantile(75)             # => 3rd-quartile salary (linear interp)
 
-Metrics.rmse([2, 4, 6], [1, 5, 7])   # => 1
+Metrics.rmse([2, 4, 6], [1, 5, 7])   # => 1     (also mse / mae / r2)
+Metrics.explained_variance(p, actual)# => r2's mean-corrected sibling
+Metrics.mape(p, actual)              # => mean absolute PERCENTAGE error
+Metrics.median_absolute_error(p, a)  # => median |residual| (outlier-robust)
+Metrics.max_error(p, actual)         # => largest single |residual|
 Metrics.f1([1, 1, 0], [1, 0, 0])     # => 0.666667 (also precision / recall)
 Metrics.classification_report(preds, actual)  # multiclass P/R/F1 + macro/weighted avg
 Metrics.roc_auc(scores, actual)      # => 0.75  area under the ROC curve

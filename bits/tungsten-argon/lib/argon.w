@@ -31,17 +31,28 @@
 #   opts.args                 # => \["file.w", "arg1"]
 #   opts.command              # => "compile" (first positional before --)
 #
+# Operands named in the SYNOPSIS are reachable by name and arrive typed. Given
+# "SYNOPSIS: build \[options] TARGET \[OUTPUT] \[FILE ...]":
+#
+#   opts.positional(:target)  # => "app"            (required operand)
+#   opts.positional(:output)  # => "out.bin" or nil (\[OPTIONAL] operand)
+#   opts.positional(:file)    # => \["a", "b"] or [] (NAME... variadic operand)
+#   opts.missing_arguments    # => \["TARGET"]       (opt-in; not part of valid?)
+#
 
 + Argon
   ro :name
   ro :manpage
   ro :option_defs
+  ro :positional_defs
 
   # option_defs: array of { short:, long:, key:, takes_value:, negatable:, description: }
+  # positional_defs: array of { name:, key:, required:, variadic: } from the SYNOPSIS
 
   -> new(@manpage)
     @name = extract_name(manpage)
     @option_defs = parse_manpage(manpage)
+    @positional_defs = parse_synopsis_positionals(manpage)
 
   # Parse argv against the extracted option definitions.
   # Returns an Argon:Result.
@@ -376,6 +387,161 @@
       refs["options"] = true
 
     refs
+
+  # Parse the operands named in the SYNOPSIS into ordered positional defs. Uses
+  # the first non-empty usage line under the SYNOPSIS heading (the canonical
+  # form). Returns [] when there is no SYNOPSIS.
+  -> parse_synopsis_positionals(text)
+    lines = text.split("\n")
+    in_synopsis = false
+    usage = nil
+    i = 0
+
+    while i < lines.size()
+      line = lines[i]
+      heading = section_heading(line)
+
+      if heading && heading.upcase() == "SYNOPSIS"
+        in_synopsis = true
+        i = i + 1
+        next
+
+      if in_synopsis && heading
+        break
+
+      if in_synopsis && usage == nil
+        stripped = line.strip()
+        if stripped.size() > 0
+          usage = stripped
+      i = i + 1
+
+    if usage == nil
+      return []
+    positionals_from_usage(usage)
+
+  # Turn a usage line ("build \[options] TARGET \[OUTPUT] \[FILE ...]") into
+  # ordered positional defs. The first group is the program name and is skipped;
+  # option placeholders (\[options], \[--], anything starting with "-") are
+  # skipped; a lone "..." group makes the previous operand variadic.
+  -> positionals_from_usage(usage)
+    groups = synopsis_groups(usage)
+    defs = []
+    gi = 0
+
+    while gi < groups.size()
+      g = groups[gi].strip()
+      if gi == 0
+        gi = gi + 1
+        next
+      if g == "..."
+        if defs.size() > 0
+          last = defs[defs.size() - 1]
+          last[:variadic] = true
+        gi = gi + 1
+        next
+      d = synopsis_positional_def(g)
+      if d != nil
+        defs.push(d)
+      gi = gi + 1
+
+    defs
+
+  # Split a usage line into groups, keeping a bracketed operand ("\[FILE ...]")
+  # whole across the space it contains. Brackets do not nest in practice, so a
+  # single open/closed flag suffices.
+  -> synopsis_groups(usage)
+    parts = usage.split(" ")
+    groups = []
+    buf = ""
+    open = false
+    i = 0
+
+    while i < parts.size()
+      part = parts[i]
+      if part.size() > 0
+        if buf.size() > 0
+          buf = buf + " " + part
+        else
+          buf = part
+
+        if open
+          if part.ends_with?("]") || part.ends_with?(">")
+            open = false
+        else
+          starts_bracket = part.starts_with?("\[") || part.starts_with?("<")
+          closes = part.ends_with?("]") || part.ends_with?(">")
+          if starts_bracket && !closes
+            open = true
+
+        if !open
+          groups.push(buf)
+          buf = ""
+      i = i + 1
+
+    if buf.size() > 0
+      groups.push(buf)
+    groups
+
+  # Interpret one synopsis group into a positional def, or nil when it is an
+  # option placeholder / separator rather than an operand. "\[NAME]" is optional,
+  # "<NAME>" required, "NAME..." (or "\[NAME ...]") variadic.
+  -> synopsis_positional_def(g)
+    raw = g.strip()
+    optional = false
+
+    if raw.starts_with?("\[")
+      optional = true
+      if raw.ends_with?("]")
+        raw = raw.slice(1, raw.size() - 2)
+      else
+        raw = raw.slice(1, raw.size() - 1)
+      raw = raw.strip()
+    elsif raw.starts_with?("<")
+      if raw.ends_with?(">")
+        raw = raw.slice(1, raw.size() - 2)
+      else
+        raw = raw.slice(1, raw.size() - 1)
+      raw = raw.strip()
+
+    variadic = false
+    if raw.ends_with?("...")
+      variadic = true
+      raw = raw.slice(0, raw.size() - 3).strip()
+
+    if raw.starts_with?("-")
+      return nil
+    if option_placeholder?(raw)
+      return nil
+
+    sp = raw.index(" ")
+    if sp
+      raw = raw.slice(0, sp)
+    if raw.size() == 0
+      return nil
+
+    { name: raw, key: positional_key(raw), required: !optional, variadic: variadic }
+
+  # Well-known "not an operand" placeholders that appear where operands do.
+  -> option_placeholder?(raw)
+    low = raw.downcase()
+    if low == "options"
+      return true
+    if low == "option"
+      return true
+    if low == "opts"
+      return true
+    if low == "flags"
+      return true
+    if low == "flag"
+      return true
+    if low == "--"
+      return true
+    false
+
+  # Normalize an operand name to a lookup key (downcase, "-" → "_"), matching
+  # how option long-names become keys.
+  -> positional_key(name)
+    replace_all(name.downcase(), "-", "_")
 
   # Auto-cast a string value: "123" → 123, "3.14" → 3.14, else string
   -> cast(val)
@@ -871,6 +1037,80 @@
   # Everything after -- (passed through to child processes)
   -> passthrough
     @rest
+
+  # ---- Named positional arguments (from the SYNOPSIS) ----
+  #
+  # The SYNOPSIS line names each operand: "build \[options] TARGET \[OUTPUT]
+  # \[FILE ...]" declares `target` (required), `output` (optional), and a
+  # variadic `file`. Access is by position — fixed operands consume one argv
+  # positional each, left to right, and the variadic operand (conventionally
+  # last) takes the rest. Values are cast with the same rules as option values,
+  # so a numeric operand arrives typed.
+
+  # An operand by name. Returns the casted value; for a variadic operand, the
+  # casted list of all remaining positionals ([] when none); nil for a missing
+  # non-variadic operand or an unknown name.
+  -> positional(name)
+    key = name.to_s()
+    defs = @parser.positional_defs
+    idx = 0
+    i = 0
+    while i < defs.size()
+      d = defs[i]
+      if d[:key] == key
+        if d[:variadic]
+          if idx < @args.size()
+            return cast_positionals(@args.slice(idx, @args.size() - idx))
+          return []
+        if idx < @args.size()
+          return @parser.cast(@args[idx])
+        return nil
+      if d[:variadic]
+        idx = @args.size()
+      else
+        idx = idx + 1
+      i = i + 1
+    nil
+
+  # The declared operand names, in SYNOPSIS order (deterministic).
+  -> positional_names
+    names = []
+    defs = @parser.positional_defs
+    i = 0
+    while i < defs.size()
+      names.push(defs[i][:key])
+      i = i + 1
+    names
+
+  # Required operands the SYNOPSIS declares but argv did not supply, by name and
+  # in declaration order. Opt-in like `errors`, and deliberately kept out of
+  # `valid?`: argon's parsing stays lenient, so enforcing operands is the
+  # caller's choice. A variadic required operand is missing only when no trailing
+  # argument remains for it.
+  -> missing_arguments
+    missing = []
+    defs = @parser.positional_defs
+    consumed = 0
+    supplied = @args.size()
+    i = 0
+    while i < defs.size()
+      d = defs[i]
+      if d[:required] && consumed >= supplied
+        missing.push(d[:name])
+      if d[:variadic]
+        consumed = supplied
+      else
+        consumed = consumed + 1
+      i = i + 1
+    missing
+
+  -> cast_positionals(list)
+    out = []
+    j = 0
+    while j < list.size()
+      out.push(@parser.cast(list[j]))
+      j = j + 1
+    out
 
   # ---- Validation ----
   #

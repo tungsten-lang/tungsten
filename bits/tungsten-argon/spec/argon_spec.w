@@ -577,4 +577,114 @@ t.eq("dashed long-name conflict is caught", opts.errors.include?("mutually exclu
 opts = cli6.parse(["--verbose", "--quiet", "--bogus"])
 t.eq("conflict and unknown-option errors accumulate", opts.errors.size(), 2)
 
+# ---- Named positional arguments (from the SYNOPSIS) ----
+# The SYNOPSIS line names each operand; argon exposes them by name with typed
+# access. Bracketed "\[NAME]" operands are optional, "<NAME>" required, and a
+# trailing "NAME..." (or "\[NAME ...]") is variadic. Values are cast like option
+# values, so a numeric operand arrives typed. Fixed operands consume one argv
+# positional each, left to right; the variadic operand takes the rest.
+
+MAN7 = "NAME
+    build -- exercise named positional arguments
+
+SYNOPSIS
+    build \[options] TARGET \[OUTPUT] \[FILE ...]
+
+OPTIONS
+    -v, --verbose
+        Verbose output.
+
+    -o, --opt VALUE
+        Some option that takes a value.
+"
+
+cli7 = Argon.new(MAN7)
+
+# Extraction from the SYNOPSIS.
+pdefs = cli7.positional_defs
+t.eq("synopsis declares three operands", pdefs.size(), 3)
+t.eq("[options] placeholder is not an operand", pdefs[0][:name], "TARGET")
+t.eq("first operand keyed from its synopsis name", pdefs[0][:key], "target")
+t.eq("bare operand is required", pdefs[0][:required], true)
+t.eq("bracketed operand is optional", pdefs[1][:required], false)
+t.eq("bracketed operand is not variadic", pdefs[1][:variadic], false)
+t.eq("trailing ellipsis operand is variadic", pdefs[2][:variadic], true)
+t.eq("variadic operand keyed from its name", pdefs[2][:key], "file")
+
+# Named access, order-mapped.
+opts = cli7.parse(["app", "out.bin", "a.txt", "b.txt"])
+t.eq("first operand by name", opts.positional(:target), "app")
+t.eq("second operand by name", opts.positional(:output), "out.bin")
+t.eq("variadic operand returns the rest", opts.positional(:file), ["a.txt", "b.txt"])
+
+# Typed casting of operands.
+opts = cli7.parse(["42"])
+t.eq("numeric operand is cast typed", opts.positional(:target), 42)
+
+# Absent operands.
+opts = cli7.parse(["app"])
+t.eq("absent optional operand is nil", opts.positional(:output) == nil, true)
+t.eq("absent variadic operand is empty", opts.positional(:file), [])
+t.eq("unknown operand name is nil", opts.positional(:nope) == nil, true)
+
+# Operands coexist with flags and value options (which consume their own argv).
+opts = cli7.parse(["-v", "app", "out.bin"])
+t.eq("operand resolves past a boolean flag", opts.positional(:target), "app")
+t.eq("flag alongside operands is still set", opts.flag?(:verbose), true)
+
+opts = cli7.parse(["--opt", "X", "app"])
+t.eq("value option does not steal an operand", opts.positional(:target), "app")
+
+# Deterministic operand-name listing.
+t.eq("operand names listed in synopsis order", cli7.parse([]).positional_names, ["target", "output", "file"])
+
+# Opt-in missing-required-operand reporting (does not affect valid?).
+t.eq("missing required operand is reported", cli7.parse([]).missing_arguments, ["TARGET"])
+t.eq("supplied required operand is not missing", cli7.parse(["app"]).missing_arguments, [])
+t.eq("operands stay out of lenient valid?", cli7.parse([]).valid?, true)
+
+# Angle-bracketed <NAME> is required; a bare "NAME..." (no brackets) is variadic.
+MAN8 = "NAME
+    cat -- exercise angle-bracket and bare-ellipsis operands
+
+SYNOPSIS
+    cat <SOURCE> DEST...
+
+OPTIONS
+    -n, --number
+        Number the output lines.
+"
+
+cli8 = Argon.new(MAN8)
+pd8 = cli8.positional_defs
+t.eq("angle-bracket operand extracted", pd8[0][:key], "source")
+t.eq("angle-bracket operand is required", pd8[0][:required], true)
+t.eq("bare-ellipsis operand is variadic", pd8[1][:variadic], true)
+t.eq("bare-ellipsis operand is required", pd8[1][:required], true)
+
+opts = cli8.parse(["in.txt", "a", "b", "c"])
+t.eq("angle-bracket operand value", opts.positional(:source), "in.txt")
+t.eq("bare-ellipsis variadic collects the rest", opts.positional(:dest), ["a", "b", "c"])
+
+# A space-separated lone "..." attaches to the preceding operand.
+MAN9 = "NAME
+    rm -- exercise a space-separated ellipsis
+
+SYNOPSIS
+    rm \[options] FILE ...
+
+OPTIONS
+    -f, --force
+        Force removal.
+"
+
+cli9 = Argon.new(MAN9)
+pd9 = cli9.positional_defs
+t.eq("spaced ellipsis yields one operand", pd9.size(), 1)
+t.eq("spaced ellipsis marks the operand variadic", pd9[0][:variadic], true)
+t.eq("spaced-ellipsis operand keeps its name", pd9[0][:key], "file")
+
+opts = cli9.parse(["-f", "a", "b"])
+t.eq("spaced-ellipsis variadic collects operands", opts.positional(:file), ["a", "b"])
+
 t.done

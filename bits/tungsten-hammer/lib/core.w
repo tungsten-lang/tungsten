@@ -126,9 +126,14 @@
     while p < header_end
       c = raw_load_u8(data, p)
       if c in (:-C :-c)
+        # Verify the full "content-length:" name (case-insensitively), not just
+        # a two-byte fingerprint: a byte-0/byte-9 fingerprint false-matches other
+        # C… headers (e.g. one whose 10th byte is 'e') and would frame a bogus
+        # body length, desyncing a keep-alive connection. Mirrors the C engine's
+        # hammer_is_content_length_header (lib/hammer.c). The header_end - p >= 15
+        # guard keeps raw_ci_eq's 15-byte read within the header section.
         if header_end - p >= 15
-          e = raw_load_u8(data, p + 9)
-          if e in (:-E :-e)
+          if raw_ci_eq(data, p, "content-length:") == 1
             v = p + 15
             loop
               break if v >= header_end

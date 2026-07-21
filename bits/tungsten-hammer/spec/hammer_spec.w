@@ -126,6 +126,19 @@ t.eq("truncated body is not yet framed", Hammer.response_length(truncated), 0)
 # Too-short buffer (< 15 bytes) can't hold a status line — returns 0.
 t.eq("too-short buffer is not framed", Hammer.response_length("HTTP/1.1"), 0)
 
+# The Content-Length scan verifies the whole "Content-Length:" field name, not
+# just a fingerprint: a header that merely starts with 'C' and has 'e' at byte 9
+# ("Cablengthe: 12345") is NOT a Content-Length header and must not have its
+# digits read as a body length. Before the full-name check this framed a bogus
+# 83-byte body; the response has no Content-Length, so it frames header-only (38).
+notcl = "HTTP/1.1 200 OK\r\nCablengthe: 12345\r\n\r\nBODYBODYBODYBODYBODYBODYBODYBODYBODYBODYBODYBODY"
+t.eq("C…e… header that is not Content-Length is not mis-framed", Hammer.response_length(notcl), 38)
+# A real header that starts with 'C' and has 'e' at byte 9 (Content-Security-Policy)
+# coexisting with a real Content-Length frames to the true body — the full-name
+# check does not reject legitimate C-prefixed headers preceding Content-Length.
+csp = "HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src 'self'\r\nContent-Length: 5\r\n\r\nhello"
+t.eq("Content-Security-Policy before Content-Length frames the real body", Hammer.response_length(csp), csp.size)
+
 # ---- chunked transfer-encoding framing (RFC 7230 §4.1) ----
 # A chunked body has no Content-Length; the frame runs from the status line
 # through the terminating zero-length chunk and its blank line.

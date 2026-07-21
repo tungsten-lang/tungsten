@@ -110,4 +110,47 @@ describe "Template" ->
       expect(Template.compile("a{{}}b")).to be_nil
       expect(Template.compile("{{#with x}}y{{/with}}")).to be_nil
 
+  describe "partials" ->
+    # {{> name}} includes a registered partial, rendered against the
+    # caller's params/context (mustache semantics).
+    it "includes a registered partial rendered with the current params" ->
+      Template.register("greeting", "Hi {{name}}!")
+      t = Template.compile("<{{> greeting}}>")
+      expect(t.render({name: "Ada"})).to eq("<Hi Ada!>")
+
+    it "renders a partial once per element inside an each, seeing this" ->
+      Template.register("row", "<li>{{this.name}}</li>")
+      list = Template.compile("<ul>{{#each items}}{{> row}}{{/each}}</ul>")
+      expect(list.render({items: [{name: "a"}, {name: "b"}]})).to eq("<ul><li>a</li><li>b</li></ul>")
+
+    it "still resolves outer params names inside a partial" ->
+      Template.register("label", "{{prefix}}{{this}}")
+      t = Template.compile("{{#each xs}}{{> label}} {{/each}}")
+      expect(t.render({xs: ["1", "2"], prefix: "#"})).to eq("#1 #2 ")
+
+    it "renders an unregistered partial as empty" ->
+      Template.clear_partials
+      t = Template.compile("before{{> nope}}after")
+      expect(t.render({})).to eq("beforeafter")
+
+    it "composes partials that include other partials" ->
+      Template.register("inner", "{{v}}")
+      Template.register("outer", "({{> inner}})")
+      t = Template.compile("{{> outer}}")
+      expect(t.render({v: "x"})).to eq("(x)")
+
+    it "register returns the compiled template, or nil for malformed source" ->
+      good = Template.register("good", "{{v}}")
+      expect(good.render({v: "z"})).to eq("z")
+      expect(Template.register("mal", "{{#if x}}oops")).to be_nil
+
+    it "treats an empty partial tag as malformed" ->
+      expect(Template.compile("{{> }}")).to be_nil
+      expect(Template.compile("{{>}}")).to be_nil
+
+    it "bounds a recursive partial instead of hanging" ->
+      Template.register("loop", "x{{> loop}}")
+      t = Template.compile("{{> loop}}")
+      expect(t.render({}).size).to eq(50)
+
 spec_summary

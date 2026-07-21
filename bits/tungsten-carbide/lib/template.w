@@ -4,7 +4,7 @@
 #   t = Template.compile("<h1>{{title}}</h1>{{#each tasks}}<li>{{this.title}}</li>{{/each}}")
 #   t.render({title: "Tasks", tasks: [{title: "buy milk"}]})
 #
-# Syntax (v1 — deliberately small; no partials/layouts/filters yet):
+# Syntax (v1 — deliberately small; no layouts/filters yet):
 #   {{name}}            interpolate params[:name], HTML-escaped
 #   {{{name}}}          interpolate raw (no escaping)
 #   {{#if name}}...{{/if}}     render body when the value is truthy
@@ -13,6 +13,8 @@
 #                              inside, {{this}} is the element and
 #                              {{this.field}} reads a hash element's
 #                              :field (params names still resolve)
+#   {{> name}}          include a registered partial (Template.register),
+#                       rendered against the CURRENT params/context
 #
 # Design notes:
 #   - Mustache-style {{ }} on purpose: Tungsten's own string
@@ -38,6 +40,13 @@
 #     UTF-8-transparent — multi-byte sequences contain no ASCII bytes,
 #     so template text and values pass through byte-identical. Keep
 #     variable NAMES ASCII (name handling assumes ASCII word bytes).
+#   - Partials ({{> name}}) compose templates by name through a shared
+#     class-level registry (Template.register/partial/clear_partials — a
+#     class var, hierarchy-shared like Model's store). A partial renders
+#     against the caller's params/context, so {{> row}} inside {{#each}}
+#     sees {{this}}. An unregistered partial renders "" (inert, like a
+#     missing {{var}}); a self-/mutually-recursive partial bottoms out at
+#     a fixed nesting depth rather than hanging (verified both engines).
 #
 # Top-level (no `in` namespace): namespaced bit classes are unreachable
 # from consumers and specs — same convention as route.w / controller.w.
@@ -57,6 +66,37 @@
       if nodes != nil
         result = Template.new(nodes)
     result
+
+  # --- Partial registry (compose templates by name) ---
+  #
+  # A {{> name}} tag includes a registered partial, rendered against the
+  # SAME params/context as the point of inclusion (mustache semantics).
+  # Register once, include from any number of parents:
+  #
+  #   Template.register("row", "<li>{{this.name}}</li>")
+  #   list = Template.compile("<ul>{{#each items}}{{> row}}{{/each}}</ul>")
+  #   list.render({items: [{name: "a"}, {name: "b"}]})
+  #     # "<ul><li>a</li><li>b</li></ul>"
+  #
+  # register compiles the source and stores the Template, returning it (or
+  # nil when the source is malformed — same contract as .compile). An
+  # unregistered {{> name}} renders "" (a missing partial is inert, not an
+  # error — same convention as a missing {{var}}). The registry is one
+  # shared table (class vars are hierarchy-shared, like Model's store);
+  # clear_partials resets it for spec isolation.
+  @@partials = {}
+
+  -> .register(name, source)
+    tpl = Template.compile(source)
+    if tpl != nil
+      @@partials[name] = tpl
+    tpl
+
+  -> .partial(name)
+    @@partials[name]
+
+  -> .clear_partials
+    @@partials = {}
 
   # Source string -> flat token list (node-shaped hashes), or nil on a
   # lexically malformed template.
@@ -122,6 +162,10 @@
       name = inner.slice(6, inner.size - 6).strip
       if name != ""
         tok = {kind: :open_each, name: name}
+    elsif inner.starts_with?(">")
+      name = inner.slice(1, inner.size - 1).strip
+      if name != ""
+        tok = {kind: :partial, name: name}
     elsif inner.starts_with?("#") || inner.starts_with?("/")
       tok = nil
     elsif inner != ""
@@ -194,9 +238,11 @@
   # Render with a symbol-keyed params hash. Reusable: one compiled
   # Template renders any number of times with different params.
   -> render(params = {})
-    render_nodes(@nodes, params, nil)
+    render_nodes(@nodes, params, nil, 0)
 
-  -> render_nodes(nodes, params, this_val)
+  # depth bounds partial-include nesting so a self-/mutually-recursive
+  # partial bottoms out at 50 levels instead of hanging the render.
+  -> render_nodes(nodes, params, this_val, depth)
     out = []
     i = 0
     while i < nodes.size
@@ -214,14 +260,18 @@
       elsif kind == :if
         v = resolve_value(node[:name], params, this_val)
         if v != nil && v != false
-          out.push(render_nodes(node[:children], params, this_val))
+          out.push(render_nodes(node[:children], params, this_val, depth))
       elsif kind == :each
         v = resolve_value(node[:name], params, this_val)
         if type(v) == "Array"
           j = 0
           while j < v.size
-            out.push(render_nodes(node[:children], params, v[j]))
+            out.push(render_nodes(node[:children], params, v[j], depth))
             j = j + 1
+      elsif kind == :partial
+        pt = Template.partial(node[:name])
+        if pt != nil && depth < 50
+          out.push(render_nodes(pt.nodes, params, this_val, depth + 1))
       i = i + 1
     out.join("")
 

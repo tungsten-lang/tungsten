@@ -373,12 +373,14 @@
   # in both engines (verified by probe).
   -> valid?
     me = self
+    run_hooks(before_validation)
     collected = []
     validations.each -> (v)
       msg = me.validation_error(v)
       if msg != nil
         collected.push(msg)
     @errors = collected
+    run_hooks(after_validation)
     @errors.empty?
 
   # One descriptor -> nil or an error message string.
@@ -448,25 +450,127 @@
         msg = "must be equal to " + v[:equal_to].to_s
     msg
 
+  # --- Lifecycle callbacks (ActiveRecord-style) ---
+  #
+  # Hooks fired around validation and persistence, declared exactly like
+  # #validations: override a hook method to return an array of lambdas, each
+  # taking the model. Every hook defaults to [] (no callback), so a model that
+  # declares none behaves as before. Build the array inline or with push (both
+  # parse for lambda literals).
+  #
+  #   + Post < Model
+  #     -> before_validation
+  #       [ -> (m) m.ensure_slug ]        # normalize before the validators run
+  #     -> before_save
+  #       [ -> (m) m.deny_if_locked ]     # guard: return false to abort the save
+  #     -> after_create
+  #       [ -> (m) m.notify_admins ]      # observe the fresh insert
+  #
+  # Firing order, matching Rails, on a successful save:
+  #   before_validation -> (validate) -> after_validation ->
+  #   before_save -> before_create|before_update -> (persist) ->
+  #   after_create|after_update -> after_save
+  # When validation fails the chain stops after after_validation (save false).
+  # destroy fires: before_destroy -> (delete) -> after_destroy.
+  #
+  # Halting: a before_save / before_create / before_update / before_destroy
+  # lambda returning exactly `false` ABORTS — persistence and every later
+  # callback are skipped and the save/destroy returns false (Rails' throw
+  # :abort). Any other return (nil, self, a string, …) continues. This mirrors
+  # the controller's before-filter halt convention (controller.w). Validation
+  # hooks (before/after_validation) are side-effect only — use them to
+  # normalize attributes; require presence through #validations, not a hook.
+  #
+  # By the time the after_* callbacks run the record is already clean:
+  # #changed? is false and #previous_changes holds what this save persisted
+  # (dovetails with dirty tracking) — so after_save can ask "did :email change
+  # on this save?" via attribute_previously_changed?.
+  #
+  # Design notes (same constraints as the rest of Model):
+  #   - Instance methods returning lambda arrays, not class-level DSL — a symbol
+  #     can't become a method call (Object#send is bodyless) and inherited class
+  #     methods vanish when compiled. A lambda receives the model, so
+  #     `-> (m) m.some_method` calls an instance method.
+  #   - `me = self` before each `.each`: inside a closure the interpreter
+  #     rebinds self, so the model must ride in through the alias.
+  #   - Flag-style flow (no early return from a closure-bearing method).
+
+  -> before_validation
+    []
+  -> after_validation
+    []
+  -> before_save
+    []
+  -> after_save
+    []
+  -> before_create
+    []
+  -> after_create
+    []
+  -> before_update
+    []
+  -> after_update
+    []
+  -> before_destroy
+    []
+  -> after_destroy
+    []
+
+  # Run a guard (before-style) callback array. Returns true to proceed, or
+  # false if a callback halted by returning exactly `false`. Flag-style flow,
+  # no early return (a bare return from a closure-bearing method corrupts the
+  # interpreter).
+  -> run_guard(callbacks)
+    me = self
+    ok = true
+    callbacks.each -> (cb)
+      if ok
+        if cb.call(me) == false
+          ok = false
+    ok
+
+  # Run a side-effect (after-style / validation) callback array. Return values
+  # are ignored — these hooks observe or mutate, they do not halt.
+  -> run_hooks(callbacks)
+    me = self
+    callbacks.each -> (cb)
+      cb.call(me)
+    nil
+
   # --- Persistence lifecycle ---
 
   -> save
     result = false
-    if valid?
+    proceed = valid?
+    if proceed
+      proceed = run_guard(before_save)
+    # INSERT vs UPDATE decided before persist flips @persisted.
+    created = !@persisted
+    if proceed
+      if created
+        proceed = run_guard(before_create)
+      else
+        proceed = run_guard(before_update)
+    if proceed
       if !@persisted
         @id = Model.allocate_id(table)
         Model.rows(table).push(self)
         @persisted = true
       result = true
-    # On a successful save the record becomes clean: capture what just changed
-    # into previous_changes (only when something did — a no-op re-save leaves
-    # the prior previous_changes untouched, matching Rails), then re-snapshot
-    # the current attributes as the new clean baseline so changed? goes false.
-    if result
+      # Go clean BEFORE the after-callbacks so they observe Rails-consistent
+      # state: capture what just changed into previous_changes (only when
+      # something did — a no-op re-save leaves the prior previous_changes
+      # untouched, matching Rails), then re-snapshot the current attributes as
+      # the new clean baseline so #changed? reads false inside after_save.
       diff = changes
       if !diff.empty?
         @previous_changes = diff
       @saved_attributes = copy_hash(@attributes)
+      if created
+        run_hooks(after_create)
+      else
+        run_hooks(after_update)
+      run_hooks(after_save)
     result
 
   # Merge attrs, then save. Returns save's result; attrs stay merged
@@ -478,14 +582,18 @@
     save
 
   -> destroy
-    kept = []
-    my_id = @id
-    Model.rows(table).each -> (row)
-      if row.id != my_id
-        kept.push(row)
-    Model.replace_rows(table, kept)
-    @persisted = false
-    true
+    result = false
+    if run_guard(before_destroy)
+      kept = []
+      my_id = @id
+      Model.rows(table).each -> (row)
+        if row.id != my_id
+          kept.push(row)
+      Model.replace_rows(table, kept)
+      @persisted = false
+      result = true
+      run_hooks(after_destroy)
+    result
 
   -> new_record?
     !@persisted

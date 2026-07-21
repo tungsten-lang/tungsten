@@ -117,6 +117,86 @@ use carbide
   -> table
     "spec_dirty"
 
+# --- Models exercising lifecycle callbacks. SpecCB records every hook it fires
+# into its :log attribute via #trace, so the full firing ORDER is one string to
+# assert against (no wall-clock, no shared state).
++ SpecCB < Model
+  -> table
+    "spec_cb"
+  -> before_validation
+    [ -> (m) m.trace("bv") ]
+  -> after_validation
+    [ -> (m) m.trace("av") ]
+  -> before_save
+    [ -> (m) m.trace("bs") ]
+  -> before_create
+    [ -> (m) m.trace("bc") ]
+  -> after_create
+    [ -> (m) m.trace("ac") ]
+  -> before_update
+    [ -> (m) m.trace("bu") ]
+  -> after_update
+    [ -> (m) m.trace("au") ]
+  -> after_save
+    [ -> (m) m.trace("as") ]
+  -> before_destroy
+    [ -> (m) m.trace("bd") ]
+  -> after_destroy
+    [ -> (m) m.trace("ad") ]
+
+  # Append a marker to the "-"-joined :log attribute.
+  -> trace(mark)
+    cur = get(:log)
+    if cur == nil
+      cur = ""
+    if cur != ""
+      cur = cur + "-"
+    set(:log, cur + mark)
+
+# before_validation normalizes a derived attribute so a presence check that
+# would otherwise fail passes — proves the hook runs BEFORE the validators.
++ SpecSlug < Model
+  -> table
+    "spec_slug"
+  -> before_validation
+    [ -> (m) m.ensure_slug ]
+  -> validations
+    checks = []
+    checks.push(Model.presence(:slug))
+    checks
+  -> ensure_slug
+    if get(:slug) == nil
+      set(:slug, "auto")
+    nil
+
+# before_save halts (returns false); after_save would set :ran but must not
+# fire on the halted path — distinguishes a guard halt from a validation error.
++ SpecGuard < Model
+  -> table
+    "spec_guard"
+  -> before_save
+    [ -> (m) false ]
+  -> after_save
+    [ -> (m) m.set(:ran, true) ]
+
+# before_destroy halts (returns false) — the record survives destroy.
++ SpecLocked < Model
+  -> table
+    "spec_locked"
+  -> before_destroy
+    [ -> (m) false ]
+
+# after_save inspects the dirty-tracking state that the save just produced
+# (R9 dovetail): the record is clean and previous_changes is populated.
++ SpecAfter < Model
+  -> table
+    "spec_after"
+  -> after_save
+    [ -> (m) m.capture_flags ]
+  -> capture_flags
+    set(:saw_clean, !changed?)
+    set(:saw_prev, attribute_previously_changed?(:email))
+
 describe "Model" ->
   describe "construction" ->
     it "builds from an attributes hash" ->
@@ -623,5 +703,61 @@ describe "Model" ->
       d.set(:extra, "z")
       d.restore_attributes
       expect(d.get(:extra)).to be_nil
+
+  describe "lifecycle callbacks" ->
+    it "fires the save callbacks in Rails order on create" ->
+      Model.reset_all
+      c = Model.create(SpecCB, {})
+      expect(c.get(:log)).to eq("bv-av-bs-bc-ac-as")
+
+    it "fires the update callbacks instead of the create ones on a persisted save" ->
+      Model.reset_all
+      c = Model.create(SpecCB, {})
+      c.set(:log, "")
+      c.save
+      expect(c.get(:log)).to eq("bv-av-bs-bu-au-as")
+
+    it "runs before_validation before the validators (normalization)" ->
+      Model.reset_all
+      s = Model.create(SpecSlug, {})
+      expect(s.persisted?).to be_true
+      expect(s.get(:slug)).to eq("auto")
+
+    it "halts the save when a before_save callback returns false" ->
+      Model.reset_all
+      g = Model.create(SpecGuard, {})
+      expect(g.persisted?).to be_false
+      expect(Model.count(SpecGuard)).to eq(0)
+
+    it "treats a before_save halt as distinct from a validation failure" ->
+      Model.reset_all
+      g = Model.create(SpecGuard, {})
+      expect(g.errors).to be_empty
+
+    it "skips the after callbacks when a before_save halts" ->
+      Model.reset_all
+      g = Model.create(SpecGuard, {})
+      expect(g.get(:ran)).to be_nil
+
+    it "fires the destroy callbacks in order" ->
+      Model.reset_all
+      c = Model.create(SpecCB, {})
+      c.set(:log, "")
+      c.destroy
+      expect(c.get(:log)).to eq("bd-ad")
+
+    it "halts destroy when before_destroy returns false" ->
+      Model.reset_all
+      l = Model.create(SpecLocked, {})
+      ok = l.destroy
+      expect(ok).to be_false
+      expect(l.persisted?).to be_true
+      expect(Model.count(SpecLocked)).to eq(1)
+
+    it "exposes clean state and previous_changes to after_save (dirty-tracking dovetail)" ->
+      Model.reset_all
+      a = Model.create(SpecAfter, {email: "a@x"})
+      expect(a.get(:saw_clean)).to be_true
+      expect(a.get(:saw_prev)).to be_true
 
 spec_summary

@@ -17,6 +17,7 @@ use xctrace_xml
 use builder
 use sampler
 use flame_svg
+use flame_diff
 
 # ---- Read and parse the manpage ----
 # Prefer TUNGSTEN_ROOT (set by the CLI); __DIR__ is not always populated
@@ -78,10 +79,38 @@ fl_parse       = opts.flag?("parse")
 fl_execution   = opts.flag?("execution")
 fl_build_only  = opts.flag?("build_only")
 fl_silent      = opts.flag?("silent")
+fl_diff        = opts.flag?("diff")
 fl_files       = opts.args
 fl_passthrough = opts.passthrough
 
 # Mode dispatch.
+
+# Differential mode: compare two already-collected folded profiles
+# (`flame --diff BEFORE.folded AFTER.folded`). Operates purely on folded
+# text — no compile, no profiling — so it works on any folded stacks,
+# whoever produced them. Prints a normalized regressed/improved summary;
+# with -o, also writes the folded "stack delta" diff for downstream tools.
+if fl_diff
+  if fl_files.size < 2
+    << "tungsten flame --diff: need two folded files (BEFORE AFTER)"
+    exit(1)
+  before_path = fl_files[0]
+  after_path = fl_files[1]
+  before_text = read_file(before_path)
+  if before_text == nil
+    << "tungsten flame: cannot read " + before_path
+    exit(1)
+  after_text = read_file(after_path)
+  if after_text == nil
+    << "tungsten flame: cannot read " + after_path
+    exit(1)
+  << Tungsten:Flame:FlameDiff.report(before_text, after_text, fl_top, !fl_silent)
+  if fl_output != ""
+    write_file(fl_output, Tungsten:Flame:FlameDiff.diff_normalized(before_text, after_text))
+    if !fl_silent
+      << "wrote diff folded: " + fl_output
+  exit(0)
+
 if fl_pid != nil
   << "TODO: attach to pid " + fl_pid.to_s + " for " + fl_duration.to_s + "s"
   exit(0)

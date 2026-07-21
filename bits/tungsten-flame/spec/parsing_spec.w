@@ -9,6 +9,7 @@ use xctrace_xml
 use sidemap
 use analyzer
 use flame_svg
+use flame_diff
 
 describe "PerfScript" ->
   it "collapses perf script samples into sorted folded stacks" ->
@@ -213,5 +214,59 @@ describe "FlameSvg" ->
     svg = Tungsten:Flame:FlameSvg.render("", "Empty")
     expect(svg.include?("no samples")).to eq(true)
     expect(svg.include?("</svg>")).to eq(true)
+
+describe "FlameDiff" ->
+  it "parses folded text into a stack map with a total" ->
+    p = Tungsten:Flame:FlameDiff.parse_folded("main;a 3\nmain;b 2")
+    expect(p[:total]).to eq(5)
+    expect(p[:map]["main;a"]).to eq(3)
+    expect(p[:map]["main;b"]).to eq(2)
+
+  it "sums duplicate stacks and ignores non-positive or countless lines" ->
+    p = Tungsten:Flame:FlameDiff.parse_folded("a 2\na 3\nb 0\njustaframe")
+    expect(p[:total]).to eq(5)
+    expect(p[:map]["a"]).to eq(5)
+    expect(p[:map].keys().size()).to eq(1)
+
+  it "computes inclusive per-frame counts, counting recursion once" ->
+    incl = Tungsten:Flame:FlameDiff.frame_inclusive("main;a;a;b 4\nmain;c 6")
+    expect(incl["main"]).to eq(10)
+    expect(incl["a"]).to eq(4)
+    expect(incl["b"]).to eq(4)
+    expect(incl["c"]).to eq(6)
+
+  it "diffs two profiles into signed per-stack deltas" ->
+    d = Tungsten:Flame:FlameDiff.diff("main;a 10\nmain;b 5", "main;a 4\nmain;c 7")
+    expect(d).to eq("main;a -6\nmain;b -5\nmain;c 7")
+
+  it "normalizes before-counts to the after total when diffing" ->
+    d = Tungsten:Flame:FlameDiff.diff_normalized("x 50\ny 50", "x 200")
+    expect(d).to eq("x 100\ny -100")
+
+  it "ranks frames by absolute inclusive change, hottest first" ->
+    ranked = Tungsten:Flame:FlameDiff.rank_frames("main;slow 10\nmain;fast 90", "main;slow 60\nmain;fast 40", true)
+    expect(ranked[0][0]).to eq("fast")
+    expect(ranked[0][3]).to eq(-50)
+    expect(ranked[1][0]).to eq("slow")
+    expect(ranked[1][3]).to eq(50)
+    expect(ranked[2][0]).to eq("main")
+    expect(ranked[2][3]).to eq(0)
+
+  it "reports regressions and improvements in a plain-text summary" ->
+    r = Tungsten:Flame:FlameDiff.report("main;slow 10\nmain;fast 90", "main;slow 60\nmain;fast 40", 5, false)
+    expect(r.include?("Differential Profile")).to eq(true)
+    expect(r.include?("before 100")).to eq(true)
+    expect(r.include?("after 100")).to eq(true)
+    expect(r.include?("Regressed (hotter)")).to eq(true)
+    expect(r.include?("+50.0%")).to eq(true)
+    expect(r.include?("Improved (cooler)")).to eq(true)
+    expect(r.include?("-50.0%")).to eq(true)
+
+  it "marks an empty section (none) and survives a zero-total baseline" ->
+    r = Tungsten:Flame:FlameDiff.report("", "a 5", 5, false)
+    expect(r.include?("before 0")).to eq(true)
+    expect(r.include?("after 5")).to eq(true)
+    expect(r.include?("Improved (cooler)")).to eq(true)
+    expect(r.include?("(none)")).to eq(true)
 
 spec_summary

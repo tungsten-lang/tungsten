@@ -59,6 +59,11 @@
     return false if ct == nil
     ct.include?("application/x-www-form-urlencoded")
 
+  -> multipart?
+    ct = self.content_type
+    return false if ct == nil
+    ct.include?("multipart/form-data")
+
   -> websocket_upgrade?
     upgrade = @headers.get("Upgrade")
     return false if upgrade == nil
@@ -80,6 +85,12 @@
 
   -> form_body
     QueryString.parse(@body) if @body && self.form?
+
+  # Parsed multipart/form-data body as a MultipartForm (fields + files), or
+  # nil when the request is not multipart or carries no body. The
+  # structured counterpart to form_body — see lib/multipart.w.
+  -> multipart_body
+    Multipart.parse(@body, self.content_type) if @body && self.multipart?
 
   -> query_params
     QueryString.parse(@query_string) if @query_string

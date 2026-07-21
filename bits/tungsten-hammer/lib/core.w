@@ -352,6 +352,58 @@
   -> .response_ok(response) (string) i64
     status_ok(status_code(response))
 
+  # ---- throughput and human-readable reporting formatters ----
+  # A benchmark's headline output is its rates: requests per second and bytes
+  # per second, rendered compactly the way the C engine (lib/hammer.c) already
+  # reports them ("12.34K req/s", "2.00 MiB/s"). These are the pure-Tungsten
+  # analogues of that engine's presentation helpers, so the experimental
+  # Tungsten engine and any `use hammer/core` consumer can produce the same
+  # figures without dropping into C. All are integer-exact: rates are taken
+  # over a whole-millisecond window and every fractional value is truncated
+  # toward zero, so no floating-point rounding enters a reported number.
+
+  # Rate kernel: `count` events over an `elapsed_ms` window scaled to one
+  # second (count * 1000 / elapsed_ms). Serves both requests/sec and bytes/sec.
+  # Returns 0 for a zero or negative window, so callers need no guard.
+  -> .per_sec(count, elapsed_ms) (i64 i64) i64
+    return 0 if elapsed_ms <= 0
+    count * 1000 / elapsed_ms
+
+  # Render `hundredths` (a value already multiplied by 100) as a fixed
+  # two-decimal string: 150 -> "1.50", 5 -> "0.05", 12345 -> "123.45". The
+  # shared decimal backend for the count and byte formatters below.
+  -> .format_hundredths(hundredths) (i64) string
+    whole = hundredths / 100 ## i64
+    frac = hundredths % 100 ## i64
+    frac_str = frac.to_s
+    frac_str = "0" + frac_str if frac < 10
+    whole.to_s + "." + frac_str
+
+  # Compact decimal count (SI-style, 1000-scaled): >= 1e6 -> "M", >= 1e3 -> "K",
+  # otherwise the bare integer. This is how the requests/sec figure (and the
+  # histogram bucket counts) read: 1500 -> "1.50K", 2500000 -> "2.50M",
+  # 999 -> "999". Mirrors the C engine's format_count (no space before K/M).
+  -> .format_count(n) (i64) string
+    return format_hundredths(n * 100 / 1000000) + "M" if n >= 1000000
+    return format_hundredths(n * 100 / 1000) + "K" if n >= 1000
+    n.to_s
+
+  # Human-readable binary byte size (1024-scaled), mirroring the C engine's
+  # format_bytes exactly: a bare integer with " B" below 1 KiB, otherwise two
+  # decimals and a " KiB"/" MiB"/" GiB" suffix. Sizes past 1 GiB stay in GiB
+  # (a terabyte reads as "1024.00 GiB"), matching the C output.
+  -> .format_bytes(n) (i64) string
+    return format_hundredths(n * 100 / 1073741824) + " GiB" if n >= 1073741824
+    return format_hundredths(n * 100 / 1048576) + " MiB" if n >= 1048576
+    return format_hundredths(n * 100 / 1024) + " KiB" if n >= 1024
+    n.to_s + " B"
+
+  # Transfer rate as a human-readable per-second byte figure (wrk's
+  # "Transfer/sec", the C engine's "(%s/s)"): the byte formatter composed over
+  # the rate kernel. "1048576 bytes in 500 ms" reports "2.00 MiB".
+  -> .format_transfer_rate(total_bytes, elapsed_ms) (i64 i64) string
+    format_bytes(per_sec(total_bytes, elapsed_ms))
+
   -> .tungsten_connection(host, port, request_batch, pipeline, duration, total, errors) (string i64 string i64 i64)
     deadline_ticks = ccall_nobox("__w_deadline_ticks_after_seconds", duration)
     local_total = 0 ## i64

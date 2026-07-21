@@ -268,4 +268,62 @@ t.eq("5xx response is not ok", Hammer.response_ok("HTTP/1.1 500 Internal Server 
 t.eq("full framed 200 response is ok", Hammer.response_ok(resp), 1)
 t.eq("unparseable response is not ok", Hammer.response_ok("garbage"), 0)
 
+# ---- throughput and human-readable reporting formatters ----
+# Rates are computed over a whole-millisecond window with integer truncation
+# toward zero (no floating point). The byte/count formatters mirror the C
+# engine's format_bytes/format_count so the Tungsten engine reports identically.
+
+# ---- per_sec (rate kernel: count * 1000 / elapsed_ms) ----
+t.eq("5000 requests in 2000 ms is 2500/s", Hammer.per_sec(5000, 2000), 2500)
+t.eq("1000 in 1000 ms is 1000/s", Hammer.per_sec(1000, 1000), 1000)
+t.eq("rate truncates toward zero", Hammer.per_sec(10000, 3000), 3333)   # 3333.33 -> 3333
+t.eq("sub-unit rate truncates to 0", Hammer.per_sec(1, 2000), 0)        # 0.5 -> 0
+t.eq("3 in 2000 ms is 1/s", Hammer.per_sec(3, 2000), 1)                 # 1.5 -> 1
+t.eq("zero count is 0/s", Hammer.per_sec(0, 1000), 0)
+t.eq("zero window guarded to 0", Hammer.per_sec(500, 0), 0)
+t.eq("negative window guarded to 0", Hammer.per_sec(500, -1), 0)
+
+# ---- format_hundredths (fixed two-decimal render of a *100 value) ----
+t.eq("hundredths 0 is 0.00", Hammer.format_hundredths(0), "0.00")
+t.eq("hundredths pads a single frac digit", Hammer.format_hundredths(5), "0.05")
+t.eq("hundredths 100 is 1.00", Hammer.format_hundredths(100), "1.00")
+t.eq("hundredths 150 is 1.50", Hammer.format_hundredths(150), "1.50")
+t.eq("hundredths 99 is 0.99", Hammer.format_hundredths(99), "0.99")
+t.eq("hundredths 12345 is 123.45", Hammer.format_hundredths(12345), "123.45")
+t.eq("hundredths pads frac 9 as 09", Hammer.format_hundredths(1009), "10.09")
+
+# ---- format_count (SI 1000-scaled: K / M, else bare integer) ----
+t.eq("count below 1000 is bare", Hammer.format_count(999), "999")
+t.eq("count 0 is bare", Hammer.format_count(0), "0")
+t.eq("count 1000 is 1.00K", Hammer.format_count(1000), "1.00K")
+t.eq("count 1500 is 1.50K", Hammer.format_count(1500), "1.50K")
+t.eq("count 12345 truncates to 12.34K", Hammer.format_count(12345), "12.34K")
+t.eq("count just under 1M is K", Hammer.format_count(999999), "999.99K")
+t.eq("count 1000000 is 1.00M", Hammer.format_count(1000000), "1.00M")
+t.eq("count 2500000 is 2.50M", Hammer.format_count(2500000), "2.50M")
+t.eq("count 12345678 truncates to 12.34M", Hammer.format_count(12345678), "12.34M")
+
+# ---- format_bytes (binary 1024-scaled: B / KiB / MiB / GiB) ----
+t.eq("0 bytes is bare B", Hammer.format_bytes(0), "0 B")
+t.eq("512 bytes is bare B", Hammer.format_bytes(512), "512 B")
+t.eq("1023 bytes stays below KiB", Hammer.format_bytes(1023), "1023 B")
+t.eq("1024 bytes is 1.00 KiB", Hammer.format_bytes(1024), "1.00 KiB")
+t.eq("1536 bytes is 1.50 KiB", Hammer.format_bytes(1536), "1.50 KiB")
+t.eq("1500 bytes truncates to 1.46 KiB", Hammer.format_bytes(1500), "1.46 KiB")
+t.eq("1 MiB is 1.00 MiB", Hammer.format_bytes(1048576), "1.00 MiB")
+t.eq("2 MiB is 2.00 MiB", Hammer.format_bytes(2097152), "2.00 MiB")
+t.eq("2.5 MiB is 2.50 MiB", Hammer.format_bytes(2621440), "2.50 MiB")
+t.eq("1 GiB is 1.00 GiB", Hammer.format_bytes(1073741824), "1.00 GiB")
+t.eq("1.5 GiB is 1.50 GiB", Hammer.format_bytes(1610612736), "1.50 GiB")
+t.eq("5 GiB is 5.00 GiB", Hammer.format_bytes(5368709120), "5.00 GiB")
+t.eq("a terabyte stays in GiB", Hammer.format_bytes(1099511627776), "1024.00 GiB")
+
+# ---- format_transfer_rate (bytes/sec, human-readable) ----
+t.eq("1 MiB in 500 ms is 2.00 MiB/s", Hammer.format_transfer_rate(1048576, 500), "2.00 MiB")
+t.eq("1 MiB in 1000 ms is 1.00 MiB/s", Hammer.format_transfer_rate(1048576, 1000), "1.00 MiB")
+t.eq("2048 B in 1000 ms is 2.00 KiB/s", Hammer.format_transfer_rate(2048, 1000), "2.00 KiB")
+t.eq("5 MiB in 1000 ms is 5.00 MiB/s", Hammer.format_transfer_rate(5242880, 1000), "5.00 MiB")
+t.eq("500 B in 1000 ms is 500 B/s", Hammer.format_transfer_rate(500, 1000), "500 B")
+t.eq("zero window transfer rate is 0 B", Hammer.format_transfer_rate(1000000, 0), "0 B")
+
 t.done

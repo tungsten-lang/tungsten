@@ -230,6 +230,38 @@
   -> via_proxy?
     self.forwarded_for.size > 0
 
+  # --- Conditional requests (see lib/conditional.w and lib/http_date.w) ---
+
+  # The Date header as epoch seconds (HttpDate), or nil when it is absent
+  # or not a well-formed HTTP-date.
+  -> date
+    HttpDate.parse(@headers.get("Date"))
+
+  # If-Modified-Since / If-Unmodified-Since as epoch seconds, or nil when
+  # the header is absent or malformed.
+  -> if_modified_since
+    HttpDate.parse(@headers.get("If-Modified-Since"))
+
+  -> if_unmodified_since
+    HttpDate.parse(@headers.get("If-Unmodified-Since"))
+
+  # If-None-Match / If-Match parsed to :any ("*"), an Array of entity-tag
+  # entries, or nil when the header is absent (see ETag). The response's
+  # current representation matches under WEAK comparison for If-None-Match
+  # and STRONG for If-Match.
+  -> if_none_match
+    ETag.parse(@headers.get("If-None-Match"))
+
+  -> if_match
+    ETag.parse(@headers.get("If-Match"))
+
+  # Evaluate this request's preconditions (RFC 7232 §6) against a
+  # representation whose current ETag header value is `etag` (quoted, or
+  # nil) and whose modification time is `last_modified` epoch seconds (or
+  # nil). Returns :ok, :not_modified (304), or :precondition_failed (412).
+  -> preconditions(etag = nil, last_modified = nil)
+    Conditional.evaluate(self, etag, last_modified)
+
   # --- Parsing ---
 
   # Parse a raw HTTP/1.1 request (request line + headers + optional body).

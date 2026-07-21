@@ -8,6 +8,8 @@ use multipart
 use negotiation
 use byte_range
 use forwarded
+use http_date
+use conditional
 use request
 use response
 use router

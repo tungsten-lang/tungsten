@@ -10,21 +10,32 @@
     path = self.safe_path(config.static_dir, request.path)
     return nil unless path && File.exist?(path) && File.file?(path)
 
-    # ETag check — 304 Not Modified
+    last_modified = File.stat(path).mtime.to_i
+
+    etag = nil
+    etag_value = nil
     if config.etag
       etag = self.compute_etag(path)
-      if_none_match = request.headers.get("If-None-Match")
-      if if_none_match == "\"[etag]\""
-        return Response.new(status: 304, body: "").etag(etag)
+      etag_value = "\"" + etag + "\""
+
+    # Conditional request evaluation (RFC 7232, see lib/conditional.w):
+    # 304 Not Modified when the client's cached copy is still current, by
+    # If-None-Match (weak comparison, tag lists, "*") or If-Modified-Since.
+    if request.preconditions(etag_value, last_modified) == :not_modified
+      not_modified = Response.new(status: 304, body: "")
+      not_modified.header("Last-Modified", HttpDate.format(last_modified))
+      not_modified.etag(etag) if etag != nil
+      return not_modified
 
     # Build response
     response = Response.new(status: 200)
     response.content_type(self.mime_type(path))
+    response.header("Last-Modified", HttpDate.format(last_modified))
 
     if config.cache_control
       response.header("Cache-Control", config.cache_control)
 
-    if config.etag
+    if etag != nil
       response.etag(etag)
 
     if request.method == :HEAD

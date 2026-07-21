@@ -45,7 +45,9 @@
 
   # Port from an authority, or default_port when none is given. For an IPv6
   # host the delimiting colon is the one after the closing bracket, never a
-  # colon inside the address itself.
+  # colon inside the address itself. A bare colon with no digits after it
+  # (e.g. "a.com:" or "[::1]:") is treated like a missing port and falls back
+  # to default_port, not 0.
   -> .authority_port(auth, default_port) (string i64) i64
     if auth.starts_with?("\[")
       close = auth.index("\]")
@@ -53,10 +55,14 @@
       port_pos = close + 1
       return default_port if port_pos >= auth.size
       return default_port if auth.slice(port_pos, 1) != ":"
-      return auth.slice(port_pos + 1, auth.size - port_pos - 1).to_i
+      port_str = auth.slice(port_pos + 1, auth.size - port_pos - 1)
+      return default_port if port_str.size == 0
+      return port_str.to_i
     colon = auth.index(":")
     return default_port if colon == nil
-    auth.slice(colon + 1, auth.size - colon - 1).to_i
+    port_str = auth.slice(colon + 1, auth.size - colon - 1)
+    return default_port if port_str.size == 0
+    port_str.to_i
 
   -> .url_host(url) (string) string
     authority_host(url_authority(url))
@@ -85,13 +91,17 @@
       i += 1
     out.to_s
 
+  # The match is anchored to a header-line start — the key is "CRLF + name" —
+  # so a name is never found inside another header's value: a response carrying
+  # "X-Original-Content-Length: 99" before the real "Content-Length: 5" frames
+  # against 5, not 99. Matched case-insensitively via downcase, mirroring the
+  # line-anchored header_value / response_length_at_raw scans.
   -> .content_length(buf, header_end) (string i64) i64
-    pos = buf.index("Content-Length:")
-    if pos == nil || pos > header_end
-      pos = buf.index("content-length:")
-    if pos == nil || pos > header_end
+    target = "\r\ncontent-length:"
+    pos = buf.downcase.index(target)
+    if pos == nil || pos >= header_end
       return 0
-    value_start = pos + 15
+    value_start = pos + target.size
     line_end = buf.index("\n", value_start)
     if line_end == nil || line_end > header_end
       line_end = header_end

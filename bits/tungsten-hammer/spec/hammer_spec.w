@@ -66,6 +66,10 @@ t.eq("default https port is 443", Hammer.url_port("https://a.com/p"), 443)
 t.eq("explicit http port", Hammer.url_port("http://a.com:9000/p"), 9000)
 t.eq("explicit https port overrides default", Hammer.url_port("https://a.com:8443/p"), 8443)
 t.eq("explicit port with no path", Hammer.url_port("http://a.com:1234"), 1234)
+# A bare colon with no digits after it falls back to the scheme default, like a
+# missing port — not 0.
+t.eq("empty port falls back to http default", Hammer.url_port("http://a.com:/p"), 80)
+t.eq("empty port falls back to https default", Hammer.url_port("https://a.com:/p"), 443)
 
 # ---- url_path ----
 t.eq("missing path defaults to /", Hammer.url_path("http://a.com"), "/")
@@ -81,6 +85,7 @@ t.eq("IPv6 explicit port after bracket", Hammer.url_port("http://\[::1\]:8080/p"
 t.eq("IPv6 host without port", Hammer.url_host("http://\[2001:db8::1\]/p"), "2001:db8::1")
 t.eq("IPv6 default port when absent", Hammer.url_port("http://\[2001:db8::1\]/p"), 80)
 t.eq("IPv6 https default port", Hammer.url_port("https://\[::1\]/p"), 443)
+t.eq("IPv6 empty port falls back to default", Hammer.url_port("http://\[::1\]:/p"), 80)
 t.eq("IPv6 host with no path", Hammer.url_host("http://\[::1\]:8080"), "::1")
 t.eq("IPv6 path is unaffected by the address", Hammer.url_path("http://\[::1\]:8080/foo"), "/foo")
 
@@ -108,6 +113,13 @@ t.eq("content-length parsed", Hammer.content_length("HTTP/1.1 200 OK\r\nContent-
 t.eq("lowercase content-length parsed", Hammer.content_length("HTTP/1.1 200 OK\r\ncontent-length: 7\r\n\r\n", 100), 7)
 t.eq("absent content-length is 0", Hammer.content_length("HTTP/1.1 200 OK\r\n\r\n", 100), 0)
 t.eq("content-length beyond header_end ignored", Hammer.content_length("HTTP/1.1 200 OK\r\nContent-Length: 42\r\n\r\n", 5), 0)
+# The name is matched anchored to a header-line start (CRLF + name), so a header
+# whose NAME merely ENDS in "Content-Length" (e.g. "X-Original-Content-Length")
+# preceding the real Content-Length does not shadow it — frames against 5, not 99.
+t.eq("content-length not shadowed by a name-suffix header",
+     Hammer.content_length("HTTP/1.1 200 OK\r\nX-Original-Content-Length: 99\r\nContent-Length: 5\r\n\r\n", 200), 5)
+t.eq("content-length not shadowed (lowercase suffix header)",
+     Hammer.content_length("HTTP/1.1 200 OK\r\nx-original-content-length: 99\r\ncontent-length: 7\r\n\r\n", 200), 7)
 
 # ---- response_length / response_length_at_raw ----
 resp = "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello"

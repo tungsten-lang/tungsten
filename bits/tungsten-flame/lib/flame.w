@@ -19,6 +19,7 @@ use sampler
 use flame_svg
 use flame_diff
 use speedscope
+use hot_frames
 
 # ---- Read and parse the manpage ----
 # Prefer TUNGSTEN_ROOT (set by the CLI); __DIR__ is not always populated
@@ -81,6 +82,7 @@ fl_execution   = opts.flag?("execution")
 fl_build_only  = opts.flag?("build_only")
 fl_silent      = opts.flag?("silent")
 fl_diff        = opts.flag?("diff")
+fl_hot         = opts.flag?("hot")
 fl_speedscope  = opts.flag?("speedscope")
 fl_files       = opts.args
 fl_passthrough = opts.passthrough
@@ -111,6 +113,31 @@ if fl_diff
     write_file(fl_output, Tungsten:Flame:FlameDiff.diff_normalized(before_text, after_text))
     if !fl_silent
       << "wrote diff folded: " + fl_output
+  exit(0)
+
+# Hot-frames mode: a flat "self vs total" profile from one or more folded
+# files (`flame --hot FILE.folded [MORE.folded ...]`). Like --diff, it
+# operates purely on folded text — no compile, no profiling — so it works
+# on any folded stacks, whoever produced them. Multiple files aggregate:
+# concatenated folded text sums duplicate stacks, combining N runs into one
+# report. Ranks frames by inclusive (total) time, showing self alongside —
+# the view the self-only "Top Functions" list and the SVG picture omit.
+if fl_hot
+  if fl_files.size < 1
+    << "tungsten flame --hot: need at least one folded file"
+    exit(1)
+  combined = ""
+  hi = 0
+  while hi < fl_files.size
+    ftext = read_file(fl_files[hi])
+    if ftext == nil
+      << "tungsten flame: cannot read " + fl_files[hi]
+      exit(1)
+    if combined != ""
+      combined = combined + "\n"
+    combined = combined + ftext
+    hi = hi + 1
+  << Tungsten:Flame:HotFrames.report(combined, fl_top, !fl_silent)
   exit(0)
 
 if fl_pid != nil

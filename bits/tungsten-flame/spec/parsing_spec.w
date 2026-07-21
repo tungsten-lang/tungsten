@@ -11,6 +11,7 @@ use analyzer
 use flame_svg
 use flame_diff
 use speedscope
+use hot_frames
 
 describe "PerfScript" ->
   it "collapses perf script samples into sorted folded stacks" ->
@@ -311,5 +312,81 @@ describe "Speedscope" ->
     expect(ss.include?("\"samples\":\[\]")).to eq(true)
     expect(ss.include?("\"weights\":\[\]")).to eq(true)
     expect(ss.include?("\"endValue\":0")).to eq(true)
+
+describe "HotFrames" ->
+  it "computes self (leaf-only) counts per frame" ->
+    map = Tungsten:Flame:HotFrames.parse_folded("main;a;b 10\nmain;a;c 5\nmain;d 3")[:map]
+    sc = Tungsten:Flame:HotFrames.self_from_map(map)
+    expect(sc["b"]).to eq(10)
+    expect(sc["c"]).to eq(5)
+    expect(sc["d"]).to eq(3)
+    expect(sc.has_key?("main")).to eq(false)
+    expect(sc.has_key?("a")).to eq(false)
+
+  it "computes inclusive (total) counts, counting recursion once" ->
+    map = Tungsten:Flame:HotFrames.parse_folded("main;a;a;b 4\nmain;c 6")[:map]
+    incl = Tungsten:Flame:HotFrames.inclusive_from_map(map)
+    expect(incl["main"]).to eq(10)
+    expect(incl["a"]).to eq(4)
+    expect(incl["b"]).to eq(4)
+    expect(incl["c"]).to eq(6)
+
+  it "sums duplicate stacks so concatenated runs aggregate" ->
+    p = Tungsten:Flame:HotFrames.parse_folded("f;g 2\nf;g 3")
+    expect(p[:total]).to eq(5)
+    expect(p[:map]["f;g"]).to eq(5)
+
+  it "ranks frames by total desc, showing self alongside" ->
+    ranked = Tungsten:Flame:HotFrames.rank("main;a;b 10\nmain;a;c 5\nmain;d 3")
+    expect(ranked[0][0]).to eq("main")
+    expect(ranked[0][1]).to eq(0)
+    expect(ranked[0][2]).to eq(18)
+    expect(ranked[1][0]).to eq("a")
+    expect(ranked[1][2]).to eq(15)
+    expect(ranked[2][0]).to eq("b")
+    expect(ranked[2][1]).to eq(10)
+    expect(ranked[2][2]).to eq(10)
+
+  it "breaks equal-total ties by self descending" ->
+    ranked = Tungsten:Flame:HotFrames.rank("r;hi;lo 8\nr;hi 2")
+    expect(ranked[0][0]).to eq("hi")
+    expect(ranked[0][1]).to eq(2)
+    expect(ranked[0][2]).to eq(10)
+    expect(ranked[1][0]).to eq("r")
+    expect(ranked[1][1]).to eq(0)
+    expect(ranked[1][2]).to eq(10)
+    expect(ranked[2][0]).to eq("lo")
+
+  it "breaks equal-total-and-self ties by frame name ascending" ->
+    ranked = Tungsten:Flame:HotFrames.rank("x;p 5\nx;q 5")
+    expect(ranked[0][0]).to eq("x")
+    expect(ranked[1][0]).to eq("p")
+    expect(ranked[2][0]).to eq("q")
+
+  it "normalizes offset and library-prefix decorations" ->
+    expect(Tungsten:Flame:HotFrames.normalize_frame("libsystem_kernel.dylib`kevent + 8")).to eq("kevent")
+    expect(Tungsten:Flame:HotFrames.normalize_frame("do_work + 44")).to eq("do_work")
+    expect(Tungsten:Flame:HotFrames.normalize_frame("Array#count")).to eq("Array#count")
+
+  it "merges decorated variants of one symbol into a single frame" ->
+    map = Tungsten:Flame:HotFrames.parse_folded("a`foo + 8;bar 2\nfoo;bar 3")[:map]
+    incl = Tungsten:Flame:HotFrames.inclusive_from_map(map)
+    expect(incl["foo"]).to eq(5)
+    expect(incl["bar"]).to eq(5)
+
+  it "renders a flat self-vs-total report with percentages" ->
+    r = Tungsten:Flame:HotFrames.report("main;a;b 10\nmain;a;c 5\nmain;d 3", 3, false)
+    expect(r.include?("Hot Frames")).to eq(true)
+    expect(r.include?("18 samples")).to eq(true)
+    expect(r.include?("TOTAL")).to eq(true)
+    expect(r.include?("SELF")).to eq(true)
+    expect(r.include?("FUNCTION")).to eq(true)
+    expect(r.include?("100.0%")).to eq(true)
+    expect(r.include?("main")).to eq(true)
+
+  it "handles empty input as a no-samples report" ->
+    r = Tungsten:Flame:HotFrames.report("", 5, false)
+    expect(r.include?("no samples")).to eq(true)
+    expect(Tungsten:Flame:HotFrames.rank("").size()).to eq(0)
 
 spec_summary

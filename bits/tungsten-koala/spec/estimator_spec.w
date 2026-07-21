@@ -313,6 +313,102 @@ describe "KNNClassifier" ->
     expect(r != nil).to be_true
     expect(model.predict([[1]])).to be_nil
 
+describe "LogisticRegression" ->
+  # Weights start at zero, so sigmoid(0) = 0.5 makes the FIRST gradient
+  # step exact — no transcendental. On x = [[0], [1]], y = [0, 1] with
+  # learning rate 1 and one epoch the weight gradient is
+  # (0.5*0 + (0.5 - 1)*1) / 2 = -0.25, so w steps to [0.25] and b to 0.
+  it "takes the exact hand-computed first gradient step (lr = 1, 1 epoch)" ->
+    model = LogisticRegression.new(1, 1)
+    expect(model.fitted?).to be_false
+    r = model.fit([[0], [1]], [0, 1])
+    expect(r != nil).to be_true
+    expect(model.fitted?).to be_true
+    expect(model.coefficients.to_s).to eq("\[0.25\]")
+    expect(model.intercept.to_s).to eq("0")
+    expect(model.classes.to_s).to eq("\[0, 1\]")
+    # probabilities: sigmoid(0) is exactly 0.5, sigmoid(0.25) within tol.
+    probs = model.predict_proba([[0], [1]])
+    expect(probs[0].to_s).to eq("0.5")
+    ref = 1.to_f / (1.to_f + Math.exp(0.to_f - (1.to_f / 4.to_f)))
+    tol = 1.to_f / 1000000.to_f
+    expect(LinAlg.fabs(probs[1] - ref) < tol).to be_true
+
+  # Two well-separated clusters (class 0 near the origin, class 1 near
+  # (3,3)) are linearly separable, so batch gradient descent at the
+  # defaults drives training accuracy to 1 and pushes every probability
+  # to the correct side of 0.5, staying strictly inside (0, 1).
+  it "separates two clusters and scores 1 at the defaults" ->
+    x = [[0, 0], [1, 0], [0, 1], [3, 3], [4, 3], [3, 4]]
+    y = [0, 0, 0, 1, 1, 1]
+    model = LogisticRegression.new
+    model.fit(x, y)
+    expect(model.predict(x).to_s).to eq("\[0, 0, 0, 1, 1, 1\]")
+    expect(model.score(x, y).to_s).to eq("1")
+    probs = model.predict_proba(x)
+    half = 1.to_f / 2.to_f
+    expect(probs[0] > 0.to_f).to be_true
+    expect(probs[0] < half).to be_true
+    expect(probs[5] > half).to be_true
+    expect(probs[5] < 1.to_f).to be_true
+
+  # Labels are opaque: fit maps the two distinct labels to 0/1 by
+  # first-seen order and predict returns those originals, so the output
+  # flows straight into Metrics.accuracy like KNNClassifier's.
+  it "maps two opaque labels to 0/1 and returns the originals" ->
+    x = [[0, 0], [1, 0], [0, 1], [3, 3], [4, 3], [3, 4]]
+    y = [:a, :a, :a, :b, :b, :b]
+    model = LogisticRegression.new
+    model.fit(x, y)
+    expect(model.classes.to_s).to eq("\[a, b\]")
+    preds = model.predict([[0, 0], [4, 4]])
+    expect(preds.to_s).to eq("\[a, b\]")
+    expect(Metrics.accuracy(preds, [:a, :b]).to_s).to eq("1")
+    expect(Metrics.accuracy(preds, [:b, :b]).to_s).to eq("0.5")
+
+  # Same accepted shapes as LinearRegression / KNNClassifier through the
+  # shared feature_rows / target_values: DataFrame (numeric columns only —
+  # :name is skipped), Series / Vector single-feature columns.
+  it "accepts DataFrame, Series and Vector inputs" ->
+    df = DataFrame.new([
+      [:name, ["p", "q", "r", "s", "t", "u"]],
+      [:f1, [0, 1, 0, 8, 9, 8]],
+      [:f2, [0, 0, 1, 8, 8, 9]]
+    ])
+    labels = Series.new([:lo, :lo, :lo, :hi, :hi, :hi], :cls)
+    model = LogisticRegression.new
+    model.fit(df, labels)
+    test = DataFrame.new([[:name, ["a", "b"]], [:f1, [1, 9]], [:f2, [0, 8]]])
+    expect(model.predict(test).to_s).to eq("\[lo, hi\]")
+    expect(model.score(df, labels).to_s).to eq("1")
+    xs = Series.new([0, 1, 2, 20, 21, 22], :x)
+    ms = LogisticRegression.new
+    ms.fit(xs, [0, 0, 0, 1, 1, 1])
+    expect(ms.predict(Vector.new([1, 21])).to_s).to eq("\[0, 1\]")
+
+  # Binary only: a y with one distinct label, or three or more, makes fit
+  # return nil and leaves fitted? false.
+  it "requires exactly two classes" ->
+    expect(LogisticRegression.new.fit([[1], [2]], [0, 0])).to be_nil
+    m = LogisticRegression.new
+    expect(m.fit([[1], [2], [3]], [0, 1, 2])).to be_nil
+    expect(m.fitted?).to be_false
+
+  # Unusable shapes and premature calls all return nil and leave fitted?
+  # false — the bit's shape-error convention, matching LinearRegression.
+  it "returns nil for unusable shapes and before fit" ->
+    model = LogisticRegression.new
+    expect(model.predict([[1, 2]])).to be_nil
+    expect(model.predict_proba([[1, 2]])).to be_nil
+    expect(model.score([[1, 2]], [0])).to be_nil
+    expect(model.fit([], [])).to be_nil
+    expect(model.fit([[1, 2], [3]], [0, 1])).to be_nil
+    expect(model.fit([[1], [2]], [0, 1, 1])).to be_nil
+    expect(model.fitted?).to be_false
+    r = model.fit([[0], [1]], [0, 1])
+    expect(r != nil).to be_true
+    expect(model.predict([[1, 2]])).to be_nil
+
 describe "KFold" ->
   # Shuffle-free folds are contiguous blocks of 0...n, scikit-learn's
   # KFold(shuffle=False): 10 samples in 5 folds are five [0,1] .. [8,9]

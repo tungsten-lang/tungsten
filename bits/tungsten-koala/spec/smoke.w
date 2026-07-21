@@ -141,6 +141,31 @@ use koala
     self.check("knn default k", KNNClassifier.new.k, 5)
     self.check("knn nil before fit", KNNClassifier.new(3).predict([[1, 1]]) == nil, true)
 
+    # --- LogisticRegression ---
+    # First epoch is exact: sigmoid(0) = 0.5 (no exp), so w = [0.25], b = 0.
+    lg = LogisticRegression.new(1, 1)
+    self.check("logreg fit self", lg.fit([[0], [1]], [0, 1]) != nil, true)
+    self.check("logreg fitted?", lg.fitted?, true)
+    self.check("logreg coef", lg.coefficients, "\[0.25\]")
+    self.check("logreg intercept", lg.intercept, 0)
+    self.check("logreg classes", lg.classes.join(","), "0,1")
+    self.check("logreg proba half", lg.predict_proba([[0]]), "\[0.5\]")
+    # Separable clusters converge to 100% accuracy at the defaults.
+    lgx = [[0, 0], [1, 0], [0, 1], [3, 3], [4, 3], [3, 4]]
+    lgy = [0, 0, 0, 1, 1, 1]
+    lgc = LogisticRegression.new
+    lgc.fit(lgx, lgy)
+    self.check("logreg sep preds", lgc.predict(lgx).join(","), "0,0,0,1,1,1")
+    self.check("logreg sep score", lgc.score(lgx, lgy), 1)
+    # Opaque labels map by first-seen order and come back unchanged.
+    lgs = LogisticRegression.new
+    lgs.fit(lgx, [:a, :a, :a, :b, :b, :b])
+    self.check("logreg sym classes", lgs.classes.join(","), "a,b")
+    self.check("logreg sym preds", lgs.predict([[0, 0], [4, 4]]).join(","), "a,b")
+    self.check("logreg nil before fit", LogisticRegression.new.predict([[1]]) == nil, true)
+    self.check("logreg one-class nil", LogisticRegression.new.fit([[1], [2]], [0, 0]) == nil, true)
+    self.check("logreg three-class nil", LogisticRegression.new.fit([[1], [2], [3]], [0, 1, 2]) == nil, true)
+
     # --- Cross-validation (KFold / CrossValidation) ---
     cv5 = KFold.new(5).split(10)
     self.check("kfold count", cv5.size, 5)

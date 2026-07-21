@@ -68,6 +68,18 @@ knn.fit([[1, 1], [2, 2], [6, 6], [7, 7]], [:a, :a, :b, :b])
 knn.predict([[2, 3], [7, 6]])        # => [:a, :b]  (Euclidean nearest)
 knn.score(x_test, y_test)            # => accuracy; labels feed Metrics.f1
 
+# Classification — LogisticRegression, gradient descent on cross-entropy
+lr = LogisticRegression.new          # lr = 0.1, 1000 epochs (or new(1, 500))
+lr.fit([[0, 0], [1, 0], [3, 3], [4, 3]], [0, 0, 1, 1])
+lr.coefficients                      # => per-feature weights (floats)
+lr.intercept                         # => bias term (float)
+lr.predict([[0, 1], [4, 4]])         # => [0, 1]  (P >= 0.5 -> classes[1])
+lr.predict_proba([[0, 1], [4, 4]])   # => P(classes[1]) in (0, 1)
+lr.classes                           # => two labels, first-seen order
+lr.score(x_test, y_test)             # => accuracy; labels feed Metrics.f1
+                                     # opaque labels map to 0/1: fit two,
+                                     # e.g. [:a, :b], predict returns them
+
 # ... or as a pipeline tail: transform features, then fit/predict
 pipe = Pipeline.new([Scaler.new(:standard), LinearRegression.new])
 pipe.fit(df_features, y)             # nil (unfitted) on collinear features
@@ -182,7 +194,26 @@ rows closest in squared-Euclidean distance, `score` is accuracy; it
 shares LinearRegression's accepted input shapes and produces the label
 arrays that `Metrics.accuracy`/`precision`/`recall`/`f1` consume;
 distance and vote ties break deterministically to the earlier training
-row, so both engines agree; k defaults to 5). A `Pipeline` whose LAST step is
+row, so both engines agree; k defaults to 5) and `LogisticRegression`
+(binary logistic regression — koala's parametric probabilistic
+classifier, fitted by full-batch gradient descent on the cross-entropy
+loss: `fit` learns weights and a bias minimizing mean cross-entropy of
+`sigmoid(w·x + b)` against 0/1 targets, stepping every epoch by
+−learning_rate × gradient from zero weights, so the first epoch is exact
+— on `[[0],[1]]`/`[0,1]` at learning rate 1 the weight gradient is
+−0.25 and `w` becomes `[0.25]`, `b` stays 0. `predict_proba` returns
+`P(classes[1])` strictly in (0, 1) — the sigmoid argument is clamped to
+±30 so `exp` never overflows — and `predict` thresholds at 0.5 to the
+original labels. Labels are opaque and binary: fit collects the two
+distinct labels in first-seen order, maps the first to 0 and the second
+to 1, and returns those originals, so the output feeds `Metrics.accuracy`
+/ `precision` / `recall` / `f1` exactly like KNNClassifier; a y with one
+class or three or more makes fit return nil. `new(learning_rate, epochs)`
+defaults to 0.1 / 1000 — the default rate is derived as `1.to_f/10.to_f`
+because a float literal corrupts call arguments, so a caller wanting a
+fractional rate derives it the same way. It shares LinearRegression's
+accepted input shapes, and `Math.exp`/`Math.log` agree bit-for-bit on
+both engines, so it is deterministic). A `Pipeline` whose LAST step is
 an estimator is fitted with `pipe.fit(df, y)` and answers
 `pipe.predict(x)` / `pipe.score(x, y)` by transforming through every
 step but the last. Model evaluation: `KFold` and `CrossValidation`

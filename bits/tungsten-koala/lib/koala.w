@@ -23,6 +23,7 @@ use matrix
 use linalg
 use linear_regression
 use knn
+use logistic_regression
 use scaler
 use encoder
 use imputer
@@ -33,9 +34,10 @@ use cross_validation
 # The remaining modules under lib/ (tensor, resample, transformer,
 # estimator, index, sparse, gpu, device) are unported design drafts —
 # they do not parse as Tungsten yet and are not loaded. estimator.w's
-# linear-regression payoff shipped as linear_regression.w above, and
-# its k-NN sketch shipped as knn.w; the draft stays only as the sketch
-# for the logistic / decision-tree follow-ups. Port a draft into the
+# linear-regression payoff shipped as linear_regression.w above, its
+# k-NN sketch shipped as knn.w, and its logistic-regression sketch
+# shipped as logistic_regression.w; the draft stays only as the sketch
+# for the decision-tree / lasso follow-ups. Port a draft into the
 # manifest above only after
 # `bin/tungsten -c` passes on it AND it runs on both engines (spec
 # coverage in spec/*.w).

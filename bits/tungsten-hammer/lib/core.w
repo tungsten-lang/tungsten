@@ -496,6 +496,67 @@
       line_end = section_end
     response.slice(value_start, line_end - value_start).strip
 
+  # ---- connection persistence (HTTP keep-alive) — RFC 7230 §6.1, §6.3 ----
+  # A benchmark reuses one socket for many requests (request_batch sends
+  # "Connection: keep-alive" and tungsten_connection pipelines over the open
+  # fd), so it must honor a server that declines to persist: after a response
+  # carrying the "close" connection-option the socket is closed and the next
+  # write would error — exactly the "honor a Connection: close" use the
+  # header_value comment above names. Detecting it correctly is more than a
+  # header_value lookup: the Connection header field is a *comma-separated list*
+  # of case-insensitive tokens ("Connection: close", but also
+  # "keep-alive, Upgrade"), so a naive value == "close" both false-matches a
+  # longer token and misses "close" inside a list. And the persistence *default*
+  # is version-dependent (RFC 7230 §6.3): HTTP/1.1 persists unless told to
+  # close, while HTTP/1.0 closes unless it opts in with a "keep-alive" token.
+  # These pure predicates layer that semantics over header_value and the status
+  # line's version; all are integer-valued (1/0) so a caller branches directly.
+
+  # Case-insensitive membership test of `token` in the comma-separated list
+  # `list`: 1 when some element, trimmed of surrounding optional whitespace,
+  # equals `token` in full — a token is never matched as a substring of a longer
+  # element, so "close" is not found inside "x-close-notify". 0 otherwise,
+  # including an empty list.
+  -> .csv_has_token?(list, token) (string string) i64
+    target = token.downcase
+    lower = list.downcase
+    n = lower.size
+    start = 0 ## i64
+    while start <= n
+      comma = lower.index(",", start)
+      if comma == nil
+        seg_end = n
+      else
+        seg_end = comma
+      return 1 if lower.slice(start, seg_end - start).strip == target
+      break if comma == nil
+      start = comma + 1
+    0
+
+  # 1 when the response's Connection header lists `token` (case-insensitive,
+  # comma-list aware); 0 when the token is absent or there is no Connection
+  # header at all. The general form behind connection_close?/keep_alive?.
+  -> .connection_has_token?(response, token) (string string) i64
+    value = header_value(response, "Connection")
+    return 0 if value == nil
+    csv_has_token?(value, token)
+
+  # 1 when the server signalled it will close the connection after this response
+  # ("Connection: close", the option that ends a keep-alive session), else 0.
+  # The benchmark reconnects rather than reusing the socket when this is set.
+  -> .connection_close?(response) (string) i64
+    connection_has_token?(response, "close")
+
+  # wrk/bombardier-style persistence decision (RFC 7230 §6.3): 1 when the socket
+  # may be reused for the next request, 0 when the benchmark must reconnect. An
+  # explicit "close" always wins (0). Otherwise HTTP/1.1 — and HTTP/2, and any
+  # newer/unrecognized version — persists by default (1), while HTTP/1.0
+  # persists only when it opts in with an explicit "keep-alive" token.
+  -> .keep_alive?(response) (string) i64
+    return 0 if connection_close?(response) == 1
+    return connection_has_token?(response, "keep-alive") if response.starts_with?("HTTP/1.0")
+    1
+
   # ---- throughput and human-readable reporting formatters ----
   # A benchmark's headline output is its rates: requests per second and bytes
   # per second, rendered compactly the way the C engine (lib/hammer.c) already

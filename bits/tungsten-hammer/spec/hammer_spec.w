@@ -462,4 +462,53 @@ t.eq("header from a full framed response", Hammer.header_value(resp, "Content-Le
 partial = "HTTP/1.1 200 OK\r\nServer: partial"
 t.eq("header from an unterminated header section", Hammer.header_value(partial, "Server"), "partial")
 
+# ---- connection persistence (HTTP keep-alive) ----
+# The Connection header is a comma-separated list of case-insensitive tokens
+# (RFC 7230 §6.1); csv_has_token? matches a whole token, connection_close?
+# detects the "close" option, and keep_alive? applies the version-aware
+# persistence default (RFC 7230 §6.3). Reference values are hand-derived from
+# each header line and status-line version.
+
+# ---- csv_has_token? (comma-list token membership, case-insensitive) ----
+t.eq("single-token list matches", Hammer.csv_has_token?("close", "close"), 1)
+t.eq("token found in a multi-token list", Hammer.csv_has_token?("keep-alive, Upgrade", "upgrade"), 1)
+t.eq("first token of a list matches", Hammer.csv_has_token?("close, keep-alive", "close"), 1)
+t.eq("token match is case-insensitive", Hammer.csv_has_token?("Keep-Alive", "keep-alive"), 1)
+t.eq("query token case is normalized too", Hammer.csv_has_token?("keep-alive", "KEEP-ALIVE"), 1)
+t.eq("absent token is not found", Hammer.csv_has_token?("keep-alive, upgrade", "close"), 0)
+t.eq("token is not matched as a substring of a longer element", Hammer.csv_has_token?("x-close-notify", "close"), 0)
+t.eq("empty list has no tokens", Hammer.csv_has_token?("", "close"), 0)
+t.eq("trailing comma does not false-match", Hammer.csv_has_token?("keep-alive,", "close"), 0)
+t.eq("token after a trailing comma still matches", Hammer.csv_has_token?("keep-alive, close,", "close"), 1)
+
+# ---- connection_has_token? / connection_close? (reads the Connection header) ----
+close_resp = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n"
+ka_resp = "HTTP/1.1 200 OK\r\nConnection: keep-alive\r\n\r\n"
+list_resp = "HTTP/1.1 200 OK\r\nConnection: keep-alive, Upgrade\r\n\r\n"
+no_conn = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+t.eq("connection_has_token? finds a listed token", Hammer.connection_has_token?(list_resp, "upgrade"), 1)
+t.eq("connection_has_token? is 0 when the header is absent", Hammer.connection_has_token?(no_conn, "close"), 0)
+t.eq("connection_close? detects Connection: close", Hammer.connection_close?(close_resp), 1)
+t.eq("connection_close? is 0 on a keep-alive response", Hammer.connection_close?(ka_resp), 0)
+t.eq("connection_close? is 0 when the header is absent", Hammer.connection_close?(no_conn), 0)
+# Case-insensitive header name and token, matched from a full framed response.
+mixed_conn = "HTTP/1.1 200 OK\r\nconnection: Close\r\nContent-Length: 3\r\n\r\nabc"
+t.eq("connection_close? is case-insensitive in name and token", Hammer.connection_close?(mixed_conn), 1)
+
+# ---- keep_alive? (version-aware persistence default, RFC 7230 §6.3) ----
+# HTTP/1.1 persists by default, unless the server sends "close".
+t.eq("HTTP/1.1 persists by default", Hammer.keep_alive?(no_conn), 1)
+t.eq("HTTP/1.1 keep-alive persists", Hammer.keep_alive?(ka_resp), 1)
+t.eq("HTTP/1.1 close does not persist", Hammer.keep_alive?(close_resp), 0)
+t.eq("explicit close overrides a keep-alive token in the list", Hammer.keep_alive?("HTTP/1.1 200 OK\r\nConnection: keep-alive, close\r\n\r\n"), 0)
+# HTTP/1.0 is non-persistent unless it opts in with an explicit keep-alive.
+h10_default = "HTTP/1.0 200 OK\r\nContent-Length: 0\r\n\r\n"
+h10_ka = "HTTP/1.0 200 OK\r\nConnection: keep-alive\r\n\r\n"
+h10_close = "HTTP/1.0 200 OK\r\nConnection: close\r\n\r\n"
+t.eq("HTTP/1.0 does not persist by default", Hammer.keep_alive?(h10_default), 0)
+t.eq("HTTP/1.0 with an explicit keep-alive persists", Hammer.keep_alive?(h10_ka), 1)
+t.eq("HTTP/1.0 close does not persist", Hammer.keep_alive?(h10_close), 0)
+# HTTP/2 (and newer) persists by default like HTTP/1.1.
+t.eq("HTTP/2 persists by default", Hammer.keep_alive?("HTTP/2 200 OK\r\n\r\n"), 1)
+
 t.done

@@ -104,6 +104,13 @@ use carbide
   -> author
     Model.belongs_to(self, SpecAuthor, :author_id)
 
+# --- Model exercising query refinement (order/limit/offset/paginate/pluck).
+# Carries a string :name and a numeric :priority so ordering by each key is
+# unambiguous, and rows are inserted out of order so a working sort is visible.
++ SpecRanked < Model
+  -> table
+    "spec_ranked"
+
 describe "Model" ->
   describe "construction" ->
     it "builds from an attributes hash" ->
@@ -369,5 +376,144 @@ describe "Model" ->
         Model.reset_all
         a = Model.create(SpecAuthor, {name: "amy"})
         expect(a.profile).to be_nil
+
+  describe "query refinement" ->
+    describe "order" ->
+      it "sorts ascending by a string key" ->
+        Model.reset_all
+        Model.create(SpecRanked, {name: "charlie", priority: 2})
+        Model.create(SpecRanked, {name: "alice", priority: 3})
+        Model.create(SpecRanked, {name: "bob", priority: 1})
+        rows = Model.order(Model.all(SpecRanked), :name)
+        expect(rows[0].get(:name)).to eq("alice")
+        expect(rows[1].get(:name)).to eq("bob")
+        expect(rows[2].get(:name)).to eq("charlie")
+
+      it "sorts descending with :desc" ->
+        Model.reset_all
+        Model.create(SpecRanked, {name: "charlie", priority: 2})
+        Model.create(SpecRanked, {name: "alice", priority: 3})
+        Model.create(SpecRanked, {name: "bob", priority: 1})
+        rows = Model.order(Model.all(SpecRanked), :name, :desc)
+        expect(rows[0].get(:name)).to eq("charlie")
+        expect(rows[2].get(:name)).to eq("alice")
+
+      it "sorts by a numeric key" ->
+        Model.reset_all
+        Model.create(SpecRanked, {name: "charlie", priority: 2})
+        Model.create(SpecRanked, {name: "alice", priority: 3})
+        Model.create(SpecRanked, {name: "bob", priority: 1})
+        rows = Model.order(Model.all(SpecRanked), :priority)
+        expect(rows[0].get(:name)).to eq("bob")
+        expect(rows[2].get(:name)).to eq("alice")
+
+      it "does not mutate the source array" ->
+        Model.reset_all
+        Model.create(SpecRanked, {name: "charlie", priority: 2})
+        Model.create(SpecRanked, {name: "alice", priority: 3})
+        src = Model.all(SpecRanked)
+        Model.order(src, :name)
+        expect(src[0].get(:name)).to eq("charlie")
+
+    describe "limit / offset" ->
+      it "limits to the first n rows" ->
+        Model.reset_all
+        Model.create(SpecRanked, {name: "a", priority: 1})
+        Model.create(SpecRanked, {name: "b", priority: 2})
+        Model.create(SpecRanked, {name: "c", priority: 3})
+        rows = Model.order(Model.all(SpecRanked), :priority)
+        limited = Model.limit(rows, 2)
+        expect(limited.size).to eq(2)
+        expect(limited[0].get(:name)).to eq("a")
+        expect(limited[1].get(:name)).to eq("b")
+
+      it "returns all rows when the limit exceeds the count" ->
+        Model.reset_all
+        Model.create(SpecRanked, {name: "a", priority: 1})
+        Model.create(SpecRanked, {name: "b", priority: 2})
+        expect(Model.limit(Model.all(SpecRanked), 10).size).to eq(2)
+
+      it "treats a zero or negative limit as empty" ->
+        Model.reset_all
+        Model.create(SpecRanked, {name: "a", priority: 1})
+        expect(Model.limit(Model.all(SpecRanked), 0).size).to eq(0)
+        expect(Model.limit(Model.all(SpecRanked), -1).size).to eq(0)
+
+      it "offsets past the first n rows" ->
+        Model.reset_all
+        Model.create(SpecRanked, {name: "a", priority: 1})
+        Model.create(SpecRanked, {name: "b", priority: 2})
+        Model.create(SpecRanked, {name: "c", priority: 3})
+        rows = Model.order(Model.all(SpecRanked), :priority)
+        rest = Model.offset(rows, 1)
+        expect(rest.size).to eq(2)
+        expect(rest[0].get(:name)).to eq("b")
+
+      it "returns empty when the offset exceeds the count" ->
+        Model.reset_all
+        Model.create(SpecRanked, {name: "a", priority: 1})
+        expect(Model.offset(Model.all(SpecRanked), 5).size).to eq(0)
+
+    describe "paginate" ->
+      it "returns the requested page" ->
+        Model.reset_all
+        Model.create(SpecRanked, {name: "a", priority: 1})
+        Model.create(SpecRanked, {name: "b", priority: 2})
+        Model.create(SpecRanked, {name: "c", priority: 3})
+        Model.create(SpecRanked, {name: "d", priority: 4})
+        Model.create(SpecRanked, {name: "e", priority: 5})
+        rows = Model.order(Model.all(SpecRanked), :priority)
+        page2 = Model.paginate(rows, 2, 2)
+        expect(page2.size).to eq(2)
+        expect(page2[0].get(:name)).to eq("c")
+        expect(page2[1].get(:name)).to eq("d")
+
+      it "returns a partial final page" ->
+        Model.reset_all
+        Model.create(SpecRanked, {name: "a", priority: 1})
+        Model.create(SpecRanked, {name: "b", priority: 2})
+        Model.create(SpecRanked, {name: "c", priority: 3})
+        Model.create(SpecRanked, {name: "d", priority: 4})
+        Model.create(SpecRanked, {name: "e", priority: 5})
+        rows = Model.order(Model.all(SpecRanked), :priority)
+        page3 = Model.paginate(rows, 3, 2)
+        expect(page3.size).to eq(1)
+        expect(page3[0].get(:name)).to eq("e")
+
+      it "returns empty for an out-of-range page" ->
+        Model.reset_all
+        Model.create(SpecRanked, {name: "a", priority: 1})
+        Model.create(SpecRanked, {name: "b", priority: 2})
+        rows = Model.order(Model.all(SpecRanked), :priority)
+        expect(Model.paginate(rows, 9, 2).size).to eq(0)
+
+      it "clamps a page number below 1 to the first page" ->
+        Model.reset_all
+        Model.create(SpecRanked, {name: "a", priority: 1})
+        Model.create(SpecRanked, {name: "b", priority: 2})
+        rows = Model.order(Model.all(SpecRanked), :priority)
+        page0 = Model.paginate(rows, 0, 2)
+        expect(page0[0].get(:name)).to eq("a")
+
+    describe "page_count" ->
+      it "counts exact pages" ->
+        expect(Model.page_count(10, 5)).to eq(2)
+
+      it "rounds up a partial page" ->
+        expect(Model.page_count(11, 5)).to eq(3)
+
+      it "returns at least one page for zero rows" ->
+        expect(Model.page_count(0, 5)).to eq(1)
+
+    describe "pluck" ->
+      it "extracts one attribute across rows in order" ->
+        Model.reset_all
+        Model.create(SpecRanked, {name: "a", priority: 1})
+        Model.create(SpecRanked, {name: "b", priority: 2})
+        rows = Model.order(Model.all(SpecRanked), :priority)
+        names = Model.pluck(rows, :name)
+        expect(names.size).to eq(2)
+        expect(names[0]).to eq("a")
+        expect(names[1]).to eq("b")
 
 spec_summary

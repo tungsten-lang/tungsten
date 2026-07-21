@@ -136,6 +136,92 @@
   -> .delete_all(klass)
     Model.replace_rows(Model.table_of(klass), [])
 
+  # --- Query refinement: order / limit / offset / paginate / pluck ---
+  #
+  # ActiveRecord chains order/limit/offset/page on a relation; carbide
+  # composes them FUNCTIONALLY over the plain row array that all/where hand
+  # back — each takes a rows array and returns a NEW array, never mutating
+  # the store — because `where` yields an ordinary Array and collections ride
+  # in as arguments (the same pragma create/find/where use: no relation
+  # object, no inherited class methods to lose when compiled). They read
+  # inside-out but compose cleanly, and every list action a web app needs
+  # (sorted, paginated index pages) falls out of them:
+  #
+  #   rows  = Model.where(Post, {published: true})
+  #   page2 = Model.paginate(Model.order(rows, :title), 2, 10)  # pg 2, 10/pg
+  #   names = Model.pluck(page2, :title)                        # ["a", "b", …]
+  #   pages = Model.page_count(Model.count(Post), 10)           # pager size
+  #
+  # Design notes (constraints verified by probe on BOTH engines):
+  #   - Pure array slicing on top of sort_by/reverse/take/drop, all of which
+  #     behave identically on both engines (sort_by honours its key block
+  #     compiled, take/drop clamp to the array bounds rather than raising).
+  #   - Ordering assumes a present, comparable key on every row (a column
+  #     value), matching SQL ORDER BY; a nil or mixed-type key is a caller
+  #     error, not defended here. limit/offset/paginate ARE nil- and
+  #     over-range-safe: a bad page/size argument is clamped, an out-of-range
+  #     page yields [] — a malformed ?page= param can't crash a list action.
+  #   - Class methods called directly (Model.order(...)), never inherited, so
+  #     they work compiled; the row array rides in as an argument.
+
+  # Sort rows by attribute `key`. direction :asc (default) or :desc; :desc
+  # reverses the ascending order.
+  -> .order(rows, key, direction = :asc)
+    sorted = rows.sort_by -> (row) row.get(key)
+    result = sorted
+    if direction == :desc
+      result = sorted.reverse
+    result
+
+  # First `n` rows (SQL LIMIT). n >= size keeps them all; a nil or negative
+  # n yields [].
+  -> .limit(rows, n)
+    count = n
+    if count == nil || count < 0
+      count = 0
+    rows.take(count)
+
+  # Skip the first `n` rows (SQL OFFSET). n >= size yields []; a nil or
+  # negative n skips nothing.
+  -> .offset(rows, n)
+    skip = n
+    if skip == nil || skip < 0
+      skip = 0
+    rows.drop(skip)
+
+  # One page of results: 1-based page `number`, `per_page` rows each. An
+  # out-of-range page yields [] (never raises); a nil/<1 number or per_page
+  # is clamped to 1 so a bad param can't crash a list action.
+  -> .paginate(rows, number, per_page)
+    page = number
+    if page == nil || page < 1
+      page = 1
+    size = per_page
+    if size == nil || size < 1
+      size = 1
+    Model.limit(Model.offset(rows, (page - 1) * size), size)
+
+  # How many pages `total` rows span at `per_page` each — for sizing a pager
+  # UI (Kaminari's total_pages). Always >= 1; a nil/<1 per_page is clamped.
+  -> .page_count(total, per_page)
+    size = per_page
+    if size == nil || size < 1
+      size = 1
+    pages = total / size
+    if total % size != 0
+      pages = pages + 1
+    if pages < 1
+      pages = 1
+    pages
+
+  # Extract one attribute across rows (SQL pluck): [row.get(key), ...],
+  # in row order.
+  -> .pluck(rows, key)
+    out = []
+    rows.each -> (row)
+      out.push(row.get(key))
+    out
+
   # --- Associations (Rails-style belongs_to / has_many / has_one) ---
   #
   # Relationships over the in-memory store, expressed as one-line

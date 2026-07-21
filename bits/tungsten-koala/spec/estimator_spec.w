@@ -426,6 +426,201 @@ describe "LogisticRegression" ->
     ms.fit(x, ys)
     expect(Metrics.roc_auc(ms.predict_proba(x), ys, :b).to_s).to eq("1")
 
+describe "GaussianNB" ->
+  # Closed-form fit — no iteration, no seed. Two classes of two rows each:
+  # class 0 = [[1,2],[3,4]] (means [2,3]), class 1 = [[11,12],[13,14]]
+  # (means [12,13]); every within-class POPULATION variance (n denominator,
+  # numpy's np.var — NOT Stats.var's n-1) is 1. Priors are 2/4 = 0.5 each.
+  # epsilon_ = var_smoothing * max column variance over all four rows:
+  # each column is [1,3,11,13] / [2,4,12,14] about its mean 7 / 8, giving
+  # (36+16+16+36)/4 = 26, so epsilon = 1e-9 * 26 = 2.6e-8 and every
+  # variance is 1.000000026 — "1" at printing precision.
+  it "fits closed-form priors, means and variances (hand-computed)" ->
+    model = GaussianNB.new
+    expect(model.fitted?).to be_false
+    r = model.fit([[1, 2], [3, 4], [11, 12], [13, 14]], [0, 0, 1, 1])
+    expect(r != nil).to be_true
+    expect(model.fitted?).to be_true
+    expect(model.classes.to_s).to eq("\[0, 1\]")
+    expect(model.class_counts.to_s).to eq("\[2, 2\]")
+    expect(model.class_priors.to_s).to eq("\[0.5, 0.5\]")
+    expect(model.means.to_s).to eq("\[\[2, 3\], \[12, 13\]\]")
+    expect(model.variances.to_s).to eq("\[\[1, 1\], \[1, 1\]\]")
+    expect(model.epsilon.to_s).to eq("2.6e-08")
+    expect(model.var_smoothing.to_s).to eq("1e-09")
+
+  # jll(c) = log P(c) - 0.5*sum_j log(2*pi*var) - 0.5*sum_j (x-mean)^2/var.
+  # At the class-0 mean [2,3]: log(0.5) - log(2*pi*1) - 0 = -0.693147 -
+  # 1.837877 = -2.53102, and the class-1 term adds -0.5*(100+100) = -100
+  # for -102.531. Row [7,8] sits exactly between the two means, so both
+  # log likelihoods are bit-identical and the posteriors tie at 0.5.
+  it "classifies by argmax of the joint log likelihood" ->
+    model = GaussianNB.new
+    model.fit([[1, 2], [3, 4], [11, 12], [13, 14]], [0, 0, 1, 1])
+    q = [[2, 3], [12, 13], [7, 8]]
+    jll = model.joint_log_likelihood(q)
+    expect(jll[0].to_s).to eq("\[-2.53102, -102.531\]")
+    expect(jll[1].to_s).to eq("\[-102.531, -2.53102\]")
+    expect(jll[2].to_s).to eq("\[-27.531, -27.531\]")
+    probs = model.predict_proba(q)
+    expect(probs[2].to_s).to eq("\[0.5, 0.5\]")
+    expect(probs[0][0].to_s).to eq("1")
+    # an exact argmax tie breaks to the first-seen class
+    expect(model.predict(q).to_s).to eq("\[0, 1, 0\]")
+    expect(model.score([[1, 2], [3, 4], [11, 12], [13, 14]], [0, 0, 1, 1]).to_s).to eq("1")
+
+  # The scikit-learn GaussianNB documentation example verbatim:
+  # X = [[-1,-1],[-2,-1],[-3,-2],[1,1],[2,1],[3,2]], y = [1,1,1,2,2,2],
+  # clf.predict([[-0.8, -1]]) -> [1]. Means are [-2,-4/3] and [2,4/3],
+  # population variances 2/3 and 2/9 (+epsilon 4.66667e-9).
+  it "reproduces the scikit-learn documentation example" ->
+    x = [[0 - 1, 0 - 1], [0 - 2, 0 - 1], [0 - 3, 0 - 2], [1, 1], [2, 1], [3, 2]]
+    y = [1, 1, 1, 2, 2, 2]
+    model = GaussianNB.new
+    model.fit(x, y)
+    expect(model.means.to_s).to eq("\[\[-2, -1.33333\], \[2, 1.33333\]\]")
+    expect(model.variances.to_s).to eq("\[\[0.666667, 0.222222\], \[0.666667, 0.222222\]\]")
+    expect(model.epsilon.to_s).to eq("4.66667e-09")
+    q = [[0.to_f - 8.to_f / 10.to_f, 0 - 1]]
+    expect(model.joint_log_likelihood(q).to_s).to eq("\[\[-2.90625, -19.7063\]\]")
+    expect(model.predict(q).to_s).to eq("\[1\]")
+    expect(model.score(x, y).to_s).to eq("1")
+
+  # One feature, symmetric: class a = [-1,1] (mean 0), class b = [3,5]
+  # (mean 4), both variance 1, equal priors. With shared variances the
+  # two-class softmax IS a sigmoid of the log-odds -0.5*((x-4)^2 - x^2),
+  # so at x = 2 the classes tie exactly and at x = 0 the log-odds are -8.
+  it "returns posteriors that sum to 1 and a flat column for one label" ->
+    model = GaussianNB.new
+    model.fit([0 - 1, 1, 3, 5], [:a, :a, :b, :b])
+    expect(model.classes.to_s).to eq("\[a, b\]")
+    expect(model.means.to_s).to eq("\[\[0\], \[4\]\]")
+    probs = model.predict_proba([0, 2, 4])
+    expect(probs[1].to_s).to eq("\[0.5, 0.5\]")
+    tol = 1.to_f / 1000000.to_f
+    ref = 1.to_f / (1.to_f + Math.exp(8.to_f))
+    expect(LinAlg.fabs(probs[0][1] - ref) < tol).to be_true
+    expect(LinAlg.fabs(probs[0][0] + probs[0][1] - 1.to_f) < tol).to be_true
+    # a pos_label picks one class's column out, ready for roc_auc / log_loss
+    expect(model.predict_proba([0, 2, 4], :b).to_s).to eq("\[0.00033535, 0.5, 0.999665\]")
+    expect(model.predict_proba([0, 2, 4], :zz)).to be_nil
+    expect(model.predict([0, 2, 4]).to_s).to eq("\[a, a, b\]")
+
+  # A feature that never varies has variance 0, which would divide by
+  # zero. epsilon (= var_smoothing * the largest column variance) is added
+  # to every variance instead: feature 2 is a constant 5, so its variance
+  # is exactly epsilon = 1e-9 * 26 = 2.6e-8 and the fit stays finite. When
+  # EVERY feature is constant the reference variance is 0 too, so epsilon
+  # falls back to var_smoothing itself (scikit-learn yields nan here);
+  # both classes then tie and predict returns the first-seen label.
+  it "smooths zero-variance features instead of dividing by zero" ->
+    model = GaussianNB.new
+    model.fit([[0, 5], [2, 5], [10, 5], [12, 5]], [0, 0, 1, 1])
+    expect(model.epsilon.to_s).to eq("2.6e-08")
+    expect(model.variances.to_s).to eq("\[\[1, 2.6e-08\], \[1, 2.6e-08\]\]")
+    expect(model.joint_log_likelihood([[1, 5]])[0].to_s).to eq("\[6.20156, -43.7984\]")
+    expect(model.predict([[1, 5], [11, 5]]).to_s).to eq("\[0, 1\]")
+    flat = GaussianNB.new
+    flat.fit([5, 5, 5, 5], [0, 0, 1, 1])
+    expect(flat.epsilon.to_s).to eq("1e-09")
+    expect(flat.variances.to_s).to eq("\[\[1e-09\], \[1e-09\]\]")
+    expect(flat.predict_proba([5, 9]).to_s).to eq("\[\[0.5, 0.5\], \[0.5, 0.5\]\]")
+    expect(flat.predict([5, 9]).to_s).to eq("\[0, 0\]")
+    # var_smoothing is the knob (data-derived, never a float literal):
+    # 0.01 * 26 = 0.26 lands on every variance, 1 -> 1.26 and 0 -> 0.26.
+    loud = GaussianNB.new(1.to_f / 100.to_f)
+    loud.fit([[0, 5], [2, 5], [10, 5], [12, 5]], [0, 0, 1, 1])
+    expect(loud.epsilon.to_s).to eq("0.26")
+    expect(loud.variances.to_s).to eq("\[\[1.26, 0.26\], \[1.26, 0.26\]\]")
+    expect(loud.predict([[1, 5], [11, 5]]).to_s).to eq("\[0, 1\]")
+
+  # Multiclass out of the box — no one-vs-rest wrapper, the argmax just
+  # ranges over three classes — so predict feeds Metrics.classification_report
+  # directly. Three well-separated groups of two rows each: priors 1/3.
+  it "classifies three classes and feeds the classification report" ->
+    x = [[0, 0], [1, 0], [10, 10], [11, 10], [0, 20], [1, 20]]
+    y = [0, 0, 1, 1, 2, 2]
+    model = GaussianNB.new
+    model.fit(x, y)
+    expect(model.classes.to_s).to eq("\[0, 1, 2\]")
+    expect(model.class_counts.to_s).to eq("\[2, 2, 2\]")
+    expect(model.class_priors.to_s).to eq("\[0.333333, 0.333333, 0.333333\]")
+    expect(model.means.to_s).to eq("\[\[0.5, 0\], \[10.5, 10\], \[0.5, 20\]\]")
+    preds = model.predict([[0, 1], [10, 11], [1, 19]])
+    expect(preds.to_s).to eq("\[0, 1, 2\]")
+    expect(model.predict_proba([[0, 1]])[0].to_s).to eq("\[1, 0, 0\]")
+    expect(model.score(x, y).to_s).to eq("1")
+    rep = Metrics.classification_report(model.predict(x), y)
+    expect(rep.accuracy.to_s).to eq("1")
+    expect(rep.macro_f1.to_s).to eq("1")
+
+  # Same accepted shapes as the other estimators through the shared
+  # feature_rows / target_values: DataFrame (numeric columns only — :name
+  # is skipped), Matrix, Series / Vector single-feature columns.
+  it "accepts DataFrame, Matrix, Series and Vector inputs" ->
+    df = DataFrame.new([
+      [:name, ["p", "q", "r", "s"]],
+      [:f1, [1, 3, 11, 13]],
+      [:f2, [2, 4, 12, 14]]
+    ])
+    labels = Series.new([:lo, :lo, :hi, :hi], :cls)
+    model = GaussianNB.new
+    model.fit(df, labels)
+    expect(model.classes.to_s).to eq("\[lo, hi\]")
+    expect(model.means.to_s).to eq("\[\[2, 3\], \[12, 13\]\]")
+    test = DataFrame.new([[:name, ["a", "b"]], [:f1, [2, 12]], [:f2, [3, 13]]])
+    expect(model.predict(test).to_s).to eq("\[lo, hi\]")
+    expect(model.predict(Matrix.new([[2, 3], [12, 13]])).to_s).to eq("\[lo, hi\]")
+    expect(model.score(df, labels).to_s).to eq("1")
+    xs = Series.new([0 - 1, 1, 3, 5], :x)
+    ms = GaussianNB.new
+    ms.fit(xs, [0, 0, 1, 1])
+    expect(ms.predict(Vector.new([0, 4])).to_s).to eq("\[0, 1\]")
+
+  # The payoff of predict_proba(x, label): a threshold-free score column
+  # for Metrics.roc_auc / Metrics.log_loss. Two OVERLAPPING 1-D classes,
+  # [0,1] and [2,3], means 0.5 / 2.5 and variances 0.25 — shared, so the
+  # posterior is a sigmoid of -0.5*((x-2.5)^2 - (x-0.5)^2)/0.25 = 8x - 12.
+  # At x = 1 that is -4, P(1) = 1/(1+e^4) = 0.0179862. The ranking is still
+  # perfect (AUC 1) and the log loss is the small 0.00907804.
+  it "feeds predict_proba into Metrics.roc_auc and Metrics.log_loss" ->
+    x = [0, 1, 2, 3]
+    y = [0, 0, 1, 1]
+    model = GaussianNB.new
+    model.fit(x, y)
+    expect(model.means.to_s).to eq("\[\[0.5\], \[2.5\]\]")
+    expect(model.variances.to_s).to eq("\[\[0.25\], \[0.25\]\]")
+    scores = model.predict_proba(x, 1)
+    expect(scores.to_s).to eq("\[6.14417e-06, 0.0179862, 0.982014, 0.999994\]")
+    tol = 1.to_f / 1000000.to_f
+    ref = 1.to_f / (1.to_f + Math.exp(4.to_f))
+    expect(LinAlg.fabs(scores[1] - ref) < tol).to be_true
+    expect(Metrics.roc_auc(scores, y).to_s).to eq("1")
+    expect(Metrics.log_loss(scores, y).to_s).to eq("0.00907804")
+    expect(model.predict(x).to_s).to eq("\[0, 0, 1, 1\]")
+
+  # Unusable shapes and premature calls all return nil and leave fitted?
+  # false — the bit's shape-error convention, matching the estimators. A
+  # single class is FINE here (unlike LogisticRegression): a generative
+  # model with one class is degenerate but well defined.
+  it "returns nil for unusable shapes and before fit" ->
+    model = GaussianNB.new
+    expect(model.predict([[1, 2]])).to be_nil
+    expect(model.predict_proba([[1, 2]])).to be_nil
+    expect(model.joint_log_likelihood([[1, 2]])).to be_nil
+    expect(model.score([[1, 2]], [0])).to be_nil
+    expect(model.fit([], [])).to be_nil
+    expect(model.fit([[1, 2], [3]], [0, 1])).to be_nil
+    expect(model.fit([[1], [2]], [0, 1, 1])).to be_nil
+    expect(model.fitted?).to be_false
+    r = model.fit([[1, 2], [3, 4], [11, 12], [13, 14]], [0, 0, 1, 1])
+    expect(r != nil).to be_true
+    expect(model.predict([[1, 2, 3]])).to be_nil
+    expect(model.predict_proba([[1, 2, 3]])).to be_nil
+    one = GaussianNB.new
+    expect(one.fit([[1], [2]], [0, 0]) != nil).to be_true
+    expect(one.predict([[1]]).to_s).to eq("\[0\]")
+
 describe "KFold" ->
   # Shuffle-free folds are contiguous blocks of 0...n, scikit-learn's
   # KFold(shuffle=False): 10 samples in 5 folds are five [0,1] .. [8,9]

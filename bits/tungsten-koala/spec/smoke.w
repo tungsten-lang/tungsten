@@ -171,6 +171,77 @@ use koala
     self.check("logreg one-class nil", LogisticRegression.new.fit([[1], [2]], [0, 0]) == nil, true)
     self.check("logreg three-class nil", LogisticRegression.new.fit([[1], [2], [3]], [0, 1, 2]) == nil, true)
 
+    # --- GaussianNB (generative: closed-form Gaussian naive Bayes) ---
+    # Two classes of two rows: means [2,3] / [12,13], population variances
+    # all 1, priors 0.5. epsilon = 1e-9 * 26 (26 = the largest column
+    # variance over all four rows), so variances print as "1".
+    gx = [[1, 2], [3, 4], [11, 12], [13, 14]]
+    gy = [0, 0, 1, 1]
+    gnb = GaussianNB.new
+    self.check("gnb fit self", gnb.fit(gx, gy) != nil, true)
+    self.check("gnb fitted?", gnb.fitted?, true)
+    self.check("gnb classes", gnb.classes.join(","), "0,1")
+    self.check("gnb counts", gnb.class_counts, "\[2, 2\]")
+    self.check("gnb priors", gnb.class_priors, "\[0.5, 0.5\]")
+    self.check("gnb means", gnb.means, "\[\[2, 3\], \[12, 13\]\]")
+    self.check("gnb variances", gnb.variances, "\[\[1, 1\], \[1, 1\]\]")
+    self.check("gnb epsilon", gnb.epsilon, "2.6e-08")
+    self.check("gnb var_smoothing", gnb.var_smoothing, "1e-09")
+    # jll at the class-0 mean: log(0.5) - log(2*pi) = -2.53102; class 1
+    # adds -0.5*(100+100). Row [7,8] is equidistant, so both tie.
+    self.check("gnb jll", gnb.joint_log_likelihood([[2, 3]]), "\[\[-2.53102, -102.531\]\]")
+    self.check("gnb proba tie", gnb.predict_proba([[7, 8]]), "\[\[0.5, 0.5\]\]")
+    self.check("gnb predict", gnb.predict([[2, 3], [12, 13], [7, 8]]), "\[0, 1, 0\]")
+    self.check("gnb score", gnb.score(gx, gy), 1)
+    # scikit-learn's documentation example: predict([[-0.8, -1]]) -> [1]
+    skx = [[0 - 1, 0 - 1], [0 - 2, 0 - 1], [0 - 3, 0 - 2], [1, 1], [2, 1], [3, 2]]
+    sknb = GaussianNB.new
+    sknb.fit(skx, [1, 1, 1, 2, 2, 2])
+    self.check("gnb sklearn means", sknb.means, "\[\[-2, -1.33333\], \[2, 1.33333\]\]")
+    self.check("gnb sklearn vars", sknb.variances, "\[\[0.666667, 0.222222\], \[0.666667, 0.222222\]\]")
+    self.check("gnb sklearn predict", sknb.predict([[0.to_f - 8.to_f / 10.to_f, 0 - 1]]), "\[1\]")
+    # Opaque labels, one feature: class a = [-1,1], class b = [3,5]. Equal
+    # variances make the two-class softmax a sigmoid: P(b | x=0) = 1/(1+e^8).
+    symnb = GaussianNB.new
+    symnb.fit([0 - 1, 1, 3, 5], [:a, :a, :b, :b])
+    self.check("gnb sym classes", symnb.classes.join(","), "a,b")
+    self.check("gnb sym means", symnb.means, "\[\[0\], \[4\]\]")
+    self.check("gnb sym preds", symnb.predict([0, 2, 4]).join(","), "a,a,b")
+    self.check("gnb sym proba col", symnb.predict_proba([0, 2, 4], :b), "\[0.00033535, 0.5, 0.999665\]")
+    self.check("gnb unknown label nil", symnb.predict_proba([0], :zz) == nil, true)
+    # A constant feature would divide by zero; epsilon smooths it instead.
+    cnb = GaussianNB.new
+    cnb.fit([[0, 5], [2, 5], [10, 5], [12, 5]], [0, 0, 1, 1])
+    self.check("gnb const feature vars", cnb.variances, "\[\[1, 2.6e-08\], \[1, 2.6e-08\]\]")
+    self.check("gnb const feature predict", cnb.predict([[1, 5], [11, 5]]), "\[0, 1\]")
+    # Every feature constant: epsilon falls back to var_smoothing (sklearn
+    # yields nan), the classes tie, and predict takes the first-seen label.
+    dnb = GaussianNB.new
+    dnb.fit([5, 5, 5, 5], [0, 0, 1, 1])
+    self.check("gnb degenerate epsilon", dnb.epsilon, "1e-09")
+    self.check("gnb degenerate proba", dnb.predict_proba([5, 9]), "\[\[0.5, 0.5\], \[0.5, 0.5\]\]")
+    self.check("gnb degenerate predict", dnb.predict([5, 9]), "\[0, 0\]")
+    # Multiclass with no wrapper — the argmax just ranges over three classes.
+    mx = [[0, 0], [1, 0], [10, 10], [11, 10], [0, 20], [1, 20]]
+    my = [0, 0, 1, 1, 2, 2]
+    mnb = GaussianNB.new
+    mnb.fit(mx, my)
+    self.check("gnb multiclass priors", mnb.class_priors, "\[0.333333, 0.333333, 0.333333\]")
+    self.check("gnb multiclass predict", mnb.predict([[0, 1], [10, 11], [1, 19]]), "\[0, 1, 2\]")
+    self.check("gnb multiclass score", mnb.score(mx, my), 1)
+    self.check("gnb multiclass report", Metrics.classification_report(mnb.predict(mx), my).macro_f1, 1)
+    # Overlapping 1-D classes: means 0.5 / 2.5, variances 0.25, so P(1) is
+    # a sigmoid of 8x - 12 — 1/(1+e^4) = 0.0179862 at x = 1. The ranking is
+    # still perfect, so roc_auc is 1 and log_loss small.
+    onb = GaussianNB.new
+    onb.fit([0, 1, 2, 3], [0, 0, 1, 1])
+    self.check("gnb overlap proba", onb.predict_proba([0, 1, 2, 3], 1), "\[6.14417e-06, 0.0179862, 0.982014, 0.999994\]")
+    self.check("gnb overlap roc_auc", Metrics.roc_auc(onb.predict_proba([0, 1, 2, 3], 1), [0, 0, 1, 1]), 1)
+    self.check("gnb overlap log_loss", Metrics.log_loss(onb.predict_proba([0, 1, 2, 3], 1), [0, 0, 1, 1]), "0.00907804")
+    self.check("gnb nil before fit", GaussianNB.new.predict([[1, 2]]) == nil, true)
+    self.check("gnb nil ragged fit", GaussianNB.new.fit([[1, 2], [3]], [0, 1]) == nil, true)
+    self.check("gnb single class ok", GaussianNB.new.fit([[1], [2]], [0, 0]) != nil, true)
+
     # --- Cross-validation (KFold / CrossValidation) ---
     cv5 = KFold.new(5).split(10)
     self.check("kfold count", cv5.size, 5)

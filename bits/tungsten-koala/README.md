@@ -89,6 +89,20 @@ lr.score(x_test, y_test)             # => accuracy; labels feed Metrics.f1
                                      # opaque labels map to 0/1: fit two,
                                      # e.g. [:a, :b], predict returns them
 
+# Classification — GaussianNB, MULTICLASS Gaussian naive Bayes (closed form)
+nb = GaussianNB.new                  # var_smoothing = 1e-9 (sklearn's default)
+nb.fit([[1, 2], [3, 4], [11, 12], [13, 14]], [0, 0, 1, 1])   # one pass, no epochs
+nb.class_priors                      # => [0.5, 0.5]   P(class) = count / n
+nb.means                             # => [[2, 3], [12, 13]]   per class/feature
+nb.variances                         # => [[1, 1], [1, 1]]     ... + epsilon
+nb.epsilon                           # => 2.6e-08  smoothing; no divide-by-zero
+nb.joint_log_likelihood([[2, 3]])    # => [[-2.53102, -102.531]]  log P(c)+log p(x|c)
+nb.predict_proba([[7, 8]])           # => [[0.5, 0.5]]  per-class, rows sum to 1
+nb.predict_proba(x_test, 1)          # => flat P(class 1) column, for roc_auc
+nb.predict([[2, 3], [12, 13]])       # => [0, 1]   argmax of the log likelihood
+nb.score(x_test, y_test)             # => accuracy; labels feed Metrics.f1
+                                     # three+ classes work with no wrapper
+
 # ... or as a pipeline tail: transform features, then fit/predict
 pipe = Pipeline.new([Scaler.new(:standard), LinearRegression.new])
 pipe.fit(df_features, y)             # nil (unfitted) on collinear features
@@ -234,7 +248,43 @@ defaults to 0.1 / 1000 — the default rate is derived as `1.to_f/10.to_f`
 because a float literal corrupts call arguments, so a caller wanting a
 fractional rate derives it the same way. It shares LinearRegression's
 accepted input shapes, and `Math.exp`/`Math.log` agree bit-for-bit on
-both engines, so it is deterministic). Those probabilities feed
+both engines, so it is deterministic) and `GaussianNB` (koala's
+GENERATIVE classifier, the third kind of supervised learner beside
+KNNClassifier's lazy/instance-based and LogisticRegression's
+discriminative/iterative one. Where those two learn a decision rule,
+GaussianNB models how the data was *generated*: assume the features are
+conditionally independent given the class and each is normally
+distributed, and the fit is CLOSED FORM — one pass for the class priors
+`count/n` and the per-class per-feature `means` and `variances`. No
+epochs, no learning rate, no seed, so it is exactly determinate. Classify
+by Bayes' rule in log space: `joint_log_likelihood` is
+`log P(c) − 0.5·Σ log(2π·var) − 0.5·Σ (x−mean)²/var` per class
+(scikit-learn's `_joint_log_likelihood`), `predict` takes its argmax —
+ties break to the first-seen class — and `predict_proba` normalizes it
+through a max-shifted softmax so each row's posteriors sum to 1.
+`predict_proba(x)` returns one array per row, one entry per class in
+`classes` order; `predict_proba(x, label)` returns that single class's
+flat column, ready for `Metrics.roc_auc` / `Metrics.log_loss`, and nil
+for a label the fit never saw. Variances are POPULATION (n denominator)
+variances, matching numpy's `np.var` — not `Stats.var`'s sample n−1 — and
+every one gets `epsilon = var_smoothing × (largest column variance over
+all training rows)` added, scikit-learn's variance smoothing: a feature
+that never varies inside a class would otherwise divide by zero, and at
+the default `var_smoothing = 1e-9` the nudge is invisible at printing
+precision. koala adds one thing scikit-learn does not — when EVERY
+feature is constant that reference variance is 0 too and sklearn yields
+nan, so epsilon falls back to `var_smoothing` itself and the model stays
+finite. Labels are opaque and MULTICLASS out of the box — any number of
+integer, string, or symbol labels, no one-vs-rest wrapper, collected in
+first-seen order (scikit-learn sorts) — so `predict` feeds
+`Metrics.accuracy` and `Metrics.classification_report` directly, and a
+single class is fine (unlike LogisticRegression, which needs exactly
+two). It shares LinearRegression's accepted input shapes. On
+scikit-learn's own documentation example — `X =
+[[-1,-1],[-2,-1],[-3,-2],[1,1],[2,1],[3,2]]`, `y = [1,1,1,2,2,2]` — it
+reproduces `means [[-2,-1.33333],[2,1.33333]]`, `variances
+[[0.666667,0.222222],[0.666667,0.222222]]` and `predict([[-0.8,-1]]) =>
+[1]`). Both classifiers' probabilities feed
 threshold-free evaluation: `Metrics.roc_auc(scores, actual, pos_label)`
 is the area under the ROC curve — the probability the model ranks a
 random positive above a random negative, crediting ties half (the
@@ -243,7 +293,8 @@ Mann-Whitney U statistic), 1 perfect / 0.5 random / 0 inverted — and
 `.fpr` / `.tpr` / `.thresholds` arrays (one point per distinct score plus
 a leading reject-all point, scikit-learn's `drop_intermediate=False`)
 plus its `.auc`; both take `scores` (a probabilistic classifier's
-`P(positive)`, e.g. `LogisticRegression#predict_proba`) and `actual`,
+`P(positive)`, e.g. `LogisticRegression#predict_proba` or
+`GaussianNB#predict_proba(x, label)`) and `actual`,
 with `pos_label` naming the positive class (default 1, the
 precision/recall convention), and return nil when a class is absent
 (AUC undefined) or the arrays are misaligned. `Metrics.auc(x, y)` is the

@@ -4,9 +4,10 @@
 # (Scaler / Encoder / Imputer / Splitter / Pipeline), estimation
 # (LinearRegression — fit / predict / score with optional ridge alpha,
 # alone or as a Pipeline tail; KNNClassifier — k-nearest-neighbors
-# classification, the companion classifier to Metrics.accuracy / f1),
-# clustering (KMeans — Lloyd's algorithm, koala's first unsupervised
-# learner), and model evaluation (KFold / CrossValidation — k-fold
+# classification, the companion classifier to Metrics.accuracy / f1;
+# GaussianNB — multiclass Gaussian naive Bayes, a closed-form generative
+# classifier), clustering (KMeans — Lloyd's algorithm, koala's first
+# unsupervised learner), and model evaluation (KFold / CrossValidation — k-fold
 # cross-validation that re-fits an estimator on each fold and averages
 # the held-out score).
 
@@ -27,6 +28,7 @@ use linalg
 use linear_regression
 use knn
 use logistic_regression
+use gaussian_nb
 use scaler
 use encoder
 use imputer

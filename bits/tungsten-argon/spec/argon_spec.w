@@ -877,4 +877,99 @@ t.eq("absent list option is nil", cli11.parse([]).get(:tags) == nil, true)
 # A list option renders as a plain value option in the usage synopsis.
 t.eq("list option appears with its metavar in usage", cli11.usage().index("\[-t LIST]") != nil, true)
 
+# ---- Long-option abbreviation (getopt_long unambiguous-prefix matching) ----
+# An unambiguous prefix of a long option is accepted ("--verb" for "--verbose").
+# An exact match always wins over a prefix; a prefix shared by two or more
+# options is left unresolved and surfaces through validation as an ambiguous
+# option, naming the candidates. Resolution records under the option's canonical
+# key, so the shortened form is invisible to flag?/get/occurrences. It applies
+# to both the space and "=value" long forms.
+
+MAN12 = "NAME
+    abbr -- exercise long-option abbreviation
+
+SYNOPSIS
+    abbr \[options] file
+
+OPTIONS
+    -v, --verbose
+        Verbose output.
+
+    --version
+        Print version and exit.
+
+    -c, --color
+        Colorize output.
+
+    --config FILE
+        Read configuration from FILE.
+
+    --count N
+        Repeat count.
+
+    -o, --output FILE
+        Write to FILE.
+
+    --sort
+        Sort output.
+
+    --sort-keys
+        Sort by keys.
+"
+
+cli12 = Argon.new(MAN12)
+
+# An unambiguous prefix resolves to the canonical key (flag is invisible-shortened).
+opts = cli12.parse(["--verb"])
+t.eq("unambiguous prefix resolves a flag", opts.flag?(:verbose), true)
+t.eq("resolved abbreviation is valid", opts.valid?, true)
+t.eq("resolved abbreviation is not collected as unknown", opts.unknown, [])
+
+# The full name still works unchanged.
+t.eq("exact long name still resolves", cli12.parse(["--verbose"]).flag?(:verbose), true)
+
+# A prefix that singles out the LONGER of two similar names resolves it.
+t.eq("longer-name prefix resolves the longer option", cli12.parse(["--vers"]).flag?(:version), true)
+t.eq("longer-name prefix does not set the shorter option", cli12.parse(["--vers"]).flag?(:verbose), false)
+
+# An unambiguous prefix resolves a value option, both space and =value forms.
+t.eq("prefix resolves a value option (space form)", cli12.parse(["--conf", "f.cfg"]).get(:config), "f.cfg")
+t.eq("prefix resolves a value option (=value form)", cli12.parse(["--conf=f.cfg"]).get(:config), "f.cfg")
+
+# The resolved value is cast and reachable under the canonical key.
+t.eq("prefix-resolved value option is cast under its canonical key", cli12.parse(["--cou", "3"]).get(:count), 3)
+t.eq("prefix resolves the long output option", cli12.parse(["--out", "x"]).get(:output), "x")
+
+# An exact match wins over being a prefix of a longer option ("--sort" is exact
+# even though "sort" prefixes "sort-keys").
+opts = cli12.parse(["--sort"])
+t.eq("exact match wins over a longer option it prefixes", opts.flag?(:sort), true)
+t.eq("exact match does not set the longer option", opts.flag?(:sort_keys), false)
+
+# A longer unambiguous prefix reaches the dashed long name.
+t.eq("longer unique prefix resolves a dashed long option", cli12.parse(["--sort-k"]).flag?(:sort_keys), true)
+
+# An ambiguous prefix is left unresolved and reported by validation.
+opts = cli12.parse(["--ver"])
+t.eq("ambiguous prefix makes input invalid", opts.valid?, false)
+t.eq("ambiguous prefix reported with sorted candidates", opts.errors.include?("ambiguous option: --ver (matches --verbose, --version)"), true)
+
+# Ambiguity across three candidates, sorted.
+t.eq("three-way ambiguous prefix names all candidates", cli12.parse(["--co"]).errors.include?("ambiguous option: --co (matches --color, --config, --count)"), true)
+
+# Ambiguity in the =value form is caught too.
+t.eq("ambiguous =value prefix is invalid", cli12.parse(["--co=1"]).valid?, false)
+
+# An ambiguous prefix of two dashed-name options.
+t.eq("ambiguous prefix of dashed names reports both", cli12.parse(["--sor"]).errors.include?("ambiguous option: --sor (matches --sort, --sort-keys)"), true)
+
+# A genuinely unrecognized long option is still an unknown option, not ambiguous.
+t.eq("unmatched long option is still unknown, not ambiguous", cli12.parse(["--xyzzy"]).errors.include?("unknown option: --xyzzy"), true)
+
+# Abbreviation works on the original probe manpage too: the positive form of a
+# negatable flag, and an optional-value / value option, all abbreviate.
+t.eq("prefix resolves the positive form of a negatable flag", cli.parse(["--col"]).flag?(:color), true)
+t.eq("prefix resolves an optional-value option", cli.parse(["--pro", "fast"]).get(:profile), "fast")
+t.eq("prefix resolves a value option on the probe manpage", cli.parse(["--jo", "4"]).get(:jobs), 4)
+
 t.done

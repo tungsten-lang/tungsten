@@ -12,6 +12,10 @@
 #   * Negative numbers: "-5" / "--offset -5" are values/positionals, not flags,
 #     unless "5" is itself a defined short flag. Array options accept negative
 #     numbers as elements and stop only at genuine flags.
+#   * Long-option abbreviation: an unambiguous prefix of a long option is
+#     accepted ("--verb" for "--verbose", "--conf=x" for "--config=x"). An exact
+#     match always wins over a prefix; a prefix shared by two or more options is
+#     left unresolved and reported by validation as an ambiguous option.
 #
 # Usage:
 #
@@ -99,14 +103,24 @@
         # --key=value form
         eq = raw.index("=")
         if eq
-          key = replace_all(raw.slice(0, eq), "-", "_")
+          namepart = raw.slice(0, eq)
+          key = replace_all(namepart, "-", "_")
+          # An unambiguous abbreviation ("--conf=x") resolves to the canonical key.
+          resolved = resolve_long(namepart)
+          if resolved != nil
+            key = resolved[:key]
           val = raw.slice(eq + 1, raw.size)
           store_option(options, key, cast_option(key, val))
           i = i + 1
           next
 
         key = replace_all(raw, "-", "_")
-        defn = find_long(raw)
+        defn = resolve_long(raw)
+        # An unambiguous abbreviation ("--verb" for "--verbose") records under
+        # the resolved option's canonical key, so the shortened form is
+        # invisible downstream (flag?/get/occurrences all see "verbose").
+        if defn != nil
+          key = defn[:key]
 
         if defn && defn[:takes_value]
           if i + 1 < argv.size()
@@ -941,6 +955,39 @@
       i = i + 1
     nil
 
+  # Resolve a long-option name to its definition, allowing an unambiguous
+  # abbreviation (getopt_long's "as long as it is unique" convention). An exact
+  # match always wins; failing that, a name that is a prefix of exactly one
+  # defined long option resolves to that option. Returns nil for no match OR an
+  # ambiguous prefix (two or more options share it) — the caller keeps its
+  # lenient path, and `errors` reclassifies the ambiguous case with a dedicated
+  # message.
+  -> resolve_long(name)
+    exact = find_long(name)
+    if exact != nil
+      return exact
+    matches = long_prefix_matches(name)
+    if matches.size() == 1
+      return matches[0]
+    nil
+
+  # Every defined option whose canonical long name (with any --\[no-] stripped)
+  # has `name` as a strict prefix. An exact-length name is excluded — that is an
+  # exact match, handled by `find_long`. Drives unambiguous-abbreviation
+  # resolution and ambiguity reporting.
+  -> long_prefix_matches(name)
+    out = []
+    i = 0
+    while i < @option_defs.size()
+      d = @option_defs[i]
+      long = d[:long]
+      if long
+        clean = replace_all(long, "\[no-]", "")
+        if clean != name && clean.starts_with?(name)
+          out.push(d)
+      i = i + 1
+    out
+
   -> extract_name(text)
     # Look for NAME section: "    name -- description"
     lines = text.split("\n")
@@ -1375,7 +1422,15 @@
     unks = unknown
     u = 0
     while u < unks.size()
-      errs.push("unknown option: " + unks[u])
+      label = unks[u]
+      # An unrecognized long option that abbreviates two or more defined
+      # options is an ambiguous abbreviation, not a stray flag — report it as
+      # such, naming the options it could have meant.
+      amb = ambiguous_matches_for(label)
+      if amb != nil
+        errs.push("ambiguous option: " + label + " (matches " + join_list(amb) + ")")
+      else
+        errs.push("unknown option: " + label)
       u = u + 1
 
     errs
@@ -1406,6 +1461,25 @@
     if d[:long] != nil
       return "--" + d[:long]
     "-" + d[:short]
+
+  # For an unrecognized long option that abbreviates two or more defined options
+  # (getopt_long's ambiguous-abbreviation case), the sorted labels it could have
+  # meant; nil when `label` is a short flag or matches fewer than two options.
+  # An unambiguous abbreviation never reaches here — it resolves to a real key
+  # during parsing and so is never collected as unknown.
+  -> ambiguous_matches_for(label)
+    if !label.starts_with?("--")
+      return nil
+    name = label.slice(2, label.size())
+    matches = @parser.long_prefix_matches(name)
+    if matches.size() < 2
+      return nil
+    labels = []
+    i = 0
+    while i < matches.size()
+      labels.push(option_label(matches[i]))
+      i = i + 1
+    labels.sort()
 
   # A stable "labelA and labelB" for a conflicting pair, sorted by label so the
   # message is the same whichever option's "(conflicts with: …)" triggered it.

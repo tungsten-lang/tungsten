@@ -14,6 +14,7 @@ use flame_diff
 use speedscope
 use hot_frames
 use flame_filter
+use flame_threshold
 
 describe "PerfScript" ->
   it "collapses perf script samples into sorted folded stacks" ->
@@ -488,5 +489,42 @@ describe "SampleCollapse" ->
     lines.push("  0x1 - 0x2 demo (in demo)")
     expect(Tungsten:Flame:SampleCollapse.collapse(lines.join("\n"))).to eq("foo 5")
     expect(Tungsten:Flame:SampleCollapse.collapse("")).to eq("")
+
+describe "FlameThreshold" ->
+  it "parses percentage strings into tenths of a percent" ->
+    expect(Tungsten:Flame:FlameThreshold.parse_pct_x10("2")).to eq(20)
+    expect(Tungsten:Flame:FlameThreshold.parse_pct_x10("0.5")).to eq(5)
+    expect(Tungsten:Flame:FlameThreshold.parse_pct_x10("1.5")).to eq(15)
+    expect(Tungsten:Flame:FlameThreshold.parse_pct_x10("10")).to eq(100)
+    expect(Tungsten:Flame:FlameThreshold.parse_pct_x10("")).to eq(0)
+    expect(Tungsten:Flame:FlameThreshold.parse_pct_x10(nil)).to eq(0)
+
+  it "computes inclusive weight for every call-tree node path" ->
+    map = Tungsten:Flame:FlameThreshold.parse_folded("main;a;b 10\nmain;a;c 5\nmain;d 3")[:map]
+    incl = Tungsten:Flame:FlameThreshold.prefix_inclusive(map)
+    expect(incl["main"]).to eq(18)
+    expect(incl["main;a"]).to eq(15)
+    expect(incl["main;a;b"]).to eq(10)
+    expect(incl["main;a;c"]).to eq(5)
+    expect(incl["main;d"]).to eq(3)
+
+  it "folds sub-threshold frames into an (other) node under their parent" ->
+    folded = Tungsten:Flame:FlameThreshold.collapse("a;b;c 10\na;b;d 3\na;b;e 2\na;f 1", 200)
+    expect(folded).to eq("a;(other) 1\na;b;(other) 5\na;b;c 10")
+
+  it "preserves the grand total when folding (nothing dropped)" ->
+    folded = Tungsten:Flame:FlameThreshold.collapse("a;b;c 10\na;b;d 3\na;b;e 2\na;f 1", 200)
+    expect(Tungsten:Flame:FlameThreshold.parse_folded(folded)[:total]).to eq(16)
+
+  it "folds a sub-threshold root into a bare (other) node" ->
+    folded = Tungsten:Flame:FlameThreshold.collapse("big;work 97\ntiny 3", 50)
+    expect(folded).to eq("(other) 3\nbig;work 97")
+
+  it "keeps everything at a zero threshold, re-aggregated and sorted" ->
+    folded = Tungsten:Flame:FlameThreshold.collapse("z;b 2\na;b 3\nz;b 4", 0)
+    expect(folded).to eq("a;b 3\nz;b 6")
+
+  it "treats empty input as no stacks" ->
+    expect(Tungsten:Flame:FlameThreshold.collapse("", 200)).to eq("")
 
 spec_summary

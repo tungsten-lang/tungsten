@@ -22,6 +22,7 @@ use flame_diff
 use speedscope
 use hot_frames
 use flame_filter
+use flame_threshold
 
 # ---- Read and parse the manpage ----
 # Prefer TUNGSTEN_ROOT (set by the CLI); __DIR__ is not always populated
@@ -82,6 +83,9 @@ if fl_prune == nil
 fl_subtree = opts.get("subtree")
 if fl_subtree == nil
   fl_subtree = ""
+fl_threshold = opts.get("threshold")
+if fl_threshold == nil
+  fl_threshold = ""
 fl_output = opts.get("output")
 if fl_output == nil
   fl_output = ""
@@ -186,12 +190,15 @@ if fl_collapse_sample
   exit(0)
 
 # Filter mode: reshape one folded profile before viewing it — include
-# (`--grep PAT`), exclude (`--prune PAT`), or zoom into a subtree
-# (`--subtree PAT`). Like --diff / --hot, a pure folded-text mode (no compile,
-# no profiling) that works on any folded stacks. Emits folded text — pipe it
-# into another view (`flame --grep parse x.folded > sub.folded`). With -o the
-# result is written to the file instead of stdout.
-if fl_grep != "" || fl_prune != "" || fl_subtree != ""
+# (`--grep PAT`), exclude (`--prune PAT`), zoom into a subtree
+# (`--subtree PAT`), or fold the sub-PCT% long tail into an "(other)" node
+# (`--threshold PCT`). Like --diff / --hot, a pure folded-text mode (no
+# compile, no profiling) that works on any folded stacks. The steps compose
+# (pattern filters first, then the threshold collapse), so
+# `flame --subtree parse --threshold 1 x.folded` zooms then de-noises. Emits
+# folded text — pipe it into another view (`flame --grep parse x.folded >
+# sub.folded`). With -o the result is written to the file instead of stdout.
+if fl_grep != "" || fl_prune != "" || fl_subtree != "" || fl_threshold != ""
   if fl_files.size < 1
     << "tungsten flame: filter needs one folded file"
     exit(1)
@@ -200,6 +207,8 @@ if fl_grep != "" || fl_prune != "" || fl_subtree != ""
     << "tungsten flame: cannot read " + fl_files[0]
     exit(1)
   filtered = Tungsten:Flame:FlameFilter.apply(ftext, fl_grep, fl_prune, fl_subtree)
+  if fl_threshold != ""
+    filtered = Tungsten:Flame:FlameThreshold.collapse(filtered, Tungsten:Flame:FlameThreshold.parse_pct_x10(fl_threshold))
   if fl_output != ""
     write_file(fl_output, filtered)
     if !fl_silent

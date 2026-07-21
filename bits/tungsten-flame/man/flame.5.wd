@@ -30,6 +30,7 @@ tungsten-flame(1) -- Make flame graphs
     --grep PATTERN     Keep only folded stacks passing through PATTERN
     --prune PATTERN    Drop folded stacks touching PATTERN (mute noise)
     --subtree PATTERN  Zoom: re-root the folded profile at PATTERN
+    --threshold PCT    Fold frames below PCT% (inclusive) into an "(other)" node
 
 ## DISPLAY OPTIONS
 

@@ -495,4 +495,102 @@ describe "CrossValidation" ->
     expect(CrossValidation.cross_val_score(m, [1, 2, 3], [1, 2, 3], 5)).to be_nil
     expect(CrossValidation.cross_val_mean(m, [1, 2, 3], [1, 2], 2)).to be_nil
 
+describe "KMeans" ->
+  # Two 2x2 boxes far apart. Default init takes the first two DISTINCT
+  # rows ([0,0], [2,0]) as centroids; Lloyd converges in two iterations
+  # to the natural clusters. Hand-computed (matches scikit-learn KMeans
+  # with this fixed init, n_init=1): centroids [[1,1],[11,11]], labels
+  # [0,0,0,0,1,1,1,1], inertia exactly 16 (each point sqrt(2) from its
+  # centroid, squared 2, times eight points), n_iter 2.
+  it "clusters two separated boxes to the hand-computed reference" ->
+    x = [[0, 0], [2, 0], [0, 2], [2, 2], [10, 10], [12, 10], [10, 12], [12, 12]]
+    model = KMeans.new(2)
+    expect(model.fitted?).to be_false
+    r = model.fit(x)
+    expect(r != nil).to be_true
+    expect(model.fitted?).to be_true
+    expect(model.labels.to_s).to eq("\[0, 0, 0, 0, 1, 1, 1, 1\]")
+    expect(model.centroids.to_s).to eq("\[\[1, 1\], \[11, 11\]\]")
+    expect(model.inertia.to_s).to eq("16")
+    expect(model.n_iter.to_s).to eq("2")
+
+  # predict assigns fresh rows to the nearest fitted centroid; a row
+  # whose width differs from the fitted feature count returns nil.
+  it "assigns new rows to the nearest centroid" ->
+    x = [[0, 0], [2, 0], [0, 2], [2, 2], [10, 10], [12, 10], [10, 12], [12, 12]]
+    model = KMeans.new(2)
+    model.fit(x)
+    expect(model.predict([[1, 1], [11, 11], [0, 0], [12, 12]]).to_s).to eq("\[0, 1, 0, 1\]")
+    expect(model.predict([[1, 2, 3]])).to be_nil
+
+  # fit_predict returns the training labels in one call; score is the
+  # NEGATED within-cluster sum of squares (sklearn's convention), so on
+  # the training rows it is -inertia = -16.
+  it "fit_predicts and scores as negative inertia" ->
+    x = [[0, 0], [2, 0], [0, 2], [2, 2], [10, 10], [12, 10], [10, 12], [12, 12]]
+    expect(KMeans.new(2).fit_predict(x).to_s).to eq("\[0, 0, 0, 0, 1, 1, 1, 1\]")
+    model = KMeans.new(2)
+    model.fit(x)
+    expect(model.score(x).to_s).to eq("-16")
+
+  # Same accepted shapes as the estimators, via the shared feature_rows:
+  # a DataFrame (numeric columns only — :name is skipped) and a flat
+  # single-feature array both cluster. df centroids [[0.5,0.5],[10.5,10.5]],
+  # inertia 2 (each of four points 0.5 from its centroid in each of two
+  # dims: 0.25+0.25 = 0.5, times four).
+  it "accepts DataFrame and flat-array inputs" ->
+    df = DataFrame.new([
+      [:name, ["a", "b", "c", "d"]],
+      [:f1, [0, 1, 10, 11]],
+      [:f2, [0, 1, 10, 11]]
+    ])
+    dm = KMeans.new(2)
+    dm.fit(df)
+    expect(dm.labels.to_s).to eq("\[0, 0, 1, 1\]")
+    expect(dm.centroids.to_s).to eq("\[\[0.5, 0.5\], \[10.5, 10.5\]\]")
+    expect(dm.inertia.to_s).to eq("2")
+    fm = KMeans.new(2)
+    fm.fit([0, 1, 2, 100, 101, 102])
+    expect(fm.labels.to_s).to eq("\[0, 0, 0, 1, 1, 1\]")
+    expect(fm.centroids.to_s).to eq("\[\[1\], \[101\]\]")
+
+  # k = 1 collapses every row into one cluster whose centroid is the
+  # global mean; the eight box corners mean to (6, 6).
+  it "puts every row in one cluster at the global mean when k = 1" ->
+    x = [[0, 0], [2, 0], [0, 2], [2, 2], [10, 10], [12, 10], [10, 12], [12, 12]]
+    model = KMeans.new(1)
+    model.fit(x)
+    expect(model.centroids.to_s).to eq("\[\[6, 6\]\]")
+    expect(model.labels.to_s).to eq("\[0, 0, 0, 0, 0, 0, 0, 0\]")
+
+  # The only randomness in k-means is the initial centroids, so a seed
+  # makes the whole clustering reproducible: koala shuffles the rows
+  # through Splitter's MINSTD generator, then seeds from the first k
+  # distinct. Same seed, byte-identical labels/centroids/inertia; and on
+  # separable data every valid init recovers the same partition (inertia
+  # 16, invariant to which cluster is numbered 0).
+  it "is deterministic under a seed" ->
+    x = [[0, 0], [2, 0], [0, 2], [2, 2], [10, 10], [12, 10], [10, 12], [12, 12]]
+    a = KMeans.new(2, 42)
+    a.fit(x)
+    b = KMeans.new(2, 42)
+    b.fit(x)
+    expect(a.labels.to_s).to eq(b.labels.to_s)
+    expect(a.centroids.to_s).to eq(b.centroids.to_s)
+    expect(a.inertia.to_s).to eq(b.inertia.to_s)
+    expect(a.inertia.to_s).to eq("16")
+
+  # Unusable shapes and premature calls all return nil and leave fitted?
+  # false — the bit's shape-error convention, matching the estimators.
+  it "returns nil for unusable shapes and before fit" ->
+    expect(KMeans.new(2).fit([])).to be_nil
+    expect(KMeans.new(9).fit([[1, 1], [2, 2]])).to be_nil
+    expect(KMeans.new(2).fit([[1, 2], [3]])).to be_nil
+    expect(KMeans.new(0).fit([[1, 1], [2, 2]])).to be_nil
+    model = KMeans.new(2)
+    expect(model.predict([[1, 1]])).to be_nil
+    expect(model.score([[1, 1]])).to be_nil
+    expect(model.fitted?).to be_false
+    expect(KMeans.new.k).to eq(8)
+
 spec_summary

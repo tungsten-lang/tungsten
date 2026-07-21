@@ -95,6 +95,18 @@ pipe.fit(df_features, y)             # nil (unfitted) on collinear features
 pipe.predict(test_df)                # scale with train params, then predict
 pipe.score(test_df, y_test)          # the estimator's R² on the chain
 
+# Clustering — KMeans, Lloyd's algorithm (koala's first UNSUPERVISED learner)
+km = KMeans.new(2)                   # k clusters (defaults to 8, sklearn)
+km.fit(x)                            # partitions rows; no labels needed
+km.labels                            # => cluster index (0..k-1) per row
+km.centroids                         # => k centroid rows (floats)
+km.inertia                           # => within-cluster sum of squares
+km.n_iter                            # => Lloyd iterations to convergence
+km.predict([[1, 1], [11, 11]])       # => [0, 1]  nearest-centroid assignment
+km.fit_predict(x)                    # fit, then return the training labels
+km.score(x)                          # => -inertia (sklearn's convention)
+KMeans.new(2, 42)                    # seeded init — same seed, same clustering
+
 # Model evaluation — k-fold cross-validation, re-fit per fold
 KFold.new(5).split(10)               # 5 contiguous [train, test] index pairs
 KFold.new(5, 42).split(10)           # ... over a seeded MINSTD shuffle first
@@ -260,7 +272,29 @@ both engines; `CrossValidation.cross_val_score(model, x, y, k)` re-fits
 the estimator on each fold's training rows and returns the array of
 held-out scores — the estimators' `.score` is R² for LinearRegression
 and accuracy for KNNClassifier — and `cross_val_mean` averages them,
-sharing the estimators' accepted input shapes).
+sharing the estimators' accepted input shapes). Clustering: `KMeans`
+(koala's first UNSUPERVISED learner — it partitions rows into k groups
+with no labels at all, by Lloyd's algorithm: seed k centroids, then
+repeat ASSIGN-each-row-to-its-nearest-centroid / UPDATE-each-centroid-to-
+its-members'-mean until the assignment stops changing (or max_iter,
+default 300) — `fit` learns `centroids` / `labels` / `inertia` (the
+within-cluster sum of squares, which never increases across steps) /
+`n_iter`, `predict` assigns fresh rows to the nearest centroid,
+`fit_predict` returns the training labels, and `score` is the negated
+inertia, scikit-learn's convention. Determinism — k-means' only
+randomness is the initial centroids — is pinned two ways, both
+reproducible on both engines: with no seed the centroids are the first
+k DISTINCT rows in order, and an integer seed permutes the rows first
+through Splitter's MINSTD generator (as `KFold` does) then seeds from
+the first k distinct; distance ties in ASSIGN break to the lowest-index
+centroid, so the whole clustering is a pure function of the inputs. k
+defaults to 8 (scikit-learn's). It shares the estimators' accepted input
+shapes through `feature_rows` and returns nil for an empty or ragged x,
+k < 1, or fewer rows than clusters. On the two 2x2 boxes
+`[[0,0],[2,0],[0,2],[2,2],[10,10],[12,10],[10,12],[12,12]]` at k = 2 it
+converges in 2 iterations to centroids `[[1,1],[11,11]]`, labels
+`[0,0,0,0,1,1,1,1]`, and inertia exactly 16 — matching scikit-learn's
+`KMeans` with the same fixed init).
 
 Verify with `bin/tungsten bits/tungsten-koala/spec/koala_spec.w`,
 `spec/linalg_spec.w`, `spec/preprocessing_spec.w`, and

@@ -4,9 +4,11 @@
 # (Scaler / Encoder / Imputer / Splitter / Pipeline), estimation
 # (LinearRegression — fit / predict / score with optional ridge alpha,
 # alone or as a Pipeline tail; KNNClassifier — k-nearest-neighbors
-# classification, the companion classifier to Metrics.accuracy / f1), and
-# model evaluation (KFold / CrossValidation — k-fold cross-validation
-# that re-fits an estimator on each fold and averages the held-out score).
+# classification, the companion classifier to Metrics.accuracy / f1),
+# clustering (KMeans — Lloyd's algorithm, koala's first unsupervised
+# learner), and model evaluation (KFold / CrossValidation — k-fold
+# cross-validation that re-fits an estimator on each fold and averages
+# the held-out score).
 
 use version
 use stats
@@ -31,6 +33,7 @@ use imputer
 use splitter
 use pipeline
 use cross_validation
+use kmeans
 
 # The remaining modules under lib/ (tensor, resample, transformer,
 # estimator, index, sparse, gpu, device) are unported design drafts —

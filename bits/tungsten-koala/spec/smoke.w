@@ -191,6 +191,31 @@ use koala
     self.check("cross_val knn", CrossValidation.cross_val_score(KNNClassifier.new(1), ckx, cky, 3), "\[1, 1, 1\]")
     self.check("cross_val nil mismatch", CrossValidation.cross_val_score(LinearRegression.new, [1, 2, 3], [1, 2]) == nil, true)
 
+    # --- KMeans (unsupervised: Lloyd's algorithm) ---
+    # Two 2x2 boxes; default init = first two distinct rows. Converges in
+    # two iterations to centroids [[1,1],[11,11]], labels [0,0,0,0,1,1,1,1],
+    # inertia exactly 16 (each point sqrt(2) from its centroid).
+    kmx = [[0, 0], [2, 0], [0, 2], [2, 2], [10, 10], [12, 10], [10, 12], [12, 12]]
+    km = KMeans.new(2)
+    self.check("kmeans fit self", km.fit(kmx) != nil, true)
+    self.check("kmeans fitted?", km.fitted?, true)
+    self.check("kmeans labels", km.labels, "\[0, 0, 0, 0, 1, 1, 1, 1\]")
+    self.check("kmeans centroids", km.centroids, "\[\[1, 1\], \[11, 11\]\]")
+    self.check("kmeans inertia", km.inertia, 16)
+    self.check("kmeans n_iter", km.n_iter, 2)
+    self.check("kmeans predict", km.predict([[1, 1], [11, 11], [0, 0]]), "\[0, 1, 0\]")
+    self.check("kmeans score neg inertia", km.score(kmx), "-16")
+    self.check("kmeans fit_predict", KMeans.new(2).fit_predict(kmx), "\[0, 0, 0, 0, 1, 1, 1, 1\]")
+    self.check("kmeans k=1 global mean", KMeans.new(1).fit_predict(kmx), "\[0, 0, 0, 0, 0, 0, 0, 0\]")
+    self.check("kmeans default k", KMeans.new.k, 8)
+    # A seed makes the clustering reproducible on both engines.
+    kseed = KMeans.new(2, 42)
+    kseed.fit(kmx)
+    self.check("kmeans seed inertia", kseed.inertia, 16)
+    self.check("kmeans k>n nil", KMeans.new(9).fit([[1, 1], [2, 2]]) == nil, true)
+    self.check("kmeans empty nil", KMeans.new(2).fit([]) == nil, true)
+    self.check("kmeans nil before fit", KMeans.new(2).predict([[1, 1]]) == nil, true)
+
     # --- Multiclass metrics (ConfusionMatrix / ClassificationReport) ---
     cpred = [0, 1, 2, 2, 2, 0]
     cact = [0, 0, 2, 2, 1, 0]

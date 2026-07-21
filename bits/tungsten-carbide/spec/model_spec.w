@@ -197,6 +197,18 @@ use carbide
     set(:saw_clean, !changed?)
     set(:saw_prev, attribute_previously_changed?(:email))
 
+# --- Models exercising timestamps. SpecStamped opts into auto-stamping;
+# SpecPlain leaves #timestamps? at its default (false), so it is never stamped.
++ SpecStamped < Model
+  -> table
+    "spec_stamped"
+  -> timestamps?
+    true
+
++ SpecPlain < Model
+  -> table
+    "spec_plain"
+
 describe "Model" ->
   describe "construction" ->
     it "builds from an attributes hash" ->
@@ -759,5 +771,71 @@ describe "Model" ->
       a = Model.create(SpecAfter, {email: "a@x"})
       expect(a.get(:saw_clean)).to be_true
       expect(a.get(:saw_prev)).to be_true
+
+  describe "timestamp clock" ->
+    it "advances the monotonic tick by one on each read by default" ->
+      Model.reset_all
+      expect(Model.now).to eq(1)
+      expect(Model.now).to eq(2)
+
+    it "freezes now at an injected clock value until cleared" ->
+      Model.reset_all
+      Model.set_clock(42)
+      expect(Model.now).to eq(42)
+      expect(Model.now).to eq(42)
+      Model.clear_clock
+      expect(Model.now).to eq(1)
+
+  describe "timestamps" ->
+    it "does not stamp created_at/updated_at unless the model opts in" ->
+      Model.reset_all
+      p = Model.create(SpecPlain, {name: "x"})
+      expect(p.created_at).to be_nil
+      expect(p.updated_at).to be_nil
+
+    it "stamps created_at == updated_at on create" ->
+      Model.reset_all
+      s = Model.create(SpecStamped, {title: "a"})
+      expect(s.created_at).to eq(1)
+      expect(s.updated_at).to eq(1)
+
+    it "advances updated_at but leaves created_at on a dirty update" ->
+      Model.reset_all
+      s = Model.create(SpecStamped, {title: "a"})
+      s.update({title: "b"})
+      expect(s.created_at).to eq(1)
+      expect(s.updated_at).to eq(2)
+
+    it "leaves updated_at untouched on a no-op re-save" ->
+      Model.reset_all
+      s = Model.create(SpecStamped, {title: "a"})
+      s.save
+      expect(s.updated_at).to eq(1)
+
+    it "records the updated_at bump in previous_changes on a dirty save" ->
+      Model.reset_all
+      s = Model.create(SpecStamped, {title: "a"})
+      s.update({title: "b"})
+      expect(s.attribute_previously_changed?(:updated_at)).to be_true
+      expect(s.previous_changes[:updated_at].to_s).to eq([1, 2].to_s)
+
+    it "stamps from an injected clock, keeping created_at frozen across updates" ->
+      Model.reset_all
+      Model.set_clock(500)
+      s = Model.create(SpecStamped, {title: "a"})
+      expect(s.created_at).to eq(500)
+      expect(s.updated_at).to eq(500)
+      Model.set_clock(600)
+      s.update({title: "b"})
+      expect(s.created_at).to eq(500)
+      expect(s.updated_at).to eq(600)
+      Model.clear_clock
+
+    it "exposes the stamps through to_h" ->
+      Model.reset_all
+      s = Model.create(SpecStamped, {title: "a"})
+      h = s.to_h
+      expect(h[:created_at]).to eq(1)
+      expect(h[:updated_at]).to eq(1)
 
 spec_summary

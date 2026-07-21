@@ -67,6 +67,11 @@
   # isolation comes from the table key.
   @@stores   = {}
   @@next_ids = {}
+  # Timestamp clock (see the Timestamps section). An injected value in @@clock
+  # freezes "now"; when nil, #now advances a deterministic monotonic tick —
+  # never wall-clock, so created_at/updated_at are reproducible on both engines.
+  @@clock = nil
+  @@tick  = 0
 
   # --- Store registry (class-side plumbing) ---
 
@@ -85,10 +90,40 @@
     @@next_ids[table] = current + 1
     current
 
-  # Drop every table AND id sequence — spec isolation.
+  # Drop every table AND id sequence — spec isolation. Also restores the
+  # timestamp clock to a fresh monotonic tick with no injected value.
   -> .reset_all
     @@stores   = {}
     @@next_ids = {}
+    @@clock    = nil
+    @@tick     = 0
+
+  # --- Timestamp clock (deterministic; injectable) ---
+  #
+  # #now is the single source of "current time" for created_at/updated_at.
+  # By default it returns a monotonic tick that advances by one on each read,
+  # so timestamps order reproducibly without a wall-clock (specs stay
+  # deterministic on both engines). set_clock freezes now at a fixed value
+  # (Rails' travel_to) — every stamp then reads that value until clear_clock
+  # reverts to the tick. reset_all restores both. Called directly (never
+  # inherited), so they work compiled.
+
+  # Freeze "now" at a fixed value (any comparable — an integer, an ISO string).
+  # Every subsequent stamp reads it until clear_clock.
+  -> .set_clock(value)
+    @@clock = value
+
+  # Revert to the monotonic tick.
+  -> .clear_clock
+    @@clock = nil
+
+  # Current timestamp: the frozen clock when set, else the next monotonic tick.
+  -> .now
+    result = @@clock
+    if result == nil
+      @@tick  = @@tick + 1
+      result  = @@tick
+    result
 
   # Table name for a model class: a blank instance answers #table
   # (instances virtual-dispatch identically in both engines; classes
@@ -552,6 +587,10 @@
       else
         proceed = run_guard(before_update)
     if proceed
+      # Stamp created_at/updated_at BEFORE the changes snapshot so the stamps
+      # ride into previous_changes (an opt-in per model; default is a no-op).
+      if timestamps?
+        apply_timestamps(created)
       if !@persisted
         @id = Model.allocate_id(table)
         Model.rows(table).push(self)
@@ -608,6 +647,56 @@
       if own[k] != v
         ok = false
     ok
+
+  # --- Timestamps (ActiveRecord-style created_at / updated_at) ---
+  #
+  # Opt in per model by overriding #timestamps? to return true (default false,
+  # so existing models are unchanged). When enabled, a successful save stamps
+  # the record's :created_at / :updated_at attributes from Model.now:
+  #
+  #   + Post < Model
+  #     -> table
+  #       "posts"
+  #     -> timestamps?
+  #       true
+  #
+  #   post = Model.create(Post, {title: "a"})
+  #   post.created_at == post.updated_at   # true — one clock read per create
+  #   post.update({title: "b"})            # updated_at advances, created_at stays
+  #
+  # Semantics (matching Rails, verified on both engines):
+  #   - created_at and updated_at are set from a SINGLE Model.now read on
+  #     create, so they are equal on insert. On update only updated_at is
+  #     re-stamped, and only when the record is actually dirty — a no-op
+  #     re-save leaves both timestamps (and previous_changes) untouched.
+  #   - The stamps are ordinary symbol attributes, so they flow through
+  #     to_h / serialization / where and register in dirty tracking's
+  #     previous_changes (Rails includes updated_at in saved_changes).
+  #   - Time comes from Model.now (deterministic tick or an injected clock),
+  #     never wall-clock — see the clock section above. No closures here, so
+  #     the stamp is safe on both engines.
+
+  # Override to true in a concrete model to auto-stamp created_at/updated_at.
+  -> timestamps?
+    false
+
+  # Convenience readers (attributes are symbol-keyed; no method_missing).
+  -> created_at
+    @attributes[:created_at]
+
+  -> updated_at
+    @attributes[:updated_at]
+
+  # Stamp the timestamp attributes for a save. `created` selects insert vs
+  # update semantics; Model.now is read ONCE. On update, stamps only when the
+  # record has a pending change (Rails skips the bump on a no-op save).
+  -> apply_timestamps(created)
+    if created
+      t = Model.now
+      @attributes[:created_at] = t
+      @attributes[:updated_at] = t
+    elsif changed?
+      @attributes[:updated_at] = Model.now
 
   # --- Dirty tracking (ActiveModel::Dirty subset) ---
   #

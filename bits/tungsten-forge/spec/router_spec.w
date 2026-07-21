@@ -68,4 +68,44 @@ describe "Router" ->
       match = router.resolve(:GET, "/api/v1/bits")
       expect(match).not_to be_nil
 
+  describe "wildcard splat routes" ->
+    it "captures the remaining path under the splat name" ->
+      router = Router.new
+      router.get "/assets/*path" -> (req) Response.ok("asset")
+      match = router.resolve(:GET, "/assets/css/app.css")
+      expect(match).not_to be_nil
+      expect(match.params[:path]).to eq("css/app.css")
+
+    it "captures a single trailing segment" ->
+      router = Router.new
+      router.get "/files/*path" -> (req) Response.ok("file")
+      match = router.resolve(:GET, "/files/readme")
+      expect(match.params[:path]).to eq("readme")
+
+    it "captures a bare wildcard under :splat" ->
+      router = Router.new
+      router.get "/*" -> (req) Response.ok("catch-all")
+      match = router.resolve(:GET, "/a/b/c")
+      expect(match.params[:splat]).to eq("a/b/c")
+
+    it "requires at least one segment for the splat" ->
+      router = Router.new
+      router.get "/assets/*path" -> (req) Response.ok("asset")
+      match = router.resolve(:GET, "/assets")
+      expect(match).to be_nil
+
+    it "combines dynamic segments with a trailing splat" ->
+      router = Router.new
+      router.get "/users/:id/files/*path" -> (req) Response.ok("user file")
+      match = router.resolve(:GET, "/users/42/files/docs/report.pdf")
+      expect(match.params[:id]).to eq("42")
+      expect(match.params[:path]).to eq("docs/report.pdf")
+
+    it "lets an earlier static route win over a splat" ->
+      router = Router.new
+      router.get "/assets/logo.png" -> (req) Response.ok("logo")
+      router.get "/assets/*path" -> (req) Response.ok("asset")
+      match = router.resolve(:GET, "/assets/logo.png")
+      expect(match.params[:path]).to be_nil
+
 spec_summary

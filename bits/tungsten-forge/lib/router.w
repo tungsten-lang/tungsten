@@ -102,9 +102,25 @@
   ro :path
   ro :handler
   ro :segments
+  ro :wildcard
 
   -> new(@method, @path, @handler)
-    @segments = @path.split("/").reject -> (s) s.empty?
+    raw = @path.split("/").reject -> (s) s.empty?
+    # A trailing "*name" (or bare "*") segment is a wildcard splat: it
+    # matches one or more remaining path segments — captured, joined by
+    # "/", under :name (or :splat for a bare "*"). Splats are how a
+    # catch-all like "/assets/*path" or an SPA fallback "/*" is written.
+    # Only the LAST segment is treated as a splat; a "*" earlier in the
+    # pattern is matched literally.
+    @wildcard = nil
+    if raw.size > 0 && raw[raw.size - 1].starts_with?("*")
+      star = raw[raw.size - 1]
+      name = star.slice(1, star.size - 1)
+      name = "splat" if name.empty?
+      @wildcard = name.to_sym
+      @segments = raw.slice(0, raw.size - 1)
+    else
+      @segments = raw
 
   # No early returns here: the self-hosted interpreter mis-executes an
   # early `return` from a method that also contains block closures
@@ -112,8 +128,17 @@
   -> match(request_path)
     request_segments = request_path.split("/").reject -> (s) s.empty?
     result = nil
+    fixed = @segments.size
 
-    if request_segments.size == @segments.size
+    # A plain route needs an exact segment count; a splat route needs the
+    # fixed prefix plus at least one segment for the splat to capture.
+    size_ok = false
+    if @wildcard == nil
+      size_ok = request_segments.size == fixed
+    else
+      size_ok = request_segments.size > fixed
+
+    if size_ok
       params = {}
       matched = true
 
@@ -125,6 +150,10 @@
             params[segment.slice(1, segment.size - 1).to_sym] = req_segment
           elsif segment != req_segment
             matched = false
+
+      if matched && @wildcard != nil
+        rest = request_segments.slice(fixed, request_segments.size - fixed)
+        params[@wildcard] = rest.join("/")
 
       if matched
         result = RouteMatch.new(self, params)

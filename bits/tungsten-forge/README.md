@@ -80,6 +80,25 @@ Forge.routes ->
       Logger.info("Client disconnected")
 ```
 
+## Behind a Proxy
+
+When Forge runs behind a reverse proxy or load balancer, `request.remote_addr` is the *proxy's* address. The request surface parses both the RFC 7239 `Forwarded` header and the de-facto `X-Forwarded-*` family so handlers can recover the real client:
+
+```tungsten
+get "/whoami" -> (request)
+  Response.json({
+    ip:     request.client_ip,       # leftmost forwarded address, or remote_addr
+    chain:  request.forwarded_for,   # full address chain, client-first, hosts bare
+    proto:  request.forwarded_proto, # "https" / "http" (RFC 7239 proto or X-Forwarded-Proto)
+    host:   request.forwarded_host,  # original Host
+    port:   request.forwarded_port,  # X-Forwarded-Port as an Integer
+    secure: request.forwarded_ssl?,  # true when the client used TLS
+    proxied: request.via_proxy?
+  })
+```
+
+`request.forwarded` returns the structured RFC 7239 elements (each a hash of `for`/`by`/`host`/`proto`). **Security:** these headers are client-forgeable — trust `client_ip` only when a proxy you control sanitizes the inbound value.
+
 ## Static Files
 
 ```tungsten

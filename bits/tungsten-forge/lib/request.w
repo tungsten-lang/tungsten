@@ -149,6 +149,87 @@
   -> ranges(total)
     ByteRange.resolve(@headers.get("Range"), total)
 
+  # --- Proxy forwarding (see lib/forwarded.w) ---
+
+  # The structured RFC 7239 `Forwarded` header: an ordered Array of
+  # elements, each a Hash of downcased param name => value (leftmost =
+  # originating client). Empty when there is no Forwarded header.
+  -> forwarded
+    Forwarded.parse(@headers.get("Forwarded"))
+
+  # The forwarded address chain as bare hosts, client-first. Read from the
+  # RFC 7239 `Forwarded` `for=` values when present, else from
+  # `X-Forwarded-For`. Ports and IPv6 brackets are stripped. Empty when
+  # the request did not arrive through a proxy.
+  -> forwarded_for
+    hosts = []
+    self.forwarded.each -> (el)
+      f = el["for"]
+      hosts.push(Forwarded.node_host(f)) if f != nil
+    if hosts.size == 0
+      Forwarded.split_list(@headers.get("X-Forwarded-For")).each -> (tok)
+        hosts.push(Forwarded.node_host(tok))
+    hosts
+
+  # Best guess at the originating client's IP: the leftmost forwarded
+  # address, or @remote_addr (the TCP peer) when the request did not come
+  # through a proxy. SECURITY: the header is client-forgeable — trust this
+  # only when a proxy you control sanitizes the inbound value (see
+  # lib/forwarded.w).
+  -> client_ip
+    chain = self.forwarded_for
+    if chain.size > 0
+      chain[0]
+    else
+      @remote_addr
+
+  # The scheme the client originally used ("https" / "http"), downcased,
+  # from the RFC 7239 `proto` param or `X-Forwarded-Proto`, or nil when
+  # neither is present.
+  -> forwarded_proto
+    proto = nil
+    self.forwarded.each -> (el)
+      p = el["proto"]
+      proto = p if proto == nil && p != nil
+    if proto == nil
+      list = Forwarded.split_list(@headers.get("X-Forwarded-Proto"))
+      proto = list[0] if list.size > 0
+    if proto == nil
+      proto
+    else
+      proto.downcase
+
+  # The Host the client originally requested, from the RFC 7239 `host`
+  # param or `X-Forwarded-Host`, or nil when neither is present.
+  -> forwarded_host
+    host = nil
+    self.forwarded.each -> (el)
+      h = el["host"]
+      host = h if host == nil && h != nil
+    if host == nil
+      list = Forwarded.split_list(@headers.get("X-Forwarded-Host"))
+      host = list[0] if list.size > 0
+    host
+
+  # The original client-facing port from `X-Forwarded-Port` as an Integer,
+  # or nil when the header is absent.
+  -> forwarded_port
+    list = Forwarded.split_list(@headers.get("X-Forwarded-Port"))
+    if list.size > 0
+      list[0].to_i
+    else
+      nil
+
+  # Did the client originally connect over TLS? True when the forwarded
+  # scheme is "https".
+  -> forwarded_ssl?
+    self.forwarded_proto == "https"
+
+  # Did this request arrive through at least one proxy that announced a
+  # forwarded address (either header family)?
+  -> via_proxy?
+    self.forwarded_for.size > 0
+
   # --- Parsing ---
 
   # Parse a raw HTTP/1.1 request (request line + headers + optional body).

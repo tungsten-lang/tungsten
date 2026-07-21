@@ -90,9 +90,18 @@
 
       if arg.starts_with?("--no-")
         raw = arg.slice(2, arg.size)
-        defn = find_long(raw)
+        # An option literally named "--no-cache" wins over reading the token as
+        # a negation — including when it was abbreviated ("--no-cac"), so the
+        # lookup goes through the abbreviation resolver, not an exact match.
+        defn = resolve_long(raw)
         if !defn || defn[:negatable]
-          key = replace_all(arg.slice(5, arg.size), "-", "_")
+          # The negated form abbreviates too ("--no-col" for "--\[no-]color"):
+          # resolve the name after "--no-" and record under the canonical key.
+          negated = resolve_long(arg.slice(5, arg.size))
+          if negated != nil
+            key = negated[:key]
+          else
+            key = replace_all(arg.slice(5, arg.size), "-", "_")
           flags[key] = false
           i = i + 1
           next
@@ -806,7 +815,9 @@
   # Extract a "(conflicts with: A, B)" / "(conflicts: A, B)" annotation naming
   # the options this one is mutually exclusive with. Names are normalized to key
   # form (leading dashes stripped, "-" → "_") so "(conflicts with: --output-format)"
-  # matches the option whose key is "output_format". Returns nil when absent.
+  # matches the option whose key is "output_format". A short-flag spelling
+  # ("(conflicts with: -q)") reduces to the bare letter and is resolved against
+  # short flags by `find_option`. Returns nil when absent.
   -> extract_conflicts(text)
     di = text.index("(conflicts with:")
     marker = 16
@@ -932,6 +943,17 @@
         return @option_defs[i]
       i = i + 1
     nil
+
+  # Resolve an option named in an annotation ("(conflicts with: X)") to its
+  # definition. Annotation names arrive stripped of their leading dashes, so a
+  # long name ("--out") is already the canonical key while a short one ("-q")
+  # is a bare letter — try the key first, then the short-flag letter, so both
+  # spellings reach the same option.
+  -> find_option(name)
+    d = find_by_key(name)
+    if d != nil
+      return d
+    find_short(name)
 
   -> find_short(letter)
     i = 0
@@ -1156,7 +1178,13 @@
       flag = tokens[0] if tokens.size() > 0
 
       if flag
-        if flag.starts_with?("--")
+        # First form wins, for both the short and the long name. The comma split
+        # above cannot tell a flag list from an inline description that contains
+        # a comma ("-v, --verbose  Verbose output, -q for quiet" splits into
+        # three parts, the last starting with a flag-shaped token). Without
+        # first-wins, that trailing text would silently redefine the option's
+        # short letter — or, with a "--word" after the comma, its whole key.
+        if flag.starts_with?("--") && long == nil
           raw = flag.slice(2, flag.size())
           if raw.starts_with?("\[no-]") || raw.starts_with?("\[no]")
             negatable = true
@@ -1173,7 +1201,7 @@
               takes_value = true
               if value_name == nil
                 value_name = clean_value_name(val_name)
-        elsif flag.starts_with?("-") && flag.size() == 2
+        elsif flag.starts_with?("-") && !flag.starts_with?("--") && flag.size() == 2 && short == nil
           short = flag.slice(1, 2)
           if !key
             key = short
@@ -1410,8 +1438,8 @@
         ci = 0
         while ci < conflicts.size()
           other = conflicts[ci]
-          od = @parser.find_by_key(other)
-          if od != nil && provided?(other)
+          od = @parser.find_option(other)
+          if od != nil && provided?(od[:key])
             pair = conflict_pair_label(d, od)
             if !reported.has_key?(pair)
               reported[pair] = true

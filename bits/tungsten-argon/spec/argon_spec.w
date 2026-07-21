@@ -526,6 +526,9 @@ OPTIONS
 
     --long-flag-b
         Second long flag.
+
+    -s, --squash
+        Squash output. (conflicts with: -q)
 "
 
 cli6 = Argon.new(MAN6)
@@ -572,6 +575,22 @@ t.eq("multi-conflict list catches --quiet", opts.errors.include?("mutually exclu
 # Dashed long-name conflict resolves and reports with full labels.
 opts = cli6.parse(["--long-flag-a", "--long-flag-b"])
 t.eq("dashed long-name conflict is caught", opts.errors.include?("mutually exclusive options: --long-flag-a and --long-flag-b"), true)
+
+# A conflict may name its target by SHORT flag ("(conflicts with: -q)"). The
+# annotation strips leading dashes, leaving a bare letter, so the lookup has to
+# fall back from the canonical key to the short flag — otherwise the whole
+# constraint silently evaporates.
+t.eq("short-flag conflict name is extracted as a bare letter", cli6.find_by_key("squash")[:conflicts], ["q"])
+opts = cli6.parse(["--squash", "--quiet"])
+t.eq("short-flag-named conflict fires", opts.valid?, false)
+t.eq("short-flag-named conflict reports canonical labels", opts.errors.include?("mutually exclusive options: --quiet and --squash"), true)
+t.eq("short-flag-named conflict is reported once", opts.errors.size(), 1)
+t.eq("short-flag-named conflict fires from the short side too", cli6.parse(["-s", "-q"]).errors.include?("mutually exclusive options: --quiet and --squash"), true)
+t.eq("short-flag-named conflict stays quiet when alone", cli6.parse(["--squash"]).valid?, true)
+
+# Abbreviation composes with conflicts: an abbreviated option records under its
+# canonical key, so the constraint still sees it.
+t.eq("abbreviated options still clash", cli6.parse(["--verb", "--qui"]).errors.include?("mutually exclusive options: --quiet and --verbose"), true)
 
 # A conflict error accumulates alongside other validation errors.
 opts = cli6.parse(["--verbose", "--quiet", "--bogus"])
@@ -971,5 +990,129 @@ t.eq("unmatched long option is still unknown, not ambiguous", cli12.parse(["--xy
 t.eq("prefix resolves the positive form of a negatable flag", cli.parse(["--col"]).flag?(:color), true)
 t.eq("prefix resolves an optional-value option", cli.parse(["--pro", "fast"]).get(:profile), "fast")
 t.eq("prefix resolves a value option on the probe manpage", cli.parse(["--jo", "4"]).get(:jobs), 4)
+
+# ---- Abbreviation x "--no-" forms ----
+# "--no-X" is read as a negation only when it is not itself a defined option.
+# Both halves of that decision go through the abbreviation resolver: an
+# abbreviated real option ("--no-cac" for "--no-cache") must not be mistaken for
+# a negation, and the negated form of a negatable flag abbreviates too
+# ("--no-col" negates "--\[no-]color"), recording under the canonical key. An
+# unresolvable "--no-X" keeps the lenient path.
+
+MAN13 = "NAME
+    npmish -- exercise --no- prefixed options alongside negation
+
+SYNOPSIS
+    npmish \[options] file
+
+OPTIONS
+    --no-cache
+        Disable the cache. An option whose real name begins with no-.
+
+    -C, --\[no-]color
+        Colorize output.
+
+    --network
+        Use the network.
+"
+
+cli13 = Argon.new(MAN13)
+
+# An option literally named "--no-cache" is a flag, not a negation of "--cache".
+t.eq("--no-X option name is keyed whole", cli13.find_by_key("no_cache")[:long], "no-cache")
+opts = cli13.parse(["--no-cache"])
+t.eq("exact --no-X option sets its flag", opts.flag?(:no_cache), true)
+t.eq("exact --no-X option is not an unknown option", opts.unknown, [])
+
+# ...and it stays reachable when abbreviated, instead of being swallowed as a
+# negation of the nonexistent "--cac".
+opts = cli13.parse(["--no-cac"])
+t.eq("abbreviated --no-X option resolves to its canonical key", opts.flag?(:no_cache), true)
+t.eq("abbreviated --no-X option is not read as a negation", opts.negated?(:cac), false)
+t.eq("abbreviated --no-X option is valid", opts.valid?, true)
+
+# A genuine negation still negates, abbreviated or not.
+t.eq("exact negation still negates", cli13.parse(["--no-color"]).negated?(:color), true)
+opts = cli13.parse(["--no-col"])
+t.eq("abbreviated negation negates under the canonical key", opts.negated?(:color), true)
+t.eq("abbreviated negation is not flag?-true", opts.flag?(:color), false)
+t.eq("abbreviated negation is valid", opts.valid?, true)
+
+# The positive abbreviation of the same flag is unaffected.
+t.eq("positive abbreviation of a negatable flag still sets it", cli13.parse(["--col"]).flag?(:color), true)
+
+# An unresolvable "--no-X" keeps the lenient path: recorded as a negation of X,
+# and surfaced by validation as an unknown option.
+opts = cli13.parse(["--no-frobnicate"])
+t.eq("unknown --no-X is still recorded as a negation", opts.negated?(:frobnicate), true)
+t.eq("unknown --no-X is reported as an unknown option", opts.unknown, ["--frobnicate"])
+
+# ---- Inline descriptions containing a comma ----
+# An option line's flag forms are comma-separated, and argon also accepts the
+# description inline on that same line ("hammer-style"). A comma inside that
+# description therefore splits into a part that can itself begin with a
+# flag-shaped token ("..., -q for quiet" / "..., --stdout prints instead").
+# First form wins for both names, so trailing prose cannot redefine the
+# option's short letter or its key.
+
+MAN14 = "NAME
+    hammer -- exercise inline descriptions that contain commas
+
+SYNOPSIS
+    hammer \[options] file
+
+OPTIONS
+    -v, --verbose  Verbose output, -q for quiet
+
+    -o, --out FILE  Write to FILE, --stdout prints instead
+
+    -j, --jobs N  Parallel jobs, --serial disables (default: 8)
+"
+
+cli14 = Argon.new(MAN14)
+
+# A short flag named in the prose does not become the option's short form.
+t.eq("prose short flag does not steal the short form", cli14.find_by_key("verbose")[:short], "v")
+opts = cli14.parse(["-v"])
+t.eq("documented short flag still parses", opts.flag?(:verbose), true)
+t.eq("documented short flag is not unknown", opts.unknown, [])
+
+# A long flag named in the prose does not become the option's key.
+t.eq("prose long flag does not steal the key", cli14.find_by_key("out")[:long], "out")
+t.eq("prose long flag does not steal the metavar", cli14.find_by_key("out")[:value_name], "FILE")
+t.eq("documented long option still parses", cli14.parse(["--out", "x"]).get(:out), "x")
+t.eq("documented short form of it still parses", cli14.parse(["-o", "x"]).get(:out), "x")
+
+# The inline "(default: N)" on such a line is still extracted, under the right key.
+t.eq("inline default survives a comma in the description", cli14.parse([]).get(:jobs), 8)
+t.eq("value option after a prose comma still takes its value", cli14.parse(["-j", "2"]).get(:jobs), 2)
+
+# The generated usage advertises the documented forms.
+t.eq("usage advertises the documented short form", cli14.usage(), "usage: hammer \[-v] \[-o FILE] \[-j N] file")
+
+# ---- Degenerate and empty values ----
+# An empty "=value" is a value: it must beat the manpage default rather than
+# fall through it, and a zero must not read as "absent" either.
+
+t.eq("empty =value is preserved, not replaced by the default", cli2.parse(["--out="]).get(:out), "")
+t.eq("empty =value is preserved over an explicit default too", cli2.parse(["--out="]).get(:out, "a.out"), "")
+t.eq("a zero value does not fall through to the default", cli.parse(["--jobs", "0"]).get(:jobs), 0)
+t.eq("empty argv leaves no rest", cli.parse([]).passthrough, [])
+
+# ---- "--" and the =value form against array options ----
+# "--" is not value-like, so it stops array consumption and everything past it
+# is passthrough; the "=value" form of an array option appends like the spaced
+# form does.
+
+opts = cli.parse(["--files", "a", "--", "b"])
+t.eq("-- stops array-option consumption", opts.get(:files), ["a"])
+t.eq("tokens after -- are passthrough, not array elements", opts.passthrough, ["b"])
+
+opts = cli.parse(["--profile", "--", "x"])
+t.eq("-- is not an optional value", opts.get(:profile), true)
+t.eq("-- after an optional-value option still separates", opts.passthrough, ["x"])
+
+t.eq("=value form of an array option accumulates", cli.parse(["--files=a", "--files=b"]).get(:files), ["a", "b"])
+t.eq("=value form appends to a spaced array option", cli.parse(["--files", "a", "b", "--files=c"]).get(:files), ["a", "b", "c"])
 
 t.done

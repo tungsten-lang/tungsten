@@ -3,6 +3,7 @@
 
 use version
 use query_string
+use cookie
 use request
 use response
 use router

@@ -91,4 +91,74 @@ describe "Request#form_body" ->
     form = req.form_body
     expect(form).to be_nil
 
+describe "Cookie.parse" ->
+  it "splits pairs on ; and name/value on the first =" ->
+    c = Cookie.parse("sessionid=abc123; theme=dark")
+    expect(c["sessionid"]).to eq("abc123")
+    expect(c["theme"]).to eq("dark")
+
+  it "keeps everything after the first = in the value" ->
+    c = Cookie.parse("token=a=b=c")
+    expect(c["token"]).to eq("a=b=c")
+
+  it "trims whitespace around names and values" ->
+    c = Cookie.parse("  a = 1 ;   b=2  ")
+    expect(c["a"]).to eq("1")
+    expect(c["b"]).to eq("2")
+
+  it "treats a valueless segment as present with an empty value" ->
+    c = Cookie.parse("consent; page=2")
+    expect(c["consent"]).to eq("")
+    expect(c["page"]).to eq("2")
+
+  it "keeps an explicit empty value" ->
+    c = Cookie.parse("q=")
+    expect(c["q"]).to eq("")
+
+  it "unwraps a double-quoted value" ->
+    c = Cookie.parse("token=\"abc def\"")
+    expect(c["token"]).to eq("abc def")
+
+  it "does not percent-decode cookie octets" ->
+    c = Cookie.parse("path=%2Fusers%2F42")
+    expect(c["path"]).to eq("%2Fusers%2F42")
+
+  it "lets the first value win for a duplicate name" ->
+    c = Cookie.parse("x=1; x=2; x=3")
+    expect(c["x"]).to eq("1")
+
+  it "skips empty segments from stray or trailing semicolons" ->
+    c = Cookie.parse("; a=1;; b=2;")
+    expect(c["a"]).to eq("1")
+    expect(c["b"]).to eq("2")
+
+  it "skips a segment whose name is empty" ->
+    c = Cookie.parse("=orphan; real=yes")
+    expect(c.key?("real")).to eq(true)
+    expect(c.size).to eq(1)
+
+  it "returns an empty hash for nil or empty input" ->
+    expect(Cookie.parse(nil).size).to eq(0)
+    expect(Cookie.parse("").size).to eq(0)
+
+describe "Request#cookies" ->
+  it "parses the Cookie header of a parsed request" ->
+    req = Request.parse("GET /x HTTP/1.1\r\nHost: x\r\nCookie: sid=42; theme=dark\r\n\r\n")
+    jar = req.cookies
+    expect(jar["sid"]).to eq("42")
+    expect(jar["theme"]).to eq("dark")
+
+  it "is an empty hash when the request has no Cookie header" ->
+    req = Request.parse("GET /x HTTP/1.1\r\nHost: x\r\n\r\n")
+    expect(req.cookies.size).to eq(0)
+
+describe "Request#cookie" ->
+  it "returns a single cookie value by name" ->
+    req = Request.parse("GET /x HTTP/1.1\r\nCookie: sid=42; theme=dark\r\n\r\n")
+    expect(req.cookie("theme")).to eq("dark")
+
+  it "is nil for an absent cookie" ->
+    req = Request.parse("GET /x HTTP/1.1\r\nCookie: sid=42\r\n\r\n")
+    expect(req.cookie("nope")).to be_nil
+
 spec_summary

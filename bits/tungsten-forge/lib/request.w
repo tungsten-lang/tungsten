@@ -84,6 +84,16 @@
   -> query_params
     QueryString.parse(@query_string) if @query_string
 
+  # Inbound cookies as { "name" => "value" }. Always a Hash (empty when
+  # the request carries no Cookie header), so callers can index straight
+  # into it — see lib/cookie.w for the parsing rules.
+  -> cookies
+    Cookie.parse(@headers.get("Cookie"))
+
+  # The value of a single cookie by name, or nil when it is absent.
+  -> cookie(name)
+    self.cookies[name]
+
   # --- Parsing ---
 
   # Parse a raw HTTP/1.1 request (request line + headers + optional body).

@@ -400,4 +400,45 @@ opts = cli4.parse(["--mode", "nope", "--typo"])
 t.eq("multiple problems accumulate", opts.errors.size(), 3)
 t.eq("error? is the negation of valid?", opts.error?, true)
 
+# ---- Count flags (repeated boolean flags accumulate: the -vvv idiom) ----
+# A boolean flag given more than once records how many times it appeared, so a
+# CLI can read a verbosity/quiet LEVEL rather than a mere on/off. flag? still
+# reports the boolean; occurrences reports the tally.
+
+opts = cli3.parse(["-vvv"])
+t.eq("bundled repeats count up", opts.occurrences(:verbose), 3)
+t.eq("a counted flag is still flag?-true", opts.flag?(:verbose), true)
+
+opts = cli3.parse(["-v"])
+t.eq("a single occurrence counts 1", opts.occurrences(:verbose), 1)
+
+opts = cli3.parse([])
+t.eq("an absent flag counts 0", opts.occurrences(:verbose), 0)
+
+opts = cli3.parse(["-v", "-v"])
+t.eq("separate short flags accumulate", opts.occurrences(:verbose), 2)
+
+opts = cli3.parse(["--verbose", "--verbose"])
+t.eq("repeated long flags accumulate", opts.occurrences(:verbose), 2)
+
+# One letter's repeats are counted independently within a mixed bundle.
+opts = cli3.parse(["-vva"])
+t.eq("count tracks one letter in a mixed bundle", opts.occurrences(:verbose), 2)
+t.eq("another bundled flag is still set", opts.flag?(:a), true)
+t.eq("the singly-set letter counts 1", opts.occurrences(:a), 1)
+
+# Repeats before a value-flag ending the bundle are still counted, and the
+# value-flag still consumes its next token.
+opts = cli3.parse(["-vvo", "out.bin"])
+t.eq("repeats before a value-flag are counted", opts.occurrences(:verbose), 2)
+t.eq("the value-flag after repeats still takes its value", opts.get(:out), "out.bin")
+
+# Negations set the flag false and are deliberately not counted; an explicit
+# enable of the same negatable flag does count.
+opts = cli.parse(["--no-color"])
+t.eq("a negation contributes no count", opts.occurrences(:color), 0)
+
+opts = cli.parse(["-C", "-C"])
+t.eq("repeated enable of a negatable flag counts", opts.occurrences(:color), 2)
+
 t.done

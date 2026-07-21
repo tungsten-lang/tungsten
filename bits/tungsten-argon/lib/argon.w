@@ -19,6 +19,7 @@
 #   opts = cli.parse(ARGV)
 #
 #   opts.flag?(:verbose)      # => true/false
+#   opts.occurrences(:verbose) # => 3 for "-vvv" (repeated flags accumulate)
 #   opts.get(:out)            # => "file.wc" or nil
 #   opts.get(:out, "a.out")   # => "file.wc" or "a.out"
 #   opts.args                 # => \["file.w", "arg1"]
@@ -40,6 +41,7 @@
   # Returns an Argon:Result.
   -> parse(argv)
     flags = {}
+    counts = {}
     options = {}
     positional = []
     rest = []
@@ -108,7 +110,7 @@
             options[key] = true
             i = i + 1
         else
-          flags[key] = true
+          mark_flag(flags, counts, key)
           i = i + 1
         next
 
@@ -166,10 +168,10 @@
                   options[key] = true
               ci = chars.size()
           elsif defn
-            flags[defn[:key]] = true
+            mark_flag(flags, counts, defn[:key])
             ci = ci + 1
           else
-            flags[letter] = true
+            mark_flag(flags, counts, letter)
             ci = ci + 1
         next
 
@@ -203,18 +205,30 @@
               options[key] = true
               i = i + 1
           else
-            flags[key] = true
+            mark_flag(flags, counts, key)
             i = i + 1
         else
           # Unknown short flag — treat as flag using the letter as key
-          flags[short] = true
+          mark_flag(flags, counts, short)
           i = i + 1
         next
 
       positional.push(arg)
       i = i + 1
 
-    Argon:Result.new(flags, options, positional, rest, self)
+    Argon:Result.new(flags, counts, options, positional, rest, self)
+
+  # Set a boolean flag and bump its occurrence count. Repeated flags accumulate
+  # (the "-vvv" verbosity idiom); `flag?` reads the boolean, `occurrences` the
+  # tally. Negations ("--no-x") set the flag false directly and are deliberately
+  # not counted here.
+  -> mark_flag(flags, counts, key)
+    flags[key] = true
+    existing = counts[key]
+    if existing
+      counts[key] = existing + 1
+    else
+      counts[key] = 1
 
   # Store an option value, appending to arrays for repeated array options
   -> store_option(options, key, val)
@@ -699,12 +713,13 @@
 # Result object returned by Argon#parse
 + Argon:Result
   ro :flags
+  ro :counts
   ro :options
   ro :args
   ro :rest
   ro :parser
 
-  -> new(@flags, @options, @args, @rest, @parser)
+  -> new(@flags, @counts, @options, @args, @rest, @parser)
 
   # Check if a flag is set (boolean flags like --verbose, --debug)
   -> flag?(name)
@@ -715,6 +730,19 @@
   -> negated?(name)
     key = name.to_s()
     @flags[key] == false
+
+  # How many times a boolean flag was supplied. "-vvv" => 3, "-v" => 1,
+  # never given => 0. Repeated flags accumulate whether bundled ("-vvv"),
+  # separated ("-v -v -v"), or long ("--verbose --verbose") — the common
+  # verbosity-level idiom. Negations ("--no-color") do not count.
+  # (Named `occurrences`, not `count`: `count` collides with the runtime's
+  # Enumerable intrinsic, which would treat the symbol arg as a predicate.)
+  -> occurrences(name)
+    key = name.to_s()
+    n = @counts[key]
+    if n
+      return n
+    0
 
   # Get an option value. Falls back to the manpage default if present.
   -> get(name, default = nil)
@@ -801,12 +829,14 @@
     errors.size() > 0
 
   # Options the user passed that the manpage never documented, formatted as
-  # they would appear on the command line ("--frobnicate", "-z").
+  # they would appear on the command line ("--frobnicate", "-z"). Sorted so the
+  # result is deterministic: the names are gathered from the flags/options
+  # hashes, whose iteration order the compiled runtime does not guarantee.
   -> unknown
     names = []
     collect_unknown(@flags, names)
     collect_unknown(@options, names)
-    names
+    names.sort()
 
   # ---- Validation helpers ----
 

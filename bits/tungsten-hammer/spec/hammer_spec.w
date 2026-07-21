@@ -219,4 +219,53 @@ t.eq("max of empty sample is 0", Hammer.stat_max(empty), 0)
 t.eq("sum of empty sample is 0", Hammer.stat_sum(empty), 0)
 t.eq("mean of empty sample is 0", Hammer.stat_mean(empty), 0)
 
+# ---- HTTP status-line classification ----
+# status_code reads the token after the first space of the status line
+# (RFC 7230 §3.1.2), bounded by the next space or CR. Reference values are the
+# literal codes in each status line.
+
+# ---- status_code ----
+t.eq("status code 200 from status line", Hammer.status_code("HTTP/1.1 200 OK\r\n\r\n"), 200)
+t.eq("status code 404", Hammer.status_code("HTTP/1.1 404 Not Found\r\n\r\n"), 404)
+t.eq("status code 301 on HTTP/1.0", Hammer.status_code("HTTP/1.0 301 Moved Permanently\r\n\r\n"), 301)
+t.eq("status code 500", Hammer.status_code("HTTP/1.1 500 Internal Server Error\r\n\r\n"), 500)
+t.eq("status code 204 no content", Hammer.status_code("HTTP/1.1 204 No Content\r\n\r\n"), 204)
+t.eq("status code 100 continue", Hammer.status_code("HTTP/1.1 100 Continue\r\n\r\n"), 100)
+t.eq("status code from HTTP/2 style line", Hammer.status_code("HTTP/2 502 Bad Gateway\r\n\r\n"), 502)
+# The code is read from the head of a full framed response too (reusing `resp`).
+t.eq("status code from a full framed response", Hammer.status_code(resp), 200)
+# Malformed / non-response inputs classify as 0.
+t.eq("no space after version yields 0", Hammer.status_code("HTTP/1.1"), 0)
+t.eq("non-HTTP input yields 0", Hammer.status_code("garbage line"), 0)
+t.eq("empty input yields 0", Hammer.status_code(""), 0)
+
+# ---- status_class ----
+t.eq("2xx classifies as 2", Hammer.status_class(200), 2)
+t.eq("upper 2xx classifies as 2", Hammer.status_class(299), 2)
+t.eq("3xx classifies as 3", Hammer.status_class(301), 3)
+t.eq("4xx classifies as 4", Hammer.status_class(404), 4)
+t.eq("5xx classifies as 5", Hammer.status_class(503), 5)
+t.eq("1xx classifies as 1", Hammer.status_class(100), 1)
+t.eq("below 100 is out of range (0)", Hammer.status_class(99), 0)
+t.eq("above 599 is out of range (0)", Hammer.status_class(600), 0)
+t.eq("the failure code 0 classifies as 0", Hammer.status_class(0), 0)
+
+# ---- status_ok (wrk-style: 2xx/3xx are non-errors) ----
+t.eq("200 is ok", Hammer.status_ok(200), 1)
+t.eq("204 is ok", Hammer.status_ok(204), 1)
+t.eq("301 redirect is ok", Hammer.status_ok(301), 1)
+t.eq("302 redirect is ok", Hammer.status_ok(302), 1)
+t.eq("100 informational is not ok", Hammer.status_ok(100), 0)
+t.eq("404 is not ok", Hammer.status_ok(404), 0)
+t.eq("500 is not ok", Hammer.status_ok(500), 0)
+t.eq("failure code 0 is not ok", Hammer.status_ok(0), 0)
+
+# ---- response_ok (parse + classify in one call) ----
+t.eq("2xx response is ok", Hammer.response_ok("HTTP/1.1 200 OK\r\n\r\n"), 1)
+t.eq("3xx response is ok", Hammer.response_ok("HTTP/1.1 301 Moved Permanently\r\n\r\n"), 1)
+t.eq("4xx response is not ok", Hammer.response_ok("HTTP/1.1 404 Not Found\r\n\r\n"), 0)
+t.eq("5xx response is not ok", Hammer.response_ok("HTTP/1.1 500 Internal Server Error\r\n\r\n"), 0)
+t.eq("full framed 200 response is ok", Hammer.response_ok(resp), 1)
+t.eq("unparseable response is not ok", Hammer.response_ok("garbage"), 0)
+
 t.done

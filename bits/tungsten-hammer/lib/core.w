@@ -302,6 +302,56 @@
     return 0 if n == 0
     stat_sum(samples) / n
 
+  # ---- HTTP status-line classification ----
+  # A benchmark must distinguish responses the server actually served from ones
+  # it rejected: a load test against an endpoint returning 500 to every request
+  # should report those as errors, not throughput. wrk reports exactly this as
+  # its "Non-2xx or 3xx responses" line. The framing code above locates a
+  # complete response; these helpers read its status and classify it. All are
+  # pure and integer-valued (0/1 for predicates) so a counter sums them directly.
+
+  # Numeric status code from an HTTP status line ("HTTP/1.1 200 OK" -> 200).
+  # The status-line grammar (RFC 7230 §3.1.2) is `HTTP-version SP status-code SP
+  # reason-phrase`, so the code is the token after the first space, bounded by
+  # the next space or CR. Returns 0 for anything not beginning with "HTTP/" or
+  # with no space after the version — the caller treats 0 as "not a response".
+  -> .status_code(response) (string) i64
+    return 0 if !response.starts_with?("HTTP/")
+    sp = response.index(" ")
+    return 0 if sp == nil
+    code_start = sp + 1
+    code_end = response.index(" ", code_start)
+    cr = response.index("\r", code_start)
+    if cr != nil && (code_end == nil || cr < code_end)
+      code_end = cr
+    if code_end == nil
+      code_end = response.size
+    return 0 if code_end <= code_start
+    response.slice(code_start, code_end - code_start).to_i
+
+  # Class digit of a status code: 1xx->1, 2xx->2, ... 5xx->5. Codes outside the
+  # valid 100..599 range (including the 0 that status_code returns on failure)
+  # classify as 0.
+  -> .status_class(code) (i64) i64
+    return 0 if code < 100
+    return 0 if code > 599
+    code / 100
+
+  # wrk-style success predicate: a response is a non-error when its status is
+  # 2xx (success) or 3xx (redirect). Everything else — 1xx, 4xx, 5xx, and
+  # unparseable status lines (code 0) — counts as an error. Returns 1 for OK,
+  # 0 otherwise, so `oks += status_ok(code)` tallies successful responses.
+  -> .status_ok(code) (i64) i64
+    cls = status_class(code)
+    return 1 if cls == 2
+    return 1 if cls == 3
+    0
+
+  # Parse and classify a raw response in one call: 1 when the framed response's
+  # status line is 2xx/3xx, 0 otherwise (error or unparseable).
+  -> .response_ok(response) (string) i64
+    status_ok(status_code(response))
+
   -> .tungsten_connection(host, port, request_batch, pipeline, duration, total, errors) (string i64 string i64 i64)
     deadline_ticks = ccall_nobox("__w_deadline_ticks_after_seconds", duration)
     local_total = 0 ## i64

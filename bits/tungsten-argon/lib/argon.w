@@ -22,6 +22,12 @@
 #   opts.occurrences(:verbose) # => 3 for "-vvv" (repeated flags accumulate)
 #   opts.get(:out)            # => "file.wc" or nil
 #   opts.get(:out, "a.out")   # => "file.wc" or "a.out"
+#
+# Options the manpage annotates "(env: VAR)" fall back to $VAR when absent from
+# argv — resolution is command line > environment > default:
+#
+#   -t, --token TOKEN   API token. (env: API_TOKEN)
+#   opts.get(:token)          # => argv value, else $API_TOKEN, else nil
 #   opts.args                 # => \["file.w", "arg1"]
 #   opts.command              # => "compile" (first positional before --)
 #
@@ -434,6 +440,27 @@
   -> extract_required(text)
     text.index("(required)") != nil
 
+  # Extract an "(env: VAR)" annotation naming the environment variable an
+  # option falls back to when it is absent from argv. Returns the variable
+  # name (a plain string) or nil. Same extraction shape as extract_default.
+  -> extract_env(text)
+    di = text.index("(env:")
+    if di == nil
+      return nil
+    after = text.slice(di + 5, text.size()).strip()
+    paren = after.index(")")
+    if paren == nil
+      return nil
+    name = after.slice(0, paren).strip()
+    if name.size() == 0
+      return nil
+    name
+
+  # Look up an environment variable's value (nil when unset). Indirection so
+  # Argon:Result can reach the global env() through a plain top-level class.
+  -> env_lookup(name)
+    env(name)
+
   # Extract a "(one of: a, b, c)" / "(choices: a, b, c)" annotation into a
   # list of allowed values, cast with the same rules as parsed values so
   # numeric choices ("(choices: 1, 2, 3)") match casted integer inputs.
@@ -630,6 +657,13 @@
               defn[:choices] = inline_choices
             else
               defn[:choices] = extract_choices(desc)
+            # Environment-variable fallback: "(env: VAR)". As with defaults, an
+            # annotation on the option line itself wins over one below it.
+            inline_env = extract_env(stripped)
+            if inline_env != nil
+              defn[:env] = inline_env
+            else
+              defn[:env] = extract_env(desc)
             defs.push(defn)
 
       i = i + 1
@@ -744,12 +778,18 @@
       return n
     0
 
-  # Get an option value. Falls back to the manpage default if present.
+  # Get an option value. Resolution order is command line > environment >
+  # explicit default arg > manpage default. The environment step applies only
+  # to options the manpage annotates "(env: VAR)"; the raw env string is cast
+  # with the same rules as a parsed value, so "8" arrives as 8.
   -> get(name, default = nil)
     key = name.to_s()
     val = @options[key]
     if val
       return val
+    env_val = env_value(key)
+    if env_val != nil
+      return env_val
     if default != nil
       return default
     # Look up manpage default
@@ -761,6 +801,20 @@
         return d[:default]
       i = i + 1
     nil
+
+  # The casted value of an option's "(env: VAR)" fallback variable, or nil when
+  # the option declares no env fallback or the variable is unset.
+  -> env_value(key)
+    d = @parser.find_by_key(key)
+    if d == nil
+      return nil
+    name = d[:env]
+    if name == nil
+      return nil
+    raw = @parser.env_lookup(name)
+    if raw == nil
+      return nil
+    @parser.cast(raw)
 
   # The first positional argument (often a command or filename)
   -> command

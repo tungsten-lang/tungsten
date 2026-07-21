@@ -441,4 +441,51 @@ t.eq("a negation contributes no count", opts.occurrences(:color), 0)
 opts = cli.parse(["-C", "-C"])
 t.eq("repeated enable of a negatable flag counts", opts.occurrences(:color), 2)
 
+# ---- Environment-variable fallback ("(env: VAR)") ----
+# An option the manpage annotates "(env: VAR)" draws its value from $VAR when
+# it is absent from argv. Resolution order is command line > environment >
+# default, and the env string is cast with the same rules as a parsed value.
+# HOME is used for the "present" cases because it is reliably set; a
+# deliberately-unset variable name exercises the fall-through-to-default path.
+
+MAN5 = "NAME
+    envy -- exercise environment-variable fallback
+
+SYNOPSIS
+    envy \[options] file
+
+OPTIONS
+    -H, --homedir DIR
+        Home directory. (env: HOME)
+
+    -k, --token TOKEN
+        API token. (env: ARGON_UNSET_TOKEN_XYZ) (default: anonymous)
+
+    -c, --config FILE  Config path. (env: ARGON_INLINE_ENV)
+        A fallback described here also names (env: ARGON_DESC_ENV).
+
+    -o, --out FILE
+        Output file.
+"
+
+cli5 = Argon.new(MAN5)
+
+# Annotation extraction.
+t.eq("(env: VAR) annotation is extracted", cli5.find_by_key("homedir")[:env], "HOME")
+t.eq("(env: VAR) extracted alongside a default", cli5.find_by_key("token")[:env], "ARGON_UNSET_TOKEN_XYZ")
+t.eq("no env annotation leaves env nil", cli5.find_by_key("out")[:env] == nil, true)
+t.eq("inline env annotation wins over the description", cli5.find_by_key("config")[:env], "ARGON_INLINE_ENV")
+
+# Value resolution.
+opts = cli5.parse([])
+t.eq("env fallback draws from a set variable", opts.get(:homedir), env("HOME"))
+t.eq("unset env variable falls through to the manpage default", opts.get(:token), "anonymous")
+t.eq("an option with neither value, env, nor default is nil", opts.get(:out) == nil, true)
+
+opts = cli5.parse(["--homedir", "/custom"])
+t.eq("command-line value beats the environment", opts.get(:homedir), "/custom")
+
+opts = cli5.parse([])
+t.eq("environment beats an explicit default argument", opts.get(:homedir, "/fallback"), env("HOME"))
+
 t.done

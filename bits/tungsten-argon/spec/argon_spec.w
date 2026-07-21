@@ -488,4 +488,93 @@ t.eq("command-line value beats the environment", opts.get(:homedir), "/custom")
 opts = cli5.parse([])
 t.eq("environment beats an explicit default argument", opts.get(:homedir, "/fallback"), env("HOME"))
 
+# ---- Mutually exclusive options ("(conflicts with: ...)") ----
+# An option annotated "(conflicts with: X)" may not be supplied together with X.
+# The check is symmetric: declaring the conflict on either side is enough, and a
+# pair is reported once, in a deterministic (sorted-by-label) order. Parsing
+# itself stays lenient — the clash only surfaces through errors / valid?.
+
+MAN6 = "NAME
+    router -- exercise mutually exclusive options
+
+SYNOPSIS
+    router \[options] file
+
+OPTIONS
+    -v, --verbose
+        Verbose output. (conflicts with: quiet)
+
+    -q, --quiet
+        Quiet output. (conflicts with: verbose)
+
+    --json
+        JSON output.
+
+    --yaml
+        YAML output. (conflicts with: json)
+
+    -o, --out FILE  Output file. (conflicts with: quiet)
+
+    --strict
+        Strict mode. (conflicts with: quiet, plain)
+
+    --plain
+        Plain output.
+
+    --long-flag-a
+        First long flag. (conflicts with: --long-flag-b)
+
+    --long-flag-b
+        Second long flag.
+"
+
+cli6 = Argon.new(MAN6)
+
+# Annotation extraction (names normalized to key form).
+t.eq("(conflicts with: X) extracts a single conflict", cli6.find_by_key("verbose")[:conflicts], ["quiet"])
+t.eq("one-sided conflict annotation is extracted", cli6.find_by_key("yaml")[:conflicts], ["json"])
+t.eq("inline conflict annotation on the option line is extracted", cli6.find_by_key("out")[:conflicts], ["quiet"])
+t.eq("(conflicts with: A, B) extracts a list", cli6.find_by_key("strict")[:conflicts], ["quiet", "plain"])
+t.eq("dashed conflict name is normalized to key form", cli6.find_by_key("long_flag_a")[:conflicts], ["long_flag_b"])
+t.eq("no conflict annotation leaves conflicts nil", cli6.find_by_key("plain")[:conflicts] == nil, true)
+t.eq("undeclared side leaves conflicts nil", cli6.find_by_key("json")[:conflicts] == nil, true)
+
+# Supplying only one side, or neither, is fine.
+t.eq("one conflicting option alone is valid", cli6.parse(["--verbose"]).valid?, true)
+t.eq("neither conflicting option is valid", cli6.parse(["--plain"]).valid?, true)
+
+# Supplying both sides is a single, deterministic error.
+opts = cli6.parse(["--verbose", "--quiet"])
+t.eq("mutually exclusive options make input invalid", opts.valid?, false)
+t.eq("conflict is reported once (both sides declare it)", opts.errors.size(), 1)
+t.eq("conflict message is sorted and deterministic", opts.errors.include?("mutually exclusive options: --quiet and --verbose"), true)
+
+# Short-flag forms of the same pair also clash.
+opts = cli6.parse(["-v", "-q"])
+t.eq("short-flag forms clash too", opts.errors.include?("mutually exclusive options: --quiet and --verbose"), true)
+
+# The check is symmetric even when only one side declares the conflict.
+opts = cli6.parse(["--json", "--yaml"])
+t.eq("conflict fires when only the other side declares it", opts.valid?, false)
+t.eq("one-sided conflict reported once", opts.errors.include?("mutually exclusive options: --json and --yaml"), true)
+
+# A value option can conflict with a flag (inline annotation).
+opts = cli6.parse(["-o", "a.bin", "--quiet"])
+t.eq("value option conflicting with a flag is caught", opts.valid?, false)
+t.eq("value/flag conflict is reported", opts.errors.include?("mutually exclusive options: --out and --quiet"), true)
+
+# A multi-conflict list fires against whichever member is present.
+opts = cli6.parse(["--strict", "--plain"])
+t.eq("multi-conflict list catches --plain", opts.errors.include?("mutually exclusive options: --plain and --strict"), true)
+opts = cli6.parse(["--strict", "--quiet"])
+t.eq("multi-conflict list catches --quiet", opts.errors.include?("mutually exclusive options: --quiet and --strict"), true)
+
+# Dashed long-name conflict resolves and reports with full labels.
+opts = cli6.parse(["--long-flag-a", "--long-flag-b"])
+t.eq("dashed long-name conflict is caught", opts.errors.include?("mutually exclusive options: --long-flag-a and --long-flag-b"), true)
+
+# A conflict error accumulates alongside other validation errors.
+opts = cli6.parse(["--verbose", "--quiet", "--bogus"])
+t.eq("conflict and unknown-option errors accumulate", opts.errors.size(), 2)
+
 t.done

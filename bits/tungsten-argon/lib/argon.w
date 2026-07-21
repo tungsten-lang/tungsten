@@ -456,6 +456,37 @@
       return nil
     name
 
+  # Extract a "(conflicts with: A, B)" / "(conflicts: A, B)" annotation naming
+  # the options this one is mutually exclusive with. Names are normalized to key
+  # form (leading dashes stripped, "-" → "_") so "(conflicts with: --output-format)"
+  # matches the option whose key is "output_format". Returns nil when absent.
+  -> extract_conflicts(text)
+    di = text.index("(conflicts with:")
+    marker = 16
+    if di == nil
+      di = text.index("(conflicts:")
+      marker = 11
+    if di == nil
+      return nil
+    after = text.slice(di + marker, text.size())
+    paren = after.index(")")
+    if paren == nil
+      return nil
+    raw = after.slice(0, paren).split(",")
+    out = []
+    k = 0
+    while k < raw.size()
+      name = raw[k].strip()
+      while name.starts_with?("-")
+        name = name.slice(1, name.size())
+      name = replace_all(name, "-", "_")
+      if name.size() > 0
+        out.push(name)
+      k = k + 1
+    if out.size() == 0
+      return nil
+    out
+
   # Look up an environment variable's value (nil when unset). Indirection so
   # Argon:Result can reach the global env() through a plain top-level class.
   -> env_lookup(name)
@@ -664,6 +695,14 @@
               defn[:env] = inline_env
             else
               defn[:env] = extract_env(desc)
+            # Mutually exclusive options: "(conflicts with: A, B)". As with the
+            # other annotations, one on the option line itself wins over one
+            # sitting in the description lines below.
+            inline_conflicts = extract_conflicts(stripped)
+            if inline_conflicts != nil
+              defn[:conflicts] = inline_conflicts
+            else
+              defn[:conflicts] = extract_conflicts(desc)
             defs.push(defn)
 
       i = i + 1
@@ -842,6 +881,7 @@
   #   * a "(required)" option the user never supplied;
   #   * a non-optional value option left without a value;
   #   * a value outside a "(one of: …)" / "(choices: …)" set;
+  #   * two "(conflicts with: …)" options supplied together;
   #   * an option the manpage never documented (a typo or stray flag).
 
   # A list of human-readable error strings; empty when the input is valid.
@@ -866,6 +906,29 @@
           errs.push("invalid value for " + option_label(d) + ": " + bad.to_s() + " (expected one of: " + join_list(choices) + ")")
 
       i = i + 1
+
+    # Mutually exclusive options ("(conflicts with: …)"): report each
+    # conflicting pair that was supplied together, once, in a deterministic
+    # (sorted) order. Declaring the conflict on either option suffices — the
+    # check is symmetric, so "-v (conflicts with: quiet)" also rules out
+    # supplying --quiet together with -v even if --quiet declares nothing.
+    reported = {}
+    c = 0
+    while c < defs.size()
+      d = defs[c]
+      conflicts = d[:conflicts]
+      if conflicts != nil && provided?(d[:key])
+        ci = 0
+        while ci < conflicts.size()
+          other = conflicts[ci]
+          od = @parser.find_by_key(other)
+          if od != nil && provided?(other)
+            pair = conflict_pair_label(d, od)
+            if !reported.has_key?(pair)
+              reported[pair] = true
+              errs.push("mutually exclusive options: " + pair)
+          ci = ci + 1
+      c = c + 1
 
     unks = unknown
     u = 0
@@ -901,6 +964,15 @@
     if d[:long] != nil
       return "--" + d[:long]
     "-" + d[:short]
+
+  # A stable "labelA and labelB" for a conflicting pair, sorted by label so the
+  # message is the same whichever option's "(conflicts with: …)" triggered it.
+  -> conflict_pair_label(a, b)
+    la = option_label(a)
+    lb = option_label(b)
+    if lb < la
+      return lb + " and " + la
+    la + " and " + lb
 
   -> first_invalid_choice(val, choices)
     if val.is_a?(Array)

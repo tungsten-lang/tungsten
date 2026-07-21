@@ -124,6 +124,47 @@
   -> .auc(x, y)
     RocCurve.trapezoid(x, y)
 
+  # Log loss — binary cross-entropy, the mean negative log-likelihood a
+  # probabilistic classifier assigns the true labels. This is the EXACT
+  # objective LogisticRegression minimizes, and scikit-learn's log_loss:
+  #
+  #     L = -mean( y*ln(p) + (1 - y)*ln(1 - p) )
+  #
+  # where scores[i] = p is the model's P(row i is positive) — e.g.
+  # LogisticRegression#predict_proba — y is 1 when actual[i] == pos_label
+  # else 0, and pos_label names the positive class (default 1, matching
+  # precision / recall / f1 / roc_auc). Lower is better: 0 is a perfectly
+  # confident classifier, ln 2 ≈ 0.693147 a coin flip, and it grows without
+  # bound as confidence in a wrong label rises. It complements roc_auc —
+  # AUC judges only the RANKING of the scores, log loss judges their
+  # CALIBRATION (how close each probability is to the outcome), so a model
+  # can rank perfectly (AUC 1) yet carry a large log loss from
+  # under-confident probabilities. Probabilities are clipped to
+  # [eps, 1 - eps] (eps = 1e-15, scikit-learn's default) so a fully
+  # confident wrong prediction stays finite. Unlike roc_auc, a single class
+  # is fine — log loss is defined with no negatives (or no positives) — so
+  # nil arises only when scores and actual are misaligned or empty.
+  -> .log_loss(scores, actual, pos_label = 1)
+    ok = scores != nil && actual != nil
+    ok = scores.size == actual.size && scores.size > 0 if ok
+    out = nil
+    if ok
+      kilo = 1000.to_f
+      eps = 1.to_f / (kilo * kilo * kilo * kilo * kilo)
+      hi = 1.to_f - eps
+      total = 0.to_f
+      i = 0
+      scores.each -> (s)
+        p = s.to_f
+        p = eps if p < eps
+        p = hi if p > hi
+        y = 0.to_f
+        y = 1.to_f if actual[i] == pos_label
+        total += y * Math.log(p) + (1.to_f - y) * Math.log(1.to_f - p)
+        i += 1
+      out = 0.to_f - total / scores.size.to_f
+    out
+
   # A ClassificationReport: per-class precision / recall / f1 / support
   # (each metric one-vs-rest, the binary metrics above per class), plus
   # overall accuracy and macro / support-weighted averages — scikit-learn's

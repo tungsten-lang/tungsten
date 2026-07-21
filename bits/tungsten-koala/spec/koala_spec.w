@@ -370,4 +370,49 @@ describe "RocCurve" ->
     expect(Metrics.roc_auc(scores, [1])).to be_nil
     expect(Metrics.roc_auc([], [])).to be_nil
 
+describe "Metrics.log_loss" ->
+  # scikit-learn reference: log_loss([1, 0, 1, 0], [0.9, 0.1, 0.8, 0.35])
+  # = 0.21616187468057912. koala takes scores first (the roc_auc order):
+  # L = -mean(y*ln p + (1-y)*ln(1-p)). Every float derives from integers
+  # via .to_f — a float literal corrupts call arguments on both engines.
+  it "matches the scikit-learn log_loss reference example" ->
+    scores = [9.to_f / 10.to_f, 1.to_f / 10.to_f, 8.to_f / 10.to_f, 35.to_f / 100.to_f]
+    actual = [1, 0, 1, 0]
+    expect(Metrics.log_loss(scores, actual).to_s).to eq("0.216162")
+
+  # All probabilities at 0.5 is a coin flip: L = -ln(0.5) = ln 2 for any
+  # labels, log loss's natural chance baseline.
+  it "scores a coin flip as ln 2" ->
+    half = [5.to_f / 10.to_f, 5.to_f / 10.to_f, 5.to_f / 10.to_f, 5.to_f / 10.to_f]
+    expect(Metrics.log_loss(half, [1, 0, 1, 0]).to_s).to eq("0.693147")
+
+  # A perfectly confident, perfectly correct classifier scores ~0: the
+  # p = 1 / p = 0 extremes clip to [eps, 1 - eps] (eps = 1e-15) so the
+  # loss is a hair above 0, not -inf, matching scikit-learn's clipping.
+  it "scores a perfect confident classifier at ~0 via clipping" ->
+    tol = 1.to_f / 1000000.to_f
+    loss = Metrics.log_loss([1.to_f, 0.to_f], [1, 0])
+    expect(LinAlg.fabs(loss) < tol).to be_true
+
+  # pos_label selects the positive class, mirroring roc_auc: the scikit-learn
+  # roc example (actual [1,1,2,2], pos_label 2, scores [0.1,0.4,0.35,0.8])
+  # gives L = -mean(ln 0.9 + ln 0.6 + ln 0.35 + ln 0.8) = 0.472288.
+  it "honors pos_label" ->
+    scores = [1.to_f / 10.to_f, 4.to_f / 10.to_f, 35.to_f / 100.to_f, 8.to_f / 10.to_f]
+    expect(Metrics.log_loss(scores, [1, 1, 2, 2], 2).to_s).to eq("0.472288")
+
+  # Unlike roc_auc, a single present class is well-defined — log loss needs
+  # no negatives to normalize. Two positives at 0.9 / 0.8:
+  # L = -(ln 0.9 + ln 0.8) / 2 = 0.164252 (where roc_auc returns nil).
+  it "is defined for a single class, where roc_auc is nil" ->
+    scores = [9.to_f / 10.to_f, 8.to_f / 10.to_f]
+    expect(Metrics.log_loss(scores, [1, 1]).to_s).to eq("0.164252")
+    expect(Metrics.roc_auc(scores, [1, 1])).to be_nil
+
+  # nil (koala's requirement-not-met convention) only when scores and
+  # actual are misaligned or empty — never merely for a missing class.
+  it "returns nil for misaligned or empty inputs" ->
+    expect(Metrics.log_loss([9.to_f / 10.to_f, 1.to_f / 10.to_f], [1])).to be_nil
+    expect(Metrics.log_loss([], [])).to be_nil
+
 spec_summary

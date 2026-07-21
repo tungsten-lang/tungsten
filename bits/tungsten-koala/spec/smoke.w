@@ -224,6 +224,18 @@ use koala
     self.check("auc helper", Metrics.auc([0.to_f, 1.to_f], [0.to_f, 1.to_f]), "0.5")
     self.check("roc nil one class", Metrics.roc_auc([1.to_f, 9.to_f], [1, 1]) == nil, true)
     self.check("roc nil misaligned", Metrics.roc_curve([1.to_f, 9.to_f], [1]) == nil, true)
+    # Log loss — binary cross-entropy, the objective LogisticRegression
+    # minimizes (scikit-learn's log_loss); scores first, like roc_auc.
+    llscores = [9.to_f / 10.to_f, 1.to_f / 10.to_f, 8.to_f / 10.to_f, 35.to_f / 100.to_f]
+    self.check("log_loss reference", Metrics.log_loss(llscores, [1, 0, 1, 0]), "0.216162")
+    coin = [5.to_f / 10.to_f, 5.to_f / 10.to_f, 5.to_f / 10.to_f, 5.to_f / 10.to_f]
+    self.check("log_loss coin flip ln2", Metrics.log_loss(coin, [1, 0, 1, 0]), "0.693147")
+    self.check("log_loss pos_label", Metrics.log_loss(rscores, ract, 2), "0.472288")
+    self.check("log_loss single class", Metrics.log_loss([9.to_f / 10.to_f, 8.to_f / 10.to_f], [1, 1]), "0.164252")
+    lltol = 1.to_f / 1000000.to_f
+    self.check("log_loss perfect ~0", LinAlg.fabs(Metrics.log_loss([1.to_f, 0.to_f], [1, 0])) < lltol, true)
+    self.check("log_loss nil misaligned", Metrics.log_loss([9.to_f / 10.to_f, 1.to_f / 10.to_f], [1]) == nil, true)
+    self.check("log_loss nil empty", Metrics.log_loss([], []) == nil, true)
 
 t = KoalaSmoke.new
 t.run

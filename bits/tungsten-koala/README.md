@@ -28,6 +28,7 @@ Metrics.f1([1, 1, 0], [1, 0, 0])     # => 0.666667 (also precision / recall)
 Metrics.classification_report(preds, actual)  # multiclass P/R/F1 + macro/weighted avg
 Metrics.roc_auc(scores, actual)      # => 0.75  area under the ROC curve
 Metrics.roc_curve(scores, actual)    # => RocCurve: .fpr / .tpr / .thresholds / .auc
+Metrics.log_loss(scores, actual)     # => 0.216162  binary cross-entropy (log loss)
 
 v = Vector.new([1, 2, 3])
 v.dot(Vector.new([4, 5, 6]))         # => 32
@@ -231,7 +232,18 @@ with `pos_label` naming the positive class (default 1, the
 precision/recall convention), and return nil when a class is absent
 (AUC undefined) or the arrays are misaligned. `Metrics.auc(x, y)` is the
 underlying trapezoidal area under any curve, so `roc_auc == auc(fpr,
-tpr)`. A `Pipeline` whose LAST step is
+tpr)`. `Metrics.log_loss(scores, actual, pos_label)` is the binary
+cross-entropy `-mean(y*ln p + (1-y)*ln(1-p))` — the EXACT objective
+`LogisticRegression` minimizes and scikit-learn's `log_loss`. Where
+`roc_auc` judges only the ranking of the scores, log loss judges their
+calibration (how close each probability is to the outcome), so a model
+can rank perfectly yet carry a large log loss from under-confident
+probabilities; lower is better, 0 a perfectly confident classifier and
+`ln 2 ≈ 0.693147` a coin flip. Probabilities are clipped to
+`[eps, 1-eps]` (`eps = 1e-15`) so a confidently wrong prediction stays
+finite, and — unlike `roc_auc` — a single present class is well-defined
+(no negatives to normalize by), so it returns nil only when `scores` and
+`actual` are misaligned or empty. A `Pipeline` whose LAST step is
 an estimator is fitted with `pipe.fit(df, y)` and answers
 `pipe.predict(x)` / `pipe.score(x, y)` by transforming through every
 step but the last. Model evaluation: `KFold` and `CrossValidation`

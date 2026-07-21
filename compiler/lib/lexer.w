@@ -1184,6 +1184,12 @@ use ../../languages/tungsten/lexers/regex_helpers
     @indent_stack = [0]
     @at_line_start = true
     @paren_depth = 0
+    # One entry per open `(`: 1 if it opened a lambda param list (`->(`),
+    # else 0. `@after_lambda_params` latches true across the closing `)` so
+    # the body-starting `<<` lexes as PUTS_OP, not LSHIFT (RPAREN is a value
+    # type). Reset on the next meaningful token in push_token.
+    @paren_lambda_stack = []
+    @after_lambda_params = false
     @regex_capture_scope = false
     # Canonical i64 packed token stream (W_LEXICAL_TOKEN per slot).
     # Parser sites read via tok_type/tok_off/tok_len helpers; no
@@ -1210,6 +1216,11 @@ use ../../languages/tungsten/lexers/regex_helpers
     if type_sym != :SP
       @last_token_type = type_sym
       @last_token_value = value
+      # The lambda-params latch only applies to the token that directly
+      # follows the closing `)`. Whitespace (:SP) is transparent; any other
+      # meaningful token clears it. The `)` branch re-sets it *after* this
+      # runs, so the latch survives its own RPAREN push.
+      @after_lambda_params = false
     if type_sym == :REGEX
       @regex_capture_scope = true
     if type_sym == :NEWLINE || type_sym == :SEMICOLON
@@ -2646,6 +2657,8 @@ use ../../languages/tungsten/lexers/regex_helpers
     @token_count = 0
     @last_token_type = nil
     @last_token_value = nil
+    @paren_lambda_stack = []
+    @after_lambda_params = false
     @regex_capture_scope = false
     @sup_skip_to = 0
     build_line_index()
@@ -3191,7 +3204,10 @@ use ../../languages/tungsten/lexers/regex_helpers
         emit_at(:ARROW, raw, off)
       return nil
     if raw == "<<"
-      if is_value_type?(@last_token_type) || is_value_keyword_prev?()
+      # `->(x) << ...` — the `)` closes a lambda param list, not a value, so
+      # `<<` begins the body as a PUTS_OP. Without the latch, RPAREN's
+      # value-type classification would mis-emit LSHIFT here.
+      if (is_value_type?(@last_token_type) || is_value_keyword_prev?()) && !@after_lambda_params
         emit_at(:LSHIFT, raw, off)
       else
         emit_at(:PUTS_OP, raw, off)
@@ -3337,9 +3353,22 @@ use ../../languages/tungsten/lexers/regex_helpers
     elsif raw == "^"
       emit_at(:CARET, raw, off)
     elsif raw == "("
+      # Remember whether this `(` opens a lambda param list (`->(`). Read
+      # @last_token_type before emit_at overwrites it. Store 1/0 (not a
+      # bool) to sidestep the inline bool-array codegen path.
+      opens_lambda = 0
+      if @last_token_type == :ARROW
+        opens_lambda = 1
+      @paren_lambda_stack.push(opens_lambda)
       emit_at(:LPAREN, raw, off)
     elsif raw == ")"
+      was_lambda = 0
+      if @paren_lambda_stack.size() > 0
+        was_lambda = @paren_lambda_stack.pop()
       emit_at(:RPAREN, raw, off)
+      # Set after emit_at so push_token's reset doesn't clear it.
+      if was_lambda == 1
+        @after_lambda_params = true
     elsif raw == "{"
       emit_at(:LBRACE, raw, off)
     elsif raw == "}"

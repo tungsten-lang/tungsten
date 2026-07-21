@@ -168,6 +168,7 @@ compiled_specs=(
   spec/compiler/indexed_compound_assignment_parameter_spec.w
   spec/compiler/int_to_i_autoload_spec.w
   spec/compiler/ivar_typed_return_spec.w
+  spec/compiler/lambda_puts_body_spec.w
   spec/compiler/mmap_size_relaxed_autoload_spec.w
   spec/compiler/mmap_size_relaxed_native_autoload_spec.w
   spec/compiler/nested_i64_array_boxed_store_spec.w

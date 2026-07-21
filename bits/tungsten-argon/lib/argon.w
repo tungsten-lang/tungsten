@@ -296,6 +296,71 @@
       p = p + 1
     out
 
+  # A full, formatted --help body: the generated usage synopsis, a blank line,
+  # then an aligned "Options:" table pairing each option's flag forms with the
+  # description text extracted from the manpage. Like `usage`, it is derived
+  # from the same defs `parse` uses, so it can never drift from what the parser
+  # accepts. Each option row shows both flag forms and its metavar
+  # ("-o, --out FILE"), a negatable flag its "\[no-]" prefix
+  # ("-C, --\[no-]color"), an array option an ellipsis, and an optional-value
+  # option a nested bracket — with descriptions aligned into a second column.
+  # When the manpage declares no options, the usage line is returned alone.
+  -> help_text
+    body = usage()
+    if @option_defs.size() == 0
+      return body
+
+    # Widest flag column, so descriptions line up.
+    width = 0
+    i = 0
+    while i < @option_defs.size()
+      w = option_help_label(@option_defs[i]).size()
+      if w > width
+        width = w
+      i = i + 1
+
+    body = body + "\n\nOptions:"
+    i = 0
+    while i < @option_defs.size()
+      d = @option_defs[i]
+      row = "  " + pad_right(option_help_label(d), width)
+      desc = d[:description]
+      if desc != nil && desc.size() > 0
+        row = row + "  " + desc
+      body = body + "\n" + row
+      i = i + 1
+    body
+
+  # Render one option's flag forms for the help table (see `help_text`). Both
+  # forms appear when present ("-o, --out"); a negatable flag shows its
+  # "\[no-]" prefix ("--\[no-]color"); the value metavar trails when the option
+  # takes one — bare ("--out FILE"), ellipsis for arrays ("--files FILE..."),
+  # nested bracket for optional values ("--profile \[MODE]"). Unlike the usage
+  # synopsis, no outer brackets are drawn — the table column handles layout.
+  -> option_help_label(d)
+    label = ""
+    if d[:short] != nil
+      label = "-" + d[:short]
+    if d[:long] != nil
+      long_disp = d[:long]
+      if d[:negatable]
+        long_disp = "\[no-]" + long_disp
+      if label.size() > 0
+        label = label + ", --" + long_disp
+      else
+        label = "--" + long_disp
+    if d[:takes_value]
+      vn = d[:value_name]
+      if vn == nil
+        vn = "VALUE"
+      if d[:array]
+        label = label + " " + vn + "..."
+      elsif d[:optional_value]
+        label = label + " \[" + vn + "]"
+      else
+        label = label + " " + vn
+    label
+
   # Render one option as it appears in the usage synopsis (see `usage`).
   -> option_usage(d)
     label = usage_flag_label(d)
@@ -331,6 +396,15 @@
     "\[" + s + "]"
 
   # ---- Private ----
+
+  # Right-pad `s` with spaces to `width` (no-op when already wide enough).
+  # Pure Tungsten so it runs under the interpreter too; used to align the
+  # help-table columns.
+  -> pad_right(s, width)
+    out = s
+    while out.size() < width
+      out = out + " "
+    out
 
   # Replace every occurrence of `from` in `s` with `to`.
   # (Pure Tungsten so Argon also runs under the interpreter, which has no gsub.)
@@ -1352,6 +1426,11 @@
   # for prefixing error output: `<< opts.usage()` then `opts.errors`.
   -> usage
     @parser.usage()
+
+  # The full formatted --help body for this CLI (delegates to the parser):
+  # the usage synopsis plus an aligned option table with descriptions.
+  -> help_text
+    @parser.help_text()
 
   # Print help and exit
   -> help!

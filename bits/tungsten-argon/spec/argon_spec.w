@@ -740,4 +740,60 @@ t.eq("required variadic operand is unbracketed with ellipsis", cli8.usage().ends
 t.eq("array metavar renders inline with an ellipsis", cli3.usage().index("\[--nums N...]") != nil, true)
 t.eq("operand still trails after an array option", cli3.usage().ends_with?(" file"), true)
 
+# ---- Generated help body (--help) ----
+# Building on the usage synopsis, argon renders a full --help body: the usage
+# line, a blank line, then an aligned "Options:" table pairing each option's
+# flag forms (both short and long, with metavar) against the description text
+# extracted from the manpage. Like usage(), it is derived from the same defs
+# parse() uses, so it can never drift from what the parser accepts. It is
+# reachable from both the parser and the parse result (the latter delegates).
+
+help = cli.help_text()
+
+# The body opens with the generated usage synopsis, then a blank line and the
+# option table heading.
+t.eq("help body begins with the usage synopsis", help.starts_with?(cli.usage()), true)
+t.eq("help body has a blank-line-separated Options heading", help.index("\n\nOptions:") != nil, true)
+
+# Each option row shows BOTH flag forms and its metavar (unlike the bracketed
+# usage synopsis, no outer brackets are drawn — the column handles layout).
+t.eq("value option row shows both forms and its metavar", help.index("-o, --out FILE") != nil, true)
+t.eq("boolean flag row shows both forms and no metavar", help.index("-d, --debug ") != nil, true)
+
+# A negatable flag advertises negation with a \[no-] prefix in the table.
+t.eq("negatable flag row shows the \[no-] prefix", help.index("-C, --\[no-]color") != nil, true)
+
+# Array and optional-value metavars render as they do in the synopsis, minus
+# the outer bracket: an ellipsis for arrays, a nested bracket for optionals.
+t.eq("array option row renders an ellipsis metavar", help.index("--files FILE...") != nil, true)
+t.eq("optional-value option row renders a nested-bracket metavar", help.index("-p, --profile \[MODE]") != nil, true)
+
+# The manpage description text is carried into each row.
+t.eq("description text is rendered in the help body", help.index("Write output to FILE.") != nil, true)
+
+# The widest option row determines the column; its description follows after a
+# two-space gap (exact form).
+t.eq("widest option row has a two-space gap before its description", help.index("-p, --profile \[MODE]  Profile, optionally in MODE.") != nil, true)
+
+# Descriptions align into a shared column across rows of differing label width.
+hrows = help.split("\n")
+t.eq("descriptions align to a shared column across rows", hrows[4].index("Enable debug mode."), hrows[5].index("Write output to FILE."))
+
+# The generated body is distinct from the raw-manpage passthrough (help()).
+t.eq("generated help body differs from the raw manpage", help == cli.help(), false)
+
+# The parse result delegates to the same generated help body.
+t.eq("result help_text delegates to the parser", cli.parse([]).help_text(), help)
+
+# A manpage that declares no options renders the usage line alone (no table).
+MAN10 = "NAME
+    bare -- a command with no options
+
+SYNOPSIS
+    bare FILE
+"
+cli10 = Argon.new(MAN10)
+t.eq("no-options help body is the usage line alone", cli10.help_text(), cli10.usage())
+t.eq("no-options help body has no Options heading", cli10.help_text().index("Options:") == nil, true)
+
 t.done

@@ -83,15 +83,66 @@
       result = out + "\""
     result
 
+  # --- Payload shaping ---
+  #
+  # These build the API envelope every serializer eventually needs. They
+  # are pure hash/array transforms (explicit `.each -> (x)` blocks), so
+  # they encode identically on BOTH engines — same contract as .encode.
+
+  # Keep/drop attribute keys of one hash per the :only / :except options.
+  #   :only   [:id, :title]   keep only these keys (in the hash's order)
+  #   :except [:secret]       drop these keys
+  # When both are given, :only selects first and :except removes from
+  # that selection. Absent options leave the hash untouched.
+  -> .shape(hash, options)
+    only   = options[:only]
+    except = options[:except]
+    if only == nil && except == nil
+      hash
+    else
+      out = {}
+      hash.each -> (k, v)
+        keep = true
+        if only != nil && !only.include?(k)
+          keep = false
+        if except != nil && except.include?(k)
+          keep = false
+        if keep
+          out[k] = v
+      out
+
+  # Wrap a payload (object or array) in a top-level envelope.
+  #   :root "post"      nest the payload under this key: {"post": ...}
+  #   :meta {page: 1}   attach a sibling "meta" object (requires :root —
+  #                     meta has no home without an envelope to sit in)
+  # No :root leaves the payload as-is.
+  -> .envelope(payload, options)
+    root = options[:root]
+    meta = options[:meta]
+    if root == nil
+      payload
+    else
+      wrapped = {}
+      wrapped[root] = payload
+      if meta != nil
+        wrapped[:meta] = meta
+      wrapped
+
   # --- Model conveniences ---
 
-  # One model -> JSON object (via Model#to_h).
-  -> .record(model)
-    Serializer.encode(model.to_h)
+  # One model -> JSON object (via Model#to_h). options: {only:, except:,
+  # root:, meta:} — explicit hash, not kwargs. Defaults to bare to_h.
+  #   Serializer.record(post)
+  #   Serializer.record(post, {only: [:id, :title], root: "post"})
+  -> .record(model, options = {})
+    Serializer.encode(Serializer.envelope(Serializer.shape(model.to_h, options), options))
 
-  # Array of models -> JSON array of objects.
-  -> .collection(models)
+  # Array of models -> JSON array of objects. Each row is shaped by
+  # :only / :except; :root / :meta wrap the whole array.
+  #   Serializer.collection(posts)
+  #   Serializer.collection(posts, {only: [:id], root: "posts", meta: {total: 2}})
+  -> .collection(models, options = {})
     rows = []
     models.each -> (m)
-      rows.push(m.to_h)
-    Serializer.encode(rows)
+      rows.push(Serializer.shape(m.to_h, options))
+    Serializer.encode(Serializer.envelope(rows, options))

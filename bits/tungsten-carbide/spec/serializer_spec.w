@@ -58,4 +58,50 @@ describe "Serializer" ->
       expect(json.include?("\"title\":\"one\"")).to be_true
       expect(json.include?("\"title\":\"two\"")).to be_true
 
+  describe "shaping options" ->
+    it "keeps only the requested attribute keys with :only" ->
+      Model.reset_all
+      p = Model.create(SerPost, {title: "hi", body: "text"})
+      json = Serializer.record(p, {only: [:id, :title]})
+      expect(json.include?("\"title\":\"hi\"")).to be_true
+      expect(json.include?("\"id\":1")).to be_true
+      expect(json.include?("body")).to be_false
+
+    it "drops the listed attribute keys with :except" ->
+      Model.reset_all
+      p = Model.create(SerPost, {title: "hi", body: "text"})
+      json = Serializer.record(p, {except: [:body]})
+      expect(json.include?("\"title\":\"hi\"")).to be_true
+      expect(json.include?("body")).to be_false
+
+    it "wraps a record under :root" ->
+      Model.reset_all
+      p = Model.create(SerPost, {title: "hi"})
+      json = Serializer.record(p, {root: "post"})
+      expect(json.starts_with?("{\"post\":{")).to be_true
+      expect(json.include?("\"title\":\"hi\"")).to be_true
+
+    it "attaches a :meta object beside a rooted payload" ->
+      Model.reset_all
+      p = Model.create(SerPost, {title: "hi"})
+      json = Serializer.record(p, {root: "post", meta: {ok: true}})
+      expect(json.include?("\"post\":{")).to be_true
+      expect(json.include?("\"meta\":{\"ok\":true}")).to be_true
+
+    it "shapes each row and roots a collection with :only and :root" ->
+      Model.reset_all
+      Model.create(SerPost, {title: "one", body: "a"})
+      Model.create(SerPost, {title: "two", body: "b"})
+      json = Serializer.collection(Model.all(SerPost), {only: [:title], root: "posts", meta: {total: 2}})
+      expect(json.starts_with?("{")).to be_true
+      expect(json.include?("\"posts\":\[{")).to be_true
+      expect(json.include?("\"title\":\"one\"")).to be_true
+      expect(json.include?("body")).to be_false
+      expect(json.include?("\"meta\":{\"total\":2}")).to be_true
+
+    it "leaves the payload unshaped when no options are given" ->
+      Model.reset_all
+      p = Model.create(SerPost, {title: "hi", body: "text"})
+      expect(Serializer.record(p)).to eq(Serializer.record(p, {}))
+
 spec_summary

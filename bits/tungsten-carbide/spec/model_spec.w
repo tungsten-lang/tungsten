@@ -80,6 +80,30 @@ use carbide
     checks.push(Model.length(:code, {min: 5, message: "code too tiny"}))
     checks
 
+# --- Models exercising associations. A SpecAuthor has_many SpecBooks and
+# has_one SpecProfile; each child belongs_to its SpecAuthor via :author_id.
+# The two sides reference each other (forward class refs resolve at call
+# time on both engines).
++ SpecAuthor < Model
+  -> table
+    "spec_authors"
+  -> books
+    Model.has_many(self, SpecBook, :author_id)
+  -> profile
+    Model.has_one(self, SpecProfile, :author_id)
+
++ SpecBook < Model
+  -> table
+    "spec_books"
+  -> author
+    Model.belongs_to(self, SpecAuthor, :author_id)
+
++ SpecProfile < Model
+  -> table
+    "spec_profiles"
+  -> author
+    Model.belongs_to(self, SpecAuthor, :author_id)
+
 describe "Model" ->
   describe "construction" ->
     it "builds from an attributes hash" ->
@@ -283,5 +307,67 @@ describe "Model" ->
         m = SpecMsg.new({code: "ab"})
         expect(m.valid?).to be_false
         expect(m.errors[0]).to eq("code too tiny")
+
+  describe "associations" ->
+    describe "belongs_to" ->
+      it "returns the owner record via the foreign key" ->
+        Model.reset_all
+        a = Model.create(SpecAuthor, {name: "amy"})
+        b = Model.create(SpecBook, {title: "hello", author_id: a.id})
+        expect(b.author.get(:name)).to eq("amy")
+        expect(b.author.id).to eq(a.id)
+
+      it "returns nil when the foreign key is unset" ->
+        Model.reset_all
+        b = Model.create(SpecBook, {title: "orphan"})
+        expect(b.author).to be_nil
+
+      it "returns nil for a dangling foreign key" ->
+        Model.reset_all
+        b = Model.create(SpecBook, {title: "ghost", author_id: 999})
+        expect(b.author).to be_nil
+
+    describe "has_many" ->
+      it "returns every child pointing at this record" ->
+        Model.reset_all
+        a = Model.create(SpecAuthor, {name: "amy"})
+        Model.create(SpecBook, {title: "one", author_id: a.id})
+        Model.create(SpecBook, {title: "two", author_id: a.id})
+        expect(a.books.size).to eq(2)
+
+      it "returns an empty array when there are no children" ->
+        Model.reset_all
+        a = Model.create(SpecAuthor, {name: "amy"})
+        expect(a.books.size).to eq(0)
+
+      it "scopes children to their own owner" ->
+        Model.reset_all
+        a = Model.create(SpecAuthor, {name: "amy"})
+        b = Model.create(SpecAuthor, {name: "bob"})
+        Model.create(SpecBook, {title: "a1", author_id: a.id})
+        Model.create(SpecBook, {title: "a2", author_id: a.id})
+        Model.create(SpecBook, {title: "b1", author_id: b.id})
+        expect(a.books.size).to eq(2)
+        expect(b.books.size).to eq(1)
+        expect(b.books[0].get(:title)).to eq("b1")
+
+      it "round-trips has_many back to belongs_to" ->
+        Model.reset_all
+        a = Model.create(SpecAuthor, {name: "amy"})
+        Model.create(SpecBook, {title: "solo", author_id: a.id})
+        book = a.books[0]
+        expect(book.author.id).to eq(a.id)
+
+    describe "has_one" ->
+      it "returns the single child record" ->
+        Model.reset_all
+        a = Model.create(SpecAuthor, {name: "amy"})
+        Model.create(SpecProfile, {bio: "writes code", author_id: a.id})
+        expect(a.profile.get(:bio)).to eq("writes code")
+
+      it "returns nil when there is no child" ->
+        Model.reset_all
+        a = Model.create(SpecAuthor, {name: "amy"})
+        expect(a.profile).to be_nil
 
 spec_summary

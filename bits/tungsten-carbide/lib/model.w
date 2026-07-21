@@ -136,6 +136,70 @@
   -> .delete_all(klass)
     Model.replace_rows(Model.table_of(klass), [])
 
+  # --- Associations (Rails-style belongs_to / has_many / has_one) ---
+  #
+  # Relationships over the in-memory store, expressed as one-line
+  # instance methods on a concrete model. A parent owns children through a
+  # foreign-key attribute the child carries (child[:parent_id] == parent.id):
+  #
+  #   + Author < Model
+  #     -> table
+  #       "authors"
+  #     -> books                                   # has_many
+  #       Model.has_many(self, Book, :author_id)
+  #     -> profile                                 # has_one
+  #       Model.has_one(self, Profile, :author_id)
+  #
+  #   + Book < Model
+  #     -> table
+  #       "books"
+  #     -> author                                  # belongs_to
+  #       Model.belongs_to(self, Author, :author_id)
+  #
+  #   author.books        # [book, ...]  (every Book with author_id == author.id)
+  #   author.profile      # profile or nil
+  #   book.author         # author or nil
+  #   book.author.id == author.id   # round-trips
+  #
+  # Design notes (same constraints as the query interface above):
+  #   - Helper CLASS methods on Model, called from a concrete model's
+  #     INSTANCE method. Inherited class methods are invisible to compiled
+  #     binaries, but a direct Model.has_many(...) call is not inherited, and
+  #     the target class rides in as an argument (classes are first-class
+  #     values — the same pattern create/find/where use). Instance methods
+  #     virtual-dispatch identically in both engines, so `author.books` works.
+  #   - The foreign key is a symbol attribute name on the CHILD (:author_id).
+  #     belongs_to reads it off the owner record; has_many/has_one match it
+  #     against the parent's id.
+  #   - No new store state: has_many/has_one filter through Model.where and
+  #     belongs_to through Model.find, so associations inherit their nil/empty
+  #     behavior — a nil or dangling foreign key yields nil (belongs_to/has_one)
+  #     or [] (has_many), never an exception (identical on both engines).
+  #   - Forward class references resolve at call time (verified on both
+  #     engines), so a parent may name a child class defined later and the two
+  #     sides may reference each other.
+
+  # belongs_to: the single owner record this record points at through its
+  # foreign_key attribute. nil when the key is unset or dangling.
+  -> .belongs_to(record, owner_klass, foreign_key)
+    Model.find(owner_klass, record.get(foreign_key))
+
+  # has_many: every child record whose foreign_key equals this record's id
+  # (an empty array when there are none).
+  -> .has_many(owner, child_klass, foreign_key)
+    conditions = {}
+    conditions[foreign_key] = owner.id
+    Model.where(child_klass, conditions)
+
+  # has_one: the first child record whose foreign_key equals this record's
+  # id, or nil when there are none.
+  -> .has_one(owner, child_klass, foreign_key)
+    matches = Model.has_many(owner, child_klass, foreign_key)
+    result = nil
+    if matches.size > 0
+      result = matches[0]
+    result
+
   # --- Validation descriptor builders ---
 
   # Presence: nil or "" fails with "<attr> can't be blank".

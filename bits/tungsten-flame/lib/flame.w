@@ -26,6 +26,7 @@ use hot_frames
 use flame_filter
 use flame_threshold
 use flame_normalize
+use flame_split
 
 # ---- Read and parse the manpage ----
 # Prefer TUNGSTEN_ROOT (set by the CLI); __DIR__ is not always populated
@@ -92,6 +93,11 @@ if fl_threshold == nil
 fl_rewrite = opts.get("rewrite")
 if fl_rewrite == nil
   fl_rewrite = ""
+# Named `fl_root` (not `root`): `root` above holds TUNGSTEN_ROOT.
+fl_root = opts.get("root")
+if fl_root == nil
+  fl_root = ""
+fl_root = fl_root.to_s()
 fl_output = opts.get("output")
 if fl_output == nil
   fl_output = ""
@@ -109,6 +115,7 @@ fl_collapse_dtrace = opts.flag?("collapse_dtrace")
 fl_collapse_recursion = opts.flag?("collapse_recursion")
 fl_speedscope  = opts.flag?("speedscope")
 fl_trace_event = opts.flag?("trace_event")
+fl_split       = opts.flag?("split")
 fl_files       = opts.args
 fl_passthrough = opts.passthrough
 
@@ -265,6 +272,81 @@ if fl_trace_event
       << "open at https://ui.perfetto.dev or chrome://tracing"
   else
     << te_json
+  exit(0)
+
+# Split mode: partition a folded profile by its ROOT frame — the per-thread
+# view (`flame --split FILE.folded`). A profile of a threaded process (anything
+# --collapse-sample produces, where each thread is its own folded root) is
+# several independent profiles in one file: viewed whole, every percentage is
+# diluted by threads you do not care about. The partition is lossless — a
+# stack's root is a pure function of the stack, so every stack lands in exactly
+# one group and the group totals sum to the input total.
+#
+# Three shapes, matching how you actually use it:
+#   flame --split FILE                 listing — which roots exist, their
+#                                      samples, share, and stack counts
+#   flame --split -o PREFIX FILE       writes PREFIX.<root>.folded per root
+#   flame --root NAME FILE             select — just that root's stacks
+#
+# Like --diff / --hot / --grep, a pure folded-text mode (no compile, no
+# profiling) that works on any folded stacks; several files aggregate first
+# (concatenated folded text sums duplicate stacks), so N runs partition as one.
+# Select emits folded text — pipe it into any other view
+# (`flame --root Thread_1 x.folded > t1.folded`).
+if fl_split || fl_root != ""
+  if fl_files.size < 1
+    << "tungsten flame --split: need at least one folded file"
+    exit(1)
+  combined = ""
+  si = 0
+  while si < fl_files.size
+    ftext = read_file(fl_files[si])
+    if ftext == nil
+      << "tungsten flame: cannot read " + fl_files[si]
+      exit(1)
+    if combined != ""
+      combined = combined + "\n"
+    combined = combined + ftext
+    si = si + 1
+
+  # Select mode: one root's stacks, as a standalone folded profile.
+  if fl_root != ""
+    selected = Tungsten:Flame:FlameSplit.select(combined, fl_root)
+    if selected == ""
+      << "tungsten flame --root: no stacks with root frame: " + fl_root
+      << "(run `flame --split` on the same file to list the roots it has)"
+      exit(1)
+    if fl_output != ""
+      write_file(fl_output, selected)
+      if !fl_silent
+        << "wrote folded stacks for root " + fl_root + ": " + fl_output + " (" + Tungsten:Flame:FlameFilter.stack_count(selected).to_s() + " stacks)"
+    else
+      << selected
+    exit(0)
+
+  # Split mode with -o: one folded file per root, named from a filesystem-safe
+  # slug of the root frame. A trailing ".folded" on the prefix is stripped so
+  # `-o out.folded` yields `out.Thread_1.folded`, not `out.folded.Thread_1.folded`.
+  if fl_output != ""
+    prefix = fl_output
+    if prefix.ends_with?(".folded")
+      prefix = prefix.slice(0, prefix.size() - 7)
+    groups = Tungsten:Flame:FlameSplit.groups(combined)
+    if groups.size() == 0
+      << "tungsten flame --split: no samples in input"
+      exit(1)
+    gi = 0
+    while gi < groups.size()
+      grp = groups[gi]
+      path = prefix + "." + Tungsten:Flame:FlameSplit.slug(grp[0]) + ".folded"
+      write_file(path, grp[1])
+      if !fl_silent
+        << "wrote " + path + " (" + Tungsten:Flame:FlameFilter.stack_count(grp[1]).to_s() + " stacks)"
+      gi = gi + 1
+    exit(0)
+
+  # Split mode, no -o: the listing.
+  << Tungsten:Flame:FlameSplit.list_report(combined, !fl_silent)
   exit(0)
 
 # Filter mode: reshape one folded profile before viewing it — include

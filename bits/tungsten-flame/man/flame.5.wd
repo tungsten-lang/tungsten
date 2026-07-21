@@ -35,6 +35,8 @@ tungsten-flame(1) -- Make flame graphs
     --collapse-recursion  Fold runs of consecutive repeated frames (recursion)
     --rewrite RULES    Merge frame variants: "old=>new;old2=>new2"
     --threshold PCT    Fold frames below PCT% (inclusive) into an "(other)" node
+    --split            Partition folded stacks by root frame (per-thread view)
+    --root NAME        Keep only folded stacks whose root frame is NAME
 
 ## DISPLAY OPTIONS
 

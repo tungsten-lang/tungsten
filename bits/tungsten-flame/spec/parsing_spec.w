@@ -18,6 +18,7 @@ use hot_frames
 use flame_filter
 use flame_threshold
 use flame_normalize
+use flame_split
 
 describe "PerfScript" ->
   it "collapses perf script samples into sorted folded stacks" ->
@@ -720,5 +721,123 @@ describe "FlameNormalize" ->
 
   it "apply with neither operation is an identity passthrough" ->
     expect(Tungsten:Flame:FlameNormalize.apply("a;b 2", false, "")).to eq("a;b 2")
+
+describe "FlameSplit" ->
+  it "extracts the root frame as the first segment of a stack" ->
+    expect(Tungsten:Flame:FlameSplit.root_of("Thread_1;start;work")).to eq("Thread_1")
+
+  it "treats a single-frame stack as its own root" ->
+    expect(Tungsten:Flame:FlameSplit.root_of("main")).to eq("main")
+
+  it "lists the distinct root frames, sorted" ->
+    txt = "Thread_2;spin 5\nThread_1;start;work 30\nThread_1;start;idle 10"
+    expect(Tungsten:Flame:FlameSplit.roots(txt).join(",")).to eq("Thread_1,Thread_2")
+
+  it "selects one root's stacks as a standalone folded profile" ->
+    txt = "Thread_1;start;work 30\nThread_2;spin 5\nThread_1;start;idle 10"
+    expect(Tungsten:Flame:FlameSplit.select(txt, "Thread_1")).to eq("Thread_1;start;idle 10\nThread_1;start;work 30")
+
+  it "keeps the root frame in the selected stacks (a valid profile for any view)" ->
+    expect(Tungsten:Flame:FlameSplit.select("Thread_2;spin 5", "Thread_2")).to eq("Thread_2;spin 5")
+
+  it "matches the root frame exactly, not as a substring" ->
+    txt = "Thread_1;a 3\nThread_10;b 7"
+    expect(Tungsten:Flame:FlameSplit.select(txt, "Thread_1")).to eq("Thread_1;a 3")
+
+  it "returns no stacks for a root that is not present" ->
+    expect(Tungsten:Flame:FlameSplit.select("Thread_1;a 3", "Thread_9")).to eq("")
+
+  it "tallies per-root sample totals" ->
+    txt = "Thread_1;start;work 30\nThread_1;start;idle 10\nThread_2;spin 5"
+    totals = Tungsten:Flame:FlameSplit.totals(txt)
+    expect(totals["Thread_1"]).to eq(40)
+    expect(totals["Thread_2"]).to eq(5)
+
+  it "preserves the grand total across the partition (lossless)" ->
+    txt = "Thread_1;start;work 30\nThread_1;start;idle 10\nThread_2;spin 5\nsolo 7"
+    total = Tungsten:Flame:FlameSplit.parse_folded(txt)[:total]
+    totals = Tungsten:Flame:FlameSplit.totals(txt)
+    names = totals.keys()
+    sum = 0
+    i = 0
+    while i < names.size()
+      sum = sum + totals[names[i]]
+      i = i + 1
+    expect(total).to eq(52)
+    expect(sum).to eq(total)
+
+  it "puts every stack in exactly one group, losing and duplicating none" ->
+    txt = "Thread_1;start;work 30\nThread_1;start;idle 10\nThread_2;spin 5\nsolo 7"
+    groups = Tungsten:Flame:FlameSplit.groups(txt)
+    parts = []
+    i = 0
+    while i < groups.size()
+      parts.push(groups[i][1])
+      i = i + 1
+    rejoined = Tungsten:Flame:FlameSplit.select(parts.join("\n"), "Thread_1")
+    expect(groups.size()).to eq(3)
+    # Re-parsing the concatenated groups reproduces the input exactly.
+    regrouped = Tungsten:Flame:FlameSplit.parse_folded(parts.join("\n"))
+    expect(regrouped[:total]).to eq(52)
+    expect(Tungsten:Flame:FlameFilter.stack_count(parts.join("\n"))).to eq(4)
+    expect(rejoined).to eq("Thread_1;start;idle 10\nThread_1;start;work 30")
+
+  it "returns groups as sorted root/folded pairs" ->
+    groups = Tungsten:Flame:FlameSplit.groups("b_root;x 2\na_root;y 3")
+    expect(groups[0][0]).to eq("a_root")
+    expect(groups[0][1]).to eq("a_root;y 3")
+    expect(groups[1][0]).to eq("b_root")
+    expect(groups[1][1]).to eq("b_root;x 2")
+
+  it "sums duplicate stacks before partitioning (multi-file aggregation)" ->
+    totals = Tungsten:Flame:FlameSplit.totals("Thread_1;a 3\nThread_1;a 4")
+    expect(totals["Thread_1"]).to eq(7)
+    expect(Tungsten:Flame:FlameSplit.select("Thread_1;a 3\nThread_1;a 4", "Thread_1")).to eq("Thread_1;a 7")
+
+  it "counts distinct stacks per root" ->
+    counts = Tungsten:Flame:FlameSplit.stack_counts("Thread_1;a 3\nThread_1;b 4\nThread_2;c 1")
+    expect(counts["Thread_1"]).to eq(2)
+    expect(counts["Thread_2"]).to eq(1)
+
+  it "ranks listing rows by sample total descending" ->
+    rows = Tungsten:Flame:FlameSplit.rows("small;a 1\nbig;b 100\nmid;c 50")
+    expect(rows[0][0]).to eq("big")
+    expect(rows[1][0]).to eq("mid")
+    expect(rows[2][0]).to eq("small")
+
+  it "breaks listing ties by root name ascending" ->
+    rows = Tungsten:Flame:FlameSplit.rows("zed;a 5\nabe;b 5")
+    expect(rows[0][0]).to eq("abe")
+    expect(rows[1][0]).to eq("zed")
+
+  it "reports each root's share of the profile" ->
+    report = Tungsten:Flame:FlameSplit.list_report("Thread_1;a 75\nThread_2;b 25", false)
+    expect(report.include?("2 roots, 100 samples")).to eq(true)
+    expect(report.include?("75.0%")).to eq(true)
+    expect(report.include?("25.0%")).to eq(true)
+    expect(report.include?("Thread_1")).to eq(true)
+
+  it "reports no samples for empty input rather than crashing" ->
+    expect(Tungsten:Flame:FlameSplit.list_report("", false).include?("(no samples)")).to eq(true)
+    expect(Tungsten:Flame:FlameSplit.roots("").size()).to eq(0)
+    expect(Tungsten:Flame:FlameSplit.select("", "Thread_1")).to eq("")
+
+  it "slugs a root name into a filesystem-safe form" ->
+    expect(Tungsten:Flame:FlameSplit.slug("Thread_1")).to eq("Thread_1")
+    expect(Tungsten:Flame:FlameSplit.slug("DispatchQueue_1: main  (serial)")).to eq("DispatchQueue_1__main___serial_")
+    expect(Tungsten:Flame:FlameSplit.slug("a/../b")).to eq("a_.._b")
+
+  it "partitions the folded stacks a macOS sample collapse produces" ->
+    lines = []
+    lines.push("Call graph:")
+    lines.push("    30 Thread_1   DispatchQueue_1: main  (serial)")
+    lines.push("    + 30 start (in dyld) + 0  \[0x1\]")
+    lines.push("    +   30 work (in x) + 0  \[0x2\]")
+    lines.push("    5 Thread_2")
+    lines.push("    + 5 spin (in y) + 0  \[0x3\]")
+    lines.push("Total number in stack (recursive counted multiple, when >=5):")
+    folded = Tungsten:Flame:SampleCollapse.collapse(lines.join("\n"))
+    expect(Tungsten:Flame:FlameSplit.roots(folded).join(",")).to eq("Thread_1,Thread_2")
+    expect(Tungsten:Flame:FlameSplit.select(folded, "Thread_2")).to eq("Thread_2;spin 5")
 
 spec_summary

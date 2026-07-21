@@ -317,4 +317,87 @@ t.eq("defined digit-flag after an array is set", opts.flag?(:high_five), true)
 opts = cli.parse(["--profile", "-5"])
 t.eq("optional-value option consumes a negative number", opts.get(:profile), -5)
 
+# ---- Validation (manpage-driven constraints) ----
+# Parsing stays lenient; validation is opt-in via errors / valid?. Constraints
+# are read from the manpage: "(required)" marks a mandatory option, and
+# "(one of: ...)" / "(choices: ...)" restricts accepted values. Unknown options
+# (typos, stray flags) and value options left without a value are also reported.
+
+# A known-good parse against the original manpage is valid; a typo is not —
+# note the unknown flag is still *recorded* (lenient), yet flagged invalid.
+t.eq("known usage is valid", cli.parse(["--debug", "file.w"]).valid?, true)
+t.eq("unknown long flag makes input invalid", cli.parse(["--frobnicate"]).valid?, false)
+t.eq("skipped optional value is not a missing-value error", cli.parse(["--profile", "--debug"]).valid?, true)
+
+MAN4 = "NAME
+    validate -- exercise argon validation
+
+SYNOPSIS
+    validate \[options] file
+
+OPTIONS
+    -i, --input FILE
+        Input file. (required)
+
+    -m, --mode MODE
+        Operating mode. (one of: fast, slow, thorough)
+
+    -l, --level N
+        Verbosity level. (choices: 1, 2, 3)
+
+    -o, --out FILE
+        Output file.
+
+    -v, --verbose
+        Verbose output.
+"
+
+cli4 = Argon.new(MAN4)
+
+# Constraint extraction from the manpage.
+t.eq("(required) annotation marks option required", cli4.find_by_key("input")[:required], true)
+t.eq("unannotated option is not required", cli4.find_by_key("out")[:required], false)
+t.eq("(one of: ...) extracts string choices", cli4.find_by_key("mode")[:choices], ["fast", "slow", "thorough"])
+t.eq("(choices: ...) casts numeric choices", cli4.find_by_key("level")[:choices], [1, 2, 3])
+t.eq("no choices annotation leaves choices nil", cli4.find_by_key("out")[:choices] == nil, true)
+
+# A fully correct invocation validates clean.
+opts = cli4.parse(["--input", "a.txt", "--mode", "fast", "--level", "2", "-v"])
+t.eq("complete valid invocation is valid", opts.valid?, true)
+t.eq("valid invocation has no errors", opts.errors, [])
+
+# Missing required option.
+opts = cli4.parse(["--mode", "fast"])
+t.eq("missing required option is invalid", opts.valid?, false)
+t.eq("missing required option is reported", opts.errors.include?("missing required option: --input"), true)
+
+# Invalid choice (string).
+opts = cli4.parse(["--input", "a.txt", "--mode", "wat"])
+t.eq("bad string choice is invalid", opts.valid?, false)
+t.eq("bad string choice is reported with the allowed set", opts.errors.include?("invalid value for --mode: wat (expected one of: fast, slow, thorough)"), true)
+
+# Numeric choice: casted value must be a member.
+opts = cli4.parse(["--input", "a.txt", "--level", "2"])
+t.eq("valid numeric choice passes", opts.valid?, true)
+opts = cli4.parse(["--input", "a.txt", "--level", "5"])
+t.eq("out-of-set numeric choice is invalid", opts.valid?, false)
+t.eq("bad numeric choice reported after casting", opts.errors.include?("invalid value for --level: 5 (expected one of: 1, 2, 3)"), true)
+
+# A value option left without a value degrades to true — validation catches it.
+opts = cli4.parse(["--input"])
+t.eq("value option missing its value is invalid", opts.valid?, false)
+t.eq("missing value is reported", opts.errors.include?("missing value for option: --input"), true)
+
+# Unknown options are surfaced, formatted as they appeared on the command line.
+opts = cli4.parse(["--input", "a.txt", "--frobnicate", "-z"])
+t.eq("unknown long+short options collected", opts.unknown, ["--frobnicate", "-z"])
+t.eq("unknown options make input invalid", opts.valid?, false)
+t.eq("unknown long option is reported", opts.errors.include?("unknown option: --frobnicate"), true)
+t.eq("unknown short option is reported", opts.errors.include?("unknown option: -z"), true)
+
+# Several problems at once accumulate independently.
+opts = cli4.parse(["--mode", "nope", "--typo"])
+t.eq("multiple problems accumulate", opts.errors.size(), 3)
+t.eq("error? is the negation of valid?", opts.error?, true)
+
 t.done

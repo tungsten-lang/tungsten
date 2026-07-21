@@ -416,6 +416,38 @@
       return nil
     cast(after.slice(0, paren).strip())
 
+  # Detect a "(required)" annotation marking an option as mandatory.
+  -> extract_required(text)
+    text.index("(required)") != nil
+
+  # Extract a "(one of: a, b, c)" / "(choices: a, b, c)" annotation into a
+  # list of allowed values, cast with the same rules as parsed values so
+  # numeric choices ("(choices: 1, 2, 3)") match casted integer inputs.
+  # Returns nil when absent.
+  -> extract_choices(text)
+    di = text.index("(one of:")
+    marker = 8
+    if di == nil
+      di = text.index("(choices:")
+      marker = 9
+    if di == nil
+      return nil
+    after = text.slice(di + marker, text.size())
+    paren = after.index(")")
+    if paren == nil
+      return nil
+    raw = after.slice(0, paren).split(",")
+    out = []
+    k = 0
+    while k < raw.size()
+      item = raw[k].strip()
+      if item.size() > 0
+        out.push(cast(item))
+      k = k + 1
+    if out.size() == 0
+      return nil
+    out
+
   # Cast a parsed value based on its option_def
   -> cast_option(key, val)
     defn = find_by_key(key)
@@ -574,6 +606,16 @@
               below_default = extract_default(desc)
               if below_default != nil
                 defn[:default] = below_default
+            # Validation constraints (same extraction shape as defaults):
+            # "(required)" marks the option mandatory; "(one of: a, b)" /
+            # "(choices: a, b)" restricts its accepted values. An annotation
+            # on the option line itself wins over one in the description.
+            defn[:required] = extract_required(stripped) || extract_required(desc)
+            inline_choices = extract_choices(stripped)
+            if inline_choices != nil
+              defn[:choices] = inline_choices
+            else
+              defn[:choices] = extract_choices(desc)
             defs.push(defn)
 
       i = i + 1
@@ -708,6 +750,111 @@
   # Everything after -- (passed through to child processes)
   -> passthrough
     @rest
+
+  # ---- Validation ----
+  #
+  # Parsing itself stays lenient (unknown flags are still recorded; a value
+  # option missing its value degrades to `true`). Validation is opt-in: call
+  # `errors` / `valid?` to surface what the user got wrong against what the
+  # manpage declares. Checks, in order:
+  #   * a "(required)" option the user never supplied;
+  #   * a non-optional value option left without a value;
+  #   * a value outside a "(one of: …)" / "(choices: …)" set;
+  #   * an option the manpage never documented (a typo or stray flag).
+
+  # A list of human-readable error strings; empty when the input is valid.
+  -> errors
+    errs = []
+    defs = @parser.option_defs
+    i = 0
+    while i < defs.size()
+      d = defs[i]
+      key = d[:key]
+
+      if d[:required] && !provided?(key)
+        errs.push("missing required option: " + option_label(d))
+
+      if d[:takes_value] && !d[:optional_value] && @options[key] == true
+        errs.push("missing value for option: " + option_label(d))
+
+      choices = d[:choices]
+      if choices != nil && @options.has_key?(key) && @options[key] != true
+        bad = first_invalid_choice(@options[key], choices)
+        if bad != nil
+          errs.push("invalid value for " + option_label(d) + ": " + bad.to_s() + " (expected one of: " + join_list(choices) + ")")
+
+      i = i + 1
+
+    unks = unknown
+    u = 0
+    while u < unks.size()
+      errs.push("unknown option: " + unks[u])
+      u = u + 1
+
+    errs
+
+  # True when the input satisfies every manpage-declared constraint.
+  -> valid?
+    errors.size() == 0
+
+  -> error?
+    errors.size() > 0
+
+  # Options the user passed that the manpage never documented, formatted as
+  # they would appear on the command line ("--frobnicate", "-z").
+  -> unknown
+    names = []
+    collect_unknown(@flags, names)
+    collect_unknown(@options, names)
+    names
+
+  # ---- Validation helpers ----
+
+  -> provided?(key)
+    @flags.has_key?(key) || @options.has_key?(key)
+
+  -> option_label(d)
+    if d[:long] != nil
+      return "--" + d[:long]
+    "-" + d[:short]
+
+  -> first_invalid_choice(val, choices)
+    if val.is_a?(Array)
+      j = 0
+      while j < val.size()
+        if !choices.include?(val[j])
+          return val[j]
+        j = j + 1
+      return nil
+    if !choices.include?(val)
+      return val
+    nil
+
+  -> join_list(items)
+    out = ""
+    j = 0
+    while j < items.size()
+      if j > 0
+        out = out + ", "
+      out = out + items[j].to_s()
+      j = j + 1
+    out
+
+  -> collect_unknown(h, names)
+    ks = h.keys
+    j = 0
+    while j < ks.size()
+      k = ks[j]
+      if @parser.find_by_key(k) == nil
+        label = pretty_key(k)
+        if !names.include?(label)
+          names.push(label)
+      j = j + 1
+
+  -> pretty_key(k)
+    if k.size() == 1
+      return "-" + k
+    "--" + @parser.replace_all(k, "_", "-")
 
   # Print help and exit
   -> help!

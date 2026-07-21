@@ -380,4 +380,46 @@ t.eq("5 MiB in 1000 ms is 5.00 MiB/s", Hammer.format_transfer_rate(5242880, 1000
 t.eq("500 B in 1000 ms is 500 B/s", Hammer.format_transfer_rate(500, 1000), "500 B")
 t.eq("zero window transfer rate is 0 B", Hammer.format_transfer_rate(1000000, 0), "0 B")
 
+# ---- HTTP header field lookup ----
+# header_value reads the (whitespace-trimmed) value of a named field from the
+# header section of a raw response, matched case-insensitively and anchored to
+# the start of a header line (RFC 7230 §3.2). Reference values are the literal
+# field values in each header block below.
+hdrs = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: 1234\r\nServer: nginx/1.25.3\r\nConnection: keep-alive\r\n\r\n<html>body</html>"
+t.eq("header value read verbatim", Hammer.header_value(hdrs, "Content-Type"), "text/html; charset=utf-8")
+t.eq("header name is case-insensitive (lower)", Hammer.header_value(hdrs, "content-type"), "text/html; charset=utf-8")
+t.eq("header name is case-insensitive (upper)", Hammer.header_value(hdrs, "CONTENT-TYPE"), "text/html; charset=utf-8")
+t.eq("later header found", Hammer.header_value(hdrs, "Server"), "nginx/1.25.3")
+t.eq("last header before blank line found", Hammer.header_value(hdrs, "Connection"), "keep-alive")
+t.eq("numeric header value as string", Hammer.header_value(hdrs, "Content-Length"), "1234")
+t.eq("header value composes with to_i", Hammer.header_value(hdrs, "Content-Length").to_i, 1234)
+# Absent header is nil (distinct from a present-but-empty value).
+t.eq("absent header is nil", Hammer.header_value(hdrs, "X-Missing") == nil, true)
+# The match is anchored to a line start, so a name is not found as a substring
+# of another header's name ("Type" must not match "Content-Type").
+substr = "HTTP/1.1 200 OK\r\nContent-Type: x\r\n\r\n"
+t.eq("name is not matched inside another header name", Hammer.header_value(substr, "Type") == nil, true)
+# The search is bounded to the header section: a header-looking line in the
+# body is not returned, while a real header in the same response is.
+bodyfake = "HTTP/1.1 200 OK\r\nServer: real\r\n\r\nX-Fake: 999\r\nmore"
+t.eq("header-looking body line is not matched", Hammer.header_value(bodyfake, "X-Fake") == nil, true)
+t.eq("real header is still found past a body false-match", Hammer.header_value(bodyfake, "Server"), "real")
+# A present header with an empty value returns "" (not nil).
+empty = "HTTP/1.1 200 OK\r\nX-Empty:\r\n\r\n"
+t.eq("present empty-valued header is the empty string", Hammer.header_value(empty, "X-Empty"), "")
+t.eq("present empty-valued header is not nil", Hammer.header_value(empty, "X-Empty") == nil, false)
+# The first occurrence wins for a repeated header.
+dup = "HTTP/1.1 200 OK\r\nSet-Cookie: a\r\nSet-Cookie: b\r\n\r\n"
+t.eq("first occurrence of a repeated header wins", Hammer.header_value(dup, "Set-Cookie"), "a")
+# Surrounding optional whitespace (spaces and tabs) is trimmed.
+spaced = "HTTP/1.1 200 OK\r\nX-Space:     padded value   \r\n\r\n"
+t.eq("leading and trailing spaces are trimmed", Hammer.header_value(spaced, "X-Space"), "padded value")
+tabbed = "HTTP/1.1 200 OK\r\nX-Tab:\tvalue\t\r\n\r\n"
+t.eq("tab optional-whitespace is trimmed", Hammer.header_value(tabbed, "X-Tab"), "value")
+# Works on a full framed response — the body ("hello") does not interfere.
+t.eq("header from a full framed response", Hammer.header_value(resp, "Content-Length"), "5")
+# Incomplete header section (no terminating blank line, last header unterminated).
+partial = "HTTP/1.1 200 OK\r\nServer: partial"
+t.eq("header from an unterminated header section", Hammer.header_value(partial, "Server"), "partial")
+
 t.done

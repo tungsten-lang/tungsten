@@ -416,6 +416,42 @@
   -> .response_ok(response) (string) i64
     status_ok(status_code(response))
 
+  # ---- HTTP header field lookup ----
+  # Beyond framing and status, a benchmark inspects individual response
+  # headers: to honor a "Connection: close" the server sends back, to record
+  # the "Server" it hit, or to note "Content-Encoding: gzip". content_length
+  # above is the specialized, hot-path form of exactly this lookup; header_value
+  # is the general one — the pure-Tungsten analogue any `use hammer/core`
+  # consumer can reach for. It reads a raw response the same way status_code
+  # does, so the two compose over one framed response.
+  #
+  # A header field (RFC 7230 §3.2) is `field-name ":" OWS field-value OWS`, one
+  # per CRLF-delimited line within the header section that ends at the blank
+  # line (CRLFCRLF). header_value returns the (whitespace-trimmed) value of the
+  # first field named `name`, matched case-insensitively per the spec. The
+  # match is anchored to the start of a header line — the search key is
+  # "CRLF + name + colon" — so a name is never found inside another header's
+  # value (a lookup of "Type" does not match "Content-Type:") nor inside the
+  # message body (bounded to the header section). Returns nil when the header
+  # is absent; a present header with an empty value (e.g. "X-Foo:") returns the
+  # empty string, so nil and "" are distinguishable by the caller.
+  -> .header_value(response, name) (string string)
+    he = response.index("\r\n\r\n")
+    if he == nil
+      section_end = response.size
+    else
+      section_end = he + 2
+    lower = response.downcase
+    target = ("\r\n" + name + ":").downcase
+    pos = lower.index(target)
+    return nil if pos == nil
+    return nil if pos >= section_end
+    value_start = pos + target.size
+    line_end = response.index("\r\n", value_start)
+    if line_end == nil || line_end > section_end
+      line_end = section_end
+    response.slice(value_start, line_end - value_start).strip
+
   # ---- throughput and human-readable reporting formatters ----
   # A benchmark's headline output is its rates: requests per second and bytes
   # per second, rendered compactly the way the C engine (lib/hammer.c) already

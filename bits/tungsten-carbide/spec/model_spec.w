@@ -29,6 +29,57 @@ use carbide
   -> table
     "spec_tags"
 
+# --- Models exercising the declarative validation rules (one rule each so a
+# failing spec points at exactly one descriptor). ---
+
++ SpecLen < Model
+  -> table
+    "spec_len"
+  -> validations
+    checks = []
+    checks.push(Model.length(:code, {min: 3, max: 6}))
+    checks
+
++ SpecExact < Model
+  -> table
+    "spec_exact"
+  -> validations
+    checks = []
+    checks.push(Model.length(:pin, {exact: 4}))
+    checks
+
++ SpecNum < Model
+  -> table
+    "spec_num"
+  -> validations
+    checks = []
+    checks.push(Model.numericality(:age, {only_integer: true, greater_than: 0, less_than: 150}))
+    checks
+
++ SpecInc < Model
+  -> table
+    "spec_inc"
+  -> validations
+    checks = []
+    checks.push(Model.inclusion(:role, {list: ["admin", "user"]}))
+    checks
+
++ SpecExc < Model
+  -> table
+    "spec_exc"
+  -> validations
+    checks = []
+    checks.push(Model.exclusion(:name, {list: ["admin", "root"]}))
+    checks
+
++ SpecMsg < Model
+  -> table
+    "spec_msg"
+  -> validations
+    checks = []
+    checks.push(Model.length(:code, {min: 5, message: "code too tiny"}))
+    checks
+
 describe "Model" ->
   describe "construction" ->
     it "builds from an attributes hash" ->
@@ -158,5 +209,79 @@ describe "Model" ->
       expect(Model.count(SpecPost)).to eq(1)
       expect(Model.count(SpecTag)).to eq(1)
       expect(Model.first(SpecTag).get(:name)).to eq("misc")
+
+  describe "declarative validations" ->
+    describe "length" ->
+      it "accepts a value within min/max" ->
+        expect(SpecLen.new({code: "abcd"}).valid?).to be_true
+
+      it "rejects a value shorter than min" ->
+        m = SpecLen.new({code: "ab"})
+        expect(m.valid?).to be_false
+        expect(m.errors[0]).to eq("code is too short (minimum 3 characters)")
+
+      it "rejects a value longer than max" ->
+        m = SpecLen.new({code: "abcdefg"})
+        expect(m.valid?).to be_false
+        expect(m.errors[0]).to eq("code is too long (maximum 6 characters)")
+
+      it "skips length on a nil value (presence's job)" ->
+        expect(SpecLen.new({}).valid?).to be_true
+
+      it "enforces an exact length" ->
+        m = SpecExact.new({pin: "12"})
+        expect(m.valid?).to be_false
+        expect(m.errors[0]).to eq("pin is the wrong length (should be 4 characters)")
+        expect(SpecExact.new({pin: "1234"}).valid?).to be_true
+
+    describe "numericality" ->
+      it "accepts a valid integer in range" ->
+        expect(SpecNum.new({age: 30}).valid?).to be_true
+
+      it "rejects a non-numeric value" ->
+        m = SpecNum.new({age: "old"})
+        expect(m.valid?).to be_false
+        expect(m.errors[0]).to eq("age is not a number")
+
+      it "rejects a non-integer when only_integer is set" ->
+        m = SpecNum.new({age: 3.5})
+        expect(m.valid?).to be_false
+        expect(m.errors[0]).to eq("age must be an integer")
+
+      it "enforces greater_than" ->
+        m = SpecNum.new({age: 0})
+        expect(m.valid?).to be_false
+        expect(m.errors[0]).to eq("age must be greater than 0")
+
+      it "enforces less_than" ->
+        m = SpecNum.new({age: 200})
+        expect(m.valid?).to be_false
+        expect(m.errors[0]).to eq("age must be less than 150")
+
+      it "skips numericality on a nil value" ->
+        expect(SpecNum.new({}).valid?).to be_true
+
+    describe "inclusion / exclusion" ->
+      it "accepts a listed value" ->
+        expect(SpecInc.new({role: "admin"}).valid?).to be_true
+
+      it "rejects an unlisted value" ->
+        m = SpecInc.new({role: "ghost"})
+        expect(m.valid?).to be_false
+        expect(m.errors[0]).to eq("role is not included in the list")
+
+      it "rejects a reserved value" ->
+        m = SpecExc.new({name: "admin"})
+        expect(m.valid?).to be_false
+        expect(m.errors[0]).to eq("name is reserved")
+
+      it "accepts a non-reserved value" ->
+        expect(SpecExc.new({name: "alice"}).valid?).to be_true
+
+    describe "message override" ->
+      it "replaces the default text with a rule's :message" ->
+        m = SpecMsg.new({code: "ab"})
+        expect(m.valid?).to be_false
+        expect(m.errors[0]).to eq("code too tiny")
 
 spec_summary

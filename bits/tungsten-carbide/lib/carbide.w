@@ -1,10 +1,11 @@
 # Tungsten Carbide — a web application framework for Tungsten
 # Named for the hardest compound of tungsten — strong, sharp, built to cut.
 #
-# Carbide's working core: routing (route.w), controllers (controller.w),
-# models with validations + an in-memory store (model.w), JSON
-# serialization (serializer.w), mustache-style view templates
-# (template.w), and live serving through forge (application.w).
+# Carbide's working core: routing (route.w), controllers (controller.w)
+# with strong-parameter allow-listing (strong_params.w), models with
+# validations + an in-memory store (model.w), JSON serialization
+# (serializer.w), mustache-style view templates (template.w), and live
+# serving through forge (application.w).
 # Everything loaded here runs on BOTH engines and is spec-covered
 # (spec/*.w).
 
@@ -16,6 +17,7 @@ use template
 use application
 use model
 use serializer
+use strong_params
 
 # The remaining modules under lib/ (migration, worker, mailer,
 # request, channel, event, notifier, policy, config, facade, job,

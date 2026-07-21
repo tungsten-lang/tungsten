@@ -80,6 +80,27 @@
   -> param(name)
     @params[name]
 
+  # --- Strong parameters (mass-assignment protection) ---
+  #
+  # Wrap the request params for allow-listing before handing them to a
+  # model — the Rails discipline of never mass-assigning raw client input
+  # (see strong_params.w). `params` itself stays a plain hash (dispatch and
+  # filters rely on that); strong-params is an opt-in layer on top.
+  #
+  #   attrs = strong_params.require(:post).permit([:title, :body])
+  #   Model.create(Post, attrs)          # :id / :admin can't sneak in
+  #
+  # Keys ride in as an explicit array (carbide avoids varargs/kwargs), and
+  # permit returns a plain filtered hash ready for Model.create/update.
+  -> strong_params
+    StrongParams.new(@params)
+
+  # Convenience: allow-list the TOP-LEVEL params directly (for flat params,
+  # e.g. from route segments), skipping the require(:model) nesting step.
+  #   permit([:title, :body])   # => {title: ...} with only present keys
+  -> permit(keys)
+    strong_params.permit(keys)
+
   # --- Response helpers (forge Response factories) ---
 
   -> render_text(body)

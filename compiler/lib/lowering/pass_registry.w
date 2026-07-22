@@ -343,6 +343,11 @@
   when :rescue_expr
     materialize_bindings(ctx)
     return lower_rescue_expr(ctx, node)
+  when :begin
+    # begin/rescue in value position produces the taken arm's last
+    # expression (round-3 bug 2 fix, 2026-07-22).
+    materialize_bindings(ctx)
+    return lower_begin(ctx, node, true)
 
   when :go
     return lower_go(ctx, node)

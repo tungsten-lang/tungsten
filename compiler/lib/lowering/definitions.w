@@ -808,8 +808,10 @@
       # Some nodes are statements that don't produce values. A bare tail `if`
       # (no else/elsif) is NOT one of them — it yields its then-value or nil,
       # so it must go through lower_expression (lower_if_expr), not
-      # lower_statement, or the implicit return is always nil.
-      if last_t in (:puts :print :while :method_def :fn_def :begin :raise)
+      # lower_statement, or the implicit return is always nil. Nor is a tail
+      # `begin/rescue` — it yields the taken arm's last expression
+      # (round-3 bug 2 fix, 2026-07-22).
+      if last_t in (:puts :print :while :method_def :fn_def :raise)
         lower_statement(child_ctx, last)
       elsif last_t == :return
         lower_statement(child_ctx, last)

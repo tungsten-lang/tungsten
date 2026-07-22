@@ -335,7 +335,8 @@
   last = body[body.size() - 1]
   last_t = ast_kind(last)
   # If last is a statement (return, puts, while, etc.), lower as statement — no result to store
-  if last_t in (:return :puts :print :raise :while :method_def :fn_def :class_def :begin)
+  # (:begin left OFF this list 2026-07-22: begin/rescue is a value expression)
+  if last_t in (:return :puts :print :raise :while :method_def :fn_def :class_def)
     lower_statement(ctx, last)
   else
     last_tv = lower_expression(ctx, last)
@@ -1511,7 +1512,8 @@
 
   last = body[body.size() - 1]
   last_t = ast_kind(last)
-  if last_t in (:return :puts :print :raise :while :method_def :fn_def :class_def :begin)
+  # (:begin left OFF this list 2026-07-22: begin/rescue is a value expression)
+  if last_t in (:return :puts :print :raise :while :method_def :fn_def :class_def)
     lower_statement(ctx, last)
     return typed_value(:i64, w_nil.to_s())
   lower_expression(ctx, last)
@@ -1577,8 +1579,21 @@
   wfn[:eh_depth] = saved_depth
   nil
 
--> lower_begin(ctx, node)
+# want_value: begin/rescue in VALUE position (last expression of a method,
+# case arm, or if arm, or an assignment rhs) produces the last expression of
+# whichever arm ran — via a result slot rather than a phi, because the
+# ensure/unwind machinery gives the merge block an open-ended predecessor
+# set. Statement position (want_value false) keeps the historical
+# discard-everything behavior. Before 2026-07-22 (round-3 bug 2) value
+# position silently produced nil from BOTH arms.
+-> lower_begin(ctx, node, want_value = false)
   wfn = ctx[:func]
+
+  result_ptr = nil
+  if want_value
+    result_var = "__begin_expr." + next_label(wfn, "be")
+    result_ptr = ensure_var_slot(wfn, result_var)
+    emit_instruction(wfn, {op: :store_i64, value: w_nil.to_s(), ptr: result_ptr})
 
   # Push exception frame: buf = w_exception_push()
   buf = next_temp(wfn)
@@ -1615,7 +1630,10 @@
   wfn[:eh_depth] = wfn[:eh_depth] + 1
   if ensure_entry != nil
     wfn[:ensure_stack].push(ensure_entry)
-  lower_program(ctx, node.body)
+  if result_ptr != nil && node.body != nil && node.body.size() > 0
+    lower_if_expr_body(ctx, wfn, node.body, result_ptr)
+  else
+    lower_program(ctx, node.body)
   if ensure_entry != nil
     wfn[:ensure_stack].pop()
   wfn[:eh_depth] = wfn[:eh_depth] - 1
@@ -1647,7 +1665,10 @@
     # consumed by this landing pad, so eh_base == the current depth).
     if ensure_entry != nil
       wfn[:ensure_stack].push(ensure_entry)
-    lower_program(ctx, node.rescue_body)
+    if result_ptr != nil && node.rescue_body.size() > 0
+      lower_if_expr_body(ctx, wfn, node.rescue_body, result_ptr)
+    else
+      lower_program(ctx, node.rescue_body)
     if ensure_entry != nil
       wfn[:ensure_stack].pop()
   if !block_terminated(wfn)
@@ -1670,6 +1691,10 @@
     restore_recycle_scope_depth(wfn, rescue_recycle_depth)
 
   start_block(wfn, end_label)
+  if result_ptr != nil
+    result = next_temp(wfn)
+    emit_instruction(wfn, {op: :load_i64, temp: result, ptr: result_ptr})
+    return typed_value(:i64, result)
   nil
 
 -> lower_rescue_expr(ctx, node)

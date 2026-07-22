@@ -30,6 +30,7 @@ use preprocess
   # text spells optional arguments without them.
   << "USAGE"
   << "    wassat <problem.cnf> --proof <path>     certificate-backed answers"
+  << "    wassat <problem.cnf> --lrat <path>      certificate-backed, LRAT dialect"
   << "    wassat <problem.cnf> --drat <path>      certificate-backed, plain DRAT"
   << "    wassat <problem.cnf> --fast             trusted answers, no certificate"
   << "    wassat version"
@@ -59,6 +60,7 @@ use preprocess
     "input": nil,
     "proof": nil,
     "drat": nil,
+    "lrat": nil,
     "fast": false,
     "lookahead": 0,
     "conflicts": 0
@@ -68,7 +70,7 @@ use preprocess
   while i < args.size
     flag = args[i]
     if flag.starts_with?("--")
-      unless flag == "--proof" || flag == "--drat" || flag == "--lookahead" || flag == "--conflicts" || flag == "--fast"
+      unless flag == "--proof" || flag == "--drat" || flag == "--lrat" || flag == "--lookahead" || flag == "--conflicts" || flag == "--fast"
         raise "unknown Wassat option: [flag]"
       raise "duplicate Wassat option: [flag]" if seen[flag] == true
       seen[flag] = true
@@ -83,6 +85,8 @@ use preprocess
           out["proof"] = value
         elsif flag == "--drat"
           out["drat"] = value
+        elsif flag == "--lrat"
+          out["lrat"] = value
         else
           raise "[flag] requires a non-negative decimal integer, got '[value]'" unless wassat_unsigned_decimal?(value)
           if flag == "--lookahead"
@@ -95,12 +99,16 @@ use preprocess
       out["input"] = flag
       i += 1
   raise "missing input formula" if out["input"] == nil
-  if out["proof"] != nil && out["proof"] == out["drat"]
-    raise "--proof and --drat need different destinations"
-  if out["fast"] && (out["proof"] != nil || out["drat"] != nil)
+  if out["proof"] != nil && out["lrat"] != nil
+    raise "--proof and --lrat are two renderings of one hinted stream; choose one"
+  hinted = out["proof"]
+  hinted = out["lrat"] if hinted == nil
+  if hinted != nil && hinted == out["drat"]
+    raise "hinted and DRAT outputs need different destinations"
+  if out["fast"] && (out["proof"] != nil || out["drat"] != nil || out["lrat"] != nil)
     raise "--fast forgoes certificates; drop --fast or the proof options"
-  if !out["fast"] && out["proof"] == nil && out["drat"] == nil
-    raise "choose a mode: --proof <path> (or --drat <path>) for checkable answers, --fast for trusted ones"
+  if !out["fast"] && out["proof"] == nil && out["drat"] == nil && out["lrat"] == nil
+    raise "choose a mode: --proof/--lrat/--drat <path> for checkable answers, --fast for trusted ones"
   out
 
 # The mode a parsed option set selects: "proof" or "fast". `--drat` implies
@@ -155,11 +163,15 @@ use preprocess
   options = wassat_cli_options(args)
   input = options["input"]
   wrat_out = options["proof"]
+  wrat_out = options["lrat"] if wrat_out == nil
+  # LRAT is the hinted stream without the wrat header; everything else about
+  # emission, streaming, and checking is identical (wrat reads both).
+  header_wanted = options["proof"] != nil
   drat_out = options["drat"]
   quiet = wrat_out == "-" || drat_out == "-"
-  # Raw DRAT records learned clauses directly. Hinted WRAT costs a replayed
-  # propagation per learned clause; request it only for --proof. If both
-  # outputs are requested, the hinted proof can also be rendered as DRAT.
+  # Raw DRAT records each learned clause directly; the hinted stream carries
+  # antecedent chains derived from conflict analysis. If both are requested
+  # they are emitted natively in lockstep.
   proof_mode = WASSAT_PROOF_NONE
   proof_mode = WASSAT_PROOF_DRAT unless drat_out == nil
   proof_mode = WASSAT_PROOF_WRAT unless wrat_out == nil
@@ -188,7 +200,8 @@ use preprocess
     wtext = ""
     dtext = ""
     unless wrat_out == nil
-      wtext = "wrat 1\n" + art["wrat"].join("\n") + "\n"
+      whead = header_wanted ? "wrat 1\n" : ""
+      wtext = whead + art["wrat"].join("\n") + "\n"
       unless wrat_out == "-"
         raise "proof write failed at '[wrat_out]'" unless write_file(wrat_out, wtext)
     unless drat_out == nil
@@ -218,9 +231,9 @@ use preprocess
   s.stream_proofs(wrat_stream, drat_stream) unless wrat_stream == nil && drat_stream == nil
   s.enable_dual_drat if proof_mode == WASSAT_PROOF_WRAT && drat_out != nil
   unless wrat_stream == nil
-    whead = "wrat 1\n"
+    whead = header_wanted ? "wrat 1\n" : ""
     whead = whead + art["wrat"].join("\n") + "\n" unless art["wrat"].empty?
-    raise "proof write failed at '[wrat_stream]'" unless wassat_append_text(wrat_stream, whead)
+    raise "proof write failed at '[wrat_stream]'" unless whead == "" || wassat_append_text(wrat_stream, whead)
     s.wrat_header_written
   unless drat_stream == nil || art["drat"].empty?
     dhead = art["drat"].join("\n") + "\n"
@@ -257,7 +270,8 @@ use preprocess
     unless wrat_out == nil
       if wrat_out == "-"
         lines = wassat_concat_arrays(art["wrat"], result["proof"])
-        print("wrat 1\n" + lines.join("\n") + "\n")
+        whead = header_wanted ? "wrat 1\n" : ""
+        print(whead + lines.join("\n") + "\n")
     unless drat_out == nil
       if drat_out == "-"
         dlines = wassat_concat_arrays(art["drat"], result["drat"])

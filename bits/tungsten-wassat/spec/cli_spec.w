@@ -28,6 +28,12 @@ describe "Tungsten Wassat CLI" ->
     it "rejects --fast combined with certificate output" ->
       expect(-> () wassat_cli_options(["problem.cnf", "--fast", "--proof", "p"])).to raise_error
       expect(-> () wassat_cli_options(["problem.cnf", "--fast", "--drat", "d"])).to raise_error
+      expect(-> () wassat_cli_options(["problem.cnf", "--fast", "--lrat", "l"])).to raise_error
+
+    it "treats --lrat as proof mode and as exclusive with --proof" ->
+      options = wassat_cli_options(["problem.cnf", "--lrat", "out.lrat"])
+      expect(wassat_mode_of(options)).to eq("proof")
+      expect(-> () wassat_cli_options(["problem.cnf", "--proof", "a", "--lrat", "b"])).to raise_error
 
     it "accepts flags in any position around the input path" ->
       options = wassat_cli_options(["--fast", "problem.cnf"])

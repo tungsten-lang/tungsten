@@ -19,10 +19,13 @@
 # PROOFS
 #
 # Proof logging is opt-in. Raw DRAT records each learned RUP clause directly.
-# Hinted WRAT additionally REPLAYS the propagation a checker will perform for
-# every learned clause. That is slower than reconstructing hints from solver
-# state but correct by construction: the emitted chain is literally the
-# sequence the checker is about to follow.
+# Hinted WRAT/LRAT derives each learned clause's antecedent chain DIRECTLY
+# from the conflict's resolution cone while the trail is intact (reasons in
+# trail order, conflict clause last) — replay-free, so hinted emission costs
+# the resolution footprint instead of a whole-database propagation per
+# clause. Occurrence-driven replay survives only for the rare steps with no
+# analysis behind them (the terminal empty clause, assumption blocking
+# clauses).
 
 UNASSIGNED = 0
 
@@ -138,6 +141,35 @@ WASSAT_PROOF_DRAT = 2
     @trail_wcount = 0
     @reductions = 0
     @next_reduce = 1500
+
+    # Replay occurrence lists (hinted mode only): intrusive per-literal
+    # lists over the LOGICAL clause database, so hint replay propagates
+    # queue-driven over the clauses that can actually fire instead of
+    # re-scanning the whole database to a fixpoint per learned clause.
+    # @rtrail tracks touched replay variables for touched-only resets.
+    rtotal = 0
+    @input_clauses.each -> (c)
+      rtotal += c.size
+    if @proof_mode == WASSAT_PROOF_WRAT
+      @rocc_head = i64[2 * nv + 4]
+      i = 0
+      while i < 2 * nv + 4
+        @rocc_head[i] = -1
+        i += 1
+      @rocc_cap = 2 * rtotal + 4096
+      @rocc_next = i64[@rocc_cap]
+      @rocc_ci = i64[@rocc_cap]
+    else
+      @rocc_head = i64[1]
+      @rocc_cap = 1
+      @rocc_next = i64[1]
+      @rocc_ci = i64[1]
+    @rocc_size = 0
+    @rtrail = i64[nv + 2]
+    @rst = i64[4]
+    @rout = i64[nv + 8]
+    @runits = []                 # indices of stored unit clauses (hinted mode)
+    @rempties = []               # indices of stored empty clauses (hinted mode)
 
     # clause arena
     total = 0
@@ -267,7 +299,37 @@ WASSAT_PROOF_DRAT = 2
     if n >= 2
       self.watch(ci, 0, @arena[@cstart[ci]], @arena[@cstart[ci] + 1])
       self.watch(ci, 1, @arena[@cstart[ci] + 1], @arena[@cstart[ci]])
+    if @proof_mode == WASSAT_PROOF_WRAT
+      self.grow_replay_occ(n)
+      @runits.push(ci) if n == 1
+      @rempties.push(ci) if n == 0
+      i = 0
+      st = @cstart[ci]
+      while i < n
+        li = self.lit_index(@arena[st + i])
+        slot = @rocc_size
+        @rocc_size += 1
+        @rocc_next[slot] = @rocc_head[li]
+        @rocc_ci[slot] = ci
+        @rocc_head[li] = slot
+        i += 1
     ci
+
+  -> grow_replay_occ(need)
+    if @rocc_size + need > @rocc_cap
+      ncap = @rocc_cap * 2
+      ncap = @rocc_size + need + 4096 if ncap < @rocc_size + need
+      nn = i64[ncap]
+      nc = i64[ncap]
+      i = 0
+      while i < @rocc_size
+        nn[i] = @rocc_next[i]
+        nc[i] = @rocc_ci[i]
+        i += 1
+      @rocc_next = nn
+      @rocc_ci = nc
+      @rocc_cap = ncap
+    0
 
   -> add_input_clause(c)
     n = c.size
@@ -280,7 +342,8 @@ WASSAT_PROOF_DRAT = 2
       @ok = false
     elsif n == 1
       ci = self.store_clause(c, 1)
-      self.enqueue(c[0], -1) if self.value(c[0]) == 0
+      # the unit clause itself is the reason: direct hint chains cite it
+      self.enqueue(c[0], ci) if self.value(c[0]) == 0
       @ok = false if self.value(c[0]) < 0
     else
       self.store_clause(c, n)
@@ -450,58 +513,71 @@ WASSAT_PROOF_DRAT = 2
     l > 0 ? a : 0 - a
 
   -> replay_hints(lits)
-    v = 0
-    while v <= @nvars
-      @rassign[v] = 0
-      v += 1
+    out = self.replay_hints_pass(lits, false)
+    # The lazy pass only examines clauses touched by falsification, which
+    # yields short chains but never proactively fires stored unit clauses;
+    # retry with units seeded first (the checker's own order) before
+    # declaring failure.
+    out = self.replay_hints_pass(lits, true) if out.empty?
+    out
 
+  -> replay_hints_pass(lits, seed_units)
+    # a stored empty clause conflicts under any assignment: it lives in no
+    # occurrence bucket, so cite it directly
+    unless @rempties.empty?
+      return [@gid[@rempties[0]]]
     record = []
     conflict = false
+    rt = 0
     i = 0
     while i < lits.size
       l = lits[i]
       if self.replay_value(l) > 0
         conflict = true
-      else
+      elsif self.replay_value(l) == 0
         @rassign[l.abs] = l > 0 ? -1 : 1      # assert the negation
+        @rtrail[rt] = l > 0 ? 0 - l : l.abs   # the literal made TRUE
+        rt += 1
       i += 1
 
+    if seed_units && !conflict
+      ui = 0
+      while ui < @runits.size && !conflict
+        ci = @runits[ui]
+        ul = @arena[@cstart[ci]]
+        uv = self.replay_value(ul)
+        if uv < 0
+          record.push(@gid[ci])
+          conflict = true
+        elsif uv == 0
+          @rassign[ul.abs] = ul > 0 ? 1 : -1
+          @rtrail[rt] = ul
+          rt += 1
+          record.push(@gid[ci])
+        ui += 1
+
     unless conflict
-      changed = true
-      while changed && !conflict
-        changed = false
-        ci = 0
-        while ci < @ncl && !conflict
-          # Proof replay uses the logical proof database, not the reduced
-          # search database. reduce_db only detaches clauses from propagation;
-          # it emits no deletion steps, so the independent checker still has
-          # every input and learned clause at its original `ci + 1` id.
-          st = @cstart[ci]
-          n = @clen[ci]
-          sat = false
-          unassigned = 0
-          unit = 0
-          j = 0
-          while j < n
-            l = @arena[st + j]
-            val = self.replay_value(l)
-            if val > 0
-              sat = true
-              j = n
-            else
-              if val == 0
-                unassigned += 1
-                unit = l
-              j += 1
-          unless sat
-            if unassigned == 0
-              conflict = true
-              record.push(@gid[ci])
-            elsif unassigned == 1
-              @rassign[unit.abs] = unit > 0 ? 1 : -1
-              record.push(@gid[ci])
-              changed = true
-          ci += 1
+      @rst[0] = 0
+      @rst[1] = rt
+      @rst[2] = -1
+      @rst[3] = 0
+      wassat_replay_prop(@arena, @cstart, @clen, @rocc_head, @rocc_next,
+                         @rocc_ci, @rassign, @rtrail, @rout, @rst)
+      rt = @rst[1]
+      k = 0
+      while k < @rst[3]
+        record.push(@gid[@rout[k]])
+        k += 1
+      if @rst[2] >= 0
+        record.push(@gid[@rst[2]])
+        conflict = true
+
+    # touched-only reset: clearing all of @rassign per learned clause was
+    # itself a per-conflict full-array scan
+    i = 0
+    while i < rt
+      @rassign[@rtrail[i].abs] = 0
+      i += 1
 
     # A chain that never reached a conflict does not justify the clause;
     # returning it would emit a proof step no checker can accept.
@@ -634,6 +710,75 @@ WASSAT_PROOF_DRAT = 2
     self.log_clause(self.buf_to_array(n)) unless @proof_mode == WASSAT_PROOF_NONE
     0
 
+  # Direct hint chain for the learned clause in @lbuf[0..n), derived from
+  # the conflict's resolution cone while the trail is still intact: every
+  # antecedent actually resolved by first-UIP analysis or consulted by
+  # minimisation, ordered by trail position (dependency order), conflict
+  # clause last. Replay-free: reconstructing chains by propagation replay
+  # cost minutes per certificate at 50k-conflict scale, because late cones
+  # approach the whole implication structure.
+  #
+  # Correctness: with the learned clause negated, each cited reason clause
+  # becomes unit in trail order (its other literals are falsified by the
+  # negated clause or by earlier-cited reasons), and the conflict clause is
+  # then fully falsified. Minimisation-removed literals' reasons are in the
+  # cone by closure, so their falsifications derive too.
+  -> log_learned_direct(n, confl)
+    return 0 if @proof_mode == WASSAT_PROOF_NONE
+    lits = self.buf_to_array(n)
+    if @proof_mode == WASSAT_PROOF_DRAT
+      self.log_drat_line(lits.empty? ? "0" : lits.join(" ") + " 0")
+      return 0
+    # mark learned-clause variables: value 1 (never expanded)
+    i = 0
+    while i < n
+      @seen[@lbuf[i].abs] = 1
+      i += 1
+    # cone closure from the conflict clause: value 2 (reason cited)
+    work = [confl]
+    wi = 0
+    while wi < work.size
+      wci = work[wi]
+      st = @cstart[wci]
+      m = @clen[wci]
+      j = 0
+      while j < m
+        v = @arena[st + j].abs
+        if @seen[v] == 0
+          @seen[v] = 2
+          rci = @reason[v]
+          raise "internal error: cone literal [v] has no reason clause" if rci < 0
+          work.push(rci)
+        j += 1
+      wi += 1
+    # cite cone reasons in trail order, conflict last
+    hints = []
+    ti = 0
+    while ti < @tsize
+      v = @trail[ti].abs
+      hints.push(@gid[@reason[v]]) if @seen[v] == 2
+      ti += 1
+    hints.push(@gid[confl])
+    # clear both marker kinds
+    i = 0
+    while i < n
+      @seen[@lbuf[i].abs] = 0
+      i += 1
+    work.each -> (wci2)
+      st = @cstart[wci2]
+      m = @clen[wci2]
+      j = 0
+      while j < m
+        @seen[@arena[st + j].abs] = 0
+        j += 1
+    cid = @next_gid
+    line = "[cid] " + lits.join(" ")
+    line = "[cid]" if lits.empty?
+    self.log_wrat_line(line + " 0 " + hints.join(" ") + " 0")
+    self.log_drat_line(lits.empty? ? "0" : lits.join(" ") + " 0") if @dual_drat
+    @refuted = true if lits.empty?
+    0
+
   # Copy the learned clause out of the buffer; only needed for proof output.
   -> buf_to_array(n)
     out = []
@@ -727,7 +872,7 @@ WASSAT_PROOF_DRAT = 2
           target = self.analyze(confl)
           n = @lsize
           lbd = self.compute_lbd_buf(n)
-          self.log_learned(n)
+          self.log_learned_direct(n, confl)
           self.backjump(target)
           asserting = @lbuf[0]
           if n == 1
@@ -1194,6 +1339,77 @@ WASSAT_PROOF_DRAT = 2
 
   st[3] = keep
   st[4] = target
+  0
+
+# Native replay propagation for hint construction: queue-driven unit
+# propagation over the LOGICAL clause database via the replay occurrence
+# lists. Records, in propagation order, the index of every clause that fired
+# as a unit (out[0..st[3]-1]); st[2] reports the conflicting clause or -1.
+# The recorded order IS the hint chain: each clause was unit at the moment it
+# was recorded, which is exactly what the checker re-verifies. Replaces a
+# whole-database fixpoint scan per learned clause that made hinted-proof
+# generation quadratic.
+#
+#   st[0] = qhead   st[1] = trail size   st[2] = conflict ci or -1
+#   st[3] = recorded unit count
+-> wassat_replay_prop(ar, cs, cln, och, ocn, ocv, rasg, rtr, out, st) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+  qhead = st[0]
+  tsize = st[1]
+  conflict = -1
+  count = 0
+  while qhead < tsize && conflict < 0
+    p = rtr[qhead]
+    qhead += 1
+    neg = 0 - p
+    li = 0
+    if neg > 0
+      li = neg << 1
+    else
+      li = ((0 - neg) << 1) + 1
+    w = och[li]
+    while w >= 0 && conflict < 0
+      ci = ocv[w]
+      stx = cs[ci]
+      n = cln[ci]
+      sat = 0
+      unassigned = 0
+      unit = 0
+      j = 0
+      while j < n
+        l = ar[stx + j]
+        vv = 0
+        if l > 0
+          vv = rasg[l]
+        else
+          vv = 0 - rasg[0 - l]
+        if vv > 0
+          sat = 1
+          j = n
+        else
+          if vv == 0
+            unassigned = unassigned + 1
+            unit = l
+          j = j + 1
+      if sat == 0
+        if unassigned == 0
+          conflict = ci
+        else
+          if unassigned == 1
+            uv = unit
+            pol = 1
+            if uv < 0
+              uv = 0 - uv
+              pol = -1
+            rasg[uv] = pol
+            rtr[tsize] = unit
+            tsize = tsize + 1
+            out[count] = ci
+            count = count + 1
+      w = ocn[w]
+  st[0] = qhead
+  st[1] = tsize
+  st[2] = conflict
+  st[3] = count
   0
 
 # Native variable-order heap. Keeping the arrays in typed top-level helpers

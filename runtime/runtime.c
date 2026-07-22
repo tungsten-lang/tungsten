@@ -26696,6 +26696,52 @@ int64_t w_index_raw_i64(WValue recv, WValue idx) {
     return w_to_i64(w_index_fused_dispatch(recv, idx));
 }
 
+/* Write-side twins (round-3 bug 4, 2026-07-22): `recv[i] = v` where v is a
+ * raw machine int and recv has no static typed-array identity. The generic
+ * path boxes v (heap bignum past 2^48) only for the typed-array setter to
+ * unbox it again — a dead box per write. Typed integer arrays store raw
+ * here with w_array_write_at's exact bounds/negative-wrap/size-extension
+ * semantics; float, u1, poly, and non-array receivers fall back to box +
+ * the same "[]=" dynamic dispatch as before (strict u1 raises, custom
+ * overloads, Hash writes all byte-identical). Returns the raw value —
+ * assignment-as-expression semantics are `v` on every path, and the
+ * compiler types the result :raw_i64/:raw_u64 so statement position never
+ * boxes it. */
+static void w_index_set_fused_dispatch(WValue recv, WValue idx, WValue val) {
+    static WInlineCache ic;
+    WValue args[2];
+    args[0] = idx;
+    args[1] = val;
+    w_method_call_cached(recv, WN_idxset, args, 2, &ic);
+}
+
+static int w_index_set_fused_raw(WValue recv, WValue idx, int64_t raw) {
+    if (!w_is_body(recv) && w_is_array(recv)) {
+        WArray *a = (WArray *)w_as_ptr(recv);
+        if (!array_is_wvalue(a) && !array_is_float(a) && a->ebits != 1) {
+            int64_t i = w_as_int(idx);
+            if (i < 0) i += a->size;
+            if (i < 0 || i >= a->cap) return 1;   /* OOB: silent no-op, as w_array_write_at */
+            array_write(a, a->start + i, (uint64_t)raw);
+            if (i >= a->size) a->size = i + 1;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int64_t w_index_set_raw_i64(WValue recv, WValue idx, int64_t raw) {
+    if (!w_index_set_fused_raw(recv, idx, raw))
+        w_index_set_fused_dispatch(recv, idx, w_int(raw));
+    return raw;
+}
+
+int64_t w_index_set_raw_u64(WValue recv, WValue idx, int64_t raw) {
+    if (!w_index_set_fused_raw(recv, idx, raw))
+        w_index_set_fused_dispatch(recv, idx, w_u64((uint64_t)raw));
+    return raw;
+}
+
 int64_t w_index_raw_u64(WValue recv, WValue idx) {
     int64_t v;
     int hit = w_index_fused_raw(recv, idx, &v);

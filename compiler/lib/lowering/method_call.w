@@ -1598,6 +1598,28 @@
           emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: mangled, args: spec_args})
           return typed_value(:i64, temp)
 
+  # Fused raw subscript WRITE (round-3 bug 4, 2026-07-22 — write-side twin
+  # of the read fusion in lower_machine_int_expression): `recv[i] = v` where
+  # v is a machine-int-typed value and recv is a plain untyped :var. The
+  # generic path would box v (heap bignum past 2^48) just for the
+  # typed-array setter to unbox it — one dead box per write. Same gating as
+  # the read fusion: :var receivers only (view-field $vars and every other
+  # receiver shape keep the path below), typed-array receivers keep their
+  # inline handlers above.
+  if method_name == "\[]=" && node.args != nil && node.args.size() == 2 && node.block == nil && recv_node != nil && is_ast_node?(recv_node) && ast_kind(recv_node) == :var && !is_typed_array_type?(recv_type)
+    fused_vt = infer_type(node.args[1], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    fused_mt = canonical_machine_int_type(fused_vt)
+    if fused_mt in (:i64 :u64)
+      fused_recv_reg = ensure_i64_value(wfn, lower_expression(ctx, recv_node))
+      fused_idx_reg = ensure_i64_value(wfn, lower_expression(ctx, node.args[0]))
+      fused_raw = lower_machine_int_expression(ctx, node.args[1], fused_mt)
+      fused_t = next_temp(wfn)
+      fused_fn = "w_index_set_raw_i64"
+      if fused_mt == :u64
+        fused_fn = "w_index_set_raw_u64"
+      emit_instruction(wfn, {op: :call_direct_i64, temp: fused_t, name: fused_fn, args: [fused_recv_reg, fused_idx_reg, fused_raw]})
+      return typed_value(raw_machine_value_type(fused_mt), fused_t)
+
   receiver_val = lower_expression(ctx, recv_node)
   receiver_reg = ensure_i64_value(wfn, receiver_val)
 

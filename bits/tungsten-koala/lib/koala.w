@@ -6,16 +6,20 @@
 # alone or as a Pipeline tail; KNNClassifier — k-nearest-neighbors
 # classification, the companion classifier to Metrics.accuracy / f1;
 # GaussianNB — multiclass Gaussian naive Bayes, a closed-form generative
-# classifier), clustering (KMeans — Lloyd's algorithm, koala's first
+# classifier; DecisionTreeClassifier / DecisionTreeRegressor — CART
+# recursive partitioning, koala's non-parametric piecewise-constant
+# learner and the machinery a forest would stand on), clustering (KMeans
+# — Lloyd's algorithm, koala's first
 # unsupervised learner), model evaluation (KFold / CrossValidation — k-fold
 # cross-validation that re-fits an estimator on each fold and averages
 # the held-out score, supervised or not), and model selection (GridSearch
 # — exhaustive hyperparameter search scoring every point of a param grid
 # by cross-validation, through the estimator contract alone).
 #
-# All five estimators answer ONE declared contract (lib/estimator_base.w):
+# All seven estimators answer ONE declared contract (lib/estimator_base.w):
 # `is Estimable` plus `is SupervisedEstimator` (LinearRegression,
-# KNNClassifier, LogisticRegression, GaussianNB) or `is
+# KNNClassifier, LogisticRegression, GaussianNB, DecisionTreeClassifier,
+# DecisionTreeRegressor) or `is
 # UnsupervisedEstimator` (KMeans). That contract adds `supervised?`,
 # `params`, `with_params(overrides)` and `estimator_name` to the familiar
 # new / fitted? / fit / predict / score, and puts the ONE definition of
@@ -52,6 +56,7 @@ use linear_regression
 use knn
 use logistic_regression
 use gaussian_nb
+use decision_tree
 use scaler
 use encoder
 use imputer
@@ -65,9 +70,10 @@ use grid_search
 # estimator, index, sparse, gpu, device) are unported design drafts —
 # they do not parse as Tungsten yet and are not loaded. estimator.w's
 # linear-regression payoff shipped as linear_regression.w above, its
-# k-NN sketch shipped as knn.w, and its logistic-regression sketch
-# shipped as logistic_regression.w; the draft stays only as the sketch
-# for the decision-tree / lasso follow-ups. NOTE that the draft
+# k-NN sketch shipped as knn.w, its logistic-regression sketch shipped
+# as logistic_regression.w, and its decision-tree sketch shipped as
+# decision_tree.w; the draft stays only as the sketch for the lasso
+# follow-up. NOTE that the draft
 # estimator.w sketches its own `+ Estimator` / `trait Predictable` — those
 # are SUPERSEDED by estimator_base.w's `Estimator` / `Estimable`, which is
 # the loaded, working contract; do not load the draft alongside it. Port a

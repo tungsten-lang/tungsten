@@ -118,6 +118,96 @@ describe "Metrics" ->
     expect(Metrics.precision([0, 0], [1, 0]).to_s).to eq("0")
     expect(Metrics.f1([0, 0], [0, 0]).to_s).to eq("0")
 
+describe "Metrics.fbeta" ->
+  # Same binary case as above: P = 0.5, R = 2/3. scikit-learn
+  # fbeta_score references for that pair —
+  #   beta = 2   -> 0.625               (recall-leaning)
+  #   beta = 1   -> 0.5714285714285714  (== f1)
+  #   beta = 1/2 -> 0.5263157894736842  (precision-leaning)
+  #   beta = 0   -> 0.5                 (== precision)
+  # beta is passed as an integer or a derived float — a float literal in
+  # a call argument corrupts it on both engines.
+  it "generalizes f1 with a beta that weights recall" ->
+    preds = [1, 1, 1, 0, 0, 1]
+    act = [1, 0, 0, 0, 1, 1]
+    expect(Metrics.fbeta(preds, act, 2).to_s).to eq("0.625")
+    expect(Metrics.fbeta(preds, act, 1.to_f / 2.to_f).to_s).to eq("0.526316")
+    # The two endpoints of the sweep are metrics koala already had.
+    expect(Metrics.fbeta(preds, act).to_s).to eq(Metrics.f1(preds, act).to_s)
+    expect(Metrics.fbeta(preds, act, 0).to_s).to eq(Metrics.precision(preds, act).to_s)
+    # R (2/3) exceeds P (0.5) here, so leaning on recall raises the score
+    # and leaning on precision lowers it — beta orders the whole family.
+    expect(Metrics.fbeta(preds, act, 2) > Metrics.f1(preds, act)).to be_true
+    expect(Metrics.fbeta(preds, act, 1.to_f / 2.to_f) < Metrics.f1(preds, act)).to be_true
+
+  it "honors pos_label and the zero-division convention" ->
+    preds = [1, 1, 1, 0, 0, 1]
+    act = [1, 0, 0, 0, 1, 1]
+    # pos_label 0: P = 0.5, R = 1/3 -> F2 = 0.35714285714285715 (sklearn).
+    expect(Metrics.fbeta(preds, act, 2, 0).to_s).to eq("0.357143")
+    # Nothing predicted positive and nothing actually positive: 0.0, never
+    # a divide error (scikit-learn's zero_division=0 default).
+    expect(Metrics.fbeta([0, 0], [0, 0], 2).to_s).to eq("0")
+
+describe "Metrics imbalanced-data scores" ->
+  # The motivating case: 8 negatives, 2 positives, and a classifier that
+  # always answers the majority class. Accuracy calls that a success at
+  # 0.8; balanced accuracy, MCC and kappa each call it what it is.
+  # scikit-learn references — balanced_accuracy_score 0.5,
+  # matthews_corrcoef 0.0, cohen_kappa_score 0.0, f1_score 0.0.
+  it "exposes the majority-class classifier accuracy flatters" ->
+    act = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1]
+    preds = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    expect(Metrics.accuracy(preds, act).to_s).to eq("0.8")
+    expect(Metrics.balanced_accuracy(preds, act).to_s).to eq("0.5")
+    expect(Metrics.matthews_corrcoef(preds, act).to_s).to eq("0")
+    expect(Metrics.cohen_kappa(preds, act).to_s).to eq("0")
+
+  # MCC is a correlation, so its range is [-1, 1]. scikit-learn's
+  # matthews_corrcoef docstring example — y_true [1,1,1,0] against
+  # y_pred [1,0,1,1] — is -0.3333333333333333, here in koala's
+  # (predictions, actual) order.
+  it "scores MCC 1 perfect, -1 inverted, and the sklearn reference" ->
+    truth = [0, 1, 0, 1]
+    expect(Metrics.matthews_corrcoef([0, 1, 0, 1], truth).to_s).to eq("1")
+    expect(Metrics.matthews_corrcoef([1, 0, 1, 0], truth).to_s).to eq("-1")
+    expect(Metrics.matthews_corrcoef([1, 0, 1, 1], [1, 1, 1, 0]).to_s).to eq("-0.333333")
+
+  # scikit-learn's cohen_kappa_score docstring example:
+  # y_true [2,0,2,2,0,1] against y_pred [0,0,2,2,0,2] = 0.4285714285714286.
+  it "matches the scikit-learn cohen_kappa_score reference" ->
+    expect(Metrics.cohen_kappa([0, 0, 2, 2, 0, 2], [2, 0, 2, 2, 0, 1]).to_s).to eq("0.428571")
+    expect(Metrics.cohen_kappa([0, 1, 0, 1], [0, 1, 0, 1]).to_s).to eq("1")
+    expect(Metrics.cohen_kappa([1, 0], [0, 1]).to_s).to eq("-1")
+
+  # All three generalize to any number of classes. Same 3-class case the
+  # ConfusionMatrix / ClassificationReport blocks use. scikit-learn:
+  # balanced_accuracy_score 0.5555555555555555, matthews_corrcoef 0.5,
+  # cohen_kappa_score 0.4782608695652174 — and balanced accuracy IS the
+  # report's macro recall, by definition.
+  it "generalizes to multiclass and ties back to the report" ->
+    preds = [0, 1, 2, 2, 2, 0]
+    act = [0, 0, 2, 2, 1, 0]
+    rep = Metrics.classification_report(preds, act)
+    tol = 1.to_f / 100000.to_f
+    expect(Metrics.balanced_accuracy(preds, act).to_s).to eq("0.555556")
+    expect(LinAlg.fabs(Metrics.balanced_accuracy(preds, act) - rep.macro_recall) < tol).to be_true
+    expect(Metrics.matthews_corrcoef(preds, act).to_s).to eq("0.5")
+    expect(Metrics.cohen_kappa(preds, act).to_s).to eq("0.478261")
+
+  it "returns nil for unusable input and 0 where the score is undefined" ->
+    expect(Metrics.balanced_accuracy([1], [1, 0])).to be_nil
+    expect(Metrics.matthews_corrcoef([], [])).to be_nil
+    expect(Metrics.cohen_kappa([1], [1, 0])).to be_nil
+    # One class on both sides: the correlation and the chance correction
+    # are both undefined (scikit-learn gives 0.0 and nan respectively) —
+    # koala emits no nan, so both answer 0.0.
+    expect(Metrics.matthews_corrcoef([1, 1], [1, 1]).to_s).to eq("0")
+    expect(Metrics.cohen_kappa([1, 1], [1, 1]).to_s).to eq("0")
+    # Balanced accuracy averages only the classes present in `actual`,
+    # matching scikit-learn (0.5 here, the recall of the lone class).
+    expect(Metrics.balanced_accuracy([1, 0], [1, 1]).to_s).to eq("0.5")
+
 describe "Metrics regression family" ->
   # koala takes (predictions, actual); scikit-learn's y_pred / y_true.
   # Shared example: pred = [2,4,6] vs actual = [1,5,7], residuals
@@ -239,6 +329,29 @@ describe "ClassificationReport" ->
     expect(rep.accuracy.to_s).to eq("0.5")
     expect(rep.to_df.column_values(:label).join(",")).to eq("1,0,accuracy,macro avg,weighted avg")
     expect(rep.to_df.column_values(:support).to_s).to eq("\[3, 3, 6, 6, 6\]")
+
+  # Micro averaging pools every class's TP / FP / FN into ONE table and
+  # scores that once, so each SAMPLE weighs equally rather than each
+  # class. For single-label multiclass every row contributes one
+  # prediction and one truth, so a false positive for one class is a
+  # false negative for another and all three micro scores collapse to the
+  # accuracy — scikit-learn's precision_score / recall_score / f1_score
+  # with average="micro" all return 0.6666666666666666 for this case,
+  # exactly accuracy_score's value. macro (5/9, 8/15) differs, because
+  # the classes here are uneven.
+  it "pools classes into micro averages that equal the accuracy" ->
+    preds = [0, 1, 2, 2, 2, 0]
+    actual = [0, 0, 2, 2, 1, 0]
+    rep = Metrics.classification_report(preds, actual)
+    tol = 1.to_f / 100000.to_f
+    expect(LinAlg.fabs(rep.micro_precision - 2.to_f / 3.to_f) < tol).to be_true
+    expect(rep.micro_recall.to_s).to eq(rep.micro_precision.to_s)
+    expect(rep.micro_f1.to_s).to eq(rep.micro_precision.to_s)
+    expect(rep.micro_f1.to_s).to eq(rep.accuracy.to_s)
+    expect(rep.micro_f1.to_s != rep.macro_f1.to_s).to be_true
+    # The pooled contingency itself: 4 correct, and 2 misses that count
+    # once as a false positive and once as a false negative.
+    expect(rep.micro_counts.join(",")).to eq("4,2,2")
 
 describe "Rolling" ->
   it "computes trailing-window aggregations" ->
@@ -452,5 +565,160 @@ describe "Metrics.log_loss" ->
   it "returns nil for misaligned or empty inputs" ->
     expect(Metrics.log_loss([9.to_f / 10.to_f, 1.to_f / 10.to_f], [1])).to be_nil
     expect(Metrics.log_loss([], [])).to be_nil
+
+describe "PrecisionRecallCurve" ->
+  # scikit-learn's own precision_recall_curve docstring example:
+  #   y_true = [0, 0, 1, 1], probas_pred = [0.1, 0.4, 0.35, 0.8]
+  #   -> precision  [0.5, 0.66666667, 0.5, 1, 1]
+  #      recall     [1, 1, 0.5, 0.5, 0]
+  #      thresholds [0.1, 0.35, 0.4, 0.8]
+  #   average_precision_score = 0.8333333333333333.
+  # Scores first, the roc_curve / log_loss order.
+  it "matches the scikit-learn precision_recall_curve reference" ->
+    scores = [1.to_f / 10.to_f, 4.to_f / 10.to_f, 35.to_f / 100.to_f, 8.to_f / 10.to_f]
+    act = [0, 0, 1, 1]
+    c = Metrics.precision_recall_curve(scores, act)
+    expect(c != nil).to be_true
+    expect(c.precision.join(",")).to eq("0.5,0.666667,0.5,1,1")
+    expect(c.recall.join(",")).to eq("1,1,0.5,0.5,0")
+    expect(c.thresholds.join(",")).to eq("0.1,0.35,0.4,0.8")
+    expect(c.average_precision.to_s).to eq("0.833333")
+    expect(Metrics.average_precision(scores, act).to_s).to eq("0.833333")
+    # Points run in ASCENDING threshold order (recall falls from 1 to 0)
+    # and the closing (recall 0, precision 1) point has no threshold, so
+    # the curve arrays run one longer — scikit-learn's layout, and NOT
+    # RocCurve's (descending, leading reject-all, all arrays equal).
+    expect(c.precision.size).to eq(c.thresholds.size + 1)
+    expect(c.recall.size).to eq(c.precision.size)
+
+  # Why the PR curve exists. One positive among ten, ranked second: ROC
+  # divides that single false positive by the eight negatives and reports
+  # a confident 0.8888888888888888, while average precision divides by
+  # what the model actually flagged and reports 0.5 (both scikit-learn).
+  it "sees the imbalance ROC-AUC hides" ->
+    scores = [90.to_f, 80.to_f, 70.to_f, 60.to_f, 50.to_f, 40.to_f, 30.to_f, 20.to_f, 10.to_f, 5.to_f]
+    act = [0, 1, 0, 0, 0, 0, 0, 0, 0, 0]
+    expect(Metrics.roc_auc(scores, act).to_s).to eq("0.888889")
+    expect(Metrics.average_precision(scores, act).to_s).to eq("0.5")
+
+  # AP extremes (scikit-learn): a perfect ranking 1, an inverted one
+  # 0.41666666666666663, all-tied scores the POSITIVE RATE (0.5 here) —
+  # AP's chance baseline is that rate, not roc_auc's flat 0.5.
+  it "scores perfect 1, inverted 0.416667, all-tied at the positive rate" ->
+    labels = [0, 0, 1, 1]
+    expect(Metrics.average_precision([1.to_f, 2.to_f, 8.to_f, 9.to_f], labels).to_s).to eq("1")
+    expect(Metrics.average_precision([9.to_f, 8.to_f, 2.to_f, 1.to_f], labels).to_s).to eq("0.416667")
+    tied = [5.to_f, 5.to_f, 5.to_f, 5.to_f]
+    expect(Metrics.average_precision(tied, labels).to_s).to eq("0.5")
+
+  # Unlike roc_curve, a single present class still yields a curve — the
+  # PR curve needs no negatives to normalize by. With no positives recall
+  # is pinned at 1 and AP is 0; with no negatives precision is 1
+  # throughout and AP is 1. Both are scikit-learn's conventions.
+  it "is defined for a single class, where roc_curve is nil" ->
+    scores = [9.to_f / 10.to_f, 8.to_f / 10.to_f]
+    allpos = Metrics.precision_recall_curve(scores, [1, 1])
+    expect(allpos.precision.join(",")).to eq("1,1,1")
+    expect(allpos.recall.join(",")).to eq("1,0.5,0")
+    expect(Metrics.average_precision(scores, [1, 1]).to_s).to eq("1")
+    nopos = Metrics.precision_recall_curve(scores, [0, 0])
+    expect(nopos.precision.join(",")).to eq("0,0,1")
+    expect(nopos.recall.join(",")).to eq("1,1,0")
+    expect(Metrics.average_precision(scores, [0, 0]).to_s).to eq("0")
+    expect(Metrics.roc_curve(scores, [1, 1])).to be_nil
+
+  it "returns nil only for misaligned or empty inputs" ->
+    expect(Metrics.precision_recall_curve([1.to_f], [1, 0])).to be_nil
+    expect(Metrics.average_precision([], [])).to be_nil
+
+describe "Metrics.brier_score" ->
+  # scikit-learn: brier_score_loss([0, 1, 1, 0], [0.1, 0.9, 0.8, 0.3])
+  # = 0.0375. Scores first, the log_loss / roc_auc order.
+  it "matches the scikit-learn brier_score_loss reference" ->
+    scores = [1.to_f / 10.to_f, 9.to_f / 10.to_f, 8.to_f / 10.to_f, 3.to_f / 10.to_f]
+    expect(Metrics.brier_score(scores, [0, 1, 1, 0]).to_s).to eq("0.0375")
+    # Bounded, unlike log loss: 0 perfect, 0.25 a constant coin flip,
+    # 1 the worst possible — confident and wrong on every row.
+    expect(Metrics.brier_score([1.to_f, 0.to_f], [1, 0]).to_s).to eq("0")
+    expect(Metrics.brier_score([5.to_f / 10.to_f, 5.to_f / 10.to_f], [1, 0]).to_s).to eq("0.25")
+    expect(Metrics.brier_score([0.to_f, 1.to_f], [1, 0]).to_s).to eq("1")
+
+  # Calibration, not ranking. Two models rank these rows identically —
+  # roc_auc says 1 for both — but one commits and one hedges, and the
+  # Brier score separates them: 0.00025 against 0.18125 (scikit-learn).
+  it "measures calibration where roc_auc measures only ranking" ->
+    confident = [99.to_f / 100.to_f, 98.to_f / 100.to_f, 2.to_f / 100.to_f, 1.to_f / 100.to_f]
+    timid = [6.to_f / 10.to_f, 55.to_f / 100.to_f, 45.to_f / 100.to_f, 4.to_f / 10.to_f]
+    act = [1, 1, 0, 0]
+    expect(Metrics.roc_auc(confident, act).to_s).to eq("1")
+    expect(Metrics.roc_auc(timid, act).to_s).to eq("1")
+    expect(Metrics.brier_score(confident, act).to_s).to eq("0.00025")
+    expect(Metrics.brier_score(timid, act).to_s).to eq("0.18125")
+
+  # pos_label mirrors log_loss / roc_auc: the roc reference example with
+  # actual [1,1,2,2] and pos_label 2 scores 0.158125 (scikit-learn).
+  it "honors pos_label and returns nil for unusable input" ->
+    scores = [1.to_f / 10.to_f, 4.to_f / 10.to_f, 35.to_f / 100.to_f, 8.to_f / 10.to_f]
+    expect(Metrics.brier_score(scores, [1, 1, 2, 2], 2).to_s).to eq("0.158125")
+    expect(Metrics.brier_score([1.to_f], [1, 0])).to be_nil
+    expect(Metrics.brier_score([], [])).to be_nil
+
+describe "Metrics.silhouette_score" ->
+  # Two tight clusters, far apart. scikit-learn's silhouette_score for
+  # x = [[0,0],[0,1],[10,0],[10,1]] with labels [0,0,1,1] is
+  # 0.9002487577582194. Mislabel the same points [0,1,0,1] and it goes
+  # NEGATIVE, -0.4475062189439555 — a negative silhouette means rows sit
+  # closer to another cluster than to their own.
+  it "matches the scikit-learn silhouette_score reference" ->
+    x = [[0, 0], [0, 1], [10, 0], [10, 1]]
+    expect(Metrics.silhouette_score(x, [0, 0, 1, 1]).to_s).to eq("0.900249")
+    expect(Metrics.silhouette_score(x, [0, 1, 0, 1]).to_s).to eq("-0.447506")
+
+  # Three clusters on a line, given as rows and as a FLAT array (one
+  # feature per row) — both 0.8764474173169825 in scikit-learn. Labels
+  # are opaque: strings cluster exactly as integers do (the string case
+  # is 0.899749373433584).
+  it "handles many clusters, single-feature rows and opaque labels" ->
+    rows = [[1], [2], [8], [9], [20], [21]]
+    flat = [1, 2, 8, 9, 20, 21]
+    labels = [0, 0, 1, 1, 2, 2]
+    expect(Metrics.silhouette_score(rows, labels).to_s).to eq("0.876447")
+    expect(Metrics.silhouette_score(flat, labels).to_s).to eq("0.876447")
+    expect(Metrics.silhouette_score([0, 1, 10, 11], ["a", "a", "b", "b"]).to_s).to eq("0.899749")
+
+  # A row alone in its cluster scores 0, not 1 — scikit-learn's rule,
+  # since there is no within-cluster distance to compare against. Here
+  # x = [0, 1, 10] with labels [0, 0, 1] gives
+  # (0.9 + 0.888889 + 0) / 3 = 0.5962962962962962.
+  it "scores a singleton cluster 0" ->
+    expect(Metrics.silhouette_score([0, 1, 10], [0, 0, 1]).to_s).to eq("0.596296")
+
+  # The measurement KMeans was missing. KMeans reports `inertia`, which
+  # falls monotonically as k grows and so can only rank fits at the SAME
+  # k — it can never say whether a clustering is good. The silhouette
+  # normalizes cohesion by separation, so it is comparable across k and
+  # is how k gets chosen. The estimator spec's separable 8-point case
+  # (inertia exactly 16) scores 0.8390486223330011 in scikit-learn.
+  it "scores a fitted KMeans clustering, which inertia cannot" ->
+    x = [[0, 0], [2, 0], [0, 2], [2, 2], [10, 10], [12, 10], [10, 12], [12, 12]]
+    model = KMeans.new(2)
+    model.fit(x)
+    expect(model.inertia.to_s).to eq("16")
+    expect(model.labels.join(",")).to eq("0,0,0,0,1,1,1,1")
+    expect(Metrics.silhouette_score(x, model.labels).to_s).to eq("0.839049")
+    # The silhouette also RANKS clusterings inertia cannot compare: the
+    # correct 2-cluster split beats a split that cuts across both blobs.
+    wrong = [0, 1, 0, 1, 0, 1, 0, 1]
+    expect(Metrics.silhouette_score(x, model.labels) > Metrics.silhouette_score(x, wrong)).to be_true
+
+  # nil where the score is undefined: one cluster has nothing to separate
+  # from, and n clusters over n rows leaves every row a singleton
+  # (scikit-learn raises ValueError for both — valid counts are 2 to
+  # n - 1), or the inputs simply do not line up.
+  it "returns nil when the clustering is degenerate or misaligned" ->
+    expect(Metrics.silhouette_score([0, 1, 2], [0, 0, 0])).to be_nil
+    expect(Metrics.silhouette_score([0, 1, 2], [0, 1, 2])).to be_nil
+    expect(Metrics.silhouette_score([0, 1], [0])).to be_nil
+    expect(Metrics.silhouette_score([], [])).to be_nil
 
 spec_summary

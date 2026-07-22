@@ -242,6 +242,190 @@ use koala
     self.check("gnb nil ragged fit", GaussianNB.new.fit([[1, 2], [3]], [0, 1]) == nil, true)
     self.check("gnb single class ok", GaussianNB.new.fit([[1], [2]], [0, 0]) != nil, true)
 
+    # --- DecisionTreeClassifier (CART: greedy axis-aligned gini splits) ---
+    # Labels follow feature 1 and ignore feature 0. Root gini 0.5; feature 0
+    # @ 0.5 leaves both sides mixed (gain 0), feature 1 @ 5 — the midpoint of
+    # 0 and 10 — separates them exactly (gain 0.5), so that is the root.
+    tx = [[0, 0], [1, 0], [0, 10], [1, 10]]
+    ty = [:lo, :lo, :hi, :hi]
+    dt = DecisionTreeClassifier.new
+    self.check("tree fit self", dt.fit(tx, ty) != nil, true)
+    self.check("tree fitted?", dt.fitted?, true)
+    self.check("tree classes", dt.classes.join(","), "lo,hi")
+    self.check("tree root feature", dt.tree[:feature], 1)
+    self.check("tree root threshold", dt.tree[:threshold], "5")
+    self.check("tree root impurity", dt.tree[:impurity], "0.5")
+    self.check("tree root gain", dt.tree[:gain], "0.5")
+    self.check("tree depth", dt.depth, 1)
+    self.check("tree nodes", dt.node_count, 3)
+    self.check("tree leaves", dt.leaf_count, 2)
+    self.check("tree render", dt.tree_lines.join(" | "), "x1 <= 5 |   leaf: lo (n=2) |   leaf: hi (n=2)")
+    self.check("tree predict", dt.predict(tx).join(","), "lo,lo,hi,hi")
+    self.check("tree unseen rows", dt.predict([[99, 4], [0 - 7, 6]]).join(","), "lo,hi")
+    self.check("tree score", dt.score(tx, ty), 1)
+    # A stump caps the tree at one test; max_depth 0 makes the root a leaf
+    # that predicts the training majority (3 vs 3 ties to the first-seen 0).
+    sx = [[0], [1], [2], [10], [11], [12]]
+    sy = [0, 0, 0, 1, 1, 1]
+    stump = DecisionTreeClassifier.new(1)
+    stump.fit(sx, sy)
+    self.check("tree stump threshold", stump.tree[:threshold], 6)
+    self.check("tree stump depth", stump.depth, 1)
+    self.check("tree stump score", stump.score(sx, sy), 1)
+    root = DecisionTreeClassifier.new(0)
+    root.fit(sx, sy)
+    self.check("tree root-only leaf", root.tree[:leaf], true)
+    self.check("tree root-only counts", root.tree[:counts], "\[3, 3\]")
+    self.check("tree root-only predict", root.predict([[0], [12]]), "\[0, 0\]")
+    self.check("tree root-only score", root.score(sx, sy), "0.5")
+    # XOR: no single cut improves gini, so every gain is 0 — the best
+    # zero-gain split is taken anyway and the children separate it exactly.
+    xx = [[0, 0], [0, 1], [1, 0], [1, 1]]
+    xy = [0, 1, 1, 0]
+    xt = DecisionTreeClassifier.new
+    xt.fit(xx, xy)
+    self.check("tree xor gain", xt.tree[:gain], 0)
+    self.check("tree xor depth", xt.depth, 2)
+    self.check("tree xor score", xt.score(xx, xy), 1)
+    # Leaf class distribution. Capped at depth 1, x = 0..3 / y = 0,1,0,1
+    # ties at gain 1/6 between thresholds 0.5 and 2.5 — the LOWEST wins —
+    # leaving a pure left leaf and a {1,0,1} right leaf.
+    px = [[0], [1], [2], [3]]
+    py = [0, 1, 0, 1]
+    pt = DecisionTreeClassifier.new(1)
+    pt.fit(px, py)
+    self.check("tree tie threshold", pt.tree[:threshold], "0.5")
+    self.check("tree tie gain", pt.tree[:gain], "0.166667")
+    self.check("tree leaf counts", pt.tree[:right][:counts], "\[1, 2\]")
+    self.check("tree proba", pt.predict_proba(px), "\[\[1, 0\], \[0.333333, 0.666667\], \[0.333333, 0.666667\], \[0.333333, 0.666667\]\]")
+    self.check("tree proba column", pt.predict_proba(px, 1), "\[0, 0.666667, 0.666667, 0.666667\]")
+    self.check("tree proba unknown label", pt.predict_proba(px, 99) == nil, true)
+    self.check("tree partial score", pt.score(px, py), "0.75")
+    # entropy is a real alternative: on four rows of four classes it takes
+    # 1.5 (gain 1 bit) where gini ties and keeps the lower 0.5.
+    ex = [[0], [1], [2], [3]]
+    ey = [0, 1, 2, 3]
+    ent = DecisionTreeClassifier.new(1, nil, nil, :entropy)
+    ent.fit(ex, ey)
+    self.check("tree entropy impurity", ent.tree[:impurity], 2)
+    self.check("tree entropy threshold", ent.tree[:threshold], "1.5")
+    self.check("tree entropy gain", ent.tree[:gain], 1)
+    gin = DecisionTreeClassifier.new(1, nil, nil, :gini)
+    gin.fit(ex, ey)
+    self.check("tree gini impurity", gin.tree[:impurity], "0.75")
+    self.check("tree gini threshold", gin.tree[:threshold], "0.5")
+    self.check("tree bad criterion nil", DecisionTreeClassifier.new(nil, nil, nil, :bogus).fit(ex, ey) == nil, true)
+    # Multiclass with no wrapper — the root is a three-way gain tie won by
+    # the lowest feature index, and its left child splits on feature 1.
+    mtx = [[0, 0], [1, 0], [10, 10], [11, 10], [0, 20], [1, 20]]
+    mty = [0, 0, 1, 1, 2, 2]
+    mt = DecisionTreeClassifier.new
+    mt.fit(mtx, mty)
+    self.check("tree multiclass render", mt.tree_lines.join(" | "), "x0 <= 5.5 |   x1 <= 10 |     leaf: 0 (n=2) |     leaf: 2 (n=2) |   leaf: 1 (n=2)")
+    self.check("tree multiclass predict", mt.predict([[0, 1], [10, 11], [1, 19]]), "\[0, 1, 2\]")
+    self.check("tree multiclass score", mt.score(mtx, mty), 1)
+    self.check("tree multiclass report", Metrics.classification_report(mt.predict(mtx), mty).macro_f1, 1)
+    # Nodes that cannot be split stay leaves: a single class, and features
+    # that are constant (no distinct values, hence no candidate threshold).
+    one = DecisionTreeClassifier.new
+    one.fit([[1], [2]], [5, 5])
+    self.check("tree single class leaf", one.tree[:leaf], true)
+    self.check("tree single class predict", one.predict([[9]]), "\[5\]")
+    flat = DecisionTreeClassifier.new
+    flat.fit([[3], [3]], [0, 1])
+    self.check("tree constant feature leaf", flat.tree[:leaf], true)
+    self.check("tree constant feature proba", flat.predict_proba([[3]]), "\[\[0.5, 0.5\]\]")
+    # min_samples_leaf can make the best-gaining split inadmissible: on
+    # y = 0,0,0,1 the perfect 2.5 split leaves one row on the right, so
+    # with a floor of 2 the weaker 1.5 split (gain 0.125) is taken instead.
+    lx = [[0], [1], [2], [3]]
+    ly = [0, 0, 0, 1]
+    self.check("tree default threshold", DecisionTreeClassifier.new.fit(lx, ly).tree[:threshold], "2.5")
+    leafy = DecisionTreeClassifier.new(nil, nil, 2)
+    leafy.fit(lx, ly)
+    self.check("tree min_samples_leaf threshold", leafy.tree[:threshold], "1.5")
+    self.check("tree min_samples_leaf gain", leafy.tree[:gain], "0.125")
+    tight = DecisionTreeClassifier.new(nil, 5)
+    tight.fit(lx, ly)
+    self.check("tree min_samples_split leaf", tight.tree[:leaf], true)
+    self.check("tree param clamp", DecisionTreeClassifier.new(nil, 1, 0).params[:min_samples_split], 2)
+    # Determinism: no seed, no sampling — the same data fits the same tree.
+    dx = [[0, 0], [1, 0], [0, 1], [1, 1], [10, 10], [11, 10], [10, 11], [11, 11]]
+    dy = [0, 0, 0, 0, 1, 1, 1, 1]
+    d1 = DecisionTreeClassifier.new
+    d1.fit(dx, dy)
+    d2 = DecisionTreeClassifier.new
+    d2.fit(dx, dy)
+    self.check("tree determinism", d1.tree_lines.join(" | "), d2.tree_lines.join(" | "))
+    self.check("tree determinism exact", d1.tree_lines.join(" | "), "x0 <= 5.5 |   leaf: 0 (n=4) |   leaf: 1 (n=4)")
+    # Shapes and degenerate input, the bit's nil convention throughout.
+    tdf = DataFrame.new([[:name, ["p", "q", "r", "s"]], [:f1, [0, 1, 10, 11]], [:f2, [0, 1, 10, 11]]])
+    tlab = Series.new([:lo, :lo, :hi, :hi], :cls)
+    fdt = DecisionTreeClassifier.new
+    fdt.fit(tdf, tlab)
+    self.check("tree frame predict", fdt.predict(Matrix.new([[0, 0], [11, 11]])).join(","), "lo,hi")
+    self.check("tree frame score", fdt.score(tdf, tlab), 1)
+    self.check("tree nil before fit", DecisionTreeClassifier.new.predict([[1, 2]]) == nil, true)
+    self.check("tree nil tree before fit", DecisionTreeClassifier.new.tree == nil, true)
+    self.check("tree nil empty fit", DecisionTreeClassifier.new.fit([], []) == nil, true)
+    self.check("tree nil ragged fit", DecisionTreeClassifier.new.fit([[1, 2], [3]], [0, 1]) == nil, true)
+    self.check("tree nil misaligned fit", DecisionTreeClassifier.new.fit([[1], [2]], [0, 1, 1]) == nil, true)
+    self.check("tree nil wrong width", fdt.predict([[1, 2, 3]]) == nil, true)
+    # Contract + composition: cross-validated, grid-searched and pipelined
+    # without any of that machinery naming a tree.
+    self.check("tree supervised?", DecisionTreeClassifier.new.supervised?, true)
+    self.check("tree name", DecisionTreeClassifier.new.estimator_name, "DecisionTreeClassifier")
+    self.check("tree params size", DecisionTreeClassifier.new.params.size, 4)
+    self.check("tree cross_val", CrossValidation.cross_val_mean(DecisionTreeClassifier.new, dx, dy, 4), 1)
+    tgs = GridSearch.new(DecisionTreeClassifier.new, { max_depth: [1, 2] }, 4)
+    tgs.fit(dx, dy)
+    self.check("tree grid best", tgs.best_params[:max_depth], 1)
+    self.check("tree grid score", tgs.best_score, 1)
+    self.check("tree grid refit depth", tgs.best_estimator.depth, 1)
+    tpipe = Pipeline.new([[:scale, Scaler.new(:standard)], [:tree, DecisionTreeClassifier.new(2)]])
+    tpdf = DataFrame.new([[:f, [0, 1, 10, 11]]])
+    tpipe.fit(tpdf, [0, 0, 1, 1])
+    self.check("tree pipeline predict", tpipe.predict(tpdf), "\[0, 0, 1, 1\]")
+    self.check("tree pipeline score", tpipe.score(tpdf, [0, 0, 1, 1]), 1)
+    self.check("tree pipeline param", tpipe.params["tree.max_depth"], 2)
+
+    # --- DecisionTreeRegressor (the same tree, MSE criterion) ---
+    # x = 0,1,10,11 / y = 1,1,9,9: root mean 5, variance 16; splitting at
+    # 5.5 makes both sides constant, so the gain is the whole 16.
+    rtx = [[0], [1], [10], [11]]
+    rty = [1, 1, 9, 9]
+    rt = DecisionTreeRegressor.new
+    self.check("rtree fit self", rt.fit(rtx, rty) != nil, true)
+    self.check("rtree impurity", rt.tree[:impurity], 16)
+    self.check("rtree threshold", rt.tree[:threshold], "5.5")
+    self.check("rtree gain", rt.tree[:gain], 16)
+    self.check("rtree render", rt.tree_lines.join(" | "), "x0 <= 5.5 |   leaf: 1 (n=2) |   leaf: 9 (n=2)")
+    self.check("rtree piecewise constant", rt.predict([[0], [5], [6], [11]]), "\[1, 1, 9, 9\]")
+    self.check("rtree r2", rt.score(rtx, rty), 1)
+    # y = 2x: the uncapped tree memorizes all four points; the stump
+    # predicts 1 and 5, leaving SS_res 4 of SS_tot 20, so R² = 0.8.
+    lrx = [[0], [1], [2], [3]]
+    lry = [0, 2, 4, 6]
+    lrt = DecisionTreeRegressor.new
+    lrt.fit(lrx, lry)
+    self.check("rtree linear impurity", lrt.tree[:impurity], 5)
+    self.check("rtree linear threshold", lrt.tree[:threshold], "1.5")
+    self.check("rtree linear predict", lrt.predict(lrx), "\[0, 2, 4, 6\]")
+    self.check("rtree linear leaves", lrt.leaf_count, 4)
+    rstump = DecisionTreeRegressor.new(1)
+    rstump.fit(lrx, lry)
+    self.check("rtree stump predict", rstump.predict(lrx), "\[1, 1, 5, 5\]")
+    self.check("rtree stump r2", rstump.score(lrx, lry), "0.8")
+    rroot = DecisionTreeRegressor.new(0)
+    rroot.fit(lrx, lry)
+    self.check("rtree mean-only predict", rroot.tree[:prediction], 3)
+    self.check("rtree mean-only r2", rroot.score(lrx, lry), 0)
+    self.check("rtree name", DecisionTreeRegressor.new.estimator_name, "DecisionTreeRegressor")
+    self.check("rtree criterion", DecisionTreeRegressor.new.params[:criterion], "mse")
+    self.check("rtree gini rejected", DecisionTreeRegressor.new(nil, nil, nil, :gini).fit(rtx, rty) == nil, true)
+    self.check("rtree variance alias", DecisionTreeRegressor.new(nil, nil, nil, :variance).fit(rtx, rty) != nil, true)
+    self.check("rtree nil before fit", DecisionTreeRegressor.new.predict([[1]]) == nil, true)
+
     # --- Cross-validation (KFold / CrossValidation) ---
     cv5 = KFold.new(5).split(10)
     self.check("kfold count", cv5.size, 5)
@@ -376,6 +560,107 @@ use koala
     self.check("log_loss perfect ~0", LinAlg.fabs(Metrics.log_loss([1.to_f, 0.to_f], [1, 0])) < lltol, true)
     self.check("log_loss nil misaligned", Metrics.log_loss([9.to_f / 10.to_f, 1.to_f / 10.to_f], [1]) == nil, true)
     self.check("log_loss nil empty", Metrics.log_loss([], []) == nil, true)
+    # --- fbeta: f1 with a beta that weights recall (sklearn fbeta_score)
+    # Same binary case as above: P = 0.5, R = 2/3.
+    fpreds = [1, 1, 1, 0, 0, 1]
+    fact = [1, 0, 0, 0, 1, 1]
+    self.check("fbeta beta=2", Metrics.fbeta(fpreds, fact, 2), "0.625")
+    self.check("fbeta beta=1/2", Metrics.fbeta(fpreds, fact, 1.to_f / 2.to_f), "0.526316")
+    self.check("fbeta beta=1 is f1", Metrics.fbeta(fpreds, fact), Metrics.f1(fpreds, fact))
+    self.check("fbeta beta=0 is precision", Metrics.fbeta(fpreds, fact, 0), Metrics.precision(fpreds, fact))
+    self.check("fbeta pos_label 0", Metrics.fbeta(fpreds, fact, 2, 0), "0.357143")
+    self.check("fbeta zero division", Metrics.fbeta([0, 0], [0, 0], 2), "0")
+    # --- imbalanced-data scores: the majority-class classifier that
+    # accuracy rates 0.8 and every honest metric rates chance-level.
+    imb_act = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1]
+    imb_preds = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    self.check("majority accuracy flatters", Metrics.accuracy(imb_preds, imb_act), "0.8")
+    self.check("majority balanced_accuracy", Metrics.balanced_accuracy(imb_preds, imb_act), "0.5")
+    self.check("majority mcc", Metrics.matthews_corrcoef(imb_preds, imb_act), "0")
+    self.check("majority cohen_kappa", Metrics.cohen_kappa(imb_preds, imb_act), "0")
+    # sklearn docstring examples, in koala's (predictions, actual) order
+    self.check("mcc reference", Metrics.matthews_corrcoef([1, 0, 1, 1], [1, 1, 1, 0]), "-0.333333")
+    self.check("mcc perfect", Metrics.matthews_corrcoef([0, 1, 0, 1], [0, 1, 0, 1]), "1")
+    self.check("mcc inverted", Metrics.matthews_corrcoef([1, 0, 1, 0], [0, 1, 0, 1]), "-1")
+    self.check("kappa reference", Metrics.cohen_kappa([0, 0, 2, 2, 0, 2], [2, 0, 2, 2, 0, 1]), "0.428571")
+    self.check("kappa perfect", Metrics.cohen_kappa([0, 1, 0, 1], [0, 1, 0, 1]), "1")
+    self.check("kappa antiperfect", Metrics.cohen_kappa([1, 0], [0, 1]), "-1")
+    # multiclass — same 3-class case as the ConfusionMatrix block
+    self.check("balanced_accuracy multiclass", Metrics.balanced_accuracy(cpred, cact), "0.555556")
+    self.check("balanced_accuracy is macro recall", Metrics.balanced_accuracy(cpred, cact), rep.macro_recall)
+    self.check("mcc multiclass", Metrics.matthews_corrcoef(cpred, cact), "0.5")
+    self.check("kappa multiclass", Metrics.cohen_kappa(cpred, cact), "0.478261")
+    # degenerate: one class on both sides -> 0, never nan; nil for unusable input
+    self.check("mcc one class", Metrics.matthews_corrcoef([1, 1], [1, 1]), "0")
+    self.check("kappa one class", Metrics.cohen_kappa([1, 1], [1, 1]), "0")
+    self.check("balanced_accuracy skips absent class", Metrics.balanced_accuracy([1, 0], [1, 1]), "0.5")
+    self.check("balanced_accuracy nil misaligned", Metrics.balanced_accuracy([1], [1, 0]) == nil, true)
+    self.check("mcc nil empty", Metrics.matthews_corrcoef([], []) == nil, true)
+    self.check("kappa nil misaligned", Metrics.cohen_kappa([1], [1, 0]) == nil, true)
+    # --- micro averages: pooled TP/FP/FN, equal to accuracy for
+    # single-label multiclass (sklearn average="micro")
+    self.check("micro counts", rep.micro_counts.join(","), "4,2,2")
+    self.check("micro precision", rep.micro_precision, "0.666667")
+    self.check("micro recall equals precision", rep.micro_recall, rep.micro_precision)
+    self.check("micro f1 equals accuracy", rep.micro_f1, rep.accuracy)
+    # --- precision-recall curve / average precision (sklearn reference:
+    # y_true [0,0,1,1], scores [0.1,0.4,0.35,0.8] -> AP 0.8333333333333333)
+    prc = Metrics.precision_recall_curve(rscores, [0, 0, 1, 1])
+    self.check("pr precision", prc.precision.join(","), "0.5,0.666667,0.5,1,1")
+    self.check("pr recall", prc.recall.join(","), "1,1,0.5,0.5,0")
+    self.check("pr thresholds ascending", prc.thresholds.join(","), "0.1,0.35,0.4,0.8")
+    self.check("pr curve one longer", prc.precision.size, prc.thresholds.size + 1)
+    self.check("average_precision", prc.average_precision, "0.833333")
+    self.check("average_precision scalar", Metrics.average_precision(rscores, [0, 0, 1, 1]), "0.833333")
+    self.check("average_precision pos_label", Metrics.average_precision(rscores, ract, 2), "0.833333")
+    # one positive of ten, ranked 2nd: ROC hides the false positive, AP does not
+    ap_scores = [90.to_f, 80.to_f, 70.to_f, 60.to_f, 50.to_f, 40.to_f, 30.to_f, 20.to_f, 10.to_f, 5.to_f]
+    ap_act = [0, 1, 0, 0, 0, 0, 0, 0, 0, 0]
+    self.check("imbalanced roc_auc", Metrics.roc_auc(ap_scores, ap_act), "0.888889")
+    self.check("imbalanced average_precision", Metrics.average_precision(ap_scores, ap_act), "0.5")
+    self.check("ap perfect", Metrics.average_precision([1.to_f, 2.to_f, 8.to_f, 9.to_f], [0, 0, 1, 1]), "1")
+    self.check("ap inverted", Metrics.average_precision([9.to_f, 8.to_f, 2.to_f, 1.to_f], [0, 0, 1, 1]), "0.416667")
+    self.check("ap all tied is positive rate", Metrics.average_precision([5.to_f, 5.to_f, 5.to_f, 5.to_f], [0, 0, 1, 1]), "0.5")
+    # a single class is fine here, where roc_curve is nil
+    one_class = [9.to_f / 10.to_f, 8.to_f / 10.to_f]
+    self.check("pr all positive", Metrics.precision_recall_curve(one_class, [1, 1]).recall.join(","), "1,0.5,0")
+    self.check("ap all positive", Metrics.average_precision(one_class, [1, 1]), "1")
+    self.check("pr no positive", Metrics.precision_recall_curve(one_class, [0, 0]).precision.join(","), "0,0,1")
+    self.check("ap no positive", Metrics.average_precision(one_class, [0, 0]), "0")
+    self.check("pr nil misaligned", Metrics.precision_recall_curve([1.to_f], [1, 0]) == nil, true)
+    self.check("ap nil empty", Metrics.average_precision([], []) == nil, true)
+    # --- brier score: bounded calibration, log_loss's gentle sibling
+    bscores = [1.to_f / 10.to_f, 9.to_f / 10.to_f, 8.to_f / 10.to_f, 3.to_f / 10.to_f]
+    self.check("brier reference", Metrics.brier_score(bscores, [0, 1, 1, 0]), "0.0375")
+    self.check("brier perfect", Metrics.brier_score([1.to_f, 0.to_f], [1, 0]), "0")
+    self.check("brier coin flip", Metrics.brier_score([5.to_f / 10.to_f, 5.to_f / 10.to_f], [1, 0]), "0.25")
+    self.check("brier worst", Metrics.brier_score([0.to_f, 1.to_f], [1, 0]), "1")
+    self.check("brier pos_label", Metrics.brier_score(rscores, ract, 2), "0.158125")
+    # identical ranking (roc_auc 1 both), very different calibration
+    confident = [99.to_f / 100.to_f, 98.to_f / 100.to_f, 2.to_f / 100.to_f, 1.to_f / 100.to_f]
+    timid = [6.to_f / 10.to_f, 55.to_f / 100.to_f, 45.to_f / 100.to_f, 4.to_f / 10.to_f]
+    self.check("brier confident", Metrics.brier_score(confident, [1, 1, 0, 0]), "0.00025")
+    self.check("brier timid", Metrics.brier_score(timid, [1, 1, 0, 0]), "0.18125")
+    self.check("brier ranks tie on auc", Metrics.roc_auc(confident, [1, 1, 0, 0]), Metrics.roc_auc(timid, [1, 1, 0, 0]))
+    self.check("brier nil misaligned", Metrics.brier_score([1.to_f], [1, 0]) == nil, true)
+    self.check("brier nil empty", Metrics.brier_score([], []) == nil, true)
+    # --- silhouette score: koala's first unsupervised metric
+    sil_x = [[0, 0], [0, 1], [10, 0], [10, 1]]
+    self.check("silhouette separated", Metrics.silhouette_score(sil_x, [0, 0, 1, 1]), "0.900249")
+    self.check("silhouette mislabeled negative", Metrics.silhouette_score(sil_x, [0, 1, 0, 1]), "-0.447506")
+    self.check("silhouette 3 clusters", Metrics.silhouette_score([[1], [2], [8], [9], [20], [21]], [0, 0, 1, 1, 2, 2]), "0.876447")
+    self.check("silhouette flat rows", Metrics.silhouette_score([1, 2, 8, 9, 20, 21], [0, 0, 1, 1, 2, 2]), "0.876447")
+    self.check("silhouette string labels", Metrics.silhouette_score([0, 1, 10, 11], ["a", "a", "b", "b"]), "0.899749")
+    self.check("silhouette singleton scores 0", Metrics.silhouette_score([0, 1, 10], [0, 0, 1]), "0.596296")
+    km_x = [[0, 0], [2, 0], [0, 2], [2, 2], [10, 10], [12, 10], [10, 12], [12, 12]]
+    km = KMeans.new(2)
+    km.fit(km_x)
+    self.check("silhouette scores a KMeans fit", Metrics.silhouette_score(km_x, km.labels), "0.839049")
+    self.check("silhouette ranks the right split higher", Metrics.silhouette_score(km_x, km.labels) > Metrics.silhouette_score(km_x, [0, 1, 0, 1, 0, 1, 0, 1]), true)
+    self.check("silhouette nil one cluster", Metrics.silhouette_score([0, 1, 2], [0, 0, 0]) == nil, true)
+    self.check("silhouette nil all singletons", Metrics.silhouette_score([0, 1, 2], [0, 1, 2]) == nil, true)
+    self.check("silhouette nil misaligned", Metrics.silhouette_score([0, 1], [0]) == nil, true)
+    self.check("silhouette nil empty", Metrics.silhouette_score([], []) == nil, true)
 
 t = KoalaSmoke.new
 t.run

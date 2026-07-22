@@ -29,10 +29,18 @@ Metrics.mape(p, actual)              # => mean absolute PERCENTAGE error
 Metrics.median_absolute_error(p, a)  # => median |residual| (outlier-robust)
 Metrics.max_error(p, actual)         # => largest single |residual|
 Metrics.f1([1, 1, 0], [1, 0, 0])     # => 0.666667 (also precision / recall)
-Metrics.classification_report(preds, actual)  # multiclass P/R/F1 + macro/weighted avg
+Metrics.fbeta(preds, actual, 2)      # => f1 with recall weighted beta times
+Metrics.classification_report(preds, actual)  # multiclass P/R/F1 + macro/micro/weighted avg
+Metrics.balanced_accuracy(preds, actual)      # => macro recall — accuracy that skew can't fool
+Metrics.matthews_corrcoef(preds, actual)      # => MCC, the imbalanced-binary metric of choice
+Metrics.cohen_kappa(preds, actual)   # => agreement corrected for chance
 Metrics.roc_auc(scores, actual)      # => 0.75  area under the ROC curve
 Metrics.roc_curve(scores, actual)    # => RocCurve: .fpr / .tpr / .thresholds / .auc
+Metrics.average_precision(scores, actual)     # => PR-AUC — the right curve when positives are rare
+Metrics.precision_recall_curve(scores, actual) # => .precision / .recall / .thresholds
 Metrics.log_loss(scores, actual)     # => 0.216162  binary cross-entropy (log loss)
+Metrics.brier_score(scores, actual)  # => 0.0375  BOUNDED calibration error
+Metrics.silhouette_score(x, labels)  # => cluster quality — the metric KMeans lacked
 
 v = Vector.new([1, 2, 3])
 v.dot(Vector.new([4, 5, 6]))         # => 32
@@ -41,6 +49,9 @@ m.matmul(Matrix.identity(2))         # => m
 m.solve(Vector.new([5, 10]))         # => Vector [1, 3]
 m.det                                # => 5 (0 = singular; nil = not square)
 m.inv                                # => Matrix (nil when singular)
+m.qr                                 # => { q:, r: } reduced Householder QR
+tall = Matrix.new([[1, 0], [1, 1], [1, 2], [1, 3]])
+tall.lstsq([0, 1, 2, 5])             # => Vector [-0.4, 1.6]  least squares
 
 # ML preprocessing — fit/transform, sklearn-style
 Scaler.new(:standard).fit_transform(df)   # (v-mean)/std; :min_max for 0..1
@@ -59,7 +70,7 @@ named = Pipeline.new([[:fill, Imputer.new(:mean)], [:scale, Scaler.new(:standard
 named.step(:scale)                   # by name (symbol or string); named[1] too
 named.names                          # => ["fill", "scale"]; has_step?(:scale)
 
-# Estimation — LinearRegression, normal equations on LinAlg.solve
+# Estimation — LinearRegression, Householder QR least squares
 model = LinearRegression.new
 model.fit([0, 1, 2, 3], [1, 3, 5, 7])  # x: DataFrame | Matrix | Vector |
 model.coefficients                   # => [2]     Series | rows | flat array
@@ -68,7 +79,7 @@ model.predict([[5], [6]])            # => [11, 13]
 model.score([0, 1], [1, 3])          # => 1 (R² via Metrics.r2)
 
 # Ridge: alpha on the X^T X diagonal — but never the intercept slot.
-ridge = LinearRegression.new(12)     # alpha = 0 (default) is exact OLS
+ridge = LinearRegression.new(12)     # alpha = 0 (default) is plain OLS, by QR
 ridge.fit([0 - 3, 0 - 1, 1, 3], [0 - 5, 0 - 1, 3, 7])
 ridge.coefficients                   # => [1.25]  (OLS slope 2, shrunk)
 ridge.intercept                      # => 1       (bias never penalized)
@@ -110,6 +121,31 @@ nb.predict([[2, 3], [12, 13]])       # => [0, 1]   argmax of the log likelihood
 nb.score(x_test, y_test)             # => accuracy; labels feed Metrics.f1
                                      # three+ classes work with no wrapper
 
+# Classification — DecisionTreeClassifier, CART: greedy axis-aligned splits
+dt = DecisionTreeClassifier.new      # gini, unlimited depth (see below for knobs)
+dt.fit([[0, 0], [1, 0], [0, 10], [1, 10]], [:lo, :lo, :hi, :hi])
+dt.tree[:feature]                    # => 1     the split feature it CHOSE
+dt.tree[:threshold]                  # => 5     midpoint of the two x1 values
+dt.tree[:gain]                       # => 0.5   impurity decrease it bought
+dt.depth                             # => 1     .node_count / .leaf_count too
+dt.tree_lines                        # => the fitted tree, READABLE:
+                                     #    ["x1 <= 5", "  leaf: lo (n=2)",
+                                     #                "  leaf: hi (n=2)"]
+dt.predict([[99, 4], [-7, 6]])       # => [:lo, :hi]   the original labels
+dt.predict_proba(x_test)             # => the LEAF's class distribution per row
+dt.predict_proba(x_test, :hi)        # => flat P(:hi) column, for roc_auc
+dt.score(x_test, y_test)             # => accuracy; three+ classes, no wrapper
+DecisionTreeClassifier.new(3, 5, 2, :entropy)
+                                     # max_depth, min_samples_split,
+                                     # min_samples_leaf, criterion — all four
+                                     # are tunable `params`
+
+# Regression — DecisionTreeRegressor, the same tree on an MSE criterion
+rt = DecisionTreeRegressor.new(1)    # a regression STUMP
+rt.fit([[0], [1], [2], [3]], [0, 2, 4, 6])
+rt.predict([[0], [3]])               # => [1, 5]   PIECEWISE CONSTANT leaf means
+rt.score(x_test, y_test)             # => R², like LinearRegression's
+
 # ... or as a pipeline tail: transform features, then fit/predict
 pipe = Pipeline.new([[:scale, Scaler.new(:standard)], [:model, LinearRegression.new]])
 pipe.fit(df_features, y)             # nil (unfitted) on collinear features
@@ -144,6 +180,16 @@ scores = CrossValidation.cross_val_score(LinearRegression.new, x, y, 5)
 CrossValidation.cross_val_mean(KNNClassifier.new(3), x, y, 4)  # mean fold score
 CrossValidation.cross_val_score(KMeans.new(2), x, nil, 2)      # unsupervised: no y
 
+# Six splitters — pass ANY of them where the fold count goes
+StratifiedKFold.new(3).split(y)      # every fold keeps y's class mix
+LeaveOneOut.new.split(4)             # n folds, one held-out row each
+GroupKFold.new(2).split(groups)      # no group spans train and test
+TimeSeriesSplit.new(3).split(12)     # expanding window, never the future
+TimeSeriesSplit.new(3, 1).split(12)  # ... with a 1-row gap before each test
+ShuffleSplit.new(5, 30, 42).split(10)  # 5 seeded random 30% hold-outs
+CrossValidation.cross_val_score(KNNClassifier.new(1), x, y, StratifiedKFold.new(3))
+GridSearch.new(KNNClassifier.new, { k: [1, 3] }, StratifiedKFold.new(3))
+
 # Hyperparameter search — GridSearch, every combination scored by k-fold CV
 gs = GridSearch.new(KNNClassifier.new, { k: [1, 3, 5] }, 4)
 gs.size                              # => 3   combinations, known before fit
@@ -175,14 +221,15 @@ Estimator.score_model(m, rows, yvals)
 ## The estimator contract
 
 Every estimator — `LinearRegression`, `KNNClassifier`,
-`LogisticRegression`, `GaussianNB`, `KMeans` — answers one declared
-interface, defined in `lib/estimator_base.w`:
+`LogisticRegression`, `GaussianNB`, `DecisionTreeClassifier`,
+`DecisionTreeRegressor`, `KMeans` — answers one declared interface,
+defined in `lib/estimator_base.w`:
 
 | trait | methods | who |
 | --- | --- | --- |
 | `Tunable` | `params` `with_params(overrides)` | Scaler, Imputer, Encoder (and every Estimable, which restates the pair) |
-| `Estimable` | `fitted?` `predict(x)` `supervised?` `params` `with_params(overrides)` `estimator_name` | all five |
-| `SupervisedEstimator` | `fit(x, y)` `score(x, y)` | LinearRegression, KNNClassifier, LogisticRegression, GaussianNB |
+| `Estimable` | `fitted?` `predict(x)` `supervised?` `params` `with_params(overrides)` `estimator_name` | all seven |
+| `SupervisedEstimator` | `fit(x, y)` `score(x, y)` | LinearRegression, KNNClassifier, LogisticRegression, GaussianNB, DecisionTreeClassifier, DecisionTreeRegressor |
 | `UnsupervisedEstimator` | `fit(x)` `score(x)` | KMeans |
 
 `Tunable` is the hyperparameter half on its own — what a search needs and
@@ -207,7 +254,7 @@ A class declares its conformance with `is`:
 The traits are FLAT (no `with` composition — that form does not run on
 the interpreter) and `is` is a **declaration, not an enforcement**: a
 class naming a trait it does not satisfy still compiles. The enforcement
-is `spec/estimator_spec.w`, which walks all five and asserts each really
+is `spec/estimator_spec.w`, which walks them all and asserts each really
 answers every contract method.
 
 `supervised?` exists because fit's ARITY genuinely differs — KMeans takes
@@ -216,9 +263,10 @@ answers every contract method.
 guess.
 
 `params` reports only the CONSTRUCTOR knobs a search varies (`alpha`;
-`k`; `learning_rate` / `epochs`; `var_smoothing`; `k` / `seed` /
-`max_iter`) and never learned state — coefficients and centroids stay out
-of the search space, before and after a fit. `with_params` **clones**: it
+`k`; `learning_rate` / `epochs`; `var_smoothing`; `max_depth` /
+`min_samples_split` / `min_samples_leaf` / `criterion`; `k` / `seed` /
+`max_iter`) and never learned state — coefficients, centroids and the
+fitted tree stay out of the search space, before and after a fit. `with_params` **clones**: it
 returns a fresh unfitted instance with the overrides applied and leaves
 the receiver alone, so a search fans out from one prototype without
 aliasing. Keys you omit carry over, so `m.with_params(m.params)`
@@ -250,6 +298,158 @@ what makes that work; without it the chain died on `column_names`.
 ```tungsten
 Scaler.new(:standard).fit_transform([[2, 9], [4, 9], [6, 9]])
 # => a DataFrame with columns "x0", "x1"
+```
+
+## Decision trees
+
+`DecisionTreeClassifier` is koala's non-parametric, piecewise-constant
+learner. Where `LinearRegression` fits one global hyperplane,
+`KNNClassifier` defers everything to query time, `LogisticRegression`
+iterates to a single boundary and `GaussianNB` assumes a generative
+Gaussian per class, a tree recursively cuts the feature space with
+axis-aligned half-planes (`x[j] <= t`) and predicts a constant inside each
+box. It needs no scaling, no distance metric and no learning rate, it is
+multiclass from the start — and, unlike every other estimator here, the
+fitted model is **readable**.
+
+### The algorithm (CART, greedy, top-down)
+
+At each node, over every feature and every candidate threshold, the rows
+split into `x[j] <= t` and `x[j] > t`, scored by the impurity decrease:
+
+```
+gain = imp(node) - (n_left/n) * imp(left) - (n_right/n) * imp(right)
+```
+
+The best-gaining split is taken and both sides recurse. `criterion`
+selects the impurity:
+
+| criterion | formula | estimator |
+| --- | --- | --- |
+| `:gini` (default) | `1 - sum_c p_c^2` | DecisionTreeClassifier |
+| `:entropy` | `-sum_c p_c log2 p_c` | DecisionTreeClassifier |
+| `:mse` (default) | population variance | DecisionTreeRegressor |
+
+They are genuinely different objectives, not a relabelling. On four rows
+of four distinct classes, entropy takes the balanced middle split
+outright (gain 1 bit) while gini ties across two candidates and keeps the
+lower threshold.
+
+Candidate thresholds are the **midpoints between adjacent DISTINCT sorted
+values** of that feature inside that node (scikit-learn's rule). Midpoints
+put the boundary in the gap, so a query landing between two training
+values is classified by the nearer side; taking only distinct values means
+a **constant feature offers no threshold at all** rather than a degenerate
+empty split.
+
+A node becomes a leaf when it is pure, when `n < min_samples_split`, when
+`depth == max_depth`, or when no admissible split exists. Its prediction
+is the majority class (classifier) or the mean target (regressor).
+
+### Determinism is a guarantee, and the tie-break rule is documented
+
+There is no bootstrap, no feature subsampling and no seed: the fitted tree
+is a **pure function of the training data**, identical run to run and
+engine to engine. The one place a choice could wobble is a tie in gain, so
+the rule is stated and enforced:
+
+> Features are scanned in **ascending index** order, and each feature's
+> thresholds in **ascending value** order; a candidate replaces the
+> incumbent only when it is **strictly** better. Ties therefore break to
+> the **lowest feature index**, then to the **lowest threshold**.
+
+"Strictly better" is measured against a *relative* tolerance
+(`gain > best + imp(node)/1e12`), so two mathematically equal gains
+reached by different summation orders cannot swap the winner on a
+last-bit difference.
+
+A **zero-gain split is still taken** when it is the best on offer
+(scikit-learn's `min_impurity_decrease = 0.0`). That is what lets a tree
+learn XOR: no single axis-aligned cut of `[[0,0],[0,1],[1,0],[1,1]]`
+improves gini at all, but splitting anyway lets the two children separate
+it perfectly at depth 2. Only the *absence* of any admissible split makes
+a leaf.
+
+### The fitted tree is an inspectable structure
+
+A node is a plain hash, and an internal node holds its children directly —
+so you can assert the fitted shape, not just its predictions:
+
+```tungsten
+model = DecisionTreeClassifier.new
+model.fit([[0, 0], [1, 0], [0, 10], [1, 10]], [:lo, :lo, :hi, :hi])
+
+model.tree[:feature]             # => 1        the split feature
+model.tree[:threshold]           # => 5        midpoint of 0 and 10
+model.tree[:impurity]            # => 0.5      gini before the split
+model.tree[:gain]                # => 0.5      what the split bought
+model.tree[:n]                   # => 4        rows that reached this node
+model.tree[:left][:prediction]   # => :lo      the `<=` child
+model.tree[:left][:counts]       # => [2, 0]   rows per class, `classes` order
+
+model.depth                      # => 1   edges to the deepest leaf
+model.node_count                 # => 3
+model.leaf_count                 # => 2
+model.tree_lines.join("\n")
+# x1 <= 5
+#   leaf: lo (n=2)
+#   leaf: hi (n=2)
+```
+
+`predict_proba` is that leaf's class distribution, `counts / n`, so it
+pairs with `Metrics.roc_auc` and `Metrics.log_loss` exactly as
+`GaussianNB`'s does — `predict_proba(x, label)` hands over the flat
+column.
+
+### Hyperparameters — all four are real, tunable `params`
+
+| param | default | meaning |
+| --- | --- | --- |
+| `max_depth` | `nil` | unlimited; `0` = a single leaf, `1` = a decision stump |
+| `min_samples_split` | `2` | a node smaller than this is never split |
+| `min_samples_leaf` | `1` | a split leaving a side smaller than this is inadmissible |
+| `criterion` | `:gini` / `:mse` | see the table above |
+
+`min_samples_leaf` can *change the answer*, not merely prune: on
+`x = 0,1,2,3` with `y = 0,0,0,1` the perfect split at 2.5 leaves one row
+on the right, so a floor of 2 rejects it and the weaker 1.5 split (gain
+0.125) is taken instead. Both floors are clamped to their legal minimum in
+the **constructor**, so `params` always reports the value actually in
+force and `m.with_params(m.params)` is the identity.
+
+Because they are ordinary `params`, they round-trip through `with_params`
+and the rest of koala tunes them with no code aware trees exist:
+
+```tungsten
+gs = GridSearch.new(DecisionTreeClassifier.new, { max_depth: [1, 2, 3] }, 4)
+gs.fit(x, y)
+gs.best_params                   # => { max_depth: 1 }
+gs.best_estimator.depth          # => 1
+
+pipe = Pipeline.new([[:scale, Scaler.new(:standard)],
+                     [:tree, DecisionTreeClassifier.new(2)]])
+pipe.params["tree.max_depth"]    # => 2   dotted, alongside "scale.kind"
+```
+
+An unknown criterion makes `fit` return `nil` rather than silently
+falling back — `:gini` on a regressor and `:mse` on a classifier are both
+refused. Everything else follows the bit's convention: an empty `x`, a
+ragged `x`, a `y` whose size mismatches, a query row of the wrong width,
+or any call before a successful fit returns `nil` and never raises.
+
+### DecisionTreeRegressor
+
+The same machinery with variance as the criterion and the mean target at
+each leaf, so `score` is R² and `CrossValidation` / `GridSearch` rank it
+exactly like `LinearRegression`. Predictions are **piecewise constant** —
+a fully grown tree interpolates nothing, it memorizes the training means
+of its boxes, which is precisely why `max_depth` is worth searching:
+
+```tungsten
+rt = DecisionTreeRegressor.new(1)          # a stump on y = 2x, x = 0..3
+rt.fit([[0], [1], [2], [3]], [0, 2, 4, 6])
+rt.predict([[0], [1], [2], [3]])           # => [1, 1, 5, 5]
+rt.score([[0], [1], [2], [3]], [0, 2, 4, 6])  # => 0.8   (SS_res 4 of SS_tot 20)
 ```
 
 ## Pipelines
@@ -367,6 +567,106 @@ rather than a property of the class — `Estimator.fit_model` /
 `.score_model` read `supervised?` and dispatch. Today the tail estimator
 must be a supervised one: fitting without `y` transforms through every
 step, which an unsupervised tail has no `transform` for.
+
+## Cross-validation splitters
+
+A cross-validation score is only as honest as the folds it averages, and
+plain `KFold` — contiguous blocks of `0...n` — is honest about far less
+than it looks. `lib/cross_validation.w` carries six splitters, each
+answering one shared contract, and `cross_val_score` takes any of them
+in the same argument that used to take a fold count.
+
+| Splitter | What it guarantees | The leak it closes |
+| --- | --- | --- |
+| `KFold.new(k, seed)` | k contiguous folds, sklearn's fold sizes | — (the baseline) |
+| `StratifiedKFold.new(k, seed)` | every fold keeps each class's proportion | a fold with **none** of a class |
+| `LeaveOneOut.new` | n folds, one held-out row each | small-n bias (the k = n limit) |
+| `GroupKFold.new(k, groups)` | a group is never split across a fold | training on the **same subject** you test |
+| `TimeSeriesSplit.new(k, gap)` | train is a prefix, test the block after | **reading tomorrow's newspaper** |
+| `ShuffleSplit.new(reps, pct, seed)` | reps independent random hold-outs | too few / too rigid draws |
+
+**`StratifiedKFold` is the one classification actually needs.** With
+sorted or imbalanced labels, KFold's contiguous folds are a trap: for
+`y = [0,0,0,0,0,0,1,1,1]` and `k = 3` the third fold tests **only** class
+1 while training on **zero** examples of it, and nothing warns you. Run
+1-NN on two well-separated clusters through both and the fold scores are
+`[1, 1, 0]` under `KFold` and `[1, 1, 1]` under `StratifiedKFold` — the
+difference is entirely the splitter, not the model.
+
+Stratification deals each class's rows round-robin across the folds, but
+the deal for the next class **resumes where the last one stopped**
+instead of restarting at fold 0. That rotation is what keeps fold sizes
+even: three classes of four into three folds gives 4/4/4, where
+restarting each class at fold 0 would give a lopsided 6/3/3. Fold sizes
+therefore match scikit-learn's.
+
+### One contract: `folds(n, y)` — and why `split` differs
+
+Every splitter answers `Splitting`: a single method `folds(n, y)`
+returning `[train, test]` index pairs, or nil. That is the whole entry
+fee — a splitter written **outside** koala works with `cross_val_score`
+with no registration.
+
+Each splitter also keeps its own natural `split`, and those signatures
+deliberately differ, because the splitters genuinely need different
+things: `KFold#split(n)`, `LeaveOneOut#split(n)`,
+`TimeSeriesSplit#split(n)` and `ShuffleSplit#split(n)` need only the
+sample **count**, `StratifiedKFold#split(y)` needs the **labels**, and
+`GroupKFold#split(groups)` needs each row's **group**. Hiding that behind
+one uniform `split(n, y, groups)` would be a lie — it would suggest
+KFold consults the labels (it does not) and that stratification is free
+(it is not). So the natural API stays honest about its inputs and
+`folds(n, y)` is the thin adapter on top. A row's group is not its
+target, so `GroupKFold` takes groups at **construction**
+(`GroupKFold.new(k, groups)`), which is where `folds` reads them.
+
+```tungsten
+CrossValidation.cross_val_score(model, x, y, 5)      # a fold count — unchanged
+CrossValidation.cross_val_score(model, x, y, 5, 42)  # ... seeded
+CrossValidation.cross_val_score(model, x, y, StratifiedKFold.new(5))
+CrossValidation.cross_val_score(model, x, y, GroupKFold.new(3, groups))
+CrossValidation.cross_val_score(model, x, y, TimeSeriesSplit.new(4))
+```
+
+An integer `cv` is exactly the original behaviour; anything answering
+`folds(n, y)` is used instead, and `seed` is then ignored (a splitter
+carries its own seeding, and a second seed here could only contradict
+it). The test is behavioural — `respond_to?("folds")` — the same
+duck-typing `Estimator.frame` uses, because `type(obj)` on an instance
+returns `"Hash"` interpreted and could not tell a splitter from a hash.
+Because `GridSearch` hands its `k` straight through,
+`GridSearch.new(est, grid, StratifiedKFold.new(3))` searches on
+stratified folds with **no change to `lib/grid_search.w`**.
+
+An unsupervised model may still be given a `y`: the estimator never sees
+it (`Estimator.fit_model` passes `fit(rows)` on its own arity), but the
+**splitter** does — which is what lets a clustering run be stratified by
+a label it is not allowed to learn from.
+
+### Determinism, and nil for degenerate input
+
+Same inputs and same seed give byte-identical folds on **both engines**.
+Three rules make that true: classes and groups are collected in
+**first-appearance** order by scanning the rows (a hash is used only for
+O(1) lookup, keyed by `label.to_s`, and `.keys` is never enumerated,
+because its order differs between engines); ordering uses hand-rolled
+**stable** sorts, never `Array#sort`; and all shuffling goes through the
+one MINSTD generator in `Splitter.indices`. `ShuffleSplit` derives each
+repetition's seed by **advancing** that stream rather than using
+`seed + r`, whose MINSTD orbit would be nearly identical.
+
+No splitter ever raises. nil comes back for `k < 2`, `k > n`, a `y` or
+`groups` length that disagrees with `n`, a class with fewer than `k`
+members (`StratifiedKFold` will not pretend a split is stratified when
+one class cannot reach every fold), fewer than `k` distinct groups, too
+few rows for `k + 1` time blocks, and a percentage that rounds to an
+empty test or empty train set. A stratified request without labels is
+nil too — quietly *un*stratifying it is the bug the class exists to
+prevent.
+
+`spec/cross_validation_spec.w` asserts exact fold membership for every
+hand-computed case above, the class proportions in every fold, and the
+KFold-vs-StratifiedKFold contrast end to end.
 
 ## Hyperparameter search
 
@@ -553,7 +853,23 @@ median; `Stats.percentile(values, p)` and `Series#quantile(p)` take an
 integer percent 0..100 and interpolate linearly, matching numpy's
 default and pandas),
 dense linear algebra: `Vector`, `Matrix`, `LinAlg` (pure Tungsten,
-CPU-only; ops with a shape requirement return nil when it is not met),
+CPU-only; ops with a shape requirement return nil when it is not met;
+square systems go through Gaussian elimination with partial pivoting —
+`det` / `solve` / `inv` — while least squares goes through Householder
+QR: `qr` returns the reduced factorization `{ q:, r: }` with `q`'s
+columns orthonormal and `q.matmul(r)` the input, and `lstsq(b)` solves
+the overdetermined system by back substitution through `r`. QR never
+forms `X^T X`, so it does not square the condition number the way the
+normal equations do — on the clustered Vandermonde design in
+`spec/linalg_spec.w` that is a max coefficient error of 6.9e-11 against
+the normal equations' 5.3e-4, seven orders of magnitude. Householder
+reflections rather than Gram-Schmidt: each reflection is exactly
+orthogonal to working precision, which is the property that survives
+badly clustered columns. This QR is not rank-revealing — there is no
+column pivoting — so a numerically dependent column returns nil rather
+than being worked around, with `LinAlg.rank_tol` (1e-12, relative to
+the column norm) separating "dependent" from "merely ill-conditioned"
+with six decades of margin either side),
 ML preprocessing: `Scaler`, `Encoder`, `Imputer`, `Splitter`,
 `Pipeline` (fit/transform with per-instance fitted state; transform
 before fit returns nil; steps may be named as `[name, step]` pairs and
@@ -563,11 +879,17 @@ steps' hyperparameters flatten to `"step.param"` keys a generic search
 can tune — see *Pipelines* above; splitting is deterministic — unseeded calls
 keep row order, and the seeded shuffle is a built-in MINSTD generator,
 so the same seed gives the same split on both engines; `test_pct` is an
-integer percent), and estimation: `LinearRegression` (least squares by
-normal equations through `LinAlg.solve`, with an internal intercept
-column; `new(alpha)` adds ridge regularization — alpha lands on every
-X^T X diagonal entry except the intercept's, so alpha = 0 is exact OLS,
-alpha > 0 fits even collinear features, and the bias is never shrunk;
+integer percent), and estimation: `LinearRegression` (least squares
+with an internal intercept column, through one of two solvers chosen by
+alpha: plain OLS (alpha = 0, the default) runs `LinAlg.lstsq` —
+Householder QR on the design matrix itself, so an ill-conditioned
+design keeps roughly twice as many correct digits as the normal
+equations would — while `new(alpha)` with alpha > 0 adds ridge
+regularization on the penalized normal equations through
+`LinAlg.solve`, where alpha lands on every X^T X diagonal entry except
+the intercept's. Ridge stays on that route deliberately: the penalty is
+*defined* on X^T X, and it is what makes the system positive definite.
+So alpha > 0 fits even collinear features, and the bias is never shrunk;
 alpha is an integer or a *data-derived* float such as `1.to_f / 2.to_f`
 — float literals corrupt call arguments on both engines today; x may
 be a DataFrame — numeric columns only — a Matrix, a Vector or Series —
@@ -663,7 +985,97 @@ probabilities; lower is better, 0 a perfectly confident classifier and
 `[eps, 1-eps]` (`eps = 1e-15`) so a confidently wrong prediction stays
 finite, and — unlike `roc_auc` — a single present class is well-defined
 (no negatives to normalize by), so it returns nil only when `scores` and
-`actual` are misaligned or empty. A `Pipeline` whose LAST step is
+`actual` are misaligned or empty.
+
+**When the classes are IMBALANCED, accuracy lies.** A classifier that
+always answers the majority class scores 0.8 on a 4:1 split while having
+learned nothing, and `f1` — which never looks at the true negatives —
+can be talked up the same way. Four metrics say what actually happened.
+`Metrics.fbeta(predictions, actual, beta, pos_label)` is `f1` with a
+knob: `(1+β²)PR / (β²P+R)`, where β is how many times as much a unit of
+recall is worth as a unit of precision — β = 2 when a MISSED positive is
+the expensive error (fraud, screening), β = ½ when the false alarm is,
+β = 1 exactly `f1` and β = 0 exactly `precision`.
+`Metrics.balanced_accuracy` is the unweighted mean of the per-class
+recalls, so every class counts the same however rare it is and the
+majority-class classifier lands on its true 0.5 rather than 0.8; it is
+the `ClassificationReport`'s macro recall, exposed as a scalar.
+`Metrics.matthews_corrcoef` (MCC) is the correlation between the
+predicted and the true labels, in `[-1, 1]` — 1 perfect, 0 chance, -1
+inverted — and is the metric of choice for imbalanced binary problems
+because ALL FOUR confusion cells enter it symmetrically, so no amount of
+majority class can inflate it. `Metrics.cohen_kappa` answers the related
+question "how much of this accuracy was EARNED?", discounting the
+agreement two independent labelers with these class frequencies would
+reach by chance: `(p_o - p_e) / (1 - p_e)`. All four take PREDICTIONS
+first (the `accuracy` / `precision` / `f1` order), all but `fbeta` are
+multiclass, and all return nil for a misaligned or empty pair. Where
+scikit-learn's degenerate cases yield `nan` (a single class present),
+koala emits 0 — it never returns a nan. The report gains the third
+average scikit-learn offers: `rep.micro_precision` / `micro_recall` /
+`micro_f1` pool every class's TP/FP/FN into ONE table and score that
+once, so each SAMPLE weighs equally rather than each class; for
+single-label multiclass all three provably equal the accuracy, and
+`rep.micro_counts` shows the pooled `[TP, FP, FN]` they come from.
+
+`Metrics.precision_recall_curve(scores, actual, pos_label)` returns a
+`PrecisionRecallCurve` — `.precision` / `.recall` / `.thresholds` and
+`.average_precision` — and **it, not the ROC curve, is the one to read
+when positives are rare.** Both curves are built from the same TP/FP
+counts, but ROC divides the false positives by the number of NEGATIVES,
+so a large negative class dilutes them; precision divides by what the
+model actually FLAGGED, which no amount of negatives shrinks. One
+positive among ten, ranked second, scores a comfortable ROC-AUC of
+0.888889 and an average precision of 0.5 — same data, and only the
+second number is honest about the false positive. `Metrics.average_precision`
+is that area directly, scikit-learn's `average_precision_score`: a STEP
+sum `Σ (Rₙ - Rₙ₋₁)·Pₙ` rather than a trapezoid, since interpolating
+between two PR operating points claims performance that is not
+achievable. Read it against the POSITIVE RATE, which is its chance
+baseline (an AP of 0.5 is excellent on a 1% positive class and terrible
+on a balanced one) — not against `roc_auc`'s flat 0.5. Its layout
+follows scikit-learn exactly and so differs from `RocCurve`'s: points
+run in ASCENDING threshold order with a closing `(recall 0, precision 1)`
+point that has no threshold, making the curve arrays one longer than
+`.thresholds`. Unlike `roc_curve` it survives a single present class.
+`Metrics.brier_score(scores, actual, pos_label)` is `mean((p - y)²)`,
+log loss's BOUNDED sibling: both measure calibration rather than
+ranking, but log loss is unbounded and one confident miss can dominate
+it, while the Brier score's worst case per row is 1 — 0 perfect, 0.25 a
+constant coin flip, 1 confidently wrong throughout. Two models that rank
+identically (`roc_auc` 1 for both) separate cleanly under it, 0.00025
+for the confident one against 0.18125 for the hedging one. Optimize log
+loss; REPORT the Brier score.
+
+Finally, `Metrics.silhouette_score(x, labels)` is koala's first
+UNSUPERVISED metric, and the question `KMeans` previously could not be
+asked. `KMeans` reports `inertia`, the within-cluster sum of squares —
+but inertia falls monotonically as k rises, so it can rank two fits at
+the SAME k and nothing more; it can never say whether a clustering is
+any good, or choose k. The silhouette scores each row
+`(b - a) / max(a, b)`, where a is its mean distance to the rest of its
+own cluster and b the smallest mean distance to any other, and averages:
+near 1 the rows sit deep inside well-separated clusters, near 0 they
+straddle boundaries, and NEGATIVE means they are closer to a different
+cluster than to their own — assigned wrong. Because it normalizes
+cohesion by separation it is comparable across different k, which is how
+k gets chosen: fit for k = 2, 3, 4, … and keep the best silhouette.
+
+```
+m = KMeans.new(3).fit(x)
+Metrics.silhouette_score(x, m.labels)
+```
+
+`x` is the row data (an array of feature arrays, or a flat array of
+numbers for a single feature) and `labels` the cluster assignment per
+row, any values at all. Rows alone in their cluster score 0
+(scikit-learn's rule — there is no within-cluster distance to compare
+against), and the score is nil when the cluster count is not in
+`2 .. n_rows - 1` (one cluster has nothing to separate from, n clusters
+leaves every row a singleton) or the inputs do not line up.
+scikit-learn raises there; koala returns nil.
+
+A `Pipeline` whose LAST step is
 an estimator is fitted with `pipe.fit(df, y)` and answers
 `pipe.predict(x)` / `pipe.score(x, y)` by transforming through every
 step but the last. Model evaluation: `KFold` and `CrossValidation`
@@ -676,7 +1088,12 @@ both engines; `CrossValidation.cross_val_score(model, x, y, k)` re-fits
 the estimator on each fold's training rows and returns the array of
 held-out scores — the estimators' `.score` is R² for LinearRegression
 and accuracy for KNNClassifier — and `cross_val_mean` averages them,
-sharing the estimators' accepted input shapes). Clustering: `KMeans`
+sharing the estimators' accepted input shapes; that fourth argument also
+takes a SPLITTER — `StratifiedKFold` (class proportions preserved in
+every fold, the one classification needs), `LeaveOneOut`, `GroupKFold`
+(no group spans train and test), `TimeSeriesSplit` (expanding window,
+never trains on the future) or `ShuffleSplit` (repeated seeded
+hold-outs) — anything answering `folds(n, y)`). Clustering: `KMeans`
 (koala's first UNSUPERVISED learner — it partitions rows into k groups
 with no labels at all, by Lloyd's algorithm: seed k centroids, then
 repeat ASSIGN-each-row-to-its-nearest-centroid / UPDATE-each-centroid-to-

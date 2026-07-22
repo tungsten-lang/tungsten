@@ -1,4 +1,5 @@
-# Estimator specs — LinearRegression (normal equations on LinAlg),
+# Estimator specs — LinearRegression (Householder QR least squares for
+# OLS, penalized normal equations for ridge — both on LinAlg),
 # ridge regularization (the alpha parameter), Vector/Series feature
 # input, DataFrame#to_matrix, and the Pipeline estimator tail, on the
 # tungsten-spec framework.
@@ -107,6 +108,91 @@ describe "LinearRegression" ->
     expect(model.intercept.to_s).to eq("1")
     expect(model.coefficients.to_s).to eq("\[1\]")
     expect(model.predict([[1, 2]])).to be_nil
+
+# The reason fit's OLS path (alpha = 0) goes through Householder QR on
+# the design matrix instead of Gaussian elimination on X^T X. Forming
+# X^T X squares the condition number; QR never forms it. See the
+# LinAlg-level head-to-head in spec/linalg_spec.w.
+describe "LinearRegression OLS numerics (QR vs the normal equations)" ->
+  # A Vandermonde design on clustered nodes — features [t, t^2] for
+  # t = 1, 1.001, ..., 1.005 — with y placed EXACTLY on the plane
+  # 3 + t + 2t^2. The residual is zero and the true coefficients are
+  # known, so any error the estimator reports is arithmetic loss.
+  # cond(X) is about 1.7e6; cond(X^T X) about 2.9e12.
+  #
+  # Measured on both engines: the QR fit is off by 6.9e-11, while the
+  # normal equations this file's estimator used to run are off by
+  # 5.3e-4 on the very same design — SEVEN orders of magnitude, and a
+  # difference that shows up in the sixth printed digit of a slope.
+  # Both routes are computed here, so the spec proves the improvement
+  # rather than asserting it.
+  it "recovers a known plane from an ill-conditioned design" ->
+    d = 1.to_f / 1000.to_f
+    rows = []
+    ys = []
+    design = []
+    6.times -> (i)
+      t = 1.to_f + i.to_f * d
+      row = []
+      row.push(t)
+      row.push(t * t)
+      rows.push(row)
+      ys.push(3.to_f + t + 2.to_f * t * t)
+      # the same design matrix fit builds internally: leading all-ones
+      # intercept column, then the features
+      dr = []
+      dr.push(1.to_f)
+      dr.push(t)
+      dr.push(t * t)
+      design.push(dr)
+
+    model = LinearRegression.new
+    r = model.fit(rows, ys)
+    expect(r != nil).to be_true
+    # printed to six significant digits the fit is simply exact
+    expect(model.intercept.to_s).to eq("3")
+    expect(model.coefficients.to_s).to eq("\[1, 2\]")
+
+    qerr = LinAlg.fabs(model.intercept - 3.to_f)
+    q0 = LinAlg.fabs(model.coefficients[0] - 1.to_f)
+    q1 = LinAlg.fabs(model.coefficients[1] - 2.to_f)
+    qerr = q0 if q0 > qerr
+    qerr = q1 if q1 > qerr
+
+    # The OLD route, rebuilt by hand on the same design matrix: the
+    # normal equations X^T X beta = X^T y through Gaussian elimination.
+    xm = Matrix.new(design)
+    xt = xm.transpose
+    nb = LinAlg.solve(xt.matmul(xm), xt.matvec(Vector.new(ys))).to_a
+    nerr = LinAlg.fabs(nb[0] - 3.to_f)
+    n0 = LinAlg.fabs(nb[1] - 1.to_f)
+    n1 = LinAlg.fabs(nb[2] - 2.to_f)
+    nerr = n0 if n0 > nerr
+    nerr = n1 if n1 > nerr
+
+    tight = 1.to_f / 100000000.to_f
+    loose = 1.to_f / 1000000.to_f
+    expect(qerr < tight).to be_true             # what fit does now
+    expect(nerr > loose).to be_true             # what fit used to do
+    expect(qerr * 1000.to_f < nerr).to be_true  # three decades better, at least
+
+  # Ill-conditioned is NOT the same as rank-deficient: the design above
+  # keeps its smallest QR pivot at 2.5e-6 of the column norm, six
+  # decades above LinAlg.rank_tol, so it fits. An exactly dependent
+  # column still comes back nil — the contract is unchanged.
+  it "still separates ill-conditioned from rank-deficient" ->
+    d = 1.to_f / 1000.to_f
+    rows = []
+    ys = []
+    6.times -> (i)
+      t = 1.to_f + i.to_f * d
+      row = []
+      row.push(t)
+      row.push(t * t)
+      rows.push(row)
+      ys.push(t)
+    expect(LinearRegression.new.fit(rows, ys) != nil).to be_true
+    expect(LinearRegression.new.fit([[1, 2], [2, 4], [3, 6]], [1, 2, 3])).to be_nil
 
 describe "Ridge regression (LinearRegression alpha)" ->
   # Hand-computed exact case, alpha = 12 on the symmetric x above:
@@ -620,6 +706,558 @@ describe "GaussianNB" ->
     one = GaussianNB.new
     expect(one.fit([[1], [2]], [0, 0]) != nil).to be_true
     expect(one.predict([[1]]).to_s).to eq("\[0\]")
+
+# --- DecisionTreeClassifier (lib/decision_tree.w) ---
+#
+# Every tree below is worked out BY HAND in its comment — the chosen
+# feature, the chosen threshold and the gain that chose it — and then
+# asserted, so these specs test the SPLIT SEARCH and not merely that it
+# runs. Gini of a node is 1 - sum p_c^2; a split's gain is
+# imp(node) - (nl/n)*imp(left) - (nr/n)*imp(right); candidate thresholds
+# are midpoints between adjacent DISTINCT sorted values.
+describe "DecisionTreeClassifier" ->
+  # x = [[0,0],[1,0],[0,10],[1,10]] with labels lo,lo,hi,hi — they follow
+  # feature 1 exactly and ignore feature 0. Root gini = 0.5.
+  #   feature 0 @ 0.5: both sides are {lo,hi}, gini 0.5 each -> gain 0
+  #   feature 1 @ 5:   left {lo,lo} gini 0, right {hi,hi} gini 0 -> gain 0.5
+  # so the root MUST be feature 1 at the midpoint of 0 and 10, and both
+  # children are pure leaves.
+  it "splits a clean axis-aligned separation at the midpoint (hand-computed)" ->
+    x = [[0, 0], [1, 0], [0, 10], [1, 10]]
+    y = [:lo, :lo, :hi, :hi]
+    model = DecisionTreeClassifier.new
+    expect(model.fitted?).to be_false
+    r = model.fit(x, y)
+    expect(r != nil).to be_true
+    expect(model.fitted?).to be_true
+    expect(model.classes.join(",")).to eq("lo,hi")
+    expect(model.n_features).to eq(2)
+    expect(model.tree[:leaf]).to be_false
+    expect(model.tree[:feature]).to eq(1)
+    expect(model.tree[:threshold].to_s).to eq("5")
+    expect(model.tree[:impurity].to_s).to eq("0.5")
+    expect(model.tree[:gain].to_s).to eq("0.5")
+    expect(model.tree[:n]).to eq(4)
+    expect(model.tree[:depth]).to eq(0)
+    # both children are PURE leaves, one per class
+    expect(model.tree[:left][:leaf]).to be_true
+    expect(model.tree[:left][:prediction].to_s).to eq("lo")
+    expect(model.tree[:left][:impurity].to_s).to eq("0")
+    expect(model.tree[:right][:prediction].to_s).to eq("hi")
+    expect(model.depth).to eq(1)
+    expect(model.node_count).to eq(3)
+    expect(model.leaf_count).to eq(2)
+    expect(model.tree_lines.join(" | ")).to eq("x1 <= 5 |   leaf: lo (n=2) |   leaf: hi (n=2)")
+    # perfect separation -> accuracy 1, and unseen rows follow the same rule
+    expect(model.predict(x).join(",")).to eq("lo,lo,hi,hi")
+    expect(model.score(x, y).to_s).to eq("1")
+    expect(model.predict([[99, 4], [0 - 7, 6]]).join(",")).to eq("lo,hi")
+
+  # Ties are broken by the DOCUMENTED rule: lowest feature index first,
+  # then lowest threshold.
+  #
+  # FEATURE tie — x = [[0,0],[1,1]], y = [0,1]. Feature 0 @ 0.5 and
+  # feature 1 @ 0.5 both separate perfectly (gain 0.5); feature 0 wins.
+  #
+  # THRESHOLD tie — x = [[0],[1],[2],[3]], y = [0,1,0,1]. Root gini 0.5.
+  #   @ 0.5: right {1,0,1} gini 4/9, weighted 1/3 -> gain 1/6
+  #   @ 1.5: both sides {0,1} gini 0.5             -> gain 0
+  #   @ 2.5: left {0,1,0} gini 4/9, weighted 1/3   -> gain 1/6
+  # 0.5 and 2.5 tie, so the LOWEST threshold, 0.5, is taken.
+  it "breaks a gain tie by lowest feature index, then lowest threshold" ->
+    ft = DecisionTreeClassifier.new
+    ft.fit([[0, 0], [1, 1]], [0, 1])
+    expect(ft.tree[:feature]).to eq(0)
+    expect(ft.tree[:threshold].to_s).to eq("0.5")
+    expect(ft.tree[:gain].to_s).to eq("0.5")
+    tt = DecisionTreeClassifier.new(1)
+    tt.fit([[0], [1], [2], [3]], [0, 1, 0, 1])
+    expect(tt.tree[:feature]).to eq(0)
+    expect(tt.tree[:threshold].to_s).to eq("0.5")
+    expect(tt.tree[:gain].to_s).to eq("0.166667")
+    # three-way tie across features — x0 @ 5.5, x1 @ 5 and x1 @ 15 all buy
+    # exactly 1/3 of the root's 2/3 gini, so feature 0 takes it
+    mx = [[0, 0], [1, 0], [10, 10], [11, 10], [0, 20], [1, 20]]
+    my = [0, 0, 1, 1, 2, 2]
+    mt = DecisionTreeClassifier.new(1)
+    mt.fit(mx, my)
+    expect(mt.tree[:impurity].to_s).to eq("0.666667")
+    expect(mt.tree[:feature]).to eq(0)
+    expect(mt.tree[:threshold].to_s).to eq("5.5")
+    expect(mt.tree[:gain].to_s).to eq("0.333333")
+
+  # max_depth caps the number of EDGES from the root: 1 is a decision
+  # STUMP (one test, two leaves), 0 is a single leaf that always predicts
+  # the training majority. x = [[0],[1],[2],[10],[11],[12]] with three 0s
+  # then three 1s splits perfectly at the midpoint of 2 and 10.
+  it "behaves as a stump at max_depth = 1 and a single leaf at 0" ->
+    x = [[0], [1], [2], [10], [11], [12]]
+    y = [0, 0, 0, 1, 1, 1]
+    stump = DecisionTreeClassifier.new(1)
+    stump.fit(x, y)
+    expect(stump.depth).to eq(1)
+    expect(stump.node_count).to eq(3)
+    expect(stump.leaf_count).to eq(2)
+    expect(stump.tree[:threshold].to_s).to eq("6")
+    expect(stump.tree[:gain].to_s).to eq("0.5")
+    expect(stump.score(x, y).to_s).to eq("1")
+    expect(stump.tree_lines.join(" | ")).to eq("x0 <= 6 |   leaf: 0 (n=3) |   leaf: 1 (n=3)")
+    # an UNCAPPED tree on this data finds the same single split — nothing
+    # is left to gain once both sides are pure
+    full = DecisionTreeClassifier.new
+    full.fit(x, y)
+    expect(full.tree_lines.join(" | ")).to eq(stump.tree_lines.join(" | "))
+    # max_depth 0: the root IS the leaf; 3 vs 3 ties to the first-seen label
+    root = DecisionTreeClassifier.new(0)
+    root.fit(x, y)
+    expect(root.tree[:leaf]).to be_true
+    expect(root.depth).to eq(0)
+    expect(root.node_count).to eq(1)
+    expect(root.tree[:counts].to_s).to eq("\[3, 3\]")
+    expect(root.tree[:prediction]).to eq(0)
+    expect(root.predict([[0], [12]]).to_s).to eq("\[0, 0\]")
+    expect(root.score(x, y).to_s).to eq("0.5")
+
+  # XOR is the classic case a SINGLE axis-aligned cut cannot touch: every
+  # split of [[0,0],[0,1],[1,0],[1,1]] / [0,1,1,0] leaves both sides at
+  # gini 0.5, so every gain is exactly 0. A zero-gain split is still taken
+  # when it is the best on offer (scikit-learn's min_impurity_decrease = 0),
+  # and the two children then separate it perfectly — depth 2, accuracy 1.
+  it "reaches accuracy 1 on XOR by taking a zero-gain split" ->
+    x = [[0, 0], [0, 1], [1, 0], [1, 1]]
+    y = [0, 1, 1, 0]
+    model = DecisionTreeClassifier.new
+    model.fit(x, y)
+    expect(model.tree[:feature]).to eq(0)
+    expect(model.tree[:threshold].to_s).to eq("0.5")
+    expect(model.tree[:gain].to_s).to eq("0")
+    expect(model.depth).to eq(2)
+    expect(model.leaf_count).to eq(4)
+    expect(model.score(x, y).to_s).to eq("1")
+    expect(model.predict(x).to_s).to eq("\[0, 1, 1, 0\]")
+    # a stump, by contrast, cannot beat chance here
+    expect(DecisionTreeClassifier.new(1).fit(x, y).score(x, y).to_s).to eq("0.5")
+
+  # predict_proba is the LEAF's class distribution, counts / n in `classes`
+  # order. x = [[0],[1],[2],[3]], y = [0,1,0,1] capped at depth 1 splits at
+  # 0.5 (see the tie spec): the left leaf holds {0} -> [1, 0], the right
+  # leaf {1,0,1} -> [1/3, 2/3] and predicts the majority 1.
+  it "reports the leaf class distribution from predict_proba" ->
+    x = [[0], [1], [2], [3]]
+    y = [0, 1, 0, 1]
+    model = DecisionTreeClassifier.new(1)
+    model.fit(x, y)
+    expect(model.tree[:left][:counts].to_s).to eq("\[1, 0\]")
+    expect(model.tree[:right][:counts].to_s).to eq("\[1, 2\]")
+    expect(model.tree[:right][:impurity].to_s).to eq("0.444444")
+    expect(model.tree[:right][:prediction]).to eq(1)
+    probs = model.predict_proba(x)
+    expect(probs[0].to_s).to eq("\[1, 0\]")
+    expect(probs[1].to_s).to eq("\[0.333333, 0.666667\]")
+    # every row sums to 1
+    tol = 1.to_f / 1000000.to_f
+    expect(LinAlg.fabs(probs[1][0] + probs[1][1] - 1.to_f) < tol).to be_true
+    # a pos_label picks one class's column out, ready for roc_auc / log_loss
+    expect(model.predict_proba(x, 1).to_s).to eq("\[0, 0.666667, 0.666667, 0.666667\]")
+    expect(model.predict_proba(x, 99)).to be_nil
+    expect(model.predict(x).to_s).to eq("\[0, 1, 1, 1\]")
+    expect(model.score(x, y).to_s).to eq("0.75")
+    # a perfectly separating tree gives hard 0/1 posteriors that feed the
+    # ROC / log-loss work directly
+    sep = DecisionTreeClassifier.new
+    sep.fit([[0], [1], [2], [3]], [0, 0, 1, 1])
+    expect(sep.predict_proba([[0], [1], [2], [3]], 1).to_s).to eq("\[0, 0, 1, 1\]")
+    expect(Metrics.roc_auc(sep.predict_proba([[0], [1], [2], [3]], 1), [0, 0, 1, 1]).to_s).to eq("1")
+
+  # Multiclass with no wrapper — the majority vote just ranges over three
+  # classes — so predict feeds Metrics.classification_report directly. The
+  # root is the three-way tie above (feature 0 @ 5.5); its left child holds
+  # the four rows of classes 0 and 2, which feature 1 @ 10 separates.
+  it "classifies three classes and feeds the classification report" ->
+    x = [[0, 0], [1, 0], [10, 10], [11, 10], [0, 20], [1, 20]]
+    y = [0, 0, 1, 1, 2, 2]
+    model = DecisionTreeClassifier.new
+    model.fit(x, y)
+    expect(model.classes.to_s).to eq("\[0, 1, 2\]")
+    expect(model.tree_lines.join(" | ")).to eq("x0 <= 5.5 |   x1 <= 10 |     leaf: 0 (n=2) |     leaf: 2 (n=2) |   leaf: 1 (n=2)")
+    expect(model.depth).to eq(2)
+    expect(model.leaf_count).to eq(3)
+    expect(model.predict([[0, 1], [10, 11], [1, 19]]).to_s).to eq("\[0, 1, 2\]")
+    expect(model.predict_proba([[0, 1]])[0].to_s).to eq("\[1, 0, 0\]")
+    expect(model.score(x, y).to_s).to eq("1")
+    rep = Metrics.classification_report(model.predict(x), y)
+    expect(rep.accuracy.to_s).to eq("1")
+    expect(rep.macro_f1.to_s).to eq("1")
+
+  # :entropy is a real alternative criterion, not a relabelling of gini —
+  # it picks a DIFFERENT split on the same data. Four rows, four classes:
+  # entropy = log2(4) = 2 bits, gini = 1 - 4*(1/4)^2 = 0.75.
+  #   @ 0.5: entropy weighted (3/4)*log2(3) = 1.189 -> gain 0.811
+  #          gini    weighted (3/4)*(2/3)   = 0.5   -> gain 0.25
+  #   @ 1.5: entropy weighted 1             -> gain 1     (best)
+  #          gini    weighted 0.5           -> gain 0.25  (ties @ 0.5)
+  # so entropy takes 1.5 outright while gini ties and keeps the lower 0.5.
+  it "supports entropy as a selectable criterion" ->
+    x = [[0], [1], [2], [3]]
+    y = [0, 1, 2, 3]
+    ent = DecisionTreeClassifier.new(1, nil, nil, :entropy)
+    ent.fit(x, y)
+    expect(ent.criterion.to_s).to eq("entropy")
+    expect(ent.tree[:impurity].to_s).to eq("2")
+    expect(ent.tree[:threshold].to_s).to eq("1.5")
+    expect(ent.tree[:gain].to_s).to eq("1")
+    gini = DecisionTreeClassifier.new(1, nil, nil, :gini)
+    gini.fit(x, y)
+    expect(gini.tree[:impurity].to_s).to eq("0.75")
+    expect(gini.tree[:threshold].to_s).to eq("0.5")
+    expect(gini.tree[:gain].to_s).to eq("0.25")
+    # a balanced two-class node is exactly 1 bit, and both criteria agree
+    # on the perfectly separating split
+    bx = [[0], [1], [2], [10], [11], [12]]
+    by = [0, 0, 0, 1, 1, 1]
+    b = DecisionTreeClassifier.new(nil, nil, nil, :entropy)
+    b.fit(bx, by)
+    expect(b.tree[:impurity].to_s).to eq("1")
+    expect(b.tree[:gain].to_s).to eq("1")
+    expect(b.tree[:threshold].to_s).to eq("6")
+    expect(b.score(bx, by).to_s).to eq("1")
+    # ... and an unknown criterion is a fit ERROR, never a silent fallback
+    expect(DecisionTreeClassifier.new(nil, nil, nil, :bogus).fit(bx, by)).to be_nil
+    expect(DecisionTreeClassifier.new(nil, nil, nil, :mse).fit(bx, by)).to be_nil
+
+  # The three "cannot split" shapes all end in a LEAF rather than a raise:
+  # a pure node (nothing to gain), an all-constant feature set (no distinct
+  # values, hence no candidate threshold at all), and a single class.
+  it "makes a leaf of a pure node, a constant feature and a single class" ->
+    single = DecisionTreeClassifier.new
+    single.fit([[1], [2]], [5, 5])
+    expect(single.tree[:leaf]).to be_true
+    expect(single.tree[:impurity].to_s).to eq("0")
+    expect(single.classes.to_s).to eq("\[5\]")
+    expect(single.tree[:prediction]).to eq(5)
+    expect(single.predict_proba([[9]]).to_s).to eq("\[\[1\]\]")
+    expect(single.score([[1], [2]], [5, 5]).to_s).to eq("1")
+    # every feature constant: no threshold exists, so the root stays a leaf
+    # and predicts the tied first-seen label
+    flat = DecisionTreeClassifier.new
+    flat.fit([[3], [3]], [0, 1])
+    expect(flat.tree[:leaf]).to be_true
+    expect(flat.tree[:counts].to_s).to eq("\[1, 1\]")
+    expect(flat.tree[:impurity].to_s).to eq("0.5")
+    expect(flat.tree[:prediction]).to eq(0)
+    expect(flat.predict_proba([[3]]).to_s).to eq("\[\[0.5, 0.5\]\]")
+    expect(flat.score([[3], [3]], [0, 1]).to_s).to eq("0.5")
+    # a constant feature ALONGSIDE a useful one is simply skipped
+    mixed = DecisionTreeClassifier.new
+    mixed.fit([[0, 5], [1, 5], [10, 5], [11, 5]], [0, 0, 1, 1])
+    expect(mixed.tree[:feature]).to eq(0)
+    expect(mixed.tree[:threshold].to_s).to eq("5.5")
+    expect(mixed.depth).to eq(1)
+
+  # min_samples_split stops a SMALL node being split at all;
+  # min_samples_leaf makes a split INADMISSIBLE when either side would be
+  # too small — which can force a worse-gaining split to be chosen.
+  # x = [[0],[1],[2],[3]], y = [0,0,0,1], root gini 0.375.
+  #   @ 2.5: sides 3/1, perfect       -> gain 0.375  (the default winner)
+  #   @ 1.5: sides 2/2, right gini 0.5 -> gain 0.125
+  #   @ 0.5: sides 1/3
+  # With min_samples_leaf = 2 only 1.5 survives, so that is what is taken.
+  it "respects min_samples_split and min_samples_leaf" ->
+    x = [[0], [1], [2], [3]]
+    y = [0, 0, 0, 1]
+    base = DecisionTreeClassifier.new
+    base.fit(x, y)
+    expect(base.tree[:impurity].to_s).to eq("0.375")
+    expect(base.tree[:threshold].to_s).to eq("2.5")
+    expect(base.tree[:gain].to_s).to eq("0.375")
+    expect(base.score(x, y).to_s).to eq("1")
+    leafy = DecisionTreeClassifier.new(nil, nil, 2)
+    leafy.fit(x, y)
+    expect(leafy.tree[:threshold].to_s).to eq("1.5")
+    expect(leafy.tree[:gain].to_s).to eq("0.125")
+    expect(leafy.tree_lines.join(" | ")).to eq("x0 <= 1.5 |   leaf: 0 (n=2) |   leaf: 0 (n=2)")
+    expect(leafy.score(x, y).to_s).to eq("0.75")
+    # a node smaller than min_samples_split is never split — 4 < 5
+    tight = DecisionTreeClassifier.new(nil, 5)
+    tight.fit(x, y)
+    expect(tight.tree[:leaf]).to be_true
+    expect(tight.node_count).to eq(1)
+    # both are clamped to their legal minimum, so params always reports
+    # the value actually in force and with_params round-trips
+    clamped = DecisionTreeClassifier.new(nil, 1, 0)
+    expect(clamped.min_samples_split).to eq(2)
+    expect(clamped.min_samples_leaf).to eq(1)
+    expect(clamped.params[:min_samples_split]).to eq(2)
+
+  # Nothing here is random — no bootstrap, no feature subsampling, no seed
+  # — so the fitted tree is a pure function of the data. The two trees are
+  # compared as their full rendered structure, not just their predictions.
+  it "fits an IDENTICAL tree from the same data twice" ->
+    x = [[0, 0], [1, 0], [0, 1], [1, 1], [10, 10], [11, 10], [10, 11], [11, 11]]
+    y = [0, 0, 0, 0, 1, 1, 1, 1]
+    a = DecisionTreeClassifier.new
+    a.fit(x, y)
+    b = DecisionTreeClassifier.new
+    b.fit(x, y)
+    expect(a.tree_lines.join(" | ")).to eq(b.tree_lines.join(" | "))
+    # ... and it is this exact structure on BOTH engines
+    expect(a.tree_lines.join(" | ")).to eq("x0 <= 5.5 |   leaf: 0 (n=4) |   leaf: 1 (n=4)")
+    expect(a.node_count).to eq(b.node_count)
+    expect(a.predict(x).to_s).to eq(b.predict(x).to_s)
+    # a clone made through the contract fits the same tree too
+    c = a.with_params(a.params)
+    c.fit(x, y)
+    expect(c.tree_lines.join(" | ")).to eq(a.tree_lines.join(" | "))
+
+  # Same accepted shapes as the other estimators, through the shared
+  # Estimator.feature_rows / .target_values: DataFrame (numeric columns
+  # only — :name is skipped), Matrix, Series / Vector single-feature columns.
+  it "accepts DataFrame, Matrix, Series and Vector inputs" ->
+    df = DataFrame.new([
+      [:name, ["p", "q", "r", "s"]],
+      [:f1, [0, 1, 10, 11]],
+      [:f2, [0, 1, 10, 11]]
+    ])
+    labels = Series.new([:lo, :lo, :hi, :hi], :cls)
+    model = DecisionTreeClassifier.new
+    model.fit(df, labels)
+    expect(model.classes.join(",")).to eq("lo,hi")
+    expect(model.n_features).to eq(2)
+    expect(model.predict(Matrix.new([[0, 0], [11, 11]])).join(",")).to eq("lo,hi")
+    expect(model.score(df, labels).to_s).to eq("1")
+    flat = DecisionTreeClassifier.new
+    flat.fit(Series.new([0, 1, 10, 11], :x), [0, 0, 1, 1])
+    expect(flat.predict(Vector.new([0, 11])).to_s).to eq("\[0, 1\]")
+
+  # Unusable shapes and premature calls all return nil and leave fitted?
+  # false — the bit's shape-error convention, matching the estimators.
+  it "returns nil for unusable shapes and before fit" ->
+    model = DecisionTreeClassifier.new
+    expect(model.predict([[1, 2]])).to be_nil
+    expect(model.predict_proba([[1, 2]])).to be_nil
+    expect(model.apply([[1, 2]])).to be_nil
+    expect(model.score([[1, 2]], [0])).to be_nil
+    expect(model.tree).to be_nil
+    expect(model.classes).to be_nil
+    expect(model.depth).to be_nil
+    expect(model.node_count).to be_nil
+    expect(model.tree_lines).to be_nil
+    expect(model.fit([], [])).to be_nil
+    expect(model.fit([[1, 2], [3]], [0, 1])).to be_nil
+    expect(model.fit([[1], [2]], [0, 1, 1])).to be_nil
+    expect(model.fitted?).to be_false
+    r = model.fit([[1, 2], [3, 4], [11, 12], [13, 14]], [0, 0, 1, 1])
+    expect(r != nil).to be_true
+    # a query row of the wrong width is nil, not a crash
+    expect(model.predict([[1, 2, 3]])).to be_nil
+    expect(model.predict_proba([[1]])).to be_nil
+    expect(model.score([[1, 2, 3]], [0])).to be_nil
+
+# --- DecisionTreeRegressor (the same machinery, MSE criterion) ---
+#
+# Impurity is the POPULATION variance of the targets and a leaf predicts
+# their MEAN, so `score` is R² (Metrics.r2) like LinearRegression's.
+describe "DecisionTreeRegressor" ->
+  # x = [[0],[1],[10],[11]], y = [1,1,9,9]. Root mean 5, variance
+  # (16+16+16+16)/4 = 16.
+  #   @ 0.5:  weighted (3/4)*var([1,9,9]) = (3/4)*(128/9) = 10.667 -> gain 5.333
+  #   @ 5.5:  both sides constant, variance 0                     -> gain 16
+  #   @ 10.5: mirror of 0.5                                       -> gain 5.333
+  # so the root splits at 5.5 and both leaves are exact.
+  it "splits on variance and predicts the leaf mean (hand-computed)" ->
+    x = [[0], [1], [10], [11]]
+    y = [1, 1, 9, 9]
+    model = DecisionTreeRegressor.new
+    expect(model.fitted?).to be_false
+    expect(model.fit(x, y) != nil).to be_true
+    expect(model.criterion.to_s).to eq("mse")
+    expect(model.tree[:impurity].to_s).to eq("16")
+    expect(model.tree[:threshold].to_s).to eq("5.5")
+    expect(model.tree[:gain].to_s).to eq("16")
+    expect(model.tree[:left][:prediction].to_s).to eq("1")
+    expect(model.tree[:right][:prediction].to_s).to eq("9")
+    expect(model.tree_lines.join(" | ")).to eq("x0 <= 5.5 |   leaf: 1 (n=2) |   leaf: 9 (n=2)")
+    expect(model.score(x, y).to_s).to eq("1")
+    # PIECEWISE CONSTANT: a query between the two boxes takes its side's
+    # mean, it does not interpolate
+    expect(model.predict([[0], [5], [6], [11]]).to_s).to eq("\[1, 1, 9, 9\]")
+
+  # y = 2x on x = 0..3: root mean 3, variance (9+1+1+9)/4 = 5.
+  #   @ 0.5: weighted (3/4)*var([2,4,6]) = (3/4)*(8/3) = 2 -> gain 3
+  #   @ 1.5: var([0,2]) = var([4,6]) = 1, weighted 1       -> gain 4  (best)
+  #   @ 2.5: mirror of 0.5                                 -> gain 3
+  # Uncapped it memorizes all four points; the STUMP predicts 1 and 5,
+  # leaving SS_res = 4 against SS_tot = 20, so R² = 0.8.
+  it "grows to exact leaves, and a stump scores the R² it earns" ->
+    x = [[0], [1], [2], [3]]
+    y = [0, 2, 4, 6]
+    full = DecisionTreeRegressor.new
+    full.fit(x, y)
+    expect(full.tree[:impurity].to_s).to eq("5")
+    expect(full.tree[:threshold].to_s).to eq("1.5")
+    expect(full.tree[:gain].to_s).to eq("4")
+    expect(full.depth).to eq(2)
+    expect(full.leaf_count).to eq(4)
+    expect(full.predict(x).to_s).to eq("\[0, 2, 4, 6\]")
+    expect(full.score(x, y).to_s).to eq("1")
+    stump = DecisionTreeRegressor.new(1)
+    stump.fit(x, y)
+    expect(stump.predict(x).to_s).to eq("\[1, 1, 5, 5\]")
+    expect(stump.score(x, y).to_s).to eq("0.8")
+    # max_depth 0 predicts the global mean, which is exactly R² = 0
+    root = DecisionTreeRegressor.new(0)
+    root.fit(x, y)
+    expect(root.tree[:prediction].to_s).to eq("3")
+    expect(root.score(x, y).to_s).to eq("0")
+
+  it "returns nil for a classifier criterion, unusable shapes and before fit" ->
+    x = [[0], [1], [10], [11]]
+    y = [1, 1, 9, 9]
+    expect(DecisionTreeRegressor.new(nil, nil, nil, :gini).fit(x, y)).to be_nil
+    expect(DecisionTreeRegressor.new(nil, nil, nil, :entropy).fit(x, y)).to be_nil
+    # :variance is accepted as an alias of :mse
+    expect(DecisionTreeRegressor.new(nil, nil, nil, :variance).fit(x, y) != nil).to be_true
+    model = DecisionTreeRegressor.new
+    expect(model.predict([[1]])).to be_nil
+    expect(model.score([[1]], [1])).to be_nil
+    expect(model.tree).to be_nil
+    expect(model.depth).to be_nil
+    expect(model.fit([], [])).to be_nil
+    expect(model.fit([[1, 2], [3]], [1, 2])).to be_nil
+    expect(model.fit([[1], [2]], [1, 2, 3])).to be_nil
+    expect(model.fitted?).to be_false
+    expect(model.fit(x, y) != nil).to be_true
+    expect(model.predict([[1, 2]])).to be_nil
+
+# --- The trees against the estimator contract (lib/estimator_base.w) ---
+#
+# The same enforcement the five older estimators get: the trees really
+# answer every contract method, report the right arity, keep learned state
+# out of `params`, and clone correctly. params is compared PER KEY — hash
+# to_s key order differs between the two engines.
+describe "Decision tree estimator contract" ->
+  it "is answered by both trees" ->
+    models = [DecisionTreeClassifier.new, DecisionTreeRegressor.new]
+    missing = []
+    models.each -> (m)
+      missing.push(m.estimator_name + ".fitted?") if !m.respond_to?("fitted?")
+      missing.push(m.estimator_name + ".fit") if !m.respond_to?("fit")
+      missing.push(m.estimator_name + ".predict") if !m.respond_to?("predict")
+      missing.push(m.estimator_name + ".score") if !m.respond_to?("score")
+      missing.push(m.estimator_name + ".supervised?") if !m.respond_to?("supervised?")
+      missing.push(m.estimator_name + ".params") if !m.respond_to?("params")
+      missing.push(m.estimator_name + ".with_params") if !m.respond_to?("with_params")
+      missing.push(m.estimator_name + ".estimator_name") if !m.respond_to?("estimator_name")
+    expect(missing.join(",")).to eq("")
+    names = []
+    models.each -> (m)
+      names.push(m.estimator_name)
+    expect(names.join(",")).to eq("DecisionTreeClassifier,DecisionTreeRegressor")
+    expect(DecisionTreeClassifier.new.supervised?).to be_true
+    expect(DecisionTreeRegressor.new.supervised?).to be_true
+    expect(DecisionTreeClassifier.new.fitted?).to be_false
+
+  it "reports all four hyperparameters and nothing learned" ->
+    m = DecisionTreeClassifier.new(3, 4, 2, :entropy)
+    expect(m.params.size).to eq(4)
+    expect(m.params[:max_depth]).to eq(3)
+    expect(m.params[:min_samples_split]).to eq(4)
+    expect(m.params[:min_samples_leaf]).to eq(2)
+    expect(m.params[:criterion].to_s).to eq("entropy")
+    # the defaults: unlimited depth, sklearn's 2 / 1, gini
+    d = DecisionTreeClassifier.new
+    expect(d.params[:max_depth]).to be_nil
+    expect(d.params[:min_samples_split]).to eq(2)
+    expect(d.params[:min_samples_leaf]).to eq(1)
+    expect(d.params[:criterion].to_s).to eq("gini")
+    expect(DecisionTreeRegressor.new.params[:criterion].to_s).to eq("mse")
+    # fitting adds no key — the tree itself never leaks into the search space
+    m.fit([[0], [1], [10], [11]], [0, 0, 1, 1])
+    expect(m.fitted?).to be_true
+    expect(m.params.size).to eq(4)
+    expect(m.params[:max_depth]).to eq(3)
+
+  it "round-trips params through with_params and clones unfitted" ->
+    drift = []
+    models = [DecisionTreeClassifier.new(3, 4, 2, :entropy), DecisionTreeRegressor.new(2)]
+    models.each -> (m)
+      copy = m.with_params(m.params)
+      before = m.params
+      after = copy.params
+      drift.push(m.estimator_name + ".size") if before.size != after.size
+      before.each -> (k, v)
+        drift.push(m.estimator_name + "." + k.to_s) if after[k].to_s != v.to_s
+    expect(drift.join(",")).to eq("")
+    # unmentioned keys carry over on a partial override
+    proto = DecisionTreeClassifier.new(3, 4, 2, :entropy)
+    part = proto.with_params({ max_depth: 9 })
+    expect(part.params[:max_depth]).to eq(9)
+    expect(part.params[:min_samples_split]).to eq(4)
+    expect(part.params[:criterion].to_s).to eq("entropy")
+    # key PRESENCE decides — an explicit nil max_depth means "unlimited"
+    expect(proto.with_params({ max_depth: nil }).params[:max_depth]).to be_nil
+    expect(proto.params[:max_depth]).to eq(3)
+    # the clone is FRESH and UNFITTED, and fitting it leaves self alone
+    x = [[0], [1], [10], [11]]
+    y = [0, 0, 1, 1]
+    proto.fit(x, y)
+    clone = proto.with_params({ max_depth: 1 })
+    expect(clone.fitted?).to be_false
+    expect(clone.tree).to be_nil
+    expect(clone.predict(x)).to be_nil
+    clone.fit(x, y)
+    expect(proto.params[:max_depth]).to eq(3)
+    expect(proto.fitted?).to be_true
+
+  # The payoff of conforming: generic tooling drives a tree without naming
+  # it. CrossValidation dispatches through supervised?, GridSearch tunes
+  # max_depth through params / with_params, and a Pipeline exposes the tree's
+  # knobs as "tree.max_depth" with no code in pipeline.w aware trees exist.
+  it "cross-validates, grid-searches and pipelines through the contract alone" ->
+    x = [[0, 0], [1, 0], [0, 1], [1, 1], [10, 10], [11, 10], [10, 11], [11, 11]]
+    y = [0, 0, 0, 0, 1, 1, 1, 1]
+    expect(Estimator.fit_model(DecisionTreeClassifier.new, x, y) != nil).to be_true
+    expect(CrossValidation.cross_val_mean(DecisionTreeClassifier.new, x, y, 4).to_s).to eq("1")
+    gs = GridSearch.new(DecisionTreeClassifier.new, { max_depth: [1, 2] }, 4)
+    expect(gs.size).to eq(2)
+    expect(gs.fit(x, y) != nil).to be_true
+    # both depths separate these two blobs perfectly, so the tie goes to the
+    # FIRST candidate in enumeration order — the simpler max_depth 1
+    expect(gs.best_params[:max_depth]).to eq(1)
+    expect(gs.best_score.to_s).to eq("1")
+    expect(gs.best_estimator.estimator_name).to eq("DecisionTreeClassifier")
+    expect(gs.best_estimator.fitted?).to be_true
+    expect(gs.best_estimator.depth).to eq(1)
+    ranked = ""
+    gs.results.each -> (e)
+      ranked += e[:params][:max_depth].to_s + ":" + e[:score].to_s + ":" + e[:rank].to_s + " "
+    expect(ranked).to eq("1:1:1 2:1:2 ")
+    # the criterion is searchable too
+    gc = GridSearch.new(DecisionTreeClassifier.new, { criterion: [:gini, :entropy] }, 4)
+    expect(gc.fit(x, y) != nil).to be_true
+    expect(gc.best_params[:criterion].to_s).to eq("gini")
+
+  it "works as a Pipeline tail and exposes its knobs to the search" ->
+    df = DataFrame.new([[:f, [0, 1, 10, 11]]])
+    y = [0, 0, 1, 1]
+    pipe = Pipeline.new([[:scale, Scaler.new(:standard)], [:tree, DecisionTreeClassifier.new(2)]])
+    expect(pipe.names.join(",")).to eq("scale,tree")
+    expect(pipe.supervised?).to be_true
+    expect(pipe.predict(df)).to be_nil
+    expect(pipe.fit(df, y) != nil).to be_true
+    expect(pipe.predict(df).to_s).to eq("\[0, 0, 1, 1\]")
+    expect(pipe.score(df, y).to_s).to eq("1")
+    # all four tree knobs joined the pipeline's search space, dotted
+    keys = []
+    pipe.params.keys.each -> (k)
+      keys.push(k.to_s)
+    expect(keys.include?("tree.max_depth")).to be_true
+    expect(keys.include?("tree.criterion")).to be_true
+    expect(pipe.params["tree.max_depth"]).to eq(2)
+    tuned = pipe.with_params({ "tree.max_depth" => 1 })
+    expect(tuned.params["tree.max_depth"]).to eq(1)
+    expect(tuned.fitted?).to be_false
+    expect(pipe.params["tree.max_depth"]).to eq(2)
 
 describe "KFold" ->
   # Shuffle-free folds are contiguous blocks of 0...n, scikit-learn's

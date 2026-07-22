@@ -1,7 +1,7 @@
-# LinearRegression — least squares via the normal equations, with
-# optional ridge regularization (pure Tungsten, CPU-only; koala's
-# first estimator: fit / predict / score with per-instance fitted
-# state, sklearn-style)
+# LinearRegression — least squares via Householder QR, with optional
+# ridge regularization on the normal equations (pure Tungsten,
+# CPU-only; koala's first estimator: fit / predict / score with
+# per-instance fitted state, sklearn-style)
 #
 #     model = LinearRegression.new
 #     model = LinearRegression.new(12)   # ridge, alpha = 12
@@ -11,12 +11,31 @@
 #     model.predict(x)         # plain array of float predictions
 #     model.score(x, y)        # R² of predict(x) against y (Metrics.r2)
 #
-# alpha is the ridge strength: fit solves (X^T X + alpha*I') beta =
-# X^T y where I' is the identity with a ZERO in the intercept slot —
-# the standard penalty shrinks every feature coefficient toward zero
-# but never the bias. alpha = 0 (the default) is plain OLS, bit-for-bit.
-# With alpha > 0 the penalized matrix is positive definite, so inputs
-# whose plain X^T X is singular (collinear features) fit fine.
+# TWO SOLVERS, chosen by alpha:
+#
+#   alpha = 0 (the default) — PLAIN OLS through LinAlg.lstsq:
+#     Householder QR on the design matrix X itself, with back
+#     substitution through R. The normal equations are never formed,
+#     so cond(X) is not squared and an ill-conditioned design keeps
+#     roughly twice as many correct digits (see the numerics note in
+#     lib/linalg.w, and the head-to-head against the old route in
+#     spec/linalg_spec.w: 6.9e-11 error versus 5.3e-4 on a clustered
+#     Vandermonde).
+#
+#   alpha > 0 — RIDGE through the penalized normal equations,
+#     (X^T X + alpha*I') beta = X^T y, where I' is the identity with a
+#     ZERO in the intercept slot: the standard penalty shrinks every
+#     feature coefficient toward zero but never the bias. This path is
+#     UNCHANGED — the ridge penalty is defined on X^T X, and the
+#     penalty itself bounds the conditioning that made OLS's normal
+#     equations unsafe. With alpha > 0 the penalized matrix is positive
+#     definite, so inputs whose plain X^T X is singular (collinear
+#     features) fit fine.
+#
+# Rank deficiency is rejected identically by both routes: QR's scaled
+# rank test (LinAlg.rank_tol) and elimination's zero-pivot test both
+# return nil for genuinely collinear features, so fit's contract below
+# is the same as it always was.
 #
 # alpha honesty (verified by probe on both engines): pass an INTEGER
 # (`LinearRegression.new(12)`), or a data-derived float built with
@@ -36,14 +55,12 @@
 # Imputer first.
 #
 # fit builds the design matrix X with a leading all-ones intercept
-# column and solves the (possibly ridge-penalized) normal equations
-# (X^T X + alpha*I') beta = X^T y through LinAlg.solve (Gaussian
-# elimination with partial pivoting). A singular penalized matrix —
-# collinear features or fewer samples than features, with alpha = 0 —
-# makes solve return nil, so fit returns nil and fitted? stays false:
-# the bit's shape-error convention. predict/score return nil before a
-# successful fit, and predict returns nil when a row's width differs
-# from the fitted feature count.
+# column and hands it to whichever solver alpha selects (above). An
+# unusable system — collinear features, or fewer samples than features,
+# with alpha = 0 — makes the solver return nil, so fit returns nil and
+# fitted? stays false: the bit's shape-error convention. predict/score
+# return nil before a successful fit, and predict returns nil when a
+# row's width differs from the fitted feature count.
 #
 # NOTE: locals are hoisted from ivars before any `-> (x)` block — the
 # interpreter cannot resolve @ivars from a block body — and methods
@@ -107,17 +124,36 @@
           row.push(v)
         design.push(row)
       xm = Matrix.new(design)
-      xt = xm.transpose
-      xtx = xt.matmul(xm)
-      # ridge: add alpha to every diagonal entry EXCEPT the intercept's
-      # (row 0 of the design is the all-ones column — the bias is never
-      # penalized). alpha = 0 adds nothing, so OLS results are untouched.
       alpha = @alpha
-      ents = xtx.to_a
-      n = ents.size
-      n.times -> (k)
-        ents[k][k] = ents[k][k] + alpha if k > 0
-      beta = LinAlg.solve(xtx, xt.matvec(Vector.new(yvals)))
+      beta = nil
+      if alpha == 0
+        # PLAIN OLS: least squares straight off the design matrix by
+        # Householder QR. X^T X is never formed, so the condition
+        # number is not squared — on an ill-conditioned design this is
+        # the difference between four correct digits and eleven (see
+        # the numerics note in lib/linalg.w and the head-to-head spec
+        # in spec/linalg_spec.w). Rank-deficient designs still come
+        # back nil: LinAlg's scaled rank test replaces the old
+        # exactly-zero pivot, and both reject genuinely collinear
+        # features with six decades of margin.
+        beta = LinAlg.lstsq(xm, yvals)
+      else
+        # RIDGE: the penalized normal equations, unchanged. Adding
+        # alpha to the feature diagonal is defined ON X^T X, and the
+        # penalty makes the system positive definite — so the squared
+        # condition number the OLS path fled is bounded here by alpha
+        # itself, and every hand-computed ridge value in the specs is
+        # produced by exactly this arithmetic.
+        xt = xm.transpose
+        xtx = xt.matmul(xm)
+        # add alpha to every diagonal entry EXCEPT the intercept's
+        # (row 0 of the design is the all-ones column — the bias is
+        # never penalized).
+        ents = xtx.to_a
+        n = ents.size
+        n.times -> (k)
+          ents[k][k] = ents[k][k] + alpha if k > 0
+        beta = LinAlg.solve(xtx, xt.matvec(Vector.new(yvals)))
       if beta != nil
         b = beta.to_a
         coefs = []

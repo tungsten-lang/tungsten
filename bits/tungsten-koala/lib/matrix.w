@@ -279,6 +279,17 @@
   -> solve(b)
     LinAlg.solve(self, b)
 
+  # Reduced QR: { q: Matrix, r: Matrix } with self == q.matmul(r);
+  # nil when empty, wider than tall, or rank-deficient.
+  -> qr
+    LinAlg.qr(self)
+
+  # Least-squares x minimizing |self*x - b| (b: Vector or array), by
+  # Householder QR — the numerically sound route for overdetermined
+  # systems. nil when the shapes are unusable or self is rank-deficient.
+  -> lstsq(b)
+    LinAlg.lstsq(self, b)
+
   # --- Conversion ---
 
   # Already a Matrix — self. (The estimator input convention: every

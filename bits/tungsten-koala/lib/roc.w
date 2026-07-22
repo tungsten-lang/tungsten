@@ -144,3 +144,115 @@
       auc = RocCurve.trapezoid(fpr, tpr)
       out = RocCurve.new(fpr, tpr, full_thresholds, auc)
     out
+
+# PrecisionRecallCurve — the precision-recall curve and its area
+# (average precision), RocCurve's companion for IMBALANCED data
+# (scikit-learn's precision_recall_curve / average_precision_score).
+#
+#     c = Metrics.precision_recall_curve(scores, actual)   # or nil
+#     c.precision            # precision at each point
+#     c.recall               # recall at each point, 1 down to 0
+#     c.thresholds           # the score cut per point, ASCENDING
+#     c.average_precision    # the area — a step sum, not a trapezoid
+#
+#     Metrics.average_precision(scores, actual)   # the scalar directly
+#
+# Both curves are built from the same tp / fp counts at every distinct
+# score, but they normalize the false positives differently, and that is
+# the whole point. ROC plots TPR against FPR = FP / all negatives, so a
+# large negative class DILUTES the false positives; the PR curve plots
+# precision = TP / (TP + FP) against recall, normalizing by what the
+# model actually flagged, which does not shrink as negatives are added.
+# On a 1%-positive problem a model can hold a ROC-AUC near 0.9 while its
+# precision is a few percent — the PR curve shows that, the ROC curve
+# hides it.
+#
+# LAYOUT follows scikit-learn exactly, which is NOT RocCurve's layout:
+# points run in ASCENDING threshold order (so recall descends from 1 to
+# 0), and a closing (recall 0, precision 1) point is appended for which
+# there is no threshold — .precision and .recall are therefore ONE
+# LONGER than .thresholds. RocCurve, by contrast, runs in descending
+# threshold order with a leading reject-all point and all three arrays
+# the same length.
+#
+# The area is scikit-learn's average_precision_score, the STEP sum
+# sum_n (R_n - R_n-1) * P_n rather than a trapezoidal integral — the
+# trapezoid would interpolate linearly between operating points, which
+# is optimistic on a PR curve because the segment between two thresholds
+# is not achievable. Its baseline is the POSITIVE RATE (a random ranker
+# scores about n_pos / n), not roc_auc's 0.5.
+#
+# nil only when scores and actual are misaligned or empty — unlike
+# RocCurve, a single present class still yields a curve, matching
+# scikit-learn: with no positives every precision is 0 and recall is
+# pinned at 1, with no negatives precision is 1 throughout.
++ PrecisionRecallCurve
+  ro :precision            # precision per point (thresholds ascending)
+  ro :recall               # recall per point, descending from 1 to 0
+  ro :thresholds           # score cut per point, ascending; one shorter
+  ro :average_precision    # area under the curve (float)
+
+  # Plain field setter — PrecisionRecallCurve.from builds and validates.
+  -> new(precision, recall, thresholds, average_precision)
+    @precision = precision
+    @recall = recall
+    @thresholds = thresholds
+    @average_precision = average_precision
+
+  # Build from scores / actual / pos_label, or nil when the inputs are
+  # unusable (misaligned or empty).
+  -> .from(scores, actual, pos_label)
+    ok = scores != nil && actual != nil
+    ok = scores.size == actual.size && scores.size > 0 if ok
+    out = nil
+    if ok
+      npos = 0
+      actual.each -> (a)
+        npos += 1 if a == pos_label
+      npf = npos.to_f
+      # Walk the distinct scores from the strictest cut down, counting
+      # the tp / fp admitted at each — the same sweep RocCurve.from makes.
+      desc = RocCurve.distinct_desc(scores)
+      prec_desc = []
+      rec_desc = []
+      desc.each -> (t)
+        tp = 0
+        fp = 0
+        i = 0
+        scores.each -> (s)
+          if s.to_f >= t
+            if actual[i] == pos_label
+              tp += 1
+            else
+              fp += 1
+          i += 1
+        p = 0.to_f
+        p = tp.to_f / (tp + fp).to_f if (tp + fp) > 0
+        # With no positives at all, recall is pinned at 1 rather than
+        # 0/0 — scikit-learn's convention.
+        r = 1.to_f
+        r = tp.to_f / npf if npos > 0
+        prec_desc.push(p)
+        rec_desc.push(r)
+      # Reverse into ascending-threshold order (Array#reverse is not a
+      # portable assumption here — index the array directly), then close
+      # the curve at (recall 0, precision 1), which has no threshold.
+      precision = []
+      recall = []
+      thresholds = []
+      n = desc.size
+      n.times -> (j)
+        k = n - 1 - j
+        precision.push(prec_desc[k])
+        recall.push(rec_desc[k])
+        thresholds.push(desc[k])
+      precision.push(1.to_f)
+      recall.push(0.to_f)
+      # AP = sum (R_n - R_n+1) * P_n over the curve as laid out above,
+      # scikit-learn's -sum(diff(recall) * precision[:-1]).
+      ap = 0.to_f
+      m = recall.size
+      m.times -> (j)
+        ap += (recall[j] - recall[j + 1]) * precision[j] if j < m - 1
+      out = PrecisionRecallCurve.new(precision, recall, thresholds, ap)
+    out

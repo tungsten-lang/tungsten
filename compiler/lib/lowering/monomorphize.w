@@ -1125,6 +1125,14 @@
       mangled = mangle_generic_class_name(node.name, ta)
       return Tungsten:AST:ClassRef.new(mangled)
     return nil
+  # `Foo<T>.new(...)` — the parser moves the generic type args off the
+  # interned `Foo` class_ref (shared by name) onto this distinct call node
+  # (parser.w). collect_generic_instantiations reads them here too, so the
+  # rewrite must mangle the receiver from the SAME call-node type_args;
+  # otherwise the receiver stays a bare `Foo` that lowers to nil.
+  if nk == :call && node.type_args != nil && node.receiver != nil && ast_kind(node.receiver) == :class_ref && mod[:generic_class_templates][node.receiver.name] != nil
+    mangled = mangle_generic_class_name(node.receiver.name, node.type_args)
+    ast_set(node, :receiver, Tungsten:AST:ClassRef.new(mangled))
   kid = kind_id_table[nk]
   if kid == nil
     return nil

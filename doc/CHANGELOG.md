@@ -2,12 +2,16 @@
 
 ## Unreleased
 
-- **Conditional annotated reassign keeps boxed variables boxed** — a
+- **Annotated reassign of a boxed variable is full-width correct** — a
   `## i64/u64` reassign of an existing parameter or boxed local (e.g.
-  inside one branch of an `if`) no longer retypes it to a raw machine
-  slot; the RHS keeps wrapping semantics but the result is boxed back.
-  Previously post-merge reads and inferred return types mixed NaN-boxed
-  and raw bits — silent wrong values at call boundaries.
+  inside one branch of an `if`, or an unconditional chain like
+  xorshift64* through a parameter) no longer retypes it to a raw machine
+  slot; the RHS keeps wrapping semantics but the result is boxed back and
+  the variable is classified `:bigint` so subsequent machine-context reads
+  take the full-width unbox. Previously post-merge reads mixed NaN-boxed
+  and raw bits (silent wrong values at call boundaries), and — even
+  unconditionally — values past 2^48 read back through the 48-bit nanunbox
+  shortcut were truncated to garbage.
 - **begin/rescue is a value expression in compiled code** — in value
   position (method tail, case/if arm, assignment rhs) it now produces the
   taken arm's last expression; both arms previously reached callers as

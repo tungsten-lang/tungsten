@@ -2009,8 +2009,19 @@ use lowering/definitions
       raw_val = lower_machine_int_expression(ctx, node.value, target_type)
       boxed_tmp = next_temp(wfn)
       emit_instruction(wfn, {op: :call_direct_i64, temp: boxed_tmp, name: machine_box_fn(target_type), args: [raw_val]})
+      # Round-4 fix (2026-07-22): stamp :bigint, NOT :int. boxed_tmp above is
+      # machine_box_fn(:u64) = w_u64(...), a real BIGNUM box for values past
+      # 2^48. A :int stamp routes later machine-context reads through the
+      # 48-bit nanunbox_int shortcut in ensure_raw_machine_int, truncating
+      # chained param reassigns (x = x ^ (x >> 12) ## u64; …) to garbage.
+      # :bigint is not a machine-int type, so the var read returns the boxed
+      # value and ensure_raw_machine_int takes the full-width machine_unbox_fn
+      # (w_to_u64/w_to_i64) path. Chained annotated reassigns re-enter this
+      # box-back branch (existing type :bigint is neither nil nor
+      # raw-int-storage, so hint_retype_safe stays false), keeping the
+      # representation consistent. Verified clean stage1≡stage2 fixed point.
       if hint_existing_t == nil
-        ctx[:var_types][name] = :int
+        ctx[:var_types][name] = :bigint
       hint_ptr = wfn[:var_slots][name]
       if hint_ptr != nil
         emit_instruction(wfn, {op: :store_i64, value: boxed_tmp, ptr: hint_ptr})

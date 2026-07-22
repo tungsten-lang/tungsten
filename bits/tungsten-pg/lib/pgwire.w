@@ -496,6 +496,18 @@
     @sock.write(chunk)
     nil
 
+  # Build the 'Q' simple-query wire frame ONCE for a constant SQL string;
+  # send it repeatedly with exec_frame. Callers with per-turn constant SQL
+  # (chessbot's merge script) avoid re-allocating the multi-KB payload/frame
+  # arrays on every execution (no tracing GC — per-call framing leaks).
+  -> build_query_frame(sql)
+    pgw_pack(pgw_frame(81, self.cstr_payload(sql)))
+
+  -> exec_frame(fu8)
+    self.guard_open()
+    @sock.write_bytes(fu8)
+    self.consume_results()
+
   # b: u8[] of COPY text, sent whole (b.size bytes) as one CopyData frame.
   # The no-String twin of copy_write for allocation-disciplined callers
   # (chessbot flushes stream a pooled buffer in chunks through this).

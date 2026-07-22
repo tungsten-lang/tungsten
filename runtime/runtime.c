@@ -26655,6 +26655,55 @@ WValue w_array_get(WValue arr, WValue index) {
     return w_int((int64_t)array_read(a, a->start + i));
 }
 
+/* Fused subscript-read + machine-int capture: `x = recv[i] ## i64/u64`
+ * where recv has no static typed-array identity. The generic path returns
+ * a boxed WValue whose fresh bignum box (element > 2^48 from a typed int
+ * array) was a dead temporary free-insertion never reclaimed — one leaked
+ * bignum per read (2026-07-22). Typed integer arrays load raw here (no box
+ * at all); every other receiver — poly arrays, Hash, String, custom []
+ * overloads — takes the same dynamic dispatch as before and the same
+ * w_to_i64/w_to_u64 coercion (those results are stored or small values, so
+ * nothing new is allocated). OOB mirrors the old path exactly: the
+ * coercion of W_NIL. */
+static WValue w_index_fused_dispatch(WValue recv, WValue idx) {
+    /* Shared static cache: same racy-repopulate pattern as the per-callsite
+     * caches in generated code. */
+    static WInlineCache ic;
+    return w_method_call_cached(recv, WN_idx, &idx, 1, &ic);
+}
+
+static int w_index_fused_raw(WValue recv, WValue idx, int64_t *out) {
+    if (!w_is_body(recv) && w_is_array(recv)) {
+        WArray *a = (WArray *)w_as_ptr(recv);
+        if (!array_is_wvalue(a) && !array_is_float(a) && a->ebits != 1) {
+            int64_t i = w_as_int(idx);
+            if (i < 0) i += a->size;
+            if (i < 0 || i >= a->size) return 0;
+            *out = array_is_signed_int(a)
+                       ? array_read_signed(a, a->start + i)
+                       : (int64_t)array_read(a, a->start + i);
+            return 1;
+        }
+    }
+    return -1;
+}
+
+int64_t w_index_raw_i64(WValue recv, WValue idx) {
+    int64_t v;
+    int hit = w_index_fused_raw(recv, idx, &v);
+    if (hit == 1) return v;
+    if (hit == 0) return w_to_i64(W_NIL);
+    return w_to_i64(w_index_fused_dispatch(recv, idx));
+}
+
+int64_t w_index_raw_u64(WValue recv, WValue idx) {
+    int64_t v;
+    int hit = w_index_fused_raw(recv, idx, &v);
+    if (hit == 1) return v;
+    if (hit == 0) return (int64_t)w_to_u64(W_NIL);
+    return (int64_t)w_to_u64(w_index_fused_dispatch(recv, idx));
+}
+
 /* Raw-index twin of w_array_get, same negative-wrap and nil-on-OOB
  * semantics — emitted when the index is already a raw machine int. */
 WValue w_array_get_i64(WValue arr, int64_t i) {

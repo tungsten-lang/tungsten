@@ -185,6 +185,8 @@ compiled_specs=(
   spec/compiler/string_buffer_size_revisit_autoload_spec.w
   spec/compiler/string_escape_backslash_spec.w
   spec/compiler/string_interp_esc_bracket_spec.w
+  spec/compiler/machine_int_subscript_fused_spec.w
+  spec/compiler/u64_raw_multiply_spec.w
   spec/compiler/typed_helper_array_signature_spec.w
   spec/compiler/typed_overload_spec.w
   spec/compiler/uuid_byte_revisit_autoload_spec.w

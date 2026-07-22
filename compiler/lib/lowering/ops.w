@@ -356,6 +356,32 @@
     t = next_temp(wfn)
     emit_instruction(wfn, {op: :subborrow_u64, temp: t, lhs: a_raw, rhs: b_raw})
     return t
+  # Fused subscript capture: `x = recv[i] ## i64/u64` on a receiver WITHOUT
+  # static typed-array identity would lower to generic dispatch returning a
+  # boxed value whose fresh bignum box (element > 2^48) leaked — one bignum
+  # per read (2026-07-22). Emit the raw-returning runtime read instead:
+  # typed integer arrays load raw inside the helper (no box at all); other
+  # receivers take the identical dynamic dispatch + coercion. Receivers the
+  # compiler already types as typed arrays keep the inline raw path below.
+  # Restricted to plain :var receivers (locals/params — the leak class):
+  # :gvar `$field` receivers are packed VIEW FIELDS whose subscript lowers
+  # through the view-aware inline path, not a boxed WValue — feeding one to
+  # the dispatch helper segfaults (caught by network_native_spec, whose
+  # binary compiles core/ipv6.w's `$bytes[0] ## i64` sites).
+  if ast_kind(node) == :call && node.name == "\[]" && node.args != nil && node.args.size() == 1 && node.receiver != nil && is_ast_node?(node.receiver) && ast_kind(node.receiver) == :var && type in (:i64 :u64)
+    recv_t = infer_type(node.receiver, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    if !is_typed_array_type?(recv_t)
+      wfn = ctx[:func]
+      recv_tv = lower_expression(ctx, node.receiver)
+      recv_reg = ensure_i64_value(wfn, recv_tv)
+      idx_tv = lower_expression(ctx, node.args[0])
+      idx_reg = ensure_i64_value(wfn, idx_tv)
+      t = next_temp(wfn)
+      fused_fn = "w_index_raw_i64"
+      if type == :u64
+        fused_fn = "w_index_raw_u64"
+      emit_instruction(wfn, {op: :call_direct_i64, temp: t, name: fused_fn, args: [recv_reg, idx_reg]})
+      return t
   tv = lower_expression(ctx, node)
   inferred = infer_type(node, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
   ensure_raw_machine_int(ctx[:func], tv, type, inferred)

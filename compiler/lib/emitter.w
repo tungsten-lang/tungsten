@@ -257,6 +257,8 @@ use hashing
   out << declare_fn("w_to_i64", "i64", wv)
   out << declare_fn("w_u64", wv, "i64")
   out << declare_fn("w_to_u64", "i64", wv)
+  out << declare_fn("w_index_raw_i64", "i64", wv2)
+  out << declare_fn("w_index_raw_u64", "i64", wv2)
   out << declare_fn("w_i128", wv, "i128")
   out << declare_fn("w_to_i128", "i128", wv)
   out << declare_fn("w_u128", wv, "i128")

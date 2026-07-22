@@ -7,9 +7,11 @@
 # classification, the companion classifier to Metrics.accuracy / f1;
 # GaussianNB — multiclass Gaussian naive Bayes, a closed-form generative
 # classifier), clustering (KMeans — Lloyd's algorithm, koala's first
-# unsupervised learner), and model evaluation (KFold / CrossValidation — k-fold
+# unsupervised learner), model evaluation (KFold / CrossValidation — k-fold
 # cross-validation that re-fits an estimator on each fold and averages
-# the held-out score).
+# the held-out score, supervised or not), and model selection (GridSearch
+# — exhaustive hyperparameter search scoring every point of a param grid
+# by cross-validation, through the estimator contract alone).
 #
 # All five estimators answer ONE declared contract (lib/estimator_base.w):
 # `is Estimable` plus `is SupervisedEstimator` (LinearRegression,
@@ -18,8 +20,8 @@
 # `params`, `with_params(overrides)` and `estimator_name` to the familiar
 # new / fitted? / fit / predict / score, and puts the ONE definition of
 # every accepted input shape on the neutral `Estimator` base rather than on
-# a concrete sibling. It is what generic tooling — cross-validation, and
-# grid search — dispatches through.
+# a concrete sibling. It is what generic tooling — CrossValidation and
+# GridSearch — dispatches through, without ever naming a concrete class.
 
 use version
 use stats
@@ -47,6 +49,7 @@ use splitter
 use pipeline
 use cross_validation
 use kmeans
+use grid_search
 
 # The remaining modules under lib/ (tensor, resample, transformer,
 # estimator, index, sparse, gpu, device) are unported design drafts —

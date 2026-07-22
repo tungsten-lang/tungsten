@@ -51,6 +51,9 @@ Splitter.train_test(df, 30)          # => [train, test]; last 30% tests
 Splitter.train_test(df, 30, 42)      # seeded shuffle — same seed, same split
 pipe = Pipeline.new([Imputer.new(:mean), Scaler.new(:standard)])
 pipe.fit_transform(df)               # chained; transform replays train params
+named = Pipeline.new([[:fill, Imputer.new(:mean)], [:scale, Scaler.new(:standard)]])
+named.step(:scale)                   # by name (symbol or string); named[1] too
+named.names                          # => ["fill", "scale"]; has_step?(:scale)
 
 # Estimation — LinearRegression, normal equations on LinAlg.solve
 model = LinearRegression.new
@@ -104,10 +107,16 @@ nb.score(x_test, y_test)             # => accuracy; labels feed Metrics.f1
                                      # three+ classes work with no wrapper
 
 # ... or as a pipeline tail: transform features, then fit/predict
-pipe = Pipeline.new([Scaler.new(:standard), LinearRegression.new])
+pipe = Pipeline.new([[:scale, Scaler.new(:standard)], [:model, LinearRegression.new]])
 pipe.fit(df_features, y)             # nil (unfitted) on collinear features
 pipe.predict(test_df)                # scale with train params, then predict
 pipe.score(test_df, y_test)          # the estimator's R² on the chain
+
+# A Pipeline IS an Estimable — the same six methods as a bare estimator
+pipe.estimator_name                  # => "Pipeline"
+pipe.supervised?                     # => delegated to the TAIL step
+pipe.params                          # => { "model.alpha" => 0 }  "step.param"
+pipe.with_params({ "model.alpha" => 10 })   # fresh UNFITTED chain; pipe intact
 
 # Clustering — KMeans, Lloyd's algorithm (koala's first UNSUPERVISED learner)
 km = KMeans.new(2)                   # k clusters (defaults to 8, sklearn)
@@ -127,6 +136,21 @@ KFold.new(5, 42).split(10)           # ... over a seeded MINSTD shuffle first
 scores = CrossValidation.cross_val_score(LinearRegression.new, x, y, 5)
                                      # => [1, 1, 1, 1, 1]  (per-fold R²)
 CrossValidation.cross_val_mean(KNNClassifier.new(3), x, y, 4)  # mean fold score
+CrossValidation.cross_val_score(KMeans.new(2), x, nil, 2)      # unsupervised: no y
+
+# Hyperparameter search — GridSearch, every combination scored by k-fold CV
+gs = GridSearch.new(KNNClassifier.new, { k: [1, 3, 5] }, 4)
+gs.size                              # => 3   combinations, known before fit
+gs.candidates                        # => [{k: 1}, {k: 3}, {k: 5}]  search order
+gs.fit(x, y)                         # nil on a bad grid — never raises
+gs.best_params                       # => { k: 1 }
+gs.best_score                        # => best mean fold score (higher is better)
+gs.best_estimator                    # => a KNNClassifier(1) REFIT on all the data
+gs.results                           # => [{params:, score:, rank:}, ...] best-first
+gs.predict(x_test)                   # delegates to best_estimator
+GridSearch.new(km, { k: [2, 3] }, 2).fit(x)        # unsupervised: no y
+GridSearch.new(m, grid, 4, 42)                     # seeded folds
+GridSearch.new(m, grid, 4, nil, false)             # refit: off
 
 # The estimator contract — one uniform interface across all five
 m.supervised?                        # => true; false for KMeans alone
@@ -193,6 +217,188 @@ single-feature array; `Estimator.target_values(y)` accepts a Series, a
 Vector, or a plain array. `LinearRegression.feature_rows` /
 `.target_values` remain as delegating aliases for callers written before
 the move.
+
+## Pipelines
+
+A `Pipeline` chains fit/transform steps into one transformer, fitting
+each step on the previous step's output and replaying the *training*
+parameters on `transform`. Its last step may instead be an estimator,
+which is what makes a whole chain fittable, predictable and scorable as
+a unit. Pipelines nest.
+
+### Named steps
+
+Give a step as a `[name, step]` pair and the chain becomes addressable
+by meaning rather than by position:
+
+```tungsten
+pipe = Pipeline.new([
+  [:scale, Scaler.new(:standard)],
+  [:model, LinearRegression.new]
+])
+
+pipe.step(:scale)        # the Scaler — :scale and "scale" both work
+pipe.step("model")       # the LinearRegression
+pipe[1]                  # ... which positional access still returns
+pipe.names               # => ["scale", "model"]
+pipe.has_step?(:model)   # => true
+```
+
+The bare-array form is unchanged and gets names derived for it. A step
+that answers `estimator_name` is named after it, downcased — sklearn's
+`make_pipeline` convention; anything else is named for its POSITION, so
+the auto name mirrors `pipe[i]`:
+
+```tungsten
+Pipeline.new([Imputer.new(:mean), Scaler.new(:standard), LinearRegression.new]).names
+# => ["step_0", "step_1", "linearregression"]
+```
+
+Repeats de-duplicate by suffix (`linearregression`,
+`linearregression_2`), so every name in a pipeline is unique — which is
+what lets the parameter keys below be unambiguous. Names normalize to
+STRINGS: one vocabulary, because those keys are strings too.
+
+### A Pipeline IS an Estimable
+
+A Pipeline answers the same `Estimable` contract as a bare estimator —
+`fitted?` / `predict` / `supervised?` / `params` / `with_params` /
+`estimator_name` — so generic tooling drives a whole chain through
+exactly the interface it uses for one model, **without knowing pipelines
+exist**:
+
+```tungsten
+pipe.params
+# => { "model.alpha" => 0 }
+
+tuned = pipe.with_params({ "model.alpha" => 10 })   # fresh, UNFITTED
+pipe.params["model.alpha"]                          # => 0 — untouched
+```
+
+That is the whole payoff: a grid search written against `Estimable`
+alone tunes a pipeline the same way it tunes a model.
+
+**The separator is a DOT** — a step's parameters are addressed
+`"<step>.<param>"`. The dot reads as what it is (attribute access on a
+named step), it cannot occur inside a parameter name, and it nests for
+free: a pipeline inside a pipeline flattens to `"inner.model.alpha"`,
+because each level only prefixes its own step name. scikit-learn spells
+this `__` because a Python keyword argument cannot contain a dot; a
+Tungsten hash key is an ordinary string, so the readable separator is
+available and is the one used here.
+
+**The tunable surface is exactly the steps answering BOTH `params` and
+`with_params`** — the `Estimable` half of the contract. That rule is not
+a convenience. `params` and `with_params` have to round-trip
+(`p.with_params(p.params)` reproduces `p`), so reporting a key that
+`with_params` could not apply would break the contract for every caller.
+It also keeps out the steps that would otherwise poison the hash:
+`Scaler#params` and `Imputer#params` report FITTED state (an array of
+`[name, a, b]` triples), not hyperparameters, and neither answers
+`with_params`. So koala's bundled transformers contribute **no keys**
+today, and a Scaler + LinearRegression chain's search space is
+`{ "model.alpha" => ... }` alone. Nothing is special-cased to a class —
+the day `Scaler` carries `params` / `with_params`, `"scale.kind"` joins
+the surface with no change to `lib/pipeline.w`.
+
+`with_params` returns a fresh, UNFITTED Pipeline and leaves the receiver
+alone, so a search fans out from one prototype without aliasing. Every
+tunable step is rebuilt through its own `with_params` (a fresh unfitted
+step, even where no key targeted it); unmentioned keys carry over, and a
+key naming no step — or no parameter of it — is ignored rather than
+fatal. A step outside the contract cannot be cloned generically and is
+carried over by reference: safe for the serial fit-then-use a search
+does, since the new pipeline is unfitted and `fit` re-fits every step
+from scratch, but two such clones must not be fitted and used
+interleaved.
+
+`supervised?` delegates to the TAIL step (false for a transformer-only
+chain), which is what tells generic tooling the fit arity to use. A
+Pipeline declares only `is Estimable`, and not one of the two arity
+traits, precisely because that arity is its tail's to decide at runtime
+rather than a property of the class — `Estimator.fit_model` /
+`.score_model` read `supervised?` and dispatch. Today the tail estimator
+must be a supervised one: fitting without `y` transforms through every
+step, which an unsupervised tail has no `transform` for.
+
+## Hyperparameter search
+
+`GridSearch` (`lib/grid_search.w`) is model SELECTION: it scores every
+combination of a hyperparameter grid by k-fold cross-validation and keeps
+the best, the way scikit-learn's `GridSearchCV` sits above
+`cross_val_score`.
+
+```tungsten
+gs = GridSearch.new(KNNClassifier.new, { k: [1, 3, 5] }, 4)
+gs.fit(x, y)
+gs.best_params        # => { k: 1 }
+gs.best_score         # => its mean fold score
+gs.best_estimator     # => a KNNClassifier(1) refit on ALL the data
+gs.results            # => every combination as { params:, score:, rank: }
+```
+
+The constructor is
+`GridSearch.new(estimator, param_grid, k = 5, seed = nil, refit = true)` —
+a PROTOTYPE estimator, a grid of `param => [values]`, the CV fold count,
+an optional fold-shuffle seed, and whether to refit the winner. Each
+candidate is built with `estimator.with_params(combination)` — a fresh,
+UNFITTED clone, so the prototype is never touched and candidates never
+alias — and scored with `CrossValidation.cross_val_mean`. Higher always
+wins: every koala score follows sklearn's sign convention (R² / accuracy,
+and NEGATED inertia for KMeans), so one comparison ranks them all.
+
+**Contract-only, never type-tested.** GridSearch reaches its estimator
+through exactly six methods — `params`, `with_params`, `supervised?`,
+`fit` / `score` (only via `Estimator.fit_model` / `.score_model`) and
+`estimator_name`. It never asks what class it holds, so anything
+answering `Estimable` is searchable. A Pipeline is, today, with no code
+in `grid_search.w` aware of it:
+
+```tungsten
+gs = GridSearch.new(Pipeline.new([LinearRegression.new]),
+                    { "linearregression.alpha" => [0, 1] }, 3)
+gs.fit(x, y)          # best_estimator is a refit Pipeline
+```
+
+**Supervised and unsupervised.** `fit(x, y)` searches a supervised
+estimator, `fit(x)` an unsupervised one — the arity is chosen by the
+estimator's own `supervised?`, down in `CrossValidation`, so KMeans needs
+no special case. Read the statistics honestly, though: `-inertia` falls
+monotonically as k rises, so searching KMeans's `k` by cross-validated
+score simply elects the LARGEST k offered. Use it for `max_iter` or
+`seed`, and pick k by an elbow criterion.
+
+**Determinism is a guarantee, on both engines.** Candidate order is a
+pure function of the grid, never of hash iteration order — which is
+genuinely unstable: the same literal yields `.keys` in one order
+interpreted and another compiled. So keys are sorted by NAME
+(`GridSearch.grid_keys`; symbol `.sort` is *not* used — its order is
+neither documented nor lexicographic), each value list keeps the order
+you gave it, and the product runs odometer-style with the LAST key
+varying fastest — `{ a: [3, 4], b: [1, 2] }` gives a3b1, a3b2, a4b1,
+a4b2, matching sklearn's `ParameterGrid`. Ties break to the FIRST
+candidate enumerated, and `results` is ranked by a STABLE sort, so equal
+scores keep enumeration order. `size` and `candidates` are computed at
+construction and read correctly BEFORE `fit`.
+
+**Degenerate input returns nil, never raises** — koala's convention
+throughout. `fit` is nil (and `fitted?` stays false) for a nil, empty, or
+empty-valued grid; for a grid naming a param the estimator does not
+expose (checked against `estimator.params`, so a typo is caught rather
+than silently ignored by `with_params`, which would report a "winner"
+that never varied); for misaligned `x` / `y` or a k out of range; and
+when no candidate scored at all. A SINGLE nil-scoring candidate is not
+degenerate — `alpha = 0` on collinear features cannot fit, so it stays in
+`results` with a nil score, ranked last, and never wins. With
+`refit = false`, `best_estimator` stays nil (sklearn's semantics) while
+`best_params` / `best_score` / `results` are unaffected.
+
+`CrossValidation` was widened to make this work: it now fits and scores
+through `Estimator.fit_model` / `.score_model` instead of calling
+`model.fit(rows, y)` directly, so `y` is optional and an unsupervised
+estimator cross-validates correctly rather than not at all. A fold whose
+re-fit FAILS is now recorded as nil and not scored — previously it was
+scored anyway, silently reporting the PREVIOUS fold's fitted state.
 
 ## The train/test workflow, end to end
 
@@ -272,7 +478,11 @@ dense linear algebra: `Vector`, `Matrix`, `LinAlg` (pure Tungsten,
 CPU-only; ops with a shape requirement return nil when it is not met),
 ML preprocessing: `Scaler`, `Encoder`, `Imputer`, `Splitter`,
 `Pipeline` (fit/transform with per-instance fitted state; transform
-before fit returns nil; splitting is deterministic — unseeded calls
+before fit returns nil; steps may be named as `[name, step]` pairs and
+addressed with `step(:name)` / `names` / `has_step?` alongside the
+positional `pipe[i]`, and a Pipeline itself answers `Estimable`, so its
+steps' hyperparameters flatten to `"step.param"` keys a generic search
+can tune — see *Pipelines* above; splitting is deterministic — unseeded calls
 keep row order, and the seeded shuffle is a built-in MINSTD generator,
 so the same seed gives the same split on both engines; `test_pct` is an
 integer percent), and estimation: `LinearRegression` (least squares by
@@ -410,7 +620,17 @@ k < 1, or fewer rows than clusters. On the two 2x2 boxes
 `[[0,0],[2,0],[0,2],[2,2],[10,10],[12,10],[10,12],[12,12]]` at k = 2 it
 converges in 2 iterations to centroids `[[1,1],[11,11]]`, labels
 `[0,0,0,0,1,1,1,1]`, and inertia exactly 16 — matching scikit-learn's
-`KMeans` with the same fixed init).
+`KMeans` with the same fixed init). Model selection: `GridSearch`
+(`lib/grid_search.w` — exhaustive hyperparameter search, the layer above
+cross-validation: it enumerates a param grid's cartesian product in an
+order that is a pure function of the grid, clones the prototype estimator
+once per combination through `with_params`, scores each by k-fold CV, and
+reports `best_params` / `best_score` / `best_estimator` (refit on the
+full data) plus a ranked `results` table. It touches its estimator only
+through the `Estimable` contract, so a Pipeline searches with no code
+aware of it, and supervised and unsupervised estimators are dispatched by
+their own `supervised?`. Ties break to the first candidate enumerated and
+a bad grid returns nil rather than raising).
 
 Verify with `bin/tungsten bits/tungsten-koala/spec/koala_spec.w`,
 `spec/linalg_spec.w`, `spec/preprocessing_spec.w`, and

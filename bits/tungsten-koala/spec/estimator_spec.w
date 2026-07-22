@@ -689,6 +689,39 @@ describe "CrossValidation" ->
     expect(CrossValidation.cross_val_score(m, [1, 2, 3], [1, 2])).to be_nil
     expect(CrossValidation.cross_val_score(m, [1, 2, 3], [1, 2, 3], 5)).to be_nil
     expect(CrossValidation.cross_val_mean(m, [1, 2, 3], [1, 2], 2)).to be_nil
+    # a supervised estimator still REQUIRES its y
+    expect(CrossValidation.cross_val_score(m, [1, 2, 3], nil, 2)).to be_nil
+
+  # Unsupervised CV: no y at all. Fit and score go through
+  # Estimator.fit_model / .score_model, so KMeans gets fit(rows) / score(rows).
+  #
+  # HAND-COMPUTED, both folds. The 8 rows interleave two unit squares —
+  # one at the origin, one at (10, 10) — so each contiguous 2-fold split
+  # trains on one full sample of both clusters:
+  #   fold 0 trains on [1,0], [11,10], [1,1], [11,11] -> centroids
+  #   [1, 0.5] and [11, 10.5]; its held-out rows [0,0], [10,10], [0,1],
+  #   [10,11] each sit (1, 0.5) from their centre -> 1 + 0.25 = 1.25 each,
+  #   inertia 5, score -5. Fold 1 is the mirror image, also -5.
+  it "cross-validates an unsupervised estimator with no y" ->
+    x = [[0, 0], [10, 10], [0, 1], [10, 11], [1, 0], [11, 10], [1, 1], [11, 11]]
+    scores = CrossValidation.cross_val_score(KMeans.new(2), x, nil, 2)
+    expect(scores.size).to eq(2)
+    expect(scores.to_s).to eq("\[-5, -5\]")
+    expect(CrossValidation.cross_val_mean(KMeans.new(2), x, nil, 2).to_s).to eq("-5")
+
+  # A fold whose re-fit FAILS must not be scored: the estimator still
+  # carries the previous fold's state, so scoring it would quietly report
+  # the wrong model. Collinear features are singular at alpha = 0.
+  it "records nil for a fold whose fit fails, and never scores stale state" ->
+    x = [[1, 2], [2, 4], [3, 6], [4, 8], [5, 10], [6, 12]]
+    y = [1, 2, 3, 4, 5, 6]
+    scores = CrossValidation.cross_val_score(LinearRegression.new(0), x, y, 3)
+    expect(scores.size).to eq(3)
+    expect(scores[0]).to be_nil
+    expect(scores[2]).to be_nil
+    expect(CrossValidation.cross_val_mean(LinearRegression.new(0), x, y, 3)).to be_nil
+    # ridge at alpha = 1 is non-singular on the same data
+    expect(CrossValidation.cross_val_mean(LinearRegression.new(1), x, y, 3) != nil).to be_true
 
 describe "KMeans" ->
   # Two 2x2 boxes far apart. Default init takes the first two DISTINCT
@@ -994,5 +1027,269 @@ describe "Estimator arity-safe dispatch" ->
       failures.push(m.estimator_name + ".score") if Estimator.score_model(m, x, targets[i]) == nil
       i += 1
     expect(failures.join(",")).to eq("")
+
+# --- GridSearch (lib/grid_search.w) ---
+#
+# The reference winners below are HAND-COMPUTED, never read back off the
+# implementation, so the assertions test the SEARCH and not its plumbing:
+#
+#   * KNN grid — x = [0,1,2,3, 10,11,12,13], labels [0,0,0,0, 1,1,1,1],
+#     4 contiguous folds (test pairs [0,1] [2,3] [4,5] [6,7]). At k = 1
+#     and k = 3 every held-out point's neighbours are all its own class,
+#     so accuracy is 1 on all four folds. At k = 5 the six training rows
+#     always include four of the OTHER class, so every vote flips and
+#     accuracy is 0 on all four folds. Winner: k = 1 (or whichever of
+#     1 / 3 is enumerated first), score exactly 1; k = 5 scores 0.
+#   * Ridge grid — y = 2x + 1 on x = 0..7, 4 folds. Each 6-row training
+#     fold recovers the exact line, so alpha = 0 predicts its held-out
+#     pair exactly: R² = 1 on every fold. alpha = 100 shrinks the slope
+#     to near nothing and scores far below. Winner: alpha = 0, score 1.
+#   * Collinear grid — x = [[i, 2i]], 3 folds. X^T X is singular, so
+#     alpha = 0 CANNOT FIT: every fold is nil and the candidate's mean is
+#     nil. alpha = 1 is non-singular. Winner: alpha = 1, and alpha = 0
+#     ranks last with a nil score.
+#   * KMeans grid — the interleaved two-square data from the
+#     CrossValidation block, 2 folds: k = 2 scores -5, k = 1 scores -205
+#     (both hand-computed there and above).
+#
+# Whole-hash to_s is never asserted (key order differs between engines) —
+# params are read per key.
+describe "GridSearch grid enumeration" ->
+  # Pure functions of the grid: no estimator, no data, no CV.
+  it "enumerates the cartesian product with sorted keys, last varying fastest" ->
+    cands = GridSearch.candidates({ b: [1, 2], a: [3, 4] })
+    expect(cands.size).to eq(4)
+    sig = ""
+    cands.each -> (h)
+      sig += h[:a].to_s + "/" + h[:b].to_s + " "
+    expect(sig).to eq("3/1 3/2 4/1 4/2 ")
+
+  # The order must NOT depend on hash iteration order: the same literal
+  # yields .keys in one order interpreted and another compiled.
+  it "orders keys by name, never by hash iteration order" ->
+    expect(GridSearch.grid_keys({ zebra: 1, alpha: 2, mid: 3 }).join(",")).to eq("alpha,mid,zebra")
+    expect(GridSearch.grid_keys({ alpha: 1, mid: 2, zebra: 3 }).join(",")).to eq("alpha,mid,zebra")
+    expect(GridSearch.grid_keys({}).size).to eq(0)
+    expect(GridSearch.grid_keys(nil)).to be_nil
+
+  it "preserves each value list's given order" ->
+    vs = ""
+    GridSearch.candidates({ k: [5, 1, 3] }).each -> (h)
+      vs += h[:k].to_s + ","
+    expect(vs).to eq("5,1,3,")
+
+  it "expands a two-key grid over both axes" ->
+    cands = GridSearch.candidates({ epochs: [10, 20], learning_rate: [1, 2, 3] })
+    expect(cands.size).to eq(6)
+    sig = ""
+    cands.each -> (h)
+      sig += h[:learning_rate].to_s + "@" + h[:epochs].to_s + " "
+    expect(sig).to eq("1@10 2@10 3@10 1@20 2@20 3@20 ")
+
+  it "takes a bare value as a one-element list" ->
+    cands = GridSearch.candidates({ k: 3 })
+    expect(cands.size).to eq(1)
+    expect(cands[0][:k]).to eq(3)
+
+  it "returns nil for a nil, empty, or empty-valued grid" ->
+    expect(GridSearch.candidates(nil)).to be_nil
+    expect(GridSearch.candidates({})).to be_nil
+    expect(GridSearch.candidates({ k: [] })).to be_nil
+    expect(GridSearch.candidates({ k: [1], j: [] })).to be_nil
+
+describe "GridSearch (supervised)" ->
+  # k = 1 is enumerated SECOND, so a winner of 1 proves the search really
+  # compares scores rather than keeping the first candidate.
+  it "elects the k that must win even when enumerated last" ->
+    x = [0, 1, 2, 3, 10, 11, 12, 13]
+    y = [0, 0, 0, 0, 1, 1, 1, 1]
+    gs = GridSearch.new(KNNClassifier.new, { k: [5, 1] }, 4)
+    expect(gs.fitted?).to be_false
+    expect(gs.size).to eq(2)
+    r = gs.fit(x, y)
+    expect(r != nil).to be_true
+    expect(gs.fitted?).to be_true
+    expect(gs.best_params[:k]).to eq(1)
+    expect(gs.best_score.to_s).to eq("1")
+    expect(gs.results.size).to eq(2)
+    expect(gs.results[0][:params][:k]).to eq(1)
+    expect(gs.results[0][:rank]).to eq(1)
+    expect(gs.results[1][:params][:k]).to eq(5)
+    expect(gs.results[1][:score].to_s).to eq("0")
+    expect(gs.results[1][:rank]).to eq(2)
+
+  # k = 1 and k = 3 both score exactly 1. The winner must be whichever the
+  # grid lists FIRST — reversing the list reverses the winner, which no
+  # value-based tie-break could do.
+  it "breaks a tie toward the first candidate in enumeration order" ->
+    x = [0, 1, 2, 3, 10, 11, 12, 13]
+    y = [0, 0, 0, 0, 1, 1, 1, 1]
+    a = GridSearch.new(KNNClassifier.new, { k: [1, 3, 5] }, 4)
+    a.fit(x, y)
+    expect(a.best_params[:k]).to eq(1)
+    b = GridSearch.new(KNNClassifier.new, { k: [3, 1, 5] }, 4)
+    b.fit(x, y)
+    expect(b.best_params[:k]).to eq(3)
+    # ranking is STABLE: the tied pair keeps enumeration order, 5 sinks
+    order = ""
+    b.results.each -> (e)
+      order += e[:params][:k].to_s + e[:rank].to_s + " "
+    expect(order).to eq("31 12 53 ")
+
+  it "elects alpha = 0 on a perfectly linear fit (R² exactly 1)" ->
+    x = [0, 1, 2, 3, 4, 5, 6, 7]
+    y = [1, 3, 5, 7, 9, 11, 13, 15]
+    gs = GridSearch.new(LinearRegression.new, { alpha: [100, 0] }, 4)
+    gs.fit(x, y)
+    expect(gs.best_params[:alpha]).to eq(0)
+    expect(gs.best_score.to_s).to eq("1")
+    expect(gs.results[1][:params][:alpha]).to eq(100)
+    expect(gs.results[1][:score] < gs.best_score).to be_true
+
+  # alpha = 0 is singular here — it scores nil on every fold — so ridge
+  # must win, and the unscorable candidate must still be reported.
+  it "ranks a nil-scoring candidate last and never lets it win" ->
+    x = [[1, 2], [2, 4], [3, 6], [4, 8], [5, 10], [6, 12]]
+    y = [1, 2, 3, 4, 5, 6]
+    gs = GridSearch.new(LinearRegression.new, { alpha: [0, 1] }, 3)
+    gs.fit(x, y)
+    expect(gs.best_params[:alpha]).to eq(1)
+    expect(gs.best_score != nil).to be_true
+    expect(gs.results[0][:params][:alpha]).to eq(1)
+    expect(gs.results[1][:params][:alpha]).to eq(0)
+    expect(gs.results[1][:score]).to be_nil
+    expect(gs.results[1][:rank]).to eq(2)
+
+  it "refits the winner on the full data and delegates predict / score" ->
+    x = [0, 1, 2, 3, 10, 11, 12, 13]
+    y = [0, 0, 0, 0, 1, 1, 1, 1]
+    gs = GridSearch.new(KNNClassifier.new, { k: [5, 1] }, 4)
+    gs.fit(x, y)
+    best = gs.best_estimator
+    expect(best != nil).to be_true
+    expect(best.fitted?).to be_true
+    expect(best.k).to eq(1)
+    expect(best.estimator_name).to eq("KNNClassifier")
+    expect(gs.predict([0, 13]).to_s).to eq("\[0, 1\]")
+    expect(gs.score(x, y).to_s).to eq("1")
+    expect(gs.estimator_name).to eq("GridSearch(KNNClassifier)")
+
+  it "leaves best_estimator nil when refit is false" ->
+    x = [0, 1, 2, 3, 10, 11, 12, 13]
+    y = [0, 0, 0, 0, 1, 1, 1, 1]
+    gs = GridSearch.new(KNNClassifier.new, { k: [1, 3] }, 4, nil, false)
+    expect(gs.fit(x, y) != nil).to be_true
+    expect(gs.best_params[:k]).to eq(1)
+    expect(gs.results.size).to eq(2)
+    expect(gs.best_estimator).to be_nil
+    expect(gs.predict(x)).to be_nil
+    expect(gs.score(x, y)).to be_nil
+
+  # Candidates are clones: the prototype is never fitted or re-tuned.
+  it "never mutates the prototype estimator" ->
+    x = [0, 1, 2, 3, 10, 11, 12, 13]
+    y = [0, 0, 0, 0, 1, 1, 1, 1]
+    proto = KNNClassifier.new(7)
+    gs = GridSearch.new(proto, { k: [1, 3] }, 4)
+    gs.fit(x, y)
+    expect(proto.k).to eq(7)
+    expect(proto.fitted?).to be_false
+
+describe "GridSearch (unsupervised)" ->
+  # No y anywhere: fit(x) alone. KMeans reports supervised? false, so
+  # CrossValidation calls fit(rows) / score(rows) through the contract's
+  # arity-safe dispatch — GridSearch itself has no idea which kind it holds.
+  it "searches an unsupervised estimator with no y" ->
+    x = [[0, 0], [10, 10], [0, 1], [10, 11], [1, 0], [11, 10], [1, 1], [11, 11]]
+    gs = GridSearch.new(KMeans.new(2), { k: [1, 2] }, 2)
+    r = gs.fit(x)
+    expect(r != nil).to be_true
+    expect(gs.best_params[:k]).to eq(2)
+    expect(gs.best_score.to_s).to eq("-5")
+    expect(gs.results[1][:params][:k]).to eq(1)
+    expect(gs.results[1][:score].to_s).to eq("-205")
+    expect(gs.best_estimator.fitted?).to be_true
+    expect(gs.best_estimator.estimator_name).to eq("KMeans")
+
+  # Unmentioned params carry over from the prototype through with_params.
+  it "carries the prototype's other params into every candidate" ->
+    x = [[0, 0], [10, 10], [0, 1], [10, 11], [1, 0], [11, 10], [1, 1], [11, 11]]
+    gs = GridSearch.new(KMeans.new(2, 7, 50), { k: [1, 2] }, 2)
+    gs.fit(x)
+    expect(gs.best_estimator.max_iter).to eq(50)
+    expect(gs.best_estimator.seed).to eq(7)
+
+describe "GridSearch determinism" ->
+  # Same seed, same grid, twice -> identical params, scores AND ranks.
+  it "reproduces identical results for the same seed" ->
+    x = [0, 1, 2, 3, 10, 11, 12, 13]
+    y = [0, 0, 0, 0, 1, 1, 1, 1]
+    first = ""
+    a = GridSearch.new(KNNClassifier.new, { k: [1, 3, 5] }, 4, 42)
+    a.fit(x, y)
+    a.results.each -> (e)
+      first += e[:params][:k].to_s + ":" + e[:score].to_s + ":" + e[:rank].to_s + " "
+    second = ""
+    b = GridSearch.new(KNNClassifier.new, { k: [1, 3, 5] }, 4, 42)
+    b.fit(x, y)
+    b.results.each -> (e)
+      second += e[:params][:k].to_s + ":" + e[:score].to_s + ":" + e[:rank].to_s + " "
+    expect(first).to eq(second)
+    # ... and it is this exact string on BOTH engines
+    expect(first).to eq("1:1:1 3:1:2 5:0.5:3 ")
+    expect(a.best_params[:k]).to eq(b.best_params[:k])
+    expect(a.best_score.to_s).to eq(b.best_score.to_s)
+
+  it "reports size and candidates before fit" ->
+    gs = GridSearch.new(KNNClassifier.new, { k: [1, 3, 5] }, 4)
+    expect(gs.size).to eq(3)
+    expect(gs.candidates.size).to eq(3)
+    expect(gs.candidates[0][:k]).to eq(1)
+    expect(gs.fitted?).to be_false
+    expect(gs.results).to be_nil
+    expect(gs.best_params).to be_nil
+    expect(gs.best_score).to be_nil
+    expect(gs.best_estimator).to be_nil
+
+describe "GridSearch degenerate input" ->
+  # A typo'd param would otherwise be swallowed by with_params and report
+  # a "winner" that never varied — so the grid's keys are checked against
+  # the estimator's own params.
+  it "returns nil for a param the estimator does not have" ->
+    x = [0, 1, 2, 3, 10, 11, 12, 13]
+    y = [0, 0, 0, 0, 1, 1, 1, 1]
+    gs = GridSearch.new(KNNClassifier.new, { bogus: [1, 2] }, 4)
+    expect(gs.fit(x, y)).to be_nil
+    expect(gs.fitted?).to be_false
+    expect(gs.best_params).to be_nil
+    expect(gs.results).to be_nil
+    # one good key alongside one bad one is still rejected
+    mixed = GridSearch.new(KNNClassifier.new, { k: [1], bogus: [2] }, 4)
+    expect(mixed.fit(x, y)).to be_nil
+
+  it "returns nil for an empty grid" ->
+    x = [0, 1, 2, 3, 10, 11, 12, 13]
+    y = [0, 0, 0, 0, 1, 1, 1, 1]
+    gs = GridSearch.new(KNNClassifier.new, {}, 4)
+    expect(gs.size).to eq(0)
+    expect(gs.candidates).to be_nil
+    expect(gs.fit(x, y)).to be_nil
+    expect(gs.fitted?).to be_false
+    nilg = GridSearch.new(KNNClassifier.new, nil, 4)
+    expect(nilg.fit(x, y)).to be_nil
+    expect(nilg.size).to eq(0)
+
+  it "returns nil for misaligned x / y and for k out of range" ->
+    x = [0, 1, 2, 3, 10, 11, 12, 13]
+    y = [0, 0, 0, 0, 1, 1, 1, 1]
+    mis = GridSearch.new(KNNClassifier.new, { k: [1] }, 4)
+    expect(mis.fit(x, [0, 1])).to be_nil
+    expect(mis.fitted?).to be_false
+    big = GridSearch.new(KNNClassifier.new, { k: [1] }, 99)
+    expect(big.fit(x, y)).to be_nil
+    one = GridSearch.new(KNNClassifier.new, { k: [1] }, 1)
+    expect(one.fit(x, y)).to be_nil
+    empty = GridSearch.new(KNNClassifier.new, { k: [1] }, 4)
+    expect(empty.fit([], [])).to be_nil
 
 spec_summary

@@ -261,6 +261,45 @@ use koala
     cky = [0, 0, 0, 1, 1, 1]
     self.check("cross_val knn", CrossValidation.cross_val_score(KNNClassifier.new(1), ckx, cky, 3), "\[1, 1, 1\]")
     self.check("cross_val nil mismatch", CrossValidation.cross_val_score(LinearRegression.new, [1, 2, 3], [1, 2]) == nil, true)
+    # unsupervised CV: no y; interleaved two-square data, both folds -5
+    ukx = [[0, 0], [10, 10], [0, 1], [10, 11], [1, 0], [11, 10], [1, 1], [11, 11]]
+    self.check("cross_val unsupervised", CrossValidation.cross_val_score(KMeans.new(2), ukx, nil, 2), "\[-5, -5\]")
+    self.check("cross_val supervised needs y", CrossValidation.cross_val_score(LinearRegression.new, cvx, nil, 5) == nil, true)
+
+    # --- GridSearch (hyperparameter search by cross-validated score) ---
+    # Two tight clusters: k = 1 / 3 score 1 on every fold, k = 5 scores 0.
+    # k = 1 is listed LAST, so electing it proves scores are compared.
+    gkx = [0, 1, 2, 3, 10, 11, 12, 13]
+    gky = [0, 0, 0, 0, 1, 1, 1, 1]
+    gs = GridSearch.new(KNNClassifier.new, { k: [5, 1] }, 4)
+    self.check("gridsearch size", gs.size, 2)
+    self.check("gridsearch fit self", gs.fit(gkx, gky) != nil, true)
+    self.check("gridsearch best k", gs.best_params[:k], 1)
+    self.check("gridsearch best score", gs.best_score, 1)
+    self.check("gridsearch rank1", gs.results[0][:params][:k], 1)
+    self.check("gridsearch rank2 score", gs.results[1][:score], 0)
+    self.check("gridsearch refit fitted", gs.best_estimator.fitted?, true)
+    self.check("gridsearch predict", gs.predict([0, 13]), "\[0, 1\]")
+    # candidate order is a pure function of the grid: keys sorted by name,
+    # last key varying fastest
+    gcands = GridSearch.candidates({ b: [1, 2], a: [3, 4] })
+    self.check("gridsearch product size", gcands.size, 4)
+    self.check("gridsearch product order", gcands[1][:a].to_s + "/" + gcands[1][:b].to_s, "3/2")
+    self.check("gridsearch key order", GridSearch.grid_keys({ zebra: 1, alpha: 2 }).join(","), "alpha,zebra")
+    # ties break to the first candidate enumerated: reversing the list
+    # reverses the winner
+    gtie = GridSearch.new(KNNClassifier.new, { k: [3, 1, 5] }, 4)
+    gtie.fit(gkx, gky)
+    self.check("gridsearch tie break", gtie.best_params[:k], 3)
+    # unsupervised search, no y at all
+    gum = GridSearch.new(KMeans.new(2), { k: [1, 2] }, 2)
+    gum.fit(ukx)
+    self.check("gridsearch unsupervised", gum.best_params[:k], 2)
+    self.check("gridsearch unsupervised score", gum.best_score, -5)
+    # degenerate: unknown param, empty grid, misaligned inputs -> nil
+    self.check("gridsearch unknown param nil", GridSearch.new(KNNClassifier.new, { bogus: [1] }, 4).fit(gkx, gky) == nil, true)
+    self.check("gridsearch empty grid nil", GridSearch.new(KNNClassifier.new, {}, 4).fit(gkx, gky) == nil, true)
+    self.check("gridsearch misaligned nil", GridSearch.new(KNNClassifier.new, { k: [1] }, 4).fit(gkx, [0, 1]) == nil, true)
 
     # --- KMeans (unsupervised: Lloyd's algorithm) ---
     # Two 2x2 boxes; default init = first two distinct rows. Converges in

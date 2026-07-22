@@ -37,6 +37,7 @@
 
 use spec
 use koala
+use support
 
 # --- helpers (spec-local; prefixed sw_ to stay out of koala's way) ---
 
@@ -169,8 +170,8 @@ describe "Weighted metrics" ->
     act = [1, 2, 4]
     # weighted mean of act under [2,1,1] is 8/4 = 2, so
     # ss_tot = 2*1 + 0 + 4 = 6, ss_res = 1, r2 = 1 - 1/6
-    expect(Metrics.r2(preds, act, [2, 1, 1]).to_s).to eq("0.833333")
-    expect(Metrics.r2([1, 1, 2, 3], [1, 1, 2, 4]).to_s).to eq("0.833333")
+    expect(Metrics.r2(preds, act, [2, 1, 1])).to be_num("0.833333")
+    expect(Metrics.r2([1, 1, 2, 3], [1, 1, 2, 4])).to be_num("0.833333")
     # ... and it is NOT the unweighted number, so the weights really bit
     expect(Metrics.r2(preds, act).to_s).to eq(Metrics.r2(preds, act).to_s)
     expect(sw_gap(Metrics.r2(preds, act, [2, 1, 1]), Metrics.r2(preds, act)) > sw_tol).to be_true

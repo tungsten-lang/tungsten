@@ -141,13 +141,10 @@
 # successful fit and when a query row's width differs from the fitted
 # feature count, and predict_proba returns nil for a label the fit never saw.
 #
-# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
-# interpreter cannot resolve @ivars from a block body — and methods
-# containing closures avoid early `return`. Arrays are built with push
-# (Array `+` and `insert` are unavailable). No float literal appears here:
-# every float derives from the data via .to_f. Array#sort is not used
-# (its cross-engine order is not guaranteed) — DecisionTree.sorted_copy is
-# an explicit insertion sort.
+# NOTE: every float here derives from the data via .to_f — a bare decimal
+# literal is a Decimal and does not coerce with Float. Array#sort is not
+# used (its cross-engine order is not guaranteed) — DecisionTree.sorted_copy
+# is an explicit insertion sort.
 
 # The shared tree machinery, as statics so it is callable from inside a
 # block and reusable by BOTH estimators below (and by a future forest).
@@ -220,8 +217,7 @@
   # Written as a separate method rather than a branch inside `variance`
   # so the unweighted path stays on exactly the arithmetic it always
   # used — no hand-computed spec value can shift by a last bit. The two
-  # loops use DIFFERENT counter names on purpose: a local captured by two
-  # sibling closures in one block miscompiles today.
+  # loops keep each counter in its own pass.
   -> .weighted_variance(ys, wts)
     n = ys.size
     out = 0.to_f

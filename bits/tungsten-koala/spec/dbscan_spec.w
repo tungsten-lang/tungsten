@@ -30,6 +30,7 @@
 
 use spec
 use koala
+use support
 
 # --- Shared fixtures -------------------------------------------------
 
@@ -431,10 +432,10 @@ describe "DBSCAN score" ->
   # A density model has no inertia, so `score` is the SILHOUETTE of
   # predict(x) over the rows that are not noise. scikit-learn's
   # silhouette_score over the eight non-noise rows of this fixture is
-  # 0.9195260905673606; Float#to_s prints six significant digits.
+  # 0.9195260905673606, compared here to six significant figures.
   it "is the silhouette over the non-noise rows" ->
     m = Fx.fitted_blobs
-    expect(m.score(Fx.blobs).to_s).to eq("0.919526")
+    expect(m.score(Fx.blobs)).to be_num("0.919526")
     expect(m.score(Fx.blobs) > 9.to_f / 10.to_f).to be_true
 
   # Noise is EXCLUDED rather than pooled into a pseudo-cluster: -1 is the
@@ -689,7 +690,7 @@ describe "DBSCAN estimator contract" ->
     m = DBSCAN.new(2, 3)
     expect(Estimator.fit_model(m, Fx.blobs, nil)).to eq(m)
     expect(m.labels.join(",")).to eq("0,0,0,0,1,1,1,1,-1")
-    expect(Estimator.score_model(m, Fx.blobs, nil).to_s).to eq("0.919526")
+    expect(Estimator.score_model(m, Fx.blobs, nil)).to be_num("0.919526")
 
 # --- persistence -----------------------------------------------------
 

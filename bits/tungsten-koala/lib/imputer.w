@@ -39,8 +39,11 @@
 # [name, fill] pairs answer to their own name, because `params` means
 # "what you set" everywhere else in koala.
 #
-# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
-# interpreter cannot resolve @ivars from a block body.
+# SAMPLE WEIGHTS: optional trailing argument on fit —
+# `imp.fit(df, [2, 1, 1])`. :mean uses the weighted mean of non-nil
+# cells; :median / :mode still use the unweighted rule but only on
+# rows with positive weight (zero-weight rows are dropped before the
+# statistic); :constant ignores weights. Unusable weight vector => nil.
 + Imputer
   is Tunable
 
@@ -63,30 +66,40 @@
   # :mean and :median never fit a non-numeric column (Stats.numeric?):
   # averaging strings is meaningless, so a mixed frame imputes cleanly
   # with columns = nil. :mode and :constant fit any column.
-  -> fit(df)
+  # Optional sample_weight: see header. Unusable weights => nil.
+  -> fit(df, sample_weight = nil)
     frame = Estimator.frame(df)
-    strategy = @strategy
-    fill_value = @fill_value
-    wanted = @columns
-    wanted = frame.column_names if wanted == nil
-    needs_numeric = false
-    needs_numeric = true if strategy == :mean
-    needs_numeric = true if strategy == :median
-    names = []
-    fills = []
-    wanted.each -> (name)
-      values = frame.column_values(name)
-      usable = false
-      usable = true if values != nil
-      if usable && needs_numeric
-        usable = Stats.numeric?(values)
-      if usable
-        names.push(name)
-        fills.push(Imputer.fill_for(strategy, values, fill_value))
-    @fit_names = names
-    @fit_fills = fills
-    @fitted = true
-    self
+    n = frame.row_count
+    wts = nil
+    ok = true
+    if sample_weight != nil
+      wts = Estimator.weight_values(sample_weight, n)
+      ok = false if wts == nil
+    out = nil
+    if ok
+      strategy = @strategy
+      fill_value = @fill_value
+      wanted = @columns
+      wanted = frame.column_names if wanted == nil
+      needs_numeric = false
+      needs_numeric = true if strategy == :mean
+      needs_numeric = true if strategy == :median
+      names = []
+      fills = []
+      wanted.each -> (name)
+        values = frame.column_values(name)
+        usable = false
+        usable = true if values != nil
+        if usable && needs_numeric
+          usable = Stats.numeric?(values)
+        if usable
+          names.push(name)
+          fills.push(Imputer.fill_for(strategy, values, fill_value, wts))
+      @fit_names = names
+      @fit_fills = fills
+      @fitted = true
+      out = self
+    out
 
   # New DataFrame with nils replaced by fitted fills; nil before fit.
   -> transform(df)
@@ -118,8 +131,8 @@
       out = DataFrame.new(pairs)
     out
 
-  -> fit_transform(df)
-    self.fit(df)
+  -> fit_transform(df, sample_weight = nil)
+    self.fit(df, sample_weight)
     self.transform(df)
 
   # --- Tunable contract (see lib/estimator_base.w) ---
@@ -149,20 +162,36 @@
     out
 
   # The fill value a strategy learns from one column's values.
+  # Optional weights: :mean uses weighted_mean_clean; :median/:mode
+  # drop zero-weight rows then run the plain statistic; :constant
+  # ignores weights.
   #
   # NOTE: sequential block-ifs assigning `out` — `return Stats.mean(...)`
   # under an if segfaults the interpreter when the returned value is a
   # cross-class static call (same as Pivot.aggregate).
-  -> .fill_for(strategy, values, fill_value)
+  -> .fill_for(strategy, values, fill_value, weights = nil)
     out = nil
     if strategy == :mean
-      out = Stats.mean(values)
+      out = Estimator.weighted_mean_clean(values, weights)
     if strategy == :median
-      out = Stats.median(values)
+      out = Stats.median(Imputer.positive_weight_values(values, weights))
     if strategy == :mode
-      out = Stats.mode(values)
+      out = Stats.mode(Imputer.positive_weight_values(values, weights))
     if strategy == :constant
       out = fill_value
+    out
+
+  # values restricted to rows with positive weight (or the full column
+  # when weights is nil). Nils stay in so Stats.clean still applies.
+  -> .positive_weight_values(values, weights)
+    out = values
+    if weights != nil
+      kept = []
+      i = 0
+      values.each -> (v)
+        kept.push(v) if weights[i] > 0.to_f
+        i += 1
+      out = kept
     out
 
   # --- Persistence (see lib/persist.w) ---

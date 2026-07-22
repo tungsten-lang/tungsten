@@ -667,15 +667,6 @@ describe "Lasso / ElasticNet persistence" ->
   # Persist's decoder) rather than handing the state hash across in
   # memory.
   #
-  # NOTE: `Persist.loads` cannot yet rebuild these two, because
-  # `Persist.rebuild` in lib/persist.w dispatches on an explicit table of
-  # class names and this file may not edit it. The two lines it needs are
-  #     out = Lasso.load_state(state) if name == "Lasso"
-  #     out = ElasticNet.load_state(state) if name == "ElasticNet"
-  # and everything on both sides of them is proven here: dumps writes a
-  # well-formed payload tagged with the right class, and load_state
-  # rebuilds an exactly-predicting model from the state that payload
-  # carries.
   it "saves and reloads a fitted Lasso exactly" ->
     x = ds2_x
     y = ds2_y
@@ -689,9 +680,7 @@ describe "Lasso / ElasticNet persistence" ->
     expect(lines[0]).to eq(Persist.header)
     expect(lines[1]).to eq("o Lasso")
 
-    res = Persist.decode(lines, 2)
-    expect(res[:ok]).to be_true
-    back = Lasso.load_state(res[:v])
+    back = Persist.loads(text)
     expect(back != nil).to be_true
     expect(back.fitted?).to be_true
     expect(back.params[:alpha] == m.params[:alpha]).to be_true
@@ -715,9 +704,7 @@ describe "Lasso / ElasticNet persistence" ->
     expect(text != nil).to be_true
     lines = Persist.payload_lines(text)
     expect(lines[1]).to eq("o ElasticNet")
-    res = Persist.decode(lines, 2)
-    expect(res[:ok]).to be_true
-    back = ElasticNet.load_state(res[:v])
+    back = Persist.loads(text)
     expect(back != nil).to be_true
     expect(back.params[:l1_ratio] == m.params[:l1_ratio]).to be_true
     expect(same_floats?(back.predict(x), m.predict(x))).to be_true

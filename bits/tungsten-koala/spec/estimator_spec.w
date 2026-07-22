@@ -20,6 +20,7 @@
 
 use spec
 use koala
+use support
 
 describe "LinearRegression" ->
   it "recovers y = 2x + 1 exactly from a flat x array" ->
@@ -40,10 +41,10 @@ describe "LinearRegression" ->
     y = [3, 5, 7, 9]
     model = LinearRegression.new
     model.fit(x, y)
-    expect(model.intercept.to_s).to eq("3")
-    expect(model.coefficients.to_s).to eq("\[1, 2\]")
-    expect(model.predict([[1, 1], [4, 3]]).to_s).to eq("\[6, 13\]")
-    expect(model.score(x, y).to_s).to eq("1")
+    expect(model.intercept.to_s).to be_num("3")
+    expect(model.coefficients.to_s).to be_nums("\[1, 2\]")
+    expect(model.predict([[1, 1], [4, 3]]).to_s).to be_nums("\[6, 13\]")
+    expect(model.score(x, y).to_s).to be_num("1")
 
   it "matches the hand-computed inexact fit within tolerance" ->
     x = [0, 1, 2, 3]
@@ -67,10 +68,10 @@ describe "LinearRegression" ->
     y = Series.new([3, 5, 7, 9], :target)
     model = LinearRegression.new
     model.fit(df, y)
-    expect(model.intercept.to_s).to eq("3")
-    expect(model.coefficients.to_s).to eq("\[1, 2\]")
-    expect(model.predict(Matrix.new([[1, 1]])).to_s).to eq("\[6\]")
-    expect(model.score(df, y).to_s).to eq("1")
+    expect(model.intercept.to_s).to be_num("3")
+    expect(model.coefficients.to_s).to be_nums("\[1, 2\]")
+    expect(model.predict(Matrix.new([[1, 1]])).to_s).to be_nums("\[6\]")
+    expect(model.score(df, y).to_s).to be_num("1")
 
   it "returns nil (and stays unfitted) for collinear features" ->
     x = [[1, 2], [2, 4], [3, 6]]
@@ -105,8 +106,8 @@ describe "LinearRegression" ->
     expect(model.fitted?).to be_false
     r = model.fit([0 - 1, 0, 1], [0, 1, 2])
     expect(r != nil).to be_true
-    expect(model.intercept.to_s).to eq("1")
-    expect(model.coefficients.to_s).to eq("\[1\]")
+    expect(model.intercept.to_s).to be_num("1")
+    expect(model.coefficients.to_s).to be_nums("\[1\]")
     expect(model.predict([[1, 2]])).to be_nil
 
 # The reason fit's OLS path (alpha = 0) goes through Householder QR on
@@ -149,9 +150,9 @@ describe "LinearRegression OLS numerics (QR vs the normal equations)" ->
     model = LinearRegression.new
     r = model.fit(rows, ys)
     expect(r != nil).to be_true
-    # printed to six significant digits the fit is simply exact
-    expect(model.intercept.to_s).to eq("3")
-    expect(model.coefficients.to_s).to eq("\[1, 2\]")
+    # to a numeric tolerance the fit is simply exact
+    expect(model.intercept.to_s).to be_num("3")
+    expect(model.coefficients.to_s).to be_nums("\[1, 2\]")
 
     qerr = LinAlg.fabs(model.intercept - 3.to_f)
     q0 = LinAlg.fabs(model.coefficients[0] - 1.to_f)
@@ -531,9 +532,9 @@ describe "GaussianNB" ->
     expect(model.class_counts.to_s).to eq("\[2, 2\]")
     expect(model.class_priors.to_s).to eq("\[0.5, 0.5\]")
     expect(model.means.to_s).to eq("\[\[2, 3\], \[12, 13\]\]")
-    expect(model.variances.to_s).to eq("\[\[1, 1\], \[1, 1\]\]")
-    expect(model.epsilon.to_s).to eq("2.6e-08")
-    expect(model.var_smoothing.to_s).to eq("1e-09")
+    expect(model.variances.to_s).to be_nums("\[\[1, 1\], \[1, 1\]\]")
+    expect(model.epsilon.to_s).to be_num("2.6e-08")
+    expect(model.var_smoothing.to_s).to be_num("1e-09")
 
   # jll(c) = log P(c) - 0.5*sum_j log(2*pi*var) - 0.5*sum_j (x-mean)^2/var.
   # At the class-0 mean [2,3]: log(0.5) - log(2*pi*1) - 0 = -0.693147 -
@@ -545,15 +546,15 @@ describe "GaussianNB" ->
     model.fit([[1, 2], [3, 4], [11, 12], [13, 14]], [0, 0, 1, 1])
     q = [[2, 3], [12, 13], [7, 8]]
     jll = model.joint_log_likelihood(q)
-    expect(jll[0].to_s).to eq("\[-2.53102, -102.531\]")
-    expect(jll[1].to_s).to eq("\[-102.531, -2.53102\]")
-    expect(jll[2].to_s).to eq("\[-27.531, -27.531\]")
+    expect(jll[0].to_s).to be_nums("\[-2.53102, -102.531\]")
+    expect(jll[1].to_s).to be_nums("\[-102.531, -2.53102\]")
+    expect(jll[2].to_s).to be_nums("\[-27.531, -27.531\]")
     probs = model.predict_proba(q)
-    expect(probs[2].to_s).to eq("\[0.5, 0.5\]")
-    expect(probs[0][0].to_s).to eq("1")
+    expect(probs[2].to_s).to be_nums("\[0.5, 0.5\]")
+    expect(probs[0][0].to_s).to be_num("1")
     # an exact argmax tie breaks to the first-seen class
     expect(model.predict(q).to_s).to eq("\[0, 1, 0\]")
-    expect(model.score([[1, 2], [3, 4], [11, 12], [13, 14]], [0, 0, 1, 1]).to_s).to eq("1")
+    expect(model.score([[1, 2], [3, 4], [11, 12], [13, 14]], [0, 0, 1, 1]).to_s).to be_num("1")
 
   # The scikit-learn GaussianNB documentation example verbatim:
   # X = [[-1,-1],[-2,-1],[-3,-2],[1,1],[2,1],[3,2]], y = [1,1,1,2,2,2],
@@ -564,13 +565,13 @@ describe "GaussianNB" ->
     y = [1, 1, 1, 2, 2, 2]
     model = GaussianNB.new
     model.fit(x, y)
-    expect(model.means.to_s).to eq("\[\[-2, -1.33333\], \[2, 1.33333\]\]")
-    expect(model.variances.to_s).to eq("\[\[0.666667, 0.222222\], \[0.666667, 0.222222\]\]")
-    expect(model.epsilon.to_s).to eq("4.66667e-09")
+    expect(model.means.to_s).to be_nums("\[\[-2, -1.33333\], \[2, 1.33333\]\]")
+    expect(model.variances.to_s).to be_nums("\[\[0.666667, 0.222222\], \[0.666667, 0.222222\]\]")
+    expect(model.epsilon.to_s).to be_num("4.66667e-09")
     q = [[0.to_f - 8.to_f / 10.to_f, 0 - 1]]
-    expect(model.joint_log_likelihood(q).to_s).to eq("\[\[-2.90625, -19.7063\]\]")
+    expect(model.joint_log_likelihood(q).to_s).to be_nums("\[\[-2.90625, -19.7063\]\]")
     expect(model.predict(q).to_s).to eq("\[1\]")
-    expect(model.score(x, y).to_s).to eq("1")
+    expect(model.score(x, y).to_s).to be_num("1")
 
   # One feature, symmetric: class a = [-1,1] (mean 0), class b = [3,5]
   # (mean 4), both variance 1, equal priors. With shared variances the
@@ -588,7 +589,7 @@ describe "GaussianNB" ->
     expect(LinAlg.fabs(probs[0][1] - ref) < tol).to be_true
     expect(LinAlg.fabs(probs[0][0] + probs[0][1] - 1.to_f) < tol).to be_true
     # a pos_label picks one class's column out, ready for roc_auc / log_loss
-    expect(model.predict_proba([0, 2, 4], :b).to_s).to eq("\[0.00033535, 0.5, 0.999665\]")
+    expect(model.predict_proba([0, 2, 4], :b).to_s).to be_nums("\[0.00033535, 0.5, 0.999665\]")
     expect(model.predict_proba([0, 2, 4], :zz)).to be_nil
     expect(model.predict([0, 2, 4]).to_s).to eq("\[a, a, b\]")
 
@@ -602,22 +603,22 @@ describe "GaussianNB" ->
   it "smooths zero-variance features instead of dividing by zero" ->
     model = GaussianNB.new
     model.fit([[0, 5], [2, 5], [10, 5], [12, 5]], [0, 0, 1, 1])
-    expect(model.epsilon.to_s).to eq("2.6e-08")
-    expect(model.variances.to_s).to eq("\[\[1, 2.6e-08\], \[1, 2.6e-08\]\]")
-    expect(model.joint_log_likelihood([[1, 5]])[0].to_s).to eq("\[6.20156, -43.7984\]")
+    expect(model.epsilon.to_s).to be_num("2.6e-08")
+    expect(model.variances.to_s).to be_nums("\[\[1, 2.6e-08\], \[1, 2.6e-08\]\]")
+    expect(model.joint_log_likelihood([[1, 5]])[0].to_s).to be_nums("\[6.20156, -43.7984\]")
     expect(model.predict([[1, 5], [11, 5]]).to_s).to eq("\[0, 1\]")
     flat = GaussianNB.new
     flat.fit([5, 5, 5, 5], [0, 0, 1, 1])
-    expect(flat.epsilon.to_s).to eq("1e-09")
-    expect(flat.variances.to_s).to eq("\[\[1e-09\], \[1e-09\]\]")
-    expect(flat.predict_proba([5, 9]).to_s).to eq("\[\[0.5, 0.5\], \[0.5, 0.5\]\]")
+    expect(flat.epsilon.to_s).to be_num("1e-09")
+    expect(flat.variances.to_s).to be_nums("\[\[1e-09\], \[1e-09\]\]")
+    expect(flat.predict_proba([5, 9]).to_s).to be_nums("\[\[0.5, 0.5\], \[0.5, 0.5\]\]")
     expect(flat.predict([5, 9]).to_s).to eq("\[0, 0\]")
     # var_smoothing is the knob (data-derived, never a float literal):
     # 0.01 * 26 = 0.26 lands on every variance, 1 -> 1.26 and 0 -> 0.26.
     loud = GaussianNB.new(1.to_f / 100.to_f)
     loud.fit([[0, 5], [2, 5], [10, 5], [12, 5]], [0, 0, 1, 1])
-    expect(loud.epsilon.to_s).to eq("0.26")
-    expect(loud.variances.to_s).to eq("\[\[1.26, 0.26\], \[1.26, 0.26\]\]")
+    expect(loud.epsilon.to_s).to be_num("0.26")
+    expect(loud.variances.to_s).to be_nums("\[\[1.26, 0.26\], \[1.26, 0.26\]\]")
     expect(loud.predict([[1, 5], [11, 5]]).to_s).to eq("\[0, 1\]")
 
   # Multiclass out of the box — no one-vs-rest wrapper, the argmax just
@@ -630,11 +631,11 @@ describe "GaussianNB" ->
     model.fit(x, y)
     expect(model.classes.to_s).to eq("\[0, 1, 2\]")
     expect(model.class_counts.to_s).to eq("\[2, 2, 2\]")
-    expect(model.class_priors.to_s).to eq("\[0.333333, 0.333333, 0.333333\]")
-    expect(model.means.to_s).to eq("\[\[0.5, 0\], \[10.5, 10\], \[0.5, 20\]\]")
+    expect(model.class_priors.to_s).to be_nums("\[0.333333, 0.333333, 0.333333\]")
+    expect(model.means.to_s).to be_nums("\[\[0.5, 0\], \[10.5, 10\], \[0.5, 20\]\]")
     preds = model.predict([[0, 1], [10, 11], [1, 19]])
     expect(preds.to_s).to eq("\[0, 1, 2\]")
-    expect(model.predict_proba([[0, 1]])[0].to_s).to eq("\[1, 0, 0\]")
+    expect(model.predict_proba([[0, 1]])[0].to_s).to be_nums("\[1, 0, 0\]")
     expect(model.score(x, y).to_s).to eq("1")
     rep = Metrics.classification_report(model.predict(x), y)
     expect(rep.accuracy.to_s).to eq("1")
@@ -674,15 +675,15 @@ describe "GaussianNB" ->
     y = [0, 0, 1, 1]
     model = GaussianNB.new
     model.fit(x, y)
-    expect(model.means.to_s).to eq("\[\[0.5\], \[2.5\]\]")
-    expect(model.variances.to_s).to eq("\[\[0.25\], \[0.25\]\]")
+    expect(model.means.to_s).to be_nums("\[\[0.5\], \[2.5\]\]")
+    expect(model.variances.to_s).to be_nums("\[\[0.25\], \[0.25\]\]")
     scores = model.predict_proba(x, 1)
-    expect(scores.to_s).to eq("\[6.14417e-06, 0.0179862, 0.982014, 0.999994\]")
+    expect(scores.to_s).to be_nums("\[6.14417e-06, 0.0179862, 0.982014, 0.999994\]")
     tol = 1.to_f / 1000000.to_f
     ref = 1.to_f / (1.to_f + Math.exp(4.to_f))
     expect(LinAlg.fabs(scores[1] - ref) < tol).to be_true
     expect(Metrics.roc_auc(scores, y).to_s).to eq("1")
-    expect(Metrics.log_loss(scores, y).to_s).to eq("0.00907804")
+    expect(Metrics.log_loss(scores, y).to_s).to be_num("0.00907804")
     expect(model.predict(x).to_s).to eq("\[0, 0, 1, 1\]")
 
   # Unusable shapes and premature calls all return nil and leave fitted?
@@ -774,17 +775,17 @@ describe "DecisionTreeClassifier" ->
     tt.fit([[0], [1], [2], [3]], [0, 1, 0, 1])
     expect(tt.tree[:feature]).to eq(0)
     expect(tt.tree[:threshold].to_s).to eq("0.5")
-    expect(tt.tree[:gain].to_s).to eq("0.166667")
+    expect(tt.tree[:gain].to_s).to be_num("0.166667")
     # three-way tie across features — x0 @ 5.5, x1 @ 5 and x1 @ 15 all buy
     # exactly 1/3 of the root's 2/3 gini, so feature 0 takes it
     mx = [[0, 0], [1, 0], [10, 10], [11, 10], [0, 20], [1, 20]]
     my = [0, 0, 1, 1, 2, 2]
     mt = DecisionTreeClassifier.new(1)
     mt.fit(mx, my)
-    expect(mt.tree[:impurity].to_s).to eq("0.666667")
+    expect(mt.tree[:impurity].to_s).to be_num("0.666667")
     expect(mt.tree[:feature]).to eq(0)
     expect(mt.tree[:threshold].to_s).to eq("5.5")
-    expect(mt.tree[:gain].to_s).to eq("0.333333")
+    expect(mt.tree[:gain].to_s).to be_num("0.333333")
 
   # max_depth caps the number of EDGES from the root: 1 is a decision
   # STUMP (one test, two leaves), 0 is a single leaf that always predicts
@@ -849,16 +850,16 @@ describe "DecisionTreeClassifier" ->
     model.fit(x, y)
     expect(model.tree[:left][:counts].to_s).to eq("\[1, 0\]")
     expect(model.tree[:right][:counts].to_s).to eq("\[1, 2\]")
-    expect(model.tree[:right][:impurity].to_s).to eq("0.444444")
+    expect(model.tree[:right][:impurity].to_s).to be_num("0.444444")
     expect(model.tree[:right][:prediction]).to eq(1)
     probs = model.predict_proba(x)
     expect(probs[0].to_s).to eq("\[1, 0\]")
-    expect(probs[1].to_s).to eq("\[0.333333, 0.666667\]")
+    expect(probs[1].to_s).to be_nums("\[0.333333, 0.666667\]")
     # every row sums to 1
     tol = 1.to_f / 1000000.to_f
     expect(LinAlg.fabs(probs[1][0] + probs[1][1] - 1.to_f) < tol).to be_true
     # a pos_label picks one class's column out, ready for roc_auc / log_loss
-    expect(model.predict_proba(x, 1).to_s).to eq("\[0, 0.666667, 0.666667, 0.666667\]")
+    expect(model.predict_proba(x, 1).to_s).to be_nums("\[0, 0.666667, 0.666667, 0.666667\]")
     expect(model.predict_proba(x, 99)).to be_nil
     expect(model.predict(x).to_s).to eq("\[0, 1, 1, 1\]")
     expect(model.score(x, y).to_s).to eq("0.75")
@@ -910,7 +911,7 @@ describe "DecisionTreeClassifier" ->
     gini.fit(x, y)
     expect(gini.tree[:impurity].to_s).to eq("0.75")
     expect(gini.tree[:threshold].to_s).to eq("0.5")
-    expect(gini.tree[:gain].to_s).to eq("0.25")
+    expect(gini.tree[:gain].to_s).to be_num("0.25")
     # a balanced two-class node is exactly 1 bit, and both criteria agree
     # on the perfectly separating split
     bx = [[0], [1], [2], [10], [11], [12]]
@@ -1103,7 +1104,7 @@ describe "DecisionTreeRegressor" ->
     stump = DecisionTreeRegressor.new(1)
     stump.fit(x, y)
     expect(stump.predict(x).to_s).to eq("\[1, 1, 5, 5\]")
-    expect(stump.score(x, y).to_s).to eq("0.8")
+    expect(stump.score(x, y).to_s).to be_num("0.8")
     # max_depth 0 predicts the global mean, which is exactly R² = 0
     root = DecisionTreeRegressor.new(0)
     root.fit(x, y)

@@ -37,14 +37,11 @@
 # return nil for genuinely collinear features, so fit's contract below
 # is the same as it always was.
 #
-# alpha honesty (verified by probe on both engines): pass an INTEGER
-# (`LinearRegression.new(12)`), or a data-derived float built with
-# .to_f arithmetic (`LinearRegression.new(1.to_f / 2.to_f)`). Never
-# write a float LITERAL for it — a float literal anywhere in a program
-# (even `a / 10.0` in an unrelated top-level line) corrupts later
-# method-call arguments on BOTH engines today ("undefined method for
-# Object (numeric 0xfffd...)"), so fractional alpha must come from
-# integer .to_f division.
+# alpha honesty: pass an INTEGER (`LinearRegression.new(12)`) or a
+# Float built with .to_f arithmetic (`LinearRegression.new(1.to_f /
+# 2.to_f)`). Keep it in Float — a bare decimal literal is a Decimal,
+# which does not coerce with the Float arithmetic inside the ridge
+# solver, so a fractional alpha comes from integer .to_f division.
 #
 # Accepted shapes, normalized in one place (feature_rows /
 # target_values): x is a DataFrame (numeric columns only, in column
@@ -62,10 +59,9 @@
 # return nil before a successful fit, and predict returns nil when a
 # row's width differs from the fitted feature count.
 #
-# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
-# interpreter cannot resolve @ivars from a block body — and methods
-# containing closures avoid early `return` (see stats.w). No float
-# literals appear here: every float derives from the data via .to_f.
+# NOTE: every float here derives from the data via .to_f — Decimal
+# literals and Float values do not mix, so the numeric code stays in
+# Float throughout.
 + LinearRegression
   is Estimable
   is SupervisedEstimator

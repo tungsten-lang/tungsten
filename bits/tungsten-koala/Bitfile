@@ -3,7 +3,7 @@ tungsten "tungsten-0.0.1"
 name        "tungsten-koala"
 version     "0.1.0"
 summary     "Data science and machine learning for Tungsten"
-description "Koala is a friendlier pandas — DataFrames, linear algebra, matrix math, ML pipelines, and interop. Columnar storage backed by Apache Arrow for zero-copy performance."
+description "Koala is a friendlier pandas — DataFrames, Series, linear algebra, sklearn-style pipelines and estimators. Columns are ordered name/value arrays (no Arrow). Dense multi-D and GPU work route through core Tensor; sparse work through core SparseMatrix."
 license     "MIT OR Apache-2.0"
 authors     ["Tungsten Language Project"]
 

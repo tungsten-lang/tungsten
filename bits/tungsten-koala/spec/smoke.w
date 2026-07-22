@@ -9,8 +9,51 @@
 # Comparisons go through .to_s / .join — compiled Array == is identity-based,
 # and string-array to_s differs between engines (quotes), so string columns
 # are compared via join.
+#
+# Float#to_s now prints the full f64 (%.17g, round-trips) rather than the old
+# six-significant-digit %g, so a readable `want` like "0.666667" no longer
+# equals the rendered value by string. `check` therefore falls back to a
+# NUMERIC comparison (via spec/support.w): when the exact strings differ but
+# both render as the same-length list of numeric tokens, they match within a
+# relative 1e-5. Non-numeric mismatches still fail exactly.
 
 use koala
+use support
+
+# A token is numeric if it holds at least one digit and only the characters
+# that make up a decimal or scientific float.
+-> smoke_is_num_token(t)
+  if t == ""
+    return false
+  has_digit = false
+  i = 0
+  n = t.size
+  while i < n
+    c = t[i]
+    if c >= "0" && c <= "9"
+      has_digit = true
+    else
+      if c != "." && c != "-" && c != "+" && c != "e" && c != "E"
+        return false
+    i += 1
+  has_digit
+
+# True when got/want render the same list of numeric values within tolerance.
+# Declines (returns false) for anything that is not purely numeric on both
+# sides, so a real string/label mismatch still fails.
+-> smoke_num_match(g, w)
+  gt = koala_num_tokens(g)
+  wt = koala_num_tokens(w)
+  if gt.size == 0 || gt.size != wt.size
+    return false
+  i = 0
+  while i < gt.size
+    if !smoke_is_num_token(gt[i]) || !smoke_is_num_token(wt[i])
+      return false
+    if !koala_num_close(gt[i].to_f, wt[i].to_f)
+      return false
+    i += 1
+  true
 
 + KoalaSmoke
   ro :checks
@@ -24,7 +67,7 @@ use koala
     @checks += 1
     g = got.to_s
     w = want.to_s
-    if g == w
+    if g == w || smoke_num_match(g, w)
       << "  ok - " + label
     else
       @failures += 1

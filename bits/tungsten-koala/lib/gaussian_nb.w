@@ -72,10 +72,9 @@
 # when a query row's width differs from the fitted feature count, and
 # predict_proba returns nil for a label the fit never saw.
 #
-# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
-# interpreter cannot resolve @ivars from a block body — and methods
-# containing closures avoid early `return` (see stats.w). Every float
-# derives from the data via .to_f with ONE exception: 2*pi, which has no
+# NOTE: every float derives from the data via .to_f (a bare decimal
+# literal is a Decimal and does not coerce with Float) with ONE
+# exception: 2*pi, which has no
 # integer derivation (Math.atan here is a low-precision polynomial, so
 # 4*atan(1) is off by ~1e-5). It is written once, in .two_pi, using `~` —
 # Tungsten's explicit f64 literal, the form core/math.w and core/stats.w

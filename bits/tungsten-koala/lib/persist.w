@@ -116,9 +116,9 @@
 # behaviour rather than `type`, because `type(obj)` on an instance is
 # "Hash" on the interpreter and cannot tell an object from a hash.
 #
-# NOTE: no float literal appears here (every float derives via .to_f), no
-# `return` sits inside a closure-bearing method, arrays are built with
-# push, and respond_to? is passed a STRING — the bit's portability rules.
+# NOTE: no float literal appears here (every float derives via .to_f — a
+# bare decimal literal is a Decimal and does not coerce with Float), and
+# respond_to? is passed a STRING — the bit's portability rules.
 + Persist
   # The format version this build writes, and the only one it reads.
   -> .version
@@ -191,6 +191,7 @@
     out = Lasso.load_state(state) if name == "Lasso"
     out = ElasticNet.load_state(state) if name == "ElasticNet"
     out = KNNClassifier.load_state(state) if name == "KNNClassifier"
+    out = KNeighborsRegressor.load_state(state) if name == "KNeighborsRegressor"
     out = LogisticRegression.load_state(state) if name == "LogisticRegression"
     out = GaussianNB.load_state(state) if name == "GaussianNB"
     out = KMeans.load_state(state) if name == "KMeans"
@@ -203,6 +204,8 @@
     out = PCA.load_state(state) if name == "PCA"
     out = Imputer.load_state(state) if name == "Imputer"
     out = Encoder.load_state(state) if name == "Encoder"
+    out = VarianceThreshold.load_state(state) if name == "VarianceThreshold"
+    out = SelectKBest.load_state(state) if name == "SelectKBest"
     out = Pipeline.load_state(state) if name == "Pipeline"
     out
 

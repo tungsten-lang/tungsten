@@ -86,10 +86,9 @@
 # and a test percentage that rounds to an empty test or an empty train
 # (ShuffleSplit).
 #
-# NOTE: locals are hoisted from ivars before any `-> (x)` block, methods
-# containing closures avoid early `return`, arrays are built with `push`
-# (Array `+` and `insert` are unavailable), and no float literals appear
-# here — the same conventions as the rest of koala's estimator code.
+# NOTE: floats derive from the data via .to_f — a bare decimal literal is
+# a Decimal and does not coerce with Float — the same convention as the
+# rest of koala's estimator code.
 
 # The uniform splitter contract: one method, so CrossValidation can take
 # ANY splitter without naming a concrete class. Declared, not enforced —

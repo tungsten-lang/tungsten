@@ -14,11 +14,11 @@
 #
 # NOTE: this Matrix intentionally shadows core's generic Matrix<T>
 # (the column-major Metal/GPU-convention type) inside programs that
-# `use koala`. Interop with core Mat types — and routing big matmuls
-# through Math/Metal — is a follow-up, deliberately out of scope here.
-#
-# NOTE: locals are hoisted from ivars before any `-> (x)` block, and
-# methods containing closures avoid early `return` (see stats.w).
+# `use koala`. Large matmuls can route through core/blas `dgemm` via
+# `.matmul_accel` (compiled + Accelerate); the default `.matmul` stays
+# pure Tungsten so the interpreter and small products keep working.
+# Multi-D / GPU faces live on core Tensor — convert with `.to_tensor`
+# when that path is needed (compiled-only factories).
 + Matrix
   ro :entries    # nested row arrays, rectangular after construction
 
@@ -193,6 +193,8 @@
   # --- Matrix products ---
 
   # Matrix multiplication; nil unless self.col_count == other.row_count.
+  # Pure Tungsten triple loop — correct on both engines. For large
+  # products under the compiler, prefer matmul_accel (dgemm).
   -> matmul(other)
     out = nil
     if self.col_count == other.row_count
@@ -209,6 +211,49 @@
             total += ar[k] * b[k][j]
           row.push(total)
         rows.push(row)
+      out = Matrix.new(rows)
+    out
+
+  # Accelerate dgemm path (core/blas). Returns nil on shape mismatch.
+  # Requires a compiled program linked with the BLAS bridge; the
+  # interpreter has no f64_array / dgemm, so do not call this there —
+  # use matmul instead. Result entries are floats.
+  -> matmul_accel(other)
+    out = nil
+    if self.col_count == other.row_count
+      m = self.row_count
+      k = self.col_count
+      n = other.col_count
+      a_flat = f64_array(m * k)
+      b_flat = f64_array(k * n)
+      c_flat = f64_array(m * n)
+      ents = @entries
+      i = 0
+      ents.each -> (row)
+        j = 0
+        row.each -> (v)
+          a_flat[i * k + j] = v.to_f
+          j += 1
+        i += 1
+      bents = other.to_a
+      i = 0
+      bents.each -> (row)
+        j = 0
+        row.each -> (v)
+          b_flat[i * n + j] = v.to_f
+          j += 1
+        i += 1
+      dgemm(a_flat, b_flat, c_flat, m, n, k)
+      rows = []
+      i = 0
+      while i < m
+        row = []
+        j = 0
+        while j < n
+          row.push(c_flat[i * n + j])
+          j += 1
+        rows.push(row)
+        i += 1
       out = Matrix.new(rows)
     out
 

@@ -14,6 +14,7 @@
 
 use spec
 use koala
+use support
 
 describe "Vector" ->
   it "constructs, indexes, and converts" ->
@@ -165,9 +166,9 @@ describe "LinAlg QR (Householder)" ->
     expect(res[:q].shape.to_s).to eq("\[2, 2\]")
     expect(res[:r].shape.to_s).to eq("\[2, 2\]")
     expect(res[:r].to_a.to_s).to eq("\[\[-5, -4\], \[0, -3\]\]")
-    expect(res[:q].to_a.to_s).to eq("\[\[-0.6, 0.8\], \[-0.8, -0.6\]\]")
+    expect(res[:q].to_a.to_s).to be_nums("\[\[-0.6, 0.8\], \[-0.8, -0.6\]\]")
     # the defining property: Q R reconstructs the input exactly here
-    expect(res[:q].matmul(res[:r]).to_a.to_s).to eq("\[\[3, 0\], \[4, 5\]\]")
+    expect(res[:q].matmul(res[:r]).to_a.to_s).to be_nums("\[\[3, 0\], \[4, 5\]\]")
     # ...and Q's columns are orthonormal: Q^T Q = I to working precision
     # (the off-diagonal lands on 1.1e-16, not a printable zero — this is
     # exactly the property Householder guarantees and Gram-Schmidt does
@@ -186,9 +187,9 @@ describe "LinAlg QR (Householder)" ->
     res = LinAlg.qr(Matrix.new([[1, 0], [1, 1], [1, 2], [1, 3]]))
     expect(res[:q].shape.to_s).to eq("\[4, 2\]")
     expect(res[:r].shape.to_s).to eq("\[2, 2\]")
-    expect(res[:r].to_a.to_s).to eq("\[\[-2, -3\], \[0, -2.23607\]\]")
+    expect(res[:r].to_a.to_s).to be_nums("\[\[-2, -3\], \[0, -2.23607\]\]")
     expect(res[:q].col(0).to_a.to_s).to eq("\[-0.5, -0.5, -0.5, -0.5\]")
-    expect(res[:q].transpose.matmul(res[:q]).to_a.to_s).to eq("\[\[1, 0\], \[0, 1\]\]")
+    expect(res[:q].transpose.matmul(res[:q]).to_a.to_s).to be_nums("\[\[1, 0\], \[0, 1\]\]")
 
   it "solves least squares, and agrees with solve on square systems" ->
     # the 4-point fit y = 1.6x - 0.4 (hand-computed in estimator_spec

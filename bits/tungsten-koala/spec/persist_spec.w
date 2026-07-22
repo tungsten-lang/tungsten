@@ -75,10 +75,11 @@ describe "Persist format" ->
     model.fit(Fx.frame, Fx.labels)
     expect(Persist.dumps(model)).to eq(Persist.dumps(model))
 
-  it "round-trips a float that Float#to_s cannot carry" ->
+  it "round-trips a hard float through its readable decimal" ->
     v = 1.to_f / 3.to_f
-    # The premise: six significant digits is all to_s gives, on BOTH engines.
-    expect(v.to_s.to_f == v).to be_false
+    # Float#to_s now prints the full f64 (%.17g), so its decimal already
+    # round-trips exactly on BOTH engines — persist stores that decimal.
+    expect(v.to_s.to_f == v).to be_true
     lines = []
     lines.push(Persist.float_line(v))
     res = Persist.decode(lines, 0)
@@ -108,8 +109,11 @@ describe "Persist format" ->
     expect(Persist.float_line(5.to_f / 2.to_f)).to eq("d 2.5")
     expect(Persist.float_line(0.to_f)).to eq("d 0")
 
-  it "falls back to exact bits when the decimal would lose digits" ->
-    expect(Persist.float_line(1.to_f / 3.to_f).slice(0, 1)).to eq("b")
+  it "writes the readable decimal now that Float#to_s round-trips" ->
+    # %.17g makes every finite f64's decimal round-trip, so float_line
+    # takes the "d" (decimal) branch; the "b" (exact-bits) branch remains
+    # as a guard should to_s ever lose precision again.
+    expect(Persist.float_line(1.to_f / 3.to_f).slice(0, 1)).to eq("d")
 
   it "escapes backslashes and newlines so a node stays on one line" ->
     raw = "a\\b\nc"

@@ -201,11 +201,8 @@
 # not think about it. `min_samples` defaults to 5 and `metric` to
 # "euclidean", both scikit-learn's.
 #
-# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
-# interpreter cannot resolve @ivars from a block body — methods containing
-# closures avoid early `return`, arrays are built with push (Array `+` is
-# unsupported), and no float literal ever reaches a call argument (they
-# corrupt arguments on both engines); every float here derives via .to_f.
+# NOTE: every float here derives via .to_f — a bare decimal literal is a
+# Decimal and does not coerce with Float.
 + DBSCAN
   is Estimable
   is UnsupervisedEstimator
@@ -378,7 +375,7 @@
 
   # Distance between two equal-width rows under `code`: SQUARED euclidean
   # (0), manhattan (1) or chebyshev (2). Each metric lives in its own
-  # method so no two sibling closures in one body share a captured local.
+  # small method.
   -> .distance(a, b, code)
     out = 0.to_f
     out = DBSCAN.sq_euclidean(a, b) if code == 0

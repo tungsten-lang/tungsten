@@ -8,9 +8,6 @@
 # dropped from each window; a cell is nil until the window holds at least
 # `min_periods` non-nil values (default 1; pandas defaults to `window` —
 # pass it explicitly for that behavior).
-#
-# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
-# interpreter cannot resolve @ivars from a block body.
 + Rolling
   ro :series
   ro :window

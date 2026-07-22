@@ -20,9 +20,8 @@
 #
 # Fitted state lives in parallel arrays (@fit_names / @fit_a / @fit_b,
 # where a/b is mean/std or min/max) — hash iteration order is not
-# guaranteed across engines. No float literals appear here: floats
-# cross engine boundaries unreliably, so every float derives from the
-# data via .to_f (the stats.w convention).
+# guaranteed across engines. Every float derives from the data via .to_f
+# — a bare decimal literal is a Decimal and does not coerce with Float.
 #
 # --- Tunable (see lib/estimator_base.w) ---
 #
@@ -42,8 +41,12 @@
 # "what you set" everywhere else in koala and fitted state must never
 # leak into a search space that cannot rebuild it.
 #
-# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
-# interpreter cannot resolve @ivars from a block body.
+# SAMPLE WEIGHTS: optional trailing argument on fit —
+# `sc.fit(df, [2, 1, 1])` — so a Pipeline can centre on the weighted
+# mean and divide by the weighted sample std (or min/max over positive-
+# weight rows). An unusable vector returns nil and leaves fitted?
+# false. Integer weights match row-duplication for :standard (same
+# definition as Estimator.weighted_mean / weighted_sample_std).
 + Scaler
   is Tunable
 
@@ -65,32 +68,46 @@
   # Non-numeric columns (strings, symbols — Stats.numeric?) are never
   # fitted, even when requested: scaling them is meaningless, so a
   # mixed frame scales cleanly with columns = nil.
-  -> fit(df)
+  # Optional sample_weight: see header. Unusable weights => nil.
+  -> fit(df, sample_weight = nil)
     frame = Estimator.frame(df)
-    kind = @kind
-    wanted = @columns
-    wanted = frame.column_names if wanted == nil
-    names = []
-    a = []
-    b = []
-    wanted.each -> (name)
-      values = frame.column_values(name)
-      usable = false
-      usable = Stats.numeric?(values) if values != nil
-      if usable
-        clean = Stats.clean(values)
-        names.push(name)
-        if kind == :min_max
-          a.push(Stats.min(clean))
-          b.push(Stats.max(clean))
-        else
-          a.push(Stats.mean(clean))
-          b.push(Stats.std(clean))
-    @fit_names = names
-    @fit_a = a
-    @fit_b = b
-    @fitted = true
-    self
+    n = frame.row_count
+    wts = nil
+    ok = true
+    if sample_weight != nil
+      wts = Estimator.weight_values(sample_weight, n)
+      ok = false if wts == nil
+    out = nil
+    if ok
+      kind = @kind
+      wanted = @columns
+      wanted = frame.column_names if wanted == nil
+      names = []
+      a = []
+      b = []
+      wanted.each -> (name)
+        values = frame.column_values(name)
+        usable = false
+        usable = Stats.numeric?(values) if values != nil
+        if usable
+          names.push(name)
+          if kind == :min_max
+            ext = Estimator.weighted_extrema(values, wts)
+            if ext == nil
+              a.push(0.to_f)
+              b.push(0.to_f)
+            else
+              a.push(ext[0])
+              b.push(ext[1])
+          else
+            a.push(Estimator.weighted_mean_clean(values, wts))
+            b.push(Estimator.weighted_sample_std(values, wts))
+      @fit_names = names
+      @fit_a = a
+      @fit_b = b
+      @fitted = true
+      out = self
+    out
 
   # New DataFrame with fitted columns scaled; nil before fit.
   -> transform(df)
@@ -124,8 +141,8 @@
       out = DataFrame.new(pairs)
     out
 
-  -> fit_transform(df)
-    self.fit(df)
+  -> fit_transform(df, sample_weight = nil)
+    self.fit(df, sample_weight)
     self.transform(df)
 
   # --- Tunable contract (see lib/estimator_base.w) ---

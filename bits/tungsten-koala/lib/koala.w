@@ -85,6 +85,7 @@ use estimator_base
 use linear_regression
 use regularized_linear
 use knn
+use knn_regressor
 use logistic_regression
 use gaussian_nb
 use decision_tree
@@ -93,6 +94,7 @@ use scaler
 use pca
 use encoder
 use imputer
+use feature_selection
 use splitter
 use pipeline
 use cross_validation
@@ -100,21 +102,13 @@ use kmeans
 use dbscan
 use grid_search
 use persist
+use sparse_frame
 
-# The remaining modules under lib/ (tensor, resample, transformer,
-# estimator, index, sparse, gpu, device) are unported design drafts —
-# they do not parse as Tungsten yet and are not loaded. estimator.w's
-# linear-regression payoff shipped as linear_regression.w above, its
-# k-NN sketch shipped as knn.w, its logistic-regression sketch shipped
-# as logistic_regression.w, and its decision-tree sketch shipped as
-# decision_tree.w; the draft stays only as the sketch for the lasso
-# follow-up. NOTE that the draft
-# estimator.w sketches its own `+ Estimator` / `trait Predictable` — those
-# are SUPERSEDED by estimator_base.w's `Estimator` / `Estimable`, which is
-# the loaded, working contract; do not load the draft alongside it. Port a
-# draft into the manifest above only after
-# `bin/tungsten -c` passes on it AND it runs on both engines (spec
-# coverage in spec/*.w).
+# Drafts that once lived next to these files (tensor, gpu, device, sparse,
+# estimator, index, resample, transformer) are in attic/drafts/ — not
+# loaded. Dense multi-D / GPU: core Tensor. Sparse: core SparseMatrix
+# (see sparse_frame.w for DataFrame bridges).
+# See docs/ROADMAP.md and docs/compiler-issues.md.
 
 + Koala
   # Create a DataFrame from ordered [name, values] column pairs.

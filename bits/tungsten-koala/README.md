@@ -458,15 +458,15 @@ an unweighted one and differs only in what each fold learns and reports.
 An estimator that refuses weights fails every fold's fit and scores nil
 throughout: loudly wrong rather than quietly unweighted.
 
-**Two limits, stated rather than hidden.** A `Pipeline` passes weights to
-its ESTIMATOR TAIL only — `Scaler` and `Imputer` are fitted unweighted,
-because neither takes a weight vector yet (scikit-learn's
-`StandardScaler` does). And a tree's `min_samples_split` /
-`min_samples_leaf` still count ROWS, matching scikit-learn (which spells
-the weighted version `min_weight_fraction_leaf`, a separate knob), so
-they are the one place a weighted fit and its duplicated twin can
-legitimately differ — and only when those knobs are moved off their
-defaults.
+**Weights on transformers too.** A `Pipeline` passes `sample_weight` to
+every `Scaler` / `Imputer` step as well as the estimator tail, so scaling
+centres on the weighted mean and mean-imputation fills with the weighted
+mean (scikit-learn's path). `Encoder` still ignores weights. A tree's
+`min_samples_split` / `min_samples_leaf` still count ROWS, matching
+scikit-learn (which spells the weighted version
+`min_weight_fraction_leaf`, a separate knob), so they are the one place a
+weighted fit and its duplicated twin can legitimately differ — and only
+when those knobs are moved off their defaults.
 
 ## Decision trees
 

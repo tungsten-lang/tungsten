@@ -196,13 +196,10 @@
 # (deterministically, but not the minimum-norm one) — use
 # LinearRegression, which detects the rank deficiency and says nil.
 #
-# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
-# interpreter cannot resolve @ivars from a block body — and methods
-# containing closures avoid early `return` (see stats.w). The descent
-# loops are `while` loops over explicit indices rather than blocks: two
-# sibling closures capturing one counter miscompile today (see the note in
-# estimator_base.w), and the inner loops are the hot path. No float
-# literal appears in this file: every float derives from the data or from
+# NOTE: the descent loops are `while` loops over explicit indices rather
+# than blocks — the inner loops are the hot path. No float literal appears
+# in this file (a bare decimal literal is a Decimal and does not coerce
+# with Float): every float derives from the data or from
 # integer division via .to_f.
 
 # The solver both estimators share: coordinate descent, centering, the
@@ -441,9 +438,9 @@
 # accident.
 #
 # ALPHA HONESTY, the same as linear_regression.w's: pass an INTEGER, or a
-# float built with .to_f arithmetic (`1.to_f / 10.to_f`). Never a float
-# LITERAL — one anywhere in a program corrupts later method-call arguments
-# on both engines.
+# Float built with .to_f arithmetic (`1.to_f / 10.to_f`). Keep it in
+# Float — a bare decimal literal is a Decimal and does not coerce with the
+# solver's Float arithmetic.
 + ElasticNet
   is Estimable
   is SupervisedEstimator

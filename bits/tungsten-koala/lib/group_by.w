@@ -2,9 +2,6 @@
 #
 #     df.group_by(:dept).mean(:salary)   # => DataFrame [dept, salary]
 #     df.group_by(:dept).count           # => DataFrame [dept, count]
-#
-# NOTE: inside `-> (x)` blocks this file deliberately uses locals hoisted
-# from ivars — the interpreter cannot resolve @ivars from a block body.
 
 + GroupBy
   ro :df

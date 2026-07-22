@@ -12,10 +12,10 @@
 # expected text below and exits 1 on any mismatch (chosen over a
 # separate spec so the runnable artifact carries its own proof).
 #
-# House rules on display: no float literals anywhere (they corrupt
-# later method-call arguments on both engines — see
-# lib/linear_regression.w), and \[...\] escaped in string literals
-# (bare brackets interpolate).
+# House rules on display: \[...\] is escaped in string literals (bare
+# brackets interpolate). Float#to_s prints the full f64, so the expected
+# transcript below carries the exact rendered digits — deterministic and
+# byte-identical on both engines.
 
 use koala
 
@@ -75,10 +75,10 @@ out = lines.join("\n")
 expected_lines = []
 expected_lines.push("frame 10 rows: sqft/rooms/price")
 expected_lines.push("split (seed 42): train 7 rows, test 3 rows")
-expected_lines.push("intercept 20.1429")
-expected_lines.push("coefficients \[4.45079, 0.816497\]")
+expected_lines.push("intercept 20.142857142857146")
+expected_lines.push("coefficients \[4.4507891221134948, 0.81649658092772703\]")
 expected_lines.push("train R2 1")
-expected_lines.push("test R2 0.979802")
+expected_lines.push("test R2 0.97980223017041856")
 expected = expected_lines.join("\n")
 if out != expected
   << "WORKFLOW: MISMATCH — expected transcript:"

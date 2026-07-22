@@ -42,8 +42,6 @@
 # here is likewise NOT rank-revealing: there is no column pivoting, so
 # a numerically dependent column is reported (nil) rather than worked
 # around.
-#
-# NOTE: methods containing closures avoid early `return` (see stats.w).
 + LinAlg
   # |x| as a float.
   -> .fabs(x)

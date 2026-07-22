@@ -26,10 +26,9 @@
 # scikit-learn regardless. Labels are opaque — integers, strings, or
 # symbols all count.
 #
-# NOTE: locals are hoisted from ivars before any `-> (x)` block, methods
-# containing closures avoid early `return`, ivars are assigned at the END
-# of the constructor, and every float derives from the data via .to_f —
-# the same conventions as the rest of koala.
+# NOTE: ivars are assigned at the END of the constructor, and every float
+# derives from the data via .to_f — a bare decimal literal is a Decimal
+# and does not coerce with Float.
 
 + ConfusionMatrix
   ro :labels   # class labels, first-seen order (actual then predictions)

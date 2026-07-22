@@ -47,13 +47,11 @@
 # the result stays strictly in (0, 1) and the classifier is deterministic
 # on both engines (Math.exp / Math.log agree bit-for-bit — verified).
 #
-# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
-# interpreter cannot resolve @ivars from a block body — methods
-# containing closures avoid early `return`, and every float derives from
-# the data via .to_f: a float LITERAL (even the learning rate) corrupts
-# call arguments on both engines, so the default learning rate is built
-# as 1.to_f / 10.to_f and a caller wanting a fractional rate must derive
-# it the same way (`LogisticRegression.new(1.to_f / 10.to_f)`).
+# NOTE: every float derives from the data via .to_f. A bare decimal
+# literal is a Decimal and does not coerce with Float, so the default
+# learning rate is built as 1.to_f / 10.to_f and a caller wanting a
+# fractional rate must derive it the same way
+# (`LogisticRegression.new(1.to_f / 10.to_f)`).
 + LogisticRegression
   is Estimable
   is SupervisedEstimator

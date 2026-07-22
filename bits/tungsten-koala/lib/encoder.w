@@ -37,9 +37,6 @@
 # entry fee for Pipeline's tunable surface, so an Encoder named :encode
 # in a chain contributes "encode.kind" and a grid search can choose
 # label-vs-one-hot the way it chooses a model's alpha.
-#
-# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
-# interpreter cannot resolve @ivars from a block body.
 + Encoder
   is Tunable
 

@@ -103,16 +103,20 @@
 # declares only `is Estimable` and not one of the two arity traits
 # precisely because that arity is its tail's to decide at runtime, not
 # a property of the class — Estimator.fit_model / .score_model read
-# supervised? and dispatch. Today the tail estimator must be a
-# SUPERVISED one: fitting without y transforms through every step,
-# which an unsupervised tail has no transform for.
+# supervised? and dispatch.
 #
-# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
-# interpreter cannot resolve @ivars from a block body — and methods
-# containing closures avoid early `return`. Array `+` concatenation is
-# avoided (it is unsupported); arrays are built with push. respond_to?
-# is passed a STRING ("with_params"), the only form that answers on
-# both engines.
+# UNSUPERVISED TAILS: a chain ending in KMeans / DBSCAN / any estimator
+# with supervised? == false fits with `fit(x)` (no y). Intermediate
+# steps still transform; the tail does not. predict / score / transform
+# (when the tail is a transformer like PCA) all work after that fit.
+#
+# SAMPLE WEIGHTS: every step that accepts an optional trailing weight
+# vector gets it — Scaler, Imputer, and estimator tails. Steps that
+# ignore the second argument (Encoder today) still receive only the
+# frame. Unusable weights fail the first step that validates them.
+#
+# NOTE: respond_to? is passed a STRING ("with_params"), the only form
+# that answers on both engines.
 + Pipeline
   is Estimable
 
@@ -162,55 +166,72 @@
     self.step(name) != nil
 
   # Fit every step, feeding each the previous step's transform output.
-  # With y given, the LAST step is fitted as an estimator —
-  # step.fit(current, y, sample_weight) — and fit returns nil (fitted?
-  # stays false) when that estimator fit itself returns nil.
+  # The LAST step is an estimator when it answers predict (supervised
+  # or unsupervised); otherwise it is a transformer like every prior
+  # step. fit returns nil (fitted? false) when any estimator fit fails.
   #
-  # SAMPLE WEIGHTS reach the ESTIMATOR TAIL only. The transformers are
-  # fitted unweighted, which is a real limitation and stated rather than
-  # hidden: a weighted Scaler would centre on the weighted mean and a
-  # weighted Imputer would fill with the weighted mean, and neither
-  # Scaler nor Imputer takes weights today (scikit-learn's StandardScaler
-  # does; koala's does not yet). So on a weighted pipeline the scaling
-  # statistics are those of the unweighted training rows, while the model
-  # on top is genuinely weighted.
+  # SAMPLE WEIGHTS ride every Scaler / Imputer and the estimator tail
+  # (see header). Intermediate transformers that do not take weights
+  # are fitted as fit(current) only.
   -> fit(df, y = nil, sample_weight = nil)
     steps = @steps
     last = steps.size - 1
     current = df
     ok = true
+    has_est = false
     i = 0
     steps.each -> (step)
-      if y != nil && i == last
-        ok = false if step.fit(current, y, sample_weight) == nil
+      is_last = i == last
+      is_est = is_last && Pipeline.estimator_step?(step)
+      if is_est
+        has_est = true
+        res = nil
+        if Pipeline.supervised_step?(step)
+          res = step.fit(current, y, sample_weight)
+        else
+          res = step.fit(current, sample_weight)
+        ok = false if res == nil
       else
-        step.fit(current)
+        if Pipeline.weighted_transform?(step)
+          res = step.fit(current, sample_weight)
+          ok = false if res == nil
+        else
+          step.fit(current)
+        # Transform after fitting a non-estimator step. On a transformer-
+        # only chain the last step transforms too (fit_transform).
         current = step.transform(current)
       i += 1
     out = nil
     if ok
       @fitted = true
-      @has_estimator = true if y != nil
+      @has_estimator = has_est
       out = self
     out
 
   # Run df through every fitted step; nil before fit.
+  # On an estimator-tailed chain, transform runs every step BUT the
+  # estimator (same as transform_features) — an estimator has no
+  # transform. Transformer-only chains transform every step.
   -> transform(df)
     out = nil
     if @fitted
-      steps = @steps
-      current = df
-      steps.each -> (step)
-        current = step.transform(current)
-      out = current
+      if @has_estimator
+        out = self.transform_features(df)
+      else
+        steps = @steps
+        current = df
+        steps.each -> (step)
+          current = step.transform(current)
+        out = current
     out
 
-  -> fit_transform(df)
-    self.fit(df)
+  -> fit_transform(df, sample_weight = nil)
+    self.fit(df, nil, sample_weight)
     self.transform(df)
 
   # x transformed through every step but the last — the estimator
-  # tail's feature input.
+  # tail's feature input. On a transformer-only chain this still
+  # skips the last step; prefer transform there.
   -> transform_features(x)
     steps = @steps
     last = steps.size - 1
@@ -222,7 +243,8 @@
     current
 
   # Estimator predictions for x: transform through every step but the
-  # last, then the last step's predict. nil unless fitted with y.
+  # last, then the last step's predict. nil unless fitted with an
+  # estimator tail (supervised or unsupervised).
   -> predict(x)
     out = nil
     if @fitted && @has_estimator
@@ -230,15 +252,20 @@
       out = steps[steps.size - 1].predict(self.transform_features(x))
     out
 
-  # The estimator tail's score on x against y; nil unless fitted with y.
-  # y defaults to nil so an unsupervised caller — Estimator.score_model
-  # on a chain whose supervised? is false — reaches the same nil rather
-  # than an arity error. sample_weight rides through to the tail.
+  # The estimator tail's score on x against y; nil unless fitted with
+  # an estimator tail. y defaults to nil so an unsupervised caller —
+  # Estimator.score_model on a chain whose supervised? is false —
+  # reaches the same nil rather than an arity error. sample_weight
+  # rides through to the tail.
   -> score(x, y = nil, sample_weight = nil)
     out = nil
     if @fitted && @has_estimator
       steps = @steps
-      out = steps[steps.size - 1].score(self.transform_features(x), y, sample_weight)
+      tail = steps[steps.size - 1]
+      if Pipeline.supervised_step?(tail)
+        out = tail.score(self.transform_features(x), y, sample_weight)
+      else
+        out = tail.score(self.transform_features(x), sample_weight)
     out
 
   # --- Estimable contract (see lib/estimator_base.w) ---
@@ -256,9 +283,11 @@
       out = tail.supervised? if tail.respond_to?("supervised?")
     out
 
-  # Weights are the TAIL's to honour, so this delegates exactly like
-  # supervised? does — a Pipeline ending in a KNNClassifier says false,
-  # and so does a transformer-only chain (there is nothing to weight).
+  # Weights for the *estimator contract* are the TAIL's to honour —
+  # generic tooling asks this before fit_model. Transformers may still
+  # absorb weights when the pipeline fits (Scaler / Imputer), but a
+  # chain ending in KNNClassifier reports false so CV does not pretend
+  # the model is weighted. A transformer-only chain reports false.
   -> supports_sample_weight?
     steps = @steps
     out = false
@@ -342,6 +371,30 @@
   # step cannot rebuild would break the round-trip.
   -> .tunable?(step)
     step.respond_to?("params") && step.respond_to?("with_params")
+
+  # An estimator step answers predict (and usually score). Transformers
+  # (Scaler, Imputer, Encoder, PCA) do not — they answer transform.
+  # respond_to? is the dual-engine probe; type() is unusable interpreted.
+  -> .estimator_step?(step)
+    step.respond_to?("predict")
+
+  # Supervised estimators answer supervised? true; unsupervised answer
+  # false; transformers answer neither and count as not supervised.
+  -> .supervised_step?(step)
+    out = false
+    out = step.supervised? if step.respond_to?("supervised?")
+    out
+
+  # Transformers that accept an optional sample_weight on fit.
+  # Behavioural: Scaler and Imputer. Encoder does not.
+  -> .weighted_transform?(step)
+    out = false
+    if step.respond_to?("fit") && !Pipeline.estimator_step?(step)
+      name = nil
+      name = step.persist_name if step.respond_to?("persist_name")
+      out = true if name == "Scaler"
+      out = true if name == "Imputer"
+    out
 
   # One step, rebuilt from the overrides addressed to it. The lookup
   # walks the STEP's own parameter names — so nothing needs to parse a

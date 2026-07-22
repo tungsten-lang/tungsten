@@ -11,10 +11,6 @@
 # NOTE: this Vector intentionally shadows core's generic Vector<T>
 # (the numeric-tower / Metal-adjacent type) inside programs that
 # `use koala`. Interop with core Vec/Mat types is a follow-up.
-#
-# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
-# interpreter cannot resolve @ivars from a block body — and methods
-# that contain closures avoid early `return` (see stats.w).
 + Vector
   ro :values
 

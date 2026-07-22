@@ -320,23 +320,9 @@ use koala
     model.fit(rows)
     model
 
-  # A fitted PCA through the Persist format and back.
-  #
-  # NOTE: `Persist.loads` cannot yet dispatch the class name "PCA" — that
-  # needs ONE line in Persist.rebuild, and lib/persist.w is owned by a
-  # sibling change, so it is deliberately left untouched here. Everything
-  # else in the format is exercised: dumps writes the payload, Persist's
-  # own reader decodes the state node (line 2, after the header and the
-  # `o PCA` tag), and PCA.load_state rebuilds from it. When that one line
-  # lands this becomes a plain Persist.loads.
+  # A fitted PCA through the Persist format and back (full loads path).
   -> .cycle(model)
-    text = Persist.dumps(model)
-    out = nil
-    if text != nil
-      lines = Persist.payload_lines(text)
-      res = Persist.decode(lines, 2)
-      out = PCA.load_state(res[:v]) if res[:ok]
-    out
+    Persist.loads(Persist.dumps(model))
 
   # The column of a transformed frame, as a plain array.
   -> .scores(frame, name)

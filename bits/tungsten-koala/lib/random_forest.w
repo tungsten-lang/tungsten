@@ -153,12 +153,9 @@
 # predict_proba / score return nil before a successful fit and on a width
 # mismatch, and predict_proba returns nil for a label the fit never saw.
 #
-# NOTE: the per-row accumulation loops below are WHILE loops, not blocks,
-# on purpose — two sibling closures capturing the same accumulator in one
-# block miscompiles today (see lib/estimator_base.w), and an ensemble's
-# inner loop is exactly that shape. Locals are hoisted from ivars before
-# any `-> (x)` block, arrays are built with push, and no float literal
-# appears here: every float derives from the data via .to_f.
+# NOTE: the per-row accumulation loops below are WHILE loops over explicit
+# indices. Every float here derives from the data via .to_f — a bare
+# decimal literal is a Decimal and does not coerce with Float.
 
 # The shared ensemble machinery, as statics so BOTH forests use one copy
 # and a spec can exercise the pieces directly.
@@ -228,9 +225,8 @@
   # --- The bootstrap ---
 
   # How many times each of n rows was drawn in one bootstrap resample of
-  # size n, drawn WITH REPLACEMENT from `state`. A while loop rather than
-  # a block: the counter, the state and the counts vector would otherwise
-  # be three captures of the same accumulator shape.
+  # size n, drawn WITH REPLACEMENT from `state`. A while loop over explicit
+  # indices accumulates the counter, the state and the counts vector.
   -> .draw_counts(n, state)
     counts = []
     i = 0

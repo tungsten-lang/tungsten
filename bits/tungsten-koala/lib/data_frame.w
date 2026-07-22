@@ -6,9 +6,6 @@
 #       [:name, ["Alice", "Bob", "Carol"]],
 #       [:age,  [30, 25, 35]]
 #     ])
-#
-# NOTE: inside `-> (x)` blocks this file deliberately uses locals hoisted
-# from ivars — the interpreter cannot resolve @ivars from a block body.
 
 + DataFrame
   ro :names   # ordered column names
@@ -194,8 +191,6 @@
   # the quartiles use linear-interpolation percentiles (Stats.percentile,
   # so the 50% row equals the median). An empty frame, or one with no
   # numeric column, yields just the :statistic column.
-  #
-  # NOTE: locals hoisted from ivars before the block; no early return.
   -> describe
     names = @names
     cols = @cols
@@ -217,6 +212,200 @@
         pairs.push([n, stats])
       i += 1
     DataFrame.new(pairs)
+
+  # --- I/O (CSV) ---
+  #
+  # String-only on purpose: `File` is undefined on the interpreter
+  # (docs/compiler-issues.md), so path helpers would be compiled-only
+  # and dual-engine-hostile. Callers with File write the string:
+  #
+  #     text = df.to_csv_string
+  #     df2  = DataFrame.from_csv_string(text)
+  #     File.write("out.csv", text)          # compiled
+  #     df3  = DataFrame.from_csv_string(File.read("out.csv"))
+  #
+  # Round-trip is text fidelity for cells, not float bit-exactness
+  # (use Persist for models). RFC-ish: commas separate; fields with
+  # comma / quote / newline are double-quoted; quotes doubled inside.
+  # First row is the header. Empty field -> nil. Integers and plain
+  # floats parse as numbers; everything else stays a String.
+
+  -> to_csv_string
+    names = @names
+    cols = @cols
+    lines = []
+    header = []
+    names.each -> (n)
+      header.push(DataFrame.csv_escape(n.to_s))
+    lines.push(header.join(","))
+    self.row_count.times -> (i)
+      cells = []
+      cols.each -> (c)
+        cells.push(DataFrame.csv_escape_cell(c[i]))
+      lines.push(cells.join(","))
+    lines.join("\n")
+
+  -> .from_csv_string(text)
+    out = nil
+    if text != nil && type(text) == "String" && text.size > 0
+      rows = DataFrame.csv_parse_rows(text)
+      if rows.size > 0
+        header = rows[0]
+        pairs = []
+        j = 0
+        header.each -> (h)
+          col = []
+          i = 1
+          while i < rows.size
+            row = rows[i]
+            cell = nil
+            cell = row[j] if j < row.size
+            col.push(DataFrame.csv_parse_cell(cell))
+            i += 1
+          pairs.push([DataFrame.csv_header_name(h), col])
+          j += 1
+        out = DataFrame.new(pairs)
+    out
+
+  # Header cell → column name. Simple identifiers become Symbols so
+  # df[:age] works after a round-trip; anything else stays a String.
+  -> .csv_header_name(h)
+    out = ""
+    out = h.to_s if h != nil
+    simple = out.size > 0
+    i = 0
+    while i < out.size && simple
+      c = out[i]
+      ok = false
+      ok = true if c >= "a" && c <= "z"
+      ok = true if c >= "A" && c <= "Z"
+      ok = true if c >= "0" && c <= "9"
+      ok = true if c == "_"
+      simple = false if !ok
+      i += 1
+    out = out.to_sym if simple
+    out
+
+  # Escape a header or already-string cell for CSV.
+  -> .csv_escape(s)
+    t = s
+    t = "" if t == nil
+    t = t.to_s
+    need = false
+    need = true if t.include?(",")
+    need = true if t.include?("\"")
+    need = true if t.include?("\n")
+    need = true if t.include?("\r")
+    out = t
+    if need
+      out = "\"" + t.split("\"").join("\"\"") + "\""
+    out
+
+  -> .csv_escape_cell(v)
+    out = ""
+    if v == nil
+      out = ""
+    else
+      out = DataFrame.csv_escape(v.to_s)
+    out
+
+  # Split text into rows of field strings (no type coercion).
+  -> .csv_parse_rows(text)
+    rows = []
+    row = []
+    field = ""
+    in_q = false
+    i = 0
+    n = text.size
+    while i < n
+      ch = text[i]
+      if in_q
+        if ch == "\""
+          nxt = ""
+          nxt = text[i + 1] if i + 1 < n
+          if nxt == "\""
+            field = field + "\""
+            i += 1
+          else
+            in_q = false
+        else
+          field = field + ch
+      else
+        if ch == "\""
+          in_q = true
+        else
+          if ch == ","
+            row.push(field)
+            field = ""
+          else
+            if ch == "\n"
+              row.push(field)
+              rows.push(row)
+              row = []
+              field = ""
+            else
+              if ch == "\r"
+                # swallow; \r\n handled by ignoring \r
+                0
+              else
+                field = field + ch
+      i += 1
+    # last field / row (no trailing newline)
+    row.push(field)
+    # drop a final empty row produced only by a trailing newline
+    if row.size == 1 && row[0] == "" && rows.size > 0
+      0
+    else
+      rows.push(row)
+    rows
+
+  # "" -> nil; integer text -> Integer; plain float text -> Float;
+  # else String. Leading/trailing space is kept for non-numbers.
+  -> .csv_parse_cell(s)
+    out = nil
+    if s != nil && s != ""
+      t = type(s)
+      raw = s
+      raw = s.to_s if t != "String"
+      # integer?
+      is_int = true
+      j = 0
+      m = raw.size
+      if m == 0
+        is_int = false
+      if m > 0 && (raw[0] == "-" || raw[0] == "+")
+        j = 1
+        is_int = false if m == 1
+      while j < m && is_int
+        c = raw[j]
+        is_int = false if c < "0" || c > "9"
+        j += 1
+      if is_int
+        out = raw.to_i
+      else
+        # float: digits with one dot, optional leading sign
+        is_f = true
+        dots = 0
+        j = 0
+        if m == 0
+          is_f = false
+        if m > 0 && (raw[0] == "-" || raw[0] == "+")
+          j = 1
+          is_f = false if m == 1
+        while j < m && is_f
+          c = raw[j]
+          if c == "."
+            dots += 1
+            is_f = false if dots > 1
+          else
+            is_f = false if c < "0" || c > "9"
+          j += 1
+        is_f = false if dots != 1
+        if is_f
+          out = raw.to_f
+        else
+          out = raw
+    out
 
   # --- Display ---
 

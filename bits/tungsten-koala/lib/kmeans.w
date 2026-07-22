@@ -34,9 +34,9 @@
 #     centroids — so the same seed gives the same clustering every time.
 # Distance ties in ASSIGN break to the lowest-index centroid (strict
 # `<`, exactly like KNNClassifier), so the assignment is a pure function
-# of the inputs. Every float derives from the data via .to_f (no float
-# literal ever reaches a call argument — those corrupt args on both
-# engines), and Math is not even needed: squared distance keeps integer
+# of the inputs. Every float derives from the data via .to_f (a bare
+# decimal literal is a Decimal and does not coerce with Float), and Math
+# is not even needed: squared distance keeps integer
 # inputs exact until the centroid means divide.
 #
 # REFERENCE (hand-computed, matches scikit-learn's KMeans with the same
@@ -56,11 +56,8 @@
 # return nil before a successful fit and when a query row's width
 # differs from the fitted feature count.
 #
-# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
-# interpreter cannot resolve @ivars from a block body — and methods
-# containing closures avoid early `return` (see stats.w). Array `+`
-# concatenation is avoided (it is unsupported); arrays are built with
-# push.
+# NOTE: see the float convention above — every float derives from the
+# data via .to_f, since a Decimal literal does not coerce with Float.
 + KMeans
   is Estimable
   is UnsupervisedEstimator

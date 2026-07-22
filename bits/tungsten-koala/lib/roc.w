@@ -39,9 +39,9 @@
 # scikit-learn's error case, rendered as koala's return-nil convention.
 #
 # NOTE: the koala conventions — every float derives from data via .to_f
-# (a float literal corrupts call arguments on both engines), methods
-# holding a closure take no early `return`, and outer locals accumulate
-# inside `.each` / `.times` blocks the way Stats / LogisticRegression do.
+# (a bare decimal literal is a Decimal and does not coerce with Float),
+# and outer locals accumulate inside `.each` / `.times` blocks the way
+# Stats / LogisticRegression do.
 + RocCurve
   ro :fpr          # false-positive rate per curve point (0..1, ascending)
   ro :tpr          # true-positive rate per curve point (0..1, ascending)

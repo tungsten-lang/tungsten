@@ -85,11 +85,8 @@
 # nil (sklearn's semantics — the attribute is simply unavailable);
 # `best_params`, `best_score` and `results` are unaffected.
 #
-# NOTE: locals are hoisted from ivars before any `-> (x)` block — the
-# interpreter cannot resolve @ivars from a block body — methods
-# containing closures avoid early `return`, arrays are built with push
-# (Array `+` and `insert` are unavailable), and no float literals appear
-# here: every float derives from the data.
+# NOTE: every float derives from the data via .to_f — a bare decimal
+# literal is a Decimal and does not coerce with Float arithmetic.
 + GridSearch
   ro :estimator      # the prototype every candidate is cloned from
   ro :param_grid     # the searched hash of param => [values]

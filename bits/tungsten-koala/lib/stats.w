@@ -49,7 +49,7 @@
   # PERCENTILE.INC), so 25/50/75 match pandas' quartiles and 50 equals
   # the median. nils are dropped first; nil for an empty (or all-nil)
   # array. p is an integer percent, never a float fraction, so no float
-  # literal is needed at the call site (float literals corrupt call args).
+  # literal is needed at the call site.
   #
   # The 0-based fractional rank p/100*(n-1) is split into an integer
   # floor and remainder with pure integer arithmetic, so only the final
@@ -111,11 +111,6 @@
     clean.max
 
   # Sample variance (n - 1 denominator); 0.0 for fewer than 2 values.
-  #
-  # NOTE: no early return here — an early `return` from a method that
-  # also contains a block closure corrupts interpreter dispatch when the
-  # return path is taken (verified: the old `return 0.to_f if size <= 1`
-  # guard made Stats.var([1]) die with "expected string or symbol").
   -> .var(values)
     clean = self.clean(values)
     out = 0.to_f

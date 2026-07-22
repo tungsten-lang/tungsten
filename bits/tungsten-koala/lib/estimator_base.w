@@ -270,12 +270,8 @@
   # weights is nil, since a weight of 1 multiplies exactly in IEEE754 and
   # the denominator falls back to the count.
   #
-  # ONE loop, not two, on purpose: a local counter captured by two SIBLING
-  # closures in the same block miscompiles today (the second capture
-  # leaves the first closure's copy unset, and the compiled program dies
-  # with "expected numeric type" on the index), so every weighted helper
-  # in this bit keeps its per-row index inside a single block or gives the
-  # second block a different name.
+  # ONE loop, not two: every weighted helper in this bit keeps its per-row
+  # index and accumulator in a single pass.
   -> .weighted_mean(values, weights)
     acc = 0.to_f
     i = 0
@@ -285,6 +281,84 @@
       acc += v.to_f * wt
       i += 1
     acc / Estimator.weight_total(weights, values.size).to_f
+
+  # Weighted mean of a column that may contain nils: only non-nil cells
+  # contribute, and their weights are re-totalled. nil when no usable
+  # cell remains (all nil, or every non-nil cell has weight 0).
+  # Unweighted (weights nil) is Stats.mean.
+  -> .weighted_mean_clean(values, weights)
+    out = nil
+    if weights == nil
+      out = Stats.mean(values)
+    else
+      acc = 0.to_f
+      total = 0.to_f
+      i = 0
+      values.each -> (v)
+        if v != nil
+          wt = weights[i]
+          if wt > 0.to_f
+            acc += v.to_f * wt
+            total += wt
+        i += 1
+      out = acc / total if total > 0.to_f
+    out
+
+  # Sample (n-1) weighted standard deviation of non-nil cells. With
+  # weights nil this is Stats.std. With weights, the denominator is
+  # sum(w) - 1 when sum(w) > 1 (so an all-1s vector matches the sample
+  # std), else 0. Zero-weight rows do not contribute.
+  -> .weighted_sample_std(values, weights)
+    out = nil
+    if weights == nil
+      out = Stats.std(values)
+    else
+      m = Estimator.weighted_mean_clean(values, weights)
+      if m != nil
+        acc = 0.to_f
+        total = 0.to_f
+        i = 0
+        values.each -> (v)
+          if v != nil
+            wt = weights[i]
+            if wt > 0.to_f
+              d = v.to_f - m
+              acc += wt * d * d
+              total += wt
+          i += 1
+        if total > 1.to_f
+          out = Math.sqrt(acc / (total - 1.to_f))
+        else
+          out = 0.to_f
+    out
+
+  # Min / max over non-nil cells with positive weight (or all non-nil
+  # when weights is nil). nil when nothing remains.
+  # (Do not name a local `use` — that is a reserved word.)
+  -> .weighted_extrema(values, weights)
+    wts = weights
+    lo = nil
+    hi = nil
+    i = 0
+    values.each -> (v)
+      take = false
+      if v != nil
+        take = true
+        if wts != nil
+          take = false
+          take = true if wts[i] > 0.to_f
+      if take
+        f = v.to_f
+        if lo == nil
+          lo = f
+          hi = f
+        else
+          lo = f if f < lo
+          hi = f if f > hi
+      i += 1
+    out = nil
+    out = [lo, hi] if lo != nil
+    out
 
   # rows / targets / weights with every ZERO-WEIGHT row removed, as a
   # { rows:, targets:, weights: } triple.

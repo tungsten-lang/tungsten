@@ -161,9 +161,10 @@
 # spec/pca_spec.w does, and what proves everything on this side works.
 #
 # NOTE: no float literal appears in this file (every float derives via
-# .to_f), the numeric kernel uses `while` rather than blocks so no
-# closure captures a mutating counter, arrays are built with push
-# (Array `+` is unavailable), and respond_to? is never needed here.
+# .to_f — a bare decimal literal is a Decimal and does not coerce with
+# Float), the numeric kernel uses `while` rather than blocks (see the note
+# above .fit), arrays are built with push, and respond_to? is never needed
+# here.
 + PCA
   is Tunable
 

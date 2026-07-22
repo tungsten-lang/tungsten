@@ -151,8 +151,8 @@
   # scikit-learn's zero-division convention.
   #
   # Predictions first, like precision / recall / f1. Pass beta as an
-  # INTEGER or a derived float (2, or 1.to_f / 2.to_f) — a float literal
-  # in a call argument corrupts it on both engines.
+  # INTEGER or a derived Float (2, or 1.to_f / 2.to_f) — a bare decimal
+  # literal is a Decimal and does not coerce with Float.
   -> .fbeta(predictions, actual, beta = 1, pos_label = 1, sample_weight = nil)
     p = self.precision(predictions, actual, pos_label, sample_weight)
     r = self.recall(predictions, actual, pos_label, sample_weight)

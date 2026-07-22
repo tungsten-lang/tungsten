@@ -7,7 +7,6 @@ Two ways to run code (see **Engines** at the bottom):
 
 - `bin/tungsten file.w` — quick run (interpreter)
 - `bin/tungsten -o app file.w && ./app` — compile to a native binary
-  (the reference path; a few constructs marked *compiled* below need it)
 
 ## Basics
 
@@ -19,7 +18,8 @@ Two ways to run code (see **Engines** at the bottom):
 name = "Tungsten"
 x = 42
 
-# String interpolation uses [ ]
+# String interpolation uses [ ]  (but a [ right after ESC is literal,
+# so ANSI sequences like "\e[K" are safe; \[ escapes explicitly)
 << "hello [name], [x * 2]"
 ```
 
@@ -29,6 +29,10 @@ x = 42
 # Method definition
 -> greet(name)
   << "hello [name]"
+
+# Anonymous reference (position)
+-> greet/1
+  << "hello [@1]"
 
 # Anonymous lambda
 double = ->(x) x * 2
@@ -44,6 +48,36 @@ fn fib(n)
 # Arity shorthand: args are @1, @2, … (compiled)
 -> add/2
   @1 + @2
+
+# Anonymous reference (@1.x)
+-> distance/1
+  << "hello [x' - x]"
+```
+
+## Blocks
+
+```tungsten
+# Inline block
+[1, 2, 3].each ->(x) << x
+
+# Implicit #each
+[1, 2, 3] ->(x) << x * 2
+
+# Free arg binding
+[1, 2, 3] -> << x
+[1, 2, 3] -> << i
+
+# Multiline block with ->
+[1, 2, 3].each ->(x)
+  << x * 2
+
+# Multiline block - implicit each
+[1, 2, 3] ->(x)
+  << x * 2
+
+# Multiline block - implicit each
+[1, 2, 3] ->
+  << x * 2
 ```
 
 ## Control Flow
@@ -150,16 +184,6 @@ h = {name: "Alice", age: 30}
   << i
 ```
 
-## Blocks
-
-```tungsten
-# Inline brace block
-[1, 2, 3].each ->(x) { << x }
-
-# Multiline block with ->
-[1, 2, 3].each ->(x)
-  << x * 2
-```
 
 ## Error Handling
 

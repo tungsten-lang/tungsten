@@ -2200,8 +2200,17 @@ use ../../languages/tungsten/lexers/regex_helpers
           @col += 1
         next
 
-      # String interpolation — [] (empty) is literal, not interpolation
-      if ch == "\[" && @pos + 1 < @chars.size() && @chars[@pos + 1] != "]"
+      # String interpolation — [] (empty) is literal, not interpolation.
+      # A [ immediately preceded by ESC (0x1B) is also literal (language
+      # ruling 2026-07-22): ESC-[ is the ANSI CSI prefix, so escape-bracket
+      # sequences never start interpolation, while "\e[48;2;[r]m" still
+      # interpolates [r] (its [ follows ';'). The \e-[ fast path in the
+      # escape handler above already consumes the adjacent pair; this guard
+      # catches ESC arriving any other way (backslash-u001b escape, concatenated
+      # escapes). The 27.chr() comparison sits last so it only runs when ch
+      # is [ (and it avoids a "\e" literal, which the bootstrap compiler may
+      # not lex — see the escape-handler comment above).
+      if ch == "\[" && @pos + 1 < @chars.size() && @chars[@pos + 1] != "]" && !(str.size() > 0 && str[str.size() - 1] == 27.chr())
         has_interp = true
         if str.size() > 0
           parts.push([:str, str])

@@ -89,6 +89,26 @@ operator. Always space division when the right-hand side is a bare name:
 
 ---
 
+## 3½. `[` interpolates — except right after ESC
+
+`[expr]` inside a double-quoted string interpolates. Two exceptions:
+
+```tungsten
+<< "value: [x]"              # interpolates x
+<< "\[x]"                    # escaped: literal [x]
+<< "\e[K"                    # literal — [ after ESC never interpolates
+<< "\e[48;2;[r];[g];[b]m"    # ANSI prefix literal, [r]/[g]/[b] interpolate
+```
+
+Ruling (2026-07-22): a `[` **immediately preceded by ESC (0x1B)** never
+starts interpolation, however the ESC was produced (`\e`, `\u001b`, concatenation). ANSI
+CSI sequences are safe to write naturally. A `[` after any other character
+interpolates when its content parses as an expression; `\[` stays the
+explicit escaped-literal form. Guarded by
+`spec/compiler/string_interp_esc_bracket_spec.w`.
+
+---
+
 ## 4. `0.1` is Decimal; floats need `~`
 
 ```tungsten

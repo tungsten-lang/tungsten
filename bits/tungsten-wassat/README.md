@@ -98,6 +98,33 @@ learned database, restart/reduction cadence, branching state, and hidden proof
 prefix. Terminal calls are idempotent, and returned result arrays are detached
 from later continuation.
 
+## Preprocessing
+
+Both modes preprocess once, above solver construction (`lib/preprocess.w`):
+failed-literal probing, equivalent-literal substitution (SCCs of the binary
+implication graph), subsumption with self-subsuming strengthening, and
+bounded variable elimination. Preprocessing produces an immutable artifact —
+the reduced clauses with their global proof ids, an elimination stack, and
+the certificate prefix — which the solver consumes; hints translate through
+the id table rather than assuming `clause index + 1`.
+
+Every preprocessing addition is RUP and carries direct antecedent hints
+(probe-trail cone closure, resolution parents, implication paths); deletions
+are pure. SAT models are reconstructed through the elimination stack and
+verified against the *original* formula before being reported; a failing
+model is a hard error, never printed. Certificates including BVE resolvents
+and deletions verify under both `tungsten-wrat` and `drat-trim`.
+
+The `c stats` line reports one schema per run:
+`restarts reduces probes probes_failed vars_substituted clauses_subsumed
+clauses_strengthened vars_eliminated preprocess_ms`.
+
+Known cost caveat: preprocessing is a measured win on the harder BMC
+instances (bmc-ibm-12: 11,224 conflicts to ~7,400, total user time down) but
+its fixed cost is not yet free on large-but-easy instances; intake and the
+boxed commit paths are the remaining optimization targets. Family-level
+wall-clock gates should be re-measured on an idle machine.
+
 ## Search engine
 
 The core uses flat typed `i64[]` storage, an arena clause database, intrusive
@@ -143,6 +170,7 @@ encodings.
 ```sh
 ../../bin/tungsten spec/solver_spec.w
 ../../bin/tungsten spec/cli_spec.w
+../../bin/tungsten spec/preprocess_spec.w
 
 # Requires CaDiCaL; verifies each UNSAT proof when tungsten-wrat is built.
 CASES=300 python3 benchmarks/differential.py
@@ -151,11 +179,14 @@ python3 benchmarks/gen_instances.py /tmp/satbench
 BENCH=/tmp/satbench python3 benchmarks/bench.py
 ```
 
-Current coverage includes 36 solver specs, six CLI specs, a
-300-instance differential run with zero disagreement and 152 independently
-checked UNSAT proofs, a separate 1,200-formula brute-force audit, and proof
-checks after learned-clause deletion and resumed conflict budgets. SAT models
-are evaluated against their original clauses.
+Current coverage includes 36 solver specs, 13 CLI specs (the mode
+contract), 16 preprocessing specs (per-technique cases, the edge-case
+traps, freeze set, reconstruction, and a corrupted-model guard), a
+200-instance differential run with zero disagreement and every UNSAT proof
+independently checked, and certificate verification through both `wrat`
+and `drat-trim` on pigeonhole, dubois, and uuf instances whose proofs
+contain preprocessing additions and deletions. SAT models are evaluated
+against their original clauses.
 
 ## Limitations
 

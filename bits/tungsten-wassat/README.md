@@ -125,6 +125,41 @@ its fixed cost is not yet free on large-but-easy instances; intake and the
 boxed commit paths are the remaining optimization targets. Family-level
 wall-clock gates should be re-measured on an idle machine.
 
+## Incremental solving
+
+`solve_assuming(assumptions)` / `solve_assuming_budget` provide the full
+MiniSat contract: SAT / UNSAT / UNKNOWN under assumption literals, plus the
+failed-assumption core on UNSAT. Assumptions are decisions, never clauses,
+so every learned clause stays formula-implied; the core's negation (the
+blocking clause) is logged as an ordinary RUP addition the independent
+checker accepts. Each call is a fresh query — the learned database,
+activities, and hidden proof prefix persist; formula-level UNSAT is
+terminal. Assumptions may only name variables that survived preprocessing
+(`wassat_check_assumptions`; freeze anything you intend to assume).
+
+## Certificate dialects
+
+- `--proof <path>` — hinted WRAT (header + antecedent chains).
+- `--lrat <path>` — the same hinted stream in LRAT (no header), for
+  verified-checker interop; `wrat` auto-detects both.
+- `--drat <path>` — plain DRAT for `drat-trim` and compatible tools.
+
+Hint chains are derived directly from each conflict's resolution cone
+(reasons in trail order, conflict clause last) — replay-free, so hinted
+emission costs the resolution footprint rather than a propagation replay
+per learned clause.
+
+## Stochastic local search
+
+`wassat sls <cnf> --flips N --seed S [--pre]` runs the CCAnr-family engine
+(`lib/sls.w`): configuration checking plus clause weighting over a native
+flip loop. It returns a model or `s UNKNOWN`, never UNSATISFIABLE, and
+every model passes the original-formula guard before printing. `--pre`
+searches the preprocessed kernel and reconstructs through the elimination
+stack — structured instances that stall raw (bmc-ibm) solve in thousands
+of flips on their kernels. `benchmarks/sls_gate.py` is the 20-seed
+statistical gate.
+
 ## Search engine
 
 The core uses flat typed `i64[]` storage, an arena clause database, intrusive

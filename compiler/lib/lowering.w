@@ -1984,6 +1984,43 @@ use lowering/definitions
     return typed_value(:i64, w_nil.to_s())
 
   if is_raw_int_storage_type(target_type)
+    # Retype guard (round-3 bug 1, 2026-07-22): an annotated reassign of an
+    # EXISTING boxed variable — a parameter, a materialized boxed slot, or a
+    # live boxed binding — must NOT switch the variable to a raw machine
+    # slot. The switch happens at whatever point the assignment sits in the
+    # statement stream, so a reassign inside one branch of an `if` leaves
+    # the other branch holding the boxed representation; post-merge reads
+    # and the function's inferred return type then mix NaN-boxed and raw
+    # bits (observed as tag-junk integers at call boundaries). The
+    # annotation KEEPS its wrapping semantics — the RHS is lowered raw —
+    # but the result is boxed back into the variable's existing
+    # representation and the variable's type stays boxed (:int).
+    hint_existing_t = ctx[:var_types][name]
+    hint_retype_safe = hint_existing_t != nil && is_raw_int_storage_type(hint_existing_t)
+    if !hint_retype_safe
+      hint_retype_safe = ctx[:bindings][name] == nil && wfn[:var_slots][name] == nil
+      if hint_retype_safe
+        pi = 0
+        while pi < wfn[:params].size()
+          if wfn[:params][pi] == name
+            hint_retype_safe = false
+          pi += 1
+    if !hint_retype_safe
+      raw_val = lower_machine_int_expression(ctx, node.value, target_type)
+      boxed_tmp = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: boxed_tmp, name: machine_box_fn(target_type), args: [raw_val]})
+      if hint_existing_t == nil
+        ctx[:var_types][name] = :int
+      hint_ptr = wfn[:var_slots][name]
+      if hint_ptr != nil
+        emit_instruction(wfn, {op: :store_i64, value: boxed_tmp, ptr: hint_ptr})
+      else
+        ctx[:bindings][name] = boxed_tmp
+      if wfn[:name] == "main"
+        ctx[:mod][:top_level_vars][name] = true
+        ctx[:mod][:top_level_var_types][name] = nil
+        emit_store_global_unless_const(wfn, ctx, name, boxed_tmp)
+      return typed_value(:i64, boxed_tmp)
     raw_val = lower_machine_int_expression(ctx, node.value, target_type)
     ctx[:var_types][name] = target_type
     ctx[:bindings][name] = nil

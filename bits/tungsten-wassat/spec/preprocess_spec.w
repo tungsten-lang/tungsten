@@ -1,8 +1,14 @@
 # Preprocessing specs: the four techniques, their proof obligations, the
 # elimination stack, and the edge-case traps from the Phase 1 checklist.
+#
+# The independent checker is imported from its own bit for the certificate
+# regressions: every UNSAT fixture's proof is replayed by tungsten-wrat
+# in-process. The two bits still share no parser or checking code — the
+# spec merely runs both.
 
 use spec
 use wassat
+use ../../tungsten-wrat/lib/wrat
 
 # Probing target: assuming x propagates a and -a, so -x is implied; y then
 # follows from (x | y).
@@ -30,6 +36,14 @@ BVE_TAUT = "p cnf 3 2\n1 2 3 0\n-1 -2 -3 0\n"
 PHP32_PRE = "p cnf 6 9\n1 2 0\n3 4 0\n5 6 0\n-1 -3 0\n-1 -5 0\n-3 -5 0\n-2 -4 0\n-2 -6 0\n-4 -6 0\n"
 
 DUPLICATES = "p cnf 3 3\n1 1 2 0\n-1 3 3 0\n-2 -3 0\n"
+
+# Helper-lifetime regression: 1 == 2 through an SCC, then the ternary blocks
+# force 1 true and 2 false, so the formula is UNSAT and every (-2 ...) clause
+# is rewritten citing the equivalence helper (2 | -1). A bug once rewrote the
+# helpers themselves into tautologies and deleted them while later rewritten
+# clauses still cited their ids — both certificate dialects failed the
+# independent checkers ("step N is not redundant").
+HELPER_LIFETIME = "p cnf 4 10\n-1 2 0\n-2 1 0\n1 3 4 0\n1 3 -4 0\n1 -3 4 0\n1 -3 -4 0\n-2 3 4 0\n-2 3 -4 0\n-2 -3 4 0\n-2 -3 -4 0\n"
 
 describe "Wassat preprocessing" ->
 
@@ -128,6 +142,11 @@ describe "Wassat preprocessing" ->
       expect(-> () wassat_parse_cnf("p cnf 99999999999 1\n1 0\n")).to raise_error
       expect(-> () wassat_parse_cnf("p cnf 2 99999999999\n1 0\n")).to raise_error
 
+    it "accepts tab-separated DIMACS" ->
+      f = wassat_parse_cnf("p cnf 2 1\n1\t-2\t0\n")
+      expect(f["clauses"].size).to eq(1)
+      expect(f["clauses"][0].size).to eq(2)
+
   context "freeze set" ->
     it "never eliminates or substitutes a frozen variable" ->
       f = wassat_parse_cnf(EQUIV_AB)
@@ -156,6 +175,25 @@ describe "Wassat preprocessing" ->
       last = r["proof"][r["proof"].size - 1]
       toks = wassat_tokenize(last)
       expect(toks[1]).to eq("0")
+
+    it "substitution certificates survive helper deletion ordering" ->
+      r = wassat_solve_preprocessed(HELPER_LIFETIME, WASSAT_PROOF_WRAT, 0, 0)
+      expect(r["unsat"]).to eq(true)
+      expect(r["pre"]["stats"]["vars_substituted"] >= 1).to eq(true)
+      check = wrat_verify(HELPER_LIFETIME, wassat_proof_text(r))
+      expect(check["verified"]).to eq(true)
+
+    it "every UNSAT fixture certificate verifies under the independent checker" ->
+      fixtures = [EQUIV_CONTRA, PHP32_PRE, HELPER_LIFETIME, "p cnf 1 1\n0\n"]
+      ok = true
+      fixtures.each -> (text)
+        r = wassat_solve_preprocessed(text, WASSAT_PROOF_WRAT, 0, 0)
+        if r["unsat"]
+          check = wrat_verify(text, wassat_proof_text(r))
+          ok = false unless check["verified"] == true
+        else
+          ok = false
+      expect(ok).to eq(true)
 
     it "agrees with the unpreprocessed solver across the fixture set" ->
       fixtures = [PROBE_FAILS, EQUIV_AB, EQUIV_CONTRA, SUBSUME, BVE_SIMPLE, BVE_TAUT, DUPLICATES, PHP32_PRE]

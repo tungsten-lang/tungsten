@@ -138,6 +138,16 @@ WASSAT_PRE_BUCKET_CAP = 1024
     @lstamp = i64[2 * nv + 2]
     @lgen = 0
 
+    # Certificate-lifetime state. A proof citation is valid only if it
+    # precedes any deletion of the cited clause in the stream, so: helper
+    # equivalence binaries are excluded from rewriting and deleted only
+    # after the whole class is rewritten (@helper_mark), and root literals
+    # propagated from multi-literal clauses get their unit derived
+    # immediately (never at sweep time, when the reason may be gone).
+    # @probing suppresses unit derivation for temporary probe assignments.
+    @helper_mark = {}
+    @probing = false
+
   # Both proof dialects at once (CLI requested --proof and --drat together).
   -> enable_dual_emission
     @emit_wrat = true
@@ -321,6 +331,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
   # loop; every implication records its reason and trail position so hint
   # chains can be emitted directly.
   -> propagate_root
+    pre_ts = @ftsize
     @pst[0] = @fqhead
     @pst[1] = @ftsize
     @pst[2] = -1
@@ -330,7 +341,30 @@ WASSAT_PRE_BUCKET_CAP = 1024
     @fqhead = @pst[0]
     @ftsize = @pst[1]
     @ticks += @pst[3]
-    @pst[2]
+    confl = @pst[2]
+    # Committed root implications derive their units NOW, while every
+    # antecedent is still alive; a conflict path instead emits the empty
+    # clause immediately (also while everything it cites is alive).
+    self.derive_root_units(pre_ts) unless @probing || confl >= 0
+    confl
+
+  # Root literals propagated from multi-literal clauses get an explicit RUP
+  # unit at once: later techniques may delete the reason clause, and a
+  # citation emitted after that deletion is invalid. @preason is re-pointed
+  # at the unit so every later cone cites the unit instead.
+  -> derive_root_units(from_ts)
+    ti = from_ts
+    while ti < @ftsize
+      l = @ftrail[ti]
+      rci = @preason[l.abs]
+      if rci >= 0 && @lits[rci].size > 1
+        chain = self.conflict_chain(rci, l.abs)
+        gid = @next_gid
+        self.plog_add(gid, [l], chain)
+        nci = self.store([l])
+        @preason[l.abs] = nci
+      ti += 1
+    0
 
   # ---- hint chains ----------------------------------------------------------
 
@@ -441,12 +475,14 @@ WASSAT_PRE_BUCKET_CAP = 1024
   -> probe(lit)
     mark = @ftsize
     qsave = @fqhead
+    @probing = true
     self.assign(lit, 0 - 1)
     confl = self.propagate_root
     if confl >= 0
       chain = self.conflict_chain(confl, lit.abs)
       # undo the probe segment before touching root state
       self.undo_to(mark, qsave)
+      @probing = false
       unit = [0 - lit]
       gid = @next_gid
       self.plog_add(gid, unit, chain)
@@ -463,6 +499,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
       true
     else
       self.undo_to(mark, qsave)
+      @probing = false
       false
 
   -> undo_to(mark, qsave)
@@ -684,9 +721,14 @@ WASSAT_PRE_BUCKET_CAP = 1024
       already = true if @replit[l.abs] != 0
     return 0 if already
 
-    # derive both equivalence binaries per non-representative member
+    # Derive both equivalence binaries per non-representative member. The
+    # helpers are marked so occurrence rewriting skips them: rewriting a
+    # helper maps it to a tautology and deletes it while later rewritten
+    # clauses still cite its id — the certificate then fails both checkers.
+    # They are deleted only after the whole class is rewritten.
     binid_fwd = {}               # var -> pgid of (-y | r')  [y => r']
     binid_back = {}              # var -> pgid of (y | -r')
+    helpers = []
     lits_of.each -> (y)
       if y != rep && @status == 0
         yv = y.abs
@@ -708,6 +750,10 @@ WASSAT_PRE_BUCKET_CAP = 1024
           self.plog_add(gb, [yv, 0 - r_for_y], self.path_gids(pb))
           cb = self.store([yv, 0 - r_for_y])
           binid_back[yv] = @fpgid[cb]
+          @helper_mark[cf] = true
+          @helper_mark[cb] = true
+          helpers.push(cf)
+          helpers.push(cb)
           @replit[yv] = r_for_y
           @gone[yv] = 2
           @stack.push({ "kind": "subst", "var": yv, "rep": r_for_y })
@@ -718,6 +764,12 @@ WASSAT_PRE_BUCKET_CAP = 1024
       yv = y.abs
       if @replit[yv] != 0 && @status == 0
         self.rewrite_occurrences(yv, binid_fwd[yv], binid_back[yv])
+
+    # Every citation of the helpers has been emitted; retiring them now is a
+    # pure deletion. Eager unit derivation has already re-pointed @preason
+    # away from any helper that propagated during the rewrite cascades.
+    self.delete_batch(helpers)
+    @helper_mark = {}
     0
 
   -> path_gids(path)
@@ -728,7 +780,10 @@ WASSAT_PRE_BUCKET_CAP = 1024
 
   # Rewrite all live clauses mentioning yv through @replit[yv]. Hints per
   # rewritten clause: the equivalence binary used for each mapped literal,
-  # then the original clause id.
+  # then the original clause id. Helper binaries are skipped (their ids are
+  # cited by these very steps), and so are clauses satisfied at the root —
+  # they may be the recorded reason of a root literal, they are swept later
+  # anyway, and replacing one would orphan its citation.
   -> rewrite_occurrences(yv, gid_fwd, gid_back)
     r = @replit[yv]
     two = [2 * yv, 2 * yv + 1]
@@ -736,7 +791,15 @@ WASSAT_PRE_BUCKET_CAP = 1024
       w = @oh[li]
       while w >= 0
         ci = @ov[w]
-        if @falive[ci] == 1
+        eligible = @falive[ci] == 1 && !@helper_mark.has_key?(ci)
+        if eligible
+          sat_root = false
+          si = 0
+          while si < @lits[ci].size
+            sat_root = true if self.value(@lits[ci][si]) > 0
+            si += 1
+          eligible = !sat_root
+        if eligible
           arr = @lits[ci]
           @ticks += arr.size
           mapped = []
@@ -1092,17 +1155,13 @@ WASSAT_PRE_BUCKET_CAP = 1024
     while ti < @ftsize
       l = @ftrail[ti]
       rci = @preason[l.abs]
-      if rci >= 0 && @falive[rci] == 1 && @lits[rci].size == 1
-        keep_unit[rci] = 1
-      else
-        chain = []
-        if rci >= 0
-          chain = self.conflict_chain_for_unit(l)
-        gid = @next_gid
-        self.plog_add(gid, [l], chain)
-        nci = self.store([l])
-        @preason[l.abs] = nci
-        keep_unit[nci] = 1
+      # Eager derivation guarantees every root literal is backed by a live
+      # unit clause by now (input unit, probe unit, or derived unit); a
+      # violation means some technique deleted a cited clause and the
+      # certificate is already unsound — stop loudly, never paper over it.
+      unless rci >= 0 && @falive[rci] == 1 && @lits[rci].size == 1
+        raise "internal error: root literal [l] lost its unit clause"
+      keep_unit[rci] = 1
       ti += 1
     doomed = []
     ci = 0
@@ -1122,17 +1181,17 @@ WASSAT_PRE_BUCKET_CAP = 1024
     self.delete_batch(doomed)
     0
 
-  # Chain justifying root literal `l`: cone of its reason, then the reason
-  # itself (which is conflicting once the checker asserts -l and replays the
-  # cone).
-  -> conflict_chain_for_unit(l)
-    rci = @preason[l.abs]
-    chain = self.conflict_chain(rci, l.abs)
-    chain
-
   # ---- artifact -------------------------------------------------------------
 
   -> artifact
+    # A substituted variable that ended up root-assigned during the rewrite
+    # cascades is pinned by a live unit clause, so it is not "gone" in the
+    # assumption/consistency sense (reconstruction still overwrites it with
+    # the representative's value, which the equivalence makes identical).
+    v = 1
+    while v <= @nvars
+      @gone[v] = 0 if @gone[v] == 2 && @passign[v] != 0
+      v += 1
     clauses = []
     gids = []
     ci = 0
@@ -1317,6 +1376,10 @@ WASSAT_PRE_BUCKET_CAP = 1024
               n = fcl[ci]
               if n < slen
                 ok = 0
+              # never delete or strengthen a unit clause: root literals'
+              # units are load-bearing citations for the whole certificate
+              if n < 2
+                ok = 0
             if ok == 1 && mode == 0
               if (csig & fsig[ci]) != csig
                 ok = 0
@@ -1399,6 +1462,11 @@ WASSAT_PRE_BUCKET_CAP = 1024
     r = s.solve_budget(max_conflicts)
     if r["status"] == 1
       r["model"] = wassat_reconstruct_model(art["stack"], r["model"], f["nvars"])
+      # The library path carries the same output-integrity guard as the CLI:
+      # a reconstructed model that fails the ORIGINAL formula is a hard
+      # error, never a returned result.
+      unless wassat_model_satisfies?(f, r["model"])
+        raise "internal error: reconstructed model does not satisfy the original formula"
     if r["status"] == -1
       r["proof"] = wassat_concat_arrays(art["wrat"], r["proof"])
       r["drat"] = wassat_concat_arrays(art["drat"], r["drat"])

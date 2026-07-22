@@ -83,19 +83,31 @@ solvers = [
     ("z3", lambda cnf: command(Z3, "-dimacs", str(cnf))),
 ]
 
+failures = 0
+
 print(f"== Solvers (wall milliseconds; timeout {TIMEOUT:g}s) ==")
 print(f"{'instance':<12}" + "".join(f"{name:>11}" for name, _ in solvers) + "   agreement")
 for name in instances:
     cnf = BENCH / f"{name}.cnf"
     cells: list[str] = []
     verdicts: list[str] = []
-    for _, make_command in solvers:
+    wassat_verdict = ""
+    for solver_name, make_command in solvers:
         cmd = make_command(cnf)
         elapsed, verdict = run(cmd)
         cells.append("--" if cmd is None else ("TO" if elapsed is None else f"{1000 * elapsed:.1f}"))
+        if solver_name == "wassat":
+            wassat_verdict = verdict
         if verdict not in ("--", "TO") and not verdict.startswith("exit-"):
             verdicts.append(verdict)
-    agreement = "OK" if len(set(verdicts)) <= 1 else "MISMATCH: " + "/".join(verdicts)
+    # A missing Wassat verdict is a failure, never silent agreement: a broken
+    # binary that prints nothing must not produce a green table.
+    if wassat_verdict in ("SATISFIABLE", "UNSATISFIABLE", "UNKNOWN"):
+        agreement = "OK" if len(set(verdicts)) <= 1 else "MISMATCH: " + "/".join(verdicts)
+    else:
+        agreement = f"NO WASSAT VERDICT ({wassat_verdict})"
+    if not agreement.startswith("OK"):
+        failures += 1
     print(f"{name:<12}" + "".join(f"{cell:>11}" for cell in cells) + f"   {agreement}")
 
 
@@ -106,6 +118,11 @@ if WRAT is not None:
         cnf = BENCH / f"{name}.cnf"
         wrat = BENCH / f"{name}.wrat"
         drat = BENCH / f"{name}.drat"
+        # Stale certificates from an earlier run must never be re-checked as
+        # if freshly produced: remove them before generation and require the
+        # solver to actually report UNSAT.
+        wrat.unlink(missing_ok=True)
+        drat.unlink(missing_ok=True)
         generated = subprocess.run(
             [WASSAT, str(cnf), "--proof", str(wrat), "--drat", str(drat)],
             capture_output=True,
@@ -113,13 +130,28 @@ if WRAT is not None:
             timeout=max(TIMEOUT, 120),
             check=False,
         )
-        if generated.returncode != 0 or not wrat.is_file() or not drat.is_file():
+        produced_unsat = "s UNSATISFIABLE" in generated.stdout
+        if generated.returncode != 0 or not produced_unsat or not wrat.is_file() or not drat.is_file():
             print(f"{name:<12}{'generation failed':>24}")
+            failures += 1
             continue
         steps = sum(1 for line in wrat.read_text().splitlines() if line and not line.startswith("wrat"))
+        hinted_ms, hinted_verdict = run([WRAT, str(cnf), str(wrat)], timeout=max(TIMEOUT, 120))
+        plain_ms, plain_verdict = run([WRAT, str(cnf), str(drat)], timeout=max(TIMEOUT, 120))
+        # The row is meaningful only when the independent checker says
+        # VERIFIED for both dialects.
+        if hinted_verdict != "VERIFIED" or plain_verdict != "VERIFIED":
+            print(f"{name:<12}NOT VERIFIED (hinted={hinted_verdict}, plain={plain_verdict})")
+            failures += 1
+            continue
         print(
-            f"{name:<12}{timed([WRAT, str(cnf), str(wrat)]):>12}"
-            f"{timed([WRAT, str(cnf), str(drat)]):>12}{steps:>10}"
+            f"{name:<12}{1000 * hinted_ms:>12.1f}"
+            f"{1000 * plain_ms:>12.1f}{steps:>10}"
         )
 else:
     print("\nProof checking skipped: tungsten-wrat binary was not found.")
+    failures += 1
+
+if failures:
+    raise SystemExit(f"FAIL: {failures} benchmark row(s) failed")
+print("\nOK: all rows agreed and all fresh certificates verified")

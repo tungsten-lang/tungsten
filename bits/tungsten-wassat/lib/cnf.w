@@ -6,12 +6,15 @@
 # make both agree on a formula that is not the one on disk.  The duplication
 # is the feature.
 
-# Split a line into non-empty whitespace-separated tokens.
+# Split a line into non-empty whitespace-separated tokens. DIMACS permits
+# tabs as well as spaces, so each space-split piece is split again on tabs;
+# strip disposes of any carriage returns.
 -> wassat_tokenize(line)
   out = []
   line.split(" ").each -> (t)
-    piece = t.strip
-    out.push(piece) unless piece == ""
+    t.split("\t").each -> (u)
+      piece = u.strip
+      out.push(piece) unless piece == ""
   out
 
 # DIMACS counts are non-negative decimal integers.  Do not use String#to_i

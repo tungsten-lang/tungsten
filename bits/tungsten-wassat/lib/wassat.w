@@ -108,13 +108,35 @@ use preprocess
 -> wassat_mode_of(options)
   options["fast"] ? "fast" : "proof"
 
+# Two paths name the same file when the strings match or when both exist
+# with the same (device, inode) identity — which catches symlink and
+# hardlink aliases, not just spelling. The identity probe is compiled-CLI
+# only; the string check short-circuits first so library callers with
+# equal paths never reach the ccall.
+-> wassat_same_file?(a, b)
+  return true if a == b
+  ida = ccall("__w_file_id", a)
+  idb = ccall("__w_file_id", b)
+  ida != nil && idb != nil && ida == idb
+
 # Truncate requested certificate destinations before solving. Otherwise a SAT,
 # UNKNOWN, parse failure, or interrupted rerun can leave an older refutation at
 # the requested path and make it look like evidence for the current formula.
+# Callers must have READ the input already: an aliased destination is
+# detected here, but even a missed alias must never truncate an unread input.
 -> wassat_prepare_output(path, input_path, label)
   unless path == nil || path == "-"
-    raise "[label] output must not overwrite the input formula" if path == input_path
+    raise "[label] output must not overwrite the input formula" if wassat_same_file?(path, input_path)
     raise "cannot prepare [label] output at '[path]'" unless write_file(path, "")
+  0
+
+# Status, model, and comment lines go to stderr whenever a certificate is
+# being written to stdout, so the streamed proof is standalone.
+-> wassat_status(quiet, text)
+  if quiet
+    z = ccall("__w_eprint", text + "\n")
+  else
+    << text
   0
 
 # Report malformed input as a clean diagnostic rather than a backtrace. The
@@ -134,16 +156,18 @@ use preprocess
   input = options["input"]
   wrat_out = options["proof"]
   drat_out = options["drat"]
-  wassat_prepare_output(wrat_out, input, "WRAT")
-  wassat_prepare_output(drat_out, input, "DRAT")
+  quiet = wrat_out == "-" || drat_out == "-"
   # Raw DRAT records learned clauses directly. Hinted WRAT costs a replayed
   # propagation per learned clause; request it only for --proof. If both
   # outputs are requested, the hinted proof can also be rendered as DRAT.
   proof_mode = WASSAT_PROOF_NONE
   proof_mode = WASSAT_PROOF_DRAT unless drat_out == nil
   proof_mode = WASSAT_PROOF_WRAT unless wrat_out == nil
+  # Read the formula BEFORE touching any destination; only then truncate.
   cnf_text = read_file(input)
   raise "cannot read input formula '[input]'" if cnf_text == nil
+  wassat_prepare_output(wrat_out, input, "WRAT")
+  wassat_prepare_output(drat_out, input, "DRAT")
   formula = wassat_parse_cnf(cnf_text)
 
   # Preprocess once, above solver construction. The artifact carries the
@@ -157,23 +181,26 @@ use preprocess
   pstats = wassat_pre_stats_text(art["stats"], pre_ms)
 
   if art["status"] == -1
-    # refuted during preprocessing; the prefix is the whole certificate
-    print("s UNSATISFIABLE\n")
-    << "c mode: [wassat_mode_of(options)]"
-    << "c conflicts: 0, decisions: 0"
-    << "c stats restarts=0 reduces=0 " + pstats
+    # Refuted during preprocessing; the prefix is the whole certificate.
+    # Certificates reach durable storage BEFORE the verdict is announced: a
+    # failed write must never leave "s UNSATISFIABLE" beside an incomplete
+    # proof.
+    wtext = ""
+    dtext = ""
     unless wrat_out == nil
       wtext = "wrat 1\n" + art["wrat"].join("\n") + "\n"
-      if wrat_out == "-"
-        print(wtext)
-      else
+      unless wrat_out == "-"
         raise "proof write failed at '[wrat_out]'" unless write_file(wrat_out, wtext)
     unless drat_out == nil
       dtext = art["drat"].empty? ? "" : art["drat"].join("\n") + "\n"
-      if drat_out == "-"
-        print(dtext)
-      else
+      unless drat_out == "-"
         raise "proof write failed at '[drat_out]'" unless write_file(drat_out, dtext)
+    wassat_status(quiet, "s UNSATISFIABLE")
+    wassat_status(quiet, "c mode: [wassat_mode_of(options)]")
+    wassat_status(quiet, "c conflicts: 0, decisions: 0")
+    wassat_status(quiet, "c stats restarts=0 reduces=0 " + pstats)
+    print(wtext) if wrat_out == "-"
+    print(dtext) if drat_out == "-"
     return 0
 
   s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, options["lookahead"])
@@ -213,13 +240,20 @@ use preprocess
     unless wassat_model_satisfies?(formula, result["model"])
       raise "internal error: model does not satisfy the input formula"
 
-  print(wassat_result_text(result))
-  << "c mode: [wassat_mode_of(options)]"
-  << "c conflicts: [result["conflicts"]], decisions: [result["decisions"]]"
-  << "c stats restarts=[result["restarts"]] reduces=[result["reduces"]] " + pstats
+  # On UNSAT the certificate is flushed to durable storage BEFORE the
+  # verdict is announced: a failed flush raises here and the run reports an
+  # error, never "s UNSATISFIABLE" beside an incomplete proof.
+  s.flush_proof_sinks if result["status"] == -1
+
+  # Trim the trailing newline: wassat_result_text ends with one and
+  # wassat_status appends its own.
+  rtext = wassat_result_text(result)
+  wassat_status(quiet, rtext.slice(0, rtext.size - 1))
+  wassat_status(quiet, "c mode: [wassat_mode_of(options)]")
+  wassat_status(quiet, "c conflicts: [result["conflicts"]], decisions: [result["decisions"]]")
+  wassat_status(quiet, "c stats restarts=[result["restarts"]] reduces=[result["reduces"]] " + pstats)
 
   if result["status"] == -1
-    s.flush_proof_sinks
     unless wrat_out == nil
       if wrat_out == "-"
         lines = wassat_concat_arrays(art["wrat"], result["proof"])

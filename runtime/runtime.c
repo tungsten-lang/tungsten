@@ -18210,23 +18210,39 @@ WValue __w_file_read_dir(WValue path_val) {
     return result;
 }
 
-WValue __w_write_file(WValue path_val, WValue content_val) {
+/* Write `content` to `path` in mode `mode` ("wb" truncate / "ab" append).
+ * Returns W_TRUE only if every byte reached the file: a short fwrite (disk
+ * full) or a failed fclose (delayed flush error) reports W_FALSE at fault
+ * time instead of letting the caller trust a truncated file. */
+static WValue w_write_file_mode(WValue path_val, WValue content_val, const char *mode) {
     const char *path = as_str(path_val);
-    FILE *f = fopen(path, "wb");
+    FILE *f = fopen(path, mode);
     if (!f) return W_FALSE;
+    size_t want = 0, wrote = 0;
     if (w_is_bytes(content_val)) {
         WArray *a = (WArray *)w_as_ptr(content_val);
         uint8_t *data = (uint8_t *)a->slots + a->start;
-        if (a->size > 0) fwrite(data, 1, (size_t)a->size, f);
+        want = (size_t)a->size;
+        if (want > 0) wrote = fwrite(data, 1, want, f);
     } else {
         char inline_buf[6];
         const char *content;
         size_t len;
         w_str_data(content_val, inline_buf, &content, &len);
-        fwrite(content, 1, len, f);
+        want = len;
+        if (want > 0) wrote = fwrite(content, 1, len, f);
     }
-    fclose(f);
+    int close_failed = fclose(f) != 0;
+    if (wrote != want || close_failed) return W_FALSE;
     return W_TRUE;
+}
+
+WValue __w_write_file(WValue path_val, WValue content_val) {
+    return w_write_file_mode(path_val, content_val, "wb");
+}
+
+WValue __w_append_file(WValue path_val, WValue content_val) {
+    return w_write_file_mode(path_val, content_val, "ab");
 }
 
 WValue __w_file_expand_path(WValue path_val) {

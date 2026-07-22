@@ -742,6 +742,28 @@
     param_names_list.push(param_runtime_name(params[pi]))
     pi += 1
   reassigned = find_reassigned_params(body, param_names_list)
+  # Round-5 (2026-07-22): a param reassigned with a machine-int annotation
+  # anywhere in the body is promoted to a RAW machine entry slot — the same
+  # representation a local gets from `y = x ## u64`. One representation for
+  # the whole function: full-width raw reads (no nanunbox truncation),
+  # native 2^64 wrap on unannotated arithmetic reassigns in the chain, no
+  # mid-branch retype. Captured params stay boxed (closure capture
+  # snapshots WValues), as do already-typed signature params.
+  param_hint_map = find_param_machine_hints(body, param_names_list)
+  captured_for_hints = find_captured_params_in_body(body, param_names_list)
+  hi = 0
+  while hi < reassigned.size()
+    hname = reassigned[hi]
+    if param_hint_map[hname] != nil && child_var_types[hname] == nil
+      hcaptured = false
+      hj = 0
+      while hj < captured_for_hints.size()
+        if captured_for_hints[hj] == hname
+          hcaptured = true
+        hj += 1
+      if !hcaptured
+        child_var_types[hname] = param_hint_map[hname]
+    hi += 1
   pi = 0
   while pi < reassigned.size()
     pname = reassigned[pi]

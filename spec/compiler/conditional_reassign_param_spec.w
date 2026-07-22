@@ -84,3 +84,25 @@ check("reassign.param_chain_matches_hoist",
 check("reassign.param_used_mid_chain", xs_partial_then_read(88172645463325252).to_s(),
       "88193037827817907")
 check("reassign.param_chain_small", xs_param(12345), 414263032884)
+
+# Round-5 (2026-07-22): MIXED chains — annotated xor/shift reassigns plus an
+# UNANNOTATED multiply reassign of the same param — must wrap at 2^64
+# exactly like the identical local chain (entry materialization gives the
+# param a raw machine slot). Previously the unannotated line promoted
+# through the boxed path and returned values exceeding 2^64.
+
+-> xs_mixed_param(x)
+  x = x ^ (x >> 12) ## u64
+  x = x * 2685821657736338717
+  x
+
+-> xs_mixed_local(seed)
+  y = seed ## u64
+  y = y ^ (y >> 12) ## u64
+  y = y * 2685821657736338717
+  y
+
+check("reassign.mixed_param_wraps", xs_mixed_param(88172645463325252).to_s(), "8558018892776634439")
+check("reassign.mixed_local_wraps", xs_mixed_local(88172645463325252).to_s(), "8558018892776634439")
+check("reassign.mixed_param_eq_local",
+      xs_mixed_param(88172645463325252), xs_mixed_local(88172645463325252))

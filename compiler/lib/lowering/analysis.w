@@ -851,6 +851,77 @@
       scan_assigns_for_params(node.else_body, assigned)
     i += 1
 
+# Round-5 (2026-07-22): params whose body carries a machine-int annotated
+# reassign (`p = … ## u64`) get materialized as RAW machine entry slots in
+# definitions.w — the same representation a local gets from an annotated
+# first assignment. That gives full-width raw reads, native 2^64 wrap on
+# UNANNOTATED arithmetic reassigns in the same chain (previously those
+# promoted through the boxed :bigint path while identical local chains
+# wrapped), and no mid-branch retype. Returns pname → :i64/:u64, first
+# hint wins. Positions this walker doesn't reach (or captured params,
+# filtered by the caller) simply stay boxed — the correct-but-promoting
+# round-4 behavior — so misses degrade gracefully, never miscompile.
+-> find_param_machine_hints(body, param_names)
+  if body == nil || param_names == nil || param_names.size() == 0
+    return {}
+  names = {}
+  i = 0
+  while i < param_names.size()
+    names[param_names[i]] = true
+    i += 1
+  hints = {}
+  scan_param_machine_hints(body, names, hints)
+  hints
+
+-> scan_param_machine_hints(nodes, names, hints)
+  if nodes == nil
+    return nil
+  i = 0
+  while i < nodes.size()
+    node = nodes[i]
+    if node == nil
+      i += 1
+      next
+    t = ast_kind(node)
+    if t in (:fastmath_block :strictmath_block :overflow_block)
+      scan_param_machine_hints(node[:body], names, hints)
+      i += 1
+      next
+    case t
+    when :assign
+      if ast_kind(node.target) == :var && names[node.target.name] == true && node.type_hint != nil
+        if node.type_hint in ("i64" "u64") && hints[node.target.name] == nil
+          hints[node.target.name] = node.type_hint.to_sym()
+    when :if
+      scan_param_machine_hints(node.then_body, names, hints)
+      scan_param_machine_hints(node.else_body, names, hints)
+      if node.elsif_clauses != nil
+        j = 0
+        while j < node.elsif_clauses.size()
+          scan_param_machine_hints(node.elsif_clauses[j][1], names, hints)
+          j += 1
+    when :while
+      scan_param_machine_hints(node.body, names, hints)
+    when :begin
+      scan_param_machine_hints(node.body, names, hints)
+      scan_param_machine_hints(node.rescue_body, names, hints)
+      scan_param_machine_hints(node.ensure_body, names, hints)
+    when :case
+      if node.clauses != nil
+        j = 0
+        while j < node.clauses.size()
+          scan_param_machine_hints(node.clauses[j].body, names, hints)
+          j += 1
+      scan_param_machine_hints(node.else_body, names, hints)
+    when :case_value
+      if node.arms != nil
+        j = 0
+        while j < node.arms.size()
+          scan_param_machine_hints(node.arms[j].body, names, hints)
+          j += 1
+      scan_param_machine_hints(node.else_body, names, hints)
+    i += 1
+
 # ── Escaping-closure detection (iterator-inline gate) ─────────────────
 # True when the subtree creates a closure that can OUTLIVE the enclosing
 # frame: a `go` body, a bare `-> (…)` lambda in expression position

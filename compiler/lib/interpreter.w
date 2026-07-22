@@ -3060,12 +3060,17 @@ use target
       raise pending_error
     result
 
-  -> collect_free_vars(node, env, vars, seen)
+  # Syntactic implicit-parameter candidates for a paramless block: every name
+  # the body READS before assigning it, in first-appearance order. Purely a
+  # function of the AST — no Environment is consulted, so the result is safe to
+  # cache on the node (see call_block). Deciding which candidates are actually
+  # free (rather than captures of the enclosing frame) happens per call.
+  -> collect_free_vars(node, vars, seen)
     if node == nil
       return nil
     if type(node) == "Array"
       node.each -> (child)
-        collect_free_vars(child, env, vars, seen)
+        collect_free_vars(child, vars, seen)
       return nil
     if !is_ast_node?(node) || ast_kind(node) == nil
       return nil
@@ -3074,18 +3079,18 @@ use target
       return nil
     if t == :var
       name = ast_get(node, :name)
-      if seen[name] == nil && name[0] != "@" && !env.defined?(name)
+      if seen[name] == nil && name[0] != "@"
         seen[name] = true
         vars.push(name)
       return nil
     if t == :assign
-      collect_free_vars(ast_get(node, :value), env, vars, seen)
+      collect_free_vars(ast_get(node, :value), vars, seen)
       if ast_get(node, :target) != nil && ast_kind(ast_get(node, :target)) == :var
         seen[ast_get(ast_get(node, :target), :name)] = true
       return nil
     if t == :compound_assign
-      collect_free_vars(ast_get(node, :value), env, vars, seen)
-      collect_free_vars(ast_get(node, :target), env, vars, seen)
+      collect_free_vars(ast_get(node, :value), vars, seen)
+      collect_free_vars(ast_get(node, :target), vars, seen)
       return nil
     if t == :string_interp
       parts = ast_get(node, :parts)
@@ -3093,7 +3098,7 @@ use target
       while i < parts.size()
         part = parts[i]
         if part[0] != :str
-          collect_free_vars(part[1], env, vars, seen)
+          collect_free_vars(part[1], vars, seen)
         i += 1
       return nil
     # Generic walk: recurse into all AST children. The Hash-era walk
@@ -3102,7 +3107,7 @@ use target
     # flag), not children, and ast_children() already excludes them
     # by walking only Hash/Array slot values.
     ast_children(node).each -> (c)
-      collect_free_vars(c, env, vars, seen)
+      collect_free_vars(c, vars, seen)
     nil
 
   -> call_block(block_data, args)
@@ -3114,12 +3119,23 @@ use target
       if params.size() == 0 && args.size() > 0
         if ast_get(blk_node, :_free_vars) == nil
           vars = []
-          collect_free_vars(ast_get(blk_node, :body), blk_env, vars, {})
+          collect_free_vars(ast_get(blk_node, :body), vars, {})
           ast_set(blk_node, :_free_vars, vars)
+        # The cached list is syntactic; a candidate already bound in the
+        # enclosing FRAME is a capture, not a parameter, so it is skipped and
+        # consumes no argument. Frame-scoped on purpose: `defined?` reads past
+        # the method barrier, which let a caller's `i` steal the implicit
+        # index parameter of core/array.w's `-> each/&` (`$size -> &(self[i])`)
+        # and hand every iteration the same element. Re-checked per call so
+        # the cache can never freeze one caller's answer for all the others.
         free_vars = ast_get(blk_node, :_free_vars)
         i = 0
-        while i < free_vars.size() && i < args.size()
-          block_env.define(free_vars[i], args[i])
+        argi = 0
+        while i < free_vars.size() && argi < args.size()
+          candidate = free_vars[i]
+          if !blk_env.defined_locally_or_in_scope?(candidate)
+            block_env.define(candidate, args[argi])
+            argi += 1
           i += 1
       else
         i = 0

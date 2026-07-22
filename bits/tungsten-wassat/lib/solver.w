@@ -692,7 +692,8 @@ WASSAT_PROOF_DRAT = 2
     { "sat": sat, "unsat": unsat, "complete": status != 0,
       "status": status, "model": model, "proof": proof, "drat": drat,
       "proof_mode": @proof_mode,
-      "conflicts": @conflicts, "decisions": @decisions_made }
+      "conflicts": @conflicts, "decisions": @decisions_made,
+      "restarts": @restart_count, "reduces": @reductions }
 
   # A positive conflict budget is additional work for this call. Returning
   # UNKNOWN preserves the trail, learned database, restart cadence, and hidden
@@ -1149,3 +1150,22 @@ WASSAT_PROOF_DRAT = 2
     "s UNKNOWN\n"
   else
     "s UNSATISFIABLE\n"
+
+# Output-integrity guard: does the model satisfy every clause of the formula?
+# Every SAT answer must pass this scan against the ORIGINAL formula before it
+# is reported, whichever engine produced it. UNSAT has independent checkers;
+# this is the SAT side of that symmetry.
+-> wassat_model_satisfies?(formula, model)
+  nv = formula["nvars"]
+  sign = i64[nv + 1]
+  model.each -> (l)
+    v = l.abs
+    sign[v] = l > 0 ? 1 : -1 if v >= 1 && v <= nv
+  ok = true
+  formula["clauses"].each -> (c)
+    hit = false
+    c.each -> (l)
+      want = l > 0 ? 1 : -1
+      hit = true if sign[l.abs] == want
+    ok = false unless hit
+  ok

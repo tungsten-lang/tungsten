@@ -77,7 +77,7 @@ if not BENCH.is_dir():
 
 instances = ["php32", "php43", "php54", "php65", "php76", "php87", "rand3_20", "rand3_40"]
 solvers = [
-    ("wassat", lambda cnf: command(WASSAT, str(cnf))),
+    ("wassat", lambda cnf: command(WASSAT, str(cnf), "--fast")),
     ("cadical", lambda cnf: command(CADICAL, str(cnf))),
     ("cms5", lambda cnf: command(CMS5, str(cnf))),
     ("z3", lambda cnf: command(Z3, "-dimacs", str(cnf))),

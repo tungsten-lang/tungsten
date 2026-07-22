@@ -105,7 +105,7 @@ with tempfile.TemporaryDirectory(prefix="wassat-differential-") as directory:
             + "".join(" ".join(map(str, clause)) + " 0\n" for clause in clauses)
         )
         ours = subprocess.run(
-            [WASSAT, str(cnf)], capture_output=True, text=True, timeout=TIMEOUT, check=False
+            [WASSAT, str(cnf), "--fast"], capture_output=True, text=True, timeout=TIMEOUT, check=False
         )
         reference = subprocess.run(
             [CADICAL, str(cnf)], capture_output=True, text=True, timeout=TIMEOUT, check=False

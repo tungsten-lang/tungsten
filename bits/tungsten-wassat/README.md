@@ -15,12 +15,20 @@ From this directory:
 ```sh
 ../../bin/tungsten compile bin/wassat.w --out bin/wassat --release --lto --fast
 
-bin/wassat problem.cnf
-bin/wassat problem.cnf --conflicts 100000
+bin/wassat problem.cnf --fast
+bin/wassat problem.cnf --fast --conflicts 100000
 bin/wassat problem.cnf --drat out.drat
 bin/wassat problem.cnf --proof out.wrat
 bin/wassat problem.cnf --proof out.wrat --drat out.drat
 ```
+
+A mode is required, and there is no silent default: `--proof`/`--drat` answer
+with a checkable certificate and restrict the engine to proof-covered
+techniques, while `--fast` may use every technique and returns answers that
+are trusted, not proven. Running without a mode is an error, because the
+difference is whether an UNSAT answer can be independently verified — that
+should never be implicit. The selected mode is echoed in the `c mode:`
+comment line.
 
 `--conflicts n` returns `s UNKNOWN` if the bounded search has not finished.
 `--lookahead n` scores up to `n` candidate variables by trial propagation

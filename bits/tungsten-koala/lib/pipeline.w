@@ -77,14 +77,16 @@
 # convenience: `params` and `with_params` have to round-trip
 # (`p.with_params(p.params)` reproduces p), so reporting a key that
 # with_params could not apply would break the contract for every caller.
-# It also excludes the steps that would otherwise poison the hash —
-# Scaler#params and Imputer#params report FITTED state (an array of
-# [name, a, b] triples), not hyperparameters, and answer no with_params.
-# So koala's bundled transformers contribute NO keys today, and the
-# tunable surface of a Scaler + LinearRegression chain is
-# { "model.alpha" => ... } alone. Nothing here is special-cased to a
-# class: the day Scaler carries params/with_params, "scale.kind" joins
-# the surface with no change to this file.
+# It also excludes any step that cannot take part — a step answering
+# neither half is carried by reference and contributes no keys. koala's
+# bundled transformers DO take part (Scaler / Imputer / Encoder are
+# `is Tunable`), so a Scaler + LinearRegression chain's surface is
+# { "scale.kind" => ..., "scale.columns" => ..., "model.alpha" => ... }
+# and a grid search tunes the scaling alongside the model. Nothing here
+# was special-cased to make that happen: the rule was always stated in
+# terms of the two METHODS, never a class, so the transformers joined
+# the surface with no change to this file. What fit LEARNED answers to
+# `learned_params`, which is deliberately not `params`.
 #
 # with_params returns a FRESH, UNFITTED Pipeline and leaves the receiver
 # untouched, so a search fans out from one prototype without aliasing.

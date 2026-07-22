@@ -15,13 +15,36 @@
 # column order is preserved. columns = nil encodes every column.
 # transform before fit returns nil.
 #
+# INPUT is a DataFrame, or anything Estimator.frame accepts — a Matrix,
+# an array of row arrays, or a flat single-feature array, whose columns
+# are then named x0, x1, … positionally. The output is always a
+# DataFrame. That coercion is what lets an Encoder ride inside a
+# cross-validated or grid-searched Pipeline, where x reaches the steps as
+# plain ROWS.
+#
 # Fitted state lives in parallel arrays (@fit_names / @fit_cats) — hash
-# iteration order is not guaranteed across engines.
+# iteration order is not guaranteed across engines; `categories(name)`
+# reads it back per column.
+#
+# --- Tunable (see lib/estimator_base.w) ---
+#
+#     enc.params                            # => { kind: :label, columns: nil }
+#     enc.with_params({ kind: :one_hot })   # => a NEW, UNFITTED Encoder
+#
+# `params` reports the CONSTRUCTOR knobs — the two a search varies — and
+# `with_params` returns a fresh unfitted clone with the overrides
+# applied, leaving the receiver untouched. Answering both is the whole
+# entry fee for Pipeline's tunable surface, so an Encoder named :encode
+# in a chain contributes "encode.kind" and a grid search can choose
+# label-vs-one-hot the way it chooses a model's alpha.
 #
 # NOTE: locals are hoisted from ivars before any `-> (x)` block — the
 # interpreter cannot resolve @ivars from a block body.
 + Encoder
+  is Tunable
+
   ro :kind
+  ro :columns
 
   -> new(kind = :label, columns = nil)
     @kind = kind
@@ -35,12 +58,13 @@
 
   # Collect first-seen category lists from df (only @columns when given).
   -> fit(df)
+    frame = Estimator.frame(df)
     wanted = @columns
-    wanted = df.column_names if wanted == nil
+    wanted = frame.column_names if wanted == nil
     names = []
     cats = []
     wanted.each -> (name)
-      values = df.column_values(name)
+      values = frame.column_values(name)
       if values != nil
         seen = []
         values.each -> (v)
@@ -67,12 +91,13 @@
   -> transform(df)
     out = nil
     if @fitted
+      frame = Estimator.frame(df)
       kind = @kind
       fit_names = @fit_names
       fit_cats = @fit_cats
       pairs = []
-      df.column_names.each -> (name)
-        values = df.column_values(name)
+      frame.column_names.each -> (name)
+        values = frame.column_values(name)
         i = -1
         j = 0
         fit_names.each -> (n)
@@ -102,6 +127,21 @@
   -> fit_transform(df)
     self.fit(df)
     self.transform(df)
+
+  # --- Tunable contract (see lib/estimator_base.w) ---
+
+  # The hyperparameters a search varies — the constructor's own knobs,
+  # never the categories fit collected (those are categories(name)).
+  -> params
+    { kind: @kind, columns: @columns }
+
+  # A NEW, UNFITTED Encoder with `overrides` applied; self is left
+  # untouched. Unmentioned keys carry over, so with_params(params)
+  # round-trips, and an explicit `{ columns: nil }` really does widen a
+  # column-restricted encoder back to every column (key presence, not
+  # value, decides).
+  -> with_params(overrides)
+    Encoder.new(Estimator.opt(overrides, :kind, @kind), Estimator.opt(overrides, :columns, @columns))
 
   # Index of v in the category list; nil when v is nil or unseen.
   -> .code_for(cats, v)

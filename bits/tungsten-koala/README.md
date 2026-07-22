@@ -47,6 +47,10 @@ Scaler.new(:standard).fit_transform(df)   # (v-mean)/std; :min_max for 0..1
 Encoder.new(:one_hot, [:dept]).fit_transform(df)  # 0/1 "dept_eng" columns
 Encoder.new(:label, [:dept])              # category -> first-seen index
 Imputer.new(:median).fit_transform(df)    # nil-fill; :mean/:mode/:constant
+Scaler.new(:standard).fit_transform([[2, 9], [4, 9]])  # rows too: cols x0, x1
+sc.learned_params                    # what FIT learned: [name, mean, std]
+sc.params                            # what you SET: { kind:, columns: }
+sc.with_params({ kind: :min_max })   # => a NEW, UNFITTED Scaler; sc intact
 Splitter.train_test(df, 30)          # => [train, test]; last 30% tests
 Splitter.train_test(df, 30, 42)      # seeded shuffle — same seed, same split
 pipe = Pipeline.new([Imputer.new(:mean), Scaler.new(:standard)])
@@ -115,7 +119,9 @@ pipe.score(test_df, y_test)          # the estimator's R² on the chain
 # A Pipeline IS an Estimable — the same six methods as a bare estimator
 pipe.estimator_name                  # => "Pipeline"
 pipe.supervised?                     # => delegated to the TAIL step
-pipe.params                          # => { "model.alpha" => 0 }  "step.param"
+pipe.params                          # => { "scale.kind" => :standard,
+                                     #      "scale.columns" => nil,
+                                     #      "model.alpha" => 0 }  "step.param"
 pipe.with_params({ "model.alpha" => 10 })   # fresh UNFITTED chain; pipe intact
 
 # Clustering — KMeans, Lloyd's algorithm (koala's first UNSUPERVISED learner)
@@ -151,6 +157,9 @@ gs.predict(x_test)                   # delegates to best_estimator
 GridSearch.new(km, { k: [2, 3] }, 2).fit(x)        # unsupervised: no y
 GridSearch.new(m, grid, 4, 42)                     # seeded folds
 GridSearch.new(m, grid, 4, nil, false)             # refit: off
+GridSearch.new(pipe, { "scale.kind" => [:standard, :min_max],
+                       "model.alpha" => [1, 10] }, 2)  # tune PREPROCESSING
+                                     # and the model in ONE grid
 
 # The estimator contract — one uniform interface across all five
 m.supervised?                        # => true; false for KMeans alone
@@ -171,9 +180,21 @@ interface, defined in `lib/estimator_base.w`:
 
 | trait | methods | who |
 | --- | --- | --- |
+| `Tunable` | `params` `with_params(overrides)` | Scaler, Imputer, Encoder (and every Estimable, which restates the pair) |
 | `Estimable` | `fitted?` `predict(x)` `supervised?` `params` `with_params(overrides)` `estimator_name` | all five |
 | `SupervisedEstimator` | `fit(x, y)` `score(x, y)` | LinearRegression, KNNClassifier, LogisticRegression, GaussianNB |
 | `UnsupervisedEstimator` | `fit(x)` `score(x)` | KMeans |
+
+`Tunable` is the hyperparameter half on its own — what a search needs and
+nothing more. It exists because koala's transformers carry real
+hyperparameters (`kind`, `strategy`, `columns`, `fill_value`) but have no
+`predict` and no fit ARITY to declare, so `Estimable` would be a lie for
+them. Declaring it is the whole entry fee for a `Pipeline`'s tunable
+surface. `Estimable` RESTATES the two methods rather than composing
+`Tunable`, because trait composition (`with`) does not run on the
+interpreter — the traits here are flat by construction. Nothing tests a
+trait NAME: `Pipeline.tunable?` tests the two methods, so both kinds of
+step pass without it knowing either name.
 
 A class declares its conformance with `is`:
 
@@ -217,6 +238,19 @@ single-feature array; `Estimator.target_values(y)` accepts a Series, a
 Vector, or a plain array. `LinearRegression.feature_rows` /
 `.target_values` remain as delegating aliases for callers written before
 the move.
+
+`Estimator.frame(x)` is the transformer-side twin: the same input shapes,
+coerced the other way, into a DataFrame whose columns are named
+`x0`, `x1`, … positionally (a DataFrame passes through untouched). The
+transformers address columns BY NAME, but `CrossValidation` — and so
+`GridSearch` — coerces `x` to plain ROW ARRAYS before the model sees it,
+so a `Scaler` step inside a searched pipeline is handed rows. `frame` is
+what makes that work; without it the chain died on `column_names`.
+
+```tungsten
+Scaler.new(:standard).fit_transform([[2, 9], [4, 9], [6, 9]])
+# => a DataFrame with columns "x0", "x1"
+```
 
 ## Pipelines
 
@@ -269,7 +303,8 @@ exist**:
 
 ```tungsten
 pipe.params
-# => { "model.alpha" => 0 }
+# => { "scale.kind" => :standard, "scale.columns" => nil,
+#      "model.alpha" => 0 }
 
 tuned = pipe.with_params({ "model.alpha" => 10 })   # fresh, UNFITTED
 pipe.params["model.alpha"]                          # => 0 — untouched
@@ -288,18 +323,30 @@ Tungsten hash key is an ordinary string, so the readable separator is
 available and is the one used here.
 
 **The tunable surface is exactly the steps answering BOTH `params` and
-`with_params`** — the `Estimable` half of the contract. That rule is not
-a convenience. `params` and `with_params` have to round-trip
+`with_params`** — the `Tunable` pair. That rule is not a convenience.
+`params` and `with_params` have to round-trip
 (`p.with_params(p.params)` reproduces `p`), so reporting a key that
 `with_params` could not apply would break the contract for every caller.
-It also keeps out the steps that would otherwise poison the hash:
-`Scaler#params` and `Imputer#params` report FITTED state (an array of
-`[name, a, b]` triples), not hyperparameters, and neither answers
-`with_params`. So koala's bundled transformers contribute **no keys**
-today, and a Scaler + LinearRegression chain's search space is
-`{ "model.alpha" => ... }` alone. Nothing is special-cased to a class —
-the day `Scaler` carries `params` / `with_params`, `"scale.kind"` joins
-the surface with no change to `lib/pipeline.w`.
+
+koala's bundled transformers are `Tunable`, so **the preprocessing is
+part of the search space**: a `Scaler` named `:scale` contributes
+`"scale.kind"` and `"scale.columns"`, an `Imputer` named `:impute`
+contributes `"impute.strategy"` / `"impute.columns"` /
+`"impute.fill_value"`, and an `Encoder` contributes `"encode.kind"` /
+`"encode.columns"`. Nothing about that is special-cased to a class — the
+rule was always stated in terms of the two METHODS, so the transformers
+joined the surface with no change to `lib/pipeline.w` or
+`lib/grid_search.w` at all. A step answering neither half is still
+excluded and carried by reference.
+
+**Learned state is not `params`.** `Scaler#learned_params` (per-column
+`[name, mean, std]` triples) and `Imputer#learned_params` (per-column
+`[name, fill]` pairs) report what `fit` DISCOVERED; `params` reports what
+you SET. Those were one method once, and the fitted meaning lost the
+name: `params` means the constructor's knobs everywhere else in koala,
+and a `Pipeline` flattening a step's `params` into its search space must
+never be handed state that `with_params` cannot rebuild. `Encoder`'s
+learned state stays where it was, on `categories(name)`.
 
 `with_params` returns a fresh, UNFITTED Pipeline and leaves the receiver
 alone, so a search fans out from one prototype without aliasing. Every
@@ -359,6 +406,37 @@ gs = GridSearch.new(Pipeline.new([LinearRegression.new]),
                     { "linearregression.alpha" => [0, 1] }, 3)
 gs.fit(x, y)          # best_estimator is a refit Pipeline
 ```
+
+**Preprocessing is searchable too.** Because the transformers are
+`Tunable`, one grid can vary the scaling and the model together — and
+neither `grid_search.w` nor `pipeline.w` contains a line about scaling:
+
+```tungsten
+pipe = Pipeline.new([[:scale, Scaler.new(:min_max)],
+                     [:model, LinearRegression.new(10)]])
+gs = GridSearch.new(pipe, { "scale.kind"  => [:min_max, :standard],
+                            "model.alpha" => [1, 10] }, 2)
+gs.fit(x, y)
+gs.best_params        # => { "scale.kind" => :standard, "model.alpha" => 1 }
+gs.best_estimator     # => a refit Pipeline carrying BOTH winning knobs
+```
+
+That winner is not arbitrary. Ridge shrinks the fitted slope by
+`S / (S + alpha)`, where `S` is the training column's centred sum of
+squares *after* scaling — so the scaler decides how hard the same `alpha`
+bites. `:standard` divides by the sample std, leaving `S = n - 1`;
+`:min_max` divides by the range, leaving `S = (n - 1) * std² / range²`,
+which is always smaller. Less shrinkage means a fit closer to the true
+line, so `(alpha 1, :standard)` beats `(1, :min_max)` beats
+`(10, :standard)` beats `(10, :min_max)` — exactly the ranking the search
+reports (`spec/preprocessing_spec.w`, "searches a scaler param and a
+model param in one grid"). Note the winner is the SECOND candidate
+enumerated, so it is not the tie-break default, and it differs from the
+prototype in BOTH knobs.
+
+Grid keys are checked against `estimator.params`, so `"scale.kind"` being
+accepted is itself proof the Scaler is on the tunable surface — and a
+typo in the step name or the param is still caught loudly-by-nil.
 
 **Supervised and unsupervised.** `fit(x, y)` searches a supervised
 estimator, `fit(x)` an unsupervised one — the arity is chosen by the

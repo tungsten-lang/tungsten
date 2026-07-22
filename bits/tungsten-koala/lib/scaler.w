@@ -11,16 +11,44 @@
 # nil; columns that were not fitted pass through unchanged. transform
 # before fit returns nil (the shape-error convention).
 #
+# INPUT is a DataFrame, or anything Estimator.frame accepts — a Matrix,
+# an array of row arrays, or a flat single-feature array, whose columns
+# are then named x0, x1, … positionally. The output is always a
+# DataFrame. That coercion is what lets a Scaler ride inside a
+# cross-validated or grid-searched Pipeline, where x reaches the steps as
+# plain ROWS (CrossValidation coerces before the model sees it).
+#
 # Fitted state lives in parallel arrays (@fit_names / @fit_a / @fit_b,
 # where a/b is mean/std or min/max) — hash iteration order is not
 # guaranteed across engines. No float literals appear here: floats
 # cross engine boundaries unreliably, so every float derives from the
 # data via .to_f (the stats.w convention).
 #
+# --- Tunable (see lib/estimator_base.w) ---
+#
+#     sc.params                             # => { kind: :standard, columns: nil }
+#     sc.with_params({ kind: :min_max })    # => a NEW, UNFITTED Scaler
+#
+# `params` reports the CONSTRUCTOR knobs — the two a search varies — and
+# `with_params` returns a fresh unfitted clone with the overrides applied,
+# leaving the receiver untouched. Answering both is the whole entry fee
+# for Pipeline's tunable surface, so a Scaler named :scale in a chain
+# contributes "scale.kind" / "scale.columns" and GridSearch can select
+# the scaling ITSELF alongside the model's hyperparameters — with no code
+# in lib/pipeline.w or lib/grid_search.w aware of scaling.
+#
+# WHAT FIT LEARNED IS `learned_params`, NOT `params` — the per-column
+# [name, a, b] triples answer to their own name, because `params` means
+# "what you set" everywhere else in koala and fitted state must never
+# leak into a search space that cannot rebuild it.
+#
 # NOTE: locals are hoisted from ivars before any `-> (x)` block — the
 # interpreter cannot resolve @ivars from a block body.
 + Scaler
+  is Tunable
+
   ro :kind
+  ro :columns
 
   -> new(kind = :standard, columns = nil)
     @kind = kind
@@ -38,14 +66,15 @@
   # fitted, even when requested: scaling them is meaningless, so a
   # mixed frame scales cleanly with columns = nil.
   -> fit(df)
+    frame = Estimator.frame(df)
     kind = @kind
     wanted = @columns
-    wanted = df.column_names if wanted == nil
+    wanted = frame.column_names if wanted == nil
     names = []
     a = []
     b = []
     wanted.each -> (name)
-      values = df.column_values(name)
+      values = frame.column_values(name)
       usable = false
       usable = Stats.numeric?(values) if values != nil
       if usable
@@ -67,13 +96,14 @@
   -> transform(df)
     out = nil
     if @fitted
+      frame = Estimator.frame(df)
       kind = @kind
       fit_names = @fit_names
       fit_a = @fit_a
       fit_b = @fit_b
       pairs = []
-      df.column_names.each -> (name)
-        values = df.column_values(name)
+      frame.column_names.each -> (name)
+        values = frame.column_values(name)
         i = -1
         j = 0
         fit_names.each -> (n)
@@ -98,9 +128,25 @@
     self.fit(df)
     self.transform(df)
 
-  # Fitted parameters as ordered [name, a, b] triples
-  # (a/b = mean/std for :standard, min/max for :min_max).
+  # --- Tunable contract (see lib/estimator_base.w) ---
+
+  # The hyperparameters a search varies — the constructor's own knobs,
+  # never the mean/std fit learned (those are learned_params).
   -> params
+    { kind: @kind, columns: @columns }
+
+  # A NEW, UNFITTED Scaler with `overrides` applied; self is left
+  # untouched. Unmentioned keys carry over, so with_params(params)
+  # round-trips, and an explicit `{ columns: nil }` really does widen a
+  # column-restricted scaler back to every numeric column (key presence,
+  # not value, decides).
+  -> with_params(overrides)
+    Scaler.new(Estimator.opt(overrides, :kind, @kind), Estimator.opt(overrides, :columns, @columns))
+
+  # What fit LEARNED, as ordered [name, a, b] triples
+  # (a/b = mean/std for :standard, min/max for :min_max). Distinct from
+  # `params` above, which reports the knobs you set.
+  -> learned_params
     fit_names = @fit_names
     fit_a = @fit_a
     fit_b = @fit_b

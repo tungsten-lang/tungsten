@@ -22,6 +22,16 @@
 # every accepted input shape on the neutral `Estimator` base rather than on
 # a concrete sibling. It is what generic tooling — CrossValidation and
 # GridSearch — dispatches through, without ever naming a concrete class.
+#
+# The three PREPROCESSING transformers (Scaler / Imputer / Encoder)
+# declare the hyperparameter half of that contract on its own,
+# `is Tunable` — `params` / `with_params` and nothing more, since a
+# transformer has no predict and no fit arity to declare. That is the
+# whole entry fee for a Pipeline's tunable surface, so a grid search
+# tunes the SCALING or the FILL RULE alongside the model's alpha, with no
+# code in pipeline.w or grid_search.w aware that scaling exists. What fit
+# LEARNED answers to `learned_params` (Encoder: `categories`), keeping
+# `params` meaning "the knobs you set" everywhere in the bit.
 
 use version
 use stats

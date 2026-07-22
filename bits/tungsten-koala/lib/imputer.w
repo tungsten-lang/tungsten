@@ -13,13 +13,40 @@
 # passes through unchanged, and :mean/:median skip non-numeric columns
 # (see fit). transform before fit returns nil.
 #
+# INPUT is a DataFrame, or anything Estimator.frame accepts — a Matrix,
+# an array of row arrays, or a flat single-feature array, whose columns
+# are then named x0, x1, … positionally. The output is always a
+# DataFrame. That coercion is what lets an Imputer ride inside a
+# cross-validated or grid-searched Pipeline, where x reaches the steps as
+# plain ROWS.
+#
 # Fitted state lives in parallel arrays (@fit_names / @fit_fills) —
 # hash iteration order is not guaranteed across engines.
+#
+# --- Tunable (see lib/estimator_base.w) ---
+#
+#     imp.params                              # => { strategy: :mean, columns: nil, fill_value: nil }
+#     imp.with_params({ strategy: :median })  # => a NEW, UNFITTED Imputer
+#
+# `params` reports the CONSTRUCTOR knobs — the three a search varies —
+# and `with_params` returns a fresh unfitted clone with the overrides
+# applied, leaving the receiver untouched. Answering both is the whole
+# entry fee for Pipeline's tunable surface, so an Imputer named :impute
+# in a chain contributes "impute.strategy" and a grid search can pick
+# the fill rule the way it picks a model's alpha.
+#
+# WHAT FIT LEARNED IS `learned_params`, NOT `params` — the per-column
+# [name, fill] pairs answer to their own name, because `params` means
+# "what you set" everywhere else in koala.
 #
 # NOTE: locals are hoisted from ivars before any `-> (x)` block — the
 # interpreter cannot resolve @ivars from a block body.
 + Imputer
+  is Tunable
+
   ro :strategy
+  ro :columns
+  ro :fill_value
 
   -> new(strategy = :mean, columns = nil, fill_value = nil)
     @strategy = strategy
@@ -37,17 +64,18 @@
   # averaging strings is meaningless, so a mixed frame imputes cleanly
   # with columns = nil. :mode and :constant fit any column.
   -> fit(df)
+    frame = Estimator.frame(df)
     strategy = @strategy
     fill_value = @fill_value
     wanted = @columns
-    wanted = df.column_names if wanted == nil
+    wanted = frame.column_names if wanted == nil
     needs_numeric = false
     needs_numeric = true if strategy == :mean
     needs_numeric = true if strategy == :median
     names = []
     fills = []
     wanted.each -> (name)
-      values = df.column_values(name)
+      values = frame.column_values(name)
       usable = false
       usable = true if values != nil
       if usable && needs_numeric
@@ -64,11 +92,12 @@
   -> transform(df)
     out = nil
     if @fitted
+      frame = Estimator.frame(df)
       fit_names = @fit_names
       fit_fills = @fit_fills
       pairs = []
-      df.column_names.each -> (name)
-        values = df.column_values(name)
+      frame.column_names.each -> (name)
+        values = frame.column_values(name)
         i = -1
         j = 0
         fit_names.each -> (n)
@@ -93,8 +122,23 @@
     self.fit(df)
     self.transform(df)
 
-  # Fitted fill values as ordered [name, fill] pairs.
+  # --- Tunable contract (see lib/estimator_base.w) ---
+
+  # The hyperparameters a search varies — the constructor's own knobs,
+  # never the fill values fit learned (those are learned_params).
   -> params
+    { strategy: @strategy, columns: @columns, fill_value: @fill_value }
+
+  # A NEW, UNFITTED Imputer with `overrides` applied; self is left
+  # untouched. Unmentioned keys carry over, so with_params(params)
+  # round-trips, and an explicit nil value really does clear a knob (key
+  # presence, not value, decides).
+  -> with_params(overrides)
+    Imputer.new(Estimator.opt(overrides, :strategy, @strategy), Estimator.opt(overrides, :columns, @columns), Estimator.opt(overrides, :fill_value, @fill_value))
+
+  # What fit LEARNED, as ordered [name, fill] pairs. Distinct from
+  # `params` above, which reports the knobs you set.
+  -> learned_params
     fit_names = @fit_names
     fit_fills = @fit_fills
     out = []

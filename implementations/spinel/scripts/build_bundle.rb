@@ -657,6 +657,12 @@ def stage0_codepoint_lexer_compat(body)
         end
       end
       if byte == 61
+        if byte(1) == 62
+          advance(2)
+          return set_token(:"=>", nil, @row, start_col)
+        end
+      end
+      if byte == 61
         if byte(1) == 61
           advance(2)
           return set_token(:==, nil, @row, start_col)
@@ -863,7 +869,9 @@ def stage0_codepoint_lexer_compat(body)
   RUBY
   body = replace_method(body, "slice", <<~RUBY)
     def slice(start_pos = @pos, end_pos = @pos)
-      @source.byteslice(start_pos, end_pos - start_pos)
+      start_i = start_pos.to_i
+      end_i = end_pos.to_i
+      @source.byteslice(start_i, end_i - start_i)
     end
   RUBY
   body = replace_method(body, "pos=", <<~RUBY)
@@ -1052,6 +1060,35 @@ def stage0_codepoint_lexer_compat(body)
       consume_number_sign
       advance if approx || byte == 126
       consume_number_sign
+
+      if byte == 48
+        radix = byte(1)
+        if radix == 120 || radix == 88
+          advance(2)
+          while hex_byte?(byte) || byte == 95
+            advance
+          end
+          return set_token(:INT, slice(start), @row, start_col)
+        elsif radix == 98 || radix == 66
+          advance(2)
+          while byte == 48 || byte == 49 || byte == 95
+            advance
+          end
+          return set_token(:INT, slice(start), @row, start_col)
+        elsif radix == 111 || radix == 79
+          advance(2)
+          while (byte >= 48 && byte <= 55) || byte == 95
+            advance
+          end
+          return set_token(:INT, slice(start), @row, start_col)
+        elsif radix == 100 || radix == 68
+          advance(2)
+          while digit_byte?(byte) || byte == 95
+            advance
+          end
+          return set_token(:INT, slice(start), @row, start_col)
+        end
+      end
 
       loop do
         b = byte
@@ -1312,6 +1349,12 @@ def stage0_parser_source
           end
         end
 
+        def skip_collection_whitespace
+          while @token.type?(:SP) || @token.type?(:NL) || @token.type?(:INDENT) || @token.type?(:DEDENT)
+            next_token
+          end
+        end
+
         def skip_statement_separators
           while @token.type?(:SP) || @token.type?(:NL) || @token.type?(:";") || @token.type?(:INDENT)
             next_token
@@ -1429,7 +1472,6 @@ def stage0_parser_source
           next_token
           condition = parse_binary_expression
           then_block = parse_indented_block
-          discard_duplicate_block(then_block)
           while !@token.type?(:EOF) && @token.col > if_col
             next_token
           end
@@ -1447,7 +1489,6 @@ def stage0_parser_source
           next_token
           condition = parse_binary_expression
           then_block = parse_indented_block
-          discard_duplicate_block(then_block)
           while !@token.type?(:EOF) && @token.col > if_col
             next_token
           end
@@ -1459,48 +1500,6 @@ def stage0_parser_source
             else_block = parse_indented_block
           end
           If.new(condition, then_block, else_block)
-        end
-
-        def current_starts_like?(node)
-          return false if node.nil?
-          if node.doc == 13
-            return @token.type?(:ID) && @token.value.to_s == node.name.to_s
-          end
-          if node.doc == 8
-            return @token.type?(:ID) && @token.value.to_s == node.name.to_s
-          end
-          if node.doc == 14
-            return keyword_value?("return")
-          end
-          if node.doc == 10
-            return keyword_value?("if")
-          end
-          if node.doc == 11
-            return keyword_value?("while")
-          end
-          false
-        end
-
-        def discard_duplicate_block(block)
-          return if block.nil?
-          return if block.length == 0
-          return unless current_starts_like?(block[0])
-
-          i = 0
-          while i < block.length && !@token.type?(:EOF)
-            before_pos = @lexer_adapter.pos
-            parse_statement
-            if @lexer_adapter.pos == before_pos && !@token.type?(:EOF)
-              next_token
-            end
-            while @token.type?(:DEDENT)
-              next_token
-            end
-            while @token.type?(:NL) || @token.type?(:SP) || @token.type?(:INDENT)
-              next_token
-            end
-            i += 1
-          end
         end
 
         def parse_stage0_while
@@ -1819,6 +1818,15 @@ def stage0_parser_source
 
         def parse_primary
           skip_spaces
+          if @token.type?(:-)
+            next_token
+            if @token.type?(:INT)
+              value = "-" + @token.value.to_s
+              next_token
+              return Int.new(value)
+            end
+            return BinaryOp.new(Int.new(0), :-, parse_primary)
+          end
           if @token.type?(:INT)
             value = @token.value
             next_token
@@ -1867,12 +1875,12 @@ def stage0_parser_source
             next_token
             arr_lit = ArrayLiteral.new
             until @token.type?(:EOF) || @token.type?(:"]")
-              skip_spaces
+              skip_collection_whitespace
               if @token.type?(:"]")
                 break
               end
               arr_lit.list.push(parse_binary_expression)
-              skip_spaces
+              skip_collection_whitespace
               if @token.type?(:",")
                 next_token
               end
@@ -1893,7 +1901,7 @@ def stage0_parser_source
             # 16-byte). Using List explicitly pins the container type.
             entries = List.new
             until @token.type?(:EOF) || @token.type?(:"}")
-              skip_spaces
+              skip_collection_whitespace
               if @token.type?(:"}")
                 break
               end
@@ -1901,26 +1909,26 @@ def stage0_parser_source
               if @token.type?(:ID)
                 key = StringLiteral.new(@token.value)
                 next_token
-                skip_spaces
+                skip_collection_whitespace
                 if @token.type?(:":")
                   next_token
                 end
               else
                 key = parse_binary_expression
-                skip_spaces
+                skip_collection_whitespace
                 if @token.type?(:"=>")
                   next_token
                 elsif @token.type?(:":")
                   next_token
                 end
               end
-              skip_spaces
+              skip_collection_whitespace
               value = parse_binary_expression
               pair = List.new
               pair.push(key)
               pair.push(value)
               entries.push(pair)
-              skip_spaces
+              skip_collection_whitespace
               if @token.type?(:",")
                 next_token
               end
@@ -2099,7 +2107,7 @@ def stage0_environment_compat(body)
   body = replace_method(body, "slot_index", <<~RUBY)
     def slot_index(name)
       idx = @slot_names[name]
-      return idx if idx > 0
+      return idx unless idx.nil?
       nil
     end
   RUBY
@@ -2119,7 +2127,7 @@ def stage0_environment_compat(body)
       env = self
       while true
         idx = env.slot_index(name)
-        if idx > 0
+        unless idx.nil?
           return env.get_slot(idx)
         end
         parent = env.parent
@@ -2180,11 +2188,14 @@ def stage0_environment_compat(body)
 
     def bind_slot(name, value)
       idx = @slot_names[name]
-      if idx > 0
+      unless idx.nil?
         @slot_values[idx] = value
       else
-        idx = @slot_values.length
-        @slot_names[name] = idx
+        # Keep the missing lookup's nil out of the value written to the
+        # String=>Integer slot table. Spinel is flow-insensitive, so reusing
+        # idx here widens @slot_names to a boxed hash.
+        new_idx = @slot_values.length
+        @slot_names[name] = new_idx
         @slot_values.push(value)
       end
       value
@@ -2192,7 +2203,7 @@ def stage0_environment_compat(body)
 
     def bind_new_slot(name, value)
       idx = @slot_values.length
-      @slot_names[name] = idx
+      @slot_names[name.to_s] = idx
       @slot_values.push(value)
       value
     end
@@ -3965,8 +3976,15 @@ def stage0_real_interpreter_compat(body)
       trace_eval = @stage0_eval_depth == 1
       while i < list.length
         if @stage0_loading_depth != nil && @stage0_loading_depth > 0
-          doc = list[i].doc
-          if doc != 12 && doc != 23 && doc != 24 && doc != 25 && doc != 26 && doc != 37
+          item = list[i]
+          doc = item.doc
+          load_item = doc == 12 || doc == 23 || doc == 24 || doc == 25 || doc == 26 || doc == 37
+          if doc == 8
+            value_doc = item.value.doc
+            load_item = value_doc == 3 || value_doc == 4 || value_doc == 5 || value_doc == 6 ||
+                        value_doc == 16 || value_doc == 31 || value_doc == 32 || value_doc == 33
+          end
+          unless load_item
             i += 1
             next
           end
@@ -4673,7 +4691,7 @@ def stage0_real_interpreter_compat(body)
       # caching, the per-visit intern dominates the profile (the prior
       # uncached step-C bench landed strcmp at 583 samples).
       name_sym = node.cached_name_sym
-      if name_sym < 0
+      if name_sym == :__spinel_uncached_name__
         name_sym = stage0_str_to_sym(name)
         node.cached_name_sym = name_sym
       end
@@ -4775,13 +4793,12 @@ def stage0_real_interpreter_compat(body)
       if name_sym == :clock
         return 0
       end
-  if name_sym == :write_file
-    path = evaluate(args[0])
-    data = evaluate(args[1])
-    File.write(path.to_s, data.to_s)
-    File.write("/tmp/stage0-trace-WF-" + path.to_s.gsub("/", "_"), "len=" + data.to_s.length.to_s)
-    return nil
-  end
+      if name_sym == :write_file
+        path = evaluate(args[0])
+        data = evaluate(args[1])
+        File.write(path.to_s, data.to_s)
+        return nil
+      end
       if name_sym == :read_file
         path = evaluate(args[0])
         return File.read(path.to_s)
@@ -5495,15 +5512,16 @@ def stage0_real_interpreter_compat(body)
   RUBY
   body = replace_method(body, "visit_case_expr", <<~RUBY)
     def visit_case_expr(node)
+      return nil unless node.is_a?(CaseExpr)
       whens = node.whens
       if ENV["TUNGSTEN_STAGE0_CASE_TRACE"] == "1"
-        trace = "case_enter whens=" + whens.length.to_s + " receiver_type=" + type(node.receiver).to_s + "\n"
+        trace = "case_enter whens=" + whens.length.to_s + " receiver_type=" + stage0_type_name(node.receiver) + "\n"
         File.write("/tmp/tungsten-stage0-case-trace", trace)
       end
       if node.receiver
         receiver_val = evaluate(node.receiver)
         if ENV["TUNGSTEN_STAGE0_CASE_TRACE"] == "1"
-          trace = "receiver=" + receiver_val.to_s + " type=" + type(receiver_val).to_s + " whens=" + whens.length.to_s + "\n"
+          trace = "receiver=" + receiver_val.to_s + " type=" + stage0_type_name(receiver_val) + " whens=" + whens.length.to_s + "\n"
           File.write("/tmp/tungsten-stage0-case-trace", trace)
         end
         wi = 0
@@ -7541,13 +7559,13 @@ def stage0_literal_source(path)
         class SetLiteral < Node
           attr_accessor :elements
           def initialize(elements)
-            @elements = elements
+            @elements = elements.to_a
           end
         end
         class MultisetLiteral < Node
           attr_accessor :elements
           def initialize(elements)
-            @elements = elements
+            @elements = elements.to_a
           end
         end
       end
@@ -7603,10 +7621,11 @@ def stage0_literal_source(path)
     <<~RUBY
       module Tungsten::AST
         class Int < Node
-          attr_accessor :value
+          attr_accessor :value, :raw
           def initialize(value)
             @doc = 3
-            text = ("" + value.to_s).delete("_")
+            @raw = "" + value.to_s
+            text = @raw.delete("_")
             neg = false
             if text.start_with?("-")
               neg = true
@@ -7616,7 +7635,18 @@ def stage0_literal_source(path)
             end
             n = 0
             if text.start_with?("0x") || text.start_with?("0X")
-              n = text[2, text.length - 2].to_i(16)
+              digits = text[2, text.length - 2]
+              first = digits[0, 1].to_i(16)
+              if !neg && digits.length == 16 && first >= 8
+                # Spinel's native integers are signed i64s. Preserve a full
+                # u64 literal as its two's-complement bit pattern instead of
+                # asking String#to_i to overflow above INT64_MAX.
+                high = first - 8
+                tail = digits[1, 15].to_i(16)
+                @value = (-9223372036854775807 - 1) + high * 1152921504606846976 + tail
+                return
+              end
+              n = digits.to_i(16)
             elsif text.start_with?("0b") || text.start_with?("0B")
               n = text[2, text.length - 2].to_i(2)
             elsif text.start_with?("0o") || text.start_with?("0O")
@@ -7624,6 +7654,19 @@ def stage0_literal_source(path)
             elsif text.start_with?("0d") || text.start_with?("0D")
               n = text[2, text.length - 2].to_i(10)
             else
+              # The compiler preserves raw literal text and reconstructs
+              # decimal BigInts downstream. Avoid asking Spinel's native-i64
+              # parser to consume those values while constructing this shim
+              # AST; the placeholder is replaced from @raw before it matters.
+              overflow = text.length > 19
+              if text.length == 19
+                limit = neg ? "9223372036854775808" : "9223372036854775807"
+                overflow = text > limit
+              end
+              if overflow
+                @value = 0
+                return
+              end
               n = text.to_i
             end
             if neg
@@ -7796,7 +7839,7 @@ def stage0_ast_compat(body, path)
       def initialize(lhs, elements)
         @doc = 21
         @lhs = lhs
-        @elements = elements
+        @elements = elements.to_a
       end
     RUBY
   when %r{/ast/keywords/case_expr\.rb\z}
@@ -7806,9 +7849,10 @@ def stage0_ast_compat(body, path)
         @receiver = 0
         @receiver = ""
         @receiver = receiver
-        @whens = List.new
+        @whens = 0
         @whens = whens
-        @else_body = List.from(else_body)
+        @else_body = 0
+        @else_body = else_body
       end
     RUBY
   when %r{/ast/keywords/use\.rb\z}
@@ -7980,7 +8024,7 @@ def stage0_ast_compat(body, path)
     replace_method(body, "initialize", <<~RUBY)
       def initialize(elements = [])
         @doc = 42
-        @elements = elements || []
+        @elements = (elements || []).to_a
       end
     RUBY
   when %r{/ast/splat\.rb\z}
@@ -8076,7 +8120,7 @@ def stage0_ast_compat(body, path)
         @block = block
         @name_column_number = column
         @has_parens = parens
-        @cached_name_sym = -1
+        @cached_name_sym = :__spinel_uncached_name__
         @cached_w_method = nil
       end
     RUBY
@@ -8090,7 +8134,7 @@ def stage0_ast_compat(body, path)
       def initialize(left, operator, right)
         @doc = 7
         @left = left
-        @operator = operator
+        @operator = operator.to_sym
         @right = right
       end
     RUBY
@@ -8117,6 +8161,8 @@ def stage0_ast_compat(body, path)
       def initialize(name)
         @doc = 9
         @name = name.to_s
+        @cached_slot = -1
+        @cached_layout_shape = 1
       end
     RUBY
     replace_method(body, "constant?", <<~RUBY)
@@ -8634,6 +8680,12 @@ def stage0_parser_compat(body)
         end
       end
 
+      def skip_collection_whitespace
+        while @token.type?(:SP) || @token.type?(:NL) || @token.type?(:INDENT) || @token.type?(:DEDENT)
+          next_token
+        end
+      end
+
       def skip_statement_separators
         while @token.type?(:SP) || @token.type?(:NL) || @token.type?(:";") || @token.type?(:INDENT)
           next_token
@@ -8753,6 +8805,9 @@ def stage0_parser_compat(body)
         if keyword_value?("begin")
           return parse_stage0_begin
         end
+        if keyword_value?("case")
+          return parse_stage0_case
+        end
         if keyword_value?("class")
           return parse_stage0_class
         end
@@ -8763,6 +8818,114 @@ def stage0_parser_compat(body)
           return parse_stage0_def
         end
         parse_assignment_or_expression
+      end
+
+      def parse_stage0_case
+        loc_file = @token.file
+        loc_row = @token.row
+        loc_col = @token.col
+        next_token
+        skip_spaces
+
+        receiver = nil
+        if !@token.type?(:NL) && !@token.type?(:EOF)
+          receiver = parse_binary_expression
+        end
+        while @token.type?(:NL) || @token.type?(:SP) || @token.type?(:INDENT) || @token.type?(:DEDENT)
+          next_token
+        end
+
+        whens = List.new
+        else_body = List.new
+
+        # Tungsten's compact value-case form uses `condition => value` and a
+        # bare `=> value` default arm. Build the same [conditions, body] pairs
+        # as the Ruby-style `when` form so both syntaxes share evaluation.
+        if !keyword_value?("when") && !keyword_value?("else")
+          arrow_done = false
+          while !arrow_done && !@token.type?(:EOF)
+            default_arm = @token.type?(:"=>")
+            conditions = List.new
+            if !default_arm
+              conditions.push(parse_binary_expression)
+              skip_spaces
+              if !@token.type?(:"=>")
+                arrow_done = true
+              end
+            end
+            if !arrow_done
+              next_token
+              skip_spaces
+              body = List.new
+              if @token.type?(:NL) || @token.type?(:INDENT)
+                body = parse_indented_block
+              else
+                body.push(parse_statement)
+              end
+              if default_arm
+                else_body = body
+                arrow_done = true
+              else
+                pair = List.new
+                pair.push(conditions)
+                pair.push(body)
+                whens.push(pair)
+                while @token.type?(:NL) || @token.type?(:SP) || @token.type?(:INDENT) || @token.type?(:DEDENT)
+                  next_token
+                end
+              end
+            end
+          end
+        else
+          first_when = true
+          while keyword_value?("when") && (@token.col == loc_col || (first_when && @token.col <= loc_col))
+            first_when = false
+            next_token
+            skip_spaces
+            conditions = List.new
+            conditions.push(parse_binary_expression)
+            skip_spaces
+            while @token.type?(:",")
+              next_token
+              skip_spaces
+              conditions.push(parse_binary_expression)
+              skip_spaces
+            end
+
+            body = List.new
+            if keyword_value?("then")
+              next_token
+              skip_spaces
+              body.push(parse_statement)
+            elsif @token.type?(:NL) || @token.type?(:INDENT)
+              body = parse_indented_block
+            else
+              body.push(parse_statement)
+            end
+
+            pair = List.new
+            pair.push(conditions)
+            pair.push(body)
+            whens.push(pair)
+            while @token.type?(:NL) || @token.type?(:SP) || @token.type?(:INDENT) || @token.type?(:DEDENT)
+              next_token
+            end
+          end
+
+          if keyword_value?("else") && @token.col == loc_col
+            next_token
+            skip_spaces
+            if @token.type?(:NL) || @token.type?(:INDENT)
+              else_body = parse_indented_block
+            else
+              else_body.push(parse_statement)
+            end
+          end
+        end
+
+        node = CaseExpr.new(receiver, whens, else_body)
+        node.set_location(loc_file, loc_row, loc_col)
+        node
       end
 
       def parse_stage0_begin
@@ -8790,7 +8953,6 @@ def stage0_parser_compat(body)
         next_token
         condition = parse_binary_expression
         then_block = parse_indented_block
-        discard_duplicate_block(then_block)
         while !@token.type?(:EOF) && @token.col > if_col
           next_token
         end
@@ -8811,7 +8973,6 @@ def stage0_parser_compat(body)
         next_token
         condition = parse_binary_expression
         then_block = parse_indented_block
-        discard_duplicate_block(then_block)
         while !@token.type?(:EOF) && @token.col > if_col
           next_token
         end
@@ -8823,48 +8984,6 @@ def stage0_parser_compat(body)
           else_block = parse_indented_block
         end
         If.new(condition, then_block, else_block)
-      end
-
-      def current_starts_like?(node)
-        return false if node.nil?
-        if node.doc == 13
-          return @token.type?(:ID) && @token.value.to_s == node.name.to_s
-        end
-        if node.doc == 8
-          return @token.type?(:ID) && @token.value.to_s == node.name.to_s
-        end
-        if node.doc == 14
-          return keyword_value?("return")
-        end
-        if node.doc == 10
-          return keyword_value?("if")
-        end
-        if node.doc == 11
-          return keyword_value?("while")
-        end
-        false
-      end
-
-      def discard_duplicate_block(block)
-        return if block.nil?
-        return if block.length == 0
-        return unless current_starts_like?(block[0])
-
-        i = 0
-        while i < block.length && !@token.type?(:EOF)
-          before_pos = @lexer_adapter.pos
-          parse_statement
-          if @lexer_adapter.pos == before_pos && !@token.type?(:EOF)
-            next_token
-          end
-          while @token.type?(:DEDENT)
-            next_token
-          end
-          while @token.type?(:NL) || @token.type?(:SP) || @token.type?(:INDENT)
-            next_token
-          end
-          i += 1
-        end
       end
 
       def parse_stage0_while
@@ -9188,6 +9307,15 @@ def stage0_parser_compat(body)
 
       def parse_primary
         skip_spaces
+        if @token.type?(:-)
+          next_token
+          if @token.type?(:INT)
+            value = "-" + @token.value.to_s
+            next_token
+            return Int.new(value)
+          end
+          return BinaryOp.new(Int.new(0), :-, parse_primary)
+        end
         if @token.type?(:INT)
           value = @token.value
           next_token
@@ -9240,12 +9368,12 @@ def stage0_parser_compat(body)
           next_token
           arr_lit = ArrayLiteral.new
           until @token.type?(:EOF) || @token.type?(:"]")
-            skip_spaces
+            skip_collection_whitespace
             if @token.type?(:"]")
               break
             end
             arr_lit.list.push(parse_binary_expression)
-            skip_spaces
+            skip_collection_whitespace
             if @token.type?(:",")
               next_token
             end
@@ -9262,7 +9390,7 @@ def stage0_parser_compat(body)
           # iv_entries; using List pins the container type.
           entries = List.new
           until @token.type?(:EOF) || @token.type?(:"}")
-            skip_spaces
+            skip_collection_whitespace
             if @token.type?(:"}")
               break
             end
@@ -9270,26 +9398,26 @@ def stage0_parser_compat(body)
             if @token.type?(:ID)
               key = StringLiteral.new(@token.value)
               next_token
-              skip_spaces
+              skip_collection_whitespace
               if @token.type?(:":")
                 next_token
               end
             else
               key = parse_binary_expression
-              skip_spaces
+              skip_collection_whitespace
               if @token.type?(:"=>")
                 next_token
               elsif @token.type?(:":")
                 next_token
               end
             end
-            skip_spaces
+            skip_collection_whitespace
             value = parse_binary_expression
             pair = List.new
             pair.push(key)
             pair.push(value)
             entries.push(pair)
-            skip_spaces
+            skip_collection_whitespace
             if @token.type?(:",")
               next_token
             end
@@ -10295,7 +10423,6 @@ TRACE_ENV_VARS = %w[
   STAGE0_ARROW_TRACE
   STAGE0_BIND_TRACE
   STAGE0_BODY_TRACE
-  STAGE0_STACK_TRACE
   STAGE0_CASE_TRACE
   STAGE0_COMPILE_TRACE
   STAGE0_CONVERT_TRACE
@@ -10334,6 +10461,13 @@ final_bundle = final_bundle.gsub(/ENV\["(?:#{fold_pattern.source})"\] != "1"/, "
 final_bundle = final_bundle.sub(
   "      @loaded_files = {}\n      @current_file = nil\n",
   "      @loaded_files = {}\n      @stage0_loading_depth = 0\n      @current_file = nil\n"
+)
+final_bundle = final_bundle.sub(
+  "      @current_block = \"\"\n",
+  "      @current_block = \"\"\n" \
+  "      @stage0_current_function = \"\"\n" \
+  "      @stage0_stack_trace_enabled = ENV[\"TUNGSTEN_STAGE0_STACK_TRACE\"] == \"1\" ? 1 : 0\n" \
+  "      @stage0_call_stack = []\n"
 )
 final_use_methods = <<~RUBY
 
@@ -10575,6 +10709,11 @@ final_use_methods = <<~RUBY
     out_s = out_s.split("raw_int_candidate_map(body, child_var_types)").join("{}")
     out_s = out_s.split("raw_int_candidate_map(body, ctx[\\\"var_types\\\"])" ).join("{}")
     out_s = out_s.split("raw_int_candidate_map(ast[\\\"expressions\\\"], var_types)").join("{}")
+    # slab_ast's first two arguments are required raw integer literals. The
+    # reduced stage-0 evaluator does not reliably implement the tuple-style
+    # `in` guard here, which leaves both operands nil in WIRE.
+    out_s = out_s.split("if kind_tv[\\\"type\\\"] in (\\\"raw_int\\\" \\\"raw_i64\\\" \\\"raw_u64\\\")").join("if true")
+    out_s = out_s.split("if sc_tv[\\\"type\\\"] in (\\\"raw_int\\\" \\\"raw_i64\\\" \\\"raw_u64\\\")").join("if true")
     start_pos = out_s.index("-> wire_module")
     end_pos = out_s.index("-> next_call_site_id")
     if start_pos >= 0 && end_pos >= 0
@@ -10979,7 +11118,6 @@ final_use_methods = <<~RUBY
     normalized = normalized.split(lower_var_self_dispatch).join(
       "    emit_instruction(wfn, {op: :call_method_i64, temp: temp, temp_args_val: temp_args, receiver: self_reg, method_name_val: method_name_val, args: [], ic_id: ic_id})\\n"
     )
-    normalized = normalized.split("  mod[:functions].push(main_fn)\\n").join("  mod[:functions].push(main_fn)\\n  if env(\\"TUNGSTEN_SPINEL_STAGE0_CALL_TRACE\\") == \\"1\\"\\n    write_file(\\"/tmp/tungsten-stage0-functions-size.txt\\", mod[:functions].size())\\n    write_file(\\"/tmp/tungsten-stage0-functions-string-size.txt\\", mod[\\"functions\\"].size())\\n")
     ctx_start = normalized.index("  ctx = {")
     ctx_end = -1
     if ctx_start >= 0
@@ -11283,7 +11421,15 @@ final_use_methods = <<~RUBY
     normalized = out.split("emit_instruction(wfn, {op: \\\"const_color\\\", temp: temp,\\n    r: (packed >> 24) & 0xff,\\n    g: (packed >> 16) & 0xff,\\n    b: (packed >> 8) & 0xff,\\n    a: packed & 0xff})").join("emit_instruction(wfn, {op: \\\"const_color\\\", temp: temp, r: (packed >> 24) & 0xff, g: (packed >> 16) & 0xff, b: (packed >> 8) & 0xff, a: packed & 0xff})")
     normalized = normalized.split("raw_int_candidate_map(body, child_var_types)").join("{}")
     normalized = normalized.split("raw_int_candidate_map(body, ctx[\\\"var_types\\\"])" ).join("{}")
-    normalized
+    # slab_ast's first two arguments are required raw integer literals. The
+    # direct parser stringifies symbol literals before this point, while its
+    # reduced evaluator does not reliably implement the tuple-style `in` guard.
+    normalized = normalized.split("if kind_tv[\\\"type\\\"] in (\\\"raw_int\\\" \\\"raw_i64\\\" \\\"raw_u64\\\")").join("if true")
+    normalized = normalized.split("if sc_tv[\\\"type\\\"] in (\\\"raw_int\\\" \\\"raw_i64\\\" \\\"raw_u64\\\")").join("if true")
+    # The reduced parser does not treat newlines inside braces as structural
+    # whitespace. Split compiler modules now contain multiline hash literals,
+    # so normalize them just as the original monolithic lowering source was.
+    self.stage0_collapse_simple_hash_blocks(normalized)
   end
 
   def stage0_normalize_ast_source(source)
@@ -12433,7 +12579,7 @@ final_use_methods = <<~RUBY
       compile_fn = compile_fn + "          inst1 = f0[\\"blocks\\"][0][\\"instructions\\"][1]\\n"
       compile_fn = compile_fn + "          trace = trace + \\"inst1=\\" + inst1[\\"op\\"].to_s() + \\" value=\\" + inst1[\\"value\\"].to_s() + \\" name=\\" + inst1[\\"name\\"].to_s() + \\"\\\\n\\"\\n"
       compile_fn = compile_fn + "    write_file(\\"/tmp/tungsten-stage0-compile-trace\\", trace)\\n"
-      compile_fn = compile_fn + "  content_hash_pass(mod, verbose)\\n"
+      compile_fn = compile_fn + "  content_hash_pass(mod, verbose)\n"
       compile_fn = compile_fn + "  mod[:enhanced_stacktraces] = true\\n"
       compile_fn = compile_fn + "  if release_mode\\n"
       compile_fn = compile_fn + "    mod[:enhanced_stacktraces] = false\\n"
@@ -12721,13 +12867,6 @@ final_use_methods = <<~RUBY
     # Ruby semantics let us evaluate each arg in the old env and
     # set into the new env directly. ~50% fewer per-call allocations
     # in the dominant hot path of compiler/lib/lowering.w.
-    # Diagnostic: trace dispatch for compile/emit_ir/load_program_ast +
-    # lower_X dispatchers + intermediate compile() passes + lower_ast
-    # setup helpers (the hang is in compile()'s scaffolding — bug is
-    # input-independent, fires even on a 1-line `puts "hello"`)
-    if call_name == "compile" || call_name == "emit_ir" || call_name == "stage0_load_program_ast" || call_name == "compile_one" || call_name == "load_program_ast" || call_name == "write_file" || call_name == "lower_program" || call_name == "lower_statement" || call_name == "lower_method_def" || call_name == "lower_class_def" || call_name == "lower_fn_def" || call_name == "emit_artifact" || call_name == "lower_ast" || call_name == "analyze_function" || call_name == "ssa_convert" || call_name == "prune_empty_blocks" || call_name == "ownership_pass" || call_name == "escape_pass" || call_name == "free_insertion_pass" || call_name == "content_hash_pass" || call_name == "detect_llvm_target" || call_name == "wire_module" || call_name == "register_ast_constructor_return_types" || call_name == "collect_top_level_static_types" || call_name == "collect_ivar_types" || call_name == "mark_builtin_runtime_class_uses" || call_name == "mark_nonescaping_small_arrays" || call_name == "register_class_method" || call_name == "builtin_runtime_classes" || call_name == "lower_expression" || call_name == "lower_if" || call_name == "lower_while" || call_name == "lower_call"
-      File.write("/tmp/stage0-trace-CALL-" + call_name, "n=" + arg_nodes.length.to_s)
-    end
     old_env = @env
     old_returning = @returning
     old_return_value = @return_value
@@ -12774,11 +12913,6 @@ final_use_methods = <<~RUBY
     if @returning
       result = @return_value
     end
-    # Diagnostic: log return type for key dispatched defs
-    if call_name == "compile" || call_name == "emit_ir" || call_name == "compile_one"
-      File.write("/tmp/stage0-trace-RET-" + call_name, "type=" + result.class.to_s + " nil?=" + (result == nil).to_s + " len=" + (result.respond_to?(:length) ? result.length.to_s : "n/a"))
-    end
-
     @env = old_env
     @returning = old_returning
     @return_value = old_return_value
@@ -12935,6 +13069,11 @@ final_use_methods = <<~RUBY
     end
     if name_sym == :last
       return nil
+    end
+    if recv.is_a?(Hash)
+      field_value = recv[name_sym]
+      return field_value unless field_value.nil?
+      return recv[name_sym.to_s]
     end
     nil
   end
@@ -13203,6 +13342,7 @@ final_use_methods = <<~RUBY
     if doc == 3 || doc == 4 || doc == 5 || doc == 16 || doc == 31 || doc == 32 || doc == 33 || doc == 41
       h = stage0_ast_hash(stage0_ruby_ast_node_kind(value))
       stage0_ast_hash_set(h, "value", value.value)
+      stage0_ast_hash_set(h, "raw", value.raw) if doc == 3
       return h
     end
     if doc == 6
@@ -13297,7 +13437,7 @@ final_use_methods = <<~RUBY
     end
     if doc == 22
       stage0_ast_hash_set(h, "whens", stage0_ruby_ast_array_to_array(value.whens))
-      stage0_ast_hash_set_node(h, "else_body", value.else)
+      stage0_ast_hash_set_node(h, "else_body", value.else_body)
       return h
     end
     if doc == 23
@@ -13440,6 +13580,14 @@ final_use_methods = <<~RUBY
     end
     if resolved.end_with?("compiler/lib/lowering.w")
       return stage0_normalize_lowering_source(raw_source)
+    end
+    if resolved.end_with?("compiler/lib/emitter.w")
+      source = stage0_normalize_emitter_source(raw_source)
+      return source
+    end
+    if resolved.end_with?("compiler/lib/lowering/calls.w")
+      source = stage0_normalize_ruby_parse_source(raw_source)
+      return source
     end
     # All four files (cfg.w, ownership.w, escape.w, metal_emitter.w)
     # used to be stubbed to empty source on the assumption that the
@@ -13650,9 +13798,10 @@ final_use_methods = <<~RUBY
       if dump_path != nil && dump_path != ""
         File.write(dump_path, source)
       end
+    elsif path.end_with?("compiler/lib/error_formatter.w")
+      source = self.stage0_normalize_ruby_parse_source(raw_source)
     elsif path.end_with?("compiler/lib/interpreter.w") ||
        path.end_with?("compiler/lib/loader.w") ||
-       path.end_with?("compiler/lib/error_formatter.w") ||
        path.end_with?("compiler/lib/metal_emitter.w")
       source = self.stage0_normalize_lexer_source(raw_source)
     elsif path.end_with?("compiler/lib/wire.w")
@@ -13735,17 +13884,9 @@ RUBY
 postamble_marker = "\n  end\n\n\n# -- implementations/spinel/stage0/postamble.rb --"
 final_bundle = replace_method(final_bundle, "visit_var", <<~RUBY)
   def visit_var(node)
-    cached_slot = node.cached_slot
-    if cached_slot > 0 && node.cached_layout_shape == @env.layout_shape
-      value = @env.get_slot(cached_slot)
-      return value unless value.nil?
-    end
-
     name = stage0_var_name(node)
     idx = @env.slot_index(name)
-    if idx > 0
-      node.cached_slot = idx
-      node.cached_layout_shape = @env.layout_shape
+    unless idx.nil?
       value = @env.get_slot(idx)
       return value unless value.nil?
     end
@@ -13766,13 +13907,18 @@ final_bundle = replace_method(final_bundle, "visit_var", <<~RUBY)
       else
         pe = np
         pidx = pe.slot_index(name)
-        if pidx > 0
+        unless pidx.nil?
           value = pe.get_slot(pidx)
           return value unless value.nil?
           looking = false
         end
       end
     end
+
+    # The reduced stage0 parser represents a bare no-arg `clock` expression
+    # as a Var rather than a Call. Preserve normal lexical shadowing above,
+    # then use the same deterministic bootstrap clock as visit_call.
+    return 0 if name == "clock"
 
     klass = @classes[name]
     return klass unless klass.nil?

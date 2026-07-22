@@ -1,5 +1,6 @@
 #!/bin/zsh
 set -eu
+unsetopt BG_NICE
 zmodload zsh/datetime
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -25,6 +26,7 @@ STAGE1_BUILD_LOG="$BUILD/tungsten-stage1.log"
 STAGE2_BUILD_LOG="$BUILD/tungsten-stage2.log"
 
 cd "$ROOT"
+mkdir -p "$BUILD"
 
 : "${TUNGSTEN_CLANG_OPT:=-O1}"
 : "${TUNGSTEN_SPINEL_STAGE1_CLANG_OPT:=-O0}"

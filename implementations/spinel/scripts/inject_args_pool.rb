@@ -26,12 +26,14 @@ path = ARGV[0]
 src  = File.read(path)
 orig = src.dup
 
-# 1. Inject the pool right before the FFI externs block — that's a
-#    stable, well-known marker in the file. The pool helpers are
-#    `static inline` so the compiler can fold them into call sites.
-marker = "/* ---- FFI externs ---- */"
-unless src.include?(marker)
-  warn "inject_args_pool: marker not found in #{path}"
+# 1. Inject the pool before evaluate_args' forward declaration. This remains
+#    stable across backends that omit the old optional FFI-externs section.
+#    The runtime array declarations are available by this point, and the pool
+#    helpers are `static inline` so the compiler can fold them into call sites.
+declaration_re = /^static sp_PolyArray \* sp_Interpreter_evaluate_args\([^\n]*\);\n/
+declaration = src.match(declaration_re)
+unless declaration
+  warn "inject_args_pool: evaluate_args declaration not found in #{path}"
   exit 1
 end
 
@@ -60,7 +62,7 @@ pool_block = <<~'C'
   }
 C
 
-src = src.sub(marker, "#{pool_block}\n#{marker}")
+src.insert(declaration.begin(0), "#{pool_block}\n")
 
 # 2. Replace evaluate_args' fresh allocation with a pool pop.
 #    There is exactly one `lv_values = sp_PolyArray_new();` inside
@@ -144,10 +146,18 @@ body2 = src[brace_open2..fn2_end]
 # Inject release before SP_GC_RESTORE(); return _t... pattern. We
 # only match returns whose value is an _tNNN temp (the compiler's
 # generated return tag) to avoid catching macro-internal RESTOREs.
+# Older generated functions restore the GC frame and return a temporary on one
+# line; current ones emit plain return statements because the restore is
+# handled by the runtime configuration. Support both shapes.
 patched2 = body2.gsub(/(SP_GC_RESTORE\(\);\s*return _t\d+;)/m,
                       "sp_args_release(lv_args); \\1")
 if patched2 == body2
-  raise "call_w_method: no SP_GC_RESTORE/return pair patched"
+  patched2 = body2.gsub(/^(\s*)(return\s+[^;]+;)$/) do
+    "#{$1}sp_args_release(lv_args);\n#{$1}#{$2}"
+  end
+end
+if patched2 == body2
+  raise "call_w_method: no return path patched"
 end
 src[brace_open2..fn2_end] = patched2
 

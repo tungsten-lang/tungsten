@@ -20100,7 +20100,14 @@ static WValue w_ic_string_ord(WValue r, WValue *a, int c) {
 static WValue w_ic_string_to_i(WValue r, WValue *a, int c) {
     int base = 10;
     if (c >= 1 && w_is_int(a[0])) base = (int)w_as_int(a[0]);
-    return w_int(strtoll(as_str(r), NULL, base));
+    /* Default Int is arbitrary-precision: a decimal that overflows i64 must
+     * promote to bignum instead of saturating at strtoll's LLONG_MAX/MIN.
+     * (Non-decimal bases keep the fixed-width parse.) */
+    errno = 0;
+    long long v = strtoll(as_str(r), NULL, base);
+    if (base == 10 && errno == ERANGE)
+        return w_bigint_from_dec_str(r);
+    return w_int((int64_t)v);
 }
 static WValue w_ic_string_to_f(WValue r, WValue *a, int c) {
     (void)a; (void)c;

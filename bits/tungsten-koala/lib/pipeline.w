@@ -358,3 +358,42 @@
         local[k] = overrides[full] if overrides != nil && overrides.key?(full)
       out = step.with_params(local)
     out
+
+  # --- Persistence (see lib/persist.w) ---
+
+  -> persist_name
+    "Pipeline"
+
+  # A pipeline saves its STEPS, each of which is a persistable object in
+  # its own right — so the format's object node nests, and a Pipeline of a
+  # Scaler and a tree (or of another Pipeline) round-trips with no code
+  # here aware of what a step is. The names ride along so the rebuilt
+  # chain is addressable by the same names, and `has_estimator` because it
+  # is what decides whether predict answers at all.
+  -> to_state
+    { names: @names, steps: @steps, has_estimator: @has_estimator }
+
+  -> .load_state(st)
+    out = nil
+    ok = st != nil
+    ok = st[:names] != nil && st[:steps] != nil if ok
+    if ok
+      names = st[:names]
+      loaded = st[:steps]
+      ok = loaded.size == names.size
+      entries = []
+      i = 0
+      loaded.each -> (step)
+        ok = false if step == nil
+        entries.push([names[i], step])
+        i += 1
+      if ok
+        model = Pipeline.new(entries)
+        out = model.restore_state(st)
+    out
+
+  -> restore_state(st)
+    @fitted = true
+    @has_estimator = false
+    @has_estimator = true if st[:has_estimator] == true
+    self

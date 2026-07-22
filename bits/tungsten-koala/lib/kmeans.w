@@ -347,3 +347,32 @@
     row.each -> (v)
       out.push(v.to_f)
     out
+
+  # --- Persistence (see lib/persist.w) ---
+
+  -> persist_name
+    "KMeans"
+
+  # `labels` and `inertia` describe the TRAINING run and are kept so a
+  # loaded model reports what it learned, not just what it predicts;
+  # `centroids` alone is what predict needs.
+  -> to_state
+    { k: @k, seed: @seed, max_iter: @max_iter, centroids: @centroids, labels: @labels, inertia: @inertia, n_iter: @n_iter }
+
+  -> .load_state(st)
+    out = nil
+    ok = st != nil
+    ok = st[:k] != nil && st[:max_iter] != nil && st[:centroids] != nil if ok
+    ok = st[:labels] != nil && st[:inertia] != nil && st[:n_iter] != nil if ok
+    if ok
+      model = KMeans.new(st[:k], st[:seed], st[:max_iter])
+      out = model.restore_state(st)
+    out
+
+  -> restore_state(st)
+    @centroids = st[:centroids]
+    @labels = st[:labels]
+    @inertia = st[:inertia]
+    @n_iter = st[:n_iter]
+    @fitted = true
+    self

@@ -181,3 +181,26 @@
       ok = false if sample_weight != nil && wts == nil
       out = Metrics.accuracy(preds, yvals, wts) if ok
     out
+
+  # --- Persistence (see lib/persist.w) ---
+
+  -> persist_name
+    "KNNClassifier"
+
+  # A lazy learner's fitted state IS its training set, so that is what a
+  # saved k-NN carries — there is nothing smaller that predicts the same.
+  -> to_state
+    { k: @k, train_rows: @train_rows, train_labels: @train_labels }
+
+  -> .load_state(st)
+    out = nil
+    if st != nil && st[:k] != nil && st[:train_rows] != nil && st[:train_labels] != nil
+      model = KNNClassifier.new(st[:k])
+      out = model.restore_state(st)
+    out
+
+  -> restore_state(st)
+    @train_rows = st[:train_rows]
+    @train_labels = st[:train_labels]
+    @fitted = true
+    self

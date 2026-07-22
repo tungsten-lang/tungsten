@@ -393,3 +393,36 @@
       ok = false if sample_weight != nil && wts == nil
       out = Metrics.accuracy(preds, yvals, wts) if ok
     out
+
+  # --- Persistence (see lib/persist.w) ---
+
+  -> persist_name
+    "GaussianNB"
+
+  # A generative classifier IS its per-class priors, means and variances,
+  # so all three are saved along with the epsilon that smoothed them —
+  # epsilon is derived from the TRAINING data, not from var_smoothing
+  # alone, so it cannot be recomputed at load time.
+  -> to_state
+    { var_smoothing: @var_smoothing, classes: @classes, class_counts: @class_counts, class_priors: @class_priors, means: @means, variances: @variances, epsilon: @epsilon }
+
+  -> .load_state(st)
+    out = nil
+    ok = st != nil
+    ok = st[:var_smoothing] != nil && st[:classes] != nil && st[:class_counts] != nil if ok
+    ok = st[:class_priors] != nil && st[:means] != nil if ok
+    ok = st[:variances] != nil && st[:epsilon] != nil if ok
+    if ok
+      model = GaussianNB.new(st[:var_smoothing])
+      out = model.restore_state(st)
+    out
+
+  -> restore_state(st)
+    @classes = st[:classes]
+    @class_counts = st[:class_counts]
+    @class_priors = st[:class_priors]
+    @means = st[:means]
+    @variances = st[:variances]
+    @epsilon = st[:epsilon]
+    @fitted = true
+    self

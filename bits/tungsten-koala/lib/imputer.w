@@ -164,3 +164,28 @@
     if strategy == :constant
       out = fill_value
     out
+
+  # --- Persistence (see lib/persist.w) ---
+
+  -> persist_name
+    "Imputer"
+
+  # The learned per-column fill values, so a loaded Imputer fills a test
+  # frame from the TRAINING statistics exactly as the saved one did.
+  -> to_state
+    { strategy: @strategy, columns: @columns, fill_value: @fill_value, fit_names: @fit_names, fit_fills: @fit_fills }
+
+  -> .load_state(st)
+    out = nil
+    ok = st != nil
+    ok = st[:strategy] != nil && st[:fit_names] != nil && st[:fit_fills] != nil if ok
+    if ok
+      model = Imputer.new(st[:strategy], st[:columns], st[:fill_value])
+      out = model.restore_state(st)
+    out
+
+  -> restore_state(st)
+    @fit_names = st[:fit_names]
+    @fit_fills = st[:fit_fills]
+    @fitted = true
+    self

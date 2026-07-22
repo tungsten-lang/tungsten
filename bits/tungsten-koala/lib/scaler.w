@@ -173,3 +173,31 @@
       else
         out = (v.to_f - a.to_f) / s
     out
+
+  # --- Persistence (see lib/persist.w) ---
+
+  -> persist_name
+    "Scaler"
+
+  # The parallel fitted arrays go across as they are — a loaded Scaler
+  # replays the TRAINING mean/std (or min/max), which is the whole point
+  # of saving a transformer rather than re-fitting one.
+  -> to_state
+    { kind: @kind, columns: @columns, fit_names: @fit_names, fit_a: @fit_a, fit_b: @fit_b }
+
+  -> .load_state(st)
+    out = nil
+    ok = st != nil
+    ok = st[:kind] != nil && st[:fit_names] != nil if ok
+    ok = st[:fit_a] != nil && st[:fit_b] != nil if ok
+    if ok
+      model = Scaler.new(st[:kind], st[:columns])
+      out = model.restore_state(st)
+    out
+
+  -> restore_state(st)
+    @fit_names = st[:fit_names]
+    @fit_a = st[:fit_a]
+    @fit_b = st[:fit_b]
+    @fitted = true
+    self

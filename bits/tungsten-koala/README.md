@@ -223,6 +223,12 @@ m.fit(x, y, [2, 1, 1])               # row 0 counts twice
 m.score(x, y, [2, 1, 1])             # ... and is scored that way
 Metrics.accuracy(preds, act, w)      # weighted metrics, same convention
 CrossValidation.cross_val_score(m, x, y, 5, nil, w)   # subset per fold
+
+# Model persistence — a fitted model survives the process
+text = Persist.dumps(m)              # a self-contained String; nil if unfitted
+m2 = Persist.loads(text)             # the model back; nil on anything corrupt
+m2.predict(x) == m.predict(x)        # IDENTICAL, to the last bit
+Persist.dumps(pipe)                  # works for a whole Pipeline, nested
 ```
 
 ## The estimator contract
@@ -899,6 +905,84 @@ through `Estimator.fit_model` / `.score_model` instead of calling
 estimator cross-validates correctly rather than not at all. A fold whose
 re-fit FAILS is now recorded as nil and not scored — previously it was
 scored anyway, silently reporting the PREVIOUS fold's fitted state.
+
+## Model persistence
+
+A fitted model used to die with the process. `Persist` (lib/persist.w)
+turns one into text and back:
+
+```tungsten
+pipe = Pipeline.new([Scaler.new(:standard), LinearRegression.new])
+pipe.fit(x_train, y_train)
+
+text = Persist.dumps(pipe)          # a self-contained String
+# ... store `text` wherever you like ...
+served = Persist.loads(text)        # a fitted Pipeline, ready to predict
+
+served.predict(x_test)              # exactly what `pipe` would have said
+```
+
+Every fitted koala object round-trips: all seven estimators, the three
+transformers, and a `Pipeline` of any of them nested to any depth —
+including a decision tree's recursive node structure, which needs no
+special case because a node is a plain hash and the format encodes
+hashes.
+
+**The guarantee is exactness.** A loaded model predicts *identically* to
+the saved one, element for element — not to a tolerance. That is what
+decides the format. `Float#to_s` prints six significant digits on both
+engines, so `(1.to_f / 3.to_f).to_s.to_f` is **not** the value it came
+from, and there is no printf-style formatter here to ask for more. A
+decimal payload — and therefore a JSON one — would silently round every
+coefficient and move every tree threshold, and a threshold that moves by
+one ulp routes a query row down the other branch and predicts a
+different *label*. So a float is written as its own bits:
+
+```
+koala-model 1
+o LinearRegression
+h 3
+y alpha
+i 0
+y coefficients
+a 1
+b 0 2 134217727 67108861     # (-1)^0 * (hi/2^27 + lo/2^53) * 2^2
+y intercept
+b 1 2 111848106 44739235
+```
+
+The mantissa is normalized by exact halving and split across two
+integers because the interpreter's integers are 48-bit and a 53-bit
+mantissa does not fit in one. A value whose short decimal *provably*
+round-trips (checked, not assumed) stays readable as `d 2.5` instead.
+
+Hash keys are emitted sorted, so **a payload is byte-identical on both
+engines** — a model trained under the interpreter loads under the
+compiler and predicts the same thing.
+
+There are **no file helpers**, deliberately: `File` and `IO` are
+undefined on the interpreter and exist only compiled, so a
+`Persist.save(model, path)` would work on one engine and raise on the
+other. Writing the string is the caller's job. A payload that picked up
+a trailing newline on the way through a file still loads.
+
+Nothing raises. `dumps` answers nil for an **unfitted** model (there is
+no state to write) and for anything that is not a koala model; `loads`
+answers nil for a missing or unknown version stamp, an unknown class
+name, truncated input, trailing junk, and a state that does not carry
+what its class needs — which is the guard that stops a payload written
+by a *different* estimator from loading as a model that quietly answers
+predictions:
+
+```tungsten
+Persist.dumps(LinearRegression.new)                  # => nil, never fitted
+Persist.loads("garbage")                             # => nil
+Persist.loads(lin_text.split("o LinearRegression")
+                      .join("o KNNClassifier"))      # => nil, not mis-loaded
+```
+
+See `spec/persist_spec.w` for the fit / dump / load / compare proof on
+every estimator, on both engines.
 
 ## The train/test workflow, end to end
 

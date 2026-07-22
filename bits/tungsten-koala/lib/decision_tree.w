@@ -747,6 +747,35 @@
       out = Metrics.accuracy(preds, yvals, wts) if ok
     out
 
+  # --- Persistence (see lib/persist.w) ---
+
+  -> persist_name
+    "DecisionTreeClassifier"
+
+  # The whole fitted TREE goes in. It needs no encoder of its own: a node
+  # is a plain hash whose :left / :right are plain hashes, so the generic
+  # hash node of the format carries the recursion for free — which is the
+  # payoff of representing nodes as data rather than as closures.
+  -> to_state
+    { max_depth: @max_depth, min_samples_split: @min_samples_split, min_samples_leaf: @min_samples_leaf, criterion: @criterion, classes: @classes, tree: @tree, n_features: @n_features }
+
+  -> .load_state(st)
+    out = nil
+    ok = st != nil
+    ok = st[:min_samples_split] != nil && st[:min_samples_leaf] != nil && st[:criterion] != nil if ok
+    ok = st[:classes] != nil && st[:tree] != nil && st[:n_features] != nil if ok
+    if ok
+      model = DecisionTreeClassifier.new(st[:max_depth], st[:min_samples_split], st[:min_samples_leaf], st[:criterion])
+      out = model.restore_state(st)
+    out
+
+  -> restore_state(st)
+    @classes = st[:classes]
+    @tree = st[:tree]
+    @n_features = st[:n_features]
+    @fitted = true
+    self
+
 # A CART regression tree on the SAME machinery: identical greedy split
 # search, with variance (MSE) as the criterion and the MEAN target as every
 # leaf's prediction. `score` is R² (Metrics.r2), matching LinearRegression's
@@ -918,3 +947,29 @@
       ok = false if sample_weight != nil && wts == nil
       out = Metrics.r2(preds, yvals, wts) if ok
     out
+
+  # --- Persistence (see lib/persist.w) ---
+
+  -> persist_name
+    "DecisionTreeRegressor"
+
+  # As for the classifier, minus `classes` — a regression leaf predicts a
+  # mean, so there are no labels to carry.
+  -> to_state
+    { max_depth: @max_depth, min_samples_split: @min_samples_split, min_samples_leaf: @min_samples_leaf, criterion: @criterion, tree: @tree, n_features: @n_features }
+
+  -> .load_state(st)
+    out = nil
+    ok = st != nil
+    ok = st[:min_samples_split] != nil && st[:min_samples_leaf] != nil && st[:criterion] != nil if ok
+    ok = st[:tree] != nil && st[:n_features] != nil if ok
+    if ok
+      model = DecisionTreeRegressor.new(st[:max_depth], st[:min_samples_split], st[:min_samples_leaf], st[:criterion])
+      out = model.restore_state(st)
+    out
+
+  -> restore_state(st)
+    @tree = st[:tree]
+    @n_features = st[:n_features]
+    @fitted = true
+    self

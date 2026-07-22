@@ -42,6 +42,21 @@
 # `score` means what it says. See lib/estimator_base.w for the full
 # rationale and spec/sample_weight_spec.w for the proofs.
 #
+# MODEL PERSISTENCE (lib/persist.w) closes the loop that made every
+# fitted model die with its process: `Persist.dumps(model)` returns a
+# self-contained String and `Persist.loads(text)` gives the model back,
+# for EVERY estimator, every transformer and a Pipeline nested to any
+# depth. The guarantee is exactness, not approximation — a loaded model
+# predicts identically to the saved one, element for element — which is
+# why the format encodes an f64 as its own BITS rather than as text:
+# `Float#to_s` prints six significant digits on both engines, so a
+# decimal (or JSON) payload silently rounds every coefficient and moves
+# every tree threshold. Payloads are byte-identical across the two
+# engines, so a model trained under one loads under the other. There are
+# no file helpers on purpose: `File` is undefined on the interpreter, so
+# writing the string is the caller's job. See lib/persist.w for the
+# format and spec/persist_spec.w for the identical-prediction proofs.
+#
 # The three PREPROCESSING transformers (Scaler / Imputer / Encoder)
 # declare the hyperparameter half of that contract on its own,
 # `is Tunable` — `params` / `with_params` and nothing more, since a
@@ -80,6 +95,7 @@ use pipeline
 use cross_validation
 use kmeans
 use grid_search
+use persist
 
 # The remaining modules under lib/ (tensor, resample, transformer,
 # estimator, index, sparse, gpu, device) are unported design drafts —

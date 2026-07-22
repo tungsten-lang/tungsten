@@ -288,3 +288,31 @@
       ok = false if sample_weight != nil && wts == nil
       out = Metrics.accuracy(preds, yvals, wts) if ok
     out
+
+  # --- Persistence (see lib/persist.w) ---
+
+  -> persist_name
+    "LogisticRegression"
+
+  # `classes` rides along with the weights: the label a probability maps
+  # to is learned state, not a knob, and a model that lost it would
+  # predict 0/1 instead of what it was trained on.
+  -> to_state
+    { learning_rate: @learning_rate, epochs: @epochs, coefficients: @coefficients, intercept: @intercept, classes: @classes }
+
+  -> .load_state(st)
+    out = nil
+    ok = st != nil
+    ok = st[:learning_rate] != nil && st[:epochs] != nil if ok
+    ok = st[:coefficients] != nil && st[:intercept] != nil && st[:classes] != nil if ok
+    if ok
+      model = LogisticRegression.new(st[:learning_rate], st[:epochs])
+      out = model.restore_state(st)
+    out
+
+  -> restore_state(st)
+    @coefficients = st[:coefficients]
+    @intercept = st[:intercept]
+    @classes = st[:classes]
+    @fitted = true
+    self

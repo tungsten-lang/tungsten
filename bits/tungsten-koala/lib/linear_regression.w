@@ -259,6 +259,36 @@
       out = Metrics.r2(preds, yvals, wts) if ok
     out
 
+  # --- Persistence (see lib/persist.w) ---
+
+  # This model's tag in a saved payload.
+  -> persist_name
+    "LinearRegression"
+
+  # Everything needed to rebuild a fitted model: the hyperparameter AND
+  # what fit learned. Distinct from `params`, which is the knobs alone —
+  # a saved model is exactly the pair.
+  -> to_state
+    { alpha: @alpha, coefficients: @coefficients, intercept: @intercept }
+
+  # A FITTED LinearRegression rebuilt from `st`, or nil when st is not one
+  # of ours — the guard that stops a payload written by a different
+  # estimator, or a truncated one, from loading as a model that answers
+  # predictions.
+  -> .load_state(st)
+    out = nil
+    if st != nil && st[:alpha] != nil && st[:coefficients] != nil && st[:intercept] != nil
+      model = LinearRegression.new(st[:alpha])
+      out = model.restore_state(st)
+    out
+
+  # Reinstate the learned coefficients on self; returns self.
+  -> restore_state(st)
+    @coefficients = st[:coefficients]
+    @intercept = st[:intercept]
+    @fitted = true
+    self
+
   # --- Input coercion: DELEGATING ALIASES ---
   #
   # The one definition of every accepted input shape moved to the neutral

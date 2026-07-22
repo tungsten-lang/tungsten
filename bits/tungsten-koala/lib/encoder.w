@@ -152,3 +152,29 @@
         out = i if c == v
         i += 1
     out
+
+  # --- Persistence (see lib/persist.w) ---
+
+  -> persist_name
+    "Encoder"
+
+  # The first-seen category lists — the ORDER is the encoding, so it has
+  # to survive: a loaded Encoder must map the same category to the same
+  # index (and the same one-hot column) as the saved one.
+  -> to_state
+    { kind: @kind, columns: @columns, fit_names: @fit_names, fit_cats: @fit_cats }
+
+  -> .load_state(st)
+    out = nil
+    ok = st != nil
+    ok = st[:kind] != nil && st[:fit_names] != nil && st[:fit_cats] != nil if ok
+    if ok
+      model = Encoder.new(st[:kind], st[:columns])
+      out = model.restore_state(st)
+    out
+
+  -> restore_state(st)
+    @fit_names = st[:fit_names]
+    @fit_cats = st[:fit_cats]
+    @fitted = true
+    self

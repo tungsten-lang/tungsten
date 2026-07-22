@@ -50,14 +50,21 @@ use dimacs
             decided = true
   fmt
 
+# A proof token that is not an exact integer (or the deletion marker `d`
+# where the dialect allows it) is a malformed certificate, not something to
+# coerce: `to_i` would turn garbage into 0 and silently truncate the step.
+-> wrat_proof_int(tok)
+  raise "invalid proof token '[tok]'" unless wrat_int_token?(tok)
+  tok.to_i
+
 # Parse one hinted (WRAT/LRAT) line into a step.
 -> wrat_parse_hinted_line(toks)
-  id = toks[0].to_i
+  id = wrat_proof_int(toks[0])
   if toks[1] == "d"
     ids = []
     i = 2
     while i < toks.size
-      v = toks[i].to_i
+      v = wrat_proof_int(toks[i])
       ids.push(v) unless v == 0
       i += 1
     { "kind": "d", "id": id, "lits": [], "hints": ids }
@@ -67,7 +74,7 @@ use dimacs
     i = 1
     seen_zero = false
     while i < toks.size
-      v = toks[i].to_i
+      v = wrat_proof_int(toks[i])
       if v == 0
         # The first 0 closes the literals, the second closes the hints.
         break if seen_zero
@@ -86,7 +93,7 @@ use dimacs
     lits = []
     i = 1
     while i < toks.size
-      v = toks[i].to_i
+      v = wrat_proof_int(toks[i])
       lits.push(v) unless v == 0
       i += 1
     { "kind": "d", "id": 0, "lits": lits, "hints": [] }
@@ -94,7 +101,7 @@ use dimacs
     lits = []
     i = 0
     while i < toks.size
-      v = toks[i].to_i
+      v = wrat_proof_int(toks[i])
       lits.push(v) unless v == 0
       i += 1
     { "kind": "a", "id": 0, "lits": lits, "hints": [] }

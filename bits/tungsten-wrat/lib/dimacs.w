@@ -7,13 +7,31 @@
 # silently change the meaning of the formula.
 
 
-# Split a line into non-empty whitespace-separated tokens.
+# Split a line into non-empty whitespace-separated tokens. DIMACS permits
+# tabs as well as spaces; strip disposes of carriage returns.
 -> wrat_tokenize(line)
   out = []
   line.split(" ").each -> (t)
-    piece = t.strip
-    out.push(piece) unless piece == ""
+    t.split("\t").each -> (u)
+      piece = u.strip
+      out.push(piece) unless piece == ""
   out
+
+# A checker must never guess: a token is an integer only if it is entirely
+# decimal digits with an optional leading sign. `to_i` accepts numeric
+# prefixes and turns arbitrary text into 0, either of which would silently
+# change what is being verified.
+-> wrat_int_token?(token)
+  return false if token == nil || token.empty?
+  first = token.slice(0, 1)
+  start = 0
+  start = 1 if first == "-" || first == "+"
+  return false if start == token.size
+  i = start
+  while i < token.size
+    return false if "0123456789".index(token.slice(i, 1)) == nil
+    i += 1
+  true
 
 # Parse DIMACS CNF text into {"nvars", "clauses"}.
 #
@@ -36,11 +54,14 @@
         parts = wrat_tokenize(line)
         raise "malformed p-line: [line]" if parts.size < 4
         raise "only 'cnf' is supported, got '[parts[1]]'" unless parts[1] == "cnf"
+        raise "invalid variable count '[parts[2]]'" unless wrat_int_token?(parts[2])
         nvars = parts[2].to_i
       else
         wrat_tokenize(line).each -> (tok)
+          raise "invalid DIMACS token '[tok]'" unless wrat_int_token?(tok)
           lit = tok.to_i
           if lit == 0
+            raise "signed or padded zero is not a clause terminator: '[tok]'" unless tok == "0"
             clauses.push(current)
             current = []
           else

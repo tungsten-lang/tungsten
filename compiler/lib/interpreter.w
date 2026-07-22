@@ -1775,9 +1775,10 @@ use target
           return left + right
         raise "TypeError: no implicit conversion of [w_type_name(right)] into String"
       if type(left) == "Array"
-        if type(right) == "Array"
-          return left + right
-        return left + [right]
+        # array + array concatenates; array + scalar is elementwise
+        # broadcast (proposal §3.5) — both go through runtime w_add, which
+        # NEVER appends a scalar (mirrors the compiled path).
+        return left + right
       if type(right) == "String" && type(left) != "Char" && type(left) != "StringBuffer"
         raise "TypeError: String can't be coerced into [w_type_name(left)]"
       return left + right

@@ -1418,6 +1418,8 @@ WValue w_array_tan_unsigned(WValue arr);
 WValue w_array_tan_float(WValue arr);
 WValue w_socket_read_exact(WValue sock, WValue n);
 WValue w_socket_write_bytes(WValue sock, WValue bytes);
+WValue w_socket_read_into(WValue sock, WValue buf, WValue offset, WValue n);
+WValue w_socket_write_slice(WValue sock, WValue bytes, WValue offset, WValue len);
 
 /* ---- View registry ---- */
 void w_register_view(WValue parent, WValue view);

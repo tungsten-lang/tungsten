@@ -18691,6 +18691,7 @@ static WValue WN_prepend = 0, WN_append = 0, WN_to_sym = 0, WN_infinite_q = 0;
 static WValue WN_accept = 0, WN_repeat = 0, WN_unshift = 0, WN_rindex = 0;
 static WValue WN_merge_bang = 0;
 static WValue WN_read_exact = 0, WN_write_bytes = 0, WN_shutdown = 0, WN_set_timeout = 0;
+static WValue WN_read_into = 0, WN_write_slice = 0;
 static WValue WN_alpn_protocol = 0, WN_serve_http = 0, WN_concat = 0;
 static WValue WN_listen = 0, WN_connect = 0, WN_load_cert = 0;
 static WValue WN_file_exists_q = 0, WN_read_file = 0, WN_write_file = 0;
@@ -18882,6 +18883,8 @@ static void w_init_method_names(void) {
     WN_merge_bang   = w_string("merge!");
     WN_read_exact   = w_string("read_exact");
     WN_write_bytes  = w_string("write_bytes");
+    WN_read_into    = w_string("read_into");
+    WN_write_slice  = w_string("write_slice");
     WN_shutdown     = w_string("shutdown");
     WN_set_timeout  = w_string("set_timeout");
     WN_alpn_protocol = w_string("alpn_protocol");
@@ -22318,6 +22321,14 @@ static WValue w_ic_socket_write_bytes(WValue r, WValue *a, int c) {
     if (c < 1) die("socket.write_bytes requires 1 argument");
     return w_socket_write_bytes(r, a[0]);
 }
+static WValue w_ic_socket_read_into(WValue r, WValue *a, int c) {
+    if (c < 3) die("socket.read_into requires buf, offset, n");
+    return w_socket_read_into(r, a[0], a[1], a[2]);
+}
+static WValue w_ic_socket_write_slice(WValue r, WValue *a, int c) {
+    if (c < 3) die("socket.write_slice requires buf, offset, len");
+    return w_socket_write_slice(r, a[0], a[1], a[2]);
+}
 static WValue w_ic_socket_close(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_socket_close(r);
@@ -22678,6 +22689,8 @@ static WICEntry w_ic_socket_table[] = {    /* Phase 7+o */
     {0, w_ic_socket_set_timeout},
     {0, w_ic_socket_alpn_protocol},
     {0, w_ic_socket_serve_http},
+    {0, w_ic_socket_read_into},
+    {0, w_ic_socket_write_slice},
     {0, NULL}
 };
 
@@ -23192,6 +23205,8 @@ static void w_init_ic_tables(void) {
     w_ic_socket_table[7].name = WN_set_timeout;
     w_ic_socket_table[8].name = WN_alpn_protocol;
     w_ic_socket_table[9].name = WN_serve_http;
+    w_ic_socket_table[10].name = WN_read_into;
+    w_ic_socket_table[11].name = WN_write_slice;
     /* Mmap (Phase 7+o) */
     w_ic_mmap_table[0].name   = WN_close;
     w_ic_mmap_table[1].name   = WN_byte_at;
@@ -28564,6 +28579,62 @@ WValue w_socket_read_exact(WValue sock, WValue n_val) {
     return w_bytes_from_data(buf, n);
 }
 
+/* Read exactly n bytes into a caller-owned ByteArray at `offset` —
+ * allocation-free twin of w_socket_read_exact for pooled read buffers.
+ * Returns bytes-read as Int; W_NIL when the socket is closed or EOF
+ * arrives before the first byte (same semantics as read_exact returning
+ * nil); a short count on EOF/ECONNRESET mid-frame. The buffer is never
+ * grown — offset+n must fit inside the array's current size. The data
+ * pointer is recomputed after every park so a blocking wait can never
+ * hold a stale pointer. */
+WValue w_socket_read_into(WValue sock, WValue buf_val, WValue off_val, WValue n_val) {
+    WSocket *s = as_socket(sock);
+    if (s->closed) return W_NIL;
+
+    WArray *a = as_bytes_arr(buf_val);
+    int64_t off = w_as_int(off_val);
+    int64_t n = w_as_int(n_val);
+    if (n <= 0) return w_int(0);
+    if (off < 0 || off + n > a->size)
+        w_raise(w_string("socket: read_into out of range"));
+
+    int64_t total_read = 0;
+    while (total_read < n) {
+        uint8_t *dst = (uint8_t *)a->slots + a->start + off + total_read;
+        ssize_t bytes;
+#ifdef TUNGSTEN_TLS
+        if (s->ssl) {
+            bytes = w_tls_read(s, (char *)dst, n - total_read);
+        } else
+#endif
+        {
+            bytes = read(s->fd, dst, n - total_read);
+        }
+
+        if (bytes > 0) {
+            total_read += bytes;
+            continue;
+        }
+        if (bytes == 0) {
+            /* EOF before all bytes read */
+            if (total_read == 0) return W_NIL;
+            return w_int(total_read);
+        }
+        /* bytes < 0 */
+        if (errno == EINTR) continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            w_socket_park(s->fd, W_EVENT_READ);
+            continue;
+        }
+        if (errno == ECONNRESET) {
+            if (total_read == 0) return W_NIL;
+            return w_int(total_read);
+        }
+        w_raise(w_string("socket: read_into failed"));
+    }
+    return w_int(n);
+}
+
 /* Write ByteArray to socket (length-aware, no strlen). Phase 6i.1:
  * ByteArray is now a WArray<u8>, so dig the payload out of `slots`. */
 WValue w_socket_write_bytes(WValue sock, WValue bytes_val) {
@@ -28599,6 +28670,56 @@ WValue w_socket_write_bytes(WValue sock, WValue bytes_val) {
             }
             if (errno == EPIPE || errno == ECONNRESET) return w_box_int(written);
             w_raise(w_string("socket: write_bytes failed"));
+        }
+    }
+    return w_box_int(written);
+}
+
+/* Write a sub-range of a ByteArray to the socket — allocation-free twin
+ * of w_socket_write_bytes for pooled send buffers (no .slice copy needed).
+ * Returns bytes written as Int, mirroring write_bytes; raises on a closed
+ * socket or hard error; out-of-range offset/len raises rather than
+ * clamping. The data pointer is recomputed after every park. */
+WValue w_socket_write_slice(WValue sock, WValue bytes_val, WValue off_val, WValue len_val) {
+    WSocket *s = as_socket(sock);
+    if (s->closed) {
+        w_raise(w_string("socket: write to closed socket"));
+    }
+
+    WArray *a = as_bytes_arr(bytes_val);
+    int64_t off = w_as_int(off_val);
+    int64_t len = w_as_int(len_val);
+    if (len <= 0) return w_box_int(0);
+    if (off < 0 || off + len > a->size)
+        w_raise(w_string("socket: write_slice out of range"));
+
+    size_t total = (size_t)len;
+    size_t written = 0;
+
+#ifdef TUNGSTEN_TLS
+    if (s->ssl) {
+        while (written < total) {
+            const uint8_t *data = (const uint8_t *)a->slots + a->start + off;
+            ssize_t n = w_tls_write(s, (const char *)(data + written), total - written);
+            if (n > 0) { written += n; continue; }
+            if (n <= 0) return w_box_int(written);
+        }
+        return w_box_int(written);
+    }
+#endif
+
+    while (written < total) {
+        const uint8_t *data = (const uint8_t *)a->slots + a->start + off;
+        ssize_t n = write(s->fd, data + written, total - written);
+        if (n > 0) { written += n; continue; }
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                w_socket_park(s->fd, W_EVENT_WRITE);
+                continue;
+            }
+            if (errno == EPIPE || errno == ECONNRESET) return w_box_int(written);
+            w_raise(w_string("socket: write_slice failed"));
         }
     }
     return w_box_int(written);

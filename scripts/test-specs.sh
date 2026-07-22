@@ -171,6 +171,7 @@ compiled_specs=(
   spec/compiler/lambda_puts_body_spec.w
   spec/compiler/mmap_size_relaxed_autoload_spec.w
   spec/compiler/mmap_size_relaxed_native_autoload_spec.w
+  spec/compiler/nested_closure_counted_capture_spec.w
   spec/compiler/nested_i64_array_boxed_store_spec.w
   spec/compiler/one_arg_cached_dispatch_emitter_spec.w
   spec/compiler/ownership_phi_escape_spec.w
@@ -258,6 +259,7 @@ interpreter_specs=(
 core_specs=(
   spec/core/byte_array_equality_spec.w
   spec/core/crypto_hmac_scram_spec.w
+  spec/core/socket_read_into_spec.w
   spec/core/byte_array_slice_spec.w
   spec/core/byte_array_view_flatten_spec.w
   spec/core/byte_array_view_reallocation_spec.w

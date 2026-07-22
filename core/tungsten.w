@@ -67,6 +67,7 @@
   auto :String,       "string_native"
   auto :StringBuffer, "string_buffer"
   auto :Symbol,       "symbol"
+  auto :System,       "system"
   auto :Thread,       "thread"
   auto :Token,        "token"
   auto :UUID,         "uuid"

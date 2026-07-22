@@ -88,6 +88,18 @@ WASSAT_PROOF_DRAT = 2
     @ok = true
     @terminal_status = 0
 
+    # Incremental queries: assumptions are DECISIONS, not clauses — every
+    # learned clause therefore remains implied by the formula alone, and the
+    # proof stream never contains an assumption-dependent step. On failure
+    # the negated core is logged as an ordinary RUP addition (the blocking
+    # clause); deriving the empty clause under assumption units would NOT
+    # refute the original CNF. @formula_unsat marks the one verdict no later
+    # query can undo.
+    @assump = []
+    @nassump = 0
+    @failed_core = []
+    @formula_unsat = false
+
     # Global proof-id counter. Without preprocessing every stored clause gets
     # id `ci + 1` exactly as before; once a preprocessed artifact supplies
     # non-contiguous ids, hints must translate through @gid rather than assume
@@ -329,6 +341,44 @@ WASSAT_PROOF_DRAT = 2
     @lsize = @astate[3]
     @astate[4]
 
+  # The failed-assumption core: the assumption `a` is falsified under the
+  # current trail; walk the reasons of everything that contributed back to
+  # the assumption decisions. Returns [a, b1, ..., bm] — assumptions whose
+  # conjunction the formula refutes. MiniSat's analyzeFinal.
+  -> analyze_final(a)
+    core = [a]
+    av = a.abs
+    @seen[av] = 1
+    marked = [av]
+    i = @tsize - 1
+    floor = 0
+    floor = @trail_lim[0] if @dlevel > 0
+    while i >= floor
+      l = @trail[i]
+      v = l.abs
+      if @seen[v] == 1
+        if @reason[v] < 0 && @level[v] > 0
+          # an assumption decision (level 0 reason-less literals are input
+          # units, formula-implied, never part of a core); when it is the
+          # same VARIABLE it is the opposing assumption literal itself
+          # (assume x and -x together)
+          core.push(l) unless l == a
+        elsif @reason[v] >= 0
+          ci = @reason[v]
+          st = @cstart[ci]
+          n = @clen[ci]
+          j = 0
+          while j < n
+            q = @arena[st + j].abs
+            if @seen[q] == 0 && @level[q] > 0
+              @seen[q] = 1
+              marked.push(q)
+            j += 1
+      i -= 1
+    marked.each -> (v)
+      @seen[v] = 0
+    core
+
   # ---- branching ----------------------------------------------------------
 
   # One-step rollout branching, in the DETOUR sense: for each candidate action
@@ -459,13 +509,26 @@ WASSAT_PROOF_DRAT = 2
 
   -> log_clause(lits)
     if @proof_mode == WASSAT_PROOF_WRAT
-      hints = self.replay_hints(lits)
+      # A tautology (possible for the blocking clause of directly
+      # contradictory assumptions) is RUP with no hints at all: negating it
+      # is immediately contradictory, which the checker accepts before
+      # reading a single hint. Replay would misreport it as a failure.
+      taut = false
+      ti = 0
+      while ti < lits.size
+        tj = ti + 1
+        while tj < lits.size
+          taut = true if lits[ti] == 0 - lits[tj]
+          tj += 1
+        ti += 1
+      hints = []
+      hints = self.replay_hints(lits) unless taut
       # Silently omitting a failed replay is unsound: the learned clause is
       # still inserted into the search database, so later hint ids could name
       # a clause the checker never received. Every first-UIP clause is RUP;
       # failure to reconstruct its chain therefore indicates a solver/proof
       # bug and must stop certificate production loudly.
-      raise "internal proof replay failed for learned clause: [lits.join(" ")]" if hints.empty?
+      raise "internal proof replay failed for learned clause: [lits.join(" ")]" if hints.empty? && !taut
       cid = @next_gid                # the id the upcoming store will assign
       line = "[cid] " + lits.join(" ")
       line = "[cid]" if lits.empty?
@@ -658,6 +721,7 @@ WASSAT_PROOF_DRAT = 2
         @since_restart += 1
         if @dlevel == 0
           self.log_clause([])
+          @formula_unsat = true
           result = -1
         else
           target = self.analyze(confl)
@@ -763,29 +827,84 @@ WASSAT_PROOF_DRAT = 2
             @reductions += 1
             self.reduce_db
         else
-          v = 0
-          if @lookahead > 0
-            v = self.pick_branch_rollout
-          else
-            v = self.pick_branch
-          if v == 0
-            result = 1
-          elsif v > 0
-            @decisions_made += 1
-            @trail_lim[@dlevel] = @tsize
-            @dlevel += 1
-            self.enqueue(@phase[v] > 0 ? v : 0 - v, -1)
-          # v < 0 means rollout applied a forced literal; just loop again
+          # Assumptions occupy the first decision levels; a restart pops
+          # them and this branch re-asserts them on the way back down.
+          handled = false
+          if @dlevel < @nassump
+            a = @assump[@dlevel]
+            av = self.value(a)
+            if av > 0
+              # already satisfied: hold an empty decision level so later
+              # assumptions still map to their own levels
+              @trail_lim[@dlevel] = @tsize
+              @dlevel += 1
+            elsif av < 0
+              # falsified: the query is UNSAT under these assumptions
+              @failed_core = self.analyze_final(a)
+              blocking = []
+              @failed_core.each -> (l)
+                blocking.push(0 - l)
+              self.log_clause(blocking) unless @proof_mode == WASSAT_PROOF_NONE
+              bi = self.store_clause(blocking, blocking.size)
+              result = -2
+            else
+              @decisions_made += 1
+              @trail_lim[@dlevel] = @tsize
+              @dlevel += 1
+              self.enqueue(a, -1)
+            handled = true
+          unless handled
+            v = 0
+            if @lookahead > 0
+              v = self.pick_branch_rollout
+            else
+              v = self.pick_branch
+            if v == 0
+              result = 1
+            elsif v > 0
+              @decisions_made += 1
+              @trail_lim[@dlevel] = @tsize
+              @dlevel += 1
+              self.enqueue(@phase[v] > 0 ? v : 0 - v, -1)
+            # v < 0 means rollout applied a forced literal; just loop again
     limited ? 0 : result
 
   -> solve
     self.solve_budget(0)
 
+  # Full MiniSat-style incremental query: SAT / UNSAT / UNKNOWN under the
+  # given assumption literals, plus the failed-assumption core on UNSAT.
+  # Each call is a FRESH query: per-query state (trail, cached non-formula
+  # verdict, previous core) resets, while the learned-clause database,
+  # branching activities, restart cadence, and hidden proof prefix persist.
+  -> solve_assuming(assumptions)
+    self.solve_assuming_budget(assumptions, 0)
+
+  -> solve_assuming_budget(assumptions, max_conflicts)
+    self.reset_query
+    @assump = assumptions
+    @nassump = assumptions.size
+    r = self.solve_query(max_conflicts)
+    @assump = []
+    @nassump = 0
+    r
+
+  # Clear per-query state between incremental calls. A formula-level UNSAT
+  # is the one verdict no later query can undo; everything else is scoped to
+  # the query that produced it.
+  -> reset_query
+    self.backjump(0)
+    @failed_core = []
+    @terminal_status = 0 unless @formula_unsat
+    0
+
   # Build a detached result. Arrays returned by an earlier call must not gain
   # proof steps, lose a model, or otherwise change when the same solver resumes.
+  # Status -2 is UNSAT-under-assumptions: reported with status -1 plus a
+  # non-empty "core" (formula-level UNSAT always carries an empty core).
   -> result_for(status)
     sat = status == 1
-    unsat = status == -1
+    unsat = status == -1 || status == -2
     model = []
     if sat
       v = 1
@@ -793,12 +912,15 @@ WASSAT_PROOF_DRAT = 2
         model.push(@assign[v] >= 0 ? v : 0 - v)
         v += 1
 
+    core = []
+    core = @failed_core.dup if status == -2
     proof = []
     drat = []
     proof = @proof.dup if unsat && @proof_mode == WASSAT_PROOF_WRAT
     drat = @drat.dup if unsat && (@proof_mode == WASSAT_PROOF_DRAT || @dual_drat)
     { "sat": sat, "unsat": unsat, "complete": status != 0,
-      "status": status, "model": model, "proof": proof, "drat": drat,
+      "status": status == -2 ? -1 : status, "model": model,
+      "core": core, "proof": proof, "drat": drat,
       "proof_mode": @proof_mode,
       "conflicts": @conflicts, "decisions": @decisions_made,
       "restarts": @restart_count, "reduces": @reductions }
@@ -807,6 +929,11 @@ WASSAT_PROOF_DRAT = 2
   # UNKNOWN preserves the trail, learned database, restart cadence, and hidden
   # proof prefix so a later call can continue safely. Zero is unlimited.
   -> solve_budget(max_conflicts)
+    @assump = []
+    @nassump = 0
+    self.solve_query(max_conflicts)
+
+  -> solve_query(max_conflicts)
     raise "conflict budget must be non-negative, got [max_conflicts]" if max_conflicts < 0
     return self.result_for(@terminal_status) unless @terminal_status == 0
 
@@ -816,9 +943,11 @@ WASSAT_PROOF_DRAT = 2
       stop_conflicts = @conflicts + max_conflicts if max_conflicts > 0
       status = self.solve_loop(stop_conflicts)
     else
+      @formula_unsat = true
       self.log_clause([]) unless @refuted
 
-    @terminal_status = status unless status == 0
+    # UNSAT-under-assumptions is a per-query verdict, never terminal.
+    @terminal_status = status unless status == 0 || status == -2
     self.result_for(status)
 
 # Native two-watched-literal propagation.

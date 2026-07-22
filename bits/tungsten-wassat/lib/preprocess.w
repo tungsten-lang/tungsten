@@ -1473,6 +1473,19 @@ WASSAT_PRE_BUCKET_CAP = 1024
     r["pre"] = art
     r
 
+# E4 contract: assumptions may only name variables that survived
+# preprocessing. Anything eliminated or substituted must have been declared
+# with freeze(var) BEFORE preprocessing ran; discovering it here is a hard
+# error, never a silent wrong answer.
+-> wassat_check_assumptions(art, assumptions)
+  gone = art["gone"]
+  assumptions.each -> (a)
+    v = a.abs
+    unless gone[v] == 0
+      kind = gone[v] == 1 ? "eliminated" : "substituted"
+      raise "assumption names [kind] variable [v]; freeze it before preprocessing"
+  0
+
 # Reconstruct a model of the ORIGINAL formula from a model of the reduced
 # one. `model` is the solver's canonical array (index v-1 holds +-v); the
 # stack is walked backwards, with every BVE pivot first defaulted to false

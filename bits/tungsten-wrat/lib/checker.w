@@ -11,25 +11,54 @@
 # With hints (WRAT/LRAT) the checker never searches: it replays exactly the
 # clauses the solver names, in order, which makes a check cost the total
 # length of the hinted clauses rather than a fixpoint over the whole
-# database.  That is the near-linear path.  Unhinted DRAT falls back to
-# propagating the entire database to a fixpoint, which is correct but is a
-# reference implementation, not a fast one.
-
+# database.  That is the near-linear path.
+#
+# Unhinted DRAT is checked with two-watched-literal propagation over the
+# live database.  Watches are chosen among non-false literals, so undoing
+# an assignment never invalidates a watch: between proof steps the checker
+# clears the trail and the watch structure carries over untouched.  Each
+# step therefore costs work proportional to the clauses actually visited,
+# not to the size of the database — the previous full-fixpoint reference
+# loop made large plain-DRAT proofs quadratic and unusable in practice.
+# Deletions are indexed by sorted literal content, replacing the previous
+# full-database scan per delete line.
 
 use dimacs
 use proof
 
 + WratChecker
   -> new(@nvars)
-    @db = {}          # live clauses: id -> Array of literals
-    @ids = []         # insertion order of live ids
-    @next_id = 1
     @assign = []      # index by variable: 0 unassigned, 1 true, -1 false
     @trail = []
+    @qhead = 0
     i = 0
     while i <= @nvars
       @assign.push(0)
       i += 1
+
+    # Clause storage, one slot per added clause (live or dead).
+    @clits = []       # slot -> Array of literals
+    @alive = []       # slot -> 1 live, 0 dead
+    @cid = []         # slot -> proof id
+    @wa = []          # slot -> first watched literal (0 if unit/empty)
+    @wb = []          # slot -> second watched literal (0 if unit/empty)
+
+    @slot_of = {}     # proof id -> slot
+    @ids = []         # insertion order of ids (live filter via @slot_of/@alive)
+    @next_id = 1
+
+    @units = []       # slots of clauses stored as single-literal
+    @empty_live = 0   # count of live empty clauses in the database
+
+    # watch lists: literal l -> bucket at index l + @nvars
+    @watch = []
+    i = 0
+    while i <= 2 * @nvars
+      @watch.push([])
+      i += 1
+
+    # sorted-content key -> slots in insertion order (for DRAT deletes)
+    @key_slots = {}
 
   # ---- assignment helpers -------------------------------------------------
 
@@ -45,45 +74,102 @@ use proof
     @trail.each -> (lit)
       @assign[lit.abs] = 0
     @trail = []
+    @qhead = 0
 
   # ---- clause database ----------------------------------------------------
+
+  -> content_key(lits)
+    lits.sort.join(",")
 
   -> add_clause(lits, id)
     cid = id > 0 ? id : @next_id
     @next_id = cid + 1 if cid >= @next_id
-    @db[cid] = lits
+    slot = @clits.size
+    @clits.push(lits)
+    @alive.push(1)
+    @cid.push(cid)
+    @wa.push(0)
+    @wb.push(0)
+    @slot_of[cid] = slot
     @ids.push(cid)
+
+    key = self.content_key(lits)
+    @key_slots[key] = [] unless @key_slots.has_key?(key)
+    @key_slots[key].push(slot)
+
+    if lits.empty?
+      @empty_live += 1
+    else
+      # Pick two watches with distinct literal values; duplicated literals
+      # degrade to the unit case, which keeps the watch invariant honest.
+      first = lits[0]
+      second = 0
+      j = 1
+      while j < lits.size && second == 0
+        second = lits[j] if lits[j] != first
+        j += 1
+      if second == 0
+        @units.push(slot)
+      else
+        @wa[slot] = first
+        @wb[slot] = second
+        @watch[first + @nvars].push(slot)
+        @watch[second + @nvars].push(slot)
     cid
 
+  -> kill_slot(slot)
+    @alive[slot] = 0
+    @empty_live -= 1 if @clits[slot].empty?
+    # Watch lists and @units drop dead slots lazily during traversal.
+
   -> delete_id(cid)
-    if @db.has_key?(cid)
-      @db.delete(cid)
-      true
+    if @slot_of.has_key?(cid)
+      slot = @slot_of[cid]
+      if @alive[slot] == 1
+        self.kill_slot(slot)
+        true
+      else
+        false
     else
       false
 
-  # DRAT deletes by literal content; drop the first structural match.
-  # Array `==` is identity in Tungsten, so clauses are compared by their
-  # sorted join -- comparing the arrays directly would never match.
+  # DRAT deletes by literal content; drop the first structural match in
+  # insertion order.  Array `==` is identity in Tungsten, so clauses are
+  # keyed by their sorted join -- comparing arrays directly would never
+  # match.
   -> delete_lits(lits)
-    want = lits.sort.join(",")
-    hit = 0
-    @ids.each -> (cid)
-      if hit == 0 && @db.has_key?(cid)
-        hit = cid if @db[cid].sort.join(",") == want
-    hit == 0 ? false : self.delete_id(hit)
+    key = self.content_key(lits)
+    hit = -1
+    if @key_slots.has_key?(key)
+      bucket = @key_slots[key]
+      j = 0
+      while j < bucket.size && hit < 0
+        hit = bucket[j] if @alive[bucket[j]] == 1
+        j += 1
+    if hit < 0
+      false
+    else
+      self.kill_slot(hit)
+      true
 
   -> live_ids
     out = []
     @ids.each -> (cid)
-      out.push(cid) if @db.has_key?(cid)
+      slot = @slot_of[cid]
+      out.push(cid) if @alive[slot] == 1
     out
+
+  # Look up a live clause by proof id (hinted path); [] when absent.
+  -> lits_for_id(cid)
+    if @slot_of.has_key?(cid)
+      slot = @slot_of[cid]
+      @alive[slot] == 1 ? @clits[slot] : []
+    else
+      []
 
   # ---- propagation --------------------------------------------------------
 
-  # Evaluate a clause under the current assignment.
-  # Returns {"sat", "unassigned", "unit"} where "unit" is the sole
-  # unassigned literal when exactly one remains.
+  # Evaluate a clause under the current assignment (hinted/RAT paths).
   -> classify(lits)
     sat = false
     unassigned = 0
@@ -97,21 +183,60 @@ use proof
         unit = l
     { "sat": sat, "unassigned": unassigned, "unit": unit }
 
-  # Propagate the whole database to a fixpoint. Returns true on conflict.
-  -> propagate_all
-    conflict = false
-    changed = true
-    while changed && !conflict
-      changed = false
-      self.live_ids.each -> (cid)
-        unless conflict
-          info = self.classify(@db[cid])
-          unless info["sat"]
-            if info["unassigned"] == 0
+  # Two-watched-literal propagation to fixpoint from the current trail.
+  # Returns true on conflict.
+  -> propagate
+    conflict = @empty_live > 0
+
+    # Live unit clauses fire first: nothing watches them.
+    ui = 0
+    while ui < @units.size && !conflict
+      slot = @units[ui]
+      if @alive[slot] == 1
+        l = @clits[slot][0]
+        v = self.value(l)
+        if v < 0
+          conflict = true
+        elsif v == 0
+          self.assign_lit(l)
+      ui += 1
+
+    while @qhead < @trail.size && !conflict
+      lit = @trail[@qhead]
+      @qhead += 1
+      bucket = @watch[(0 - lit) + @nvars]
+      i = 0
+      while i < bucket.size && !conflict
+        slot = bucket[i]
+        if @alive[slot] == 0
+          bucket[i] = bucket[bucket.size - 1]
+          bucket.pop
+        else
+          # Normalise: @wb[slot] is the watch being falsified.
+          if @wa[slot] == 0 - lit
+            @wa[slot] = @wb[slot]
+            @wb[slot] = 0 - lit
+          other = @wa[slot]
+          if self.value(other) > 0
+            i += 1
+          else
+            lits = @clits[slot]
+            found = 0
+            j = 0
+            while j < lits.size && found == 0
+              cand = lits[j]
+              found = cand if cand != other && cand != (0 - lit) && self.value(cand) >= 0
+              j += 1
+            if found != 0
+              @wb[slot] = found
+              @watch[found + @nvars].push(slot)
+              bucket[i] = bucket[bucket.size - 1]
+              bucket.pop
+            elsif self.value(other) == 0
+              self.assign_lit(other)
+              i += 1
+            else
               conflict = true
-            elsif info["unassigned"] == 1
-              self.assign_lit(info["unit"])
-              changed = true
     conflict
 
   # Replay a hint chain. Returns true if it ends in a conflict.
@@ -120,8 +245,11 @@ use proof
     ok = true
     hints.each -> (cid)
       if ok && !conflict
-        if @db.has_key?(cid)
-          info = self.classify(@db[cid])
+        lits = self.lits_for_id(cid)
+        if lits.empty? && !(@slot_of.has_key?(cid) && @alive[@slot_of[cid]] == 1)
+          ok = false
+        else
+          info = self.classify(lits)
           if info["unassigned"] == 0 && !info["sat"]
             conflict = true
           elsif info["unassigned"] == 1 && !info["sat"]
@@ -130,8 +258,6 @@ use proof
             # A hint that is satisfied or still ambiguous is not a valid
             # step in a propagation chain.
             ok = false
-        else
-          ok = false
     conflict
 
   # ---- redundancy tests ---------------------------------------------------
@@ -155,7 +281,7 @@ use proof
     if immediate
       result = true
     elsif hints.empty?
-      result = self.propagate_all
+      result = self.propagate
     else
       result = self.propagate_hints(hints)
     self.undo_all
@@ -169,7 +295,7 @@ use proof
       ok = true
       self.live_ids.each -> (cid)
         if ok
-          other = @db[cid]
+          other = @clits[@slot_of[cid]]
           if other.include?(0 - pivot)
             resolvent = []
             lits.each -> (l)

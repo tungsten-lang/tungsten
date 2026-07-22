@@ -1,6 +1,7 @@
 tungsten "tungsten-0.0.1"
 
 name        "tungsten-pg"
-version     "0.1.0"
+version     "0.2.0"
 summary     "PostgreSQL adapter for Tungsten"
 license     "MIT OR Apache-2.0"
+includes    ["native/pg_bridge.c"]

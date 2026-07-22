@@ -18580,6 +18580,23 @@ WValue __w_print(WValue v) {
     return w_print(v);
 }
 
+/* Print to stderr: lets a CLI keep stdout clean for machine-readable
+ * payloads (e.g. a proof streamed to `-`) while still reporting status. */
+WValue __w_eprint(WValue v) {
+    WValue s = w_to_s(v);
+    fprintf(stderr, "%s", as_str(s));
+    return W_NIL;
+}
+
+/* Stable file identity for alias detection (symlinks, hardlinks): packs
+ * (device, inode); nil when the path does not exist. */
+WValue __w_file_id(WValue path_val) {
+    const char *path = as_str(path_val);
+    struct stat st;
+    if (stat(path, &st) != 0) return W_NIL;
+    return w_int(((int64_t)st.st_dev << 40) ^ (int64_t)st.st_ino);
+}
+
 /* ---- Primality ---- */
 
 WValue __w_prime_aks(WValue n) {

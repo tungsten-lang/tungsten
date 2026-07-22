@@ -1682,6 +1682,14 @@ use target
     raise "Invalid compound assignment target"
 
   -> apply_compound_op(op, left, right)
+    # Object operands dispatch their own operator method (`a *= b` -> a.*(b)),
+    # mirroring apply_binary_op's object arm. Without this, `result *= base`
+    # inside Hypercomplex#** fell through to the primitive `left * right` arm,
+    # which fed a whole object into the runtime multiply and died in as_int.
+    if type(left) == "Hash" && left.has_key?(:rt) && left[:rt] == :object
+      opn = binop_method_name(op)
+      if opn != nil
+        return dispatch_method(left, opn, [right], nil, nil)
     if op == :PLUS
       if type(left) == "String"
         return left + w_to_s(right)
@@ -1851,6 +1859,8 @@ use target
       return "|"
     if op == :CARET
       return "^"
+    if op == :HADAMARD
+      return "⊙"
     nil
 
   # Range#/ (step): materialize `(a..b) / n` as [a, a+n, a+2n, ...] while
@@ -1871,6 +1881,11 @@ use target
   -> eval_unary_op(node, env)
     operand = evaluate(ast_get(node, :operand), env)
     if ast_get(node, :op) == :MINUS
+      # A user object negates through its own `-@` operator method (which the
+      # numeric tower aliases to `negate`), mirroring the compiled path's
+      # w_neg -> `-@` instance dispatch. Primitives keep the `0 - x` arm.
+      if type(operand) == "Hash" && operand.has_key?(:rt) && operand[:rt] == :object
+        return dispatch_method(operand, "-@", [], nil, nil)
       return 0 - operand
     raise "Unknown unary operator"
 
@@ -2377,7 +2392,7 @@ use target
 
     # Method on object
     if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :object
-      m = lookup_method(recv[:w_class], name, args.size(), block != nil)
+      m = lookup_method(recv[:w_class], name, args.size(), block != nil, args)
       if m != nil
         # Implicit construction from the receiver's class: a one-param
         # method called with N>1 args builds its argument from the
@@ -2816,12 +2831,86 @@ use target
       i += 1
     false
 
-  -> lookup_method_exact_arity(w_class, name, argc, has_block = false)
+  # Choose among same-arity overloads the one whose declared parameter types
+  # most specifically match the argument runtime types — the interpret-time
+  # equivalent of the compiled synthesized `@1.is_a?("Type")` dispatcher.
+  # Returns nil when no typed overload matches (normal dispatch then applies).
+  -> select_typed_overload(overloads, argc, has_block, args)
+    best = nil
+    i = 0
+    while i < overloads.size()
+      m = overloads[i]
+      pts = m[:param_types]
+      if pts != nil
+        takes_block = method_takes_block?(m)
+        arity = m[:params].size()
+        if takes_block
+          arity -= 1
+        if arity == argc && takes_block == has_block && overload_matches_args?(pts, args)
+          if best == nil || param_types_more_specific?(pts, best[:param_types])
+            best = m
+      i += 1
+    best
+
+  # Every declared param type must be satisfied by the corresponding arg's
+  # runtime type (is_a? over the class ancestry — the same relation the
+  # compiled gate lowers to via w_value_is_a).
+  -> overload_matches_args?(pts, args)
+    j = 0
+    while j < pts.size()
+      if j >= args.size()
+        return false
+      if !is_a_class?(args[j], "" + pts[j].to_s())
+        return false
+      j += 1
+    true
+
+  # `a` is at least as specific as `b` when each declared type is the same as,
+  # or a subclass of, `b`'s — so `(Vector)` beats `(Number)` for a Vec3
+  # argument while `(Number)` stays the base fallback.
+  -> param_types_more_specific?(a, b)
+    if b == nil
+      return true
+    j = 0
+    while j < a.size()
+      if j >= b.size()
+        return true
+      if !class_name_subtype?("" + a[j].to_s(), "" + b[j].to_s())
+        return false
+      j += 1
+    true
+
+  # Is the class named `a_name` the same as, or a descendant of, `b_name`?
+  # Walks the class table's superclass chain. Number is the universal
+  # numeric-tower base (load-order tolerant), mirroring lowering's
+  # overload_type_is_ancestor? fallback.
+  -> class_name_subtype?(a_name, b_name)
+    if a_name == b_name
+      return true
+    c = @classes[a_name]
+    guard = 0
+    while c != nil && guard < 64
+      if c[:name] == b_name
+        return true
+      c = c[:superclass]
+      guard += 1
+    if b_name == "Number"
+      return true
+    false
+
+  -> lookup_method_exact_arity(w_class, name, argc, has_block = false, args = nil)
     if w_class == nil
       return nil
     overload_map = w_class[:method_overloads]
     if overload_map != nil && overload_map.has_key?(name)
       overloads = overload_map[name]
+      # Typed operator-overload selection: with arg VALUES in hand, prefer the
+      # same-arity overload whose declared parameter type most specifically
+      # matches the argument's runtime type. Untyped methods fall through.
+      if args != nil
+        typed = select_typed_overload(overloads, argc, has_block, args)
+        if typed != nil
+          return typed
       # Block-aware pass first: prefer the overload whose declared block
       # parameter matches the call site's block presence, at the arity
       # net of that block param. This mirrors the compiled engine's
@@ -2848,7 +2937,7 @@ use target
         if overloads[i][:params].size() == argc
           return overloads[i]
         i -= 1
-    lookup_method_exact_arity(w_class[:superclass], name, argc, has_block)
+    lookup_method_exact_arity(w_class[:superclass], name, argc, has_block, args)
 
   -> lookup_method_fallback(w_class, name)
     if w_class == nil
@@ -2864,11 +2953,11 @@ use target
   # first, then performs a second name-only walk. The fallback selects the
   # first registration for overloaded names; no-arity introspection retains
   # the interpreter's established last-definition map.
-  -> lookup_method(w_class, name, argc = nil, has_block = false)
+  -> lookup_method(w_class, name, argc = nil, has_block = false, args = nil)
     if w_class == nil
       return nil
     if argc != nil
-      exact = lookup_method_exact_arity(w_class, name, argc, has_block)
+      exact = lookup_method_exact_arity(w_class, name, argc, has_block, args)
       if exact != nil
         return exact
       return lookup_method_fallback(w_class, name)
@@ -3274,7 +3363,10 @@ use target
     replaced = false
     i = 0
     while i < overloads.size()
-      if overloads[i][:params].size() == w_method[:params].size()
+      # Same-arity siblings that differ only by declared PARAMETER TYPE
+      # (`-> */1(Vector)` vs `-> */1(Number)`) are distinct typed overloads —
+      # keep both. Only a same-arity, same-param-type redefinition clobbers.
+      if overloads[i][:params].size() == w_method[:params].size() && same_param_types?(overloads[i][:param_types], w_method[:param_types])
         overloads[i] = w_method
         replaced = true
         break
@@ -3282,6 +3374,23 @@ use target
     if !replaced
       overloads.push(w_method)
     w_method
+
+  # Two param-type signatures are equal when both are absent, or both list the
+  # same type names in order. Used so typed operator overloads coexist while a
+  # genuine redefinition still replaces its predecessor.
+  -> same_param_types?(a, b)
+    if a == nil && b == nil
+      return true
+    if a == nil || b == nil
+      return false
+    if a.size() != b.size()
+      return false
+    i = 0
+    while i < a.size()
+      if a[i] != b[i]
+        return false
+      i += 1
+    true
 
   -> eval_class_def(node, env)
     # Class re-open: if a class with this name already exists, merge the
@@ -3322,7 +3431,7 @@ use target
       from_trait = entry[1]
       if ast_kind(expr) == :method_def
         mbody = register_trailing_accessors(expr, ast_get(expr, :body), w_class)
-        w_method = {rt: :method, name: ast_get(expr, :name), params: ast_get(expr, :params), body: mbody, w_class: w_class, file: @current_file, trait_default: from_trait}
+        w_method = {rt: :method, name: ast_get(expr, :name), params: ast_get(expr, :params), body: mbody, w_class: w_class, file: @current_file, trait_default: from_trait, param_types: ast_get(expr, :param_types)}
         if ast_get(expr, :is_class_method) == true
           w_class[:class_methods][ast_get(expr, :name)] = w_method
         else

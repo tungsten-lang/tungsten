@@ -249,6 +249,11 @@ interpreter_specs=(
   spec/interpreter/uuid_byte_revisit_spec.w
   spec/core/base64_native_spec.w
   spec/core/system_spec.w
+  spec/numeric/complex_spec.w
+  spec/numeric/hypercomplex_mul_spec.w
+  spec/numeric/matrix_spec.w
+  spec/numeric/operator_overload_spec.w
+  spec/numeric/vector_spec.w
   benchmarks/runtime_ports/array_leaf_interpreter.w
   benchmarks/runtime_ports/bigint_predicate_relaxed_interpreter.w
   benchmarks/runtime_ports/float_remaining_interpreter.w

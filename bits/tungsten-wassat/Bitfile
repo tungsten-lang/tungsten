@@ -1,0 +1,8 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-wassat"
+version     "0.0.1"
+summary     "SAT solver that emits checkable UNSAT certificates"
+description "Native Tungsten CDCL SAT solver with two-watched propagation, first-UIP learning, EVSIDS branching, bounded search, and independently checkable hinted WRAT or raw DRAT refutations. Pair with tungsten-wrat, which deliberately shares no parser or checking code with the solver."
+license     "MIT"
+authors     ["Tungsten Language Project"]

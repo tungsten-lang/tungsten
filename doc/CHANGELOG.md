@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **Conditional annotated reassign keeps boxed variables boxed** — a
+  `## i64/u64` reassign of an existing parameter or boxed local (e.g.
+  inside one branch of an `if`) no longer retypes it to a raw machine
+  slot; the RHS keeps wrapping semantics but the result is boxed back.
+  Previously post-merge reads and inferred return types mixed NaN-boxed
+  and raw bits — silent wrong values at call boundaries.
+- **begin/rescue is a value expression in compiled code** — in value
+  position (method tail, case/if arm, assignment rhs) it now produces the
+  taken arm's last expression; both arms previously reached callers as
+  nil. `ensure` still runs for effect only. Matches the interpreter.
+- **Fused machine-int subscript reads AND writes** — `x = arr[i] ## u64`
+  and `arr[i] = x` (machine-int x) on untyped `:var` receivers lower to
+  raw runtime reads/writes for typed integer arrays: zero heap boxing
+  (previously one dead bignum box per read AND per write past 2^48 — the
+  chessbot 1 GB/s leak). Every other receiver keeps byte-identical
+  dynamic dispatch.
+- **u64×u64 multiply confirmed raw** — annotated u64 multiplies lower to a
+  raw wrapping `mul` in all positions; pinned by spec with xorshift64*
+  reference vectors.
+- Wide-arity (16-param) direct functions with in-body calls pinned by
+  spec; dynamic method dispatch keeps its documented 8-argument limit
+  (loud error, never corruption).
+
 - **`sleep()` works in compiled binaries** — bare `sleep(duration)` lowers
   to `__w_sleep`, which now exists in the runtime (Int/Float/Decimal
   seconds; `nil` blocks forever; returns the duration). Previously every

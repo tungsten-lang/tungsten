@@ -21,6 +21,7 @@
 use version
 use cnf
 use solver
+use preprocess
 
 -> wassat_print_usage
   << "Tungsten Wassat [WASSAT_VERSION] -- SAT solver with checkable proofs"
@@ -144,43 +145,89 @@ use solver
   cnf_text = read_file(input)
   raise "cannot read input formula '[input]'" if cnf_text == nil
   formula = wassat_parse_cnf(cnf_text)
-  s = Wassat.new(formula["nvars"], formula["clauses"], proof_mode, options["lookahead"])
+
+  # Preprocess once, above solver construction. The artifact carries the
+  # reduced clauses with their global proof ids, the elimination stack for
+  # model reconstruction, and the certificate prefix for every derivation.
+  t0 = ccall("__w_clock_ms")
+  pre = WassatPreprocess.new(formula["nvars"], formula["clauses"], proof_mode)
+  pre.enable_dual_emission if proof_mode == WASSAT_PROOF_WRAT && drat_out != nil
+  art = pre.run
+  pre_ms = ccall("__w_clock_ms") - t0
+  pstats = wassat_pre_stats_text(art["stats"], pre_ms)
+
+  if art["status"] == -1
+    # refuted during preprocessing; the prefix is the whole certificate
+    print("s UNSATISFIABLE\n")
+    << "c mode: [wassat_mode_of(options)]"
+    << "c conflicts: 0, decisions: 0"
+    << "c stats restarts=0 reduces=0 " + pstats
+    unless wrat_out == nil
+      wtext = "wrat 1\n" + art["wrat"].join("\n") + "\n"
+      if wrat_out == "-"
+        print(wtext)
+      else
+        raise "proof write failed at '[wrat_out]'" unless write_file(wrat_out, wtext)
+    unless drat_out == nil
+      dtext = art["drat"].empty? ? "" : art["drat"].join("\n") + "\n"
+      if drat_out == "-"
+        print(dtext)
+      else
+        raise "proof write failed at '[drat_out]'" unless write_file(drat_out, dtext)
+    return 0
+
+  s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, options["lookahead"])
+  s.seed_proof_ids(art["gids"], art["next_gid"])
 
   # File destinations stream during search so certificate memory stays flat;
   # `-` destinations render from the in-memory arrays after the fact. When
-  # both dialects are requested they are emitted natively in lockstep.
+  # both dialects are requested they are emitted natively in lockstep. The
+  # coordinator owns the certificate: the preprocessing prefix goes to each
+  # sink before the solver appends a single line.
   wrat_stream = nil
   wrat_stream = wrat_out unless wrat_out == nil || wrat_out == "-"
   drat_stream = nil
   drat_stream = drat_out unless drat_out == nil || drat_out == "-"
   s.stream_proofs(wrat_stream, drat_stream) unless wrat_stream == nil && drat_stream == nil
   s.enable_dual_drat if proof_mode == WASSAT_PROOF_WRAT && drat_out != nil
+  unless wrat_stream == nil
+    whead = "wrat 1\n"
+    whead = whead + art["wrat"].join("\n") + "\n" unless art["wrat"].empty?
+    raise "proof write failed at '[wrat_stream]'" unless wassat_append_text(wrat_stream, whead)
+    s.wrat_header_written
+  unless drat_stream == nil || art["drat"].empty?
+    dhead = art["drat"].join("\n") + "\n"
+    raise "proof write failed at '[drat_stream]'" unless wassat_append_text(drat_stream, dhead)
 
   result = s.solve_budget(options["conflicts"])
   # A run that did not end UNSAT truncates its sink destinations at once: a
   # partial refutation must never survive on disk, whatever happens later.
   s.abort_proof_sinks unless result["status"] == -1
 
-  # Output integrity: a model is verified against the ORIGINAL formula before
-  # anything is reported. A failing model is a solver bug and must surface as
-  # a hard error here, never as a wrong `v` line a harness might trust.
+  # Output integrity: the reconstructed model is verified against the
+  # ORIGINAL formula before anything is reported. A failing model is a
+  # solver or reconstruction bug and must surface as a hard error here,
+  # never as a wrong `v` line a harness might trust.
   if result["status"] == 1
+    result["model"] = wassat_reconstruct_model(art["stack"], result["model"], formula["nvars"])
     unless wassat_model_satisfies?(formula, result["model"])
       raise "internal error: model does not satisfy the input formula"
 
   print(wassat_result_text(result))
   << "c mode: [wassat_mode_of(options)]"
   << "c conflicts: [result["conflicts"]], decisions: [result["decisions"]]"
-  << "c stats restarts=[result["restarts"]] reduces=[result["reduces"]]"
+  << "c stats restarts=[result["restarts"]] reduces=[result["reduces"]] " + pstats
 
   if result["status"] == -1
     s.flush_proof_sinks
     unless wrat_out == nil
       if wrat_out == "-"
-        print(wassat_proof_text(result))
+        lines = wassat_concat_arrays(art["wrat"], result["proof"])
+        print("wrat 1\n" + lines.join("\n") + "\n")
     unless drat_out == nil
       if drat_out == "-"
-        print(wassat_drat_text(result))
+        dlines = wassat_concat_arrays(art["drat"], result["drat"])
+        print(dlines.empty? ? "" : dlines.join("\n") + "\n")
   0
 
 # Dispatch recognized command-line arguments. The executable entry point calls

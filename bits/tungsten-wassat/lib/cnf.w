@@ -71,6 +71,10 @@
           raise "invalid clause count '[parts[3]]'" unless wassat_unsigned_decimal?(parts[3])
           nvars = parts[2].to_i
           declared_clauses = parts[3].to_i
+          # A hostile header must fail loudly here, not OOM later when the
+          # solver sizes its per-variable arrays from the declaration.
+          raise "implausible variable count [nvars] in header" if nvars > 50000000
+          raise "implausible clause count [declared_clauses] in header" if declared_clauses > 200000000
           have_header = true
         else
           raise "missing p cnf header" unless have_header

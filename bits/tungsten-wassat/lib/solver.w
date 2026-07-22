@@ -480,6 +480,24 @@ WASSAT_PROOF_DRAT = 2
       @refuted = true if lits.empty?
     0
 
+  # Adopt a preprocessed artifact's proof identity: clause k of the reduced
+  # formula carries ids[k] in the certificate (surviving originals keep their
+  # input ids, preprocessing additions sit between them), and fresh
+  # derivations continue from next_gid.
+  -> seed_proof_ids(ids, next_gid)
+    i = 0
+    while i < ids.size
+      @gid[i] = ids[i]
+      i += 1
+    @next_gid = next_gid
+    0
+
+  # The coordinator already wrote the wrat header (with the preprocessing
+  # prefix); the sink must not emit a second one.
+  -> wrat_header_written
+    @wrat_header_done = true
+    0
+
   # ---- proof sinks ---------------------------------------------------------
 
   # Opt a proof stream into disk streaming. Lines then leave memory in

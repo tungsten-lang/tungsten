@@ -145,7 +145,21 @@ use solver
   raise "cannot read input formula '[input]'" if cnf_text == nil
   formula = wassat_parse_cnf(cnf_text)
   s = Wassat.new(formula["nvars"], formula["clauses"], proof_mode, options["lookahead"])
+
+  # File destinations stream during search so certificate memory stays flat;
+  # `-` destinations render from the in-memory arrays after the fact. When
+  # both dialects are requested they are emitted natively in lockstep.
+  wrat_stream = nil
+  wrat_stream = wrat_out unless wrat_out == nil || wrat_out == "-"
+  drat_stream = nil
+  drat_stream = drat_out unless drat_out == nil || drat_out == "-"
+  s.stream_proofs(wrat_stream, drat_stream) unless wrat_stream == nil && drat_stream == nil
+  s.enable_dual_drat if proof_mode == WASSAT_PROOF_WRAT && drat_out != nil
+
   result = s.solve_budget(options["conflicts"])
+  # A run that did not end UNSAT truncates its sink destinations at once: a
+  # partial refutation must never survive on disk, whatever happens later.
+  s.abort_proof_sinks unless result["status"] == -1
 
   # Output integrity: a model is verified against the ORIGINAL formula before
   # anything is reported. A failing model is a solver bug and must surface as
@@ -160,18 +174,13 @@ use solver
   << "c stats restarts=[result["restarts"]] reduces=[result["reduces"]]"
 
   if result["status"] == -1
+    s.flush_proof_sinks
     unless wrat_out == nil
-      text = wassat_proof_text(result)
       if wrat_out == "-"
-        print(text)
-      else
-        raise "proof write failed at '[wrat_out]'" unless write_file(wrat_out, text)
+        print(wassat_proof_text(result))
     unless drat_out == nil
-      dtext = wassat_drat_text(result)
       if drat_out == "-"
-        print(dtext)
-      else
-        raise "proof write failed at '[drat_out]'" unless write_file(drat_out, dtext)
+        print(wassat_drat_text(result))
   0
 
 # Dispatch recognized command-line arguments. The executable entry point calls

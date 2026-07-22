@@ -88,6 +88,23 @@ WASSAT_PROOF_DRAT = 2
     @ok = true
     @terminal_status = 0
 
+    # Global proof-id counter. Without preprocessing every stored clause gets
+    # id `ci + 1` exactly as before; once a preprocessed artifact supplies
+    # non-contiguous ids, hints must translate through @gid rather than assume
+    # a constant offset from the clause index.
+    @next_gid = 1
+
+    # Streaming proof sinks. nil means the in-memory arrays (library mode);
+    # a path streams proof lines to disk in bounded chunks so certificate
+    # memory stays flat no matter how long the refutation runs.
+    @wrat_sink = nil
+    @drat_sink = nil
+    @dual_drat = false           # WRAT mode also emits plain DRAT lines
+    @wrat_pend = []
+    @drat_pend = []
+    @pend_bytes = 0
+    @wrat_header_done = false
+
     # Search-schedule state belongs to the solver, not to one budget slice.
     # Keeping it here makes `solve_budget` continuation observationally the
     # same search as one uninterrupted solve (apart from where control returns
@@ -123,6 +140,7 @@ WASSAT_PROOF_DRAT = 2
     @clen = i64[maxcl]
     @alive = i64[maxcl]
     @clbd = i64[maxcl]           # 0 = original clause (never deleted)
+    @gid = i64[maxcl]            # clause index -> global proof id
     @ccap = maxcl
     @ncl = 0
 
@@ -174,6 +192,7 @@ WASSAT_PROOF_DRAT = 2
       cl = i64[ncap]
       al = i64[ncap]
       lb = i64[ncap]
+      gd = i64[ncap]
       wn = i64[2 * ncap]
       wb = i64[2 * ncap]
       i = 0
@@ -182,6 +201,7 @@ WASSAT_PROOF_DRAT = 2
         cl[i] = @clen[i]
         al[i] = @alive[i]
         lb[i] = @clbd[i]
+        gd[i] = @gid[i]
         i += 1
       i = 0
       while i < 2 * @ncl
@@ -197,6 +217,7 @@ WASSAT_PROOF_DRAT = 2
       @clen = cl
       @alive = al
       @clbd = lb
+      @gid = gd
       @wnext = wn
       @wblock = wb
       @ccap = ncap
@@ -224,6 +245,8 @@ WASSAT_PROOF_DRAT = 2
     @clen[ci] = n
     @alive[ci] = 1
     @clbd[ci] = 0
+    @gid[ci] = @next_gid
+    @next_gid += 1
     i = 0
     while i < n
       @arena[@asize] = lits_arr[i]
@@ -423,10 +446,10 @@ WASSAT_PROOF_DRAT = 2
           unless sat
             if unassigned == 0
               conflict = true
-              record.push(ci + 1)
+              record.push(@gid[ci])
             elsif unassigned == 1
               @rassign[unit.abs] = unit > 0 ? 1 : -1
-              record.push(ci + 1)
+              record.push(@gid[ci])
               changed = true
           ci += 1
 
@@ -443,17 +466,84 @@ WASSAT_PROOF_DRAT = 2
       # failure to reconstruct its chain therefore indicates a solver/proof
       # bug and must stop certificate production loudly.
       raise "internal proof replay failed for learned clause: [lits.join(" ")]" if hints.empty?
-      cid = @ncl + 1                 # ids are 1-based, matching input order
+      cid = @next_gid                # the id the upcoming store will assign
       line = "[cid] " + lits.join(" ")
       line = "[cid]" if lits.empty?
-      @proof.push(line + " 0 " + hints.join(" ") + " 0")
+      self.log_wrat_line(line + " 0 " + hints.join(" ") + " 0")
+      self.log_drat_line(lits.empty? ? "0" : lits.join(" ") + " 0") if @dual_drat
       @refuted = true if lits.empty?
     elsif @proof_mode == WASSAT_PROOF_DRAT
       # First-UIP clauses are RUP, hence also valid DRAT additions. Recording
       # their literals directly avoids the whole-database propagation replay
       # required to construct WRAT hints.
-      @drat.push(lits.empty? ? "0" : lits.join(" ") + " 0")
+      self.log_drat_line(lits.empty? ? "0" : lits.join(" ") + " 0")
       @refuted = true if lits.empty?
+    0
+
+  # ---- proof sinks ---------------------------------------------------------
+
+  # Opt a proof stream into disk streaming. Lines then leave memory in
+  # bounded chunks instead of accumulating for the whole run; the destination
+  # must already be truncated (the CLI does this before solving). nil keeps a
+  # stream in its in-memory array.
+  -> stream_proofs(wrat_path, drat_path)
+    @wrat_sink = wrat_path
+    @drat_sink = drat_path
+    0
+
+  # In WRAT mode, additionally emit each step in plain DRAT. Emitting both
+  # natively at log time is what keeps the two dialects in lockstep once
+  # deletions appear: WRAT deletes by clause id, DRAT by literal content, and
+  # only the emitter has both on hand.
+  -> enable_dual_drat
+    @dual_drat = true
+    0
+
+  -> log_wrat_line(line)
+    if @wrat_sink == nil
+      @proof.push(line)
+    else
+      unless @wrat_header_done
+        @wrat_pend.push("wrat 1\n")
+        @pend_bytes += 7
+        @wrat_header_done = true
+      @wrat_pend.push(line + "\n")
+      @pend_bytes += line.size + 1
+      self.flush_proof_sinks if @pend_bytes > 262144
+    0
+
+  -> log_drat_line(line)
+    if @drat_sink == nil
+      @drat.push(line)
+    else
+      @drat_pend.push(line + "\n")
+      @pend_bytes += line.size + 1
+      self.flush_proof_sinks if @pend_bytes > 262144
+    0
+
+  # Write pending chunks through the checked append primitive. A failed or
+  # short write surfaces here, at fault time, not as a checker rejection two
+  # commands later.
+  -> flush_proof_sinks
+    unless @wrat_pend.empty?
+      text = @wrat_pend.join("")
+      raise "proof write failed at '[@wrat_sink]'" unless wassat_append_text(@wrat_sink, text)
+      @wrat_pend = []
+    unless @drat_pend.empty?
+      dtext = @drat_pend.join("")
+      raise "proof write failed at '[@drat_sink]'" unless wassat_append_text(@drat_sink, dtext)
+      @drat_pend = []
+    @pend_bytes = 0
+    0
+
+  # Truncate sink destinations. A SAT or UNKNOWN outcome must not leave a
+  # partial refutation on disk masquerading as evidence for this formula.
+  -> abort_proof_sinks
+    @wrat_pend = []
+    @drat_pend = []
+    @pend_bytes = 0
+    z = write_file(@wrat_sink, "") unless @wrat_sink == nil
+    z = write_file(@drat_sink, "") unless @drat_sink == nil
     0
 
   # Log the learned clause only when a proof was requested. Materialising the
@@ -688,7 +778,7 @@ WASSAT_PROOF_DRAT = 2
     proof = []
     drat = []
     proof = @proof.dup if unsat && @proof_mode == WASSAT_PROOF_WRAT
-    drat = @drat.dup if unsat && @proof_mode == WASSAT_PROOF_DRAT
+    drat = @drat.dup if unsat && (@proof_mode == WASSAT_PROOF_DRAT || @dual_drat)
     { "sat": sat, "unsat": unsat, "complete": status != 0,
       "status": status, "model": model, "proof": proof, "drat": drat,
       "proof_mode": @proof_mode,
@@ -1108,13 +1198,19 @@ WASSAT_PROOF_DRAT = 2
   s = Wassat.new(f["nvars"], f["clauses"], proof_mode, lookahead)
   s.solve_budget(max_conflicts)
 
-# Render a proof as .wrat text (hinted, with header).
+# Append text to a file through the runtime primitive, which reports short
+# writes and close failures. Compiled path only: the embedded interpreter does
+# not whitelist this ccall, and library/spec callers use the in-memory arrays.
+-> wassat_append_text(path, text)
+  ccall("__w_append_file", path, text)
+
+# Render a proof as .wrat text (hinted, with header). Joined in one pass:
+# line-at-a-time concatenation re-copied the accumulated prefix per line and
+# went quadratic on long refutations.
 -> wassat_proof_text(result)
   out = ""
   if result["status"] == -1 && result["complete"] == true && result["proof_mode"] == WASSAT_PROOF_WRAT && !result["proof"].empty?
-    out = "wrat 1\n"
-    result["proof"].each -> (line)
-      out = out + line + "\n"
+    out = "wrat 1\n" + result["proof"].join("\n") + "\n"
   out
 
 # Render the same proof as plain .drat: drop the clause id and the hint
@@ -1126,20 +1222,25 @@ WASSAT_PROOF_DRAT = 2
   if result["status"] == -1 && result["complete"] == true && valid_mode
     raw = result["drat"]
     unless raw == nil || raw.empty?
-      raw.each -> (line)
-        out = out + line + "\n"
+      out = raw.join("\n") + "\n"
     else
       # A hinted solve can still be rendered for DRAT interoperability by
-      # dropping its ids and hints. This is not used by the cheap raw mode.
+      # dropping its ids and hints. Addition steps only: a WRAT deletion
+      # names clause ids, whose literal content is not recoverable from the
+      # proof text alone, which is why deletion-bearing runs emit both
+      # dialects natively at log time instead of converting after the fact.
+      lines = []
       result["proof"].each -> (line)
         toks = wassat_tokenize(line)
+        raise "cannot render WRAT deletion step as DRAT after the fact: [line]" if toks.size > 1 && toks[1] == "d"
         lits = []
         i = 1
         while i < toks.size
           break if toks[i] == "0"
           lits.push(toks[i])
           i += 1
-        out = out + (lits.empty? ? "0\n" : lits.join(" ") + " 0\n")
+        lines.push(lits.empty? ? "0" : lits.join(" ") + " 0")
+      out = lines.join("\n") + "\n" unless lines.empty?
   out
 
 # Render a solver result in DIMACS competition output format.

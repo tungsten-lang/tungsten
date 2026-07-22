@@ -4,11 +4,12 @@
 #
 # Plants, in order: psi is verified numerically as an automorphism on
 # Strassen and naive <2,2,2> (image gates exactly); the census finds
-# Strassen = 3 pairs + 1 fixed and naive = 2 pairs + 4 fixed; the (2,4)
-# rank-8 and (3,1) rank-7 existence cells are SAT with gated witnesses
-# (Strassen itself is a (3,1) witness, so SAT is guaranteed); the (3,0)
-# rank-6 cell is a planted UNSAT (rank 6 < R(2x2) = 7); and the <2,5,2>
-# rank-17/18 target cells run as budget-bounded probes with honest labels.
+# Strassen = 2 pairs + 3 fixed and naive = 2 pairs + 4 fixed; the (2,4)
+# rank-8 and (2,3) rank-7 existence cells are SAT with gated witnesses,
+# while the fixed-cell rank consequence closes (3,1).  The (3,0) rank-6
+# cell is the independent planted UNSAT (rank 6 < R(2x2) = 7); and the
+# <2,5,2> rank-17/18 target cells run as budget-bounded probes with honest
+# labels.
 
 use flipfleet_psi_quotient
 
@@ -42,6 +43,29 @@ use flipfleet_psi_quotient
   ws[6] = 1
   7
 
+-> ffpst_pair_psi_mask(mask, n, m) (i64 i64 i64) i64
+  width = 2 * n * m + n * n ## i64
+  out = 0 ## i64
+  pos = 0 ## i64
+  while pos < width
+    if ((mask >> pos) & 1) == 1
+      mapped = ffpsi_pair_psi_var(1, pos, n, m) - 1 ## i64
+      out = out | (1 << mapped)
+    pos += 1
+  out
+
+-> ffpst_mask_lex_le(left, right, width) (i64 i64 i64) i64
+  pos = 0 ## i64
+  while pos < width
+    a = (left >> pos) & 1 ## i64
+    b = (right >> pos) & 1 ## i64
+    if a < b
+      return 1
+    if a > b
+      return 0
+    pos += 1
+  1
+
 su = i64[16]
 sv = i64[16]
 sw = i64[16]
@@ -61,6 +85,33 @@ while i < 7
 z = ffpst_expect("psi image of strassen exact", ffpsi_verify_rect(iu, iv, iw, 7, 2, 2, 2) == 1)
 z = ffpst_expect("psi fixes M1", ffpsi_is_fixed(9, 9, 9, 2, 2) == 1)
 z = ffpst_expect("psi involution", ffpsi_apply_u(iu[3], iv[3], iw[3], 2, 2) == su[3] && ffpsi_apply_v(iu[3], iv[3], iw[3], 2, 2) == sv[3] && ffpsi_apply_w(iu[3], iv[3], iw[3], 2, 2) == sw[3])
+z = ffpst_expect("coefficient quotient orbit counts", ffpsi_cell_orbit_count(2, 2) == 36 && ffpsi_cell_orbit_count(2, 5) == 210)
+cell = 0 ## i64
+while cell < 400
+  mate = ffpsi_cell_mate(cell, 2, 5) ## i64
+  z = ffpst_expect("coefficient action is involutive", mate >= 0 && mate < 400 && ffpsi_cell_mate(mate, 2, 5) == cell)
+  cell += 1
+
+# The primitive-variable orientation map is the same involution as the term
+# action.  Exhaustive 2x2 masks establish that at least one orientation is
+# canonical, and that both are admitted exactly for self-fixed generators.
+z = ffpst_expect("pair psi map endpoints", ffpsi_pair_psi_var(100, 0, 2, 5) == 110 && ffpsi_pair_psi_var(100, 9, 2, 5) == 119)
+z = ffpst_expect("pair psi map swaps factors", ffpsi_pair_psi_var(100, 10, 2, 5) == 100 && ffpsi_pair_psi_var(100, 19, 2, 5) == 109)
+z = ffpst_expect("pair psi map transposes w", ffpsi_pair_psi_var(100, 20, 2, 5) == 120 && ffpsi_pair_psi_var(100, 21, 2, 5) == 122 && ffpsi_pair_psi_var(100, 22, 2, 5) == 121 && ffpsi_pair_psi_var(100, 23, 2, 5) == 123)
+z = ffpst_expect("reduced orientation widths", ffpsi_pair_orientation_width(2, 2) == 5 && ffpsi_pair_orientation_width(2, 5) == 11)
+pos = 0 ## i64
+while pos < 24
+  mapped = ffpsi_pair_psi_var(100, pos, 2, 5) - 100 ## i64
+  z = ffpst_expect("pair psi variable map involution", mapped >= 0 && mapped < 24 && ffpsi_pair_psi_var(100, mapped, 2, 5) == 100 + pos)
+  pos += 1
+mask = 0 ## i64
+while mask < 4096
+  psi_mask = ffpst_pair_psi_mask(mask, 2, 2) ## i64
+  forward = ffpst_mask_lex_le(mask, psi_mask, 12) ## i64
+  reverse = ffpst_mask_lex_le(psi_mask, mask, 12) ## i64
+  z = ffpst_expect("one pair orientation is canonical", forward == 1 || reverse == 1)
+  z = ffpst_expect("self-fixed pair admits both orientations", (forward == 1 && reverse == 1) == (mask == psi_mask))
+  mask += 1
 
 # --- census ------------------------------------------------------------------------
 # By hand: M1 = (9,9,9), M6 = (5,3,8), M7 = (10,12,1) are psi-fixed;
@@ -98,6 +149,34 @@ nw[7] = 8
 groups = ffpsi_census(nu, nv, nw, 8, 2, 2, profile)
 z = ffpst_expect("naive census", profile[0] == 2 && profile[1] == 4 && profile[2] == 1)
 
+# In-process SBP accounting: two reduced pair-orientation chains, one pair
+# sorting chain, and two fixed sorting chains use 33 fresh prefix variables
+# and 198 clauses.  The whole-matmul fixed-cell consequences add nine XOR
+# variables and 45 Tseitin/guard clauses; the anchor adds exactly the positive
+# U(0,0) unit of the last sorted fixed block and no auxiliary.
+sat_sbp = i64[ffcdcl_state_size(4096, 200000)]
+z = ffpst_expect("SBP accounting init", ffcdcl_init(sat_sbp, 4096, 5499) == 1)
+z = ffpst_expect("SBP accounting encode", ffpsi_encode(sat_sbp, 2, 2, 2, 3) == 1)
+top_before_sbp = ffcdcl_top_var(sat_sbp) ## i64
+clauses_before_sbp = ffcdcl_clause_count(sat_sbp) ## i64
+z = ffpst_expect("whole-matmul fixed-cell rank consequences", ffpsi_encode_matmul_rank_consequences(sat_sbp, 2, 2, 2, 3) == 1)
+z = ffpst_expect("fixed-cell consequence variable count", ffcdcl_top_var(sat_sbp) - top_before_sbp == 9)
+z = ffpst_expect("fixed-cell consequence clause count", ffcdcl_clause_count(sat_sbp) - clauses_before_sbp == 45)
+top_before_sbp = ffcdcl_top_var(sat_sbp)
+clauses_before_sbp = ffcdcl_clause_count(sat_sbp)
+z = ffpst_expect("orientation and sorting encode", ffpsi_encode_sbps(sat_sbp, 2, 2, 2, 3) == 1)
+z = ffpst_expect("SBP fresh auxiliary count", ffpsi_sbp_aux_count(2, 2, 2, 3) == 33 && ffcdcl_top_var(sat_sbp) - top_before_sbp == 33)
+z = ffpst_expect("SBP clause count", ffcdcl_clause_count(sat_sbp) - clauses_before_sbp == 198)
+top_before_anchor = ffcdcl_top_var(sat_sbp) ## i64
+clauses_before_anchor = ffcdcl_clause_count(sat_sbp) ## i64
+z = ffpst_expect("whole-matmul coordinate anchor", ffpsi_encode_matmul_anchor(sat_sbp, 2, 2, 2, 3) == 1)
+z = ffpst_expect("anchor is last fixed U00", ffpsi_fixed_base(2, 2, 4, 4, 4) == 41 && ffcdcl_top_var(sat_sbp) == top_before_anchor && ffcdcl_clause_count(sat_sbp) == clauses_before_anchor + 1)
+anchor_neg = i64[1]
+anchor_neg[0] = 2 * 41 + 1
+z = ffpst_expect("anchor negative control clause", ffcdcl_add_clause(sat_sbp, anchor_neg, 1) == 1)
+no_assumptions = i64[1]
+z = ffpst_expect("anchor negative control UNSAT", ffcdcl_solve(sat_sbp, no_assumptions, 0, 1000) == 0 - 1)
+
 # --- existence cells for <2,2,2> ------------------------------------------------------
 out_u = i64[32]
 out_v = i64[32]
@@ -108,7 +187,8 @@ z = ffpst_expect("(2,4) rank-8 cell SAT", meta[2] == 1)
 z = ffpst_expect("(2,4) witness gates", meta[6] == 1 && rank8 >= 7 && rank8 <= 8)
 << "PSI_CELL c=2 f=4 rank=" + rank8.to_s() + " vars=" + meta[0].to_s() + " clauses=" + meta[1].to_s() + " conflicts=" + meta[3].to_s() + " ms=" + meta[7].to_s()
 
-# Strassen itself witnesses (c=2, f=3), so this cell is SAT by planting.
+# Strassen itself witnesses (c=2, f=3), so this remains a planted SAT control
+# after pair orientation, pair/fixed sorting, and the coordinate anchor.
 rank7 = ffpsi_solve(2, 2, 2, 3, 400000, 5503, out_u, out_v, out_w, meta) ## i64
 z = ffpst_expect("(2,3) rank-7 cell SAT", meta[2] == 1)
 z = ffpst_expect("(2,3) witness gates at 7", meta[6] == 1 && rank7 == 7)
@@ -116,8 +196,8 @@ cens = ffpsi_census(out_u, out_v, out_w, 7, 2, 2, profile) ## i64
 z = ffpst_expect("(2,3) witness is psi-symmetric", profile[2] == 1 && profile[1] >= 1)
 << "PSI_CELL c=2 f=3 rank=" + rank7.to_s() + " pairs=" + profile[0].to_s() + " fixed=" + profile[1].to_s() + " conflicts=" + meta[3].to_s() + " ms=" + meta[7].to_s()
 
-# (3,1) is an honest probe: a rank-7 witness with only one fixed term may
-# or may not exist.
+# (3,1) is impossible: one fixed W diagonal cannot span the two-dimensional
+# fixed-cell target.
 rank7b = ffpsi_solve(2, 2, 3, 1, 200000, 5504, out_u, out_v, out_w, meta) ## i64
 label31 = "indeterminate" ## String
 if meta[2] == 1
@@ -129,6 +209,8 @@ if rank7b > 0
   z = ffpst_expect("(3,1) hit gates", meta[6] == 1 && rank7b == 7)
 << "PSI_CELL c=3 f=1 verdict=" + label31 + " rank=" + rank7b.to_s() + " conflicts=" + meta[3].to_s() + " ms=" + meta[7].to_s()
 
+# The corresponding rank-6 cell remains a planted UNSAT control after the
+# reduced pair-orientation leaders; f=0 also checks the no-anchor boundary.
 rank6 = ffpsi_solve(2, 2, 3, 0, 400000, 5505, out_u, out_v, out_w, meta) ## i64
 z = ffpst_expect("(3,0) rank-6 cell UNSAT", rank6 == 0 && meta[2] == 0 - 1)
 << "PSI_CELL c=3 f=0 verdict=certified-unsat conflicts=" + meta[3].to_s() + " ms=" + meta[7].to_s()

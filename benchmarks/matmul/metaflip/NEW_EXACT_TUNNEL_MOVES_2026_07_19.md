@@ -8,14 +8,14 @@ before they reach production.
 
 Every retained endpoint below is checked by an exact local tensor gate.  Real
 matrix-multiplication endpoints are rebuilt and independently checked against
-all tensor coefficients.  None of these prototypes is scheduled by Metaflip
-yet, and no TUI code was changed.
+all tensor coefficients.  The fixed-rank pocket is now one low-cadence CPU
+racer arm; the other prototypes remain unscheduled.  No TUI code was changed.
 
 ## Decision summary
 
 | Move | Strongest evidence | Decision |
 |---|---|---|
-| fixed-rank flip-pocket closure | 102 distinct real C013 relations of size 3--8; all close in 2--5 flips, and 30 improving orientations require leaving the default density-slack envelope | best CPU-resident candidate; run a matched campaign before promotion |
+| fixed-rank flip-pocket closure | autonomous C013 selector: greedy strict-gain rescans converge d3554→d3496 in seven tickets; depth-four closures cross `+10/+9` barriers and d3496 wins 24/24 matched trials against root/one-ticket controls | promoted as one bounded, adaptive CPU-racer arm |
 | coupled multi-codeword bucket kernel | planted 9→7 where either constituent stays at 9; two independently full-gated rank-93 5x5 doors at support distance 10 and 14 | best algebraic GPU candidate; add a sparse experimental sampler only after continuation scoring |
 | kernel-line fiber completion | exact rank-6 endpoint at distance 12 outside an exhaustively enumerated three-state ordinary-flip component; every proper lift subset pays +1/+2 rank | genuine component bridge; keep in the lab until a rank-metric real-frontier search replaces random masks |
 | paired nonzero-defect cancellation | exact planted 6→4 and a fast dual-hash join; 99.2M naive real proposals produce no hash hit | identity is useful, current proposal generator is not; keep offline |
@@ -60,16 +60,71 @@ by `DSLACK=4`—its one uphill edge is only `+1`—so the regression makes only 
 true depth/monotonicity claim.  It freezes the other thirteen terms, rebuilds
 the full rank-18 scheme, and passes the complete rectangular tensor gate.
 
-The prototype is an oracle-window closure: two known exact endpoints define
-the pocket, after which the BFS rediscovers the word without seeing its path.
-Production still needs the proposed support-overlap pocket selector and a
-ticket-to-hit benchmark; the corpus result proves the closure is useful, not
-that autonomous selection is already solved.
+The follow-up implementation removes the endpoint oracle.  A ticket is one
+equal-factor pair from the live exact scheme.  The search starts with those two
+terms and may recruit a frozen term only when an ordinary legal flip connects
+it to a live pocket term.  Terms and recruited-source sets are canonicalized,
+duplicate states are hash-indexed, and collisions with the still-frozen scheme
+are rejected.  Thus the endpoint and even the final pocket size are discovered
+from factor overlap; no target support or archived flip recipe is supplied.
 
-Recommended first production experiment: one low-cadence coordinator CPU
-resident, rotating `k={5,6,8}`, depth at most five, and node caps 128/128/256.
-Admit density wins and rank drops; archive neutral endpoints sparsely.  Target
-less than one percent aggregate CPU displacement.
+On the packaged C013 rank-247/d3554 door, 43 tickets produce nine improving
+endpoints.  Six are also reachable with the normal `DSLACK=4` edge bound; three
+are genuine barrier tunnels.  All nine materialized schemes pass the complete
+7x7 tensor gate.  The representative autonomous ticket 8 retains only 19
+states from 36,000 factor-overlap proposals and finds this four-flip path:
+
+```text
+whole-scheme density: 3554 -> 3564 -> 3564 -> 3555 -> 3546
+shared-factor axes:       W       V       V       W
+pocket terms:             2       2       3       3       3
+```
+
+Its maximum uphill edge is `+10`, so the same search with `DSLACK=4` retains
+only its root.  The saved d3546 endpoint is at support distance six from C013,
+at distance 494 from the d3094 fleet leader, and has SHA-256
+`f59cac07c5497fe5ebe18f019151f8951f15b0c97ab253f915b7c0c5a66a61d3`.
+
+The decisive test was continuation rather than endpoint density.  Twenty-four
+matched trials gave the original C013 door, the d3546 pocket child, and the
+strongest one-flip `DSLACK=4` child one million ordinary moves each.  The pocket
+child won 24/24 trials against both controls.  Final minimum densities were
+3510/3502/3510 and integer-average densities were 3513/3505/3513 respectively.
+The comparison consumed 72 million ordinary moves in about 5.98 seconds.
+
+The selector is useful but not complete.  It finds six density improvements
+among the 16 tickets on the rectangular 2x2x5 d92 door, with best gain six,
+but none reconstructs the known oracle-selected d84 pocket.  Representative
+2x2, 3x3, 4x4, 5x5, 6x6, and the d3094 7x7 leader show no autonomous gain at
+the tested bounds.  This is why production gives the move one adaptive CPU
+racer arm rather than a permanent hot-path share.
+
+The follow-up word audit showed that one random ticket leaves substantial
+deterministic value on the table. Repeated current ordinal 1 stops at d3524,
+whereas complete strict-gain rescans converge in seven adopted tickets:
+
+```text
+3554 -> 3544 -> 3534 -> 3524 -> 3514 -> 3506 -> 3498 -> 3496
+ticket     1      1      1      3      4     42      7
+gain      10     10     10     10      8      8      2
+```
+
+The gain-eight tickets have local depth four and maximum uphill edges `+10`
+and `+9`. The final complete scan has no strict gain; there is no cycle. The
+endpoint is support-distance 28 from C013. A target-free scan from d3546
+converges to the same canonical term set. Twenty-four matched million-move
+trials give d3496 all 24 wins against both C013 and its best one-ticket child;
+minimum/average final density is 3492/3495 versus 3510--3511/3513.
+
+The resident arm therefore runs a bounded productive closure at lease start.
+It first consumes up to four ordinal-1 prefix attempts, then performs at most
+five complete strict-gain rescans, with at most eight adoptions and 64 tickets
+per round. The prefix cuts C013 work from 50,740,254 to 31,614,912 proposals
+without changing d3496. Every ticket retains the original pocket-size-five,
+depth-five, 512-state, and `+12` edge bounds. Both source and every endpoint
+pass the complete exact gate. Invalid bounds, collisions, misses, and rejected
+endpoints fail closed. Scheduler telemetry charges all pocket proposals to arm
+exposure and attributes setup gain before ordinary continuation reward.
 
 ## 2. Coupled multi-codeword bucket-kernel descent
 

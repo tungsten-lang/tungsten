@@ -13,7 +13,7 @@ use ../lib/metaflip/paths
 failures = 0 ## i64
 
 -> package_expect(label, condition) (String bool) i64
-  if condition == 0
+  if !condition
     << "FAIL " + label
     return 1
   0
@@ -41,9 +41,14 @@ failures += package_expect("229 preserves R/R+1/R+2 doors", ffrp_frontier_seed_c
 failures += package_expect("229 rank-debt doors are packaged", read_file(runtime_root + "/" + ffrp_frontier_seed_rel(2, 2, 9, 3)) != nil && read_file(runtime_root + "/" + ffrp_frontier_seed_rel(2, 2, 9, 4)) != nil)
 package_sums = read_file(runtime_root + "/SHA256SUMS")
 failures += package_expect("229 rank-debt doors are checksummed", package_sums != nil && package_sums.include?("matmul_2x2x9_rank33_d159_isotropy_split_plus1_gf2.txt") && package_sums.include?("matmul_2x2x9_rank34_d165_isotropy_split_plus2_gf2.txt"))
+failures += package_expect("225 keeps the AWS disjoint archive door", ffrp_frontier_seed_count(2, 2, 5) == 6 && ffrp_frontier_seed_rel(2, 2, 5, 5).ends_with?("matmul_2x2x5_rank18_d141_peterson_2026_aws_disjoint_gf2.txt") && read_file(runtime_root + "/" + ffrp_frontier_seed_rel(2, 2, 5, 5)) != nil)
+failures += package_expect("334 keeps the AWS disjoint archive door", ffrp_frontier_seed_count(3, 3, 4) == 4 && ffrp_frontier_seed_rel(3, 3, 4, 1).ends_with?("matmul_3x3x4_rank29_d249_peterson_2026_aws_disjoint_gf2.txt") && read_file(runtime_root + "/" + ffrp_frontier_seed_rel(3, 3, 4, 1)) != nil)
 failures += package_expect("344 d280 is the packaged default", ffrp_seed_rel(3, 4, 4).ends_with?("matmul_3x4x4_rank38_d280_live_density_leader_gf2.txt"))
-failures += package_expect("344 preserves R/R+1/R+2 doors", ffrp_frontier_seed_count(3, 4, 4) == 4 && ffrp_frontier_seed_rel(3, 4, 4, 1).ends_with?("matmul_3x4x4_rank38_gf2.txt") && ffrp_frontier_seed_rel(3, 4, 4, 2).include?("rank39_peterson_2026_isotropy_split_plus1") && ffrp_frontier_seed_rel(3, 4, 4, 3).include?("rank40_peterson_2026_isotropy_split_plus2"))
+failures += package_expect("344 preserves R/R+1/R+2 and AWS doors", ffrp_frontier_seed_count(3, 4, 4) == 5 && ffrp_frontier_seed_rel(3, 4, 4, 1).ends_with?("matmul_3x4x4_rank38_gf2.txt") && ffrp_frontier_seed_rel(3, 4, 4, 2).ends_with?("matmul_3x4x4_rank38_d310_peterson_2026_aws_disjoint_gf2.txt") && ffrp_frontier_seed_rel(3, 4, 4, 3).include?("rank39_peterson_2026_isotropy_split_plus1") && ffrp_frontier_seed_rel(3, 4, 4, 4).include?("rank40_peterson_2026_isotropy_split_plus2"))
 failures += package_expect("344 d280 seed is packaged", read_file(runtime_root + "/" + ffrp_seed_rel(3, 4, 4)) != nil)
+near7 = ffp_near_seed_paths(7, 1)
+failures += package_expect("7x7 +1 shoulders are packaged", near7.size() == 2 && near7[0].ends_with?("matmul_7x7_rank248_d2946_live_density_leader_gf2.txt") && near7[1].ends_with?("matmul_7x7_rank248_d3092_aws_near1_local_gf2.txt") && read_file(runtime_root + "/" + near7[0]) != nil && read_file(runtime_root + "/" + near7[1]) != nil)
+failures += package_expect("AWS campaign promotions are checksummed", package_sums != nil && package_sums.include?("matmul_2x2x5_rank18_d141_peterson_2026_aws_disjoint_gf2.txt") && package_sums.include?("matmul_3x3x4_rank29_d249_peterson_2026_aws_disjoint_gf2.txt") && package_sums.include?("matmul_3x4x4_rank38_d310_peterson_2026_aws_disjoint_gf2.txt") && package_sums.include?("matmul_7x7_rank248_d2946_live_density_leader_gf2.txt") && package_sums.include?("matmul_7x7_rank248_d3092_aws_near1_local_gf2.txt"))
 failures += package_expect("456 d906 is the packaged default", ffrp_seed_rel(4, 5, 6).ends_with?("matmul_4x5x6_rank90_d906_rect_portfolio_gf2.txt"))
 failures += package_expect("456 preserves three doors", ffrp_frontier_seed_count(4, 5, 6) == 3 && ffrp_frontier_seed_rel(4, 5, 6, 1).ends_with?("matmul_4x5x6_rank90_d907_gl_frontier_gf2.txt") && ffrp_frontier_seed_rel(4, 5, 6, 2).ends_with?("matmul_4x5x6_rank90_catalog_gf2.txt"))
 failures += package_expect("456 d906 seed is packaged", read_file(runtime_root + "/" + ffrp_seed_rel(4, 5, 6)) != nil)
@@ -84,7 +89,11 @@ failures += package_expect("456 GPU masks and exact gate are packaged", source45
 failures += package_expect("457 wide GPU geometry is packaged", ffrgb_geometry_valid(4, 5, 7) == 1 && ffrgb_cap(4, 5, 7) == 168 && ffrgb_wpg(4, 5, 7) == 8 && ffrgb_mask_bytes(4, 5, 7) == 8 && ffrgb_shared_bytes(4, 5, 7) == 32256)
 failures += package_expect_rect_partner_guard(runtime_root, "457")
 source457 = read_file(ffrgb_source_path(runtime_root, 4, 5, 7))
-failures += package_expect("457 full-width masks and exact gate are packaged", source457 != nil && source457.include?("## i64[]: work_us") && source457.include?("gpu.shared_i64(1344)") && source457.include?("sample2 = state ## u32") && source457.include?("u1 = u1 & 1048575") && source457.include?("u1 = u1 & 34359738367") && source457.include?("u1 = u1 & 268435455") && source457.include?("metal_buffer_write_i64(seed_us") && source457.include?("metal_buffer_read_i64(best_us") && source457.include?("while ai < ab") && source457.include?("while bi < bb") && source457.include?("while ci < cb") && source457.include?("if got != want"))
+failures += package_expect("457 full-width masks and exact gate are packaged", source457 != nil && source457.include?("## i64[]: work_us") && source457.include?("gpu.shared_i64(1344)") && source457.include?("sample2 = (state ^ wide_salt) ## u32") && source457.include?("u1 = u1 & 1048575") && source457.include?("u1 = u1 & 34359738367") && source457.include?("u1 = u1 & 268435455") && source457.include?("metal_buffer_write_i64(seed_us") && source457.include?("metal_buffer_read_i64(best_us") && source457.include?("while ai < ab") && source457.include?("while bi < bb") && source457.include?("while ci < cb") && source457.include?("if got != want"))
+failures += package_expect("467 wide GPU geometry is packaged", ffrgb_geometry_valid(4, 6, 7) == 1 && ffrgb_cap(4, 6, 7) == 168 && ffrgb_wpg(4, 6, 7) == 8 && ffrgb_mask_bytes(4, 6, 7) == 8 && ffrgb_shared_bytes(4, 6, 7) == 32256)
+failures += package_expect_rect_partner_guard(runtime_root, "467")
+source467 = read_file(ffrgb_source_path(runtime_root, 4, 6, 7))
+failures += package_expect("467 full-width masks and exact gate are packaged", source467 != nil && source467.include?("## i64[]: work_us") && source467.include?("gpu.shared_i64(1344)") && source467.include?("sample2 = (state ^ wide_salt) ## u32") && source467.include?("u1 = (((u1 & 1023) << 32) ^ (sample2 ## i64)) & 4398046511103") && source467.include?("u1 = u1 & 16777215") && source467.include?("u1 = u1 & 4398046511103") && source467.include?("u1 = u1 & 268435455") && source467.include?("metal_buffer_write_i64(seed_us") && source467.include?("metal_buffer_read_i64(best_us") && source467.include?("while ai < ab") && source467.include?("while bi < bb") && source467.include?("while ci < cb") && source467.include?("if got != want"))
 failures += package_expect_rect_partner_guard(runtime_root, "234")
 failures += package_expect_rect_partner_guard(runtime_root, "235")
 failures += package_expect_rect_partner_guard(runtime_root, "245")
@@ -96,10 +105,17 @@ failures += package_expect_rect_partner_guard(runtime_root, "345")
 failures += package_expect_rect_partner_guard(runtime_root, "355")
 failures += package_expect_rect_partner_guard(runtime_root, "445")
 failures += package_expect("seed provenance manifest is packaged", read_file(runtime_root + "/manifests/seeds.tsv") != nil)
+failures += package_expect("greedy pocket seed is packaged", read_file(runtime_root + "/seeds/gf2/matmul_7x7_rank247_d3496_fixed_rank_pocket_greedy_closure_gf2.txt") != nil && package_sums != nil && package_sums.include?("matmul_7x7_rank247_d3496_fixed_rank_pocket_greedy_closure_gf2.txt"))
+failures += package_expect("Runpod epoch-1965 C013 endpoint and former active parent are packaged", read_file(runtime_root + "/seeds/gf2/matmul_7x7_rank247_d3486_c013_runpod_epoch1965_continuation_gf2.txt") != nil && read_file(runtime_root + "/seeds/gf2/matmul_7x7_rank247_d3492_outer_isotropy_c013_cuda_epoch67_gf2.txt") != nil && package_sums != nil && package_sums.include?("matmul_7x7_rank247_d3486_c013_runpod_epoch1965_continuation_gf2.txt") && package_sums.include?("matmul_7x7_rank247_d3492_outer_isotropy_c013_cuda_epoch67_gf2.txt"))
+failures += package_expect("Runpod epoch-257 affine density co-leader and parent are packaged", read_file(runtime_root + "/seeds/gf2/matmul_7x7_rank247_d3094_affine_code_cuda_epoch257_gf2.txt") != nil && read_file(runtime_root + "/seeds/gf2/matmul_7x7_rank247_d3096_affine_code_cuda_epoch3306_gf2.txt") != nil && package_sums != nil && package_sums.include?("matmul_7x7_rank247_d3094_affine_code_cuda_epoch257_gf2.txt") && package_sums.include?("matmul_7x7_rank247_d3096_affine_code_cuda_epoch3306_gf2.txt"))
+failures += package_expect("Runpod low-quota source and epoch-27 parent are packaged", read_file(runtime_root + "/seeds/gf2/matmul_7x7_rank247_d3542_c013_runpod_cuda_epoch1965_g6417_gf2.txt") != nil && read_file(runtime_root + "/seeds/gf2/matmul_7x7_rank247_d3538_peterson_2026_runpod_cuda_epoch27_novelty_gf2.txt") != nil && package_sums != nil && package_sums.include?("matmul_7x7_rank247_d3542_c013_runpod_cuda_epoch1965_g6417_gf2.txt") && package_sums.include?("matmul_7x7_rank247_d3538_peterson_2026_runpod_cuda_epoch27_novelty_gf2.txt"))
 failures += package_expect("CLI source is packaged", read_file(package_root + "/bin/metaflip.w") != nil)
 launcher_source = read_file(package_root + "/bin/metaflip")
 failures += package_expect("source-checkout launcher targets CLI entry", launcher_source != nil && launcher_source.include?("metaflip.w") && launcher_source.include?("metaflip-cli"))
 failures += package_expect("public library entry is packaged", read_file(package_root + "/lib/metaflip.w") != nil)
+public_library_source = read_file(package_root + "/lib/metaflip.w")
+failures += package_expect("proof facade is publicly linked", public_library_source != nil && public_library_source.include?("use metaflip/proof"))
+failures += package_expect("pure-Tungsten proof engines are packaged", read_file(runtime_root + "/proof.w") != nil && read_file(runtime_root + "/proof/cdcl.w") != nil && read_file(runtime_root + "/proof/psi.w") != nil)
 failures += package_expect("rank-down endpoint compiler is packaged", read_file(runtime_root + "/strategies/rect_endpoint_rankdown.w") != nil)
 failures += package_expect("rank-two endpoint compiler is packaged", read_file(runtime_root + "/strategies/rect_endpoint_rankdown2.w") != nil)
 failures += package_expect("four-line catalyst compiler is packaged", read_file(runtime_root + "/strategies/rect_catalyst_lift2.w") != nil)

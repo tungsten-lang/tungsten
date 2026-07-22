@@ -235,7 +235,7 @@ while rank <= 168
 
 # Every generated rectangular worker must use the same inline permutation and
 # must agree with the profile geometry used by the coordinator.
-tags = ["225","226","227","228","229","234","235","245","256","334","335","344","345","346","347","355","356","445","446","456","457"]
+tags = ["225","226","227","228","229","234","235","245","256","334","335","344","345","346","347","355","356","445","446","456","457","467"]
 i = 0
 while i < tags.size()
   path = __DIR__ + "/../lib/metaflip/kernels/rectangular/cal2zone_" + tags[i] + ".w"
@@ -247,9 +247,13 @@ while i < tags.size()
     ok = body.include?("sample = ((sample >> ((sample >> 28) + 4)) ^ sample) * 277803737")
   if ok
     ok = body.include?("sample = (sample >> 22) ^ sample")
-  wide = tags[i] == "457"
+  wide = tags[i] == "457" || tags[i] == "467"
   if ok && wide
-    ok = body.split("277803737").size() == 5 && body.split("sample2 = (state ^ wide_salt) ## u32").size() == 3 && body.include?("wide_salt = (mv * 747796405) ^ (tid * 289133645)") && body.split("u1 = (((u1 & 7) << 32) ^ (sample2 ## i64)) & 34359738367").size() == 3 && body.split("u1 = sample\n").size() == 3 && !body.include?("u1 = sample ## i64")
+    ok = body.split("277803737").size() == 5 && body.split("sample2 = (state ^ wide_salt) ## u32").size() == 3 && body.include?("wide_salt = (mv * 747796405) ^ (tid * 289133645)") && body.split("u1 = sample\n").size() == 3 && !body.include?("u1 = sample ## i64")
+  if ok && tags[i] == "457"
+    ok = body.split("u1 = (((u1 & 7) << 32) ^ (sample2 ## i64)) & 34359738367").size() == 3
+  if ok && tags[i] == "467"
+    ok = body.split("u1 = (((u1 & 1023) << 32) ^ (sample2 ## i64)) & 4398046511103").size() == 3
   if ok && !wide
     ok = body.split("277803737").size() == 3 && !body.include?("wide_salt")
   if ok

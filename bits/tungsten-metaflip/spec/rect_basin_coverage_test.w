@@ -102,7 +102,7 @@ z = ffrbct_expect("J14 covers twelve sides and keeps two leaders", ffrcb_side_la
 z = ffrbct_expect("J15 covers nine sides and keeps six leaders", ffrcb_side_lane_budget(15, 9) == 9)
 z = ffrbct_expect("J64 splits surplus width evenly", ffrcb_side_lane_budget(64, 2) == 32 && ffrcb_side_lane_budget(64, 12) == 32)
 
-wide_side_counts = [2,3,5,3,3,3]
+wide_side_counts = [3,4,5,3,3,3]
 wide_shape = 0 ## i64
 while wide_shape < wide_side_counts.size()
   side_count = wide_side_counts[wide_shape] ## i64

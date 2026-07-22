@@ -3,7 +3,7 @@ use ../lib/metaflip/fleet/intake
 failures = 0 ## i64
 
 -> intake_expect(label, condition) (String bool) i64
-  if condition == 0
+  if !condition
     << "FAIL large-host intake scheduler: " + label
     return 1
   0

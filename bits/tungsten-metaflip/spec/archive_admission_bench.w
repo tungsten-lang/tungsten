@@ -29,7 +29,7 @@ use ../lib/metaflip/fleet/archive
 root = __DIR__ + "/../lib/metaflip/seeds/gf2/"
 paths = []
 paths.push("matmul_7x7_rank247_d3096_dynamic_syzygy_gf2.txt")
-paths.push("matmul_7x7_rank247_d3096_affine_code_cuda_epoch3306_gf2.txt")
+paths.push("matmul_7x7_rank247_d3094_affine_code_cuda_epoch257_gf2.txt")
 paths.push("matmul_7x7_rank247_d3098_global_isotropy_gf2.txt")
 paths.push("matmul_7x7_rank247_d3098_odd_parent3_gf2.txt")
 paths.push("matmul_7x7_rank247_d3098_partial_auto_beam_dense_gf2.txt")

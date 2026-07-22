@@ -1,8 +1,8 @@
 use ../lib/metaflip/kernels/pooled_exact
 use ../lib/metaflip/kernels/bundles/pooled_exact
 
--> ffpemt_expect(name, condition)
-  if condition == 0
+-> ffpemt_expect(name, condition) (String bool) i64
+  if !condition
     << "FAIL " + name
     exit(1)
   1

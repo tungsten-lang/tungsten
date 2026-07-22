@@ -65,11 +65,13 @@ find_nvcc() {
     command -v "$NVCC" 2>/dev/null || return 1
     return
   fi
-  command -v nvcc 2>/dev/null && return
+  # Prefer the canonical toolkit driver over our PATH wrapper.  This keeps a
+  # second setup run idempotent instead of resolving the wrapper to itself.
   if [ -x /usr/local/cuda/bin/nvcc ]; then
     printf '%s\n' /usr/local/cuda/bin/nvcc
     return
   fi
+  command -v nvcc 2>/dev/null && return
   return 1
 }
 
@@ -194,6 +196,22 @@ write_llvm_source() {
   fi
 }
 
+# nvcc derives its CUDA toolkit root from argv[0].  A raw symlink in
+# /usr/local/bin therefore makes it search /usr/local/include instead of the
+# image's /usr/local/cuda/include.  Keep the convenient PATH entry, but exec
+# the canonical driver so argv[0] still identifies the real toolkit tree.
+write_nvcc_wrapper() {
+  nvcc_real=$1
+  if [ "$MODE" = dry-run ]; then
+    printf 'WRITE_NVCC_WRAPPER %s -> %s\n' /usr/local/bin/nvcc "$nvcc_real"
+    return
+  fi
+  nvcc_wrapper_tmp="/usr/local/bin/.nvcc.metaflip.$$"
+  printf '%s\n' '#!/bin/sh' "exec \"$nvcc_real\" \"\$@\"" > "$nvcc_wrapper_tmp"
+  chmod 0755 "$nvcc_wrapper_tmp"
+  mv -f "$nvcc_wrapper_tmp" /usr/local/bin/nvcc
+}
+
 if [ "$MODE" != dry-run ] && [ "$(id -u)" -ne 0 ]; then
   echo "setup_runpod.sh: run as root inside the Runpod container" >&2
   exit 1
@@ -215,7 +233,7 @@ run_cmd ln -sfn "/usr/bin/clang++-$LLVM_MAJOR" /usr/local/bin/clang++
 run_cmd ln -sfn "/usr/bin/ld.lld-$LLVM_MAJOR" /usr/local/bin/ld.lld
 
 if [ "$MODE" = dry-run ]; then
-  run_cmd ln -sfn /usr/local/cuda/bin/nvcc /usr/local/bin/nvcc
+  write_nvcc_wrapper /usr/local/cuda/bin/nvcc
   printf 'CHECK setup_runpod.sh --check\n'
   exit
 fi
@@ -225,8 +243,11 @@ if [ -z "$nvcc_path" ]; then
   echo "setup_runpod.sh: CUDA-devel image has no nvcc; refusing a host-only setup" >&2
   exit 1
 fi
-if [ "$nvcc_path" != /usr/local/bin/nvcc ]; then
-  run_cmd ln -sfn "$nvcc_path" /usr/local/bin/nvcc
+nvcc_real=$(readlink -f "$nvcc_path" 2>/dev/null || printf '%s\n' "$nvcc_path")
+if [ -z "$nvcc_real" ] || [ ! -x "$nvcc_real" ]; then
+  echo "setup_runpod.sh: cannot resolve the CUDA compiler: $nvcc_path" >&2
+  exit 1
 fi
+write_nvcc_wrapper "$nvcc_real"
 
 check_toolchain

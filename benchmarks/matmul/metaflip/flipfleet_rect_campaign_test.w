@@ -1,7 +1,7 @@
 use flipfleet_rect_campaign
 
 -> ffrct_expect(label, condition) i64
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + label
     return 1
   0
@@ -168,7 +168,7 @@ p346 = 6 ## i64
 capacity346 = ffr_default_capacity(n346, m346, p346) ## i64
 state346 = i64[ffr_state_size(capacity346)]
 rank346 = ffr_load_scheme_cap(state346, ffrp_seed_rel(n346, m346, p346), n346, m346, p346, capacity346, 907, 4, 8, 1000, 250) ## i64
-failures += ffrct_expect("346 exact catalog seed", rank346 == 54 && ffr_best_bits(state346) == 826 && ffr_verify_best_exact(state346, n346, m346, p346) == 1)
+failures += ffrct_expect("346 exact frontier seed", rank346 == 54 && ffr_best_bits(state346) == 488 && ffr_verify_best_exact(state346, n346, m346, p346) == 1)
 phase346 = i64[3]
 z = ffrp_campaign_budgets(2000, phase346)
 elapsed346 = i64[1]
@@ -183,7 +183,7 @@ p456 = 6 ## i64
 capacity456 = ffr_default_capacity(n456, m456, p456) ## i64
 state456 = i64[ffr_state_size(capacity456)]
 rank456 = ffr_load_scheme_cap(state456, ffrp_seed_rel(n456, m456, p456), n456, m456, p456, capacity456, 909, 4, 8, 1000, 250) ## i64
-failures += ffrct_expect("456 exact catalog seed", rank456 == 90 && ffr_best_bits(state456) == 975 && ffr_verify_best_exact(state456, n456, m456, p456) == 1)
+failures += ffrct_expect("456 exact frontier seed", rank456 == 90 && ffr_best_bits(state456) == 907 && ffr_verify_best_exact(state456, n456, m456, p456) == 1)
 phase456 = i64[3]
 z = ffrp_campaign_budgets(2000, phase456)
 elapsed456 = i64[1]
@@ -200,7 +200,7 @@ p457 = 7 ## i64
 capacity457 = ffr_default_capacity(n457, m457, p457) ## i64
 state457 = i64[ffr_state_size(capacity457)]
 rank457 = ffr_load_scheme_cap(state457, ffrp_seed_rel(n457, m457, p457), n457, m457, p457, capacity457, 911, 4, 8, 1000, 250) ## i64
-failures += ffrct_expect("457 exact seed", rank457 == 104 && ffr_best_bits(state457) == 1160 && ffr_verify_best_exact(state457, n457, m457, p457) == 1)
+failures += ffrct_expect("457 exact seed", rank457 == 104 && ffr_best_bits(state457) == 1089 && ffr_verify_best_exact(state457, n457, m457, p457) == 1)
 phase457 = i64[3]
 z = ffrp_campaign_budgets(2000, phase457)
 elapsed457 = i64[1]
@@ -218,7 +218,7 @@ p468 = 8 ## i64
 capacity468 = ffr_default_capacity(n468, m468, p468) ## i64
 state468 = i64[ffr_state_size(capacity468)]
 rank468 = ffr_load_scheme_cap(state468, ffrp_seed_rel(n468, m468, p468), n468, m468, p468, capacity468, 913, 4, 8, 1000, 250) ## i64
-failures += ffrct_expect("468 exact density leader", rank468 == 140 && ffr_best_bits(state468) == 1748 && ffr_verify_best_exact(state468, n468, m468, p468) == 1)
+failures += ffrct_expect("468 exact density leader", rank468 == 140 && ffr_best_bits(state468) == 1560 && ffr_verify_best_exact(state468, n468, m468, p468) == 1)
 phase468 = i64[3]
 z = ffrp_campaign_budgets(2000, phase468)
 elapsed468 = i64[1]

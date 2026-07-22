@@ -1,7 +1,7 @@
 use flipfleet_rect_residual_worm
 
 -> ffrrwt_expect(label, condition)
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + label
     exit(1)
   1

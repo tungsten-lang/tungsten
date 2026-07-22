@@ -7,8 +7,8 @@
 use flipfleet_outer_isotropy
 use flipfleet_block_leaf_pool
 
--> ffou_expect(label, condition)
-  if condition != 0
+-> ffou_expect(label, condition) (String bool) i64
+  if condition
     return 1
   << "OUTER_UNBALANCED7_FAIL " + label
   exit(1)

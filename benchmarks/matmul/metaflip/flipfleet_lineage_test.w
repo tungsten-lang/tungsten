@@ -3,7 +3,7 @@ use flipfleet_basin_identity
 use flipfleet_lineage
 
 -> ffl_test_expect(name, condition)
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + name
     exit(1)
 

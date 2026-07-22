@@ -3017,3 +3017,677 @@ exact zero-partner best/current wall in zero of 88 matched trials (including
 production; retain init/rebase-only braid on genuinely zero-edge starts.  The
 reproducible decision benchmark is
 `spec/rect_post_focus_braid_bench.w`; no production or TUI path changed.
+
+## 2026-07-21: collision-complete square k-XOR pool
+
+The square k-XOR pool had two independent completeness holes.  Its GPU probe
+returned only the first disjoint table tuple with a matching 128-bit
+fingerprint, so a false fingerprint collision could hide a later exact local
+replacement.  In addition, the `8->7` quad-query path decoded its three-term
+table key as a four-term key before overlap filtering.  The probe now accepts
+a match ordinal and the host advances ordinals until a complete dispatch is
+empty; the quad path decodes three- and four-term keys separately.
+
+The adversarial Metal regression gives every candidate the same fingerprint.
+For query `(0,1,2)` it recovered all 15 disjoint pair-table ordinals and then
+proved ordinal 15 empty; for query `(0,1,2,3)` it recovered all ten disjoint
+triple-table ordinals and proved ordinal ten empty.  Rebuilt production workers
+then completed bounded `5+` circuit, `6->5`, and formerly broken `8->7` runs
+against the exact 3x3 rank-23 frontier with no GPU or exact-gate failure.  A
+no-hit round still dispatches once, so collision completeness does not multiply
+the common empty-join cost.  This repairs search coverage; it is not itself a
+rank or density result.
+
+The bounded candidate tail had a separate coverage bias: after retaining live
+terms and reconstructed split parents, nested U/V/W loops used the remaining
+pool slots by exhausting W under the first U/V pair.  Production caps often
+stopped before any other U value appeared.  The tail now uses a deterministic
+full-cycle coprime traversal of the Cartesian product.  Its regression visits
+all 120 cells exactly once; the first eight cells span `4/2/6` distinct U/V/W
+values rather than the legacy `1/2/6`.  Bounded 3x3 `6->5`, 5x5 `8->7`, and
+7x7 `9->8` Metal screens completed cleanly with no exact-gate failure.  This is
+again a search-coverage repair, not a claimed tensor result.
+
+## 2026-07-21: one-spectator k-XOR repair stays offline
+
+The one-spectator repair asks whether a failed `k->k-1` replacement residual
+becomes zero or rank one after XORing one unselected live term.  In the
+rank-one case it materializes the exact `(k+1)->k` splice with the recovered
+factor triple; in the zero case parity compaction may drop farther.  The pure
+Tungsten endpoint keeps the source immutable and independently reconstructs
+every accepted child over all `n^6` coefficients.  Planted controls recover a
+split Strassen shoulder from rank eight to seven and collapse an added
+four-term relation from rank eleven to seven; rank-two, duplicate-selection,
+and zero-factor adversaries all reject.
+
+The real decision screen covered ten 3x3, 4x4, 5x5, and 7x7 frontier doors,
+1,280 connectivity-biased windows, and 4,252,108,800 canonical four-term
+replacement tuples.  It produced no projected join, near-miss ticket, repair
+gate, or accepted endpoint.  The move therefore remains an offline intake
+tool rather than consuming a CPU or GPU pool lease.
+
+## 2026-07-21: computed rank-one and rank-two completion ladder
+
+Two exact residual-completion endpoints remove the requirement that every
+replacement term already occur in the bounded candidate pool.  For a selected
+`k`-term sum, rank-one completion enumerates `k-2` proposed terms and factors
+the remaining tensor as zero or one rank-one outer product.  Rank-two
+completion enumerates `k-3` terms and exhaustively recognizes tensor rank at
+most two through its U-flattening and the three nonzero `GL(2,2)` basis
+choices.  Both use compact U/V rows containing W masks, in-place combination
+toggles, no per-tuple allocation, independent residual rebuilds, and fresh
+full-tensor endpoint gates.
+
+The hard planted rank-one control reaches the last `C(16,7)=11,440` leaf,
+synthesizes the omitted split parent, and recovers 3x3 rank 24 to 23.  The
+rank-two control reaches the last `C(16,6)=8,008` leaf, synthesizes two absent
+factors, and exact-gates rank 25 to 24.  Zero residuals, rank-three
+flattenings, rank-three shared-U matrices, basis-choice failures, duplicate
+selections/pools, and source immutability all have direct regressions.
+
+The real screen applied live-term and exact-flip-derived pools to 64 windows
+on each packaged 3x3, 4x4, 5x5, 6x6, and 7x7 leader.  Rank-one completion
+classified 2,480,896 tuples (at most 4.532 billion compact-row checks) in
+about 0.78 seconds; rank-two completion classified 1,582,592 residuals (3.049
+billion input slice cells) in about 0.61 seconds.  Neither screen found even a
+zero/rank-one/rank-two frontier residual, hence neither incurred a full gate
+or produced an endpoint.  The exact cores remain useful offline primitives,
+but current candidate policies do not justify a production lease.
+
+## 2026-07-21: paired square-pressure traversal
+
+A five-second native sample of the pure-Tungsten 5x5 work loop put the exact
+flip transaction on the expected hot path and attributed about one eighth of
+top-of-stack samples to the square pressure calculation.  The old path called
+the single-query traversal four times per legal proposal, repeatedly decoding
+the same six flat-state offsets.  The new square-only pair traversal evaluates
+both old endpoints together and both new endpoints together with typed-array
+access; rectangular workers retain their existing raw-pointer batch path.
+
+The fixed-trajectory benchmark remained bit-for-bit identical.  Paired release
+measurements improved 3x3 by 4.9%, 6x6 by 0.6%, and 7x7 by 1.4%; three paired
+5x5 measurements improved the median from 63.4 to 63.9 million attempts/s
+(0.8%).  The 4x4 seed had no legal partners in 100 million attempts, so its
+timing is unaffected except for noise.  An alternative that sent square
+pressure through the generic raw-pointer path was 2--8% slower and was
+discarded.  `spec/scheme_hotpath_test.w` independently compares the paired
+answer with a complete live-term pressure reference.
+
+## 2026-07-21: productive fixed-rank pocket words converge at C013 d3496
+
+Chaining the autonomous factor-overlap ticket search exposed substantially
+more value than its original one-ticket intake. A deterministic ordinal-1
+prefix takes C013 `d3554 -> d3544 -> d3534 -> d3524` and then stops. Complete
+strict-gain rescans continue through `d3514 -> d3506 -> d3498 -> d3496`, then
+certify that no bounded ticket improves. The seven selected ticket ordinals
+are `1,1,1,3,4,42,7`, with gains `10,10,10,10,8,8,2`. The gain-eight closures
+have depth four and cross `+10` and `+9` density edges. Every intermediate and
+the final rank-247 endpoint passes the full 7x7 tensor gate; the final support
+distance from C013 is 28. Starting at the earlier d3546 tunnel child converges
+to the same canonical term set.
+
+The complete greedy audit examined 344 ticket searches, 43,303 retained local
+states, and 50,740,254 factor-overlap proposals. Using the three-gain
+ordinal-1 prefix before full rescans cuts this to 31,614,912 proposals without
+changing the endpoint. In 24 matched one-million-move continuations, d3496
+beat both C013 and its best one-ticket child in every trial; final minimum and
+integer-average densities were 3492/3495 versus 3510--3511/3513. The d3496
+certificate is packaged for replay, and the existing fixed-pocket CPU racer
+arm now runs the bounded productive closure (eight adoptions, four
+prefix attempts, five full rounds, 64 tickets/round) rather than one random
+ticket. The ordinary move hot path and TUI are unchanged.
+
+## 2026-07-21: independently rediscovered d3492 replaces its d3496 near-duplicate
+
+The six-hour RTX 4090 campaign rediscovered a rank-247/d3492 C013 descendant
+at epoch 10, group 243. Its 247-term support is exactly equal to the earlier
+epoch-67 d3492 certificate after order normalization: intersection 247,
+symmetric difference zero. The byte hashes differ only because the terms are
+serialized in a different order. The live relay log records an `exact-novel`
+epoch with all eight downloaded candidates exact-gated; both the packaged
+support-major verifier and the independent coefficient-major oracle accept the
+certificate. It has support distances 32 from C013, 4 from the d3496 greedy
+pocket closure, 30 from the first d3546 barrier child, and 494 from the d3094
+density leader.
+
+A bounded fixed-pocket rescan is a stable miss on both serializations: 44
+tickets, 6,483,492 proposals, no density change, and no exact rejects. Ordinary
+matched continuations of the two d3492 serializations tie 24/24, confirming
+that term order does not create a distinct search door. Against d3496, d3492
+wins 20/24 one-million-move continuations with four ties and no losses. This is
+strict shoulder dominance rather than evidence that d3492 supersedes the
+structurally disjoint d3094 leader: d3094 wins the same density comparison
+24/24 and remains the hot default.
+
+Because d3492 and d3496 differ by only four support terms, adding both to the
+automatic frontier would spend a slot without meaningful basin diversity.
+The catalog therefore promotes the existing epoch-67 d3492 certificate into
+the C013-density slot and moves d3496 to the explicit experiment inventory.
+The active frontier stays at 18 roots, d3546 remains as a replay shoulder, and
+d3094 is unchanged.
+
+## 2026-07-21: rectangular side doors survive spot interruption
+
+Long salted rectangular shards previously selected diverse sticky doors at
+startup but wrote their evolving side archive only during graceful exit.  A
+spot reclaim could therefore preserve the fleet-best checkpoint while losing
+hours of independent basin progress.  The coordinator now performs a cold
+side-door checkpoint every fifteen minutes, or after one minute when the fleet
+leader has changed.  It runs only at the common CPU/GPU barrier, reloads and
+exact-gates the existing disk slots, combines them with startup doors and all
+live island bests, repeats the anchored structural/max-min selection, and
+atomically replaces the eight bounded slots.  It never rebases a sticky island
+or enters a move loop.
+
+The side-archive regression clears every slot, persists a distinct live
+rank-47 2x5x6 door through the new path, reloads the exact same term set, and
+checks both the fifteen-minute and post-adoption cadence.  The full rectangular
+CLI nonce/door schedule also passes.  Final graceful harvest reloads the most
+recent periodic slots before selecting live current shoulders, so normal exit
+cannot accidentally discard a door that the interruption-safe checkpoint had
+already saved.
+
+## 2026-07-21: exact rank-three residual completion stays offline
+
+The computed residual-completion ladder now has a complete rank-at-most-three
+recognizer.  For `k` selected terms it enumerates `k-4` candidate terms and
+synthesizes the remaining zero through three factors, so every admitted child
+is a strict `k -> <=k-1` replacement.  The pure-Tungsten implementation keeps
+the source byte-for-byte immutable, uses compact U/V rows of W masks, allocates
+all tuple-recognition workspaces once per search, rebuilds every recognized
+residual, and independently full-gates every materialized endpoint.
+
+The recognizer dispatches by U-flattening rank.  Dimension one reduces to a
+matrix-rank-three factorization; dimension two checks all three `GL(2,2)`
+bases and the remaining weight-three identity.  Its rank-one/rank-one case now
+uses the exact cross-rectangle constructions for arbitrary factor widths
+through 62 rather than a bounded mask scan.  Dimension three exhaustively
+checks all 168 ordered bases of `GL(3,2)`.  Direct regressions cover residual
+ranks zero through three, both dimension-two paths, a width-62 cross rectangle,
+the full 168-basis negative path, flattening-rank-four rejection, duplicates,
+and immutable-source behavior.
+
+The hard planted control puts the useful six-term candidate subset at the last
+`C(16,6)=8,008` leaf.  Starting from a single-split 3x3 rank-24 shoulder, it
+synthesizes three absent base terms and independently exact-gates the original
+rank-23 record.  This is genuine three-factor synthesis rather than pool recall.
+
+The matched native release screen covered 32 live-pool and 32 exact-flip-pool
+windows on each packaged 3x3, 4x4, 5x5, 6x6, and 7x7 leader.  It classified
+791,296 residual tuples in about 0.40 seconds.  Seventeen residuals reached
+U-flattening dimension three and the remaining 791,279 rejected above three;
+none had tensor rank zero through three, so there were zero compact rebuilds,
+full gates, or hits.  The exact core is therefore retained as an offline
+primitive; these frontier candidate policies do not justify a production
+CPU/GPU pool lease.
+
+## 2026-07-21: alternate-axis retry earns one CPU racer arm
+
+Record plateaus make a random first-term/axis proposal cheap but usually
+partnerless.  The new opt-in axis-sweep walker preserves the selected first
+term and, only after the random axis misses, probes the other two axes in
+cyclic order.  It does not alter the ordinary flip routine or its RNG
+trajectory.  Proposal telemetry remains comparable: a term with no partner on
+all three axes is one miss, and proposals minus partner misses reports legal
+flips separately from internal axis probes.
+
+Ten paired half-second native release trials per arm used identical seeds and
+alternated arm order on exact 3x3/r23/d139, 5x5/r93/d1155, and
+7x7/r247/d3094 records.  Relative to the ordinary walker, the sweep raised
+legal proposals per wall second by 26.3%, 28.7%, and 12.9%, respectively; it
+raised accepted proposals per second by 26.3%, 28.2%, and 14.1%.  Every one of
+the 30 pairs favored the sweep on both rates.  Both arms produced ten distinct
+exact endpoints on every shape, every paired endpoint differed, and mean
+support distances remained comparable (`12/10`, `30/28`, and `74/75` for
+baseline/sweep).  Neither arm found a rank or best-density improvement in this
+short plateau screen, so the result is higher useful flip throughput and
+different basin motion rather than a tensor record.
+
+The promoted implementation reuses the still-uniform partner ordinal when an
+axis misses, since that miss is independent of the ordinal.  This removes up
+to two unnecessary RNG advances without losing coverage.  A final six-pair,
+250 ms/arm release confirmation measured accepted-flip gains of 30.6%, 35.6%,
+and 18.7% on 3x3, 5x5, and 7x7; all 18 pairs favored the sweep and every
+endpoint remained exact, distinct, and pairwise different.
+
+The strategy therefore occupies only one cold-rotating adaptive CPU racer arm.
+All other islands retain the baseline hot path.  A negative split-cadence tag
+selects the persistent worker dispatch without adding a branch to ordinary
+workers; the sweep restores the cadence magnitude internally, preserving the
+normal wander split schedule.  A cold incidence audit sends provably edge-free
+states through the baseline instead: 2x2/r7/d36 and 4x4/r47/d450 had zero
+legal flips, and three-axis probing merely cut raw calls per second roughly in
+half.  `spec/axis_sweep_racer_test.w` exact-gates all
+three shapes, pins a deterministic rescued miss, checks density and trajectory
+invariants, and compares persistent-worker dispatch with the direct walker.
+`spec/axis_sweep_racer_bench.w` is the reproducible matched-wall decision
+benchmark.
+
+## 2026-07-21: rectangular axis sweep moves faster but does not earn a lane
+
+The square axis-sweep result does not automatically transfer to the saved
+rectangular frontiers.  A separate native release audit therefore paired the
+ordinary selector and axis sweep on identical exact doors, identical RNG
+seeds, equal wall time, and alternating arm order.  It independently gated
+every live and best endpoint, measured exact support-set distance and endpoint
+uniqueness, then reinitialized each endpoint and ran three matched ordinary
+two-million-move continuations.  Reinitialization deliberately removes the
+different proposal counts and RNG history from the fertility comparison.
+
+On 12 half-second pairs from `4x4x5/r60/d628`, sweep raised legal flips per
+second by 30.8% and accepted flips per second by 28.0%; all twelve rate pairs
+favored it.  Both arms produced 12 distinct exact endpoints, with mean source
+distances 22 (baseline) and 24 (sweep).  Endpoint density was inconclusive
+(sweep/baseline/tie wins `6/5/1`), and the 36 matched continuations favored
+baseline `4/1` with 31 ties.  Every continuation stayed exact and found a
+same-rank density improvement relative to its shoulder, but none beat d628 or
+dropped rank.
+
+The larger `4x5x7/r104/d1089` confirmation used 24 half-second pairs and 72
+matched continuations.  Sweep again won all rate pairs, +30.1% legal and
++30.7% accepted flips per second.  All 48 screened endpoints were exact and
+unique; mean source distance was 46/44 for baseline/sweep, and endpoint
+density wins were `12/9/3` for sweep/baseline/tie.  That weak endpoint signal
+did not survive continuation: paired fertility was effectively even at
+`32/33/7`, both arms averaged rank 104/d1099, and neither produced a rank or
+source-density win.  An eight-pair `2x2x5/r18/d84` control likewise showed
+more sweep motion (+21.9% legal, +20.7% accepted) but worse mean endpoint and
+continuation density, with no source-record win.
+
+The result is a useful negative: retrying axes converts partner misses into
+motion, but current rectangular record doors turn that extra motion into no
+measured short-horizon fertility.  No rectangular CPU arm was added, and the
+ordinary rectangular worker/scheduler paths remain unchanged.  The exact
+reproducer is `spec/rect_axis_sweep_fertility_bench.w`; promotion should be
+reconsidered only after a door or move mix shows paired continuation wins, not
+from accepted-flip throughput alone.
+
+## 2026-07-21: a second collision term stays offline
+
+A bounded extension of axis sweep samples one fresh uniform, different live
+term only when the first term has no partner on all three axes, then sweeps
+that second term's axes before recording the proposal-level miss.  The
+prototype lives entirely in the benchmark: baseline and the promoted
+one-term sweep retain their code and RNG trajectories.  Twelve native release
+pairs per arm used identical exact records and seeds, cyclically rotated the
+three arm orders, ran for 500 ms, exact-gated every endpoint, and followed each
+endpoint with three matched ordinary two-million-move continuations.
+
+The second sample rescued real collisions but mostly paid for itself in scan
+cost.  Relative to one-term sweep, legal flips per second changed by +5.7% on
+3x3, -0.5% on 5x5, and +1.9% on 7x7.  All 108 timed endpoints were exact and
+107 were unique within their arm/shape collection (one baseline 3x3 repeat);
+mean source distances stayed comparable.  The fallback found a legal edge on
+about 41.7%, 15.0%, and 20.1% of its second-term samples, respectively, so the
+mechanism was exercised rather than optimized away.
+
+Fertility did not improve robustly.  Against one-term sweep, paired
+continuation wins/losses/ties were `0/0/36` on 3x3, `17/13/6` on 5x5, and
+`16/17/3` on 7x7.  Against baseline they were `0/0/36`, `12/21/3`, and
+`16/16/4`.  Every one of the 324 continuations remained exact and improved
+the density of its temporary shoulder, but none dropped rank or beat the
+packaged source density.  Extra collision coverage is therefore not evidence
+of extra basin fertility on these records.  No adaptive arm was added; the
+offline reproducer is `spec/two_term_collision_sweep_bench.w`.
+
+## 2026-07-21: exact coefficient-orbit quotient halves the open psi SAT cells
+
+The four remaining psi-invariant rank-17 cells for `<2,5,2>` now use native
+CryptoMiniSat XOR rows, explicit lexicographic symmetry breaking, and an exact
+quotient of the coefficient equations.  The induced involution sends
+
+`u(i,j) v(j2,k) w(i2,k2)` to
+`u(k,j2) v(j,i) w(k2,i2)`.
+
+Because every encoded term multiset is psi-closed, its coefficient function is
+constant on these orbits; the matrix-multiplication target has the same
+invariance.  The 400 Brent equations therefore have 210 orbit representatives
+(190 pairs and 20 fixed cells).  On each fixed cell, the two products from a
+conjugate term pair are equal and cancel over GF(2), so only products from
+fixed generators need to be materialized.  This is an equivalent encoding of
+the psi-invariant existence cell, not a sampled or relaxed system.
+
+Lex leaders order adjacent pair representatives over their full `u|v|w`
+blocks and adjacent fixed generators over `u|w`.  A literal-for-literal test
+matches the in-process `ffpsi_lex_chain`; all generated headers match both
+physical clause counts and maximum variable indices.  The 2x2 controls remain
+decisive after both reductions: the planted psi-symmetric rank-7 cell is SAT,
+while the rank-6 cell is UNSAT.
+
+There is another exact symmetry inside every conjugate pair: choosing `X` or
+`psi(X)` as its representative describes the same unordered two-term orbit.
+The exporter now requires `X <= psi(X)` before sorting pair representatives.
+For `<2,5,2>`, the 24 block positions contain only eleven nontrivial psi
+two-cycles (ten `u <-> v^T` cycles and one off-diagonal `w` cycle).  Only the
+earlier endpoint of each cycle can be the first lexicographic difference, so
+an exact eleven-coordinate comparator uses ten auxiliaries and 60 clauses per
+pair instead of comparing all 24 positions.  Exhaustive 2x2 enumeration proves
+that at least one orientation is always admitted and both are admitted exactly
+at psi-fixed representatives.  This removes a residual symmetry of up to
+`2^c` while remaining compatible with non-strict pair sorting and repeated or
+self-fixed pair generators.
+
+One additional unit clause anchors the coordinate orbit.  Outer permutations
+applied simultaneously to U rows, V columns, and both W indices, together with
+inner permutations of U columns and V rows, commute with psi and act
+transitively on the ten U coordinates.  Every fixed generator has nonzero U,
+so some coordinate image puts a supported bit at U(0,0).  Once fixed
+generators are sorted, the last one must then have U(0,0)=1.  The rank-7
+Strassen control remains SAT with this anchor, while rank 6 remains UNSAT.
+
+The in-process CDCL solver now uses the same exact coefficient-orbit quotient;
+the full-row encoder remains available as an independent control and for
+arbitrary residual targets.  Its generic SBP entry remains safe for arbitrary
+psi-invariant descent residuals; the coordinate anchor and fixed-cell rank
+consequences are deliberately exposed only through the whole-matmul wrapper.
+On the 2x2 `(c,f)=(2,3)` control, orientation plus pair/fixed sorting allocate
+exactly 33 fresh prefix variables and 198 clauses; the fixed-cell consequences
+add nine XOR variables and 45 Tseitin/guard clauses, then the anchor adds one
+unit and no variable.  Native controls still return the planted rank-7 cell
+SAT and the rank-6 cell UNSAT.
+
+At `<2,5,2>` c8f1, quotienting cuts the in-process instance from 13,253
+variables / 53,517 clauses to 6,553 / 26,287.  In a matched c8f2 60,000-conflict
+probe it reduces wall time from 5.35 to 3.12 seconds (41.7%).  On 2x2 it cuts
+the rank-8 control from 1,004 / 4,032 to 548 / 2,104 while retaining an exact
+SAT witness.  The rank consequences collapse the one-fixed rank-7 and c8f1
+controls from 73 and 640 conflicts to one; their pre-quotient c8f2 probe alone
+was 17% slower, but the complete quotient-plus-rank path more than recovers
+that cost.  These are exact model-set reductions, not search heuristics.
+
+The native-XOR path also exposes three consequences that generic Tseitin
+preprocessing otherwise has to rediscover.  Whenever a fixed generator reads
+the same U variable through U and wired V, its product is the quadratic
+`U & W`, so it uses an exact three-clause product encoding.  More globally,
+the fixed-cell equations say that the fixed generators' W diagonals must span
+the two-dimensional target: at least one first diagonal bit, at least one
+second bit, and at least one row whose two bits differ.  Three-variable native
+XOR rows define the difference bits.  The already-closed `(c,f)=(8,1)`
+production cell remains UNSAT under this explicit rank-two consequence, while
+the planted rank-7 control remains SAT.
+
+The fixed-cell equations give a second rank-two view.  For every inner
+coordinate `j`, the two vectors `(U_q(0,j))_q` and `(U_q(1,j))_q` are both
+nonzero and unequal, because multiplication by the fixed W-diagonal matrix
+maps them to `e_0` and `e_1`.  The exporter now states those necessary row
+separations directly with `m*f` native-XOR difference variables and
+`m*(f+3)` rows.  Five matched 5-second c7f3 screens were deliberately neutral:
+mean conflict throughput changed by -0.4% and decisions by -1.7%, with every
+run still indeterminate.  The consequence is retained as an exact, compact
+portfolio formulation rather than claimed as a solver-speed win.
+
+For `(c,f)=(7,3),(6,5),(5,7),(4,9)`, the earlier symmetry-broken full-row XNF
+instances had respectively `7174/28617`, `7181/28640`, `7188/28663`, and
+`7195/28686` variables/clauses.  The quotient instances have
+`3664/14387`, `3711/14570`, `3758/14753`, and `3805/14936`: roughly half the
+search state before CDCL begins.  The orientation-canonical variants remain
+compact at `3734/14807`, `3771/14930`, `3808/15053`, and `3845/15176`, while
+removing maximum symmetry factors 128, 64, 32, and 16.  The coordinate anchor
+adds one clause to each.  After quadratic-product simplification and the
+fixed-diagonal and fixed-U row-rank consequences, the final anchored exporter
+reports `3762/14780`, `3811/14855`, `3860/14930`, and `3909/15005`.  Every physical
+clause count and maximum variable index matches its header, and all four parse
+under CryptoMiniSat.  Four quotient-only, four orientation-canonical, and four
+coordinate-anchored single-thread solves were started as a seed/encoding
+portfolio on the open cells.  They were externally interrupted after roughly
+1h41m--1h54m, before their configured limits; none emitted SAT, UNSAT,
+INDETERMINATE, or final solver statistics.  Those twelve logs therefore
+certify nothing and all four cells remain open.  Matched final-SBP screens were
+neutral to slightly positive: across four cells, 5-second conflict and
+decision totals changed by -0.06% and -2.30%, while 30-second totals changed
+by -0.41% and -0.86%.  The exact model-set reduction remains worthwhile, but
+until one cell returns SAT or all four return UNSAT, this is an encoding
+improvement rather than a new rank-17 scheme or a completed lower-bound
+certificate.
+
+## 2026-07-21: SAT capacity is no longer logical search state
+
+The in-process CDCL allocator distinguishes `max_vars` (arena capacity) from
+`top_var` (the highest variable actually referenced), but its initial decision
+heap previously inserted every variable through `max_vars`.  Reserving safe
+XOR/SBP headroom therefore made the solver branch on nonexistent variables,
+changed deterministic trajectories when only capacity changed, and could put
+thousands of irrelevant decision levels below the first real conflict.
+
+Every solve now rebuilds the heap from variables `1..top_var` after assumptions
+have extended that bound, and initialization no longer performs the redundant
+full-capacity heap insertion.  A focused formula with only `x1` and `x2` but
+capacity for 4,096 variables now needs at most two decisions; the old path
+needed 4,096.  Pigeonhole UNSAT, planted random SAT with model re-evaluation,
+XOR ingestion, failed assumptions, conflict budgets, mark/release, the Brent
+window bridge, and the 800-variable performance control all remain exact.  The
+change benefits every in-process SAT move and makes harmless memory headroom
+trajectory-neutral for densely numbered encodings.
+
+## 2026-07-21: batch the two consecutive flip RNG draws
+
+The pure-Tungsten CPU flip path now advances its PCG stream twice from one
+load/store of the worker RNG state and packs the two 31-bit results into one
+`i64`.  The first word still selects the axis and the second still selects the
+partner ordinal.  A focused regression compares 512 paired advances with 1024
+scalar advances, including the stored continuation state.  Fixed 10M--200M
+move trajectories on 5x5, 7x7, and `<2,5,6>` retained identical RNG, rank,
+density, accepted/rejected/miss counts, ordered endpoint digest, and exhaustive
+exactness.
+
+All timings used native `--release --fast --lto` binaries on the concurrently
+loaded campaign host, with ABBA order and reversed ABBA repeats where measured.
+Aggregating the long work-mode pairs, 5x5 rose from 41.64M to 42.77M moves/s
+(`+2.7%`), 7x7 from 25.64M to 26.09M (`+1.7%`), and `<2,5,6>` from 70.19M to
+76.10M (`+8.4%`).  Wander-mode pairs changed from 43.88M to 44.74M on 5x5
+(`+2.0%`), 28.66M to 31.19M on 7x7 (`+8.8%`, one ABBA set), and 65.28M to
+72.48M on `<2,5,6>` (`+11.0%`, one ABBA set).  The larger rectangular gain is
+plausible because almost every proposal exits after partner lookup, making RNG
+state traffic a larger fraction of the loop.
+
+Two tempting alternatives were rejected rather than shipped.  Remembering a
+sole eligible partner during the hash-chain count increased the inlined hot
+loop enough to lose about 6% in a sustained 5x5 ABBA run, despite removing a
+second traversal on some legal proposals.  Manually cancelling the unchanged
+factor popcounts in the density comparison was neutral-to-slower; release LTO
+already optimizes the original expression well.  Both prototypes preserved
+the exact trajectory, but both were reverted before this result was retained.
+
+## 2026-07-21: one cold `<2,2,9>` rectangular split lane
+
+The rectangular CPU scheduler previously gave every island the same rank-debt
+split cadence of 2,000 wander-mode moves. Two scheduling alternatives were
+screened by exact endpoint value and a fresh ordinary continuation, not by raw
+flip motion. First, reordering the existing 10% focused, 70% adaptive, and 20%
+wander phases looked useful at two million moves but reversed on `<2,2,5>`,
+`<2,2,9>`, and `<4,5,7>` in the five-million-move confirmation. Production
+phase order therefore remains unchanged.
+
+A cadence sweep over 500, 1,000, 2,000, 4,000, and 8,000 moves found a narrower
+signal on `<2,2,9>`. The release/LTO screen covered the required `<3,3,4>`,
+`<3,4,4>`, `<2,2,5>`, `<2,2,9>`, `<2,5,6>`, `<4,4,5>`, and `<4,5,7>`
+frontiers. At two million search moves plus one million fresh continuation
+moves, cadence 8,000 tied the baseline in every `<3,3,4>`, `<3,4,4>`, and
+`<2,5,6>` trial; it was mixed on the other controls and won six of eight
+`<2,2,9>` continuation pairs against two losses. No arm improved a packaged
+record in this bounded screen.
+
+The longer `<2,2,9>` confirmation used 32 trials of ten million search moves
+plus three million fresh continuation moves on three rank-32 coordinate
+presentations and the checked-in rank-33/rank-34 split shoulders. The cold
+cadence won `15/16/1`, `20/12/0`, `18/13/1`, `18/13/1`, and `21/9/2`
+candidate/baseline/tie pairs: 92 wins, 63 losses, and five ties overall. Both
+arms closed every planted debt, all 320 search endpoints and all 320 fresh
+continuation endpoints were exact, and neither produced a new rank-31 scheme.
+The gain is that the cold
+lane's exact current shoulders more often continue closer to rank 32, making
+them better R..R+2 side-archive material.
+
+Production now assigns cadence 8,000 only to the last `<2,2,9>` island when a
+shape has multiple workers. A one-worker portfolio child alternates 2,000 and
+8,000 across its already-low-discrepancy exact restart tickets. Every other
+shape and every other lane retains the baseline hot path; the cadence branch
+exists only in the one cold worker. The reproducible seven-shape and expanded
+`<2,2,9>` screen is `spec/rect_split_cadence_fertility_bench.w`.
+
+## 2026-07-21: reject the one-pass cyclic-skip partner racer
+
+An opt-in CPU prototype replaced the baseline count-plus-ordinal partner
+selection with one hash-chain pass: a random skip from zero through three
+selected an exact-factor successor, wrapping to the first match on short
+chains.  The exact flip transaction and acceptance gate were unchanged.  The
+confirmation used 20 paired trials per shape, 500 ms per timed arm, then three
+fresh ordinary-walker continuations of two million moves from every endpoint.
+
+| tensor | cyclic calls/s vs baseline | continuation cyclic / baseline / tie |
+|---|---:|---:|
+| `3x3x3` | +1.11% | 0 / 0 / 60 |
+| `5x5x5` | +3.38% | 16 / 32 / 12 |
+| `7x7x7` | -1.37% | 26 / 27 / 7 |
+| `<2,2,9>` | +4.84% | 23 / 37 / 0 |
+
+All 480 continuation endpoints passed exhaustive exact verification.  Neither
+arm found a rank gain or beat a source record.  The modest proposal-rate wins
+therefore did not produce continuation value: 5x5 and `<2,2,9>` were clearly
+worse, 7x7 was neutral, and 3x3 always tied.  The selector, walker, and test
+prototype were reverted rather than adding an adaptive lane or enlarging the
+production hot-path surface.
+
+## 2026-07-21: 120-trillion-move cloud harvest and a full-width 467 GPU lane
+
+One `m8i.96xlarge` campaign ran for about 5.5 hours with 384 vCPUs.  The five
+rectangular children completed 112,175,392,000,000 moves and the 7x7 child
+completed 8,146,068,954,609, for 120,321,460,954,609 aggregate moves.  No
+front improved rank or density: 225 remained r18/d84, 229 r32/d156, 334
+r29/d204, 344 r38/d280, 256 r47/d438, and 777 r247/d3094.  There were zero
+exact rejects, child failures, stale workers, and OOMs.
+
+The harvest nevertheless contains valuable exact doors.  The 7x7 rank-248
+near-one bank produced d2946, six bits below the previous packaged d2952
+rank-248 shoulder.  Its support distance from the r247 leader is 495, the
+maximum possible, while its distance from the earlier Sedoglavic r248/d2952
+seed is 12.  Normalized term-multiset hashing shows that it exactly
+rediscovers the d2946 support already present in the curated results corpus;
+only term order differs.  Production therefore promotes the existing
+canonical presentation as the operational rank-248 density leader rather than
+publishing a duplicate certificate.  It is not a new tensor-rank record.  A
+second r248/d3092 shoulder
+is support-distance 19 from the r247 leader and two bits lighter, making it a
+useful low-debt local door.  The 225 r18/d141, 334 r29/d249, and 344 r38/d310
+side doors are term-disjoint from their leaders and checked-in same-rank
+seeds; retain them for basin diversity despite their worse density.
+
+An independent pure-Tungsten verifier expanded every coefficient of all 109
+harvested schemes: 64 7x7 shoulders plus 45 rectangular leaders/side doors.
+All are exact.  All 136 source-side file hashes match the local harvest.  The
+100-GB source EBS volume is still retained as a second copy.  Spot compute was
+about $12.17; EBS, IPv4, and transfer add roughly twenty cents so far.  The
+retained gp3 copy continues at about $9.12/month.
+
+The campaign work also added a full-width Metal worker for `<4,6,7>`, including
+an unbiased sampler for its 42-bit middle factor.  In an equal-work local
+Metal comparison, 512 lanes each completed 100,000 moves across four epochs
+(204.8M total): 467 took 12.79 seconds (~16.0M moves/s), while the analogous
+457 control took 12.15 seconds (~16.9M moves/s).  The 5.3% cost is small enough
+to make 467 viable as an explicit high-leverage GPU campaign shape; it does
+not by itself justify displacing narrower default fronts.
+
+The companion RTX 4090 run completed 2,348 epochs in 19,806 seconds of search,
+with 9,617,408,000,000 attempted moves, 753,215,661,933 eligible partners,
+11,527 downloaded/exact candidates, 4,988 live-novel reports, and zero device
+exact rejects.  The final main archive contains 5,038 files and 5,034 unique
+normalized term multisets; parameter sweeps add 50 artifacts.  A separate host
+verifier reconstructed all 117,649 coefficients for every archive and sweep
+file plus `best.txt`: all 5,089 checks passed.  The CPU sidecar completed
+4,773,600,000,000 exact `<4,4,5>` moves and remained r60/d628 with no block
+drop or exact reject.
+
+The final archive adds a useful density tie rather than a rank record.  Runpod
+epoch 257, group 8177 produced an exact r247/d3094 affine-code child.  It is
+support-distance 396 from the existing hot d3094 leader but only distance six
+from the active affine-code CUDA d3096 parent: one three-term exchange saves
+two factor bits.  It is unique among all 5,038 final artifacts.  Forty-eight
+canonicalized matched continuations of four million moves each tied the hot
+d3094 48/48 and beat the affine parent 48/48, with every retained and live
+endpoint full-gated.  Replace only the dominated affine frontier/GPU-original
+slot; keep the old d3094 as hot default and the d3096 parent as provenance.
+
+The full archive triage superseded the earlier epoch-27 d3538 cold source.
+Epoch 1965/group 6417 is an exact r247/d3542 C013-family support at minimum
+packaged distance 62.  Across 24 canonicalized matched four-million-move
+continuations it beat d3538 24/24 and the active d3492 child 23/24 with one
+tie.  Trials 4, 15, and 21 independently produced the identical exact
+r247/d3486 endpoint.  The endpoint is distance 20 from d3492, distance 42 from
+its doorway, and distance 494 from the global d3094 leader.  A direct
+96-million-move stability probe left d3486 unchanged in all 24 trials.
+Production therefore replaces the C013 d3492 frontier slot with d3486 and the
+sole low-quota d3538 source with d3542; d3492, d3496, and d3538 remain explicit
+replay provenance.  This improves a productive alternate basin, not the global
+density leader or tensor rank.
+
+The final local harvest contains all 5,141 source-manifested result files;
+every SHA-256 matches, and the stopped 10-GB Runpod volume remains a second
+copy.  The useful GPU search cost about $3.80, but leaving the allocated pod
+idle for roughly 7.8 hours raised its total to about $9.3.  Future runs need a
+host-side harvest-and-verify guard that stops the pod only after the local copy
+closes cryptographically.
+
+## 2026-07-21: native Wassat hardening and independent ψ certification
+
+The pure-Tungsten Wassat CDCL solver was audited before using it as a Metaflip
+backend.  The most serious finding was in DIMACS ingestion: the permissive
+integer conversion maps arbitrary text to zero, so an XNF line beginning with
+`x` could be read as an empty CNF clause and yield a false UNSAT verdict.  The
+parser now accepts one exact `p cnf` header, validates every literal and count,
+enforces clause termination and bounds, supports the SATLIB `%` trailer, and
+explicitly rejects XNF/native-XOR input.  The CLI also rejects malformed or
+duplicate options and truncates requested certificate paths before solving so
+an old proof cannot survive a SAT, UNKNOWN, parse failure, or interrupted run.
+
+Proof logging now has separate modes.  Raw DRAT records learned RUP clauses
+directly; hinted WRAT replays propagation only when explicit hint chains are
+requested.  On an open ψ quotient at a 1,000-conflict cap, proof-off and raw
+DRAT runs both took about 0.07 seconds, while hinted WRAT took 7.28 seconds.
+Raw DRAT is therefore the campaign mode; hinted WRAT remains useful for small
+or final offline proofs.  Inconclusive and SAT results expose no partial
+certificate, while resumable solver instances retain the hidden proof prefix,
+trail, learned database, restart/reduction cadence, and branching state across
+additional-conflict budgets.
+
+The search audit also found that the advertised activity policy never bumped a
+variable.  Wassat now bumps every newly discovered conflict-graph variable,
+uses integer EVSIDS with rare rescaling, and maintains an `O(log n)` typed max
+heap with lazy assigned-variable removal and backjump reinsertion.  Against the
+four still-open rank-17 `<2,5,2>` ψ cells at 20,000 conflicts, decisions fell
+from `39,520/54,604/44,975/51,085` to
+`37,807/38,418/37,069/37,933`.  Final Wassat wall times were
+`0.74--0.78/0.68/0.60--0.62/0.64--0.65` seconds for cells
+`(7,3)/(6,5)/(5,7)/(4,9)`.  The specialized in-process `ffcdcl` still needed
+4--7% fewer decisions and about `0.41--0.55` solve-only seconds, so it remains
+the production default.  Wassat is now close enough to be useful as an
+independent proof lane.  The general EVSIDS policy regresses the accidental
+static order that was unusually favorable on pigeonhole formulas; optional
+rollout lookahead repairs that family but hurts these tensor encodings.
+
+All root controls reproduced their known verdicts, including exact decoded
+witness gating.  Wassat then independently re-solved the already-closed
+`(c,f)=(3,11)` rank-17 ψ cell as UNSAT in 568,284 conflicts and 751,899
+decisions: 27.46 seconds without proof logging and 29.43 seconds with raw
+DRAT.  This is not a sixth closed cell or a new rank bound: CryptoMiniSat had
+already closed `(3,11)` on 2026-07-16.  It is a second solver implementation
+and a new independently checkable certificate for that same cell.
+
+The exact CNF has 6,978 variables and 27,582 clauses, SHA-256
+`b7c290c4873d2d251e301681ffc20278b915a1172a2ba76c3fdb809517c609f6`.
+`drat-trim` verified the complete 568,284-step Wassat proof, then independently
+verified a 370,564-line trimmed proof.  The compressed trimmed certificate has
+SHA-256
+`9b536ffaf949884ba4b80f1610afbf772039a4f41fbbb0ca217a003da9d0f687`
+and is preserved with the CNF and a reproducibility manifest under
+`~/.tungsten/metaflip/proofs/gf2/2x5x2/r17/psi-c3f11-wassat-2026/`.
+CaDiCaL 3.0.1 independently returned UNSAT on the identical CNF in 3.28
+seconds, providing a second verdict cross-check.
+
+Correctness coverage after the changes comprises 36 solver specs, six CLI
+groups, 300 randomized differentials against CaDiCaL with 152 independently
+checked raw proofs, a separate 1,200-formula brute-force audit, resumed-budget
+proof checks, and formulas that exercise learned-clause deletion.  The new
+reproducer is `flipfleet_wassat_psi_bench.w`; it constructs the exact quotient,
+solves with Wassat, pins any returned model through the independent `ffcdcl`
+encoding, decodes it, and exhaustively reconstructs the tensor before accepting
+a SAT result.  The four balanced rank-17 ψ cells remain open.

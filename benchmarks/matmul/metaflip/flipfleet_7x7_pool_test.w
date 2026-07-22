@@ -3,7 +3,7 @@ use flipfleet_7x7_pool
 failures = 0 ## i64
 
 -> ff7t_expect(label, condition) i64
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + label
     return 1
   0
@@ -104,7 +104,10 @@ left_retry = ff7_rect_pool_label("rect-3x3x4", 0, 29, 12, 11, 1234567, 12, 1, 0,
 right_retry = ff7_rect_pool_label("rect-3x4x4", 0, 38, 12, 11, 1234567, 12, 1, 0, 5, 9, 3)
 active_row = ff_tui_gpu_pool_pair(left_active, 1, 1, right_active, 1, 1, 160)
 retry_row = ff_tui_gpu_pool_pair(left_retry, 1, 1, right_retry, 1, 1, 160)
-failures += ff7t_expect("rect TUI fixed width", active_row.size() == 160 && retry_row.size() == 160)
+# The requested 160 is terminal-column width.  String.size counts UTF-8 bytes,
+# so the two three-byte bullet markers add four bytes while preserving 160
+# visible columns.
+failures += ff7t_expect("rect TUI fixed visible width", active_row.size() == 164 && retry_row.size() == active_row.size())
 failures += ff7t_expect("rect TUI retry visible", retry_row.include?("retry"))
 failures += ff7t_expect("rect TUI cfail visible", retry_row.include?("cfail3"))
 

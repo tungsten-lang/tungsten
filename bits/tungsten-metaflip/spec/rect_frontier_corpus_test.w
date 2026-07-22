@@ -14,16 +14,16 @@ use ../lib/metaflip/rect/doors
   1
 
 root = __DIR__ + "/../lib/metaflip/" ## String
-labels = ["3x3x4","3x4x4","2x3x5","3x4x5","4x5x5","5x6x7"]
-ns = [3,3,2,3,4,5]
-ms = [3,4,3,4,5,6]
-ps = [4,4,5,5,5,7]
-expected_doors = [3,4,6,4,4,4]
-expected_r = [1,2,4,2,2,2]
-expected_r1 = [1,1,1,1,1,1]
-expected_r2 = [1,1,1,1,1,1]
+labels = ["2x2x5","3x3x4","3x4x4","2x3x5","3x4x5","4x5x5","5x6x7"]
+ns = [2,3,3,2,3,4,5]
+ms = [2,3,4,3,4,5,6]
+ps = [5,4,4,5,5,5,7]
+expected_doors = [6,4,5,6,4,4,4]
+expected_r = [6,2,3,4,2,2,2]
+expected_r1 = [0,1,1,1,1,1,1]
+expected_r2 = [0,1,1,1,1,1,1]
 # Minimum exact term-set symmetric difference from slot-zero for R+1/R+2.
-minimum_shoulder_distance = [59,77,44,94,153,301]
+minimum_shoulder_distance = [0,59,77,44,94,153,301]
 
 total = 0 ## i64
 shape = 0 ## i64
@@ -66,5 +66,5 @@ while shape < labels.size()
   z = ffrfct_expect(labels[shape]+" rank-R+2 count",strata[2] == expected_r2[shape])
   shape += 1
 
-z = ffrfct_expect("total registered corpus doors",total == 25)
-<< "PASS rectangular frontier corpus exact=25 shapes=6 strata=R/R+1/R+2 uniqueness=full leader-distance=gated"
+z = ffrfct_expect("total registered corpus doors",total == 33)
+<< "PASS rectangular frontier corpus exact=33 shapes=7 strata=R/R+1/R+2 uniqueness=full leader-distance=gated"

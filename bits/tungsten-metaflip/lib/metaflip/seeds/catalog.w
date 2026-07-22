@@ -206,6 +206,21 @@
     # d3094 scheme above is the default and therefore gets the hot path.
     paths.push(base + "matmul_7x7_rank247_d3554_outer_isotropy_gf2.txt")
     paths.push(base + "matmul_7x7_rank247_d3554_outer_isotropy_c013_m7_gf2.txt")
+    # The final C013 continuation endpoint is rank 247/d3486. Runpod epoch
+    # 1965 reached the identical support in three of 24 canonical matched
+    # four-million-move trials (4/15/21; seeds 718917/1870936/2499310) from
+    # the d3542 source. It is support distance 42 from that source and 20 from
+    # the former active d3492 endpoint (the source itself is distance 62 from
+    # d3492); a direct continuation was locally
+    # terminal. Raw, term-multiset, and D3/reversal SHA-256 are respectively
+    # dfab762a6150c274b670f67f6169d3635c32974c0be106482717b94fae149b05,
+    # 52284f28e3886fe20b848ddd81d57993dbd1566de11c13cce8875c4729ffbef3,
+    # and 4873e956b1f3df815c250ab99fceb4ee9f3dd18c230fea8b5985e9f4817952ec.
+    # It replaces only the C013 basin slot; d3492 and d3496 remain explicit
+    # provenance below. The earlier d3546 child remains directly after it as
+    # replay evidence for the first fixed-pocket tunneling ticket.
+    paths.push(base + "matmul_7x7_rank247_d3486_c013_runpod_epoch1965_continuation_gf2.txt")
+    paths.push(base + "matmul_7x7_rank247_d3546_autonomous_flip_pocket_gf2.txt")
     paths.push(base + "matmul_7x7_rank247_d3554_outer_isotropy_c021_m4_gf2.txt")
     paths.push(base + "matmul_7x7_rank247_d3554_outer_isotropy_c024_m0_gf2.txt")
     # Reflection-factor partial nullspace tunnels from the c013/c024 outer
@@ -217,24 +232,55 @@
     # existing bank.  It is an archive/restart source only; the minute-scale
     # frontier-source scheduler supplies its derived work lazily.
     paths.push(base + "matmul_7x7_rank247_d3098_odd_parent3_gf2.txt")
-    # The affine-code slot likewise uses its independently dual-gated d3096
-    # CUDA child from epoch 3306. It is a three-term exchange at distance six
-    # from the d3098 affine-code parent but distance 494 from the beam-far
-    # child, so replacing both dominated parents preserves rather than narrows
-    # the two basins. Keep the old affine-code root packaged for provenance.
-    paths.push(base + "matmul_7x7_rank247_d3096_affine_code_cuda_epoch3306_gf2.txt")
+    # The affine-code slot uses the independently dual-gated d3094 CUDA child
+    # harvested from Runpod aack78ni07p1uh at epoch 257/group 8177 (campaign
+    # source commit 1dfc4321f964a0ca4eca75e8c0870f8692d565b0). Raw SHA-256 is
+    # ddf710feced82ece388d9e368f9ad4bcf4da08d0583c4b17ab34a8a5e1accb71;
+    # the order-independent term-multiset SHA-256 is
+    # d71bbeb41d5da88264475eb412baca85d099764fa3a1fce9474cffc78b7cfee8.
+    # It is one three-term exchange (support distance six) from the old d3096
+    # epoch-3306 affine-code child and distance 396 from the hot d3094 default.
+    # In 48 canonicalized matched four-million-move continuations it tied the
+    # incumbent 48/48 and beat its d3096 parent 48/0/0. Thus it replaces that
+    # active basin slot without changing the hot default; the parent stays
+    # packaged below as explicit replay/provenance.
+    paths.push(base + "matmul_7x7_rank247_d3094_affine_code_cuda_epoch257_gf2.txt")
   paths
 
 # Exact artifacts retained for explicit experiments but deliberately omitted
 # from `ffp_frontier_seed_paths`: they do not consume an automatic CPU archive
-# slot. The d3492 endpoint is a distance-32, 62-bit density descent from c013,
-# whose high-density parent remains active because its measured CUDA novelty
-# yield is exceptional and the child's continuation fertility is not yet known.
+# slot. The d3496 target-free pocket closure and its former active d3492 child
+# remain reproducible provenance for the d3486 C013 endpoint. The replaced
+# d3538 low-quota source likewise remains the parent/control certificate for
+# the d3542 source. The d3096 epoch-3306 affine-code child remains the exact
+# parent/replay certificate for the active epoch-257 d3094 descendant.
 -> ffp_experimental_seed_paths(n) (i64)
   base = "seeds/gf2/"
   paths = []
   if n == 7
-    paths.push(base + "matmul_7x7_rank247_d3492_outer_isotropy_c013_cuda_epoch67_experimental_gf2.txt")
+    paths.push(base + "matmul_7x7_rank247_d3496_fixed_rank_pocket_greedy_closure_gf2.txt")
+    paths.push(base + "matmul_7x7_rank247_d3492_outer_isotropy_c013_cuda_epoch67_gf2.txt")
+    paths.push(base + "matmul_7x7_rank247_d3538_peterson_2026_runpod_cuda_epoch27_novelty_gf2.txt")
+    paths.push(base + "matmul_7x7_rank247_d3096_affine_code_cuda_epoch3306_gf2.txt")
+  paths
+
+# One exact same-rank novelty source admitted only to the frozen, low-cadence
+# frontier-escape schedule.  It is deliberately separate from both the hot
+# max-min archive (`ffp_frontier_seed_paths`) and explicit-only replay artifacts
+# (`ffp_experimental_seed_paths`). Runpod epoch 1965/group 6417's d3542 source
+# beat the old d3538 low-quota source 24/0/0 and the former active d3492 child
+# 23/0/1 in 24 canonical matched four-million-move continuations. It produced
+# the active d3486 endpoint three times, but remains a deliberately cold source
+# because the endpoint itself is the stronger production door. Raw,
+# term-multiset, and D3/reversal SHA-256 are respectively
+# bc0d913f34d0b733436059e16775bbff3c8f29e3306bd5b8e29de4f05a05b676,
+# 6a54c3e5388784485afa3a10814a9e41658ff7456c339c3e01e1c487fe6e4f6c,
+# and dbd111c632e27812ddddac7300e6d4842a68340248842dce65c825f8eb7c9a24.
+-> ffp_low_quota_seed_paths(n) (i64)
+  base = "seeds/gf2/"
+  paths = []
+  if n == 7
+    paths.push(base + "matmul_7x7_rank247_d3542_c013_runpod_cuda_epoch1965_g6417_gf2.txt")
   paths
 
 # Independently exact, structurally distant cross-field shoulders.  These are
@@ -250,6 +296,15 @@
     # mod 2 with the trace-dual W factor transposed.  Its exact r49/d432
     # projection is orbit-distance 96 from the r47 density leader.
     paths.push(base + "matmul_4x4_rank49_d432_signed_4x4x4_m49_zt_gf2.txt")
+  if n == 7 && delta == 1
+    # The canonical public d2946 rank-248 density leader sits 495 support terms
+    # from the r247/d3094 hot leader.  AWS near1_16 rediscovered the same term
+    # multiset in a different row order, so retain the existing corpus bytes
+    # rather than manufacturing a duplicate certificate.  The independently
+    # full-gated d3092 AWS endpoint is a genuinely novel local +1 door
+    # (distance 19), pairing a remote basin with nearby rank debt.
+    paths.push(base + "matmul_7x7_rank248_d2946_live_density_leader_gf2.txt")
+    paths.push(base + "matmul_7x7_rank248_d3092_aws_near1_local_gf2.txt")
   paths
 
 -> ffp_c3_seed_path(n) (i64)

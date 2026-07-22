@@ -77,6 +77,16 @@ zmeta = i64[2]
 rank = ffr3tr_d2_weight3(a, b, 3, 5, 10, 10, du, dv, dw, zmeta)
 z = ffr3trt_expect("d2 rank-one anchor enumeration", rank == 3 && zmeta[1] == 1 && zmeta[0] == 1)
 
+# The same cross-rectangle identity is width-independent.  The historical
+# exponential mask scan failed closed above width twenty even though only the
+# two algebraic cross products are needed.
+large_a = i64[25]
+large_b = i64[25]
+large_a[0] = 1 << 24
+large_b[24] = 1
+rank = ffr3tr_d2_weight3(large_a, large_b, 3, 5, 25, 25, du, dv, dw, zmeta)
+z = ffr3trt_expect("d2 rank-one cross at width 25", rank == 3 && zmeta[1] == 1 && zmeta[0] == 1)
+
 # d=3: the first slice is the sum of all three matrices.  Recovering the
 # planted terms therefore requires a nontrivial GL(3,2) basis change.
 u[0] = 3

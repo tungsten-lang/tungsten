@@ -3,7 +3,7 @@ use flipfleet_simd_bundle
 failures = 0 ## i64
 
 -> expect(label, condition) i64
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + label
     return 1
   0
@@ -19,7 +19,7 @@ while n <= 7
   failures += expect("source asset " + n.to_s(), source != nil)
   failures += expect("metal asset " + n.to_s(), metal != nil)
   if source != nil
-    failures += expect("bounded dispatch ABI " + n.to_s(), source.include?("DISPATCHES = av[4].to_i()"))
+    failures += expect("bounded dispatch ABI " + n.to_s(), source.include?("DISPATCHES = av\[4].to_i()"))
     failures += expect("host gate A " + n.to_s(), source.include?("while ai < ab"))
     failures += expect("host gate B " + n.to_s(), source.include?("while bi < bb"))
     failures += expect("host gate C " + n.to_s(), source.include?("while ci < cb"))
@@ -42,7 +42,7 @@ failures += expect("6x6 i64", ffsimd_mask_bytes(6) == 8)
 metal6 = read_file(ffsimd_metal_rel(6))
 if metal6 != nil
   failures += expect("i64 Metal buffers", metal6.include?("device long *work_us"))
-  failures += expect("i64 shared scheme", metal6.include?("threadgroup long sus[232]"))
+  failures += expect("i64 shared scheme", metal6.include?("threadgroup long sus\[232]"))
 source7 = read_file(ffsimd_source_rel(7))
 if source7 != nil
   failures += expect("7x7 raw parse", source7.include?("umask = uhi * 10000000 + ulo"))
@@ -65,5 +65,6 @@ failures += expect("epoch finite", epoch != "")
 
 if failures > 0
   << "flipfleet_simd_bundle_test: " + failures.to_s() + " failure(s)"
+  exit(1)
 if failures == 0
   << "flipfleet_simd_bundle_test: all checks passed"

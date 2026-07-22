@@ -9,7 +9,7 @@
 # Modes:
 #   0 ordinary metaflip walk
 #   1 frozen-core/fringe walk
-#   2 tuned control-race walk
+#   2 tuned control-race walk (negative split cadence selects axis-sweep)
 #   3 accepted-state cycle-watch walk
 
 # Return the lower median elapsed time of eligible workers.  `scratch` is
@@ -165,7 +165,10 @@
         if mode == 1
           result = ffw_walk_fringe(worker_state, round_steps[slot], core_slots[0])
         if mode == 2
-          result = ffw_walk_tuned(worker_state, round_steps[slot], controls)
+          if controls[0] >= 0
+            result = ffw_walk_tuned(worker_state, round_steps[slot], controls)
+          if controls[0] < 0
+            result = ffw_walk_axis_sweep_tuned(worker_state, round_steps[slot], controls)
         if mode == 3
           result = ffw_walk_cycle_watch(worker_state, round_steps[slot], recent, recent_capacity, stats)
         elapsed_ms[slot] = ccall("__w_clock_ms") - t0

@@ -53,10 +53,13 @@ METAFLIP_CUDA_ARCH=sm_89 \
 
 The helper pins LLVM 18 from the signed apt.llvm.org repository, installs the
 complete Tungsten/OpenBLAS self-host dependencies (including Ruby), exposes
-the image's existing CUDA compiler as `/usr/local/bin/nvcc`, and functionally
+the image's existing CUDA compiler through an `/usr/local/bin/nvcc` exec
+wrapper, and functionally
 probes clang/lld, zstd, Oniguruma, OpenBLAS, Ruby, and `nvcc`. It is
 idempotent. Use `--dry-run` to inspect its package/link plan without changing
-the image.
+the image. The wrapper is intentional: NVIDIA's driver derives its toolkit
+root from `argv[0]`, so a raw symlink outside `/usr/local/cuda/bin` can make a
+healthy CUDA image fail to locate `cuda_runtime.h`.
 
 Use the full stage-one/stage-two `build --no-bits` above, not only
 `bootstrap`: the CUDA source exercises compiler paths that need the installed
@@ -83,11 +86,19 @@ bits/tungsten-metaflip/cloud/cuda/test_777_host.sh
 ```
 
 The host regression exact-gates all five campaign roots, proves that objective
-ordering selects the d3094 certificate as leader, and checks the 25% leader
+ordering retains the final d3094 affine certificate over its equal-density
+incumbent, and checks the 25% leader
 floor, adaptive role and original-root allocation, productive-role preference,
 deterministic replay, bounded no-starvation exploration, descendant rotation,
 source-aware density-chain admission, deterministic top-K group selection,
-the K=1 compatibility path, transfer bounds, and harvest-counter lifecycle.
+the K=1 compatibility path, transfer bounds, and harvest-counter lifecycle. It
+also pins the observed saturated-novelty trace (155 archive admissions in 208
+visits with no objective gain): the saturated source must no longer monopolize
+reward slots, while the fixed exploration gaps and productive-source preference
+remain unchanged. The pinned result allocates the next 256 source slots as
+`65,64,63,64` (the saturated source is third) and the 4,096-slot horizon as
+`854,854,1534,854`, keeping its bounded discovery bonus below twice any neutral
+source instead of winning every exploitation slot.
 
 The relay launch is deliberately one 32-thread warp per CUDA block.  During
 the cloud build, the script fail-closed checks the emitted barrier inventory
@@ -115,8 +126,8 @@ set -o pipefail
   --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3094_three_flip_density_gf2.txt \
   --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3096_dynamic_syzygy_gf2.txt \
   --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3096_partial_auto_beam_far_cuda_epoch1849_gf2.txt \
-  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3554_outer_isotropy_c013_m7_gf2.txt \
-  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3096_affine_code_cuda_epoch3306_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3542_c013_runpod_cuda_epoch1965_g6417_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3094_affine_code_cuda_epoch257_gf2.txt \
   --out /workspace/results/best.txt \
   --status /workspace/results/status.txt \
   --archive-dir /workspace/results/archive \
@@ -141,11 +152,19 @@ nonleader role. Reward slots select the best exact-gated useful-yield rate. This
 keeps a 25% leader floor while reallocating the remaining 75% according to the
 yield of the original and descendant families. Within the original role, every
 eligible root is likewise tried once, then one in every four original slots is
-oldest-first exploration. Both levels score an exact-novel artifact as one
-point and a fleet-best as eight additional points. Deterministic age and source
-ties make a fixed run reproducible. The relay permutes term order on every
-visit so CUDA RNG streams do not repeat. Production uses the faster scan
-specialization; explicit
+oldest-first exploration. At both levels, the first raw exact-novel artifact
+contributes one bounded discovery point. Raw archive diversity
+therefore cannot accumulate an unbounded advantage or monopolize a portfolio.
+An exact-novel endpoint at lower rank, or at the fleet-best rank
+within `max(8, best_density/50)` density bits of the leader, earns four
+unbounded objective-useful points. A same-source rank/density chain replacement
+earns the same credit as measured continuation fertility. A fleet-best earns
+sixteen additional unbounded points. A unit scheduling prior lets finite historical credit
+be compared fairly with less-visited neutral sources; it is used only when at
+least one compared source has credit, preserving the exact neutral oldest-first schedule.
+Deterministic age and source ties make a fixed run reproducible. The relay
+permutes term order on every visit so CUDA RNG streams do not repeat. Production
+uses the faster scan specialization; explicit
 `--mode alternate` remains useful in the smoke test because it exercises both
 kernels independently within every scheduling role. In alternate mode, the
 leader role, every original source, and every descendant slot own independent
@@ -153,17 +172,17 @@ scan/hash visit parity rather than inheriting the global epoch. Adaptive
 preference and even-sized door rotation therefore cannot pin a fertile source
 to only one kernel.
 
-The active beam-far and affine-code roots are exact rank-247/d3096 children
-harvested at epochs 1849 and 3306 of Runpod campaign `7h2j3f0tfwjv0p` from
-source commit `fd25c71`. Their SHA-256 digests are respectively
-`6b308083887f1bab57ddf476afdf4e6ec6f5fca28cc477e6e62e89b413cb3e64` and
-`b8af658635eae896fe7111666925bbd4c6bb65ac1b64a47db8ff3bbb65387b92`.
-Independent support-major and coefficient-major Tungsten gates accept both.
-Each is a three-term exchange at support distance six from its former d3098
-root and saves two density bits. The children are mutually disjoint (distance
-494), so the two strict improvements preserve basin diversity. The old roots
-remain packaged for provenance but must not be launched alongside their
-near-duplicate children.
+The active beam-far root is the exact rank-247/d3096 child harvested at epoch
+1849 of Runpod campaign `7h2j3f0tfwjv0p` from source commit `fd25c71`; its
+SHA-256 is
+`6b308083887f1bab57ddf476afdf4e6ec6f5fca28cc477e6e62e89b413cb3e64`.
+That campaign's epoch-3306 d3096 affine-code child, SHA-256
+`b8af658635eae896fe7111666925bbd4c6bb65ac1b64a47db8ff3bbb65387b92`,
+is now the explicit parent of the active d3094 descendant described below.
+Independent support-major and coefficient-major Tungsten gates accept the
+complete lineage. Both d3096 children were three-term exchanges from their
+d3098 roots; the active beam child and final affine d3094 child remain mutually
+disjoint (distance 494), preserving the independent basins.
 
 The exact three-for-three support exchanges are recorded here so the density
 steps can be replayed without relying on archive term order:
@@ -186,13 +205,50 @@ and adds
   (67108864, 22578644156672, 41943042)
   (1099511697412, 584116633600, 2050)
   (2216203126786, 21994527523072, 2050)
+
+epoch 257 of the final campaign removes
+  (16777216, 87961234317378, 34370224128)
+  (274894701569, 35651650, 34360786944)
+  (566952501248, 87961198665728, 34360786944)
+and adds
+  (16777216, 87961234317378, 11534336)
+  (274877924353, 35651650, 34360786944)
+  (566935724032, 87961198665728, 34360786944)
 ```
 
-The same campaign's epoch-67 d3492 c013 descendant is packaged as
-`matmul_7x7_rank247_d3492_outer_isotropy_c013_cuda_epoch67_experimental_gf2.txt`.
-It is an explicit continuation experiment, not part of the command below:
-c013 remains the productive root, and the child does not consume an automatic
-CPU frontier slot until its own fertility is measured.
+The last exchange is the active source-4 replacement. Runpod pod
+`aack78ni07p1uh`, campaign source commit
+`1dfc4321f964a0ca4eca75e8c0870f8692d565b0`, produced it at epoch 257,
+group 8177. The packaged raw bytes have SHA-256
+`ddf710feced82ece388d9e368f9ad4bcf4da08d0583c4b17ab34a8a5e1accb71`;
+the order-independent numeric term-multiset SHA-256 is
+`d71bbeb41d5da88264475eb412baca85d099764fa3a1fce9474cffc78b7cfee8`.
+It is rank 247/d3094, support distance six from the epoch-3306 d3096
+affine-code parent and distance 396 from the hot d3094 incumbent. Across 48
+canonicalized matched four-million-move continuations it tied the incumbent
+48 times and beat its parent 48/0/0. It therefore replaces the parent only in
+source 4 and the active frontier slot; the incumbent stays source 0/hot
+default, while the d3096 parent remains packaged for explicit replay.
+
+Final Runpod triage promotes two independently exact C013 artifacts. Epoch
+1965/group 6417 produced rank 247/d3542; in 24 canonical matched 4M-move
+continuations it beat the old d3538 low-quota source 24/0/0 and the former
+active d3492 endpoint 23/0/1. It replaces source 3 in the CUDA recipe and the
+single low-quota slot, while the d3554 C013 root remains in the CPU frontier.
+The same trials reached an identical rank-247/d3486 endpoint in trials 4, 15,
+and 21 (seeds `718917`, `1870936`, and `2499310`). That endpoint is distance 42
+from d3542 and 20 from d3492; direct continuation was locally terminal, so it
+replaces d3492 in the active C013 frontier slot. The old d3538, d3492, and d3496
+certificates remain packaged for explicit replay. Raw, term-multiset, and
+D3/reversal hashes are respectively
+`bc0d913f34d0b733436059e16775bbff3c8f29e3306bd5b8e29de4f05a05b676`,
+`6a54c3e5388784485afa3a10814a9e41658ff7456c339c3e01e1c487fe6e4f6c`,
+`dbd111c632e27812ddddac7300e6d4842a68340248842dce65c825f8eb7c9a24`
+for d3542 and
+`dfab762a6150c274b670f67f6169d3635c32974c0be106482717b94fae149b05`,
+`52284f28e3886fe20b848ddd81d57993dbd1566de11c13cce8875c4729ffbef3`,
+`4873e956b1f3df815c250ab99fceb4ee9f3dd18c230fea8b5985e9f4817952ec`
+for d3486. The d3094 scheme remains the hot leader.
 
 ```bash
 cd /workspace/tungsten
@@ -202,8 +258,8 @@ set -o pipefail
   --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3094_three_flip_density_gf2.txt \
   --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3096_dynamic_syzygy_gf2.txt \
   --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3096_partial_auto_beam_far_cuda_epoch1849_gf2.txt \
-  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3554_outer_isotropy_c013_m7_gf2.txt \
-  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3096_affine_code_cuda_epoch3306_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3542_c013_runpod_cuda_epoch1965_g6417_gf2.txt \
+  --seed bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_7x7_rank247_d3094_affine_code_cuda_epoch257_gf2.txt \
   --out /workspace/results/best.txt \
   --status /workspace/results/status.txt \
   --archive-dir /workspace/results/archive \
@@ -301,7 +357,10 @@ role/source, cumulative `policy=L/O/D` counts, and role statistics. In
 `role_stats`, `lastA` is the role's last adaptive slot; fixed leader-floor
 visits do not change it.
 `original_source_stats` serializes each source as
-`INDEX:vVISITS,nNOVEL,bBEST,pPOINTS,lastSLOT`; `policy_original_slots` and
+`INDEX:vVISITS,nNOVEL,uUSEFUL,bBEST,pPOINTS,lastSLOT`; `role_stats` and
+`descendant_source_stats` expose the same `uUSEFUL` field. `pPOINTS` is the
+bounded novelty plus objective-useful and fleet-best reward described above;
+it deliberately excludes the unit scheduling prior. `policy_original_slots` and
 `policy_original_explore_every` make the exploration cadence auditable.
 `epoch_door_action`, `epoch_door_score`, and
 `epoch_door_source_replacement` report the current epoch's archive decision;
@@ -405,3 +464,40 @@ An exit code of 2, a `CUDA_OOM`/`CUDA_ERROR`/`CUDA777_FATAL` line, an
 `exact-reject` status, or a stale status combined with zero GPU utilization is
 a failed campaign. Copy `/workspace/results` off the pod before terminating
 it. A normal wall-limit or signal drain writes `phase=done`.
+
+## Unattended harvest before stop
+
+Use the host-side guard when a pod should stop billing as soon as a campaign
+reaches `phase=done` or a terminal failure. List every result-bearing tree;
+the mixed 7x7/rectangular campaign has two:
+
+```sh
+bits/tungsten-metaflip/cloud/cuda/harvest_then_stop.sh \
+  --pod-id POD_ID \
+  --ssh-host SSH_HOST --ssh-port SSH_PORT \
+  --ssh-key ~/.ssh/runpod_tungsten \
+  --remote-workspace /workspace \
+  --local-destination ~/.tungsten/metaflip/cloud/POD_ID/final-UTC \
+  --result-path results \
+  --result-path cpu-results-445
+```
+
+The destination must not already exist. The guard polls the atomically written
+status and checks the campaign process. At a terminal state it generates a
+SHA-256 manifest on the pod, copies each configured tree into a fresh staging
+directory, regenerates the remote manifest, requires both manifests to match,
+and verifies every listed hash locally. Only after the verified staging tree
+is published does it run exactly `runpodctl pod stop POD_ID`. It never deletes
+or terminates a pod. An SSH, manifest, copy, stability, local-hash, or final
+status error exits without invoking Runpod, leaving the pod and persistent disk
+untouched. A still-running terminal process is permitted only when the two
+source manifests prove a stable snapshot around the transfer.
+
+Use `--dry-run` to validate and print the plan without contacting the pod, or
+`--once` from an external scheduler to return 3 while a campaign remains
+active. The mock regression exercises clean completion, terminal failure,
+transfer corruption, an active campaign, and dry-run without cloud access:
+
+```sh
+bits/tungsten-metaflip/cloud/cuda/test_harvest_then_stop.sh
+```

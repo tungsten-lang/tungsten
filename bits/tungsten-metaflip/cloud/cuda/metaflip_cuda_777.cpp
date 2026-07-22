@@ -394,6 +394,17 @@ void write_scheme_atomic(const std::string& path, const Scheme& scheme) {
   return density(left) < density(right);
 }
 
+bool globally_competitive_objective(int candidate_rank, int candidate_density,
+                                    int best_rank, int best_density) {
+  if (candidate_rank != best_rank) return candidate_rank < best_rank;
+  // Admit a narrow two-percent density band (with an eight-bit small-instance
+  // floor) as globally competitive.  This rewards candidates plausibly able
+  // to continue into the fleet objective without treating a far, saturated
+  // novelty basin such as the C013 source d3542 versus d3094 as equivalent progress.
+  const int slack = std::max(8, best_density / 50);
+  return candidate_density <= best_density + slack;
+}
+
 void improve_objective(Scheme& incumbent, const std::vector<Scheme>& candidates) {
   for (const auto& candidate : candidates) {
     if (objective_better(candidate, incumbent)) incumbent = candidate;
@@ -443,6 +454,7 @@ struct LaunchChoice {
 struct OriginalSourceStats {
   unsigned long long epochs = 0;
   unsigned long long exact_novel = 0;
+  unsigned long long objective_useful = 0;
   unsigned long long fleet_best = 0;
   unsigned long long last_slot = 0;
   bool visited = false;
@@ -451,6 +463,7 @@ struct OriginalSourceStats {
 struct DescendantSourceStats {
   unsigned long long epochs = 0;
   unsigned long long exact_novel = 0;
+  unsigned long long objective_useful = 0;
   unsigned long long fleet_best = 0;
   unsigned long long last_slot = 0;
   unsigned long long generation = 0;
@@ -464,29 +477,57 @@ constexpr unsigned long long kRoleExploreEvery = 4;
 struct RoleStats {
   unsigned long long epochs = 0;
   unsigned long long exact_novel = 0;
+  unsigned long long objective_useful = 0;
   unsigned long long fleet_best = 0;
   unsigned long long last_adaptive_slot = 0;
   bool adaptive_visited = false;
 };
 
+constexpr unsigned long long kRawNoveltyCreditCap = 1;
+constexpr unsigned long long kObjectiveUsefulWeight = 4;
+constexpr unsigned long long kFleetBestWeight = 16;
+constexpr unsigned long long kSchedulerPrior = 1;
+
 unsigned long long reward_points(unsigned long long exact_novel,
+                                 unsigned long long objective_useful,
                                  unsigned long long fleet_best) {
-  // A rank/density improvement to the fleet leader is the primary objective;
-  // a distinct exact door is still useful because it can found a fertile
-  // descendant chain.  Both signals are counted only after the host gate.
-  return exact_novel + 8ULL * fleet_best;
+  // Raw archive novelty is useful while a source is first mapped, but it is
+  // not an objective and an unbounded count permanently monopolizes a
+  // cumulative-yield scheduler after the archive saturates.  Cap that prior;
+  // globally competitive candidates, same-source objective chain advances,
+  // and fleet-best outcomes retain uncapped, dominant credit.  All signals
+  // are counted only after the exhaustive host gate.
+  const unsigned long long novelty_credit =
+      std::min(exact_novel, kRawNoveltyCreditCap);
+  return novelty_credit + kObjectiveUsefulWeight * objective_useful +
+         kFleetBestWeight * fleet_best;
 }
 
 unsigned long long original_reward_points(const OriginalSourceStats& stats) {
-  return reward_points(stats.exact_novel, stats.fleet_best);
+  return reward_points(stats.exact_novel, stats.objective_useful,
+                       stats.fleet_best);
 }
 
 unsigned long long descendant_reward_points(const DescendantSourceStats& stats) {
-  return reward_points(stats.exact_novel, stats.fleet_best);
+  return reward_points(stats.exact_novel, stats.objective_useful,
+                       stats.fleet_best);
 }
 
 unsigned long long role_reward_points(const RoleStats& stats) {
-  return reward_points(stats.exact_novel, stats.fleet_best);
+  return reward_points(stats.exact_novel, stats.objective_useful,
+                       stats.fleet_best);
+}
+
+unsigned long long original_score_points(const OriginalSourceStats& stats) {
+  return kSchedulerPrior + original_reward_points(stats);
+}
+
+unsigned long long descendant_score_points(const DescendantSourceStats& stats) {
+  return kSchedulerPrior + descendant_reward_points(stats);
+}
+
+unsigned long long role_score_points(const RoleStats& stats) {
+  return kSchedulerPrior + role_reward_points(stats);
 }
 
 std::string original_source_stats_text(const std::vector<OriginalSourceStats>& stats) {
@@ -494,7 +535,7 @@ std::string original_source_stats_text(const std::vector<OriginalSourceStats>& s
   for (size_t i = 0; i < stats.size(); ++i) {
     if (i != 0) out << ';';
     out << i << ":v" << stats[i].epochs << ",n" << stats[i].exact_novel
-        << ",b" << stats[i].fleet_best << ",p"
+        << ",u" << stats[i].objective_useful << ",b" << stats[i].fleet_best << ",p"
         << original_reward_points(stats[i]) << ",last";
     if (stats[i].visited) {
       out << stats[i].last_slot;
@@ -511,7 +552,8 @@ std::string descendant_source_stats_text(
   for (size_t i = 0; i < stats.size(); ++i) {
     if (i != 0) out << ';';
     out << i << ":g" << stats[i].generation << ",v" << stats[i].epochs
-        << ",n" << stats[i].exact_novel << ",b" << stats[i].fleet_best
+        << ",n" << stats[i].exact_novel << ",u" << stats[i].objective_useful
+        << ",b" << stats[i].fleet_best
         << ",p" << descendant_reward_points(stats[i]) << ",last";
     if (stats[i].visited) {
       out << stats[i].last_slot;
@@ -527,7 +569,8 @@ std::string role_stats_text(const std::array<RoleStats, 3>& stats) {
   for (size_t i = 0; i < stats.size(); ++i) {
     if (i != 0) out << ';';
     out << launch_role_name(static_cast<LaunchRole>(i)) << ":v" << stats[i].epochs
-        << ",n" << stats[i].exact_novel << ",b" << stats[i].fleet_best
+        << ",n" << stats[i].exact_novel << ",u" << stats[i].objective_useful
+        << ",b" << stats[i].fleet_best
         << ",p" << role_reward_points(stats[i]) << ",lastA";
     if (stats[i].adaptive_visited) {
       out << stats[i].last_adaptive_slot;
@@ -581,16 +624,31 @@ struct LaunchScheduler {
       if (explore) {
         take = original_stats[candidate].last_slot < original_stats[best].last_slot;
       } else {
-        const unsigned __int128 candidate_reward =
-            static_cast<unsigned __int128>(original_reward_points(original_stats[candidate])) *
-            original_stats[best].epochs;
-        const unsigned __int128 best_reward =
-            static_cast<unsigned __int128>(original_reward_points(original_stats[best])) *
-            original_stats[candidate].epochs;
-        if (candidate_reward != best_reward) {
-          take = candidate_reward > best_reward;
+        const unsigned long long candidate_points =
+            original_reward_points(original_stats[candidate]);
+        const unsigned long long best_points =
+            original_reward_points(original_stats[best]);
+        if (candidate_points != 0 || best_points != 0) {
+          const unsigned __int128 candidate_reward =
+              static_cast<unsigned __int128>(
+                  original_score_points(original_stats[candidate])) *
+              original_stats[best].epochs;
+          const unsigned __int128 best_reward =
+              static_cast<unsigned __int128>(
+                  original_score_points(original_stats[best])) *
+              original_stats[candidate].epochs;
+          if (candidate_reward != best_reward) {
+            take = candidate_reward > best_reward;
+          } else {
+            take = original_stats[candidate].last_slot <
+                   original_stats[best].last_slot;
+          }
         } else {
-          take = original_stats[candidate].last_slot < original_stats[best].last_slot;
+          // Preserve the exact neutral oldest-first schedule (and therefore
+          // independent partner-mode parity).  The unit prior is needed only
+          // when finite historical credit is competing with a neutral source.
+          take = original_stats[candidate].last_slot <
+                 original_stats[best].last_slot;
         }
       }
       if (!take && original_stats[candidate].last_slot == original_stats[best].last_slot) {
@@ -634,16 +692,25 @@ struct LaunchScheduler {
         take = descendant_stats[candidate].last_slot <
                descendant_stats[best].last_slot;
       } else {
-        const unsigned __int128 candidate_reward =
-            static_cast<unsigned __int128>(
-                descendant_reward_points(descendant_stats[candidate])) *
-            descendant_stats[best].epochs;
-        const unsigned __int128 best_reward =
-            static_cast<unsigned __int128>(
-                descendant_reward_points(descendant_stats[best])) *
-            descendant_stats[candidate].epochs;
-        if (candidate_reward != best_reward) {
-          take = candidate_reward > best_reward;
+        const unsigned long long candidate_points =
+            descendant_reward_points(descendant_stats[candidate]);
+        const unsigned long long best_points =
+            descendant_reward_points(descendant_stats[best]);
+        if (candidate_points != 0 || best_points != 0) {
+          const unsigned __int128 candidate_reward =
+              static_cast<unsigned __int128>(
+                  descendant_score_points(descendant_stats[candidate])) *
+              descendant_stats[best].epochs;
+          const unsigned __int128 best_reward =
+              static_cast<unsigned __int128>(
+                  descendant_score_points(descendant_stats[best])) *
+              descendant_stats[candidate].epochs;
+          if (candidate_reward != best_reward) {
+            take = candidate_reward > best_reward;
+          } else {
+            take = descendant_stats[candidate].last_slot <
+                   descendant_stats[best].last_slot;
+          }
         } else {
           take = descendant_stats[candidate].last_slot <
                  descendant_stats[best].last_slot;
@@ -725,16 +792,24 @@ struct LaunchScheduler {
       if (explore) {
         take = candidate_stats.last_adaptive_slot < best_stats.last_adaptive_slot;
       } else {
-        const unsigned __int128 candidate_reward =
-            static_cast<unsigned __int128>(role_reward_points(candidate_stats)) *
-            best_stats.epochs;
-        const unsigned __int128 best_reward =
-            static_cast<unsigned __int128>(role_reward_points(best_stats)) *
-            candidate_stats.epochs;
-        if (candidate_reward != best_reward) {
-          take = candidate_reward > best_reward;
+        const unsigned long long candidate_points = role_reward_points(candidate_stats);
+        const unsigned long long best_points = role_reward_points(best_stats);
+        if (candidate_points != 0 || best_points != 0) {
+          const unsigned __int128 candidate_reward =
+              static_cast<unsigned __int128>(role_score_points(candidate_stats)) *
+              best_stats.epochs;
+          const unsigned __int128 best_reward =
+              static_cast<unsigned __int128>(role_score_points(best_stats)) *
+              candidate_stats.epochs;
+          if (candidate_reward != best_reward) {
+            take = candidate_reward > best_reward;
+          } else {
+            take = candidate_stats.last_adaptive_slot <
+                   best_stats.last_adaptive_slot;
+          }
         } else {
-          take = candidate_stats.last_adaptive_slot < best_stats.last_adaptive_slot;
+          take = candidate_stats.last_adaptive_slot <
+                 best_stats.last_adaptive_slot;
         }
       }
       if (!take && candidate_stats.last_adaptive_slot == best_stats.last_adaptive_slot) {
@@ -791,10 +866,12 @@ struct LaunchScheduler {
     return select_role(role, true, original_roots, descendants, global_best, originals);
   }
 
-  void observe(const LaunchChoice& choice, bool exact_novel, bool fleet_best) {
+  void observe(const LaunchChoice& choice, bool exact_novel,
+               bool objective_useful, bool fleet_best) {
     RoleStats& role = role_stats[static_cast<size_t>(choice.role)];
     if (role.epochs == 0) throw std::runtime_error("role outcome has no scheduled visit");
     if (exact_novel) ++role.exact_novel;
+    if (objective_useful) ++role.objective_useful;
     if (fleet_best) ++role.fleet_best;
 
     if (choice.role == LaunchRole::kOriginal) {
@@ -804,6 +881,7 @@ struct LaunchScheduler {
       }
       OriginalSourceStats& stats = original_stats[choice.source_index];
       if (exact_novel) ++stats.exact_novel;
+      if (objective_useful) ++stats.objective_useful;
       if (fleet_best) ++stats.fleet_best;
     } else if (choice.role == LaunchRole::kDescendant) {
       if (choice.source_index >= descendant_stats.size() ||
@@ -812,6 +890,7 @@ struct LaunchScheduler {
       }
       DescendantSourceStats& stats = descendant_stats[choice.source_index];
       if (exact_novel) ++stats.exact_novel;
+      if (objective_useful) ++stats.objective_useful;
       if (fleet_best) ++stats.fleet_best;
     }
   }
@@ -1194,14 +1273,14 @@ int policy_self_test(const std::vector<std::string>& recipe_paths) {
   LaunchScheduler late_descendant;
   for (long long epoch = 0; epoch < 8; ++epoch) {
     const LaunchChoice choice = late_descendant.choose(epoch, roots, {}, root0);
-    late_descendant.observe(choice, false, false);
+    late_descendant.observe(choice, false, false, false);
   }
   bool late_descendant_seen = false;
   for (long long epoch = 8; epoch < 12; ++epoch) {
     const LaunchChoice choice =
         late_descendant.choose(epoch, roots, scheduled_descendants, root0);
     if (choice.role == LaunchRole::kDescendant) late_descendant_seen = true;
-    late_descendant.observe(choice, false, false);
+    late_descendant.observe(choice, false, false, false);
   }
   if (!late_descendant_seen) {
     throw std::runtime_error("newly available descendant role was not explored promptly");
@@ -1220,7 +1299,7 @@ int policy_self_test(const std::vector<std::string>& recipe_paths) {
     if (choice.role == LaunchRole::kDescendant) {
       ++descendant_modes[choice.source_index][static_cast<size_t>(partner_mode)];
     }
-    two_descendants.observe(choice, false, false);
+    two_descendants.observe(choice, false, false, false);
   }
   for (const auto& modes : descendant_modes) {
     if (modes[0] == 0 || modes[1] == 0 || std::abs(modes[0] - modes[1]) > 1) {
@@ -1244,6 +1323,71 @@ int policy_self_test(const std::vector<std::string>& recipe_paths) {
   const int root_max =
       std::max({long_roots[1], long_roots[2], long_roots[3], long_roots[4]});
   if (root_max - root_min > 1) throw std::runtime_error("original roots were not fair");
+
+  if (!globally_competitive_objective(246, 4000, 247, 3094) ||
+      !globally_competitive_objective(247, 3155, 247, 3094) ||
+      globally_competitive_objective(247, 3156, 247, 3094) ||
+      globally_competitive_objective(247, 3492, 247, 3094) ||
+      globally_competitive_objective(248, 3000, 247, 3094)) {
+    throw std::runtime_error("globally competitive objective band regressed");
+  }
+
+  // Pin the live saturation pattern: C013/source 3 has 155 raw exact-novel
+  // outcomes in 208 visits, but no globally competitive candidate, local
+  // objective chain advance, or fleet-best.  Under the old unbounded novelty
+  // mean it won every exploitation slot forever.  The bounded prior must let
+  // less-visited neutral sources catch up while oldest-first exploration still
+  // bounds every gap.
+  LaunchScheduler saturated_novelty;
+  saturated_novelty.original_stats.resize(roots.size());
+  const std::array<unsigned long long, 5> seeded_visits = {0, 18, 18, 208, 18};
+  const std::array<unsigned long long, 5> seeded_last = {0, 240, 241, 261, 242};
+  for (size_t source = 1; source < roots.size(); ++source) {
+    auto& stats = saturated_novelty.original_stats[source];
+    stats.epochs = seeded_visits[source];
+    stats.last_slot = seeded_last[source];
+    stats.visited = true;
+  }
+  saturated_novelty.original_stats[3].exact_novel = 155;
+  saturated_novelty.original_slots = 262;
+  if (original_reward_points(saturated_novelty.original_stats[3]) !=
+          kRawNoveltyCreditCap ||
+      original_score_points(saturated_novelty.original_stats[3]) !=
+          kSchedulerPrior + kRawNoveltyCreditCap) {
+    throw std::runtime_error("raw novelty saturation credit is not bounded");
+  }
+  const std::vector<size_t> saturation_eligible = {1, 2, 3, 4};
+  std::array<unsigned long long, 5> saturation_counts{};
+  std::array<unsigned long long, 5> saturation_probe_counts{};
+  std::array<unsigned long long, 5> saturation_last = seeded_last;
+  constexpr unsigned long long kSaturationProbeSlots = 256;
+  constexpr unsigned long long kSaturationSlots = 4096;
+  for (unsigned long long slot = 0; slot < kSaturationSlots; ++slot) {
+    const size_t source = saturated_novelty.choose_original(saturation_eligible);
+    (void)saturated_novelty.select_original(source, roots);
+    ++saturation_counts[source];
+    saturation_last[source] = saturated_novelty.original_slots - 1;
+    if (slot + 1 == kSaturationProbeSlots) {
+      saturation_probe_counts = saturation_counts;
+    }
+  }
+  const unsigned long long probe_max_neutral =
+      std::max({saturation_probe_counts[1], saturation_probe_counts[2],
+                saturation_probe_counts[4]});
+  const unsigned long long saturation_max_neutral =
+      std::max({saturation_counts[1], saturation_counts[2], saturation_counts[4]});
+  if (saturation_probe_counts[3] >= probe_max_neutral ||
+      saturation_probe_counts[3] * 2 >= kSaturationProbeSlots ||
+      saturation_counts[3] * 2 >= kSaturationSlots ||
+      saturation_counts[3] >= 2 * saturation_max_neutral) {
+    throw std::runtime_error("saturated raw novelty still monopolized source slots");
+  }
+  for (const size_t source : saturation_eligible) {
+    if ((saturated_novelty.original_slots - 1) - saturation_last[source] >
+        kOriginalExploreEvery * saturation_eligible.size()) {
+      throw std::runtime_error("saturation correction weakened source exploration");
+    }
+  }
 
   // Reproduce the observed campaign shape: source 3 emits three exact-novel
   // artifacts (including one fleet best), while every other original stays
@@ -1300,7 +1444,7 @@ int policy_self_test(const std::vector<std::string>& recipe_paths) {
         choice.source_index == 3 && partner_mode == 0 &&
         adaptive.original_stats[3].exact_novel < 3;
     const bool fleet_best = exact_novel && adaptive.original_stats[3].exact_novel == 1;
-    adaptive.observe(choice, exact_novel, fleet_best);
+    adaptive.observe(choice, exact_novel, exact_novel, fleet_best);
   }
   for (size_t source = 1; source < roots.size(); ++source) {
     if (!seen_visit[source] ||
@@ -1349,7 +1493,7 @@ int policy_self_test(const std::vector<std::string>& recipe_paths) {
           choice.source_index == 3 && partner_mode == 0 &&
           adaptive_replay.original_stats[3].exact_novel < 3;
       adaptive_replay.observe(
-          choice, exact_novel,
+          choice, exact_novel, exact_novel,
           exact_novel && adaptive_replay.original_stats[3].exact_novel == 1);
     }
   }
@@ -1380,7 +1524,8 @@ int policy_self_test(const std::vector<std::string>& recipe_paths) {
       descendant_seen[role] = true;
       descendant_last[role] = slot;
     }
-    descendant_adaptive.observe(choice, choice.role == LaunchRole::kDescendant, false);
+    descendant_adaptive.observe(choice, choice.role == LaunchRole::kDescendant,
+                                choice.role == LaunchRole::kDescendant, false);
   }
   for (size_t role = 1; role < descendant_seen.size(); ++role) {
     if (!descendant_seen[role] ||
@@ -1586,8 +1731,8 @@ int policy_self_test(const std::vector<std::string>& recipe_paths) {
     }
 
     // Begin at the final root to catch accidental first-seed assumptions. The
-    // shell regression asserts that the current five-root recipe selects the
-    // first supplied d3094 certificate after objective comparison.
+    // shell regression asserts that the current five-root recipe retains the
+    // final d3094 affine certificate when it ties the first d3094 root.
     Scheme recipe_best = recipe_roots.back();
     improve_objective(recipe_best, recipe_roots);
     size_t best_source = recipe_roots.size();
@@ -1614,6 +1759,14 @@ int policy_self_test(const std::vector<std::string>& recipe_paths) {
             << " adaptive_counts=" << adaptive_counts[1] << ',' << adaptive_counts[2]
             << ',' << adaptive_counts[3] << ',' << adaptive_counts[4]
             << " adaptive_reward=" << original_reward_points(adaptive.original_stats[3])
+            << " saturation_counts_256=" << saturation_probe_counts[1] << ','
+            << saturation_probe_counts[2] << ',' << saturation_probe_counts[3]
+            << ',' << saturation_probe_counts[4]
+            << " saturation_counts_4096=" << saturation_counts[1] << ','
+            << saturation_counts[2] << ',' << saturation_counts[3] << ','
+            << saturation_counts[4]
+            << " saturation_raw_reward="
+            << original_reward_points(saturated_novelty.original_stats[3])
             << " adaptive_roles=" << adaptive_role_counts[0] << ','
             << adaptive_role_counts[1] << ',' << adaptive_role_counts[2]
             << " descendant_roles=" << descendant_role_counts[0] << ','
@@ -2054,18 +2207,18 @@ int policy_status_self_test() {
   PolicyTelemetry policy;
   policy.role_epochs = {18, 31, 18};
   policy.adaptive_role_slots = 50;
-  policy.role_stats[0] = {18, 0, 0, 45, true};
-  policy.role_stats[1] = {31, 3, 1, 49, true};
-  policy.role_stats[2] = {18, 2, 0, 47, true};
+  policy.role_stats[0] = {18, 0, 0, 0, 45, true};
+  policy.role_stats[1] = {31, 3, 2, 1, 49, true};
+  policy.role_stats[2] = {18, 2, 1, 0, 47, true};
   policy.original_slots = 17;
   policy.original_stats.resize(3);
-  policy.original_stats[1] = {4, 0, 0, 12, true};
-  policy.original_stats[2] = {13, 3, 1, 16, true};
+  policy.original_stats[1] = {4, 0, 0, 0, 12, true};
+  policy.original_stats[2] = {13, 3, 2, 1, 16, true};
   policy.descendant_slots = 18;
   policy.descendant_stats.resize(3);
-  policy.descendant_stats[0] = {4, 0, 0, 12, 0, true};
-  policy.descendant_stats[1] = {13, 3, 1, 16, 2, true};
-  policy.descendant_stats[2] = {0, 0, 0, 0, 1, false};
+  policy.descendant_stats[0] = {4, 0, 0, 0, 12, 0, true};
+  policy.descendant_stats[1] = {13, 3, 2, 1, 16, 2, true};
+  policy.descendant_stats[2] = {0, 0, 0, 0, 0, 1, false};
   policy.selected_role = LaunchRole::kDescendant;
   policy.selected_source = 7;
   policy.selected_mode = 1;
@@ -2084,15 +2237,17 @@ int policy_status_self_test() {
       "policy_leader_epochs=18\n", "policy_original_epochs=31\n",
       "policy_descendant_epochs=18\n", "policy_adaptive_role_slots=50\n",
       "policy_role_explore_every=4\n",
-      "role_stats=leader:v18,n0,b0,p0,lastA45;"
-      "original:v31,n3,b1,p11,lastA49;descendant:v18,n2,b0,p2,lastA47\n",
+      "role_stats=leader:v18,n0,u0,b0,p0,lastA45;"
+      "original:v31,n3,u2,b1,p25,lastA49;"
+      "descendant:v18,n2,u1,b0,p5,lastA47\n",
       "selected_role=descendant\n",
       "policy_original_slots=17\n", "policy_original_explore_every=4\n",
-      "original_source_stats=0:v0,n0,b0,p0,last-;1:v4,n0,b0,p0,last12;"
-      "2:v13,n3,b1,p11,last16\n",
+      "original_source_stats=0:v0,n0,u0,b0,p0,last-;"
+      "1:v4,n0,u0,b0,p0,last12;2:v13,n3,u2,b1,p25,last16\n",
       "policy_descendant_slots=18\n", "policy_descendant_explore_every=4\n",
-      "descendant_source_stats=0:g0,v4,n0,b0,p0,last12;"
-      "1:g2,v13,n3,b1,p11,last16;2:g1,v0,n0,b0,p0,last-\n",
+      "descendant_source_stats=0:g0,v4,n0,u0,b0,p0,last12;"
+      "1:g2,v13,n3,u2,b1,p25,last16;"
+      "2:g1,v0,n0,u0,b0,p0,last-\n",
       "selected_source=7\n", "selected_kernel=hash\n", "epoch_door_action=4\n",
       "epoch_door_score=19\n", "epoch_door_source_replacement=1\n",
       "harvest_top_k=8\n",
@@ -2722,6 +2877,7 @@ int run_campaign(const Config& config) {
     DoorAdmission door_admission;
     std::vector<std::pair<int, size_t>> descendant_stats_actions;
     bool epoch_exact_novel = false;
+    bool epoch_objective_useful = false;
     bool epoch_fleet_best = false;
 
     struct DownloadedCandidate {
@@ -2823,6 +2979,12 @@ int run_campaign(const Config& config) {
       // the source-aware one-parent exception.
       if (absolute_winner) {
         epoch_exact_novel = novel;
+        const bool globally_competitive =
+            novel && globally_competitive_objective(
+                         static_cast<int>(candidate.terms.size()),
+                         downloaded.computed_density,
+                         static_cast<int>(global_best.terms.size()),
+                         density(global_best));
         if (novel) {
           door_admission = admit_harvested_descendant(
               original_roots, descendants, candidate, descendant_capacity,
@@ -2836,6 +2998,8 @@ int run_campaign(const Config& config) {
         } else {
           outcome = "exact-duplicate";
         }
+        epoch_objective_useful =
+            globally_competitive || door_admission.source_replacement;
         if (objective_better(candidate, global_best)) {
           epoch_fleet_best = true;
           global_best = candidate;
@@ -2860,7 +3024,8 @@ int run_campaign(const Config& config) {
     // this epoch. Then synchronize every bank mutation, including auxiliary
     // top-K admissions: a replaced slot must not lend its parent's reward or
     // scan/hash parity to the newly promoted child.
-    scheduler.observe(choice, epoch_exact_novel, epoch_fleet_best);
+    scheduler.observe(choice, epoch_exact_novel, epoch_objective_useful,
+                      epoch_fleet_best);
     for (const auto& action : descendant_stats_actions) {
       scheduler.note_descendant_admission(action.first, action.second);
     }

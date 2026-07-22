@@ -10,8 +10,8 @@ SEEDS="
 $PRIMARY_SEED
 $SEED_DIR/matmul_7x7_rank247_d3096_dynamic_syzygy_gf2.txt
 $SEED_DIR/matmul_7x7_rank247_d3096_partial_auto_beam_far_cuda_epoch1849_gf2.txt
-$SEED_DIR/matmul_7x7_rank247_d3554_outer_isotropy_c013_m7_gf2.txt
-$SEED_DIR/matmul_7x7_rank247_d3096_affine_code_cuda_epoch3306_gf2.txt
+$SEED_DIR/matmul_7x7_rank247_d3542_c013_runpod_cuda_epoch1965_g6417_gf2.txt
+$SEED_DIR/matmul_7x7_rank247_d3094_affine_code_cuda_epoch257_gf2.txt
 "
 TEST_BIN=${TMPDIR:-/tmp}/metaflip-cuda-777-host-test-$$
 ERROR_LOG=${TMPDIR:-/tmp}/metaflip-cuda-777-host-test-error-$$
@@ -27,8 +27,8 @@ done
 POLICY_OUTPUT=$("$TEST_BIN" --policy-self-test $SEEDS)
 printf '%s\n' "$POLICY_OUTPUT"
 if ! printf '%s\n' "$POLICY_OUTPUT" | \
-    grep -qx 'CUDA777_POLICY_RECIPE_SELF_TEST ok roots=5 best_source=0 rank=247 density=3094'; then
-  echo "CUDA777_SELF_TEST five-root recipe did not select the d3094 objective leader" >&2
+    grep -qx 'CUDA777_POLICY_RECIPE_SELF_TEST ok roots=5 best_source=4 rank=247 density=3094'; then
+  echo "CUDA777_SELF_TEST five-root recipe did not retain the d3094 affine objective leader" >&2
   exit 1
 fi
 if ! printf '%s\n' "$POLICY_OUTPUT" | \

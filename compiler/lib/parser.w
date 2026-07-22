@@ -1160,6 +1160,11 @@ use ../../core/token
       if node.receiver == nil
         raise compile_error_at(:E_PARSE_INVALID_ASSIGN_TARGET, "Cannot assign to a bare function call — did you mean a setter via `ast_set(...)` or `obj.method = ...`?")
       return node
+    # PascalCase identifiers parse as class_ref (e.g. `Wit`, `FooBar`,
+    # `WIT_keys`). They are not assignable variables. SCREAMING_SNAKE
+    # (`WIT_KEYS`, `GOOD_7`) and snake_case (`wit_keys`) are fine.
+    if ast_kind(node) == :class_ref
+      raise compile_error_at(:E_PARSE_INVALID_ASSIGN_TARGET, "Cannot assign to PascalCase name `[node.name]` — it is a class reference. Use snake_case or SCREAMING_SNAKE for variables (e.g. `wit_keys` or `WIT_KEYS`).")
     raise compile_error_at(:E_PARSE_INVALID_ASSIGN_TARGET, "Invalid assignment target")
 
   # -- Ranges --

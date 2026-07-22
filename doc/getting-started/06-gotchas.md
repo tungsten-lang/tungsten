@@ -253,11 +253,30 @@ Forgetting this looks like a mysterious missing constant.
 
 ---
 
+## PascalCase is not a variable name
+
+Identifiers with an uppercase letter followed later by a lowercase letter
+(`FooBar`, `Wit`, `WIT_keys`) parse as **class references**, not variables.
+Assigning to them raises `E_PARSE_INVALID_ASSIGN_TARGET`.
+
+```tungsten
+# bad — class_ref
+WIT_keys = [1, 2, 3]
+
+# good — SCREAMING_SNAKE or snake_case
+WIT_KEYS = [1, 2, 3]
+wit_keys = [1, 2, 3]
+GOOD_7 = [1, 5]          # digits are fine in SCREAMING_SNAKE
+```
+
+---
+
 ## Quick recovery checklist
 
 | Symptom | Likely cause | Try |
 | ------- | ------------ | --- |
 | Syntax error at a surprising indent | Dedent / tabs | Spaces only; reindent |
+| `Invalid assignment target` on `Foo=…` | PascalCase → class_ref | Use `snake_case` or `SCREAMING_SNAKE` |
 | Feature works in docs, fails quick run | Compiled-only construct | `bin/tungsten -o …` |
 | Slow loop / growing RSS | Default `Int` bignums | `## i64` on hot vars |
 | `a/b` not dividing | MAP lex | `a / b` with spaces |

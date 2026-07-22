@@ -105,6 +105,10 @@ use metaflip_worker
   state[11] = controls[5]
   state[41] = controls[6]
   if selected == 8
+    # Splits are rejected above best+band.  A seed starts with a randomized
+    # band in 1..4, so make the arm's promised +4 shoulder reachable.
+    if state[10] < 4
+      state[10] = 4
     target_rank = ffw_current_rank(state) + 4 ## i64
     tries = 0 ## i64
     while ffw_current_rank(state) < target_rank && tries < 16384

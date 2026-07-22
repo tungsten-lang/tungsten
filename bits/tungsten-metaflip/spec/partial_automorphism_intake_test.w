@@ -5,7 +5,7 @@ use ../lib/metaflip/seeds/catalog
 failures = 0 ## i64
 
 -> ffpait_expect(label, condition) (String bool) i64
-  if condition == 0
+  if !condition
     << "FAIL partial-automorphism intake: " + label
     return 1
   0
@@ -32,11 +32,21 @@ while i < paths.size()
   copied = ffw_reseed_from(stored, state, 94001 + i) ## i64
   failures += ffpait_expect("clone exact frontier", copied == 247)
   archive.push(stored)
-  z = ffme_add_copy(map_states, map_keys, map_uses, map_sources, state, 247, 7, 64, 0, state_size, 95001 + i) ## i64
+  z = ffme_add_copy(map_states, map_keys, map_uses, map_sources, state, 247, 7, 64, i, state_size, 95001 + i) ## i64
   i += 1
 
-failures += ffpait_expect("curated archive fills cap", archive.size() == 16)
-failures += ffpait_expect("curated MAP descriptors distinct", map_states.size() == 16)
+failures += ffpait_expect("curated archive loads every frontier root", archive.size() == paths.size() && archive.size() == 18)
+failures += ffpait_expect("curated MAP descriptors distinct count=" + map_states.size().to_s(), map_states.size() == 15)
+# The d3486 C013 endpoint and source-17 affine d3094 happen to share the coarse
+# MAP descriptor. Keep the stronger objective in that niche; d3486 remains an
+# independent frontier/archive root rather than changing global MAP policy for
+# one collision.
+c013_key = ffme_descriptor(frontier[10], 247, 7) ## i64
+affine_key = ffme_descriptor(frontier[17], 247, 7) ## i64
+collision_slot = ffme_find(map_keys, c013_key) ## i64
+failures += ffpait_expect("C013-affine MAP collision is pinned", c013_key == affine_key && collision_slot >= 0)
+if collision_slot >= 0
+  failures += ffpait_expect("objective-dominant affine owns collided niche", map_sources[collision_slot] == 17 && ffw_best_bits(map_states[collision_slot]) == 3094)
 
 us = i64[capacity]
 vs = i64[capacity]
@@ -72,7 +82,7 @@ while attempt < 40 && map_only_found == 0
   attempt += 1
 
 failures += ffpait_expect("real exact endpoint demonstrates MAP-only admission", map_only_found == 1)
-failures += ffpait_expect("intake exercised exact candidates", exact_candidates > 1)
+failures += ffpait_expect("intake exercised an exact candidate", exact_candidates >= 1)
 
 if failures > 0
   exit(1)

@@ -4,8 +4,8 @@ use flipfleet_block_leaf_pool
 # block records which use that leaf 39 and 47 times.  Prepending the variant
 # deliberately overrides the stable d160 tie without changing formula scoring.
 
--> ffb235_expect(label, condition)
-  if condition != 0
+-> ffb235_expect(label, condition) (String bool) i64
+  if condition
     return 1
   << "BLOCK_235_VARIANT_FAIL " + label
   exit(1)

@@ -68,6 +68,24 @@ slot0_body = read_file(ffrda_path(best_path, 0))
 slot1_body = read_file(ffrda_path(best_path, 1))
 z = ffrdat_expect("stale slots clear atomically", saved == 0 && clear_stats[3] == 0 && slot0_body != nil && slot0_body.size() == 0 && slot1_body != nil && slot1_body.size() == 0)
 
+# A long standalone/spot campaign checkpoints barrier-stable island bests
+# before graceful exit.  The helper must reconstruct existing slots, retain a
+# distinct live basin, and publish it without mutating the source state.
+z = ffrdat_expect("side checkpoint cadence waits", ffrc_side_checkpoint_due(1, 1000, 899999, 0) == 0)
+z = ffrdat_expect("side checkpoint cadence fifteen minutes", ffrc_side_checkpoint_due(1, 1000, 901000, 0) == 1)
+z = ffrdat_expect("leader adoption checkpoint after one minute", ffrc_side_checkpoint_due(1, 1000, 61000, 1) == 1)
+live_states = []
+live_states.push(door)
+prior = []
+anchors = []
+checkpoint_stats = i64[4]
+checkpointed = ffrda_checkpoint_live(best_path, leader, anchors, live_states, prior, n, m, p, capacity, 94501, dslack, cycles, workq, wanderq, "rect-side-test-live", 225, checkpoint_stats) ## i64
+z = ffrdat_expect("live side checkpoint writes one door", checkpointed == 1 && checkpoint_stats[2] == 1 && checkpoint_stats[3] == 0)
+checkpoint_bank = []
+checkpoint_load_stats = i64[4]
+loaded = ffrda_load(best_path, leader, n, m, p, capacity, 94601, dslack, cycles, workq, wanderq, checkpoint_bank, checkpoint_load_stats)
+z = ffrdat_expect("live side checkpoint reloads exactly", loaded == 1 && ffrda_same_best(door, checkpoint_bank[0]) == 1 && ffr_verify_best_exact(door, n, m, p) == 1)
+
 # Reset is a durable boundary, not merely an in-process load guard. Repopulate
 # a record-rank side door, reset to schoolbook, and prove a fresh process would
 # see empty side slots and the naive checkpoint.

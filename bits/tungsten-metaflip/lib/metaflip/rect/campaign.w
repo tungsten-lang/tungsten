@@ -111,6 +111,20 @@ use doors
       return 0
   1
 
+# Persist independent rectangular basins on a cold coordinator cadence.  A
+# leader adoption receives a faster one-minute checkpoint; otherwise fifteen
+# minutes bounds potential spot-instance loss without putting filesystem or
+# structural-distance work in the search epochs' hot path.
+-> ffrc_side_checkpoint_due(enabled, last_ms, now_ms, adopted) (i64 i64 i64 i64) i64
+  if enabled == 0 || now_ms <= last_ms
+    return 0
+  elapsed = now_ms - last_ms ## i64
+  if adopted != 0 && elapsed >= 60000
+    return 1
+  if elapsed >= 900000
+    return 1
+  0
+
 -> ffrc_atomic_write(path, body, run_tag, nonce) (String String String i64) i64
   tmp_buffer = StringBuffer(path.size() + run_tag.size() + 48) ## reuse
   tmp_buffer << path
@@ -826,7 +840,8 @@ use doors
   while lane < walkers
     start_channel = Channel.new(1)
     cpu_start_channels.push(start_channel)
-    cpu_threads.push(ffrcp_spawn(states, lane, phase_moves, elapsed_cpu, start_channel, cpu_done_channel))
+    split_cadence = ffrcp_split_cadence(n, m, p, lane, walkers, restart_door_ticket) ## i64
+    cpu_threads.push(ffrcp_spawn(states, lane, phase_moves, split_cadence, elapsed_cpu, start_channel, cpu_done_channel))
     lane += 1
   cpu_moves = 0 ## i64
   cpu_ms = 0 ## i64
@@ -846,6 +861,8 @@ use doors
   round = 0 ## i64
   running = 1 ## i64
   start_ms = ccall("__w_clock_ms") ## i64
+  last_side_checkpoint_ms = start_ms ## i64
+  side_archive_checkpoints = 0 ## i64
   trap_ok = ccall("__w_trap_interrupts")
 
   # Dashboard state: adoption counters, run-length sparkline histories, the
@@ -1301,7 +1318,17 @@ use doors
               status_degraded = 1
               flash_text = "fleet best reset to naive; checkpoint write failed"
             if reset_saved >= 1
-              flash_text = "fleet best and rank timeline reset to naive (r" + ffr_best_rank(best).to_s() + ")"
+              side_cleared = ffrda_clear(best_path, run_tag + "-manual-naive", round + 210000) ## i64
+              if side_cleared == 1
+                side_archive.clear
+                side_archive_loaded = 0
+                side_archive_seeded = 0
+                archive_enabled = 0
+                last_side_checkpoint_ms = now_ms
+                flash_text = "fleet best, rank timeline, and side doors reset to naive (r" + ffr_best_rank(best).to_s() + ")"
+              if side_cleared == 0
+                status_degraded = 1
+                flash_text = "fleet best reset to naive; side-door clear failed"
           if naive_best == nil
             flash_text = "naive reseed failed exact best clone; fleet best unchanged"
           flash_until_ms = now_ms + 4000
@@ -1337,6 +1364,21 @@ use doors
         keys_seen += 1
         key = ccall("w_input_poll", 0) ## i64
 
+    # Island threads and accelerator children are all joined here. Snapshot
+    # their monotonic exact bests to the bounded side archive without rebasing
+    # or otherwise disturbing a sticky basin.
+    checkpoint_due = ffrc_side_checkpoint_due(archive_enabled, last_side_checkpoint_ms, now_ms, adopted) ## i64
+    if checkpoint_due != 0 && naive_seed == 0
+      checkpoint_seed = ffrcb_seed(89501 + side_archive_checkpoints * 211, restart_nonce, round, side_archive_checkpoints) ## i64
+      checkpointed = ffrda_checkpoint_live(best_path, best, frontier_anchors, states, side_archive, n, m, p, capacity, checkpoint_seed, dslack, cycles, workq, wanderq, run_tag, round + 300000, side_archive_stats) ## i64
+      if checkpointed < 0
+        status_degraded = 1
+      if checkpointed >= 0
+        side_archive_checkpoints += 1
+        last_side_checkpoint_ms = ccall("__w_clock_ms")
+      now_ms = ccall("__w_clock_ms")
+      elapsed_s = (now_ms - start_ms) / 1000
+
     sequence += 1
     # A portfolio parent polls child telemetry at 50 ms and publishes at one
     # second cadence. Avoid an atomic temp-file/rename on every fast CPU round;
@@ -1346,7 +1388,7 @@ use doors
     if status_due != 0
       status = ffrc_status_body("running", sequence, tensor, record, record_known, best, walkers, cpu_moves, cpu_ms, gpu_requested, gpu_supported, gpu_ready, lanes, gpu_moves, gpu_ms, gpu_failures, exact_rejects, elapsed_s)
       status = status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " cpu_leader_lanes=" + cpu_leader_lanes.to_s() + " cpu_side_lanes=" + cpu_side_lanes.to_s() + " block_attempts=" + block_stats[0].to_s() + " block_local=" + block_stats[1].to_s() + " block_exact=" + block_stats[2].to_s() + " block_drops=" + block_stats[3].to_s() + " block_density=" + block_stats[4].to_s() + " block_neutral=" + block_stats[5].to_s() + " block_ms=" + block_ms.to_s() + " block_period=" + block_period.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
-      status = status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
+      status = status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_checkpoints=" + side_archive_checkpoints.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
       status_ok = ffrc_atomic_write(status_path, status, run_tag, sequence)
       if status_ok == 1
         last_status_ms = now_ms
@@ -1423,6 +1465,20 @@ use doors
       if action < 0
         side_archive_stats[1] += 1
       si += 1
+    # Periodic checkpoint slots may contain a door whose original island was
+    # subsequently rebased. Reload those exact files before the final max-min
+    # selection so graceful exit is at least as durable as abrupt spot loss.
+    latest_side_archive = []
+    latest_side_stats = i64[4]
+    latest_seed = ffrcb_seed(87401, restart_nonce, sequence, side_archive_checkpoints) ## i64
+    z = ffrda_load_anchored(best_path, best, frontier_anchors, n, m, p, capacity, latest_seed, dslack, cycles, workq, wanderq, latest_side_archive, latest_side_stats)
+    side_archive_stats[1] += latest_side_stats[1]
+    si = 0
+    while si < latest_side_archive.size()
+      action = ffrda_collect_unique(exit_doors, latest_side_archive[si], best, n, m, p)
+      if action < 0
+        side_archive_stats[1] += 1
+      si += 1
     z = ffrda_select_diverse_anchored(exit_doors, best, frontier_anchors, ffrda_cap(), selected_doors) ## i64
     saved_doors = ffrda_save(best_path, selected_doors, run_tag, sequence + 400000, side_archive_stats) ## i64
     if side_archive_stats[3] > 0
@@ -1432,7 +1488,7 @@ use doors
   final_elapsed_s = (final_ms - start_ms) / 1000 ## i64
   final_status = ffrc_status_body("stopped", sequence + 1, tensor, record, record_known, best, walkers, cpu_moves, cpu_ms, gpu_requested, gpu_supported, gpu_ready, lanes, gpu_moves, gpu_ms, gpu_failures, exact_rejects, final_elapsed_s)
   final_status = final_status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " cpu_leader_lanes=" + cpu_leader_lanes.to_s() + " cpu_side_lanes=" + cpu_side_lanes.to_s() + " block_attempts=" + block_stats[0].to_s() + " block_local=" + block_stats[1].to_s() + " block_exact=" + block_stats[2].to_s() + " block_drops=" + block_stats[3].to_s() + " block_density=" + block_stats[4].to_s() + " block_neutral=" + block_stats[5].to_s() + " block_ms=" + block_ms.to_s() + " block_period=" + block_period.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
-  final_status = final_status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
+  final_status = final_status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_checkpoints=" + side_archive_checkpoints.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
   status_ok = ffrc_atomic_write(status_path, final_status, run_tag, sequence + 1)
   saved = ffrc_dump_atomic(best, best_path, run_tag, sequence + 100000) ## i64
   if saved < 1

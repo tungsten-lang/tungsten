@@ -14,10 +14,17 @@ operators that need spaces (`n / 2` vs map `arr/map`). See
 ## E_PARSE_INVALID_ASSIGN_TARGET
 
 The left-hand side of `=` is not something that can be assigned (for example
-a bare expression or a call that is not `[]=` / a setter).
+a bare expression, a call that is not `[]=` / a setter, or a PascalCase
+name).
 
 **Fix:** Assign to a local, `@ivar`, `@@cvar`, `$global`, or a call of the form
 `obj.field =` / `arr[i] =`.
+
+**PascalCase pitfall:** identifiers that look like class names
+(`FooBar`, `Wit`, `WIT_keys` — any name with an uppercase letter followed
+later by a lowercase letter) parse as `class_ref` and cannot be assigned.
+Use `snake_case` (`wit_keys`) or `SCREAMING_SNAKE` (`WIT_KEYS`, `GOOD_7`)
+for variables and constants.
 
 ## E_LEX_UNEXPECTED_CHAR
 

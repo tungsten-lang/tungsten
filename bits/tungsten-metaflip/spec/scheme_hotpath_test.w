@@ -6,7 +6,7 @@ use ../lib/metaflip/rect
 failures = 0 ## i64
 
 -> hot_expect(label, condition) (String bool) i64
-  if condition == 0
+  if !condition
     << "FAIL " + label
     return 1
   0
@@ -77,6 +77,8 @@ failures = 0 ## i64
   ok = 1 ## i64
   if ffw_pressure(st,u0,v0,w0) != expected0
     ok = 0
+  if ffw_pressure_pair_balanced(st,u0,v0,w0,u1,v1,w1) != expected0 + expected1
+    ok = 0
   if ffw_pressure_raw(data,1,u0,v0,w0) != expected0 || ffw_pressure_batch_raw(data,1,u0,v0,w0,u1,v1,w1,2) != expected0 + expected1
     ok = 0
   if ffw_pressure_raw(data,2,u0,v0,w0) != expected0 || ffw_pressure_batch_raw(data,2,u0,v0,w0,u1,v1,w1,2) != expected0 + expected1
@@ -138,6 +140,26 @@ failures = 0 ## i64
       axis += 1
     i += 1
   true
+
+# Batched flip RNG must be precisely two scalar draws, including the stored
+# continuation state used by deterministic worker replay.
+rng_cap = ffw_default_capacity(3) ## i64
+rng_scalar = i64[ffw_state_size(rng_cap)]
+rng_paired = i64[ffw_state_size(rng_cap)]
+rng_scalar_ok = ffw_prepare(rng_scalar,3,rng_cap,1700,0,1,1,1) ## i64
+rng_paired_ok = ffw_prepare(rng_paired,3,rng_cap,1700,0,1,1,1) ## i64
+rng_match = 1 ## i64
+rng_round = 0 ## i64
+while rng_round < 512
+  scalar_first = ffw_rand31(rng_scalar) ## i64
+  scalar_second = ffw_rand31(rng_scalar) ## i64
+  paired_words = ffw_rand31_pair(rng_paired) ## i64
+  paired_first = paired_words & 2147483647 ## i64
+  paired_second = (paired_words >> 31) & 2147483647 ## i64
+  if scalar_first != paired_first || scalar_second != paired_second || rng_scalar[8] != rng_paired[8] || rng_scalar[9] != rng_paired[9]
+    rng_match = 0
+  rng_round += 1
+failures += hot_expect("paired RNG exactly matches scalar replay", rng_scalar_ok == 1 && rng_paired_ok == 1 && rng_match == 1)
 
 # Exercise accepted and rejected rank-neutral flips plus rank-raising splits.
 square_cap = ffw_default_capacity(3) ## i64

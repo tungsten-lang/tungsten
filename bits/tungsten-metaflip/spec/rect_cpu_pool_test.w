@@ -1,6 +1,16 @@
 use ../lib/metaflip/rect
 use ../lib/metaflip/rect/cpu_pool
 
+if ffrcp_split_cadence(3, 3, 4, 0, 1, 1) != 2000
+  << "FAIL rectangular CPU cadence leaked to another shape"
+  exit(1)
+if ffrcp_split_cadence(2, 2, 9, 0, 4, 0) != 2000 || ffrcp_split_cadence(2, 2, 9, 2, 4, 0) != 2000 || ffrcp_split_cadence(2, 2, 9, 3, 4, 0) != 8000
+  << "FAIL rectangular CPU cadence wide-shard lane"
+  exit(1)
+if ffrcp_split_cadence(2, 2, 9, 0, 1, 0 - 1) != 2000 || ffrcp_split_cadence(2, 2, 9, 0, 1, 0) != 2000 || ffrcp_split_cadence(2, 2, 9, 0, 1, 1) != 8000 || ffrcp_split_cadence(2, 2, 9, 0, 1, 2) != 2000
+  << "FAIL rectangular CPU cadence one-worker alternation"
+  exit(1)
+
 n = 2 ## i64
 m = 2 ## i64
 p = 5 ## i64
@@ -28,7 +38,10 @@ lane = 0
 while lane < workers
   start = Channel.new(1)
   starts.push(start)
-  threads.push(ffrcp_spawn(states, lane, phase_moves, elapsed, start, done))
+  split_cadence = 2000 ## i64
+  if lane == 1
+    split_cadence = 8000
+  threads.push(ffrcp_spawn(states, lane, phase_moves, split_cadence, elapsed, start, done))
   lane += 1
 
 lane = 0
@@ -75,6 +88,9 @@ if ffr_moves(old_lane0) != 10000
   exit(1)
 if ffr_moves(states[0]) != 10000 || ffr_moves(states[1]) != 20000
   << "FAIL rectangular CPU pool second epoch moves=" + ffr_moves(states[0]).to_s() + "/" + ffr_moves(states[1]).to_s()
+  exit(1)
+if ffw_split_attempts(states[1]) < 1
+  << "FAIL rectangular CPU pool cold cadence never attempted a split"
   exit(1)
 if ffr_verify_current_exact(states[0], n, m, p) != 1 || ffr_verify_current_exact(states[1], n, m, p) != 1
   << "FAIL rectangular CPU pool exactness"

@@ -1445,3 +1445,154 @@ doors, so unused capacity remained empty rather than admitting weak or
 inexact states. Rectangular checkpoints now persist up to eight exact side
 doors, raising the full 4x6x7 child from six to ten distinct initial sources
 without forcing every shape to manufacture eight.
+
+## 2026-07-21: productive pockets, selective motion, and a smaller proof search
+
+Three independent experiments sharpened the distinction between moving faster
+and reaching a more fertile basin. First, the fixed-rank pocket search turned
+a bounded sequence of support-overlap choices into a deterministic exact
+closure. From the C013-derived 7x7 rank-247/d3554 presentation, seven accepted
+steps reach d3496. A three-gain ordinal-one prefix followed by complete ticket
+rescans reduces the replay from 50.7 million to 31.6 million proposals without
+changing its endpoint. The GPU campaign later rediscovered d3492, but exact
+support normalization showed that candidate to be the same 247-term support as
+an existing epoch-67 certificate. It nevertheless dominates the nearby d3496
+shoulder in matched continuations, so d3492 now occupies that active catalog
+slot while the structurally distant d3094 scheme remains the density leader.
+
+Second, one cold CPU racer now retries the other two factor axes when a selected
+term has no partner on its first random axis. Matched native trials raised
+accepted exact flips per second by about 31% on 3x3, 36% on 5x5, and 19% on
+7x7, with distinct exact endpoints and no change to ordinary islands. The
+same test was deliberately not generalized on motion alone. On 4x4x5 and
+4x5x7, rectangular motion rose about 28--31%, but paired ordinary
+continuations were worse or tied and never beat the source rank or density.
+A second-term collision retry likewise produced no rank or packaged-density
+win in 324 exact continuations. Those two variants remain reproducible offline
+benchmarks rather than consuming production lanes.
+
+Third, the open psi-symmetric rank-17 cells for `<2,5,2>` received an exact SAT
+quotient. A psi-closed scheme has equal coefficients on the induced cell pair
+
+`u(i,j)v(j2,k)w(i2,k2)` and `u(k,j2)v(j,i)w(k2,i2)`.
+
+The 400 Brent equations therefore collapse to 210 involution orbits. On the
+20 fixed cells, conjugate-pair products cancel over GF(2); duplicate U/wired-V
+inputs also reduce to ordinary two-input products. Lexicographic leaders
+orient every unordered `{X,psi(X)}` pair, sort pair and fixed generators, and
+anchor the coordinate orbit at U(0,0). The fixed generators' W diagonals are
+also required explicitly to span the two-dimensional fixed-cell target. For
+each inner coordinate, the two fixed-U row vectors are likewise required to
+be nonzero and unequal: the fixed-cell equations map them to the two distinct
+outer basis vectors. Both rank consequences are implied by the full equations
+but expose their propagation structure directly to CDCL.
+
+The resulting four open formulas contain 3,762--3,909 variables and
+14,780--15,005 clauses, roughly half the earlier symmetry-broken full-row
+instances. In `(c,f)` order `(7,3),(6,5),(5,7),(4,9)`, the exact
+variable/clause counts are `3762/14780`, `3811/14855`, `3860/14930`, and
+`3909/15005`. Header counts, maximum variable indices, and physical clause
+counts agree exactly. The planted psi-symmetric 2x2 rank-7 cell remains SAT;
+2x2 rank 6 and the one-fixed-generator `<2,5,2>` rank-17 cell remain UNSAT.
+The pure-Tungsten in-process CDCL path now applies the same quotient. On the
+c8f1 control it falls from 13,253 variables and 53,517 clauses to 6,553 and
+26,287; a matched c8f2 60,000-conflict probe falls from 5.35 to 3.12 seconds.
+The full-row encoder remains available as an independent exact control.
+The underlying in-process CDCL solver also stopped treating reserved variable
+capacity as logical search state. Before this fix, a formula using two
+variables in a 4,096-variable arena made 4,096 decisions; it now makes at most
+two. This removes irrelevant decision levels from every SAT-backed move and
+makes capacity headroom independent of the proof trajectory.
+Twelve earlier single-thread solves compared quotient-only,
+orientation-canonical, and coordinate-anchored encodings across the four open
+partitions. They were externally interrupted after about 1 hour 41 minutes to
+1 hour 54 minutes, before their configured limits, and none emitted a SAT,
+UNSAT, indeterminate, or final-statistics record. They therefore certify
+nothing; all four cells remain open. Matched 5-second and 30-second screens of
+the final inner-weight quotient were neutral to slightly positive, reducing
+aggregate decisions by 2.30% and 0.86%, respectively. The exact model-set
+reduction is retained, but this remains a proof-search improvement rather
+than a new decomposition or completed lower bound.
+
+## 2026-07-21: a 120-trillion-move cloud campaign finds better doors, not a lower rank
+
+A 384-vCPU `m8i.96xlarge` campaign spent about 5.5 hours on one 7x7 fleet and
+five high-leverage rectangular fronts. The rectangular workers completed
+112,175,392,000,000 moves and the 7x7 worker completed 8,146,068,954,609,
+for 120,321,460,954,609 moves in aggregate. The best ranks and densities did
+not improve: `<2,2,5>` stayed r18/d84, `<2,2,9>` r32/d156, `<3,3,4>`
+r29/d204, `<3,4,4>` r38/d280, `<2,5,6>` r47/d438, and 7x7 r247/d3094.
+There were no exact-gate rejects, worker failures, stale workers, or OOMs.
+
+The negative record result still produced useful restart geometry. The 7x7
+near-one bank contains an exact r248/d2946 scheme: six factor bits below the
+previous packaged r248/d2952 shoulder, at the maximum possible support
+distance 495 from the r247 leader. It is only distance 12 from the earlier
+Sedoglavic shoulder, but it is not a planted split. Normalizing term order
+shows that it exactly rediscovers the separately curated r248/d2946 support,
+so Metaflip promotes that canonical presentation instead of publishing a
+duplicate certificate. It becomes the rank-248 density leader in the
+operational seed corpus. A second exact
+r248/d3092 scheme lies only 19
+terms from the r247 leader while being two factor bits lighter, making it a
+particularly clean low-debt door. The rectangular archives also produced
+term-disjoint exact same-rank doors at `<2,2,5>` r18/d141, `<3,3,4>`
+r29/d249, and `<3,4,4>` r38/d310. Their density is worse than the leaders,
+but their maximum support distance makes them valuable alternate basins.
+
+All 109 harvested schemes—64 7x7 shoulders and 45 rectangular leaders or side
+doors—passed a second, independent pure-Tungsten expansion of every GF(2)
+coefficient. Source-side SHA-256 hashes for all 136 harvested files also
+verify locally. The original 100-GB EBS volume remains preserved in addition
+to the local harvest. Spot compute cost about $12.17; EBS, IPv4, and the tiny
+transfer add roughly twenty cents so far. The retained gp3 volume continues at
+about $9.12/month until it is deleted.
+
+The same campaign work added a full-width Metal worker for `<4,6,7>`, whose
+42-bit middle factor had previously excluded that high-leverage shape from
+the GPU portfolio. At equal work, 512 lanes and 204.8 million moves, it ran at
+about 16.0 million moves/second versus 16.9 million for the analogous `<4,5,7>`
+control—only 5.3% slower despite the wider factor. It is therefore viable for
+explicit rectangular GPU campaigns, without displacing narrower default
+fronts merely because it now fits.
+
+A frugal RTX 4090 campaign completed 2,348 epochs and 9,617,408,000,000
+attempted moves in 19,806 seconds of search time. It examined
+753,215,661,933 eligible partners, downloaded and exact-gated 11,527
+candidates, reported 4,988 novel schemes, and recorded zero device exact
+rejects. Its final main archive contains 5,038 files representing 5,034 unique
+normalized term multisets; the launch-parameter sweeps contribute another 50
+files. A separate host verifier rebuilt all 117,649 coefficients for every
+main and sweep artifact plus `best.txt`: all 5,089 checks passed. The side CPU
+campaign added 4,773,600,000,000 exact `<4,4,5>` moves and remained at
+rank 60/density 628 with no exact rejects or block rank drops.
+
+The campaign did not lower rank, but the final archive contains a second exact
+rank-247/density-3094 support. It shares only 49 of 247 terms with the hot
+d3094 leader, yet is a distance-six child of the affine-code d3096 CUDA door.
+The epoch-257 original-source scan found it as a single three-term exchange:
+three removed terms have combined density 34 and three replacements density
+32. The artifact is unique in the complete archive. In 48 canonicalized,
+matched four-million-move continuations it tied the incumbent d3094 in all 48
+trials and beat its d3096 parent in all 48, with every retained and live
+endpoint full-gated. Metaflip therefore uses it to replace only the dominated
+affine-code frontier slot; the original d3094 remains the hot default.
+
+The full archive triage found a second productive route in the C013 family.
+Epoch 1965/group 6417 is an exact r247/d3542 support at minimum packaged
+distance 62. In 24 canonicalized, matched four-million-move continuations it
+beat the earlier epoch-27 d3538 source 24/24 and the active d3492 child 23/24,
+with one tie. Three independent RNG trials converged to the identical exact
+r247/d3486 support. That endpoint is distance 20 from d3492 and distance 494
+from the global d3094 leader; a direct 96-million-move stability probe left it
+unchanged in all 24 trials. Metaflip therefore replaces the active C013 d3492
+slot with d3486 and uses d3542 as the sole cold doorway. The older d3492,
+d3496, and d3538 artifacts remain explicit replay provenance. This is a
+productive alternate-basin refinement, not a global density or rank record.
+
+The final Runpod copy contains 5,141 source-manifested files. Every local byte
+matches the SHA-256 manifest created on the stopped campaign state, and the
+pod's 10-GB persistent disk remains undeleted as a second copy. The GPU search
+itself cost about $3.80, but the pod stayed allocated for roughly 7.8 hours
+after `phase=done`; the resulting Runpod bill is about $9.3. That operational
+miss motivates a host-side harvest-then-stop guard before another campaign.

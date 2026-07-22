@@ -496,6 +496,18 @@
     @sock.write(chunk)
     nil
 
+  # b: u8[] of COPY text, sent whole (b.size bytes) as one CopyData frame.
+  # The no-String twin of copy_write for allocation-disciplined callers
+  # (chessbot flushes stream a pooled buffer in chunks through this).
+  -> copy_write_bytes(b)
+    raise "PG: no COPY in progress" if !@copying
+    header = []
+    header.push(100)                 # 'd'
+    pgw_w_i32(header, b.size + 4)
+    @sock.write_bytes(pgw_pack(header))
+    @sock.write_bytes(b)
+    nil
+
   -> copy_finish
     raise "PG: no COPY in progress" if !@copying
     @copying = false

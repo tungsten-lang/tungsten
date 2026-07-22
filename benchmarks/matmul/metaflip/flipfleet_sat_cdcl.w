@@ -215,9 +215,27 @@
     st[st[38] + v] = 0 - 1
     st[st[35] + v] = ffcdcl_next_random(st) % 16
     v += 1
+  # The logical variable set is not known until clauses/assumptions arrive.
+  # ffcdcl_solve builds the heap from top_var; inserting the full capacity
+  # here both wastes initialization time and turns arena headroom into search.
+  st[16] = 0
+  1
+
+# Capacity is headroom, not part of the logical formula.  Rebuild the decision
+# heap from the highest variable actually referenced so a generously sized
+# arena does not branch over thousands of nonexistent variables.  Most
+# encoders number their variables densely; sparse numbering remains sound but
+# may include the unused gaps below top_var.
+-> ffcdcl_rebuild_live_heap(st) (i64[]) i64
+  st[16] = 0
+  v = 1 ## i64
+  while v <= st[2]
+    st[st[38] + v] = 0 - 1
+    v += 1
   v = 1
-  while v <= max_vars
-    z = ffcdcl_heap_insert(st, v) ## i64
+  while v <= st[4]
+    if st[st[32] + v] == 0
+      z = ffcdcl_heap_insert(st, v) ## i64
     v += 1
   1
 
@@ -682,9 +700,15 @@
     lit = assumptions[i] ## i64
     if lit < 2 || lit / 2 > st[2]
       return 0 - 3
+    if lit / 2 > st[4]
+      st[4] = lit / 2
     st[st[45] + i] = lit
     i += 1
   st[22] = count
+  # ffcdcl_init reserves max_vars and historically inserted that entire
+  # capacity into the heap.  Strip untouched headroom before every solve;
+  # clear_trail above has already restored all live assignments.
+  z = ffcdcl_rebuild_live_heap(st)
   # Re-enqueue root facts from the arena (units survive reset/release here).
   base = st[46] ## i64
   off = 0 ## i64
@@ -773,6 +797,9 @@
 
 -> ffcdcl_conflicts(st) (i64[]) i64
   st[21]
+
+-> ffcdcl_decisions(st) (i64[]) i64
+  st[20]
 
 -> ffcdcl_clause_count(st) (i64[]) i64
   st[6]

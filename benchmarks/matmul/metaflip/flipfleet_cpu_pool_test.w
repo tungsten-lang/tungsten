@@ -3,7 +3,7 @@ use flipfleet_cpu_experiments
 use flipfleet_cpu_pool
 
 -> ffcp_test_expect(name, condition)
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + name
     exit(1)
 
@@ -69,4 +69,3 @@ while i < 2
 
 ffcp_test_expect("states remain exact", ffw_verify_best_exact(first, n) == 1 && ffw_verify_best_exact(second, n) == 1 && ffw_verify_best_exact(peer, n) == 1)
 << "flipfleet_cpu_pool_test: all checks passed"
-

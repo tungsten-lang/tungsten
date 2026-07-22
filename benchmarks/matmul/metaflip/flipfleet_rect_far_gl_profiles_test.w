@@ -2,7 +2,7 @@ use flipfleet_rect_global_isotropy
 use flipfleet_rect_profiles
 
 -> ffrfgpt_expect(label, condition) i64
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + label
     exit(1)
   1
@@ -10,7 +10,7 @@ use flipfleet_rect_profiles
 labels = ["2x4x5", "3x4x6", "3x4x7", "4x4x5", "4x4x6", "4x5x6", "4x5x7", "4x5x8", "4x6x7", "4x6x8", "5x6x7"]
 densities = i64[11]
 distances = i64[11]
-densities[0] = 241
+densities[0] = 222
 densities[1] = 488
 densities[2] = 519
 densities[3] = 628
@@ -21,7 +21,7 @@ densities[7] = 1283
 densities[8] = 1406
 densities[9] = 1560
 densities[10] = 1875
-distances[0] = 56
+distances[0] = 52
 distances[1] = 108
 distances[2] = 124
 distances[3] = 120

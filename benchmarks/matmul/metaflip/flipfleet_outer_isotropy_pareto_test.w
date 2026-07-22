@@ -1,7 +1,7 @@
 use flipfleet_leaf_conjugation
 
--> ffoipt_expect(label, condition)
-  if condition != 0
+-> ffoipt_expect(label, condition) (String bool) i64
+  if condition
     return 1
   << "FAIL " + label
   exit(1)

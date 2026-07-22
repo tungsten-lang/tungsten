@@ -4,8 +4,8 @@
 use flipfleet_block_composer
 use flipfleet_leaf_conjugation
 
--> ff22t_expect(label, condition)
-  if condition != 0
+-> ff22t_expect(label, condition) (String bool) i64
+  if condition
     return 1
   << "FF22_GL_BANK_TEST_FAIL " + label
   exit(1)
@@ -65,7 +65,9 @@ ff22t_expect("density class 42", has42 == 1)
 # Composition smoke: each leaf alone must build exact <4,4,4> via two 2+2 splits.
 # Outer is Strassen on 2x2 blocks of size 2.
 outer = seed
-alloc = [2, 2]
+alloc = i64[2]
+alloc[0] = 2
+alloc[1] = 2
 i = 0
 while i < leaves.size()
   only = []

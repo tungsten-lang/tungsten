@@ -1,7 +1,7 @@
 use flipfleet_block_leaf_pool
 
--> ffblpt_expect(label, condition)
-  if condition != 0
+-> ffblpt_expect(label, condition) (String bool) i64
+  if condition
     return 1
   << "BLOCK_LEAF_POOL_FAIL " + label
   exit(1)

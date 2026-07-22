@@ -194,6 +194,7 @@ compiled_specs=(
   spec/compiler/zero_arg_cached_dispatch_spec.w
   spec/interpreter/hash_size_view_field_spec.w
   spec/interpreter/float_leaf_native_spec.w
+  spec/interpreter/implicit_block_param_shadow_spec.w
   spec/interpreter/ipv4_octets_native_spec.w
   spec/core/basics_spec.w
   spec/core/base64_native_spec.w
@@ -231,6 +232,7 @@ interpreter_specs=(
   spec/interpreter/float_leaf_native_spec.w
   spec/interpreter/big_array_cap_empty_revisit_spec.w
   spec/interpreter/hash_size_view_field_spec.w
+  spec/interpreter/implicit_block_param_shadow_spec.w
   spec/interpreter/int_to_i_native_spec.w
   spec/interpreter/ipv4_octets_native_spec.w
   spec/interpreter/mmap_size_relaxed_spec.w

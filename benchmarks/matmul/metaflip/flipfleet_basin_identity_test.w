@@ -3,7 +3,7 @@ use flipfleet_escape
 use flipfleet_basin_identity
 
 -> ffbi_test_expect(name, condition)
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + name
     exit(1)
 

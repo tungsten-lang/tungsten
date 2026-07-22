@@ -4,25 +4,33 @@
 `flipfleet --rect` coordinator. It remains independent of I/O, worker state,
 and rendering, so policy tests do not start campaigns or touch the TUI.
 
-The default portfolio is ordered as `2x2x5`, `4x5x7`, `3x4x6`, `4x5x6`,
-`4x4x6`, `4x4x5`, `2x5x6`, `3x4x7`, and `3x5x6`. Static priorities reflect the audited
-downstream composition leverage: 4x5x7 is the strategic leader, followed by
-4x5x6, 3x4x6, and 4x4x6; 4x4x5 is the strongest immediately GPU-capable
-larger leaf, while 2x5x6 is the leading small-cross primitive and carries 734
-guaranteed downstream terms (82 saved plus 652 strict audited). The 2x2x5 value is
-a mathematical-closure priority rather than a composition count. The default
-leverage units are
-`2500, 2043, 1417, 1683, 1106, 1067, 734, 1342, 1277`.
+The current 13-shape default is ordered as `2x2x5`, `2x2x6`, `2x2x7`,
+`2x2x8`, `2x2x9`, `4x5x7`, `3x4x6`, `4x5x6`, `4x4x6`, `4x4x5`,
+`2x5x6`, `3x4x7`, and `3x5x6`. The adjacent two-wide ladder makes the
+small-host rotating floor visit every explicit primitive frontier rather than
+pinning a historical prefix. Its leverage units are, in that order,
+`2500, 400, 1, 1, 800, 2043, 1679, 1683, 1106, 1411, 734, 1458, 1638`.
 
-The 3x4x7 and 3x5x6 choices replaced 3x3x4 and 3x4x4 in the earlier
-seven-shape composition tranche. The certified 2x2x5 gap and newly audited
-2x5x6 leaf subsequently expanded the default to nine shapes. A matched
-one-core 100M-move run measured:
+The two-wide values are mathematical-closure priorities rather than block
+composition counts. In particular, `2x2x5` is the certified one-term gap and
+`2x2x9` starts at the public rank-32 integer witness, so a rank-31 hit would
+improve every supported field. Among the larger leaves, `4x5x7` and `4x5x6`
+carry the largest audited impact; `3x4x6` is only four leverage units behind
+`4x5x6` while using a much smaller rank/factor state. `4x4x5` has three
+independently exact basins and 109 guaranteed saved-formula improvements,
+which makes it a stronger immediate campaign than raw leverage alone implies.
+`2x5x6` is the leading small-cross primitive and carries 734 downstream terms
+(82 guaranteed saved plus 652 strict-audit terms).
+
+The default grew from an earlier seven-shape composition tranche to nine
+shapes, and then to thirteen when the full `2x2x5..9` primitive ladder was
+made explicit. The historical matched one-core 100M-move audit that motivated
+the larger-leaf replacements measured:
 
 | shape | moves/s | audited leverage | leverage-weighted attempts/s |
 |---|---:|---:|---:|
-| `3x4x7` | 16.1M | 1,342 | 21.6B |
-| `3x5x6` | 14.1M | 1,277 | 17.9B |
+| `3x4x7` | 16.1M | 1,342 (then-current) | 21.6B |
+| `3x5x6` | 14.1M | 1,277 (then-current) | 17.9B |
 | `3x4x4` | 14.5M | 258 | 3.73B |
 | `3x3x4` | 16.4M | 3 | 0.049B |
 
@@ -32,7 +40,7 @@ attempts. The six-profile benchmark produced no rank drop, but did yield exact
 same-rank density leaders for 347, 458, 466, and 468.
 
 The admitted but non-default `4x6x7` and `5x6x7` profiles carry 2,002 and
-1,579 units. The new non-default 357/458/466/468 profiles carry
+1,579 units. The non-default 357/458/466/468 profiles carry
 1,223/1,325/1,176/1,202 units. The tiny `2x3x4` and `2x4x5` campaigns are also admitted but
 non-default. Neither occurs in the current materialized/audited local formula
 set, so each receives only the minimum positive leverage score of one;

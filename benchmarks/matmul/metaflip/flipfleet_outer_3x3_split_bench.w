@@ -3,8 +3,8 @@
 
 use flipfleet_leaf_conjugation
 
--> ffo3_expect(label, condition)
-  if condition != 0
+-> ffo3_expect(label, condition) (String bool) i64
+  if condition
     return 1
   << "OUTER_3X3_SPLIT_FAIL " + label
   exit(1)

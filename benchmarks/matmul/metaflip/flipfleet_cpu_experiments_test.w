@@ -2,7 +2,7 @@ use metaflip_worker
 use flipfleet_cpu_experiments
 
 -> ffcr_test_expect(name, condition)
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + name
     exit(1)
 

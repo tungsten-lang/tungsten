@@ -1,7 +1,7 @@
 use flipfleet_global_isotropy
 
 -> ffgirt_expect(name, condition)
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + name
     exit(1)
 

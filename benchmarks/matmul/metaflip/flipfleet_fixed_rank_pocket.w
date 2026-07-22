@@ -398,3 +398,456 @@ use flipfleet_block_composer
   if ffbc_verify_exact(result) != 1
     return nil
   result
+
+# ---- Autonomous support-overlap pocket selection ------------------------
+#
+# The endpoint-directed search above is an oracle/control.  A fleet cannot
+# know the other endpoint in advance.  The autonomous selector instead uses
+# each currently legal equal-factor pair as a ticket.  After the first flip,
+# a term from the frozen scheme may enter the pocket only when it shares the
+# factor required by a legal next flip with a live pocket term.  Thus the
+# pocket grows along the actual factor-overlap graph created by the word; no
+# target scheme, archive difference, or pre-recorded recipe is consulted.
+#
+# A state stores (a) the sorted source indices whose terms have entered the
+# pocket and (b) the sorted current local presentation.  These are separate:
+# flips destroy the correspondence between a source term and an endpoint
+# term.  Whole-scheme density debt is exactly
+#
+#   density(current local terms) - density(replaced source terms).
+#
+# so edge debt can be gated without materializing the other rank-k terms.
+
+-> fffrp_origin_has(origins, base, count, value) (i64[] i64 i64 i64) i64
+  i = 0 ## i64
+  while i < count
+    if origins[base + i] == value
+      return 1
+    i += 1
+  0
+
+-> fffrp_sort_origins(origins, count) (i64[] i64) i64
+  i = 1 ## i64
+  while i < count
+    value = origins[i] ## i64
+    j = i ## i64
+    while j > 0 && origins[j - 1] > value
+      origins[j] = origins[j - 1]
+      j -= 1
+    origins[j] = value
+    i += 1
+  1
+
+-> fffrp_origin_density(source_u, source_v, source_w, origins, origin_base, count) (i64[] i64[] i64[] i64[] i64 i64) i64
+  density = 0 ## i64
+  i = 0 ## i64
+  while i < count
+    slot = origins[origin_base + i] ## i64
+    density += fffrp_popcount(source_u[slot])
+    density += fffrp_popcount(source_v[slot])
+    density += fffrp_popcount(source_w[slot])
+    i += 1
+  density
+
+-> fffrp_state_equal(state_u, state_v, state_w, state_origins, state_base, state_count, candidate_u, candidate_v, candidate_w, candidate_origins, count) (i64[] i64[] i64[] i64[] i64 i64 i64[] i64[] i64[] i64[] i64) i64
+  if state_count != count
+    return 0
+  if fffrp_terms_equal(state_u, state_v, state_w, state_base, candidate_u, candidate_v, candidate_w, 0, count) != 1
+    return 0
+  i = 0 ## i64
+  while i < count
+    if state_origins[state_base + i] != candidate_origins[i]
+      return 0
+    i += 1
+  1
+
+-> fffrp_seen_variable(states_u, states_v, states_w, states_origins, counts, total, stride, candidate_u, candidate_v, candidate_w, candidate_origins, count) (i64[] i64[] i64[] i64[] i64[] i64 i64 i64[] i64[] i64[] i64[] i64) i64
+  state = 0 ## i64
+  while state < total
+    if fffrp_state_equal(states_u, states_v, states_w, states_origins, state * stride, counts[state], candidate_u, candidate_v, candidate_w, candidate_origins, count) == 1
+      return state
+    state += 1
+  0 - 1
+
+-> fffrp_hash_mix(hash, value) (i64 i64) i64
+  x = value ^ (value >> 21) ^ (value >> 42) ## i64
+  ((hash ^ x) * 2654435761 + 40503) & 9223372036854775807
+
+-> fffrp_variable_hash(us, vs, ws, term_base, origins, origin_base, count) (i64[] i64[] i64[] i64 i64[] i64 i64) i64
+  hash = fffrp_hash_mix(1469598103934665603, count) ## i64
+  i = 0 ## i64
+  while i < count
+    hash = fffrp_hash_mix(hash, origins[origin_base + i] + 1)
+    hash = fffrp_hash_mix(hash, us[term_base + i])
+    hash = fffrp_hash_mix(hash, vs[term_base + i])
+    hash = fffrp_hash_mix(hash, ws[term_base + i])
+    i += 1
+  hash
+
+-> fffrp_seen_variable_hashed(states_u, states_v, states_w, states_origins, counts, stride, candidate_u, candidate_v, candidate_w, candidate_origins, count, candidate_hash, hash_heads, hash_next, hash_mask) (i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64 i64 i64[] i64[] i64) i64
+  cursor = hash_heads[candidate_hash & hash_mask] ## i64
+  while cursor != 0
+    state = cursor - 1 ## i64
+    if fffrp_state_equal(states_u, states_v, states_w, states_origins, state * stride, counts[state], candidate_u, candidate_v, candidate_w, candidate_origins, count) == 1
+      return state
+    cursor = hash_next[state]
+  0 - 1
+
+-> fffrp_hash_link(hash_heads, hash_next, hash_mask, state, hash) (i64[] i64[] i64 i64 i64) i64
+  bucket = hash & hash_mask ## i64
+  hash_next[state] = hash_heads[bucket]
+  hash_heads[bucket] = state + 1
+  1
+
+-> fffrp_frozen_collision(source_u, source_v, source_w, source_count, origins, origin_count, candidate_u, candidate_v, candidate_w, count) (i64[] i64[] i64[] i64 i64[] i64 i64[] i64[] i64[] i64) i64
+  i = 0 ## i64
+  while i < count
+    slot = 0 ## i64
+    while slot < source_count
+      if fffrp_origin_has(origins, 0, origin_count, slot) == 0
+        if candidate_u[i] == source_u[slot] && candidate_v[i] == source_v[slot] && candidate_w[i] == source_w[slot]
+          return 1
+      slot += 1
+    i += 1
+  0
+
+# Deterministic ticket enumeration.  A pair sharing two axes contributes two
+# tickets because the two ordinary flips are algebraically distinct.
+-> fffrp_ticket(source_u, source_v, source_w, source_count, wanted, ticket_out) (i64[] i64[] i64[] i64 i64 i64[]) i64
+  if ticket_out.size() < 3
+    return 0
+  seen = 0 ## i64
+  left = 0 ## i64
+  while left < source_count - 1
+    right = left + 1 ## i64
+    while right < source_count
+      axis = 0 ## i64
+      while axis < 3
+        equal = 0 ## i64
+        if axis == 0 && source_u[left] == source_u[right]
+          equal = 1
+        if axis == 1 && source_v[left] == source_v[right]
+          equal = 1
+        if axis == 2 && source_w[left] == source_w[right]
+          equal = 1
+        if equal == 1
+          if seen == wanted
+            ticket_out[0] = left
+            ticket_out[1] = right
+            ticket_out[2] = axis
+            return 1
+          seen += 1
+        axis += 1
+      right += 1
+    left += 1
+  0
+
+-> fffrp_ticket_count(source_u, source_v, source_w, source_count) (i64[] i64[] i64[] i64) i64
+  total = 0 ## i64
+  left = 0 ## i64
+  while left < source_count - 1
+    right = left + 1 ## i64
+    while right < source_count
+      if source_u[left] == source_u[right]
+        total += 1
+      if source_v[left] == source_v[right]
+        total += 1
+      if source_w[left] == source_w[right]
+        total += 1
+      right += 1
+    left += 1
+  total
+
+-> fffrp_copy_variable_state(states_u, states_v, states_w, states_origins, source_state, target_state, stride, count) (i64[] i64[] i64[] i64[] i64 i64 i64 i64) i64
+  source_base = source_state * stride ## i64
+  target_base = target_state * stride ## i64
+  i = 0 ## i64
+  while i < count
+    states_u[target_base + i] = states_u[source_base + i]
+    states_v[target_base + i] = states_v[source_base + i]
+    states_w[target_base + i] = states_w[source_base + i]
+    states_origins[target_base + i] = states_origins[source_base + i]
+    i += 1
+  count
+
+# Explore one autonomous ticket.  The root contains the ticket's two source
+# terms; subsequent legal flips may recruit at most `max_terms - 2` frozen
+# source terms.  `max_edge_uphill < 0` disables the ordinary walker's local
+# density gate.  The best net density endpoint is returned, even when its
+# shortest retained path temporarily exceeds that gate.
+#
+# stats:
+#   [0] states, [1] proposals, [2] legal, [3] duplicates,
+#   [4] frozen collisions, [5] best gain, [6] best depth,
+#   [7] best pocket terms, [8] largest uphill edge on best path,
+#   [9] capacity exhaustion, [10] density-gate prunes,
+#   [11] endpoint density, [12] replaced-source density.
+-> fffrp_autonomous_ticket(source_u, source_v, source_w, source_count, ticket, max_terms, max_depth, max_states, max_edge_uphill, endpoint_u, endpoint_v, endpoint_w, endpoint_origins, stats) (i64[] i64[] i64[] i64 i64 i64 i64 i64 i64 i64[] i64[] i64[] i64[] i64[]) i64
+  i = 0 ## i64
+  while i < stats.size()
+    stats[i] = 0
+    i += 1
+  if source_count < 2 || max_terms < 2 || max_depth < 1 || max_states < 1 || stats.size() < 13
+    return 0
+  if endpoint_u.size() < max_terms || endpoint_v.size() < max_terms || endpoint_w.size() < max_terms || endpoint_origins.size() < max_terms
+    return 0
+  ticket_info = i64[3]
+  if fffrp_ticket(source_u, source_v, source_w, source_count, ticket, ticket_info) != 1
+    return 0
+
+  stride = max_terms ## i64
+  states_u = i64[max_states * stride]
+  states_v = i64[max_states * stride]
+  states_w = i64[max_states * stride]
+  states_origins = i64[max_states * stride]
+  counts = i64[max_states]
+  depths = i64[max_states]
+  parents = i64[max_states]
+  move_axes = i64[max_states]
+  densities = i64[max_states]
+  source_densities = i64[max_states]
+  max_rises = i64[max_states]
+  hash_capacity = 16 ## i64
+  while hash_capacity < max_states * 2
+    hash_capacity = hash_capacity * 2
+  hash_heads = i64[hash_capacity]
+  hash_next = i64[max_states]
+  hash_mask = hash_capacity - 1 ## i64
+
+  left = ticket_info[0] ## i64
+  right = ticket_info[1] ## i64
+  states_u[0] = source_u[left]
+  states_v[0] = source_v[left]
+  states_w[0] = source_w[left]
+  states_u[1] = source_u[right]
+  states_v[1] = source_v[right]
+  states_w[1] = source_w[right]
+  fffrp_sort_terms(states_u, states_v, states_w, 2)
+  states_origins[0] = left
+  states_origins[1] = right
+  fffrp_sort_origins(states_origins, 2)
+  counts[0] = 2
+  parents[0] = 0 - 1
+  move_axes[0] = 0 - 1
+  densities[0] = fffrp_density(states_u, states_v, states_w, 0, 2)
+  source_densities[0] = densities[0]
+  stats[0] = 1
+  root_hash = fffrp_variable_hash(states_u, states_v, states_w, 0, states_origins, 0, 2) ## i64
+  fffrp_hash_link(hash_heads, hash_next, hash_mask, 0, root_hash)
+  total = 1 ## i64
+  head = 0 ## i64
+  best = 0 ## i64
+
+  scratch_u = i64[max_terms]
+  scratch_v = i64[max_terms]
+  scratch_w = i64[max_terms]
+  scratch_origins = i64[max_terms]
+  input_u = i64[max_terms]
+  input_v = i64[max_terms]
+  input_w = i64[max_terms]
+
+  while head < total
+    count = counts[head] ## i64
+    base = head * stride ## i64
+    if depths[head] < max_depth
+      # Moves internal to the currently selected pocket.
+      pair_left = 0 ## i64
+      while pair_left < count - 1
+        pair_right = pair_left + 1 ## i64
+        while pair_right < count
+          axis = 0 ## i64
+          while axis < 3
+            stats[1] = stats[1] + 1
+            made = fffrp_flip_neighbor(states_u, states_v, states_w, base, count, pair_left, pair_right, axis, scratch_u, scratch_v, scratch_w) ## i64
+            if made == count
+              stats[2] = stats[2] + 1
+              i = 0
+              while i < count
+                scratch_origins[i] = states_origins[base + i]
+                i += 1
+              candidate_density = fffrp_density(scratch_u, scratch_v, scratch_w, 0, count) ## i64
+              rise = candidate_density - densities[head] ## i64
+              allowed = 1 ## i64
+              if max_edge_uphill >= 0 && rise > max_edge_uphill
+                allowed = 0
+                stats[10] = stats[10] + 1
+              if allowed == 1 && fffrp_frozen_collision(source_u, source_v, source_w, source_count, scratch_origins, count, scratch_u, scratch_v, scratch_w, count) == 1
+                allowed = 0
+                stats[4] = stats[4] + 1
+              if allowed == 1
+                candidate_hash = fffrp_variable_hash(scratch_u, scratch_v, scratch_w, 0, scratch_origins, 0, count) ## i64
+                prior = fffrp_seen_variable_hashed(states_u, states_v, states_w, states_origins, counts, stride, scratch_u, scratch_v, scratch_w, scratch_origins, count, candidate_hash, hash_heads, hash_next, hash_mask) ## i64
+                if prior >= 0
+                  stats[3] = stats[3] + 1
+                if prior < 0
+                  if total >= max_states
+                    stats[9] = 1
+                  if total < max_states
+                    target_base = total * stride ## i64
+                    fffrp_copy_terms(scratch_u, scratch_v, scratch_w, 0, states_u, states_v, states_w, target_base, count)
+                    i = 0
+                    while i < count
+                      states_origins[target_base + i] = scratch_origins[i]
+                      i += 1
+                    counts[total] = count
+                    depths[total] = depths[head] + 1
+                    parents[total] = head
+                    move_axes[total] = axis
+                    densities[total] = candidate_density
+                    source_densities[total] = source_densities[head]
+                    max_rises[total] = max_rises[head]
+                    if rise > max_rises[total]
+                      max_rises[total] = rise
+                    gain = source_densities[total] - candidate_density ## i64
+                    best_gain = source_densities[best] - densities[best] ## i64
+                    if gain > best_gain
+                      best = total
+                    fffrp_hash_link(hash_heads, hash_next, hash_mask, total, candidate_hash)
+                    total += 1
+                    stats[0] = total
+              axis += 1
+            else
+              axis += 1
+          pair_right += 1
+        pair_left += 1
+
+      # Grow the support-overlap pocket by one source term, but only through
+      # a legal factor-sharing flip with a current local term.
+      if count < max_terms
+        local = 0 ## i64
+        while local < count
+          source_slot = 0 ## i64
+          while source_slot < source_count
+            if fffrp_origin_has(states_origins, base, count, source_slot) == 0
+              fffrp_copy_terms(states_u, states_v, states_w, base, input_u, input_v, input_w, 0, count)
+              input_u[count] = source_u[source_slot]
+              input_v[count] = source_v[source_slot]
+              input_w[count] = source_w[source_slot]
+              i = 0
+              while i < count
+                scratch_origins[i] = states_origins[base + i]
+                i += 1
+              scratch_origins[count] = source_slot
+              fffrp_sort_origins(scratch_origins, count + 1)
+              axis = 0
+              while axis < 3
+                stats[1] = stats[1] + 1
+                made = fffrp_flip_neighbor(input_u, input_v, input_w, 0, count + 1, local, count, axis, scratch_u, scratch_v, scratch_w) ## i64
+                if made == count + 1
+                  stats[2] = stats[2] + 1
+                  candidate_density = fffrp_density(scratch_u, scratch_v, scratch_w, 0, count + 1) ## i64
+                  candidate_source_density = source_densities[head] ## i64
+                  candidate_source_density += fffrp_popcount(source_u[source_slot]) + fffrp_popcount(source_v[source_slot]) + fffrp_popcount(source_w[source_slot])
+                  parent_delta = densities[head] - source_densities[head] ## i64
+                  candidate_delta = candidate_density - candidate_source_density ## i64
+                  rise = candidate_delta - parent_delta ## i64
+                  allowed = 1 ## i64
+                  if max_edge_uphill >= 0 && rise > max_edge_uphill
+                    allowed = 0
+                    stats[10] = stats[10] + 1
+                  if allowed == 1 && fffrp_frozen_collision(source_u, source_v, source_w, source_count, scratch_origins, count + 1, scratch_u, scratch_v, scratch_w, count + 1) == 1
+                    allowed = 0
+                    stats[4] = stats[4] + 1
+                  if allowed == 1
+                    candidate_hash = fffrp_variable_hash(scratch_u, scratch_v, scratch_w, 0, scratch_origins, 0, count + 1) ## i64
+                    prior = fffrp_seen_variable_hashed(states_u, states_v, states_w, states_origins, counts, stride, scratch_u, scratch_v, scratch_w, scratch_origins, count + 1, candidate_hash, hash_heads, hash_next, hash_mask) ## i64
+                    if prior >= 0
+                      stats[3] = stats[3] + 1
+                    if prior < 0
+                      if total >= max_states
+                        stats[9] = 1
+                      if total < max_states
+                        target_base = total * stride ## i64
+                        fffrp_copy_terms(scratch_u, scratch_v, scratch_w, 0, states_u, states_v, states_w, target_base, count + 1)
+                        i = 0
+                        while i < count + 1
+                          states_origins[target_base + i] = scratch_origins[i]
+                          i += 1
+                        counts[total] = count + 1
+                        depths[total] = depths[head] + 1
+                        parents[total] = head
+                        move_axes[total] = axis
+                        densities[total] = candidate_density
+                        source_densities[total] = candidate_source_density
+                        max_rises[total] = max_rises[head]
+                        if rise > max_rises[total]
+                          max_rises[total] = rise
+                        gain = candidate_source_density - candidate_density ## i64
+                        best_gain = source_densities[best] - densities[best] ## i64
+                        if gain > best_gain
+                          best = total
+                        fffrp_hash_link(hash_heads, hash_next, hash_mask, total, candidate_hash)
+                        total += 1
+                        stats[0] = total
+                axis += 1
+            source_slot += 1
+          local += 1
+    head += 1
+
+  best_count = counts[best] ## i64
+  best_base = best * stride ## i64
+  fffrp_copy_terms(states_u, states_v, states_w, best_base, endpoint_u, endpoint_v, endpoint_w, 0, best_count)
+  i = 0
+  while i < best_count
+    endpoint_origins[i] = states_origins[best_base + i]
+    i += 1
+  stats[5] = source_densities[best] - densities[best]
+  stats[6] = depths[best]
+  stats[7] = best_count
+  stats[8] = max_rises[best]
+  stats[11] = densities[best]
+  stats[12] = source_densities[best]
+  # Optional compact replay trace for tests, certificates, and move intake:
+  # [13] depth, [14..19] whole-scheme density deltas by depth,
+  # [20..25] flip axes (root=-1), [26..31] pocket term counts.
+  if stats.size() >= 32
+    stats[13] = depths[best]
+    cursor = best ## i64
+    while cursor >= 0
+      position = depths[cursor] ## i64
+      if position <= 5
+        stats[14 + position] = densities[cursor] - source_densities[cursor]
+        stats[20 + position] = move_axes[cursor]
+        stats[26 + position] = counts[cursor]
+      cursor = parents[cursor]
+  stats[5]
+
+-> fffrp_scalar_scheme(scheme, source_u, source_v, source_w) (FFBCScheme i64[] i64[] i64[]) i64
+  if scheme == nil || source_u.size() < scheme.rank() || source_v.size() < scheme.rank() || source_w.size() < scheme.rank()
+    return 0
+  term = i64[3]
+  i = 0 ## i64
+  while i < scheme.rank()
+    if fffrp_scalar_term(scheme, i, term) != 1
+      return 0
+    source_u[i] = term[0]
+    source_v[i] = term[1]
+    source_w[i] = term[2]
+    i += 1
+  scheme.rank()
+
+-> fffrp_materialize_selected(source, origins, endpoint_u, endpoint_v, endpoint_w, count) (FFBCScheme i64[] i64[] i64[] i64[] i64)
+  if source == nil || count < 1 || origins.size() < count || endpoint_u.size() < count || endpoint_v.size() < count || endpoint_w.size() < count
+    return nil
+  result = FFBCScheme.new(source.n(), source.m(), source.p(), source.rank())
+  term = i64[3]
+  at = 0 ## i64
+  i = 0 ## i64
+  while i < source.rank()
+    if fffrp_origin_has(origins, 0, count, i) == 0
+      if fffrp_scalar_term(source, i, term) != 1 || fffrp_write_term(result, at, term[0], term[1], term[2]) != 1
+        return nil
+      at += 1
+    i += 1
+  i = 0
+  while i < count
+    if fffrp_write_term(result, at, endpoint_u[i], endpoint_v[i], endpoint_w[i]) != 1
+      return nil
+    at += 1
+    i += 1
+  if at != source.rank()
+    return nil
+  result.set_rank(at)
+  if ffbc_verify_exact(result) != 1
+    return nil
+  result

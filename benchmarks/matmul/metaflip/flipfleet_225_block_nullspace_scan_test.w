@@ -2,7 +2,7 @@ use flipfleet_225_block_gl_parent_lib
 use flipfleet_rect_archive_nullspace
 
 -> ff225nst_expect(label, condition)
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + label
     exit(1)
   1

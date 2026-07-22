@@ -1,4 +1,4 @@
-# Optional macOS/Metal integration smoke for the three large rectangles in
+# Optional macOS/Metal integration smoke for the large rectangles in
 # the default portfolio.  It deliberately uses Tungsten's runtime Metal
 # compiler so the full-width control does not depend on an installed offline
 # Metal toolchain.
@@ -39,12 +39,18 @@ if ffrgb_geometry_valid(4, 5, 6) != 1 || ffrgb_shared_bytes(4, 5, 6) != 29184
 if ffrgb_geometry_valid(4, 5, 7) != 1 || ffrgb_shared_bytes(4, 5, 7) != 32256
   << "FAIL 4x5x7 GPU geometry"
   exit(1)
+if ffrgb_geometry_valid(4, 6, 7) != 1 || ffrgb_shared_bytes(4, 6, 7) != 32256
+  << "FAIL 4x6x7 GPU geometry"
+  exit(1)
 
 seed446 = root + "/seeds/gf2/matmul_4x4x6_rank73_d690_gl_frontier_gf2.txt"
 seed456 = root + "/seeds/gf2/matmul_4x5x6_rank90_d906_rect_portfolio_gf2.txt"
 if rect_new_build_and_run(root, "446", seed446, 4, 4, 6, 72, 16) != 1
   exit(1)
 if rect_new_build_and_run(root, "456", seed456, 4, 5, 6, 89, 16) != 1
+  exit(1)
+seed467 = root + "/seeds/gf2/matmul_4x6x7_rank123_d1406_gl_frontier_gf2.txt"
+if rect_new_build_and_run(root, "467", seed467, 4, 6, 7, 122, 8) != 1
   exit(1)
 
 # The canonical 457 seed contains V masks above 2^34.  Appending an identical
@@ -81,4 +87,4 @@ if result457 == nil || !result457.starts_with?("104 1089\n") || !result457.inclu
   << "FAIL 457 full-width roundtrip gate"
   exit(1)
 
-<< "metaflip packaged 446/456/457 GPU smoke: ok"
+<< "metaflip packaged 446/456/457/467 GPU smoke: ok"

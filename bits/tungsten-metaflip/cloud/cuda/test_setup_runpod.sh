@@ -32,7 +32,7 @@ expect_plan 'https://apt.llvm.org/jammy/'
 expect_plan 'llvm-toolchain-jammy-18'
 expect_plan 'clang-18 llvm-18 lld-18'
 expect_plan 'ln -sfn /usr/bin/clang-18 /usr/local/bin/clang'
-expect_plan 'ln -sfn /usr/local/cuda/bin/nvcc /usr/local/bin/nvcc'
+expect_plan 'WRITE_NVCC_WRAPPER /usr/local/bin/nvcc -> /usr/local/cuda/bin/nvcc'
 expect_plan 'CHECK setup_runpod.sh --check'
 
 # Exercise the functional check without a GPU or Linux package mutation. The

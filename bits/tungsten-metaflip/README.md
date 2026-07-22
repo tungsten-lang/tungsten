@@ -6,9 +6,10 @@ over GF(2). The fleet keeps independent CPU basins and schedules a diverse
 portfolio of Metal kernels, with the GPU enabled by default when supported.
 
 Version 0.1 is intentionally GF(2)-only. It includes the production fleet,
-the pure-Tungsten GPU sources it builds, and the small set of exact schemes
-needed to start supported campaigns. Ternary search, proof campaigns, exploratory
-benchmarks, and the full certificate collection remain outside this bit.
+the pure-Tungsten GPU sources it builds, the small set of exact schemes needed
+to start supported campaigns, and reusable in-process proof primitives.
+Long-running proof campaign manifests, ternary search, exploratory benchmarks,
+and the full certificate collection remain outside this bit.
 
 ```text
 tungsten-metaflip/
@@ -25,6 +26,8 @@ tungsten-metaflip/
 │   ├── scheme.w
 │   ├── verify.w
 │   ├── compose.w
+│   ├── proof.w
+│   ├── proof/
 │   ├── fleet.w
 │   ├── rect.w
 │   ├── tui.w
@@ -93,7 +96,50 @@ tungsten compile spec/gpu_smoke.w --out /tmp/metaflip-gpu-smoke
 
 tungsten compile spec/metallib_runtime_fallback_smoke.w --out /tmp/metaflip-msl-fallback-smoke
 PATH="$PWD/spec/fixtures/offline-metal-failure:$PATH" /tmp/metaflip-msl-fallback-smoke "$PWD/lib/metaflip"
+
+tungsten compile spec/fixed_rank_pocket_strategy_test.w --out /tmp/metaflip-pocket-test --release --lto
+/tmp/metaflip-pocket-test
+
+tungsten compile spec/seven_by_seven_d3492_fertility_bench.w --out /tmp/metaflip-d3492-fertility --release --lto
+/tmp/metaflip-d3492-fertility
 ```
+
+## Proof library
+
+`use metaflip` exposes a caller-owned incremental CDCL solver and an exact
+transpose-involution (`psi`) quotient for GF(2) matrix multiplication tensors
+of shape `<n,m,n>`. The solver uses one flat `i64[]` arena and rebuilds its
+decision heap only through the highest variable actually referenced, so spare
+capacity does not silently become search state. It supports clauses, XORs,
+assumptions, failed-assumption cores, conflict budgets, and clause marks.
+
+The psi solver models a rank `2*pairs + fixed` invariant decomposition. Its
+compact encoder keeps one row from every complete coefficient-cell orbit and
+cancels conjugate-pair products only on genuinely fixed cells. Pair
+orientation and interchangeable-generator ordering are sound symmetry
+breakers; whole-matmul solves additionally use a coordinate anchor and the
+`n=2` fixed-cell rank consequences. SAT results are expanded and exhaustively
+checked against every coefficient before the API returns them.
+
+```w
+use metaflip
+
+out_u = i64[32]
+out_v = i64[32]
+out_w = i64[32]
+meta = i64[16]
+
+# The Strassen psi cell: rank 7 = 2*2 conjugate terms + 3 fixed terms.
+rank = metaflip_proof_psi_solve(
+  2, 2, 2, 3, 400000, 1,
+  out_u, out_v, out_w, meta
+)
+```
+
+For independent checks, `metaflip_proof_psi_encode_full_matmul` retains every
+coefficient row, while `metaflip_proof_psi_encode_quotient_matmul` exposes the
+exact orbit quotient over a caller-owned CDCL state. Focused release/LTO
+regressions live in `spec/proof_cdcl_test.w` and `spec/proof_psi_test.w`.
 
 ## Run
 
@@ -119,10 +165,12 @@ zero preserves the historical trajectory. Advanced sharded launchers may
 also pass `--rect-door-ticket N` to rotate a one-lane or multi-lane shard
 through checked-in side doors independently of the RNG nonce. The adaptive
 `--rect` portfolio owns both schedules itself and therefore rejects manual
-nonce overrides. Salted profile shards also load and save the exact eight-slot
-side archive on process exit, so a bounded cloud tranche retains useful
-nonleader endpoints instead of preserving only its fleet best. Explicit
-`--seed` experiments remain isolated from that archive.
+nonce overrides. Salted profile shards load the exact eight-slot side archive,
+checkpoint their barrier-stable island bests every fifteen minutes (or shortly
+after a fleet-leader adoption), and save the final live shoulders on process
+exit. A reclaimed spot tranche therefore retains useful nonleader endpoints
+instead of preserving only its fleet best. Explicit `--seed` experiments
+remain isolated from that archive.
 
 Wide salted shards reserve enough lanes to touch every available side door,
 then split surplus width between the fleet best and side exploration. In the
@@ -150,6 +198,53 @@ d3096. Metaflip keeps d3094 as the hot default while retaining the nearby
 d3096 parent and structurally distant rank-247 restart doors. Every endpoint
 was checked against all 7^6 target coefficients; d3094 additionally passed
 independent pure-Tungsten and host-side verifiers before packaging.
+
+The active affine-code frontier slot is now a second exact rank-247/d3094
+support, without changing that hot default. Runpod pod `aack78ni07p1uh`
+produced it at epoch 257/group 8177 from source commit
+`1dfc4321f964a0ca4eca75e8c0870f8692d565b0`. It is one three-term exchange
+(support distance six) from the packaged epoch-3306 d3096 affine-code parent,
+but support distance 396 from the incumbent d3094 scheme. In 48 canonicalized
+matched four-million-move continuations it tied the incumbent in every trial
+and beat the parent 48/0/0. Metaflip therefore replaces only the affine-code
+frontier/source-4 slot and keeps the d3096 parent as explicit replay. The raw
+certificate SHA-256 is
+`ddf710feced82ece388d9e368f9ad4bcf4da08d0583c4b17ab34a8a5e1accb71`;
+its order-independent term-multiset SHA-256 is
+`d71bbeb41d5da88264475eb412baca85d099764fa3a1fce9474cffc78b7cfee8`.
+
+The structurally distant C013 branch also retains an autonomous fixed-rank
+pocket closure at rank 247/d3496. Starting from d3554, a target-free greedy
+word closes at densities `3544,3534,3524,3514,3506,3498,3496`; its two deepest
+tickets require local `+10` and `+9` barrier edges. The later d3492 CUDA child
+is four support terms away. Final Runpod triage then found a rank-247/d3486
+continuation endpoint in three independent 4M-move trials (4/15/21; seeds
+`718917`, `1870936`, and `2499310`). It is support distance 20 from d3492 and
+42 from its d3542 source. A direct continuation was locally terminal, so d3486
+replaces only the active C013 basin slot; d3492 and d3496 remain explicit
+provenance and the earlier d3546 barrier child remains an active replay
+shoulder. The raw, order-independent term-multiset, and D3/reversal SHA-256 are
+`dfab762a6150c274b670f67f6169d3635c32974c0be106482717b94fae149b05`,
+`52284f28e3886fe20b848ddd81d57993dbd1566de11c13cce8875c4729ffbef3`,
+and `4873e956b1f3df815c250ab99fceb4ee9f3dd18c230fea8b5985e9f4817952ec`.
+Its coarse MAP descriptor collides with the affine d3094 co-leader, so the
+lower-density affine scheme owns that MAP niche while d3486 remains a distinct
+frontier/archive door. None replaces the d3094 hot leader.
+
+The exact Runpod epoch-1965/group-6417 d3542 certificate now owns the single
+cold `ffp_low_quota_seed_paths(7)` slot. Across 24 canonicalized matched
+four-million-move continuations it beat the former d3538 low-quota source
+24/0/0 and the former active d3492 endpoint 23/0/1, while producing the same
+d3486 endpoint three times. It is support distance 66 from d3538 and 62 from
+d3492. That fertility makes it a better CUDA source-3 and cold restart door,
+but d3486 itself remains the production endpoint. The older d3538 certificate
+is retained for explicit replay. The low-quota inventory remains one item and
+therefore still receives exactly one seventeenth of the frozen-source
+escape/partial-automorphism schedule at the default 16-source archive size.
+Raw, order-independent term-multiset, and D3/reversal SHA-256 are
+`bc0d913f34d0b733436059e16775bbff3c8f29e3306bd5b8e29de4f05a05b676`,
+`6a54c3e5388784485afa3a10814a9e41658ff7456c339c3e01e1c487fe6e4f6c`,
+and `dbd111c632e27812ddddac7300e6d4842a68340248842dce65c825f8eb7c9a24`.
 
 That discovery also produced a reusable exact move, **support-component
 peeling**. For two exact parents `A` and `B`, Metaflip forms `D = A xor B` and
@@ -184,6 +279,39 @@ permanent selector inside both exact `span-refactor-3` and
 `span-refactor-4`: one quarter of their neighborhoods target composition
 seams, including the 7x7 4+3 cut, without duplicating the expensive join or
 adding a fourth physical pool slot.
+
+One CPU parameter-racer arm now runs a bounded autonomous fixed-rank pocket
+closure at lease start. A cheap ordinal-1 prefix is followed by complete
+strict-gain rescans of the current ticket surface. Every ticket keeps pocket
+size/depth at most five, a 512-state arena, and a `+12` uphill-edge ceiling;
+the lease caps the whole word at eight adoptions, four prefix attempts, five
+full rounds, and 64 tickets per round. The C013 prepass reaches the same d3496
+endpoint in 31.6M rather than 50.7M proposals. Every adopted endpoint receives
+a full tensor gate; misses, invalid bounds, and failed candidates preserve the
+exact source. Proposals count toward exposure and setup gains toward adaptive
+reward, so the cold closure uses one racer arm without changing the TUI or the
+ordinary per-move hot path.
+
+A second bounded racer arm uses **alternate-axis retry**.  When a randomly
+chosen first term has no partner on its selected axis, that arm alone reuses
+the term and probes the other two axes before declaring the proposal dead.
+Matched-wall native trials improved accepted flips per second by 31% on 3x3,
+36% on 5x5, and 19% on 7x7 while retaining distinct exact endpoints and
+comparable support distances.  It remains one adaptive arm: ordinary CPU
+islands keep their unchanged fast path and RNG trajectory, while a cold
+incidence check sends provably edge-free racer states back through baseline.
+
+The square k-XOR pool is collision-complete: when several table tuples share
+the requested 128-bit fingerprint, it advances through tuple ordinals until
+every disjoint candidate has passed the exact local gate. The `8->7` path also
+decodes its three-term table keys with the correct radix before overlap
+filtering. Empty-fingerprint rounds still require one dispatch; extra work is
+paid only when a join actually has multiple candidate tuples.
+After live terms and reconstructed split parents are protected, the bounded
+candidate tail traverses its factor Cartesian product with a full-cycle
+coprime permutation. Short pool prefixes therefore sample all three factor
+axes instead of exhausting W while pinning the first U/V pair; an unbounded
+pass remains exhaustive and duplicate-free.
 
 The executable normally locates `lib/metaflip/` beside its installed build
 tree. `--runtime-root PATH` or `METAFLIP_RUNTIME_ROOT` can select an unpacked
@@ -220,7 +348,9 @@ structural signatures with no measurable throughput loss. Metal alternates
 fleet-best epochs with the exact door
 scheduled for that shape's CPU host, including one-host portfolio allocations;
 this prevents a broad portfolio from silently sending every GPU epoch back to
-the leader. CPU islands likewise retain their OS threads for the campaign
+the leader. Periodic side-door writes happen only at the common quiescent
+barrier, reconstruct prior disk slots before max-min selection, and never
+rebase a live island. CPU islands likewise retain their OS threads for the campaign
 lifetime and reload their coordinator-owned state slots after each round
 barrier, avoiding repeated thread allocation without weakening sticky-door
 independence. One additional coordinator-resident block-interior probe snapshots
@@ -233,7 +363,10 @@ meet-in-the-middle lane runs
 concurrently with CPU islands and Metal walking; its output is joined and
 fully verified at the epoch barrier. Every shape in the default mix now has a
 specialized cal2zone worker, including `4x4x6`, `4x5x6`, and the full-width
-i64 `4x5x7` lane; 5-to-4 MITM is also enabled for the validated small
+i64 `4x5x7` lane. The non-default but high-leverage `4x6x7` frontier also has
+an eight-walker i64 worker, so explicit high-impact portfolios can allocate
+Metal breadth to its 42-bit middle factor instead of falling back to CPU-only
+search. 5-to-4 MITM is also enabled for the validated small
 `2x2x6` profile. Rectangular status
 child files report block-interior attempts/exact endpoints/drops/cadence;
 portfolio files report CPU moves, GPU moves, MITM attempts/pairs/time, and
@@ -311,6 +444,7 @@ its coefficient domain, shape, rank, density, discoverer, provenance, and
 digest.
 
 The generalized rectangular k-XOR objectives, endpoint-to-word compilers,
+one-spectator repair, computed rank-one/rank-two/rank-three completion ladder,
 four-line catalyst, and double-annihilation macro under
 `lib/metaflip/strategies/` are offline research tools. They can verify a
 prescribed local replacement and compile a replayable exact setup/flip/cleanup

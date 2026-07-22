@@ -9,8 +9,8 @@
 
 use flipfleet_outer_isotropy
 
--> ffoip_expect(label, condition)
-  if condition != 0
+-> ffoip_expect(label, condition) (String bool) i64
+  if condition
     return 1
   << "OUTER_ISOTROPY_PARETO_FAIL " + label
   exit(1)

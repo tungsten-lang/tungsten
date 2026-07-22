@@ -1,7 +1,7 @@
 use flipfleet_outer_isotropy
 
--> ffoist_expect(label, condition)
-  if condition != 0
+-> ffoist_expect(label, condition) (String bool) i64
+  if condition
     return 1
   << "FAIL " + label
   exit(1)

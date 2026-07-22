@@ -148,6 +148,21 @@ z = ffcdt_expect("php43 init", ffcdcl_init(st2, 12, 22) == 1)
 z = ffcdt_expect("php43 clauses", ffcdt_add_php(st2, 4, 3) == 1)
 z = ffcdt_expect("php43 UNSAT", ffcdcl_solve(st2, none, 0, 0) == 0 - 1)
 
+# --- 2b. Reserved variable capacity is not logical search state ---
+# Only x1/x2 occur, although the arena reserves 4096 variables.  A complete
+# model therefore needs at most two decisions; the historical full-capacity
+# heap made 4096 decisions and changed trajectories when callers adjusted
+# harmless headroom.
+sth = i64[ffcdcl_state_size(4096, 4096)]
+z = ffcdt_expect("headroom init", ffcdcl_init(sth, 4096, 23) == 1)
+head_clause = i64[2]
+head_clause[0] = 2
+head_clause[1] = 4
+z = ffcdt_expect("headroom clause", ffcdcl_add_clause(sth, head_clause, 2) == 1)
+z = ffcdt_expect("headroom top variable", ffcdcl_top_var(sth) == 2)
+z = ffcdt_expect("headroom SAT", ffcdcl_solve(sth, none, 0, 0) == 1)
+z = ffcdt_expect("headroom excluded from decisions", ffcdcl_decisions(sth) <= 2)
+
 # --- 3. Planted random 3-SAT: 30 vars, 120 clauses ---
 st3 = i64[ffcdcl_state_size(30, 65536)]
 z = ffcdt_expect("planted init", ffcdcl_init(st3, 30, 33) == 1)

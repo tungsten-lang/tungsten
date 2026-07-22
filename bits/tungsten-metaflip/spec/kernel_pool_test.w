@@ -1,8 +1,8 @@
 use ../lib/metaflip/kernels/pool
 use ../lib/metaflip/tui
 
--> ffkpt_expect(label, condition)
-  if condition == 0
+-> ffkpt_expect(label, condition) (String bool) i64
+  if !condition
     << "FAIL " + label
     exit(1)
   1

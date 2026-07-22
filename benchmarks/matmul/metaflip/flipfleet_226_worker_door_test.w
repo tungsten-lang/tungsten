@@ -3,7 +3,7 @@
 use metaflip_rect_worker
 
 -> ff226wdt_expect(label, condition)
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + label
     exit(1)
   1

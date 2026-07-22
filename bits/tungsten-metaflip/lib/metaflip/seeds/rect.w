@@ -274,7 +274,7 @@
   if ffrp_supported(n, m, p) == 0
     return 0
   if n == 2 && m == 2 && p == 5
-    return 5
+    return 6
   if n == 2 && m == 2 && p == 6
     return 2
   if n == 2 && m == 2 && p == 7
@@ -292,9 +292,9 @@
   if n == 3 && m == 4 && (p == 6 || p == 7)
     return 2
   if n == 3 && m == 3 && p == 4
-    return 3
-  if n == 3 && m == 4 && p == 4
     return 4
+  if n == 3 && m == 4 && p == 4
+    return 5
   if n == 3 && m == 4 && p == 5
     return 4
   if n == 4 && m == 4 && p == 5
@@ -324,6 +324,11 @@
     return "seeds/gf2/matmul_2x2x5_rank18_d84_block_splice_gf2.txt"
   if n == 2 && m == 2 && p == 5 && slot == 4
     return "seeds/gf2/matmul_2x2x5_rank18_d84_gpu_block_tunnel_gf2.txt"
+  # AWS high-leverage campaign archive doors.  Each has zero term overlap
+  # with its campaign leader, so these occupy cold rotation slots rather than
+  # replacing the monotonic density leaders returned by `ffrp_seed_rel`.
+  if n == 2 && m == 2 && p == 5 && slot == 5
+    return "seeds/gf2/matmul_2x2x5_rank18_d141_peterson_2026_aws_disjoint_gf2.txt"
   if n == 2 && m == 2 && p == 6 && slot == 1
     return "seeds/gf2/matmul_2x2x6_rank21_d108_block_local_gl_gf2.txt"
   if n == 2 && m == 2 && p == 7 && slot == 1
@@ -371,12 +376,16 @@
   if n == 3 && m == 4 && p == 4 && slot == 1
     return "seeds/gf2/matmul_3x4x4_rank38_gf2.txt"
   if n == 3 && m == 3 && p == 4 && slot == 1
-    return "seeds/gf2/matmul_3x3x4_rank30_peterson_2026_isotropy_split_plus1_parent_5314db3816_gf2.txt"
+    return "seeds/gf2/matmul_3x3x4_rank29_d249_peterson_2026_aws_disjoint_gf2.txt"
   if n == 3 && m == 3 && p == 4 && slot == 2
+    return "seeds/gf2/matmul_3x3x4_rank30_peterson_2026_isotropy_split_plus1_parent_5314db3816_gf2.txt"
+  if n == 3 && m == 3 && p == 4 && slot == 3
     return "seeds/gf2/matmul_3x3x4_rank31_peterson_2026_isotropy_split_plus2_parent_5314db3816_gf2.txt"
   if n == 3 && m == 4 && p == 4 && slot == 2
-    return "seeds/gf2/matmul_3x4x4_rank39_peterson_2026_isotropy_split_plus1_parent_91bff8b09f_gf2.txt"
+    return "seeds/gf2/matmul_3x4x4_rank38_d310_peterson_2026_aws_disjoint_gf2.txt"
   if n == 3 && m == 4 && p == 4 && slot == 3
+    return "seeds/gf2/matmul_3x4x4_rank39_peterson_2026_isotropy_split_plus1_parent_91bff8b09f_gf2.txt"
+  if n == 3 && m == 4 && p == 4 && slot == 4
     return "seeds/gf2/matmul_3x4x4_rank40_peterson_2026_isotropy_split_plus2_parent_8aa9879491_gf2.txt"
   if n == 3 && m == 4 && p == 5 && slot == 1
     return "seeds/gf2/matmul_3x4x5_rank47_d396_peterson_2026_gf2.txt"
@@ -461,10 +470,15 @@
   # 32,768-byte Metal threadgroup allocation.
   if n == 4 && m == 5 && p == 7
     return 168
+  # The high-leverage 4x6x7 frontier has 24/42/28-bit factors.  Its rank-123
+  # and rank-168 naive seeds both fit the same 168-slot, eight-walker i64
+  # geometry as 4x5x7 (32,256 bytes of threadgroup memory).
+  if n == 4 && m == 6 && p == 7
+    return 168
   0
 
 -> ffrp_gpu_wpg(n, m, p) (i64 i64 i64) i64
-  if n == 4 && m == 5 && p == 7
+  if n == 4 && ((m == 5 && p == 7) || (m == 6 && p == 7))
     return 8
   if ffrp_gpu_cap(n, m, p) > 0
     return 16

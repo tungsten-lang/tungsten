@@ -6,7 +6,7 @@ use ../lib/metaflip/strategies/global_isotropy
 failures = 0 ## i64
 
 -> nonce_diversity_expect(label, condition) (String bool) i64
-  if condition == 0
+  if !condition
     << "FAIL square campaign nonce diversity: " + label
     return 1
   0

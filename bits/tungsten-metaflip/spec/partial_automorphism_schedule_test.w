@@ -5,7 +5,7 @@ use ../lib/metaflip/seeds/catalog
 failures = 0 ## i64
 
 -> ffpasst_expect(label, condition) (String bool) i64
-  if condition == 0
+  if !condition
     << "FAIL partial-automorphism schedule: " + label
     return 1
   0
@@ -17,7 +17,7 @@ failures += ffpasst_expect("cooldown blocks early call", ffpan_tunnel_due(7, 150
 failures += ffpasst_expect("cooldown opens boundary", ffpan_tunnel_due(7, 15100, 100, ffpan_tunnel_cooldown_ms(7)) == 1)
 
 source_count = ffp_frontier_seed_paths(7).size() ## i64
-failures += ffpasst_expect("schedule covers full active frontier", source_count == 16)
+failures += ffpasst_expect("schedule covers full active frontier", source_count == 18)
 generator_count = ffpan_elementary_count(7) ## i64
 schedule = i64[3]
 seen = i64[source_count * generator_count]
@@ -44,7 +44,7 @@ while source_index < source_count
 
 # Three supervisor nonces receive disjoint generator starts for the first 32
 # visits to each source (just over two hours at the 15-second cadence for the
-# current 16-state frontier). Source phases may reorder calls but not coverage.
+# current 18-state frontier). Source phases may reorder calls but not coverage.
 cross_seen = i64[source_count * generator_count]
 cross_duplicates = 0 ## i64
 campaign_nonce = 1 ## i64
@@ -70,7 +70,7 @@ failures += ffpasst_expect("non-7x7 schedule rejected", ffpan_portfolio_decode(6
 # rotation and phased nonces through the real arbitrary-cardinality finder.
 root = __DIR__ + "/../lib/metaflip/seeds/gf2/"
 paths = ["matmul_7x7_rank247_d3096_dynamic_syzygy_gf2.txt",
-         "matmul_7x7_rank247_d3096_affine_code_cuda_epoch3306_gf2.txt",
+         "matmul_7x7_rank247_d3094_affine_code_cuda_epoch257_gf2.txt",
          "matmul_7x7_rank247_d3098_global_isotropy_gf2.txt"]
 capacity = 320 ## i64
 state_size = ffw_state_size(capacity) ## i64

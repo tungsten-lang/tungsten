@@ -18,7 +18,7 @@ out_dir = args[0]
     return 0 - 1
   if ffpsi_encode(sat, 2, 5, c, f) != 1
     return 0 - 1
-  if ffpsi_encode_sbps(sat, 2, 5, c, f) != 1
+  if ffpsi_encode_matmul_sbps(sat, 2, 5, c, f) != 1
     return 0 - 1
   path = out_dir + "/psi252_r" + rank.to_s() + "_c" + c.to_s() + "f" + f.to_s() + ".cnf" ## String
   written = ffcdcl_dump_dimacs(sat, path) ## i64

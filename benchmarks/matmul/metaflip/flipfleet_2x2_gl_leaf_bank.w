@@ -19,8 +19,8 @@
 use flipfleet_block_composer
 use flipfleet_leaf_conjugation
 
--> ff22_expect(label, condition)
-  if condition != 0
+-> ff22_expect(label, condition) (String bool) i64
+  if condition
     return 1
   << "FF22_GL_BANK_FAIL " + label
   exit(1)

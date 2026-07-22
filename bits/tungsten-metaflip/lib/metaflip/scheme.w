@@ -20,6 +20,7 @@
 #   ffw_load_scheme_cap(st,path,n,cap,seed,dslack,cycles,workq,wanderq)
 #   ffw_reseed_from(dst,src,seed)            # dst and src must be distinct
 #   ffw_walk / ffw_work / ffw_wander(st,steps)
+#   ffw_walk_axis_sweep(st,steps)             # opt-in adaptive racer
 #   ffw_verify_best_exact / ffw_verify_current_exact(st,n)
 #   ffw_adopt_current(st,allow_density_tie)
 #   ffw_export_best / ffw_export_current(st,us,vs,ws)
@@ -398,6 +399,37 @@
 
 -> ffw_pick_partner(st, axis, slot, random_word) (i64[] i64 i64 i64) i64
   ffw_pick_partner_min(st, axis, slot, random_word, 0)
+
+# Cold audit for policy selection: count current (term,axis) incidences with
+# at least one ordinary flip partner.  The axis-sweep racer falls back to the
+# faster baseline walker when this is zero, because probing all three axes
+# cannot manufacture an edge.
+-> ffw_partnerable_incidences(st) (i64[]) i64
+  if ffw_valid(st) != 1 || st[6] < 2
+    return 0
+  incidences = 0 ## i64
+  index = 0 ## i64
+  while index < st[6]
+    slot = st[st[50] + index] ## i64
+    axis = 0 ## i64
+    while axis < 3
+      head = st[53] ## i64
+      nexto = st[56] ## i64
+      factoro = st[44] ## i64
+      if axis == 1
+        head = st[54]
+        nexto = st[58]
+        factoro = st[45]
+      if axis == 2
+        head = st[55]
+        nexto = st[60]
+        factoro = st[46]
+      key = st[factoro + slot] ## i64
+      if ffw_chain_count_min(st, head, nexto, factoro, key, slot, 0) > 0
+        incidences += 1
+      axis += 1
+    index += 1
+  incidences
 
 
 # ---- exactness, density, adoption ----------------------------------------
@@ -965,6 +997,18 @@
   st[8] = rng
   (rng >> 32) & 2147483647
 
+# Produce two consecutive 31-bit words while loading/storing the worker RNG
+# state once.  The low 31 bits are the first word and bits 31..61 the second;
+# this is exactly two ffw_rand31 calls and preserves replay state byte-for-byte.
+-> ffw_rand31_pair(st) (i64[]) i64
+  increment = st[9] ## i64
+  first_rng = (st[8] * 6364136223846793005 + increment) & 9223372036854775807 ## i64
+  second_rng = (first_rng * 6364136223846793005 + increment) & 9223372036854775807 ## i64
+  st[8] = second_rng
+  first_word = (first_rng >> 32) & 2147483647 ## i64
+  second_word = (second_rng >> 32) & 2147483647 ## i64
+  first_word | (second_word << 31)
+
 -> ffw_pressure_balanced(st, u, v, w) (i64[] i64 i64 i64) i64
   # Two factor chains cover all three pair supports. This is the shortest
   # path for square/balanced shapes, where no axis is systematically denser.
@@ -990,6 +1034,52 @@
         if st[st[46] + slot] == w
           count += 1
     c = st[st[58] + slot]
+  count
+
+# Evaluate the two endpoints of a square flip together.  Keeping the seven
+# chain offsets in locals avoids decoding the flat worker layout four times
+# per legal proposal while retaining ordinary typed-array accesses (which are
+# faster than raw loads for these short square chains on Apple silicon).
+-> ffw_pressure_pair_balanced(st, u0, v0, w0, u1, v1, w1) (i64[] i64 i64 i64 i64 i64 i64) i64
+  uo = st[44] ## i64
+  vo = st[45] ## i64
+  wo = st[46] ## i64
+  uhead = st[53] ## i64
+  vhead = st[54] ## i64
+  unext = st[56] ## i64
+  vnext = st[58] ## i64
+  count = 0 ## i64
+  query = 0 ## i64
+  while query < 2
+    u = u0 ## i64
+    v = v0 ## i64
+    w = w0 ## i64
+    if query == 1
+      u = u1
+      v = v1
+      w = w1
+    c = st[uhead + ffw_hash(st, u)] ## i64
+    while c != 0
+      slot = c - 1 ## i64
+      if st[uo + slot] == u
+        samev = 0 ## i64
+        samew = 0 ## i64
+        if st[vo + slot] == v
+          samev = 1
+        if st[wo + slot] == w
+          samew = 1
+        if samev + samew == 1
+          count += 1
+      c = st[unext + slot]
+    c = st[vhead + ffw_hash(st, v)] ## i64
+    while c != 0
+      slot = c - 1 ## i64
+      if st[vo + slot] == v
+        if st[uo + slot] != u
+          if st[wo + slot] == w
+            count += 1
+      c = st[vnext + slot]
+    query += 1
   count
 
 -> ffw_pressure_plan_raw(data) (i64) i64
@@ -1186,9 +1276,10 @@
     ui = st[st[44] + first] ## i64
     vi = st[st[45] + first] ## i64
     wi = st[st[46] + first] ## i64
-    word = ffw_rand31(st)
+    word_pair = ffw_rand31_pair(st) ## i64
+    word = word_pair & 2147483647 ## i64
     axis = (((word >> 22) & 511) * 3) >> 9 ## i64
-    word = ffw_rand31(st)
+    word = (word_pair >> 31) & 2147483647
     second = ffw_pick_partner_min(st, axis, first, word, min_slot) ## i64
     if second < 0
       st[23] = st[23] + 1
@@ -1229,7 +1320,7 @@
         if st[3] > 49
           old_pressure = ffw_pressure_batch_raw(pressure_data, pressure_plan, ui, vi, wi, uj, vj, wj, 2)
         if st[3] <= 49
-          old_pressure = ffw_pressure_balanced(st, ui, vi, wi) + ffw_pressure_balanced(st, uj, vj, wj)
+          old_pressure = ffw_pressure_pair_balanced(st, ui, vi, wi, uj, vj, wj)
       old_bits = ffw_popcount(ui) + ffw_popcount(vi) + ffw_popcount(wi) ## i64
       old_bits += ffw_popcount(uj) + ffw_popcount(vj) + ffw_popcount(wj)
       rank = rank_before ## i64
@@ -1242,7 +1333,7 @@
         if st[3] > 49
           new_pressure = ffw_pressure_batch_raw(pressure_data, pressure_plan, au, av, aw, bu, bv, bw, 2)
         if st[3] <= 49
-          new_pressure = ffw_pressure_balanced(st, au, av, aw) + ffw_pressure_balanced(st, bu, bv, bw)
+          new_pressure = ffw_pressure_pair_balanced(st, au, av, aw, bu, bv, bw)
       new_bits = ffw_popcount(au) + ffw_popcount(av) + ffw_popcount(aw) ## i64
       new_bits += ffw_popcount(bu) + ffw_popcount(bv) + ffw_popcount(bw)
       accept = 0 ## i64
@@ -1288,6 +1379,144 @@
       if accept == 0
         st[6] = rank_before
   result
+
+# Collision-directed flip for one bounded adaptive CPU racer.  It keeps
+# the ordinary hot loop above completely unchanged: only after the randomly
+# selected axis has no legal partner does it reuse the selected first term and
+# probe the other two axes in cyclic order.  `st[20]` and `st[23]` retain their
+# proposal-level meanings, so a three-axis failure is one partner miss rather
+# than three.  As on the baseline path, proposals minus partner misses is the
+# number of legal flip proposals; rejected retains its all-nonaccepted meaning.
+-> ffw_try_flip_axis_sweep_controlled(st, mode, min_slot, pressure_ceiling, pressure_period) (i64[] i64 i64 i64 i64) i64
+  st[20] = st[20] + 1
+  result = 0 ## i64
+  rank_before = st[6] ## i64
+  if rank_before < 2
+    st[21] = st[21]
+    st[22] = st[22] + 1
+    result = 0
+  if rank_before >= 2
+    word = ffw_rand31(st) ## i64
+    rank_index = (word * rank_before) >> 31 ## i64
+    first = st[st[50] + rank_index] ## i64
+    scanned_first = 0 ## i64
+    while first < min_slot && scanned_first < rank_before
+      rank_index = (rank_index + 1) % rank_before
+      first = st[st[50] + rank_index]
+      scanned_first += 1
+    if first < min_slot
+      st[22] = st[22] + 1
+      return 0
+    ui = st[st[44] + first] ## i64
+    vi = st[st[45] + first] ## i64
+    wi = st[st[46] + first] ## i64
+    word_pair = ffw_rand31_pair(st) ## i64
+    word = word_pair & 2147483647 ## i64
+    axis = (((word >> 22) & 511) * 3) >> 9 ## i64
+    partner_word = (word_pair >> 31) & 2147483647 ## i64
+    second = ffw_pick_partner_min(st, axis, first, partner_word, min_slot) ## i64
+    axis_probe = 1 ## i64
+    # A miss depends only on the selected term and factor chains, not on the
+    # partner ordinal word. Reuse that still-uniform word on alternate axes;
+    # drawing again would spend up to two PCG steps on the dominant all-miss
+    # path without adding partner coverage.
+    while second < 0 && axis_probe < 3
+      axis = (axis + 1) % 3
+      second = ffw_pick_partner_min(st, axis, first, partner_word, min_slot)
+      axis_probe += 1
+    if second < 0
+      st[23] = st[23] + 1
+      st[22] = st[22] + 1
+    if second >= 0
+      uj = st[st[44] + second] ## i64
+      vj = st[st[45] + second] ## i64
+      wj = st[st[46] + second] ## i64
+      au = ui ## i64
+      av = vi ## i64
+      aw = wi ## i64
+      bu = ui ## i64
+      bv = vi ## i64
+      bw = wj ## i64
+      if axis == 0
+        aw = wi ^ wj
+        bv = vi ^ vj
+      if axis == 1
+        aw = wi ^ wj
+        bu = ui ^ uj
+      if axis == 2
+        av = vi ^ vj
+        bu = ui ^ uj
+        bv = vj
+        bw = wi
+      pressure_data = 0 ## i64
+      pressure_plan = 0 ## i64
+      if mode == 0 && st[3] > 49
+        pressure_data = ccall_nobox("w_array_data_ptr", st)
+        pressure_plan = ffw_pressure_plan_raw(pressure_data)
+      old_pressure = 0 ## i64
+      if mode == 0
+        if st[3] > 49
+          old_pressure = ffw_pressure_batch_raw(pressure_data, pressure_plan, ui, vi, wi, uj, vj, wj, 2)
+        if st[3] <= 49
+          old_pressure = ffw_pressure_pair_balanced(st, ui, vi, wi, uj, vj, wj)
+      old_bits = ffw_popcount(ui) + ffw_popcount(vi) + ffw_popcount(wi) ## i64
+      old_bits += ffw_popcount(uj) + ffw_popcount(vj) + ffw_popcount(wj)
+      rank = rank_before ## i64
+      rank = ffw_remove_known_slot(st, first, rank)
+      rank = ffw_remove_known_slot(st, second, rank)
+      rank = ffw_toggle(st, au, av, aw, rank)
+      rank = ffw_toggle(st, bu, bv, bw, rank)
+      new_pressure = 0 ## i64
+      if mode == 0
+        if st[3] > 49
+          new_pressure = ffw_pressure_batch_raw(pressure_data, pressure_plan, au, av, aw, bu, bv, bw, 2)
+        if st[3] <= 49
+          new_pressure = ffw_pressure_pair_balanced(st, au, av, aw, bu, bv, bw)
+      new_bits = ffw_popcount(au) + ffw_popcount(av) + ffw_popcount(aw) ## i64
+      new_bits += ffw_popcount(bu) + ffw_popcount(bv) + ffw_popcount(bw)
+      accept = 0 ## i64
+      if rank < rank_before
+        accept = 1
+      if rank == rank_before
+        if mode == 0
+          ceiling = pressure_ceiling ## i64
+          if ceiling < 0
+            ceiling = 0
+          period = pressure_period ## i64
+          if period < 1
+            period = 1
+          pressure_slack = ceiling - ((st[13] / period) % (ceiling + 1)) ## i64
+          if new_pressure + pressure_slack >= old_pressure
+            if new_bits <= old_bits + st[17]
+              accept = 1
+        if mode != 0
+          if new_bits <= old_bits + st[17] + st[10]
+            accept = 1
+      if accept == 0
+        rank = ffw_toggle(st, au, av, aw, rank)
+        rank = ffw_toggle(st, bu, bv, bw, rank)
+        rank = ffw_insert_known_absent(st, ui, vi, wi, rank)
+        rank = ffw_insert_known_absent(st, uj, vj, wj, rank)
+        st[22] = st[22] + 1
+      if accept == 1
+        st[6] = rank
+        if rank == rank_before
+          st[64] = st[64] + new_bits - old_bits
+        if rank != rank_before
+          st[64] = ffw_view_bits(st, st[44], st[45], st[46], st[50], rank) - st[36]
+        st[21] = st[21] + 1
+        result = 1
+        adopted = ffw_adopt_algebraic(st, 1) ## i64
+        if adopted == 2
+          result = 2
+        if adopted < 0
+          result = 0 - 1
+      if accept == 0
+        st[6] = rank_before
+  result
+
+-> ffw_try_flip_axis_sweep(st, mode) (i64[] i64) i64
+  ffw_try_flip_axis_sweep_controlled(st, mode, 0, 6, 300000)
 
 -> ffw_try_flip_core(st, mode, min_slot) (i64[] i64 i64) i64
   ffw_try_flip_controlled(st, mode, min_slot, 6, 300000)
@@ -1398,6 +1627,28 @@
 -> ffw_one(st, mode) (i64[] i64) i64
   ffw_one_controlled(st, mode, 2000, 6, 300000)
 
+-> ffw_one_axis_sweep_controlled(st, mode, split_cadence, pressure_ceiling, pressure_period) (i64[] i64 i64 i64 i64) i64
+  result = 0 ## i64
+  do_split = 0 ## i64
+  if mode != 0
+    if st[13] > 0
+      if split_cadence > 0 && (st[13] % split_cadence) == 0
+        do_split = 1
+  if do_split == 1
+    result = ffw_try_split(st)
+  if do_split == 0
+    result = ffw_try_flip_axis_sweep_controlled(st, mode, 0, pressure_ceiling, pressure_period)
+  st[13] = st[13] + 1
+  st[42] = (st[42] & 2) | mode
+  if mode == 0
+    st[34] = st[34] + 1
+  if mode != 0
+    st[35] = st[35] + 1
+  if st[7] > 0
+    if st[6] > st[7] + st[10]
+      z = ffw_restore_best(st) ## i64
+  result
+
 -> ffw_work(st, steps) (i64[] i64) i64
   i = 0 ## i64
   while i < steps
@@ -1473,6 +1724,46 @@
       z = ffw_advance_zone_controlled(st, controls[3], controls[4])
     i += 1
   st[7]
+
+# Opt-in twin of ffw_walk_tuned for one adaptive CPU lane.  Baseline lanes do
+# not reach it; its portfolio admission is backed by matched-wall-time legal
+# and accepted-flip rates rather than a higher per-call hit rate.
+-> ffw_walk_axis_sweep_tuned(st, steps, controls) (i64[] i64 i64[]) i64
+  threshold = controls[5] ## i64
+  if threshold < 1
+    threshold = 1
+  max_band = controls[6] ## i64
+  if max_band <= threshold
+    max_band = threshold + 1
+  st[11] = threshold
+  st[41] = max_band
+  split_cadence = controls[0] ## i64
+  # The adaptive racer uses a negative cadence as its worker-pool dispatch
+  # tag. Preserve the magnitude as the actual split cadence once inside this
+  # opt-in walker.
+  if split_cadence < 0
+    split_cadence = 0 - split_cadence
+  i = 0 ## i64
+  while i < steps
+    mode = 0 ## i64
+    if st[10] > st[11]
+      mode = 1
+    z = ffw_one_axis_sweep_controlled(st, mode, split_cadence, controls[1], controls[2]) ## i64
+    if st[13] >= st[14]
+      z = ffw_advance_zone_controlled(st, controls[3], controls[4])
+    i += 1
+  st[7]
+
+-> ffw_walk_axis_sweep(st, steps) (i64[] i64) i64
+  controls = i64[7]
+  controls[0] = 2000
+  controls[1] = 6
+  controls[2] = 300000
+  controls[3] = 1
+  controls[4] = 12
+  controls[5] = 7
+  controls[6] = 60
+  ffw_walk_axis_sweep_tuned(st, steps, controls)
 
 -> ffw_enable_cycle_hash(st) (i64[]) i64
   st[42] = st[42] | 2

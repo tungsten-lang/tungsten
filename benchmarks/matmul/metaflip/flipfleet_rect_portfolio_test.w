@@ -1,7 +1,7 @@
 use flipfleet_rect_portfolio
 
 -> ffrpot_expect(label, condition) i64
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + label
     return 1
   0
@@ -42,9 +42,9 @@ tiny_metrics = i64[2]
 metrics_nonce = ccall("__w_clock_ms").to_s()
 closure_missing_best = "/tmp/flipfleet_rect_portfolio_missing_234_" + metrics_nonce
 failures += ffrpot_expect("closure profile exact seed metrics", ffrpo_load_metrics("2x3x4", ".", closure_missing_best, 0, tiny_metrics, 0) == 1 && tiny_metrics[0] == 20 && tiny_metrics[1] == 130)
-failures += ffrpot_expect("235 exact seed metrics", ffrpo_load_metrics("2x3x5", ".", closure_missing_best, 0, tiny_metrics, 0) == 1 && tiny_metrics[0] == 25 && tiny_metrics[1] == 170)
+failures += ffrpot_expect("235 exact seed metrics", ffrpo_load_metrics("2x3x5", ".", closure_missing_best, 0, tiny_metrics, 0) == 1 && tiny_metrics[0] == 25 && tiny_metrics[1] == 160)
 tiny_missing_best = "/tmp/flipfleet_rect_portfolio_missing_245_" + metrics_nonce
-failures += ffrpot_expect("tiny profile exact seed metrics", ffrpo_load_metrics("2x4x5", ".", tiny_missing_best, 0, tiny_metrics, 0) == 1 && tiny_metrics[0] == 33 && tiny_metrics[1] == 241)
+failures += ffrpot_expect("tiny profile exact seed metrics", ffrpo_load_metrics("2x4x5", ".", tiny_missing_best, 0, tiny_metrics, 0) == 1 && tiny_metrics[0] == 33 && tiny_metrics[1] == 222)
 gap_missing_best = "/tmp/flipfleet_rect_portfolio_missing_225_" + metrics_nonce
 failures += ffrpot_expect("225 exact seed metrics", ffrpo_load_metrics("2x2x5", ".", gap_missing_best, 0, tiny_metrics, 0) == 1 && tiny_metrics[0] == 18 && tiny_metrics[1] == 84)
 failures += ffrpot_expect("226 exact seed metrics", ffrpo_load_metrics("2x2x6", ".", gap_missing_best, 0, tiny_metrics, 0) == 1 && tiny_metrics[0] == 21 && tiny_metrics[1] == 108)

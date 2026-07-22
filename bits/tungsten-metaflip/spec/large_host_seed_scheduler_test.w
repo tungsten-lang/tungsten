@@ -3,7 +3,7 @@ use ../lib/metaflip/fleet/basins
 failures = 0 ## i64
 
 -> large_seed_expect(label, condition) (String bool) i64
-  if condition == 0
+  if !condition
     << "FAIL large-host seed scheduler: " + label
     return 1
   0

@@ -2638,12 +2638,13 @@ if STRATEGY == "islands" && J >= 4
     cycle_watch_index = candidate_index
 
 racer_controls = i64[7]
-racer_pulls = i64[9]
-racer_exposure = i64[9]
-racer_novel = i64[9]
-racer_returns = i64[9]
-racer_drops = i64[9]
-racer_density = i64[9]
+racer_setup = i64[7]
+racer_pulls = i64[ffcr_arm_count()]
+racer_exposure = i64[ffcr_arm_count()]
+racer_novel = i64[ffcr_arm_count()]
+racer_returns = i64[ffcr_arm_count()]
+racer_drops = i64[ffcr_arm_count()]
+racer_density = i64[ffcr_arm_count()]
 racer_seen_ids = i64[64]
 racer_seen_count = 0 ## i64
 racer_epoch = 0 ## i64
@@ -2655,7 +2656,7 @@ racer_lease_origin_id = 0 ## i64
 racer_lease_novel = 0 ## i64
 if racer_index >= 0
   racer_arm = ffcr_select_arm(racer_epoch, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops, racer_density)
-  z = ffcr_apply_arm(states[racer_index], racer_arm, cpu_work_moves[zones[racer_index]], cpu_wander_moves[zones[racer_index]], racer_controls) ## i64
+  z = ffcr_apply_arm_measured(states[racer_index], racer_arm, cpu_work_moves[zones[racer_index]], cpu_wander_moves[zones[racer_index]], racer_controls, racer_setup) ## i64
   racer_lease_start_moves = ffw_moves(states[racer_index])
   racer_lease_start_rank = ffw_best_rank(states[racer_index])
   racer_lease_start_bits = ffw_best_bits(states[racer_index])
@@ -2713,7 +2714,7 @@ rect_last_improved = 0 - 1 ## i64
 rect_archive_334 = []
 rect_archive_344 = []
 rect_binaries = ["/tmp/metaflip_rect_gpu_334", "/tmp/metaflip_rect_gpu_344"]
-rect_seed_paths = [RUNTIME_ROOT + "/seeds/gf2/matmul_3x3x4_rank29_gf2.txt", RUNTIME_ROOT + "/seeds/gf2/matmul_3x4x4_rank38_gf2.txt"]
+rect_registered_seeds = [[], []]
 rect_checkpoint_paths = [ffls_best_path(STATE_DIR, "gf2", "3x3x4"), ffls_best_path(STATE_DIR, "gf2", "3x4x4")]
 rect_candidate_states = []
 rect_reject_scratch = []
@@ -2734,12 +2735,25 @@ while rect_component < 2
   rect_reject_scratch.push(i64[ffr_state_size(rcap)])
   if rect_enabled != 0
     # rect_enabled is already gated off under --naive; this path only loads
-    # published rectangular leaves and prior campaign checkpoints.
-    seed_state = i64[ffr_state_size(rcap)]
-    seed_rank = ffr_load_scheme_cap(seed_state, rect_seed_paths[rect_component], rn, rm, rp, rcap, 61001 + rect_component * 101, DSLACK, CYCLES, balanced_work, balanced_wander) ## i64
+    # published rectangular leaves and prior campaign checkpoints. Slot zero
+    # is the canonical density leader and becomes the dynamic live-best door;
+    # every later registered R/R+1/R+2 door stays in a separate exact launch
+    # bank so diversity rotation cannot alter checkpoint/archive semantics.
     selected_rect = nil
-    if seed_rank > 0
-      selected_rect = seed_state
+    registered_count = ffrp_frontier_seed_count(rn, rm, rp) ## i64
+    registered_slot = 0 ## i64
+    while registered_slot < registered_count
+      registered_rel = ffrp_frontier_seed_rel(rn, rm, rp, registered_slot)
+      registered_state = i64[ffr_state_size(rcap)]
+      registered_rank = ffr_load_scheme_cap(registered_state, RUNTIME_ROOT + "/" + registered_rel, rn, rm, rp, rcap, 61001 + rect_component * 1009 + registered_slot * 17, DSLACK, CYCLES, balanced_work, balanced_wander) ## i64
+      if registered_rank > 0 && ffr_verify_best_exact(registered_state, rn, rm, rp) == 1
+        if registered_slot == 0
+          selected_rect = registered_state
+        else
+          rect_registered_seeds[rect_component].push(registered_state)
+      else
+        rect_failures[rect_component] = rect_failures[rect_component] + 1
+      registered_slot += 1
     durable_rect = i64[ffr_state_size(rcap)]
     durable_rect_text = read_file(rect_checkpoint_paths[rect_component])
     durable_rank = ffr_load_scheme_cap(durable_rect, rect_checkpoint_paths[rect_component], rn, rm, rp, rcap, 62003 + rect_component * 103, DSLACK, CYCLES, balanced_work, balanced_wander) ## i64
@@ -3239,7 +3253,11 @@ if GPU == 1
         gpu_launch_lanes[gpu_slot] = component_lanes
         gpu_launch_debt[gpu_slot] = 0
         rect_elapsed_ms[rect_component] = 0
-        gpu_threads[gpu_slot] = ffn_gpu_launch_rect(RUNTIME_ROOT, rect_binaries[rect_component], RUN_TAG, rect_component, component_lanes, GPU_STEPS, GPU_EPOCH_ROUNDS, rect_states[rect_component], rect_elapsed_ms, gpu_persistent_processes, gpu_persistent_active, gpu_persistent_generations, gpu_persistent_lanes)
+        rect_launch_seed = rect_states[rect_component]
+        seed_choice = ff7_rect_seed_choice(rect_component, rect_launch_number[rect_component], rect_registered_seeds[rect_component].size() + 1) ## i64
+        if seed_choice > 0
+          rect_launch_seed = rect_registered_seeds[rect_component][seed_choice - 1]
+        gpu_threads[gpu_slot] = ffn_gpu_launch_rect(RUNTIME_ROOT, rect_binaries[rect_component], RUN_TAG, rect_component, component_lanes, GPU_STEPS, GPU_EPOCH_ROUNDS, rect_launch_seed, rect_elapsed_ms, gpu_persistent_processes, gpu_persistent_active, gpu_persistent_generations, gpu_persistent_lanes)
         if gpu_threads[gpu_slot] == nil
           rect_failures[rect_component] = rect_failures[rect_component] + 1
           rect_retry_round[rect_component] = 1
@@ -3281,6 +3299,8 @@ status_basin_stats = i64[4]
 frontier_escape_last_ms = start_ms ## i64
 frontier_escape_sources = []
 frontier_escape_source_count = ffn_snapshot_archive_into(frontier_escape_sources, archive, ARCHIVE_CAP, STATE_SIZE, 28801) ## i64
+if SEED_NAIVE == 0
+  frontier_escape_source_count += ff7_append_low_quota_sources(RUNTIME_ROOT, ffp_low_quota_seed_paths(N), frontier_escape_sources, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, 28901)
 frontier_escape_completed_batches = 0 ## i64
 frontier_escape_lazy_admissions = 0 ## i64
 frontier_escape_schedule = i64[3]
@@ -3533,6 +3553,8 @@ while running == 1
           frontier_escape_admissions.clear
           frontier_escape_last_ms = now_ms
           frontier_escape_source_count = ffn_snapshot_archive_into(frontier_escape_sources, archive, ARCHIVE_CAP, STATE_SIZE, 51801 + round * 131)
+          if SEED_NAIVE == 0
+            frontier_escape_source_count += ff7_append_low_quota_sources(RUNTIME_ROOT, ffp_low_quota_seed_paths(N), frontier_escape_sources, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, 51901 + round * 131)
           frontier_escape_completed_batches = 0
           partial_auto_attempts = 0
           partial_auto_last_ms = now_ms
@@ -3582,17 +3604,17 @@ while running == 1
               last_progress_ms[core_fringe_index] = now_ms
 
           if racer_index >= 0
-            racer_pulls = i64[9]
-            racer_exposure = i64[9]
-            racer_novel = i64[9]
-            racer_returns = i64[9]
-            racer_drops = i64[9]
-            racer_density = i64[9]
+            racer_pulls = i64[ffcr_arm_count()]
+            racer_exposure = i64[ffcr_arm_count()]
+            racer_novel = i64[ffcr_arm_count()]
+            racer_returns = i64[ffcr_arm_count()]
+            racer_drops = i64[ffcr_arm_count()]
+            racer_density = i64[ffcr_arm_count()]
             racer_seen_ids = i64[64]
             racer_seen_count = 1
             racer_epoch = 0
             racer_arm = ffcr_select_arm(0, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops, racer_density)
-            z = ffcr_apply_arm(states[racer_index], racer_arm, cpu_work_moves[zones[racer_index]], cpu_wander_moves[zones[racer_index]], racer_controls)
+            z = ffcr_apply_arm_measured(states[racer_index], racer_arm, cpu_work_moves[zones[racer_index]], cpu_wander_moves[zones[racer_index]], racer_controls, racer_setup)
             racer_lease_start_moves = ffw_moves(states[racer_index])
             racer_lease_start_rank = ffw_best_rank(states[racer_index])
             racer_lease_start_bits = ffw_best_bits(states[racer_index])
@@ -3639,7 +3661,7 @@ while running == 1
           last_progress_ms[rw] = now_ms
           rw += 1
         if racer_index >= 0
-          z = ffcr_apply_arm(states[racer_index], racer_arm, cpu_work_moves[zones[racer_index]], cpu_wander_moves[zones[racer_index]], racer_controls)
+          z = ffcr_apply_arm_measured(states[racer_index], racer_arm, cpu_work_moves[zones[racer_index]], cpu_wander_moves[zones[racer_index]], racer_controls, racer_setup)
           racer_lease_start_moves = ffw_moves(states[racer_index])
           racer_lease_start_rank = ffw_best_rank(states[racer_index])
           racer_lease_start_bits = ffw_best_bits(states[racer_index])
@@ -4430,7 +4452,11 @@ while running == 1
           rect_elapsed_ms[rect_component] = 0
           gpu_launch_lanes[rect_slot] = rect_lanes[rect_component]
           gpu_launch_debt[rect_slot] = 0
-          gpu_threads[rect_slot] = ffn_gpu_launch_rect(RUNTIME_ROOT, rect_binaries[rect_component], RUN_TAG, rect_component, rect_lanes[rect_component], GPU_STEPS, GPU_EPOCH_ROUNDS, rect_states[rect_component], rect_elapsed_ms, gpu_persistent_processes, gpu_persistent_active, gpu_persistent_generations, gpu_persistent_lanes)
+          rect_launch_seed = rect_states[rect_component]
+          seed_choice = ff7_rect_seed_choice(rect_component, rect_launch_number[rect_component], rect_registered_seeds[rect_component].size() + 1) ## i64
+          if seed_choice > 0
+            rect_launch_seed = rect_registered_seeds[rect_component][seed_choice - 1]
+          gpu_threads[rect_slot] = ffn_gpu_launch_rect(RUNTIME_ROOT, rect_binaries[rect_component], RUN_TAG, rect_component, rect_lanes[rect_component], GPU_STEPS, GPU_EPOCH_ROUNDS, rect_launch_seed, rect_elapsed_ms, gpu_persistent_processes, gpu_persistent_active, gpu_persistent_generations, gpu_persistent_lanes)
           if gpu_threads[rect_slot] == nil
             rect_failures[rect_component] = rect_failures[rect_component] + 1
             rect_retry_round[rect_component] = round + ffn_gpu_retry_delay(rect_failures[rect_component])
@@ -4646,6 +4672,8 @@ while running == 1
     # this finite source_count*6*5 schedule; the next rank generation refreshes
     # the same high-water storage in place.
     frontier_escape_source_count = ffn_snapshot_archive_into(frontier_escape_sources, archive, ARCHIVE_CAP, STATE_SIZE, 21801 + round * 47)
+    if SEED_NAIVE == 0
+      frontier_escape_source_count += ff7_append_low_quota_sources(RUNTIME_ROOT, ffp_low_quota_seed_paths(N), frontier_escape_sources, best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, balanced_work, balanced_wander, 21901 + round * 47)
     frontier_escape_completed_batches = 0
     partial_auto_attempts = 0
     partial_auto_last_ms = now_ms
@@ -4733,16 +4761,16 @@ while running == 1
         if ffl_returned_to_origin(states[i], lineage_origin_ids[i]) == 1
           lineage_returns += 1
       if i == racer_index
-        racer_spent = ffw_moves(states[i]) - racer_lease_start_moves ## i64
+        racer_spent = ffw_moves(states[i]) - racer_lease_start_moves + racer_setup[6] ## i64
         racer_returned = 0 ## i64
         if ffbi_current_id(states[i]) == racer_lease_origin_id
           racer_returned = 1
-        racer_drop = racer_lease_start_rank - ffw_best_rank(states[i]) ## i64
+        racer_drop = racer_setup[0] + racer_lease_start_rank - ffw_best_rank(states[i]) ## i64
         if racer_drop < 0
           racer_drop = 0
-        racer_density_gain = 0 ## i64
+        racer_density_gain = racer_setup[1] ## i64
         if ffw_best_rank(states[i]) == racer_lease_start_rank && ffw_best_bits(states[i]) < racer_lease_start_bits
-          racer_density_gain = racer_lease_start_bits - ffw_best_bits(states[i])
+          racer_density_gain += racer_lease_start_bits - ffw_best_bits(states[i])
         z = ffcr_record_lease(racer_arm, racer_spent, racer_lease_novel, racer_returned, racer_drop, racer_density_gain, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops, racer_density) ## i64
         racer_epoch += 1
         racer_arm = ffcr_select_arm(racer_epoch, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops, racer_density)
@@ -4823,7 +4851,7 @@ while running == 1
       if next_debt <= 0
         active_seed_finished[i] = 1
       if i == racer_index
-        z = ffcr_apply_arm(states[i], racer_arm, cpu_work_moves[zones[i]], cpu_wander_moves[zones[i]], racer_controls)
+        z = ffcr_apply_arm_measured(states[i], racer_arm, cpu_work_moves[zones[i]], cpu_wander_moves[zones[i]], racer_controls, racer_setup)
         racer_lease_start_moves = ffw_moves(states[i])
         racer_lease_start_rank = ffw_best_rank(states[i])
         racer_lease_start_bits = ffw_best_bits(states[i])
@@ -5080,7 +5108,11 @@ while running == 1
           gpu_launch_lanes[rect_slot] = component_lanes
           gpu_launch_debt[rect_slot] = 0
           rect_elapsed_ms[rect_component] = 0
-          gpu_threads[rect_slot] = ffn_gpu_launch_rect(RUNTIME_ROOT, rect_binaries[rect_component], RUN_TAG, rect_component, component_lanes, GPU_STEPS, GPU_EPOCH_ROUNDS, rect_states[rect_component], rect_elapsed_ms, gpu_persistent_processes, gpu_persistent_active, gpu_persistent_generations, gpu_persistent_lanes)
+          rect_launch_seed = rect_states[rect_component]
+          seed_choice = ff7_rect_seed_choice(rect_component, rect_launch_number[rect_component], rect_registered_seeds[rect_component].size() + 1) ## i64
+          if seed_choice > 0
+            rect_launch_seed = rect_registered_seeds[rect_component][seed_choice - 1]
+          gpu_threads[rect_slot] = ffn_gpu_launch_rect(RUNTIME_ROOT, rect_binaries[rect_component], RUN_TAG, rect_component, component_lanes, GPU_STEPS, GPU_EPOCH_ROUNDS, rect_launch_seed, rect_elapsed_ms, gpu_persistent_processes, gpu_persistent_active, gpu_persistent_generations, gpu_persistent_lanes)
           if gpu_threads[rect_slot] == nil
             rect_failures[rect_component] = rect_failures[rect_component] + 1
             rect_retry_round[rect_component] = round + ffn_gpu_retry_delay(rect_failures[rect_component])

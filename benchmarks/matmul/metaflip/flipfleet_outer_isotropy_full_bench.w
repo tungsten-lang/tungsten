@@ -8,8 +8,8 @@
 
 use flipfleet_outer_isotropy
 
--> ffoisf_expect(label, condition)
-  if condition != 0
+-> ffoisf_expect(label, condition) (String bool) i64
+  if condition
     return 1
   << "OUTER_ISOTROPY_FULL_FAIL " + label
   exit(1)

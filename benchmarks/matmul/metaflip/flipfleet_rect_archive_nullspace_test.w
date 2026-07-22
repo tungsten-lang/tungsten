@@ -1,7 +1,7 @@
 use flipfleet_rect_archive_nullspace
 
 -> ffrant_expect(label, condition) i64
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + label
     exit(1)
   1

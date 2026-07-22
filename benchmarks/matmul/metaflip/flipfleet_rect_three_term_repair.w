@@ -245,29 +245,19 @@ use flipfleet_rect_two_term_repair
       li += 1
     return 0
 
-  # This exponential branch is finite and complete for the intended 10x10
-  # matrices.  Larger widths fail closed rather than overflowing an i64 shift.
-  if vwidth > 20 || wwidth > 20
-    return 0
-  factor = i64[2]
-  if ffr2tr_matrix_rank_one(a, vwidth, factor) != 1
-    return 0
-  limit_w = 1 << wwidth ## i64
-  zw = 1 ## i64
-  while zw < limit_w
-    if zw != factor[1]
-      meta[0] += 1
-      if ffr3tr_try_weight3_z(a, b, ua, ub, factor[0], zw, vwidth, out_u, out_v, out_w) == 1
-        return 3
-    zw += 1
-  limit_v = 1 << vwidth ## i64
-  zv = 1 ## i64
-  while zv < limit_v
-    if zv != factor[0]
-      meta[0] += 1
-      if ffr3tr_try_weight3_z(a, b, ua, ub, zv, factor[1], vwidth, out_u, out_v, out_w) == 1
-        return 3
-    zv += 1
+  # When both matrices are rank one, A=a*b and B=c*d.  The cross outer
+  # product Z=a*d gives A+Z=a*(b+d) and B+Z=(a+c)*d, both rank at most one.
+  # (The symmetric Z=c*b is a second exact choice.)  The previous exhaustive
+  # scan over every nonzero factor mask was therefore unnecessary and, worse,
+  # failed closed above width 20.  These two algebraic candidates are complete
+  # for arbitrary widths that fit the i64 factor representation.
+  if ra == 1 && rb == 1
+    meta[0] += 1
+    if ffr3tr_try_weight3_z(a, b, ua, ub, av[0], bw[0], vwidth, out_u, out_v, out_w) == 1
+      return 3
+    meta[0] += 1
+    if ffr3tr_try_weight3_z(a, b, ua, ub, bv[0], aw[0], vwidth, out_u, out_v, out_w) == 1
+      return 3
   0
 
 # meta: U-flatten rank, case (10 / 20..22 / 29 / 30), returned rank,

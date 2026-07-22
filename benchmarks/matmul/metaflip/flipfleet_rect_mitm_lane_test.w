@@ -3,7 +3,7 @@ use flipfleet_rect_mitm_lane_lib
 failures = 0 ## i64
 
 -> ffrmt_check(label, condition) i64
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + label
     return 1
   0

@@ -629,6 +629,45 @@ use ../rect
     slot += 1
   stats[2]
 
+# Persist a barrier-stable view of the live island bests without changing any
+# island.  Existing disk slots and the startup bank participate in the same
+# anchored max-min selection, so a periodic checkpoint cannot accidentally
+# forget an older basin merely because its original island was later rebased.
+# Every disk input is reconstructed and every output is independently gated by
+# ffr_dump_best before the atomic rename.  Return the selected door count, or
+# -1 only when a write failed; malformed candidates are counted and skipped.
+-> ffrda_checkpoint_live(best_path, leader, anchors, states, prior, n, m, p, capacity, seed_base, dslack, cycles, workq, wanderq, run_tag, nonce, stats)
+  disk = []
+  load_stats = i64[4]
+  z = ffrda_load_anchored(best_path, leader, anchors, n, m, p, capacity, seed_base, dslack, cycles, workq, wanderq, disk, load_stats) ## i64
+  stats[1] += load_stats[1]
+  candidates = []
+  i = 0 ## i64
+  while i < prior.size()
+    action = ffrda_collect_unique(candidates, prior[i], leader, n, m, p) ## i64
+    if action < 0
+      stats[1] += 1
+    i += 1
+  i = 0
+  while i < disk.size()
+    action = ffrda_collect_unique(candidates, disk[i], leader, n, m, p)
+    if action < 0
+      stats[1] += 1
+    i += 1
+  i = 0
+  while i < states.size()
+    action = ffrda_collect_unique(candidates, states[i], leader, n, m, p)
+    if action < 0
+      stats[1] += 1
+    i += 1
+  selected = []
+  z = ffrda_select_diverse_anchored(candidates, leader, anchors, ffrda_cap(), selected)
+  failures_before = stats[3] ## i64
+  z = ffrda_save(best_path, selected, run_tag, nonce, stats)
+  if stats[3] != failures_before
+    return 0 - 1
+  selected.size()
+
 # Physically invalidate every side slot before publishing a naive checkpoint.
 # A reset must remain self-contained across process restarts; an in-memory
 # "do not load" flag cannot be the only barrier against stale knowledge.

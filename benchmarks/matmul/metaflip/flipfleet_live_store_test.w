@@ -1,7 +1,7 @@
 use flipfleet_live_store
 
 -> fflst_expect(label, condition) i64
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + label
     return 1
   0

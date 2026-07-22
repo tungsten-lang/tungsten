@@ -145,7 +145,7 @@
   1
 
 -> ffrpp_default_gpu_capable(shape) (i64) i64
-  if shape == 225 || shape == 226 || shape == 227 || shape == 228 || shape == 229 || shape == 234 || shape == 235 || shape == 245 || shape == 256 || shape == 334 || shape == 335 || shape == 344 || shape == 345 || shape == 346 || shape == 347 || shape == 355 || shape == 356 || shape == 445 || shape == 446 || shape == 456 || shape == 457
+  if shape == 225 || shape == 226 || shape == 227 || shape == 228 || shape == 229 || shape == 234 || shape == 235 || shape == 245 || shape == 256 || shape == 334 || shape == 335 || shape == 344 || shape == 345 || shape == 346 || shape == 347 || shape == 355 || shape == 356 || shape == 445 || shape == 446 || shape == 456 || shape == 457 || shape == 467
     return 1
   0
 

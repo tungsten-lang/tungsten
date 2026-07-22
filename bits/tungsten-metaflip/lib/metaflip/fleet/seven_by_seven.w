@@ -9,6 +9,7 @@ use ../tui
 use banks
 use archive
 use map_elites
+use ../rect/basins
 
 # Independently admit one already exact-gated partial-automorphism endpoint to
 # the global max-min frontier archive and MAP-Elites.  These are complementary
@@ -45,6 +46,37 @@ use map_elites
   if moved
     return 1
   0
+
+# Append independently exact 7x7 novelty sources to the already frozen
+# frontier-escape generation without admitting them to the hot same-rank
+# archive or MAP-Elites.  The existing finite schedule rotates sources first,
+# so one appended source receives exactly 1/(archive sources + 1) of this cold
+# one-candidate-per-minute escape work (and the same share of the existing
+# partial-automorphism intake).  Rank changes and --naive are handled by the
+# caller; this gate also refuses stale-rank, malformed, and duplicate inputs.
+-> ff7_append_low_quota_sources(root, paths, sources, leader, n, capacity, state_size, dslack, cycles, workq, wanderq, seed_base) i64
+  if n != 7 || leader == nil || ffw_best_rank(leader) < 1
+    return 0
+  added = 0 ## i64
+  i = 0 ## i64
+  while i < paths.size()
+    candidate = i64[state_size]
+    path = root + "/" + paths[i]
+    rank = ffw_load_scheme_cap(candidate, path, n, capacity, seed_base + i * 131, dslack, cycles, workq, wanderq) ## i64
+    if rank == ffw_best_rank(leader) && ffw_verify_best_exact(candidate, n) == 1
+      duplicate = 0 ## i64
+      source_index = 0 ## i64
+      while source_index < sources.size()
+        if ffn_distance(sources[source_index], candidate) == 0
+          duplicate = 1
+          source_index = sources.size()
+        else
+          source_index += 1
+      if duplicate == 0
+        sources.push(candidate)
+        added += 1
+    i += 1
+  added
 
 # Reserve one sixth of role 10's existing pool budget for each ready 7x7
 # rectangular component.  At the default 1,536-lane pool this is 256+256;
@@ -111,6 +143,16 @@ use map_elites
     allocation[1] = allocation[1] + extra1 * 32
     used += extra_chunks * 32
   used
+
+# Rotate the dynamic live component leader (slot zero) and every registered
+# alternate/shoulder through the same low-discrepancy door schedule used by
+# standalone rectangular campaigns.  A fixed corpus is covered exactly once
+# per complete window, and the component offset staggers 334 against 344.
+-> ff7_rect_seed_choice(component, launch_number, choices) (i64 i64 i64) i64
+  if choices < 1 || launch_number < 0
+    return 0 - 1
+  ticket = ffrcb_portfolio_door_ticket(launch_number, component, 0) ## i64
+  ffrcb_scheduled_door_choice(ticket, choices)
 
 # Water-fill the selected generic pool children from the explicit remainder.
 # Mode caps can leave part of the requested budget unused; callers return that

@@ -9,8 +9,8 @@
 
 use flipfleet_outer_isotropy
 
--> ffois_expect(label, condition)
-  if condition != 0
+-> ffois_expect(label, condition) (String bool) i64
+  if condition
     return 1
   << "OUTER_ISOTROPY_FAIL " + label
   exit(1)

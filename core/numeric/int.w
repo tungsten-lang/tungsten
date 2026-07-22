@@ -143,6 +143,51 @@
   -> pow(e, m)
     modpow(e, m)
 
+  # Modular inverse via extended Euclidean. Mirrors Integer#invmod so the
+  # same call works on any integer class. Raises when not invertible.
+  -> invmod(modulus)
+    if modulus == 0
+      raise "Int#invmod: modulus must be nonzero"
+    m = modulus < 0 ? 0 - modulus : modulus
+    if m == 1
+      return 0
+    a = self % m
+    if a < 0
+      a = a + m
+    t = 0
+    newt = 1
+    r = m
+    newr = a
+    while newr != 0
+      q = r / newr
+      tmp_t = newt
+      newt = t - q * newt
+      t = tmp_t
+      tmp_r = newr
+      newr = r - q * newr
+      r = tmp_r
+    if r > 1
+      raise "Int#invmod: not invertible"
+    if t < 0
+      t = t + m
+    t
+
+  # Legendre symbol (self/p). Mirrors Integer#legendre.
+  -> legendre(p)
+    if p <= 2 || p.even?
+      raise "Int#legendre: p must be an odd prime"
+    a = self % p
+    if a < 0
+      a = a + p
+    if a == 0
+      return 0
+    s = a.modpow((p - 1) / 2, p)
+    if s == 1
+      return 1
+    if s == p - 1
+      return -1
+    raise "Int#legendre: Euler criterion returned an invalid value"
+
   # Number of bits in the two's-complement representation, excluding sign
   # (Ruby Integer#bit_length): 0 -> 0, 255 -> 8, 256 -> 9, -256 -> 8. Halving
   # `/ 2` (not `>>`, which is i64-only) keeps it exact for BigInt receivers.

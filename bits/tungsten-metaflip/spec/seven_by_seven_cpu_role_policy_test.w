@@ -3,7 +3,7 @@ use ../lib/metaflip/seeds/catalog
 failures = 0 ## i64
 
 -> s7crpt_expect(label, condition) (String bool) i64
-  if condition == 0
+  if !condition
     << "FAIL " + label
     return 1
   0

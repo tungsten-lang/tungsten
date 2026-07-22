@@ -3,7 +3,7 @@ use flipfleet_gpu_bundle
 failures = 0 ## i64
 
 -> expect(label, condition) i64
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + label
     return 1
   0
@@ -21,7 +21,7 @@ while n <= 7
   failures += expect("metal asset " + n.to_s(), metal != nil)
   if source != nil
     failures += expect("exact gate " + n.to_s(), source.include?("while ai < ab"))
-    failures += expect("bounded epochs " + n.to_s(), source.include?("ROUNDS = av0[16].to_i()"))
+    failures += expect("bounded epochs " + n.to_s(), source.include?("ROUNDS = av0\[16].to_i()"))
     failures += expect("cached library " + n.to_s(), source.include?("metal_load_library(device, metallibpath)"))
     failures += expect("persistent mailbox " + n.to_s(), source.include?("persistent_command_path") && source.include?("persistent_generation.to_s() + \" done \""))
     failures += expect("persistent crash lease " + n.to_s(), source.include?("persistent_idle_timeout_ms = " + ffpg_worker_idle_timeout_ms().to_s()) && source.include?("persistent_generation.to_s() + \" expired \""))
@@ -59,5 +59,6 @@ failures += expect("persistent crash lease boundary", ffpg_worker_idle_expired(1
 
 if failures > 0
   << "flipfleet_gpu_bundle_test: " + failures.to_s() + " failure(s)"
+  exit(1)
 if failures == 0
   << "flipfleet_gpu_bundle_test: all checks passed"

@@ -54,6 +54,7 @@
   table_mask = params[1] ## u32
   table_cap = params[2] ## i32
   tuple_size = params[3] ## i32
+  ordinal = params[4] ## i32
   square = count * count ## i32
   a = tid / square ## i32
   rem = tid - a * square ## i32
@@ -72,6 +73,7 @@
       tuple_offset = table_cap * 5 ## i32
       scanned = 0 ## i32
       found = 0 ## i32
+      matching = 0 ## i32
       while scanned < table_cap
         if table[used_offset + slot] == 0
           scanned = table_cap
@@ -112,9 +114,12 @@
                   if z == c
                     overlap = 1
                   if overlap == 0
-                    matches[tid] = table[tuple_offset + slot]
-                    found = 1
-                    scanned = table_cap
+                    if matching == ordinal
+                      matches[tid] = table[tuple_offset + slot]
+                      found = 1
+                      scanned = table_cap
+                    else
+                      matching = matching + 1
           if found == 0
             slot = (slot + 1) & table_mask
             scanned = scanned + 1
@@ -127,6 +132,7 @@
   table_mask = params[1] ## u32
   table_cap = params[2] ## i32
   tuple_size = params[3] ## i32
+  ordinal = params[4] ## i32
   square = count * count ## i32
   cube = square * count ## i32
   a = tid / cube ## i32
@@ -149,6 +155,7 @@
         tuple_offset = table_cap * 5 ## i32
         scanned = 0 ## i32
         found = 0 ## i32
+        matching = 0 ## i32
         while scanned < table_cap
           if table[used_offset + slot] == 0
             scanned = table_cap
@@ -158,12 +165,23 @@
                 if table[table_cap * 2 + slot] == want2
                   if table[table_cap * 3 + slot] == want3
                     code = table[tuple_offset + slot] - 1 ## u32
-                    x = code / cube ## i32
-                    rest = code - x * cube ## i32
-                    y = rest / square ## i32
-                    rest = rest - y * square
-                    z = rest / count ## i32
-                    q = rest - z * count ## i32
+                    x = 0 ## i32
+                    y = 0 ## i32
+                    z = 0 ## i32
+                    q = -1 ## i32
+                    rest = 0 ## i32
+                    if tuple_size == 3
+                      x = code / square
+                      rest = code - x * square
+                      y = rest / count
+                      z = rest - y * count
+                    if tuple_size == 4
+                      x = code / cube
+                      rest = code - x * cube
+                      y = rest / square
+                      rest = rest - y * square
+                      z = rest / count
+                      q = rest - z * count
                     overlap = 0 ## i32
                     if x == a
                       overlap = 1
@@ -198,9 +216,12 @@
                     if q == d
                       overlap = 1
                     if overlap == 0
-                      matches[tid] = table[tuple_offset + slot]
-                      found = 1
-                      scanned = table_cap
+                      if matching == ordinal
+                        matches[tid] = table[tuple_offset + slot]
+                        found = 1
+                        scanned = table_cap
+                      else
+                        matching = matching + 1
             if found == 0
               slot = (slot + 1) & table_mask
               scanned = scanned + 1
@@ -282,6 +303,36 @@ use mitm
     added += 1
   count
 
+-> ffx_gcd(a, b) (i64 i64) i64
+  while b != 0
+    remainder = a % b ## i64
+    a = b
+    b = remainder
+  a
+
+# Visit a bounded Cartesian candidate tail through a full-cycle modular
+# permutation.  The old nested-loop prefix exhausted W while holding the first
+# U/V factors fixed; with the production pool caps that meant most launches
+# never combined the other factor values at all.  A coprime stride preserves
+# completeness when the whole product fits while spreading every short prefix
+# across all three axes.
+-> ffx_cartesian_index(total, seed, ordinal) (i64 i64 i64) i64
+  if total < 2
+    return 0
+  start = seed % total ## i64
+  if start < 0
+    start += total
+  step = (seed * 2 + 1) % total ## i64
+  if step < 0
+    step += total
+  if step < 1
+    step = 1
+  while ffx_gcd(step, total) != 1
+    step += 1
+    if step >= total
+      step = 1
+  (start + ordinal * step) % total
+
 -> ffx_candidates(us, vs, ws, rank, selected, selected_count, limit, nearby, cu, cv, cw) (i64[] i64[] i64[] i64 i64[] i64 i64 i64 i64[] i64[] i64[]) i64
   pu = i64[64]
   pv = i64[64]
@@ -330,21 +381,29 @@ use mitm
           count += 1
       right += 1
     left += 1
-  a = 0 ## i64
-  while a < nu && count < limit
-    b = 0 ## i64
-    while b < nv && count < limit
-      c = 0 ## i64
-      while c < nw && count < limit
-        if pu[a] != 0 && pv[b] != 0 && pw[c] != 0
-          if ffm_candidate_present(cu, cv, cw, count, pu[a], pv[b], pw[c]) == 0
-            cu[count] = pu[a]
-            cv[count] = pv[b]
-            cw[count] = pw[c]
-            count += 1
-        c += 1
-      b += 1
-    a += 1
+  total = nu * nv * nw ## i64
+  seed = selected_count * 13 ## i64
+  i = 0
+  while i < selected_count
+    # Indices are deliberately used rather than potentially overflowing
+    # factor products. Different subset offsets therefore rotate the prefix.
+    seed += selected[i] * (17 + i * 14)
+    i += 1
+  visited = 0 ## i64
+  plane = nv * nw ## i64
+  while visited < total && count < limit
+    linear = ffx_cartesian_index(total, seed, visited) ## i64
+    a = linear / plane ## i64
+    rem = linear - a * plane ## i64
+    b = rem / nw ## i64
+    c = rem - b * nw ## i64
+    if pu[a] != 0 && pv[b] != 0 && pw[c] != 0
+      if ffm_candidate_present(cu, cv, cw, count, pu[a], pv[b], pw[c]) == 0
+        cu[count] = pu[a]
+        cv[count] = pv[b]
+        cw[count] = pw[c]
+        count += 1
+    visited += 1
   count
 
 -> ffx_target_fingerprint(us, vs, ws, selected, selected_count, dim, out) (i64[] i64[] i64[] i64[] i64 i64 i64[]) i64
@@ -520,64 +579,71 @@ use mitm
   if query_tuple_size == 4
     query_work = fourth
   matches = metal_array(32, query_work)
-  probe_params = metal_array(32, 4)
+  probe_params = metal_array(32, 5)
   probe_params[0] = count
   probe_params[1] = hcap - 1
   probe_params[2] = hcap
   probe_params[3] = table_tuple_size
+  probe_pipeline = nil
   if query_tuple_size == 3
     probe_pipeline = metal_pipeline(library, "ffx_probe_triples")
-    metal_dispatch_n(queue, probe_pipeline, [metal_buffer_for(device, fps0), metal_buffer_for(device, fps1), metal_buffer_for(device, fps2), metal_buffer_for(device, fps3), metal_buffer_for(device, table), metal_buffer_for(device, target), metal_buffer_for(device, matches), metal_buffer_for(device, probe_params)], cube)
   if query_tuple_size == 4
     probe_pipeline = metal_pipeline(library, "ffx_probe_quads")
-    metal_dispatch_n(queue, probe_pipeline, [metal_buffer_for(device, fps0), metal_buffer_for(device, fps1), metal_buffer_for(device, fps2), metal_buffer_for(device, fps3), metal_buffer_for(device, table), metal_buffer_for(device, target), metal_buffer_for(device, matches), metal_buffer_for(device, probe_params)], fourth)
   replacement_count = k - 1 ## i64
   indices = i64[8]
-  index = 0
-  while index < query_work
-    packed_table = matches[index] ## i64
-    if packed_table > 0
-      code = packed_table - 1 ## i64
-      if table_tuple_size == 2
-        indices[0] = code / count
-        indices[1] = code % count
-      if table_tuple_size == 3
-        indices[0] = code / square
-        rem2 = code - indices[0] * square ## i64
-        indices[1] = rem2 / count
-        indices[2] = rem2 % count
-      if table_tuple_size == 4
-        indices[0] = code / cube
-        rem2 = code - indices[0] * cube ## i64
-        indices[1] = rem2 / square
-        rem2 = rem2 - indices[1] * square
-        indices[2] = rem2 / count
-        indices[3] = rem2 % count
-      query_offset = table_tuple_size ## i64
-      if query_tuple_size == 3
-        qa = index / square ## i64
-        qrem = index - qa * square ## i64
-        qb = qrem / count ## i64
-        qc = qrem - qb * count ## i64
-        indices[query_offset] = qa
-        indices[query_offset + 1] = qb
-        indices[query_offset + 2] = qc
-      if query_tuple_size == 4
-        qa = index / cube
-        qrem = index - qa * cube
-        qb = qrem / square
-        qrem = qrem - qb * square
-        qc = qrem / count
-        qd = qrem - qc * count ## i64
-        indices[query_offset] = qa
-        indices[query_offset + 1] = qb
-        indices[query_offset + 2] = qc
-        indices[query_offset + 3] = qd
-      if ffx_local_exact(us, vs, ws, selected, k, cu, cv, cw, indices, replacement_count, n) == 1
-        hit = ffx_accept(us, vs, ws, rank, selected, k, cu, cv, cw, indices, replacement_count, n, output_path) ## i64
-        if hit > 0
-          return hit
-    index += 1
+  ordinal = 0 ## i64
+  ordinal_hits = 1 ## i64
+  while ordinal_hits > 0
+    probe_params[4] = ordinal
+    metal_dispatch_n(queue, probe_pipeline, [metal_buffer_for(device, fps0), metal_buffer_for(device, fps1), metal_buffer_for(device, fps2), metal_buffer_for(device, fps3), metal_buffer_for(device, table), metal_buffer_for(device, target), metal_buffer_for(device, matches), metal_buffer_for(device, probe_params)], query_work)
+    ordinal_hits = 0
+    index = 0 ## i64
+    while index < query_work
+      packed_table = matches[index] ## i64
+      if packed_table > 0
+        ordinal_hits += 1
+        code = packed_table - 1 ## i64
+        if table_tuple_size == 2
+          indices[0] = code / count
+          indices[1] = code % count
+        if table_tuple_size == 3
+          indices[0] = code / square
+          rem2 = code - indices[0] * square ## i64
+          indices[1] = rem2 / count
+          indices[2] = rem2 % count
+        if table_tuple_size == 4
+          indices[0] = code / cube
+          rem2 = code - indices[0] * cube ## i64
+          indices[1] = rem2 / square
+          rem2 = rem2 - indices[1] * square
+          indices[2] = rem2 / count
+          indices[3] = rem2 % count
+        query_offset = table_tuple_size ## i64
+        if query_tuple_size == 3
+          qa = index / square ## i64
+          qrem = index - qa * square ## i64
+          qb = qrem / count ## i64
+          qc = qrem - qb * count ## i64
+          indices[query_offset] = qa
+          indices[query_offset + 1] = qb
+          indices[query_offset + 2] = qc
+        if query_tuple_size == 4
+          qa = index / cube
+          qrem = index - qa * cube
+          qb = qrem / square
+          qrem = qrem - qb * square
+          qc = qrem / count
+          qd = qrem - qc * count ## i64
+          indices[query_offset] = qa
+          indices[query_offset + 1] = qb
+          indices[query_offset + 2] = qc
+          indices[query_offset + 3] = qd
+        if ffx_local_exact(us, vs, ws, selected, k, cu, cv, cw, indices, replacement_count, n) == 1
+          hit = ffx_accept(us, vs, ws, rank, selected, k, cu, cv, cw, indices, replacement_count, n, output_path) ## i64
+          if hit > 0
+            return hit
+      index += 1
+    ordinal += 1
   0
 
 # Exhaustive tensor gate for one subset of candidate indices.  This is used
@@ -706,39 +772,46 @@ use mitm
         z = ffx_insert(table, hcap, triple0[index], triple1[index], triple2[index], triple3[index], packed[index])
       index += 1
   matches = metal_array(32, cube)
-  probe_params = metal_array(32, 4)
+  probe_params = metal_array(32, 5)
   probe_params[0] = count
   probe_params[1] = hcap - 1
   probe_params[2] = hcap
   probe_params[3] = table_tuple_size
   probe_pipeline = metal_pipeline(library, "ffx_probe_triples")
-  metal_dispatch_n(queue, probe_pipeline, [metal_buffer_for(device, fps0), metal_buffer_for(device, fps1), metal_buffer_for(device, fps2), metal_buffer_for(device, fps3), metal_buffer_for(device, table), metal_buffer_for(device, target), metal_buffer_for(device, matches), metal_buffer_for(device, probe_params)], cube)
   indices = i64[6]
-  index = 0
-  while index < cube
-    packed_table = matches[index] ## i64
-    if packed_table > 0
-      code = packed_table - 1 ## i64
-      if table_tuple_size == 2
-        indices[0] = code / count
-        indices[1] = code % count
-      if table_tuple_size == 3
-        indices[0] = code / square
-        rem2 = code - indices[0] * square ## i64
-        indices[1] = rem2 / count
-        indices[2] = rem2 % count
-      qa = index / square ## i64
-      qrem = index - qa * square ## i64
-      qb = qrem / count ## i64
-      qc = qrem - qb * count ## i64
-      indices[table_tuple_size] = qa
-      indices[table_tuple_size + 1] = qb
-      indices[table_tuple_size + 2] = qc
-      if ffx_primitive_zero(cu, cv, cw, indices, identity_count, n) == 1
-        hit = ffx_accept_identity(us, vs, ws, rank, cu, cv, cw, indices, identity_count, n, output_path) ## i64
-        if hit > 0
-          return hit
-    index += 1
+  ordinal = 0 ## i64
+  ordinal_hits = 1 ## i64
+  while ordinal_hits > 0
+    probe_params[4] = ordinal
+    metal_dispatch_n(queue, probe_pipeline, [metal_buffer_for(device, fps0), metal_buffer_for(device, fps1), metal_buffer_for(device, fps2), metal_buffer_for(device, fps3), metal_buffer_for(device, table), metal_buffer_for(device, target), metal_buffer_for(device, matches), metal_buffer_for(device, probe_params)], cube)
+    ordinal_hits = 0
+    index = 0 ## i64
+    while index < cube
+      packed_table = matches[index] ## i64
+      if packed_table > 0
+        ordinal_hits += 1
+        code = packed_table - 1 ## i64
+        if table_tuple_size == 2
+          indices[0] = code / count
+          indices[1] = code % count
+        if table_tuple_size == 3
+          indices[0] = code / square
+          rem2 = code - indices[0] * square ## i64
+          indices[1] = rem2 / count
+          indices[2] = rem2 % count
+        qa = index / square ## i64
+        qrem = index - qa * square ## i64
+        qb = qrem / count ## i64
+        qc = qrem - qb * count ## i64
+        indices[table_tuple_size] = qa
+        indices[table_tuple_size + 1] = qb
+        indices[table_tuple_size + 2] = qc
+        if ffx_primitive_zero(cu, cv, cw, indices, identity_count, n) == 1
+          hit = ffx_accept_identity(us, vs, ws, rank, cu, cv, cw, indices, identity_count, n, output_path) ## i64
+          if hit > 0
+            return hit
+      index += 1
+    ordinal += 1
   0
 
 -> ffx_mine_circuits(seed_path, output_path, n, subsets, pool, nearby, offset, metal_path, metallib_path = "") i64

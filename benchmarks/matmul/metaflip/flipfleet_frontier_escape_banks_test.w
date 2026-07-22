@@ -6,7 +6,7 @@ use flipfleet_frontier_escape_banks
 failures = 0 ## i64
 
 -> fffebt_expect(label, condition) i64
-  if condition == 0
+  if condition == false || condition == 0
     << "FAIL " + label
     return 1
   0
@@ -170,7 +170,7 @@ path_family_counters = i64[6]
 source_admissions = []
 path_total = fffeb_append_frontier_paths(".", paths, d450, n, capacity, state_size, dslack, cycles, workq, wanderq, 6, path_near1, path_near1_signatures, path_near1_uses, path_near1_successes, 32, path_near2, path_near2_signatures, path_near2_uses, path_near2_successes, 32, 8, 2, path_near_counters, source_admissions, path_family_counters) ## i64
 failures += fffebt_expect("path helper visits both", source_admissions.size() == 2 && source_admissions[0] > 0 && source_admissions[1] > 0 && path_total == source_admissions[0] + source_admissions[1])
-failures += fffebt_expect("path helper retains rank48 breadth", path_near1.size() > source_admissions[0])
+failures += fffebt_expect("path helper fills rank48 signature quota", path_near1.size() == 8 && path_near1_signatures.size() == path_near1.size())
 
 if failures > 0
   << "flipfleet_frontier_escape_banks_test: " + failures.to_s() + " failure(s)"

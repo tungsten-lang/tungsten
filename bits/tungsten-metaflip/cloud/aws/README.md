@@ -238,3 +238,64 @@ the independent failure cases above remain fail-closed:
 ```sh
 bits/tungsten-metaflip/cloud/aws/test_rect_portfolio_deadline.sh
 ```
+
+## High-leverage five-plus-one world-record preset
+
+`supervise_high_leverage_mix.sh` reserves nodes `0..4` for rectangular leaves
+whose one-rank improvements propagate through the largest audited block-
+composition families, and keeps node `5` on an independent 7x7 rank-246 hunt:
+
+| node | tensor | target | audited leverage |
+|---:|---:|---:|---:|
+| 0 | `4x4x5` | 60 -> 59 | 1,411 |
+| 1 | `4x5x7` | 104 -> 103 | 2,043 |
+| 2 | `4x6x7` | 123 -> 122 | 2,002 |
+| 3 | `3x4x6` | 54 -> 53 | 1,679 |
+| 4 | `2x5x6` | 47 -> 46 | 734 |
+| 5 | `7x7` | 247 -> 246 | direct square record |
+
+`3x4x6` is used instead of `3x5x6`: it has both higher audited leverage
+(1,679 versus 1,638) and a smaller worker state. `4x4x5` is not simply the
+fifth-largest aggregate count: it is the smallest frontier with 109 guaranteed
+saved-formula improvements, so the preset deliberately balances impact with
+per-move searchability rather than sorting only by raw leverage. The
+rectangular parents use
+the normal 256-round leased-door rotation, so each node repeatedly reloads its
+exact checkpoint and bounded side archive with a fresh nonce and door ticket.
+
+The mixed wrapper launches the two existing supervisors with disjoint NUMA
+masks. If either supervisor ends or fails, it asks the sibling to drain, waits
+for both exact checkpoint paths, and issues one host-shutdown request. This
+avoids two independent shutdown owners and replaces the ad-hoc cross-process
+watchdog used by early campaigns.
+
+```sh
+bits/tungsten-metaflip/cloud/aws/supervise_high_leverage_mix.sh \
+  --binary /home/ubuntu/tungsten/build/cloud/metaflip-next \
+  --runtime-root /home/ubuntu/tungsten/bits/tungsten-metaflip \
+  --state-root /var/lib/metaflip/high-leverage-mix \
+  --log-root /var/log/metaflip/high-leverage-mix \
+  --seconds 14400
+```
+
+Always inspect both generated child campaigns before spending compute:
+
+```sh
+bits/tungsten-metaflip/cloud/aws/supervise_high_leverage_mix.sh \
+  --dry-run \
+  --binary /home/ubuntu/tungsten/build/cloud/metaflip-next \
+  --runtime-root /home/ubuntu/tungsten/bits/tungsten-metaflip \
+  --state-root /var/lib/metaflip/high-leverage-mix
+```
+
+The wrapper owns process lifetime, not cloud storage. For Spot campaigns,
+retain the EBS volume through instance termination, copy and hash-verify the
+final state/log archive, and only then delete the retained volume.
+
+The local contract test expands the preset through both real child-supervisor
+dry-run paths and asserts all six disjoint NUMA assignments without starting a
+fleet:
+
+```sh
+bits/tungsten-metaflip/cloud/aws/test_supervise_high_leverage_mix.sh
+```

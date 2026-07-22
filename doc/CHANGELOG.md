@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+- **`sleep()` works in compiled binaries** — bare `sleep(duration)` lowers
+  to `__w_sleep`, which now exists in the runtime (Int/Float/Decimal
+  seconds; `nil` blocks forever; returns the duration). Previously every
+  program calling `sleep()` failed at link time with `___w_sleep` undefined.
+- **`System` registered in the core auto table** — `System.cpu_count`,
+  `System.executable_path`, etc. resolve in compiled programs instead of
+  dying with "undefined method for nil".
+- **`String#to_i` promotes past i64** — decimals outside the i64 range parse
+  to bignums instead of silently saturating at `LLONG_MAX`/`LLONG_MIN`.
+  Non-decimal bases keep the fixed-width parse; `String#to_i` still stops at
+  underscores (unchanged).
+- **Interpolation ruling: ESC-`[` never interpolates** — inside a string, a
+  `[` immediately preceded by ESC (0x1B) is literal no matter how the ESC
+  was produced (`\e`, `\u001b`, concatenation), so ANSI CSI sequences like `"\e[K"` can
+  never be misread as interpolation. Brackets after any other character
+  interpolate as before; `\[` remains the escaped-literal form. New specs:
+  `spec/compiler/string_interp_esc_bracket_spec.w`,
+  `spec/compiler/string_escape_backslash_spec.w`,
+  `spec/core/{global_sleep,system_cpu_count,string_to_i_bignum}_spec.w`.
+
 ## 2026.07.04 — Public Preview
 
 The first public release of Tungsten: an object-oriented language that reads

@@ -183,6 +183,8 @@ compiled_specs=(
   spec/compiler/source_argc1_exact_ivar_spec.w
   spec/compiler/source_argc1_hint_compat_spec.w
   spec/compiler/string_buffer_size_revisit_autoload_spec.w
+  spec/compiler/string_escape_backslash_spec.w
+  spec/compiler/string_interp_esc_bracket_spec.w
   spec/compiler/typed_helper_array_signature_spec.w
   spec/compiler/typed_overload_spec.w
   spec/compiler/uuid_byte_revisit_autoload_spec.w
@@ -193,6 +195,9 @@ compiled_specs=(
   spec/interpreter/ipv4_octets_native_spec.w
   spec/core/basics_spec.w
   spec/core/base64_native_spec.w
+  spec/core/global_sleep_spec.w
+  spec/core/system_cpu_count_spec.w
+  spec/core/string_to_i_bignum_spec.w
   spec/core/string_native_spec.w
   spec/core/control_flow_spec.w
   spec/core/classes_spec.w

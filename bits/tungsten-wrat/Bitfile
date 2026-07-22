@@ -6,3 +6,5 @@ summary     "UNSAT proof checker for the WRAT, LRAT and DRAT certificate formats
 description "Independently re-derives every step of a propositional refutation. Reads Tungsten-native hinted .wrat proofs, LRAT, and plain DRAT, checking redundancy by reverse unit propagation with a RAT fallback. Hinted proofs are checked in near-linear time by replaying the solver's named propagation chain instead of searching for one. Deliberately small and heuristic-free so it can be audited, and deliberately shares no code with the solver that produced the proof."
 license     "MIT OR Apache-2.0"
 authors     ["Tungsten Language Project"]
+
+executable  "wrat", source: "bin/wrat.w"

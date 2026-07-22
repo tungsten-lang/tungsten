@@ -57,9 +57,9 @@ use checker
     << "s NOT VERIFIED"
     1
 
-# wrat.w doubles as the bit manifest, so `use wrat` consumers execute this
-# top-level call too -- it therefore acts ONLY on recognized arguments and
-# is a silent no-op otherwise.
+# Dispatch recognized command-line arguments. The executable entry point
+# (bin/wrat.w) calls this explicitly; importing `use wrat` — including from
+# another bit's regression specs — is side-effect free.
 -> wrat_run_cli(args)
   cmd = nil
   cmd = args[0] if args.size > 0
@@ -70,5 +70,6 @@ use checker
     wrat_print_usage
   elsif args.size >= 2
     exit(wrat_check_files(args[0], args[1]))
-
-wrat_run_cli(argv())
+  else
+    wrat_print_usage
+    exit(1)

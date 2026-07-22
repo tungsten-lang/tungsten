@@ -11,6 +11,9 @@ use core/crypto/sha224
 use core/crypto/sha256
 use core/crypto/sha384
 use core/crypto/sha512
+use core/crypto/hmac
+use core/crypto/pbkdf2
+use core/crypto/scram
 
 + Crypto
 
@@ -22,6 +25,15 @@ use core/crypto/sha512
 
   -> .md5_bytes(data)
     Crypto:MD5.digest(data)
+
+  -> .hmac_sha256(key, data)
+    Crypto:HMAC.sha256_hex(key, data)
+
+  -> .hmac_sha256_bytes(key, data)
+    Crypto:HMAC.sha256(key, data)
+
+  -> .pbkdf2_sha256(password, salt, iterations, dklen = 32)
+    Crypto:PBKDF2.sha256(password, salt, iterations, dklen)
 
   -> .sha1(data)
     Crypto:SHA1.hexdigest(data)

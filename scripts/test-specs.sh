@@ -244,6 +244,7 @@ interpreter_specs=(
 
 core_specs=(
   spec/core/byte_array_equality_spec.w
+  spec/core/crypto_hmac_scram_spec.w
   spec/core/byte_array_slice_spec.w
   spec/core/byte_array_view_flatten_spec.w
   spec/core/byte_array_view_reallocation_spec.w

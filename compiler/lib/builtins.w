@@ -52,8 +52,10 @@
   when "type"
     # Bare type(value) arrives with the value in args and a nil top-level
     # receiver; receiver-style dispatch has no explicit argument.
+    # Use w_type_name so interpreter objects ({rt: :object, w_class: …})
+    # report their class name rather than "Hash" (their storage shape).
     target = args.empty?() ? recv : args[0]
-    type(target)
+    interp.w_type_name(target)
 
   when "to_s"
     interp.w_to_s(recv)
@@ -62,7 +64,7 @@
     interp.w_to_s(recv).to_i()
 
   when "class"
-    type(recv)
+    interp.w_type_name(recv)
 
   # -- String methods --
   when "length", "size"

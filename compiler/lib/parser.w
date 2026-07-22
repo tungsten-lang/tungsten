@@ -712,7 +712,28 @@ use ../../core/token
 
   -> is_block_node?(node)
     t = ast_kind(node)
-    t in (:if :while :with :parallel_with :case :begin :method_def :fn_def :class_def :trait_def :on_guard)
+    if t in (:if :while :with :parallel_with :case :begin :method_def :fn_def :class_def :trait_def :on_guard)
+      return true
+    # A call that carries a trailing block is a multi-line statement form
+    # (`xs.each -> …`). Do not accept a next-line `[` as indexing of it —
+    # that misparses a bare tail array literal as `each(...)[n, n]`.
+    if t == :call && node.block != nil
+      return true
+    false
+
+  # Exclusive end line of `expr` when recorded; else its start line; else
+  # the current line. Used to keep tight postfix `[]` on the same line as
+  # the receiver (see parse_postfix_from indexing rule).
+  -> expr_end_line_for(expr)
+    out = current_line()
+    if expr != nil
+      el = expr.end_line
+      if el != nil && el != 0
+        out = el
+      else
+        sl = expr.line
+        out = sl if sl != nil && sl != 0
+    out
 
   -> parse_expression(allow_passthrough = true)
     if at_kw?("trait")
@@ -1536,7 +1557,12 @@ use ../../core/token
         expr = Tungsten:AST:ViewFieldVar.new(expr, vf_field)
         expr.loc = vf_loc
         expr.loc_end = make_end_loc()
-      elsif at_type?(T_LBRACKET) && !is_block_node?(expr)
+      elsif at_type?(T_LBRACKET) && !is_block_node?(expr) && !@sp_before && current_line() == expr_end_line_for(expr)
+        # Indexing is a TIGHT postfix: `xs[i]` on the same line. A `[` on a
+        # later line after a call-with-block used to be misparsed as
+        # `xs.each(...)[n, n]` → "Expected RBRACKET, got COMMA" for a bare
+        # tail array literal. Mirror the same-line rule used for trailing
+        # `if` / `unless` modifiers.
         lbr_loc = make_loc_here()
         advance()
         index = parse_expression()

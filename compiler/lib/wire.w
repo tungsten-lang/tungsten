@@ -886,6 +886,11 @@
 -> dead_store_elim(block)
   prev_store = {}
   dead_set = {}
+  # Slots whose address has been taken (ptr_to_i64) may be loaded later
+  # through a captured inttoptr — e.g. `i = 0; each { use i }; i = 1`.
+  # DSE must not kill stores to escaped slots: the intervening use is
+  # invisible as a load_i64 of the slot itself.
+  escaped = {}
 
   i = 0
   instrs = block[:instructions]
@@ -893,12 +898,15 @@
     inst = instrs[i]
     if inst[:op] in (:store_i64 :store_i128 :store_float :store_double)
       prev = prev_store[inst[:ptr]]
-      if prev != nil
+      if prev != nil && escaped[inst[:ptr]] != true
         dead_set[prev] = true
       prev_store[inst[:ptr]] = i
     elsif inst[:op] in (:load_i64 :load_i128 :load_float :load_double)
       # Load makes the previous store to this slot live
       prev_store[inst[:ptr]] = nil
+    elsif inst[:op] == :ptr_to_i64
+      escaped[inst[:value]] = true
+      prev_store[inst[:value]] = nil
     i += 1
 
   if dead_set.keys().size() == 0

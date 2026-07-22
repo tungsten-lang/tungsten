@@ -22,8 +22,58 @@
     i += 1
   outer_vars = ctx[:func][:var_slots]
   fn_params = ctx[:func][:params]
-  find_vars_in_body(ast_get(block, :body), captures, block_param_set, outer_vars, fn_params)
+  # Bindings (register-only locals not yet in var_slots) are also outer
+  # vars — materialize is intentionally deferred until after capture so
+  # always-flush can see live binding values.
+  outer_bindings = ctx[:bindings]
+  find_vars_in_body(ast_get(block, :body), captures, block_param_set, outer_vars, fn_params, outer_bindings)
   captures
+
+
+# Resolve the i64 temp holding the live value of a capture name.
+-> resolve_capture_store_value(ctx, wfn, cap_name, raw_type)
+  if cap_name == "__block_return_frame" && ctx[:block_return_frame] != nil
+    return ctx[:block_return_frame]
+  if ctx[:bindings][cap_name] != nil
+    if is_raw_int_storage_type(raw_type)
+      return ensure_raw_machine_int(wfn, typed_value(:i64, ctx[:bindings][cap_name]), raw_type, raw_type)
+    if is_machine_float_type(raw_type)
+      if raw_type in (:f32 :raw_f32)
+        return ensure_raw_f32(wfn, typed_value(raw_float_value_type(raw_type), ctx[:bindings][cap_name]))
+      return ensure_raw_f64(wfn, typed_value(raw_float_value_type(raw_type), ctx[:bindings][cap_name]))
+    return ctx[:bindings][cap_name]
+  recovered = find_last_literal_assign_rhs(ctx, cap_name)
+  if recovered != nil
+    return ensure_i64_value(wfn, lower_expression(ctx, recovered))
+  cap_val = lower_var(ctx, Tungsten:AST:Var.new(cap_name))
+  if is_raw_int_storage_type(raw_type)
+    return ensure_raw_machine_int(wfn, cap_val, raw_type, raw_type)
+  if is_machine_float_type(raw_type)
+    if raw_type in (:f32 :raw_f32)
+      return ensure_raw_f32(wfn, cap_val)
+    return ensure_raw_f64(wfn, cap_val)
+  ensure_i64_value(wfn, cap_val)
+
+# Recover a simple-literal assign RHS for capture when the binding was
+# cleared/orphaned. Only literals — re-lowering a general RHS can have
+# side effects and breaks self-host (write_file).
+-> find_last_literal_assign_rhs(ctx, name)
+  stmts = ctx[:enclosing_stmts]
+  idx = ctx[:enclosing_stmt_idx]
+  if stmts == nil || idx == nil
+    return nil
+  j = idx - 1
+  while j >= 0
+    st = stmts[j]
+    if st != nil && is_ast_node?(st) && ast_kind(st) == :assign
+      tgt = ast_get(st, :target)
+      if tgt != nil && is_ast_node?(tgt) && ast_kind(tgt) == :var && ast_get(tgt, :name) == name
+        val = ast_get(st, :value)
+        if val != nil && is_ast_node?(val) && ast_kind(val) in (:int :float :bool :nil_lit :string :symbol)
+          return val
+        return nil
+    j = j - 1
+  nil
 
 -> merge_capture_names(into, names)
   if names == nil
@@ -191,16 +241,18 @@
   else
     nil
 
--> find_vars_in_body(body, captures, block_params, outer_vars, fn_params)
+-> find_vars_in_body(body, captures, block_params, outer_vars, fn_params, outer_bindings = nil)
   if body == nil
     return nil
   i = 0
   while i < body.size()
-    find_vars_in_node(body[i], captures, block_params, outer_vars, fn_params)
+    find_vars_in_node(body[i], captures, block_params, outer_vars, fn_params, outer_bindings)
     i += 1
 
--> is_outer_var(name, outer_vars, fn_params)
+-> is_outer_var(name, outer_vars, fn_params, outer_bindings = nil)
   if outer_vars[name] != nil
+    return true
+  if outer_bindings != nil && outer_bindings[name] != nil
     return true
   i = 0
   while i < fn_params.size()
@@ -209,14 +261,14 @@
     i += 1
   false
 
--> find_vars_in_node(node, captures, block_params, outer_vars, fn_params)
+-> find_vars_in_node(node, captures, block_params, outer_vars, fn_params, outer_bindings = nil)
   if node == nil
     return nil
   t = ast_kind(node)
   case t
   when :var
     name = ast_get(node, :name)
-    if is_outer_var(name, outer_vars, fn_params) && block_params[name] == nil && !captures.include?(name)
+    if is_outer_var(name, outer_vars, fn_params, outer_bindings) && block_params[name] == nil && !captures.include?(name)
       captures.push(name)
     return nil
   when :parg
@@ -224,23 +276,23 @@
     # `__argN`) — never a block parameter. Capture it into the closure so the
     # reference resolves to the method's arg from inside the block body.
     name = "__arg" + ast_get(node, :index).to_s()
-    if is_outer_var(name, outer_vars, fn_params) && block_params[name] == nil && !captures.include?(name)
+    if is_outer_var(name, outer_vars, fn_params, outer_bindings) && block_params[name] == nil && !captures.include?(name)
       captures.push(name)
     return nil
   when :assign
-    find_vars_in_node(ast_get(node, :value), captures, block_params, outer_vars, fn_params)
+    find_vars_in_node(ast_get(node, :value), captures, block_params, outer_vars, fn_params, outer_bindings)
     if ast_get(node, :target) != nil
-      find_vars_in_node(ast_get(node, :target), captures, block_params, outer_vars, fn_params)
+      find_vars_in_node(ast_get(node, :target), captures, block_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :compound_assign
-    find_vars_in_node(ast_get(node, :value), captures, block_params, outer_vars, fn_params)
+    find_vars_in_node(ast_get(node, :value), captures, block_params, outer_vars, fn_params, outer_bindings)
     # Also check the target variable
     if ast_get(node, :target) != nil
-      find_vars_in_node(ast_get(node, :target), captures, block_params, outer_vars, fn_params)
+      find_vars_in_node(ast_get(node, :target), captures, block_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :binary_op
-    find_vars_in_node(ast_get(node, :left), captures, block_params, outer_vars, fn_params)
-    find_vars_in_node(ast_get(node, :right), captures, block_params, outer_vars, fn_params)
+    find_vars_in_node(ast_get(node, :left), captures, block_params, outer_vars, fn_params, outer_bindings)
+    find_vars_in_node(ast_get(node, :right), captures, block_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :call
     if ast_get(node, :receiver) == nil
@@ -250,67 +302,67 @@
       if is_outer_var(name, outer_vars, fn_params) && block_params[name] == nil && !captures.include?(name)
         captures.push(name)
     else
-      find_vars_in_node(ast_get(node, :receiver), captures, block_params, outer_vars, fn_params)
+      find_vars_in_node(ast_get(node, :receiver), captures, block_params, outer_vars, fn_params, outer_bindings)
     if ast_get(node, :args) != nil
       i = 0
       while i < ast_get(node, :args).size()
-        find_vars_in_node(ast_get(node, :args)[i], captures, block_params, outer_vars, fn_params)
+        find_vars_in_node(ast_get(node, :args)[i], captures, block_params, outer_vars, fn_params, outer_bindings)
         i += 1
     if ast_get(node, :block) != nil
-      find_vars_in_body(ast_get(ast_get(node, :block), :body), captures, block_params, outer_vars, fn_params)
+      find_vars_in_body(ast_get(ast_get(node, :block), :body), captures, block_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :puts
     vals = ast_get(node, :value)
     if vals != nil
       i = 0
       while i < vals.size()
-        find_vars_in_node(vals[i], captures, block_params, outer_vars, fn_params)
+        find_vars_in_node(vals[i], captures, block_params, outer_vars, fn_params, outer_bindings)
         i += 1
     return nil
   when :print
-    find_vars_in_node(ast_get(node, :value), captures, block_params, outer_vars, fn_params)
+    find_vars_in_node(ast_get(node, :value), captures, block_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :if
-    find_vars_in_node(ast_get(node, :condition), captures, block_params, outer_vars, fn_params)
+    find_vars_in_node(ast_get(node, :condition), captures, block_params, outer_vars, fn_params, outer_bindings)
     if ast_get(node, :then_body) != nil
-      find_vars_in_body(ast_get(node, :then_body), captures, block_params, outer_vars, fn_params)
+      find_vars_in_body(ast_get(node, :then_body), captures, block_params, outer_vars, fn_params, outer_bindings)
     if ast_get(node, :elsif_clauses) != nil
       i = 0
       while i < ast_get(node, :elsif_clauses).size()
         clause = ast_get(node, :elsif_clauses)[i]
-        find_vars_in_node(clause[0], captures, block_params, outer_vars, fn_params)
-        find_vars_in_body(clause[1], captures, block_params, outer_vars, fn_params)
+        find_vars_in_node(clause[0], captures, block_params, outer_vars, fn_params, outer_bindings)
+        find_vars_in_body(clause[1], captures, block_params, outer_vars, fn_params, outer_bindings)
         i += 1
     if ast_get(node, :else_body) != nil
-      find_vars_in_body(ast_get(node, :else_body), captures, block_params, outer_vars, fn_params)
+      find_vars_in_body(ast_get(node, :else_body), captures, block_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :return
-    find_vars_in_node(ast_get(node, :value), captures, block_params, outer_vars, fn_params)
+    find_vars_in_node(ast_get(node, :value), captures, block_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :unary_op
-    find_vars_in_node(ast_get(node, :operand), captures, block_params, outer_vars, fn_params)
+    find_vars_in_node(ast_get(node, :operand), captures, block_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :and, :or
-    find_vars_in_node(ast_get(node, :left), captures, block_params, outer_vars, fn_params)
-    find_vars_in_node(ast_get(node, :right), captures, block_params, outer_vars, fn_params)
+    find_vars_in_node(ast_get(node, :left), captures, block_params, outer_vars, fn_params, outer_bindings)
+    find_vars_in_node(ast_get(node, :right), captures, block_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :not
-    find_vars_in_node(ast_get(node, :operand), captures, block_params, outer_vars, fn_params)
+    find_vars_in_node(ast_get(node, :operand), captures, block_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :string_interp
     i = 0
     while i < ast_get(node, :parts).size()
       part = ast_get(node, :parts)[i]
       if part[0] != :str
-        find_vars_in_node(part[1], captures, block_params, outer_vars, fn_params)
+        find_vars_in_node(part[1], captures, block_params, outer_vars, fn_params, outer_bindings)
       i += 1
     return nil
   when :while
-    find_vars_in_node(ast_get(node, :condition), captures, block_params, outer_vars, fn_params)
-    find_vars_in_body(ast_get(node, :body), captures, block_params, outer_vars, fn_params)
+    find_vars_in_node(ast_get(node, :condition), captures, block_params, outer_vars, fn_params, outer_bindings)
+    find_vars_in_body(ast_get(node, :body), captures, block_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :go
-    find_vars_in_body(ast_get(node, :body), captures, block_params, outer_vars, fn_params)
+    find_vars_in_body(ast_get(node, :body), captures, block_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :case
     if ast_get(node, :whens) != nil
@@ -319,39 +371,39 @@
         w = ast_get(node, :whens)[i]
         ci = 0
         while ci < ast_get(w, :conditions).size()
-          find_vars_in_node(ast_get(w, :conditions)[ci], captures, block_params, outer_vars, fn_params)
+          find_vars_in_node(ast_get(w, :conditions)[ci], captures, block_params, outer_vars, fn_params, outer_bindings)
           ci += 1
-        find_vars_in_body(ast_get(w, :body), captures, block_params, outer_vars, fn_params)
+        find_vars_in_body(ast_get(w, :body), captures, block_params, outer_vars, fn_params, outer_bindings)
         i += 1
     if ast_get(node, :else_body) != nil
-      find_vars_in_body(ast_get(node, :else_body), captures, block_params, outer_vars, fn_params)
+      find_vars_in_body(ast_get(node, :else_body), captures, block_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :case_value
-    find_vars_in_node(ast_get(node, :subject), captures, block_params, outer_vars, fn_params)
+    find_vars_in_node(ast_get(node, :subject), captures, block_params, outer_vars, fn_params, outer_bindings)
     if ast_get(node, :arms) != nil
       i = 0
       while i < ast_get(node, :arms).size()
         arm = ast_get(node, :arms)[i]
-        find_vars_in_node(ast_get(arm, :pattern), captures, block_params, outer_vars, fn_params)
+        find_vars_in_node(ast_get(arm, :pattern), captures, block_params, outer_vars, fn_params, outer_bindings)
         if ast_get(arm, :guard) != nil
-          find_vars_in_node(ast_get(arm, :guard), captures, block_params, outer_vars, fn_params)
-        find_vars_in_body(ast_get(arm, :body), captures, block_params, outer_vars, fn_params)
+          find_vars_in_node(ast_get(arm, :guard), captures, block_params, outer_vars, fn_params, outer_bindings)
+        find_vars_in_body(ast_get(arm, :body), captures, block_params, outer_vars, fn_params, outer_bindings)
         i += 1
     if ast_get(node, :else_body) != nil
-      find_vars_in_body(ast_get(node, :else_body), captures, block_params, outer_vars, fn_params)
+      find_vars_in_body(ast_get(node, :else_body), captures, block_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :begin
-    find_vars_in_body(ast_get(node, :body), captures, block_params, outer_vars, fn_params)
+    find_vars_in_body(ast_get(node, :body), captures, block_params, outer_vars, fn_params, outer_bindings)
     if ast_get(node, :rescue_body) != nil
-      find_vars_in_body(ast_get(node, :rescue_body), captures, block_params, outer_vars, fn_params)
+      find_vars_in_body(ast_get(node, :rescue_body), captures, block_params, outer_vars, fn_params, outer_bindings)
     if ast_get(node, :ensure_body) != nil
-      find_vars_in_body(ast_get(node, :ensure_body), captures, block_params, outer_vars, fn_params)
+      find_vars_in_body(ast_get(node, :ensure_body), captures, block_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :array
     if ast_get(node, :elements) != nil
       i = 0
       while i < ast_get(node, :elements).size()
-        find_vars_in_node(ast_get(node, :elements)[i], captures, block_params, outer_vars, fn_params)
+        find_vars_in_node(ast_get(node, :elements)[i], captures, block_params, outer_vars, fn_params, outer_bindings)
         i += 1
     return nil
   when :hash_literal
@@ -359,8 +411,8 @@
       i = 0
       while i < ast_get(node, :entries).size()
         entry = ast_get(node, :entries)[i]
-        find_vars_in_node(entry[0], captures, block_params, outer_vars, fn_params)
-        find_vars_in_node(entry[1], captures, block_params, outer_vars, fn_params)
+        find_vars_in_node(entry[0], captures, block_params, outer_vars, fn_params, outer_bindings)
+        find_vars_in_node(entry[1], captures, block_params, outer_vars, fn_params, outer_bindings)
         i += 1
     return nil
   when :block
@@ -383,7 +435,7 @@
     while bi < nbp.size()
       nested_params[nbp[bi]] = true
       bi += 1
-    find_vars_in_body(ast_get(node, :body), captures, nested_params, outer_vars, fn_params)
+    find_vars_in_body(ast_get(node, :body), captures, nested_params, outer_vars, fn_params, outer_bindings)
     return nil
   when :ivar
     return nil
@@ -707,50 +759,40 @@
         if owner_fn[:heap_slot_names] == nil
           owner_fn[:heap_slot_names] = {}
         owner_fn[:heap_slot_names][owner_name] = true
-      cap_slot = wfn[:var_slots][cap_name]
-      if cap_slot == nil
-        raw_type = ctx[:var_types][cap_name]
-        cap_store = nil
-        if cap_name == "__block_return_frame" && ctx[:block_return_frame] != nil
-          cap_store = ctx[:block_return_frame]
-        elsif ctx[:bindings][cap_name] != nil
-          if is_raw_int_storage_type(raw_type)
-            cap_store = ensure_raw_machine_int(wfn, typed_value(:i64, ctx[:bindings][cap_name]), raw_type, raw_type)
-          elsif is_machine_float_type(raw_type)
-            if raw_type in (:f32 :raw_f32)
-              cap_store = ensure_raw_f32(wfn, typed_value(raw_float_value_type(raw_type), ctx[:bindings][cap_name]))
-            else
-              cap_store = ensure_raw_f64(wfn, typed_value(raw_float_value_type(raw_type), ctx[:bindings][cap_name]))
-          else
-            cap_store = ctx[:bindings][cap_name]
-        else
-          cap_val = lower_var(ctx, Tungsten:AST:Var.new(cap_name))
-          if is_raw_int_storage_type(raw_type)
-            cap_store = ensure_raw_machine_int(wfn, cap_val, raw_type, raw_type)
-          elsif is_machine_float_type(raw_type)
-            if raw_type in (:f32 :raw_f32)
-              cap_store = ensure_raw_f32(wfn, cap_val)
-            else
-              cap_store = ensure_raw_f64(wfn, cap_val)
-          else
-            cap_store = ensure_i64_value(wfn, cap_val)
-        slot_type = "i64"
-        if is_raw_int_storage_type(raw_type)
-          slot_type = machine_slot_type(raw_type)
-        elsif is_machine_float_type(raw_type)
-          slot_type = float_slot_type(raw_type)
-        cap_slot = ensure_var_slot(wfn, cap_name, slot_type)
+      # Flush the live value into the frame slot before capturing its
+      # address, so the closure sees it and a later reassignment cannot DCE
+      # the flush (wire.w:dead_store_elim treats ptr_to_i64 as an escape) —
+      # e.g. `i = 0; each { use i }; i = 1`. A slot that ALREADY exists
+      # already holds the live value, so only flush when we are materializing
+      # the slot for the first time OR a fresher register binding must be
+      # pushed into it. Synthesizing a flush value onto a pre-existing slot
+      # would clobber it: a control-flow-cleared local resolves to its stale
+      # literal initializer (a closure-counted `npos` reset to its `= 0`),
+      # and the symbolic `__block_return_frame` passthrough resolves to its
+      # own name, emitting an invalid `store i64 __block_return_frame`.
+      raw_type = ctx[:var_types][cap_name]
+      slot_preexisted = wfn[:var_slots][cap_name] != nil
+      cap_store = nil
+      if !slot_preexisted || ctx[:bindings][cap_name] != nil
+        cap_store = resolve_capture_store_value(ctx, wfn, cap_name, raw_type)
+      slot_type = "i64"
+      if is_raw_int_storage_type(raw_type)
+        slot_type = machine_slot_type(raw_type)
+      elsif is_machine_float_type(raw_type)
+        slot_type = float_slot_type(raw_type)
+      cap_slot = ensure_var_slot(wfn, cap_name, slot_type)
+      cap_bits = next_temp(wfn)
+      emit_instruction(wfn, {op: :ptr_to_i64, temp: cap_bits, value: cap_slot})
+      gep_reg = next_temp(wfn)
+      emit_instruction(wfn, {op: :gep_array, temp: gep_reg, base: arr_ptr, count: captures.size(), index: ci})
+      emit_instruction(wfn, {op: :store_ptr, value: cap_bits, dest: gep_reg})
+      if cap_store != nil
         store_op = :store_i64
         if is_raw_int_storage_type(raw_type)
           store_op = machine_store_op(raw_type)
         elsif is_machine_float_type(raw_type)
           store_op = float_store_op(raw_type)
         emit_instruction(wfn, {op: store_op, value: cap_store, ptr: cap_slot})
-      cap_bits = next_temp(wfn)
-      emit_instruction(wfn, {op: :ptr_to_i64, temp: cap_bits, value: cap_slot})
-      gep_reg = next_temp(wfn)
-      emit_instruction(wfn, {op: :gep_array, temp: gep_reg, base: arr_ptr, count: captures.size(), index: ci})
-      emit_instruction(wfn, {op: :store_ptr, value: cap_bits, dest: gep_reg})
       ci += 1
     cap_ptr = arr_ptr
   else

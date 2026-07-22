@@ -1373,6 +1373,31 @@ use target
     when "w_uuid_to_s"
       return ccall("w_uuid_to_s", args[1])
 
+    # -- Typed arrays / Tensor / BLAS (core/blas, core/tensor) --
+    # Class-side Tensor factories (`Tensor.zeros`) go through f32_array /
+    # f64_array → w_array_new_aligned. Only symbols that exist in
+    # runtime/runtime.h are listed here.
+    when "w_array_new_aligned"
+      return ccall("w_array_new_aligned", args[1], args[2])
+    when "w_tensor_zeros_f32"
+      return ccall("w_tensor_zeros_f32", args[1])
+    when "w_tensor_at_f32"
+      return ccall("w_tensor_at_f32", args[1], args[2])
+    when "w_tensor_set_f32"
+      return ccall("w_tensor_set_f32", args[1], args[2], args[3])
+    when "w_tensor_shape"
+      return ccall("w_tensor_shape", args[1])
+    when "w_tensor_rank"
+      return ccall("w_tensor_rank", args[1])
+    when "w_tensor_view_f32"
+      return ccall("w_tensor_view_f32", args[1], args[2], args[3])
+    when "w_tensor_slice0_f32"
+      return ccall("w_tensor_slice0_f32", args[1], args[2], args[3])
+    when "w_blas_sgemm_nn"
+      return ccall("w_blas_sgemm_nn", args[1], args[2], args[3], args[4], args[5], args[6])
+    when "w_blas_dgemm_nn"
+      return ccall("w_blas_dgemm_nn", args[1], args[2], args[3], args[4], args[5], args[6])
+
     raise "Unsupported ccall '[cname]' in interpreter"
 
   -> interpreted_thread?(value)

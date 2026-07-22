@@ -18695,6 +18695,7 @@ static WValue WN_read_into = 0, WN_write_slice = 0;
 static WValue WN_alpn_protocol = 0, WN_serve_http = 0, WN_concat = 0;
 static WValue WN_listen = 0, WN_connect = 0, WN_load_cert = 0;
 static WValue WN_file_exists_q = 0, WN_read_file = 0, WN_write_file = 0;
+static WValue WN_length = 0;
 static WValue WN_respond_to_q = 0;
 static WValue WN_is_a_q = 0;
 static WValue WN_spaceship = 0;
@@ -18902,6 +18903,7 @@ static void w_init_method_names(void) {
     WN_byte_at      = w_string("byte_at");
     WN_view_at      = w_string("view_at");
     WN_subview      = w_string("subview");
+    WN_length       = w_string("length");
 }
 
 static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue args_arr);
@@ -20080,6 +20082,22 @@ static WValue w_ic_string_slice(WValue r, WValue *a, int c) {
         return w_string(ch);
     }
     return W_NIL;
+}
+/* size/length via DYNAMIC dispatch (round-5, 2026-07-22): the type-class
+ * cascade fails to resolve core String/Symbol source methods (String#size
+ * exists in core/string_native.w but w_type_class_method misses it), so an
+ * untyped receiver — `f(s).size()` where f's return type is unknown — died
+ * with "undefined method 'size' for String". Statically-typed call sites
+ * never noticed (they lower direct). These IC entries serve the dynamic
+ * path with the same semantics as the source methods: byte length for
+ * strings, to_s byte length for symbols (0xF9 is the shared string/symbol
+ * dispatch key, so the handler must be symbol-aware). The cascade gap
+ * itself (which also hides reverse/chars/bytes/… from dynamic dispatch)
+ * is documented at w_cacheable_type_class_method. */
+static WValue w_ic_string_size(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    if (w_is_symbol(r)) return w_int(w_string_byte_length(w_to_s(r)));
+    return w_int(w_string_byte_length(r));
 }
 static WValue w_ic_string_strip(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -22624,6 +22642,8 @@ static WICEntry w_ic_string_table[] = {
     {0, w_ic_string_matchop},   /* WN_match_q — same handler */
     {0, w_ic_string_rindex},    /* WN_rindex */
     {0, w_ic_string_reverse},   /* WN_reverse */
+    {0, w_ic_string_size},      /* WN_size — round-5, dynamic-path gap */
+    {0, w_ic_string_size},      /* WN_length — same handler */
     {0, NULL}
 };
 
@@ -23161,6 +23181,8 @@ static void w_init_ic_tables(void) {
     w_ic_string_table[32].name = WN_match_q;
     w_ic_string_table[33].name = WN_rindex;
     /* Slot 34 (reverse) retired to core/string_native.w. */
+    w_ic_string_table[35].name = WN_size;    /* round-5: dynamic-path gap */
+    w_ic_string_table[36].name = WN_length;
     /* Int */
     /* Slot 0 (to_s, both arities) retired to core/integer.w. */
     w_ic_int_table[1].name    = WN_abs;

@@ -183,6 +183,7 @@ compiled_specs=(
   spec/compiler/recycle_terminated_scope_spec.w
   spec/compiler/source_argc1_exact_ivar_spec.w
   spec/compiler/source_argc1_hint_compat_spec.w
+  spec/compiler/string_dynamic_dispatch_spec.w
   spec/compiler/string_buffer_size_revisit_autoload_spec.w
   spec/compiler/string_escape_backslash_spec.w
   spec/compiler/string_interp_esc_bracket_spec.w

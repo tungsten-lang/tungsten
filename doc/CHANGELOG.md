@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Machine-int annotated params materialize as raw entry slots** — a
+  parameter reassigned anywhere in its body with `## i64/u64` now gets a
+  raw machine slot at function ENTRY (the representation a local gets from
+  `y = x ## u64`): full-width reads, native 2^64 wrap on UNANNOTATED
+  arithmetic reassigns in the same chain (previously those promoted to
+  bignums while identical local chains wrapped), and no mid-branch
+  retype. Captured and signature-typed params are unaffected.
+- **`size`/`length` reachable through dynamic dispatch on String/Symbol** —
+  untyped receivers (`f(s).size()`, chained `.to_s().size()` in
+  interpolation) previously died with "undefined method 'size' for
+  String": the type-class cascade misses core String/Symbol source
+  methods (pre-existing gap; other source methods like `reverse` remain
+  dynamically unreachable — documented in runtime.c).
+
 - **Annotated reassign of a boxed variable is full-width correct** — a
   `## i64/u64` reassign of an existing parameter or boxed local (e.g.
   inside one branch of an `if`, or an unconditional chain like

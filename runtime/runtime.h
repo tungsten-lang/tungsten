@@ -1356,6 +1356,9 @@ WValue w_array_view_range(WValue arr, WValue from_v, WValue to_v, WValue exclusi
  * another array (elementwise pair) or a scalar (broadcast). Returns a
  * fresh array with same ebits and size as lhs. */
 WValue w_array_add_elem(WValue lhs, WValue rhs);
+/* `array + array` is CONCATENATION (elementwise pairwise ops are the `.op`
+ * forms). Returns a fresh boxed array holding lhs's elements then rhs's. */
+WValue w_array_concat(WValue lhs, WValue rhs);
 WValue w_array_sub_elem(WValue lhs, WValue rhs);
 WValue w_array_mul_elem(WValue lhs, WValue rhs);
 WValue w_array_div_elem(WValue lhs, WValue rhs);

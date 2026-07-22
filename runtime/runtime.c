@@ -14147,6 +14147,7 @@ WValue w_range_bound_i64_w(WValue v) {
 
 WValue w_add(WValue a, WValue b) {
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_add_elem(a, b);
+    if (w_is_array(a) && w_is_array(b)) return w_array_concat(a, b);
     /* StringBuffer << value → in-place append, return buffer */
     if (w_is_strbuf(a))
         return w_strbuf_append(a, w_to_s(b));
@@ -15456,7 +15457,10 @@ WValue w_to_s(WValue v) {
         if (d == (double)(int64_t)d && d >= -9e18 && d <= 9e18)
             n = snprintf(buf, sizeof(buf), "%.0f", d);
         else
-            n = snprintf(buf, sizeof(buf), "%g", d);
+            /* %.17g is enough digits for an f64 round-trip through text
+             * (dtoa guarantee). Plain %g defaults to 6 significant digits
+             * and silently loses precision — (1/3).to_s.to_f != 1/3. */
+            n = snprintf(buf, sizeof(buf), "%.17g", d);
         return w_string_n(buf, n);
     }
     if (w_is_decimal(v)) {
@@ -16282,6 +16286,25 @@ WValue w_array_new_empty(void) {
     arr->_pad[1] = 0;             /* the same `slots` ptr without a struct re-cast. */
     arr->slots = malloc(sizeof(WValue) * arr->cap);
     return w_box_ptr(arr, W_SUBTAG_ARRAY);
+}
+
+/* `array + array` → concatenation. Builds a fresh polymorphic array and
+ * copies lhs's elements then rhs's, reading each through the polymorphic
+ * w_array_get so mixed element tiers (i64[] + f64[] + boxed) concatenate
+ * correctly; the result is boxed. Neither operand is mutated. */
+WValue w_array_concat(WValue lhs, WValue rhs) {
+    WArray *la = (WArray *)w_as_ptr(lhs);
+    WArray *ra = (WArray *)w_as_ptr(rhs);
+    int64_t ln = la->size;
+    int64_t rn = ra->size;
+    WValue out = w_array_new_empty();
+    for (int64_t i = 0; i < ln; i++) {
+        w_array_push(out, w_array_get(lhs, w_int(i)));
+    }
+    for (int64_t i = 0; i < rn; i++) {
+        w_array_push(out, w_array_get(rhs, w_int(i)));
+    }
+    return out;
 }
 
 /* ---- Recycle pools (## recycle annotation) ---- */

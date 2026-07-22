@@ -22,6 +22,7 @@ use version
 use cnf
 use solver
 use preprocess
+use sls
 
 -> wassat_print_usage
   << "Tungsten Wassat [WASSAT_VERSION] -- SAT solver with checkable proofs"
@@ -278,6 +279,73 @@ use preprocess
         print(dlines.empty? ? "" : dlines.join("\n") + "\n")
   0
 
+# `wassat sls <cnf> --flips <n> --seed <s>`: run the stochastic local search
+# alone. Prints a model (verified against the formula first) or s UNKNOWN --
+# local search can never answer UNSATISFIABLE, so no certificate applies.
+-> wassat_run_sls(args)
+  input = nil
+  flips = 10000000
+  seed = 1
+  pre = false
+  i = 0
+  while i < args.size
+    flag = args[i]
+    if flag == "--flips" || flag == "--seed"
+      raise "missing value after [flag]" if i + 1 >= args.size
+      value = args[i + 1]
+      raise "[flag] requires a non-negative decimal integer, got '[value]'" unless wassat_unsigned_decimal?(value)
+      if flag == "--flips"
+        flips = value.to_i
+      else
+        seed = value.to_i
+      i += 2
+    elsif flag == "--pre"
+      pre = true
+      i += 1
+    elsif flag.starts_with?("--")
+      raise "unknown wassat sls option: [flag]"
+    else
+      raise "unexpected extra argument '[flag]'" unless input == nil
+      input = flag
+      i += 1
+  raise "missing input formula" if input == nil
+  cnf_text = read_file(input)
+  raise "cannot read input formula '[input]'" if cnf_text == nil
+  formula = wassat_parse_cnf(cnf_text)
+  r = nil
+  if pre
+    # SLS over the preprocessed kernel: the structured shell (root
+    # implications, substituted equivalences, eliminable variables) is
+    # exactly what local search wastes flips rediscovering. The model is
+    # reconstructed through the elimination stack and verified against the
+    # ORIGINAL formula like every other answer.
+    art = wassat_preprocess(cnf_text, WASSAT_PROOF_NONE)
+    if art["status"] == -1
+      # preprocessing refuted it; SLS has nothing to say beyond UNKNOWN
+      << "s UNKNOWN"
+      << "c mode: sls"
+      << "c stats flips=0 restarts=0 best_unsat=1 seed=[seed]"
+      return 0
+    reduced = { "nvars": formula["nvars"], "clauses": art["clauses"] }
+    r = wassat_sls_solve(reduced, flips, seed)
+    if r["sat"]
+      r["model"] = wassat_reconstruct_model(art["stack"], r["model"], formula["nvars"])
+  else
+    r = wassat_sls_solve(formula, flips, seed)
+  if r["sat"]
+    # same output-integrity bar as every other engine: verify against the
+    # ORIGINAL formula before reporting
+    unless wassat_model_satisfies?(formula, r["model"])
+      raise "internal error: SLS model does not satisfy the input formula"
+    print("s SATISFIABLE
+v " + r["model"].join(" ") + " 0
+")
+  else
+    << "s UNKNOWN"
+  << "c mode: sls"
+  << "c stats flips=[r["flips"]] restarts=[r["restarts"]] best_unsat=[r["best_unsat"]] seed=[r["seed"]]"
+  0
+
 # Dispatch recognized command-line arguments. The executable entry point calls
 # this explicitly; importing `use wassat` is side-effect free.
 -> wassat_run_cli(args)
@@ -288,6 +356,18 @@ use preprocess
     << "Tungsten Wassat [WASSAT_VERSION]"
   elsif cmd == "help" || cmd == "--help" || cmd == "-h"
     wassat_print_usage
+  elsif cmd == "sls"
+    rest = []
+    i = 1
+    while i < args.size
+      rest.push(args[i])
+      i += 1
+    begin
+      wassat_run_sls(rest)
+    rescue e
+      << "c error: [e]"
+      << "s UNKNOWN"
+      exit(1)
   elsif args.size >= 1
     wassat_run_file(args)
   else

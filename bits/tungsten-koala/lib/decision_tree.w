@@ -160,6 +160,16 @@
 #     cfg[:min_split] min_samples_split
 #     cfg[:min_leaf]  min_samples_leaf
 #     cfg[:crit]      criterion as a STRING ("gini" / "entropy" / "mse")
+#
+# Two OPTIONAL keys turn the same machinery into a forest's tree; both
+# absent (the default) is the plain tree above, unchanged in every detail:
+#
+#     cfg[:max_features]  features to consider PER SPLIT; nil = all
+#     cfg[:rng]           MINSTD state driving that per-split draw, advanced
+#                         IN PLACE as the build consumes it
+#
+# See DecisionTree.split_features for why the redraw is per SPLIT rather
+# than per tree, and lib/random_forest.w for the ensemble that sets them.
 + DecisionTree
   # --- Criteria ---
 
@@ -326,6 +336,72 @@
       out.push(v) if out.size == 0 || out[out.size - 1] != v
     out
 
+  # vals (integers) ascending — sorted_copy's INTEGER twin, so the result
+  # can be used as an array INDEX. sorted_copy coerces to f64 and a float
+  # is not an index.
+  -> .sorted_ints(vals)
+    out = []
+    vals.each -> (v)
+      out.push(v)
+    n = out.size
+    i = 1
+    while i < n
+      cur = out[i]
+      j = i - 1
+      while j >= 0 && out[j] > cur
+        out[j + 1] = out[j]
+        j -= 1
+      out[j + 1] = cur
+      i += 1
+    out
+
+  # The feature indices this node's split search will scan, ASCENDING.
+  #
+  # An ordinary tree scans EVERY feature: `cfg[:max_features]` is absent
+  # (or nil) and the answer is 0 … nf-1, exactly the order the search used
+  # before this hook existed. Nothing about an existing tree changes — same
+  # features, same order, same tie-break (lowest index wins), same tree.
+  #
+  # A RANDOM FOREST sets `cfg[:max_features] = m` and `cfg[:rng] = a MINSTD
+  # state`, and gets a fresh m-of-nf subset drawn WITHOUT replacement at
+  # EVERY node. That per-split redraw — not the bootstrap — is what
+  # decorrelates the trees; a forest that subsampled features once per tree
+  # would still let one dominant feature sit at every root. The subset is
+  # returned SORTED so the documented tie-break survives subsampling: among
+  # the drawn features, the lowest index still wins.
+  #
+  # The draw advances `cfg[:rng]` IN PLACE. cfg is one hash shared by the
+  # whole build recursion, so the stream is consumed in the build's
+  # depth-first order (node, then left subtree, then right) — a fixed order
+  # for fixed data, which is what makes the forest a pure function of its
+  # seed on both engines. MINSTD is Splitter's generator, reused rather than
+  # reinvented; its worst-case product stays inside the 48-bit boxed-int
+  # range.
+  -> .split_features(cfg)
+    nf = cfg[:nf]
+    m = cfg[:max_features]
+    m = nf if m == nil
+    m = nf if m > nf
+    m = 1 if m < 1
+    idx = []
+    nf.times -> (i)
+      idx.push(i)
+    out = idx
+    if m < nf
+      state = cfg[:rng]
+      m.times -> (k)
+        state = (state * 48271) % 2147483647
+        j = k + (state % (nf - k))
+        tmp = idx[k]
+        idx[k] = idx[j]
+        idx[j] = tmp
+      cfg[:rng] = state
+      picked = []
+      m.times -> (p)
+        picked.push(idx[p])
+      out = DecisionTree.sorted_ints(picked)
+    out
+
   # Index of label in classes, or -1 when it is not there.
   -> .label_index(classes, label)
     idx = -1
@@ -377,8 +453,11 @@
   # `min_weight_fraction_leaf`, a separate knob) — so it is the one place
   # a weighted fit and its row-duplicated twin can legitimately differ,
   # and only when that knob is set away from its default.
+  # The FEATURES scanned are whatever DecisionTree.split_features answers —
+  # all of them for an ordinary tree (unchanged), a fresh random subset per
+  # node when the caller asked for one (a random forest). Either way they
+  # arrive in ascending index order, so the rule above is untouched.
   -> .best_split(rows, ys, wts, cfg, parent_imp)
-    nf = cfg[:nf]
     k = cfg[:k]
     min_leaf = cfg[:min_leaf]
     crit = cfg[:crit]
@@ -386,7 +465,8 @@
     tol = parent_imp / 1000000000000.to_f
     best = nil
     bgain = 0.to_f
-    nf.times -> (j)
+    feats = DecisionTree.split_features(cfg)
+    feats.each -> (j)
       col = []
       rows.each -> (r)
         col.push(r[j].to_f)

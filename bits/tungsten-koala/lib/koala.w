@@ -83,17 +83,21 @@ use matrix
 use linalg
 use estimator_base
 use linear_regression
+use regularized_linear
 use knn
 use logistic_regression
 use gaussian_nb
 use decision_tree
+use random_forest
 use scaler
+use pca
 use encoder
 use imputer
 use splitter
 use pipeline
 use cross_validation
 use kmeans
+use dbscan
 use grid_search
 use persist
 

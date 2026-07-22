@@ -76,6 +76,27 @@ fails += check("exec of COPY raises", raised)
 r6 = c.exec("SELECT 8")
 fails += check("usable after CopyFail", r6[0][0] == "8")
 
+# pooled-buffer growth: one message bigger than the 64KB initial pool
+# (200KB cell forces ensure_rbuf to double mid-connection), then a small
+# query proves the connection still frames correctly afterwards.
+rbig = c.exec("SELECT length(repeat('x', 200000)), repeat('y', 70000)")
+fails += check("200k-cell message", rbig[0][0] == "200000")
+fails += check("70k cell intact", rbig[0][1].bytes.size == 70000)
+rafter = c.exec("SELECT 11")
+fails += check("small frame after growth", rafter[0][0] == "11")
+
+# copy_write_slice: stream sub-ranges of one staging buffer
+c.exec("CREATE TEMP TABLE pgwire_slice(a INT, b TEXT)")
+c.copy_start("COPY pgwire_slice FROM STDIN")
+stage = pgw_str_to_bytes("IGNORED1\tsliced\n2\tcopy\nIGNORED")
+c.copy_write_slice(stage, 7, 9)      # "1\tsliced\n"
+c.copy_write_slice(stage, 16, 7)     # "2\tcopy\n"
+c.copy_write_slice(stage, 0, 0)      # no-op
+tag2 = c.copy_finish()
+fails += check("copy_write_slice tag ([tag2])", tag2 == "COPY 2")
+r5b = c.exec("SELECT b FROM pgwire_slice ORDER BY a")
+fails += check("copy_write_slice contents", r5b[0][0] == "sliced" && r5b[1][0] == "copy")
+
 # framing robustness + throughput: 20k rows (> 64KB of data)
 t0 = clock()
 big = c.exec("SELECT g, 'row-' || g FROM generate_series(1, 20000) g")

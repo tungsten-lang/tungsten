@@ -48,8 +48,20 @@ ReadyForQuery — the connection stays usable.
 and host-less URLs mean `127.0.0.1:5432`. Passwords are ASCII (no SASLprep);
 use `PGPASSWORD` for passwords containing `:` or `@`.
 
-Throughput: ~700k rows/sec on a local 20k-row × 2-col text result
+Throughput: ~900k rows/sec on a local 20k-row × 2-col text result
 (Apple Silicon, `--release`).
+
+### Allocation discipline (no tracing GC)
+
+The read path is pooled: every message header lands in one reusable 5-byte
+buffer and every message body in one grow-only per-connection buffer
+(64 KB floor, doubled on demand, never shrunk), via the runtime's
+`Socket#read_into(buf, offset, n)` — the allocation-free twin of
+`read_exact`. Steady-state reads allocate only what the API returns (row
+arrays and cell Strings). For bulk sends, `build_query_frame`/`exec_frame`
+cache constant query frames, and `copy_write_slice(buf, off, len)` streams
+sub-ranges of one staging buffer through `Socket#write_slice` with zero
+per-chunk copies on either side.
 
 ## Tests
 

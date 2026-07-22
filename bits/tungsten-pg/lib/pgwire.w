@@ -114,9 +114,11 @@
   pgw_pack(msg)
 
 # Parse a NUL-terminated string at off; returns [string, next_off].
--> pgw_cstr_at(b, off)
+# `limit` bounds the scan — with a pooled read buffer the array is larger
+# than the message, so the message length (not b.size) is the wall.
+-> pgw_cstr_at(b, off, limit)
   end_ = off
-  while end_ < b.size && b[end_] != 0
+  while end_ < limit && b[end_] != 0
     end_ += 1
   cell = u8[end_ - off]
   i = off
@@ -150,6 +152,14 @@
     @closed = true
     @copying = false
     @auth_method = "trust"
+    # Pooled read path (no tracing GC — per-message ByteArrays leak):
+    # @hbuf holds every 5-byte message header, @rbuf every message body
+    # (grow-only, doubled on demand, never shrunk), @rlen the live body
+    # length, @chdr the reusable CopyData frame header.
+    @hbuf = u8[5]
+    @rbuf = u8[65536]
+    @rlen = 0
+    @chdr = u8[5]
 
   # postgres://user:pass@host:port/db — every part optional.
   # postgres:///db → 127.0.0.1:5432. TCP only. (Values are not
@@ -212,32 +222,49 @@
     self.auth_loop()
     self
 
+  # Grow-only pooled body buffer (doubling; 64 KB floor from the ctor).
+  -> ensure_rbuf(n)
+    if @rbuf.size < n
+      ncap = @rbuf.size
+      while ncap < n
+        ncap = ncap * 2
+      @rbuf = u8[ncap]
+    nil
+
+  # Reads one message into the pooled buffers: returns the type byte;
+  # the body is @rbuf[0...@rlen]. Zero allocations at steady state.
   -> read_msg
-    t = @sock.read_exact(1)
-    if t == nil
+    got = @sock.read_into(@hbuf, 0, 5)
+    if got == nil
       @closed = true
       raise "PG: connection closed by server"
-    lnb = @sock.read_exact(4)
-    raise "PG: connection closed mid-frame" if lnb == nil
-    n = pgw_be32(lnb, 0)
-    body = u8[0]
+    if got < 5
+      @closed = true
+      raise "PG: connection closed mid-frame"
+    n = pgw_be32(@hbuf, 1)
+    @rlen = 0
     if n > 4
-      body = @sock.read_exact(n - 4)
-      raise "PG: connection closed mid-frame" if body == nil
-    [t[0], body]
+      body_n = n - 4
+      self.ensure_rbuf(body_n)
+      got2 = @sock.read_into(@rbuf, 0, body_n)
+      if got2 == nil || got2 < body_n
+        @closed = true
+        raise "PG: connection closed mid-frame"
+      @rlen = body_n
+    @hbuf[0]
 
-  -> parse_error_fields(b)
+  -> parse_error_fields(b, len)
     fields = {}
     off = 0
-    while off < b.size && b[off] != 0
+    while off < len && b[off] != 0
       code = b[off]
-      r = pgw_cstr_at(b, off + 1)
+      r = pgw_cstr_at(b, off + 1, len)
       fields[code] = r[0]
       off = r[1]
     fields
 
-  -> format_error(b)
-    f = self.parse_error_fields(b)
+  -> format_error(b, len)
+    f = self.parse_error_fields(b, len)
     sev = f[83]
     code = f[67]
     msg = f[77]
@@ -248,14 +275,14 @@
 
   # Handle the async messages every read loop must tolerate.
   # Returns true if consumed.
-  -> handle_async(t, b)
+  -> handle_async(t, b, len)
     if t == 83                       # 'S' ParameterStatus
-      name_r = pgw_cstr_at(b, 0)
-      val_r = pgw_cstr_at(b, name_r[1])
+      name_r = pgw_cstr_at(b, 0, len)
+      val_r = pgw_cstr_at(b, name_r[1], len)
       @params[name_r[0]] = val_r[0]
       return true
     if t == 78                       # 'N' NoticeResponse
-      f = self.parse_error_fields(b)
+      f = self.parse_error_fields(b, len)
       m = f[77]
       m = "(notice)" if m == nil
       @notices.push(m)
@@ -273,10 +300,9 @@
   -> auth_loop
     scram = nil
     while true
-      m = self.read_msg()
-      t = m[0]
-      b = m[1]
-      if self.handle_async(t, b)
+      t = self.read_msg()
+      b = @rbuf
+      if self.handle_async(t, b, @rlen)
         t = t                        # consumed async message; keep reading
       elsif t == 82                  # 'R' Authentication*
         code = pgw_be32(b, 0)
@@ -298,8 +324,8 @@
           @auth_method = "scram-sha-256"
           mechs = []
           off = 4
-          while off < b.size && b[off] != 0
-            r = pgw_cstr_at(b, off)
+          while off < @rlen && b[off] != 0
+            r = pgw_cstr_at(b, off, @rlen)
             mechs.push(r[0])
             off = r[1]
           found = false
@@ -316,12 +342,12 @@
           pgw_w_raw(payload, initial)
           @sock.write_bytes(pgw_frame(112, payload))
         elsif code == 11             # SASL continue
-          server_first = pgw_bytes_str(self.body_from(b, 4))
+          server_first = pgw_bytes_str(self.body_from(b, 4, @rlen))
           payload = []
           pgw_w_raw(payload, scram.client_final(server_first))
           @sock.write_bytes(pgw_frame(112, payload))
         elsif code == 12             # SASL final: verify server signature
-          final = pgw_bytes_str(self.body_from(b, 4))
+          final = pgw_bytes_str(self.body_from(b, 4, @rlen))
           raise "PG: server signature mismatch — not the server we authenticated" if !scram.verify_server_final(final)
         else
           raise "PG: unsupported auth method [code] (supported: trust, cleartext, md5, SCRAM-SHA-256)"
@@ -329,7 +355,7 @@
         @in_txn = b[0] != 73
         return nil
       elsif t == 69                  # 'E'
-        @last_error = self.format_error(b)
+        @last_error = self.format_error(b, @rlen)
         @closed = true
         raise @last_error
       # anything else during startup: ignore
@@ -339,10 +365,10 @@
     pgw_w_str(payload, s)
     payload
 
-  -> body_from(b, off)
-    out = u8[b.size - off]
+  -> body_from(b, off, end_)
+    out = u8[end_ - off]
     i = off
-    while i < b.size
+    while i < end_
       out[i - off] = b[i]
       i += 1
     out
@@ -376,15 +402,14 @@
     err = ""
     saw_result = false
     while true
-      m = self.read_msg()
-      t = m[0]
-      b = m[1]
-      if self.handle_async(t, b)
+      t = self.read_msg()
+      b = @rbuf
+      if self.handle_async(t, b, @rlen)
         t = t                        # consumed async message; keep reading
       elsif t == 68                  # 'D'
         current.push(self.parse_data_row(b))
       elsif t == 67                  # 'C' CommandComplete
-        r = pgw_cstr_at(b, 0)
+        r = pgw_cstr_at(b, 0, @rlen)
         @command_tag = r[0]
         last = current
         current = []
@@ -406,7 +431,7 @@
       elsif t == 72 || t == 100 || t == 99                # 'H'/'d'/'c' CopyOut
         err = "PG: COPY TO STDOUT is not supported" if err == ""
       elsif t == 69                  # 'E'
-        err = self.format_error(b) if err == ""
+        err = self.format_error(b, @rlen) if err == ""
         @last_error = err
       elsif t == 90                  # 'Z'
         @in_txn = b[0] != 73
@@ -467,16 +492,15 @@
     @sock.write_bytes(pgw_frame(81, self.cstr_payload(sql)))
     err = ""
     while true
-      m = self.read_msg()
-      t = m[0]
-      b = m[1]
-      if self.handle_async(t, b)
+      t = self.read_msg()
+      b = @rbuf
+      if self.handle_async(t, b, @rlen)
         t = t                        # consumed async message; keep reading
       elsif t == 71                  # 'G' CopyInResponse
         @copying = true
         return true
       elsif t == 69
-        err = self.format_error(b) if err == ""
+        err = self.format_error(b, @rlen) if err == ""
         @last_error = err
       elsif t == 90
         @in_txn = b[0] != 73
@@ -486,13 +510,21 @@
         # a non-COPY statement slipped through — drain and report
         err = "PG: statement did not start a COPY" if err == ""
 
+  # Reusable CopyData frame header: 'd' + i32(payload + 4) in @chdr.
+  -> copy_header(payload_len)
+    @chdr[0] = 100                   # 'd'
+    n = payload_len + 4
+    @chdr[1] = (n >> 24) & 0xFF
+    @chdr[2] = (n >> 16) & 0xFF
+    @chdr[3] = (n >> 8) & 0xFF
+    @chdr[4] = n & 0xFF
+    @sock.write_bytes(@chdr)
+    nil
+
   # chunk: String of COPY text rows; boundaries need not align with rows.
   -> copy_write(chunk)
     raise "PG: no COPY in progress" if !@copying
-    header = []
-    header.push(100)                 # 'd'
-    pgw_w_i32(header, chunk.bytes.size + 4)
-    @sock.write_bytes(pgw_pack(header))
+    self.copy_header(chunk.bytes.size)
     @sock.write(chunk)
     nil
 
@@ -513,11 +545,18 @@
   # (chessbot flushes stream a pooled buffer in chunks through this).
   -> copy_write_bytes(b)
     raise "PG: no COPY in progress" if !@copying
-    header = []
-    header.push(100)                 # 'd'
-    pgw_w_i32(header, b.size + 4)
-    @sock.write_bytes(pgw_pack(header))
+    self.copy_header(b.size)
     @sock.write_bytes(b)
+    nil
+
+  # Send b[off ... off+len) as one CopyData frame — the fully pooled COPY
+  # path: callers keep ONE grow-only staging buffer and stream sub-ranges,
+  # with zero per-chunk allocations on either side (socket write_slice).
+  -> copy_write_slice(b, off, len)
+    raise "PG: no COPY in progress" if !@copying
+    return nil if len <= 0
+    self.copy_header(len)
+    @sock.write_slice(b, off, len)
     nil
 
   -> copy_finish

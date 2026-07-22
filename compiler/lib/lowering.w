@@ -1043,6 +1043,7 @@ use lowering/definitions
   mod[:known_calls]["cache_read"] = "__w_cache_read"
   mod[:known_calls]["cache_write"] = "__w_cache_write"
   mod[:known_calls]["system"] = "__w_system"
+  mod[:known_calls]["sleep"] = "__w_sleep"
   mod[:known_calls]["capture"] = "__w_capture"
   mod[:known_calls]["exit"] = "__w_exit"
   mod[:known_calls]["raise"] = "w_raise"

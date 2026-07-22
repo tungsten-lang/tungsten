@@ -24439,6 +24439,24 @@ WValue w_thread_sleep_ms(int64_t ms) {
     return W_NIL;
 }
 
+/* Global sleep(duration = nil) from core/global.w. Seconds as Int, Float,
+ * or Decimal; nil blocks forever (Ruby semantics). Returns the duration. */
+WValue __w_sleep(WValue duration) {
+    if (duration == W_NIL) {
+        for (;;) pause();
+    }
+    double secs = cmp_numeric_double(duration);
+    if (secs > 0) {
+        struct timespec ts;
+        ts.tv_sec = (time_t)secs;
+        ts.tv_nsec = (long)((secs - (double)ts.tv_sec) * 1e9);
+        if (ts.tv_nsec < 0) ts.tv_nsec = 0;
+        if (ts.tv_nsec > 999999999L) ts.tv_nsec = 999999999L;
+        nanosleep(&ts, NULL);
+    }
+    return duration;
+}
+
 /* Raw-i64 sleep used by native Tungsten coordinators that poll atomic file
  * mailboxes. Plain ccall forwards machine-integer arguments without boxing. */
 WValue __w_sleep_ms(int64_t milliseconds) {

@@ -10,6 +10,16 @@
 # unsupervised learner), and model evaluation (KFold / CrossValidation — k-fold
 # cross-validation that re-fits an estimator on each fold and averages
 # the held-out score).
+#
+# All five estimators answer ONE declared contract (lib/estimator_base.w):
+# `is Estimable` plus `is SupervisedEstimator` (LinearRegression,
+# KNNClassifier, LogisticRegression, GaussianNB) or `is
+# UnsupervisedEstimator` (KMeans). That contract adds `supervised?`,
+# `params`, `with_params(overrides)` and `estimator_name` to the familiar
+# new / fitted? / fit / predict / score, and puts the ONE definition of
+# every accepted input shape on the neutral `Estimator` base rather than on
+# a concrete sibling. It is what generic tooling — cross-validation, and
+# grid search — dispatches through.
 
 use version
 use stats
@@ -25,6 +35,7 @@ use pivot
 use vector
 use matrix
 use linalg
+use estimator_base
 use linear_regression
 use knn
 use logistic_regression
@@ -43,8 +54,11 @@ use kmeans
 # linear-regression payoff shipped as linear_regression.w above, its
 # k-NN sketch shipped as knn.w, and its logistic-regression sketch
 # shipped as logistic_regression.w; the draft stays only as the sketch
-# for the decision-tree / lasso follow-ups. Port a draft into the
-# manifest above only after
+# for the decision-tree / lasso follow-ups. NOTE that the draft
+# estimator.w sketches its own `+ Estimator` / `trait Predictable` — those
+# are SUPERSEDED by estimator_base.w's `Estimator` / `Estimable`, which is
+# the loaded, working contract; do not load the draft alongside it. Port a
+# draft into the manifest above only after
 # `bin/tungsten -c` passes on it AND it runs on both engines (spec
 # coverage in spec/*.w).
 

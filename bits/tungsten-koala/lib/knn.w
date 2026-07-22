@@ -25,9 +25,9 @@
 # lower training index (a strict `<` keeps the first-seen minimum),
 # matching scikit-learn's stable neighbour order.
 #
-# Accepted shapes are exactly LinearRegression's, coerced through the
-# same LinearRegression.feature_rows / .target_values (one definition of
-# every accepted input shape): x is a DataFrame (numeric columns only),
+# Accepted shapes are the estimators' shared ones, coerced through the
+# neutral Estimator.feature_rows / Estimator.target_values (one definition
+# of every accepted input shape): x is a DataFrame (numeric columns only),
 # a Matrix, an array of row arrays, or a flat single-feature array; y is
 # a Series, a Vector, or a plain array of labels. nil cells are NOT
 # handled — run an Imputer first. An empty x, a ragged x, or a y whose
@@ -40,6 +40,9 @@
 # containing closures avoid early `return` (see stats.w). No float
 # literals appear here: every float derives from the data via .to_f.
 + KNNClassifier
+  is Estimable
+  is SupervisedEstimator
+
   ro :k   # neighbour count
 
   -> new(k = 5)
@@ -51,12 +54,30 @@
   -> fitted?
     @fitted
 
+  # --- Estimable contract (see lib/estimator_base.w) ---
+
+  -> estimator_name
+    "KNNClassifier"
+
+  # Learns from features AND labels: fit(x, y) / score(x, y).
+  -> supervised?
+    true
+
+  # The hyperparameters a search varies — never the stored training rows.
+  -> params
+    { k: @k }
+
+  # A NEW, UNFITTED KNNClassifier with `overrides` applied; self is left
+  # untouched. Unmentioned keys carry over, so with_params(params) round-trips.
+  -> with_params(overrides)
+    KNNClassifier.new(Estimator.opt(overrides, :k, @k))
+
   # Store the training rows and labels. Returns self, or nil — fitted?
   # stays false — when the shapes are unusable (empty x, ragged rows,
   # y size mismatch).
   -> fit(x, y)
-    rows = LinearRegression.feature_rows(x)
-    labels = LinearRegression.target_values(y)
+    rows = Estimator.feature_rows(x)
+    labels = Estimator.target_values(y)
     ok = rows != nil && labels != nil
     ok = rows.size > 0 && rows.size == labels.size if ok
     ok = rows[0].size > 0 if ok
@@ -113,7 +134,7 @@
   # when x's rows do not match the fitted feature count.
   -> predict(x)
     rows = nil
-    rows = LinearRegression.feature_rows(x) if @fitted
+    rows = Estimator.feature_rows(x) if @fitted
     out = nil
     if rows != nil
       nf = @train_rows[0].size
@@ -131,7 +152,7 @@
   # nil before fit or when the shapes do not line up.
   -> score(x, y)
     preds = self.predict(x)
-    yvals = LinearRegression.target_values(y)
+    yvals = Estimator.target_values(y)
     out = nil
     if preds != nil && yvals != nil
       out = Metrics.accuracy(preds, yvals) if preds.size == yvals.size && preds.size > 0

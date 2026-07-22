@@ -127,7 +127,72 @@ KFold.new(5, 42).split(10)           # ... over a seeded MINSTD shuffle first
 scores = CrossValidation.cross_val_score(LinearRegression.new, x, y, 5)
                                      # => [1, 1, 1, 1, 1]  (per-fold R²)
 CrossValidation.cross_val_mean(KNNClassifier.new(3), x, y, 4)  # mean fold score
+
+# The estimator contract — one uniform interface across all five
+m.supervised?                        # => true; false for KMeans alone
+m.estimator_name                     # => "LinearRegression"
+m.params                             # => { alpha: 12 }  hyperparameters ONLY
+m.with_params({ alpha: 3 })          # => a NEW, UNFITTED clone; m untouched
+Estimator.feature_rows(x)            # the one definition of every x shape
+Estimator.target_values(y)           # ... and every y shape
+Estimator.fit_model(m, rows, yvals)  # arity-safe: fit(x,y) or fit(x)
+Estimator.score_model(m, rows, yvals)
 ```
+
+## The estimator contract
+
+Every estimator — `LinearRegression`, `KNNClassifier`,
+`LogisticRegression`, `GaussianNB`, `KMeans` — answers one declared
+interface, defined in `lib/estimator_base.w`:
+
+| trait | methods | who |
+| --- | --- | --- |
+| `Estimable` | `fitted?` `predict(x)` `supervised?` `params` `with_params(overrides)` `estimator_name` | all five |
+| `SupervisedEstimator` | `fit(x, y)` `score(x, y)` | LinearRegression, KNNClassifier, LogisticRegression, GaussianNB |
+| `UnsupervisedEstimator` | `fit(x)` `score(x)` | KMeans |
+
+A class declares its conformance with `is`:
+
+```tungsten
++ LinearRegression
+  is Estimable
+  is SupervisedEstimator
+```
+
+The traits are FLAT (no `with` composition — that form does not run on
+the interpreter) and `is` is a **declaration, not an enforcement**: a
+class naming a trait it does not satisfy still compiles. The enforcement
+is `spec/estimator_spec.w`, which walks all five and asserts each really
+answers every contract method.
+
+`supervised?` exists because fit's ARITY genuinely differs — KMeans takes
+`fit(x)`, the rest take `fit(x, y)`. `Estimator.fit_model` /
+`.score_model` do that dispatch for you, so generic tooling never has to
+guess.
+
+`params` reports only the CONSTRUCTOR knobs a search varies (`alpha`;
+`k`; `learning_rate` / `epochs`; `var_smoothing`; `k` / `seed` /
+`max_iter`) and never learned state — coefficients and centroids stay out
+of the search space, before and after a fit. `with_params` **clones**: it
+returns a fresh unfitted instance with the overrides applied and leaves
+the receiver alone, so a search fans out from one prototype without
+aliasing. Keys you omit carry over, so `m.with_params(m.params)`
+round-trips; key PRESENCE decides, so an explicit `{ seed: nil }` really
+does clear KMeans's seed.
+
+Two engine gotchas the contract works around: hash `to_s` key order
+differs between the engines (compare `params[:alpha]`, never the whole
+hash as a string), and `type(obj)` on an instance returns the class name
+compiled but `"Hash"` interpreted — which is why the contract carries
+`estimator_name`.
+
+Input coercion lives on the neutral `Estimator` base, not on any
+estimator: `Estimator.feature_rows(x)` accepts a DataFrame (numeric
+columns only), a Matrix, an array of row arrays, or a flat
+single-feature array; `Estimator.target_values(y)` accepts a Series, a
+Vector, or a plain array. `LinearRegression.feature_rows` /
+`.target_values` remain as delegating aliases for callers written before
+the move.
 
 ## The train/test workflow, end to end
 
@@ -340,7 +405,7 @@ through Splitter's MINSTD generator (as `KFold` does) then seeds from
 the first k distinct; distance ties in ASSIGN break to the lowest-index
 centroid, so the whole clustering is a pure function of the inputs. k
 defaults to 8 (scikit-learn's). It shares the estimators' accepted input
-shapes through `feature_rows` and returns nil for an empty or ragged x,
+shapes through `Estimator.feature_rows` and returns nil for an empty or ragged x,
 k < 1, or fewer rows than clusters. On the two 2x2 boxes
 `[[0,0],[2,0],[0,2],[2,2],[10,10],[12,10],[10,12],[12,12]]` at k = 2 it
 converges in 2 iterations to centroids `[[1,1],[11,11]]`, labels

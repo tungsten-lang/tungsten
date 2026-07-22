@@ -1,3 +1,15 @@
+# SUPERSEDED, UNLOADED DRAFT — do NOT add this to lib/koala.w.
+#
+# The working estimator contract is lib/estimator_base.w: `+ Estimator`
+# (input coercion + arity-safe dispatch) and the flat traits `Estimable` /
+# `SupervisedEstimator` / `UnsupervisedEstimator`, which all five shipped
+# estimators conform to. The `+ Estimator` and `trait Predictable` below
+# are the ORIGINAL sketch and would COLLIDE with it.
+#
+# This file survives only as the design sketch for the decision-tree and
+# lasso follow-ups. It does not parse as Tungsten: it leans on `**options`
+# kwargs and `case X => Type ->` forms that do not run on both engines.
+#
 # Estimator — base trait and implementations for ML models
 # Estimators implement fit/predict/score for supervised learning.
 #

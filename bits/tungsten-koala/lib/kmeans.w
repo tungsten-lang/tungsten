@@ -47,8 +47,8 @@
 # [0,0,0,0,1,1,1,1], and inertia exactly 16 (each of the eight points
 # sits sqrt(2) from its centroid, squared distance 2, times eight).
 #
-# Accepted input shapes are exactly LinearRegression's, coerced through
-# the shared LinearRegression.feature_rows: x is a DataFrame (numeric
+# Accepted input shapes are the estimators' shared ones, coerced through
+# the neutral Estimator.feature_rows: x is a DataFrame (numeric
 # columns only), a Matrix, an array of row arrays, or a flat
 # single-feature array. nil cells are NOT handled — run an Imputer
 # first. fit returns nil (and fitted? stays false) for an empty x, a
@@ -62,8 +62,12 @@
 # concatenation is avoided (it is unsupported); arrays are built with
 # push.
 + KMeans
+  is Estimable
+  is UnsupervisedEstimator
+
   ro :k          # cluster count
   ro :seed       # init seed (nil = deterministic first-k-distinct init)
+  ro :max_iter   # Lloyd iteration cap (sklearn's 300)
   ro :centroids  # k centroid rows (arrays of floats) after fit; nil before
   ro :labels     # cluster index per training row after fit; nil before
   ro :inertia    # within-cluster sum of squared distances; nil before fit
@@ -82,11 +86,33 @@
   -> fitted?
     @fitted
 
+  # --- Estimable contract (see lib/estimator_base.w) ---
+
+  -> estimator_name
+    "KMeans"
+
+  # koala's only UNSUPERVISED estimator: fit(x) / score(x), no labels.
+  # Generic tooling must read this before calling fit — see
+  # Estimator.fit_model / .score_model.
+  -> supervised?
+    false
+
+  # The hyperparameters a search varies — never the learned centroids.
+  -> params
+    { k: @k, seed: @seed, max_iter: @max_iter }
+
+  # A NEW, UNFITTED KMeans with `overrides` applied; self is left untouched.
+  # Unmentioned keys carry over, so with_params(params) round-trips. An
+  # explicit `{ seed: nil }` DOES clear the seed (key presence, not value,
+  # decides), restoring the deterministic first-k-distinct init.
+  -> with_params(overrides)
+    KMeans.new(Estimator.opt(overrides, :k, @k), Estimator.opt(overrides, :seed, @seed), Estimator.opt(overrides, :max_iter, @max_iter))
+
   # Learn k centroids and the per-row cluster assignment from x. Returns
   # self, or nil — fitted? stays false — for unusable shapes (empty x,
   # ragged rows, k < 1, or fewer rows than clusters).
   -> fit(x)
-    rows = LinearRegression.feature_rows(x)
+    rows = Estimator.feature_rows(x)
     ok = rows != nil
     ok = rows.size > 0 if ok
     ok = @k >= 1 if ok
@@ -132,7 +158,7 @@
   # when a row's width differs from the fitted feature count.
   -> predict(x)
     rows = nil
-    rows = LinearRegression.feature_rows(x) if @fitted
+    rows = Estimator.feature_rows(x) if @fitted
     out = nil
     if rows != nil
       cs = @centroids
@@ -161,7 +187,7 @@
     labs = self.predict(x)
     out = nil
     if labs != nil
-      rows = LinearRegression.feature_rows(x)
+      rows = Estimator.feature_rows(x)
       cs = @centroids
       total = 0.to_f
       idx = 0

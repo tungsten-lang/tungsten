@@ -61,8 +61,8 @@
 # class's posterior column to Metrics.roc_auc / Metrics.log_loss. An argmax
 # tie breaks to the first-seen class.
 #
-# Accepted shapes are exactly LinearRegression's, coerced through the same
-# LinearRegression.feature_rows / .target_values (one definition of every
+# Accepted shapes are the estimators' shared ones, coerced through the
+# neutral Estimator.feature_rows / .target_values (one definition of every
 # accepted input shape): x is a DataFrame (numeric columns only), a Matrix,
 # an array of row arrays, or a flat single-feature array; y is a Series, a
 # Vector, or a plain array of labels. nil cells are NOT handled — run an
@@ -81,6 +81,9 @@
 # Tungsten's explicit f64 literal, the form core/math.w and core/stats.w
 # use for the same constant — and is byte-identical on both engines.
 + GaussianNB
+  is Estimable
+  is SupervisedEstimator
+
   ro :classes        # distinct labels, first-seen order; nil before fit
   ro :class_counts   # rows per class; nil before fit
   ro :class_priors   # P(class) = count / n; nil before fit
@@ -103,6 +106,24 @@
 
   -> fitted?
     @fitted
+
+  # --- Estimable contract (see lib/estimator_base.w) ---
+
+  -> estimator_name
+    "GaussianNB"
+
+  # Learns from features AND labels: fit(x, y) / score(x, y).
+  -> supervised?
+    true
+
+  # The hyperparameters a search varies — never the learned priors/means.
+  -> params
+    { var_smoothing: @var_smoothing }
+
+  # A NEW, UNFITTED GaussianNB with `overrides` applied; self is left
+  # untouched. Unmentioned keys carry over, so with_params(params) round-trips.
+  -> with_params(overrides)
+    GaussianNB.new(Estimator.opt(overrides, :var_smoothing, @var_smoothing))
 
   # 2*pi as an f64 — the bit's single float literal (see the header note).
   -> .two_pi
@@ -201,8 +222,8 @@
   # fitted? stays false — when the shapes are unusable (empty x, ragged
   # rows, y size mismatch).
   -> fit(x, y)
-    rows = LinearRegression.feature_rows(x)
-    labels = LinearRegression.target_values(y)
+    rows = Estimator.feature_rows(x)
+    labels = Estimator.target_values(y)
     ok = rows != nil && labels != nil
     ok = rows.size > 0 && rows.size == labels.size if ok
     ok = rows[0].size > 0 if ok
@@ -248,7 +269,7 @@
   # x coerced to feature rows, or nil before fit and on a width mismatch.
   -> query_rows(x)
     rows = nil
-    rows = LinearRegression.feature_rows(x) if @fitted
+    rows = Estimator.feature_rows(x) if @fitted
     out = nil
     if rows != nil
       nf = @means[0].size
@@ -311,7 +332,7 @@
   # before fit or when the shapes do not line up.
   -> score(x, y)
     preds = self.predict(x)
-    yvals = LinearRegression.target_values(y)
+    yvals = Estimator.target_values(y)
     out = nil
     if preds != nil && yvals != nil
       out = Metrics.accuracy(preds, yvals) if preds.size == yvals.size && preds.size > 0

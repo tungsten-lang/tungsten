@@ -788,4 +788,211 @@ describe "KMeans" ->
     expect(model.fitted?).to be_false
     expect(KMeans.new.k).to eq(8)
 
+# --- The estimator contract (lib/estimator_base.w) ---
+#
+# `is Estimable` / `is SupervisedEstimator` / `is UnsupervisedEstimator`
+# DECLARE conformance but the engines do not enforce it — a class naming a
+# trait it does not satisfy still compiles. These specs are the enforcement:
+# they walk ALL FIVE estimators and assert each really answers the contract,
+# reports the right arity through supervised?, and clones correctly.
+#
+# params is compared PER KEY (params[:alpha]), never as a whole-hash string —
+# hash to_s key order differs between the two engines.
+describe "Estimator contract" ->
+  it "is answered by all five estimators" ->
+    models = [LinearRegression.new, KNNClassifier.new, LogisticRegression.new, GaussianNB.new, KMeans.new]
+    expect(models.size).to eq(5)
+    missing = []
+    models.each -> (m)
+      missing.push(m.estimator_name + ".fitted?") if !m.respond_to?("fitted?")
+      missing.push(m.estimator_name + ".fit") if !m.respond_to?("fit")
+      missing.push(m.estimator_name + ".predict") if !m.respond_to?("predict")
+      missing.push(m.estimator_name + ".score") if !m.respond_to?("score")
+      missing.push(m.estimator_name + ".supervised?") if !m.respond_to?("supervised?")
+      missing.push(m.estimator_name + ".params") if !m.respond_to?("params")
+      missing.push(m.estimator_name + ".with_params") if !m.respond_to?("with_params")
+      missing.push(m.estimator_name + ".estimator_name") if !m.respond_to?("estimator_name")
+    expect(missing.join(",")).to eq("")
+
+  it "names every estimator (type() is not reliable interpreted)" ->
+    names = []
+    models = [LinearRegression.new, KNNClassifier.new, LogisticRegression.new, GaussianNB.new, KMeans.new]
+    models.each -> (m)
+      names.push(m.estimator_name)
+    expect(names.join(",")).to eq("LinearRegression,KNNClassifier,LogisticRegression,GaussianNB,KMeans")
+
+  it "starts every estimator unfitted" ->
+    unfitted = true
+    models = [LinearRegression.new, KNNClassifier.new, LogisticRegression.new, GaussianNB.new, KMeans.new]
+    models.each -> (m)
+      unfitted = false if m.fitted?
+    expect(unfitted).to be_true
+
+  # The four supervised learners take fit(x, y); KMeans alone takes fit(x).
+  it "declares supervised? — true for the four, false for KMeans" ->
+    expect(LinearRegression.new.supervised?).to be_true
+    expect(KNNClassifier.new.supervised?).to be_true
+    expect(LogisticRegression.new.supervised?).to be_true
+    expect(GaussianNB.new.supervised?).to be_true
+    expect(KMeans.new.supervised?).to be_false
+
+  it "reports only hyperparameters from params, never learned state" ->
+    expect(LinearRegression.new(12).params[:alpha]).to eq(12)
+    expect(LinearRegression.new(12).params.size).to eq(1)
+    expect(KNNClassifier.new(3).params[:k]).to eq(3)
+    expect(KNNClassifier.new(3).params.size).to eq(1)
+    expect(LogisticRegression.new(nil, 40).params[:epochs]).to eq(40)
+    expect(LogisticRegression.new(nil, 40).params.size).to eq(2)
+    expect(GaussianNB.new.params.size).to eq(1)
+    expect(KMeans.new(2, 7, 50).params[:k]).to eq(2)
+    expect(KMeans.new(2, 7, 50).params[:seed]).to eq(7)
+    expect(KMeans.new(2, 7, 50).params[:max_iter]).to eq(50)
+    expect(KMeans.new(2, 7, 50).params.size).to eq(3)
+
+  # params still reports the CONSTRUCTOR knobs after a fit — learned state
+  # (coefficients, centroids) never leaks into the search space.
+  it "keeps params free of learned state after fitting" ->
+    m = LinearRegression.new(12)
+    m.fit([[0, 0], [2, 0], [0, 2], [2, 2]], [3, 5, 7, 9])
+    expect(m.fitted?).to be_true
+    expect(m.params.size).to eq(1)
+    expect(m.params[:alpha]).to eq(12)
+    km = KMeans.new(2)
+    km.fit([[0, 0], [2, 0], [10, 10], [12, 12]])
+    expect(km.fitted?).to be_true
+    expect(km.params.size).to eq(3)
+    expect(km.params[:k]).to eq(2)
+
+  # with_params(params) must be the identity on the hyperparameters.
+  it "round-trips params through with_params for all five" ->
+    drift = []
+    models = [LinearRegression.new(12), KNNClassifier.new(3), LogisticRegression.new(nil, 40), GaussianNB.new, KMeans.new(2, 7, 50)]
+    models.each -> (m)
+      copy = m.with_params(m.params)
+      before = m.params
+      after = copy.params
+      drift.push(m.estimator_name + ".size") if before.size != after.size
+      before.each -> (k, v)
+        drift.push(m.estimator_name + "." + k.to_s) if after[k].to_s != v.to_s
+    expect(drift.join(",")).to eq("")
+
+  it "carries unmentioned keys over on a partial override" ->
+    m = KMeans.new(2, 7, 50)
+    c = m.with_params({ k: 4 })
+    expect(c.params[:k]).to eq(4)
+    expect(c.params[:seed]).to eq(7)
+    expect(c.params[:max_iter]).to eq(50)
+    l = LogisticRegression.new(nil, 40).with_params({ epochs: 5 })
+    expect(l.params[:epochs]).to eq(5)
+    expect(l.params[:learning_rate].to_s).to eq(LogisticRegression.new.learning_rate.to_s)
+
+  # Key PRESENCE decides, not the value — so an explicit nil clears a knob.
+  it "applies an override whose value is nil" ->
+    m = KMeans.new(2, 7, 50)
+    expect(m.params[:seed]).to eq(7)
+    expect(m.with_params({ seed: nil }).params[:seed]).to be_nil
+    expect(m.with_params({ seed: nil }).params[:k]).to eq(2)
+    expect(m.params[:seed]).to eq(7)
+
+  it "returns a FRESH UNFITTED clone from with_params, leaving self alone" ->
+    x = [[0, 0], [2, 0], [0, 2], [2, 2]]
+    y = [3, 5, 7, 9]
+    m = LinearRegression.new(12)
+    m.fit(x, y)
+    expect(m.fitted?).to be_true
+    c = m.with_params({ alpha: 3 })
+    expect(c.fitted?).to be_false
+    expect(c.alpha).to eq(3)
+    expect(c.coefficients).to be_nil
+    expect(c.predict(x)).to be_nil
+    # the original keeps its own hyperparameter AND its fitted state
+    expect(m.alpha).to eq(12)
+    expect(m.fitted?).to be_true
+    expect(m.predict(x) != nil).to be_true
+    # fitting the clone does not disturb the original
+    c.fit(x, y)
+    expect(c.fitted?).to be_true
+    expect(m.alpha).to eq(12)
+    expect(m.params[:alpha]).to eq(12)
+
+  it "returns an unfitted clone for every estimator" ->
+    fitted_clones = []
+    models = [LinearRegression.new(12), KNNClassifier.new(3), LogisticRegression.new(nil, 40), GaussianNB.new, KMeans.new(2, 7, 50)]
+    models.each -> (m)
+      c = m.with_params({})
+      fitted_clones.push(m.estimator_name) if c.fitted?
+    expect(fitted_clones.join(",")).to eq("")
+
+  # An empty override hash is a plain clone of the hyperparameters.
+  it "clones unchanged from an empty override hash" ->
+    expect(LinearRegression.new(12).with_params({}).params[:alpha]).to eq(12)
+    expect(KNNClassifier.new(3).with_params({}).params[:k]).to eq(3)
+    expect(KMeans.new(2, 7, 50).with_params({}).params[:max_iter]).to eq(50)
+
+describe "Estimator input coercion" ->
+  # Coercion is defined ONCE on the neutral base — no estimator depends on a
+  # concrete sibling for it any more.
+  it "normalizes every accepted x shape from the neutral base" ->
+    expect(Estimator.feature_rows([1, 2, 3]).to_s).to eq("\[\[1\], \[2\], \[3\]\]")
+    expect(Estimator.feature_rows([[1, 2], [3, 4]]).to_s).to eq("\[\[1, 2\], \[3, 4\]\]")
+    expect(Estimator.feature_rows([]).to_s).to eq("\[\]")
+    expect(Estimator.feature_rows(Matrix.new([[1, 2], [3, 4]])).to_s).to eq("\[\[1, 2\], \[3, 4\]\]")
+    df = DataFrame.new([[:a, [1, 2]], [:b, [3, 4]]])
+    expect(Estimator.feature_rows(df).to_s).to eq("\[\[1, 3\], \[2, 4\]\]")
+
+  it "normalizes every accepted y shape from the neutral base" ->
+    expect(Estimator.target_values([1, 2]).to_s).to eq("\[1, 2\]")
+    expect(Estimator.target_values(Series.new([1, 2])).to_s).to eq("\[1, 2\]")
+    expect(Estimator.target_values(Vector.new([1, 2])).to_s).to eq("\[1, 2\]")
+
+  # LinearRegression.feature_rows / .target_values are kept as delegating
+  # aliases so callers written before the move keep working.
+  it "keeps the LinearRegression aliases delegating" ->
+    expect(LinearRegression.feature_rows([1, 2]).to_s).to eq(Estimator.feature_rows([1, 2]).to_s)
+    expect(LinearRegression.feature_rows([[1, 2]]).to_s).to eq(Estimator.feature_rows([[1, 2]]).to_s)
+    expect(LinearRegression.target_values([1, 2]).to_s).to eq(Estimator.target_values([1, 2]).to_s)
+    expect(LinearRegression.target_values(Series.new([3, 4])).to_s).to eq("\[3, 4\]")
+
+  it "reads an override with Estimator.opt by key presence" ->
+    expect(Estimator.opt({ alpha: 9 }, :alpha, 1)).to eq(9)
+    expect(Estimator.opt({ beta: 9 }, :alpha, 1)).to eq(1)
+    expect(Estimator.opt({}, :alpha, 1)).to eq(1)
+    expect(Estimator.opt(nil, :alpha, 1)).to eq(1)
+    expect(Estimator.opt({ alpha: nil }, :alpha, 1)).to be_nil
+
+describe "Estimator arity-safe dispatch" ->
+  # What supervised? is FOR: generic tooling fits and scores without knowing
+  # which arity a given estimator takes.
+  it "fits and scores a supervised estimator through fit_model" ->
+    x = [[0, 0], [2, 0], [0, 2], [2, 2]]
+    y = [3, 5, 7, 9]
+    m = Estimator.fit_model(LinearRegression.new, x, y)
+    expect(m != nil).to be_true
+    expect(m.fitted?).to be_true
+    expect(Estimator.score_model(m, x, y).to_s).to eq("1")
+
+  it "fits and scores an unsupervised estimator through fit_model" ->
+    x = [[0, 0], [2, 0], [0, 2], [2, 2], [10, 10], [12, 10], [10, 12], [12, 12]]
+    m = Estimator.fit_model(KMeans.new(2), x, nil)
+    expect(m != nil).to be_true
+    expect(m.fitted?).to be_true
+    expect(m.inertia.to_s).to eq("16")
+    # sklearn's convention: score is -inertia, so the y argument is ignored
+    expect(Estimator.score_model(m, x, nil).to_s).to eq("-16")
+
+  it "dispatches across all five without knowing their arity" ->
+    x = [[0, 0], [2, 0], [0, 2], [2, 2]]
+    y = [3, 5, 7, 9]
+    labels = [0, 0, 1, 1]
+    failures = []
+    models = [LinearRegression.new, KNNClassifier.new(1), KMeans.new(2)]
+    targets = [y, labels, nil]
+    i = 0
+    models.each -> (m)
+      f = Estimator.fit_model(m, x, targets[i])
+      failures.push(m.estimator_name) if f == nil
+      failures.push(m.estimator_name + ".score") if Estimator.score_model(m, x, targets[i]) == nil
+      i += 1
+    expect(failures.join(",")).to eq("")
+
 spec_summary

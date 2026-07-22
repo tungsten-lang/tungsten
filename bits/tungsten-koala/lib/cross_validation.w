@@ -26,7 +26,7 @@
 # bit's shape-error convention).
 #
 # CrossValidation.cross_val_score coerces x / y through the estimators'
-# shared LinearRegression.feature_rows / .target_values (every accepted
+# shared Estimator.feature_rows / .target_values (every accepted
 # input shape, one definition: a DataFrame, Matrix, array of row arrays,
 # or flat single-feature array for x; a Series, Vector, or array for y),
 # builds the folds against the sample count, and for each fold re-fits
@@ -88,8 +88,8 @@
   # inputs cannot be coerced, their lengths disagree, or KFold rejects k.
   # A fold whose fit fails contributes a nil score.
   -> .cross_val_score(model, x, y, k = 5, seed = nil)
-    rows = LinearRegression.feature_rows(x)
-    yvals = LinearRegression.target_values(y)
+    rows = Estimator.feature_rows(x)
+    yvals = Estimator.target_values(y)
     out = nil
     ok = rows != nil && yvals != nil
     ok = rows.size > 0 && rows.size == yvals.size if ok

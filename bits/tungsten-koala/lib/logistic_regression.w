@@ -34,8 +34,8 @@
 # recall / f1 exactly like KNNClassifier. A y with one distinct label, or
 # three or more, makes fit return nil and fitted? stay false.
 #
-# Accepted shapes are exactly LinearRegression's, coerced through the
-# same LinearRegression.feature_rows / .target_values: x is a DataFrame
+# Accepted shapes are the estimators' shared ones, coerced through the
+# neutral Estimator.feature_rows / .target_values: x is a DataFrame
 # (numeric columns only), a Matrix, an array of row arrays, or a flat
 # single-feature array; y is a Series, a Vector, or a plain array of
 # labels. nil cells are NOT handled — run an Imputer first. An empty x,
@@ -55,6 +55,9 @@
 # as 1.to_f / 10.to_f and a caller wanting a fractional rate must derive
 # it the same way (`LogisticRegression.new(1.to_f / 10.to_f)`).
 + LogisticRegression
+  is Estimable
+  is SupervisedEstimator
+
   ro :coefficients   # per-feature weights after a successful fit; nil before
   ro :intercept      # bias term after a successful fit; nil before
   ro :classes        # the two labels, first-seen order; nil before fit
@@ -73,6 +76,24 @@
 
   -> fitted?
     @fitted
+
+  # --- Estimable contract (see lib/estimator_base.w) ---
+
+  -> estimator_name
+    "LogisticRegression"
+
+  # Learns from features AND labels: fit(x, y) / score(x, y).
+  -> supervised?
+    true
+
+  # The hyperparameters a search varies — never the learned weights.
+  -> params
+    { learning_rate: @learning_rate, epochs: @epochs }
+
+  # A NEW, UNFITTED LogisticRegression with `overrides` applied; self is left
+  # untouched. Unmentioned keys carry over, so with_params(params) round-trips.
+  -> with_params(overrides)
+    LogisticRegression.new(Estimator.opt(overrides, :learning_rate, @learning_rate), Estimator.opt(overrides, :epochs, @epochs))
 
   # Sigmoid 1 / (1 + e^-z), with z clamped to [-30, 30] so e^-z cannot
   # overflow; the output is strictly inside (0, 1).
@@ -122,8 +143,8 @@
   # self, or nil — fitted? stays false — when the shapes are unusable
   # (empty x, ragged rows, y size mismatch) or y is not exactly binary.
   -> fit(x, y)
-    rows = LinearRegression.feature_rows(x)
-    labels = LinearRegression.target_values(y)
+    rows = Estimator.feature_rows(x)
+    labels = Estimator.target_values(y)
     ok = rows != nil && labels != nil
     ok = rows.size > 0 && rows.size == labels.size if ok
     ok = rows[0].size > 0 if ok
@@ -179,7 +200,7 @@
   # count.
   -> predict_proba(x)
     rows = nil
-    rows = LinearRegression.feature_rows(x) if @fitted
+    rows = Estimator.feature_rows(x) if @fitted
     out = nil
     if rows != nil
       weights = @coefficients
@@ -215,7 +236,7 @@
   # nil before fit or when the shapes do not line up.
   -> score(x, y)
     preds = self.predict(x)
-    yvals = LinearRegression.target_values(y)
+    yvals = Estimator.target_values(y)
     out = nil
     if preds != nil && yvals != nil
       out = Metrics.accuracy(preds, yvals) if preds.size == yvals.size && preds.size > 0

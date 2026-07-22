@@ -282,7 +282,7 @@
   # --- Conversion ---
 
   # Already a Matrix — self. (The estimator input convention: every
-  # tabular type answers to_matrix, so LinearRegression.feature_rows
+  # tabular type answers to_matrix, so Estimator.feature_rows
   # coerces DataFrame and Matrix through one polymorphic call.)
   -> to_matrix
     self

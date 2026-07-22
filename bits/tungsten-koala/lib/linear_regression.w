@@ -50,6 +50,9 @@
 # containing closures avoid early `return` (see stats.w). No float
 # literals appear here: every float derives from the data via .to_f.
 + LinearRegression
+  is Estimable
+  is SupervisedEstimator
+
   ro :coefficients   # per-feature slopes after a successful fit; nil before
   ro :intercept      # bias term after a successful fit; nil before
   ro :alpha          # ridge strength; 0 = plain OLS
@@ -63,12 +66,30 @@
   -> fitted?
     @fitted
 
+  # --- Estimable contract (see lib/estimator_base.w) ---
+
+  -> estimator_name
+    "LinearRegression"
+
+  # Learns from features AND a target: fit(x, y) / score(x, y).
+  -> supervised?
+    true
+
+  # The hyperparameters a search varies — never the learned coefficients.
+  -> params
+    { alpha: @alpha }
+
+  # A NEW, UNFITTED LinearRegression with `overrides` applied; self is left
+  # untouched. Unmentioned keys carry over, so with_params(params) round-trips.
+  -> with_params(overrides)
+    LinearRegression.new(Estimator.opt(overrides, :alpha, @alpha))
+
   # Learn coefficients and intercept from x/y. Returns self, or nil —
   # fitted? stays false — when the shapes are unusable (empty x,
   # ragged rows, y size mismatch) or X^T X is singular.
   -> fit(x, y)
-    rows = LinearRegression.feature_rows(x)
-    yvals = LinearRegression.target_values(y)
+    rows = Estimator.feature_rows(x)
+    yvals = Estimator.target_values(y)
     ok = rows != nil && yvals != nil
     ok = rows.size > 0 && rows.size == yvals.size if ok
     ok = rows[0].size > 0 if ok
@@ -115,7 +136,7 @@
   # feature count.
   -> predict(x)
     rows = nil
-    rows = LinearRegression.feature_rows(x) if @fitted
+    rows = Estimator.feature_rows(x) if @fitted
     out = nil
     if rows != nil
       coefs = @coefficients
@@ -138,42 +159,22 @@
   # fit or when the shapes do not line up.
   -> score(x, y)
     preds = self.predict(x)
-    yvals = LinearRegression.target_values(y)
+    yvals = Estimator.target_values(y)
     out = nil
     if preds != nil && yvals != nil
       out = Metrics.r2(preds, yvals) if preds.size == yvals.size && preds.size > 0
     out
 
-  # --- Input coercion (every accepted shape, one place) ---
+  # --- Input coercion: DELEGATING ALIASES ---
+  #
+  # The one definition of every accepted input shape moved to the neutral
+  # Estimator base (lib/estimator_base.w) — a classifier has no business
+  # depending on the linear model for it. These two survive unchanged in
+  # behavior so existing callers keep working; new code should call
+  # Estimator.feature_rows / Estimator.target_values directly.
 
-  # x as plain feature rows: a Matrix or DataFrame goes through its
-  # to_matrix (numeric columns only for a frame — nil when it has
-  # none), an array of arrays is taken as-is, and a flat array becomes
-  # one single-feature row per value.
   -> .feature_rows(x)
-    out = nil
-    if type(x) == "Array"
-      if x.size == 0
-        out = []
-      else
-        if type(x[0]) == "Array"
-          out = x
-        else
-          rows = []
-          x.each -> (v)
-            rows.push([v])
-          out = rows
-    else
-      m = x.to_matrix
-      out = m.to_a if m != nil
-    out
+    Estimator.feature_rows(x)
 
-  # y as a plain array of target values: Series / Vector -> to_a, a
-  # plain array is taken as-is.
   -> .target_values(y)
-    out = nil
-    if type(y) == "Array"
-      out = y
-    else
-      out = y.to_a
-    out
+    Estimator.target_values(y)

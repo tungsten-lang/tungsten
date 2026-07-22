@@ -70,6 +70,16 @@ named = Pipeline.new([[:fill, Imputer.new(:mean)], [:scale, Scaler.new(:standard
 named.step(:scale)                   # by name (symbol or string); named[1] too
 named.names                          # => ["fill", "scale"]; has_step?(:scale)
 
+# Dimensionality reduction — PCA, a transformer (one-sided Jacobi, not covariance)
+pca = PCA.new(2)                     # keep the top 2 principal directions
+scores = pca.fit_transform([[0 - 2, 1], [0 - 1, 0 - 1], [0, 0], [1, 0 - 1], [2, 1]])
+scores.column_names                  # => ["pc0", "pc1"]  a DataFrame of scores
+pca.explained_variance               # => Vector [2.5, 1]  sigma^2 / (n - 1)
+pca.explained_variance_ratio         # => Vector [0.714286, 0.285714]  share each keeps
+pca.components                       # a 2x2 Matrix, one unit-norm direction per row
+pca.inverse_transform(scores)        # DataFrame back in the original coordinates
+PCA.new(2, true)                     # whiten: rescale scores to unit variance
+
 # Estimation — LinearRegression, Householder QR least squares
 model = LinearRegression.new
 model.fit([0, 1, 2, 3], [1, 3, 5, 7])  # x: DataFrame | Matrix | Vector |
@@ -86,6 +96,16 @@ ridge.intercept                      # => 1       (bias never penalized)
 half = LinearRegression.new(1.to_f / 2.to_f)  # fractional alpha: derive it —
                                      # float LITERALS corrupt call arguments
                                      # on both engines (see linear_regression.w)
+
+# Lasso / ElasticNet — L1 and L1+L2: where ridge SHRINKS, lasso SELECTS
+las = Lasso.new(1.to_f / 5.to_f)     # alpha 0.2 — derive floats; a literal corrupts args
+las.fit([[1, 5], [2, 3], [3, 8], [4, 1], [5, 9], [6, 2], [7, 6], [8, 4]],
+        [3, 5, 8, 9, 11, 14, 15, 17])   # feature 1 is noise
+las.coefficients                     # => [1.9619, 0]  junk slope thresholded EXACTLY to 0
+las.intercept                        # => 1.42143  intercept never penalized (centering)
+las.n_iter                           # => 2   coordinate-descent sweeps to converge
+Lasso.new.l1_ratio                   # => 1   Lasso IS ElasticNet(alpha, 1)
+ElasticNet.new(1, 1.to_f / 2.to_f)   # (alpha, l1_ratio); new(a, 0) == LinearRegression.new(n*a)
 
 # Classification — KNNClassifier, majority vote of the k nearest rows
 knn = KNNClassifier.new(3)           # k neighbours (defaults to 5, sklearn)
@@ -146,6 +166,16 @@ rt.fit([[0], [1], [2], [3]], [0, 2, 4, 6])
 rt.predict([[0], [3]])               # => [1, 5]   PIECEWISE CONSTANT leaf means
 rt.score(x_test, y_test)             # => R², like LinearRegression's
 
+# Ensemble — RandomForestClassifier: bagged CART + per-split feature subsampling
+rf = RandomForestClassifier.new(50, :sqrt, nil, 1, 42)  # n_estimators, max_features, depth, leaf, seed
+rf.fit([[0, 0], [1, 0], [0, 1], [1, 1], [10, 10], [11, 10], [10, 11], [11, 11]],
+       [:a, :a, :a, :a, :b, :b, :b, :b])
+rf.predict_proba([[0, 0]])[0]        # => [0.98, 0.02]  MEAN of the trees' leaf distributions
+rf.oob_score                         # out-of-bag accuracy — a free holdout, no second split
+rf.tree_count                        # => 50   trees that grew (rf.trees are the roots)
+RandomForestRegressor.new(50, nil, nil, 1, 42)   # MSE trees; max_features defaults to :all
+RandomForestClassifier.new(1, :all, nil, 1, 0, nil, false)  # == the DecisionTree, node for node
+
 # ... or as a pipeline tail: transform features, then fit/predict
 pipe = Pipeline.new([[:scale, Scaler.new(:standard)], [:model, LinearRegression.new]])
 pipe.fit(df_features, y)             # nil (unfitted) on collinear features
@@ -171,6 +201,16 @@ km.predict([[1, 1], [11, 11]])       # => [0, 1]  nearest-centroid assignment
 km.fit_predict(x)                    # fit, then return the training labels
 km.score(x)                          # => -inertia (sklearn's convention)
 KMeans.new(2, 42)                    # seeded init — same seed, same clustering
+
+# Clustering — DBSCAN, density-based (koala's SECOND unsupervised learner)
+rows = [[0, 0], [0, 1], [1, 0], [1, 1], [10, 10], [10, 11], [11, 10], [11, 11], [50, 50]]
+db = DBSCAN.new(2, 3)                # eps = 2, min_samples = 3 (eps has NO default)
+db.fit_predict(rows)                 # => [0, 0, 0, 0, 1, 1, 1, 1, -1]  -1 = noise (outlier)
+db.n_clusters                        # => 2   DISCOVERED, not supplied like KMeans's k
+db.core_sample_indices               # => [0, 1, 2, 3, 4, 5, 6, 7]  the dense-region rows
+db.predict([[1, 2], [9, 10], [5, 5], [50, 50]])  # => [0, 1, -1, -1]  nearest CORE within eps
+db.score(rows)                       # => 0.919526  silhouette over the non-noise rows
+DBSCAN.new(2, 3, "manhattan")        # metric: euclidean (default) | manhattan | chebyshev
 
 # Model evaluation — k-fold cross-validation, re-fit per fold
 KFold.new(5).split(10)               # 5 contiguous [train, test] index pairs
@@ -207,8 +247,8 @@ GridSearch.new(pipe, { "scale.kind" => [:standard, :min_max],
                        "model.alpha" => [1, 10] }, 2)  # tune PREPROCESSING
                                      # and the model in ONE grid
 
-# The estimator contract — one uniform interface across all five
-m.supervised?                        # => true; false for KMeans alone
+# The estimator contract — one uniform interface, whatever the model
+m.supervised?                        # => true; false for KMeans / DBSCAN (unsupervised)
 m.supports_sample_weight?            # => true; false for KNNClassifier alone
 m.estimator_name                     # => "LinearRegression"
 m.params                             # => { alpha: 12 }  hyperparameters ONLY
@@ -233,17 +273,17 @@ Persist.dumps(pipe)                  # works for a whole Pipeline, nested
 
 ## The estimator contract
 
-Every estimator — `LinearRegression`, `KNNClassifier`,
-`LogisticRegression`, `GaussianNB`, `DecisionTreeClassifier`,
-`DecisionTreeRegressor`, `KMeans` — answers one declared interface,
-defined in `lib/estimator_base.w`:
+Every estimator — the linear and regularized regressors, the
+classifiers, the tree and forest ensembles, and the two clustering
+algorithms — answers one declared interface, defined in
+`lib/estimator_base.w`:
 
 | trait | methods | who |
 | --- | --- | --- |
-| `Tunable` | `params` `with_params(overrides)` | Scaler, Imputer, Encoder (and every Estimable, which restates the pair) |
-| `Estimable` | `fitted?` `predict(x)` `supervised?` `supports_sample_weight?` `params` `with_params(overrides)` `estimator_name` | all seven |
-| `SupervisedEstimator` | `fit(x, y, sample_weight)` `score(x, y, sample_weight)` | LinearRegression, KNNClassifier, LogisticRegression, GaussianNB, DecisionTreeClassifier, DecisionTreeRegressor |
-| `UnsupervisedEstimator` | `fit(x, sample_weight)` `score(x, sample_weight)` | KMeans |
+| `Tunable` | `params` `with_params(overrides)` | Scaler, Imputer, Encoder, PCA (and every Estimable, which restates the pair) |
+| `Estimable` | `fitted?` `predict(x)` `supervised?` `supports_sample_weight?` `params` `with_params(overrides)` `estimator_name` | every estimator below, plus `Pipeline` |
+| `SupervisedEstimator` | `fit(x, y, sample_weight)` `score(x, y, sample_weight)` | LinearRegression, Lasso, ElasticNet, KNNClassifier, LogisticRegression, GaussianNB, DecisionTreeClassifier, DecisionTreeRegressor, RandomForestClassifier, RandomForestRegressor |
+| `UnsupervisedEstimator` | `fit(x, sample_weight)` `score(x, sample_weight)` | KMeans, DBSCAN |
 
 `Tunable` is the hyperparameter half on its own — what a search needs and
 nothing more. It exists because koala's transformers carry real
@@ -922,7 +962,7 @@ served = Persist.loads(text)        # a fitted Pipeline, ready to predict
 served.predict(x_test)              # exactly what `pipe` would have said
 ```
 
-Every fitted koala object round-trips: all seven estimators, the three
+Every fitted koala object round-trips: every estimator, the
 transformers, and a `Pipeline` of any of them nested to any depth —
 including a decision tree's recursive node structure, which needs no
 special case because a node is a plain hash and the format encodes
@@ -983,6 +1023,302 @@ Persist.loads(lin_text.split("o LinearRegression")
 
 See `spec/persist_spec.w` for the fit / dump / load / compare proof on
 every estimator, on both engines.
+
+## Regularized linear models: Lasso and ElasticNet
+
+`LinearRegression` already carries OLS (`alpha = 0`, Householder QR) and
+ridge (`alpha > 0`, an L2 penalty on the normal equations); both are
+closed-form because L2 is differentiable everywhere. `Lasso` (L1) and
+`ElasticNet` (L1 + L2) complete the family with the one thing ridge
+cannot do. L1 is not differentiable at zero, and that kink is the whole
+point: it makes the optimum *land on* zero for a whole set of
+coefficients rather than merely near it. Ridge hands an irrelevant
+feature a small nonzero slope forever; lasso hands it 0, and the feature
+is gone. That is feature **selection**, a genuinely different capability
+from shrinkage — which is why it is its own estimator and not another
+branch of `LinearRegression`.
+
+### Where ridge shrinks, lasso selects
+
+On a design whose second feature is unrelated scatter, `alpha = 0.2`
+drives that coefficient to *exactly* zero while the signal survives —
+where ridge at the equivalent strength only shrinks it:
+
+```tungsten
+x = [[1, 5], [2, 3], [3, 8], [4, 1], [5, 9], [6, 2], [7, 6], [8, 4]]
+y = [3, 5, 8, 9, 11, 14, 15, 17]                # feature 1 is noise
+
+Lasso.new(1.to_f / 5.to_f).fit(x, y).coefficients               # => [1.9619, 0]
+LinearRegression.new(8.to_f / 5.to_f).fit(x, y).coefficients[1]  # => 0.0074742
+```
+
+The zero is a literal `0.to_f`, not a small number that prints as zero —
+`spec/regularized_linear_spec.w` asserts `== 0.to_f`, exactly. The
+surviving coefficient is `1.96190476190476`, scikit-learn's value to
+twelve digits; ridge at the same effective strength (koala's ridge alpha
+is `n * alpha = 8 * 0.2 = 1.6`) leaves the junk feature at
+`0.00747420194811457` — smaller than OLS, still there, and still there
+for every alpha short of infinity. Shrinkage is not selection.
+
+### The algorithm, and what `alpha` means
+
+The solver is cyclic coordinate descent with soft-thresholding: holding
+every other coefficient fixed, the objective in one coefficient is a
+one-dimensional quadratic plus `lambda * |w_j|`, whose exact minimizer is
+a closed-form soft-threshold. There is no learning rate, no step size, no
+random coordinate order and no seed, so a fit is determinate and
+byte-identical on both engines. The intercept is never penalized: `x`
+and `y` are centered by their (weighted) means, descent runs with no
+intercept column, and the bias is read back afterwards — the closed-form
+elimination of an unpenalized intercept, not an approximation.
+
+The objective is scikit-learn's term for term, *including* the
+`1/(2 n_samples)` on the data-fit half, so koala's `alpha` means exactly
+what scikit-learn's does and every reference number in the spec is a
+scikit-learn 1.9 value. It does **not** mean the same thing as ridge's
+alpha, because ridge does not scale its data term. Multiplying the
+ElasticNet objective through by `2W` gives the exact bridge:
+
+    ElasticNet.new(a, 0)  ==  LinearRegression.new(n * a)
+
+with `n` the sample count (`W`, the total sample weight, when weighted) —
+scikit-learn's own relationship between its `ElasticNet` and `Ridge`, and
+the spec asserts both halves agree with sklearn. `Lasso.new(a)` is
+`ElasticNet.new(a, 1)` running the identical solver; `Lasso` exists for
+its name, its l1_ratio-free `params` surface and its persist tag, exactly
+as scikit-learn's `Lasso` is an `ElasticNet` pinned at `l1_ratio = 1`.
+
+### p > n, and what is refused
+
+`fit` returns nil — never raises — for an empty or ragged `x`, a
+mismatched `y`, an unusable weight vector, a negative `alpha`, an
+`l1_ratio` outside `[0, 1]`, `max_iter < 1`, or a negative `tol`. It does
+**not** refuse collinear features or fewer samples than features: with
+`alpha > 0` the penalized objective is strictly convex where it matters,
+and `p > n` is the case lasso was invented for — where OLS must return
+nil, lasso answers a sparse fit (one surviving feature of five, in the
+spec's `p > n` case). `sample_weight` is exact: an integer weight vector
+is the same model as duplicating each row that many times, because the
+`1/(2W)` normalization divides by the total weight, not the row count.
+
+## Random forests
+
+`RandomForestClassifier` and `RandomForestRegressor` are koala's first
+**ensemble** learners: where `lib/decision_tree.w` grows one CART tree, a
+forest grows many and averages them. A fully grown tree has low bias and
+enormous variance — it will carve a box around a single mislabelled row —
+and variance is exactly what averaging destroys. But averaging *identical*
+trees destroys nothing, so the trees have to disagree, and a forest
+manufactures disagreement twice:
+
+- **bootstrap** — each tree is grown on `n` rows drawn with replacement
+  from the `n` training rows, so each sees a different ~63% of them;
+- **per-split feature subsampling** — at *every* node, only a random
+  `max_features`-sized subset of the features is even considered.
+
+The second is what makes it a forest rather than N copies. Bagging alone
+leaves one dominant feature at the root of nearly every tree, so the
+trees stay correlated and the mean barely moves; hiding that feature from
+a random majority of the nodes forces the weaker features into play, and
+decorrelated errors are what a mean can actually cancel.
+
+### The bootstrap is a `sample_weight` vector
+
+Drawing row `i` exactly `n_i` times and fitting is, for this tree
+machinery, the *identical* tree that `sample_weight[i] = n_i` produces —
+every weighted term is the unweighted term times an integer (koala's
+definition of weight correctness). So a resample costs one float vector
+rather than a copy of the data, the caller's own `sample_weight` composes
+by simple multiplication, and the rows drawn *zero* times fall out as
+that tree's **out-of-bag** set for free. Predicting each row with only
+the trees that did not see it gives `oob_score` — a held-out accuracy
+(classifier) or R² (regressor) over the whole training set with no split,
+no second fit and no cross-validation loop. It is nil when nothing was
+left out (`bootstrap: false`).
+
+### One tree, node for node
+
+Switch off *both* sources of randomness and grow a single tree, and the
+result is not merely similar to a `DecisionTreeClassifier` — it is the
+same tree, node for node, because it runs the same `DecisionTree.build`
+over the same config:
+
+```tungsten
+RandomForestClassifier.new(1, :all, nil, 1, 0, nil, false)
+# ... predicts exactly what DecisionTreeClassifier.new does
+```
+
+`spec/random_forest_spec.w` asserts that against the *rendered* tree, not
+just the predictions: if bagging, subsampling and averaging are wired
+correctly, turning them all off has to land back on the tree they were
+built from. On noisy training data scored against a clean test set the
+ensemble earns its keep — the classifier goes `0.75 → 0.875` and the
+regressor R² `0.419 → 0.597` against their own single deep tree, which
+memorizes the flipped rows a forest votes away.
+
+### Hyperparameters (seven, all tunable `params`)
+
+`n_estimators`, `max_features`, `max_depth`, `min_samples_leaf`, `seed`,
+`criterion` and `bootstrap`. `max_features` is a symbol or an integer,
+never a fraction — `:sqrt` (the classifier default), `:log2`, `:all`
+(plain bagging, and the regressor default), or a count clamped to
+`1..n_features` — because a float hyperparameter cannot survive `params`,
+`with_params`, a grid search and a Persist payload by decimal text, and
+the symbols mean what scikit-learn's strings mean. Every draw comes from
+one seeded MINSTD stream (the one `Splitter` and `KFold` use), so the same
+seed and rows give a byte-identical forest — same thresholds, same
+predictions, same payload — on both engines; a nil seed is the fixed
+default stream, not entropy, because a forest nobody can reproduce is not
+a model. `min_samples_leaf` is clamped in the constructor so
+`with_params(params)` is the identity, while `n_estimators < 1`, an
+unknown `criterion` or an unknown `max_features` make `fit` return nil
+rather than silently fall back. They round-trip through `with_params`, so
+`GridSearch` tunes them and a `Pipeline` exposes them as
+`"forest.n_estimators"`.
+
+## Principal component analysis
+
+`PCA` is koala's dimensionality reduction — a *transformer*, so it slots
+into a `Pipeline` ahead of any estimator. `fit` mean-centers the data and
+extracts the top-k orthonormal directions of greatest variance;
+`transform` projects rows onto them into a DataFrame of `pc0, pc1, …`.
+
+### One-sided Jacobi, not the covariance
+
+The textbook route forms the covariance `C = X_c^T X_c / (n - 1)` and
+eigendecomposes it — and that is the trap the Householder least-squares
+work already escaped in `lib/linalg.w`. Forming `X^T X` squares the
+condition number: a design with `cond(X) = 1e6` hands the eigensolver a
+matrix at `1e12` and burns twelve of f64's ~sixteen digits before the
+first rotation, and the damage lands exactly on the small trailing
+components PCA exists to reveal. So koala applies the orthogonalization to
+`X_c` *itself* — one-sided Jacobi, the classical high-relative-accuracy
+SVD (Demmel & Veselić): plane rotations sweep across pairs of columns
+until every pair is orthogonal, the singular values come out as the
+converged column norms, and squaring happens only inside the choice of a
+rotation angle, never in a reported quantity.
+
+That is measured, not asserted. `spec/pca_spec.w` fits a design whose two
+variances are 18 decades apart: forming the covariance rounds the smaller
+back to *exactly zero*, while one-sided Jacobi on the same f64 data
+recovers it to about eight significant digits — eight correct digits
+against none, on both engines. Jacobi also survives rank deficiency where
+a non-pivoting QR (`LinAlg.qr`) returns nil: a constant column, a
+duplicated feature and a rank-1 cloud are ordinary inputs, a dependent
+column simply converges to a zero norm, and the components stay *exactly*
+orthonormal at any rank because they are a product of plane rotations on
+the identity.
+
+### Signs, variances, and whitening
+
+An eigenvector is defined only up to sign, so an unpinned sign falls out
+of whatever rounding the rotations produced and differs run to run. koala
+pins it on the *loadings*: every component is negated, if needed, so its
+largest-magnitude entry is positive (ties to the lowest index). Because
+the rule reads only `components`, not the sample order, a re-fit on
+shuffled rows is bit-identical. (scikit-learn pins the sign on the scores
+instead; the two agree on most data and are exact negations where they
+differ — documented, and the spec compares against sklearn with koala's
+rule applied.)
+
+`explained_variance` is `sigma^2 / (n - 1)`, the same denominator
+`Stats.var` and scikit-learn use, so an axis-aligned dataset reports its
+own column variances. `explained_variance_ratio` divides by the *whole*
+trace — the variance over all `min(n, p)` components — so a full-rank
+fit's ratios sum to 1 and a truncated fit reports the fraction of the
+original variance it kept. `whiten: true` divides each score column by
+`sqrt(explained_variance)` for unit-variance, decorrelated output, and
+`inverse_transform` undoes it exactly (a zero-variance component is left
+alone, never divided by zero).
+
+```tungsten
+pca = PCA.new(2)
+scores = pca.fit_transform([[0 - 2, 1], [0 - 1, 0 - 1], [0, 0], [1, 0 - 1], [2, 1]])
+scores.column_names               # => ["pc0", "pc1"]
+pca.explained_variance            # => Vector [2.5, 1]
+pca.explained_variance_ratio      # => Vector [0.714286, 0.285714]
+```
+
+`n_components` is the one tunable knob; `params` reports it and `whiten`,
+while the mean, components and variances answer to `learned_params`,
+because `params` means "what you set" everywhere in koala. A PCA named
+`:pca` in a chain therefore contributes `"pca.n_components"` /
+`"pca.whiten"` to a `GridSearch` with no code in `pipeline.w` or
+`grid_search.w` aware PCA exists.
+
+## Density clustering: DBSCAN
+
+`DBSCAN` is koala's second unsupervised learner, after `KMeans`, and its
+complement. `KMeans` needs `k` up front, minimizes squared distance to
+`k` centroids — so it can only carve space into `k` *convex* cells — and
+forces every row into a cluster, so one far point drags a centroid and
+there is no way to say "noise". DBSCAN drops all three assumptions: it
+grows clusters by **density** (a region is a cluster when points are
+packed closely enough, whatever *shape* it has), discovers the cluster
+count from the data, and labels anything not dense enough `-1`. The price
+is a different pair of knobs — `eps` (how close counts as close) and
+`min_samples` (how many neighbours make a region dense) — and no notion
+of a cluster centre at all. `eps` has no default on purpose: it is the one
+number DBSCAN's behaviour turns on, and scikit-learn's `0.5` is wrong for
+almost every dataset.
+
+### The case KMeans cannot solve
+
+Two concentric rings share a centroid, so no assignment of ring-to-cluster
+is a k-means fixed point — the two centroids would coincide and every
+distance would tie — and KMeans provably slices *across* both rings
+instead. DBSCAN separates them exactly, because each ring is
+density-connected to itself and to nothing else. The honest caveat,
+asserted in `spec/dbscan_spec.w` rather than hidden: the silhouette
+rewards compact, roughly spherical clusters, so on the rings it *prefers*
+the wrong answer — it scores KMeans's slicing split `0.295` over DBSCAN's
+correct inner/outer split `0.083`. `score` is a defensible default
+objective (a real internal index, so `eps` and `min_samples` are
+searchable), not an oracle.
+
+```tungsten
+rows = [[0, 0], [0, 1], [1, 0], [1, 1], [10, 10], [10, 11], [11, 10], [11, 11], [50, 50]]
+db = DBSCAN.new(2, 3)                     # eps = 2, min_samples = 3
+db.fit_predict(rows)                      # => [0, 0, 0, 0, 1, 1, 1, 1, -1]
+db.n_clusters                             # => 2   discovered, not supplied
+db.core_sample_indices                    # => [0, 1, 2, 3, 4, 5, 6, 7]
+```
+
+### Determinism, and two documented sklearn divergences
+
+DBSCAN's output is famously order-sensitive on *border* rows — a non-core
+row inside two clusters' reach could go either way. koala pins it: cluster
+numbering follows the ascending index of each component's first core
+sample, and a border row joins the **lowest-numbered** adjacent cluster
+(scikit-learn's answer too, stated as a rule about the output). Core
+samples are never ambiguous, so a fit is a pure function of the row order,
+byte-identical across runs and engines; permuting the input rows may move
+a border row, exactly as in scikit-learn.
+
+Two deviations from scikit-learn are deliberate and spec'd:
+
+- **`predict` is defined**, where scikit-learn offers only `fit_predict`.
+  A density model has no natural out-of-sample rule, so rather than fake
+  one, koala states it: each row goes to the cluster of the nearest core
+  sample within `eps`, else `-1`. A training core or noise row always
+  agrees with `labels`; a border row can disagree (`fit` gives it the
+  lowest-numbered adjacent cluster, `predict` the nearest), and that gap
+  is called out rather than hidden. `fit_predict` returns the real DBSCAN
+  answer for the training set and is the method to use there.
+- **A zero-weight row can never be core.** A weight is how many times a
+  row counts toward a neighbourhood, so an integer vector equals row
+  duplication. scikit-learn derives core-ness from the weighted sum alone,
+  so a weight-0 row can still be core and bridge two clusters into one —
+  which the dataset with that row *deleted* would never do. koala refuses
+  that: a row not in the sample must not change the answer, so weight 0
+  drops the row (though it is still labelled, one entry per input row).
+  With all-positive weights the two agree byte for byte.
+
+`metric` is `"euclidean"` (default), `"manhattan"` or `"chebyshev"`, a
+real hyperparameter a search can vary; euclidean stays on squared
+distances so integer inputs are exact. An empty or ragged `x`, `eps <= 0`,
+`min_samples < 1`, an unknown metric or an unusable weight vector make
+`fit` return nil.
 
 ## The train/test workflow, end to end
 

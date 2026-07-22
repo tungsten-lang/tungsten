@@ -662,6 +662,72 @@ use koala
     self.check("silhouette nil misaligned", Metrics.silhouette_score([0, 1], [0]) == nil, true)
     self.check("silhouette nil empty", Metrics.silhouette_score([], []) == nil, true)
 
+    # --- sample weights: the framework-free mirror of
+    #     spec/sample_weight_spec.w. The property that matters is that an
+    #     INTEGER weight vector is indistinguishable from duplicating each
+    #     row that many times, so each estimator below is checked against
+    #     its own duplicated dataset.
+    self.check("weights nil for wrong length", Estimator.weight_values([1, 1], 3) == nil, true)
+    self.check("weights nil for negative", Estimator.weight_values([1, 0 - 1, 1], 3) == nil, true)
+    self.check("weights nil for empty", Estimator.weight_values([], 3) == nil, true)
+    self.check("weights nil for all-zero", Estimator.weight_values([0, 0, 0], 3) == nil, true)
+    self.check("weights keep a single zero", Estimator.weight_values([0, 1, 2], 3).join(","), "0,1,2")
+    self.check("weight total falls back to the count", Estimator.weight_total(nil, 4), 4)
+    self.check("weighted accuracy", Metrics.accuracy([1, 0, 1], [1, 0, 0], [2, 1, 1]), "0.75")
+    self.check("weighted mse", Metrics.mse([1, 2, 3], [1, 2, 4], [2, 1, 1]), "0.25")
+    self.check("weighted r2 weights its baseline", Metrics.r2([1, 2, 3], [1, 2, 4], [2, 1, 1]), "0.833333")
+    self.check("weighted precision", Metrics.precision([1, 0, 1], [1, 1, 0], 1, [1, 3, 1]), "0.5")
+    self.check("weighted recall", Metrics.recall([1, 0, 1], [1, 1, 0], 1, [1, 3, 1]), "0.25")
+    self.check("metric nil for bad weights", Metrics.accuracy([1, 0], [1, 0], [1, 1, 1]) == nil, true)
+
+    sw_x = [[0], [1], [2], [3]]
+    sw_y = [0, 1, 2, 5]
+    sw_dup_x = [[0], [0], [1], [2], [3]]
+    sw_dup_y = [0, 0, 1, 2, 5]
+    sw_w = LinearRegression.new
+    sw_w.fit(sw_x, sw_y, [2, 1, 1, 1])
+    sw_d = LinearRegression.new
+    sw_d.fit(sw_dup_x, sw_dup_y)
+    self.check("WLS == duplication (slope)", LinAlg.fabs(sw_w.coefficients[0] - sw_d.coefficients[0]) < 1.to_f / 1000000000.to_f, true)
+    self.check("WLS == duplication (intercept)", LinAlg.fabs(sw_w.intercept - sw_d.intercept) < 1.to_f / 1000000000.to_f, true)
+    sw_ones = LinearRegression.new
+    sw_ones.fit(sw_x, sw_y, [1, 1, 1, 1])
+    sw_plain = LinearRegression.new
+    sw_plain.fit(sw_x, sw_y)
+    self.check("all-1s weights are a no-op", sw_ones.coefficients, sw_plain.coefficients.to_s)
+    self.check("bad weights leave fit nil", LinearRegression.new.fit(sw_x, sw_y, [1, 1]) == nil, true)
+
+    # a leaf takes the HEAVIEST class, not the most numerous
+    sw_tree = DecisionTreeClassifier.new(0)
+    sw_tree.fit([[0], [1], [2]], [:a, :b, :b], [3, 1, 1])
+    self.check("weighted leaf takes the heaviest class", sw_tree.predict([[0]]).join(","), "a")
+    self.check("weighted leaf proba over total weight", sw_tree.predict_proba([[0]], :a).join(","), "0.6")
+
+    # a regressor leaf predicts the weighted mean; k-means the weighted centroid
+    sw_reg = DecisionTreeRegressor.new(0)
+    sw_reg.fit([[0], [1]], [1, 5], [3, 1])
+    self.check("weighted leaf mean", sw_reg.predict([[0]]).join(","), "2")
+    sw_km = KMeans.new(1)
+    sw_km.fit([[0], [10]], [3, 1])
+    self.check("weighted centroid", sw_km.centroids[0][0], "2.5")
+    self.check("weighted inertia", sw_km.inertia, "75")
+
+    # GaussianNB reports class_counts as total WEIGHT
+    sw_nb = GaussianNB.new
+    sw_nb.fit([[1], [2], [8], [9]], [:lo, :lo, :hi, :hi], [3, 1, 1, 1])
+    self.check("weighted class counts", sw_nb.class_counts.join(","), "4,2")
+
+    # KNNClassifier refuses weights outright — never a silently unweighted fit
+    self.check("knn declines weights", KNNClassifier.new(1).supports_sample_weight?, false)
+    self.check("knn fit nil with weights", KNNClassifier.new(1).fit(sw_x, sw_y, [1, 1, 1, 1]) == nil, true)
+    self.check("linreg accepts weights", LinearRegression.new.supports_sample_weight?, true)
+
+    # cross-validation subsets them per fold
+    sw_cv = CrossValidation.cross_val_score(LinearRegression.new, sw_x, sw_y, 2, nil, [2, 1, 1, 1])
+    self.check("cv threads weights", sw_cv.size, 2)
+    self.check("cv nil for bad weights", CrossValidation.cross_val_score(LinearRegression.new, sw_x, sw_y, 2, nil, [1, 1]) == nil, true)
+    self.check("cv nil folds when the estimator refuses", CrossValidation.cross_val_mean(KNNClassifier.new(1), sw_x, sw_y, 2, nil, [2, 1, 1, 1]) == nil, true)
+
 t = KoalaSmoke.new
 t.run
 if t.failures > 0

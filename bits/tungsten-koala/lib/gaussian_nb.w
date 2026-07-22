@@ -116,6 +116,11 @@
   -> supervised?
     true
 
+  # Every fitted quantity is a mean or a count, so every one of them has
+  # a weighted form — see fit.
+  -> supports_sample_weight?
+    true
+
   # The hyperparameters a search varies — never the learned priors/means.
   -> params
     { var_smoothing: @var_smoothing }
@@ -129,36 +134,58 @@
   -> .two_pi
     ~6.283185307179586
 
-  # Population mean of every column of rows (nf columns).
-  -> .column_means(rows, nf)
-    nd = rows.size.to_f
+  # Population mean of every column of rows (nf columns), weighted per row
+  # when `wts` is given: sum_i w_i x_ij / sum_i w_i.
+  -> .column_means(rows, nf, wts)
+    nd = Estimator.weight_total(wts, rows.size).to_f
     out = []
     nf.times -> (j)
       total = 0.to_f
+      i = 0
       rows.each -> (r)
-        total += r[j].to_f
+        if wts == nil
+          total += r[j].to_f
+        else
+          total += r[j].to_f * wts[i]
+        i += 1
       out.push(total / nd)
     out
 
   # Population (n denominator) variance of every column about means, with
-  # eps added to each — numpy's np.var plus scikit-learn's epsilon_.
-  -> .column_vars(rows, means, nf, eps)
-    nd = rows.size.to_f
+  # eps added to each — numpy's np.var plus scikit-learn's epsilon_ — and
+  # weighted per row when `wts` is given (the weighted second moment about
+  # the weighted mean, over sum(w)).
+  -> .column_vars(rows, means, nf, eps, wts)
+    nd = Estimator.weight_total(wts, rows.size).to_f
     out = []
     nf.times -> (j)
       m = means[j]
       total = 0.to_f
+      i = 0
       rows.each -> (r)
         d = r[j].to_f - m
-        total += d * d
+        if wts == nil
+          total += d * d
+        else
+          total += (d * d) * wts[i]
+        i += 1
       out.push(total / nd + eps)
     out
 
   # The largest per-feature population variance over all rows — the base
   # of epsilon (scikit-learn's np.var(X, axis=0).max()).
-  -> .max_column_var(rows, nf)
+  #
+  # DELIBERATE DEVIATION: koala computes this from the WEIGHTED column
+  # variance, where scikit-learn uses the unweighted one (its
+  # `np.var(X, axis=0).max()` never sees sample_weight). sklearn's choice
+  # makes epsilon_ differ between a weighted fit and the equivalent
+  # row-duplicated fit, so the two models disagree in the ~1e-9th digit of
+  # every variance — tiny, but it breaks the one property worth
+  # guaranteeing here, that an integer weight vector IS duplication.
+  # Weighting it costs nothing and restores the equivalence exactly.
+  -> .max_column_var(rows, nf, wts)
     zero = 0.to_f
-    cvars = GaussianNB.column_vars(rows, GaussianNB.column_means(rows, nf), nf, zero)
+    cvars = GaussianNB.column_vars(rows, GaussianNB.column_means(rows, nf, wts), nf, zero, wts)
     best = zero
     cvars.each -> (v)
       best = v if v > best
@@ -220,8 +247,19 @@
   # Learn class priors, per-class per-feature means and (smoothed)
   # variances from x/y in one closed-form pass. Returns self, or nil —
   # fitted? stays false — when the shapes are unusable (empty x, ragged
-  # rows, y size mismatch).
-  -> fit(x, y)
+  # rows, y size mismatch, an unusable sample_weight).
+  #
+  # SAMPLE WEIGHTS are natural here because every fitted quantity is a
+  # count or a mean: `class_counts` becomes each class's total WEIGHT
+  # (a float, scikit-learn's class_count_ under sample_weight),
+  # `class_priors` divides it by the total weight, and the per-class means
+  # and variances become weighted means and weighted second moments about
+  # them. Nothing about the classification rule changes.
+  #
+  # Zero-weight rows are dropped first, so a class that exists only in
+  # zero-weight rows does not exist at all — which is what the duplicated
+  # dataset says too, and avoids a log(0) prior.
+  -> fit(x, y, sample_weight = nil)
     rows = Estimator.feature_rows(x)
     labels = Estimator.target_values(y)
     ok = rows != nil && labels != nil
@@ -231,11 +269,19 @@
       width = rows[0].size
       rows.each -> (r)
         ok = false if r.size != width
+    wts = nil
+    wts = Estimator.weight_values(sample_weight, rows.size) if ok && sample_weight != nil
+    ok = false if sample_weight != nil && wts == nil
+    if ok && wts != nil
+      trimmed = Estimator.drop_zero_weights(rows, labels, wts)
+      rows = trimmed[:rows]
+      labels = trimmed[:targets]
+      wts = trimmed[:weights]
     out = nil
     if ok
       nf = rows[0].size
-      nd = rows.size.to_f
-      eps = @var_smoothing * GaussianNB.max_column_var(rows, nf)
+      nd = Estimator.weight_total(wts, rows.size).to_f
+      eps = @var_smoothing * GaussianNB.max_column_var(rows, nf, wts)
       eps = @var_smoothing if eps <= 0.to_f
       classes = []
       labels.each -> (l)
@@ -246,16 +292,21 @@
       sigmas = []
       classes.each -> (c)
         crows = []
+        cwts = []
         i = 0
         labels.each -> (l)
-          crows.push(rows[i]) if l == c
+          if l == c
+            crows.push(rows[i])
+            cwts.push(wts[i]) if wts != nil
           i += 1
-        cn = crows.size
+        cw = nil
+        cw = cwts if wts != nil
+        cn = Estimator.weight_total(cw, crows.size)
         counts.push(cn)
         priors.push(cn.to_f / nd)
-        m = GaussianNB.column_means(crows, nf)
+        m = GaussianNB.column_means(crows, nf, cw)
         mus.push(m)
-        sigmas.push(GaussianNB.column_vars(crows, m, nf, eps))
+        sigmas.push(GaussianNB.column_vars(crows, m, nf, eps, cw))
       @classes = classes
       @class_counts = counts
       @class_priors = priors
@@ -328,12 +379,17 @@
       out = preds
     out
 
-  # Accuracy (Metrics.accuracy) of self's predictions on x against y; nil
-  # before fit or when the shapes do not line up.
-  -> score(x, y)
+  # Accuracy (Metrics.accuracy) of self's predictions on x against y,
+  # weighted when sample_weight is given; nil before fit, when the shapes
+  # do not line up, or when the weights are unusable.
+  -> score(x, y, sample_weight = nil)
     preds = self.predict(x)
     yvals = Estimator.target_values(y)
     out = nil
     if preds != nil && yvals != nil
-      out = Metrics.accuracy(preds, yvals) if preds.size == yvals.size && preds.size > 0
+      ok = preds.size == yvals.size && preds.size > 0
+      wts = nil
+      wts = Estimator.weight_values(sample_weight, preds.size) if ok && sample_weight != nil
+      ok = false if sample_weight != nil && wts == nil
+      out = Metrics.accuracy(preds, yvals, wts) if ok
     out

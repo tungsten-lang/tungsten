@@ -97,6 +97,11 @@
   -> supervised?
     false
 
+  # A centroid is a MEAN and inertia is a SUM, so both have exact
+  # weighted forms — see fit.
+  -> supports_sample_weight?
+    true
+
   # The hyperparameters a search varies — never the learned centroids.
   -> params
     { k: @k, seed: @seed, max_iter: @max_iter }
@@ -110,8 +115,25 @@
 
   # Learn k centroids and the per-row cluster assignment from x. Returns
   # self, or nil — fitted? stays false — for unusable shapes (empty x,
-  # ragged rows, k < 1, or fewer rows than clusters).
-  -> fit(x)
+  # ragged rows, k < 1, fewer rows than clusters, or an unusable
+  # sample_weight).
+  #
+  # SAMPLE WEIGHTS touch the two places k-means adds things up: a centroid
+  # becomes the WEIGHTED mean of its assigned rows, and inertia the
+  # weighted sum of squared distances. The ASSIGN step is untouched — a
+  # row's nearest centroid does not depend on how much that row counts —
+  # so Lloyd's convergence argument survives unchanged.
+  #
+  # Zero-weight rows are NOT dropped here (unlike the supervised
+  # estimators): `labels` is documented as one entry per input row, and
+  # silently shortening it would be a worse surprise than carrying a row
+  # that contributes nothing. Instead they are excluded where their
+  # presence would actually change the answer — they never SEED a
+  # centroid (init_centroids skips them, so a weighted fit initializes
+  # exactly as the row-duplicated one does) and they add nothing to a
+  # centroid mean or to inertia. They are still assigned a label, which is
+  # simply "the cluster this row would belong to".
+  -> fit(x, sample_weight = nil)
     rows = Estimator.feature_rows(x)
     ok = rows != nil
     ok = rows.size > 0 if ok
@@ -122,30 +144,34 @@
       width0 = rows[0].size
       rows.each -> (r)
         ok = false if r.size != width0
+    wts = nil
+    wts = Estimator.weight_values(sample_weight, rows.size) if ok && sample_weight != nil
+    ok = false if sample_weight != nil && wts == nil
+    if ok && wts != nil
+      # k clusters need k rows that are actually IN the sample.
+      positive = 0
+      wts.each -> (v)
+        positive += 1 if v > 0.to_f
+      ok = false if positive < @k
     out = nil
     if ok
       kk = @k
       sd = @seed
       width = rows[0].size
       mi = @max_iter
-      centers = KMeans.init_centroids(rows, kk, sd)
+      centers = KMeans.init_centroids(rows, kk, sd, wts)
       labels = KMeans.assign_step(rows, centers)
       iters = 0
       converged = false
       mi.times -> (t)
         if !converged
-          nc = KMeans.update_step(rows, labels, centers, kk, width)
+          nc = KMeans.update_step(rows, labels, centers, kk, width, wts)
           nl = KMeans.assign_step(rows, nc)
           centers = nc
           iters = iters + 1
           converged = true if KMeans.labels_equal(labels, nl)
           labels = nl
-      total = 0.to_f
-      idx = 0
-      rows.each -> (r)
-        lab = labels[idx]
-        total += KMeans.sq_dist(r, centers[lab])
-        idx += 1
+      total = KMeans.inertia_of(rows, labels, centers, wts)
       @centroids = centers
       @labels = labels
       @inertia = total
@@ -181,40 +207,58 @@
     out
 
   # sklearn's KMeans.score: the NEGATED within-cluster sum of squares of
-  # x under the fitted centroids (greater is better, 0 is perfect). nil
-  # before fit or on a width mismatch.
-  -> score(x)
+  # x under the fitted centroids (greater is better, 0 is perfect), each
+  # row's contribution scaled by its weight when sample_weight is given.
+  # nil before fit, on a width mismatch, or for an unusable weight vector.
+  -> score(x, sample_weight = nil)
     labs = self.predict(x)
     out = nil
     if labs != nil
       rows = Estimator.feature_rows(x)
-      cs = @centroids
-      total = 0.to_f
-      idx = 0
-      rows.each -> (r)
-        lab = labs[idx]
-        total += KMeans.sq_dist(r, cs[lab])
-        idx += 1
-      out = 0.to_f - total
+      ok = true
+      wts = nil
+      wts = Estimator.weight_values(sample_weight, rows.size) if sample_weight != nil
+      ok = false if sample_weight != nil && wts == nil
+      out = 0.to_f - KMeans.inertia_of(rows, labs, @centroids, wts) if ok
     out
 
   # --- static helpers (no @ivars, so they are safe inside blocks) ---
 
+  # The within-cluster sum of squared distances of `rows` to their
+  # assigned centroids, each term scaled by that row's weight (1 when
+  # `wts` is nil). Shared by fit's `inertia` and score.
+  -> .inertia_of(rows, labels, centers, wts)
+    total = 0.to_f
+    idx = 0
+    rows.each -> (r)
+      wt = 1.to_f
+      wt = wts[idx] if wts != nil
+      total += KMeans.sq_dist(r, centers[labels[idx]]) * wt
+      idx += 1
+    total
+
   # Initial centroids: the first k DISTINCT rows of the (optionally
-  # seed-shuffled) index order. A degenerate input with fewer than k
-  # distinct rows falls back to filling from the order with repeats.
-  -> .init_centroids(rows, k, seed)
+  # seed-shuffled) index order, skipping any row whose weight is zero —
+  # such a row is not in the sample, so it must not seed a cluster, and
+  # skipping it is what makes a weighted init identical to the
+  # row-duplicated one. A degenerate input with fewer than k distinct rows
+  # falls back to filling from the order with repeats.
+  -> .init_centroids(rows, k, seed, wts)
     order = Splitter.indices(rows.size, seed)
     centers = []
     order.each -> (ix)
       pt = rows[ix]
-      if centers.size < k
+      live = true
+      live = wts[ix] > 0.to_f if wts != nil
+      if centers.size < k && live
         dup = false
         centers.each -> (c)
           dup = true if KMeans.rows_equal(c, pt)
         centers.push(KMeans.to_floats(pt)) if !dup
     order.each -> (ix)
-      centers.push(KMeans.to_floats(rows[ix])) if centers.size < k
+      spare = true
+      spare = wts[ix] > 0.to_f if wts != nil
+      centers.push(KMeans.to_floats(rows[ix])) if centers.size < k && spare
     centers
 
   # Assign every row to its nearest centroid.
@@ -237,29 +281,32 @@
       ci += 1
     best
 
-  # Recompute each centroid as the mean of its assigned rows; an empty
-  # cluster keeps its previous centroid.
-  -> .update_step(rows, labels, centers, k, width)
+  # Recompute each centroid as the WEIGHTED mean of its assigned rows (a
+  # weight of 1 multiplies exactly, so this is the plain mean when `wts`
+  # is nil); a cluster holding no weight at all keeps its previous
+  # centroid.
+  -> .update_step(rows, labels, centers, k, width, wts)
     out = []
     k.times -> (c)
-      cnt = 0
+      cnt = 0.to_f
       acc = []
       width.times -> (w)
         acc.push(0.to_f)
       idx = 0
       rows.each -> (r)
         if labels[idx] == c
-          cnt += 1
+          wt = 1.to_f
+          wt = wts[idx] if wts != nil
+          cnt += wt
           w2 = 0
           r.each -> (v)
-            acc[w2] = acc[w2] + v.to_f
+            acc[w2] = acc[w2] + v.to_f * wt
             w2 += 1
         idx += 1
-      if cnt > 0
+      if cnt > 0.to_f
         row = []
-        cf = cnt.to_f
         width.times -> (w)
-          row.push(acc[w] / cf)
+          row.push(acc[w] / cnt)
         out.push(row)
       else
         out.push(centers[c])

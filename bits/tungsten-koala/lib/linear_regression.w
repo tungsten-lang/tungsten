@@ -92,6 +92,10 @@
   -> supervised?
     true
 
+  # Weighted least squares is exact here — see fit.
+  -> supports_sample_weight?
+    true
+
   # The hyperparameters a search varies — never the learned coefficients.
   -> params
     { alpha: @alpha }
@@ -103,8 +107,32 @@
 
   # Learn coefficients and intercept from x/y. Returns self, or nil —
   # fitted? stays false — when the shapes are unusable (empty x,
-  # ragged rows, y size mismatch) or X^T X is singular.
-  -> fit(x, y)
+  # ragged rows, y size mismatch, an unusable weight vector) or X^T X is
+  # singular.
+  #
+  # WEIGHTED LEAST SQUARES falls out of the QR path for free. Minimizing
+  # sum_i w_i (y_i - x_i·beta)^2 is EXACTLY ordinary least squares on the
+  # rescaled problem
+  #
+  #     X' = diag(sqrt(w)) X      y' = diag(sqrt(w)) y
+  #
+  # because |X'beta - y'|^2 = sum_i w_i (x_i·beta - y_i)^2 term by term.
+  # So fit scales each design row and its target by sqrt(w) and hands the
+  # result to the SAME LinAlg.lstsq — no normal equations reintroduced,
+  # the squared condition number still avoided, and the ridge branch
+  # inherits it too: forming X'^T X' from the scaled design gives
+  # X^T W X exactly, so the penalized system becomes
+  # (X^T W X + alpha*I') beta = X^T W y, which is what scikit-learn's
+  # Ridge does (it rescales by sqrt(w) and leaves alpha alone).
+  #
+  # An integer weight vector is therefore indistinguishable from row
+  # duplication: sqrt(2)^2 = 2 puts exactly two copies of a row into
+  # X^T W X. Zero-weight rows are dropped before the design is built
+  # (Estimator.drop_zero_weights) rather than being scaled to a zero row —
+  # a zero row would add no rank but would still inflate the row count
+  # that lstsq's nr >= nc test reads, so dropping is both cheaper and the
+  # only answer that keeps "weight 0 == not in the sample" true.
+  -> fit(x, y, sample_weight = nil)
     rows = Estimator.feature_rows(x)
     yvals = Estimator.target_values(y)
     ok = rows != nil && yvals != nil
@@ -114,15 +142,39 @@
       width = rows[0].size
       rows.each -> (r)
         ok = false if r.size != width
+    wts = nil
+    wts = Estimator.weight_values(sample_weight, rows.size) if ok && sample_weight != nil
+    ok = false if sample_weight != nil && wts == nil
+    if ok && wts != nil
+      trimmed = Estimator.drop_zero_weights(rows, yvals, wts)
+      rows = trimmed[:rows]
+      yvals = trimmed[:targets]
+      wts = trimmed[:weights]
     out = nil
     if ok
-      # design matrix: leading all-ones intercept column, then features
+      # design matrix: leading all-ones intercept column, then features —
+      # each row (and its target) scaled by sqrt(w) when weights are given.
       design = []
-      rows.each -> (r)
-        row = [1]
-        r.each -> (v)
-          row.push(v)
-        design.push(row)
+      targets = yvals
+      if wts == nil
+        rows.each -> (r)
+          row = [1]
+          r.each -> (v)
+            row.push(v)
+          design.push(row)
+      else
+        scaled_y = []
+        i = 0
+        rows.each -> (r)
+          s = Math.sqrt(wts[i])
+          row = []
+          row.push(s)
+          r.each -> (v)
+            row.push(v.to_f * s)
+          design.push(row)
+          scaled_y.push(yvals[i].to_f * s)
+          i += 1
+        targets = scaled_y
       xm = Matrix.new(design)
       alpha = @alpha
       beta = nil
@@ -136,7 +188,7 @@
         # back nil: LinAlg's scaled rank test replaces the old
         # exactly-zero pivot, and both reject genuinely collinear
         # features with six decades of margin.
-        beta = LinAlg.lstsq(xm, yvals)
+        beta = LinAlg.lstsq(xm, targets)
       else
         # RIDGE: the penalized normal equations, unchanged. Adding
         # alpha to the feature diagonal is defined ON X^T X, and the
@@ -153,7 +205,7 @@
         n = ents.size
         n.times -> (k)
           ents[k][k] = ents[k][k] + alpha if k > 0
-        beta = LinAlg.solve(xtx, xt.matvec(Vector.new(yvals)))
+        beta = LinAlg.solve(xtx, xt.matvec(Vector.new(targets)))
       if beta != nil
         b = beta.to_a
         coefs = []
@@ -192,13 +244,19 @@
     out
 
   # R² (Metrics.r2) of self's predictions on x against y; nil before
-  # fit or when the shapes do not line up.
-  -> score(x, y)
+  # fit, when the shapes do not line up, or when sample_weight is
+  # unusable. With weights this is the WEIGHTED R² — weighted residuals
+  # against a weighted-mean baseline.
+  -> score(x, y, sample_weight = nil)
     preds = self.predict(x)
     yvals = Estimator.target_values(y)
     out = nil
     if preds != nil && yvals != nil
-      out = Metrics.r2(preds, yvals) if preds.size == yvals.size && preds.size > 0
+      ok = preds.size == yvals.size && preds.size > 0
+      wts = nil
+      wts = Estimator.weight_values(sample_weight, preds.size) if ok && sample_weight != nil
+      ok = false if sample_weight != nil && wts == nil
+      out = Metrics.r2(preds, yvals, wts) if ok
     out
 
   # --- Input coercion: DELEGATING ALIASES ---

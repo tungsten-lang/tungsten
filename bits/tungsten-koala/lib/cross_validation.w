@@ -605,7 +605,21 @@ trait Splitting
   # model may still be given a y: the estimator never sees it, but the
   # SPLITTER does, which is what lets a clustering run be stratified by a
   # label it is not allowed to learn from.
-  -> .cross_val_score(model, x, y = nil, cv = 5, seed = nil)
+  # SAMPLE WEIGHTS are threaded per fold. A weight belongs to a ROW, so
+  # each fold's weight vector is that fold's indices applied to the full
+  # vector — Estimator.subset, the same index order the rows and targets
+  # are gathered in — and both the fit and the held-out score get their
+  # own slice. Nothing else changes: the splitter never sees the weights
+  # (a fold is chosen by position, class or group, never by importance),
+  # so a weighted run splits identically to an unweighted one and the two
+  # differ only in what each fold learns and reports.
+  #
+  #     cross_val_score(model, x, y, 5, nil, w)
+  #
+  # An estimator that refuses weights (KNNClassifier) fails EVERY fold's
+  # fit and so scores nil throughout — loudly wrong rather than quietly
+  # unweighted.
+  -> .cross_val_score(model, x, y = nil, cv = 5, seed = nil, sample_weight = nil)
     rows = Estimator.feature_rows(x)
     supervised = model.supervised?
     yvals = nil
@@ -615,6 +629,9 @@ trait Splitting
     ok = yvals != nil && rows.size == yvals.size if ok && supervised
     ok = rows.size == yvals.size if ok && yvals != nil
     ok = rows.size > 0 if ok
+    wts = nil
+    wts = Estimator.weight_values(sample_weight, rows.size) if ok && sample_weight != nil
+    ok = false if sample_weight != nil && wts == nil
     if ok
       splitter = CrossValidation.splitter_for(cv, seed)
       folds = nil
@@ -634,9 +651,11 @@ trait Splitting
           te_idx.each -> (ix)
             te_rows.push(rows[ix])
             te_y.push(yvals[ix]) if yvals != nil
-          f = Estimator.fit_model(model, tr_rows, tr_y)
+          tr_w = Estimator.subset(wts, tr_idx)
+          te_w = Estimator.subset(wts, te_idx)
+          f = Estimator.fit_model(model, tr_rows, tr_y, tr_w)
           s = nil
-          s = Estimator.score_model(model, te_rows, te_y) if f != nil
+          s = Estimator.score_model(model, te_rows, te_y, te_w) if f != nil
           scores.push(s)
         out = scores
     out
@@ -648,8 +667,8 @@ trait Splitting
   # straight through, a GridSearch built with `GridSearch.new(est, grid,
   # StratifiedKFold.new(3))` searches on stratified folds with no change
   # to lib/grid_search.w.
-  -> .cross_val_mean(model, x, y = nil, cv = 5, seed = nil)
-    scores = self.cross_val_score(model, x, y, cv, seed)
+  -> .cross_val_mean(model, x, y = nil, cv = 5, seed = nil, sample_weight = nil)
+    scores = self.cross_val_score(model, x, y, cv, seed, sample_weight)
     out = nil
     out = Stats.mean(scores) if scores != nil
     out

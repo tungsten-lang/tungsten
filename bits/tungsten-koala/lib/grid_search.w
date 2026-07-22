@@ -212,7 +212,11 @@
   # Score every candidate by k-fold CV and keep the best. Returns self, or
   # nil — fitted? stays false — for any of the degenerate cases in the
   # header. y is omitted (nil) for an unsupervised estimator.
-  -> fit(x, y = nil)
+  # sample_weight rides straight through to the cross-validation (which
+  # subsets it per fold) and to the winner's refit, so a search over
+  # imbalanced data is scored on the same weighting it will be trained
+  # with.
+  -> fit(x, y = nil, sample_weight = nil)
     est = @estimator
     cands = @candidates
     folds = @k
@@ -232,7 +236,7 @@
       i = 0
       cands.each -> (c)
         model = est.with_params(c)
-        s = CrossValidation.cross_val_mean(model, x, y, folds, sd)
+        s = CrossValidation.cross_val_mean(model, x, y, folds, sd, sample_weight)
         row = { params: c, score: s }
         scored.push(row)
         if s != nil
@@ -247,7 +251,7 @@
         @fitted = true
         if @refit
           winner = est.with_params(cands[best_i])
-          done = Estimator.fit_model(winner, x, y)
+          done = Estimator.fit_model(winner, x, y, sample_weight)
           @best_estimator = winner if done != nil
         out = self
     out
@@ -265,10 +269,15 @@
   # best_estimator's score on x / y, through the same arity-safe dispatch
   # the search itself used. nil before a successful fit, or when refit
   # was false.
-  -> score(x, y = nil)
+  -> score(x, y = nil, sample_weight = nil)
     out = nil
-    out = Estimator.score_model(@best_estimator, x, y) if @best_estimator != nil
+    out = Estimator.score_model(@best_estimator, x, y, sample_weight) if @best_estimator != nil
     out
+
+  # Whether `fit(x, y, w)`'s weights will actually be honoured — the
+  # searched estimator's answer, since every candidate is a clone of it.
+  -> supports_sample_weight?
+    @estimator.supports_sample_weight?
 
   # "GridSearch(KNNClassifier)" — the search named by what it searches.
   -> estimator_name

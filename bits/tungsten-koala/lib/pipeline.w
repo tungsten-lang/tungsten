@@ -163,9 +163,18 @@
 
   # Fit every step, feeding each the previous step's transform output.
   # With y given, the LAST step is fitted as an estimator —
-  # step.fit(current, y) — and fit returns nil (fitted? stays false)
-  # when that estimator fit itself returns nil.
-  -> fit(df, y = nil)
+  # step.fit(current, y, sample_weight) — and fit returns nil (fitted?
+  # stays false) when that estimator fit itself returns nil.
+  #
+  # SAMPLE WEIGHTS reach the ESTIMATOR TAIL only. The transformers are
+  # fitted unweighted, which is a real limitation and stated rather than
+  # hidden: a weighted Scaler would centre on the weighted mean and a
+  # weighted Imputer would fill with the weighted mean, and neither
+  # Scaler nor Imputer takes weights today (scikit-learn's StandardScaler
+  # does; koala's does not yet). So on a weighted pipeline the scaling
+  # statistics are those of the unweighted training rows, while the model
+  # on top is genuinely weighted.
+  -> fit(df, y = nil, sample_weight = nil)
     steps = @steps
     last = steps.size - 1
     current = df
@@ -173,7 +182,7 @@
     i = 0
     steps.each -> (step)
       if y != nil && i == last
-        ok = false if step.fit(current, y) == nil
+        ok = false if step.fit(current, y, sample_weight) == nil
       else
         step.fit(current)
         current = step.transform(current)
@@ -224,12 +233,12 @@
   # The estimator tail's score on x against y; nil unless fitted with y.
   # y defaults to nil so an unsupervised caller — Estimator.score_model
   # on a chain whose supervised? is false — reaches the same nil rather
-  # than an arity error.
-  -> score(x, y = nil)
+  # than an arity error. sample_weight rides through to the tail.
+  -> score(x, y = nil, sample_weight = nil)
     out = nil
     if @fitted && @has_estimator
       steps = @steps
-      out = steps[steps.size - 1].score(self.transform_features(x), y)
+      out = steps[steps.size - 1].score(self.transform_features(x), y, sample_weight)
     out
 
   # --- Estimable contract (see lib/estimator_base.w) ---
@@ -245,6 +254,17 @@
     if steps.size > 0
       tail = steps[steps.size - 1]
       out = tail.supervised? if tail.respond_to?("supervised?")
+    out
+
+  # Weights are the TAIL's to honour, so this delegates exactly like
+  # supervised? does — a Pipeline ending in a KNNClassifier says false,
+  # and so does a transformer-only chain (there is nothing to weight).
+  -> supports_sample_weight?
+    steps = @steps
+    out = false
+    if steps.size > 0
+      tail = steps[steps.size - 1]
+      out = tail.supports_sample_weight? if tail.respond_to?("supports_sample_weight?")
     out
 
   # Every tunable step's hyperparameters, flattened and addressed

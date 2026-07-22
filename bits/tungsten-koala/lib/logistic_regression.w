@@ -86,6 +86,11 @@
   -> supervised?
     true
 
+  # The gradient is a SUM over rows, so a weight is just that row's
+  # multiplier in it — see fit.
+  -> supports_sample_weight?
+    true
+
   # The hyperparameters a search varies — never the learned weights.
   -> params
     { learning_rate: @learning_rate, epochs: @epochs }
@@ -120,29 +125,58 @@
       probs.push(LogisticRegression.sigmoid(z))
     probs
 
-  # Sum of a float array (Stats.sum accumulates as an integer).
-  -> .sum_f(values)
+  # Sum of a float array (Stats.sum accumulates as an integer), weighted
+  # per element when `wts` is given: the bias gradient.
+  #
+  # The weight multiplies the FINISHED per-row term (`(e) * w`, not
+  # `(w * e)`), so an integer weight of 2 gives bit-for-bit the same
+  # double as adding that row's term twice — which is what makes the
+  # duplication equivalence exact rather than merely close.
+  -> .sum_f(values, wts = nil)
     total = 0.to_f
+    i = 0
     values.each -> (v)
-      total += v
+      if wts == nil
+        total += v
+      else
+        total += v * wts[i]
+      i += 1
     total
 
-  # Per-feature gradient sum: gw[j] = sum_i errors[i] * rows[i][j].
-  -> .gradient_w(errors, rows, nf)
+  # Per-feature gradient sum: gw[j] = sum_i w_i * errors[i] * rows[i][j]
+  # (w_i = 1 unweighted).
+  -> .gradient_w(errors, rows, nf, wts)
     gw = []
     nf.times -> (j)
       total = 0.to_f
       i = 0
       errors.each -> (e)
-        total += e * rows[i][j].to_f
+        if wts == nil
+          total += e * rows[i][j].to_f
+        else
+          total += (e * rows[i][j].to_f) * wts[i]
         i += 1
       gw.push(total)
     gw
 
   # Learn weights and intercept from x/y by gradient descent. Returns
   # self, or nil — fitted? stays false — when the shapes are unusable
-  # (empty x, ragged rows, y size mismatch) or y is not exactly binary.
-  -> fit(x, y)
+  # (empty x, ragged rows, y size mismatch, an unusable sample_weight) or
+  # y is not exactly binary.
+  #
+  # SAMPLE WEIGHTS enter the one place they can: the loss is a SUM over
+  # rows, so weighting it re-weights each row's contribution to the
+  # gradient and nothing else —
+  #
+  #     gw[j] = sum_i w_i (p_i - t_i) x_ij      gb = sum_i w_i (p_i - t_i)
+  #
+  # divided by sum(w) rather than n. Everything else — the epoch count,
+  # the learning rate, the zero start, the clamp — is untouched, so a
+  # weighted run takes exactly the same trajectory a run on the
+  # row-duplicated dataset would, epoch for epoch. A zero-weight row is
+  # dropped up front (it would contribute nothing but would still shift
+  # the first-seen class order, which decides which label is target 1).
+  -> fit(x, y, sample_weight = nil)
     rows = Estimator.feature_rows(x)
     labels = Estimator.target_values(y)
     ok = rows != nil && labels != nil
@@ -152,6 +186,14 @@
       width = rows[0].size
       rows.each -> (r)
         ok = false if r.size != width
+    wts = nil
+    wts = Estimator.weight_values(sample_weight, rows.size) if ok && sample_weight != nil
+    ok = false if sample_weight != nil && wts == nil
+    if ok && wts != nil
+      trimmed = Estimator.drop_zero_weights(rows, labels, wts)
+      rows = trimmed[:rows]
+      labels = trimmed[:targets]
+      wts = trimmed[:weights]
     classes = []
     if ok
       labels.each -> (l)
@@ -167,7 +209,7 @@
         targets.push(t)
       nf = rows[0].size
       n = rows.size
-      nd = n.to_f
+      nd = Estimator.weight_total(wts, n).to_f
       lr = @learning_rate
       steps = @epochs
       weights = []
@@ -181,8 +223,8 @@
         probs.each -> (p)
           errors.push(p - targets[i])
           i += 1
-        gw = LogisticRegression.gradient_w(errors, rows, nf)
-        gb = LogisticRegression.sum_f(errors)
+        gw = LogisticRegression.gradient_w(errors, rows, nf, wts)
+        gb = LogisticRegression.sum_f(errors, wts)
         new_w = []
         nf.times -> (j)
           new_w.push(weights[j] - lr * (gw[j] / nd))
@@ -232,12 +274,17 @@
       out = preds
     out
 
-  # Accuracy (Metrics.accuracy) of self's predictions on x against y;
-  # nil before fit or when the shapes do not line up.
-  -> score(x, y)
+  # Accuracy (Metrics.accuracy) of self's predictions on x against y,
+  # weighted when sample_weight is given; nil before fit, when the shapes
+  # do not line up, or when the weights are unusable.
+  -> score(x, y, sample_weight = nil)
     preds = self.predict(x)
     yvals = Estimator.target_values(y)
     out = nil
     if preds != nil && yvals != nil
-      out = Metrics.accuracy(preds, yvals) if preds.size == yvals.size && preds.size > 0
+      ok = preds.size == yvals.size && preds.size > 0
+      wts = nil
+      wts = Estimator.weight_values(sample_weight, preds.size) if ok && sample_weight != nil
+      ok = false if sample_weight != nil && wts == nil
+      out = Metrics.accuracy(preds, yvals, wts) if ok
     out

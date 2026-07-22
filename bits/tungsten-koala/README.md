@@ -209,6 +209,7 @@ GridSearch.new(pipe, { "scale.kind" => [:standard, :min_max],
 
 # The estimator contract — one uniform interface across all five
 m.supervised?                        # => true; false for KMeans alone
+m.supports_sample_weight?            # => true; false for KNNClassifier alone
 m.estimator_name                     # => "LinearRegression"
 m.params                             # => { alpha: 12 }  hyperparameters ONLY
 m.with_params({ alpha: 3 })          # => a NEW, UNFITTED clone; m untouched
@@ -216,6 +217,12 @@ Estimator.feature_rows(x)            # the one definition of every x shape
 Estimator.target_values(y)           # ... and every y shape
 Estimator.fit_model(m, rows, yvals)  # arity-safe: fit(x,y) or fit(x)
 Estimator.score_model(m, rows, yvals)
+
+# Sample weights — an optional trailing argument, sklearn-style
+m.fit(x, y, [2, 1, 1])               # row 0 counts twice
+m.score(x, y, [2, 1, 1])             # ... and is scored that way
+Metrics.accuracy(preds, act, w)      # weighted metrics, same convention
+CrossValidation.cross_val_score(m, x, y, 5, nil, w)   # subset per fold
 ```
 
 ## The estimator contract
@@ -228,9 +235,9 @@ defined in `lib/estimator_base.w`:
 | trait | methods | who |
 | --- | --- | --- |
 | `Tunable` | `params` `with_params(overrides)` | Scaler, Imputer, Encoder (and every Estimable, which restates the pair) |
-| `Estimable` | `fitted?` `predict(x)` `supervised?` `params` `with_params(overrides)` `estimator_name` | all seven |
-| `SupervisedEstimator` | `fit(x, y)` `score(x, y)` | LinearRegression, KNNClassifier, LogisticRegression, GaussianNB, DecisionTreeClassifier, DecisionTreeRegressor |
-| `UnsupervisedEstimator` | `fit(x)` `score(x)` | KMeans |
+| `Estimable` | `fitted?` `predict(x)` `supervised?` `supports_sample_weight?` `params` `with_params(overrides)` `estimator_name` | all seven |
+| `SupervisedEstimator` | `fit(x, y, sample_weight)` `score(x, y, sample_weight)` | LinearRegression, KNNClassifier, LogisticRegression, GaussianNB, DecisionTreeClassifier, DecisionTreeRegressor |
+| `UnsupervisedEstimator` | `fit(x, sample_weight)` `score(x, sample_weight)` | KMeans |
 
 `Tunable` is the hyperparameter half on its own — what a search needs and
 nothing more. It exists because koala's transformers carry real
@@ -299,6 +306,121 @@ what makes that work; without it the chain died on `column_names`.
 Scaler.new(:standard).fit_transform([[2, 9], [4, 9], [6, 9]])
 # => a DataFrame with columns "x0", "x1"
 ```
+
+## Sample weights
+
+Every `fit` and every `score` takes an optional trailing `sample_weight`
+— a per-row importance vector, scikit-learn's
+`fit(X, y, sample_weight=None)`:
+
+```tungsten
+model.fit(x, y)                  # unweighted — unchanged, forever
+model.fit(x, y, [2, 1, 1])       # row 0 counts twice
+model.score(x, y, [2, 1, 1])     # ... and is scored that way
+```
+
+That is how you handle **imbalanced classes** (up-weight the rare one),
+**importance-weighted data** (a row that stands for a thousand
+customers), and **bootstrap resampling** — the last being the thing a
+random forest is built out of.
+
+### Integer weights ARE duplication
+
+The definition of correctness, and what `spec/sample_weight_spec.w`
+asserts for every estimator that takes weights:
+
+```tungsten
+model.fit([r0, r1, r2], [y0, y1, y2], [2, 1, 1])
+model.fit([r0, r0, r1, r2], [y0, y0, y1, y2])   # the SAME model
+```
+
+It follows that a weight of **0 drops a row** and that an all-1s vector
+is a **no-op** — both asserted too. `Estimator.drop_zero_weights` makes
+the zero case structural rather than something each estimator
+re-derives, so a dropped row cannot seed a k-means centroid, claim a
+naive-Bayes prior, or shift the first-seen class order.
+
+An unusable vector — wrong length, empty, negative, or summing to zero —
+makes `fit` return **nil** and leaves `fitted?` false, the bit's
+shape-error convention. Nothing raises. Validation lives in one place,
+`Estimator.weight_values`, and accepts a plain array, a `Series` or a
+`Vector`, exactly as a target does.
+
+### Who supports them, and who says no
+
+| estimator | weighted | how |
+| --- | --- | --- |
+| `LinearRegression` | yes | weighted least squares — rows and targets scaled by `sqrt(w)` through the same Householder QR; ridge inherits it as `(X^T W X + alpha*I') beta = X^T W y` |
+| `LogisticRegression` | yes | weighted gradient: `sum_i w_i (p_i - t_i) x_i`, over `sum(w)` |
+| `GaussianNB` | yes | weighted priors, means and variances (`class_counts` becomes total weight) |
+| `DecisionTreeClassifier` | yes | weighted impurity, weighted split scoring, heaviest-class leaves |
+| `DecisionTreeRegressor` | yes | weighted MSE, weighted-mean leaves |
+| `KMeans` | yes | weighted centroids and weighted inertia; zero-weight rows never seed a centroid but are still labelled |
+| `KNNClassifier` | **no** | `fit` returns nil rather than ignoring them |
+
+`KNNClassifier` follows scikit-learn, whose `KNeighborsClassifier` has no
+`sample_weight` either: `fit` stores the training set unchanged, so there
+is nowhere for a weight to be absorbed, and weighting the neighbour VOTE
+would be a different algorithm (sklearn's `weights=`, a hyperparameter
+over distance). Rather than silently ignore them, `fit` answers nil and
+`supports_sample_weight?` says so up front — the weights twin of
+`supervised?`, and machine-readable for the same reason:
+
+```tungsten
+KNNClassifier.new(3).supports_sample_weight?     # => false
+LinearRegression.new.supports_sample_weight?     # => true
+Pipeline.new([Scaler.new(:standard), KNNClassifier.new(1)])
+  .supports_sample_weight?                       # => false (delegates to the tail)
+```
+
+Its `score` still takes weights — a weighted accuracy is well defined
+whatever produced the labels, which is scikit-learn's split too.
+
+### Weighted metrics
+
+`Metrics.accuracy`, `precision`, `recall`, `f1`, `fbeta`, `mse`, `rmse`,
+`mae` and `r2` all take an optional trailing weight vector, matching
+scikit-learn's semantics — otherwise `score(x, y, w)` would have nothing
+to compute. `r2` weights its BASELINE as well as its residuals (the
+weighted mean of `y`, not the plain one); the classification metrics turn
+each confusion cell into a sum of weights. An unusable vector returns
+nil.
+
+```tungsten
+Metrics.accuracy([1, 0, 1], [1, 0, 0], [2, 1, 1])   # => 0.75
+Metrics.r2([1, 2, 3], [1, 2, 4], [2, 1, 1])         # => 0.833333
+```
+
+### Through the generic tooling
+
+Weights ride the contract, so `CrossValidation` and `GridSearch` thread
+them with no new concept: `Estimator.fit_model` /
+`.score_model` grew one optional argument, and a fold's weight vector is
+that fold's indices applied to the full one (`Estimator.subset`, in the
+fold's own index order).
+
+```tungsten
+CrossValidation.cross_val_score(model, x, y, 5, nil, w)
+CrossValidation.cross_val_mean(model, x, y, StratifiedKFold.new(3), nil, w)
+GridSearch.new(DecisionTreeClassifier.new, { max_depth: [1, 2] }, 3).fit(x, y, w)
+Pipeline.new([Imputer.new(:mean), LinearRegression.new]).fit(x, y, w)
+```
+
+The splitter never sees the weights — a fold is chosen by position, class
+or group, never by importance — so a weighted run splits identically to
+an unweighted one and differs only in what each fold learns and reports.
+An estimator that refuses weights fails every fold's fit and scores nil
+throughout: loudly wrong rather than quietly unweighted.
+
+**Two limits, stated rather than hidden.** A `Pipeline` passes weights to
+its ESTIMATOR TAIL only — `Scaler` and `Imputer` are fitted unweighted,
+because neither takes a weight vector yet (scikit-learn's
+`StandardScaler` does). And a tree's `min_samples_split` /
+`min_samples_leaf` still count ROWS, matching scikit-learn (which spells
+the weighted version `min_weight_fraction_leaf`, a separate knob), so
+they are the one place a weighted fit and its duplicated twin can
+legitimately differ — and only when those knobs are moved off their
+defaults.
 
 ## Decision trees
 

@@ -63,6 +63,18 @@
   -> supervised?
     true
 
+  # NO — and it says so out loud. scikit-learn's KNeighborsClassifier has
+  # no sample_weight either, and the reason is structural rather than an
+  # omission: fit stores the training set unchanged, so there is nowhere
+  # for a weight to be absorbed, and the only thing weights COULD touch is
+  # the neighbour vote — which is a different algorithm (sklearn spells it
+  # `weights=`, a hyperparameter over DISTANCE, not a per-row importance).
+  # Silently ignoring a weight vector would hand back a model the caller
+  # believes is weighted, so fit returns nil instead. `score` still takes
+  # weights: a weighted accuracy is well defined however the labels arose.
+  -> supports_sample_weight?
+    false
+
   # The hyperparameters a search varies — never the stored training rows.
   -> params
     { k: @k }
@@ -74,8 +86,13 @@
 
   # Store the training rows and labels. Returns self, or nil — fitted?
   # stays false — when the shapes are unusable (empty x, ragged rows,
-  # y size mismatch).
-  -> fit(x, y)
+  # y size mismatch) or when a sample_weight is supplied at all.
+  #
+  # The weight argument exists ONLY so the refusal is explicit: k-NN
+  # cannot honour per-row weights (see supports_sample_weight?), and a
+  # nil fit is how this bit says "I will not answer that" — never a
+  # silently unweighted model wearing a weighted caller's expectations.
+  -> fit(x, y, sample_weight = nil)
     rows = Estimator.feature_rows(x)
     labels = Estimator.target_values(y)
     ok = rows != nil && labels != nil
@@ -85,6 +102,7 @@
       width = rows[0].size
       rows.each -> (r)
         ok = false if r.size != width
+    ok = false if sample_weight != nil
     out = nil
     if ok
       @train_rows = rows
@@ -149,11 +167,17 @@
     out
 
   # Accuracy (Metrics.accuracy) of self's predictions on x against y;
-  # nil before fit or when the shapes do not line up.
-  -> score(x, y)
+  # nil before fit, when the shapes do not line up, or when sample_weight
+  # is unusable. Weights ARE honoured here (a weighted accuracy needs
+  # nothing from the model) even though fit refuses them.
+  -> score(x, y, sample_weight = nil)
     preds = self.predict(x)
     yvals = Estimator.target_values(y)
     out = nil
     if preds != nil && yvals != nil
-      out = Metrics.accuracy(preds, yvals) if preds.size == yvals.size && preds.size > 0
+      ok = preds.size == yvals.size && preds.size > 0
+      wts = nil
+      wts = Estimator.weight_values(sample_weight, preds.size) if ok && sample_weight != nil
+      ok = false if sample_weight != nil && wts == nil
+      out = Metrics.accuracy(preds, yvals, wts) if ok
     out

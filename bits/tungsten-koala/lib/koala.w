@@ -21,11 +21,26 @@
 # KNNClassifier, LogisticRegression, GaussianNB, DecisionTreeClassifier,
 # DecisionTreeRegressor) or `is
 # UnsupervisedEstimator` (KMeans). That contract adds `supervised?`,
-# `params`, `with_params(overrides)` and `estimator_name` to the familiar
+# `supports_sample_weight?`, `params`, `with_params(overrides)` and
+# `estimator_name` to the familiar
 # new / fitted? / fit / predict / score, and puts the ONE definition of
 # every accepted input shape on the neutral `Estimator` base rather than on
 # a concrete sibling. It is what generic tooling — CrossValidation and
 # GridSearch — dispatches through, without ever naming a concrete class.
+#
+# SAMPLE WEIGHTS ride that contract as an optional trailing argument on
+# fit and score — `model.fit(x, y, [2, 1, 1])` — validated in one place
+# (Estimator.weight_values) and threaded per fold by CrossValidation and
+# GridSearch. An INTEGER weight vector is exactly equivalent to
+# duplicating each row that many times, which is what makes a bootstrap
+# (and therefore a forest) expressible; a 0 drops a row; all-1s is a
+# no-op. Every estimator supports them except KNNClassifier, which
+# refuses them explicitly (`supports_sample_weight?` is false and fit
+# returns nil) exactly as scikit-learn's KNeighborsClassifier has no
+# sample_weight. Metrics.accuracy / precision / recall / f1 / fbeta /
+# mse / rmse / mae / r2 take an optional weight vector too, so a weighted
+# `score` means what it says. See lib/estimator_base.w for the full
+# rationale and spec/sample_weight_spec.w for the proofs.
 #
 # The three PREPROCESSING transformers (Scaler / Imputer / Encoder)
 # declare the hyperparameter half of that contract on its own,

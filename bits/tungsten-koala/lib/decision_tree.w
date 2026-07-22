@@ -101,6 +101,9 @@
 #     left:       the `x[feature] <= threshold` child (nil at a leaf)
 #     right:      the `x[feature] >  threshold` child (nil at a leaf)
 #     n:          training rows that reached this node
+#     weight:     their total sample WEIGHT — equal to `n` (and an
+#                 integer) for an unweighted fit; what predict_proba
+#                 divides `counts` by
 #     depth:      0 at the root
 #     impurity:   this node's impurity under `criterion`
 #     counts:     rows per class, in `classes` order (nil for a regressor)
@@ -200,12 +203,46 @@
       out = acc / nd
     out
 
+  # Population variance of the targets, weighted per row: the weighted
+  # second moment about the WEIGHTED mean, over sum(w). The regression
+  # criterion under sample weights.
+  #
+  # Written as a separate method rather than a branch inside `variance`
+  # so the unweighted path stays on exactly the arithmetic it always
+  # used — no hand-computed spec value can shift by a last bit. The two
+  # loops use DIFFERENT counter names on purpose: a local captured by two
+  # sibling closures in one block miscompiles today.
+  -> .weighted_variance(ys, wts)
+    n = ys.size
+    out = 0.to_f
+    if n > 0
+      nd = Estimator.weight_total(wts, n).to_f
+      total = 0.to_f
+      i = 0
+      ys.each -> (v)
+        total += v.to_f * wts[i]
+        i += 1
+      m = total / nd
+      acc = 0.to_f
+      j = 0
+      ys.each -> (v)
+        d = v.to_f - m
+        acc += (d * d) * wts[j]
+        j += 1
+      out = acc / nd
+    out
+
   # One node's impurity under cfg's criterion. `counts` is nil for a
-  # regression tree, where the raw targets are what matters.
-  -> .impurity(ys, counts, n, crit)
+  # regression tree, where the raw targets are what matters; `n` is the
+  # node's TOTAL WEIGHT (its row count when unweighted, so gini and
+  # entropy are unchanged — they already divide counts by a total).
+  -> .impurity(ys, counts, n, crit, wts)
     out = 0.to_f
     if crit == "mse"
-      out = DecisionTree.variance(ys)
+      if wts == nil
+        out = DecisionTree.variance(ys)
+      else
+        out = DecisionTree.weighted_variance(ys, wts)
     else
       if crit == "entropy"
         out = DecisionTree.entropy(counts, n)
@@ -237,10 +274,28 @@
       out.push(cnt)
     out
 
-  # counts_of, or nil for a regression tree (k = 0).
-  -> .node_counts(ys, k)
+  # Total WEIGHT per class index, over k classes — counts_of's weighted
+  # twin. Entries are floats, and an integer weight vector makes them
+  # exactly the counts the row-duplicated dataset would produce.
+  -> .weighted_counts_of(ys, k, wts)
+    out = []
+    k.times -> (i)
+      acc = 0.to_f
+      c = 0
+      ys.each -> (v)
+        acc += wts[c] if v == i
+        c += 1
+      out.push(acc)
+    out
+
+  # counts_of (or its weighted twin), or nil for a regression tree (k = 0).
+  -> .node_counts(ys, k, wts)
     out = nil
-    out = DecisionTree.counts_of(ys, k) if k > 0
+    if k > 0
+      if wts == nil
+        out = DecisionTree.counts_of(ys, k)
+      else
+        out = DecisionTree.weighted_counts_of(ys, k, wts)
     out
 
   # vals as f64, ascending — an explicit insertion sort, so the order is
@@ -280,23 +335,33 @@
       i += 1
     idx
 
-  # Split rows/ys on `x[j] <= thr`, keeping each side's rows and targets
-  # aligned: { lr:, ly:, rr:, ry: }.
-  -> .partition(rows, ys, j, thr)
+  # Split rows/ys on `x[j] <= thr`, keeping each side's rows, targets AND
+  # weights aligned: { lr:, ly:, lws:, rr:, ry:, rws: }. The two weight
+  # slices are nil for an unweighted tree, so a whole subtree can be grown
+  # without ever allocating one.
+  -> .partition(rows, ys, wts, j, thr)
     lr = []
     ly = []
+    lws = []
     rr = []
     ry = []
+    rws = []
     i = 0
     rows.each -> (r)
       if r[j].to_f <= thr
         lr.push(r)
         ly.push(ys[i])
+        lws.push(wts[i]) if wts != nil
       else
         rr.push(r)
         ry.push(ys[i])
+        rws.push(wts[i]) if wts != nil
       i += 1
-    { lr: lr, ly: ly, rr: rr, ry: ry }
+    lw = nil
+    lw = lws if wts != nil
+    rwt = nil
+    rwt = rws if wts != nil
+    { lr: lr, ly: ly, lws: lw, rr: rr, ry: ry, rws: rwt }
 
   # --- The greedy split search ---
 
@@ -305,12 +370,19 @@
   # thresholds ascending, replacement only on a STRICTLY better gain
   # (measured against a relative tolerance), so ties keep the lowest
   # feature index and then the lowest threshold.
-  -> .best_split(rows, ys, cfg, parent_imp)
+  # WEIGHTS change only the arithmetic, never the rule: the two sides are
+  # weighed by their TOTAL WEIGHT instead of their row count, and their
+  # impurities are the weighted ones. `min_samples_leaf` still counts
+  # ROWS, matching scikit-learn (which spells the weighted version
+  # `min_weight_fraction_leaf`, a separate knob) — so it is the one place
+  # a weighted fit and its row-duplicated twin can legitimately differ,
+  # and only when that knob is set away from its default.
+  -> .best_split(rows, ys, wts, cfg, parent_imp)
     nf = cfg[:nf]
     k = cfg[:k]
     min_leaf = cfg[:min_leaf]
     crit = cfg[:crit]
-    nd = rows.size.to_f
+    nd = Estimator.weight_total(wts, rows.size).to_f
     tol = parent_imp / 1000000000000.to_f
     best = nil
     bgain = 0.to_f
@@ -323,24 +395,31 @@
       span = 0 if span < 0
       span.times -> (c)
         thr = (uniq[c] + uniq[c + 1]) / 2.to_f
-        part = DecisionTree.partition(rows, ys, j, thr)
+        part = DecisionTree.partition(rows, ys, wts, j, thr)
         ln = part[:lr].size
         rn = part[:rr].size
         if ln >= min_leaf && rn >= min_leaf
-          li = DecisionTree.impurity(part[:ly], DecisionTree.node_counts(part[:ly], k), ln, crit)
-          ri = DecisionTree.impurity(part[:ry], DecisionTree.node_counts(part[:ry], k), rn, crit)
-          gain = parent_imp - (ln.to_f / nd) * li - (rn.to_f / nd) * ri
+          lws = part[:lws]
+          rws = part[:rws]
+          lwn = Estimator.weight_total(lws, ln)
+          rwn = Estimator.weight_total(rws, rn)
+          li = DecisionTree.impurity(part[:ly], DecisionTree.node_counts(part[:ly], k, lws), lwn, crit, lws)
+          ri = DecisionTree.impurity(part[:ry], DecisionTree.node_counts(part[:ry], k, rws), rwn, crit, rws)
+          gain = parent_imp - (lwn.to_f / nd) * li - (rwn.to_f / nd) * ri
           if best == nil || gain > bgain + tol
             bgain = gain
-            best = { feature: j, threshold: thr, gain: gain, lr: part[:lr], ly: part[:ly], rr: part[:rr], ry: part[:ry] }
+            best = { feature: j, threshold: thr, gain: gain, lr: part[:lr], ly: part[:ly], lws: lws, rr: part[:rr], ry: part[:ry], rws: rws }
     best
 
   # --- Node construction ---
 
-  # What a node alone would predict: the majority class (ties to the
-  # first-seen label, since a later class must STRICTLY out-count it) for a
-  # classification tree, the mean target for a regression one.
-  -> .node_value(ys, counts, n, cfg)
+  # What a node alone would predict: the HEAVIEST class (ties to the
+  # first-seen label, since a later class must STRICTLY out-weigh it) for
+  # a classification tree, the WEIGHTED mean target for a regression one.
+  # Both reduce to the majority class and the plain mean when wts is nil —
+  # `counts` is then integer counts and weighted_mean's per-row multiplier
+  # is exactly 1.
+  -> .node_value(ys, counts, cfg, wts)
     out = nil
     if cfg[:k] > 0
       classes = cfg[:classes]
@@ -350,40 +429,42 @@
         best = c if counts[c] > counts[best]
       out = classes[best]
     else
-      total = 0.to_f
-      ys.each -> (v)
-        total += v.to_f
-      out = total / n.to_f
+      out = Estimator.weighted_mean(ys, wts)
     out
 
-  -> .leaf_node(ys, counts, n, depth, imp, cfg)
-    value = DecisionTree.node_value(ys, counts, n, cfg)
-    { leaf: true, feature: nil, threshold: nil, gain: nil, left: nil, right: nil, n: n, depth: depth, impurity: imp, counts: counts, prediction: value }
+  # `n` is the node's ROW count and `nw` its total WEIGHT (the same
+  # number, an integer, when unweighted). Both are recorded: `n` is what
+  # tree_lines prints and what min_samples_* compare against, `weight` is
+  # what predict_proba divides its class counts by.
+  -> .leaf_node(ys, counts, n, nw, depth, imp, cfg, wts)
+    value = DecisionTree.node_value(ys, counts, cfg, wts)
+    { leaf: true, feature: nil, threshold: nil, gain: nil, left: nil, right: nil, n: n, weight: nw, depth: depth, impurity: imp, counts: counts, prediction: value }
 
   # Grow the subtree for rows/ys at `depth`, returning its root node. The
   # four stopping rules of the header live here, in order: too small, pure,
   # depth cap, then "no admissible split" (best_split answering nil).
-  -> .build(rows, ys, cfg, depth)
+  -> .build(rows, ys, wts, cfg, depth)
     k = cfg[:k]
     limit = cfg[:limit]
     min_split = cfg[:min_split]
     crit = cfg[:crit]
     n = rows.size
-    counts = DecisionTree.node_counts(ys, k)
-    imp = DecisionTree.impurity(ys, counts, n, crit)
+    nw = Estimator.weight_total(wts, n)
+    counts = DecisionTree.node_counts(ys, k, wts)
+    imp = DecisionTree.impurity(ys, counts, nw, crit, wts)
     grow = n >= min_split
     grow = false if imp <= 0.to_f
     grow = false if limit >= 0 && depth >= limit
     best = nil
-    best = DecisionTree.best_split(rows, ys, cfg, imp) if grow
+    best = DecisionTree.best_split(rows, ys, wts, cfg, imp) if grow
     out = nil
     if best == nil
-      out = DecisionTree.leaf_node(ys, counts, n, depth, imp, cfg)
+      out = DecisionTree.leaf_node(ys, counts, n, nw, depth, imp, cfg, wts)
     else
-      value = DecisionTree.node_value(ys, counts, n, cfg)
-      l = DecisionTree.build(best[:lr], best[:ly], cfg, depth + 1)
-      r = DecisionTree.build(best[:rr], best[:ry], cfg, depth + 1)
-      out = { leaf: false, feature: best[:feature], threshold: best[:threshold], gain: best[:gain], left: l, right: r, n: n, depth: depth, impurity: imp, counts: counts, prediction: value }
+      value = DecisionTree.node_value(ys, counts, cfg, wts)
+      l = DecisionTree.build(best[:lr], best[:ly], best[:lws], cfg, depth + 1)
+      r = DecisionTree.build(best[:rr], best[:ry], best[:rws], cfg, depth + 1)
+      out = { leaf: false, feature: best[:feature], threshold: best[:threshold], gain: best[:gain], left: l, right: r, n: n, weight: nw, depth: depth, impurity: imp, counts: counts, prediction: value }
     out
 
   # --- Reading a fitted tree ---
@@ -421,13 +502,14 @@
       out = 1 + d
     out
 
-  # A node's class distribution, counts / n in `classes` order; nil for a
-  # regression node.
+  # A node's class distribution, counts / total weight in `classes` order;
+  # nil for a regression node. `weight` is the node's row count exactly
+  # when the fit was unweighted, so this is the old counts / n there.
   -> .proba_of(node)
     counts = node[:counts]
     out = nil
     if counts != nil
-      nd = node[:n].to_f
+      nd = node[:weight].to_f
       col = []
       counts.each -> (c)
         col.push(c.to_f / nd)
@@ -492,6 +574,11 @@
   -> supervised?
     true
 
+  # Weighted impurity and weighted leaf votes — see fit. This is what a
+  # bootstrap (and therefore a forest) stands on.
+  -> supports_sample_weight?
+    true
+
   # The four knobs a search varies — never the learned tree.
   -> params
     { max_depth: @max_depth, min_samples_split: @min_samples_split, min_samples_leaf: @min_samples_leaf, criterion: @criterion }
@@ -509,9 +596,18 @@
   # --- Fit ---
 
   # Grow the tree from x/y. Returns self, or nil — fitted? stays false —
-  # when the shapes are unusable (empty x, ragged rows, y size mismatch) or
-  # the criterion is not one this tree knows.
-  -> fit(x, y)
+  # when the shapes are unusable (empty x, ragged rows, y size mismatch,
+  # an unusable sample_weight) or the criterion is not one this tree knows.
+  #
+  # SAMPLE WEIGHTS make the impurity, the split scoring and every leaf's
+  # prediction weighted (see DecisionTree.best_split / .node_value), which
+  # is precisely what a bootstrap resample needs: drawing row i n_i times
+  # and fitting is the same tree as fitting once with sample_weight = n.
+  # That equivalence is the prerequisite for a random forest, and it is
+  # exact — a weight of 2 produces the same doubles as two copies of the
+  # row, because every weighted term is the unweighted term times an
+  # integer.
+  -> fit(x, y, sample_weight = nil)
     rows = Estimator.feature_rows(x)
     labels = Estimator.target_values(y)
     ok = rows != nil && labels != nil
@@ -522,6 +618,14 @@
       rows.each -> (r)
         ok = false if r.size != width
     ok = false if !DecisionTree.criterion_ok?(@criterion, false)
+    wts = nil
+    wts = Estimator.weight_values(sample_weight, rows.size) if ok && sample_weight != nil
+    ok = false if sample_weight != nil && wts == nil
+    if ok && wts != nil
+      trimmed = Estimator.drop_zero_weights(rows, labels, wts)
+      rows = trimmed[:rows]
+      labels = trimmed[:targets]
+      wts = trimmed[:weights]
     out = nil
     if ok
       nf = rows[0].size
@@ -537,7 +641,7 @@
       cfg = { k: classes.size, classes: classes, nf: nf, limit: limit, min_split: @min_samples_split, min_leaf: @min_samples_leaf, crit: @criterion.to_s }
       @classes = classes
       @n_features = nf
-      @tree = DecisionTree.build(rows, ys, cfg, 0)
+      @tree = DecisionTree.build(rows, ys, wts, cfg, 0)
       @fitted = true
       out = self
     out
@@ -628,14 +732,19 @@
           out = col
     out
 
-  # Accuracy (Metrics.accuracy) of self's predictions on x against y; nil
-  # before fit or when the shapes do not line up.
-  -> score(x, y)
+  # Accuracy (Metrics.accuracy) of self's predictions on x against y,
+  # weighted when sample_weight is given; nil before fit, when the shapes
+  # do not line up, or when the weights are unusable.
+  -> score(x, y, sample_weight = nil)
     preds = self.predict(x)
     yvals = Estimator.target_values(y)
     out = nil
     if preds != nil && yvals != nil
-      out = Metrics.accuracy(preds, yvals) if preds.size == yvals.size && preds.size > 0
+      ok = preds.size == yvals.size && preds.size > 0
+      wts = nil
+      wts = Estimator.weight_values(sample_weight, preds.size) if ok && sample_weight != nil
+      ok = false if sample_weight != nil && wts == nil
+      out = Metrics.accuracy(preds, yvals, wts) if ok
     out
 
 # A CART regression tree on the SAME machinery: identical greedy split
@@ -684,6 +793,10 @@
   -> supervised?
     true
 
+  # Weighted MSE and weighted leaf means — see fit.
+  -> supports_sample_weight?
+    true
+
   -> params
     { max_depth: @max_depth, min_samples_split: @min_samples_split, min_samples_leaf: @min_samples_leaf, criterion: @criterion }
 
@@ -696,7 +809,9 @@
 
   # --- Fit ---
 
-  -> fit(x, y)
+  # Weighted exactly like the classifier: weighted MSE as the split
+  # criterion and the weighted mean target at every leaf.
+  -> fit(x, y, sample_weight = nil)
     rows = Estimator.feature_rows(x)
     targets = Estimator.target_values(y)
     ok = rows != nil && targets != nil
@@ -707,6 +822,14 @@
       rows.each -> (r)
         ok = false if r.size != width
     ok = false if !DecisionTree.criterion_ok?(@criterion, true)
+    wts = nil
+    wts = Estimator.weight_values(sample_weight, rows.size) if ok && sample_weight != nil
+    ok = false if sample_weight != nil && wts == nil
+    if ok && wts != nil
+      trimmed = Estimator.drop_zero_weights(rows, targets, wts)
+      rows = trimmed[:rows]
+      targets = trimmed[:targets]
+      wts = trimmed[:weights]
     out = nil
     if ok
       nf = rows[0].size
@@ -718,7 +841,7 @@
       limit = 0 if limit < 0 && @max_depth != nil
       cfg = { k: 0, classes: nil, nf: nf, limit: limit, min_split: @min_samples_split, min_leaf: @min_samples_leaf, crit: "mse" }
       @n_features = nf
-      @tree = DecisionTree.build(rows, ys, cfg, 0)
+      @tree = DecisionTree.build(rows, ys, wts, cfg, 0)
       @fitted = true
       out = self
     out
@@ -781,12 +904,17 @@
       out = preds
     out
 
-  # R² (Metrics.r2) of self's predictions on x against y; nil before fit or
-  # when the shapes do not line up.
-  -> score(x, y)
+  # R² (Metrics.r2) of self's predictions on x against y, weighted when
+  # sample_weight is given; nil before fit, when the shapes do not line
+  # up, or when the weights are unusable.
+  -> score(x, y, sample_weight = nil)
     preds = self.predict(x)
     yvals = Estimator.target_values(y)
     out = nil
     if preds != nil && yvals != nil
-      out = Metrics.r2(preds, yvals) if preds.size == yvals.size && preds.size > 0
+      ok = preds.size == yvals.size && preds.size > 0
+      wts = nil
+      wts = Estimator.weight_values(sample_weight, preds.size) if ok && sample_weight != nil
+      ok = false if sample_weight != nil && wts == nil
+      out = Metrics.r2(preds, yvals, wts) if ok
     out

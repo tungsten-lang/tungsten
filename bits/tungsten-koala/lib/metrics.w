@@ -26,54 +26,113 @@
   # --- Classification ---
 
   # Accuracy: fraction of correct predictions.
-  -> .accuracy(predictions, actual)
-    correct = 0
-    i = 0
-    predictions.each -> (p)
-      correct += 1 if p == actual[i]
-      i += 1
-    correct.to_f / predictions.size.to_f
+  #
+  # With `sample_weight` it is the WEIGHTED fraction —
+  # sum(w_i * [pred_i == actual_i]) / sum(w) — scikit-learn's
+  # accuracy_score(..., sample_weight=w). This is what makes
+  # `model.score(x, y, w)` mean anything: an integer weight vector scores
+  # exactly as the row-duplicated dataset would, and all-1s reproduces the
+  # unweighted number. nil (never a raise) for an unusable weight vector,
+  # by Estimator.weight_values' rules.
+  -> .accuracy(predictions, actual, sample_weight = nil)
+    out = nil
+    if sample_weight == nil
+      correct = 0
+      i = 0
+      predictions.each -> (p)
+        correct += 1 if p == actual[i]
+        i += 1
+      out = correct.to_f / predictions.size.to_f
+    else
+      wts = Estimator.weight_values(sample_weight, predictions.size)
+      if wts != nil
+        hit = 0.to_f
+        total = 0.to_f
+        i = 0
+        predictions.each -> (p)
+          hit += wts[i] if p == actual[i]
+          total += wts[i]
+          i += 1
+        out = hit / total
+    out
 
   # Precision for a binary classifier: of the rows predicted positive,
   # the fraction that are truly positive — TP / (TP + FP). pos_label
   # names the positive class (default 1). 0.0 when nothing is predicted
   # positive, matching scikit-learn's zero-division convention.
-  -> .precision(predictions, actual, pos_label = 1)
-    tp = 0
-    fp = 0
-    i = 0
-    predictions.each -> (p)
-      if p == pos_label
-        tp += 1 if actual[i] == pos_label
-        fp += 1 if actual[i] != pos_label
-      i += 1
-    out = 0.to_f
-    out = tp.to_f / (tp + fp).to_f if (tp + fp) > 0
+  # With `sample_weight` every cell of the confusion count becomes a sum
+  # of weights instead of a count of rows — scikit-learn's
+  # precision_score(..., sample_weight=w). Imbalance is the whole reason
+  # weights exist, and precision / recall are the metrics imbalance is
+  # judged by, so they take them too.
+  -> .precision(predictions, actual, pos_label = 1, sample_weight = nil)
+    out = nil
+    if sample_weight == nil
+      tp = 0
+      fp = 0
+      i = 0
+      predictions.each -> (p)
+        if p == pos_label
+          tp += 1 if actual[i] == pos_label
+          fp += 1 if actual[i] != pos_label
+        i += 1
+      out = 0.to_f
+      out = tp.to_f / (tp + fp).to_f if (tp + fp) > 0
+    else
+      wts = Estimator.weight_values(sample_weight, predictions.size)
+      if wts != nil
+        tpw = 0.to_f
+        fpw = 0.to_f
+        i = 0
+        predictions.each -> (p)
+          if p == pos_label
+            tpw += wts[i] if actual[i] == pos_label
+            fpw += wts[i] if actual[i] != pos_label
+          i += 1
+        out = 0.to_f
+        out = tpw / (tpw + fpw) if (tpw + fpw) > 0.to_f
     out
 
   # Recall (sensitivity) for a binary classifier: of the truly positive
   # rows, the fraction the model caught — TP / (TP + FN). 0.0 when there
   # are no actual positives.
-  -> .recall(predictions, actual, pos_label = 1)
-    tp = 0
-    fneg = 0
-    i = 0
-    actual.each -> (a)
-      if a == pos_label
-        tp += 1 if predictions[i] == pos_label
-        fneg += 1 if predictions[i] != pos_label
-      i += 1
-    out = 0.to_f
-    out = tp.to_f / (tp + fneg).to_f if (tp + fneg) > 0
+  -> .recall(predictions, actual, pos_label = 1, sample_weight = nil)
+    out = nil
+    if sample_weight == nil
+      tp = 0
+      fneg = 0
+      i = 0
+      actual.each -> (a)
+        if a == pos_label
+          tp += 1 if predictions[i] == pos_label
+          fneg += 1 if predictions[i] != pos_label
+        i += 1
+      out = 0.to_f
+      out = tp.to_f / (tp + fneg).to_f if (tp + fneg) > 0
+    else
+      wts = Estimator.weight_values(sample_weight, predictions.size)
+      if wts != nil
+        tpw = 0.to_f
+        fnw = 0.to_f
+        i = 0
+        actual.each -> (a)
+          if a == pos_label
+            tpw += wts[i] if predictions[i] == pos_label
+            fnw += wts[i] if predictions[i] != pos_label
+          i += 1
+        out = 0.to_f
+        out = tpw / (tpw + fnw) if (tpw + fnw) > 0.to_f
     out
 
   # F1 score: the harmonic mean of precision and recall,
   # 2 * P * R / (P + R). 0.0 when both are 0.
-  -> .f1(predictions, actual, pos_label = 1)
-    p = self.precision(predictions, actual, pos_label)
-    r = self.recall(predictions, actual, pos_label)
-    out = 0.to_f
-    out = 2.to_f * p * r / (p + r) if (p + r) > 0
+  -> .f1(predictions, actual, pos_label = 1, sample_weight = nil)
+    p = self.precision(predictions, actual, pos_label, sample_weight)
+    r = self.recall(predictions, actual, pos_label, sample_weight)
+    out = nil
+    if p != nil && r != nil
+      out = 0.to_f
+      out = 2.to_f * p * r / (p + r) if (p + r) > 0
     out
 
   # F-beta score — scikit-learn's fbeta_score, the WEIGHTED harmonic mean
@@ -94,41 +153,79 @@
   # Predictions first, like precision / recall / f1. Pass beta as an
   # INTEGER or a derived float (2, or 1.to_f / 2.to_f) — a float literal
   # in a call argument corrupts it on both engines.
-  -> .fbeta(predictions, actual, beta = 1, pos_label = 1)
-    p = self.precision(predictions, actual, pos_label)
-    r = self.recall(predictions, actual, pos_label)
-    b2 = beta.to_f * beta.to_f
-    denom = b2 * p + r
-    out = 0.to_f
-    out = (1.to_f + b2) * p * r / denom if denom > 0
+  -> .fbeta(predictions, actual, beta = 1, pos_label = 1, sample_weight = nil)
+    p = self.precision(predictions, actual, pos_label, sample_weight)
+    r = self.recall(predictions, actual, pos_label, sample_weight)
+    out = nil
+    if p != nil && r != nil
+      b2 = beta.to_f * beta.to_f
+      denom = b2 * p + r
+      out = 0.to_f
+      out = (1.to_f + b2) * p * r / denom if denom > 0
     out
 
   # --- Regression ---
 
-  # Mean squared error.
-  -> .mse(predictions, actual)
-    total = 0.to_f
-    i = 0
-    predictions.each -> (p)
-      d = p.to_f - actual[i].to_f
-      total += d * d
-      i += 1
-    total / predictions.size.to_f
+  # Mean squared error. With `sample_weight`, sum(w*d^2) / sum(w) —
+  # scikit-learn's mean_squared_error(..., sample_weight=w). nil for an
+  # unusable weight vector.
+  -> .mse(predictions, actual, sample_weight = nil)
+    out = nil
+    if sample_weight == nil
+      total = 0.to_f
+      i = 0
+      predictions.each -> (p)
+        d = p.to_f - actual[i].to_f
+        total += d * d
+        i += 1
+      out = total / predictions.size.to_f
+    else
+      wts = Estimator.weight_values(sample_weight, predictions.size)
+      if wts != nil
+        total = 0.to_f
+        sw = 0.to_f
+        i = 0
+        predictions.each -> (p)
+          d = p.to_f - actual[i].to_f
+          total += d * d * wts[i]
+          sw += wts[i]
+          i += 1
+        out = total / sw
+    out
 
-  # Root mean squared error.
-  -> .rmse(predictions, actual)
-    Math.sqrt(self.mse(predictions, actual))
+  # Root mean squared error (weighted when sample_weight is given).
+  -> .rmse(predictions, actual, sample_weight = nil)
+    m = self.mse(predictions, actual, sample_weight)
+    out = nil
+    out = Math.sqrt(m) if m != nil
+    out
 
-  # Mean absolute error.
-  -> .mae(predictions, actual)
-    total = 0.to_f
-    i = 0
-    predictions.each -> (p)
-      d = p.to_f - actual[i].to_f
-      d = 0.to_f - d if d < 0
-      total += d
-      i += 1
-    total / predictions.size.to_f
+  # Mean absolute error. With `sample_weight`, sum(w*|d|) / sum(w).
+  -> .mae(predictions, actual, sample_weight = nil)
+    out = nil
+    if sample_weight == nil
+      total = 0.to_f
+      i = 0
+      predictions.each -> (p)
+        d = p.to_f - actual[i].to_f
+        d = 0.to_f - d if d < 0
+        total += d
+        i += 1
+      out = total / predictions.size.to_f
+    else
+      wts = Estimator.weight_values(sample_weight, predictions.size)
+      if wts != nil
+        total = 0.to_f
+        sw = 0.to_f
+        i = 0
+        predictions.each -> (p)
+          d = p.to_f - actual[i].to_f
+          d = 0.to_f - d if d < 0
+          total += d * wts[i]
+          sw += wts[i]
+          i += 1
+        out = total / sw
+    out
 
   # Median absolute error — the median of the absolute residuals,
   # scikit-learn's median_absolute_error. The mean/median/max of the
@@ -444,19 +541,48 @@
     ClassificationReport.new(predictions, actual)
 
   # R² (coefficient of determination).
-  -> .r2(predictions, actual)
-    m = Stats.mean(actual)
-    ss_res = 0.to_f
-    ss_tot = 0.to_f
-    i = 0
-    actual.each -> (a)
-      dr = a.to_f - predictions[i].to_f
-      dt = a.to_f - m
-      ss_res += dr * dr
-      ss_tot += dt * dt
-      i += 1
-    return 1.to_f if ss_tot == 0
-    1.to_f - ss_res / ss_tot
+  #
+  # With `sample_weight` every squared term is weighted AND the baseline
+  # is the WEIGHTED mean of `actual` — scikit-learn's
+  # r2_score(..., sample_weight=w):
+  #
+  #     1 - sum(w*(a - p)^2) / sum(w*(a - weighted_mean(a))^2)
+  #
+  # Weighting the residuals but not the baseline would be the classic
+  # wrong answer (it compares against a model the weighted data never
+  # proposes), so both move together. 1 when the weighted target variance
+  # is 0; nil for an unusable weight vector.
+  -> .r2(predictions, actual, sample_weight = nil)
+    out = nil
+    if sample_weight == nil
+      m = Stats.mean(actual)
+      ss_res = 0.to_f
+      ss_tot = 0.to_f
+      i = 0
+      actual.each -> (a)
+        dr = a.to_f - predictions[i].to_f
+        dt = a.to_f - m
+        ss_res += dr * dr
+        ss_tot += dt * dt
+        i += 1
+      out = 1.to_f
+      out = 1.to_f - ss_res / ss_tot if ss_tot != 0
+    else
+      wts = Estimator.weight_values(sample_weight, predictions.size)
+      if wts != nil
+        wm = Estimator.weighted_mean(actual, wts)
+        ss_res = 0.to_f
+        ss_tot = 0.to_f
+        i = 0
+        actual.each -> (a)
+          dr = a.to_f - predictions[i].to_f
+          dt = a.to_f - wm
+          ss_res += dr * dr * wts[i]
+          ss_tot += dt * dt * wts[i]
+          i += 1
+        out = 1.to_f
+        out = 1.to_f - ss_res / ss_tot if ss_tot != 0
+    out
 
   # --- Clustering (unsupervised; no true labels exist) ---
 

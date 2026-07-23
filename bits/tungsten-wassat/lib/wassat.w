@@ -221,6 +221,27 @@ use portfolio
     print(dtext) if drat_out == "-"
     return 0
 
+  # --fast opens with a bounded SLS burst on the preprocessed kernel —
+  # cms5's satisfiable-BMC trick, and the reason it beat us 10x there.
+  # Structured kernels that are satisfiable usually fall in a few thousand
+  # flips (bmc-ibm-2: 1,226); UNSAT instances waste ~20ms and move on. The
+  # model reconstructs through the elimination stack and passes the same
+  # original-formula guard as every engine.
+  if proof_mode == WASSAT_PROOF_NONE
+    reduced = { "nvars": formula["nvars"], "clauses": art["clauses"] }
+    # bounded so a refutation-bound instance pays ~10-40ms, not a solve
+    burst_flips = 50000
+    burst = wassat_sls_solve(reduced, burst_flips, 7)
+    if burst["sat"]
+      model = wassat_reconstruct_model(art["stack"], burst["model"], formula["nvars"])
+      unless wassat_model_satisfies?(formula, model)
+        raise "internal error: SLS burst model does not satisfy the input formula"
+      print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
+      << "c mode: fast (sls burst)"
+      << "c conflicts: 0, decisions: 0"
+      << "c stats restarts=0 reduces=0 flips=[burst["flips"]] " + pstats
+      return 0
+
   s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, options["lookahead"])
   s.seed_proof_ids(art["gids"], art["next_gid"])
 

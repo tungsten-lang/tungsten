@@ -279,14 +279,19 @@ use portfolio
       # Serial light probe (flat-load, so construction is native): many
       # structured instances decide within a few thousand conflicts on the
       # light kernel and skip the heavy rounds entirely (ibm-6: 1.3k).
+      # Kernel size does NOT predict probe wins (ibm-6 at 368k clauses
+      # decides in ~2.5k conflicts; ibm-12 at 195k never does) — so the
+      # probe always runs with a small budget: a win skips the heavy
+      # rounds outright, a miss costs ~0.15s.
       if probe_p == nil
         sprobe = Wassat.from_flat(formula["nvars"], art, 0)
-        # budget scales inversely with kernel size: per-conflict cost grows
-        # with the formula, and so does the price of a missed probe
-        # (measured: ibm-10 decides at 8-12k and wants the budget; a 12k
-        # miss on ibm-12's 195k-clause kernel wastes >1s)
-        probe_budget = formula["clauses"].size < 100000 ? 12000 : 4000
-        spr = sprobe.solve_budget(probe_budget)
+        # time-boxed in conflict slices: wins arrive fast when they arrive
+        # at all, and a miss is capped at ~120ms instead of a full
+        # conflict budget's worth of work on a big kernel
+        probe_t0 = ccall("__w_clock_ms")
+        spr = sprobe.solve_budget(512)
+        while spr["status"] == 0 && spr["conflicts"] < 4000 && ccall("__w_clock_ms") - probe_t0 < 120
+          spr = sprobe.solve_budget(512)
         if spr["status"] != 0
           pre_msq = ccall("__w_clock_ms") - t0
           if spr["status"] == 1

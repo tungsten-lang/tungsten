@@ -275,7 +275,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
 -> wassat_fast_arm_body(solver, res, base)
   solver.solve_shared(res, base)
 
--> wassat_run_fast_portfolio(input, threads, share)
+-> wassat_run_fast_portfolio(input, threads, share, gpu)
   cnf_text = read_file(input)
   raise "cannot read input formula '[input]'" if cnf_text == nil
   formula = wassat_parse_cnf(cnf_text)
@@ -315,6 +315,25 @@ WASSAT_ARM_SLS = 2             # local search, models only
     base = a * (nv + 8)
     handles.push(Thread.new -> wassat_fast_arm_body(solver, res, base))
     a += 1
+
+  # The GPU walker fleet races on the COORDINATOR'S thread — which would
+  # otherwise sleep in join — so all Metal allocation stays off the worker
+  # threads. Models only; a CDCL answer raises the stop cell and the host
+  # dispatch loop yields between chunks. Unavailability (no device, no
+  # sidecar) degrades to a CPU-only race, never an error.
+  gpu_model = []
+  if gpu
+    reduced = { "nvars": nv, "clauses": art["clauses"] }
+    metal_path = env("WASSAT_METAL")
+    metal_path = "bin/wassat.metal" if metal_path == nil || metal_path == ""
+    begin
+      gr = wassat_sls_gpu_solve(reduced, 512, 100000, 1000000, 9001, 48, metal_path, stop)
+      if gr["sat"]
+        gpu_model = gr["model"]
+        stop[0] = 1
+    rescue e
+      << "c arm gpu-sls unavailable: [e]"
+
   handles.each -> (h)
     z = h.join
 
@@ -335,13 +354,21 @@ WASSAT_ARM_SLS = 2             # local search, models only
       verdict = "SAT" if st == 1 && verdict == "UNKNOWN"
       a += 1
 
+  # a CDCL UNSAT beats everything; otherwise any model wins — the GPU's
+  # counts as one more arm
+  if verdict == "UNKNOWN" && !gpu_model.empty?
+    verdict = "SAT"
+    winner = 0 - 2
+
   if verdict == "SAT"
-    base = winner * (nv + 8)
-    reduced_model = []
-    v = 1
-    while v <= nv
-      reduced_model.push(res[base + v] == 1 ? v : 0 - v)
-      v += 1
+    reduced_model = gpu_model
+    if winner >= 0
+      base = winner * (nv + 8)
+      reduced_model = []
+      v = 1
+      while v <= nv
+        reduced_model.push(res[base + v] == 1 ? v : 0 - v)
+        v += 1
     model = wassat_reconstruct_model(art["stack"], reduced_model, nv)
     unless wassat_model_satisfies?(formula, model)
       raise "internal error: winning arm's model does not satisfy the original formula"
@@ -350,8 +377,9 @@ WASSAT_ARM_SLS = 2             # local search, models only
     << "s UNSATISFIABLE"
   else
     << "s UNKNOWN"
-  << "c mode: fast-portfolio threads=[threads]"
-  << "c winner: arm[winner]" unless winner < 0
+  << "c mode: fast-portfolio threads=[threads] gpu=[gpu]"
+  << "c winner: arm[winner]" if winner >= 0
+  << "c winner: gpu-sls" if winner == 0 - 2
   a = 0
   while a < threads
     base = a * (nv + 8)
@@ -369,6 +397,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
   race_dir = nil
   fast = false
   share = true
+  gpu = false
   threads = 4
   i = 0
   while i < args.size
@@ -389,6 +418,9 @@ WASSAT_ARM_SLS = 2             # local search, models only
     elsif flag == "--no-share"
       share = false
       i += 1
+    elsif flag == "--gpu"
+      gpu = true
+      i += 1
     elsif flag.starts_with?("--")
       raise "unknown portfolio option: [flag]"
     else
@@ -397,7 +429,8 @@ WASSAT_ARM_SLS = 2             # local search, models only
       i += 1
   raise "missing input formula" if input == nil
   raise "--fast forgoes certificates; drop --fast or --proof" if fast && proof_out != nil
-  return wassat_run_fast_portfolio(input, threads, share) if fast
+  raise "--gpu requires --fast (the GPU arm returns models, not proofs)" if gpu && !fast
+  return wassat_run_fast_portfolio(input, threads, share, gpu) if fast
   if race_dir == nil
     base = input.split("/").last.replace(".cnf", "")
     race_dir = "/tmp/wassat-race-" + base

@@ -233,7 +233,9 @@
 
 # Run the GPU walker fleet. Deterministic per (seed, walkers, chunk size).
 # Returns the CPU engine's result shape; "flips" is the per-walker bound.
--> wassat_sls_gpu_solve(formula, walkers, chunk_flips, chunks, seed, noise, metal_path)
+# stop_cell: optional shared i64[] — between dispatches the host loop breaks
+# when another engine has answered (nil = run to the chunk budget).
+-> wassat_sls_gpu_solve(formula, walkers, chunk_flips, chunks, seed, noise, metal_path, stop_cell = nil)
   nv = formula["nvars"]
   norm = wassat_sls_gpu_normalize(formula["clauses"])
   if norm["impossible"]
@@ -302,9 +304,12 @@
   found = false
   c = 0
   while c < chunks && !found
-    wsls_metal_dispatch(queue, walk_pipe, [wsls_metal_buffer(device, fla), wsls_metal_buffer(device, fcs), wsls_metal_buffer(device, fcl), wsls_metal_buffer(device, och), wsls_metal_buffer(device, ocn), wsls_metal_buffer(device, ocv), wsls_metal_buffer(device, asg), wsls_metal_buffer(device, satc), wsls_metal_buffer(device, crit), wsls_metal_buffer(device, ulist), wsls_metal_buffer(device, upos), wsls_metal_buffer(device, uc), wsls_metal_buffer(device, rngbuf), wsls_metal_buffer(device, ctrl), wsls_metal_buffer(device, params)], walkers)
-    found = ctrl[0] != 0
-    c += 1
+    if stop_cell != nil && stop_cell[0] != 0
+      c = chunks
+    else
+      z = wsls_metal_dispatch(queue, walk_pipe, [wsls_metal_buffer(device, fla), wsls_metal_buffer(device, fcs), wsls_metal_buffer(device, fcl), wsls_metal_buffer(device, och), wsls_metal_buffer(device, ocn), wsls_metal_buffer(device, ocv), wsls_metal_buffer(device, asg), wsls_metal_buffer(device, satc), wsls_metal_buffer(device, crit), wsls_metal_buffer(device, ulist), wsls_metal_buffer(device, upos), wsls_metal_buffer(device, uc), wsls_metal_buffer(device, rngbuf), wsls_metal_buffer(device, ctrl), wsls_metal_buffer(device, params)], walkers)
+      found = ctrl[0] != 0
+      c += 1
 
   best = 2147483647
   wi = 0

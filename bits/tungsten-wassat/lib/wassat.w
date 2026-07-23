@@ -258,6 +258,11 @@ use portfolio
       # only worth its ~60ms serial overhead (artifact write + spawn) when
       # the heavy rounds + solve it overlaps are big
       begin
+        # Opt-in (WASSAT_RACE=1): on instances where the probe rarely wins
+        # it is pure core contention against the main solve — measured
+        # net-negative on loaded machines (ibm-12 serial 1.68s vs raced
+        # 1.9-4.6s). Worth revisiting with a win-prediction heuristic.
+        raise "race disabled" unless env("WASSAT_RACE") == "1"
         raise "small instance; skip race" if formula["clauses"].size <= 50000
         race_dir = "/tmp/wassat-lightrace-" + input.split("/").last.replace(".cnf", "")
         z = ccall("__w_system", "mkdir -p " + race_dir)

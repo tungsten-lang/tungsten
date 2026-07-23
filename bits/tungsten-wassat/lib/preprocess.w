@@ -1235,6 +1235,8 @@ WASSAT_PRE_BUCKET_CAP = 1024
     { "nvars": @nvars, "clauses": clauses, "gids": gids,
       "next_gid": @next_gid, "status": @status,
       "stack": @stack, "gone": @gone,
+      "fla": @fla, "fcs": @fcs, "fcl": @fcl, "falive": @falive,
+      "ftaut": @ftaut, "fpgid": @fpgid, "fncl": @ncl,
       "wrat": @wrat_lines, "drat": @drat_lines,
       "stats": { "probes": @probes_run, "probes_failed": @probes_failed,
                  "vars_substituted": @vars_substituted,

@@ -1366,6 +1366,66 @@ WASSAT_PROOF_DRAT = 2
             # v < 0 means rollout applied a forced literal; just loop again
     limited ? 0 : result
 
+  # Flat-load construction for the trusted path: build the solver shell
+  # with NO input clauses, then ingest the preprocessor's flat mirrors
+  # natively (arena copy + watches + binary lists + proof ids in one pass).
+  -> .from_flat(nvars, art, lookahead)
+    s = Wassat.new(nvars, [], WASSAT_PROOF_NONE, lookahead)
+    s.load_flat(art)
+    s
+
+  -> load_flat(art)
+    sncl = art["fncl"]
+    # size the arena and tables for the live clauses plus learning headroom
+    total = 0
+    sfcl = art["fcl"]
+    salive = art["falive"]
+    i = 0
+    while i < sncl
+      total += sfcl[i] if salive[i] == 1
+      i += 1
+    cap = total * 8 + 4096
+    @arena = i64[cap]
+    @acap = cap
+    maxcl = sncl * 8 + 1024
+    @cstart = i64[maxcl]
+    @clen = i64[maxcl]
+    @alive = i64[maxcl]
+    @clbd = i64[maxcl]
+    @gid = i64[maxcl]
+    @ccap = maxcl
+    @wnext = i64[2 * maxcl]
+    @wblock = i64[2 * maxcl]
+    @bl_cap = 2 * total + 4096
+    @bl_next = i64[@bl_cap]
+    @bl_other = i64[@bl_cap]
+    @bl_ci = i64[@bl_cap]
+    units = i64[@nvars + 4]
+    pm = i64[10]
+    pm[0] = sncl
+    pm[1] = cap
+    pm[2] = maxcl
+    pm[8] = @bl_cap
+    wassat_load_flat(art["fla"], art["fcs"], sfcl, salive, art["ftaut"],
+                     art["fpgid"], @arena, @cstart, @clen, @alive, @clbd,
+                     @gid, @wfirst, @wnext, @wblock, @bl_head, @bl_next,
+                     @bl_other, @bl_ci, units, pm)
+    @ncl = pm[3]
+    @asize = pm[4]
+    @bl_size = pm[7]
+    @next_gid = art["next_gid"]
+    @ok = false if pm[6] == 1
+    u = 0
+    while u < pm[5]
+      ci = units[u]
+      l = @arena[@cstart[ci]]
+      if self.value(l) == 0
+        self.enqueue(l, ci)
+      elsif self.value(l) < 0
+        @ok = false
+      u += 1
+    0
+
   -> solve
     self.solve_budget(0)
 
@@ -1786,6 +1846,100 @@ WASSAT_PROOF_DRAT = 2
 
   st[3] = keep
   st[4] = target
+  0
+
+# Native flat-formula loader: ingest a preprocessor's flat clause mirrors
+# directly — live clauses copy arena-to-arena, watches and binary-implication
+# lists are built in the same pass, proof ids carry over. Replaces a boxed
+# artifact rebuild plus a boxed per-literal intake (~250ms on 100k-clause
+# instances). Unit clause indices land in `units` for the boxed enqueue.
+#
+#   pm[0] src clause count      pm[1] dst arena cap   pm[2] dst clause cap
+#   pm[3] out: clauses stored   pm[4] out: arena used pm[5] out: unit count
+#   pm[6] out: 1 = saw empty clause  pm[7] out: bl nodes used  pm[8] bl cap
+-> wassat_load_flat(sfla, sfcs, sfcl, salive, staut, spgid, dar, dcs, dcl, dal, dlbd, dgid, wf, wn, wb, blh, bln, blo, blc, units, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+  sncl = pm[0]
+  acap = pm[1]
+  ccap = pm[2]
+  blcap = pm[8]
+  ncl = 0
+  asize = 0
+  nunits = 0
+  saw_empty = 0
+  blsize = 0
+  si = 0
+  while si < sncl
+    if salive[si] == 1
+      n = sfcl[si]
+      if ncl + 1 < ccap && asize + n < acap
+        st = sfcs[si]
+        dcs[ncl] = asize
+        dcl[ncl] = n
+        dal[ncl] = 1
+        dlbd[ncl] = 0
+        dgid[ncl] = spgid[si]
+        j = 0
+        while j < n
+          dar[asize + j] = sfla[st + j]
+          j = j + 1
+        if n == 0
+          saw_empty = 1
+        else
+          if n == 1
+            units[nunits] = ncl
+            nunits = nunits + 1
+          else
+            a = dar[asize]
+            bq = dar[asize + 1]
+            if n == 2
+              if blsize + 2 <= blcap
+                la = 0
+                if a > 0
+                  la = a << 1
+                else
+                  la = ((0 - a) << 1) + 1
+                lb = 0
+                if bq > 0
+                  lb = bq << 1
+                else
+                  lb = ((0 - bq) << 1) + 1
+                bln[blsize] = blh[la]
+                blo[blsize] = bq
+                blc[blsize] = ncl
+                blh[la] = blsize
+                blsize = blsize + 1
+                bln[blsize] = blh[lb]
+                blo[blsize] = a
+                blc[blsize] = ncl
+                blh[lb] = blsize
+                blsize = blsize + 1
+            else
+              la = 0
+              if a > 0
+                la = a << 1
+              else
+                la = ((0 - a) << 1) + 1
+              lb = 0
+              if bq > 0
+                lb = bq << 1
+              else
+                lb = ((0 - bq) << 1) + 1
+              w0 = 2 * ncl
+              wn[w0] = wf[la]
+              wb[w0] = bq
+              wf[la] = w0
+              w1 = 2 * ncl + 1
+              wn[w1] = wf[lb]
+              wb[w1] = a
+              wf[lb] = w1
+        asize = asize + n
+        ncl = ncl + 1
+    si = si + 1
+  pm[3] = ncl
+  pm[4] = asize
+  pm[5] = nunits
+  pm[6] = saw_empty
+  pm[7] = blsize
   0
 
 # Native replay propagation for hint construction: queue-driven unit

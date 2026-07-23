@@ -308,8 +308,13 @@ use portfolio
     print(dtext) if drat_out == "-"
     return 0
 
-  s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, options["lookahead"])
-  s.seed_proof_ids(art["gids"], art["next_gid"])
+  s = nil
+  if proof_mode == WASSAT_PROOF_NONE
+    # trusted path: ingest the preprocessor's flat mirrors natively
+    s = Wassat.from_flat(formula["nvars"], art, options["lookahead"])
+  else
+    s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, options["lookahead"])
+    s.seed_proof_ids(art["gids"], art["next_gid"])
 
   # File destinations stream during search so certificate memory stays flat;
   # `-` destinations render from the in-memory arrays after the fact. When

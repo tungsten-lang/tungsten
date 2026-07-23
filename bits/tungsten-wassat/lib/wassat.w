@@ -164,8 +164,35 @@ use portfolio
     << "s UNKNOWN"
     exit(1)
 
+# Report a probe-process win: reconstruct the reduced-formula model (or
+# accept the trusted UNSAT), verify, print. Returns 0 on success, 1 when
+# the status file is unreadable (caller falls through to its own solve).
+-> wassat_report_probe_win(prc, probe_out, light_stack, formula, art, start_ms)
+  if prc == 20
+    << "s UNSATISFIABLE"
+    << "c mode: fast (raced: light probe)"
+    << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - start_ms)
+    return 0
+  line = read_file(probe_out)
+  return 1 if line == nil
+  reduced_model = []
+  wassat_tokenize(line).each -> (tk)
+    v = tk.to_i
+    reduced_model.push(v) unless v == 0 || tk == "0"
+  return 1 if reduced_model.empty?
+  model = wassat_reconstruct_model(light_stack, reduced_model, formula["nvars"])
+  unless wassat_model_satisfies?(formula, model)
+    raise "internal error: probe model does not satisfy the input formula"
+  print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
+  << "c mode: fast (raced: light probe)"
+  << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - start_ms)
+  0
+
 -> wassat_run_file_checked(args)
   options = wassat_cli_options(args)
+  probe_p = nil
+  probe_out = nil
+  light_stack = nil
   input = options["input"]
   wrat_out = options["proof"]
   wrat_out = options["lrat"] if wrat_out == nil
@@ -220,26 +247,38 @@ use portfolio
         << "c conflicts: 0, decisions: 0"
         << "c stats restarts=0 reduces=0 flips=[burst0["flips"]] " + wassat_pre_stats_text(art["stats"], pre_ms0)
         return 0
-      # Light CDCL probe: structured instances often decide within a few
-      # thousand conflicts on the light kernel — skip the heavy rounds
-      # entirely when they do. A miss costs ~0.1-0.3s against the ~1s
-      # heavy round it replaces on the instances it targets.
-      probe = Wassat.new(formula["nvars"], art["clauses"], WASSAT_PROOF_NONE, 0)
-      probe_r = probe.solve_budget(4000)
-      if probe_r["status"] != 0
-        pre_msp = ccall("__w_clock_ms") - t0
-        if probe_r["status"] == 1
-          model = wassat_reconstruct_model(art["stack"], probe_r["model"], formula["nvars"])
-          unless wassat_model_satisfies?(formula, model)
-            raise "internal error: light-probe model does not satisfy the input formula"
-          print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
-        else
-          << "s UNSATISFIABLE"
-        << "c mode: fast (light+cdcl probe)"
-        << "c conflicts: [probe_r["conflicts"]], decisions: [probe_r["decisions"]]"
-        << "c stats restarts=[probe_r["restarts"]] reduces=[probe_r["reduces"]] " + wassat_pre_stats_text(art["stats"], pre_msp)
-        return 0
+      # Race a probe PROCESS on the light kernel while this process pays
+      # for the heavy rounds and the full solve. A process, not a thread:
+      # the main thread must not dispatch while worker threads run
+      # (inline caches are process-global), but OS isolation makes the
+      # probe free — its miss costs nothing serial but the artifact write.
+      light_stack = art["stack"]
+      probe_p = nil
+      probe_out = nil
+      # only worth its ~60ms serial overhead (artifact write + spawn) when
+      # the heavy rounds + solve it overlaps are big
+      begin
+        raise "small instance; skip race" if formula["clauses"].size <= 50000
+        race_dir = "/tmp/wassat-lightrace-" + input.split("/").last.replace(".cnf", "")
+        z = ccall("__w_system", "mkdir -p " + race_dir)
+        rp = race_dir + "/reduced.cnf"
+        gp = race_dir + "/gids.txt"
+        probe_out = race_dir + "/probe.out"
+        z = ccall("__w_system", "rm -f " + probe_out)
+        if wassat_write_artifact_files(formula["nvars"], art, rp, gp)
+          probe_p = Process.spawn([wassat_own_binary, "--worker", rp, "--gids", gp,
+                                   "--status", probe_out, "--arm", "probe"])
+      rescue e
+        probe_p = nil
+
       art = pre.run_heavy
+      # did the probe already win while we preprocessed?
+      if probe_p != nil
+        prc = probe_p.poll
+        if prc != nil && (prc == 10 || prc == 20)
+          r2 = wassat_report_probe_win(prc, probe_out, light_stack, formula, art, t0)
+          return 0 if r2 == 0
+          probe_p = nil
   else
     art = pre.run
   pre_ms = ccall("__w_clock_ms") - t0
@@ -293,6 +332,19 @@ use portfolio
     raise "proof write failed at '[drat_stream]'" unless wassat_append_text(drat_stream, dhead)
 
   result = s.solve_budget(options["conflicts"])
+  if probe_p != nil
+    if result["status"] == 0
+      prc = probe_p.poll
+      if prc != nil && (prc == 10 || prc == 20)
+        r2 = wassat_report_probe_win(prc, probe_out, light_stack, formula, art, t0)
+        return 0 if r2 == 0
+    z = probe_p.kill
+    prc = probe_p.poll
+    if prc == nil
+      z = ccall("__w_sleep_ms", 30)
+      prc = probe_p.poll
+      z = probe_p.kill(9) if prc == nil
+      prc = probe_p.wait
   # A run that did not end UNSAT truncates its sink destinations at once: a
   # partial refutation must never survive on disk, whatever happens later.
   s.abort_proof_sinks unless result["status"] == -1

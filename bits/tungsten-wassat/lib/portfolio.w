@@ -179,6 +179,20 @@ WASSAT_ARM_SLS = 2             # local search, models only
     raise "artifact write failed" unless write_file(gids_path, glines.join("\n") + "\n")
     0
 
+# Write a preprocessed artifact (reduced DIMACS + global-id table) for
+# worker processes. Returns false on any write failure.
+-> wassat_write_artifact_files(nvars, art, reduced_path, gids_path)
+  lines = []
+  lines.push("p cnf [nvars] [art["clauses"].size]")
+  art["clauses"].each -> (c)
+    lines.push(c.empty? ? "0" : c.join(" ") + " 0")
+  return false unless write_file(reduced_path, lines.join("\n") + "\n")
+  glines = []
+  art["gids"].each -> (g)
+    glines.push("[g]")
+  glines.push("[art["next_gid"]]")
+  write_file(gids_path, glines.join("\n") + "\n")
+
 # Path to the running wassat binary (argv[0] as invoked).
 -> wassat_own_binary
   a = ccall("__w_argv_program")
@@ -243,6 +257,19 @@ WASSAT_ARM_SLS = 2             # local search, models only
       raise "status write failed" unless write_file(status_path, r["model"].join(" ") + " 0\n")
       exit(10)
     exit(3)                    # budget exhausted; SLS never answers UNSAT
+
+  if arm == "probe"
+    # trusted-mode racer over a light artifact: no proof obligations, so
+    # verdicts are exit codes and SAT writes the reduced-formula model
+    sp = Wassat.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_NONE, 0)
+    pr = sp.solve_budget(0)
+    if pr["status"] == 1
+      raise "status write failed" unless write_file(status_path, pr["model"].join(" ") + " 0\n")
+      exit(10)
+    elsif pr["status"] == 0 - 1
+      raise "status write failed" unless write_file(status_path, "UNSAT\n")
+      exit(20)
+    exit(3)
 
   s = Wassat.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_WRAT, 0)
   s.seed_proof_ids(gids, next_gid)

@@ -276,6 +276,26 @@ use portfolio
       rescue e
         probe_p = nil
 
+      # Serial light probe (flat-load, so construction is native): many
+      # structured instances decide within a few thousand conflicts on the
+      # light kernel and skip the heavy rounds entirely (ibm-6: 1.3k).
+      if probe_p == nil
+        sprobe = Wassat.from_flat(formula["nvars"], art, 0)
+        spr = sprobe.solve_budget(4000)
+        if spr["status"] != 0
+          pre_msq = ccall("__w_clock_ms") - t0
+          if spr["status"] == 1
+            model = wassat_reconstruct_model(light_stack, spr["model"], formula["nvars"])
+            unless wassat_model_satisfies?(formula, model)
+              raise "internal error: light-probe model does not satisfy the input formula"
+            print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
+          else
+            << "s UNSATISFIABLE"
+          << "c mode: fast (light+cdcl probe)"
+          << "c conflicts: [spr["conflicts"]], decisions: [spr["decisions"]]"
+          << "c stats restarts=[spr["restarts"]] reduces=[spr["reduces"]] " + wassat_pre_stats_text(art["stats"], pre_msq)
+          return 0
+
       art = pre.run_heavy
       # did the probe already win while we preprocessed?
       if probe_p != nil

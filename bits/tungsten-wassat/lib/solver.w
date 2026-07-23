@@ -148,6 +148,8 @@ WASSAT_PROOF_DRAT = 2
     # from restart churn — the EMA policy alone re-created the old 4x
     # regression on satisfiable BMC. Intervals grow geometrically; stable
     # gets 3x the focused budget.
+    # focused-first measured better on BOTH uuf250 (95k vs 160k conflicts
+    # stable-first) and ibm-12 (14.8k vs 18.9k)
     @mode_stable = false
     @mode_len = 3000
     @mode_at = 3000

@@ -142,6 +142,33 @@ describe "Wassat preprocessing" ->
       expect(-> () wassat_parse_cnf("p cnf 99999999999 1\n1 0\n")).to raise_error
       expect(-> () wassat_parse_cnf("p cnf 2 99999999999\n1 0\n")).to raise_error
 
+    it "native parser (compiled CLI) matches the boxed accept/reject matrix" ->
+      # __w_parse_dimacs is compiled-only; drive it through the binary.
+      bin = "bits/tungsten-wassat/bin/wassat"
+      good = ["p cnf 2 1\n1 -2 0\n", "c hi\np cnf 2 2\n1 0 -2 0\n%\n0\n", "p cnf 3 1\n1 2\n3 0\n"]
+      gi = 0
+      good.each -> (t)
+        a = wassat_parse_cnf(t)
+        z = system("printf '" + t.replace("\n", "\\n").replace("\t", "\\t") + "' > /tmp/npar_g[gi].cnf")
+        ok = system("cd /Users/erik/tungsten && " + bin + " /tmp/npar_g[gi].cnf --fast > /tmp/npar_g[gi].out 2>&1")
+        out = read_file("/tmp/npar_g[gi].out")
+        expect(out.index("s ") != nil).to eq(true)
+        expect(out.index("c error") == nil).to eq(true)
+        gi += 1
+      bad = ["1 0\n", "p cnf 1\n1 0\n", "p xnf 1 1\n1 0\n", "p cnf 1 1\np cnf 1 1\n1 0\n",
+             "p cnf 1 1\nwat 0\n", "p cnf 1 1\ncat 1 0\n", "p cnf 2 1\n3 0\n",
+             "p cnf 1 1\n1\n", "p cnf 1 1\n1 -0\n", "p cnf 1 1\n00 0\n",
+             "p cnf 2 2\n1 0\n", "p cnf 2 1\n1 0\n2 0\n", "p cnf 2 1\nx 1 2 0\n"]
+      bi = 0
+      bad.each -> (t)
+        expect(-> () wassat_parse_cnf(t)).to raise_error
+        z = system("printf '" + t.replace("\n", "\\n").replace("\t", "\\t") + "' > /tmp/npar_b[bi].cnf")
+        rc = system("cd /Users/erik/tungsten && " + bin + " /tmp/npar_b[bi].cnf --fast > /tmp/npar_b[bi].out 2>&1")
+        expect(rc).to eq(false)
+        out = read_file("/tmp/npar_b[bi].out")
+        expect(out.index("c error") != nil).to eq(true)
+        bi += 1
+
     it "accepts tab-separated DIMACS" ->
       f = wassat_parse_cnf("p cnf 2 1\n1\t-2\t0\n")
       expect(f["clauses"].size).to eq(1)

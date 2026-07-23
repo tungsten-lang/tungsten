@@ -46,6 +46,43 @@
   return false if token != "0" && token.to_i == 0
   true
 
+# Native-parser entry: the C extern tokenizes and validates strict DIMACS
+# straight into flat i64 buffers (the boxed splitting below cost ~200ms on
+# 200k-clause files); boxed clauses are then built by a cheap array walk.
+# Validation matrix matches wassat_parse_cnf exactly — the spec suite runs
+# the same rejection cases against both.
+-> wassat_parse_cnf_native(text)
+  cap_l = text.size / 2 + 64
+  cap_c = text.size / 4 + 64
+  lits = i64[cap_l]
+  offs = i64[cap_c]
+  lens = i64[cap_c]
+  hdr = i64[8]
+  z = ccall("__w_parse_dimacs", text, lits, offs, lens, hdr)
+  err = hdr[4]
+  if err != 0
+    msgs = { 1: "missing or duplicate p cnf header", 2: "malformed p-line",
+             3: "invalid DIMACS token", 4: "literal exceeds declared variable count",
+             5: "clause not terminated by 0", 6: "clause count mismatch",
+             7: "input exceeds parser buffers", 8: "XNF/native XOR clauses are not supported; expand them to CNF" }
+    raise "[msgs[err]] (line [hdr[5]])"
+  nvars = hdr[0]
+  raise "implausible variable count [nvars] in header" if nvars > 50000000
+  ncl = hdr[2]
+  clauses = []
+  k = 0
+  while k < ncl
+    o = offs[k]
+    n = lens[k]
+    c = []
+    j = 0
+    while j < n
+      c.push(lits[o + j])
+      j += 1
+    clauses.push(c)
+    k += 1
+  { "nvars": nvars, "clauses": clauses }
+
 # Parse DIMACS CNF text into {"nvars": Int, "clauses": Array}.
 -> wassat_parse_cnf(text)
   nvars = 0

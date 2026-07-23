@@ -18671,6 +18671,121 @@ WValue __w_eprint(WValue v) {
 
 /* Stable file identity for alias detection (symlinks, hardlinks): packs
  * (device, inode); nil when the path does not exist. */
+/* Strict DIMACS CNF parser into caller-provided flat i64 buffers — the
+ * boxed line/token splitting cost ~200ms on 200k-clause files and its
+ * output was immediately re-walked into flat mirrors anyway. Validation
+ * matches the .w parser exactly: single well-formed header, `cnf` kind,
+ * digit-only counts, literals within the declared bound, the exact token
+ * `0` as terminator (no signed/padded zero), `c`-token comments, a `%`
+ * trailer ending the clause section, and a declared-vs-parsed count match.
+ *
+ * hdr: [0]=nvars [1]=declared [2]=parsed clauses [3]=total lits
+ *      [4]=error code (0 ok) [5]=error line (1-based)
+ * offs[k]/lens[k] index into lits for clause k.
+ * Error codes: 1 no/dup header, 2 bad header, 3 bad token, 4 bound,
+ * 5 unterminated, 6 count mismatch, 7 buffer overflow, 8 xnf. */
+WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
+                        WValue lens_val, WValue hdr_val) {
+    char inline_buf[6];
+    const char *tx; size_t tlen;
+    w_str_data(text_val, inline_buf, &tx, &tlen);
+    WArray *la = (WArray *)w_as_ptr(lits_val);
+    WArray *oa = (WArray *)w_as_ptr(offs_val);
+    WArray *na = (WArray *)w_as_ptr(lens_val);
+    WArray *ha = (WArray *)w_as_ptr(hdr_val);
+    int64_t *lits = (int64_t *)la->slots + la->start;
+    int64_t *offs = (int64_t *)oa->slots + oa->start;
+    int64_t *lens = (int64_t *)na->slots + na->start;
+    int64_t *hdr  = (int64_t *)ha->slots + ha->start;
+    int64_t lcap = la->size, ccap = oa->size;
+    int64_t nvars = 0, declared = 0, ncl = 0, nlits = 0, cur_off = 0, cur_len = 0;
+    int have_header = 0, done = 0;
+    int64_t lineno = 1;
+    size_t i = 0;
+    hdr[0] = hdr[1] = hdr[2] = hdr[3] = hdr[4] = hdr[5] = 0;
+#define P_ERR(code) { hdr[4] = (code); hdr[5] = lineno; return W_NIL; }
+    while (i < tlen && !done) {
+        /* consume one line's tokens */
+        int line_started = 0;
+        while (i < tlen && tx[i] != '\n') {
+            char c = tx[i];
+            if (c == ' ' || c == '\t' || c == '\r') { i++; continue; }
+            /* token start */
+            size_t j = i;
+            while (j < tlen && tx[j] != ' ' && tx[j] != '\t' &&
+                   tx[j] != '\r' && tx[j] != '\n') j++;
+            size_t n = j - i;
+            if (!line_started && c == '%') { done = 1; i = j; break; }
+            if (!line_started && n == 1 && c == 'c') {
+                /* comment token: skip rest of line */
+                while (j < tlen && tx[j] != '\n') j++;
+                i = j; break;
+            }
+            if (!line_started && n == 1 && c == 'p') {
+                if (have_header) P_ERR(1);
+                /* expect: cnf <digits> <digits> then end of line */
+                const char *q = tx + j; size_t rem = tlen - j;
+                int64_t vals[2]; int vi = 0;
+                size_t k = 0;
+                /* skip spaces, read "cnf" */
+                while (k < rem && (q[k] == ' ' || q[k] == '\t')) k++;
+                if (k + 3 > rem || q[k] != 'c' || q[k+1] != 'n' || q[k+2] != 'f') P_ERR(2);
+                k += 3;
+                for (; vi < 2; vi++) {
+                    while (k < rem && (q[k] == ' ' || q[k] == '\t')) k++;
+                    if (k >= rem || q[k] < '0' || q[k] > '9') P_ERR(2);
+                    int64_t v = 0;
+                    while (k < rem && q[k] >= '0' && q[k] <= '9') {
+                        v = v * 10 + (q[k] - '0');
+                        if (v > 2000000000) P_ERR(2);
+                        k++;
+                    }
+                    vals[vi] = v;
+                }
+                while (k < rem && (q[k] == ' ' || q[k] == '\t' || q[k] == '\r')) k++;
+                if (k < rem && q[k] != '\n') P_ERR(2);
+                nvars = vals[0]; declared = vals[1]; have_header = 1;
+                if (declared + 2 > ccap) P_ERR(7);
+                i = j + k; break;
+            }
+            if (!have_header) P_ERR(1);
+            if (!line_started && n == 1 && c == 'x') P_ERR(8);
+            line_started = 1;
+            /* literal token: optional sign then digits only */
+            size_t k = i; int neg = 0;
+            if (tx[k] == '-' || tx[k] == '+') { neg = (tx[k] == '-'); k++; }
+            if (k >= j) P_ERR(3);
+            int64_t v = 0;
+            for (; k < j; k++) {
+                if (tx[k] < '0' || tx[k] > '9') P_ERR(3);
+                v = v * 10 + (tx[k] - '0');
+                if (v > 2000000000) P_ERR(4);
+            }
+            if (v == 0) {
+                /* exact "0" only */
+                if (n != 1) P_ERR(3);
+                if (ncl >= declared) P_ERR(6);
+                offs[ncl] = cur_off; lens[ncl] = cur_len;
+                ncl++; cur_off = nlits; cur_len = 0;
+            } else {
+                if (v > nvars) P_ERR(4);
+                if (nlits + 1 > lcap) P_ERR(7);
+                lits[nlits++] = neg ? -v : v;
+                cur_len++;
+                cur_off = nlits - cur_len;
+            }
+            i = j;
+        }
+        if (i < tlen && tx[i] == '\n') { i++; lineno++; }
+    }
+    if (!have_header) P_ERR(1);
+    if (cur_len != 0) P_ERR(5);
+    if (ncl != declared) P_ERR(6);
+    hdr[0] = nvars; hdr[1] = declared; hdr[2] = ncl; hdr[3] = nlits;
+    return W_NIL;
+#undef P_ERR
+}
+
 WValue __w_file_id(WValue path_val) {
     const char *path = as_str(path_val);
     struct stat st;

@@ -212,7 +212,7 @@ use portfolio
   raise "cannot read input formula '[input]'" if cnf_text == nil
   wassat_prepare_output(wrat_out, input, "WRAT")
   wassat_prepare_output(drat_out, input, "DRAT")
-  formula = wassat_parse_cnf(cnf_text)
+  formula = wassat_parse_cnf_native(cnf_text)
 
   # Preprocess once, above solver construction. The artifact carries the
   # reduced clauses with their global proof ids, the elimination stack for

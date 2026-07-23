@@ -260,9 +260,13 @@ WASSAT_ARM_SLS = 2             # local search, models only
 
   if arm == "probe"
     # trusted-mode racer over a light artifact: no proof obligations, so
-    # verdicts are exit codes and SAT writes the reduced-formula model
+    # verdicts are exit codes and SAT writes the reduced-formula model.
+    # SELF-LIMITING: a coordinator killed by timeout/interrupt orphans the
+    # racer (it leads its own process group by design) — two leaked probes
+    # ground at 97% CPU for 20 minutes. The budget bounds an orphan's life;
+    # a live coordinator never needs more than this anyway.
     sp = Wassat.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_NONE, 0)
-    pr = sp.solve_budget(0)
+    pr = sp.solve_budget(2000000)
     if pr["status"] == 1
       raise "status write failed" unless write_file(status_path, pr["model"].join(" ") + " 0\n")
       exit(10)

@@ -319,7 +319,7 @@ use portfolio
             << "s UNSATISFIABLE"
           mode_tag = art["raw"] == true ? "raw cdcl" : "light+cdcl probe"
           << "c mode: fast ([mode_tag])"
-          << "c conflicts: [spr["conflicts"]], decisions: [spr["decisions"]]"
+          << "c conflicts: [spr["conflicts"]], decisions: [spr["decisions"]], props: [spr["props"]]"
           << "c stats restarts=[spr["restarts"]] reduces=[spr["reduces"]] " + wassat_pre_stats_text(art["stats"], pre_msq)
           return 0
 

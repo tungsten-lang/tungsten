@@ -174,6 +174,7 @@ WASSAT_PROOF_DRAT = 2
     # searches dragging an ever-larger database.
     @nlearned = 0
     @vivified = 0
+    @last_reduce_at = 0
     # Random-3-SAT-scale formulas want a TIGHT reduction cadence (small DB
     # = fast propagation; uuf250: 95k conflicts tight vs 128k relaxed);
     # structured instances want it RELAXED (retained clauses collapse the
@@ -250,6 +251,7 @@ WASSAT_PROOF_DRAT = 2
     @clen = i64[maxcl]
     @alive = i64[maxcl]
     @clbd = i64[maxcl]           # 0 = original clause (never deleted)
+    @cused = i64[maxcl]          # conflict count when last resolved in analysis
     @gid = i64[maxcl]            # clause index -> global proof id
     @ccap = maxcl
     @ncl = 0
@@ -323,6 +325,7 @@ WASSAT_PROOF_DRAT = 2
       cl = i64[ncap]
       al = i64[ncap]
       lb = i64[ncap]
+      cu = i64[ncap]
       gd = i64[ncap]
       wn = i64[2 * ncap]
       wb = i64[2 * ncap]
@@ -332,6 +335,7 @@ WASSAT_PROOF_DRAT = 2
         cl[i] = @clen[i]
         al[i] = @alive[i]
         lb[i] = @clbd[i]
+        cu[i] = @cused[i]
         gd[i] = @gid[i]
         i += 1
       i = 0
@@ -348,6 +352,7 @@ WASSAT_PROOF_DRAT = 2
       @clen = cl
       @alive = al
       @clbd = lb
+      @cused = cu
       @gid = gd
       @wnext = wn
       @wblock = wb
@@ -524,9 +529,10 @@ WASSAT_PROOF_DRAT = 2
     @astate[0] = confl
     @astate[1] = @tsize
     @astate[2] = @dlevel
+    @astate[5] = @conflicts
     wassat_analyze(@arena, @assign, @level, @reason, @seen, @cstart, @clen,
                    @trail, @lbuf, @mbuf, @mstk, @mclr, @activity, @heap,
-                   @heappos, @hstate, @astate, @nvars)
+                   @heappos, @hstate, @astate, @nvars, @cused)
     @lsize = @astate[3]
     @astate[4]
 
@@ -1088,12 +1094,18 @@ WASSAT_PROOF_DRAT = 2
         cut = b
         b -= 1
 
-    # keep binaries and anything below the cut; drop the rest
+    # Keep binaries and anything below the cut; drop the rest — EXCEPT
+    # tier-2 clauses (LBD <= 6) resolved in analysis since the previous
+    # reduction: recency of use predicts future use better than glue alone
+    # (glucose-style tiering; the counting chains of cardinality instances
+    # live or die by this).
     ci = 0
     while ci < @ncl
       if @alive[ci] == 1 && @clbd[ci] >= cut && @clen[ci] > 2 && @clbd[ci] > 2
-        @alive[ci] = 0
+        keep2 = @clbd[ci] <= 6 && @cused[ci] >= @last_reduce_at
+        @alive[ci] = 0 unless keep2
       ci += 1
+    @last_reduce_at = @conflicts
 
     # Fixed-capacity mode reclaims the arena in place: live clauses slide
     # down over dead space (dest <= src, in index order), clause INDICES
@@ -1473,6 +1485,7 @@ WASSAT_PROOF_DRAT = 2
     @clen = i64[maxcl]
     @alive = i64[maxcl]
     @clbd = i64[maxcl]
+    @cused = i64[maxcl]
     @gid = i64[maxcl]
     @ccap = maxcl
     @wnext = i64[2 * maxcl]
@@ -1772,7 +1785,7 @@ WASSAT_PROOF_DRAT = 2
 #
 #   st[0] = conflicting clause   st[1] = trail size   st[2] = decision level
 #   st[3] = learned clause size  st[4] = backjump level
--> wassat_analyze(ar, asg, lvl, rsn, sn, cs, cln, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64)
+-> wassat_analyze(ar, asg, lvl, rsn, sn, cs, cln, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[])
   confl = st[0]
   tsize = st[1]
   dl = st[2]
@@ -1784,6 +1797,7 @@ WASSAT_PROOF_DRAT = 2
   keep_going = true
 
   while keep_going
+    cused[cl] = st[5]
     stx = cs[cl]
     n = cln[cl]
     # Skip the literal being RESOLVED by variable, not by slot: watch-based

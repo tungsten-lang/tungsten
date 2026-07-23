@@ -157,6 +157,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
     # @probing suppresses unit derivation for temporary probe assignments.
     @helper_mark = {}
     @probing = false
+    @lazy_lits = false
 
   # From-flat intake for the trusted path: the native parser's flat arrays
   # fill the mirrors (arena, occurrence lists, signatures, tautology marks,
@@ -179,6 +180,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
     @osize = pm[2]
     @next_gid = ncl + 1
     # boxed truth stays LAZY: nil slots, materialized per clause on touch
+    @lazy_lits = true
     k = 0
     while k < ncl
       @lits.push(nil)
@@ -1295,12 +1297,17 @@ WASSAT_PRE_BUCKET_CAP = 1024
     while v <= @nvars
       @gone[v] = 0 if @gone[v] == 2 && @passign[v] != 0
       v += 1
+    # Boxed clauses are consumed only by the small-kernel SLS burst and
+    # the portfolio artifact writer; on big trusted-path formulas every
+    # downstream consumer reads the flat mirrors, and materializing 300k
+    # lazy clauses here would undo the lazy-truth win — twice per run.
+    want_boxed = !@lazy_lits || @ncl <= 50000
     clauses = []
     gids = []
     ci = 0
     while ci < @ncl
       if @falive[ci] == 1
-        clauses.push(self.lits_of(ci))
+        clauses.push(self.lits_of(ci)) if want_boxed
         gids.push(@fpgid[ci])
       ci += 1
     { "nvars": @nvars, "clauses": clauses, "gids": gids,

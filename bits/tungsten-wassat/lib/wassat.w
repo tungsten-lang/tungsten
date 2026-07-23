@@ -234,7 +234,7 @@ use portfolio
       # ones, where the SLS constructor's normalization alone costs more
       # than the CDCL probe.
       burst0 = { "sat": false }
-      if art["clauses"].size <= 50000
+      if art["clauses"].size > 0 && art["clauses"].size <= 50000
         reduced0 = { "nvars": formula["nvars"], "clauses": art["clauses"] }
         burst0 = wassat_sls_solve(reduced0, 60000, 7)
       if burst0["sat"]

@@ -6,6 +6,21 @@
 # make both agree on a formula that is not the one on disk.  The duplication
 # is the feature.
 
+# Phase profiling for the speed campaign: WASSAT_PROFILE=1 prints per-phase
+# wall times to stderr (stderr so `s ` verdict parsing stays clean). Returns
+# the current clock so call sites chain: t = wassat_prof("phase", t).
+-> wassat_prof(label, since_ms)
+  return 0 unless env("WASSAT_PROFILE") == "1"
+  t = ccall("__w_clock_ms")
+  z = ccall("__w_eprint", "c prof [label] [t - since_ms]ms\n")
+  t
+
+# Clock a phase start only when profiling: the ccall is unavailable in the
+# interpreter, where the spec suite runs these paths.
+-> wassat_prof_clock
+  return 0 unless env("WASSAT_PROFILE") == "1"
+  ccall("__w_clock_ms")
+
 # Split a line into non-empty whitespace-separated tokens. DIMACS permits
 # tabs as well as spaces, so each space-split piece is split again on tabs;
 # strip disposes of any carriage returns.

@@ -158,6 +158,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
     @helper_mark = {}
     @probing = false
     @lazy_lits = false
+    @raw_kernel = false
 
   # From-flat intake for the trusted path: the native parser's flat arrays
   # fill the mirrors (arena, occurrence lists, signatures, tautology marks,
@@ -208,11 +209,28 @@ WASSAT_PRE_BUCKET_CAP = 1024
 
   -> run_light_flat(parse)
     self.init_budget
+    tp = wassat_prof_clock
     self.intake_flat(parse)
-    self.run_probing if @status == 0
-    self.run_substitution if @status == 0
+    tp = wassat_prof("pre.intake_flat", tp)
+    # Raw-kernel policy, measured on the bmc family: on big structured
+    # instances substitution made search HARDER (ibm-12: 12.2k conflicts on
+    # the substituted kernel, 6.5k after heavy repair, 4.9k raw) and every
+    # pipeline phase was pure overhead on top. Modern-solver shape: large
+    # inputs go straight to CDCL; preprocessing effort belongs to small
+    # kernels where it is cheap and provably shrinks search (php, dubois,
+    # lr5's Sinz chains). WASSAT_RAW=1/0 forces either policy.
+    raw = @ncl > 50000
+    raw = env("WASSAT_RAW") == "1" if env("WASSAT_RAW") != nil
+    @raw_kernel = raw
+    self.run_probing if @status == 0 && !raw
+    tp = wassat_prof("pre.probing", tp)
+    self.run_substitution if @status == 0 && !raw
+    tp = wassat_prof("pre.substitution", tp)
     self.sweep_satisfied if @status == 0
-    self.artifact
+    tp = wassat_prof("pre.sweep", tp)
+    art = self.artifact
+    tp = wassat_prof("pre.artifact", tp)
+    art
 
   # Lazy boxed truth: intake_flat leaves @lits as nil slots and clauses
   # materialize from the flat mirrors only when a technique actually touches
@@ -1201,9 +1219,14 @@ WASSAT_PRE_BUCKET_CAP = 1024
     self.artifact
 
   -> run_heavy
+    tp = wassat_prof_clock
     self.heavy_rounds
+    tp = wassat_prof("pre.heavy_rounds", tp)
     self.sweep_satisfied if @status == 0
-    self.artifact
+    tp = wassat_prof("pre.heavy_sweep", tp)
+    art = self.artifact
+    tp = wassat_prof("pre.heavy_artifact", tp)
+    art
 
   -> init_budget
     # Probing gets a fixed slice; encoding-scale instances get a deeper
@@ -1220,8 +1243,11 @@ WASSAT_PRE_BUCKET_CAP = 1024
     progress = true
     while progress && @status == 0 && self.within_budget && passes < WASSAT_PRE_MAX_PASSES
       before = @clauses_subsumed + @clauses_strengthened + @vars_eliminated
+      tp = wassat_prof_clock
       z = self.run_subsumption
+      tp = wassat_prof("pre.subsume.p[passes]", tp)
       z = self.run_bve if @status == 0 && self.within_budget
+      tp = wassat_prof("pre.bve.p[passes]", tp)
       gained = @clauses_subsumed + @clauses_strengthened + @vars_eliminated - before
       threshold = 1 + @ncl / 512
       progress = gained >= threshold
@@ -1311,6 +1337,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
         gids.push(@fpgid[ci])
       ci += 1
     { "nvars": @nvars, "clauses": clauses, "gids": gids,
+      "raw": @raw_kernel,
       "next_gid": @next_gid, "status": @status,
       "stack": @stack, "gone": @gone,
       "fla": @fla, "fcs": @fcs, "fcl": @fcl, "falive": @falive,

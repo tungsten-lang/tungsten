@@ -208,11 +208,13 @@ use portfolio
   proof_mode = WASSAT_PROOF_DRAT unless drat_out == nil
   proof_mode = WASSAT_PROOF_WRAT unless wrat_out == nil
   # Read the formula BEFORE touching any destination; only then truncate.
+  tprof = wassat_prof_clock
   cnf_text = read_file(input)
   raise "cannot read input formula '[input]'" if cnf_text == nil
   wassat_prepare_output(wrat_out, input, "WRAT")
   wassat_prepare_output(drat_out, input, "DRAT")
   formula = wassat_parse_cnf_native(cnf_text)
+  tprof = wassat_prof("cli.parse", tprof)
 
   # Preprocess once, above solver construction. The artifact carries the
   # reduced clauses with their global proof ids, the elimination stack for
@@ -228,6 +230,7 @@ use portfolio
   art = nil
   if proof_mode == WASSAT_PROOF_NONE
     art = pre.run_light_flat(formula)
+    tprof = wassat_prof("cli.light", tprof)
     if art["status"] == 0
       # The burst pays only on kernels local search can actually crack —
       # measured: hits on small kernels (ibm-2), never on 100k-clause
@@ -237,6 +240,7 @@ use portfolio
       if art["clauses"].size > 0 && art["clauses"].size <= 50000
         reduced0 = { "nvars": formula["nvars"], "clauses": art["clauses"] }
         burst0 = wassat_sls_solve(reduced0, 60000, 7)
+      tprof = wassat_prof("cli.sls_burst", tprof)
       if burst0["sat"]
         model = wassat_reconstruct_model(art["stack"], burst0["model"], formula["nvars"])
         unless wassat_model_satisfies?(formula, model)
@@ -289,9 +293,21 @@ use portfolio
         # at all, and a miss is capped at ~120ms instead of a full
         # conflict budget's worth of work on a big kernel
         probe_t0 = ccall("__w_clock_ms")
+        # On a raw kernel the probe IS the solve: unbounded (or the
+        # explicit --conflicts budget); on a preprocessed kernel it stays
+        # a cheap scout whose miss falls through to the heavy rounds.
+        probe_wall = 120
+        probe_cap = 4000
+        if art["raw"] == true
+          probe_wall = 1 << 40
+          probe_cap = options["conflicts"] > 0 ? options["conflicts"] : 1 << 60
+        if env("WASSAT_PROBE_MS") != nil
+          probe_wall = env("WASSAT_PROBE_MS").to_i
+          probe_cap = probe_wall * 40
         spr = sprobe.solve_budget(512)
-        while spr["status"] == 0 && spr["conflicts"] < 4000 && ccall("__w_clock_ms") - probe_t0 < 120
+        while spr["status"] == 0 && spr["conflicts"] < probe_cap && ccall("__w_clock_ms") - probe_t0 < probe_wall
           spr = sprobe.solve_budget(512)
+        tprof = wassat_prof("cli.serial_probe", tprof)
         if spr["status"] != 0
           pre_msq = ccall("__w_clock_ms") - t0
           if spr["status"] == 1
@@ -301,12 +317,14 @@ use portfolio
             print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
           else
             << "s UNSATISFIABLE"
-          << "c mode: fast (light+cdcl probe)"
+          mode_tag = art["raw"] == true ? "raw cdcl" : "light+cdcl probe"
+          << "c mode: fast ([mode_tag])"
           << "c conflicts: [spr["conflicts"]], decisions: [spr["decisions"]]"
           << "c stats restarts=[spr["restarts"]] reduces=[spr["reduces"]] " + wassat_pre_stats_text(art["stats"], pre_msq)
           return 0
 
       art = pre.run_heavy
+      tprof = wassat_prof("cli.heavy", tprof)
       # did the probe already win while we preprocessed?
       if probe_p != nil
         prc = probe_p.poll
@@ -347,6 +365,7 @@ use portfolio
   if proof_mode == WASSAT_PROOF_NONE
     # trusted path: ingest the preprocessor's flat mirrors natively
     s = Wassat.from_flat(formula["nvars"], art, options["lookahead"])
+    tprof = wassat_prof("cli.from_flat", tprof)
   else
     s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, options["lookahead"])
     s.seed_proof_ids(art["gids"], art["next_gid"])
@@ -372,6 +391,7 @@ use portfolio
     raise "proof write failed at '[drat_stream]'" unless wassat_append_text(drat_stream, dhead)
 
   result = s.solve_budget(options["conflicts"])
+  tprof = wassat_prof("cli.solve", tprof)
   if probe_p != nil
     if result["status"] == 0
       prc = probe_p.poll
@@ -395,6 +415,7 @@ use portfolio
   # never as a wrong `v` line a harness might trust.
   if result["status"] == 1
     result["model"] = wassat_reconstruct_model(art["stack"], result["model"], formula["nvars"])
+    tprof = wassat_prof("cli.reconstruct", tprof)
     unless wassat_model_satisfies?(formula, result["model"])
       raise "internal error: model does not satisfy the input formula"
 

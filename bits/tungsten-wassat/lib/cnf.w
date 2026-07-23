@@ -81,7 +81,9 @@
       j += 1
     clauses.push(c)
     k += 1
-  { "nvars": nvars, "clauses": clauses }
+  { "nvars": nvars, "clauses": clauses,
+    "flat_lits": lits, "flat_offs": offs, "flat_lens": lens,
+    "flat_ncl": ncl, "flat_nlits": hdr[3] }
 
 # Parse DIMACS CNF text into {"nvars": Int, "clauses": Array}.
 -> wassat_parse_cnf(text)

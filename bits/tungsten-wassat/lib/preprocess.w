@@ -158,6 +158,67 @@ WASSAT_PRE_BUCKET_CAP = 1024
     @helper_mark = {}
     @probing = false
 
+  # From-flat intake for the trusted path: the native parser's flat arrays
+  # fill the mirrors (arena, occurrence lists, signatures, tautology marks,
+  # sequential proof ids) in one native pass; the boxed @lits truth — still
+  # needed by rewriting, resolution commits, the elimination stack, and the
+  # artifact — is built by a single cheap walk. Replaces the boxed
+  # per-literal store() intake. Call INSTEAD of intake() via run_light_flat.
+  -> intake_flat(parse)
+    @fqhead = 0
+    ncl = parse["flat_ncl"]
+    lits = parse["flat_lits"]
+    offs = parse["flat_offs"]
+    lens = parse["flat_lens"]
+    pm = i64[8]
+    pm[0] = ncl
+    wassat_pre_intake(lits, offs, lens, @fla, @fcs, @fcl, @falive, @ftaut,
+                      @fsig, @fpgid, @oh, @on, @ov, @ocount, pm)
+    @ncl = ncl
+    @fasize = pm[1]
+    @osize = pm[2]
+    @next_gid = ncl + 1
+    # boxed truth, one tight walk
+    k = 0
+    while k < ncl
+      o = offs[k]
+      n = lens[k]
+      c = []
+      j = 0
+      while j < n
+        c.push(lits[o + j])
+        j += 1
+      @lits.push(c)
+      k += 1
+    # fire input units / empty clauses exactly like intake()
+    ci = 0
+    while ci < @ncl && @status == 0
+      n = @fcl[ci]
+      if n == 0
+        self.plog_add(@next_gid, [], [@fpgid[ci]])
+        @next_gid += 1
+        @status = -1
+      elsif n == 1 && @ftaut[ci] == 0
+        l = @fla[@fcs[ci]]
+        lv = self.value(l)
+        if lv < 0
+          self.refute(ci)
+        elsif lv == 0
+          self.assign(l, ci)
+      ci += 1
+    if @status == 0
+      confl = self.propagate_root
+      self.refute(confl) if confl >= 0
+    0
+
+  -> run_light_flat(parse)
+    self.init_budget
+    self.intake_flat(parse)
+    self.run_probing if @status == 0
+    self.run_substitution if @status == 0
+    self.sweep_satisfied if @status == 0
+    self.artifact
+
   # Both proof dialects at once (CLI requested --proof and --drat together).
   -> enable_dual_emission
     @emit_wrat = true
@@ -1622,6 +1683,55 @@ WASSAT_PRE_BUCKET_CAP = 1024
       pm[7] = ticks
       pm[8] = gen
       0
+
+# Native mirror intake from the parser's flat arrays: copy the literal
+# arena, compute per-clause tautology marks and 64-bit signatures, build
+# the intrusive occurrence lists, and assign sequential proof ids —
+# everything store() did per boxed literal, in one pass.
+#   pm[0] in: clause count   pm[1] out: arena size   pm[2] out: occ nodes
+-> wassat_pre_intake(slits, soffs, slens, fla, fcs, fcl, falive, ftaut, fsig, fpgid, och, ocn, ocv, ocount, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+  ncl = pm[0]
+  asize = 0
+  osize = 0
+  k = 0
+  while k < ncl
+    o = soffs[k]
+    n = slens[k]
+    fcs[k] = asize
+    fcl[k] = n
+    falive[k] = 1
+    fpgid[k] = k + 1
+    sig = 0
+    t = 0
+    j = 0
+    while j < n
+      l = slits[o + j]
+      fla[asize + j] = l
+      av = l
+      if l < 0
+        av = 0 - l
+      sig = sig | (1 << (av & 63))
+      m = 0
+      while m < j
+        if fla[asize + m] == 0 - l
+          t = 1
+        m = m + 1
+      li = av + av
+      if l < 0
+        li = li + 1
+      ocn[osize] = och[li]
+      ocv[osize] = k
+      och[li] = osize
+      ocount[li] = ocount[li] + 1
+      osize = osize + 1
+      j = j + 1
+    ftaut[k] = t
+    fsig[k] = sig
+    asize = asize + n
+    k = k + 1
+  pm[1] = asize
+  pm[2] = osize
+  0
 
 # Array concatenation helper: `+` on arrays is not defined in Tungsten.
 -> wassat_concat_arrays(a, b)

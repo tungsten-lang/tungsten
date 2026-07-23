@@ -227,7 +227,7 @@ use portfolio
   pre.enable_dual_emission if proof_mode == WASSAT_PROOF_WRAT && drat_out != nil
   art = nil
   if proof_mode == WASSAT_PROOF_NONE
-    art = pre.run_light
+    art = pre.run_light_flat(formula)
     if art["status"] == 0
       # The burst pays only on kernels local search can actually crack —
       # measured: hits on small kernels (ibm-2), never on 100k-clause

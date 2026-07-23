@@ -281,7 +281,12 @@ use portfolio
       # light kernel and skip the heavy rounds entirely (ibm-6: 1.3k).
       if probe_p == nil
         sprobe = Wassat.from_flat(formula["nvars"], art, 0)
-        spr = sprobe.solve_budget(4000)
+        # budget scales inversely with kernel size: per-conflict cost grows
+        # with the formula, and so does the price of a missed probe
+        # (measured: ibm-10 decides at 8-12k and wants the budget; a 12k
+        # miss on ibm-12's 195k-clause kernel wastes >1s)
+        probe_budget = formula["clauses"].size < 100000 ? 12000 : 4000
+        spr = sprobe.solve_budget(probe_budget)
         if spr["status"] != 0
           pre_msq = ccall("__w_clock_ms") - t0
           if spr["status"] == 1

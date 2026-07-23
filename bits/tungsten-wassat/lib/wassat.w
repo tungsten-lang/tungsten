@@ -202,8 +202,14 @@ use portfolio
   if proof_mode == WASSAT_PROOF_NONE
     art = pre.run_light
     if art["status"] == 0
-      reduced0 = { "nvars": formula["nvars"], "clauses": art["clauses"] }
-      burst0 = wassat_sls_solve(reduced0, 60000, 7)
+      # The burst pays only on kernels local search can actually crack —
+      # measured: hits on small kernels (ibm-2), never on 100k-clause
+      # ones, where the SLS constructor's normalization alone costs more
+      # than the CDCL probe.
+      burst0 = { "sat": false }
+      if art["clauses"].size <= 50000
+        reduced0 = { "nvars": formula["nvars"], "clauses": art["clauses"] }
+        burst0 = wassat_sls_solve(reduced0, 60000, 7)
       if burst0["sat"]
         model = wassat_reconstruct_model(art["stack"], burst0["model"], formula["nvars"])
         unless wassat_model_satisfies?(formula, model)

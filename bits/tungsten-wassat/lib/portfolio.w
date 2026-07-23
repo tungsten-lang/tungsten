@@ -1,0 +1,308 @@
+# Portfolio coordinator (Phase 3, --proof half): a process race.
+#
+# One wassat worker process per arm over the SHARED preprocessed artifact;
+# first decisive answer wins; losers are killed by process group. Processes,
+# not threads, because in proof mode isolation and kill-ability must be OS
+# guarantees, not protocols — there is no clause sharing here by design
+# (finding 3A), so the only shared state is the read-only artifact on disk.
+#
+# The COORDINATOR owns the certificate. Preprocessing runs once; the
+# artifact written to the race directory is the reduced formula as DIMACS,
+# the global-proof-id table (line k = the certificate id of reduced clause
+# k), and the coordinator keeps the elimination stack and proof prefix in
+# memory. Workers solve the reduced formula with seeded ids, so their hint
+# chains already cite global ids; on UNSAT the coordinator splices
+# prefix + winner proof and the result verifies against the ORIGINAL
+# formula's checker. On SAT the winner's model walks the elimination stack
+# and must satisfy the original formula before anything is reported.
+#
+# Workers write their proof to a temp path and RENAME it into place after
+# printing the verdict — a killed loser can never leave a plausible partial
+# certificate at the expected path.
+#
+# Arm-failure policy (finding 5A): a dead or wedged arm is logged with its
+# exit status and marked out, never respawned; zero live CDCL arms in proof
+# mode is a loud fatal error, never a hang.
+
+WASSAT_ARM_MARATHON = 0        # rare restarts, saved phases (the default core)
+WASSAT_ARM_GARDEN = 1          # randomized initial phases (diversity)
+WASSAT_ARM_SLS = 2             # local search, models only
+
++ WassatPortfolio
+  -> new(@input_path, @race_dir, @arms_spec)
+    @procs = []                # arm index -> Process or nil
+    @arm_kind = []
+    @arm_label = []
+    @out_paths = []
+    @proof_paths = []
+
+  # Run the race. Returns {"verdict", "model", "proof_path", "winner",
+  # "arms"}; raises on portfolio degradation or an unverifiable answer.
+  -> run(proof_out)
+    cnf_text = read_file(@input_path)
+    raise "cannot read input formula '[@input_path]'" if cnf_text == nil
+    formula = wassat_parse_cnf(cnf_text)
+
+    # preprocess ONCE; the artifact is what every arm consumes
+    pre = WassatPreprocess.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_WRAT)
+    art = pre.run
+
+    if art["status"] == -1
+      # refuted before any arm spawns; the prefix is the certificate
+      wtext = "wrat 1\n" + art["wrat"].join("\n") + "\n"
+      raise "proof write failed at '[proof_out]'" unless proof_out == nil || write_file(proof_out, wtext)
+      return { "verdict": "UNSAT", "model": [], "proof_path": proof_out,
+               "winner": "preprocess", "arms": [] }
+
+    reduced_path = @race_dir + "/reduced.cnf"
+    gids_path = @race_dir + "/gids.txt"
+    self.write_artifact(formula["nvars"], art, reduced_path, gids_path)
+
+    # spawn one worker per arm, each in its own process group
+    self_exe = wassat_own_binary
+    i = 0
+    while i < @arms_spec.size
+      spec = @arms_spec[i]
+      kind = spec["kind"]
+      label = spec["label"]
+      out_path = @race_dir + "/arm[i].out"
+      proof_path = @race_dir + "/arm[i].wrat"
+      argv = [self_exe, "--worker", reduced_path, "--gids", gids_path,
+              "--status", out_path]
+      if kind == WASSAT_ARM_SLS
+        argv.push("--arm")
+        argv.push("sls")
+        argv.push("--seed")
+        argv.push("[spec["seed"]]")
+      elsif kind == WASSAT_ARM_GARDEN
+        argv.push("--arm")
+        argv.push("garden")
+        argv.push("--seed")
+        argv.push("[spec["seed"]]")
+        argv.push("--proof-tmp")
+        argv.push(proof_path)
+      else
+        argv.push("--arm")
+        argv.push("marathon")
+        argv.push("--proof-tmp")
+        argv.push(proof_path)
+      @procs.push(Process.spawn(argv))
+      @arm_kind.push(kind)
+      @arm_label.push(label)
+      @out_paths.push(out_path)
+      @proof_paths.push(proof_path)
+      i += 1
+
+    # poll until a decisive arm finishes; losers die by group
+    winner = -1
+    verdict = ""
+    live_cdcl = 0
+    @arm_kind.each -> (k)
+      live_cdcl += 1 unless k == WASSAT_ARM_SLS
+    arms_report = []
+    while winner < 0
+      done_any = false
+      i = 0
+      while i < @procs.size && winner < 0
+        p = @procs[i]
+        unless p == nil
+          rc = p.poll
+          unless rc == nil
+            done_any = true
+            @procs[i] = nil
+            if rc == 10 || rc == 20
+              winner = i
+              verdict = rc == 10 ? "SAT" : "UNSAT"
+            else
+              # arm died without answering: log, mark out, never respawn
+              live_cdcl -= 1 unless @arm_kind[i] == WASSAT_ARM_SLS
+              arms_report.push("[@arm_label[i]] failed rc=[rc]")
+              raise "portfolio degraded: no prover arms remain" if live_cdcl == 0
+        i += 1
+      z = ccall("__w_sleep_ms", 20) unless done_any || winner >= 0
+
+    # kill the losers (TERM, then KILL for anything stubborn); all status
+    # goes through the Process wrapper so its exit-code cache stays coherent
+    i = 0
+    while i < @procs.size
+      p = @procs[i]
+      unless p == nil
+        z = p.kill
+        rc = p.poll
+        if rc == nil
+          z = ccall("__w_sleep_ms", 50)
+          rc = p.poll
+          if rc == nil
+            z = p.kill(9)
+            rc = p.wait
+      i += 1
+
+    win_label = @arm_label[winner]
+    arms_report.push("[win_label] WON [verdict]")
+
+    if verdict == "SAT"
+      # reconstruct through the elimination stack; verify vs the ORIGINAL
+      model_line = read_file(@out_paths[winner])
+      raise "winning arm left no status file" if model_line == nil
+      reduced_model = []
+      wassat_tokenize(model_line).each -> (t)
+        v = t.to_i
+        reduced_model.push(v) unless v == 0 || t == "0"
+      model = wassat_reconstruct_model(art["stack"], reduced_model, formula["nvars"])
+      unless wassat_model_satisfies?(formula, model)
+        raise "internal error: winning arm's model does not satisfy the original formula"
+      { "verdict": "SAT", "model": model, "proof_path": nil,
+        "winner": win_label, "arms": arms_report }
+    else
+      # splice: preprocessing prefix + the winner's search proof
+      wproof = read_file(@proof_paths[winner])
+      raise "winning arm left no proof" if wproof == nil
+      full = "wrat 1\n"
+      full = full + art["wrat"].join("\n") + "\n" unless art["wrat"].empty?
+      full = full + wproof
+      raise "proof write failed at '[proof_out]'" unless proof_out == nil || write_file(proof_out, full)
+      { "verdict": "UNSAT", "model": [], "proof_path": proof_out,
+        "winner": win_label, "arms": arms_report }
+
+  # The reduced formula as strict DIMACS plus the id table (line k holds the
+  # certificate id of clause k).
+  -> write_artifact(nvars, art, reduced_path, gids_path)
+    lines = []
+    lines.push("p cnf [nvars] [art["clauses"].size]")
+    art["clauses"].each -> (c)
+      lines.push(c.empty? ? "0" : c.join(" ") + " 0")
+    raise "artifact write failed" unless write_file(reduced_path, lines.join("\n") + "\n")
+    glines = []
+    art["gids"].each -> (g)
+      glines.push("[g]")
+    glines.push("[art["next_gid"]]")
+    raise "artifact write failed" unless write_file(gids_path, glines.join("\n") + "\n")
+    0
+
+# Path to the running wassat binary (argv[0] as invoked).
+-> wassat_own_binary
+  a = ccall("__w_argv_program")
+  a == nil || a == "" ? "wassat" : a
+
+# ---- worker mode ------------------------------------------------------------
+#
+# `wassat --worker reduced.cnf --gids g.txt --status out [--arm X]
+#  [--seed N] [--proof-tmp path]`
+#
+# Consumes the artifact, solves, writes its model (SAT) to the status file,
+# commits its proof atomically (write temp, rename), and answers through the
+# SAT-conventional exit code: 10 SAT / 20 UNSAT. Anything else is a failure.
+-> wassat_run_worker(args)
+  input = nil
+  gids_path = nil
+  status_path = nil
+  proof_tmp = nil
+  arm = "marathon"
+  seed = 1
+  i = 0
+  while i < args.size
+    flag = args[i]
+    if flag == "--gids" || flag == "--status" || flag == "--proof-tmp" || flag == "--arm" || flag == "--seed"
+      raise "missing value after [flag]" if i + 1 >= args.size
+      value = args[i + 1]
+      if flag == "--gids"
+        gids_path = value
+      elsif flag == "--status"
+        status_path = value
+      elsif flag == "--proof-tmp"
+        proof_tmp = value
+      elsif flag == "--arm"
+        arm = value
+      else
+        seed = value.to_i
+      i += 2
+    elsif flag.starts_with?("--")
+      raise "unknown worker option: [flag]"
+    else
+      raise "unexpected extra argument '[flag]'" unless input == nil
+      input = flag
+      i += 1
+  raise "worker needs an input formula" if input == nil
+  raise "worker needs --gids" if gids_path == nil
+  raise "worker needs --status" if status_path == nil
+
+  cnf_text = read_file(input)
+  raise "cannot read reduced formula" if cnf_text == nil
+  formula = wassat_parse_cnf(cnf_text)
+  gtext = read_file(gids_path)
+  raise "cannot read gid table" if gtext == nil
+  gids = []
+  gtext.split("\n").each -> (line)
+    t = line.strip
+    gids.push(t.to_i) unless t == ""
+  next_gid = gids.pop
+
+  if arm == "sls"
+    r = wassat_sls_solve(formula, 50000000, seed)
+    if r["sat"]
+      raise "status write failed" unless write_file(status_path, r["model"].join(" ") + " 0\n")
+      exit(10)
+    exit(3)                    # budget exhausted; SLS never answers UNSAT
+
+  s = Wassat.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_WRAT, 0)
+  s.seed_proof_ids(gids, next_gid)
+  s.reseed_phases(seed) if arm == "garden"
+  result = s.solve_budget(0)
+
+  if result["status"] == 1
+    raise "status write failed" unless write_file(status_path, result["model"].join(" ") + " 0\n")
+    exit(10)
+  elsif result["status"] == -1
+    unless proof_tmp == nil
+      tmp = proof_tmp + ".tmp"
+      raise "proof write failed" unless write_file(tmp, result["proof"].join("\n") + "\n")
+      raise "proof rename failed" unless ccall("__w_rename", tmp, proof_tmp)
+    raise "status write failed" unless write_file(status_path, "UNSAT\n")
+    exit(20)
+  exit(3)
+
+# ---- portfolio CLI -----------------------------------------------------------
+#
+# `wassat portfolio <cnf> --proof <path> [--dir <race dir>]`
+-> wassat_run_portfolio(args)
+  input = nil
+  proof_out = nil
+  race_dir = nil
+  i = 0
+  while i < args.size
+    flag = args[i]
+    if flag == "--proof" || flag == "--dir"
+      raise "missing value after [flag]" if i + 1 >= args.size
+      if flag == "--proof"
+        proof_out = args[i + 1]
+      else
+        race_dir = args[i + 1]
+      i += 2
+    elsif flag.starts_with?("--")
+      raise "unknown portfolio option: [flag]"
+    else
+      raise "unexpected extra argument '[flag]'" unless input == nil
+      input = flag
+      i += 1
+  raise "missing input formula" if input == nil
+  if race_dir == nil
+    base = input.split("/").last.replace(".cnf", "")
+    race_dir = "/tmp/wassat-race-" + base
+  z = ccall("__w_system", "mkdir -p " + race_dir)
+
+  arms = [
+    { "kind": WASSAT_ARM_MARATHON, "label": "marathon", "seed": 0 },
+    { "kind": WASSAT_ARM_GARDEN, "label": "garden", "seed": 42 },
+    { "kind": WASSAT_ARM_SLS, "label": "sls", "seed": 7 }
+  ]
+  port = WassatPortfolio.new(input, race_dir, arms)
+  r = port.run(proof_out)
+  if r["verdict"] == "SAT"
+    print("s SATISFIABLE\nv " + r["model"].join(" ") + " 0\n")
+  else
+    << "s UNSATISFIABLE"
+  << "c mode: portfolio"
+  << "c winner: [r["winner"]]"
+  r["arms"].each -> (line)
+    << "c arm: [line]"
+  0

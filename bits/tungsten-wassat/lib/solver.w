@@ -619,6 +619,21 @@ WASSAT_PROOF_DRAT = 2
       @refuted = true if lits.empty?
     0
 
+  # Garden-arm diversity: randomize the initial saved phases from a seed
+  # (xorshift). Call before solving; sound because phases only steer
+  # branching polarity. Seed 0 keeps the all-negative default.
+  -> reseed_phases(seed)
+    return 0 if seed == 0
+    rng = seed
+    v = 1
+    while v <= @nvars
+      rng = rng ^ (rng << 13)
+      rng = rng ^ (rng >> 7)
+      rng = rng ^ (rng << 17)
+      @phase[v] = (rng & 1) == 1 ? 1 : -1
+      v += 1
+    0
+
   # Adopt a preprocessed artifact's proof identity: clause k of the reduced
   # formula carries ids[k] in the certificate (surviving originals keep their
   # input ids, preprocessing additions sit between them), and fresh

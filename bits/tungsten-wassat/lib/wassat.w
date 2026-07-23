@@ -214,6 +214,25 @@ use portfolio
         << "c conflicts: 0, decisions: 0"
         << "c stats restarts=0 reduces=0 flips=[burst0["flips"]] " + wassat_pre_stats_text(art["stats"], pre_ms0)
         return 0
+      # Light CDCL probe: structured instances often decide within a few
+      # thousand conflicts on the light kernel — skip the heavy rounds
+      # entirely when they do. A miss costs ~0.1-0.3s against the ~1s
+      # heavy round it replaces on the instances it targets.
+      probe = Wassat.new(formula["nvars"], art["clauses"], WASSAT_PROOF_NONE, 0)
+      probe_r = probe.solve_budget(4000)
+      if probe_r["status"] != 0
+        pre_msp = ccall("__w_clock_ms") - t0
+        if probe_r["status"] == 1
+          model = wassat_reconstruct_model(art["stack"], probe_r["model"], formula["nvars"])
+          unless wassat_model_satisfies?(formula, model)
+            raise "internal error: light-probe model does not satisfy the input formula"
+          print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
+        else
+          << "s UNSATISFIABLE"
+        << "c mode: fast (light+cdcl probe)"
+        << "c conflicts: [probe_r["conflicts"]], decisions: [probe_r["decisions"]]"
+        << "c stats restarts=[probe_r["restarts"]] reduces=[probe_r["reduces"]] " + wassat_pre_stats_text(art["stats"], pre_msp)
+        return 0
       art = pre.run_heavy
   else
     art = pre.run

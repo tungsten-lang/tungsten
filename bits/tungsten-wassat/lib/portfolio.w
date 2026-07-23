@@ -306,6 +306,65 @@ WASSAT_ARM_SLS = 2             # local search, models only
 -> wassat_fast_arm_body(solver, res, base)
   solver.solve_shared(res, base)
 
+# Raw-kernel basin race: K allocation-free arms over the SAME flat artifact,
+# diversified along the axes that measurably move bmc-family trajectories —
+# decision heuristic (VMTF vs EVSIDS) and initial phases. First decisive arm
+# raises the stop cell. Returns {"status": 1/-1/0, "model": reduced-space}.
+# Motivation: ibm-12's conflict count ranges 4.9k-17k across heuristic
+# configurations with no single winner; sampling basins concurrently buys
+# min-over-arms wall time for one thread-spawn's overhead.
+-> wassat_raw_race(nv, art, threads)
+  stop = i64[4]
+  res = i64[threads * (nv + 8)]
+  ring_maxlen = 24
+  ring_cap = 4096
+  ring = i64[8 + ring_cap * (3 + ring_maxlen)]
+  solvers = []
+  a = 0
+  while a < threads
+    s = Wassat.from_flat(nv, art, 0)
+    s.enable_fixed_caps
+    s.set_stop_cell(stop)
+    s.enable_sharing(ring, ring_cap, ring_maxlen, a)
+    s.disable_vmtf if a % 2 == 1
+    s.reseed_phases(1000 + a * 7919) if a >= 2
+    solvers.push(s)
+    a += 1
+  handles = []
+  a = 0
+  while a < threads
+    solver = solvers[a]
+    base = a * (nv + 8)
+    handles.push(Thread.new -> wassat_fast_arm_body(solver, res, base))
+    a += 1
+  handles.each -> (h)
+    z = h.join
+  status = 0
+  winner = -1
+  a = 0
+  while a < threads
+    st = res[a * (nv + 8)]
+    if st == 0 - 1
+      status = 0 - 1
+      winner = a
+      a = threads
+    else
+      if st == 1 && status == 0
+        status = 1
+        winner = a
+      a += 1
+  model = []
+  conflicts = 0
+  if winner >= 0
+    base = winner * (nv + 8)
+    conflicts = res[base + nv + 4]
+    if status == 1
+      v = 1
+      while v <= nv
+        model.push(res[base + v] == 1 ? v : 0 - v)
+        v += 1
+  { "status": status, "model": model, "winner": winner, "conflicts": conflicts }
+
 -> wassat_run_fast_portfolio(input, threads, share, gpu)
   cnf_text = read_file(input)
   raise "cannot read input formula '[input]'" if cnf_text == nil

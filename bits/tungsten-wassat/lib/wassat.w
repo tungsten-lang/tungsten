@@ -293,14 +293,15 @@ use portfolio
         # at all, and a miss is capped at ~120ms instead of a full
         # conflict budget's worth of work on a big kernel
         probe_t0 = ccall("__w_clock_ms")
-        # On a raw kernel the probe IS the solve: unbounded (or the
-        # explicit --conflicts budget); on a preprocessed kernel it stays
-        # a cheap scout whose miss falls through to the heavy rounds.
+        # On a raw kernel the probe is a bounded first shot: easy kernels
+        # (ibm-6/10 class) decide inside it, and a miss falls through to
+        # the diversified thread race below. On a preprocessed kernel it
+        # stays a cheap scout whose miss pays for the heavy rounds.
         probe_wall = 120
         probe_cap = 4000
         if art["raw"] == true
-          probe_wall = 1 << 40
-          probe_cap = options["conflicts"] > 0 ? options["conflicts"] : 1 << 60
+          probe_wall = 250
+          probe_cap = options["conflicts"] > 0 ? options["conflicts"] : 3000
         if env("WASSAT_PROBE_MS") != nil
           probe_wall = env("WASSAT_PROBE_MS").to_i
           probe_cap = probe_wall * 40
@@ -312,9 +313,12 @@ use portfolio
           pre_msq = ccall("__w_clock_ms") - t0
           if spr["status"] == 1
             model = wassat_reconstruct_model(light_stack, spr["model"], formula["nvars"])
+            tprof = wassat_prof("cli.reconstruct", tprof)
             unless wassat_model_satisfies?(formula, model)
               raise "internal error: light-probe model does not satisfy the input formula"
+            tprof = wassat_prof("cli.verify", tprof)
             print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
+            tprof = wassat_prof("cli.vline", tprof)
           else
             << "s UNSATISFIABLE"
           mode_tag = art["raw"] == true ? "raw cdcl" : "light+cdcl probe"
@@ -323,6 +327,25 @@ use portfolio
           << "c stats restarts=[spr["restarts"]] reduces=[spr["reduces"]] " + wassat_pre_stats_text(art["stats"], pre_msq)
           return 0
 
+      if art["raw"] == true
+        arms = 4
+        arms = env("WASSAT_ARMS").to_i if env("WASSAT_ARMS") != nil
+        if arms > 1
+          rr = wassat_raw_race(formula["nvars"], art, arms)
+          tprof = wassat_prof("cli.raw_race", tprof)
+          if rr["status"] != 0
+            pre_msr = ccall("__w_clock_ms") - t0
+            if rr["status"] == 1
+              model = wassat_reconstruct_model(light_stack, rr["model"], formula["nvars"])
+              unless wassat_model_satisfies?(formula, model)
+                raise "internal error: race arm's model does not satisfy the input formula"
+              print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
+            else
+              << "s UNSATISFIABLE"
+            << "c mode: fast (raw cdcl race, arm [rr["winner"]])"
+            << "c conflicts: [rr["conflicts"]], decisions: 0, props: 0"
+            << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(art["stats"], pre_msr)
+            return 0
       art = pre.run_heavy
       tprof = wassat_prof("cli.heavy", tprof)
       # did the probe already win while we preprocessed?

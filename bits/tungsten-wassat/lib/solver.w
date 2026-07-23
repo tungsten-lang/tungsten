@@ -40,7 +40,34 @@ WASSAT_PROOF_DRAT = 2
 + Wassat
   -> new(@nvars, @input_clauses, @proof_mode, @lookahead)
     nv = @nvars
-    @assign = i64[nv + 1]        # 0 unassigned, 1 true, -1 false
+    @assign = i8[nv + 1]         # 0 unassigned, 1 true, -1 false — one BYTE
+                                 # per var: the propagation loop's random
+                                 # reads then live in L1 (i64 was 8x bigger)
+    # VMTF decision queue (focused mode): doubly-linked list over vars,
+    # analyzed vars move to the front, decisions walk from the cached
+    # search position toward the tail. Stable mode keeps the EVSIDS heap —
+    # the kissat split: VMTF chases the conflict frontier, the heap
+    # remembers long-run importance.
+    @vq_next = i64[nv + 2]
+    @vq_prev = i64[nv + 2]
+    @vq_stamp = i64[nv + 2]
+    @vq_state = i64[4]           # head / tail / stamp counter / search pos
+    # VMTF measured: bmc-scale raw kernels 4.6x fewer conflicts (ibm-10
+    # 5.9k -> 1.3k); random 3-SAT regresses ~25% — so the queue drives
+    # focused mode only on raw kernels, EVSIDS everywhere else.
+    @use_vmtf = false
+    v = 1
+    while v <= nv
+      @vq_prev[v] = v - 1
+      @vq_next[v] = v + 1
+      @vq_stamp[v] = nv - v + 1
+      v += 1
+    if nv >= 1
+      @vq_next[nv] = 0
+      @vq_state[0] = 1
+      @vq_state[1] = nv
+      @vq_state[2] = nv + 1
+      @vq_state[3] = 1
     @level = i64[nv + 1]
     @reason = i64[nv + 1]        # clause index, or -1 for a decision
     @seen = i64[nv + 1]
@@ -507,6 +534,7 @@ WASSAT_PROOF_DRAT = 2
         @assign[v] = 0
         @reason[v] = -1
         wassat_heap_insert(@heap, @heappos, @activity, @hstate, v)
+        @vq_state[3] = v if @vq_stamp[v] > @vq_stamp[@vq_state[3]]
       @dlevel -= 1
     @qhead = @tsize
     0
@@ -552,7 +580,8 @@ WASSAT_PROOF_DRAT = 2
     @astate[5] = @conflicts
     wassat_analyze(@arena, @assign, @level, @reason, @seen, @cstart, @clen,
                    @trail, @lbuf, @mbuf, @mstk, @mclr, @activity, @heap,
-                   @heappos, @hstate, @astate, @nvars, @cused)
+                   @heappos, @hstate, @astate, @nvars, @cused,
+                   @vq_next, @vq_prev, @vq_stamp, @vq_state)
     @lsize = @astate[3]
     @astate[4]
 
@@ -646,8 +675,17 @@ WASSAT_PROOF_DRAT = 2
 
   # Pop assigned entries lazily until the highest-activity unassigned
   # variable is found; 0 means the assignment is total.
+  # Arm diversity switch for the raw-kernel race: EVSIDS arms call this
+  # after from_flat (which turns VMTF on for raw kernels).
+  -> disable_vmtf
+    @use_vmtf = false
+    0
+
   -> pick_branch
-    wassat_heap_pick(@assign, @heap, @heappos, @activity, @hstate)
+    if @mode_stable || !@use_vmtf
+      wassat_heap_pick(@assign, @heap, @heappos, @activity, @hstate)
+    else
+      wassat_vmtf_pick(@assign, @vq_next, @vq_stamp, @vq_state)
 
   -> pick_branch_activity
     self.pick_branch
@@ -1483,10 +1521,16 @@ WASSAT_PROOF_DRAT = 2
     while i < sncl
       total += sfcl[i] if salive[i] == 1
       i += 1
-    cap = total * 8 + 4096
+    # Right-sized, not worst-cased: zero-filling 8x tables cost ~200ms of
+    # pure page touching on bmc-scale kernels (the tables dwarfed the
+    # solve). Learned clauses grow the tables on demand through
+    # grow_clause_tables, which doubles and repacks — a few cheap
+    # reallocations on long runs instead of a huge cold allocation on
+    # every run.
+    cap = total * 2 + 65536
     @arena = i64[cap]
     @acap = cap
-    maxcl = sncl * 8 + 1024
+    maxcl = sncl + sncl / 2 + 65536
     @cstart = i64[maxcl]
     @clen = i64[maxcl]
     @alive = i64[maxcl]
@@ -1494,7 +1538,7 @@ WASSAT_PROOF_DRAT = 2
     @cused = i64[maxcl]
     @gid = i64[maxcl]
     @ccap = maxcl
-    @wp_cap = 4 * maxcl + 4 * @nvars + 72
+    @wp_cap = 2 * maxcl + 4 * @nvars + 72
     @wpool = i64[@wp_cap]
     @wp_state[0] = 0
     @wp_state[1] = @wp_cap
@@ -1514,6 +1558,7 @@ WASSAT_PROOF_DRAT = 2
                      @bl_other, @bl_ci, units, pm)
     @ncl = pm[3]
     @asize = pm[4]
+    @use_vmtf = true if art["raw"] == true
     self.rebuild_watches
     @bl_size = pm[7]
     @next_gid = art["next_gid"]
@@ -1666,7 +1711,7 @@ WASSAT_PROOF_DRAT = 2
 # Best-phase snapshot: copy the current assignment's polarity for every
 # trail variable. Runs on every deepening conflict, so it must be a raw
 # typed loop — the boxed version was 58% of the ibm-12 solve profile.
--> wassat_best_phase_save(tr, asg, bph, tsize) (i64[] i64[] i64[] i64)
+-> wassat_best_phase_save(tr, asg, bph, tsize) (i64[] i8[] i64[] i64)
   ti = 0
   while ti < tsize
     l = tr[ti]
@@ -1676,7 +1721,7 @@ WASSAT_PROOF_DRAT = 2
     ti += 1
   0
 
--> wassat_propagate(ar, asg, lvl, rsn, phs, wss, wsn, wsc, wp, wst, cs, cln, tr, st, dl, blh, bln, blo, blc) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[])
+-> wassat_propagate(ar, asg, lvl, rsn, phs, wss, wsn, wsc, wp, wst, cs, cln, tr, st, dl, blh, bln, blo, blc) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[])
   qhead = st[0]
   tsize = st[1]
   conflict = -1
@@ -1927,7 +1972,7 @@ WASSAT_PROOF_DRAT = 2
 #
 #   st[0] = conflicting clause   st[1] = trail size   st[2] = decision level
 #   st[3] = learned clause size  st[4] = backjump level
--> wassat_analyze(ar, asg, lvl, rsn, sn, cs, cln, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[])
+-> wassat_analyze(ar, asg, lvl, rsn, sn, cs, cln, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[])
   confl = st[0]
   tsize = st[1]
   dl = st[2]
@@ -1964,6 +2009,7 @@ WASSAT_PROOF_DRAT = 2
         # conflict and produced noticeably poorer branching on structured
         # quotient formulas.
         z = wassat_evsids_bump(act, heap, hpos, hst, vq, nv)
+        z = wassat_vmtf_front(vqn, vqp, vqs, vst, vq)
         if lvl[vq] >= dl
           counter += 1
         else
@@ -2301,7 +2347,7 @@ WASSAT_PROOF_DRAT = 2
 # Assigned variables can remain in the heap after propagation. Discard them
 # only when they reach the top; backjump reinserts a variable iff it had
 # already been discarded. This avoids arbitrary heap removals on every unit.
--> wassat_heap_pick(asg, heap, hpos, act, hst) (i64[] i64[] i64[] i64[] i64[]) i64
+-> wassat_heap_pick(asg, heap, hpos, act, hst) (i8[] i64[] i64[] i64[] i64[]) i64
   v = 0
   while v == 0 && hst[0] > 0
     cand = wassat_heap_pop(heap, hpos, act, hst)
@@ -2340,6 +2386,37 @@ WASSAT_PROOF_DRAT = 2
   if hst[1] < 32
     hst[1] = 32
   1
+
+# VMTF move-to-front: unlink v and relink it at the queue head with a fresh
+# stamp. The stamp orders "recently in a conflict"; backjump repositions the
+# search cursor to the highest-stamp unassigned variable.
+-> wassat_vmtf_front(vqn, vqp, vqs, vst, v) (i64[] i64[] i64[] i64[] i64) i64
+  return 0 if vst[0] == v
+  pn = vqn[v]
+  pp = vqp[v]
+  if pp > 0
+    vqn[pp] = pn
+  if pn > 0
+    vqp[pn] = pp
+  if vst[1] == v
+    vst[1] = pp
+  h = vst[0]
+  vqp[h] = v
+  vqn[v] = h
+  vqp[v] = 0
+  vst[0] = v
+  vst[2] = vst[2] + 1
+  vqs[v] = vst[2]
+  0
+
+# VMTF decision: walk from the search cursor toward the tail, skipping
+# assigned variables. Returns 0 when everything is assigned (a model).
+-> wassat_vmtf_pick(asg, vqn, vqs, vst) (i8[] i64[] i64[] i64[]) i64
+  v = vst[3]
+  while v > 0 && asg[v] != 0
+    v = vqn[v]
+  vst[3] = v
+  v
 
 -> wassat_evsids_bump(act, heap, hpos, hst, v, nv) (i64[] i64[] i64[] i64[] i64 i64) i64
   act[v] = act[v] + hst[1]

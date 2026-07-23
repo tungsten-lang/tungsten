@@ -275,7 +275,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
 -> wassat_fast_arm_body(solver, res, base)
   solver.solve_shared(res, base)
 
--> wassat_run_fast_portfolio(input, threads)
+-> wassat_run_fast_portfolio(input, threads, share)
   cnf_text = read_file(input)
   raise "cannot read input formula '[input]'" if cnf_text == nil
   formula = wassat_parse_cnf(cnf_text)
@@ -301,7 +301,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
     s = Wassat.new(nv, art["clauses"], WASSAT_PROOF_NONE, 0)
     s.enable_fixed_caps
     s.set_stop_cell(stop)
-    s.enable_sharing(ring, ring_cap, ring_maxlen, a)
+    s.enable_sharing(ring, ring_cap, ring_maxlen, a) if share
     # arm 0 is marathon (default phases); the rest are garden arms with
     # seeded random phases for basin diversity
     s.reseed_phases(1000 + a * 7919) if a > 0
@@ -368,6 +368,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
   proof_out = nil
   race_dir = nil
   fast = false
+  share = true
   threads = 4
   i = 0
   while i < args.size
@@ -385,6 +386,9 @@ WASSAT_ARM_SLS = 2             # local search, models only
     elsif flag == "--fast"
       fast = true
       i += 1
+    elsif flag == "--no-share"
+      share = false
+      i += 1
     elsif flag.starts_with?("--")
       raise "unknown portfolio option: [flag]"
     else
@@ -393,7 +397,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
       i += 1
   raise "missing input formula" if input == nil
   raise "--fast forgoes certificates; drop --fast or --proof" if fast && proof_out != nil
-  return wassat_run_fast_portfolio(input, threads) if fast
+  return wassat_run_fast_portfolio(input, threads, share) if fast
   if race_dir == nil
     base = input.split("/").last.replace(".cnf", "")
     race_dir = "/tmp/wassat-race-" + base

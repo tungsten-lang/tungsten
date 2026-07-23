@@ -23,6 +23,9 @@ use cnf
 use solver
 use preprocess
 use sls
+use sls_gpu
+use trim
+use explain
 
 -> wassat_print_usage
   << "Tungsten Wassat [WASSAT_VERSION] -- SAT solver with checkable proofs"
@@ -287,20 +290,27 @@ use sls
   flips = 10000000
   seed = 1
   pre = false
+  gpu = false
+  walkers = 256
   i = 0
   while i < args.size
     flag = args[i]
-    if flag == "--flips" || flag == "--seed"
+    if flag == "--flips" || flag == "--seed" || flag == "--walkers"
       raise "missing value after [flag]" if i + 1 >= args.size
       value = args[i + 1]
       raise "[flag] requires a non-negative decimal integer, got '[value]'" unless wassat_unsigned_decimal?(value)
       if flag == "--flips"
         flips = value.to_i
+      elsif flag == "--walkers"
+        walkers = value.to_i
       else
         seed = value.to_i
       i += 2
     elsif flag == "--pre"
       pre = true
+      i += 1
+    elsif flag == "--gpu"
+      gpu = true
       i += 1
     elsif flag.starts_with?("--")
       raise "unknown wassat sls option: [flag]"
@@ -327,11 +337,11 @@ use sls
       << "c stats flips=0 restarts=0 best_unsat=1 seed=[seed]"
       return 0
     reduced = { "nvars": formula["nvars"], "clauses": art["clauses"] }
-    r = wassat_sls_solve(reduced, flips, seed)
+    r = wassat_sls_dispatch(reduced, flips, seed, gpu, walkers)
     if r["sat"]
       r["model"] = wassat_reconstruct_model(art["stack"], r["model"], formula["nvars"])
   else
-    r = wassat_sls_solve(formula, flips, seed)
+    r = wassat_sls_dispatch(formula, flips, seed, gpu, walkers)
   if r["sat"]
     # same output-integrity bar as every other engine: verify against the
     # ORIGINAL formula before reporting
@@ -345,6 +355,19 @@ v " + r["model"].join(" ") + " 0
   << "c mode: sls"
   << "c stats flips=[r["flips"]] restarts=[r["restarts"]] best_unsat=[r["best_unsat"]] seed=[r["seed"]]"
   0
+
+# CPU walker or the GPU fleet, per --gpu. The GPU path reads the Metal
+# sidecar the build wrote next to the entry point (override: WASSAT_METAL).
+-> wassat_sls_dispatch(formula, flips, seed, gpu, walkers)
+  if gpu
+    metal_path = env("WASSAT_METAL")
+    metal_path = "bin/wassat.metal" if metal_path == nil || metal_path == ""
+    chunk = 200000
+    chunks = flips / chunk
+    chunks = 1 if chunks < 1
+    wassat_sls_gpu_solve(formula, walkers, chunk, chunks, seed, metal_path)
+  else
+    wassat_sls_solve(formula, flips, seed)
 
 # Dispatch recognized command-line arguments. The executable entry point calls
 # this explicitly; importing `use wassat` is side-effect free.
@@ -367,6 +390,28 @@ v " + r["model"].join(" ") + " 0
     rescue e
       << "c error: [e]"
       << "s UNKNOWN"
+      exit(1)
+  elsif cmd == "trim"
+    rest = []
+    i = 1
+    while i < args.size
+      rest.push(args[i])
+      i += 1
+    begin
+      wassat_run_trim(rest)
+    rescue e
+      << "c error: [e]"
+      exit(1)
+  elsif cmd == "explain"
+    rest = []
+    i = 1
+    while i < args.size
+      rest.push(args[i])
+      i += 1
+    begin
+      wassat_run_explain(rest)
+    rescue e
+      << "c error: [e]"
       exit(1)
   elsif args.size >= 1
     wassat_run_file(args)

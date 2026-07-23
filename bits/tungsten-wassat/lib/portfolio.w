@@ -327,7 +327,10 @@ WASSAT_ARM_SLS = 2             # local search, models only
     s.set_stop_cell(stop)
     s.enable_sharing(ring, ring_cap, ring_maxlen, a)
     s.disable_vmtf if a % 2 == 1
-    s.reseed_phases(1000 + a * 7919) if a >= 2
+    grp = a / 2
+    s.reseed_phases(1000 + a * 7919) if grp == 1
+    s.reseed_phases(4242 + a * 104729) if grp == 3
+    s.set_positive_phases if grp == 2
     solvers.push(s)
     a += 1
   handles = []

@@ -56,6 +56,7 @@ WASSAT_PROOF_DRAT = 2
     # 5.9k -> 1.3k); random 3-SAT regresses ~25% — so the queue drives
     # focused mode only on raw kernels, EVSIDS everywhere else.
     @use_vmtf = false
+    @use_target = false
     v = 1
     while v <= nv
       @vq_prev[v] = v - 1
@@ -675,6 +676,27 @@ WASSAT_PROOF_DRAT = 2
 
   # Pop assigned entries lazily until the highest-activity unassigned
   # variable is found; 0 means the assignment is total.
+  # Seed saved phases (and the best-phase basin) from an external
+  # assignment — typically a local-search near-solution: SLS-refined
+  # polarities are the mechanism behind cms5's bmc times.
+  -> set_phases(lits)
+    lits.each -> (l)
+      v = l.abs
+      pol = l > 0 ? 1 : -1
+      @phase[v] = pol
+      @bphase[v] = pol
+    0
+
+  # All-positive saved phases: bmc-style circuit encodings often sit in a
+  # different basin family under inverted polarity (default is negative).
+  -> set_positive_phases
+    v = 1
+    while v <= @nvars
+      @phase[v] = 1
+      @bphase[v] = 1
+      v += 1
+    0
+
   # Arm diversity switch for the raw-kernel race: EVSIDS arms call this
   # after from_flat (which turns VMTF on for raw kernels).
   -> disable_vmtf
@@ -1499,7 +1521,13 @@ WASSAT_PROOF_DRAT = 2
               @decisions_made += 1
               @trail_lim[@dlevel] = @tsize
               @dlevel += 1
-              self.enqueue(@phase[v] > 0 ? v : 0 - v, -1)
+              # Target phases (cms5's 'polar stb', Biere): decide with the
+              # polarity from the deepest conflict-free trail seen, not the
+              # churn-prone last-saved phase. Ablating exactly this knob on
+              # cms5 separates its 0.18s from 0.64s on bmc-ibm-12.
+              pl = @phase[v]
+              pl = @bphase[v] if @use_target && @bphase[v] != 0
+              self.enqueue(pl > 0 ? v : 0 - v, -1)
             # v < 0 means rollout applied a forced literal; just loop again
     limited ? 0 : result
 
@@ -1558,7 +1586,13 @@ WASSAT_PROOF_DRAT = 2
                      @bl_other, @bl_ci, units, pm)
     @ncl = pm[3]
     @asize = pm[4]
-    @use_vmtf = true if art["raw"] == true
+    if art["raw"] == true
+      @use_vmtf = true
+      @use_target = true
+      # Stable-first measured WORSE here despite target phases (ibm-6
+      # 272 -> 2,461 conflicts, ibm-10 1.1k -> 3.1k) — focused-first
+      # stays the default, matching kissat. Opt-in for experiments.
+      @mode_stable = true if env("WASSAT_STABLE_FIRST") == "1"
     self.rebuild_watches
     @bl_size = pm[7]
     @next_gid = art["next_gid"]

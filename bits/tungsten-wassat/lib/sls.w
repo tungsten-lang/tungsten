@@ -185,8 +185,15 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       while v <= @nvars
         model.push(@asg[v] == 1 ? v : 0 - v)
         v += 1
-    { "sat": @st[9] == 1, "model": model, "flips": @st[4], "restarts": 0,
-      "best_unsat": @st[7], "seed": seed }
+    # The final assignment is returned even on a miss: a near-solution is
+    # exactly the polarity seed CDCL wants (cms5's CCAnr/'polar stb' trick).
+    assign = []
+    v = 1
+    while v <= @nvars
+      assign.push(@asg[v] == 1 ? v : 0 - v)
+      v += 1
+    { "sat": @st[9] == 1, "model": model, "assign": assign, "flips": @st[4],
+      "restarts": 0, "best_unsat": @st[7], "seed": seed }
 
 # One complete CCAnr-style search to a model or the flip budget.
 #

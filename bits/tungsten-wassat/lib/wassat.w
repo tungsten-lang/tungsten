@@ -328,7 +328,7 @@ use portfolio
           return 0
 
       if art["raw"] == true
-        arms = 4
+        arms = 8
         arms = env("WASSAT_ARMS").to_i if env("WASSAT_ARMS") != nil
         if arms > 1
           rr = wassat_raw_race(formula["nvars"], art, arms)

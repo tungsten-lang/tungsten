@@ -99,8 +99,9 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       return { "sat": false, "model": [], "flips": 0, "restarts": 0,
                "best_unsat": 1, "seed": seed }
 
-    # seeded initial assignment (xorshift64*)
-    rng = seed
+    # seeded initial assignment (xorshift64*); ## i64 prevents BigInt
+    # promotion (untyped shifts never wrap)
+    rng = seed ## i64
     rng = 88172645463325252 if rng == 0
     v = 1
     while v <= @nvars

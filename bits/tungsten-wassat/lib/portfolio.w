@@ -261,6 +261,105 @@ WASSAT_ARM_SLS = 2             # local search, models only
     exit(20)
   exit(3)
 
+# ---- threaded portfolio (--fast half) ----------------------------------------
+#
+# In-process threads with clause sharing — the trusted-not-proven mode, so
+# PROOF_NONE throughout and no certificate. Everything workers touch is
+# allocated on the MAIN thread before spawn (solver instances, the sharing
+# ring, the stop cell, the result slab); worker bodies are allocation-free
+# (fixed capacities, preallocated scratch), share low-LBD clauses through
+# the seqlock ring, and stop cooperatively when any arm answers.
+#
+# A top-level fn as the thread body: thread.w snapshots block captures at
+# spawn, so the per-arm loop variables bind correctly.
+-> wassat_fast_arm_body(solver, res, base)
+  solver.solve_shared(res, base)
+
+-> wassat_run_fast_portfolio(input, threads)
+  cnf_text = read_file(input)
+  raise "cannot read input formula '[input]'" if cnf_text == nil
+  formula = wassat_parse_cnf(cnf_text)
+  nv = formula["nvars"]
+
+  # preprocess ONCE; every arm consumes the same reduced clauses
+  pre = WassatPreprocess.new(nv, formula["clauses"], WASSAT_PROOF_NONE)
+  art = pre.run
+  if art["status"] == -1
+    << "s UNSATISFIABLE"
+    << "c mode: fast-portfolio (preprocessing refuted)"
+    return 0
+
+  ring_maxlen = 24
+  ring_cap = 4096
+  ring = i64[8 + ring_cap * (3 + ring_maxlen)]
+  stop = i64[4]
+  res = i64[threads * (nv + 8)]
+
+  solvers = []
+  a = 0
+  while a < threads
+    s = Wassat.new(nv, art["clauses"], WASSAT_PROOF_NONE, 0)
+    s.enable_fixed_caps
+    s.set_stop_cell(stop)
+    s.enable_sharing(ring, ring_cap, ring_maxlen, a)
+    # arm 0 is marathon (default phases); the rest are garden arms with
+    # seeded random phases for basin diversity
+    s.reseed_phases(1000 + a * 7919) if a > 0
+    solvers.push(s)
+    a += 1
+
+  handles = []
+  a = 0
+  while a < threads
+    solver = solvers[a]
+    base = a * (nv + 8)
+    handles.push(Thread.new -> wassat_fast_arm_body(solver, res, base))
+    a += 1
+  handles.each -> (h)
+    z = h.join
+
+  # collect: any UNSAT wins (trusted by the --fast contract); else any SAT
+  # model is reconstructed through the elimination stack and must satisfy
+  # the ORIGINAL formula; else everyone stopped or retired.
+  verdict = "UNKNOWN"
+  winner = -1
+  a = 0
+  while a < threads
+    st = res[a * (nv + 8)]
+    if st == 0 - 1
+      verdict = "UNSAT"
+      winner = a
+      a = threads
+    else
+      winner = a if st == 1 && verdict == "UNKNOWN"
+      verdict = "SAT" if st == 1 && verdict == "UNKNOWN"
+      a += 1
+
+  if verdict == "SAT"
+    base = winner * (nv + 8)
+    reduced_model = []
+    v = 1
+    while v <= nv
+      reduced_model.push(res[base + v] == 1 ? v : 0 - v)
+      v += 1
+    model = wassat_reconstruct_model(art["stack"], reduced_model, nv)
+    unless wassat_model_satisfies?(formula, model)
+      raise "internal error: winning arm's model does not satisfy the original formula"
+    print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
+  elsif verdict == "UNSAT"
+    << "s UNSATISFIABLE"
+  else
+    << "s UNKNOWN"
+  << "c mode: fast-portfolio threads=[threads]"
+  << "c winner: arm[winner]" unless winner < 0
+  a = 0
+  while a < threads
+    base = a * (nv + 8)
+    ms = res[base + nv + 5] - res[base + nv + 6]
+    << "c arm[a]: status=[res[base]] conflicts=[res[base + nv + 4]] ms=[ms] exported=[res[base + nv + 1]] imported=[res[base + nv + 2]] dropped_on_lap=[res[base + nv + 3]]"
+    a += 1
+  0
+
 # ---- portfolio CLI -----------------------------------------------------------
 #
 # `wassat portfolio <cnf> --proof <path> [--dir <race dir>]`
@@ -268,16 +367,24 @@ WASSAT_ARM_SLS = 2             # local search, models only
   input = nil
   proof_out = nil
   race_dir = nil
+  fast = false
+  threads = 4
   i = 0
   while i < args.size
     flag = args[i]
-    if flag == "--proof" || flag == "--dir"
+    if flag == "--proof" || flag == "--dir" || flag == "--threads"
       raise "missing value after [flag]" if i + 1 >= args.size
       if flag == "--proof"
         proof_out = args[i + 1]
+      elsif flag == "--threads"
+        threads = args[i + 1].to_i
+        raise "--threads needs 1..64" if threads < 1 || threads > 64
       else
         race_dir = args[i + 1]
       i += 2
+    elsif flag == "--fast"
+      fast = true
+      i += 1
     elsif flag.starts_with?("--")
       raise "unknown portfolio option: [flag]"
     else
@@ -285,6 +392,8 @@ WASSAT_ARM_SLS = 2             # local search, models only
       input = flag
       i += 1
   raise "missing input formula" if input == nil
+  raise "--fast forgoes certificates; drop --fast or --proof" if fast && proof_out != nil
+  return wassat_run_fast_portfolio(input, threads) if fast
   if race_dir == nil
     base = input.split("/").last.replace(".cnf", "")
     race_dir = "/tmp/wassat-race-" + base

@@ -142,6 +142,28 @@ WASSAT_PROOF_DRAT = 2
     @reductions = 0
     @next_reduce = 1500
 
+    # Threaded-portfolio state (--fast). @stop_cell is a shared i64[] the
+    # winner raises; the solve loop polls it at conflict boundaries —
+    # cooperative cancellation, because Thread.kill is deferred
+    # pthread_cancel and cannot stop an allocation-free loop. @ring is the
+    # clause-sharing seqlock ring. @fixed_caps freezes the arena and clause
+    # tables (worker threads must not allocate); on exhaustion the arm
+    # compacts via reduce_db, then retires loudly.
+    @stop_cell = nil
+    @ring = nil
+    @ring_cap = 0
+    @ring_maxlen = 0
+    @ring_stride = 0
+    @arm_id = 0
+    @read_ticket = 0
+    @fixed_caps = false
+    @retired = false
+    @import_pending = 0
+    @share_exports = 0
+    @share_imports = 0
+    @share_dropped = 0
+    @rhist = i64[64]             # reduce_db scratch (worker threads: no alloc)
+
     # Replay occurrence lists (hinted mode only): intrusive per-literal
     # lists over the LOGICAL clause database, so hint replay propagates
     # queue-driven over the clauses that can actually fire instead of
@@ -619,12 +641,37 @@ WASSAT_PROOF_DRAT = 2
       @refuted = true if lits.empty?
     0
 
+  # ---- threaded-portfolio configuration (main thread, pre-spawn) ----------
+
+  -> set_stop_cell(cell)
+    @stop_cell = cell
+    0
+
+  # Freeze capacities: grow-in-thread is forbidden, exhaustion retires the
+  # arm. Call on the main thread after construction.
+  -> enable_fixed_caps
+    @fixed_caps = true
+    0
+
+  # Join the sharing ring: ring[0] is the atomic ticket; slot t%cap starts
+  # at 8 + slot*stride with [seq, src_arm, len, lits...].
+  -> enable_sharing(ring, cap, maxlen, arm_id)
+    @ring = ring
+    @ring_cap = cap
+    @ring_maxlen = maxlen
+    @ring_stride = 3 + maxlen
+    @arm_id = arm_id
+    @read_ticket = 0
+    0
+
   # Garden-arm diversity: randomize the initial saved phases from a seed
   # (xorshift). Call before solving; sound because phases only steer
   # branching polarity. Seed 0 keeps the all-negative default.
   -> reseed_phases(seed)
     return 0 if seed == 0
-    rng = seed
+    # machine-int typing is load-bearing: untyped xorshift has no 64-bit
+    # wrap, promotes to BigInt, and turns this loop quadratic
+    rng = seed ## i64
     v = 1
     while v <= @nvars
       rng = rng ^ (rng << 13)
@@ -824,7 +871,7 @@ WASSAT_PROOF_DRAT = 2
   -> reduce_db
     # histogram LBD values to find a cut that removes about half
     total = 0
-    hist = i64[64]
+    hist = @rhist
     i = 0
     while i < 64
       hist[i] = 0
@@ -854,6 +901,30 @@ WASSAT_PROOF_DRAT = 2
         @alive[ci] = 0
       ci += 1
 
+    # Fixed-capacity mode reclaims the arena in place: live clauses slide
+    # down over dead space (dest <= src, in index order), clause INDICES
+    # stay stable (reasons, watch slots), dead clauses zero their length.
+    # Only sound without proof logging — proof replay would still need the
+    # dead literals; --fast is PROOF_NONE by contract.
+    if @fixed_caps && @proof_mode == WASSAT_PROOF_NONE
+      wp = 0
+      ci = 0
+      while ci < @ncl
+        if @alive[ci] == 1
+          st = @cstart[ci]
+          n = @clen[ci]
+          if st != wp
+            k = 0
+            while k < n
+              @arena[wp + k] = @arena[st + k]
+              k += 1
+            @cstart[ci] = wp
+          wp += n
+        else
+          @clen[ci] = 0
+        ci += 1
+      @asize = wp
+
     # rebuild watches from scratch over the survivors
     i = 0
     while i < 2 * @nvars + 4
@@ -868,6 +939,108 @@ WASSAT_PROOF_DRAT = 2
       ci += 1
     0
 
+  # ---- clause sharing (seqlock ring) ---------------------------------------
+
+  # Export the learned clause in @lbuf[0..n): reserve a ticket, mark the
+  # slot (even seq), write payload plain, commit (odd seq, RELEASE). A
+  # consumer that acquires the odd seq observes the payload.
+  -> share_export(n)
+    t = ccall("__w_arr_fetch_add", @ring, 0, 1)
+    base = 8 + (t % @ring_cap) * @ring_stride
+    z = ccall("__w_arr_store_rel", @ring, base, 2 * t)
+    @ring[base + 1] = @arm_id
+    @ring[base + 2] = n
+    i = 0
+    while i < n
+      @ring[base + 3 + i] = @lbuf[i]
+      i += 1
+    z = ccall("__w_arr_store_rel", @ring, base, 2 * t + 1)
+    @share_exports += 1
+    0
+
+  # Import committed clauses at a level-zero safe point. Returns -1 when an
+  # import refutes the formula (all-false or unit-conflict at root), else 0.
+  # Lapped slots are skipped (losing shared clauses is harmless); a torn
+  # read is impossible by the seqlock protocol, and every accepted clause
+  # is still sanity-scanned before it touches the database.
+  -> share_import
+    wt = ccall("__w_arr_load_acq", @ring, 0)
+    status = 0
+    while @read_ticket < wt && status == 0
+      t = @read_ticket
+      base = 8 + (t % @ring_cap) * @ring_stride
+      s1 = ccall("__w_arr_load_acq", @ring, base)
+      if s1 < 2 * t + 1
+        # not committed yet; retry at the next safe point
+        wt = @read_ticket
+      else
+        accept = false
+        n = 0
+        if s1 == 2 * t + 1
+          src = @ring[base + 1]
+          n = @ring[base + 2]
+          if src != @arm_id && n >= 1 && n <= @ring_maxlen
+            i = 0
+            while i < n
+              @mbuf[i] = @ring[base + 3 + i]
+              i += 1
+            s2 = ccall("__w_arr_load_acq", @ring, base)
+            accept = s2 == 2 * t + 1
+        if accept
+          # sanity: literals in range (belt and braces under the seqlock)
+          ok = true
+          i = 0
+          while i < n
+            v = @mbuf[i].abs
+            ok = false if v < 1 || v > @nvars
+            i += 1
+          if ok
+            status = self.import_clause(n)
+            @share_imports += 1 if status >= 0
+          else
+            @share_dropped += 1
+        else
+          @share_dropped += 1 if s1 > 2 * t + 1
+        @read_ticket = t + 1
+    status
+
+  # Assignment-aware install of the clause in @mbuf[0..n) at level zero:
+  # satisfied -> skip; all-false -> the formula is refuted (shared clauses
+  # are formula-implied); unit -> store, enqueue, propagate; otherwise store
+  # watching two non-false literals. Capacity exhaustion drops the import
+  # (sharing is an optimization, never worth corruption).
+  -> import_clause(n)
+    sat = false
+    unassigned = 0
+    i = 0
+    while i < n
+      lv = self.value(@mbuf[i])
+      sat = true if lv > 0
+      unassigned += 1 if lv == 0
+      i += 1
+    return 0 if sat
+    return -1 if unassigned == 0
+    if @fixed_caps && (@asize + n + 4 > @acap || @ncl + 2 >= @ccap)
+      @share_dropped += 1
+      return 0
+    # move non-false literals to the front so store_clause watches them
+    front = 0
+    i = 0
+    while i < n
+      if self.value(@mbuf[i]) == 0
+        tmp = @mbuf[front]
+        @mbuf[front] = @mbuf[i]
+        @mbuf[i] = tmp
+        front += 1
+      i += 1
+    ci = self.store_clause(@mbuf, n)
+    @clbd[ci] = 2
+    if unassigned == 1
+      self.enqueue(@mbuf[0], ci)
+      confl = self.propagate
+      return -1 if confl >= 0
+    0
+
   # ---- search -------------------------------------------------------------
 
   -> solve_loop(stop_conflicts)
@@ -875,8 +1048,16 @@ WASSAT_PROOF_DRAT = 2
     limited = false
 
     while result == 0 && !limited
-      confl = self.propagate
-      if confl >= 0
+      # Cooperative cancellation: another arm answered. Checked at the top
+      # of every iteration — the only place a worker can be stopped.
+      confl = -1
+      if @stop_cell != nil && @stop_cell[0] != 0
+        limited = true
+      else
+        confl = self.propagate
+      if limited
+        0
+      elsif confl >= 0
         @conflicts += 1
         @since_restart += 1
         if @dlevel == 0
@@ -884,63 +1065,89 @@ WASSAT_PROOF_DRAT = 2
           @formula_unsat = true
           result = -1
         else
-          target = self.analyze(confl)
-          n = @lsize
-          lbd = self.compute_lbd_buf(n)
-          self.log_learned_direct(n, confl)
-          self.backjump(target)
-          asserting = @lbuf[0]
-          if n == 1
-            # Unit clauses are stored too, not just asserted: a logged clause
-            # consumes an id in the checker's database, so skipping the store
-            # here would desynchronise every later hint reference.
-            ci = self.store_clause(@lbuf, 1)
-            self.enqueue(asserting, ci)
+          # Fixed capacities: exhaustion first forces a reduce+compact, and
+          # if the arena still cannot take this clause the arm retires
+          # loudly — never a realloc in a worker thread.
+          if @fixed_caps && (@asize + @nvars + 4 > @acap || @ncl + 2 >= @ccap)
+            self.backjump(0)
+            self.reduce_db
+            if @asize + @nvars + 4 > @acap || @ncl + 2 >= @ccap
+              @retired = true
+              limited = true
+          if limited
+            0
           else
-            # store learned clause, watching the asserting literal and a
-            # literal from the backjump level
-            best = 1
-            bl = -1
-            i = 1
-            while i < n
-              lv = @level[@lbuf[i].abs]
-              if lv > bl
-                bl = lv
-                best = i
-              i += 1
-            @obuf[0] = asserting
-            @obuf[1] = @lbuf[best]
-            j = 2
-            i = 1
-            while i < n
-              unless i == best
-                @obuf[j] = @lbuf[i]
-                j += 1
-              i += 1
-            ci = self.store_clause(@obuf, n)
-            @clbd[ci] = lbd
-            self.enqueue(asserting, ci)
-          # Feed both moving averages: the recent window drives restarts, the
-          # global mean is the yardstick it is compared against.
-          @lbd_gsum += lbd
-          @lbd_gcount += 1
-          if @lbd_wcount >= 64
-            @lbd_wsum -= @lbd_win[@lbd_wi]
-          else
-            @lbd_wcount += 1
-          @lbd_win[@lbd_wi] = lbd
-          @lbd_wsum += lbd
-          @lbd_wi = (@lbd_wi + 1) % 64
-          if @trail_wcount >= 512
-            @trail_wsum -= @trail_win[@trail_wi]
-          else
-            @trail_wcount += 1
-          @trail_win[@trail_wi] = @tsize
-          @trail_wsum += @tsize
-          @trail_wi = (@trail_wi + 1) % 512
-          wassat_evsids_advance(@hstate)
-          if stop_conflicts > 0 && @conflicts >= stop_conflicts
-            limited = true
+            target = self.analyze(confl)
+            n = @lsize
+            lbd = self.compute_lbd_buf(n)
+            self.log_learned_direct(n, confl)
+            # low-LBD learned clauses are the sharing currency
+            self.share_export(n) if @ring != nil && lbd <= 2 && n <= @ring_maxlen
+            self.backjump(target)
+            asserting = @lbuf[0]
+            if n == 1
+              # Unit clauses are stored too, not just asserted: a logged clause
+              # consumes an id in the checker's database, so skipping the store
+              # here would desynchronise every later hint reference.
+              ci = self.store_clause(@lbuf, 1)
+              self.enqueue(asserting, ci)
+            else
+              # store learned clause, watching the asserting literal and a
+              # literal from the backjump level
+              best = 1
+              bl = -1
+              i = 1
+              while i < n
+                lv = @level[@lbuf[i].abs]
+                if lv > bl
+                  bl = lv
+                  best = i
+                i += 1
+              @obuf[0] = asserting
+              @obuf[1] = @lbuf[best]
+              j = 2
+              i = 1
+              while i < n
+                unless i == best
+                  @obuf[j] = @lbuf[i]
+                  j += 1
+                i += 1
+              ci = self.store_clause(@obuf, n)
+              @clbd[ci] = lbd
+              self.enqueue(asserting, ci)
+            # Feed both moving averages: the recent window drives restarts, the
+            # global mean is the yardstick it is compared against.
+            @lbd_gsum += lbd
+            @lbd_gcount += 1
+            if @lbd_wcount >= 64
+              @lbd_wsum -= @lbd_win[@lbd_wi]
+            else
+              @lbd_wcount += 1
+            @lbd_win[@lbd_wi] = lbd
+            @lbd_wsum += lbd
+            @lbd_wi = (@lbd_wi + 1) % 64
+            if @trail_wcount >= 512
+              @trail_wsum -= @trail_win[@trail_wi]
+            else
+              @trail_wcount += 1
+            @trail_win[@trail_wi] = @tsize
+            @trail_wsum += @tsize
+            @trail_wi = (@trail_wi + 1) % 512
+            wassat_evsids_advance(@hstate)
+            # Import safe point: every 2048 conflicts, drain the ring at
+            # level zero with assignment-aware installs.
+            if @ring != nil
+              @import_pending += 1
+              if @import_pending >= 2048
+                @import_pending = 0
+                self.backjump(0)
+                rc = self.share_import
+                if rc < 0
+                  self.log_clause([])
+                  @formula_unsat = true
+                  result = -1
+            if stop_conflicts > 0 && @conflicts >= stop_conflicts
+              limited = true
       else
         # Restart when the recent window of learned-clause LBDs is markedly
         # worse than the running average -- the search has stopped learning
@@ -1031,6 +1238,38 @@ WASSAT_PROOF_DRAT = 2
 
   -> solve
     self.solve_budget(0)
+
+  # Allocation-free worker entry for the threaded portfolio: run to a
+  # decision (or stop/retire) and write the verdict and assignment into the
+  # shared result slab — no boxed result objects in a worker thread.
+  #   res[base]   = 1 SAT / -1 UNSAT / 0 stopped-unknown / 2 retired
+  #   res[base+1..base+nvars] = assignment (SAT only)
+  #   res[base+nvars+1..+3]  = exports / imports / dropped
+  -> solve_shared(res, base)
+    res[base + @nvars + 6] = ccall("__w_clock_ms")
+    status = 0
+    if @ok
+      status = self.solve_loop(0)
+    else
+      @formula_unsat = true
+      status = 0 - 1
+    res[base] = status
+    res[base] = 2 if status == 0 && @retired
+    if status == 1
+      v = 1
+      while v <= @nvars
+        res[base + v] = @assign[v] >= 0 ? 1 : 0
+        v += 1
+    res[base + @nvars + 1] = @share_exports
+    res[base + @nvars + 2] = @share_imports
+    res[base + @nvars + 3] = @share_dropped
+    res[base + @nvars + 4] = @conflicts
+    res[base + @nvars + 5] = ccall("__w_clock_ms")
+    # first decisive answer raises the stop flag for every other arm
+    if (status == 1 || status == 0 - 1) && @stop_cell != nil
+      @stop_cell[1] = status
+      @stop_cell[0] = 1
+    0
 
   # Full MiniSat-style incremental query: SAT / UNSAT / UNKNOWN under the
   # given assumption literals, plus the failed-assumption core on UNSAT.

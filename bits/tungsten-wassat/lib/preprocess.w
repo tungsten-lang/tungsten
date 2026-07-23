@@ -178,17 +178,10 @@ WASSAT_PRE_BUCKET_CAP = 1024
     @fasize = pm[1]
     @osize = pm[2]
     @next_gid = ncl + 1
-    # boxed truth, one tight walk
+    # boxed truth stays LAZY: nil slots, materialized per clause on touch
     k = 0
     while k < ncl
-      o = offs[k]
-      n = lens[k]
-      c = []
-      j = 0
-      while j < n
-        c.push(lits[o + j])
-        j += 1
-      @lits.push(c)
+      @lits.push(nil)
       k += 1
     # fire input units / empty clauses exactly like intake()
     ci = 0
@@ -218,6 +211,23 @@ WASSAT_PRE_BUCKET_CAP = 1024
     self.run_substitution if @status == 0
     self.sweep_satisfied if @status == 0
     self.artifact
+
+  # Lazy boxed truth: intake_flat leaves @lits as nil slots and clauses
+  # materialize from the flat mirrors only when a technique actually touches
+  # them (proof lines, subset re-verification, the elimination stack, the
+  # artifact). The certificate path's intake() stays fully materialized.
+  -> lits_of(ci)
+    c = @lits[ci]
+    return c unless c == nil
+    st = @fcs[ci]
+    n = @fcl[ci]
+    c = []
+    j = 0
+    while j < n
+      c.push(@fla[st + j])
+      j += 1
+    @lits[ci] = c
+    c
 
   # Both proof dialects at once (CLI requested --proof and --drat together).
   -> enable_dual_emission
@@ -371,7 +381,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
   -> delete_clause(ci)
     if @falive[ci] == 1
       @falive[ci] = 0
-      self.plog_delete([@fpgid[ci]], [@lits[ci]])
+      self.plog_delete([@fpgid[ci]], [self.lits_of(ci)])
     0
 
   # Delete a batch with one WRAT line (and per-clause DRAT lines).
@@ -382,7 +392,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
       if @falive[ci] == 1
         @falive[ci] = 0
         ids.push(@fpgid[ci])
-        lls.push(@lits[ci])
+        lls.push(self.lits_of(ci))
     self.plog_delete(ids, lls) unless ids.empty?
     0
 
@@ -428,7 +438,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
     while ti < @ftsize
       l = @ftrail[ti]
       rci = @preason[l.abs]
-      if rci >= 0 && @lits[rci].size > 1
+      if rci >= 0 && @fcl[rci] > 1
         chain = self.conflict_chain(rci, l.abs)
         gid = @next_gid
         self.plog_add(gid, [l], chain)
@@ -448,7 +458,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
     work = [confl_ci]
     wi = 0
     while wi < work.size
-      arr = @lits[work[wi]]
+      arr = self.lits_of(work[wi])
       i = 0
       while i < arr.size
         v = arr[i].abs
@@ -498,7 +508,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
       z = self.store(c.dup)
     ci = 0
     while ci < @ncl && @status == 0
-      arr = @lits[ci]
+      arr = self.lits_of(ci)
       if arr.size == 0
         self.plog_add(@next_gid, [], [@fpgid[ci]])
         @next_gid += 1
@@ -610,9 +620,9 @@ WASSAT_PRE_BUCKET_CAP = 1024
       i += 1
     ci = 0
     while ci < @ncl
-      if @falive[ci] == 1 && @ftaut[ci] == 0 && @lits[ci].size == 2
-        a = @lits[ci][0]
-        b = @lits[ci][1]
+      if @falive[ci] == 1 && @ftaut[ci] == 0 && @fcl[ci] == 2
+        a = @fla[@fcs[ci]]
+        b = @fla[@fcs[ci] + 1]
         # `a == b` is a duplicated-literal pseudo-binary; its hint replay
         # would classify as two unassigned occurrences, never a unit.
         if a != b && self.value(a) == 0 && self.value(b) == 0
@@ -866,12 +876,12 @@ WASSAT_PRE_BUCKET_CAP = 1024
         if eligible
           sat_root = false
           si = 0
-          while si < @lits[ci].size
-            sat_root = true if self.value(@lits[ci][si]) > 0
+          while si < @fcl[ci]
+            sat_root = true if self.value(@fla[@fcs[ci] + si]) > 0
             si += 1
           eligible = !sat_root
         if eligible
-          arr = @lits[ci]
+          arr = self.lits_of(ci)
           @ticks += arr.size
           mapped = []
           hints = []
@@ -967,9 +977,9 @@ WASSAT_PRE_BUCKET_CAP = 1024
   # dropping the negated flip literal (add-then-delete, never in place).
   -> commit_survivor(sci, di, fl)
     return false unless @falive[sci] == 1 && @falive[di] == 1
-    arr = @lits[sci]
+    arr = self.lits_of(sci)
     if fl == 0
-      if self.subset_of(arr, @lits[di])
+      if self.subset_of(arr, self.lits_of(di))
         self.delete_clause(di)
         @clauses_subsumed += 1
         true
@@ -985,13 +995,13 @@ WASSAT_PRE_BUCKET_CAP = 1024
       first_flip = fl
       while more && @status == 0
         flipped = 0
-        if first_flip != 0 && self.subset_one_flip(arr, first_flip, @lits[target])
+        if first_flip != 0 && self.subset_one_flip(arr, first_flip, self.lits_of(target))
           flipped = first_flip
         else
           fi = 0
           while fi < arr.size && flipped == 0
             cand = arr[fi]
-            flipped = cand if self.subset_one_flip(arr, cand, @lits[target])
+            flipped = cand if self.subset_one_flip(arr, cand, self.lits_of(target))
             fi += 1
         first_flip = 0
         if flipped == 0
@@ -999,7 +1009,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
         else
           l = flipped
           strengthened = []
-          @lits[target].each -> (dl)
+          self.lits_of(target).each -> (dl)
             strengthened.push(dl) unless dl == 0 - l
           gid = @next_gid
           self.plog_add(gid, strengthened, [@fpgid[sci], @fpgid[target]])
@@ -1102,7 +1112,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
       i += 1
     @stack.push({ "kind": "bve_var", "pivot": v })
     pos.each -> (ci)
-      @stack.push({ "kind": "bve", "pivot": v, "lits": @lits[ci].dup })
+      @stack.push({ "kind": "bve", "pivot": v, "lits": self.lits_of(ci).dup })
     parents = []
     pos.each -> (ci)
       parents.push(ci)
@@ -1252,7 +1262,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
       # unit clause by now (input unit, probe unit, or derived unit); a
       # violation means some technique deleted a cited clause and the
       # certificate is already unsound — stop loudly, never paper over it.
-      unless rci >= 0 && @falive[rci] == 1 && @lits[rci].size == 1
+      unless rci >= 0 && @falive[rci] == 1 && @fcl[rci] == 1
         raise "internal error: root literal [l] lost its unit clause"
       keep_unit[rci] = 1
       ti += 1
@@ -1263,7 +1273,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
         if @ftaut[ci] == 1
           doomed.push(ci)
         else
-          arr = @lits[ci]
+          arr = self.lits_of(ci)
           sat = false
           i = 0
           while i < arr.size
@@ -1290,7 +1300,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
     ci = 0
     while ci < @ncl
       if @falive[ci] == 1
-        clauses.push(@lits[ci])
+        clauses.push(self.lits_of(ci))
         gids.push(@fpgid[ci])
       ci += 1
     { "nvars": @nvars, "clauses": clauses, "gids": gids,

@@ -42,7 +42,7 @@
 WASSAT_PRE_PROBE_CAP = 2000
 WASSAT_PRE_OCC_PRODUCT_CAP = 4096
 WASSAT_PRE_MAX_PASSES = 10
-WASSAT_PRE_PROBE_TICKS = 8000000
+WASSAT_PRE_PROBE_TICKS = 2000000
 WASSAT_PRE_BUCKET_CAP = 1024
 
 + WassatPreprocess
@@ -110,6 +110,13 @@ WASSAT_PRE_BUCKET_CAP = 1024
     @ticks = 0
     @tick_budget = 0             # 0 = derived from formula size in `run`
     @probe_cap = WASSAT_PRE_PROBE_CAP
+    # BVE growth margin, raised per pass (CaDiCaL-style elimination
+    # rounds): Sinz-counter registers — the whole encoding layer of
+    # cardinality instances — cost ONE extra literal to eliminate and a
+    # zero-growth bound rejects every one of them. Measured on the k=5
+    # Lonely Runner class: margin 0 eliminated 44 variables, the pass-2
+    # margin unlocked 573 of 976 (CaDiCaL's inprocessing gets 596).
+    @bve_margin = 0
 
     # stats
     @probes_run = 0
@@ -1027,7 +1034,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
             resolvents.push(res)
             parent_ids.push([@fpgid[pos[pi]], @fpgid[neg[ni]]])
             new_lits += res.size
-            feasible = false if resolvents.size > old_count || new_lits > old_lits
+            feasible = false if resolvents.size > old_count + @bve_margin || new_lits > old_lits + 16 * @bve_margin
         ni += 1
       pi += 1
     return false unless feasible
@@ -1118,7 +1125,16 @@ WASSAT_PRE_BUCKET_CAP = 1024
   # ---- driver ---------------------------------------------------------------
 
   -> run
-    @tick_budget = 200 * self.total_literals + 10000000 if @tick_budget == 0
+    # Probing gets a fixed slice (it was eating 8M of an ~11M budget on
+    # small instances, starving the subsumption/BVE rounds the growth
+    # margins need). Encoding-scale instances also get a deeper budget for
+    # the margin rounds; on 100k-clause formulas the budget cap is exactly
+    # what keeps preprocessing from eating the win (measured on bmc).
+    if @tick_budget == 0
+      if @input_clauses.size <= 20000
+        @tick_budget = 400 * self.total_literals + 40000000
+      else
+        @tick_budget = 200 * self.total_literals + 10000000
     self.intake
     self.run_probing if @status == 0
     self.run_substitution if @status == 0
@@ -1135,6 +1151,13 @@ WASSAT_PRE_BUCKET_CAP = 1024
       gained = @clauses_subsumed + @clauses_strengthened + @vars_eliminated - before
       threshold = 1 + @ncl / 512
       progress = gained >= threshold
+      @bve_margin = @bve_margin + 4 if @bve_margin < 16 && @ncl <= 20000
+      # The first margin steps must run even when the zero-margin pass
+      # found little — that is exactly the case they exist for. Forced
+      # only on encoding-scale instances: on 100k-clause BMC formulas the
+      # extra full rounds doubled preprocessing for no payoff, while every
+      # cardinality-encoded formula this targets is a few thousand clauses.
+      progress = true if passes < 4 && @ncl <= 20000
       passes += 1
     self.sweep_satisfied if @status == 0
     self.artifact

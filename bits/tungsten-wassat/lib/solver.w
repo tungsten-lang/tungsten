@@ -53,6 +53,8 @@ WASSAT_PROOF_DRAT = 2
     @lbuf = i64[nv + 3]          # learned clause, reused every conflict
     @obuf = i64[nv + 3]          # watch-ordered copy of the learned clause
     @mbuf = i64[nv + 3]          # minimisation scratch
+    @mstk = i64[nv + 3]          # recursive-minimisation DFS stack
+    @mclr = i64[nv + 3]          # marks to clear after minimisation
     @lbd_seen = i64[nv + 2]      # scratch for literal-block-distance
     @lbd_stamp = 0
     @trail = i64[nv + 2]
@@ -125,22 +127,41 @@ WASSAT_PROOF_DRAT = 2
     # same search as one uninterrupted solve (apart from where control returns
     # to the caller).
     @restart_count = 0
-    @restart_budget = 100
     @since_restart = 0
-    # Glucose-style adaptive restart state. A fixed schedule is a guess about
-    # how fast the search is learning; these two moving averages measure it.
-    @lbd_win = i64[64]           # recent LBDs, circular
-    @lbd_wi = 0
-    @lbd_wsum = 0
-    @lbd_wcount = 0
-    @lbd_gsum = 0
-    @lbd_gcount = 0
-    @trail_win = i64[512]        # recent trail sizes, circular
-    @trail_wi = 0
-    @trail_wsum = 0
-    @trail_wcount = 0
+    # Glucose-style exponential moving averages (fixed-point << 16). The
+    # fast/slow LBD ratio decides WHETHER learning has stalled; the trail
+    # EMA blocks restarts while the search is unusually deep (plausibly
+    # closing on a model). This replaces the old 64/512-entry windows AND
+    # the 16,384-conflict floor: frequent restarts only pay off alongside
+    # phase saving + rephasing, which now exist — measured on the k=5
+    # Lonely Runner class, the rare-restart policy was >40x behind CaDiCaL
+    # while raw propagation speed was fine.
+    @ema_fast = 0                # LBD, alpha = 1/32
+    @ema_slow = 0                # LBD, alpha = 1/16384
+    @ema_trail = 0               # trail depth, alpha = 1/4096
+    @lbd_gcount = 0              # restart warmup gate + stats
     @reductions = 0
-    @next_reduce = 1500
+
+    # Rephasing (CaDiCaL-style): remember the deepest assignment seen in
+    # this epoch, and periodically cycle the saved phases through
+    # best / inverted / best / original / best / random. Restarting into a
+    # remembered good basin is what makes frequent restarts cheap.
+    @bphase = i64[nv + 1]        # phases at the deepest trail so far
+    v = 0
+    while v <= nv
+      @bphase[v] = -1
+      v += 1
+    @best_tsize = 0
+    @rephase_at = 4000
+    @rephase_idx = 0
+    @rephases = 0
+    @rephase_rng = 88172645463325252
+
+    # Clause-DB reduction is driven by the LIVE learned-clause count, not
+    # by accepted restarts — coupling it to restarts left multi-minute
+    # searches dragging an ever-larger database.
+    @nlearned = 0
+    @reduce_limit = 2000
 
     # Threaded-portfolio state (--fast). @stop_cell is a shared i64[] the
     # winner raises; the solve loop polls it at conflict boundaries —
@@ -426,8 +447,8 @@ WASSAT_PROOF_DRAT = 2
     @astate[1] = @tsize
     @astate[2] = @dlevel
     wassat_analyze(@arena, @assign, @level, @reason, @seen, @cstart, @clen,
-                   @trail, @lbuf, @mbuf, @activity, @heap, @heappos,
-                   @hstate, @astate, @nvars)
+                   @trail, @lbuf, @mbuf, @mstk, @mclr, @activity, @heap,
+                   @heappos, @hstate, @astate, @nvars)
     @lsize = @astate[3]
     @astate[4]
 
@@ -870,6 +891,35 @@ WASSAT_PROOF_DRAT = 2
       i += 1
     count
 
+  # Cycle the saved phases: best-phase epochs interleaved with inverted,
+  # original, and random assignments — diversification with a persistent
+  # pull back toward the deepest basin seen. Runs at level zero.
+  -> rephase
+    idx = @rephase_idx % 6
+    # typed local: untyped xorshift never wraps and promotes to BigInt;
+    # masked to 47 bits on store-back so the ivar stays a fast small int
+    rng = @rephase_rng ## i64
+    v = 1
+    while v <= @nvars
+      if idx == 1
+        @phase[v] = 1
+      elsif idx == 3
+        @phase[v] = -1
+      elsif idx == 5
+        rng = rng ^ (rng << 13)
+        rng = rng ^ (rng >> 7)
+        rng = rng ^ (rng << 17)
+        @phase[v] = (rng & 1) == 1 ? 1 : -1
+      else
+        @phase[v] = @bphase[v]
+      v += 1
+    @rephase_rng = rng & 140737488355327
+    @rephase_idx += 1
+    @rephases += 1
+    @rephase_at = @conflicts + 4000 + 1000 * @rephases
+    @best_tsize = 0
+    0
+
   # Drop the least useful half of the learned clauses and rebuild the watch
   # lists over the survivors. Only ever called at decision level zero, where
   # no clause is anybody's reason, so nothing in the trail can dangle.
@@ -941,6 +991,12 @@ WASSAT_PROOF_DRAT = 2
         st = @cstart[ci]
         self.watch(ci, 0, @arena[st], @arena[st + 1])
         self.watch(ci, 1, @arena[st + 1], @arena[st])
+      ci += 1
+    # recount the live learned population for the reduction schedule
+    @nlearned = 0
+    ci = 0
+    while ci < @ncl
+      @nlearned += 1 if @alive[ci] == 1 && @clbd[ci] > 0
       ci += 1
     0
 
@@ -1120,24 +1176,24 @@ WASSAT_PROOF_DRAT = 2
               ci = self.store_clause(@obuf, n)
               @clbd[ci] = lbd
               self.enqueue(asserting, ci)
-            # Feed both moving averages: the recent window drives restarts, the
-            # global mean is the yardstick it is compared against.
-            @lbd_gsum += lbd
+            # Exponential moving averages (fixed-point << 16): the fast/slow
+            # LBD ratio is the restart trigger, the trail EMA its blocker.
+            @nlearned += 1 if n > 1
+            lv = lbd << 16
+            @ema_fast += (lv - @ema_fast) >> 5
+            @ema_slow += (lv - @ema_slow) >> 14
+            @ema_trail += ((@tsize << 16) - @ema_trail) >> 12
             @lbd_gcount += 1
-            if @lbd_wcount >= 64
-              @lbd_wsum -= @lbd_win[@lbd_wi]
-            else
-              @lbd_wcount += 1
-            @lbd_win[@lbd_wi] = lbd
-            @lbd_wsum += lbd
-            @lbd_wi = (@lbd_wi + 1) % 64
-            if @trail_wcount >= 512
-              @trail_wsum -= @trail_win[@trail_wi]
-            else
-              @trail_wcount += 1
-            @trail_win[@trail_wi] = @tsize
-            @trail_wsum += @tsize
-            @trail_wi = (@trail_wi + 1) % 512
+            # Deepest assignment this epoch: remember its phases. Restarts
+            # and rephases steer back into this basin instead of discarding
+            # the progress (the reason rare restarts used to be right).
+            if @tsize > @best_tsize
+              @best_tsize = @tsize
+              ti = 0
+              while ti < @tsize
+                bv = @trail[ti].abs
+                @bphase[bv] = @assign[bv]
+                ti += 1
             wassat_evsids_advance(@hstate)
             # Import safe point: every 2048 conflicts, drain the ring at
             # level zero with assignment-aware installs.
@@ -1154,50 +1210,40 @@ WASSAT_PROOF_DRAT = 2
             if stop_conflicts > 0 && @conflicts >= stop_conflicts
               limited = true
       else
-        # Restart when the recent window of learned-clause LBDs is markedly
-        # worse than the running average -- the search has stopped learning
-        # usefully. Blocked by a trail that is much deeper than usual, which
-        # means we are plausibly closing in on a model and a restart would
-        # throw that progress away. A fixed schedule got this badly wrong:
-        # restarting every few hundred conflicts cost 8x the conflicts on
-        # satisfiable BMC instances and 4x on hard random UNSAT.
-        # Two gates. The LBD comparison decides *whether* learning has stalled;
-        # the interval floor decides how often we are willing to act on it.
-        #
-        # The floor is large, and that is a measured choice rather than a
-        # default. Restarting every few hundred conflicts (the previous
-        # schedule) cost 8x the conflicts on satisfiable BMC instances and 4x
-        # on hard random UNSAT; a pure LBD trigger and a 3000-conflict floor
-        # were both still far too eager. Frequent restarts pay off in modern
-        # solvers because they are paired with target phases and rephasing, so
-        # a restart resumes near where it left off. With only basic phase
-        # saving a restart genuinely discards progress, so this solver should
-        # restart rarely until that machinery exists.
+        # Clause-DB reduction first, on its own schedule: when the live
+        # learned count passes the limit, drop the high-LBD half. Decoupled
+        # from restarts — coupling it to accepted restarts left long
+        # searches dragging an ever-larger database (measured on both the
+        # psi tensor cells and the k=5 Lonely Runner class).
+        if @nlearned > @reduce_limit
+          self.backjump(0)
+          self.reduce_db
+          @reductions += 1
+          @reduce_limit += 300
+
+        # Glucose restart: the recent learning quality (fast EMA) is
+        # markedly worse than the long-run average (slow EMA) — the search
+        # has stopped making progress where it is. Blocked while the trail
+        # is much deeper than usual (plausibly closing on a model), which is
+        # what protects satisfiable BMC-style instances from restart churn.
+        # The old 16,384-conflict floor predates rephasing; with best-phase
+        # rephasing a restart resumes near the remembered basin, so the
+        # floor drops to 64.
         want_restart = false
-        if @since_restart >= WASSAT_MIN_RESTART_INTERVAL
-          if @lbd_wcount >= 64 && @lbd_gcount > 0
-            if @lbd_wsum * 8 * @lbd_gcount > @lbd_gsum * 64 * 10
-              want_restart = true
-        # Blocking compares against a RECENT trail average, not a global one:
-        # a lifetime mean drifts stale and stops recognising that the search is
-        # currently running deep, which is exactly when a restart is most
-        # destructive on satisfiable instances.
-        if want_restart && @trail_wcount >= 512
-          if @tsize * 10 * @trail_wcount > @trail_wsum * 14
-            want_restart = false          # blocked: unusually deep trail
+        if @since_restart >= 64 && @lbd_gcount >= 128
+          if @ema_fast * 4 > @ema_slow * 5
+            want_restart = true
+        if want_restart && (@tsize << 16) * 5 > @ema_trail * 7
+          want_restart = false          # blocked: unusually deep trail
         if want_restart
           @since_restart = 0
           @restart_count += 1
-          @lbd_wsum = 0
-          @lbd_wcount = 0
-          @lbd_wi = 0
           self.backjump(0)
-          # Learned clauses are only useful while they are cheap to walk;
-          # periodically drop the high-LBD half so propagation stays fast.
-          if @conflicts > @next_reduce
-            @next_reduce = @conflicts + 1500 + 250 * @reductions
-            @reductions += 1
-            self.reduce_db
+          # Rephase on schedule, at a restart boundary: cycle the saved
+          # phases through best / inverted / best / original / best /
+          # random, then start a fresh best-phase epoch.
+          if @conflicts >= @rephase_at
+            self.rephase
         else
           # Assumptions occupy the first decision levels; a restart pops
           # them and this branch re-asserts them on the way back down.
@@ -1481,7 +1527,7 @@ WASSAT_PROOF_DRAT = 2
 #
 #   st[0] = conflicting clause   st[1] = trail size   st[2] = decision level
 #   st[3] = learned clause size  st[4] = backjump level
--> wassat_analyze(ar, asg, lvl, rsn, sn, cs, cln, tr, out, tmp, act, heap, hpos, hst, st, nv) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64)
+-> wassat_analyze(ar, asg, lvl, rsn, sn, cs, cln, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64)
   confl = st[0]
   tsize = st[1]
   dl = st[2]
@@ -1538,10 +1584,16 @@ WASSAT_PROOF_DRAT = 2
 
   out[0] = 0 - p
 
-  # Self-subsuming minimisation: drop literals whose reason clause is already
-  # covered by the clause. Results go to `tmp` rather than compacting `out`
-  # in place -- compaction would overwrite entries still needed to clear the
-  # marks of the literals it removed, silently corrupting later analyses.
+  # Recursive (MiniSat-style) minimisation: a literal is redundant when
+  # every path through its reason DAG bottoms out in clause literals or
+  # root assignments. Marks double as a cache — a variable proven covered
+  # stays marked so later candidates reuse the work; a failed probe unwinds
+  # only its own marks. On Sinz-counter cardinality instances (the k=5
+  # Lonely Runner class) the old one-level pass left learned clauses long,
+  # and long clauses propagate weakly — this is the classic fix.
+  # Results go to `tmp` rather than compacting `out` in place — compaction
+  # would overwrite entries still needed to clear the marks.
+  nclr = 0
   keep = 1
   i = 1
   while i < size
@@ -1549,27 +1601,49 @@ WASSAT_PROOF_DRAT = 2
     vq = q
     if q < 0
       vq = 0 - q
-    r = rsn[vq]
     redundant = 0
-    if r >= 0
+    if rsn[vq] >= 0
+      # iterative litRedundant over the reason DAG
       redundant = 1
-      stx = cs[r]
-      n = cln[r]
-      k = 1
-      while k < n
-        lk = ar[stx + k]
-        vk = lk
-        if lk < 0
-          vk = 0 - lk
-        if sn[vk] == 0 && lvl[vk] > 0
-          redundant = 0
-        k += 1
+      sp = 0
+      stk[sp] = vq
+      sp += 1
+      top = nclr
+      while sp > 0 && redundant == 1
+        sp -= 1
+        cv = stk[sp]
+        r = rsn[cv]
+        stx = cs[r]
+        n = cln[r]
+        k = 0
+        while k < n && redundant == 1
+          lk = ar[stx + k]
+          vk = lk
+          if lk < 0
+            vk = 0 - lk
+          if vk != cv && sn[vk] == 0 && lvl[vk] > 0
+            if rsn[vk] >= 0
+              sn[vk] = 1
+              stk[sp] = vk
+              sp += 1
+              tclr[nclr] = vk
+              nclr += 1
+            else
+              # a decision: this path cannot be covered — fail and unwind
+              # the marks THIS probe added (earlier candidates' cache stays)
+              redundant = 0
+              j = top
+              while j < nclr
+                sn[tclr[j]] = 0
+                j += 1
+              nclr = top
+          k += 1
     if redundant == 0
       tmp[keep] = q
       keep += 1
     i += 1
 
-  # clear every mark we set, using the untouched original literals
+  # clear every mark: the clause's own literals, then the probe cache
   i = 1
   while i < size
     q = out[i]
@@ -1577,6 +1651,10 @@ WASSAT_PROOF_DRAT = 2
     if q < 0
       vq = 0 - q
     sn[vq] = 0
+    i += 1
+  i = 0
+  while i < nclr
+    sn[tclr[i]] = 0
     i += 1
 
   i = 1

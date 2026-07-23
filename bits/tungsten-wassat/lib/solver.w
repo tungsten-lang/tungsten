@@ -173,6 +173,7 @@ WASSAT_PROOF_DRAT = 2
     # by accepted restarts — coupling it to restarts left multi-minute
     # searches dragging an ever-larger database.
     @nlearned = 0
+    @vivified = 0
     # Random-3-SAT-scale formulas want a TIGHT reduction cadence (small DB
     # = fast propagation; uuf250: 95k conflicts tight vs 128k relaxed);
     # structured instances want it RELAXED (retained clauses collapse the
@@ -968,6 +969,67 @@ WASSAT_PROOF_DRAT = 2
       i += 1
     count
 
+  # One bounded vivification pass over kept learned clauses (3 <= LBD <= 6,
+  # length >= 3): for each, assert negations literal by literal at fresh
+  # decision levels; unit propagation conflicting after i literals proves
+  # l1..li is implied — store it, retire the original (its watchers stay
+  # until the next rebuild; the dead clause is still implied, so stray
+  # propagation from it remains sound). Runs at decision level zero.
+  -> vivify_round
+    budget = 300
+    ci = 0
+    while ci < @ncl && budget > 0
+      if @alive[ci] == 1 && @clbd[ci] >= 3 && @clbd[ci] <= 6 && @clen[ci] >= 3
+        budget -= 1
+        st = @cstart[ci]
+        n = @clen[ci]
+        # copy out: propagation may reorder arena slots mid-walk
+        i = 0
+        while i < n
+          @obuf[i] = @arena[st + i]
+          i += 1
+        sat_or_skip = false
+        i = 0
+        while i < n && !sat_or_skip
+          sat_or_skip = true if self.value(@obuf[i]) != 0
+          i += 1
+        unless sat_or_skip
+          shorten = 0
+          i = 0
+          while i < n && shorten == 0
+            @trail_lim[@dlevel] = @tsize
+            @dlevel += 1
+            self.enqueue(0 - @obuf[i], -1)
+            confl = self.propagate
+            if confl >= 0
+              shorten = i + 1
+            else
+              i += 1
+          self.backjump(0)
+          # a root-falsified derived unit is a whole-formula refutation the
+          # loop machinery would not surface from here — leave that clause
+          # to ordinary search (rare, and merely a missed shortening)
+          if shorten == 1 && self.value(@obuf[0]) < 0
+            shorten = 0
+          if shorten > 0 && shorten < n
+            nci = self.store_clause(@obuf, shorten)
+            lbdv = @clbd[ci]
+            lbdv = shorten - 1 if shorten - 1 < lbdv
+            lbdv = 1 if lbdv < 1
+            @clbd[nci] = lbdv
+            @nlearned += 1 if shorten > 1
+            if shorten == 1
+              # a derived unit: assert it at the root; a conflict from the
+              # propagation will resurface at the loop's next iteration
+              l0 = @obuf[0]
+              if self.value(l0) == 0
+                self.enqueue(l0, nci)
+                confl2 = self.propagate
+            @alive[ci] = 0
+            @vivified += 1
+      ci += 1
+    0
+
   # Cycle the saved phases: best-phase epochs interleaved with inverted,
   # original, and random assignments — diversification with a persistent
   # pull back toward the deepest basin seen. Runs at level zero.
@@ -1297,6 +1359,13 @@ WASSAT_PROOF_DRAT = 2
           self.reduce_db
           @reductions += 1
           @reduce_limit += @reduce_step
+          # Vivification (DETOUR dominance on learned clauses) — MEASURED
+          # NET-NEGATIVE in v1 form and gated off: prefix-conflict
+          # shortening replaced clauses but perturbed trajectories
+          # (ibm-12 conflicts 5,074 -> 18,292; uuf250 +0.3s; lr5 frontier
+          # unmoved). Opt-in for future experiments with the stronger
+          # forms (false-literal removal, implication-aware shortening).
+          self.vivify_round if @proof_mode == WASSAT_PROOF_NONE && env("WASSAT_VIVIFY") == "1"
 
         # Glucose restart: the recent learning quality (fast EMA) is
         # markedly worse than the long-run average (slow EMA) — the search
@@ -2228,11 +2297,51 @@ WASSAT_PROOF_DRAT = 2
   else
     "s UNSATISFIABLE\n"
 
+# Native model scan over the parser's flat arrays: every clause must have
+# a literal agreeing with the sign array. Returns via pm[0].
+-> wassat_verify_flat(slits, soffs, slens, sign, pm) (i64[] i64[] i64[] i64[] i64[])
+  ncl = pm[1]
+  ok = 1
+  k = 0
+  while k < ncl && ok == 1
+    o = soffs[k]
+    n = slens[k]
+    hit = 0
+    j = 0
+    while j < n
+      l = slits[o + j]
+      av = l
+      want = 1
+      if l < 0
+        av = 0 - l
+        want = -1
+      if sign[av] == want
+        hit = 1
+        j = n
+      else
+        j = j + 1
+    if hit == 0
+      ok = 0
+    k = k + 1
+  pm[0] = ok
+  0
+
 # Output-integrity guard: does the model satisfy every clause of the formula?
 # Every SAT answer must pass this scan against the ORIGINAL formula before it
 # is reported, whichever engine produced it. UNSAT has independent checkers;
 # this is the SAT side of that symmetry.
 -> wassat_model_satisfies?(formula, model)
+  # formulas from the native parser carry flat arrays — scan those natively
+  if formula.has_key?("flat_ncl")
+    nv2 = formula["nvars"]
+    sign = i64[nv2 + 1]
+    model.each -> (l)
+      v = l.abs
+      sign[v] = l > 0 ? 1 : -1 if v >= 1 && v <= nv2
+    pm = i64[2]
+    pm[1] = formula["flat_ncl"]
+    wassat_verify_flat(formula["flat_lits"], formula["flat_offs"], formula["flat_lens"], sign, pm)
+    return pm[0] == 1
   nv = formula["nvars"]
   sign = i64[nv + 1]
   model.each -> (l)

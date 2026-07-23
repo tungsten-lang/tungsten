@@ -242,6 +242,11 @@ WASSAT_PROOF_DRAT = 2
     if @asize + need > @acap
       ncap = @acap * 2
       ncap = @asize + need + 1024 if ncap < @asize + need
+      # The arena is append-only (reduce_db only detaches); a search that
+      # cannot finish grows it without bound until the runtime's typed-array
+      # limit fires as a cryptic crash hours in. Fail precisely instead.
+      if ncap > 1073741824
+        raise "learned-clause arena exceeded 8 GiB; instance too hard for the current search — bound it with --conflicts or use the portfolio"
       bigger = i64[ncap]
       i = 0
       while i < @asize

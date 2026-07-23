@@ -1124,24 +1124,35 @@ WASSAT_PRE_BUCKET_CAP = 1024
 
   # ---- driver ---------------------------------------------------------------
 
-  -> run
-    # Probing gets a fixed slice (it was eating 8M of an ~11M budget on
-    # small instances, starving the subsumption/BVE rounds the growth
-    # margins need). Encoding-scale instances also get a deeper budget for
-    # the margin rounds; on 100k-clause formulas the budget cap is exactly
-    # what keeps preprocessing from eating the win (measured on bmc).
+  # Two-stage entry for the trusted (--fast) path: run_light does the cheap
+  # phases (intake, probing, substitution — ~150ms even on 100k-clause
+  # inputs) and snapshots an artifact; if the caller's SLS burst misses,
+  # run_heavy continues with the subsumption/BVE rounds on the same state.
+  # The certificate path keeps using run() unchanged.
+  -> run_light
+    self.init_budget
+    self.intake
+    self.run_probing if @status == 0
+    self.run_substitution if @status == 0
+    self.sweep_satisfied if @status == 0
+    self.artifact
+
+  -> run_heavy
+    self.heavy_rounds
+    self.sweep_satisfied if @status == 0
+    self.artifact
+
+  -> init_budget
+    # Probing gets a fixed slice; encoding-scale instances get a deeper
+    # budget for the margin rounds (see run).
     if @tick_budget == 0
       if @input_clauses.size <= 20000
         @tick_budget = 400 * self.total_literals + 40000000
       else
         @tick_budget = 200 * self.total_literals + 10000000
-    self.intake
-    self.run_probing if @status == 0
-    self.run_substitution if @status == 0
-    # Iterate subsumption + BVE while a pass still earns its keep. Requiring
-    # MEANINGFUL progress matters: on bmc-scale instances the first pass
-    # collects tens of thousands of reductions and each later full rescan
-    # costs a large fraction of a second to find a handful more.
+    0
+
+  -> heavy_rounds
     passes = 0
     progress = true
     while progress && @status == 0 && self.within_budget && passes < WASSAT_PRE_MAX_PASSES
@@ -1154,11 +1165,19 @@ WASSAT_PRE_BUCKET_CAP = 1024
       @bve_margin = @bve_margin + 4 if @bve_margin < 16 && @ncl <= 20000
       # The first margin steps must run even when the zero-margin pass
       # found little — that is exactly the case they exist for. Forced
-      # only on encoding-scale instances: on 100k-clause BMC formulas the
-      # extra full rounds doubled preprocessing for no payoff, while every
-      # cardinality-encoded formula this targets is a few thousand clauses.
+      # only on encoding-scale instances; big inputs also cap at two
+      # rounds (the pass-2 rescan cost ~270ms on bmc to find crumbs).
       progress = true if passes < 4 && @ncl <= 20000
+      progress = false if passes >= 1 && @input_clauses.size > 20000
       passes += 1
+    0
+
+  -> run
+    self.init_budget
+    self.intake
+    self.run_probing if @status == 0
+    self.run_substitution if @status == 0
+    self.heavy_rounds
     self.sweep_satisfied if @status == 0
     self.artifact
 

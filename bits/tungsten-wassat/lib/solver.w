@@ -142,6 +142,16 @@ WASSAT_PROOF_DRAT = 2
     @lbd_gcount = 0              # restart warmup gate + stats
     @reductions = 0
 
+    # Stable/focused alternation (CaDiCaL): FOCUSED mode restarts eagerly
+    # (floor 64) and drives refutations; STABLE mode restarts rarely
+    # (floor 16384) under best phases and protects satisfiable instances
+    # from restart churn — the EMA policy alone re-created the old 4x
+    # regression on satisfiable BMC. Intervals grow geometrically; stable
+    # gets 3x the focused budget.
+    @mode_stable = false
+    @mode_len = 3000
+    @mode_at = 3000
+
     # Rephasing (CaDiCaL-style): remember the deepest assignment seen in
     # this epoch, and periodically cycle the saved phases through
     # best / inverted / best / original / best / random. Restarting into a
@@ -1229,8 +1239,22 @@ WASSAT_PROOF_DRAT = 2
         # The old 16,384-conflict floor predates rephasing; with best-phase
         # rephasing a restart resumes near the remembered basin, so the
         # floor drops to 64.
+        # mode switch at the boundary
+        if @conflicts >= @mode_at
+          @mode_stable = !@mode_stable
+          if @mode_stable
+            @mode_len = @mode_len * 2
+            @mode_at = @conflicts + 3 * @mode_len
+            # enter stable under the best phases seen so far
+            v2 = 1
+            while v2 <= @nvars
+              @phase[v2] = @bphase[v2]
+              v2 += 1
+          else
+            @mode_at = @conflicts + @mode_len
+        floor = @mode_stable ? 16384 : 64
         want_restart = false
-        if @since_restart >= 64 && @lbd_gcount >= 128
+        if @since_restart >= floor && @lbd_gcount >= 128
           if @ema_fast * 4 > @ema_slow * 5
             want_restart = true
         if want_restart && (@tsize << 16) * 5 > @ema_trail * 7

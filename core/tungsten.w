@@ -1,5 +1,6 @@
 + Tungsten
   auto :Atomic,       "atomic"
+  auto :Process,      "process"
   auto :Array,        "array"
   auto :Base64,       "base64"
   auto :BigArray,     "big_array"
@@ -47,6 +48,7 @@
   auto :SciIO,        "io"
   auto :Plot,      "plot"
   auto :Sparse,       "sparse"
+  auto :SparseMatrix, "sparse"
   auto :CUDA,         "cuda"
   auto :MAC,          "mac"
   auto :Module,       "module"

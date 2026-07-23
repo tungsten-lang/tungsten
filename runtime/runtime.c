@@ -18436,6 +18436,80 @@ WValue __w_system(WValue cmd_val) {
     return W_FALSE;
 }
 
+/* ---- Process API (spawn / wait / kill) ------------------------------------
+ * Real child-process control for portfolio solvers and worker pools, where
+ * __w_system's boolean collapse of the exit status is unusable: SAT solvers
+ * speak in exit codes (10 SAT / 20 UNSAT), and a coordinator must be able to
+ * poll many children and kill losers by process group. Each child is spawned
+ * into its OWN process group (pgid == pid) so a kill reaches the child and
+ * everything it spawned, and never this process. */
+
+/* argv comes as an Array of strings; execs directly (no shell). Returns the
+ * pid, or -errno style negative on failure. */
+WValue __w_proc_spawn(WValue argv_val) {
+    WArray *arr = (WArray *)w_as_ptr(argv_val);
+    int argc = (int)arr->size;
+    if (argc < 1) return w_int(-1);
+    char **argv = (char **)malloc(sizeof(char *) * (argc + 1));
+    if (!argv) return w_int(-1);
+    for (int i = 0; i < argc; i++) {
+        WValue s = arr->slots[arr->start + i];
+        argv[i] = (char *)as_str(s);
+    }
+    argv[argc] = NULL;
+
+    posix_spawnattr_t attr;
+    if (posix_spawnattr_init(&attr) != 0) { free(argv); return w_int(-1); }
+    short flags = POSIX_SPAWN_SETPGROUP;
+    if (posix_spawnattr_setflags(&attr, flags) != 0 ||
+        posix_spawnattr_setpgroup(&attr, 0) != 0) {
+        posix_spawnattr_destroy(&attr);
+        free(argv);
+        return w_int(-1);
+    }
+    pid_t pid = -1;
+    int err = posix_spawnp(&pid, argv[0], NULL, &attr, argv, environ);
+    posix_spawnattr_destroy(&attr);
+    free(argv);
+    if (err != 0) return w_int(-(int64_t)err);
+    return w_int((int64_t)pid);
+}
+
+/* Wait for one child. block=0 polls (WNOHANG). Returns:
+ *   -1  still running (poll only)
+ *   -2  wait failed (no such child)
+ *   >=0 exit code, or 256+signal when signal-terminated. */
+WValue __w_proc_wait(WValue pid_val, WValue block_val) {
+    pid_t pid = (pid_t)w_as_int(pid_val);
+    int block = (int)w_as_int(block_val);
+    int status = 0;
+    for (;;) {
+        pid_t r = waitpid(pid, &status, block ? 0 : WNOHANG);
+        if (r == pid) break;
+        if (r == 0) return w_int(-1);
+        if (r == -1 && errno == EINTR) continue;
+        return w_int(-2);
+    }
+    if (WIFEXITED(status)) return w_int((int64_t)WEXITSTATUS(status));
+    if (WIFSIGNALED(status)) return w_int(256 + (int64_t)WTERMSIG(status));
+    return w_int(-2);
+}
+
+/* Signal the child's whole process group (it leads its own). */
+WValue __w_proc_kill(WValue pid_val, WValue sig_val) {
+    pid_t pid = (pid_t)w_as_int(pid_val);
+    int sig = (int)w_as_int(sig_val);
+    if (pid <= 1) return W_FALSE;
+    return kill(-pid, sig) == 0 ? W_TRUE : W_FALSE;
+}
+
+/* Liveness probe: signal 0 to the process (not the group). */
+WValue __w_proc_alive(WValue pid_val) {
+    pid_t pid = (pid_t)w_as_int(pid_val);
+    if (pid <= 1) return W_FALSE;
+    return kill(pid, 0) == 0 ? W_TRUE : W_FALSE;
+}
+
 /* rename(2) from two WValue strings, for atomic publish of temp files
  * without forking a shell. The first path is copied out before the second
  * as_str() call so the thread-local ring buffer cannot alias the two. */

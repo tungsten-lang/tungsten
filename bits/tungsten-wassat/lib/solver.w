@@ -241,6 +241,22 @@ WASSAT_PROOF_DRAT = 2
     @ccap = maxcl
     @ncl = 0
 
+    # Binary-clause implication lists: propagating -l walks blist[l] and
+    # assigns/conflicts DIRECTLY — no clause-arena read, no watch movement
+    # (a binary's watches never move). Binaries live here instead of the
+    # two-watched lists; the clause body stays in the arena for analysis
+    # and proofs. Payload is inline per node: other literal + reason ci.
+    @bl_head = i64[2 * nv + 4]
+    i = 0
+    while i < 2 * nv + 4
+      @bl_head[i] = -1
+      i += 1
+    @bl_cap = total + 4096
+    @bl_next = i64[@bl_cap]
+    @bl_other = i64[@bl_cap]
+    @bl_ci = i64[@bl_cap]
+    @bl_size = 0
+
     # watch lists: 2*(nv+1) literal slots
     @wfirst = i64[2 * nv + 4]
     i = 0
@@ -325,6 +341,42 @@ WASSAT_PROOF_DRAT = 2
       @ccap = ncap
     0
 
+  # Register binary clause (a | b): falsifying a implies b and vice versa.
+  -> bl_add(a, b, ci)
+    if @bl_size + 2 > @bl_cap
+      if @fixed_caps
+        @retired = true
+        return 0
+      ncap = @bl_cap * 2
+      nn = i64[ncap]
+      no = i64[ncap]
+      nc = i64[ncap]
+      i = 0
+      while i < @bl_size
+        nn[i] = @bl_next[i]
+        no[i] = @bl_other[i]
+        nc[i] = @bl_ci[i]
+        i += 1
+      @bl_next = nn
+      @bl_other = no
+      @bl_ci = nc
+      @bl_cap = ncap
+    la = self.lit_index(a)
+    lb = self.lit_index(b)
+    n1 = @bl_size
+    @bl_size += 1
+    @bl_next[n1] = @bl_head[la]
+    @bl_other[n1] = b
+    @bl_ci[n1] = ci
+    @bl_head[la] = n1
+    n2 = @bl_size
+    @bl_size += 1
+    @bl_next[n2] = @bl_head[lb]
+    @bl_other[n2] = a
+    @bl_ci[n2] = ci
+    @bl_head[lb] = n2
+    0
+
   # Attach watcher slot `slot` of clause `ci` to the list of literal `l`,
   # caching `blocker` -- any other literal of the clause. If the blocker is
   # already true the clause is satisfied and propagation can skip it without
@@ -354,7 +406,9 @@ WASSAT_PROOF_DRAT = 2
       @arena[@asize] = lits_arr[i]
       @asize += 1
       i += 1
-    if n >= 2
+    if n == 2
+      self.bl_add(@arena[@cstart[ci]], @arena[@cstart[ci] + 1], ci)
+    elsif n >= 3
       self.watch(ci, 0, @arena[@cstart[ci]], @arena[@cstart[ci] + 1])
       self.watch(ci, 1, @arena[@cstart[ci] + 1], @arena[@cstart[ci]])
     if @proof_mode == WASSAT_PROOF_WRAT
@@ -443,7 +497,8 @@ WASSAT_PROOF_DRAT = 2
     @pstate[1] = @tsize
     @pstate[2] = -1
     wassat_propagate(@arena, @assign, @level, @reason, @phase, @wfirst,
-                     @wnext, @wblock, @cstart, @clen, @trail, @pstate, @dlevel)
+                     @wnext, @wblock, @cstart, @clen, @trail, @pstate, @dlevel,
+                     @bl_head, @bl_next, @bl_other, @bl_ci)
     @qhead = @pstate[0]
     @tsize = @pstate[1]
     @pstate[2]
@@ -997,7 +1052,7 @@ WASSAT_PROOF_DRAT = 2
       i += 1
     ci = 0
     while ci < @ncl
-      if @alive[ci] == 1 && @clen[ci] >= 2
+      if @alive[ci] == 1 && @clen[ci] >= 3
         st = @cstart[ci]
         self.watch(ci, 0, @arena[st], @arena[st + 1])
         self.watch(ci, 1, @arena[st + 1], @arena[st])
@@ -1444,7 +1499,7 @@ WASSAT_PROOF_DRAT = 2
 # it without reading the clause body. And the watch list is traversed IN
 # PLACE with a trailing pointer, so a watcher is spliced only when it really
 # moves to another literal.
--> wassat_propagate(ar, asg, lvl, rsn, phs, wf, wn, wb, cs, cln, tr, st, dl) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64)
+-> wassat_propagate(ar, asg, lvl, rsn, phs, wf, wn, wb, cs, cln, tr, st, dl, blh, bln, blo, blc) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[])
   qhead = st[0]
   tsize = st[1]
   conflict = -1
@@ -1458,6 +1513,31 @@ WASSAT_PROOF_DRAT = 2
       li = neg << 1
     else
       li = ((0 - neg) << 1) + 1
+    # binary implications first: direct assign/conflict, no arena access
+    b = blh[li]
+    while b >= 0 && conflict < 0
+      other = blo[b]
+      ov = 0
+      if other > 0
+        ov = asg[other]
+      else
+        ov = 0 - asg[0 - other]
+      if ov < 0
+        conflict = blc[b]
+      else
+        if ov == 0
+          v = other
+          pol = 1
+          if other < 0
+            v = 0 - other
+            pol = -1
+          asg[v] = pol
+          lvl[v] = dl
+          rsn[v] = blc[b]
+          phs[v] = pol
+          tr[tsize] = other
+          tsize += 1
+      b = bln[b]
     prev = -1
     w = wf[li]
     while w >= 0 && conflict < 0
@@ -1565,15 +1645,21 @@ WASSAT_PROOF_DRAT = 2
   while keep_going
     stx = cs[cl]
     n = cln[cl]
-    j = 1
-    if p == 0
-      j = 0
+    # Skip the literal being RESOLVED by variable, not by slot: watch-based
+    # propagation swaps the propagated literal to slot 0, but binary-list
+    # propagation never touches the arena, so the slot invariant is gone.
+    pv = 0
+    if p != 0
+      pv = p
+      if pv < 0
+        pv = 0 - pv
+    j = 0
     while j < n
       q = ar[stx + j]
       vq = q
       if q < 0
         vq = 0 - q
-      if sn[vq] == 0 && lvl[vq] > 0
+      if vq != pv && sn[vq] == 0 && lvl[vq] > 0
         sn[vq] = 1
         # MiniSat-style EVSIDS bumps the whole conflict graph as it is first
         # discovered, not merely the literals surviving minimisation. The

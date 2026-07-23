@@ -173,7 +173,17 @@ WASSAT_PROOF_DRAT = 2
     # by accepted restarts — coupling it to restarts left multi-minute
     # searches dragging an ever-larger database.
     @nlearned = 0
-    @reduce_limit = 2000
+    # Random-3-SAT-scale formulas want a TIGHT reduction cadence (small DB
+    # = fast propagation; uuf250: 95k conflicts tight vs 128k relaxed);
+    # structured instances want it RELAXED (retained clauses collapse the
+    # search; ibm-12: 5.1k conflicts relaxed vs 14.8k tight, and each
+    # avoided reduce also skips a 200k-clause watch rebuild).
+    if @input_clauses.size < 20000
+      @reduce_limit = 2000
+      @reduce_step = 300
+    else
+      @reduce_limit = 4000
+      @reduce_step = 1000
 
     # Threaded-portfolio state (--fast). @stop_cell is a shared i64[] the
     # winner raises; the solve loop polls it at conflict boundaries —
@@ -1286,7 +1296,7 @@ WASSAT_PROOF_DRAT = 2
           self.backjump(0)
           self.reduce_db
           @reductions += 1
-          @reduce_limit += 300
+          @reduce_limit += @reduce_step
 
         # Glucose restart: the recent learning quality (fast EMA) is
         # markedly worse than the long-run average (slow EMA) — the search

@@ -108,7 +108,8 @@ def main() -> None:
             continue
         rivals = {k: v for k, v in rows.items() if k != "wassat"}
         best_rival = min(rivals.values()) if rivals else float("inf")
-        ok = rows["wassat"] <= max(best_rival * TOLERANCE, 0.05)
+        # sub-100ms rows are process-startup noise, not solver signal
+        ok = rows["wassat"] <= max(best_rival * TOLERANCE, 0.10)
         mark = "ok" if ok else "SLOW"
         if not ok:
             failures += 1

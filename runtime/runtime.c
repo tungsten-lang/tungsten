@@ -17669,6 +17669,13 @@ WValue __w_argv(void) {
     return arr;
 }
 
+/* The program name (argv[0] as invoked) — lets a coordinator respawn its
+ * own binary as worker processes. */
+WValue __w_argv_program(void) {
+    if (g_argc < 1 || g_argv == NULL) return W_NIL;
+    return w_string(g_argv[0]);
+}
+
 /* Canonicalize a string/symbol scrutinee for an interned switch_i64:
  * content of 5 bytes or fewer re-packs to inline SSO bits — slab/heap/slice
  * variants of SHORT content otherwise never equal the SSO literal keys the
@@ -24758,6 +24765,36 @@ WValue w_atomic_cas(WValue a, WValue expected, WValue desired) {
     int64_t des = w_as_int(desired);
     int ok = atomic_compare_exchange_strong(&as_atomic(a)->value, &exp, des);
     return ok ? W_TRUE : W_FALSE;
+}
+
+/* ---- Element-level atomics on typed i64 arrays ----------------------------
+ * The publish protocol for cross-thread rings (seqlock): payload slots are
+ * written plain, the sequence slot is store-RELEASED by the producer and
+ * load-ACQUIRED by the consumer, so a consumer that observes the committed
+ * sequence value is guaranteed to observe the payload writes that preceded
+ * it. The ticket counter uses seq-cst fetch-add. int64_t slots are 8-aligned,
+ * so the C11 atomic builtins apply directly. */
+
+static inline _Atomic int64_t *w_i64_slot_atomic(WValue arr_val, WValue idx_val) {
+    WArray *a = (WArray *)w_as_ptr(arr_val);
+    int64_t idx = w_as_int(idx_val);
+    return (_Atomic int64_t *)((int64_t *)a->slots + a->start + idx);
+}
+
+WValue __w_arr_load_acq(WValue arr_val, WValue idx_val) {
+    return w_int(atomic_load_explicit(w_i64_slot_atomic(arr_val, idx_val),
+                                      memory_order_acquire));
+}
+
+WValue __w_arr_store_rel(WValue arr_val, WValue idx_val, WValue v) {
+    atomic_store_explicit(w_i64_slot_atomic(arr_val, idx_val), w_as_int(v),
+                          memory_order_release);
+    return W_NIL;
+}
+
+WValue __w_arr_fetch_add(WValue arr_val, WValue idx_val, WValue delta) {
+    return w_int(atomic_fetch_add(w_i64_slot_atomic(arr_val, idx_val),
+                                  w_as_int(delta)));
 }
 
 WValue w_atomic_increment(WValue a) {

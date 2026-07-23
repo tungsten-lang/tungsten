@@ -130,6 +130,9 @@ WASSAT_PRE_BUCKET_CAP = 1024
     @pst = i64[4]                # qhead / tsize / conflict / ticks
     @subscan_pm = i64[10]
     @subscan_out = i64[16384]    # survivor triples: 3 slots each + header
+    @bve_pm = i64[12]
+    @bve_out = i64[131072]       # packed resolvents: [len, aci, bci, lits...]*
+    @bve_hash = i64[8192]        # per-candidate resolvent dedup hashes
 
     # reusable BFS scratch for implication paths (allocated on first use);
     # a fresh boxed array per path was the substitution phase's entire cost
@@ -993,70 +996,57 @@ WASSAT_PRE_BUCKET_CAP = 1024
   # deleted, or nothing happens.
   -> try_eliminate(v)
     return false if @frozen[v] == 1 || @passign[v] != 0 || @gone[v] != 0
+    @bve_pm[0] = v
+    @bve_pm[1] = @bve_margin
+    @bve_pm[2] = WASSAT_PRE_OCC_PRODUCT_CAP
+    @bve_pm[3] = 131072
+    @bve_pm[4] = 0
+    @bve_pm[5] = 0
+    @bve_pm[6] = 0
+    @bve_pm[7] = 0
+    wassat_pre_bve_scan(@fla, @fcs, @fcl, @falive, @ftaut, @oh, @on, @ov,
+                        @lstamp, @bve_hash, @bve_out, @bve_pm, @lgen)
+    @lgen = @bve_pm[8]
+    @ticks += @bve_pm[7]
+    return false if @bve_pm[4] == 0
+
+    # commit from the packed buffer: all resolvents added, all originals
+    # deleted, or nothing — the atomicity contract is unchanged
+    count = @bve_pm[5]
     pos = self.live_occ(2 * v)
     neg = self.live_occ(2 * v + 1)
-    return false if pos.empty? && neg.empty?
-    return false if pos.size * neg.size > WASSAT_PRE_OCC_PRODUCT_CAP
-    # a parent holding the pivot twice cannot serve as a unit in the
-    # resolvent's hint replay; leave such variables alone
+    off = 0
+    i = 0
+    while i < count
+      n = @bve_out[off]
+      aci = @bve_out[off + 1]
+      bci = @bve_out[off + 2]
+      res = []
+      j = 0
+      while j < n
+        res.push(@bve_out[off + 3 + j])
+        j += 1
+      gid = @next_gid
+      self.plog_add(gid, res, [@fpgid[aci], @fpgid[bci]])
+      nci = self.store(res)
+      if res.size == 1 && @status == 0
+        lv = self.value(res[0])
+        if lv < 0
+          self.refute(nci)
+        elsif lv == 0
+          self.assign(res[0], nci)
+          confl = self.propagate_root
+          self.refute(confl) if confl >= 0
+      off += 3 + n
+      i += 1
+    @stack.push({ "kind": "bve_var", "pivot": v })
+    pos.each -> (ci)
+      @stack.push({ "kind": "bve", "pivot": v, "lits": @lits[ci].dup })
     parents = []
     pos.each -> (ci)
       parents.push(ci)
     neg.each -> (ci)
       parents.push(ci)
-    dup_pivot = false
-    parents.each -> (ci)
-      count = 0
-      @lits[ci].each -> (l)
-        count += 1 if l.abs == v
-      dup_pivot = true if count > 1
-    return false if dup_pivot
-    old_count = pos.size + neg.size
-    old_lits = 0
-    parents.each -> (ci)
-      old_lits += @lits[ci].size
-
-    resolvents = []
-    parent_ids = []
-    seen_keys = {}
-    new_lits = 0
-    feasible = true
-    pi = 0
-    while pi < pos.size && feasible
-      ni = 0
-      while ni < neg.size && feasible
-        @ticks += @lits[pos[pi]].size + @lits[neg[ni]].size
-        res = self.resolve(@lits[pos[pi]], @lits[neg[ni]], v)
-        unless res == nil
-          key = res.sort.join(",")
-          unless seen_keys.has_key?(key)
-            seen_keys[key] = true
-            resolvents.push(res)
-            parent_ids.push([@fpgid[pos[pi]], @fpgid[neg[ni]]])
-            new_lits += res.size
-            feasible = false if resolvents.size > old_count + @bve_margin || new_lits > old_lits + 16 * @bve_margin
-        ni += 1
-      pi += 1
-    return false unless feasible
-
-    # commit: add all resolvents, push the positive side, delete originals
-    i = 0
-    while i < resolvents.size
-      gid = @next_gid
-      self.plog_add(gid, resolvents[i], parent_ids[i])
-      nci = self.store(resolvents[i])
-      if resolvents[i].size == 1 && @status == 0
-        lv = self.value(resolvents[i][0])
-        if lv < 0
-          self.refute(nci)
-        elsif lv == 0
-          self.assign(resolvents[i][0], nci)
-          confl = self.propagate_root
-          self.refute(confl) if confl >= 0
-      i += 1
-    @stack.push({ "kind": "bve_var", "pivot": v })
-    pos.each -> (ci)
-      @stack.push({ "kind": "bve", "pivot": v, "lits": @lits[ci].dup })
     self.delete_batch(parents)
     @gone[v] = 1
     @vars_eliminated += 1
@@ -1465,6 +1455,171 @@ WASSAT_PRE_BUCKET_CAP = 1024
   pm[5] = pm[5] + ticks
   pm[6] = sci
   0
+
+# Native BVE feasibility scan for one pivot: walks both occurrence lists,
+# forms every resolvent over the flat literal arena (tautologies skipped via
+# generation stamps, duplicates collapsed by an order-independent 64-bit
+# hash — a collision only under-counts growth, which is a size POLICY, never
+# soundness), applies the growth bounds, and on success leaves the packed
+# resolvents [len, aci, bci, lits...]* in `out` for the boxed commit. The
+# boxed path used to build every rejected candidate's resolvents as Arrays
+# with sort.join dedup keys — the dominant cost of the heavy round.
+#
+#   pm[0] pivot  pm[1] margin  pm[2] occ-product cap  pm[3] out capacity
+#   pm[4] feasible(out)  pm[5] resolvent count(out)  pm[6] unused
+#   pm[7] ticks(out)  pm[8] next lgen(out)
+-> wassat_pre_bve_scan(fla, fcs, fcl, falive, ftaut, och, ocn, ocv, lstamp, hbuf, out, pm, lgen0) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64)
+  v = pm[0]
+  margin = pm[1]
+  prodcap = pm[2]
+  outcap = pm[3]
+  gen = lgen0
+  ticks = 0
+  pm[4] = 0
+  pm[5] = 0
+
+  # count live occurrences, old totals, and reject duplicated pivots
+  npos = 0
+  nneg = 0
+  old_lits = 0
+  dup = 0
+  side = 0
+  while side < 2
+    w = och[2 * v + side]
+    while w >= 0
+      ci = ocv[w]
+      if falive[ci] == 1 && ftaut[ci] == 0
+        if side == 0
+          npos = npos + 1
+        else
+          nneg = nneg + 1
+        stx = fcs[ci]
+        n = fcl[ci]
+        old_lits = old_lits + n
+        pc = 0
+        j = 0
+        while j < n
+          l = fla[stx + j]
+          av = l
+          if l < 0
+            av = 0 - l
+          if av == v
+            pc = pc + 1
+          j = j + 1
+        if pc > 1
+          dup = 1
+      w = ocn[w]
+    side = side + 1
+  if dup == 1
+    pm[8] = gen
+    pm[7] = ticks
+    0
+  else
+    if npos + nneg == 0 || npos * nneg > prodcap
+      pm[8] = gen
+      pm[7] = ticks
+      0
+    else
+      old_count = npos + nneg
+      count = 0
+      new_lits = 0
+      off = 0
+      feasible = 1
+      wa = och[2 * v]
+      while wa >= 0 && feasible == 1
+        aci = ocv[wa]
+        if falive[aci] == 1 && ftaut[aci] == 0
+          astx = fcs[aci]
+          an = fcl[aci]
+          wb = och[2 * v + 1]
+          while wb >= 0 && feasible == 1
+            bci = ocv[wb]
+            if falive[bci] == 1 && ftaut[bci] == 0
+              bstx = fcs[bci]
+              bn = fcl[bci]
+              ticks = ticks + an + bn
+              # stamp a-side literals (minus pivot), then merge b-side
+              gen = gen + 1
+              taut = 0
+              rl = 0
+              hdr = off
+              base = off + 3
+              j = 0
+              while j < an
+                l = fla[astx + j]
+                av = l
+                if l < 0
+                  av = 0 - l
+                if av != v
+                  li = av + av
+                  if l < 0
+                    li = li + 1
+                  if lstamp[li] != gen
+                    lstamp[li] = gen
+                    if base + rl < outcap
+                      out[base + rl] = l
+                    rl = rl + 1
+                j = j + 1
+              j = 0
+              while j < bn && taut == 0
+                l = fla[bstx + j]
+                av = l
+                if l < 0
+                  av = 0 - l
+                if av != v
+                  li = av + av
+                  oi = li + 1
+                  if l < 0
+                    li = li + 1
+                    oi = li - 1
+                  if lstamp[oi] == gen
+                    taut = 1
+                  else
+                    if lstamp[li] != gen
+                      lstamp[li] = gen
+                      if base + rl < outcap
+                        out[base + rl] = l
+                      rl = rl + 1
+                j = j + 1
+              if taut == 0
+                if base + rl >= outcap
+                  feasible = 0
+                else
+                  # order-independent hash for cross-pair dedup
+                  h = 0
+                  j = 0
+                  while j < rl
+                    x = out[base + j] * 2654435761
+                    x = x ^ (x >> 13)
+                    h = h ^ (x * 40503)
+                    j = j + 1
+                  h = h ^ rl
+                  isdup = 0
+                  j = 0
+                  while j < count
+                    if hbuf[j] == h
+                      isdup = 1
+                      j = count
+                    j = j + 1
+                  if isdup == 0
+                    hbuf[count] = h
+                    out[hdr] = rl
+                    out[hdr + 1] = aci
+                    out[hdr + 2] = bci
+                    count = count + 1
+                    new_lits = new_lits + rl
+                    off = base + rl
+                    if count > old_count + margin
+                      feasible = 0
+                    if new_lits > old_lits + 16 * margin
+                      feasible = 0
+            wb = ocn[wb]
+        wa = ocn[wa]
+      pm[4] = feasible
+      pm[5] = count
+      pm[7] = ticks
+      pm[8] = gen
+      0
 
 # Array concatenation helper: `+` on arrays is not defined in Tungsten.
 -> wassat_concat_arrays(a, b)

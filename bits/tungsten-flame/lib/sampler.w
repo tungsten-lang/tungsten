@@ -17,23 +17,38 @@ in Tungsten:Flame
   # per-metric sections. Single-metric flows return one key ("cycles"
   # on Linux, "samples" on macOS). Multi-event extension fills more.
   -> .profile(bin_path, duration, rate)
+    self.profile_cmd([bin_path], duration, rate)
+
+  # Same contract, but the target is a full command line (binary + args):
+  # the launched process is whatever argv describes, and symbolication
+  # keys off argv[0].
+  -> .profile_cmd(argv, duration, rate)
     os = self.os_name()
     if os == "Linux"
-      self.profile_linux(bin_path, duration, rate)
+      self.profile_linux(argv, duration, rate)
     elsif os == "Darwin"
-      self.profile_macos(bin_path, duration, rate)
+      self.profile_macos(argv, duration, rate)
     else
       << "sampler: unsupported OS: " + os
       {}
 
-  -> .profile_linux(bin_path, duration, rate)
+  -> .quote_argv(argv)
+    out = ""
+    i = 0
+    while i < argv.size()
+      out = out + " " if i > 0
+      out = out + Tungsten:Flame:Builder.shell_quote(argv[i])
+      i = i + 1
+    out
+
+  -> .profile_linux(argv, duration, rate)
     tmpdir = self.mktmpdir()
     perf_data = tmpdir + "/perf.data"
-    bin_q = Tungsten:Flame:Builder.shell_quote(bin_path)
+    cmd_q = self.quote_argv(argv)
     pd_q = Tungsten:Flame:Builder.shell_quote(perf_data)
     rate_s = (rate == nil ? "99" : rate.to_s())
     duration_s = duration.to_s()
-    rec_cmd = "perf record -F " + rate_s + " -g --call-graph fp -o " + pd_q + " -- timeout " + duration_s + "s " + bin_q + " 2>/dev/null"
+    rec_cmd = "perf record -F " + rate_s + " -g --call-graph fp -o " + pd_q + " -- timeout " + duration_s + "s " + cmd_q + " 2>/dev/null"
     if !system(rec_cmd)
       << "sampler: perf record failed"
       return {}
@@ -45,14 +60,15 @@ in Tungsten:Flame
     result["cycles"] = Tungsten:Flame:PerfScript.collapse(script_text)
     result
 
-  -> .profile_macos(bin_path, duration, rate)
+  -> .profile_macos(argv, duration, rate)
     tmpdir = self.mktmpdir()
+    bin_path = argv[0]
     trace_path = tmpdir + "/flame.trace"
     template = __DIR__ + "/xctrace/flame-counters.tracetemplate"
     if !file?(template)
       << "sampler: template not found: " + template
       return {}
-    bin_q = Tungsten:Flame:Builder.shell_quote(bin_path)
+    bin_q = self.quote_argv(argv)
     trace_q = Tungsten:Flame:Builder.shell_quote(trace_path)
     tpl_q = Tungsten:Flame:Builder.shell_quote(template)
     log_path = tmpdir + "/xctrace.log"
@@ -114,7 +130,10 @@ in Tungsten:Flame
           if arrow != nil
             return rest.slice(0, arrow)
         return ""
-      if line.include?("Kernel mapped ") && line.include?(bin_path)
+      # dyld prints the ABSOLUTE target path; bin_path may be relative
+      # (external-command mode launches `./bin/foo`), so match on the
+      # trailing path component.
+      if line.include?("Kernel mapped ") && line.ends_with?("/" + bin_path.split("/").last)
         seen_map = true
       i = i + 1
     ""

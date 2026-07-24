@@ -386,15 +386,12 @@ if fl_pid != nil
   << "TODO: attach to pid " + fl_pid.to_s + " for " + fl_duration.to_s + "s"
   exit(0)
 
-if fl_passthrough.size > 0
-  << "TODO: profile external command: " + fl_passthrough.join(" ")
-  exit(0)
 
 if fl_lex
   << "TODO: profile lexer over " + fl_files.size.to_s + " file(s)"
   exit(0)
 
-if fl_files.size == 0
+if fl_files.size == 0 && fl_passthrough.size == 0
   << "tungsten flame v0.3.0"
   << ""
   help_text = cli.help
@@ -407,7 +404,11 @@ if fl_ruby
   exit(0)
 
 # ---- Compile + profile + display ----
-source = fl_files[0]
+# Two entries into the same pipeline: a .w source (compile first), or an
+# external command after `--` (profile as-is; symbols resolve through the
+# sidemap the compiler wrote next to the target binary at build time).
+ext_argv = fl_passthrough
+source = ext_argv.size > 0 ? ext_argv[0] : fl_files[0]
 if !file?(source)
   << "tungsten flame: source not found: " + source
   exit(1)
@@ -424,12 +425,16 @@ if fl_build_only
   exit(0)
 
 bin_path = tmpdir + "/flame_bin"
-build_ok = Tungsten:Flame:Builder.compile(source, bin_path)
-if !build_ok
-  << "tungsten flame: build failed"
-  exit(1)
-
-metrics = Tungsten:Flame:Sampler.profile(bin_path, fl_duration, fl_rate)
+metrics = nil
+if ext_argv.size > 0
+  bin_path = source
+  metrics = Tungsten:Flame:Sampler.profile_cmd(ext_argv, fl_duration, fl_rate)
+else
+  build_ok = Tungsten:Flame:Builder.compile(source, bin_path)
+  if !build_ok
+    << "tungsten flame: build failed"
+    exit(1)
+  metrics = Tungsten:Flame:Sampler.profile(bin_path, fl_duration, fl_rate)
 metric_names = metrics.keys
 if metric_names.size == 0
   << "tungsten flame: profiling produced no samples"

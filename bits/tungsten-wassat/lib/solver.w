@@ -13,7 +13,7 @@
 # (negative), which makes the watch lists plain integer-keyed tables.
 #
 # Watch lists are per-literal contiguous blocks in one packed i64 pool
-# (entry = clause index << 32 | blocker literal): appends relocate a full
+# (entry = clause index << 32 | blocker lit-index): appends relocate a full
 # block to the pool top with doubling, and pool exhaustion triggers a
 # counting repack from the clause DB — never an allocation, so worker
 # threads stay allocation-free.
@@ -99,9 +99,15 @@ WASSAT_PROOF_DRAT = 2
     @lbd_stamp = 0
     @trail = i64[nv + 2]
     @trail_lim = i64[nv + 2]
+    # the assignment again, indexed by literal (lit_index): lassign[2v] is
+    # assign[v], lassign[2v+1] is -assign[v]. One byte load answers "is this
+    # literal true?" in native propagate — no sign-mask arithmetic.
+    @lassign = i8[2 * nv + 4]
     v = 0
     while v <= nv
       @assign[v] = 0
+      @lassign[v << 1] = 0
+      @lassign[(v << 1) + 1] = 0
       @level[v] = 0
       @reason[v] = -1
       @seen[v] = 0
@@ -312,7 +318,7 @@ WASSAT_PROOF_DRAT = 2
     @bl_size = 0
 
     # Contiguous watch stacks: per-literal blocks inside one packed pool.
-    # Entry = (clause_index << 32) | (blocker & 0xFFFFFFFF). The previous
+    # Entry = (clause_index << 32) | blocker_lit_index. The previous
     # intrusive linked lists paid a cache miss per node hop; blocks scan
     # linearly (propagation was 56% of the ibm-12 solve profile). Packing
     # and unpacking live ONLY in native typed code: a boxed `ci << 32`
@@ -531,10 +537,13 @@ WASSAT_PROOF_DRAT = 2
   # level while the solver sits at a deeper decision level.
   -> enqueue_lvl(l, from, lev)
     v = l.abs
-    @assign[v] = l > 0 ? 1 : -1
+    pol = l > 0 ? 1 : -1
+    @assign[v] = pol
+    @lassign[v << 1] = pol
+    @lassign[(v << 1) + 1] = 0 - pol
     @level[v] = lev
     @reason[v] = from
-    @phase[v] = l > 0 ? 1 : -1
+    @phase[v] = pol
     @trail[@tsize] = l
     @tsize += 1
     0
@@ -544,7 +553,7 @@ WASSAT_PROOF_DRAT = 2
   -> backjump(target)
     @bstate[0] = @dlevel
     @bstate[1] = @tsize
-    wassat_backjump(@trail, @trail_lim, @assign, @level, @reason, @heap,
+    wassat_backjump(@trail, @trail_lim, @assign, @lassign, @level, @reason, @heap,
                     @heappos, @activity, @hstate, @vq_stamp, @vq_state,
                     @kbuf, @bstate, target, @use_chrono ? 1 : 0)
     @dlevel = @bstate[0]
@@ -577,7 +586,7 @@ WASSAT_PROOF_DRAT = 2
     @pstate[2] = -1
     @pstate[3] = 0
     @pstate[5] = @use_chrono ? 1 : 0
-    wassat_propagate(@arena, @assign, @level, @reason, @phase, @ws_start,
+    wassat_propagate(@arena, @assign, @lassign, @level, @reason, @phase, @ws_start,
                      @ws_size, @ws_cap, @wpool, @wp_state, @cstart, @clen,
                      @trail, @pstate, @dlevel,
                      @bl_head, @bl_next, @bl_other, @bl_ci)
@@ -589,7 +598,7 @@ WASSAT_PROOF_DRAT = 2
       self.rebuild_watches
       @pstate[2] = -1
       @pstate[3] = 0
-      wassat_propagate(@arena, @assign, @level, @reason, @phase, @ws_start,
+      wassat_propagate(@arena, @assign, @lassign, @level, @reason, @phase, @ws_start,
                        @ws_size, @ws_cap, @wpool, @wp_state, @cstart, @clen,
                        @trail, @pstate, @dlevel,
                        @bl_head, @bl_next, @bl_other, @bl_ci)
@@ -1820,7 +1829,7 @@ WASSAT_PROOF_DRAT = 2
     ti += 1
   0
 
--> wassat_propagate(ar, asg, lvl, rsn, phs, wss, wsn, wsc, wp, wst, cs, cln, tr, st, dl, blh, bln, blo, blc) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[])
+-> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wss, wsn, wsc, wp, wst, cs, cln, tr, st, dl, blh, bln, blo, blc) (i64[] i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[])
   qhead = st[0]
   tsize = st[1]
   conflict = -1
@@ -1862,6 +1871,8 @@ WASSAT_PROOF_DRAT = 2
             v = 0 - other
             pol = -1
           asg[v] = pol
+          lasg[v << 1] = pol
+          lasg[(v << 1) + 1] = 0 - pol
           lvl[v] = plvl
           rsn[v] = blc[b]
           phs[v] = pol
@@ -1878,23 +1889,17 @@ WASSAT_PROOF_DRAT = 2
     j = lo + wsn[li] - 1
     while j >= lo && conflict < 0 && bail == 0
       e = wp[j]
-      blk = e & 4294967295
-      blk = blk - 4294967296 if blk > 2147483647
-      # branchless truth test: abs index and polarity flip via sign-mask
-      # arithmetic, no data-random branch on the literal's sign
-      sgn = blk >> 63
-      bv = (asg[(blk ^ sgn) - sgn] ^ sgn) - sgn
+      # entries carry the blocker's LIT-INDEX (always positive), so one
+      # byte load answers "is the blocker true?" — no sign handling at all
+      bv = lasg[e & 4294967295]
       # skip run of satisfied blockers in a store-free inner loop: nothing
-      # in here writes memory, so the wp/asg descriptor loads hoist out
+      # in here writes memory, so the wp/lasg descriptor loads hoist out
       # instead of being re-fetched per entry (stores on the clause-inspect
       # paths below otherwise pin them inside the loop body)
       while bv > 0 && j > lo
         j -= 1
         e = wp[j]
-        blk = e & 4294967295
-        blk = blk - 4294967296 if blk > 2147483647
-        sgn = blk >> 63
-        bv = (asg[(blk ^ sgn) - sgn] ^ sgn) - sgn
+        bv = lasg[e & 4294967295]
       if bv > 0
         j -= 1
       else
@@ -1905,10 +1910,13 @@ WASSAT_PROOF_DRAT = 2
           ar[stx] = ar[stx + 1]
           ar[stx + 1] = neg
         other = ar[stx]
+        # lit-index of `other`, reused as the packed blocker at every
+        # repack site below; its truth is then a single byte load
         so = other >> 63
-        ov = (asg[(other ^ so) - so] ^ so) - so
+        oli = (((other ^ so) - so) << 1) + (so & 1)
+        ov = lasg[oli]
         if ov > 0
-          wp[j] = (ci << 32) | (other & 4294967295)
+          wp[j] = (ci << 32) | oli
           j -= 1
         else
           k = 2
@@ -1954,10 +1962,10 @@ WASSAT_PROOF_DRAT = 2
                 wsc[ri] = need
                 wst[0] = top + need
             if bail == 0
-              wp[wss[ri] + rn] = (ci << 32) | (other & 4294967295)
+              wp[wss[ri] + rn] = (ci << 32) | oli
               wsn[ri] = rn + 1
           else
-            wp[j] = (ci << 32) | (other & 4294967295)
+            wp[j] = (ci << 32) | oli
             if ov == 0
               v = other
               pol = 1
@@ -1976,6 +1984,8 @@ WASSAT_PROOF_DRAT = 2
                   mxl = lvl[vk2] if lvl[vk2] > mxl
                   k += 1
               asg[v] = pol
+              lasg[v << 1] = pol
+              lasg[(v << 1) + 1] = 0 - pol
               lvl[v] = mxl
               rsn[v] = ci
               phs[v] = pol
@@ -2018,7 +2028,9 @@ WASSAT_PROOF_DRAT = 2
     wss[li] = top
     wsc[li] = need
     wst[0] = top + need
-  wp[wss[li] + n] = (ci << 32) | (blk & 4294967295)
+  bli = blk << 1
+  bli = ((0 - blk) << 1) + 1 if blk < 0
+  wp[wss[li] + n] = (ci << 32) | bli
   wsn[li] = n + 1
   0
 
@@ -2077,9 +2089,9 @@ WASSAT_PROOF_DRAT = 2
         lb = bq << 1
       else
         lb = ((0 - bq) << 1) + 1
-      wp[wss[la] + wsn[la]] = (ci << 32) | (bq & 4294967295)
+      wp[wss[la] + wsn[la]] = (ci << 32) | lb
       wsn[la] = wsn[la] + 1
-      wp[wss[lb] + wsn[lb]] = (ci << 32) | (a & 4294967295)
+      wp[wss[lb] + wsn[lb]] = (ci << 32) | la
       wsn[lb] = wsn[lb] + 1
     ci += 1
   0
@@ -2541,7 +2553,7 @@ WASSAT_PROOF_DRAT = 2
 # are kept — re-appended in original order and re-propagated by the caller
 # (st[2] returns the qhead rewind point).
 #   st[0] = dlevel in/out   st[1] = tsize in/out   st[2] = qhead out
--> wassat_backjump(tr, tlim, asg, lvl, rsn, heap, hpos, act, hst, vqs, vst, kbuf, st, target, chrono) (i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
+-> wassat_backjump(tr, tlim, asg, lasg, lvl, rsn, heap, hpos, act, hst, vqs, vst, kbuf, st, target, chrono) (i64[] i64[] i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
   dl = st[0]
   ts = st[1]
   kept = 0
@@ -2557,6 +2569,8 @@ WASSAT_PROOF_DRAT = 2
         kept += 1
       else
         asg[v] = 0
+        lasg[v << 1] = 0
+        lasg[(v << 1) + 1] = 0
         rsn[v] = 0 - 1
         z = wassat_heap_insert(heap, hpos, act, hst, v)
         if vqs[v] > vqs[vst[3]]

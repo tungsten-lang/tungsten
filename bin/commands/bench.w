@@ -68,7 +68,7 @@ BARW = 24
 
 # ---- benchmark catalogue --------------------------------------------------
 # section "h" = head-to-head (parity story); "t" = throughput baseline.
-benches = ["collatz", "mandelbrot", "julia", "decimal_e", "string_scan", "array_sort", "array_fill", "string_build", "bigint_fib", "rational_harmonic"]
+benches = ["collatz", "mandelbrot", "julia", "nbody", "decimal_e", "string_scan", "array_sort", "array_fill", "string_build", "bigint_fib", "rational_harmonic"]
 
 glyph = {}
 title = {}
@@ -97,6 +97,13 @@ desc["julia"]  = "Julia-set fractal, 2000×2000 grid"
 work["julia"]  = 4000000
 unit["julia"]  = "pixels"
 section["julia"] = "h"
+
+glyph["nbody"] = "🪐"
+title["nbody"] = "nbody"
+desc["nbody"]  = "gravitational n-body: 5 bodies, 500k timesteps"
+work["nbody"]  = 500000
+unit["nbody"]  = "steps"
+section["nbody"] = "h"
 
 glyph["decimal_e"] = "🧊"
 title["decimal_e"] = "decimal_e"
@@ -297,10 +304,38 @@ section["rational_harmonic"] = "t"
 
 # results agree when equal, or numeric within 0.01% (fp counts differ in the
 # last digits). integer cross-multiply — never divide.
+-> has_dot(s)
+  i = 0
+  while i < s.size()
+    if s.slice(i, 1) == "."
+      return true
+    i = i + 1
+  false
+
 -> results_match(a, b)
   if a == b
     return true
   if numeric?(a) && numeric?(b)
+    # fractional result (e.g. nbody's energy): relative tolerance via
+    # float subtract + integer-scaled compare (no float division).
+    if has_dot(a) || has_dot(b)
+      fa = a.to_f
+      fb = b.to_f
+      d = fa - fb
+      if d < 0.0
+        d = 0.0 - d
+      m = fa
+      if m < 0.0
+        m = 0.0 - m
+      fb2 = fb
+      if fb2 < 0.0
+        fb2 = 0.0 - fb2
+      if fb2 > m
+        m = fb2
+      if m == 0.0
+        return true
+      return d * 10000 < m
+    # integer result: exact, or within 0.01% (fp counts differ in last digits)
     ia = a.to_i
     ib = b.to_i
     diff = ia - ib
@@ -448,33 +483,8 @@ if builddir == ""
 
 built = {}
 srcok = {}
-
-print("")
-print("  [DIM]building")
-bi = 0
-while bi < benches.size()
-  b = benches[bi]
-  built[b] = {}
-  srcok[b] = {}
-  li = 0
-  while li < active.size()
-    l = active[li]
-    src = src_path(b, l)
-    srcok[b][l] = have_file(src)
-    built[b][l] = false
-    if srcok[b][l]
-      if compiled.include?(l)
-        out = builddir + "/" + b + "_" + l
-        cmd = compile_command(l, src, out, b)
-        if cmd != ""
-          system(cmd)
-          built[b][l] = is_exe(out)
-      else
-        built[b][l] = true
-    li = li + 1
-  print("[DIM].[RESET]")
-  bi = bi + 1
-<< "[RESET]"
+times = {}
+results = {}
 
 # ---- measure --------------------------------------------------------------
 -> measure(cmd, runs)
@@ -491,39 +501,6 @@ while bi < benches.size()
         best = e
     r = r + 1
   [best, result]
-
-times = {}
-results = {}
-
-print("  [DIM]running  [RESET]")
-bi = 0
-while bi < benches.size()
-  b = benches[bi]
-  times[b] = {}
-  results[b] = {}
-  li = 0
-  while li < active.size()
-    l = active[li]
-    times[b][l] = nil
-    if built[b][l]
-      src = src_path(b, l)
-      out = builddir + "/" + b + "_" + l
-      cmd = run_command(l, src, out)
-      rlang = runs
-      if l == "rb" || l == "py"
-        rlang = 1
-      m = measure(cmd, rlang)
-      bt = m[0]
-      results[b][l] = m[1]
-      if bt > 0.0
-        usv = (bt * 1000000).to_i
-        if usv < 1
-          usv = 1
-        times[b][l] = usv
-      print(col[l] + "•" + RESET)
-    li = li + 1
-  bi = bi + 1
-<< ""
 
 # ---- rendering ------------------------------------------------------------
 -> make_bar(num, den)
@@ -564,7 +541,47 @@ while bi < benches.size()
   << line
   0
 
--> render_bench(b)
+# Compile, time, and render ONE benchmark, streaming: the title is printed
+# first (so on a TTY it flushes immediately and the run never looks frozen
+# during the seconds-long interpreter runs), then rows fill in below it.
+-> process_bench(b)
+  built[b] = {}
+  srcok[b] = {}
+  times[b] = {}
+  results[b] = {}
+  << ""
+  << "  " + glyph[b] + " " + BOLD + WHITE + title[b] + RESET + "  [GREY]" + desc[b] + "[RESET]"
+  li = 0
+  while li < active.size()
+    l = active[li]
+    src = src_path(b, l)
+    srcok[b][l] = have_file(src)
+    built[b][l] = false
+    times[b][l] = nil
+    if srcok[b][l]
+      if compiled.include?(l)
+        out = builddir + "/" + b + "_" + l
+        cmd = compile_command(l, src, out, b)
+        if cmd != ""
+          system(cmd)
+          built[b][l] = is_exe(out)
+      else
+        built[b][l] = true
+    if built[b][l]
+      rout = builddir + "/" + b + "_" + l
+      rcmd = run_command(l, src, rout)
+      rlang = runs
+      if l == "rb" || l == "py"
+        rlang = 1
+      m = measure(rcmd, rlang)
+      bt = m[0]
+      results[b][l] = m[1]
+      if bt > 0.0
+        usv = (bt * 1000000).to_i
+        if usv < 1
+          usv = 1
+        times[b][l] = usv
+    li = li + 1
   best_us = -1
   li = 0
   while li < active.size()
@@ -584,8 +601,6 @@ while bi < benches.size()
       if ref == "" && results[b][l] != nil && results[b][l] != ""
         ref = results[b][l]
       li = li + 1
-  << ""
-  << "  " + glyph[b] + " " + BOLD + WHITE + title[b] + RESET + "  [GREY]" + desc[b] + "[RESET]"
   li = 0
   while li < active.size()
     l = active[li]
@@ -600,7 +615,7 @@ bi = 0
 while bi < benches.size()
   b = benches[bi]
   if section[b] == "h"
-    render_bench(b)
+    process_bench(b)
   bi = bi + 1
 
 # section 2: throughput baselines
@@ -618,7 +633,7 @@ if has_t
   while bi < benches.size()
     b = benches[bi]
     if section[b] == "t"
-      render_bench(b)
+      process_bench(b)
     bi = bi + 1
 
 # ---- scoreboard -----------------------------------------------------------

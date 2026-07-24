@@ -29,6 +29,13 @@ CADICAL = os.environ.get("CADICAL", shutil.which("cadical") or "")
 CMS5 = os.environ.get("CRYPTOMINISAT5", shutil.which("cryptominisat5") or "")
 REPS = int(os.environ.get("REPS", "3"))
 TOLERANCE = float(os.environ.get("TOLERANCE", "1.5"))
+# The dominance goal: wassat fastest on every row by MARGIN. Rows where the
+# best rival is under DOM_FLOOR seconds are startup-noise territory and pass
+# when wassat is within NOISE_MS of the best rival instead.
+DOMINANCE = os.environ.get("DOMINANCE", "") == "1"
+MARGIN = float(os.environ.get("MARGIN", "1.25"))
+DOM_FLOOR = float(os.environ.get("DOM_FLOOR", "0.05"))
+NOISE_MS = float(os.environ.get("NOISE_MS", "8")) / 1000.0
 FRONTIER_BUDGET = float(os.environ.get("FRONTIER_BUDGET", "60"))
 BENCH = Path(os.environ.get("BENCH", "/tmp/satbench"))
 SATLIB_ROOT = os.environ.get("SATLIB_ROOT", "")
@@ -136,8 +143,19 @@ def main() -> None:
         mark = "ok" if ok else "SLOW"
         if not ok:
             failures += 1
+        # Dominance verdict: fastest by MARGIN on solver-bound rows, within
+        # measurement noise on startup-bound ones. Informational unless
+        # DOMINANCE=1 makes it gate.
+        if best_rival < DOM_FLOOR:
+            dom = rows["wassat"] <= best_rival + NOISE_MS
+            dmark = "DOM~" if dom else "dom-miss"
+        else:
+            dom = rows["wassat"] * MARGIN <= best_rival
+            dmark = f"DOM {best_rival / rows['wassat']:.2f}x" if dom else f"dom-miss {best_rival / rows['wassat']:.2f}x"
+        if DOMINANCE and not dom:
+            failures += 1
         cells = "  ".join(f"{k}={v:.2f}s" for k, v in rows.items())
-        print(f"  {name}: {cells}  [{mark}]")
+        print(f"  {name}: {cells}  [{mark}] [{dmark}]")
 
     print("\n== frontier instances (tracked, budgeted) ==")
     if not FRONTIER:

@@ -1593,6 +1593,9 @@ WASSAT_PROOF_DRAT = 2
       # 272 -> 2,461 conflicts, ibm-10 1.1k -> 3.1k) — focused-first
       # stays the default, matching kissat. Opt-in for experiments.
       @mode_stable = true if env("WASSAT_STABLE_FIRST") == "1"
+    # experiment knobs: force either policy on preprocessed kernels too
+    @use_vmtf = true if env("WASSAT_VMTF") == "1"
+    @use_target = true if env("WASSAT_TARGET") == "1"
     self.rebuild_watches
     @bl_size = pm[7]
     @next_gid = art["next_gid"]

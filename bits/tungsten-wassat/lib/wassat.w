@@ -300,8 +300,8 @@ use portfolio
         probe_wall = 120
         probe_cap = 4000
         if art["raw"] == true
-          probe_wall = 250
-          probe_cap = options["conflicts"] > 0 ? options["conflicts"] : 3000
+          probe_wall = 150
+          probe_cap = options["conflicts"] > 0 ? options["conflicts"] : 2000
         if env("WASSAT_PROBE_MS") != nil
           probe_wall = env("WASSAT_PROBE_MS").to_i
           probe_cap = probe_wall * 40

@@ -328,6 +328,9 @@ WASSAT_ARM_SLS = 2             # local search, models only
     s.enable_sharing(ring, ring_cap, ring_maxlen, a)
     s.disable_vmtf if a % 2 == 1
     grp = a / 2
+    # arm 0 would exactly replay the serial probe's already-failed
+    # trajectory (same heuristic, same phases) — give it a fresh basin
+    s.reseed_phases(777) if a == 0
     s.reseed_phases(1000 + a * 7919) if grp == 1
     s.reseed_phases(4242 + a * 104729) if grp == 3
     s.set_positive_phases if grp == 2

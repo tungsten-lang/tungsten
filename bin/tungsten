@@ -66,6 +66,40 @@ case "$1" in
   build)
     exec "$RUBY" "$RUBY_CLI" "$@"
     ;;
+  # bench: the cross-language benchmark suite (bin/commands/bench.w). Options
+  # are translated to env vars because `tungsten run` consumes leading --flags
+  # itself; benchmark names pass through as positional args.
+  bench)
+    shift
+    if [ ! -x "$COMPILER" ]; then
+      echo "tungsten bench: build the compiler first — bin/tungsten build" >&2
+      exit 1
+    fi
+    bench_args=()
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --list)      export BENCH_LIST=1 ;;
+        --only)      shift; [ "$#" -gt 0 ] && export BENCH_ONLY="$1" ;;
+        --only=*)    export BENCH_ONLY="${1#--only=}" ;;
+        --runs)      shift; [ "$#" -gt 0 ] && export BENCH_RUNS="$1" ;;
+        --runs=*)    export BENCH_RUNS="${1#--runs=}" ;;
+        -h|--help)
+          echo "Usage: tungsten bench [benchmark...] [--only LANGS] [--runs N] [--list]"
+          echo
+          echo "  Compares Tungsten against C, Rust, Go, Crystal, Ruby and Python"
+          echo "  across a curated suite, then prints a colour throughput report."
+          echo
+          echo "  benchmark...   names to run (default: all; see --list)"
+          echo "  --only LANGS   comma list, e.g. w,c,rust,go  (aliases: tungsten,rust,…)"
+          echo "  --runs N       best-of-N timing for compiled langs (default 3)"
+          echo "  --list         list the benchmarks and exit"
+          exit 0 ;;
+        *)           bench_args+=("$1") ;;
+      esac
+      shift
+    done
+    exec "$COMPILER" run "$ROOT/bin/commands/bench.w" "${bench_args[@]}"
+    ;;
 esac
 
 # --fast-math / --no-fast-math: compile-time choice for `if FAST_MATH`

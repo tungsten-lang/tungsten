@@ -335,6 +335,16 @@ WASSAT_PROOF_DRAT = 2
     @input_clauses.each -> (c)
       self.add_input_clause(c)
 
+    # All-UIP shrink state (appended last: ctor blocks accrete at the end).
+    # @shcnt counts clause literals per decision LEVEL during a shrink call
+    # (all-zero between calls; typed arrays start zeroed); @shst carries
+    # scalars/stats across the native boundary: [0] size in/out  [1] body
+    # literals examined  [2] literals removed  [3] block attempts
+    # [4] blocks shrunk  [5] backjump target out  [6] probe clear-list size.
+    @shcnt = i64[nv + 3]
+    @shst = i64[8]
+    @use_shrink = @config.use_shrinking
+
   # ---- literal encoding ---------------------------------------------------
 
   -> lit_index(l)
@@ -621,6 +631,20 @@ WASSAT_PROOF_DRAT = 2
                    @vq_next, @vq_prev, @vq_stamp, @vq_state)
     @lsize = @astate[3]
     @astate[4]
+
+  # All-UIP shrinking: between analysis and LBD/storage, replace each
+  # multi-literal decision-level block of @lbuf with that level's unique
+  # implication point (see `wassat_shrink`). Shaped like `analyze`: the
+  # native worker leaves the (possibly shorter) clause in @lbuf, scalars
+  # cross through @shst. Updates @lsize; returns the recomputed backjump
+  # target (shrinking can only lower it, never raise it).
+  -> shrink_learned(n)
+    @shst[0] = n
+    z = wassat_shrink(@arena, @assign, @level, @reason, @seen, @cstart, @clen,
+                      @trail, @trail_lim, @lbuf, @mbuf, @mstk, @obuf, @mclr,
+                      @shcnt, @shst, @nvars)
+    @lsize = @shst[0]
+    @shst[5]
 
   # The failed-assumption core: the assumption `a` is falsified under the
   # current trail; walk the reasons of everything that contributed back to
@@ -1380,6 +1404,28 @@ WASSAT_PROOF_DRAT = 2
           # tore down the trail and could move `confl` out from under analyze.)
           target = self.analyze(confl, cl)
           n = @lsize
+          # All-UIP shrinking, with the trail still intact: long same-level
+          # runs (cardinality/counting chains) collapse to one literal per
+          # level, which is what minimisation provably cannot do there.
+          # Downstream consumers (LBD, proof logging, sharing, watch
+          # selection, backjump target) all read @lbuf/@lsize, so they see
+          # the shrunken clause automatically. Certificates need no gating:
+          # WRAT hints derive by reason-closure from the FINAL @lbuf, and
+          # every clause cited by shrinking's resolutions is inside that
+          # closure; DRAT additions stay RUP.
+          # Shape-gated (policy.w use_shrinking): random-3-SAT-like
+          # formulas have near-singleton blocks and measurably lose.
+          # NOT under chronological backtracking: the pass locates a
+          # level's literals through its trail segment, and chrono breaks
+          # that contiguity (kept blocks, out-of-order assertion levels).
+          # CaDiCaL shrinks under chrono by sorting on per-variable trail
+          # positions, which wassat does not track; without them the pass
+          # can only abort or misfire there — measured on bmc-ibm-12
+          # (chrono arm) it nearly doubled the conflict count for zero
+          # removal, while plain arms are unaffected.
+          if @use_shrink && !@use_chrono
+            target = self.shrink_learned(n)
+            n = @lsize
           lbd = self.compute_lbd_buf(n)
           self.log_learned_direct(n, confl)
           # low-LBD learned clauses are the sharing currency
@@ -1597,6 +1643,7 @@ WASSAT_PROOF_DRAT = 2
     @reduce_limit = @config.reduce_limit
     @reduce_step = @config.reduce_step
     @auto_vivify = @config.use_vivification
+    @use_shrink = @config.use_shrinking
     sncl = art["fncl"]
     # size the arena and tables for the live clauses plus learning headroom
     total = 0
@@ -1763,6 +1810,7 @@ WASSAT_PROOF_DRAT = 2
       "proof_mode": @proof_mode,
       "conflicts": @conflicts, "decisions": @decisions_made,
       "props": @pstate[4],
+      "shrink_seen": @shst[1], "shrink_removed": @shst[2],
       "restarts": @restart_count, "reduces": @reductions }
 
   # A positive conflict budget is additional work for this call. Returning
@@ -2271,6 +2319,349 @@ WASSAT_PROOF_DRAT = 2
   st[3] = keep
   st[4] = target
   0
+
+# All-UIP learned-clause shrinking (Feng & Bacchus 2020; CaDiCaL "shrink").
+#
+# After first-UIP analysis + recursive minimisation, try to replace each
+# decision level's literal BLOCK in the learned clause with that level's
+# single unique implication point: resolve the block's literals backward
+# over the level's own trail segment until one marked literal remains.
+# A resolution step may pull in literals from LOWER levels; exactly as
+# in CaDiCaL (opts.shrink=3), such a literal is acceptable only when it
+# is already in the clause, already proven removable, or passes the
+# recursive-minimisation redundancy probe over its reason DAG
+# (`wassat_shrink_probe`); anything else fails the block, which is then
+# kept unchanged. Literals are never ADDED, so neither the size nor the
+# glue can grow. After a successful block, its resolved-away literals
+# are marked removable (CaDiCaL's mark_shrinkable_as_removable): they
+# are implied by the surviving clause, so later blocks' probes may
+# bottom out in them. Blocks are processed lowest level FIRST — probes
+# reach only downward, so the removable marks cascade upward. On cardinality-counting instances (Sinz chains:
+# the Lonely Runner class) this removes the long same-level runs that
+# plain minimisation provably cannot touch — the probes succeed there
+# because pulled chain literals are covered by the clause's own lower
+# blocks; on random 3-SAT nearly every block is a singleton and the
+# pass no-ops in one walk over the clause.
+#
+# Scratch: `tmp` holds the working clause body; `cnt` is a per-LEVEL
+# literal count (all-zero between calls — restored via the level list
+# before returning); `stk` carries the descending distinct-level list at
+# its TOP end and the per-attempt pulled-variable list at its bottom
+# (nlev + pulled <= dlevel + |segment| <= nv + 1, so they cannot meet);
+# `dstk` is the probes' DFS stack and `tclr` the removable/poison
+# clear-list (each listed var is currently marked, so it never exceeds
+# nv entries). `sn` marks — 1 clause body, 2 open same-level, 3
+# removable, 4 poison — are restored to zero on every path, the same
+# contract the minimisation block satisfies. Runs with the trail
+# intact, BEFORE any backjump, and never allocates: worker threads run
+# this. Under chronological backtracking a level's literals need not be
+# contiguous in its trail segment; a foreign-level entry mid-segment
+# aborts that level's attempt (sound: the block is simply kept).
+#
+#   st[0] = clause size in/out        st[5] = backjump target out
+#   st[1] += body literals examined   st[2] += literals removed
+#   st[3] += block attempts           st[4] += blocks shrunk
+#   st[6] = removable/poison clear-list size (internal)
+-> wassat_shrink(ar, asg, lvl, rsn, sn, cs, cln, tr, tlim, out, tmp, stk, dstk, tclr, cnt, st, nv) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
+  n = st[0]
+  if n <= 2
+    tgt = 0
+    if n == 2
+      q = out[1]
+      v = q
+      v = 0 - q if q < 0
+      tgt = lvl[v]
+    st[5] = tgt
+    return n
+  # mark the body, count literals per level, and build the distinct-level
+  # list descending at the top of stk (levels[k] = stk[nv + 2 - k])
+  nlev = 0
+  m = 0
+  i = 1
+  while i < n
+    q = out[i]
+    v = q
+    v = 0 - q if q < 0
+    lq = lvl[v]
+    if cnt[lq] == 0
+      j = nlev
+      while j > 0 && stk[nv + 3 - j] < lq
+        stk[nv + 2 - j] = stk[nv + 3 - j]
+        j -= 1
+      stk[nv + 2 - j] = lq
+      nlev += 1
+    cnt[lq] = cnt[lq] + 1
+    sn[v] = 1
+    tmp[m] = q
+    m += 1
+    i += 1
+  st[6] = 0
+  budget = 8 * n
+  # process blocks LOWEST level first (the list is descending, so walk it
+  # backward): probes only look DOWNWARD through reason DAGs, so removable
+  # marks from already-shrunken lower blocks are what let higher blocks'
+  # probes succeed — the cascade only exists in this direction (CaDiCaL's
+  # sort order does exactly this)
+  k = nlev - 1
+  while k >= 0
+    bl = stk[nv + 2 - k]
+    if cnt[bl] >= 2
+      st[3] = st[3] + 1
+      opn = cnt[bl]
+      flr = tlim[bl - 1]
+      ti = tlim[bl] - 1
+      np = 0
+      bad = 0
+      uip = 0
+      resolved = 0
+      while opn > 0 && bad == 0
+        # advance to the next marked literal in this level's segment
+        scanning = 1
+        while scanning == 1
+          if ti < flr
+            bad = 1
+            scanning = 0
+          else
+            tv = tr[ti]
+            av = tv
+            av = 0 - tv if tv < 0
+            if lvl[av] != bl
+              # chrono guard: a foreign-level entry inside the segment
+              bad = 1
+              scanning = 0
+            else
+              mk = sn[av]
+              if mk == 1 || mk == 2
+                scanning = 0
+              else
+                ti -= 1
+        if bad == 0
+          tv = tr[ti]
+          av = tv
+          av = 0 - tv if tv < 0
+          sn[av] = 0
+          opn -= 1
+          if opn == 0
+            uip = tv
+          else
+            rc = rsn[av]
+            resolved += 1
+            if rc < 0 || resolved > budget
+              bad = 1
+            else
+              stx = cs[rc]
+              rn = cln[rc]
+              j = 0
+              while j < rn && bad == 0
+                q = ar[stx + j]
+                w = q
+                w = 0 - q if q < 0
+                if w != av
+                  mk = sn[w]
+                  if mk == 0
+                    lw = lvl[w]
+                    if lw > 0
+                      if lw == bl
+                        sn[w] = 2
+                        stk[np] = w
+                        np += 1
+                        opn += 1
+                      else
+                        # a lower-level literal not in the clause: accept
+                        # it only if its reason DAG proves it redundant
+                        # (CaDiCaL's minimize_literal fallback); anything
+                        # else would grow the clause — reject the block
+                        pr = wassat_shrink_probe(ar, lvl, rsn, sn, cs, cln, dstk, tclr, st, w, 0)
+                        bad = 1 if pr == 0
+                  else
+                    # 1/2/3 support the resolvent; 4 is known-irredundant
+                    bad = 1 if mk == 4
+                j += 1
+            ti -= 1
+      if bad == 0
+        # success: drop the level's body literals and assert the
+        # level-UIP in their place (negated, exactly like out[0]).
+        # Everything resolved away — body and pulled literals — is
+        # implied by the surviving clause, so mark it removable for
+        # later blocks' probes (mark_shrinkable_as_removable).
+        wp = 0
+        r = 0
+        while r < m
+          q = tmp[r]
+          w = q
+          w = 0 - q if q < 0
+          if lvl[w] == bl
+            sn[w] = 3
+            tclr[st[6]] = w
+            st[6] = st[6] + 1
+          else
+            tmp[wp] = q
+            wp += 1
+          r += 1
+        m = wp
+        r = 0
+        while r < np
+          w = stk[r]
+          sn[w] = 3
+          tclr[st[6]] = w
+          st[6] = st[6] + 1
+          r += 1
+        w = uip
+        w = 0 - uip if uip < 0
+        tmp[m] = 0 - uip
+        m += 1
+        sn[w] = 1
+        cnt[bl] = 1
+        st[4] = st[4] + 1
+      else
+        # failed block: clear its pulled marks, then re-mark the level's
+        # body literals (consumed ones lost their marks during the walk);
+        # probe caches (3/4) persist — they hold relative to the clause,
+        # not to this attempt
+        r = 0
+        while r < np
+          sn[stk[r]] = 0
+          r += 1
+        r = 0
+        while r < m
+          q = tmp[r]
+          w = q
+          w = 0 - q if q < 0
+          sn[w] = 1 if lvl[w] == bl
+          r += 1
+        # fallback (CaDiCaL's shrunken_block_no_uip): probe each block
+        # literal individually. Removable marks cascaded up from lower
+        # blocks let probes succeed here where the minimisation inside
+        # analyze — which ran before any cascade marks existed — could
+        # not; this is most of CaDiCaL's removal on counting instances
+        # (its `minishrunken` statistic). A failed probe re-marks the
+        # literal as ordinary body support, never poison.
+        wp = 0
+        r = 0
+        while r < m
+          q = tmp[r]
+          w = q
+          w = 0 - q if q < 0
+          drop = 0
+          if lvl[w] == bl
+            sn[w] = 0
+            drop = wassat_shrink_probe(ar, lvl, rsn, sn, cs, cln, dstk, tclr, st, w, 1)
+            sn[w] = 1 if drop == 0
+          if drop == 0
+            tmp[wp] = q
+            wp += 1
+          r += 1
+        m = wp
+    k -= 1
+  # restore the per-level counters, probe marks, and body marks, write
+  # the clause back, and recompute the backjump target (max level over
+  # the new body)
+  k = 0
+  while k < nlev
+    cnt[stk[nv + 2 - k]] = 0
+    k += 1
+  r = 0
+  while r < st[6]
+    sn[tclr[r]] = 0
+    r += 1
+  tgt = 0
+  r = 0
+  while r < m
+    q = tmp[r]
+    w = q
+    w = 0 - q if q < 0
+    sn[w] = 0
+    lw = lvl[w]
+    tgt = lw if lw > tgt
+    out[r + 1] = q
+    r += 1
+  st[0] = m + 1
+  st[5] = tgt
+  st[1] = st[1] + n - 1
+  st[2] = st[2] + n - 1 - m
+  m + 1
+
+# Redundancy probe for shrinking — the exact analogue of CaDiCaL's
+# recursive minimize_literal, done as an iterative post-order DFS: `root`
+# (a variable pulled into a block resolution from a lower level, or a
+# failed block's own literal in fallback mode) is redundant when every
+# path through its reason DAG bottoms out in clause literals (sn 1), open
+# resolvent literals (2), proven-removable literals (3), or root-level
+# assignments. Every node gets a PERMANENT verdict at its post-visit —
+# removable (3) when its whole subtree is covered, poison (4) when the
+# probe fails while it is still on the stack. Completed subtrees keep
+# their 3-marks even when the enclosing probe fails; this memoization is
+# what makes chain-structured DAGs (Sinz counters) cheap and is the
+# difference between probes that cascade and probes that die (an earlier
+# unwind-everything variant removed 25x fewer literals). tclr lists every
+# 3/4-marked variable exactly once (st[6] is its size), so the shrink
+# epilogue can restore the all-zero `sn` contract without a full sweep.
+# Frames pack (resume-index << 32 | var); reason DAGs are acyclic in
+# trail order, so an on-stack variable can never be re-encountered.
+# In fallback mode (fbk 1) a failed root is NOT poisoned: the caller
+# re-marks it as clause body — CaDiCaL sets keep on exactly that path,
+# and keep wins over poison in its early-return order.
+-> wassat_shrink_probe(ar, lvl, rsn, sn, cs, cln, dstk, tclr, st, root, fbk) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+  if rsn[root] < 0
+    if fbk == 0
+      sn[root] = 4
+      tclr[st[6]] = root
+      st[6] = st[6] + 1
+    return 0
+  sp = 1
+  dstk[0] = root
+  good = 1
+  while sp > 0 && good == 1
+    fr = dstk[sp - 1]
+    v = fr & 4294967295
+    ci = fr >> 32
+    rc = rsn[v]
+    stx = cs[rc]
+    rn = cln[rc]
+    # resume the reason scan at ci: find the next literal needing a verdict
+    child = 0
+    while ci < rn && child == 0 && good == 1
+      q = ar[stx + ci]
+      w = q
+      w = 0 - q if q < 0
+      if w != v && lvl[w] > 0
+        mk = sn[w]
+        if mk == 0
+          if rsn[w] < 0
+            good = 0
+          else
+            child = w
+        else
+          good = 0 if mk == 4
+      ci += 1
+    if good == 1
+      if child == 0
+        # reason exhausted: v is covered — permanent removable verdict
+        sn[v] = 3
+        tclr[st[6]] = v
+        st[6] = st[6] + 1
+        sp -= 1
+      else
+        # remember the resume point, then descend into the child
+        dstk[sp - 1] = (ci << 32) | v
+        if sp > 1000
+          good = 0
+        else
+          dstk[sp] = child
+          sp += 1
+  if good == 0
+    # a path hit a decision or poison: every frame still on the stack
+    # fails with it (finished subtrees keep their removable marks)
+    j = 0
+    while j < sp
+      fr = dstk[j]
+      v = fr & 4294967295
+      if fbk == 0 || j > 0
+        sn[v] = 4
+        tclr[st[6]] = v
+        st[6] = st[6] + 1
+      j += 1
+  good
 
 # Native flat-formula loader: ingest a preprocessor's flat clause mirrors
 # directly — live clauses copy arena-to-arena, watches and binary-implication

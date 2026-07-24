@@ -56,6 +56,30 @@
     # plain.
     false
 
+  -> use_shrinking
+    # All-UIP learned-clause shrinking (Feng & Bacchus; CaDiCaL's shrink)
+    # pays where learned clauses carry multi-literal decision-level blocks
+    # — counting/cardinality encodings and structured kernels. On
+    # random-3-SAT-like formulas the blocks are near-singletons: measured
+    # on uuf250-01 the pass removed ~1% of learned literals while costing
+    # ~5% conflict throughput and perturbing the trajectory (+4.6%
+    # conflicts) — a strict loss, so the ternary-dominated shape keeps it
+    # off, the same measured-policy treatment as lookahead and VMTF.
+    #
+    # DORMANT (2026-07-24): shape-gating is not enough — interleaved A/B on
+    # the whole gate found php87 0.03s -> 0.11s (3.7x: heavy shrinking,
+    # 29% of literals removed, on a row already decided in 416 conflicts by
+    # lookahead) and bmc-ibm-12 0.88 -> 0.94s, against ibm-10 0.18 -> 0.16s
+    # and uuf250 unchanged. Net negative, so the pass stays off everywhere.
+    # It is retained (certified: 38+12 specs, php87 WRAT verified WITH the
+    # pass active, 200-case differential) because the technique is
+    # trajectory-dependent: wassat's lr5 clauses carry only ~20% of their
+    # literals in multi-literal level blocks (1% removed, ~15% ceiling)
+    # versus CaDiCaL's 37%, and the restart/branching cadence work that
+    # reshapes that trajectory is the phase that could make this pay.
+    return false if true
+    !(@ternary * 4 >= @nclauses * 3)
+
   -> use_vivification
     # The current prefix-conflict pass is a measured net loss: on uuf250 it
     # perturbs a roughly 95k-conflict trajectory into a multi-million-conflict

@@ -601,10 +601,10 @@ WASSAT_PROOF_DRAT = 2
 
   # First-UIP analysis. Delegates to the native `wassat_analyze` below and
   # leaves the learned clause in @lbuf; @astate carries the scalars.
-  -> analyze(confl)
+  -> analyze(confl, alevel)
     @astate[0] = confl
     @astate[1] = @tsize
-    @astate[2] = @dlevel
+    @astate[2] = alevel
     @astate[5] = @conflicts
     wassat_analyze(@arena, @assign, @level, @reason, @seen, @cstart, @clen,
                    @trail, @lbuf, @mbuf, @mstk, @mclr, @activity, @heap,
@@ -724,6 +724,15 @@ WASSAT_PROOF_DRAT = 2
       @phase[v] = 1
       @bphase[v] = 1
       v += 1
+    0
+
+  # Chronological backtracking is enabled per-solver by the coordinator:
+  # the bounded probe must stay plain (easy kernels decide there on pure
+  # target-phase descents, and chrono disturbs them), while the fresh
+  # post-probe-miss main solver takes it from the start (mid-run switches
+  # measured strictly worse than either pure mode on ibm-12).
+  -> enable_chrono
+    @use_chrono = true
     0
 
   # Arm diversity switch for the raw-kernel race: EVSIDS arms call this
@@ -1341,12 +1350,14 @@ WASSAT_PROOF_DRAT = 2
       elsif confl >= 0
         @conflicts += 1
         @since_restart += 1
-        # Chronological pre-step: normalize to the conflict's true level
-        # before refutation check and analysis (Nadel-Ryvchin).
-        if @use_chrono && @dlevel > 0
-          cl = self.conflict_level(confl)
-          self.backjump(cl) if cl < @dlevel
-        if @dlevel == 0
+        # Chronological analysis happens AT the conflict's true level (max
+        # level in the clause — can sit below @dlevel under out-of-order
+        # assignments), with ONE combined backjump after learning. v1
+        # pre-backjumped here and thrashed its kept blocks twice per
+        # conflict. Without chrono, cl == @dlevel and paths are identical.
+        cl = @dlevel
+        cl = self.conflict_level(confl) if @use_chrono && @dlevel > 0
+        if cl == 0
           self.log_clause([])
           @formula_unsat = true
           result = -1
@@ -1358,7 +1369,7 @@ WASSAT_PROOF_DRAT = 2
           # ordering is the fix for the fixed-capacity portfolio SIGBUS —
           # exhaustion handling used to backjump+reduce_db here first, which
           # tore down the trail and could move `confl` out from under analyze.)
-          target = self.analyze(confl)
+          target = self.analyze(confl, cl)
           n = @lsize
           lbd = self.compute_lbd_buf(n)
           self.log_learned_direct(n, confl)
@@ -1403,7 +1414,7 @@ WASSAT_PROOF_DRAT = 2
               # and let the asserted UIP re-propagate through the kept
               # prefix. Ablated on cms5 this knob alone is 3.5x on ibm-12.
               jump = target
-              jump = @dlevel - 1 if @use_chrono && @nassump == 0 && @dlevel - target > @chrono_t
+              jump = cl - 1 if @use_chrono && @nassump == 0 && cl - target > @chrono_t
               self.backjump(jump)
               if n == 1
                 # Unit clauses are stored too, not just asserted: a logged clause

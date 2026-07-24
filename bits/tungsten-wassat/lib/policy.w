@@ -48,16 +48,21 @@
     raw
 
   -> use_chronological_backtracking(raw)
-    # The existing kept-block implementation is sound but slower than ordinary
-    # backjumping on every gate family. It is not exposed as an opt-in. This
-    # policy method is the sole future activation point once true trail reuse
-    # wins the automatic gate.
+    # v2 (analysis AT the conflict level, one combined jump) wins on long
+    # raw searches (ibm-12: 12.2k -> 8.3k conflicts) and loses on the
+    # fast target-phase dives that decide inside the probe (ibm-6:
+    # 272 -> 2k). The coordinator therefore enables it per-solver on the
+    # post-probe-miss main solve only (enable_chrono); solvers default
+    # plain.
     false
 
   -> use_vivification
-    # Vivification pays only after a meaningful learned database exists and is
-    # currently proof-free. Avoid tiny formulas and huge watch rebuilds.
-    @nclauses >= 1000 && @nclauses <= 50000 && @nliterals <= 1000000
+    # The current prefix-conflict pass is a measured net loss: on uuf250 it
+    # perturbs a roughly 95k-conflict trajectory into a multi-million-conflict
+    # search, and prior BMC measurements also regressed. Keep the technique
+    # out of the automatic policy until a stronger form wins the reference
+    # gate; there is deliberately no user-facing opt-in tuning switch.
+    false
 
   -> raw_race_arms
     # DISABLED (2026-07-24): the implicit multi-arm race intermittently
@@ -74,9 +79,10 @@
   -> lookahead_candidates
     # Trial propagation is a strong win for compact random 3-SAT and
     # pigeonhole-like "one long choice plus many binary exclusions" tasks,
-    # but a loss on the large structured kernels. Select it from shape rather
-    # than exposing a tuning switch.
-    random3 = @nvars >= 20 && @nvars <= 2000 && @nclauses >= 80 && @ternary * 4 >= @nclauses * 3
+    # but it multiplies decision work and destroys the tuned CDCL trajectory
+    # on uuf100/uuf250-scale random kernels. Keep rollout to the small random
+    # class where it wins; select it from shape rather than exposing a knob.
+    random3 = @nvars >= 20 && @nvars <= 64 && @nclauses >= 80 && @ternary * 4 >= @nclauses * 3
     choice_binary = @nvars >= 20 && @nvars <= 512 && @nclauses >= 100 && @binary * 2 >= @nclauses && @max_clause >= 4
     return 16 if random3 || choice_binary
     0

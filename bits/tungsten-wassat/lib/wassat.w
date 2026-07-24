@@ -428,6 +428,10 @@ use portfolio
   if proof_mode == WASSAT_PROOF_NONE
     # trusted path: ingest the preprocessor's flat mirrors natively
     s = Wassat.from_flat(formula["nvars"], art, 0)
+    # This solver only runs when the bounded probe missed — a long search
+    # ahead, where chronological backtracking measurably pays (the probe
+    # itself must stay plain: fast target-phase dives dislike it).
+    s.enable_chrono if art["raw"] == true
     tprof = wassat_prof("cli.from_flat", tprof)
   else
     s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, 0)

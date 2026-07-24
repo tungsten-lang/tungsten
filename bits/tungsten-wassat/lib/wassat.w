@@ -289,10 +289,12 @@ use portfolio
     if art["status"] == 0
       # The burst pays only on kernels local search can actually crack —
       # measured: hits on small kernels (ibm-2), never on 100k-clause
-      # ones, where the SLS constructor's normalization alone costs more
-      # than the CDCL probe.
+      # ones (the SLS constructor's normalization alone costs more than
+      # the CDCL probe), and never worth it below ~2k clauses, where the
+      # 1ms bounded probe decides before the burst's 12ms even starts
+      # (uuf100/php/dubois class — 18ms -> ~6ms total).
       burst0 = { "sat": false }
-      if art["clauses"].size > 0 && art["clauses"].size <= 50000
+      if art["clauses"].size > 2000 && art["clauses"].size <= 50000
         reduced0 = { "nvars": formula["nvars"], "clauses": art["clauses"] }
         burst0 = wassat_sls_solve(reduced0, 60000, 7)
       tprof = wassat_prof("cli.sls_burst", tprof)

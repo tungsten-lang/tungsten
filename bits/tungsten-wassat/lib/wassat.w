@@ -284,7 +284,13 @@ use portfolio
   pre.enable_dual_emission if proof_mode == WASSAT_PROOF_WRAT && drat_final != nil
   art = nil
   if proof_mode == WASSAT_PROOF_NONE
-    art = pre.run_light_flat(formula)
+    # A raw kernel runs no preprocessing technique at all, so it does not
+    # need the preprocessor: hand the parser's flat arrays straight to the
+    # solver (see wassat_raw_artifact).
+    if config.raw_kernel?
+      art = wassat_raw_artifact(formula, formula["nvars"])
+    else
+      art = pre.run_light_flat(formula)
     tprof = wassat_prof("cli.light", tprof)
     if art["status"] == 0
       # The burst pays only on kernels local search can actually crack —
@@ -386,8 +392,12 @@ use portfolio
             << "c conflicts: [budget_used], decisions: 0, props: 0"
             << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(art["stats"], pre_msr)
             return 0
-      art = pre.run_heavy
-      tprof = wassat_prof("cli.heavy", tprof)
+      # Raw kernels skipped the preprocessor entirely, so there is no
+      # intake for the heavy rounds to operate on — and policy disables
+      # every technique they would run at this size anyway.
+      unless config.raw_kernel?
+        art = pre.run_heavy
+        tprof = wassat_prof("cli.heavy", tprof)
       # did the probe already win while we preprocessed?
       if probe_p != nil
         prc = probe_p.poll

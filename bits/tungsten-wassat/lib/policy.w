@@ -5,6 +5,20 @@
 # deterministic from the parsed task shape, so benchmark results are
 # reproducible and library callers get the same decisions as the CLI.
 
+# Clause-shape histogram over the parser's flat lengths:
+#   [0] total literals  [1] longest clause  [2] units  [3] binary  [4] ternary
+-> wassat_shape_counts(lens, ncl, out) (i64[] i64 i64[])
+  i = 0
+  while i < ncl
+    n = lens[i]
+    out[0] = out[0] + n
+    out[1] = n if n > out[1]
+    out[2] = out[2] + 1 if n == 1
+    out[3] = out[3] + 1 if n == 2
+    out[4] = out[4] + 1 if n == 3
+    i += 1
+  0
+
 -> wassat_decimal_in_range(flag, token, minimum, maximum)
   raise "[flag] requires a non-negative decimal integer, got '[token]'" unless wassat_unsigned_decimal?(token)
   value = 0
@@ -35,10 +49,34 @@
       @binary += 1 if n == 2
       @ternary += 1 if n == 3
 
+  # Shape counters straight from the parser's flat length array, for the
+  # raw path that never materializes boxed clauses (see
+  # wassat_raw_artifact). Same numbers the boxed constructor computes.
+  -> .from_lens(nvars, lens, ncl)
+    c = WassatConfig.new(nvars, [])
+    counts = i64[8]
+    wassat_shape_counts(lens, ncl, counts)
+    c.adopt_counts(ncl, counts)
+    c
+
+  -> adopt_counts(ncl, counts)
+    @nclauses = ncl
+    @nliterals = counts[0]
+    @max_clause = counts[1]
+    @units = counts[2]
+    @binary = counts[3]
+    @ternary = counts[4]
+    0
+
   -> raw_kernel?
     # Large kernels currently lose more to full preprocessing intake and
     # rewrite passes than they regain in search. Small encoding kernels still
     # benefit substantially from probing, substitution, subsumption, and BVE.
+    #
+    # Validation hook: no correctness-suite instance is anywhere near this
+    # size, so lowering the threshold is the only way to exercise the raw
+    # path (preprocessor bypass included) across the differential.
+    return @nclauses > env("WASSAT_RAW_AT").to_i if env("WASSAT_RAW_AT") != nil
     @nclauses > 50000
 
   -> use_vmtf(raw)

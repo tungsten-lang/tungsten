@@ -1813,6 +1813,47 @@ WASSAT_PRE_BUCKET_CAP = 1024
   out
 
 # The preprocessing half of the stats contract line.
+# Raw-kernel artifact: skip the preprocessor entirely.
+#
+# Above the size threshold every technique is disabled by policy, yet
+# intake still built occurrence lists and signatures for the subsumption
+# and BVE passes that never run, and sweep_satisfied re-derived root units
+# the solver's own load already collects — 51ms of the 120ms on
+# bmc-ibm-6. The parser's flat arrays are already exactly the arena the
+# solver ingests, so hand them over directly with the three trivial
+# side-tables the loader expects. Tautologies stay in: they are satisfied
+# under every assignment, so they never propagate or conflict, and the
+# watch scheme carries them at no cost.
+-> wassat_raw_artifact(parse, nvars)
+  ncl = parse["flat_ncl"]
+  alive = i64[ncl + 1]
+  taut = i64[ncl + 1]
+  gids = i64[ncl + 1]
+  wassat_raw_sidetables(alive, gids, ncl)
+  { "nvars": nvars, "clauses": [], "gids": [], "raw": true,
+    "config": WassatConfig.from_lens(nvars, parse["flat_lens"], ncl),
+    "next_gid": ncl + 1, "status": 0,
+    "stack": [], "gone": i64[nvars + 2],
+    "fla": parse["flat_lits"], "fcs": parse["flat_offs"],
+    "fcl": parse["flat_lens"], "falive": alive,
+    "ftaut": taut, "fpgid": gids, "fncl": ncl,
+    "wrat": [], "drat": [],
+    "stats": { "probes": 0, "probes_failed": 0,
+               "vars_substituted": 0,
+               "clauses_subsumed": 0,
+               "clauses_strengthened": 0,
+               "vars_eliminated": 0,
+               "ticks": 0 } }
+
+# Every clause alive, proof ids sequential from 1.
+-> wassat_raw_sidetables(alive, gids, ncl) (i64[] i64[] i64)
+  i = 0
+  while i < ncl
+    alive[i] = 1
+    gids[i] = i + 1
+    i += 1
+  0
+
 -> wassat_pre_stats_text(stats, pre_ms)
   "probes=[stats["probes"]] probes_failed=[stats["probes_failed"]] vars_substituted=[stats["vars_substituted"]] clauses_subsumed=[stats["clauses_subsumed"]] clauses_strengthened=[stats["clauses_strengthened"]] vars_eliminated=[stats["vars_eliminated"]] preprocess_ms=[pre_ms]"
 

@@ -13762,6 +13762,20 @@ static double as_float(WValue v) {
 static double as_numeric_double(WValue v) {
     if (w_is_double(v)) return w_as_double(v);
     if (w_is_int(v)) return (double)w_as_int(v);
+    /* A Decimal reaching arithmetic's double branch means the *other* operand
+     * is a Float, so the result is already inexact — promote the decimal to a
+     * double, exactly as cmp_numeric_double does for order comparisons.
+     * Without this, mixed Float×Decimal arithmetic (`~1.5 * 2.0`, and the
+     * `clock() * 1000.0` footgun where `1000.0` is a Decimal literal) dies
+     * with "expected numeric type" even though the comparison forms work.
+     * Exact Decimal×Decimal is unaffected: that is handled earlier, before the
+     * w_is_double branch that calls this. */
+    if (is_decimal_any(v)) {
+        int64_t sig;
+        int scale;
+        decimal_extract(v, &sig, &scale);
+        return (double)sig * pow(10.0, (double)scale);
+    }
     die("expected numeric type");
     return 0.0;
 }
@@ -14168,8 +14182,12 @@ WValue w_add(WValue a, WValue b) {
     if (is_duration_any(a) && is_duration_any(b))
         return w_duration_add(a, b);
     if (w_is_double(a) || w_is_double(b)) {
-        if ((w_is_double(a) || w_is_int(a)) &&
-            (w_is_double(b) || w_is_int(b)))
+        /* double + (double|int|decimal) → float. Decimals are admitted here
+         * (matching w_sub/w_mul/w_div and the == comparison path); a genuine
+         * non-numeric like `~1.5 + "s"` still falls through to the string /
+         * instance handling below for a proper TypeError. */
+        if ((w_is_double(a) || w_is_int(a) || is_decimal_any(a)) &&
+            (w_is_double(b) || w_is_int(b) || is_decimal_any(b)))
             return w_float(as_numeric_double(a) + as_numeric_double(b));
     }
     /* Strict string `+`: only text (String/Char/Rope) concatenates with

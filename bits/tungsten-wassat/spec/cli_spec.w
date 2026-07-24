@@ -1,5 +1,38 @@
 use spec
 use wassat
+use ../../tungsten-wrat/lib/wrat
+
+# Pigeonhole PHP(p,h) as DIMACS text: p pigeons, h holes, UNSAT when p > h.
+# Compact and deterministic, so the compiled smoke tests stay hermetic.
+-> cli_php_cnf(pigeons, holes)
+  clauses = []
+  i = 0
+  while i < pigeons
+    row = []
+    j = 0
+    while j < holes
+      row.push(i * holes + j + 1)
+      j += 1
+    clauses.push(row)
+    i += 1
+  j = 0
+  while j < holes
+    a = 0
+    while a < pigeons
+      b = a + 1
+      while b < pigeons
+        clauses.push([0 - (a * holes + j + 1), 0 - (b * holes + j + 1)])
+        b += 1
+      a += 1
+    j += 1
+  lines = ["p cnf [pigeons * holes] [clauses.size]"]
+  clauses.each -> (c)
+    lines.push(c.join(" ") + " 0")
+  lines.join("\n") + "\n"
+
+-> cli_test_bin
+  bin = env("WASSAT_TEST_BIN")
+  bin == nil || bin == "" ? "bits/tungsten-wassat/bin/wassat" : bin
 
 describe "Tungsten Wassat CLI" ->
   context "the mode contract" ->
@@ -129,5 +162,98 @@ describe "Tungsten Wassat CLI" ->
       expect(ok).to eq(true)
       out = read_file("/tmp/wassat-cli-sls-zero.out")
       expect(out.index("flips=0") != nil).to eq(true)
+
+  # End-to-end smoke tests over the compiled binary: the native parser,
+  # streamed proofs, and exit codes only exist in a compiled program.
+  context "compiled CLI smoke" ->
+    it "prints version and discoverable help" ->
+      bin = cli_test_bin
+      expect(system(bin + " version > /tmp/wassat-cli-ver.out 2>&1")).to eq(true)
+      expect(read_file("/tmp/wassat-cli-ver.out").index("Tungsten Wassat") != nil).to eq(true)
+      expect(system(bin + " help > /tmp/wassat-cli-help.out 2>&1")).to eq(true)
+      help = read_file("/tmp/wassat-cli-help.out")
+      expect(help.index("USAGE") != nil).to eq(true)
+      expect(help.index("portfolio") != nil).to eq(true)
+      expect(help.index("--conflicts") != nil).to eq(true)
+
+    it "prints a model line for a satisfiable instance" ->
+      bin = cli_test_bin
+      sat = "/tmp/wassat-cli-smoke-sat.cnf"
+      z = write_file(sat, "p cnf 3 2\n1 -2 0\n2 3 0\n")
+      expect(z).to eq(true)
+      expect(system(bin + " " + sat + " --fast > /tmp/wassat-cli-smoke-sat.out 2>&1")).to eq(true)
+      out = read_file("/tmp/wassat-cli-smoke-sat.out")
+      expect(out.index("s SATISFIABLE") != nil).to eq(true)
+      expect(out.index("v ") != nil).to eq(true)
+
+    it "writes a WRAT certificate that the independent checker verifies" ->
+      bin = cli_test_bin
+      text = cli_php_cnf(4, 3)
+      cnf = "/tmp/wassat-cli-smoke-unsat.cnf"
+      proof = "/tmp/wassat-cli-smoke.wrat"
+      expect(write_file(cnf, text)).to eq(true)
+      expect(system(bin + " " + cnf + " --proof " + proof + " > /tmp/wassat-cli-smoke-unsat.out 2>&1")).to eq(true)
+      out = read_file("/tmp/wassat-cli-smoke-unsat.out")
+      expect(out.index("s UNSATISFIABLE") != nil).to eq(true)
+      check = wrat_verify(text, read_file(proof))
+      expect(check["verified"]).to eq(true)
+
+    it "writes a DRAT certificate that the independent checker verifies" ->
+      bin = cli_test_bin
+      text = cli_php_cnf(4, 3)
+      cnf = "/tmp/wassat-cli-smoke-drat.cnf"
+      proof = "/tmp/wassat-cli-smoke.drat"
+      expect(write_file(cnf, text)).to eq(true)
+      expect(system(bin + " " + cnf + " --drat " + proof + " > /tmp/wassat-cli-smoke-drat.out 2>&1")).to eq(true)
+      out = read_file("/tmp/wassat-cli-smoke-drat.out")
+      expect(out.index("s UNSATISFIABLE") != nil).to eq(true)
+      check = wrat_verify(text, read_file(proof))
+      expect(check["verified"]).to eq(true)
+
+    it "streams a proof to stdout with `--proof -`" ->
+      bin = cli_test_bin
+      text = cli_php_cnf(4, 3)
+      cnf = "/tmp/wassat-cli-smoke-stdout.cnf"
+      expect(write_file(cnf, text)).to eq(true)
+      # verdict + comments go to stderr in quiet mode; the proof is on stdout
+      expect(system(bin + " " + cnf + " --proof - > /tmp/wassat-cli-stdout.proof 2>/dev/null")).to eq(true)
+      proof_text = read_file("/tmp/wassat-cli-stdout.proof")
+      expect(proof_text != nil && proof_text != "").to eq(true)
+      check = wrat_verify(text, proof_text)
+      expect(check["verified"]).to eq(true)
+
+    it "reports malformed input as a clean error, not a crash" ->
+      bin = cli_test_bin
+      bad = "/tmp/wassat-cli-smoke-bad.cnf"
+      expect(write_file(bad, "p cnf 1 5\nnot a clause\n")).to eq(true)
+      expect(system(bin + " " + bad + " --fast > /tmp/wassat-cli-bad.out 2>&1")).to eq(false)
+      out = read_file("/tmp/wassat-cli-bad.out")
+      expect(out.index("c error") != nil).to eq(true)
+      expect(out.index("s UNKNOWN") != nil).to eq(true)
+
+  # Aggregate --conflicts cap: NO CDCL stage (scout probe, raw race, final
+  # solve) may push the total past the requested budget. PHP(6,5) is decided
+  # only after ~143 conflicts, so a small cap must return UNKNOWN with a
+  # conflict count that never exceeds the cap.
+  context "aggregate conflict budget" ->
+    it "solves within an unlimited budget but stops at a small cap" ->
+      bin = cli_test_bin
+      text = cli_php_cnf(6, 5)
+      cnf = "/tmp/wassat-cli-budget.cnf"
+      expect(write_file(cnf, text)).to eq(true)
+
+      expect(system(bin + " " + cnf + " --fast --conflicts 0 > /tmp/wassat-cli-budget0.out 2>&1")).to eq(true)
+      expect(read_file("/tmp/wassat-cli-budget0.out").index("s UNSATISFIABLE") != nil).to eq(true)
+
+      expect(system(bin + " " + cnf + " --fast --conflicts 1 > /tmp/wassat-cli-budget1.out 2>&1")).to eq(true)
+      out1 = read_file("/tmp/wassat-cli-budget1.out")
+      expect(out1.index("s UNKNOWN") != nil).to eq(true)
+      # aggregate conflicts reported must not exceed the cap of 1
+      expect(out1.index("c conflicts: 1,") != nil || out1.index("c conflicts: 0,") != nil).to eq(true)
+
+      expect(system(bin + " " + cnf + " --fast --conflicts 2 > /tmp/wassat-cli-budget2.out 2>&1")).to eq(true)
+      out2 = read_file("/tmp/wassat-cli-budget2.out")
+      expect(out2.index("s UNKNOWN") != nil).to eq(true)
+      expect(out2.index("c conflicts: 3,") == nil).to eq(true)
 
 spec_summary

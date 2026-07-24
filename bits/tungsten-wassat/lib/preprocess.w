@@ -136,7 +136,9 @@ WASSAT_PRE_BUCKET_CAP = 1024
     @subscan_out = i64[16384]    # survivor triples: 3 slots each + header
     @bve_pm = i64[12]
     @bve_out = i64[131072]       # packed resolvents: [len, aci, bci, lits...]*
-    @bve_hash = i64[8192]        # per-candidate resolvent dedup hashes
+    @bve_hash = i64[8192]        # per-candidate resolvent dedup hashes (bucket)
+    @bve_hpos = i64[8192]        # header offset of each committed resolvent —
+                                 # lets a hash match confirm EXACT set equality
 
     # reusable BFS scratch for implication paths (allocated on first use);
     # a fresh boxed array per path was the substitution phase's entire cost
@@ -1099,7 +1101,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
     @bve_pm[6] = 0
     @bve_pm[7] = 0
     wassat_pre_bve_scan(@fla, @fcs, @fcl, @falive, @ftaut, @oh, @on, @ov,
-                        @lstamp, @bve_hash, @bve_out, @bve_pm, @lgen)
+                        @lstamp, @bve_hash, @bve_hpos, @bve_out, @bve_pm, @lgen)
     @lgen = @bve_pm[8]
     @ticks += @bve_pm[7]
     return false if @bve_pm[4] == 0
@@ -1578,7 +1580,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
 #   pm[0] pivot  pm[1] margin  pm[2] occ-product cap  pm[3] out capacity
 #   pm[4] feasible(out)  pm[5] resolvent count(out)  pm[6] unused
 #   pm[7] ticks(out)  pm[8] next lgen(out)
--> wassat_pre_bve_scan(fla, fcs, fcl, falive, ftaut, och, ocn, ocv, lstamp, hbuf, out, pm, lgen0) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64)
+-> wassat_pre_bve_scan(fla, fcs, fcl, falive, ftaut, och, ocn, ocv, lstamp, hbuf, hpos, out, pm, lgen0) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64)
   v = pm[0]
   margin = pm[1]
   prodcap = pm[2]
@@ -1695,7 +1697,12 @@ WASSAT_PRE_BUCKET_CAP = 1024
                 if base + rl >= outcap
                   feasible = 0
                 else
-                  # order-independent hash for cross-pair dedup
+                  # Order-independent 64-bit hash only SELECTS a candidate
+                  # bucket; a hash hit then triggers an EXACT set comparison.
+                  # Two DISTINCT resolvents can collide on this hash, and
+                  # dropping a real resolvent as a false duplicate makes the
+                  # reduced formula non-equisatisfiable (a reconstructed model
+                  # then fails the original-formula guard).
                   h = 0
                   j = 0
                   while j < rl
@@ -1706,13 +1713,29 @@ WASSAT_PRE_BUCKET_CAP = 1024
                   h = h ^ rl
                   isdup = 0
                   j = 0
-                  while j < count
-                    if hbuf[j] == h
-                      isdup = 1
-                      j = count
+                  while j < count && isdup == 0
+                    if hbuf[j] == h && out[hpos[j]] == rl
+                      # same hash and same length: confirm identical literal
+                      # sets (unique lits per resolvent, so subset ⟹ equal)
+                      sp = hpos[j]
+                      same = 1
+                      p = 0
+                      while p < rl && same == 1
+                        found = 0
+                        q = 0
+                        while q < rl && found == 0
+                          if out[sp + 3 + q] == out[base + p]
+                            found = 1
+                          q = q + 1
+                        if found == 0
+                          same = 0
+                        p = p + 1
+                      if same == 1
+                        isdup = 1
                     j = j + 1
                   if isdup == 0
                     hbuf[count] = h
+                    hpos[count] = hdr
                     out[hdr] = rl
                     out[hdr + 1] = aci
                     out[hdr + 2] = bci

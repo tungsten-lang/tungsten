@@ -67,8 +67,13 @@
 # Validation matrix matches wassat_parse_cnf exactly — the spec suite runs
 # the same rejection cases against both.
 -> wassat_parse_cnf_native(text)
+  # Every clause needs at least a "0" terminator plus a separator (2 bytes),
+  # and every literal at least a digit plus a separator (2 bytes), so
+  # text.size/2 bounds BOTH counts. The old clause bound of text.size/4
+  # assumed ~2 literals per clause and rejected legal empty/unit-clause-heavy
+  # formulas (e.g. 137 empty clauses) as "input exceeds parser buffers".
   cap_l = text.size / 2 + 64
-  cap_c = text.size / 4 + 64
+  cap_c = text.size / 2 + 64
   lits = i64[cap_l]
   offs = i64[cap_c]
   lens = i64[cap_c]

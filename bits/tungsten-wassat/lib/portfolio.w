@@ -248,6 +248,22 @@ WASSAT_ARM_SLS = 2             # local search, models only
   a = ccall("__w_argv_program")
   a == nil || a == "" ? "wassat" : a
 
+# Resolve the Metal sidecar the build emits BESIDE the running executable,
+# not relative to the current working directory. WASSAT_METAL overrides. Only
+# when argv[0] carries no directory (a bare PATH lookup) do we fall back to a
+# CWD-relative path.
+-> wassat_metal_path
+  override = env("WASSAT_METAL")
+  return override if override != nil && override != ""
+  prog = wassat_own_binary
+  slash = 0 - 1
+  i = 0
+  while i < prog.size
+    slash = i if prog.slice(i, 1) == "/"
+    i += 1
+  return "bin/wassat.metal" if slash < 0
+  prog.slice(0, slash + 1) + "wassat.metal"
+
 # ---- worker mode ------------------------------------------------------------
 #
 # `wassat --worker reduced.cnf --gids g.txt --status out [--arm X]
@@ -379,6 +395,11 @@ WASSAT_ARM_SLS = 2             # local search, models only
 -> wassat_fast_arm_body(solver, res, base)
   solver.solve_shared(res, base)
 
+# Budgeted arm body: each arm stops UNKNOWN after `budget` conflicts (0 =
+# unlimited) so the raw-kernel race honours the aggregate --conflicts cap.
+-> wassat_fast_arm_body_budget(solver, res, base, budget)
+  solver.solve_shared_budget(res, base, budget)
+
 # Raw-kernel basin race: K allocation-free arms over the SAME flat artifact,
 # diversified along the axes that measurably move bmc-family trajectories —
 # decision heuristic (VMTF vs EVSIDS) and initial phases. First decisive arm
@@ -386,7 +407,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
 # Motivation: ibm-12's conflict count ranges 4.9k-17k across heuristic
 # configurations with no single winner; sampling basins concurrently buys
 # min-over-arms wall time for one thread-spawn's overhead.
--> wassat_raw_race(nv, art, threads)
+-> wassat_raw_race(nv, art, threads, max_conflicts)
   stop = i64[4]
   res = i64[threads * (nv + 8)]
   ring_maxlen = 24
@@ -414,7 +435,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
   while a < threads
     solver = solvers[a]
     base = a * (nv + 8)
-    handles.push(Thread.new -> wassat_fast_arm_body(solver, res, base))
+    handles.push(Thread.new -> wassat_fast_arm_body_budget(solver, res, base, max_conflicts))
     a += 1
   handles.each -> (h)
     z = h.join
@@ -493,8 +514,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
   gpu_model = []
   if gpu
     reduced = { "nvars": nv, "clauses": art["clauses"] }
-    metal_path = env("WASSAT_METAL")
-    metal_path = "bin/wassat.metal" if metal_path == nil || metal_path == ""
+    metal_path = wassat_metal_path
     begin
       gr = wassat_sls_gpu_solve(reduced, 512, 2000000000, 9001, 48, metal_path, stop)
       if gr["sat"]

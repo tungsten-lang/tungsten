@@ -39,7 +39,12 @@ wassat problem.cnf --proof out.wrat --drat out.drat
 
 `--fast` enables the full trusted engine. Proof modes use only transformations
 whose certificate obligations are implemented. `--conflicts` is a resource
-limit, not a strategy knob; exhaustion returns `s UNKNOWN`.
+limit, not a strategy knob: it caps the *aggregate* conflicts across every
+CDCL stage (the scout probe, the raw-kernel race, and the final solve), so no
+stage can push the total past the requested budget. `--conflicts 0` is
+unlimited; a positive budget that is exhausted returns `s UNKNOWN` (unless
+preprocessing or root propagation decides the formula with no search conflict),
+and the reported conflict count is the aggregate.
 
 The main solver inspects variable, clause, literal, binary, ternary, and unit
 counts. That policy chooses among raw or preprocessed kernels, bounded local
@@ -177,7 +182,10 @@ validate their literals.
 
 The default repository spec gate builds a fresh Wassat CLI and runs all Wassat
 specs, including the native parser, process portfolio, deadlines, atomic proof
-publishing, randomized continuation agreement, and independent proof replay:
+publishing, randomized continuation agreement, compiled CLI smoke tests
+(version/help, SAT models, WRAT/DRAT certificates, stdout proofs, malformed
+input, the aggregate conflict budget), and independent proof replay. The
+independent `tungsten-wrat` checker spec runs in the same gate:
 
 ```sh
 scripts/test-specs.sh
@@ -205,7 +213,11 @@ specific checkout path.
 
 ## Current limits
 
-Wassat does not support incremental clause addition/removal or native XOR/XNF
-reasoning. Proof portfolio workers do not share learned clauses, by design;
-the shared threaded portfolio is trusted-only. GPU local search currently
-uses Metal and is model-only.
+Wassat supports incremental solving through assumption literals
+(`solve_assuming` / `solve_assuming_budget`) over one persistent learned
+database, with a failed-assumption core on UNSAT; it does not support
+incremental clause addition/removal, nor native XOR/XNF reasoning. Proof
+portfolio workers do not share learned clauses, by design; the shared threaded
+portfolio is trusted-only (`--fast`), and the implicit raw-kernel thread race
+is enabled only after passing sustained fixed-capacity stress. GPU local
+search currently uses Metal and is model-only.

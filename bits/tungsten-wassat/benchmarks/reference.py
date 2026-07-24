@@ -117,6 +117,14 @@ def main() -> None:
         for sname, mk in solvers():
             t, v = median_time(mk(path), 120)
             rows[sname], verdicts[sname] = t, v
+        # A solver that emits no verdict (or only times out) is BROKEN, not
+        # fast: a no-op such as /usr/bin/true reports "NONE" and must never
+        # stand in as a passing row. Fail before the timing comparison.
+        missing = sorted(k for k, v in verdicts.items() if v in ("NONE", "TIMEOUT"))
+        if missing:
+            print(f"  {name}: NO VERDICT from {missing} (verdicts={verdicts})")
+            failures += 1
+            continue
         if len(set(verdicts.values()) - {"TIMEOUT"}) > 1:
             print(f"  {name}: VERDICT MISMATCH {verdicts}")
             failures += 1
@@ -147,12 +155,18 @@ def main() -> None:
             rival_name = "cms5"
             rival_t, rival_v = run([CMS5, path], 300)
         wt, wv = run([WASSAT, path, "--fast"], FRONTIER_BUDGET)
+        # No verdict at all (a crash or a no-op binary) is a failure, distinct
+        # from a legitimate TIMEOUT on a known-behind instance.
+        if wv == "NONE":
+            print(f"  {name}: NO VERDICT from wassat (broken)")
+            failures += 1
+            continue
         if wv not in ("TIMEOUT",) and rival_v and rival_v != "TIMEOUT" and wv != rival_v:
             print(f"  {name}: VERDICT MISMATCH wassat={wv} cadical={rival_v}")
             failures += 1
             continue
         gap = (wt / rival_t) if rival_t else float("nan")
-        solved = "SOLVED" if wv != "TIMEOUT" else f"unsolved@{FRONTIER_BUDGET:.0f}s"
+        solved = "SOLVED" if wv in ("SATISFIABLE", "UNSATISFIABLE") else f"unsolved@{FRONTIER_BUDGET:.0f}s"
         rival_text = "missing" if rival_t is None else f"{rival_t:.1f}s"
         print(f"  {name}: wassat {solved} ({wt:.1f}s)  {rival_name}={rival_text}  gap>={gap:.1f}x")
 

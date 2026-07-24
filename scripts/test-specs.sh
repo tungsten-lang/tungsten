@@ -322,6 +322,13 @@ wassat_specs=(
   bits/tungsten-wassat/spec/portfolio_spec.w
 )
 
+# The independent proof checker ships as its own bit with no shared parsing
+# or checking code; its checker_spec runs through the interpreter (it needs
+# no compiled runtime builtins).
+wrat_specs=(
+  bits/tungsten-wrat/spec/checker_spec.w
+)
+
 for spec in "${compiled_specs[@]}"; do
   run_compiled_spec "$spec"
 done
@@ -348,6 +355,10 @@ else
   echo "FAIL [wassat] CLI compile failed" >&2
   fail=1
 fi
+
+for spec in "${wrat_specs[@]}"; do
+  run_interpreter_spec "$spec"
+done
 
 if [[ "${RUN_CORE_SPECS:-0}" == "1" ]]; then
   ruby -e 'File.binwrite("/tmp/tungsten-mmap-view-smoke.bin", [1, 2, 3, 4].pack("V*"))'

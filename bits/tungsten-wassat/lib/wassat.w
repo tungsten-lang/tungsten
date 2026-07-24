@@ -231,6 +231,10 @@ use portfolio
   probe_p = nil
   probe_out = nil
   light_stack = nil
+  # Aggregate CDCL conflicts consumed by every search stage (scout probe, raw
+  # race, final solve). --conflicts is a cap over their SUM, not a per-stage
+  # allowance; 0 stays unlimited.
+  budget_used = 0
   input = options["input"]
   wrat_final = options["proof"]
   wrat_final = options["lrat"] if wrat_final == nil
@@ -325,10 +329,18 @@ use portfolio
         # stays a cheap scout whose miss pays for the heavy rounds.
         probe_wall = config.probe_ms(art["raw"] == true)
         probe_cap = config.probe_conflicts(art["raw"] == true)
-        probe_cap = options["conflicts"] if art["raw"] == true && options["conflicts"] > 0
-        spr = sprobe.solve_budget(512)
+        # The scout is the FIRST CDCL stage inside the aggregate --conflicts
+        # budget. Cap it (and every slice, including the first) at the
+        # requested budget on raw AND reduced kernels, so a small budget is
+        # never blown by the fixed 512-conflict first slice.
+        probe_cap = options["conflicts"] if options["conflicts"] > 0 && options["conflicts"] < probe_cap
+        slice = probe_cap < 512 ? probe_cap : 512
+        spr = sprobe.solve_budget(slice)
         while spr["status"] == 0 && spr["conflicts"] < probe_cap && ccall("__w_clock_ms") - probe_t0 < probe_wall
-          spr = sprobe.solve_budget(512)
+          rem = probe_cap - spr["conflicts"]
+          slice = rem < 512 ? rem : 512
+          spr = sprobe.solve_budget(slice)
+        budget_used = spr["conflicts"]
         tprof = wassat_prof("cli.serial_probe", tprof)
         if spr["status"] != 0
           pre_msq = ccall("__w_clock_ms") - t0
@@ -348,10 +360,16 @@ use portfolio
           << "c stats restarts=[spr["restarts"]] reduces=[spr["reduces"]] " + wassat_pre_stats_text(art["stats"], pre_msq)
           return 0
 
-      if art["raw"] == true
+      if art["raw"] == true && (options["conflicts"] == 0 || budget_used < options["conflicts"])
         arms = config.raw_race_arms
         if arms > 1
-          rr = wassat_raw_race(formula["nvars"], art, arms)
+          # Each arm is bounded by what remains of the aggregate budget, so no
+          # CDCL path runs past --conflicts (previously the race was unbounded
+          # and could answer long after a small --conflicts cap should have
+          # returned UNKNOWN). 0 keeps the race unlimited.
+          race_budget = options["conflicts"] == 0 ? 0 : options["conflicts"] - budget_used
+          rr = wassat_raw_race(formula["nvars"], art, arms, race_budget)
+          budget_used += rr["conflicts"]
           tprof = wassat_prof("cli.raw_race", tprof)
           if rr["status"] != 0
             pre_msr = ccall("__w_clock_ms") - t0
@@ -363,7 +381,7 @@ use portfolio
             else
               << "s UNSATISFIABLE"
             << "c mode: fast (raw cdcl race, arm [rr["winner"]])"
-            << "c conflicts: [rr["conflicts"]], decisions: 0, props: 0"
+            << "c conflicts: [budget_used], decisions: 0, props: 0"
             << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(art["stats"], pre_msr)
             return 0
       art = pre.run_heavy
@@ -435,7 +453,19 @@ use portfolio
     dhead = art["drat"].join("\n") + "\n"
     raise "proof write failed at '[drat_stream]'" unless wassat_append_text(drat_stream, dhead)
 
-  result = s.solve_budget(options["conflicts"])
+  # Final search runs on whatever remains of the aggregate budget. If earlier
+  # CDCL stages (scout, raw race) already spent it, add no further conflicts —
+  # report UNKNOWN. --conflicts 0 stays unlimited.
+  final_budget = options["conflicts"]
+  skip_final = false
+  if options["conflicts"] > 0
+    final_budget = options["conflicts"] - budget_used
+    skip_final = final_budget <= 0
+  result = nil
+  if skip_final
+    result = s.unknown_result
+  else
+    result = s.solve_budget(final_budget)
   tprof = wassat_prof("cli.solve", tprof)
   if probe_p != nil
     if result["status"] == 0
@@ -478,9 +508,12 @@ use portfolio
   # Trim the trailing newline: wassat_result_text ends with one and
   # wassat_status appends its own.
   rtext = wassat_result_text(result)
+  # Report conflicts as the aggregate across every CDCL stage so the number
+  # is consistent with the --conflicts cap.
+  agg_conflicts = result["conflicts"] + budget_used
   wassat_status(quiet, rtext.slice(0, rtext.size - 1))
   wassat_status(quiet, "c mode: [wassat_mode_of(options)]")
-  wassat_status(quiet, "c conflicts: [result["conflicts"]], decisions: [result["decisions"]]")
+  wassat_status(quiet, "c conflicts: [agg_conflicts], decisions: [result["decisions"]]")
   wassat_status(quiet, "c stats restarts=[result["restarts"]] reduces=[result["reduces"]] " + pstats)
 
   if result["status"] == -1
@@ -588,8 +621,7 @@ v " + r["model"].join(" ") + " 0
 # sidecar the build wrote next to the entry point (override: WASSAT_METAL).
 -> wassat_sls_dispatch(formula, flips, seed, gpu, walkers, noise)
   if gpu
-    metal_path = env("WASSAT_METAL")
-    metal_path = "bin/wassat.metal" if metal_path == nil || metal_path == ""
+    metal_path = wassat_metal_path
     wassat_sls_gpu_solve(formula, walkers, flips, seed, noise, metal_path)
   else
     wassat_sls_solve(formula, flips, seed)

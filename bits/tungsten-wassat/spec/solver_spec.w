@@ -173,6 +173,28 @@ describe "Tungsten Wassat" ->
       expect(sat_again["status"]).to eq(1)
       expect(sat_again["model"].size).to eq(2)
 
+  context "fixed-capacity search (portfolio arm safety)" ->
+    # Regression for the fixed-capacity portfolio SIGBUS: capacity exhaustion
+    # while handling a conflict must NOT backjump/compact before analysis.
+    # Forcing a tiny arena makes almost every conflict hit the exhaustion
+    # path; the arm must analyze the conflict first, then reclaim or retire —
+    # never crash and never answer SAT on this UNSAT formula.
+    it "handles arena exhaustion mid-conflict without corrupting analysis" ->
+      f = wassat_parse_cnf(PHP32)
+      s = Wassat.new(f["nvars"], f["clauses"], WASSAT_PROOF_NONE, 0)
+      s.force_tiny_arena_for_test(3 * (f["nvars"] + 8))
+      r = s.solve_budget(0)
+      # completes without a crash; UNSAT if it reclaimed enough, else UNKNOWN
+      # (retired) — but NEVER a spurious SAT
+      expect(r["status"] == -1 || r["status"] == 0).to eq(true)
+
+    it "retires safely when the arena cannot hold even one learned clause" ->
+      f = wassat_parse_cnf(PHP32)
+      s = Wassat.new(f["nvars"], f["clauses"], WASSAT_PROOF_NONE, 0)
+      s.force_tiny_arena_for_test(1)
+      r = s.solve_budget(0)
+      expect(r["status"] == -1 || r["status"] == 0).to eq(true)
+
   context "EVSIDS variable-order heap" ->
     it "raises bumped variables to the top and keeps inverse positions valid" ->
       asg = i64[6]

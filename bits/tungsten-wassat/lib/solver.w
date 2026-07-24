@@ -872,6 +872,17 @@ WASSAT_PROOF_DRAT = 2
     @fixed_caps = true
     0
 
+  # Test-only: force an artificially small LOGICAL arena capacity so the
+  # fixed-capacity exhaustion/compaction path fires after only a handful of
+  # learned clauses. The PHYSICAL @arena keeps its real size, so every read
+  # and write stays in bounds — this only tightens the capacity CHECK. Used
+  # by the regression that pins the "analyze the conflict before compacting"
+  # ordering (the fixed-capacity portfolio SIGBUS).
+  -> force_tiny_arena_for_test(slack)
+    @fixed_caps = true
+    @acap = @asize + slack
+    0
+
   # Join the sharing ring: ring[0] is the atomic ticket; slot t%cap starts
   # at 8 + slot*stride with [seq, src_arm, len, lits...].
   -> enable_sharing(ring, cap, maxlen, arm_id)
@@ -1643,10 +1654,17 @@ WASSAT_PROOF_DRAT = 2
   #   res[base+1..base+nvars] = assignment (SAT only)
   #   res[base+nvars+1..+3]  = exports / imports / dropped
   -> solve_shared(res, base)
+    self.solve_shared_budget(res, base, 0)
+
+  # Budgeted worker entry: `max_conflicts` 0 is unlimited, else the arm stops
+  # UNKNOWN once it has added that many conflicts. Lets the raw-kernel race
+  # honour the aggregate --conflicts cap the same way the serial paths do.
+  -> solve_shared_budget(res, base, max_conflicts)
     res[base + @nvars + 6] = ccall("__w_clock_ms")
     status = 0
     if @ok
-      status = self.solve_loop(0)
+      stop = max_conflicts > 0 ? @conflicts + max_conflicts : 0
+      status = self.solve_loop(stop)
     else
       @formula_unsat = true
       status = 0 - 1
@@ -1734,6 +1752,12 @@ WASSAT_PROOF_DRAT = 2
     @assump = []
     @nassump = 0
     self.solve_query(max_conflicts)
+
+  # A well-formed UNKNOWN result without running any search — used when an
+  # earlier CDCL stage has already consumed the whole aggregate --conflicts
+  # budget, so this solver must not add a single conflict.
+  -> unknown_result
+    self.result_for(0)
 
   -> solve_query(max_conflicts)
     raise "conflict budget must be non-negative, got [max_conflicts]" if max_conflicts < 0

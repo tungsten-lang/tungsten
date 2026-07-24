@@ -45,6 +45,25 @@ DUPLICATES = "p cnf 3 3\n1 1 2 0\n-1 3 3 0\n-2 -3 0\n"
 # independent checkers ("step N is not redundant").
 HELPER_LIFETIME = "p cnf 4 10\n-1 2 0\n-2 1 0\n1 3 4 0\n1 3 -4 0\n1 -3 4 0\n1 -3 -4 0\n-2 3 4 0\n-2 3 -4 0\n-2 -3 4 0\n-2 -3 -4 0\n"
 
+# BVE resolvent hash-collision regression (hermetic reconstruction of the
+# 54-var/84-clause fixture). Eliminating variable 1 forms two DISTINCT
+# 14-literal resolvents that hash to the same 64-bit XOR value; a hash-only
+# dedup drops one, the reduced formula loses equisatisfiability, and the
+# reconstructed model fails the original-formula guard (CaDiCaL says SAT).
+# The exact clause set is faithful to /private/tmp/wassat-bve-hash-collision.cnf.
+-> bve_hash_collision_cnf
+  taut_vars = [6, 7, 8, 9, 11, 12, 13, 14, 17, 18, 21, 22, 24,
+               25, 28, 29, 31, 32, 33, 37, 38, 41, 44, 50, 52, 53, 54]
+  lines = ["p cnf 54 84"]
+  lines.push("1 6 7 8 9 11 12 13 14 17 18 21 22 24 0")
+  lines.push("1 25 28 29 31 32 33 37 38 41 44 50 52 53 0")
+  lines.push("-1 54 0")
+  taut_vars.each -> (v)
+    lines.push("[v] -[v] 0")
+    lines.push("[v] -[v] 0")
+    lines.push("[v] -[v] 0")
+  lines.join("\n") + "\n"
+
 describe "Wassat preprocessing" ->
 
   context "failed-literal probing" ->
@@ -109,6 +128,17 @@ describe "Wassat preprocessing" ->
       r = wassat_solve_preprocessed(BVE_TAUT, WASSAT_PROOF_WRAT, 0, 0)
       expect(r["sat"]).to eq(true)
       f = wassat_parse_cnf(BVE_TAUT)
+      expect(wassat_model_satisfies?(f, r["model"])).to eq(true)
+
+    it "keeps distinct resolvents that share an XOR hash (collision safety)" ->
+      text = bve_hash_collision_cnf
+      f = wassat_parse_cnf(text)
+      expect(f["clauses"].size).to eq(84)
+      # SAT preservation: the reduced formula must stay satisfiable, and the
+      # reconstructed model must satisfy the ORIGINAL formula. A hash-only
+      # dedup drops a required resolvent and this reconstruction fails.
+      r = wassat_solve_preprocessed(text, WASSAT_PROOF_WRAT, 0, 0)
+      expect(r["sat"]).to eq(true)
       expect(wassat_model_satisfies?(f, r["model"])).to eq(true)
 
     it "leaves no live clause mentioning an eliminated variable" ->

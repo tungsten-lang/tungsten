@@ -80,4 +80,29 @@ describe "Tungsten Wrat" ->
       r = wrat_verify(UNIT_CONTRADICTION, "3 d 1 0\n4 0 1 2 0\n")
       expect(r["verified"]).to eq(false)
 
+  # The checker must trust the formula's OWN declared dimensions, independently
+  # of any solver: it enforces exactly one `p cnf V C` header, the declared
+  # clause count, and the declared variable bound. Otherwise a file declaring
+  # zero (or fewer) clauses but carrying a contradiction could be VERIFIED.
+  context "DIMACS strictness (independent of the solver)" ->
+    it "rejects a header that declares fewer clauses than the file carries" ->
+      # the bug shape: declares 0 clauses, actually contains a contradiction
+      expect(-> () wrat_parse_cnf("p cnf 1 0\n1 0\n-1 0\n")).to raise_error
+      expect(-> () wrat_parse_cnf("p cnf 1 1\n1 0\n-1 0\n")).to raise_error
+
+    it "rejects a header that declares more clauses than the file carries" ->
+      expect(-> () wrat_parse_cnf("p cnf 1 2\n1 0\n")).to raise_error
+
+    it "enforces the declared variable bound instead of auto-expanding it" ->
+      expect(-> () wrat_parse_cnf("p cnf 1 1\n2 0\n")).to raise_error
+
+    it "requires exactly one p cnf header" ->
+      expect(-> () wrat_parse_cnf("1 0\n")).to raise_error
+      expect(-> () wrat_parse_cnf("p cnf 1 1\np cnf 1 1\n1 0\n")).to raise_error
+
+    it "still accepts a well-formed formula with exact dimensions" ->
+      f = wrat_parse_cnf("p cnf 2 2\n1 -2 0\n2 0\n")
+      expect(f["nvars"]).to eq(2)
+      expect(f["clauses"].size).to eq(2)
+
 spec_summary

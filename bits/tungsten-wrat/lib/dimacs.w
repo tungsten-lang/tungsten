@@ -33,14 +33,26 @@
     i += 1
   true
 
+# Header counts (variable count, clause count) are non-negative decimals: no
+# sign is permitted, unlike a literal.
+-> wrat_unsigned_decimal?(token)
+  return false if token == nil || token.empty?
+  i = 0
+  while i < token.size
+    return false if "0123456789".index(token.slice(i, 1)) == nil
+    i += 1
+  true
+
 # Parse DIMACS CNF text into {"nvars", "clauses"}.
 #
 # Accepts `c` comment lines and a `p cnf <vars> <clauses>` header.  Clauses
 # may span lines; each is terminated by a literal 0.
 -> wrat_parse_cnf(text)
   nvars = 0
+  declared_clauses = 0
   clauses = []
   current = []
+  have_header = false
 
   # A `%` line ends the clause section. SATLIB files close with "%\n0\n",
   # and reading that trailing 0 as a clause terminator would append an empty
@@ -52,11 +64,21 @@
     unless done || line == "" || line.starts_with?("c")
       if line.starts_with?("p")
         parts = wrat_tokenize(line)
-        raise "malformed p-line: [line]" if parts.size < 4
+        # The header is mandatory, unique, and EXACTLY `p cnf V C`. The
+        # checker must trust the formula's own declared dimensions, not the
+        # solver's -- so it enforces them here, independently of Wassat: the
+        # declared variable count is an upper bound on every literal and the
+        # declared clause count must match the clauses actually read.
+        raise "duplicate p cnf header" if have_header
+        raise "malformed p-line: [line]" unless parts.size == 4
         raise "only 'cnf' is supported, got '[parts[1]]'" unless parts[1] == "cnf"
-        raise "invalid variable count '[parts[2]]'" unless wrat_int_token?(parts[2])
+        raise "invalid variable count '[parts[2]]'" unless wrat_unsigned_decimal?(parts[2])
+        raise "invalid clause count '[parts[3]]'" unless wrat_unsigned_decimal?(parts[3])
         nvars = parts[2].to_i
+        declared_clauses = parts[3].to_i
+        have_header = true
       else
+        raise "missing p cnf header" unless have_header
         wrat_tokenize(line).each -> (tok)
           raise "invalid DIMACS token '[tok]'" unless wrat_int_token?(tok)
           lit = tok.to_i
@@ -64,14 +86,18 @@
             raise "signed or padded zero is not a clause terminator: '[tok]'" unless tok == "0"
             clauses.push(current)
             current = []
+            raise "too many clauses: header declared [declared_clauses]" if clauses.size > declared_clauses
           else
             current.push(lit)
             v = lit.abs
-            nvars = v if v > nvars
+            raise "literal [lit] exceeds declared variable count [nvars]" if v > nvars
 
   # A trailing clause with no terminating 0 is a truncated file, not an
   # empty clause -- surfacing it beats silently accepting a bad formula.
+  raise "missing p cnf header" unless have_header
   raise "clause not terminated by 0" unless current.empty?
+  unless clauses.size == declared_clauses
+    raise "clause count mismatch: header declared [declared_clauses], parsed [clauses.size]"
 
   { "nvars": nvars, "clauses": clauses }
 

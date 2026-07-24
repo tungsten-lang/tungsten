@@ -104,9 +104,19 @@ describe "Tungsten Wassat CLI" ->
         random_clauses.push([a, 0 - b, c])
         i += 1
       random_policy = WassatConfig.new(30, random_clauses)
+      medium_random_policy = WassatConfig.new(100, random_clauses)
       tiny_policy = WassatConfig.new(3, [[1, 2], [-1, 3]])
       expect(random_policy.lookahead_candidates).to eq(16)
+      expect(medium_random_policy.lookahead_candidates).to eq(0)
       expect(tiny_policy.lookahead_candidates).to eq(0)
+
+    it "keeps measured-losing vivification out of the automatic policy" ->
+      clauses = []
+      i = 0
+      while i < 1000
+        clauses.push([i % 100 + 1, 0 - ((i * 7) % 100 + 1), (i * 13) % 100 + 1])
+        i += 1
+      expect(WassatConfig.new(100, clauses).use_vivification).to eq(false)
 
   context "certificate destinations" ->
     it "leaves stdout available as a certificate destination" ->

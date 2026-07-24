@@ -61,6 +61,9 @@ WASSAT_PROOF_DRAT = 2
     @chrono_t = 50               # level-gap threshold, swept on the bmc family
     @chrono_t = env("WASSAT_CHRONO_T").to_i if env("WASSAT_CHRONO_T") != nil
     @kbuf = i64[nv + 2]          # backjump keep-buffer for out-of-order levels
+    @bstate = i64[4]             # dlevel / tsize / qhead across native backjump
+    @pwork = i64[nv + 4]         # WRAT hint scratch: cone clause stack
+    @phint = i64[nv + 4]         # WRAT hint scratch: hint gids in trail order
     v = 1
     while v <= nv
       @vq_prev[v] = v - 1
@@ -170,9 +173,11 @@ WASSAT_PROOF_DRAT = 2
     # phase saving + rephasing, which now exist — measured on the k=5
     # Lonely Runner class, the rare-restart policy was >40x behind CaDiCaL
     # while raw propagation speed was fine.
-    @ema_fast = 0                # LBD, alpha = 1/32
-    @ema_slow = 0                # LBD, alpha = 1/16384
-    @ema_trail = 0               # trail depth, alpha = 1/4096
+    # Restart EMAs live in typed scratch: they are touched on every
+    # conflict (update) and every decision (trigger check), and boxed
+    # ivar arithmetic there was ~3% of the fast-path profile.
+    # [0] LBD fast (alpha 1/32)  [1] LBD slow (1/16384)  [2] trail (1/4096)
+    @estate = i64[4]
     @lbd_gcount = 0              # restart warmup gate + stats
     @reductions = 0
 
@@ -534,32 +539,17 @@ WASSAT_PROOF_DRAT = 2
     @tsize += 1
     0
 
+  # Native pop loop: backjump runs per conflict over the whole popped
+  # suffix — boxed it was ~5% of the uuf250 profile (flame, 2026-07-24).
   -> backjump(target)
-    kept = 0
-    while @dlevel > target
-      limit = @trail_lim[@dlevel - 1]
-      while @tsize > limit
-        @tsize -= 1
-        l = @trail[@tsize]
-        v = l.abs
-        if @use_chrono && @level[v] <= target
-          # out-of-order assignment that belongs at or below the target:
-          # keep it assigned, re-append below, and re-propagate it (its
-          # implications above the target were just popped)
-          @kbuf[kept] = l
-          kept += 1
-        else
-          @assign[v] = 0
-          @reason[v] = -1
-          wassat_heap_insert(@heap, @heappos, @activity, @hstate, v)
-          @vq_state[3] = v if @vq_stamp[v] > @vq_stamp[@vq_state[3]]
-      @dlevel -= 1
-    i = kept - 1
-    while i >= 0
-      @trail[@tsize] = @kbuf[i]
-      @tsize += 1
-      i -= 1
-    @qhead = @tsize - kept
+    @bstate[0] = @dlevel
+    @bstate[1] = @tsize
+    wassat_backjump(@trail, @trail_lim, @assign, @level, @reason, @heap,
+                    @heappos, @activity, @hstate, @vq_stamp, @vq_state,
+                    @kbuf, @bstate, target, @use_chrono ? 1 : 0)
+    @dlevel = @bstate[0]
+    @tsize = @bstate[1]
+    @qhead = @bstate[2]
     0
 
   # The true level of a conflict under out-of-order assignments: the max
@@ -1018,48 +1008,16 @@ WASSAT_PROOF_DRAT = 2
     if @proof_mode == WASSAT_PROOF_DRAT
       self.log_drat_line(lits.empty? ? "0" : lits.join(" ") + " 0")
       return 0
-    # mark learned-clause variables: value 1 (never expanded)
-    i = 0
-    while i < n
-      @seen[@lbuf[i].abs] = 1
-      i += 1
-    # cone closure from the conflict clause: value 2 (reason cited)
-    work = [confl]
-    wi = 0
-    while wi < work.size
-      wci = work[wi]
-      st = @cstart[wci]
-      m = @clen[wci]
-      j = 0
-      while j < m
-        v = @arena[st + j].abs
-        if @seen[v] == 0
-          @seen[v] = 2
-          rci = @reason[v]
-          raise "internal error: cone literal [v] has no reason clause" if rci < 0
-          work.push(rci)
-        j += 1
-      wi += 1
-    # cite cone reasons in trail order, conflict last
+    # Cone closure + trail-ordered hint collection, native end to end —
+    # boxed, this graph walk was ~10% of WRAT-mode wall (flame 2026-07-24)
+    hn = wassat_wrat_hints(@arena, @cstart, @clen, @reason, @seen, @trail,
+                           @gid, @pwork, @phint, @lbuf, n, confl, @tsize)
+    raise "internal error: cone literal has no reason clause" if hn < 0
     hints = []
-    ti = 0
-    while ti < @tsize
-      v = @trail[ti].abs
-      hints.push(@gid[@reason[v]]) if @seen[v] == 2
-      ti += 1
-    hints.push(@gid[confl])
-    # clear both marker kinds
-    i = 0
-    while i < n
-      @seen[@lbuf[i].abs] = 0
-      i += 1
-    work.each -> (wci2)
-      st = @cstart[wci2]
-      m = @clen[wci2]
-      j = 0
-      while j < m
-        @seen[@arena[st + j].abs] = 0
-        j += 1
+    hi = 0
+    while hi < hn
+      hints.push(@phint[hi])
+      hi += 1
     cid = @next_gid
     line = "[cid] " + lits.join(" ")
     line = "[cid]" if lits.empty?
@@ -1081,16 +1039,7 @@ WASSAT_PROOF_DRAT = 2
   # Low-LBD clauses are the ones worth keeping (Audemard & Simon).
   -> compute_lbd_buf(n)
     @lbd_stamp += 1
-    stamp = @lbd_stamp
-    count = 0
-    i = 0
-    while i < n
-      lv = @level[@lbuf[i].abs]
-      if @lbd_seen[lv] != stamp
-        @lbd_seen[lv] = stamp
-        count += 1
-      i += 1
-    count
+    wassat_lbd_buf(@lbuf, @level, @lbd_seen, n, @lbd_stamp)
 
   # One bounded vivification pass over kept learned clauses (3 <= LBD <= 6,
   # length >= 3): for each, assert negations literal by literal at fresh
@@ -1448,10 +1397,7 @@ WASSAT_PROOF_DRAT = 2
             # Exponential moving averages (fixed-point << 16): the fast/slow
             # LBD ratio is the restart trigger, the trail EMA its blocker.
             @nlearned += 1 if n > 1
-            lv = lbd << 16
-            @ema_fast += (lv - @ema_fast) >> 5
-            @ema_slow += (lv - @ema_slow) >> 14
-            @ema_trail += ((@tsize << 16) - @ema_trail) >> 12
+            wassat_ema_conflict(@estate, lbd, @tsize)
             @lbd_gcount += 1
             # Deepest assignment this epoch: remember its phases. Restarts
             # and rephases steer back into this basin instead of discarding
@@ -1517,10 +1463,7 @@ WASSAT_PROOF_DRAT = 2
         floor = @mode_stable ? 16384 : 64
         want_restart = false
         if @since_restart >= floor && @lbd_gcount >= 128
-          if @ema_fast * 4 > @ema_slow * 5
-            want_restart = true
-        if want_restart && (@tsize << 16) * 5 > @ema_trail * 7
-          want_restart = false          # blocked: unusually deep trail
+          want_restart = wassat_restart_hot(@estate, @tsize) == 1
         if want_restart
           @since_restart = 0
           @restart_count += 1
@@ -1603,10 +1546,12 @@ WASSAT_PROOF_DRAT = 2
     # grow_clause_tables, which doubles and repacks — a few cheap
     # reallocations on long runs instead of a huge cold allocation on
     # every run.
-    cap = total * 2 + 65536
+    cap = total * 2 + 2097152
     @arena = i64[cap]
     @acap = cap
-    maxcl = sncl + sncl / 2 + 65536
+    head = sncl / 2
+    head = 131072 if head < 131072
+    maxcl = sncl + head
     @cstart = i64[maxcl]
     @clen = i64[maxcl]
     @alive = i64[maxcl]
@@ -2438,6 +2383,129 @@ WASSAT_PROOF_DRAT = 2
     z = wassat_heap_swap(heap, hpos, i, best)
     i = best
 
+# WRAT hint construction: mark the learned clause (1), close the conflict
+# cone over reason clauses (2), then cite each cone reason in trail order
+# with the conflict last. Marks are cleared before returning. Returns the
+# hint count, or -1 when a cone literal has no reason (caller raises).
+-> wassat_wrat_hints(ar, cs, cln, rsn, sn, tr, gid, work, hout, lbuf, n, confl, tsize) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64) i64
+  i = 0
+  while i < n
+    q = lbuf[i]
+    v = q
+    v = 0 - q if q < 0
+    sn[v] = 1
+    i += 1
+  work[0] = confl
+  wtop = 1
+  wi = 0
+  bad = 0
+  while wi < wtop && bad == 0
+    wci = work[wi]
+    stx = cs[wci]
+    m = cln[wci]
+    j = 0
+    while j < m && bad == 0
+      q = ar[stx + j]
+      v = q
+      v = 0 - q if q < 0
+      if sn[v] == 0
+        sn[v] = 2
+        rci = rsn[v]
+        if rci < 0
+          bad = 1
+        else
+          work[wtop] = rci
+          wtop += 1
+      j += 1
+    wi += 1
+  hn = 0
+  ti = 0
+  while ti < tsize
+    q = tr[ti]
+    v = q
+    v = 0 - q if q < 0
+    if sn[v] == 2
+      hout[hn] = gid[rsn[v]]
+      hn += 1
+    ti += 1
+  hout[hn] = gid[confl]
+  hn += 1
+  i = 0
+  while i < n
+    q = lbuf[i]
+    v = q
+    v = 0 - q if q < 0
+    sn[v] = 0
+    i += 1
+  wi = 0
+  while wi < wtop
+    wci = work[wi]
+    stx = cs[wci]
+    m = cln[wci]
+    j = 0
+    while j < m
+      q = ar[stx + j]
+      v = q
+      v = 0 - q if q < 0
+      sn[v] = 0
+      j += 1
+    wi += 1
+  return 0 - 1 if bad == 1
+  hn
+
+# Distinct decision levels in the learned clause (its LBD) — a per-conflict
+# loop, so the literal walk stays native.
+-> wassat_lbd_buf(out, lvl, seen, n, stamp) (i64[] i64[] i64[] i64 i64) i64
+  count = 0
+  i = 0
+  while i < n
+    q = out[i]
+    v = q
+    v = 0 - q if q < 0
+    lv = lvl[v]
+    if seen[lv] != stamp
+      seen[lv] = stamp
+      count += 1
+    i += 1
+  count
+
+# Native backjump: pop trail levels above `target`, unassigning and
+# re-inserting each variable into the decision heap; under chronological
+# backtracking (chrono=1), out-of-order assignments at or below the target
+# are kept — re-appended in original order and re-propagated by the caller
+# (st[2] returns the qhead rewind point).
+#   st[0] = dlevel in/out   st[1] = tsize in/out   st[2] = qhead out
+-> wassat_backjump(tr, tlim, asg, lvl, rsn, heap, hpos, act, hst, vqs, vst, kbuf, st, target, chrono) (i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
+  dl = st[0]
+  ts = st[1]
+  kept = 0
+  while dl > target
+    limit = tlim[dl - 1]
+    while ts > limit
+      ts -= 1
+      l = tr[ts]
+      v = l
+      v = 0 - l if l < 0
+      if chrono == 1 && lvl[v] <= target
+        kbuf[kept] = l
+        kept += 1
+      else
+        asg[v] = 0
+        rsn[v] = 0 - 1
+        z = wassat_heap_insert(heap, hpos, act, hst, v)
+        if vqs[v] > vqs[vst[3]]
+          vst[3] = v
+    dl -= 1
+  i = kept - 1
+  while i >= 0
+    tr[ts] = kbuf[i]
+    ts += 1
+    i -= 1
+  st[0] = dl
+  st[1] = ts
+  st[2] = ts - kept
+  0
+
 -> wassat_heap_insert(heap, hpos, act, hst, v) (i64[] i64[] i64[] i64[] i64) i64
   if hpos[v] >= 0
     return 0
@@ -2542,6 +2610,23 @@ WASSAT_PROOF_DRAT = 2
     z = wassat_evsids_rescale(act, hst, nv)
   if hpos[v] >= 0
     z = wassat_heap_up(heap, hpos, act, hpos[v])
+  1
+
+# Per-conflict EMA updates (fixed-point << 16) and the per-decision restart
+# trigger, over the typed @estate scratch — both run in the innermost loop.
+-> wassat_ema_conflict(est, lbd, ts) (i64[] i64 i64)
+  lv = lbd << 16
+  est[0] += (lv - est[0]) >> 5
+  est[1] += (lv - est[1]) >> 14
+  est[2] += ((ts << 16) - est[2]) >> 12
+  0
+
+# Glucose restart: recent learning quality (fast EMA) markedly worse than
+# the long-run average — blocked while the trail is much deeper than usual
+# (plausibly closing on a model).
+-> wassat_restart_hot(est, ts) (i64[] i64) i64
+  return 0 if est[0] * 4 <= est[1] * 5
+  return 0 if (ts << 16) * 5 > est[2] * 7
   1
 
 -> wassat_evsids_advance(hst) (i64[]) i64

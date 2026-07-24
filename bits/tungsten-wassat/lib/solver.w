@@ -1700,9 +1700,10 @@ WASSAT_PROOF_DRAT = 2
     total = 0
     sfcl = art["fcl"]
     salive = art["falive"]
+    synth = art["fsynth"] == true ? 1 : 0
     i = 0
     while i < sncl
-      total += sfcl[i] if salive[i] == 1
+      total += sfcl[i] if synth == 1 || salive[i] == 1
       i += 1
     # Right-sized, not worst-cased: zero-filling 8x tables cost ~200ms of
     # pure page touching on bmc-scale kernels (the tables dwarfed the
@@ -1734,10 +1735,11 @@ WASSAT_PROOF_DRAT = 2
     @bl_state[0] = 0
     @bl_state[1] = @blp_cap
     units = i64[@nvars + 4]
-    pm = i64[10]
+    pm = i64[12]
     pm[0] = sncl
     pm[1] = cap
     pm[2] = maxcl
+    pm[9] = synth
     wassat_load_flat(art["fla"], art["fcs"], sfcl, salive, art["ftaut"],
                      art["fpgid"], @arena, @cmeta, @alive, @clbd,
                      @gid, units, pm)
@@ -2846,13 +2848,20 @@ WASSAT_PROOF_DRAT = 2
   sncl = pm[0]
   acap = pm[1]
   ccap = pm[2]
+  # pm[9] = 1: the caller has no side tables — every clause is alive and
+  # proof ids are sequential (the raw path, which never materializes them;
+  # see wassat_raw_artifact). Saves three ncl-sized allocations and their
+  # fills on every large instance.
+  synth = pm[9]
   ncl = 0
   asize = 0
   nunits = 0
   saw_empty = 0
   si = 0
   while si < sncl
-    if salive[si] == 1
+    live = synth
+    live = salive[si] if synth == 0
+    if live == 1
       n = sfcl[si]
       if ncl + 1 < ccap && asize + n + 1 < acap
         st = sfcs[si]
@@ -2863,7 +2872,8 @@ WASSAT_PROOF_DRAT = 2
         dcm[(ncl << 1) + 1] = n
         dal[ncl] = 1
         dlbd[ncl] = 0
-        dgid[ncl] = spgid[si]
+        dgid[ncl] = ncl + 1
+        dgid[ncl] = spgid[si] if synth == 0
         j = 0
         while j < n
           dar[asize + j] = sfla[st + j]

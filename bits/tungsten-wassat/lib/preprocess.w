@@ -1826,17 +1826,19 @@ WASSAT_PRE_BUCKET_CAP = 1024
 # watch scheme carries them at no cost.
 -> wassat_raw_artifact(parse, nvars)
   ncl = parse["flat_ncl"]
-  alive = i64[ncl + 1]
-  taut = i64[ncl + 1]
-  gids = i64[ncl + 1]
-  wassat_raw_sidetables(alive, gids, ncl)
+  # No side tables at all: every clause is alive and proof ids are
+  # sequential, so the loader synthesizes both from the index ("fsynth").
+  # Materializing them cost three ncl-sized allocations plus their fills —
+  # 7.8MB and ~5ms on bmc-ibm-10 — for data that is either constant or,
+  # in the case of proof ids, never read on this path.
+  empty = i64[1]
   { "nvars": nvars, "clauses": [], "gids": [], "raw": true,
     "config": WassatConfig.from_lens(nvars, parse["flat_lens"], ncl),
     "next_gid": ncl + 1, "status": 0,
     "stack": [], "gone": i64[nvars + 2],
     "fla": parse["flat_lits"], "fcs": parse["flat_offs"],
-    "fcl": parse["flat_lens"], "falive": alive,
-    "ftaut": taut, "fpgid": gids, "fncl": ncl,
+    "fcl": parse["flat_lens"], "falive": empty,
+    "ftaut": empty, "fpgid": empty, "fncl": ncl, "fsynth": true,
     "wrat": [], "drat": [],
     "stats": { "probes": 0, "probes_failed": 0,
                "vars_substituted": 0,
@@ -1844,15 +1846,6 @@ WASSAT_PRE_BUCKET_CAP = 1024
                "clauses_strengthened": 0,
                "vars_eliminated": 0,
                "ticks": 0 } }
-
-# Every clause alive, proof ids sequential from 1.
--> wassat_raw_sidetables(alive, gids, ncl) (i64[] i64[] i64)
-  i = 0
-  while i < ncl
-    alive[i] = 1
-    gids[i] = i + 1
-    i += 1
-  0
 
 -> wassat_pre_stats_text(stats, pre_ms)
   "probes=[stats["probes"]] probes_failed=[stats["probes_failed"]] vars_substituted=[stats["vars_substituted"]] clauses_subsumed=[stats["clauses_subsumed"]] clauses_strengthened=[stats["clauses_strengthened"]] vars_eliminated=[stats["vars_eliminated"]] preprocess_ms=[pre_ms]"

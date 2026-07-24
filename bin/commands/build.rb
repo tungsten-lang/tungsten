@@ -686,6 +686,13 @@ end
 runtime_cache_schema = "runtime-cache-v1"
 cc_flags = %W[-O2 -DNDEBUG -pthread] + MARCH_FLAGS + %w[-c] + tls_flags + http2_flags + onig_cflags + zstd_cflags
 runtime_objc_flags = %W[-O2 -DNDEBUG] + MARCH_FLAGS + %w[-c -x objective-c]
+# TUNGSTEN_SANITIZE="-fsanitize=thread" (or address) instruments the runtime
+# objects; the flags join the compile key below so sanitized and plain
+# archives cache side by side. Pass the matching -fsanitize in LDFLAGS when
+# linking a program against a sanitized archive.
+sanitize_flags = ENV.fetch("TUNGSTEN_SANITIZE", "").split
+cc_flags += sanitize_flags
+runtime_objc_flags += sanitize_flags
 # Linux (validated on Ubuntu 24.04): without _DEFAULT_SOURCE, popen/pclose
 # prototypes are hidden under strict feature-test macros and the implicit
 # declarations segfault the stage-0 C VM at runtime.

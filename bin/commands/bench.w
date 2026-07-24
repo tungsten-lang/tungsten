@@ -257,12 +257,14 @@ section["rational_harmonic"] = "t"
   ""
 
 -> run_command(lang, src, out)
-  case lang
-  when "rb"
-    return "ruby --yjit \"[src]\""
-  when "py"
-    return "python3 \"[src]\""
-  "\"[out]\""
+  base = "\"[out]\""
+  if lang == "rb"
+    base = "ruby --yjit \"[src]\""
+  elsif lang == "py"
+    base = "python3 \"[src]\""
+  # timeout_prefix bounds any single run so a pathological program (e.g. a
+  # quadratic string scan) can never hang the whole suite.
+  timeout_prefix + base
 
 -> parse_elapsed(output)
   lines = output.split("\n")
@@ -499,6 +501,10 @@ results = {}
     if e >= 0.0
       if best < 0.0 || e < best
         best = e
+    else
+      # no elapsed line → the run failed or the timeout killed it; don't
+      # burn further attempts on a broken/hanging command.
+      r = runs
     r = r + 1
   [best, result]
 
@@ -607,6 +613,13 @@ results = {}
     render_row(b, l, best_us, ref)
     li = li + 1
   0
+
+# Per-run wall-clock guard so no single benchmark can hang the suite.
+timeout_prefix = ""
+if have_cmd("timeout")
+  timeout_prefix = "timeout 60 "
+elsif have_cmd("gtimeout")
+  timeout_prefix = "gtimeout 60 "
 
 # section 1: head to head
 << ""

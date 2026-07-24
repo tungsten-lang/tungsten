@@ -335,6 +335,7 @@ use portfolio
         # (ibm-6/10 class) decide inside it, and a miss falls through to
         # the diversified thread race below. On a preprocessed kernel it
         # stays a cheap scout whose miss pays for the heavy rounds.
+        raw_probe = art["raw"] == true
         probe_wall = config.probe_ms(art["raw"] == true)
         probe_cap = config.probe_conflicts(art["raw"] == true)
         # The scout is the FIRST CDCL stage inside the aggregate --conflicts
@@ -344,7 +345,14 @@ use portfolio
         probe_cap = options["conflicts"] if options["conflicts"] > 0 && options["conflicts"] < probe_cap
         slice = probe_cap < 512 ? probe_cap : 512
         spr = sprobe.solve_budget(slice)
-        while spr["status"] == 0 && spr["conflicts"] < probe_cap && ccall("__w_clock_ms") - probe_t0 < probe_wall
+        # The wall-clock cap bounds a miss on kernels whose conflicts are
+        # expensive, but it makes the outcome depend on machine load: on
+        # bmc-ibm-10 the probe decides at 1,733 conflicts when quiet and
+        # falls off a cliff to a full 11k-conflict main solve when busy,
+        # with the conflict count varying run to run. A raw kernel's probe
+        # is already bounded by its conflict cap, so it runs on conflicts
+        # alone and is reproducible.
+        while spr["status"] == 0 && spr["conflicts"] < probe_cap && (raw_probe || ccall("__w_clock_ms") - probe_t0 < probe_wall)
           rem = probe_cap - spr["conflicts"]
           slice = rem < 512 ? rem : 512
           spr = sprobe.solve_budget(slice)

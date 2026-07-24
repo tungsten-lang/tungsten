@@ -77,7 +77,21 @@
     # size, so lowering the threshold is the only way to exercise the raw
     # path (preprocessor bypass included) across the differential.
     return @nclauses > env("WASSAT_RAW_AT").to_i if env("WASSAT_RAW_AT") != nil
-    @nclauses > 50000
+    return true if @nclauses > 50000
+    # Size alone is the wrong rule for the middle band. Measured, verdicts
+    # identical: bmc-ibm-2 (11,683 clauses, structured) runs 17.5ms through
+    # the pipeline against 6.3ms raw, while uuf250-01 (1,065 clauses,
+    # random 3-SAT) runs 1.60s through the pipeline against 2.89s raw —
+    # dense ternary formulas genuinely want probing and elimination, and
+    # structured ones do not. The ternary-dominance test that separates
+    # them for lookahead and shrinking separates them here too.
+    #
+    # Confounded, deliberately: this predicate also selects VMTF, target
+    # phases and chronological backtracking, so the numbers above are the
+    # combined effect of the bypass and the heuristics, not the bypass
+    # alone. Splitting the two is worth doing before this threshold moves
+    # again.
+    @nclauses > 5000 && !(@ternary * 4 >= @nclauses * 3)
 
   -> use_vmtf(raw)
     raw

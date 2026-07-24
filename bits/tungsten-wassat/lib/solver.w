@@ -57,6 +57,10 @@ WASSAT_PROOF_DRAT = 2
     # focused mode only on raw kernels, EVSIDS everywhere else.
     @use_vmtf = false
     @use_target = false
+    @use_chrono = false
+    @chrono_t = 50               # level-gap threshold, swept on the bmc family
+    @chrono_t = env("WASSAT_CHRONO_T").to_i if env("WASSAT_CHRONO_T") != nil
+    @kbuf = i64[nv + 2]          # backjump keep-buffer for out-of-order levels
     v = 1
     while v <= nv
       @vq_prev[v] = v - 1
@@ -516,9 +520,14 @@ WASSAT_PROOF_DRAT = 2
   # ---- trail --------------------------------------------------------------
 
   -> enqueue(l, from)
+    self.enqueue_lvl(l, from, @dlevel)
+
+  # Chronological backtracking asserts the UIP at its TRUE implication
+  # level while the solver sits at a deeper decision level.
+  -> enqueue_lvl(l, from, lev)
     v = l.abs
     @assign[v] = l > 0 ? 1 : -1
-    @level[v] = @dlevel
+    @level[v] = lev
     @reason[v] = from
     @phase[v] = l > 0 ? 1 : -1
     @trail[@tsize] = l
@@ -526,19 +535,46 @@ WASSAT_PROOF_DRAT = 2
     0
 
   -> backjump(target)
+    kept = 0
     while @dlevel > target
       limit = @trail_lim[@dlevel - 1]
       while @tsize > limit
         @tsize -= 1
         l = @trail[@tsize]
         v = l.abs
-        @assign[v] = 0
-        @reason[v] = -1
-        wassat_heap_insert(@heap, @heappos, @activity, @hstate, v)
-        @vq_state[3] = v if @vq_stamp[v] > @vq_stamp[@vq_state[3]]
+        if @use_chrono && @level[v] <= target
+          # out-of-order assignment that belongs at or below the target:
+          # keep it assigned, re-append below, and re-propagate it (its
+          # implications above the target were just popped)
+          @kbuf[kept] = l
+          kept += 1
+        else
+          @assign[v] = 0
+          @reason[v] = -1
+          wassat_heap_insert(@heap, @heappos, @activity, @hstate, v)
+          @vq_state[3] = v if @vq_stamp[v] > @vq_stamp[@vq_state[3]]
       @dlevel -= 1
-    @qhead = @tsize
+    i = kept - 1
+    while i >= 0
+      @trail[@tsize] = @kbuf[i]
+      @tsize += 1
+      i -= 1
+    @qhead = @tsize - kept
     0
+
+  # The true level of a conflict under out-of-order assignments: the max
+  # level over the conflicting clause's literals. Can sit BELOW @dlevel,
+  # in which case analysis must happen there.
+  -> conflict_level(confl)
+    stx = @cstart[confl]
+    n = @clen[confl]
+    m = 0
+    i = 0
+    while i < n
+      lv = @level[@arena[stx + i].abs]
+      m = lv if lv > m
+      i += 1
+    m
 
   # ---- propagation --------------------------------------------------------
 
@@ -550,6 +586,7 @@ WASSAT_PROOF_DRAT = 2
     @pstate[1] = @tsize
     @pstate[2] = -1
     @pstate[3] = 0
+    @pstate[5] = @use_chrono ? 1 : 0
     wassat_propagate(@arena, @assign, @level, @reason, @phase, @ws_start,
                      @ws_size, @ws_cap, @wpool, @wp_state, @cstart, @clen,
                      @trail, @pstate, @dlevel,
@@ -1342,6 +1379,11 @@ WASSAT_PROOF_DRAT = 2
       elsif confl >= 0
         @conflicts += 1
         @since_restart += 1
+        # Chronological pre-step: normalize to the conflict's true level
+        # before refutation check and analysis (Nadel-Ryvchin).
+        if @use_chrono && @dlevel > 0
+          cl = self.conflict_level(confl)
+          self.backjump(cl) if cl < @dlevel
         if @dlevel == 0
           self.log_clause([])
           @formula_unsat = true
@@ -1365,14 +1407,20 @@ WASSAT_PROOF_DRAT = 2
             self.log_learned_direct(n, confl)
             # low-LBD learned clauses are the sharing currency
             self.share_export(n) if @ring != nil && lbd <= 2 && n <= @ring_maxlen
-            self.backjump(target)
+            # Chronological backtracking: a far backjump discards a deep,
+            # largely-consistent trail. Step back a single level instead
+            # and let the asserted UIP re-propagate through the kept
+            # prefix. Ablated on cms5 this knob alone is 3.5x on ibm-12.
+            jump = target
+            jump = @dlevel - 1 if @use_chrono && @nassump == 0 && @dlevel - target > @chrono_t
+            self.backjump(jump)
             asserting = @lbuf[0]
             if n == 1
               # Unit clauses are stored too, not just asserted: a logged clause
               # consumes an id in the checker's database, so skipping the store
               # here would desynchronise every later hint reference.
               ci = self.store_clause(@lbuf, 1)
-              self.enqueue(asserting, ci)
+              self.enqueue_lvl(asserting, ci, target)
             else
               # store learned clause, watching the asserting literal and a
               # literal from the backjump level
@@ -1396,7 +1444,7 @@ WASSAT_PROOF_DRAT = 2
                 i += 1
               ci = self.store_clause(@obuf, n)
               @clbd[ci] = lbd
-              self.enqueue(asserting, ci)
+              self.enqueue_lvl(asserting, ci, target)
             # Exponential moving averages (fixed-point << 16): the fast/slow
             # LBD ratio is the restart trigger, the trail EMA its blocker.
             @nlearned += 1 if n > 1
@@ -1589,6 +1637,12 @@ WASSAT_PROOF_DRAT = 2
     if art["raw"] == true
       @use_vmtf = true
       @use_target = true
+      # Chronological backtracking v1 is SOUND (pivot selection is
+      # level-aware, implications assert at reason level) but measured
+      # net-negative on the bmc gate in this form (ibm-6 0.11 -> 0.17s,
+      # ibm-12 winner conflicts similar, walls worse) — opt-in until the
+      # kept-block/qhead protocol matches cadical's trail-reuse exactly.
+      @use_chrono = true if env("WASSAT_CHRONO") == "1"
       # Stable-first measured WORSE here despite target phases (ibm-6
       # 272 -> 2,461 conflicts, ibm-10 1.1k -> 3.1k) — focused-first
       # stays the default, matching kissat. Opt-in for experiments.
@@ -1775,6 +1829,15 @@ WASSAT_PROOF_DRAT = 2
       li = neg << 1
     else
       li = ((0 - neg) << 1) + 1
+    # the true implication level of p's variable: under chronological
+    # backtracking implications assert at their REASON's level, not the
+    # current decision level — stamping dl here inflates levels and makes
+    # every later chrono jump thrash its kept blocks
+    pv2 = p
+    if p < 0
+      pv2 = 0 - p
+    plvl = dl
+    plvl = lvl[pv2] if st[5] == 1
     # binary implications first: direct assign/conflict, no arena access
     b = blh[li]
     while b >= 0 && conflict < 0
@@ -1794,7 +1857,7 @@ WASSAT_PROOF_DRAT = 2
             v = 0 - other
             pol = -1
           asg[v] = pol
-          lvl[v] = dl
+          lvl[v] = plvl
           rsn[v] = blc[b]
           phs[v] = pol
           tr[tsize] = other
@@ -1890,8 +1953,19 @@ WASSAT_PROOF_DRAT = 2
               if other < 0
                 v = 0 - other
                 pol = -1
+              mxl = dl
+              if st[5] == 1
+                mxl = 0
+                k = 1
+                while k < n
+                  lk = ar[stx + k]
+                  vk2 = lk
+                  if lk < 0
+                    vk2 = 0 - lk
+                  mxl = lvl[vk2] if lvl[vk2] > mxl
+                  k += 1
               asg[v] = pol
-              lvl[v] = dl
+              lvl[v] = mxl
               rsn[v] = ci
               phs[v] = pol
               tr[tsize] = other
@@ -2053,11 +2127,18 @@ WASSAT_PROOF_DRAT = 2
           out[size] = q
           size += 1
       j += 1
+    # Pivot selection: the next SAME-LEVEL literal of the cone, walking
+    # the trail downward. Under chronological backtracking, seen literals
+    # with lvl < dl (cone members already routed to `out`) can sit ABOVE
+    # current-level literals — resolving one as a pivot corrupts both the
+    # counter and the resolution (this produced false UNSAT verdicts on
+    # satisfiable bmc instances). Their marks stay set; the shared
+    # clearing pass below handles them.
     tv = tr[index]
     av = tv
     if tv < 0
       av = 0 - tv
-    while sn[av] == 0
+    while sn[av] == 0 || lvl[av] < dl
       index -= 1
       tv = tr[index]
       av = tv

@@ -1877,8 +1877,9 @@ WASSAT_PROOF_DRAT = 2
     # (appends go to OTHER literals); removal swaps the front entry in and
     # shrinks the block from the front, which keeps every unvisited entry
     # below j and leaks one pool slot until the next repack.
-    j = wss[li] + wsn[li] - 1
-    while j >= wss[li] && conflict < 0 && bail == 0
+    lo = wss[li]
+    j = lo + wsn[li] - 1
+    while j >= lo && conflict < 0 && bail == 0
       e = wp[j]
       blk = e & 4294967295
       blk = blk - 4294967296 if blk > 2147483647
@@ -1925,8 +1926,9 @@ WASSAT_PROOF_DRAT = 2
             # remove this entry: pull the (unvisited) front entry into j
             # and shrink the block from the front, then append (ci, other)
             # to repl's block — relocating it to the pool top on overflow
-            wp[j] = wp[wss[li]]
-            wss[li] = wss[li] + 1
+            wp[j] = wp[lo]
+            lo += 1
+            wss[li] = lo
             wsn[li] = wsn[li] - 1
             wsc[li] = wsc[li] - 1
             ri = 0

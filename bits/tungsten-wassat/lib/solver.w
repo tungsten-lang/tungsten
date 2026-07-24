@@ -314,8 +314,11 @@ WASSAT_PROOF_DRAT = 2
     @acap = cap
     @asize = 0
     maxcl = @input_clauses.size * 8 + 1024
-    @cstart = i64[maxcl]
-    @clen = i64[maxcl]
+    # arena offset and length INTERLEAVED: cmeta[2*ci] = start, cmeta[2*ci+1]
+    # = length. Propagation's clause-inspect path reads both on every blocker
+    # miss; sharing one 16-byte-aligned pair means one cache line and one
+    # array descriptor instead of two of each.
+    @cmeta = i64[2 * maxcl]
     @alive = i64[maxcl]
     @clbd = i64[maxcl]           # 0 = original clause (never deleted)
     @cused = i64[maxcl]          # conflict count when last resolved in analysis
@@ -327,17 +330,22 @@ WASSAT_PROOF_DRAT = 2
     # assigns/conflicts DIRECTLY — no clause-arena read, no watch movement
     # (a binary's watches never move). Binaries live here instead of the
     # two-watched lists; the clause body stays in the arena for analysis
-    # and proofs. Payload is inline per node: other literal + reason ci.
-    @bl_head = i64[2 * nv + 4]
-    i = 0
-    while i < 2 * nv + 4
-      @bl_head[i] = -1
-      i += 1
-    @bl_cap = total + 4096
-    @bl_next = i64[@bl_cap]
-    @bl_other = i64[@bl_cap]
-    @bl_ci = i64[@bl_cap]
-    @bl_size = 0
+    # and proofs.
+    #
+    # Same shape as the watch pool below: per-literal CONTIGUOUS blocks in
+    # one packed i64 pool, entry = (clause << 32) | the other literal's LIT
+    # INDEX. The intrusive linked list this replaces averaged ~3 nodes per
+    # walk, and every hop was a serial dependent load — with a block the
+    # entries stream and their `lasg` truth probes all issue at once. The
+    # lit-index payload makes that probe a single byte load, with no sign
+    # dance at all.
+    # start / size / capacity live at bl[4li], +1, +2 (stride 4 keeps the
+    # pair 16-byte aligned, so start and size arrive in one `ldp`)
+    @bldir = i64[4 * (2 * nv + 4)]
+    @blp_cap = 2 * maxcl + 2 * (2 * nv + 4) + 64
+    @bl_pool = i64[@blp_cap]
+    @bl_state = i64[4]           # pool top / pool cap / overflow flag
+    @bl_state[1] = @blp_cap
 
     # Contiguous watch stacks: per-literal blocks inside one packed pool.
     # Entry = (clause_index << 32) | blocker_lit_index. The previous
@@ -346,9 +354,9 @@ WASSAT_PROOF_DRAT = 2
     # and unpacking live ONLY in native typed code: a boxed `ci << 32`
     # promotes past the small-int range.
     nlits = 2 * nv + 4
-    @ws_start = i64[nlits]
-    @ws_size = i64[nlits]
-    @ws_cap = i64[nlits]
+    # same stride-4 directory as the binary blocks: start / size / capacity
+    # share a cache line, and propagate carries one descriptor, not three
+    @wsdir = i64[4 * nlits]
     @wp_cap = 4 * maxcl + 2 * nlits + 64
     @wpool = i64[@wp_cap]
     @wp_state = i64[4]           # pool top / pool cap / overflow flag
@@ -399,23 +407,21 @@ WASSAT_PROOF_DRAT = 2
   -> grow_clause_tables
     if @ncl + 1 >= @ccap
       ncap = @ccap * 2
-      cs = i64[ncap]
-      cl = i64[ncap]
+      cm = i64[2 * ncap]
       al = i64[ncap]
       lb = i64[ncap]
       cu = i64[ncap]
       gd = i64[ncap]
       i = 0
       while i < @ncl
-        cs[i] = @cstart[i]
-        cl[i] = @clen[i]
+        cm[2 * i] = @cmeta[2 * i]
+        cm[2 * i + 1] = @cmeta[2 * i + 1]
         al[i] = @alive[i]
         lb[i] = @clbd[i]
         cu[i] = @cused[i]
         gd[i] = @gid[i]
         i += 1
-      @cstart = cs
-      @clen = cl
+      @cmeta = cm
       @alive = al
       @clbd = lb
       @cused = cu
@@ -428,42 +434,34 @@ WASSAT_PROOF_DRAT = 2
       @wp_state[0] = 0
       @wp_state[1] = @wp_cap
       self.rebuild_watches
+      # the binary pool is sized by clause capacity too — regrow and repack
+      @blp_cap = 2 * ncap + 4 * @nvars + 72
+      @bl_pool = i64[@blp_cap]
+      @bl_state[0] = 0
+      @bl_state[1] = @blp_cap
+      self.rebuild_binaries
     0
 
   # Register binary clause (a | b): falsifying a implies b and vice versa.
+  # Overflowed appends drop their entry; the tight repack below re-creates
+  # both from the clause DB, exactly like the watch pool.
   -> bl_add(a, b, ci)
-    if @bl_size + 2 > @bl_cap
-      if @fixed_caps
-        @retired = true
-        return 0
-      ncap = @bl_cap * 2
-      nn = i64[ncap]
-      no = i64[ncap]
-      nc = i64[ncap]
-      i = 0
-      while i < @bl_size
-        nn[i] = @bl_next[i]
-        no[i] = @bl_other[i]
-        nc[i] = @bl_ci[i]
-        i += 1
-      @bl_next = nn
-      @bl_other = no
-      @bl_ci = nc
-      @bl_cap = ncap
     la = self.lit_index(a)
     lb = self.lit_index(b)
-    n1 = @bl_size
-    @bl_size += 1
-    @bl_next[n1] = @bl_head[la]
-    @bl_other[n1] = b
-    @bl_ci[n1] = ci
-    @bl_head[la] = n1
-    n2 = @bl_size
-    @bl_size += 1
-    @bl_next[n2] = @bl_head[lb]
-    @bl_other[n2] = a
-    @bl_ci[n2] = ci
-    @bl_head[lb] = n2
+    wassat_bl_add(@bldir, @bl_pool, @bl_state, la, ci, lb)
+    wassat_bl_add(@bldir, @bl_pool, @bl_state, lb, ci, la)
+    self.rebuild_binaries if @bl_state[2] == 1
+    0
+
+  # Repack every live binary's two entries tight (+1 slack per literal)
+  # straight from the clause DB. Always fits: 2*binaries + nlits is below
+  # the pool's 2*ccap + 2*nlits sizing, and reductions never delete a
+  # binary — so, like rebuild_watches, this is allocation-free and safe to
+  # trigger from a worker thread.
+  -> rebuild_binaries
+    wassat_bl_rebuild(@cmeta, @alive, @arena, @bldir,
+                      @bl_pool, @bl_state, @ncl, 2 * @nvars + 4)
+    @bl_state[2] = 0
     0
 
   # Attach watcher slot `slot` of clause `ci` to the list of literal `l`,
@@ -472,7 +470,7 @@ WASSAT_PROOF_DRAT = 2
   # reading the clause body at all.
   -> watch(ci, slot, l, blocker)
     li = self.lit_index(l)
-    wassat_ws_add(@ws_start, @ws_size, @ws_cap, @wpool, @wp_state, li, ci, blocker)
+    wassat_ws_add(@wsdir, @wpool, @wp_state, li, ci, blocker)
     0
 
   # Watches are a pure acceleration structure: repack every live clause's
@@ -481,8 +479,8 @@ WASSAT_PROOF_DRAT = 2
   # worker threads may trigger it safely mid-search. The rebuilt layout
   # always fits: 2*live + nlits < 4*ccap + 2*nlits.
   -> rebuild_watches
-    wassat_ws_rebuild(@cstart, @clen, @alive, @arena, @ws_start, @ws_size,
-                      @ws_cap, @wpool, @wp_state, @ncl, 2 * @nvars + 4)
+    wassat_ws_rebuild(@cmeta, @alive, @arena, @wsdir,
+                      @wpool, @wp_state, @ncl, 2 * @nvars + 4)
     @wp_state[2] = 0
     0
 
@@ -492,8 +490,8 @@ WASSAT_PROOF_DRAT = 2
     self.grow_arena(n)
     ci = @ncl
     @ncl += 1
-    @cstart[ci] = @asize
-    @clen[ci] = n
+    @cmeta[2 * ci] = @asize
+    @cmeta[2 * ci + 1] = n
     @alive[ci] = 1
     @clbd[ci] = 0
     @gid[ci] = @next_gid
@@ -504,10 +502,10 @@ WASSAT_PROOF_DRAT = 2
       @asize += 1
       i += 1
     if n == 2
-      self.bl_add(@arena[@cstart[ci]], @arena[@cstart[ci] + 1], ci)
+      self.bl_add(@arena[@cmeta[2 * ci]], @arena[@cmeta[2 * ci] + 1], ci)
     elsif n >= 3
-      self.watch(ci, 0, @arena[@cstart[ci]], @arena[@cstart[ci] + 1])
-      self.watch(ci, 1, @arena[@cstart[ci] + 1], @arena[@cstart[ci]])
+      self.watch(ci, 0, @arena[@cmeta[2 * ci]], @arena[@cmeta[2 * ci] + 1])
+      self.watch(ci, 1, @arena[@cmeta[2 * ci] + 1], @arena[@cmeta[2 * ci]])
       # an overflowed append dropped its entry; the repack re-creates both
       self.rebuild_watches if @wp_state[2] == 1
     if @proof_mode == WASSAT_PROOF_WRAT
@@ -515,7 +513,7 @@ WASSAT_PROOF_DRAT = 2
       @runits.push(ci) if n == 1
       @rempties.push(ci) if n == 0
       i = 0
-      st = @cstart[ci]
+      st = @cmeta[2 * ci]
       while i < n
         li = self.lit_index(@arena[st + i])
         slot = @rocc_size
@@ -597,8 +595,8 @@ WASSAT_PROOF_DRAT = 2
   # level over the conflicting clause's literals. Can sit BELOW @dlevel,
   # in which case analysis must happen there.
   -> conflict_level(confl)
-    stx = @cstart[confl]
-    n = @clen[confl]
+    stx = @cmeta[2 * confl]
+    n = @cmeta[2 * confl + 1]
     m = 0
     i = 0
     while i < n
@@ -618,10 +616,10 @@ WASSAT_PROOF_DRAT = 2
     @pstate[2] = -1
     @pstate[3] = 0
     @pstate[5] = @use_chrono ? 1 : 0
-    wassat_propagate(@arena, @assign, @lassign, @level, @reason, @phase, @ws_start,
-                     @ws_size, @ws_cap, @wpool, @wp_state, @cstart, @clen,
+    wassat_propagate(@arena, @assign, @lassign, @level, @reason, @phase,
+                     @wsdir, @wpool, @wp_state, @cmeta,
                      @trail, @pstate, @dlevel,
-                     @bl_head, @bl_next, @bl_other, @bl_ci)
+                     @bldir, @bl_pool)
     # Pool exhausted mid-scan: the native side rewound qhead past the
     # current literal, so a repack plus a re-run from the same queue
     # position re-derives everything soundly (assignments already made
@@ -630,10 +628,10 @@ WASSAT_PROOF_DRAT = 2
       self.rebuild_watches
       @pstate[2] = -1
       @pstate[3] = 0
-      wassat_propagate(@arena, @assign, @lassign, @level, @reason, @phase, @ws_start,
-                       @ws_size, @ws_cap, @wpool, @wp_state, @cstart, @clen,
+      wassat_propagate(@arena, @assign, @lassign, @level, @reason, @phase,
+                       @wsdir, @wpool, @wp_state, @cmeta,
                        @trail, @pstate, @dlevel,
-                       @bl_head, @bl_next, @bl_other, @bl_ci)
+                       @bldir, @bl_pool)
     @qhead = @pstate[0]
     @tsize = @pstate[1]
     @pstate[2]
@@ -647,7 +645,7 @@ WASSAT_PROOF_DRAT = 2
     @astate[1] = @tsize
     @astate[2] = alevel
     @astate[5] = @conflicts
-    wassat_analyze(@arena, @assign, @level, @reason, @seen, @cstart, @clen,
+    wassat_analyze(@arena, @assign, @level, @reason, @seen, @cmeta,
                    @trail, @lbuf, @mbuf, @mstk, @mclr, @activity, @heap,
                    @heappos, @hstate, @astate, @nvars, @cused,
                    @vq_next, @vq_prev, @vq_stamp, @vq_state)
@@ -662,7 +660,7 @@ WASSAT_PROOF_DRAT = 2
   # target (shrinking can only lower it, never raise it).
   -> shrink_learned(n)
     @shst[0] = n
-    z = wassat_shrink(@arena, @assign, @level, @reason, @seen, @cstart, @clen,
+    z = wassat_shrink(@arena, @assign, @level, @reason, @seen, @cmeta,
                       @trail, @trail_lim, @lbuf, @mbuf, @mstk, @obuf, @mclr,
                       @shcnt, @shst, @nvars)
     @lsize = @shst[0]
@@ -692,8 +690,8 @@ WASSAT_PROOF_DRAT = 2
           core.push(l) unless l == a
         elsif @reason[v] >= 0
           ci = @reason[v]
-          st = @cstart[ci]
-          n = @clen[ci]
+          st = @cmeta[2 * ci]
+          n = @cmeta[2 * ci + 1]
           j = 0
           while j < n
             q = @arena[st + j].abs
@@ -849,7 +847,7 @@ WASSAT_PROOF_DRAT = 2
       ui = 0
       while ui < @runits.size && !conflict
         ci = @runits[ui]
-        ul = @arena[@cstart[ci]]
+        ul = @arena[@cmeta[2 * ci]]
         uv = self.replay_value(ul)
         if uv < 0
           record.push(@gid[ci])
@@ -866,7 +864,7 @@ WASSAT_PROOF_DRAT = 2
       @rst[1] = rt
       @rst[2] = -1
       @rst[3] = 0
-      wassat_replay_prop(@arena, @cstart, @clen, @rocc_head, @rocc_next,
+      wassat_replay_prop(@arena, @cmeta, @rocc_head, @rocc_next,
                          @rocc_ci, @rassign, @rtrail, @rout, @rst)
       rt = @rst[1]
       k = 0
@@ -1087,7 +1085,7 @@ WASSAT_PROOF_DRAT = 2
       return 0
     # Cone closure + trail-ordered hint collection, native end to end —
     # boxed, this graph walk was ~10% of WRAT-mode wall (flame 2026-07-24)
-    hn = wassat_wrat_hints(@arena, @cstart, @clen, @reason, @seen, @trail,
+    hn = wassat_wrat_hints(@arena, @cmeta, @reason, @seen, @trail,
                            @gid, @pwork, @phint, @lbuf, n, confl, @tsize)
     raise "internal error: cone literal has no reason clause" if hn < 0
     hints = []
@@ -1128,10 +1126,10 @@ WASSAT_PROOF_DRAT = 2
     budget = 300
     ci = 0
     while ci < @ncl && budget > 0
-      if @alive[ci] == 1 && @clbd[ci] >= 3 && @clbd[ci] <= 6 && @clen[ci] >= 3
+      if @alive[ci] == 1 && @clbd[ci] >= 3 && @clbd[ci] <= 6 && @cmeta[2 * ci + 1] >= 3
         budget -= 1
-        st = @cstart[ci]
-        n = @clen[ci]
+        st = @cmeta[2 * ci]
+        n = @cmeta[2 * ci + 1]
         # copy out: propagation may reorder arena slots mid-walk
         i = 0
         while i < n
@@ -1244,7 +1242,7 @@ WASSAT_PROOF_DRAT = 2
     # live or die by this).
     ci = 0
     while ci < @ncl
-      if @alive[ci] == 1 && @clbd[ci] >= cut && @clen[ci] > 2 && @clbd[ci] > 2
+      if @alive[ci] == 1 && @clbd[ci] >= cut && @cmeta[2 * ci + 1] > 2 && @clbd[ci] > 2
         keep2 = @clbd[ci] <= 6 && @cused[ci] >= @last_reduce_at
         @alive[ci] = 0 unless keep2
       ci += 1
@@ -1260,17 +1258,17 @@ WASSAT_PROOF_DRAT = 2
       ci = 0
       while ci < @ncl
         if @alive[ci] == 1
-          st = @cstart[ci]
-          n = @clen[ci]
+          st = @cmeta[2 * ci]
+          n = @cmeta[2 * ci + 1]
           if st != wp
             k = 0
             while k < n
               @arena[wp + k] = @arena[st + k]
               k += 1
-            @cstart[ci] = wp
+            @cmeta[2 * ci] = wp
           wp += n
         else
-          @clen[ci] = 0
+          @cmeta[2 * ci + 1] = 0
         ci += 1
       @asize = wp
 
@@ -1707,8 +1705,7 @@ WASSAT_PROOF_DRAT = 2
     head = sncl / 2
     head = 131072 if head < 131072
     maxcl = sncl + head
-    @cstart = i64[maxcl]
-    @clen = i64[maxcl]
+    @cmeta = i64[2 * maxcl]
     @alive = i64[maxcl]
     @clbd = i64[maxcl]
     @cused = i64[maxcl]
@@ -1718,20 +1715,18 @@ WASSAT_PROOF_DRAT = 2
     @wpool = i64[@wp_cap]
     @wp_state[0] = 0
     @wp_state[1] = @wp_cap
-    @bl_cap = 2 * total + 4096
-    @bl_next = i64[@bl_cap]
-    @bl_other = i64[@bl_cap]
-    @bl_ci = i64[@bl_cap]
+    @blp_cap = 2 * maxcl + 4 * @nvars + 72
+    @bl_pool = i64[@blp_cap]
+    @bl_state[0] = 0
+    @bl_state[1] = @blp_cap
     units = i64[@nvars + 4]
     pm = i64[10]
     pm[0] = sncl
     pm[1] = cap
     pm[2] = maxcl
-    pm[8] = @bl_cap
     wassat_load_flat(art["fla"], art["fcs"], sfcl, salive, art["ftaut"],
-                     art["fpgid"], @arena, @cstart, @clen, @alive, @clbd,
-                     @gid, @bl_head, @bl_next,
-                     @bl_other, @bl_ci, units, pm)
+                     art["fpgid"], @arena, @cmeta, @alive, @clbd,
+                     @gid, units, pm)
     @ncl = pm[3]
     @asize = pm[4]
     if art["raw"] == true
@@ -1739,13 +1734,13 @@ WASSAT_PROOF_DRAT = 2
       @use_target = @config.use_target_phases(true)
       @use_chrono = @config.use_chronological_backtracking(true)
     self.rebuild_watches
-    @bl_size = pm[7]
+    self.rebuild_binaries
     @next_gid = art["next_gid"]
     @ok = false if pm[6] == 1
     u = 0
     while u < pm[5]
       ci = units[u]
-      l = @arena[@cstart[ci]]
+      l = @arena[@cmeta[2 * ci]]
       if self.value(l) == 0
         self.enqueue(l, ci)
       elsif self.value(l) < 0
@@ -1919,7 +1914,97 @@ WASSAT_PROOF_DRAT = 2
     ti += 1
   0
 
--> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wss, wsn, wsc, wp, wst, cs, cln, tr, st, dl, blh, bln, blo, blc) (i64[] i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[])
+# Append one binary implication to a literal's block, relocating the block
+# to the pool top (capacity doubling) when full. Sets blst[2] on pool
+# exhaustion — the caller repacks via rebuild_binaries. `oli` is already a
+# lit index; the packing lives here because a boxed `ci << 32` leaves the
+# small-int range.
+-> wassat_bl_add(bd, blp, blst, li, ci, oli) (i64[] i64[] i64[] i64 i64 i64)
+  d = li << 2
+  n = bd[d + 1]
+  if n >= bd[d + 2]
+    need = 4
+    need = n * 2 if n * 2 > 4
+    top = blst[0]
+    if top + need > blst[1]
+      blst[2] = 1
+      return 0 - 1
+    src = bd[d]
+    q = 0
+    while q < n
+      blp[top + q] = blp[src + q]
+      q += 1
+    bd[d] = top
+    bd[d + 2] = need
+    blst[0] = top + need
+  blp[bd[d] + n] = (ci << 32) | oli
+  bd[d + 1] = n + 1
+  0
+
+# Counting repack of the whole binary pool from the clause DB: two passes
+# (count, fill) with +1 slack per literal, mirroring wassat_ws_rebuild.
+# Always fits: 2*binaries + nlits is far below the pool's 2*ccap sizing.
+# Never allocates.
+-> wassat_bl_rebuild(cm, alive, ar, bd, blp, blst, ncl, nlits) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
+  li = 0
+  while li < nlits
+    bd[(li << 2) + 1] = 0
+    li += 1
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1 && cm[(ci << 1) + 1] == 2
+      stx = cm[ci << 1]
+      a = ar[stx]
+      bq = ar[stx + 1]
+      la = 0
+      if a > 0
+        la = a << 1
+      else
+        la = ((0 - a) << 1) + 1
+      lb = 0
+      if bq > 0
+        lb = bq << 1
+      else
+        lb = ((0 - bq) << 1) + 1
+      bd[(la << 2) + 1] = bd[(la << 2) + 1] + 1
+      bd[(lb << 2) + 1] = bd[(lb << 2) + 1] + 1
+    ci += 1
+  top = 0
+  li = 0
+  while li < nlits
+    d = li << 2
+    bd[d] = top
+    bd[d + 2] = bd[d + 1] + 1
+    top = top + bd[d + 1] + 1
+    bd[d + 1] = 0
+    li += 1
+  blst[0] = top
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1 && cm[(ci << 1) + 1] == 2
+      stx = cm[ci << 1]
+      a = ar[stx]
+      bq = ar[stx + 1]
+      la = 0
+      if a > 0
+        la = a << 1
+      else
+        la = ((0 - a) << 1) + 1
+      lb = 0
+      if bq > 0
+        lb = bq << 1
+      else
+        lb = ((0 - bq) << 1) + 1
+      da = la << 2
+      db = lb << 2
+      blp[bd[da] + bd[da + 1]] = (ci << 32) | lb
+      bd[da + 1] = bd[da + 1] + 1
+      blp[bd[db] + bd[db + 1]] = (ci << 32) | la
+      bd[db + 1] = bd[db + 1] + 1
+    ci += 1
+  0
+
+-> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, cm, tr, st, dl, bd, blp) (i64[] i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[])
   qhead = st[0]
   tsize = st[1]
   conflict = -1
@@ -1946,37 +2031,46 @@ WASSAT_PROOF_DRAT = 2
     plvl = dl
     plvl = lvl[pv2] if st[5] == 1
     # binary implications first: direct assign/conflict, no arena access
-    b = blh[li]
-    while b >= 0 && conflict < 0
-      other = blo[b]
-      so = other >> 63
-      ov = (asg[(other ^ so) - so] ^ so) - so
+    bdi = li << 2
+    blo = bd[bdi]
+    b = blo + bd[bdi + 1] - 1
+    while b >= blo && conflict < 0
+      pay = blp[b]
+      b -= 1
+      # the other literal is stored as a LIT INDEX, so its truth is one byte
+      # load with no sign handling — and consecutive entries are contiguous,
+      # so these probes all issue together instead of chaining. Scanned
+      # BACKWARD over an ascending fill: that is exactly the order the
+      # prepend-built linked list produced (newest implication first).
+      oli = pay & 4294967295
+      ov = lasg[oli]
       if ov < 0
-        conflict = blc[b]
+        conflict = pay >> 32
       else
         if ov == 0
-          v = other
+          v = oli >> 1
           pol = 1
-          if other < 0
-            v = 0 - other
+          other = v
+          if (oli & 1) == 1
             pol = -1
+            other = 0 - v
           asg[v] = pol
-          lasg[v << 1] = pol
-          lasg[(v << 1) + 1] = 0 - pol
+          lasg[oli] = 1
+          lasg[oli ^ 1] = -1
           lvl[v] = plvl
-          rsn[v] = blc[b]
+          rsn[v] = pay >> 32
           phs[v] = pol
           tr[tsize] = other
           tsize += 1
-      b = bln[b]
     # Contiguous watch block, scanned BACKWARD: appends land at the end,
     # so the newest watch is visited first — the same order as the linked
-    # lists this replaced (prepend). wss[li] cannot move during the scan
+    # lists this replaced (prepend). the block start cannot move during the scan
     # (appends go to OTHER literals); removal swaps the front entry in and
     # shrinks the block from the front, which keeps every unvisited entry
     # below j and leaks one pool slot until the next repack.
-    lo = wss[li]
-    j = lo + wsn[li] - 1
+    wdi = li << 2
+    lo = wd[wdi]
+    j = lo + wd[wdi + 1] - 1
     while j >= lo && conflict < 0 && bail == 0
       e = wp[j]
       # entries carry the blocker's LIT-INDEX (always positive), so one
@@ -1994,8 +2088,10 @@ WASSAT_PROOF_DRAT = 2
         j -= 1
       else
         ci = e >> 32
-        stx = cs[ci]
-        n = cln[ci]
+        # start and length are adjacent: one descriptor, one cache line
+        mi = ci << 1
+        stx = cm[mi]
+        n = cm[mi + 1]
         if ar[stx] == neg
           ar[stx] = ar[stx + 1]
           ar[stx + 1] = neg
@@ -2027,33 +2123,34 @@ WASSAT_PROOF_DRAT = 2
             # to repl's block — relocating it to the pool top on overflow
             wp[j] = wp[lo]
             lo += 1
-            wss[li] = lo
-            wsn[li] = wsn[li] - 1
-            wsc[li] = wsc[li] - 1
+            wd[wdi] = lo
+            wd[wdi + 1] = wd[wdi + 1] - 1
+            wd[wdi + 2] = wd[wdi + 2] - 1
             ri = 0
             if repl > 0
               ri = repl << 1
             else
               ri = ((0 - repl) << 1) + 1
-            rn = wsn[ri]
-            if rn >= wsc[ri]
+            rdi = ri << 2
+            rn = wd[rdi + 1]
+            if rn >= wd[rdi + 2]
               need = 4
               need = rn * 2 if rn * 2 > 4
               top = wst[0]
               if top + need > wst[1]
                 bail = 1
               else
-                src = wss[ri]
+                src = wd[rdi]
                 q = 0
                 while q < rn
                   wp[top + q] = wp[src + q]
                   q += 1
-                wss[ri] = top
-                wsc[ri] = need
+                wd[rdi] = top
+                wd[rdi + 2] = need
                 wst[0] = top + need
             if bail == 0
-              wp[wss[ri] + rn] = (ci << 32) | oli
-              wsn[ri] = rn + 1
+              wp[wd[rdi] + rn] = (ci << 32) | oli
+              wd[rdi + 1] = rn + 1
           else
             wp[j] = (ci << 32) | oli
             if ov == 0
@@ -2101,42 +2198,43 @@ WASSAT_PROOF_DRAT = 2
 # Append one watch entry to a literal's block, relocating the block to the
 # pool top (capacity doubling) when full. Sets wst[2] and returns -1 when
 # the pool itself is exhausted — the caller repacks via rebuild_watches.
--> wassat_ws_add(wss, wsn, wsc, wp, wst, li, ci, blk) (i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
-  n = wsn[li]
-  if n >= wsc[li]
+-> wassat_ws_add(wd, wp, wst, li, ci, blk) (i64[] i64[] i64[] i64 i64 i64)
+  d = li << 2
+  n = wd[d + 1]
+  if n >= wd[d + 2]
     need = 4
     need = n * 2 if n * 2 > 4
     top = wst[0]
     if top + need > wst[1]
       wst[2] = 1
       return 0 - 1
-    src = wss[li]
+    src = wd[d]
     q = 0
     while q < n
       wp[top + q] = wp[src + q]
       q += 1
-    wss[li] = top
-    wsc[li] = need
+    wd[d] = top
+    wd[d + 2] = need
     wst[0] = top + need
   bli = blk << 1
   bli = ((0 - blk) << 1) + 1 if blk < 0
-  wp[wss[li] + n] = (ci << 32) | bli
-  wsn[li] = n + 1
+  wp[wd[d] + n] = (ci << 32) | bli
+  wd[d + 1] = n + 1
   0
 
 # Counting repack of the whole watch pool from the clause DB: two passes
 # (count, fill) with +1 slack per literal so the first later append per
 # literal does not immediately relocate. Always fits: 2*live + nlits is
 # far below the pool's 4*ccap sizing. Never allocates.
--> wassat_ws_rebuild(cs, cln, alive, ar, wss, wsn, wsc, wp, wst, ncl, nlits) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
+-> wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
   li = 0
   while li < nlits
-    wsn[li] = 0
+    wd[(li << 2) + 1] = 0
     li += 1
   ci = 0
   while ci < ncl
-    if alive[ci] == 1 && cln[ci] >= 3
-      stx = cs[ci]
+    if alive[ci] == 1 && cm[(ci << 1) + 1] >= 3
+      stx = cm[ci << 1]
       a = ar[stx]
       bq = ar[stx + 1]
       la = 0
@@ -2149,24 +2247,25 @@ WASSAT_PROOF_DRAT = 2
         lb = bq << 1
       else
         lb = ((0 - bq) << 1) + 1
-      wsn[la] = wsn[la] + 1
-      wsn[lb] = wsn[lb] + 1
+      wd[(la << 2) + 1] = wd[(la << 2) + 1] + 1
+      wd[(lb << 2) + 1] = wd[(lb << 2) + 1] + 1
     ci += 1
   top = 0
   li = 0
   while li < nlits
-    wss[li] = top
-    wsc[li] = wsn[li] + 1
-    top = top + wsn[li] + 1
-    wsn[li] = 0
+    d = li << 2
+    wd[d] = top
+    wd[d + 2] = wd[d + 1] + 1
+    top = top + wd[d + 1] + 1
+    wd[d + 1] = 0
     li += 1
   wst[0] = top
   # Ascending fill + the backward block scan in propagate = exactly the
   # replaced linked lists' order (prepend, newest scanned first).
   ci = 0
   while ci < ncl
-    if alive[ci] == 1 && cln[ci] >= 3
-      stx = cs[ci]
+    if alive[ci] == 1 && cm[(ci << 1) + 1] >= 3
+      stx = cm[ci << 1]
       a = ar[stx]
       bq = ar[stx + 1]
       la = 0
@@ -2179,10 +2278,12 @@ WASSAT_PROOF_DRAT = 2
         lb = bq << 1
       else
         lb = ((0 - bq) << 1) + 1
-      wp[wss[la] + wsn[la]] = (ci << 32) | lb
-      wsn[la] = wsn[la] + 1
-      wp[wss[lb] + wsn[lb]] = (ci << 32) | la
-      wsn[lb] = wsn[lb] + 1
+      da = la << 2
+      db = lb << 2
+      wp[wd[da] + wd[da + 1]] = (ci << 32) | lb
+      wd[da + 1] = wd[da + 1] + 1
+      wp[wd[db] + wd[db + 1]] = (ci << 32) | la
+      wd[db + 1] = wd[db + 1] + 1
     ci += 1
   0
 
@@ -2196,7 +2297,7 @@ WASSAT_PROOF_DRAT = 2
 #
 #   st[0] = conflicting clause   st[1] = trail size   st[2] = decision level
 #   st[3] = learned clause size  st[4] = backjump level
--> wassat_analyze(ar, asg, lvl, rsn, sn, cs, cln, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[])
+-> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[])
   confl = st[0]
   tsize = st[1]
   dl = st[2]
@@ -2209,8 +2310,8 @@ WASSAT_PROOF_DRAT = 2
 
   while keep_going
     cused[cl] = st[5]
-    stx = cs[cl]
-    n = cln[cl]
+    stx = cm[cl << 1]
+    n = cm[(cl << 1) + 1]
     # Skip the literal being RESOLVED by variable, not by slot: watch-based
     # propagation swaps the propagated literal to slot 0, but binary-list
     # propagation never touches the arena, so the slot invariant is gone.
@@ -2297,8 +2398,8 @@ WASSAT_PROOF_DRAT = 2
         sp -= 1
         cv = stk[sp]
         r = rsn[cv]
-        stx = cs[r]
-        n = cln[r]
+        stx = cm[r << 1]
+        n = cm[(r << 1) + 1]
         k = 0
         while k < n && redundant == 1
           lk = ar[stx + k]
@@ -2404,7 +2505,7 @@ WASSAT_PROOF_DRAT = 2
 #   st[1] += body literals examined   st[2] += literals removed
 #   st[3] += block attempts           st[4] += blocks shrunk
 #   st[6] = removable/poison clear-list size (internal)
--> wassat_shrink(ar, asg, lvl, rsn, sn, cs, cln, tr, tlim, out, tmp, stk, dstk, tclr, cnt, st, nv) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
+-> wassat_shrink(ar, asg, lvl, rsn, sn, cm, tr, tlim, out, tmp, stk, dstk, tclr, cnt, st, nv) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
   n = st[0]
   if n <= 2
     tgt = 0
@@ -2491,8 +2592,8 @@ WASSAT_PROOF_DRAT = 2
             if rc < 0 || resolved > budget
               bad = 1
             else
-              stx = cs[rc]
-              rn = cln[rc]
+              stx = cm[rc << 1]
+              rn = cm[(rc << 1) + 1]
               j = 0
               while j < rn && bad == 0
                 q = ar[stx + j]
@@ -2513,7 +2614,7 @@ WASSAT_PROOF_DRAT = 2
                         # it only if its reason DAG proves it redundant
                         # (CaDiCaL's minimize_literal fallback); anything
                         # else would grow the clause — reject the block
-                        pr = wassat_shrink_probe(ar, lvl, rsn, sn, cs, cln, dstk, tclr, st, w, 0)
+                        pr = wassat_shrink_probe(ar, lvl, rsn, sn, cm, dstk, tclr, st, w, 0)
                         bad = 1 if pr == 0
                   else
                     # 1/2/3 support the resolvent; 4 is known-irredundant
@@ -2587,7 +2688,7 @@ WASSAT_PROOF_DRAT = 2
           drop = 0
           if lvl[w] == bl
             sn[w] = 0
-            drop = wassat_shrink_probe(ar, lvl, rsn, sn, cs, cln, dstk, tclr, st, w, 1)
+            drop = wassat_shrink_probe(ar, lvl, rsn, sn, cm, dstk, tclr, st, w, 1)
             sn[w] = 1 if drop == 0
           if drop == 0
             tmp[wp] = q
@@ -2643,7 +2744,7 @@ WASSAT_PROOF_DRAT = 2
 # In fallback mode (fbk 1) a failed root is NOT poisoned: the caller
 # re-marks it as clause body — CaDiCaL sets keep on exactly that path,
 # and keep wins over poison in its early-return order.
--> wassat_shrink_probe(ar, lvl, rsn, sn, cs, cln, dstk, tclr, st, root, fbk) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+-> wassat_shrink_probe(ar, lvl, rsn, sn, cm, dstk, tclr, st, root, fbk) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
   if rsn[root] < 0
     if fbk == 0
       sn[root] = 4
@@ -2658,8 +2759,8 @@ WASSAT_PROOF_DRAT = 2
     v = fr & 4294967295
     ci = fr >> 32
     rc = rsn[v]
-    stx = cs[rc]
-    rn = cln[rc]
+    stx = cm[rc << 1]
+    rn = cm[(rc << 1) + 1]
     # resume the reason scan at ci: find the next literal needing a verdict
     child = 0
     while ci < rn && child == 0 && good == 1
@@ -2706,32 +2807,31 @@ WASSAT_PROOF_DRAT = 2
   good
 
 # Native flat-formula loader: ingest a preprocessor's flat clause mirrors
-# directly — live clauses copy arena-to-arena, watches and binary-implication
-# lists are built in the same pass, proof ids carry over. Replaces a boxed
+# directly — live clauses copy arena-to-arena and proof ids carry over;
+# watches and binary implications follow from the caller's counting
+# repacks. Replaces a boxed
 # artifact rebuild plus a boxed per-literal intake (~250ms on 100k-clause
 # instances). Unit clause indices land in `units` for the boxed enqueue.
 #
 #   pm[0] src clause count      pm[1] dst arena cap   pm[2] dst clause cap
 #   pm[3] out: clauses stored   pm[4] out: arena used pm[5] out: unit count
-#   pm[6] out: 1 = saw empty clause  pm[7] out: bl nodes used  pm[8] bl cap
--> wassat_load_flat(sfla, sfcs, sfcl, salive, staut, spgid, dar, dcs, dcl, dal, dlbd, dgid, blh, bln, blo, blc, units, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+#   pm[6] out: 1 = saw empty clause
+-> wassat_load_flat(sfla, sfcs, sfcl, salive, staut, spgid, dar, dcm, dal, dlbd, dgid, units, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   sncl = pm[0]
   acap = pm[1]
   ccap = pm[2]
-  blcap = pm[8]
   ncl = 0
   asize = 0
   nunits = 0
   saw_empty = 0
-  blsize = 0
   si = 0
   while si < sncl
     if salive[si] == 1
       n = sfcl[si]
       if ncl + 1 < ccap && asize + n < acap
         st = sfcs[si]
-        dcs[ncl] = asize
-        dcl[ncl] = n
+        dcm[ncl << 1] = asize
+        dcm[(ncl << 1) + 1] = n
         dal[ncl] = 1
         dlbd[ncl] = 0
         dgid[ncl] = spgid[si]
@@ -2745,33 +2845,8 @@ WASSAT_PROOF_DRAT = 2
           if n == 1
             units[nunits] = ncl
             nunits = nunits + 1
-          else
-            # long-clause watches are built afterwards by the caller's
-            # counting repack (rebuild_watches); only binaries index here
-            a = dar[asize]
-            bq = dar[asize + 1]
-            if n == 2
-              if blsize + 2 <= blcap
-                la = 0
-                if a > 0
-                  la = a << 1
-                else
-                  la = ((0 - a) << 1) + 1
-                lb = 0
-                if bq > 0
-                  lb = bq << 1
-                else
-                  lb = ((0 - bq) << 1) + 1
-                bln[blsize] = blh[la]
-                blo[blsize] = bq
-                blc[blsize] = ncl
-                blh[la] = blsize
-                blsize = blsize + 1
-                bln[blsize] = blh[lb]
-                blo[blsize] = a
-                blc[blsize] = ncl
-                blh[lb] = blsize
-                blsize = blsize + 1
+          # watches AND binary implications are built afterwards by the
+          # caller's counting repacks (rebuild_watches / rebuild_binaries)
         asize = asize + n
         ncl = ncl + 1
     si = si + 1
@@ -2779,7 +2854,6 @@ WASSAT_PROOF_DRAT = 2
   pm[4] = asize
   pm[5] = nunits
   pm[6] = saw_empty
-  pm[7] = blsize
   0
 
 # Native replay propagation for hint construction: queue-driven unit
@@ -2793,7 +2867,7 @@ WASSAT_PROOF_DRAT = 2
 #
 #   st[0] = qhead   st[1] = trail size   st[2] = conflict ci or -1
 #   st[3] = recorded unit count
--> wassat_replay_prop(ar, cs, cln, och, ocn, ocv, rasg, rtr, out, st) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_replay_prop(ar, cm, och, ocn, ocv, rasg, rtr, out, st) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   qhead = st[0]
   tsize = st[1]
   conflict = -1
@@ -2810,8 +2884,8 @@ WASSAT_PROOF_DRAT = 2
     w = och[li]
     while w >= 0 && conflict < 0
       ci = ocv[w]
-      stx = cs[ci]
-      n = cln[ci]
+      stx = cm[ci << 1]
+      n = cm[(ci << 1) + 1]
       sat = 0
       unassigned = 0
       unit = 0
@@ -2898,7 +2972,7 @@ WASSAT_PROOF_DRAT = 2
 # cone over reason clauses (2), then cite each cone reason in trail order
 # with the conflict last. Marks are cleared before returning. Returns the
 # hint count, or -1 when a cone literal has no reason (caller raises).
--> wassat_wrat_hints(ar, cs, cln, rsn, sn, tr, gid, work, hout, lbuf, n, confl, tsize) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64) i64
+-> wassat_wrat_hints(ar, cm, rsn, sn, tr, gid, work, hout, lbuf, n, confl, tsize) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64) i64
   i = 0
   while i < n
     q = lbuf[i]
@@ -2912,8 +2986,8 @@ WASSAT_PROOF_DRAT = 2
   bad = 0
   while wi < wtop && bad == 0
     wci = work[wi]
-    stx = cs[wci]
-    m = cln[wci]
+    stx = cm[wci << 1]
+    m = cm[(wci << 1) + 1]
     j = 0
     while j < m && bad == 0
       q = ar[stx + j]
@@ -2951,8 +3025,8 @@ WASSAT_PROOF_DRAT = 2
   wi = 0
   while wi < wtop
     wci = work[wi]
-    stx = cs[wci]
-    m = cln[wci]
+    stx = cm[wci << 1]
+    m = cm[(wci << 1) + 1]
     j = 0
     while j < m
       q = ar[stx + j]

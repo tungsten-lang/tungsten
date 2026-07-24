@@ -18834,6 +18834,19 @@ WValue __w_eprint(WValue v) {
  * offs[k]/lens[k] index into lits for clause k.
  * Error codes: 1 no/dup header, 2 bad header, 3 bad token, 4 bound,
  * 5 unterminated, 6 count mismatch, 7 buffer overflow, 8 xnf. */
+/* DIMACS character classes: one table load replaces the four-way
+ * delimiter comparison the scanner used to do per character. */
+#define DC_SPACE 1u   /* ' ', '\t', '\r' */
+#define DC_NL    2u   /* '\n' */
+#define DC_DIGIT 4u
+static const uint8_t w_dimacs_cls[256] = {
+    ['\t'] = DC_SPACE, ['\r'] = DC_SPACE, [' '] = DC_SPACE, ['\n'] = DC_NL,
+    ['0'] = DC_DIGIT, ['1'] = DC_DIGIT, ['2'] = DC_DIGIT, ['3'] = DC_DIGIT,
+    ['4'] = DC_DIGIT, ['5'] = DC_DIGIT, ['6'] = DC_DIGIT, ['7'] = DC_DIGIT,
+    ['8'] = DC_DIGIT, ['9'] = DC_DIGIT,
+};
+#define DC_BREAK (DC_SPACE | DC_NL)
+
 WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
                         WValue lens_val, WValue hdr_val) {
     char inline_buf[6];
@@ -18849,98 +18862,98 @@ WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
     int64_t *hdr  = (int64_t *)ha->slots + ha->start;
     int64_t lcap = la->size, ccap = oa->size;
     int64_t nvars = 0, declared = 0, ncl = 0, nlits = 0, cur_off = 0, cur_len = 0;
-    int have_header = 0, done = 0;
+    int have_header = 0, done = 0, line_started = 0;
     int64_t lineno = 1;
     size_t i = 0;
+    const uint8_t *cls = w_dimacs_cls;
     hdr[0] = hdr[1] = hdr[2] = hdr[3] = hdr[4] = hdr[5] = 0;
 #define P_ERR(code) { hdr[4] = (code); hdr[5] = lineno; return W_NIL; }
+#define AT_BREAK(pos) ((pos) >= tlen || (cls[(unsigned char)tx[pos]] & DC_BREAK))
     while (i < tlen && !done) {
-        /* consume one line's tokens */
-        int line_started = 0;
-        while (i < tlen && tx[i] != '\n') {
-            char c = tx[i];
-            if (c == ' ' || c == '\t' || c == '\r') { i++; continue; }
-            /* token start */
-            size_t j = i;
-            while (j < tlen && tx[j] != ' ' && tx[j] != '\t' &&
-                   tx[j] != '\r' && tx[j] != '\n') j++;
-            size_t n = j - i;
-            if (!line_started && c == '%') { done = 1; i = j; break; }
-            if (!line_started && n == 1 && c == 'c') {
-                /* comment token: skip rest of line */
-                while (j < tlen && tx[j] != '\n') j++;
-                i = j; break;
+        unsigned char c = (unsigned char)tx[i];
+        uint8_t k = cls[c];
+        if (k & DC_SPACE) { i++; continue; }
+        if (k & DC_NL) { i++; lineno++; line_started = 0; continue; }
+
+        if (!line_started) {
+            /* `%` ends the clause section wherever it opens a line. */
+            if (c == '%') { done = 1; break; }
+            /* Keywords only as whole tokens: `cat 1 0` is malformed input,
+             * not a comment. */
+            if (c == 'c' && AT_BREAK(i + 1)) {
+                while (i < tlen && tx[i] != '\n') i++;
+                continue;
             }
-            if (!line_started && n == 1 && c == 'p') {
+            if (c == 'p' && AT_BREAK(i + 1)) {
                 if (have_header) P_ERR(1);
-                /* expect: cnf <digits> <digits> then end of line */
-                const char *q = tx + j; size_t rem = tlen - j;
-                int64_t vals[2]; int vi = 0;
-                size_t k = 0;
-                /* skip spaces, read "cnf" */
-                while (k < rem && (q[k] == ' ' || q[k] == '\t')) k++;
-                if (k + 3 > rem || q[k] != 'c' || q[k+1] != 'n' || q[k+2] != 'f') P_ERR(2);
-                k += 3;
-                if (k >= rem || (q[k] != ' ' && q[k] != '\t')) P_ERR(2);
-                for (; vi < 2; vi++) {
-                    int had_space = 0;
-                    while (k < rem && (q[k] == ' ' || q[k] == '\t')) {
-                        had_space = 1;
-                        k++;
-                    }
+                i++;                       /* past 'p' */
+                int had_space = 0;
+                while (i < tlen && (cls[(unsigned char)tx[i]] & DC_SPACE)) { had_space = 1; i++; }
+                if (!had_space) P_ERR(2);
+                if (i + 3 > tlen || tx[i] != 'c' || tx[i+1] != 'n' || tx[i+2] != 'f') P_ERR(2);
+                i += 3;
+                if (i >= tlen || !(cls[(unsigned char)tx[i]] & DC_SPACE)) P_ERR(2);
+                int64_t vals[2];
+                for (int vi = 0; vi < 2; vi++) {
+                    had_space = 0;
+                    while (i < tlen && (cls[(unsigned char)tx[i]] & DC_SPACE)) { had_space = 1; i++; }
                     if (!had_space) P_ERR(2);
-                    if (k >= rem || q[k] < '0' || q[k] > '9') P_ERR(2);
+                    if (i >= tlen || !(cls[(unsigned char)tx[i]] & DC_DIGIT)) P_ERR(2);
                     int64_t v = 0;
-                    while (k < rem && q[k] >= '0' && q[k] <= '9') {
-                        int digit = q[k] - '0';
+                    while (i < tlen && (cls[(unsigned char)tx[i]] & DC_DIGIT)) {
+                        int digit = tx[i] - '0';
                         if (v > (2000000000LL - digit) / 10) P_ERR(2);
                         v = v * 10 + digit;
-                        k++;
+                        i++;
                     }
                     vals[vi] = v;
                 }
-                while (k < rem && (q[k] == ' ' || q[k] == '\t' || q[k] == '\r')) k++;
-                if (k < rem && q[k] != '\n') P_ERR(2);
+                while (i < tlen && (cls[(unsigned char)tx[i]] & DC_SPACE)) i++;
+                if (i < tlen && tx[i] != '\n') P_ERR(2);
                 nvars = vals[0]; declared = vals[1]; have_header = 1;
                 if (declared + 2 > ccap) P_ERR(7);
-                i = j + k; break;
+                continue;
             }
             if (!have_header) P_ERR(1);
-            if (!line_started && n == 1 && c == 'x') P_ERR(8);
-            line_started = 1;
-            /* literal token: optional sign then digits only */
-            size_t k = i; int neg = 0;
-            if (tx[k] == '-' || tx[k] == '+') { neg = (tx[k] == '-'); k++; }
-            if (k >= j) P_ERR(3);
-            int64_t v = 0;
-            for (; k < j; k++) {
-                if (tx[k] < '0' || tx[k] > '9') P_ERR(3);
-                int digit = tx[k] - '0';
-                if (v > (2000000000LL - digit) / 10) P_ERR(4);
-                v = v * 10 + digit;
-            }
-            if (v == 0) {
-                /* exact "0" only */
-                if (n != 1) P_ERR(3);
-                if (ncl >= declared) P_ERR(6);
-                offs[ncl] = cur_off; lens[ncl] = cur_len;
-                ncl++; cur_off = nlits; cur_len = 0;
-            } else {
-                if (v > nvars) P_ERR(4);
-                if (nlits + 1 > lcap) P_ERR(7);
-                lits[nlits++] = neg ? -v : v;
-                cur_len++;
-                cur_off = nlits - cur_len;
-            }
-            i = j;
+            if (c == 'x' && AT_BREAK(i + 1)) P_ERR(8);
         }
-        if (i < tlen && tx[i] == '\n') { i++; lineno++; }
+        if (!have_header) P_ERR(1);
+        line_started = 1;
+
+        /* Literal: optional sign, then digits, then a delimiter. One pass. */
+        int neg = 0, signed_tok = 0;
+        if (c == '-' || c == '+') { neg = (c == '-'); signed_tok = 1; i++; }
+        int64_t v = 0; int nd = 0;
+        while (i < tlen && (cls[(unsigned char)tx[i]] & DC_DIGIT)) {
+            int digit = tx[i] - '0';
+            if (v > (2000000000LL - digit) / 10) P_ERR(4);
+            v = v * 10 + digit;
+            nd++; i++;
+        }
+        /* No digits, or trailing junk inside the token, is a bad token. */
+        if (nd == 0) P_ERR(3);
+        if (!AT_BREAK(i)) P_ERR(3);
+
+        if (v == 0) {
+            /* The terminator is the exact token `0`: -0, +0 and 00 are not. */
+            if (nd != 1 || signed_tok) P_ERR(3);
+            if (ncl >= declared) P_ERR(6);
+            offs[ncl] = cur_off; lens[ncl] = cur_len;
+            ncl++; cur_off = nlits; cur_len = 0;
+        } else {
+            if (v > nvars) P_ERR(4);
+            if (nlits + 1 > lcap) P_ERR(7);
+            lits[nlits++] = neg ? -v : v;
+            cur_len++;
+            cur_off = nlits - cur_len;
+        }
     }
     if (!have_header) P_ERR(1);
     if (cur_len != 0) P_ERR(5);
     if (ncl != declared) P_ERR(6);
     hdr[0] = nvars; hdr[1] = declared; hdr[2] = ncl; hdr[3] = nlits;
     return W_NIL;
+#undef AT_BREAK
 #undef P_ERR
 }
 

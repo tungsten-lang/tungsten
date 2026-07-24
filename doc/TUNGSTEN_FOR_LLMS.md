@@ -52,23 +52,6 @@ fn fib(n)
 # Anonymous reference (@1.x)
 -> distance/1
   << "hello [x' - x]"
-
-# Typed signature: parameter types in ( ) AFTER the arg list, then an
-# optional return type. Positional — one type per parameter, in order.
-# This is the ONLY way to type a signature (there is no inline `arg ## T`).
-# It makes hot code run at machine speed — raw i64/f64 and raw typed-array
-# access, no NaN-boxing.
--> add(a, b) (i64 i64) i64
-  a + b
-
--> dot(xs, ys, n) (f64[] f64[] i64) f64   # typed-array + int params, f64 return
-  ...
-
-# Machine types: i64 u64 i32 u8 f64 f32 bool ; typed arrays: i64[] f64[] u8[] …
-# Return type may also be a class: -> build(cap) (i64) string_buffer
-# Inside a body, type an accumulator with `## i64` / `## f64`; `~3.0` is a raw
-# float literal. Untyped ints are arbitrary-precision (correct, but boxed and
-# ~18x slower in tight loops) — annotate the signature and hot-loop locals.
 ```
 
 ## Blocks

@@ -1850,11 +1850,8 @@ WASSAT_PROOF_DRAT = 2
     b = blh[li]
     while b >= 0 && conflict < 0
       other = blo[b]
-      ov = 0
-      if other > 0
-        ov = asg[other]
-      else
-        ov = 0 - asg[0 - other]
+      so = other >> 63
+      ov = (asg[(other ^ so) - so] ^ so) - so
       if ov < 0
         conflict = blc[b]
       else
@@ -1883,11 +1880,21 @@ WASSAT_PROOF_DRAT = 2
       e = wp[j]
       blk = e & 4294967295
       blk = blk - 4294967296 if blk > 2147483647
-      bv = 0
-      if blk > 0
-        bv = asg[blk]
-      else
-        bv = 0 - asg[0 - blk]
+      # branchless truth test: abs index and polarity flip via sign-mask
+      # arithmetic, no data-random branch on the literal's sign
+      sgn = blk >> 63
+      bv = (asg[(blk ^ sgn) - sgn] ^ sgn) - sgn
+      # skip run of satisfied blockers in a store-free inner loop: nothing
+      # in here writes memory, so the wp/asg descriptor loads hoist out
+      # instead of being re-fetched per entry (stores on the clause-inspect
+      # paths below otherwise pin them inside the loop body)
+      while bv > 0 && j > lo
+        j -= 1
+        e = wp[j]
+        blk = e & 4294967295
+        blk = blk - 4294967296 if blk > 2147483647
+        sgn = blk >> 63
+        bv = (asg[(blk ^ sgn) - sgn] ^ sgn) - sgn
       if bv > 0
         j -= 1
       else
@@ -1898,11 +1905,8 @@ WASSAT_PROOF_DRAT = 2
           ar[stx] = ar[stx + 1]
           ar[stx + 1] = neg
         other = ar[stx]
-        ov = 0
-        if other > 0
-          ov = asg[other]
-        else
-          ov = 0 - asg[0 - other]
+        so = other >> 63
+        ov = (asg[(other ^ so) - so] ^ so) - so
         if ov > 0
           wp[j] = (ci << 32) | (other & 4294967295)
           j -= 1
@@ -1911,11 +1915,8 @@ WASSAT_PROOF_DRAT = 2
           found = -1
           while k < n && found < 0
             lk = ar[stx + k]
-            vk = 0
-            if lk > 0
-              vk = asg[lk]
-            else
-              vk = 0 - asg[0 - lk]
+            sk = lk >> 63
+            vk = (asg[(lk ^ sk) - sk] ^ sk) - sk
             if vk >= 0
               found = k
             k += 1

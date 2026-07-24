@@ -309,7 +309,9 @@ WASSAT_PROOF_DRAT = 2
     total = 0
     @input_clauses.each -> (c)
       total += c.size
-    cap = total * 8 + 4096
+    # +1 word per clause: every clause carries a HEADER immediately before
+    # its literals — (clause index << 32) | length
+    cap = (total + @input_clauses.size) * 8 + 4096
     @arena = i64[cap]
     @acap = cap
     @asize = 0
@@ -470,7 +472,7 @@ WASSAT_PROOF_DRAT = 2
   # reading the clause body at all.
   -> watch(ci, slot, l, blocker)
     li = self.lit_index(l)
-    wassat_ws_add(@wsdir, @wpool, @wp_state, li, ci, blocker)
+    wassat_ws_add(@wsdir, @wpool, @wp_state, li, @cmeta[2 * ci], blocker)
     0
 
   # Watches are a pure acceleration structure: repack every live clause's
@@ -487,9 +489,15 @@ WASSAT_PROOF_DRAT = 2
   # Store a clause and return its index; watches the first two literals.
   -> store_clause(lits_arr, n)
     self.grow_clause_tables
-    self.grow_arena(n)
+    self.grow_arena(n + 1)
     ci = @ncl
     @ncl += 1
+    # Header word, then the literals. Propagation reaches a clause by arena
+    # offset and reads the header at stx - 1, so length AND clause index
+    # arrive in the same cache line as the first literals — no clause-table
+    # load on the inspect path at all.
+    wassat_hdr_put(@arena, @asize, ci, n)
+    @asize += 1
     @cmeta[2 * ci] = @asize
     @cmeta[2 * ci + 1] = n
     @alive[ci] = 1
@@ -617,7 +625,7 @@ WASSAT_PROOF_DRAT = 2
     @pstate[3] = 0
     @pstate[5] = @use_chrono ? 1 : 0
     wassat_propagate(@arena, @assign, @lassign, @level, @reason, @phase,
-                     @wsdir, @wpool, @wp_state, @cmeta,
+                     @wsdir, @wpool, @wp_state,
                      @trail, @pstate, @dlevel,
                      @bldir, @bl_pool)
     # Pool exhausted mid-scan: the native side rewound qhead past the
@@ -629,7 +637,7 @@ WASSAT_PROOF_DRAT = 2
       @pstate[2] = -1
       @pstate[3] = 0
       wassat_propagate(@arena, @assign, @lassign, @level, @reason, @phase,
-                       @wsdir, @wpool, @wp_state, @cmeta,
+                       @wsdir, @wpool, @wp_state,
                        @trail, @pstate, @dlevel,
                        @bldir, @bl_pool)
     @qhead = @pstate[0]
@@ -1260,13 +1268,16 @@ WASSAT_PROOF_DRAT = 2
         if @alive[ci] == 1
           st = @cmeta[2 * ci]
           n = @cmeta[2 * ci + 1]
-          if st != wp
+          # the header travels with the body; its packed (index, length)
+          # is position-independent, so a plain copy is correct
+          if st != wp + 1
+            @arena[wp] = @arena[st - 1]
             k = 0
             while k < n
-              @arena[wp + k] = @arena[st + k]
+              @arena[wp + 1 + k] = @arena[st + k]
               k += 1
-            @cmeta[2 * ci] = wp
-          wp += n
+            @cmeta[2 * ci] = wp + 1
+          wp += n + 1
         else
           @cmeta[2 * ci + 1] = 0
         ci += 1
@@ -1699,7 +1710,10 @@ WASSAT_PROOF_DRAT = 2
     # grow_clause_tables, which doubles and repacks — a few cheap
     # reallocations on long runs instead of a huge cold allocation on
     # every run.
-    cap = total * 2 + 2097152
+    cap = (total + sncl) * 2 + 2097152
+    # the watch entry addresses a clause by ARENA OFFSET, so the offset must
+    # fit the packed entry's high word; grow_arena enforces the same bound
+    raise "clause arena exceeds 8 GiB; instance too large for the current representation" if cap > 1073741824
     @arena = i64[cap]
     @acap = cap
     head = sncl / 2
@@ -1914,6 +1928,12 @@ WASSAT_PROOF_DRAT = 2
     ti += 1
   0
 
+# Write a clause header into the arena: (clause index << 32) | length.
+# Native because a boxed `ci << 32` leaves the small-int range.
+-> wassat_hdr_put(ar, at, ci, n) (i64[] i64 i64 i64)
+  ar[at] = (ci << 32) | n
+  0
+
 # Append one binary implication to a literal's block, relocating the block
 # to the pool top (capacity doubling) when full. Sets blst[2] on pool
 # exhaustion — the caller repacks via rebuild_binaries. `oli` is already a
@@ -2004,7 +2024,7 @@ WASSAT_PROOF_DRAT = 2
     ci += 1
   0
 
--> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, cm, tr, st, dl, bd, blp) (i64[] i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[])
+-> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp) (i64[] i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[])
   qhead = st[0]
   tsize = st[1]
   conflict = -1
@@ -2087,11 +2107,15 @@ WASSAT_PROOF_DRAT = 2
       if bv > 0
         j -= 1
       else
-        ci = e >> 32
-        # start and length are adjacent: one descriptor, one cache line
-        mi = ci << 1
-        stx = cm[mi]
-        n = cm[mi + 1]
+        # The entry carries the clause's ARENA OFFSET, not its index, so
+        # the header at stx - 1 supplies the length — and it lands in the
+        # same cache line as the literals we are about to read. One
+        # dependent miss per inspected clause instead of two, and no
+        # clause-table descriptor on this path at all.
+        stx = e >> 32
+        hdr = ar[stx - 1]
+        n = hdr & 4294967295
+        cbase = stx << 32
         if ar[stx] == neg
           ar[stx] = ar[stx + 1]
           ar[stx + 1] = neg
@@ -2102,7 +2126,7 @@ WASSAT_PROOF_DRAT = 2
         oli = (((other ^ so) - so) << 1) + (so & 1)
         ov = lasg[oli]
         if ov > 0
-          wp[j] = (ci << 32) | oli
+          wp[j] = cbase | oli
           j -= 1
         else
           k = 2
@@ -2119,7 +2143,7 @@ WASSAT_PROOF_DRAT = 2
             ar[stx + found] = neg
             ar[stx + 1] = repl
             # remove this entry: pull the (unvisited) front entry into j
-            # and shrink the block from the front, then append (ci, other)
+            # and shrink the block from the front, then append (stx, other)
             # to repl's block — relocating it to the pool top on overflow
             wp[j] = wp[lo]
             lo += 1
@@ -2149,10 +2173,10 @@ WASSAT_PROOF_DRAT = 2
                 wd[rdi + 2] = need
                 wst[0] = top + need
             if bail == 0
-              wp[wd[rdi] + rn] = (ci << 32) | oli
+              wp[wd[rdi] + rn] = cbase | oli
               wd[rdi + 1] = rn + 1
           else
-            wp[j] = (ci << 32) | oli
+            wp[j] = cbase | oli
             if ov == 0
               v = other
               pol = 1
@@ -2174,13 +2198,15 @@ WASSAT_PROOF_DRAT = 2
               lasg[v << 1] = pol
               lasg[(v << 1) + 1] = 0 - pol
               lvl[v] = mxl
-              rsn[v] = ci
+              # the clause INDEX is what the rest of the solver speaks —
+              # unpack it from the header only on these two rare paths
+              rsn[v] = hdr >> 32
               phs[v] = pol
               tr[tsize] = other
               tsize += 1
               j -= 1
             else
-              conflict = ci
+              conflict = hdr >> 32
   # Pool exhausted: the current literal must be rescanned after the caller
   # repacks the pool (its entry was already swap-removed). Rewind qhead so
   # the retry re-derives everything from this point; work already enqueued
@@ -2198,7 +2224,7 @@ WASSAT_PROOF_DRAT = 2
 # Append one watch entry to a literal's block, relocating the block to the
 # pool top (capacity doubling) when full. Sets wst[2] and returns -1 when
 # the pool itself is exhausted — the caller repacks via rebuild_watches.
--> wassat_ws_add(wd, wp, wst, li, ci, blk) (i64[] i64[] i64[] i64 i64 i64)
+-> wassat_ws_add(wd, wp, wst, li, stx, blk) (i64[] i64[] i64[] i64 i64 i64)
   d = li << 2
   n = wd[d + 1]
   if n >= wd[d + 2]
@@ -2218,7 +2244,7 @@ WASSAT_PROOF_DRAT = 2
     wst[0] = top + need
   bli = blk << 1
   bli = ((0 - blk) << 1) + 1 if blk < 0
-  wp[wd[d] + n] = (ci << 32) | bli
+  wp[wd[d] + n] = (stx << 32) | bli
   wd[d + 1] = n + 1
   0
 
@@ -2280,9 +2306,9 @@ WASSAT_PROOF_DRAT = 2
         lb = ((0 - bq) << 1) + 1
       da = la << 2
       db = lb << 2
-      wp[wd[da] + wd[da + 1]] = (ci << 32) | lb
+      wp[wd[da] + wd[da + 1]] = (stx << 32) | lb
       wd[da + 1] = wd[da + 1] + 1
-      wp[wd[db] + wd[db + 1]] = (ci << 32) | la
+      wp[wd[db] + wd[db + 1]] = (stx << 32) | la
       wd[db + 1] = wd[db + 1] + 1
     ci += 1
   0
@@ -2828,8 +2854,11 @@ WASSAT_PROOF_DRAT = 2
   while si < sncl
     if salive[si] == 1
       n = sfcl[si]
-      if ncl + 1 < ccap && asize + n < acap
+      if ncl + 1 < ccap && asize + n + 1 < acap
         st = sfcs[si]
+        # header word, then the literals (see store_clause)
+        dar[asize] = (ncl << 32) | n
+        asize = asize + 1
         dcm[ncl << 1] = asize
         dcm[(ncl << 1) + 1] = n
         dal[ncl] = 1

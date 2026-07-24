@@ -20,7 +20,8 @@
 #
 # PROOFS
 #
-# Proof logging is opt-in. Raw DRAT records each learned RUP clause directly.
+# Proof logging follows the requested certificate contract. Raw DRAT records
+# each learned RUP clause directly.
 # Hinted WRAT/LRAT derives each learned clause's antecedent chain DIRECTLY
 # from the conflict's resolution cone while the trail is intact (reasons in
 # trail order, conflict clause last) — replay-free, so hinted emission costs
@@ -29,17 +30,20 @@
 # analysis behind them (the terminal empty clause, assumption blocking
 # clauses).
 
+use cnf
+use policy
+
 UNASSIGNED = 0
 
-# Minimum conflicts between restarts. See the restart block in `solve_loop`.
-WASSAT_MIN_RESTART_INTERVAL = 16384
 WASSAT_PROOF_NONE = 0
 WASSAT_PROOF_WRAT = 1
 WASSAT_PROOF_DRAT = 2
 
 + Wassat
-  -> new(@nvars, @input_clauses, @proof_mode, @lookahead)
+  -> new(@nvars, @input_clauses, @proof_mode, legacy_lookahead = 0)
     nv = @nvars
+    @config = WassatConfig.new(@nvars, @input_clauses)
+    @lookahead = @config.lookahead_candidates
     @assign = i8[nv + 1]         # 0 unassigned, 1 true, -1 false — one BYTE
                                  # per var: the propagation loop's random
                                  # reads then live in L1 (i64 was 8x bigger)
@@ -58,8 +62,7 @@ WASSAT_PROOF_DRAT = 2
     @use_vmtf = false
     @use_target = false
     @use_chrono = false
-    @chrono_t = 50               # level-gap threshold, swept on the bmc family
-    @chrono_t = env("WASSAT_CHRONO_T").to_i if env("WASSAT_CHRONO_T") != nil
+    @chrono_t = 50
     @kbuf = i64[nv + 2]          # backjump keep-buffer for out-of-order levels
     @bstate = i64[4]             # dlevel / tsize / qhead across native backjump
     @pwork = i64[nv + 4]         # WRAT hint scratch: cone clause stack
@@ -219,12 +222,9 @@ WASSAT_PROOF_DRAT = 2
     # structured instances want it RELAXED (retained clauses collapse the
     # search; ibm-12: 5.1k conflicts relaxed vs 14.8k tight, and each
     # avoided reduce also skips a 200k-clause watch rebuild).
-    if @input_clauses.size < 20000
-      @reduce_limit = 2000
-      @reduce_step = 300
-    else
-      @reduce_limit = 4000
-      @reduce_step = 1000
+    @reduce_limit = @config.reduce_limit
+    @reduce_step = @config.reduce_step
+    @auto_vivify = @config.use_vivification
 
     # Threaded-portfolio state (--fast). @stop_cell is a shared i64[] the
     # winner raises; the solve loop polls it at conflict boundaries —
@@ -344,9 +344,9 @@ WASSAT_PROOF_DRAT = 2
     if @asize + need > @acap
       ncap = @acap * 2
       ncap = @asize + need + 1024 if ncap < @asize + need
-      # The arena is append-only (reduce_db only detaches); a search that
-      # cannot finish grows it without bound until the runtime's typed-array
-      # limit fires as a cryptic crash hours in. Fail precisely instead.
+      # Proof-free reductions compact the arena; a search that still cannot
+      # finish may grow it until the runtime's typed-array limit fires as a
+      # cryptic crash hours in. Fail precisely instead.
       if ncap > 1073741824
         raise "learned-clause arena exceeded 8 GiB; instance too hard for the current search — bound it with --conflicts or use the portfolio"
       bigger = i64[ncap]
@@ -708,7 +708,9 @@ WASSAT_PROOF_DRAT = 2
   # polarities are the mechanism behind cms5's bmc times.
   -> set_phases(lits)
     lits.each -> (l)
+      raise "phase literal must not be zero" if l == 0
       v = l.abs
+      raise "phase literal [l] exceeds variable count [@nvars]" if v > @nvars
       pol = l > 0 ? 1 : -1
       @phase[v] = pol
       @bphase[v] = pol
@@ -1173,12 +1175,12 @@ WASSAT_PROOF_DRAT = 2
       ci += 1
     @last_reduce_at = @conflicts
 
-    # Fixed-capacity mode reclaims the arena in place: live clauses slide
+    # Proof-free mode reclaims the arena in place: live clauses slide
     # down over dead space (dest <= src, in index order), clause INDICES
     # stay stable (reasons, watch slots), dead clauses zero their length.
     # Only sound without proof logging — proof replay would still need the
     # dead literals; --fast is PROOF_NONE by contract.
-    if @fixed_caps && @proof_mode == WASSAT_PROOF_NONE
+    if @proof_mode == WASSAT_PROOF_NONE
       wp = 0
       ci = 0
       while ci < @ncl
@@ -1338,62 +1340,90 @@ WASSAT_PROOF_DRAT = 2
           @formula_unsat = true
           result = -1
         else
-          # Fixed capacities: exhaustion first forces a reduce+compact, and
-          # if the arena still cannot take this clause the arm retires
-          # loudly — never a realloc in a worker thread.
-          if @fixed_caps && (@asize + @nvars + 4 > @acap || @ncl + 2 >= @ccap)
+          # Analyze the conflict BEFORE touching the trail or the arena.
+          # First-UIP analysis needs the implication trail intact and the
+          # conflicting clause unmoved: NEVER backjump, compact, or detach
+          # clauses before the learned clause is captured in @lbuf. (This
+          # ordering is the fix for the fixed-capacity portfolio SIGBUS —
+          # exhaustion handling used to backjump+reduce_db here first, which
+          # tore down the trail and could move `confl` out from under analyze.)
+          target = self.analyze(confl)
+          n = @lsize
+          lbd = self.compute_lbd_buf(n)
+          self.log_learned_direct(n, confl)
+          # low-LBD learned clauses are the sharing currency
+          self.share_export(n) if @ring != nil && lbd <= 2 && n <= @ring_maxlen
+          # Fixed capacities: with the learned clause safely captured, an
+          # exhausted arena may now be compacted (backjump to 0 + reduce_db)
+          # without corrupting analysis. If it still cannot take the clause
+          # the arm retires loudly — never a realloc in a worker thread.
+          compacted = false
+          if @fixed_caps && (@asize + n + 4 > @acap || @ncl + 2 >= @ccap)
             self.backjump(0)
             self.reduce_db
-            if @asize + @nvars + 4 > @acap || @ncl + 2 >= @ccap
+            compacted = true
+            if @asize + n + 4 > @acap || @ncl + 2 >= @ccap
               @retired = true
               limited = true
           if limited
             0
           else
-            target = self.analyze(confl)
-            n = @lsize
-            lbd = self.compute_lbd_buf(n)
-            self.log_learned_direct(n, confl)
-            # low-LBD learned clauses are the sharing currency
-            self.share_export(n) if @ring != nil && lbd <= 2 && n <= @ring_maxlen
-            # Chronological backtracking: a far backjump discards a deep,
-            # largely-consistent trail. Step back a single level instead
-            # and let the asserted UIP re-propagate through the kept
-            # prefix. Ablated on cms5 this knob alone is 3.5x on ibm-12.
-            jump = target
-            jump = @dlevel - 1 if @use_chrono && @nassump == 0 && @dlevel - target > @chrono_t
-            self.backjump(jump)
             asserting = @lbuf[0]
-            if n == 1
-              # Unit clauses are stored too, not just asserted: a logged clause
-              # consumes an id in the checker's database, so skipping the store
-              # here would desynchronise every later hint reference.
-              ci = self.store_clause(@lbuf, 1)
-              self.enqueue_lvl(asserting, ci, target)
+            if compacted
+              # The compaction backjumped to level 0, so a multi-literal
+              # learned clause is no longer unit (its non-UIP literals are
+              # now unassigned). Store it to guide subsequent search — the
+              # next decision restarts the descent, restart-style. A unit
+              # still asserts at level 0.
+              if n == 1
+                ci = self.store_clause(@lbuf, 1)
+                self.enqueue_lvl(asserting, ci, 0)
+              else
+                @obuf[0] = asserting
+                i = 1
+                while i < n
+                  @obuf[i] = @lbuf[i]
+                  i += 1
+                ci = self.store_clause(@obuf, n)
+                @clbd[ci] = lbd
             else
-              # store learned clause, watching the asserting literal and a
-              # literal from the backjump level
-              best = 1
-              bl = -1
-              i = 1
-              while i < n
-                lv = @level[@lbuf[i].abs]
-                if lv > bl
-                  bl = lv
-                  best = i
-                i += 1
-              @obuf[0] = asserting
-              @obuf[1] = @lbuf[best]
-              j = 2
-              i = 1
-              while i < n
-                unless i == best
-                  @obuf[j] = @lbuf[i]
-                  j += 1
-                i += 1
-              ci = self.store_clause(@obuf, n)
-              @clbd[ci] = lbd
-              self.enqueue_lvl(asserting, ci, target)
+              # Chronological backtracking: a far backjump discards a deep,
+              # largely-consistent trail. Step back a single level instead
+              # and let the asserted UIP re-propagate through the kept
+              # prefix. Ablated on cms5 this knob alone is 3.5x on ibm-12.
+              jump = target
+              jump = @dlevel - 1 if @use_chrono && @nassump == 0 && @dlevel - target > @chrono_t
+              self.backjump(jump)
+              if n == 1
+                # Unit clauses are stored too, not just asserted: a logged clause
+                # consumes an id in the checker's database, so skipping the store
+                # here would desynchronise every later hint reference.
+                ci = self.store_clause(@lbuf, 1)
+                self.enqueue_lvl(asserting, ci, target)
+              else
+                # store learned clause, watching the asserting literal and a
+                # literal from the backjump level
+                best = 1
+                bl = -1
+                i = 1
+                while i < n
+                  lv = @level[@lbuf[i].abs]
+                  if lv > bl
+                    bl = lv
+                    best = i
+                  i += 1
+                @obuf[0] = asserting
+                @obuf[1] = @lbuf[best]
+                j = 2
+                i = 1
+                while i < n
+                  unless i == best
+                    @obuf[j] = @lbuf[i]
+                    j += 1
+                  i += 1
+                ci = self.store_clause(@obuf, n)
+                @clbd[ci] = lbd
+                self.enqueue_lvl(asserting, ci, target)
             # Exponential moving averages (fixed-point << 16): the fast/slow
             # LBD ratio is the restart trigger, the trail EMA its blocker.
             @nlearned += 1 if n > 1
@@ -1437,7 +1467,7 @@ WASSAT_PROOF_DRAT = 2
           # (ibm-12 conflicts 5,074 -> 18,292; uuf250 +0.3s; lr5 frontier
           # unmoved). Opt-in for future experiments with the stronger
           # forms (false-literal removal, implication-aware shortening).
-          self.vivify_round if @proof_mode == WASSAT_PROOF_NONE && env("WASSAT_VIVIFY") == "1"
+          self.vivify_round if @proof_mode == WASSAT_PROOF_NONE && @auto_vivify
 
         # Glucose restart: the recent learning quality (fast EMA) is
         # markedly worse than the long-run average (slow EMA) — the search
@@ -1531,6 +1561,11 @@ WASSAT_PROOF_DRAT = 2
     s
 
   -> load_flat(art)
+    @config = art["config"]
+    @lookahead = @config.lookahead_candidates
+    @reduce_limit = @config.reduce_limit
+    @reduce_step = @config.reduce_step
+    @auto_vivify = @config.use_vivification
     sncl = art["fncl"]
     # size the arena and tables for the live clauses plus learning headroom
     total = 0
@@ -1580,21 +1615,9 @@ WASSAT_PROOF_DRAT = 2
     @ncl = pm[3]
     @asize = pm[4]
     if art["raw"] == true
-      @use_vmtf = true
-      @use_target = true
-      # Chronological backtracking v1 is SOUND (pivot selection is
-      # level-aware, implications assert at reason level) but measured
-      # net-negative on the bmc gate in this form (ibm-6 0.11 -> 0.17s,
-      # ibm-12 winner conflicts similar, walls worse) — opt-in until the
-      # kept-block/qhead protocol matches cadical's trail-reuse exactly.
-      @use_chrono = true if env("WASSAT_CHRONO") == "1"
-      # Stable-first measured WORSE here despite target phases (ibm-6
-      # 272 -> 2,461 conflicts, ibm-10 1.1k -> 3.1k) — focused-first
-      # stays the default, matching kissat. Opt-in for experiments.
-      @mode_stable = true if env("WASSAT_STABLE_FIRST") == "1"
-    # experiment knobs: force either policy on preprocessed kernels too
-    @use_vmtf = true if env("WASSAT_VMTF") == "1"
-    @use_target = true if env("WASSAT_TARGET") == "1"
+      @use_vmtf = @config.use_vmtf(true)
+      @use_target = @config.use_target_phases(true)
+      @use_chrono = @config.use_chronological_backtracking(true)
     self.rebuild_watches
     @bl_size = pm[7]
     @next_gid = art["next_gid"]
@@ -1654,6 +1677,11 @@ WASSAT_PROOF_DRAT = 2
     self.solve_assuming_budget(assumptions, 0)
 
   -> solve_assuming_budget(assumptions, max_conflicts)
+    assumptions.each -> (a)
+      raise "assumption literal must not be zero" if a == 0
+      v = a.abs
+      raise "assumption literal [a] exceeds variable count [@nvars]" if v > @nvars
+    raise "conflict budget must be non-negative" if max_conflicts < 0
     self.reset_query
     @assump = assumptions
     @nassump = assumptions.size
@@ -2641,8 +2669,8 @@ WASSAT_PROOF_DRAT = 2
 -> wassat_solve_opts(cnf_text, want_proof)
   wassat_solve_full(cnf_text, want_proof, 0)
 
-# `lookahead` is the number of candidate variables scored by one-step rollout
-# before each decision; 0 selects plain activity branching.
+# `lookahead` remains in the source-compatible library signature but policy
+# selection is automatic; callers no longer tune the branching algorithm.
 -> wassat_solve_full(cnf_text, want_proof, lookahead)
   wassat_solve_limited(cnf_text, want_proof, lookahead, 0)
 
@@ -2653,8 +2681,8 @@ WASSAT_PROOF_DRAT = 2
   wassat_solve_mode_limited(cnf_text, mode, lookahead, max_conflicts)
 
 # Explicit proof-mode API. Raw DRAT logs each RUP learned clause directly;
-# hinted WRAT additionally replays propagation to construct a checkable hint
-# chain. Existing boolean APIs above retain their historical meaning.
+# hinted WRAT records the conflict cone's antecedents in dependency order.
+# Existing boolean APIs above retain their historical meaning.
 -> wassat_solve_mode_limited(cnf_text, proof_mode, lookahead, max_conflicts)
   f = wassat_parse_cnf(cnf_text)
   unless proof_mode == WASSAT_PROOF_NONE || proof_mode == WASSAT_PROOF_WRAT || proof_mode == WASSAT_PROOF_DRAT

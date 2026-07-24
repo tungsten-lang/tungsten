@@ -30,22 +30,35 @@ CMS5 = os.environ.get("CRYPTOMINISAT5", shutil.which("cryptominisat5") or "")
 REPS = int(os.environ.get("REPS", "3"))
 TOLERANCE = float(os.environ.get("TOLERANCE", "1.5"))
 FRONTIER_BUDGET = float(os.environ.get("FRONTIER_BUDGET", "60"))
+BENCH = Path(os.environ.get("BENCH", "/tmp/satbench"))
+SATLIB_ROOT = os.environ.get("SATLIB_ROOT", "")
 
-BMC = "/tmp/satlib/structclean/bmc"
 PARITY = [
-    ("uuf100-01", "/tmp/satlib/clean/uuf100-430/uuf100-01.cnf"),
-    ("uuf250-01", "/tmp/satlib/clean/uuf250-1065/uuf250-01.cnf"),
-    ("php87", "/tmp/wassat-satbench/php87.cnf"),
-    ("dubois26", "/tmp/satlib/structclean/dubois/dubois26.cnf"),
-    ("bmc-ibm-2", f"{BMC}/bmc-ibm-2.cnf"),
-    ("bmc-ibm-6", f"{BMC}/bmc-ibm-6.cnf"),
-    ("bmc-ibm-10", f"{BMC}/bmc-ibm-10.cnf"),
-    ("bmc-ibm-12", f"{BMC}/bmc-ibm-12.cnf"),
+    ("php76", str(BENCH / "php76.cnf")),
+    ("php87", str(BENCH / "php87.cnf")),
+    ("rand3_20", str(BENCH / "rand3_20.cnf")),
+    ("rand3_40", str(BENCH / "rand3_40.cnf")),
 ]
-FRONTIER = [
-    ("lr5_37", "/tmp/lr5_37.cnf"),
-    ("lr5_41", "/tmp/lr5_41.cnf"),
-]
+if SATLIB_ROOT:
+    satlib = Path(SATLIB_ROOT)
+    bmc = satlib / "structclean" / "bmc"
+    PARITY.extend(
+        [
+            ("uuf100-01", str(satlib / "clean" / "uuf100-430" / "uuf100-01.cnf")),
+            ("uuf250-01", str(satlib / "clean" / "uuf250-1065" / "uuf250-01.cnf")),
+            ("dubois26", str(satlib / "structclean" / "dubois" / "dubois26.cnf")),
+            ("bmc-ibm-2", str(bmc / "bmc-ibm-2.cnf")),
+            ("bmc-ibm-6", str(bmc / "bmc-ibm-6.cnf")),
+            ("bmc-ibm-10", str(bmc / "bmc-ibm-10.cnf")),
+            ("bmc-ibm-12", str(bmc / "bmc-ibm-12.cnf")),
+        ]
+    )
+
+FRONTIER = []
+for name, env_name in (("lr5_37", "LR5_37"), ("lr5_41", "LR5_41")):
+    path = os.environ.get(env_name)
+    if path:
+        FRONTIER.append((name, path))
 
 
 def solvers():
@@ -87,6 +100,8 @@ def median_time(cmd, timeout):
 def main() -> None:
     if not Path(WASSAT).is_file():
         raise SystemExit(f"wassat not found at {WASSAT}")
+    if not CADICAL and not CMS5:
+        raise SystemExit("install CaDiCaL or CryptoMiniSat, or set CADICAL/CRYPTOMINISAT5")
     names = [n for n, _ in solvers()]
     print(f"[reference] REPS={REPS} TOLERANCE={TOLERANCE}x  solvers={names}")
     failures = 0
@@ -117,13 +132,20 @@ def main() -> None:
         print(f"  {name}: {cells}  [{mark}]")
 
     print("\n== frontier instances (tracked, budgeted) ==")
+    if not FRONTIER:
+        print("  none configured (set LR5_37 and/or LR5_41)")
     for name, path in FRONTIER:
         if not Path(path).is_file():
             print(f"  {name}: missing encoder output, skipped")
             continue
         rival_t = rival_v = None
+        rival_name = "none"
         if CADICAL:
+            rival_name = "cadical"
             rival_t, rival_v = run([CADICAL, "-q", path], 300)
+        elif CMS5:
+            rival_name = "cms5"
+            rival_t, rival_v = run([CMS5, path], 300)
         wt, wv = run([WASSAT, path, "--fast"], FRONTIER_BUDGET)
         if wv not in ("TIMEOUT",) and rival_v and rival_v != "TIMEOUT" and wv != rival_v:
             print(f"  {name}: VERDICT MISMATCH wassat={wv} cadical={rival_v}")
@@ -131,7 +153,8 @@ def main() -> None:
             continue
         gap = (wt / rival_t) if rival_t else float("nan")
         solved = "SOLVED" if wv != "TIMEOUT" else f"unsolved@{FRONTIER_BUDGET:.0f}s"
-        print(f"  {name}: wassat {solved} ({wt:.1f}s)  cadical={rival_t:.1f}s  gap>={gap:.1f}x")
+        rival_text = "missing" if rival_t is None else f"{rival_t:.1f}s"
+        print(f"  {name}: wassat {solved} ({wt:.1f}s)  {rival_name}={rival_text}  gap>={gap:.1f}x")
 
     if failures:
         raise SystemExit(f"\nFAIL: {failures} parity failure(s)")

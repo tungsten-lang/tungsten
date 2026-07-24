@@ -55,4 +55,23 @@ describe "Wassat proof trimming" ->
       check = wrat_verify(TRIM_ALL4, dtext)
       expect(check["verified"]).to eq(true)
 
+  context "strict artifact parsing" ->
+    it "rejects malformed headers, ids, terminators, and forward citations" ->
+      malformed = [
+        "wrat 2\n5 0 1 0\n",
+        "wrat 1\nwrat 1\n5 0 1 0\n",
+        "x 0 1 0\n",
+        "5 1 0 2\n",
+        "5 1 0 2 0 junk\n",
+        "5 d 0\n",
+        "5 d 3\n",
+        "5 1 0 6 0\n6 0 1 0\n"
+      ]
+      malformed.each -> (text)
+        expect(-> () wassat_trim_hinted(text)).to raise_error
+
+    it "rejects duplicate addition ids" ->
+      expect(-> () wassat_trim_hinted("5 1 0 1 0\n5 0 1 0\n")).to raise_error
+      expect(-> () wassat_trim_to_drat("wrat nope\n5 0 1 0\n")).to raise_error
+
 spec_summary

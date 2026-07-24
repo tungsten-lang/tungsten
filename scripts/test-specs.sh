@@ -81,6 +81,37 @@ run_interpreter_spec() {
   record_result "$name" "$output" "$status"
 }
 
+run_wassat_spec() {
+  local path="$1"
+  local wassat_bin="$2"
+  local name
+  local spec_bin
+  local output
+  local status
+
+  name="$(basename "${path%.w}")"
+  if [[ "$name" == "cli_spec" || "$name" == "preprocess_spec" || "$name" == "portfolio_spec" ]]; then
+    spec_bin="$TMP_ROOT/wassat-$name"
+    echo "compile+run $path (WASSAT_TEST_BIN=$wassat_bin)"
+    if ! "$TUNGSTEN" compile "$path" --out "$spec_bin" --no-lto >/dev/null; then
+      echo "FAIL [wassat/$name] compile failed" >&2
+      fail=1
+      return
+    fi
+    set +e
+    output="$(WASSAT_TEST_BIN="$wassat_bin" "$spec_bin" 2>&1)"
+    status=$?
+    set -e
+  else
+    echo "run $path (WASSAT_TEST_BIN=$wassat_bin)"
+    set +e
+    output="$(WASSAT_TEST_BIN="$wassat_bin" "$TUNGSTEN" run "$path" 2>&1)"
+    status=$?
+    set -e
+  fi
+  record_result "wassat/$name" "$output" "$status"
+}
+
 run_metal_spec() {
   local path="$1"
   local name
@@ -280,6 +311,17 @@ metal_specs=(
   spec/core/schedule_unroll_spec.w
 )
 
+wassat_specs=(
+  bits/tungsten-wassat/spec/solver_spec.w
+  bits/tungsten-wassat/spec/cli_spec.w
+  bits/tungsten-wassat/spec/preprocess_spec.w
+  bits/tungsten-wassat/spec/incremental_spec.w
+  bits/tungsten-wassat/spec/sls_spec.w
+  bits/tungsten-wassat/spec/trim_spec.w
+  bits/tungsten-wassat/spec/explain_spec.w
+  bits/tungsten-wassat/spec/portfolio_spec.w
+)
+
 for spec in "${compiled_specs[@]}"; do
   run_compiled_spec "$spec"
 done
@@ -291,6 +333,21 @@ done
 for spec in "${interpreter_specs[@]}"; do
   run_interpreter_spec "$spec"
 done
+
+# Wassat's native DIMACS parser, process portfolio, atomic proof publishing,
+# and worker lifecycle exist only in compiled programs. Build the exact CLI
+# under test once, inject it into every library spec, and keep the corpus
+# hermetic so this gate runs on both CI architectures.
+wassat_bin="$TMP_ROOT/wassat"
+echo "compile bits/tungsten-wassat/bin/wassat.w"
+if "$TUNGSTEN" compile bits/tungsten-wassat/bin/wassat.w --out "$wassat_bin" --no-lto >/dev/null; then
+  for spec in "${wassat_specs[@]}"; do
+    run_wassat_spec "$spec" "$wassat_bin"
+  done
+else
+  echo "FAIL [wassat] CLI compile failed" >&2
+  fail=1
+fi
 
 if [[ "${RUN_CORE_SPECS:-0}" == "1" ]]; then
   ruby -e 'File.binwrite("/tmp/tungsten-mmap-view-smoke.bin", [1, 2, 3, 4].pack("V*"))'

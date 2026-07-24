@@ -231,11 +231,11 @@
     work.push(uniq) unless taut
   { "work": work, "impossible": impossible }
 
-# Run the GPU walker fleet. Deterministic per (seed, walkers, chunk size).
+# Run the GPU walker fleet. Deterministic per (seed, walkers, max flips).
 # Returns the CPU engine's result shape; "flips" is the per-walker bound.
 # stop_cell: optional shared i64[] — between dispatches the host loop breaks
 # when another engine has answered (nil = run to the chunk budget).
--> wassat_sls_gpu_solve(formula, walkers, chunk_flips, chunks, seed, noise, metal_path, stop_cell = nil)
+-> wassat_sls_gpu_solve(formula, walkers, max_flips, seed, noise, metal_path, stop_cell = nil)
   nv = formula["nvars"]
   norm = wassat_sls_gpu_normalize(formula["clauses"])
   if norm["impossible"]
@@ -243,6 +243,9 @@
              "best_unsat": 1, "seed": seed, "walkers": walkers }
   work = norm["work"]
   ncl = work.size
+  if max_flips == 0
+    return { "sat": false, "model": [], "flips": 0, "restarts": 0,
+             "best_unsat": ncl, "seed": seed, "walkers": walkers }
   total = 0
   work.each -> (c)
     total += c.size
@@ -293,7 +296,7 @@
   params[0] = nv
   params[1] = ncl
   params[2] = walkers
-  params[3] = chunk_flips
+  params[3] = 0
   params[4] = noise              # of 256; ~145 for random 3-SAT, ~48 structured
   params[5] = seed
 
@@ -302,14 +305,18 @@
   wsls_metal_dispatch(queue, init_pipe, [wsls_metal_buffer(device, fla), wsls_metal_buffer(device, fcs), wsls_metal_buffer(device, fcl), wsls_metal_buffer(device, asg), wsls_metal_buffer(device, satc), wsls_metal_buffer(device, crit), wsls_metal_buffer(device, ulist), wsls_metal_buffer(device, upos), wsls_metal_buffer(device, uc), wsls_metal_buffer(device, rngbuf), wsls_metal_buffer(device, params)], walkers)
 
   found = false
-  c = 0
-  while c < chunks && !found
+  done = 0
+  chunk_flips = 200000
+  while done < max_flips && !found
     if stop_cell != nil && stop_cell[0] != 0
-      c = chunks
+      max_flips = done
     else
+      this_chunk = chunk_flips
+      this_chunk = max_flips - done if done + this_chunk > max_flips
+      params[3] = this_chunk
       z = wsls_metal_dispatch(queue, walk_pipe, [wsls_metal_buffer(device, fla), wsls_metal_buffer(device, fcs), wsls_metal_buffer(device, fcl), wsls_metal_buffer(device, och), wsls_metal_buffer(device, ocn), wsls_metal_buffer(device, ocv), wsls_metal_buffer(device, asg), wsls_metal_buffer(device, satc), wsls_metal_buffer(device, crit), wsls_metal_buffer(device, ulist), wsls_metal_buffer(device, upos), wsls_metal_buffer(device, uc), wsls_metal_buffer(device, rngbuf), wsls_metal_buffer(device, ctrl), wsls_metal_buffer(device, params)], walkers)
       found = ctrl[0] != 0
-      c += 1
+      done += this_chunk
 
   best = 2147483647
   wi = 0
@@ -327,8 +334,8 @@
       while v <= nv
         model.push(asg[vbase + v] == 1 ? v : 0 - v)
         v += 1
-      return { "sat": true, "model": model, "flips": c * chunk_flips,
+      return { "sat": true, "model": model, "flips": done,
                "restarts": 0, "best_unsat": 0, "seed": seed,
                "walkers": walkers, "winner": wid }
-  { "sat": false, "model": [], "flips": chunks * chunk_flips, "restarts": 0,
+  { "sat": false, "model": [], "flips": done, "restarts": 0,
     "best_unsat": best, "seed": seed, "walkers": walkers }

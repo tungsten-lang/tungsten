@@ -16,6 +16,7 @@
 #include <stdatomic.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <stdlib.h>  /* getenv/atoi for the temporary IC tear probe */
 
 /* ---- Heap string (mode 7: transient/large strings, freeable) ---- */
 typedef struct WString {
@@ -694,12 +695,60 @@ void w_block_return_signal(uint64_t buf_bits, WValue value);
 WValue w_method_call(WValue recv, WValue method_name, WValue args_arr);
 WValue w_method_call_fast(WValue recv, WValue name, WValue *args_ptr, int argc);
 
-/* ---- Monomorphic inline cache (per call site) ---- */
+/* ---- Monomorphic inline cache (per call site) ----
+ *
+ * Concurrency contract: caches are process-global and worker threads
+ * dispatch through them, so publication must be tear-free. Writers
+ * invalidate (type_key = 0, release), fill fn_ptr/arity, then publish
+ * type_key (release). Readers acquire-load type_key, read the fields,
+ * and acquire-load type_key AGAIN — a mid-flight writer makes one of
+ * the two loads miss. This is sound for cold population and for
+ * single-writer re-population (the shapes Tungsten threading produces:
+ * worker-shared sites are monomorphic). Two threads concurrently
+ * publishing DIFFERENT methods through one site can still interleave;
+ * that shape implies racing polymorphic dispatch, which the threading
+ * model already forbids.
+ *
+ * History: the previous key-FIRST unordered write let a second arm of
+ * wassat's thread race read {key, fn} with a stale arity of 0 and call
+ * an arity-1 method with no argument — garbage register, SIGBUS inside
+ * Wassat#analyze (13 crash reports, 2026-07-24). */
 typedef struct {
-    uint64_t type_key;     /* w_dispatch_key(recv) for cached type */
+    _Atomic uint64_t type_key; /* w_dispatch_key(recv); 0 = empty/mid-write */
     int32_t  arity;        /* -1 = builtin wrapper, >= 0 = user method arity */
     void    *fn_ptr;       /* cached function pointer */
 } WInlineCache;
+
+/* TEMPORARY A/B tear-window probe (W_IC_TEAR_US): replicates the ORIGINAL
+ * key-first publication with an artificially widened window. */
+static inline void w_ic_publish(WInlineCache *cache, uint64_t key, void *fn, int32_t arity) {
+    const char *tear = getenv("W_IC_TEAR_US");
+    if (tear && tear[0] == 'A') {
+        /* A: the ORIGINAL order — key visible, fn written, arity stale
+         * for the widened window. Readers that match the key call the fn
+         * with the wrong arity. */
+        atomic_store_explicit(&cache->type_key, key, memory_order_relaxed);
+        cache->fn_ptr = fn;
+        usleep((unsigned)atoi(tear + 1));
+        cache->arity  = arity;
+        return;
+    }
+    if (tear && tear[0] == 'B') {
+        /* B: the FIXED protocol with the same widened window inside it —
+         * the key is 0 for the whole window, so readers miss to the slow
+         * path and nothing tears. */
+        atomic_store_explicit(&cache->type_key, 0, memory_order_release);
+        cache->fn_ptr = fn;
+        usleep((unsigned)atoi(tear + 1));
+        cache->arity  = arity;
+        atomic_store_explicit(&cache->type_key, key, memory_order_release);
+        return;
+    }
+    atomic_store_explicit(&cache->type_key, 0, memory_order_release);
+    cache->fn_ptr = fn;
+    cache->arity  = arity;
+    atomic_store_explicit(&cache->type_key, key, memory_order_release);
+}
 
 WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc, WInlineCache *cache);
 WValue w_method_call_cached_0(WValue recv, WValue name, WInlineCache *cache);

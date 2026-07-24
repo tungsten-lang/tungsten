@@ -45,8 +45,7 @@ describe "Tungsten Wassat CLI" ->
 
   context "option validation" ->
     it "parses explicit non-negative search controls" ->
-      options = wassat_cli_options(["problem.cnf", "--fast", "--lookahead", "16", "--conflicts", "2500"])
-      expect(options["lookahead"]).to eq(16)
+      options = wassat_cli_options(["problem.cnf", "--fast", "--conflicts", "2500"])
       expect(options["conflicts"]).to eq(2500)
 
     it "rejects controls that could silently become unlimited" ->
@@ -54,10 +53,27 @@ describe "Tungsten Wassat CLI" ->
       expect(-> () wassat_cli_options(["problem.cnf", "--fast", "--conflicts", "-1"])).to raise_error
       expect(-> () wassat_cli_options(["problem.cnf", "--fast", "--conflicts"])).to raise_error
       expect(-> () wassat_cli_options(["problem.cnf", "--fast", "--unknown", "1"])).to raise_error
-      expect(-> () wassat_cli_options(["problem.cnf", "--fast", "--lookahead", "2", "--lookahead", "3"])).to raise_error
+      expect(-> () wassat_cli_options(["problem.cnf", "--fast", "--lookahead", "2"])).to raise_error
+
+    it "rejects overflowing limits instead of wrapping them" ->
+      expect(-> () wassat_cli_options(["problem.cnf", "--fast", "--conflicts", "999999999999999999999"])).to raise_error
 
     it "requires distinct certificate destinations" ->
       expect(-> () wassat_cli_options(["problem.cnf", "--proof", "same", "--drat", "same"])).to raise_error
+
+    it "selects branching techniques from formula shape" ->
+      random_clauses = []
+      i = 0
+      while i < 100
+        a = i % 30 + 1
+        b = (i * 7) % 30 + 1
+        c = (i * 13) % 30 + 1
+        random_clauses.push([a, 0 - b, c])
+        i += 1
+      random_policy = WassatConfig.new(30, random_clauses)
+      tiny_policy = WassatConfig.new(3, [[1, 2], [-1, 3]])
+      expect(random_policy.lookahead_candidates).to eq(16)
+      expect(tiny_policy.lookahead_candidates).to eq(0)
 
   context "certificate destinations" ->
     it "leaves stdout available as a certificate destination" ->
@@ -68,5 +84,50 @@ describe "Tungsten Wassat CLI" ->
 
     it "reports a missing input before DIMACS parsing" ->
       expect(-> () wassat_run_file_checked(["/tmp/wassat-file-that-does-not-exist-9e31", "--fast"])).to raise_error
+
+    it "atomically removes stale certificates on SAT and malformed input" ->
+      bin = env("WASSAT_TEST_BIN")
+      bin = "bits/tungsten-wassat/bin/wassat" if bin == nil || bin == ""
+      sat_cnf = "/tmp/wassat-cli-atomic-sat.cnf"
+      bad_cnf = "/tmp/wassat-cli-atomic-bad.cnf"
+      proof = "/tmp/wassat-cli-atomic.wrat"
+      z = write_file(sat_cnf, "p cnf 1 1\n1 0\n")
+      z = write_file(proof, "stale\n")
+      ok = system(bin + " " + sat_cnf + " --proof " + proof + " > /tmp/wassat-cli-atomic-sat.out 2>&1")
+      expect(ok).to eq(true)
+      expect(read_file(proof)).to eq(nil)
+
+      z = write_file(bad_cnf, "p cnf2 1\n1 0\n")
+      z = write_file(proof, "stale again\n")
+      ok = system(bin + " " + bad_cnf + " --proof " + proof + " > /tmp/wassat-cli-atomic-bad.out 2>&1")
+      expect(ok).to eq(false)
+      expect(read_file(proof)).to eq(nil)
+
+    it "rejects hardlink aliases without damaging the input" ->
+      bin = env("WASSAT_TEST_BIN")
+      bin = "bits/tungsten-wassat/bin/wassat" if bin == nil || bin == ""
+      input = "/tmp/wassat-cli-alias-input.cnf"
+      alias_path = "/tmp/wassat-cli-alias-proof.wrat"
+      body = "p cnf 1 1\n1 0\n"
+      z = write_file(input, body)
+      z = ccall("__w_unlink", alias_path)
+      expect(system("ln " + input + " " + alias_path)).to eq(true)
+      ok = system(bin + " " + input + " --proof " + alias_path + " > /tmp/wassat-cli-alias.out 2>&1")
+      expect(ok).to eq(false)
+      expect(read_file(input)).to eq(body)
+      expect(read_file(alias_path)).to eq(body)
+
+  context "SLS option contract" ->
+    it "rejects GPU-only controls on CPU and honors a zero GPU flip budget" ->
+      bin = env("WASSAT_TEST_BIN")
+      bin = "bits/tungsten-wassat/bin/wassat" if bin == nil || bin == ""
+      input = "/tmp/wassat-cli-sls.cnf"
+      z = write_file(input, "p cnf 2 1\n1 2 0\n")
+      ok = system(bin + " sls " + input + " --flips 1 --walkers 8 > /tmp/wassat-cli-sls-bad.out 2>&1")
+      expect(ok).to eq(false)
+      ok = system(bin + " sls " + input + " --gpu --flips 0 --walkers 8 --noise 48 > /tmp/wassat-cli-sls-zero.out 2>&1")
+      expect(ok).to eq(true)
+      out = read_file("/tmp/wassat-cli-sls-zero.out")
+      expect(out.index("flips=0") != nil).to eq(true)
 
 spec_summary

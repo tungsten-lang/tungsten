@@ -54,4 +54,11 @@ describe "Wassat explain" ->
       expect(labels[1]).to eq("time 1 must be covered")
       expect(labels[2]).to eq("at most k")
 
+    it "rejects malformed, zero, and duplicate clause ids" ->
+      expect(-> () wassat_labels_parse("missing separator\n")).to raise_error
+      expect(-> () wassat_labels_parse("0\tzero\n")).to raise_error
+      expect(-> () wassat_labels_parse("1\tfirst\n1\tsecond\n")).to raise_error
+      expect(-> () wassat_labels_parse("2\t\n")).to raise_error
+      expect(-> () wassat_explain("wrat nope\n5 0 1 0\n", {})).to raise_error
+
 spec_summary

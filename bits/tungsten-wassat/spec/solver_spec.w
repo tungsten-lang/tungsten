@@ -247,7 +247,7 @@ describe "Tungsten Wassat" ->
       expect(hst[1]).to eq(32)
       expect(wassat_heap_valid(heap, hpos, act, hst, 3)).to eq(1)
 
-    it "remains compatible with rollout branching" ->
+    it "keeps legacy lookahead arguments source-compatible under automatic policy" ->
       sat = wassat_solve_full(CHAIN, false, 3)
       unsat = wassat_solve_full(PHP32, false, 4)
       expect(sat["status"]).to eq(1)

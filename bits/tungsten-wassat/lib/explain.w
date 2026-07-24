@@ -18,10 +18,14 @@
     line = raw.strip
     unless line == ""
       tab = line.index("\t")
-      unless tab == nil
-        id_tok = line.slice(0, tab)
-        label = line.slice(tab + 1, line.size - tab - 1)
-        out[id_tok.to_i] = label if wassat_unsigned_decimal?(id_tok)
+      raise "malformed labels line '[line]': expected '<id><tab><label>'" if tab == nil
+      id_tok = line.slice(0, tab)
+      label = line.slice(tab + 1, line.size - tab - 1)
+      raise "empty label for input clause [id_tok]" if label == ""
+      raise "labels must not contain tab characters" unless label.index("\t") == nil
+      id = wassat_decimal_in_range("label clause id", id_tok, 1, 2000000000)
+      raise "duplicate label clause id [id]" if out.has_key?(id)
+      out[id] = label
   out
 
 # Analyze a hinted proof against a labels map. Returns
@@ -29,15 +33,27 @@
 #    "missing": ids cited but unlabeled,
 #    "derived_steps": addition count, "input_citations": count}
 -> wassat_explain(proof_text, labels)
+  # Validate the complete hinted document before deriving any narration.
+  validated = wassat_trim_hinted(proof_text)
   defined = {}
   steps = []
+  had_header = false
+  saw_body = false
   proof_text.split("\n").each -> (raw)
     line = raw.strip
-    unless line == "" || line.starts_with?("c") || line.starts_with?("wrat")
-      st = wassat_trim_parse_line(line)
-      unless st == nil || st["delete"]
-        steps.push(st)
-        defined[st["id"]] = true
+    unless line == "" || line.starts_with?("c")
+      toks = wassat_tokenize(line)
+      if toks[0] == "wrat"
+        raise "malformed WRAT header" unless toks.size == 2 && toks[1] == "1"
+        raise "WRAT header must precede every proof step" if saw_body
+        raise "duplicate WRAT header" if had_header
+        had_header = true
+      else
+        saw_body = true
+        st = wassat_trim_parse_line(line)
+        unless st == nil || st["delete"]
+          steps.push(st)
+          defined[st["id"]] = true
 
   used_ids = []
   seen = {}
@@ -87,10 +103,13 @@
 -> wassat_run_explain(args)
   input = nil
   labels_path = nil
+  labels_seen = false
   i = 0
   while i < args.size
     flag = args[i]
     if flag == "--labels"
+      raise "duplicate --labels option" if labels_seen
+      labels_seen = true
       raise "missing value after [flag]" if i + 1 >= args.size
       labels_path = args[i + 1]
       i += 2

@@ -29,19 +29,26 @@ WASSAT_ARM_GARDEN = 1          # randomized initial phases (diversity)
 WASSAT_ARM_SLS = 2             # local search, models only
 
 + WassatPortfolio
-  -> new(@input_path, @race_dir, @arms_spec)
+  -> new(@input_path, @race_dir, @arms_spec, @timeout_ms)
     @procs = []                # arm index -> Process or nil
     @arm_kind = []
     @arm_label = []
     @out_paths = []
     @proof_paths = []
+    @reduced_path = nil
+    @gids_path = nil
+    @proof_tmp_output = nil
 
   # Run the race. Returns {"verdict", "model", "proof_path", "winner",
   # "arms"}; raises on portfolio degradation or an unverifiable answer.
   -> run(proof_out)
     cnf_text = read_file(@input_path)
     raise "cannot read input formula '[@input_path]'" if cnf_text == nil
+    wassat_clear_output(proof_out, @input_path, "portfolio proof")
     formula = wassat_parse_cnf(cnf_text)
+    proof_tmp_out = wassat_reserve_output(proof_out, @input_path, "portfolio proof")
+    @proof_tmp_output = proof_tmp_out
+    portfolio_started = ccall("__w_clock_ms")
 
     # preprocess ONCE; the artifact is what every arm consumes
     pre = WassatPreprocess.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_WRAT)
@@ -50,12 +57,21 @@ WASSAT_ARM_SLS = 2             # local search, models only
     if art["status"] == -1
       # refuted before any arm spawns; the prefix is the certificate
       wtext = "wrat 1\n" + art["wrat"].join("\n") + "\n"
-      raise "proof write failed at '[proof_out]'" unless proof_out == nil || write_file(proof_out, wtext)
+      raise "proof write failed at '[proof_tmp_out]'" unless write_file(proof_tmp_out, wtext)
+      wassat_publish_output(proof_tmp_out, proof_out, "portfolio proof")
       return { "verdict": "UNSAT", "model": [], "proof_path": proof_out,
                "winner": "preprocess", "arms": [] }
 
+    if @timeout_ms > 0 && ccall("__w_clock_ms") - portfolio_started >= @timeout_ms
+      wassat_discard_output(proof_tmp_out, proof_out)
+      return { "verdict": "UNKNOWN", "model": [], "proof_path": nil,
+               "winner": "deadline",
+               "arms": ["deadline reached during preprocessing after [@timeout_ms]ms"] }
+
     reduced_path = @race_dir + "/reduced.cnf"
     gids_path = @race_dir + "/gids.txt"
+    @reduced_path = reduced_path
+    @gids_path = gids_path
     self.write_artifact(formula["nvars"], art, reduced_path, gids_path)
 
     # spawn one worker per arm, each in its own process group
@@ -100,25 +116,32 @@ WASSAT_ARM_SLS = 2             # local search, models only
     @arm_kind.each -> (k)
       live_cdcl += 1 unless k == WASSAT_ARM_SLS
     arms_report = []
+    race_started = portfolio_started
+    timed_out = false
     while winner < 0
       done_any = false
-      i = 0
-      while i < @procs.size && winner < 0
-        p = @procs[i]
-        unless p == nil
-          rc = p.poll
-          unless rc == nil
-            done_any = true
-            @procs[i] = nil
-            if rc == 10 || rc == 20
-              winner = i
-              verdict = rc == 10 ? "SAT" : "UNSAT"
-            else
-              # arm died without answering: log, mark out, never respawn
-              live_cdcl -= 1 unless @arm_kind[i] == WASSAT_ARM_SLS
-              arms_report.push("[@arm_label[i]] failed rc=[rc]")
-              raise "portfolio degraded: no prover arms remain" if live_cdcl == 0
-        i += 1
+      if @timeout_ms > 0 && ccall("__w_clock_ms") - race_started >= @timeout_ms
+        timed_out = true
+        arms_report.push("deadline reached after [@timeout_ms]ms")
+        winner = 0 - 2
+      else
+        i = 0
+        while i < @procs.size && winner < 0
+          p = @procs[i]
+          unless p == nil
+            rc = p.poll
+            unless rc == nil
+              done_any = true
+              @procs[i] = nil
+              if rc == 10 || rc == 20
+                winner = i
+                verdict = rc == 10 ? "SAT" : "UNSAT"
+              else
+                # arm died without answering: log, mark out, never respawn
+                live_cdcl -= 1 unless @arm_kind[i] == WASSAT_ARM_SLS
+                arms_report.push("[@arm_label[i]] failed rc=[rc]")
+                raise "portfolio degraded: no prover arms remain" if live_cdcl == 0
+          i += 1
       z = ccall("__w_sleep_ms", 20) unless done_any || winner >= 0
 
     # kill the losers (TERM, then KILL for anything stubborn); all status
@@ -137,10 +160,16 @@ WASSAT_ARM_SLS = 2             # local search, models only
             rc = p.wait
       i += 1
 
+    if timed_out
+      wassat_discard_output(proof_tmp_out, proof_out)
+      return { "verdict": "UNKNOWN", "model": [], "proof_path": nil,
+               "winner": "deadline", "arms": arms_report }
+
     win_label = @arm_label[winner]
     arms_report.push("[win_label] WON [verdict]")
 
     if verdict == "SAT"
+      wassat_discard_output(proof_tmp_out, proof_out)
       # reconstruct through the elimination stack; verify vs the ORIGINAL
       model_line = read_file(@out_paths[winner])
       raise "winning arm left no status file" if model_line == nil
@@ -154,15 +183,36 @@ WASSAT_ARM_SLS = 2             # local search, models only
       { "verdict": "SAT", "model": model, "proof_path": nil,
         "winner": win_label, "arms": arms_report }
     else
-      # splice: preprocessing prefix + the winner's search proof
-      wproof = read_file(@proof_paths[winner])
-      raise "winning arm left no proof" if wproof == nil
-      full = "wrat 1\n"
-      full = full + art["wrat"].join("\n") + "\n" unless art["wrat"].empty?
-      full = full + wproof
-      raise "proof write failed at '[proof_out]'" unless proof_out == nil || write_file(proof_out, full)
+      # Stream-splice: preprocessing prefix + the winner's search proof.
+      # The worker proof can be arbitrarily large and is never boxed here.
+      prefix = "wrat 1\n"
+      prefix = prefix + art["wrat"].join("\n") + "\n" unless art["wrat"].empty?
+      raise "proof write failed at '[proof_tmp_out]'" unless write_file(proof_tmp_out, prefix)
+      raise "winning arm left no proof" unless ccall("__w_append_file_to", proof_tmp_out, @proof_paths[winner])
+      wassat_publish_output(proof_tmp_out, proof_out, "portfolio proof")
       { "verdict": "UNSAT", "model": [], "proof_path": proof_out,
         "winner": win_label, "arms": arms_report }
+
+  -> cleanup
+    @procs.each -> (proc)
+      unless proc == nil
+        rc = proc.poll
+        if rc == nil
+          z = proc.kill
+          z = ccall("__w_sleep_ms", 20)
+          rc = proc.poll
+          z = proc.kill(9) if rc == nil
+          rc = proc.wait if rc == nil
+    @out_paths.each -> (path)
+      z = ccall("__w_unlink", path)
+    @proof_paths.each -> (path)
+      z = ccall("__w_unlink", path)
+      z = ccall("__w_unlink", path + ".tmp")
+    z = ccall("__w_unlink", @reduced_path) unless @reduced_path == nil
+    z = ccall("__w_unlink", @gids_path) unless @gids_path == nil
+    z = ccall("__w_unlink", @proof_tmp_output) unless @proof_tmp_output == nil || @proof_tmp_output == "-"
+    z = ccall("__w_rmdir", @race_dir)
+    0
 
   # The reduced formula as strict DIMACS plus the id table (line k holds the
   # certificate id of clause k).
@@ -213,10 +263,13 @@ WASSAT_ARM_SLS = 2             # local search, models only
   proof_tmp = nil
   arm = "marathon"
   seed = 1
+  seen = {}
   i = 0
   while i < args.size
     flag = args[i]
     if flag == "--gids" || flag == "--status" || flag == "--proof-tmp" || flag == "--arm" || flag == "--seed"
+      raise "duplicate worker option: [flag]" if seen[flag] == true
+      seen[flag] = true
       raise "missing value after [flag]" if i + 1 >= args.size
       value = args[i + 1]
       if flag == "--gids"
@@ -228,7 +281,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
       elsif flag == "--arm"
         arm = value
       else
-        seed = value.to_i
+        seed = wassat_decimal_in_range("--seed", value, 0, 2147483647)
       i += 2
     elsif flag.starts_with?("--")
       raise "unknown worker option: [flag]"
@@ -239,6 +292,9 @@ WASSAT_ARM_SLS = 2             # local search, models only
   raise "worker needs an input formula" if input == nil
   raise "worker needs --gids" if gids_path == nil
   raise "worker needs --status" if status_path == nil
+  unless arm == "marathon" || arm == "garden" || arm == "sls" || arm == "probe"
+    raise "unknown worker arm '[arm]'"
+  raise "worker prover arm needs --proof-tmp" if (arm == "marathon" || arm == "garden") && proof_tmp == nil
 
   cnf_text = read_file(input)
   raise "cannot read reduced formula" if cnf_text == nil
@@ -246,10 +302,19 @@ WASSAT_ARM_SLS = 2             # local search, models only
   gtext = read_file(gids_path)
   raise "cannot read gid table" if gtext == nil
   gids = []
+  max_gid = 0
   gtext.split("\n").each -> (line)
     t = line.strip
-    gids.push(t.to_i) unless t == ""
+    unless t == ""
+      g = wassat_decimal_in_range("gid table entry", t, 1, 2000000000)
+      raise "gid table must be strictly increasing" if g <= max_gid
+      gids.push(g)
+      max_gid = g
   next_gid = gids.pop
+  raise "gid table length mismatch" unless gids.size == formula["clauses"].size
+  raise "gid table is missing next_gid" if next_gid == nil
+  unless gids.empty?
+    raise "next_gid must be greater than every clause id" if next_gid <= gids[gids.size - 1]
 
   if arm == "sls"
     r = wassat_sls_solve(formula, 50000000, seed)
@@ -278,18 +343,26 @@ WASSAT_ARM_SLS = 2             # local search, models only
   s = Wassat.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_WRAT, 0)
   s.seed_proof_ids(gids, next_gid)
   s.reseed_phases(seed) if arm == "garden"
+  tmp = proof_tmp + ".tmp"
+  raise "proof temp cleanup failed" unless ccall("__w_unlink", tmp)
+  raise "proof temp prepare failed" unless write_file(tmp, "")
+  s.stream_proofs(tmp, nil)
+  s.wrat_header_written
   result = s.solve_budget(0)
 
   if result["status"] == 1
+    s.abort_proof_sinks
+    z = ccall("__w_unlink", tmp)
     raise "status write failed" unless write_file(status_path, result["model"].join(" ") + " 0\n")
     exit(10)
   elsif result["status"] == -1
-    unless proof_tmp == nil
-      tmp = proof_tmp + ".tmp"
-      raise "proof write failed" unless write_file(tmp, result["proof"].join("\n") + "\n")
-      raise "proof rename failed" unless ccall("__w_rename", tmp, proof_tmp)
+    s.flush_proof_sinks
+    raise "proof flush failed" unless ccall("__w_fsync_path", tmp)
+    raise "proof rename failed" unless ccall("__w_rename", tmp, proof_tmp)
     raise "status write failed" unless write_file(status_path, "UNSAT\n")
     exit(20)
+  s.abort_proof_sinks
+  z = ccall("__w_unlink", tmp)
   exit(3)
 
 # ---- threaded portfolio (--fast half) ----------------------------------------
@@ -423,7 +496,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
     metal_path = env("WASSAT_METAL")
     metal_path = "bin/wassat.metal" if metal_path == nil || metal_path == ""
     begin
-      gr = wassat_sls_gpu_solve(reduced, 512, 100000, 1000000, 9001, 48, metal_path, stop)
+      gr = wassat_sls_gpu_solve(reduced, 512, 2000000000, 9001, 48, metal_path, stop)
       if gr["sat"]
         gpu_model = gr["model"]
         stop[0] = 1
@@ -495,26 +568,39 @@ WASSAT_ARM_SLS = 2             # local search, models only
   share = true
   gpu = false
   threads = 4
+  timeout_ms = 300000
+  seen = {}
   i = 0
   while i < args.size
     flag = args[i]
-    if flag == "--proof" || flag == "--dir" || flag == "--threads"
+    if flag == "--proof" || flag == "--dir" || flag == "--threads" || flag == "--timeout-ms"
+      raise "duplicate portfolio option: [flag]" if seen[flag] == true
+      seen[flag] = true
       raise "missing value after [flag]" if i + 1 >= args.size
       if flag == "--proof"
         proof_out = args[i + 1]
       elsif flag == "--threads"
-        threads = args[i + 1].to_i
-        raise "--threads needs 1..64" if threads < 1 || threads > 64
+        value = args[i + 1]
+        threads = wassat_decimal_in_range("--threads", value, 1, 64)
+      elsif flag == "--timeout-ms"
+        value = args[i + 1]
+        timeout_ms = wassat_decimal_in_range("--timeout-ms", value, 1, 86400000)
       else
         race_dir = args[i + 1]
       i += 2
     elsif flag == "--fast"
+      raise "duplicate portfolio option: [flag]" if seen[flag] == true
+      seen[flag] = true
       fast = true
       i += 1
     elsif flag == "--no-share"
+      raise "duplicate portfolio option: [flag]" if seen[flag] == true
+      seen[flag] = true
       share = false
       i += 1
     elsif flag == "--gpu"
+      raise "duplicate portfolio option: [flag]" if seen[flag] == true
+      seen[flag] = true
       gpu = true
       i += 1
     elsif flag.starts_with?("--")
@@ -527,22 +613,34 @@ WASSAT_ARM_SLS = 2             # local search, models only
   raise "--fast forgoes certificates; drop --fast or --proof" if fast && proof_out != nil
   raise "--gpu requires --fast (the GPU arm returns models, not proofs)" if gpu && !fast
   return wassat_run_fast_portfolio(input, threads, share, gpu) if fast
+  raise "portfolio proof mode requires --proof <path>" if proof_out == nil
+  raise "portfolio proof must be written to a file, not stdout" if proof_out == "-"
   if race_dir == nil
-    base = input.split("/").last.replace(".cnf", "")
-    race_dir = "/tmp/wassat-race-" + base
-  z = ccall("__w_system", "mkdir -p " + race_dir)
+    race_dir = ccall("__w_mkdtemp", "wassat-race")
+  else
+    raise "cannot create portfolio work root '[race_dir]'" unless ccall("__w_mkdir_p", race_dir)
+    race_dir = ccall("__w_mkdtemp_in", race_dir, "run")
+  raise "cannot create unique portfolio work directory" if race_dir == nil
 
   arms = [
     { "kind": WASSAT_ARM_MARATHON, "label": "marathon", "seed": 0 },
     { "kind": WASSAT_ARM_GARDEN, "label": "garden", "seed": 42 },
     { "kind": WASSAT_ARM_SLS, "label": "sls", "seed": 7 }
   ]
-  port = WassatPortfolio.new(input, race_dir, arms)
-  r = port.run(proof_out)
+  port = WassatPortfolio.new(input, race_dir, arms, timeout_ms)
+  r = nil
+  begin
+    r = port.run(proof_out)
+  rescue e
+    port.cleanup
+    raise e
+  port.cleanup
   if r["verdict"] == "SAT"
     print("s SATISFIABLE\nv " + r["model"].join(" ") + " 0\n")
-  else
+  elsif r["verdict"] == "UNSAT"
     << "s UNSATISFIABLE"
+  else
+    << "s UNKNOWN"
   << "c mode: portfolio"
   << "c winner: [r["winner"]]"
   r["arms"].each -> (line)

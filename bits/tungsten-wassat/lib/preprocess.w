@@ -39,6 +39,9 @@
 # native top-level functions over those arrays; a profile of the boxed
 # version spent ~90% of its time re-boxing literal reads.
 
+use cnf
+use policy
+
 WASSAT_PRE_PROBE_CAP = 2000
 WASSAT_PRE_OCC_PRODUCT_CAP = 4096
 WASSAT_PRE_MAX_PASSES = 10
@@ -48,6 +51,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
 + WassatPreprocess
   -> new(@nvars, @input_clauses, @proof_mode)
     nv = @nvars
+    @config = WassatConfig.new(@nvars, @input_clauses)
     @passign = i64[nv + 1]       # root assignment: 0 / 1 / -1
     @preason = i64[nv + 1]       # root reason clause index, -1 = none
     @tpos = i64[nv + 1]          # trail position, for hint ordering
@@ -218,9 +222,8 @@ WASSAT_PRE_BUCKET_CAP = 1024
     # pipeline phase was pure overhead on top. Modern-solver shape: large
     # inputs go straight to CDCL; preprocessing effort belongs to small
     # kernels where it is cheap and provably shrinks search (php, dubois,
-    # lr5's Sinz chains). WASSAT_RAW=1/0 forces either policy.
-    raw = @ncl > 50000
-    raw = env("WASSAT_RAW") == "1" if env("WASSAT_RAW") != nil
+    # and compact Sinz chains). The choice is deterministic from task shape.
+    raw = @config.raw_kernel?
     @raw_kernel = raw
     self.run_probing if @status == 0 && !raw
     tp = wassat_prof("pre.probing", tp)
@@ -1338,7 +1341,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
       ci += 1
     { "nvars": @nvars, "clauses": clauses, "gids": gids,
       "raw": @raw_kernel,
-      "next_gid": @next_gid, "status": @status,
+      "next_gid": @next_gid, "status": @status, "config": @config,
       "stack": @stack, "gone": @gone,
       "fla": @fla, "fcs": @fcs, "fcl": @fcl, "falive": @falive,
       "ftaut": @ftaut, "fpgid": @fpgid, "fncl": @ncl,
@@ -1833,7 +1836,9 @@ WASSAT_PRE_BUCKET_CAP = 1024
 -> wassat_check_assumptions(art, assumptions)
   gone = art["gone"]
   assumptions.each -> (a)
+    raise "assumption literal must not be zero" if a == 0
     v = a.abs
+    raise "assumption literal [a] exceeds preprocessed variable count [gone.size - 1]" if v >= gone.size
     unless gone[v] == 0
       kind = gone[v] == 1 ? "eliminated" : "substituted"
       raise "assumption names [kind] variable [v]; freeze it before preprocessing"

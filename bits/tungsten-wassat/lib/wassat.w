@@ -20,6 +20,7 @@
 
 use version
 use cnf
+use policy
 use solver
 use preprocess
 use sls
@@ -38,6 +39,11 @@ use portfolio
   << "    wassat <problem.cnf> --lrat <path>      certificate-backed, LRAT dialect"
   << "    wassat <problem.cnf> --drat <path>      certificate-backed, plain DRAT"
   << "    wassat <problem.cnf> --fast             trusted answers, no certificate"
+  << "    wassat portfolio <problem.cnf> --proof <path>"
+  << "    wassat portfolio <problem.cnf> --fast --threads <n>"
+  << "    wassat sls <problem.cnf> --flips <n> --seed <n>"
+  << "    wassat trim <proof.wrat> --out <path> --drat <path>"
+  << "    wassat explain <proof.wrat> --labels <path>"
   << "    wassat version"
   << "    wassat help"
   << ""
@@ -52,10 +58,20 @@ use portfolio
   << ""
   << "Use `-` as the path to write the proof to stdout."
   << ""
-  << "--lookahead <n> scores n candidate variables by one-step rollout"
-  << "(trial propagation) before each decision. Helps markedly on random"
-  << "instances, hurts on structured ones. Default 0 = activity branching."
+  << "MAIN OPTIONS"
   << "--conflicts <n> returns s UNKNOWN after n conflicts (default unlimited)."
+  << "Search techniques and branching policy are selected automatically from"
+  << "the parsed formula shape; there are no algorithm-tuning switches."
+  << ""
+  << "PORTFOLIO OPTIONS"
+  << "--proof <path> is required in proof mode; --fast selects the shared"
+  << "in-process race. --threads <n> defaults to 4, --timeout-ms <n> defaults"
+  << "to 300000, --no-share disables learned-clause sharing, and --gpu adds"
+  << "a model-only Metal arm to --fast. --dir chooses a work-directory parent."
+  << ""
+  << "SLS OPTIONS"
+  << "--flips <n>, --seed <n>, and --pre are CPU controls. --gpu selects the"
+  << "Metal fleet; --walkers <n> and --noise <0..256> apply only with --gpu."
 
 # Parse and validate command-line arguments. Flags may appear before or after
 # the input path (benchmark harnesses append the path last). A typo in a
@@ -67,7 +83,6 @@ use portfolio
     "drat": nil,
     "lrat": nil,
     "fast": false,
-    "lookahead": 0,
     "conflicts": 0
   }
   seen = {}
@@ -75,7 +90,7 @@ use portfolio
   while i < args.size
     flag = args[i]
     if flag.starts_with?("--")
-      unless flag == "--proof" || flag == "--drat" || flag == "--lrat" || flag == "--lookahead" || flag == "--conflicts" || flag == "--fast"
+      unless flag == "--proof" || flag == "--drat" || flag == "--lrat" || flag == "--conflicts" || flag == "--fast"
         raise "unknown Wassat option: [flag]"
       raise "duplicate Wassat option: [flag]" if seen[flag] == true
       seen[flag] = true
@@ -93,11 +108,7 @@ use portfolio
         elsif flag == "--lrat"
           out["lrat"] = value
         else
-          raise "[flag] requires a non-negative decimal integer, got '[value]'" unless wassat_unsigned_decimal?(value)
-          if flag == "--lookahead"
-            out["lookahead"] = value.to_i
-          else
-            out["conflicts"] = value.to_i
+          out["conflicts"] = wassat_decimal_in_range(flag, value, 0, 2000000000)
         i += 2
     else
       raise "unexpected extra argument '[flag]' (input is '[out["input"]]')" unless out["input"] == nil
@@ -132,15 +143,42 @@ use portfolio
   idb = ccall("__w_file_id", b)
   ida != nil && idb != nil && ida == idb
 
-# Truncate requested certificate destinations before solving. Otherwise a SAT,
-# UNKNOWN, parse failure, or interrupted rerun can leave an older refutation at
-# the requested path and make it look like evidence for the current formula.
+# Validate requested certificate destinations before solving. Otherwise an
+# aliased output could replace the formula it is meant to certify.
 # Callers must have READ the input already: an aliased destination is
 # detected here, but even a missed alias must never truncate an unread input.
 -> wassat_prepare_output(path, input_path, label)
   unless path == nil || path == "-"
     raise "[label] output must not overwrite the input formula" if wassat_same_file?(path, input_path)
-    raise "cannot prepare [label] output at '[path]'" unless write_file(path, "")
+  0
+
+-> wassat_clear_output(path, input_path, label)
+  unless path == nil || path == "-"
+    wassat_prepare_output(path, input_path, label)
+    raise "cannot clear stale [label] output at '[path]'" unless ccall("__w_unlink", path)
+  0
+
+# After the caller has cleared any stale final, reserve a unique temporary file
+# beside it. Search streams only to the temporary path; a terminal UNSAT
+# publishes it atomically after a successful flush.
+-> wassat_reserve_output(path, input_path, label)
+  return nil if path == nil
+  return "-" if path == "-"
+  wassat_prepare_output(path, input_path, label)
+  tmp = ccall("__w_temp_file_for", path)
+  raise "cannot reserve [label] output beside '[path]'" if tmp == nil
+  tmp
+
+-> wassat_publish_output(tmp, final_path, label)
+  return 0 if final_path == nil || final_path == "-"
+  raise "[label] flush failed at '[tmp]'" unless ccall("__w_fsync_path", tmp)
+  raise "[label] publish failed at '[final_path]'" unless ccall("__w_rename", tmp, final_path)
+  raise "[label] directory flush failed at '[final_path]'" unless ccall("__w_fsync_parent", final_path)
+  0
+
+-> wassat_discard_output(tmp, final_path)
+  if tmp != nil && final_path != nil && final_path != "-" && tmp != final_path
+    z = ccall("__w_unlink", tmp)
   0
 
 # Status, model, and comment lines go to stderr whenever a certificate is
@@ -194,26 +232,39 @@ use portfolio
   probe_out = nil
   light_stack = nil
   input = options["input"]
-  wrat_out = options["proof"]
-  wrat_out = options["lrat"] if wrat_out == nil
+  wrat_final = options["proof"]
+  wrat_final = options["lrat"] if wrat_final == nil
   # LRAT is the hinted stream without the wrat header; everything else about
   # emission, streaming, and checking is identical (wrat reads both).
   header_wanted = options["proof"] != nil
-  drat_out = options["drat"]
-  quiet = wrat_out == "-" || drat_out == "-"
+  drat_final = options["drat"]
+  quiet = wrat_final == "-" || drat_final == "-"
   # Raw DRAT records each learned clause directly; the hinted stream carries
   # antecedent chains derived from conflict analysis. If both are requested
   # they are emitted natively in lockstep.
   proof_mode = WASSAT_PROOF_NONE
-  proof_mode = WASSAT_PROOF_DRAT unless drat_out == nil
-  proof_mode = WASSAT_PROOF_WRAT unless wrat_out == nil
+  proof_mode = WASSAT_PROOF_DRAT unless drat_final == nil
+  proof_mode = WASSAT_PROOF_WRAT unless wrat_final == nil
   # Read the formula BEFORE touching any destination; only then truncate.
   tprof = wassat_prof_clock
   cnf_text = read_file(input)
   raise "cannot read input formula '[input]'" if cnf_text == nil
-  wassat_prepare_output(wrat_out, input, "WRAT")
-  wassat_prepare_output(drat_out, input, "DRAT")
+  if wrat_final != nil && wrat_final != "-" && drat_final != nil && drat_final != "-"
+    raise "hinted and DRAT outputs resolve to the same file" if wassat_same_file?(wrat_final, drat_final)
+  # Clear stale finals before parsing, but create no temporary artifact until
+  # strict DIMACS validation succeeds. A malformed input therefore leaves
+  # neither an old proof nor a leaked temp file.
+  wassat_clear_output(wrat_final, input, "WRAT")
+  wassat_clear_output(drat_final, input, "DRAT")
   formula = wassat_parse_cnf_native(cnf_text)
+  wrat_out = wassat_reserve_output(wrat_final, input, "WRAT")
+  drat_out = nil
+  begin
+    drat_out = wassat_reserve_output(drat_final, input, "DRAT")
+  rescue e
+    wassat_discard_output(wrat_out, wrat_final)
+    raise e
+  config = WassatConfig.new(formula["nvars"], formula["clauses"])
   tprof = wassat_prof("cli.parse", tprof)
 
   # Preprocess once, above solver construction. The artifact carries the
@@ -226,7 +277,7 @@ use portfolio
   # path keeps the single-shot run().
   t0 = ccall("__w_clock_ms")
   pre = WassatPreprocess.new(formula["nvars"], formula["clauses"], proof_mode)
-  pre.enable_dual_emission if proof_mode == WASSAT_PROOF_WRAT && drat_out != nil
+  pre.enable_dual_emission if proof_mode == WASSAT_PROOF_WRAT && drat_final != nil
   art = nil
   if proof_mode == WASSAT_PROOF_NONE
     art = pre.run_light_flat(formula)
@@ -251,34 +302,9 @@ use portfolio
         << "c conflicts: 0, decisions: 0"
         << "c stats restarts=0 reduces=0 flips=[burst0["flips"]] " + wassat_pre_stats_text(art["stats"], pre_ms0)
         return 0
-      # Race a probe PROCESS on the light kernel while this process pays
-      # for the heavy rounds and the full solve. A process, not a thread:
-      # the main thread must not dispatch while worker threads run
-      # (inline caches are process-global), but OS isolation makes the
-      # probe free — its miss costs nothing serial but the artifact write.
       light_stack = art["stack"]
       probe_p = nil
       probe_out = nil
-      # only worth its ~60ms serial overhead (artifact write + spawn) when
-      # the heavy rounds + solve it overlaps are big
-      begin
-        # Opt-in (WASSAT_RACE=1): on instances where the probe rarely wins
-        # it is pure core contention against the main solve — measured
-        # net-negative on loaded machines (ibm-12 serial 1.68s vs raced
-        # 1.9-4.6s). Worth revisiting with a win-prediction heuristic.
-        raise "race disabled" unless env("WASSAT_RACE") == "1"
-        raise "small instance; skip race" if formula["clauses"].size <= 50000
-        race_dir = "/tmp/wassat-lightrace-" + input.split("/").last.replace(".cnf", "")
-        z = ccall("__w_system", "mkdir -p " + race_dir)
-        rp = race_dir + "/reduced.cnf"
-        gp = race_dir + "/gids.txt"
-        probe_out = race_dir + "/probe.out"
-        z = ccall("__w_system", "rm -f " + probe_out)
-        if wassat_write_artifact_files(formula["nvars"], art, rp, gp)
-          probe_p = Process.spawn([wassat_own_binary, "--worker", rp, "--gids", gp,
-                                   "--status", probe_out, "--arm", "probe"])
-      rescue e
-        probe_p = nil
 
       # Serial light probe (flat-load, so construction is native): many
       # structured instances decide within a few thousand conflicts on the
@@ -297,14 +323,9 @@ use portfolio
         # (ibm-6/10 class) decide inside it, and a miss falls through to
         # the diversified thread race below. On a preprocessed kernel it
         # stays a cheap scout whose miss pays for the heavy rounds.
-        probe_wall = 120
-        probe_cap = 4000
-        if art["raw"] == true
-          probe_wall = 150
-          probe_cap = options["conflicts"] > 0 ? options["conflicts"] : 2000
-        if env("WASSAT_PROBE_MS") != nil
-          probe_wall = env("WASSAT_PROBE_MS").to_i
-          probe_cap = probe_wall * 40
+        probe_wall = config.probe_ms(art["raw"] == true)
+        probe_cap = config.probe_conflicts(art["raw"] == true)
+        probe_cap = options["conflicts"] if art["raw"] == true && options["conflicts"] > 0
         spr = sprobe.solve_budget(512)
         while spr["status"] == 0 && spr["conflicts"] < probe_cap && ccall("__w_clock_ms") - probe_t0 < probe_wall
           spr = sprobe.solve_budget(512)
@@ -328,8 +349,7 @@ use portfolio
           return 0
 
       if art["raw"] == true
-        arms = 8
-        arms = env("WASSAT_ARMS").to_i if env("WASSAT_ARMS") != nil
+        arms = config.raw_race_arms
         if arms > 1
           rr = wassat_raw_race(formula["nvars"], art, arms)
           tprof = wassat_prof("cli.raw_race", tprof)
@@ -367,30 +387,32 @@ use portfolio
     # proof.
     wtext = ""
     dtext = ""
-    unless wrat_out == nil
+    unless wrat_final == nil
       whead = header_wanted ? "wrat 1\n" : ""
       wtext = whead + art["wrat"].join("\n") + "\n"
-      unless wrat_out == "-"
+      unless wrat_final == "-"
         raise "proof write failed at '[wrat_out]'" unless write_file(wrat_out, wtext)
-    unless drat_out == nil
+        wassat_publish_output(wrat_out, wrat_final, "WRAT")
+    unless drat_final == nil
       dtext = art["drat"].empty? ? "" : art["drat"].join("\n") + "\n"
-      unless drat_out == "-"
+      unless drat_final == "-"
         raise "proof write failed at '[drat_out]'" unless write_file(drat_out, dtext)
+        wassat_publish_output(drat_out, drat_final, "DRAT")
     wassat_status(quiet, "s UNSATISFIABLE")
     wassat_status(quiet, "c mode: [wassat_mode_of(options)]")
     wassat_status(quiet, "c conflicts: 0, decisions: 0")
     wassat_status(quiet, "c stats restarts=0 reduces=0 " + pstats)
-    print(wtext) if wrat_out == "-"
-    print(dtext) if drat_out == "-"
+    print(wtext) if wrat_final == "-"
+    print(dtext) if drat_final == "-"
     return 0
 
   s = nil
   if proof_mode == WASSAT_PROOF_NONE
     # trusted path: ingest the preprocessor's flat mirrors natively
-    s = Wassat.from_flat(formula["nvars"], art, options["lookahead"])
+    s = Wassat.from_flat(formula["nvars"], art, 0)
     tprof = wassat_prof("cli.from_flat", tprof)
   else
-    s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, options["lookahead"])
+    s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, 0)
     s.seed_proof_ids(art["gids"], art["next_gid"])
 
   # File destinations stream during search so certificate memory stays flat;
@@ -399,11 +421,11 @@ use portfolio
   # coordinator owns the certificate: the preprocessing prefix goes to each
   # sink before the solver appends a single line.
   wrat_stream = nil
-  wrat_stream = wrat_out unless wrat_out == nil || wrat_out == "-"
+  wrat_stream = wrat_out unless wrat_final == nil || wrat_final == "-"
   drat_stream = nil
-  drat_stream = drat_out unless drat_out == nil || drat_out == "-"
+  drat_stream = drat_out unless drat_final == nil || drat_final == "-"
   s.stream_proofs(wrat_stream, drat_stream) unless wrat_stream == nil && drat_stream == nil
-  s.enable_dual_drat if proof_mode == WASSAT_PROOF_WRAT && drat_out != nil
+  s.enable_dual_drat if proof_mode == WASSAT_PROOF_WRAT && drat_final != nil
   unless wrat_stream == nil
     whead = header_wanted ? "wrat 1\n" : ""
     whead = whead + art["wrat"].join("\n") + "\n" unless art["wrat"].empty?
@@ -431,6 +453,9 @@ use portfolio
   # A run that did not end UNSAT truncates its sink destinations at once: a
   # partial refutation must never survive on disk, whatever happens later.
   s.abort_proof_sinks unless result["status"] == -1
+  if result["status"] != -1
+    wassat_discard_output(wrat_out, wrat_final)
+    wassat_discard_output(drat_out, drat_final)
 
   # Output integrity: the reconstructed model is verified against the
   # ORIGINAL formula before anything is reported. A failing model is a
@@ -446,6 +471,9 @@ use portfolio
   # verdict is announced: a failed flush raises here and the run reports an
   # error, never "s UNSATISFIABLE" beside an incomplete proof.
   s.flush_proof_sinks if result["status"] == -1
+  if result["status"] == -1
+    wassat_publish_output(wrat_out, wrat_final, "WRAT") unless wrat_final == nil || wrat_final == "-"
+    wassat_publish_output(drat_out, drat_final, "DRAT") unless drat_final == nil || drat_final == "-"
 
   # Trim the trailing newline: wassat_result_text ends with one and
   # wassat_status appends its own.
@@ -456,13 +484,13 @@ use portfolio
   wassat_status(quiet, "c stats restarts=[result["restarts"]] reduces=[result["reduces"]] " + pstats)
 
   if result["status"] == -1
-    unless wrat_out == nil
-      if wrat_out == "-"
+    unless wrat_final == nil
+      if wrat_final == "-"
         lines = wassat_concat_arrays(art["wrat"], result["proof"])
         whead = header_wanted ? "wrat 1\n" : ""
         print(whead + lines.join("\n") + "\n")
-    unless drat_out == nil
-      if drat_out == "-"
+    unless drat_final == nil
+      if drat_final == "-"
         dlines = wassat_concat_arrays(art["drat"], result["drat"])
         print(dlines.empty? ? "" : dlines.join("\n") + "\n")
   0
@@ -478,27 +506,36 @@ use portfolio
   gpu = false
   walkers = 256
   noise = 48
+  walkers_seen = false
+  noise_seen = false
+  seen = {}
   i = 0
   while i < args.size
     flag = args[i]
     if flag == "--flips" || flag == "--seed" || flag == "--walkers" || flag == "--noise"
+      raise "duplicate wassat sls option: [flag]" if seen[flag] == true
+      seen[flag] = true
       raise "missing value after [flag]" if i + 1 >= args.size
       value = args[i + 1]
-      raise "[flag] requires a non-negative decimal integer, got '[value]'" unless wassat_unsigned_decimal?(value)
       if flag == "--flips"
-        flips = value.to_i
+        flips = wassat_decimal_in_range(flag, value, 0, 2000000000)
       elsif flag == "--walkers"
-        walkers = value.to_i
+        walkers = wassat_decimal_in_range(flag, value, 1, 4096)
+        walkers_seen = true
       elsif flag == "--noise"
-        noise = value.to_i
-        raise "--noise is out of 256" if noise > 256
+        noise = wassat_decimal_in_range(flag, value, 0, 256)
+        noise_seen = true
       else
-        seed = value.to_i
+        seed = wassat_decimal_in_range(flag, value, 0, 2147483647)
       i += 2
     elsif flag == "--pre"
+      raise "duplicate wassat sls option: [flag]" if seen[flag] == true
+      seen[flag] = true
       pre = true
       i += 1
     elsif flag == "--gpu"
+      raise "duplicate wassat sls option: [flag]" if seen[flag] == true
+      seen[flag] = true
       gpu = true
       i += 1
     elsif flag.starts_with?("--")
@@ -508,6 +545,8 @@ use portfolio
       input = flag
       i += 1
   raise "missing input formula" if input == nil
+  raise "--walkers only applies with --gpu" if walkers_seen && !gpu
+  raise "--noise only applies with --gpu" if noise_seen && !gpu
   cnf_text = read_file(input)
   raise "cannot read input formula '[input]'" if cnf_text == nil
   formula = wassat_parse_cnf(cnf_text)
@@ -551,10 +590,7 @@ v " + r["model"].join(" ") + " 0
   if gpu
     metal_path = env("WASSAT_METAL")
     metal_path = "bin/wassat.metal" if metal_path == nil || metal_path == ""
-    chunk = 200000
-    chunks = flips / chunk
-    chunks = 1 if chunks < 1
-    wassat_sls_gpu_solve(formula, walkers, chunk, chunks, seed, noise, metal_path)
+    wassat_sls_gpu_solve(formula, walkers, flips, seed, noise, metal_path)
   else
     wassat_sls_solve(formula, flips, seed)
 

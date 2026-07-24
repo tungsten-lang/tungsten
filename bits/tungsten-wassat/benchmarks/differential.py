@@ -42,6 +42,10 @@ def satisfies(clauses: list[list[int]], assignment: set[int]) -> bool:
 
 if not Path(WASSAT).is_file():
     raise SystemExit(f"Wassat binary not found: {WASSAT}")
+if not Path(WRAT).is_file():
+    raise SystemExit(
+        f"tungsten-wrat binary not found: {WRAT}; certificate checking is mandatory"
+    )
 if not CADICAL:
     raise SystemExit("CaDiCaL not found; set CADICAL to run the differential test")
 
@@ -122,25 +126,24 @@ with tempfile.TemporaryDirectory(prefix="wassat-differential-") as directory:
                 raise SystemExit(f"invalid Wassat model on {cnf}")
         elif ours_verdict == "UNSATISFIABLE":
             unsat_count += 1
-            if Path(WRAT).is_file():
-                proof = root / f"case-{case:04d}.drat"
-                produced = subprocess.run(
-                    [WASSAT, str(cnf), "--drat", str(proof)],
-                    capture_output=True,
-                    text=True,
-                    timeout=TIMEOUT,
-                    check=False,
-                )
-                checked = subprocess.run(
-                    [WRAT, str(cnf), str(proof)],
-                    capture_output=True,
-                    text=True,
-                    timeout=TIMEOUT,
-                    check=False,
-                )
-                if produced.returncode != 0 or "s VERIFIED" not in checked.stdout:
-                    raise SystemExit(f"raw proof failed independent checking on {cnf}")
-                proof_count += 1
+            proof = root / f"case-{case:04d}.drat"
+            produced = subprocess.run(
+                [WASSAT, str(cnf), "--drat", str(proof)],
+                capture_output=True,
+                text=True,
+                timeout=TIMEOUT,
+                check=False,
+            )
+            checked = subprocess.run(
+                [WRAT, str(cnf), str(proof)],
+                capture_output=True,
+                text=True,
+                timeout=TIMEOUT,
+                check=False,
+            )
+            if produced.returncode != 0 or "s VERIFIED" not in checked.stdout:
+                raise SystemExit(f"raw proof failed independent checking on {cnf}")
+            proof_count += 1
         else:
             raise SystemExit(f"missing Wassat verdict on {cnf}: {ours.stdout}{ours.stderr}")
 

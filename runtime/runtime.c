@@ -18528,6 +18528,138 @@ WValue __w_rename(WValue old_val, WValue new_val) {
     return W_FALSE;
 }
 
+/* Create a unique temporary directory below TMPDIR (or /tmp). `prefix` is a
+ * filename component supplied by trusted application code, not a path. */
+WValue __w_mkdtemp(WValue prefix_val) {
+    const char *base = getenv("TMPDIR");
+    if (!base || !*base) base = "/tmp";
+    const char *prefix = as_str(prefix_val);
+    if (!prefix || !*prefix || strchr(prefix, '/')) return W_NIL;
+    char path[4096];
+    size_t n = strlen(base);
+    int sep = n > 0 && base[n - 1] == '/' ? 0 : 1;
+    int wrote = snprintf(path, sizeof path, "%s%s%s-XXXXXX",
+                         base, sep ? "/" : "", prefix);
+    if (wrote < 0 || (size_t)wrote >= sizeof path) return W_NIL;
+    return mkdtemp(path) ? w_string(path) : W_NIL;
+}
+
+WValue __w_mkdtemp_in(WValue parent_val, WValue prefix_val) {
+    char parent[3072];
+    snprintf(parent, sizeof parent, "%s", as_str(parent_val));
+    const char *prefix = as_str(prefix_val);
+    if (!*parent || !prefix || !*prefix || strchr(prefix, '/')) return W_NIL;
+    size_t n = strlen(parent);
+    int sep = parent[n - 1] == '/' ? 0 : 1;
+    char path[4096];
+    int wrote = snprintf(path, sizeof path, "%s%s%s-XXXXXX",
+                         parent, sep ? "/" : "", prefix);
+    if (wrote < 0 || (size_t)wrote >= sizeof path) return W_NIL;
+    return mkdtemp(path) ? w_string(path) : W_NIL;
+}
+
+/* Reserve a unique temporary file beside `destination`, ensuring the final
+ * rename stays on the same filesystem. The caller owns unlinking it. */
+WValue __w_temp_file_for(WValue destination_val) {
+    const char *destination = as_str(destination_val);
+    char path[4096];
+    int wrote = snprintf(path, sizeof path, "%s.tmp.XXXXXX", destination);
+    if (wrote < 0 || (size_t)wrote >= sizeof path) return W_NIL;
+    int fd = mkstemp(path);
+    if (fd < 0) return W_NIL;
+    if (close(fd) != 0) {
+        unlink(path);
+        return W_NIL;
+    }
+    return w_string(path);
+}
+
+/* Durability and cleanup helpers used by atomic artifact publishers. */
+WValue __w_fsync_path(WValue path_val) {
+    const char *path = as_str(path_val);
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return W_FALSE;
+    int ok = fsync(fd) == 0;
+    if (close(fd) != 0) ok = 0;
+    return ok ? W_TRUE : W_FALSE;
+}
+
+WValue __w_fsync_parent(WValue path_val) {
+    const char *source = as_str(path_val);
+    char parent[4096];
+    size_t len = strlen(source);
+    if (len == 0 || len >= sizeof parent) return W_FALSE;
+    memcpy(parent, source, len + 1);
+    char *slash = strrchr(parent, '/');
+    if (!slash) {
+        parent[0] = '.';
+        parent[1] = '\0';
+    } else if (slash == parent) {
+        slash[1] = '\0';
+    } else {
+        *slash = '\0';
+    }
+    int fd = open(parent, O_RDONLY);
+    if (fd < 0) return W_FALSE;
+    int ok = fsync(fd) == 0;
+    if (close(fd) != 0) ok = 0;
+    return ok ? W_TRUE : W_FALSE;
+}
+
+WValue __w_unlink(WValue path_val) {
+    return unlink(as_str(path_val)) == 0 || errno == ENOENT ? W_TRUE : W_FALSE;
+}
+
+WValue __w_rmdir(WValue path_val) {
+    return rmdir(as_str(path_val)) == 0 || errno == ENOENT ? W_TRUE : W_FALSE;
+}
+
+WValue __w_append_file_to(WValue destination_val, WValue source_val) {
+    char destination[4096];
+    snprintf(destination, sizeof destination, "%s", as_str(destination_val));
+    const char *source = as_str(source_val);
+    FILE *in = fopen(source, "rb");
+    if (!in) return W_FALSE;
+    FILE *out = fopen(destination, "ab");
+    if (!out) {
+        fclose(in);
+        return W_FALSE;
+    }
+    unsigned char buffer[262144];
+    int ok = 1;
+    size_t count;
+    while ((count = fread(buffer, 1, sizeof buffer, in)) > 0) {
+        if (fwrite(buffer, 1, count, out) != count) {
+            ok = 0;
+            break;
+        }
+    }
+    if (ferror(in)) ok = 0;
+    if (fflush(out) != 0) ok = 0;
+    if (fclose(in) != 0) ok = 0;
+    if (fclose(out) != 0) ok = 0;
+    return ok ? W_TRUE : W_FALSE;
+}
+
+/* Shell-free mkdir -p for coordinator work directories. */
+WValue __w_mkdir_p(WValue path_val) {
+    const char *source = as_str(path_val);
+    char path[4096];
+    size_t len = strlen(source);
+    if (len == 0 || len >= sizeof path) return W_FALSE;
+    memcpy(path, source, len + 1);
+    while (len > 1 && path[len - 1] == '/') path[--len] = '\0';
+    for (char *p = path + 1; *p; p++) {
+        if (*p != '/') continue;
+        *p = '\0';
+        if (mkdir(path, 0700) != 0 && errno != EEXIST) return W_FALSE;
+        *p = '/';
+    }
+    if (mkdir(path, 0700) != 0 && errno != EEXIST) return W_FALSE;
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode) ? W_TRUE : W_FALSE;
+}
+
 /* setenv() from two WValue strings. ccall() passes its arguments as boxed
  * WValues, so libc setenv() cannot be invoked directly — it would treat the
  * NaN-boxed string as a char* and dereference garbage (the matmul_mlx_strict
@@ -18731,13 +18863,20 @@ WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
                 while (k < rem && (q[k] == ' ' || q[k] == '\t')) k++;
                 if (k + 3 > rem || q[k] != 'c' || q[k+1] != 'n' || q[k+2] != 'f') P_ERR(2);
                 k += 3;
+                if (k >= rem || (q[k] != ' ' && q[k] != '\t')) P_ERR(2);
                 for (; vi < 2; vi++) {
-                    while (k < rem && (q[k] == ' ' || q[k] == '\t')) k++;
+                    int had_space = 0;
+                    while (k < rem && (q[k] == ' ' || q[k] == '\t')) {
+                        had_space = 1;
+                        k++;
+                    }
+                    if (!had_space) P_ERR(2);
                     if (k >= rem || q[k] < '0' || q[k] > '9') P_ERR(2);
                     int64_t v = 0;
                     while (k < rem && q[k] >= '0' && q[k] <= '9') {
-                        v = v * 10 + (q[k] - '0');
-                        if (v > 2000000000) P_ERR(2);
+                        int digit = q[k] - '0';
+                        if (v > (2000000000LL - digit) / 10) P_ERR(2);
+                        v = v * 10 + digit;
                         k++;
                     }
                     vals[vi] = v;
@@ -18758,8 +18897,9 @@ WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
             int64_t v = 0;
             for (; k < j; k++) {
                 if (tx[k] < '0' || tx[k] > '9') P_ERR(3);
-                v = v * 10 + (tx[k] - '0');
-                if (v > 2000000000) P_ERR(4);
+                int digit = tx[k] - '0';
+                if (v > (2000000000LL - digit) / 10) P_ERR(4);
+                v = v * 10 + digit;
             }
             if (v == 0) {
                 /* exact "0" only */
@@ -18790,7 +18930,10 @@ WValue __w_file_id(WValue path_val) {
     const char *path = as_str(path_val);
     struct stat st;
     if (stat(path, &st) != 0) return W_NIL;
-    return w_int(((int64_t)st.st_dev << 40) ^ (int64_t)st.st_ino);
+    char identity[96];
+    snprintf(identity, sizeof identity, "%llu:%llu",
+             (unsigned long long)st.st_dev, (unsigned long long)st.st_ino);
+    return w_string(identity);
 }
 
 /* ---- Primality ---- */
@@ -23613,9 +23756,7 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
      * table fall through to the cascade as before. */
     WValue (*builtin)(WValue, WValue*, int) = w_resolve_ic(key, name, recv);
     if (builtin) {
-        cache->type_key = key;
-        cache->fn_ptr = (void *)builtin;
-        cache->arity = -1;
+        w_ic_publish(cache, key, (void *)builtin, -1);
         return builtin(recv, args_ptr, argc);
     }
 
@@ -23630,9 +23771,7 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
      * merely-present method that an earlier special path actually handled. */
     WMethod *type_method = w_cacheable_type_class_method(recv, name, argc, key);
     if (type_method) {
-        cache->type_key = key;
-        cache->fn_ptr = type_method->fn_ptr;
-        cache->arity = type_method->arity - 1; /* subtract self */
+        w_ic_publish(cache, key, type_method->fn_ptr, type_method->arity - 1 /* subtract self */);
         return w_type_class_method_call(type_method, recv, &stack_args);
     }
 
@@ -23644,9 +23783,7 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
         WMethod *m = w_method_lookup_arity(g_class_table[obj->class_id], name, argc + 1);
         if (!m) m = w_method_lookup(g_class_table[obj->class_id], name);
         if (m) {
-            cache->type_key = key;
-            cache->fn_ptr = m->fn_ptr;
-            cache->arity = m->arity - 1; /* subtract self */
+            w_ic_publish(cache, key, m->fn_ptr, m->arity - 1 /* subtract self */);
         }
     } else if (w_is_class(recv) && !w_hash_key_eq(name, WN_new)) {
         /* Cache user-defined static methods. Constructors allocate before dispatch. */
@@ -23654,9 +23791,7 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
         WMethod *m = w_static_method_lookup_arity(klass, name, argc + 1);
         if (!m) m = w_static_method_lookup(klass, name);
         if (m) {
-            cache->type_key = key;
-            cache->fn_ptr = m->fn_ptr;
-            cache->arity = m->arity - 1; /* subtract class receiver */
+            w_ic_publish(cache, key, m->fn_ptr, m->arity - 1 /* subtract class receiver */);
         }
     }
     return result;
@@ -23673,13 +23808,19 @@ WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc
 
     uint64_t key = w_dispatch_key(recv);
 
-    /* Cache hit — direct call */
-    if (__builtin_expect(key == cache->type_key && cache->fn_ptr != NULL, 1)) {
-        if (cache->arity < 0) {
-            return ((WValue(*)(WValue, WValue*, int))cache->fn_ptr)(recv, args_ptr, argc);
+    /* Cache hit — direct call. Seqlock-lite read: fields are only valid
+     * if type_key matches BOTH before and after reading them (see the
+     * publication contract in runtime.h). */
+    uint64_t tk = atomic_load_explicit(&cache->type_key, memory_order_acquire);
+    void *fn = cache->fn_ptr;
+    int32_t car = cache->arity;
+    if (__builtin_expect(key == tk && fn != NULL &&
+            key == atomic_load_explicit(&cache->type_key, memory_order_acquire), 1)) {
+        if (car < 0) {
+            return ((WValue(*)(WValue, WValue*, int))fn)(recv, args_ptr, argc);
         }
         /* User method: dispatch by arity */
-        int expected = cache->arity;
+        int expected = car;
         WValue a[8];
         for (int i = 0; i < expected && i < 8; i++)
             a[i] = (i < argc) ? args_ptr[i] : W_NIL;
@@ -23689,11 +23830,11 @@ WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc
         typedef WValue (*fn3)(WValue, WValue, WValue, WValue);
         typedef WValue (*fn4)(WValue, WValue, WValue, WValue, WValue);
         switch (expected) {
-            case 0: return ((fn0)cache->fn_ptr)(recv);
-            case 1: return ((fn1)cache->fn_ptr)(recv, a[0]);
-            case 2: return ((fn2)cache->fn_ptr)(recv, a[0], a[1]);
-            case 3: return ((fn3)cache->fn_ptr)(recv, a[0], a[1], a[2]);
-            case 4: return ((fn4)cache->fn_ptr)(recv, a[0], a[1], a[2], a[3]);
+            case 0: return ((fn0)fn)(recv);
+            case 1: return ((fn1)fn)(recv, a[0]);
+            case 2: return ((fn2)fn)(recv, a[0], a[1]);
+            case 3: return ((fn3)fn)(recv, a[0], a[1], a[2]);
+            case 4: return ((fn4)fn)(recv, a[0], a[1], a[2], a[3]);
             default: break;
         }
     }
@@ -23717,9 +23858,14 @@ WValue w_method_call_cached_0(WValue recv, WValue name, WInlineCache *cache) {
 
     uint64_t key = w_dispatch_key(recv);
 
-    if (__builtin_expect(key == cache->type_key && cache->fn_ptr != NULL, 1)) {
-        if (cache->arity < 0) {
-            return ((WValue(*)(WValue, WValue*, int))cache->fn_ptr)(recv, NULL, 0);
+    /* Seqlock-lite read — see the publication contract in runtime.h. */
+    uint64_t tk = atomic_load_explicit(&cache->type_key, memory_order_acquire);
+    void *fn = cache->fn_ptr;
+    int32_t car = cache->arity;
+    if (__builtin_expect(key == tk && fn != NULL &&
+            key == atomic_load_explicit(&cache->type_key, memory_order_acquire), 1)) {
+        if (car < 0) {
+            return ((WValue(*)(WValue, WValue*, int))fn)(recv, NULL, 0);
         }
 
         typedef WValue (*fn0)(WValue);
@@ -23728,14 +23874,14 @@ WValue w_method_call_cached_0(WValue recv, WValue name, WInlineCache *cache) {
         typedef WValue (*fn3)(WValue, WValue, WValue, WValue);
         typedef WValue (*fn4)(WValue, WValue, WValue, WValue, WValue);
 
-        if (__builtin_expect(cache->arity == 0, 1))
-            return ((fn0)cache->fn_ptr)(recv);
+        if (__builtin_expect(car == 0, 1))
+            return ((fn0)fn)(recv);
 
-        switch (cache->arity) {
-            case 1: return ((fn1)cache->fn_ptr)(recv, W_NIL);
-            case 2: return ((fn2)cache->fn_ptr)(recv, W_NIL, W_NIL);
-            case 3: return ((fn3)cache->fn_ptr)(recv, W_NIL, W_NIL, W_NIL);
-            case 4: return ((fn4)cache->fn_ptr)(recv, W_NIL, W_NIL, W_NIL, W_NIL);
+        switch (car) {
+            case 1: return ((fn1)fn)(recv, W_NIL);
+            case 2: return ((fn2)fn)(recv, W_NIL, W_NIL);
+            case 3: return ((fn3)fn)(recv, W_NIL, W_NIL, W_NIL);
+            case 4: return ((fn4)fn)(recv, W_NIL, W_NIL, W_NIL, W_NIL);
             default: break;
         }
     }
@@ -23765,9 +23911,12 @@ WValue w_method_call_cached_1(WValue recv, WValue name, WValue arg,
     if (__builtin_expect(w_is_instance(recv), 1)) {
         WObject *obj = (WObject *)w_as_ptr(recv);
         uint64_t key = 0x100000000ULL | (uint64_t)obj->class_id;
-        if (__builtin_expect(key == cache->type_key &&
-                             cache->fn_ptr != NULL && cache->arity == 1, 1)) {
-            return ((WValue(*)(WValue, WValue))cache->fn_ptr)(recv, arg);
+        uint64_t tk = atomic_load_explicit(&cache->type_key, memory_order_acquire);
+        void *fn = cache->fn_ptr;
+        int32_t car = cache->arity;
+        if (__builtin_expect(key == tk && fn != NULL && car == 1 &&
+                key == atomic_load_explicit(&cache->type_key, memory_order_acquire), 1)) {
+            return ((WValue(*)(WValue, WValue))fn)(recv, arg);
         }
     }
     return w_method_call_cached_1_compat(recv, name, arg, cache);

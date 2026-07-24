@@ -197,6 +197,12 @@ benchmarks/matmul/metaflip/.ff_cwd.tmp
 /flipfleet_*_best.txt
 .venv/
 
+# Wassat benchmark corpora are generated/downloaded locally and can be
+# hundreds of megabytes; keep only generators and benchmark manifests.
+/bits/tungsten-wassat/lr5_*
+/bits/tungsten-wassat/php[0-9]*
+/bits/tungsten-wassat/uuf[0-9]*
+
 # Local AWS inventory / host IPs (never commit)
 benchmarks/matmul/metaflip/ember-holdco-*.json
 benchmarks/matmul/metaflip/monster-*.json

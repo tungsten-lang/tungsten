@@ -60,6 +60,11 @@ describe "Wassat incremental solving" ->
       expect(r["unsat"]).to eq(true)
       expect(r["core"].size).to eq(2)
 
+    it "rejects zero and out-of-range assumptions at the library boundary" ->
+      s = inc_solver(IMPL_CHAIN, WASSAT_PROOF_NONE)
+      expect(-> () s.solve_assuming([0])).to raise_error
+      expect(-> () s.solve_assuming([99])).to raise_error
+
   context "the core is a certificate" ->
     it "logs the blocking clause as a final RUP addition the checker accepts" ->
       s = inc_solver(IMPL_CHAIN, WASSAT_PROOF_WRAT)
@@ -133,5 +138,10 @@ describe "Wassat incremental solving" ->
       s.seed_proof_ids(art["gids"], art["next_gid"])
       r = s.solve_assuming([1])
       expect(r["sat"]).to eq(true)
+
+    it "validates assumptions before indexing the elimination map" ->
+      art = wassat_preprocess(BVE_SIMPLE_INC, WASSAT_PROOF_NONE)
+      expect(-> () wassat_check_assumptions(art, [0])).to raise_error
+      expect(-> () wassat_check_assumptions(art, [99])).to raise_error
 
 spec_summary

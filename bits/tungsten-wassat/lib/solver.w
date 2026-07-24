@@ -1762,6 +1762,34 @@ WASSAT_PROOF_DRAT = 2
       elsif self.value(l) < 0
         @ok = false
       u += 1
+    # Root simplification — the cheap half of what the preprocessor bought.
+    # Propagate the units now, then detach every clause a root-assigned
+    # literal already satisfies. On bmc-ibm-10 the full preprocessor cut
+    # propagation 24% while eliminating ZERO variables: the whole win was
+    # this, and it cost ~55ms of occurrence lists and signatures to get.
+    # Here it is one arena scan plus the rebuild that already follows.
+    #
+    # Sound: a root-satisfied clause is true under every extension, so it
+    # can neither propagate nor conflict; level-zero assignments survive
+    # every backjump, and analyze skips level-zero literals, so a detached
+    # clause is never read as a reason. PROOF_NONE only — deleting clauses
+    # owes proof steps otherwise.
+    #
+    # TRADE, measured and deliberate: bmc-ibm-10 140 -> 112ms (+20%,
+    # conflicts 1,733 -> 1,220) and bmc-ibm-6 +3%, against bmc-ibm-12
+    # 530 -> 770ms (-45%, conflicts 7,162 -> 10,173). ibm-12's loss is
+    # watch-order perturbation, not work — a removal-ratio gate cannot
+    # separate the two (both sit between 2% and 10% removal). Taken
+    # because ibm-10 crosses its dominance bar and ibm-12 misses its own
+    # at either time; per-instance basin selection (race arms) is the
+    # real fix.
+    if @ok && @proof_mode == WASSAT_PROOF_NONE
+      confl0 = self.propagate
+      if confl0 >= 0
+        @ok = false
+      else
+        z = wassat_detach_satisfied(@arena, @cmeta, @alive, @lassign, @ncl)
+        self.rebuild_watches
     0
 
   -> solve
@@ -2844,6 +2872,32 @@ WASSAT_PROOF_DRAT = 2
 #   pm[0] src clause count      pm[1] dst arena cap   pm[2] dst clause cap
 #   pm[3] out: clauses stored   pm[4] out: arena used pm[5] out: unit count
 #   pm[6] out: 1 = saw empty clause
+# Detach clauses a root assignment already satisfies. Only long clauses:
+# binaries live in the implication lists, not the watch pool.
+-> wassat_detach_satisfied(ar, cm, alive, lasg, ncl) (i64[] i64[] i64[] i8[] i64) i64
+  hits = 0
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1
+      stx = cm[2 * ci]
+      n = cm[2 * ci + 1]
+      j = 0
+      sat = 0
+      while j < n && sat == 0
+        l = ar[stx + j]
+        li = 0
+        if l > 0
+          li = l << 1
+        else
+          li = ((0 - l) << 1) + 1
+        sat = 1 if lasg[li] > 0
+        j += 1
+      if sat == 1 && n >= 3
+        alive[ci] = 0
+        hits += 1
+    ci += 1
+  hits
+
 -> wassat_load_flat(sfla, sfcs, sfcl, salive, staut, spgid, dar, dcm, dal, dlbd, dgid, units, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   sncl = pm[0]
   acap = pm[1]

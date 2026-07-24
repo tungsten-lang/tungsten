@@ -60,8 +60,15 @@
     @nclauses >= 1000 && @nclauses <= 50000 && @nliterals <= 1000000
 
   -> raw_race_arms
-    return 8 if @nclauses >= 150000
-    return 4 if @nclauses >= 50000
+    # DISABLED (2026-07-24): the implicit multi-arm race intermittently
+    # SIGBUSed inside worker-thread conflict analysis on small raw
+    # kernels (13 crash reports against wassat-reaudit-e06). The inline
+    # cache publication tear it exposed is fixed in the runtime
+    # (w_ic_publish, runtime.h), but the crash never reproduced locally
+    # under 100+ attempts, so the implicit race stays serial until the
+    # original reproducer validates the fix. The explicit `portfolio`
+    # subcommand and wassat_raw_race remain available for that
+    # validation.
     1
 
   -> lookahead_candidates

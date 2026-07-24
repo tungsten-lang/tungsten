@@ -6,9 +6,11 @@ only grows. Two classes:
 
   parity instances — wassat must be within TOLERANCE of the best rival
                      (exit nonzero otherwise; this is a regression gate);
-  frontier instances — known-behind, tracked with gap ratios and a per-run
-                       budget so the suite stays fast; improving these is
-                       the standing goal, regressing parity is failure.
+  frontier instances — hard instances tracked with a per-run budget so the
+                       suite stays fast; improving these is the standing
+                       goal, regressing parity is failure. They stay listed
+                       here after wassat overtakes the rival, as the record
+                       of what the frontier used to be.
 
 Every verdict is cross-checked between solvers; disagreement is fatal.
 """
@@ -186,7 +188,13 @@ def main() -> None:
         gap = (wt / rival_t) if rival_t else float("nan")
         solved = "SOLVED" if wv in ("SATISFIABLE", "UNSATISFIABLE") else f"unsolved@{FRONTIER_BUDGET:.0f}s"
         rival_text = "missing" if rival_t is None else f"{rival_t:.1f}s"
-        print(f"  {name}: wassat {solved} ({wt:.1f}s)  {rival_name}={rival_text}  gap>={gap:.1f}x")
+        # Once wassat solves a frontier instance the interesting number is
+        # the speedup, not the deficit — print whichever direction holds.
+        if rival_t and wv in ("SATISFIABLE", "UNSATISFIABLE"):
+            verdict = f"{1.0 / gap:.1f}x FASTER" if gap < 1 else f"{gap:.1f}x behind"
+        else:
+            verdict = f"gap>={gap:.1f}x"
+        print(f"  {name}: wassat {solved} ({wt:.1f}s)  {rival_name}={rival_text}  {verdict}")
 
     if failures:
         raise SystemExit(f"\nFAIL: {failures} parity failure(s)")

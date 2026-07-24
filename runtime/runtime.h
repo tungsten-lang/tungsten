@@ -16,7 +16,6 @@
 #include <stdatomic.h>
 #include <pthread.h>
 #include <unistd.h>
-#include <stdlib.h>  /* getenv/atoi for the temporary IC tear probe */
 
 /* ---- Heap string (mode 7: transient/large strings, freeable) ---- */
 typedef struct WString {
@@ -719,31 +718,7 @@ typedef struct {
     void    *fn_ptr;       /* cached function pointer */
 } WInlineCache;
 
-/* TEMPORARY A/B tear-window probe (W_IC_TEAR_US): replicates the ORIGINAL
- * key-first publication with an artificially widened window. */
 static inline void w_ic_publish(WInlineCache *cache, uint64_t key, void *fn, int32_t arity) {
-    const char *tear = getenv("W_IC_TEAR_US");
-    if (tear && tear[0] == 'A') {
-        /* A: the ORIGINAL order — key visible, fn written, arity stale
-         * for the widened window. Readers that match the key call the fn
-         * with the wrong arity. */
-        atomic_store_explicit(&cache->type_key, key, memory_order_relaxed);
-        cache->fn_ptr = fn;
-        usleep((unsigned)atoi(tear + 1));
-        cache->arity  = arity;
-        return;
-    }
-    if (tear && tear[0] == 'B') {
-        /* B: the FIXED protocol with the same widened window inside it —
-         * the key is 0 for the whole window, so readers miss to the slow
-         * path and nothing tears. */
-        atomic_store_explicit(&cache->type_key, 0, memory_order_release);
-        cache->fn_ptr = fn;
-        usleep((unsigned)atoi(tear + 1));
-        cache->arity  = arity;
-        atomic_store_explicit(&cache->type_key, key, memory_order_release);
-        return;
-    }
     atomic_store_explicit(&cache->type_key, 0, memory_order_release);
     cache->fn_ptr = fn;
     cache->arity  = arity;

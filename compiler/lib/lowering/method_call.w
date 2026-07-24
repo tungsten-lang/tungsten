@@ -180,6 +180,20 @@
 
   recv_type = receiver_static_type(ctx, recv_node)
 
+  # Raw-f64 scalar libm fast path: `(float expr).sqrt / .sin / .cos / .tan /
+  # .exp / .log` on a statically-float receiver calls libm directly on the
+  # double — mirroring the `Math.sqrt` raw path — instead of a boxed method
+  # dispatch. This is the residual n-body hotspot: `(dx*dx+dy*dy+dz*dz).sqrt`
+  # otherwise box/unbox-round-trips through w_method_call every iteration.
+  # Gated on a float recv_type so the receiver is lowered exactly once here;
+  # ensure_raw_f64 handles a raw or boxed float operand.
+  if recv_node != nil && node.block == nil && (node.args == nil || node.args.size() == 0) && (recv_type == :float || recv_type == :f64) && method_name in ("sqrt" "sin" "cos" "tan" "exp" "log")
+    fv = lower_expression(ctx, recv_node)
+    fraw = ensure_raw_f64(wfn, fv)
+    ftmp = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_libm_f64, temp: ftmp, name: method_name, value: fraw})
+    return typed_value(:raw_f64, ftmp)
+
   # Quantity is an immediate/domain runtime value rather than a heap Instance,
   # so its metadata/equivalence methods lower directly instead of entering the
   # user-class method cache.

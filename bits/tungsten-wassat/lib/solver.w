@@ -62,6 +62,28 @@ WASSAT_PROOF_DRAT = 2
     @use_vmtf = false
     @use_target = false
     @use_chrono = false
+    # Restart margin (num/den): the fast LBD EMA must exceed the slow one
+    # by this factor. 5/4 is Glucose's classic 1.25; CaDiCaL uses 1.10.
+    # On flat-LBD classes (cardinality counting chains hold LBD ~40) a
+    # wide margin never fires and the search never restarts.
+    @rst_num = 5
+    @rst_den = 4
+    @rst_num = env("WASSAT_RST_NUM").to_i if env("WASSAT_RST_NUM") != nil
+    @rst_den = env("WASSAT_RST_DEN").to_i if env("WASSAT_RST_DEN") != nil
+    # A zero denominator would make the trigger unsatisfiable and silently
+    # disable restarts entirely — the failure mode that invalidated a
+    # margin sweep before it was caught.
+    # Focused-only mode (CaDiCaL's --no-stabilize): pinned by frontier
+    # escalation, below.
+    @no_stable = false
+    @escalated = false
+    @escalate_at = @config.escalate_conflicts
+    # Validation hook: the escalation only fires on searches past 250k
+    # conflicts, which no differential case reaches — lowering it is the
+    # only way to exercise the path in the correctness suite.
+    @escalate_at = env("WASSAT_ESCALATE_AT").to_i if env("WASSAT_ESCALATE_AT") != nil
+    @rst_num = 5 if @rst_num < 1
+    @rst_den = 4 if @rst_den < 1
     @chrono_t = 50
     @kbuf = i64[nv + 2]          # backjump keep-buffer for out-of-order levels
     @bstate = i64[4]             # dlevel / tsize / qhead across native backjump
@@ -1383,6 +1405,26 @@ WASSAT_PROOF_DRAT = 2
       elsif confl >= 0
         @conflicts += 1
         @since_restart += 1
+        # Frontier escalation: a search still undecided after this many
+        # conflicts is not going to be decided by the current
+        # configuration. Reconfigure IN PLACE to the aggressive stack that
+        # measurably cracks counting/cardinality frontiers — VMTF
+        # decisions, target phases, chronological backtracking, focused-only
+        # restarts and a 1.05 restart margin — from a clean trail, keeping
+        # the entire learned database. Every one of the five is necessary:
+        # dropping any single one leaves lr5_37 unsolved past 130s, while
+        # together they take it from never-solved to 58s.
+        if @escalate_at > 0 && !@escalated && @conflicts >= @escalate_at && @proof_mode == WASSAT_PROOF_NONE && @nassump == 0
+          @escalated = true
+          self.backjump(0)
+          @use_vmtf = true
+          @use_target = true
+          @use_chrono = true
+          @no_stable = true
+          @mode_stable = false
+          @rst_num = 21
+          @rst_den = 20
+          @since_restart = 0
         # Chronological analysis happens AT the conflict's true level (max
         # level in the clause — can sit below @dlevel under out-of-order
         # assignments), with ONE combined backjump after learning. v1
@@ -1555,7 +1597,7 @@ WASSAT_PROOF_DRAT = 2
         # rephasing a restart resumes near the remembered basin, so the
         # floor drops to 64.
         # mode switch at the boundary
-        if @conflicts >= @mode_at
+        if @conflicts >= @mode_at && !@no_stable
           @mode_stable = !@mode_stable
           if @mode_stable
             @mode_len = @mode_len * 2
@@ -1570,7 +1612,7 @@ WASSAT_PROOF_DRAT = 2
         floor = @mode_stable ? 16384 : 64
         want_restart = false
         if @since_restart >= floor && @lbd_gcount >= 128
-          want_restart = wassat_restart_hot(@estate, @tsize) == 1
+          want_restart = wassat_restart_hot(@estate, @tsize, @rst_num, @rst_den) == 1
         if want_restart
           @since_restart = 0
           @restart_count += 1
@@ -3095,8 +3137,12 @@ WASSAT_PROOF_DRAT = 2
 # Glucose restart: recent learning quality (fast EMA) markedly worse than
 # the long-run average — blocked while the trail is much deeper than usual
 # (plausibly closing on a model).
--> wassat_restart_hot(est, ts) (i64[] i64) i64
-  return 0 if est[0] * 4 <= est[1] * 5
+# Glucose restart trigger with a configurable margin: restart when the
+# recent learning quality (fast LBD EMA) is worse than the long-run
+# average (slow EMA) by more than num/den, unless the trail is unusually
+# deep (plausibly closing on a model).
+-> wassat_restart_hot(est, ts, num, den) (i64[] i64 i64 i64) i64
+  return 0 if est[0] * den <= est[1] * num
   return 0 if (ts << 16) * 5 > est[2] * 7
   1
 

@@ -56,6 +56,14 @@
     # plain.
     false
 
+  -> escalate_conflicts
+    # Conflicts of fruitless search before the solver reconfigures itself
+    # to the aggressive frontier stack (see solve_loop). Set above every
+    # gate instance's conflict need — uuf250-01 decides in ~135k — so the
+    # escalation only ever fires on searches that are genuinely stuck; the
+    # Lonely Runner class needs ~1.2M and escalates at 4% of that cost.
+    250000
+
   -> use_shrinking
     # All-UIP learned-clause shrinking (Feng & Bacchus; CaDiCaL's shrink)
     # pays where learned clauses carry multi-literal decision-level blocks

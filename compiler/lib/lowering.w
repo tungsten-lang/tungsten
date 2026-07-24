@@ -1205,6 +1205,13 @@ use lowering/definitions
 
   collect_top_level_static_types(mod, ast.expressions)
 
+  # Tier-a call-site parameter type inference: seed unannotated top-level
+  # fn params from the unanimous concrete type seen across all call sites
+  # (typed arrays / floats only, no ABI change, no clone). Needs the
+  # top-level static types just collected; consumed in
+  # populate_definition_var_types when each body is lowered below.
+  collect_param_type_observations(mod, ast.expressions)
+
   # ARGV use is discovered by the combined runtime-use walk below. Build the
   # function first, then attach argc/argv before emission if that walk finds a
   # use. No instructions are emitted between these points.

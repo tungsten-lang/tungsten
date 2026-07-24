@@ -986,3 +986,211 @@
   if blk == nil || !is_ast_node?(blk)
     return false
   spawns_escaping_closure_in_body?(ast_get(blk, :body))
+
+# ── Call-site parameter type inference (Tier a, no-clone) ─────────────────
+# Whole-program pre-pass: for every UNANNOTATED top-level function, collect
+# the static type of each argument across ALL of its call sites. When a
+# parameter is unanimously passed exactly one concrete whitelisted type
+# (a typed array, or a float), populate_definition_var_types seeds
+# child_var_types[param] with it — so the body's `p[i]` / float arithmetic
+# lowers to raw loads / native fadd instead of boxed `[]` dispatch + w_add.
+# No ABI change (a typed-array handle and a nanboxed float both pass as an
+# i64 WValue either way), no body clone: the identical machinery the manual
+# `(f64[] f64)` param-type-list annotation already drives.
+#
+# Sound by construction — it BAILS (leaves the param boxed, today's exact
+# behavior) on any of:
+#   * the fn is a class method / redefined / already annotated
+#   * the fn NAME is used as a first-class value (closure/.call), or as a
+#     symbol (send/reflection)
+#   * a call site has mismatched arity or a trailing kwargs hash
+#   * a param carries a default / keyword / splat / block
+#   * any argument's static type is unknown at some call site
+#   * the observed set is non-singleton, or the type is off-whitelist
+# Gated by env TUNGSTEN_PARAM_INFER (default on) so it can be bisected.
+-> param_infer_enabled?
+  env("TUNGSTEN_PARAM_INFER") != "0"
+
+# Eligible seed type, or nil. Typed arrays pass through unchanged; floats
+# normalize to :f64 to match the proven param-type-list annotation path.
+-> param_infer_whitelist_type(t)
+  if t == nil
+    return nil
+  if is_typed_array_type?(t)
+    return t
+  if t == :float || t == :f64
+    return :f64
+  nil
+
+# Given the observed-type set (Hash type_sym→true) for one param, return the
+# seed type iff the set is a whitelisted singleton, else nil.
+-> param_infer_seed_type(obs_set)
+  if obs_set == nil
+    return nil
+  ks = obs_set.keys()
+  if ks.size() != 1
+    return nil
+  param_infer_whitelist_type(ks[0])
+
+# Inlined twin of calls.w's call_args_has_kwargs? (that worker is `use`d
+# after analysis, so it is not referenceable here): a kwargs group is a
+# single trailing hash_literal marked from_kwargs.
+-> pi_args_have_kwargs?(args)
+  if args == nil || args.size() == 0
+    return false
+  last = args[args.size() - 1]
+  last != nil && is_ast_node?(last) && ast_kind(last) == :hash_literal && last.from_kwargs == true
+
+-> collect_param_type_observations(mod, expressions)
+  if !param_infer_enabled?
+    return nil
+  mod[:observed_param_types] = {}
+  mod[:param_infer_bailed] = {}
+  if expressions == nil
+    return nil
+
+  # (1) Candidate untyped top-level functions. A name defined more than once
+  # at top level is ambiguous → bail it outright.
+  candidates = {}
+  seen = {}
+  i = 0
+  while i < expressions.size()
+    expr = expressions[i]
+    if expr != nil && is_ast_node?(expr) && ast_kind(expr) in (:fn_def :method_def)
+      if expr.is_class_method != true && expr.param_types == nil && expr.name != nil
+        nm = expr.name
+        if seen[nm] == nil
+          seen[nm] = true
+          candidates[nm] = expr
+        else
+          mod[:param_infer_bailed][nm] = true
+    i += 1
+
+  # (2)+(3) One complete walk of the whole program: record call-site arg
+  # types and flag any candidate name used as a value/symbol.
+  top_local = mod[:top_level_static_types]
+  if top_local == nil
+    top_local = {}
+  ci = 0
+  while ci < expressions.size()
+    pi_walk(expressions[ci], top_local, candidates, mod)
+    ci += 1
+  nil
+
+-> pi_walk_stmts(stmts, local, candidates, mod)
+  if stmts == nil
+    return nil
+  i = 0
+  while i < stmts.size()
+    pi_walk(stmts[i], local, candidates, mod)
+    i += 1
+  nil
+
+-> pi_walk(node, local, candidates, mod)
+  if node == nil || !is_ast_node?(node)
+    return nil
+  k = ast_kind(node)
+  # Leaf: a candidate name appearing as a plain var is a first-class
+  # reference (direct calls store the name as an attribute, not a var).
+  if k == :var
+    if candidates[node.name] != nil
+      mod[:param_infer_bailed][node.name] = true
+    return nil
+  if k == :symbol
+    sv = ast_get(node, :value)
+    if sv != nil && candidates[sv.to_s()] != nil
+      mod[:param_infer_bailed][sv.to_s()] = true
+    return nil
+  # Nested def: fresh scope, params unknown (they shadow any outer name).
+  if k in (:fn_def :method_def)
+    inner = {}
+    pi_collect_local_types(node.body, inner, mod)
+    pi_walk_stmts(node.body, inner, candidates, mod)
+    return nil
+  # Direct call to a candidate: record its arguments' inferred types.
+  if k == :call && node.receiver == nil && node.name != nil && candidates[node.name] != nil
+    pi_record_call(candidates[node.name], node, local, mod)
+  # Recurse into every child (args, receiver, bodies, …) — completeness is
+  # required so no call site or value-reference is missed.
+  kids = ast_children(node)
+  ki = 0
+  while ki < kids.size()
+    pi_walk(kids[ki], local, candidates, mod)
+    ki += 1
+  nil
+
+# Flow-insensitive local static-type map for a body: record each `var =`
+# assignment's inferred RHS type (last write wins). Params are left unset
+# (unknown), so references to an untyped param resolve nil → conservative.
+-> pi_collect_local_types(stmts, local, mod)
+  if stmts == nil
+    return nil
+  i = 0
+  while i < stmts.size()
+    node = stmts[i]
+    if node != nil && is_ast_node?(node)
+      k = ast_kind(node)
+      if k == :assign && node.target != nil && is_ast_node?(node.target) && ast_kind(node.target) == :var
+        t = infer_type(node.value, local, mod[:fn_return_types], nil)
+        if t != nil
+          local[node.target.name] = normalize_type_symbol(t)
+      if k == :if
+        pi_collect_local_types(node.then_body, local, mod)
+        pi_collect_local_types(node.else_body, local, mod)
+        if node.elsif_clauses != nil
+          j = 0
+          while j < node.elsif_clauses.size()
+            pi_collect_local_types(node.elsif_clauses[j][1], local, mod)
+            j += 1
+      if k == :while
+        pi_collect_local_types(node.body, local, mod)
+      if k == :case
+        if node.clauses != nil
+          j = 0
+          while j < node.clauses.size()
+            pi_collect_local_types(node.clauses[j].body, local, mod)
+            j += 1
+        pi_collect_local_types(node.else_body, local, mod)
+      if k == :case_value
+        if node.arms != nil
+          j = 0
+          while j < node.arms.size()
+            pi_collect_local_types(node.arms[j].body, local, mod)
+            j += 1
+        pi_collect_local_types(node.else_body, local, mod)
+    i += 1
+  nil
+
+# Record one call site's argument types into the callee's observation slots,
+# bailing the whole callee on arity / kwargs mismatch.
+-> pi_record_call(def_node, call_node, local, mod)
+  nm = def_node.name
+  if mod[:param_infer_bailed][nm] == true
+    return nil
+  params = def_node.params
+  if params == nil
+    mod[:param_infer_bailed][nm] = true
+    return nil
+  args = call_node.args
+  if args == nil
+    args = []
+  if args.size() != params.size() || pi_args_have_kwargs?(args)
+    mod[:param_infer_bailed][nm] = true
+    return nil
+  obs = mod[:observed_param_types][nm]
+  if obs == nil
+    obs = []
+    j = 0
+    while j < params.size()
+      obs.push({})
+      j += 1
+    mod[:observed_param_types][nm] = obs
+  ai = 0
+  while ai < args.size()
+    at = infer_type(args[ai], local, mod[:fn_return_types], nil)
+    key = :unknown
+    if at != nil
+      key = normalize_type_symbol(at)
+    obs[ai][key] = true
+    ai += 1
+  nil

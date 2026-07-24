@@ -1,8 +1,9 @@
 # Gravitational n-body: 5 bodies (Sun + 4 gas giants), 500,000 timesteps.
-# The body state lives in a raw f64[35]; `advance` types its array parameter
-# via the trailing param-type-list `(f64[] f64)` so `b[i]` stays a raw load,
-# and every intermediate is `## f64` — no boxing in the hot pairwise loop.
--> advance(b, dt) (f64[] f64)
+# The body state lives in a raw f64[35]. `advance`'s array parameter needs no
+# type annotation — call-site parameter inference sees every caller passes an
+# f64[] and types `b` accordingly, so `b[i]` stays a raw load; the `## f64`
+# intermediates keep the hot pairwise loop unboxed.
+-> advance(b, dt)
   i = 0 ## i64
   while i < 5
     j = i + 1 ## i64

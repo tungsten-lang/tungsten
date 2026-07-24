@@ -465,7 +465,7 @@
 # again while lowering the body; keeping one implementation is essential
 # because callers and callees must agree on whether each i64 register contains
 # a raw machine integer or a boxed WValue.
--> populate_definition_var_types(node, child_var_types)
+-> populate_definition_var_types(node, child_var_types, mod = nil)
   if node.type_hints != nil
     hint_names = node.type_hints.keys()
     i = 0
@@ -491,6 +491,26 @@
       else
         child_var_types[pname] = normalize_type_symbol(pt[pti])
       pti += 1
+
+  # Tier-a inferred param seeding: only for unannotated fns, only params
+  # still unset, only a whitelisted (typed-array / float) unanimous type
+  # observed across every call site. Never overrides an explicit annotation
+  # (guarded on child_var_types[pname] == nil). Skips params with a
+  # default/keyword/splat/block. Bailed callees are excluded upstream.
+  if mod != nil && node.param_types == nil && node.name != nil && mod[:observed_param_types] != nil
+    if mod[:param_infer_bailed] == nil || mod[:param_infer_bailed][node.name] != true
+      obs = mod[:observed_param_types][node.name]
+      if obs != nil && node.params != nil
+        pidx = 0
+        while pidx < node.params.size() && pidx < obs.size()
+          p = node.params[pidx]
+          if !(is_ast_node?(p) && (p.block_param == true || p.default != nil || p.keyword == true || p.splat == true))
+            pname = param_runtime_name(p)
+            if child_var_types[pname] == nil
+              seed = param_infer_seed_type(obs[pidx])
+              if seed != nil
+                child_var_types[pname] = seed
+          pidx += 1
 
   fname = node.name
   if fname != nil && (fname.starts_with?("hot_") || fname.starts_with?("bench_"))
@@ -524,7 +544,7 @@
     node = expressions[i]
     if ast_kind(node) in (:method_def :fn_def)
       child_var_types = {}
-      populate_definition_var_types(node, child_var_types)
+      populate_definition_var_types(node, child_var_types, mod)
       rt = nil
       if node.return_type != nil
         rt = normalize_type_symbol(node.return_type)
@@ -633,7 +653,7 @@
 
   # Apply declared parameter/local types through the same helper used by the
   # module-wide raw-ABI prepass.
-  populate_definition_var_types(node, child_var_types)
+  populate_definition_var_types(node, child_var_types, mod)
 
   child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types)
 

@@ -428,6 +428,11 @@ WASSAT_ARM_SLS = 2             # local search, models only
     s.reseed_phases(1000 + a * 7919) if grp == 1
     s.reseed_phases(4242 + a * 104729) if grp == 3
     s.set_positive_phases if grp == 2
+    # Chronological backtracking on half the arms: it is worth ~3.5x on
+    # this instance class when it fits the trajectory and costs when it
+    # does not, which is exactly what a race is for — take the min rather
+    # than guess which side the instance is on.
+    s.enable_chrono if grp % 2 == 1
     solvers.push(s)
     a += 1
   handles = []

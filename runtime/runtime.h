@@ -1058,6 +1058,13 @@ WValue w_array_as_metal_buffer(WValue device, WValue arr);
  * page boundary, enabling the noCopy MTLBuffer path. ccall-callable:
  * args arrive as NaN-boxed WValues. */
 WValue w_array_new_aligned(WValue element_bits, WValue size);
+/* Typed-array parameter guard emitted by lowering at native-fn call sites
+ * whose argument element width could not be resolved statically. Raises when
+ * the incoming array's element storage width does not match the callee's
+ * declared width (or mixes polymorphic w64 with a typed tier); returns `arr`
+ * unchanged otherwise. See the definition in runtime.c for the rationale. */
+WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
+                           WValue site);
 WValue w_metal_buffer_write_f32(WValue buffer, WValue index, WValue value);
 WValue w_metal_buffer_read_f32(WValue buffer, WValue index);
 WValue w_metal_buffer_write_f16(WValue buffer, WValue index, WValue value);

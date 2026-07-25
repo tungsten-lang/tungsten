@@ -42,6 +42,43 @@
     return true
   false
 
+# Guard one typed-array argument whose element width the call site could not
+# prove. A callee declared `(i64[])` compiles its body against an 8-byte
+# element stride, but the argument crosses as a plain WValue handle — LLVM
+# sees `i64` either way — so handing it a 32-bit-element array silently writes
+# 8-byte elements into 4-byte slots and past the end of the allocation.
+#
+# Emitted ONLY where the width is genuinely unknown at compile time: when the
+# argument's inferred type already matches the declaration, or the declaration
+# pins no element width, this returns the register untouched and costs nothing.
+# The statically-decidable mismatch is rejected outright by lowering instead
+# (E_LOWER_TYPED_ARG_MISMATCH).
+-> guard_typed_array_arg(ctx, arg_reg, declared_type, actual_type, fn_name, index)
+  if declared_type == nil
+    return arg_reg
+  # canonical_signature_type, not normalize_type_symbol: a declared parameter
+  # arrives in the parser's spelling (`:"i64[]"`) while inference produces
+  # `:typed_array_i64`, and only the former collapses both onto one symbol.
+  dt = canonical_signature_type(declared_type)
+  if !is_typed_array_type?(dt)
+    return arg_reg
+  # `Array` / bool arrays pin no element stride worth checking here.
+  if dt in (:typed_array :typed_array_bool)
+    return arg_reg
+  if actual_type != nil && canonical_signature_type(actual_type) == dt
+    return arg_reg
+  wfn = ctx[:func]
+  want_poly = 0
+  if dt == :typed_array_w64
+    want_poly = 1
+  site = "" + fn_name + ": argument " + (index + 1).to_s() + " is declared " + type_symbol_display(dt)
+  site_tv = lower_string(ctx, Tungsten:AST:String.new(site))
+  site_reg = ensure_i64_value(wfn, site_tv)
+  ctx[:mod][:ccall_fns]["w_check_array_ebits"] = 4
+  checked = next_temp(wfn)
+  emit_instruction(wfn, {op: :call_direct_i64, temp: checked, name: "w_check_array_ebits", args: [arg_reg, typed_array_element_bits(dt).to_s(), want_poly.to_s(), site_reg]})
+  checked
+
 -> lower_call(ctx, node)
   wfn = ctx[:func]
   name = node.name
@@ -669,6 +706,36 @@
     return typed_value(:i64, temp)
 
   # ccall("c_function_name", arg1, arg2, ...) → direct call to named C function
+  #
+  # ARGUMENT ABI — read this before "fixing" a ccall crash. Arguments are
+  # passed in whatever machine representation the Tungsten expression already
+  # has: a raw machine int (`## i64` local, an int literal, a ccall_nobox
+  # result, a pointer) goes across raw; anything else is boxed to a WValue.
+  # There is no C signature available here (`ccall_fns` records only arity),
+  # so this is the only rule lowering can apply — see doc/SYNTAX_WISHLIST.md
+  # "Typed and effectful foreign interfaces" for the declared-signature design
+  # that would replace it.
+  #
+  # The consequence that surprises people: an int *literal* is a raw machine
+  # int, so `ccall("f", 1024)` passes an unboxed 1024, while `n = 1024;
+  # ccall("f", n)` passes a boxed WValue (an untyped local's storage is a
+  # WValue, and analysis.w deliberately keeps `ccall` out of its raw-intrinsic
+  # exemption list so such a local is not promoted to a raw slot). That is NOT
+  # an oversight to be "fixed" by boxing literals — both directions are
+  # load-bearing:
+  #   raw  wanted: `ccall("w_int", n)` (the core boxing idiom, n is `## i64`),
+  #                `ccall("__w_mmap_as_typed", self, 32)` (core/mmap.w passes a
+  #                compile-time raw element encoding, by design — see the
+  #                comment there), `w_color_raw`, `w_date`, `w_input_poll`,
+  #                `__w_sleep_ms`, `w_ipv4`, `w_duration_ns`.
+  #   box  wanted: every C function whose parameter is a WValue, i.e. the large
+  #                majority.
+  # A C function taking `WValue` mostly survives a raw small int anyway, since
+  # w_as_int only sign-extends the low 48 bits and ignores the tag; it is
+  # w_to_i64 / w_truthy / anything reaching w_is_bigint that dereferences the
+  # raw value as a heap pointer and SIGSEGVs. When a ccall to a WValue-taking
+  # helper crashes on a literal, bind the literal to a plain local first (or
+  # nest `ccall("w_int", …)`) — do not change the rule here.
   if name == "ccall" && args.size() >= 1
     # First arg must be a string literal — the C function name
     fn_node = args[0]
@@ -763,8 +830,15 @@
 
   # ccall_rawargs("c_function_name", ...)
   #
-  # Like ccall(), but raw machine-int arguments stay raw instead of being
-  # boxed first. Use for C helpers with mixed WValue/raw signatures.
+  # Historically documented as "like ccall(), but raw machine-int arguments
+  # stay raw instead of being boxed first" — that description was never true:
+  # plain ccall already forwards raw machine ints raw (see its ABI note
+  # above), so the two forms lower identically today. The spelling is kept
+  # because it states the intent at the call site for C helpers with mixed
+  # WValue/raw signatures, and because it IS distinct to escape analysis:
+  # analysis.w lists ccall_rawargs (not ccall) as a raw-consuming intrinsic,
+  # so a raw-int-candidate local passed here keeps its unboxed stack slot
+  # instead of being forced back to a WValue.
   if name == "ccall_rawargs" && args.size() >= 1
     fn_node = args[0]
     if ast_kind(fn_node) != :string
@@ -843,6 +917,7 @@
       if arg_types[ati] == nil
         has_unknown_arg = true
       ati += 1
+
     if has_unknown_arg && ctx[:mod][:known_calls][name] == nil
       arity_key = typed_overload_arity_key(name, args.size())
       if ctx[:mod][:known_typed_overload_counts][arity_key] == 1
@@ -850,6 +925,12 @@
         fallback_target = ctx[:mod][:known_calls][fallback_key]
         fallback_types = ctx[:mod][:known_unique_typed_overload_param_types][arity_key]
         if fallback_target != nil && fallback_types != nil
+          # This is the only resolution path that binds a call to a typed
+          # signature WITHOUT the argument types matching it — it is reached
+          # precisely because at least one argument's type is unknown. For a
+          # typed-array parameter that means the callee's element stride is
+          # taken on faith; guard the ones we could not prove (see
+          # guard_typed_array_arg / w_check_array_ebits).
           if ctx[:mod][:raw_callable_fns][fallback_key] != nil && !call_has_ast_block?(node)
             pkinds = ctx[:mod][:raw_fn_param_kinds][fallback_key]
             arg_regs = []
@@ -857,7 +938,7 @@
             while i < args.size()
               arg_tv = lower_expression(ctx, args[i])
               if pkinds != nil && pkinds[i] == :arr
-                arg_regs.push(ensure_i64_value(wfn, arg_tv))
+                arg_regs.push(guard_typed_array_arg(ctx, ensure_i64_value(wfn, arg_tv), fallback_types[i], arg_types[i], name, i))
               else
                 arg_regs.push(ensure_raw_machine_int(wfn, arg_tv, :i64, fallback_types[i]))
               i += 1
@@ -873,6 +954,7 @@
             reg = ensure_i64_value(wfn, val)
             if val[:type] in (:raw_i64 :raw_u64 :raw_i128 :raw_u128)
               fresh_boxes.push(reg)
+            reg = guard_typed_array_arg(ctx, reg, fallback_types[i], arg_types[i], name, i)
             arg_regs.push(reg)
             i += 1
 
@@ -988,6 +1070,24 @@
     hint = foreign_idiom_hint(name)
     if hint != nil
       raise compile_error_for_node(:E_LOWER_FOREIGN_IDIOM, "unknown function '" + name + "' — " + hint, ctx[:source_path], node)
+    # A typed fn of this name and arity IS declared, but the inferred argument
+    # types matched no declared signature, so resolution fell through to the
+    # unmangled `__w_NAME` symbol — which is never emitted for a typed def.
+    # Left alone, that dies at link time as "Undefined symbols: ___w_NAME",
+    # miles from the call. Name the mismatch here instead.
+    #
+    # The case worth calling out: handing a fn declared `i64[]` an array whose
+    # elements are 32-bit. Both are the same LLVM i64 handle, so nothing before
+    # the linker notices that the callee will stride 8 bytes through 4-byte
+    # slots.
+    typed_arity_key = typed_overload_arity_key(name, args.size())
+    if ctx[:mod][:known_typed_overload_counts][typed_arity_key] != nil
+      got_types = inferred_arg_types(args, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+      declared_types = ctx[:mod][:known_unique_typed_overload_param_types][typed_arity_key]
+      mismatch_msg = "no declared signature of '" + name + "' accepts (" + type_signature_display(got_types) + ")"
+      if ctx[:mod][:known_typed_overload_counts][typed_arity_key] == 1 && declared_types != nil
+        mismatch_msg = mismatch_msg + "; it is declared (" + type_signature_display(declared_types) + ")"
+      raise compile_error_for_node(:E_LOWER_TYPED_ARG_MISMATCH, mismatch_msg, ctx[:source_path], node)
 
   # Inline wymix: 128-bit multiply, XOR high and low halves.
   # Returns i48 NaN-boxed integer (truncated to 48 bits for safe chaining).

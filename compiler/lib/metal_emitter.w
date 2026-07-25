@@ -116,6 +116,12 @@ use ast
     if wmma_scan(x.condition) || wmma_scan(x.body)
       return true
     return false
+  if k in (:and :or)
+    if wmma_scan(x.left) || wmma_scan(x.right)
+      return true
+    return false
+  if k == :not
+    return wmma_scan(x.operand)
   false
 
 # Threadgroup-wide reduction helpers — emitted into every kernel file
@@ -937,7 +943,7 @@ use ast
   if !is_ast_node?(node)
     return false
   k = ast_kind(node)
-  if k in (:binary_op :unary_op :int :float :decimal :bool :var)
+  if k in (:binary_op :unary_op :and :or :not :int :float :decimal :bool :var)
     return true
   if k == :if && gpu_is_ternary?(node)
     return true
@@ -1064,7 +1070,7 @@ use ast
   if msg.include?("CUDA-only")
     return "build with TUNGSTEN_GPU_DIALECTS=cuda (default) or use the Metal simdgroup_* surface"
   if msg.include?("unsupported statement") || msg.include?("unsupported expression")
-    return "GPU kernels support assign, if/else, while, return, arithmetic, indexing, and gpu.* primitives — see doc/getting-started and metal_emitter.w"
+    return "GPU kernels support assign, if/else, while, return, arithmetic, logic (`&&` / `||` / `!`), indexing, and gpu.* primitives — see doc/getting-started and metal_emitter.w"
   if msg.include?("unsupported")
     return "check the @gpu subset: typed arrays, scalars, and gpu.thread_position_in_grid / gpu.shared_* / barriers"
   nil
@@ -1444,6 +1450,20 @@ use ast
       "(" + emit_expr(ctx, node.left) + " " + binop_symbol(node.op) + " " + emit_expr(ctx, node.right) + ")"
   elsif t == :unary_op
     uop_symbol(node.op) + "(" + emit_expr(ctx, node.operand) + ")"
+  # Short-circuit logic. MSL and CUDA are both C++ dialects, so `&&`, `||`
+  # and `!` are native and implicitly convert scalar operands to bool —
+  # these pass straight through instead of forcing the caller to nest ifs.
+  # (`!x` parses to a :not node, never :unary_op, so uop_symbol's :BANG arm
+  # never sees it.) Every arm self-parenthesizes, so nesting is
+  # precedence-safe. Note Tungsten's `a && b` evaluates to b's *value* while
+  # C++'s yields a bool; inside the GPU scalar subset — conditions and bool
+  # locals — the two agree, and the C semantics are what MSL wants.
+  elsif t == :and
+    "(" + emit_expr(ctx, node.left) + " && " + emit_expr(ctx, node.right) + ")"
+  elsif t == :or
+    "(" + emit_expr(ctx, node.left) + " || " + emit_expr(ctx, node.right) + ")"
+  elsif t == :not
+    "(!" + emit_expr(ctx, node.operand) + ")"
   elsif t == :call
     emit_call(ctx, node)
   elsif t == :if && gpu_is_ternary?(node)
@@ -1904,6 +1924,10 @@ use ast
       bt
     else
       infer_expr_type(ctx, node.else_body[0])
+  elsif t in (:and :or :not)
+    # Logical operators are bool-valued in C++, so `flag = a && b` declares
+    # as `bool flag` without needing a `## bool` hint from the author.
+    :bool
   elsif t == :binary_op
     lt = infer_expr_type(ctx, node.left)
     rt = infer_expr_type(ctx, node.right)
@@ -2127,6 +2151,22 @@ use ast
     return "" + node.name
   if t == :binary_op
     return "(" + wgsl_expr(ctx, node.left) + " " + binop_symbol(node.op) + " " + wgsl_expr(ctx, node.right) + ")"
+  # WGSL has native short-circuit `&&`/`||`/`!` over bool. Keeping the
+  # dialect at parity with MSL/CUDA here stops a kernel that uses logic
+  # from being silently skipped on the WebGPU path.
+  if t == :and || t == :or
+    l = wgsl_expr(ctx, node.left)
+    r = wgsl_expr(ctx, node.right)
+    if l == nil || r == nil
+      return nil
+    if t == :and
+      return "(" + l + " && " + r + ")"
+    return "(" + l + " || " + r + ")"
+  if t == :not
+    o = wgsl_expr(ctx, node.operand)
+    if o == nil
+      return nil
+    return "(!" + o + ")"
   if t == :call
     recv = node.receiver
     nm = "" + node.name.to_s()

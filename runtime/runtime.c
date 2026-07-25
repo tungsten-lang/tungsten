@@ -25957,6 +25957,67 @@ WValue w_array_new_uninit(int64_t element_bits, int64_t cap) {
     return w_box_ptr(a, W_SUBTAG_ARRAY);
 }
 
+/* Typed-array parameter guard for the native-fn boundary.
+ *
+ * A top-level fn declared `-> f(a) (i64[]) i64` compiles its body against an
+ * 8-byte element stride, but the argument crosses as a bare WValue handle —
+ * LLVM sees `i64` either way. When the caller's element type is statically
+ * known, lowering rejects a mismatch outright (E_LOWER_TYPED_ARG_MISMATCH).
+ * When it is NOT known (the array arrived from an untyped fn return, a
+ * collection, or a block), nothing before this guard notices that the callee
+ * is about to stride 8 bytes through 4-byte slots — it writes past the end of
+ * the allocation and corrupts whatever follows, with no crash at the call.
+ *
+ * Deliberately permissive: only a genuine STORAGE-WIDTH mismatch, or mixing a
+ * polymorphic w64 array with a typed one, is rejected. Same-width differences
+ * (u64[] vs i64[], f32[] vs u32[]) reinterpret bits but keep the stride, so
+ * they stay legal and cost nothing here.
+ *
+ * want_bits is the declared element's storage width in bits; want_poly is 1
+ * when the declaration is the polymorphic w64 tier. `site_v` is a WValue
+ * String the compiler pre-builds naming the function, the parameter and the
+ * declared type — assembling it here would mean decoding NaN-boxed strings,
+ * which inline-mode Strings have no stable pointer for. Anything that is not
+ * one of the three array tiers passes through untouched: this guard is about
+ * element width, not about type-checking the handle. */
+WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
+                           WValue site_v) {
+    int64_t got_ebits;
+    if (w_is_array(arr)) {
+        got_ebits = (int64_t)((WArray *)w_as_ptr(arr))->ebits;
+    } else if (w_is_small_array(arr)) {
+        got_ebits = (int64_t)((WSmallArray *)w_as_ptr(arr))->ebits;
+    } else if (w_is_big_array(arr)) {
+        got_ebits = (int64_t)((WBigArray *)w_as_ptr(arr))->ebits;
+    } else {
+        return arr;
+    }
+    int got_poly = (got_ebits == 65);
+    int64_t got_bits = array_storage_bits(got_ebits);
+    if (got_poly == (want_poly != 0) && got_bits == want_bits) return arr;
+
+    char tail[224];
+    if (got_poly) {
+        snprintf(tail, sizeof(tail),
+                 ", but received a polymorphic Array — w64 slots hold boxed "
+                 "WValues, not raw %lld-bit elements",
+                 (long long)want_bits);
+    } else if (want_poly) {
+        snprintf(tail, sizeof(tail),
+                 ", but received a typed array with %lld-bit elements",
+                 (long long)got_bits);
+    } else {
+        snprintf(tail, sizeof(tail),
+                 ", but received one with %lld-bit elements — the callee would "
+                 "stride %lld bytes through %lld-byte slots and write past the "
+                 "end of the allocation",
+                 (long long)got_bits, (long long)(want_bits / 8),
+                 (long long)(got_bits / 8));
+    }
+    w_raise(w_str_concat(site_v, w_string(tail)));
+    return arr;
+}
+
 /* Phase 7b (#68): page-aligned typed-array allocation. Required for the
  * Metal noCopy buffer wrap (`newBufferWithBytesNoCopy:`) to actually
  * succeed — Apple's API rejects non-page-aligned pointers and our

@@ -224,6 +224,7 @@ compiled_specs=(
   spec/compiler/conditional_reassign_param_spec.w
   spec/compiler/begin_rescue_value_spec.w
   spec/compiler/wide_params_calls_spec.w
+  spec/compiler/typed_array_param_width_spec.w
   spec/compiler/typed_helper_array_signature_spec.w
   spec/compiler/typed_overload_spec.w
   spec/compiler/uuid_byte_revisit_autoload_spec.w

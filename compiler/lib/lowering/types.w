@@ -759,6 +759,32 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
 -> is_typed_array_type?(t)
   t in (:typed_array :typed_array_bool :typed_array_u4 :typed_array_i4 :typed_array_u8 :typed_array_i8 :typed_array_u16 :typed_array_i16 :typed_array_u32 :typed_array_i32 :typed_array_u64 :typed_array_i64 :typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f8_e4m3 :typed_array_f8_e5m2 :typed_array_f4_e2m1 :typed_array_w64)
 
+# Render a type symbol back in source spelling, for diagnostics. Accepts both
+# the normalized internal form (`:typed_array_i32`) and the raw declared
+# spelling a signature carries (`:"i32[]"`), so a message can put a call's
+# inferred argument types and a definition's declared types side by side.
+-> type_symbol_display(t)
+  if t == nil
+    return "?"
+  s = "" + t.to_s()
+  if s == "typed_array"
+    return "Array"
+  if s.size() > 12 && s.slice(0, 12) == "typed_array_"
+    return s.slice(12, s.size() - 12) + "\[]"
+  s
+
+-> type_signature_display(types)
+  if types == nil
+    return ""
+  out = ""
+  i = 0
+  while i < types.size()
+    if i > 0
+      out = out + ", "
+    out = out + type_symbol_display(types[i])
+    i += 1
+  out
+
 # Phase 3: tier × ebits type symbols for the unified Array hierarchy.
 # Recognized variants per tier: u4 i4 u8 i8 u16 i16 u32 i32 u64 i64 f32 f64
 # w64 bf16 f8_e4m3 f8_e5m2 f4_e2m1. Phase 5 monomorphization uses

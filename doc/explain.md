@@ -41,6 +41,23 @@ spells differently (for example `print`, `def`, `class`).
 **Fix:** Use Tungsten surface forms: `<<` to print, `->` for methods, `+ Name`
 for classes. See `doc/TUNGSTEN_FOR_LLMs.md`.
 
+## E_LOWER_TYPED_ARG_MISMATCH
+
+A function with this name and arity is declared with a typed signature, but the
+call's inferred argument types match none of its declared signatures. Only
+exactly-matching types resolve; there is no implicit widening or conversion.
+
+Watch for typed arrays in particular: `i64[]` and `i32[]` are the same handle
+at the LLVM level but different element widths, so a callee declared `i64[]`
+strides 8 bytes through an `i32[]`'s 4-byte slots. Before this diagnostic
+existed the call fell through to an unmangled symbol and failed at link time
+with `Undefined symbols: ___w_NAME`.
+
+**Fix:** Declare the parameter with the element width you actually pass
+(`i32[]` for a 32-bit array), convert the argument, or add an overload for the
+types at the call site. Note that the *actual* element width is what matters —
+`i32[8]`, `Array.zeros` variants, and Metal buffer views each pin their own.
+
 ## E_LOWER_UNKNOWN_TRAIT
 
 A class says `is TraitName` but that trait was not found at lower time.

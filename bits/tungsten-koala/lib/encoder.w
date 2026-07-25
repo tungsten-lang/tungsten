@@ -18,9 +18,9 @@
 # INPUT is a DataFrame, or anything Estimator.frame accepts — a Matrix,
 # an array of row arrays, or a flat single-feature array, whose columns
 # are then named x0, x1, … positionally. The output is always a
-# DataFrame. That coercion is what lets an Encoder ride inside a
-# cross-validated or grid-searched Pipeline, where x reaches the steps as
-# plain ROWS.
+# DataFrame. That coercion also lets an Encoder ride in an ordinary
+# Pipeline whose caller supplies plain rows. CrossValidation preserves a
+# real DataFrame so named and categorical columns survive to preprocessing.
 #
 # Fitted state lives in parallel arrays (@fit_names / @fit_cats) — hash
 # iteration order is not guaranteed across engines; `categories(name)`

@@ -317,6 +317,30 @@ describe "Persist round-trip: transformers" ->
     expect(back.params[:columns].join(",")).to eq("x")
     expect(back.transform(Fx.frame).column_values(:z).join(",")).to eq("2,1,4,3,6,5,8,7")
 
+  it "replays a ColumnSelector's fitted input and output schema" ->
+    select = ColumnSelector.new([:z])
+    select.fit(Fx.frame)
+    back = Fx.cycle(select)
+    expect(back.get_feature_names_out.join(",")).to eq("z")
+    expect(back.transform(Fx.frame).column_values(:z).join(",")).to eq("2,1,4,3,6,5,8,7")
+
+  it "replays every learned ColumnTransformer branch exactly" ->
+    frame = DataFrame.new([
+      [:x, [2, 4, 6]],
+      [:kind, ["a", "b", "a"]],
+      [:id, [7, 8, 9]]
+    ])
+    prep = ColumnTransformer.new([
+      [:num, Scaler.new(:standard), [:x]],
+      [:cat, Encoder.new(:one_hot), [:kind]]
+    ], :passthrough)
+    prep.fit(frame)
+    back = Fx.cycle(prep)
+    expect(back.get_feature_names_out.join(",")).to eq(prep.get_feature_names_out.join(","))
+    expect(back.transform(frame).column_values("num__x").join(",")).to eq("-1,0,1")
+    expect(back.transform(frame).column_values("cat__kind_b").join(",")).to eq("0,1,0")
+    expect(back.transform(frame).column_values("remainder__id").join(",")).to eq("7,8,9")
+
 describe "Persist round-trip: Pipeline" ->
   it "predicts identically on unseen rows — the steps' learned state survives" ->
     pipe = Pipeline.new([

@@ -8,8 +8,9 @@
 # These are small, deterministic capability probes, not claims about
 # large-scale throughput: nonlinear classification, exact polynomial
 # regression under cross-validation, multiclass classification with
-# stratification, cross-fitted probability calibration around a preprocessing
-# Pipeline, and unsupervised cluster-quality evaluation.
+# stratification, mixed numeric/categorical preprocessing, cross-fitted
+# probability calibration around a preprocessing Pipeline, and unsupervised
+# cluster-quality evaluation.
 
 use koala
 
@@ -88,7 +89,37 @@ ok = false if center[0].size != 3
 center[0].each -> (p)
   ok = false if LinAlg.fabs(p - 1.to_f / 3.to_f) > 1.to_f / 1000000.to_f
 
-# 5. A cross-fitted sigmoid calibrator wraps a full preprocessing Pipeline,
+# 5. A heterogeneous DataFrame where the number is deliberately uninformative:
+# only the one-hot city branch can solve it. CV must preserve the DataFrame
+# schema until ColumnTransformer selects and composes its parallel branches.
+mixed_age = []
+mixed_city = []
+mixed_y = []
+6.times -> (i)
+  mixed_age.push(i + 1)
+  mixed_city.push("red")
+  mixed_y.push(0)
+  mixed_age.push(i + 1)
+  mixed_city.push("blue")
+  mixed_y.push(1)
+  mixed_age.push(i + 1)
+  mixed_city.push("green")
+  mixed_y.push(0)
+mixed_x = DataFrame.new([[:age, mixed_age], [:city, mixed_city]])
+mixed_pipe = Pipeline.new([
+  [:prep, ColumnTransformer.new([
+    [:num, Scaler.new(:standard), [:age]],
+    [:cat, Encoder.new(:one_hot), [:city]]
+  ])],
+  [:model, LogisticRegression.new(1, 300)]
+])
+mixed_scores = CrossValidation.cross_val_score(
+  mixed_pipe, mixed_x, mixed_y, StratifiedKFold.new(3)
+)
+lines.push("mixed ColumnTransformer CV " + mixed_scores.to_s)
+ok = false if mixed_scores.to_s != "\[1, 1, 1\]"
+
+# 6. A cross-fitted sigmoid calibrator wraps a full preprocessing Pipeline,
 # preserving class metadata and returning normalized held-out probabilities.
 cal_x = [[0], [1], [2], [3], [4], [5], [6], [7], [8], [9], [10], [11]]
 cal_y = [:cold, :cold, :cold, :cold, :cold, :cold,
@@ -105,7 +136,7 @@ ok = false if calibrated.predict([[2], [9]]).join(",") != "cold,hot"
 cal_probs.each -> (row)
   ok = false if LinAlg.fabs(Stats.sum(row) - 1.to_f) > 1.to_f / 1000000.to_f
 
-# 6. Two compact boxes ten units apart. KMeans recovers the two groups;
+# 7. Two compact boxes ten units apart. KMeans recovers the two groups;
 # silhouette checks separation independently of the training objective.
 cluster_x = [[0, 0], [0, 1], [1, 0], [1, 1],
              [10, 10], [10, 11], [11, 10], [11, 11]]

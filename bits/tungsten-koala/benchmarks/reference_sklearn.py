@@ -19,7 +19,8 @@ from sklearn.model_selection import KFold, StratifiedKFold, cross_val_score
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, PolynomialFeatures, StandardScaler
 from sklearn.tree import DecisionTreeClassifier
 
 
@@ -140,6 +141,52 @@ emit(
         iris_y,
         cv=iris_cv,
     ).mean(),
+)
+
+# Mixed numeric/categorical classification. The numeric feature repeats for
+# every category, so the one-hot branch supplies all useful class signal.
+mixed_x = np.array(
+    [[age, city] for age in range(1, 7) for city in ("red", "blue", "green")],
+    dtype=object,
+)
+mixed_y = np.array(
+    [1 if city == "blue" else 0 for _age, city in mixed_x],
+)
+mixed_cv = StratifiedKFold(3, shuffle=False)
+numeric_only = Pipeline(
+    [
+        (
+            "prep",
+            ColumnTransformer([("num", StandardScaler(), [0])]),
+        ),
+        ("model", LogisticRegression(C=1e6, solver="lbfgs", max_iter=5000)),
+    ]
+)
+mixed_columns = Pipeline(
+    [
+        (
+            "prep",
+            ColumnTransformer(
+                [
+                    ("num", StandardScaler(), [0]),
+                    (
+                        "cat",
+                        OneHotEncoder(handle_unknown="ignore"),
+                        [1],
+                    ),
+                ]
+            ),
+        ),
+        ("model", LogisticRegression(C=1e6, solver="lbfgs", max_iter=5000)),
+    ]
+)
+emit(
+    "mixed_numeric_only_cv_mean",
+    cross_val_score(numeric_only, mixed_x, mixed_y, cv=mixed_cv).mean(),
+)
+emit(
+    "mixed_column_transform_cv_mean",
+    cross_val_score(mixed_columns, mixed_x, mixed_y, cv=mixed_cv).mean(),
 )
 
 # The same held-out Versicolor/Virginica calibration problem as Koala:

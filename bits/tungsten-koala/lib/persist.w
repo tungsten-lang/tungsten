@@ -8,7 +8,8 @@
 # Every fitted koala object round-trips: the linear, nearest-neighbor,
 # probabilistic, tree/forest and clustering estimators,
 # CalibratedClassifierCV (including every fold model/calibrator), every
-# bundled transformer, and a Pipeline of any of them, nested to any depth.
+# bundled transformer (including heterogeneous ColumnTransformer branches),
+# and a Pipeline of any of them, nested to any depth.
 #
 # --- Why a format of koala's own ---
 #
@@ -208,6 +209,8 @@
     out = VarianceThreshold.load_state(state) if name == "VarianceThreshold"
     out = SelectKBest.load_state(state) if name == "SelectKBest"
     out = PolynomialFeatures.load_state(state) if name == "PolynomialFeatures"
+    out = ColumnSelector.load_state(state) if name == "ColumnSelector"
+    out = ColumnTransformer.load_state(state) if name == "ColumnTransformer"
     out = Pipeline.load_state(state) if name == "Pipeline"
     out
 

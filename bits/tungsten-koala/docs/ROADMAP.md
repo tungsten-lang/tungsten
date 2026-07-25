@@ -20,7 +20,7 @@ on Tungsten, reusing **core** primitives instead of reinventing them.
 | `estimator.w` | **Delete.** Superseded by `estimator_base.w`; sketch already shipped (lasso etc.). |
 | `tensor.w`, `gpu.w`, `device.w` | **Delete.** Replaced by `core/tensor` + Metal; parallel Device invents a second world. |
 | `sparse.w` | **Delete** as implementation; replace with thin re-export / DataFrame helpers over `core/sparse`. |
-| `transformer.w` | **Partly shipped:** `PolynomialFeatures` is now a Tunable, persistent Pipeline step with sklearn-compatible ordering. `ColumnSelector` / `FunctionTransformer` remain. |
+| `transformer.w` | **Mostly shipped:** `PolynomialFeatures`, `ColumnSelector`, and the more capable parallel `ColumnTransformer` are Tunable, persistent Pipeline steps. `FunctionTransformer` remains. |
 | `index.w` | **Port later** as simple row labels (Range/Array); no multi-index. |
 | `resample.w` | **Port later** once time columns exist; ffill/bfill TODOs stay on the list. |
 
@@ -50,7 +50,8 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
   invalid rolling/join/pivot contracts with nil rather than a crash or a
   misleading score.
 - Cross-validation fits a fresh clone per fold, leaves its prototype
-  unfitted, and refuses a partial mean when any fold fails.
+  unfitted, refuses a partial mean when any fold fails, and preserves
+  DataFrame schemas so categorical columns reach fold-local preprocessing.
 - Pipeline stops on transformer fit/transform failure, invalidates itself
   after a failed re-fit, and passes y to supervised transformers such as
   `SelectKBest`.
@@ -65,25 +66,33 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
   Pipelines; binary and multiclass probabilities, sample weights,
   GridSearch, custom splitters, calibration curves/ECE/MCE, and exact
   persistence are covered on both engines.
-- A live scikit-learn 1.9.0 differential now covers fifteen numerical
-  outcomes and three calibration-quality ratios across
+- `ColumnSelector` and sklearn-style `ColumnTransformer` now compose
+  named numeric/categorical branches, nested transformer Pipelines,
+  supervised and weighted transforms, drop/passthrough remainder policy,
+  collision-safe feature names, nested tuning, GridSearch, CV,
+  calibration, strict schemas, and exact persistence.
+- A live scikit-learn 1.9.0 differential now covers seventeen numerical
+  outcomes, three calibration-quality ratios, and a mixed-column quality
+  gain across
   nonlinear classification, polynomial regression, multiclass
-  classification/probability scoring, a canonical Iris subset, held-out
-  probability calibration, and clustering. On held-out Iris, Koala
+  classification/probability scoring, a canonical Iris subset,
+  heterogeneous preprocessing, held-out probability calibration, and
+  clustering. The categorical branch improves mixed-data CV accuracy
+  from 0.667 to 1.0 in both implementations. On held-out Iris, Koala
   sigmoid/isotonic log loss is 0.353/0.251 against sklearn's 0.346/0.258;
   both cut the raw tree loss by over 86%.
-- 15 interpreted and compiled spec suites cover 653 examples; the
-  framework-free smoke test adds 386 checks on each engine.
+- 16 interpreted and compiled spec suites cover 678 examples; the
+  framework-free smoke test adds 398 checks on each engine.
 
 ## Highest-leverage next tranche
 
-1. `ColumnSelector` / `FunctionTransformer`, then mixed numeric/categorical
-   column pipelines.
-2. Broader sklearn differentials on standard tabular datasets plus
+1. Broader sklearn differentials on standard tabular datasets plus
    wall-clock and memory baselines.
-3. Gradient boosting and permutation importance before widening into GPU
+2. Gradient boosting and permutation importance before widening into GPU
    execution.
-4. KNN classifier distance weights/probabilities and SVM classification.
+3. KNN classifier distance weights/probabilities and SVM classification.
+4. A persistable named-operation alternative to arbitrary-closure
+   `FunctionTransformer`.
 
 ## Compiler / runtime fixes koala depends on
 

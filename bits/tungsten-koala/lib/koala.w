@@ -1,7 +1,8 @@
 # Koala — data science and machine learning for Tungsten
 # A friendlier pandas: Series, DataFrame, group_by, stats, metrics,
 # dense linear algebra (Vector / Matrix / LinAlg), ML preprocessing
-# (Scaler / Encoder / Imputer / Splitter / Pipeline), estimation
+# (Scaler / Encoder / Imputer / Splitter / Pipeline / ColumnTransformer),
+# estimation
 # (LinearRegression — fit / predict / score with optional ridge alpha,
 # alone or as a Pipeline tail; KNNClassifier — k-nearest-neighbors
 # classification, the companion classifier to Metrics.accuracy / f1;
@@ -58,7 +59,8 @@
 # format and spec/persist_spec.w for the identical-prediction proofs.
 #
 # The PREPROCESSING transformers (Scaler / Imputer / Encoder / PCA /
-# VarianceThreshold / SelectKBest / PolynomialFeatures)
+# VarianceThreshold / SelectKBest / PolynomialFeatures / ColumnSelector /
+# ColumnTransformer)
 # declare the hyperparameter half of that contract on its own,
 # `is Tunable` — `params` / `with_params` and nothing more, since a
 # transformer has no predict and no fit arity to declare. That is the
@@ -99,6 +101,7 @@ use feature_selection
 use polynomial_features
 use splitter
 use pipeline
+use column_transformer
 use cross_validation
 use calibration
 use kmeans

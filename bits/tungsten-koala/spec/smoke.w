@@ -437,6 +437,55 @@ use support
     self.check("tree pipeline score", tpipe.score(tpdf, [0, 0, 1, 1]), 1)
     self.check("tree pipeline param", tpipe.params["tree.max_depth"], 2)
 
+    # --- heterogeneous column composition ---
+    mix = DataFrame.new([
+      [:age, [10, 20, 30]],
+      [:city, ["red", "blue", "red"]],
+      [:id, [101, 102, 103]]
+    ])
+    pick = ColumnSelector.new([:city, :age])
+    self.check("column selector names", pick.fit_transform(mix).column_names.join(","), "city,age")
+    prep = ColumnTransformer.new([
+      [:num, Scaler.new(:standard), [:age]],
+      [:cat, Encoder.new(:one_hot), [:city]]
+    ], :passthrough)
+    mixed = prep.fit_transform(mix)
+    self.check("column transformer fit", prep.fitted?, true)
+    self.check("column transformer names", mixed.column_names.join(","), "num__age,cat__city_red,cat__city_blue,remainder__id")
+    self.check("column transformer numeric", mixed.column_values("num__age").join(","), "-1,0,1")
+    self.check("column transformer category", mixed.column_values("cat__city_blue").join(","), "0,1,0")
+    self.check("column transformer remainder", mixed.column_values("remainder__id").join(","), "101,102,103")
+    unknown = prep.transform(DataFrame.new([[:age, [40]], [:city, ["green"]], [:id, [104]]]))
+    self.check("column transformer unknown red", unknown.column_values("cat__city_red")[0], 0)
+    self.check("column transformer unknown blue", unknown.column_values("cat__city_blue")[0], 0)
+    self.check("column transformer tunable", prep.params.key?("cat.kind"), true)
+    prep_back = Persist.loads(Persist.dumps(prep))
+    self.check("column transformer persists", prep_back.get_feature_names_out.join(","), prep.get_feature_names_out.join(","))
+
+    mixed_ages = []
+    mixed_cities = []
+    mixed_labels = []
+    6.times -> (i)
+      mixed_ages.push(i + 1)
+      mixed_cities.push("red")
+      mixed_labels.push(0)
+      mixed_ages.push(i + 1)
+      mixed_cities.push("blue")
+      mixed_labels.push(1)
+      mixed_ages.push(i + 1)
+      mixed_cities.push("green")
+      mixed_labels.push(0)
+    mixed_frame = DataFrame.new([[:age, mixed_ages], [:city, mixed_cities]])
+    mixed_pipe = Pipeline.new([
+      ColumnTransformer.new([
+        [:num, Scaler.new(:standard), [:age]],
+        [:cat, Encoder.new(:one_hot), [:city]]
+      ]),
+      LogisticRegression.new(1, 300)
+    ])
+    self.check("mixed dataframe CV", CrossValidation.cross_val_mean(mixed_pipe, mixed_frame, mixed_labels, StratifiedKFold.new(3)), 1)
+    self.check("mixed dataframe prototype stays fresh", mixed_pipe.fitted?, false)
+
     # --- DecisionTreeRegressor (the same tree, MSE criterion) ---
     # x = 0,1,10,11 / y = 1,1,9,9: root mean 5, variance 16; splitting at
     # 5.5 makes both sides constant, so the gain is the whole 16.

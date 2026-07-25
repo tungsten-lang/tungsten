@@ -126,10 +126,9 @@ describe "Scaler" ->
   it "learns nothing before fit" ->
     expect(Scaler.new(:standard).learned_params.size).to eq(0)
 
-  # The transformers address columns BY NAME, but CrossValidation and
-  # GridSearch coerce x to plain ROW ARRAYS before the model sees it —
-  # so a Scaler inside a searched pipeline is handed rows, not a frame.
-  # Estimator.frame names such columns x0, x1, … positionally.
+  # A direct caller may supply plain ROW ARRAYS rather than a named frame.
+  # Estimator.frame names such columns x0, x1, … positionally. CV preserves
+  # a real DataFrame so mixed categorical schemas are not erased.
   it "accepts plain row arrays, naming the columns positionally" ->
     out = Scaler.new(:standard).fit_transform([[2, 10], [4, 15], [6, 20]])
     expect(out.column_names.join(",")).to eq("x0,x1")

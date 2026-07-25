@@ -409,6 +409,49 @@
       out = picked
     out
 
+  # Number of feature rows without erasing a DataFrame's schema. Generic
+  # evaluation used to call feature_rows(x) up front, which turns a frame
+  # into its NUMERIC matrix and silently discards categorical columns before
+  # an Encoder/ColumnTransformer Pipeline can see them.
+  -> .feature_count(x)
+    out = nil
+    if x != nil
+      if x.respond_to?("column_names") && x.respond_to?("row_count")
+        ok = true
+        ok = x.valid? if x.respond_to?("valid?")
+        out = x.row_count if ok
+      else
+        rows = Estimator.feature_rows(x)
+        out = rows.size if rows != nil
+    out
+
+  # Feature rows at `idx`, preserving a DataFrame as a DataFrame (same
+  # ordered columns and cell types). Matrix/Vector/plain arrays keep the
+  # historical normalized row-array representation.
+  -> .subset_features(x, idx)
+    out = nil
+    if x != nil && idx != nil
+      if x.respond_to?("column_names") && x.respond_to?("take")
+        out = x.take(idx)
+      else
+        rows = Estimator.feature_rows(x)
+        out = Estimator.subset(rows, idx) if rows != nil
+    out
+
+  # Indices carrying positive sample weight, in input order. nil weights
+  # mean every row survives.
+  -> .positive_weight_indices(weights, n)
+    out = []
+    if weights == nil
+      n.times -> (i)
+        out.push(i)
+    else
+      i = 0
+      weights.each -> (weight)
+        out.push(i) if weight > 0.to_f
+        i += 1
+    out
+
   # Fresh unfitted clone through the Estimable contract. Cross-validation
   # uses one per fold so the caller's prototype is never fitted and learned
   # state cannot leak between folds. nil for an object outside the contract

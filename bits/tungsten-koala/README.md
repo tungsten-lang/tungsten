@@ -74,6 +74,14 @@ named = Pipeline.new([[:fill, Imputer.new(:mean)], [:scale, Scaler.new(:standard
 named.step(:scale)                   # by name (symbol or string); named[1] too
 named.names                          # => ["fill", "scale"]; has_step?(:scale)
 
+# Parallel preprocessing for heterogeneous columns
+prep = ColumnTransformer.new([
+  [:numeric, Scaler.new(:standard), [:salary]],
+  [:category, Encoder.new(:one_hot), [:dept]]
+], :drop)
+prep.fit(df)
+prep.get_feature_names_out           # after fit: numeric__salary, category__dept_...
+
 # Feature generation / selection compose inside the same Pipeline
 poly = PolynomialFeatures.new(2)     # x0,x1,x0^2,x0*x1,x1^2 (sklearn order)
 poly.fit_transform([[2, 3]])         # => one row [2,3,4,6,9]
@@ -770,6 +778,56 @@ cosmetic metadata: probability calibration and multiclass metrics have
 to know which class each column names, and preprocessing must not hide
 it.
 
+## Heterogeneous columns
+
+`ColumnTransformer` is the parallel counterpart to Pipeline's sequential
+composition. Each named branch receives only its assigned columns; the
+transformed outputs are concatenated in declaration order:
+
+```tungsten
+prep = ColumnTransformer.new([
+  [:numeric, Pipeline.new([
+    Imputer.new(:median),
+    Scaler.new(:standard)
+  ]), [:age, :income]],
+  [:category, Encoder.new(:one_hot), [:city, :plan]]
+], :passthrough)
+
+model = Pipeline.new([
+  [:prep, prep],
+  [:model, LogisticRegression.new]
+])
+model.fit(train_df, y)
+model.predict(test_df)
+```
+
+A branch may be any transformer, a transformer-only nested Pipeline,
+`:passthrough`, or `:drop`. The final `remainder` argument is `:drop` by
+default or `:passthrough` to append every unassigned input column.
+Supervised branches such as `SelectKBest` receive `y`; Scaler and
+Imputer receive sample weights. An estimator-tailed Pipeline is rejected
+as a branch because a column branch must produce transformed features.
+
+Output names default to `"<branch>__<feature>"`, preventing two branches
+from silently colliding. `get_feature_names_out` exposes the fitted
+schema. Passing `false` as the third constructor argument keeps raw names
+only when they are unique. Transform requires the same ordered input
+schema used at fit time, so missing, extra, or reordered production
+columns fail with nil instead of shifting model inputs.
+
+`ColumnSelector.new([:age, :income])` is the smaller sequential primitive;
+`:drop` as its second argument inverts the selection. Both classes are
+Tunable and persistent. A branch's parameters flatten under its name, so
+an outer Pipeline exposes keys such as `"prep.numeric.kind"` and
+`"prep.category.kind"` directly to GridSearch.
+
+CrossValidation and calibration now select DataFrame rows without
+converting the frame to a numeric matrix. Categorical columns therefore
+survive through every fold. On the mixed reference problem, age contains
+no class information: the numeric-only Pipeline scores 0.6667, while the
+scaled plus one-hot ColumnTransformer scores 1.0 in both Koala and
+scikit-learn.
+
 ## Probability calibration
 
 Accuracy and ROC-AUC can be excellent while the probabilities are
@@ -1037,20 +1095,23 @@ learned state cannot leak between folds.
 `examples/reference_ml.w` is a self-checking set of deterministic
 end-to-end problems: nonlinear XOR, exact quadratic regression under CV,
 three-class GaussianNB and multinomial LogisticRegression under
-stratified CV, balanced multiclass probability checks, a cross-fitted
-calibrator wrapped around a preprocessing Pipeline, and KMeans evaluated
-by silhouette rather than its training objective.
+stratified CV, balanced multiclass probability checks, heterogeneous
+numeric/categorical column composition, a cross-fitted calibrator wrapped
+around a preprocessing Pipeline, and KMeans evaluated by silhouette
+rather than its training objective.
 
 The matching `benchmarks/reference_koala.w` and
 `benchmarks/reference_sklearn.py` use identical fixtures. Against
-scikit-learn 1.9.0, all fifteen numerical gates and three calibration
+scikit-learn 1.9.0, all seventeen numerical gates and four capability /
 quality gates pass: raw XOR accuracy
 0.5, polynomial XOR accuracy 1, quadratic mean CV R² 1, multiclass
 GaussianNB and LogisticRegression mean CV accuracy 1, balanced-center
 multiclass log loss `ln(3)`, a canonical 60-row Iris subset evaluated by
-scaled LogisticRegression, GaussianNB and scaled 3-NN, held-out
-Versicolor/Virginica tree calibration, and two-box silhouette
-0.91952609056736.
+scaled LogisticRegression, GaussianNB and scaled 3-NN, mixed-column
+preprocessing, held-out Versicolor/Virginica tree calibration, and
+two-box silhouette 0.91952609056736. On the mixed frame, both
+implementations improve from numeric-only CV accuracy 0.6667 to 1.0
+after adding the one-hot categorical branch.
 
 On that held-out calibration problem, Koala's sigmoid log loss is
 0.3533 against sklearn's 0.3463, isotonic log loss is 0.2513 against

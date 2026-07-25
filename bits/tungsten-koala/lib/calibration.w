@@ -571,25 +571,27 @@
     @classes = nil
     @calibrated_models = nil
     @effective_cv = nil
-    rows = Estimator.feature_rows(x)
+    features = x
+    n = Estimator.feature_count(features)
     labels = nil
     labels = Estimator.target_values(y) if y != nil
-    ok = rows != nil && labels != nil
-    ok = rows.size > 0 && rows.size == labels.size if ok
+    ok = n != nil && labels != nil
+    ok = n > 0 && n == labels.size if ok
     ok = @method == "sigmoid" || @method == "isotonic" if ok
     ok = @estimator != nil && @estimator.respond_to?("supervised?") if ok
     ok = @estimator.supervised? if ok
     ok = @estimator.respond_to?("predict_proba") || @estimator.respond_to?("decision_function") if ok
     wts = nil
     if ok && sample_weight != nil
-      wts = Estimator.weight_values(sample_weight, rows.size)
+      wts = Estimator.weight_values(sample_weight, n)
       ok = false if wts == nil
       ok = false if ok && !self.supports_sample_weight?
     if ok && wts != nil
-      trimmed = Estimator.drop_zero_weights(rows, labels, wts)
-      rows = trimmed[:rows]
-      labels = trimmed[:targets]
-      wts = trimmed[:weights]
+      keep = Estimator.positive_weight_indices(wts, n)
+      features = Estimator.subset_features(features, keep)
+      labels = Estimator.subset(labels, keep)
+      wts = Estimator.subset(wts, keep)
+      n = keep.size
     classes = []
     if ok
       classes = Calibration.classes(labels)
@@ -598,7 +600,7 @@
     folds = nil
     if ok
       splitter = CalibratedClassifierCV.splitter_for(@cv)
-      folds = splitter.folds(rows.size, labels) if splitter != nil
+      folds = splitter.folds(n, labels) if splitter != nil
       ok = false if folds == nil || folds.size == 0
     trained = []
     if ok
@@ -606,10 +608,10 @@
         if ok
           train_idx = fold[0]
           test_idx = fold[1]
-          train_rows = Estimator.subset(rows, train_idx)
+          train_rows = Estimator.subset_features(features, train_idx)
           train_y = Estimator.subset(labels, train_idx)
           train_w = Estimator.subset(wts, train_idx)
-          test_rows = Estimator.subset(rows, test_idx)
+          test_rows = Estimator.subset_features(features, test_idx)
           test_y = Estimator.subset(labels, test_idx)
           test_w = Estimator.subset(wts, test_idx)
           model = Estimator.unfitted_copy(@estimator)

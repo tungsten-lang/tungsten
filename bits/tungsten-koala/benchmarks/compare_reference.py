@@ -49,6 +49,17 @@ QUALITY_RATIOS = {
     ),
 }
 
+# A heterogeneous preprocessing stack must materially beat throwing away the
+# category column. This catches the historical failure where CV coerced a
+# DataFrame to its numeric matrix before the Pipeline saw it.
+QUALITY_GAINS = {
+    "mixed_columns_vs_numeric_only": (
+        "mixed_column_transform_cv_mean",
+        "mixed_numeric_only_cv_mean",
+        0.20,
+    ),
+}
+
 
 def metrics(command: list[str]) -> dict[str, float]:
     completed = subprocess.run(
@@ -114,6 +125,21 @@ for name, (calibrated_name, raw_name, max_ratio) in QUALITY_RATIOS.items():
     print(
         f"{name},{koala_ratio:.17g},{sklearn_ratio:.17g},"
         f"{max_ratio:.3g},{status}"
+    )
+
+print("quality_gate,koala_gain,sklearn_gain,min_gain,status")
+for name, (full_name, baseline_name, min_gain) in QUALITY_GAINS.items():
+    koala_gain = koala[full_name] - koala[baseline_name]
+    sklearn_gain = sklearn[full_name] - sklearn[baseline_name]
+    status = (
+        "PASS"
+        if koala_gain >= min_gain and sklearn_gain >= min_gain
+        else "FAIL"
+    )
+    failed = failed or status == "FAIL"
+    print(
+        f"{name},{koala_gain:.17g},{sklearn_gain:.17g},"
+        f"{min_gain:.3g},{status}"
     )
 
 if failed:

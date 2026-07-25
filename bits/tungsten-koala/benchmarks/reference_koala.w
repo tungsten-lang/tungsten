@@ -55,6 +55,38 @@ iris_knn = Pipeline.new([Scaler.new(:standard), KNNClassifier.new(3)])
 << "iris_gaussian_nb_cv_mean," + CrossValidation.cross_val_mean(GaussianNB.new, iris_x, iris_y, iris_cv).to_s
 << "iris_knn_cv_mean," + CrossValidation.cross_val_mean(iris_knn, iris_x, iris_y, iris_cv).to_s
 
+# Mixed numeric/categorical classification. Age repeats once per city and
+# contains no class signal; city alone determines the label. This exercises
+# DataFrame-preserving CV plus parallel scaling and one-hot encoding.
+mixed_age = []
+mixed_city = []
+mixed_y = []
+6.times -> (i)
+  mixed_age.push(i + 1)
+  mixed_city.push("red")
+  mixed_y.push(0)
+  mixed_age.push(i + 1)
+  mixed_city.push("blue")
+  mixed_y.push(1)
+  mixed_age.push(i + 1)
+  mixed_city.push("green")
+  mixed_y.push(0)
+mixed_x = DataFrame.new([[:age, mixed_age], [:city, mixed_city]])
+mixed_cv = StratifiedKFold.new(3)
+numeric_only = Pipeline.new([
+  ColumnTransformer.new([[:num, Scaler.new(:standard), [:age]]]),
+  LogisticRegression.new(1, 300)
+])
+mixed_columns = Pipeline.new([
+  ColumnTransformer.new([
+    [:num, Scaler.new(:standard), [:age]],
+    [:cat, Encoder.new(:one_hot), [:city]]
+  ]),
+  LogisticRegression.new(1, 300)
+])
+<< "mixed_numeric_only_cv_mean," + CrossValidation.cross_val_mean(numeric_only, mixed_x, mixed_y, mixed_cv).to_s
+<< "mixed_column_transform_cv_mean," + CrossValidation.cross_val_mean(mixed_columns, mixed_x, mixed_y, mixed_cv).to_s
+
 # Held-out probability calibration on the overlapping Versicolor/Virginica
 # half of Iris. Train on the first 20 examples of each class (already in the
 # fixture above), then test on the next 20. An unconstrained tree emits hard

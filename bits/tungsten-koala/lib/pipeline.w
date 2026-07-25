@@ -342,6 +342,35 @@
         out = tail.supports_sample_weight? if tail.respond_to?("supports_sample_weight?")
     out
 
+  # Structural role when this Pipeline is itself nested as a step. A
+  # transformer-only Pipeline still answers predict (the method returns nil),
+  # so respond_to?("predict") alone would misclassify it as an estimator.
+  -> estimator_tail?
+    steps = @steps
+    out = false
+    if steps.size > 0
+      out = Pipeline.estimator_step?(steps[steps.size - 1])
+    out
+
+  # A transformer-only nested Pipeline needs y when any inner transformer
+  # needs y (for example SelectKBest followed by Scaler).
+  -> supervised_transformer?
+    out = false
+    if !self.estimator_tail?
+      @steps.each -> (step)
+        out = true if Pipeline.supervised_transformer?(step)
+    out
+
+  # Kept separate from the estimator-facing supports_sample_weight? contract:
+  # a transformer-only chain reports false there, but can still forward
+  # weights to inner Scaler / Imputer / ColumnTransformer steps.
+  -> supports_transform_sample_weight?
+    out = false
+    if !self.estimator_tail?
+      @steps.each -> (step)
+        out = true if Pipeline.weighted_transform?(step)
+    out
+
   # Every tunable step's hyperparameters, flattened and addressed
   # "<step>.<param>" — the whole chain's search space as one hash a
   # caller can read without knowing it holds a pipeline.
@@ -422,7 +451,9 @@
   # (Scaler, Imputer, Encoder, PCA) do not — they answer transform.
   # respond_to? is the dual-engine probe; type() is unusable interpreted.
   -> .estimator_step?(step)
-    step.respond_to?("predict")
+    out = step.respond_to?("predict")
+    out = step.estimator_tail? if step.respond_to?("estimator_tail?")
+    out
 
   # Supervised estimators answer supervised? true; unsupervised answer
   # false; transformers answer neither and count as not supervised.
@@ -443,7 +474,10 @@
   -> .weighted_transform?(step)
     out = false
     if step.respond_to?("fit") && !Pipeline.estimator_step?(step)
-      out = step.supports_sample_weight? if step.respond_to?("supports_sample_weight?")
+      if step.respond_to?("supports_transform_sample_weight?")
+        out = step.supports_transform_sample_weight?
+      else
+        out = step.supports_sample_weight? if step.respond_to?("supports_sample_weight?")
     out
 
   # Fit one transformer through its declared arity. The return value is

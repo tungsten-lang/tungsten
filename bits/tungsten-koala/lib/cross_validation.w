@@ -618,38 +618,37 @@ trait Splitting
   # An estimator that refuses weights (KNNClassifier) fails EVERY fold's
   # fit and so scores nil throughout — loudly wrong rather than quietly
   # unweighted.
+  #
+  # A DataFrame stays a DataFrame while fold rows are selected. This is a
+  # correctness boundary, not an optimization: converting it through
+  # feature_rows would keep only numeric columns and silently erase a
+  # categorical feature before Encoder / ColumnTransformer could see it.
   -> .cross_val_score(model, x, y = nil, cv = 5, seed = nil, sample_weight = nil)
-    rows = Estimator.feature_rows(x)
+    n = Estimator.feature_count(x)
     supervised = model.supervised?
     yvals = nil
     yvals = Estimator.target_values(y) if y != nil
     out = nil
-    ok = rows != nil
-    ok = yvals != nil && rows.size == yvals.size if ok && supervised
-    ok = rows.size == yvals.size if ok && yvals != nil
-    ok = rows.size > 0 if ok
+    ok = n != nil
+    ok = yvals != nil && n == yvals.size if ok && supervised
+    ok = n == yvals.size if ok && yvals != nil
+    ok = n > 0 if ok
     wts = nil
-    wts = Estimator.weight_values(sample_weight, rows.size) if ok && sample_weight != nil
+    wts = Estimator.weight_values(sample_weight, n) if ok && sample_weight != nil
     ok = false if sample_weight != nil && wts == nil
     if ok
       splitter = CrossValidation.splitter_for(cv, seed)
       folds = nil
-      folds = splitter.folds(rows.size, yvals) if splitter != nil
+      folds = splitter.folds(n, yvals) if splitter != nil
       if folds != nil
         scores = []
         folds.each -> (fold)
           tr_idx = fold[0]
           te_idx = fold[1]
-          tr_rows = []
-          tr_y = []
-          tr_idx.each -> (ix)
-            tr_rows.push(rows[ix])
-            tr_y.push(yvals[ix]) if yvals != nil
-          te_rows = []
-          te_y = []
-          te_idx.each -> (ix)
-            te_rows.push(rows[ix])
-            te_y.push(yvals[ix]) if yvals != nil
+          tr_rows = Estimator.subset_features(x, tr_idx)
+          tr_y = Estimator.subset(yvals, tr_idx)
+          te_rows = Estimator.subset_features(x, te_idx)
+          te_y = Estimator.subset(yvals, te_idx)
           tr_w = Estimator.subset(wts, tr_idx)
           te_w = Estimator.subset(wts, te_idx)
           # Every fold gets a fresh unfitted clone. Reusing `model` here

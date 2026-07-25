@@ -205,6 +205,18 @@ describe "Persist round-trip: GaussianNB" ->
     expect(back.epsilon == model.epsilon).to be_true
     expect(back.params[:var_smoothing] == model.params[:var_smoothing]).to be_true
 
+describe "Persist round-trip: CalibratedClassifierCV" ->
+  it "preserves every fold model and calibrator exactly" ->
+    model = CalibratedClassifierCV.new(DecisionTreeClassifier.new(2), :sigmoid, 2)
+    model.fit(Fx.frame, Fx.labels)
+    back = Fx.cycle(model)
+    expect(back.fitted?).to be_true
+    expect(back.classes.join(",")).to eq(model.classes.join(","))
+    expect(back.calibrated_models.size).to eq(2)
+    expect(back.predict_proba(Fx.queries).to_s).to eq(model.predict_proba(Fx.queries).to_s)
+    expect(Fx.preds(back)).to eq(Fx.preds(model))
+    expect(back.params["estimator.max_depth"]).to eq(2)
+
 describe "Persist round-trip: KMeans" ->
   it "assigns identical clusters — the unsupervised case" ->
     model = KMeans.new(2)

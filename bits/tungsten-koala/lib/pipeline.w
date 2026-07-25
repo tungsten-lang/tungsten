@@ -257,6 +257,46 @@
       out = steps[steps.size - 1].predict(self.transform_features(x))
     out
 
+  # The classifier tail's learned class order. Generic probability tools
+  # (calibration, log loss, ROC) need this metadata just as they need
+  # predict_proba, and a preprocessing Pipeline must not hide it.
+  -> classes
+    out = nil
+    if @fitted && @has_estimator
+      steps = @steps
+      tail = steps[steps.size - 1]
+      out = tail.classes if tail.respond_to?("classes")
+    out
+
+  # Probability predictions forwarded through the fitted preprocessing
+  # chain. The optional label preserves each tail's convention: no label
+  # returns its normal probability layout; a label requests one flat class
+  # column. nil when the tail is not probabilistic.
+  -> predict_proba(x, label = nil)
+    out = nil
+    if @fitted && @has_estimator
+      steps = @steps
+      tail = steps[steps.size - 1]
+      if tail.respond_to?("predict_proba")
+        features = self.transform_features(x)
+        if label == nil
+          out = tail.predict_proba(features)
+        else
+          out = tail.predict_proba(features, label)
+    out
+
+  # Raw classifier scores, when the tail exposes them (currently logistic
+  # regression). CalibratedClassifierCV prefers these to already-squashed
+  # probabilities, matching scikit-learn's response-method order.
+  -> decision_function(x)
+    out = nil
+    if @fitted && @has_estimator
+      steps = @steps
+      tail = steps[steps.size - 1]
+      if tail.respond_to?("decision_function")
+        out = tail.decision_function(self.transform_features(x))
+    out
+
   # The estimator tail's score on x against y; nil unless fitted with
   # an estimator tail. y defaults to nil so an unsupervised caller —
   # Estimator.score_model on a chain whose supervised? is false —

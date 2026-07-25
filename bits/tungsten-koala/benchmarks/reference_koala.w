@@ -55,6 +55,36 @@ iris_knn = Pipeline.new([Scaler.new(:standard), KNNClassifier.new(3)])
 << "iris_gaussian_nb_cv_mean," + CrossValidation.cross_val_mean(GaussianNB.new, iris_x, iris_y, iris_cv).to_s
 << "iris_knn_cv_mean," + CrossValidation.cross_val_mean(iris_knn, iris_x, iris_y, iris_cv).to_s
 
+# Held-out probability calibration on the overlapping Versicolor/Virginica
+# half of Iris. Train on the first 20 examples of each class (already in the
+# fixture above), then test on the next 20. An unconstrained tree emits hard
+# 0/1 leaf probabilities; cross-fitted sigmoid and isotonic calibration must
+# sharply reduce held-out log loss, and isotonic must reduce Brier error too.
+cal_train_x = []
+cal_train_y = []
+i = 20
+while i < iris_x.size
+  cal_train_x.push(iris_x[i])
+  cal_train_y.push(iris_y[i])
+  i += 1
+cal_test_x = [[59, 32, 48, 18], [61, 28, 40, 13], [63, 25, 49, 15], [61, 28, 47, 12], [64, 29, 43, 13], [66, 30, 44, 14], [68, 28, 48, 14], [67, 30, 50, 17], [60, 29, 45, 15], [57, 26, 35, 10], [55, 24, 38, 11], [55, 24, 37, 10], [58, 27, 39, 12], [60, 27, 51, 16], [54, 30, 45, 15], [60, 34, 45, 16], [67, 31, 47, 15], [63, 23, 44, 13], [56, 30, 41, 13], [55, 25, 40, 13], [69, 32, 57, 23], [56, 28, 49, 20], [77, 28, 67, 20], [63, 27, 49, 18], [67, 33, 57, 21], [72, 32, 60, 18], [62, 28, 48, 18], [61, 30, 49, 18], [64, 28, 56, 21], [72, 30, 58, 16], [74, 28, 61, 19], [79, 38, 64, 20], [64, 28, 56, 22], [63, 28, 51, 15], [61, 26, 56, 14], [77, 30, 61, 23], [63, 34, 56, 24], [64, 31, 55, 18], [60, 30, 48, 18], [69, 31, 54, 21]]
+cal_test_y = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+              2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+raw_tree = DecisionTreeClassifier.new
+raw_tree.fit(cal_train_x, cal_train_y)
+sigmoid_tree = CalibratedClassifierCV.new(DecisionTreeClassifier.new, :sigmoid, 5)
+sigmoid_tree.fit(cal_train_x, cal_train_y)
+isotonic_tree = CalibratedClassifierCV.new(DecisionTreeClassifier.new, :isotonic, 5)
+isotonic_tree.fit(cal_train_x, cal_train_y)
+raw_tree_scores = raw_tree.predict_proba(cal_test_x, 2)
+sigmoid_tree_scores = sigmoid_tree.predict_proba(cal_test_x, 2)
+isotonic_tree_scores = isotonic_tree.predict_proba(cal_test_x, 2)
+<< "iris_tree_raw_log_loss," + Metrics.log_loss(raw_tree_scores, cal_test_y, 2).to_s
+<< "iris_tree_sigmoid_log_loss," + Metrics.log_loss(sigmoid_tree_scores, cal_test_y, 2).to_s
+<< "iris_tree_isotonic_log_loss," + Metrics.log_loss(isotonic_tree_scores, cal_test_y, 2).to_s
+<< "iris_tree_raw_brier," + Metrics.brier_score(raw_tree_scores, cal_test_y, 2).to_s
+<< "iris_tree_isotonic_brier," + Metrics.brier_score(isotonic_tree_scores, cal_test_y, 2).to_s
+
 cluster_x = [[0, 0], [0, 1], [1, 0], [1, 1],
              [10, 10], [10, 11], [11, 10], [11, 11]]
 km = KMeans.new(2)

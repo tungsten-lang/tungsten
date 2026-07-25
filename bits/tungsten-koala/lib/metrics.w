@@ -609,18 +609,45 @@
   # score when you are REPORTING how well the probabilities are
   # calibrated. Scores first, the log_loss / roc_auc order. nil when the
   # arrays are misaligned or empty; a single present class is fine.
-  -> .brier_score(scores, actual, pos_label = 1)
+  # Optional sample weights divide by sum(w), like the other weighted
+  # classification metrics.
+  -> .brier_score(scores, actual, pos_label = 1, sample_weight = nil)
     out = nil
-    if self.aligned?(scores, actual)
+    ok = self.aligned?(scores, actual)
+    wts = nil
+    if ok && sample_weight != nil
+      wts = Estimator.weight_values(sample_weight, scores.size)
+      ok = false if wts == nil
+    if ok
       total = 0.to_f
+      weight_total = 0.to_f
       i = 0
       scores.each -> (s)
         y = 0.to_f
         y = 1.to_f if actual[i] == pos_label
         d = s.to_f - y
-        total += d * d
+        wt = 1.to_f
+        wt = wts[i] if wts != nil
+        total += d * d * wt
+        weight_total += wt
         i += 1
-      out = total / scores.size.to_f
+      out = total / weight_total
+    out
+
+  # Reliability diagram / calibration curve. `prob_true` is the observed
+  # positive rate and `prob_pred` the mean forecast in each non-empty bin;
+  # the returned CalibrationCurve also exposes counts, weight sums, ECE and
+  # maximum calibration error. Bins are equal-width (`uniform`) or
+  # equal-rank (`quantile`), matching sklearn.calibration_curve.
+  -> .calibration_curve(scores, actual, n_bins = 5, strategy = "uniform", pos_label = 1, sample_weight = nil)
+    CalibrationCurve.from(scores, actual, n_bins, strategy, pos_label, sample_weight)
+
+  # Expected calibration error: the reliability curve's absolute
+  # observed-vs-predicted gap, weighted by each bin's sample mass.
+  -> .expected_calibration_error(scores, actual, n_bins = 5, strategy = "uniform", pos_label = 1, sample_weight = nil)
+    curve = CalibrationCurve.from(scores, actual, n_bins, strategy, pos_label, sample_weight)
+    out = nil
+    out = curve.ece if curve != nil
     out
 
   # A ClassificationReport: per-class precision / recall / f1 / support

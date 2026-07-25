@@ -5,10 +5,10 @@
 #     again = Persist.loads(text)       # the model, or nil
 #     again.predict(x) == model.predict(x)      # element for element, exactly
 #
-# Every fitted koala object round-trips: LinearRegression, KNNClassifier,
-# LogisticRegression, GaussianNB, KMeans, DecisionTreeClassifier,
-# DecisionTreeRegressor, every bundled transformer, and a Pipeline of any
-# of them, nested to any depth.
+# Every fitted koala object round-trips: the linear, nearest-neighbor,
+# probabilistic, tree/forest and clustering estimators,
+# CalibratedClassifierCV (including every fold model/calibrator), every
+# bundled transformer, and a Pipeline of any of them, nested to any depth.
 #
 # --- Why a format of koala's own ---
 #
@@ -200,6 +200,7 @@
     out = DecisionTreeRegressor.load_state(state) if name == "DecisionTreeRegressor"
     out = RandomForestClassifier.load_state(state) if name == "RandomForestClassifier"
     out = RandomForestRegressor.load_state(state) if name == "RandomForestRegressor"
+    out = CalibratedClassifierCV.load_state(state) if name == "CalibratedClassifierCV"
     out = Scaler.load_state(state) if name == "Scaler"
     out = PCA.load_state(state) if name == "PCA"
     out = Imputer.load_state(state) if name == "Imputer"

@@ -690,8 +690,25 @@ use support
     self.check("brier confident", Metrics.brier_score(confident, [1, 1, 0, 0]), "0.00025")
     self.check("brier timid", Metrics.brier_score(timid, [1, 1, 0, 0]), "0.18125")
     self.check("brier ranks tie on auc", Metrics.roc_auc(confident, [1, 1, 0, 0]), Metrics.roc_auc(timid, [1, 1, 0, 0]))
+    self.check("brier sample weights", Metrics.brier_score([0.to_f, 1.to_f], [1, 1], 1, [3, 1]), "0.75")
     self.check("brier nil misaligned", Metrics.brier_score([1.to_f], [1, 0]) == nil, true)
     self.check("brier nil empty", Metrics.brier_score([], []) == nil, true)
+    # --- reliability curves + cross-fitted probability calibration
+    cal_curve = Metrics.calibration_curve(
+      [1.to_f / 10.to_f, 2.to_f / 10.to_f, 8.to_f / 10.to_f, 9.to_f / 10.to_f],
+      [0, 1, 1, 1],
+      2
+    )
+    self.check("calibration curve observed", cal_curve.prob_true.join(","), "0.5,1")
+    self.check("calibration curve predicted", cal_curve.prob_pred.join(","), "0.15,0.85")
+    self.check("calibration curve ECE", cal_curve.ece, "0.25")
+    cal_x = [[0], [1], [2], [3], [4], [5], [6], [7], [8], [9], [10], [11]]
+    cal_y = [:cold, :cold, :cold, :cold, :cold, :cold, :hot, :hot, :hot, :hot, :hot, :hot]
+    calibrated = CalibratedClassifierCV.new(DecisionTreeClassifier.new(2), :sigmoid, 3)
+    self.check("calibrated fit", calibrated.fit(cal_x, cal_y) != nil, true)
+    self.check("calibrated fold count", calibrated.calibrated_models.size, 3)
+    self.check("calibrated predictions", calibrated.predict([[2], [9]]).join(","), "cold,hot")
+    self.check("calibrated probabilities normalize", Stats.sum(calibrated.predict_proba([[2]])[0]), "1")
     # --- silhouette score: koala's first unsupervised metric
     sil_x = [[0, 0], [0, 1], [10, 0], [10, 1]]
     self.check("silhouette separated", Metrics.silhouette_score(sil_x, [0, 0, 1, 1]), "0.900249")

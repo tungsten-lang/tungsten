@@ -11,14 +11,16 @@ wall-clock performance.
 
 import numpy as np
 from sklearn.cluster import KMeans
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.datasets import load_iris
 from sklearn.linear_model import LinearRegression, LogisticRegression
-from sklearn.metrics import log_loss, silhouette_score
+from sklearn.metrics import brier_score_loss, log_loss, silhouette_score
 from sklearn.model_selection import KFold, StratifiedKFold, cross_val_score
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+from sklearn.tree import DecisionTreeClassifier
 
 
 def emit(name: str, value: float) -> None:
@@ -138,6 +140,42 @@ emit(
         iris_y,
         cv=iris_cv,
     ).mean(),
+)
+
+# The same held-out Versicolor/Virginica calibration problem as Koala:
+# first 20 rows per class for training, next 20 for testing.
+cal_train_idx = list(range(50, 70)) + list(range(100, 120))
+cal_test_idx = list(range(70, 90)) + list(range(120, 140))
+cal_train_x = (iris.data[cal_train_idx] * 10).astype(int)
+cal_train_y = iris.target[cal_train_idx]
+cal_test_x = (iris.data[cal_test_idx] * 10).astype(int)
+cal_test_y = iris.target[cal_test_idx]
+raw_tree = DecisionTreeClassifier(random_state=0).fit(cal_train_x, cal_train_y)
+sigmoid_tree = CalibratedClassifierCV(
+    DecisionTreeClassifier(random_state=0),
+    method="sigmoid",
+    cv=5,
+    ensemble=True,
+).fit(cal_train_x, cal_train_y)
+isotonic_tree = CalibratedClassifierCV(
+    DecisionTreeClassifier(random_state=0),
+    method="isotonic",
+    cv=5,
+    ensemble=True,
+).fit(cal_train_x, cal_train_y)
+raw_tree_scores = raw_tree.predict_proba(cal_test_x)[:, 1]
+sigmoid_tree_scores = sigmoid_tree.predict_proba(cal_test_x)[:, 1]
+isotonic_tree_scores = isotonic_tree.predict_proba(cal_test_x)[:, 1]
+emit("iris_tree_raw_log_loss", log_loss(cal_test_y, raw_tree_scores))
+emit("iris_tree_sigmoid_log_loss", log_loss(cal_test_y, sigmoid_tree_scores))
+emit("iris_tree_isotonic_log_loss", log_loss(cal_test_y, isotonic_tree_scores))
+emit(
+    "iris_tree_raw_brier",
+    brier_score_loss(cal_test_y, raw_tree_scores, pos_label=2),
+)
+emit(
+    "iris_tree_isotonic_brier",
+    brier_score_loss(cal_test_y, isotonic_tree_scores, pos_label=2),
 )
 
 cluster_x = np.array(

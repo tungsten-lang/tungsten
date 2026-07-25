@@ -658,6 +658,7 @@ describe "The sample-weight contract" ->
     models.push(DecisionTreeClassifier.new)
     models.push(DecisionTreeRegressor.new)
     models.push(KMeans.new(2))
+    models.push(CalibratedClassifierCV.new(DecisionTreeClassifier.new, :sigmoid, 2))
     missing = []
     models.each -> (m)
       missing.push(m.estimator_name) if !m.respond_to?("supports_sample_weight?")
@@ -666,7 +667,7 @@ describe "The sample-weight contract" ->
     models.each -> (m)
       yes.push(m.estimator_name) if m.supports_sample_weight?
     # everything but KNNClassifier, matching scikit-learn
-    expect(yes.join(",")).to eq("LinearRegression,LogisticRegression,GaussianNB,DecisionTreeClassifier,DecisionTreeRegressor,KMeans")
+    expect(yes.join(",")).to eq("LinearRegression,LogisticRegression,GaussianNB,DecisionTreeClassifier,DecisionTreeRegressor,KMeans,CalibratedClassifierCV")
 
   it "dispatches weights generically through fit_model / score_model" ->
     x = [[0], [1], [2], [3]]

@@ -749,6 +749,10 @@ describe "Metrics.brier_score" ->
   it "honors pos_label and returns nil for unusable input" ->
     scores = [1.to_f / 10.to_f, 4.to_f / 10.to_f, 35.to_f / 100.to_f, 8.to_f / 10.to_f]
     expect(Metrics.brier_score(scores, [1, 1, 2, 2], 2).to_s).to be_num("0.158125")
+    # Three copies of the wrong first row plus one correct row:
+    # (3*1 + 0) / 4 = 0.75.
+    expect(Metrics.brier_score([0.to_f, 1.to_f], [1, 1], 1, [3, 1]).to_s).to eq("0.75")
+    expect(Metrics.brier_score([0.to_f, 1.to_f], [1, 1], 1, [1])).to be_nil
     expect(Metrics.brier_score([1.to_f], [1, 0])).to be_nil
     expect(Metrics.brier_score([], [])).to be_nil
 

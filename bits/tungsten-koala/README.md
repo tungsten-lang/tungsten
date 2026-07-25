@@ -42,6 +42,8 @@ Metrics.log_loss(scores, actual)     # => 0.216162  binary cross-entropy (log lo
 Metrics.multiclass_log_loss(probability_rows, actual, classes)
                                      # => softmax cross-entropy
 Metrics.brier_score(scores, actual)  # => 0.0375  BOUNDED calibration error
+Metrics.calibration_curve(scores, actual, 10, :uniform)
+                                     # => reliability bins + ECE/MCE
 Metrics.silhouette_score(x, labels)  # => cluster quality — the metric KMeans lacked
 
 v = Vector.new([1, 2, 3])
@@ -144,6 +146,14 @@ multi.predict_proba([[0, 0, 0]])     # => [[1/3, 1/3, 1/3]] in classes order
 multi.predict_proba(mx, :b)          # => flat P(:b) column
 multi.decision_function(mx)          # => raw class logits
 multi.log_loss(mx, my)               # => multiclass cross-entropy
+
+# Probability calibration — cross-fitted Platt sigmoid or isotonic PAVA
+base = Pipeline.new([Scaler.new(:standard), DecisionTreeClassifier.new])
+cal = CalibratedClassifierCV.new(base, :sigmoid, 5)
+cal.fit(x_train, y_train)             # held-out fold predictions fit calibrators
+cal.predict_proba(x_test)             # full calibrated probability rows
+cal.predict_proba(x_test, :positive)  # one flat class column
+CalibratedClassifierCV.new(base, :isotonic, 5)
 
 # Classification — GaussianNB, MULTICLASS Gaussian naive Bayes (closed form)
 nb = GaussianNB.new                  # var_smoothing = 1e-9 (sklearn's default)
@@ -300,7 +310,7 @@ algorithms — answers one declared interface, defined in
 | --- | --- | --- |
 | `Tunable` | `params` `with_params(overrides)` | Scaler, Imputer, Encoder, PCA (and every Estimable, which restates the pair) |
 | `Estimable` | `fitted?` `predict(x)` `supervised?` `supports_sample_weight?` `params` `with_params(overrides)` `estimator_name` | every estimator below, plus `Pipeline` |
-| `SupervisedEstimator` | `fit(x, y, sample_weight)` `score(x, y, sample_weight)` | LinearRegression, Lasso, ElasticNet, KNNClassifier, LogisticRegression, GaussianNB, DecisionTreeClassifier, DecisionTreeRegressor, RandomForestClassifier, RandomForestRegressor |
+| `SupervisedEstimator` | `fit(x, y, sample_weight)` `score(x, y, sample_weight)` | LinearRegression, Lasso, ElasticNet, KNNClassifier, LogisticRegression, GaussianNB, DecisionTreeClassifier, DecisionTreeRegressor, RandomForestClassifier, RandomForestRegressor, CalibratedClassifierCV |
 | `UnsupervisedEstimator` | `fit(x, sample_weight)` `score(x, sample_weight)` | KMeans, DBSCAN |
 
 `Tunable` is the hyperparameter half on its own — what a search needs and
@@ -750,8 +760,65 @@ Pipeline declares only `is Estimable`, and not one of the two arity
 traits, precisely because that arity is its tail's to decide at runtime
 rather than a property of the class — `Estimator.fit_model` /
 `.score_model` read `supervised?` and dispatch. Today the tail estimator
-must be a supervised one: fitting without `y` transforms through every
-step, which an unsupervised tail has no `transform` for.
+may be supervised or unsupervised: `Pipeline.new([Scaler.new,
+KMeans.new(3)])` fits without `y`, transforms through the scaler, and
+delegates prediction and negative-inertia scoring to KMeans.
+
+Classifier Pipelines also forward `classes`, `predict_proba(x, label)`
+and `decision_function(x)` when their tail exposes them. That is not
+cosmetic metadata: probability calibration and multiclass metrics have
+to know which class each column names, and preprocessing must not hide
+it.
+
+## Probability calibration
+
+Accuracy and ROC-AUC can be excellent while the probabilities are
+unsafe to act on. A tree that emits 0 or 1 for every leaf may rank the
+rows correctly, yet one confident miss dominates log loss. Koala now
+ships both sides of the calibration workflow:
+
+```tungsten
+curve = Metrics.calibration_curve(scores, actual, 10, :uniform, :yes)
+curve.prob_true       # observed positive rate in each non-empty bin
+curve.prob_pred       # mean forecast in the same bins
+curve.counts          # rows per bin; .weight_sums for weighted curves
+curve.ece             # expected calibration error, weighted by bin mass
+curve.mce             # largest bin gap
+
+base = Pipeline.new([
+  [:scale, Scaler.new(:standard)],
+  [:tree, DecisionTreeClassifier.new]
+])
+
+cal = CalibratedClassifierCV.new(base, :sigmoid, 5)
+cal.fit(x_train, y_train)
+cal.predict_proba(x_test)            # n-by-k, in cal.classes order
+cal.predict_proba(x_test, :yes)      # flat P(:yes) column
+```
+
+`Metrics.calibration_curve` follows sklearn's non-empty-bin layout with
+equal-width `:uniform` or equal-rank `:quantile` bins. It additionally
+accepts sample weights and reports ECE/MCE directly. Inputs outside
+`[0,1]`, bad bin counts/strategies, misalignment, and unusable weights
+return nil.
+
+`CalibratedClassifierCV` is genuinely **cross-fitted**. For every
+stratified fold it fits a fresh clone of the base estimator on the other
+folds, learns the calibrator only from that fold's held-out responses,
+and averages the calibrated fold models at prediction. No row calibrates
+the same model that trained on it. Binary calibration learns
+`P(classes[1])` and complements it; multiclass learns one-vs-rest
+calibrators and normalizes each row.
+
+`:sigmoid` is Platt's Bayesian-smoothed logistic mapping, solved by
+deterministic Newton steps. `:isotonic` is weighted
+pair-adjacent-violators regression with clipped linear interpolation.
+Both methods accept sample weights, opaque labels, multiclass targets,
+and either a fold count or a custom splitter. The wrapper is itself a
+`SupervisedEstimator`: it cross-validates, serves as a Pipeline tail,
+persists its complete fold ensemble exactly, and exposes the base
+estimator's knobs under `"estimator.<param>"`, so GridSearch can tune
+tree depth and calibration method together.
 
 ## Cross-validation splitters
 
@@ -970,21 +1037,30 @@ learned state cannot leak between folds.
 `examples/reference_ml.w` is a self-checking set of deterministic
 end-to-end problems: nonlinear XOR, exact quadratic regression under CV,
 three-class GaussianNB and multinomial LogisticRegression under
-stratified CV, balanced multiclass probability checks, and KMeans
-evaluated by silhouette rather than its training objective.
+stratified CV, balanced multiclass probability checks, a cross-fitted
+calibrator wrapped around a preprocessing Pipeline, and KMeans evaluated
+by silhouette rather than its training objective.
 
 The matching `benchmarks/reference_koala.w` and
 `benchmarks/reference_sklearn.py` use identical fixtures. Against
-scikit-learn 1.9.0, all ten gates pass: raw XOR accuracy
+scikit-learn 1.9.0, all fifteen numerical gates and three calibration
+quality gates pass: raw XOR accuracy
 0.5, polynomial XOR accuracy 1, quadratic mean CV R² 1, multiclass
 GaussianNB and LogisticRegression mean CV accuracy 1, balanced-center
 multiclass log loss `ln(3)`, a canonical 60-row Iris subset evaluated by
-scaled LogisticRegression, GaussianNB and scaled 3-NN, and two-box
-silhouette 0.91952609056736. Nine gates agree to `1e-12`; Iris GaussianNB
-differs by one row (Koala 0.9667, sklearn 0.95) and has an explicit 0.02
-held-out-quality tolerance. `benchmarks/compare_reference.py` compiles
-Koala, runs both sides, prints every delta/tolerance, and fails any gate
-outside its contract.
+scaled LogisticRegression, GaussianNB and scaled 3-NN, held-out
+Versicolor/Virginica tree calibration, and two-box silhouette
+0.91952609056736.
+
+On that held-out calibration problem, Koala's sigmoid log loss is
+0.3533 against sklearn's 0.3463, isotonic log loss is 0.2513 against
+0.2580, and isotonic Brier error is 0.06619 against 0.06752. Both Koala
+log-loss calibrators cut the raw tree's loss by more than 86%, and
+isotonic cuts Brier error by 11.8%. The comparator enforces those
+relative gains in addition to implementation-to-implementation
+tolerances. `benchmarks/compare_reference.py` compiles Koala, runs both
+sides, prints every delta/tolerance and quality ratio, and fails any
+gate outside its contract.
 
 ## Model persistence
 
@@ -1006,7 +1082,9 @@ Every fitted koala object round-trips: every estimator, the
 transformers, and a `Pipeline` of any of them nested to any depth —
 including a decision tree's recursive node structure, which needs no
 special case because a node is a plain hash and the format encodes
-hashes.
+hashes. A `CalibratedClassifierCV` persists every fitted fold model and
+every sigmoid/isotonic calibrator, so its averaged serving probabilities
+are identical after reload too.
 
 **The guarantee is exactness.** A loaded model predicts *identically* to
 the saved one, element for element — not to a tolerance. That is what
@@ -1621,14 +1699,18 @@ follows scikit-learn exactly and so differs from `RocCurve`'s: points
 run in ASCENDING threshold order with a closing `(recall 0, precision 1)`
 point that has no threshold, making the curve arrays one longer than
 `.thresholds`. Unlike `roc_curve` it survives a single present class.
-`Metrics.brier_score(scores, actual, pos_label)` is `mean((p - y)²)`,
+`Metrics.brier_score(scores, actual, pos_label, sample_weight)` is
+`mean((p - y)²)`,
 log loss's BOUNDED sibling: both measure calibration rather than
 ranking, but log loss is unbounded and one confident miss can dominate
 it, while the Brier score's worst case per row is 1 — 0 perfect, 0.25 a
 constant coin flip, 1 confidently wrong throughout. Two models that rank
 identically (`roc_auc` 1 for both) separate cleanly under it, 0.00025
 for the confident one against 0.18125 for the hedging one. Optimize log
-loss; REPORT the Brier score.
+loss; REPORT the Brier score. `Metrics.calibration_curve` then shows
+where the error lives by binning forecasts into observed-vs-predicted
+rates, with `.ece` and `.mce` summarizing the weighted and worst gaps;
+see “Probability calibration” above for the cross-fitted correction.
 
 Finally, `Metrics.silhouette_score(x, labels)` is koala's first
 UNSUPERVISED metric, and the question `KMeans` previously could not be

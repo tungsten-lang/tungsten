@@ -16,6 +16,37 @@ METRIC_TOLERANCES = {
     # implementations' numeric conventions. This gate is a held-out quality
     # comparison, not a claim of coefficient identity.
     "iris_gaussian_nb_cv_mean": 0.02,
+    # Koala clips probabilities at 1e-15; sklearn 1.9 clips at the f64
+    # machine epsilon. The three identical confident misses therefore have
+    # different finite raw-tree log losses by definition.
+    "iris_tree_raw_log_loss": 0.12,
+    # The implementations cross-fit the same tree folds; their Platt solver
+    # and isotonic threshold pruning differ slightly but must land at the
+    # same held-out calibration quality.
+    "iris_tree_sigmoid_log_loss": 0.01,
+    "iris_tree_isotonic_log_loss": 0.01,
+    "iris_tree_isotonic_brier": 0.002,
+}
+
+# Beyond closeness to sklearn, calibration must actually solve the problem:
+# each calibrated log loss must be below one fifth of the overconfident raw
+# tree's, and isotonic Brier error must fall by at least five percent.
+QUALITY_RATIOS = {
+    "sigmoid_log_loss_vs_raw": (
+        "iris_tree_sigmoid_log_loss",
+        "iris_tree_raw_log_loss",
+        0.20,
+    ),
+    "isotonic_log_loss_vs_raw": (
+        "iris_tree_isotonic_log_loss",
+        "iris_tree_raw_log_loss",
+        0.20,
+    ),
+    "isotonic_brier_vs_raw": (
+        "iris_tree_isotonic_brier",
+        "iris_tree_raw_brier",
+        0.95,
+    ),
 }
 
 
@@ -68,6 +99,21 @@ for name in koala:
     print(
         f"{name},{koala[name]:.17g},{sklearn[name]:.17g},"
         f"{delta:.3g},{tolerance:.3g},{status}"
+    )
+
+print("quality_gate,koala_ratio,sklearn_ratio,max_ratio,status")
+for name, (calibrated_name, raw_name, max_ratio) in QUALITY_RATIOS.items():
+    koala_ratio = koala[calibrated_name] / koala[raw_name]
+    sklearn_ratio = sklearn[calibrated_name] / sklearn[raw_name]
+    status = (
+        "PASS"
+        if koala_ratio <= max_ratio and sklearn_ratio <= max_ratio
+        else "FAIL"
+    )
+    failed = failed or status == "FAIL"
+    print(
+        f"{name},{koala_ratio:.17g},{sklearn_ratio:.17g},"
+        f"{max_ratio:.3g},{status}"
     )
 
 if failed:

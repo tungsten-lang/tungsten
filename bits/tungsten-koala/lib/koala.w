@@ -12,7 +12,9 @@
 # — Lloyd's algorithm, koala's first
 # unsupervised learner), model evaluation (KFold / CrossValidation — k-fold
 # cross-validation that re-fits an estimator on each fold and averages
-# the held-out score, supervised or not), and model selection (GridSearch
+# the held-out score, supervised or not), probability calibration
+# (CalibratedClassifierCV — cross-fitted sigmoid or isotonic mappings plus
+# reliability curves), and model selection (GridSearch
 # — exhaustive hyperparameter search scoring every point of a param grid
 # by cross-validation, through the estimator contract alone).
 #
@@ -36,7 +38,7 @@
 # refuses them explicitly (`supports_sample_weight?` is false and fit
 # returns nil) exactly as scikit-learn's KNeighborsClassifier has no
 # sample_weight. Metrics.accuracy / precision / recall / f1 / fbeta /
-# mse / rmse / mae / r2 take an optional weight vector too, so a weighted
+# mse / rmse / mae / r2 / log_loss / brier_score take an optional weight vector too, so a weighted
 # `score` means what it says. See lib/estimator_base.w for the full
 # rationale and spec/sample_weight_spec.w for the proofs.
 #
@@ -98,6 +100,7 @@ use polynomial_features
 use splitter
 use pipeline
 use cross_validation
+use calibration
 use kmeans
 use dbscan
 use grid_search

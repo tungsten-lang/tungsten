@@ -35,7 +35,7 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
 5. **LinAlg** — rank-revealing QR, rank, thin SVD/Cholesky as pure follow-ons.
 6. **Estimators** — multiclass logistic (shipped); KNN regressor + distance weights; feature selection; SVM; gradient boosting.
 7. **Trees** — Gini/MSE feature importances; tree export; permutation importance (ablation).
-8. **Calibration** — `CalibratedClassifierCV` (Platt / isotonic).
+8. **Calibration** — `CalibratedClassifierCV` (Platt / isotonic). **Shipped.**
 9. **DataFrame parity** — multi-key group_by, value_counts, sort, drop_duplicates, melt, fillna, masks.
 10. **Time series** — shift, lag, gap-aware resample.
 11. **PG** — optional `DataFrame.from_sql` via `tungsten-pg`.
@@ -60,24 +60,30 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
   stable multinomial softmax, probability matrices / class columns, raw
   decision scores, multiclass log loss, weights, persistence, CV,
   Pipeline, and GridSearch support.
-- A live scikit-learn 1.9.0 differential now covers ten outcomes across
+- `CalibratedClassifierCV` now cross-fits sigmoid/Platt or weighted
+  isotonic calibrators around bare classifiers and preprocessing
+  Pipelines; binary and multiclass probabilities, sample weights,
+  GridSearch, custom splitters, calibration curves/ECE/MCE, and exact
+  persistence are covered on both engines.
+- A live scikit-learn 1.9.0 differential now covers fifteen numerical
+  outcomes and three calibration-quality ratios across
   nonlinear classification, polynomial regression, multiclass
-  classification/probability scoring, a canonical Iris subset, and
-  clustering. Nine agree to 1e-12; Iris GaussianNB differs by one of 60
-  rows in Koala's favor and passes an explicit 0.02 quality tolerance.
-- 14 interpreted and compiled spec suites cover 632 examples; the
-  framework-free smoke test adds 378 checks on each engine.
+  classification/probability scoring, a canonical Iris subset, held-out
+  probability calibration, and clustering. On held-out Iris, Koala
+  sigmoid/isotonic log loss is 0.353/0.251 against sklearn's 0.346/0.258;
+  both cut the raw tree loss by over 86%.
+- 15 interpreted and compiled spec suites cover 653 examples; the
+  framework-free smoke test adds 386 checks on each engine.
 
 ## Highest-leverage next tranche
 
-1. Probability calibration (`CalibratedClassifierCV`) and calibration
-   curves, measured by log loss and Brier score.
-2. `ColumnSelector` / `FunctionTransformer`, then mixed numeric/categorical
+1. `ColumnSelector` / `FunctionTransformer`, then mixed numeric/categorical
    column pipelines.
-3. Broader sklearn differentials on standard tabular datasets plus
+2. Broader sklearn differentials on standard tabular datasets plus
    wall-clock and memory baselines.
-4. Gradient boosting and permutation importance before widening into GPU
+3. Gradient boosting and permutation importance before widening into GPU
    execution.
+4. KNN classifier distance weights/probabilities and SVM classification.
 
 ## Compiler / runtime fixes koala depends on
 

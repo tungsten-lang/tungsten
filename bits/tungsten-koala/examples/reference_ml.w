@@ -8,7 +8,8 @@
 # These are small, deterministic capability probes, not claims about
 # large-scale throughput: nonlinear classification, exact polynomial
 # regression under cross-validation, multiclass classification with
-# stratification, and unsupervised cluster-quality evaluation.
+# stratification, cross-fitted probability calibration around a preprocessing
+# Pipeline, and unsupervised cluster-quality evaluation.
 
 use koala
 
@@ -87,7 +88,24 @@ ok = false if center[0].size != 3
 center[0].each -> (p)
   ok = false if LinAlg.fabs(p - 1.to_f / 3.to_f) > 1.to_f / 1000000.to_f
 
-# 5. Two compact boxes ten units apart. KMeans recovers the two groups;
+# 5. A cross-fitted sigmoid calibrator wraps a full preprocessing Pipeline,
+# preserving class metadata and returning normalized held-out probabilities.
+cal_x = [[0], [1], [2], [3], [4], [5], [6], [7], [8], [9], [10], [11]]
+cal_y = [:cold, :cold, :cold, :cold, :cold, :cold,
+         :hot, :hot, :hot, :hot, :hot, :hot]
+cal_base = Pipeline.new([
+  [:scale, Scaler.new(:standard)],
+  [:tree, DecisionTreeClassifier.new(2)]
+])
+calibrated = CalibratedClassifierCV.new(cal_base, :sigmoid, 3)
+calibrated.fit(cal_x, cal_y)
+cal_probs = calibrated.predict_proba([[2], [9]])
+lines.push("calibrated Pipeline probabilities " + cal_probs.to_s)
+ok = false if calibrated.predict([[2], [9]]).join(",") != "cold,hot"
+cal_probs.each -> (row)
+  ok = false if LinAlg.fabs(Stats.sum(row) - 1.to_f) > 1.to_f / 1000000.to_f
+
+# 6. Two compact boxes ten units apart. KMeans recovers the two groups;
 # silhouette checks separation independently of the training objective.
 cluster_x = [[0, 0], [0, 1], [1, 0], [1, 1],
              [10, 10], [10, 11], [11, 10], [11, 11]]

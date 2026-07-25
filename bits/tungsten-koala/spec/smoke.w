@@ -498,6 +498,17 @@ use support
     ])
     self.check("mixed dataframe CV", CrossValidation.cross_val_mean(mixed_pipe, mixed_frame, mixed_labels, StratifiedKFold.new(3)), 1)
     self.check("mixed dataframe prototype stays fresh", mixed_pipe.fitted?, false)
+    mixed_pipe.fit(mixed_frame, mixed_labels)
+    mixed_importance = PermutationImportance.compute(mixed_pipe, mixed_frame, mixed_labels, 8, 42)
+    self.check("permutation importance result", mixed_importance != nil, true)
+    self.check("permutation importance names", mixed_importance.feature_names.join(","), "age,city")
+    self.check("permutation importance baseline", mixed_importance.baseline_score, 1)
+    self.check("permutation importance repeat shape", mixed_importance.importances[0].size, 8)
+    self.check("permutation importance age zero", mixed_importance.importances_mean[0], 0)
+    self.check("permutation importance city signal", mixed_importance.importances_mean[1] > 1.to_f / 4.to_f, true)
+    self.check("permutation importance summary", mixed_importance.to_df.column_names.join(","), "feature,importance_mean,importance_std")
+    mixed_importance_again = PermutationImportance.compute(mixed_pipe, mixed_frame, mixed_labels, 8, 42)
+    self.check("permutation importance deterministic", mixed_importance_again.importances.to_s, mixed_importance.importances.to_s)
 
     # --- DecisionTreeRegressor (the same tree, MSE criterion) ---
     # x = 0,1,10,11 / y = 1,1,9,9: root mean 5, variance 16; splitting at

@@ -34,7 +34,8 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
 4. **Sparse + matmul** — core SparseMatrix facade; BLAS-backed matmul.
 5. **LinAlg** — rank-revealing QR, rank, thin SVD/Cholesky as pure follow-ons.
 6. **Estimators** — multiclass logistic (shipped); KNN regressor + distance weights; feature selection; SVM; gradient boosting.
-7. **Trees** — Gini/MSE feature importances; tree export; permutation importance (ablation).
+7. **Trees / inspection** — permutation importance (shipped); Gini/MSE
+   feature importances and tree export remain.
 8. **Calibration** — `CalibratedClassifierCV` (Platt / isotonic). **Shipped.**
 9. **DataFrame parity** — multi-key group_by, value_counts, sort, drop_duplicates, melt, fillna, masks.
 10. **Time series** — shift, lag, gap-aware resample.
@@ -76,26 +77,33 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
   nested tuning, and persistence. `KNeighborsRegressor` uses the same
   corrected distance rule and averages duplicate exact matches like
   sklearn.
-- A live scikit-learn 1.9.0 differential now covers twenty-two numerical
-  outcomes, three calibration-quality ratios, and two capability gains
+- `PermutationImportance` now performs deterministic repeated score
+  ablation through the generic estimator contract without refitting. It
+  preserves mixed DataFrames, supports supervised/unsupervised and weighted
+  scores, retains negative importances, exposes named summaries, and is
+  covered across linear, KNN, KMeans, and heterogeneous Pipeline models on
+  both engines.
+- A live scikit-learn 1.9.0 differential now covers twenty-four numerical
+  outcomes, three calibration-quality ratios, and three capability gains
   across
   nonlinear classification, polynomial regression, multiclass
   classification/probability scoring, a canonical Iris subset,
   heterogeneous preprocessing, held-out probability calibration, and
   clustering. The categorical branch improves mixed-data CV accuracy
   from 0.667 to 1.0 and distance-weighted KNN improves its reference
-  accuracy from 0.5 to 1.0 in both implementations. On held-out Iris, Koala
+  accuracy from 0.5 to 1.0 in both implementations. Mixed-pipeline
+  permutation importance is age/city 0/0.422 in Koala versus 0/0.439 in
+  sklearn. On held-out Iris, Koala
   sigmoid/isotonic log loss is 0.353/0.251 against sklearn's 0.346/0.258;
   both cut the raw tree loss by over 86%.
-- 17 interpreted and compiled spec suites cover 697 examples; the
-  framework-free smoke test adds 405 checks on each engine.
+- 18 interpreted and compiled spec suites cover 715 examples; the
+  framework-free smoke test adds 413 checks on each engine.
 
 ## Highest-leverage next tranche
 
 1. Broader sklearn differentials on standard tabular datasets plus
    wall-clock and memory baselines.
-2. Gradient boosting and permutation importance before widening into GPU
-   execution.
+2. Gradient boosting before widening into GPU execution.
 3. SVM classification and probability calibration.
 4. A persistable named-operation alternative to arbitrary-closure
    `FunctionTransformer`.

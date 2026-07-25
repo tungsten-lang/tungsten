@@ -18,7 +18,9 @@
 # (CalibratedClassifierCV — cross-fitted sigmoid or isotonic mappings plus
 # reliability curves), and model selection (GridSearch
 # — exhaustive hyperparameter search scoring every point of a param grid
-# by cross-validation, through the estimator contract alone).
+# by cross-validation, through the estimator contract alone), plus model
+# inspection (PermutationImportance — repeated score ablation for any fitted
+# estimator or mixed-column Pipeline).
 #
 # All estimators answer ONE declared contract (lib/estimator_base.w):
 # `is Estimable` plus `is SupervisedEstimator` or
@@ -104,6 +106,7 @@ use splitter
 use pipeline
 use column_transformer
 use cross_validation
+use permutation_importance
 use calibration
 use kmeans
 use dbscan

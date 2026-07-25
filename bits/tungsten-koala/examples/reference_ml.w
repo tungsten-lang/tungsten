@@ -9,8 +9,9 @@
 # large-scale throughput: nonlinear classification, exact polynomial
 # regression under cross-validation, multiclass classification with
 # stratification, mixed numeric/categorical preprocessing, distance-weighted
-# nearest neighbours, cross-fitted probability calibration around a
-# preprocessing Pipeline, and unsupervised cluster-quality evaluation.
+# nearest neighbours, model-agnostic permutation importance, cross-fitted
+# probability calibration around a preprocessing Pipeline, and unsupervised
+# cluster-quality evaluation.
 
 use koala
 
@@ -118,6 +119,18 @@ mixed_scores = CrossValidation.cross_val_score(
 )
 lines.push("mixed ColumnTransformer CV " + mixed_scores.to_s)
 ok = false if mixed_scores.to_s != "\[1, 1, 1\]"
+mixed_pipe.fit(mixed_x, mixed_y)
+mixed_importance = PermutationImportance.compute(
+  mixed_pipe, mixed_x, mixed_y, 12, 42
+)
+lines.push(
+  "mixed permutation importance " +
+  mixed_importance.feature_names.join(",") + " " +
+  mixed_importance.importances_mean.to_s
+)
+ok = false if mixed_importance.feature_names.join(",") != "age,city"
+ok = false if LinAlg.fabs(mixed_importance.importances_mean[0]) > 1.to_f / 1000000000.to_f
+ok = false if mixed_importance.importances_mean[1] <= 1.to_f / 4.to_f
 
 # 6. Distance-weighted KNN fixes a majority-vote error and exposes calibrated
 # class probabilities; the regressor uses the same inverse-Euclidean rule.

@@ -13,6 +13,7 @@ import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.datasets import load_iris
+from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.metrics import brier_score_loss, log_loss, silhouette_score
 from sklearn.model_selection import KFold, StratifiedKFold, cross_val_score
@@ -188,6 +189,17 @@ emit(
     "mixed_column_transform_cv_mean",
     cross_val_score(mixed_columns, mixed_x, mixed_y, cv=mixed_cv).mean(),
 )
+mixed_columns.fit(mixed_x, mixed_y)
+mixed_importance = permutation_importance(
+    mixed_columns,
+    mixed_x,
+    mixed_y,
+    n_repeats=20,
+    random_state=42,
+    scoring="accuracy",
+)
+emit("mixed_permutation_age", mixed_importance.importances_mean[0])
+emit("mixed_permutation_city", mixed_importance.importances_mean[1])
 
 # Uniform versus inverse-Euclidean-distance KNN on the same hand-computable
 # classification and regression fixture as Koala.

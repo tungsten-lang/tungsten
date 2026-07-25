@@ -286,6 +286,16 @@ GridSearch.new(pipe, { "scale.kind" => [:standard, :min_max],
                        "model.alpha" => [1, 10] }, 2)  # tune PREPROCESSING
                                      # and the model in ONE grid
 
+# Model inspection — repeated score ablation, independent of estimator type
+importance = PermutationImportance.compute(fitted_model, x_test, y_test, 10, 42)
+importance.baseline_score            # the unpermuted score
+importance.feature_names             # DataFrame names, or positional x0/x1/...
+importance.importances               # feature-major repeat vectors
+importance.importances_mean          # mean score decrease per feature
+importance.importances_std           # population std across repeats
+importance.to_df                     # feature / importance_mean / importance_std
+PermutationImportance.compute(km, x, nil, 10, 42)  # unsupervised works too
+
 # The estimator contract — one uniform interface, whatever the model
 m.supervised?                        # => true; false for KMeans / DBSCAN (unsupervised)
 m.supports_sample_weight?            # => true; false for KNNClassifier alone
@@ -1095,6 +1105,34 @@ silently dropping the hard fold. Every fold gets a fresh
 `with_params(params)` clone: the caller's prototype remains unfitted and
 learned state cannot leak between folds.
 
+## Permutation feature importance
+
+`PermutationImportance.compute(model, x, y = nil, n_repeats = 5,
+seed = 42, sample_weight = nil)` explains an already-fitted model by
+repeatedly shuffling one source column and measuring the score decrease:
+`baseline_score - permuted_score`. It is estimator-independent—the same
+code inspects a linear model, forest, nearest-neighbor learner, clustering
+model, or a complete preprocessing `Pipeline`—and it never refits or mutates
+the model.
+
+The result retains `baseline_score`, original `feature_names`, every
+feature-major repeat vector in `importances`, and its population
+`importances_mean` / `importances_std`; `to_df` returns those summaries as
+named columns. A plain row array receives positional names `x0`, `x1`, …
+while a DataFrame keeps its exact names and cell types. That preservation is
+essential for mixed pipelines: permuting `:city` must send strings through
+the fitted `ColumnTransformer` and `Encoder`, not discard the column through
+a numeric-matrix conversion.
+
+Every Koala estimator uses a higher-is-better score, including KMeans's
+negative inertia, so the same subtraction has one meaning across the
+framework. A negative importance is retained rather than clamped: it says
+that this sample scored better after the shuffle. The integer seed drives
+the shared MINSTD stream and is deterministic on both engines. Supervised
+models require aligned `y`; unsupervised models ignore it. Optional sample
+weights affect scoring only. Empty, one-row, ragged, duplicate-name,
+misaligned, unfitted, and otherwise unusable inputs return nil.
+
 ## Reference ML differential
 
 `examples/reference_ml.w` is a self-checking set of deterministic
@@ -1102,13 +1140,13 @@ end-to-end problems: nonlinear XOR, exact quadratic regression under CV,
 three-class GaussianNB and multinomial LogisticRegression under
 stratified CV, balanced multiclass probability checks, heterogeneous
 numeric/categorical column composition, inverse-distance KNN
-classification/regression, a cross-fitted calibrator wrapped around a
-preprocessing Pipeline, and KMeans evaluated by silhouette rather than
-its training objective.
+classification/regression, permutation importance over a mixed-column
+Pipeline, a cross-fitted calibrator wrapped around a preprocessing Pipeline,
+and KMeans evaluated by silhouette rather than its training objective.
 
 The matching `benchmarks/reference_koala.w` and
 `benchmarks/reference_sklearn.py` use identical fixtures. Against
-scikit-learn 1.9.0, all twenty-two numerical gates and five capability /
+scikit-learn 1.9.0, all twenty-four numerical gates and six capability /
 quality gates pass: raw XOR accuracy
 0.5, polynomial XOR accuracy 1, quadratic mean CV R² 1, multiclass
 GaussianNB and LogisticRegression mean CV accuracy 1, balanced-center
@@ -1117,7 +1155,10 @@ scaled LogisticRegression, GaussianNB and scaled 3-NN, mixed-column
 preprocessing, held-out Versicolor/Virginica tree calibration, and
 two-box silhouette 0.91952609056736. On the mixed frame, both
 implementations improve from numeric-only CV accuracy 0.6667 to 1.0
-after adding the one-hot categorical branch. On the KNN fixture,
+after adding the one-hot categorical branch. Permuting age then has exactly
+zero importance while permuting city costs 0.4222 accuracy in Koala and
+0.4389 in sklearn, independently confirming that the fitted heterogeneous
+Pipeline learned the intended feature. On the KNN fixture,
 inverse-distance weighting improves held-out accuracy from 0.5 to 1.0;
 Koala matches sklearn's exact `12/19` class probability, `31/19`
 regression prediction, and duplicate-exact-match mean.

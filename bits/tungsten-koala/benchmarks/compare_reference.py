@@ -26,6 +26,11 @@ METRIC_TOLERANCES = {
     "iris_tree_sigmoid_log_loss": 0.01,
     "iris_tree_isotonic_log_loss": 0.01,
     "iris_tree_isotonic_brier": 0.002,
+    # Both implementations expose the same accuracy drop, but consume their
+    # deterministic RNG streams differently. Twenty repeats make the mean
+    # stable enough for a capability comparison without pretending that the
+    # individual permutations are identical.
+    "mixed_permutation_city": 0.10,
 }
 
 # Beyond closeness to sklearn, calibration must actually solve the problem:
@@ -57,6 +62,11 @@ QUALITY_GAINS = {
         "mixed_column_transform_cv_mean",
         "mixed_numeric_only_cv_mean",
         0.20,
+    ),
+    "mixed_category_importance_vs_age": (
+        "mixed_permutation_city",
+        "mixed_permutation_age",
+        0.25,
     ),
     "knn_distance_vs_uniform": (
         "knn_distance_accuracy",

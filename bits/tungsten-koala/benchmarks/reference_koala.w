@@ -86,6 +86,12 @@ mixed_columns = Pipeline.new([
 ])
 << "mixed_numeric_only_cv_mean," + CrossValidation.cross_val_mean(numeric_only, mixed_x, mixed_y, mixed_cv).to_s
 << "mixed_column_transform_cv_mean," + CrossValidation.cross_val_mean(mixed_columns, mixed_x, mixed_y, mixed_cv).to_s
+mixed_columns.fit(mixed_x, mixed_y)
+mixed_importance = PermutationImportance.compute(
+  mixed_columns, mixed_x, mixed_y, 20, 42
+)
+<< "mixed_permutation_age," + mixed_importance.importances_mean[0].to_s
+<< "mixed_permutation_city," + mixed_importance.importances_mean[1].to_s
 
 # KNN weighting parity. Uniform 3-NN lets two far class-b rows outvote the
 # nearby class-a row at x=1; inverse Euclidean distance reverses that error.

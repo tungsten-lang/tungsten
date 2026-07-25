@@ -29013,6 +29013,105 @@ WValue w_array_csort_range(WValue arr, WValue lo, WValue hi) {
     return w_array_csort_impl(arr, w_as_int(lo), w_as_int(hi), 0);
 }
 
+/* Explicit alternative sort algorithms — Array#tsort / #skasort / #wolfsort.
+ * Integer typed arrays only (unsigned comparison, matching Array#sort);
+ * float/generic arrays fall back to Array#sort. timsort is stable + adaptive
+ * to near-sorted data; skasort is an in-place MSD radix; wolfsort is a
+ * distribution+pdqsort hybrid. All templated per element width. */
+#define TIM_T uint8_t
+#define TIM_SUF u8
+#include "timsort.inc"
+#undef TIM_T
+#undef TIM_SUF
+#define TIM_T uint16_t
+#define TIM_SUF u16
+#include "timsort.inc"
+#undef TIM_T
+#undef TIM_SUF
+#define TIM_T uint32_t
+#define TIM_SUF u32
+#include "timsort.inc"
+#undef TIM_T
+#undef TIM_SUF
+#define TIM_T uint64_t
+#define TIM_SUF u64
+#include "timsort.inc"
+#undef TIM_T
+#undef TIM_SUF
+
+#define SKA_T uint8_t
+#define SKA_SUF u8
+#include "skasort.inc"
+#undef SKA_T
+#undef SKA_SUF
+#define SKA_T uint16_t
+#define SKA_SUF u16
+#include "skasort.inc"
+#undef SKA_T
+#undef SKA_SUF
+#define SKA_T uint32_t
+#define SKA_SUF u32
+#include "skasort.inc"
+#undef SKA_T
+#undef SKA_SUF
+#define SKA_T uint64_t
+#define SKA_SUF u64
+#include "skasort.inc"
+#undef SKA_T
+#undef SKA_SUF
+
+#define WOLF_T uint8_t
+#define WOLF_SUF u8
+#include "wolfsort.inc"
+#undef WOLF_T
+#undef WOLF_SUF
+#define WOLF_T uint16_t
+#define WOLF_SUF u16
+#include "wolfsort.inc"
+#undef WOLF_T
+#undef WOLF_SUF
+#define WOLF_T uint32_t
+#define WOLF_SUF u32
+#include "wolfsort.inc"
+#undef WOLF_T
+#undef WOLF_SUF
+#define WOLF_T uint64_t
+#define WOLF_SUF u64
+#include "wolfsort.inc"
+#undef WOLF_T
+#undef WOLF_SUF
+
+#define DEFINE_ARRAY_ALGO_SORT(fname, algo)                                     \
+WValue fname(WValue arr) {                                                       \
+    WArray *src = (WArray *)w_as_ptr(arr);                                       \
+    if (array_is_float(src) || src->ebits == 65) return w_array_sort(arr);       \
+    WValue result = w_array_new(src->ebits, src->size);                          \
+    WArray *dst = (WArray *)w_as_ptr(result);                                    \
+    int64_t nbytes = array_byte_size(src->ebits, src->size);                     \
+    int64_t src_off = array_byte_size(src->ebits, src->start);                   \
+    memcpy(dst->slots, (uint8_t *)src->slots + src_off, nbytes);                 \
+    dst->size = src->size;                                                       \
+    switch (array_storage_bits(dst->ebits)) {                                    \
+        case 8:  algo##_u8((uint8_t *)dst->slots, dst->size); break;             \
+        case 16: algo##_u16((uint16_t *)dst->slots, dst->size); break;           \
+        case 32: algo##_u32((uint32_t *)dst->slots, dst->size); break;           \
+        case 64: algo##_u64((uint64_t *)dst->slots, dst->size); break;           \
+        case 4: {                                                                \
+            uint8_t *tmp = malloc(dst->size);                                    \
+            for (int64_t j = 0; j < dst->size; j++) tmp[j] = (uint8_t)array_read(dst, j); \
+            algo##_u8(tmp, dst->size);                                           \
+            for (int64_t j = 0; j < dst->size; j++) array_write(dst, j, tmp[j]); \
+            free(tmp);                                                           \
+            break;                                                               \
+        }                                                                        \
+    }                                                                            \
+    return result;                                                               \
+}
+DEFINE_ARRAY_ALGO_SORT(w_array_tsort, tim_sort)
+DEFINE_ARRAY_ALGO_SORT(w_array_skasort, ska_sort)
+DEFINE_ARRAY_ALGO_SORT(w_array_wolfsort, wolf_sort)
+#undef DEFINE_ARRAY_ALGO_SORT
+
 /* Comparator sort — sign of the block's verdict for a pair. Ruby-style
  * contract: the block returns negative/zero/positive (any Int, or a Float
  * whose sign is used). Mirrors the Ruby engine's

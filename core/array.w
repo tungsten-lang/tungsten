@@ -273,6 +273,19 @@
   -> csort(min, max)
     ccall("w_array_csort_range", self, min, max)
 
+  # -- Explicit alternative sort algorithms (integer arrays) --
+  # `sort` already picks the best of pdqsort/radix by size; these let you
+  # request a specific algorithm. Float/generic arrays fall back to `sort`.
+  #   tsort    — timsort: stable, adaptive (near-linear on already-sorted data)
+  #   skasort  — in-place MSD byte-radix (american-flag sort)
+  #   wolfsort — distribution + pdqsort hybrid
+  -> tsort
+    ccall("w_array_tsort", self)
+  -> skasort
+    ccall("w_array_skasort", self)
+  -> wolfsort
+    ccall("w_array_wolfsort", self)
+
   # Keep the separator overload before the zero-argument overload. Runtime
   # dispatch selects exact arity first and otherwise falls back to the first
   # method of this name, matching the former C handler's extra-argument

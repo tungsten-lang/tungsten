@@ -1398,11 +1398,17 @@ use target
     when "w_blas_dgemm_nn"
       return ccall("w_blas_dgemm_nn", args[1], args[2], args[3], args[4], args[5], args[6])
 
-    # -- Array#csort (counting sort, core/array.w) --
+    # -- Array#csort / #tsort / #skasort / #wolfsort (core/array.w) --
     when "w_array_csort"
       return ccall("w_array_csort", args[1])
     when "w_array_csort_range"
       return ccall("w_array_csort_range", args[1], args[2], args[3])
+    when "w_array_tsort"
+      return ccall("w_array_tsort", args[1])
+    when "w_array_skasort"
+      return ccall("w_array_skasort", args[1])
+    when "w_array_wolfsort"
+      return ccall("w_array_wolfsort", args[1])
 
     raise "Unsupported ccall '[cname]' in interpreter"
 

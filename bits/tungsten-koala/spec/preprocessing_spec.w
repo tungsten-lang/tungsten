@@ -33,6 +33,25 @@ use koala
   -> transform(df)
     df
 
+# A transformer whose fit fails. Pipeline must stop immediately, leave
+# itself unfitted, and never call transform on a failed step.
++ FailingTransformer
+  -> new
+    @transformed = false
+
+  -> fitted?
+    false
+
+  -> transformed?
+    @transformed
+
+  -> fit(df)
+    nil
+
+  -> transform(df)
+    @transformed = true
+    df
+
 describe "Stats.mode" ->
   it "returns the most frequent value" ->
     expect(Stats.mode([1, 2, 2, 3])).to eq(2)
@@ -412,6 +431,27 @@ describe "Pipeline" ->
   it "returns nil from transform before fit" ->
     pipe = Pipeline.new([Scaler.new(:standard)])
     expect(pipe.transform(DataFrame.new([[:x, [1]]]))).to be_nil
+
+  it "propagates a transformer fit failure without transforming" ->
+    bad = FailingTransformer.new
+    pipe = Pipeline.new([bad, Scaler.new(:standard)])
+    expect(pipe.fit(DataFrame.new([[:x, [1, 2, 3]]]))).to be_nil
+    expect(pipe.fitted?).to be_false
+    expect(bad.transformed?).to be_false
+
+  it "passes targets to supervised feature selectors" ->
+    df = DataFrame.new([
+      [:signal, [0, 1, 2, 3, 4, 5]],
+      [:noise, [1, 1, 0, 0, 1, 1]]
+    ])
+    y = [0, 2, 4, 6, 8, 10]
+    pipe = Pipeline.new([
+      [:select, SelectKBest.new(1, :f_regression)],
+      [:model, LinearRegression.new]
+    ])
+    expect(pipe.fit(df, y) != nil).to be_true
+    expect(pipe.step(:select).transform(df).column_names.join(",")).to eq("signal")
+    expect(pipe.score(df, y).to_s).to eq("1")
 
 # Named steps — a chain addressed by meaning, not by position. Names
 # normalize to STRINGS (a symbol and a string address the same step),

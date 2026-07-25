@@ -174,6 +174,11 @@
   # (see header). Intermediate transformers that do not take weights
   # are fitted as fit(current) only.
   -> fit(df, y = nil, sample_weight = nil)
+    # A failed re-fit invalidates the chain as a whole. Individual steps
+    # may still carry their previous learned state, but no prediction may
+    # expose it through a Pipeline that could not complete this fit.
+    @fitted = false
+    @has_estimator = false
     steps = @steps
     last = steps.size - 1
     current = df
@@ -181,25 +186,25 @@
     has_est = false
     i = 0
     steps.each -> (step)
-      is_last = i == last
-      is_est = is_last && Pipeline.estimator_step?(step)
-      if is_est
-        has_est = true
-        res = nil
-        if Pipeline.supervised_step?(step)
-          res = step.fit(current, y, sample_weight)
-        else
-          res = step.fit(current, sample_weight)
-        ok = false if res == nil
-      else
-        if Pipeline.weighted_transform?(step)
-          res = step.fit(current, sample_weight)
+      if ok
+        is_last = i == last
+        is_est = is_last && Pipeline.estimator_step?(step)
+        if is_est
+          has_est = true
+          res = nil
+          if Pipeline.supervised_step?(step)
+            res = step.fit(current, y, sample_weight)
+          else
+            res = step.fit(current, sample_weight)
           ok = false if res == nil
         else
-          step.fit(current)
-        # Transform after fitting a non-estimator step. On a transformer-
-        # only chain the last step transforms too (fit_transform).
-        current = step.transform(current)
+          res = Pipeline.fit_transformer(step, current, y, sample_weight)
+          ok = false if res == nil
+          # Transform after fitting a non-estimator step. On a transformer-
+          # only chain the last step transforms too (fit_transform).
+          if ok
+            current = step.transform(current)
+            ok = false if current == nil
       i += 1
     out = nil
     if ok
@@ -293,7 +298,8 @@
     out = false
     if steps.size > 0
       tail = steps[steps.size - 1]
-      out = tail.supports_sample_weight? if tail.respond_to?("supports_sample_weight?")
+      if Pipeline.estimator_step?(tail)
+        out = tail.supports_sample_weight? if tail.respond_to?("supports_sample_weight?")
     out
 
   # Every tunable step's hyperparameters, flattened and addressed
@@ -385,15 +391,37 @@
     out = step.supervised? if step.respond_to?("supervised?")
     out
 
-  # Transformers that accept an optional sample_weight on fit.
-  # Behavioural: Scaler and Imputer. Encoder does not.
+  # Transformers declare whether fit needs y and whether it accepts
+  # sample_weight. This is behavioural rather than class-name based so a
+  # user-defined transformer and supervised selectors such as SelectKBest
+  # compose without adding another special case here.
+  -> .supervised_transformer?(step)
+    out = false
+    out = step.supervised_transformer? if step.respond_to?("supervised_transformer?")
+    out
+
   -> .weighted_transform?(step)
     out = false
     if step.respond_to?("fit") && !Pipeline.estimator_step?(step)
-      name = nil
-      name = step.persist_name if step.respond_to?("persist_name")
-      out = true if name == "Scaler"
-      out = true if name == "Imputer"
+      out = step.supports_sample_weight? if step.respond_to?("supports_sample_weight?")
+    out
+
+  # Fit one transformer through its declared arity. The return value is
+  # checked by Pipeline#fit before transform runs.
+  -> .fit_transformer(step, current, y, sample_weight)
+    out = nil
+    supervised = Pipeline.supervised_transformer?(step)
+    weighted = Pipeline.weighted_transform?(step)
+    if supervised
+      if weighted
+        out = step.fit(current, y, sample_weight)
+      else
+        out = step.fit(current, y)
+    else
+      if weighted
+        out = step.fit(current, sample_weight)
+      else
+        out = step.fit(current)
     out
 
   # One step, rebuilt from the overrides addressed to it. The lookup

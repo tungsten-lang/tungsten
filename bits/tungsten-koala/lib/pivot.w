@@ -13,32 +13,46 @@
 # agg: :sum, :mean, :median, :min, :max, :count, :first, :last
 + Pivot
   -> .table(df, index_col, columns_col, values_col, agg = :sum)
-    ivals = df.column_values(index_col)
-    cvals = df.column_values(columns_col)
-    vvals = df.column_values(values_col)
+    out = nil
+    ok = df != nil
+    ok = df.respond_to?("valid?") if ok
+    ok = df.valid? if ok
+    ok = Pivot.valid_aggregate?(agg) if ok
+    ivals = nil
+    cvals = nil
+    vvals = nil
+    if ok
+      ivals = df.column_values(index_col)
+      cvals = df.column_values(columns_col)
+      vvals = df.column_values(values_col)
+      ok = ivals != nil && cvals != nil && vvals != nil
+    if ok
+      row_keys = []
+      ivals.each -> (v)
+        row_keys.push(v) if !row_keys.include?(v)
+      col_keys = []
+      cvals.each -> (v)
+        col_keys.push(v) if !col_keys.include?(v)
 
-    row_keys = []
-    ivals.each -> (v)
-      row_keys.push(v) if !row_keys.include?(v)
-    col_keys = []
-    cvals.each -> (v)
-      col_keys.push(v) if !col_keys.include?(v)
+      pairs = [[index_col, row_keys]]
+      col_keys.each -> (ck)
+        cells = []
+        row_keys.each -> (rk)
+          bucket = []
+          i = 0
+          ivals.each -> (iv)
+            bucket.push(vvals[i]) if iv == rk && cvals[i] == ck
+            i += 1
+          if bucket.size == 0
+            cells.push(nil)
+          else
+            cells.push(Pivot.aggregate(bucket, agg))
+        pairs.push([ck, cells])
+      out = DataFrame.new(pairs)
+    out
 
-    pairs = [[index_col, row_keys]]
-    col_keys.each -> (ck)
-      cells = []
-      row_keys.each -> (rk)
-        bucket = []
-        i = 0
-        ivals.each -> (iv)
-          bucket.push(vvals[i]) if iv == rk && cvals[i] == ck
-          i += 1
-        if bucket.size == 0
-          cells.push(nil)
-        else
-          cells.push(Pivot.aggregate(bucket, agg))
-      pairs.push([ck, cells])
-    DataFrame.new(pairs)
+  -> .valid_aggregate?(agg)
+    agg == :sum || agg == :mean || agg == :median || agg == :min || agg == :max || agg == :count || agg == :first || agg == :last
 
   # Aggregate an array of cell values by name.
   #

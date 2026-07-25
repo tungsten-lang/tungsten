@@ -70,6 +70,12 @@ named = Pipeline.new([[:fill, Imputer.new(:mean)], [:scale, Scaler.new(:standard
 named.step(:scale)                   # by name (symbol or string); named[1] too
 named.names                          # => ["fill", "scale"]; has_step?(:scale)
 
+# Feature generation / selection compose inside the same Pipeline
+poly = PolynomialFeatures.new(2)     # x0,x1,x0^2,x0*x1,x1^2 (sklearn order)
+poly.fit_transform([[2, 3]])         # => one row [2,3,4,6,9]
+PolynomialFeatures.new(3, true, true) # bias + interaction-only through degree 3
+SelectKBest.new(2, :f_classif)       # supervised transformer; Pipeline passes y
+
 # Dimensionality reduction — PCA, a transformer (one-sided Jacobi, not covariance)
 pca = PCA.new(2)                     # keep the top 2 principal directions
 scores = pca.fit_transform([[0 - 2, 1], [0 - 1, 0 - 1], [0, 0], [1, 0 - 1], [2, 1]])
@@ -943,8 +949,26 @@ degenerate — `alpha = 0` on collinear features cannot fit, so it stays in
 through `Estimator.fit_model` / `.score_model` instead of calling
 `model.fit(rows, y)` directly, so `y` is optional and an unsupervised
 estimator cross-validates correctly rather than not at all. A fold whose
-re-fit FAILS is now recorded as nil and not scored — previously it was
-scored anyway, silently reporting the PREVIOUS fold's fitted state.
+re-fit FAILS is recorded as nil and makes `cross_val_mean` nil rather than
+silently dropping the hard fold. Every fold gets a fresh
+`with_params(params)` clone: the caller's prototype remains unfitted and
+learned state cannot leak between folds.
+
+## Reference ML differential
+
+`examples/reference_ml.w` is a self-checking set of deterministic
+end-to-end problems: nonlinear XOR, exact quadratic regression under CV,
+three-class GaussianNB under stratified CV, and KMeans evaluated by
+silhouette rather than its training objective.
+
+The matching `benchmarks/reference_koala.w` and
+`benchmarks/reference_sklearn.py` use identical fixtures. Against
+scikit-learn 1.9.0, all five reported outcomes agree: raw XOR accuracy
+0.5, polynomial XOR accuracy 1, quadratic mean CV R² 1, multiclass
+GaussianNB mean CV accuracy 1, and two-box silhouette
+0.91952609056736 (the final printed float digit may differ).
+`benchmarks/compare_reference.py` runs both sides and enforces an absolute
+tolerance of 1e-12.
 
 ## Model persistence
 
@@ -1670,13 +1694,7 @@ their own `supervised?`. Ties break to the first candidate enumerated and
 a bad grid returns nil rather than raising).
 
 Verify with `bin/tungsten bits/tungsten-koala/spec/koala_spec.w`,
-`spec/linalg_spec.w`, `spec/preprocessing_spec.w`, and
-`spec/estimator_spec.w` (the tungsten-spec suites), `spec/smoke.w`
-(framework-free), or the self-checking `examples/workflow.w` — all
-pass interpreted and compiled.
-
-The remaining files under `lib/` (tensor, resample, transformer,
-estimator, index, sparse, gpu, device) are unported design drafts and
-are not loaded by `use koala` yet (see the list in `lib/koala.w`);
-estimator.w's linear-regression payoff shipped as
-`lib/linear_regression.w`.
+the other `spec/*_spec.w` suites, `spec/smoke.w` (framework-free), or
+the self-checking `examples/workflow.w` and `examples/reference_ml.w`.
+The design drafts moved to `attic/drafts/`; they are not loaded by
+`use koala`.

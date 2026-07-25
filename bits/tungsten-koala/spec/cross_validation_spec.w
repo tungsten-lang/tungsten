@@ -31,14 +31,14 @@ use koala
 -> cv_count(pair, side, labels, want)
   total = 0
   pair[side].each -> (ix)
-    total += 1 if labels[ix].to_s == want.to_s
+    total += 1 if labels[ix] == want
   total
 
 # The distinct group names appearing on side `side` of `pair`.
 -> cv_names(pair, side, groups)
   names = []
   pair[side].each -> (ix)
-    nm = groups[ix].to_s
+    nm = groups[ix]
     names.push(nm) if !names.include?(nm)
   names
 
@@ -161,13 +161,13 @@ describe "StratifiedKFold" ->
     again = StratifiedKFold.new(5, 42).split(y)
     expect(again[3][1].join(",")).to eq(folds[3][1].join(","))
 
-  # Labels are opaque and compared by to_s, so a symbol and its string
-  # form are the SAME class (two classes of two here, not four of one).
-  it "compares labels by to_s, so :a and the string a are one class" ->
-    folds = StratifiedKFold.new(2).split([:a, "a", :b, "b"])
+  # Labels are opaque values: a Symbol and a String with the same text
+  # remain distinct classes, just as they do in every fitted classifier.
+  it "does not conflate a symbol label with a string label" ->
+    folds = StratifiedKFold.new(2).split([:a, :a, "a", "a", :b, :b, "b", "b"])
     expect(folds.size).to eq(2)
-    expect(folds[0][1].join(",")).to eq("0,2")
-    expect(folds[1][1].join(",")).to eq("1,3")
+    expect(folds[0][1].join(",")).to eq("0,2,4,6")
+    expect(folds[1][1].join(",")).to eq("1,3,5,7")
 
   # Degenerate input is nil, never an exception — the bit's convention.
   # A class with fewer than k members is the interesting one: it could
@@ -235,6 +235,14 @@ describe "GroupKFold" ->
     folds.each -> (pair)
       clean = false if cv_group_spans(pair, groups)
     expect(clean).to be_true
+
+  it "does not conflate symbol and string group identifiers" ->
+    groups = [:a, :a, "a", "a"]
+    folds = GroupKFold.new(2).split(groups)
+    expect(folds.size).to eq(2)
+    expect(folds[0][1].join(",")).to eq("0,1")
+    expect(folds[1][1].join(",")).to eq("2,3")
+    expect(cv_group_spans(folds[0], groups)).to be_false
 
   it "returns nil when there are fewer groups than folds" ->
     expect(GroupKFold.new(3).split([:a, :a, :b, :b])).to be_nil
@@ -376,7 +384,12 @@ describe "CrossValidation with a splitter" ->
   it "still takes a plain fold count" ->
     x = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     y = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
-    expect(CrossValidation.cross_val_score(LinearRegression.new, x, y, 5).to_s).to eq("\[1, 1, 1, 1, 1\]")
+    prototype = LinearRegression.new
+    expect(CrossValidation.cross_val_score(prototype, x, y, 5).to_s).to eq("\[1, 1, 1, 1, 1\]")
+    # A CV estimator is a prototype, not the mutable storage for the last
+    # fold. Every split fits an independent with_params(params) clone.
+    expect(prototype.fitted?).to be_false
+    expect(prototype.coefficients).to be_nil
     expect(CrossValidation.cross_val_score(LinearRegression.new, x, y, 5, 42).to_s).to eq("\[1, 1, 1, 1, 1\]")
     expect(CrossValidation.cross_val_mean(LinearRegression.new, x, y, 5).to_s).to eq("1")
 

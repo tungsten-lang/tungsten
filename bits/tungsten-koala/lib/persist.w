@@ -7,8 +7,8 @@
 #
 # Every fitted koala object round-trips: LinearRegression, KNNClassifier,
 # LogisticRegression, GaussianNB, KMeans, DecisionTreeClassifier,
-# DecisionTreeRegressor, the three transformers (Scaler / Imputer /
-# Encoder) and a Pipeline of any of them, nested to any depth.
+# DecisionTreeRegressor, every bundled transformer, and a Pipeline of any
+# of them, nested to any depth.
 #
 # --- Why a format of koala's own ---
 #
@@ -206,6 +206,7 @@
     out = Encoder.load_state(state) if name == "Encoder"
     out = VarianceThreshold.load_state(state) if name == "VarianceThreshold"
     out = SelectKBest.load_state(state) if name == "SelectKBest"
+    out = PolynomialFeatures.load_state(state) if name == "PolynomialFeatures"
     out = Pipeline.load_state(state) if name == "Pipeline"
     out
 

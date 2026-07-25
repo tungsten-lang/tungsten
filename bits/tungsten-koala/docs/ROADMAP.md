@@ -20,7 +20,7 @@ on Tungsten, reusing **core** primitives instead of reinventing them.
 | `estimator.w` | **Delete.** Superseded by `estimator_base.w`; sketch already shipped (lasso etc.). |
 | `tensor.w`, `gpu.w`, `device.w` | **Delete.** Replaced by `core/tensor` + Metal; parallel Device invents a second world. |
 | `sparse.w` | **Delete** as implementation; replace with thin re-export / DataFrame helpers over `core/sparse`. |
-| `transformer.w` | **Keep ideas, port cleanly:** `ColumnSelector`, `FunctionTransformer`, `PolynomialFeatures` as Tunable steps in real Tungsten (no kwargs / `case =>`). |
+| `transformer.w` | **Partly shipped:** `PolynomialFeatures` is now a Tunable, persistent Pipeline step with sklearn-compatible ordering. `ColumnSelector` / `FunctionTransformer` remain. |
 | `index.w` | **Port later** as simple row labels (Range/Array); no multi-index. |
 | `resample.w` | **Port later** once time columns exist; ffill/bfill TODOs stay on the list. |
 
@@ -42,6 +42,38 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
 12. **Benchmarks** — sklearn differential + wall-clock suite.
 13. **Parallel CV / GridSearch** + more examples.
 14. **GPU path** — DataFrame/Matrix → `Tensor` for large ops (compiled-only).
+
+## Verified progress (2026-07-25)
+
+- Correctness boundaries now reject empty/misaligned metric inputs, mixed
+  numeric columns, out-of-range percentiles, ragged table operations, and
+  invalid rolling/join/pivot contracts with nil rather than a crash or a
+  misleading score.
+- Cross-validation fits a fresh clone per fold, leaves its prototype
+  unfitted, and refuses a partial mean when any fold fails.
+- Pipeline stops on transformer fit/transform failure, invalidates itself
+  after a failed re-fit, and passes y to supervised transformers such as
+  `SelectKBest`.
+- `PolynomialFeatures` shipped with degree, bias, interaction-only,
+  feature names, tuning, Pipeline composition, and persistence.
+- A live scikit-learn 1.9.0 differential now covers five outcomes across
+  nonlinear classification, polynomial regression, multiclass
+  classification, and clustering; all five agree (within the last float
+  digit for silhouette).
+- 14 interpreted and compiled spec suites cover 623 examples; the
+  framework-free smoke test adds 376 checks on each engine.
+
+## Highest-leverage next tranche
+
+1. Multiclass logistic regression with stable softmax and `predict_proba`.
+2. Probability calibration (`CalibratedClassifierCV`) and calibration
+   curves, measured by log loss and Brier score.
+3. `ColumnSelector` / `FunctionTransformer`, then mixed numeric/categorical
+   column pipelines.
+4. Broader sklearn differentials on standard tabular datasets plus
+   wall-clock and memory baselines.
+5. Gradient boosting and permutation importance before widening into GPU
+   execution.
 
 ## Compiler / runtime fixes koala depends on
 

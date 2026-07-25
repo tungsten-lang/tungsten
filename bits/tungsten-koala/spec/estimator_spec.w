@@ -307,6 +307,16 @@ describe "Pipeline estimator tail" ->
     expect(pipe.predict(df)).to be_nil
     expect(pipe.score(df, y)).to be_nil
 
+  it "invalidates a previously fitted pipeline when re-fit fails" ->
+    pipe = Pipeline.new([Scaler.new(:standard), LinearRegression.new])
+    good = DataFrame.new([[:x, [1, 2, 3, 4]]])
+    expect(pipe.fit(good, [3, 5, 7, 9]) != nil).to be_true
+    expect(pipe.fitted?).to be_true
+    singular = DataFrame.new([[:a, [1, 2, 3]], [:b, [2, 4, 6]]])
+    expect(pipe.fit(singular, [1, 2, 3])).to be_nil
+    expect(pipe.fitted?).to be_false
+    expect(pipe.predict(good)).to be_nil
+
   it "keeps transformer-only pipelines predict-free" ->
     df = DataFrame.new([[:x, [2, 4, 6]]])
     pipe = Pipeline.new([Scaler.new(:standard)])

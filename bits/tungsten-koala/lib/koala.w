@@ -16,11 +16,9 @@
 # — exhaustive hyperparameter search scoring every point of a param grid
 # by cross-validation, through the estimator contract alone).
 #
-# All seven estimators answer ONE declared contract (lib/estimator_base.w):
-# `is Estimable` plus `is SupervisedEstimator` (LinearRegression,
-# KNNClassifier, LogisticRegression, GaussianNB, DecisionTreeClassifier,
-# DecisionTreeRegressor) or `is
-# UnsupervisedEstimator` (KMeans). That contract adds `supervised?`,
+# All estimators answer ONE declared contract (lib/estimator_base.w):
+# `is Estimable` plus `is SupervisedEstimator` or
+# `is UnsupervisedEstimator`. That contract adds `supervised?`,
 # `supports_sample_weight?`, `params`, `with_params(overrides)` and
 # `estimator_name` to the familiar
 # new / fitted? / fit / predict / score, and puts the ONE definition of
@@ -57,7 +55,8 @@
 # writing the string is the caller's job. See lib/persist.w for the
 # format and spec/persist_spec.w for the identical-prediction proofs.
 #
-# The three PREPROCESSING transformers (Scaler / Imputer / Encoder)
+# The PREPROCESSING transformers (Scaler / Imputer / Encoder / PCA /
+# VarianceThreshold / SelectKBest / PolynomialFeatures)
 # declare the hyperparameter half of that contract on its own,
 # `is Tunable` — `params` / `with_params` and nothing more, since a
 # transformer has no predict and no fit arity to declare. That is the
@@ -95,6 +94,7 @@ use pca
 use encoder
 use imputer
 use feature_selection
+use polynomial_features
 use splitter
 use pipeline
 use cross_validation

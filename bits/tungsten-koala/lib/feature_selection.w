@@ -22,6 +22,12 @@
   -> fitted?
     @fitted
 
+  -> supervised_transformer?
+    false
+
+  -> supports_sample_weight?
+    true
+
   -> params
     { threshold: @threshold }
 
@@ -104,6 +110,12 @@
   -> fitted?
     @fitted
 
+  -> supervised_transformer?
+    true
+
+  -> supports_sample_weight?
+    false
+
   -> params
     { k: @k, score_func: @score_func }
 
@@ -111,11 +123,8 @@
     SelectKBest.new(Estimator.opt(overrides, :k, @k), Estimator.opt(overrides, :score_func, @score_func))
 
   # Supervised: needs y. fit(df, y) or fit(rows, y) via Estimator.frame.
-  # Signature matches transformers that take optional trailing weight:
-  # fit(x, y = nil, sample_weight = nil) when used as pipeline step before
-  # an estimator — Pipeline currently only passes weights, not y, to
-  # intermediate steps. Call fit(x, y) directly for now; Pipeline support
-  # for supervised transformers is a follow-up.
+  # supervised_transformer? tells Pipeline to pass y to this intermediate
+  # step before fitting the estimator tail.
   -> fit(df, y = nil, sample_weight = nil)
     frame = Estimator.frame(df)
     targets = Estimator.target_values(y)

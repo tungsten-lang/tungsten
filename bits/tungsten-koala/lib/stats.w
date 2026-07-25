@@ -60,7 +60,10 @@
     s = self.sorted(self.clean(values))
     n = s.size
     out = nil
-    if n > 0
+    valid_p = p != nil
+    valid_p = type(p) == "Integer" if valid_p
+    valid_p = p >= 0 && p <= 100 if valid_p
+    if n > 0 && valid_p
       span = p * (n - 1)
       lo = span / 100
       frac = (span % 100).to_f / 100.to_f
@@ -69,18 +72,20 @@
       out = s[lo].to_f + frac * (s[hi].to_f - s[lo].to_f)
     out
 
-  # True when the first non-nil value is numeric (Integer or Float).
-  # False for an empty or all-nil array. type() names agree across
-  # engines (verified: Integer/Float/String/Symbol/Nil/Boolean).
+  # True when EVERY non-nil value is numeric (Integer or Float).
+  # False for an empty or all-nil array. Checking the whole column is
+  # important: accepting [1, "oops"] because its first cell is numeric
+  # would let a string leak into Matrix arithmetic and model fitting.
   -> .numeric?(values)
-    first = nil
-    values.each -> (v)
-      first = v if first == nil && v != nil
-    t = type(first)
-    out = false
-    out = true if t == "Integer"
-    out = true if t == "Float"
-    out
+    seen = false
+    numeric = values != nil
+    if numeric
+      values.each -> (v)
+        if v != nil
+          seen = true
+          t = type(v)
+          numeric = false if t != "Integer" && t != "Float"
+    numeric && seen
 
   # Most frequent non-nil value; ties break to the first seen. Works
   # for strings/symbols too. nil for an empty or all-nil array.

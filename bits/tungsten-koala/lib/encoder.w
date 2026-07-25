@@ -53,6 +53,12 @@
   -> fitted?
     @fitted
 
+  -> supervised_transformer?
+    false
+
+  -> supports_sample_weight?
+    false
+
   # Collect first-seen category lists from df (only @columns when given).
   -> fit(df)
     frame = Estimator.frame(df)

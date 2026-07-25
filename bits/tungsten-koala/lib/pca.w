@@ -184,6 +184,12 @@
   -> fitted?
     @fitted
 
+  -> supervised_transformer?
+    false
+
+  -> supports_sample_weight?
+    false
+
   # --- fit / transform ---
 
   # Learn the mean and the top-k principal directions from x.
@@ -449,9 +455,8 @@
         out = { names: names, rows: rows }
     out
 
-  # A single cell PCA can do arithmetic on. Stats.numeric? only inspects
-  # a column's FIRST non-nil value, which is the right rule for deciding
-  # whether a column is a feature but not for trusting every entry in it.
+  # A single cell PCA can do arithmetic on. Stats.numeric? rejects mixed
+  # columns and this stricter pass additionally rejects nil cells.
   -> .numeric_cell?(v)
     t = type(v)
     out = false

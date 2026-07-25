@@ -35,6 +35,21 @@
   -> empty?
     self.row_count == 0
 
+  # True when every column has the same row count. The constructor stays
+  # lightweight and preserves supplied data; rectangular operations use
+  # this boundary to reject ragged frames without indexing past a column.
+  -> valid?
+    ok = @names.size == @cols.size
+    width = 0
+    if ok && @cols.size > 0
+      ok = false if type(@cols[0]) != "Array"
+      width = @cols[0].size if ok
+    if ok
+      @cols.each -> (col)
+        ok = false if type(col) != "Array"
+        ok = false if type(col) == "Array" && col.size != width
+    ok
+
   -> column_names
     @names
 
@@ -138,7 +153,9 @@
   # --- Grouping ---
 
   -> group_by(col)
-    GroupBy.new(self, col)
+    out = nil
+    out = GroupBy.new(self, col) if self.valid? && self.column_values(col) != nil
+    out
 
   # --- Combining / reshaping ---
 

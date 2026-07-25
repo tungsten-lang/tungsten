@@ -20,47 +20,58 @@
     self.perform(left, right, key, :left)
 
   -> .perform(left, right, key, how)
-    left_keys = left.column_values(key)
-    right_keys = right.column_values(key)
-    keep_unmatched = how == :left
+    out = nil
+    ok = left != nil && right != nil
+    ok = left.respond_to?("valid?") && right.respond_to?("valid?") if ok
+    ok = left.valid? && right.valid? if ok
+    ok = how == :inner || how == :left if ok
+    left_keys = nil
+    right_keys = nil
+    if ok
+      left_keys = left.column_values(key)
+      right_keys = right.column_values(key)
+      ok = left_keys != nil && right_keys != nil
+    if ok
+      keep_unmatched = how == :left
 
-    left_idx = []
-    right_idx = []   # nil marks an unmatched left row (left join)
-    i = 0
-    left_keys.each -> (k)
-      matched = false
-      j = 0
-      right_keys.each -> (rk)
-        if rk == k
+      left_idx = []
+      right_idx = []   # nil marks an unmatched left row (left join)
+      i = 0
+      left_keys.each -> (k)
+        matched = false
+        j = 0
+        right_keys.each -> (rk)
+          if rk == k
+            left_idx.push(i)
+            right_idx.push(j)
+            matched = true
+          j += 1
+        if !matched && keep_unmatched
           left_idx.push(i)
-          right_idx.push(j)
-          matched = true
-        j += 1
-      if !matched && keep_unmatched
-        left_idx.push(i)
-        right_idx.push(nil)
-      i += 1
+          right_idx.push(nil)
+        i += 1
 
-    pairs = []
-    left_names = left.column_names
-    left_names.each -> (n)
-      vals = left.column_values(n)
-      picked = []
-      left_idx.each -> (li)
-        picked.push(vals[li])
-      pairs.push([n, picked])
-
-    right.column_names.each -> (n)
-      if n != key
-        vals = right.column_values(n)
+      pairs = []
+      left_names = left.column_names
+      left_names.each -> (n)
+        vals = left.column_values(n)
         picked = []
-        right_idx.each -> (rj)
-          if rj == nil
-            picked.push(nil)
-          else
-            picked.push(vals[rj])
-        label = n
-        label = "[n]_right" if left_names.include?(n)
-        pairs.push([label, picked])
+        left_idx.each -> (li)
+          picked.push(vals[li])
+        pairs.push([n, picked])
 
-    DataFrame.new(pairs)
+      right.column_names.each -> (n)
+        if n != key
+          vals = right.column_values(n)
+          picked = []
+          right_idx.each -> (rj)
+            if rj == nil
+              picked.push(nil)
+            else
+              picked.push(vals[rj])
+          label = n
+          label = "[n]_right" if left_names.include?(n)
+          pairs.push([label, picked])
+
+      out = DataFrame.new(pairs)
+    out

@@ -121,7 +121,7 @@
 # are NOT estimators: Scaler, Imputer and Encoder carry real
 # hyperparameters (kind / strategy / columns / fill_value) but have no
 # predict and no fit ARITY to declare, so `Estimable` would be a lie for
-# them. `Tunable` is that pair alone, and the three transformers declare
+# them. `Tunable` is that pair alone, and the bundled transformers declare
 # it — which is what puts "scale.kind" and "impute.strategy" into a
 # pipeline's search space with no change to lib/pipeline.w.
 #
@@ -407,6 +407,16 @@
       idx.each -> (ix)
         picked.push(values[ix])
       out = picked
+    out
+
+  # Fresh unfitted clone through the Estimable contract. Cross-validation
+  # uses one per fold so the caller's prototype is never fitted and learned
+  # state cannot leak between folds. nil for an object outside the contract
+  # or for a broken with_params implementation.
+  -> .unfitted_copy(model)
+    out = nil
+    if model != nil && model.respond_to?("params") && model.respond_to?("with_params")
+      out = model.with_params(model.params)
     out
 
   # --- Arity-safe dispatch (what `supervised?` is FOR) ---

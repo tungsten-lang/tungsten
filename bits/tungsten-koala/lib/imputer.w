@@ -62,6 +62,12 @@
   -> fitted?
     @fitted
 
+  -> supervised_transformer?
+    false
+
+  -> supports_sample_weight?
+    true
+
   # Learn per-column fill values from df (only @columns when given).
   # :mean and :median never fit a non-numeric column (Stats.numeric?):
   # averaging strings is meaningless, so a mixed frame imputes cleanly

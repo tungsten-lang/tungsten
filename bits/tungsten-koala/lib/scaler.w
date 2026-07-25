@@ -64,6 +64,12 @@
   -> fitted?
     @fitted
 
+  -> supervised_transformer?
+    false
+
+  -> supports_sample_weight?
+    true
+
   # Learn per-column parameters from df (only @columns when given).
   # Non-numeric columns (strings, symbols — Stats.numeric?) are never
   # fitted, even when requested: scaling them is meaningless, so a

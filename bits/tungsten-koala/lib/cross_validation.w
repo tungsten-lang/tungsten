@@ -61,9 +61,9 @@
 #   * NO hash iteration order. Classes (StratifiedKFold) and groups
 #     (GroupKFold) are collected in FIRST-APPEARANCE order by scanning the
 #     samples — the Encoder / GaussianNB / LogisticRegression convention.
-#     A Hash is used only for O(1) LOOKUP (keyed by `label.to_s`, so a
-#     symbol and its string form are the same class); `.keys` is never
-#     enumerated, because its order differs between engines.
+#     A Hash is used only for O(1) LOOKUP with the OPAQUE label/group
+#     itself as the key; `.keys` is never enumerated, because its order
+#     differs between engines.
 #   * NO `Array#sort`. GroupKFold orders its groups with a hand-rolled
 #     STABLE selection sort (largest first, first-appearance breaking
 #     ties) — the Stats.sorted / GridSearch.rank convention. Symbol
@@ -186,9 +186,9 @@ trait Splitting
   # k [train_indices, test_indices] pairs over 0...y.size, each fold
   # holding (as near as integer arithmetic allows) the same class mix as
   # y itself. y is a plain array, Series or Vector of labels — anything
-  # Estimator.target_values accepts; labels are opaque and compared by
-  # `.to_s`, so integers, strings and symbols all work (and :a and "a"
-  # are the SAME class).
+  # Estimator.target_values accepts. Labels are opaque and compared by
+  # value, so integers, strings and symbols work without conflating :a
+  # with the distinct string "a".
   #
   # nil when y is missing or empty, when k < 2 or k > y.size, or when ANY
   # class has fewer than k members — that class could not appear in every
@@ -211,7 +211,7 @@ trait Splitting
       class_members = []
       slot = {}
       order.each -> (ix)
-        name = labels[ix].to_s
+        name = labels[ix]
         if !slot.key?(name)
           slot[name] = class_names.size
           class_names.push(name)
@@ -322,7 +322,7 @@ trait Splitting
   # k [train_indices, test_indices] pairs over 0...groups.size where every
   # index sharing a group value lands on the SAME side of every fold.
   # groups is a plain array, Series or Vector; values are opaque and
-  # compared by `.to_s`. Test indices come back in ascending order.
+  # compared by value. Test indices come back in ascending order.
   #
   # nil when groups is missing or empty, k < 2, or there are fewer than k
   # distinct groups (a group cannot be cut in half to fill a fold).
@@ -339,7 +339,7 @@ trait Splitting
       group_members = []
       slot = {}
       n.times -> (i)
-        name = vals[i].to_s
+        name = vals[i]
         if !slot.key?(name)
           slot[name] = group_names.size
           group_names.push(name)
@@ -652,16 +652,23 @@ trait Splitting
             te_y.push(yvals[ix]) if yvals != nil
           tr_w = Estimator.subset(wts, tr_idx)
           te_w = Estimator.subset(wts, te_idx)
-          f = Estimator.fit_model(model, tr_rows, tr_y, tr_w)
+          # Every fold gets a fresh unfitted clone. Reusing `model` here
+          # mutates the caller's prototype and lets any incompletely-reset
+          # learned state bleed from one fold into the next.
+          fold_model = Estimator.unfitted_copy(model)
+          f = nil
+          f = Estimator.fit_model(fold_model, tr_rows, tr_y, tr_w) if fold_model != nil
           s = nil
-          s = Estimator.score_model(model, te_rows, te_y, te_w) if f != nil
+          s = Estimator.score_model(fold_model, te_rows, te_y, te_w) if f != nil
           scores.push(s)
         out = scores
     out
 
   # The mean of cross_val_score (the single headline number). nil when
-  # cross_val_score is nil; nil-scoring folds are dropped by Stats.mean,
-  # and an all-nil set of folds means nil overall. This is the number
+  # cross_val_score is nil or ANY fold failed to fit/score. A partial mean
+  # would reward a candidate for silently dropping its hardest folds and
+  # can elect a model that cannot complete the requested validation. This is
+  # the number
   # GridSearch ranks candidates by — and because GridSearch hands its `k`
   # straight through, a GridSearch built with `GridSearch.new(est, grid,
   # StratifiedKFold.new(3))` searches on stratified folds with no change
@@ -669,5 +676,10 @@ trait Splitting
   -> .cross_val_mean(model, x, y = nil, cv = 5, seed = nil, sample_weight = nil)
     scores = self.cross_val_score(model, x, y, cv, seed, sample_weight)
     out = nil
-    out = Stats.mean(scores) if scores != nil
+    ok = scores != nil
+    ok = scores.size > 0 if ok
+    if ok
+      scores.each -> (score)
+        ok = false if score == nil
+      out = Stats.mean(scores) if ok
     out

@@ -68,6 +68,14 @@ describe "DataFrame" ->
     # b = 10*a, so std scales 10x (12.9099) and the quartiles shift.
     expect(d.column_values(:b).join(",")).to be_nums("4,25,12.9099,10,17.5,25,32.5,40")
 
+  it "reports whether its columns form a rectangular table" ->
+    expect(DataFrame.new([[:a, [1, 2]], [:b, [3, 4]]]).valid?).to be_true
+    ragged = DataFrame.new([[:a, [1, 2]], [:b, [3]]])
+    expect(ragged.valid?).to be_false
+    expect(DataFrame.new([[:a, nil]]).valid?).to be_false
+    expect(ragged.group_by(:a)).to be_nil
+    expect(DataFrame.new([[:a, [1]]]).group_by(:missing)).to be_nil
+
 describe "Stats.percentile" ->
   it "interpolates linearly like numpy and pandas" ->
     # 0-based fractional rank p/100*(n-1); [1,2,3,4] -> 1.75/2.5/3.25.
@@ -86,6 +94,18 @@ describe "Stats.percentile" ->
     expect(Stats.percentile([1, nil, 2, 3, 4], 25).to_s).to eq("1.75")
     expect(Stats.percentile([7], 25).to_s).to eq("7")
     expect(Stats.percentile([], 50)).to be_nil
+
+  it "rejects percentiles outside the 0..100 contract" ->
+    expect(Stats.percentile([1, 2, 3], -1)).to be_nil
+    expect(Stats.percentile([1, 2, 3], 101)).to be_nil
+    expect(Stats.percentile([1, 2, 3], nil)).to be_nil
+
+describe "Stats.numeric?" ->
+  it "requires every non-nil cell to be numeric" ->
+    expect(Stats.numeric?([1, nil, 2.to_f])).to be_true
+    expect(Stats.numeric?([1, "oops"])).to be_false
+    expect(Stats.numeric?([nil, "oops", 1])).to be_false
+    expect(Stats.numeric?([nil])).to be_false
 
 describe "GroupBy" ->
   it "counts and aggregates per group" ->
@@ -118,6 +138,23 @@ describe "Metrics" ->
     # scikit-learn zero-division convention: 0.0, never a divide error.
     expect(Metrics.precision([0, 0], [1, 0]).to_s).to eq("0")
     expect(Metrics.f1([0, 0], [0, 0]).to_s).to eq("0")
+
+  it "rejects empty and misaligned prediction/target pairs" ->
+    expect(Metrics.accuracy([], [])).to be_nil
+    expect(Metrics.accuracy([1], [1, 0])).to be_nil
+    expect(Metrics.precision([1], [1, 0])).to be_nil
+    expect(Metrics.recall([1], [1, 0])).to be_nil
+    expect(Metrics.f1([1], [1, 0])).to be_nil
+    expect(Metrics.mse([1], [1, 0])).to be_nil
+    expect(Metrics.rmse([1], [1, 0])).to be_nil
+    expect(Metrics.mae([1], [1, 0])).to be_nil
+    expect(Metrics.median_absolute_error([1], [1, 0])).to be_nil
+    expect(Metrics.max_error([1], [1, 0])).to be_nil
+    expect(Metrics.mape([1], [1, 0])).to be_nil
+    expect(Metrics.explained_variance([1], [1, 0])).to be_nil
+    expect(Metrics.r2([1], [1, 0])).to be_nil
+    expect(Metrics.confusion_matrix([1], [1, 0])).to be_nil
+    expect(Metrics.classification_report([1], [1, 0])).to be_nil
 
 describe "Metrics.fbeta" ->
   # Same binary case as above: P = 0.5, R = 2/3. scikit-learn
@@ -381,6 +418,12 @@ describe "Rolling" ->
     expect(r.sum.to_a.to_s).to eq("\[1, 1, 3\]")
     expect(r.count.to_a.to_s).to eq("\[1, 1, 1\]")
 
+  it "rejects invalid window contracts" ->
+    s = Series.new([1, 2, 3], "x")
+    expect(s.rolling(0).sum).to be_nil
+    expect(s.rolling(2, 0).mean).to be_nil
+    expect(s.rolling(2, 3).max).to be_nil
+
 describe "Join" ->
   it "inner joins on a key column" ->
     left = DataFrame.new([[:id, [1, 2, 3]], [:name, ["a", "b", "c"]]])
@@ -418,6 +461,14 @@ describe "Join" ->
     j = left.join(right, :id)
     expect(j.column_names.join(",")).to eq("id,v,v_right")
     expect(j.column_values("v_right").to_s).to eq("\[99\]")
+
+  it "returns nil for a missing key, unsupported mode or ragged frame" ->
+    left = DataFrame.new([[:id, [1]], [:x, [2]]])
+    right = DataFrame.new([[:id, [1]], [:y, [3]]])
+    expect(left.join(right, :missing)).to be_nil
+    expect(left.join(right, :id, :outer)).to be_nil
+    ragged = DataFrame.new([[:id, [1, 2]], [:y, [3]]])
+    expect(left.join(ragged, :id)).to be_nil
 
 describe "Pivot" ->
   it "builds a sum pivot table" ->
@@ -457,6 +508,13 @@ describe "Pivot" ->
     q = pt.column_values("q")
     expect(q[0]).to be_nil
     expect(q[1]).to eq(2)
+
+  it "returns nil for missing columns, bad aggregation or ragged data" ->
+    df = DataFrame.new([[:i, ["x"]], [:c, ["a"]], [:v, [1]]])
+    expect(df.pivot(:missing, :c, :v)).to be_nil
+    expect(df.pivot(:i, :c, :v, :bogus)).to be_nil
+    ragged = DataFrame.new([[:i, ["x", "y"]], [:c, ["a"]], [:v, [1, 2]]])
+    expect(ragged.pivot(:i, :c, :v)).to be_nil
 
 describe "RocCurve" ->
   # scikit-learn's own roc_curve docstring example:

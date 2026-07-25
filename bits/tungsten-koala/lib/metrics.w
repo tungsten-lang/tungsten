@@ -453,14 +453,19 @@
   # confident wrong prediction stays finite. Unlike roc_auc, a single class
   # is fine — log loss is defined with no negatives (or no positives) — so
   # nil arises only when scores and actual are misaligned or empty.
-  -> .log_loss(scores, actual, pos_label = 1)
+  -> .log_loss(scores, actual, pos_label = 1, sample_weight = nil)
     ok = self.aligned?(scores, actual)
     out = nil
+    if ok
+      wts = nil
+      wts = Estimator.weight_values(sample_weight, scores.size) if sample_weight != nil
+      ok = false if sample_weight != nil && wts == nil
     if ok
       kilo = 1000.to_f
       eps = 1.to_f / (kilo * kilo * kilo * kilo * kilo)
       hi = 1.to_f - eps
       total = 0.to_f
+      weight_total = 0.to_f
       i = 0
       scores.each -> (s)
         p = s.to_f
@@ -468,9 +473,76 @@
         p = hi if p > hi
         y = 0.to_f
         y = 1.to_f if actual[i] == pos_label
-        total += y * Math.log(p) + (1.to_f - y) * Math.log(1.to_f - p)
+        term = y * Math.log(p) + (1.to_f - y) * Math.log(1.to_f - p)
+        if wts == nil
+          total += term
+        else
+          total += term * wts[i]
+          weight_total += wts[i]
         i += 1
-      out = 0.to_f - total / scores.size.to_f
+      denom = scores.size.to_f
+      denom = weight_total if wts != nil
+      out = 0.to_f - total / denom
+    out
+
+  # Multiclass cross-entropy for one probability row per sample, with
+  # columns in `classes` order. This is scikit-learn's multiclass log_loss:
+  # -mean(log(P(true class))). Labels are opaque values and every actual
+  # label must occur in classes. Optional sample weights use their sum as
+  # the denominator.
+  -> .multiclass_log_loss(probabilities, actual, classes, sample_weight = nil)
+    out = nil
+    ok = self.aligned?(probabilities, actual)
+    ok = classes != nil && type(classes) == "Array" && classes.size > 1 if ok
+    if ok
+      unique = []
+      classes.each -> (label)
+        unique.push(label) if !unique.include?(label)
+      ok = false if unique.size != classes.size
+    wts = nil
+    if ok && sample_weight != nil
+      wts = Estimator.weight_values(sample_weight, probabilities.size)
+      ok = false if wts == nil
+    if ok
+      kilo = 1000.to_f
+      eps = 1.to_f / (kilo * kilo * kilo * kilo * kilo)
+      hi = 1.to_f - eps
+      total = 0.to_f
+      weight_total = 0.to_f
+      i = 0
+      while i < probabilities.size
+        row = probabilities[i]
+        ok = false if type(row) != "Array"
+        ok = false if type(row) == "Array" && row.size != classes.size
+        if type(row) == "Array"
+          row.each -> (value)
+            kind = type(value)
+            ok = false if kind != "Integer" && kind != "Float"
+        class_index = 0 - 1
+        c = 0
+        while c < classes.size
+          class_index = c if classes[c] == actual[i]
+          c += 1
+        ok = false if class_index < 0
+        if ok
+          p = row[class_index]
+          kind = type(p)
+          ok = false if kind != "Integer" && kind != "Float"
+          if ok
+            clipped = p.to_f
+            clipped = eps if clipped < eps
+            clipped = hi if clipped > hi
+            term = 0.to_f - Math.log(clipped)
+            if wts == nil
+              total += term
+            else
+              total += term * wts[i]
+              weight_total += wts[i]
+        i += 1
+      if ok
+        denom = probabilities.size.to_f
+        denom = weight_total if wts != nil
+        out = total / denom
     out
 
   # Precision-recall curve as a PrecisionRecallCurve: .precision /

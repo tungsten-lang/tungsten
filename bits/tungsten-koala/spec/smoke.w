@@ -212,7 +212,12 @@ use support
     self.check("logreg sym preds", lgs.predict([[0, 0], [4, 4]]).join(","), "a,b")
     self.check("logreg nil before fit", LogisticRegression.new.predict([[1]]) == nil, true)
     self.check("logreg one-class nil", LogisticRegression.new.fit([[1], [2]], [0, 0]) == nil, true)
-    self.check("logreg three-class nil", LogisticRegression.new.fit([[1], [2], [3]], [0, 1, 2]) == nil, true)
+    mlr = LogisticRegression.new(1, 100)
+    mlrx = [[1, 0, 0], [1, 0, 0], [0, 1, 0], [0, 1, 0], [0, 0, 1], [0, 0, 1]]
+    mlry = [:a, :a, :b, :b, :c, :c]
+    self.check("logreg multiclass fit", mlr.fit(mlrx, mlry) != nil, true)
+    self.check("logreg multiclass predict", mlr.predict(mlrx).join(","), "a,a,b,b,c,c")
+    self.check("logreg multiclass center proba", mlr.predict_proba([[0, 0, 0]])[0], "\[0.333333, 0.333333, 0.333333\]")
 
     # --- GaussianNB (generative: closed-form Gaussian naive Bayes) ---
     # Two classes of two rows: means [2,3] / [12,13], population variances

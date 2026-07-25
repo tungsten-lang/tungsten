@@ -183,6 +183,18 @@ describe "Persist round-trip: LogisticRegression" ->
     expect(back.params[:epochs]).to eq(40)
     expect(back.classes.join(",")).to eq(model.classes.join(","))
 
+  it "round-trips multiclass coefficients, biases and probabilities" ->
+    x = [[1, 0, 0], [1, 0, 0], [0, 1, 0], [0, 1, 0], [0, 0, 1], [0, 0, 1]]
+    y = [:a, :a, :b, :b, :c, :c]
+    model = LogisticRegression.new(1, 100)
+    model.fit(x, y)
+    back = Fx.cycle(model)
+    expect(back.classes.join(",")).to eq("a,b,c")
+    expect(back.coefficients.to_s).to eq(model.coefficients.to_s)
+    expect(back.intercept.to_s).to eq(model.intercept.to_s)
+    expect(back.predict_proba([[1, 0, 0], [0, 0, 0]]).to_s).to eq(model.predict_proba([[1, 0, 0], [0, 0, 0]]).to_s)
+    expect(back.predict([[1, 0, 0], [0, 1, 0], [0, 0, 1]]).join(",")).to eq("a,b,c")
+
 describe "Persist round-trip: GaussianNB" ->
   it "predicts identically — priors, means and variances all survive" ->
     model = GaussianNB.new

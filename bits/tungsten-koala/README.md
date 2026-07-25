@@ -39,6 +39,8 @@ Metrics.roc_curve(scores, actual)    # => RocCurve: .fpr / .tpr / .thresholds / 
 Metrics.average_precision(scores, actual)     # => PR-AUC — the right curve when positives are rare
 Metrics.precision_recall_curve(scores, actual) # => .precision / .recall / .thresholds
 Metrics.log_loss(scores, actual)     # => 0.216162  binary cross-entropy (log loss)
+Metrics.multiclass_log_loss(probability_rows, actual, classes)
+                                     # => softmax cross-entropy
 Metrics.brier_score(scores, actual)  # => 0.0375  BOUNDED calibration error
 Metrics.silhouette_score(x, labels)  # => cluster quality — the metric KMeans lacked
 
@@ -132,6 +134,16 @@ lr.classes                           # => two labels, first-seen order
 lr.score(x_test, y_test)             # => accuracy; labels feed Metrics.f1
                                      # opaque labels map to 0/1: fit two,
                                      # e.g. [:a, :b], predict returns them
+
+# Three+ classes switch to stable multinomial softmax automatically
+mx = [[1, 0, 0], [1, 0, 0], [0, 1, 0], [0, 1, 0], [0, 0, 1], [0, 0, 1]]
+my = [:a, :a, :b, :b, :c, :c]
+multi = LogisticRegression.new(1, 100)
+multi.fit(mx, my)
+multi.predict_proba([[0, 0, 0]])     # => [[1/3, 1/3, 1/3]] in classes order
+multi.predict_proba(mx, :b)          # => flat P(:b) column
+multi.decision_function(mx)          # => raw class logits
+multi.log_loss(mx, my)               # => multiclass cross-entropy
 
 # Classification — GaussianNB, MULTICLASS Gaussian naive Bayes (closed form)
 nb = GaussianNB.new                  # var_smoothing = 1e-9 (sklearn's default)
@@ -403,7 +415,7 @@ shape-error convention. Nothing raises. Validation lives in one place,
 | estimator | weighted | how |
 | --- | --- | --- |
 | `LinearRegression` | yes | weighted least squares — rows and targets scaled by `sqrt(w)` through the same Householder QR; ridge inherits it as `(X^T W X + alpha*I') beta = X^T W y` |
-| `LogisticRegression` | yes | weighted gradient: `sum_i w_i (p_i - t_i) x_i`, over `sum(w)` |
+| `LogisticRegression` | yes | weighted sigmoid/softmax gradient: `sum_i w_i (p_ic - t_ic) x_i`, over `sum(w)` |
 | `GaussianNB` | yes | weighted priors, means and variances (`class_counts` becomes total weight) |
 | `DecisionTreeClassifier` | yes | weighted impurity, weighted split scoring, heaviest-class leaves |
 | `DecisionTreeRegressor` | yes | weighted MSE, weighted-mean leaves |
@@ -479,12 +491,11 @@ when those knobs are moved off their defaults.
 `DecisionTreeClassifier` is koala's non-parametric, piecewise-constant
 learner. Where `LinearRegression` fits one global hyperplane,
 `KNNClassifier` defers everything to query time, `LogisticRegression`
-iterates to a single boundary and `GaussianNB` assumes a generative
+iterates to global linear class boundaries and `GaussianNB` assumes a generative
 Gaussian per class, a tree recursively cuts the feature space with
 axis-aligned half-planes (`x[j] <= t`) and predicts a constant inside each
 box. It needs no scaling, no distance metric and no learning rate, it is
-multiclass from the start — and, unlike every other estimator here, the
-fitted model is **readable**.
+multiclass from the start, and the fitted model is **readable**.
 
 ### The algorithm (CART, greedy, top-down)
 
@@ -958,17 +969,22 @@ learned state cannot leak between folds.
 
 `examples/reference_ml.w` is a self-checking set of deterministic
 end-to-end problems: nonlinear XOR, exact quadratic regression under CV,
-three-class GaussianNB under stratified CV, and KMeans evaluated by
-silhouette rather than its training objective.
+three-class GaussianNB and multinomial LogisticRegression under
+stratified CV, balanced multiclass probability checks, and KMeans
+evaluated by silhouette rather than its training objective.
 
 The matching `benchmarks/reference_koala.w` and
 `benchmarks/reference_sklearn.py` use identical fixtures. Against
-scikit-learn 1.9.0, all five reported outcomes agree: raw XOR accuracy
+scikit-learn 1.9.0, all ten gates pass: raw XOR accuracy
 0.5, polynomial XOR accuracy 1, quadratic mean CV R² 1, multiclass
-GaussianNB mean CV accuracy 1, and two-box silhouette
-0.91952609056736 (the final printed float digit may differ).
-`benchmarks/compare_reference.py` runs both sides and enforces an absolute
-tolerance of 1e-12.
+GaussianNB and LogisticRegression mean CV accuracy 1, balanced-center
+multiclass log loss `ln(3)`, a canonical 60-row Iris subset evaluated by
+scaled LogisticRegression, GaussianNB and scaled 3-NN, and two-box
+silhouette 0.91952609056736. Nine gates agree to `1e-12`; Iris GaussianNB
+differs by one row (Koala 0.9667, sklearn 0.95) and has an explicit 0.02
+held-out-quality tolerance. `benchmarks/compare_reference.py` compiles
+Koala, runs both sides, prints every delta/tolerance, and fails any gate
+outside its contract.
 
 ## Model persistence
 
@@ -1471,25 +1487,23 @@ shares LinearRegression's accepted input shapes and produces the label
 arrays that `Metrics.accuracy`/`precision`/`recall`/`f1` consume;
 distance and vote ties break deterministically to the earlier training
 row, so both engines agree; k defaults to 5) and `LogisticRegression`
-(binary logistic regression — koala's parametric probabilistic
-classifier, fitted by full-batch gradient descent on the cross-entropy
-loss: `fit` learns weights and a bias minimizing mean cross-entropy of
-`sigmoid(w·x + b)` against 0/1 targets, stepping every epoch by
-−learning_rate × gradient from zero weights, so the first epoch is exact
-— on `[[0],[1]]`/`[0,1]` at learning rate 1 the weight gradient is
-−0.25 and `w` becomes `[0.25]`, `b` stays 0. `predict_proba` returns
-`P(classes[1])` strictly in (0, 1) — the sigmoid argument is clamped to
-±30 so `exp` never overflows — and `predict` thresholds at 0.5 to the
-original labels. Labels are opaque and binary: fit collects the two
-distinct labels in first-seen order, maps the first to 0 and the second
-to 1, and returns those originals, so the output feeds `Metrics.accuracy`
-/ `precision` / `recall` / `f1` exactly like KNNClassifier; a y with one
-class or three or more makes fit return nil. `new(learning_rate, epochs)`
-defaults to 0.1 / 1000 — the default rate is derived as `1.to_f/10.to_f`
-because a float literal corrupts call arguments, so a caller wanting a
-fractional rate derives it the same way. It shares LinearRegression's
-accepted input shapes, and `Math.exp`/`Math.log` agree bit-for-bit on
-both engines, so it is deterministic) and `GaussianNB` (koala's
+(koala's parametric probabilistic classifier, fitted by full-batch
+gradient descent on cross-entropy. Two classes retain the original
+sigmoid path bit-for-bit: `fit` learns one weight vector and bias,
+`predict_proba(x)` returns flat `P(classes[1])`, and `predict` thresholds
+at 0.5. Three or more classes use multinomial softmax with one weight row
+and bias per class; logits are max-shifted before exponentiation, so the
+probability rows stay finite and sum to 1. `predict_proba(x)` then returns
+the full matrix in first-seen `classes` order, while
+`predict_proba(x, label)` returns one flat class column in either mode.
+`decision_function` exposes the raw logits and `log_loss` reports the
+binary or multiclass objective. Labels remain opaque and only a one-class
+target is rejected. `new(learning_rate, epochs)` defaults to 0.1 / 1000;
+the default rate is derived as `1.to_f/10.to_f` because a float literal
+corrupts call arguments, so a caller wanting a fractional rate derives it
+the same way. It shares LinearRegression's accepted input shapes, honors
+sample weights in every class gradient, and is deterministic on both
+engines) and `GaussianNB` (koala's
 GENERATIVE classifier, the third kind of supervised learner beside
 KNNClassifier's lazy/instance-based and LogisticRegression's
 discriminative/iterative one. Where those two learn a decision rule,
@@ -1519,7 +1533,7 @@ finite. Labels are opaque and MULTICLASS out of the box — any number of
 integer, string, or symbol labels, no one-vs-rest wrapper, collected in
 first-seen order (scikit-learn sorts) — so `predict` feeds
 `Metrics.accuracy` and `Metrics.classification_report` directly, and a
-single class is fine (unlike LogisticRegression, which needs exactly
+single class is fine (unlike LogisticRegression, which needs at least
 two). It shares LinearRegression's accepted input shapes. On
 scikit-learn's own documentation example — `X =
 [[-1,-1],[-2,-1],[-3,-2],[1,1],[2,1],[3,2]]`, `y = [1,1,1,2,2,2]` — it
@@ -1540,7 +1554,7 @@ with `pos_label` naming the positive class (default 1, the
 precision/recall convention), and return nil when a class is absent
 (AUC undefined) or the arrays are misaligned. `Metrics.auc(x, y)` is the
 underlying trapezoidal area under any curve, so `roc_auc == auc(fpr,
-tpr)`. `Metrics.log_loss(scores, actual, pos_label)` is the binary
+tpr)`. `Metrics.log_loss(scores, actual, pos_label, sample_weight)` is the binary
 cross-entropy `-mean(y*ln p + (1-y)*ln(1-p))` — the EXACT objective
 `LogisticRegression` minimizes and scikit-learn's `log_loss`. Where
 `roc_auc` judges only the ranking of the scores, log loss judges their
@@ -1551,7 +1565,10 @@ probabilities; lower is better, 0 a perfectly confident classifier and
 `[eps, 1-eps]` (`eps = 1e-15`) so a confidently wrong prediction stays
 finite, and — unlike `roc_auc` — a single present class is well-defined
 (no negatives to normalize by), so it returns nil only when `scores` and
-`actual` are misaligned or empty.
+`actual` are misaligned or empty. For a probability matrix,
+`Metrics.multiclass_log_loss(probabilities, actual, classes,
+sample_weight)` computes `-mean(log(P(true class)))`, the multinomial
+softmax objective.
 
 **When the classes are IMBALANCED, accuracy lies.** A classifier that
 always answers the majority class scores 0.8 on a 4:1 split while having

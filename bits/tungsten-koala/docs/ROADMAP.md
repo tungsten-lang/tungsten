@@ -33,7 +33,7 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
 3. **Contract honesty** — weighted Scaler/Imputer; unsupervised Pipeline tails; `supports_sample_weight?` accuracy.
 4. **Sparse + matmul** — core SparseMatrix facade; BLAS-backed matmul.
 5. **LinAlg** — rank-revealing QR, rank, thin SVD/Cholesky as pure follow-ons.
-6. **Estimators** — multiclass logistic; KNN regressor + distance weights; feature selection; SVM; gradient boosting.
+6. **Estimators** — multiclass logistic (shipped); KNN regressor + distance weights; feature selection; SVM; gradient boosting.
 7. **Trees** — Gini/MSE feature importances; tree export; permutation importance (ablation).
 8. **Calibration** — `CalibratedClassifierCV` (Platt / isotonic).
 9. **DataFrame parity** — multi-key group_by, value_counts, sort, drop_duplicates, melt, fillna, masks.
@@ -56,23 +56,27 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
   `SelectKBest`.
 - `PolynomialFeatures` shipped with degree, bias, interaction-only,
   feature names, tuning, Pipeline composition, and persistence.
-- A live scikit-learn 1.9.0 differential now covers five outcomes across
+- `LogisticRegression` now retains its binary sigmoid path while adding
+  stable multinomial softmax, probability matrices / class columns, raw
+  decision scores, multiclass log loss, weights, persistence, CV,
+  Pipeline, and GridSearch support.
+- A live scikit-learn 1.9.0 differential now covers ten outcomes across
   nonlinear classification, polynomial regression, multiclass
-  classification, and clustering; all five agree (within the last float
-  digit for silhouette).
-- 14 interpreted and compiled spec suites cover 623 examples; the
-  framework-free smoke test adds 376 checks on each engine.
+  classification/probability scoring, a canonical Iris subset, and
+  clustering. Nine agree to 1e-12; Iris GaussianNB differs by one of 60
+  rows in Koala's favor and passes an explicit 0.02 quality tolerance.
+- 14 interpreted and compiled spec suites cover 632 examples; the
+  framework-free smoke test adds 378 checks on each engine.
 
 ## Highest-leverage next tranche
 
-1. Multiclass logistic regression with stable softmax and `predict_proba`.
-2. Probability calibration (`CalibratedClassifierCV`) and calibration
+1. Probability calibration (`CalibratedClassifierCV`) and calibration
    curves, measured by log loss and Brier score.
-3. `ColumnSelector` / `FunctionTransformer`, then mixed numeric/categorical
+2. `ColumnSelector` / `FunctionTransformer`, then mixed numeric/categorical
    column pipelines.
-4. Broader sklearn differentials on standard tabular datasets plus
+3. Broader sklearn differentials on standard tabular datasets plus
    wall-clock and memory baselines.
-5. Gradient boosting and permutation importance before widening into GPU
+4. Gradient boosting and permutation importance before widening into GPU
    execution.
 
 ## Compiler / runtime fixes koala depends on

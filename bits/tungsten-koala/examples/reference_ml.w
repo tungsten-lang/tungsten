@@ -57,7 +57,37 @@ class_scores = CrossValidation.cross_val_score(
 lines.push("multiclass GaussianNB CV " + class_scores.to_s)
 ok = false if class_scores.to_s != "\[1, 1, 1\]"
 
-# 4. Two compact boxes ten units apart. KMeans recovers the two groups;
+# 4. A balanced three-class linear problem. Multinomial LogisticRegression
+# fits through stable softmax, cross-validates perfectly, and assigns the
+# all-zero center equal probability for every class.
+softmax_x = []
+softmax_y = []
+6.times -> (i)
+  softmax_x.push([1, 0, 0])
+  softmax_y.push(:a)
+6.times -> (i)
+  softmax_x.push([0, 1, 0])
+  softmax_y.push(:b)
+6.times -> (i)
+  softmax_x.push([0, 0, 1])
+  softmax_y.push(:c)
+softmax_scores = CrossValidation.cross_val_score(
+  LogisticRegression.new(1, 100),
+  softmax_x,
+  softmax_y,
+  StratifiedKFold.new(3)
+)
+softmax = LogisticRegression.new(1, 100)
+softmax.fit(softmax_x, softmax_y)
+center = softmax.predict_proba([[0, 0, 0]])
+lines.push("multiclass LogisticRegression CV " + softmax_scores.to_s)
+lines.push("multiclass center probabilities " + center[0].to_s)
+ok = false if softmax_scores.to_s != "\[1, 1, 1\]"
+ok = false if center[0].size != 3
+center[0].each -> (p)
+  ok = false if LinAlg.fabs(p - 1.to_f / 3.to_f) > 1.to_f / 1000000.to_f
+
+# 5. Two compact boxes ten units apart. KMeans recovers the two groups;
 # silhouette checks separation independently of the training objective.
 cluster_x = [[0, 0], [0, 1], [1, 0], [1, 1],
              [10, 10], [10, 11], [11, 10], [11, 11]]

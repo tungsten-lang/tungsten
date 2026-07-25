@@ -611,6 +611,13 @@ describe "Metrics.log_loss" ->
     scores = [1.to_f / 10.to_f, 4.to_f / 10.to_f, 35.to_f / 100.to_f, 8.to_f / 10.to_f]
     expect(Metrics.log_loss(scores, [1, 1, 2, 2], 2).to_s).to be_num("0.472288")
 
+  it "weights binary log loss by the sum of sample weights" ->
+    scores = [9.to_f / 10.to_f, 2.to_f / 10.to_f]
+    actual = [1, 1]
+    weighted = Metrics.log_loss(scores, actual, 1, [2, 1])
+    expected = 0.to_f - (2.to_f * Math.log(9.to_f / 10.to_f) + Math.log(2.to_f / 10.to_f)) / 3.to_f
+    expect(LinAlg.fabs(weighted - expected) < 1.to_f / 1000000.to_f).to be_true
+
   # Unlike roc_auc, a single present class is well-defined — log loss needs
   # no negatives to normalize. Two positives at 0.9 / 0.8:
   # L = -(ln 0.9 + ln 0.8) / 2 = 0.164252 (where roc_auc returns nil).
@@ -624,6 +631,29 @@ describe "Metrics.log_loss" ->
   it "returns nil for misaligned or empty inputs" ->
     expect(Metrics.log_loss([9.to_f / 10.to_f, 1.to_f / 10.to_f], [1])).to be_nil
     expect(Metrics.log_loss([], [])).to be_nil
+
+describe "Metrics.multiclass_log_loss" ->
+  it "scores the probability assigned to each row's true class" ->
+    probabilities = [
+      [7.to_f / 10.to_f, 2.to_f / 10.to_f, 1.to_f / 10.to_f],
+      [1.to_f / 10.to_f, 8.to_f / 10.to_f, 1.to_f / 10.to_f]
+    ]
+    loss = Metrics.multiclass_log_loss(probabilities, [:a, :b], [:a, :b, :c])
+    expected = 0.to_f - (Math.log(7.to_f / 10.to_f) + Math.log(8.to_f / 10.to_f)) / 2.to_f
+    expect(LinAlg.fabs(loss - expected) < 1.to_f / 1000000.to_f).to be_true
+
+  it "supports sample weights and rejects malformed probability tables" ->
+    probabilities = [
+      [7.to_f / 10.to_f, 2.to_f / 10.to_f, 1.to_f / 10.to_f],
+      [1.to_f / 10.to_f, 8.to_f / 10.to_f, 1.to_f / 10.to_f]
+    ]
+    weighted = Metrics.multiclass_log_loss(probabilities, [:a, :b], [:a, :b, :c], [2, 1])
+    expected = 0.to_f - (2.to_f * Math.log(7.to_f / 10.to_f) + Math.log(8.to_f / 10.to_f)) / 3.to_f
+    expect(LinAlg.fabs(weighted - expected) < 1.to_f / 1000000.to_f).to be_true
+    expect(Metrics.multiclass_log_loss([[1, 0]], [:a], [:a, :b, :c])).to be_nil
+    expect(Metrics.multiclass_log_loss([[1, 0, 0]], [:missing], [:a, :b, :c])).to be_nil
+    expect(Metrics.multiclass_log_loss([[1, "bad", 0]], [:a], [:a, :b, :c])).to be_nil
+    expect(Metrics.multiclass_log_loss([], [], [:a, :b])).to be_nil
 
 describe "PrecisionRecallCurve" ->
   # scikit-learn's own precision_recall_curve docstring example:

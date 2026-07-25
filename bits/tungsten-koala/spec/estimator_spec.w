@@ -430,6 +430,11 @@ describe "LogisticRegression" ->
     ref = 1.to_f / (1.to_f + Math.exp(0.to_f - (1.to_f / 4.to_f)))
     tol = 1.to_f / 1000000.to_f
     expect(LinAlg.fabs(probs[1] - ref) < tol).to be_true
+    matrix = model.predict_proba_matrix([[0], [1]])
+    expect(matrix[0].join(",")).to eq("0.5,0.5")
+    expect(model.predict_proba([[0], [1]], 0).join(",")).to be_nums("0.5,0.437823")
+    expect(model.predict_proba([[0]], 99)).to be_nil
+    expect(model.decision_function([[0], [1]]).join(",")).to eq("0,0.25")
 
   # Two well-separated clusters (class 0 near the origin, class 1 near
   # (3,3)) are linearly separable, so batch gradient descent at the
@@ -483,13 +488,56 @@ describe "LogisticRegression" ->
     ms.fit(xs, [0, 0, 0, 1, 1, 1])
     expect(ms.predict(Vector.new([1, 21])).to_s).to eq("\[0, 1\]")
 
-  # Binary only: a y with one distinct label, or three or more, makes fit
-  # return nil and leaves fitted? false.
-  it "requires exactly two classes" ->
+  it "rejects a target with fewer than two classes" ->
     expect(LogisticRegression.new.fit([[1], [2]], [0, 0])).to be_nil
-    m = LogisticRegression.new
-    expect(m.fit([[1], [2], [3]], [0, 1, 2])).to be_nil
-    expect(m.fitted?).to be_false
+
+  # At zero weights every class probability is 1/3. On x = [1,2,3] with
+  # one sample per class, the first softmax gradient step is therefore
+  # [-1/3, 0, +1/3] in the three class weight rows (bias gradients cancel).
+  it "takes the hand-computed first multiclass softmax step" ->
+    model = LogisticRegression.new(1, 1)
+    expect(model.fit([[1], [2], [3]], [:a, :b, :c]) != nil).to be_true
+    expect(model.classes.join(",")).to eq("a,b,c")
+    expect(model.coefficients[0].join(",")).to be_nums("-0.333333")
+    expect(model.coefficients[1].join(",")).to be_nums("0")
+    expect(model.coefficients[2].join(",")).to be_nums("0.333333")
+    expect(model.intercept.join(",")).to be_nums("0,0,0")
+    expect(model.predict_proba([[0]])[0].join(",")).to be_nums("0.333333,0.333333,0.333333")
+
+  it "classifies three classes and exposes full or per-class probabilities" ->
+    x = [[1, 0, 0], [1, 0, 0], [0, 1, 0], [0, 1, 0], [0, 0, 1], [0, 0, 1]]
+    y = [:a, :a, :b, :b, :c, :c]
+    model = LogisticRegression.new(1, 100)
+    expect(model.fit(x, y) != nil).to be_true
+    expect(model.predict(x).join(",")).to eq("a,a,b,b,c,c")
+    expect(model.score(x, y).to_s).to eq("1")
+    center = model.predict_proba([[0, 0, 0]])
+    expect(center[0].join(",")).to be_nums("0.333333,0.333333,0.333333")
+    expect(LinAlg.fabs(Stats.sum(center[0]) - 1.to_f) < 1.to_f / 1000000.to_f).to be_true
+    expect(model.predict_proba([[0, 0, 0]], :b).join(",")).to be_nums("0.333333")
+    expect(model.predict_proba([[0, 0, 0]], :missing)).to be_nil
+    expect(model.decision_function([[0, 0, 0]])[0].size).to eq(3)
+    expect(model.log_loss(x, y) < 1.to_f / 10.to_f).to be_true
+
+  it "cross-validates, pipelines and grid-searches a multiclass linear model" ->
+    x = [[1, 0, 0], [1, 0, 0], [1, 0, 0],
+         [0, 1, 0], [0, 1, 0], [0, 1, 0],
+         [0, 0, 1], [0, 0, 1], [0, 0, 1]]
+    y = [:a, :a, :a, :b, :b, :b, :c, :c, :c]
+    splitter = StratifiedKFold.new(3)
+    model = LogisticRegression.new(1, 100)
+    expect(CrossValidation.cross_val_score(model, x, y, splitter).join(",")).to eq("1,1,1")
+    expect(model.fitted?).to be_false
+    pipe = Pipeline.new([[:scale, Scaler.new(:standard)], [:model, LogisticRegression.new(1, 100)]])
+    expect(pipe.fit(x, y) != nil).to be_true
+    expect(pipe.score(x, y).to_s).to eq("1")
+    search = GridSearch.new(
+      Pipeline.new([[:model, LogisticRegression.new(1, 20)]]),
+      { "model.epochs" => [20, 100] },
+      splitter
+    )
+    expect(search.fit(x, y) != nil).to be_true
+    expect(search.best_score.to_s).to eq("1")
 
   # Unusable shapes and premature calls all return nil and leave fitted?
   # false — the bit's shape-error convention, matching LinearRegression.
@@ -501,10 +549,23 @@ describe "LogisticRegression" ->
     expect(model.fit([], [])).to be_nil
     expect(model.fit([[1, 2], [3]], [0, 1])).to be_nil
     expect(model.fit([[1], [2]], [0, 1, 1])).to be_nil
+    expect(model.fit([[1], [nil]], [0, 1])).to be_nil
+    expect(model.fit([[1], ["x"]], [0, 1])).to be_nil
+    expect(LogisticRegression.new(0, 10).fit([[0], [1]], [0, 1])).to be_nil
+    expect(LogisticRegression.new(1, 0).fit([[0], [1]], [0, 1])).to be_nil
     expect(model.fitted?).to be_false
     r = model.fit([[0], [1]], [0, 1])
     expect(r != nil).to be_true
     expect(model.predict([[1, 2]])).to be_nil
+    expect(model.predict([[nil]])).to be_nil
+    expect(model.log_loss([[0], [1]], nil)).to be_nil
+
+  it "invalidates a fitted model when a re-fit fails" ->
+    model = LogisticRegression.new
+    expect(model.fit([[0], [1]], [0, 1]) != nil).to be_true
+    expect(model.fit([[0], [1]], [0, 0])).to be_nil
+    expect(model.fitted?).to be_false
+    expect(model.predict([[0]])).to be_nil
 
   # The payoff of predict_proba: its scores feed Metrics.roc_auc for
   # threshold-free evaluation. The two clusters are linearly separable, so

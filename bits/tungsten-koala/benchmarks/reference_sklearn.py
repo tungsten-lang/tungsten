@@ -11,12 +11,14 @@ wall-clock performance.
 
 import numpy as np
 from sklearn.cluster import KMeans
+from sklearn.datasets import load_iris
 from sklearn.linear_model import LinearRegression, LogisticRegression
-from sklearn.metrics import silhouette_score
+from sklearn.metrics import log_loss, silhouette_score
 from sklearn.model_selection import KFold, StratifiedKFold, cross_val_score
 from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import PolynomialFeatures
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
 
 
 def emit(name: str, value: float) -> None:
@@ -70,6 +72,71 @@ emit(
         class_x,
         class_y,
         cv=StratifiedKFold(3, shuffle=False),
+    ).mean(),
+)
+
+softmax_x = np.repeat(np.eye(3), 6, axis=0)
+softmax_y = np.repeat(np.array(["a", "b", "c"]), 6)
+softmax_model = LogisticRegression(C=1e6, solver="lbfgs").fit(
+    softmax_x, softmax_y
+)
+emit(
+    "multiclass_logreg_cv_mean",
+    cross_val_score(
+        LogisticRegression(C=1e6, solver="lbfgs"),
+        softmax_x,
+        softmax_y,
+        cv=StratifiedKFold(3, shuffle=False),
+    ).mean(),
+)
+center_probabilities = softmax_model.predict_proba(np.zeros((3, 3)))
+emit(
+    "multiclass_center_log_loss",
+    log_loss(
+        np.array(["a", "b", "c"]),
+        center_probabilities,
+        labels=softmax_model.classes_,
+    ),
+)
+
+iris = load_iris()
+iris_indices = list(range(20)) + list(range(50, 70)) + list(range(100, 120))
+iris_x = (iris.data[iris_indices] * 10).astype(int)
+iris_y = iris.target[iris_indices]
+iris_cv = StratifiedKFold(5, shuffle=False)
+emit(
+    "iris_logreg_cv_mean",
+    cross_val_score(
+        Pipeline(
+            [
+                ("scale", StandardScaler()),
+                (
+                    "model",
+                    LogisticRegression(solver="lbfgs", max_iter=5000),
+                ),
+            ]
+        ),
+        iris_x,
+        iris_y,
+        cv=iris_cv,
+    ).mean(),
+)
+emit(
+    "iris_gaussian_nb_cv_mean",
+    cross_val_score(GaussianNB(), iris_x, iris_y, cv=iris_cv).mean(),
+)
+emit(
+    "iris_knn_cv_mean",
+    cross_val_score(
+        Pipeline(
+            [
+                ("scale", StandardScaler()),
+                ("model", KNeighborsClassifier(3)),
+            ]
+        ),
+        iris_x,
+        iris_y,
+        cv=iris_cv,
     ).mean(),
 )
 

@@ -350,13 +350,28 @@ describe "LogisticRegression sample_weight (weighted gradient)" ->
     expect(ones.intercept.to_s).to eq(plain.intercept.to_s)
 
   it "drops a zero-weight row, including from the class list" ->
-    # the :c row is weighted out, so what is left is binary and fittable
+    # Multiclass is valid unweighted; weighting :c out turns this fit into
+    # the binary compatibility path and removes :c from learned classes.
     x = [[0], [1], [2]]
     y = [:a, :b, :c]
+    all = LogisticRegression.new(1, 10)
+    expect(all.fit(x, y) != nil).to be_true
+    expect(all.classes.join(",")).to eq("a,b,c")
     model = LogisticRegression.new(1, 10)
-    expect(model.fit(x, y)).to be_nil
     expect(model.fit(x, y, [1, 1, 0]) != nil).to be_true
     expect(model.classes.join(",")).to eq("a,b")
+
+  it "gives the row-duplicated multiclass softmax fit" ->
+    x = [[1, 0, 0], [1, 0, 0], [0, 1, 0], [0, 1, 0], [0, 0, 1], [0, 0, 1]]
+    y = [:a, :a, :b, :b, :c, :c]
+    counts = [3, 1, 1, 2, 2, 1]
+    weighted = LogisticRegression.new(1, 25)
+    weighted.fit(x, y, counts)
+    duplicate = LogisticRegression.new(1, 25)
+    duplicate.fit(sw_expand(x, counts), sw_expand(y, counts))
+    expect(sw_near_rows(weighted.coefficients, duplicate.coefficients)).to be_true
+    expect(sw_near(weighted.intercept, duplicate.intercept)).to be_true
+    expect(sw_near_rows(weighted.predict_proba(x), duplicate.predict_proba(x))).to be_true
 
   it "returns nil for an unusable weight vector" ->
     x = [[0], [1], [2], [3]]

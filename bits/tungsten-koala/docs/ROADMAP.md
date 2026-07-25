@@ -71,18 +71,24 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
   supervised and weighted transforms, drop/passthrough remainder policy,
   collision-safe feature names, nested tuning, GridSearch, CV,
   calibration, strict schemas, and exact persistence.
-- A live scikit-learn 1.9.0 differential now covers seventeen numerical
-  outcomes, three calibration-quality ratios, and a mixed-column quality
-  gain across
+- `KNNClassifier` now supports uniform or inverse-Euclidean-distance
+  voting, first-seen classes, full/per-class probabilities, calibration,
+  nested tuning, and persistence. `KNeighborsRegressor` uses the same
+  corrected distance rule and averages duplicate exact matches like
+  sklearn.
+- A live scikit-learn 1.9.0 differential now covers twenty-two numerical
+  outcomes, three calibration-quality ratios, and two capability gains
+  across
   nonlinear classification, polynomial regression, multiclass
   classification/probability scoring, a canonical Iris subset,
   heterogeneous preprocessing, held-out probability calibration, and
   clustering. The categorical branch improves mixed-data CV accuracy
-  from 0.667 to 1.0 in both implementations. On held-out Iris, Koala
+  from 0.667 to 1.0 and distance-weighted KNN improves its reference
+  accuracy from 0.5 to 1.0 in both implementations. On held-out Iris, Koala
   sigmoid/isotonic log loss is 0.353/0.251 against sklearn's 0.346/0.258;
   both cut the raw tree loss by over 86%.
-- 16 interpreted and compiled spec suites cover 678 examples; the
-  framework-free smoke test adds 398 checks on each engine.
+- 17 interpreted and compiled spec suites cover 697 examples; the
+  framework-free smoke test adds 405 checks on each engine.
 
 ## Highest-leverage next tranche
 
@@ -90,7 +96,7 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
    wall-clock and memory baselines.
 2. Gradient boosting and permutation importance before widening into GPU
    execution.
-3. KNN classifier distance weights/probabilities and SVM classification.
+3. SVM classification and probability calibration.
 4. A persistable named-operation alternative to arbitrary-closure
    `FunctionTransformer`.
 

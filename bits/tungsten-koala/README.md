@@ -125,11 +125,14 @@ las.n_iter                           # => 2   coordinate-descent sweeps to conve
 Lasso.new.l1_ratio                   # => 1   Lasso IS ElasticNet(alpha, 1)
 ElasticNet.new(1, 1.to_f / 2.to_f)   # (alpha, l1_ratio); new(a, 0) == LinearRegression.new(n*a)
 
-# Classification — KNNClassifier, majority vote of the k nearest rows
-knn = KNNClassifier.new(3)           # k neighbours (defaults to 5, sklearn)
+# Nearest neighbours — uniform or inverse-Euclidean-distance weighting
+knn = KNNClassifier.new(3, :distance) # k defaults to 5; :uniform is default
 knn.fit([[1, 1], [2, 2], [6, 6], [7, 7]], [:a, :a, :b, :b])
 knn.predict([[2, 3], [7, 6]])        # => [:a, :b]  (Euclidean nearest)
+knn.predict_proba([[2, 3]])          # => rows in first-seen classes order
+knn.predict_proba([[2, 3]], :a)      # => flat P(:a) column
 knn.score(x_test, y_test)            # => accuracy; labels feed Metrics.f1
+KNeighborsRegressor.new(3, :distance) # same neighbours; weighted target mean
 
 # Classification — LogisticRegression, gradient descent on cross-entropy
 lr = LogisticRegression.new          # lr = 0.1, 1000 epochs (or new(1, 500))
@@ -318,7 +321,7 @@ algorithms — answers one declared interface, defined in
 | --- | --- | --- |
 | `Tunable` | `params` `with_params(overrides)` | Scaler, Imputer, Encoder, PCA (and every Estimable, which restates the pair) |
 | `Estimable` | `fitted?` `predict(x)` `supervised?` `supports_sample_weight?` `params` `with_params(overrides)` `estimator_name` | every estimator below, plus `Pipeline` |
-| `SupervisedEstimator` | `fit(x, y, sample_weight)` `score(x, y, sample_weight)` | LinearRegression, Lasso, ElasticNet, KNNClassifier, LogisticRegression, GaussianNB, DecisionTreeClassifier, DecisionTreeRegressor, RandomForestClassifier, RandomForestRegressor, CalibratedClassifierCV |
+| `SupervisedEstimator` | `fit(x, y, sample_weight)` `score(x, y, sample_weight)` | LinearRegression, Lasso, ElasticNet, KNNClassifier, KNeighborsRegressor, LogisticRegression, GaussianNB, DecisionTreeClassifier, DecisionTreeRegressor, RandomForestClassifier, RandomForestRegressor, CalibratedClassifierCV |
 | `UnsupervisedEstimator` | `fit(x, sample_weight)` `score(x, sample_weight)` | KMeans, DBSCAN |
 
 `Tunable` is the hyperparameter half on its own — what a search needs and
@@ -438,18 +441,20 @@ shape-error convention. Nothing raises. Validation lives in one place,
 | `DecisionTreeClassifier` | yes | weighted impurity, weighted split scoring, heaviest-class leaves |
 | `DecisionTreeRegressor` | yes | weighted MSE, weighted-mean leaves |
 | `KMeans` | yes | weighted centroids and weighted inertia; zero-weight rows never seed a centroid but are still labelled |
-| `KNNClassifier` | **no** | `fit` returns nil rather than ignoring them |
+| `KNNClassifier`, `KNeighborsRegressor` | **no** | `fit` returns nil rather than ignoring them |
 
-`KNNClassifier` follows scikit-learn, whose `KNeighborsClassifier` has no
-`sample_weight` either: `fit` stores the training set unchanged, so there
-is nowhere for a weight to be absorbed, and weighting the neighbour VOTE
-would be a different algorithm (sklearn's `weights=`, a hyperparameter
-over distance). Rather than silently ignore them, `fit` answers nil and
-`supports_sample_weight?` says so up front — the weights twin of
-`supervised?`, and machine-readable for the same reason:
+The nearest-neighbour estimators follow scikit-learn, whose KNN fits have
+no `sample_weight`: `fit` stores the training set unchanged, so there is
+nowhere for a per-row importance weight to be absorbed. Weighting the
+neighbour vote/mean is a different algorithm, exposed explicitly as the
+`:uniform` / `:distance` `weight_kind` hyperparameter. Rather than silently
+ignore sample weights, `fit` answers nil and `supports_sample_weight?` says
+so up front — the weights twin of `supervised?`, and machine-readable for
+the same reason:
 
 ```tungsten
 KNNClassifier.new(3).supports_sample_weight?     # => false
+KNeighborsRegressor.new(3).supports_sample_weight? # => false
 LinearRegression.new.supports_sample_weight?     # => true
 Pipeline.new([Scaler.new(:standard), KNNClassifier.new(1)])
   .supports_sample_weight?                       # => false (delegates to the tail)
@@ -1096,13 +1101,14 @@ learned state cannot leak between folds.
 end-to-end problems: nonlinear XOR, exact quadratic regression under CV,
 three-class GaussianNB and multinomial LogisticRegression under
 stratified CV, balanced multiclass probability checks, heterogeneous
-numeric/categorical column composition, a cross-fitted calibrator wrapped
-around a preprocessing Pipeline, and KMeans evaluated by silhouette
-rather than its training objective.
+numeric/categorical column composition, inverse-distance KNN
+classification/regression, a cross-fitted calibrator wrapped around a
+preprocessing Pipeline, and KMeans evaluated by silhouette rather than
+its training objective.
 
 The matching `benchmarks/reference_koala.w` and
 `benchmarks/reference_sklearn.py` use identical fixtures. Against
-scikit-learn 1.9.0, all seventeen numerical gates and four capability /
+scikit-learn 1.9.0, all twenty-two numerical gates and five capability /
 quality gates pass: raw XOR accuracy
 0.5, polynomial XOR accuracy 1, quadratic mean CV R² 1, multiclass
 GaussianNB and LogisticRegression mean CV accuracy 1, balanced-center
@@ -1111,7 +1117,10 @@ scaled LogisticRegression, GaussianNB and scaled 3-NN, mixed-column
 preprocessing, held-out Versicolor/Virginica tree calibration, and
 two-box silhouette 0.91952609056736. On the mixed frame, both
 implementations improve from numeric-only CV accuracy 0.6667 to 1.0
-after adding the one-hot categorical branch.
+after adding the one-hot categorical branch. On the KNN fixture,
+inverse-distance weighting improves held-out accuracy from 0.5 to 1.0;
+Koala matches sklearn's exact `12/19` class probability, `31/19`
+regression prediction, and duplicate-exact-match mean.
 
 On that held-out calibration problem, Koala's sigmoid log loss is
 0.3533 against sklearn's 0.3463, isotonic log loss is 0.2513 against
@@ -1620,11 +1629,15 @@ features at alpha = 0 — makes fit return nil and `fitted?` stay false,
 and `predict`/`score` return nil before a successful fit), and
 classification: `KNNClassifier` (k-nearest-neighbors, koala's companion
 classifier to the regression estimator — a lazy learner: `fit` stores
-the training rows, `predict` returns the majority label among the k
-rows closest in squared-Euclidean distance, `score` is accuracy; it
-shares LinearRegression's accepted input shapes and produces the label
-arrays that `Metrics.accuracy`/`precision`/`recall`/`f1` consume;
-distance and vote ties break deterministically to the earlier training
+the training rows, `predict` returns the weighted vote among the k rows
+closest in Euclidean distance, `predict_proba` returns class-frequency
+or inverse-distance probability rows, and `score` is accuracy. The
+default `:uniform` mode is majority vote; `:distance` gives each
+neighbour weight `1 / distance`, with sklearn's rule that exact matches
+exclude every nonmatch. `classes` is first-seen and one label may be
+requested as a flat probability column. `KNeighborsRegressor` shares the
+same neighbour/weight rules and predicts the weighted target mean.
+Distance and vote ties break deterministically to the earlier training
 row, so both engines agree; k defaults to 5) and `LogisticRegression`
 (koala's parametric probabilistic classifier, fitted by full-batch
 gradient descent on cross-entropy. Two classes retain the original

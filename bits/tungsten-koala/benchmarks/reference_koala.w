@@ -87,6 +87,28 @@ mixed_columns = Pipeline.new([
 << "mixed_numeric_only_cv_mean," + CrossValidation.cross_val_mean(numeric_only, mixed_x, mixed_y, mixed_cv).to_s
 << "mixed_column_transform_cv_mean," + CrossValidation.cross_val_mean(mixed_columns, mixed_x, mixed_y, mixed_cv).to_s
 
+# KNN weighting parity. Uniform 3-NN lets two far class-b rows outvote the
+# nearby class-a row at x=1; inverse Euclidean distance reverses that error.
+# The probability and regression prediction are exact 12/19 and 31/19,
+# distinguishing inverse distance from the old inverse-squared bug.
+knn_train_x = [[0], [4], [5]]
+knn_class_y = [:a, :b, :b]
+knn_test_x = [[1], [9.to_f / 2.to_f]]
+knn_test_y = [:a, :b]
+knn_uniform = KNNClassifier.new(3, :uniform)
+knn_uniform.fit(knn_train_x, knn_class_y)
+knn_distance = KNNClassifier.new(3, :distance)
+knn_distance.fit(knn_train_x, knn_class_y)
+<< "knn_uniform_accuracy," + knn_uniform.score(knn_test_x, knn_test_y).to_s
+<< "knn_distance_accuracy," + knn_distance.score(knn_test_x, knn_test_y).to_s
+<< "knn_distance_class_a_probability," + knn_distance.predict_proba([[1]], :a)[0].to_s
+knn_regression = KNeighborsRegressor.new(3, :distance)
+knn_regression.fit(knn_train_x, [0, 4, 5])
+<< "knn_regressor_distance_prediction," + knn_regression.predict([[1]])[0].to_s
+knn_duplicate = KNeighborsRegressor.new(3, :distance)
+knn_duplicate.fit([[0], [0], [10]], [2, 4, 10])
+<< "knn_regressor_duplicate_prediction," + knn_duplicate.predict([[0]])[0].to_s
+
 # Held-out probability calibration on the overlapping Versicolor/Virginica
 # half of Iris. Train on the first 20 examples of each class (already in the
 # fixture above), then test on the next 20. An unconstrained tree emits hard

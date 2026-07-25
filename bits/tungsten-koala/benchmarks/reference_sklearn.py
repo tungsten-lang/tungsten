@@ -17,7 +17,7 @@ from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.metrics import brier_score_loss, log_loss, silhouette_score
 from sklearn.model_selection import KFold, StratifiedKFold, cross_val_score
 from sklearn.naive_bayes import GaussianNB
-from sklearn.neighbors import KNeighborsClassifier
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, PolynomialFeatures, StandardScaler
@@ -187,6 +187,41 @@ emit(
 emit(
     "mixed_column_transform_cv_mean",
     cross_val_score(mixed_columns, mixed_x, mixed_y, cv=mixed_cv).mean(),
+)
+
+# Uniform versus inverse-Euclidean-distance KNN on the same hand-computable
+# classification and regression fixture as Koala.
+knn_train_x = np.array([[0.0], [4.0], [5.0]])
+knn_class_y = np.array(["a", "b", "b"])
+knn_test_x = np.array([[1.0], [4.5]])
+knn_test_y = np.array(["a", "b"])
+knn_uniform = KNeighborsClassifier(3, weights="uniform").fit(
+    knn_train_x, knn_class_y
+)
+knn_distance = KNeighborsClassifier(3, weights="distance").fit(
+    knn_train_x, knn_class_y
+)
+emit("knn_uniform_accuracy", knn_uniform.score(knn_test_x, knn_test_y))
+emit("knn_distance_accuracy", knn_distance.score(knn_test_x, knn_test_y))
+class_a = list(knn_distance.classes_).index("a")
+emit(
+    "knn_distance_class_a_probability",
+    knn_distance.predict_proba([[1.0]])[0, class_a],
+)
+knn_regression = KNeighborsRegressor(3, weights="distance").fit(
+    knn_train_x, np.array([0.0, 4.0, 5.0])
+)
+emit(
+    "knn_regressor_distance_prediction",
+    knn_regression.predict([[1.0]])[0],
+)
+knn_duplicate = KNeighborsRegressor(3, weights="distance").fit(
+    np.array([[0.0], [0.0], [10.0]]),
+    np.array([2.0, 4.0, 10.0]),
+)
+emit(
+    "knn_regressor_duplicate_prediction",
+    knn_duplicate.predict([[0.0]])[0],
 )
 
 # The same held-out Versicolor/Virginica calibration problem as Koala:

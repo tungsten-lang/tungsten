@@ -159,12 +159,24 @@ describe "Persist round-trip: LinearRegression" ->
 
 describe "Persist round-trip: KNNClassifier" ->
   it "predicts identically — the stored training set survives" ->
-    model = KNNClassifier.new(3)
+    model = KNNClassifier.new(3, :distance)
     model.fit(Fx.frame, Fx.labels)
     back = Fx.cycle(model)
     expect(back.fitted?).to be_true
     expect(Fx.preds(back)).to eq(Fx.preds(model))
     expect(back.params[:k]).to eq(3)
+    expect(back.params[:weight_kind]).to eq(:distance)
+    expect(back.classes.join(",")).to eq(model.classes.join(","))
+    expect(back.predict_proba(Fx.queries).to_s).to eq(model.predict_proba(Fx.queries).to_s)
+
+describe "Persist round-trip: KNeighborsRegressor" ->
+  it "predicts identically under inverse-distance weighting" ->
+    model = KNeighborsRegressor.new(3, :distance)
+    model.fit(Fx.frame, Fx.targets)
+    back = Fx.cycle(model)
+    expect(back.fitted?).to be_true
+    expect(Fx.preds(back)).to eq(Fx.preds(model))
+    expect(back.params[:weight_kind]).to eq(:distance)
 
 describe "Persist round-trip: LogisticRegression" ->
   it "predicts identically, probabilities included" ->

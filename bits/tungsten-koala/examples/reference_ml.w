@@ -8,9 +8,9 @@
 # These are small, deterministic capability probes, not claims about
 # large-scale throughput: nonlinear classification, exact polynomial
 # regression under cross-validation, multiclass classification with
-# stratification, mixed numeric/categorical preprocessing, cross-fitted
-# probability calibration around a preprocessing Pipeline, and unsupervised
-# cluster-quality evaluation.
+# stratification, mixed numeric/categorical preprocessing, distance-weighted
+# nearest neighbours, cross-fitted probability calibration around a
+# preprocessing Pipeline, and unsupervised cluster-quality evaluation.
 
 use koala
 
@@ -119,7 +119,30 @@ mixed_scores = CrossValidation.cross_val_score(
 lines.push("mixed ColumnTransformer CV " + mixed_scores.to_s)
 ok = false if mixed_scores.to_s != "\[1, 1, 1\]"
 
-# 6. A cross-fitted sigmoid calibrator wraps a full preprocessing Pipeline,
+# 6. Distance-weighted KNN fixes a majority-vote error and exposes calibrated
+# class probabilities; the regressor uses the same inverse-Euclidean rule.
+knn_train_x = [[0], [4], [5]]
+knn_test_x = [[1], [9.to_f / 2.to_f]]
+knn_test_y = [:a, :b]
+knn_uniform = KNNClassifier.new(3)
+knn_uniform.fit(knn_train_x, [:a, :b, :b])
+knn_distance = KNNClassifier.new(3, :distance)
+knn_distance.fit(knn_train_x, [:a, :b, :b])
+knn_uniform_accuracy = knn_uniform.score(knn_test_x, knn_test_y)
+knn_distance_accuracy = knn_distance.score(knn_test_x, knn_test_y)
+knn_probability = knn_distance.predict_proba([[1]], :a)[0]
+knn_regression = KNeighborsRegressor.new(3, :distance)
+knn_regression.fit(knn_train_x, [0, 4, 5])
+knn_regression_prediction = knn_regression.predict([[1]])[0]
+lines.push("KNN uniform/distance accuracy " + knn_uniform_accuracy.to_s + "/" + knn_distance_accuracy.to_s)
+lines.push("KNN distance class-a probability " + knn_probability.to_s)
+lines.push("KNN regression prediction " + knn_regression_prediction.to_s)
+ok = false if knn_uniform_accuracy.to_s != "0.5"
+ok = false if knn_distance_accuracy.to_s != "1"
+ok = false if LinAlg.fabs(knn_probability - 12.to_f / 19.to_f) > 1.to_f / 1000000000000.to_f
+ok = false if LinAlg.fabs(knn_regression_prediction - 31.to_f / 19.to_f) > 1.to_f / 1000000000000.to_f
+
+# 7. A cross-fitted sigmoid calibrator wraps a full preprocessing Pipeline,
 # preserving class metadata and returning normalized held-out probabilities.
 cal_x = [[0], [1], [2], [3], [4], [5], [6], [7], [8], [9], [10], [11]]
 cal_y = [:cold, :cold, :cold, :cold, :cold, :cold,
@@ -136,7 +159,7 @@ ok = false if calibrated.predict([[2], [9]]).join(",") != "cold,hot"
 cal_probs.each -> (row)
   ok = false if LinAlg.fabs(Stats.sum(row) - 1.to_f) > 1.to_f / 1000000.to_f
 
-# 7. Two compact boxes ten units apart. KMeans recovers the two groups;
+# 8. Two compact boxes ten units apart. KMeans recovers the two groups;
 # silhouette checks separation independently of the training objective.
 cluster_x = [[0, 0], [0, 1], [1, 0], [1, 1],
              [10, 10], [10, 11], [11, 10], [11, 11]]

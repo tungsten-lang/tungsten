@@ -58,6 +58,11 @@ QUALITY_GAINS = {
         "mixed_numeric_only_cv_mean",
         0.20,
     ),
+    "knn_distance_vs_uniform": (
+        "knn_distance_accuracy",
+        "knn_uniform_accuracy",
+        0.50,
+    ),
 }
 
 

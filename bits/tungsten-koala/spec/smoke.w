@@ -188,6 +188,19 @@ use support
     self.check("knn train score", knn.score(kx, ky), 1)
     self.check("knn default k", KNNClassifier.new.k, 5)
     self.check("knn nil before fit", KNNClassifier.new(3).predict([[1, 1]]) == nil, true)
+    self.check("knn classes", knn.classes.join(","), "a,b")
+    self.check("knn probability rows", knn.predict_proba([[2, 3]])[0].join(","), "1,0")
+    kd = KNNClassifier.new(3, :distance)
+    kd.fit([[0], [4], [5]], [:a, :b, :b])
+    self.check("knn distance reverses far majority", kd.predict([[1]]).join(","), "a")
+    self.check("knn inverse distance probability", kd.predict_proba([[1]], :a)[0], "0.631579")
+    kr = KNeighborsRegressor.new(3, :distance)
+    kr.fit([[0], [4], [5]], [0, 4, 5])
+    self.check("knn regressor inverse distance", kr.predict([[1]])[0], "1.63158")
+    krz = KNeighborsRegressor.new(3, :distance)
+    krz.fit([[0], [0], [10]], [2, 4, 10])
+    self.check("knn regressor duplicate exact mean", krz.predict([[0]])[0], 3)
+    self.check("knn weight kind tunable", kd.params[:weight_kind], "distance")
 
     # --- LogisticRegression ---
     # First epoch is exact: sigmoid(0) = 0.5 (no exp), so w = [0.25], b = 0.

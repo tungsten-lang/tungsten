@@ -9,9 +9,10 @@
 #     model.predict(x_test)
 #     model.score(x_test, y_test)              # R²
 #
-# Distance is squared Euclidean (same as KNNClassifier). Ties break to
-# lower training index. sample_weight is refused on fit (same structural
-# reason as the classifier); score still accepts weights for Metrics.r2.
+# Neighbour ordering uses squared Euclidean distance (same as
+# KNNClassifier), while :distance weights use inverse EUCLIDEAN distance,
+# matching sklearn. Ties break to lower training index. sample_weight is
+# refused on fit; score still accepts weights for Metrics.r2.
 #
 # NOTE: floats derive via .to_f — a bare decimal literal is a Decimal and
 # does not coerce with Float.
@@ -49,15 +50,20 @@
     KNeighborsRegressor.new(Estimator.opt(overrides, :k, @k), Estimator.opt(overrides, :weight_kind, @weight_kind))
 
   -> fit(x, y, sample_weight = nil)
+    @fitted = false
+    @train_rows = nil
+    @train_targets = nil
     rows = Estimator.feature_rows(x)
     targets = Estimator.target_values(y)
     ok = rows != nil && targets != nil
     ok = rows.size > 0 && rows.size == targets.size if ok
-    ok = rows[0].size > 0 if ok
+    ok = KNNClassifier.numeric_rows?(rows) if ok
+    ok = Stats.numeric?(targets) if ok
     if ok
-      width = rows[0].size
-      rows.each -> (r)
-        ok = false if r.size != width
+      targets.each -> (target)
+        ok = false if target == nil
+    ok = type(@k) == "Integer" if ok
+    ok = @k > 0 if ok
     ok = false if sample_weight != nil
     kind = @weight_kind
     ok = false if kind != :uniform && kind != :distance
@@ -111,20 +117,24 @@
       chosen_y.push(tvals[best].to_f)
     out = 0.to_f
     if kind == :distance
-      # Exact zero distance: return that neighbour's target (sklearn).
-      zero_hit = false
-      zi = 0
+      # Exact matches exclude non-zero neighbours. Multiple exact matches
+      # receive equal weight (sklearn), rather than arbitrarily taking one.
+      zero_count = 0
+      zero_total = 0.to_f
+      i = 0
       chosen_d.each -> (d)
-        if !zero_hit && d == 0.to_f
-          out = chosen_y[zi]
-          zero_hit = true
-        zi += 1
-      if !zero_hit
+        if d == 0.to_f
+          zero_count += 1
+          zero_total += chosen_y[i]
+        i += 1
+      if zero_count > 0
+        out = zero_total / zero_count.to_f
+      else
         wsum = 0.to_f
         num = 0.to_f
         i = 0
         chosen_d.each -> (d)
-          w = 1.to_f / d
+          w = 1.to_f / Math.sqrt(d)
           num += w * chosen_y[i]
           wsum += w
           i += 1
@@ -140,7 +150,7 @@
     out = nil
     if @fitted
       rows = Estimator.feature_rows(x)
-      if rows != nil
+      if rows != nil && KNNClassifier.numeric_rows?(rows, true)
         width = @train_rows[0].size
         ok = true
         rows.each -> (r)
@@ -168,8 +178,17 @@
 
   -> .load_state(st)
     out = nil
-    ok = st != nil
-    ok = st[:k] != nil && st[:train_rows] != nil && st[:train_targets] != nil if ok
+    ok = st != nil && type(st) == "Hash"
+    ok = st[:k] != nil && st[:weight_kind] != nil if ok
+    ok = st[:train_rows] != nil && st[:train_targets] != nil if ok
+    ok = type(st[:k]) == "Integer" && st[:k] > 0 if ok
+    ok = st[:weight_kind] == :uniform || st[:weight_kind] == :distance if ok
+    ok = KNNClassifier.numeric_rows?(st[:train_rows]) if ok
+    ok = type(st[:train_targets]) == "Array" && Stats.numeric?(st[:train_targets]) if ok
+    ok = st[:train_rows].size == st[:train_targets].size if ok
+    if ok
+      st[:train_targets].each -> (target)
+        ok = false if target == nil
     if ok
       model = KNeighborsRegressor.new(st[:k], st[:weight_kind])
       out = model.restore_state(st)

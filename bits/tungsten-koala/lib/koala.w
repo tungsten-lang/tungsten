@@ -5,7 +5,8 @@
 # estimation
 # (LinearRegression — fit / predict / score with optional ridge alpha,
 # alone or as a Pipeline tail; KNNClassifier — k-nearest-neighbors
-# classification, the companion classifier to Metrics.accuracy / f1;
+# classification with probability output and uniform/distance votes;
+# KNeighborsRegressor — the same neighbor rules for continuous targets;
 # GaussianNB — multiclass Gaussian naive Bayes, a closed-form generative
 # classifier; DecisionTreeClassifier / DecisionTreeRegressor — CART
 # recursive partitioning, koala's non-parametric piecewise-constant
@@ -35,10 +36,10 @@
 # GridSearch. An INTEGER weight vector is exactly equivalent to
 # duplicating each row that many times, which is what makes a bootstrap
 # (and therefore a forest) expressible; a 0 drops a row; all-1s is a
-# no-op. Every estimator supports them except KNNClassifier, which
-# refuses them explicitly (`supports_sample_weight?` is false and fit
-# returns nil) exactly as scikit-learn's KNeighborsClassifier has no
-# sample_weight. Metrics.accuracy / precision / recall / f1 / fbeta /
+# no-op. Every estimator supports them except the two nearest-neighbor
+# learners, which refuse them explicitly (`supports_sample_weight?` is
+# false and fit returns nil), matching scikit-learn's KNN estimators.
+# Metrics.accuracy / precision / recall / f1 / fbeta /
 # mse / rmse / mae / r2 / log_loss / brier_score take an optional weight vector too, so a weighted
 # `score` means what it says. See lib/estimator_base.w for the full
 # rationale and spec/sample_weight_spec.w for the proofs.

@@ -167,14 +167,14 @@
   # the reason koala's transformers work inside generic tooling at all.
   #
   # Scaler / Imputer / Encoder are written against a frame (they address
-  # columns BY NAME), but CrossValidation — and therefore GridSearch —
-  # coerces x to plain row arrays before the model ever sees it, so a
-  # Pipeline with a Scaler step used to die on `column_names` for an
-  # Array the moment it was cross-validated. frame closes that: anything
-  # feature_rows accepts (a Matrix, an array of row arrays, a flat
-  # single-feature array) becomes a frame whose columns are named
-  # x0, x1, … positionally, and a DataFrame passes straight through
-  # untouched — detected by BEHAVIOUR (respond_to? "column_names", the
+  # columns BY NAME), while ordinary callers may still supply a Matrix or
+  # plain rows. frame closes that boundary: anything feature_rows accepts
+  # (a Matrix, an array of row arrays, a flat single-feature array) becomes
+  # a frame whose columns are named x0, x1, … positionally, and a DataFrame
+  # passes straight through untouched. CrossValidation now preserves that
+  # DataFrame while selecting folds, so named categorical columns survive
+  # to ColumnTransformer. Frames are detected by BEHAVIOUR
+  # (respond_to? "column_names", the
   # string form, the only one that answers on both engines) because
   # type(obj) on an instance returns "Hash" interpreted and cannot tell
   # a frame from a matrix. nil in, nil out.

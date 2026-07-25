@@ -433,6 +433,18 @@ WASSAT_ARM_SLS = 2             # local search, models only
     # does not, which is exactly what a race is for — take the min rather
     # than guess which side the instance is on.
     s.enable_chrono if grp % 2 == 1
+    # Fifth diversity axis: congruence closure + equivalent-literal
+    # substitution against the arm's own arena. Deterministic single-arm
+    # measurement on the bmc family: ibm-11 11,940 -> 4,734 conflicts and
+    # ibm-13 20,350 -> 9,238 with it, against ibm-12 7,162 -> 15,868. A
+    # symmetric win and loss of the same size on the same family is the
+    # definition of a race axis — take the min rather than pick a side.
+    # Arms 1, 2, 5, 6 draw one from each of the four existing groups, so
+    # the axis stays decorrelated from phases, VMTF and chronological
+    # backtracking instead of piggybacking on one of them.
+    s.simplify_raw_mode(0) if a % 4 == 1
+    s.simplify_raw_mode(1) if a % 4 == 2
+    s.simplify_raw if a % 4 != 1 && a % 4 != 2 && art["config"].force_simplify?
     solvers.push(s)
     a += 1
   handles = []
@@ -476,9 +488,22 @@ WASSAT_ARM_SLS = 2             # local search, models only
   formula = wassat_parse_cnf(cnf_text)
   nv = formula["nvars"]
 
-  # preprocess ONCE; every arm consumes the same reduced clauses
+  # Preprocess ONCE, along the SAME route the serial `--fast` path takes:
+  # a raw kernel skips the preprocessor entirely, everything else runs the
+  # light flat phases and then the heavy subsumption/BVE rounds. Arms then
+  # ingest the flat mirrors natively through from_flat, so arm 0 is a
+  # faithful replica of the serial solver rather than a weaker cousin —
+  # without this the race started from a light-only kernel and lost to
+  # `--fast` on uuf250-01 (2.10s against 1.53s) before diversity even had a
+  # chance to pay.
+  config = WassatConfig.new(nv, formula["clauses"])
   pre = WassatPreprocess.new(nv, formula["clauses"], WASSAT_PROOF_NONE)
-  art = pre.run
+  art = nil
+  if config.raw_kernel?
+    art = wassat_raw_artifact(formula, nv)
+  else
+    art = pre.run_light_flat(formula)
+    art = pre.run_heavy if art["status"] == 0
   if art["status"] == -1
     << "s UNSATISFIABLE"
     << "c mode: fast-portfolio (preprocessing refuted)"
@@ -493,13 +518,29 @@ WASSAT_ARM_SLS = 2             # local search, models only
   solvers = []
   a = 0
   while a < threads
-    s = Wassat.new(nv, art["clauses"], WASSAT_PROOF_NONE, 0)
+    s = Wassat.from_flat(nv, art, 0)
     s.enable_fixed_caps
     s.set_stop_cell(stop)
     s.enable_sharing(ring, ring_cap, ring_maxlen, a) if share
-    # arm 0 is marathon (default phases); the rest are garden arms with
-    # seeded random phases for basin diversity
-    s.reseed_phases(1000 + a * 7919) if a > 0
+    # Diversity along the axes that measurably move trajectories, the same
+    # three the raw-kernel race samples: branching heuristic, initial
+    # phases, and chronological backtracking. Arm 0 is the marathon default
+    # — the serial path's own configuration — so the race can only improve
+    # on it, never lose to it by construction.
+    #
+    # Odd arms take the heuristic the policy did NOT pick, so both EVSIDS
+    # and VMTF are sampled whatever the kernel's shape says.
+    if a % 2 == 1
+      if config.use_vmtf(art["raw"] == true)
+        s.disable_vmtf
+      else
+        s.enable_vmtf
+    grp = a / 2
+    s.reseed_phases(1000 + a * 7919) if grp == 1
+    s.set_positive_phases if grp == 2
+    s.reseed_phases(4242 + a * 104729) if grp == 3
+    s.reseed_phases(90001 + a * 15485863) if grp >= 4
+    s.enable_chrono if grp % 2 == 1
     solvers.push(s)
     a += 1
 

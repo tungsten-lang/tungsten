@@ -327,6 +327,7 @@ use portfolio
       # rounds outright, a miss costs ~0.15s.
       if probe_p == nil
         sprobe = Wassat.from_flat(formula["nvars"], art, 0)
+        sprobe.simplify_raw if config.force_simplify?
         # time-boxed in conflict slices: wins arrive fast when they arrive
         # at all, and a miss is capped at ~120ms instead of a full
         # conflict budget's worth of work on a big kernel
@@ -452,6 +453,7 @@ use portfolio
     # ahead, where chronological backtracking measurably pays (the probe
     # itself must stay plain: fast target-phase dives dislike it).
     s.enable_chrono if art["raw"] == true
+    s.simplify_raw if config.force_simplify?
     tprof = wassat_prof("cli.from_flat", tprof)
   else
     s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, 0)

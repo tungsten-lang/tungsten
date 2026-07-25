@@ -33,6 +33,12 @@
     raise "[flag] needs [minimum]..[maximum], got [value]"
   value
 
+# Whether a solver that has been ASKED to simplify (Wassat#simplify_raw)
+# runs each of the two techniques. Which solvers are asked is a separate
+# decision and belongs to the coordinator — see wassat_raw_race.
+WASSAT_SUBST_DEFAULT = true
+WASSAT_CONGRUENCE_DEFAULT = true
+
 + WassatConfig
   -> new(@nvars, clauses)
     @nclauses = clauses.size
@@ -99,6 +105,39 @@
   -> use_target_phases(raw)
     raw
 
+  -> use_substitution(raw)
+    # Equivalent-literal substitution: Tarjan SCCs of the binary implication
+    # graph, collapsing each component to one representative literal. On the
+    # preprocessed path this is WassatPreprocess#run_substitution; on the raw
+    # path it runs against the solver's own arena
+    # (Wassat#substitute_equivalences).
+    #
+    # An explicit switch, not a shape guess, because the technique's value
+    # splits by instance family rather than by any counter this class holds:
+    # WASSAT_SUBST=1 forces it on, WASSAT_SUBST=0 off, on both paths.
+    return env("WASSAT_SUBST") == "1" if env("WASSAT_SUBST") != nil
+    WASSAT_SUBST_DEFAULT
+
+  # Ternary count, for sizing the congruence pass's scratch tables.
+  -> ternary_count
+    @ternary
+
+  -> use_congruence(raw)
+    # Congruence closure: ternary strengthening (extract_binaries) plus AND
+    # and XOR gate extraction, merging gates that share a right-hand side.
+    # It never rewrites the CNF itself — every merge is emitted as the two
+    # equivalence binaries and consumed by use_substitution's SCC pass,
+    # which is why the two switches are only worth anything together.
+    # WASSAT_CONGRUENCE=1 forces it on, =0 off.
+    return env("WASSAT_CONGRUENCE") == "1" if env("WASSAT_CONGRUENCE") != nil
+    WASSAT_CONGRUENCE_DEFAULT
+
+  -> force_simplify?
+    # Measurement hook. The race turns the simplification axis on for four
+    # of its arms and the serial probe never uses it, so an end-to-end
+    # ablation of the technique needs a way to say "every raw solver".
+    env("WASSAT_SIMPLIFY") == "1"
+
   -> use_chronological_backtracking(raw)
     # v2 (analysis AT the conflict level, one combined jump) wins on long
     # raw searches (ibm-12: 12.2k -> 8.3k conflicts) and loses on the
@@ -160,6 +199,11 @@
     # 4s once the configuration changed; bmc-ibm-10 moved 20% on watch
     # order; bmc-ibm-12 spans 4.9k-17k conflicts across configurations).
     # Racing configurations takes the min instead of gambling on one.
+    # Measurement hook: racing 8 diversified arms makes a raw-kernel run
+    # non-deterministic by construction, so any A/B on a technique that
+    # changes the trajectory has to be able to pin the arm count. Same
+    # spirit as WASSAT_RAW_AT.
+    return env("WASSAT_ARMS").to_i if env("WASSAT_ARMS") != nil
     return 8 if @nclauses >= 150000
     return 4 if @nclauses >= 50000
     1

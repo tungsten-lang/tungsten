@@ -377,6 +377,13 @@ WASSAT_PROOF_DRAT = 2
     @shst = i64[8]
     @use_shrink = @config.use_shrinking
 
+    # Equivalent-literal substitution: var -> the signed literal it was
+    # proved equivalent to (0 = not substituted). Written by
+    # substitute_equivalences, read once when a model is extracted.
+    @subst = i64[1]
+    @nsubst = 0
+    @raw_flat = false
+
   # ---- literal encoding ---------------------------------------------------
 
   -> lit_index(l)
@@ -800,6 +807,13 @@ WASSAT_PROOF_DRAT = 2
   # after from_flat (which turns VMTF on for raw kernels).
   -> disable_vmtf
     @use_vmtf = false
+    0
+
+  # The mirror image, for arms built through the boxed constructor: a
+  # preprocessed kernel defaults to EVSIDS, so the VMTF half of a threaded
+  # portfolio asks for it explicitly.
+  -> enable_vmtf
+    @use_vmtf = true
     0
 
   -> pick_branch
@@ -1283,6 +1297,57 @@ WASSAT_PROOF_DRAT = 2
         ci += 1
       @asize = wp
 
+      # Under FIXED capacities the clause INDEX space is recycled too.
+      # Without this it is monotonic — one slot burned per conflict, never
+      # returned — so a frozen arm retires after @ccap conflicts however much
+      # arena it has left (uuf250-01 retires at ~10k against the ~135k
+      # conflicts it needs). Renumbering is sound because an index is only a
+      # name: the per-clause tables are compacted in the same order
+      # (dest <= src), the arena header's packed (index, length) is rewritten
+      # in place, and the two structures that address clauses BY INDEX —
+      # @reason and the binary implication lists — are remapped and rebuilt.
+      # Watch entries carry arena OFFSETS and are repacked below anyway.
+      #
+      # @gid doubles as the old->new map: it holds certificate ids, which
+      # PROOF_NONE neither assigns meaning to nor reads, so inside this
+      # branch it is free scratch.
+      if @fixed_caps
+        map = @gid
+        nn = 0
+        ci = 0
+        while ci < @ncl
+          if @alive[ci] == 1
+            map[ci] = nn
+            nn += 1
+          else
+            map[ci] = -1
+          ci += 1
+        ci = 0
+        while ci < @ncl
+          nci = map[ci]
+          if nci >= 0
+            st = @cmeta[2 * ci]
+            n = @cmeta[2 * ci + 1]
+            @cmeta[2 * nci] = st
+            @cmeta[2 * nci + 1] = n
+            @alive[nci] = 1
+            @clbd[nci] = @clbd[ci]
+            @cused[nci] = @cused[ci]
+            wassat_hdr_put(@arena, st - 1, nci, n)
+          ci += 1
+        @ncl = nn
+        # A reason names its clause by index. A reason clause that did not
+        # survive becomes a root fact: only level-zero reasons can be live
+        # here (reduce_db always runs from a level-zero trail), and neither
+        # analysis nor minimisation ever dereferences one.
+        v = 1
+        while v <= @nvars
+          r = @reason[v]
+          @reason[v] = map[r] if r >= 0
+          v += 1
+        # binary-list entries pack the clause index, so they must be rebuilt
+        self.rebuild_binaries
+
     # rebuild watches from scratch over the survivors (tight repack)
     self.rebuild_watches
     # recount the live learned population for the reduction schedule
@@ -1342,11 +1407,19 @@ WASSAT_PROOF_DRAT = 2
             accept = s2 == 2 * t + 1
         if accept
           # sanity: literals in range (belt and braces under the seqlock)
+          # AND over variables this arm still reasons about. An arm that ran
+          # simplify_raw parked its substituted variables at the root, which
+          # is sound exactly because they occur in none of ITS clauses — an
+          # imported clause over one of them would read as all-false and be
+          # taken for a refutation of the formula. Dropping it costs
+          # nothing: the clause constrains variables this arm eliminated.
           ok = true
           i = 0
           while i < n
             v = @mbuf[i].abs
             ok = false if v < 1 || v > @nvars
+            if ok && @nsubst > 0
+              ok = false if @subst[v] != 0
             i += 1
           if ok
             status = self.import_clause(n)
@@ -1414,26 +1487,6 @@ WASSAT_PROOF_DRAT = 2
       elsif confl >= 0
         @conflicts += 1
         @since_restart += 1
-        # Frontier escalation: a search still undecided after this many
-        # conflicts is not going to be decided by the current
-        # configuration. Reconfigure IN PLACE to the aggressive stack that
-        # measurably cracks counting/cardinality frontiers — VMTF
-        # decisions, target phases, chronological backtracking, focused-only
-        # restarts and a 1.05 restart margin — from a clean trail, keeping
-        # the entire learned database. Every one of the five is necessary:
-        # dropping any single one leaves lr5_37 unsolved past 130s, while
-        # together they take it from never-solved to 58s.
-        if @escalate_at > 0 && !@escalated && @conflicts >= @escalate_at && @proof_mode == WASSAT_PROOF_NONE && @nassump == 0
-          @escalated = true
-          self.backjump(0)
-          @use_vmtf = true
-          @use_target = true
-          @use_chrono = true
-          @no_stable = true
-          @mode_stable = false
-          @rst_num = 21
-          @rst_den = 20
-          @since_restart = 0
         # Chronological analysis happens AT the conflict's true level (max
         # level in the clause — can sit below @dlevel under out-of-order
         # assignments), with ONE combined backjump after learning. v1
@@ -1579,6 +1632,37 @@ WASSAT_PROOF_DRAT = 2
             if stop_conflicts > 0 && @conflicts >= stop_conflicts
               limited = true
       else
+        # Frontier escalation: a search still undecided after this many
+        # conflicts is not going to be decided by the current
+        # configuration. Reconfigure IN PLACE to the aggressive stack that
+        # measurably cracks counting/cardinality frontiers — VMTF
+        # decisions, target phases, chronological backtracking, focused-only
+        # restarts and a 1.05 restart margin — from a clean trail, keeping
+        # the entire learned database. Every one of the five is necessary:
+        # dropping any single one leaves lr5_37 unsolved past 130s, while
+        # together they take it from never-solved to 58s.
+        #
+        # It lives HERE, on the conflict-FREE branch, and nowhere else. The
+        # reconfiguration wants a clean trail, but backjumping to level 0 on
+        # the conflict branch left `cl = @dlevel` reading 0 for the conflict
+        # still in hand, which the very next test reads as a root conflict
+        # and turns into an empty clause: every search that reached
+        # @escalate_at answered `s UNSATISFIABLE` on the spot, whatever the
+        # truth (uf250-01, satisfiable, reported UNSAT at the threshold).
+        # A conflict-free iteration is the same clean trail with no conflict
+        # to misattribute, and it is at most one propagation away.
+        if @escalate_at > 0 && !@escalated && @conflicts >= @escalate_at && @proof_mode == WASSAT_PROOF_NONE && @nassump == 0
+          @escalated = true
+          self.backjump(0)
+          @use_vmtf = true
+          @use_target = true
+          @use_chrono = true
+          @no_stable = true
+          @mode_stable = false
+          @rst_num = 21
+          @rst_den = 20
+          @since_restart = 0
+
         # Clause-DB reduction first, on its own schedule: when the live
         # learned count passes the limit, drop the high-LBD half. Decoupled
         # from restarts — coupling it to accepted restarts left long
@@ -1762,6 +1846,228 @@ WASSAT_PROOF_DRAT = 2
       elsif self.value(l) < 0
         @ok = false
       u += 1
+    @raw_flat = art["raw"] == true
+    0
+
+  # Inprocessing for raw kernels, which bypass the preprocessor entirely:
+  # congruence closure followed by equivalent-literal substitution, run
+  # against this solver's own arena — no intake mirror, no artifact round
+  # trip. The COORDINATOR calls this, immediately after from_flat and
+  # before any search, because the two techniques reshape the search
+  # trajectory rather than uniformly shrinking it: measured deterministically
+  # on the bmc family they are worth 2.2x on ibm-11 and ibm-13 and cost 2.1x
+  # on ibm-12. That is a race axis, not a default (see wassat_raw_race).
+  #
+  # Must be called while the root trail is still unpropagated (load_flat
+  # leaves @qhead at 0): the rewrite repacks the watch and binary blocks,
+  # and it is the first propagate call replaying the whole root trail that
+  # re-establishes the watched-literal invariant against them.
+  -> simplify_raw
+    self.simplify_raw_mode(1)
+
+  # `cong` 0 runs equivalent-literal substitution alone, 1 runs congruence
+  # closure first so the gate merges feed it more equivalences. They are
+  # separate arm configurations because they are separately best: measured
+  # single-arm, substitution alone takes ibm-11 to 4,734 conflicts and
+  # ibm-13 to 9,238 where congruence on top gives 11,273 and 13,068, while
+  # on ibm-10 the order reverses (942 against 864).
+  -> simplify_raw_mode(cong)
+    return 0 unless @raw_flat && @proof_mode == WASSAT_PROOF_NONE
+    tsimp = wassat_prof_clock
+    if cong == 1 && @config.use_congruence(true)
+      self.extract_binaries
+      self.extract_and_gates
+      self.extract_xor_gates
+    self.substitute_equivalences if @config.use_substitution(true)
+    tsimp = wassat_prof("raw.simplify", tsimp)
+    0
+
+  # Congruence closure, stage 3: XOR gate extraction. Arity is capped at 4
+  # (kissat's default): the side-clause requirement is 2^arity clauses, so
+  # the search cost doubles per unit of arity while real encodings almost
+  # never carry wider XORs.
+  -> extract_xor_gates
+    return 0 unless @proof_mode == WASSAT_PROOF_NONE
+    maxg = @ncl + 16
+    maxg = 131072 if maxg > 131072
+    gcap = 8 * maxg
+    ghcap = 1024
+    while ghcap < 4 * maxg
+      ghcap = ghcap * 2
+    chcap = 1024
+    while chcap < 2 * (@ncl + 16)
+      chcap = chcap * 2
+    nl = 2 * @nvars + 4
+    lcount = i64[nl]
+    cht = i64[chcap]
+    mark = i64[nl]
+    qli = i64[8]
+    gar = i64[gcap]
+    ght = i64[ghcap]
+    out = i64[2 * maxg]
+    st = i64[8]
+    wassat_extract_xor_gates(@cmeta, @alive, @arena, @lassign, lcount, cht,
+                             mark, qli, gar, ght, out, st, @ncl, nl,
+                             chcap - 1, gcap, ghcap - 1, maxg)
+    self.add_merge_binaries(out, st[0])
+    z = wassat_prof("congruence.xor gates=[st[1]] merges=[st[0]]", wassat_prof_clock)
+    st[0]
+
+  # Congruence closure, stage 2: AND gate extraction. Merges are emitted as
+  # equivalence binaries — nothing else — so the SCC pass that follows is
+  # what actually turns them into a smaller formula. Measured alone the
+  # pass is worthless; measured with substitution it is the difference.
+  -> extract_and_gates
+    return 0 unless @proof_mode == WASSAT_PROOF_NONE
+    maxg = @ncl + 16
+    maxg = 131072 if maxg > 131072
+    gcap = 8 * maxg
+    hcap = 1024
+    while hcap < 4 * maxg
+      hcap = hcap * 2
+    mark = i64[2 * @nvars + 4]
+    gar = i64[gcap]
+    ght = i64[hcap]
+    out = i64[2 * maxg]
+    st = i64[8]
+    wassat_extract_and_gates(@cmeta, @alive, @arena, @lassign, @bldir,
+                             @bl_pool, mark, gar, ght, out, st, @ncl,
+                             gcap, hcap - 1, maxg)
+    self.add_merge_binaries(out, st[0])
+    z = wassat_prof("congruence.and gates=[st[1]] merges=[st[0]]", wassat_prof_clock)
+    st[0]
+
+  # Turn each equivalent-literal pair into the two binaries that state it.
+  # This is the ONLY channel between congruence and the rest of the solver:
+  # the equivalence enters the clause database, becomes two edges of the
+  # binary implication graph, and substitute_equivalences collapses it.
+  -> add_merge_binaries(pairs, n)
+    i = 0
+    while i < n
+      x = pairs[2 * i]
+      y = pairs[2 * i + 1]
+      self.store_clause([0 - x, y], 2)
+      self.store_clause([x, 0 - y], 2)
+      i += 1
+    0
+
+  # Congruence closure, stage 1: ternary strengthening. Adds every implied
+  # binary a ternary clause hides behind an existing implication. They are
+  # kept (not used to shrink the ternary) because their whole value is as
+  # implication-graph edges for substitute_equivalences — kissat's
+  # congruence pass never rewrites the CNF either, it only ever emits
+  # binaries and lets the substitution round consume them.
+  -> extract_binaries
+    return 0 unless @proof_mode == WASSAT_PROOF_NONE
+    cap = @config.ternary_count + 4
+    return 0 if cap < 8
+    hcap = 1024
+    while hcap < 4 * cap
+      hcap = hcap * 2
+    mark = i64[2 * @nvars + 4]
+    out = i64[2 * cap]
+    ht = i64[hcap]
+    st = i64[8]
+    wassat_extract_binaries(@cmeta, @alive, @arena, @lassign, @bldir,
+                            @bl_pool, mark, ht, out, st, @ncl, cap,
+                            hcap - 1)
+    n = st[0]
+    i = 0
+    while i < n
+      self.store_clause([out[2 * i], out[2 * i + 1]], 2)
+      i += 1
+    z = wassat_prof("congruence.binaries extracted=[n]", wassat_prof_clock)
+    n
+
+  # Equivalent-literal substitution against the live database.
+  #
+  # Called at level 0 with the input units enqueued but NOT yet propagated
+  # (load_flat leaves @qhead at 0), which is what makes an in-place rewrite
+  # safe: the watch and binary blocks are repacked from the clause table
+  # afterwards, and the first propagate call then replays the whole root
+  # trail against them, so no clause can end up watched on a literal it
+  # will never see falsified again.
+  #
+  # Substituted variables occur in no live clause once the rewrite is done,
+  # so every clause a later conflict resolves is over representatives only;
+  # the mapping is replayed onto the assignment once, when a model is
+  # extracted (see unsubstitute).
+  -> substitute_equivalences
+    return 0 unless @proof_mode == WASSAT_PROOF_NONE
+    nl = 2 * @nvars + 4
+    idx = i64[nl]
+    low = i64[nl]
+    onstk = i64[nl]
+    reprs = i64[nl]
+    stk = i64[nl]
+    work = i64[nl]
+    wcur = i64[nl]
+    st = i64[8]
+    wassat_scc(@bldir, @bl_pool, @assign, idx, low, onstk, reprs, stk,
+               work, wcur, st, 2 * @nvars + 2)
+    if st[0] == 1
+      @ok = false
+      @formula_unsat = true
+      return 0
+    return 0 if st[1] == 0
+    mark = i64[nl]
+    units = i64[@ncl + 2]
+    rst = i64[8]
+    wassat_subst_rewrite(@cmeta, @alive, @arena, reprs, mark, units,
+                         rst, @ncl)
+    self.rebuild_watches
+    self.rebuild_binaries
+    if rst[0] == 1
+      @ok = false
+      @formula_unsat = true
+      return 0
+    @subst = i64[@nvars + 2]
+    v = 1
+    while v <= @nvars
+      r = reprs[v << 1]
+      if r != 0 && r != v << 1
+        rv = r >> 1
+        @subst[v] = (r & 1) == 1 ? 0 - rv : rv
+        @nsubst += 1
+        # Park the variable at the root. It occurs in no live clause, so
+        # this can neither propagate nor conflict — but it takes it out of
+        # the decision pool, which is the whole point: left free, every
+        # substituted variable is still picked, assigned and popped by the
+        # branching heuristic (bmc-ibm-10: 33k decisions became 355k).
+        # unsubstitute overwrites the parked value with the
+        # representative's when the model is read.
+        self.enqueue(v, 0 - 1)
+      v += 1
+    z = wassat_prof("subst vars=[@nsubst] rewritten=[rst[2]] taut=[rst[3]] units=[rst[1]] edges=[st[2]]", wassat_prof_clock)
+    u = 0
+    while u < rst[1]
+      ci = units[u]
+      l = @arena[@cmeta[2 * ci]]
+      lv = self.value(l)
+      if lv == 0
+        self.enqueue(l, ci)
+      elsif lv < 0
+        @ok = false
+        @formula_unsat = true
+      u += 1
+    0
+
+  # Replay the equivalences onto the assignment: a substituted variable is
+  # in no clause the search ever saw, so its value comes from the literal it
+  # was proved equal to. Idempotent, and a no-op when nothing was
+  # substituted.
+  -> unsubstitute
+    return 0 if @nsubst == 0
+    v = 1
+    while v <= @nvars
+      r = @subst[v]
+      if r != 0
+        pol = self.value(r)
+        pol = 1 if pol == 0
+        @assign[v] = pol
+        @lassign[v << 1] = pol
+        @lassign[(v << 1) + 1] = 0 - pol
+      v += 1
     0
 
   -> solve
@@ -1791,6 +2097,7 @@ WASSAT_PROOF_DRAT = 2
     res[base] = status
     res[base] = 2 if status == 0 && @retired
     if status == 1
+      self.unsubstitute
       v = 1
       while v <= @nvars
         res[base + v] = @assign[v] >= 0 ? 1 : 0
@@ -1846,6 +2153,7 @@ WASSAT_PROOF_DRAT = 2
     unsat = status == -1 || status == -2
     model = []
     if sat
+      self.unsubstitute
       v = 1
       while v <= @nvars
         model.push(@assign[v] >= 0 ? v : 0 - v)
@@ -2024,6 +2332,691 @@ WASSAT_PROOF_DRAT = 2
       blp[bd[db] + bd[db + 1]] = (ci << 32) | la
       bd[db + 1] = bd[db + 1] + 1
     ci += 1
+  0
+
+# ---- congruence closure ---------------------------------------------------
+
+# Ternary strengthening — kissat's extract_binaries. If one literal of a
+# ternary clause implies another through an existing binary, the third is
+# redundant: (a | b | c) together with a => b yields (b | c). The point is
+# not the strengthening itself but the new implication-graph edge, which
+# the SCC pass downstream can close into an equivalence.
+#
+# Membership is answered by stamping, not searching: the negated literal's
+# whole binary block is marked with one generation, then both partners are
+# tested with a single load each, so a clause costs the sum of three binary
+# block lengths rather than a product.
+#
+# Pairs are deduplicated against each other through an open-addressed table
+# keyed on the packed literal-index pair (existing binaries are already
+# excluded by the block scan), so a pair extracted from twenty different
+# ternaries is stored once.
+#
+#   out[2i], out[2i+1] = the pair's signed literals   st[0] = pairs
+-> wassat_extract_binaries(cm, alive, ar, lasg, bd, blp, mark, ht, out, st, ncl, outcap, hmask) (i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
+  gen = 0
+  n = 0
+  ci = 0
+  while ci < ncl && n < outcap
+    if alive[ci] == 1 && cm[(ci << 1) + 1] == 3
+      stx = cm[ci << 1]
+      a = ar[stx]
+      b = ar[stx + 1]
+      c = ar[stx + 2]
+      la = 0
+      if a > 0
+        la = a << 1
+      else
+        la = ((0 - a) << 1) + 1
+      lb = 0
+      if b > 0
+        lb = b << 1
+      else
+        lb = ((0 - b) << 1) + 1
+      lc = 0
+      if c > 0
+        lc = c << 1
+      else
+        lc = ((0 - c) << 1) + 1
+      if lasg[la] == 0 && lasg[lb] == 0 && lasg[lc] == 0
+        found = 0
+        ll = 0
+        kk = 0
+        gen += 1
+        d = (la ^ 1) << 2
+        p = bd[d]
+        e = p + bd[d + 1]
+        while p < e
+          mark[blp[p] & 4294967295] = gen
+          p += 1
+        if mark[lb] == gen || mark[lc] == gen
+          ll = lb
+          kk = lc
+          found = 1
+        if found == 0
+          gen += 1
+          d = (lb ^ 1) << 2
+          p = bd[d]
+          e = p + bd[d + 1]
+          while p < e
+            mark[blp[p] & 4294967295] = gen
+            p += 1
+          if mark[la] == gen || mark[lc] == gen
+            ll = la
+            kk = lc
+            found = 1
+        if found == 0
+          gen += 1
+          d = (lc ^ 1) << 2
+          p = bd[d]
+          e = p + bd[d + 1]
+          while p < e
+            mark[blp[p] & 4294967295] = gen
+            p += 1
+          if mark[la] == gen || mark[lb] == gen
+            ll = la
+            kk = lb
+            found = 1
+        if found == 1
+          gen += 1
+          d = ll << 2
+          p = bd[d]
+          e = p + bd[d + 1]
+          while p < e
+            mark[blp[p] & 4294967295] = gen
+            p += 1
+          if mark[kk] == gen
+            found = 0
+        if found == 1
+          x = ll
+          y = kk
+          if y < x
+            x = kk
+            y = ll
+          key = (x << 32) | y
+          h = ((x * 1000003) + y) & hmask
+          seen = 0
+          while ht[h] != 0 && seen == 0
+            if ht[h] == key
+              seen = 1
+            else
+              h = (h + 1) & hmask
+          if seen == 0
+            ht[h] = key
+            nl = ll >> 1
+            if (ll & 1) == 1
+              nl = 0 - nl
+            nk = kk >> 1
+            if (kk & 1) == 1
+              nk = 0 - nk
+            out[n << 1] = nl
+            out[(n << 1) + 1] = nk
+            n += 1
+    ci += 1
+  st[0] = n
+  0
+
+# AND gate extraction — kissat's extract_and_gates_with_base_clause.
+#
+# A clause (lhs | r1 | ... | rk) is the long side of an AND gate with
+# left-hand side `lhs` exactly when every short side (-lhs | -ri) is present
+# as a binary, and then lhs <-> -r1 & ... & -rk. Two gates with the same
+# right-hand side define the same function, so their left-hand sides are
+# equivalent — that merge is the entire product of this pass, and it is
+# emitted as a pair for the caller to add as two binaries. Nothing here
+# rewrites a clause.
+#
+# The side-condition test is the 3-bit marking scheme reduced to what it is
+# actually for: stamp the whole binary block of -lhs with one generation,
+# then answer each of the k membership questions with a single load. A
+# candidate therefore costs |binaries(-lhs)| + k, never k^2, and candidates
+# with fewer negated binary occurrences than the arity are rejected before
+# any scanning at all.
+#
+# Gates are keyed by (arity, sorted RHS) in an open-addressed table over a
+# flat gate arena; a probe that matches an existing entry is a merge.
+#
+#   out[2i], out[2i+1] = equivalent literal pair   st[0] = merges  st[1] = gates
+-> wassat_extract_and_gates(cm, alive, ar, lasg, bd, blp, mark, gar, ght, out, st, ncl, gcap, hmask, outcap) (i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64)
+  gen = 0
+  gtop = 0
+  nm = 0
+  ng = 0
+  ci = 0
+  while ci < ncl && nm < outcap && gtop + 24 <= gcap
+    if alive[ci] == 1
+      n = cm[(ci << 1) + 1]
+      if n >= 3 && n <= 17
+        stx = cm[ci << 1]
+        ok = 1
+        j = 0
+        while j < n
+          l = ar[stx + j]
+          li = 0
+          if l > 0
+            li = l << 1
+          else
+            li = ((0 - l) << 1) + 1
+          if lasg[li] != 0
+            ok = 0
+          j += 1
+        if ok == 1
+          arity = n - 1
+          j = 0
+          while j < n && nm < outcap && gtop + 24 <= gcap
+            lhs = ar[stx + j]
+            lh = 0
+            if lhs > 0
+              lh = lhs << 1
+            else
+              lh = ((0 - lhs) << 1) + 1
+            nlh = lh ^ 1
+            if bd[(nlh << 2) + 1] >= arity
+              gen += 1
+              d = nlh << 2
+              p = bd[d]
+              e = p + bd[d + 1]
+              while p < e
+                mark[blp[p] & 4294967295] = gen
+                p += 1
+              matched = 0
+              k = 0
+              while k < n
+                if k != j
+                  l2 = ar[stx + k]
+                  l2i = 0
+                  if l2 > 0
+                    l2i = l2 << 1
+                  else
+                    l2i = ((0 - l2) << 1) + 1
+                  if mark[l2i ^ 1] == gen
+                    matched += 1
+                k += 1
+              if matched == arity
+                base = gtop
+                gar[base] = arity
+                gar[base + 1] = lh
+                m = 0
+                k = 0
+                while k < n
+                  if k != j
+                    l2 = ar[stx + k]
+                    l2i = 0
+                    if l2 > 0
+                      l2i = l2 << 1
+                    else
+                      l2i = ((0 - l2) << 1) + 1
+                    gar[base + 2 + m] = l2i ^ 1
+                    m += 1
+                  k += 1
+                q = 1
+                while q < arity
+                  vq = gar[base + 2 + q]
+                  r = q - 1
+                  while r >= 0 && gar[base + 2 + r] > vq
+                    gar[base + 3 + r] = gar[base + 2 + r]
+                    r -= 1
+                  gar[base + 3 + r] = vq
+                  q += 1
+                h = arity + 7
+                q = 0
+                while q < arity
+                  h = ((h * 1000003) + gar[base + 2 + q]) & hmask
+                  q += 1
+                hit = 0 - 1
+                probes = 0
+                while ght[h] != 0 && hit < 0 && probes <= hmask
+                  o = ght[h] - 1
+                  if gar[o] == arity
+                    same = 1
+                    q = 0
+                    while q < arity
+                      if gar[o + 2 + q] != gar[base + 2 + q]
+                        same = 0
+                      q += 1
+                    if same == 1
+                      hit = o
+                  if hit < 0
+                    h = (h + 1) & hmask
+                    probes += 1
+                if hit >= 0
+                  a1 = gar[hit + 1]
+                  if a1 != lh && a1 != (lh ^ 1)
+                    x = a1 >> 1
+                    if (a1 & 1) == 1
+                      x = 0 - x
+                    y = lh >> 1
+                    if (lh & 1) == 1
+                      y = 0 - y
+                    out[nm << 1] = x
+                    out[(nm << 1) + 1] = y
+                    nm += 1
+                else
+                  ght[h] = base + 1
+                  gtop = base + 2 + arity
+                  ng += 1
+            j += 1
+    ci += 1
+  st[0] = nm
+  st[1] = ng
+  0
+
+# XOR gate extraction — kissat's extract_xor_gates_with_base_clause.
+#
+# An arity-k XOR is encoded by all 2^k clauses over the same k+1 variables
+# whose negation count has one fixed parity, so a clause is the base of an
+# XOR gate exactly when every one of its parity siblings is also present.
+# Presence is answered by a clause index built once over the short clauses:
+# an open-addressed table keyed on an ORDER-INDEPENDENT sum hash of the
+# literal indices, resolved by an exact stamped set comparison. Clauses
+# with a repeated or complementary literal are left out of the index, which
+# is what makes "same size and every literal marked" an exact set equality.
+#
+# Only base clauses in kissat's normal form are tried — at most one negated
+# literal, and if there is one it must be the largest — so each gate is
+# reached from exactly one of its 2^k clauses instead of all of them. The
+# right-hand side is then all-positive and the parity rides on the
+# left-hand side's sign, which is what lets two XORs over the same
+# variables be compared by RHS alone.
+#
+# Same product as the AND pass: matching gates yield an equivalent literal
+# pair, and nothing here touches a clause.
+#
+#   out[2i], out[2i+1] = equivalent literal pair   st[0] = merges  st[1] = gates
+-> wassat_extract_xor_gates(cm, alive, ar, lasg, lcount, cht, mark, qli, gar, ght, out, st, ncl, nlits, chmask, gcap, ghmask, outcap) (i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64 i64)
+  li = 0
+  while li < nlits
+    lcount[li] = 0
+    li += 1
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1
+      n = cm[(ci << 1) + 1]
+      if n >= 3 && n <= 5
+        stx = cm[ci << 1]
+        dup = 0
+        acc = 0
+        j = 0
+        while j < n
+          l = ar[stx + j]
+          lj = 0
+          if l > 0
+            lj = l << 1
+          else
+            lj = ((0 - l) << 1) + 1
+          k = 0
+          while k < j
+            l2 = ar[stx + k]
+            l2j = 0
+            if l2 > 0
+              l2j = l2 << 1
+            else
+              l2j = ((0 - l2) << 1) + 1
+            if (l2j >> 1) == (lj >> 1)
+              dup = 1
+            k += 1
+          acc = acc + lj * 1000003
+          j += 1
+        if dup == 0
+          j = 0
+          while j < n
+            l = ar[stx + j]
+            lj = 0
+            if l > 0
+              lj = l << 1
+            else
+              lj = ((0 - l) << 1) + 1
+            lcount[lj] = lcount[lj] + 1
+            j += 1
+          h = acc & chmask
+          probes = 0
+          while cht[h] != 0 && probes <= chmask
+            h = (h + 1) & chmask
+            probes += 1
+          cht[h] = ci + 1
+    ci += 1
+  gen = 0
+  gtop = 0
+  nm = 0
+  ng = 0
+  ci = 0
+  while ci < ncl && nm < outcap && gtop + 12 <= gcap
+    if alive[ci] == 1
+      n = cm[(ci << 1) + 1]
+      if n >= 3 && n <= 5
+        stx = cm[ci << 1]
+        ok = 1
+        neg = 0
+        largest = 0
+        j = 0
+        while j < n
+          l = ar[stx + j]
+          lj = 0
+          if l > 0
+            lj = l << 1
+          else
+            lj = ((0 - l) << 1) + 1
+          if lasg[lj] != 0
+            ok = 0
+          if lj > largest
+            largest = lj
+          qli[j] = lj
+          if (lj & 1) == 1
+            neg += 1
+          j += 1
+        if neg > 1
+          ok = 0
+        if ok == 1 && neg == 1 && (largest & 1) == 0
+          ok = 0
+        j = 0
+        while j < n && ok == 1
+          k = 0
+          while k < j
+            if (qli[k] >> 1) == (qli[j] >> 1)
+              ok = 0
+            k += 1
+          j += 1
+        arity = n - 1
+        need = 1 << (arity - 1)
+        j = 0
+        while j < n && ok == 1
+          if lcount[qli[j]] < need
+            ok = 0
+          if lcount[qli[j] ^ 1] < need
+            ok = 0
+          j += 1
+        if ok == 1
+          end = 1 << n
+          pat = 0
+          found = 0
+          while pat < end && ok == 1
+            par = 0
+            b = 0
+            while b < n
+              par = par ^ ((pat >> b) & 1)
+              b += 1
+            if par == neg
+              gen += 1
+              b = 0
+              while b < n
+                mark[(qli[b] & 0 - 2) | ((pat >> b) & 1)] = gen
+                b += 1
+              acc = 0
+              b = 0
+              while b < n
+                acc = acc + ((qli[b] & 0 - 2) | ((pat >> b) & 1)) * 1000003
+                b += 1
+              h = acc & chmask
+              hitc = 0
+              probes = 0
+              while cht[h] != 0 && hitc == 0 && probes <= chmask
+                dci = cht[h] - 1
+                if cm[(dci << 1) + 1] == n
+                  stx2 = cm[dci << 1]
+                  okk = 1
+                  q = 0
+                  while q < n
+                    l2 = ar[stx2 + q]
+                    l2j = 0
+                    if l2 > 0
+                      l2j = l2 << 1
+                    else
+                      l2j = ((0 - l2) << 1) + 1
+                    if mark[l2j] != gen
+                      okk = 0
+                    q += 1
+                  if okk == 1
+                    hitc = 1
+                if hitc == 0
+                  h = (h + 1) & chmask
+                  probes += 1
+              if hitc == 0
+                ok = 0
+              else
+                found += 1
+            pat += 1
+          if ok == 1 && found == (1 << arity)
+            j = 0
+            while j < n && nm < outcap && gtop + 12 <= gcap
+              lh = qli[j] & 0 - 2
+              if neg == 0
+                lh = lh ^ 1
+              base = gtop
+              gar[base] = arity
+              gar[base + 1] = lh
+              m = 0
+              k = 0
+              while k < n
+                if k != j
+                  gar[base + 2 + m] = qli[k] & 0 - 2
+                  m += 1
+                k += 1
+              q = 1
+              while q < arity
+                vq = gar[base + 2 + q]
+                r = q - 1
+                while r >= 0 && gar[base + 2 + r] > vq
+                  gar[base + 3 + r] = gar[base + 2 + r]
+                  r -= 1
+                gar[base + 3 + r] = vq
+                q += 1
+              hg = arity + 13
+              q = 0
+              while q < arity
+                hg = ((hg * 1000003) + gar[base + 2 + q]) & ghmask
+                q += 1
+              hit = 0 - 1
+              probes = 0
+              while ght[hg] != 0 && hit < 0 && probes <= ghmask
+                o = ght[hg] - 1
+                if gar[o] == arity
+                  same = 1
+                  q = 0
+                  while q < arity
+                    if gar[o + 2 + q] != gar[base + 2 + q]
+                      same = 0
+                    q += 1
+                  if same == 1
+                    hit = o
+                if hit < 0
+                  hg = (hg + 1) & ghmask
+                  probes += 1
+              if hit >= 0
+                a1 = gar[hit + 1]
+                if a1 != lh && a1 != (lh ^ 1)
+                  x = a1 >> 1
+                  if (a1 & 1) == 1
+                    x = 0 - x
+                  y = lh >> 1
+                  if (lh & 1) == 1
+                    y = 0 - y
+                  out[nm << 1] = x
+                  out[(nm << 1) + 1] = y
+                  nm += 1
+              else
+                ght[hg] = base + 1
+                gtop = base + 2 + arity
+                ng += 1
+              j += 1
+    ci += 1
+  st[0] = nm
+  st[1] = ng
+  0
+
+# ---- equivalent-literal substitution (SCC decomposition) ------------------
+
+# Iterative Tarjan over the binary implication graph the solver ALREADY
+# carries: @bldir/@bl_pool hold, per literal `l`, every binary containing
+# `l` with the other literal's index as payload — and (a | b) is exactly
+# the pair of edges -a => b and -b => a. So the successors of literal node
+# `u` are the payloads of the block of `u ^ 1`, and no adjacency structure
+# is built at all.
+#
+# reprs[li] becomes the representative literal INDEX of li's strongly
+# connected component: the numerically smallest index in the component.
+# That choice is antitone — rep(-x) == rep(x) ^ 1 — because two literals of
+# different variables keep their order under `^ 1`, so the mirror component
+# elects the mirror representative and union-find chains never arise.
+# Literals of root-assigned variables are skipped: their value is already
+# fixed and rewriting a root reason clause would orphan it.
+#
+#   st[0] = 1 when one component holds both x and -x (formula UNSAT)
+#   st[1] = literals mapped away from themselves
+#   st[2] = edges traversed
+#   st[3] = the contradictory variable, when st[0] is 1
+-> wassat_scc(bd, blp, asg, idx, low, onstk, reprs, stk, work, wcur, st, nlits) (i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64)
+  dfsi = 1
+  stop = 0
+  ticks = 0
+  node = 2
+  while node < nlits && st[0] == 0
+    nv = node >> 1
+    if idx[node] == 0 && asg[nv] == 0
+      work[0] = node
+      wcur[0] = 0
+      top = 1
+      while top > 0 && st[0] == 0
+        u = work[top - 1]
+        if idx[u] == 0
+          idx[u] = dfsi
+          low[u] = dfsi
+          dfsi += 1
+          stk[stop] = u
+          stop += 1
+          onstk[u] = 1
+        d = (u ^ 1) << 2
+        blo = bd[d]
+        bn = bd[d + 1]
+        k = wcur[top - 1]
+        advanced = 0
+        while k < bn && advanced == 0
+          w = blp[blo + k] & 4294967295
+          k += 1
+          ticks += 1
+          if asg[w >> 1] == 0
+            if idx[w] == 0
+              wcur[top - 1] = k
+              work[top] = w
+              wcur[top] = 0
+              top += 1
+              advanced = 1
+            else
+              if onstk[w] == 1 && low[w] < low[u]
+                low[u] = low[w]
+        if advanced == 0
+          wcur[top - 1] = k
+          top -= 1
+          if top > 0
+            pu = work[top - 1]
+            if low[u] < low[pu]
+              low[pu] = low[u]
+          if low[u] == idx[u]
+            base = stop - 1
+            while stk[base] != u
+              base -= 1
+            rep = u
+            j = base
+            while j < stop
+              if stk[j] < rep
+                rep = stk[j]
+              j += 1
+            j = base
+            while j < stop
+              x = stk[j]
+              onstk[x] = 0
+              reprs[x] = rep
+              j += 1
+            j = base
+            while j < stop
+              x = stk[j]
+              if reprs[x ^ 1] == rep
+                st[0] = 1
+                st[3] = x >> 1
+              if x != rep
+                st[1] = st[1] + 1
+              j += 1
+            stop = base
+    node += 1
+  st[2] = ticks
+  0
+
+# Rewrite every live clause through `reprs`, in place. A mapped clause can
+# only ever shrink (duplicates collapse), so the body stays at its arena
+# offset and only the packed header word and the clause-table length move.
+# A clause that maps to a tautology dies; one that collapses to a unit is
+# reported so the caller can put it on the root trail.
+#
+# `mark` is a generation-stamped literal table: one generation per clause,
+# so duplicate and complementary detection costs one store and one load per
+# literal with no clearing pass.
+#
+#   st[0] = 1 when a clause became empty   st[1] = units collected
+#   st[2] = clauses rewritten              st[3] = clauses killed as tautologies
+-> wassat_subst_rewrite(cm, alive, ar, reprs, mark, units, st, ncl) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64)
+  gen = 0
+  nu = 0
+  rewritten = 0
+  killed = 0
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1
+      n = cm[(ci << 1) + 1]
+      stx = cm[ci << 1]
+      hit = 0
+      j = 0
+      while j < n
+        l = ar[stx + j]
+        li = 0
+        if l > 0
+          li = l << 1
+        else
+          li = ((0 - l) << 1) + 1
+        r = reprs[li]
+        if r != 0 && r != li
+          hit = 1
+        j += 1
+      if hit == 1
+        gen += 1
+        taut = 0
+        m = 0
+        j = 0
+        while j < n
+          l = ar[stx + j]
+          li = 0
+          if l > 0
+            li = l << 1
+          else
+            li = ((0 - l) << 1) + 1
+          r = reprs[li]
+          if r != 0
+            li = r
+          if mark[li ^ 1] == gen
+            taut = 1
+          if mark[li] != gen
+            mark[li] = gen
+            nl = li >> 1
+            if (li & 1) == 1
+              nl = 0 - nl
+            ar[stx + m] = nl
+            m += 1
+          j += 1
+        if taut == 1
+          alive[ci] = 0
+          killed += 1
+        else
+          rewritten += 1
+          if m < n
+            cm[(ci << 1) + 1] = m
+            ar[stx - 1] = (ci << 32) | m
+          if m == 0
+            st[0] = 1
+          if m == 1
+            units[nu] = ci
+            nu += 1
+    ci += 1
+  st[1] = nu
+  st[2] = rewritten
+  st[3] = killed
   0
 
 -> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp) (i64[] i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[])

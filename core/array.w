@@ -252,6 +252,27 @@
       i += 1
     [lo, hi]
 
+  # -- Counting sort (csort) — for integers over a bounded range --
+  # O(n + range): scan for min/max, tally counts[value - min], then write the
+  # values back in order. A large win when the range is tight relative to the
+  # array size. Returns a new sorted array; falls back to the comparison sort
+  # (Array#sort) for float/non-integer arrays or a range too sparse to be worth
+  # the counts array.
+  -> csort
+    ccall("w_array_csort", self)
+
+  # One argument: an Integer `count` means values live in [0, count); a Range
+  # `a..b` gives an explicit [a, b]. (is_a?(Integer) picks the count form.)
+  -> csort(a)
+    if a.is_a?(Integer)
+      ccall("w_array_csort_range", self, 0, a - 1)
+    else
+      ccall("w_array_csort_range", self, a.first, a.last)
+
+  # Two arguments: explicit inclusive [min, max].
+  -> csort(min, max)
+    ccall("w_array_csort_range", self, min, max)
+
   # Keep the separator overload before the zero-argument overload. Runtime
   # dispatch selects exact arity first and otherwise falls back to the first
   # method of this name, matching the former C handler's extra-argument

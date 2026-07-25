@@ -28890,6 +28890,32 @@ static int w_ta_cmpf64(const void *a, const void *b) { double va = *(const doubl
 #undef PDQ_T
 #undef PDQ_SUF
 
+/* LSD radix — O(n), the fastest sort for large integer arrays. Array#sort
+ * routes here above RADIX_THRESHOLD elements; below it, pdqsort's lower
+ * constant factor + pattern-adaptivity win. */
+#define RDX_T uint8_t
+#define RDX_SUF u8
+#include "radixsort.inc"
+#undef RDX_T
+#undef RDX_SUF
+#define RDX_T uint16_t
+#define RDX_SUF u16
+#include "radixsort.inc"
+#undef RDX_T
+#undef RDX_SUF
+#define RDX_T uint32_t
+#define RDX_SUF u32
+#include "radixsort.inc"
+#undef RDX_T
+#undef RDX_SUF
+#define RDX_T uint64_t
+#define RDX_SUF u64
+#include "radixsort.inc"
+#undef RDX_T
+#undef RDX_SUF
+
+#define RADIX_THRESHOLD 256
+
 WValue w_array_sort(WValue arr) {
     WArray *src = (WArray *)w_as_ptr(arr);
     WValue result = w_array_new(src->ebits, src->size);
@@ -28910,21 +28936,81 @@ WValue w_array_sort(WValue arr) {
         }
         return result;
     }
+    int64_t sz = dst->size;
+    int use_radix = sz >= RADIX_THRESHOLD;
     switch (array_storage_bits(dst->ebits)) {
-        case 8:  pdq_sort_u8((uint8_t *)dst->slots, dst->size); break;
-        case 16: pdq_sort_u16((uint16_t *)dst->slots, dst->size); break;
-        case 32: pdq_sort_u32((uint32_t *)dst->slots, dst->size); break;
-        case 64: pdq_sort_u64((uint64_t *)dst->slots, dst->size); break;
+        case 8:  if (use_radix) rdx_sort_u8((uint8_t *)dst->slots, sz);   else pdq_sort_u8((uint8_t *)dst->slots, sz); break;
+        case 16: if (use_radix) rdx_sort_u16((uint16_t *)dst->slots, sz); else pdq_sort_u16((uint16_t *)dst->slots, sz); break;
+        case 32: if (use_radix) rdx_sort_u32((uint32_t *)dst->slots, sz); else pdq_sort_u32((uint32_t *)dst->slots, sz); break;
+        case 64: if (use_radix) rdx_sort_u64((uint64_t *)dst->slots, sz); else pdq_sort_u64((uint64_t *)dst->slots, sz); break;
         case 4: {
             uint8_t *tmp = malloc(dst->size);
             for (int64_t j = 0; j < dst->size; j++) tmp[j] = (uint8_t)array_read(dst, j);
-            pdq_sort_u8(tmp, dst->size);
+            if (use_radix) rdx_sort_u8(tmp, sz); else pdq_sort_u8(tmp, sz);
             for (int64_t j = 0; j < dst->size; j++) array_write(dst, j, tmp[j]);
             free(tmp);
             break;
         }
     }
     return result;
+}
+
+/* Counting sort for integer arrays over a bounded range. Three passes: find
+ * (or take) [lo,hi], tally counts[v-lo], then write values back in order.
+ * O(n + range) — a big win when the value range is tight relative to n.
+ * Falls back to w_array_sort for float/non-int arrays, out-of-range values
+ * (explicit range), or a range too large to be worth the counts array. */
+static WValue w_array_csort_impl(WValue arr, int64_t lo, int64_t hi, int auto_range) {
+    WArray *src = (WArray *)w_as_ptr(arr);
+    if (array_is_float(src)) return w_array_sort(arr);
+    int64_t n = src->size;
+    WValue result = w_array_new(src->ebits, n);
+    WArray *dst = (WArray *)w_as_ptr(result);
+    dst->size = n;
+    int is_w64 = (dst->ebits == 65);
+    if (n <= 1) {
+        if (n == 1) {
+            WValue e = array_slot_load_decoded(src, 0);
+            if (is_w64) dst->slots[0] = e;
+            else if (w_is_int(e)) array_write(dst, 0, (uint64_t)w_as_int(e));
+            else { free(w_as_ptr(result)); return w_array_sort(arr); }
+        }
+        return result;
+    }
+    /* Pass 1: validate integers and (auto) find range or (explicit) bounds-check. */
+    if (auto_range) { lo = INT64_MAX; hi = INT64_MIN; }
+    int fallback = 0;
+    for (int64_t i = 0; i < n; i++) {
+        WValue e = array_slot_load_decoded(src, i);
+        if (!w_is_int(e)) { fallback = 1; break; }
+        int64_t v = w_as_int(e);
+        if (auto_range) { if (v < lo) lo = v; if (v > hi) hi = v; }
+        else if (v < lo || v > hi) { fallback = 1; break; }
+    }
+    if (fallback || hi < lo) return w_array_sort(arr);
+    uint64_t range = (uint64_t)(hi - lo) + 1;
+    /* Counting sort is only viable when the range is comparable to n; a sparse
+     * range would allocate (and zero) an enormous counts array. */
+    if (range > (uint64_t)n * 4 + (1u << 20)) return w_array_sort(arr);
+    int64_t *counts = (int64_t *)calloc((size_t)range, sizeof(int64_t));
+    if (!counts) return w_array_sort(arr);
+    for (int64_t i = 0; i < n; i++)
+        counts[w_as_int(array_slot_load_decoded(src, i)) - lo]++;
+    int64_t idx = 0;
+    for (uint64_t b = 0; b < range; b++) {
+        int64_t val = lo + (int64_t)b, c = counts[b];
+        for (int64_t k = 0; k < c; k++) {
+            if (is_w64) dst->slots[idx] = w_int(val);
+            else array_write(dst, idx, (uint64_t)val);
+            idx++;
+        }
+    }
+    free(counts);
+    return result;
+}
+WValue w_array_csort(WValue arr) { return w_array_csort_impl(arr, 0, 0, 1); }
+WValue w_array_csort_range(WValue arr, WValue lo, WValue hi) {
+    return w_array_csort_impl(arr, w_as_int(lo), w_as_int(hi), 0);
 }
 
 /* Comparator sort — sign of the block's verdict for a pair. Ruby-style

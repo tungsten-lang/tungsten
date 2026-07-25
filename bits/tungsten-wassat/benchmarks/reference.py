@@ -2,10 +2,19 @@
 """The reference suite: wassat against every installed rival, exit-coded.
 
 This file DEFINES the performance goal. Instances are pinned and the set
-only grows. Two classes:
+only grows. Four classes:
 
-  parity instances — wassat must be within TOLERANCE of the best rival
-                     (exit nonzero otherwise; this is a regression gate);
+  parity instances   — wassat must be within TOLERANCE of the best rival
+                       (exit nonzero otherwise; this is a regression gate);
+  survey instances   — the breadth set. Correctness gates (verdicts must
+                       agree with each other and with the known answer), speed
+                       is reported per family but does not gate. This is the
+                       honest map of where the solver stands; rows graduate
+                       into `parity` once wassat holds its own on them.
+  competition rows   — SAT Competition 2026 main-track instances, carrying the
+                       published instance-wise runtimes of the actual field
+                       (CaDiCaL 3, Kissat, and the best of all 31 entrants) so
+                       a local measurement can be placed against it;
   frontier instances — hard instances tracked with a per-run budget so the
                        suite stays fast; improving these is the standing
                        goal, regressing parity is failure. They stay listed
@@ -13,16 +22,36 @@ only grows. Two classes:
                        of what the frontier used to be.
 
 Every verdict is cross-checked between solvers; disagreement is fatal.
+
+Instance sets, all optional — a missing directory skips its section rather
+than failing, so the suite still runs on a bare checkout:
+
+  BENCH=/tmp/satbench           generated corpus (benchmarks/gen_instances.py)
+  SATLIB_ROOT=...               SATLIB, as unpacked by the original refbench
+  SATBENCH_EXT=/tmp/satbench-ext   breadth set: SATLIB structured families plus
+                                a slice of older SAT Competition tracks. Sources
+                                are cs.ubc.ca/~hoos/SATLIB/benchm.html and
+                                benchmark-database.de; the SATLIB tarballs end
+                                each file with a `%`/`0` sentinel that CaDiCaL
+                                rejects, so strip from the `%` line onward.
+  SATBENCH_2026=/tmp/satbench-2026  SAT Competition 2026 main track. The rows
+                                below were fetched with, in order:
+                                  benchmarks/sc2026.py fetch --per-family 2 \
+                                      --max-field-seconds 60
+                                  benchmarks/sc2026.py fetch --per-family 1 \
+                                      --min-field-seconds 60 --max-field-seconds 900
 """
 
 from __future__ import annotations
 
+import math
 import os
 import shutil
 import statistics
 import subprocess
 import sys
 import time
+from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,8 +68,23 @@ MARGIN = float(os.environ.get("MARGIN", "1.25"))
 DOM_FLOOR = float(os.environ.get("DOM_FLOOR", "0.05"))
 NOISE_MS = float(os.environ.get("NOISE_MS", "8")) / 1000.0
 FRONTIER_BUDGET = float(os.environ.get("FRONTIER_BUDGET", "60"))
+SURVEY_BUDGET = float(os.environ.get("SURVEY_BUDGET", "120"))
+COMP_BUDGET = float(os.environ.get("COMP_BUDGET", "60"))
+# A row counts as a tie when the two times are within TIE_BAND of each other;
+# below TIE_FLOOR seconds the row is process-startup noise and always ties.
+TIE_BAND = float(os.environ.get("TIE_BAND", "1.10"))
+TIE_FLOOR = float(os.environ.get("TIE_FLOOR", "0.05"))
 BENCH = Path(os.environ.get("BENCH", "/tmp/satbench"))
 SATLIB_ROOT = os.environ.get("SATLIB_ROOT", "")
+EXT = Path(os.environ.get("SATBENCH_EXT", "/tmp/satbench-ext"))
+SC2026 = Path(os.environ.get("SATBENCH_2026", "/tmp/satbench-2026"))
+# The survey is broad and each row is measured REPS times by three solvers;
+# SURVEY_REPS trades that down when only a smoke check is wanted. Competition
+# rows run long enough that the median buys little, so they default to one rep.
+SURVEY_REPS = int(os.environ.get("SURVEY_REPS", str(REPS)))
+COMP_REPS = int(os.environ.get("COMP_REPS", "1"))
+# Repeats stop paying for themselves once a single run is this long.
+REP_CEILING = float(os.environ.get("REP_CEILING", "5"))
 
 PARITY = [
     ("php76", str(BENCH / "php76.cnf")),
@@ -62,6 +106,92 @@ if SATLIB_ROOT:
             ("bmc-ibm-12", str(bmc / "bmc-ibm-12.cnf")),
         ]
     )
+
+# --------------------------------------------------------------------------
+# The survey: breadth over instance FAMILY, which is what the parity list
+# lacks. Every row was screened so that the fastest rival needs a measurable
+# amount of work on it; rows the rivals dispatch in milliseconds carry no
+# signal and are deliberately absent. `expect` is the published answer, so a
+# wrong verdict is caught even when both rivals agree with each other.
+#
+#   (family, name, relative path under SATBENCH_EXT, expect)
+SURVEY: list[tuple[str, str, str, str]] = [
+    ("beijing (planning/scheduling)", "3bitadd_31", "beijing/3bitadd_31.cnf", "sat"),
+    ("beijing (planning/scheduling)", "2bitadd_10", "beijing/2bitadd_10.cnf", "unsat"),
+    ("bmc-ibm/galileo (hardware BMC)", "bmc-ibm-6", "bmc/bmc-ibm-6.cnf", "sat"),
+    ("bmc-ibm/galileo (hardware BMC)", "bmc-ibm-12", "bmc/bmc-ibm-12.cnf", "sat"),
+    ("graph-colouring (DIMACS large)", "g250.15", "gcp-large/g250.15.cnf", "sat"),
+    ("graph-colouring (DIMACS large)", "g125.18", "gcp-large/g125.18.cnf", "sat"),
+    ("lran-f (large random 3-SAT)", "f1000", "lran/f1000.cnf", "sat"),
+    ("lran-f (large random 3-SAT)", "f600", "lran/f600.cnf", "sat"),
+    ("pigeonhole", "hole9", "pigeon/hole9.cnf", "unsat"),
+    ("pigeonhole", "php109", "pigeon/php109.cnf", "unsat"),
+    ("quasigroup (QG)", "qg3-09", "quasigroup/qg3-09.cnf", "unsat"),
+    ("quasigroup (QG)", "qg5-13", "quasigroup/qg5-13.cnf", "unsat"),
+    ("random-3sat SAT (uf)", "uf250-0100", "rand3/uf250-0100.cnf", "sat"),
+    ("random-3sat SAT (uf)", "uf225-015", "rand3/uf225-015.cnf", "sat"),
+    ("random-3sat UNSAT (uuf)", "uuf200-013", "rand3/uuf200-013.cnf", "unsat"),
+    ("random-3sat UNSAT (uuf)", "uuf225-015", "rand3/uuf225-015.cnf", "unsat"),
+    ("sc-archive: agile", "bench_1614.smt2", "comp/agile-sat__bench_1614.smt2.cnf", "sat"),
+    ("sc-archive: bitvector", "minand064", "comp/bitvector-unsat__minand064.cnf", "unsat"),
+    ("sc-archive: bitvector", "smulo016", "comp/bitvector-unsat__smulo016.cnf", "unsat"),
+    ("sc-archive: cryptography", "cms-scheel-md5-families-r24-c11-p1", "comp/cryptography-sat__cms-scheel-md5-families-r24-c11-p1-4-6-9-10-11-1.cnf", "sat"),
+    ("sc-archive: edge-matching", "em_7_3_6_fbc", "comp/edge-matching-sat__em_7_3_6_fbc.cnf", "sat"),
+    ("sc-archive: graph-based", "urqh2x5.shuffled-as.sat03-1473", "comp/graph-based-unsat__urqh2x5.shuffled-as.sat03-1473.cnf", "unsat"),
+    ("sc-archive: hardware-bmc", "shuffling-1-s1722048485-of-bench-s", "comp/hardware-bmc-unsat__shuffling-1-s1722048485-of-bench-sat04-437.used-.cnf", "unsat"),
+    ("sc-archive: hardware-verification", "ibm-2004-03-k70", "comp/hardware-verification-sat__ibm-2004-03-k70.cnf", "sat"),
+    ("sc-archive: hardware-verification", "SAT_dat.k10", "comp/hardware-verification-unsat__SAT_dat.k10.cnf", "unsat"),
+    ("sc-archive: planning", "mrpp_6x6#14_10", "comp/planning-sat__mrpp_6x6#14_10.cnf", "sat"),
+    ("sc-archive: planning", "blocks-4-ipc5-h21-unknown", "comp/planning-unsat__blocks-4-ipc5-h21-unknown.cnf", "unsat"),
+    ("sc-archive: popularity-similarity", "mp1-ps_5000_21250_3_0_0.8_0_1.50_6", "comp/popularity-similarity-unsat__mp1-ps_5000_21250_3_0_0.8_0_1.50_6.cnf", "unsat"),
+    ("sc-archive: quasigroup-completion", "qwh.35.405.shuffled-as.sat03-1651", "comp/quasigroup-completion-sat__qwh.35.405.shuffled-as.sat03-1651.cnf", "sat"),
+    ("sc-archive: quasigroup-completion", "gensys-icl003.shuffled-as.sat05-27", "comp/quasigroup-completion-unsat__gensys-icl003.shuffled-as.sat05-2715.cnf", "unsat"),
+    ("sc-archive: random-planted-solution", "fla-350-6", "comp/random-planted-solution-sat__fla-350-6.cnf", "sat"),
+    ("sc-archive: scheduling", "Break_triple_10_16.xml", "comp/scheduling-sat__Break_triple_10_16.xml.cnf", "sat"),
+    ("sc-archive: social-golfer", "ContextModel_output_8_3_10.bul_.di", "comp/social-golfer-sat__ContextModel_output_8_3_10.bul_.dimacs.cnf", "sat"),
+    ("sc-archive: software-verification", "dspam_dump_vc972", "comp/software-verification-unsat__dspam_dump_vc972.cnf", "unsat"),
+    ("sc-archive: tseitin", "Urquhart-s3-b3.shuffled-as.sat03-1", "comp/tseitin-unsat__Urquhart-s3-b3.shuffled-as.sat03-1556.cnf", "unsat"),
+    ("sc-archive: tseitin", "urquhart3_25bis.shuffled", "comp/tseitin-unsat__urquhart3_25bis.shuffled.cnf", "unsat"),
+]
+
+# SAT Competition 2026 main track. `field_best` / `cadical3` / `kissat` are the
+# competition's own published instance-wise runtimes (downloads/scores.csv),
+# measured on competition hardware with a 5000s budget — they order the field,
+# they do not convert into a ratio against a local measurement.
+#
+#   (family, name, relative path under SATBENCH_2026, expect, best, cadical3, kissat)
+COMPETITION: list[tuple[str, str, str, str, float | None, float | None, float | None]] = [
+    ("sc2026: miter", "ak128modbtbg2msisc", "ak128modbtbg2msisc.cnf", "sat", 0.27, 0.63, 0.31),
+    ("sc2026: n320p5q", "n320p5q2_n.af_239", "n320p5q2_n.af_239.cnf", "sat", 0.11, 1.53, 6.06),
+    ("sc2026: sembuster", "sembuster_4200.af_72", "sembuster_4200.af_72.cnf", "sat", 0.44, 1.48, 0.60),
+    ("sc2026: sembuster", "sembuster_7500.af_74", "sembuster_7500.af_74.cnf", "sat", 0.65, 1.96, 0.93),
+    ("sc2026: scc", "scc_9630_26_0.3_0.1_17.af_76", "scc_9630_26_0.3_0.1_17.af_76.cnf", "sat", 0.80, 2.68, 1.01),
+    ("sc2026: Large", "Large-result_b23.af_303", "Large-result_b23.af_303.cnf", "sat", 1.09, 3.83, 1.47),
+    ("sc2026: scc", "scc_7216_12_0.5_0.2_11.af", "scc_7216_12_0.5_0.2_11.af.cnf", "sat", 0.98, 3.45, 1.28),
+    ("sc2026: Carry", "Carry_Bits_Fast_12", "Carry_Bits_Fast_12.cnf", "sat", 0.04, 15.53, 5.39),
+    ("sc2026: n384p5q", "n384p5q2_vh.af_138", "n384p5q2_vh.af_138.cnf", "sat", 1.47, 3.94, 8.53),
+    ("sc2026: DivS", "DivS_568_11", "DivS_568_11.cnf", "sat", 3.35, 4.19, 22.64),
+    ("sc2026: planning", "mrpp_8x8#20_14", "mrpp_8x8_20_14.cnf", "sat", 9.71, 9.71, 23.49),
+    ("sc2026: Large", "Large-result_b24.af_2238", "Large-result_b24.af_2238.cnf", "sat", 2.84, 10.27, 3.81),
+    ("sc2026: DivS", "DivS_862_11", "DivS_862_11.cnf", "sat", 5.59, 6.59, 21.52),
+    ("sc2026: ais", "ais8.mis-97.debugged", "ais8.mis-97.debugged.cnf", "unsat", 2.59, 7.51, 2.61),
+    ("sc2026: hardware-verification", "4pipe", "4pipe.cnf", "unsat", 3.97, 9.88, 5.81),
+    ("sc2026: crusti", "crusti_g2io_200_0.1_127_14.af_151", "crusti_g2io_200_0.1_127_14.af_151.cnf", "unsat", 33.03, 44.07, 63.82),
+    ("sc2026: schooltt", "schooltt-5-7-12-2-4-1.4-2.6-0.2-0.", "schooltt-5-7-12-2-4-1.4-2.6-0.2-0.9-seed2.cnf", "sat", 12.47, 34.38, 19.17),
+    ("sc2026: ntil", "ntil-90d-33", "ntil-90d-33.cnf", "sat", 10.94, 109.56, 175.61),
+    ("sc2026: set-covering", "SCPC-500-19", "SCPC-500-19.cnf", "unsat", 26.01, 33.05, 34.58),
+    ("sc2026: generic-csp", "connm-ue-csp-sat-n600-d0.04-s17930", "connm-ue-csp-sat-n600-d0.04-s1793042357.used-as.sat04-975.cnf", "unsat", 30.42, 48.95, 37.71),
+    ("sc2026: hgen", "170225812", "170225812.cnf", "sat", 0.39, 14.08, 34.86),
+    ("sc2026: station-repacking", "41-119494", "41-119494.cnf", "sat", 6.31, 124.51, 27.90),
+    ("sc2026: cellular-automata", "spg_200_301", "spg_200_301.cnf", "unsat", 17.55, 70.95, 309.27),
+    # WRONG-ANSWER WITNESS: wassat --fast reports UNSATISFIABLE here in ~12s.
+    # SC2026 records these SATISFIABLE with a verified model (green_lymphosat,
+    # 0.04s); 29 of 31 entrants, CaDiCaL 3 and Kissat included, timed out at
+    # 5000s. Siblings 1/2/4/6/8/9/10/12/13/14/15 behave identically. This row
+    # is meant to keep the suite red until the fast-only technique is fixed;
+    # --proof mode does not reproduce the claim (it times out instead).
+    ("sc2026: lymphosat-only", "16", "16.cnf", "sat", 0.04, None, None),
+]
 
 FRONTIER = []
 for name, env_name in (("lr5_37", "LR5_37"), ("lr5_41", "LR5_41")):
@@ -95,50 +225,106 @@ def run(cmd, timeout):
     return time.perf_counter() - t0, verdict_of(p.stdout)
 
 
-def median_time(cmd, timeout):
+def median_time(cmd, timeout, reps=None):
+    """Median of `reps` runs, but only while a repeat is worth its wall clock.
+
+    Repetition exists to average out startup and scheduler noise, which is a
+    few milliseconds. Once a single run takes longer than REP_CEILING that
+    noise is already lost in the rounding, so measuring it three times buys
+    nothing and costs three times the suite's runtime. Short rows — where the
+    noise actually matters — still get the full median.
+    """
     times, verdicts = [], set()
-    for _ in range(REPS):
+    for _ in range(reps or REPS):
         t, v = run(cmd, timeout)
         times.append(t)
         verdicts.add(v)
+        if t > REP_CEILING:
+            break
     if len(verdicts) != 1:
         raise SystemExit(f"nondeterministic verdicts {verdicts} for {cmd}")
     return statistics.median(times), verdicts.pop()
 
 
-def main() -> None:
-    if not Path(WASSAT).is_file():
-        raise SystemExit(f"wassat not found at {WASSAT}")
-    if not CADICAL and not CMS5:
-        raise SystemExit("install CaDiCaL or CryptoMiniSat, or set CADICAL/CRYPTOMINISAT5")
-    names = [n for n, _ in solvers()]
-    print(f"[reference] REPS={REPS} TOLERANCE={TOLERANCE}x  solvers={names}")
-    failures = 0
+def outcome(ours: float, best_rival: float) -> str:
+    """WIN / TIE / LOSS against the best rival, with a startup-noise floor."""
+    if best_rival < TIE_FLOOR and ours < TIE_FLOOR:
+        return "TIE"
+    if ours * TIE_BAND < best_rival:
+        return "WIN"
+    if best_rival * TIE_BAND < ours:
+        return "LOSS"
+    return "TIE"
 
+
+def geomean(values: list[float]) -> float | None:
+    """None when no row raced to completion — a mean of nothing is not 1.0."""
+    return math.exp(sum(math.log(v) for v in values) / len(values)) if values else None
+
+
+def fmt_geomean(value: float | None) -> str:
+    return "--" if value is None else f"{value:.2f}x"
+
+
+def measure_row(path: str, budget: float, reps: int):
+    """Median time and verdict per solver. TIMEOUT is recorded, not fatal."""
+    times, verdicts = {}, {}
+    for sname, mk in solvers():
+        try:
+            t, v = median_time(mk(path), budget, reps)
+        except SystemExit as exc:
+            raise SystemExit(f"{path}: {exc}") from exc
+        times[sname], verdicts[sname] = t, v
+    return times, verdicts
+
+
+def check_verdicts(name: str, verdicts: dict, expect: str | None) -> str | None:
+    """Return an error string when the row is not trustworthy, else None.
+
+    A rival that answers nothing at all is refusing the input, not losing the
+    race: CryptoMiniSat rejects the DIMACS variant that wraps a clause across
+    lines, which CaDiCaL and wassat both accept. Such a rival drops out of the
+    row. wassat answering nothing is always fatal — that is how a silently
+    broken build gets caught instead of scoring a free win.
+    """
+    real = {k: v for k, v in verdicts.items() if v not in ("TIMEOUT",)}
+    if real.get("wassat") == "NONE":
+        return f"NO VERDICT from wassat (broken build?) verdicts={verdicts}"
+    refused = sorted(k for k, v in real.items() if v == "NONE")
+    real = {k: v for k, v in real.items() if v != "NONE"}
+    if not real:
+        # Everyone ran out of budget: uninformative, but not a correctness
+        # failure. Only an actual refusal to read the input is one.
+        return f"REFUSED by {refused}" if refused else None
+    if len(set(real.values())) > 1:
+        return f"VERDICT MISMATCH {verdicts}"
+    if expect and real:
+        got = next(iter(real.values()))
+        want = {"sat": "SATISFIABLE", "unsat": "UNSATISFIABLE"}.get(expect, expect)
+        if got != want:
+            return f"WRONG ANSWER got={got} expected={want}"
+    return None
+
+
+def parity_section() -> int:
     print("\n== parity instances (regression gate) ==")
+    failures = 0
     for name, path in PARITY:
         if not Path(path).is_file():
             print(f"  {name}: MISSING ({path})")
             failures += 1
             continue
-        rows = {}
-        verdicts = {}
-        for sname, mk in solvers():
-            t, v = median_time(mk(path), 120)
-            rows[sname], verdicts[sname] = t, v
+        rows, verdicts = measure_row(path, 120, REPS)
         # A solver that emits no verdict (or only times out) is BROKEN, not
         # fast: a no-op such as /usr/bin/true reports "NONE" and must never
         # stand in as a passing row. Fail before the timing comparison.
-        missing = sorted(k for k, v in verdicts.items() if v in ("NONE", "TIMEOUT"))
-        if missing:
-            print(f"  {name}: NO VERDICT from {missing} (verdicts={verdicts})")
+        problem = check_verdicts(name, verdicts, None)
+        if problem:
+            print(f"  {name}: {problem}")
             failures += 1
             continue
-        if len(set(verdicts.values()) - {"TIMEOUT"}) > 1:
-            print(f"  {name}: VERDICT MISMATCH {verdicts}")
-            failures += 1
-            continue
-        rivals = {k: v for k, v in rows.items() if k != "wassat"}
+        rivals = {k: v for k, v in rows.items()
+                  if k != "wassat" and verdicts[k] not in ("TIMEOUT", "NONE")}
         best_rival = min(rivals.values()) if rivals else float("inf")
         # sub-100ms rows are process-startup noise, not solver signal
         ok = rows["wassat"] <= max(best_rival * TOLERANCE, 0.10)
@@ -158,8 +344,99 @@ def main() -> None:
             failures += 1
         cells = "  ".join(f"{k}={v:.2f}s" for k, v in rows.items())
         print(f"  {name}: {cells}  [{mark}] [{dmark}]")
+    return failures
 
+
+def survey_section(title: str, rows, root: Path, budget: float, published: bool,
+                   reps: int | None = None) -> tuple[int, dict]:
+    """Measure a breadth section. Correctness gates; speed is reported."""
+    print(f"\n== {title} ==")
+    failures = 0
+    tally: dict[str, list] = defaultdict(list)
+    if not rows:
+        print("  (no instances pinned)")
+        return 0, tally
+    if not root.is_dir():
+        print(f"  skipped: {root} not present "
+              f"(fetch it, or point SATBENCH_EXT/SATBENCH_2026 elsewhere)")
+        return 0, tally
+    header = f"  {'instance':34s} {'wassat':>8s} {'cadical':>8s} {'cms5':>8s}  {'vs best':>9s}  result"
+    if published:
+        header += "   published field (competition hw)"
+    last_family = None
+    print(header)
+    for row in rows:
+        family, name, rel, expect = row[0], row[1], row[2], row[3]
+        path = str(root / rel)
+        if family != last_family:
+            print(f"  -- {family} --")
+            last_family = family
+        if not Path(path).is_file():
+            print(f"  {name[:34]:34s} MISSING")
+            continue
+        times, verdicts = measure_row(path, budget, reps or SURVEY_REPS)
+        problem = check_verdicts(name, verdicts, expect)
+        if problem:
+            print(f"  {name[:34]:34s} {problem}")
+            failures += 1
+            continue
+        rivals = {k: v for k, v in times.items() if k != "wassat"}
+        solved_rivals = {k: v for k, v in rivals.items() if verdicts[k] not in ("TIMEOUT", "NONE")}
+        cells = "".join(
+            "     n/a" if verdicts.get(k) == "NONE" else f" {times.get(k, float('nan')):8.2f}"
+            for k in ("wassat", "cadical", "cms5"))
+        if verdicts["wassat"] == "TIMEOUT":
+            verdict = f"UNSOLVED@{budget:.0f}s"
+            ratio = None
+        elif solved_rivals:
+            best = min(solved_rivals.values())
+            ratio = best / times["wassat"]
+            verdict = f"{outcome(times['wassat'], best):4s} {ratio:.2f}x"
+        else:
+            ratio = None
+            verdict = "only wassat solved"
+        line = f"  {name[:34]:34s}{cells}  {verdict}"
+        if published:
+            best, cad, kis = row[4], row[5], row[6]
+            fmt = lambda x: "   -" if x is None else f"{x:6.1f}"
+            line += f"   best={fmt(best)} cadical3={fmt(cad)} kissat={fmt(kis)}"
+        print(line)
+        tally[family].append((name, times.get("wassat"), ratio, verdicts["wassat"]))
+    return failures, tally
+
+
+def scoreboard(tally: dict) -> None:
+    if not tally:
+        return
+    print("\n  by family:")
+    print(f"    {'family':26s} {'n':>3s} {'W':>3s} {'T':>3s} {'L':>3s} {'we-lost':>8s} {'we-only':>8s}"
+          f"  {'geomean vs best rival':>22s}")
+    all_ratios = []
+    tot = [0, 0, 0, 0, 0]
+    for family in sorted(tally):
+        rows = tally[family]
+        ratios = [r for _n, _t, r, _v in rows if r]
+        wins = sum(1 for _n, t, r, v in rows if r and outcome(t, t * r) == "WIN")
+        losses = sum(1 for _n, t, r, v in rows if r and outcome(t, t * r) == "LOSS")
+        ties = len(ratios) - wins - losses
+        # a row splits four ways: raced (W/T/L), wassat alone could not finish,
+        # or only wassat finished — the last two never enter the geomean
+        unsolved = sum(1 for _n, _t, r, v in rows if v == "TIMEOUT")
+        only_us = len(rows) - len(ratios) - unsolved
+        all_ratios += ratios
+        tot = [a + b for a, b in zip(tot, [wins, ties, losses, unsolved, only_us])]
+        g = geomean(ratios)
+        print(f"    {family[:26]:26s} {len(rows):3d} {wins:3d} {ties:3d} {losses:3d} "
+              f"{unsolved:8d} {only_us:8d}  {fmt_geomean(g):>22s}")
+    print(f"    {'TOTAL':26s} {sum(len(v) for v in tally.values()):3d} "
+          f"{tot[0]:3d} {tot[1]:3d} {tot[2]:3d} {tot[3]:8d} {tot[4]:8d}  "
+          f"{fmt_geomean(geomean(all_ratios)):>22s}")
+    print("    (geomean > 1 means wassat is faster than the best installed rival)")
+
+
+def frontier_section() -> int:
     print("\n== frontier instances (tracked, budgeted) ==")
+    failures = 0
     if not FRONTIER:
         print("  none configured (set LR5_37 and/or LR5_41)")
     for name, path in FRONTIER:
@@ -195,10 +472,47 @@ def main() -> None:
         else:
             verdict = f"gap>={gap:.1f}x"
         print(f"  {name}: wassat {solved} ({wt:.1f}s)  {rival_name}={rival_text}  {verdict}")
+    return failures
+
+
+def smoke_test() -> None:
+    """A silently rebuilt binary is a no-op that would 'pass' every row."""
+    probe = subprocess.run([WASSAT, "--version"], capture_output=True, text=True, check=False)
+    if "Wassat" not in probe.stdout:
+        raise SystemExit(
+            f"{WASSAT} does not answer --version — it is a broken build, not a fast one.\n"
+            f"Rebuild with: bin/tungsten -o bin/wassat bin/wassat.w --release"
+        )
+
+
+def main() -> None:
+    if not Path(WASSAT).is_file():
+        raise SystemExit(f"wassat not found at {WASSAT}")
+    smoke_test()
+    if not CADICAL and not CMS5:
+        raise SystemExit("install CaDiCaL or CryptoMiniSat, or set CADICAL/CRYPTOMINISAT5")
+    names = [n for n, _ in solvers()]
+    print(f"[reference] REPS={REPS} TOLERANCE={TOLERANCE}x  solvers={names}")
+    failures = parity_section()
+
+    f, ext_tally = survey_section(
+        "survey: breadth set (correctness gates, speed reported)", SURVEY, EXT, SURVEY_BUDGET, False)
+    failures += f
+    scoreboard(ext_tally)
+
+    f, comp_tally = survey_section(
+        "SAT Competition 2026 main track", COMPETITION, SC2026, COMP_BUDGET, True, COMP_REPS)
+    failures += f
+    scoreboard(comp_tally)
+    if comp_tally:
+        print("\n  published columns are the competition's own instance-wise results:")
+        print("  different hardware and a 5000s budget, so they rank the field, not our clock.")
+
+    failures += frontier_section()
 
     if failures:
-        raise SystemExit(f"\nFAIL: {failures} parity failure(s)")
-    print("\nOK: parity held on every gate instance")
+        raise SystemExit(f"\nFAIL: {failures} failure(s)")
+    print("\nOK: parity held on every gate instance, verdicts agree across the survey")
 
 
 if __name__ == "__main__":

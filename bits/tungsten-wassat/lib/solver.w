@@ -290,6 +290,7 @@ WASSAT_PROOF_DRAT = 2
     @walker = nil
     @walks = 0
     @walk_last = 0
+    @walk_min = -1
 
     # Clause-DB reduction is driven by the LIVE learned-clause count, not
     # by accepted restarts — coupling it to restarts left multi-minute
@@ -452,6 +453,8 @@ WASSAT_PROOF_DRAT = 2
     @subst = i64[1]
     @nsubst = 0
     @raw_flat = false
+    # Lucky phases run at most once per solver, on the first solve_query.
+    @lucky_pending = @config.use_lucky
     self.prepare_walk
 
   # ---- literal encoding ---------------------------------------------------
@@ -838,6 +841,132 @@ WASSAT_PROOF_DRAT = 2
     gain = @tsize - mark
     self.backjump(@dlevel - 1)
     confl >= 0 ? -1 : gain
+
+  # ---- lucky phases -------------------------------------------------------
+  #
+  # kissat's lucky.c, before search. Four decision-free greedy dives —
+  # {false, true} x {input order, reverse input order} — each of which walks
+  # every variable, assumes it at the dive's polarity, and propagates. A dive
+  # that never gets stuck lands on a TOTAL assignment without one conflict or
+  # one branching decision, and the instance is answered outright.
+  #
+  # Why this earns its place next to a tuned CDCL: the cost is bounded by one
+  # propagation sweep per dive (every literal is assigned at most once and the
+  # trail only grows), so a miss is a few hundred milliseconds on a
+  # million-clause kernel and a hit is the whole instance. Measured here on
+  # the SC2026 miter family, which is exactly the shape it is for: kissat
+  # answers ak128modbtbg2msisc with 0 conflicts and 0 decisions on its
+  # forward-true dive in 0.13s, against 14.4s for an 8-arm CDCL race that has
+  # to rediscover the same assignment one branching decision at a time.
+  #
+  # Two details are load-bearing, both taken from kissat:
+  #
+  #   * A conflict below the top level is a FAILED LITERAL, not a dead end:
+  #     the assumed literal's negation holds at the root, so it is enqueued
+  #     there and the dive continues with a strictly stronger formula. Even a
+  #     dive that ultimately gives up can therefore leave root units behind.
+  #   * Saved phases must survive a miss. `enqueue` writes @phase on every
+  #     assignment, so a failed dive would otherwise hand the subsequent
+  #     search 296k phases set to the dive's polarity and silently replace the
+  #     branching heuristic's own basin. They are snapshotted and restored.
+  #
+  # Returns 1 (total assignment on @assign), -1 (root conflict: UNSAT), or 0.
+  # Coordinator entry point: run the dives and package the verdict the same
+  # way solve_budget would, so a hit needs no separate reporting path.
+  -> lucky_result
+    r = self.lucky_probe
+    return nil if r == 0
+    @terminal_status = r
+    self.result_for(r)
+
+  -> lucky_probe
+    return 0 unless @ok && @lucky_pending
+    @lucky_pending = false
+    return 0 unless @proof_mode == WASSAT_PROOF_NONE
+    # Assumptions own the first decision levels; a dive would fight them.
+    return 0 if @nassump > 0 || @dlevel > 0
+    tl = wassat_prof_clock
+    # A miss must leave the saved phases alone: `enqueue` writes @phase on
+    # every assignment, so a failed dive would otherwise reseed every phase
+    # to the dive's own polarity and quietly replace the branching
+    # heuristic's basin. kissat backtracks the dives with an explicit
+    # `backtrack_without_updating_phases` for exactly this reason.
+    #
+    # What CANNOT be restored, and is inherent to running propagation before
+    # search, is watch order: propagation permutes clause literals and moves
+    # watch entries between blocks, and wassat's trajectory is measurably
+    # sensitive to both. A miss is therefore cheap (0-5ms measured, the dives
+    # abandon early) but not free. Measured on quasigroup-completion
+    # (qwh.35.405) that reordering costs 4,830 -> 7,380 conflicts; restoring
+    # @heap/@heappos/@hstate/@vq_state as well was tried and changed nothing,
+    # so the residual is the watch state and only a win pays for it.
+    sphase = i64[@nvars + 1]
+    v = 0
+    while v <= @nvars
+      sphase[v] = @phase[v]
+      v += 1
+    r = self.lucky_dive(0 - 1, 0)
+    r = self.lucky_dive(1, 0) if r == 0
+    r = self.lucky_dive(0 - 1, 1) if r == 0
+    r = self.lucky_dive(1, 1) if r == 0
+    if r != 1
+      v = 0
+      while v <= @nvars
+        @phase[v] = sphase[v]
+        v += 1
+    tl = wassat_prof("lucky result=[r]", tl)
+    r
+
+  # One dive. `pol` is the polarity assumed for every free variable; a
+  # non-zero `backward` walks the variables from @nvars down to 1 instead of
+  # up. Returns 1 for a total assignment, -1 for root-level UNSAT, 0 for a
+  # dive that got stuck (the trail is returned to a propagated root).
+  -> lucky_dive(pol, backward)
+    # backjump(0) declares the whole remaining trail propagated (it sets
+    # @qhead to the trail size), so it is NOT a safe way to reach a
+    # propagated root: load_flat deliberately hands the solver its input
+    # units with @qhead still at 0, and jumping to a level we are already at
+    # would drop them on the floor unpropagated. Only unwind when there is
+    # something to unwind, and let propagate establish the root fixpoint.
+    self.backjump(0) if @dlevel > 0
+    if self.propagate >= 0
+      @formula_unsat = true
+      return 0 - 1
+    stuck = 0
+    i = 0
+    while i < @nvars && stuck == 0
+      v = backward == 0 ? i + 1 : @nvars - i
+      if @assign[v] == 0
+        l = pol > 0 ? v : 0 - v
+        @trail_lim[@dlevel] = @tsize
+        @dlevel += 1
+        self.enqueue(l, -1)
+        if self.propagate >= 0
+          if @dlevel > 1
+            # Try the other side of this one decision only. kissat gives up
+            # on the dive if that conflicts too rather than starting to
+            # search — the whole point is that a dive never backtracks twice.
+            self.backjump(@dlevel - 1)
+            @trail_lim[@dlevel] = @tsize
+            @dlevel += 1
+            self.enqueue(0 - l, -1)
+            stuck = 1 if self.propagate >= 0
+          else
+            # `l` was the only decision, so it is a failed literal and its
+            # negation is implied at the root.
+            self.backjump(0)
+            self.enqueue(0 - l, -1)
+            stuck = 2 if self.propagate >= 0
+      i += 1
+    if stuck == 2
+      @formula_unsat = true
+      self.backjump(0)
+      return 0 - 1
+    if stuck == 1
+      self.backjump(0)
+      z = self.propagate
+      return 0
+    1
 
   # Pop assigned entries lazily until the highest-activity unassigned
   # variable is found; 0 means the assignment is total.
@@ -1358,7 +1487,7 @@ WASSAT_PROOF_DRAT = 2
       span = @rephase_base if span < @rephase_base
       budget = @walk_mult * span
       budget = 2000000 if budget > 2000000
-      z = @walker.walk_from_phase(@phase, budget, 1 + @walks * 7919)
+      @walk_min = @walker.walk_from_phase(@phase, budget, 1 + @walks * 7919)
       v = 1
       while v <= @nvars
         @bphase[v] = @phase[v]

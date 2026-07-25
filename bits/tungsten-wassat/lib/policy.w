@@ -118,6 +118,16 @@ WASSAT_CONGRUENCE_DEFAULT = true
     return env("WASSAT_SUBST") == "1" if env("WASSAT_SUBST") != nil
     WASSAT_SUBST_DEFAULT
 
+  -> use_lucky
+    # kissat's lucky phases (lucky.c): four decision-free greedy dives run
+    # once, before the first branching decision. Not shape-gated, because the
+    # cost is bounded by a propagation sweep on any shape and the payoff is
+    # the whole instance: the SC2026 miter ak128modbtbg2msisc is answered by
+    # the forward-true dive with zero conflicts, where an 8-arm CDCL race
+    # needs 14.4s to rediscover the same assignment. WASSAT_LUCKY=0 turns it
+    # off for ablation.
+    env("WASSAT_LUCKY") != "0"
+
   # Ternary count, for sizing the congruence pass's scratch tables.
   -> ternary_count
     @ternary

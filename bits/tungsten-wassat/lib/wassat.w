@@ -196,6 +196,13 @@ use portfolio
 # junk than to be the formula the caller meant to solve.
 -> wassat_run_file(args)
   begin
+    # SAT Competition convention: 10 = SATISFIABLE, 20 = UNSATISFIABLE,
+    # 0 = anything else. Exiting here rather than returning the code is
+    # deliberate — the value does not survive the begin/rescue and the
+    # dispatcher's if-chain above it.
+    # exit() inside begin/rescue is SWALLOWED here (the known
+    # return-through-ensure gap), so the code is returned out and the
+    # entry point exits with it.
     wassat_run_file_checked(args)
   rescue e
     << "c error: [e]"
@@ -313,7 +320,7 @@ use portfolio
         << "c mode: fast (light+sls burst)"
         << "c conflicts: 0, decisions: 0"
         << "c stats restarts=0 reduces=0 flips=[burst0["flips"]] " + wassat_pre_stats_text(art["stats"], pre_ms0)
-        return 0
+        exit(10)
       light_stack = art["stack"]
       probe_p = nil
       probe_out = nil
@@ -326,6 +333,29 @@ use portfolio
       # probe always runs with a small budget: a win skips the heavy
       # rounds outright, a miss costs ~0.15s.
       if probe_p == nil
+        sprobe = Wassat.from_flat(formula["nvars"], art, 0)
+        # Lucky phases (kissat's lucky.c) before anything else, on a solver
+        # that is THROWN AWAY unless it wins. The dives are decision-free and
+        # cost 0-5ms, but they propagate, and propagation permutes clause
+        # literals and moves watch entries — reordering the search tuned
+        # against this database. Measured, keeping the dived solver: the
+        # SC2026 miter is answered outright (9.9s -> 0.18s) but bmc-ibm-6
+        # regresses 0.062s -> 0.281s on watch order alone. Rebuilding on a
+        # miss costs one from_flat and makes the technique strictly additive.
+        lucky = sprobe.lucky_result
+        if lucky != nil
+          pre_msl = ccall("__w_clock_ms") - t0
+          if lucky["status"] == 1
+            model = wassat_reconstruct_model(light_stack, lucky["model"], formula["nvars"])
+            unless wassat_model_satisfies?(formula, model)
+              raise "internal error: lucky model does not satisfy the input formula"
+            print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
+          else
+            << "s UNSATISFIABLE"
+          << "c mode: fast (lucky phases)"
+          << "c conflicts: 0, decisions: 0, props: [lucky["props"]]"
+          << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(art["stats"], pre_msl)
+          exit(lucky["status"] == 1 ? 10 : 20)
         sprobe = Wassat.from_flat(formula["nvars"], art, 0)
         sprobe.simplify_raw if config.force_simplify?
         # time-boxed in conflict slices: wins arrive fast when they arrive
@@ -375,7 +405,7 @@ use portfolio
           << "c mode: fast ([mode_tag])"
           << "c conflicts: [spr["conflicts"]], decisions: [spr["decisions"]], props: [spr["props"]]"
           << "c stats restarts=[spr["restarts"]] reduces=[spr["reduces"]] " + wassat_pre_stats_text(art["stats"], pre_msq)
-          return 0
+          exit(spr["status"] == 1 ? 10 : 20)
 
       if art["raw"] == true && (options["conflicts"] == 0 || budget_used < options["conflicts"])
         arms = config.raw_race_arms
@@ -400,7 +430,7 @@ use portfolio
             << "c mode: fast (raw cdcl race, arm [rr["winner"]])"
             << "c conflicts: [budget_used], decisions: 0, props: 0"
             << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(art["stats"], pre_msr)
-            return 0
+            exit(rr["status"] == 1 ? 10 : 20)
       # Raw kernels skipped the preprocessor entirely, so there is no
       # intake for the heavy rounds to operate on — and policy disables
       # every technique they would run at this size anyway.
@@ -412,7 +442,8 @@ use portfolio
         prc = probe_p.poll
         if prc != nil && (prc == 10 || prc == 20)
           r2 = wassat_report_probe_win(prc, probe_out, light_stack, formula, art, t0)
-          return 0 if r2 == 0
+          if r2 == 0
+            exit(prc == 20 ? 20 : 10)
           probe_p = nil
   else
     art = pre.run
@@ -443,7 +474,7 @@ use portfolio
     wassat_status(quiet, "c stats restarts=0 reduces=0 " + pstats)
     print(wtext) if wrat_final == "-"
     print(dtext) if drat_final == "-"
-    return 0
+    exit(20)
 
   s = nil
   if proof_mode == WASSAT_PROOF_NONE
@@ -552,6 +583,12 @@ use portfolio
       if drat_final == "-"
         dlines = wassat_concat_arrays(art["drat"], result["drat"])
         print(dlines.empty? ? "" : dlines.join("\n") + "\n")
+  # NB: `exit(n) if cond` silently does NOTHING in Tungsten — the
+  # modifier form of exit is dropped. Block form only.
+  if result["status"] == 1
+    exit(10)
+  if result["status"] == -1
+    exit(20)
   0
 
 # `wassat sls <cnf> --flips <n> --seed <s>`: run the stochastic local search
@@ -654,6 +691,10 @@ v " + r["model"].join(" ") + " 0
 
 # Dispatch recognized command-line arguments. The executable entry point calls
 # this explicitly; importing `use wassat` is side-effect free.
+# SAT Competition exit-code convention: 10 = SATISFIABLE, 20 =
+# UNSATISFIABLE, 0 = anything else (UNKNOWN, usage, refusal). Every
+# competition harness and every rival solver uses this; returning 0 for
+# both verdicts made wassat unscoreable regardless of correctness.
 -> wassat_run_cli(args)
   cmd = nil
   cmd = args[0] if args.size > 0
@@ -720,7 +761,7 @@ v " + r["model"].join(" ") + " 0
       << "s UNKNOWN"
       exit(1)
   elsif args.size >= 1
-    wassat_run_file(args)
+    return wassat_run_file(args)
   else
     wassat_print_usage
     exit(1)

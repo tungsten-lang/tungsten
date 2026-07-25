@@ -141,7 +141,8 @@ with tempfile.TemporaryDirectory(prefix="wassat-differential-") as directory:
                 timeout=TIMEOUT,
                 check=False,
             )
-            if produced.returncode != 0 or "s VERIFIED" not in checked.stdout:
+            # 10/20 are the SAT-competition verdict exit codes, not failures.
+            if produced.returncode not in (0, 10, 20) or "s VERIFIED" not in checked.stdout:
                 raise SystemExit(f"raw proof failed independent checking on {cnf}")
             proof_count += 1
         else:

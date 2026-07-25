@@ -32,6 +32,7 @@
 
 use cnf
 use policy
+use sls
 
 UNASSIGNED = 0
 
@@ -234,10 +235,61 @@ WASSAT_PROOF_DRAT = 2
       @bphase[v] = -1
       v += 1
     @best_tsize = 0
-    @rephase_at = 4000
+    # Rephase cadence. kissat scales its interval as rephaseint * k*log10(k+9)^3
+    # over the rephase COUNT, which starts far tighter than a flat 4000 and
+    # opens up later; the knobs are here so the schedule can be swept.
+    @rephase_base = 4000
+    @rephase_base = env("WASSAT_REPHASE_BASE").to_i if env("WASSAT_REPHASE_BASE") != nil
+    @rephase_base = 100 if @rephase_base < 100
+    @rephase_step = 1000
+    @rephase_step = env("WASSAT_REPHASE_STEP").to_i if env("WASSAT_REPHASE_STEP") != nil
+    @rephase_step = 0 if @rephase_step < 0
+    @rephase_at = @rephase_base
+    # Rephasing is reachable ONLY through an accepted restart, and stable mode
+    # deliberately refuses restarts for 16,384 conflicts at a time — so on
+    # structured instances the rotation, and with it the walk, can go a whole
+    # search without firing once (hole9 refutes at 11,990 conflicts having
+    # never rephased). kissat drives `kissat_rephase` from the search loop on
+    # its own conflict schedule and lets it backtrack to zero itself.
+    #
+    # WASSAT_REPHASE_FREE=1 does that here, and it is OFF by default on
+    # measurement: the raw path likes it (uf250, 30 instances: 1.45x) but it
+    # taxes refutations, because a forced rephase is a forced restart and
+    # stable mode's rare-restart discipline is what keeps them cheap (uuf250,
+    # 8 solved instances: 0.92x). The structured half of the trade could not
+    # be measured — see the note on this in the walk comment below.
+    @rephase_free = env("WASSAT_REPHASE_FREE") == "1"
     @rephase_idx = 0
     @rephases = 0
     @rephase_rng = 88172645463325252
+
+    # Local search as a PHASE ORACLE rather than a portfolio arm. Wassat has
+    # had a CCAnr walk (lib/sls.w) since the beginning and never let it touch
+    # the saved phases: it raced as an independent arm, or ran as a pre-search
+    # burst whose result was DISCARDED unless it happened to be a model. Every
+    # leading solver does the opposite —
+    #   kissat   rephase.c:87  schedule = B W I B W O, so `rephase_walking`
+    #                          reseeds the saved phases twice per cycle;
+    #   cms5     ccnr_cms.cpp:311-322 writes `stable_polarity` from the CCAnr
+    #                          assignment ALWAYS, `best_polarity` on a model.
+    # The payload is the near-solution, not the solution. A walk that ends
+    # twelve clauses short still tells CDCL which half of the cube to descend.
+    @use_walk = env("WASSAT_WALK") != "0"
+    @use_warmup = env("WASSAT_WARMUP") != "0"
+    # Flips per walk, as a multiple of the conflicts since the last one:
+    # kissat budgets its walk as a fraction of search effort rather than a
+    # constant, so the walk grows with the instance instead of vanishing.
+    # 5 is measured, not guessed — on the uf250 family the SAT win is FLAT
+    # in this knob (18x at 5, 18x at 25, 18x at 60) while the UNSAT cost is
+    # linear in it (uuf250: 0.90x at 5, 0.81x at 10, 0.65x at 25). The walk
+    # either finds the basin quickly or not at all, so buying more flips
+    # buys nothing and only taxes refutations.
+    @walk_mult = 5
+    @walk_mult = env("WASSAT_WALK_MULT").to_i if env("WASSAT_WALK_MULT") != nil
+    @walk_mult = 1 if @walk_mult < 1
+    @walker = nil
+    @walks = 0
+    @walk_last = 0
 
     # Clause-DB reduction is driven by the LIVE learned-clause count, not
     # by accepted restarts — coupling it to restarts left multi-minute
@@ -274,6 +326,23 @@ WASSAT_PROOF_DRAT = 2
     @share_exports = 0
     @share_imports = 0
     @share_dropped = 0
+    @share_filtered = 0        # rejected by the batched import filter
+    # Export gate: learned clauses with LBD at or below this go on the ring.
+    # 2 is the "glue only" default the raw-kernel race uses.
+    @share_lbd = 2
+    # Assignment sink for batched clause filtering (GpuShareSat). The arm
+    # periodically stamps its CURRENT trail into a shared pair of bitsets;
+    # a filter pass then tests the shared pool against those and marks the
+    # clauses that are false or unit under them — the only ones worth
+    # installing. Writes go to this arm's own rotating slot, so the sink is
+    # shared but never contended, and publication allocates nothing.
+    @asg_sink = nil
+    @asg_words = 0
+    @asg_slots = 0
+    @asg_every = 0
+    @asg_pending = 0
+    @asg_count = 0
+    @asg_filter = false
     @rhist = i64[64]             # reduce_db scratch (worker threads: no alloc)
 
     # Replay occurrence lists (hinted mode only): intrusive per-literal
@@ -383,6 +452,7 @@ WASSAT_PROOF_DRAT = 2
     @subst = i64[1]
     @nsubst = 0
     @raw_flat = false
+    self.prepare_walk
 
   # ---- literal encoding ---------------------------------------------------
 
@@ -978,6 +1048,37 @@ WASSAT_PROOF_DRAT = 2
     @read_ticket = 0
     0
 
+  # Widen or narrow the export gate. Glue-only (2) keeps the ring quiet but
+  # nearly inert — 170 clauses per arm across 140k conflicts on uuf250-01 —
+  # while a threaded portfolio wants the ring busy enough that IMPORT
+  # selectivity, not export scarcity, is what limits what an arm takes on.
+  -> set_share_lbd(k)
+    @share_lbd = k
+    0
+
+  # Attach the assignment sink: `slots` rotating snapshots of `words` i64
+  # per bitset half, one snapshot every `every` conflicts. Main thread,
+  # pre-spawn — the arm only ever writes into it.
+  -> set_assignment_sink(buf, words, slots, every)
+    @asg_sink = buf
+    @asg_words = words
+    @asg_slots = slots
+    @asg_every = every
+    @asg_pending = 0
+    @asg_count = 0
+    0
+
+  # Filter imports through the snapshot window instead of installing every
+  # clause the ring offers. Requires set_assignment_sink.
+  -> enable_import_filter
+    @asg_filter = true
+    0
+
+  # How many snapshots this arm has published (the sink wraps, so a reader
+  # takes min(count, slots) of them).
+  -> assignment_samples
+    @asg_count
+
   # Garden-arm diversity: randomize the initial saved phases from a seed
   # (xorshift). Call before solving; sound because phases only steer
   # branching polarity. Seed 0 keeps the all-negative default.
@@ -1199,32 +1300,115 @@ WASSAT_PROOF_DRAT = 2
       ci += 1
     0
 
-  # Cycle the saved phases: best-phase epochs interleaved with inverted,
-  # original, and random assignments — diversification with a persistent
-  # pull back toward the deepest basin seen. Runs at level zero.
+  # The walker owns typed arrays sized from the live clause set, so it is
+  # built HERE — on the main thread, at construction — and never later: a
+  # portfolio arm becomes a worker thread the moment it is handed to
+  # Thread.new, and worker threads must not allocate (see enable_fixed_caps).
+  -> prepare_walk
+    return 0 unless @use_walk && @nvars > 0 && @ncl > 0
+    w = WassatSls.new(@nvars, [])
+    w.alloc_arena(@cmeta, @alive, @clbd, @ncl)
+    @walker = w
+    0
+
+  # kissat's `kissat_warmup` (src/warmup.c, 54 lines): before local search,
+  # decide the formula down under the SAVED phases and propagate, then
+  # backtrack to level zero. Assignment-time phase saving means every
+  # propagated literal writes its own value into @phase on the way down, so
+  # what comes back is the same polarity vector made PROPAGATION-CONSISTENT
+  # — the walk then starts from a point the solver could actually reach
+  # instead of an arbitrary corner of the cube.
+  #
+  # Conflicts are ignored, as kissat's propagate_beyond_conflicts ignores
+  # them: the native propagate has already advanced the queue past the
+  # literal that produced one, so the next call simply resumes at the next
+  # literal. Nothing here is trusted — backjump(0) unassigns all of it.
+  -> warmup
+    return 0 unless @ok && @dlevel == 0 && @nassump == 0
+    guard = 0
+    limit = @nvars + 2
+    while guard < limit
+      v = self.pick_branch
+      break if v <= 0
+      @trail_lim[@dlevel] = @tsize
+      @dlevel += 1
+      self.enqueue(@phase[v] > 0 ? v : 0 - v, -1)
+      z = self.propagate
+      guard += 1
+    self.backjump(0)
+    0
+
+  # One bounded local-search pass over the CURRENT residual formula, seeded
+  # from the saved phases and writing its best assignment straight back into
+  # them. Both directions matter and neither existed before: seeding means
+  # the walk starts from what CDCL has learned, and writing back means CDCL
+  # descends toward what the walk found.
+  #
+  # @bphase (the target phases decisions actually read when @use_target is
+  # on) takes the same vector: kissat copies saved over target at every
+  # rephase and resets the target trail height, and without that the walk's
+  # answer would be invisible to every arm running target phases.
+  -> walk_phases
+    return 0 if @walker == nil
+    return 0 unless @ok && @dlevel == 0 && @nassump == 0
+    self.warmup if @use_warmup
+    live = @walker.refill_arena(@arena, @cmeta, @alive, @clbd, @ncl, @assign)
+    if live > 0
+      span = @conflicts - @walk_last
+      span = @rephase_base if span < @rephase_base
+      budget = @walk_mult * span
+      budget = 2000000 if budget > 2000000
+      z = @walker.walk_from_phase(@phase, budget, 1 + @walks * 7919)
+      v = 1
+      while v <= @nvars
+        @bphase[v] = @phase[v]
+        v += 1
+    @walk_last = @conflicts
+    @walks += 1
+    0
+
+  # Cycle the saved phases. With the walk wired in the rotation is kissat's
+  # (rephase.c:87) — Best, Walk, Inverted, Best, Walk, Original — so local
+  # search reseeds the phases twice per cycle; WASSAT_WALK=0 falls back to
+  # the previous best/original/best/inverted/best/random rotation, which is
+  # the A/B this change was measured against. Runs at level zero.
   -> rephase
     idx = @rephase_idx % 6
     # typed local: untyped xorshift never wraps and promotes to BigInt;
     # masked to 47 bits on store-back so the ivar stays a fast small int
     rng = @rephase_rng ## i64
-    v = 1
-    while v <= @nvars
-      if idx == 1
-        @phase[v] = 1
-      elsif idx == 3
-        @phase[v] = -1
-      elsif idx == 5
-        rng = rng ^ (rng << 13)
-        rng = rng ^ (rng >> 7)
-        rng = rng ^ (rng << 17)
-        @phase[v] = (rng & 1) == 1 ? 1 : -1
+    if @walker != nil
+      if idx == 1 || idx == 4
+        self.walk_phases
       else
-        @phase[v] = @bphase[v]
-      v += 1
+        v = 1
+        while v <= @nvars
+          if idx == 2
+            @phase[v] = -1
+          elsif idx == 5
+            @phase[v] = 1
+          else
+            @phase[v] = @bphase[v]
+          v += 1
+    else
+      v = 1
+      while v <= @nvars
+        if idx == 1
+          @phase[v] = 1
+        elsif idx == 3
+          @phase[v] = -1
+        elsif idx == 5
+          rng = rng ^ (rng << 13)
+          rng = rng ^ (rng >> 7)
+          rng = rng ^ (rng << 17)
+          @phase[v] = (rng & 1) == 1 ? 1 : -1
+        else
+          @phase[v] = @bphase[v]
+        v += 1
     @rephase_rng = rng & 140737488355327
     @rephase_idx += 1
     @rephases += 1
-    @rephase_at = @conflicts + 4000 + 1000 * @rephases
+    @rephase_at = @conflicts + @rephase_base + @rephase_step * @rephases
     @best_tsize = 0
     0
 
@@ -1421,6 +1605,18 @@ WASSAT_PROOF_DRAT = 2
             if ok && @nsubst > 0
               ok = false if @subst[v] != 0
             i += 1
+          # Batched-filter selectivity (GpuShareSat): a clause is worth
+          # installing only if it would have been FALSE or UNIT under one of
+          # this arm's recent assignments — the rest cost a store, two watch
+          # appends and a propagation to say nothing. The test cannot be run
+          # against the assignment in hand: imports happen at level zero,
+          # where almost nothing is assigned and every clause reads as
+          # "still open". It runs against the rotating snapshot window
+          # instead, which is exactly what the GPU pass batches.
+          if ok && @asg_filter
+            ok = wassat_asg_hit(@mbuf, n, @asg_sink, @asg_words, @asg_slots,
+                                @asg_count) == 1
+            @share_filtered += 1 unless ok
           if ok
             status = self.import_clause(n)
             @share_imports += 1 if status >= 0
@@ -1533,7 +1729,7 @@ WASSAT_PROOF_DRAT = 2
           lbd = self.compute_lbd_buf(n)
           self.log_learned_direct(n, confl)
           # low-LBD learned clauses are the sharing currency
-          self.share_export(n) if @ring != nil && lbd <= 2 && n <= @ring_maxlen
+          self.share_export(n) if @ring != nil && lbd <= @share_lbd && n <= @ring_maxlen
           # Fixed capacities: with the learned clause safely captured, an
           # exhausted arena may now be compacted (backjump to 0 + reduce_db)
           # without corrupting analysis. If it still cannot take the clause
@@ -1617,6 +1813,19 @@ WASSAT_PROOF_DRAT = 2
               @best_tsize = @tsize
               wassat_best_phase_save(@trail, @assign, @bphase, @tsize)
             wassat_evsids_advance(@hstate)
+            # Assignment snapshot for batched filtering. Taken HERE, right
+            # after a conflict has been learned from and backjumped, because
+            # that is a deep, representative trail — the import safe point
+            # below is at level zero, where almost nothing is assigned and a
+            # false/unit test would reject the whole pool.
+            if @asg_sink != nil
+              @asg_pending += 1
+              if @asg_pending >= @asg_every
+                @asg_pending = 0
+                wassat_asg_publish(@assign, @asg_sink,
+                                   (@asg_count % @asg_slots) * 2 * @asg_words,
+                                   @asg_words, @nvars)
+                @asg_count += 1
             # Import safe point: every 2048 conflicts, drain the ring at
             # level zero with assignment-aware installs.
             if @ring != nil
@@ -1706,6 +1915,9 @@ WASSAT_PROOF_DRAT = 2
         want_restart = false
         if @since_restart >= floor && @lbd_gcount >= 128
           want_restart = wassat_restart_hot(@estate, @tsize, @rst_num, @rst_den) == 1
+        # A due rephase forces the restart it needs, rather than waiting for
+        # one stable mode may never grant. Opt-in; see @rephase_free.
+        want_restart = true if @rephase_free && @conflicts >= @rephase_at && @dlevel > 0
         if want_restart
           @since_restart = 0
           @restart_count += 1
@@ -1847,6 +2059,7 @@ WASSAT_PROOF_DRAT = 2
         @ok = false
       u += 1
     @raw_flat = art["raw"] == true
+    self.prepare_walk
     0
 
   # Inprocessing for raw kernels, which bypass the preprocessor entirely:
@@ -2105,6 +2318,7 @@ WASSAT_PROOF_DRAT = 2
     res[base + @nvars + 1] = @share_exports
     res[base + @nvars + 2] = @share_imports
     res[base + @nvars + 3] = @share_dropped
+    res[base + @nvars + 7] = @share_filtered
     res[base + @nvars + 4] = @conflicts
     res[base + @nvars + 5] = ccall("__w_clock_ms")
     # first decisive answer raises the stop flag for every other arm
@@ -2236,6 +2450,70 @@ WASSAT_PROOF_DRAT = 2
     v = 0 - l if l < 0
     bph[v] = asg[v]
     ti += 1
+  0
+
+# Stamp the current assignment into a snapshot slot as two bitsets: the
+# first `words` are "v is TRUE", the next `words` are "v is FALSE". A
+# variable unassigned at this instant appears in neither, so a clause with
+# an unassigned literal can never read as false. Native and typed: this runs
+# inside a worker's solve loop, allocates nothing, and the shift would leave
+# the boxed small-int range at bit 63.
+-> wassat_asg_publish(assign, buf, base, words, nv) (i8[] i64[] i64 i64 i64)
+  one = 1 ## i64
+  w = 0
+  while w < 2 * words
+    buf[base + w] = 0
+    w += 1
+  v = 1
+  while v <= nv
+    a = assign[v]
+    if a > 0
+      buf[base + (v >> 6)] = buf[base + (v >> 6)] | (one << (v & 63))
+    else
+      if a < 0
+        buf[base + words + (v >> 6)] = buf[base + words + (v >> 6)] | (one << (v & 63))
+    v += 1
+  0
+
+# Batched clause filtering, the scalar half: is this clause FALSE or UNIT
+# under ANY of the `count` snapshots in the window? Returns 1 if so.
+#
+# This is the same verdict the GPU pass computes for a whole pool at once
+# (benchmarks/gpu_share_filter_bench.w keeps the two bit-exact); the only
+# difference is that the kernel reads a clause once and tests it against
+# every snapshot in lockstep, which is the amortization the CPU cannot do.
+# Scanning stops at the first hit — the answer is a disjunction over the
+# window, so later snapshots cannot change it.
+-> wassat_asg_hit(mbuf, n, buf, words, slots, count) (i64[] i64 i64[] i64 i64 i64)
+  one = 1 ## i64
+  have = count ## i64
+  have = slots if count > slots
+  return 0 if have < 1
+  s = 0 ## i64
+  while s < have
+    base = s * 2 * words ## i64
+    nfalse = 0 ## i64
+    sat = 0 ## i64
+    k = 0 ## i64
+    while k < n
+      l = mbuf[k] ## i64
+      v = l ## i64
+      v = 0 - l if l < 0
+      w = v >> 6 ## i64
+      b = one << (v & 63) ## i64
+      pos = buf[base + w] & b ## i64
+      neg = buf[base + words + w] & b ## i64
+      istrue = pos ## i64
+      isfalse = neg ## i64
+      if l < 0
+        istrue = neg
+        isfalse = pos
+      sat = 1 if istrue != 0
+      nfalse = nfalse + 1 if isfalse != 0
+      k = k + 1
+    if sat == 0
+      return 1 if nfalse >= n - 1
+    s = s + 1
   0
 
 # Write a clause header into the arena: (clause index << 32) | length.

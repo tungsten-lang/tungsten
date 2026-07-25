@@ -33,7 +33,8 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
 3. **Contract honesty** — weighted Scaler/Imputer; unsupervised Pipeline tails; `supports_sample_weight?` accuracy.
 4. **Sparse + matmul** — core SparseMatrix facade; BLAS-backed matmul.
 5. **LinAlg** — rank-revealing QR, rank, thin SVD/Cholesky as pure follow-ons.
-6. **Estimators** — multiclass logistic (shipped); KNN regressor + distance weights; feature selection; SVM; gradient boosting.
+6. **Estimators** — multiclass logistic, KNN regressor + distance weights,
+   feature selection, and gradient boosting shipped; SVM remains.
 7. **Trees / inspection** — permutation importance (shipped); Gini/MSE
    feature importances and tree export remain.
 8. **Calibration** — `CalibratedClassifierCV` (Platt / isotonic). **Shipped.**
@@ -83,8 +84,15 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
   scores, retains negative importances, exposes named summaries, and is
   covered across linear, KNN, KMeans, and heterogeneous Pipeline models on
   both engines.
-- A live scikit-learn 1.9.0 differential now covers twenty-four numerical
-  outcomes, three calibration-quality ratios, and three capability gains
+- `GradientBoostingRegressor` now fits sequential least-squares residual
+  trees; `GradientBoostingClassifier` fits binomial or multinomial Newton
+  trees with normalized probabilities. Both support sample weights,
+  Pipeline/CV/GridSearch, staged losses/predictions/probabilities, exact
+  persistence, and deterministic interpreted/compiled execution. Integer
+  weights match row duplication, and one unshrunk regression stage is
+  exactly its CART tree.
+- A live scikit-learn 1.9.0 differential now covers thirty numerical
+  outcomes, three calibration-quality ratios, and five capability gains
   across
   nonlinear classification, polynomial regression, multiclass
   classification/probability scoring, a canonical Iris subset,
@@ -93,18 +101,20 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
   from 0.667 to 1.0 and distance-weighted KNN improves its reference
   accuracy from 0.5 to 1.0 in both implementations. Mixed-pipeline
   permutation importance is age/city 0/0.422 in Koala versus 0/0.439 in
-  sklearn. On held-out Iris, Koala
+  sklearn. Boosted quadratic R² is 0.999597 versus a stump's 0.430807, and
+  binary/multiclass boosting log loss matches sklearn to at least fifteen
+  digits. On held-out Iris, Koala
   sigmoid/isotonic log loss is 0.353/0.251 against sklearn's 0.346/0.258;
   both cut the raw tree loss by over 86%.
-- 18 interpreted and compiled spec suites cover 715 examples; the
-  framework-free smoke test adds 413 checks on each engine.
+- 19 interpreted and compiled spec suites cover 744 examples; the
+  framework-free smoke test adds 431 checks on each engine.
 
 ## Highest-leverage next tranche
 
 1. Broader sklearn differentials on standard tabular datasets plus
    wall-clock and memory baselines.
-2. Gradient boosting before widening into GPU execution.
-3. SVM classification and probability calibration.
+2. SVM classification and probability calibration.
+3. Tree feature importances and export.
 4. A persistable named-operation alternative to arbitrary-closure
    `FunctionTransformer`.
 

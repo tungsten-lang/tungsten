@@ -58,6 +58,16 @@ QUALITY_RATIOS = {
 # category column. This catches the historical failure where CV coerced a
 # DataFrame to its numeric matrix before the Pipeline saw it.
 QUALITY_GAINS = {
+    "quadratic_boost_vs_stump": (
+        "quadratic_boost_r2",
+        "quadratic_stump_r2",
+        0.50,
+    ),
+    "xor_boost_vs_linear": (
+        "xor_boost_accuracy",
+        "xor_raw_accuracy",
+        0.50,
+    ),
     "mixed_columns_vs_numeric_only": (
         "mixed_column_transform_cv_mean",
         "mixed_numeric_only_cv_mean",

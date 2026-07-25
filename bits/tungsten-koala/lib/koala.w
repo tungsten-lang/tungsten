@@ -10,7 +10,10 @@
 # GaussianNB — multiclass Gaussian naive Bayes, a closed-form generative
 # classifier; DecisionTreeClassifier / DecisionTreeRegressor — CART
 # recursive partitioning, koala's non-parametric piecewise-constant
-# learner and the machinery a forest would stand on), clustering (KMeans
+# learner and the machinery forests and gradient boosting stand on;
+# RandomForestClassifier / RandomForestRegressor — parallel bagged trees;
+# GradientBoostingClassifier / GradientBoostingRegressor — sequential
+# residual/Newton trees), clustering (KMeans
 # — Lloyd's algorithm, koala's first
 # unsupervised learner), model evaluation (KFold / CrossValidation — k-fold
 # cross-validation that re-fits an estimator on each fold and averages
@@ -96,6 +99,7 @@ use logistic_regression
 use gaussian_nb
 use decision_tree
 use random_forest
+use gradient_boosting
 use scaler
 use pca
 use encoder

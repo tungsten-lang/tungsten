@@ -9,9 +9,9 @@
 # large-scale throughput: nonlinear classification, exact polynomial
 # regression under cross-validation, multiclass classification with
 # stratification, mixed numeric/categorical preprocessing, distance-weighted
-# nearest neighbours, model-agnostic permutation importance, cross-fitted
-# probability calibration around a preprocessing Pipeline, and unsupervised
-# cluster-quality evaluation.
+# nearest neighbours, binary/multiclass gradient boosting, model-agnostic
+# permutation importance, cross-fitted probability calibration around a
+# preprocessing Pipeline, and unsupervised cluster-quality evaluation.
 
 use koala
 
@@ -31,10 +31,15 @@ xor_pipe = Pipeline.new([
 xor_pipe.fit(xor_x, xor_y)
 raw_score = raw.score(xor_x, xor_y)
 poly_score = xor_pipe.score(xor_x, xor_y)
+boosted_xor = GradientBoostingClassifier.new(20, 1.to_f / 10.to_f, 2)
+boosted_xor.fit(xor_x, xor_y)
+boosted_xor_score = boosted_xor.score(xor_x, xor_y)
 lines.push("xor raw accuracy " + raw_score.to_s)
 lines.push("xor polynomial accuracy " + poly_score.to_s)
+lines.push("xor boosted accuracy " + boosted_xor_score.to_s)
 ok = false if raw_score.to_s != "0.5"
 ok = false if poly_score.to_s != "1"
+ok = false if boosted_xor_score.to_s != "1"
 
 # 2. Exact quadratic regression: every fold fits y = 3x^2 + 2x + 1
 # through a degree-2 expansion and gets R² 1 on held-out rows.
@@ -47,6 +52,12 @@ quad_scores = CrossValidation.cross_val_score(quad_pipe, quad_x, quad_y, 3)
 lines.push("quadratic polynomial CV " + quad_scores.to_s)
 ok = false if quad_scores.to_s != "\[1, 1, 1\]"
 ok = false if quad_pipe.fitted?
+quad_stump = DecisionTreeRegressor.new(1)
+quad_stump.fit(quad_x, quad_y)
+quad_boost = GradientBoostingRegressor.new(60, 1.to_f / 10.to_f, 2)
+quad_boost.fit(quad_x, quad_y)
+lines.push("quadratic stump/boost R2 " + quad_stump.score(quad_x, quad_y).to_s + "/" + quad_boost.score(quad_x, quad_y).to_s)
+ok = false if quad_boost.score(quad_x, quad_y) - quad_stump.score(quad_x, quad_y) < 1.to_f / 2.to_f
 
 # 3. Three well-separated classes. Stratified folds keep one point from
 # each class in every test fold; GaussianNB classifies all nine correctly.
@@ -59,6 +70,15 @@ class_scores = CrossValidation.cross_val_score(
 )
 lines.push("multiclass GaussianNB CV " + class_scores.to_s)
 ok = false if class_scores.to_s != "\[1, 1, 1\]"
+class_boost = GradientBoostingClassifier.new(20, 1.to_f / 10.to_f, 2)
+class_boost_scores = CrossValidation.cross_val_score(
+  class_boost, class_x, class_y, StratifiedKFold.new(3)
+)
+class_boost.fit(class_x, class_y)
+lines.push("multiclass GradientBoosting CV " + class_boost_scores.to_s)
+lines.push("multiclass GradientBoosting log loss " + class_boost.log_loss(class_x, class_y).to_s)
+ok = false if class_boost_scores.to_s != "\[1, 1, 1\]"
+ok = false if class_boost.log_loss(class_x, class_y) > 1.to_f / 10.to_f
 
 # 4. A balanced three-class linear problem. Multinomial LogisticRegression
 # fits through stable softmax, cross-validates perfectly, and assigns the

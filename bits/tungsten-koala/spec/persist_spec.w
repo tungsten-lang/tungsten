@@ -295,6 +295,26 @@ describe "Persist round-trip: DecisionTreeRegressor" ->
     expect(Fx.preds(back)).to eq(Fx.preds(model))
     expect(back.tree[:impurity] == model.tree[:impurity]).to be_true
 
+describe "Persist round-trip: GradientBoosting" ->
+  it "keeps every regression stage and exact prediction" ->
+    model = GradientBoostingRegressor.new(8, 1.to_f / 10.to_f, 2)
+    model.fit(Fx.frame, Fx.targets)
+    back = Fx.cycle(model)
+    expect(back.fitted?).to be_true
+    expect(back.trees.size).to eq(8)
+    expect(back.train_scores.to_s).to eq(model.train_scores.to_s)
+    expect(Fx.preds(back)).to eq(Fx.preds(model))
+
+  it "keeps classifier classes, Newton leaves, logits, and probabilities" ->
+    model = GradientBoostingClassifier.new(8, 1.to_f / 10.to_f, 2)
+    model.fit(Fx.frame, Fx.labels)
+    back = Fx.cycle(model)
+    expect(back.fitted?).to be_true
+    expect(back.classes.join(",")).to eq(model.classes.join(","))
+    expect(back.decision_function(Fx.queries).to_s).to eq(model.decision_function(Fx.queries).to_s)
+    expect(back.predict_proba(Fx.queries).to_s).to eq(model.predict_proba(Fx.queries).to_s)
+    expect(Fx.preds(back)).to eq(Fx.preds(model))
+
 describe "Persist round-trip: transformers" ->
   it "replays a Scaler's training mean and std" ->
     scale = Scaler.new(:standard)

@@ -13,6 +13,7 @@ import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.datasets import load_iris
+from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
 from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.metrics import brier_score_loss, log_loss, silhouette_score
@@ -22,7 +23,7 @@ from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, PolynomialFeatures, StandardScaler
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
 
 def emit(name: str, value: float) -> None:
@@ -40,6 +41,14 @@ poly = Pipeline(
 ).fit(xor_x, xor_y)
 emit("xor_raw_accuracy", raw.score(xor_x, xor_y))
 emit("xor_poly_accuracy", poly.score(xor_x, xor_y))
+xor_boost = GradientBoostingClassifier(
+    n_estimators=20,
+    learning_rate=0.1,
+    max_depth=2,
+    random_state=0,
+).fit(xor_x, xor_y)
+emit("xor_boost_accuracy", xor_boost.score(xor_x, xor_y))
+emit("xor_boost_log_loss", log_loss(xor_y, xor_boost.predict_proba(xor_x)))
 
 quad_x = np.arange(-7, 8, dtype=float).reshape(-1, 1)
 quad_y = 3 * quad_x[:, 0] ** 2 + 2 * quad_x[:, 0] + 1
@@ -53,6 +62,17 @@ emit(
     "quadratic_cv_mean",
     cross_val_score(quad, quad_x, quad_y, cv=KFold(3, shuffle=False)).mean(),
 )
+quadratic_stump = DecisionTreeRegressor(max_depth=1, random_state=0).fit(
+    quad_x, quad_y
+)
+quadratic_boost = GradientBoostingRegressor(
+    n_estimators=60,
+    learning_rate=0.1,
+    max_depth=2,
+    random_state=0,
+).fit(quad_x, quad_y)
+emit("quadratic_stump_r2", quadratic_stump.score(quad_x, quad_y))
+emit("quadratic_boost_r2", quadratic_boost.score(quad_x, quad_y))
 
 class_x = np.array(
     [
@@ -77,6 +97,30 @@ emit(
         class_y,
         cv=StratifiedKFold(3, shuffle=False),
     ).mean(),
+)
+emit(
+    "multiclass_boost_cv_mean",
+    cross_val_score(
+        GradientBoostingClassifier(
+            n_estimators=20,
+            learning_rate=0.1,
+            max_depth=2,
+            random_state=0,
+        ),
+        class_x,
+        class_y,
+        cv=StratifiedKFold(3, shuffle=False),
+    ).mean(),
+)
+class_boost = GradientBoostingClassifier(
+    n_estimators=20,
+    learning_rate=0.1,
+    max_depth=2,
+    random_state=0,
+).fit(class_x, class_y)
+emit(
+    "multiclass_boost_log_loss",
+    log_loss(class_y, class_boost.predict_proba(class_x)),
 )
 
 softmax_x = np.repeat(np.eye(3), 6, axis=0)

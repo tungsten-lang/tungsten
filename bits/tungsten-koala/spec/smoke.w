@@ -232,6 +232,40 @@ use support
     self.check("logreg multiclass predict", mlr.predict(mlrx).join(","), "a,a,b,b,c,c")
     self.check("logreg multiclass center proba", mlr.predict_proba([[0, 0, 0]])[0], "\[0.333333, 0.333333, 0.333333\]")
 
+    # --- GradientBoosting: sequential residual/Newton CART ensembles ---
+    gbx = [[0], [1], [10], [11]]
+    gby = [1, 1, 9, 9]
+    gbr = GradientBoostingRegressor.new(1, 1, 1)
+    self.check("gradient boost regressor fit", gbr.fit(gbx, gby) != nil, true)
+    self.check("gradient boost one stage", gbr.predict(gbx), "\[1, 1, 9, 9\]")
+    self.check("gradient boost regressor score", gbr.score(gbx, gby), 1)
+    self.check("gradient boost train mse", gbr.train_scores, "\[0\]")
+    self.check("gradient boost staged regression", gbr.staged_predict(gbx).size, 1)
+    gbq_x = [[0 - 4], [0 - 3], [0 - 2], [0 - 1], [0], [1], [2], [3], [4]]
+    gbq_y = [16, 9, 4, 1, 0, 1, 4, 9, 16]
+    gbq = GradientBoostingRegressor.new(20, 1.to_f / 10.to_f, 2)
+    gbq.fit(gbq_x, gbq_y)
+    self.check("gradient boost nonlinear r2", gbq.score(gbq_x, gbq_y) > 9.to_f / 10.to_f, true)
+    self.check("gradient boost loss falls", gbq.train_scores[19] < gbq.train_scores[0], true)
+    gbcx = [[0, 0], [0, 1], [1, 0], [1, 1], [8, 8], [8, 9], [9, 8], [9, 9]]
+    gbcy = [:cold, :cold, :cold, :cold, :hot, :hot, :hot, :hot]
+    gbc = GradientBoostingClassifier.new(10, 1.to_f / 10.to_f, 2)
+    self.check("gradient boost classifier fit", gbc.fit(gbcx, gbcy) != nil, true)
+    self.check("gradient boost classifier classes", gbc.classes.join(","), "cold,hot")
+    self.check("gradient boost classifier predict", gbc.predict([[0, 0], [9, 9]]).join(","), "cold,hot")
+    self.check("gradient boost classifier probabilities", Stats.sum(gbc.predict_proba([[0, 0]])[0]), 1)
+    self.check("gradient boost staged probabilities", gbc.staged_predict_proba([[0, 0]]).size, 10)
+    gbmx = [[0, 0], [0, 1], [1, 0], [10, 10], [10, 11], [11, 10], [20, 0], [20, 1], [21, 0]]
+    gbmy = [:a, :a, :a, :b, :b, :b, :c, :c, :c]
+    gbm = GradientBoostingClassifier.new(10, 1.to_f / 10.to_f, 2)
+    self.check("gradient boost multiclass fit", gbm.fit(gbmx, gbmy) != nil, true)
+    self.check("gradient boost multiclass stages", gbm.trees[0].size, 3)
+    self.check("gradient boost multiclass predict", gbm.predict(gbmx).join(","), gbmy.join(","))
+    self.check("gradient boost multiclass probability", Stats.sum(gbm.predict_proba([[10, 10]])[0]), 1)
+    gbc_back = Persist.loads(Persist.dumps(gbc))
+    self.check("gradient boost persists", gbc_back.predict_proba(gbcx).to_s, gbc.predict_proba(gbcx).to_s)
+    self.check("gradient boost nil one class", GradientBoostingClassifier.new(2).fit([[0], [1]], [:a, :a]) == nil, true)
+
     # --- GaussianNB (generative: closed-form Gaussian naive Bayes) ---
     # Two classes of two rows: means [2,3] / [12,13], population variances
     # all 1, priors 0.5. epsilon = 1e-9 * 26 (26 = the largest column

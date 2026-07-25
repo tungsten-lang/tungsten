@@ -10,6 +10,10 @@ poly = Pipeline.new([PolynomialFeatures.new(2), LogisticRegression.new(1, 2000)]
 poly.fit(xor_x, xor_y)
 << "xor_raw_accuracy," + raw.score(xor_x, xor_y).to_s
 << "xor_poly_accuracy," + poly.score(xor_x, xor_y).to_s
+xor_boost = GradientBoostingClassifier.new(20, 1.to_f / 10.to_f, 2)
+xor_boost.fit(xor_x, xor_y)
+<< "xor_boost_accuracy," + xor_boost.score(xor_x, xor_y).to_s
+<< "xor_boost_log_loss," + xor_boost.log_loss(xor_x, xor_y).to_s
 
 quad_x = [0 - 7, 0 - 6, 0 - 5, 0 - 4, 0 - 3, 0 - 2, 0 - 1, 0, 1, 2, 3, 4, 5, 6, 7]
 quad_y = []
@@ -17,6 +21,12 @@ quad_x.each -> (v)
   quad_y.push(3 * v * v + 2 * v + 1)
 quad = Pipeline.new([PolynomialFeatures.new(2), LinearRegression.new])
 << "quadratic_cv_mean," + CrossValidation.cross_val_mean(quad, quad_x, quad_y, 3).to_s
+quadratic_stump = DecisionTreeRegressor.new(1)
+quadratic_stump.fit(quad_x, quad_y)
+quadratic_boost = GradientBoostingRegressor.new(60, 1.to_f / 10.to_f, 2)
+quadratic_boost.fit(quad_x, quad_y)
+<< "quadratic_stump_r2," + quadratic_stump.score(quad_x, quad_y).to_s
+<< "quadratic_boost_r2," + quadratic_boost.score(quad_x, quad_y).to_s
 
 class_x = [[0, 0], [0, 1], [1, 0],
            [10, 10], [10, 11], [11, 10],
@@ -24,6 +34,10 @@ class_x = [[0, 0], [0, 1], [1, 0],
 class_y = [:a, :a, :a, :b, :b, :b, :c, :c, :c]
 nb = GaussianNB.new
 << "multiclass_nb_cv_mean," + CrossValidation.cross_val_mean(nb, class_x, class_y, StratifiedKFold.new(3)).to_s
+class_boost = GradientBoostingClassifier.new(20, 1.to_f / 10.to_f, 2)
+<< "multiclass_boost_cv_mean," + CrossValidation.cross_val_mean(class_boost, class_x, class_y, StratifiedKFold.new(3)).to_s
+class_boost.fit(class_x, class_y)
+<< "multiclass_boost_log_loss," + class_boost.log_loss(class_x, class_y).to_s
 
 softmax_x = []
 softmax_y = []

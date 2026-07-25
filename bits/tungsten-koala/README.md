@@ -215,6 +215,17 @@ rf.tree_count                        # => 50   trees that grew (rf.trees are the
 RandomForestRegressor.new(50, nil, nil, 1, 42)   # MSE trees; max_features defaults to :all
 RandomForestClassifier.new(1, :all, nil, 1, 0, nil, false)  # == the DecisionTree, node for node
 
+# Sequential ensembles — each shallow tree corrects the current residuals
+gbr = GradientBoostingRegressor.new(100, nil, 3, 1)
+gbr.fit(x_train, y_train)            # squared-error residual trees
+gbr.train_scores                     # training MSE after every stage
+gbr.staged_predict(x_test)           # prediction vector after each tree
+gbc = GradientBoostingClassifier.new(100, nil, 3, 1)
+gbc.fit(x_train, y_train)            # binary or multiclass Newton trees
+gbc.predict_proba(x_test)            # full softmax probability rows
+gbc.decision_function(x_test)        # binary logits or multiclass logit rows
+gbc.staged_predict_proba(x_test)     # probability matrix after each stage
+
 # ... or as a pipeline tail: transform features, then fit/predict
 pipe = Pipeline.new([[:scale, Scaler.new(:standard)], [:model, LinearRegression.new]])
 pipe.fit(df_features, y)             # nil (unfitted) on collinear features
@@ -331,7 +342,7 @@ algorithms — answers one declared interface, defined in
 | --- | --- | --- |
 | `Tunable` | `params` `with_params(overrides)` | Scaler, Imputer, Encoder, PCA (and every Estimable, which restates the pair) |
 | `Estimable` | `fitted?` `predict(x)` `supervised?` `supports_sample_weight?` `params` `with_params(overrides)` `estimator_name` | every estimator below, plus `Pipeline` |
-| `SupervisedEstimator` | `fit(x, y, sample_weight)` `score(x, y, sample_weight)` | LinearRegression, Lasso, ElasticNet, KNNClassifier, KNeighborsRegressor, LogisticRegression, GaussianNB, DecisionTreeClassifier, DecisionTreeRegressor, RandomForestClassifier, RandomForestRegressor, CalibratedClassifierCV |
+| `SupervisedEstimator` | `fit(x, y, sample_weight)` `score(x, y, sample_weight)` | LinearRegression, Lasso, ElasticNet, KNNClassifier, KNeighborsRegressor, LogisticRegression, GaussianNB, DecisionTreeClassifier, DecisionTreeRegressor, RandomForestClassifier, RandomForestRegressor, GradientBoostingClassifier, GradientBoostingRegressor, CalibratedClassifierCV |
 | `UnsupervisedEstimator` | `fit(x, sample_weight)` `score(x, sample_weight)` | KMeans, DBSCAN |
 
 `Tunable` is the hyperparameter half on its own — what a search needs and
@@ -365,7 +376,8 @@ answers every contract method.
 guess.
 
 `params` reports only the CONSTRUCTOR knobs a search varies (`alpha`;
-`k`; `learning_rate` / `epochs`; `var_smoothing`; `max_depth` /
+`k`; `learning_rate` / `epochs`; `var_smoothing`; `n_estimators` /
+`learning_rate` / `max_depth` /
 `min_samples_split` / `min_samples_leaf` / `criterion`; `k` / `seed` /
 `max_iter`) and never learned state — coefficients, centroids and the
 fitted tree stay out of the search space, before and after a fit. `with_params` **clones**: it
@@ -1140,13 +1152,14 @@ end-to-end problems: nonlinear XOR, exact quadratic regression under CV,
 three-class GaussianNB and multinomial LogisticRegression under
 stratified CV, balanced multiclass probability checks, heterogeneous
 numeric/categorical column composition, inverse-distance KNN
-classification/regression, permutation importance over a mixed-column
-Pipeline, a cross-fitted calibrator wrapped around a preprocessing Pipeline,
-and KMeans evaluated by silhouette rather than its training objective.
+classification/regression, binary and multiclass gradient boosting,
+permutation importance over a mixed-column Pipeline, a cross-fitted
+calibrator wrapped around a preprocessing Pipeline, and KMeans evaluated by
+silhouette rather than its training objective.
 
 The matching `benchmarks/reference_koala.w` and
 `benchmarks/reference_sklearn.py` use identical fixtures. Against
-scikit-learn 1.9.0, all twenty-four numerical gates and six capability /
+scikit-learn 1.9.0, all thirty numerical gates and eight capability /
 quality gates pass: raw XOR accuracy
 0.5, polynomial XOR accuracy 1, quadratic mean CV R² 1, multiclass
 GaussianNB and LogisticRegression mean CV accuracy 1, balanced-center
@@ -1161,7 +1174,9 @@ zero importance while permuting city costs 0.4222 accuracy in Koala and
 Pipeline learned the intended feature. On the KNN fixture,
 inverse-distance weighting improves held-out accuracy from 0.5 to 1.0;
 Koala matches sklearn's exact `12/19` class probability, `31/19`
-regression prediction, and duplicate-exact-match mean.
+regression prediction, and duplicate-exact-match mean. Gradient boosting
+matches sklearn's XOR and multiclass log losses to the last displayed digit
+and improves quadratic R² by 0.5688 over a lone stump in both.
 
 On that held-out calibration problem, Koala's sigmoid log loss is
 0.3533 against sklearn's 0.3463, isotonic log loss is 0.2513 against
@@ -1404,6 +1419,72 @@ unknown `criterion` or an unknown `max_features` make `fit` return nil
 rather than silently fall back. They round-trip through `with_params`, so
 `GridSearch` tunes them and a `Pipeline` exposes them as
 `"forest.n_estimators"`.
+
+## Gradient boosting
+
+`GradientBoostingRegressor` and `GradientBoostingClassifier` are the
+sequential counterpart to random forests. A forest grows independent,
+deliberately decorrelated trees and averages away variance; boosting grows
+tree `m` against what stages `0...m-1` still get wrong. The additive model is:
+
+```
+prediction(x) = initial + learning_rate * sum_m tree_m(x)
+```
+
+For squared-error regression, `initial_prediction` is the weighted target
+mean, each stage fits `y - current_prediction`, and each leaf's weighted
+mean residual is the exact least-squares line-search step. One unshrunk
+stage (`n_estimators = 1`, `learning_rate = 1`) therefore predicts exactly
+like the corresponding `DecisionTreeRegressor`; the spec pins that identity
+before testing larger ensembles.
+
+Classification boosts logits under binomial or multinomial cross-entropy.
+The initial binary logit is the weighted class-prior log odds; multiclass
+starts from log priors. CART first partitions each negative-gradient column
+`one_hot(y) - probability`, then each terminal region is replaced by
+Friedman's Newton update. Binary fits one tree per stage. Multiclass fits one
+tree per class per stage, including the `(K - 1) / K` correction, and
+softmax couples their logits into normalized probabilities.
+
+```tungsten
+reg = GradientBoostingRegressor.new(60, 1.to_f / 10.to_f, 2, 1)
+reg.fit(x, y)
+reg.predict(x_test)
+reg.train_scores                 # weighted MSE after each stage
+
+clf = GradientBoostingClassifier.new(20, 1.to_f / 10.to_f, 2, 1)
+clf.fit(x, labels)
+clf.classes                      # first-seen opaque labels
+clf.predict_proba(x_test)        # [row][class], classes order
+clf.predict_proba(x_test, label) # one flat class column
+clf.decision_function(x_test)    # raw binary/multiclass scores
+clf.train_scores                 # weighted cross-entropy after each stage
+clf.staged_decision_function(x_test)
+clf.staged_predict_proba(x_test) # final element equals predict_proba
+clf.staged_predict(x_test)
+```
+
+Constructor order is `n_estimators, learning_rate, max_depth,
+min_samples_leaf`; defaults are `100, 0.1, 3, 1`. The learning rate is a
+Float, so callers derive fractions with `.to_f` as elsewhere in Koala.
+All four knobs are ordinary `params`: Pipeline exposes them by dotted name,
+GridSearch varies them, and `with_params` returns a fresh unfitted ensemble.
+There is intentionally no randomness or subsampling yet, so data plus
+hyperparameters determine every threshold, Newton leaf, probability and
+Persist payload identically on both engines.
+
+Weights affect the initial mean/prior, every CART split, every residual leaf,
+every Newton numerator/denominator, and every staged loss; integer weights
+match row duplication exactly. Empty/ragged/nonnumeric/misaligned input,
+fewer than two classifier classes, invalid weights, `n_estimators < 1`,
+non-positive `learning_rate`, negative depth, or an invalid leaf floor
+returns nil and leaves the model unfitted.
+
+The live sklearn differential is deliberately numerical, not just an
+accuracy tie. On the same fixtures, Koala and sklearn 1.9 produce identical
+binary XOR log loss `0.067758207545402294`; multiclass log loss differs by
+`2.9e-16`; and 60 depth-2 stages lift quadratic training R² from a stump's
+`0.43080684` to `0.99959672`, differing by `3.3e-16`.
 
 ## Principal component analysis
 

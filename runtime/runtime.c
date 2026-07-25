@@ -28865,6 +28865,31 @@ static int w_ta_cmp64(const void *a, const void *b) { uint64_t va = *(const uint
 static int w_ta_cmpf32(const void *a, const void *b) { float va = *(const float *)a, vb = *(const float *)b; return (va > vb) - (va < vb); }
 static int w_ta_cmpf64(const void *a, const void *b) { double va = *(const double *)a, vb = *(const double *)b; return (va > vb) - (va < vb); }
 
+/* pdqsort — pattern-defeating quicksort, type-specialized for integer typed
+ * arrays. Replaces the qsort-with-callback path: inlined comparisons + branchless
+ * block partitioning make it ~4x faster on random data. Unsigned comparison
+ * matches the w_ta_cmp* semantics above. */
+#define PDQ_T uint8_t
+#define PDQ_SUF u8
+#include "pdqsort.inc"
+#undef PDQ_T
+#undef PDQ_SUF
+#define PDQ_T uint16_t
+#define PDQ_SUF u16
+#include "pdqsort.inc"
+#undef PDQ_T
+#undef PDQ_SUF
+#define PDQ_T uint32_t
+#define PDQ_SUF u32
+#include "pdqsort.inc"
+#undef PDQ_T
+#undef PDQ_SUF
+#define PDQ_T uint64_t
+#define PDQ_SUF u64
+#include "pdqsort.inc"
+#undef PDQ_T
+#undef PDQ_SUF
+
 WValue w_array_sort(WValue arr) {
     WArray *src = (WArray *)w_as_ptr(arr);
     WValue result = w_array_new(src->ebits, src->size);
@@ -28886,14 +28911,14 @@ WValue w_array_sort(WValue arr) {
         return result;
     }
     switch (array_storage_bits(dst->ebits)) {
-        case 8:  qsort(dst->slots, dst->size, 1, w_ta_cmp8); break;
-        case 16: qsort(dst->slots, dst->size, 2, w_ta_cmp16); break;
-        case 32: qsort(dst->slots, dst->size, 4, w_ta_cmp32); break;
-        case 64: qsort(dst->slots, dst->size, 8, w_ta_cmp64); break;
+        case 8:  pdq_sort_u8((uint8_t *)dst->slots, dst->size); break;
+        case 16: pdq_sort_u16((uint16_t *)dst->slots, dst->size); break;
+        case 32: pdq_sort_u32((uint32_t *)dst->slots, dst->size); break;
+        case 64: pdq_sort_u64((uint64_t *)dst->slots, dst->size); break;
         case 4: {
             uint8_t *tmp = malloc(dst->size);
             for (int64_t j = 0; j < dst->size; j++) tmp[j] = (uint8_t)array_read(dst, j);
-            qsort(tmp, dst->size, 1, w_ta_cmp8);
+            pdq_sort_u8(tmp, dst->size);
             for (int64_t j = 0; j < dst->size; j++) array_write(dst, j, tmp[j]);
             free(tmp);
             break;

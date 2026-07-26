@@ -1418,6 +1418,7 @@ WValue w_array_csort_range(WValue arr, WValue lo, WValue hi);
 WValue w_array_tsort(WValue arr);
 WValue w_array_skasort(WValue arr);
 WValue w_array_wolfsort(WValue arr);
+WValue w_array_ipnsort(WValue arr);
 WValue w_array_shuffle(WValue arr);
 WValue w_array_min_signed(WValue arr);
 WValue w_array_min_unsigned(WValue arr);

@@ -279,12 +279,15 @@
   #   tsort    — timsort: stable, adaptive (near-linear on already-sorted data)
   #   skasort  — in-place MSD byte-radix (american-flag sort)
   #   wolfsort — distribution + pdqsort hybrid
+  #   ipnsort  — instruction-parallel network sort (Rust sort_unstable's algorithm)
   -> tsort
     ccall("w_array_tsort", self)
   -> skasort
     ccall("w_array_skasort", self)
   -> wolfsort
     ccall("w_array_wolfsort", self)
+  -> ipnsort
+    ccall("w_array_ipnsort", self)
 
   # Keep the separator overload before the zero-argument overload. Runtime
   # dispatch selects exact arity first and otherwise falls back to the first

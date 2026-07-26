@@ -1409,6 +1409,8 @@ use target
       return ccall("w_array_skasort", args[1])
     when "w_array_wolfsort"
       return ccall("w_array_wolfsort", args[1])
+    when "w_array_ipnsort"
+      return ccall("w_array_ipnsort", args[1])
 
     raise "Unsupported ccall '[cname]' in interpreter"
 

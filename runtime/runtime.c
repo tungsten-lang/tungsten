@@ -28997,6 +28997,31 @@ static int w_ta_cmpf64(const void *a, const void *b) { double va = *(const doubl
 #undef PDQ_T
 #undef PDQ_SUF
 
+/* ipnsort — instruction-parallel network sort (the algorithm behind Rust's
+ * sort_unstable), type-specialized like pdqsort above. Exposed as Array#ipnsort
+ * for callers who want it explicitly; faster than pdqsort on random data via a
+ * branchless cyclic Lomuto partition + Batcher-network small-sort. */
+#define IPN_T uint8_t
+#define IPN_SUF u8
+#include "ipnsort.inc"
+#undef IPN_T
+#undef IPN_SUF
+#define IPN_T uint16_t
+#define IPN_SUF u16
+#include "ipnsort.inc"
+#undef IPN_T
+#undef IPN_SUF
+#define IPN_T uint32_t
+#define IPN_SUF u32
+#include "ipnsort.inc"
+#undef IPN_T
+#undef IPN_SUF
+#define IPN_T uint64_t
+#define IPN_SUF u64
+#include "ipnsort.inc"
+#undef IPN_T
+#undef IPN_SUF
+
 /* LSD radix — O(n), the fastest sort for large integer arrays. Array#sort
  * routes here above RADIX_THRESHOLD elements; below it, pdqsort's lower
  * constant factor + pattern-adaptivity win. */
@@ -29058,6 +29083,31 @@ WValue w_array_sort(WValue arr) {
             free(tmp);
             break;
         }
+    }
+    return result;
+}
+
+/* Array#ipnsort — explicit instruction-parallel network sort. Same integer
+ * typed-array semantics as w_array_sort's pdqsort path (unsigned compare,
+ * per-width specialization), but always ipnsort — no radix crossover. w64,
+ * float, and 4-bit arrays fall back to w_array_sort, which owns those tiers. */
+WValue w_array_ipnsort(WValue arr) {
+    WArray *src = (WArray *)w_as_ptr(arr);
+    if (src->ebits == 65 || array_is_float(src) || array_storage_bits(src->ebits) == 4) {
+        return w_array_sort(arr);
+    }
+    WValue result = w_array_new(src->ebits, src->size);
+    WArray *dst = (WArray *)w_as_ptr(result);
+    int64_t nbytes = array_byte_size(src->ebits, src->size);
+    int64_t src_off = array_byte_size(src->ebits, src->start);
+    memcpy(dst->slots, (uint8_t *)src->slots + src_off, nbytes);
+    dst->size = src->size;
+    int64_t sz = dst->size;
+    switch (array_storage_bits(dst->ebits)) {
+        case 8:  ipn_sort_u8((uint8_t *)dst->slots, sz);   break;
+        case 16: ipn_sort_u16((uint16_t *)dst->slots, sz); break;
+        case 32: ipn_sort_u32((uint32_t *)dst->slots, sz); break;
+        case 64: ipn_sort_u64((uint64_t *)dst->slots, sz); break;
     }
     return result;
 }

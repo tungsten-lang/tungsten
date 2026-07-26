@@ -181,7 +181,10 @@ describe "Wassat preprocessing" ->
       good.each -> (t)
         a = wassat_parse_cnf(t)
         z = write_file("/tmp/npar_g[gi].cnf", t)
-        ok = system(bin + " /tmp/npar_g[gi].cnf --fast > /tmp/npar_g[gi].out 2>&1")
+        # An accepted formula exits with a SAT Competition verdict code (10
+        # SAT / 20 UNSAT) or 0 for UNKNOWN; only a REJECTED one exits 1, so
+        # "was it parsed" is "did it avoid the error exit", not "was it 0".
+        ok = system("(" + bin + " /tmp/npar_g[gi].cnf --fast > /tmp/npar_g[gi].out 2>&1); c=$?; test $c -eq 0 -o $c -eq 10 -o $c -eq 20")
         out = read_file("/tmp/npar_g[gi].out")
         expect(ok).to eq(true)
         expect(out.index("s ") != nil).to eq(true)

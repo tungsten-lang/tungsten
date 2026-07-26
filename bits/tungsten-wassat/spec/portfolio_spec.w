@@ -29,11 +29,22 @@ PORT_SAT = "p cnf 3 3\n1 0\n-1 2 0\n-2 3 0\n"
     mask += 1
   lines.join("\n") + "\n"
 
+# SAT Competition exit codes: 10 = SATISFIABLE, 20 = UNSATISFIABLE, 0 =
+# anything else. `system` collapses the wait status to "was it zero", which
+# cannot tell 10 from 20 from a crash, so the code is round-tripped through
+# the shell that ran the command.
+-> port_exit_code(cmd)
+  code_file = "/tmp/pspec_exit_code"
+  z = system("(" + cmd + "); echo $? > " + code_file)
+  text = read_file(code_file)
+  text == nil ? 0 - 1 : text.strip.to_i
+
+# Runs the portfolio over `cnf_path` and returns its exit code.
 -> port_run(cnf_path, proof_path, dir, suffix = "", timeout_ms = 30000)
   cmd = PORT_BIN + " portfolio " + cnf_path
   cmd = cmd + " --proof " + proof_path unless proof_path == nil
   cmd = cmd + " --dir " + dir + " --timeout-ms [timeout_ms] " + suffix + " > " + dir + ".out 2>&1"
-  system(cmd)
+  port_exit_code(cmd)
 
 describe "Wassat portfolio (process race)" ->
 
@@ -42,7 +53,7 @@ describe "Wassat portfolio (process race)" ->
       cnf_path = "/tmp/pspec_search_unsat.cnf"
       z = write_file(cnf_path, port_search_unsat)
       ok = port_run(cnf_path, "/tmp/pspec_search.wrat", "/tmp/pspec_race1")
-      expect(ok).to eq(true)
+      expect(ok).to eq(20)
       out = read_file("/tmp/pspec_race1.out")
       expect(out.index("s UNSATISFIABLE") != nil).to eq(true)
       expect(out.index("winner: preprocess") == nil).to eq(true)
@@ -65,7 +76,7 @@ describe "Wassat portfolio (process race)" ->
       z = write_file(cnf_path, PORT_SAT)
       z = write_file(proof_path, "stale proof\n")
       ok = port_run(cnf_path, proof_path, "/tmp/pspec_race2")
-      expect(ok).to eq(true)
+      expect(ok).to eq(10)
       out = read_file("/tmp/pspec_race2.out")
       expect(out.index("s SATISFIABLE") != nil).to eq(true)
       expect(read_file(proof_path)).to eq(nil)
@@ -82,8 +93,8 @@ describe "Wassat portfolio (process race)" ->
     it "answers UNSAT through the thread race with sharing stats" ->
       cnf_path = "/tmp/pspec_search_unsat.cnf"
       z = write_file(cnf_path, port_search_unsat)
-      ok = system(PORT_BIN + " portfolio " + cnf_path + " --fast --threads 3 > /tmp/pspec_fast1.out 2>&1")
-      expect(ok).to eq(true)
+      ok = port_exit_code(PORT_BIN + " portfolio " + cnf_path + " --fast --threads 3 > /tmp/pspec_fast1.out 2>&1")
+      expect(ok).to eq(20)
       out = read_file("/tmp/pspec_fast1.out")
       expect(out.index("s UNSATISFIABLE") != nil).to eq(true)
       expect(out.index("exported=") != nil).to eq(true)
@@ -91,8 +102,8 @@ describe "Wassat portfolio (process race)" ->
     it "answers SAT with a model verified against the original formula" ->
       cnf_path = "/tmp/pspec_fast_sat.cnf"
       z = write_file(cnf_path, PORT_SAT)
-      ok = system(PORT_BIN + " portfolio " + cnf_path + " --fast --threads 3 > /tmp/pspec_fast2.out 2>&1")
-      expect(ok).to eq(true)
+      ok = port_exit_code(PORT_BIN + " portfolio " + cnf_path + " --fast --threads 3 > /tmp/pspec_fast2.out 2>&1")
+      expect(ok).to eq(10)
       out = read_file("/tmp/pspec_fast2.out")
       expect(out.index("s SATISFIABLE") != nil).to eq(true)
       model = []
@@ -113,7 +124,7 @@ describe "Wassat portfolio (process race)" ->
     it "answers a preprocessing-refutable formula without spawning arms" ->
       z = write_file("/tmp/pspec_triv.cnf", "p cnf 1 2\n1 0\n-1 0\n")
       ok = port_run("/tmp/pspec_triv.cnf", "/tmp/pspec_triv.wrat", "/tmp/pspec_race3")
-      expect(ok).to eq(true)
+      expect(ok).to eq(20)
       out = read_file("/tmp/pspec_race3.out")
       expect(out.index("s UNSATISFIABLE") != nil).to eq(true)
       expect(out.index("winner: preprocess") != nil).to eq(true)
@@ -127,7 +138,8 @@ describe "Wassat portfolio (process race)" ->
       z = write_file(cnf_path, port_search_unsat)
       z = write_file(proof_path, "stale\n")
       ok = port_run(cnf_path, proof_path, "/tmp/pspec_race_deadline", "", 1)
-      expect(ok).to eq(true)
+      # a deadline stop is UNKNOWN, which is exit 0 and not a verdict code
+      expect(ok).to eq(0)
       out = read_file("/tmp/pspec_race_deadline.out")
       expect(out.index("s UNKNOWN") != nil).to eq(true)
       expect(out.index("deadline") != nil).to eq(true)

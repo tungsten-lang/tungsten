@@ -34,6 +34,14 @@ use ../../tungsten-wrat/lib/wrat
   bin = env("WASSAT_TEST_BIN")
   bin == nil || bin == "" ? "bits/tungsten-wassat/bin/wassat" : bin
 
+# SAT Competition exit codes: 10 = SATISFIABLE, 20 = UNSATISFIABLE, 0 =
+# anything else. `system` collapses the wait status to "was it zero", which
+# cannot tell 10 from 20 from a crash, so the expected code is asserted by
+# the shell that ran the command -- a stricter check than the old
+# `system(...) == true`, and the contract every competition harness reads.
+-> cli_exits(cmd, code)
+  system("(" + cmd + "); test $? -eq [code]")
+
 describe "Tungsten Wassat CLI" ->
   context "the mode contract" ->
     it "refuses to run without an explicit mode" ->
@@ -136,7 +144,7 @@ describe "Tungsten Wassat CLI" ->
       proof = "/tmp/wassat-cli-atomic.wrat"
       z = write_file(sat_cnf, "p cnf 1 1\n1 0\n")
       z = write_file(proof, "stale\n")
-      ok = system(bin + " " + sat_cnf + " --proof " + proof + " > /tmp/wassat-cli-atomic-sat.out 2>&1")
+      ok = cli_exits(bin + " " + sat_cnf + " --proof " + proof + " > /tmp/wassat-cli-atomic-sat.out 2>&1", 10)
       expect(ok).to eq(true)
       expect(read_file(proof)).to eq(nil)
 
@@ -168,10 +176,16 @@ describe "Tungsten Wassat CLI" ->
       z = write_file(input, "p cnf 2 1\n1 2 0\n")
       ok = system(bin + " sls " + input + " --flips 1 --walkers 8 > /tmp/wassat-cli-sls-bad.out 2>&1")
       expect(ok).to eq(false)
-      ok = system(bin + " sls " + input + " --gpu --flips 0 --walkers 8 --noise 48 > /tmp/wassat-cli-sls-zero.out 2>&1")
+      # a flipless GPU run answers UNKNOWN, which is exit 0 -- local search
+      # can never answer UNSAT, so 20 is unreachable here
+      ok = cli_exits(bin + " sls " + input + " --gpu --flips 0 --walkers 8 --noise 48 > /tmp/wassat-cli-sls-zero.out 2>&1", 0)
       expect(ok).to eq(true)
       out = read_file("/tmp/wassat-cli-sls-zero.out")
       expect(out.index("flips=0") != nil).to eq(true)
+      # ... and a model from the CPU walker is exit 10 like every other engine's
+      ok = cli_exits(bin + " sls " + input + " --flips 100000 > /tmp/wassat-cli-sls-sat.out 2>&1", 10)
+      expect(ok).to eq(true)
+      expect(read_file("/tmp/wassat-cli-sls-sat.out").index("s SATISFIABLE") != nil).to eq(true)
 
   # End-to-end smoke tests over the compiled binary: the native parser,
   # streamed proofs, and exit codes only exist in a compiled program.
@@ -191,7 +205,7 @@ describe "Tungsten Wassat CLI" ->
       sat = "/tmp/wassat-cli-smoke-sat.cnf"
       z = write_file(sat, "p cnf 3 2\n1 -2 0\n2 3 0\n")
       expect(z).to eq(true)
-      expect(system(bin + " " + sat + " --fast > /tmp/wassat-cli-smoke-sat.out 2>&1")).to eq(true)
+      expect(cli_exits(bin + " " + sat + " --fast > /tmp/wassat-cli-smoke-sat.out 2>&1", 10)).to eq(true)
       out = read_file("/tmp/wassat-cli-smoke-sat.out")
       expect(out.index("s SATISFIABLE") != nil).to eq(true)
       expect(out.index("v ") != nil).to eq(true)
@@ -202,7 +216,7 @@ describe "Tungsten Wassat CLI" ->
       cnf = "/tmp/wassat-cli-smoke-unsat.cnf"
       proof = "/tmp/wassat-cli-smoke.wrat"
       expect(write_file(cnf, text)).to eq(true)
-      expect(system(bin + " " + cnf + " --proof " + proof + " > /tmp/wassat-cli-smoke-unsat.out 2>&1")).to eq(true)
+      expect(cli_exits(bin + " " + cnf + " --proof " + proof + " > /tmp/wassat-cli-smoke-unsat.out 2>&1", 20)).to eq(true)
       out = read_file("/tmp/wassat-cli-smoke-unsat.out")
       expect(out.index("s UNSATISFIABLE") != nil).to eq(true)
       check = wrat_verify(text, read_file(proof))
@@ -214,7 +228,7 @@ describe "Tungsten Wassat CLI" ->
       cnf = "/tmp/wassat-cli-smoke-drat.cnf"
       proof = "/tmp/wassat-cli-smoke.drat"
       expect(write_file(cnf, text)).to eq(true)
-      expect(system(bin + " " + cnf + " --drat " + proof + " > /tmp/wassat-cli-smoke-drat.out 2>&1")).to eq(true)
+      expect(cli_exits(bin + " " + cnf + " --drat " + proof + " > /tmp/wassat-cli-smoke-drat.out 2>&1", 20)).to eq(true)
       out = read_file("/tmp/wassat-cli-smoke-drat.out")
       expect(out.index("s UNSATISFIABLE") != nil).to eq(true)
       check = wrat_verify(text, read_file(proof))
@@ -226,7 +240,7 @@ describe "Tungsten Wassat CLI" ->
       cnf = "/tmp/wassat-cli-smoke-stdout.cnf"
       expect(write_file(cnf, text)).to eq(true)
       # verdict + comments go to stderr in quiet mode; the proof is on stdout
-      expect(system(bin + " " + cnf + " --proof - > /tmp/wassat-cli-stdout.proof 2>/dev/null")).to eq(true)
+      expect(cli_exits(bin + " " + cnf + " --proof - > /tmp/wassat-cli-stdout.proof 2>/dev/null", 20)).to eq(true)
       proof_text = read_file("/tmp/wassat-cli-stdout.proof")
       expect(proof_text != nil && proof_text != "").to eq(true)
       check = wrat_verify(text, proof_text)
@@ -252,16 +266,17 @@ describe "Tungsten Wassat CLI" ->
       cnf = "/tmp/wassat-cli-budget.cnf"
       expect(write_file(cnf, text)).to eq(true)
 
-      expect(system(bin + " " + cnf + " --fast --conflicts 0 > /tmp/wassat-cli-budget0.out 2>&1")).to eq(true)
+      expect(cli_exits(bin + " " + cnf + " --fast --conflicts 0 > /tmp/wassat-cli-budget0.out 2>&1", 20)).to eq(true)
       expect(read_file("/tmp/wassat-cli-budget0.out").index("s UNSATISFIABLE") != nil).to eq(true)
 
-      expect(system(bin + " " + cnf + " --fast --conflicts 1 > /tmp/wassat-cli-budget1.out 2>&1")).to eq(true)
+      # a bounded run that stops UNKNOWN is exit 0, not a verdict code
+      expect(cli_exits(bin + " " + cnf + " --fast --conflicts 1 > /tmp/wassat-cli-budget1.out 2>&1", 0)).to eq(true)
       out1 = read_file("/tmp/wassat-cli-budget1.out")
       expect(out1.index("s UNKNOWN") != nil).to eq(true)
       # aggregate conflicts reported must not exceed the cap of 1
       expect(out1.index("c conflicts: 1,") != nil || out1.index("c conflicts: 0,") != nil).to eq(true)
 
-      expect(system(bin + " " + cnf + " --fast --conflicts 2 > /tmp/wassat-cli-budget2.out 2>&1")).to eq(true)
+      expect(cli_exits(bin + " " + cnf + " --fast --conflicts 2 > /tmp/wassat-cli-budget2.out 2>&1", 0)).to eq(true)
       out2 = read_file("/tmp/wassat-cli-budget2.out")
       expect(out2.index("s UNKNOWN") != nil).to eq(true)
       expect(out2.index("c conflicts: 3,") == nil).to eq(true)

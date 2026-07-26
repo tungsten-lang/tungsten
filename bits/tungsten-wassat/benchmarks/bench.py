@@ -130,8 +130,10 @@ if WRAT is not None:
             timeout=max(TIMEOUT, 120),
             check=False,
         )
+        # 20 is the SAT-competition exit code for UNSATISFIABLE, and the only
+        # status a successful refutation may report here.
         produced_unsat = "s UNSATISFIABLE" in generated.stdout
-        if generated.returncode != 0 or not produced_unsat or not wrat.is_file() or not drat.is_file():
+        if generated.returncode != 20 or not produced_unsat or not wrat.is_file() or not drat.is_file():
             print(f"{name:<12}{'generation failed':>24}")
             failures += 1
             continue

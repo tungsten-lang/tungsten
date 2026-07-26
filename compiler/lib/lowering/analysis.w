@@ -490,6 +490,54 @@
     visit_promote_node(nodes[i], records, declared_types)
     i += 1
 
+# A `recv.each { … }` (and find/detect/all?/any?/none?) whose receiver is a range,
+# an int (`n.each` → `0...n`), or an array/typed-array is lowered as a frame-local
+# INLINED loop — no closure allocation, the block body runs in the enclosing
+# scope. So an int accumulator mutated inside is safe to raw-promote, exactly like
+# a `while` body — unlike a genuine closure (a stored/passed block, or map/reduce's
+# closure-arg form), whose captured slots must stay boxed. This returns the block
+# param's element type (so `acc += i` is int-shaped and promotes) for those
+# provably-inlined int-yielding iterators, and nil otherwise (→ the caller
+# bulk-escapes the block, unchanged). Float typed-arrays return :f64 and poly
+# arrays return nil-element (param left untyped), so their accumulators stay boxed
+# via int_shaped_node?'s machine-int-only rule — the fix can't corrupt them. The
+# receiver-type gate mirrors the lowering's inline condition (method_call.w), so
+# we never recurse into a real closure.
+# Returns [inlined?, elem_type_or_nil].
+-> inlined_iterator_elem_type(node, declared_types)
+  if node.receiver == nil
+    return [false, nil]
+  # Scoped to `.each` on an integer RANGE (the `(0..n).each` / `n.each` counting
+  # loop) — the provably-safe, primary case. Array `.each` is deliberately
+  # EXCLUDED: its inline path owns per-iteration `## recycle` lexical scopes that
+  # the old bulk-escape kept intact, and recursing there segfaulted the recycle
+  # validation. Range `.each` has no such scope interaction, so int accumulators
+  # promote cleanly. Only `each` (not find/all?/… — those had no measured need
+  # and add control-flow surface) to keep the change minimal.
+  if node.name != "each"
+    return [false, nil]
+  rk = ast_kind(node.receiver)
+  # range literal, int literal, or integer-like var (`n.each` → `(0...n).each`)
+  if rk == :range || rk == :int
+    return [true, :i64]
+  if rk == :var && is_integer_like_type(declared_types[node.receiver.name])
+    return [true, :i64]
+  [false, nil]
+
+# The block param name (explicit `-> (x)` first param), or nil.
+-> iterator_block_param_name(block)
+  if block == nil
+    return nil
+  params = block.params
+  if params == nil || params.size() == 0
+    return nil
+  p = params[0]
+  if is_ast_node?(p) && p.name != nil
+    return p.name
+  if type(p) == "String"
+    return p
+  nil
+
 -> visit_promote_node(node, records, declared_types)
   if node == nil
     return nil
@@ -573,7 +621,33 @@
         visit_promote_node(node.args[i], records, declared_types)
         i += 1
     if node.block != nil
-      mark_subtree_escape(node.block, records)
+      inl = inlined_iterator_elem_type(node, declared_types)
+      if inl[0] == true
+        # Provably-inlined loop iterator: recurse into the block body (like a
+        # `while` body) instead of bulk-escaping, so int accumulators promote.
+        # Type the block param to the element type only when it is provably
+        # integer — a nil or float element leaves the param untyped/float, and
+        # int_shaped_node?'s machine-int-only rule then keeps the accumulator
+        # boxed. Real escapes INSIDE the block (return, escaping call arg, a
+        # nested closure) are still caught by visit_promote_list's contextual
+        # walk. Param typing is applied to `declared_types` and restored after
+        # (it is a loop-local element binding, not an outer fact).
+        pname = iterator_block_param_name(node.block)
+        elem_t = inl[1]
+        had_key = false
+        old_val = nil
+        if pname != nil && elem_t != nil
+          had_key = declared_types.has_key?(pname)
+          old_val = declared_types[pname]
+          declared_types[pname] = elem_t
+        visit_promote_list(node.block.body, records, declared_types)
+        if pname != nil && elem_t != nil
+          if had_key
+            declared_types[pname] = old_val
+          else
+            declared_types.delete(pname)
+      else
+        mark_subtree_escape(node.block, records)
     return nil
 
   when :return, :recase

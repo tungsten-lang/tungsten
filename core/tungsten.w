@@ -72,6 +72,7 @@
   auto :System,       "system"
   auto :Thread,       "thread"
   auto :Token,        "token"
+  auto :Tuple,        "tuple"
   auto :UUID,         "uuid"
   auto :Value,        "value"
   auto :Vector,       "vector"

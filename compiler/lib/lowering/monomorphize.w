@@ -1202,6 +1202,89 @@
     return repl + rest
   s
 
+# Fold a product of factors (`M * N`, `8`, `N`) to an integer, resolving
+# const-int param names via int_map. Returns nil if any factor is unresolved
+# (leave the size symbolic rather than guess).
+-> fold_product(s, int_map)
+  if s == ""
+    return nil
+  factors = s.split("*")
+  result = 1
+  fi = 0
+  while fi < factors.size()
+    f = factors[fi]
+    v = nil
+    if numeric_str?(f)
+      v = f.to_i()
+    else
+      v = int_map[f]
+    if v == nil
+      return nil
+    result = result * v
+    fi += 1
+  result
+
+# Fold a `- data` array-size expression (`N`, `M * N`, `M*N+1`) to an integer
+# after const-int substitution. Sum-of-products with + and - (no parens — data
+# block sizes don't use them; `*` binds tighter via fold_product). Returns nil
+# if unfoldable.
+-> fold_size_expr(body, int_map)
+  clean = ""
+  i = 0
+  while i < body.size()
+    c = body[i]
+    if c != " "
+      clean = clean + c
+    i += 1
+  plus_parts = clean.split("+")
+  total = 0
+  pi = 0
+  while pi < plus_parts.size()
+    sub_parts = plus_parts[pi].split("-")
+    si = 0
+    while si < sub_parts.size()
+      prod = fold_product(sub_parts[si], int_map)
+      if prod == nil
+        return nil
+      if si == 0
+        total = total + prod
+      else
+        total = total - prod
+      si += 1
+    pi += 1
+  total
+
+# Substitute a `- data` field type string: head via the type mapping
+# (`T` → `i32`) and any array-size bracket via const-int folding
+# (`T[N]` → `i32[8]`, `T[M*N]` → `i32[9]`). Downstream type_size needs a
+# literal numeric bracket, so an unfoldable size is left as-is (best effort).
+-> subst_field_type_string(s, mapping, int_map)
+  if s == nil
+    return nil
+  lbr = "\["
+  rbr = "\]"
+  bracket = s.index(lbr)
+  if bracket == nil
+    repl = mapping[s]
+    if repl != nil
+      return repl
+    return s
+  head = s.slice(0, bracket)
+  rbr_idx = s.index(rbr)
+  new_head = head
+  hrepl = mapping[head]
+  if hrepl != nil
+    new_head = hrepl
+  body = ""
+  if rbr_idx != nil && rbr_idx > bracket + 1
+    body = s.slice(bracket + 1, rbr_idx - bracket - 1)
+  if body == ""
+    return new_head + lbr + rbr
+  folded = fold_size_expr(body, int_map)
+  if folded == nil
+    return new_head + lbr + body + rbr
+  new_head + lbr + folded.to_s() + rbr
+
 -> substitute_type_params_in_ast(node, mapping, mod)
   if node == nil
     return nil
@@ -1296,6 +1379,91 @@
       aj += 1
     ai += 1
 
+# True when `s` is a base-10 integer literal (optional leading `-`) — used to
+# tell a const-int generic argument (`Foo<T, 8>` → "8") from a type argument
+# (`Foo<T, f32>` → "f32"). Const-int args substitute as integer VALUES; type
+# args substitute as type strings.
+-> numeric_str?(s)
+  if s == nil || s.size() == 0
+    return false
+  start = 0
+  if s[0] == "-"
+    start = 1
+  if start >= s.size()
+    return false
+  i = start
+  while i < s.size()
+    c = s[i]
+    if c < "0" || c > "9"
+      return false
+    i += 1
+  true
+
+# Substitute bare VALUE uses of a const-int generic parameter with an integer
+# literal throughout a specialized class body: a `:var` node whose name is a
+# const-int param (e.g. `N` in `-> capacity; N`, or `M`/`N` inside `(0...(M*N))`
+# and `elements[c*M+item]`) becomes an `:int` literal. Type-position uses are
+# handled separately by substitute_type_params_in_ast; this pass covers the
+# value positions it can't (a var's kind can't change in place, so — like every
+# kind-changing rewrite here — the replacement is returned and the parent writes
+# it back via the schema-field walk below). Returns a replacement node when the
+# node ITSELF must be replaced, else nil (having mutated descendants in place).
+-> subst_const_int_node(node, int_map)
+  if node == nil
+    return nil
+  if !is_ast_node?(node)
+    return nil
+  if ast_kind(node) == :var
+    iv = int_map[node.name]
+    if iv != nil
+      return Tungsten:AST:Int.new(iv)
+  # Fold a const-int bracket in this node's type_hint string (`## T[N]` →
+  # `## i32[4]`). The head (`T`→`i32`) was already done by
+  # substitute_type_params_in_ast; here we only fold the size, passing an empty
+  # type-mapping so the head is left as-is.
+  th = node.type_hint
+  if th != nil
+    lbr = "\["
+    if th.index(lbr) != nil
+      new_th = subst_field_type_string(th, {}, int_map)
+      if new_th != th
+        node.type_hint = new_th
+  kid = kind_id_table[ast_kind(node)]
+  if kid == nil
+    return nil
+  schema = slab_offset_table_data[kid]
+  if schema == nil
+    return nil
+  ks = schema.keys()
+  i = 0
+  while i < ks.size()
+    k = ks[i]
+    v = ast_get(node, k)
+    if is_ast_node?(v)
+      replaced = subst_const_int_node(v, int_map)
+      if replaced != nil
+        ast_set(node, k, replaced)
+    elsif type(v) == "Array"
+      any_replaced = false
+      rebuilt = []
+      j = 0
+      while j < v.size()
+        elt = v[j]
+        if is_ast_node?(elt)
+          replaced = subst_const_int_node(elt, int_map)
+          if replaced != nil
+            rebuilt.push(replaced)
+            any_replaced = true
+          else
+            rebuilt.push(elt)
+        else
+          rebuilt.push(elt)
+        j += 1
+      if any_replaced
+        ast_set(node, k, rebuilt)
+    i += 1
+  nil
+
 -> specialize_generic_class(template_name, type_args, mod)
   template = mod[:generic_class_templates][template_name]
   if template == nil
@@ -1331,14 +1499,41 @@
         ci += 1
       pi += 1
   mapping = {}
+  int_map = {}
   i = 0
   while i < type_params.size()
     mapping[type_params[i]] = type_args[i]
+    # A numeric arg is a const-int param: keep it in `mapping` too (nested
+    # generics substitute it in type_args positions) AND record its integer
+    # value for the bare-value substitution pass.
+    if numeric_str?(type_args[i])
+      int_map[type_params[i]] = type_args[i].to_i()
     i += 1
   cloned_body = ast_deep_clone(template.body)
+  has_int_params = int_map.keys().size() > 0
   ci = 0
   while ci < cloned_body.size()
     substitute_type_params_in_ast(cloned_body[ci], mapping, mod)
+    if has_int_params
+      subst_const_int_node(cloned_body[ci], int_map)
+    ci += 1
+  # `- data` block field types live in a plain hash (view_decl :count), which
+  # the AST walks above don't reach. Rewrite each field's type string so the
+  # data-layout uses the concrete element type and const-int size
+  # (`T slots[N]` → `i32 slots[8]`); type_size then computes real offsets.
+  ci = 0
+  while ci < cloned_body.size()
+    stmt = cloned_body[ci]
+    if is_ast_node?(stmt) && ast_kind(stmt) == :view_decl
+      layout = ast_get(stmt, :count)
+      if layout != nil && type(layout) == "Hash" && layout[:fields] != nil
+        new_fields = []
+        fj = 0
+        while fj < layout[:fields].size()
+          fld = layout[:fields][fj]
+          new_fields.push({name: fld[:name], type: subst_field_type_string(fld[:type], mapping, int_map)})
+          fj += 1
+        ast_set(stmt, :count, {struct_name: layout[:struct_name], fields: new_fields})
     ci += 1
   spec_name = mangle_generic_class_name(template_name, type_args)
   spec_super = template.superclass

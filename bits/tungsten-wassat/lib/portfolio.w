@@ -400,6 +400,57 @@ WASSAT_ARM_SLS = 2             # local search, models only
 -> wassat_fast_arm_body_budget(solver, res, base, budget)
   solver.solve_shared_budget(res, base, budget)
 
+# ---- lucky arm ---------------------------------------------------------------
+#
+# kissat runs its lucky phases (lucky.c: four decision-free greedy dives) TWICE
+# — once on the raw formula (`luckyearly`) and once on the preprocessed one
+# (`luckylate`, search.c:178-190) — under two separate options, because
+# preprocessing can CREATE luckiness: substitution and elimination collapse
+# formulas that were not constant-satisfiable into ones that are.
+#
+# Here both shots are ARMS. An arm is the right shape for this technique
+# because the dives propagate, and propagation permutes clause literals and
+# moves watch entries — reordering any search that inherits the solver. Giving
+# the dives their own solver in their own thread makes a miss cost nothing:
+# nothing else in the process is perturbed, so there is no rebuild to pay for,
+# and the arm's few milliseconds run beside real search rather than in front
+# of it.
+#
+# Builds its own solver INSIDE the thread deliberately: constructing it on the
+# main thread would put a from_flat back on the critical path, which is the
+# cost this arrangement exists to remove.
+-> wassat_lucky_arm_body(nv, art, res, base, stop)
+  s = Wassat.from_flat(nv, art, 0)
+  s.set_stop_cell(stop)
+  s.lucky_shared(res, base)
+
+# The bounded CDCL scout, as an arm. It is the same search the coordinator used
+# to run inline: its own solver over the same artifact, stopped by conflict cap
+# (and, off the raw path, by wall clock). It runs beside the lucky arm so that
+# neither pays for the other — a lucky win stops it through the shared cell,
+# and a lucky miss leaves its trajectory bit-identical to the serial one.
+#
+# `out` is its private channel for the boxed result: the coordinator reports
+# conflicts, decisions and propagations from it.
+-> wassat_scout_arm_body(nv, art, stop, cap, wall, raw, simplify, out)
+  s = Wassat.from_flat(nv, art, 0)
+  s.set_stop_cell(stop)
+  s.simplify_raw if simplify
+  t0 = ccall("__w_clock_ms")
+  slice = cap < 512 ? cap : 512
+  spr = s.solve_budget(slice)
+  # The wall-clock cap bounds a miss on kernels whose conflicts are expensive,
+  # but it makes the outcome depend on machine load: on bmc-ibm-10 the scout
+  # decides at 1,733 conflicts when quiet and falls off a cliff to a full
+  # 11k-conflict main solve when busy. A raw kernel's scout is already bounded
+  # by its conflict cap, so it runs on conflicts alone and is reproducible.
+  while spr["status"] == 0 && spr["conflicts"] < cap && stop[0] == 0 && (raw || ccall("__w_clock_ms") - t0 < wall)
+    rem = cap - spr["conflicts"]
+    slice = rem < 512 ? rem : 512
+    spr = s.solve_budget(slice)
+  out.push(spr)
+  0
+
 # Raw-kernel basin race: K allocation-free arms over the SAME flat artifact,
 # diversified along the axes that measurably move bmc-family trajectories —
 # decision heuristic (VMTF vs EVSIDS) and initial phases. First decisive arm
@@ -512,6 +563,20 @@ WASSAT_ARM_SLS = 2             # local search, models only
     stop[1] = 0 - 1
     stop[0] = 1
     return 0
+  # kissat's LATE lucky shot (search.c: luckylate, after preprocessing), taken
+  # here by the arm that did the rendering rather than by an arm of its own.
+  # The rendering exists only inside this thread — handing it to a separate arm
+  # would mean either a synchronised handoff or a second preprocessor rendering
+  # the same formula twice — so the arm that produced it takes its own shot on
+  # it, and the coordinator needs no new channel: a win lands in this arm's
+  # result slot and is reconstructed through this arm's elimination stack,
+  # exactly like a search win. The dives get their own solver so that a miss
+  # leaves the arm's search trajectory bit-identical to what it would have been.
+  if stop[0] == 0
+    ls = Wassat.from_flat(nv, rendered, 0)
+    ls.set_stop_cell(stop)
+    ls.lucky_shared(res, base)
+    return 0 if res[base] != 0
   s = Wassat.from_flat(nv, rendered, 0)
   s.enable_fixed_caps
   s.set_stop_cell(stop)

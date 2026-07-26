@@ -871,13 +871,32 @@ WASSAT_PROOF_DRAT = 2
   #     branching heuristic's own basin. They are snapshotted and restored.
   #
   # Returns 1 (total assignment on @assign), -1 (root conflict: UNSAT), or 0.
-  # Coordinator entry point: run the dives and package the verdict the same
-  # way solve_budget would, so a hit needs no separate reporting path.
-  -> lucky_result
-    r = self.lucky_probe
-    return nil if r == 0
-    @terminal_status = r
-    self.result_for(r)
+  #
+  # ARM ENTRY POINT. The dives are a race arm like any other: their solver is
+  # their own, they write their verdict into the shared result slab with the
+  # same layout solve_shared_budget uses, and they raise the stop cell on a
+  # win. A miss writes 0 and the arm simply exits — nothing else in the
+  # process has been touched, so there is no watch order to repair.
+  #
+  # res[base + @nvars + 1] carries the propagation count (the sharing-export
+  # slot, which an arm that never learns a clause has no use for); conflicts
+  # and decisions are zero by construction and are not written.
+  -> lucky_shared(res, base)
+    res[base + @nvars + 6] = ccall("__w_clock_ms")
+    status = self.lucky_probe
+    res[base] = status
+    if status == 1
+      v = 1
+      while v <= @nvars
+        res[base + v] = @assign[v] >= 0 ? 1 : 0
+        v += 1
+    res[base + @nvars + 1] = @pstate[4]
+    res[base + @nvars + 4] = 0
+    res[base + @nvars + 5] = ccall("__w_clock_ms")
+    if (status == 1 || status == 0 - 1) && @stop_cell != nil
+      @stop_cell[1] = status
+      @stop_cell[0] = 1
+    0
 
   -> lucky_probe
     return 0 unless @ok && @lucky_pending
@@ -895,11 +914,13 @@ WASSAT_PROOF_DRAT = 2
     # What CANNOT be restored, and is inherent to running propagation before
     # search, is watch order: propagation permutes clause literals and moves
     # watch entries between blocks, and wassat's trajectory is measurably
-    # sensitive to both. A miss is therefore cheap (0-5ms measured, the dives
-    # abandon early) but not free. Measured on quasigroup-completion
-    # (qwh.35.405) that reordering costs 4,830 -> 7,380 conflicts; restoring
+    # sensitive to both. Measured on quasigroup-completion (qwh.35.405) that
+    # reordering costs 4,830 -> 7,380 conflicts; restoring
     # @heap/@heappos/@hstate/@vq_state as well was tried and changed nothing,
-    # so the residual is the watch state and only a win pays for it.
+    # so the residual is the watch state. This is why the dives run on a
+    # solver of their OWN, in their own arm (lucky_shared) — the damage is
+    # confined to a solver that is discarded the moment the dives end, and no
+    # search anywhere pays for a miss.
     sphase = i64[@nvars + 1]
     v = 0
     while v <= @nvars

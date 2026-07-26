@@ -325,70 +325,76 @@ use portfolio
       probe_p = nil
       probe_out = nil
 
-      # Serial light probe (flat-load, so construction is native): many
+      # Bounded CDCL scout (flat-load, so construction is native): many
       # structured instances decide within a few thousand conflicts on the
       # light kernel and skip the heavy rounds entirely (ibm-6: 1.3k).
-      # Kernel size does NOT predict probe wins (ibm-6 at 368k clauses
+      # Kernel size does NOT predict scout wins (ibm-6 at 368k clauses
       # decides in ~2.5k conflicts; ibm-12 at 195k never does) — so the
-      # probe always runs with a small budget: a win skips the heavy
+      # scout always runs with a small budget: a win skips the heavy
       # rounds outright, a miss costs ~0.15s.
       if probe_p == nil
-        sprobe = Wassat.from_flat(formula["nvars"], art, 0)
-        # Lucky phases (kissat's lucky.c) before anything else, on a solver
-        # that is THROWN AWAY unless it wins. The dives are decision-free and
-        # cost 0-5ms, but they propagate, and propagation permutes clause
-        # literals and moves watch entries — reordering the search tuned
-        # against this database. Measured, keeping the dived solver: the
-        # SC2026 miter is answered outright (9.9s -> 0.18s) but bmc-ibm-6
-        # regresses 0.062s -> 0.281s on watch order alone. Rebuilding on a
-        # miss costs one from_flat and makes the technique strictly additive.
-        lucky = sprobe.lucky_result
-        if lucky != nil
+        # On a raw kernel the scout is a bounded first shot: easy kernels
+        # (ibm-6/10 class) decide inside it, and a miss falls through to
+        # the diversified thread race below. On a preprocessed kernel it
+        # stays a cheap scout whose miss pays for the heavy rounds.
+        raw_probe = art["raw"] == true
+        probe_wall = config.probe_ms(raw_probe)
+        probe_cap = config.probe_conflicts(raw_probe)
+        # The scout is the FIRST CDCL stage inside the aggregate --conflicts
+        # budget. Cap it (and every slice, including the first) at the
+        # requested budget on raw AND reduced kernels, so a small budget is
+        # never blown by the fixed 512-conflict first slice.
+        probe_cap = options["conflicts"] if options["conflicts"] > 0 && options["conflicts"] < probe_cap
+        # SCOUT RACE. Two arms over the same artifact, each on its own solver,
+        # concurrently: kissat's lucky phases (the four decision-free dives of
+        # lucky.c, its `luckyearly` shot) and the bounded CDCL scout.
+        #
+        # An arm, not a prologue, because the dives propagate — and propagation
+        # permutes clause literals and moves watch entries, which reorders any
+        # search that inherits the solver. Measured, keeping the dived solver:
+        # the SC2026 miter is answered outright (9.9s -> 0.18s) but bmc-ibm-6
+        # regresses 0.062s -> 0.281s on watch order alone. Running them in
+        # front of the scout on a throwaway solver fixed that but paid a
+        # from_flat for every miss; running them BESIDE it pays nothing at all,
+        # and a win stops the scout through the shared cell.
+        #
+        # Everything the arms need is resolved into locals HERE, on the main
+        # thread, so that spawning the second arm dispatches nothing while the
+        # first is already running.
+        scout_nv = formula["nvars"]
+        scout_simplify = config.force_simplify?
+        scout_stop = i64[4]
+        scout_res = i64[scout_nv + 8]
+        scout_out = []
+        lucky_h = Thread.new -> wassat_lucky_arm_body(scout_nv, art, scout_res, 0, scout_stop)
+        scout_h = Thread.new -> wassat_scout_arm_body(scout_nv, art, scout_stop, probe_cap, probe_wall, raw_probe, scout_simplify, scout_out)
+        z = lucky_h.join
+        z = scout_h.join
+        tprof = wassat_prof("cli.scout_race", tprof)
+        # A lucky verdict is checked first: it is the same formula the scout
+        # is solving, so the two cannot disagree, and the dives reach it with
+        # zero conflicts and zero decisions.
+        lucky_status = scout_res[0]
+        if lucky_status != 0
           pre_msl = ccall("__w_clock_ms") - t0
-          if lucky["status"] == 1
-            model = wassat_reconstruct_model(light_stack, lucky["model"], formula["nvars"])
+          if lucky_status == 1
+            lmodel = []
+            v = 1
+            while v <= scout_nv
+              lmodel.push(scout_res[v] == 1 ? v : 0 - v)
+              v += 1
+            model = wassat_reconstruct_model(light_stack, lmodel, scout_nv)
             unless wassat_model_satisfies?(formula, model)
               raise "internal error: lucky model does not satisfy the input formula"
             print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
           else
             << "s UNSATISFIABLE"
           << "c mode: fast (lucky phases)"
-          << "c conflicts: 0, decisions: 0, props: [lucky["props"]]"
+          << "c conflicts: 0, decisions: 0, props: [scout_res[scout_nv + 1]]"
           << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(art["stats"], pre_msl)
-          exit(lucky["status"] == 1 ? 10 : 20)
-        sprobe = Wassat.from_flat(formula["nvars"], art, 0)
-        sprobe.simplify_raw if config.force_simplify?
-        # time-boxed in conflict slices: wins arrive fast when they arrive
-        # at all, and a miss is capped at ~120ms instead of a full
-        # conflict budget's worth of work on a big kernel
-        probe_t0 = ccall("__w_clock_ms")
-        # On a raw kernel the probe is a bounded first shot: easy kernels
-        # (ibm-6/10 class) decide inside it, and a miss falls through to
-        # the diversified thread race below. On a preprocessed kernel it
-        # stays a cheap scout whose miss pays for the heavy rounds.
-        raw_probe = art["raw"] == true
-        probe_wall = config.probe_ms(art["raw"] == true)
-        probe_cap = config.probe_conflicts(art["raw"] == true)
-        # The scout is the FIRST CDCL stage inside the aggregate --conflicts
-        # budget. Cap it (and every slice, including the first) at the
-        # requested budget on raw AND reduced kernels, so a small budget is
-        # never blown by the fixed 512-conflict first slice.
-        probe_cap = options["conflicts"] if options["conflicts"] > 0 && options["conflicts"] < probe_cap
-        slice = probe_cap < 512 ? probe_cap : 512
-        spr = sprobe.solve_budget(slice)
-        # The wall-clock cap bounds a miss on kernels whose conflicts are
-        # expensive, but it makes the outcome depend on machine load: on
-        # bmc-ibm-10 the probe decides at 1,733 conflicts when quiet and
-        # falls off a cliff to a full 11k-conflict main solve when busy,
-        # with the conflict count varying run to run. A raw kernel's probe
-        # is already bounded by its conflict cap, so it runs on conflicts
-        # alone and is reproducible.
-        while spr["status"] == 0 && spr["conflicts"] < probe_cap && (raw_probe || ccall("__w_clock_ms") - probe_t0 < probe_wall)
-          rem = probe_cap - spr["conflicts"]
-          slice = rem < 512 ? rem : 512
-          spr = sprobe.solve_budget(slice)
+          exit(lucky_status == 1 ? 10 : 20)
+        spr = scout_out[0]
         budget_used = spr["conflicts"]
-        tprof = wassat_prof("cli.serial_probe", tprof)
         if spr["status"] != 0
           pre_msq = ccall("__w_clock_ms") - t0
           if spr["status"] == 1
@@ -409,57 +415,84 @@ use portfolio
 
       if art["raw"] == true && (options["conflicts"] == 0 || budget_used < options["conflicts"])
         arms = config.raw_race_arms
-        if arms > 1
-          # Each arm is bounded by what remains of the aggregate budget, so no
-          # CDCL path runs past --conflicts (previously the race was unbounded
-          # and could answer long after a small --conflicts cap should have
-          # returned UNKNOWN). 0 keeps the race unlimited.
-          race_budget = options["conflicts"] == 0 ? 0 : options["conflicts"] - budget_used
-          rr = wassat_raw_race(formula["nvars"], art, arms, race_budget)
-          budget_used += rr["conflicts"]
+        # Preprocessing joins the race as ARMS, each in its own thread, each
+        # rendering the formula and then solving what it rendered. Nothing is
+        # decided up front and nothing is paid for up front: an instance the
+        # raw arms crack in 5k conflicts never waits on a preprocessor, and
+        # one that needs elimination gets it concurrently.
+        #
+        # There is no yield test and no clause-count gate on the RESULT,
+        # because the measured families do not separate on yield: bmc-ibm-6
+        # substitutes 14.3% of its variables and is 3.5x SLOWER preprocessed,
+        # the md5 kernel substitutes 1.6% and is 20x faster, and 3bitadd_31
+        # reduces by NOTHING and is 4.6x faster. Racing removes the need to
+        # predict, which is the entire design.
+        #
+        # Two renderings, not one pipeline, because they are separately best:
+        # elimination is worth 5.8x on the bitvector kernel smulo016 and costs
+        # 50x on the md5 one (5k conflicts light, 255k heavy).
+        pre_arms = wassat_pre_arm_count
+        # Resource gate, not a yield prediction: two preprocessing passes have
+        # stopping points too coarse to bound on very large inputs, so they are
+        # not offered inputs they cannot survive (see wassat_pre_max_clauses).
+        pre_arms = 0 if formula["flat_ncl"] > wassat_pre_max_clauses
+        race = nil
+        if arms > 1 || pre_arms > 0
+          race = wassat_race_build(formula["nvars"], art, arms, formula)
+          if pre_arms > 0
+            # A preprocessor per arm: two threads rendering through one would
+            # race on its arena. Constructed HERE, on the main thread, because
+            # construction is the one part that touches the parsed formula's
+            # boxed clauses while another arm might be reading them.
+            plight = WassatPreprocess.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_NONE)
+            plight.set_budget(wassat_pre_light_ticks)
+            plight.set_deadline_ms(wassat_pre_stage_ms)
+            plight.force_full_pipeline
+            wassat_race_add_pre(race, plight, false, "light")
+            if pre_arms > 1
+              pheavy = WassatPreprocess.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_NONE)
+              pheavy.set_budget(wassat_pre_light_ticks + wassat_pre_heavy_ticks)
+              pheavy.set_deadline_ms(2 * wassat_pre_stage_ms)
+              pheavy.force_full_pipeline
+              wassat_race_add_pre(race, pheavy, true, "heavy")
+        # Each arm is bounded by what remains of the aggregate budget, so no
+        # CDCL path runs past --conflicts (previously the race was unbounded
+        # and could answer long after a small --conflicts cap should have
+        # returned UNKNOWN). 0 keeps the race unlimited.
+        race_budget = options["conflicts"] == 0 ? 0 : options["conflicts"] - budget_used
+        rr = nil
+        if race != nil
+          rr = wassat_race_run(race, race_budget)
           tprof = wassat_prof("cli.raw_race", tprof)
-          if rr["status"] != 0
-            pre_msr = ccall("__w_clock_ms") - t0
-            if rr["status"] == 1
-              model = wassat_reconstruct_model(light_stack, rr["model"], formula["nvars"])
-              unless wassat_model_satisfies?(formula, model)
-                raise "internal error: race arm's model does not satisfy the input formula"
-              print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
-            else
-              << "s UNSATISFIABLE"
-            << "c mode: fast (raw cdcl race, arm [rr["winner"]])"
-            << "c conflicts: [budget_used], decisions: 0, props: 0"
-            << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(art["stats"], pre_msr)
-            exit(rr["status"] == 1 ? 10 : 20)
-      # Raw kernels skipped the preprocessor entirely, so there is no
-      # intake for the heavy rounds to operate on — and policy disables
-      # every technique they would run at this size anyway.
-      if config.raw_kernel?
-        # Budgeted preprocessing trial, deliberately placed AFTER the probe.
-        # The old flat size gate sent every >50k-clause formula straight to
-        # CDCL, which is catastrophic on the families that DO reduce: crypto
-        # md5 runs 11.94s raw against 0.20s preprocessed (60x). But running
-        # it at load time regressed bmc-ibm-6 3.5x, and no yield threshold
-        # can separate the two — ibm-6 reduces MORE (14.3% of variables)
-        # than crypto (1.6%) and still does not benefit. What separates them
-        # is that ibm-6 decides inside the probe in 272 conflicts and never
-        # needs preprocessing at all. So: probe first, and only formulas the
-        # probe could not crack pay for a trial, under a size-proportional
-        # tick budget, keeping the result only if it actually reduced.
-        # kissat has no clause-count gate either, for the same reason.
-        trial_ticks = 200 * formula["flat_nlits"] + 20000000
-        pre.set_budget(trial_ticks)
-        pre.force_full_pipeline
-        trial = pre.run_light_flat(formula)
-        tprof = wassat_prof("cli.trial", tprof)
-        elim = trial["stats"]["vars_eliminated"] + trial["stats"]["vars_substituted"]
-        # A refutation during the trial is a real answer — never discard it.
-        if trial["status"] != 0
-          art = trial
-        else
-          if elim * 100 >= formula["nvars"]
-            art = trial
-      else
+        if rr != nil && rr["status"] != 0
+          budget_used += rr["conflicts"]
+          pre_msr = ccall("__w_clock_ms") - t0
+          # The winner's model is in ITS OWN formula's variable space, so
+          # take the stack and the stats of the rendering that won. Each
+          # preprocessing arm left both in its private `out` channel.
+          pidx = rr["pre_index"]
+          won_stack = art["stack"]
+          won_stats = art["stats"]
+          arm_tag = "arm [rr["winner"]]"
+          if pidx >= 0
+            spec = race["pre"][pidx]
+            won_stack = spec["out"][0]
+            won_stats = spec["out"][1]
+            arm_tag = "[spec["label"]]-preprocessed arm"
+          if rr["status"] == 1
+            model = wassat_reconstruct_model(won_stack, rr["model"], formula["nvars"])
+            unless wassat_model_satisfies?(formula, model)
+              raise "internal error: race arm's model does not satisfy the input formula"
+            print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
+          else
+            << "s UNSATISFIABLE"
+          << "c mode: fast (raw cdcl race, [arm_tag])"
+          << "c conflicts: [budget_used], decisions: 0, props: 0"
+          << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(won_stats, pre_msr)
+          exit(rr["status"] == 1 ? 10 : 20)
+        if rr != nil
+          budget_used += rr["conflicts"]
+      unless config.raw_kernel?
         art = pre.run_heavy
         tprof = wassat_prof("cli.heavy", tprof)
       # did the probe already win while we preprocessed?

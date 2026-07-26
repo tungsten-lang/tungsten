@@ -39,6 +39,127 @@
 WASSAT_SUBST_DEFAULT = true
 WASSAT_CONGRUENCE_DEFAULT = true
 
+# ---- adaptive race allocation (DORMANT: measured null) ------------------------
+#
+# The raw-kernel race allocates its arms from a hard-coded diversity matrix
+# (see wassat_race_build). These numbers turn that one-shot allocation into a
+# ROUND-BASED one: arms run a slice, stop at a barrier, get scored on progress
+# telemetry they produced WITHOUT finishing, and the worst is respawned on a
+# different configuration chosen by an integer UCB over the diversity axes.
+#
+# It is off by default because it was measured to be worth nothing — the
+# evidence is under wassat_race_round1_conflicts, and the short version is that
+# the raw arms are statistically exchangeable, so uniform allocation over them
+# is already optimal. What survives is the instrumentation: the barrier is the
+# only place a coordinator can look at an arm that has not finished, and every
+# future question about this race ("should preprocessing get a third core?",
+# "is this arm duplicating that one?") is asked there.
+
+# Conflicts each arm gets in round 1. 0 turns the mechanism off entirely and
+# restores the single unbounded round the race has always run.
+#
+# DORMANT (2026-07-26), and the measurement is the reason. Rounds exist ONLY to
+# make reallocation possible, and reallocation over these axes was measured to
+# be worth nothing.
+#
+# 1. No progress signal predicts the winner. Over 37 finished races the raw
+#    arms were ranked at the first barrier by each candidate metric and the
+#    position of the arm that went on to WIN was recorded; 0.5 is chance at 8
+#    arms, and the interval is 95%:
+#
+#      conflicts/sec 0.459+-0.119   fast LBD EMA  0.479+-0.101
+#      slow LBD EMA  0.456+-0.096   trail depth   0.425+-0.090
+#      props/conflict 0.483+-0.119  cps over LBD  0.417+-0.100
+#
+#    Every interval contains chance. Only the live learned-clause count
+#    (0.320+-0.097) clears it, and that is one hit out of ten metrics tried on
+#    one sample — the multiple-comparison result you would expect from noise,
+#    not a finding. An earlier n=17 pass ranked propagations-per-conflict the
+#    OPPOSITE way round with the same confidence, which is what settled it.
+#
+# 2. Acting on any of them changes nothing. Forced to replace the worst arm
+#    every 4th round (WASSAT_REALLOC=2) against no reallocation at all, 8 raw
+#    arms, 3000-conflict rounds, medians of 5 interleaved:
+#
+#                  no-realloc  cps/LBD  fast-LBD  share-credit  learnt
+#      minand064      5.704s    5.722    5.751      5.675       5.698
+#      g125.18        2.029     1.998    1.971      1.991       2.012
+#      g250.15        1.615     1.623    1.629      1.599       1.607
+#      bmc-ibm-12     1.062     1.196    1.154      1.093       1.073
+#      3bitadd_31     0.784     0.639    0.871      1.036       0.993
+#
+#    Four different reward signals, none separated from doing nothing by more
+#    than the noise floor, on the one instance (bmc-ibm-12) where they separate
+#    at all it is the wrong way.
+#
+# The explanation is not that the allocator is bad. It is that the arms are
+# EXCHANGEABLE: at any barrier the raw arms sit within ~1.3x on conflicts and
+# ~1.5x on LBD, and which one reaches the answer is decided by which basin
+# happens to contain it. Uniform allocation over exchangeable arms is optimal
+# by definition, so no bandit can beat the fixed matrix here — the fixed matrix
+# is already the right answer.
+#
+# Retained, not deleted, because the telemetry underneath it (export_telemetry,
+# the per-author sharing credit) is what made that measurable, and because the
+# axis where the arms are NOT exchangeable — raw arms against preprocessed
+# renderings — is a live question this machinery is the way to answer. Set
+# WASSAT_ROUND1 to re-arm it.
+-> wassat_race_round1_conflicts
+  return wassat_decimal_in_range("WASSAT_ROUND1", env("WASSAT_ROUND1"), 0, 2000000000) if env("WASSAT_ROUND1") != nil
+  0
+
+# Wall-clock target for rounds 2..n, in milliseconds. Rounds after the first
+# are sized PER ARM from the arm's own measured conflict rate, not by a shared
+# conflict count: arms in a diversified race differ by up to 3x in conflicts
+# per second, and a shared conflict slice would make the barrier wait on the
+# slowest arm every round. Same reason metaflip's pool sizes its next round
+# from measured elapsed time (ffcp_adapt_round_steps) rather than from a fixed
+# step count.
+-> wassat_race_round_ms
+  return wassat_decimal_in_range("WASSAT_ROUND_MS", env("WASSAT_ROUND_MS"), 10, 3600000) if env("WASSAT_ROUND_MS") != nil
+  400
+
+# Whether a scored arm may be killed and respawned on a different
+# configuration. Only consulted when WASSAT_ROUND1 has re-armed the rounds. 0
+# keeps the rounds and their telemetry but leaves every arm on the
+# configuration the diversity matrix gave it — the ablation that separates the
+# cost of the barrier from the value of reallocating, and the one that showed
+# the barrier costs 4-6% on a single-arm race and nothing on a multi-arm one.
+-> wassat_race_reallocate
+  return wassat_decimal_in_range("WASSAT_REALLOC", env("WASSAT_REALLOC"), 0, 2) if env("WASSAT_REALLOC") != nil
+  1
+
+# How eagerly a losing arm is replaced.
+#   1  RATIO. Only an arm scoring below half the median of the live raw arms
+#      is replaced. On a race whose arms are all within 25% of each other —
+#      which is what every measured instance looks like — this never fires and
+#      the allocator degenerates to the fixed matrix.
+#   2  RANK. The worst live arm is replaced every wassat_race_realloc_every
+#      rounds whatever the spread. The aggressive bracket: it exists to put an
+#      upper bound on what reallocation can be worth, because a mechanism that
+#      does not help when it fires constantly cannot help when it fires rarely.
+-> wassat_race_realloc_every
+  return wassat_decimal_in_range("WASSAT_REALLOC_EVERY", env("WASSAT_REALLOC_EVERY"), 1, 1000000) if env("WASSAT_REALLOC_EVERY") != nil
+  4
+
+# Which progress signal scores an arm. All five were measured over 37 finished
+# races by ranking each raw arm at the first barrier and recording where the
+# EVENTUAL WINNER sat in that ranking; all five came back at chance. The table
+# is under wassat_race_round1_conflicts and the per-metric reasoning is at
+# wassat_race_arm_score. The default is arbitrary among equals.
+#   0  tight-rate: conflicts per second divided by the fast LBD EMA
+#   1  learning quality alone: the fast LBD EMA, lower is better
+#   2  propagations per conflict, higher is better
+#   3  sharing credit: clauses this arm authored that OTHER arms installed
+#   4  live learned-clause count
+-> wassat_race_reward_metric
+  return wassat_decimal_in_range("WASSAT_REWARD", env("WASSAT_REWARD"), 0, 4) if env("WASSAT_REWARD") != nil
+  1
+
+# Per-round arm telemetry to stderr, for the reward-signal study.
+-> wassat_race_trace?
+  env("WASSAT_RACE_TRACE") == "1"
+
 # How many PREPROCESSED renderings of the formula join the raw-kernel race,
 # in pipeline order: 1 adds the light one (probing plus equivalent-literal
 # substitution), 2 adds the heavy one (subsumption plus bounded variable
@@ -99,12 +220,14 @@ WASSAT_CONGRUENCE_DEFAULT = true
 # wanted more is 4pipe at 567M ticks and 812ms, and it eliminated zero
 # variables for them, which is the case a cap exists for.
 #
-# Honest limitation: this bounds ROUNDS, not the work inside one. The native
-# subsumption and elimination scans check the budget between chunks, and a
-# chunk can overshoot enormously — 4pipe reaches 567M ticks against a 66M
-# allowance in a single pass. The wall-clock deadline below is the backstop
-# that actually binds, and the clause gate is what covers the case where even
-# that cannot (a chunk that runs 95s without returning).
+# This used to bound ROUNDS and not the work inside one: a subsumption chunk
+# ended only when the clause range or the survivor-output budget did, so
+# 4pipe retired 567M ticks against a 66M allowance in a single pass and
+# blocks-4-ipc5-h21 ran 95 seconds inside one call. The scan now takes a tick
+# cap (WASSAT_PRE_SUB_CHUNK_TICKS) and resumes through the pm[6] token it
+# already reported, so the allowance binds to within one chunk: 4pipe's pass
+# went 1947ms -> 147ms and now stops at the budget instead of overrunning it
+# 8x. This number is therefore a real allowance again, not an aspiration.
 -> wassat_pre_heavy_ticks
   return wassat_decimal_in_range("WASSAT_PRE_HEAVY_TICKS", env("WASSAT_PRE_HEAVY_TICKS"), 1, 2000000000) if env("WASSAT_PRE_HEAVY_TICKS") != nil
   64000000
@@ -136,25 +259,47 @@ WASSAT_CONGRUENCE_DEFAULT = true
 # specific, documented reason rather than a general belief about big
 # formulas.
 #
-# The reason: two passes here have stopping points too coarse to bound. On
-# the planning kernel blocks-4-ipc5-h21 (906k clauses) substitution rewrites
-# for 59s before its per-class budget check comes round — the wall-clock
-# deadline now cuts that to ~2.2s — and forward subsumption spends 95
-# SECONDS and 139 BILLION ticks inside ONE native chunk, where no budget,
-# deadline or signal can reach it. That is a scaling defect in
-# WassatPreprocess, not a property of large formulas, and the fix is to make
-# those passes interruptible (chunk the subsumption scan, charge and check
-# the rewrite per clause). Until then the renderings are not offered inputs
-# they cannot survive, because the alternative is a 22s answer becoming a
-# 125s one.
+# It used to be 400,000, and it was that low because two passes had stopping
+# points too coarse to bound: forward subsumption spent up to 95 SECONDS and
+# 139 billion ticks inside ONE native chunk where no budget, deadline or
+# signal could reach it, and the substitution rewrite only checked its budget
+# between SCC classes, so one big class ran for minutes. Both are now
+# interruptible — the native scan takes a tick cap and resumes through pm[6]
+# (WASSAT_PRE_SUB_CHUNK_TICKS), and the rewrite tests the deadline every
+# WASSAT_PRE_SUBST_CHECK_EVERY clauses instead of once per class — so the
+# reason for holding the gate down is gone. Measured, medians, interleaved,
+# with the gate as the only variable:
 #
-# 400,000 is 1.4x the largest formula measured to preprocess healthily
-# (ibm-2004-03-k70, 286k clauses, 137ms) and 2.3x below the one that does
-# not. Raise it once the passes are interruptible; the race handles the
-# question of whether preprocessing was WORTH it on its own.
+#   4pipe            subsumption pass 1947ms -> 147ms  (one chunk -> chunked)
+#   blocks-4-ipc5    22.42s gated off vs 22.55s gated on, medians of 3 — the
+#   (906k clauses)   cliff is gone. Before the fix the same comparison was
+#                    19.3s -> 32.4s, a 68% penalty for offering the arm.
+#   spg_200_301      116.5s gated off vs 97.6s gated on, medians of 4 — about
+#   (1.55M clauses)  1.2x, so preprocessing now earns its arm here where the
+#                    old gate refused it outright.
+#
+# Both instances are UNSAT and both were run on a contended machine; spg
+# spans 93-188s run to run, so treat 1.2x as "no longer harmful and probably
+# positive", not as a measured speedup. The claim this change rests on is the
+# blocks-4-ipc5 pair — the cliff the gate existed to avoid is gone — not on
+# spg being faster.
+#
+# So the gate is raised 5x rather than removed. Removed is still wrong: this
+# is a RESOURCE gate — the distinction the rest of this file insists on, and
+# the one CryptoMiniSat draws in OccSimplifier::setup(), where >40M clauses
+# or >100M literals skips occurrence-based simplification outright because
+# the structure cannot be afforded. The occurrence lists and boxed clause
+# objects the preprocessor builds are proportional to LITERALS, and the
+# competition set contains formulas (Large-result_b24, 25M clauses) an order
+# of magnitude past anything measured here. 2,000,000 is 1.3x the largest
+# instance shown to preprocess profitably and keeps those outliers out.
+#
+# kissat by contrast has no size gate on preprocessing at all, and CaDiCaL's
+# one clause-count term only postpones, so even at 2M this remains the
+# minority position — held now for a memory bound, not a scaling defect.
 -> wassat_pre_max_clauses
   return wassat_decimal_in_range("WASSAT_PRE_MAX_CLAUSES", env("WASSAT_PRE_MAX_CLAUSES"), 0, 2000000000) if env("WASSAT_PRE_MAX_CLAUSES") != nil
-  400000
+  2000000
 
 + WassatConfig
   -> new(@nvars, clauses)
@@ -287,6 +432,54 @@ WASSAT_CONGRUENCE_DEFAULT = true
     return env("WASSAT_CONGRUENCE") == "1" if env("WASSAT_CONGRUENCE") != nil
     WASSAT_CONGRUENCE_DEFAULT
 
+  # Rounds of (extract gates -> substitute equivalences) before the closure
+  # gives up. See Wassat#congruence_rounds for why re-extraction is the
+  # rehash that walks an equivalence up a circuit layer, and why 1 is
+  # bit-identical to the single pass this replaced.
+  #
+  # DEFAULT 1 — the fixpoint is implemented, correct and measurably deeper,
+  # and it is still off, because nothing measured got FASTER for it.
+  #
+  # Where it merges at all it compounds exactly as the theory says, and the
+  # later rounds are the productive ones (agile-sat bench_1614 XOR merges by
+  # round: 165, 336, 314, 288, 261 — the second round beats the first):
+  #
+  #   instance                  substituted vars, round 1 -> 8 rounds
+  #   agile-sat bench_1614      988 -> 2818   (2.9x)
+  #   agile-sat bench_2778      935 -> 3455   (3.7x)
+  #   agile-sat bench_1794      919 -> 2782   (3.0x)
+  #   cryptography md5 r24      695 ->  701   (1.01x, fixpoint at round 3)
+  #
+  # Note the agile rows are still CLIMBING at the round cap, so 8 is not the
+  # fixpoint there — it is the budget. Only md5 actually converges.
+  #
+  # But that is a count of equivalences, not of solved instances. On the md5
+  # kernel — the only one of these whose wall time is stable enough to read
+  # under load — the extra rounds cost a consistent 8% (0.40s -> 0.43s,
+  # medians of 5, interleaved) and win nothing, because the arm that
+  # actually answers it is the PREPROCESSED one, not a raw arm carrying
+  # congruence. The agile instances swing 5.6s-137s run to run on a
+  # contended machine, which is far too wide to resolve the difference.
+  #
+  # So: measured, deeper, not yet shown to pay, and therefore not on. Raise
+  # it to re-open the question on a quiet machine; the numbers above are the
+  # baseline to beat. Congruence merges anything at all on only 7 of the 115
+  # instances in the competition set, so the whole question is narrow.
+  -> congruence_max_rounds
+    return wassat_decimal_in_range("WASSAT_CONGRUENCE_ROUNDS", env("WASSAT_CONGRUENCE_ROUNDS"), 1, 64) if env("WASSAT_CONGRUENCE_ROUNDS") != nil
+    1
+
+  # Ceiling on the gate arena, in gates. The arena starts at min(clauses,
+  # 131072) and doubles whenever extraction reports it filled one (see
+  # Wassat#extract_and_gates), so this is a memory bound, not a work bound:
+  # a gate costs 2+arity words of arena, 8 words of hash table and 2 words
+  # of merge output, so a 1M-gate ceiling is ~150MB transient, freed the
+  # moment the pass returns. Formulas that want more are exactly the ones
+  # whose arena already dwarfs it.
+  -> congruence_gate_ceiling
+    return wassat_decimal_in_range("WASSAT_CONGRUENCE_GATES", env("WASSAT_CONGRUENCE_GATES"), 1024, 2000000000) if env("WASSAT_CONGRUENCE_GATES") != nil
+    1048576
+
   -> force_simplify?
     # Measurement hook. The race turns the simplification axis on for four
     # of its arms and the serial probe never uses it, so an end-to-end
@@ -358,6 +551,41 @@ WASSAT_CONGRUENCE_DEFAULT = true
     # non-deterministic by construction, so any A/B on a technique that
     # changes the trajectory has to be able to pin the arm count. Same
     # spirit as WASSAT_RAW_AT.
+    #
+    # OPEN, and the biggest measured defect in this file (2026-07-26). Swept
+    # interleaved, medians of 5, arm count pinned by WASSAT_ARMS. The column
+    # this rule actually selects is marked *:
+    #
+    #                clauses   arms=1   arms=2   arms=4   arms=8
+    #   smulo016       8,738   5.284*   5.456    5.471    5.620
+    #   3bitadd_31    31,310   2.792*   0.825    0.682    0.655
+    #   minand064     42,956   3.405*   3.504    3.748    4.203
+    #   g125.18       70,163   4.042    1.124    1.220*   1.440
+    #   qg7-13        97,072   0.245    0.246    0.255*   0.268
+    #   crypto-md5   131,279   0.268    0.292    0.320*   0.368
+    #   bmc-ibm-12   194,778   0.629    1.054    0.883    0.783*
+    #   g250.15      233,965   0.867    0.895    0.986    1.112*
+    #   ak128 miter  968,713   0.188    0.183    0.193    0.188*
+    #
+    # 3bitadd_31 is 4.3x slower than it needs to be, and clause count cannot
+    # be what fixes it: it sits at 31k BETWEEN smulo016 at 8.7k and minand064
+    # at 43k, both of which genuinely want the single arm this rule gives all
+    # three. The rule is wrong in both directions on the same size band, which
+    # is the signature of a decision that has no static predictor — the same
+    # shape as the preprocessing-yield question the race already solved by
+    # racing instead of predicting.
+    #
+    # Not changed here, for two reasons. The sweep ran with roughly three
+    # foreign cores busy, which systematically penalises high arm counts, so
+    # every "fewer arms is better" row is suspect (the two rows that go the
+    # OTHER way, 3bitadd_31 and g125.18, are not — contention can only have
+    # understated them). And the arm count interacts with clause sharing, the
+    # ring, and the two preprocessing arms, so it deserves its own campaign on
+    # a quiet machine rather than a side effect of one about the diversity
+    # matrix. This is where that campaign should start, and unlike the
+    # diversity matrix (see wassat_race_round1_conflicts) this is an axis where
+    # the arms are NOT interchangeable, so an adaptive allocator has something
+    # real to allocate.
     return env("WASSAT_ARMS").to_i if env("WASSAT_ARMS") != nil
     return 8 if @nclauses >= 150000
     return 4 if @nclauses >= 50000

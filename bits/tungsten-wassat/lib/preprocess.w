@@ -48,6 +48,40 @@ WASSAT_PRE_MAX_PASSES = 10
 WASSAT_PRE_PROBE_TICKS = 2000000
 WASSAT_PRE_BUCKET_CAP = 1024
 
+# Ticks one native subsumption chunk may retire before it returns to the
+# driver, so that the tick budget and the wall deadline get a say. Without
+# it a chunk ends only when the clause range or the 4000-survivor output
+# budget does, and on a formula with few subsumption hits that is the WHOLE
+# range in one uninterruptible call: 4pipe spends 1.9s and blocks-4-ipc5-h21
+# 95 seconds and 139 billion ticks inside a single one, where no budget,
+# deadline or signal can reach it.
+#
+# Native subsumption retires roughly 1.5 billion ticks a second, so 2M is
+# about 1.5ms of work per chunk — fine enough that the 1500ms stage deadline
+# binds to within a thousandth of itself, coarse enough that the per-chunk
+# driver overhead (one clock read and a re-entry) stays in the noise. The
+# chunk boundary is free: pm[6] already reports where to resume, because the
+# output budget always could stop a chunk early.
+WASSAT_PRE_SUB_CHUNK_TICKS = 2000000
+
+# Clauses the substitution rewrite may walk between budget checks. It used
+# to check once per SCC class, and a class can own most of the formula:
+# on blocks-4-ipc5-h21 (906k clauses) that overshot the 1500ms stage
+# deadline to 2307ms, and with the deadline lifted the rewrite ran for 407
+# SECONDS without ever consulting a budget. Checking every 256 clauses
+# brings it to 1412ms against the same 1500ms deadline, and amortises the
+# clock read to nothing.
+#
+# Worth recording, because it is why the DEADLINE and not the tick budget is
+# what bounds this pass: `@ticks += arr.size` under-charges the rewrite by
+# about three orders of magnitude. The 407s run retired only a few million
+# ticks against a 16M allowance — the boxed cost per clause (materialise the
+# literal array, O(n^2) dedup, store, delete, emit hints) is nowhere near
+# proportional to the clause's length. Re-calibrating the tick currency would
+# invalidate every tick figure quoted in policy.w, so the deadline stays the
+# mechanism, exactly as wassat_pre_stage_ms says it is.
+WASSAT_PRE_SUBST_CHECK_EVERY = 256
+
 + WassatPreprocess
   -> new(@nvars, @input_clauses, @proof_mode)
     nv = @nvars
@@ -115,6 +149,13 @@ WASSAT_PRE_BUCKET_CAP = 1024
     @tick_budget = 0             # 0 = derived from formula size in `run`
     @deadline_ms = 0             # 0 = no wall-clock stop (see set_deadline_ms)
     @probe_cap = WASSAT_PRE_PROBE_CAP
+    # Clauses the substitution rewrite has walked, across every variable and
+    # every class of the whole pass. It has to span calls: a class is a list
+    # of variables and most of them own only a handful of occurrences, so a
+    # counter reset per variable would leave the budget unchecked exactly on
+    # the formulas made of many small classes — which is the shape that runs
+    # for minutes.
+    @rewrite_seen = 0
     # BVE growth margin, raised per pass (CaDiCaL-style elimination
     # rounds): Sinz-counter registers — the whole encoding layer of
     # cardinality instances — cost ONE extra literal to eliminate and a
@@ -793,8 +834,11 @@ WASSAT_PRE_BUCKET_CAP = 1024
 
   -> run_substitution
     return 0 unless @status == 0 && self.within_budget
+    tsub = wassat_prof_clock
     adj = self.build_binary_graph
+    tsub = wassat_prof("pre.subst.graph", tsub)
     comp = self.tarjan(adj)
+    tsub = wassat_prof("pre.subst.tarjan", tsub)
 
     # group literals by component
     groups = {}
@@ -805,10 +849,12 @@ WASSAT_PRE_BUCKET_CAP = 1024
         groups[key] = [] unless groups.has_key?(key)
         groups[key].push(node)
       node += 1
+    tsub = wassat_prof("pre.subst.group", tsub)
 
     groups.each -> (key, members)
       if @status == 0 && members.size > 1 && self.within_budget
         self.substitute_class(adj, comp, members)
+    tsub = wassat_prof("pre.subst.rewrite", tsub)
     0
 
   # Substitute one nontrivial SCC. members are lit_indexes.
@@ -896,16 +942,28 @@ WASSAT_PRE_BUCKET_CAP = 1024
           @vars_substituted += 1
 
     # rewrite every live clause containing a substituted variable of this class
+    finished = true
     lits_of.each -> (y)
       yv = y.abs
-      if @replit[yv] != 0 && @status == 0
-        self.rewrite_occurrences(yv, binid_fwd[yv], binid_back[yv])
+      if @replit[yv] != 0 && @status == 0 && finished
+        finished = self.rewrite_occurrences(yv, binid_fwd[yv], binid_back[yv])
 
     # Every citation of the helpers has been emitted; retiring them now is a
     # pure deletion. Eager unit derivation has already re-pointed @preason
     # away from any helper that propagated during the rewrite cascades.
-    self.delete_batch(helpers)
-    @helper_mark = {}
+    #
+    # NOT when the rewrite was interrupted. An unfinished class leaves its
+    # members in live clauses, and then the helper binaries are the only
+    # remaining statement that y == rep — delete them and the reconstruction
+    # stack's `subst` replay would overwrite a variable the search had
+    # decided independently, which is a wrong model, not a slower one.
+    # Keeping them costs two binaries per member and is exactly sound:
+    # @gone == 2 only withdraws a variable from BVE candidacy (see
+    # bve_candidate), it never asserts the variable occurs nowhere. The
+    # marks stay set with them so no later class can rewrite one away.
+    if finished
+      self.delete_batch(helpers)
+      @helper_mark = {}
     0
 
   -> path_gids(path)
@@ -920,13 +978,24 @@ WASSAT_PRE_BUCKET_CAP = 1024
   # cited by these very steps), and so are clauses satisfied at the root —
   # they may be the recorded reason of a root literal, they are swept later
   # anyway, and replacing one would orphan its citation.
+  #
+  # Returns false when the tick budget or the wall deadline stopped it part
+  # way, which the caller must not treat as a completed class — see
+  # substitute_class. The check is per clause (amortised over
+  # WASSAT_PRE_SUBST_CHECK_EVERY of them, since it reads the clock) rather
+  # than per class, because a class can own most of the formula and the
+  # per-class check then arrives minutes late.
   -> rewrite_occurrences(yv, gid_fwd, gid_back)
     r = @replit[yv]
     two = [2 * yv, 2 * yv + 1]
+    done = true
     two.each -> (li)
       w = @oh[li]
-      while w >= 0
+      while w >= 0 && done
         ci = @ov[w]
+        @rewrite_seen += 1
+        if @rewrite_seen % WASSAT_PRE_SUBST_CHECK_EVERY == 0
+          done = false unless self.within_budget
         eligible = @falive[ci] == 1 && !@helper_mark.has_key?(ci)
         if eligible
           sat_root = false
@@ -989,7 +1058,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
                 confl = self.propagate_root
                 self.refute(confl) if confl >= 0
         w = @on[w]
-    0
+    done
 
   # ---- technique 3: subsumption + self-subsuming strengthening --------------
 
@@ -1015,6 +1084,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
       @subscan_pm[4] = 4000
       @subscan_pm[5] = 0
       @subscan_pm[6] = 0
+      @subscan_pm[7] = WASSAT_PRE_SUB_CHUNK_TICKS
       wassat_pre_subpass(@fla, @fcs, @fcl, @falive, @ftaut, @fsig, @oh, @on,
                          @ov, @ocount, @lstamp, @subscan_out, @subscan_pm)
       @ticks += @subscan_pm[5]
@@ -1464,16 +1534,32 @@ WASSAT_PRE_BUCKET_CAP = 1024
 #
 #   pm[0] generation base  pm[1] start ci  pm[2] end ci (exclusive)
 #   pm[3] bucket scan cap  pm[4] out triple budget  pm[5] ticks out
-#   pm[6] next ci out
+#   pm[6] next ci out     pm[7] tick cap in (0 = uncapped)
+#
+# The tick cap is what makes the pass interruptible at all: it is tested
+# between subsumers, so a chunk always finishes the one it is on (bounded by
+# that clause's length times the bucket cap) and always advances, and the
+# driver gets the budget and the deadline back every ~1.5ms instead of once
+# per formula.
 -> wassat_pre_subpass(fla, fcs, fcl, falive, ftaut, fsig, och, ocn, ocv, ocount, lstamp, out, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   base = pm[0]
   sci = pm[1]
   endci = pm[2]
   cap = pm[3]
   budget = pm[4]
+  tcap = pm[7]
+  tcap = 9223372036854775807 if tcap <= 0
   ticks = 0
+  # `ticks` is the CALIBRATED currency the budgets in policy.w are quoted
+  # in, and it is charged only for a candidate that survives to the literal
+  # match. That makes it the wrong thing to cut a chunk on: a bucket walk
+  # that rejects every candidate retires no ticks at all and would run the
+  # whole formula uninterrupted. `work` charges the walk too, so the chunk
+  # boundary tracks real time, and it is deliberately kept out of pm[5] so
+  # the reported tick counts stay comparable with every number on record.
+  work = 0
   count = 0
-  while sci < endci && count < budget
+  while sci < endci && count < budget && work < tcap
     keep = 1
     if falive[sci] != 1
       keep = 0
@@ -1538,6 +1624,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
           while w >= 0 && scanned < cap
             ci = ocv[w]
             scanned = scanned + 1
+            work = work + 1
             ok = 1
             if ci == sci
               ok = 0
@@ -1560,6 +1647,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
             if ok == 1
               dstx = fcs[ci]
               ticks = ticks + n
+              work = work + n
               matched = 0
               flip_seen = 0
               j = 0

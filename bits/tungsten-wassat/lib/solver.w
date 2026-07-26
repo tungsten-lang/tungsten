@@ -321,6 +321,7 @@ WASSAT_PROOF_DRAT = 2
     @ring_stride = 0
     @arm_id = 0
     @read_ticket = 0
+    @credit = nil              # per-author install credit; see set_share_credit
     @fixed_caps = false
     @retired = false
     @import_pending = 0
@@ -1198,6 +1199,13 @@ WASSAT_PROOF_DRAT = 2
     @read_ticket = 0
     0
 
+  # Shared per-author install counter for the adaptive race: cell k counts the
+  # clauses authored by arm k that some other arm installed. Written with an
+  # atomic add by the importer, read by the coordinator at a barrier.
+  -> set_share_credit(credit)
+    @credit = credit
+    0
+
   # Widen or narrow the export gate. Glue-only (2) keeps the ring quiet but
   # nearly inert — 170 clauses per arm across 140k conflicts on uuf250-01 —
   # while a threaded portfolio wants the ring busy enough that IMPORT
@@ -1769,7 +1777,15 @@ WASSAT_PROOF_DRAT = 2
             @share_filtered += 1 unless ok
           if ok
             status = self.import_clause(n)
-            @share_imports += 1 if status >= 0
+            if status >= 0
+              @share_imports += 1
+              # Credit the AUTHOR, not the importer. An arm whose lemmas other
+              # arms actually install is contributing to the race's finish
+              # time even when its own trajectory never reaches an answer,
+              # and that contribution is invisible to every counter this
+              # solver keeps about itself. One atomic per INSTALLED clause —
+              # rarer than a restart, so it is nowhere near the hot loop.
+              z = ccall("__w_arr_fetch_add", @credit, src, 1) unless @credit == nil
           else
             @share_dropped += 1
         else
@@ -2245,67 +2261,151 @@ WASSAT_PROOF_DRAT = 2
     return 0 unless @raw_flat && @proof_mode == WASSAT_PROOF_NONE
     tsimp = wassat_prof_clock
     if cong == 1 && @config.use_congruence(true)
-      self.extract_binaries
-      self.extract_and_gates
-      self.extract_xor_gates
+      self.congruence_rounds
     self.substitute_equivalences if @config.use_substitution(true)
     tsimp = wassat_prof("raw.simplify", tsimp)
+    0
+
+  # Congruence closure iterated to a fixpoint.
+  #
+  # kissat reaches the same fixpoint with an occurrence-driven worklist:
+  # merge_literals (congruence.c:877) schedules the merged-away literal, and
+  # propagate_units_and_equivalences (:4210) rewrites every gate in that
+  # literal's occurrence list through the representative map and RE-HASHES
+  # it, which can expose a further match and merge again. extract_gates
+  # itself runs exactly once. That rehash is what walks an equivalence UP a
+  # circuit: a merge at one layer makes two gates in the layer above
+  # syntactically identical, and nothing but a rehash can notice.
+  #
+  # This solver keeps no gate occurrence index — a merge leaves here only as
+  # the two equivalence binaries, and the SCC substitution is what consumes
+  # them (add_merge_binaries). But that substitution rewrites the arena IN
+  # PLACE, so re-extracting from the rewritten arena hashes the same gates
+  # through the same representative map. Re-extraction is this
+  # architecture's spelling of kissat's rehash, and iterating the pair is
+  # the fixpoint. One pass sees only the layer the merges started at.
+  #
+  # Bounded the way every other budget here is bounded, and cheaply: a round
+  # that merges nothing, or whose merges the SCC pass declines to substitute,
+  # ends the loop immediately — and that is the common case, since congruence
+  # merges anything at all on only 7 of the 115 instances in the competition
+  # set. At the shipped default of one round this does byte-for-byte the work
+  # the single pass did; see congruence_max_rounds for why the default is one
+  # and what the deeper closure was measured to be worth.
+  -> congruence_rounds
+    self.extract_binaries
+    rounds = @config.congruence_max_rounds
+    r = 0
+    while r < rounds
+      m = self.extract_and_gates + self.extract_xor_gates
+      break if m == 0
+      # The LAST round's substitution is the caller's, not ours. That is
+      # what makes congruence_max_rounds 1 bit-identical to the single pass
+      # this replaced — extract, extract, then exactly one substitution —
+      # rather than one pass plus a redundant SCC sweep.
+      break if r + 1 >= rounds
+      before = @nsubst
+      self.substitute_equivalences
+      break unless @ok
+      # A round whose merges the SCC pass declined to substitute cannot
+      # change what the next extraction hashes, so it is the fixpoint.
+      break if @nsubst == before
+      r += 1
     0
 
   # Congruence closure, stage 3: XOR gate extraction. Arity is capped at 4
   # (kissat's default): the side-clause requirement is 2^arity clauses, so
   # the search cost doubles per unit of arity while real encodings almost
   # never carry wider XORs.
+  # The gate arena is sized from the formula and GROWN when the scan reports
+  # it filled one (st[2]), rather than clamped to a constant: a constant cap
+  # truncates extraction silently, which is indistinguishable from "this
+  # formula has no gates" and is the worst possible failure for a technique
+  # whose whole output is a merge count. kissat mallocs each gate
+  # individually and doubles its hash table at 50% load, so it has no cap at
+  # all; doubling a flat arena is the same policy with one allocation.
+  # Geometric, so the retries cost at most one extra pass in total.
   -> extract_xor_gates
     return 0 unless @proof_mode == WASSAT_PROOF_NONE
+    ceil = @config.congruence_gate_ceiling
     maxg = @ncl + 16
     maxg = 131072 if maxg > 131072
-    gcap = 8 * maxg
-    ghcap = 1024
-    while ghcap < 4 * maxg
-      ghcap = ghcap * 2
+    maxg = ceil if maxg > ceil
     chcap = 1024
     while chcap < 2 * (@ncl + 16)
       chcap = chcap * 2
     nl = 2 * @nvars + 4
-    lcount = i64[nl]
-    cht = i64[chcap]
-    mark = i64[nl]
-    qli = i64[8]
-    gar = i64[gcap]
-    ght = i64[ghcap]
-    out = i64[2 * maxg]
-    st = i64[8]
-    wassat_extract_xor_gates(@cmeta, @alive, @arena, @lassign, lcount, cht,
-                             mark, qli, gar, ght, out, st, @ncl, nl,
-                             chcap - 1, gcap, ghcap - 1, maxg)
-    self.add_merge_binaries(out, st[0])
-    z = wassat_prof("congruence.xor gates=[st[1]] merges=[st[0]]", wassat_prof_clock)
-    st[0]
+    nm = 0
+    ng = 0
+    grow = true
+    while grow
+      grow = false
+      gcap = 8 * maxg
+      ghcap = 1024
+      while ghcap < 4 * maxg
+        ghcap = ghcap * 2
+      lcount = i64[nl]
+      cht = i64[chcap]
+      mark = i64[nl]
+      qli = i64[8]
+      gar = i64[gcap]
+      ght = i64[ghcap]
+      out = i64[2 * maxg]
+      st = i64[8]
+      wassat_extract_xor_gates(@cmeta, @alive, @arena, @lassign, lcount, cht,
+                               mark, qli, gar, ght, out, st, @ncl, nl,
+                               chcap - 1, gcap, ghcap - 1, maxg)
+      if st[2] == 1 && maxg < ceil
+        maxg = 2 * maxg
+        maxg = ceil if maxg > ceil
+        grow = true
+      else
+        nm = st[0]
+        ng = st[1]
+        self.add_merge_binaries(out, nm)
+    z = wassat_prof("congruence.xor gates=[ng] merges=[nm] cap=[maxg]", wassat_prof_clock)
+    nm
 
   # Congruence closure, stage 2: AND gate extraction. Merges are emitted as
   # equivalence binaries — nothing else — so the SCC pass that follows is
   # what actually turns them into a smaller formula. Measured alone the
   # pass is worthless; measured with substitution it is the difference.
+  # Same growth policy as the XOR pass above: size from the formula, and
+  # double whenever the scan reports it ran out of arena, hash table or
+  # merge slots.
   -> extract_and_gates
     return 0 unless @proof_mode == WASSAT_PROOF_NONE
+    ceil = @config.congruence_gate_ceiling
     maxg = @ncl + 16
     maxg = 131072 if maxg > 131072
-    gcap = 8 * maxg
-    hcap = 1024
-    while hcap < 4 * maxg
-      hcap = hcap * 2
-    mark = i64[2 * @nvars + 4]
-    gar = i64[gcap]
-    ght = i64[hcap]
-    out = i64[2 * maxg]
-    st = i64[8]
-    wassat_extract_and_gates(@cmeta, @alive, @arena, @lassign, @bldir,
-                             @bl_pool, mark, gar, ght, out, st, @ncl,
-                             gcap, hcap - 1, maxg)
-    self.add_merge_binaries(out, st[0])
-    z = wassat_prof("congruence.and gates=[st[1]] merges=[st[0]]", wassat_prof_clock)
-    st[0]
+    maxg = ceil if maxg > ceil
+    nm = 0
+    ng = 0
+    grow = true
+    while grow
+      grow = false
+      gcap = 8 * maxg
+      hcap = 1024
+      while hcap < 4 * maxg
+        hcap = hcap * 2
+      mark = i64[2 * @nvars + 4]
+      gar = i64[gcap]
+      ght = i64[hcap]
+      out = i64[2 * maxg]
+      st = i64[8]
+      wassat_extract_and_gates(@cmeta, @alive, @arena, @lassign, @bldir,
+                               @bl_pool, mark, gar, ght, out, st, @ncl,
+                               gcap, hcap - 1, maxg)
+      if st[2] == 1 && maxg < ceil
+        maxg = 2 * maxg
+        maxg = ceil if maxg > ceil
+        grow = true
+      else
+        nm = st[0]
+        ng = st[1]
+        self.add_merge_binaries(out, nm)
+    z = wassat_prof("congruence.and gates=[ng] merges=[nm] cap=[maxg]", wassat_prof_clock)
+    nm
 
   # Turn each equivalent-literal pair into the two binaries that state it.
   # This is the ONLY channel between congruence and the rest of the solver:
@@ -2391,11 +2491,17 @@ WASSAT_PROOF_DRAT = 2
       @ok = false
       @formula_unsat = true
       return 0
-    @subst = i64[@nvars + 2]
+    # Allocated once and never rebuilt: congruence_rounds calls this pass
+    # repeatedly, each round's SCC sees only the equivalences that round's
+    # merges introduced, and a fresh array would throw away every mapping
+    # the previous rounds established — silently, and only visible as a
+    # wrong model. Entries already written are likewise never overwritten;
+    # the chain they form is resolved in unsubstitute.
+    @subst = i64[@nvars + 2] if @nsubst == 0
     v = 1
     while v <= @nvars
       r = reprs[v << 1]
-      if r != 0 && r != v << 1
+      if r != 0 && r != (v << 1) && @subst[v] == 0
         rv = r >> 1
         @subst[v] = (r & 1) == 1 ? 0 - rv : rv
         @nsubst += 1
@@ -2406,7 +2512,7 @@ WASSAT_PROOF_DRAT = 2
         # branching heuristic (bmc-ibm-10: 33k decisions became 355k).
         # unsubstitute overwrites the parked value with the
         # representative's when the model is read.
-        self.enqueue(v, 0 - 1)
+        self.enqueue(v, 0 - 1) if self.value(v) == 0
       v += 1
     z = wassat_prof("subst vars=[@nsubst] rewritten=[rst[2]] taut=[rst[3]] units=[rst[1]] edges=[st[2]]", wassat_prof_clock)
     u = 0
@@ -2430,9 +2536,28 @@ WASSAT_PROOF_DRAT = 2
     return 0 if @nsubst == 0
     v = 1
     while v <= @nvars
-      r = @subst[v]
-      if r != 0
-        pol = self.value(r)
+      if @subst[v] != 0
+        # Follow the chain to a variable nothing mapped away. With
+        # congruence iterated to a fixpoint a variable can be mapped in one
+        # round onto a representative that a LATER round mapped again, and
+        # only the end of the chain names a variable the search actually
+        # decided — every link before it is parked at an arbitrary root
+        # value. Reading one link would make the model depend on variable
+        # numbering. kissat's find_repr walks the same chain.
+        sign = 1
+        cur = v
+        hops = 0
+        while @subst[cur] != 0 && hops <= @nsubst
+          nxt = @subst[cur]
+          if nxt < 0
+            sign = 0 - sign
+            cur = 0 - nxt
+          else
+            cur = nxt
+          hops += 1
+        rep = cur
+        rep = 0 - cur if sign < 0
+        pol = self.value(rep)
         pol = 1 if pol == 0
         @assign[v] = pol
         @lassign[v << 1] = pol
@@ -2482,6 +2607,33 @@ WASSAT_PROOF_DRAT = 2
     if (status == 1 || status == 0 - 1) && @stop_cell != nil
       @stop_cell[1] = status
       @stop_cell[0] = 1
+    0
+
+  # Progress telemetry for the adaptive race, written into this arm's private
+  # slice of a shared i64 slab (stride WASSAT_TEL_STRIDE, laid out below).
+  #
+  # It exists because a race arm's terminal signal — "did you win" — is
+  # useless for allocation: at most one arm per race ever produces it, and it
+  # arrives exactly when there is nothing left to allocate. Every number here
+  # is instead readable from an arm that has NOT finished, which is every arm,
+  # every round but the last.
+  #
+  #   0 conflicts   1 decisions   2 propagations
+  #   3 fast LBD EMA (<<16)   4 slow LBD EMA (<<16)   5 trail-size EMA (<<16)
+  #   6 live learned clauses  7 cumulative solve ms (the caller accumulates)
+  #
+  # The three EMAs are the solver's own restart controller state, already
+  # maintained in the innermost conflict loop (wassat_ema_conflict), so this
+  # costs nothing to produce: a race arm's learning quality is measured by the
+  # exact statistic the arm already uses to decide when to restart itself.
+  -> export_telemetry(tel, base)
+    tel[base] = @conflicts
+    tel[base + 1] = @decisions_made
+    tel[base + 2] = @pstate[4]
+    tel[base + 3] = @estate[0]
+    tel[base + 4] = @estate[1]
+    tel[base + 5] = @estate[2]
+    tel[base + 6] = @nlearned
     0
 
   # Full MiniSat-style incremental query: SAT / UNSAT / UNKNOWN under the
@@ -2912,6 +3064,7 @@ WASSAT_PROOF_DRAT = 2
 # flat gate arena; a probe that matches an existing entry is a merge.
 #
 #   out[2i], out[2i+1] = equivalent literal pair   st[0] = merges  st[1] = gates
+#   st[2] = 1 when a capacity stopped the scan short of the whole formula
 -> wassat_extract_and_gates(cm, alive, ar, lasg, bd, blp, mark, gar, ght, out, st, ncl, gcap, hmask, outcap) (i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64)
   gen = 0
   gtop = 0
@@ -3034,6 +3187,10 @@ WASSAT_PROOF_DRAT = 2
     ci += 1
   st[0] = nm
   st[1] = ng
+  st[2] = 0
+  st[2] = 1 if ci < ncl
+  st[2] = 1 if nm >= outcap
+  st[2] = 1 if gtop + 24 > gcap
   0
 
 # XOR gate extraction — kissat's extract_xor_gates_with_base_clause.
@@ -3058,6 +3215,7 @@ WASSAT_PROOF_DRAT = 2
 # pair, and nothing here touches a clause.
 #
 #   out[2i], out[2i+1] = equivalent literal pair   st[0] = merges  st[1] = gates
+#   st[2] = 1 when a capacity stopped the scan short of the whole formula
 -> wassat_extract_xor_gates(cm, alive, ar, lasg, lcount, cht, mark, qli, gar, ght, out, st, ncl, nlits, chmask, gcap, ghmask, outcap) (i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64 i64)
   li = 0
   while li < nlits
@@ -3276,6 +3434,10 @@ WASSAT_PROOF_DRAT = 2
     ci += 1
   st[0] = nm
   st[1] = ng
+  st[2] = 0
+  st[2] = 1 if ci < ncl
+  st[2] = 1 if nm >= outcap
+  st[2] = 1 if gtop + 12 > gcap
   0
 
 # ---- equivalent-literal substitution (SCC decomposition) ------------------

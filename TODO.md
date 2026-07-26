@@ -32,3 +32,21 @@ messages, contiguous f32/f64/integer datasets (LE/BE). TH5C/TH5D unchanged.
 - Golden fixtures from h5py/`h5dump` under `spec/sci/fixtures/`.
 - Optional `libhdf5` bridge (`runtime/sci_io_bridge.c`) remains unlinked —
   only if the pure walker stalls on exotic files.
+
+## Wassat: merged multi-thread proof stream (deferred by CEO review 2026-07-22)
+
+**Trigger:** Phase 3 `--fast` clause sharing lands AND demonstrates superlinear
+gains AND certified (`--proof`) runs become the wall-clock bottleneck. Until
+all three hold, do not build this.
+
+**What:** design + implement a single merged proof stream with cross-thread
+derivation tracking, so a clause-sharing portfolio can emit checkable
+refutations. Today's decision (review findings 3A + 12C): `--proof` races
+isolated processes with self-contained proofs and no sharing; sharing lives
+only in `--fast`, where answers are trusted-not-proven by contract. This TODO
+is the one door that design closes, and this note is where the key is.
+
+**Context to reload:** plan `~/.claude/plans/would-you-rather-write-floating-parnas.md`
+(Phase 3 section), CEO record
+`~/.gstack/projects/companygardener-math/ceo-plans/2026-07-22-wassat-portfolio.md`.
+Effort: XL human / L with CC. Priority: P3.

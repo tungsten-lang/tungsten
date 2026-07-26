@@ -395,10 +395,18 @@ WASSAT_ARM_SLS = 2             # local search, models only
 -> wassat_fast_arm_body(solver, res, base)
   solver.solve_shared(res, base)
 
-# Budgeted arm body: each arm stops UNKNOWN after `budget` conflicts (0 =
-# unlimited) so the raw-kernel race honours the aggregate --conflicts cap.
--> wassat_fast_arm_body_budget(solver, res, base, budget)
+# The same arm body for a ROUND of the adaptive race: solve a slice, then
+# publish progress telemetry into this arm's private slice of the shared slab.
+# `tel[tbase + 7]` accumulates solve milliseconds across rounds, which is the
+# exposure denominator the allocator divides reward by — the "one pull is a
+# resource-time quantum" rule, so a fast arm and a slow arm are compared on
+# what they returned per millisecond rather than per invocation.
+-> wassat_fast_arm_body_round(solver, res, base, budget, tel, tbase)
+  t0 = ccall("__w_clock_ms")
   solver.solve_shared_budget(res, base, budget)
+  solver.export_telemetry(tel, tbase)
+  tel[tbase + 7] = tel[tbase + 7] + (ccall("__w_clock_ms") - t0)
+  0
 
 # ---- lucky arm ---------------------------------------------------------------
 #
@@ -468,9 +476,17 @@ WASSAT_ARM_SLS = 2             # local search, models only
   cap = threads + 2
   stop = i64[4]
   res = i64[cap * (nv + 8)]
+  tel = i64[cap * WASSAT_TEL_STRIDE]
+  # Cell k counts clauses AUTHORED by arm k that some other arm installed.
+  credit = i64[cap]
   ring_maxlen = 24
   ring_cap = 4096
   ring = i64[8 + ring_cap * (3 + ring_maxlen)]
+  # The arm's configuration, kept as DATA rather than only as a sequence of
+  # calls on the solver: an allocator that may replace an arm has to be able
+  # to name the configuration it is replacing, name the one it is replacing it
+  # with, and give the axes credit separately (see wassat_race_axis_score).
+  cfgs = i64[cap * WASSAT_CFG_STRIDE]
   solvers = []
   a = 0
   while a < threads
@@ -480,7 +496,9 @@ WASSAT_ARM_SLS = 2             # local search, models only
     # A lone raw arm has nobody to share with — the preprocessing arms solve
     # DIFFERENT formulas and must never take its clauses — so it keeps the
     # export path out of its inner loop entirely.
-    s.enable_sharing(ring, ring_cap, ring_maxlen, a) if threads > 1
+    if threads > 1
+      s.enable_sharing(ring, ring_cap, ring_maxlen, a)
+      s.set_share_credit(credit)
     if threads == 1
       # Sole raw arm: take the configuration the serial post-probe solve
       # would have used, so adding a preprocessing arm changes only what
@@ -488,35 +506,77 @@ WASSAT_ARM_SLS = 2             # local search, models only
       s.enable_chrono
       s.simplify_raw if art["config"].force_simplify?
     else
-      s.disable_vmtf if a % 2 == 1
-      grp = a / 2
-      # arm 0 would exactly replay the serial probe's already-failed
-      # trajectory (same heuristic, same phases) — give it a fresh basin
-      s.reseed_phases(777) if a == 0
-      s.reseed_phases(1000 + a * 7919) if grp == 1
-      s.reseed_phases(4242 + a * 104729) if grp == 3
-      s.set_positive_phases if grp == 2
-      # Chronological backtracking on half the arms: it is worth ~3.5x on
-      # this instance class when it fits the trajectory and costs when it
-      # does not, which is exactly what a race is for — take the min rather
-      # than guess which side the instance is on.
-      s.enable_chrono if grp % 2 == 1
-      # Fifth diversity axis: congruence closure + equivalent-literal
-      # substitution against the arm's own arena. Deterministic single-arm
-      # measurement on the bmc family: ibm-11 11,940 -> 4,734 conflicts and
-      # ibm-13 20,350 -> 9,238 with it, against ibm-12 7,162 -> 15,868. A
-      # symmetric win and loss of the same size on the same family is the
-      # definition of a race axis — take the min rather than pick a side.
-      # Arms 1, 2, 5, 6 draw one from each of the four existing groups, so
-      # the axis stays decorrelated from phases, VMTF and chronological
-      # backtracking instead of piggybacking on one of them.
-      s.simplify_raw_mode(0) if a % 4 == 1
-      s.simplify_raw_mode(1) if a % 4 == 2
-      s.simplify_raw if a % 4 != 1 && a % 4 != 2 && art["config"].force_simplify?
+      wassat_race_matrix_config(a, cfgs, a * WASSAT_CFG_STRIDE)
+      wassat_race_apply_config(s, cfgs, a * WASSAT_CFG_STRIDE, art["config"].force_simplify?)
     solvers.push(s)
     a += 1
   { "nv": nv, "solvers": solvers, "res": res, "stop": stop, "threads": threads,
-    "cap": cap, "pre": [], "formula": formula }
+    "cap": cap, "pre": [], "formula": formula, "tel": tel, "cfgs": cfgs,
+    "art": art, "ring": ring, "ring_cap": ring_cap, "ring_maxlen": ring_maxlen,
+    "credit": credit }
+
+# ---- arm configuration as data ------------------------------------------------
+#
+# WASSAT_CFG_STRIDE cells per arm:
+#   0 branching   0 = the shape policy's heuristic, 1 = the other one
+#   1 phase kind  0 = saved phases, 1 = reseeded from cell 2, 2 = all-positive
+#   2 phase seed  (kind 1 only)
+#   3 chrono      0 off, 1 on (chronological backtracking v2)
+#   4 simplify    0 = none unless forced, 1 = substitution, 2 = + congruence
+WASSAT_CFG_STRIDE = 8
+WASSAT_TEL_STRIDE = 8
+
+# The historical hard-coded diversity matrix, transcribed exactly. Reproducing
+# it here rather than replacing it is the point: the adaptive allocator STARTS
+# from the matrix, so an instance the matrix already decides in one round is
+# decided by the same eight trajectories it always was, and anything the
+# allocator does afterwards is measured against that baseline rather than
+# confounded with a new starting allocation.
+#
+# The axis rationale (unchanged, and each one is a measured symmetric win/loss
+# on the bmc family, which is what makes it a race axis rather than a default):
+# branching heuristic — ibm-12's conflict count ranges 4.9k-17k across
+# configurations with no single winner. Chronological backtracking — worth
+# ~3.5x when it fits the trajectory and a loss when it does not. Congruence
+# plus equivalent-literal substitution — ibm-11 11,940 -> 4,734 conflicts and
+# ibm-13 20,350 -> 9,238 with it, against ibm-12 7,162 -> 15,868; arms 1, 2, 5,
+# 6 draw one from each phase group so the axis stays decorrelated. Arm 0 is
+# reseeded because it would otherwise replay the serial probe's already-failed
+# trajectory exactly.
+-> wassat_race_matrix_config(a, cfgs, b) (i64 i64[] i64)
+  grp = a / 2 ## i64
+  cfgs[b] = a % 2
+  cfgs[b + 1] = 0
+  cfgs[b + 2] = 0
+  if a == 0
+    cfgs[b + 1] = 1
+    cfgs[b + 2] = 777
+  if grp == 1
+    cfgs[b + 1] = 1
+    cfgs[b + 2] = 1000 + a * 7919
+  if grp == 2
+    cfgs[b + 1] = 2
+  if grp == 3
+    cfgs[b + 1] = 1
+    cfgs[b + 2] = 4242 + a * 104729
+  cfgs[b + 3] = grp % 2
+  cfgs[b + 4] = 0
+  cfgs[b + 4] = 1 if a % 4 == 1
+  cfgs[b + 4] = 2 if a % 4 == 2
+  0
+
+# Apply a configuration vector to a freshly built solver. `forced` is the
+# WASSAT_SIMPLIFY measurement hook: it only reaches arms whose simplify axis is
+# 0, exactly as before.
+-> wassat_race_apply_config(s, cfgs, b, forced)
+  s.disable_vmtf if cfgs[b] == 1
+  s.reseed_phases(cfgs[b + 2]) if cfgs[b + 1] == 1
+  s.set_positive_phases if cfgs[b + 1] == 2
+  s.enable_chrono if cfgs[b + 3] == 1
+  s.simplify_raw_mode(0) if cfgs[b + 4] == 1
+  s.simplify_raw_mode(1) if cfgs[b + 4] == 2
+  s.simplify_raw if cfgs[b + 4] == 0 && forced
+  0
 
 # Register a PREPROCESSING arm: its own preprocessor (never shared — two
 # threads rendering through one WassatPreprocess would race on its arena) and
@@ -548,10 +608,28 @@ WASSAT_ARM_SLS = 2             # local search, models only
 # runs, and this arm sticks to the same already-warm code the serial
 # preprocessed path uses rather than any newly-written polymorphic helper.
 #
-# `out` is this arm's private two-slot channel back to the coordinator: the
-# elimination stack its model must be reconstructed through, and the stats to
-# report. Private per arm, so pushing to it needs no synchronisation.
--> wassat_pre_arm_body(pre, formula, nv, res, base, heavy, stop, out, budget)
+# `out` is this arm's private channel back to the coordinator: the elimination
+# stack its model must be reconstructed through, the stats to report, and —
+# from round 1 on — the solver it built over its own rendering, so a later
+# round resumes that search instead of re-rendering the formula. Private per
+# arm, so pushing to it needs no synchronisation.
+#
+# `round` 0 renders and takes the late lucky shot; every later round is a pure
+# search slice on the solver round 0 left behind. A rendering cannot be sliced
+# in the middle, so round 0 is as long as the rendering takes and the barrier
+# after it is the one place a raw arm can be left waiting — which is why round
+# 0 is also the longest slice the race ever hands out.
+-> wassat_pre_arm_body(pre, formula, nv, res, base, heavy, stop, out, budget, tel, tbase, round)
+  t0 = ccall("__w_clock_ms")
+  if round > 0
+    # Nothing to resume: this arm refuted during rendering, or won with the
+    # late lucky dives, or its rendering never produced a solver.
+    return 0 if out.size < 3
+    sr = out[2]
+    sr.solve_shared_budget(res, base, budget)
+    sr.export_telemetry(tel, tbase)
+    tel[tbase + 7] = tel[tbase + 7] + (ccall("__w_clock_ms") - t0)
+    return 0
   rendered = pre.run_light_flat(formula)
   rendered = pre.run_heavy if heavy && rendered["status"] == 0
   out.push(rendered["stack"])
@@ -580,13 +658,196 @@ WASSAT_ARM_SLS = 2             # local search, models only
   s = Wassat.from_flat(nv, rendered, 0)
   s.enable_fixed_caps
   s.set_stop_cell(stop)
+  out.push(s)
   s.solve_shared_budget(res, base, budget)
+  s.export_telemetry(tel, tbase)
+  tel[tbase + 7] = tel[tbase + 7] + (ccall("__w_clock_ms") - t0)
+  0
+
+# ---- the reward signal --------------------------------------------------------
+#
+# A race arm's terminal signal is "did you win", and it is useless for
+# allocation: at most one arm per race ever emits it, and it arrives exactly
+# when there is nothing left to allocate. Everything below is therefore scored
+# from telemetry an UNFINISHED arm produces, which is the whole difficulty.
+#
+# All five were MEASURED against the only question that matters — where does
+# the arm that goes on to win sit in this metric's ranking at a barrier — and
+# all five came back at chance. The numbers are under
+# wassat_race_round1_conflicts. They are kept selectable rather than reduced to
+# the winner because there is no winner; the next attempt at this should start
+# by re-running that study, not by trusting a comment.
+#
+#   0 tight-rate, conflicts per second over the fast LBD EMA. Work rate divided
+#     by work quality: an arm loses by being slow OR by learning garbage. The
+#     prior favourite, and no better than chance (0.417 +- 0.100).
+#   1 the fast LBD EMA alone, lower better — recent learned-clause tightness,
+#     the solver's own restart controller reading its own learning quality.
+#   2 propagations per conflict, higher better — reasoning depth per conflict.
+#     The metric whose SIGN flipped between two samples of the same instances,
+#     which is what established that none of this is signal.
+#   3 sharing credit: clauses this arm AUTHORED that other arms installed. The
+#     one candidate that is not about the arm's own progress at all — metaflip's
+#     delayed credit assignment (lib/metaflip/fleet/lineage.w), where an arm is
+#     paid for what its descendants achieved. In a clause-sharing race this is
+#     the honest objective, because the race's goal is its own finish time and
+#     an arm that helps another arm finish has earned its core. Also chance.
+#   4 live learned-clause count. The only metric to clear chance (0.320 +-
+#     0.097) and the only one with no mechanism behind it, on one sample, out of
+#     ten tried. Treated as noise until someone reproduces it.
+#
+# Returned in milli-units, and normalised by the round's best arm before it is
+# banked, so a banked reward is always 0..1000 whatever the instance or the
+# round length. Note that a PREPROCESSING arm's numbers are not comparable with
+# a raw arm's — it is solving a smaller formula, so its conflict rate and trail
+# depth are on a different scale — which is why only raw arms are ranked
+# against each other.
+-> wassat_race_arm_score(metric, dconf, dms, dprop, dcredit, learnt, fast_lbd) (i64 i64 i64 i64 i64 i64 i64) i64
+  return 0 if dconf <= 0
+  # A sub-millisecond slice is charged one millisecond rather than scored zero:
+  # an arm that answered its slice too fast to time is the LAST one to call a
+  # loser, and a zero here would name it worst and respawn it.
+  ms = dms < 1 ? 1 : dms ## i64
+  # est[0] is the fast LBD EMA in <<16 fixed point; +1 floors the divisor and
+  # keeps a formula whose learned clauses are all unit from dividing by zero.
+  lbd = (fast_lbd >> 16) + 1 ## i64
+  return (dconf * 1000000) / (ms * lbd) if metric == 0
+  return 1000000 / lbd if metric == 1
+  return (dprop * 1000) / dconf if metric == 2
+  return (dcredit * 1000000) / ms if metric == 3
+  learnt
+
+# floor(log2) and integer sqrt: UCB needs a logarithm and a square root, and
+# this codebase has neither in integer form. Borrowed from metaflip's GPU role
+# scheduler (lib/metaflip/kernels/policy.w), which solves the same problem for
+# the same reason — fixed-point integer arithmetic end to end, so an allocation
+# is reproducible and testable rather than a float that drifts by platform.
+-> wassat_log2_floor(x) (i64) i64
+  n = x ## i64
+  r = 0 ## i64
+  while n > 1
+    n = n >> 1
+    r += 1
+  r
+
+-> wassat_isqrt(x) (i64) i64
+  return 0 if x <= 0
+  return 1 if x < 4
+  g = 1 << ((wassat_log2_floor(x) / 2) + 1) ## i64
+  i = 0 ## i64
+  while i < 64
+    ng = (g + x / g) / 2 ## i64
+    return g if ng >= g
+    g = ng
+    i += 1
+  g
+
+# ---- axis-level credit assignment ---------------------------------------------
+#
+# Credit goes to the AXIS LEVELS a configuration carries, not to the
+# configuration as a whole. With eight arms there is exactly ONE sample of each
+# full configuration and four of each binary axis level, so per-configuration
+# credit is a bandit with one pull per arm — no better than random — while
+# per-axis credit has enough samples in a single round to mean something.
+#
+# Ten slots: branching {evsids, vmtf} | phases {saved, seeded, positive} |
+# chrono {off, on} | simplify {none, subst, subst+congruence}.
+WASSAT_AXIS_SLOTS = 10
+
+-> wassat_axis_base(axis) (i64) i64
+  return 0 if axis == 0
+  return 2 if axis == 1
+  return 5 if axis == 2
+  7
+
+-> wassat_axis_levels(axis) (i64) i64
+  return 2 if axis == 0
+  return 3 if axis == 1
+  return 2 if axis == 2
+  3
+
+# Which configuration cell an axis reads: branching 0, phases 1, chrono 3,
+# simplify 4 (cell 2 is the phase seed, which is a payload, not a level).
+-> wassat_axis_cfg_slot(axis) (i64) i64
+  return 0 if axis == 0
+  return 1 if axis == 1
+  return 3 if axis == 2
+  4
+
+# Integer UCB1 in milli-units over one axis. 1386000 is 2*ln(2)*10^6, so
+# isqrt(1386000 * log2(N) / n) is 1000*sqrt(2 ln N / n) — the textbook bonus,
+# without a float. An untried level is infinitely optimistic, which is what
+# forces every level of every axis to be sampled before any of them is trusted.
+-> wassat_race_axis_best(axis, rew, cnt) (i64 i64[] i64[]) i64
+  b = wassat_axis_base(axis) ## i64
+  n = wassat_axis_levels(axis) ## i64
+  total = 0 ## i64
+  l = 0 ## i64
+  while l < n
+    total += cnt[b + l]
+    l += 1
+  total = 2 if total < 2
+  best = 0 ## i64
+  best_score = 0 - 1 ## i64
+  l = 0
+  while l < n
+    score = 1000000000 ## i64
+    if cnt[b + l] > 0
+      mean = rew[b + l] / cnt[b + l] ## i64
+      score = mean + wassat_isqrt((1386000 * wassat_log2_floor(total)) / cnt[b + l])
+    if score > best_score
+      best = l
+      best_score = score
+    l += 1
+  best
+
+# Build the configuration a respawned arm takes. `rotate` is metaflip's forced
+# rotation (kernels/pool.w: every fourth launch ignores the argmax): without
+# it a noisy first round can pin every later respawn to one corner of the
+# configuration space and the race stops being a race. The phase seed is ALWAYS
+# fresh — a respawned arm that replays a trajectory already in the race has
+# bought nothing at all.
+-> wassat_race_new_config(cfgs, b, rew, cnt, nrealloc, rotate) (i64[] i64 i64[] i64[] i64 i64)
+  if rotate == 1
+    # Continue the diversity matrix's own sequence past the arms in play,
+    # which walks it onto phase seeds and axis combinations no live arm holds.
+    wassat_race_matrix_config(nrealloc, cfgs, b)
+    cfgs[b + 2] = 990001 + nrealloc * 15485863 if cfgs[b + 1] == 1
+    return 0
+  cfgs[b] = wassat_race_axis_best(0, rew, cnt)
+  cfgs[b + 1] = wassat_race_axis_best(1, rew, cnt)
+  cfgs[b + 3] = wassat_race_axis_best(2, rew, cnt)
+  cfgs[b + 4] = wassat_race_axis_best(3, rew, cnt)
+  # Level 0 of the phase axis is "saved phases", which for a FRESH solver means
+  # the default initial polarity — the incumbent arm 0's own starting point. A
+  # respawn onto it buys a duplicate trajectory, so it is promoted to a seeded
+  # one. The seed is always fresh for the same reason.
+  cfgs[b + 1] = 1 if cfgs[b + 1] == 0
+  cfgs[b + 2] = 990001 + nrealloc * 15485863
+  0
 
 # Run the race: every raw arm over the flat artifact, plus one arm per
 # preprocessed rendering that renders and then solves, all concurrently.
 # `budget` caps each arm's conflicts (0 = unlimited). While the arms are live
 # the main thread does nothing but join — inline caches are process-global,
 # so the coordinator must not dispatch until every arm has stopped.
+#
+# ADAPTIVE ALLOCATION. The race runs in rounds separated by a join barrier;
+# scoring and reallocation happen at the barrier, on the main thread, with
+# every arm stopped. Round 0 is sized (wassat_race_round1_conflicts) so that
+# every instance the fixed matrix already decides quickly never reaches a
+# barrier at all, and the mechanism costs those families exactly nothing.
+#
+# Two invariants hold whatever the allocator decides:
+#   * arm 0 is never reallocated. With one raw arm it holds the configuration
+#     the serial post-probe solve would have used, and a race that REPLACES
+#     that configuration can lose outright to the serial path on the instances
+#     where it was the right one.
+#   * an arm is replaced only when it is losing BADLY (below half the median
+#     score), never merely because it is behind. A respawn throws away that
+#     arm's learned clauses and pays a fresh from_flat, so churn on a race
+#     whose arms are all comparable — which the measurements say is the common
+#     case — is a pure loss.
 -> wassat_race_run(race, budget)
   nv = race["nv"]
   res = race["res"]
@@ -595,25 +856,205 @@ WASSAT_ARM_SLS = 2             # local search, models only
   threads = race["threads"]
   pre = race["pre"]
   formula = race["formula"]
+  tel = race["tel"]
+  cfgs = race["cfgs"]
+  art = race["art"]
+  cap = race["cap"]
   total = threads + pre.size
-  handles = []
+  round_ms = wassat_race_round_ms
+  trace = wassat_race_trace?
+  # Reallocation needs somebody to reallocate: with one raw arm there is no
+  # second configuration to compare against and no arm that may be replaced.
+  # Rounds exist ONLY to make reallocation possible, so a race that structurally
+  # cannot reallocate does not pay for them — measured on the three instances
+  # the policy gives a single raw arm, rounds alone cost 4-6% (smulo016 8.90s ->
+  # 9.21s, minand064 6.07s -> 6.43s) buying nothing, because with one arm the
+  # barrier is pure idle time at the join. WASSAT_REALLOC=0 keeps the barriers
+  # and the telemetry while suppressing the respawn, which is the ablation that
+  # separates the cost of the mechanism from its value.
+  sliceable = threads > 1
+  realloc = sliceable ? wassat_race_reallocate : 0
+  round1 = sliceable ? wassat_race_round1_conflicts : 0
+  credit = race["credit"]
+  metric = wassat_race_reward_metric
+  realloc_every = wassat_race_realloc_every
+  live = i64[cap]
+  slice = i64[cap]
+  spent = i64[cap]
+  pcredit = i64[cap]
+  prev = i64[cap * WASSAT_TEL_STRIDE]
+  score = i64[cap]
+  sorted = i64[cap]
+  axis_rew = i64[WASSAT_AXIS_SLOTS]
+  axis_cnt = i64[WASSAT_AXIS_SLOTS]
+  axis_pulls = 0
+  nrealloc = 0
   a = 0
-  while a < threads
-    solver = solvers[a]
-    base = a * (nv + 8)
-    handles.push(Thread.new -> wassat_fast_arm_body_budget(solver, res, base, budget))
+  while a < total
+    live[a] = 1
+    slice[a] = round1 == 0 ? budget : round1
+    slice[a] = budget if budget > 0 && (slice[a] == 0 || slice[a] > budget)
     a += 1
-  p = 0
-  while p < pre.size
-    spec = pre[p]
-    pp = spec["pre"]
-    heavy = spec["heavy"]
-    out = spec["out"]
-    base = (threads + p) * (nv + 8)
-    handles.push(Thread.new -> wassat_pre_arm_body(pp, formula, nv, res, base, heavy, stop, out, budget))
-    p += 1
-  handles.each -> (h)
-    z = h.join
+  round = 0
+  running = 1
+  while running == 1
+    handles = []
+    a = 0
+    while a < threads
+      if live[a] == 1
+        solver = solvers[a]
+        base = a * (nv + 8)
+        tbase = a * WASSAT_TEL_STRIDE
+        arm_slice = slice[a]
+        handles.push(Thread.new -> wassat_fast_arm_body_round(solver, res, base, arm_slice, tel, tbase))
+      a += 1
+    p = 0
+    while p < pre.size
+      if live[threads + p] == 1
+        spec = pre[p]
+        pp = spec["pre"]
+        heavy = spec["heavy"]
+        out = spec["out"]
+        base = (threads + p) * (nv + 8)
+        tbase = (threads + p) * WASSAT_TEL_STRIDE
+        pre_slice = slice[threads + p]
+        pre_round = round
+        handles.push(Thread.new -> wassat_pre_arm_body(pp, formula, nv, res, base, heavy, stop, out, pre_slice, tel, tbase, pre_round))
+      p += 1
+    handles.each -> (h)
+      z = h.join
+    # ---- barrier: every arm is stopped, the coordinator may dispatch again --
+    #
+    # Everything from here to the next spawn runs with no worker live, which is
+    # the condition the whole design is built around: inline caches are
+    # process-global, so the coordinator scores, sorts, allocates and builds
+    # replacement solvers HERE and does nothing but join while arms run.
+    running = 0
+    if round1 > 0
+      decided = 0
+      a = 0
+      while a < total
+        st = res[a * (nv + 8)]
+        decided = 1 if st == 1 || st == 0 - 1
+        a += 1
+      if decided == 0
+        # Score the round every arm just finished, and retire the arms that
+        # cannot continue: retired by the solver, stuck (no conflict advanced,
+        # which is how a preprocessing arm that refuted or won its lucky dives
+        # reports "nothing here to resume"), or out of aggregate budget.
+        best = 0
+        nlive = 0
+        a = 0
+        while a < total
+          score[a] = 0
+          if live[a] == 1
+            tb = a * WASSAT_TEL_STRIDE
+            dconf = tel[tb] - prev[tb]
+            dms = tel[tb + 7] - prev[tb + 7]
+            dprop = tel[tb + 2] - prev[tb + 2]
+            dcredit = credit[a] - pcredit[a]
+            spent[a] = spent[a] + dconf
+            score[a] = wassat_race_arm_score(metric, dconf, dms, dprop, dcredit, tel[tb + 6], tel[tb + 3])
+            best = score[a] if score[a] > best
+            if trace
+              z = ccall("__w_eprint", "c trace r[round] arm[a] conf=[tel[tb]] d=[dconf] ms=[dms] lbdf=[tel[tb + 3] >> 16] lbds=[tel[tb + 4] >> 16] trail=[tel[tb + 5] >> 16] learnt=[tel[tb + 6]] dec=[tel[tb + 1]] prop=[tel[tb + 2]] credit=[credit[a]] score=[score[a]]\n")
+            pcredit[a] = credit[a]
+            live[a] = 0 if res[a * (nv + 8)] == 2
+            live[a] = 0 if dconf <= 0
+            live[a] = 0 if budget > 0 && spent[a] >= budget
+            if live[a] == 1
+              # Each arm's next slice comes from its OWN measured rate, not
+              # from a shared conflict count: arms in a diversified race differ
+              # by up to 3x in conflicts per second, and a shared slice would
+              # make every barrier wait on the slowest arm.
+              rate = (dconf * round_ms) / dms
+              slice[a] = rate < 1000 ? 1000 : rate
+              slice[a] = budget - spent[a] if budget > 0 && spent[a] + slice[a] > budget
+              nlive += 1
+            k = 0
+            while k < WASSAT_TEL_STRIDE
+              prev[tb + k] = tel[tb + k]
+              k += 1
+          a += 1
+        running = 1 if nlive > 0
+        if realloc > 0 && best > 0 && nlive > 1
+          # Bank each arm's reward against the axis levels its configuration
+          # carries, normalised to 0..1000 against the round's best arm so the
+          # scale is the same whatever the instance or the round length.
+          a = 0
+          while a < threads
+            if live[a] == 1
+              cb = a * WASSAT_CFG_STRIDE
+              r = (score[a] * 1000) / best
+              i = 0
+              while i < 4
+                lvl = wassat_axis_base(i) + cfgs[cb + wassat_axis_cfg_slot(i)]
+                axis_rew[lvl] = axis_rew[lvl] + r
+                axis_cnt[lvl] = axis_cnt[lvl] + 1
+                i += 1
+            a += 1
+          axis_pulls += 1
+          # The median of the live raw arms, and the worst arm that is not the
+          # pinned one. `sorted` is reused every round; m is small (<= 64).
+          m = 0
+          a = 0
+          while a < threads
+            if live[a] == 1
+              sorted[m] = score[a]
+              m += 1
+            a += 1
+          i = 1
+          while i < m
+            v = sorted[i]
+            j = i - 1
+            while j >= 0 && sorted[j] > v
+              sorted[j + 1] = sorted[j]
+              j -= 1
+            sorted[j + 1] = v
+            i += 1
+          med = m > 0 ? sorted[m / 2] : 0
+          worst = 0 - 1
+          a = 1
+          while a < threads
+            if live[a] == 1 && (worst < 0 || score[a] < score[worst])
+              worst = a
+            a += 1
+          # RATIO mode: losing BADLY, not merely behind. Half the median is the
+          # line: on a race whose arms are all within 25% of each other — the
+          # common case on every instance measured — nothing is ever replaced
+          # and the allocator degenerates to the fixed matrix, which is the
+          # intent. RANK mode replaces the worst arm on a fixed cadence
+          # whatever the spread, which is the aggressive bracket.
+          fire = 0
+          fire = 1 if realloc == 1 && med > 0 && score[worst] * 2 < med
+          fire = 1 if realloc == 2 && round % realloc_every == realloc_every - 1
+          if worst >= 0 && fire == 1
+            cb = worst * WASSAT_CFG_STRIDE
+            wassat_race_new_config(cfgs, cb, axis_rew, axis_cnt, nrealloc,
+                                   nrealloc % 4 == 3 ? 1 : 0)
+            ns = Wassat.from_flat(nv, art, 0)
+            ns.enable_fixed_caps
+            ns.set_stop_cell(stop)
+            ns.enable_sharing(race["ring"], race["ring_cap"], race["ring_maxlen"], worst)
+            ns.set_share_credit(credit)
+            wassat_race_apply_config(ns, cfgs, cb, art["config"].force_simplify?)
+            solvers[worst] = ns
+            # A fresh solver's counters restart at zero, so its telemetry
+            # baseline restarts with them. `spent` deliberately does NOT: the
+            # aggregate --conflicts cap counts work the race did, not work any
+            # one solver object remembers doing.
+            tb = worst * WASSAT_TEL_STRIDE
+            k = 0
+            while k < WASSAT_TEL_STRIDE
+              tel[tb + k] = 0
+              prev[tb + k] = 0
+              k += 1
+            slice[worst] = round1
+            slice[worst] = budget - spent[worst] if budget > 0 && spent[worst] + slice[worst] > budget
+            nrealloc += 1
+            if trace
+              z = ccall("__w_eprint", "c trace r[round] REALLOC arm[worst] score=[score[worst]] med=[med] -> vmtf=[cfgs[cb]] ph=[cfgs[cb + 1]]/[cfgs[cb + 2]] chrono=[cfgs[cb + 3]] simp=[cfgs[cb + 4]]\n")
+    round += 1
   a = 0
   while a < total
     base = a * (nv + 8)
@@ -679,7 +1120,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
   if art["status"] == -1
     << "s UNSATISFIABLE"
     << "c mode: fast-portfolio (preprocessing refuted)"
-    return 0
+    exit(20)
 
   # A busier ring than the raw-kernel race's: this half of the portfolio is
   # unbounded, so exports accumulate for the whole search rather than a
@@ -832,6 +1273,12 @@ WASSAT_ARM_SLS = 2             # local search, models only
     ms = res[base + nv + 5] - res[base + nv + 6]
     << "c arm[a]: status=[res[base]] conflicts=[res[base + nv + 4]] ms=[ms] exported=[res[base + nv + 1]] imported=[res[base + nv + 2]] dropped=[res[base + nv + 3]] filtered=[res[base + nv + 7]]"
     a += 1
+  # SAT Competition convention, after every diagnostic line is out: 10 =
+  # SATISFIABLE, 20 = UNSATISFIABLE, 0 = UNKNOWN.
+  if verdict == "SAT"
+    exit(10)
+  if verdict == "UNSAT"
+    exit(20)
   0
 
 # ---- portfolio CLI -----------------------------------------------------------
@@ -922,4 +1369,10 @@ WASSAT_ARM_SLS = 2             # local search, models only
   << "c winner: [r["winner"]]"
   r["arms"].each -> (line)
     << "c arm: [line]"
+  # SAT Competition convention, after every diagnostic line is out: 10 =
+  # SATISFIABLE, 20 = UNSATISFIABLE, 0 = UNKNOWN (deadline included).
+  if r["verdict"] == "SAT"
+    exit(10)
+  if r["verdict"] == "UNSAT"
+    exit(20)
   0

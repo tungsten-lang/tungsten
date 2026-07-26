@@ -56,6 +56,13 @@ runs remain reproducible.
 Every SAT model is reconstructed after preprocessing and checked against the
 original formula before it is printed.
 
+Exit codes follow the SAT Competition convention, so a competition harness can
+score a run without parsing its output: **10** for `s SATISFIABLE`, **20** for
+`s UNSATISFIABLE`, **0** for anything else that is not an error (`s UNKNOWN`,
+`help`, `version`), and **1** for a usage or input error. Every verdict path
+obeys it — the serial solve, the scout, lucky, local-search and raw-kernel
+race arms, a preprocessing refutation, `sls`, and both halves of `portfolio`.
+
 ## Input and artifact safety
 
 The CLI accepts strict DIMACS CNF. It rejects malformed or duplicate headers,

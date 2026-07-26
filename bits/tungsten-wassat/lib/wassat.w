@@ -56,6 +56,11 @@ use portfolio
   << "    s UNSATISFIABLE with a refutation when a proof path is given"
   << "    s UNKNOWN       when --conflicts stops a bounded search"
   << ""
+  << "EXIT CODES (SAT Competition convention)"
+  << "    10  SATISFIABLE      20  UNSATISFIABLE"
+  << "     0  UNKNOWN, help, or version"
+  << "     1  usage or input error (2 from --worker)"
+  << ""
   << "Use `-` as the path to write the proof to stdout."
   << ""
   << "MAIN OPTIONS"
@@ -197,12 +202,11 @@ use portfolio
 -> wassat_run_file(args)
   begin
     # SAT Competition convention: 10 = SATISFIABLE, 20 = UNSATISFIABLE,
-    # 0 = anything else. Exiting here rather than returning the code is
-    # deliberate — the value does not survive the begin/rescue and the
-    # dispatcher's if-chain above it.
-    # exit() inside begin/rescue is SWALLOWED here (the known
-    # return-through-ensure gap), so the code is returned out and the
-    # entry point exits with it.
+    # 0 = anything else. Each verdict site below exits with its own code the
+    # moment the answer is known — the scout, lucky, local-search and race
+    # arms, the preprocessing refutation and the serial solve all finish in
+    # different places, and threading a code back out of every one of them
+    # would buy nothing over exiting where the answer is.
     wassat_run_file_checked(args)
   rescue e
     << "c error: [e]"
@@ -587,7 +591,8 @@ use portfolio
       prc = probe_p.poll
       if prc != nil && (prc == 10 || prc == 20)
         r2 = wassat_report_probe_win(prc, probe_out, light_stack, formula, art, t0)
-        return 0 if r2 == 0
+        if r2 == 0
+          exit(prc == 20 ? 20 : 10)
     z = probe_p.kill
     prc = probe_p.poll
     if prc == nil
@@ -641,8 +646,12 @@ use portfolio
       if drat_final == "-"
         dlines = wassat_concat_arrays(art["drat"], result["drat"])
         print(dlines.empty? ? "" : dlines.join("\n") + "\n")
-  # NB: `exit(n) if cond` silently does NOTHING in Tungsten — the
-  # modifier form of exit is dropped. Block form only.
+  # Block form, NOT `exit(n) if cond`. parse_exit takes its operand with
+  # parse_expression, so a trailing modifier binds to the ARGUMENT:
+  # `exit(20) if cond` parses as `exit(20 if cond)`, which is `exit(nil)` —
+  # an immediate exit 0 — whenever cond is false, silently dropping every
+  # statement after it. parse_raise already dodges this by stopping at
+  # parse_assignment (see its comment); parse_exit still needs the same fix.
   if result["status"] == 1
     exit(10)
   if result["status"] == -1
@@ -736,6 +745,10 @@ v " + r["model"].join(" ") + " 0
     << "s UNKNOWN"
   << "c mode: sls"
   << "c stats flips=[r["flips"]] restarts=[r["restarts"]] best_unsat=[r["best_unsat"]] seed=[r["seed"]]"
+  # A model is exit 10 like every other engine's; local search can never
+  # answer UNSAT, so a miss is UNKNOWN and exits 0.
+  if r["sat"]
+    exit(10)
   0
 
 # CPU walker or the GPU fleet, per --gpu. The GPU path reads the Metal

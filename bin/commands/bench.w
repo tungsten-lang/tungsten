@@ -34,15 +34,20 @@ primdir = root + "/benchmarks/primitives"
 tungsten = root + "/bin/tungsten"
 
 # ---- palette --------------------------------------------------------------
-BOLD  = "\e[1m"
-DIM   = "\e[2m"
-RESET = "\e[0m"
-GOLD  = "\e[38;5;220m"
-GREEN = "\e[38;5;47m"
-REDC  = "\e[38;5;203m"
-GREY  = "\e[38;5;245m"
-WHITE = "\e[38;5;255m"
-WCOL  = "\e[38;5;51m"
+# Tungsten's brand colors (from tungsten-lang.org): amber-orange #E8A020 and a
+# dark gray. 256-color approximations: orange 214, dark gray 245 (matches the
+# brand #8A8A96). No bright cyan.
+BOLD   = "\e[1m"
+DIM    = "\e[2m"
+RESET  = "\e[0m"
+GOLD   = "\e[38;5;220m"
+GREEN  = "\e[38;5;47m"
+REDC   = "\e[38;5;203m"
+GREY   = "\e[38;5;245m"
+WHITE  = "\e[38;5;255m"
+ORANGE = "\e[38;5;214m"
+DARKB  = "\e[1m\e[38;5;245m"
+WCOL   = "\e[38;5;214m"
 
 # ---- catalogue ------------------------------------------------------------
 # Ordered list of primitives grouped by category. Op counts are NOT stored
@@ -270,6 +275,10 @@ elsif have_cmd("gtimeout")
     return "clang -O3 -march=native -flto -DNDEBUG \"[src]\" -o \"[out]\" >/dev/null 2>&1"
   when "rs"
     return "rustc -O -C target-cpu=native \"[src]\" -o \"[out]\" >/dev/null 2>&1"
+  when "go"
+    return "go build -o \"[out]\" \"[src]\" >/dev/null 2>&1"
+  when "zig"
+    return "zig build-exe -O ReleaseFast -lc \"[src]\" -femit-bin=\"[out]\" >/dev/null 2>&1"
   ""
 
 -> bench_peer(name, lang, ext, runs)
@@ -304,30 +313,20 @@ elsif have_cmd("gtimeout")
     return 0
   (ops * 1000000) / best_us
 
-# ---- run all --------------------------------------------------------------
-rate = {}
-okf = {}
-pi = 0
-while pi < prims.size()
-  p = prims[pi]
-  res = bench_native(primdir + "/" + p + ".w", runs)
-  rate[p] = res[0]
-  okf[p] = res[1]
-  pi = pi + 1
-
-# ---- baseline (machine-readable) ------------------------------------------
+# ---- baseline (machine-readable): pre-compute + dump ----------------------
 if baseline_mode
   pi = 0
   while pi < prims.size()
     p = prims[pi]
-    if okf[p]
-      << p + "\t" + rate[p].to_s()
+    res = bench_native(primdir + "/" + p + ".w", runs)
+    if res[1]
+      << p + "\t" + res[0].to_s()
     pi = pi + 1
   if builddir != "" && builddir != "/"
     system("rm -rf \"[builddir]\"")
   exit(0)
 
-# ---- pretty report --------------------------------------------------------
+# ---- machine + header -----------------------------------------------------
 os = capture("uname -s").strip
 cpu = "unknown CPU"
 cores = capture("getconf _NPROCESSORS_ONLN 2>/dev/null").strip
@@ -345,41 +344,39 @@ if version == nil || version == ""
 if version == ""
   version = "dev"
 
-# widest bar scales to the fastest rate across the whole run
-maxrate = 1
-pi = 0
-while pi < prims.size()
-  p = prims[pi]
-  if okf[p] && rate[p] > maxrate
-    maxrate = rate[p]
-  pi = pi + 1
-
-BARW = 20
+# Absolute bar (full = 4B ops/s) so each row's bar is drawn as it streams in,
+# with no pre-pass to find the global max.
+BAR_FULL = 4000000000
+BARW = 16
 BLOCK = "█"
--> bar_for(r, maxr, w)
-  if maxr <= 0
-    return ""
-  cells = (r * w) / maxr
+-> bar_for(r, w)
+  cells = (r * w) / BAR_FULL
   if cells > w
     cells = w
   BLOCK * cells
 
+# Peer ratio column (Tungsten ÷ peer) or blank when the peer is absent/fails.
+-> ratio_col(r, peer_rate)
+  if peer_rate <= 0
+    return rj("·", 7)
+  rj(fmt_x((r * 100) / peer_rate), 7)
+
 << ""
-<< "  [WHITE][BOLD]⚡ TUNGSTEN PRIMITIVE BASELINE[RESET]   [DIM]v[version][RESET]"
-<< "  [GREY]" + "─" * 62 + "[RESET]"
+<< "  " + ORANGE + BOLD + "⚡ TUNGSTEN PRIMITIVE BASELINE" + RESET + "   " + DIM + "v" + version + RESET
+<< "  [GREY]" + "─" * 66 + "[RESET]"
 << "  [GREY]machine[RESET] [cpu]  [GREY]·[RESET] [cores] cores  [GREY]·[RESET] [os]"
 << "  [GREY]method  best of [runs] runs · data-dependent loops (no dead-code elision) · native -O[RESET]"
 
 hdr = "  " + lj("primitive", 14) + rj("ns/op", 8) + "  " + rj("rate", 9) + "  " + lj("unit", 7)
 if compare_mode
-  hdr = hdr + rj("C", 8) + rj("Rust", 8)
+  hdr = hdr + rj("C", 7) + rj("Rust", 7) + rj("Go", 7) + rj("Zig", 7)
 << ""
 << DIM + hdr + RESET
 
+# ---- stream: measure + print each primitive the moment it completes --------
 ci = 0
 while ci < cats.size()
   c = cats[ci]
-  # does any selected primitive belong to this category?
   any = false
   pi = 0
   while pi < prims.size()
@@ -388,41 +385,37 @@ while ci < cats.size()
     pi = pi + 1
   if any
     << ""
-    << "  [WHITE][BOLD][c][RESET]"
+    << "  " + DARKB + c + RESET
     pi = 0
     while pi < prims.size()
       p = prims[pi]
       if cat[p] == c
-        if !okf[p]
+        res = bench_native(primdir + "/" + p + ".w", runs)
+        if !res[1]
           << "  " + lj(p, 14) + GREY + "  build/run failed" + RESET
         else
-          r = rate[p]
+          r = res[0]
           # ns/op ×100 = 1e11 / rate  (integer)
           ns100 = 0
           if r > 0
             ns100 = 100000000000 / r
-          line = "  " + WCOL + lj(p, 14) + RESET
+          line = "  " + ORANGE + lj(p, 14) + RESET
           line = line + GREY + rj(fmt_ns(ns100), 8) + RESET
           line = line + "  " + WHITE + rj(fmt_rate(r), 9) + RESET
           line = line + "  " + DIM + lj(unit[c], 7) + RESET
-          if compare_mode && peer[p] == true
-            cr = bench_peer(p, "c", "c", runs)
-            rr = bench_peer(p, "rs", "rs", runs)
-            cx = ""
-            if cr > 0
-              cx = fmt_x((r * 100) / cr)
-            rx = ""
-            if rr > 0
-              rx = fmt_x((r * 100) / rr)
-            line = line + GREY + rj(cx, 8) + rj(rx, 8) + RESET
-          line = line + "  " + WCOL + bar_for(r, maxrate, BARW) + RESET + "  " + DIM + desc[p] + RESET
+          if compare_mode
+            if peer[p] == true
+              line = line + GREY + ratio_col(r, bench_peer(p, "c", "c", runs)) + ratio_col(r, bench_peer(p, "rs", "rs", runs)) + ratio_col(r, bench_peer(p, "go", "go", runs)) + ratio_col(r, bench_peer(p, "zig", "zig", runs)) + RESET
+            else
+              line = line + GREY + rj("·", 7) + rj("·", 7) + rj("·", 7) + rj("·", 7) + RESET
+          line = line + "  " + ORANGE + bar_for(r, BARW) + RESET + "  " + DIM + desc[p] + RESET
           << line
       pi = pi + 1
   ci = ci + 1
 
 << ""
 if compare_mode
-  << "  [GREY]C clang -O3 -march=native -flto · Rust rustc -O target-cpu=native · ratio = Tungsten ÷ peer[RESET]"
+  << "  [GREY]C clang -O3 -march=native -flto · Rust rustc -O · Go go build · Zig ReleaseFast · ratio = Tungsten ÷ peer[RESET]"
 << "  [GREY]tip  `tungsten bench --baseline > before.txt`, change code, diff against `--baseline` again[RESET]"
 << ""
 

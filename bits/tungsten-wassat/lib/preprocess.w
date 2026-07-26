@@ -164,6 +164,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
     @helper_mark = {}
     @probing = false
     @lazy_lits = false
+    @force_full = false
     @raw_kernel = false
 
   # From-flat intake for the trusted path: the native parser's flat arrays
@@ -225,7 +226,11 @@ WASSAT_PRE_BUCKET_CAP = 1024
     # inputs go straight to CDCL; preprocessing effort belongs to small
     # kernels where it is cheap and provably shrinks search (php, dubois,
     # and compact Sinz chains). The choice is deterministic from task shape.
-    raw = @config.raw_kernel?
+    # The budgeted trial (see lib/wassat.w) needs the FULL pipeline —
+    # probing and substitution are exactly what pays on the crypto and
+    # bitvector families — so it forces this off. Without it the trial
+    # runs a no-op and always falls back.
+    raw = @config.raw_kernel? && !@force_full
     @raw_kernel = raw
     self.run_probing if @status == 0 && !raw
     tp = wassat_prof("pre.probing", tp)
@@ -258,6 +263,10 @@ WASSAT_PRE_BUCKET_CAP = 1024
   -> enable_dual_emission
     @emit_wrat = true
     @emit_drat = true
+    0
+
+  -> force_full_pipeline
+    @force_full = true
     0
 
   -> set_budget(ticks)

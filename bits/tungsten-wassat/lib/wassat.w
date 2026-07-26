@@ -434,7 +434,32 @@ use portfolio
       # Raw kernels skipped the preprocessor entirely, so there is no
       # intake for the heavy rounds to operate on — and policy disables
       # every technique they would run at this size anyway.
-      unless config.raw_kernel?
+      if config.raw_kernel?
+        # Budgeted preprocessing trial, deliberately placed AFTER the probe.
+        # The old flat size gate sent every >50k-clause formula straight to
+        # CDCL, which is catastrophic on the families that DO reduce: crypto
+        # md5 runs 11.94s raw against 0.20s preprocessed (60x). But running
+        # it at load time regressed bmc-ibm-6 3.5x, and no yield threshold
+        # can separate the two — ibm-6 reduces MORE (14.3% of variables)
+        # than crypto (1.6%) and still does not benefit. What separates them
+        # is that ibm-6 decides inside the probe in 272 conflicts and never
+        # needs preprocessing at all. So: probe first, and only formulas the
+        # probe could not crack pay for a trial, under a size-proportional
+        # tick budget, keeping the result only if it actually reduced.
+        # kissat has no clause-count gate either, for the same reason.
+        trial_ticks = 200 * formula["flat_nlits"] + 20000000
+        pre.set_budget(trial_ticks)
+        pre.force_full_pipeline
+        trial = pre.run_light_flat(formula)
+        tprof = wassat_prof("cli.trial", tprof)
+        elim = trial["stats"]["vars_eliminated"] + trial["stats"]["vars_substituted"]
+        # A refutation during the trial is a real answer — never discard it.
+        if trial["status"] != 0
+          art = trial
+        else
+          if elim * 100 >= formula["nvars"]
+            art = trial
+      else
         art = pre.run_heavy
         tprof = wassat_prof("cli.heavy", tprof)
       # did the probe already win while we preprocessed?

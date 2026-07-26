@@ -92,13 +92,14 @@ case "$1" in
           echo "Usage: tungsten bench [primitive...] [--compare] [--baseline] [--runs N] [--list]"
           echo "       tungsten bench --suite [benchmark...] [--only LANGS] [--runs N] [--list]"
           echo
-          echo "  Default: Tungsten primitive-op velocity baseline (ops/sec) — a stable,"
-          echo "  machine-diffable regression baseline for the compiler."
+          echo "  Default: Tungsten primitive-op velocity baseline (ops/sec). Each op is"
+          echo "  auto-calibrated to ~1s after a 3s warmup. If bench_baseline.txt exists,"
+          echo "  prints a before/after/Δ table (green = faster now, red = slower)."
           echo
           echo "  primitive...   names to run (default: all; see --list)"
-          echo "  --compare      also time C/Rust peers where a fair equivalent exists"
-          echo "  --baseline     emit machine-readable 'name<TAB>ops_per_sec' (for diffing)"
-          echo "  --runs N       best-of-N timing (default 3)"
+          echo "  --compare      also time C / Rust / Go / Zig peers where fair"
+          echo "  --baseline     write bench_baseline.txt (the before/after reference)"
+          echo "  --runs N       best-of-N per op (default 1; each run is ~1s)"
           echo "  --list         list the primitives and exit"
           echo
           echo "  --suite        run the cross-language ALGORITHM suite instead"

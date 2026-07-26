@@ -1,12 +1,15 @@
 # primitive: int_mul — 300000000 ops
 s = 1 ## i64
 n = 300000000 ## i64
+__ev = env("BENCH_ITERS")
+if __ev != nil && __ev != ""
+  n = __ev.to_i() ## i64
 t0 = clock
 i = 0 ## i64
 while i < n
   s = s * 6364136223846793005 + 1
   i = i + 1
 t1 = clock
-<< "ops: 300000000"
+<< "ops: [n]"
 << s
 << "elapsed: [t1 - t0]s"

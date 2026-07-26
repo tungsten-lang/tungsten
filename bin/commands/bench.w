@@ -183,7 +183,8 @@ peer["array_set"] = true
   v.to_i()
 
 # ---- argument parsing (options via env; wrapper translates --flags) --------
-runs = 3
+# Default runs=1: each run is calibrated to ~1s, stable enough on its own.
+runs = 1
 rv = env("BENCH_RUNS")
 if rv != nil && rv != ""
   runs = rv.to_i()
@@ -193,6 +194,7 @@ if runs < 1
 list_only = env("BENCH_LIST") != nil && env("BENCH_LIST") != ""
 baseline_mode = env("BENCH_BASELINE") != nil && env("BENCH_BASELINE") != ""
 compare_mode = env("BENCH_COMPARE") != nil && env("BENCH_COMPARE") != ""
+baseline_path = "bench_baseline.txt"
 
 want = []
 args = argv()
@@ -239,30 +241,55 @@ if have_cmd("timeout")
 elsif have_cmd("gtimeout")
   timeout_prefix = "gtimeout 120 "
 
-# Compile + run a program best-of-N; return [ops_per_sec, ok]. Uses integer
-# microseconds throughout (no float division): ops/sec = ops * 1e6 / us.
+# Calibration: each measured run is auto-sized to ~1 second so numbers are
+# stable and the whole suite streams predictably. A cheap pilot finds the
+# per-op cost; the real run is scaled to hit the target. BENCH_ITERS overrides
+# the loop count in every primitive (see benchmarks/primitives/*.w).
+CAL_PILOT = 500000
+CAL_TARGET_US = 1000000
+CAL_MIN = 500000
+CAL_MAX = 4000000000
+
+# Run a compiled primitive with a specific iteration count; [ops, microseconds]
+# or [-1, -1] on failure.
+-> run_with(out, iters)
+  o = capture("BENCH_ITERS=[iters] " + timeout_prefix + "\"[out]\" 2>/dev/null")
+  e = parse_elapsed(o)
+  if e < 0.0
+    return [-1, -1]
+  us = (e * 1000000).to_i
+  if us < 1
+    us = 1
+  [parse_ops(o), us]
+
+# Compile, pilot to size a ~1s run, then best-of-N at that size.
+# Returns [ops_per_sec, ok]. Integer microseconds throughout.
 -> bench_native(src, runs)
   out = builddir + "/" + capture("basename \"[src]\" .w").strip
-  cmd = "\"[tungsten]\" compile --native \"[src]\" -o \"[out]\" >/dev/null 2>&1"
-  system(cmd)
+  # Fast archive-linked -o path (~9x faster to compile than `compile --native`,
+  # identical runtime for these self-contained hot loops).
+  system("\"[tungsten]\" -o \"[out]\" \"[src]\" >/dev/null 2>&1")
   if !is_exe(out)
     return [0, false]
+  pilot = run_with(out, CAL_PILOT)
+  if pilot[0] <= 0
+    return [0, false]
+  target = (CAL_PILOT * CAL_TARGET_US) / pilot[1]
+  if target < CAL_MIN
+    target = CAL_MIN
+  if target > CAL_MAX
+    target = CAL_MAX
   best_us = -1
   ops = 0
   r = 0
   while r < runs
-    o = capture(timeout_prefix + "\"[out]\" 2>/dev/null")
-    e = parse_elapsed(o)
-    if r == 0
-      ops = parse_ops(o)
-    if e >= 0.0
-      us = (e * 1000000).to_i
-      if us < 1
-        us = 1
-      if best_us < 0 || us < best_us
-        best_us = us
-    else
+    m = run_with(out, target)
+    if m[0] <= 0
       r = runs
+    else
+      ops = m[0]
+      if best_us < 0 || m[1] < best_us
+        best_us = m[1]
     r = r + 1
   if best_us <= 0 || ops <= 0
     return [0, false]
@@ -313,15 +340,51 @@ elsif have_cmd("gtimeout")
     return 0
   (ops * 1000000) / best_us
 
-# ---- baseline (machine-readable): pre-compute + dump ----------------------
+# CPU spin to stabilize frequency + caches before measuring (BENCH_ITERS=2B
+# int_add ≈ 1s/run, so ~3 runs fills the budget).
+-> warmup(secs)
+  wout = builddir + "/warmup"
+  system("\"[tungsten]\" -o \"[wout]\" \"[primdir]/int_add.w\" >/dev/null 2>&1")
+  if is_exe(wout)
+    warmed = 0.0
+    while warmed < secs
+      o = capture("BENCH_ITERS=2000000000 \"[wout]\" 2>/dev/null")
+      e = parse_elapsed(o)
+      if e < 0.0
+        warmed = secs
+      else
+        warmed = warmed + e
+  nil
+
+# Read a bench_baseline.txt (name<TAB>ops_per_sec per line) into a map.
+-> read_baseline(path)
+  m = {}
+  raw = capture("cat \"[path]\" 2>/dev/null")
+  lines = raw.split("\n")
+  i = 0
+  while i < lines.size()
+    ln = lines[i].strip()
+    if ln.size() > 0
+      parts = ln.split("\t")
+      if parts.size() == 2
+        m[parts[0].strip()] = parts[1].strip().to_i()
+    i = i + 1
+  m
+
+# ---- baseline mode: warm up, measure, WRITE bench_baseline.txt ------------
 if baseline_mode
+  << "  [GREY]warming up (3s)…[RESET]"
+  warmup(3.0)
+  content = ""
   pi = 0
   while pi < prims.size()
     p = prims[pi]
     res = bench_native(primdir + "/" + p + ".w", runs)
     if res[1]
-      << p + "\t" + res[0].to_s()
+      content = content + p + "\t" + res[0].to_s() + "\n"
     pi = pi + 1
+  system("printf '%s' '" + content + "' > \"[baseline_path]\"")
+  << "  [GREEN]✔[RESET] wrote [WHITE][baseline_path][RESET] — rerun [WHITE]tungsten bench[RESET] to see before/after/Δ"
   if builddir != "" && builddir != "/"
     system("rm -rf \"[builddir]\"")
   exit(0)
@@ -344,6 +407,10 @@ if version == nil || version == ""
 if version == ""
   version = "dev"
 
+# A baseline file (from a prior `--baseline`) turns on the before/after/Δ table.
+base = read_baseline(baseline_path)
+have_base = base.size() > 0
+
 # Absolute bar (full = 4B ops/s) so each row's bar is drawn as it streams in,
 # with no pre-pass to find the global max.
 BAR_FULL = 4000000000
@@ -365,13 +432,19 @@ BLOCK = "█"
 << "  " + ORANGE + BOLD + "⚡ TUNGSTEN PRIMITIVE BASELINE" + RESET + "   " + DIM + "v" + version + RESET
 << "  [GREY]" + "─" * 66 + "[RESET]"
 << "  [GREY]machine[RESET] [cpu]  [GREY]·[RESET] [cores] cores  [GREY]·[RESET] [os]"
-<< "  [GREY]method  best of [runs] runs · data-dependent loops (no dead-code elision) · native -O[RESET]"
+<< "  [GREY]method  ~1s/op calibrated · 3s warmup · data-dependent loops · native -O[RESET]"
 
 hdr = "  " + lj("primitive", 14) + rj("ns/op", 8) + "  " + rj("rate", 9) + "  " + lj("unit", 7)
 if compare_mode
   hdr = hdr + rj("C", 7) + rj("Rust", 7) + rj("Go", 7) + rj("Zig", 7)
+elsif have_base
+  hdr = hdr + rj("baseline", 10) + rj("Δ", 8)
 << ""
 << DIM + hdr + RESET
+
+# warm up before the first measurement
+<< "  [GREY]warming up (3s)…[RESET]"
+warmup(3.0)
 
 # ---- stream: measure + print each primitive the moment it completes --------
 ci = 0
@@ -408,6 +481,18 @@ while ci < cats.size()
               line = line + GREY + ratio_col(r, bench_peer(p, "c", "c", runs)) + ratio_col(r, bench_peer(p, "rs", "rs", runs)) + ratio_col(r, bench_peer(p, "go", "go", runs)) + ratio_col(r, bench_peer(p, "zig", "zig", runs)) + RESET
             else
               line = line + GREY + rj("·", 7) + rj("·", 7) + rj("·", 7) + rj("·", 7) + RESET
+          elsif have_base
+            b = base[p]
+            if b != nil && b > 0
+              dx = (r * 100) / b
+              dcol = GREY
+              if dx >= 102
+                dcol = GREEN
+              elsif dx <= 98
+                dcol = REDC
+              line = line + GREY + rj(fmt_rate(b), 10) + RESET + dcol + rj(fmt_x(dx), 8) + RESET
+            else
+              line = line + GREY + rj("·", 10) + rj("new", 8) + RESET
           line = line + "  " + ORANGE + bar_for(r, BARW) + RESET + "  " + DIM + desc[p] + RESET
           << line
       pi = pi + 1
@@ -416,7 +501,10 @@ while ci < cats.size()
 << ""
 if compare_mode
   << "  [GREY]C clang -O3 -march=native -flto · Rust rustc -O · Go go build · Zig ReleaseFast · ratio = Tungsten ÷ peer[RESET]"
-<< "  [GREY]tip  `tungsten bench --baseline > before.txt`, change code, diff against `--baseline` again[RESET]"
+elsif have_base
+  << "  [GREY]Δ = now ÷ baseline · [GREEN]green[GREY] faster now · [REDC]red[GREY] slower · baseline from [baseline_path][RESET]"
+else
+  << "  [GREY]tip  `tungsten bench --baseline` writes bench_baseline.txt; rerun `tungsten bench` for before/after/Δ[RESET]"
 << ""
 
 if builddir != "" && builddir != "/"

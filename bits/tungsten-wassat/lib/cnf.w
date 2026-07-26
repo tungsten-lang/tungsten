@@ -15,6 +15,14 @@
   z = ccall("__w_eprint", "c prof [label] [t - since_ms]ms\n")
   t
 
+# A profile line that reports a measurement other than elapsed time — the
+# shape of a preprocessed rendering, say. Same gate, same stream, so it never
+# reaches a harness parsing stdout.
+-> wassat_prof_note(text)
+  return 0 unless env("WASSAT_PROFILE") == "1"
+  z = ccall("__w_eprint", "c prof [text]\n")
+  0
+
 # Clock a phase start only when profiling: the ccall is unavailable in the
 # interpreter, where the spec suite runs these paths.
 -> wassat_prof_clock

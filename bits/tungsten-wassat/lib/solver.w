@@ -2136,6 +2136,13 @@ WASSAT_PROOF_DRAT = 2
     # grow_clause_tables, which doubles and repacks — a few cheap
     # reallocations on long runs instead of a huge cold allocation on
     # every run.
+    # A frozen race arm cannot grow this, so it compacts (backjump to level 0
+    # + reduce_db) whenever it fills. Enlarging the headroom to avoid that is
+    # a measured LOSS, not a win: on the reduced bitvector kernel smulo016 an
+    # 8x arena turned a 232k-conflict solve into a 613k-conflict one at 5.8x
+    # the wall clock, and 64x was still 3.2x behind. The compaction cadence is
+    # doing useful work — it is an aggressive restart that keeps the learned
+    # database small — so the capacity stays exactly as sized here.
     cap = (total + sncl) * 2 + 2097152
     # the watch entry addresses a clause by ARENA OFFSET, so the offset must
     # fit the packed entry's high word; grow_arena enforces the same bound

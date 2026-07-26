@@ -39,6 +39,123 @@
 WASSAT_SUBST_DEFAULT = true
 WASSAT_CONGRUENCE_DEFAULT = true
 
+# How many PREPROCESSED renderings of the formula join the raw-kernel race,
+# in pipeline order: 1 adds the light one (probing plus equivalent-literal
+# substitution), 2 adds the heavy one (subsumption plus bounded variable
+# elimination) beside it. They are ADDITIONAL arms, so the raw side keeps
+# every basin it sampled before and the preprocessing decision costs a thread
+# instead of a gamble. 0 is the ablation switch: no preprocessing pass at
+# all, and a raw kernel goes to CDCL exactly as it did before.
+#
+# Both renderings are worth their arm, and the reason they are separate arms
+# rather than one pipeline is that they are separately best: the md5
+# cryptography kernel is solved by the light rendering in 5k conflicts and
+# the heavy one needs 255k, while the bitvector kernel smulo016 is untouched
+# by the light rendering (33.8s) and solved by the heavy one in 4.9s.
+-> wassat_pre_arm_count
+  return wassat_decimal_in_range("WASSAT_PRE_ARMS", env("WASSAT_PRE_ARMS"), 0, 2) if env("WASSAT_PRE_ARMS") != nil
+  2
+
+
+# Effort allowance for the LIGHT rendering (probing and equivalent-literal
+# substitution), in preprocessor ticks.
+#
+# ABSOLUTE, not size-derived. The rendering runs in its own thread, so its
+# cost is not on anyone's critical path — but the coordinator still has to
+# JOIN it, so a rendering that runs for minutes holds the whole answer even
+# after another arm has won. What the budget bounds is that hostage window,
+# and the window is the same length whatever the formula's size, so scaling
+# the budget by size only makes it longest exactly where it is worst.
+#
+# The preprocessor's own size-derived budget (init_budget) is what this
+# replaces, and it is worth being concrete about why: on the planning kernel
+# blocks-4-ipc5-h21 (906k clauses, 2.4M literals) it works out to 499M ticks,
+# and substitution's boxed implication walk retires roughly 20M ticks a
+# second, so the "budget" authorised four minutes of preprocessing on an
+# instance the race answers in 22 seconds.
+#
+# 16M is 5.8x the largest healthy consumption measured (medians, ticks):
+#
+#   smulo016 286k · crypto 566k · mrpp6x6 586k · agile1614 1.79M
+#   minand064 2.06M · g125.18 2.14M · hwbmc 2.15M · 4pipe 2.26M
+#   g250.15 2.47M · bmc-ibm-12 2.74M · ibm-2004-03-k70 2.76M
+#
+# Every one of those completes the pass well inside the cap; the instances
+# the cap stops are the ones whose implication graph makes the pass
+# superlinear, and stopping them early costs only the substitutions it had
+# not found yet.
+-> wassat_pre_light_ticks
+  return wassat_decimal_in_range("WASSAT_PRE_TICKS", env("WASSAT_PRE_TICKS"), 1, 2000000000) if env("WASSAT_PRE_TICKS") != nil
+  16000000
+
+# Further allowance for the HEAVY rendering (subsumption and bounded variable
+# elimination) on top of whatever the light one spent. A separate number
+# because these rounds are native and retire ticks two orders of magnitude
+# faster, so they can afford far more of them.
+#
+# 64M is 2.6x the largest USEFUL consumption measured — minand064 24.4M,
+# crypto 21.5M, 3bitadd_31 14.9M, agile1614 13.2M, g250.15 11.9M, hwbmc
+# 7.6M, smulo016 6.6M, g125.18 5.4M, mrpp6x6 4.4M. The one instance that
+# wanted more is 4pipe at 567M ticks and 812ms, and it eliminated zero
+# variables for them, which is the case a cap exists for.
+#
+# Honest limitation: this bounds ROUNDS, not the work inside one. The native
+# subsumption and elimination scans check the budget between chunks, and a
+# chunk can overshoot enormously — 4pipe reaches 567M ticks against a 66M
+# allowance in a single pass. The wall-clock deadline below is the backstop
+# that actually binds, and the clause gate is what covers the case where even
+# that cannot (a chunk that runs 95s without returning).
+-> wassat_pre_heavy_ticks
+  return wassat_decimal_in_range("WASSAT_PRE_HEAVY_TICKS", env("WASSAT_PRE_HEAVY_TICKS"), 1, 2000000000) if env("WASSAT_PRE_HEAVY_TICKS") != nil
+  64000000
+
+# Wall-clock stop for each rendering, in milliseconds. A backstop for the
+# tick budgets above, not a replacement: ticks are the reproducible currency
+# and bound the pass on every formula whose cost per tick is normal, but they
+# do not bound TIME, and one measured formula makes that gap enormous — see
+# WassatPreprocess#set_deadline_ms.
+#
+# 1500ms is ~11x the slowest healthy light pass (bmc-ibm-2004-03-k70, 137ms)
+# and ~1.8x the slowest healthy heavy pass (4pipe, 812ms), so it never fires
+# on an instance the tick budget already handles. It fires only where the
+# alternative is minutes. Deliberately in the same range as the whole race it
+# is a prefix to: a preprocessing pass that costs more than the search it is
+# meant to accelerate has already lost, whatever it would have found.
+-> wassat_pre_stage_ms
+  return wassat_decimal_in_range("WASSAT_PRE_STAGE_MS", env("WASSAT_PRE_STAGE_MS"), 0, 3600000) if env("WASSAT_PRE_STAGE_MS") != nil
+  1500
+
+# Clauses above which no preprocessed rendering is built at all.
+#
+# A RESOURCE gate, not a yield prediction — the distinction the rest of this
+# file insists on, and the one CryptoMiniSat draws in OccSimplifier::setup(),
+# where >40M clauses or >100M literals skips occurrence-based simplification
+# outright because the structure cannot be afforded. kissat by contrast has
+# no size gate on preprocessing at all, and CaDiCaL's one clause-count term
+# only postpones. So this is the minority position and it is held for a
+# specific, documented reason rather than a general belief about big
+# formulas.
+#
+# The reason: two passes here have stopping points too coarse to bound. On
+# the planning kernel blocks-4-ipc5-h21 (906k clauses) substitution rewrites
+# for 59s before its per-class budget check comes round — the wall-clock
+# deadline now cuts that to ~2.2s — and forward subsumption spends 95
+# SECONDS and 139 BILLION ticks inside ONE native chunk, where no budget,
+# deadline or signal can reach it. That is a scaling defect in
+# WassatPreprocess, not a property of large formulas, and the fix is to make
+# those passes interruptible (chunk the subsumption scan, charge and check
+# the rewrite per clause). Until then the renderings are not offered inputs
+# they cannot survive, because the alternative is a 22s answer becoming a
+# 125s one.
+#
+# 400,000 is 1.4x the largest formula measured to preprocess healthily
+# (ibm-2004-03-k70, 286k clauses, 137ms) and 2.3x below the one that does
+# not. Raise it once the passes are interruptible; the race handles the
+# question of whether preprocessing was WORTH it on its own.
+-> wassat_pre_max_clauses
+  return wassat_decimal_in_range("WASSAT_PRE_MAX_CLAUSES", env("WASSAT_PRE_MAX_CLAUSES"), 0, 2000000000) if env("WASSAT_PRE_MAX_CLAUSES") != nil
+  400000
+
 + WassatConfig
   -> new(@nvars, clauses)
     @nclauses = clauses.size
@@ -75,13 +192,41 @@ WASSAT_CONGRUENCE_DEFAULT = true
     0
 
   -> raw_kernel?
-    # Large kernels currently lose more to full preprocessing intake and
-    # rewrite passes than they regain in search. Small encoding kernels still
-    # benefit substantially from probing, substitution, subsumption, and BVE.
+    # This no longer decides whether preprocessing HAPPENS — the raw path
+    # races preprocessed renderings of the formula (wassat_race_stage_pre), so
+    # a "raw" kernel gets probing, substitution, subsumption and elimination
+    # anyway, as racers rather than as a commitment. What is left is a choice
+    # between two ROUTES: race the renderings, or solve one serially.
+    #
+    # Swept 2026-07-26, medians of 3, ratio against the value below. Every
+    # column from 0 to 100,000 is identical on every instance; the ratios
+    # appear only where an instance CROSSES the threshold onto the serial
+    # preprocessed route, and every crossing is a loss:
+    #
+    #                   clauses   raced   serial-preprocessed
+    #   3bitadd_31       31,310   0.93s   2.59s  (2.8x worse)
+    #   g125.18          70,163   1.26s   3.45s  (2.8x worse)
+    #   bmc-ibm-12      194,778   0.70s   1.17s  (1.7x worse)
+    #   bmc-ibm-6       368,352   0.076s  0.272s (3.6x worse)
+    #   ak128 miter     968,713   0.18s   0.57s  (3.1x worse)
+    #
+    # The one instance that prefers the serial route is the md5 kernel
+    # (131,279 clauses, 0.53s raced against 0.20s serial) and it is not a
+    # preprocessing gap — the race finds the same reduced formula, it just
+    # pays a slice of racing and two thread-spawn rounds to get there.
+    #
+    # So the threshold is no longer load-bearing and any value in [0, 100000]
+    # is equivalent. It is kept, at the value it has always had, because
+    # moving it UP is a measured regression and moving it DOWN also flips
+    # VMTF, target phases, chronological backtracking and the probe budget
+    # (see the confound note below) — a change that deserves its own campaign,
+    # not a side effect of this one. Measured at 0 it is neutral-to-better on
+    # 14 instances, random-3-SAT SAT most of all (uf250-0100 0.245s -> 0.017s),
+    # which is where that campaign should start.
     #
     # Validation hook: no correctness-suite instance is anywhere near this
     # size, so lowering the threshold is the only way to exercise the raw
-    # path (preprocessor bypass included) across the differential.
+    # path across the differential.
     return @nclauses > env("WASSAT_RAW_AT").to_i if env("WASSAT_RAW_AT") != nil
     return true if @nclauses > 50000
     # Size alone is the wrong rule for the middle band. Measured, verdicts

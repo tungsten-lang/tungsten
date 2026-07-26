@@ -113,6 +113,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
     @status = 0                  # 0 unknown, -1 refuted during preprocessing
     @ticks = 0
     @tick_budget = 0             # 0 = derived from formula size in `run`
+    @deadline_ms = 0             # 0 = no wall-clock stop (see set_deadline_ms)
     @probe_cap = WASSAT_PRE_PROBE_CAP
     # BVE growth margin, raised per pass (CaDiCaL-style elimination
     # rounds): Sinz-counter registers — the whole encoding layer of
@@ -271,6 +272,25 @@ WASSAT_PRE_BUCKET_CAP = 1024
 
   -> set_budget(ticks)
     @tick_budget = ticks
+    0
+
+  # Stop this run `ms` milliseconds from now, whatever the tick budget says.
+  #
+  # A backstop for one specific failure: a tick is not proportional to time.
+  # Substitution charges one tick per rewritten literal but pays, per clause,
+  # for boxed materialization, an O(n^2) duplicate check, a store, a delete,
+  # occurrence-list surgery and proof bookkeeping. On most formulas that
+  # constant is stable and the tick budget bounds the pass; on the planning
+  # kernel blocks-4-ipc5-h21 it collapses to ~270k ticks a second against a
+  # healthy ~20M, so a 16M-tick allowance buys 59 SECONDS. No tick cap
+  # separates the two — 16M is under what bmc-ibm-2004-03-k70 legitimately
+  # spends — so time is bounded directly.
+  #
+  # Only the racing renderings set this. The certificate path (`run`) leaves
+  # it at 0 and stays deterministic; here the deadline can only cost the
+  # race an arm's head start, never a verdict.
+  -> set_deadline_ms(ms)
+    @deadline_ms = ms <= 0 ? 0 : ccall("__w_clock_ms") + ms
     0
 
   -> freeze(v)
@@ -640,6 +660,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
     0
 
   -> within_budget
+    return false if @deadline_ms > 0 && ccall("__w_clock_ms") >= @deadline_ms
     @tick_budget == 0 || @ticks < @tick_budget
 
   # ---- technique 2: equivalent-literal substitution -------------------------

@@ -403,13 +403,20 @@ WASSAT_ARM_SLS = 2             # local search, models only
 # Raw-kernel basin race: K allocation-free arms over the SAME flat artifact,
 # diversified along the axes that measurably move bmc-family trajectories —
 # decision heuristic (VMTF vs EVSIDS) and initial phases. First decisive arm
-# raises the stop cell. Returns {"status": 1/-1/0, "model": reduced-space}.
-# Motivation: ibm-12's conflict count ranges 4.9k-17k across heuristic
-# configurations with no single winner; sampling basins concurrently buys
-# min-over-arms wall time for one thread-spawn's overhead.
--> wassat_raw_race(nv, art, threads, max_conflicts)
+# raises the stop cell. Motivation: ibm-12's conflict count ranges 4.9k-17k
+# across heuristic configurations with no single winner; sampling basins
+# concurrently buys min-over-arms wall time for one thread-spawn's overhead.
+#
+# Build the raw arms and the state they race over, returned as a bundle so
+# the coordinator can run the race in SLICES and do main-thread work — which
+# is to say preprocessing — in the gaps between them.
+-> wassat_race_build(nv, art, threads, formula)
+  # Capacity for the raw arms plus the two preprocessed renderings, allocated
+  # once: `res` is addressed by arm index and must not move after an arm has
+  # a pointer into it.
+  cap = threads + 2
   stop = i64[4]
-  res = i64[threads * (nv + 8)]
+  res = i64[cap * (nv + 8)]
   ring_maxlen = 24
   ring_cap = 4096
   ring = i64[8 + ring_cap * (3 + ring_maxlen)]
@@ -419,52 +426,145 @@ WASSAT_ARM_SLS = 2             # local search, models only
     s = Wassat.from_flat(nv, art, 0)
     s.enable_fixed_caps
     s.set_stop_cell(stop)
-    s.enable_sharing(ring, ring_cap, ring_maxlen, a)
-    s.disable_vmtf if a % 2 == 1
-    grp = a / 2
-    # arm 0 would exactly replay the serial probe's already-failed
-    # trajectory (same heuristic, same phases) — give it a fresh basin
-    s.reseed_phases(777) if a == 0
-    s.reseed_phases(1000 + a * 7919) if grp == 1
-    s.reseed_phases(4242 + a * 104729) if grp == 3
-    s.set_positive_phases if grp == 2
-    # Chronological backtracking on half the arms: it is worth ~3.5x on
-    # this instance class when it fits the trajectory and costs when it
-    # does not, which is exactly what a race is for — take the min rather
-    # than guess which side the instance is on.
-    s.enable_chrono if grp % 2 == 1
-    # Fifth diversity axis: congruence closure + equivalent-literal
-    # substitution against the arm's own arena. Deterministic single-arm
-    # measurement on the bmc family: ibm-11 11,940 -> 4,734 conflicts and
-    # ibm-13 20,350 -> 9,238 with it, against ibm-12 7,162 -> 15,868. A
-    # symmetric win and loss of the same size on the same family is the
-    # definition of a race axis — take the min rather than pick a side.
-    # Arms 1, 2, 5, 6 draw one from each of the four existing groups, so
-    # the axis stays decorrelated from phases, VMTF and chronological
-    # backtracking instead of piggybacking on one of them.
-    s.simplify_raw_mode(0) if a % 4 == 1
-    s.simplify_raw_mode(1) if a % 4 == 2
-    s.simplify_raw if a % 4 != 1 && a % 4 != 2 && art["config"].force_simplify?
+    # A lone raw arm has nobody to share with — the preprocessing arms solve
+    # DIFFERENT formulas and must never take its clauses — so it keeps the
+    # export path out of its inner loop entirely.
+    s.enable_sharing(ring, ring_cap, ring_maxlen, a) if threads > 1
+    if threads == 1
+      # Sole raw arm: take the configuration the serial post-probe solve
+      # would have used, so adding a preprocessing arm changes only what
+      # runs BESIDE the raw search and never the raw trajectory itself.
+      s.enable_chrono
+      s.simplify_raw if art["config"].force_simplify?
+    else
+      s.disable_vmtf if a % 2 == 1
+      grp = a / 2
+      # arm 0 would exactly replay the serial probe's already-failed
+      # trajectory (same heuristic, same phases) — give it a fresh basin
+      s.reseed_phases(777) if a == 0
+      s.reseed_phases(1000 + a * 7919) if grp == 1
+      s.reseed_phases(4242 + a * 104729) if grp == 3
+      s.set_positive_phases if grp == 2
+      # Chronological backtracking on half the arms: it is worth ~3.5x on
+      # this instance class when it fits the trajectory and costs when it
+      # does not, which is exactly what a race is for — take the min rather
+      # than guess which side the instance is on.
+      s.enable_chrono if grp % 2 == 1
+      # Fifth diversity axis: congruence closure + equivalent-literal
+      # substitution against the arm's own arena. Deterministic single-arm
+      # measurement on the bmc family: ibm-11 11,940 -> 4,734 conflicts and
+      # ibm-13 20,350 -> 9,238 with it, against ibm-12 7,162 -> 15,868. A
+      # symmetric win and loss of the same size on the same family is the
+      # definition of a race axis — take the min rather than pick a side.
+      # Arms 1, 2, 5, 6 draw one from each of the four existing groups, so
+      # the axis stays decorrelated from phases, VMTF and chronological
+      # backtracking instead of piggybacking on one of them.
+      s.simplify_raw_mode(0) if a % 4 == 1
+      s.simplify_raw_mode(1) if a % 4 == 2
+      s.simplify_raw if a % 4 != 1 && a % 4 != 2 && art["config"].force_simplify?
     solvers.push(s)
     a += 1
+  { "nv": nv, "solvers": solvers, "res": res, "stop": stop, "threads": threads,
+    "cap": cap, "pre": [], "formula": formula }
+
+# Register a PREPROCESSING arm: its own preprocessor (never shared — two
+# threads rendering through one WassatPreprocess would race on its arena) and
+# whether it runs the heavy rounds on top of the light ones. `label` names it
+# in the verdict line.
+#
+# No clause sharing for these arms, deliberately. A learned clause is sound
+# only for the formula it was derived from: variable elimination preserves
+# satisfiability, not consequences, so a clause from the raw kernel need not
+# be implied by a reduced one and installing it could refute a satisfiable
+# formula. Every rendering is a different formula and carries exactly one
+# arm, so a ring would be unsound AND useless.
+-> wassat_race_add_pre(race, pre, heavy, label)
+  raise "race capacity exceeded" if race["threads"] + race["pre"].size >= race["cap"]
+  race["pre"].push({ "pre": pre, "heavy": heavy, "label": label, "out": [] })
+  0
+
+# A preprocessing arm: ONE thread that renders the formula and then solves
+# what it rendered. This is the whole point of the design — preprocessing is
+# not a decision the coordinator makes and pays for up front, it is a racer,
+# and it costs the raw arms nothing but a core.
+#
+# It allocates heavily, in a worker thread, deliberately. That is safe here:
+# the runtime has no GC and hands allocation to the system allocator, and
+# per-thread runtime state is already __thread. The rule that does bind is
+# about process-global DISPATCH state — inline caches are per-call-site and
+# shared, and two threads publishing DIFFERENT methods through one site can
+# still interleave — so the MAIN thread does nothing but join while this
+# runs, and this arm sticks to the same already-warm code the serial
+# preprocessed path uses rather than any newly-written polymorphic helper.
+#
+# `out` is this arm's private two-slot channel back to the coordinator: the
+# elimination stack its model must be reconstructed through, and the stats to
+# report. Private per arm, so pushing to it needs no synchronisation.
+-> wassat_pre_arm_body(pre, formula, nv, res, base, heavy, stop, out, budget)
+  rendered = pre.run_light_flat(formula)
+  rendered = pre.run_heavy if heavy && rendered["status"] == 0
+  out.push(rendered["stack"])
+  out.push(rendered["stats"])
+  # A refutation during preprocessing is a real answer: report it the way an
+  # arm reports one, so the coordinator needs no second channel for it.
+  if rendered["status"] != 0
+    res[base] = 0 - 1
+    stop[1] = 0 - 1
+    stop[0] = 1
+    return 0
+  s = Wassat.from_flat(nv, rendered, 0)
+  s.enable_fixed_caps
+  s.set_stop_cell(stop)
+  s.solve_shared_budget(res, base, budget)
+
+# Run the race: every raw arm over the flat artifact, plus one arm per
+# preprocessed rendering that renders and then solves, all concurrently.
+# `budget` caps each arm's conflicts (0 = unlimited). While the arms are live
+# the main thread does nothing but join — inline caches are process-global,
+# so the coordinator must not dispatch until every arm has stopped.
+-> wassat_race_run(race, budget)
+  nv = race["nv"]
+  res = race["res"]
+  stop = race["stop"]
+  solvers = race["solvers"]
+  threads = race["threads"]
+  pre = race["pre"]
+  formula = race["formula"]
+  total = threads + pre.size
   handles = []
   a = 0
   while a < threads
     solver = solvers[a]
     base = a * (nv + 8)
-    handles.push(Thread.new -> wassat_fast_arm_body_budget(solver, res, base, max_conflicts))
+    handles.push(Thread.new -> wassat_fast_arm_body_budget(solver, res, base, budget))
     a += 1
+  p = 0
+  while p < pre.size
+    spec = pre[p]
+    pp = spec["pre"]
+    heavy = spec["heavy"]
+    out = spec["out"]
+    base = (threads + p) * (nv + 8)
+    handles.push(Thread.new -> wassat_pre_arm_body(pp, formula, nv, res, base, heavy, stop, out, budget))
+    p += 1
   handles.each -> (h)
     z = h.join
+  a = 0
+  while a < total
+    base = a * (nv + 8)
+    kind = a < threads ? "raw" : "pre"
+    ms = res[base + nv + 5] - res[base + nv + 6]
+    wassat_prof_note("race.arm[a] [kind] status=[res[base]] conflicts=[res[base + nv + 4]] ms=[ms]")
+    a += 1
   status = 0
   winner = -1
   a = 0
-  while a < threads
+  while a < total
     st = res[a * (nv + 8)]
     if st == 0 - 1
       status = 0 - 1
       winner = a
-      a = threads
+      a = total
     else
       if st == 1 && status == 0
         status = 1
@@ -480,12 +580,19 @@ WASSAT_ARM_SLS = 2             # local search, models only
       while v <= nv
         model.push(res[base + v] == 1 ? v : 0 - v)
         v += 1
-  { "status": status, "model": model, "winner": winner, "conflicts": conflicts }
+  # The winning arm's model lives in ITS OWN formula's variable space, so the
+  # caller must walk the matching elimination stack — "pre_index" says which
+  # rendering won (-1 = the raw one). Getting this wrong is caught by the
+  # model check against the original formula, never passed off as an answer.
+  { "status": status, "model": model, "winner": winner, "conflicts": conflicts,
+    "pre_index": winner >= threads ? winner - threads : 0 - 1 }
 
 -> wassat_run_fast_portfolio(input, threads, share, gpu)
   cnf_text = read_file(input)
   raise "cannot read input formula '[input]'" if cnf_text == nil
-  formula = wassat_parse_cnf(cnf_text)
+  # the NATIVE parser: run_light_flat and wassat_raw_artifact both consume
+  # its flat mirrors, which the boxed parser does not produce
+  formula = wassat_parse_cnf_native(cnf_text)
   nv = formula["nvars"]
 
   # Preprocess ONCE, along the SAME route the serial `--fast` path takes:
@@ -509,9 +616,44 @@ WASSAT_ARM_SLS = 2             # local search, models only
     << "c mode: fast-portfolio (preprocessing refuted)"
     return 0
 
+  # A busier ring than the raw-kernel race's: this half of the portfolio is
+  # unbounded, so exports accumulate for the whole search rather than a
+  # short burst, and the gate below is deliberately wider than glue-only.
+  # Lapping is harmless (a lost shared clause is a lost hint, not a wrong
+  # answer) but wasteful, so the ring holds ~8 drain intervals' worth.
   ring_maxlen = 24
-  ring_cap = 4096
+  ring_cap = 32768
   ring = i64[8 + ring_cap * (3 + ring_maxlen)]
+  # Export gate. Glue-only (2) is the raw race's setting and leaves the ring
+  # nearly empty; this half exports broadly and lets the IMPORT filter below
+  # decide what is worth installing, which is the GpuShareSat division of
+  # labour. Unfiltered, this gate would be ruinous — measured on uuf250-01
+  # at 4 arms, LBD<=12 with no filter takes 187s against 1.06s at LBD<=4.
+  share_lbd = 12
+  share_lbd = wassat_decimal_in_range("WASSAT_SHARE_LBD", env("WASSAT_SHARE_LBD"), 0, 64) if env("WASSAT_SHARE_LBD") != nil
+
+  # Batched import filtering (GpuShareSat, SAT'21). Each arm keeps a rotating
+  # window of assignment snapshots and installs a shared clause only when it
+  # would have been FALSE or UNIT under one of them — the clauses that would
+  # actually propagate or conflict. Everything else costs a store, two watch
+  # appends and a propagation to say nothing.
+  #
+  # Depth 64 is the measured knee on uuf250-01: conflicts are flat from 64
+  # to 1024 (62k vs 65k) while the scan cost is linear in depth, so the
+  # deeper windows buy nothing and cost 0.6s. 0 disables the filter and
+  # installs everything. Buffers are allocated HERE, on the main thread —
+  # worker arms only ever write into their own slice.
+  filter_slots = 64
+  filter_slots = wassat_decimal_in_range("WASSAT_FILTER", env("WASSAT_FILTER"), 0, 4096) if env("WASSAT_FILTER") != nil
+  filter_every = 64
+  filter_every = wassat_decimal_in_range("WASSAT_FILTER_EVERY", env("WASSAT_FILTER_EVERY"), 1, 1000000) if env("WASSAT_FILTER_EVERY") != nil
+  asg_words = nv / 64 + 2
+  asg_sinks = []
+  a = 0
+  while a < threads
+    asg_sinks.push(filter_slots > 0 ? i64[filter_slots * 2 * asg_words + 8] : nil)
+    a += 1
+
   stop = i64[4]
   res = i64[threads * (nv + 8)]
 
@@ -519,9 +661,13 @@ WASSAT_ARM_SLS = 2             # local search, models only
   a = 0
   while a < threads
     s = Wassat.from_flat(nv, art, 0)
+    s.set_share_lbd(share_lbd)
     s.enable_fixed_caps
     s.set_stop_cell(stop)
     s.enable_sharing(ring, ring_cap, ring_maxlen, a) if share
+    if filter_slots > 0 && share
+      s.set_assignment_sink(asg_sinks[a], asg_words, filter_slots, filter_every)
+      s.enable_import_filter
     # Diversity along the axes that measurably move trajectories, the same
     # three the raw-kernel race samples: branching heuristic, initial
     # phases, and chronological backtracking. Arm 0 is the marathon default
@@ -619,7 +765,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
   while a < threads
     base = a * (nv + 8)
     ms = res[base + nv + 5] - res[base + nv + 6]
-    << "c arm[a]: status=[res[base]] conflicts=[res[base + nv + 4]] ms=[ms] exported=[res[base + nv + 1]] imported=[res[base + nv + 2]] dropped_on_lap=[res[base + nv + 3]]"
+    << "c arm[a]: status=[res[base]] conflicts=[res[base + nv + 4]] ms=[ms] exported=[res[base + nv + 1]] imported=[res[base + nv + 2]] dropped=[res[base + nv + 3]] filtered=[res[base + nv + 7]]"
     a += 1
   0
 

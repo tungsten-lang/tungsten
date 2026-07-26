@@ -66,39 +66,50 @@ case "$1" in
   build)
     exec "$RUBY" "$RUBY_CLI" "$@"
     ;;
-  # bench: the cross-language benchmark suite (bin/commands/bench.w). Options
-  # are translated to env vars because `tungsten run` consumes leading --flags
-  # itself; benchmark names pass through as positional args.
+  # bench: Tungsten primitive-op velocity baseline (bin/commands/bench.w).
+  # `--suite` switches to the cross-language algorithm suite (bench-suite.w).
+  # Options are translated to env vars because `tungsten run` consumes leading
+  # --flags itself; names pass through as positional args.
   bench)
     shift
     if [ ! -x "$COMPILER" ]; then
       echo "tungsten bench: build the compiler first — bin/tungsten build" >&2
       exit 1
     fi
+    bench_cmd="$ROOT/bin/commands/bench.w"
     bench_args=()
     while [ "$#" -gt 0 ]; do
       case "$1" in
+        --suite)     bench_cmd="$ROOT/bin/commands/bench-suite.w" ;;
         --list)      export BENCH_LIST=1 ;;
+        --baseline)  export BENCH_BASELINE=1 ;;
+        --compare)   export BENCH_COMPARE=1 ;;
         --only)      shift; [ "$#" -gt 0 ] && export BENCH_ONLY="$1" ;;
         --only=*)    export BENCH_ONLY="${1#--only=}" ;;
         --runs)      shift; [ "$#" -gt 0 ] && export BENCH_RUNS="$1" ;;
         --runs=*)    export BENCH_RUNS="${1#--runs=}" ;;
         -h|--help)
-          echo "Usage: tungsten bench [benchmark...] [--only LANGS] [--runs N] [--list]"
+          echo "Usage: tungsten bench [primitive...] [--compare] [--baseline] [--runs N] [--list]"
+          echo "       tungsten bench --suite [benchmark...] [--only LANGS] [--runs N] [--list]"
           echo
-          echo "  Compares Tungsten against C, Rust, Go, Crystal, Ruby and Python"
-          echo "  across a curated suite, then prints a colour throughput report."
+          echo "  Default: Tungsten primitive-op velocity baseline (ops/sec) — a stable,"
+          echo "  machine-diffable regression baseline for the compiler."
           echo
-          echo "  benchmark...   names to run (default: all; see --list)"
-          echo "  --only LANGS   comma list, e.g. w,c,rust,go  (aliases: tungsten,rust,…)"
-          echo "  --runs N       best-of-N timing for compiled langs (default 3)"
-          echo "  --list         list the benchmarks and exit"
+          echo "  primitive...   names to run (default: all; see --list)"
+          echo "  --compare      also time C/Rust peers where a fair equivalent exists"
+          echo "  --baseline     emit machine-readable 'name<TAB>ops_per_sec' (for diffing)"
+          echo "  --runs N       best-of-N timing (default 3)"
+          echo "  --list         list the primitives and exit"
+          echo
+          echo "  --suite        run the cross-language ALGORITHM suite instead"
+          echo "                 (Tungsten vs C/Rust/Go/Crystal/Ruby/Python)"
+          echo "  --only LANGS   (suite) comma list, e.g. w,c,rust,go"
           exit 0 ;;
         *)           bench_args+=("$1") ;;
       esac
       shift
     done
-    exec "$COMPILER" run "$ROOT/bin/commands/bench.w" "${bench_args[@]}"
+    exec "$COMPILER" run "$bench_cmd" "${bench_args[@]}"
     ;;
 esac
 

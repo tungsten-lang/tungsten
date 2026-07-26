@@ -127,4 +127,23 @@ check("suffix_return.pos", early(1), "pos")
 check("suffix_return.zero", early(0), "zero")
 check("suffix_return.neg", early(-2), "neg")
 
+# suffix if on exit
+#
+# Regression: parse_exit used to take its operand with parse_expression, so
+# the modifier bound to the ARGUMENT — `exit(99) if false` parsed as
+# `exit(99 if false)`, i.e. `exit(nil)`, a silent exit 0 that also dropped
+# every statement after it. There is no way to observe that with check(),
+# because the process is already gone: if these regress, the PASS lines and
+# the banner below simply never print. Treat a missing banner as a failure.
+-> exit_paren_false(c)
+  exit(99) if c
+  "survived"
+
+-> exit_bare_false(c)
+  exit 99 if c
+  "survived"
+
+check("suffix_exit.paren_false_continues", exit_paren_false(false), "survived")
+check("suffix_exit.bare_false_continues", exit_bare_false(false), "survived")
+
 << "control_flow_spec: all checks passed"

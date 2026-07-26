@@ -2587,7 +2587,12 @@ use ../../core/token
     advance()
     if at_type?(T_NEWLINE) || at_type?(T_EOF) || at_type?(T_DEDENT) || at_type?(T_SEMICOLON)
       return Tungsten:AST:Call.new(nil, "exit", [Tungsten:AST:Int.new(0)])
-    Tungsten:AST:Call.new(nil, "exit", [parse_expression()])
+    # Assignment level, NOT parse_expression — same reason as parse_raise
+    # above. `exit(20) if cond` must attach the modifier to the statement;
+    # parse_expression binds it to the argument instead, giving
+    # `exit(20 if cond)` → `exit(nil)` → a silent exit 0 that also drops
+    # every statement after it whenever cond is false.
+    Tungsten:AST:Call.new(nil, "exit", [parse_assignment()])
 
   -> parse_use
     advance()

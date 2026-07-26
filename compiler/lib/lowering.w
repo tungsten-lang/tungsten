@@ -1091,6 +1091,12 @@ use lowering/definitions
   # Generic class monomorphization runs BEFORE the main expressions walk
   # so specialized classes are visible to every downstream pass.
   monomorphize_generics(ast, mod)
+  # Desugar `SmallArray<T, N>.new` → `SmallArray.new(:T, N)`. Always runs (unlike
+  # monomorphize_generics, which early-returns when no user generic templates
+  # exist), so a program using SmallArray<T,N> without any user generics is still
+  # rewritten. Must precede the stack-promote / escape analysis so it sees the
+  # canonical constructor.
+  rewrite_smallarray_generic_ctors(ast)
   # Flag top-level typed-overload sets so they get distinct symbols (must
   # run before the registration walk below reads function_name_for_def).
   mark_fn_overload_groups(ast.expressions)

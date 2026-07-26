@@ -1693,3 +1693,85 @@
     ast.expressions = new_expressions
   rewrite_generic_call_sites(ast, mod)
   nil
+
+# Element types that map to a SmallArray/typed-array storage tier (the ones
+# ebits_symbol_to_int knows and the inline small_array ops support). bool/u1 and
+# the fp8/fp4 variants are deliberately excluded — the stack small-array path
+# doesn't cover them.
+-> small_array_elem_type?(name)
+  name in ("u4" "i4" "u8" "i8" "u16" "i16" "u32" "i32" "u64" "i64" "f32" "f64" "bf16" "w64")
+
+# Desugar `SmallArray<T, N>.new` → the typed-array literal `T[N]`. SmallArray is a
+# builtin, not a user generic template, so monomorphize_generics leaves the
+# `<T,N>` sugar alone; this always-run pass rewrites it to `T[N]`, which the
+# existing typed-array lowering stack-promotes to a HEADERLESS raw `[N x T]`
+# alloca (SROA-able) when the var is a non-escaping local, and falls back to a
+# heap typed array on escape. Its type infers to `:small_array_<T>`, so
+# `[]`/`[]=`/`.size` use the inline ops and `.size` folds to the constant N.
+# Node REPLACEMENT (a :call becomes a :typed_array), so this returns the
+# replacement node or nil, and callers swap it into the child slot — the same
+# return-based discipline rewrite_generic_call_sites_in_node uses for class_ref.
+# T must be a small-array element type and N a numeric literal; anything else is
+# left untouched.
+-> rewrite_smallarray_ctor_node(node)
+  if node == nil
+    return nil
+  if !is_ast_node?(node)
+    return nil
+  nk = ast_kind(node)
+  if nk == :call && node.name == "new" && node.receiver != nil && ast_kind(node.receiver) == :class_ref && node.receiver.name == "SmallArray"
+    ta = node.type_args
+    if ta != nil && ta.size() == 2 && small_array_elem_type?(ta[0]) && numeric_str?(ta[1])
+      return Tungsten:AST:TypedArray.new(ta[0], Tungsten:AST:Int.new(ta[1].to_i()))
+  kid = kind_id_table[nk]
+  if kid == nil
+    return nil
+  schema = slab_offset_table_data[kid]
+  if schema == nil
+    return nil
+  ks = schema.keys()
+  i = 0
+  while i < ks.size()
+    k = ks[i]
+    v = ast_get(node, k)
+    if is_ast_node?(v)
+      replaced = rewrite_smallarray_ctor_node(v)
+      if replaced != nil
+        ast_set(node, k, replaced)
+    elsif type(v) == "Array"
+      any_replaced = false
+      rebuilt = []
+      j = 0
+      while j < v.size()
+        elt = v[j]
+        if is_ast_node?(elt)
+          replaced = rewrite_smallarray_ctor_node(elt)
+          if replaced != nil
+            rebuilt.push(replaced)
+            any_replaced = true
+          else
+            rebuilt.push(elt)
+        else
+          rebuilt.push(elt)
+        j += 1
+      if any_replaced
+        ast_set(node, k, rebuilt)
+    i += 1
+  nil
+
+-> rewrite_smallarray_generic_ctors(ast)
+  exprs = ast.expressions
+  any_replaced = false
+  rebuilt = []
+  i = 0
+  while i < exprs.size()
+    replaced = rewrite_smallarray_ctor_node(exprs[i])
+    if replaced != nil
+      rebuilt.push(replaced)
+      any_replaced = true
+    else
+      rebuilt.push(exprs[i])
+    i += 1
+  if any_replaced
+    ast.expressions = rebuilt
+  nil

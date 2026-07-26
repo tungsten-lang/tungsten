@@ -222,6 +222,7 @@ compiled_specs=(
   spec/compiler/machine_int_subscript_store_spec.w
   spec/compiler/small_array_stack_escape_spec.w
   spec/compiler/small_array_stack_zero_init_spec.w
+  spec/compiler/small_array_generic_spec.w
   spec/compiler/u64_raw_multiply_spec.w
   spec/compiler/conditional_reassign_param_spec.w
   spec/compiler/begin_rescue_value_spec.w

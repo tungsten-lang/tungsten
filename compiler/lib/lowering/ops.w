@@ -370,7 +370,12 @@
   # binary compiles core/ipv6.w's `$bytes[0] ## i64` sites).
   if ast_kind(node) == :call && node.name == "\[]" && node.args != nil && node.args.size() == 1 && node.receiver != nil && is_ast_node?(node.receiver) && ast_kind(node.receiver) == :var && type in (:i64 :u64)
     recv_t = infer_type(node.receiver, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
-    if !is_typed_array_type?(recv_t)
+    # Small/big-array receivers have their own inline element ops
+    # (small_array_get_inline / big_array_get_inline) — fall through to the
+    # inline path below rather than the boxed w_index_raw_i64 CALL, so element
+    # reads in a loop stay call-free and can vectorize. Only genuinely untyped /
+    # poly (:array) receivers use the runtime raw-read helper.
+    if !is_typed_array_type?(recv_t) && !is_small_array_type?(recv_t) && !is_big_array_type?(recv_t)
       wfn = ctx[:func]
       recv_tv = lower_expression(ctx, node.receiver)
       recv_reg = ensure_i64_value(wfn, recv_tv)
@@ -673,6 +678,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_instruction(wfn, {op: float_load_op(float_type), temp: cur_raw, ptr: ptr})
 
     rhs = lower_expression(ctx, node.value)
+    # A Decimal RHS (bare `3.5` parses as a Decimal, so `f64var += 3.5`) is
+    # coerced to a real double here by ensure_raw_f64 → w_num_to_f64; a bitcast-
+    # unbox would produce garbage (see ensure_raw_f64's fallback comment).
     rhs_raw = nil
     if float_type in (:f32 :raw_f32)
       rhs_raw = ensure_raw_f32(wfn, rhs)
@@ -1474,7 +1482,18 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     temp = next_temp(wfn)
     emit_instruction(wfn, {op: machine_int_to_f64_op(src_type), temp: temp, value: tv[:value]})
     return temp
-  nanunbox_float_emit(wfn, ensure_i64_value(wfn, tv))
+  # Fallback: a boxed WValue (`:i64`) whose concrete numeric kind isn't known at
+  # compile time — a boxed double, a Decimal literal (bare `3.5` parses as a
+  # Decimal, so `x ## f64` and mixed float/decimal expressions carry Decimals
+  # here), or a boxed Integer. A bare bitcast-unbox is correct ONLY for a genuine
+  # boxed double; for a Decimal/Int it reinterprets unrelated bits as an IEEE
+  # double (garbage — the root of the `## f64 += 3.5`, `f64 > 3.0`, `f64 + 3.5`
+  # bugs). w_num_to_f64 dispatches on the runtime type and converts each kind
+  # correctly. (`## f64` hot loops keep their accumulator as :raw_f64 and never
+  # reach this fallback, so the extra call only lands at boxed-value boundaries.)
+  temp = next_temp(wfn)
+  emit_instruction(wfn, {op: :call_num_to_f64, temp: temp, value: ensure_i64_value(wfn, tv)})
+  temp
 
 -> ensure_raw_f32(wfn, tv)
   if tv[:type] == :raw_f32

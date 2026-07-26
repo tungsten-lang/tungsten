@@ -962,7 +962,7 @@
       if idx_val[:type] in (:raw_int :raw_i64 :raw_u64)
         idx_raw = ensure_raw_int(wfn, idx_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_set_i64", args: [receiver_reg, idx_raw, val_reg]})
+        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_array_set_i64_fast", args: [receiver_reg, idx_raw, val_reg]})
         return typed_value(:i64, temp)
       idx_reg = ensure_i64_value(wfn, idx_val)
       temp = next_temp(wfn)
@@ -1040,6 +1040,16 @@
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       idx_val = lower_expression(ctx, node.args[0])
+      # Raw machine-int index: store via the inline set fast path (store-side
+      # twin of the raw `[]` get at the top of this method). Cold path re-boxes
+      # + calls the body-safe w_array_set, so semantics are identical.
+      if idx_val[:type] in (:raw_int :raw_i64 :raw_u64)
+        idx_raw = ensure_raw_int(wfn, idx_val)
+        val_expr = lower_expression(ctx, node.args[1])
+        val_reg = ensure_i64_value(wfn, val_expr)
+        temp = next_temp(wfn)
+        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_array_set_i64_fast", args: [receiver_reg, idx_raw, val_reg]})
+        return typed_value(:i64, temp)
       idx_reg = ensure_i64_value(wfn, idx_val)
       val_expr = lower_expression(ctx, node.args[1])
       val_reg = ensure_i64_value(wfn, val_expr)
@@ -1165,23 +1175,51 @@
   if is_small_array_type?(recv_type)
     elem_bits = typed_array_element_bits(small_array_to_typed_array_type(recv_type))
     elem_signed = typed_array_signed?(small_array_to_typed_array_type(recv_type))
+    # Headerless stack SmallArray? A var whose defining `buf = i32[N]` assign
+    # recorded N in wfn[:sa_size] (see lower_assign_expr). Its binding is the RAW
+    # alloca pointer (no header, no box), so element access uses the raw ptr
+    # directly (headerless: true) and .size/.length/.cap fold to the constant N.
+    sa_hl = false
+    sa_n = nil
+    sa_ptr = nil
+    if is_ast_node?(recv_node) && ast_kind(recv_node) == :var && wfn[:sa_size] != nil
+      sa_nm = ast_get(recv_node, :name)
+      sa_n = wfn[:sa_size][sa_nm]
+      if sa_n != nil
+        sa_hl = true
+        sa_ptr = wfn[:sa_ptr][sa_nm]
     if method_name == "size" && node.args.size() == 0
+      if sa_hl
+        return nanbox_int_emit(wfn, sa_n.to_s())
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_small_array_size", args: [receiver_reg]})
       return typed_value(:i64, temp)
     if method_name == "cap" && node.args.size() == 0
+      if sa_hl
+        return nanbox_int_emit(wfn, sa_n.to_s())
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_small_array_size", args: [receiver_reg]})
       return typed_value(:i64, temp)
+    # `length` is an escape-safe receiver method, so a headerless var can reach
+    # it. It has no boxed inline handler (boxed small arrays dispatch through
+    # SmallArray#length), so only intercept the headerless case → constant N;
+    # boxed arrays fall through to generic dispatch unchanged.
+    if method_name == "length" && node.args.size() == 0 && sa_hl
+      return nanbox_int_emit(wfn, sa_n.to_s())
     # Phase 6f: empty? is handled inline so Phase 5 specialization
     # doesn't try to monomorphize Enumerable's `each -> return false : true`
     # body (which would surface SmallArray-context bugs in `$size`
     # lowering). The fast path is a tiny size==0 compare.
     if method_name == "empty?" && node.args.size() == 0
+      if sa_hl
+        empty_v = w_false.to_s()
+        if sa_n == 0
+          empty_v = w_true.to_s()
+        return typed_value(:i64, empty_v)
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       size_temp = next_temp(wfn)
@@ -1195,8 +1233,14 @@
       emit_instruction(wfn, {op: :select_i64, temp: temp, cond: cmp, then_val: w_true.to_s(), else_val: w_false.to_s()})
       return typed_value(:i64, temp)
     if method_name == "\[]" && node.args.size() == 1
-      receiver_val = lower_expression(ctx, recv_node)
-      receiver_reg = ensure_i64_value(wfn, receiver_val)
+      # Headerless: the raw alloca ptr comes straight from wfn[:sa_ptr] (the var
+      # is NOT in ctx[:bindings], so don't lower it as a bare var). Boxed: lower
+      # the receiver and unmask the WValue as before.
+      if sa_hl
+        receiver_reg = sa_ptr
+      else
+        receiver_val = lower_expression(ctx, recv_node)
+        receiver_reg = ensure_i64_value(wfn, receiver_val)
       idx_val = lower_expression(ctx, node.args[0])
       idx_raw = false
       if idx_val[:type] in (:raw_int :raw_i64 :raw_u64)
@@ -1210,14 +1254,17 @@
         scratch.push(next_temp(wfn))
         si += 1
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :small_array_get_inline, temp: temp, arr: receiver_reg, idx: idx_reg, idx_raw: idx_raw, s: scratch, bits: elem_bits, signed: elem_signed})
+      emit_instruction(wfn, {op: :small_array_get_inline, temp: temp, arr: receiver_reg, idx: idx_reg, idx_raw: idx_raw, s: scratch, bits: elem_bits, signed: elem_signed, headerless: sa_hl})
       elem_type = small_array_to_typed_array_type(recv_type)
       if elem_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16)
         return raw_float_from_bits_i64(wfn, temp, elem_type)
       return typed_value(:raw_int, temp)
     if method_name == "\[]=" && node.args.size() == 2
-      receiver_val = lower_expression(ctx, recv_node)
-      receiver_reg = ensure_i64_value(wfn, receiver_val)
+      if sa_hl
+        receiver_reg = sa_ptr
+      else
+        receiver_val = lower_expression(ctx, recv_node)
+        receiver_reg = ensure_i64_value(wfn, receiver_val)
       idx_val = lower_expression(ctx, node.args[0])
       idx_raw = false
       if idx_val[:type] in (:raw_int :raw_i64 :raw_u64)
@@ -1231,6 +1278,15 @@
         val_reg = raw_float_bits_i64(wfn, val_expr, elem_type)
       elsif val_expr[:type] in (:raw_int :raw_i64 :raw_u64)
         val_reg = val_expr[:value]
+      elsif val_expr[:type] in (:int :i64) && elem_type != :typed_array_w64
+        # Boxed Integer / WValue into a raw small-array integer slot: convert at
+        # the store boundary. A tag shift is unsound because values outside i48
+        # are heap BigInts whose pointer bits would be written raw. Mirrors the
+        # typed_array_set_inline path.
+        store_machine_type = :i64
+        if elem_type == :typed_array_u64
+          store_machine_type = :u64
+        val_reg = ensure_raw_machine_int(wfn, val_expr, store_machine_type, nil)
       else
         val_reg = ensure_i64_value(wfn, val_expr)
       scratch = []
@@ -1239,7 +1295,7 @@
         scratch.push(next_temp(wfn))
         si += 1
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :small_array_set_inline, temp: temp, arr: receiver_reg, idx: idx_reg, idx_raw: idx_raw, value: val_reg, s: scratch, bits: elem_bits, signed: elem_signed})
+      emit_instruction(wfn, {op: :small_array_set_inline, temp: temp, arr: receiver_reg, idx: idx_reg, idx_raw: idx_raw, value: val_reg, s: scratch, bits: elem_bits, signed: elem_signed, headerless: sa_hl})
       return typed_value(:i64, temp)
 
   # Direct builtins for typed arrays (integer widths plus runtime-backed floats)

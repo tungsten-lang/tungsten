@@ -481,6 +481,11 @@ use lowering/definitions
     if node.element_type == "bool" || node.element_type == "u1" || node.element_type == "i1"
       return :bool_array
     etype = node.element_type
+    # Non-escaping `i32[N]` (N<=255) promoted to a stack WSmallArray by
+    # mark_stackable_typed_arrays: its element access must dispatch to the
+    # small_array inline ops, so surface the small_array_* type.
+    if typed_array_new_stack_promoted?(node)
+      return small_array_etype_to_sym(etype)
     if etype in ("u4" "i4")
       return typed_array_etype_to_sym(etype)
     if etype in ("u8" "i8" "u16" "i16" "u32" "i32" "u64" "i64" "f64" "f32" "bf16" "w64")
@@ -1482,6 +1487,14 @@ use lowering/definitions
   # annotation default to "on" for safe top-level patterns.
   mark_nonescaping_small_arrays(ast.expressions)
 
+  # Phase 6i: promote non-escaping, non-resized `i32[N]` (N<=255) locals to
+  # stack WSmallArrays. Recurses into every function/method body (unlike the
+  # top-level-only SmallArray.new pass above). ~5.7x faster alloc + (with the
+  # small-array rvalue reads routed through small_array_get_inline, lowering/ops.w)
+  # vectorizing element loops — a promoted 128-elem fill+sum is ~5x faster than
+  # the heap form. Always on.
+  mark_stackable_typed_arrays(ast.expressions)
+
   if verbose
     << "  lowering..."
   lower_program(ctx, ast.expressions)
@@ -1950,6 +1963,43 @@ use lowering/definitions
     ctx[:closure_bindings][name] = nil
     if ctx[:closure_noalloc_bindings] != nil
       ctx[:closure_noalloc_bindings][name] = nil
+
+  # Headerless stack SmallArray. `buf = i32[N]` that the escape pass proved
+  # non-escaping (node.stack_safe) — used only via []/[]=/size/length, a single
+  # assignment, not in a loop. Emit a bare `[payload x i8]` alloca and bind the
+  # var to the RAW alloca pointer: no 2-byte ebits/size header, no
+  # w_small_array_init, no box (subtag OR). Keeping the pointer un-ptrtoint'd is
+  # exactly what lets LLVM SROA promote the buffer to registers (the sorting-
+  # network leaf win). `.size`/[]/[]= use the compile-time N/T (wfn[:sa_size] +
+  # the :small_array_* type) instead of reading a runtime header.
+  #   - `wfn[:name] != "main"`: a top-level var stores through @global.<name> via
+  #     ptrtoint, which re-escapes the pointer — keep those on the boxed path.
+  #   - `wfn[:var_slots][name] == nil`: a pre-allocated i64 slot would also
+  #     ptrtoint the pointer on store; only pure SSA-binding vars go headerless.
+  if wfn[:name] != "main" && wfn[:var_slots][name] == nil && node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) in (:typed_array_new :typed_array) && typed_array_new_stack_promoted?(node.value)
+    ta_node = node.value
+    sa_sym = small_array_etype_to_sym(ta_node.element_type)
+    if sa_sym != nil
+      sa_bits = typed_array_element_bits(small_array_to_typed_array_type(sa_sym))
+      sa_size = ast_get(ta_node, :size).value
+      sa_payload = small_array_payload_bytes(sa_bits, sa_size)
+      sa_ptr = next_temp(wfn)
+      emit_instruction(wfn, {op: :small_array_alloca, temp_ptr: sa_ptr, total_bytes: sa_payload})
+      # Keep the raw alloca pointer OUT of ctx[:bindings]: materialize_bindings
+      # spills bindings to i64 slots (`store i64 <binding>, ptr %vs.N`), which
+      # would ptrtoint-and-re-escape the pointer AND is a type error (ptr into an
+      # i64 slot). The alloca dominates every use (entry block), so no spill is
+      # needed — the []/[]=/size use sites read the pointer straight from
+      # wfn[:sa_ptr]. var_types is still set so the receiver infers :small_array_*
+      # and the use sites take the inline path.
+      ctx[:var_types][name] = sa_sym
+      if wfn[:sa_ptr] == nil
+        wfn[:sa_ptr] = {}
+      if wfn[:sa_size] == nil
+        wfn[:sa_size] = {}
+      wfn[:sa_ptr][name] = sa_ptr
+      wfn[:sa_size][name] = sa_size
+      return typed_value(sa_sym, sa_ptr)
 
   target_type = ctx[:var_types][name]
   if node.type_hint != nil

@@ -13780,6 +13780,17 @@ static double as_numeric_double(WValue v) {
     return 0.0;
 }
 
+/* Callable numeric->raw-double coercion for generated code. The compiler emits
+ * this in ensure_raw_f64's fallback when a boxed value (`:i64`) must become a
+ * raw f64 but its concrete numeric kind isn't known at compile time — a boxed
+ * double, a Decimal literal (`x ## f64` where the literal parsed as a Decimal),
+ * or a boxed Integer. A plain bitcast-unbox is only correct for a genuine boxed
+ * double; for a Decimal or Int it reinterprets unrelated bits as an IEEE double
+ * (garbage). Routing through as_numeric_double converts each kind correctly. */
+double w_num_to_f64(WValue v) {
+    return as_numeric_double(v);
+}
+
 /* Promote any numeric (double/int/decimal) to a double for the purpose
  * of an order comparison only. Decimal precision loss is acceptable
  * here because the comparison's result is a single bit. Used by
@@ -15016,6 +15027,39 @@ WValue w_eq(WValue a, WValue b) {
         if (na->type != nb->type || na->len != nb->len || na->prefix != nb->prefix)
             return W_FALSE;
         return w_bool(memcmp(na->bytes, nb->bytes, na->len) == 0);
+    }
+
+    /* User-defined `==`: if `a` is a class instance whose class OVERRIDES `==`
+     * (resolves to something other than the Object#== default), dispatch to it —
+     * same operator-overload pattern as w_add routing `+` to a.+(b). The
+     * override guard (m != objm) is essential: dispatching the Object#== default
+     * would re-enter this w_eq and loop. Plain objects keep identity semantics
+     * (the bit-equality fast path at the top already handled a == a). */
+    if (w_is_instance(a)) {
+        WObject *obj = (WObject *)w_as_ptr(a);
+        WClass *klass = g_class_table[obj->class_id];
+        WValue eqname = w_string("==");
+        WMethod *m = w_method_lookup(klass, eqname);
+        if (m) {
+            /* Compare against the *global* Object#== default (cached once), not
+             * the receiver's own root — a class without an explicit superclass is
+             * its own root, so root-based comparison would misjudge its own == as
+             * the default. Dispatch only when the resolved == is an override. */
+            static WMethod *object_eq = NULL;
+            static int object_eq_init = 0;
+            if (!object_eq_init) {
+                object_eq_init = 1;
+                for (int ci = 0; ci < W_MAX_CLASSES; ci++) {
+                    WClass *c = g_class_table[ci];
+                    if (c && c->name && strcmp(c->name, "Object") == 0) {
+                        object_eq = w_method_lookup(c, eqname);
+                        break;
+                    }
+                }
+            }
+            if (m != object_eq)
+                return w_method_call_fast(a, eqname, &b, 1);
+        }
     }
 
     /* Different types or different values */
@@ -27743,12 +27787,14 @@ WValue w_small_array_init(int64_t mem, int64_t ebits, int64_t size) {
     WSmallArray *a = (WSmallArray *)(uintptr_t)mem;
     a->ebits = (uint8_t)ebits;
     a->size  = (uint8_t)size;
-    /* slots aren't zero-filled here — the caller's alloca produced
-     * undefined memory. If the user expects zero-init, they should use
-     * w_small_array_new instead, OR the lowering can emit a memset.
-     * For literal-construction sites where every slot is immediately
-     * written by the lowered initializer code, skipping the memset
-     * saves cycles in the hot path. */
+    /* slots are NOT zero-filled here: the caller's alloca hands back
+     * whatever the previous frame at this depth left behind. Tungsten's
+     * `i64[n]` / `SmallArray.new(:i64, n)` are zero-initialised by
+     * contract, so the emitter pairs every small_array_alloca with a
+     * `store [N x i8] zeroinitializer` before this call (emitter.w,
+     * `when :small_array_alloca`). Keeping the zeroing on the emitter
+     * side lets SROA/DSE delete it at sites that overwrite every slot;
+     * doing it here would be an opaque call LLVM cannot elide. */
     return w_box_ptr(a, W_SUBTAG_SMALL_ARRAY);
 }
 

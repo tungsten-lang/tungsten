@@ -134,11 +134,11 @@
   if nt == :assign
     return assign_stmt_safe_for_var?(stmt, var_name)
   if nt == :return
-    return !stmt_value_is_var?(stmt.value, var_name)
+    return !expr_escapes_var?(stmt.value, var_name)
   if nt == :yield
-    return !stmt_value_is_var?(stmt.value, var_name)
+    return !expr_escapes_var?(stmt.value, var_name)
   if nt == :ivar_set
-    return !stmt_value_is_var?(stmt.value, var_name)
+    return !expr_escapes_var?(stmt.value, var_name)
   # Top-level class/trait/method/fn definitions get their own scope and
   # don't auto-capture sibling locals. Safe by construction.
   if nt == :class_def
@@ -171,7 +171,9 @@
   if args != nil
     ai = 0
     while ai < args.size()
-      if stmt_value_is_var?(args[ai], var_name)
+      # Recursive, not just a bare-var test: `other.push([s])` and
+      # `f(g(s))` leak the pointer just as surely as `other.push(s)`.
+      if expr_escapes_var?(args[ai], var_name)
         return false
       ai += 1
   if stmt.block != nil
@@ -183,14 +185,273 @@
   if target == nil
     return true
   if ast_kind(target) == :ivar
-    return !stmt_value_is_var?(stmt.value, var_name)
+    return !expr_escapes_var?(stmt.value, var_name)
   if ast_kind(target) == :cvar
-    return !stmt_value_is_var?(stmt.value, var_name)
+    return !expr_escapes_var?(stmt.value, var_name)
   if ast_kind(target) == :var
-    if stmt_value_is_var?(stmt.value, var_name)
+    # `x = [s]` / `x = {k: s}` store the pointer into a heap structure that
+    # outlives the frame — a bare-var test on the value would miss both.
+    if expr_escapes_var?(stmt.value, var_name)
       return false
     return true
   true
+
+# ── Stack-promote non-escaping i32[N] literals to WSmallArray ──────────────
+# A `var = i32[N]` (typed_array_new) with a compile-time size 0..255 and a
+# packable element type lowers to a heap WArray by default. When the local
+# provably (a) never escapes — never passed as a call arg, returned, yielded,
+# stored in an ivar/cvar/another var, or captured by a block — and (b) is never
+# resized (only `[]`, `[]=`, `size`, `length` on it; `push`/`<<`/etc. are
+# blocked, matching WSmallArray's frozen contract), we stack-allocate it instead
+# (small_array_alloca). infer_type + lower_typed_array_new share
+# `typed_array_new_stack_promoted?` so the element-access ops (small vs typed)
+# always match the allocation. Candidates inside a loop/block are skipped: an
+# alloca whose address escapes into the boxed pointer can't be hoisted, so one
+# in a loop body would grow the stack per iteration.
+-> small_array_etype_to_sym(etype)
+  case etype
+  when "u4" then :small_array_u4
+  when "i4" then :small_array_i4
+  when "u8" then :small_array_u8
+  when "i8" then :small_array_i8
+  when "u16" then :small_array_u16
+  when "i16" then :small_array_i16
+  when "u32" then :small_array_u32
+  when "i32" then :small_array_i32
+  when "u64" then :small_array_u64
+  when "i64" then :small_array_i64
+  when "f32" then :small_array_f32
+  when "f64" then :small_array_f64
+  when "bf16" then :small_array_bf16
+  when "w64" then :small_array_w64
+  else nil
+
+# Shared predicate: is this typed_array_new node cleared for stack promotion?
+# Used by both infer_type (type = small_array_*) and lower_typed_array_new
+# (alloca), so they never disagree.
+-> typed_array_new_stack_promoted?(node)
+  if node == nil
+    return false
+  if node.stack_safe != true
+    return false
+  et = node.element_type
+  if et == nil
+    return false
+  if small_array_etype_to_sym(et) == nil
+    return false
+  sz = ast_get(node, :size)
+  if sz == nil
+    return false
+  if !is_ast_node?(sz)
+    return false
+  if ast_kind(sz) != :int
+    return false
+  if sz.value < 0 || sz.value > 255
+    return false
+  true
+
+-> is_stackable_ta_assign?(stmt)
+  if !is_ast_node?(stmt)
+    return false
+  if ast_kind(stmt) != :assign
+    return false
+  tgt = stmt.target
+  if tgt == nil || !is_ast_node?(tgt) || ast_kind(tgt) != :var
+    return false
+  val = stmt.value
+  if val == nil || !is_ast_node?(val)
+    return false
+  vk = ast_kind(val)
+  if vk != :typed_array_new && vk != :typed_array
+    return false
+  et = val.element_type
+  if et == nil || small_array_etype_to_sym(et) == nil
+    return false
+  sz = ast_get(val, :size)
+  if sz == nil || !is_ast_node?(sz) || ast_kind(sz) != :int
+    return false
+  if sz.value < 0 || sz.value > 255
+    return false
+  true
+
+# Collect stackable candidates in this scope. Skips anything inside a loop or
+# block body (alloca-in-loop would grow the stack). Does not descend into nested
+# method/fn definitions — those are separate scopes.
+-> collect_ta_candidates(node, in_loop, out)
+  if node == nil
+    return nil
+  if type(node) == "Array"
+    i = 0
+    while i < node.size()
+      collect_ta_candidates(node[i], in_loop, out)
+      i += 1
+    return nil
+  if !is_ast_node?(node)
+    return nil
+  k = ast_kind(node)
+  if k == :method_def || k == :fn_def
+    return nil
+  if !in_loop && is_stackable_ta_assign?(node)
+    out.push({var: node.target.name, node: node.value})
+  child_loop = in_loop
+  if k == :while || k == :until || k == :loop || k == :for
+    child_loop = true
+  ch = ast_children(node)
+  j = 0
+  while j < ch.size()
+    c = ch[j]
+    ci_loop = child_loop
+    if is_ast_node?(c) && ast_kind(c) == :block
+      ci_loop = true
+    collect_ta_candidates(c, ci_loop, out)
+    j += 1
+  nil
+
+# Every reference to var_name in the scope must be either its single defining
+# assignment or the receiver of a frozen-safe call ([], []=, size, length).
+-> typed_array_var_stack_safe?(scope_body, var_name)
+  st = {ok: true, assigns: 0, any_recv_call: false}
+  walk_escape_uses(scope_body, var_name, st)
+  st[:ok] && st[:assigns] == 1
+
+# Does `var_name` escape anywhere inside this expression? Used by the
+# SmallArray.new pass to vet a call argument / assigned value, where a bare
+# mention leaks the pointer but a receiver-position mention (`s.size`) does
+# not — WSmallArray is frozen and no runtime entry point retains its receiver.
+-> expr_escapes_var?(node, var_name)
+  st = {ok: true, assigns: 0, any_recv_call: true}
+  walk_escape_uses(node, var_name, st)
+  st[:ok] == false
+
+# Conservative escape walker shared by both stack-promotion passes.
+#
+#   st[:ok]            — cleared the instant an escaping mention is seen
+#   st[:assigns]       — number of assignments whose target IS the var
+#   st[:any_recv_call] — true: ANY method with the var as RECEIVER is safe;
+#                        false: only [] / []= / size / length are (push, <<,
+#                        concat, … would resize past a fixed stack buffer)
+#
+# EVERY other appearance of the var is treated as an escape: a bare mention
+# (statement position, implicit return, `return e`), a call ARGUMENT, an
+# element of an array or hash literal, an alias assignment, a block/closure
+# capture, an ivar/cvar store. A missed promotion costs one heap allocation;
+# a wrong promotion boxes a pointer into a frame that is about to be reclaimed.
+#
+# Traversal is deliberately NOT ast_children-based. ast_children keeps only the
+# values for which is_ast_node? holds, so nested child-lists are dropped whole:
+# hash_literal `entries` and if `elsif_clauses` hold W_PACKED_BODY refs, which
+# `type()` reports as "Array" but which are not AST nodes. That blind spot is
+# exactly how `{ "arr": e }` hid an escape and handed out a dangling stack
+# pointer. Here every schema slot is visited and every nested Array descended,
+# and an unknown node kind fails closed.
+-> walk_escape_uses(node, var_name, st)
+  if node == nil
+    return nil
+  if st[:ok] == false
+    return nil
+  if !is_ast_node?(node)
+    if type(node) == "Array"
+      i = 0
+      while i < node.size()
+        walk_escape_uses(node[i], var_name, st)
+        i += 1
+    return nil
+  k = ast_kind(node)
+  # A nested definition opens its own scope and cannot see this frame's locals.
+  if k == :method_def || k == :fn_def
+    return nil
+  if k == :assign
+    tgt = node.target
+    if tgt != nil && is_ast_node?(tgt) && ast_kind(tgt) == :var && tgt.name == var_name
+      st[:assigns] = st[:assigns] + 1
+      walk_escape_uses(node.value, var_name, st)
+      return nil
+  if k == :call
+    recv = node.receiver
+    if recv != nil && is_ast_node?(recv) && ast_kind(recv) == :var && recv.name == var_name
+      nm = node.name
+      # A safe receiver method (`[]`/`[]=`/size/length, or any when
+      # any_recv_call) keeps the var stack-local — UNLESS the call sits inside a
+      # closure/block body (st[:in_block]), where referencing the var CAPTURES
+      # it: the closure can outlive the frame, so the var must escape to the heap.
+      if st[:in_block] != true && (st[:any_recv_call] == true || nm == "[]" || nm == "[]=" || nm == "size" || nm == "length")
+        walk_escape_uses(node.args, var_name, st)
+        walk_escape_uses(node.block, var_name, st)
+        return nil
+      st[:ok] = false
+      return nil
+  if k == :var && node.name == var_name
+    st[:ok] = false
+    return nil
+  # A block/closure literal captures enclosing locals. Walk its body with
+  # in_block set so ANY reference to var_name inside (even a safe receiver call)
+  # counts as an escaping capture. Restore the flag afterward so sibling uses
+  # outside the closure are judged normally.
+  if k == :block
+    saved_in_block = st[:in_block]
+    st[:in_block] = true
+    bkid = kind_id_table[k]
+    if bkid != nil
+      bkeys = slab_keys_table[bkid]
+      if bkeys != nil
+        bj = 0
+        while bj < bkeys.size()
+          walk_escape_uses(ast_get(node, bkeys[bj]), var_name, st)
+          bj += 1
+    st[:in_block] = saved_in_block
+    return nil
+  kid = kind_id_table[k]
+  if kid == nil
+    st[:ok] = false
+    return nil
+  keys = slab_keys_table[kid]
+  if keys == nil
+    st[:ok] = false
+    return nil
+  j = 0
+  while j < keys.size()
+    walk_escape_uses(ast_get(node, keys[j]), var_name, st)
+    j += 1
+  nil
+
+# Entry: process a scope's statement list, then recurse into nested fn bodies.
+-> mark_stackable_typed_arrays(scope_body)
+  if scope_body == nil
+    return nil
+  if type(scope_body) != "Array"
+    return nil
+  cands = []
+  collect_ta_candidates(scope_body, false, cands)
+  ci = 0
+  while ci < cands.size()
+    c = cands[ci]
+    if typed_array_var_stack_safe?(scope_body, c[:var])
+      c[:node].stack_safe = true
+    ci += 1
+  recurse_ta_scopes(scope_body)
+  nil
+
+-> recurse_ta_scopes(node)
+  if node == nil
+    return nil
+  if type(node) == "Array"
+    i = 0
+    while i < node.size()
+      recurse_ta_scopes(node[i])
+      i += 1
+    return nil
+  if !is_ast_node?(node)
+    return nil
+  k = ast_kind(node)
+  if k == :method_def || k == :fn_def
+    mark_stackable_typed_arrays(ast_get(node, :body))
+    return nil
+  ch = ast_children(node)
+  j = 0
+  while j < ch.size()
+    recurse_ta_scopes(ch[j])
+    j += 1
+  nil
 
 # Phase 5 (gap #2): walk every method body of every class, find ivar
 # assignments, and record the inferred RHS type into mod[:ivar_types]

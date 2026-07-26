@@ -535,6 +535,20 @@
     bits = -64
 
   if bits != 0
+    # Non-escaping, non-resized `i32[N]` (N<=255) → stack WSmallArray, matching
+    # the SmallArray.new stack path. infer_type surfaces the small_array_* type
+    # for the same node so element access uses the small_array inline ops.
+    if typed_array_new_stack_promoted?(node)
+      size_const = ast_get(node, :size).value
+      payload_bytes = small_array_payload_bytes(bits, size_const)
+      total_bytes = 2 + payload_bytes
+      temp_ptr = next_temp(wfn)
+      temp_int = next_temp(wfn)
+      temp_box = next_temp(wfn)
+      emit_instruction(wfn, {op: :small_array_alloca, temp_ptr: temp_ptr, total_bytes: total_bytes})
+      emit_instruction(wfn, {op: :ptr_to_i64, temp: temp_int, value: temp_ptr})
+      emit_instruction(wfn, {op: :call_direct_i64, temp: temp_box, name: "w_small_array_init", args: [temp_int, bits.to_s(), size_const.to_s()]})
+      return typed_value(:i64, temp_box)
     # ## reuse — per-site thread-local slot reused across calls. Shape is
     # stable (same element_bits) at a given site; capacity grows as needed.
     if node.reuse_safe == true

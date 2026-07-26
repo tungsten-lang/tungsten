@@ -265,15 +265,28 @@ use hashing
   out << declare_fn("w_to_i128", "i128", wv)
   out << declare_fn("w_u128", wv, "i128")
   out << declare_fn("w_to_u128", "i128", wv)
-  out << declare_fn_attrs("w_bool", wv, "i64", "nounwind willreturn memory(none) speculatable alwaysinline")
-  out << declare_fn_attrs("w_nil", wv, "", "nounwind willreturn memory(none) speculatable alwaysinline")
+  # `alwaysinline` on a bodiless declare is a no-op (LLVM can't inline a function
+  # it has no body for), and these are never called via @w_bool/@w_nil in practice
+  # — the emitter already inlines boolean boxing as `select i1 …, 2, 1` and nil as
+  # the constant 0. Keep memory(none)+speculatable (those DO optimize any residual
+  # call: CSE, hoist, DCE); drop the dead alwaysinline.
+  out << declare_fn_attrs("w_bool", wv, "i64", "nounwind willreturn memory(none) speculatable")
+  out << declare_fn_attrs("w_nil", wv, "", "nounwind willreturn memory(none) speculatable")
   out << declare_fn("w_string", wv, "ptr")
   out << declare_fn("w_str_to_sym", wv, wv)
   out << declare_fn("w_regex_new", wv, wv2)
   out << declare_fn("w_regex_match", wv, wv2)
   out << declare_fn("w_regex_capture", wv, wv)
-  out << declare_fn_attrs("w_float", wv, "double", "nounwind willreturn memory(none) speculatable alwaysinline")
+  # w_float's body (w_box_double) has a NaN-normalization branch — not worth
+  # hand-inlining (miscompile risk on the encoding) and it isn't called via
+  # @w_float in practice (float boxing lowers inline). Drop the dead alwaysinline.
+  out << declare_fn_attrs("w_float", wv, "double", "nounwind willreturn memory(none) speculatable")
   out << declare_fn("w_decimal", wv, "i64, i32")
+  # Numeric->raw-double coercion for ensure_raw_f64's fallback: converts a boxed
+  # double/Decimal/Int correctly (a plain bitcast-unbox only works for a genuine
+  # boxed double; a Decimal reinterprets to garbage). memory(read) — a heap
+  # Decimal reads its payload.
+  out << declare_fn_attrs("w_num_to_f64", "double", wv, "nounwind memory(read)")
 
   # Domain type constructors
   out << declare_fn("w_currency", wv, "i32, i64, i32")
@@ -323,7 +336,9 @@ use hashing
   out << "declare void @w_slab_init_static(ptr, i32)\n"
   out << "declare void @__w_loc_set_col(ptr, i32, i32)\n"
   out << declare_fn("w_int_to_hex_str", wv, "i64")
-  out << declare_fn_attrs("w_truthy", "i64", wv, "nounwind willreturn memory(none) speculatable alwaysinline")
+  # Same as w_bool/w_nil: `if`/`while` conditions lower to inline i1 tests, so
+  # @w_truthy is never actually called; drop the dead alwaysinline, keep the rest.
+  out << declare_fn_attrs("w_truthy", "i64", wv, "nounwind willreturn memory(none) speculatable")
 
   # Arrays — bare polymorphic constructor and the typed/sized form
   out << declare_fn("w_array_new_empty", wv, "")
@@ -333,14 +348,20 @@ use hashing
   out << declare_fn("w_fused_out_reuse_or_new", wv, "ptr, i64, i64")
   out << declare_fn("w_array_push", wv, wv2)
   out << declare_fn("w_array_get", wv, wv2)
-  out << declare_fn("w_array_get_i64", wv, "i64, i64")
-  out << declare_fn("w_array_idx_i64", wv, "i64, i64")
+  # Pure reads: return W_NIL on OOB, never raise, always return. memory(read)+
+  # willreturn lets the function-attrs pass propagate purity up through the
+  # inlined __w_array_*_i64_fast helpers, so `a[i]` reads CSE and hoist out of
+  # loops that don't write the array.
+  out << declare_fn_attrs("w_array_get_i64", wv, "i64, i64", "nounwind willreturn memory(read)")
+  out << declare_fn_attrs("w_array_idx_i64", wv, "i64, i64", "nounwind willreturn memory(read)")
   out << declare_fn("w_array_set", wv, wv3)
   out << declare_fn("w_array_set_i64", wv, "i64, i64, i64")
-  out << declare_fn("w_array_size", wv, wv)
+  # `.size`/`.cap` read one header field, never raise — memory(read) lets LICM
+  # hoist `arr.size` out of read-only loops and CSE repeated reads.
+  out << declare_fn_attrs("w_array_size", wv, wv, "nounwind willreturn memory(read)")
   out << declare_fn("w_array_pop", wv, wv)
   out << declare_fn("w_array_shift", wv, wv)
-  out << declare_fn("w_array_cap", wv, wv)
+  out << declare_fn_attrs("w_array_cap", wv, wv, "nounwind willreturn memory(read)")
 
   # Bool arrays
   out << declare_fn("w_bool_array_new", wv, "i64")
@@ -383,7 +404,7 @@ use hashing
   out << declare_fn("w_array_sqrt_signed", wv, wv)
   out << declare_fn("w_array_sqrt_unsigned", wv, wv)
   out << declare_fn("w_array_sqrt_float", wv, wv)
-  out << declare_fn("w_bool_array_size", wv, wv)
+  out << declare_fn_attrs("w_bool_array_size", wv, wv, "nounwind willreturn memory(read)")
 
   # String builtins
   out << declare_fn("w_string_index", wv, wv3)
@@ -676,12 +697,12 @@ use hashing
   out << "  %base = and i64 %arr, -16\n"
   out << "  %p = inttoptr i64 %base to ptr\n"
   out << "  %ebp = getelementptr i8, ptr %p, i64 1\n"
-  out << "  %eb = load i8, ptr %ebp, align 1\n"
+  out << "  %eb = load i8, ptr %ebp, align 1" + invariant_load_suffix() + "\n"
   out << "  %is65 = icmp eq i8 %eb, 65\n"
   out << "  br i1 %is65, label %rng, label %slow\n"
   out << "rng:\n"
   out << "  %szp = getelementptr i8, ptr %p, i64 8\n"
-  out << "  %sz32 = load i32, ptr %szp, align 4\n"
+  out << "  %sz32 = load i32, ptr %szp, align 4" + tbaa_header_suffix() + "\n"
   out << "  %sz = sext i32 %sz32 to i64\n"
   out << "  %neg = icmp slt i64 %i, 0\n"
   out << "  %iw = add i64 %i, %sz\n"
@@ -690,13 +711,13 @@ use hashing
   out << "  br i1 %inb, label %fast, label %slow\n"
   out << "fast:\n"
   out << "  %stp = getelementptr i8, ptr %p, i64 4\n"
-  out << "  %st32 = load i32, ptr %stp, align 4\n"
+  out << "  %st32 = load i32, ptr %stp, align 4" + tbaa_header_suffix() + "\n"
   out << "  %st = sext i32 %st32 to i64\n"
   out << "  %eff = add i64 %st, %ix\n"
   out << "  %slp = getelementptr i8, ptr %p, i64 16\n"
-  out << "  %slots = load ptr, ptr %slp, align 8\n"
+  out << "  %slots = load ptr, ptr %slp, align 8" + tbaa_header_suffix() + "\n"
   out << "  %ep = getelementptr i64, ptr %slots, i64 %eff\n"
-  out << "  %v = load i64, ptr %ep, align 8\n"
+  out << "  %v = load i64, ptr %ep, align 8" + tbaa_elem_suffix() + "\n"
   out << "  ret i64 %v\n"
   out << "slow:\n"
   out << "  %sv = call i64 @w_array_get_i64(i64 %arr, i64 %i)\n"
@@ -716,21 +737,73 @@ use hashing
   out << "  %base = and i64 %arr, -16\n"
   out << "  %p = inttoptr i64 %base to ptr\n"
   out << "  %ebp = getelementptr i8, ptr %p, i64 1\n"
-  out << "  %eb = load i8, ptr %ebp, align 1\n"
+  out << "  %eb = load i8, ptr %ebp, align 1" + invariant_load_suffix() + "\n"
   out << "  %is65 = icmp eq i8 %eb, 65\n"
   out << "  br i1 %is65, label %fast, label %slow\n"
   out << "fast:\n"
   out << "  %stp = getelementptr i8, ptr %p, i64 4\n"
-  out << "  %st32 = load i32, ptr %stp, align 4\n"
+  out << "  %st32 = load i32, ptr %stp, align 4" + tbaa_header_suffix() + "\n"
   out << "  %st = sext i32 %st32 to i64\n"
   out << "  %eff = add i64 %st, %i\n"
   out << "  %slp = getelementptr i8, ptr %p, i64 16\n"
-  out << "  %slots = load ptr, ptr %slp, align 8\n"
+  out << "  %slots = load ptr, ptr %slp, align 8" + tbaa_header_suffix() + "\n"
   out << "  %ep = getelementptr i64, ptr %slots, i64 %eff\n"
-  out << "  %v = load i64, ptr %ep, align 8\n"
+  out << "  %v = load i64, ptr %ep, align 8" + tbaa_elem_suffix() + "\n"
   out << "  ret i64 %v\n"
   out << "slow:\n"
   out << "  %sv = call i64 @w_array_idx_i64(i64 %arr, i64 %i)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
+# Inline WArray write fast path — the store-side twin of __w_array_get_i64_fast.
+# Fast case (poly array, ebits=65, index in [0,size) after negative-wrap): store
+# the boxed value straight into slots[start+ix] and return it. Everything else —
+# growth (i in [size,cap)), typed/float/bool arrays, body refs — falls to the
+# cold path, which re-boxes the index and calls the body-safe w_array_set so the
+# full `[]=` semantics (and the immutable-body raise) are preserved. Only the
+# in-bounds poly case is inlined, so no size bump is ever needed inline.
+-> array_set_fast_helper_ir()
+  out = StringBuffer(1400)
+  out << "define private i64 @__w_array_set_i64_fast(i64 %arr, i64 %i, i64 %val) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %hi = lshr i64 %arr, 48\n"
+  out << "  %lo0 = icmp eq i64 %hi, 0\n"
+  out << "  %ge16 = icmp uge i64 %arr, 16\n"
+  out << "  %obj = and i1 %lo0, %ge16\n"
+  out << "  %sub = and i64 %arr, 15\n"
+  out << "  %isarr = icmp eq i64 %sub, 10\n"
+  out << "  %objarr = and i1 %obj, %isarr\n"
+  out << "  br i1 %objarr, label %hdr, label %slow\n"
+  out << "hdr:\n"
+  out << "  %base = and i64 %arr, -16\n"
+  out << "  %p = inttoptr i64 %base to ptr\n"
+  out << "  %ebp = getelementptr i8, ptr %p, i64 1\n"
+  out << "  %eb = load i8, ptr %ebp, align 1" + invariant_load_suffix() + "\n"
+  out << "  %is65 = icmp eq i8 %eb, 65\n"
+  out << "  br i1 %is65, label %rng, label %slow\n"
+  out << "rng:\n"
+  out << "  %szp = getelementptr i8, ptr %p, i64 8\n"
+  out << "  %sz32 = load i32, ptr %szp, align 4" + tbaa_header_suffix() + "\n"
+  out << "  %sz = sext i32 %sz32 to i64\n"
+  out << "  %neg = icmp slt i64 %i, 0\n"
+  out << "  %iw = add i64 %i, %sz\n"
+  out << "  %ix = select i1 %neg, i64 %iw, i64 %i\n"
+  out << "  %inb = icmp ult i64 %ix, %sz\n"
+  out << "  br i1 %inb, label %fast, label %slow\n"
+  out << "fast:\n"
+  out << "  %stp = getelementptr i8, ptr %p, i64 4\n"
+  out << "  %st32 = load i32, ptr %stp, align 4" + tbaa_header_suffix() + "\n"
+  out << "  %st = sext i32 %st32 to i64\n"
+  out << "  %eff = add i64 %st, %ix\n"
+  out << "  %slp = getelementptr i8, ptr %p, i64 16\n"
+  out << "  %slots = load ptr, ptr %slp, align 8" + tbaa_header_suffix() + "\n"
+  out << "  %ep = getelementptr i64, ptr %slots, i64 %eff\n"
+  out << "  store i64 %val, ptr %ep, align 8" + tbaa_elem_suffix() + "\n"
+  out << "  ret i64 %val\n"
+  out << "slow:\n"
+  out << "  %ib = call i64 @w_int(i64 %i)\n"
+  out << "  %sv = call i64 @w_array_set(i64 %arr, i64 %ib, i64 %val)\n"
   out << "  ret i64 %sv\n"
   out << "}\n"
   out.to_s()
@@ -843,6 +916,51 @@ use hashing
     return ""
   ", !range !{" + llvm_type + " " + low.to_s() + ", " + llvm_type + " " + high.to_s() + "}"
 
+# TBAA (type-based alias analysis) tags for typed-array access. The WArray
+# header (start/size/slots-ptr) and the element data occupy disjoint memory —
+# no byte is ever accessed as both — so tagging header loads and element
+# loads/stores with distinct sibling TBAA types lets LLVM's LICM hoist the
+# invariant header derefs (slots ptr @+16, start @+4) out of a hot loop that
+# only reads/writes elements. This is sound even when the array is grown
+# inside the loop: `push`/`unshift`/`clear` realloc via a runtime CALL, which
+# is a memory barrier LICM will not hoist across, and any inline header store
+# is untagged (may-alias-all), so the header load stays pinned exactly where a
+# realloc could move slots/start. Node definitions are emitted once per module
+# in emit_artifact (tbaa_metadata_defs()). IDs are high to avoid colliding with
+# LLVM's auto-numbering of inline (!range) metadata.
+-> tbaa_header_suffix()
+  ", !tbaa !31416"
+-> tbaa_elem_suffix()
+  ", !tbaa !31417"
+# Object instance-variable slots (WObject payload @ +8 + offset*8) are a distinct
+# memory kind from array headers and array element data — an object and an array
+# are always separate allocations, so an ivar load never aliases an array store.
+# A dedicated TBAA type lets LICM/GVN hoist a `self.field` read across an array
+# element store in the same loop (e.g. `arr[i] = self.base + i`). Field-vs-field
+# is left may-alias (one scalar tag), which is all we need. `- data` view-field
+# access stays UNTAGGED (may-alias-all) so a field reinterpreted through a view is
+# never split into two disjoint types.
+-> tbaa_ivar_suffix()
+  ", !tbaa !31421"
+# ebits (element type/width, header byte @+1) is fixed at allocation and never
+# changes for an array's lifetime — unlike start/size/slots which realloc moves.
+# So an ebits load is genuinely invariant: !invariant.load lets LLVM hoist the
+# poly-array kind check out of a hot loop (and even across calls), collapsing
+# per-access dispatch on an untyped receiver to a single check.
+-> invariant_load_suffix()
+  ", !invariant.load !31419"
+-> tbaa_metadata_defs()
+  o = StringBuffer(256)
+  o << "\n!31414 = !{!\"tungsten_tbaa_root\"}\n"
+  o << "!31415 = !{!\"warray_data\", !31414}\n"
+  o << "!31418 = !{!\"warray_header\", !31414}\n"
+  o << "!31416 = !{!31418, !31418, i64 0}\n"
+  o << "!31417 = !{!31415, !31415, i64 0}\n"
+  o << "!31419 = !{}\n"
+  o << "!31420 = !{!\"object_field\", !31414}\n"
+  o << "!31421 = !{!31420, !31420, i64 0}\n"
+  o.to_s()
+
 -> direct_range_metadata_suffix(llvm_type, low, high)
   ", !range !{" + llvm_type + " " + low.to_s() + ", " + llvm_type + " " + high.to_s() + "}"
 
@@ -902,6 +1020,8 @@ use hashing
     [inst[:name]]
   when :call_libm_f64
     [inst[:name]]
+  when :call_num_to_f64
+    ["w_num_to_f64"]
   when :call_loc_set_col
     ["__w_loc_set_col"]
   when :call_reuse_or_new_array
@@ -1651,11 +1771,25 @@ use hashing
   # before the auto-declare loop below — its decls_out dedupe then skips
   # re-declaring the helper names.
   if ccall_needed.has_key?("__w_array_get_i64_fast") || ccall_needed.has_key?("__w_array_idx_i64_fast")
+    # memory(read) on the get/idx slow twins: the fast helpers only load + tail
+    # into these, so the function-attrs pass infers the whole inlined helper is
+    # read-only and can hoist/CSE `a[i]` reads.
     if decls_out.index("@w_array_get_i64(") == nil
-      decls_out = decls_out + "declare i64 @w_array_get_i64(i64, i64) nounwind\n"
+      decls_out = decls_out + "declare i64 @w_array_get_i64(i64, i64) nounwind willreturn memory(read)\n"
     if decls_out.index("@w_array_idx_i64(") == nil
-      decls_out = decls_out + "declare i64 @w_array_idx_i64(i64, i64) nounwind\n"
+      decls_out = decls_out + "declare i64 @w_array_idx_i64(i64, i64) nounwind willreturn memory(read)\n"
     decls_out = decls_out + array_fast_helpers_ir() + "\n"
+
+  # Inline array-write fast path — separate injection so read-only modules never
+  # emit it. Its cold path re-boxes the index and calls the body-safe w_array_set
+  # (raises on immutable AST body refs) rather than the WArray-assuming
+  # w_array_set_i64, so the general `a[i]=x` site stays sound.
+  if ccall_needed.has_key?("__w_array_set_i64_fast")
+    if decls_out.index("@w_array_set(") == nil
+      decls_out = decls_out + "declare i64 @w_array_set(i64, i64, i64) nounwind\n"
+    if decls_out.index("@w_int(") == nil
+      decls_out = decls_out + "declare i64 @w_int(i64) nounwind\n"
+    decls_out = decls_out + array_set_fast_helper_ir() + "\n"
 
   # Inline comparison fast paths — same injection scheme, one helper per
   # comparison actually used by this module.
@@ -1706,7 +1840,13 @@ use hashing
       while pi < argc
         params.push("i64")
         pi += 1
-      decls_out = decls_out + "declare i64 @" + iname + "(" + params.join(", ") + ") nounwind\n"
+      # Pure size accessors read one header field, never raise, always return —
+      # memory(read) lets LICM hoist/CSE `arr.size` out of loops. These come only
+      # through the auto-declare path (no declare_fn entry), so tag them here.
+      tail_attrs = "nounwind"
+      if iname in ("w_big_array_size" "w_small_array_size")
+        tail_attrs = "nounwind willreturn memory(read)"
+      decls_out = decls_out + "declare i64 @" + iname + "(" + params.join(", ") + ") " + tail_attrs + "\n"
       declared_names[iname] = true
     ck += 1
   if decls_out != ""
@@ -1722,7 +1862,7 @@ use hashing
 
   attr_groups_out = emit_function_attr_groups(attr_groups)
 
-  header + decls_out + globals_out.to_s() + strings_out + fn_out.to_s() + fn_meta_out + call_site_out + llvm_used_out + attr_groups_out
+  header + decls_out + globals_out.to_s() + strings_out + fn_out.to_s() + fn_meta_out + call_site_out + llvm_used_out + attr_groups_out + tbaa_metadata_defs()
 
 # -- Emit a single function --
 
@@ -2419,6 +2559,11 @@ use hashing
     else
       inst[:temp] + " = call double @" + inst[:name] + "(double " + inst[:lhs] + ", double " + inst[:rhs] + ")"
 
+  # Numeric->raw-double coercion of a boxed WValue (ensure_raw_f64 fallback):
+  # takes an i64 WValue (boxed double / Decimal / Int), returns a raw double.
+  when :call_num_to_f64
+    inst[:temp] + " = call double @w_num_to_f64(i64 " + inst[:value] + ")"
+
   # Fused-elementwise loop ops (lowering/ops.w try_fuse_elementwise). The
   # header decode is hoisted out of the fused loop deliberately: the loop
   # body the fuser emits contains no push/clear/realloc, so slots/start are
@@ -2432,9 +2577,9 @@ use hashing
     parts << t + ".hdr = and i64 " + v + ", -16\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
     parts << t + ".slp = getelementptr i8, ptr " + t + ".hp, i64 16\n  "
-    parts << t + ".slots = load ptr, ptr " + t + ".slp, align 8\n  "
+    parts << t + ".slots = load ptr, ptr " + t + ".slp, align 8" + tbaa_header_suffix() + "\n  "
     parts << t + ".stp = getelementptr i8, ptr " + t + ".hp, i64 4\n  "
-    parts << t + ".st32 = load i32, ptr " + t + ".stp, align 4\n  "
+    parts << t + ".st32 = load i32, ptr " + t + ".stp, align 4" + tbaa_header_suffix() + "\n  "
     parts << t + ".st = sext i32 " + t + ".st32 to i64\n  "
     parts << t + " = getelementptr double, ptr " + t + ".slots, i64 " + t + ".st"
     parts.to_s()
@@ -2445,7 +2590,7 @@ use hashing
     parts << t + ".hdr = and i64 " + v + ", -16\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
     parts << t + ".szp = getelementptr i8, ptr " + t + ".hp, i64 8\n  "
-    parts << t + ".sz32 = load i32, ptr " + t + ".szp, align 4\n  "
+    parts << t + ".sz32 = load i32, ptr " + t + ".szp, align 4" + tbaa_header_suffix() + "\n  "
     parts << t + " = sext i32 " + t + ".sz32 to i64"
     parts.to_s()
   when :load_f64_at
@@ -2475,9 +2620,9 @@ use hashing
     parts << t + ".hdr = and i64 " + v + ", -16\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
     parts << t + ".slp = getelementptr i8, ptr " + t + ".hp, i64 16\n  "
-    parts << t + ".slots = load ptr, ptr " + t + ".slp, align 8\n  "
+    parts << t + ".slots = load ptr, ptr " + t + ".slp, align 8" + tbaa_header_suffix() + "\n  "
     parts << t + ".stp = getelementptr i8, ptr " + t + ".hp, i64 4\n  "
-    parts << t + ".st32 = load i32, ptr " + t + ".stp, align 4\n  "
+    parts << t + ".st32 = load i32, ptr " + t + ".stp, align 4" + tbaa_header_suffix() + "\n  "
     parts << t + ".st = sext i32 " + t + ".st32 to i64\n  "
     parts << t + ".ep = getelementptr i64, ptr " + t + ".slots, i64 " + t + ".st\n  "
     parts << t + " = ptrtoint ptr " + t + ".ep to i64"
@@ -2490,9 +2635,9 @@ use hashing
     parts << t + ".hdr = and i64 " + v + ", -16\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
     parts << t + ".slp = getelementptr i8, ptr " + t + ".hp, i64 16\n  "
-    parts << t + ".slots = load ptr, ptr " + t + ".slp, align 8\n  "
+    parts << t + ".slots = load ptr, ptr " + t + ".slp, align 8" + tbaa_header_suffix() + "\n  "
     parts << t + ".stp = getelementptr i8, ptr " + t + ".hp, i64 4\n  "
-    parts << t + ".st32 = load i32, ptr " + t + ".stp, align 4\n  "
+    parts << t + ".st32 = load i32, ptr " + t + ".stp, align 4" + tbaa_header_suffix() + "\n  "
     parts << t + ".st = sext i32 " + t + ".st32 to i64\n  "
     parts << t + " = getelementptr float, ptr " + t + ".slots, i64 " + t + ".st"
     parts.to_s()
@@ -2594,9 +2739,9 @@ use hashing
     out << ap + " = and i64 " + arr + ", -16\n  "
     out << ap_p + " = inttoptr i64 " + ap + " to ptr\n  "
     out << dg + " = getelementptr i8, ptr " + ap_p + ", i64 16\n  "
-    out << dp + " = load ptr, ptr " + dg + ", align 8\n  "
+    out << dp + " = load ptr, ptr " + dg + ", align 8" + tbaa_header_suffix() + "\n  "
     out << sg + " = getelementptr i8, ptr " + ap_p + ", i64 4\n  "
-    out << s32 + " = load i32, ptr " + sg + ", align 4\n  "
+    out << s32 + " = load i32, ptr " + sg + ", align 4" + tbaa_header_suffix() + "\n  "
     out << s64 + " = sext i32 " + s32 + " to i64\n  "
     out << abs_idx + " = add i64 " + s64 + ", " + idx + "\n  "
     out << bi + " = lshr i64 " + abs_idx + ", 3\n  "
@@ -2604,7 +2749,7 @@ use hashing
     out << bit8 + " = trunc i64 " + bit64 + " to i8\n  "
     out << mask + " = shl i8 1, " + bit8 + "\n  "
     out << ep + " = getelementptr i8, ptr " + dp + ", i64 " + bi + "\n  "
-    out << byte + " = load i8, ptr " + ep + "\n  "
+    out << byte + " = load i8, ptr " + ep + tbaa_elem_suffix() + "\n  "
     out << masked + " = and i8 " + byte + ", " + mask + "\n  "
     # Two output flavors. With as_i1 the inline op leaves `t` as the
     # raw bit (`icmp ne i8 masked, 0`) — `if !bits[i]` / `while bits[i]`
@@ -2651,9 +2796,9 @@ use hashing
     out << ap + " = and i64 " + arr + ", -16\n  "
     out << ap_p + " = inttoptr i64 " + ap + " to ptr\n  "
     out << dg + " = getelementptr i8, ptr " + ap_p + ", i64 16\n  "
-    out << dp + " = load ptr, ptr " + dg + ", align 8\n  "
+    out << dp + " = load ptr, ptr " + dg + ", align 8" + tbaa_header_suffix() + "\n  "
     out << sg + " = getelementptr i8, ptr " + ap_p + ", i64 4\n  "
-    out << s32 + " = load i32, ptr " + sg + ", align 4\n  "
+    out << s32 + " = load i32, ptr " + sg + ", align 4" + tbaa_header_suffix() + "\n  "
     out << s64 + " = sext i32 " + s32 + " to i64\n  "
     out << abs_idx + " = add i64 " + s64 + ", " + idx + "\n  "
     out << bi + " = lshr i64 " + abs_idx + ", 3\n  "
@@ -2661,13 +2806,13 @@ use hashing
     out << bit8 + " = trunc i64 " + bit64 + " to i8\n  "
     out << mask + " = shl i8 1, " + bit8 + "\n  "
     out << ep + " = getelementptr i8, ptr " + dp + ", i64 " + bi + "\n  "
-    out << byte + " = load i8, ptr " + ep + "\n  "
+    out << byte + " = load i8, ptr " + ep + tbaa_elem_suffix() + "\n  "
     out << set_bit + " = icmp ugt i64 " + val + ", 1\n  "
     out << inv_mask + " = xor i8 " + mask + ", -1\n  "
     out << cleared + " = and i8 " + byte + ", " + inv_mask + "\n  "
     out << with_bit + " = or i8 " + cleared + ", " + mask + "\n  "
     out << new_byte + " = select i1 " + set_bit + ", i8 " + with_bit + ", i8 " + cleared + "\n  "
-    out << "store i8 " + new_byte + ", ptr " + ep + "\n  "
+    out << "store i8 " + new_byte + ", ptr " + ep + tbaa_elem_suffix() + "\n  "
     out << t + " = add i64 " + val + ", 0"
     out.to_s()
 
@@ -3045,8 +3190,18 @@ use hashing
   # a ptrtoint and a call to w_small_array_init to stamp the header and
   # apply the W_SUBTAG_SMALL_ARRAY box. align 16 keeps the low nibble
   # clear so the runtime's box can OR the subtag in safely.
+  #
+  # The zeroing store is NOT optional. `i64[n]` and `SmallArray.new(:i64, n)`
+  # are zero-initialised by contract, and the heap forms get that from
+  # calloc — but `alloca` hands back whatever the previous frame at this
+  # depth left behind, and w_small_array_init writes only the 2 header
+  # bytes. Without this a recursive program reads its own dead frames
+  # (proved: spec/compiler/small_array_stack_zero_init_spec.w). LLVM folds
+  # the store into a single llvm.memset of total_bytes; the stack path is
+  # still the cheaper half of calloc (no malloc, no free).
   when :small_array_alloca
-    inst[:temp_ptr] + " = alloca \[" + inst[:total_bytes].to_s() + " x i8\], align 16"
+    bytes = inst[:total_bytes].to_s()
+    inst[:temp_ptr] + " = alloca \[" + bytes + " x i8\], align 16\n  store \[" + bytes + " x i8\] zeroinitializer, ptr " + inst[:temp_ptr] + ", align 16"
   when :call_direct_void
     args_str = render_call_args(inst[:args], inst[:arg_types])
     base = call_prefix(inst) + " void @" + inst[:name] + "(" + args_str + ")"
@@ -3370,9 +3525,9 @@ use hashing
     parts << s[0] + " = and i64 " + arr + ", -16\n  "               # unmask
     parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "      # struct ptr
     parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 16\n  "  # &slots
-    parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8\n  "    # slots ptr — re-read each access: realloc (push/unshift past cap, clear) moves it, so NOT invariant
+    parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8" + tbaa_header_suffix() + "\n  "    # slots ptr — re-read each access: realloc (push/unshift past cap, clear) moves it, so NOT invariant. TBAA=header lets LICM hoist it when no realloc is in the loop.
     parts << s[4] + " = getelementptr i8, ptr " + s[1] + ", i64 4\n  "  # &start
-    parts << s[5] + ".raw32 = load i32, ptr " + s[4] + ", align 4\n  "  # start (i32) — re-read: shift/unshift move it, so NOT invariant
+    parts << s[5] + ".raw32 = load i32, ptr " + s[4] + ", align 4" + tbaa_header_suffix() + "\n  "  # start (i32) — re-read: shift/unshift move it. TBAA=header, same rationale.
     parts << s[5] + " = sext i32 " + s[5] + ".raw32 to i64\n  "    # start (i64 for GEP arithmetic)
     if idx_raw == true
       # Raw index — use directly, fill unused scratch with dummy values
@@ -3385,11 +3540,11 @@ use hashing
       parts << s[8] + " = add i64 " + s[5] + ", " + s[7] + "\n  "
     if bits == 64
       parts << s[9] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << t + " = load i64, ptr " + s[9] + ", align 8"
+      parts << t + " = load i64, ptr " + s[9] + ", align 8" + tbaa_elem_suffix()
     elsif bits == 32
       parts << s[9] + " = getelementptr i32, ptr " + s[3] + ", i64 " + s[8] + "\n  "
       raw = t + ".raw"
-      parts << raw + " = load i32, ptr " + s[9] + ", align 4\n  "
+      parts << raw + " = load i32, ptr " + s[9] + ", align 4" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i32 " + raw + " to i64"
       else
@@ -3397,7 +3552,7 @@ use hashing
     elsif bits == 16
       parts << s[9] + " = getelementptr i16, ptr " + s[3] + ", i64 " + s[8] + "\n  "
       raw = t + ".raw"
-      parts << raw + " = load i16, ptr " + s[9] + ", align 2\n  "
+      parts << raw + " = load i16, ptr " + s[9] + ", align 2" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i16 " + raw + " to i64"
       else
@@ -3405,7 +3560,7 @@ use hashing
     elsif bits == 8
       parts << s[9] + " = getelementptr i8, ptr " + s[3] + ", i64 " + s[8] + "\n  "
       raw = t + ".raw"
-      parts << raw + " = load i8, ptr " + s[9] + ", align 1\n  "
+      parts << raw + " = load i8, ptr " + s[9] + ", align 1" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i8 " + raw + " to i64"
       else
@@ -3420,7 +3575,7 @@ use hashing
       nibble = t + ".nibble"
       parts << byte_idx + " = lshr i64 " + s[8] + ", 1\n  "
       parts << s[9] + " = getelementptr i8, ptr " + s[3] + ", i64 " + byte_idx + "\n  "
-      parts << raw8 + " = load i8, ptr " + s[9] + ", align 1\n  "
+      parts << raw8 + " = load i8, ptr " + s[9] + ", align 1" + tbaa_elem_suffix() + "\n  "
       parts << raw64 + " = zext i8 " + raw8 + " to i64\n  "
       parts << slot + " = and i64 " + s[8] + ", 1\n  "
       parts << shift + " = shl i64 " + slot + ", 2\n  "
@@ -3434,7 +3589,7 @@ use hashing
         parts << t + " = add i64 " + nibble + ", 0"
     else
       parts << s[9] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << t + " = load i64, ptr " + s[9] + ", align 8"
+      parts << t + " = load i64, ptr " + s[9] + ", align 8" + tbaa_elem_suffix()
     parts.to_s()
   when :typed_array_set_inline
     # Inline typed array write: same Phase 4 i32-offset shift as get.
@@ -3451,9 +3606,9 @@ use hashing
     parts << s[0] + " = and i64 " + arr + ", -16\n  "
     parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "
     parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 16\n  "  # &slots (Phase 4: was 32)
-    parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8\n  "    # slots ptr — re-read each access: realloc (push/unshift past cap, clear) moves it, so NOT invariant
+    parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8" + tbaa_header_suffix() + "\n  "    # slots ptr — re-read each access: realloc (push/unshift past cap, clear) moves it. TBAA=header lets LICM hoist it when no realloc is in the loop.
     parts << s[4] + " = getelementptr i8, ptr " + s[1] + ", i64 4\n  "   # &start (Phase 4: was 8)
-    parts << s[5] + ".raw32 = load i32, ptr " + s[4] + ", align 4\n  "   # start (i32) — re-read: shift/unshift move it, so NOT invariant
+    parts << s[5] + ".raw32 = load i32, ptr " + s[4] + ", align 4" + tbaa_header_suffix() + "\n  "   # start (i32) — re-read: shift/unshift move it. TBAA=header, same rationale.
     parts << s[5] + " = sext i32 " + s[5] + ".raw32 to i64\n  "
     if idx_raw == true
       parts << s[6] + " = add i64 0, 0\n  "
@@ -3465,22 +3620,22 @@ use hashing
       parts << s[8] + " = add i64 " + s[5] + ", " + s[7] + "\n  "
     if bits == 64
       parts << s[9] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << "store i64 " + val + ", ptr " + s[9] + ", align 8\n  "
+      parts << "store i64 " + val + ", ptr " + s[9] + ", align 8" + tbaa_elem_suffix() + "\n  "
     elsif bits == 32
       parts << s[9] + " = getelementptr i32, ptr " + s[3] + ", i64 " + s[8] + "\n  "
       tr = t + ".trunc"
       parts << tr + " = trunc i64 " + val + " to i32\n  "
-      parts << "store i32 " + tr + ", ptr " + s[9] + ", align 4\n  "
+      parts << "store i32 " + tr + ", ptr " + s[9] + ", align 4" + tbaa_elem_suffix() + "\n  "
     elsif bits == 16
       parts << s[9] + " = getelementptr i16, ptr " + s[3] + ", i64 " + s[8] + "\n  "
       tr = t + ".trunc"
       parts << tr + " = trunc i64 " + val + " to i16\n  "
-      parts << "store i16 " + tr + ", ptr " + s[9] + ", align 2\n  "
+      parts << "store i16 " + tr + ", ptr " + s[9] + ", align 2" + tbaa_elem_suffix() + "\n  "
     elsif bits == 8
       parts << s[9] + " = getelementptr i8, ptr " + s[3] + ", i64 " + s[8] + "\n  "
       tr = t + ".trunc"
       parts << tr + " = trunc i64 " + val + " to i8\n  "
-      parts << "store i8 " + tr + ", ptr " + s[9] + ", align 1\n  "
+      parts << "store i8 " + tr + ", ptr " + s[9] + ", align 1" + tbaa_elem_suffix() + "\n  "
     elsif bits == 4
       byte_idx = t + ".byteidx"
       raw8 = t + ".raw8"
@@ -3496,7 +3651,7 @@ use hashing
       tr = t + ".trunc"
       parts << byte_idx + " = lshr i64 " + s[8] + ", 1\n  "
       parts << s[9] + " = getelementptr i8, ptr " + s[3] + ", i64 " + byte_idx + "\n  "
-      parts << raw8 + " = load i8, ptr " + s[9] + ", align 1\n  "
+      parts << raw8 + " = load i8, ptr " + s[9] + ", align 1" + tbaa_elem_suffix() + "\n  "
       parts << raw64 + " = zext i8 " + raw8 + " to i64\n  "
       parts << slot + " = and i64 " + s[8] + ", 1\n  "
       parts << shift + " = shl i64 " + slot + ", 2\n  "
@@ -3507,10 +3662,10 @@ use hashing
       parts << shifted + " = shl i64 " + nibble + ", " + shift + "\n  "
       parts << merged + " = or i64 " + cleared + ", " + shifted + "\n  "
       parts << tr + " = trunc i64 " + merged + " to i8\n  "
-      parts << "store i8 " + tr + ", ptr " + s[9] + ", align 1\n  "
+      parts << "store i8 " + tr + ", ptr " + s[9] + ", align 1" + tbaa_elem_suffix() + "\n  "
     else
       parts << s[9] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << "store i64 " + val + ", ptr " + s[9] + ", align 8\n  "
+      parts << "store i64 " + val + ", ptr " + s[9] + ", align 8" + tbaa_elem_suffix() + "\n  "
     # No size-grow update: T[N] / Array.new constructors set size == cap
     # at allocation, and the inline `[]=` path is only emitted when the
     # store stays within that preallocated range.
@@ -3560,9 +3715,9 @@ use hashing
     parts << s[0] + " = and i64 " + arr + ", -16\n  "
     parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "
     parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 16\n  "
-    parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8\n  "
+    parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8" + tbaa_header_suffix() + "\n  "
     parts << s[4] + " = getelementptr i8, ptr " + s[1] + ", i64 4\n  "
-    parts << s[5] + ".raw32 = load i32, ptr " + s[4] + ", align 4\n  "
+    parts << s[5] + ".raw32 = load i32, ptr " + s[4] + ", align 4" + tbaa_header_suffix() + "\n  "
     parts << s[5] + " = sext i32 " + s[5] + ".raw32 to i64\n  "
     if idx_raw == true
       parts << s[6] + " = add i64 0, 0\n  "
@@ -3574,45 +3729,45 @@ use hashing
       parts << s[8] + " = add i64 " + s[5] + ", " + s[7] + "\n  "
     if bits == 64
       parts << s[9] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << t + ".loaded = load i64, ptr " + s[9] + ", align 8\n  "
+      parts << t + ".loaded = load i64, ptr " + s[9] + ", align 8" + tbaa_elem_suffix() + "\n  "
       parts << t + ".res = " + llvm_op + " i64 " + t + ".loaded, " + val + "\n  "
-      parts << "store i64 " + t + ".res, ptr " + s[9] + ", align 8\n  "
+      parts << "store i64 " + t + ".res, ptr " + s[9] + ", align 8" + tbaa_elem_suffix() + "\n  "
       parts << t + " = add i64 " + t + ".res, 0"
     elsif bits == 32
       parts << s[9] + " = getelementptr i32, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << t + ".loaded = load i32, ptr " + s[9] + ", align 4\n  "
+      parts << t + ".loaded = load i32, ptr " + s[9] + ", align 4" + tbaa_elem_suffix() + "\n  "
       parts << t + ".v32 = trunc i64 " + val + " to i32\n  "
       parts << t + ".res32 = " + llvm_op + " i32 " + t + ".loaded, " + t + ".v32\n  "
-      parts << "store i32 " + t + ".res32, ptr " + s[9] + ", align 4\n  "
+      parts << "store i32 " + t + ".res32, ptr " + s[9] + ", align 4" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i32 " + t + ".res32 to i64"
       else
         parts << t + " = zext i32 " + t + ".res32 to i64"
     elsif bits == 16
       parts << s[9] + " = getelementptr i16, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << t + ".loaded = load i16, ptr " + s[9] + ", align 2\n  "
+      parts << t + ".loaded = load i16, ptr " + s[9] + ", align 2" + tbaa_elem_suffix() + "\n  "
       parts << t + ".v16 = trunc i64 " + val + " to i16\n  "
       parts << t + ".res16 = " + llvm_op + " i16 " + t + ".loaded, " + t + ".v16\n  "
-      parts << "store i16 " + t + ".res16, ptr " + s[9] + ", align 2\n  "
+      parts << "store i16 " + t + ".res16, ptr " + s[9] + ", align 2" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i16 " + t + ".res16 to i64"
       else
         parts << t + " = zext i16 " + t + ".res16 to i64"
     elsif bits == 8
       parts << s[9] + " = getelementptr i8, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << t + ".loaded = load i8, ptr " + s[9] + ", align 1\n  "
+      parts << t + ".loaded = load i8, ptr " + s[9] + ", align 1" + tbaa_elem_suffix() + "\n  "
       parts << t + ".v8 = trunc i64 " + val + " to i8\n  "
       parts << t + ".res8 = " + llvm_op + " i8 " + t + ".loaded, " + t + ".v8\n  "
-      parts << "store i8 " + t + ".res8, ptr " + s[9] + ", align 1\n  "
+      parts << "store i8 " + t + ".res8, ptr " + s[9] + ", align 1" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i8 " + t + ".res8 to i64"
       else
         parts << t + " = zext i8 " + t + ".res8 to i64"
     else
       parts << s[9] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << t + ".loaded = load i64, ptr " + s[9] + ", align 8\n  "
+      parts << t + ".loaded = load i64, ptr " + s[9] + ", align 8" + tbaa_elem_suffix() + "\n  "
       parts << t + ".res = " + llvm_op + " i64 " + t + ".loaded, " + val + "\n  "
-      parts << "store i64 " + t + ".res, ptr " + s[9] + ", align 8\n  "
+      parts << "store i64 " + t + ".res, ptr " + s[9] + ", align 8" + tbaa_elem_suffix() + "\n  "
       parts << t + " = add i64 " + t + ".res, 0"
     parts.to_s()
 
@@ -3636,9 +3791,9 @@ use hashing
     parts << s[0] + " = and i64 " + arr + ", -16\n  "                # unmask
     parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "       # WBigArray*
     parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 32\n  "
-    parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8\n  "     # slots
+    parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8" + tbaa_header_suffix() + "\n  "     # slots
     parts << s[4] + " = getelementptr i8, ptr " + s[1] + ", i64 8\n  "
-    parts << s[5] + " = load i64, ptr " + s[4] + ", align 8\n  "     # start
+    parts << s[5] + " = load i64, ptr " + s[4] + ", align 8" + tbaa_header_suffix() + "\n  "     # start
     if idx_raw == true
       parts << s[6] + " = add i64 " + s[5] + ", " + idx + "\n  "
     else
@@ -3647,11 +3802,11 @@ use hashing
       parts << s[6] + " = add i64 " + s[5] + ", " + s[6] + ".as\n  "
     if bits == 64
       parts << s[7] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[6] + "\n  "
-      parts << t + " = load i64, ptr " + s[7] + ", align 8"
+      parts << t + " = load i64, ptr " + s[7] + ", align 8" + tbaa_elem_suffix()
     elsif bits == 32
       parts << s[7] + " = getelementptr i32, ptr " + s[3] + ", i64 " + s[6] + "\n  "
       raw = t + ".raw"
-      parts << raw + " = load i32, ptr " + s[7] + ", align 4\n  "
+      parts << raw + " = load i32, ptr " + s[7] + ", align 4" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i32 " + raw + " to i64"
       else
@@ -3659,7 +3814,7 @@ use hashing
     elsif bits == 16
       parts << s[7] + " = getelementptr i16, ptr " + s[3] + ", i64 " + s[6] + "\n  "
       raw = t + ".raw"
-      parts << raw + " = load i16, ptr " + s[7] + ", align 2\n  "
+      parts << raw + " = load i16, ptr " + s[7] + ", align 2" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i16 " + raw + " to i64"
       else
@@ -3667,7 +3822,7 @@ use hashing
     elsif bits == 8
       parts << s[7] + " = getelementptr i8, ptr " + s[3] + ", i64 " + s[6] + "\n  "
       raw = t + ".raw"
-      parts << raw + " = load i8, ptr " + s[7] + ", align 1\n  "
+      parts << raw + " = load i8, ptr " + s[7] + ", align 1" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i8 " + raw + " to i64"
       else
@@ -3682,7 +3837,7 @@ use hashing
       nibble = t + ".nibble"
       parts << byte_idx + " = lshr i64 " + s[6] + ", 1\n  "
       parts << s[7] + " = getelementptr i8, ptr " + s[3] + ", i64 " + byte_idx + "\n  "
-      parts << raw8 + " = load i8, ptr " + s[7] + ", align 1\n  "
+      parts << raw8 + " = load i8, ptr " + s[7] + ", align 1" + tbaa_elem_suffix() + "\n  "
       parts << raw64 + " = zext i8 " + raw8 + " to i64\n  "
       parts << slot + " = and i64 " + s[6] + ", 1\n  "
       parts << shift + " = shl i64 " + slot + ", 2\n  "
@@ -3696,7 +3851,7 @@ use hashing
         parts << t + " = add i64 " + nibble + ", 0"
     else
       parts << s[7] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[6] + "\n  "
-      parts << t + " = load i64, ptr " + s[7] + ", align 8"
+      parts << t + " = load i64, ptr " + s[7] + ", align 8" + tbaa_elem_suffix()
     parts.to_s()
 
   # Phase 6f (post-Phase-6h): SmallArray inline read. Layout differs
@@ -3718,9 +3873,17 @@ use hashing
     if signed == nil
       signed = false
     parts = StringBuffer(400)
-    parts << s[0] + " = and i64 " + arr + ", -16\n  "                  # unmask
-    parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "          # struct ptr
-    parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 2\n  " # &slots[0]
+    if inst[:headerless] == true
+      # Headerless stack SmallArray: arr IS the raw [payload x i8] alloca ptr —
+      # slots start at offset 0 (no 2-byte ebits/size header) and there is no
+      # box to unmask. The offset-0 GEP just rebinds arr as the slots base so
+      # the per-width element GEPs below are unchanged. Keeping arr a raw ptr
+      # (never ptrtoint'd) is what lets LLVM SROA promote the alloca.
+      parts << s[2] + " = getelementptr i8, ptr " + arr + ", i64 0\n  "
+    else
+      parts << s[0] + " = and i64 " + arr + ", -16\n  "                  # unmask
+      parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "          # struct ptr
+      parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 2\n  " # &slots[0]
     if idx_raw == true
       parts << s[3] + " = add i64 " + idx + ", 0\n  "                  # raw index (i64)
     else
@@ -3728,24 +3891,24 @@ use hashing
       parts << s[3] + " = ashr i64 " + s[3] + ".sl, 16\n  "            # unbox → i64
     if bits == 64
       parts << s[4] + " = getelementptr i64, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << t + " = load i64, ptr " + s[4] + ", align 1"
+      parts << t + " = load i64, ptr " + s[4] + ", align 1" + tbaa_elem_suffix()
     elsif bits == 32
       parts << s[4] + " = getelementptr i32, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << t + ".raw = load i32, ptr " + s[4] + ", align 1\n  "
+      parts << t + ".raw = load i32, ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i32 " + t + ".raw to i64"
       else
         parts << t + " = zext i32 " + t + ".raw to i64"
     elsif bits == 16
       parts << s[4] + " = getelementptr i16, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << t + ".raw = load i16, ptr " + s[4] + ", align 1\n  "
+      parts << t + ".raw = load i16, ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i16 " + t + ".raw to i64"
       else
         parts << t + " = zext i16 " + t + ".raw to i64"
     elsif bits == 8
       parts << s[4] + " = getelementptr i8, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << t + ".raw = load i8, ptr " + s[4] + ", align 1\n  "
+      parts << t + ".raw = load i8, ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i8 " + t + ".raw to i64"
       else
@@ -3761,7 +3924,7 @@ use hashing
       nibble = t + ".nibble"
       parts << byte_idx + " = lshr i64 " + s[3] + ", 1\n  "
       parts << s[4] + " = getelementptr i8, ptr " + s[2] + ", i64 " + byte_idx + "\n  "
-      parts << raw8 + " = load i8, ptr " + s[4] + ", align 1\n  "
+      parts << raw8 + " = load i8, ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
       parts << raw64 + " = zext i8 " + raw8 + " to i64\n  "
       parts << slot + " = and i64 " + s[3] + ", 1\n  "
       parts << shift + " = shl i64 " + slot + ", 2\n  "
@@ -3775,7 +3938,7 @@ use hashing
         parts << t + " = add i64 " + nibble + ", 0"
     else
       parts << s[4] + " = getelementptr i64, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << t + " = load i64, ptr " + s[4] + ", align 1"
+      parts << t + " = load i64, ptr " + s[4] + ", align 1" + tbaa_elem_suffix()
     parts.to_s()
 
   # Phase 6f: SmallArray inline write — same layout shortcuts as get.
@@ -3793,9 +3956,14 @@ use hashing
     if bits == nil
       bits = 8
     parts = StringBuffer(400)
-    parts << s[0] + " = and i64 " + arr + ", -16\n  "
-    parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "
-    parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 2\n  "
+    if inst[:headerless] == true
+      # Headerless stack SmallArray write: arr is the raw alloca ptr, slots at
+      # offset 0, no unmask. See :small_array_get_inline for the rationale.
+      parts << s[2] + " = getelementptr i8, ptr " + arr + ", i64 0\n  "
+    else
+      parts << s[0] + " = and i64 " + arr + ", -16\n  "
+      parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "
+      parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 2\n  "
     if idx_raw == true
       parts << s[3] + " = add i64 " + idx + ", 0\n  "
     else
@@ -3803,22 +3971,22 @@ use hashing
       parts << s[3] + " = ashr i64 " + s[3] + ".sl, 16\n  "
     if bits == 64
       parts << s[4] + " = getelementptr i64, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << "store i64 " + val + ", ptr " + s[4] + ", align 1\n  "
+      parts << "store i64 " + val + ", ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
     elsif bits == 32
       tr = t + ".tr"
       parts << s[4] + " = getelementptr i32, ptr " + s[2] + ", i64 " + s[3] + "\n  "
       parts << tr + " = trunc i64 " + val + " to i32\n  "
-      parts << "store i32 " + tr + ", ptr " + s[4] + ", align 1\n  "
+      parts << "store i32 " + tr + ", ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
     elsif bits == 16
       tr = t + ".tr"
       parts << s[4] + " = getelementptr i16, ptr " + s[2] + ", i64 " + s[3] + "\n  "
       parts << tr + " = trunc i64 " + val + " to i16\n  "
-      parts << "store i16 " + tr + ", ptr " + s[4] + ", align 1\n  "
+      parts << "store i16 " + tr + ", ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
     elsif bits == 8
       tr = t + ".tr"
       parts << s[4] + " = getelementptr i8, ptr " + s[2] + ", i64 " + s[3] + "\n  "
       parts << tr + " = trunc i64 " + val + " to i8\n  "
-      parts << "store i8 " + tr + ", ptr " + s[4] + ", align 1\n  "
+      parts << "store i8 " + tr + ", ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
     elsif bits == 4
       # 4-bit pack: read-modify-write of the nibble at slot bit 0/1.
       byte_idx = t + ".byteidx"
@@ -3835,7 +4003,7 @@ use hashing
       tr = t + ".tr"
       parts << byte_idx + " = lshr i64 " + s[3] + ", 1\n  "
       parts << s[4] + " = getelementptr i8, ptr " + s[2] + ", i64 " + byte_idx + "\n  "
-      parts << raw8 + " = load i8, ptr " + s[4] + ", align 1\n  "
+      parts << raw8 + " = load i8, ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
       parts << raw64 + " = zext i8 " + raw8 + " to i64\n  "
       parts << slot + " = and i64 " + s[3] + ", 1\n  "
       parts << shift + " = shl i64 " + slot + ", 2\n  "
@@ -3846,10 +4014,10 @@ use hashing
       parts << shifted + " = shl i64 " + nibble + ", " + shift + "\n  "
       parts << merged + " = or i64 " + cleared + ", " + shifted + "\n  "
       parts << tr + " = trunc i64 " + merged + " to i8\n  "
-      parts << "store i8 " + tr + ", ptr " + s[4] + ", align 1\n  "
+      parts << "store i8 " + tr + ", ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
     else
       parts << s[4] + " = getelementptr i64, ptr " + s[2] + ", i8 " + s[3] + "\n  "
-      parts << "store i64 " + val + ", ptr " + s[4] + ", align 1\n  "
+      parts << "store i64 " + val + ", ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
     # Define result so SSA refs to t are valid.
     parts << t + " = add i64 " + val + ", 0"
     parts.to_s()
@@ -3865,15 +4033,15 @@ use hashing
     parts << s[0] + " = and i64 " + arr + ", -16\n  "               # unmask
     parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "      # struct ptr
     parts << s[2] + ".field = getelementptr i8, ptr " + s[1] + ", i64 16\n  "  # &slots
-    parts << s[2] + " = load ptr, ptr " + s[2] + ".field, align 8\n  "   # slots ptr
+    parts << s[2] + " = load ptr, ptr " + s[2] + ".field, align 8" + tbaa_header_suffix() + "\n  "   # slots ptr — TBAA=header lets LICM hoist when no realloc call is in the loop
     parts << s[3] + " = getelementptr i8, ptr " + s[1] + ", i64 4\n  "  # &start
-    parts << s[4] + " = load i32, ptr " + s[3] + ", align 4\n  "   # start (i32)
+    parts << s[4] + " = load i32, ptr " + s[3] + ", align 4" + tbaa_header_suffix() + "\n  "   # start (i32)
     parts << s[5] + " = sext i32 " + s[4] + " to i64\n  "          # start (i64)
     parts << s[6] + " = shl i64 " + idx + ", 16\n  "                # unbox idx
     parts << s[7] + " = ashr i64 " + s[6] + ", 16\n  "              # sign-extend
     parts << s[8] + " = add i64 " + s[5] + ", " + s[7] + "\n  "   # effective idx
     parts << s[9] + " = getelementptr i64, ptr " + s[2] + ", i64 " + s[8] + "\n  "  # elem ptr
-    parts << t + " = load i64, ptr " + s[9] + ", align 8"           # load element
+    parts << t + " = load i64, ptr " + s[9] + ", align 8" + tbaa_elem_suffix()           # load element
     parts.to_s()
   when :builtin_class_init
     swv = nil
@@ -3939,7 +4107,7 @@ use hashing
     parts << t + ".raw = and i64 " + sr + ", -16\n  "
     parts << t + ".ptr = inttoptr i64 " + t + ".raw to ptr\n  "
     parts << t + ".gep = getelementptr i8, ptr " + t + ".ptr, i64 " + byte_offset + "\n  "
-    parts << t + " = load i64, ptr " + t + ".gep, align 8"
+    parts << t + " = load i64, ptr " + t + ".gep, align 8" + tbaa_ivar_suffix()
     parts.to_s()
   when :slab_node_get_idx
     # PR #2 Phase 2: read one slab slot from an AST node.
@@ -3962,7 +4130,7 @@ use hashing
     parts << t + ".raw = and i64 " + sr + ", -16\n  "
     parts << t + ".ptr = inttoptr i64 " + t + ".raw to ptr\n  "
     parts << t + ".gep = getelementptr i8, ptr " + t + ".ptr, i64 " + byte_offset + "\n  "
-    parts << "store i64 " + inst[:value] + ", ptr " + t + ".gep, align 8\n  "
+    parts << "store i64 " + inst[:value] + ", ptr " + t + ".gep, align 8" + tbaa_ivar_suffix() + "\n  "
     parts << t + " = add i64 " + inst[:value] + ", 0"
     parts.to_s()
   when :class_add_ivar

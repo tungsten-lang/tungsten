@@ -2625,6 +2625,47 @@ novec_md_state = {count: 0}
     parts << t + ".sz32 = load i32, ptr " + t + ".szp, align 4" + tbaa_header_suffix() + "\n  "
     parts << t + " = sext i32 " + t + ".sz32 to i64"
     parts.to_s()
+  # `.size` for a statically-:array receiver. Unlike :ta_size_raw (typed
+  # arrays — always real WArrays), a :array-typed var can hold a BODY-REF at
+  # runtime: an AST child-list packed box (tag 0xFFFE, subtype 6) that quacks
+  # like an array — e.g. `args = call_node.args` nil-defaulted with
+  # `args = []` keeps the :array static type but carries the packed box. The
+  # runtime's w_array_size handles that with a w_is_body check; dropping it
+  # segfaulted stage 2 (load through 0xFFFEC…). The body length lives in the
+  # box's low 21 bits, so both paths stay inline and call-free — the whole
+  # diamond is pure and LICM-hoistable, preserving the fill-loop win.
+  when :array_size_raw
+    t = inst[:temp]
+    v = inst[:value]
+    lbl = "asz." + t.slice(1, t.size() - 1)
+    parts = StringBuffer(480)
+    parts << t + ".tg = lshr i64 " + v + ", 45\n  "
+    parts << t + ".isb = icmp eq i64 " + t + ".tg, 524278\n  "
+    parts << "br i1 " + t + ".isb, label %" + lbl + ".body, label %" + lbl + ".arr\n"
+    parts << lbl + ".body:\n  "
+    parts << t + ".bl = and i64 " + v + ", 2097151\n  "
+    parts << "br label %" + lbl + ".done\n"
+    parts << lbl + ".arr:\n  "
+    parts << t + ".hdr = and i64 " + v + ", -16\n  "
+    parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
+    parts << t + ".szp = getelementptr i8, ptr " + t + ".hp, i64 8\n  "
+    parts << t + ".sz32 = load i32, ptr " + t + ".szp, align 4" + tbaa_header_suffix() + "\n  "
+    parts << t + ".sz = sext i32 " + t + ".sz32 to i64\n  "
+    parts << "br label %" + lbl + ".done\n"
+    parts << lbl + ".done:\n  "
+    parts << t + " = phi i64 \[" + t + ".bl, %" + lbl + ".body], \[" + t + ".sz, %" + lbl + ".arr]"
+    parts.to_s()
+  # WArray.cap (i32 header field at +12) — same shape/soundness as :ta_size_raw.
+  when :ta_cap_raw
+    t = inst[:temp]
+    v = inst[:value]
+    parts = StringBuffer(240)
+    parts << t + ".hdr = and i64 " + v + ", -16\n  "
+    parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
+    parts << t + ".cpp = getelementptr i8, ptr " + t + ".hp, i64 12\n  "
+    parts << t + ".cp32 = load i32, ptr " + t + ".cpp, align 4" + tbaa_header_suffix() + "\n  "
+    parts << t + " = sext i32 " + t + ".cp32 to i64"
+    parts.to_s()
   when :load_f64_at
     t = inst[:temp]
     t + ".p = getelementptr double, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  " + t + " = load double, ptr " + t + ".p, align 8"

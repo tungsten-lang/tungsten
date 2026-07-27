@@ -998,15 +998,25 @@
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_cap", args: [receiver_reg]})
-      return typed_value(:i64, temp)
+      emit_instruction(wfn, {op: :ta_cap_raw, temp: temp, value: receiver_reg})
+      return typed_value(:raw_i64, temp)
 
+    # `.size` on a statically-proven :array receiver is an inline header
+    # load (:array_size_raw), not a runtime call. The call form defeated
+    # LICM in `while i < a.size` loops that store to a's ELEMENTS in the
+    # body — a call may read anything, so the size reloaded every iteration
+    # and the loop couldn't vectorize (measured 11.7x on fill loops). The
+    # warray_header TBAA tag is what keeps this sound: element stores carry
+    # warray_data (disjoint), while push/realloc are calls, which remain
+    # full barriers the load will never be hoisted across. :array (unlike
+    # typed_array_*) can carry AST body-ref packed boxes at runtime, so the
+    # op inlines w_array_size's body check too (see emitter :array_size_raw).
     if recv_type == :array && method_name == "size" && node.args.size() == 0
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_size", args: [receiver_reg]})
-      return typed_value(:i64, temp)
+      emit_instruction(wfn, {op: :array_size_raw, temp: temp, value: receiver_reg})
+      return typed_value(:raw_i64, temp)
 
 
     if method_name == "\[]" && node.args.size() == 1
@@ -1322,12 +1332,14 @@
       temp = next_temp(wfn)
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_pop", args: [receiver_reg]})
       return typed_value(:i64, temp)
+    # Inline TBAA'd header load, not a call — see the :array `.size` comment
+    # above (11.7x on `while i < a.size` fill loops; LICM + vectorization).
     if method_name == "size" && node.args.size() == 0
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_size", args: [receiver_reg]})
-      return typed_value(:i64, temp)
+      emit_instruction(wfn, {op: :ta_size_raw, temp: temp, value: receiver_reg})
+      return typed_value(:raw_i64, temp)
     if method_name in ("min" "max" "sum") && node.args.size() == 0
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)

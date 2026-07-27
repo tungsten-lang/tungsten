@@ -2158,6 +2158,14 @@ WASSAT_PROOF_DRAT = 2
               # churn-prone last-saved phase. Ablating exactly this knob on
               # cms5 separates its 0.18s from 0.64s on bmc-ibm-12.
               pl = @phase[v]
+              # Unconditioned on mode, deliberately. CaDiCaL gates target
+              # phases to stable mode, but wassat runs focused-first with a
+              # 16k-conflict stable floor, and the SAT payoff lives in the
+              # focused phase: mode-gated, f1000 stays unsolved and uf250 is
+              # unchanged; unconditioned, f1000 goes T/O -> 5.5s, uf250-0100
+              # 0.23s -> 0.02s, f600 1.0s -> 0.35s, against a ~1.3x tax on
+              # uuf-class refutations (uuf250-01 1.42s -> 1.89s) that stays
+              # far inside the parity gate.
               pl = @bphase[v] if @use_target && @bphase[v] != 0
               self.enqueue(pl > 0 ? v : 0 - v, -1)
             # v < 0 means rollout applied a forced literal; just loop again
@@ -2249,6 +2257,12 @@ WASSAT_PROOF_DRAT = 2
       @use_vmtf = @config.use_vmtf(true)
       @use_target = @config.use_target_phases(true)
       @use_chrono = @config.use_chronological_backtracking(true)
+    else
+      # The light path used to skip this entirely, leaving target phases OFF
+      # for every preprocessed solve -- the same structurally-unreachable
+      # shape as the SLS-burst gate. Policy decides; the default preserves
+      # the old behaviour until the measurement says otherwise.
+      @use_target = @config.use_target_phases(false)
     self.rebuild_watches
     self.rebuild_binaries
     @next_gid = art["next_gid"]

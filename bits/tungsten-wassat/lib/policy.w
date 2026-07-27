@@ -426,7 +426,18 @@ WASSAT_CONGRUENCE_DEFAULT = true
     raw
 
   -> use_target_phases(raw)
-    raw
+    # ON everywhere since 2026-07-28. The light path used to run without
+    # target phases at all -- the assignment sat under `if art["raw"]` in
+    # load_flat, so every preprocessed serial solve decided on churn-prone
+    # saved phases only. That was the whole f1000-class failure: our conflict
+    # rate on it BEATS CaDiCaL's (58.6k/s vs 43.3k/s) and the row still
+    # timed out at 40x CaDiCaL's conflict count. With target phases the same
+    # serial solver matches CaDiCaL (5.5s vs 5.18s), uf250-0100 drops 0.23s
+    # -> 0.02s and f600 1.0s -> 0.35s. The cost is a ~1.3x slowdown on
+    # uuf-class refutations (uuf250-01 1.42s -> 1.89s serial), which the
+    # parity gate absorbs: we stay 1.4x ahead of CaDiCaL there.
+    return env("WASSAT_TARGET") == "1" if env("WASSAT_TARGET") != nil
+    true
 
   -> use_substitution(raw)
     # Equivalent-literal substitution: Tarjan SCCs of the binary implication

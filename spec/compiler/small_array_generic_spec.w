@@ -76,3 +76,19 @@ check("smallarray.size_is_const", just_size == 100)
   b = SmallArray<i32, 0>.new
   b.size
 check("smallarray.empty", empty_size == 0)
+
+# Explicit SmallArray<T,N> may exceed the 255-element auto-promotion cap
+# (headerless stack buffer, up to 4096). A plain `i32[N]` literal stays capped
+# at 255 (auto-promotion is deliberately conservative).
+-> big_stack
+  b = SmallArray<i64, 2048>.new
+  b[0] = 11
+  b[2047] = 22
+  b[0] + b[2047] + b.size
+check("smallarray.big_2048", big_stack == 2081)
+
+-> at_cap
+  b = SmallArray<i32, 4096>.new
+  b[4095] = 5
+  b[4095] + b.size
+check("smallarray.at_4096", at_cap == 4101)

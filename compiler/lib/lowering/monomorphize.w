@@ -226,6 +226,17 @@
   when "w64" then :small_array_w64
   else nil
 
+# Max element count a typed-array literal may hold on the stack (headerless).
+# Auto-promoted `i32[N]` literals stay conservative (255) so a stray large
+# literal can't blow the stack. The explicit `SmallArray<T, N>` form (marked
+# with :stack_explicit by rewrite_smallarray_ctor_node) is an opt-in request for
+# a bigger fixed-size stack buffer, so it's allowed up to 4096 — the headerless
+# raw `[N x T]` alloca has no header, so there's no u8-size limit to respect.
+-> stack_size_cap(node)
+  if ast_get(node, :stack_explicit) == true
+    return 4096
+  255
+
 # Shared predicate: is this typed_array_new node cleared for stack promotion?
 # Used by both infer_type (type = small_array_*) and lower_typed_array_new
 # (alloca), so they never disagree.
@@ -246,7 +257,7 @@
     return false
   if ast_kind(sz) != :int
     return false
-  if sz.value < 0 || sz.value > 255
+  if sz.value < 0 || sz.value > stack_size_cap(node)
     return false
   true
 
@@ -270,7 +281,7 @@
   sz = ast_get(val, :size)
   if sz == nil || !is_ast_node?(sz) || ast_kind(sz) != :int
     return false
-  if sz.value < 0 || sz.value > 255
+  if sz.value < 0 || sz.value > stack_size_cap(val)
     return false
   true
 
@@ -1722,7 +1733,11 @@
   if nk == :call && node.name == "new" && node.receiver != nil && ast_kind(node.receiver) == :class_ref && node.receiver.name == "SmallArray"
     ta = node.type_args
     if ta != nil && ta.size() == 2 && small_array_elem_type?(ta[0]) && numeric_str?(ta[1])
-      return Tungsten:AST:TypedArray.new(ta[0], Tungsten:AST:Int.new(ta[1].to_i()))
+      ta_node = Tungsten:AST:TypedArray.new(ta[0], Tungsten:AST:Int.new(ta[1].to_i()))
+      # Mark as an explicit fixed-size stack request so the promotion gate
+      # allows up to 4096 elements (vs 255 for an auto-promoted `i32[N]` literal).
+      ast_set(ta_node, :stack_explicit, true)
+      return ta_node
   kid = kind_id_table[nk]
   if kid == nil
     return nil

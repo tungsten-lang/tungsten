@@ -348,9 +348,11 @@ use portfolio
         scout_nv = formula["nvars"]
         scout_simplify = config.force_simplify?
         scout_stop = i64[4]
-        # Two slots: the lucky arm at 0, the SLS arm at scout_nv + 8.
-        scout_res = i64[2 * (scout_nv + 8)]
+        # Three slots: the lucky arm at 0, the SLS arm at scout_nv + 8, the
+        # XOR-refutation arm at 2 * (scout_nv + 8).
+        scout_res = i64[3 * (scout_nv + 8)]
         scout_sls_base = scout_nv + 8
+        scout_xor_base = 2 * (scout_nv + 8)
         scout_out = []
         # Local search races the SCOUT, not just the raw arms behind it. The
         # scout is bounded by conflicts rather than wall clock on a raw kernel,
@@ -364,6 +366,11 @@ use portfolio
         scout_sls_flips = wassat_sls_arm_flips
         if scout_sls_flips > 0
           scout_sls_h = Thread.new -> wassat_sls_arm_body(scout_nv, formula, scout_res, scout_sls_base, scout_stop, scout_sls_flips, 7)
+        # GE over whatever XOR constraint groups the formula carries; refutes
+        # tseitin/parity kernels outright. Reads the ORIGINAL clause list, so
+        # its verdict is about the input formula whichever rendering the other
+        # arms are on.
+        scout_xor_h = Thread.new -> wassat_xor_arm_body(scout_nv, formula, scout_res, scout_xor_base, scout_stop)
         z = lucky_h.join
         z = scout_h.join
         # The walker is bounded by THE SCOUT'S LIFETIME, not by a flip budget.
@@ -380,6 +387,16 @@ use portfolio
         # full SLS arm in the raw race behind this.
         scout_stop[0] = 1
         z = scout_sls_h.join if scout_sls_h != nil
+        z = scout_xor_h.join
+        # A GE refutation outranks everything: it is a verdict about the whole
+        # input, costs zero conflicts, and cannot disagree with any other arm.
+        if scout_res[scout_xor_base] == 0 - 1
+          pre_msx = ccall("__w_clock_ms") - t0
+          << "s UNSATISFIABLE"
+          << "c mode: fast (xor refutation, [scout_res[scout_xor_base + scout_nv + 4]] parity rows)"
+          << "c conflicts: 0, decisions: 0, props: 0"
+          << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(art["stats"], pre_msx)
+          exit(20)
         # A walked model is checked before the scout's verdict for the same
         # reason the lucky one is: same formula, so they cannot disagree, and
         # this one cost no conflicts at all.

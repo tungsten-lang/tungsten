@@ -477,6 +477,153 @@ WASSAT_ARM_SLS = 2             # local search, models only
     stop[0] = 1
   0
 
+# ---- XOR refutation arm --------------------------------------------------------
+#
+# Tseitin/parity kernels are CNF renderings of GF(2) linear systems, and a
+# linear system is refuted by Gaussian elimination in microseconds where CDCL
+# needs millions of conflicts: Urquhart-s3-b3 is 18 XOR constraints wearing 376
+# clauses, and the raw race spent 48s on what GE settles instantly. CaDiCaL
+# beats us on these rows with raw throughput alone; this beats the approach
+# rather than the constant.
+#
+# DETECTION. A width-k XOR constraint appears in CNF as exactly 2^(k-1)
+# clauses over the same variable set, one per odd (or per even) assignment:
+# each clause forbids the single assignment where all its literals are false,
+# so the group's forbidden points are precisely one parity class. The test is
+# therefore: group clauses by sorted variable set, and accept a group iff it
+# has 2^(k-1) DISTINCT sign patterns all of the same negation parity p. The
+# constraint is then xor(vars) = p^1.
+#
+# SOUNDNESS needs no coverage gate: the accepted groups are a SUBSET of the
+# formula's constraints, and an unsatisfiable subset refutes the whole
+# formula. Clauses that fit no perfect group are simply not rows. The arm can
+# therefore run on every instance; on a non-XOR formula it finds few or no
+# rows, fails to refute, and reports nothing.
+#
+# MODEL-FREE AND REFUTE-ONLY: a consistent system says nothing (the non-XOR
+# clauses still constrain), so the only signal this arm ever raises is -1.
+# Fast path only -- a GE refutation has no DRAT justification here.
+-> wassat_xor_arm_body(nv, formula, res, base, stop)
+  clauses = formula["clauses"]
+  ncl = clauses.size
+  # Grouping hashes every clause; bound the work since this is a side arm.
+  return 0 if ncl > 100000 || ncl < 4
+  gvars = {}
+  gpats = {}
+  gpar = {}
+  gbad = {}
+  ci = 0
+  while ci < ncl
+    return 0 if (ci & 1023) == 0 && stop[0] != 0
+    c = clauses[ci]
+    k = c.size
+    if k >= 2 && k <= 24
+      # sort the variables (insertion, k is tiny) and reject duplicates
+      vs = []
+      i = 0
+      while i < k
+        l = c[i]
+        v = l < 0 ? 0 - l : l
+        j = vs.size - 1
+        vs.push(v)
+        while j >= 0 && vs[j] > v
+          vs[j + 1] = vs[j]
+          j -= 1
+        vs[j + 1] = v
+        i += 1
+      dup = false
+      i = 1
+      while i < k
+        dup = true if vs[i] == vs[i - 1]
+        i += 1
+      unless dup
+        key = vs.join(",")
+        # sign pattern: bit i set iff the literal of vs[i] is negative
+        pat = 0
+        par = 0
+        i = 0
+        while i < k
+          l = c[i]
+          v = l < 0 ? 0 - l : l
+          if l < 0
+            par = par ^ 1
+            j = 0
+            while j < k
+              pat = pat | (1 << j) if vs[j] == v
+              j += 1
+          i += 1
+        if gvars[key] == nil
+          gvars[key] = vs
+          gpats[key] = {}
+          gpar[key] = par
+          gbad[key] = false
+        gbad[key] = true if gpar[key] != par
+        pats = gpats[key]
+        gbad[key] = true if pats[pat] != nil
+        pats[pat] = 1
+    ci += 1
+  # incremental GE over the accepted groups, rows as var-bitmask words + rhs
+  nw = (nv >> 6) + 1
+  pivots = []
+  nrows = 0
+  refuted = false
+  gkeys = gvars.keys
+  gi = 0
+  while gi < gkeys.size
+    key = gkeys[gi]
+    gi += 1
+    unless refuted || gbad[key] || nrows > 4096
+      vs = gvars[key]
+      k = vs.size
+      if gpats[key].size == (1 << (k - 1))
+        nrows += 1
+        row = i64[nw]
+        i = 0
+        while i < k
+          v = vs[i]
+          row[v >> 6] = row[v >> 6] | (1 << (v & 63))
+          i += 1
+        rhs = gpar[key] ^ 1
+        # reduce by existing pivots, lowest set bit as pivot position
+        pi = 0
+        while pi < pivots.size
+          pv = pivots[pi]
+          prow = pv[0]
+          pw = pv[2]
+          pb = pv[3]
+          if ((row[pw] >> pb) & 1) == 1
+            w = 0
+            while w < nw
+              row[w] = row[w] ^ prow[w]
+              w += 1
+            rhs = rhs ^ pv[1]
+          pi += 1
+        # find this row's pivot
+        pw = 0 - 1
+        pb = 0
+        w = 0
+        while w < nw && pw < 0
+          if row[w] != 0
+            pw = w
+            b = 0
+            while b < 64
+              if ((row[w] >> b) & 1) == 1
+                pb = b
+                b = 64
+              else
+                b += 1
+          w += 1
+        if pw < 0
+          refuted = true if rhs == 1
+        else
+          pivots.push([row, rhs, pw, pb])
+  if refuted
+    res[base] = 0 - 1
+    res[base + nv + 4] = nrows
+    stop[1] = 0 - 1
+    stop[0] = 1
+  0
+
 # The bounded CDCL scout, as an arm. It is the same search the coordinator used
 # to run inline: its own solver over the same artifact, stopped by conflict cap
 # (and, off the raw path, by wall clock). It runs beside the lucky arm so that

@@ -1482,6 +1482,22 @@ use lowering/definitions
                 vdf += 1
           mi2 += 1
     ci += 1
+
+  # Freeze the string slab once startup registration is fully emitted (every
+  # class/method-name intern above precedes this point in main). The compiled
+  # binary's literals all live in the STATIC slab, so post-freeze w_string_n
+  # canonicalizes by lookup: content matching any literal returns the slab
+  # value (bit-equality with literals, case arms, and hash keys all intact),
+  # and only content no literal can match mints a mode-7 heap string. Without
+  # the freeze every unique runtime string (i.to_s() in a loop!) was INSERTED
+  # into the intern table — 65% of new_string's profile was w_slab_intern plus
+  # table growth, and the slab grew without bound. no-static-slab builds keep
+  # interning: their literals materialize lazily in USER code, after this
+  # point, and must still canonicalize into the slab.
+  if mod[:no_static_slab] != true
+    slab_freeze_tmp = next_temp(main_fn)
+    emit_instruction(main_fn, {op: :call_direct_i64, temp: slab_freeze_tmp, name: "w_slab_freeze_safe", args: []})
+
   # Phase 5 (gap #2): pre-pass over class method ASTs to collect ivar
   # types, so dispatch on `self.@arr.method()` can specialize when
   # @arr is statically typed. Runs after all class methods are

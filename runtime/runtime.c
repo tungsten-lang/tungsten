@@ -15954,8 +15954,22 @@ WValue w_str_append(WValue str, WValue suffix) {
     if (w_is_rope(str)) str = w_rope_flatten(str);
     w_str_data(str, str_buf, &str_data, &str_len);
 
-    /* Always allocate new buffer (safe for aliased values) */
+    /* Canonicalize short results through w_string_n: <=5 bytes box inline,
+     * 6-61 bytes intern (or, post-freeze, canonicalize by slab lookup and go
+     * heap only for content no literal can match). Minting mode-7 heap
+     * strings here for canonical-range lengths broke `==` against equal
+     * literals — w_eq's cross-mode skip assumes those lengths are always
+     * inline/slab — which surfaced as `("xy" << "z") != "xyz"` and, once the
+     * slab froze at startup, as Array#join results comparing unequal. */
     size_t new_len = str_len + sfx_len;
+    if (new_len <= W_SLAB_SSO2_MAX) {
+        char joined[62];
+        memcpy(joined, str_data, str_len);
+        memcpy(joined + str_len, sfx_data, sfx_len);
+        return w_string_n(joined, new_len);
+    }
+
+    /* Always allocate new buffer (safe for aliased values) */
     WString *ws = malloc(sizeof(WString) + new_len + 1);
     ws->len = (uint32_t)new_len;
     memcpy(ws->data, str_data, str_len);

@@ -44,10 +44,9 @@ check("fast.shl_strbuf_append", sb.to_s(), "ab12")
 arr = [1]
 apush(arr, 9)
 check("fast.shl_array_push", arr, "\[1, 9]")
-# NOTE: compared via to_s/size, not ==. `("xy" << "z") == "xyz"` is FALSE in
-# ALL engines today (w_str_append mints a short HEAP string; w_eq's cross-mode
-# skip assumes <=61-byte strings are always inline/slab canonical) — a
-# pre-existing equality bug, filed separately. This spec pins append CONTENT.
+# Append results canonicalize through w_string_n (<=61 bytes inline/slab or
+# frozen-lookup), so == against an equal literal holds — this was FALSE when
+# w_str_append minted mode-7 heap strings for canonical-range lengths.
 app = shl_str("xy", "z")
 check("fast.shl_string_append_size", app.size(), "3")
-check("fast.shl_string_append_text", "" + app, "xyz")
+check("fast.shl_string_append_eq", app == "xyz", "true")

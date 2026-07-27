@@ -90,4 +90,34 @@ person[:job] = "engineer"
 check("hash.sym.insert", person[:job], "engineer")
 check("hash.sym.size_after", person.size, 4)
 
+# -- Delete churn must not saturate the probe table with tombstones --
+# These keys cover all eight home buckets in the initial table on both native
+# and C-VM engines. Before the occupied-slot fix, the first miss after these
+# deletes looped forever because no W_UNDEF bucket remained.
+churn = {}
+churn_keys = [0, 1, 2, 6, 10, 17, 61, 64]
+churn_keys.each -> (key)
+  churn[key] = key
+  check("hash.delete.value." + key.to_s(), churn.delete(key), key)
+
+check("hash.delete_churn.size", churn.size, 0)
+check("hash.delete_churn.miss", churn[999] == nil, true)
+check("hash.delete_churn.member", churn.has_key?(999), false)
+check("hash.delete_churn.delete_miss", churn.delete(999) == nil, true)
+churn[999] = 55
+check("hash.delete_churn.reinsert", churn[999], 55)
+check("hash.delete_churn.reinsert_size", churn.size, 1)
+
+# -- Frozen dynamic strings must retain literal Hash-key identity --
+# Keep this last: slab freeze is intentionally irreversible for the process.
+frozen_literal = "hello world"
+frozen_source = "HELLO WORLD"
+frozen_hash = {frozen_literal => 7}
+freeze_slab()
+frozen_dynamic = frozen_source.downcase()
+
+check("hash.frozen_string.equal", frozen_dynamic == frozen_literal, true)
+check("hash.frozen_string.member", frozen_hash.has_key?(frozen_dynamic), true)
+check("hash.frozen_string.lookup", frozen_hash[frozen_dynamic], 7)
+
 << "arrays_hashes_spec: all checks passed"

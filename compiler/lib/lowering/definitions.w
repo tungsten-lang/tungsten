@@ -1372,6 +1372,23 @@
   if node.params != nil
     pcount = node.params.size()
   mod[:class_method_asts][cname + "." + mname + "/" + pcount.to_s()] = node
+  # Devirtualization index: map class.method/arity to its deterministic
+  # function symbol, but ONLY for plain-signature methods (no defaults,
+  # keywords, splats, or block params, and no yield) — the shapes whose
+  # direct-call ABI is exactly (recv, a0..aN). Reopened redefinitions
+  # derive the SAME symbol and replace the earlier function (last wins),
+  # so the mapping never goes stale. lower_method_call consults this to
+  # emit a class-id-guarded direct call instead of IC dispatch.
+  plain = method_lowering_analysis(node)[:yield_block_name] == nil
+  if plain && node.params != nil
+    ppi = 0
+    while ppi < node.params.size()
+      pp = node.params[ppi]
+      if pp.default != nil || pp.keyword == true || pp.splat == true || pp.block_param == true
+        plain = false
+      ppi += 1
+  if plain && mname != "new"
+    mod[:class_method_fn_names][cname + "." + mname + "/" + pcount.to_s()] = mfn_name
 
 -> static_method_raw_abi?(node)
   # Both class methods (`-> .name`) and typed instance methods (`->`,
@@ -1701,6 +1718,12 @@
     block_return_frame: nil,
     yield_block_name: yield_block_name
   }
+  # `## i64: name` param ascriptions type the BODY, same as they do for
+  # top-level defs (populate_definition_var_types). lower_class_method
+  # historically seeded only node.param_types, so class-method hints typed
+  # nothing — body bit-ops on the param stayed boxed runtime calls (the
+  # lexer's packed_type_id/offset/length were the measured victims).
+  # Seeded FIRST so an explicit native signature below still wins.
   if node.type_hints != nil
     hint_names = node.type_hints.keys()
     hi = 0

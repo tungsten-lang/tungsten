@@ -36,7 +36,7 @@
   # friends were full w_add calls.
   m[:PLUS]      = "__w_add_fast"
   m[:MINUS]     = "__w_sub_fast"
-  m[:STAR]      = "w_mul"
+  m[:STAR]      = "__w_mul_fast"
   m[:POW]       = "w_pow"
   m[:SLASH]     = "w_div"
   m[:PERCENT]   = "w_mod"
@@ -50,11 +50,11 @@
   m[:GT]        = "__w_gt_fast"
   m[:LTE]       = "__w_lte_fast"
   m[:GTE]       = "__w_gte_fast"
-  m[:AMPERSAND] = "w_bit_and"
-  m[:PIPE]      = "w_bit_or"
-  m[:CARET]     = "w_bit_xor"
-  m[:LSHIFT]    = "w_bit_shl"
-  m[:RSHIFT]    = "w_bit_shr"
+  m[:AMPERSAND] = "__w_band_fast"
+  m[:PIPE]      = "__w_bor_fast"
+  m[:CARET]     = "__w_bxor_fast"
+  m[:LSHIFT]    = "__w_shl_fast"
+  m[:RSHIFT]    = "__w_shr_fast"
   m
 
 builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "StandardError", "Tungsten:AST:Node"]

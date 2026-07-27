@@ -602,7 +602,7 @@
       raw = next_temp(wfn)
       emit_instruction(wfn, {op: :load_i64, temp: raw, ptr: raw_slot})
       boxed_temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: boxed_temp, name: "w_int", args: [raw]})
+      emit_instruction(wfn, {op: :call_direct_i64, temp: boxed_temp, name: "__w_int_fast", args: [raw]})
       boxed_slot = wfn[:var_slots][vname]
       emit_instruction(wfn, {op: :store_i64, value: boxed_temp, ptr: boxed_slot})
     ui += 1

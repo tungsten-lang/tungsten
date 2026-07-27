@@ -1,8 +1,14 @@
+# The multiplier operand is masked to 15 bits so the product stays inside
+# the 47-bit inline-int payload: (2^15)(2654435761) < 2^47. The original
+# unmasked form overflowed i48 from v ~ 106k on, so 98%+ of iterations
+# allocated BigInts through w_mul's promotion path — the "method dispatch"
+# primitive was really measuring bignum malloc churn (53% allocation in the
+# branch profile).
 + Mixer
   -> new(@k)
     self
   -> mix(v)
-    (v * 2654435761) ^ @k
+    ((v & 32767) * 2654435761) ^ @k
 
 # primitive: method_call — 8000000 ops
 chk = 0 ## i64

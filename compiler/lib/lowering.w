@@ -1000,6 +1000,7 @@ use lowering/definitions
   #   compile-time const array literals (Phase 5g). Emitter writes each
   #   as a private LLVM global; lowering ptrtoint's them at the load site.
   mod[:class_method_asts] = {}
+  mod[:class_method_fn_names] = {}
   mod[:specialized_methods] = {}
   mod[:small_array_consts] = []
   # The class-registration prepass expands traits/accessors/typed overloads
@@ -1937,6 +1938,22 @@ use lowering/definitions
   if ctx[:quantity_dimensions] == nil
     ctx[:quantity_dimensions] = {}
   ctx[:quantity_dimensions][name] = static_quantity_signature(ctx, node.value)
+
+  # Devirtualization fact: `x = C.new(...)` records C so a later `x.m(...)`
+  # can emit a class-id-GUARDED direct call to C's method instead of IC
+  # dispatch (lower_method_call). Any other assignment clears the fact. The
+  # runtime guard is the soundness backstop — a stale fact (e.g. the var
+  # reassigned inside a closure this walk can't see) just fails the guard
+  # and takes the IC path, so this map only has to be a good heuristic.
+  if ctx[:exact_local_classes] == nil
+    ctx[:exact_local_classes] = {}
+  ctx[:exact_local_classes][name] = nil
+  if node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :call && node.value.name == "new" && node.value.receiver != nil && is_ast_node?(node.value.receiver)
+    ctor_cls = ast_get(node.value.receiver, :name)
+    if ctor_cls != nil
+      cls_node = ctx[:mod][:known_classes][ctor_cls]
+      if cls_node != nil && is_ast_node?(cls_node) && ast_kind(cls_node) == :class_def
+        ctx[:exact_local_classes][name] = ctor_cls
 
   # Range-elision (#49): stash range-literal RHS so a later `r.each ...`
   # substitutes the range expression at the call site and routes through

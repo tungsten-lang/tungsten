@@ -81,7 +81,7 @@
   when :u128
     "w_u128"
   else
-    "w_int"
+    "__w_int_fast"
 
 -> machine_unbox_fn(t)
   case t
@@ -92,7 +92,7 @@
   when :u128
     "w_to_u128"
   else
-    "w_to_i64"
+    "__w_to_i64_fast"
 
 -> machine_call_return_op(t)
   if is_machine_int128_type(t)

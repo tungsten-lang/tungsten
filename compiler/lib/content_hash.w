@@ -97,6 +97,14 @@ use hashing
         encode_val(buf, args[ai], temp_map)
         ai += 1
 
+    # Devirtualized target: two otherwise-identical bodies whose call sites
+    # devirtualize to DIFFERENT methods must not content-collapse.
+    if inst[:devirt_fn] != nil
+      buf << "dv:"
+      buf << inst[:devirt_fn]
+      buf << ":"
+      buf << inst[:devirt_class]
+
     buf << ";"
     return nil
 
@@ -314,6 +322,12 @@ use hashing
           replacement = rename_map[inst[:fn_name]]
           if replacement != nil
             inst[:fn_name] = replacement
+        # Devirtualized direct-call target on an IC dispatch site — the
+        # method function gets compact-symbol renamed like any function.
+        if op == :call_method_i64 && inst[:devirt_fn] != nil
+          replacement = rename_map[inst[:devirt_fn]]
+          if replacement != nil
+            inst[:devirt_fn] = replacement
         # Fused-loop worker address (ptrtoint ptr @name) — the referenced
         # worker gets compact-symbol renamed like any function.
         if op == :fn_addr_i64

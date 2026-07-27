@@ -929,6 +929,159 @@ use hashing
   out << "}\n"
   out.to_s()
 
+# Boxed & | ^ fast paths. XOR of two int boxes zeroes the tag (retag after);
+# AND/OR of two int boxes PRESERVE the tag (tag&tag = tag|tag = tag), so the
+# result is already a valid box — a single instruction. Payload &|^ of two
+# sign-extended 48-bit values always fits i48 (sign bits combine the same
+# way), so no overflow guard is needed — mirrors bit_binop's both-int arm
+# (w_box_int_checked never fires there).
+-> bitop_fast_helper_ir(fast_name, slow_name, llvm_op)
+  out = StringBuffer(600)
+  out << "define private i64 @" + fast_name + "(i64 %a, i64 %b) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %ta = lshr i64 %a, 48\n"
+  out << "  %ia = icmp eq i64 %ta, 65530\n"
+  out << "  %tb = lshr i64 %b, 48\n"
+  out << "  %ib = icmp eq i64 %tb, 65530\n"
+  out << "  %both = and i1 %ia, %ib\n"
+  out << "  br i1 %both, label %fast, label %slow\n"
+  out << "fast:\n"
+  if llvm_op == "xor"
+    out << "  %x = xor i64 %a, %b\n"
+    out << "  %m = and i64 %x, 281474976710655\n"
+    out << "  %v = or i64 %m, -1688849860263936\n"
+  else
+    out << "  %v = " + llvm_op + " i64 %a, %b\n"
+  out << "  ret i64 %v\n"
+  out << "slow:\n"
+  out << "  %sv = call i64 @" + slow_name + "(i64 %a, i64 %b)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
+# Boxed * fast path: 48-bit payload multiply via llvm.smul.with.overflow
+# (payload magnitudes < 2^47, so the i64 product can wrap) plus the i48 fit
+# check; overflow promotes through w_mul (BigInt) exactly as before.
+-> mul_fast_helper_ir()
+  out = StringBuffer(760)
+  out << "define private i64 @__w_mul_fast(i64 %a, i64 %b) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %ta = lshr i64 %a, 48\n"
+  out << "  %ia = icmp eq i64 %ta, 65530\n"
+  out << "  %tb = lshr i64 %b, 48\n"
+  out << "  %ib = icmp eq i64 %tb, 65530\n"
+  out << "  %both = and i1 %ia, %ib\n"
+  out << "  br i1 %both, label %fast, label %slow\n"
+  out << "fast:\n"
+  out << "  %sa = shl i64 %a, 16\n"
+  out << "  %pa = ashr i64 %sa, 16\n"
+  out << "  %sb = shl i64 %b, 16\n"
+  out << "  %pb = ashr i64 %sb, 16\n"
+  out << "  %rc = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %pa, i64 %pb)\n"
+  out << "  %r = extractvalue { i64, i1 } %rc, 0\n"
+  out << "  %ov = extractvalue { i64, i1 } %rc, 1\n"
+  out << "  %rs = shl i64 %r, 16\n"
+  out << "  %rb = ashr i64 %rs, 16\n"
+  out << "  %fit48 = icmp eq i64 %rb, %r\n"
+  out << "  %nov = xor i1 %ov, true\n"
+  out << "  %ok = and i1 %fit48, %nov\n"
+  out << "  br i1 %ok, label %box, label %slow\n"
+  out << "box:\n"
+  out << "  %m = and i64 %r, 281474976710655\n"
+  out << "  %v = or i64 %m, -1688849860263936\n"
+  out << "  ret i64 %v\n"
+  out << "slow:\n"
+  out << "  %sv = call i64 @w_mul(i64 %a, i64 %b)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
+# Boxed << / >> fast paths. `<<` is polymorphic (strbuf/string/array append)
+# — the both-int tag check routes every non-int LHS to the runtime op
+# untouched. shl needs a shift-back equality check (i64 wrap) plus the i48
+# fit; overflow promotes via w_bit_shl (bignum_shl). ashr of a 48-bit value
+# always fits, so >> only guards the count range; k >= 64 and negative
+# counts (huge as unsigned) take the slow path, matching w_bit_shr.
+-> shift_fast_helper_ir(fast_name, slow_name, is_shl)
+  out = StringBuffer(860)
+  out << "define private i64 @" + fast_name + "(i64 %a, i64 %b) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %ta = lshr i64 %a, 48\n"
+  out << "  %ia = icmp eq i64 %ta, 65530\n"
+  out << "  %tb = lshr i64 %b, 48\n"
+  out << "  %ib = icmp eq i64 %tb, 65530\n"
+  out << "  %both = and i1 %ia, %ib\n"
+  out << "  br i1 %both, label %cnt, label %slow\n"
+  out << "cnt:\n"
+  out << "  %sb = shl i64 %b, 16\n"
+  out << "  %k = ashr i64 %sb, 16\n"
+  if is_shl
+    out << "  %kin = icmp ult i64 %k, 48\n"
+  else
+    out << "  %kin = icmp ult i64 %k, 64\n"
+  out << "  br i1 %kin, label %fast, label %slow\n"
+  out << "fast:\n"
+  out << "  %sa = shl i64 %a, 16\n"
+  out << "  %pa = ashr i64 %sa, 16\n"
+  if is_shl
+    out << "  %r = shl i64 %pa, %k\n"
+    out << "  %back = ashr i64 %r, %k\n"
+    out << "  %undo = icmp eq i64 %back, %pa\n"
+    out << "  %rs = shl i64 %r, 16\n"
+    out << "  %rb = ashr i64 %rs, 16\n"
+    out << "  %fit48 = icmp eq i64 %rb, %r\n"
+    out << "  %ok = and i1 %undo, %fit48\n"
+    out << "  br i1 %ok, label %box, label %slow\n"
+    out << "box:\n"
+  else
+    out << "  %r = ashr i64 %pa, %k\n"
+  out << "  %m = and i64 %r, 281474976710655\n"
+  out << "  %v = or i64 %m, -1688849860263936\n"
+  out << "  ret i64 %v\n"
+  out << "slow:\n"
+  out << "  %sv = call i64 @" + slow_name + "(i64 %a, i64 %b)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
+# Inline box/unbox wrappers. w_int boxes a raw i64 (BigInt when it exceeds
+# i48); w_to_i64 unboxes any integer box (limb-walking BigInts). The fast
+# arms cover the ~always case — a fitting value / an inline-int box.
+-> int_fast_helper_ir()
+  out = StringBuffer(480)
+  out << "define private i64 @__w_int_fast(i64 %v) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %rs = shl i64 %v, 16\n"
+  out << "  %rb = ashr i64 %rs, 16\n"
+  out << "  %fit = icmp eq i64 %rb, %v\n"
+  out << "  br i1 %fit, label %box, label %slow\n"
+  out << "box:\n"
+  out << "  %m = and i64 %v, 281474976710655\n"
+  out << "  %r = or i64 %m, -1688849860263936\n"
+  out << "  ret i64 %r\n"
+  out << "slow:\n"
+  out << "  %sv = call i64 @w_int(i64 %v)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
+-> to_i64_fast_helper_ir()
+  out = StringBuffer(480)
+  out << "define private i64 @__w_to_i64_fast(i64 %v) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %hi = lshr i64 %v, 48\n"
+  out << "  %isi = icmp eq i64 %hi, 65530\n"
+  out << "  br i1 %isi, label %fast, label %slow\n"
+  out << "fast:\n"
+  out << "  %s = shl i64 %v, 16\n"
+  out << "  %p = ashr i64 %s, 16\n"
+  out << "  ret i64 %p\n"
+  out << "slow:\n"
+  out << "  %sv = call i64 @w_to_i64(i64 %v)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
 -> filter_runtime_decls(decls, used_fns)
   lines = decls.split("\n")
   out = StringBuffer(decls.size())
@@ -1999,6 +2152,43 @@ ewscope_md_state = {ids: {}, order: []}
       decls_out = decls_out + arith_fast_helper_ir(af[0], af[1], af[2]) + "\n"
     afi += 1
 
+  # Boxed & | ^ / * / << >> fast paths + inline box/unbox wrappers, same
+  # injection scheme as the arith helpers above.
+  bitop_fast_specs = [
+    ["__w_bxor_fast", "w_bit_xor", "xor"],
+    ["__w_band_fast", "w_bit_and", "and"],
+    ["__w_bor_fast", "w_bit_or", "or"]
+  ]
+  bfi = 0
+  while bfi < bitop_fast_specs.size()
+    bf = bitop_fast_specs[bfi]
+    if ccall_needed.has_key?(bf[0])
+      if decls_out.index("@" + bf[1] + "(") == nil
+        decls_out = decls_out + "declare i64 @" + bf[1] + "(i64, i64) nounwind\n"
+      decls_out = decls_out + bitop_fast_helper_ir(bf[0], bf[1], bf[2]) + "\n"
+    bfi += 1
+  if ccall_needed.has_key?("__w_mul_fast")
+    if decls_out.index("@w_mul(") == nil
+      decls_out = decls_out + "declare i64 @w_mul(i64, i64) nounwind\n"
+    decls_out = decls_out + "declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)\n"
+    decls_out = decls_out + mul_fast_helper_ir() + "\n"
+  if ccall_needed.has_key?("__w_shl_fast")
+    if decls_out.index("@w_bit_shl(") == nil
+      decls_out = decls_out + "declare i64 @w_bit_shl(i64, i64) nounwind\n"
+    decls_out = decls_out + shift_fast_helper_ir("__w_shl_fast", "w_bit_shl", true) + "\n"
+  if ccall_needed.has_key?("__w_shr_fast")
+    if decls_out.index("@w_bit_shr(") == nil
+      decls_out = decls_out + "declare i64 @w_bit_shr(i64, i64) nounwind\n"
+    decls_out = decls_out + shift_fast_helper_ir("__w_shr_fast", "w_bit_shr", false) + "\n"
+  if ccall_needed.has_key?("__w_int_fast")
+    if decls_out.index("@w_int(") == nil
+      decls_out = decls_out + "declare i64 @w_int(i64) nounwind\n"
+    decls_out = decls_out + int_fast_helper_ir() + "\n"
+  if ccall_needed.has_key?("__w_to_i64_fast")
+    if decls_out.index("@w_to_i64(") == nil
+      decls_out = decls_out + "declare i64 @w_to_i64(i64) nounwind\n"
+    decls_out = decls_out + to_i64_fast_helper_ir() + "\n"
+
   # Emit declarations for call targets not defined in this module. The
   # already-declared check was a decls_out.index(search_str) — a full strstr
   # over the growing declaration string PER ccall target, i.e. O(targets x
@@ -2063,6 +2253,10 @@ ewscope_md_state = {ids: {}, order: []}
     return "g.done." + inst[:block_id].to_s()
   # Method-dispatch call sites carrying source-loc info split the block so
   # their return address is addressable via blockaddress(@fn, %cs.N.ret).
+  # A devirtualized site additionally merges its direct and IC arms in a
+  # dv.N.done block, which is then the real exit regardless of src_line.
+  if op == :call_method_i64 && inst[:devirt_fn] != nil
+    return "dv." + inst[:ic_id].to_s() + ".done"
   if op == :call_method_i64 && inst[:src_line] != nil
     return "cs." + inst[:ic_id].to_s() + ".ret"
   # Direct-call fallible sites (w_raise, w_array_get, w_array_set) use the
@@ -3559,6 +3753,45 @@ ewscope_md_state = {ids: {}, order: []}
     name_val = inst[:method_name_val]
     parts = StringBuffer(128 + argc * 64)
     parts << ic_gep
+    # Guarded devirtualization (lowering attaches devirt_fn/devirt_class when
+    # the receiver's exact class is statically known): receiver is a WObject
+    # (obj space, subtag 4) whose class_id (u16 at +0) equals @class.<C>'s
+    # class_id (u16 at +16 in WClass) -> direct call to the method's function
+    # symbol; anything else -> the ordinary IC dispatch below. The direct arm
+    # skips dispatch entirely and lets LLVM inline small method bodies.
+    dv_temp = inst[:temp]
+    if inst[:devirt_fn] != nil
+      t = inst[:temp]
+      lbl = "dv." + ic_id
+      parts << t + ".hi = lshr i64 " + inst[:receiver] + ", 48\n  "
+      parts << t + ".z = icmp eq i64 " + t + ".hi, 0\n  "
+      parts << t + ".ge = icmp uge i64 " + inst[:receiver] + ", 16\n  "
+      parts << t + ".o = and i1 " + t + ".z, " + t + ".ge\n  "
+      parts << t + ".sb = and i64 " + inst[:receiver] + ", 15\n  "
+      parts << t + ".isi = icmp eq i64 " + t + ".sb, 4\n  "
+      parts << t + ".oi = and i1 " + t + ".o, " + t + ".isi\n  "
+      parts << "br i1 " + t + ".oi, label %" + lbl + ".ck, label %" + lbl + ".s\n"
+      parts << lbl + ".ck:\n  "
+      parts << t + ".om = and i64 " + inst[:receiver] + ", -16\n  "
+      parts << t + ".op = inttoptr i64 " + t + ".om to ptr\n  "
+      parts << t + ".oc = load i16, ptr " + t + ".op, align 2\n  "
+      parts << t + ".cw = load i64, ptr @class." + inst[:devirt_class].gsub(":", "__") + "\n  "
+      parts << t + ".cm = and i64 " + t + ".cw, -16\n  "
+      parts << t + ".cp = inttoptr i64 " + t + ".cm to ptr\n  "
+      parts << t + ".cip = getelementptr i8, ptr " + t + ".cp, i64 16\n  "
+      parts << t + ".cc = load i16, ptr " + t + ".cip, align 2\n  "
+      parts << t + ".same = icmp eq i16 " + t + ".oc, " + t + ".cc\n  "
+      parts << "br i1 " + t + ".same, label %" + lbl + ".d, label %" + lbl + ".s\n"
+      parts << lbl + ".d:\n  "
+      parts << t + ".dv = call i64 @" + inst[:devirt_fn] + "(i64 " + inst[:receiver]
+      di = 0
+      while di < argc
+        parts << ", i64 " + inst[:args][di]
+        di += 1
+      parts << ")\n  "
+      parts << "br label %" + lbl + ".done\n"
+      parts << lbl + ".s:\n  "
+      dv_temp = t + ".sv"
     # `notail` prevents LLVM from collapsing the call+ret pair into a tail
     # call when we need a real return address for the call-site lookup.
     # Without this, -O3 converts `call + br + ret` into a `b` (unconditional
@@ -3568,9 +3801,9 @@ ewscope_md_state = {ids: {}, order: []}
     if inst[:src_line] != nil
       call_keyword = "notail call"
     if argc == 0
-      parts << inst[:temp] + " = " + call_keyword + " i64 @w_method_call_cached_0(i64 " + inst[:receiver] + ", i64 " + name_val + ic_arg + ")"
+      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_0(i64 " + inst[:receiver] + ", i64 " + name_val + ic_arg + ")"
     elsif scalar_source_one_call?(inst)
-      parts << inst[:temp] + " = " + call_keyword + " i64 @w_method_call_cached_1(i64 " + inst[:receiver] + ", i64 " + name_val + ", i64 " + inst[:args][0] + ic_arg + ")"
+      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_1(i64 " + inst[:receiver] + ", i64 " + name_val + ", i64 " + inst[:args][0] + ic_arg + ")"
     else
       stack_arr = "%__mcall_args"
       i = 0
@@ -3582,7 +3815,7 @@ ewscope_md_state = {ids: {}, order: []}
           parts << slot + " = getelementptr inbounds i64, ptr " + stack_arr + ", i32 " + i.to_s() + "\n  "
         parts << "store i64 " + inst[:args][i] + ", ptr " + slot + ", align 8\n  "
         i += 1
-      parts << inst[:temp] + " = " + call_keyword + " i64 @w_method_call_cached(i64 " + inst[:receiver] + ", i64 " + name_val + ", ptr " + stack_arr + ", i32 " + argc.to_s() + ic_arg + ")"
+      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached(i64 " + inst[:receiver] + ", i64 " + name_val + ", ptr " + stack_arr + ", i32 " + argc.to_s() + ic_arg + ")"
     if inst[:src_line] != nil
       ret_lbl = "cs." + ic_id + ".ret"
       parts << "\n  br label %"
@@ -3590,6 +3823,18 @@ ewscope_md_state = {ids: {}, order: []}
       parts << "\n"
       parts << ret_lbl
       parts << ":"
+    if inst[:devirt_fn] != nil
+      t = inst[:temp]
+      lbl = "dv." + ic_id
+      # The slow arm's value is defined in whichever block the IC render
+      # left us in: the cs.N.ret continuation when a call-site table entry
+      # was emitted, else the dv.N.s block itself.
+      slow_pred = lbl + ".s"
+      if inst[:src_line] != nil
+        slow_pred = "cs." + ic_id + ".ret"
+      parts << "\n  br label %" + lbl + ".done\n"
+      parts << lbl + ".done:\n  "
+      parts << t + " = phi i64 \[" + t + ".dv, %" + lbl + ".d], \[" + t + ".sv, %" + slow_pred + "]"
     parts.to_s()
 
   # Control flow

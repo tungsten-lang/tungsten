@@ -394,10 +394,11 @@
     temp = next_temp(f)
     emit_instruction(f, {op: :nanbox_int, temp: temp, temp_masked: temp_masked, raw: tv[:value]})
     return temp
-  # raw_i64 -> i64: box via runtime (promotes to bigint when needed)
+  # raw_i64 -> i64: box via the inline-fast wrapper (fitting values box
+  # inline; only >i48 values call w_int for BigInt promotion)
   if tv[:type] == :raw_i64
     temp = next_temp(f)
-    emit_instruction(f, {op: :call_direct_i64, temp: temp, name: "w_int", args: [tv[:value]]})
+    emit_instruction(f, {op: :call_direct_i64, temp: temp, name: "__w_int_fast", args: [tv[:value]]})
     return temp
   # raw_u64 -> i64: box via unsigned runtime bridge
   if tv[:type] == :raw_u64

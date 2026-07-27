@@ -1765,6 +1765,32 @@
       own_method = ctx[:mod][:class_method_asts][source_class_name + "." + method_name + "/1"]
       scalar_source_argc1 = own_method != nil
 
+  # Guarded devirtualization: when the receiver's exact class is statically
+  # known (a local assigned `C.new(...)`, or an ivar with a conflict-free
+  # exact-class fact) and C defines a plain-signature method for this exact
+  # arity (class_method_fn_names — filled only for devirt-safe shapes), emit
+  # a class-id-guarded direct call with the IC dispatch as the fallback arm.
+  # The runtime guard (instance subtag + class_id equality against @class.C)
+  # makes any staleness in the static fact harmless: nil, a reassigned
+  # local, or a SUBCLASS instance simply fails the guard and dispatches
+  # through the IC exactly as before.
+  devirt_fn = nil
+  devirt_class = nil
+  if node.block == nil && recv_node != nil && is_ast_node?(recv_node)
+    exact_cls = nil
+    rk2 = ast_kind(recv_node)
+    if rk2 == :var && ctx[:exact_local_classes] != nil
+      exact_cls = ctx[:exact_local_classes][recv_node.name]
+    elsif rk2 == :ivar && ctx[:class_name] != nil
+      exact_ivars2 = ctx[:mod][:exact_source_ivar_types][ctx[:class_name]]
+      if exact_ivars2 != nil
+        exact_cls = exact_ivars2[recv_node.name]
+    if exact_cls != nil
+      dfn = ctx[:mod][:class_method_fn_names][exact_cls + "." + method_name + "/" + node.args.size().to_s()]
+      if dfn != nil
+        devirt_fn = dfn
+        devirt_class = exact_cls
+
   emit_instruction(wfn, {
     op: :call_method_i64,
     temp: temp,
@@ -1773,6 +1799,8 @@
     method_name_val: method_name_val,
     args: arg_regs,
     scalar_source_argc1: scalar_source_argc1,
+    devirt_fn: devirt_fn,
+    devirt_class: devirt_class,
     ic_id: ic_id,
     src_line: node.line,
     src_col: node.col

@@ -223,6 +223,7 @@ compiled_specs=(
   spec/compiler/small_array_stack_escape_spec.w
   spec/compiler/small_array_stack_zero_init_spec.w
   spec/compiler/small_array_generic_spec.w
+  spec/compiler/masked_index_loop_spec.w
   spec/compiler/u64_raw_multiply_spec.w
   spec/compiler/conditional_reassign_param_spec.w
   spec/compiler/begin_rescue_value_spec.w
@@ -254,6 +255,7 @@ compiled_specs=(
   benchmarks/runtime_ports/array_leaf_no_use_typed.w
   benchmarks/runtime_ports/small_big_array_no_use_autoload.w
   benchmarks/runtime_ports/sync_wrapper_revisit_exact_factory.w
+  spec/numeric/bit_ops_spec.w
   spec/numeric/complex_spec.w
   spec/numeric/fp_math_mode_spec.w
   spec/numeric/hypercomplex_mul_spec.w

@@ -399,6 +399,10 @@
 
   # Find variables safe to keep unboxed (only compound-assigned ints, no full assigns)
   unboxable = find_unboxable_loop_vars(node.body, node.condition, ctx[:var_types])
+  # Wraparound array indexing (`tab[i & 1023]`) defeats LLVM's loop
+  # vectorizer — it mis-peels the loop ~2.6x slower than its own unroller.
+  # Stamp the latch to opt just this loop out; see loop_masked_array_index?.
+  loop_novec = loop_masked_array_index?(node.body, find_loop_assigned_vars(node.body, node.condition))
   # Inside a `Math.promote` / `Math.trap` block, suppress loop-var unboxing so
   # accumulators stay boxed WValues: their +/-/* then route through the
   # guarded path (lower_binary_op), which promotes to BigInt (promote) or
@@ -481,7 +485,10 @@
   pop_loop(wfn)
   if !block_terminated(wfn)
     emit_scope_pop(wfn, while_sid)
-    emit_instruction(wfn, {op: :br, label: cont_label})
+    if loop_novec
+      emit_instruction(wfn, {op: :br, label: cont_label, novec: true})
+    else
+      emit_instruction(wfn, {op: :br, label: cont_label})
   else
     restore_recycle_scope_depth(wfn, while_recycle_depth)
 

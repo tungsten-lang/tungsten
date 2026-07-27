@@ -961,6 +961,38 @@ use hashing
   o << "!31421 = !{!31420, !31420, i64 0}\n"
   o.to_s()
 
+# Loop-vectorizer opt-out for masked-index while loops (lowering stamps the
+# latch :br with novec:true — see lowering/analysis.w loop_masked_array_index?).
+# Each marked latch gets its OWN distinct self-referential !llvm.loop node:
+# LLVM uses the node as the loop's identity, and sharing one node across loops
+# measurably degrades the unroller's output (6.7B vs 8.5B ops/s on the masked
+# reduce). IDs run upward from 31423, above the fixed TBAA block; allocation
+# follows render order, which is deterministic, so stage identity holds. The
+# counter is a top-level container mutated in place (rebinding a top-level name
+# from a function shadows instead of writing through — see detect_target_memo).
+novec_md_state = {count: 0}
+
+-> novec_loop_md_ref()
+  k = novec_md_state[:count]
+  novec_md_state[:count] = k + 1
+  (31423 + k).to_s()
+
+# One shared string-tuple node (!31422) + a distinct per-loop node per marked
+# latch. Rendered AFTER all functions (emit_artifact's final concat), so the
+# counter is final. Emits nothing when no loop was marked.
+-> novec_loop_md_defs()
+  n = novec_md_state[:count]
+  if n == 0
+    return ""
+  o = StringBuffer(64)
+  o << "!31422 = !{!\"llvm.loop.vectorize.enable\", i1 false}\n"
+  i = 0
+  while i < n
+    id = (31423 + i).to_s()
+    o << "!" + id + " = distinct !{!" + id + ", !31422}\n"
+    i += 1
+  o.to_s()
+
 -> direct_range_metadata_suffix(llvm_type, low, high)
   ", !range !{" + llvm_type + " " + low.to_s() + ", " + llvm_type + " " + high.to_s() + "}"
 
@@ -1862,7 +1894,7 @@ use hashing
 
   attr_groups_out = emit_function_attr_groups(attr_groups)
 
-  header + decls_out + globals_out.to_s() + strings_out + fn_out.to_s() + fn_meta_out + call_site_out + llvm_used_out + attr_groups_out + tbaa_metadata_defs()
+  header + decls_out + globals_out.to_s() + strings_out + fn_out.to_s() + fn_meta_out + call_site_out + llvm_used_out + attr_groups_out + tbaa_metadata_defs() + novec_loop_md_defs()
 
 # -- Emit a single function --
 
@@ -3330,7 +3362,10 @@ use hashing
 
   # Control flow
   when :br
-    "br label %" + inst[:label]
+    if inst[:novec] == true
+      "br label %" + inst[:label] + ", !llvm.loop !" + novec_loop_md_ref()
+    else
+      "br label %" + inst[:label]
   when :cond_br
     "br i1 " + inst[:cond] + ", label %" + inst[:then_label] + ", label %" + inst[:else_label]
   when :switch_i64

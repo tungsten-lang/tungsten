@@ -1268,3 +1268,96 @@
     obs[ai][key] = true
     ai += 1
   nil
+
+# ── Masked-index loop detection (LLVM loop-vectorizer opt-out) ─────────
+# Wraparound array indexing in a while loop — `tab[i & 1023]` (and the `%`
+# equivalent) — makes LLVM's loop vectorizer mis-peel: it vectorizes only a
+# fraction of one array period and runs the remaining iterations scalar
+# single-accumulator, ~2.6x slower than never vectorizing at all (whose
+# unroller emits a clean multi-accumulator interleave — how clang treats
+# the identical C loop). No clang flag or IR attribute redirects the cost
+# model for just this shape (force-interleave, no-epilogue-vec, inbounds
+# GEPs: all tested, all no-ops), so lower_while stamps
+# `llvm.loop.vectorize.enable=false` metadata on the latch of exactly
+# these loops (the emitter's :br novec flag). Sequential-index loops are
+# untouched and keep full vectorization (~15.8B ops/s headerless reads).
+#
+# Detection: the loop body contains an array read/write (`[]` / `[]=`)
+# whose index expression masks (& / %) a value referencing a var assigned
+# in this loop — i.e. the index wraps as the loop advances. A mask over
+# only loop-invariant vars is a uniform load and stays vectorizable.
+-> loop_masked_array_index?(nodes, assigned)
+  if nodes == nil
+    return false
+  i = 0
+  while i < nodes.size()
+    if expr_masked_array_index?(nodes[i], assigned)
+      return true
+    i += 1
+  false
+
+-> expr_masked_array_index?(node, assigned)
+  if node == nil
+    return false
+  case ast_kind(node)
+  when :call
+    nm = node.name
+    args = node.args
+    if nm == "[]" || nm == "[]="
+      if args != nil && args.size() > 0 && index_masks_loop_var?(args[0], assigned)
+        return true
+    if node.receiver != nil && expr_masked_array_index?(node.receiver, assigned)
+      return true
+    return loop_masked_array_index?(args, assigned)
+  when :assign, :compound_assign
+    return expr_masked_array_index?(node.value, assigned)
+  when :binary_op
+    if expr_masked_array_index?(node.left, assigned)
+      return true
+    return expr_masked_array_index?(node.right, assigned)
+  when :if
+    if expr_masked_array_index?(node.condition, assigned)
+      return true
+    if loop_masked_array_index?(node.then_body, assigned)
+      return true
+    if loop_masked_array_index?(node.else_body, assigned)
+      return true
+    ec = node.elsif_clauses
+    if ec != nil
+      j = 0
+      while j < ec.size()
+        clause = ec[j]
+        if expr_masked_array_index?(clause[0], assigned)
+          return true
+        if loop_masked_array_index?(clause[1], assigned)
+          return true
+        j += 1
+    return false
+  # Nested while loops run their own lower_while pass and stamp their own
+  # latch; the outer loop's metadata would land on the wrong loop.
+  false
+
+-> index_masks_loop_var?(node, assigned)
+  if node == nil
+    return false
+  if ast_kind(node) != :binary_op
+    return false
+  op = node.op
+  if op == :AMPERSAND || op == :PERCENT
+    if masked_subtree_refs?(node.left, assigned) || masked_subtree_refs?(node.right, assigned)
+      return true
+  if index_masks_loop_var?(node.left, assigned)
+    return true
+  index_masks_loop_var?(node.right, assigned)
+
+-> masked_subtree_refs?(node, assigned)
+  if node == nil
+    return false
+  case ast_kind(node)
+  when :var
+    return assigned[node.name] != nil
+  when :binary_op
+    if masked_subtree_refs?(node.left, assigned)
+      return true
+    return masked_subtree_refs?(node.right, assigned)
+  false

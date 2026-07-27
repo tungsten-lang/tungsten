@@ -954,17 +954,21 @@ static int runtime_array_ensure_cap(TcRuntimeArray *array, size_t needed, TcErro
 // Tombstones (W_MEMO_MISS) never appear at allocation time; the probe path
 // is the only thing that ever writes one.
 static int hash_allocate_storage(TcRuntimeHash *hash, size_t cap, TcError *err) {
-  hash->cap = (uint32_t)cap;
-  hash->count = 0;
-  hash->keys = (WValue *)malloc(cap * sizeof(WValue));
-  hash->values = (WValue *)calloc(1, cap * sizeof(WValue));
-  if (!hash->keys || !hash->values) {
-    free(hash->keys);
-    free(hash->values);
+  WValue *keys = (WValue *)malloc(cap * sizeof(WValue));
+  WValue *values = (WValue *)calloc(1, cap * sizeof(WValue));
+  if (!keys || !values) {
+    free(keys);
+    free(values);
     tc_error_set(err, "hash entry allocation failed");
     return 0;
   }
-  for (size_t i = 0; i < cap; i++) hash->keys[i] = TC_HASH_EMPTY;
+  for (size_t i = 0; i < cap; i++) keys[i] = TC_HASH_EMPTY;
+
+  hash->cap = (uint32_t)cap;
+  hash->count = 0;
+  hash->occupied = 0;
+  hash->keys = keys;
+  hash->values = values;
   return 1;
 }
 
@@ -1110,7 +1114,7 @@ static size_t hash_find_slot(TcRuntimeHash *hash, TcValue key, int *found) {
   size_t mask = hash->cap - 1;
   size_t idx = (size_t)hash_value64(key) & mask;
   size_t first_tombstone = SIZE_MAX;
-  while (1) {
+  for (size_t probes = 0; probes < hash->cap; probes++) {
     TcValue k = hash->keys[idx];
     if (k == TC_HASH_EMPTY) {
       *found = 0;
@@ -1128,6 +1132,11 @@ static size_t hash_find_slot(TcRuntimeHash *hash, TcValue key, int *found) {
     }
     idx = (idx + 1) & mask;
   }
+
+  // A delete-heavy table may contain no empty slot. Terminate after one full
+  // circuit and let insertion reuse the first tombstone instead of spinning.
+  *found = 0;
+  return first_tombstone;
 }
 
 // Grow the slot table to `min_cap` (rounded up to a power of two >= 8) and
@@ -1140,9 +1149,6 @@ static int hash_grow(TcRuntimeHash *hash, size_t min_cap, TcError *err) {
   WValue *old_values = hash->values;
   size_t old_cap = hash->cap;
   if (!hash_allocate_storage(hash, cap, err)) {
-    hash->keys = old_keys;
-    hash->values = old_values;
-    hash->cap = (uint32_t)old_cap;
     return 0;
   }
   size_t mask = cap - 1;
@@ -1154,6 +1160,7 @@ static int hash_grow(TcRuntimeHash *hash, size_t min_cap, TcError *err) {
     hash->keys[idx] = k;
     hash->values[idx] = old_values[i];
     hash->count++;
+    hash->occupied++;
   }
   free(old_keys);
   free(old_values);
@@ -1180,15 +1187,28 @@ static int promote_ast_value(TcValue *value, TcError *err) {
 static int hash_set_value(TcRuntimeHash *hash, TcValue key, TcValue value, TcError *err) {
   if (!promote_ast_value(&value, err)) return 0;
   if (hash->cap == 0 && !hash_grow(hash, 8, err)) return 0;
-  // 75% load factor: grow when (count+1)*4 >= cap*3. Bit-exact match to
-  // runtime/runtime.c:w_hash_maybe_grow so the same key insertion sequence
-  // triggers grows at the same points and ends with the same slot layout.
-  if ((hash->count + 1) * 4 >= hash->cap * 3) {
-    if (!hash_grow(hash, hash->cap * 2, err)) return 0;
+  // Keep total occupied slots (live + tombstones) below 75%. Grow when live
+  // entries need the room; otherwise rebuild at the same size to discard
+  // tombstones. Mirrors runtime/runtime.c:w_hash_prepare_set.
+  if ((hash->occupied + 1) * 4 >= hash->cap * 3) {
+    size_t min_cap =
+        (hash->count + 1) * 4 >= hash->cap * 3 ? hash->cap * 2 : hash->cap;
+    if (!hash_grow(hash, min_cap, err)) return 0;
   }
   int found = 0;
   size_t slot = hash_find_slot(hash, key, &found);
-  if (!found) hash->count++;
+  if (slot == SIZE_MAX) {
+    if (!hash_grow(hash, hash->cap * 2, err)) return 0;
+    slot = hash_find_slot(hash, key, &found);
+    if (slot == SIZE_MAX) {
+      tc_error_set(err, "hash insertion found no available slot");
+      return 0;
+    }
+  }
+  if (!found) {
+    if (hash->keys[slot] == TC_HASH_EMPTY) hash->occupied++;
+    hash->count++;
+  }
   hash->keys[slot] = key;
   hash->values[slot] = value;
   return 1;

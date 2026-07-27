@@ -16731,6 +16731,7 @@ WValue w_native_data_field(WValue recv, WValue name_v) {
 static void w_hash_allocate_storage(WHash *hash, int64_t cap) {
     hash->cap = cap;
     hash->count = 0;
+    hash->occupied = 0;
     hash->keys = malloc(sizeof(WValue) * cap);
     hash->values = calloc(1, sizeof(WValue) * cap);
     for (int64_t i = 0; i < cap; i++) hash->keys[i] = W_UNDEF;
@@ -16740,33 +16741,46 @@ static int64_t w_hash_find_slot(WHash *hash, WValue key, int *found) {
     uint64_t mask = (uint64_t)(hash->cap - 1);
     uint64_t idx = w_hash_value(key) & mask;
     int64_t first_tombstone = -1;
-    while (hash->keys[idx] != W_UNDEF) {
-        if (hash->keys[idx] == W_MEMO_MISS) {
+    for (uint32_t probes = 0; probes < hash->cap; probes++) {
+        WValue slot_key = hash->keys[idx];
+        if (slot_key == W_UNDEF) {
+            *found = 0;
+            return first_tombstone >= 0 ? first_tombstone : (int64_t)idx;
+        }
+        if (slot_key == W_MEMO_MISS) {
             if (first_tombstone < 0) first_tombstone = (int64_t)idx;
-        } else if (w_hash_key_eq(hash->keys[idx], key)) {
+        } else if (w_hash_key_eq(slot_key, key)) {
             *found = 1;
             return (int64_t)idx;
         }
         idx = (idx + 1) & mask;
     }
+
+    /* A table containing no W_UNDEF slots is possible after enough deletes.
+     * Bound the probe so a miss terminates and insertion can reuse a tombstone. */
     *found = 0;
-    return first_tombstone >= 0 ? first_tombstone : (int64_t)idx;
+    return first_tombstone;
 }
 
 static void w_hash_reinsert(WHash *hash, WValue key, WValue value) {
     int found = 0;
     int64_t idx = w_hash_find_slot(hash, key, &found);
+    if (idx < 0) die("hash reinsert found no available slot");
+    WValue old_key = hash->keys[idx];
     hash->keys[idx] = key;
     hash->values[idx] = value;
-    if (!found) hash->count++;
+    if (!found) {
+        hash->count++;
+        if (old_key == W_UNDEF) hash->occupied++;
+    }
 }
 
-static void w_hash_grow(WHash *hash) {
+static void w_hash_rehash(WHash *hash, int64_t new_capacity) {
     WValue *old_keys = hash->keys;
     WValue *old_values = hash->values;
     int64_t old_capacity = hash->cap;
 
-    w_hash_allocate_storage(hash, old_capacity * 2);
+    w_hash_allocate_storage(hash, new_capacity);
 
     for (int64_t i = 0; i < old_capacity; i++) {
         if (old_keys[i] != W_UNDEF && old_keys[i] != W_MEMO_MISS) {
@@ -16778,9 +16792,11 @@ static void w_hash_grow(WHash *hash) {
     free(old_values);
 }
 
-static void w_hash_maybe_grow(WHash *hash) {
-    if ((hash->count + 1) * 4 >= hash->cap * 3) {
-        w_hash_grow(hash);
+static void w_hash_prepare_set(WHash *hash) {
+    if ((hash->occupied + 1) * 4 >= hash->cap * 3) {
+        int64_t new_capacity =
+            (hash->count + 1) * 4 >= hash->cap * 3 ? hash->cap * 2 : hash->cap;
+        w_hash_rehash(hash, new_capacity);
     }
 }
 
@@ -16798,6 +16814,7 @@ static inline void w_hash_reset(WHash *hash) {
         hash->values[i] = W_NIL;
     }
     hash->count = 0;
+    hash->occupied = 0;
     hash->flags &= ~W_HASH_FLAG_KWARGS;
 }
 
@@ -16864,10 +16881,17 @@ WValue w_hash_new_with_fn(int64_t fn_id) {
 
 WValue w_hash_set(WValue hash_val, WValue key, WValue val) {
     WHash *hash = as_hash(hash_val);
-    w_hash_maybe_grow(hash);
+    w_hash_prepare_set(hash);
     int found = 0;
     int64_t idx = w_hash_find_slot(hash, key, &found);
+    if (idx < 0) {
+        /* Defensive fallback for a corrupt/full-live table. Normal insertion
+         * reaches w_hash_prepare_set first and cannot take this branch. */
+        w_hash_rehash(hash, hash->cap * 2);
+        idx = w_hash_find_slot(hash, key, &found);
+    }
     if (!found) {
+        if (hash->keys[idx] == W_UNDEF) hash->occupied++;
         hash->keys[idx] = key;
         hash->count++;
     }

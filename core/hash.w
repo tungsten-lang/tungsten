@@ -5,7 +5,8 @@
     u32    count
     u32    capacity
     u8     flags
-    u8[7]  _pad
+    u8[3]  _pad
+    u32    occupied
     * w64[] keys
     * w64[] values
 

@@ -570,7 +570,8 @@ struct TcRuntimeHash {
   uint32_t count;
   uint32_t cap;
   uint8_t flags;
-  uint8_t pad[7];
+  uint8_t pad[3];
+  uint32_t occupied;
   WValue *keys;
   WValue *values;
 };

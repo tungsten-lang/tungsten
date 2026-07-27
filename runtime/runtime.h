@@ -297,7 +297,8 @@ typedef struct {
     uint32_t count;
     uint32_t cap;       /* allocated slots (renamed from cap) */
     uint8_t flags;
-    uint8_t pad[7];
+    uint8_t pad[3];
+    uint32_t occupied;  /* live entries + tombstones */
     WValue *keys;       /* W_UNDEF = empty slot, W_MEMO_MISS = tombstone */
     WValue *values;
 } WHash;

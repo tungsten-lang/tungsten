@@ -1912,7 +1912,7 @@ WASSAT_PROOF_DRAT = 2
           # can only abort or misfire there — measured on bmc-ibm-12
           # (chrono arm) it nearly doubled the conflict count for zero
           # removal, while plain arms are unaffected.
-          if @use_shrink && !@use_chrono
+          if @use_shrink
             target = self.shrink_learned(n)
             n = @lsize
           lbd = self.compute_lbd_buf(n)
@@ -4212,9 +4212,15 @@ WASSAT_PROOF_DRAT = 2
             av = tv
             av = 0 - tv if tv < 0
             if lvl[av] != bl
-              # chrono guard: a foreign-level entry inside the segment
-              bad = 1
-              scanning = 0
+              # Chronological backtracking interleaves foreign-level entries
+              # into this level's trail segment. SKIP them rather than abandon
+              # the block. This is never unsound: if every marked literal of
+              # `bl` is still inside the segment the walk finds them all and
+              # derives exactly what the plain case derives; if any sits
+              # outside it, the scan runs past `flr` and aborts as before. The
+              # worst case is a fruitless walk, not a wrong clause -- which is
+              # what makes it safe to try without per-variable trail positions.
+              ti -= 1
             else
               mk = sn[av]
               if mk == 1 || mk == 2

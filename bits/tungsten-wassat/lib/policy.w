@@ -173,6 +173,19 @@ WASSAT_CONGRUENCE_DEFAULT = true
 # cryptography kernel is solved by the light rendering in 5k conflicts and
 # the heavy one needs 255k, while the bitvector kernel smulo016 is untouched
 # by the light rendering (33.8s) and solved by the heavy one in 4.9s.
+# Flip budget for the raw race's SLS arm; 0 removes the arm entirely.
+#
+# Unbounded in effect rather than tuned: the arm polls the shared stop cell
+# inside its flip loop, so a budget it never reaches costs nothing — whichever
+# arm answers first stops it within a flip. The number is therefore a ceiling
+# against a pathological walk, not a schedule. Measured flips-to-model on the
+# rows this arm exists for: DivS_568_11 288, DivS_862_11 413, n320p5q2_n 6,610,
+# n384p5q2_vh 105,627, ntil-90d-33 1,216,191 — the old serial burst's 60,000
+# would have caught three of those five.
+-> wassat_sls_arm_flips
+  return wassat_decimal_in_range("WASSAT_SLS_FLIPS", env("WASSAT_SLS_FLIPS"), 0, 2000000000) if env("WASSAT_SLS_FLIPS") != nil
+  200000000
+
 -> wassat_pre_arm_count
   return wassat_decimal_in_range("WASSAT_PRE_ARMS", env("WASSAT_PRE_ARMS"), 0, 2) if env("WASSAT_PRE_ARMS") != nil
   2
@@ -544,6 +557,7 @@ WASSAT_CONGRUENCE_DEFAULT = true
     # literals in multi-literal level blocks (1% removed, ~15% ceiling)
     # versus CaDiCaL's 37%, and the restart/branching cadence work that
     # reshapes that trajectory is the phase that could make this pay.
+    return env("WASSAT_SHRINK") == "1" if env("WASSAT_SHRINK") != nil
     return false if true
     !(@ternary * 4 >= @nclauses * 3)
 

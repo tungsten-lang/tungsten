@@ -348,12 +348,56 @@ use portfolio
         scout_nv = formula["nvars"]
         scout_simplify = config.force_simplify?
         scout_stop = i64[4]
-        scout_res = i64[scout_nv + 8]
+        # Two slots: the lucky arm at 0, the SLS arm at scout_nv + 8.
+        scout_res = i64[2 * (scout_nv + 8)]
+        scout_sls_base = scout_nv + 8
         scout_out = []
+        # Local search races the SCOUT, not just the raw arms behind it. The
+        # scout is bounded by conflicts rather than wall clock on a raw kernel,
+        # and on the dense low-variable formulas local search is best at, those
+        # 2,000 conflicts are expensive: n320p5q2_n spends 748ms there while the
+        # walker reaches a model in 6,610 flips. Racing it means a formula local
+        # search cracks is answered before the scout's cap is even approached.
         lucky_h = Thread.new -> wassat_lucky_arm_body(scout_nv, art, scout_res, 0, scout_stop)
         scout_h = Thread.new -> wassat_scout_arm_body(scout_nv, art, scout_stop, probe_cap, probe_wall, raw_probe, scout_simplify, scout_out)
+        scout_sls_h = nil
+        scout_sls_flips = wassat_sls_arm_flips
+        if scout_sls_flips > 0
+          scout_sls_h = Thread.new -> wassat_sls_arm_body(scout_nv, formula, scout_res, scout_sls_base, scout_stop, scout_sls_flips, 7)
         z = lucky_h.join
         z = scout_h.join
+        # The walker is bounded by THE SCOUT'S LIFETIME, not by a flip budget.
+        # Raising the cell here is what makes this arm free: it walks for
+        # exactly as long as the scout was going to take anyway, so a miss
+        # costs a core for a stage that was already running and never a
+        # millisecond of wall clock. It also has to be unconditional -- the
+        # scout's usual outcome is status 0 (undecided, hand off to the raw
+        # race), which raises nothing, and an arm waiting on a signal that
+        # never comes would walk out its whole budget with the join blocked
+        # behind it. Measured when it did: bmc-ibm-12 0.7s -> 25s timeout.
+        #
+        # Rows that need a longer walk are not lost, they are handed to the
+        # full SLS arm in the raw race behind this.
+        scout_stop[0] = 1
+        z = scout_sls_h.join if scout_sls_h != nil
+        # A walked model is checked before the scout's verdict for the same
+        # reason the lucky one is: same formula, so they cannot disagree, and
+        # this one cost no conflicts at all.
+        if scout_res[scout_sls_base] == 1
+          pre_msw = ccall("__w_clock_ms") - t0
+          wmodel = []
+          v = 1
+          while v <= scout_nv
+            wmodel.push(scout_res[scout_sls_base + v] == 1 ? v : 0 - v)
+            v += 1
+          model = wassat_reconstruct_model(light_stack, wmodel, scout_nv)
+          unless wassat_model_satisfies?(formula, model)
+            raise "internal error: sls arm model does not satisfy the input formula"
+          print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
+          << "c mode: fast (sls arm)"
+          << "c conflicts: 0, decisions: 0, flips: [scout_res[scout_sls_base + scout_nv + 4]]"
+          << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(art["stats"], pre_msw)
+          exit(10)
         tprof = wassat_prof("cli.scout_race", tprof)
         # A lucky verdict is checked first: it is the same formula the scout
         # is solving, so the two cannot disagree, and the dives reach it with
@@ -422,12 +466,17 @@ use portfolio
         # stopping points too coarse to bound on very large inputs, so they are
         # not offered inputs they cannot survive (see wassat_pre_max_clauses).
         pre_arms = 0 if formula["flat_ncl"] > wassat_pre_max_clauses
+        # The SLS arm makes the race worth building on its own: a formula that
+        # local search cracks is answered here even when there is exactly one
+        # raw arm and no preprocessing arm.
+        sls_flips = wassat_sls_arm_flips
         race = nil
-        if arms > 1 || pre_arms > 0
+        if arms > 1 || pre_arms > 0 || sls_flips > 0
           continuation = config.continue_scout? ? scout_solver : nil
           continuation_spent = continuation == nil ? 0 : budget_used
           race = wassat_race_build(formula["nvars"], art, arms, formula,
                                    continuation, continuation_spent)
+          wassat_race_add_sls(race, sls_flips, 7) if sls_flips > 0
           if pre_arms > 0
             # A preprocessor per arm: two threads rendering through one would
             # race on its arena. Constructed HERE, on the main thread, because
@@ -463,6 +512,7 @@ use portfolio
           won_stack = art["stack"]
           won_stats = art["stats"]
           arm_tag = "arm [rr["winner"]]"
+          arm_tag = "sls arm" if rr["sls_won"] == true
           if pidx >= 0
             spec = race["pre"][pidx]
             won_stack = spec["out"][0]

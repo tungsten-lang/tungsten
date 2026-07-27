@@ -97,6 +97,17 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     @bag = i64[nv + 1]
     @wtr = i64[nv + 4]
     @st = i64[12]
+    # Interrupt cell, polled by the flip loop. Private by default so a
+    # standalone walk behaves exactly as before; a race arm swaps in the
+    # shared cell so a win by any other arm stops this one immediately
+    # rather than at the end of its flip budget (see wassat_sls_arm_body).
+    @stop = i64[4]
+
+  # Share an interrupt cell with a race. Cell 0 nonzero means "somebody else
+  # answered, stop now"; the walker never writes it.
+  -> set_stop_cell(cell)
+    @stop = cell
+    0
 
   # One full search from a fresh seeded assignment. Deterministic per seed.
   # Returns {"sat", "model", "flips", "restarts", "best_unsat", "seed"}.
@@ -208,7 +219,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     @st[11] = 0
     wassat_sls_run(@fla, @fcs, @fcl, @och, @ocn, @ocv, @asg, @satc, @crit,
                    @wght, @score, @ccf, @lastf, @ulist, @upos, @gstk, @gin,
-                   @bag, @wtr, @st)
+                   @bag, @wtr, @st, @stop)
     0
 
   # Build the flat structures directly from a CDCL solver's clause arena:
@@ -301,7 +312,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 #   st[4] flips   st[5] max flips  st[6] rng state     st[7] best unsat
 #   st[8] total weight             st[9] 1 = model found
 #   st[10] flip-trail size         st[11] flip trail overflowed
--> wassat_sls_run(fla, fcs, fcl, och, ocn, ocv, asg, satc, crit, wght, score, ccf, lastf, ulist, upos, gstk, gin, bag, wtr, st) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_sls_run(fla, fcs, fcl, och, ocn, ocv, asg, satc, crit, wght, score, ccf, lastf, ulist, upos, gstk, gin, bag, wtr, st, stp) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   nv = st[0]
   ncl = st[1]
   ucount = st[2]
@@ -328,7 +339,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     bag[vb] = asg[vb]
     vb += 1
 
-  while ucount > 0 && step < maxflips
+  while ucount > 0 && step < maxflips && stp[0] == 0
     # ---- pick: best configuration-changed positive-score variable ---------
     flip = 0
     bestscore = 0

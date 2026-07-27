@@ -432,6 +432,51 @@ WASSAT_ARM_SLS = 2             # local search, models only
   s.set_stop_cell(stop)
   s.lucky_shared(res, base)
 
+# ---- SLS arm ------------------------------------------------------------------
+#
+# Local search as a RACER on the raw path. It was previously a serial burst in
+# wassat.w gated on `art["clauses"].size` in 2000..50000 — and on the raw path
+# that gate could never pass, because wassat_raw_artifact returns
+# `"clauses": []` and carries flat arrays instead. Since raw_kernel? is true
+# above 5000 clauses the two windows overlap, so the burst was structurally
+# unreachable exactly where it was written to fire (`c prof cli.sls_burst 0ms`
+# on every raw run). Measured cost of that: n320p5q2_n 0.07s of walking against
+# 25.06s of racing, n384p5q2_vh 0.47s against 58.67s, and DivS_568_11,
+# DivS_862_11 and ntil-90d-33 solved in 2.3s/3.6s/23.0s where the race does not
+# finish at all.
+#
+# An arm rather than a wider window, for the reason preprocessing is an arm: a
+# serial burst that misses is wasted critical path, so it has to be gated on a
+# guess about whether it will hit, and there is no such guess. As a racer a
+# miss costs a core and nothing else, and the clause-count window disappears.
+# Two of those rows are 200k and 553k clauses, far outside the window that was
+# there.
+#
+# Builds inside the thread, exactly like wassat_lucky_arm_body: construction
+# normalises the clause list, which is real work that does not belong on the
+# critical path.
+#
+# MODEL ONLY — local search cannot refute, so this arm never writes -1. Its
+# model is in the ORIGINAL formula's variable space (it walks formula's own
+# clauses, not a rendering), which is the same space the raw arms answer in,
+# so the coordinator treats an SLS win exactly like a raw win.
+-> wassat_sls_arm_body(nv, formula, res, base, stop, flips, seed)
+  s = WassatSls.new(formula["nvars"], formula["clauses"])
+  s.set_stop_cell(stop)
+  r = s.solve(flips, seed)
+  if r["sat"]
+    m = r["model"]
+    v = 1
+    while v <= nv
+      res[base + v] = m[v - 1] > 0 ? 1 : 0
+      v += 1
+    res[base + nv + 4] = r["flips"]
+    res[base] = 1
+    # first decisive answer raises the stop flag for every other arm
+    stop[1] = 1
+    stop[0] = 1
+  0
+
 # The bounded CDCL scout, as an arm. It is the same search the coordinator used
 # to run inline: its own solver over the same artifact, stopped by conflict cap
 # (and, off the raw path, by wall clock). It runs beside the lucky arm so that
@@ -456,6 +501,8 @@ WASSAT_ARM_SLS = 2             # local search, models only
     rem = cap - spr["conflicts"]
     slice = rem < 512 ? rem : 512
     spr = s.solve_budget(slice)
+  # Publish the answer to the co-running arms -- the lucky arm was short enough
+  # that this never mattered, the SLS arm is not.
   if spr["status"] == 1 || spr["status"] == 0 - 1
     stop[1] = spr["status"]
     stop[0] = 1
@@ -484,10 +531,11 @@ WASSAT_ARM_SLS = 2             # local search, models only
   # another large allocation.
   matrix_threads = threads
   threads += 1 if incumbent != nil
-  # Capacity for the raw arms plus the two preprocessed renderings, allocated
+  # Capacity for the raw arms, the two preprocessed renderings and the SLS
+  # arm (slot threads+2, always reserved so indices never move), allocated
   # once: `res` is addressed by arm index and must not move after an arm has
   # a pointer into it.
-  cap = threads + 2
+  cap = threads + 3
   stop = i64[4]
   res = i64[cap * (nv + 8)]
   tel = i64[cap * WASSAT_TEL_STRIDE]
@@ -545,7 +593,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
   { "nv": nv, "solvers": solvers, "res": res, "stop": stop, "threads": threads,
     "cap": cap, "pre": [], "formula": formula, "tel": tel, "cfgs": cfgs,
     "art": art, "ring": ring, "ring_cap": ring_cap, "ring_maxlen": ring_maxlen,
-    "credit": credit, "offsets": offsets }
+    "credit": credit, "offsets": offsets, "sls": [] }
 
 # ---- arm configuration as data ------------------------------------------------
 #
@@ -612,6 +660,12 @@ WASSAT_TEL_STRIDE = 8
   s.simplify_raw_mode(0) if cfgs[b + 4] == 1
   s.simplify_raw_mode(1) if cfgs[b + 4] == 2
   s.simplify_raw if cfgs[b + 4] == 0 && forced
+  0
+
+# Register the SLS arm. Occupies the fixed slot threads+2 so it never collides
+# with a preprocessing arm, whatever pre_arms turns out to be.
+-> wassat_race_add_sls(race, flips, seed)
+  race["sls"].push({ "flips": flips, "seed": seed })
   0
 
 # Register a PREPROCESSING arm: its own preprocessor (never shared — two
@@ -888,6 +942,13 @@ WASSAT_AXIS_SLOTS = 10
   cap = race["cap"]
   offsets = race["offsets"]
   total = threads + pre.size
+  # The SLS arm sits at a FIXED slot past both preprocessing slots, so its
+  # index does not move with pre_arms. It is deliberately outside `total`:
+  # `total` bounds the scoring/reallocation machinery, and a model-only arm
+  # has no conflict telemetry to score and nothing to reallocate to.
+  sls = race["sls"]
+  sls_idx = threads + 2
+  sls_base = sls_idx * (nv + 8)
   round_ms = wassat_race_round_ms
   trace = wassat_race_trace?
   # Reallocation needs somebody to reallocate: with one raw arm there is no
@@ -948,6 +1009,11 @@ WASSAT_AXIS_SLOTS = 10
         pre_round = round
         handles.push(Thread.new -> wassat_pre_arm_body(pp, formula, nv, res, base, heavy, stop, out, pre_slice, tel, tbase, pre_round))
       p += 1
+    if round == 0 && sls.size > 0
+      spec = sls[0]
+      sflips = spec["flips"]
+      sseed = spec["seed"]
+      handles.push(Thread.new -> wassat_sls_arm_body(nv, formula, res, sls_base, stop, sflips, sseed))
     handles.each -> (h)
       z = h.join
     # ---- barrier: every arm is stopped, the coordinator may dispatch again --
@@ -964,6 +1030,7 @@ WASSAT_AXIS_SLOTS = 10
         st = res[a * (nv + 8)]
         decided = 1 if st == 1 || st == 0 - 1
         a += 1
+      decided = 1 if sls.size > 0 && res[sls_base] == 1
       if decided == 0
         # Score the round every arm just finished, and retire the arms that
         # cannot continue: retired by the solver, stuck (no conflict advanced,
@@ -1091,6 +1158,9 @@ WASSAT_AXIS_SLOTS = 10
     ms = res[base + nv + 5] - res[base + nv + 6]
     wassat_prof_note("race.arm[a] [kind] status=[res[base]] conflicts=[res[base + nv + 4]] ms=[ms]")
     a += 1
+  if sls.size > 0
+    ms = res[sls_base + nv + 5] - res[sls_base + nv + 6]
+    wassat_prof_note("race.arm[sls_idx] sls status=[res[sls_base]] flips=[res[sls_base + nv + 4]]")
   status = 0
   winner = -1
   a = 0
@@ -1105,6 +1175,11 @@ WASSAT_AXIS_SLOTS = 10
         status = 1
         winner = a
       a += 1
+  # A model-only arm cannot beat a refutation, so it is consulted last and
+  # only when nothing decisive was found.
+  if status == 0 && sls.size > 0 && res[sls_base] == 1
+    status = 1
+    winner = sls_idx
   model = []
   conflicts = 0
   if winner >= 0
@@ -1120,7 +1195,8 @@ WASSAT_AXIS_SLOTS = 10
   # rendering won (-1 = the raw one). Getting this wrong is caught by the
   # model check against the original formula, never passed off as an answer.
   { "status": status, "model": model, "winner": winner, "conflicts": conflicts,
-    "pre_index": winner >= threads ? winner - threads : 0 - 1 }
+    "pre_index": (winner >= threads && winner != sls_idx) ? winner - threads : 0 - 1,
+    "sls_won": winner == sls_idx }
 
 -> wassat_run_fast_portfolio(input, threads, share, gpu)
   cnf_text = read_file(input)

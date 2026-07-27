@@ -461,7 +461,10 @@ WASSAT_ARM_SLS = 2             # local search, models only
 # clauses, not a rendering), which is the same space the raw arms answer in,
 # so the coordinator treats an SLS win exactly like a raw win.
 -> wassat_sls_arm_body(nv, formula, res, base, stop, flips, seed)
-  s = WassatSls.new(formula["nvars"], formula["clauses"])
+  # The stop cell reaches the CONSTRUCTOR too: normalising a multi-million-
+  # clause formula takes seconds of boxed work, and the join must never wait
+  # on an arm whose race is already decided.
+  s = WassatSls.new(formula["nvars"], formula["clauses"], stop)
   s.set_stop_cell(stop)
   r = s.solve(flips, seed)
   if r["sat"]

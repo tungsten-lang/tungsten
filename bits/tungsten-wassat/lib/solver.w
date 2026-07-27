@@ -1493,7 +1493,7 @@ WASSAT_PROOF_DRAT = 2
   # Thread.new, and worker threads must not allocate (see enable_fixed_caps).
   -> prepare_walk
     return 0 unless @use_walk && @nvars > 0 && @ncl > 0
-    w = WassatSls.new(@nvars, [])
+    w = WassatSls.new(@nvars, [], nil)
     w.alloc_arena(@cmeta, @alive, @clbd, @ncl)
     @walker = w
     0

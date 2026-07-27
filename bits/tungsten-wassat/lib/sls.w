@@ -30,25 +30,46 @@
 WASSAT_SLS_WEIGHT_CAP_MULT = 16
 
 + WassatSls
-  -> new(@nvars, @input_clauses)
+  # `stop` is the race's interrupt cell, honoured DURING CONSTRUCTION. The
+  # normalisation walk is O(total literals) of boxed work -- on a 10M-clause
+  # formula it runs for seconds, and a race arm that constructs its solver
+  # inside its thread would otherwise hold the join hostage long after some
+  # other arm has answered (measured: lucky wins Large-result_b23 in ~0.4s and
+  # the join then waited 5.3s on this constructor). An aborted intake marks
+  # the walker unusable (@aborted); solve returns "no model" immediately.
+  -> new(@nvars, @input_clauses, stop)
     nv = @nvars
     @impossible = false
+    @aborted = false
     # Local search owes no proof obligations, so clauses are normalised at
     # intake: duplicate literals collapse (they would double-count in the
     # true-occurrence bookkeeping and can corrupt the critical-variable
     # scan) and tautologies drop (always satisfied, pure noise here).
+    # .each rather than subscripting, deliberately: worker threads may only
+    # iterate a boxed array through the .each IC -- indexing it concurrently
+    # from a thread SIGBUSes (the subscript inline cache is not tear-safe the
+    # way the iteration path is; measured on ntil-90d-33, instant crash). On
+    # abort the walk still touches the remaining clauses, but with an empty
+    # body -- the poll costs one flag check per clause.
     @work = []
+    cnt = 0
     @input_clauses.each -> (c)
-      @impossible = true if c.size == 0
-      uniq = []
-      taut = false
-      c.each -> (l)
-        dup = false
-        uniq.each -> (u)
-          dup = true if u == l
-          taut = true if u == 0 - l
-        uniq.push(l) unless dup
-      @work.push(uniq) unless taut
+      cnt += 1
+      unless @aborted
+        if (cnt & 4095) == 0 && stop != nil
+          @aborted = true if stop[0] != 0
+        unless @aborted
+          @impossible = true if c.size == 0
+          uniq = []
+          taut = false
+          c.each -> (l)
+            dup = false
+            uniq.each -> (u)
+              dup = true if u == l
+              taut = true if u == 0 - l
+            uniq.push(l) unless dup
+          @work.push(uniq) unless taut
+    @work = [] if @aborted
     total = 0
     @work.each -> (c)
       total += c.size
@@ -112,7 +133,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   # One full search from a fresh seeded assignment. Deterministic per seed.
   # Returns {"sat", "model", "flips", "restarts", "best_unsat", "seed"}.
   -> solve(max_flips, seed)
-    if @impossible
+    if @impossible || @aborted
       return { "sat": false, "model": [], "flips": 0, "restarts": 0,
                "best_unsat": 1, "seed": seed }
 
@@ -711,5 +732,5 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 
 # Library entry: parse-level formula in, model or nothing out. Never UNSAT.
 -> wassat_sls_solve(formula, max_flips, seed)
-  s = WassatSls.new(formula["nvars"], formula["clauses"])
+  s = WassatSls.new(formula["nvars"], formula["clauses"], nil)
   s.solve(max_flips, seed)

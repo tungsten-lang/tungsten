@@ -266,6 +266,27 @@ use support
     self.check("gradient boost persists", gbc_back.predict_proba(gbcx).to_s, gbc.predict_proba(gbcx).to_s)
     self.check("gradient boost nil one class", GradientBoostingClassifier.new(2).fit([[0], [1]], [:a, :a]) == nil, true)
 
+    # --- SVC: deterministic soft-margin linear/RBF/poly kernels ---
+    svm = SVC.new(1, :linear)
+    self.check("svc fit", svm.fit([[0 - 1], [1]], [:left, :right]) != nil, true)
+    self.check("svc classes", svm.classes.join(","), "left,right")
+    self.check("svc support", svm.support_indices.join(","), "0,1")
+    self.check("svc dual", svm.dual_coef[0], "\[-0.5, 0.5\]")
+    self.check("svc margin", svm.decision_function([[0 - 1], [1]]), "\[-1, 1\]")
+    svx = [[0 - 1, 0 - 1], [0 - 1, 1], [1, 0 - 1], [1, 1]]
+    svy = [:same, :different, :different, :same]
+    svr = SVC.new(10, :rbf, 1)
+    svr.fit(svx, svy)
+    self.check("svc rbf xor", svr.predict(svx).join(","), svy.join(","))
+    self.check("svc rbf score", svr.score(svx, svy), 1)
+    svm_multi = SVC.new(2, :linear)
+    svm_multi.fit(gbmx, gbmy)
+    self.check("svc multiclass pairs", svm_multi.estimators.size, 3)
+    self.check("svc multiclass predict", svm_multi.predict(gbmx).join(","), gbmy.join(","))
+    svm_back = Persist.loads(Persist.dumps(svr))
+    self.check("svc persists", svm_back.decision_function(svx), svr.decision_function(svx))
+    self.check("svc nil one class", SVC.new.fit([[0], [1]], [:a, :a]) == nil, true)
+
     # --- GaussianNB (generative: closed-form Gaussian naive Bayes) ---
     # Two classes of two rows: means [2,3] / [12,13], population variances
     # all 1, priors 0.5. epsilon = 1e-9 * 26 (26 = the largest column

@@ -10,8 +10,9 @@
 # regression under cross-validation, multiclass classification with
 # stratification, mixed numeric/categorical preprocessing, distance-weighted
 # nearest neighbours, binary/multiclass gradient boosting, model-agnostic
-# permutation importance, cross-fitted probability calibration around a
-# preprocessing Pipeline, and unsupervised cluster-quality evaluation.
+# permutation importance, linear/RBF support-vector classification,
+# cross-fitted probability calibration around a preprocessing Pipeline,
+# and unsupervised cluster-quality evaluation.
 
 use koala
 
@@ -40,6 +41,17 @@ lines.push("xor boosted accuracy " + boosted_xor_score.to_s)
 ok = false if raw_score.to_s != "0.5"
 ok = false if poly_score.to_s != "1"
 ok = false if boosted_xor_score.to_s != "1"
+linear_svc = SVC.new(10, :linear, 1)
+rbf_svc = SVC.new(10, :rbf, 1)
+linear_svc.fit(xor_x, xor_y)
+rbf_svc.fit(xor_x, xor_y)
+linear_svc_score = linear_svc.score(xor_x, xor_y)
+rbf_svc_score = rbf_svc.score(xor_x, xor_y)
+lines.push("xor SVC linear/RBF accuracy " + linear_svc_score.to_s + "/" + rbf_svc_score.to_s)
+lines.push("xor SVC support vectors " + rbf_svc.support_vectors.size.to_s)
+ok = false if linear_svc_score.to_s != "0.5"
+ok = false if rbf_svc_score.to_s != "1"
+ok = false if rbf_svc.support_vectors.size != 4
 
 # 2. Exact quadratic regression: every fold fits y = 3x^2 + 2x + 1
 # through a degree-2 expansion and gets R² 1 on held-out rows.
@@ -79,6 +91,11 @@ lines.push("multiclass GradientBoosting CV " + class_boost_scores.to_s)
 lines.push("multiclass GradientBoosting log loss " + class_boost.log_loss(class_x, class_y).to_s)
 ok = false if class_boost_scores.to_s != "\[1, 1, 1\]"
 ok = false if class_boost.log_loss(class_x, class_y) > 1.to_f / 10.to_f
+class_svc_scores = CrossValidation.cross_val_score(
+  SVC.new(2, :linear), class_x, class_y, StratifiedKFold.new(3)
+)
+lines.push("multiclass SVC CV " + class_svc_scores.to_s)
+ok = false if class_svc_scores.to_s != "\[1, 1, 1\]"
 
 # 4. A balanced three-class linear problem. Multinomial LogisticRegression
 # fits through stable softmax, cross-validates perfectly, and assigns the

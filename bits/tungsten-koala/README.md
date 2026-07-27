@@ -166,6 +166,17 @@ cal.predict_proba(x_test)             # full calibrated probability rows
 cal.predict_proba(x_test, :positive)  # one flat class column
 CalibratedClassifierCV.new(base, :isotonic, 5)
 
+# Kernel support vectors — soft-margin C-SVM, binary or one-vs-one multiclass
+svc = SVC.new(10, :rbf, :scale)     # c, kernel, gamma
+svc.fit(x_train, y_train)
+svc.predict(x_test)
+svc.decision_function(x_test)       # signed binary margins / class score rows
+svc.support_vectors                 # union of pairwise support vectors
+svc.support_indices
+SVC.new(1, :linear)                 # dot-product boundary
+SVC.new(1, :poly, :scale, 3, 1)    # gamma, degree, coef0
+CalibratedClassifierCV.new(svc, :sigmoid, 5) # cross-fitted probabilities
+
 # Classification — GaussianNB, MULTICLASS Gaussian naive Bayes (closed form)
 nb = GaussianNB.new                  # var_smoothing = 1e-9 (sklearn's default)
 nb.fit([[1, 2], [3, 4], [11, 12], [13, 14]], [0, 0, 1, 1])   # one pass, no epochs
@@ -342,7 +353,7 @@ algorithms — answers one declared interface, defined in
 | --- | --- | --- |
 | `Tunable` | `params` `with_params(overrides)` | Scaler, Imputer, Encoder, PCA (and every Estimable, which restates the pair) |
 | `Estimable` | `fitted?` `predict(x)` `supervised?` `supports_sample_weight?` `params` `with_params(overrides)` `estimator_name` | every estimator below, plus `Pipeline` |
-| `SupervisedEstimator` | `fit(x, y, sample_weight)` `score(x, y, sample_weight)` | LinearRegression, Lasso, ElasticNet, KNNClassifier, KNeighborsRegressor, LogisticRegression, GaussianNB, DecisionTreeClassifier, DecisionTreeRegressor, RandomForestClassifier, RandomForestRegressor, GradientBoostingClassifier, GradientBoostingRegressor, CalibratedClassifierCV |
+| `SupervisedEstimator` | `fit(x, y, sample_weight)` `score(x, y, sample_weight)` | LinearRegression, Lasso, ElasticNet, KNNClassifier, KNeighborsRegressor, LogisticRegression, SVC, GaussianNB, DecisionTreeClassifier, DecisionTreeRegressor, RandomForestClassifier, RandomForestRegressor, GradientBoostingClassifier, GradientBoostingRegressor, CalibratedClassifierCV |
 | `UnsupervisedEstimator` | `fit(x, sample_weight)` `score(x, sample_weight)` | KMeans, DBSCAN |
 
 `Tunable` is the hyperparameter half on its own — what a search needs and
@@ -378,7 +389,8 @@ guess.
 `params` reports only the CONSTRUCTOR knobs a search varies (`alpha`;
 `k`; `learning_rate` / `epochs`; `var_smoothing`; `n_estimators` /
 `learning_rate` / `max_depth` /
-`min_samples_split` / `min_samples_leaf` / `criterion`; `k` / `seed` /
+`min_samples_split` / `min_samples_leaf` / `criterion`; `c` / `kernel` /
+`gamma` / `degree` / `coef0` / `tol`; `k` / `seed` /
 `max_iter`) and never learned state — coefficients, centroids and the
 fitted tree stay out of the search space, before and after a fit. `with_params` **clones**: it
 returns a fresh unfitted instance with the overrides applied and leaves
@@ -462,6 +474,7 @@ shape-error convention. Nothing raises. Validation lives in one place,
 | `GaussianNB` | yes | weighted priors, means and variances (`class_counts` becomes total weight) |
 | `DecisionTreeClassifier` | yes | weighted impurity, weighted split scoring, heaviest-class leaves |
 | `DecisionTreeRegressor` | yes | weighted MSE, weighted-mean leaves |
+| `SVC` | yes | per-row soft-margin bounds `C_i = c * weight_i`; integer weights are expanded for exact duplication equivalence |
 | `KMeans` | yes | weighted centroids and weighted inertia; zero-weight rows never seed a centroid but are still labelled |
 | `KNNClassifier`, `KNeighborsRegressor` | **no** | `fit` returns nil rather than ignoring them |
 
@@ -1148,7 +1161,8 @@ misaligned, unfitted, and otherwise unusable inputs return nil.
 ## Reference ML differential
 
 `examples/reference_ml.w` is a self-checking set of deterministic
-end-to-end problems: nonlinear XOR, exact quadratic regression under CV,
+end-to-end problems: nonlinear XOR through polynomial, boosting, and RBF
+support-vector boundaries; exact quadratic regression under CV,
 three-class GaussianNB and multinomial LogisticRegression under
 stratified CV, balanced multiclass probability checks, heterogeneous
 numeric/categorical column composition, inverse-distance KNN
@@ -1159,7 +1173,7 @@ silhouette rather than its training objective.
 
 The matching `benchmarks/reference_koala.w` and
 `benchmarks/reference_sklearn.py` use identical fixtures. Against
-scikit-learn 1.9.0, all thirty numerical gates and eight capability /
+scikit-learn 1.9.0, all thirty-five numerical gates and nine capability /
 quality gates pass: raw XOR accuracy
 0.5, polynomial XOR accuracy 1, quadratic mean CV R² 1, multiclass
 GaussianNB and LogisticRegression mean CV accuracy 1, balanced-center
@@ -1177,6 +1191,11 @@ Koala matches sklearn's exact `12/19` class probability, `31/19`
 regression prediction, and duplicate-exact-match mean. Gradient boosting
 matches sklearn's XOR and multiclass log losses to the last displayed digit
 and improves quadratic R² by 0.5688 over a lone stump in both.
+Linear SVC reaches 0.5 on XOR while the RBF kernel reaches 1.0 with the
+same four support vectors in both implementations. One-vs-one linear SVC
+cross-validates the three-class fixture perfectly; on the 60-row Iris
+subset, Koala's scaled RBF SVC reaches 0.9667 mean CV accuracy against
+sklearn's 0.9833 (one held-out row apart).
 
 On that held-out calibration problem, Koala's sigmoid log loss is
 0.3533 against sklearn's 0.3463, isotonic log loss is 0.2513 against
@@ -1485,6 +1504,68 @@ accuracy tie. On the same fixtures, Koala and sklearn 1.9 produce identical
 binary XOR log loss `0.067758207545402294`; multiclass log loss differs by
 `2.9e-16`; and 60 depth-2 stages lift quadratic training R² from a stump's
 `0.43080684` to `0.99959672`, differing by `3.3e-16`.
+
+## Kernel support-vector classification
+
+`SVC` fits the standard soft-margin C-SVM dual. Its nonzero dual
+coefficients select the training rows that define the boundary, so
+prediction depends only on `support_vectors`, not the rest of the training
+set:
+
+```
+maximize  sum_i alpha_i - 1/2 sum_i,j alpha_i alpha_j y_i y_j K(x_i, x_j)
+subject to 0 <= alpha_i <= c * sample_weight_i
+           sum_i alpha_i y_i = 0
+```
+
+Koala solves each binary dual with deterministic sequential minimal
+optimization. The second coordinate is the feasible update with the largest
+error difference, with row order breaking ties; ten consecutive no-change
+passes stop the solve, while `max_iter` caps complete passes. There is no
+random fallback, so support vectors, margins, and Persist payloads are
+reproducible across the interpreter and compiler. The hand-solvable
+`x = [-1, 1]` case is pinned in the spec to alphas `[0.5, 0.5]`,
+signed dual coefficients `[-0.5, 0.5]`, intercept zero, and margins
+`[-1, 1]`.
+
+Three kernels are built in:
+
+```tungsten
+linear = SVC.new(1, :linear)
+rbf = SVC.new(10, :rbf, 1)
+poly = SVC.new(10, :poly, 1, 2, 1)
+```
+
+Constructor order is `c, kernel, gamma, degree, coef0, tol, max_iter`;
+defaults are `1, :rbf, :scale, 3, 0, 0.001, 1000`. Tungsten identifiers
+cannot begin with uppercase, so sklearn's `C` is exposed as the equivalent
+lowercase `c`, including `params` and GridSearch keys. `gamma` may be a
+positive number, `:auto` (`1 / n_features`), or `:scale`
+(`1 / (n_features * population_variance(x))`), matching sklearn. A
+zero-variance matrix falls back to gamma 1.
+
+Two classes produce one signed margin per row, positive toward
+`classes[1]`. Three or more classes fit one classifier for every pair,
+vote one-vs-one, and return sklearn-shaped per-class decision scores with
+bounded confidence tie-breaking. Learned inspection fields include
+`classes`, pairwise `estimators`, `support_vectors`, `support_indices`,
+pair-major `dual_coef`, `intercept`, `n_iter`, and resolved `gamma_value`.
+
+Raw SVC margins are intentional: probability estimates need calibration,
+not a sigmoid pasted onto in-sample scores. Wrap the estimator in
+`CalibratedClassifierCV.new(svc, :sigmoid, k)` or `:isotonic` for
+cross-fitted probabilities. Bare or calibrated SVC composes with Scaler,
+Pipeline, stratified CV, GridSearch, permutation importance, sample
+weights, and exact persistence. Integer weights expand rows internally,
+making the framework's weight-equals-duplication contract byte-identical.
+
+The reference differential makes the nonlinear gain explicit: linear SVC
+scores 0.5 on XOR and RBF SVC scores 1.0 in both Koala and sklearn, with
+four support vectors each. A scaled RBF model reaches 0.9667 five-fold CV
+accuracy on the canonical 60-row Iris subset versus sklearn's 0.9833. This
+implementation keeps a dense kernel matrix and is aimed at compact tabular
+problems; a chunked cache or external solver is the next step before
+claiming libsvm-scale throughput.
 
 ## Principal component analysis
 

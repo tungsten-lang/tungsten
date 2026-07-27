@@ -203,6 +203,7 @@
     out = RandomForestRegressor.load_state(state) if name == "RandomForestRegressor"
     out = GradientBoostingClassifier.load_state(state) if name == "GradientBoostingClassifier"
     out = GradientBoostingRegressor.load_state(state) if name == "GradientBoostingRegressor"
+    out = SVC.load_state(state) if name == "SVC"
     out = CalibratedClassifierCV.load_state(state) if name == "CalibratedClassifierCV"
     out = Scaler.load_state(state) if name == "Scaler"
     out = PCA.load_state(state) if name == "PCA"

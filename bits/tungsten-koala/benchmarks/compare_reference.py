@@ -31,6 +31,10 @@ METRIC_TOLERANCES = {
     # stable enough for a capability comparison without pretending that the
     # individual permutations are identical.
     "mixed_permutation_city": 0.10,
+    # Koala's deterministic SMO and libsvm optimize the same C-SVM dual but
+    # may stop at slightly different margins. The quality contract is held-out
+    # Iris accuracy, where one row out of 60 is the meaningful resolution.
+    "iris_svc_cv_mean": 0.02,
 }
 
 # Beyond closeness to sklearn, calibration must actually solve the problem:
@@ -66,6 +70,11 @@ QUALITY_GAINS = {
     "xor_boost_vs_linear": (
         "xor_boost_accuracy",
         "xor_raw_accuracy",
+        0.50,
+    ),
+    "xor_svc_rbf_vs_linear": (
+        "xor_svc_rbf_accuracy",
+        "xor_svc_linear_accuracy",
         0.50,
     ),
     "mixed_columns_vs_numeric_only": (

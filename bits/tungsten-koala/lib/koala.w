@@ -13,7 +13,8 @@
 # learner and the machinery forests and gradient boosting stand on;
 # RandomForestClassifier / RandomForestRegressor — parallel bagged trees;
 # GradientBoostingClassifier / GradientBoostingRegressor — sequential
-# residual/Newton trees), clustering (KMeans
+# residual/Newton trees; SVC — deterministic soft-margin linear/RBF/poly
+# kernel classification with one-vs-one multiclass margins), clustering (KMeans
 # — Lloyd's algorithm, koala's first
 # unsupervised learner), model evaluation (KFold / CrossValidation — k-fold
 # cross-validation that re-fits an estimator on each fold and averages
@@ -100,6 +101,7 @@ use gaussian_nb
 use decision_tree
 use random_forest
 use gradient_boosting
+use svc
 use scaler
 use pca
 use encoder

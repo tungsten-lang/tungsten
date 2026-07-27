@@ -14,6 +14,13 @@ xor_boost = GradientBoostingClassifier.new(20, 1.to_f / 10.to_f, 2)
 xor_boost.fit(xor_x, xor_y)
 << "xor_boost_accuracy," + xor_boost.score(xor_x, xor_y).to_s
 << "xor_boost_log_loss," + xor_boost.log_loss(xor_x, xor_y).to_s
+xor_svc_linear = SVC.new(10, :linear, 1)
+xor_svc_linear.fit(xor_x, xor_y)
+xor_svc_rbf = SVC.new(10, :rbf, 1)
+xor_svc_rbf.fit(xor_x, xor_y)
+<< "xor_svc_linear_accuracy," + xor_svc_linear.score(xor_x, xor_y).to_s
+<< "xor_svc_rbf_accuracy," + xor_svc_rbf.score(xor_x, xor_y).to_s
+<< "xor_svc_support_count," + xor_svc_rbf.support_vectors.size.to_s
 
 quad_x = [0 - 7, 0 - 6, 0 - 5, 0 - 4, 0 - 3, 0 - 2, 0 - 1, 0, 1, 2, 3, 4, 5, 6, 7]
 quad_y = []
@@ -38,6 +45,8 @@ class_boost = GradientBoostingClassifier.new(20, 1.to_f / 10.to_f, 2)
 << "multiclass_boost_cv_mean," + CrossValidation.cross_val_mean(class_boost, class_x, class_y, StratifiedKFold.new(3)).to_s
 class_boost.fit(class_x, class_y)
 << "multiclass_boost_log_loss," + class_boost.log_loss(class_x, class_y).to_s
+class_svc = SVC.new(2, :linear)
+<< "multiclass_svc_cv_mean," + CrossValidation.cross_val_mean(class_svc, class_x, class_y, StratifiedKFold.new(3)).to_s
 
 softmax_x = []
 softmax_y = []
@@ -65,9 +74,11 @@ iris_y = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1
 iris_cv = StratifiedKFold.new(5)
 iris_logreg = Pipeline.new([Scaler.new(:standard), LogisticRegression.new])
 iris_knn = Pipeline.new([Scaler.new(:standard), KNNClassifier.new(3)])
+iris_svc = Pipeline.new([Scaler.new(:standard), SVC.new(1, :rbf, :scale)])
 << "iris_logreg_cv_mean," + CrossValidation.cross_val_mean(iris_logreg, iris_x, iris_y, iris_cv).to_s
 << "iris_gaussian_nb_cv_mean," + CrossValidation.cross_val_mean(GaussianNB.new, iris_x, iris_y, iris_cv).to_s
 << "iris_knn_cv_mean," + CrossValidation.cross_val_mean(iris_knn, iris_x, iris_y, iris_cv).to_s
+<< "iris_svc_cv_mean," + CrossValidation.cross_val_mean(iris_svc, iris_x, iris_y, iris_cv).to_s
 
 # Mixed numeric/categorical classification. Age repeats once per city and
 # contains no class signal; city alone determines the label. This exercises

@@ -23,6 +23,7 @@ from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, PolynomialFeatures, StandardScaler
+from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
 
@@ -49,6 +50,11 @@ xor_boost = GradientBoostingClassifier(
 ).fit(xor_x, xor_y)
 emit("xor_boost_accuracy", xor_boost.score(xor_x, xor_y))
 emit("xor_boost_log_loss", log_loss(xor_y, xor_boost.predict_proba(xor_x)))
+xor_svc_linear = SVC(C=10, kernel="linear", gamma=1).fit(xor_x, xor_y)
+xor_svc_rbf = SVC(C=10, kernel="rbf", gamma=1).fit(xor_x, xor_y)
+emit("xor_svc_linear_accuracy", xor_svc_linear.score(xor_x, xor_y))
+emit("xor_svc_rbf_accuracy", xor_svc_rbf.score(xor_x, xor_y))
+emit("xor_svc_support_count", xor_svc_rbf.support_vectors_.shape[0])
 
 quad_x = np.arange(-7, 8, dtype=float).reshape(-1, 1)
 quad_y = 3 * quad_x[:, 0] ** 2 + 2 * quad_x[:, 0] + 1
@@ -122,6 +128,15 @@ emit(
     "multiclass_boost_log_loss",
     log_loss(class_y, class_boost.predict_proba(class_x)),
 )
+emit(
+    "multiclass_svc_cv_mean",
+    cross_val_score(
+        SVC(C=2, kernel="linear"),
+        class_x,
+        class_y,
+        cv=StratifiedKFold(3, shuffle=False),
+    ).mean(),
+)
 
 softmax_x = np.repeat(np.eye(3), 6, axis=0)
 softmax_y = np.repeat(np.array(["a", "b", "c"]), 6)
@@ -180,6 +195,20 @@ emit(
             [
                 ("scale", StandardScaler()),
                 ("model", KNeighborsClassifier(3)),
+            ]
+        ),
+        iris_x,
+        iris_y,
+        cv=iris_cv,
+    ).mean(),
+)
+emit(
+    "iris_svc_cv_mean",
+    cross_val_score(
+        Pipeline(
+            [
+                ("scale", StandardScaler()),
+                ("model", SVC(C=1, kernel="rbf", gamma="scale")),
             ]
         ),
         iris_x,

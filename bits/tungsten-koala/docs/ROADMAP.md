@@ -34,7 +34,7 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
 4. **Sparse + matmul** — core SparseMatrix facade; BLAS-backed matmul.
 5. **LinAlg** — rank-revealing QR, rank, thin SVD/Cholesky as pure follow-ons.
 6. **Estimators** — multiclass logistic, KNN regressor + distance weights,
-   feature selection, and gradient boosting shipped; SVM remains.
+   feature selection, gradient boosting, and kernel SVM shipped.
 7. **Trees / inspection** — permutation importance (shipped); Gini/MSE
    feature importances and tree export remain.
 8. **Calibration** — `CalibratedClassifierCV` (Platt / isotonic). **Shipped.**
@@ -91,8 +91,14 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
   persistence, and deterministic interpreted/compiled execution. Integer
   weights match row duplication, and one unshrunk regression stage is
   exactly its CART tree.
-- A live scikit-learn 1.9.0 differential now covers thirty numerical
-  outcomes, three calibration-quality ratios, and five capability gains
+- `SVC` now solves the soft-margin C-SVM dual with deterministic SMO,
+  linear/RBF/polynomial kernels, sklearn-compatible gamma rules,
+  one-vs-one multiclass decision scores, sample weights, Pipeline/CV/
+  GridSearch/calibration, inspection metadata, and exact persistence.
+  Linear and RBF XOR accuracy plus support count match sklearn exactly;
+  scaled RBF Iris CV is 0.9667 versus sklearn's 0.9833.
+- A live scikit-learn 1.9.0 differential now covers thirty-five numerical
+  outcomes, three calibration-quality ratios, and six capability gains
   across
   nonlinear classification, polynomial regression, multiclass
   classification/probability scoring, a canonical Iris subset,
@@ -103,18 +109,20 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
   permutation importance is age/city 0/0.422 in Koala versus 0/0.439 in
   sklearn. Boosted quadratic R² is 0.999597 versus a stump's 0.430807, and
   binary/multiclass boosting log loss matches sklearn to at least fifteen
-  digits. On held-out Iris, Koala
+  digits. RBF SVC lifts XOR accuracy from a linear model's 0.5 to 1.0 in
+  both implementations. On held-out Iris, Koala
   sigmoid/isotonic log loss is 0.353/0.251 against sklearn's 0.346/0.258;
   both cut the raw tree loss by over 86%.
-- 19 interpreted and compiled spec suites cover 744 examples; the
-  framework-free smoke test adds 431 checks on each engine.
+- 20 interpreted and compiled spec suites cover 766 examples; the
+  framework-free smoke test adds 442 checks on each engine.
 
 ## Highest-leverage next tranche
 
 1. Broader sklearn differentials on standard tabular datasets plus
    wall-clock and memory baselines.
-2. SVM classification and probability calibration.
-3. Tree feature importances and export.
+2. Tree feature importances and export.
+3. SVC class-weight convenience plus a bounded/chunked kernel cache for
+   larger training sets.
 4. A persistable named-operation alternative to arbitrary-closure
    `FunctionTransformer`.
 

@@ -224,6 +224,7 @@ compiled_specs=(
   spec/compiler/small_array_stack_zero_init_spec.w
   spec/compiler/small_array_generic_spec.w
   spec/compiler/masked_index_loop_spec.w
+  spec/compiler/loop_version_array_spec.w
   spec/compiler/u64_raw_multiply_spec.w
   spec/compiler/conditional_reassign_param_spec.w
   spec/compiler/begin_rescue_value_spec.w
@@ -263,6 +264,7 @@ compiled_specs=(
   spec/numeric/interval_spec.w
   spec/numeric/matrix_spec.w
   spec/numeric/operator_overload_spec.w
+  spec/numeric/rational_spec.w
   spec/numeric/vector_spec.w
 )
 
@@ -279,6 +281,7 @@ interpreter_specs=(
   spec/interpreter/int_to_i_native_spec.w
   spec/interpreter/ipv4_octets_native_spec.w
   spec/interpreter/mmap_size_relaxed_spec.w
+  spec/numeric/rational_spec.w
   spec/interpreter/slab_decl_spec.w
   spec/interpreter/string_buffer_size_revisit_spec.w
   spec/interpreter/string_empty_native_spec.w

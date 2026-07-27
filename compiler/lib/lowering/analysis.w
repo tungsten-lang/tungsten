@@ -1361,3 +1361,222 @@
       return true
     return masked_subtree_refs?(node.right, assigned)
   false
+
+# ── Loop versioning for untyped-array element loops ────────────────────
+# `while i < a.size` / `while i < n` bodies whose array accesses go through
+# the polymorphic __w_array_*_fast helpers keep a per-iteration bounds check
+# whose failure edge CALLS the runtime — a may-write call inside the loop, so
+# LLVM can neither hoist the header loads nor vectorize, no matter what
+# metadata is attached (both annotation audits converged on this; a hoisted
+# one-time guard measured 4.8x, equal to the typed path). lower_while
+# versions qualifying loops: a runtime guard (receiver is a live polymorphic
+# WArray, counter starts >= 0, bound <= size for var bounds) selects between
+# the loop body lowered with the receiver retyped :typed_array_w64 — the
+# existing UNCHECKED inline path, byte-compatible since poly slots hold
+# boxed WValues — and the original checked lowering. Locals live in shared
+# alloca slots, so the two copies merge with no phi plumbing.
+#
+# Qualification is deliberately tight (soundness first, coverage later):
+#   condition   i < a.size  (a statically :array)  |  i < n (int var,
+#               never assigned in the body — loop-invariant bound)
+#   index       every a[...] index is EXACTLY the var i
+#   counter     i int-typed; body assigns it only via i = i + <pos int lit>
+#               or i += <pos int lit> (monotone non-decreasing; the guard
+#               adds i >= 0 at entry, so accesses stay in [0, size))
+#   body        no calls of any kind except []/[]=/size on locals (element
+#               get/set never resizes; anything else — push, method calls,
+#               bare calls, string interpolation — could grow/shrink/alias
+#               a and invalidate the hoisted guard), no bare reference to a,
+#               no blocks/closures, no nested loops (they version themselves).
+# Returns {arr:, ivar:, bound_kind: :size | :var, bound_name:} or nil.
+-> loop_version_spec(node, var_types)
+  cond = node.condition
+  if cond == nil || !is_ast_node?(cond) || ast_kind(cond) != :binary_op
+    return nil
+  if cond.op != :LT
+    return nil
+  lhs = cond.left
+  if lhs == nil || !is_ast_node?(lhs) || ast_kind(lhs) != :var
+    return nil
+  ivar = lhs.name
+  ivt = var_types[ivar]
+  if !(ivt == :int || ivt == :i64 || ivt == :raw_int || ivt == :raw_i64)
+    return nil
+  rhs = cond.right
+  if rhs == nil || !is_ast_node?(rhs)
+    return nil
+  arr = nil
+  bound_kind = nil
+  bound_name = nil
+  if ast_kind(rhs) == :call && rhs.name == "size" && (rhs.args == nil || rhs.args.size() == 0)
+    rrecv = rhs.receiver
+    if rrecv == nil || !is_ast_node?(rrecv) || ast_kind(rrecv) != :var
+      return nil
+    if var_types[rrecv.name] != :array
+      return nil
+    arr = rrecv.name
+    bound_kind = :size
+  elsif ast_kind(rhs) == :var
+    bvt = var_types[rhs.name]
+    if !(bvt == :int || bvt == :i64 || bvt == :raw_int || bvt == :raw_i64)
+      return nil
+    bound_kind = :var
+    bound_name = rhs.name
+  else
+    return nil
+  st = {ok: true, arr: arr, ivar: ivar, bound_name: bound_name, i_stepped: false}
+  lv_walk_body(node.body, st, var_types)
+  if st[:ok] != true
+    return nil
+  # var-bound loops must access SOME array to be worth versioning; the walk
+  # fills st[:arr] with the single a[i]-accessed :array var it finds.
+  if st[:arr] == nil
+    return nil
+  {arr: st[:arr], ivar: st[:ivar], bound_kind: bound_kind, bound_name: bound_name}
+
+-> lv_walk_body(nodes, st, var_types)
+  if nodes == nil || st[:ok] != true
+    return nil
+  i = 0
+  while i < nodes.size()
+    lv_walk_stmt(nodes[i], st, var_types)
+    i += 1
+  nil
+
+-> lv_walk_stmt(node, st, var_types)
+  if node == nil || st[:ok] != true
+    return nil
+  if !is_ast_node?(node)
+    return nil
+  k = ast_kind(node)
+  if k == :assign
+    tgt = node.target
+    if tgt != nil && is_ast_node?(tgt) && ast_kind(tgt) == :var
+      tname = tgt.name
+      if tname == st[:arr] || tname == st[:bound_name]
+        st[:ok] = false
+        return nil
+      if tname == st[:ivar]
+        # counter: only i = i + <positive int literal>
+        v = node.value
+        if v == nil || !is_ast_node?(v) || ast_kind(v) != :binary_op || v.op != :PLUS
+          st[:ok] = false
+          return nil
+        if !(is_ast_node?(v.left) && ast_kind(v.left) == :var && v.left.name == st[:ivar])
+          st[:ok] = false
+          return nil
+        if !(is_ast_node?(v.right) && ast_kind(v.right) == :int && v.right.value > 0)
+          st[:ok] = false
+          return nil
+        return nil
+      lv_walk_expr(node.value, st, var_types)
+      return nil
+    st[:ok] = false
+    return nil
+  if k == :compound_assign
+    tgt = node.target
+    if tgt != nil && is_ast_node?(tgt) && ast_kind(tgt) == :var
+      tname = tgt.name
+      if tname == st[:arr] || tname == st[:bound_name]
+        st[:ok] = false
+        return nil
+      if tname == st[:ivar]
+        if node.op != :PLUS || !(is_ast_node?(node.value) && ast_kind(node.value) == :int && node.value.value > 0)
+          st[:ok] = false
+        return nil
+      lv_walk_expr(node.value, st, var_types)
+      return nil
+    st[:ok] = false
+    return nil
+  if k == :if
+    lv_walk_expr(node.condition, st, var_types)
+    lv_walk_body(node.then_body, st, var_types)
+    lv_walk_body(node.else_body, st, var_types)
+    ec = node.elsif_clauses
+    if ec != nil
+      j = 0
+      while j < ec.size()
+        clause = ec[j]
+        lv_walk_expr(clause[0], st, var_types)
+        lv_walk_body(clause[1], st, var_types)
+        j += 1
+    return nil
+  if k == :break || k == :next
+    return nil
+  # everything else must qualify as a pure expression
+  lv_walk_expr(node, st, var_types)
+  nil
+
+-> lv_walk_expr(node, st, var_types)
+  if node == nil || st[:ok] != true
+    return nil
+  if !is_ast_node?(node)
+    if type(node) == "Array"
+      i = 0
+      while i < node.size()
+        lv_walk_expr(node[i], st, var_types)
+        i += 1
+    return nil
+  k = ast_kind(node)
+  if k == :var
+    # bare reference to the versioned array would let it escape/alias
+    if node.name == st[:arr]
+      st[:ok] = false
+    return nil
+  if k == :int || k == :float || k == :bool || k == :nil || k == :string || k == :symbol
+    return nil
+  if k == :binary_op
+    lv_walk_expr(node.left, st, var_types)
+    lv_walk_expr(node.right, st, var_types)
+    return nil
+  if k == :unary_op
+    lv_walk_expr(node.operand, st, var_types)
+    return nil
+  if k == :call
+    recv = node.receiver
+    nm = node.name
+    if recv != nil && is_ast_node?(recv) && ast_kind(recv) == :var
+      rname = recv.name
+      if nm == "[]" || nm == "\[]"
+        if rname == st[:arr] || (st[:arr] == nil && var_types[rname] == :array)
+          # candidate array access: index must be exactly the loop var
+          args = node.args
+          if args == nil || args.size() != 1 || !(is_ast_node?(args[0]) && ast_kind(args[0]) == :var && args[0].name == st[:ivar])
+            st[:ok] = false
+            return nil
+          if st[:arr] == nil
+            if rname == st[:bound_name] || rname == st[:ivar]
+              st[:ok] = false
+              return nil
+            st[:arr] = rname
+          return nil
+        # element read on some OTHER var: safe (never resizes), args checked
+        lv_walk_expr(node.args, st, var_types)
+        return nil
+      if nm == "[]=" || nm == "\[]="
+        args = node.args
+        if args == nil || args.size() != 2
+          st[:ok] = false
+          return nil
+        if rname == st[:arr] || (st[:arr] == nil && var_types[rname] == :array)
+          if !(is_ast_node?(args[0]) && ast_kind(args[0]) == :var && args[0].name == st[:ivar])
+            st[:ok] = false
+            return nil
+          if st[:arr] == nil
+            if rname == st[:bound_name] || rname == st[:ivar]
+              st[:ok] = false
+              return nil
+            st[:arr] = rname
+          lv_walk_expr(args[1], st, var_types)
+          return nil
+        # element write on another var: in-place, never resizes — safe
+        lv_walk_expr(args[0], st, var_types)
+        lv_walk_expr(args[1], st, var_types)
+        return nil
+      if nm == "size" && (node.args == nil || node.args.size() == 0)
+        return nil
+    st[:ok] = false
+    return nil
+  # anything unrecognized (blocks, interpolation, nested loops, case, …)
+  st[:ok] = false
+  nil

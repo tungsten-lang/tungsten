@@ -355,6 +355,20 @@
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_chan_new", args: [size_reg]})
       return typed_value(:i64, temp)
 
+    if recv_name == "Rational" && method_name == "new" && node.args.size() >= 1 && node.args.size() <= 2
+      numerator_val = lower_expression(ctx, node.args[0])
+      numerator_reg = ensure_i64_value(wfn, numerator_val)
+      denominator_reg = nil
+      if node.args.size() == 2
+        denominator_val = lower_expression(ctx, node.args[1])
+        denominator_reg = ensure_i64_value(wfn, denominator_val)
+      else
+        denominator_reg = next_temp(wfn)
+        emit_instruction(wfn, {op: :call_direct_i64, temp: denominator_reg, name: "w_int", args: ["1"]})
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_rational_new", args: [numerator_reg, denominator_reg]})
+      return typed_value(:i64, temp)
+
     # Phase 3: BigArray.new(ebits, capacity) — i64-indexed array tier.
     # ebits is symbol (:u8, :i32, :f32, :w64, :bf16, …) or raw int (16/32/64/-32/…).
     if recv_name == "BigArray" && method_name == "new" && node.args.size() == 2
@@ -1514,6 +1528,15 @@
       val_expr = lower_expression(ctx, node.args[1])
       if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16)
         val_reg = raw_float_bits_i64(wfn, val_expr, recv_type)
+      elsif recv_type == :typed_array_w64
+        # w64 slots hold fully-tagged WValues (reads hand the loaded bits
+        # straight back as :i64). A raw machine int stored verbatim would be
+        # read back as a garbage-tagged box, so ENFORCE the contract: box
+        # raw values at the store boundary (ensure_i64_value — inline nanbox
+        # for i48-safe :raw_int, w_int/w_u64 bridges for full-width raws,
+        # identity for already-boxed :i64). This is also what makes the
+        # loop-versioned fast arm (:array retyped w64) store-exact.
+        val_reg = ensure_i64_value(wfn, val_expr)
       elsif val_expr[:type] in (:raw_int :raw_i64 :raw_u64)
         # Raw machine ints pass through to the typed store directly.
         # `:raw_u64` was previously missing here, which made u64[] stores

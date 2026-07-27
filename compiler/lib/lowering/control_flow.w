@@ -387,6 +387,97 @@
     nil
 
 -> lower_while(ctx, node)
+  static_cond = static_bool_value(node.condition)
+  if static_cond == :false
+    return nil
+  # Loop versioning: a qualifying untyped-array element loop (see
+  # loop_version_spec) lowers TWICE behind a one-time runtime guard — once
+  # with the array retyped :typed_array_w64 (the existing unchecked inline
+  # path; poly slots hold boxed WValues, so it is representation-exact) and
+  # once as the original checked loop. The per-iteration bounds check whose
+  # failure edge calls the runtime is what blocks LICM/vectorization on
+  # these loops (measured 4.8x, matching the typed path). Locals live in
+  # shared alloca slots, so no merge plumbing is needed.
+  if static_cond == nil
+    ver = loop_version_spec(node, ctx[:var_types])
+    if ver != nil
+      return lower_while_versioned(ctx, node, ver)
+  lower_while_core(ctx, node)
+
+# Copy a bindings map (nil-safe) — the versioned arms must not leak
+# registers defined inside one arm into the other's lowering.
+-> lv_bindings_copy(b)
+  if b == nil
+    return nil
+  out = {}
+  keys = b.keys()
+  i = 0
+  while i < keys.size()
+    out[keys[i]] = b[keys[i]]
+    i += 1
+  out
+
+# Current value of an int-typed var as a RAW i64 register.
+-> lv_raw_int_value(ctx, wfn, name)
+  tv = lower_expression(ctx, Tungsten:AST:Var.new(name))
+  vt = ctx[:var_types][name]
+  if is_machine_int_type(vt) || vt == :raw_int || vt == :raw_i64 || tv[:type] in (:raw_int :raw_i64 :raw_u64)
+    return tv[:value]
+  reg = ensure_i64_value(wfn, tv)
+  nanunbox_int_emit(wfn, reg)
+
+-> lower_while_versioned(ctx, node, ver)
+  wfn = ctx[:func]
+  arr_name = ver[:arr]
+  arr_tv = lower_expression(ctx, Tungsten:AST:Var.new(arr_name))
+  arr_reg = ensure_i64_value(wfn, arr_tv)
+  chk_label = next_label(wfn, "lv.chk")
+  fast_label = next_label(wfn, "lv.fast")
+  slow_label = next_label(wfn, "lv.slow")
+  done_label = next_label(wfn, "lv.done")
+  # Guard 1: receiver is a live polymorphic WArray (obj space, subtag 10,
+  # ebits 65) — the exact precondition of the unchecked inline path.
+  g = next_temp(wfn)
+  emit_instruction(wfn, {op: :poly_array_guard, temp: g, value: arr_reg})
+  emit_instruction(wfn, {op: :cond_br, cond: g, then_label: chk_label, else_label: slow_label})
+  start_block(wfn, chk_label)
+  # Guard 2: counter starts >= 0 (monotone +step keeps every index in
+  # bounds against the loop condition / the checked bound below).
+  i0 = lv_raw_int_value(ctx, wfn, ver[:ivar])
+  c1 = next_temp(wfn)
+  emit_instruction(wfn, {op: :icmp_i64, temp: c1, pred: "sge", lhs: i0, rhs: "0"})
+  if ver[:bound_kind] == :var
+    chk2_label = next_label(wfn, "lv.chk2")
+    emit_instruction(wfn, {op: :cond_br, cond: c1, then_label: chk2_label, else_label: slow_label})
+    start_block(wfn, chk2_label)
+    # Guard 3 (var bound): n <= size at entry; n is loop-invariant and the
+    # body cannot resize the array (loop_version_spec rejects all calls).
+    sz = next_temp(wfn)
+    emit_instruction(wfn, {op: :ta_size_raw, temp: sz, value: arr_reg})
+    nraw = lv_raw_int_value(ctx, wfn, ver[:bound_name])
+    c2 = next_temp(wfn)
+    emit_instruction(wfn, {op: :icmp_i64, temp: c2, pred: "sle", lhs: nraw, rhs: sz})
+    emit_instruction(wfn, {op: :cond_br, cond: c2, then_label: fast_label, else_label: slow_label})
+  else
+    emit_instruction(wfn, {op: :cond_br, cond: c1, then_label: fast_label, else_label: slow_label})
+  saved_bindings = lv_bindings_copy(ctx[:bindings])
+  start_block(wfn, fast_label)
+  saved_vt = ctx[:var_types][arr_name]
+  ctx[:var_types][arr_name] = :typed_array_w64
+  lower_while_core(ctx, node)
+  ctx[:var_types][arr_name] = saved_vt
+  if !block_terminated(wfn)
+    emit_instruction(wfn, {op: :br, label: done_label})
+  # The fast arm's register bindings do not dominate the slow arm.
+  ctx[:bindings] = lv_bindings_copy(saved_bindings)
+  start_block(wfn, slow_label)
+  lower_while_core(ctx, node)
+  if !block_terminated(wfn)
+    emit_instruction(wfn, {op: :br, label: done_label})
+  start_block(wfn, done_label)
+  nil
+
+-> lower_while_core(ctx, node)
   wfn = ctx[:func]
 
   # Constant-fold the loop condition. `while true` (and `until false`,

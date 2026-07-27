@@ -298,6 +298,7 @@ use hashing
   out << declare_fn("w_uuid_from_hex", wv, "ptr")
   out << declare_fn("w_ipv6_from_string", wv, "ptr, i32")
   out << declare_fn("w_rational", wv, "i32, i32")
+  out << declare_fn("w_rational_new", wv, wv2)
   out << declare_fn("w_box_char", wv, "i32")
   out << declare_fn("w_color", wv, "i32, i32, i32, i32")
   out << declare_fn("w_register_unit", "void", "i32, ptr")
@@ -2719,6 +2720,37 @@ ewscope_md_state = {ids: {}, order: []}
     parts << "br label %" + lbl + ".done\n"
     parts << lbl + ".done:\n  "
     parts << t + " = phi i64 \[" + t + ".bl, %" + lbl + ".body], \[" + t + ".sz, %" + lbl + ".arr]"
+    parts.to_s()
+  # Loop-versioning guard (lower_while_versioned): i1 = receiver is a live
+  # polymorphic WArray — object space (high 16 bits zero, >= 16), heap
+  # subtag 10, header ebits 65. Mirrors __w_array_get_i64_fast's entry
+  # checks; the ebits load happens only behind the object-space branch, so
+  # the whole test is safe on ANY WValue. Internal labels keep the phi's
+  # predecessors self-contained (same trick as :array_size_raw).
+  when :poly_array_guard
+    t = inst[:temp]
+    v = inst[:value]
+    lbl = "pag." + t.slice(1, t.size() - 1)
+    parts = StringBuffer(560)
+    parts << t + ".hi = lshr i64 " + v + ", 48\n  "
+    parts << t + ".lo0 = icmp eq i64 " + t + ".hi, 0\n  "
+    parts << t + ".ge16 = icmp uge i64 " + v + ", 16\n  "
+    parts << t + ".o1 = and i1 " + t + ".lo0, " + t + ".ge16\n  "
+    parts << t + ".sub = and i64 " + v + ", 15\n  "
+    parts << t + ".isa = icmp eq i64 " + t + ".sub, 10\n  "
+    parts << t + ".o2 = and i1 " + t + ".o1, " + t + ".isa\n  "
+    parts << "br i1 " + t + ".o2, label %" + lbl + ".hdr, label %" + lbl + ".no\n"
+    parts << lbl + ".no:\n  "
+    parts << "br label %" + lbl + ".out\n"
+    parts << lbl + ".hdr:\n  "
+    parts << t + ".base = and i64 " + v + ", -16\n  "
+    parts << t + ".p = inttoptr i64 " + t + ".base to ptr\n  "
+    parts << t + ".ebp = getelementptr i8, ptr " + t + ".p, i64 1\n  "
+    parts << t + ".eb = load i8, ptr " + t + ".ebp, align 1" + invariant_load_suffix() + "\n  "
+    parts << t + ".is65 = icmp eq i8 " + t + ".eb, 65\n  "
+    parts << "br label %" + lbl + ".out\n"
+    parts << lbl + ".out:\n  "
+    parts << t + " = phi i1 \[false, %" + lbl + ".no], \[" + t + ".is65, %" + lbl + ".hdr]"
     parts.to_s()
   # WArray.cap (i32 header field at +12) — same shape/soundness as :ta_size_raw.
   when :ta_cap_raw

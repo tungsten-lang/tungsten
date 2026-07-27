@@ -1009,6 +1009,55 @@ novec_md_state = {count: 0}
     i += 1
   o.to_s()
 
+# Scoped no-alias metadata for fused elementwise workers (lowering stamps the
+# loop's source loads / output store with ewscope:<site-id> — see
+# fuse_ew_emit_range_loop). The output is the site's fresh malloc, provably
+# disjoint from every source, but TBAA can't express it (all elements are
+# warray_data), so without this -O3 versions the loop behind per-source
+# runtime overlap checks. Per site: one distinct scope in a shared domain,
+# referenced through a scope-list node; the store carries `!alias.scope`
+# (it writes inside the scope) and the loads carry `!noalias` (they never
+# touch the scope's memory). IDs live at 300000+ — far above the TBAA block
+# and the novec range (31423+k), which would need ~270k stamped loops to
+# collide. Deterministic: sites are numbered in lowering order and the map
+# fills in render order.
+ewscope_md_state = {ids: {}, order: []}
+
+-> ewscope_list_id(sid)
+  cached = ewscope_md_state[:ids][sid]
+  if cached != nil
+    return cached
+  k = ewscope_md_state[:order].size()
+  list_id = (300001 + k * 2).to_s()
+  ewscope_md_state[:ids][sid] = list_id
+  ewscope_md_state[:order].push(sid)
+  list_id
+
+-> ewscope_store_suffix(inst)
+  if inst[:ewscope] == nil
+    return ""
+  ", !alias.scope !" + ewscope_list_id(inst[:ewscope])
+
+-> ewscope_load_suffix(inst)
+  if inst[:ewscope] == nil
+    return ""
+  ", !noalias !" + ewscope_list_id(inst[:ewscope])
+
+-> ewscope_md_defs()
+  n = ewscope_md_state[:order].size()
+  if n == 0
+    return ""
+  o = StringBuffer(96)
+  o << "!299999 = distinct !{!299999, !\"tungsten.fusedew\"}\n"
+  i = 0
+  while i < n
+    scope_id = (300000 + i * 2).to_s()
+    list_id = (300001 + i * 2).to_s()
+    o << "!" + scope_id + " = distinct !{!" + scope_id + ", !299999}\n"
+    o << "!" + list_id + " = !{!" + scope_id + "}\n"
+    i += 1
+  o.to_s()
+
 -> direct_range_metadata_suffix(llvm_type, low, high)
   ", !range !{" + llvm_type + " " + low.to_s() + ", " + llvm_type + " " + high.to_s() + "}"
 
@@ -1910,7 +1959,7 @@ novec_md_state = {count: 0}
 
   attr_groups_out = emit_function_attr_groups(attr_groups)
 
-  header + decls_out + globals_out.to_s() + strings_out + fn_out.to_s() + fn_meta_out + call_site_out + llvm_used_out + attr_groups_out + tbaa_metadata_defs() + novec_loop_md_defs()
+  header + decls_out + globals_out.to_s() + strings_out + fn_out.to_s() + fn_meta_out + call_site_out + llvm_used_out + attr_groups_out + tbaa_metadata_defs() + novec_loop_md_defs() + ewscope_md_defs()
 
 # -- Emit a single function --
 
@@ -2682,24 +2731,27 @@ novec_md_state = {count: 0}
     parts << t + ".cp32 = load i32, ptr " + t + ".cpp, align 4" + tbaa_header_suffix() + "\n  "
     parts << t + " = sext i32 " + t + ".cp32 to i64"
     parts.to_s()
+  # The *_at family carries warray_data TBAA (these are typed-array element
+  # accesses) plus per-fusion-site scoped no-alias metadata when lowering
+  # stamped ewscope (see ewscope_md_defs above).
   when :load_f64_at
     t = inst[:temp]
-    t + ".p = getelementptr double, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  " + t + " = load double, ptr " + t + ".p, align 8"
+    t + ".p = getelementptr double, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  " + t + " = load double, ptr " + t + ".p, align 8" + tbaa_elem_suffix() + ewscope_load_suffix(inst)
   when :store_f64_at
     t = inst[:temp]
-    t + " = getelementptr double, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  store double " + inst[:value] + ", ptr " + t + ", align 8"
+    t + " = getelementptr double, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  store double " + inst[:value] + ", ptr " + t + ", align 8" + tbaa_elem_suffix() + ewscope_store_suffix(inst)
   # f32 variants: 4-byte stride, fpext on load / fptrunc on store so the
   # fused per-element computation stays in f64 (matching the CPU kernels,
   # which read f32 elements into doubles).
   when :load_f32_at
     t = inst[:temp]
-    t + ".p = getelementptr float, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  " + t + ".f32 = load float, ptr " + t + ".p, align 4\n  " + t + " = fpext float " + t + ".f32 to double"
+    t + ".p = getelementptr float, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  " + t + ".f32 = load float, ptr " + t + ".p, align 4" + tbaa_elem_suffix() + ewscope_load_suffix(inst) + "\n  " + t + " = fpext float " + t + ".f32 to double"
   when :store_f32_at
     t = inst[:temp]
-    t + ".tr = fptrunc double " + inst[:value] + " to float\n  " + t + " = getelementptr float, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  store float " + t + ".tr, ptr " + t + ", align 4"
+    t + ".tr = fptrunc double " + inst[:value] + " to float\n  " + t + " = getelementptr float, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  store float " + t + ".tr, ptr " + t + ", align 4" + tbaa_elem_suffix() + ewscope_store_suffix(inst)
   when :load_i64_at
     t = inst[:temp]
-    t + ".p = getelementptr i64, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  " + t + " = load i64, ptr " + t + ".p, align 8"
+    t + ".p = getelementptr i64, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  " + t + " = load i64, ptr " + t + ".p, align 8" + tbaa_elem_suffix() + ewscope_load_suffix(inst)
   # Element-0 address of a typed array as a raw i64 — the arg block handed
   # to w_fused_parallel_run / w_fused_gpu_run. 8-byte stride (i64 blocks).
   when :ta_data_addr

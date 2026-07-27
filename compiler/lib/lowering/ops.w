@@ -2019,7 +2019,17 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 # [:raw] set to in-function raw f64 temps. Computation is f64 throughout —
 # f32 arrays fpext on load and fptrunc on store, matching the runtime
 # kernels (which read f32 elements into doubles).
--> fuse_ew_emit_range_loop(ctx, spec, arrs, out_base, lo_val, hi_val, odt)
+#
+# ewsid: fusion-site id for scoped no-alias metadata, or nil to skip. On the
+# fresh-output path the destination is a w_array_new_uninit_sized malloc that
+# cannot alias ANY source array, but TBAA can't say so (all elements share
+# warray_data), so -O3 emits per-source runtime overlap checks plus a
+# duplicated scalar loop. Stamping the store `!alias.scope` and the source
+# loads `!noalias` (one distinct scope per fusion site — emitter
+# ewscope_md_defs) removes the memchecks. The `## reuse` path passes nil:
+# its output buffer persists across calls and the freshness proof is the
+# user's assertion, not the compiler's.
+-> fuse_ew_emit_range_loop(ctx, spec, arrs, out_base, lo_val, hi_val, odt, ewsid = nil)
   wfn = ctx[:func]
   cond_label = next_label(wfn, "fuse.cond")
   body_label = next_label(wfn, "fuse.body")
@@ -2039,12 +2049,12 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   ai = 0
   while ai < arrs.size()
     cur = next_temp(wfn)
-    emit_instruction(wfn, {op: fuse_ew_load_op(arrs[ai][:etype]), temp: cur, ptr: arrs[ai][:base], index: bi_v})
+    emit_instruction(wfn, {op: fuse_ew_load_op(arrs[ai][:etype]), temp: cur, ptr: arrs[ai][:base], index: bi_v, ewscope: ewsid})
     arrs[ai][:cur] = cur
     ai += 1
   result_raw = fuse_ew_emit_scalar(ctx, spec)
   stw = next_temp(wfn)
-  emit_instruction(wfn, {op: fuse_ew_store_op(odt), temp: stw, ptr: out_base, index: bi_v, value: result_raw})
+  emit_instruction(wfn, {op: fuse_ew_store_op(odt), temp: stw, ptr: out_base, index: bi_v, value: result_raw, ewscope: ewsid})
   nxt = next_temp(wfn)
   emit_instruction(wfn, {op: :add_i64, temp: nxt, lhs: bi_v, rhs: "1"})
   emit_instruction(wfn, {op: :store_i64, value: nxt, ptr: i_slot})
@@ -2117,7 +2127,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 # bindings ([:base]/[:raw]) are temporarily rebound to worker-local temps
 # (loaded from the arg block) and restored afterwards so the site's inline
 # path still sees its own temps.
--> fuse_ew_build_worker(ctx, spec, arrs, scls, odt, sid)
+-> fuse_ew_build_worker(ctx, spec, arrs, scls, odt, sid, ewsid = nil)
   mod = ctx[:mod]
   wname = "__w_fuse_worker_" + sid.to_s()
   wfn2 = build_function(wname, ["__fw_blk", "__fw_lo", "__fw_hi"], "i64", false, [])
@@ -2161,7 +2171,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
   saved_func = ctx[:func]
   ctx[:func] = wfn2
-  fuse_ew_emit_range_loop(ctx, spec, arrs, out_base, "%__fw_lo", "%__fw_hi", odt)
+  fuse_ew_emit_range_loop(ctx, spec, arrs, out_base, "%__fw_lo", "%__fw_hi", odt, ewsid)
   ctx[:func] = saved_func
 
   emit_instruction(wfn2, {op: :ret_i64, value: "0"})
@@ -2221,7 +2231,12 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   if sid == nil
     sid = 0
   ctx[:mod][:next_fuse_site] = sid + 1
-  worker_name = fuse_ew_build_worker(ctx, spec, arrs, scls, odt, sid)
+  # Scoped no-alias metadata only where the output is THIS SITE's fresh
+  # malloc; a `## reuse` buffer persists across calls, so skip it there.
+  ewsid = nil
+  if ast_get(node, :reuse_safe) != true
+    ewsid = sid
+  worker_name = fuse_ew_build_worker(ctx, spec, arrs, scls, odt, sid, ewsid)
 
   mt_label = next_label(wfn, "fuse.mt")
   st_label = next_label(wfn, "fuse.st")
@@ -2274,7 +2289,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_instruction(wfn, {op: fuse_ew_elems_ptr_op(arrs[ai][:etype]), temp: base, value: arrs[ai][:reg]})
     arrs[ai][:base] = base
     ai += 1
-  fuse_ew_emit_range_loop(ctx, spec, arrs, out_base, "0", size_reg, odt)
+  fuse_ew_emit_range_loop(ctx, spec, arrs, out_base, "0", size_reg, odt, ewsid)
   emit_instruction(wfn, {op: :br, label: done_label})
 
   start_block(wfn, done_label)

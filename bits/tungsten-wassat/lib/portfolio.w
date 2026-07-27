@@ -603,6 +603,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
 #   2 phase seed  (kind 1 only)
 #   3 chrono      0 off, 1 on (chronological backtracking v2)
 #   4 simplify    0 = none unless forced, 1 = substitution, 2 = + congruence
+#   5 shrink      0 off, 1 All-UIP learned-clause shrinking
 WASSAT_CFG_STRIDE = 8
 WASSAT_TEL_STRIDE = 8
 
@@ -643,6 +644,13 @@ WASSAT_TEL_STRIDE = 8
   cfgs[b + 4] = 0
   cfgs[b + 4] = 1 if a % 4 == 1
   cfgs[b + 4] = 2 if a % 4 == 2
+  # SHRINK, decorrelated from the chrono axis so the four arms of a width-4
+  # race span the full 2x2 of {chrono, shrink}: arm0 neither, arm1 shrink only,
+  # arm2 chrono only, arm3 both. Raced rather than decided because the measured
+  # spread is enormous and instance-dependent with no static predictor --
+  # minand064 wants it (0.54x, 2.6x fewer conflicts) while php109 and hole9 are
+  # 10x worse with it and need 34x the conflicts.
+  cfgs[b + 5] = a % 2
   0
 
 # Apply a configuration vector to a freshly built solver. `forced` is the
@@ -660,6 +668,7 @@ WASSAT_TEL_STRIDE = 8
   s.simplify_raw_mode(0) if cfgs[b + 4] == 1
   s.simplify_raw_mode(1) if cfgs[b + 4] == 2
   s.simplify_raw if cfgs[b + 4] == 0 && forced
+  s.enable_shrink if cfgs[b + 5] == 1
   0
 
 # Register the SLS arm. Occupies the fixed slot threads+2 so it never collides

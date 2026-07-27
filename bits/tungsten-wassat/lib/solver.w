@@ -1030,6 +1030,12 @@ WASSAT_PROOF_DRAT = 2
   # target-phase descents, and chrono disturbs them), while the fresh
   # post-probe-miss main solver takes it from the start (mid-run switches
   # measured strictly worse than either pure mode on ibm-12).
+  # Race axis: All-UIP shrinking, per arm. Global policy keeps it off (see
+  # policy.w use_shrinking); this is how the race samples it anyway.
+  -> enable_shrink
+    @use_shrink = true
+    0
+
   -> enable_chrono
     @use_chrono = true
     0

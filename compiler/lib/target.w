@@ -1,10 +1,35 @@
 # Compile-time target detection and predicate matching for platform guards.
 
+# Which C compiler drives the final .ll → binary step. Explicit TUNGSTEN_CC wins.
+# Otherwise prefer a clang whose LLVM is >= 22 when one is installed: its loop
+# vectorizer splits associative reductions (and vectorizes headerless-small-array
+# reductions with natural alignment) where older clang's cost model declines —
+# ~2.3x on such loops, matching rustc's LLVM 22. Falls back to plain `clang`
+# (system default) when no newer clang is found, so other machines are unaffected.
+host_cc_memo = {}
+
 -> host_c_compiler
   cc = env("TUNGSTEN_CC")
-  if cc == nil || cc == ""
-    return "clang"
-  cc
+  if cc != nil && cc != ""
+    return cc
+  cached = host_cc_memo[:cc]
+  if cached != nil
+    return cached
+  chosen = "clang"
+  candidates = ["/opt/homebrew/opt/llvm/bin/clang", "/usr/local/opt/llvm/bin/clang", "/opt/homebrew/opt/llvm@22/bin/clang"]
+  ci = 0
+  while ci < candidates.size()
+    c = candidates[ci]
+    exists = capture("test -x \"" + c + "\" && echo y").strip()
+    if exists == "y"
+      ver = capture("\"" + c + "\" --version 2>/dev/null | head -1")
+      # major >= 22: match "clang version 22." / 23. / … (two-digit majors)
+      if ver.index("version 22.") != nil || ver.index("version 23.") != nil || ver.index("version 24.") != nil
+        chosen = c
+        ci = candidates.size()
+    ci = ci + 1
+  host_cc_memo[:cc] = chosen
+  chosen
 
 # detect_target is called once per class definition and once per @on
 # guard during lowering — 260+ times per compile of tungsten.w. Each

@@ -284,6 +284,7 @@ interpreter_specs=(
   spec/interpreter/string_empty_native_spec.w
   spec/interpreter/string_to_s_native_spec.w
   spec/interpreter/uuid_byte_revisit_spec.w
+  spec/interpreter/dot_elementwise_spec.w
   spec/core/base64_native_spec.w
   spec/core/system_spec.w
   spec/numeric/complex_spec.w

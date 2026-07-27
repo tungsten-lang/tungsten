@@ -1857,6 +1857,32 @@ use target
       return left > right
     if op == :GTE
       return left >= right
+    # Dot-prefix elementwise operators (`a .* b`, `a .+ 2`, …) — route to the
+    # same runtime kernels the compiled path uses (lowering/ops.w); they own
+    # the int/float/w64 ebits split and scalar-rhs broadcast. Interpreter
+    # arrays (typed and plain literals) are real runtime WValues, so the
+    # passthrough is exact. Added because the compiled path grew these ops
+    # without interpreter twins ("Unknown operator: DOT_STAR" under
+    # `tungsten run`). One ccall per arm: the C VM stage-0 requires ccall's
+    # first argument to be a string LITERAL, not a variable.
+    if op == :DOT_PLUS
+      return ccall("w_array_add_elem", left, right)
+    if op == :DOT_MINUS
+      return ccall("w_array_sub_elem", left, right)
+    if op == :DOT_STAR
+      return ccall("w_array_mul_elem", left, right)
+    if op == :DOT_SLASH
+      return ccall("w_array_div_elem", left, right)
+    if op == :DOT_PIPE
+      return ccall("w_array_bor_elem", left, right)
+    if op == :DOT_AMP
+      return ccall("w_array_band_elem", left, right)
+    if op == :DOT_CARET
+      return ccall("w_array_bxor_elem", left, right)
+    if op == :DOT_LSHIFT
+      return ccall("w_array_shl_elem", left, right)
+    if op == :DOT_RSHIFT
+      return ccall("w_array_shr_elem", left, right)
     raise "Unknown operator: [op]"
 
   # Operator symbol -> the method name an object overloads it with, so

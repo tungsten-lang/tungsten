@@ -547,49 +547,73 @@ WASSAT_CONGRUENCE_DEFAULT = true
     # 4s once the configuration changed; bmc-ibm-10 moved 20% on watch
     # order; bmc-ibm-12 spans 4.9k-17k conflicts across configurations).
     # Racing configurations takes the min instead of gambling on one.
-    # Measurement hook: racing 8 diversified arms makes a raw-kernel run
+    # Measurement hook: racing diversified arms makes a raw-kernel run
     # non-deterministic by construction, so any A/B on a technique that
-    # changes the trajectory has to be able to pin the arm count. Same
-    # spirit as WASSAT_RAW_AT.
+    # changes the trajectory has to be able to pin the arm count — and to pin
+    # it at ONE to get a deterministic reading at all. Same spirit as
+    # WASSAT_RAW_AT.
     #
-    # OPEN, and the biggest measured defect in this file (2026-07-26). Swept
-    # interleaved, medians of 5, arm count pinned by WASSAT_ARMS. The column
-    # this rule actually selects is marked *:
+    # NO STATIC PREDICTOR EXISTS FOR THIS, so the rule stopped trying to be one.
+    # It used to be a clause-count ladder (1 below 50k, 4 below 150k, 8 above)
+    # and that ladder was wrong in BOTH directions inside a single size band:
+    # 3bitadd_31 at 31k wanted more arms and paid 3-8x for getting one, while
+    # smulo016 at 8.7k and minand064 at 43k gain nothing from a second arm.
+    # Clause count carries no signal about how much trajectory diversity an
+    # instance needs — the same shape as the preprocessing-yield question the
+    # race already answered by racing instead of predicting.
     #
-    #                clauses   arms=1   arms=2   arms=4   arms=8
-    #   smulo016       8,738   5.284*   5.456    5.471    5.620
-    #   3bitadd_31    31,310   2.792*   0.825    0.682    0.655
-    #   minand064     42,956   3.405*   3.504    3.748    4.203
-    #   g125.18       70,163   4.042    1.124    1.220*   1.440
-    #   qg7-13        97,072   0.245    0.246    0.255*   0.268
-    #   crypto-md5   131,279   0.268    0.292    0.320*   0.368
-    #   bmc-ibm-12   194,778   0.629    1.054    0.883    0.783*
-    #   g250.15      233,965   0.867    0.895    0.986    1.112*
-    #   ak128 miter  968,713   0.188    0.183    0.193    0.188*
+    # FOUR, measured 2026-07-26 against reference.py's own parity and survey
+    # rows (29 rows scored, 11 excluded for exceeding the 25s budget on every
+    # column rather than being counted as ties), three reps, min-of-3, one
+    # binary driven by WASSAT_ARMS so the columns cannot differ by anything but
+    # width, every `s` line checked against the published answer and across
+    # columns. Geomean of per-row (width / ladder):
     #
-    # 3bitadd_31 is 4.3x slower than it needs to be, and clause count cannot
-    # be what fixes it: it sits at 31k BETWEEN smulo016 at 8.7k and minand064
-    # at 43k, both of which genuinely want the single arm this rule gives all
-    # three. The rule is wrong in both directions on the same size band, which
-    # is the signature of a decision that has no static predictor — the same
-    # shape as the preprocessing-yield question the race already solved by
-    # racing instead of predicting.
+    #   width 2   1.006      width 4   0.983      width 6   0.967
     #
-    # Not changed here, for two reasons. The sweep ran with roughly three
-    # foreign cores busy, which systematically penalises high arm counts, so
-    # every "fewer arms is better" row is suspect (the two rows that go the
-    # OTHER way, 3bitadd_31 and g125.18, are not — contention can only have
-    # understated them). And the arm count interacts with clause sharing, the
-    # ring, and the two preprocessing arms, so it deserves its own campaign on
-    # a quiet machine rather than a side effect of one about the diversity
-    # matrix. This is where that campaign should start, and unlike the
-    # diversity matrix (see wassat_race_round1_conflicts) this is an axis where
-    # the arms are NOT interchangeable, so an adaptive allocator has something
-    # real to allocate.
+    # 4 and 6 are the same number here: 6 moved 0.948 -> 0.967 between two and
+    # three reps while 4 held 0.981 -> 0.983, and the gap between them is
+    # smaller than that movement. 4 is the one that ships because four raw arms
+    # plus the two preprocessing arms is six threads, which is exactly this
+    # machine's performance-core count; six raw arms is eight threads and
+    # oversubscribes them. That reasoning is about core supply, not about this
+    # corpus, so it is the safer constant on the smaller machines this
+    # self-hosts on too.
+    #
+    # What the change actually buys is the removal of a catastrophic row, not a
+    # big average: the ladder is 3.1x slower than width 4 on 3bitadd_31, and
+    # width 4's own worst row against the ladder is 1.85x (mrpp_6x6#14_10).
+    # Total wall across the scored rows is a wash (30.5s -> 31.9s); the geomean
+    # is the honest breadth statistic and the one the scoreboard already uses.
+    #
+    # TWO BANKED NEGATIVES from the same campaign, so neither gets re-derived:
+    #
+    # 1. Width 2 looked like the answer on a 9-instance sweep (geomean 1.05
+    #    against a per-row oracle, where the ladder scored 1.38) and was then
+    #    falsified by the breadth set above, where it is a wash. Nine rows
+    #    chosen because they were interesting is a tuning set, not evidence.
+    #
+    # 2. Making arm 0 the serial post-probe configuration at every width —
+    #    on the theory that a race should contain the configuration you would
+    #    have run if you were not racing — is a 3.3% NET LOSS (geomean 1.033,
+    #    isolated at fixed width 4). It does exactly what it was meant to on
+    #    mrpp_6x6#14_10 (1.85x -> 0.54x) and loses more than that back on
+    #    ContextModel 1.98x, bench_1614 1.97x and ibm-2004-03-k70 1.72x. The
+    #    reseed on arm 0 is load-bearing: its diversity is worth more than
+    #    retaining the serial trajectory, exactly as the matrix comment in
+    #    portfolio.w already claimed.
+    #
+    # STILL OPEN. The measurement ran with ~2.3 foreign cores busy; contention
+    # can only understate a wide race, never overstate it, so the width-6 row
+    # is a lower bound on what a quiet machine would show. Two instances show
+    # contention-immune trajectory wins that only appear above width 4 —
+    # smulo016 234,312 -> 122,873 conflicts and minand064 94,504 -> 40,420 at
+    # width 16 — so the ceiling is a function of free performance cores, and
+    # the principled rule is total race width (raw + preprocessing arms)
+    # against that number. wassat has no core-count probe; until it does, a
+    # constant that never oversubscribes is the honest thing to ship.
     return env("WASSAT_ARMS").to_i if env("WASSAT_ARMS") != nil
-    return 8 if @nclauses >= 150000
-    return 4 if @nclauses >= 50000
-    1
+    4
 
   -> lookahead_candidates
     # Trial propagation is a strong win for compact random 3-SAT and

@@ -894,6 +894,41 @@ use hashing
   out << "}\n"
   out.to_s()
 
+# Boxed + / - fast path (lowering's op map routes :PLUS/:MINUS here). Both
+# operands inline Ints (tag 0xFFFA) -> sign-extended 48-bit payload add/sub
+# with an i48 fit check on the result; a fitting result re-boxes inline.
+# Overflow (needs BigInt promotion) and every non-int operand — floats,
+# BigInts, strings, user-defined + — tail-call the runtime op unchanged.
+-> arith_fast_helper_ir(fast_name, slow_name, llvm_op)
+  out = StringBuffer(760)
+  out << "define private i64 @" + fast_name + "(i64 %a, i64 %b) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %ta = lshr i64 %a, 48\n"
+  out << "  %ia = icmp eq i64 %ta, 65530\n"
+  out << "  %tb = lshr i64 %b, 48\n"
+  out << "  %ib = icmp eq i64 %tb, 65530\n"
+  out << "  %both = and i1 %ia, %ib\n"
+  out << "  br i1 %both, label %fast, label %slow\n"
+  out << "fast:\n"
+  out << "  %sa = shl i64 %a, 16\n"
+  out << "  %pa = ashr i64 %sa, 16\n"
+  out << "  %sb = shl i64 %b, 16\n"
+  out << "  %pb = ashr i64 %sb, 16\n"
+  out << "  %r = " + llvm_op + " i64 %pa, %pb\n"
+  out << "  %rs = shl i64 %r, 16\n"
+  out << "  %rb = ashr i64 %rs, 16\n"
+  out << "  %fit = icmp eq i64 %rb, %r\n"
+  out << "  br i1 %fit, label %box, label %slow\n"
+  out << "box:\n"
+  out << "  %m = and i64 %r, 281474976710655\n"
+  out << "  %v = or i64 %m, -1688849860263936\n"
+  out << "  ret i64 %v\n"
+  out << "slow:\n"
+  out << "  %sv = call i64 @" + slow_name + "(i64 %a, i64 %b)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
 -> filter_runtime_decls(decls, used_fns)
   lines = decls.split("\n")
   out = StringBuffer(decls.size())
@@ -1949,6 +1984,20 @@ ewscope_md_state = {ids: {}, order: []}
     if decls_out.index("@w_eq(") == nil
       decls_out = decls_out + "declare i64 @w_eq(i64, i64) nounwind\n"
     decls_out = decls_out + streq_fast_helper_ir() + "\n"
+
+  # Boxed +/- fast paths (op map routes :PLUS/:MINUS to these helpers).
+  arith_fast_specs = [
+    ["__w_add_fast", "w_add", "add"],
+    ["__w_sub_fast", "w_sub", "sub"]
+  ]
+  afi = 0
+  while afi < arith_fast_specs.size()
+    af = arith_fast_specs[afi]
+    if ccall_needed.has_key?(af[0])
+      if decls_out.index("@" + af[1] + "(") == nil
+        decls_out = decls_out + "declare i64 @" + af[1] + "(i64, i64) nounwind\n"
+      decls_out = decls_out + arith_fast_helper_ir(af[0], af[1], af[2]) + "\n"
+    afi += 1
 
   # Emit declarations for call targets not defined in this module. The
   # already-declared check was a decls_out.index(search_str) — a full strstr

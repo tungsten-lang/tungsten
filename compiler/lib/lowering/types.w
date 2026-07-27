@@ -27,8 +27,15 @@
 -> init_op_map
   m = {}
 
-  m[:PLUS]      = "w_add"
-  m[:MINUS]     = "w_sub"
+  # + and - route through private alwaysinline IR wrappers (emitter.w
+  # arith_fast_helper_ir), mirroring the comparison helpers below: the
+  # both-inline-Int case folds to payload add/sub + an i48 fit check at
+  # every call site; overflow and every non-int operand (floats, BigInts,
+  # strings, user + overloads) tail-call the runtime op, which stays the
+  # semantic authority (BigInt promotion included). `@pos += 1` and
+  # friends were full w_add calls.
+  m[:PLUS]      = "__w_add_fast"
+  m[:MINUS]     = "__w_sub_fast"
   m[:STAR]      = "w_mul"
   m[:POW]       = "w_pow"
   m[:SLASH]     = "w_div"

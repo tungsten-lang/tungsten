@@ -4143,6 +4143,23 @@ static void w_slab_intern_grow(void) {
 /* Forward declaration — wyhash defined later in the file */
 static uint64_t w_hash_wyhash(const uint8_t *data, size_t len);
 
+/* Read-only lookup used after slab freeze. Returning the existing slab WValue
+ * keeps dynamically constructed strings canonical with static literals without
+ * allowing the frozen slab or intern table to grow. */
+static WValue w_slab_lookup_existing(const char *s, size_t len, uint64_t h) {
+    if (g_intern.cap == 0) return W_UNDEF;
+
+    int64_t mask = g_intern.cap - 1;
+    int64_t pos = (int64_t)(h & (uint64_t)mask);
+    while (g_intern.indices[pos] != 0) {
+        if (g_intern.hashes[pos] == h &&
+            w_slab_equals_bytes(g_intern.indices[pos], s, len))
+            return w_box_slab_str(g_intern.indices[pos]);
+        pos = (pos + 1) & mask;
+    }
+    return W_UNDEF;
+}
+
 /* Intern a string. Returns WValue with mode 6 (slab) encoding.
  * If slab is frozen or exhausted, falls back to mode 7 (heap). */
 static WValue w_slab_intern(const char *s, size_t len, uint64_t h) {
@@ -4196,18 +4213,10 @@ static WValue w_string_n(const char *s, size_t len) {
 
     /* When frozen: check intern table for existing slab entry, fall back to heap */
     if (g_string_slab.frozen) {
-        if (g_intern.cap > 0) {
-            uint64_t h = w_hash_wyhash((const uint8_t *)s, len);
-            int64_t mask = g_intern.cap - 1;
-            int64_t pos = (int64_t)(h & (uint64_t)mask);
-            while (g_intern.indices[pos] != 0) {
-                if (g_intern.hashes[pos] == h) {
-                    if (w_slab_equals_bytes(g_intern.indices[pos], s, len))
-                        return w_box_slab_str(g_intern.indices[pos]);
-                }
-                pos = (pos + 1) & mask;
-            }
-        }
+        WValue existing = w_slab_lookup_existing(
+            s, len, w_hash_wyhash((const uint8_t *)s, len));
+        if (existing != W_UNDEF) return existing;
+
         WString *ws = malloc(sizeof(WString) + len + 1);
         ws->len = (uint32_t)len;
         memcpy(ws->data, s, len);
@@ -4241,6 +4250,15 @@ static WValue w_string_take(char *s, size_t len) {
      * base and dies with "string slab: mprotect failed" (e.g. `"ab" * 3` at
      * top level). Interning also keeps the result comparable to slab literals. */
     if (!g_string_slab.base) w_slab_init();
+
+    if (g_string_slab.frozen && len <= W_SLAB_SSO2_MAX) {
+        WValue existing = w_slab_lookup_existing(
+            s, len, w_hash_wyhash((const uint8_t *)s, len));
+        if (existing != W_UNDEF) {
+            free(s);
+            return existing;
+        }
+    }
 
     if (g_string_slab.frozen || len > W_SLAB_SSO2_MAX) {
         WString *ws = malloc(sizeof(WString) + len + 1);

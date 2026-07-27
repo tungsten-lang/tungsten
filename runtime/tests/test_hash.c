@@ -90,14 +90,6 @@ static void test_rope_string_ordering(void) {
     ASSERT(w_gte(flat, rope) == W_TRUE, "flat is >= equivalent rope");
 }
 
-static WValue heap_string(const char *s) {
-    size_t len = strlen(s);
-    WString *ws = malloc(sizeof(WString) + len + 1);
-    ws->len = (uint32_t)len;
-    memcpy(ws->data, s, len + 1);
-    return w_box_heap_str(ws);
-}
-
 static void test_inline_symbol_string_distinct(void) {
     printf("\nTest 4: Inline symbols and strings are distinct types\n");
 
@@ -116,18 +108,32 @@ static void test_inline_symbol_string_distinct(void) {
     ASSERT(w_eq(w_hash_get(hash, string_key), w_int(42)) == W_TRUE, "string key retrieves string value");
 }
 
-static void test_heap_symbol_slab_symbol_lookup(void) {
-    printf("\nTest 5: Heap and slab symbols share hash semantics\n");
+static void test_frozen_dynamic_string_reuses_slab_key(void) {
+    printf("\nTest 5: Frozen dynamic strings reuse existing slab keys\n");
 
-    WValue hash = w_hash_new();
-    WValue heap_symbol = w_box_symbol_from_str(heap_string("string_i64"));
-    WValue slab_symbol = w_str_to_sym(w_string("string_i64"));
+    WValue slab_string = w_string("string_i64");
+    WValue slab_symbol = w_str_to_sym(slab_string);
+    WValue source = w_string("xstring_i64x");
+    WValue string_hash = w_hash_new();
+    WValue symbol_hash = w_hash_new();
 
-    w_hash_set(hash, heap_symbol, w_int(11));
+    w_hash_set(string_hash, slab_string, w_int(7));
+    w_hash_set(symbol_hash, slab_symbol, w_int(11));
+    w_slab_freeze();
 
-    ASSERT(w_eq(heap_symbol, slab_symbol) == W_TRUE, "heap symbol equals slab symbol");
-    ASSERT(w_hash_has_key(hash, slab_symbol) == W_TRUE, "slab-symbol lookup finds heap-symbol key");
-    ASSERT(w_eq(w_hash_get(hash, slab_symbol), w_int(11)) == W_TRUE, "slab-symbol lookup returns stored value");
+    WValue dynamic_string = w_string_slice_raw(source, 1, 10);
+    WValue dynamic_symbol = w_str_to_sym(dynamic_string);
+
+    ASSERT(w_is_slab_str(dynamic_string), "frozen dynamic string reuses slab storage");
+    ASSERT(dynamic_string == slab_string, "frozen dynamic string preserves canonical identity");
+    ASSERT(w_eq(dynamic_string, slab_string) == W_TRUE, "frozen dynamic string equals literal");
+    ASSERT(w_hash_has_key(string_hash, dynamic_string) == W_TRUE, "dynamic string finds literal hash key");
+    ASSERT(w_eq(w_hash_get(string_hash, dynamic_string), w_int(7)) == W_TRUE,
+           "dynamic string returns literal-keyed value");
+    ASSERT(dynamic_symbol == slab_symbol, "dynamic symbol preserves canonical identity");
+    ASSERT(w_hash_has_key(symbol_hash, dynamic_symbol) == W_TRUE, "dynamic symbol finds literal hash key");
+    ASSERT(w_eq(w_hash_get(symbol_hash, dynamic_symbol), w_int(11)) == W_TRUE,
+           "dynamic symbol returns literal-keyed value");
 }
 
 int main(void) {
@@ -139,7 +145,7 @@ int main(void) {
     test_rope_keys_survive_growth();
     test_rope_string_ordering();
     test_inline_symbol_string_distinct();
-    test_heap_symbol_slab_symbol_lookup();
+    test_frozen_dynamic_string_reuses_slab_key();
 
     printf("\n=== Results: %d/%d passed ===\n", pass_count, test_count);
     return pass_count == test_count ? 0 : 1;

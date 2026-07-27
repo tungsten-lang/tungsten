@@ -3872,6 +3872,19 @@ use hashing
     signed = inst[:signed]
     if signed == nil
       signed = false
+    # Element alignment. The HEADERFUL WSmallArray has a 2-byte header, so
+    # elements sit at offset 2 + k*w — unaligned → align 1. The HEADERLESS form
+    # is a raw [payload x i8] alloca (align 16) with elements at offset k*w →
+    # naturally aligned; telling LLVM the true alignment is what lets it
+    # vectorize a reduction over the buffer (align 1 blocks it).
+    ealign = "align 1"
+    if inst[:headerless] == true
+      if bits == 64
+        ealign = "align 8"
+      elsif bits == 32
+        ealign = "align 4"
+      elsif bits == 16
+        ealign = "align 2"
     parts = StringBuffer(400)
     if inst[:headerless] == true
       # Headerless stack SmallArray: arr IS the raw [payload x i8] alloca ptr —
@@ -3891,17 +3904,17 @@ use hashing
       parts << s[3] + " = ashr i64 " + s[3] + ".sl, 16\n  "            # unbox → i64
     if bits == 64
       parts << s[4] + " = getelementptr i64, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << t + " = load i64, ptr " + s[4] + ", align 1" + tbaa_elem_suffix()
+      parts << t + " = load i64, ptr " + s[4] + ", " + ealign + tbaa_elem_suffix()
     elsif bits == 32
       parts << s[4] + " = getelementptr i32, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << t + ".raw = load i32, ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << t + ".raw = load i32, ptr " + s[4] + ", " + ealign + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i32 " + t + ".raw to i64"
       else
         parts << t + " = zext i32 " + t + ".raw to i64"
     elsif bits == 16
       parts << s[4] + " = getelementptr i16, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << t + ".raw = load i16, ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << t + ".raw = load i16, ptr " + s[4] + ", " + ealign + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i16 " + t + ".raw to i64"
       else
@@ -3938,7 +3951,7 @@ use hashing
         parts << t + " = add i64 " + nibble + ", 0"
     else
       parts << s[4] + " = getelementptr i64, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << t + " = load i64, ptr " + s[4] + ", align 1" + tbaa_elem_suffix()
+      parts << t + " = load i64, ptr " + s[4] + ", " + ealign + tbaa_elem_suffix()
     parts.to_s()
 
   # Phase 6f: SmallArray inline write — same layout shortcuts as get.
@@ -3955,6 +3968,16 @@ use hashing
     bits = inst[:bits]
     if bits == nil
       bits = 8
+    # Element alignment — natural for the headerless (no-header) form, byte for
+    # the headerful WSmallArray. See :small_array_get_inline for the rationale.
+    ealign = "align 1"
+    if inst[:headerless] == true
+      if bits == 64
+        ealign = "align 8"
+      elsif bits == 32
+        ealign = "align 4"
+      elsif bits == 16
+        ealign = "align 2"
     parts = StringBuffer(400)
     if inst[:headerless] == true
       # Headerless stack SmallArray write: arr is the raw alloca ptr, slots at
@@ -3971,17 +3994,17 @@ use hashing
       parts << s[3] + " = ashr i64 " + s[3] + ".sl, 16\n  "
     if bits == 64
       parts << s[4] + " = getelementptr i64, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << "store i64 " + val + ", ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << "store i64 " + val + ", ptr " + s[4] + ", " + ealign + tbaa_elem_suffix() + "\n  "
     elsif bits == 32
       tr = t + ".tr"
       parts << s[4] + " = getelementptr i32, ptr " + s[2] + ", i64 " + s[3] + "\n  "
       parts << tr + " = trunc i64 " + val + " to i32\n  "
-      parts << "store i32 " + tr + ", ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << "store i32 " + tr + ", ptr " + s[4] + ", " + ealign + tbaa_elem_suffix() + "\n  "
     elsif bits == 16
       tr = t + ".tr"
       parts << s[4] + " = getelementptr i16, ptr " + s[2] + ", i64 " + s[3] + "\n  "
       parts << tr + " = trunc i64 " + val + " to i16\n  "
-      parts << "store i16 " + tr + ", ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << "store i16 " + tr + ", ptr " + s[4] + ", " + ealign + tbaa_elem_suffix() + "\n  "
     elsif bits == 8
       tr = t + ".tr"
       parts << s[4] + " = getelementptr i8, ptr " + s[2] + ", i64 " + s[3] + "\n  "
@@ -4017,7 +4040,7 @@ use hashing
       parts << "store i8 " + tr + ", ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
     else
       parts << s[4] + " = getelementptr i64, ptr " + s[2] + ", i8 " + s[3] + "\n  "
-      parts << "store i64 " + val + ", ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << "store i64 " + val + ", ptr " + s[4] + ", " + ealign + tbaa_elem_suffix() + "\n  "
     # Define result so SSA refs to t are valid.
     parts << t + " = add i64 " + val + ", 0"
     parts.to_s()

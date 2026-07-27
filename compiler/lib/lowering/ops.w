@@ -1044,6 +1044,38 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       emit_instruction(wfn, {op: :icmp_i64, temp: temp, pred: pred, lhs: other_reg, rhs: sentinel})
       return typed_value(:i1, temp)
 
+  # String/symbol-LITERAL fast path: `x == "when"` / `x != :sym` is three
+  # inline instructions in the common case instead of a w_eq call. Sound by
+  # the canonical-representation invariants (wvalue.h): modes 0-5 pack the
+  # content in the box (length = mode, 0-5 bytes), mode 6 is the interned
+  # slab (6-61 bytes) — length-disjoint, so equal content in a canonical
+  # mode ⇒ equal bits, and different bits + canonical lhs ⇒ not equal.
+  # Everything else (mode-7 heap/rope strings, non-strings, user objects
+  # with == overloads) falls to the runtime call, preserving dispatch. Only
+  # literals that lowered to a compile-time constant qualify (>61-byte
+  # literals and no-static-slab builds lower to calls and are skipped).
+  if op in (:EQ :NEQ)
+    slit = nil
+    sother = nil
+    if node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) in (:string :symbol)
+      slit = node.left
+      sother = node.right
+    elsif node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) in (:string :symbol)
+      slit = node.right
+      sother = node.left
+    if slit != nil
+      lit_tv = lower_expression(ctx, slit)
+      lit_reg = "" + lit_tv[:value]
+      if lit_tv[:type] == :i64 && lit_reg.starts_with?("u0x")
+        other_val = lower_expression(ctx, sother)
+        other_reg = ensure_i64_value(wfn, other_val)
+        sv = next_temp(wfn)
+        emit_instruction(wfn, {op: :call_direct_i64, temp: sv, name: "__w_streq_fast", args: [other_reg, lit_reg]})
+        temp = next_temp(wfn)
+        pred = op == :EQ ? "eq" : "ne"
+        emit_instruction(wfn, {op: :icmp_i64, temp: temp, pred: pred, lhs: sv, rhs: w_true.to_s()})
+        return typed_value(:i1, temp)
+
   # Type-directed: if both sides are int, emit inline LLVM ops
   lt = infer_type(node.left, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
   rt = infer_type(node.right, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)

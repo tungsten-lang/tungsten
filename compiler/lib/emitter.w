@@ -859,6 +859,41 @@ use hashing
   out << "}\n"
   out.to_s()
 
+# `x == <string/symbol literal>` fast path. %lit is always a compile-time-
+# constant CANONICAL box (inline mode 0-5 or interned slab mode 6 — >61-byte
+# literals lower to runtime temps and never reach this helper), so after
+# alwaysinline + constant folding each site is a bit-compare plus a
+# canonicality test. Faithful specialization of w_eq's own ladder:
+#   bits equal                      -> W_TRUE  (w_eq's a == b arm)
+#   x stringy (tag 0xFFF9) mode 0-6 -> W_FALSE (canonical-by-bit-pattern arm;
+#      cross-mode pairs are length-disjoint; strings never equal symbols;
+#      non-object x never reaches user == dispatch)
+#   anything else (mode-7 heap/rope strings, ints, objects, ...) -> w_eq,
+#      preserving content compares and user-defined == exactly.
+-> streq_fast_helper_ir()
+  out = StringBuffer(700)
+  out << "define private i64 @__w_streq_fast(i64 %x, i64 %lit) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %eqb = icmp eq i64 %x, %lit\n"
+  out << "  br i1 %eqb, label %t, label %c\n"
+  out << "t:\n"
+  out << "  ret i64 2\n"
+  out << "c:\n"
+  out << "  %hi = lshr i64 %x, 48\n"
+  out << "  %iss = icmp eq i64 %hi, 65529\n"
+  out << "  %md = lshr i64 %x, 1\n"
+  out << "  %md3 = and i64 %md, 7\n"
+  out << "  %nh = icmp ne i64 %md3, 7\n"
+  out << "  %canon = and i1 %iss, %nh\n"
+  out << "  br i1 %canon, label %f, label %s\n"
+  out << "f:\n"
+  out << "  ret i64 1\n"
+  out << "s:\n"
+  out << "  %sv = call i64 @w_eq(i64 %x, i64 %lit)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
 -> filter_runtime_decls(decls, used_fns)
   lines = decls.split("\n")
   out = StringBuffer(decls.size())
@@ -1074,7 +1109,7 @@ ewscope_md_state = {ids: {}, order: []}
   direct_range_metadata_suffix("i64", w_tag_char + subtype_span * 3, w_tag_char + subtype_span * 4)
 
 -> wvalue_bool_call?(name)
-  name in ("w_bool" "w_eq" "w_neq" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_hash_has_key" "__w_file_exists" "__w_write_file" "w_ipv4_in_cidr")
+  name in ("w_bool" "w_eq" "w_neq" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "__w_streq_fast" "w_hash_has_key" "__w_file_exists" "__w_write_file" "w_ipv4_in_cidr")
 
 -> known_call_range_metadata_suffix(inst, llvm_type)
   suffix = range_metadata_suffix(inst, llvm_type)
@@ -1907,6 +1942,13 @@ ewscope_md_state = {ids: {}, order: []}
         decls_out = decls_out + "declare i64 @" + cf[1] + "(i64, i64) nounwind\n"
       decls_out = decls_out + cmp_fast_helper_ir(cf[0], cf[1], cf[2], cf[3]) + "\n"
     cfi += 1
+
+  # Literal string/symbol == fast path (lowering's :EQ/:NEQ literal arm calls
+  # __w_streq_fast with the canonical constant as %lit).
+  if ccall_needed.has_key?("__w_streq_fast")
+    if decls_out.index("@w_eq(") == nil
+      decls_out = decls_out + "declare i64 @w_eq(i64, i64) nounwind\n"
+    decls_out = decls_out + streq_fast_helper_ir() + "\n"
 
   # Emit declarations for call targets not defined in this module. The
   # already-declared check was a decls_out.index(search_str) — a full strstr

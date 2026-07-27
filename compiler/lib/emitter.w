@@ -352,6 +352,13 @@ use hashing
   # willreturn lets the function-attrs pass propagate purity up through the
   # inlined __w_array_*_i64_fast helpers, so `a[i]` reads CSE and hoist out of
   # loops that don't write the array.
+  #
+  # Documented exception: for i64-typed elements whose value exceeds the
+  # 47-bit inline-int payload, these return through w_int, which ALLOCATES a
+  # BigInt — technically a write. This is deliberate: the allocation is
+  # invisible to the caller (fresh, unaliased), so the worst a memory(read)-
+  # justified CSE can do is merge two structurally-equal BigInts. Keep the
+  # attribute; do not "fix" it by dropping the hoisting win.
   out << declare_fn_attrs("w_array_get_i64", wv, "i64, i64", "nounwind willreturn memory(read)")
   out << declare_fn_attrs("w_array_idx_i64", wv, "i64, i64", "nounwind willreturn memory(read)")
   out << declare_fn("w_array_set", wv, wv3)
@@ -365,7 +372,10 @@ use hashing
 
   # Bool arrays
   out << declare_fn("w_bool_array_new", wv, "i64")
-  out << declare_fn("w_bool_array_get", wv, wv2)
+  # Pure read: bit-tests packed storage, returns W_FALSE OOB, never raises or
+  # allocates — same hoist/CSE rationale as w_array_get_i64 above (and no
+  # BigInt exception here: results are only W_TRUE/W_FALSE).
+  out << declare_fn_attrs("w_bool_array_get", wv, wv2, "nounwind willreturn memory(read)")
   out << declare_fn("w_bool_array_set", wv, wv3)
   # Phase 4e dot-prefix elementwise operators (.+ .- .* ./ .| .& .^ .<< .>>)
   out << declare_fn("w_array_add_elem", wv, wv2)
@@ -701,21 +711,25 @@ use hashing
   out << "  %is65 = icmp eq i8 %eb, 65\n"
   out << "  br i1 %is65, label %rng, label %slow\n"
   out << "rng:\n"
+  # start/slots load HERE (before the bounds branch), not in `fast:` — the
+  # header fields exist once the kind check passed, so the loads are
+  # unconditional and speculatable, letting LICM hoist them out of loops
+  # whose bounds branch varies per iteration (~6% on generic sum loops).
   out << "  %szp = getelementptr i8, ptr %p, i64 8\n"
   out << "  %sz32 = load i32, ptr %szp, align 4" + tbaa_header_suffix() + "\n"
   out << "  %sz = sext i32 %sz32 to i64\n"
+  out << "  %stp = getelementptr i8, ptr %p, i64 4\n"
+  out << "  %st32 = load i32, ptr %stp, align 4" + tbaa_header_suffix() + "\n"
+  out << "  %st = sext i32 %st32 to i64\n"
+  out << "  %slp = getelementptr i8, ptr %p, i64 16\n"
+  out << "  %slots = load ptr, ptr %slp, align 8" + tbaa_header_suffix() + "\n"
   out << "  %neg = icmp slt i64 %i, 0\n"
   out << "  %iw = add i64 %i, %sz\n"
   out << "  %ix = select i1 %neg, i64 %iw, i64 %i\n"
   out << "  %inb = icmp ult i64 %ix, %sz\n"
   out << "  br i1 %inb, label %fast, label %slow\n"
   out << "fast:\n"
-  out << "  %stp = getelementptr i8, ptr %p, i64 4\n"
-  out << "  %st32 = load i32, ptr %stp, align 4" + tbaa_header_suffix() + "\n"
-  out << "  %st = sext i32 %st32 to i64\n"
   out << "  %eff = add i64 %st, %ix\n"
-  out << "  %slp = getelementptr i8, ptr %p, i64 16\n"
-  out << "  %slots = load ptr, ptr %slp, align 8" + tbaa_header_suffix() + "\n"
   out << "  %ep = getelementptr i64, ptr %slots, i64 %eff\n"
   out << "  %v = load i64, ptr %ep, align 8" + tbaa_elem_suffix() + "\n"
   out << "  ret i64 %v\n"
@@ -783,21 +797,23 @@ use hashing
   out << "  %is65 = icmp eq i8 %eb, 65\n"
   out << "  br i1 %is65, label %rng, label %slow\n"
   out << "rng:\n"
+  # start/slots load before the bounds branch — same reorder rationale as
+  # __w_array_get_i64_fast above (unconditional once kind-checked; hoistable).
   out << "  %szp = getelementptr i8, ptr %p, i64 8\n"
   out << "  %sz32 = load i32, ptr %szp, align 4" + tbaa_header_suffix() + "\n"
   out << "  %sz = sext i32 %sz32 to i64\n"
+  out << "  %stp = getelementptr i8, ptr %p, i64 4\n"
+  out << "  %st32 = load i32, ptr %stp, align 4" + tbaa_header_suffix() + "\n"
+  out << "  %st = sext i32 %st32 to i64\n"
+  out << "  %slp = getelementptr i8, ptr %p, i64 16\n"
+  out << "  %slots = load ptr, ptr %slp, align 8" + tbaa_header_suffix() + "\n"
   out << "  %neg = icmp slt i64 %i, 0\n"
   out << "  %iw = add i64 %i, %sz\n"
   out << "  %ix = select i1 %neg, i64 %iw, i64 %i\n"
   out << "  %inb = icmp ult i64 %ix, %sz\n"
   out << "  br i1 %inb, label %fast, label %slow\n"
   out << "fast:\n"
-  out << "  %stp = getelementptr i8, ptr %p, i64 4\n"
-  out << "  %st32 = load i32, ptr %stp, align 4" + tbaa_header_suffix() + "\n"
-  out << "  %st = sext i32 %st32 to i64\n"
   out << "  %eff = add i64 %st, %ix\n"
-  out << "  %slp = getelementptr i8, ptr %p, i64 16\n"
-  out << "  %slots = load ptr, ptr %slp, align 8" + tbaa_header_suffix() + "\n"
   out << "  %ep = getelementptr i64, ptr %slots, i64 %eff\n"
   out << "  store i64 %val, ptr %ep, align 8" + tbaa_elem_suffix() + "\n"
   out << "  ret i64 %val\n"

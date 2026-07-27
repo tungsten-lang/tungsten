@@ -1223,6 +1223,14 @@ use target
       if args.size() != 1
         raise "w_executable_dir expects no arguments"
       return ccall("w_executable_dir")
+    when "w_cpu_count"
+      if args.size() != 1
+        raise "w_cpu_count expects no arguments"
+      return ccall("w_cpu_count")
+    when "w_physical_memory_bytes"
+      if args.size() != 1
+        raise "w_physical_memory_bytes expects no arguments"
+      return ccall("w_physical_memory_bytes")
     when "w_to_s"
       # Source-defined objects exist only in this interpreter environment;
       # native w_to_s cannot see their method table. Route through the tree

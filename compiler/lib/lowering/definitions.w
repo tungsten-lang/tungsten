@@ -1701,6 +1701,18 @@
     block_return_frame: nil,
     yield_block_name: yield_block_name
   }
+  if node.type_hints != nil
+    hint_names = node.type_hints.keys()
+    hi = 0
+    while hi < hint_names.size()
+      ht = node.type_hints[hint_names[hi]]
+      hts = ht.to_s()
+      htl = hts.size()
+      if htl >= 3 && hts.slice(htl - 2, 2) == "\[]"
+        child_var_types[hint_names[hi]] = typed_array_etype_to_sym(hts.slice(0, htl - 2))
+      else
+        child_var_types[hint_names[hi]] = normalize_type_symbol(ht)
+      hi += 1
   if node.param_types != nil
     pt = node.param_types
     pti = 0
@@ -1755,6 +1767,15 @@
     if is_raw_int_storage_type(pt)
       if raw_abi && is_machine_int64_type(pt)
         child_ctx[:bindings][pname] = "%" + pname
+      elsif pt in (:i64 :u64)
+        # Checked unbox, mirroring lower_method_def: a boxed caller passes
+        # values >2^47 as heap BigInt boxes, which the plain shl/ashr
+        # nanunbox reads as pointer bits (the lexer's `## i64: tok` packed
+        # tokens hit exactly this — stage 2 lexed garbage). w_to_i64/w_to_u64
+        # handle inline and bigint boxes both.
+        raw = next_temp(new_fn)
+        emit_instruction(new_fn, {op: :call_direct_i64, temp: raw, name: machine_unbox_fn(pt), args: [kwargs_param_input(child_ctx, pname)], arg_types: ["i64"]})
+        child_ctx[:bindings][pname] = raw
       else
         raw = nanunbox_int_emit(new_fn, kwargs_param_input(child_ctx, pname))
         child_ctx[:bindings][pname] = raw

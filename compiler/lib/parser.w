@@ -933,7 +933,14 @@ use ../../core/token
     # same syntax inside parentheses and arguments, e.g. `($value ## i64)`.
     # Keeping it here gives the ascription lower precedence than arithmetic
     # while still consuming it before the enclosing `)` / `,` delimiter.
-    if at_type?(T_TYPE_HINT)
+    # NEVER onto a def: a def inside a class body ends by consuming its
+    # DEDENT, which leaves a next-line `## i64: name` param annotation as
+    # the current token here — attaching it to the just-parsed method-def
+    # swallowed the hint meant for the NEXT def (class-method `## i64:`
+    # ascriptions silently never typed their bodies). Defs take no trailing
+    # ascription; own-line hints flow to @pending_type_hints via
+    # skip_statement_end for the next def to consume.
+    if at_type?(T_TYPE_HINT) && ast_kind(expr) != :method_def && ast_kind(expr) != :fn_def
       hint = current_value()
       comment_pos = hint.index("#")
       if comment_pos != nil
@@ -2843,15 +2850,7 @@ use ../../core/token
       while !at_type?(T_RPAREN)
         if !is_param_type_token?(parser_tok_type(@current_packed))
           raise compile_error_at(:E_PARSE_BAD_PARAM_TYPE, "Expected type name in param type list, got [current_desc()]")
-        type_name = advance_value()
-        # Optional `[]` suffix for typed-array params (e.g. `i64[]`).
-        # Stored as the symbol `:"i64[]"` so the lowering's existing
-        # `## i64[]: name` normalization picks it up without change.
-        if at_type?(T_LBRACKET) && peek_type() == T_RBRACKET
-          advance()
-          advance()
-          type_name = type_name + "\[]"
-        param_types.push(type_name.to_sym())
+        param_types.push(parse_type_name_with_array_suffix().to_sym())
       expect_type(T_RPAREN)
       skip_spaces()
 
@@ -2860,7 +2859,7 @@ use ../../core/token
     # or the end of the header.
     return_type = nil
     if at_type?(T_TYPE) && looks_like_return_type?()
-      return_type = advance_value().to_sym()
+      return_type = parse_type_name_with_array_suffix().to_sym()
       skip_spaces()
 
     annotations_present = param_types != nil || return_type != nil
@@ -2990,7 +2989,25 @@ use ../../core/token
     if !at_type?(T_TYPE)
       return false
     t = peek_type(1)
+    # `f64[]` — a typed-array return. Look past an *empty* bracket pair
+    # before deciding, so the body introducer after it is what gets
+    # tested. Requiring `[` `]` adjacent keeps this unambiguous: an index
+    # expression like `x[0]` always has something between the brackets.
+    if t == T_LBRACKET && peek_type(2) == T_RBRACKET
+      t = peek_type(3)
     t == T_COLON || t == T_NEWLINE || t == T_INDENT || t == T_DEDENT || t == T_EOF || t == T_SEMICOLON
+
+  # A type name with an optional `[]` suffix for typed arrays (`f64[]`),
+  # stored as the symbol `:"f64[]"` so lowering's existing `## f64[]:`
+  # normalization picks it up unchanged. Shared by the param-type list
+  # and both return-type slots so every position accepts one spelling.
+  -> parse_type_name_with_array_suffix
+    name = advance_value()
+    if at_type?(T_LBRACKET) && peek_type() == T_RBRACKET
+      advance()
+      advance()
+      name = name + "\[]"
+    name
 
   # Scan AST nodes for first use of "out" or "acc" as a variable name.
   -> detect_accumulator_name(nodes)
@@ -3044,7 +3061,7 @@ use ../../core/token
         param_types = []
         while !at_type?(T_RPAREN)
           if at_type?(T_TYPE) || at_type?(T_ID)
-            param_types.push(advance_value().to_sym())
+            param_types.push(parse_type_name_with_array_suffix().to_sym())
           else
             break
           match_type?(T_COMMA)
@@ -3052,7 +3069,7 @@ use ../../core/token
         expect_type(T_RPAREN)
         skip_spaces()
       if at_type?(T_TYPE) && looks_like_return_type?()
-        return_type = advance_value().to_sym()
+        return_type = parse_type_name_with_array_suffix().to_sym()
         skip_spaces()
 
     skip_newlines()

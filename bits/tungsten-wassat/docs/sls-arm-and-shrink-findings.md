@@ -1,11 +1,15 @@
 # SLS as a race arm, and the chrono/shrink question — 2026-07-27
 
-Follow-up to `why-we-lose.md`. Work is on branch **`sls-race-arm`** (commit
-`0979bbf`), not on `main`: another agent held an in-flight refactor of
-`lib/{policy,portfolio,solver,wassat}.w` throughout, and committing to files
-they hold uncommitted would have their next commit silently revert it.
-Everything below was measured in a detached worktree at HEAD with a
-hash-pinned compiler.
+Follow-up to `why-we-lose.md`. **Landed** (`97ed3d1`). It was developed on a
+branch in a detached worktree because another agent held an in-flight refactor
+of `lib/{policy,portfolio,solver,wassat}.w` at the time; that refactor has since
+landed as `383594b`, and this was rebased onto it, re-gated and re-measured
+against the new baseline. Every measurement used a hash-pinned compiler.
+
+**Headline against current main: geomean 0.7636** over the parity + survey rows
+(11 faster >5%, 7 slower >5%, 13 within 5%; total 44.9s -> 40.2s). The 0.69
+below was against the pre-refactor baseline and is kept because the per-row
+detail is still the clearest picture of where the arm pays.
 
 ## 1. SLS as a race arm — landed on the branch, geomean 0.69
 

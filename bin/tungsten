@@ -98,7 +98,7 @@ case "$1" in
           echo "  prints a before/after/Δ table (green = faster now, red = slower)."
           echo
           echo "  primitive...   names to run (default: all; see --list)"
-          echo "  --compare      also time C / Rust / Go / Zig peers where fair"
+          echo "  --compare      also time C / Rust / Go / Zig / Odin / Python peers where fair"
           echo "  --baseline     write bench_baseline.txt (the before/after reference)"
           echo "  --gate         exit non-zero if any primitive is below its regression floor"
           echo "  --runs N       best-of-N per op (default 1; each run is ~1s)"

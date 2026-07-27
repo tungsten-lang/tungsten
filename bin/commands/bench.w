@@ -332,6 +332,11 @@ CAL_MAX = 4000000000
     return "go build -o \"[out]\" \"[src]\" >/dev/null 2>&1"
   when "zig"
     return "zig build-exe -O ReleaseFast -lc \"[src]\" -femit-bin=\"[out]\" >/dev/null 2>&1"
+  when "odin"
+    return "odin build \"[src]\" -file -o:speed -out:\"[out]\" >/dev/null 2>&1"
+  when "py"
+    # No compile — the .py carries a python3 shebang; "build" is copy+chmod.
+    return "cp \"[src]\" \"[out]\" && chmod +x \"[out]\" >/dev/null 2>&1"
   ""
 
 -> bench_peer(name, lang, ext, runs)
@@ -449,10 +454,11 @@ BLOCK = "█"
   BLOCK * cells
 
 # Peer ratio column (Tungsten ÷ peer) or blank when the peer is absent/fails.
--> ratio_col(r, peer_rate)
+# Width 7 fits compiled peers (1.23×); Python ratios run to hundreds× — pass 9.
+-> ratio_col(r, peer_rate, w = 7)
   if peer_rate <= 0
-    return rj("·", 7)
-  rj(fmt_x((r * 100) / peer_rate), 7)
+    return rj("·", w)
+  rj(fmt_x((r * 100) / peer_rate), w)
 
 << ""
 << "  " + ORANGE + BOLD + "⚡ TUNGSTEN PRIMITIVE BASELINE" + RESET + "   " + DIM + "v" + version + RESET
@@ -462,7 +468,7 @@ BLOCK = "█"
 
 hdr = "  " + lj("primitive", 14) + rj("ns/op", 8) + "  " + rj("rate", 9) + "  " + lj("unit", 7)
 if compare_mode
-  hdr = hdr + rj("C", 7) + rj("Rust", 7) + rj("Go", 7) + rj("Zig", 7)
+  hdr = hdr + rj("C", 7) + rj("Rust", 7) + rj("Go", 7) + rj("Zig", 7) + rj("Odin", 7) + rj("Py", 9)
 elsif have_base
   hdr = hdr + rj("baseline", 10) + rj("Δ", 8)
 << ""
@@ -512,9 +518,9 @@ while ci < cats.size()
           line = line + "  " + DIM + lj(unit[c], 7) + RESET
           if compare_mode
             if peer[p] == true
-              line = line + GREY + ratio_col(r, bench_peer(p, "c", "c", runs)) + ratio_col(r, bench_peer(p, "rs", "rs", runs)) + ratio_col(r, bench_peer(p, "go", "go", runs)) + ratio_col(r, bench_peer(p, "zig", "zig", runs)) + RESET
+              line = line + GREY + ratio_col(r, bench_peer(p, "c", "c", runs)) + ratio_col(r, bench_peer(p, "rs", "rs", runs)) + ratio_col(r, bench_peer(p, "go", "go", runs)) + ratio_col(r, bench_peer(p, "zig", "zig", runs)) + ratio_col(r, bench_peer(p, "odin", "odin", runs)) + ratio_col(r, bench_peer(p, "py", "py", runs), 9) + RESET
             else
-              line = line + GREY + rj("·", 7) + rj("·", 7) + rj("·", 7) + rj("·", 7) + RESET
+              line = line + GREY + rj("·", 7) + rj("·", 7) + rj("·", 7) + rj("·", 7) + rj("·", 7) + rj("·", 9) + RESET
           elsif have_base
             b = base[p]
             if b != nil && b > 0
@@ -542,7 +548,7 @@ while ci < cats.size()
 
 << ""
 if compare_mode
-  << "  [GREY]C clang -O3 -march=native -flto · Rust rustc -O · Go go build · Zig ReleaseFast · ratio = Tungsten ÷ peer[RESET]"
+  << "  [GREY]C clang -O3 -march=native -flto · Rust rustc -O · Go go build · Zig ReleaseFast · Odin -o:speed · Py CPython 3 · ratio = Tungsten ÷ peer[RESET]"
 elsif have_base
   << "  [GREY]Δ = now ÷ baseline · [GREEN]green[GREY] faster now · [REDC]red[GREY] slower · baseline from [baseline_path][RESET]"
 else

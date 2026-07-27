@@ -55,7 +55,7 @@ WCOL   = "\e[38;5;214m"
 # desyncs the harness. `cat` groups the display; `desc` documents the metric;
 # `peer` marks primitives that have a fair single-op peer equivalent for
 # --compare.
-prims = ["int_add", "int_mul", "int_bitops", "float_mul", "new_array", "new_string", "str_concat", "new_object", "new_hash", "array_get", "array_set", "hash_get", "str_build", "fn_call", "method_call", "block_call"]
+prims = ["int_add", "int_mul", "int_bitops", "float_mul", "new_array", "new_string", "str_concat", "new_object", "new_hash", "array_get", "array_get_heap", "array_mod", "array_set", "array_set_heap", "hash_get", "str_build", "fn_call", "method_call", "block_call"]
 
 cat = {}
 desc = {}
@@ -70,8 +70,11 @@ cat["new_string"] = "allocation"; desc["new_string"] = "int-to-string allocation
 cat["str_concat"] = "allocation"; desc["str_concat"] = "string concatenation (+ alloc)"
 cat["new_object"] = "allocation"; desc["new_object"] = "user-object instantiation"
 cat["new_hash"] = "allocation";  desc["new_hash"] = "hash alloc + one insert churn"
-cat["array_get"] = "collection"; desc["array_get"] = "typed-array element read (in-bounds)"
-cat["array_set"] = "collection"; desc["array_set"] = "typed-array element write (in-bounds)"
+cat["array_get"] = "collection"; desc["array_get"] = "STACK array read (headerless SmallArray)"
+cat["array_get_heap"] = "collection"; desc["array_get_heap"] = "HEAP array read (WArray, 24B header)"
+cat["array_mod"] = "collection"; desc["array_mod"] = "wraparound read tab\[i & 1023\] (novec loop)"
+cat["array_set"] = "collection"; desc["array_set"] = "STACK array write (headerless SmallArray)"
+cat["array_set_heap"] = "collection"; desc["array_set_heap"] = "HEAP array write (WArray, 24B header)"
 cat["hash_get"] = "collection";  desc["hash_get"] = "hash lookup by string key"
 cat["str_build"] = "string";     desc["str_build"] = "StringBuffer append throughput (chars/s)"
 cat["fn_call"] = "dispatch";     desc["fn_call"] = "static function call (may inline)"
@@ -96,7 +99,29 @@ peer["int_mul"] = true
 peer["int_bitops"] = true
 peer["float_mul"] = true
 peer["array_get"] = true
+peer["array_mod"] = true
 peer["array_set"] = true
+
+# ---- regression thresholds (min ops/sec) ----------------------------------
+# A primitive with a defined floor is measured best-of-N (see THRESH_RUNS, to
+# reach steady-state peak) and flagged RED when it falls below. `tungsten bench
+# --gate` turns a breach into a non-zero exit (for CI); a plain run only warns.
+# Floors are tuned for the reference machine (Apple M5 Max) — retune per host.
+# array_get: the headerless-SmallArray sequential read fully NEON-vectorizes on
+# LLVM-22 and PEAKS at ~15.8B ops/s here (best-of-9), edging out clang/rustc.
+# The floor is 12B — well under the peak so CPU-frequency/load variance never
+# trips it, but a codegen regression (lost vectorization, align/headerless
+# breakage) more than halves the rate to ~4-8B and is caught immediately. A
+# literal ~15B floor would flap: 15B IS the peak, so any load dips below it.
+# array_mod: the wraparound read `tab[i & 1023]` relies on lowering's
+# masked-index loop detection stamping `llvm.loop.vectorize.enable=false`
+# (LLVM's vectorizer mis-peels this shape). With the stamp: ~10.4B ops/s,
+# C parity. Losing it drops to ~3.8B — the 7B floor catches that while
+# riding out load variance.
+THRESH_RUNS = 9
+thresh = {}
+thresh["array_get"] = 12000000000
+thresh["array_mod"] = 7000000000
 
 # ---- integer-only formatting (interpreter float division is exact-rational) -
 -> lj(s, w)
@@ -194,6 +219,7 @@ if runs < 1
 list_only = env("BENCH_LIST") != nil && env("BENCH_LIST") != ""
 baseline_mode = env("BENCH_BASELINE") != nil && env("BENCH_BASELINE") != ""
 compare_mode = env("BENCH_COMPARE") != nil && env("BENCH_COMPARE") != ""
+gate_mode = env("BENCH_GATE") != nil && env("BENCH_GATE") != ""
 baseline_path = "bench_baseline.txt"
 
 want = []
@@ -447,6 +473,8 @@ elsif have_base
 warmup(3.0)
 
 # ---- stream: measure + print each primitive the moment it completes --------
+# gate_fail is a 1-element list so the top-level loop can mutate it in place.
+gate_fail = [false]
 ci = 0
 while ci < cats.size()
   c = cats[ci]
@@ -463,7 +491,13 @@ while ci < cats.size()
     while pi < prims.size()
       p = prims[pi]
       if cat[p] == c
-        res = bench_native(primdir + "/" + p + ".w", runs)
+        # Primitives with a regression floor are measured best-of-THRESH_RUNS to
+        # reach steady-state peak, so a floor near the peak doesn't flap on noise.
+        pruns = runs
+        floor = thresh[p]
+        if floor != nil && pruns < THRESH_RUNS
+          pruns = THRESH_RUNS
+        res = bench_native(primdir + "/" + p + ".w", pruns)
         if !res[1]
           << "  " + lj(p, 14) + GREY + "  build/run failed" + RESET
         else
@@ -494,6 +528,14 @@ while ci < cats.size()
             else
               line = line + GREY + rj("·", 10) + rj("new", 8) + RESET
           line = line + "  " + ORANGE + bar_for(r, BARW) + RESET + "  " + DIM + desc[p] + RESET
+          # The floor is a clean-machine codegen gate; --compare compiles 8 peer
+          # binaries mid-run and depresses the numbers, so skip the check there.
+          if floor != nil && !compare_mode
+            if r >= floor
+              line = line + GREEN + "  ✔ >=" + fmt_rate(floor) + " floor" + RESET
+            else
+              line = line + REDC + "  x " + fmt_rate(r) + " < " + fmt_rate(floor) + " floor — REGRESSION" + RESET
+              gate_fail[0] = true
           << line
       pi = pi + 1
   ci = ci + 1
@@ -509,3 +551,14 @@ else
 
 if builddir != "" && builddir != "/"
   system("rm -rf \"[builddir]\"")
+
+# Regression gate: a breached floor is always flagged RED inline; `--gate` makes
+# it a hard failure (non-zero exit) for CI.
+if gate_fail[0]
+  if gate_mode
+    << "  [REDC]✗ regression gate FAILED — a primitive fell below its floor[RESET]"
+    << ""
+    exit(1)
+  else
+    << "  [REDC]✗ a primitive is below its regression floor (run with --gate to fail CI)[RESET]"
+    << ""

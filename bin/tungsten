@@ -84,6 +84,7 @@ case "$1" in
         --list)      export BENCH_LIST=1 ;;
         --baseline)  export BENCH_BASELINE=1 ;;
         --compare)   export BENCH_COMPARE=1 ;;
+        --gate)      export BENCH_GATE=1 ;;
         --only)      shift; [ "$#" -gt 0 ] && export BENCH_ONLY="$1" ;;
         --only=*)    export BENCH_ONLY="${1#--only=}" ;;
         --runs)      shift; [ "$#" -gt 0 ] && export BENCH_RUNS="$1" ;;
@@ -99,6 +100,7 @@ case "$1" in
           echo "  primitive...   names to run (default: all; see --list)"
           echo "  --compare      also time C / Rust / Go / Zig peers where fair"
           echo "  --baseline     write bench_baseline.txt (the before/after reference)"
+          echo "  --gate         exit non-zero if any primitive is below its regression floor"
           echo "  --runs N       best-of-N per op (default 1; each run is ~1s)"
           echo "  --list         list the primitives and exit"
           echo

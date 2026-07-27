@@ -1,10 +1,11 @@
-# primitive: array_get (STACK) — sequential element read over a headerless
-# stack SmallArray<i64,1024> (the fair equivalent of C/Rust `[i64;1024]`), run
-# inside a function so stack-promotion fires. Array contents are seeded from the
-# runtime iter count so LLVM can't fold the reduction; the inner sweep is a clean
-# linear reduction (no modular scatter), which LLVM-22 fully NEON-vectorizes.
+# primitive: array_get_heap (HEAP) — sequential element read over a heap-
+# allocated typed array `i64[1024]` (a WArray: 24-byte header + separate slots
+# malloc). Same access pattern as array_get (stack) so the two lines are a
+# direct heap-vs-stack comparison. Element-read throughput is representation-
+# independent once the slots base is hoisted out of the loop; the stack win is
+# in ALLOCATION (see new_array), not access.
 -> run(reps) (i64) i64
-  tab = SmallArray<i64, 1024>.new
+  tab = i64[1024]
   j = 0 ## i64
   while j < 1024
     tab[j] = j * 2654435761 + reps

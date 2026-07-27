@@ -1,9 +1,8 @@
-# primitive: array_set (STACK) — sequential element write over a headerless
-# stack SmallArray<i64,1024>, run inside a function so stack-promotion fires.
-# The final `chk ^ tab[...]` read-back keeps the store loop from being
-# dead-code-eliminated (a stack buffer nobody reads is dead).
+# primitive: array_set_heap (HEAP) — sequential element write over a heap-
+# allocated typed array `i64[1024]` (WArray). Same access pattern as array_set
+# (stack) so the two lines are a direct heap-vs-stack comparison.
 -> run(reps) (i64) i64
-  tab = SmallArray<i64, 1024>.new
+  tab = i64[1024]
   t0 = clock
   chk = reps ## i64
   r = 0 ## i64

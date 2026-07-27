@@ -2679,7 +2679,16 @@ use ../../languages/tungsten/lexers/regex_helpers
 
     i = 0
     while i < count
-      materialize_packed_token(packed[i])
+      # Strip the W_LEXICAL_TOKEN tag (0xFFFC<<48) at the boundary: every
+      # field lives in bits 0-45 (flag 0, offset 2-25, len 26-37, type
+      # 38-45), so the low 46 bits carry the whole token and fit the
+      # 47-bit inline-int payload. With the tag on, boxing the argument
+      # allocated a BigInt PER TOKEN, and every downstream bit-op
+      # (materialize, emit's repack, the parser's per-peek decodes) ran
+      # bignum limb walks. Untagged, the stream is plain inline ints end
+      # to end. No compiler-path consumer dispatches Token methods on the
+      # tag (parser reads via mask helpers); token streams are identical.
+      materialize_packed_token(packed[i] & 0x3FFFFFFFFFFF)
       i += 1
 
     @token_count

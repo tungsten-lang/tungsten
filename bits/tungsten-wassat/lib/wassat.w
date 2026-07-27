@@ -287,9 +287,9 @@ use portfolio
   # model reconstruction, and the certificate prefix for every derivation.
   # The trusted path is CHEAP-FIRST: light phases (~150ms even on
   # 100k-clause inputs) strip the implication shell that stalls local
-  # search, an SLS burst hunts a model there, and the expensive
-  # subsumption/BVE rounds run only when the burst misses. The certificate
-  # path keeps the single-shot run().
+  # search; bounded CDCL and lucky phases race; expensive subsumption/BVE
+  # rounds run only when both miss. The
+  # certificate path keeps the single-shot run().
   t0 = ccall("__w_clock_ms")
   pre = WassatPreprocess.new(formula["nvars"], formula["clauses"], proof_mode)
   pre.enable_dual_emission if proof_mode == WASSAT_PROOF_WRAT && drat_final != nil
@@ -298,36 +298,16 @@ use portfolio
     # A raw kernel runs no preprocessing technique at all, so it does not
     # need the preprocessor: hand the parser's flat arrays straight to the
     # solver (see wassat_raw_artifact).
-    if config.raw_kernel?
+    if config.race_route?
       art = wassat_raw_artifact(formula, formula["nvars"])
     else
       art = pre.run_light_flat(formula)
     tprof = wassat_prof("cli.light", tprof)
     if art["status"] == 0
-      # The burst pays only on kernels local search can actually crack —
-      # measured: hits on small kernels (ibm-2), never on 100k-clause
-      # ones (the SLS constructor's normalization alone costs more than
-      # the CDCL probe), and never worth it below ~2k clauses, where the
-      # 1ms bounded probe decides before the burst's 12ms even starts
-      # (uuf100/php/dubois class — 18ms -> ~6ms total).
-      burst0 = { "sat": false }
-      if art["clauses"].size > 2000 && art["clauses"].size <= 50000
-        reduced0 = { "nvars": formula["nvars"], "clauses": art["clauses"] }
-        burst0 = wassat_sls_solve(reduced0, 60000, 7)
-      tprof = wassat_prof("cli.sls_burst", tprof)
-      if burst0["sat"]
-        model = wassat_reconstruct_model(art["stack"], burst0["model"], formula["nvars"])
-        unless wassat_model_satisfies?(formula, model)
-          raise "internal error: SLS burst model does not satisfy the input formula"
-        pre_ms0 = ccall("__w_clock_ms") - t0
-        print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
-        << "c mode: fast (light+sls burst)"
-        << "c conflicts: 0, decisions: 0"
-        << "c stats restarts=0 reduces=0 flips=[burst0["flips"]] " + wassat_pre_stats_text(art["stats"], pre_ms0)
-        exit(10)
       light_stack = art["stack"]
       probe_p = nil
       probe_out = nil
+      scout_solver = nil
 
       # Bounded CDCL scout (flat-load, so construction is native): many
       # structured instances decide within a few thousand conflicts on the
@@ -398,6 +378,7 @@ use portfolio
           << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(art["stats"], pre_msl)
           exit(lucky_status == 1 ? 10 : 20)
         spr = scout_out[0]
+        scout_solver = scout_out[1]
         budget_used = spr["conflicts"]
         if spr["status"] != 0
           pre_msq = ccall("__w_clock_ms") - t0
@@ -417,7 +398,8 @@ use portfolio
           << "c stats restarts=[spr["restarts"]] reduces=[spr["reduces"]] " + wassat_pre_stats_text(art["stats"], pre_msq)
           exit(spr["status"] == 1 ? 10 : 20)
 
-      if art["raw"] == true && (options["conflicts"] == 0 || budget_used < options["conflicts"])
+      staged_pre = art["raw"] == true && config.stage_pre_after_scout?
+      if art["raw"] == true && !staged_pre && (options["conflicts"] == 0 || budget_used < options["conflicts"])
         arms = config.raw_race_arms
         # Preprocessing joins the race as ARMS, each in its own thread, each
         # rendering the formula and then solving what it rendered. Nothing is
@@ -442,7 +424,10 @@ use portfolio
         pre_arms = 0 if formula["flat_ncl"] > wassat_pre_max_clauses
         race = nil
         if arms > 1 || pre_arms > 0
-          race = wassat_race_build(formula["nvars"], art, arms, formula)
+          continuation = config.continue_scout? ? scout_solver : nil
+          continuation_spent = continuation == nil ? 0 : budget_used
+          race = wassat_race_build(formula["nvars"], art, arms, formula,
+                                   continuation, continuation_spent)
           if pre_arms > 0
             # A preprocessor per arm: two threads rendering through one would
             # race on its arena. Constructed HERE, on the main thread, because
@@ -496,7 +481,12 @@ use portfolio
           exit(rr["status"] == 1 ? 10 : 20)
         if rr != nil
           budget_used += rr["conflicts"]
-      unless config.raw_kernel?
+      if staged_pre
+        pre.force_full_pipeline
+        art = pre.run_light_flat(formula)
+        art = pre.run_heavy if art["status"] == 0
+        tprof = wassat_prof("cli.staged_pre", tprof)
+      elsif !config.race_route?
         art = pre.run_heavy
         tprof = wassat_prof("cli.heavy", tprof)
       # did the probe already win while we preprocessed?

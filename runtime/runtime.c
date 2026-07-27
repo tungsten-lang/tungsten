@@ -18272,6 +18272,27 @@ WValue w_executable_dir(void) {
     return w_string_take(path, strlen(path));
 }
 
+/* Cheap process-local resource probes for schedulers and portfolios. Keep
+ * these native: the former System.cpu_count spawned sysctl/getconf through a
+ * shell, making a one-integer policy decision cost more than a small solve. */
+WValue w_cpu_count(void) {
+    long count = sysconf(_SC_NPROCESSORS_ONLN);
+    if (count < 1) count = 1;
+    if (count > 4096) count = 4096;
+    return w_int((int64_t)count);
+}
+
+WValue w_physical_memory_bytes(void) {
+    long pages = sysconf(_SC_PHYS_PAGES);
+    long page_size = sysconf(_SC_PAGESIZE);
+    if (pages < 1 || page_size < 1) return w_int(0);
+    uint64_t bytes = (uint64_t)pages * (uint64_t)page_size;
+    /* WValue small integers have ample room on supported 64-bit hosts, but
+     * keep an explicit signed bound for exotic sysconf implementations. */
+    if (bytes > (uint64_t)INT64_MAX) bytes = (uint64_t)INT64_MAX;
+    return w_int((int64_t)bytes);
+}
+
 /* Return the runtime/ directory relative to the running executable.
  * e.g. binary at "/usr/local/tungsten/bin/tungsten-compiler"
  *      → returns "/usr/local/tungsten/runtime/"

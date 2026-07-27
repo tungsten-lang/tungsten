@@ -27,6 +27,12 @@ if count < 1
   << "system cpu_count FAILED"
   exit(1)
 
+memory = System.physical_memory_bytes ## i64
+if memory < 0 || (memory > 0 && memory < 1048576)
+  << "system physical_memory_bytes FAILED"
+  exit(1)
+
 << "system executable_path ok: " + path
 << "system executable_dir ok: " + dir
 << "system cpu_count ok: " + count.to_s()
+<< "system physical_memory_bytes ok: " + memory.to_s()

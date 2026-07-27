@@ -197,7 +197,7 @@ describe "Tungsten Wassat" ->
 
   context "EVSIDS variable-order heap" ->
     it "raises bumped variables to the top and keeps inverse positions valid" ->
-      asg = i64[6]
+      asg = i8[6]
       act = i64[6]
       heap = i64[6]
       hpos = i64[6]
@@ -219,7 +219,7 @@ describe "Tungsten Wassat" ->
       expect(wassat_heap_valid(heap, hpos, act, hst, 5)).to eq(1)
 
     it "lazily drops assigned variables and reinserts them after unassignment" ->
-      asg = i64[5]
+      asg = i8[5]
       act = i64[5]
       heap = i64[5]
       hpos = i64[5]

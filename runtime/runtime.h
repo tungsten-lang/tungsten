@@ -1549,6 +1549,8 @@ WValue __w_system(WValue command);
 /* ---- Process paths ---- */
 WValue w_executable_path(void);
 WValue w_executable_dir(void);
+WValue w_cpu_count(void);
+WValue w_physical_memory_bytes(void);
 
 /* ---- Monotonic clock ---- */
 WValue __w_clock_ms(void);

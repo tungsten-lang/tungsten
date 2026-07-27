@@ -336,12 +336,12 @@ WASSAT_CONGRUENCE_DEFAULT = true
     @ternary = counts[4]
     0
 
-  -> raw_kernel?
-    # This no longer decides whether preprocessing HAPPENS — the raw path
-    # races preprocessed renderings of the formula (wassat_race_stage_pre), so
-    # a "raw" kernel gets probing, substitution, subsumption and elimination
-    # anyway, as racers rather than as a commitment. What is left is a choice
-    # between two ROUTES: race the renderings, or solve one serially.
+  -> raw_heuristics?
+    # This is the historical raw-kernel classifier used by preprocessing
+    # technique gates. Trusted routing is deliberately a separate question
+    # (race_route?): a raw race still gets its established VMTF/target search
+    # matrix, regardless of whether this classifier would have selected a
+    # serial raw kernel.
     #
     # Swept 2026-07-26, medians of 3, ratio against the value below. Every
     # column from 0 to 100,000 is identical on every instance; the ratios
@@ -360,20 +360,13 @@ WASSAT_CONGRUENCE_DEFAULT = true
     # preprocessing gap — the race finds the same reduced formula, it just
     # pays a slice of racing and two thread-spawn rounds to get there.
     #
-    # So the threshold is no longer load-bearing and any value in [0, 100000]
-    # is equivalent. It is kept, at the value it has always had, because
-    # moving it UP is a measured regression and moving it DOWN also flips
-    # VMTF, target phases, chronological backtracking and the probe budget
-    # (see the confound note below) — a change that deserves its own campaign,
-    # not a side effect of this one. Measured at 0 it is neutral-to-better on
-    # 14 instances, random-3-SAT SAT most of all (uf250-0100 0.245s -> 0.017s),
-    # which is where that campaign should start.
-    #
-    # Validation hook: no correctness-suite instance is anywhere near this
-    # size, so lowering the threshold is the only way to exercise the raw
-    # path across the differential.
-    return @nclauses > env("WASSAT_RAW_AT").to_i if env("WASSAT_RAW_AT") != nil
     return true if @nclauses > 50000
+    # Once routing is separated, small random-3-SAT no longer inherits the
+    # serial-preprocessed EVSIDS bundle by accident. In the raw race the
+    # focused VMTF/target scout is the SAT specialist (uf250-0100: 0.020s
+    # versus 0.268s), while diversified EVSIDS and preprocessed arms still
+    # cover the UNSAT side.
+    return true if @nclauses >= 80 && @ternary * 4 >= @nclauses * 3
     # Size alone is the wrong rule for the middle band. Measured, verdicts
     # identical: bmc-ibm-2 (11,683 clauses, structured) runs 17.5ms through
     # the pipeline against 6.3ms raw, while uuf250-01 (1,065 clauses,
@@ -381,13 +374,40 @@ WASSAT_CONGRUENCE_DEFAULT = true
     # dense ternary formulas genuinely want probing and elimination, and
     # structured ones do not. The ternary-dominance test that separates
     # them for lookahead and shrinking separates them here too.
-    #
-    # Confounded, deliberately: this predicate also selects VMTF, target
-    # phases and chronological backtracking, so the numbers above are the
-    # combined effect of the bypass and the heuristics, not the bypass
-    # alone. Splitting the two is worth doing before this threshold moves
-    # again.
     @nclauses > 5000 && !(@ternary * 4 >= @nclauses * 3)
+
+  # Proof/preprocessor compatibility name: preprocessing technique gates keep
+  # the historical classifier. The trusted CLI uses race_route? instead.
+  -> raw_kernel?
+    self.raw_heuristics?
+
+  -> race_route?
+    # Raw and preprocessed renderings now race, so trusted routing no longer
+    # has to predict which representation will win. This is especially
+    # important for small SAT random-3-SAT: uf250-0100 is 0.268s through the
+    # serial preprocessing route and 0.020s through the raw race, while the
+    # preprocessed arms remain present to catch UNSAT cases that prefer
+    # elimination. The only formula that cannot benefit is the empty one.
+    #
+    # Measurement hook retained for controlled route A/Bs. Unlike the old
+    # switch, it changes ROUTING ONLY; a raw race retains its established
+    # VMTF/target matrix.
+    return @nclauses > env("WASSAT_RAW_AT").to_i if env("WASSAT_RAW_AT") != nil
+    # Compact pigeonhole rows finish inside the prepared scout with the exact
+    # same 416-conflict trajectory, while raw intake adds ~15ms. Larger rows
+    # (hole9 and up) cross into the race and benefit from scout continuation.
+    return false if @nvars <= 64 && @nclauses >= 100 && @binary * 2 >= @nclauses && @max_clause >= 4
+    @nclauses > 0
+
+  -> stage_pre_after_scout?
+    # A staged exception for the dense random-3-SAT band: take the focused
+    # raw SAT shot first, then—only after that shot misses—avoid paying for
+    # six concurrent long searches on the upper end of the family. This is a
+    # work observation, not a guessed verdict: uf250-0100 answers inside the
+    # 2k-conflict scout, while uuf250 reaches the miss and is faster through
+    # the serial prepared kernel. Smaller uuf200 still benefits from the wide
+    # race, so both variable and clause floors are intentional.
+    @nvars >= 225 && @nclauses >= 1000 && @nclauses <= 5000 && @ternary * 4 >= @nclauses * 3
 
   -> use_vmtf(raw)
     raw
@@ -610,10 +630,29 @@ WASSAT_CONGRUENCE_DEFAULT = true
     # smulo016 234,312 -> 122,873 conflicts and minand064 94,504 -> 40,420 at
     # width 16 — so the ceiling is a function of free performance cores, and
     # the principled rule is total race width (raw + preprocessing arms)
-    # against that number. wassat has no core-count probe; until it does, a
-    # constant that never oversubscribes is the honest thing to ship.
+    # against that number.
     return env("WASSAT_ARMS").to_i if env("WASSAT_ARMS") != nil
-    4
+    # Fill no more than the cores left after the two representation arms,
+    # capped at the breadth-set winner (four). This preserves four raw + two
+    # preprocessed arms on the development host, but does not oversubscribe a
+    # 2- or 4-core machine.
+    cores = System.cpu_count ## i64
+    arms = cores - 2
+    arms = 1 if arms < 1
+    arms = 4 if arms > 4
+
+    # A clause-count ladder could not predict useful diversity, but formula
+    # size DOES predict resident memory. Estimate the fixed flat solver
+    # structures conservatively and keep all raw arms below one third of
+    # physical RAM, leaving room for the parsed formula and preprocessing
+    # renderings. Unknown memory (zero) leaves the CPU-only decision intact.
+    memory = System.physical_memory_bytes ## i64
+    if memory > 0
+      per_arm = 25165824 + 24 * @nliterals + 96 * @nclauses
+      budget = memory / 3
+      while arms > 1 && per_arm * arms > budget
+        arms -= 1
+    arms
 
   -> lookahead_candidates
     # Trial propagation is a strong win for compact random 3-SAT and
@@ -625,6 +664,13 @@ WASSAT_CONGRUENCE_DEFAULT = true
     choice_binary = @nvars >= 20 && @nvars <= 512 && @nclauses >= 100 && @binary * 2 >= @nclauses && @max_clause >= 4
     return 16 if random3 || choice_binary
     0
+
+  -> continue_scout?
+    # Continuation earns an extra runnable arm only on the compact random-3
+    # and choice/binary families where the bounded scout is itself a useful
+    # specialist. On general structured SAT it merely contends with the four
+    # established matrix arms (mrpp6 median regressed 31%).
+    self.lookahead_candidates > 0
 
   -> probe_ms(raw)
     raw ? 150 : 120

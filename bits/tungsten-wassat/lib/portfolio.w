@@ -428,7 +428,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
 # main thread would put a from_flat back on the critical path, which is the
 # cost this arrangement exists to remove.
 -> wassat_lucky_arm_body(nv, art, res, base, stop)
-  s = Wassat.from_flat(nv, art, 0)
+  s = Wassat.from_flat_lucky(nv, art)
   s.set_stop_cell(stop)
   s.lucky_shared(res, base)
 
@@ -456,7 +456,15 @@ WASSAT_ARM_SLS = 2             # local search, models only
     rem = cap - spr["conflicts"]
     slice = rem < 512 ? rem : 512
     spr = s.solve_budget(slice)
+  if spr["status"] == 1 || spr["status"] == 0 - 1
+    stop[1] = spr["status"]
+    stop[0] = 1
   out.push(spr)
+  # Keep the live solver beside the detached result. A scout miss has already
+  # paid construction, propagation, conflicts, learned clauses and heuristic
+  # state; the main race can continue that exact search instead of throwing
+  # all of it away and rebuilding four solvers from the original formula.
+  out.push(s)
   0
 
 # Raw-kernel basin race: K allocation-free arms over the SAME flat artifact,
@@ -469,7 +477,13 @@ WASSAT_ARM_SLS = 2             # local search, models only
 # Build the raw arms and the state they race over, returned as a bundle so
 # the coordinator can run the race in SLICES and do main-thread work — which
 # is to say preprocessing — in the gaps between them.
--> wassat_race_build(nv, art, threads, formula)
+-> wassat_race_build(nv, art, threads, formula, incumbent = nil, incumbent_conflicts = 0)
+  # Continuation is additive. Replacing matrix arm 3 made qwh.35 lose its
+  # repeatable 4,366-conflict trajectory; the scout has already allocated its
+  # solver, so keeping it as one extra arm restores that diversity without
+  # another large allocation.
+  matrix_threads = threads
+  threads += 1 if incumbent != nil
   # Capacity for the raw arms plus the two preprocessed renderings, allocated
   # once: `res` is addressed by arm index and must not move after an arm has
   # a pointer into it.
@@ -487,19 +501,35 @@ WASSAT_ARM_SLS = 2             # local search, models only
   # to name the configuration it is replacing, name the one it is replacing it
   # with, and give the axes credit separately (see wassat_race_axis_score).
   cfgs = i64[cap * WASSAT_CFG_STRIDE]
+  # Conflicts an incumbent spent before joining this race. Race budgets are
+  # additional work, and the CLI has already charged the scout work once, so
+  # final accounting subtracts this offset from the winning arm.
+  offsets = i64[cap]
   solvers = []
   a = 0
   while a < threads
-    s = Wassat.from_flat(nv, art, 0)
+    # Preserve every established matrix arm. The extra last slot is the scout
+    # continuation; it must not displace an arm with a different basin.
+    continued = incumbent != nil && a == threads - 1
+    s = continued ? incumbent : Wassat.from_flat(nv, art, 0)
+    offsets[a] = incumbent_conflicts if continued
     s.enable_fixed_caps
     s.set_stop_cell(stop)
     # A lone raw arm has nobody to share with — the preprocessing arms solve
     # DIFFERENT formulas and must never take its clauses — so it keeps the
     # export path out of its inner loop entirely.
-    if threads > 1
+    # Keep continuation private: letting it publish into the established
+    # matrix perturbed qwh.35's repeatable 4,366-conflict winning basin. Its
+    # value is the state it already learned, not another source of clauses.
+    if threads > 1 && !continued
       s.enable_sharing(ring, ring_cap, ring_maxlen, a)
       s.set_share_credit(credit)
-    if threads == 1
+    if continued
+      # Keep every bit of the scout trajectory. In particular, do not run
+      # raw simplification after search has begun or overwrite the phases it
+      # learned. Sharing/fixed-cap state above is safe to attach at a barrier.
+      z = 0
+    elsif matrix_threads == 1
       # Sole raw arm: take the configuration the serial post-probe solve
       # would have used, so adding a preprocessing arm changes only what
       # runs BESIDE the raw search and never the raw trajectory itself.
@@ -507,13 +537,15 @@ WASSAT_ARM_SLS = 2             # local search, models only
       s.simplify_raw if art["config"].force_simplify?
     else
       wassat_race_matrix_config(a, cfgs, a * WASSAT_CFG_STRIDE)
-      wassat_race_apply_config(s, cfgs, a * WASSAT_CFG_STRIDE, art["config"].force_simplify?)
+      wassat_race_apply_config(s, cfgs, a * WASSAT_CFG_STRIDE,
+                               art["config"].force_simplify?,
+                               art["config"].use_vmtf(art["raw"] == true))
     solvers.push(s)
     a += 1
   { "nv": nv, "solvers": solvers, "res": res, "stop": stop, "threads": threads,
     "cap": cap, "pre": [], "formula": formula, "tel": tel, "cfgs": cfgs,
     "art": art, "ring": ring, "ring_cap": ring_cap, "ring_maxlen": ring_maxlen,
-    "credit": credit }
+    "credit": credit, "offsets": offsets }
 
 # ---- arm configuration as data ------------------------------------------------
 #
@@ -568,8 +600,12 @@ WASSAT_TEL_STRIDE = 8
 # Apply a configuration vector to a freshly built solver. `forced` is the
 # WASSAT_SIMPLIFY measurement hook: it only reaches arms whose simplify axis is
 # 0, exactly as before.
--> wassat_race_apply_config(s, cfgs, b, forced)
-  s.disable_vmtf if cfgs[b] == 1
+-> wassat_race_apply_config(s, cfgs, b, forced, policy_vmtf)
+  if cfgs[b] == 1
+    if policy_vmtf
+      s.disable_vmtf
+    else
+      s.enable_vmtf
   s.reseed_phases(cfgs[b + 2]) if cfgs[b + 1] == 1
   s.set_positive_phases if cfgs[b + 1] == 2
   s.enable_chrono if cfgs[b + 3] == 1
@@ -614,8 +650,8 @@ WASSAT_TEL_STRIDE = 8
 # round resumes that search instead of re-rendering the formula. Private per
 # arm, so pushing to it needs no synchronisation.
 #
-# `round` 0 renders and takes the late lucky shot; every later round is a pure
-# search slice on the solver round 0 left behind. A rendering cannot be sliced
+# `round` 0 renders and starts search; every later round is a pure search slice
+# on the solver round 0 left behind. A rendering cannot be sliced
 # in the middle, so round 0 is as long as the rendering takes and the barrier
 # after it is the one place a raw arm can be left waiting — which is why round
 # 0 is also the longest slice the race ever hands out.
@@ -641,20 +677,10 @@ WASSAT_TEL_STRIDE = 8
     stop[1] = 0 - 1
     stop[0] = 1
     return 0
-  # kissat's LATE lucky shot (search.c: luckylate, after preprocessing), taken
-  # here by the arm that did the rendering rather than by an arm of its own.
-  # The rendering exists only inside this thread — handing it to a separate arm
-  # would mean either a synchronised handoff or a second preprocessor rendering
-  # the same formula twice — so the arm that produced it takes its own shot on
-  # it, and the coordinator needs no new channel: a win lands in this arm's
-  # result slot and is reconstructed through this arm's elimination stack,
-  # exactly like a search win. The dives get their own solver so that a miss
-  # leaves the arm's search trajectory bit-identical to what it would have been.
-  if stop[0] == 0
-    ls = Wassat.from_flat(nv, rendered, 0)
-    ls.set_stop_cell(stop)
-    ls.lucky_shared(res, base)
-    return 0 if res[base] != 0
+  # The former late-lucky shot built a complete throwaway solver for every
+  # rendering. Across 154 measured races it produced no answer and only added
+  # startup/memory pressure, while the early lucky arm already covers the
+  # original formula. Go directly from the prepared rendering to useful CDCL.
   s = Wassat.from_flat(nv, rendered, 0)
   s.enable_fixed_caps
   s.set_stop_cell(stop)
@@ -860,6 +886,7 @@ WASSAT_AXIS_SLOTS = 10
   cfgs = race["cfgs"]
   art = race["art"]
   cap = race["cap"]
+  offsets = race["offsets"]
   total = threads + pre.size
   round_ms = wassat_race_round_ms
   trace = wassat_race_trace?
@@ -1037,7 +1064,9 @@ WASSAT_AXIS_SLOTS = 10
             ns.set_stop_cell(stop)
             ns.enable_sharing(race["ring"], race["ring_cap"], race["ring_maxlen"], worst)
             ns.set_share_credit(credit)
-            wassat_race_apply_config(ns, cfgs, cb, art["config"].force_simplify?)
+            wassat_race_apply_config(ns, cfgs, cb,
+                                     art["config"].force_simplify?,
+                                     art["config"].use_vmtf(art["raw"] == true))
             solvers[worst] = ns
             # A fresh solver's counters restart at zero, so its telemetry
             # baseline restarts with them. `spent` deliberately does NOT: the
@@ -1080,7 +1109,7 @@ WASSAT_AXIS_SLOTS = 10
   conflicts = 0
   if winner >= 0
     base = winner * (nv + 8)
-    conflicts = res[base + nv + 4]
+    conflicts = res[base + nv + 4] - offsets[winner]
     if status == 1
       v = 1
       while v <= nv

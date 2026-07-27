@@ -905,6 +905,10 @@ WASSAT_PROOF_DRAT = 2
     return 0 unless @proof_mode == WASSAT_PROOF_NONE
     # Assumptions own the first decision levels; a dive would fight them.
     return 0 if @nassump > 0 || @dlevel > 0
+    # A racing search may have answered while this arm was constructing its
+    # solver. Do not start four full propagation sweeps after the answer is
+    # already known.
+    return 0 if @stop_cell != nil && @stop_cell[0] != 0
     tl = wassat_prof_clock
     # A miss must leave the saved phases alone: `enqueue` writes @phase on
     # every assignment, so a failed dive would otherwise reseed every phase
@@ -928,9 +932,9 @@ WASSAT_PROOF_DRAT = 2
       sphase[v] = @phase[v]
       v += 1
     r = self.lucky_dive(0 - 1, 0)
-    r = self.lucky_dive(1, 0) if r == 0
-    r = self.lucky_dive(0 - 1, 1) if r == 0
-    r = self.lucky_dive(1, 1) if r == 0
+    r = self.lucky_dive(1, 0) if r == 0 && (@stop_cell == nil || @stop_cell[0] == 0)
+    r = self.lucky_dive(0 - 1, 1) if r == 0 && (@stop_cell == nil || @stop_cell[0] == 0)
+    r = self.lucky_dive(1, 1) if r == 0 && (@stop_cell == nil || @stop_cell[0] == 0)
     if r != 1
       v = 0
       while v <= @nvars
@@ -944,6 +948,7 @@ WASSAT_PROOF_DRAT = 2
   # up. Returns 1 for a total assignment, -1 for root-level UNSAT, 0 for a
   # dive that got stuck (the trail is returned to a propagated root).
   -> lucky_dive(pol, backward)
+    return 0 if @stop_cell != nil && @stop_cell[0] != 0
     # backjump(0) declares the whole remaining trail propagated (it sets
     # @qhead to the trail size), so it is NOT a safe way to reach a
     # propagated root: load_flat deliberately hands the solver its input
@@ -956,7 +961,7 @@ WASSAT_PROOF_DRAT = 2
       return 0 - 1
     stuck = 0
     i = 0
-    while i < @nvars && stuck == 0
+    while i < @nvars && stuck == 0 && (@stop_cell == nil || @stop_cell[0] == 0)
       v = backward == 0 ? i + 1 : @nvars - i
       if @assign[v] == 0
         l = pol > 0 ? v : 0 - v
@@ -980,6 +985,11 @@ WASSAT_PROOF_DRAT = 2
             self.enqueue(0 - l, -1)
             stuck = 2 if self.propagate >= 0
       i += 1
+    # Cancellation is not a logical outcome. Unwind the private arm and let
+    # lucky_probe report a miss; the winning arm owns the real verdict.
+    if @stop_cell != nil && @stop_cell[0] != 0
+      self.backjump(0)
+      return 0
     if stuck == 2
       @formula_unsat = true
       self.backjump(0)
@@ -1022,6 +1032,19 @@ WASSAT_PROOF_DRAT = 2
   # measured strictly worse than either pure mode on ibm-12).
   -> enable_chrono
     @use_chrono = true
+    0
+
+  # The aggressive stack used after a long-search escalation.
+  -> enable_frontier_mode
+    @escalated = true
+    @use_vmtf = true
+    @use_target = true
+    @use_chrono = true
+    @no_stable = true
+    @mode_stable = false
+    @rst_num = 21
+    @rst_den = 20
+    @since_restart = 0
     0
 
   # Arm diversity switch for the raw-kernel race: EVSIDS arms call this
@@ -2027,16 +2050,8 @@ WASSAT_PROOF_DRAT = 2
         # A conflict-free iteration is the same clean trail with no conflict
         # to misattribute, and it is at most one propagation away.
         if @escalate_at > 0 && !@escalated && @conflicts >= @escalate_at && @proof_mode == WASSAT_PROOF_NONE && @nassump == 0
-          @escalated = true
           self.backjump(0)
-          @use_vmtf = true
-          @use_target = true
-          @use_chrono = true
-          @no_stable = true
-          @mode_stable = false
-          @rst_num = 21
-          @rst_den = 20
-          @since_restart = 0
+          self.enable_frontier_mode
 
         # Clause-DB reduction first, on its own schedule: when the live
         # learned count passes the limit, drop the high-LBD half. Decoupled
@@ -2150,7 +2165,15 @@ WASSAT_PROOF_DRAT = 2
     s.load_flat(art)
     s
 
-  -> load_flat(art)
+  # Propagation-only shell for the lucky arm. It never learns, reduces, walks,
+  # replays a proof, or continues into CDCL, so allocating the ordinary 2M-word
+  # learning arena and 131k clause-table headroom is pure startup traffic.
+  -> .from_flat_lucky(nvars, art)
+    s = Wassat.new(nvars, [], WASSAT_PROOF_NONE, 0)
+    s.load_flat(art, true)
+    s
+
+  -> load_flat(art, lean = false)
     @config = art["config"]
     @lookahead = @config.lookahead_candidates
     @reduce_limit = @config.reduce_limit
@@ -2181,6 +2204,7 @@ WASSAT_PROOF_DRAT = 2
     # doing useful work — it is an aggressive restart that keeps the learned
     # database small — so the capacity stays exactly as sized here.
     cap = (total + sncl) * 2 + 2097152
+    cap = total + sncl + 2 if lean
     # the watch entry addresses a clause by ARENA OFFSET, so the offset must
     # fit the packed entry's high word; grow_arena enforces the same bound
     raise "clause arena exceeds 8 GiB; instance too large for the current representation" if cap > 1073741824
@@ -2189,6 +2213,7 @@ WASSAT_PROOF_DRAT = 2
     head = sncl / 2
     head = 131072 if head < 131072
     maxcl = sncl + head
+    maxcl = sncl + 2 if lean
     @cmeta = i64[2 * maxcl]
     @alive = i64[maxcl]
     @clbd = i64[maxcl]
@@ -2232,7 +2257,7 @@ WASSAT_PROOF_DRAT = 2
         @ok = false
       u += 1
     @raw_flat = art["raw"] == true
-    self.prepare_walk
+    self.prepare_walk unless lean
     0
 
   # Inprocessing for raw kernels, which bypass the preprocessor entirely:

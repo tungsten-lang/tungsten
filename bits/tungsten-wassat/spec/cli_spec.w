@@ -117,6 +117,29 @@ describe "Tungsten Wassat CLI" ->
       expect(random_policy.lookahead_candidates).to eq(16)
       expect(medium_random_policy.lookahead_candidates).to eq(0)
       expect(tiny_policy.lookahead_candidates).to eq(0)
+      expect(random_policy.continue_scout?).to eq(true)
+      expect(medium_random_policy.continue_scout?).to eq(false)
+
+    it "selects routing and staged fallback from formula shape" ->
+      dense = []
+      i = 0
+      while i < 1065
+        dense.push([i % 250 + 1, 0 - ((i * 7) % 250 + 1), (i * 13) % 250 + 1])
+        i += 1
+      dense_policy = WassatConfig.new(250, dense)
+      expect(dense_policy.race_route?).to eq(true)
+      expect(dense_policy.stage_pre_after_scout?).to eq(true)
+
+      compact_choice = []
+      i = 0
+      while i < 90
+        compact_choice.push([i % 42 + 1, 0 - ((i * 5) % 42 + 1)])
+        i += 1
+      while i < 100
+        compact_choice.push([1, 2, 3, 4, 5, 6, 7])
+        i += 1
+      expect(WassatConfig.new(42, compact_choice).race_route?).to eq(false)
+      expect(WassatConfig.new(0, []).race_route?).to eq(false)
 
     it "keeps measured-losing vivification out of the automatic policy" ->
       clauses = []

@@ -122,6 +122,17 @@ THRESH_RUNS = 9
 thresh = {}
 thresh["array_get"] = 12000000000
 thresh["array_mod"] = 7000000000
+# Locked after the 2026-07-28 goal campaign (helpers + devirtualization +
+# slab freeze): method_call peaks ~620M (guarded devirt; was 26M through the
+# IC), block_call ~610M (inline closure body ops), new_string ~54M (frozen
+# slab: itoa + lookup instead of intern+grow), str_concat ~25M, hash_get
+# ~156M. Floors sit ~40-50% under peak — losing devirt, the boxed-op fast
+# helpers, or the startup freeze drops each to a fraction of its floor.
+thresh["method_call"] = 300000000
+thresh["block_call"] = 300000000
+thresh["new_string"] = 25000000
+thresh["str_concat"] = 12000000
+thresh["hash_get"] = 100000000
 
 # ---- integer-only formatting (interpreter float division is exact-rational) -
 -> lj(s, w)

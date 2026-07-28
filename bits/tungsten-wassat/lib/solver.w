@@ -346,6 +346,11 @@ WASSAT_PROOF_DRAT = 2
     @asg_count = 0
     @asg_filter = false
     @rhist = i64[64]             # reduce_db scratch (worker threads: no alloc)
+    # Mid-search inprocessing schedule (0 = off, the shipped default until
+    # measured). See the call site in solve_loop.
+    @inprocess_every = @config.inprocess_every
+    @inprocess_at = @inprocess_every
+    @inprocessings = 0
 
     # Replay occurrence lists (hinted mode only): intrusive per-literal
     # lists over the LOGICAL clause database, so hint replay propagates
@@ -2069,6 +2074,19 @@ WASSAT_PROOF_DRAT = 2
           self.reduce_db
           @reductions += 1
           @reduce_limit += @reduce_step
+          # INPROCESSING. Every remaining losing row has a comparable or
+          # better conflict RATE than CaDiCaL and 4-40x the conflicts, and the
+          # difference is that CaDiCaL keeps simplifying mid-search while this
+          # solver simplified once at load. This is the cheapest honest
+          # version: re-run equivalent-literal substitution here, which is
+          # already a level-zero point (backjump(0) above), already rebuilds
+          # watches and binary lists, and is already designed to be called
+          # repeatedly -- congruence_rounds calls it in a loop, @subst is
+          # allocated once and its chains resolved in unsubstitute.
+          if @inprocess_every > 0 && @conflicts >= @inprocess_at
+            @inprocess_at = @conflicts + @inprocess_every
+            self.simplify_raw_mode(0)
+            @inprocessings += 1
           # Vivification (DETOUR dominance on learned clauses) — MEASURED
           # NET-NEGATIVE in v1 form and gated off: prefix-conflict
           # shortening replaced clauses but perturbed trajectories

@@ -572,6 +572,13 @@ WASSAT_CONGRUENCE_DEFAULT = true
     return false if true
     !(@ternary * 4 >= @nclauses * 3)
 
+  # Conflicts between mid-search substitution passes; 0 disables it.
+  # Measurement hook -- the technique is unproven here, and the shipped
+  # default stays 0 until it wins on breadth.
+  -> inprocess_every
+    return wassat_decimal_in_range("WASSAT_INPROCESS", env("WASSAT_INPROCESS"), 0, 2000000000) if env("WASSAT_INPROCESS") != nil
+    0
+
   -> use_vivification
     # The current prefix-conflict pass is a measured net loss: on uuf250 it
     # perturbs a roughly 95k-conflict trajectory into a multi-million-conflict

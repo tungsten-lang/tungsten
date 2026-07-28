@@ -279,7 +279,9 @@ use portfolio
   rescue e
     wassat_discard_output(wrat_out, wrat_final)
     raise e
-  config = WassatConfig.new(formula["nvars"], formula["clauses"])
+  # from_lens, not new(clauses): identical counters (adopt_counts consumes the
+  # same histogram) without walking 10M boxed clauses on the critical path.
+  config = WassatConfig.from_lens(formula["nvars"], formula["flat_lens"], formula["flat_ncl"])
   tprof = wassat_prof("cli.parse", tprof)
 
   # Preprocess once, above solver construction. The artifact carries the

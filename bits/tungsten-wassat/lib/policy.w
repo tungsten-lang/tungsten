@@ -565,6 +565,36 @@ WASSAT_CONGRUENCE_DEFAULT = true
   # it to re-open the question on a quiet machine; the numbers above are the
   # baseline to beat. Congruence merges anything at all on only 7 of the 115
   # instances in the competition set, so the whole question is narrow.
+  # Rounds of extract-then-substitute. `Wassat#congruence_rounds` explains why
+  # re-extraction is this architecture's spelling of kissat's rehash; this is
+  # the evidence for the default being 1, which that comment promised and which
+  # was missing until 2026-07-28.
+  #
+  # The deeper closure WORKS, and dramatically. On SAT_dat.k10 (46,169 vars),
+  # variables substituted by round count:
+  #
+  #     rounds     1        4        16       64      CaDiCaL 3.0.1
+  #     subst    4,159   16,466   29,042   34,937      36,121
+  #     % vars     9%      36%      63%     75.7%       78.2%
+  #
+  # One round leaves seven eighths of the closure unfound; 64 rounds reach
+  # parity with the rival for ~1.8s of raw.simplify. Two findings kill it
+  # anyway:
+  #
+  # 1. **It does not solve the row it was built for.** SAT_dat.k10 still times
+  #    out at 300s with 75.7% substituted, against CaDiCaL's 6.6s. Substitution
+  #    parity is NOT what wins that instance, so the standing doc's frontier
+  #    entry for it is answered in the negative -- look elsewhere.
+  # 2. **It regresses the parity gate.** Interleaved A/B, one binary, 33 rows,
+  #    medians of 3, judged on rows with a measured noise floor:
+  #      bmc-ibm-12 (floor 1.10x)  0.615s -> 0.729 (r4) -> 0.981 (r16)  REAL
+  #      minand064  (floor 1.02x)  3.937s -> 3.763 -> 3.847             real, tiny
+  #      qg5-13, qg3-09, bmc-ibm-6, shuffling-1                         inside floor
+  #    Geomean is worse both ways (r4 1.0172, r16 1.0363), and bmc-ibm-12 is
+  #    the instance already sitting on the 1.5x parity tolerance.
+  #
+  # Hyper-binary resolution is not the missing input either: substitution on
+  # SAT_dat.k10 is byte-identical at WASSAT_HBR 0, 64 and 1000.
   -> congruence_max_rounds
     return wassat_decimal_in_range("WASSAT_CONGRUENCE_ROUNDS", env("WASSAT_CONGRUENCE_ROUNDS"), 1, 64) if env("WASSAT_CONGRUENCE_ROUNDS") != nil
     1

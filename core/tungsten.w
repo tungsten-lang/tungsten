@@ -119,7 +119,33 @@
   auto :Float128,     "numeric/float128"
   auto :Float256,     "numeric/float256"
 
+  auto :Rational,     "numeric/rational"
   auto :Real,         "numeric/real"
+
+  # Exact algebra. All public entry points load through the orchestrator so
+  # `use algebra` remains the feature boundary while individual classes stay
+  # discoverable through autoload.
+  auto :Algebra,                "algebra"
+  auto :Field,                  "algebra"
+  auto :RationalField,          "algebra"
+  auto :MonomialOrder,          "algebra"
+  auto :PolynomialRing,         "algebra"
+  auto :Polynomial,             "algebra"
+  auto :Poly,                   "algebra"
+  auto :GroebnerBasis,          "algebra"
+  auto :Ideal,                  "algebra"
+  auto :ProjectivePoint,        "algebra"
+  auto :ProjectiveSpace,        "algebra"
+  auto :AffineChart,            "algebra"
+  auto :Curve,                  "algebra"
+  auto :Jacobian,               "algebra"
+  auto :EllipticPoint,          "algebra"
+  auto :EllipticCurve,          "algebra"
+  auto :HyperellipticCurve,     "algebra"
+  auto :MumfordDivisor,         "algebra"
+  auto :HyperellipticJacobian,  "algebra"
+  auto :GaloisGroup,            "algebra"
+  auto :WeilCubic,              "algebra"
 
   auto :Comparable,   "traits/comparable"
   auto :Enumerable,   "traits/enumerable"

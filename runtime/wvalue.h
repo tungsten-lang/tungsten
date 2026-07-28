@@ -86,7 +86,7 @@
    nibble C             →  class
    nibble D             →  uuid
    nibble E             →  error
-   nibble F             →  domain (heap-overflow currency/quantity/duration)
+   nibble F             →  domain (heap-overflow currency/quantity/duration/rational)
 
    ---- String/Symbol (0xFFF9) ----
    bit 0:
@@ -182,6 +182,7 @@ typedef uint64_t WValue;
 #define W_DOMAIN_CURRENCY  1
 #define W_DOMAIN_QUANTITY  2
 #define W_DOMAIN_DURATION  3
+#define W_DOMAIN_RATIONAL  4
 
 /* ---- Generic object type discriminators (uint8_t in struct header) ---- */
 #define W_TYPE_THREAD    1
@@ -864,6 +865,14 @@ static inline double w_as_double(WValue v) {
 
 static inline void *w_as_ptr(WValue v) {
     return (void *)(uintptr_t)(v & ~0xFULL);
+}
+
+static inline int w_is_big_rational(WValue v) {
+    return w_is_domain_obj(v) &&
+           *(const uint8_t *)w_as_ptr(v) == W_DOMAIN_RATIONAL;
+}
+static inline int w_is_rational_any(WValue v) {
+    return w_is_rational(v) || w_is_big_rational(v);
 }
 
 /* ---- Decimal unboxing (subtype 00) ---- */

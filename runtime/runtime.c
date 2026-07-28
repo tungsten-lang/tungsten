@@ -7,6 +7,7 @@
 #include "ssmr_witness.h"
 
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
@@ -4307,6 +4308,700 @@ void w_str_data(WValue v, char buf[6], const char **out, size_t *len) {
         *out = ws->data;
         *len = ws->len;
     }
+}
+
+/* ---- Algebra source notation -------------------------------------------
+ *
+ * Algebra declarations are deliberately recognized before the general lexer:
+ *
+ *   C⊂ℙ²_ℚ(X,Y,Z):16X³Z+48XY²Z-3Y⁴=0
+ *
+ * The declared coordinates make adjacency unambiguous, so this pass can
+ * lower coefficient+symbol spans directly to Polynomial operations without
+ * installing global implicit multiplication or numeric reverse dispatch.
+ * It also lowers projective point notation P2[1:0:0] to P2.point(1,0,0).
+ *
+ * The rewrite preserves one input line per output line. Ordinary sources take
+ * the zero-allocation return-original fast path.
+ */
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+} WAlgebraBuf;
+
+static void algebra_buf_need(WAlgebraBuf *b, size_t extra) {
+    if (b->len + extra + 1 <= b->cap) return;
+    size_t cap = b->cap ? b->cap : 256;
+    while (cap < b->len + extra + 1) cap *= 2;
+    b->data = realloc(b->data, cap);
+    b->cap = cap;
+}
+
+static void algebra_buf_bytes(WAlgebraBuf *b, const char *s, size_t n) {
+    algebra_buf_need(b, n);
+    memcpy(b->data + b->len, s, n);
+    b->len += n;
+}
+
+static void algebra_buf_c(WAlgebraBuf *b, char c) {
+    algebra_buf_need(b, 1);
+    b->data[b->len++] = c;
+}
+
+static void algebra_buf_s(WAlgebraBuf *b, const char *s) {
+    algebra_buf_bytes(b, s, strlen(s));
+}
+
+static int algebra_utf8_minus(const char *s, size_t n, size_t i) {
+    return i + 3 <= n &&
+           (unsigned char)s[i] == 0xe2 &&
+           (unsigned char)s[i + 1] == 0x88 &&
+           (unsigned char)s[i + 2] == 0x92;
+}
+
+static int algebra_superscript_digit(const char *s, size_t n, size_t i,
+                                     int *digit, size_t *width) {
+    if (i + 2 <= n && (unsigned char)s[i] == 0xc2) {
+        unsigned char c = (unsigned char)s[i + 1];
+        if (c == 0xb9) { *digit = 1; *width = 2; return 1; }
+        if (c == 0xb2) { *digit = 2; *width = 2; return 1; }
+        if (c == 0xb3) { *digit = 3; *width = 2; return 1; }
+    }
+    if (i + 3 <= n &&
+        (unsigned char)s[i] == 0xe2 &&
+        (unsigned char)s[i + 1] == 0x81) {
+        unsigned char c = (unsigned char)s[i + 2];
+        if (c == 0xb0) { *digit = 0; *width = 3; return 1; }
+        if (c >= 0xb4 && c <= 0xb9) {
+            *digit = (int)(c - 0xb0);
+            *width = 3;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Parse ℙⁿ_ℚ (and the ASCII-exponent spelling ℙ^n_ℚ) at `start`.
+ * The coefficient field is intentionally explicit here: other fields are
+ * accepted by the generic constructors below and rejected by Algebra.field
+ * until their implementations exist, but curve declarations currently have
+ * a certified ℚ grammar only. */
+static int algebra_projective_q_at(const char *s, size_t n, size_t start,
+                                   unsigned long long *dimension,
+                                   size_t *end) {
+    static const unsigned char projective[] = {0xe2, 0x84, 0x99};
+    static const unsigned char rational[] = {0xe2, 0x84, 0x9a};
+    if (start + sizeof(projective) > n ||
+        memcmp(s + start, projective, sizeof(projective)) != 0)
+        return 0;
+
+    size_t p = start + sizeof(projective);
+    unsigned long long value = 0;
+    int have_dimension = 0;
+    if (p < n && s[p] == '^') {
+        p++;
+        while (p < n && isdigit((unsigned char)s[p])) {
+            have_dimension = 1;
+            value = value * 10ULL + (unsigned)(s[p] - '0');
+            p++;
+        }
+    } else {
+        int digit;
+        size_t width;
+        while (algebra_superscript_digit(s, n, p, &digit, &width)) {
+            have_dimension = 1;
+            value = value * 10ULL + (unsigned)digit;
+            p += width;
+        }
+    }
+    if (!have_dimension || p >= n || s[p] != '_')
+        return 0;
+    p++;
+    if (p + sizeof(rational) > n ||
+        memcmp(s + p, rational, sizeof(rational)) != 0)
+        return 0;
+    p += sizeof(rational);
+    *dimension = value;
+    *end = p;
+    return 1;
+}
+
+typedef struct {
+    const char *ptr;
+    size_t len;
+} WAlgebraName;
+
+static int algebra_name_at(const char *s, size_t n, size_t pos,
+                           const WAlgebraName *names, int count) {
+    int best = -1;
+    for (int i = 0; i < count; i++) {
+        if (pos + names[i].len <= n &&
+            memcmp(s + pos, names[i].ptr, names[i].len) == 0 &&
+            (best < 0 || names[i].len > names[best].len))
+            best = i;
+    }
+    return best;
+}
+
+static void algebra_emit_uint(WAlgebraBuf *out, unsigned long long value) {
+    char buf[32];
+    int n = snprintf(buf, sizeof(buf), "%llu", value);
+    algebra_buf_bytes(out, buf, (size_t)n);
+}
+
+/* Rewrite the intentionally local polynomial grammar used after `:`:
+ * signed sums of rational coefficients and adjacent declared coordinates with
+ * Unicode superscript or ASCII ^ powers. This grammar is never installed as
+ * global implicit multiplication. */
+static void algebra_rewrite_polynomial(WAlgebraBuf *out,
+                                       const char *s, size_t n,
+                                       const WAlgebraName *names, int count,
+                                       const char *coords_temp) {
+    size_t p = 0;
+    int first = 1;
+    while (p < n) {
+        while (p < n && (s[p] == ' ' || s[p] == '\t')) p++;
+        int negative = 0;
+        if (p < n && s[p] == '+') {
+            p++;
+        } else if (p < n && s[p] == '-') {
+            negative = 1; p++;
+        } else if (algebra_utf8_minus(s, n, p)) {
+            negative = 1; p += 3;
+        }
+        while (p < n && (s[p] == ' ' || s[p] == '\t')) p++;
+
+        size_t term_end = p;
+        while (term_end < n &&
+               s[term_end] != '+' && s[term_end] != '-' &&
+               !algebra_utf8_minus(s, n, term_end))
+            term_end++;
+        while (term_end > p &&
+               (s[term_end - 1] == ' ' || s[term_end - 1] == '\t'))
+            term_end--;
+
+        if (!first) algebra_buf_s(out, negative ? " - " : " + ");
+        else if (negative) algebra_buf_c(out, '-');
+        first = 0;
+        size_t term_out_start = out->len;
+
+        size_t q = p;
+        int coefficient_parenthesized = 0;
+        if (q < term_end && s[q] == '(') {
+            coefficient_parenthesized = 1;
+            q++;
+        }
+        unsigned long long coefficient_num = 0;
+        unsigned long long coefficient_den = 1;
+        int have_coefficient = 0;
+        while (q < term_end && s[q] >= '0' && s[q] <= '9') {
+            have_coefficient = 1;
+            coefficient_num = coefficient_num * 10ULL + (unsigned)(s[q] - '0');
+            q++;
+            if (q < term_end && s[q] == '_') q++;
+        }
+        if (have_coefficient && q < term_end && s[q] == '/') {
+            q++;
+            coefficient_den = 0;
+            int have_denominator = 0;
+            while (q < term_end && s[q] >= '0' && s[q] <= '9') {
+                have_denominator = 1;
+                coefficient_den = coefficient_den * 10ULL +
+                                  (unsigned)(s[q] - '0');
+                q++;
+                if (q < term_end && s[q] == '_') q++;
+            }
+            if (!have_denominator || coefficient_den == 0) {
+                algebra_buf_bytes(out, s + p, term_end - p);
+                p = term_end;
+                continue;
+            }
+        }
+        if (coefficient_parenthesized) {
+            if (q >= term_end || s[q] != ')') {
+                algebra_buf_bytes(out, s + p, term_end - p);
+                p = term_end;
+                continue;
+            }
+            q++;
+        }
+        while (q < term_end && (s[q] == ' ' || s[q] == '\t')) q++;
+
+        int factors = 0;
+        while (q < term_end) {
+            int ni = algebra_name_at(s, term_end, q, names, count);
+            if (ni < 0) break;
+            if (factors++) algebra_buf_c(out, '*');
+            algebra_buf_s(out, coords_temp);
+            algebra_buf_c(out, '[');
+            algebra_emit_uint(out, (unsigned long long)ni);
+            algebra_buf_c(out, ']');
+            q += names[ni].len;
+
+            unsigned long long exponent = 0;
+            int have_exponent = 0;
+            if (q < term_end && s[q] == '^') {
+                q++;
+                if (q < term_end && s[q] == '*') q++;
+                while (q < term_end && isdigit((unsigned char)s[q])) {
+                    have_exponent = 1;
+                    exponent = exponent * 10ULL + (unsigned)(s[q] - '0');
+                    q++;
+                }
+            } else {
+                int digit;
+                size_t width;
+                while (algebra_superscript_digit(s, term_end, q, &digit, &width)) {
+                    have_exponent = 1;
+                    exponent = exponent * 10ULL + (unsigned)digit;
+                    q += width;
+                }
+            }
+            if (have_exponent && exponent != 1) {
+                algebra_buf_s(out, "**");
+                algebra_emit_uint(out, exponent);
+            }
+            while (q < term_end && (s[q] == ' ' || s[q] == '\t')) q++;
+        }
+
+        if (q != term_end) {
+            /* Keep unsupported structure visible to the ordinary parser. */
+            out->len = term_out_start;
+            algebra_buf_bytes(out, s + p, term_end - p);
+        } else if (factors) {
+            if (have_coefficient &&
+                (coefficient_num != 1 || coefficient_den != 1)) {
+                algebra_buf_c(out, '*');
+                if (coefficient_den == 1) {
+                    algebra_emit_uint(out, coefficient_num);
+                } else {
+                    algebra_buf_s(out, "Rational.new(");
+                    algebra_emit_uint(out, coefficient_num);
+                    algebra_buf_c(out, ',');
+                    algebra_emit_uint(out, coefficient_den);
+                    algebra_buf_c(out, ')');
+                }
+            }
+        } else if (have_coefficient) {
+            if (coefficient_den == 1) {
+                algebra_emit_uint(out, coefficient_num);
+            } else {
+                algebra_buf_s(out, "Rational.new(");
+                algebra_emit_uint(out, coefficient_num);
+                algebra_buf_c(out, ',');
+                algebra_emit_uint(out, coefficient_den);
+                algebra_buf_c(out, ')');
+            }
+        } else {
+            /* Keep unsupported structure visible to the ordinary parser,
+             * which will report the source error instead of silently changing
+             * the equation. */
+            algebra_buf_bytes(out, s + p, term_end - p);
+        }
+        p = term_end;
+    }
+}
+
+static size_t algebra_trim_left(const char *s, size_t a, size_t b) {
+    while (a < b && (s[a] == ' ' || s[a] == '\t')) a++;
+    return a;
+}
+
+static size_t algebra_trim_right(const char *s, size_t a, size_t b) {
+    while (b > a && (s[b - 1] == ' ' || s[b - 1] == '\t')) b--;
+    return b;
+}
+
+static int algebra_rewrite_curve_line(WAlgebraBuf *out,
+                                      const char *line, size_t n,
+                                      unsigned long long declaration_id) {
+    static const unsigned char subset[] = {0xe2, 0x8a, 0x82};
+    size_t lead = 0;
+    while (lead < n && (line[lead] == ' ' || line[lead] == '\t')) lead++;
+    if (lead >= n || line[lead] == '#') return 0;
+
+    size_t sub = lead;
+    while (sub + sizeof(subset) <= n &&
+           memcmp(line + sub, subset, sizeof(subset)) != 0)
+        sub++;
+    if (sub + sizeof(subset) > n) return 0;
+
+    size_t curve_a = lead;
+    size_t curve_b = algebra_trim_right(line, curve_a, sub);
+    if (curve_b <= curve_a) return 0;
+    for (size_t i = curve_a; i < curve_b; i++) {
+        unsigned char c = (unsigned char)line[i];
+        if (!(isalnum(c) || c == '_')) return 0;
+    }
+
+    size_t p = algebra_trim_left(line, sub + sizeof(subset), n);
+    unsigned long long dimension = 0;
+    size_t projective_end = 0;
+    if (!algebra_projective_q_at(line, n, p, &dimension, &projective_end))
+        return 0;
+    p = algebra_trim_left(line, projective_end, n);
+    if (p >= n || line[p] != '(') return 0;
+    size_t coords_a = ++p;
+    while (p < n && line[p] != ')') p++;
+    if (p >= n) return 0;
+    size_t coords_b = p++;
+    p = algebra_trim_left(line, p, n);
+    if (p >= n || line[p] != ':') return 0;
+    size_t poly_a = algebra_trim_left(line, p + 1, n);
+    size_t eq = poly_a;
+    while (eq < n && line[eq] != '=') eq++;
+    if (eq >= n) return 0;
+    size_t poly_b = algebra_trim_right(line, poly_a, eq);
+    size_t rhs_a = algebra_trim_left(line, eq + 1, n);
+    size_t rhs_b = algebra_trim_right(line, rhs_a, n);
+
+    WAlgebraName names[32];
+    int name_count = 0;
+    size_t ca = coords_a;
+    while (ca < coords_b && name_count < 32) {
+        ca = algebra_trim_left(line, ca, coords_b);
+        size_t cb = ca;
+        while (cb < coords_b && line[cb] != ',') cb++;
+        size_t end = algebra_trim_right(line, ca, cb);
+        if (end <= ca || end - ca >= 32) return 0;
+        names[name_count].ptr = line + ca;
+        names[name_count].len = end - ca;
+        name_count++;
+        ca = cb < coords_b ? cb + 1 : cb;
+    }
+    if (ca < coords_b || name_count < 1) return 0;
+    int affine = name_count == (int)dimension;
+    if (!affine && name_count != (int)dimension + 1) return 0;
+
+    char space_temp[64];
+    char coords_temp[64];
+    snprintf(space_temp, sizeof(space_temp), "__algebra_space_%llu",
+             declaration_id);
+    snprintf(coords_temp, sizeof(coords_temp), "__algebra_coords_%llu",
+             declaration_id);
+
+    algebra_buf_bytes(out, line, lead);
+    algebra_buf_s(out, space_temp);
+    algebra_buf_s(out, "=ProjectiveSpace<ℚ,");
+    algebra_emit_uint(out, dimension);
+    algebra_buf_s(out, ">.new(Algebra.rational_field(),");
+    algebra_emit_uint(out, dimension);
+    algebra_buf_s(out, ",[");
+    for (int i = 0; i < name_count; i++) {
+        if (i > 0) algebra_buf_c(out, ',');
+        algebra_buf_c(out, ':');
+        algebra_buf_bytes(out, names[i].ptr, names[i].len);
+    }
+    if (affine) {
+        if (name_count > 0) algebra_buf_c(out, ',');
+        algebra_buf_s(out, dimension == 2 ? ":Z" : ":H");
+    }
+    algebra_buf_s(out, "]);");
+    algebra_buf_s(out, coords_temp);
+    algebra_buf_c(out, '=');
+    algebra_buf_s(out, space_temp);
+    algebra_buf_s(out, ".coords;");
+    algebra_buf_bytes(out, line + curve_a, curve_b - curve_a);
+    algebra_buf_s(out, affine ? "=Curve.affine(" : "=Curve.new(");
+    algebra_buf_s(out, space_temp);
+    algebra_buf_s(out, ",(");
+    algebra_rewrite_polynomial(out, line + poly_a, poly_b - poly_a,
+                               names, name_count, coords_temp);
+    algebra_buf_s(out, ")-(");
+    algebra_rewrite_polynomial(out, line + rhs_a, rhs_b - rhs_a,
+                               names, name_count, coords_temp);
+    algebra_buf_s(out, "))");
+    return 1;
+}
+
+static int algebra_point_content(const char *s, size_t a, size_t b) {
+    int colons = 0;
+    for (size_t i = a; i < b; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == ':') { colons++; continue; }
+        if (isdigit(c) || c == ' ' || c == '\t' || c == '+' || c == '-' ||
+            c == '/' || c == '_')
+            continue;
+        return 0;
+    }
+    return colons >= 1;
+}
+
+static int algebra_generic_new_at(const char *s, size_t n, size_t start,
+                                  const char *class_name, int needs_dimension,
+                                  size_t *field_a, size_t *field_b,
+                                  unsigned long long *dimension,
+                                  size_t *after_open) {
+    size_t class_len = strlen(class_name);
+    if (start + class_len >= n ||
+        memcmp(s + start, class_name, class_len) != 0)
+        return 0;
+    size_t p = start + class_len;
+    if (p >= n || s[p] != '<') return 0;
+    p++;
+    p = algebra_trim_left(s, p, n);
+    *field_a = p;
+    while (p < n && s[p] != ',' && s[p] != '>') p++;
+    *field_b = algebra_trim_right(s, *field_a, p);
+    if (*field_b <= *field_a) return 0;
+
+    *dimension = 0;
+    if (needs_dimension) {
+        if (p >= n || s[p] != ',') return 0;
+        p = algebra_trim_left(s, p + 1, n);
+        int have_dimension = 0;
+        while (p < n && isdigit((unsigned char)s[p])) {
+            have_dimension = 1;
+            *dimension = *dimension * 10ULL + (unsigned)(s[p] - '0');
+            p++;
+        }
+        p = algebra_trim_left(s, p, n);
+        if (!have_dimension) return 0;
+    }
+    if (p >= n || s[p] != '>') return 0;
+    p++;
+    if (p + 5 > n || memcmp(s + p, ".new(", 5) != 0) return 0;
+    *after_open = p + 5;
+    return 1;
+}
+
+/* Find the ')' paired with a generic constructor's `.new(`. Constructor
+ * rewrites pack user arguments into one Array because native rest-parameter
+ * binding is not yet reliable for arbitrary arity. Keeping this scanner local
+ * to one line also prevents algebra syntax from changing unrelated grouping. */
+static int algebra_matching_paren(const char *s, size_t n, size_t after_open,
+                                  size_t *close) {
+    int depth = 1;
+    int quote = 0;
+    for (size_t i = after_open; i < n; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (quote) {
+            if (c == (unsigned char)quote &&
+                (i == 0 || s[i - 1] != '\\'))
+                quote = 0;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            quote = c;
+            continue;
+        }
+        if (c == '(') {
+            depth++;
+        } else if (c == ')') {
+            depth--;
+            if (depth == 0) {
+                *close = i;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+/* Generated constructors already carry their runtime field metadata. Leaving
+ * them untouched makes the source transformation idempotent and also permits
+ * callers inside the algebra implementation to use the lowered object API
+ * explicitly. */
+static int algebra_constructor_arguments_lowered(const char *s, size_t a,
+                                                 size_t b) {
+    static const char field[] = "Algebra.field(";
+    static const char rational_field[] = "Algebra.rational_field(";
+    a = algebra_trim_left(s, a, b);
+    if (a + sizeof(field) - 1 <= b &&
+        memcmp(s + a, field, sizeof(field) - 1) == 0)
+        return 1;
+    if (a + sizeof(rational_field) - 1 <= b &&
+        memcmp(s + a, rational_field, sizeof(rational_field) - 1) == 0)
+        return 1;
+    return 0;
+}
+
+static void algebra_rewrite_ordinary_line(WAlgebraBuf *out,
+                                          const char *line, size_t n,
+                                          int *changed) {
+    int quote = 0;
+    for (size_t i = 0; i < n;) {
+        if (!quote && line[i] == '#') {
+            algebra_buf_bytes(out, line + i, n - i);
+            return;
+        }
+        if (line[i] == '"' || line[i] == '\'') {
+            if (!quote) quote = line[i];
+            else if (quote == line[i] && (i == 0 || line[i - 1] != '\\')) quote = 0;
+            algebra_buf_c(out, line[i++]);
+            continue;
+        }
+        unsigned long long projective_dimension = 0;
+        size_t projective_end = 0;
+        if (!quote &&
+            algebra_projective_q_at(line, n, i, &projective_dimension,
+                                    &projective_end)) {
+            algebra_buf_s(out, "ProjectiveSpace<ℚ,");
+            algebra_emit_uint(out, projective_dimension);
+            algebra_buf_s(out, ">.new(Algebra.rational_field(),");
+            algebra_emit_uint(out, projective_dimension);
+            algebra_buf_s(out, ",[])");
+            i = projective_end;
+            *changed = 1;
+            continue;
+        }
+        size_t field_a = 0, field_b = 0, after_open = 0;
+        unsigned long long dimension = 0;
+        if (!quote &&
+            algebra_generic_new_at(line, n, i, "ProjectiveSpace", 1,
+                                   &field_a, &field_b, &dimension,
+                                   &after_open)) {
+            size_t close = 0;
+            if (!algebra_matching_paren(line, n, after_open, &close)) {
+                algebra_buf_c(out, line[i++]);
+                continue;
+            }
+            if (algebra_constructor_arguments_lowered(
+                    line, after_open, close)) {
+                algebra_buf_bytes(out, line + i, close + 1 - i);
+                i = close + 1;
+                continue;
+            }
+            algebra_buf_bytes(out, line + i, field_a - i);
+            algebra_buf_bytes(out, line + field_a, field_b - field_a);
+            algebra_buf_c(out, ',');
+            algebra_emit_uint(out, dimension);
+            algebra_buf_s(out, ">.new(Algebra.field(\"");
+            algebra_buf_bytes(out, line + field_a, field_b - field_a);
+            algebra_buf_s(out, "\"),");
+            algebra_emit_uint(out, dimension);
+            algebra_buf_s(out, ",[");
+            algebra_buf_bytes(out, line + after_open, close - after_open);
+            algebra_buf_s(out, "])");
+            i = close + 1;
+            *changed = 1;
+            continue;
+        }
+        if (!quote &&
+            algebra_generic_new_at(line, n, i, "Poly", 0,
+                                   &field_a, &field_b, &dimension,
+                                   &after_open)) {
+            size_t close = 0;
+            if (!algebra_matching_paren(line, n, after_open, &close)) {
+                algebra_buf_c(out, line[i++]);
+                continue;
+            }
+            if (algebra_constructor_arguments_lowered(
+                    line, after_open, close)) {
+                algebra_buf_bytes(out, line + i, close + 1 - i);
+                i = close + 1;
+                continue;
+            }
+            algebra_buf_bytes(out, line + i, field_a - i);
+            algebra_buf_bytes(out, line + field_a, field_b - field_a);
+            algebra_buf_s(out, ">.new(Algebra.field(\"");
+            algebra_buf_bytes(out, line + field_a, field_b - field_a);
+            algebra_buf_s(out, "\"),[");
+            algebra_buf_bytes(out, line + after_open, close - after_open);
+            algebra_buf_s(out, "])");
+            i = close + 1;
+            *changed = 1;
+            continue;
+        }
+        if (!quote && line[i] == '[' && i > 0 &&
+            (isalnum((unsigned char)line[i - 1]) || line[i - 1] == '_' ||
+             line[i - 1] == ')')) {
+            size_t close = i + 1;
+            while (close < n && line[close] != ']') close++;
+            if (close < n && algebra_point_content(line, i + 1, close)) {
+                algebra_buf_s(out, ".point([");
+                for (size_t j = i + 1; j < close; j++)
+                    algebra_buf_c(out, line[j] == ':' ? ',' : line[j]);
+                algebra_buf_s(out, "])");
+                i = close + 1;
+                *changed = 1;
+                continue;
+            }
+        }
+        algebra_buf_c(out, line[i++]);
+    }
+}
+
+/* Recognize an actual source-level feature import, not the same words inside
+ * a comment or string. `use core/algebra/...` is included because the
+ * orchestrator and focused layer specs import algebra submodules directly. */
+static int algebra_source_uses_algebra(const char *s, size_t n) {
+    static const char public_use[] = "use algebra";
+    static const char core_use[] = "use core/algebra";
+    size_t line_a = 0;
+    while (line_a < n) {
+        size_t line_b = line_a;
+        while (line_b < n && s[line_b] != '\n') line_b++;
+        size_t p = line_a;
+        while (p < line_b && (s[p] == ' ' || s[p] == '\t')) p++;
+
+        if (p + sizeof(public_use) - 1 <= line_b &&
+            memcmp(s + p, public_use, sizeof(public_use) - 1) == 0) {
+            size_t after = p + sizeof(public_use) - 1;
+            if (after == line_b || s[after] == ' ' || s[after] == '\t' ||
+                s[after] == '\r' || s[after] == '#' || s[after] == ';')
+                return 1;
+        }
+        if (p + sizeof(core_use) - 1 <= line_b &&
+            memcmp(s + p, core_use, sizeof(core_use) - 1) == 0) {
+            size_t after = p + sizeof(core_use) - 1;
+            if (after == line_b || s[after] == '/' || s[after] == ' ' ||
+                s[after] == '\t' || s[after] == '\r' || s[after] == '#' ||
+                s[after] == ';')
+                return 1;
+        }
+        line_a = line_b + (line_b < n ? 1 : 0);
+    }
+    return 0;
+}
+
+WValue w_algebra_rewrite_source(WValue source) {
+    char inline_buf[6];
+    const char *s;
+    size_t n;
+    w_str_data(source, inline_buf, &s, &n);
+    /* Opt-in gate: algebra surface notation is enabled by `use algebra`
+     * (core/algebra.w itself opts in through its `use core/algebra/...`
+     * submodule directives). Every other source takes the zero-copy path
+     * untouched, whatever it contains — in particular the bracket-point
+     * rewrite below must never fire in a file that did not opt in. */
+    if (!algebra_source_uses_algebra(s, n))
+        return source;
+    static const unsigned char subset[] = {0xe2, 0x8a, 0x82};
+    static const unsigned char projective[] = {0xe2, 0x84, 0x99};
+    if (!memmem(s, n, subset, sizeof(subset)) &&
+        !memmem(s, n, projective, sizeof(projective)) &&
+        !memmem(s, n, "ProjectiveSpace<", 16) &&
+        !memmem(s, n, "Poly<", 5) &&
+        !memchr(s, ':', n))
+        return source;
+
+    WAlgebraBuf out = {0};
+    int changed = 0;
+    unsigned long long declaration_id = 0;
+    size_t line_a = 0;
+    while (line_a < n) {
+        size_t line_b = line_a;
+        while (line_b < n && s[line_b] != '\n') line_b++;
+        if (algebra_rewrite_curve_line(&out, s + line_a, line_b - line_a,
+                                       declaration_id)) {
+            changed = 1;
+            declaration_id++;
+        } else {
+            algebra_rewrite_ordinary_line(&out, s + line_a, line_b - line_a,
+                                          &changed);
+        }
+        if (line_b < n) algebra_buf_c(&out, '\n');
+        line_a = line_b + (line_b < n ? 1 : 0);
+    }
+    if (!changed) {
+        free(out.data);
+        return source;
+    }
+    algebra_buf_need(&out, 0);
+    out.data[out.len] = '\0';
+    return w_string_take(out.data, out.len);
 }
 
 WValue w_symbol(const char *s) {
@@ -12066,6 +12761,11 @@ int64_t w_numeric_to_i64(WValue v) {
         return 0;
     }
     if (w_is_double(v)) return (int64_t)w_as_double(v);
+    if (w_is_rational_any(v)) {
+        WValue quotient = bigint_div_any(w_rational_numerator(v),
+                                         w_rational_denominator(v));
+        return w_numeric_to_i64(quotient);
+    }
     /* ccall lowers integer literals and raw machine ints as plain i64. */
     if (v <= 0x00007FFFFFFFFFFFULL) return (int64_t)v;
     return as_int(v);
@@ -12523,11 +13223,30 @@ WValue w_encoded_to_s(WValue v) {
     return w_string(ev->display);
 }
 
+static WValue rational_reduce(__int128 num, __int128 den);
+static WValue rational_from_parts(WValue numerator, WValue denominator);
+static void rational_parts(WValue rational, WValue *numerator, WValue *denominator);
+
 WValue w_rational(int32_t num, uint32_t den) {
-    if (den == 0) {
-        die("rational with zero denominator");
-    }
-    return w_box_rational(num, den);
+    return rational_reduce((__int128)num, (__int128)den);
+}
+
+WValue w_rational_new(WValue numerator, WValue denominator) {
+    if (!w_is_integer_any(numerator) || !w_is_integer_any(denominator))
+        die("Rational.new expects Integer numerator and denominator");
+    return rational_from_parts(numerator, denominator);
+}
+
+WValue w_rational_numerator(WValue rational) {
+    WValue numerator, denominator;
+    rational_parts(rational, &numerator, &denominator);
+    return numerator;
+}
+
+WValue w_rational_denominator(WValue rational) {
+    WValue numerator, denominator;
+    rational_parts(rational, &numerator, &denominator);
+    return denominator;
 }
 
 /* ---- String/value-parsing literal constructors for the tree-walking
@@ -13657,11 +14376,24 @@ static WHashFn w_hash_fn_for_id(int id) {
 }
 
 static inline int w_str_cmp(WValue a, WValue b);
+static int rational_compare_exact(WValue a, WValue b, int *supported);
 
 static inline uint64_t w_hash_splitmix64(uint64_t v) {
     v ^= v >> 30; v *= 0xbf58476d1ce4e5b9ULL;
     v ^= v >> 27; v *= 0x94d049bb133111ebULL;
     v ^= v >> 31; return v;
+}
+
+static uint64_t w_hash_integer_value(WValue value) {
+    if (w_is_int(value))
+        return w_hash_splitmix64((uint64_t)w_as_int(value));
+    WBigint *big = w_as_bigint(value);
+    int32_t size = big->size;
+    int32_t count = size < 0 ? -size : size;
+    uint64_t hash = w_hash_wyhash((const uint8_t *)big->limbs,
+                                 (size_t)count * sizeof(uint64_t));
+    return w_hash_splitmix64(hash ^ (size < 0
+        ? 0x9e3779b97f4a7c15ULL : 0x243f6a8885a308d3ULL));
 }
 
 static uint64_t w_hash_value(WValue v) {
@@ -13703,6 +14435,14 @@ static uint64_t w_hash_value(WValue v) {
         if (bits == 0x8000000000000000ULL) bits = 0;
         return w_hash_splitmix64(W_DOUBLE_BIAS + bits);
     }
+    if (w_is_rational_any(v)) {
+        WValue numerator, denominator;
+        rational_parts(v, &numerator, &denominator);
+        uint64_t left = w_hash_integer_value(numerator);
+        uint64_t right = w_hash_integer_value(denominator);
+        return w_hash_splitmix64(left ^ (right << 1) ^ (right >> 63) ^
+                                 0xa4093822299f31d0ULL);
+    }
     return w_hash_splitmix64(v);
 }
 
@@ -13725,6 +14465,10 @@ static int w_hash_key_eq(WValue a, WValue b) {
     }
     if (is_decimal_any(a) && is_decimal_any(b))
         return decimal_compare(a, b) == 0;
+    if (w_is_rational_any(a) && w_is_rational_any(b)) {
+        int supported;
+        return rational_compare_exact(a, b, &supported) == 0;
+    }
     if (w_is_double(a) && w_is_double(b)) {
         uint64_t ba = a - W_DOUBLE_BIAS, bb = b - W_DOUBLE_BIAS;
         if (ba == 0x8000000000000000ULL) ba = 0;
@@ -13777,9 +14521,20 @@ static double as_float(WValue v) {
     return w_as_double(v);
 }
 
+static double integer_to_double(WValue v) {
+    if (w_is_int(v)) return (double)w_as_int(v);
+    if (w_is_bigint(v)) return bigint_to_double_impl(w_as_bigint(v));
+    die("expected integer");
+    return 0.0;
+}
+
 static double as_numeric_double(WValue v) {
     if (w_is_double(v)) return w_as_double(v);
     if (w_is_int(v)) return (double)w_as_int(v);
+    if (w_is_bigint(v)) return bigint_to_double_impl(w_as_bigint(v));
+    if (w_is_rational_any(v))
+        return integer_to_double(w_rational_numerator(v)) /
+               integer_to_double(w_rational_denominator(v));
     /* A Decimal reaching arithmetic's double branch means the *other* operand
      * is a Float, so the result is already inexact — promote the decimal to a
      * double, exactly as cmp_numeric_double does for order comparisons.
@@ -13820,6 +14575,10 @@ double w_num_to_f64(WValue v) {
 static double cmp_numeric_double(WValue v) {
     if (w_is_double(v)) return w_as_double(v);
     if (w_is_int(v)) return (double)w_as_int(v);
+    if (w_is_bigint(v)) return bigint_to_double_impl(w_as_bigint(v));
+    if (w_is_rational_any(v))
+        return integer_to_double(w_rational_numerator(v)) /
+               integer_to_double(w_rational_denominator(v));
     if (is_decimal_any(v)) {
         int64_t sig;
         int scale;
@@ -13848,55 +14607,139 @@ static int is_decimal_any(WValue v) {
 
 /* ---- Rational arithmetic ---- */
 
-static int64_t gcd(int64_t a, int64_t b) {
-    if (a < 0) a = -a;
-    if (b < 0) b = -b;
-    while (b) { int64_t t = b; b = a % b; a = t; }
-    return a;
+static void rational_parts(WValue rational, WValue *numerator, WValue *denominator) {
+    if (w_is_rational(rational)) {
+        *numerator = w_int(w_unbox_rational_num(rational));
+        *denominator = w_int(w_unbox_rational_den(rational));
+        return;
+    }
+    if (w_is_big_rational(rational)) {
+        WBigRational *big = w_as_big_rational(rational);
+        *numerator = big->numerator;
+        *denominator = big->denominator;
+        return;
+    }
+    die("expected Rational");
 }
 
-static WValue rational_reduce(int64_t num, int64_t den) {
-    if (den == 0) die("rational with zero denominator");
-    if (den < 0) { num = -num; den = -den; }
-    int64_t g = gcd(num, den);
-    num /= g; den /= g;
-    /* Check 22-bit range for packed representation */
-    if (num >= -2097152 && num <= 2097151 && den <= 4194303)
-        return w_box_rational((int32_t)num, (uint32_t)den);
-    /* Overflow: return as float approximation */
-    return w_float((double)num / (double)den);
+static WValue rational_from_parts(WValue numerator, WValue denominator) {
+    WValue zero = w_int(0);
+    if (!w_is_integer_any(numerator) || !w_is_integer_any(denominator))
+        die("rational parts must be integers");
+    if (bigint_compare(denominator, zero) == 0)
+        die("rational with zero denominator");
+    if (bigint_compare(denominator, zero) < 0) {
+        numerator = bigint_sub_any(zero, numerator);
+        denominator = bigint_sub_any(zero, denominator);
+    }
+
+    WValue gcd = bigint_gcd_any(numerator, denominator);
+    numerator = bigint_div_any(numerator, gcd);
+    denominator = bigint_div_any(denominator, gcd);
+
+    if (w_is_int(numerator) && w_is_int(denominator)) {
+        int64_t num = w_as_int(numerator);
+        int64_t den = w_as_int(denominator);
+        if (num >= -2097152 && num <= 2097151 &&
+            den > 0 && den <= 4194303)
+            return w_box_rational((int32_t)num, (uint32_t)den);
+    }
+
+    WBigRational *big = (WBigRational *)calloc(1, sizeof(WBigRational));
+    big->domain_type = W_DOMAIN_RATIONAL;
+    big->numerator = numerator;
+    big->denominator = denominator;
+    return w_box_ptr(big, W_SUBTAG_DOMAIN);
+}
+
+static WValue rational_reduce(__int128 num, __int128 den) {
+    return rational_from_parts(bigint_from_i128(num), bigint_from_i128(den));
+}
+
+/* Exact comparison across both Rational tiers and the full Integer tower. */
+static int rational_compare_exact(WValue a, WValue b, int *supported) {
+    int a_rational = w_is_rational_any(a);
+    int b_rational = w_is_rational_any(b);
+    if ((!a_rational && !w_is_integer_any(a)) ||
+        (!b_rational && !w_is_integer_any(b)) ||
+        (!a_rational && !b_rational)) {
+        *supported = 0;
+        return 0;
+    }
+    *supported = 1;
+
+    WValue an, ad, bn, bd;
+    if (a_rational) rational_parts(a, &an, &ad);
+    else { an = a; ad = w_int(1); }
+    if (b_rational) rational_parts(b, &bn, &bd);
+    else { bn = b; bd = w_int(1); }
+
+    WValue left = bigint_mul_any(an, bd);
+    WValue right = bigint_mul_any(bn, ad);
+    return bigint_compare(left, right);
 }
 
 static WValue w_rational_add(WValue a, WValue b) {
-    int32_t an = w_unbox_rational_num(a), bn = w_unbox_rational_num(b);
-    uint32_t ad = w_unbox_rational_den(a), bd = w_unbox_rational_den(b);
-    return rational_reduce((int64_t)an * bd + (int64_t)bn * ad, (int64_t)ad * bd);
+    WValue an, ad, bn, bd;
+    rational_parts(a, &an, &ad);
+    rational_parts(b, &bn, &bd);
+    WValue gcd = bigint_gcd_any(ad, bd);
+    WValue ad_reduced = bigint_div_any(ad, gcd);
+    WValue bd_reduced = bigint_div_any(bd, gcd);
+    WValue numerator = bigint_add_any(bigint_mul_any(an, bd_reduced),
+                                     bigint_mul_any(bn, ad_reduced));
+    WValue denominator = bigint_mul_any(ad_reduced, bd);
+    return rational_from_parts(numerator, denominator);
 }
 
 static WValue w_rational_sub(WValue a, WValue b) {
-    int32_t an = w_unbox_rational_num(a), bn = w_unbox_rational_num(b);
-    uint32_t ad = w_unbox_rational_den(a), bd = w_unbox_rational_den(b);
-    return rational_reduce((int64_t)an * bd - (int64_t)bn * ad, (int64_t)ad * bd);
+    WValue an, ad, bn, bd;
+    rational_parts(a, &an, &ad);
+    rational_parts(b, &bn, &bd);
+    WValue gcd = bigint_gcd_any(ad, bd);
+    WValue ad_reduced = bigint_div_any(ad, gcd);
+    WValue bd_reduced = bigint_div_any(bd, gcd);
+    WValue numerator = bigint_sub_any(bigint_mul_any(an, bd_reduced),
+                                     bigint_mul_any(bn, ad_reduced));
+    WValue denominator = bigint_mul_any(ad_reduced, bd);
+    return rational_from_parts(numerator, denominator);
 }
 
 static WValue w_rational_mul(WValue a, WValue b) {
-    int32_t an = w_unbox_rational_num(a), bn = w_unbox_rational_num(b);
-    uint32_t ad = w_unbox_rational_den(a), bd = w_unbox_rational_den(b);
-    return rational_reduce((int64_t)an * bn, (int64_t)ad * bd);
+    WValue an, ad, bn, bd;
+    rational_parts(a, &an, &ad);
+    rational_parts(b, &bn, &bd);
+    WValue gcd_left = bigint_gcd_any(an, bd);
+    WValue gcd_right = bigint_gcd_any(bn, ad);
+    WValue numerator = bigint_mul_any(bigint_div_any(an, gcd_left),
+                                     bigint_div_any(bn, gcd_right));
+    WValue denominator = bigint_mul_any(bigint_div_any(ad, gcd_right),
+                                       bigint_div_any(bd, gcd_left));
+    return rational_from_parts(numerator, denominator);
 }
 
 static WValue w_rational_div(WValue a, WValue b) {
-    int32_t an = w_unbox_rational_num(a), bn = w_unbox_rational_num(b);
-    uint32_t ad = w_unbox_rational_den(a), bd = w_unbox_rational_den(b);
-    if (bn == 0) die("division by zero (rational)");
-    return rational_reduce((int64_t)an * bd, (int64_t)ad * bn);
+    WValue an, ad, bn, bd;
+    rational_parts(a, &an, &ad);
+    rational_parts(b, &bn, &bd);
+    if (bigint_compare(bn, w_int(0)) == 0)
+        die("division by zero (rational)");
+    WValue gcd_num = bigint_gcd_any(an, bn);
+    WValue gcd_den = bigint_gcd_any(bd, ad);
+    WValue numerator = bigint_mul_any(bigint_div_any(an, gcd_num),
+                                     bigint_div_any(bd, gcd_den));
+    WValue denominator = bigint_mul_any(bigint_div_any(ad, gcd_den),
+                                       bigint_div_any(bn, gcd_num));
+    return rational_from_parts(numerator, denominator);
 }
 
-/* Rational + int → rational */
-static WValue w_rational_add_int(WValue r, int64_t n) {
-    int32_t num = w_unbox_rational_num(r);
-    uint32_t den = w_unbox_rational_den(r);
-    return rational_reduce((int64_t)num + n * den, den);
+/* Rational + Integer → rational, preserving arbitrary Integer width. */
+static WValue w_rational_add_integer(WValue rational, WValue integer) {
+    WValue numerator, denominator;
+    rational_parts(rational, &numerator, &denominator);
+    return rational_from_parts(
+        bigint_add_any(numerator, bigint_mul_any(integer, denominator)),
+        denominator);
 }
 
 /* ---- Packed complex arithmetic helpers ---- */
@@ -14215,8 +15058,8 @@ WValue w_add(WValue a, WValue b) {
          * (matching w_sub/w_mul/w_div and the == comparison path); a genuine
          * non-numeric like `~1.5 + "s"` still falls through to the string /
          * instance handling below for a proper TypeError. */
-        if ((w_is_double(a) || w_is_int(a) || is_decimal_any(a)) &&
-            (w_is_double(b) || w_is_int(b) || is_decimal_any(b)))
+        if ((w_is_double(a) || w_is_integer_any(a) || w_is_rational_any(a) || is_decimal_any(a)) &&
+            (w_is_double(b) || w_is_integer_any(b) || w_is_rational_any(b) || is_decimal_any(b)))
             return w_float(as_numeric_double(a) + as_numeric_double(b));
     }
     /* Strict string `+`: only text (String/Char/Rope) concatenates with
@@ -14251,12 +15094,12 @@ WValue w_add(WValue a, WValue b) {
     if (w_is_int(a) && w_is_char(b))
         return w_box_char((uint32_t)w_as_int(a) + w_char_codepoint(b));
     /* rational + rational */
-    if (w_is_rational(a) && w_is_rational(b))
+    if (w_is_rational_any(a) && w_is_rational_any(b))
         return w_rational_add(a, b);
-    if (w_is_rational(a) && w_is_int(b))
-        return w_rational_add_int(a, w_as_int(b));
-    if (w_is_int(a) && w_is_rational(b))
-        return w_rational_add_int(b, w_as_int(a));
+    if (w_is_rational_any(a) && w_is_integer_any(b))
+        return w_rational_add_integer(a, b);
+    if (w_is_integer_any(a) && w_is_rational_any(b))
+        return w_rational_add_integer(b, a);
     if (w_is_complex(a) && w_is_complex(b))
         return w_complex_add(a, b);
     if (w_is_complex(a) && w_is_int(b))
@@ -14321,14 +15164,16 @@ WValue w_sub(WValue a, WValue b) {
     if (w_is_instant(a) && w_is_int(b))
         return w_box_instant(w_unbox_instant(a) - w_as_int(b));
     /* rational - rational */
-    if (w_is_rational(a) && w_is_rational(b))
+    if (w_is_rational_any(a) && w_is_rational_any(b))
         return w_rational_sub(a, b);
-    if (w_is_rational(a) && w_is_int(b))
-        return w_rational_add_int(a, -w_as_int(b));
-    if (w_is_int(a) && w_is_rational(b)) {
-        /* int - rational = int + (-rational) */
-        WValue neg = w_box_rational(-w_unbox_rational_num(b), w_unbox_rational_den(b));
-        return w_rational_add_int(neg, w_as_int(a));
+    if (w_is_rational_any(a) && w_is_integer_any(b))
+        return w_rational_add_integer(a, bigint_sub_any(w_int(0), b));
+    if (w_is_integer_any(a) && w_is_rational_any(b)) {
+        WValue numerator, denominator;
+        rational_parts(b, &numerator, &denominator);
+        return rational_from_parts(
+            bigint_sub_any(bigint_mul_any(a, denominator), numerator),
+            denominator);
     }
     if (w_is_complex(a) && w_is_complex(b))
         return w_complex_sub(a, b);
@@ -14375,12 +15220,12 @@ WValue w_mul(WValue a, WValue b) {
     if ((w_is_int(a) || is_decimal_any(a)) && is_quantity_any(b))
         return w_quantity_mul_scalar(b, a);
     /* rational * rational, rational * int */
-    if (w_is_rational(a) && w_is_rational(b))
+    if (w_is_rational_any(a) && w_is_rational_any(b))
         return w_rational_mul(a, b);
-    if (w_is_rational(a) && w_is_int(b))
-        return rational_reduce((int64_t)w_unbox_rational_num(a) * w_as_int(b), w_unbox_rational_den(a));
-    if (w_is_int(a) && w_is_rational(b))
-        return rational_reduce(w_as_int(a) * (int64_t)w_unbox_rational_num(b), w_unbox_rational_den(b));
+    if (w_is_rational_any(a) && w_is_integer_any(b))
+        return w_rational_mul(a, rational_from_parts(b, w_int(1)));
+    if (w_is_integer_any(a) && w_is_rational_any(b))
+        return w_rational_mul(rational_from_parts(a, w_int(1)), b);
     if (w_is_complex(a) && w_is_complex(b))
         return w_complex_mul(a, b);
     if (w_is_complex(a) && w_is_int(b))
@@ -14484,13 +15329,12 @@ WValue w_div(WValue a, WValue b) {
     if (is_quantity_any(a) && (w_is_int(b) || is_decimal_any(b)))
         return w_quantity_div_scalar(a, b);
     /* rational / rational, rational / int */
-    if (w_is_rational(a) && w_is_rational(b))
+    if (w_is_rational_any(a) && w_is_rational_any(b))
         return w_rational_div(a, b);
-    if (w_is_rational(a) && w_is_int(b)) {
-        int64_t bv = w_as_int(b);
-        if (bv == 0) die("division by zero");
-        return rational_reduce(w_unbox_rational_num(a), (int64_t)w_unbox_rational_den(a) * bv);
-    }
+    if (w_is_rational_any(a) && w_is_integer_any(b))
+        return w_rational_div(a, rational_from_parts(b, w_int(1)));
+    if (w_is_integer_any(a) && w_is_rational_any(b))
+        return w_rational_div(rational_from_parts(a, w_int(1)), b);
     if (w_is_double(a) || w_is_double(b)) {
         double bv = as_numeric_double(b);
         if (bv == 0.0) die("division by zero");
@@ -14846,6 +15690,12 @@ WValue w_bit_shr(WValue a, WValue b) {
 }
 
 WValue w_neg(WValue v) {
+    if (w_is_rational_any(v)) {
+        WValue numerator, denominator;
+        rational_parts(v, &numerator, &denominator);
+        return rational_from_parts(bigint_sub_any(w_int(0), numerator),
+                                   denominator);
+    }
     if (w_is_decimal(v))
         return w_decimal(-w_unbox_decimal_sig(v), w_unbox_decimal_scale(v));
     if (w_is_currency(v))
@@ -14978,6 +15828,12 @@ WValue w_eq(WValue a, WValue b) {
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) == 0);
 
+    {
+        int supported;
+        int comparison = rational_compare_exact(a, b, &supported);
+        if (supported) return w_bool(comparison == 0);
+    }
+
     /* Numeric equality coerces across the int/float boundary, matching the
      * ordering comparisons (w_lt/w_gt, which use cmp_numeric_double). A bare
      * int literal compared to a float is promoted to the float's type, so
@@ -14985,8 +15841,8 @@ WValue w_eq(WValue a, WValue b) {
      * numerics (int/float/decimal) so double-vs-string stays false below
      * rather than tripping cmp_numeric_double's "expected numeric type" die. */
     if (w_is_double(a) || w_is_double(b)) {
-        int a_num = w_is_double(a) || w_is_int(a) || is_decimal_any(a);
-        int b_num = w_is_double(b) || w_is_int(b) || is_decimal_any(b);
+        int a_num = w_is_double(a) || w_is_integer_any(a) || w_is_rational_any(a) || is_decimal_any(a);
+        int b_num = w_is_double(b) || w_is_integer_any(b) || w_is_rational_any(b) || is_decimal_any(b);
         if (a_num && b_num)
             return w_bool(cmp_numeric_double(a) == cmp_numeric_double(b));
     }
@@ -15007,13 +15863,6 @@ WValue w_eq(WValue a, WValue b) {
         if (((a >> 1) & 7) != 7 || ((b >> 1) & 7) != 7)
             return W_FALSE;
         return w_bool(w_string_compare(a, b) == 0);
-    }
-
-    /* Rational equality: reduce both and compare */
-    if (w_is_rational(a) && w_is_rational(b)) {
-        int32_t an = w_unbox_rational_num(a), bn = w_unbox_rational_num(b);
-        uint32_t ad = w_unbox_rational_den(a), bd = w_unbox_rational_den(b);
-        return w_bool((int64_t)an * bd == (int64_t)bn * ad);
     }
 
     /* Date equality: compare all components */
@@ -15104,6 +15953,16 @@ WValue w_lt(WValue a, WValue b) {
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) < 0);
 
+    {
+        int supported;
+        int comparison = rational_compare_exact(a, b, &supported);
+        if (supported) return w_bool(comparison < 0);
+    }
+
+    if ((w_is_rational_any(a) && is_decimal_any(b)) ||
+        (is_decimal_any(a) && w_is_rational_any(b)))
+        return w_bool(cmp_numeric_double(a) < cmp_numeric_double(b));
+
     if (w_is_double(a) || w_is_double(b))
         return w_bool(cmp_numeric_double(a) < cmp_numeric_double(b));
 
@@ -15147,6 +16006,16 @@ WValue w_spaceship(WValue a, WValue b) {
         int c = decimal_compare(a, b);
         return w_int(c < 0 ? -1 : (c > 0 ? 1 : 0));
     }
+    {
+        int supported;
+        int comparison = rational_compare_exact(a, b, &supported);
+        if (supported) return w_int(comparison);
+    }
+    if ((w_is_rational_any(a) && is_decimal_any(b)) ||
+        (is_decimal_any(a) && w_is_rational_any(b))) {
+        double x = cmp_numeric_double(a), y = cmp_numeric_double(b);
+        return w_int(x < y ? -1 : (x > y ? 1 : 0));
+    }
     if (w_is_double(a) || w_is_double(b)) {
         double x = cmp_numeric_double(a), y = cmp_numeric_double(b);
         if (x != x || y != y) return W_NIL;   /* NaN is incomparable */
@@ -15179,6 +16048,16 @@ WValue w_gt(WValue a, WValue b) {
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) > 0);
 
+    {
+        int supported;
+        int comparison = rational_compare_exact(a, b, &supported);
+        if (supported) return w_bool(comparison > 0);
+    }
+
+    if ((w_is_rational_any(a) && is_decimal_any(b)) ||
+        (is_decimal_any(a) && w_is_rational_any(b)))
+        return w_bool(cmp_numeric_double(a) > cmp_numeric_double(b));
+
     if (w_is_double(a) || w_is_double(b))
         return w_bool(cmp_numeric_double(a) > cmp_numeric_double(b));
 
@@ -15205,6 +16084,16 @@ WValue w_lte(WValue a, WValue b) {
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) <= 0);
 
+    {
+        int supported;
+        int comparison = rational_compare_exact(a, b, &supported);
+        if (supported) return w_bool(comparison <= 0);
+    }
+
+    if ((w_is_rational_any(a) && is_decimal_any(b)) ||
+        (is_decimal_any(a) && w_is_rational_any(b)))
+        return w_bool(cmp_numeric_double(a) <= cmp_numeric_double(b));
+
     if (w_is_double(a) || w_is_double(b))
         return w_bool(cmp_numeric_double(a) <= cmp_numeric_double(b));
 
@@ -15230,6 +16119,16 @@ WValue w_gte(WValue a, WValue b) {
 
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) >= 0);
+
+    {
+        int supported;
+        int comparison = rational_compare_exact(a, b, &supported);
+        if (supported) return w_bool(comparison >= 0);
+    }
+
+    if ((w_is_rational_any(a) && is_decimal_any(b)) ||
+        (is_decimal_any(a) && w_is_rational_any(b)))
+        return w_bool(cmp_numeric_double(a) >= cmp_numeric_double(b));
 
     if (w_is_double(a) || w_is_double(b))
         return w_bool(cmp_numeric_double(a) >= cmp_numeric_double(b));
@@ -15681,6 +16580,12 @@ WValue w_to_s(WValue v) {
             else
                 format_duration_cal(buf2, (int16_t)d->sig, d->extra2);
             return w_string(buf2);
+        case W_DOMAIN_RATIONAL: {
+            WBigRational *rational = w_as_big_rational(v);
+            return w_str_concat(
+                w_str_concat(w_to_s(rational->numerator), w_string("/")),
+                w_to_s(rational->denominator));
+        }
         }
     }
     return w_string("<object>");
@@ -15771,7 +16676,6 @@ static inline uint32_t w_str_extract_fast(WValue v, char *buf) {
     }
     return 0;  /* rope, symbol — caller uses w_rope_write */
 }
-
 
 /* Encode a Unicode codepoint as UTF-8 and return it as a WString.
  * Used by tokenizer code that materializes bytes derived from dynamic
@@ -17883,7 +18787,7 @@ WValue __w_type(WValue v) {
     if (w_is_duration(v)) return g_tn_duration;
     if (w_is_date(v))     return g_tn_date;
     if (w_is_complex(v))  return g_tn_complex;
-    if (w_is_rational(v)) return g_tn_rational;
+    if (w_is_rational_any(v)) return g_tn_rational;
     if (w_is_color(v))    return g_tn_color;
     if (w_is_ipv4(v))     return g_tn_ipv4;
     if (w_is_ipv6(v))     return g_tn_ipv6;
@@ -18116,6 +19020,9 @@ WValue __w_mmap_view_at(WValue mmap_val, int64_t byte_offset, int element_bits, 
 static double w_math_to_double(WValue v) {
     if (w_is_double(v)) return w_as_double(v);
     if (w_is_int(v))    return (double)w_to_i64(v);
+    if (w_is_rational_any(v))
+        return integer_to_double(w_rational_numerator(v)) /
+               integer_to_double(w_rational_denominator(v));
     /* Decimals coerce too: libm results are approximations by nature, so the
      * precision-carrying objection to decimal→double (see cmp_numeric_double)
      * doesn't apply here. Without this, 0.5 ** 2 dies — `0.5` is a Decimal
@@ -18144,6 +19051,29 @@ WValue w_math_abs(WValue x)   { return w_float(fabs(w_math_to_double(x))); }
 WValue w_pow(WValue base, WValue ex) {
     if (w_is_int(ex)) {
         int64_t e = w_as_int(ex);
+        if (w_is_rational_any(base)) {
+            WValue factor = base;
+            uint64_t magnitude;
+            if (e < 0) {
+                WValue numerator, denominator;
+                rational_parts(base, &numerator, &denominator);
+                if (bigint_compare(numerator, w_int(0)) == 0)
+                    die("division by zero (rational)");
+                factor = rational_from_parts(denominator, numerator);
+                magnitude = (uint64_t)(-e);
+            } else {
+                magnitude = (uint64_t)e;
+            }
+            WValue result = w_rational(1, 1);
+            while (magnitude > 0) {
+                if ((magnitude & 1) != 0)
+                    result = w_mul(result, factor);
+                magnitude >>= 1;
+                if (magnitude > 0)
+                    factor = w_mul(factor, factor);
+            }
+            return result;
+        }
         /* quantity ** n — repeated dimensional multiply (cÂ² in mÂ·cÂ²). */
         if (e >= 1 && e <= 8 && is_quantity_any(base)) {
             WValue result = base;
@@ -19543,6 +20473,8 @@ static inline uint64_t w_dispatch_key(WValue v) {
             uint8_t type = *(uint8_t *)w_as_ptr(v);
             return 0x80u | (uint64_t)type;
         }
+        if (subtag == W_SUBTAG_DOMAIN && w_is_big_rational(v))
+            return 0xE0u | W_PACKED_RATIONAL;
         return subtag;
     }
     if (hi < 0xFFF9) return 0xFF;                       /* double */
@@ -24424,6 +25356,15 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
             return w_bool_array_new(len);
         }
 
+        /* Rational.new(numerator, denominator = 1) returns the packed scalar,
+         * not an allocated WObject instance. */
+        if (strcmp(klass->name, "Rational") == 0 && w_hash_key_eq(name, WN_new)) {
+            if (args->size < 1 || args->size > 2)
+                w_raise(w_string("Rational.new expects one or two arguments"));
+            WValue denominator = args->size == 2 ? args->slots[1] : w_int(1);
+            return w_rational_new(args->slots[0], denominator);
+        }
+
         if (w_hash_key_eq(name, WN_new)) {
             WValue obj = w_object_new(recv);
             WMethod *m = w_method_lookup_arity(klass, WN_new, args->size + 1);
@@ -24470,26 +25411,6 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
                     case 16: ((fn16)m->fn_ptr)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15]); break;
                     default: die_method_arity("constructor", klass->name, "new", expected, 16); break;
                 }
-            } else if (args->size > 0) {
-                /* No constructor accepts these arguments. Dropping them
-                 * silently returned an object with every field unset, so the
-                 * mistake surfaced far away as a nil field read. Tungsten's
-                 * constructor is `-> new(...)` (spec 5.3.1): `init` and
-                 * `initialize` are ordinary methods that `.new` never calls,
-                 * and a `ro`/`field` declaration does not generate one, so
-                 * name the required form rather than just the arity. */
-                /* w_raise, not die: this is a user programming error, so it
-                 * must be catchable by begin/rescue like the neighbouring
-                 * constructor diagnostics. */
-                char cbuf[512];
-                snprintf(cbuf, sizeof cbuf,
-                         "%s.new: no constructor accepts %d argument%s. Define "
-                         "`-> new(@field)` on %s -- `init`/`initialize` are not "
-                         "constructor hooks in Tungsten, and `ro :field` / "
-                         "`- data` declarations do not generate a constructor.",
-                         klass->name, args->size, args->size == 1 ? "" : "s",
-                         klass->name);
-                w_raise(w_string(cbuf));
             }
             return obj;
         }
@@ -29886,23 +30807,8 @@ WValue w_strbuf_reuse_or_new(WValue *slot, int64_t cap) {
 /* Append a string (WValue) to the buffer in place; returns the buffer. */
 WValue w_strbuf_append(WValue buf, WValue str) {
     WStrBuf *sb = (WStrBuf *)w_as_ptr(buf);
-    /* as_str() calls w_str_data -- which already returns the byte length --
-     * discards it, and stages inline-mode bytes in a thread-local rotating
-     * buffer; the length then had to be recovered with strlen. That cost an
-     * O(n) rescan of every appended chunk plus a TLS access per append, on
-     * the hottest string-building path there is. Take the length w_str_data
-     * already computed.
-     *
-     * This also settles an embedded-NUL inconsistency: strlen stopped at the
-     * first NUL, so `sb << "a\0b"` appended one byte while String#+,
-     * String#<< and String#size all count three. StringBuffer was the lone
-     * outlier; it now agrees with them. */
-    if (w_is_rope(str)) str = w_rope_flatten(str);
-    if (!w_is_stringy(str)) die("expected string or symbol");
-    char sbuf[6];
-    const char *s;
-    size_t slen;
-    w_str_data(str, sbuf, &s, &slen);
+    const char *s = as_str(str);
+    size_t slen = strlen(s);
     if (sb->size + (int64_t)slen >= sb->cap) {
         int64_t new_cap = (sb->size + slen + 1) * 2;
         sb->data = realloc(sb->data, new_cap);
@@ -29917,13 +30823,7 @@ WValue w_strbuf_append(WValue buf, WValue str) {
 /* Convert buffer contents to an immutable WValue string. */
 WValue w_strbuf_to_s(WValue buf) {
     WStrBuf *sb = (WStrBuf *)w_as_ptr(buf);
-    /* w_string() would strlen the whole buffer -- a full extra pass over
-     * everything appended (10 MB in the string_build benchmark) to recover a
-     * length sb->size already holds. It also truncated at an embedded NUL,
-     * which is the other half of the inconsistency fixed in
-     * w_strbuf_append: String#+/#<</#size are all byte-exact, so
-     * StringBuffer is too. */
-    return w_string_n(sb->data, (size_t)sb->size);
+    return w_string(sb->data);
 }
 
 /* ---- Base64 storage boundaries ----

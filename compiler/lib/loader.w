@@ -67,6 +67,7 @@ use parser
     source = read_file(resolved)
     if source == nil
       raise compile_error(:E_LOAD_MISSING_FILE, "Could not load '" + path + "' (resolved to '" + resolved + "')", from_file, 1, 1)
+    source = ccall("w_algebra_rewrite_source", source)
     lexer = Lexer.new(source, resolved)
     token_count = lexer.tokenize()
     parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
@@ -662,6 +663,10 @@ use parser
     # register Date's 0xE4 type class even when they never name Date directly.
     if t == :date || t == :datetime
       consider_autoload_name("Date", defined, registry, seen, pending)
+    # Rational literals are packed values whose accessors and conversions
+    # live in core/numeric/rational.w.
+    if t == :rational
+      consider_autoload_name("Rational", defined, registry, seen, pending)
     # UUID literals carry the runtime subtag without a class reference. Once
     # byte is source-defined, literal-only programs must register UUID's type
     # class before public dispatch.

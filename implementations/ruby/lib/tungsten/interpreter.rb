@@ -139,7 +139,7 @@ module Tungsten
 
     BUILTIN_TYPES = %w[
       String Integer Float Boolean Nil
-      Array Hash Symbol Range Decimal Tuple
+      Array Hash Symbol Range Decimal Rational Tuple
       Class Tungsten
     ].freeze
     BUILTIN_CONSTANT_NAMES = %w[
@@ -2531,6 +2531,8 @@ module Tungsten
     end
 
     def instantiate(w_class, args)
+      return Rational(*args) if w_class.name == "Rational"
+
       obj = Runtime::WObject.new(w_class)
       constructor = w_class.lookup_method("new")
       call_w_method(obj, constructor, args) if constructor
@@ -4568,6 +4570,8 @@ module Tungsten
     end
 
     def instantiate_from_nodes(w_class, arg_nodes)
+      return Rational(*evaluate_args(arg_nodes)) if w_class.name == "Rational"
+
       obj = Runtime::WObject.new(w_class)
       constructor = w_class.lookup_method("new")
       call_w_method_from_nodes(obj, constructor, arg_nodes) if constructor

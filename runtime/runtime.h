@@ -303,7 +303,8 @@ typedef struct {
     WValue *values;
 } WHash;
 
-/* ---- Domain heap object (overflow for currency/quantity/duration/decimal) ---- */
+/* ---- Domain heap object (overflow for currency/quantity/duration/decimal;
+ * Rational shares the domain subtag with its own exact two-WValue layout) ---- */
 typedef struct {
     uint8_t domain_type;   /* W_DOMAIN_* discriminator */
     uint8_t domain_flags;  /* quantity point/delta metadata; zero otherwise */
@@ -316,6 +317,20 @@ typedef struct {
 
 static inline WDomainHeap *w_as_domain(WValue v) {
     return (WDomainHeap *)w_as_ptr(v);
+}
+
+/* ---- Heap-backed Rational (overflow tier for packed Rational) ----
+ * The domain discriminator stays at offset zero so this shares the
+ * W_SUBTAG_DOMAIN bucket with the other promoted scalar domains. */
+typedef struct {
+    uint8_t domain_type;   /* W_DOMAIN_RATIONAL */
+    uint8_t pad[7];
+    WValue numerator;      /* canonical Integer or BigInt */
+    WValue denominator;    /* canonical positive Integer or BigInt */
+} WBigRational;
+
+static inline WBigRational *w_as_big_rational(WValue v) {
+    return (WBigRational *)w_as_ptr(v);
 }
 
 /* ---- Network address heap object (shared by IPv6 and MAC) ---- */
@@ -464,6 +479,9 @@ WValue w_ipv6_in_cidr(WValue ip, WValue cidr);
 WValue w_ip_in_cidr(WValue ip, WValue cidr);
 WValue w_mac_parse(WValue str_v);
 WValue w_rational(int32_t num, uint32_t den);
+WValue w_rational_new(WValue numerator, WValue denominator);
+WValue w_rational_numerator(WValue rational);
+WValue w_rational_denominator(WValue rational);
 WValue w_complex(int16_t real_sig, int real_scale, int16_t imag_sig, int imag_scale);
 WValue w_location_point(int32_t x, int32_t y);
 WValue w_location_file(int file_id, int line, int col);
@@ -498,6 +516,7 @@ WValue w_string_slice_raw(WValue str, int64_t start, int64_t len);
 WValue w_to_s(WValue v);
 int64_t w_stringy_c_length(WValue v);
 void w_str_data(WValue v, char buf[6], const char **out, size_t *len);
+WValue w_algebra_rewrite_source(WValue source);
 WValue w_string_from_codepoint(WValue cp_v);
 WValue w_string_from_codes(WValue arr_v, WValue start_v, WValue len_v);
 WValue w_regex_scan_char(WValue subj, WValue start_v, WValue n_v, WValue ch_v);

@@ -1362,6 +1362,7 @@ if wit_mode
 # Handle -e (eval) mode
 if eval_code != nil
   if show_lex
+    eval_code = ccall("w_algebra_rewrite_source", eval_code)
     lexer = Lexer.new(eval_code, "(eval)")
     token_count = lexer.tokenize()
 
@@ -1377,6 +1378,7 @@ if eval_code != nil
     exit 0
 
   if show_ast
+    eval_code = ccall("w_algebra_rewrite_source", eval_code)
     lexer = Lexer.new(eval_code, "(eval)")
     token_count = lexer.tokenize()
     parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
@@ -1407,6 +1409,7 @@ if file_path == nil && command != "compile-batch"
 # Handle --lex and --ast for files
 if show_lex
   source = read_file(file_path)
+  source = ccall("w_algebra_rewrite_source", source)
   lexer = Lexer.new(source, file_path)
   token_count = lexer.tokenize()
 
@@ -1423,6 +1426,7 @@ if show_lex
 
 if show_ast
   source = read_file(file_path)
+  source = ccall("w_algebra_rewrite_source", source)
   lexer = Lexer.new(source, file_path)
   token_count = lexer.tokenize()
   parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)

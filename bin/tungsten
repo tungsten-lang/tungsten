@@ -457,7 +457,14 @@ if [ -x "$COMPILER" ]; then
   # exit without running anything. Build if stale, then run the CLI with the
   # user's args. BIT_HOME is required so `use argon` resolves under bits/.
   WC="$ROOT/bin/tungsten.wc"
-  if [ ! -x "$WC" ] || [ "$ROOT/bin/tungsten.w" -nt "$WC" ]; then
+  # Staleness must also track the COMPILER, not just bin/tungsten.w. The CLI
+  # embeds the interpreter (compiler/lib/interpreter.w) and the rest of the
+  # compiler library, so an interpreter fix left this cache serving the old
+  # behavior indefinitely — `tungsten -e` kept reporting a bug that was
+  # already fixed, with a rebuild appearing to do nothing. Any such change
+  # rebuilds $COMPILER, so comparing against it captures the dependency
+  # transitively for one stat call.
+  if [ ! -x "$WC" ] || [ "$ROOT/bin/tungsten.w" -nt "$WC" ] || [ "$COMPILER" -nt "$WC" ]; then
     BIT_HOME="${BIT_HOME:-$ROOT/bits}" \
       "$COMPILER" compile "$ROOT/bin/tungsten.w" --out "$WC" --no-lto >/dev/null 2>&1 \
       || exec "$RUBY" "$RUBY_CLI" "$@"

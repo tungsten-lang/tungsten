@@ -92,6 +92,12 @@ RSpec.describe Tungsten::Interpreter do
     expect(run("2 ** 8")).to eq(256)
   end
 
+  it "constructs reduced rationals through the Rational class facade" do
+    expect(run("Rational.new(6, 8)")).to eq(Rational(3, 4))
+    expect(run("Rational.new(7)")).to eq(Rational(7, 1))
+    expect(run("Rational.new(15, -20)")).to eq(Rational(-3, 4))
+  end
+
   it "evaluates parenthesized expressions" do
     expect(run("(1 + 2) * 3")).to eq(9)
   end

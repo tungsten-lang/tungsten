@@ -1152,6 +1152,25 @@ int main() {
         printf("  packed rational: OK\n");
     }
 
+    /* Rational overflow tier: exact BigInt parts, same public operations, and
+     * transparent cancellation back to the packed representation. */
+    {
+        WValue numerator = bigint_dec("100000000000000000000");
+        WValue huge = w_rational_new(numerator, w_int(3));
+        assert(w_is_big_rational(huge));
+        assert(w_eq(w_rational_numerator(huge), numerator) == W_TRUE);
+        assert(w_eq(w_rational_denominator(huge), w_int(3)) == W_TRUE);
+        assert(strcmp(str_val(w_to_s(huge)), "100000000000000000000/3") == 0);
+
+        WValue inverse = w_rational_new(w_int(3), numerator);
+        WValue reduced = w_mul(huge, inverse);
+        assert(w_is_rational(reduced));
+        assert(w_unbox_rational_num(reduced) == 1);
+        assert(w_unbox_rational_den(reduced) == 1);
+
+        printf("  heap rational promotion: OK\n");
+    }
+
     /* Packed type: Complex */
     {
         WValue a = w_complex(2, 0, 3, 0);      /* 2+3i */

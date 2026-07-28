@@ -222,6 +222,7 @@ use target
     file = @current_file
     if file == nil
       file = "(eval)"
+    source = ccall("w_algebra_rewrite_source", source)
     lexer = Lexer.new(source, file)
     token_count = lexer.tokenize()
     parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
@@ -1241,6 +1242,14 @@ use target
       if type(value) == "Hash" && value.has_key?(:rt) && value[:rt] == :object
         return w_to_s(value)
       return ccall("w_to_s", value)
+    when "w_rational_numerator"
+      if args.size() != 2
+        raise "w_rational_numerator expects one Rational"
+      return ccall("w_rational_numerator", args[1])
+    when "w_rational_denominator"
+      if args.size() != 2
+        raise "w_rational_denominator expects one Rational"
+      return ccall("w_rational_denominator", args[1])
     when "w_strbuf_append"
       return ccall("w_strbuf_append", args[1], args[2])
     when "w_strbuf_to_s"
@@ -1285,6 +1294,10 @@ use target
       return ccall("w_int_to_str_base_boxed", args[1], args[2])
     when "w_str_to_sym"
       return ccall("w_str_to_sym", args[1])
+    when "w_algebra_rewrite_source"
+      if args.size() != 2
+        raise "w_algebra_rewrite_source expects one argument"
+      return ccall("w_algebra_rewrite_source", args[1])
 
     when "w_ipv4_parse"
       return ccall("w_ipv4_parse", args[1])
@@ -1791,12 +1804,25 @@ use target
   -> apply_binary_op(op, left, right)
     # Object operands dispatch their own operator method (a + b -> a.+(b)),
     # mirroring the compiled operator-overload path and the `·` arm below —
-    # covers the hypercomplex tower, Vec/Mat, etc. Arithmetic/bitwise only;
-    # comparisons (== < > …) fall through to the primitive arms unchanged.
+    # covers the hypercomplex tower, Vec/Mat, etc. Arithmetic/bitwise here,
+    # `==`/`!=` just below; ordering comparisons (< > <= >=) fall through
+    # to the primitive arms unchanged.
     if type(left) == "Hash" && left.has_key?(:rt) && left[:rt] == :object
       opn = binop_method_name(op)
       if opn != nil
         return dispatch_method(left, opn, [right], nil, nil)
+      # `==` dispatches to a BODIED user `==` override, mirroring runtime
+      # w_eq's override-guarded dispatch (Object#==/1 is a bodyless native
+      # declaration, so plain objects keep identity semantics). `!=` is
+      # always the negation of `==`, exactly like compiled w_neq — a
+      # user-defined `!=` method is not consulted by the operator.
+      if op == :EQ || op == :NEQ
+        m = lookup_method(left[:w_class], "==", 1, false, [right])
+        if m != nil && m[:body] != nil && m[:body].size() > 0
+          result = call_w_method(left, m, [right], nil, nil)
+          if op == :EQ
+            return result
+          return result == true ? false : true
     if op == :PLUS
       # Strict string `+` — only text concatenates with text; a String
       # mixed with anything else is a TypeError, mirroring runtime w_add.
@@ -2732,6 +2758,18 @@ use target
   -> primitive_runtime_class(recv)
     class_name = nil
     t = type(recv)
+    # A `:rt`-tagged hash is an INTERNAL representation, not a user Hash.
+    # `(1..100)` evaluates to {rt: :range, from:, to:, exclusive:}, so
+    # classifying it as Hash resolved `size` to Hash's `- data` layout field
+    # and returned the hash's KEY COUNT — `(1..100).size` was 4 — while
+    # `.to_a` died inside Hash#to_a. Claiming no primitive class lets
+    # dispatch_method reach its dedicated range branch, which implements
+    # size/length/to_a directly and materializes to an array for every other
+    # Enumerable name. This must return EARLY, not merely leave class_name
+    # nil: the `class_name == nil` fallback below re-derives the class from
+    # w_type_name, which reports plain "Hash" for this value.
+    if t == "Hash" && recv.has_key?(:rt) && recv[:rt] == :range
+      return nil
     if t == "Array"
       class_name = "Array"
     elsif t == "String"
@@ -3803,16 +3841,19 @@ use target
     result
 
   -> instantiate(w_class, args, env)
+    if w_class[:name] == "Rational"
+      if args.size() < 1 || args.size() > 2
+        raise "Rational.new expects one or two arguments"
+      denominator = args.size() == 2 ? args[1] : 1
+      return ccall("w_rational_new", args[0], denominator)
     obj = {rt: :object, w_class: w_class, ivars: {}}
-    constructor = lookup_method(w_class, "new")
+    # Arity-aware constructor selection: overloaded `-> new` definitions must
+    # resolve like the compiled engine (exact name+arity first, then the
+    # name-only fallback) — the bare name-only lookup returned the LAST
+    # registration and nil-padded its missing parameters.
+    constructor = lookup_method(w_class, "new", args.size(), false, args)
     if constructor != nil
       call_w_method(obj, constructor, args, nil, env)
-    elsif args != nil && args.size() > 0
-      # Mirrors the runtime's constructor check (w_method_dispatch `new`
-      # arm): arguments with no constructor to receive them used to be
-      # dropped, leaving every field unset so the mistake surfaced later as
-      # a nil field read. `-> new(...)` is the constructor (spec 5.3.1).
-      raise w_class[:name].to_s() + ".new: no constructor accepts " + args.size().to_s() + " argument(s). Define `-> new(@field)` on " + w_class[:name].to_s() + " -- `init`/`initialize` are not constructor hooks in Tungsten, and `ro :field` / `- data` declarations do not generate a constructor."
     obj
 
   # -- Super --
@@ -3827,7 +3868,7 @@ use target
       raise "no superclass"
     args = ast_get(node, :args).map -> (a)
       evaluate(a, env)
-    constructor = lookup_method(super_class, "new")
+    constructor = lookup_method(super_class, "new", args.size(), false, args)
     if constructor != nil
       call_w_method(obj, constructor, args, nil, env)
 

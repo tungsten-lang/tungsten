@@ -287,6 +287,21 @@
           }
           CNEXT();
         }
+        // Algebra notation is a native-loader source rewrite. Stage 0 only
+        // compiles the compiler itself, which contains no algebra declarations,
+        // so preserving the source is the exact bootstrap behavior required
+        // here. Native stages call runtime.c's w_algebra_rewrite_source.
+        if (!has_receiver && name_len == 5 && memcmp(name, "ccall", 5) == 0 && argc == 2
+            && tc_kind(args[0]) == TC_VAL_STRING
+            && tc_str_len(args[0]) == 24
+            && memcmp(tc_str_bytes_only(args[0]), "w_algebra_rewrite_source", 24) == 0) {
+          TcValue source = args[1];
+          FREE_ARGS();
+          if (!push(&vm, source, err)) {
+            goto cleanup_fail;
+          }
+          CNEXT();
+        }
         // Slab-AST fused kind-extract + table lookup (fix #5).
         // ast_kind in compiler/lib/ast.w dispatches
         //   ccall("w_node_kind_sym", node, kind_sym_table_data)

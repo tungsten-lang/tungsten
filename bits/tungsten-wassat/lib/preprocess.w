@@ -1193,9 +1193,9 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
   -> try_eliminate(v)
     return false if @frozen[v] == 1 || @passign[v] != 0 || @gone[v] != 0
     @bve_pm[0] = v
-    @bve_pm[1] = @bve_margin
-    @bve_pm[2] = WASSAT_PRE_OCC_PRODUCT_CAP
-    @bve_pm[3] = 131072
+    @bve_pm[1] = wassat_bve_margin_override(@bve_margin)
+    @bve_pm[2] = wassat_bve_occ_cap_override(WASSAT_PRE_OCC_PRODUCT_CAP)
+    @bve_pm[3] = wassat_bve_outcap_override(131072)
     @bve_pm[4] = 0
     @bve_pm[5] = 0
     @bve_pm[6] = 0
@@ -1461,6 +1461,30 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
 #
 #   st[0] = qhead   st[1] = trail size   st[2] = conflict ci or -1
 #   st[3] = accumulated ticks
+# Measurement hooks for the two elimination bounds. The margin is resolvent
+# growth allowed per pivot (0 = zero-growth); the cap rejects pivots whose
+# pos*neg occurrence product exceeds it. qg-family rows eliminate ZERO
+# variables under the shipped bounds while CaDiCaL clears ~30% there; these
+# pins are how that gets measured without a rebuild per configuration.
+-> wassat_bve_margin_override(v)
+  return wassat_decimal_in_range("WASSAT_BVE_MARGIN", env("WASSAT_BVE_MARGIN"), 0, 1000000) if env("WASSAT_BVE_MARGIN") != nil
+  v
+
+-> wassat_bve_occ_cap_override(v)
+  return wassat_decimal_in_range("WASSAT_BVE_OCC_CAP", env("WASSAT_BVE_OCC_CAP"), 1, 2000000000) if env("WASSAT_BVE_OCC_CAP") != nil
+  v
+
+# The packed resolvent buffer. NOT a policy knob in disguise: a pivot whose
+# resolvents overflow it is rejected outright (`base + rl >= outcap ->
+# feasible = 0`), so this bound silently CONVERTS a more permissive margin
+# into FEWER eliminations -- measured on minand064, margin 0 eliminates
+# 11,820 variables and margin 16 eliminates zero, purely from buffer
+# overflow. Any margin experiment has to raise this in step or it measures
+# the buffer instead of the margin.
+-> wassat_bve_outcap_override(v)
+  return wassat_decimal_in_range("WASSAT_BVE_OUTCAP", env("WASSAT_BVE_OUTCAP"), 1024, 2000000000) if env("WASSAT_BVE_OUTCAP") != nil
+  v
+
 -> wassat_pre_prop(fla, fcs, fcl, falive, ftaut, och, ocn, ocv, asg, rsn, tps, tr, st) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   qhead = st[0]
   tsize = st[1]

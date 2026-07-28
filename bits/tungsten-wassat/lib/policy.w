@@ -640,6 +640,50 @@ WASSAT_CONGRUENCE_DEFAULT = true
     return wassat_decimal_in_range("WASSAT_INPROCESS", env("WASSAT_INPROCESS"), 0, 2000000000) if env("WASSAT_INPROCESS") != nil
     0
 
+  # Trail reuse on restart. A restart discards a trail the heuristic would
+  # largely rebuild; keeping the prefix whose decisions still outrank the best
+  # unassigned variable saves the re-propagation. The lever it aims at is
+  # measured: SCPC-500-19 burns 1,611 propagations per conflict against
+  # CaDiCaL's 69 at the same per-operation speed.
+  # -1 forces it off on every arm, 1 forces it on, 0 lets the race axis decide
+  # (cfgs slot 7: arms 1 and 2). Three-way rather than a boolean so a single
+  # binary can A/B the axis against all-off without a second compile — two
+  # binaries built minutes apart have confounded a measurement here before.
+  # Which arms carry trail reuse, as a bitmask over arm index: bit a set means
+  # arm a reuses. 6 = arms 1 and 2, 9 = arms 0 and 3, 15 = all, 0 = none.
+  #
+  # DEFAULT 0 -- BANKED NEGATIVE. Every assignment was measured in one
+  # interleaved 4-column run (33 rows, medians of 3), and judged only on the
+  # rows with a measured noise floor, because those are the only ones a 3-rep
+  # median can resolve:
+  #
+  #   qg5-13     (floor 1.14x)  0.851s -> 1.25 / 1.19 / 1.39   REAL regression,
+  #                                                            all three masks
+  #   bmc-ibm-12 (floor 1.10x)  0.589s -> 0.62 / 0.70 / 0.62   REAL under 9
+  #   bmc-ibm-6  (floor 1.03x)  0.044s -> 0.042/0.042/0.041    real, but 3ms
+  #   minand064, qg3-09, shuffling-1                           inside floor
+  #
+  # The geomeans looked good (0.968 / 1.000 / 0.936) and are misleading: total
+  # wall time got WORSE for every assignment (39.9s -> 40.1 / 42.5 / 41.0), so
+  # the gains sit on cheap rows and the losses on expensive ones. On the full
+  # suite the axis scored 35 wins against 33, but that is two credible gains
+  # (ibm-2004-03-k70, schooltt) against one credible loss (4pipe), with the
+  # other three changes on rows whose floors are 22.24x, 7.48x and 1.62x.
+  # +1 net, inside the +/-2 churn band, against a bar set at more than +2.
+  #
+  # Kept behind the mask rather than deleted, like shrinking above: the
+  # machinery is sound (verdicts agree everywhere, f1000 unaffected at any
+  # mask) and a future restart/branching change could make it pay.
+  # See docs/trail-reuse.md.
+  -> trail_reuse_mask
+    return wassat_decimal_in_range("WASSAT_REUSE_ARMS", env("WASSAT_REUSE_ARMS"), 0, 255) if env("WASSAT_REUSE_ARMS") != nil
+    0
+
+  -> trail_reuse_force
+    return 1 if env("WASSAT_REUSE_TRAIL") == "1"
+    return -1 if env("WASSAT_REUSE_TRAIL") == "0"
+    0
+
   -> use_vivification
     # The current prefix-conflict pass is a measured net loss: on uuf250 it
     # perturbs a roughly 95k-conflict trajectory into a multi-million-conflict

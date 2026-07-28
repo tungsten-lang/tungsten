@@ -217,3 +217,48 @@ wins at no `f1000` cost. Second, and more generally: **a global flag in this
 solver is not "the axis on every arm".** It also reconfigures the serial and
 preprocessing paths, so a force-knob A/B measures something strictly larger
 than the axis, and cannot stand in for it.
+
+## Verdict — banked negative, default mask 0
+
+Four assignments, one binary, one interleaved run, 33 rows, medians of 3:
+
+| assignment | geomean | faster >5% | slower >5% | total wall |
+|---|---:|---:|---:|---:|
+| none | — | — | — | 39.9s |
+| arms 1+2 (6) | 0.9679 | 10 | 1 | 40.1s |
+| arms 0+3 (9) | 1.0001 | 8 | 6 | 42.5s |
+| all (15) | 0.9361 | 13 | 5 | 41.0s |
+
+**Every variant improves the geomean and makes total wall time worse.** That
+contradiction is the whole story: the gains are on cheap rows, the losses on
+expensive ones, and a geomean over 33 rows weights a 7ms row like a 12s one.
+
+Judged only on rows with a measured noise floor — the only ones a 3-rep median
+can resolve at all:
+
+| row (floor) | none | arms1+2 | arms0+3 | all | |
+|---|---:|---:|---:|---:|---|
+| `qg5-13` (1.14x) | 0.851 | 1.248 | 1.187 | 1.391 | **real regression, all three** |
+| `bmc-ibm-12` (1.10x) | 0.589 | 0.617 | 0.704 | 0.617 | real under 0+3 |
+| `bmc-ibm-6` (1.03x) | 0.044 | 0.042 | 0.042 | 0.041 | real — and worth 3ms |
+| `minand064` (1.02x) | 3.735 | 3.665 | 3.741 | 3.692 | inside floor |
+| `qg3-09` (1.39x) | 1.036 | 0.927 | 0.938 | 0.908 | inside floor |
+| `shuffling-1` (1.29x) | 10.64 | 11.16 | 11.50 | 11.37 | inside floor |
+
+One consistent real regression, one 3-millisecond real improvement, everything
+else noise. Combined with the suite's +1-after-noise-stripping, trail reuse
+**does not clear the bar this file set before the numbers existed**, and it is
+banked: `trail_reuse_mask` defaults to 0, so no arm reuses and the shipped
+binary is behaviourally identical to before this work.
+
+The machinery is retained behind the mask, the way shrinking and vivification
+are: verdicts agreed in every configuration measured, `f1000` is unaffected at
+every mask, and the technique is trajectory-dependent — the restart and
+branching cadence work is exactly what could make it pay later.
+
+**What it cost and what it bought.** The prediction it was built on was wrong
+(`SCPC-500-19` unmoved), and the effect it does have is not worth its
+regressions. What survives is reusable: the ±2 churn band, now measured; the
+force-knob-vs-axis distinction; and the habit of scoring only on rows whose
+noise floor is smaller than the effect, which is what turned an apparently
+clean 0.9361 geomean into a banked negative.

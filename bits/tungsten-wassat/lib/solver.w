@@ -259,6 +259,8 @@ WASSAT_PROOF_DRAT = 2
     # 8 solved instances: 0.92x). The structured half of the trade could not
     # be measured — see the note on this in the walk comment below.
     @rephase_free = env("WASSAT_REPHASE_FREE") == "1"
+    @reuse_force = @config.trail_reuse_force
+    @reuse_trail = @reuse_force == 1
     @rephase_idx = 0
     @rephases = 0
     @rephase_rng = 88172645463325252
@@ -679,6 +681,32 @@ WASSAT_PROOF_DRAT = 2
     @tsize += 1
     0
 
+  # Trail reuse (van der Tak/Ramos/Heule 2011): the level a restart can stop
+  # at instead of 0. A restart throws away the trail and the heuristic then
+  # rebuilds much of it — every decision still more active than the best
+  # unassigned variable would simply be re-made, and re-propagated. Keep that
+  # prefix. Returns 0 when nothing is reusable, i.e. a plain full restart.
+  # Ask whichever heuristic `pick_branch` is actually using — comparing trail
+  # decisions against EVSIDS activity while VMTF is driving would rank them by
+  # a key that is not deciding anything.
+  -> reuse_trail_target
+    if @mode_stable || !@use_vmtf
+      a = wassat_heap_peek_act(@assign, @heap, @heappos, @activity, @hstate)
+      return 0 if a < 0
+      return self.reuse_trail_scan(@activity, a)
+    a = wassat_vmtf_peek_stamp(@assign, @vq_next, @vq_stamp, @vq_state)
+    return 0 if a < 0
+    self.reuse_trail_scan(@vq_stamp, a)
+
+  # Deepest prefix of decisions that still outrank `a` under `key`.
+  -> reuse_trail_scan(key, a)
+    t = 0
+    while t < @dlevel
+      v = @trail[@trail_lim[t]].abs
+      break if key[v] < a
+      t += 1
+    t
+
   # Native pop loop: backjump runs per conflict over the whole popped
   # suffix — boxed it was ~5% of the uuf250 profile (flame, 2026-07-24).
   -> backjump(target)
@@ -1046,6 +1074,12 @@ WASSAT_PROOF_DRAT = 2
   # policy.w use_shrinking); this is how the race samples it anyway.
   -> enable_shrink
     @use_shrink = true
+    0
+
+  # Race axis: trail reuse on restart, per arm. Global policy keeps it off
+  # (see policy.w use_trail_reuse) because it is sharply two-sided.
+  -> enable_trail_reuse
+    @reuse_trail = true if @reuse_force == 0
     0
 
   # Race axis: learned-clause subsumption, per arm. Global policy keeps it off
@@ -2166,7 +2200,11 @@ WASSAT_PROOF_DRAT = 2
         if want_restart
           @since_restart = 0
           @restart_count += 1
-          self.backjump(0)
+          # A due rephase rewrites every saved phase, so it wants the clean
+          # slate a full restart gives it; reuse the trail only otherwise.
+          rt = 0
+          rt = self.reuse_trail_target if @reuse_trail && @conflicts < @rephase_at
+          self.backjump(rt)
           # Rephase on schedule, at a restart boundary: cycle the saved
           # phases through best / inverted / best / original / best /
           # random, then start a fresh best-phase epoch.
@@ -5030,6 +5068,17 @@ WASSAT_PROOF_DRAT = 2
       v = cand
   v
 
+# The activity `wassat_heap_pick` would return, without consuming it. Discards
+# assigned tops exactly as pick does — that is pick's own behaviour, not an
+# extra side effect — so calling this never changes which variable pick then
+# returns. -1 when the heap holds no unassigned variable.
+-> wassat_heap_peek_act(asg, heap, hpos, act, hst) (i8[] i64[] i64[] i64[] i64[]) i64
+  while hst[0] > 0 && asg[heap[0]] != 0
+    z = wassat_heap_pop(heap, hpos, act, hst)
+  r = -1
+  r = act[heap[0]] if hst[0] > 0
+  r
+
 # Debug/spec helper: validates the heap order and inverse-position map without
 # adding checks to the search hot path.
 -> wassat_heap_valid(heap, hpos, act, hst, nv) (i64[] i64[] i64[] i64[] i64) i64
@@ -5092,6 +5141,18 @@ WASSAT_PROOF_DRAT = 2
     v = vqn[v]
   vst[3] = v
   v
+
+# The stamp `wassat_vmtf_pick` would return, without consuming it. Advancing
+# vst[3] past assigned variables is pick's own behaviour, and pick does not
+# remove what it returns, so this leaves the next pick unchanged.
+-> wassat_vmtf_peek_stamp(asg, vqn, vqs, vst) (i8[] i64[] i64[] i64[]) i64
+  v = vst[3]
+  while v > 0 && asg[v] != 0
+    v = vqn[v]
+  vst[3] = v
+  r = -1
+  r = vqs[v] if v > 0
+  r
 
 -> wassat_evsids_bump(act, heap, hpos, hst, v, nv) (i64[] i64[] i64[] i64[] i64 i64) i64
   act[v] = act[v] + hst[1]

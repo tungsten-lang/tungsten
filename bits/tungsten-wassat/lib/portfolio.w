@@ -743,6 +743,11 @@ WASSAT_ARM_SLS = 2             # local search, models only
       s.simplify_raw if art["config"].force_simplify?
     else
       wassat_race_matrix_config(a, cfgs, a * WASSAT_CFG_STRIDE)
+      # TRAIL REUSE axis, set here rather than in the native matrix because the
+      # assignment is policy-driven (see policy.w trail_reuse_mask). Two-sided
+      # and trajectory-dependent: forced on every arm it wins 2bitadd_10 and
+      # schooltt but turns f1000 from 5.7s into a >150s timeout, twice.
+      cfgs[a * WASSAT_CFG_STRIDE + 7] = (art["config"].trail_reuse_mask >> a) & 1
       wassat_race_apply_config(s, cfgs, a * WASSAT_CFG_STRIDE,
                                art["config"].force_simplify?,
                                art["config"].use_vmtf(art["raw"] == true))
@@ -833,6 +838,18 @@ WASSAT_TEL_STRIDE = 8
   cfgs[b + 6] = 0
   cfgs[b + 6] = 1 if a % 4 == 2
   cfgs[b + 6] = 2 if a % 4 == 3
+  # TRAIL REUSE, the XOR of the branching and chrono axes: arms 1 and 2 on,
+  # arms 0 and 3 off. Those two already span the full 2x2 of {chrono, shrink},
+  # so no plain split stays uncorrelated with them; the XOR does.
+  #
+  # Raced rather than defaulted for the usual reason -- it is two-sided with
+  # no static predictor. Break_triple_10_16 0.31x and 2bitadd_10 0.61x for it,
+  # minand064 1.32x and ContextModel 1.92x against it, and minand064's noise
+  # floor is 1.02x so that regression is real rather than churn. It is also
+  # NOT the fix it was built to be: SCPC-500-19, the 1,611-props/conflict row
+  # that motivated it, times out at 120s with it both off and on.
+  # slot 7 (TRAIL REUSE) is not set here: it comes from policy's
+  # trail_reuse_mask in the build loop, which this native fn cannot read.
   0
 
 # Apply a configuration vector to a freshly built solver. `forced` is the
@@ -856,6 +873,7 @@ WASSAT_TEL_STRIDE = 8
   # conflicts, arm 3 every 10k -- the two intervals scored differently on
   # every row measured, so they are not interchangeable.
   s.enable_subsume(cfgs[b + 6] == 2 ? 10000 : 3000) if cfgs[b + 6] > 0
+  s.enable_trail_reuse if cfgs[b + 7] == 1
   0
 
 # Register the SLS arm. Occupies the fixed slot threads+2 so it never collides

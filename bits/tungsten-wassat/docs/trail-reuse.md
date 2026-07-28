@@ -151,3 +151,42 @@ axis 5.76s, both SATISFIABLE, against UNSOLVED@120s for global-on.
 Do not chase the complement on these two rows alone — that is the hand-picked
 sweep that has already overfitted twice in this campaign. If it is tried, it is
 scored on the full reference breadth set, on row status.
+
+## Result 5 — the axis suite: best of the three, by a boundary margin
+
+Three full reference suites, 59 comparable rows:
+
+| config | WIN | TIE | LOSS | UNSOLVED |
+|---|---:|---:|---:|---:|
+| off | 33 | 3 | 15 | 8 |
+| global on | 35 | 2 | 13 | **9** |
+| **axis (mask 6)** | **35** | 3 | 13 | **8** |
+
+The axis matches global-on's win count without paying global's unsolved row,
+and `f1000` is exactly why: `UNSOLVED@120s` under global, `LOSS 5.56s` under
+the axis. Parity gate `OK`.
+
+**But the +2 does not clear the bar this file set, and the composition says
+why.** Rows where the axis differs from off:
+
+| row | off | axis | credible? |
+|---|---|---|---|
+| `ibm-2004-03-k70` | LOSS 2.45 | **WIN 0.96** | yes — matches the A/B's 0.53x |
+| `schooltt-5-7-12-2-4-1.4` | TIE 10.06 | **WIN 8.50** | yes — global-on converted it too |
+| `Carry_Bits_Fast_12` | UNSOLVED | WIN 1.22 | **no** — 22.24x noise floor |
+| `em_7_3_6_fbc` | LOSS 41.54 | TIE 6.07 | **no** — 7.48x noise floor |
+| `crusti_g2io_200` | LOSS 51.01 | UNSOLVED | **no** — 1.62x floor, and at budget |
+| `4pipe` | **WIN 2.93** | **LOSS 4.27** | yes — a real new regression |
+
+Strip the three untrustworthy rows and the ledger is: two credible gains
+(`ibm-2004-03-k70`, `schooltt`) against one credible loss (`4pipe`). That is
++1, inside the ±2 churn band, on a rule that requires more than +2.
+
+`2bitadd_10` behaves exactly as the A/B predicted — TIE 4.14 under the axis
+against WIN 2.44 under global — which is independent confirmation that the
+wins sit on arms 0/3, not 1/2.
+
+So: the axis is the best configuration measured, and it is **not yet
+demonstrated** to be better than off. The assignment sweep (masks 0/6/9 in one
+interleaved run) is the measurement that should settle it, because an
+interleaved A/B resolves far below what three separate suite runs can.

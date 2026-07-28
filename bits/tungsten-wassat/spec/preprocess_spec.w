@@ -213,7 +213,7 @@ describe "Wassat preprocessing" ->
   context "freeze set" ->
     it "never eliminates or substitutes a frozen variable" ->
       f = wassat_parse_cnf(EQUIV_AB)
-      pre = WassatPreprocess.new(f["nvars"], f["clauses"], WASSAT_PROOF_WRAT)
+      pre = WassatPreprocess.new(f["nvars"], f["clauses"], WASSAT_PROOF_WRAT, nil)
       pre.freeze(1)
       pre.freeze(2)
       art = pre.run

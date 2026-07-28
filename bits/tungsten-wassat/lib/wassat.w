@@ -293,7 +293,7 @@ use portfolio
   # rounds run only when both miss. The
   # certificate path keeps the single-shot run().
   t0 = ccall("__w_clock_ms")
-  pre = WassatPreprocess.new(formula["nvars"], formula["clauses"], proof_mode)
+  pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, formula)
   pre.enable_dual_emission if proof_mode == WASSAT_PROOF_WRAT && drat_final != nil
   art = nil
   if proof_mode == WASSAT_PROOF_NONE
@@ -501,13 +501,13 @@ use portfolio
             # race on its arena. Constructed HERE, on the main thread, because
             # construction is the one part that touches the parsed formula's
             # boxed clauses while another arm might be reading them.
-            plight = WassatPreprocess.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_NONE)
+            plight = WassatPreprocess.new(formula["nvars"], [], WASSAT_PROOF_NONE, formula)
             plight.set_budget(wassat_pre_light_ticks)
             plight.set_deadline_ms(wassat_pre_stage_ms)
             plight.force_full_pipeline
             wassat_race_add_pre(race, plight, false, "light")
             if pre_arms > 1
-              pheavy = WassatPreprocess.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_NONE)
+              pheavy = WassatPreprocess.new(formula["nvars"], [], WASSAT_PROOF_NONE, formula)
               pheavy.set_budget(wassat_pre_light_ticks + wassat_pre_heavy_ticks)
               pheavy.set_deadline_ms(2 * wassat_pre_stage_ms)
               pheavy.force_full_pipeline

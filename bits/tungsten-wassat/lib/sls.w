@@ -37,7 +37,15 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   # other arm has answered (measured: lucky wins Large-result_b23 in ~0.4s and
   # the join then waited 5.3s on this constructor). An aborted intake marks
   # the walker unusable (@aborted); solve returns "no model" immediately.
-  -> new(@nvars, @input_clauses, stop)
+  # `flat` is the parser's formula Hash (flat_lits/flat_offs/flat_lens/flat_ncl)
+  # or nil. When present the boxed clause list is never touched: normalisation
+  # reads the i64[] mirrors and writes this walker's own flat arrays directly,
+  # which is both faster and thread-safe (a worker must never subscript a boxed
+  # Array -- see the SIGBUS note on the stop cell below).
+  -> new(@nvars, @input_clauses, stop, flat_in)
+    # Same guard as WassatPreprocess: a formula without flat mirrors is boxed.
+    flat = flat_in
+    flat = nil if flat != nil && !flat.has_key?("flat_ncl")
     nv = @nvars
     @impossible = false
     @aborted = false
@@ -52,32 +60,65 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     # abort the walk still touches the remaining clauses, but with an empty
     # body -- the poll costs one flag check per clause.
     @work = []
-    cnt = 0
-    @input_clauses.each -> (c)
-      cnt += 1
-      unless @aborted
-        if (cnt & 4095) == 0 && stop != nil
-          @aborted = true if stop[0] != 0
-        unless @aborted
-          @impossible = true if c.size == 0
-          uniq = []
-          taut = false
-          c.each -> (l)
-            dup = false
-            uniq.each -> (u)
-              dup = true if u == l
-              taut = true if u == 0 - l
-            uniq.push(l) unless dup
-          @work.push(uniq) unless taut
-    @work = [] if @aborted
+    flat_ok = false
     total = 0
-    @work.each -> (c)
-      total += c.size
-
-    @ncl = @work.size
-    @fla = i64[total + 2]
-    @fcs = i64[@ncl + 2]
-    @fcl = i64[@ncl + 2]
+    if flat != nil
+      # Two native passes over the flat mirrors: size, then fill. `pm` carries
+      # the counts back; a stamp array does dedupe and tautology detection in
+      # O(1) per literal with no allocation at all.
+      sfla = flat["flat_lits"]
+      sfcs = flat["flat_offs"]
+      sfcl = flat["flat_lens"]
+      sncl = flat["flat_ncl"]
+      stamp = i64[2 * nv + 4]
+      scell = stop == nil ? i64[4] : stop
+      pm = i64[6]
+      pm[0] = sncl
+      pm[1] = nv
+      wassat_sls_flat_size(sfla, sfcs, sfcl, stamp, pm, scell)
+      @aborted = true if pm[5] == 1
+      @impossible = true if pm[4] == 1
+      @ncl = pm[2]
+      total = pm[3]
+      @fla = i64[total + 2]
+      @fcs = i64[@ncl + 2]
+      @fcl = i64[@ncl + 2]
+      k = 0
+      while k < 2 * nv + 4
+        stamp[k] = 0
+        k += 1
+      pm[0] = sncl
+      pm[1] = nv
+      pm[5] = 0
+      wassat_sls_flat_fill(sfla, sfcs, sfcl, stamp, @fla, @fcs, @fcl, pm, scell) unless @aborted
+      @aborted = true if pm[5] == 1
+      @ncl = 0 if @aborted
+      flat_ok = true
+    unless flat_ok
+      cnt = 0
+      @input_clauses.each -> (c)
+        cnt += 1
+        unless @aborted
+          if (cnt & 4095) == 0 && stop != nil
+            @aborted = true if stop[0] != 0
+          unless @aborted
+            @impossible = true if c.size == 0
+            uniq = []
+            taut = false
+            c.each -> (l)
+              dup = false
+              uniq.each -> (u)
+                dup = true if u == l
+                taut = true if u == 0 - l
+              uniq.push(l) unless dup
+            @work.push(uniq) unless taut
+      @work = [] if @aborted
+      @work.each -> (c)
+        total += c.size
+      @ncl = @work.size
+      @fla = i64[total + 2]
+      @fcs = i64[@ncl + 2]
+      @fcl = i64[@ncl + 2]
     @och = i64[2 * nv + 4]
     i = 0
     while i < 2 * nv + 4
@@ -86,18 +127,31 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     @ocn = i64[total + 2]
     @ocv = i64[total + 2]
 
-    pos = 0
+    # The boxed path still has to flatten @work; the flat path already wrote
+    # @fla/@fcs/@fcl in its fill pass. Occurrence lists are then built from the
+    # flat arrays in BOTH cases, so there is exactly one occurrence builder.
+    unless flat_ok
+      pos = 0
+      ci = 0
+      @work.each -> (c)
+        @fcs[ci] = pos
+        @fcl[ci] = c.size
+        c.each -> (l)
+          @fla[pos] = l
+          pos += 1
+        ci += 1
     ci = 0
-    @work.each -> (c)
-      @fcs[ci] = pos
-      @fcl[ci] = c.size
-      c.each -> (l)
-        @fla[pos] = l
+    while ci < @ncl
+      o = @fcs[ci]
+      n = @fcl[ci]
+      j = 0
+      while j < n
+        l = @fla[o + j]
         li = l > 0 ? 2 * l : 2 * (0 - l) + 1
-        @ocn[pos] = @och[li]
-        @ocv[pos] = ci
-        @och[li] = pos
-        pos += 1
+        @ocn[o + j] = @och[li]
+        @ocv[o + j] = ci
+        @och[li] = o + j
+        j += 1
       ci += 1
 
     @asg = i64[nv + 1]           # 0 false, 1 true (see bool[] note above)
@@ -333,6 +387,109 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 #   st[4] flips   st[5] max flips  st[6] rng state     st[7] best unsat
 #   st[8] total weight             st[9] 1 = model found
 #   st[10] flip-trail size         st[11] flip trail overflowed
+# Pass 1: count surviving clauses and literals. A clause is dropped when it is
+# a tautology; duplicate literals collapse. `stamp` holds a per-literal
+# generation so both tests are O(1) with no allocation -- the same trick the
+# preprocessor's subsumption uses.
+#   pm in : [0] ncl  [1] nvars
+#   pm out: [2] clauses kept  [3] literals kept  [4] saw-empty-clause
+-> wassat_sls_flat_size(fla, fcs, fcl, stamp, pm, stp) (i64[] i64[] i64[] i64[] i64[] i64[])
+  ncl = pm[0]
+  nv = pm[1]
+  keep = 0
+  lits = 0
+  empty = 0
+  gen = 0
+  ci = 0
+  while ci < ncl
+    if (ci & 8191) == 0
+      if stp[0] != 0
+        pm[5] = 1
+        ci = ncl
+    o = fcs[ci]
+    n = fcl[ci]
+    empty = 1 if n == 0
+    gen += 1
+    taut = 0
+    uniq = 0
+    j = 0
+    while j < n
+      l = fla[o + j]
+      li = 0
+      if l > 0
+        li = 2 * l
+      else
+        li = 2 * (0 - l) + 1
+      if li >= 0 && li < 2 * nv + 4
+        taut = 1 if stamp[li ^ 1] == gen
+        if stamp[li] != gen
+          stamp[li] = gen
+          uniq += 1
+      j += 1
+    if taut == 0
+      keep += 1
+      lits += uniq
+    ci += 1
+  pm[2] = keep
+  pm[3] = lits
+  pm[4] = empty
+  0
+
+# Pass 2: write the deduplicated, tautology-free clauses into the walker's own
+# flat arrays. Identical traversal to pass 1, so the counts cannot disagree.
+-> wassat_sls_flat_fill(fla, fcs, fcl, stamp, ofla, ofcs, ofcl, pm, stp) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+  ncl = pm[0]
+  nv = pm[1]
+  gen = 0
+  out = 0
+  pos = 0
+  ci = 0
+  while ci < ncl
+    if (ci & 8191) == 0
+      if stp[0] != 0
+        pm[5] = 1
+        ci = ncl
+    o = fcs[ci]
+    n = fcl[ci]
+    gen += 1
+    taut = 0
+    j = 0
+    while j < n
+      l = fla[o + j]
+      li = 0
+      if l > 0
+        li = 2 * l
+      else
+        li = 2 * (0 - l) + 1
+      if li >= 0 && li < 2 * nv + 4
+        taut = 1 if stamp[li ^ 1] == gen
+        stamp[li] = gen
+      j += 1
+    if taut == 0
+      gen += 1
+      start = pos
+      j = 0
+      while j < n
+        l = fla[o + j]
+        li = 0
+        if l > 0
+          li = 2 * l
+        else
+          li = 2 * (0 - l) + 1
+        if li >= 0 && li < 2 * nv + 4
+          if stamp[li] != gen
+            stamp[li] = gen
+            ofla[pos] = l
+            pos += 1
+        j += 1
+      ofcs[out] = start
+      ofcl[out] = pos - start
+      out += 1
+    ci += 1
+  pm[2] = out
+  pm[3] = pos
+  0
+
 -> wassat_sls_run(fla, fcs, fcl, och, ocn, ocv, asg, satc, crit, wght, score, ccf, lastf, ulist, upos, gstk, gin, bag, wtr, st, stp) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   nv = st[0]
   ncl = st[1]
@@ -732,5 +889,9 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 
 # Library entry: parse-level formula in, model or nothing out. Never UNSAT.
 -> wassat_sls_solve(formula, max_flips, seed)
-  s = WassatSls.new(formula["nvars"], formula["clauses"], nil)
+  # Formulas from the BOXED parser carry no flat mirrors, so only hand the
+  # walker the flat path when they are actually present.
+  flat = formula.has_key?("flat_ncl") ? formula : nil
+  boxed = flat == nil ? formula["clauses"] : []
+  s = WassatSls.new(formula["nvars"], boxed, nil, flat)
   s.solve(max_flips, seed)

@@ -237,7 +237,7 @@
 # when another engine has answered (nil = run to the chunk budget).
 -> wassat_sls_gpu_solve(formula, walkers, max_flips, seed, noise, metal_path, stop_cell = nil)
   nv = formula["nvars"]
-  norm = wassat_sls_gpu_normalize(formula["clauses"])
+  norm = wassat_sls_gpu_normalize(wassat_formula_clauses(formula))
   if norm["impossible"]
     return { "sat": false, "model": [], "flips": 0, "restarts": 0,
              "best_unsat": 1, "seed": seed, "walkers": walkers }

@@ -83,9 +83,20 @@ WASSAT_PRE_SUB_CHUNK_TICKS = 2000000
 WASSAT_PRE_SUBST_CHECK_EVERY = 256
 
 + WassatPreprocess
-  -> new(@nvars, @input_clauses, @proof_mode)
+  # `flat` is the parser formula Hash or nil. With it, the constructor takes
+  # its counts from the flat mirrors and never touches the boxed clause list --
+  # only `intake` (the certificate path) genuinely needs boxed clauses, and it
+  # materializes them on demand.
+  -> new(@nvars, @input_clauses, @proof_mode, flat_in)
+    # Only a formula that actually carries the parser's flat mirrors counts as
+    # a flat source; the boxed parser produces neither. Checking here rather
+    # than trusting call sites -- passing a boxed formula as `flat` crashed the
+    # proof portfolio with "expected int, got nil" until this guard existed.
+    flat = flat_in
+    flat = nil if flat != nil && !flat.has_key?("flat_ncl")
+    @flat = flat
     nv = @nvars
-    @config = WassatConfig.new(@nvars, @input_clauses)
+    @config = flat == nil ? WassatConfig.new(@nvars, @input_clauses) : WassatConfig.from_lens(@nvars, flat["flat_lens"], flat["flat_ncl"])
     @passign = i64[nv + 1]       # root assignment: 0 / 1 / -1
     @preason = i64[nv + 1]       # root reason clause index, -1 = none
     @tpos = i64[nv + 1]          # trail position, for hint ordering
@@ -108,9 +119,14 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
     # typed mirrors for the scan loops
     @lits = []                   # ci -> Array of literals
     total = 0
-    @input_clauses.each -> (c)
-      total += c.size
-    @fccap = 2 * @input_clauses.size + 4 * nv + 1024
+    if flat == nil
+      @input_clauses.each -> (c)
+        total += c.size
+      @ncl_in = @input_clauses.size
+    else
+      total = flat["flat_nlits"]
+      @ncl_in = flat["flat_ncl"]
+    @fccap = 2 * @ncl_in + 4 * nv + 1024
     @facap = 2 * total + 8 * nv + 4096
     @fcs = i64[@fccap]           # ci -> arena offset
     @fcl = i64[@fccap]           # ci -> length
@@ -599,7 +615,7 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
   # refutes immediately, citing itself.
   -> intake
     @fqhead = 0
-    @input_clauses.each -> (c)
+    self.boxed_input.each -> (c)
       z = self.store(c.dup)
     ci = 0
     while ci < @ncl && @status == 0
@@ -1337,7 +1353,7 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
     # Probing gets a fixed slice; encoding-scale instances get a deeper
     # budget for the margin rounds (see run).
     if @tick_budget == 0
-      if @input_clauses.size <= 20000
+      if @ncl_in <= 20000
         @tick_budget = 400 * self.total_literals + 40000000
       else
         @tick_budget = 200 * self.total_literals + 10000000
@@ -1362,7 +1378,7 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
       # only on encoding-scale instances; big inputs also cap at two
       # rounds (the pass-2 rescan cost ~270ms on bmc to find crumbs).
       progress = true if passes < 4 && @ncl <= 20000
-      progress = false if passes >= 1 && @input_clauses.size > 20000
+      progress = false if passes >= 1 && @ncl_in > 20000
       passes += 1
     0
 
@@ -1375,7 +1391,13 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
     self.sweep_satisfied if @status == 0
     self.artifact
 
+  # Boxed input clauses, materialized only if something actually needs them.
+  -> boxed_input
+    return @input_clauses if @flat == nil
+    wassat_formula_clauses(@flat)
+
   -> total_literals
+    return @flat["flat_nlits"] if @flat != nil
     n = 0
     @input_clauses.each -> (c)
       n += c.size
@@ -1995,7 +2017,7 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
 # Preprocess CNF text and return the artifact.
 -> wassat_preprocess(cnf_text, proof_mode)
   f = wassat_parse_cnf(cnf_text)
-  pre = WassatPreprocess.new(f["nvars"], f["clauses"], proof_mode)
+  pre = WassatPreprocess.new(f["nvars"], f["clauses"], proof_mode, nil)
   pre.run
 
 # End-to-end library entry: preprocess, solve the reduced formula, and
@@ -2004,7 +2026,7 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
 # along under "pre".
 -> wassat_solve_preprocessed(cnf_text, proof_mode, lookahead, max_conflicts)
   f = wassat_parse_cnf(cnf_text)
-  pre = WassatPreprocess.new(f["nvars"], f["clauses"], proof_mode)
+  pre = WassatPreprocess.new(f["nvars"], f["clauses"], proof_mode, nil)
   art = pre.run
   if art["status"] == -1
     { "sat": false, "unsat": true, "complete": true, "status": -1,

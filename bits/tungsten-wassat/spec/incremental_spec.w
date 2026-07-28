@@ -130,7 +130,7 @@ describe "Wassat incremental solving" ->
 
     it "admits assumptions on frozen variables" ->
       f = wassat_parse_cnf(BVE_SIMPLE_INC)
-      pre = WassatPreprocess.new(f["nvars"], f["clauses"], WASSAT_PROOF_NONE)
+      pre = WassatPreprocess.new(f["nvars"], f["clauses"], WASSAT_PROOF_NONE, nil)
       pre.freeze(1)
       art = pre.run
       expect(wassat_check_assumptions(art, [1])).to eq(0)

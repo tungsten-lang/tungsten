@@ -74,6 +74,34 @@
 # 200k-clause files); boxed clauses are then built by a cheap array walk.
 # Validation matrix matches wassat_parse_cnf exactly — the spec suite runs
 # the same rejection cases against both.
+# Boxed clause list, materialized on demand and cached in the formula.
+#
+# MAIN THREAD ONLY. Worker threads must read the flat mirrors instead --
+# subscripting a boxed Array off-thread SIGBUSes, and two arms racing to
+# materialize would duplicate the work anyway.
+-> wassat_formula_clauses(formula)
+  return formula["clauses"] if formula["boxed"] == true
+  return formula["clauses"] unless formula.has_key?("flat_ncl")
+  lits = formula["flat_lits"]
+  offs = formula["flat_offs"]
+  lens = formula["flat_lens"]
+  ncl = formula["flat_ncl"]
+  clauses = []
+  k = 0
+  while k < ncl
+    o = offs[k]
+    n = lens[k]
+    c = []
+    j = 0
+    while j < n
+      c.push(lits[o + j])
+      j += 1
+    clauses.push(c)
+    k += 1
+  formula["clauses"] = clauses
+  formula["boxed"] = true
+  clauses
+
 -> wassat_parse_cnf_native(text)
   # Every clause needs at least a "0" terminator plus a separator (2 bytes),
   # and every literal at least a digit plus a separator (2 bytes), so
@@ -97,19 +125,14 @@
   nvars = hdr[0]
   raise "implausible variable count [nvars] in header" if nvars > 50000000
   ncl = hdr[2]
-  clauses = []
-  k = 0
-  while k < ncl
-    o = offs[k]
-    n = lens[k]
-    c = []
-    j = 0
-    while j < n
-      c.push(lits[o + j])
-      j += 1
-    clauses.push(c)
-    k += 1
-  { "nvars": nvars, "clauses": clauses,
+  # NO eager boxed materialization. Building one Array per clause cost ~60% of
+  # parse time (302ms of 499ms on a 10M-clause instance) for data the flat
+  # mirrors already hold: a clause IS the slice (flat_offs[k], flat_lens[k])
+  # of flat_lits, exactly the way the Tungsten lexer keeps tokens as packed
+  # (offset, length) slices of the source instead of copied strings.
+  # Consumers that genuinely need boxed clauses call wassat_formula_clauses,
+  # which materializes once and caches.
+  { "nvars": nvars, "clauses": [], "boxed": false,
     "flat_lits": lits, "flat_offs": offs, "flat_lens": lens,
     "flat_ncl": ncl, "flat_nlits": hdr[3] }
 

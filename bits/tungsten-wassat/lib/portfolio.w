@@ -51,7 +51,8 @@ WASSAT_ARM_SLS = 2             # local search, models only
     portfolio_started = ccall("__w_clock_ms")
 
     # preprocess ONCE; the artifact is what every arm consumes
-    pre = WassatPreprocess.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_WRAT)
+    # wassat_parse_cnf above is the BOXED parser -- no flat mirrors exist here.
+    pre = WassatPreprocess.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_WRAT, nil)
     art = pre.run
 
     if art["status"] == -1
@@ -327,6 +328,8 @@ WASSAT_ARM_SLS = 2             # local search, models only
       gids.push(g)
       max_gid = g
   next_gid = gids.pop
+  # NOTE: this worker path parses with wassat_parse_cnf (BOXED) -- it has no
+  # flat mirrors, so the count must come from the boxed list.
   raise "gid table length mismatch" unless gids.size == formula["clauses"].size
   raise "gid table is missing next_gid" if next_gid == nil
   unless gids.empty?
@@ -346,7 +349,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
     # racer (it leads its own process group by design) — two leaked probes
     # ground at 97% CPU for 20 minutes. The budget bounds an orphan's life;
     # a live coordinator never needs more than this anyway.
-    sp = Wassat.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_NONE, 0)
+    sp = Wassat.new(formula["nvars"], wassat_formula_clauses(formula), WASSAT_PROOF_NONE, 0)
     pr = sp.solve_budget(2000000)
     if pr["status"] == 1
       raise "status write failed" unless write_file(status_path, pr["model"].join(" ") + " 0\n")
@@ -356,7 +359,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
       exit(20)
     exit(3)
 
-  s = Wassat.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_WRAT, 0)
+  s = Wassat.new(formula["nvars"], wassat_formula_clauses(formula), WASSAT_PROOF_WRAT, 0)
   s.seed_proof_ids(gids, next_gid)
   s.reseed_phases(seed) if arm == "garden"
   tmp = proof_tmp + ".tmp"
@@ -464,7 +467,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
   # The stop cell reaches the CONSTRUCTOR too: normalising a multi-million-
   # clause formula takes seconds of boxed work, and the join must never wait
   # on an arm whose race is already decided.
-  s = WassatSls.new(formula["nvars"], formula["clauses"], stop)
+  s = WassatSls.new(formula["nvars"], [], stop, formula)
   s.set_stop_cell(stop)
   r = s.solve(flips, seed)
   if r["sat"]
@@ -507,8 +510,11 @@ WASSAT_ARM_SLS = 2             # local search, models only
 # clauses still constrain), so the only signal this arm ever raises is -1.
 # Fast path only -- a GE refutation has no DRAT justification here.
 -> wassat_xor_arm_body(nv, formula, res, base, stop)
-  clauses = formula["clauses"]
-  ncl = clauses.size
+  # Flat mirrors, not boxed clauses: this arm runs in a worker thread.
+  fla = formula["flat_lits"]
+  fcs = formula["flat_offs"]
+  fcl = formula["flat_lens"]
+  ncl = formula["flat_ncl"]
   # Grouping hashes every clause; bound the work since this is a side arm.
   return 0 if ncl > 100000 || ncl < 4
   gvars = {}
@@ -518,14 +524,14 @@ WASSAT_ARM_SLS = 2             # local search, models only
   ci = 0
   while ci < ncl
     return 0 if (ci & 1023) == 0 && stop[0] != 0
-    c = clauses[ci]
-    k = c.size
+    co = fcs[ci]
+    k = fcl[ci]
     if k >= 2 && k <= 24
       # sort the variables (insertion, k is tiny) and reject duplicates
       vs = []
       i = 0
       while i < k
-        l = c[i]
+        l = fla[co + i]
         v = l < 0 ? 0 - l : l
         j = vs.size - 1
         vs.push(v)
@@ -546,7 +552,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
         par = 0
         i = 0
         while i < k
-          l = c[i]
+          l = fla[co + i]
           v = l < 0 ? 0 - l : l
           if l < 0
             par = par ^ 1
@@ -1373,8 +1379,8 @@ WASSAT_AXIS_SLOTS = 10
   # without this the race started from a light-only kernel and lost to
   # `--fast` on uuf250-01 (2.10s against 1.53s) before diversity even had a
   # chance to pay.
-  config = WassatConfig.new(nv, formula["clauses"])
-  pre = WassatPreprocess.new(nv, formula["clauses"], WASSAT_PROOF_NONE)
+  config = WassatConfig.from_lens(nv, formula["flat_lens"], formula["flat_ncl"])
+  pre = WassatPreprocess.new(nv, [], WASSAT_PROOF_NONE, formula)
   art = nil
   if config.raw_kernel?
     art = wassat_raw_artifact(formula, nv)

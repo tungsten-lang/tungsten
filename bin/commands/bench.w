@@ -133,6 +133,10 @@ thresh["block_call"] = 300000000
 thresh["new_string"] = 25000000
 thresh["str_concat"] = 12000000
 thresh["hash_get"] = 100000000
+# str_build peaks ~3.4B chars/s since StringBuffer stopped recomputing
+# lengths with strlen on both append and to_s. Floor at 2.2B, just under the
+# pre-fix peak, so losing either half is caught.
+thresh["str_build"] = 2200000000
 
 # ---- integer-only formatting (interpreter float division is exact-rational) -
 -> lj(s, w)

@@ -762,7 +762,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
 #   3 chrono      0 off, 1 on (chronological backtracking v2)
 #   4 simplify    0 = none unless forced, 1 = substitution, 2 = + congruence
 #   5 shrink      0 off, 1 All-UIP learned-clause shrinking
-#   6 subsume     0 off, 1 learned-clause subsumption + SSR every 3k conflicts
+#   6 subsume     0 off, 1 subsumption+SSR every 3k conflicts, 2 every 10k
 WASSAT_CFG_STRIDE = 8
 WASSAT_TEL_STRIDE = 8
 
@@ -829,7 +829,10 @@ WASSAT_TEL_STRIDE = 8
   # 34 rows won -> 36, unsolved 8 -> 7. The geomean fell because
   # Carry_Bits_Fast_12 slowed 11.75s -> 40.57s, which is margin on a row that
   # is lost either way.
-  cfgs[b + 6] = (a >> 1) & 1
+  # 0 off (arms 0,1) / 1 every 3k (arm 2) / 2 every 10k (arm 3)
+  cfgs[b + 6] = 0
+  cfgs[b + 6] = 1 if a % 4 == 2
+  cfgs[b + 6] = 2 if a % 4 == 3
   0
 
 # Apply a configuration vector to a freshly built solver. `forced` is the
@@ -848,7 +851,11 @@ WASSAT_TEL_STRIDE = 8
   s.simplify_raw_mode(1) if cfgs[b + 4] == 2
   s.simplify_raw if cfgs[b + 4] == 0 && forced
   s.enable_shrink if cfgs[b + 5] == 1
-  s.enable_subsume(3000) if cfgs[b + 6] == 1
+  # Two intervals, not one: the axis pays, so spend its second arm on a
+  # DIFFERENT cadence rather than a duplicate. Arm 2 subsumes every 3k
+  # conflicts, arm 3 every 10k -- the two intervals scored differently on
+  # every row measured, so they are not interchangeable.
+  s.enable_subsume(cfgs[b + 6] == 2 ? 10000 : 3000) if cfgs[b + 6] > 0
   0
 
 # Register the SLS arm. Occupies the fixed slot threads+2 so it never collides

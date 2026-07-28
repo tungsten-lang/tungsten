@@ -71,3 +71,55 @@ is the same error that has already cost this campaign three retractions.
 Correctness is not a judgement call: `ab.py` checks every `s` line against the
 published expectation and across columns, and a disagreement is fatal
 regardless of speed.
+
+## Result 1 — the motivating row did not move
+
+`SCPC-500-19`, the instance whose 1,611-vs-69 propagations per conflict is the
+entire reason this was built, **times out at 120s with the knob both off and
+on**, twice each (`rc=124`, no `s` line). The rival solves it in 26s.
+
+So the specific prediction failed. Trail reuse does not convert the row it was
+aimed at, and the props/conflict gap there is not mainly restart
+re-propagation — or is, but re-propagation is not what the remaining 4.6x is
+made of. Whatever else this change is worth, it is not worth what this file
+originally argued it would be worth.
+
+## Result 2 — a real but two-sided effect elsewhere
+
+Interleaved A/B, one binary, env columns, medians of 3, 32 rows:
+**geomean 0.9551** — 10 rows faster >5%, 16 within 5%, 6 slower >5%.
+
+| direction | rows |
+|---|---|
+| faster | `Break_triple_10_16` 0.31x, `2bitadd_10` 0.61x, `urqh2x5` 0.79x, `shuffling-1` 0.89x |
+| slower | `ContextModel` 1.92x, `minand064` 1.32x, `qg3-09` 1.08x, `bmc-ibm-12` 1.07x |
+
+`minand064`'s measured noise floor is 1.02x, so its 1.32x regression is real,
+not churn. Two-sided with no static predictor is the exact shape `portfolio.w`
+says makes something **a race axis rather than a default** — and `cfgs` slot 7
+is free. That, not a global default, is the form this should take if it ships.
+
+## Result 3 — global ON wins rows, but costs a solved row
+
+Full reference suite, reuse forced on for every arm, against the same suite
+with it off. 59 comparable rows, and the +2 clears the ±2 churn band only
+because the four individual changes are legible:
+
+| row | off | on | |
+|---|---|---|---|
+| `2bitadd_10` | TIE 5.48 | **WIN 2.44** | predicted by the A/B's 0.61x |
+| `schooltt-5-7-12-2-4-1.4` | TIE 10.06 | **WIN 8.20** | |
+| `ais8.mis-97` | LOSS 3.72 | TIE 2.61 | |
+| `f1000` | LOSS 8.00 | **UNSOLVED@120s** | a solved row lost outright |
+
+WIN 33 -> 35, LOSS 15 -> 13, UNSOLVED 8 -> 9. The parity gate also went from
+`FAIL: 1` to `OK` — though `bmc-ibm-12` sits right on the 1.5x tolerance and
+has flipped that gate before, so it is not evidence on its own.
+
+**`f1000` is the finding.** Turning a row we solve in 8s into a timeout is a
+worse outcome than the two wins are good, because unsolved rows are the
+standing's binding constraint. It is also the precise failure a global default
+cannot avoid and a race axis can: with the axis, arms 0 and 3 run without
+reuse and should still solve `f1000`, while arms 1 and 2 deliver `2bitadd_10`
+and `schooltt`. Whether that actually holds is the next measurement, and it is
+the one that decides whether this ships at all.

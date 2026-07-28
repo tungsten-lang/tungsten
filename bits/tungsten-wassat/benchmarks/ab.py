@@ -14,6 +14,14 @@ A column may be the SAME binary under a different environment:
 which is the preferred form when the knob has an env override -- those columns
 cannot differ by compiler drift, only by the knob.
 
+MEDIAN, not min. wassat's race is nondeterministic and some rows are sharply
+bimodal -- em_7_3_6_fbc ranges 5.3s to 36.0s across five runs of the SAME
+binary in the SAME configuration. min-of-N estimates the lucky tail, so it
+reports whichever column happened to draw the fast mode and can INVERT a
+comparison outright (it scored a change 0.89 that the reference suite, which
+takes medians, scored as a regression). reference.py uses medians; so does
+this.
+
 Every run's `s` line is checked against reference.py's published expectation
 and against the other columns; a disagreement is fatal regardless of speed.
 Rows where every column exceeds the budget are reported separately and
@@ -27,6 +35,7 @@ import json
 import math
 import os
 import re
+import statistics
 import subprocess
 import sys
 import time
@@ -125,7 +134,8 @@ for lb, _, _ in BINS[1:]:
     for name, _p, _e in rows:
         if name in dead or (name, lb) not in times:
             continue
-        a, b = min(times[(name, base)]), min(times[(name, lb)])
+        a = statistics.median(times[(name, base)])
+        b = statistics.median(times[(name, lb)])
         if max(a, b) >= BUDGET - 0.5:
             continue
         rs.append((b / a, name, a, b))
@@ -134,7 +144,7 @@ for lb, _, _ in BINS[1:]:
     g = math.exp(sum(math.log(r) for r, _, _, _ in rs) / len(rs))
     faster = sum(1 for r, _, _, _ in rs if r < 0.95)
     slower = sum(1 for r, _, _, _ in rs if r > 1.05)
-    print(f"{lb} vs {base}: geomean {g:.4f} over {len(rs)} rows "
+    print(f"{lb} vs {base}: geomean {g:.4f} of MEDIANS over {len(rs)} rows "
           f"({faster} faster >5%, {slower} slower >5%, {len(rs)-faster-slower} within 5%)")
     print(f"    total {sum(x[2] for x in rs):.1f}s -> {sum(x[3] for x in rs):.1f}s")
     print("    best :", ", ".join(f"{n[:20]} {r:.2f}x" for r, n, _, _ in sorted(rs)[:5]))

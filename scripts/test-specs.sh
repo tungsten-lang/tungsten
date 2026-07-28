@@ -289,6 +289,7 @@ interpreter_specs=(
   spec/interpreter/ipv4_octets_native_spec.w
   spec/interpreter/mmap_size_relaxed_spec.w
   spec/numeric/rational_spec.w
+  spec/interpreter/range_primitive_dispatch_spec.w
   spec/interpreter/slab_decl_spec.w
   spec/interpreter/string_buffer_size_revisit_spec.w
   spec/interpreter/string_empty_native_spec.w

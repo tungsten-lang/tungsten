@@ -1154,6 +1154,20 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_str_append", args: [lhs_reg, rhs_reg]})
     return rebind_local_i64(ctx, node.left.name, temp, :string)
 
+  # String + String: both sides statically text → direct w_str_concat.
+  # The generic path (__w_add_fast → w_add) re-discovers stringiness per
+  # call and coerces the RHS through w_to_s; with both types known that
+  # whole preamble is a no-op. Concat semantics (rope over 61 bytes,
+  # canonical w_string_n below) are w_add's own string arm.
+  if op == :PLUS && lt == :string && rt == :string
+    lhs = lower_expression(ctx, node.left)
+    rhs = lower_expression(ctx, node.right)
+    lhs_reg = ensure_i64_value(wfn, lhs)
+    rhs_reg = ensure_i64_value(wfn, rhs)
+    temp = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_str_concat", args: [lhs_reg, rhs_reg]})
+    return typed_value(:i64, temp)
+
   machine_type = machine_int_result_type(lt, rt)
   if machine_type != nil && is_integer_like_type(lt) && is_integer_like_type(rt)
     int_op = machine_int_op(machine_type, op)

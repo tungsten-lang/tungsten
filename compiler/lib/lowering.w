@@ -613,6 +613,12 @@ use lowering/definitions
       return infer_lchs_return_type(node.args)
     if node.name == "to_i" && node.args != nil && node.args.size() == 0
       return :i64
+    # to_s always yields text (both the bare and radix forms). Every builtin
+    # returns a string and user to_s methods that don't would already break
+    # interpolation, so downstream sites — `.size()`, `s + x.to_s()` — may
+    # take the typed-string direct routes instead of IC dispatch.
+    if node.name == "to_s" && node.args != nil && node.args.size() <= 1
+      return :string
     # Math.* compiler intrinsics always yield a float: the w_math_*
     # intercepts (lowering/method_call.w) wrap their result in w_float
     # unconditionally. Without this, an expression like `Math.sin(x) + c`
@@ -674,6 +680,10 @@ use lowering/definitions
         return :string
       if node.name in ("ascii?" "valid_utf8?" "empty?" "include?" "starts_with?" "ends_with?")
         return :bool
+      # Byte length (String#size is bytes, not codepoints) — raw machine
+      # int, mirroring the is_array_type? size rule above.
+      if node.name == "size" && (node.args == nil || node.args.size() == 0)
+        return :i64
     return nil
   when :binary_op
     lt = infer_type(node.left, var_types, fn_return_types, infer_maps)
@@ -689,6 +699,10 @@ use lowering/definitions
     if node.op == :LSHIFT && lt == :string_buffer && rt == :string
       return :string_buffer
     if node.op == :LSHIFT && lt == :string
+      return :string
+    # Concatenation result is text — keeps the :string fact flowing so a
+    # following .size()/+ takes the direct routes instead of IC dispatch.
+    if node.op == :PLUS && lt == :string && rt == :string
       return :string
     if node.op == :PERCENT && lt == :string
       return :string

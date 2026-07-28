@@ -884,6 +884,54 @@
     emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_class_name", args: [receiver_reg]})
     return typed_value(:i64, temp)
 
+  # Integer to_s: an integer-typed receiver dispatches straight to w_to_s,
+  # skipping the IC (dispatch-key + cache probe + core Integer#to_s
+  # trampoline). w_to_s dispatches on the runtime tag, so a boxed :int that
+  # overflow-promoted to BigInt — or a fact gone stale to nil — still
+  # formats correctly (bigint_to_s / ""), the same output the IC path
+  # produces. i.to_s() was the hottest IC site in the string benches.
+  if recv_node != nil && node.block == nil && (node.args == nil || node.args.size() == 0) && method_name == "to_s" && is_integer_like_type(recv_type)
+    receiver_val = lower_expression(ctx, recv_node)
+    receiver_reg = ensure_i64_value(wfn, receiver_val)
+    temp = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_to_s", args: [receiver_reg]})
+    return typed_value(:i64, temp)
+
+  # String byte length: mirror the :array size route — raw i64 result so a
+  # consuming machine op (`chk ^ s.size()`) never boxes. w_string_byte_length
+  # flattens ropes and reads all three storage modes.
+  if recv_node != nil && node.block == nil && (node.args == nil || node.args.size() == 0) && method_name == "size" && recv_type == :string
+    receiver_val = lower_expression(ctx, recv_node)
+    receiver_reg = ensure_i64_value(wfn, receiver_val)
+    temp = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_string_byte_length", args: [receiver_reg]})
+    return typed_value(:raw_i64, temp)
+
+  # Hash subscripts: a :hash-typed receiver reaches w_hash_get / w_hash_set
+  # directly. The IC handlers (w_ic_hash_get/set) are literal one-line
+  # wrappers over the same functions, so missing-key nil, default values,
+  # and insertion order are identical — the dispatch-key probe and the
+  # args-array trampoline were the entire cost (~45% of hash_get).
+  if recv_type == :hash && node.block == nil
+    if method_name == "\[]" && node.args.size() == 1
+      receiver_val = lower_expression(ctx, recv_node)
+      receiver_reg = ensure_i64_value(wfn, receiver_val)
+      key_val = lower_expression(ctx, node.args[0])
+      key_reg = ensure_i64_value(wfn, key_val)
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_hash_get", args: [receiver_reg, key_reg]})
+      return typed_value(:i64, temp)
+    if method_name == "\[]=" && node.args.size() == 2
+      receiver_val = lower_expression(ctx, recv_node)
+      receiver_reg = ensure_i64_value(wfn, receiver_val)
+      key_val = lower_expression(ctx, node.args[0])
+      key_reg = ensure_i64_value(wfn, key_val)
+      val_val = lower_expression(ctx, node.args[1])
+      val_reg = ensure_i64_value(wfn, val_val)
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_hash_set", args: [receiver_reg, key_reg, val_reg]})
+      return typed_value(:i64, temp)
+
   # Direct builtins for StringBuffer operations when receiver type is known.
   if recv_type == :string_buffer
     if method_name in ("append" "<<" "<</1") && node.args.size() == 1

@@ -15760,9 +15760,18 @@ static inline uint32_t w_str_extract_fast(WValue v, char *buf) {
             memcpy(buf, data, len);
             return (uint32_t)len;
         }
+        /* Heap string: contiguous bytes behind a WString header. Post-freeze
+         * every canonical-range string whose content matches no literal is
+         * heap, so concat operands land here constantly — without this case
+         * both sides re-copy through the w_rope_write fallback. Callers size
+         * buf for the combined length, which bounds each operand's len. */
+        WString *ws = w_as_heap_str(v);
+        memcpy(buf, ws->data, ws->len);
+        return ws->len;
     }
-    return 0;  /* rope, heap, symbol — caller uses w_rope_write */
+    return 0;  /* rope, symbol — caller uses w_rope_write */
 }
+
 
 /* Encode a Unicode codepoint as UTF-8 and return it as a WString.
  * Used by tokenizer code that materializes bytes derived from dynamic

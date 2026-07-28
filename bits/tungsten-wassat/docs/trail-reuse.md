@@ -190,3 +190,30 @@ So: the axis is the best configuration measured, and it is **not yet
 demonstrated** to be better than off. The assignment sweep (masks 0/6/9 in one
 interleaved run) is the measurement that should settle it, because an
 interleaved A/B resolves far below what three separate suite runs can.
+
+## Correction — "global reuse breaks f1000" was the wrong conclusion
+
+`WASSAT_REUSE_TRAIL=1` and `WASSAT_REUSE_ARMS=15` are **not the same
+configuration**, and Result 3 conflated them:
+
+- the force knob sets `@reuse_force = 1` in `WassatSolver#new`, so **every
+  solver constructed** reuses — the light path, the lucky arm, the scout arm
+  and the preprocessing arms, not just the race matrix;
+- the mask sets `cfgs` slot 7, which reaches **only the raw race arms**.
+
+Measured on `f1000`, one binary, all four masks:
+
+    mask 0 -> 5.66s SAT   mask 6 -> 5.68s SAT
+    mask 9 -> 5.65s SAT   mask 15 -> 5.69s SAT
+
+Against `WASSAT_REUSE_TRAIL=1` at >150s, twice. So **reuse on all four race
+arms is harmless to `f1000`**; what destroys it is reuse on a solver outside
+the race — almost certainly the light path, which is what solves `f1000` in
+the first place (it is the row target phases won, on that path).
+
+Two consequences. First, mask 15 was excluded from the sweep for a reason that
+does not hold, and is back in — it may capture the `Break_triple`/`2bitadd_10`
+wins at no `f1000` cost. Second, and more generally: **a global flag in this
+solver is not "the axis on every arm".** It also reconfigures the serial and
+preprocessing paths, so a force-knob A/B measures something strictly larger
+than the axis, and cannot stand in for it.

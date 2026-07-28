@@ -1186,7 +1186,20 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return typed_value(:i64, temp)
 
   machine_type = machine_int_result_type(lt, rt)
-  if machine_type != nil && is_integer_like_type(lt) && is_integer_like_type(rt)
+  # `:int` is a BOXED integer that may have promoted to a heap BigInt at
+  # runtime -- that is exactly what distinguishes `## int` from `## i64`. It
+  # must never be unboxed as a raw i48: `shl 16 / ashr 16` on a BigInt WValue
+  # sign-extends POINTER bits, and everything downstream then computes on the
+  # pointer. A plain integer literal infers :i64, so `big + 1` satisfied
+  # machine_int_result_type through the literal alone and took the raw path --
+  # printing garbage for +, -, *, & and >>, and answering `==` wrong.
+  # Suppressing the machine path drops these to the guarded i48 path
+  # (tag-checked, with a w_add/w_sub/w_mul fallback) and to the boxed runtime
+  # ops, both of which handle promotion correctly. This mirrors the
+  # compound-assign path above, which already refuses the checked i48 ops for
+  # `:int` operands for exactly this reason.
+  promotable_int_operand = lt == :int || rt == :int
+  if machine_type != nil && !promotable_int_operand && is_integer_like_type(lt) && is_integer_like_type(rt)
     int_op = machine_int_op(machine_type, op)
     cmp_pred = machine_cmp_pred(machine_type, op)
 
@@ -1318,7 +1331,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     # default (nil) keep the native inline path — div/mod don't overflow-promote
     # and there's no boxed bignum to mishandle.
     om_dm = ctx[:overflow_mode]
-    if int_op != nil && om_dm != :promote && om_dm != :trap
+    # A `:int` operand carries the same hazard the promote/trap note above
+    # describes, but unconditionally: it may ALREADY hold a BigInt (`big =
+    # a + b` promoted it), and ensure_raw_int nanunbox-INTs a heap pointer.
+    # `b2 & 255` and `b2 >> 8` returned pointer-derived garbage in the
+    # default mode too, so `:int` skips this inline path regardless of the
+    # lexical overflow mode.
+    if int_op != nil && om_dm != :promote && om_dm != :trap && !promotable_int_operand
       lhs = lower_expression(ctx, node.left)
       rhs = lower_expression(ctx, node.right)
       lhs_raw = ensure_raw_int(wfn, lhs)
@@ -1333,7 +1352,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     # path's `ensure_raw_int` would TRUNCATE it to i64 and compare garbage. Skip to
     # the runtime fallback (w_eq/w_neq/w_lt/...), which keeps operands boxed and
     # compares BigInt-correctly (returning a boxed bool the branch lowering handles).
-    if cmp_pred != nil && om_dm != :promote && om_dm != :trap
+    # Same for comparisons: a promoted `:int` compared through ensure_raw_int
+    # compares pointer bits, which made `b2 == 281474976710654` answer FALSE.
+    if cmp_pred != nil && om_dm != :promote && om_dm != :trap && !promotable_int_operand
       lhs = lower_expression(ctx, node.left)
       rhs = lower_expression(ctx, node.right)
       lhs_raw = ensure_raw_int(wfn, lhs)

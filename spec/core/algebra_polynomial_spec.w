@@ -136,6 +136,21 @@ irreducible_quartic = t**4 + 1
 check("factor.irreducible_quartic.count", irreducible_quartic.factor.size, 1)
 check("factor.irreducible_quartic.value", irreducible_quartic.factor[0], irreducible_quartic)
 
+# Content is peeled as a constant unit; non-constant factors are monic.
+contentful = (t**2 + 1) * 6
+contentful_factors = contentful.factor
+check("factor.content_unit", contentful_factors[0], qring.constant(6))
+check("factor.content_monic", contentful_factors[1], t**2 + 1)
+check("factor.content_count", contentful_factors.size, 2)
+scaled_linear = (t * 2 - 2) * (t + 3)
+scaled_factors = scaled_linear.factor
+check("factor.scaled_unit", scaled_factors[0], qring.constant(2))
+check("factor.scaled_monic_first", scaled_factors[1], t - 1)
+check("factor.scaled_monic_second", scaled_factors[2], t + 3)
+scaled_product = qring.one
+scaled_factors.each -> scaled_product = scaled_product * item
+check("factor.scaled_product", scaled_product, scaled_linear)
+
 check("resultant.linear", (t**2 - 2).resultant(t - 1), -1)
 check("discriminant.quadratic", (t**2 + t + 1).discriminant, -3)
 check("discriminant.cubic", (t**3 - t).discriminant, 4)

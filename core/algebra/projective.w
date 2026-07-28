@@ -26,7 +26,8 @@
     return false if @coordinates.size != other.coordinates.size
     i = 0
     while i < @coordinates.size
-      return false if @coordinates[i] != other.coordinates[i]
+      return false if !@space.field.equal?(
+        @coordinates[i], other.coordinates[i])
       i += 1
     true
 
@@ -36,14 +37,15 @@
     chart = index == nil ? @space.dimension : index
     if chart < 0 || chart >= @space.coordinate_count
       raise "projective chart index out of range"
-    pivot = @space.field.coerce(@coordinates[chart])
+    pivot = @space.field.normalize_element(@coordinates[chart])
     if @space.field.equal?(pivot, @space.field.zero)
       raise "projective point is not in chart " + chart.to_s
     out = []
     i = 0
     while i < @coordinates.size
       if i != chart
-        out.push(@space.field.coerce(@coordinates[i]) / pivot)
+        out.push(@space.field.divide(
+          @space.field.normalize_element(@coordinates[i]), pivot))
       i += 1
     out
 
@@ -52,7 +54,7 @@
 
   -> to_s
     parts = []
-    @coordinates.each -> parts.push(item.to_s)
+    @coordinates.each -> parts.push(@space.field.element_to_s(item))
     "\[" + parts.join(":") + "\]"
 
   -> inspect
@@ -60,7 +62,7 @@
 
 
 + ProjectiveSpace<K, N>
-  with K in (ℚ RationalField)
+  with K in (ℚ RationalField FiniteField)
 
   # The algebra surface rewrite injects the actual field object and N:
   #
@@ -130,19 +132,39 @@
     class.new(@field, @dimension, [x0, x1, x2, x3])
 
   # The Array form is unbounded in N. Exact-arity rows below preserve the
-  # established low-dimensional spelling.
+  # established low-dimensional spelling. Public points coerce external
+  # scalars; point_raw is the explicit packed-element path used by finite-field
+  # enumeration and other algebra internals.
+  -> coerce_point_coordinates(coordinates)
+    values = []
+    coordinates.each -> values.push(@field.coerce(item))
+    values
+
   -> point(coordinates)
+    raise "projective coordinates must be an Array" if coordinates.class_name != "Array"
+    ProjectivePoint.new(self, coerce_point_coordinates(coordinates))
+
+  -> point(x0, x1)
+    point([x0, x1])
+
+  -> point(x0, x1, x2)
+    point([x0, x1, x2])
+
+  -> point(x0, x1, x2, x3)
+    point([x0, x1, x2, x3])
+
+  -> point_raw(coordinates)
     raise "projective coordinates must be an Array" if coordinates.class_name != "Array"
     ProjectivePoint.new(self, coordinates)
 
-  -> point(x0, x1)
-    ProjectivePoint.new(self, [x0, x1])
+  -> point_raw(x0, x1)
+    point_raw([x0, x1])
 
-  -> point(x0, x1, x2)
-    ProjectivePoint.new(self, [x0, x1, x2])
+  -> point_raw(x0, x1, x2)
+    point_raw([x0, x1, x2])
 
-  -> point(x0, x1, x2, x3)
-    ProjectivePoint.new(self, [x0, x1, x2, x3])
+  -> point_raw(x0, x1, x2, x3)
+    point_raw([x0, x1, x2, x3])
 
   -> [](coordinates)
     point(coordinates)
@@ -162,6 +184,13 @@
 
   # Insert a unit coordinate at the chosen chart position.
   -> homogenize(coordinates, index = nil)
+    homogenize_coordinates(coordinates, index, false)
+
+  # Internal/raw variant for already-normalized affine coordinates.
+  -> homogenize_raw(coordinates, index = nil)
+    homogenize_coordinates(coordinates, index, true)
+
+  -> homogenize_coordinates(coordinates, index, raw)
     chart = index == nil ? @dimension : index
     if chart < 0 || chart >= coordinate_count
       raise "projective chart index out of range"
@@ -174,10 +203,11 @@
       if i == chart
         homogeneous.push(@field.one)
       else
-        homogeneous.push(@field.coerce(coordinates[source]))
+        value = raw ? @field.normalize_element(coordinates[source]) : @field.coerce(coordinates[source])
+        homogeneous.push(value)
         source += 1
       i += 1
-    point(homogeneous)
+    point_raw(homogeneous)
 
   -> to_s
     "ℙ^" + @dimension.to_s + "_" + @field.to_s

@@ -299,6 +299,11 @@
       raise "Integer#factorial: negative receiver"
     (2..self).reduce(1) -> (acc, it) acc * it
 
+  # Exact prime-power factorization. The returned value is enumerable and
+  # exposes `primes` for the distinct-prime projection used by algebra scripts.
+  -> factor
+    IntegerFactorization.new(self)
+
   # Ruby-style alias: modpow(e, m) == pow(e, m). Gives small ints the same
   # name Int/BigInt use, so `n.modpow(e, m)` works for any integer.
   -> modpow(e, m)

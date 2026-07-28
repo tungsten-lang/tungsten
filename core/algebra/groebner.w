@@ -73,9 +73,9 @@
       lp.push(lcm - llt[1][i])
       rp.push(lcm - rlt[1][i])
       i += 1
-    left.monomial_multiply(
-      lp, left.ring.field.one / llt[0]) - right.monomial_multiply(
-      rp, right.ring.field.one / rlt[0])
+    left.monomial_multiply_raw(
+      lp, left.ring.field.divide(left.ring.field.one, llt[0])) - right.monomial_multiply_raw(
+      rp, right.ring.field.divide(right.ring.field.one, rlt[0]))
 
   -> .monomial_lcm(left, right)
     out = []
@@ -309,6 +309,75 @@
       return false if !contains?(other.source_generators[i])
       i += 1
     true
+
+  # Elimination ideal I ∩ k[x_k, ..., x_{n-1}] for a ring ordered so the first
+  # `count` variables are the ones being eliminated.  The ring's monomial order
+  # must eliminate those variables (lex with those first, or a product order
+  # with the same split); otherwise the result is only a subset of the true
+  # elimination ideal.
+  -> eliminate(count)
+    raise "elimination count must be nonnegative" if count < 0
+    raise "elimination count exceeds ring arity" if count > @ring.arity
+    remaining_names = []
+    i = count
+    while i < @ring.arity
+      remaining_names.push(@ring.names[i])
+      i += 1
+    if remaining_names.size == 0
+      return unit? ? Ideal.unit(@ring) : Ideal.zero(@ring)
+    remaining_order = @ring.order
+    if @ring.order.name == "product" && @ring.order.split == count
+      remaining_order = @ring.order.right
+    remaining_ring = PolynomialRing.new(remaining_names, @ring.field, remaining_order)
+    kept = []
+    self.basis.each -> (poly)
+      if poly.degree_in_prefix(count) == 0
+        kept.push(poly.drop_variables(count, remaining_ring))
+    return Ideal.zero(remaining_ring) if kept.size == 0
+    Ideal.new(kept)
+
+  # Colon / saturation I : f^∞ = { g | ∃k. g f^k ∈ I }.  Computed from a
+  # Gröbner basis of I + ⟨t f - 1⟩ by eliminating the auxiliary tag t under a
+  # product order that puts t first (Cox–Little–O'Shea, §4.4).
+  -> colon(element)
+    f = @ring.coerce(element)
+    return Ideal.unit(@ring) if unit?
+    if f.zero?
+      return contains?(@ring.zero) ? Ideal.unit(@ring) : Ideal.zero(@ring)
+    return self if f.constant? && !f.zero?
+    tagged_names = [("__t").to_sym]
+    @ring.names.each -> tagged_names.push(item)
+    tagged = PolynomialRing.new(
+      tagged_names, @ring.field, MonomialOrder.product(1, :lex, @ring.order))
+    t = tagged.generator(0)
+    lifted = []
+    @generators.each -> lifted.push(item.lift_variables(1, tagged))
+    lifted.push(t * f.lift_variables(1, tagged) - tagged.one)
+    eliminated = Ideal.new(lifted).eliminate(1)
+    return Ideal.unit(@ring) if eliminated.unit?
+    return Ideal.zero(@ring) if eliminated.zero?
+    rebound = []
+    eliminated.source_generators.each -> rebound.push(item.rename_into(@ring))
+    Ideal.new(rebound)
+
+  # Saturation I : f^∞ = ∪_k (I : f^k).  The single tagged construction
+  # I + ⟨t f - 1⟩ eliminates to I : f^∞ (not merely I : f).
+  -> saturate(element)
+    colon(element)
+
+  -> saturation(element)
+    saturate(element)
+
+  # Saturate by every coordinate: I : (x0,...,x_{n-1})^∞.  A homogeneous ideal
+  # cuts out the empty projective scheme iff this saturation is the unit ideal.
+  -> saturate_irrelevant
+    result = self
+    i = 0
+    while i < @ring.arity
+      result = result.saturate(@ring.generator(i))
+      return result if result.unit?
+      i += 1
+    result
 
   -> to_s
     pieces = []

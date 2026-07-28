@@ -47,9 +47,13 @@ t = Poly<ℚ>.new(:t).generator
 check("Poly field injection", t.ring.field.class_name, "RationalField")
 check("Poly identity", (t**3 - t).discriminant, 4)
 
+# Prime fields are supported; unsupported tags still fail loudly.
+f5 = Algebra.field("𝔽_5")
+check("finite field from name", f5.class_name, "FiniteField")
+check("finite field characteristic", f5.characteristic, 5)
 unsupported_raised = false
 begin
-  Algebra.field("𝔽_5")
+  Algebra.field("number_field")
 rescue error
   unsupported_raised = "[error]".include?("unsupported coefficient field")
 check("unsupported field is loud", unsupported_raised, true)

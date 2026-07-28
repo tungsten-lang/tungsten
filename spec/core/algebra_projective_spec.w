@@ -11,6 +11,7 @@ use algebra
 
 field = RationalField.new
 projective_check("field.supported", Field.supported?(field), true)
+projective_check("field.abstract_not_supported", Field.supported?(Field.new), false)
 projective_check("field.characteristic", field.characteristic, 0)
 projective_check("field.exact", field.exact?, true)
 projective_check("field.zero", field.zero, Rational.new(0))

@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(103 total), grouped by area, with its declaration, a one-line
+(154 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -15,14 +15,18 @@ summary from the source header, and a link to the source.
 
 | Class | Defined as | Summary | Source |
 |-------|-----------|---------|--------|
+| `Atomic` | `+ Atomic` | Atomic — a native signed-i64 atomic cell. | [`core/atomic.w`](../core/atomic.w) |
+| `Process` | `+ Process` | Child-process control: spawn / poll / wait / kill. | [`core/process.w`](../core/process.w) |
 | `Array` | `+ Array` | Ordered, mutable collection of typed values. Element type chosen at | [`core/array.w`](../core/array.w) |
 | `Base64` | `+ Base64` | Base64 and Base64URL codecs (RFC 4648). | [`core/base64.w`](../core/base64.w) |
 | `BigArray` | `+ BigArray` | Same shape as Array, but i64 fields for >2^32 elements. Used for | [`core/big_array.w`](../core/big_array.w) |
+| `BitOps` | `+ BitOps` | Fixed-width bit operations. | [`core/bit_ops.w`](../core/bit_ops.w) |
 | `BlankSlate` | `+ BlankSlate` | BlankSlate is the parent class of all classes in Tungsten. It's an explicit blank class. | [`core/blank_slate.w`](../core/blank_slate.w) |
 | `Bool` | `+ Bool` | Bool — true (subtag 0x2) and false (subtag 0x1) singletons | [`core/bool.w`](../core/bool.w) |
 | `BoolArray` | `+ BoolArray` | Bit-packed boolean array. Phase 6i.1b folded the dedicated WBoolArray | [`core/bool_array.w`](../core/bool_array.w) |
 | `ByteArray` | `+ ByteArray` | Length-counted, mutable, heap-allocated byte buffer. Phase 6i.1 | [`core/byte_array.w`](../core/byte_array.w) |
 | `Char` | `+ Char` | Char — Unicode scalar value. | [`core/char.w`](../core/char.w) |
+| `Channel` | `+ Channel` | — | [`core/channel.w`](../core/channel.w) |
 | `Class` | `+ Class` | — | [`core/class.w`](../core/class.w) |
 | `Closure` | `+ Closure` | — | [`core/closure.w`](../core/closure.w) |
 | `CIDR` | `+ CIDR` | — | [`core/cidr.w`](../core/cidr.w) |
@@ -42,6 +46,7 @@ summary from the source header, and a link to the source.
 | `JSON` | `+ JSON` | JSON encoder/decoder — interface and default implementation. | [`core/json.w`](../core/json.w) |
 | `Math` | `+ Math` | Math — pure-Tungsten implementations of math functions derived from | [`core/math.w`](../core/math.w) |
 | `Matrix` | `+ Matrix<T> < Number` | Matrix — generic M×N matrices over a scalar type T. Storage is | [`core/matrix.w`](../core/matrix.w) |
+| `Mmap` | `+ File` | Mmap — borrowed read-only file bytes returned by File.mmap. | [`core/mmap.w`](../core/mmap.w) |
 | `LinAlg` | `+ LinAlg` | LinAlg — dense linear algebra over nested lists / flat f64 storage. | [`core/linalg.w`](../core/linalg.w) |
 | `FFT` | `+ FFT` | FFT — discrete Fourier transform (native Cooley–Tukey radix-2). | [`core/fft.w`](../core/fft.w) |
 | `Special` | `+ Special` | Special — transcendental / special functions (SciPy `scipy.special` analogue). | [`core/special.w`](../core/special.w) |
@@ -56,6 +61,7 @@ summary from the source header, and a link to the source.
 | `SciIO` | `+ SciIO` | SciIO — scientific data interchange (no system libhdf5/netcdf/arrow). | [`core/io.w`](../core/io.w) |
 | `Plot` | `+ Plot` | Plot — terminal sparklines / heatmaps (zero-dep). | [`core/plot.w`](../core/plot.w) |
 | `Sparse` | — | Sparse — sparse **matrix** algebra (not a sparse multi-D tensor). | [`core/sparse.w`](../core/sparse.w) |
+| `SparseMatrix` | — | Sparse — sparse **matrix** algebra (not a sparse multi-D tensor). | [`core/sparse.w`](../core/sparse.w) |
 | `CUDA` | `+ CUDA` | CUDA — host-side launch for `@gpu fn` kernels emitted as .cu. | [`core/cuda.w`](../core/cuda.w) |
 | `MAC` | `+ MAC` | MAC — heap-backed 48-bit link-layer address with native byte predicates. | [`core/mac.w`](../core/mac.w) |
 | `Module` | `+ Module` | — | [`core/module.w`](../core/module.w) |
@@ -71,13 +77,54 @@ summary from the source header, and a link to the source.
 | `Regex` | `+ Regex` | Regex — a homegrown regular-expression engine, written in Tungsten. | [`core/regex.w`](../core/regex.w) |
 | `SmallArray` | `+ SmallArray` | Frozen, stack-allocatable, packed array. Up to 255 elements. | [`core/small_array.w`](../core/small_array.w) |
 | `String` | `+ String` | Native String methods that are safe to express over the WValue itself. | [`core/string_native.w`](../core/string_native.w) |
-| `StringBuffer` | `+ string_buffer` | string_buffer - mutable UTF-8 string builder | [`core/string_buffer.w`](../core/string_buffer.w) |
+| `StringBuffer` | `+ StringBuffer` | string_buffer - mutable UTF-8 string builder | [`core/string_buffer.w`](../core/string_buffer.w) |
 | `Symbol` | `+ Symbol` | — | [`core/symbol.w`](../core/symbol.w) |
+| `System` | `+ System` | — | [`core/system.w`](../core/system.w) |
 | `Thread` | `+ Thread` | Thread — a native OS thread (pthread). | [`core/thread.w`](../core/thread.w) |
 | `Token` | — | Token — lexical token, a W_TAG_CHAR value with subtype 00. | [`core/token.w`](../core/token.w) |
+| `Tuple` | `+ Tuple` | Tuple — a heterogeneous, fixed, dynamically-indexable value grouping. | [`core/tuple.w`](../core/tuple.w) |
 | `UUID` | `+ UUID` | — | [`core/uuid.w`](../core/uuid.w) |
 | `Value` | `+ Value` | — | [`core/value.w`](../core/value.w) |
 | `Vector` | `+ Vector<T> < Number` | Vector — generic real-valued N-dimensional vectors. Distinct from | [`core/vector.w`](../core/vector.w) |
+| `Algebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `Field` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `RationalField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `FiniteField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `MonomialOrder` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PolynomialRing` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `Polynomial` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `IntegerPolynomial` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `Poly` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `MacaulayResultant` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PartialDixmierOhnoInvariants` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `GeometricAutomorphismGroup` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticAutomorphismCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `GroebnerBasis` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `Ideal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ProjectivePoint` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ProjectiveSpace` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AffineChart` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `Curve` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `CurveZetaFunction` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `Line` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `Place` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `Divisor` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `DivisorPrincipalityResult` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `MonotoneQuarticPointSearch` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `Jacobian` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticPoint` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticCurve` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticJacobian` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `HyperellipticCurve` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `MumfordDivisor` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `HyperellipticJacobian` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `GaloisGroup` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `WeilSexticGaloisGroup` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `WeilSexticGaloisCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ModularIrreducibilityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `WeilCubic` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `ArgumentError` | `+ ArgumentError < Error` | ArgumentError — raised when an argument's value is unacceptable, | [`core/argument_error.w`](../core/argument_error.w) |
 | `RangeError` | `+ RangeError < Error` | RangeError — raised when a value falls outside the range an | [`core/range_error.w`](../core/range_error.w) |
 | `TypeError` | `+ TypeError < Error` | TypeError — raised when a value of the wrong type reaches an | [`core/type_error.w`](../core/type_error.w) |
@@ -93,6 +140,9 @@ summary from the source header, and a link to the source.
 | `BigComplex` | `+ BigComplex < Complex` | — | [`core/numeric/big_complex.w`](../core/numeric/big_complex.w) |
 | `BigDecimal` | `+ BigDecimal < Decimal` | — | [`core/numeric/big_decimal.w`](../core/numeric/big_decimal.w) |
 | `BigInt` | `+ BigInt < Int` | — | [`core/numeric/big_int.w`](../core/numeric/big_int.w) |
+| `Int` | `+ Int < Real` | — | [`core/numeric/int.w`](../core/numeric/int.w) |
+| `IntegerFactorization` | `+ PrimePower` | Exact prime-power factorization values. | [`core/numeric/integer_factorization.w`](../core/numeric/integer_factorization.w) |
+| `PrimePower` | `+ PrimePower` | Exact prime-power factorization values. | [`core/numeric/integer_factorization.w`](../core/numeric/integer_factorization.w) |
 | `Centumduodetrigintanion` | `+ Centumduodetrigintanion<T> < Hypercomplex<T>` | Centumduodetrigintanion — dimension-128 hypercomplex algebra. | [`core/numeric/hypercomplex/centumduodetrigintanion.w`](../core/numeric/hypercomplex/centumduodetrigintanion.w) |
 | `Complex` | `+ Complex<T> < Hypercomplex<T>` | Complex — dimension-2 hypercomplex (basis: 1, i). | [`core/numeric/hypercomplex/complex.w`](../core/numeric/hypercomplex/complex.w) |
 | `Ducentiquinquagintasexion` | `+ Ducentiquinquagintasexion<T> < Hypercomplex<T>` | Ducentiquinquagintasexion — dimension-256 hypercomplex algebra. | [`core/numeric/hypercomplex/ducentiquinquagintasexion.w`](../core/numeric/hypercomplex/ducentiquinquagintasexion.w) |
@@ -120,6 +170,7 @@ summary from the source header, and a link to the source.
 | `Float80` | `+ Float80 < Float` | Denormalized float64 | [`core/numeric/float80.w`](../core/numeric/float80.w) |
 | `Float128` | `+ Float128 < Float` | The IEEE 754-2008 standard specifies **binary128** as having: | [`core/numeric/float128.w`](../core/numeric/float128.w) |
 | `Float256` | `+ Float256 < Float` | The IEEE 754-2008 standard specifies **binary256** as having: | [`core/numeric/float256.w`](../core/numeric/float256.w) |
+| `Rational` | `+ Rational < Real` | Rational — exact fractions stored as a reduced numerator/denominator pair. | [`core/numeric/rational.w`](../core/numeric/rational.w) |
 | `Real` | `+ Real < Number` | Real — the totally ordered numbers: Int, Float, Decimal and their | [`core/numeric/real.w`](../core/numeric/real.w) |
 
 ## Traits

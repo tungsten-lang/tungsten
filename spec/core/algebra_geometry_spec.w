@@ -59,7 +59,9 @@ check("elliptic.scalar.negative", p * -1, -p)
 check("elliptic.inverse", p + (-p), elliptic.identity)
 check("elliptic.identity", p + elliptic.identity, p)
 check("elliptic.projective", elliptic.contains?(two_p.projective_point), true)
+check("elliptic.jacobian.class", elliptic.jacobian.class_name, "EllipticJacobian")
 check("elliptic.jacobian.dimension", elliptic.jacobian.dimension, 1)
+check("elliptic.curve_delegate", elliptic.curve.class_name, "Curve")
 
 # Mumford pairs and slow Cantor composition give an exact Jacobian prototype
 # without pretending that arithmetic rank is already certified.

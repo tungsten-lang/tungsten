@@ -67,4 +67,28 @@ check("ideal ring mismatch raises", mixed_raised, true)
 same_ideal = Ideal.new([x * y - 1, y**2 - x, y**3 - 1])
 check("ideal equality by membership", same_ideal.eql?(ideal), true)
 
+# Principal saturation: (x y) : x^∞ = (y).
+product_ideal = Ideal.new([x * y])
+saturated = product_ideal.saturate(x)
+check("saturation.contains_y", saturated.contains?(y), true)
+check("saturation.excludes_x", saturated.contains?(x), false)
+check("saturation.basis", saturated.basis[0], y)
+
+# Elimination of the first variable from ⟨y - x^2⟩ is the zero ideal in k[y].
+parabola = Ideal.new([y - x * x])
+eliminated = parabola.eliminate(1)
+check("elimination.ring", eliminated.ring.names.join(","), "y")
+check("elimination.zero", eliminated.zero?, true)
+
+# Lex elimination of a simple linear system recovers the projected generator.
+lex_ring = PolynomialRing.new([:u, :v], RationalField.new, :lex)
+u = lex_ring.generator(0)
+v = lex_ring.generator(1)
+linear = Ideal.new([u + v - 1, u - v])
+proj = linear.eliminate(1)
+# Reduced Gröbner bases are monic, so 2v - 1 becomes v - 1/2 in the
+# remaining univariate ring (not the original bivariate ring).
+check("elimination.linear", proj.basis[0].to_s, "v - 1/2")
+check("elimination.linear_degree", proj.basis[0].degree, 1)
+
 << "algebra_groebner_spec: all checks passed"

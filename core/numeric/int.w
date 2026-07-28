@@ -103,6 +103,12 @@
   -> factorial() 1
     (2..self).each -> acc *= item
 
+  # Mirrors Integer#factor for heap BigInt values (BigInt < Int). Keeping the
+  # implementation in the shared value object gives both integer towers the
+  # same exact semantics and presentation.
+  -> factor
+    IntegerFactorization.new(self)
+
   # Greatest common divisor — iterative Euclidean.
   -> gcd/1
     a = abs

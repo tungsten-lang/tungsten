@@ -2,6 +2,13 @@
 #
 # PolynomialRing owns both the field and the monomial order.  Polynomial never
 # silently substitutes ℚ: every coefficient enters through ring.field.coerce.
+# Algorithmic layers live in sibling files (resultant, gcd, factor) and reopen
+# Polynomial so the public surface stays one class.
+
+# Exact sparse multivariate polynomials over an explicit coefficient field.
+#
+# PolynomialRing owns both the field and the monomial order.  Polynomial never
+# silently substitutes ℚ: every coefficient enters through ring.field.coerce.
 
 + MonomialOrder
   -> new(@name)
@@ -160,11 +167,16 @@
 
   -> constant(value)
     coefficient = @field.coerce(value)
-    return zero if coefficient.zero?
+    return zero if @field.zero?(coefficient)
     Polynomial.new(self, [[coefficient, zero_exponents]])
 
   -> monomial(coefficient, exponents)
     Polynomial.new(self, [[@field.coerce(coefficient), exponents]])
+
+  # Construct a monomial whose coefficient is already a normalized field
+  # element (not an external scalar to embed through the prime subfield).
+  -> monomial_raw(coefficient, exponents)
+    Polynomial.new(self, [[@field.normalize_element(coefficient), exponents]])
 
   -> generator(index)
     raise "generator index out of range" if index < 0 || index >= arity
@@ -241,16 +253,42 @@
       i += 1
     out
 
+  # Coefficient arithmetic always goes through the ring field so FiniteField
+  # residues never leak as unreduced Integers (e.g. 3+3 = 6 in F_5).
+  -> field_add(left, right)
+    @ring.field.add(left, right)
+
+  -> field_mul(left, right)
+    @ring.field.multiply(left, right)
+
+  -> field_neg(value)
+    @ring.field.negate(value)
+
+  -> field_div(left, right)
+    @ring.field.divide(left, right)
+
+  -> field_zero?(value)
+    @ring.field.zero?(value)
+
+  -> field_one?(value)
+    @ring.field.one?(value)
+
+  -> field_eq?(left, right)
+    @ring.field.equal?(left, right)
+
+  -> field_pow(value, exponent)
+    @ring.field.power(value, exponent)
+
   -> normalize_terms(input)
     out = []
     i = 0
     while i < input.size
-      coefficient = @ring.field.coerce(input[i][0])
+      coefficient = @ring.field.normalize_element(input[i][0])
       exponents = copy_exponents(input[i][1])
       raise "wrong monomial arity" if exponents.size != @ring.arity
       exponents.each ->
         raise "monomial exponents must be nonnegative integers" if item < 0
-      if !coefficient.zero?
+      if !field_zero?(coefficient)
         found = -1
         j = 0
         while j < out.size
@@ -259,17 +297,18 @@
             break
           j += 1
         if found >= 0
-          sum = out[found][0] + coefficient
-          if sum.zero?
+          sum = field_add(out[found][0], coefficient)
+          if field_zero?(sum)
             out.delete_at(found)
           else
             out[found][0] = sum
         else
           out.push([coefficient, exponents])
       i += 1
+    sort_terms_descending(out)
 
-    # Canonical descending order makes the leading term O(1), iteration
-    # deterministic, and equality a direct term-list comparison.
+  # In-place insertion sort into the ring's monomial order (largest first).
+  -> sort_terms_descending(out)
     i = 1
     while i < out.size
       j = i
@@ -281,6 +320,33 @@
       i += 1
     out
 
+  # Linear merge of two term lists already sorted descending by monomial order.
+  -> merge_sorted_terms(left, right)
+    out = []
+    i = 0
+    j = 0
+    while i < left.size && j < right.size
+      cmp = @ring.monomial_compare(left[i][1], right[j][1])
+      if cmp > 0
+        out.push([left[i][0], copy_exponents(left[i][1])])
+        i += 1
+      elsif cmp < 0
+        out.push([right[j][0], copy_exponents(right[j][1])])
+        j += 1
+      else
+        sum = field_add(left[i][0], right[j][0])
+        if !field_zero?(sum)
+          out.push([sum, copy_exponents(left[i][1])])
+        i += 1
+        j += 1
+    while i < left.size
+      out.push([left[i][0], copy_exponents(left[i][1])])
+      i += 1
+    while j < right.size
+      out.push([right[j][0], copy_exponents(right[j][1])])
+      j += 1
+    out
+
   -> coerce(other)
     @ring.coerce(other)
 
@@ -288,7 +354,7 @@
     @terms.size == 0
 
   -> one?
-    return false if @terms.size != 1 || !@terms[0][0].one?
+    return false if @terms.size != 1 || !field_one?(@terms[0][0])
     i = 0
     while i < @terms[0][1].size
       return false if @terms[0][1][i] != 0
@@ -341,24 +407,69 @@
   -> negate
     out = []
     @terms.each -> (term)
-      out.push([term[0].negate, copy_exponents(term[1])])
+      out.push([field_neg(term[0]), copy_exponents(term[1])])
+    # Negation preserves monomial order.
     Polynomial.new(@ring, out)
 
   -> -@
     negate
 
+  # Sparse multiplication: each left term scales the already-sorted right
+  # factor into another sorted list; those lists are merged so the product
+  # never re-sorts a quadratic bag of monomials.
   -> *(value)
     other = coerce(value)
     return @ring.zero if zero? || other.zero?
-    out = []
+    if @ring.arity == 1
+      dense = dense_multiply(other)
+      return dense if dense.class_name != "Nil"
+    result_terms = []
     @terms.each -> (left)
+      partial = []
       other.terms.each -> (right)
         exponents = []
         i = 0
         while i < @ring.arity
           exponents.push(left[1][i] + right[1][i])
           i += 1
-        out.push([left[0] * right[0], exponents])
+        partial.push([field_mul(left[0], right[0]), exponents])
+      result_terms = merge_sorted_terms(result_terms, partial)
+    Polynomial.new(@ring, result_terms)
+
+  # Dense univariate product when both sides fill enough of their degree
+  # range that an array multiply beats sparse pair generation.
+  -> dense_multiply(other)
+    return nil if @ring.arity != 1
+    self_degree = degree
+    other_degree = other.degree
+    return nil if self_degree < 0 || other_degree < 0
+    self_terms = @terms.size
+    other_terms = other.terms.size
+    # Sparse remains better when either factor is very sparse.
+    return nil if self_terms * 2 < self_degree || other_terms * 2 < other_degree
+    left = coefficients
+    right = other.coefficients
+    product_degree = self_degree + other_degree
+    product = []
+    i = 0
+    while i <= product_degree
+      product.push(@ring.field.zero)
+      i += 1
+    i = 0
+    while i <= self_degree
+      if !field_zero?(left[i])
+        j = 0
+        while j <= other_degree
+          if !field_zero?(right[j])
+            product[i + j] = field_add(product[i + j], field_mul(left[i], right[j]))
+          j += 1
+      i += 1
+    out = []
+    i = product_degree
+    while i >= 0
+      if !field_zero?(product[i])
+        out.push([product[i], [i]])
+      i -= 1
     Polynomial.new(@ring, out)
 
   -> **(exponent)
@@ -386,7 +497,7 @@
     return false if @terms.size != other.terms.size
     i = 0
     while i < @terms.size
-      return false if @terms[i][0] != other.terms[i][0]
+      return false if !field_eq?(@terms[i][0], other.terms[i][0])
       return false if !same_monomial?(@terms[i][1], other.terms[i][1])
       i += 1
     true
@@ -435,7 +546,10 @@
       if exponent > 0
         exponents = copy_exponents(term[1])
         exponents[index] = exponent - 1
-        out.push([term[0] * exponent, exponents])
+        scale = @ring.field.coerce(exponent)
+        # In characteristic p the p-th power terms vanish automatically.
+        if !field_zero?(scale)
+          out.push([field_mul(term[0], scale), exponents])
     Polynomial.new(@ring, out)
 
   # Formal antiderivative in the given variable, with zero constant of
@@ -453,24 +567,35 @@
     @terms.each -> (term)
       exponent = term[1][index]
       divisor = @ring.field.coerce(exponent + 1)
-      raise "antiderivative divides by the field characteristic" if divisor.zero?
+      raise "antiderivative divides by the field characteristic" if field_zero?(divisor)
       exponents = copy_exponents(term[1])
       exponents[index] = exponent + 1
-      out.push([term[0] / divisor, exponents])
+      out.push([field_div(term[0], divisor), exponents])
     Polynomial.new(@ring, out)
 
-  # Substitute one variable by a field value, leaving an exact polynomial in
-  # the remaining variables (the substituted exponent column drops to zero
-  # and colliding monomials merge through normalization).
-  -> substitute(variable, value)
+  -> substitution_index(variable)
     index = variable.class_name == "Integer" ? variable : @ring.index_of(variable)
     raise "unknown polynomial variable" if index == nil
-    scalar = @ring.field.coerce(value)
+    index
+
+  # Substitute one variable by an external scalar. Integers embed through the
+  # field's prime subfield; packed extension-field residues use substitute_raw.
+  -> substitute(variable, value)
+    substitute_element(
+      substitution_index(variable), @ring.field.coerce(value))
+
+  # Internal/raw variant for an already-normalized coefficient-field element.
+  -> substitute_raw(variable, value)
+    substitute_element(
+      substitution_index(variable), @ring.field.normalize_element(value))
+
+  -> substitute_element(index, scalar)
     out = []
     @terms.each -> (term)
       exponents = copy_exponents(term[1])
+      power = term[1][index]
       exponents[index] = 0
-      out.push([term[0] * (scalar ** term[1][index]), exponents])
+      out.push([field_mul(term[0], field_pow(scalar, power)), exponents])
     Polynomial.new(@ring, out)
 
   # Exact definite integral of a univariate polynomial over [lower, upper],
@@ -478,7 +603,7 @@
   -> definite_integral(lower, upper)
     raise "definite_integral without a variable needs a univariate polynomial" if @ring.arity != 1
     indefinite = antiderivative(0)
-    indefinite.at(upper) - indefinite.at(lower)
+    @ring.field.subtract(indefinite.at(upper), indefinite.at(lower))
 
   # Exact definite integral in one variable of a multivariate polynomial:
   # the result is the polynomial in the remaining variables.
@@ -486,22 +611,31 @@
     indefinite = antiderivative(variable)
     indefinite.substitute(variable, upper) - indefinite.substitute(variable, lower)
 
-  # Power-table evaluation: values[i]^e is built once per variable by
-  # iterated multiplication up to degree_in(i), so a k-term polynomial costs
-  # one multiply per (term, variable) instead of a fresh exponentiation per
-  # term.
+  # Public evaluation embeds external scalars through Field#coerce. In a packed
+  # extension field this distinguishes the Integer p (the scalar zero) from
+  # the raw encoded basis element whose representation also happens to be p.
   -> evaluate(values)
+    raise "wrong coordinate count" if values.size != @ring.arity
+    coerced = []
+    values.each -> coerced.push(@ring.field.coerce(item))
+    evaluate_raw(coerced)
+
+  # Power-table evaluation of already-normalized field elements. values[i]^e
+  # is built once per variable by iterated multiplication up to degree_in(i),
+  # so a k-term polynomial costs one multiply per (term, variable) instead of
+  # a fresh exponentiation per term.
+  -> evaluate_raw(values)
     raise "wrong coordinate count" if values.size != @ring.arity
     return @ring.field.zero if zero?
     powers = []
     vi = 0
     while vi < values.size
-      base = @ring.field.coerce(values[vi])
+      base = @ring.field.normalize_element(values[vi])
       column = [@ring.field.one]
       max_exponent = degree_in(vi)
       e = 1
       while e <= max_exponent
-        column.push(column[e - 1] * base)
+        column.push(field_mul(column[e - 1], base))
         e += 1
       powers.push(column)
       vi += 1
@@ -511,20 +645,27 @@
       ti = 0
       while ti < values.size
         exponent = term[1][ti]
-        value = value * powers[ti][exponent] if exponent > 0
+        value = field_mul(value, powers[ti][exponent]) if exponent > 0
         ti += 1
-      result = result + value
+      result = field_add(result, value)
     result
 
   -> at(value)
     raise "at is only defined for univariate polynomials" if @ring.arity != 1
-    # Horner evaluation avoids constructing large intermediate powers.
     return @ring.field.zero if zero?
-    x = @ring.field.coerce(value)
+    at_element(@ring.field.coerce(value))
+
+  # Horner evaluation at an already-normalized coefficient-field element.
+  -> at_raw(value)
+    raise "at_raw is only defined for univariate polynomials" if @ring.arity != 1
+    return @ring.field.zero if zero?
+    at_element(@ring.field.normalize_element(value))
+
+  -> at_element(x)
     result = @ring.field.zero
     i = degree
     while i >= 0
-      result = result * x + coeff(i)
+      result = field_add(field_mul(result, x), coeff(i))
       i -= 1
     result
 
@@ -573,6 +714,14 @@
 
   -> monomial_multiply(exponents, coefficient = nil)
     scalar = coefficient == nil ? @ring.field.one : @ring.field.coerce(coefficient)
+    monomial_multiply_element(exponents, scalar)
+
+  # Internal/raw coefficient variant of monomial_multiply.
+  -> monomial_multiply_raw(exponents, coefficient = nil)
+    scalar = coefficient == nil ? @ring.field.one : @ring.field.normalize_element(coefficient)
+    monomial_multiply_element(exponents, scalar)
+
+  -> monomial_multiply_element(exponents, scalar)
     raise "wrong monomial arity" if exponents.size != @ring.arity
     out = []
     @terms.each -> (term)
@@ -581,12 +730,12 @@
       while i < @ring.arity
         powers.push(term[1][i] + exponents[i])
         i += 1
-      out.push([term[0] * scalar, powers])
+      out.push([field_mul(term[0], scalar), powers])
     Polynomial.new(@ring, out)
 
   -> monic
     return self if zero?
-    monomial_multiply(@ring.zero_exponents, @ring.field.one / leading_coefficient)
+    monomial_multiply_raw(@ring.zero_exponents, field_div(@ring.field.one, leading_coefficient))
 
   -> monomial_divides?(divisor, dividend)
     i = 0
@@ -619,14 +768,14 @@
           while j < @ring.arity
             powers.push(lt[1][j] - dlt[1][j])
             j += 1
-          term = @ring.monomial(lt[0] / dlt[0], powers)
+          term = @ring.monomial_raw(field_div(lt[0], dlt[0]), powers)
           quotients[i] = quotients[i] + term
           pending = pending - term * divisor
           reduced = true
           break
         i += 1
       if !reduced
-        single = @ring.monomial(lt[0], copy_exponents(lt[1]))
+        single = @ring.monomial_raw(lt[0], copy_exponents(lt[1]))
         remainder = remainder + single
         pending = pending - single
     [quotients, remainder]
@@ -678,539 +827,64 @@
   -> primitive_part
     return self if zero?
     c = content
-    monomial_multiply(@ring.zero_exponents, @ring.field.one / c)
+    monomial_multiply_raw(@ring.zero_exponents, field_div(@ring.field.one, c))
 
   -> primitive
     primitive_part
 
-  -> determinant(matrix)
-    n = matrix.size
-    return @ring.field.one if n == 0
-    work = []
-    row_index = 0
-    while row_index < n
-      row = []
-      column_index = 0
-      while column_index < matrix[row_index].size
-        row.push(matrix[row_index][column_index])
-        column_index += 1
-      work.push(row)
-      row_index += 1
-    det_value = @ring.field.one
-    column = 0
-    while column < n
-      pivot = column
-      while pivot < n && work[pivot][column].zero?
-        pivot += 1
-      return @ring.field.zero if pivot == n
-      if pivot != column
-        temporary = work[column]
-        work[column] = work[pivot]
-        work[pivot] = temporary
-        det_value = 0 - det_value
-      pivot_value = work[column][column]
-      det_value = det_value * pivot_value
-      row = column + 1
-      while row < n
-        if !work[row][column].zero?
-          factor = work[row][column] / pivot_value
-          c = column
-          while c < n
-            work[row][c] = work[row][c] - factor * work[column][c]
-            c += 1
-        row += 1
-      column += 1
-    det_value
-
-  # Univariate resultant.
-  #
-  # Over ℚ this runs Collins's subresultant polynomial-remainder sequence on
-  # integerized primitive coefficient arrays: every pseudo-remainder division
-  # is exact by the subresultant theory, so intermediate coefficients stay
-  # near determinant-bound size instead of the combinatorial growth of
-  # fraction pivoting — while the Sylvester-determinant route costs
-  # O((m+n)^3) field operations on an (m+n)-square matrix.  Contents are
-  # factored out first and restored through
-  # Res(c·F, d·G) = c^deg(G) · d^deg(F) · Res(F, G).  A non-rational
-  # coefficient field falls back to exact elimination on the Sylvester
-  # matrix.
-  -> resultant(other)
-    other = coerce(other)
-    raise "resultant is only defined for univariate polynomials" if @ring.arity != 1
-    m = degree
-    n = other.degree
-    return @ring.field.zero if m < 0 || n < 0
-    return leading_coefficient ** n if m == 0
-    return other.leading_coefficient ** m if n == 0
-    if @ring.field.class_name == "RationalField"
-      self_content = content
-      other_content = other.content
-      r = Polynomial.integer_subresultant_resultant(
-        integerized_coefficients(self_content),
-        other.integerized_coefficients(other_content))
-      return (self_content ** n) * (other_content ** m) * r
-    sylvester_resultant(other)
-
-  # Ascending integer coefficients of self divided by the given content —
-  # the primitive integer image used by the subresultant sequence.
-  -> integerized_coefficients(polynomial_content)
-    out = []
-    coefficients.each ->
-      out.push((item / polynomial_content).numerator)
-    out
-
-  # prem(a, b) = lc(b)^(deg a - deg b + 1) · a  mod  b on ascending integer
-  # coefficient arrays (zero is the empty array).  Pseudo-division never
-  # leaves the integers; the unused scale factor is applied at the end so
-  # the result matches the full lc(b) power whatever the reduction count.
-  -> .integer_pseudo_remainder(a, b)
-    db = b.size - 1
-    lb = b[db]
-    r = []
-    a.each -> r.push(item)
-    reductions = a.size - b.size + 1
-    while r.size >= b.size
-      dr = r.size - 1
-      lead = r[dr]
-      reduced = []
+  # Highest exponent among the first `count` variables (0 if none appear).
+  -> degree_in_prefix(count)
+    raise "prefix length out of range" if count < 0 || count > @ring.arity
+    result = 0
+    @terms.each -> (term)
       i = 0
-      while i < dr
-        value = lb * r[i]
-        j = i - (dr - db)
-        value = value - lead * b[j] if j >= 0 && j < db
-        reduced.push(value)
+      while i < count
+        result = term[1][i] if term[1][i] > result
         i += 1
-      while reduced.size > 0 && reduced[reduced.size - 1] == 0
-        reduced.delete_at(reduced.size - 1)
-      r = reduced
-      reductions -= 1
-      break if r.size == 0
-    if reductions > 0 && r.size > 0
-      factor = lb ** reductions
-      scaled = []
-      r.each -> scaled.push(item * factor)
-      r = scaled
-    r
+    result
 
-  # Collins's subresultant PRS on ascending integer arrays: each
-  # pseudo-remainder is divided by g·h^δ (exact), with g the previous
-  # leading coefficient and h the subresultant scale h ← g^δ / h^(δ-1).
-  # The sign tracks Res(f, g) = (-1)^(deg f · deg g) Res(g, f) at the
-  # initial swap and per PRS step.
-  -> .integer_subresultant_resultant(first, second)
-    a = first
-    b = second
-    s = 1
-    if a.size < b.size
-      s = 0 - s if (((a.size - 1) * (b.size - 1)) % 2) == 1
-      swapped = a
-      a = b
-      b = swapped
-    g = 1
-    h = 1
-    while b.size - 1 > 0
-      da = a.size - 1
-      db = b.size - 1
-      delta = da - db
-      s = 0 - s if da.odd? && db.odd?
-      r = Polynomial.integer_pseudo_remainder(a, b)
-      return 0 if r.size == 0
-      a = b
-      divisor = g * (h ** delta)
-      reduced = []
-      r.each -> reduced.push(item / divisor)
-      b = reduced
-      g = a[a.size - 1]
-      h = (g ** delta) / (h ** (delta - 1)) if delta > 0
-    da = a.size - 1
-    (s * (b[0] ** da)) / (h ** (da - 1))
-
-  # Exact O((m+n)^3) reference path: the resultant as the determinant of
-  # the Sylvester matrix over the coefficient field.  Kept for non-rational
-  # fields and as the cross-check oracle for the PRS path in the specs.
-  -> sylvester_resultant(other)
-    other = coerce(other)
-    raise "resultant is only defined for univariate polynomials" if @ring.arity != 1
-    m = degree
-    n = other.degree
-    return @ring.field.zero if m < 0 || n < 0
-    return leading_coefficient ** n if m == 0
-    return other.leading_coefficient ** m if n == 0
-    a = coefficients.reverse
-    b = other.coefficients.reverse
-    size = m + n
-    matrix = []
-    r = 0
-    while r < size
-      row = []
-      c = 0
-      while c < size
-        row.push(@ring.field.zero)
-        c += 1
-      matrix.push(row)
-      r += 1
-    r = 0
-    while r < n
-      c = 0
-      while c <= m
-        matrix[r][r + c] = a[c]
-        c += 1
-      r += 1
-    r = 0
-    while r < m
-      c = 0
-      while c <= n
-        matrix[n + r][r + c] = b[c]
-        c += 1
-      r += 1
-    determinant(matrix)
-
-  -> discriminant
-    raise "discriminant is only defined for univariate polynomials" if @ring.arity != 1
-    n = degree
-    return @ring.field.one if n <= 1
-    sign = ((n * (n - 1) / 2).odd?) ? -1 : 1
-    @ring.field.coerce(sign) * resultant(derivative(0)) / leading_coefficient
-
-  # View this polynomial as a polynomial in one selected variable. The
-  # returned coefficient remains in the same sparse ambient ring, with the
-  # selected exponent set to zero. Keeping one ring avoids inventing a
-  # recursive polynomial type while still supporting exact pseudo-remainders.
-  -> coefficient_in(variable, exponent)
-    index = variable.class_name == "Integer" ? variable : @ring.index_of(variable)
-    raise "unknown polynomial variable" if index == nil
+  # Embed into a ring with `count` new leading variables (exponents 0).
+  -> lift_variables(count, new_ring)
+    raise "lift arity mismatch" if new_ring.arity != @ring.arity + count
     out = []
     @terms.each -> (term)
-      if term[1][index] == exponent
-        powers = copy_exponents(term[1])
-        powers[index] = 0
-        out.push([term[0], powers])
-    Polynomial.new(@ring, out)
-
-  -> highest_active_variable(other)
-    candidate = @ring.arity - 1
-    while candidate >= 0
-      if degree_in(candidate) > 0 || other.degree_in(candidate) > 0
-        return candidate
-      candidate -= 1
-    -1
-
-  # Coefficient content with respect to x_variable. Coefficients only involve
-  # variables below `variable` in the recursive calls made by gcd_recursive.
-  -> content_in(variable)
-    result = nil
-    exponent = 0
-    while exponent <= degree_in(variable)
-      coefficient = coefficient_in(variable, exponent)
-      if !coefficient.zero?
-        if result.class_name == "Nil"
-          result = coefficient.monic
-        else
-          result = result.gcd_recursive(coefficient, variable - 1)
-      exponent += 1
-    result.class_name == "Nil" ? @ring.zero : result.monic
-
-  -> primitive_part_in(variable)
-    return self if zero?
-    coefficient_content = content_in(variable)
-    return monic if coefficient_content.constant?
-    (self / coefficient_content).monic
-
-  # Pseudo-division in one selected variable. Unlike ordinary division, the
-  # leading coefficient may itself be a polynomial in lower variables, so
-  # each step cross-multiplies instead of entering a rational-function field.
-  -> pseudo_remainder(divisor, variable)
-    divisor = coerce(divisor)
-    raise "polynomial division by zero" if divisor.zero?
-    divisor_degree = divisor.degree_in(variable)
-    divisor_lc = divisor.coefficient_in(variable, divisor_degree)
-    remainder = self
-    steps = 0
-    while !remainder.zero? && remainder.degree_in(variable) >= divisor_degree
-      raise "polynomial pseudo-remainder limit exceeded" if steps >= 20_000
-      remainder_degree = remainder.degree_in(variable)
-      remainder_lc = remainder.coefficient_in(variable, remainder_degree)
-      powers = @ring.zero_exponents
-      powers[variable] = remainder_degree - divisor_degree
-      shift = @ring.monomial(@ring.field.one, powers)
-      remainder = divisor_lc * remainder - remainder_lc * shift * divisor
-      steps += 1
-    remainder
-
-  # Primitive polynomial-remainder sequence over
-  # ℚ[x0, ..., x_variable]. This is intentionally slow but exact. It supplies
-  # a real multivariate GCD without requiring rational-function coefficients.
-  -> gcd_recursive(other, variable)
-    other = coerce(other)
-    return other.monic if zero?
-    return monic if other.zero?
-
-    active = variable
-    while active >= 0 && degree_in(active) == 0 && other.degree_in(active) == 0
-      active -= 1
-    return @ring.one if active < 0
-
-    if active == 0
-      left = self
-      right = other
-      while !right.zero?
-        remainder = left.rem(right)
-        left = right
-        right = remainder
-      return left.monic
-
-    left_content = content_in(active)
-    right_content = other.content_in(active)
-    common_content = left_content.gcd_recursive(right_content, active - 1)
-    left = left_content.constant? ? monic : (self / left_content).monic
-    right = right_content.constant? ? other.monic : (other / right_content).monic
-
-    while !right.zero?
-      remainder = left.pseudo_remainder(right, active)
-      if !remainder.zero?
-        remainder = remainder.primitive_part_in(active)
-      left = right
-      right = remainder
-
-    primitive_gcd = left.primitive_part_in(active)
-    (common_content * primitive_gcd).monic
-
-  -> gcd(other)
-    other = coerce(other)
-    gcd_recursive(other, highest_active_variable(other))
-
-  -> primitive_gcd(other)
-    gcd(other).monic
-
-  # Extended Euclidean algorithm over a univariate polynomial ring.
-  # Returns [g, s, t] with s*self + t*other = g and g monic.
-  -> xgcd(other)
-    other = coerce(other)
-    raise "extended gcd is only defined for univariate polynomials" if @ring.arity != 1
-    old_remainder = self
-    remainder = other
-    old_left = @ring.one
-    left = @ring.zero
-    old_right = @ring.zero
-    right = @ring.one
-
-    while !remainder.zero?
-      step = old_remainder.divmod(remainder)
-      quotient = step[0]
-      next_remainder = step[1]
-      old_remainder = remainder
-      remainder = next_remainder
-
-      next_left = old_left - quotient * left
-      old_left = left
-      left = next_left
-      next_right = old_right - quotient * right
-      old_right = right
-      right = next_right
-
-    return [@ring.zero, @ring.zero, @ring.zero] if old_remainder.zero?
-    scale = @ring.field.one / old_remainder.leading_coefficient
-    powers = @ring.zero_exponents
-    [old_remainder.monomial_multiply(powers, scale),
-     old_left.monomial_multiply(powers, scale),
-     old_right.monomial_multiply(powers, scale)]
-
-  -> squarefree?
-    return true if degree <= 0
-    common = self
-    variable = 0
-    while variable < @ring.arity
-      common = common.gcd(derivative(variable))
-      return true if common.degree == 0
-      variable += 1
-    common.degree == 0
-
-  -> integer_divisors(value)
-    n = value.abs
-    return [0] if n == 0
-    out = []
-    i = 1
-    while i * i <= n
-      if n % i == 0
-        out.push(i)
-        other = n / i
-        out.push(other) if other != i
-      i += 1
-    out
-
-  -> rational_root_candidates
-    raise "factorization is only implemented over ℚ" if @ring.field.class_name != "RationalField"
-    values = coefficients
-    common_denominator = 1
-    values.each ->
-      common_denominator = (common_denominator / common_denominator.gcd(item.denominator)) * item.denominator
-    integers = values.map -> item.numerator * (common_denominator / item.denominator)
-    numerators = integer_divisors(integers[0])
-    denominators = integer_divisors(integers[integers.size - 1])
-    out = []
-    numerators.each -> (p)
-      denominators.each -> (q)
-        if q != 0
-          positive = Rational.new(p, q)
-          out.push(positive) if !out.include?(positive)
-          negative = 0 - positive
-          out.push(negative) if !out.include?(negative)
-    out
-
-  -> signed_integer_divisors(value)
-    out = []
-    integer_divisors(value).each -> (divisor)
-      out.push(divisor)
-      out.push(0 - divisor) if divisor != 0
-    out
-
-  # Exact Lagrange interpolation through integer samples. A candidate is
-  # useful to Kronecker's method only when every resulting coefficient is an
-  # integer.
-  -> interpolate_integer_factor(points, values)
-    x = @ring.generator(0)
-    candidate = @ring.zero
-    i = 0
-    while i < points.size
-      term = @ring.constant(values[i])
-      denominator = 1
-      j = 0
-      while j < points.size
-        if i != j
-          term = term * (x - points[j])
-          denominator = denominator * (points[i] - points[j])
-        j += 1
-      term = term * Rational.new(1, denominator)
-      candidate = candidate + term
-      i += 1
-
-    integer_coefficients = true
-    candidate.coefficients.each ->
-      integer_coefficients = false if item.denominator != 1
-    return nil if !integer_coefficients
-    candidate
-
-  # Kronecker's theorem turns exact factor search into finite interpolation:
-  # for a degree-d integer factor g and d+1 distinct sample points ai,
-  # g(ai) divides f(ai). Enumerating those signed divisors and interpolating
-  # therefore finds every possible factor of degree at most floor(n/2).
-  -> kronecker_factor(search_limit = 250_000)
-    primitive = primitive_part
-    primitive = primitive.negate if primitive.leading_coefficient.negative?
-    maximum_degree = primitive.degree / 2
-    target_degree = 1
-    attempts = 0
-
-    while target_degree <= maximum_degree
-      # Gather a few extra non-root samples, then retain those with the
-      # smallest divisor sets. This changes only search order, not completeness.
-      samples = []
-      sample_index = 0
-      wanted = target_degree + 5
-      while samples.size < wanted
-        if sample_index == 0
-          point = 0
-        else
-          magnitude = (sample_index + 1) / 2
-          point = sample_index.odd? ? magnitude : 0 - magnitude
-        sample_index += 1
-        value = primitive.at(point)
-        if !value.zero?
-          divisors = signed_integer_divisors(value.numerator)
-          entry = [point, divisors]
-          sample_position = samples.size
-          while sample_position > 0 && divisors.size < samples[sample_position - 1][1].size
-            sample_position -= 1
-          samples.push(entry)
-          sample_shift = samples.size - 1
-          while sample_shift > sample_position
-            samples[sample_shift] = samples[sample_shift - 1]
-            sample_shift -= 1
-          samples[sample_position] = entry
-
-      count = target_degree + 1
-      points = []
-      divisor_sets = []
+      exponents = []
       i = 0
       while i < count
-        points.push(samples[i][0])
-        divisor_sets.push(samples[i][1])
+        exponents.push(0)
         i += 1
+      term[1].each -> exponents.push(item)
+      out.push([term[0], exponents])
+    Polynomial.new(new_ring, out)
 
-      indices = []
-      i = 0
-      while i < count
-        indices.push(0)
+  # Drop the first `count` variables (they must not appear).
+  -> drop_variables(count, new_ring)
+    raise "drop arity mismatch" if new_ring.arity != @ring.arity - count
+    raise "cannot drop variables that still appear" if degree_in_prefix(count) != 0
+    out = []
+    @terms.each -> (term)
+      exponents = []
+      i = count
+      while i < @ring.arity
+        exponents.push(term[1][i])
         i += 1
-      finished = false
-      while !finished
-        attempts += 1
-        if attempts > search_limit
-          raise "Kronecker factor search limit exceeded"
+      out.push([term[0], exponents])
+    Polynomial.new(new_ring, out)
 
-        values = []
-        i = 0
-        while i < count
-          values.push(divisor_sets[i][indices[i]])
-          i += 1
-        candidate = interpolate_integer_factor(points, values)
-        if candidate.class_name != "Nil" && candidate.degree > 0 && candidate.degree < primitive.degree
-          candidate = candidate.primitive_part
-          candidate = candidate.negate if candidate.leading_coefficient.negative?
-          if primitive.rem(candidate).zero?
-            return candidate
-
-        carry_index = count - 1
-        while carry_index >= 0
-          next_choice = indices[carry_index] + 1
-          indices[carry_index] = next_choice
-          choice_set = divisor_sets[carry_index]
-          choice_count = choice_set.size
-          if next_choice != choice_count
-            break
-          indices[carry_index] = 0
-          carry_index -= 1
-        finished = true if carry_index < 0
-
-      target_degree += 1
-    nil
-
-  # Complete exact factorization over ℚ by rational-root extraction followed
-  # by bounded Kronecker interpolation for factors of degree at least two.
-  # The resource limit fails loudly; it never labels an unsearched residual
-  # polynomial irreducible.
-  -> factor(search_limit = 250_000)
-    raise "factorization is only defined for univariate polynomials" if @ring.arity != 1
-    raise "factorization is only implemented over ℚ" if @ring.field.class_name != "RationalField"
-    return [self] if degree <= 1
-
-    x = @ring.generator(0)
-    root = nil
-    rational_root_candidates.each ->
-      if root.class_name == "Nil" && at(item).zero?
-        root = item
-    if root.class_name != "Nil"
-      linear = x - root
-      return [linear] + (self / linear).factor(search_limit)
-
-    # A quadratic or cubic over a field is reducible exactly when it has a
-    # root. The rational-root search above is exhaustive over ℚ.
-    return [self] if degree <= 3
-
-    candidate = kronecker_factor(search_limit)
-    return [self] if candidate.class_name == "Nil"
-    candidate.factor(search_limit) + (self / candidate).factor(search_limit)
-
-  -> factors
-    factor
+  # Re-host coefficients in another ring of equal arity (used after elimination
+  # when the surviving variable names match the original ring's tail).
+  -> rename_into(new_ring)
+    raise "rename arity mismatch" if new_ring.arity != @ring.arity
+    out = []
+    @terms.each -> (term)
+      out.push([term[0], copy_exponents(term[1])])
+    Polynomial.new(new_ring, out)
 
   -> galois_group
     GaloisGroup.of(self)
 
   -> coefficient_to_s(coefficient)
-    if coefficient.class_name == "Rational" && coefficient.denominator == 1
-      return coefficient.numerator.to_s
-    coefficient.to_s
+    @ring.field.element_to_s(coefficient)
 
   -> to_s
     return "0" if zero?
@@ -1227,9 +901,9 @@
         i += 1
       if monomial == ""
         pieces.push(coefficient_to_s(coefficient))
-      elsif coefficient.one?
+      elsif field_one?(coefficient)
         pieces.push(monomial)
-      elsif coefficient == @ring.field.coerce(-1)
+      elsif field_eq?(coefficient, @ring.field.coerce(-1))
         pieces.push("-" + monomial)
       else
         pieces.push(coefficient_to_s(coefficient) + monomial)
@@ -1243,8 +917,9 @@
 # The algebra surface rewrite uses the field-first array constructor:
 #
 #   Poly<ℚ>.new(:x, :y) -> Poly<ℚ>.new(Algebra.field("ℚ"), [:x, :y])
+
 + Poly<K>
-  with K in (ℚ RationalField)
+  with K in (ℚ RationalField FiniteField)
 
   -> new(field: Field, names)
     raise "Poly field constructor needs an Array of generator names" if names.class_name != "Array"

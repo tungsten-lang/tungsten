@@ -14,19 +14,40 @@
 
 use core/numeric/rational
 use core/algebra/field
+use core/algebra/finite_field
 use core/algebra/polynomial
+use core/algebra/polynomial_resultant
+use core/algebra/polynomial_gcd
+use core/algebra/polynomial_factor
+use core/algebra/number_field
 use core/algebra/groebner
 use core/algebra/projective
 use core/algebra/curves
+use core/algebra/divisors
+use core/algebra/quartics
+use core/algebra/point_search
+use core/algebra/quartic_invariants
+use core/algebra/automorphisms
+use core/algebra/zeta
+use core/algebra/galois
 
 
 + Algebra
   -> .field(name)
-    return Field.require_supported(name) if name != nil && name.is_a?(Field)
+    return Field.require_supported(name) if Field.supported?(name)
     Field.for(name)
 
   -> .rational_field
     RationalField.new
+
+  -> .finite_field(characteristic)
+    FiniteField.new(characteristic)
+
+  -> .finite_field(characteristic, degree)
+    FiniteField.extension(characteristic, degree)
+
+  -> .number_field(polynomial, name = :a)
+    NumberField.new(polynomial, name)
 
   -> .rational_projective_plane(x = :X, y = :Y, z = :Z)
     ProjectiveSpace<ℚ, 2>.new(x, y, z)
@@ -43,6 +64,15 @@ use core/algebra/curves
   # not the failure mode.
   -> .determinant(matrix, coefficient_field = nil)
     field = coefficient_field == nil ? RationalField.new : Field.require_supported(coefficient_field)
+    Algebra.determinant_elements(matrix, field, false)
+
+  # Internal/raw variant for matrices whose entries are already normalized
+  # coefficient-field elements.
+  -> .determinant_raw(matrix, coefficient_field = nil)
+    field = coefficient_field == nil ? RationalField.new : Field.require_supported(coefficient_field)
+    Algebra.determinant_elements(matrix, field, true)
+
+  -> .determinant_elements(matrix, field, raw)
     n = matrix.size
     return field.one if n == 0
 
@@ -51,7 +81,8 @@ use core/algebra/curves
       raise "determinant needs a square matrix" if source_row.size != n
       row = []
       source_row.each -> (entry)
-        row.push(field.coerce(entry))
+        value = raw ? field.normalize_element(entry) : field.coerce(entry)
+        row.push(value)
       rows.push(row)
 
     return Algebra.bareiss_rational_determinant(rows) if field.class_name == "RationalField"
@@ -117,15 +148,17 @@ use core/algebra/curves
         swapped = rows[column]
         rows[column] = rows[pivot]
         rows[pivot] = swapped
-        sign = field.zero - sign
+        sign = field.negate(sign)
 
       row = column + 1
       while row < n
         if !field.equal?(rows[row][column], field.zero)
-          factor = rows[row][column] / rows[column][column]
+          factor = field.divide(rows[row][column], rows[column][column])
           cell = column
           while cell < n
-            rows[row][cell] = rows[row][cell] - factor * rows[column][cell]
+            rows[row][cell] = field.subtract(
+              rows[row][cell],
+              field.multiply(factor, rows[column][cell]))
             cell += 1
         row += 1
       column += 1
@@ -133,6 +166,6 @@ use core/algebra/curves
     result = sign
     diagonal = 0
     while diagonal < n
-      result = result * rows[diagonal][diagonal]
+      result = field.multiply(result, rows[diagonal][diagonal])
       diagonal += 1
     result

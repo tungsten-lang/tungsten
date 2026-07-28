@@ -44,7 +44,8 @@
     out
 
   -> contains?(coordinates)
-    @equation.evaluate(projective_coordinates(coordinates)).zero?
+    space.field.zero?(
+      @equation.evaluate(projective_coordinates(coordinates)))
 
   -> point(coordinates)
     space.point(projective_coordinates(coordinates))
@@ -100,7 +101,7 @@
     return false if point.class_name != "ProjectivePoint"
     return false if point.space != @space
     return false if point.coordinates.size != @space.coordinate_count
-    @equation.evaluate(point.coordinates).zero?
+    field.zero?(@equation.evaluate_raw(point.coordinates))
 
   -> partial_derivatives
     out = []
@@ -121,9 +122,13 @@
       @singular_locus_cache = Ideal.new(generators)
     @singular_locus_cache
 
-  # An ordinary homogeneous ideal is never the unit ideal merely because its
-  # projective vanishing set is empty.  Test the standard Xi = 1 cover until
-  # saturation by the irrelevant ideal is available.
+  # Projective emptiness of the singular locus.  An ordinary homogeneous ideal
+  # is never the unit ideal merely because its projective vanishing set is
+  # empty, so we test the standard Xi = 1 affine cover: each chart adjoins
+  # Xi - 1 and asks whether the extended ideal is (1).  Principal saturation
+  # by a single coordinate is available on Ideal, but saturating by each
+  # coordinate in turn is not the same as saturating by the irrelevant ideal
+  # (x0,...,xn), so the chart cover remains the certified test here.
   -> nonsingular?
     return @nonsingular_cache if @nonsingular_cache != nil
     locus = singular_locus
@@ -167,18 +172,20 @@
   # distinct future capability.
   -> short_weierstrass?
     return false if degree != 3
+    f = field
     scale = @equation.coeff([0, 2, 1])
-    return false if scale.zero?
-    a = @equation.coeff([1, 0, 2]).negate / scale
-    b = @equation.coeff([0, 0, 3]).negate / scale
+    return false if f.zero?(scale)
+    a = f.divide(f.negate(@equation.coeff([1, 0, 2])), scale)
+    b = f.divide(f.negate(@equation.coeff([0, 0, 3])), scale)
     model = EllipticCurve.new(@space, a, b)
     @equation.eql?(model.equation * scale) && model.nonsingular?
 
   -> to_short_weierstrass
     raise "plane cubic is not in short Weierstrass coordinates" if !short_weierstrass?
+    f = field
     scale = @equation.coeff([0, 2, 1])
-    a = @equation.coeff([1, 0, 2]).negate / scale
-    b = @equation.coeff([0, 0, 3]).negate / scale
+    a = f.divide(f.negate(@equation.coeff([1, 0, 2])), scale)
+    b = f.divide(f.negate(@equation.coeff([0, 0, 3])), scale)
     EllipticCurve.new(@space, a, b)
 
   # A smooth plane curve of genus at least two has degree at least four, and
@@ -244,7 +251,7 @@
 
   -> negate
     return self if identity?
-    EllipticPoint.new(@curve, @x, @curve.field.zero - @y)
+    EllipticPoint.new(@curve, @x, @curve.field.negate(@y))
 
   -> -@
     negate
@@ -281,12 +288,14 @@
 
   -> projective_point
     if identity?
-      return @curve.space.point(0, 1, 0)
-    @curve.space.point(@x, @y, 1)
+      return @curve.space.point_raw(0, 1, 0)
+    @curve.space.point_raw(@x, @y, @curve.field.one)
 
   -> to_s
     return "O" if identity?
-    "(" + @x.to_s + ", " + @y.to_s + ")"
+    x_text = @curve.field.element_to_s(@x)
+    y_text = @curve.field.element_to_s(@y)
+    "(" + x_text + ", " + y_text + ")"
 
   -> inspect
     to_s
@@ -294,9 +303,11 @@
 
 # The short Weierstrass model y^2 z = x^3 + a x z^2 + b z^3.
 #
-# This constructor is intentionally ambient-first: its field comes from
-# `space`, so it cannot silently replace an unsupported K with ℚ.
-+ EllipticCurve < Curve
+# Composition, not inheritance: an elliptic curve *has* a plane cubic model
+# (`curve`) and a group law on `EllipticPoint`s.  Geometry (singular locus,
+# projective membership) is delegated; arithmetic stays field-protocol exact
+# so the same code runs over ℚ and 𝔽_p.
++ EllipticCurve
   -> .short_weierstrass(space, a, b)
     EllipticCurve.new(space, a, b)
 
@@ -314,6 +325,7 @@
     @equation = y**2 * z - x**3 - x * z**2 * @a - z**3 * @b
     @curve = Curve.new(@space, @equation)
     @identity = EllipticPoint.new(self, nil, nil, true)
+    @jacobian_view = EllipticJacobian.new(self)
 
   -> space
     @space
@@ -321,6 +333,8 @@
   -> equation
     @equation
 
+  # The underlying plane cubic. Callers that need Curve APIs use this
+  # explicitly rather than treating EllipticCurve as a Curve subclass.
   -> curve
     @curve
 
@@ -340,8 +354,10 @@
     3
 
   -> discriminant
-    inside = field.coerce(4) * @a**3 + field.coerce(27) * @b**2
-    field.coerce(-16) * inside
+    f = field
+    inside = f.add(f.multiply(f.coerce(4), f.power(@a, 3)),
+                   f.multiply(f.coerce(27), f.power(@b, 2)))
+    f.multiply(f.coerce(-16), inside)
 
   -> nonsingular?
     !field.equal?(discriminant, field.zero)
@@ -353,17 +369,33 @@
     raise "a singular Weierstrass cubic is not an elliptic curve" if !nonsingular?
     1
 
+  -> elliptic?
+    nonsingular?
+
+  -> short_weierstrass?
+    true
+
+  -> to_short_weierstrass
+    self
+
   -> contains?(point)
     if point.class_name == "EllipticPoint"
       return false if point.curve != self
       return true if point.identity?
-      right = point.x**3 + @a * point.x + @b
-      return field.equal?(point.y**2, right)
+      f = field
+      right = f.add(f.add(f.power(point.x, 3), f.multiply(@a, point.x)), @b)
+      return f.equal?(f.power(point.y, 2), right)
     @curve.contains?(point)
 
   -> point(x, y)
-    px = field.coerce(x)
-    py = field.coerce(y)
+    point_element(field.coerce(x), field.coerce(y))
+
+  -> point_raw(x, y)
+    px = field.normalize_element(x)
+    py = field.normalize_element(y)
+    point_element(px, py)
+
+  -> point_element(px, py)
     point = EllipticPoint.new(self, px, py)
     if !contains?(point)
       raise "point is not on the elliptic curve"
@@ -382,20 +414,38 @@
     return right if left.identity?
     return left if right.identity?
 
-    if field.equal?(left.x, right.x)
-      return @identity if field.equal?(left.y + right.y, field.zero)
-      if field.equal?(left.y, field.zero)
-        return @identity
-      numerator = field.coerce(3) * left.x**2 + @a
-      slope = numerator / (field.coerce(2) * left.y)
+    f = field
+    if f.equal?(left.x, right.x)
+      return @identity if f.equal?(f.add(left.y, right.y), f.zero)
+      return @identity if f.equal?(left.y, f.zero)
+      numerator = f.add(f.multiply(f.coerce(3), f.power(left.x, 2)), @a)
+      slope = f.divide(numerator, f.multiply(f.coerce(2), left.y))
     else
-      slope = (right.y - left.y) / (right.x - left.x)
-    x3 = slope**2 - left.x - right.x
-    y3 = slope * (left.x - x3) - left.y
-    point(x3, y3)
+      slope = f.divide(f.subtract(right.y, left.y), f.subtract(right.x, left.x))
+    x3 = f.subtract(f.subtract(f.power(slope, 2), left.x), right.x)
+    y3 = f.subtract(f.multiply(slope, f.subtract(left.x, x3)), left.y)
+    point_raw(x3, y3)
 
   -> jacobian
-    self
+    @jacobian_view
+
+  -> rank
+    raise "Jacobian rank requires a certified descent, which is not implemented"
+
+  -> to_s
+    "EllipticCurve(" + @equation.to_s + " = 0 in " + @space.to_s + ")"
+
+  -> inspect
+    to_s
+
+
+# Thin Jacobian view for a short Weierstrass model.  Dimension is 1; rank is
+# still a certified-only capability.
++ EllipticJacobian
+  -> new(@curve)
+
+  -> curve
+    @curve
 
   -> dimension
     1
@@ -404,7 +454,7 @@
     raise "Jacobian rank requires a certified descent, which is not implemented"
 
   -> to_s
-    "EllipticCurve(" + @equation.to_s + " = 0 in " + @space.to_s + ")"
+    "Jacobian(dim=1)"
 
   -> inspect
     to_s
@@ -458,7 +508,8 @@
     raise "Mumford u cannot be zero" if @u.zero?
     @u = @u.monic
     @v = @v.rem(@u)
-    if !((@v * @v - @jacobian.curve.polynomial).rem(@u)).zero?
+    model = @jacobian.model_polynomial
+    if !((@v * @v - model).rem(@u)).zero?
       raise "Mumford pair must satisfy u | (v^2 - f)"
     if @u.degree > @jacobian.dimension
       raise "Mumford divisor is not reduced"
@@ -476,7 +527,7 @@
     @u.one? && @v.zero?
 
   -> reduced?
-    monic = @u.leading_term[0].one?
+    monic = @u.ring.field.one?(@u.leading_term[0])
     monic && @v.degree < @u.degree && @u.degree <= @jacobian.dimension
 
   -> negate
@@ -530,10 +581,19 @@
     raise "a singular hyperelliptic model has no Jacobian group law here" if !@curve.nonsingular?
     if @curve.polynomial.degree.even?
       raise "Mumford Jacobian arithmetic currently requires an odd-degree model"
-    if !@curve.polynomial.leading_coefficient.one?
-      raise "Mumford Jacobian arithmetic currently requires a monic model"
-    @identity = MumfordDivisor.new(self, @curve.polynomial.ring.one,
-      @curve.polynomial.ring.zero)
+    # Non-monic models are normalized once: y^2 = c f_monic becomes
+    # (y/sqrt(c))^2 = f_monic only when c is a square in the field.  Over ℚ we
+    # require monic input; over finite fields of odd characteristic we scale
+    # the model by the inverse of the leading coefficient.
+    poly = @curve.polynomial
+    if !poly.ring.field.one?(poly.leading_coefficient)
+      if poly.ring.field.class_name == "FiniteField"
+        @scaled_polynomial = poly.monic
+      else
+        raise "Mumford Jacobian arithmetic currently requires a monic model"
+    else
+      @scaled_polynomial = poly
+    @identity = MumfordDivisor.new(self, poly.ring.one, poly.ring.zero)
 
   -> curve
     @curve
@@ -547,10 +607,13 @@
   -> divisor(u, v)
     MumfordDivisor.new(self, u, v)
 
+  -> model_polynomial
+    @scaled_polynomial
+
   # Reduce a semireduced Mumford pair by repeatedly replacing
   #   (u, v) with ((f - v²)/u, -v mod u_new).
   -> reduce_pair(u, v)
-    polynomial = @curve.polynomial
+    polynomial = model_polynomial
     u = u.monic
     v = v.rem(u)
     while u.degree > dimension
@@ -586,7 +649,7 @@
     u = (left.u * right.u) / (d * d)
     numerator = s1 * left.u * right.v
     numerator = numerator + s2 * right.u * left.v
-    numerator = numerator + s3 * (left.v * right.v + @curve.polynomial)
+    numerator = numerator + s3 * (left.v * right.v + model_polynomial)
     v = (numerator / d).rem(u)
     reduce_pair(u, v)
 

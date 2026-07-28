@@ -1279,6 +1279,65 @@ RSpec.describe "Compiler regressions" do
     expect(compile_err + _compile_out).to match(/\|\s+\^/)
   end
 
+  it "rejects a constructor call that omits a required argument" do
+    # A missing argument is nil-padded by the dispatcher, and a defaulted
+    # parameter is compiled as "if this slot is nil, substitute the default" --
+    # so once inside the body an omitted required parameter is
+    # indistinguishable from a defaulted one, and the object came back with the
+    # field silently unset. Only the call site knows the real argument count,
+    # so lowering checks it there. Statically decidable, hence a compile error
+    # rather than a runtime raise (the same two-enforcement-point split as
+    # E_LOWER_TYPED_ARG_MISMATCH); pinned here because .w specs must compile.
+    source_path = File.join(@tmpdir, "ctor_arity.w")
+    File.write(source_path, <<~W)
+      + Four
+        -> new(@a, @b, @c, @d)
+          self
+      f = Four.new(1, 2, 3)
+      << f.to_s
+    W
+
+    _out, err, status = Open3.capture3(
+      {"NO_COLOR" => "1"}, @compiler_path, "compile", source_path,
+      "--out", File.join(@tmpdir, "ctor_arity"),
+      chdir: PROJECT_ROOT
+    )
+    expect(status.success?).to be(false)
+    expect(err + _out).to include("Four.new requires 4 arguments, got 3")
+  end
+
+  it "accepts a constructor call that omits only defaulted arguments" do
+    # The guard must not fire on parameters carrying a default, on keyword or
+    # block parameters, or on anything after a splat.
+    source_path = File.join(@tmpdir, "ctor_defaults.w")
+    File.write(source_path, <<~W)
+      + D
+        -> new(@a, @b = 5)
+          self
+        -> parts
+          [@a, @b].to_s()
+      + S
+        -> new(@a, *rest)
+          self
+        -> first
+          @a
+      d = D.new(1)
+      s = S.new(7)
+      << d.parts
+      << s.first.to_s
+    W
+
+    out, err, status = Open3.capture3(
+      {"NO_COLOR" => "1"}, @compiler_path, "compile", source_path,
+      "--out", File.join(@tmpdir, "ctor_defaults"),
+      chdir: PROJECT_ROOT
+    )
+    expect(status.success?).to be(true), err + out
+    run_out, _run_err, run_status = Open3.capture3(File.join(@tmpdir, "ctor_defaults"))
+    expect(run_status.success?).to be(true)
+    expect(run_out).to eq("[1, 5]\n7\n")
+  end
+
   it "formats parse errors with source context" do
     source_path = File.join(@tmpdir, "bad_parse.w")
     File.write(source_path, "x = 1\ny = )\nz = 3\n")

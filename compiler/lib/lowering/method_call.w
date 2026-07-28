@@ -454,6 +454,47 @@
     if static_info != nil
       return lower_direct_static_method_call(ctx, static_info, recv_node, node.args)
 
+    # Constructor arity: `C.new(...)` with fewer arguments than C's `-> new`
+    # has REQUIRED parameters. Missing arguments are padded with nil by the
+    # dispatcher, and a defaulted parameter is implemented as "if the slot is
+    # nil, substitute the default" — so an omitted required parameter is
+    # indistinguishable from a defaulted one once inside the body, and the
+    # object silently came back with unset fields. The call site is the only
+    # place that knows the real argument count, so check it here, at compile
+    # time: build-time detection beats a runtime raise, and it costs nothing.
+    #
+    # Parameters with a default, keyword parameters, the block parameter, and
+    # anything after a splat are all optional, so only leading plain
+    # parameters count. A splat means variable arity — no check at all.
+    # Constructors are inherited, so walk the superclass chain like
+    # w_method_lookup does. Classes with no `-> new` anywhere are left to the
+    # runtime's own constructor diagnostic (it raises when arguments are
+    # passed with nothing to receive them).
+    if method_name == "new" && node.block == nil && ctx[:mod][:known_classes][recv_name] != nil
+      ctor_ast = nil
+      cur_cls = recv_name
+      guard = 0
+      while ctor_ast == nil && cur_cls != nil && guard < 64
+        ctor_ast = ctx[:mod][:class_method_asts][cur_cls + ".new/" + node.args.size().to_s()]
+        if ctor_ast == nil
+          ctor_ast = ctx[:mod][:class_method_asts][cur_cls + ".new"]
+        cur_cls = ctx[:mod][:class_super_names][cur_cls]
+        guard += 1
+      if ctor_ast != nil && ctor_ast.params != nil
+        required = 0
+        variadic = false
+        pi = 0
+        while pi < ctor_ast.params.size()
+          p = ctor_ast.params[pi]
+          if is_ast_node?(p)
+            if p.splat == true
+              variadic = true
+            if p.default == nil && p.keyword != true && p.block_param != true && p.splat != true && !variadic
+              required += 1
+          pi += 1
+        if !variadic && node.args.size() < required
+          raise compile_error_for_node(:E_LOWER_CTOR_ARITY, recv_name + ".new requires " + required.to_s() + " argument" + (required == 1 ? "" : "s") + ", got " + node.args.size().to_s() + " — a missing constructor argument is padded with nil, leaving the field unset", ctx[:source_path], node)
+
     # File module methods → direct runtime calls
     if recv_name == "File"
       args = node.args

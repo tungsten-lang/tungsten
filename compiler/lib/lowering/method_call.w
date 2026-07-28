@@ -894,7 +894,7 @@
     receiver_val = lower_expression(ctx, recv_node)
     receiver_reg = ensure_i64_value(wfn, receiver_val)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_to_s", args: [receiver_reg]})
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_int_to_s", args: [receiver_reg]})
     return typed_value(:i64, temp)
 
   # String byte length: mirror the :array size route — raw i64 result so a

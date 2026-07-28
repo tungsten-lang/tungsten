@@ -228,6 +228,8 @@ compiled_specs=(
   spec/compiler/devirt_method_call_spec.w
   spec/compiler/boxed_arith_fast_spec.w
   spec/compiler/typed_receiver_string_routes_spec.w
+  spec/compiler/string_free_escape_spec.w
+  spec/compiler/typed_receiver_string_routes_spec.w
   spec/compiler/u64_raw_multiply_spec.w
   spec/compiler/conditional_reassign_param_spec.w
   spec/compiler/begin_rescue_value_spec.w

@@ -22646,6 +22646,26 @@ WValue w_int_to_str_base_boxed(WValue r, WValue base) {
     return w_int_to_str_base_i64(w_as_int(r), (int)w_as_int(base));
 }
 
+/* to_s for integer-typed receivers (the typed-receiver direct route).
+ * The ownership pass treats this as a fresh heap producer and may free
+ * the result at scope exit, so unlike w_to_s — which returns its
+ * argument unchanged for strings and a rope's CACHED flat for ropes —
+ * the result must never alias storage the receiver still owns. Int and
+ * bigint receivers mint fresh strings by construction; the stale-typed
+ * fallback (a :int fact whose value is really nil / float / a string)
+ * keeps to_s semantics but re-mints any heap result through w_string_n,
+ * which returns inline/slab/fresh-heap — never its input's buffer. */
+WValue w_int_to_s(WValue r) {
+    if (w_is_int(r)) return w_int_to_str(w_as_int(r));
+    if (w_is_bigint(r)) return bigint_to_s_impl(w_as_bigint(r));
+    WValue s = w_to_s(r);
+    if (w_is_heap_str(s)) {
+        WString *ws = w_as_heap_str(s);
+        return w_string_n(ws->data, ws->len);
+    }
+    return s;
+}
+
 /* Int builtin wrappers */
 static WValue w_ic_int_to_s(WValue r, WValue *a, int c)  {
     int base = w_to_s_base_arg(a, c);

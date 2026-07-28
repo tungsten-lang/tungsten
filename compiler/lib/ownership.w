@@ -13,18 +13,40 @@ use runtime_types
     return true
   if op in (:const_float :const_decimal :const_currency :const_quantity :const_duration_ns :const_duration_months_ms :const_uuid)
     return true
-  # Known heap-allocating runtime calls
+  # Known heap-allocating runtime calls. w_int_to_s (typed-receiver to_s
+  # route) is here and w_to_s is NOT: w_to_s returns its argument for
+  # string inputs and a rope's cached flat for rope inputs, so freeing
+  # its "fresh" result can free storage someone else still owns.
+  # w_int_to_s guarantees an independent result for every input.
   if op == :call_direct_i64
     name = inst[:name]
-    return name in ("w_string" "w_hash_new" "w_array_new" "w_strbuf_new" "w_str_concat" "w_to_s")
+    return name in ("w_string" "w_hash_new" "w_array_new" "w_strbuf_new" "w_str_concat" "w_int_to_s")
   false
+
+# Runtime calls that only READ their arguments: no argument pointer is
+# stored anywhere, so passing a value to one of these must not pin it as
+# escaped. Grown case-by-case, each name verified against the C body:
+#   w_string_byte_length — reads the length (flattens a rope in place,
+#     which allocates INTO the rope; the argument itself is not retained)
+#   w_hash_get — probes by hash + eq; the key is compared, never stored
+#   w_eq / w_neq / cmp fast helpers — pure comparisons
+#   w_string_index / w_string_rindex / w_string_count — read-only scans
+# NOT here, deliberately: w_str_concat (retains both sides in a rope
+# node past 61 bytes), w_str_append (may realloc its receiver's buffer
+# into the result), w_hash_set / w_array_push (store the value).
+-> is_nonretaining_consumer(name)
+  name in ("w_string_byte_length" "w_hash_get" "w_eq" "w_neq" "__w_streq_fast" "__w_eq_fast" "__w_neq_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_string_index" "w_string_rindex" "w_string_count")
 
 # Mark temps that escape through this instruction.
 -> mark_escapes(inst, escaped)
   op = inst[:op]
 
   if op in (:call_direct_i64 :call_direct_void)
-    # All args escape (conservative v1)
+    # All args escape, except for whitelisted read-only consumers —
+    # without the whitelist, `s = i.to_s(); use(s.size())` pinned every
+    # transient string as escaped and no loop string was ever freed.
+    if op == :call_direct_i64 && is_nonretaining_consumer(inst[:name])
+      return nil
     args = inst[:args]
     if args != nil
       i = 0

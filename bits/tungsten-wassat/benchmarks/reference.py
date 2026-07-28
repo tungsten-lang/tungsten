@@ -54,6 +54,8 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+from lrc13_reference import materialize as materialize_lrc13
+
 ROOT = Path(__file__).resolve().parents[1]
 WASSAT = os.environ.get("WASSAT", str(ROOT / "bin" / "wassat"))
 CADICAL = os.environ.get("CADICAL", shutil.which("cadical") or "")
@@ -434,12 +436,12 @@ def scoreboard(tally: dict) -> None:
     print("    (geomean > 1 means wassat is faster than the best installed rival)")
 
 
-def frontier_section() -> int:
-    print("\n== frontier instances (tracked, budgeted) ==")
+def tracked_section(title, instances, budget, expect=None) -> int:
+    print(f"\n== {title} ==")
     failures = 0
-    if not FRONTIER:
+    if not instances:
         print("  none configured (set LR5_37 and/or LR5_41)")
-    for name, path in FRONTIER:
+    for name, path in instances:
         if not Path(path).is_file():
             print(f"  {name}: missing encoder output, skipped")
             continue
@@ -451,7 +453,7 @@ def frontier_section() -> int:
         elif CMS5:
             rival_name = "cms5"
             rival_t, rival_v = run([CMS5, path], 300)
-        wt, wv = run([WASSAT, path, "--fast"], FRONTIER_BUDGET)
+        wt, wv = run([WASSAT, path, "--fast"], budget)
         # No verdict at all (a crash or a no-op binary) is a failure, distinct
         # from a legitimate TIMEOUT on a known-behind instance.
         if wv == "NONE":
@@ -462,8 +464,13 @@ def frontier_section() -> int:
             print(f"  {name}: VERDICT MISMATCH wassat={wv} cadical={rival_v}")
             failures += 1
             continue
+        if expect and (wv != expect or
+                       (rival_v and rival_v != "TIMEOUT" and rival_v != expect)):
+            print(f"  {name}: EXPECTED {expect}; wassat={wv} {rival_name}={rival_v}")
+            failures += 1
+            continue
         gap = (wt / rival_t) if rival_t else float("nan")
-        solved = "SOLVED" if wv in ("SATISFIABLE", "UNSATISFIABLE") else f"unsolved@{FRONTIER_BUDGET:.0f}s"
+        solved = "SOLVED" if wv in ("SATISFIABLE", "UNSATISFIABLE") else f"unsolved@{budget:.0f}s"
         rival_text = "missing" if rival_t is None else f"{rival_t:.1f}s"
         # Once wassat solves a frontier instance the interesting number is
         # the speedup, not the deficit — print whichever direction holds.
@@ -473,6 +480,19 @@ def frontier_section() -> int:
             verdict = f"gap>={gap:.1f}x"
         print(f"  {name}: wassat {solved} ({wt:.1f}s)  {rival_name}={rival_text}  {verdict}")
     return failures
+
+
+def frontier_section() -> int:
+    return tracked_section("frontier instances (tracked, budgeted)", FRONTIER, FRONTIER_BUDGET)
+
+
+def lrc13_section() -> int:
+    return tracked_section(
+        "LRC(13) terminal-lift reference instances (pinned UNSAT)",
+        materialize_lrc13(),
+        FRONTIER_BUDGET,
+        "UNSATISFIABLE",
+    )
 
 
 def smoke_test() -> None:
@@ -509,6 +529,7 @@ def main() -> None:
         print("  different hardware and a 5000s budget, so they rank the field, not our clock.")
 
     failures += frontier_section()
+    failures += lrc13_section()
 
     if failures:
         raise SystemExit(f"\nFAIL: {failures} failure(s)")

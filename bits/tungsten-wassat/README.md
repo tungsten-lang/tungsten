@@ -215,8 +215,11 @@ BENCH=/tmp/satbench WASSAT=/path/to/wassat \
 ```
 
 Set `SATLIB_ROOT` to add the optional SATLIB parity families. Set `LR5_37`
-and/or `LR5_41` to add frontier instances. No benchmark script assumes a
-specific checkout path.
+and/or `LR5_41` to add frontier instances.  The suite always materializes
+three pinned LRC(13) Goddyn--Wong terminal-lift CNFs (p=181, 223, 281) under
+`/tmp`, checks their SHA-256 digests, and requires their known UNSAT verdicts.
+They exercise a structured certificate workload; they do not constitute an
+LRC(13) proof.  No benchmark script assumes a specific checkout path.
 
 ## Current limits
 

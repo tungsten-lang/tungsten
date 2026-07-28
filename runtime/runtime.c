@@ -25411,6 +25411,26 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
                     case 16: ((fn16)m->fn_ptr)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15]); break;
                     default: die_method_arity("constructor", klass->name, "new", expected, 16); break;
                 }
+            } else if (args->size > 0) {
+                /* No constructor accepts these arguments. Dropping them
+                 * silently returned an object with every field unset, so the
+                 * mistake surfaced far away as a nil field read. Tungsten's
+                 * constructor is `-> new(...)` (spec 5.3.1): `init` and
+                 * `initialize` are ordinary methods that `.new` never calls,
+                 * and a `ro`/`field` declaration does not generate one, so
+                 * name the required form rather than just the arity. */
+                /* w_raise, not die: this is a user programming error, so it
+                 * must be catchable by begin/rescue like the neighbouring
+                 * constructor diagnostics. */
+                char cbuf[512];
+                snprintf(cbuf, sizeof cbuf,
+                         "%s.new: no constructor accepts %d argument%s. Define "
+                         "`-> new(@field)` on %s -- `init`/`initialize` are not "
+                         "constructor hooks in Tungsten, and `ro :field` / "
+                         "`- data` declarations do not generate a constructor.",
+                         klass->name, args->size, args->size == 1 ? "" : "s",
+                         klass->name);
+                w_raise(w_string(cbuf));
             }
             return obj;
         }
@@ -30807,8 +30827,23 @@ WValue w_strbuf_reuse_or_new(WValue *slot, int64_t cap) {
 /* Append a string (WValue) to the buffer in place; returns the buffer. */
 WValue w_strbuf_append(WValue buf, WValue str) {
     WStrBuf *sb = (WStrBuf *)w_as_ptr(buf);
-    const char *s = as_str(str);
-    size_t slen = strlen(s);
+    /* as_str() calls w_str_data -- which already returns the byte length --
+     * discards it, and stages inline-mode bytes in a thread-local rotating
+     * buffer; the length then had to be recovered with strlen. That cost an
+     * O(n) rescan of every appended chunk plus a TLS access per append, on
+     * the hottest string-building path there is. Take the length w_str_data
+     * already computed.
+     *
+     * This also settles an embedded-NUL inconsistency: strlen stopped at the
+     * first NUL, so `sb << "a\0b"` appended one byte while String#+,
+     * String#<< and String#size all count three. StringBuffer was the lone
+     * outlier; it now agrees with them. */
+    if (w_is_rope(str)) str = w_rope_flatten(str);
+    if (!w_is_stringy(str)) die("expected string or symbol");
+    char sbuf[6];
+    const char *s;
+    size_t slen;
+    w_str_data(str, sbuf, &s, &slen);
     if (sb->size + (int64_t)slen >= sb->cap) {
         int64_t new_cap = (sb->size + slen + 1) * 2;
         sb->data = realloc(sb->data, new_cap);
@@ -30823,7 +30858,13 @@ WValue w_strbuf_append(WValue buf, WValue str) {
 /* Convert buffer contents to an immutable WValue string. */
 WValue w_strbuf_to_s(WValue buf) {
     WStrBuf *sb = (WStrBuf *)w_as_ptr(buf);
-    return w_string(sb->data);
+    /* w_string() would strlen the whole buffer -- a full extra pass over
+     * everything appended (10 MB in the string_build benchmark) to recover a
+     * length sb->size already holds. It also truncated at an embedded NUL,
+     * which is the other half of the inconsistency fixed in
+     * w_strbuf_append: String#+/#<</#size are all byte-exact, so
+     * StringBuffer is too. */
+    return w_string_n(sb->data, (size_t)sb->size);
 }
 
 /* ---- Base64 storage boundaries ----

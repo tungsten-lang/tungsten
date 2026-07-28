@@ -1,5 +1,5 @@
-# EXPERIMENT — Lex16 DIMACS scanner. NOT YET BENCHMARKED; see the blocker at
-# the bottom of this header before spending time on it.
+# EXPERIMENT — Lex16 DIMACS scanner. MEASURED 2026-07-28: the approach cannot
+# win, and the reason is structural rather than a tuning gap. See VERDICT.
 #
 # The question: does the Tungsten lexer's machinery (a packed LexChar array
 # plus the NEON `w_lex16_scan_flag` run-skipper) beat the runtime's scalar
@@ -21,13 +21,44 @@
 # Errors are deliberately coarse (this is a speed probe, not a replacement):
 #   1 no header   3 bad token   7 buffer overflow
 #
-# STATUS 2026-07-28: compiles and links when the function and its driver are in
-# ONE file; via `use ./dimacs_lex16` the native typed signature is dropped and
-# the body leaks to top level as calls to `lits`/`offs`/`hdr`. The wider lex16
-# path is also bit-rotted -- `languages/json/lexer16.w`, the in-tree reference
-# for this technique, fails to parse at HEAD (`Unexpected token INDENT` on the
-# bare `=>` default arm of its `case ... assigns` at line 48), so its
-# benchmark cannot build either.
+# VERDICT (measured). The Lex16 model needs a mandatory preprocessing pass:
+# string -> u16[] LexChar, one element per source byte. That pass ALONE costs
+# essentially the whole C parse:
+#
+#     instance              C parse   lex16 pack   ratio
+#     Large-result_b23        117ms        114ms   0.97x
+#     sembuster_4200           45ms         45ms   1.00x
+#     dspam_dump_vc972         12ms         12ms   1.00x
+#     bmc-ibm-12                2ms          2ms   1.00x
+#
+# So even a FREE scan loses: the lex16 route pays ~1x the existing parser
+# before it looks at a single token, then still has to scan the u16 array and
+# emit the same output. It is structurally >=2x the memory traffic, because
+# `__w_parse_dimacs` is already bandwidth-bound in ONE pass over the bytes,
+# while this makes two passes and materialises a 2-bytes-per-input-byte
+# intermediate (200MB for a 100MB file).
+#
+# The NEON run-skipping in w_lex16_scan_flag is real and does help skip the
+# ~50% of a CNF that is whitespace -- but it can only speed up the second
+# pass, which is not where the cost is.
+#
+# What the C scanner already has: `w_dimacs_cls` is a 256-entry
+# character-class table with DC_SPACE/DC_NL/DC_DIGIT bits -- the lexchar idea
+# minus the Unicode machinery DIMACS has no use for. And wassat's clause
+# database is already the slab model: flat arena + (offset,length) handles +
+# raw i64 leaf literals. Two of the three ideas were already in place; the
+# third is the one measured dead here.
+#
+# If anyone revisits: the only remaining lever on parse is SIMD-ising
+# `__w_parse_dimacs` itself (it is a scalar byte loop; runtime/SIMD_LEXER.md
+# is the precedent), NOT re-expressing it in the Lex16 idiom.
+#
+# BUILD NOTES if you do run it: the scanner still has a bug (err=3 at pos=2 on
+# a `p cnf` header), it only links when function and driver are in ONE file
+# (via `use` the native signature is dropped and the body leaks to top level),
+# and the IR must mention "lchs"/"lexchars" or the driver will not link
+# runtime/lexchar_tables.c (bin/commands/compile.rb:242). The wider lex16 path
+# is bit-rotted too: languages/json/lexer16.w does not parse at HEAD.
 #
 # Worth knowing before reviving it: the C scanner it would replace already
 # uses this design. `w_dimacs_cls` (runtime.c) is a 256-entry character-class

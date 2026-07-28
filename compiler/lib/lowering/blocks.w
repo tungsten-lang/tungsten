@@ -440,6 +440,25 @@
   when :ivar
     return nil
   else
+    # Generic child walk. This table is per-kind, and an `else nil` leaf meant
+    # every kind absent from it silently captured NOTHING: :map / :calc
+    # (pipelines) and :range were all missing, so `(1..n)/Σ(x)` or `r/Σ(x)`
+    # inside a block body never captured `n` / `r`. The reference then loaded
+    # nil at runtime — a folded closed form over a nil bound, i.e. a wrapped
+    # answer or a segfault, with nothing pointing at the capture pass.
+    # Walking ast_children makes every present and future kind safe by
+    # default; the explicit cases above remain for the kinds that need
+    # special scoping (block-param shadowing, bare-callee names) or are
+    # deliberately skipped (:ivar).
+    kids = ast_children(node)
+    i = 0
+    while i < kids.size()
+      kid = kids[i]
+      if type(kid) == "Array"
+        find_vars_in_body(kid, captures, block_params, outer_vars, fn_params, outer_bindings)
+      elsif is_ast_node?(kid)
+        find_vars_in_node(kid, captures, block_params, outer_vars, fn_params, outer_bindings)
+      i += 1
     nil
 
 -> lower_block_free_vars(block, ctx)
@@ -710,16 +729,23 @@
     emit_instruction(new_fn, {op: :store_i64, value: "%" + pname, ptr: ptr})
     pi += 1
 
-  # Lower block body with implicit return for last expression
+  # Lower block body with implicit return for last expression.
+  # enclosing_stmts/enclosing_stmt_idx mirror lower_program and the
+  # method-body loop in definitions.w — the statement-list context that
+  # binding analyses (closure noalloc, range-materialization elision) walk.
+  # child_ctx is fresh, so there is no previous value to save/restore.
   if body != nil && body.size() > 0
+    child_ctx[:enclosing_stmts] = body
     i = 0
     while i < body.size() - 1
       if block_terminated(new_fn)
         break
+      child_ctx[:enclosing_stmt_idx] = i
       lower_statement(child_ctx, body[i])
       i += 1
 
     if !block_terminated(new_fn)
+      child_ctx[:enclosing_stmt_idx] = body.size() - 1
       last = body[body.size() - 1]
       last_t = ast_kind(last)
       if last_t in (:puts :print :while :method_def :fn_def :begin :raise)

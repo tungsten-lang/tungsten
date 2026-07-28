@@ -548,6 +548,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return lower_method_call(ctx, setter_call)
 
   name = target.name
+  # A compound rebind invalidates range stashes exactly like a plain assign
+  # (the var itself, and any recorded range whose bounds read it).
+  range_binding_invalidate(ctx, name)
 
   # Ivar compound assignment: @name += val → @name = @name op val
   if ast_kind(target) == :ivar
@@ -740,6 +743,20 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # Evaluate RHS
   rhs = lower_expression(ctx, node.value)
   rhs_reg = ensure_i64_value(wfn, rhs)
+
+  # Re-resolve the write-back target: lowering the RHS may have MATERIALIZED
+  # bindings. Any :map / :calc (a fused pipeline), :or, :case, … calls
+  # materialize_bindings, which spills every live binding into a var_slot and
+  # clears ctx[:bindings]. The `ptr = nil` decision above is then stale —
+  # storing the result into the now-cleared binding leaves the slot, which
+  # every later read of this variable uses, still holding the pre-op value.
+  # That silently DROPPED the compound assignment and desynchronized the
+  # variable for the rest of the body: `t = 0` then `t += range/Σ(x)` returned
+  # 0, and a following `t += 1` was lost too. `cur` stays valid either way —
+  # materialize only copies binding registers into slots, and those registers
+  # still dominate this point.
+  if ptr == nil && ctx[:bindings][name] == nil
+    ptr = ensure_var_slot(wfn, name)
 
   # Map compound op to binary op
   op = node.op

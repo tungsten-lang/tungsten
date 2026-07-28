@@ -73,6 +73,19 @@ bench_skip = {"polysum": "ruby python"}
     return false
   bench_skip[bench].split(" ").include?(lang)
 
+# Languages whose output for a benchmark wraps mod 2^64 BY DESIGN.
+# polysum's true sums exceed 2^64 (deg-20 is ~170 digits), which fixed-width
+# languages cannot represent — their sources compute mod 2^64 on purpose as
+# native-loop speed references. Verify them as their own group (they must
+# still agree with each other mod 2^64) instead of against the exact
+# (BigInt) languages, which they could never match.
+bench_mod64 = {"polysum": "c rust zig odin go"}
+
+-> mod64_lang?(bench, lang)
+  if !bench_mod64.has_key?(bench)
+    return false
+  bench_mod64[bench].split(" ").include?(lang)
+
 # Extra runtime args per benchmark. polysum's per-element work (5 high-degree
 # polynomials) is ~50x heavier than the other loops, so the interpreters
 # would run for minutes at the source default — pass a smaller N/REPS here.
@@ -209,6 +222,8 @@ while bench_i < benchmarks.size()
   dir = benchdir + "/" + bench
   expected = ""
   expected_name = ""
+  wrapped = ""
+  wrapped_name = ""
   mismatch = ""
 
   lang_i = 0
@@ -217,11 +232,18 @@ while bench_i < benchmarks.size()
     if has_lang(lang) && has_source(dir, bench, lang) && !skip_lang?(bench, lang) && has_binary(dir, bench, lang)
       if lang != "ruby"
         cmd = run_cmd(lang, dir, bench)
-        output = capture(cmd + " 2>/dev/null").strip()
+        output = capture(cmd + " 2>/dev/null").strip().split("\n").join("  ")
 
         if output == ""
           name = display_name(lang)
           mismatch = name + " produced no output"
+        elsif mod64_lang?(bench, lang)
+          if wrapped == ""
+            wrapped = output
+            wrapped_name = display_name(lang)
+          elsif output != wrapped
+            name = display_name(lang)
+            mismatch = name + " (got: " + output + ", " + wrapped_name + " expected: " + wrapped + ")"
         elsif expected == ""
           expected = output
           expected_name = display_name(lang)
@@ -234,7 +256,13 @@ while bench_i < benchmarks.size()
     << "  [RED]MISMATCH[RESET] [label]: [mismatch]"
     verify_ok = false
   else
-    << "  [GREEN]OK[RESET] [label] = [expected]"
+    shown = expected
+    if shown == ""
+      shown = wrapped
+    note = ""
+    if expected != "" && wrapped != ""
+      note = " [DIM](fixed-64 langs agree mod 2^64)[RESET]"
+    << "  [GREEN]OK[RESET] [label] = [shown][note]"
   bench_i = bench_i + 1
 
 << ""
@@ -332,6 +360,6 @@ while bench_i < benchmarks.size()
 << "[DIM]Cleaning up compiled binaries...[RESET]"
 benchmarks.each -> (bench)
   dir = benchdir + "/" + bench
-  system("rm -f \"[dir]/[bench]_c\" \"[dir]/[bench]_go\" \"[dir]/[bench]_cr\" \"[dir]/[bench]_w\"")
+  system("rm -f \"[dir]/[bench]_c\" \"[dir]/[bench]_go\" \"[dir]/[bench]_cr\" \"[dir]/[bench]_w\" \"[dir]/[bench]_rs\" \"[dir]/[bench]_zig\" \"[dir]/[bench]_odin\"")
 
 << "[GREEN]Done![RESET]"

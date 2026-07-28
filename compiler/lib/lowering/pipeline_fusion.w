@@ -229,9 +229,18 @@
       emit_instruction(wfn, {op: :call_direct_i64, temp: zero, name: "w_int", args: ["0"]})
       return typed_value(:i64, zero)
     if cf_ok && poly_emittable(cf_poly)
-      lo_cf = nanunbox_int_emit(wfn, ensure_i64_value(wfn, lower_expression(ctx, ast_get(base, :from))))
-      hi_box = lower_expression(ctx, ast_get(base, :to))
-      hi_cf = nanunbox_int_emit(wfn, ensure_i64_value(wfn, hi_box))
+      # Bounds unbox via w_range_bound_i64, NOT nanunbox — same hazard the
+      # `:count` path below documents: a bound past 2^48 is a BOXED bigint
+      # WValue, and the 48-bit nanunbox shortcut silently truncates it, so
+      # `(1..10^15)/Σ(2x + 3)` folded to a wrapped answer while every bound
+      # under 2^48 looked correct. w_range_bound_i64 handles both int
+      # representations (and a whole-valued Decimal bound).
+      lo_b = ensure_i64_value(wfn, lower_expression(ctx, ast_get(base, :from)))
+      hi_b = ensure_i64_value(wfn, lower_expression(ctx, ast_get(base, :to)))
+      lo_cf = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: lo_cf, name: "w_range_bound_i64", args: [lo_b]})
+      hi_cf = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: hi_cf, name: "w_range_bound_i64", args: [hi_b]})
       # Exclusive range (1...n) drops the top endpoint.
       if ast_get(base, :exclusive)
         hi_excl = next_temp(wfn)

@@ -194,6 +194,7 @@ compiled_specs=(
   spec/compiler/cfg_ssa_pruning_spec.w
   spec/compiler/elementwise_fusion_spec.w
   spec/compiler/forward_typed_raw_call_spec.w
+  spec/compiler/poly_ranged_sum_big_bounds_spec.w
   spec/compiler/function_replacement_index_spec.w
   benchmarks/runtime_ports/float_remaining_no_use_literal.w
   spec/compiler/indexed_compound_assignment_parameter_spec.w

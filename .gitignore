@@ -48,6 +48,9 @@ benchmarks/**/*_c
 benchmarks/**/*_go
 benchmarks/**/*_cr
 benchmarks/**/*_w
+benchmarks/**/*_rs
+benchmarks/**/*_zig
+benchmarks/**/*_odin
 benchmarks/**/*.dwarf
 benchmarks/**/build/**/*
 # Compiled big_math benchmark binaries (built from the tracked *.c sources).

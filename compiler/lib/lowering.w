@@ -271,6 +271,255 @@ use lowering/definitions
     return false
   closure_binding_safe_use?(stmts, name)
 
+# --- Range-materialization elision (#49 completion) -------------------------
+#
+# `r = (lo..hi)` lowers through lower_range, which MATERIALIZES the range:
+# an empty array plus a push loop over every element — O(N) time and memory.
+# The range-elision substitution (ctx[:range_bindings], consumed by the
+# `.each` handler in method_call.w and lower_pipeline in pipeline_fusion.w)
+# already rewrites every elidable USE to the range literal, so when every
+# use is elidable the materialization is dead weight: a (1..10^9) binding
+# feeding a folded `range/Σ(…)` costs seconds and gigabytes for a value
+# nothing reads. These walkers prove that, letting lower_assign_expr skip
+# the materialization entirely.
+#
+# Elidable uses — exactly the shapes the substitution sites rewrite:
+#   - `r.each -> (…) …`         (method_call.w range-elision)
+#   - pipeline base: `r/…`, `r/…:sum`, `r/….take(n)`   (lower_pipeline)
+# Everything else (bare `r`, `r.size`, `r.map(:sym)`, passing `r` along) is
+# a real use and keeps the materialization.
+#
+# Soundness gates (range_assign_elidable?):
+#   - not main's top level: a top-level single-assign var promotes to
+#     @global.<name>, readable from functions this walk can't see.
+#   - fresh name: no existing slot/binding/type and not a param — a capture
+#     or reassignment writes storage other scopes may read.
+#   - single binding in the enclosing statement list (counting :assign,
+#     :compound_assign AND :multi_assign targets), no use before or inside
+#     the assign statement, every later use elidable.
+#   - uses inside nested :block subtrees are rejected wholesale: a block
+#     lowered as a real closure gets a fresh child ctx WITHOUT
+#     range_bindings, so the substitution could not fire there.
+#   - bounds are :int literals or plain :var reads, and no bound var is
+#     rebound after the assign — substitution re-evaluates bounds at the
+#     use site, which must observe the same values.
+
+-> range_elision_assign_count(node, name)
+  if node == nil
+    return 0
+  if type(node) == "Array"
+    total = 0
+    i = 0
+    while i < node.size()
+      total += range_elision_assign_count(node[i], name)
+      i += 1
+    return total
+  if !is_ast_node?(node)
+    return 0
+  k = ast_kind(node)
+  if k in (:method_def :fn_def :class_def :module_def :trait_def)
+    return 0
+  if k == :assign || k == :compound_assign
+    total = 0
+    target = node.target
+    if target != nil && is_ast_node?(target) && ast_kind(target) == :var && target.name == name
+      total += 1
+    else
+      total += range_elision_assign_count(target, name)
+    total += range_elision_assign_count(node.value, name)
+    return total
+  if k == :multi_assign
+    total = 0
+    targets = ast_get(node, :targets)
+    if targets != nil
+      ti = 0
+      while ti < targets.size()
+        t = targets[ti]
+        if t != nil && is_ast_node?(t) && ast_kind(t) == :var && t.name == name
+          total += 1
+        ti += 1
+    total += range_elision_assign_count(node.value, name)
+    return total
+  if k == :block
+    params = node.params
+    if params != nil
+      pi = 0
+      while pi < params.size()
+        pname = params[pi]
+        if is_ast_node?(pname)
+          pname = pname.name
+        if pname == name
+          return 0
+        pi += 1
+  total = 0
+  ast_children(node).each -> (c)
+    total += range_elision_assign_count(c, name)
+  total
+
+# The pipeline chain `base /stage… [:terminal]` is nested Map/Calc nodes.
+# Walk the chain: every non-source child (stage funcs, args) must be a safe
+# use; the final base being our var is the one position the substitution
+# rewrites. Mirrors fuse_pipeline's flattening (including the `.lazy` unwrap).
+-> range_elision_pipeline_safe?(node, name)
+  cur = node
+  while is_ast_node?(cur) && ast_kind(cur) in (:map :calc)
+    src = ast_get(cur, :source)
+    kids = ast_children(cur)
+    i = 0
+    while i < kids.size()
+      if kids[i] != src
+        if !range_elision_safe_use?(kids[i], name)
+          return false
+      i += 1
+    cur = src
+  if is_ast_node?(cur) && ast_kind(cur) == :call && ast_get(cur, :name) == "lazy" && cur.receiver != nil
+    a = ast_get(cur, :args)
+    if a == nil || a.size() == 0
+      cur = cur.receiver
+  if is_ast_node?(cur) && ast_kind(cur) == :var && cur.name == name
+    return true
+  range_elision_safe_use?(cur, name)
+
+-> range_elision_safe_use?(node, name)
+  if node == nil
+    return true
+  if type(node) == "Array"
+    i = 0
+    while i < node.size()
+      if !range_elision_safe_use?(node[i], name)
+        return false
+      i += 1
+    return true
+  if !is_ast_node?(node)
+    return true
+  k = ast_kind(node)
+  if k in (:method_def :fn_def :class_def :module_def :trait_def)
+    return true
+  if k == :var
+    return node.name != name
+  if k == :block
+    # A block param shadows the name — inner uses are the param's.
+    params = node.params
+    if params != nil
+      pi = 0
+      while pi < params.size()
+        pname = params[pi]
+        if is_ast_node?(pname)
+          pname = pname.name
+        if pname == name
+          return true
+        pi += 1
+    # A block lowered as a closure gets a fresh ctx without range_bindings,
+    # so no use of the name inside any block subtree can substitute.
+    return closure_binding_var_use_count(node, name) == 0
+  if k in (:map :calc)
+    return range_elision_pipeline_safe?(node, name)
+  if k == :call
+    # A bare call `name(…)` is a direct use (callee lives in Call.name, not
+    # a :var child, so the generic traversal below would miss it).
+    if node.receiver == nil && node.name == name
+      return false
+    recv = node.receiver
+    if recv != nil && is_ast_node?(recv) && ast_kind(recv) == :var && recv.name == name
+      # Only `.each` with a trailing block elides at the use site.
+      if node.name == "each" && node.block != nil
+        if !range_elision_safe_use?(ast_get(node, :args), name)
+          return false
+        return range_elision_safe_use?(node.block, name)
+      return false
+  if k == :assign || k == :compound_assign
+    target = node.target
+    if target != nil && is_ast_node?(target) && ast_kind(target) == :var && target.name == name
+      return range_elision_safe_use?(node.value, name)
+    if !range_elision_safe_use?(target, name)
+      return false
+    return range_elision_safe_use?(node.value, name)
+  children = ast_children(node)
+  i = 0
+  while i < children.size()
+    if !range_elision_safe_use?(children[i], name)
+      return false
+    i += 1
+  true
+
+# A bound expression the substitution may legally re-evaluate at the use
+# site: pure arithmetic over literals and plain variable reads. Calls (side
+# effects would replay per use) and ivars (mutable behind method calls the
+# walkers can't see) disqualify the whole range from ctx[:range_bindings].
+-> range_binding_pure_bound?(bound)
+  if bound == nil || !is_ast_node?(bound)
+    return false
+  k = ast_kind(bound)
+  if k in (:int :float :var)
+    return true
+  if k in (:binary_op :unary_op)
+    kids = ast_children(bound)
+    i = 0
+    while i < kids.size()
+      if !range_binding_pure_bound?(kids[i])
+        return false
+      i += 1
+    return true
+  false
+
+# Rebinding `name` invalidates its own recorded range AND any recorded range
+# whose bounds read `name` — the substitution re-evaluates bounds at the use
+# site, which must observe the values the bounds had at the assignment.
+-> range_binding_invalidate(ctx, name)
+  if ctx[:range_bindings] == nil
+    return nil
+  ctx[:range_bindings][name] = nil
+  ctx[:range_bindings].keys().each -> (rk)
+    rn = ctx[:range_bindings][rk]
+    if rn != nil
+      if closure_binding_var_use_count(ast_get(rn, :from), name) > 0 || closure_binding_var_use_count(ast_get(rn, :to), name) > 0
+        ctx[:range_bindings][rk] = nil
+
+-> range_elision_bound_stable?(stmt, bound)
+  if !is_ast_node?(bound)
+    return true
+  if ast_kind(bound) == :var
+    return range_elision_assign_count(stmt, bound.name) == 0
+  kids = ast_children(bound)
+  i = 0
+  while i < kids.size()
+    if !range_elision_bound_stable?(stmt, kids[i])
+      return false
+    i += 1
+  true
+
+-> range_assign_elidable?(ctx, name, value)
+  wfn = ctx[:func]
+  if wfn[:name] == "main"
+    return false
+  stmts = ctx[:enclosing_stmts]
+  idx = ctx[:enclosing_stmt_idx]
+  if stmts == nil || idx == nil
+    return false
+  if wfn[:var_slots][name] != nil || ctx[:bindings][name] != nil || ctx[:var_types][name] != nil
+    return false
+  if wfn[:params].include?(name)
+    return false
+  from = ast_get(value, :from)
+  to = ast_get(value, :to)
+  if !range_binding_pure_bound?(from) || !range_binding_pure_bound?(to)
+    return false
+  if range_elision_assign_count(stmts, name) != 1
+    return false
+  i = 0
+  while i <= idx
+    if closure_binding_var_use_count(stmts[i], name) != 0
+      return false
+    i += 1
+  j = idx + 1
+  while j < stmts.size()
+    if !range_elision_safe_use?(stmts[j], name)
+      return false
+    if !range_elision_bound_stable?(stmts[j], from) || !range_elision_bound_stable?(stmts[j], to)
+      return false
+    j += 1
+  true
+
 -> inline_block_param_name(block, ctx)
   params = block.params
   if params == nil || params.size() == 0
@@ -1931,6 +2180,10 @@ use lowering/definitions
 -> lower_assign_expr(ctx, node)
   wfn = ctx[:func]
   target = node.target
+  # Statement-position marker from lower_statement, consumed immediately so
+  # any assign lowered from this one's RHS reads as expression position.
+  stmt_position = ctx[:assign_stmt_position] == true
+  ctx[:assign_stmt_position] = nil
 
   # Ivar assignment: @name = value
   if ast_kind(target) == :ivar
@@ -1987,14 +2240,23 @@ use lowering/definitions
 
   # Range-elision (#49): stash range-literal RHS so a later `r.each ...`
   # substitutes the range expression at the call site and routes through
-  # the with-loop fast path. Reassigning to a non-range value clears
-  # the stash so we don't substitute a stale binding.
+  # the with-loop fast path. Any rebind of the var — or of a var its bounds
+  # read — clears the stash so we never substitute a stale binding; only
+  # pure bounds are recorded at all (substitution re-evaluates them at each
+  # use site, so calls would replay their side effects).
   if ctx[:range_bindings] == nil
     ctx[:range_bindings] = {}
-  if node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :range
+  range_binding_invalidate(ctx, name)
+  if node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :range && range_binding_pure_bound?(ast_get(node.value, :from)) && range_binding_pure_bound?(ast_get(node.value, :to))
     ctx[:range_bindings][name] = node.value
-  else
-    ctx[:range_bindings][name] = nil
+    # When every use of the var is an elidable position (each-with-block /
+    # pipeline base — the shapes ctx[:range_bindings] substitution rewrites),
+    # the materialization below is dead: skip it entirely. See the
+    # range_elision_* walkers for the proof obligations. Statement position
+    # only — an assign-as-expression's value is consumed by the enclosing
+    # expression and must stay materialized.
+    if stmt_position && range_assign_elidable?(ctx, name, node.value)
+      return typed_value(:i64, w_nil.to_s())
 
   # Closure-escape Phase B (#61): stash block-literal RHS so a later
   # `arr.each(cb)` substitutes the block at the call site and inlines
@@ -2547,6 +2809,7 @@ use lowering/definitions
   while i < targets.size()
     target = targets[i]
     name = target.name
+    range_binding_invalidate(ctx, name)
     # Get element i from the array
     idx_tv = lower_int(ctx, Tungsten:AST:Int.new(i))
     idx_reg = ensure_i64_value(wfn, idx_tv)

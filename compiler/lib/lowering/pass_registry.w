@@ -38,6 +38,9 @@
 
   case t
   when :assign
+    # Statement position (value discarded) — lower_assign_expr consumes the
+    # marker, so nested assigns in the RHS see expression position.
+    ctx[:assign_stmt_position] = true
     lower_assign_expr(ctx, node)
     return nil
   when :if

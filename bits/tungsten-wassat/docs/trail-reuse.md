@@ -262,3 +262,50 @@ regressions. What survives is reusable: the ±2 churn band, now measured; the
 force-knob-vs-axis distinction; and the habit of scoring only on rows whose
 noise floor is smaller than the effect, which is what turned an apparently
 clean 0.9361 geomean into a banked negative.
+
+## Postscript — four suite runs separate the signal from the churn
+
+Mask 15 (reuse on all four race arms, light path untouched) was the one
+configuration never suite-tested. Adding it gives four full runs to compare, on
+59 comparable rows:
+
+| config | WIN | TIE | LOSS | UNSOLVED |
+|---|---:|---:|---:|---:|
+| off | 33 | 3 | 15 | 8 |
+| global on (force knob) | 35 | 2 | 13 | 9 |
+| axis, mask 6 | 35 | 3 | 13 | 8 |
+| mask 15 | 34 | 2 | 15 | 8 |
+
+Every row that moved anywhere:
+
+| row | off | global | mask 6 | mask 15 |
+|---|---|---|---|---|
+| `schooltt-5-7-12-2-4-1.4` | TIE | **WIN** | **WIN** | **WIN** |
+| `2bitadd_10` | TIE | WIN | TIE | TIE |
+| `4pipe` | WIN | WIN | LOSS | WIN |
+| `ibm-2004-03-k70` | LOSS | LOSS | WIN | LOSS |
+| `Carry_Bits_Fast_12` | UNSOLVED | UNSOLVED | WIN | LOSS |
+| `em_7_3_6_fbc` | LOSS | LOSS | TIE | LOSS |
+| `crusti_g2io_200` | LOSS | LOSS | UNSOLVED | UNSOLVED |
+| `ais8.mis-97` | LOSS | TIE | LOSS | LOSS |
+| `f1000` | LOSS | UNSOLVED | LOSS | LOSS |
+
+**Exactly one row moves consistently:** `schooltt`, TIE -> WIN under all three
+reuse configurations. That is the whole replicated effect, and it is +1 — inside
+the ±2 churn band.
+
+The rest is incoherent in a way that proves it is churn rather than tuning.
+`ibm-2004-03-k70` wins under mask 6 but not mask 15: a race needs only one fast
+arm, so a configuration where *more* arms reuse cannot lose an effect that
+mask 6 found. Same for `4pipe`, which loses only under mask 6, and
+`Carry_Bits_Fast_12`, which is UNSOLVED / UNSOLVED / WIN / LOSS across four runs
+of a row with a 22.24x noise floor.
+
+One real mechanism does emerge: `2bitadd_10` wins **only** under the force knob,
+never under any mask. Masks reach only the race arms, so that win — like the
+`f1000` loss — comes from **light-path** reuse. The light path is where trail
+reuse has genuine, bidirectional effect; the race arms is where it has almost
+none. That is worth knowing if anyone revisits this, and it is the opposite of
+where the axis was built.
+
+Verdict unchanged: banked, `trail_reuse_mask` default 0.

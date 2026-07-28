@@ -599,6 +599,11 @@ WASSAT_CONGRUENCE_DEFAULT = true
   # Conflicts between mid-search substitution passes; 0 disables it.
   # Measurement hook -- the technique is unproven here, and the shipped
   # default stays 0 until it wins on breadth.
+  # Conflicts between learned-clause subsumption passes; 0 disables.
+  -> subsume_every
+    return wassat_decimal_in_range("WASSAT_SUBSUME", env("WASSAT_SUBSUME"), 0, 2000000000) if env("WASSAT_SUBSUME") != nil
+    0
+
   -> inprocess_every
     return wassat_decimal_in_range("WASSAT_INPROCESS", env("WASSAT_INPROCESS"), 0, 2000000000) if env("WASSAT_INPROCESS") != nil
     0

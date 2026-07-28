@@ -351,6 +351,13 @@ WASSAT_PROOF_DRAT = 2
     @inprocess_every = @config.inprocess_every
     @inprocess_at = @inprocess_every
     @inprocessings = 0
+    # Learned-clause subsumption scratch, allocated lazily on first use.
+    @subsume_every = @config.subsume_every
+    @subsume_at = @subsume_every
+    @sub_sig = nil
+    @sub_next = nil
+    @sub_head = nil
+    @sub_stamp = nil
 
     # Replay occurrence lists (hinted mode only): intrusive per-literal
     # lists over the LOGICAL clause database, so hint replay propagates
@@ -1041,6 +1048,13 @@ WASSAT_PROOF_DRAT = 2
     @use_shrink = true
     0
 
+  # Race axis: learned-clause subsumption, per arm. Global policy keeps it off
+  # (see policy.w subsume_every) because it is sharply instance-split.
+  -> enable_subsume(every)
+    @subsume_every = every
+    @subsume_at = every
+    0
+
   -> enable_chrono
     @use_chrono = true
     0
@@ -1607,7 +1621,33 @@ WASSAT_PROOF_DRAT = 2
   # Drop the least useful half of the learned clauses and rebuild the watch
   # lists over the survivors. Only ever called at decision level zero, where
   # no clause is anybody's reason, so nothing in the trail can dangle.
+  # Learned-clause subsumption + SSR. Runs from reduce_db, which is already at
+  # decision level zero and already rebuilds watches and binary lists
+  # afterwards -- this pass only marks learned clauses dead or shortens them
+  # in place, so that rebuild is exactly the fixup it needs.
+  -> subsume_learned
+    return 0 unless @subsume_every > 0 && @proof_mode == WASSAT_PROOF_NONE
+    return 0 if @conflicts < @subsume_at
+    @subsume_at = @conflicts + @subsume_every
+    nl = 2 * @nvars + 4
+    if @sub_sig == nil || @sub_sig.size < @ncl + 2
+      @sub_sig = i64[@ncl + 1024]
+      @sub_next = i64[@ncl + 1024]
+    if @sub_head == nil
+      @sub_head = i64[nl]
+      @sub_stamp = i64[nl]
+    pm = i64[8]
+    pm[0] = @ncl
+    pm[1] = @nvars
+    pm[2] = 32
+    pm[3] = 2000000
+    wassat_learned_subsume(@cmeta, @alive, @arena, @clbd, @sub_sig,
+                           @sub_head, @sub_next, @sub_stamp, pm)
+    z = wassat_prof("subsume_learned subsumed=[pm[4]] strengthened=[pm[5]] visits=[pm[6]]", wassat_prof_clock)
+    0
+
   -> reduce_db
+    self.subsume_learned
     # histogram LBD values to find a cut that removes about half
     total = 0
     hist = @rhist
@@ -3677,6 +3717,170 @@ WASSAT_PROOF_DRAT = 2
   st[1] = nu
   st[2] = rewritten
   st[3] = killed
+  0
+
+# Backward subsumption + self-subsuming resolution over the LEARNED clause
+# set, run at reduce_db time (decision level zero).
+#
+# This is the pass CaDiCaL's mid-search advantage actually consists of. The
+# earlier inprocessing attempt repeated SCC substitution instead, which
+# consumes BINARY clauses -- and CDCL learns long ones, so the implication
+# graph barely grew and it lost. Learned clauses, by contrast, subsume each
+# other constantly.
+#
+# Signature-first, the standard filter: sig(C) ORs 1 << (litindex & 63), and
+# C can only be contained in D when (sig(C) & ~sig(D)) == 0, which rejects
+# almost every pair with one AND. Survivors get an exact test through a
+# generation-stamped literal array.
+#
+# Only LEARNED clauses (clbd > 0) are ever deleted or strengthened, so an
+# irredundant clause can never be lost, and a clause that is somebody's reason
+# is safe too -- reduce_db already runs from a level-zero trail where only
+# level-zero reasons are live, and those are units, which this pass skips
+# (n < 2). Strengthening rewrites in place and shortens the header; the caller
+# rebuilds watches and binary lists afterwards, exactly as reduce_db already
+# does.
+#
+#   pm in : [0] ncl  [1] nvars  [2] max clause length considered
+#           [3] work budget (candidate visits)
+#   pm out: [4] subsumed  [5] strengthened  [6] visits used
+-> wassat_learned_subsume(cm, alive, ar, clbd, sig, ohead, onext, stamp, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+  ncl = pm[0]
+  nv = pm[1]
+  maxlen = pm[2]
+  budget = pm[3]
+  nlits = 2 * nv + 4
+  subsumed = 0
+  strengthened = 0
+  visits = 0
+
+  li = 0
+  while li < nlits
+    ohead[li] = 0 - 1
+    li += 1
+
+  # signatures, and occurrence lists over LEARNED clauses only
+  ci = 0
+  while ci < ncl
+    sig[ci] = 0
+    if alive[ci] == 1
+      n = cm[(ci << 1) + 1]
+      if n >= 2 && n <= maxlen
+        stx = cm[ci << 1]
+        sg = 0
+        j = 0
+        while j < n
+          l = ar[stx + j]
+          lx = 0
+          if l > 0
+            lx = l << 1
+          else
+            lx = ((0 - l) << 1) + 1
+          sg = sg | (1 << (lx & 63))
+          j += 1
+        sig[ci] = sg
+        if clbd[ci] > 0
+          # index the learned clause under its FIRST literal only; a
+          # container D must hold every literal of C, so walking one of C's
+          # literals is enough to find every candidate.
+          l = ar[stx]
+          lx = 0
+          if l > 0
+            lx = l << 1
+          else
+            lx = ((0 - l) << 1) + 1
+          onext[ci] = ohead[lx]
+          ohead[lx] = ci
+    ci += 1
+
+  # for each alive clause C, look for learned D that C subsumes or strengthens
+  gen = 0
+  ci = 0
+  while ci < ncl && visits < budget
+    if alive[ci] == 1
+      n = cm[(ci << 1) + 1]
+      if n >= 2 && n <= maxlen
+        stx = cm[ci << 1]
+        sgc = sig[ci]
+        gen += 1
+        j = 0
+        while j < n
+          l = ar[stx + j]
+          lx = 0
+          if l > 0
+            lx = l << 1
+          else
+            lx = ((0 - l) << 1) + 1
+          stamp[lx] = gen
+          j += 1
+        # candidates are the learned clauses indexed under C's first literal,
+        # plus those under its negation (which is where strengthening lives)
+        pass_i = 0
+        while pass_i < 2 && visits < budget
+          l0 = ar[stx]
+          lx0 = 0
+          if l0 > 0
+            lx0 = l0 << 1
+          else
+            lx0 = ((0 - l0) << 1) + 1
+          lx0 = lx0 ^ 1 if pass_i == 1
+          d = ohead[lx0]
+          while d >= 0 && visits < budget
+            visits += 1
+            if d != ci && alive[d] == 1 && clbd[d] > 0
+              dn = cm[(d << 1) + 1]
+              # Signature filter. C can only be CONTAINED in D when every bit
+              # of sig(C) is also in sig(D), i.e. (sigC & ~sigD) == 0 -- one
+              # AND rejects almost every pair. Applied on the subsumption pass
+              # only: the strengthening pass looks for a clause differing in
+              # one FLIPPED literal, whose bit is legitimately absent.
+              # Parenthesised because `&` binds looser than `==` here.
+              skip = 0
+              if pass_i == 0
+                notd = (0 - sig[d]) - 1
+                skip = 1 if (sgc & notd) != 0
+              if dn >= n && skip == 0
+                # exact test: every literal of C present in D (subsumption),
+                # or all but one with that one's negation present (SSR)
+                hits = 0
+                flipped = 0
+                flip_at = 0 - 1
+                dstx = cm[d << 1]
+                k = 0
+                while k < dn
+                  dl = ar[dstx + k]
+                  dx = 0
+                  if dl > 0
+                    dx = dl << 1
+                  else
+                    dx = ((0 - dl) << 1) + 1
+                  if stamp[dx] == gen
+                    hits += 1
+                  else
+                    if stamp[dx ^ 1] == gen
+                      flipped += 1
+                      flip_at = k
+                  k += 1
+                if hits == n
+                  alive[d] = 0
+                  subsumed += 1
+                else
+                  if hits == n - 1 && flipped == 1 && dn > 2
+                    # drop the flipped literal from D, in place
+                    m = flip_at
+                    while m < dn - 1
+                      ar[dstx + m] = ar[dstx + m + 1]
+                      m += 1
+                    cm[(d << 1) + 1] = dn - 1
+                    ar[dstx - 1] = (d << 32) | (dn - 1)
+                    strengthened += 1
+            d = onext[d]
+          pass_i += 1
+    ci += 1
+
+  pm[4] = subsumed
+  pm[5] = strengthened
+  pm[6] = visits
   0
 
 -> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp) (i64[] i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[])

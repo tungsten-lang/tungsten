@@ -24470,6 +24470,26 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
                     case 16: ((fn16)m->fn_ptr)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15]); break;
                     default: die_method_arity("constructor", klass->name, "new", expected, 16); break;
                 }
+            } else if (args->size > 0) {
+                /* No constructor accepts these arguments. Dropping them
+                 * silently returned an object with every field unset, so the
+                 * mistake surfaced far away as a nil field read. Tungsten's
+                 * constructor is `-> new(...)` (spec 5.3.1): `init` and
+                 * `initialize` are ordinary methods that `.new` never calls,
+                 * and a `ro`/`field` declaration does not generate one, so
+                 * name the required form rather than just the arity. */
+                /* w_raise, not die: this is a user programming error, so it
+                 * must be catchable by begin/rescue like the neighbouring
+                 * constructor diagnostics. */
+                char cbuf[512];
+                snprintf(cbuf, sizeof cbuf,
+                         "%s.new: no constructor accepts %d argument%s. Define "
+                         "`-> new(@field)` on %s -- `init`/`initialize` are not "
+                         "constructor hooks in Tungsten, and `ro :field` / "
+                         "`- data` declarations do not generate a constructor.",
+                         klass->name, args->size, args->size == 1 ? "" : "s",
+                         klass->name);
+                w_raise(w_string(cbuf));
             }
             return obj;
         }

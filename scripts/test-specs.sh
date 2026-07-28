@@ -194,6 +194,7 @@ compiled_specs=(
   spec/compiler/cfg_ssa_pruning_spec.w
   spec/compiler/elementwise_fusion_spec.w
   spec/compiler/forward_typed_raw_call_spec.w
+  spec/compiler/poly_ranged_sum_big_bounds_spec.w
   spec/compiler/function_replacement_index_spec.w
   benchmarks/runtime_ports/float_remaining_no_use_literal.w
   spec/compiler/indexed_compound_assignment_parameter_spec.w
@@ -229,6 +230,7 @@ compiled_specs=(
   spec/compiler/boxed_arith_fast_spec.w
   spec/compiler/typed_receiver_string_routes_spec.w
   spec/compiler/string_free_escape_spec.w
+  spec/compiler/constructor_arity_spec.w
   spec/compiler/typed_receiver_string_routes_spec.w
   spec/compiler/u64_raw_multiply_spec.w
   spec/compiler/conditional_reassign_param_spec.w

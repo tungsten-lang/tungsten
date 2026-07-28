@@ -3807,6 +3807,12 @@ use target
     constructor = lookup_method(w_class, "new")
     if constructor != nil
       call_w_method(obj, constructor, args, nil, env)
+    elsif args != nil && args.size() > 0
+      # Mirrors the runtime's constructor check (w_method_dispatch `new`
+      # arm): arguments with no constructor to receive them used to be
+      # dropped, leaving every field unset so the mistake surfaced later as
+      # a nil field read. `-> new(...)` is the constructor (spec 5.3.1).
+      raise w_class[:name].to_s() + ".new: no constructor accepts " + args.size().to_s() + " argument(s). Define `-> new(@field)` on " + w_class[:name].to_s() + " -- `init`/`initialize` are not constructor hooks in Tungsten, and `ro :field` / `- data` declarations do not generate a constructor."
     obj
 
   # -- Super --

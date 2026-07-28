@@ -577,7 +577,15 @@ WASSAT_CONGRUENCE_DEFAULT = true
     # perturbs a roughly 95k-conflict trajectory into a multi-million-conflict
     # search, and prior BMC measurements also regressed. Keep the technique
     # out of the automatic policy until a stronger form wins the reference
-    # gate; there is deliberately no user-facing opt-in tuning switch.
+    # gate.
+    #
+    # Measurement hook (2026-07-28): that verdict rests on uuf250 and BMC --
+    # rows wassat already WINS. The same "disabled on evidence from rows we
+    # win" pattern hid the SLS burst (97ed3d1) and target phases (7f24dd2),
+    # both of which turned out to be large wins once measured on the rows we
+    # LOSE. CaDiCaL vivifies on every one of those rows (0.02-0.81% of
+    # clauses). This pins the axis so that can be tested without a rebuild.
+    return env("WASSAT_VIVIFY") == "1" if env("WASSAT_VIVIFY") != nil
     false
 
   -> raw_race_arms

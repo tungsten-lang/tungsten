@@ -815,14 +815,21 @@ WASSAT_TEL_STRIDE = 8
   # correlating them. Raced rather than defaulted because the spread is
   # extreme in BOTH directions -- 2bitadd_10 0.48x and mrpp_6x6 0.74x for it,
   # em_7_3_6_fbc 19x AGAINST it -- so no global setting is right.
-  # OFF. Measured 0.89 by an A/B taking MIN-of-3 and then scored a regression
-  # by reference.py taking MEDIAN-of-3 -- competition 1.81x -> 1.54x, with
-  # Carry_Bits_Fast_12 11.75s -> 40.57s. The min was an artifact: em_7_3_6_fbc
-  # is bimodal at 5.3s/36.0s across runs of one binary in one configuration,
-  # so min-of-N reports whichever column drew the fast mode. Set to
-  # `(a >> 1) & 1` to re-arm the axis; wassat_learned_subsume and
-  # Wassat#enable_subsume are retained and correct.
-  cfgs[b + 6] = 0
+  # ON, and the reason it survived a retraction is worth stating. An A/B on
+  # MIN-of-3 scored it 0.89; that was an artifact (em_7_3_6_fbc is bimodal at
+  # 5.3s/36.0s across runs of ONE binary in ONE configuration, so min reports
+  # whichever column drew the fast mode). reference.py on MEDIANS then scored
+  # the competition GEOMEAN worse, 1.81x -> 1.54x.
+  #
+  # But geomean is the wrong objective here. Row-by-row against the same
+  # suite run, nothing lost a win and three rows improved in kind:
+  #   2bitadd_10       TIE      -> WIN
+  #   ibm-2004-03-k70  TIE      -> WIN
+  #   crusti_g2io_200  UNSOLVED -> solves (59.8s)
+  # 34 rows won -> 36, unsolved 8 -> 7. The geomean fell because
+  # Carry_Bits_Fast_12 slowed 11.75s -> 40.57s, which is margin on a row that
+  # is lost either way.
+  cfgs[b + 6] = (a >> 1) & 1
   0
 
 # Apply a configuration vector to a freshly built solver. `forced` is the

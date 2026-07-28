@@ -202,6 +202,38 @@ WASSAT_CONGRUENCE_DEFAULT = true
 # the whole instance; a correct one saves a core) is why the window has to be
 # far more conservative than the UNSAT rows suggest, and at that point the
 # gain is gone.
+# Memory ceiling for an SLS arm's arena, in MB. 0 = no limit.
+#
+# The walker allocates ~3 arrays sized by total literals, ~5 by clause count
+# and ~8 by variable count, ALL INSIDE THE WORKER THREAD -- exactly what
+# sls.w's own alloc_arena comment forbids ("a walk that runs inside a
+# portfolio worker thread must not allocate ... every buffer a thread touches
+# is built on the main thread before the spawn"). Measured footprint:
+# Large-result_b23 1119MB, sembuster_4200 441MB, qg5-13 13MB, shuffling-1 6MB.
+#
+# A gigabyte of fresh allocation in a worker is not only that worker's
+# problem: it costs kernel page-zeroing (mm locks), the macOS xzone allocator
+# refill lock, and enough LLC and memory bandwidth to evict every other arm's
+# working set. That is the mechanism behind arms interfering despite nominally
+# owning separate cores.
+# 256MB measured against no limit, median-of-5. FIVE rows move together by
+# the same ~0.70x, which is the signal to trust rather than one row moving a
+# lot: Large_b23 0.678 -> 0.474s, Large_b24 1.745 -> 1.306, sembuster_4200
+# 0.274 -> 0.190, sembuster_7500 0.430 -> 0.296, scc_9630 0.438 -> 0.301.
+# DivS_568_11 sits below the ceiling and is unchanged at 0.97x, so the rows
+# the walker actually wins keep their arm.
+-> wassat_sls_max_arena_mb
+  return wassat_decimal_in_range("WASSAT_SLS_MAX_MB", env("WASSAT_SLS_MAX_MB"), 0, 1000000) if env("WASSAT_SLS_MAX_MB") != nil
+  256
+
+# Estimated SLS arena for a parsed formula, in MB. Mirrors the array sizing in
+# WassatSls#new; approximate by design, it only has to rank instances.
+-> wassat_sls_arena_mb(formula)
+  lits = formula["flat_nlits"]
+  ncl = formula["flat_ncl"]
+  nv = formula["nvars"]
+  (3 * lits + 5 * ncl + 8 * nv) * 8 / 1048576
+
 -> wassat_sls_plateau_window
   return wassat_decimal_in_range("WASSAT_SLS_PLATEAU", env("WASSAT_SLS_PLATEAU"), 0, 2000000000) if env("WASSAT_SLS_PLATEAU") != nil
   0

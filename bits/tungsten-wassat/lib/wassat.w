@@ -366,6 +366,10 @@ use portfolio
         scout_h = Thread.new -> wassat_scout_arm_body(scout_nv, art, scout_stop, probe_cap, probe_wall, raw_probe, scout_simplify, scout_out)
         scout_sls_h = nil
         scout_sls_flips = wassat_sls_arm_flips
+        # Memory ceiling: a walker whose arena would be enormous costs every
+        # OTHER arm more than it can win back. See wassat_sls_max_arena_mb.
+        sls_mb = wassat_sls_max_arena_mb
+        scout_sls_flips = 0 if sls_mb > 0 && wassat_sls_arena_mb(formula) > sls_mb
         if scout_sls_flips > 0
           scout_sls_h = Thread.new -> wassat_sls_arm_body(scout_nv, formula, scout_res, scout_sls_base, scout_stop, scout_sls_flips, 7)
         # GE over whatever XOR constraint groups the formula carries; refutes
@@ -489,6 +493,8 @@ use portfolio
         # local search cracks is answered here even when there is exactly one
         # raw arm and no preprocessing arm.
         sls_flips = wassat_sls_arm_flips
+        sls_mb2 = wassat_sls_max_arena_mb
+        sls_flips = 0 if sls_mb2 > 0 && wassat_sls_arena_mb(formula) > sls_mb2
         race = nil
         if arms > 1 || pre_arms > 0 || sls_flips > 0
           continuation = config.continue_scout? ? scout_solver : nil

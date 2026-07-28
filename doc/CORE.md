@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(154 total), grouped by area, with its declaration, a one-line
+(171 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -103,6 +103,10 @@ summary from the source header, and a link to the source.
 | `PlaneQuarticAutomorphismCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `GroebnerBasis` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `Ideal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `F2LinearAlgebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `F2LinearSystem` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `F2LinearSystemCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `F2LinearSolution` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `ProjectivePoint` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `ProjectiveSpace` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `AffineChart` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
@@ -112,6 +116,19 @@ summary from the source header, and a link to the source.
 | `Place` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `Divisor` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `DivisorPrincipalityResult` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `SelmerConstraintBlock` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `SelmerConstraintSystem` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ExplicitSelmerIntersectionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `SmoothPlaneQuarticCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `SmoothPlaneQuarticBitangentCountCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `RationalHyperflexCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticBitangentChart` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `BitangentChartCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `BitangentEtaleComponentCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `BitangentProjectionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticTwoDescentSetup` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticBitangentSchemeCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `DescentRequirement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `MonotoneQuarticPointSearch` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `Jacobian` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `EllipticPoint` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

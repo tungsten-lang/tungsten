@@ -5,6 +5,9 @@ geometry layers. `Rational` remains a numeric scalar in
 `core/numeric/rational.w`; `Field` is the algebra-side protocol describing how
 such scalars behave as coefficients.
 
+The trust model, Wassat/WRAT boundary, descent dependency graph, and
+FLT-scale roadmap are in [certified-mathematics.md](certified-mathematics.md).
+
 ## Layout
 
 ```text
@@ -17,10 +20,12 @@ core/algebra/polynomial_gcd.w
 core/algebra/polynomial_factor.w
 core/algebra/number_field.w         # exact cubic fields and maximal orders
 core/algebra/groebner.w            # Buchberger, Ideal, eliminate, saturate
+core/algebra/f2_linear.w           # replay-certified linear algebra over F2
 core/algebra/projective.w          # projective spaces and normalized points
 core/algebra/curves.w              # plane, elliptic, and hyperelliptic models
 core/algebra/divisors.w            # degree-one places, small certified decisions
 core/algebra/quartics.w            # lines, intersections, finite-field bitangents
+core/algebra/descent.w             # BPS preparation, bitangent proofs, F2 kernel
 core/algebra/point_search.w        # exact bounded search for one quartic family
 core/algebra/quartic_invariants.w  # ternary resultant, discriminant, I27
 core/algebra/automorphisms.w       # normalized-hyperflex certificate
@@ -106,7 +111,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Divisors | Exact formal arithmetic on rational degree-one places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic, and general principality tests are not implemented |
 | Rational points | Complete exact bounded search for primitive points on `aX³Z + bXY²Z + g(Y,Z)`, with nonzero same-sign `a,b` and nonzero `Y⁴` coefficient | This is not a general plane-curve point finder and does not prove that no points exist above the requested height |
 | Geometric automorphisms | Exact triviality certificate over `Qbar` for smooth rational plane quartics with the unique normalized hyperflex `[1:0:0]`, tangent `Z=0`, and identity stabilizer | It is not an arbitrary plane-quartic automorphism-group algorithm and does not enumerate nontrivial groups |
-| Descent and rank | Certified results above remain distinct from rank claims | Generalized Jacobian descent is not implemented; every `Jacobian#rank` entry point raises |
+| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified geometric prefix for BPS generalized explicit 2-descent; for the shell-width quartic, a checked degree-27 bitangent projection split into squarefree pieces of degrees 6, 9, and 12 | The BPS divisor/function family, arbitrary-degree étale algebras/maximal orders, unconditional S-class groups and S-units, a certified ambient square-class basis, theta Galois modules, p-adic local images, and the comparison kernel remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
 
 `Curve#hyperelliptic_plane_model?` is specifically the smooth plane-model
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
@@ -189,10 +194,79 @@ is checkable in its stated domain. A resource limit, a missing modular
 witness, or input outside the structural family is reported as an error; it
 is never silently converted into a negative mathematical claim.
 
-Generalized descent is still future work. In particular, point searches,
-Frobenius data, torsion bounds, bitangent counts, and divisor obstructions do
-not certify a Jacobian rank. `Jacobian#rank` remains unavailable until a real
-certified descent is implemented.
+The exact F2 intersection kernel needed by generalized explicit descent is
+available, but the ambient basis and arithmetic producers remain separate
+proof obligations. In particular, point searches, Frobenius data, torsion
+bounds, bitangent counts, and divisor obstructions do not certify a Jacobian
+rank. `Jacobian#rank` remains unavailable until a verified explicit-Selmer
+bound, BPS comparison kernel, rational two-torsion dimension, and matching
+lower bound have all been composed.
+
+## Certified geometric prefix for plane-quartic 2-descent
+
+A rational hyperflex supplies the rational odd theta characteristic in
+Bruin--Poonen--Stoll section 6.5. Its intersection certificate verifies
+`l.C = 4P = 2(2P)`. Removing that member is the geometric step that prepares
+a degree-27 true descent setup instead of the generic degree-28 fake setup.
+The object remains an incomplete preparation until the BPS étale scheme,
+divisor/line-bundle family, and functions are constructed:
+
+```w
+infinity = Line.new(C.space, [0, 0, 1])
+setup = C.jacobian.two_descent_setup(
+  distinguished_bitangent: infinity
+)
+
+setup.geometric_prerequisites_certified?  # true
+setup.intended_descent_kind               # :true
+setup.expected_etale_degree               # 27
+setup.true_setup?                         # false
+setup.certified?                          # false
+scheme = setup.certify_bitangent_scheme
+scheme.component_degrees  # [6, 9, 12]
+scheme.certified?          # true
+```
+
+For the shell-width quartic, the bitangent certificate checks supplied
+projection data rather than trusting its producer. It substitutes the three
+degree-6/9/12 components into the curve-derived square equations, verifies
+exact divisibility with dense integer arithmetic, checks a full-degree
+squarefree reduction modulo 5, excludes the remaining boundary chart, and
+adds the distinguished hyperflex. The final exhaustion step explicitly carries
+a `SmoothPlaneQuarticBitangentCountCertificate`. It checks the hypotheses of
+the classical 28-bitangent theorem and records that theorem as a trusted
+mathematical import, not as a proof-assistant-checked derivation.
+The degree labels describe a checked squarefree product presentation; they
+are not yet separate arbitrary-degree `NumberField` objects.
+
+The global, norm, unramified, and local conditions eventually produced by the
+arithmetic layers meet in an exact F2 kernel:
+
+```w
+conditions = SelmerConstraintSystem.new(5)
+conditions.add_condition("global norm", [[1, 1, 1, 0, 0]], norm_certificate)
+conditions.add_condition("local image at 2", [[0, 0, 1, 1, 0]], local_certificate)
+explicit = conditions.intersection_certificate
+
+explicit.dimension
+explicit.basis
+explicit.certified?
+```
+
+The row-reduction certificate replays elementary operations, checks canonical
+RREF, and independently verifies the kernel basis. A producer certificate must
+freshly verify the exact constraint name, width, matrix, and right-hand side.
+The ambient columns are not yet tied to certified square-class generators, so
+this remains a checked explicit constraint intersection rather than a true
+arithmetic Selmer group. `ExplicitSelmerIntersectionCertificate#rank_upper_bound`
+always raises; the ambient basis and BPS comparison are still required.
+
+For finite non-linear obligations, the optional
+`bits/tungsten-wassat/lib/algebra_certificate.w` bridge exports standard CNF,
+asks Wassat for a WRAT refutation, and replays it through the independent Wrat
+checker. This is appropriate for theta-incidence matching, subgroup
+elimination, and finite cohomology. WRAT does not certify maximal orders,
+class groups, units, p-adic lifting, or the arithmetic-to-CNF translation.
 
 ## Factorization contract
 

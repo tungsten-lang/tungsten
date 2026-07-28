@@ -229,7 +229,7 @@
   # Rank is a certified-only capability.  No heuristic or point-search result
   # is promoted to an arithmetic theorem here.
   -> rank
-    raise "Jacobian rank requires a certified descent, which is not implemented"
+    raise "Jacobian rank requires a completed certified descent and matching lower bound"
 
 
 # A rational point on a short Weierstrass model.  The identity is represented
@@ -430,7 +430,7 @@
     @jacobian_view
 
   -> rank
-    raise "Jacobian rank requires a certified descent, which is not implemented"
+    raise "Jacobian rank requires a completed certified descent and matching lower bound"
 
   -> to_s
     "EllipticCurve(" + @equation.to_s + " = 0 in " + @space.to_s + ")"
@@ -451,7 +451,7 @@
     1
 
   -> rank
-    raise "Jacobian rank requires a certified descent, which is not implemented"
+    raise "Jacobian rank requires a completed certified descent and matching lower bound"
 
   -> to_s
     "Jacobian(dim=1)"
@@ -654,7 +654,7 @@
     reduce_pair(u, v)
 
   -> rank
-    raise "Jacobian rank requires a certified descent, which is not implemented"
+    raise "Jacobian rank requires a completed certified descent and matching lower bound"
 
 
 + GaloisGroup

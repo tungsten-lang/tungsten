@@ -1,0 +1,216 @@
+# Certified finite Selmer kernel and BPS plane-quartic setup.
+#
+#   bin/tungsten run spec/core/algebra_descent_spec.w
+#   bin/tungsten compile spec/core/algebra_descent_spec.w \
+#     --out /tmp/algebra-descent-spec
+
+use algebra
+
+-> descent_check(name, got, want)
+  if got != want
+    raise "FAIL " + name + ": got " + got.to_s + ", want " + want.to_s
+  << "PASS " + name
+
++ DescentSpecArithmeticCertificate
+  -> new(@name, @width, matrix, right_hand_side)
+    @name = @name.to_s
+    @matrix = F2LinearAlgebra.copy_matrix(matrix)
+    @right_hand_side = F2LinearAlgebra.copy_vector(right_hand_side)
+
+  -> certified?
+    true
+
+  -> verified?
+    true
+
+  -> verify_selmer_constraint(name, width, matrix, right_hand_side)
+    return false if name.to_s != @name || width != @width
+    return false if !F2LinearAlgebra.same_matrix?(matrix, @matrix)
+    F2LinearAlgebra.same_vector?(right_hand_side, @right_hand_side)
+
++ DescentSpecUnboundArithmeticCertificate
+  -> certified?
+    true
+
+  -> verified?
+    true
+
++ DescentSpecUncheckedArithmeticCertificate
+  -> certified?
+    true
+
+  -> verified?
+    false
+
+  -> verify_selmer_constraint(name, width, matrix, right_hand_side)
+    true
+
++ DescentSpecForgedConstraintBlock
+  -> width
+    2
+
+  -> matrix
+    [[1, 0]]
+
+  -> right_hand_side
+    [0]
+
+  -> arithmetic_certified?
+    true
+
+C ⊂ ℙ²_ℚ (B, S, Z) : 16B³Z + 48BS²Z − 3S⁴ + 8S³Z + 162S²Z² + 729Z⁴ = 0
+
+infinity = Line.new(C.space, [0, 0, 1])
+hyperflex = RationalHyperflexCertificate.new(C, infinity)
+descent_check("hyperflex.certified", hyperflex.certified?, true)
+descent_check("hyperflex.point", hyperflex.point.to_s, "\[1:0:0\]")
+descent_check("hyperflex.half_degree", hyperflex.half_intersection.degree, 2)
+
+setup = C.jacobian.two_descent_setup(distinguished_bitangent: infinity)
+descent_check("setup.geometric_prerequisites",
+              setup.geometric_prerequisites_certified?, true)
+descent_check("setup.not_completed_certificate", setup.certified?, false)
+descent_check("setup.intended_kind", setup.intended_descent_kind, :true)
+descent_check("setup.not_true_yet", setup.true_setup?, false)
+descent_check("setup.expected_etale_degree", setup.expected_etale_degree, 27)
+descent_check("setup.complete", setup.complete?, false)
+
+bitangent_scheme = setup.certify_bitangent_scheme
+descent_check("bitangent_scheme.certified",
+              bitangent_scheme.certified?, true)
+descent_check("bitangent_scheme.etale_degree",
+              bitangent_scheme.etale_degree, 27)
+descent_check("bitangent_scheme.component_degrees",
+              bitangent_scheme.component_degrees.to_s, "\[6, 9, 12\]")
+descent_check("bitangent_scheme.geometric_degree",
+              bitangent_scheme.geometric_degree, 28)
+descent_check("bitangent_scheme.count_theorem",
+              bitangent_scheme.count_certificate.certified?, true)
+descent_check("bitangent_scheme.squarefree_projection",
+              bitangent_scheme.primary_certificate.squarefree?, true)
+descent_check("bitangent_scheme.count_theorem_import",
+              bitangent_scheme.count_certificate.proof_kind,
+              :trusted_theorem_import)
+descent_check("bitangent_scheme.count_not_kernel_checked",
+              bitangent_scheme.count_certificate.kernel_checked?, false)
+
+reference_component = bitangent_scheme.primary_certificate.components[0]
+component_chart = bitangent_scheme.primary_chart
+factor_coefficients = [59049, -52488, 8748, 3240, -1152, 96, 16]
+image_coefficients = [616734, -269001, -30132, 20124, -3000, -368]
+factor = reference_component.factor
+u_image = reference_component.u_image
+image_numerator = u_image * 19683
+
+wrong_factor = BitangentEtaleComponentCertificate.new(
+  component_chart, factor + factor.ring.one, u_image,
+  image_numerator, 19683, factor_coefficients, image_coefficients)
+descent_check("bitangent_component.binds_dense_factor",
+              wrong_factor.verified?, false)
+
+wrong_image = BitangentEtaleComponentCertificate.new(
+  component_chart, factor, u_image + u_image.ring.one,
+  image_numerator, 19683, factor_coefficients, image_coefficients)
+descent_check("bitangent_component.binds_public_image",
+              wrong_image.verified?, false)
+
+changed_image_coefficients = [
+  616735, -269001, -30132, 20124, -3000, -368
+]
+wrong_dense_image = BitangentEtaleComponentCertificate.new(
+  component_chart, factor, u_image,
+  image_numerator, 19683, factor_coefficients, changed_image_coefficients)
+descent_check("bitangent_component.binds_dense_image",
+              wrong_dense_image.verified?, false)
+
+zero_denominator = BitangentEtaleComponentCertificate.new(
+  component_chart, factor, u_image,
+  image_numerator, 0, factor_coefficients, image_coefficients)
+descent_check("bitangent_component.rejects_zero_denominator",
+              zero_denominator.verified?, false)
+
+rank_error = false
+begin
+  setup.rank_upper_bound
+rescue e
+  rank_error = e.to_s.index("BPS divisor and function data") != nil
+descent_check("setup.rank_gate", rank_error, true)
+
+conditions = SelmerConstraintSystem.new(5)
+conditions.add_condition(
+  "global norm",
+  [[1, 1, 1, 0, 0]],
+  DescentSpecArithmeticCertificate.new(
+    "global norm", 5, [[1, 1, 1, 0, 0]], [0]))
+conditions.add_condition(
+  "unramified outside S",
+  [[0, 0, 1, 1, 0]],
+  DescentSpecArithmeticCertificate.new(
+    "unramified outside S", 5, [[0, 0, 1, 1, 0]], [0]))
+conditions.add_condition(
+  "local image at 2",
+  [[0, 0, 0, 1, 1]],
+  DescentSpecArithmeticCertificate.new(
+    "local image at 2", 5, [[0, 0, 0, 1, 1]], [0]))
+intersection = conditions.solve
+descent_check("constraint_block.certified",
+              conditions.blocks[0].certified?, true)
+descent_check("intersection.finite_certificate",
+              intersection.finite_certified?, true)
+descent_check("intersection.arithmetic_certificate",
+              intersection.arithmetic_certified?, true)
+descent_check("intersection.certified", intersection.certified?, true)
+descent_check("intersection.dimension", intersection.dimension, 2)
+
+finite_only = SelmerConstraintSystem.new(2)
+finite_only.add_condition("unverified local image", [[1, 1]])
+finite_result = finite_only.solve
+descent_check("finite_only.linear", finite_result.finite_certified?, true)
+descent_check("finite_only.not_arithmetic",
+              finite_result.arithmetic_certified?, false)
+descent_check("finite_only.not_certified", finite_result.certified?, false)
+
+unbound = SelmerConstraintSystem.new(2)
+unbound.add_condition(
+  "unbound claim", [[1, 0]], DescentSpecUnboundArithmeticCertificate.new)
+descent_check("unbound_producer.rejected",
+              unbound.solve.arithmetic_certified?, false)
+
+unchecked = SelmerConstraintSystem.new(2)
+unchecked.add_condition(
+  "unchecked claim", [[1, 0]],
+  DescentSpecUncheckedArithmeticCertificate.new)
+descent_check("unchecked_producer.rejected",
+              unchecked.solve.arithmetic_certified?, false)
+
+wrong_producer = DescentSpecArithmeticCertificate.new(
+  "first condition", 2, [[1, 0]], [0])
+reused = SelmerConstraintSystem.new(2)
+reused.add_condition("different condition", [[0, 1]], wrong_producer)
+descent_check("reused_producer.rejected",
+              reused.solve.arithmetic_certified?, false)
+
+forged_block_error = false
+begin
+  ExplicitSelmerIntersectionCertificate.new(
+    2, [DescentSpecForgedConstraintBlock.new])
+rescue e
+  forged_block_error = true
+descent_check("forged_constraint_block.rejected", forged_block_error, true)
+
+missing_requirement_error = false
+begin
+  DescentRequirement.new("forged", "complete", "no proof")
+rescue e
+  missing_requirement_error = true
+descent_check("completed_requirement.needs_certificate",
+              missing_requirement_error, true)
+
+comparison_error = false
+begin
+  intersection.rank_upper_bound
+rescue e
+  comparison_error = e.to_s.index("not a rank certificate") != nil
+descent_check("intersection.rank_gate", comparison_error, true)
+
+<< "algebra_descent_spec: all checks passed"

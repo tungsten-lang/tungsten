@@ -1,0 +1,146 @@
+# Certified mathematics
+
+Tungsten distinguishes an exact computation from a theorem whose complete
+dependency chain has been checked. The distinction matters most in descent:
+an exact intersection of supplied bit vectors is not evidence that those
+vectors are the global and local images of a Jacobian.
+
+## Certificate levels
+
+| Level | Meaning | May imply a theorem? |
+| --- | --- | --- |
+| Finite checked | A matrix, Boolean formula, factor product, or incidence table was replayed exactly | Only the finite statement named by the certificate |
+| Arithmetic checked | The finite data are tied to exact field, ideal, divisor, or local-arithmetic producers whose certificates also verify | Yes, within the stated arithmetic model |
+| Trusted theorem import | A named established theorem is applied after its hypotheses are checked, but its proof is not formalized here | Yes, relative to the displayed trust base |
+| Kernel checked | The theorem connecting the arithmetic statement to the claimed result is present in a proof kernel | Yes |
+| Conditional | A named conjecture or unverified theorem import is required, such as a GRH class-group bound | Only with that condition displayed |
+| Heuristic | Numerical or search evidence with no completeness theorem | No |
+
+The target proof-object contract is:
+
+- the precise claim and mathematical scope;
+- immutable input/proof artifacts;
+- dependency certificates;
+- `verified?` for independent replay;
+- `certified?` only when every required dependency is unconditional;
+- explicit conditional assumptions and theorem imports;
+- a failure or `unknown` result instead of a guessed theorem.
+
+`F2LinearSystemCertificate` is the reference finite certificate. It replays
+elementary row operations, validates canonical RREF, and independently checks
+the particular solution and kernel basis. `ExplicitSelmerIntersectionCertificate`
+binds producer dependencies to the exact supplied matrices but deliberately
+refuses to return a rank bound. Its columns do not yet carry a certified
+ambient square-class basis, so its name denotes an explicit constraint
+intersection rather than the true arithmetic Selmer group.
+
+## Wassat and Wrat
+
+Wassat is appropriate after an arithmetic checker has regenerated a bounded
+Boolean problem. Useful examples include:
+
+- matching bitangents and syzygetic quadruples to the canonical theta
+  incidence structure;
+- eliminating finite Galois subgroups or decomposition actions;
+- finite cocycle and cohomology constraints;
+- proving that an excluded Selmer vector cannot satisfy all finite
+  conditions.
+
+The optional `bits/tungsten-wassat/lib/algebra_certificate.w` bridge asks
+Wassat for a WRAT refutation and replays it through the separately implemented
+Wrat checker. The certificate stores the canonical base CNF and reconstructs
+the exact refutation query by appending the negation of its normalized claim;
+an UNSAT proof therefore cannot be relabeled as a different consequence.
+Clause labels remain diagnostic metadata.
+
+WRAT does **not** certify the arithmetic-to-CNF translation, maximal orders,
+class groups, unit groups, p-adic lifting, local constancy, duality theorems,
+or a modularity theorem. Those need their own semantic checkers or
+kernel-checked mathematics.
+
+## Geometric prefix for plane-quartic descent
+
+The implemented shell-width path prepares Bruin--Poonen--Stoll generalized
+explicit descent:
+
+1. certify a smooth plane quartic;
+2. verify the rational hyperflex `Z=0` with intersection `4P`;
+3. use the rational member to select the degree-27 geometric prefix for the
+   true setup of BPS section 6.5;
+4. check the three supplied bitangent projection pieces of degrees 6, 9, and
+   12 by exact substitution and divisibility;
+5. prove their product squarefree modulo 5 and recover all 28 geometric
+   bitangents, using the classical 28-bitangent theorem as an explicit trusted
+   import whose hypotheses are checked;
+6. intersect future global, norm, unramified, and local conditions with the
+   replay-certified F2 kernel.
+
+This is not yet a BPS true setup: `Delta'`, the divisor/line-bundle family
+`beta'`, and functions `f` with `div(f) = 2 beta'` are not represented. The
+remaining path is:
+
+```text
+construct Delta', beta', f, and the descent map
+  -> construct the degree-27 product etale algebra
+  -> arbitrary-degree maximal product order
+  -> select and certify S (candidate contains infinity, 2, 3, 13)
+  -> finite prime ideals and archimedean places above S
+  -> unconditional S-class group and S-unit basis
+  -> certified ambient square-class basis
+  -> theta Galois module and comparison kernel
+  -> certified p-adic local images
+  -> explicit Selmer upper bound
+  -> BPS comparison and rational J[2]
+  -> Mordell-Weil rank upper bound
+```
+
+A GRH-assisted class-group result must remain conditional. A certified
+explicit-Selmer upper bound may still bound the true 2-Selmer dimension after
+the comparison-kernel correction; equality with the true Selmer group is a
+stronger claim and needs the corresponding comparison certificate.
+
+Primary reference: [Bruin--Poonen--Stoll, *Generalized explicit descent and
+its application to curves of genus 3*](https://arxiv.org/abs/1205.4456).
+
+## What an FLT-scale checker needs
+
+Generalized explicit descent on this Jacobian solves a fixed arithmetic
+problem. Fermat's Last Theorem needs a uniform theorem about an infinite
+family of Frey elliptic curves, so the missing layers are substantially
+different:
+
+1. elementary exponent reduction and a checked Frey-curve construction;
+2. general integral Weierstrass models, admissible changes, minimal models,
+   invariants, and a certified Tate algorithm at every prime;
+3. conductors, component groups, finite-flat local conditions, and mod-p
+   Galois representations;
+4. modular symbols, q-expansions, Hecke algebras, old/new quotients, newforms,
+   and Sturm-bound certificates;
+5. local/global Galois cohomology, Selmer and dual Selmer groups,
+   Poitou--Tate duality, and deformation rings;
+6. a kernel-checked Ribet level-lowering theorem;
+7. a kernel-checked Wiles--Taylor--Wiles modularity-lifting theorem, including
+   `R=T`, Taylor--Wiles patching, Langlands--Tunnell, and the 3--5 switch;
+8. the finite certificate that weight-two level 2 has no cusp form, followed
+   by composition of all preceding dependencies.
+
+Wassat can check bounded subgroup, incidence, congruence, and finite-module
+sublemmas inside that chain. It cannot replace level lowering, modularity
+lifting, Chebotarev, duality, or patching.
+
+An honest intermediate milestone is an **FLT application checker**: Tungsten
+can verify the elementary Frey invariants, local conductor computation, level
+changes, and the final level-2 finite calculation while listing Ribet and
+Wiles--Taylor--Wiles as explicit trusted theorem imports. It becomes a fully
+kernel-checked FLT proof only when those theorems are formalized and their
+proofs are checked by the kernel; merely adding them as axioms remains an
+application checker relative to explicit trusted imports.
+
+Primary references:
+
+- [Ribet, *On modular representations of
+  Gal(Q-bar/Q) arising from modular forms*](https://math.berkeley.edu/~ribet/Articles/invent_100.pdf)
+- [Wiles, *Modular elliptic curves and Fermat's Last
+  Theorem*](https://annals.math.princeton.edu/1995/141-3/p01)
+- [Taylor--Wiles, *Ring-theoretic properties of certain Hecke
+  algebras*](https://annals.math.princeton.edu/1995/141-3/p02)

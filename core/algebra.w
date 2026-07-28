@@ -21,10 +21,12 @@ use core/algebra/polynomial_gcd
 use core/algebra/polynomial_factor
 use core/algebra/number_field
 use core/algebra/groebner
+use core/algebra/f2_linear
 use core/algebra/projective
 use core/algebra/curves
 use core/algebra/divisors
 use core/algebra/quartics
+use core/algebra/descent
 use core/algebra/point_search
 use core/algebra/quartic_invariants
 use core/algebra/automorphisms

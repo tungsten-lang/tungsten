@@ -185,6 +185,31 @@ Internal typed-array access in hot propagation and analysis loops remains
 unchecked for performance; public assumption and phase-seeding boundaries
 validate their literals.
 
+### Optional finite algebra obligations
+
+`lib/algebra_certificate.w` is an opt-in bridge for arithmetic algorithms that
+have already reduced a finite obligation to Boolean clauses. It supplies
+`WassatFiniteBooleanProblem`, including linear-parity helpers, and proves an
+entailed clause by running Wassat on its negation and replaying the resulting
+WRAT proof through the independent `tungsten-wrat` checker.
+
+```tungsten
+use bits/tungsten-wassat/lib/algebra_certificate
+
+problem = WassatFiniteBooleanProblem.new([:x, :y, :z])
+problem.add_equations([[1, 1, 0], [0, 1, 1]], [0, 0])
+x = problem.variable(:x)
+z = problem.variable(:z)
+certificate = problem.certify_clause([-x, z])
+<< certificate.verified?
+```
+
+The certificate establishes only the exported Boolean consequence. The
+arithmetic layer must separately certify that its number-field, local-image,
+Galois-action, or Selmer data was encoded correctly. The bridge is therefore
+not loaded by either `use wassat` or `use algebra`, and a WRAT refutation alone
+is never presented as a descent or rank certificate.
+
 ## Verification and benchmarks
 
 The default repository spec gate builds a fresh Wassat CLI and runs all Wassat

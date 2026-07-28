@@ -339,6 +339,7 @@ wassat_specs=(
   bits/tungsten-wassat/spec/sls_spec.w
   bits/tungsten-wassat/spec/trim_spec.w
   bits/tungsten-wassat/spec/explain_spec.w
+  bits/tungsten-wassat/spec/algebra_certificate_spec.w
   bits/tungsten-wassat/spec/portfolio_spec.w
 )
 

@@ -469,6 +469,8 @@ WASSAT_ARM_SLS = 2             # local search, models only
   # on an arm whose race is already decided.
   s = WassatSls.new(formula["nvars"], [], stop, formula)
   s.set_stop_cell(stop)
+  # Free the core when the walk stops improving -- see set_plateau.
+  s.set_plateau(wassat_sls_plateau_window, wassat_sls_plateau_windows)
   r = s.solve(flips, seed)
   if r["sat"]
     m = r["model"]

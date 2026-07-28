@@ -186,6 +186,30 @@ WASSAT_CONGRUENCE_DEFAULT = true
   return wassat_decimal_in_range("WASSAT_SLS_FLIPS", env("WASSAT_SLS_FLIPS"), 0, 2000000000) if env("WASSAT_SLS_FLIPS") != nil
   200000000
 
+# SLS plateau retirement: improvement window in flips, and how many
+# consecutive windows without progress retire the arm. 0 disables.
+# OFF (0), and the reason is a lesson worth keeping. On a hand-picked set of
+# mostly-UNSAT rows a 100,000-flip window looked excellent -- shuffling-1
+# 10.84 -> 8.30s, smulo016 6.11 -> 4.82, qg3-09 0.87 -> 0.67, qg5-13
+# 0.93 -> 0.76, with every row the walker WINS bit-identical. On the full
+# reference breadth set it is a NULL: geomean 1.0037 over 36 rows (12 faster
+# >5%, 3 slower >5%), and total wall gets WORSE, 76.9s -> 86.0s.
+#
+# One row explains it: em_7_3_6_fbc, 4.82x. It is SATISFIABLE and its walker
+# needs a long flat stretch before breaking through, so a plateau test cannot
+# tell "stuck forever" from "about to succeed" -- and retiring early throws
+# away the arm that would have won. That asymmetry (a false retirement costs
+# the whole instance; a correct one saves a core) is why the window has to be
+# far more conservative than the UNSAT rows suggest, and at that point the
+# gain is gone.
+-> wassat_sls_plateau_window
+  return wassat_decimal_in_range("WASSAT_SLS_PLATEAU", env("WASSAT_SLS_PLATEAU"), 0, 2000000000) if env("WASSAT_SLS_PLATEAU") != nil
+  0
+
+-> wassat_sls_plateau_windows
+  return wassat_decimal_in_range("WASSAT_SLS_PLATEAU_N", env("WASSAT_SLS_PLATEAU_N"), 1, 1000000) if env("WASSAT_SLS_PLATEAU_N") != nil
+  8
+
 -> wassat_pre_arm_count
   return wassat_decimal_in_range("WASSAT_PRE_ARMS", env("WASSAT_PRE_ARMS"), 0, 2) if env("WASSAT_PRE_ARMS") != nil
   2

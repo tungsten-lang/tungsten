@@ -177,9 +177,19 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     # shared cell so a win by any other arm stops this one immediately
     # rather than at the end of its flip budget (see wassat_sls_arm_body).
     @stop = i64[4]
+    # [0] improvement window in flips  [1] windows without progress before
+    # retiring  [2] set by the kernel when it retired on a plateau
+    @plateau = i64[4]
 
   # Share an interrupt cell with a race. Cell 0 nonzero means "somebody else
   # answered, stop now"; the walker never writes it.
+  # Retire the walk after `windows` consecutive `win`-flip windows with no
+  # improvement in best-unsat. 0 disables.
+  -> set_plateau(win, windows)
+    @plateau[0] = win
+    @plateau[1] = windows
+    0
+
   -> set_stop_cell(cell)
     @stop = cell
     0
@@ -294,7 +304,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     @st[11] = 0
     wassat_sls_run(@fla, @fcs, @fcl, @och, @ocn, @ocv, @asg, @satc, @crit,
                    @wght, @score, @ccf, @lastf, @ulist, @upos, @gstk, @gin,
-                   @bag, @wtr, @st, @stop)
+                   @bag, @wtr, @st, @stop, @plateau)
     0
 
   # Build the flat structures directly from a CDCL solver's clause arena:
@@ -490,7 +500,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   pm[3] = pos
   0
 
--> wassat_sls_run(fla, fcs, fcl, och, ocn, ocv, asg, satc, crit, wght, score, ccf, lastf, ulist, upos, gstk, gin, bag, wtr, st, stp) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_sls_run(fla, fcs, fcl, och, ocn, ocv, asg, satc, crit, wght, score, ccf, lastf, ulist, upos, gstk, gin, bag, wtr, st, stp, pm2) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   nv = st[0]
   ncl = st[1]
   ucount = st[2]
@@ -517,7 +527,31 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     bag[vb] = asg[vb]
     vb += 1
 
-  while ucount > 0 && step < maxflips && stp[0] == 0
+  # Plateau retirement. A walker that has stopped improving its best-unsat
+  # count will not answer, and on an UNSAT instance it never can -- it just
+  # holds a core a CDCL arm would use. Measured: removing the arm outright is
+  # worth 24% on shuffling-1 and 10% on smulo016 but COSTS 15-21% on
+  # qg3-09/qg5-13, so the static choice is wrong in both directions and the
+  # arm has to decide for itself. pm2[0] is the improvement window in flips,
+  # pm2[1] the number of consecutive windows without progress that retires it,
+  # and the kernel sets pm2[2] when it did. 0 disables.
+  plat_win = pm2[0]
+  plat_max = pm2[1]
+  plat_ref = best
+  plat_run = 0
+  plat_next = plat_win
+  plat_stop = 0
+  while ucount > 0 && step < maxflips && stp[0] == 0 && plat_stop == 0
+    if plat_win > 0 && step >= plat_next
+      plat_next = step + plat_win
+      if best < plat_ref
+        plat_ref = best
+        plat_run = 0
+      else
+        plat_run += 1
+        if plat_run >= plat_max
+          plat_stop = 1
+          pm2[2] = 1
     # ---- pick: best configuration-changed positive-score variable ---------
     flip = 0
     bestscore = 0

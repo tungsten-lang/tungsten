@@ -123,3 +123,31 @@ cannot avoid and a race axis can: with the axis, arms 0 and 3 run without
 reuse and should still solve `f1000`, while arms 1 and 2 deliver `2bitadd_10`
 and `schooltt`. Whether that actually holds is the next measurement, and it is
 the one that decides whether this ships at all.
+
+## Result 4 — the axis trades the regressions away *and* the wins with them
+
+Axis (slot 7, arms 1 and 2) against all-off, one binary, medians of 3:
+**geomean 0.9500 over 34 rows, 8 faster >5%, 3 slower >5%** — a better geomean
+than global-on with half the regressions. But per row against global-on:
+
+| row | global on | axis | |
+|---|---:|---:|---|
+| `minand064` | 1.32x | **0.99x** | race rescued it |
+| `ContextModel` | 1.92x | **1.02x** | race rescued it |
+| `qg3-09` | 1.08x | 0.98x | race rescued it |
+| `bmc-ibm-12` | 1.07x | 1.00x | race rescued it |
+| `Break_triple_10_16` | **0.31x** | 1.01x | win given up |
+| `2bitadd_10` | **0.61x** | 1.00x | win given up |
+| `smulo016` | 0.96x | 1.24x | axis-only regression |
+
+The rescues are the design working. The **given-up wins are the surprise**, and
+they say something specific: if reuse on arms 1 and 2 produced the fast
+`Break_triple` trajectory, the race would have captured it — a race only needs
+one arm to be fast. It did not, so under global-on the 3x came from **arm 0 or
+arm 3**, and putting reuse on the complement would be the assignment that keeps
+it. `f1000` confirms the protective half of the design directly: off 5.68s,
+axis 5.76s, both SATISFIABLE, against UNSOLVED@120s for global-on.
+
+Do not chase the complement on these two rows alone — that is the hand-picked
+sweep that has already overfitted twice in this campaign. If it is tried, it is
+scored on the full reference breadth set, on row status.

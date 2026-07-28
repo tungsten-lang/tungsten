@@ -705,6 +705,28 @@ WASSAT_CONGRUENCE_DEFAULT = true
   # machinery is sound (verdicts agree everywhere, f1000 unaffected at any
   # mask) and a future restart/branching change could make it pay.
   # See docs/trail-reuse.md.
+  # kissat's --stable=2: never alternate out of stable mode. Distinct from the
+  # rejected stable-FIRST experiment, which still alternates.
+  #
+  # As a GLOBAL setting it is bad — geomean 1.0558, total wall 32.5s -> 47.5s —
+  # but the spread is the point: 2bitadd_10 0.32x, ContextModel 0.29x and
+  # Break_triple 0.34x FOR it against dspam 20.21x, f600 3.70x and smulo016
+  # 3.20x AGAINST. A factor of 60 between best and worst row, with no static
+  # predictor, is exactly portfolio.w's criterion for a race axis. Note
+  # 2bitadd_10 needs only 1.10x to cross TIE_BAND and this is 3x.
+  #
+  # (The hypothesis that brought it in — kissat reports ibm-12 7,027 -> 2,291
+  # conflicts under --stable=2 — is REFUTED for our solver: bmc-ibm-12 at 7
+  # reps is 0.836s off against 0.968s on, i.e. 1.16x worse.)
+  -> use_stable_only
+    env("WASSAT_STABLE_ONLY") == "1"
+
+  # Which arms run stable-only, as a bitmask over arm index. Default 0 until
+  # the axis is measured; the sweep drives it from one binary.
+  -> stable_only_mask
+    return wassat_decimal_in_range("WASSAT_STABLE_ARMS", env("WASSAT_STABLE_ARMS"), 0, 65535) if env("WASSAT_STABLE_ARMS") != nil
+    0
+
   -> trail_reuse_mask
     return wassat_decimal_in_range("WASSAT_REUSE_ARMS", env("WASSAT_REUSE_ARMS"), 0, 255) if env("WASSAT_REUSE_ARMS") != nil
     0

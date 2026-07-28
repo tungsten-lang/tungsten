@@ -225,6 +225,17 @@ WASSAT_PROOF_DRAT = 2
     @mode_len = 3000
     @mode_at = 3000
 
+    # Stable-ONLY (kissat --stable=2). Distinct from the stable-FIRST variant
+    # the comment above rejects: that one still alternates, this one never
+    # leaves stable, so the search keeps the 16,384 restart floor and the
+    # EVSIDS heap for its whole life. Rival recon measured kissat ibm-12 at
+    # 7,027 conflicts against 2,291 under --stable=2, and bmc-ibm-12 needs
+    # 3.12x to cross TIE_BAND — the sizes match, which is why it is worth a
+    # measurement rather than an assumption. Hook, default off.
+    if @config.use_stable_only
+      @no_stable = true
+      @mode_stable = true
+
     # Rephasing (CaDiCaL-style): remember the deepest assignment seen in
     # this epoch, and periodically cycle the saved phases through
     # best / inverted / best / original / best / random. Restarting into a
@@ -1080,6 +1091,14 @@ WASSAT_PROOF_DRAT = 2
   # (see policy.w use_trail_reuse) because it is sharply two-sided.
   -> enable_trail_reuse
     @reuse_trail = true if @reuse_force == 0
+    0
+
+  # Race axis: never alternate out of stable mode (kissat --stable=2). Global
+  # policy keeps it off because it is two-sided by a factor of 60 between its
+  # best and worst rows; the race is what turns that into an advantage.
+  -> enable_stable_only
+    @no_stable = true
+    @mode_stable = true
     0
 
   # Race axis: learned-clause subsumption, per arm. Global policy keeps it off

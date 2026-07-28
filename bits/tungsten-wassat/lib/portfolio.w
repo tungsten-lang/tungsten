@@ -748,6 +748,11 @@ WASSAT_ARM_SLS = 2             # local search, models only
       # and trajectory-dependent: forced on every arm it wins 2bitadd_10 and
       # schooltt but turns f1000 from 5.7s into a >150s timeout, twice.
       cfgs[a * WASSAT_CFG_STRIDE + 7] = (art["config"].trail_reuse_mask >> a) & 1
+      # STABLE-ONLY axis (kissat --stable=2), same mask form. Violently
+      # two-sided as a global -- 2bitadd_10 0.32x and ContextModel 0.29x FOR
+      # it, dspam 20.21x and f600 3.70x against -- which is the textbook case
+      # for racing it instead of choosing it.
+      cfgs[a * WASSAT_CFG_STRIDE + 8] = (art["config"].stable_only_mask >> a) & 1
       wassat_race_apply_config(s, cfgs, a * WASSAT_CFG_STRIDE,
                                art["config"].force_simplify?,
                                art["config"].use_vmtf(art["raw"] == true))
@@ -768,7 +773,12 @@ WASSAT_ARM_SLS = 2             # local search, models only
 #   4 simplify    0 = none unless forced, 1 = substitution, 2 = + congruence
 #   5 shrink      0 off, 1 All-UIP learned-clause shrinking
 #   6 subsume     0 off, 1 subsumption+SSR every 3k conflicts, 2 every 10k
-WASSAT_CFG_STRIDE = 8
+#   7 trail reuse  0 off, 1 on (policy trail_reuse_mask, set in the build loop)
+#   8 stable-only  0 off, 1 never leave stable mode (policy stable_only_mask)
+#
+# Widened from 8 to 16 when the stable-only axis was added. Every access is
+# relative to `a * WASSAT_CFG_STRIDE`, so the stride is free to grow.
+WASSAT_CFG_STRIDE = 16
 WASSAT_TEL_STRIDE = 8
 
 # The historical hard-coded diversity matrix, transcribed exactly. Reproducing
@@ -874,6 +884,7 @@ WASSAT_TEL_STRIDE = 8
   # every row measured, so they are not interchangeable.
   s.enable_subsume(cfgs[b + 6] == 2 ? 10000 : 3000) if cfgs[b + 6] > 0
   s.enable_trail_reuse if cfgs[b + 7] == 1
+  s.enable_stable_only if cfgs[b + 8] == 1
   0
 
 # Register the SLS arm. Occupies the fixed slot threads+2 so it never collides

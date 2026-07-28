@@ -482,6 +482,7 @@
     if ivar_types[cname] == nil
       ivar_types[cname] = {}
       ivar_conflicts[cname] = {}
+    record_ivar_param_types(method_ast, cname, ivar_types, ivar_conflicts)
     walk_ivar_assigns(method_ast.body, cname, ivar_types, ivar_conflicts, mod)
     ki += 1
   # Conflicted ivars get nil-marked so the dispatch lookup bails cleanly.
@@ -654,6 +655,39 @@
       walk_exact_source_ivar_writes(node[ai], cname, exact_types, conflicts, mod)
       ai += 1
   nil
+
+# An `@`-binding parameter with a DECLARED type tells us the ivar's type
+# directly: `-> new(@arr, @n) (i64[], i64)` means @arr is an i64[] for the
+# life of the object. Only body assignments were consulted before, so an ivar
+# that is only ever bound through the constructor stayed untyped -- and an
+# untyped ivar container costs a full inline-cache dispatch per element read
+# (5.3ns, against 0.06ns for a typed one) at sites like
+# `@packed_tokens[@pos]`. The declared type is a contract the compiler
+# already enforces at call sites, so it is a sound source. Feeds the same
+# conflict table as walk_ivar_assigns: an ivar declared one type here and
+# assigned another in a body is nil-marked and bails to dynamic dispatch.
+-> record_ivar_param_types(method_ast, cname, ivar_types, ivar_conflicts)
+  if method_ast == nil
+    return nil
+  params = method_ast.params
+  ptypes = method_ast.param_types
+  if params == nil || ptypes == nil
+    return nil
+  pi = 0
+  while pi < params.size()
+    p = params[pi]
+    if is_ast_node?(p) && p.ivar_assign == true && pi < ptypes.size()
+      decl = ptypes[pi]
+      if decl != nil
+        itype = normalize_type_symbol(decl)
+        if itype != nil
+          iname = "@" + p.name
+          existing = ivar_types[cname][iname]
+          if existing != nil && existing != itype
+            ivar_conflicts[cname][iname] = true
+          else
+            ivar_types[cname][iname] = itype
+    pi += 1
 
 -> walk_ivar_assigns(node, cname, ivar_types, ivar_conflicts, mod)
   if node == nil

@@ -183,6 +183,7 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
     # stats
     @probes_run = 0
     @probes_failed = 0
+    @hbr_added = 0
     @vars_substituted = 0
     @clauses_subsumed = 0
     @clauses_strengthened = 0
@@ -690,6 +691,38 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
       self.refute(rc) if rc >= 0
       true
     else
+      # HYPER-BINARY RESOLUTION. A probe that does not fail still proved
+      # something: every literal `m` on the probe segment satisfies
+      # F & lit |= m, so (-lit | m) is implied by F and is RUP-checkable.
+      # Today all of that is thrown away and only failed probes teach.
+      #
+      # Not every such pair is worth adding -- most are already reachable
+      # along binary edges, and adding them would flood the formula. The ones
+      # that are NOT redundant are exactly the literals whose reason is a
+      # clause of length > 2: a literal derived through a binary clause
+      # already has that edge in the implication graph, while one derived
+      # through a long clause is a genuinely new edge. That is the strictness
+      # filter, computed for free from the reason we already recorded.
+      #
+      # Why it matters: `substitute_equivalences` finds equivalences as SCCs
+      # of the binary implication graph, and on the quasigroup rows it finds
+      # ZERO while CaDiCaL substitutes 8-14% of variables. A graph that never
+      # gains a derived edge cannot grow an SCC.
+      added = 0
+      cap = wassat_pre_hbr_cap
+      if cap > 0 && @status == 0
+        i = mark
+        while i < @ftsize && added < cap
+          m = @ftrail[i]
+          rci = @preason[m.abs]
+          if rci >= 0 && @falive[rci] == 1 && @fcl[rci] > 2
+            bin = [0 - lit, m]
+            gid = @next_gid
+            self.plog_add(gid, bin, [])
+            z = self.store(bin)
+            @hbr_added += 1
+            added += 1
+          i += 1
       self.undo_to(mark, qsave)
       @probing = false
       false
@@ -1506,6 +1539,11 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
 -> wassat_bve_outcap_override(v)
   return wassat_decimal_in_range("WASSAT_BVE_OUTCAP", env("WASSAT_BVE_OUTCAP"), 1024, 2000000000) if env("WASSAT_BVE_OUTCAP") != nil
   v
+
+# Cap on hyper-binary clauses derived per non-failing probe. 0 disables.
+-> wassat_pre_hbr_cap
+  return wassat_decimal_in_range("WASSAT_HBR", env("WASSAT_HBR"), 0, 1000000) if env("WASSAT_HBR") != nil
+  0
 
 -> wassat_pre_prop(fla, fcs, fcl, falive, ftaut, och, ocn, ocv, asg, rsn, tps, tr, st) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   qhead = st[0]

@@ -831,6 +831,7 @@
   -> new(@chart, @projection, @relation)
     @components = nil
     @etale_algebra_cache = nil
+    @integral_product_order_cache = nil
     @verified_cache = nil
     @verified_fingerprint = nil
 
@@ -842,6 +843,7 @@
     @components.each -> @projection = @projection * item.factor
     @relation = nil
     @etale_algebra_cache = nil
+    @integral_product_order_cache = nil
     @verified_cache = nil
     @verified_fingerprint = nil
 
@@ -882,6 +884,24 @@
 
   -> etale_algebra_decomposition_certificate
     etale_algebra.decomposition_certificate
+
+  # Integral generator transforms for each supplied CRT component. These are
+  # certified power orders, not yet claimed maximal.
+  -> integral_product_order
+    if !verified?
+      raise "unverified bitangent projection has no certified integral order"
+    if @integral_product_order_cache == nil
+      polynomials = []
+      if @components == nil
+        polynomials.push(@projection)
+      else
+        @components.each -> polynomials.push(item.factor)
+      @integral_product_order_cache = EtaleProductOrder.new(
+        polynomials)
+    @integral_product_order_cache
+
+  -> integral_product_order_certificate
+    integral_product_order.certificate
 
   -> degree
     @projection.degree
@@ -1089,6 +1109,7 @@
     if @hyperflex_certificate.curve != @curve
       raise "distinguished hyperflex belongs to a different curve"
     @bitangent_scheme_certificate = nil
+    @integral_product_order = nil
 
   -> curve
     @curve
@@ -1151,6 +1172,17 @@
   -> bitangent_scheme_certificate
     @bitangent_scheme_certificate
 
+  -> certify_integral_product_order
+    if @bitangent_scheme_certificate == nil
+      certify_bitangent_scheme
+    @integral_product_order = @bitangent_scheme_certificate.integral_product_order
+    if !@integral_product_order.certificate.verified?
+      raise "bitangent integral product order failed certification"
+    @integral_product_order
+
+  -> integral_product_order
+    @integral_product_order
+
   -> requirements
     out = []
     out.push(DescentRequirement.new(
@@ -1175,6 +1207,15 @@
         "finite etale bitangent algebra", "complete",
         "squarefree quotient with checked CRT component decomposition",
         @bitangent_scheme_certificate.etale_algebra_certificate))
+    if @integral_product_order == nil
+      out.push(DescentRequirement.new(
+        "integral power product order", "missing",
+        "construct certified integral generator transforms for the etale components"))
+    else
+      out.push(DescentRequirement.new(
+        "integral power product order", "complete",
+        "certified monogenic Z-orders for each etale component",
+        @integral_product_order.certificate))
     out.push(DescentRequirement.new(
       "BPS divisor and function data", "missing",
       "construct Delta', beta', and f with div(f) = 2 beta'"))
@@ -1252,6 +1293,14 @@
 
   -> etale_algebra_decomposition_certificate
     etale_algebra.decomposition_certificate
+
+  -> integral_product_order
+    if !verified?
+      raise "unverified bitangent scheme has no certified integral order"
+    @primary_certificate.integral_product_order
+
+  -> integral_product_order_certificate
+    integral_product_order.certificate
 
   -> component_degrees
     out = []

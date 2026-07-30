@@ -101,7 +101,9 @@ explicit descent:
    import whose hypotheses are checked;
 6. construct the certified degree-27 étale quotient and its executable
    `6 + 9 + 12` Chinese-remainder decomposition;
-7. intersect future global, norm, unramified, and local conditions with the
+7. construct the certified integral power product order on those three
+   components, with exact generator transforms and rank 27;
+8. intersect future global, norm, unramified, and local conditions with the
    replay-certified F2 kernel.
 
 This is not yet a BPS true setup: `Delta'`, the divisor/line-bundle family
@@ -110,7 +112,7 @@ remaining path is:
 
 ```text
 construct Delta', beta', f, and the descent map
-  -> arbitrary-degree maximal product order
+  -> enlarge the certified power product order to maximal component orders
   -> select and certify S (candidate contains infinity, 2, 3, 13)
   -> finite prime ideals and archimedean places above S
   -> unconditional S-class group and S-unit basis

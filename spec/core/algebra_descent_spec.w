@@ -111,15 +111,28 @@ descent_check("bitangent_algebra.generator_relation",
               true)
 descent_check("bitangent_algebra.component_maps",
               bitangent_algebra.generator.components.size, 3)
+descent_check("integral_order.initially_missing",
+              setup.requirements[4].status, "missing")
 
 # The degree-27 CRT replay constructs three large Bezout idempotents. Keep the
-# ordinary regression quick; the same native suite with this flag checks the
-# full executable product decomposition.
+# ordinary regression quick; the same native suite with this flag checks both
+# the full executable product decomposition and the component power orders.
 if env("TUNGSTEN_DESCENT_FULL") == "1"
   descent_check("bitangent_algebra.CRT_certificate",
                 bitangent_algebra.
                   decomposition_certificate.verified?,
                 true)
+  integral_order = setup.certify_integral_product_order
+  descent_check("integral_order.certified",
+                integral_order.certified?, true)
+  descent_check("integral_order.rank", integral_order.rank, 27)
+  descent_check("integral_order.component_ranks",
+                integral_order.component_ranks.to_s, "\[6, 9, 12\]")
+  scales = integral_order.component_orders.map -> item.generator_scale
+  descent_check("integral_order.generator_scales",
+                scales.to_s, "\[16, 64, 256\]")
+  descent_check("integral_order.requirement_complete",
+                setup.requirements[4].complete?, true)
 
 reference_component = bitangent_scheme.primary_certificate.components[0]
 component_chart = bitangent_scheme.primary_chart
@@ -160,7 +173,10 @@ rank_error = false
 begin
   setup.rank_upper_bound
 rescue e
-  rank_error = e.to_s.index("BPS divisor and function data") != nil
+  blocker = "integral power product order"
+  if env("TUNGSTEN_DESCENT_FULL") == "1"
+    blocker = "BPS divisor and function data"
+  rank_error = e.to_s.index(blocker) != nil
 descent_check("setup.rank_gate", rank_error, true)
 
 conditions = SelmerConstraintSystem.new(5)

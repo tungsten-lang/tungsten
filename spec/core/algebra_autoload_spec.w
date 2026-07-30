@@ -13,6 +13,10 @@ autoload_check("field", field.to_s, "ℚ")
 ring = PolynomialRing.new([:x], field)
 x = ring.generator(0)
 autoload_check("polynomial", (x**3 - x).discriminant, Rational.new(4))
+order = MonogenicOrder.new(x**2 - x - 1)
+autoload_check("monogenic order", order.maximal?, true)
+autoload_check("product order class",
+               EtaleProductOrder.class_name, "Class")
 
 plane = Algebra.rational_projective_plane
 autoload_check("projective", plane.dimension, 2)

@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(199 total), grouped by area, with its declaration, a one-line
+(207 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -105,6 +105,14 @@ summary from the source header, and a link to the source.
 | `EtaleAlgebraElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `EtaleAlgebraCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `EtaleAlgebraDecompositionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `IntegralGeneratorTransformCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `MonogenicOrder` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `MonogenicOrderCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `DedekindIndexCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `MonogenicOrderMaximalityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductOrder` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductOrderElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductOrderCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldMinimalPolynomialCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

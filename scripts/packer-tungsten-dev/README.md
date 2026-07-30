@@ -26,7 +26,10 @@ public subnet (this account has no default VPC, so the template uses a
 ## What's baked in
 
 - **Tungsten toolchain:** clang/llvm/lld (WIRE→LLVM→native backend), gcc/g++,
-  make/cmake/ninja, git, plus the -devel libs the runtime links against.
+  make/cmake/ninja, git, `libzstd-devel`, `openblas-devel`, and the other
+  development libraries the runtime links against.
+- **Worker runtime:** `curl`, `jq`, and the native libraries needed by Carbide
+  Dispatch workers.
 - **Ruby:** interpreter + bundler/rake/rspec/rubocop (the `--ruby` bootstrap and
   the gem).
 - **Python ML:** numpy, scipy, **scikit-learn**, pandas, matplotlib (binary

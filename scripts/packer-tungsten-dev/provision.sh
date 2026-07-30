@@ -11,11 +11,16 @@ dnf -y groupinstall "Development Tools" || true
 
 # --- Tungsten build toolchain -------------------------------------------------
 # clang/llvm/lld: the WIRE->LLVM->native backend. gcc/make/cmake: C VM + runtime.
+# libzstd/openblas headers are required by the current bootstrap/runtime bridge.
 dnf -y install \
   git make cmake ninja-build pkgconf \
   gcc gcc-c++ clang clang-tools-extra llvm llvm-devel lld \
-  zlib-devel openssl-devel libffi-devel libxml2-devel ncurses-devel readline-devel \
+  zlib-devel libzstd-devel openblas-devel \
+  openssl-devel libffi-devel libxml2-devel ncurses-devel readline-devel \
   jq tmux htop
+# curl is deliberately absent: AL2023 ships curl-minimal (which provides
+# /usr/bin/curl), and installing full curl conflicts with it, aborting the
+# image build under `set -euxo pipefail`.
 
 # --- Ruby (the --ruby bootstrap interpreter + the gem) ------------------------
 dnf -y install ruby ruby-devel rubygems
@@ -44,6 +49,10 @@ cadical --version && kissat --version
 
 # --- sanity: full native toolchain present ------------------------------------
 clang --version | head -1
+printf '#include <zstd.h>\n#include <cblas.h>\nint main(void) { return 0; }\n' \
+  | clang -fuse-ld=lld -x c - -o /tmp/tungsten-toolchain-smoke
+/tmp/tungsten-toolchain-smoke
+rm -f /tmp/tungsten-toolchain-smoke
 cc --version | head -1
 ruby --version
 python3 --version

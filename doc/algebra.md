@@ -64,6 +64,7 @@ core/algebra/quartics.w            # certified line intersections and bitangents
 core/algebra/descent.w             # BPS preparation, bitangent proofs, F2 kernel
 core/algebra/descent_functions.w   # contact divisors and BPS line ratios
 core/algebra/descent_norm.w        # true S-unit ambient and global norm kernel
+core/algebra/theta.w               # canonical 28/315 theta incidence modules
 core/algebra/point_search.w        # exact bounded search for one quartic family
 core/algebra/quartic_invariants.w  # ternary resultant, discriminant, I27
 core/algebra/automorphisms.w       # normalized-hyperflex certificate
@@ -387,7 +388,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Divisors | Exact formal arithmetic on rational and line-presented higher-degree closed places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic outside the existing Jacobian models, and general principality tests are not implemented |
 | Rational points | Complete exact bounded search for primitive points on `aX³Z + bXY²Z + g(Y,Z)`, with nonzero same-sign `a,b` and nonzero `Y⁴` coefficient | This is not a general plane-curve point finder and does not prove that no points exist above the requested height |
 | Geometric automorphisms | Exact triviality certificate over `Qbar` for smooth rational plane quartics with the unique normalized hyperflex `[1:0:0]`, tangent `Z=0`, and identity stabilizer | It is not an arbitrary plane-quartic automorphism-group algorithm and does not enumerate nontrivial groups |
-| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions; all shell-width degree-6/9/12 factors have replayed full-rank S-class proofs, and their supplied S-unit bases give a certified true-descent ambient space of dimension `9 + 12 + 14 = 35`; exact component norms give a certified rank-4 map to `Q(S,2)` and a 31-dimensional norm-one kernel | Theta Galois modules, p-adic local images, the comparison kernel, and the final Selmer bound remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
+| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions; all shell-width degree-6/9/12 factors have replayed full-rank S-class proofs, and their supplied S-unit bases give a certified true-descent ambient space of dimension `9 + 12 + 14 = 35`; exact component norms give a certified rank-4 map to `Q(S,2)` and a 31-dimensional norm-one kernel; the canonical genus-three theta model exhausts 28 odd characteristics, 315 syzygetic quadruples, and module dimensions `0,1,7,21,27,28` | Identifying the shell-width bitangent labels and decomposition actions with the canonical theta incidence, p-adic local images, the comparison kernel, and the final Selmer bound remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
 
 `Curve#hyperelliptic_plane_model?` is specifically the smooth plane-model
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
@@ -1279,6 +1280,26 @@ then checks the true setup and imports BPS Lemma 6.16 for the statement that
 the descent image lies in that kernel. On the current shell-width artifacts,
 the full native replay takes about 32 seconds and 11.4 GB RSS. It is an
 explicit opt-in research check, not part of the ordinary regression suite.
+
+The canonical finite theta module is independently executable:
+
+```w
+theta = Algebra.genus_three_theta_incidence
+theta.odd_characteristics.size       # 28
+theta.syzygetic_quadruples.size       # 315
+theta.module_dimensions               # [0, 1, 7, 21, 27, 28]
+theta.certificate.verified?           # true
+```
+
+Six-bit characteristics index the quadratic refinements of the standard
+symplectic form on \(\mathbb F_2^6\). The implementation exhausts the 28
+Arf-invariant-one forms and all four-subsets with zero affine sum. Packed
+28-bit row reduction then replays the BPS module dimensions. The finite
+enumeration is exact; Riemann--Mumford and the identification of this
+canonical incidence with a smooth plane quartic's bitangents are named
+trusted theorem imports. Tungsten has not yet matched the shell-width
+degree-6/9/12 roots to these 28 labels or certified their global and local
+permutation actions.
 
 The remaining theta and local conditions will meet the certified global norm
 condition in an exact F2 kernel:

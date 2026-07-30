@@ -1437,7 +1437,7 @@
         @global_norm_constraint.certificate))
     out.push(DescentRequirement.new(
       "theta Galois module", "missing",
-      "identify the 28/315 incidence structure and decomposition actions"))
+      "identify shell-width bitangent labels and decomposition actions with the certified canonical 28/315 incidence"))
     out.push(DescentRequirement.new(
       "local descent images", "missing",
       "certified p-adic residue disks and bitangent evaluations"))

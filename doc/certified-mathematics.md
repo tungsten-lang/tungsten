@@ -188,7 +188,8 @@ certified finite and archimedean places for S = {2, 3, 13}
   -> certified S-class 2-torsion in all degree-6/9/12 factors
   -> certified 35-dimensional true ambient square-class space
   -> certified rank-4 global norm map and 31-dimensional kernel
-  -> theta Galois module and comparison kernel
+  -> certified canonical 28/315 theta incidence
+  -> shell-width theta labeling, Galois actions, and comparison kernel
   -> certified p-adic local images
   -> explicit Selmer upper bound
   -> BPS comparison and rational J[2]

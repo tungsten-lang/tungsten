@@ -1917,6 +1917,20 @@ use lowering/definitions
 # Materialize all temp bindings to var slots. Called before control flow
 # (if, while, case, etc.) and closures so that cross-block reads and
 # capture analysis find values in var_slots.
+-> builtin_math_constant_text(name)
+  case name
+  when "π"
+    return "3.141592653589793"
+  when "τ"
+    return "6.283185307179586"
+  when "ϕ", "φ"
+    return "1.618033988749895"
+  when "ℯ"
+    return "2.718281828459045"
+  when "ℇ"
+    return "0.5772156649015329"
+  nil
+
 -> lower_var(ctx, node)
   name = node.name
   wfn = ctx[:func]
@@ -2111,6 +2125,12 @@ use lowering/definitions
     temp = next_temp(wfn)
     emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_argv", args: []})
     return typed_value(:i64, temp)
+
+  # Mathematical constants are ordinary numeric f64 values at the language
+  # surface.  Exact symbolic work deliberately uses Expression.pi/e instead.
+  constant_text = builtin_math_constant_text(name)
+  if constant_text != nil
+    return lower_float(ctx, Tungsten:AST:Float.new(constant_text))
 
   # A declared method on self is lexical to the class and wins over a
   # same-spelled module binding predeclared by the top-level analysis pass.

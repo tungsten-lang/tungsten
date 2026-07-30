@@ -1062,6 +1062,20 @@ use target
 
   # -- Variable evaluation --
 
+  -> builtin_math_constant(name)
+    case name
+    when "π"
+      return ~3.141592653589793
+    when "τ"
+      return ~6.283185307179586
+    when "ϕ", "φ"
+      return ~1.618033988749895
+    when "ℯ"
+      return ~2.718281828459045
+    when "ℇ"
+      return ~0.5772156649015329
+    nil
+
   -> eval_var(node, env)
     name = ast_get(node, :name)
     if name == "ARGV"
@@ -1082,6 +1096,8 @@ use target
     # zero-arg method on self with the same name.
     if env.defined_locally_or_in_scope?(name)
       return env.get(name)
+    mathematical_constant = self.builtin_math_constant(name)
+    return mathematical_constant if mathematical_constant != nil
     # File is a compiler intrinsic rather than an autoload-registry entry.
     # Its Mmap constructor needs the small core/mmap facade in the tree walker;
     # loading the registered Mmap name defines both classes from that file.

@@ -54,6 +54,8 @@ core/algebra/elliptic_tate.w       # Tate local data, Kodaira, conductors
 core/algebra/modular_forms.w       # Gamma0, X0, dimensions, Sturm bounds
 core/algebra/q_expansion.w         # exact q-series, E4, E6, Delta
 core/algebra/modular_symbols.w     # weight-two Manin symbols and boundaries
+core/algebra/hecke.w               # certified prime Hecke operators
+core/algebra/old_new.w             # degeneracy maps and old/new Hecke quotient
 core/algebra/divisors.w            # rational/closed places, formal divisors
 core/algebra/quartics.w            # certified line intersections and bitangents
 core/algebra/descent.w             # BPS preparation, bitangent proofs, F2 kernel
@@ -371,7 +373,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
 | Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension | Singular-curve normalization is not implemented |
 | Elliptic curves | Composition around a plane cubic model; short Weierstrass group law over ℚ and `𝔽_p` (char ≠ 2, 3); exact integral long-Weierstrass \(a_i,b_i,c_4,c_6,\Delta,j\) invariants and projective closure; replay-certified admissible transformations; bounded exhaustive local and global minimal models; the complete Tate state machine over ℚ, including wild conductor exponents at 2 and 3, Kodaira symbols, Tamagawa numbers, split multiplicative status, and certified conductors; checked primitive Frey models; `EllipticJacobian` view | Arbitrary plane cubic → Weierstrass needs a rational flex; Tate local data over number fields, isogenies, and mod-\(p\) representations are not implemented |
-| Modular forms | Exact `Gamma0(N)` index, cusp count, order-2/order-3 elliptic points, and \(X_0(N)\) genus; even-weight `CuspForms` and `ModularForms` dimensions; Sturm bounds and q-expansion precision; exact truncated q-series; certified level-one \(E_4,E_6,\Delta\) expansions and \(E_4^3-E_6^2=1728\Delta\); exhaustive weight-two \(P^1(\mathbb Z/N\mathbb Z)\) Manin symbols, sparse \(S/R\) relations, cusp boundaries, relative/cuspidal dimensions, and bounded exact rational cuspidal bases; theorem-labelled replay certificates; in particular \(\dim S_2(\Gamma_0(2))=0\) | Dimension, Sturm, classical modularity, and Manin-presentation formulas are named trusted theorem imports, not kernel proofs. General Eisenstein series, Hecke operators/algebras, higher-weight symbols, old/new decomposition, characters, and newforms are not implemented |
+| Modular forms | Exact `Gamma0(N)` index, cusp count, order-2/order-3 elliptic points, and \(X_0(N)\) genus; even-weight `CuspForms` and `ModularForms` dimensions; Sturm bounds and q-expansion precision; exact truncated q-series; certified level-one \(E_4,E_6,\Delta\) expansions and \(E_4^3-E_6^2=1728\Delta\); exhaustive weight-two \(P^1(\mathbb Z/N\mathbb Z)\) Manin symbols, sparse \(S/R\) relations, cusp boundaries, relative/cuspidal dimensions, and bounded exact rational cuspidal bases; exact prime \(T_p/U_p\) matrices from Cremona--Heilbronn sums, characteristic polynomials, degeneracy maps, old subspaces, and canonical new Hecke quotients; theorem-labelled replay certificates; in particular \(\dim S_2(\Gamma_0(2))=0\) | Dimension, Sturm, classical modularity, Manin-presentation, Heilbronn-action, and Atkin--Lehner--Li formulas are named trusted theorem imports, not kernel proofs. Composite-index Hecke operators, higher-weight symbols, characters, eigenform coefficient fields, multiplicity-one decomposition, and newform q-expansion recovery are not implemented. Dense rational quotient coordinates are resource-bounded |
 | Hyperelliptic curves | Exact `y² = f(x)` models, Mumford pairs, Cantor composition; monic odd-degree over ℚ, monic-or-scalable over `𝔽_p` | Even-degree models still raise for Jacobian arithmetic |
 | Finite-curve arithmetic | Exact reduction from ℚ, certified base change through explicit field embeddings, packed absolute and structured tower extensions, projective point counts, Frobenius traces, zeta numerators (regressed through a genus-six plane quintic), and genus-three real Weil cubics | Full zeta numerators currently start over a prime field; direct/fiber point counting is exact but exponential in field size, and higher-genus Weil-polynomial postprocessing is not yet generalized beyond the existing curve/zeta primitives |
 | Galois groups | Exact general groups in degrees at most three over ℚ; a certified classifier for irreducible reciprocal genus-three Weil sextics using modular irreducibility witnesses and exact Kummer square classes | This is not a general sextic classifier. Missing modular witnesses and unsupported shapes raise `unknown` or a capability error |
@@ -414,6 +416,15 @@ MS.relative_dimension                 # 3
 MS.boundary_rank                      # 1
 MS.cuspidal_dimension                 # 2
 MS.cuspidal_basis.size                # 2 (bounded exact Rational RREF)
+
+T2 = MS.hecke_operator(2)
+T2.characteristic_polynomial          # x² + 4x + 4
+T2.certificate.verified?
+
+ON = WeightTwoModularSymbols.new(33).old_new
+ON.old_dimension                      # 4
+ON.new_dimension                      # 2
+ON.new_characteristic_polynomial(2)  # x² - 2x + 1
 ```
 
 `QExpansion` records a hard precision boundary. Reading an unknown
@@ -432,6 +443,18 @@ reference machine, moving from a dense rank trace to the prime-level/sparse
 path reduced interpreted level-389 construction from 32.8 seconds / 5.66 GB
 to 1.21 seconds / 305 MB; the native end-to-end regression uses about
 0.20 seconds / 13 MB.
+
+`WeightTwoHeckeOperator` applies the exact Cremona--Heilbronn determinant-\(p\)
+matrices to each quotient-basis symbol. At primes dividing the level it
+explicitly omits images that are no longer primitive; this is the \(U_p\)
+case, not an accidental coercion. Its certificate regenerates every image
+and checks the characteristic polynomial at enough rational points against
+\(\det(xI-T_p)\). `WeightTwoOldNewDecomposition` constructs both prime-level
+degeneracy images from every \(N/p\), row-reduces their sum to the old
+subspace, and exposes the canonical Hecke quotient by that subspace. The
+finite matrices are replayed exactly; their interpretation as Hecke and
+old/new objects cites the Heilbronn and Atkin--Lehner--Li theorems as trusted
+imports.
 
 ## Archimedean places and S-unit square classes
 

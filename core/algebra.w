@@ -45,6 +45,8 @@ use core/algebra/elliptic_tate
 use core/algebra/modular_forms
 use core/algebra/q_expansion
 use core/algebra/modular_symbols
+use core/algebra/hecke
+use core/algebra/old_new
 use core/algebra/divisors
 use core/algebra/quartics
 use core/algebra/descent
@@ -142,6 +144,16 @@ use core/algebra/galois
                       search_limit = 1_000_000)
     WeightTwoModularSymbols.new(
       level, weight, search_limit)
+
+  -> .hecke_operator(level, prime,
+                     search_limit = 1_000_000)
+    WeightTwoModularSymbols.new(
+      level, 2, search_limit).hecke_operator(prime)
+
+  -> .old_new_decomposition(level,
+                            search_limit = 1_000_000)
+    WeightTwoModularSymbols.new(
+      level, 2, search_limit).old_new_decomposition
 
   # Exact determinant over an explicit coefficient field.  This is
   # intentionally separate from LinAlg's floating-point determinant path.

@@ -427,7 +427,10 @@
     @boundary_matrix = boundary_data[2]
     @boundary_rank = @group.number_of_cusps - 1
     @cuspidal_dimension = @relative_dimension - @boundary_rank
+    @quotient_data = nil
+    @cuspidal_basis_coordinates = nil
     @cuspidal_basis = nil
+    @hecke_operators = {}
     @certificate = WeightTwoModularSymbolsCertificate.new(self)
     if !@certificate.verified?
       raise "weight-two modular-symbol certificate failed"
@@ -525,7 +528,12 @@
       group.level / denominator_class)
     residue = 0
     if modulus > 1
-      residue = (a*(c / denominator_class)) % modulus
+      # A cusp a/c with d=gcd(c,N) is represented by
+      # a*(c/d)^(-1) modulo gcd(d,N/d).  Multiplication by c/d happens
+      # to agree at prime levels, but gives the wrong cusp at composite
+      # levels and breaks Hecke stability of the cuspidal kernel.
+      residue = (
+        a*(c / denominator_class).invmod(modulus)) % modulus
       residue += modulus if residue < 0
     Gamma0Cusp.new(group, denominator_class, residue)
 
@@ -623,15 +631,27 @@
   -> cuspidal_dimension
     @cuspidal_dimension
 
-  -> cuspidal_basis
-    if @cuspidal_basis == nil
+  -> search_limit
+    @search_limit
+
+  # Compute the exact quotient map from the raw P^1(Z/NZ) generators to a
+  # rational basis of the Manin quotient.  The rows of generators_to_basis
+  # are the coordinates of the corresponding raw Manin generators.
+  #
+  # This dense path is deliberately guarded.  Sparse relations make
+  # construction and dimension certification cheap at large levels, while
+  # exact rational quotient coordinates can still create substantial
+  # intermediate numerators.
+  -> quotient_data
+    if @quotient_data == nil
       work = @symbols.size**3
       if work > @search_limit
-        raise "cuspidal rational basis unknown: dense RREF exceeds limit"
+        raise "Manin quotient basis unknown: dense RREF exceeds limit"
       dense_relations = WeightTwoModularSymbols.relation_matrix(
         @projective_line)
       relation_reduction = ModularSymbolsLinearAlgebra.rref(
         dense_relations)
+      reduced_relations = relation_reduction[0]
       pivots = relation_reduction[1]
       quotient_columns = []
       pivot_set = {}
@@ -641,16 +661,69 @@
       while i < @symbols.size
         quotient_columns.push(i) if pivot_set[i.to_s] == nil
         i += 1
+
+      generators_to_basis = []
+      i = 0
+      while i < @symbols.size
+        generators_to_basis.push(
+          ModularSymbolsLinearAlgebra.zero_vector(
+            quotient_columns.size))
+        i += 1
+      i = 0
+      while i < quotient_columns.size
+        generators_to_basis[quotient_columns[i]][i] = Rational.new(1)
+        i += 1
+      i = 0
+      while i < pivots.size
+        j = 0
+        while j < quotient_columns.size
+          generators_to_basis[pivots[i]][j] = (
+            0 - reduced_relations[i][quotient_columns[j]])
+          j += 1
+        i += 1
+
       quotient_boundary = []
       @boundary_matrix.each -> (row)
+        # The quotient basis consists of the selected raw free generators,
+        # so its boundary columns are simply those source columns.  Multiplying
+        # B by generators_to_basis would instead project a map on the dual and
+        # is not the induced boundary map.
         restricted = []
         quotient_columns.each -> (column)
           restricted.push(row[column])
         quotient_boundary.push(restricted)
+      @quotient_data = [
+        reduced_relations, pivots, quotient_columns,
+        generators_to_basis, quotient_boundary
+      ]
+    @quotient_data
+
+  -> quotient_basis_indices
+    out = []
+    quotient_data[2].each -> out.push(item)
+    out
+
+  -> manin_generators_to_basis
+    ModularSymbolsLinearAlgebra.copy_matrix(quotient_data[3])
+
+  -> quotient_boundary_matrix
+    ModularSymbolsLinearAlgebra.copy_matrix(quotient_data[4])
+
+  -> cuspidal_basis_coordinates
+    if @cuspidal_basis_coordinates == nil
       kernel = ModularSymbolsLinearAlgebra.nullspace(
-        quotient_boundary, quotient_columns.size)
+        quotient_data[4], @relative_dimension)
+      @cuspidal_basis_coordinates = kernel
+      if @cuspidal_basis_coordinates.size != @cuspidal_dimension
+        raise "cuspidal rational basis dimension mismatch"
+    ModularSymbolsLinearAlgebra.copy_matrix(
+      @cuspidal_basis_coordinates)
+
+  -> cuspidal_basis
+    if @cuspidal_basis == nil
+      quotient_columns = quotient_data[2]
       @cuspidal_basis = []
-      kernel.each -> (quotient_vector)
+      cuspidal_basis_coordinates.each -> (quotient_vector)
         lifted = ModularSymbolsLinearAlgebra.zero_vector(@symbols.size)
         i = 0
         while i < quotient_columns.size
@@ -666,6 +739,18 @@
         copied.push(entry)
       out.push(copied)
     out
+
+  -> hecke_operator(prime)
+    key = prime.to_s
+    if @hecke_operators[key] == nil
+      @hecke_operators[key] = WeightTwoHeckeOperator.new(self, prime)
+    @hecke_operators[key]
+
+  -> hecke_matrix(prime)
+    hecke_operator(prime).relative_matrix
+
+  -> cuspidal_hecke_matrix(prime)
+    hecke_operator(prime).cuspidal_matrix
 
   -> certificate
     @certificate
@@ -752,3 +837,10 @@
 
   -> inspect
     to_s
+
+
++ Gamma0
+  -> modular_symbols(weight = 2,
+                     search_limit = 1_000_000)
+    WeightTwoModularSymbols.new(
+      self, weight, search_limit)

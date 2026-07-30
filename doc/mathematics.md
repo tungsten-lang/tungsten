@@ -150,8 +150,11 @@ application. Exact finite-precision q-series and certified level-one
 layer. Weight-two Manin symbols now model
 \(P^1(\mathbb Z/N\mathbb Z)\), their relations, cusp boundary, and cuspidal
 subspace dimensions, including a zero cuspidal symbol space at level 2.
-There is still no mod-\(p\) Galois-representation layer, Hecke/newform
-system, level-lowering proof, or
+Prime Hecke operators (including bad-prime \(U_p\)), exact characteristic
+polynomials, prime-level degeneracy maps, old subspaces, and canonical new
+Hecke quotients are also present with finite replay certificates and named
+theorem imports. There is still no mod-\(p\) Galois-representation layer,
+eigenform/newform q-expansion recovery, level-lowering proof, or
 modularity-lifting kernel. `tungsten-wassat`'s `fermat.w` is a finite SAT
 benchmark, not that arithmetic infrastructure.
 
@@ -160,8 +163,9 @@ A useful staged target is an **FLT application checker**:
 1. check exponent reduction and Frey invariants;
 2. certify minimal models, local reduction, discriminants, and conductors;
 3. compute the finite modular-form calculation at the final level
-   (the level-2 dimension and weight-two Manin-symbol calculations are
-   implemented; Hecke and newform congruence data remain);
+   (the level-2 dimension, weight-two Manin-symbol, prime Hecke, and old/new
+   quotient calculations are implemented; eigenforms and mod-\(p\)
+   congruence data remain);
 4. apply Ribet and Wiles--Taylor--Wiles as explicit trusted theorem imports.
 
 That would be useful and honest, but still relative to those imports. A fully

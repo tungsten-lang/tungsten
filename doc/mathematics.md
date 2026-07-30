@@ -147,8 +147,11 @@ replay-checks the classical dimension formula giving
 \(\dim S_2(\Gamma_0(2))=0\), the finite terminal space in the usual FLT
 application. Exact finite-precision q-series and certified level-one
 \(E_4,E_6,\Delta\) expansions provide the beginning of the q-expansion
-layer. There is still no mod-\(p\) Galois-representation layer,
-modular-symbol and newform system, level-lowering proof, or
+layer. Weight-two Manin symbols now model
+\(P^1(\mathbb Z/N\mathbb Z)\), their relations, cusp boundary, and cuspidal
+subspace dimensions, including a zero cuspidal symbol space at level 2.
+There is still no mod-\(p\) Galois-representation layer, Hecke/newform
+system, level-lowering proof, or
 modularity-lifting kernel. `tungsten-wassat`'s `fermat.w` is a finite SAT
 benchmark, not that arithmetic infrastructure.
 
@@ -157,8 +160,8 @@ A useful staged target is an **FLT application checker**:
 1. check exponent reduction and Frey invariants;
 2. certify minimal models, local reduction, discriminants, and conductors;
 3. compute the finite modular-form calculation at the final level
-   (the level-2 dimension calculation is implemented; modular symbols and
-   newform congruence data remain);
+   (the level-2 dimension and weight-two Manin-symbol calculations are
+   implemented; Hecke and newform congruence data remain);
 4. apply Ribet and Wiles--Taylor--Wiles as explicit trusted theorem imports.
 
 That would be useful and honest, but still relative to those imports. A fully

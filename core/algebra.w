@@ -44,6 +44,7 @@ use core/algebra/elliptic
 use core/algebra/elliptic_tate
 use core/algebra/modular_forms
 use core/algebra/q_expansion
+use core/algebra/modular_symbols
 use core/algebra/divisors
 use core/algebra/quartics
 use core/algebra/descent
@@ -136,6 +137,11 @@ use core/algebra/galois
 
   -> .modular_delta(precision = 12)
     ClassicalModularForms.delta(precision)
+
+  -> .modular_symbols(level, weight = 2,
+                      search_limit = 1_000_000)
+    WeightTwoModularSymbols.new(
+      level, weight, search_limit)
 
   # Exact determinant over an explicit coefficient field.  This is
   # intentionally separate from LinAlg's floating-point determinant path.

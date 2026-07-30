@@ -240,7 +240,9 @@ different:
 4. modular symbols, q-expansions, Hecke algebras, old/new quotients, newforms,
    and Sturm-bound certificates (the exact \(\Gamma_0(N)\) invariants,
    dimension formulas, Sturm certificates, and classical level-one
-   \(E_4,E_6,\Delta\) q-expansions are implemented);
+   \(E_4,E_6,\Delta\) q-expansions are implemented; weight-two Manin
+   generators, relations, cusp boundaries, and cuspidal dimensions are also
+   implemented, while Hecke/newform structure remains);
 5. local/global Galois cohomology, Selmer and dual Selmer groups,
    Poitou--Tate duality, and deformation rings;
 6. a kernel-checked Ribet level-lowering theorem;

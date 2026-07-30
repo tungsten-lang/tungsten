@@ -25,6 +25,12 @@ autoload_check("prime ideal class",
                AlgebraPrimeIdeal.class_name, "Class")
 autoload_check("prime decomposition class",
                AlgebraPrimeDecomposition.class_name, "Class")
+autoload_check("integral ideal class",
+               NumberFieldIdeal.class_name, "Class")
+autoload_check("fractional ideal class",
+               NumberFieldFractionalIdeal.class_name, "Class")
+autoload_check("ideal factorization class",
+               AlgebraIdealFactorization.class_name, "Class")
 
 plane = Algebra.rational_projective_plane
 autoload_check("projective", plane.dimension, 2)

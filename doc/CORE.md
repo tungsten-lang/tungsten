@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(239 total), grouped by area, with its declaration, a one-line
+(258 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -145,6 +145,25 @@ summary from the source header, and a link to the source.
 | `EtaleProductPrimeDecompositionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `EtaleProductSPrimeData` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `EtaleProductSPrimeDataCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `IntegerLinearAlgebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `IntegerHermiteNormalForm` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `IntegerHermiteNormalFormCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraIdealOperationCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraIdealComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ExactIntegerArithmetic` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrimeValuationCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrimeValuationComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraIdealFactorizationCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraIdealFactorization` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIdeal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIdealFactorization` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraFractionalIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraFractionalIdeal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrincipalFractionalIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrincipalFractionalIdealComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldFractionalIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldFractionalIdeal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldMinimalPolynomialCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

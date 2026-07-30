@@ -33,6 +33,7 @@ core/algebra/integer_lattice.w    # exact lattices and prime-field kernels
 core/algebra/maximal_orders.w     # degree-generic Round 2 integral closures
 core/algebra/residue_algebra.w    # reduced O/pO and primitive idempotents
 core/algebra/prime_ideals.w       # residue maps and certified primes above p
+core/algebra/ideal_arithmetic.w   # HNF ideals, valuations, factorizations
 core/algebra/real_roots.w          # Sturm isolation and certified RootOf values
 core/algebra/algebraic_real.w      # exact RootOf arithmetic and certificates
 core/algebra/expression.w          # symbolic factor and exact real solve facade
@@ -349,7 +350,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Symbolic expressions | Exact π/e and radicals; canonical simplify, expand, collect, differentiation, elementary antiderivatives; exact formal Taylor series and removable finite limits; exact univariate ℚ factor facade; arbitrary exact real roots as rationals, radicals, or certified `RootOf` constants; exact arithmetic and symbolic transcendentals over real algebraic constants | No assumptions, piecewise forms, Laurent/Puiseux series, infinite/directional limits, general multivariate factorization, complex algebraic-root object, general higher-degree radical formulas, or Risch integration |
 | Fields | Exact `RationalField`; packed prime fields and arbitrary absolute extensions `𝔽_{p^n}`; certified simple extensions `K[a]/(m)` over ℚ or finite fields with explicit base embeddings, structured finite towers, arithmetic, Frobenius, trace, norm, and enumeration; arbitrary-degree irreducible `NumberField`s over ℚ with exact power-basis arithmetic, minimal/characteristic polynomials, trace, norm, integrality, Sturm signatures, real embeddings, integral bases, maximal-order indices, and field discriminants | Automatic isomorphisms/embeddings between differently presented finite fields, complex algebraic embeddings, and general number-field isomorphism algorithms are not implemented. Modulus, factor, and maximal-order searches are explicitly resource-bounded and raise instead of guessing |
 | Finite étale algebras | Certified squarefree quotients `K[t]/(f)`; exact quotient arithmetic; units and zero divisors; multiplication-matrix trace/norm; supplied CRT components, primitive idempotents, component maps, reconstruction, degree-generic integral closures, prime ideals and finite residue fields above rational primes, and replay certificates | General fractional-ideal arithmetic, S-units, and class groups are not implemented |
-| Integral orders | Degree-generic monogenic and arbitrary-lattice ℤ-orders; exact membership, discriminant, units, trace, and norm; Dedekind local index certificates; Pohst--Zassenhaus Round 2 p-maximal overorders and global maximal-order certificates; certified p-radicals, prime ideals, residue maps, ramification indices, residue degrees, and product-order finite S-place data | General integral/fractional ideal products, inverses, valuations, class groups, and unit-group bases are not implemented. Discriminant factorization, Round 2 steps, finite-field factorization, and residue-generator search are resource-bounded and raise `unknown` on exhaustion |
+| Integral orders | Degree-generic monogenic and arbitrary-lattice ℤ-orders; exact membership, discriminant, units, trace, and norm; Dedekind local index certificates; Pohst--Zassenhaus Round 2 p-maximal overorders and global maximal-order certificates; certified p-radicals, prime ideals, residue maps, ramification indices, and residue degrees; canonical full-rank HNF integral ideals with sum, product, powers, norm, containment, prime valuations, and certified factorization; invertible fractional ideals as finite signed prime valuations, including principal fractional ideals and exact rational norms; product-order finite S-place data | Class groups and unit-group bases are not implemented. Fractional ideals currently use their certified prime-factor representation rather than an explicit fractional lattice. Discriminant factorization, Round 2 steps, finite-field factorization, residue-generator search, and ideal factorization are resource-bounded and raise `unknown` on exhaustion |
 | Polynomials | Sparse sorted terms; merge-multiply; dense univariate quotient arithmetic; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ and arbitrary finite fields as **unit × monic irreducibles**, with replay certificates; exact Sturm counts, Cauchy bounds, and certified isolation of every distinct real root | Kronecker and deterministic equal-degree factor search, Gröbner elimination, and root-interval splitting have explicit resource limits; complex-root isolation, complex algebraic-number arithmetic, and multivariate factorization are not implemented |
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders | Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
@@ -636,6 +637,45 @@ class groups, units, p-adic lifting, or the arithmetic-to-CNF translation.
 
 The product of the returned factors recovers the original polynomial. The
 leading constant is the content unit; every non-constant factor is monic.
+
+## Order and number-field ideals
+
+Full-rank integral ideals have a canonical row-Hermite basis.  Operations
+construct that basis again and attach a certificate which replays the source
+generators, lattice containment, and determinant norm:
+
+```w
+R = PolynomialRing.new([:x], RationalField.new)
+x = R.generator(0)
+K = NumberField.new(x**2 - 5, :a)
+a = K.generator
+
+I = K.principal_ideal(6)
+I.norm                                      # 36
+I.factorization.certified?                  # true
+
+P = K.prime_ideals_above(5)[0]
+P.valuation(a)                              # 1
+P.ideal_valuation(K.principal_ideal(25))    # 4
+```
+
+Invertible fractional ideals in a certified maximal order are represented by
+their finite map of certified prime ideals to signed valuations. The
+constructor rejects a nonmaximal order. The principal constructor clears
+denominators, factors the two resulting integral ideals, and certifies their
+quotient:
+
+```w
+J = K.principal_fractional_ideal(a / 2)
+J.norm                         # 5/4
+J.valuation(P)                 # 1
+J.valuation(K.prime_ideals_above(2)[0])  # -1
+(J * J.inverse).unit?          # true
+J.certificate.verified?        # true
+```
+
+All integer and prime searches are explicitly bounded.  Exhaustion raises
+instead of returning a partial factorization as a certified ideal.
 
 ## Ideal operations
 

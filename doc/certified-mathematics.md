@@ -53,6 +53,17 @@ checks that the returned rational or `AlgebraicRealRoot` is that root.
 certificate alone proves what a `RootOf` value denotes, not that it was the
 result of a claimed arithmetic operation.
 
+`IntegerHermiteNormalFormCertificate` replays the canonical full-rank
+integer lattice basis used by `AlgebraOrderIdeal`. Ideal-operation
+certificates then check generator products or sums against that lattice.
+Prime valuations are certified by exact membership in consecutive prime-ideal
+powers, and an `AlgebraIdealFactorizationCertificate` reconstructs both the
+ideal and its norm. An invertible fractional ideal records the resulting
+certified primes with signed exponents; a principal fractional-ideal
+certificate independently clears its denominator and replays the quotient.
+These certificates establish individual ideal computations. They do not
+establish class-group completeness or a unit-group basis.
+
 `F2LinearSystemCertificate` is the reference finite certificate. It replays
 elementary row operations, validates canonical RREF, and independently checks
 the particular solution and kernel basis. `ExplicitSelmerIntersectionCertificate`
@@ -107,7 +118,9 @@ explicit descent:
    components and certify the maximal product order;
 9. decompose `2`, `3`, and `13` in all maximal components, certifying the 20
    finite primes above the candidate finite set S, their residue fields,
-   ramification indices, and residue degrees;
+   ramification indices, and residue degrees; canonical integral and
+   fractional ideal arithmetic is available componentwise after this step,
+   but the product S-class and S-unit algorithms are not;
 10. intersect future global, norm, unramified, and local conditions with the
    replay-certified F2 kernel.
 

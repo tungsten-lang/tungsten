@@ -257,6 +257,20 @@ static WBigint *bigint_alloc(int32_t cap) {
     return b;
 }
 
+/* Like bigint_alloc but leaves the LIMBS uninitialized (header still
+ * zeroed): for callers that fully write limbs[0..size) before publishing,
+ * e.g. mag_add / mag_sub. Zeroing fresh limb buffers that the very next
+ * loop overwrites was ~19% of bigint_fib samples. */
+static WBigint *bigint_alloc_raw(int32_t cap) {
+    size_t sz = sizeof(WBigint) + (size_t)cap * sizeof(uint64_t);
+    sz = (sz + 15) & ~(size_t)15;
+    WBigint *b = (WBigint *)malloc(sz);
+    memset(b, 0, sizeof(WBigint));
+    b->type = W_TYPE_BIGINT;
+    b->cap = cap;
+    return b;
+}
+
 /* Phase 6i.2: bigint demoted from W_SUBTAG_BIGINT to W_SUBTAG_GENERIC; the
  * `type` byte at offset 0 is the dispatch discriminator. */
 static inline WValue bigint_box(WBigint *b) {
@@ -364,7 +378,7 @@ static WBigint *mag_add(const uint64_t *a, int32_t alen, const uint64_t *b, int3
         const uint64_t *t = a; a = b; b = t;
         int32_t tl = alen; alen = blen; blen = tl;
     }
-    WBigint *r = bigint_alloc(alen + 1);
+    WBigint *r = bigint_alloc_raw(alen + 1);
     uint64_t carry = 0;
     for (int32_t i = 0; i < blen; i++) {
         __uint128_t s = (__uint128_t)a[i] + b[i] + carry;
@@ -383,7 +397,7 @@ static WBigint *mag_add(const uint64_t *a, int32_t alen, const uint64_t *b, int3
 
 static WBigint *mag_sub(const uint64_t *a, int32_t alen, const uint64_t *b, int32_t blen) {
     /* Assumes |a| >= |b| */
-    WBigint *r = bigint_alloc(alen);
+    WBigint *r = bigint_alloc_raw(alen);
     uint64_t borrow = 0;
     for (int32_t i = 0; i < blen; i++) {
         uint64_t ai = a[i], bi = b[i];

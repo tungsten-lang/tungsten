@@ -35,8 +35,9 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
 5. **LinAlg** — rank-revealing QR, rank, thin SVD/Cholesky as pure follow-ons.
 6. **Estimators** — multiclass logistic, KNN regressor + distance weights,
    feature selection, gradient boosting, and kernel SVM shipped.
-7. **Trees / inspection** — permutation importance (shipped); Gini/MSE
-   feature importances and tree export remain.
+7. **Trees / inspection** — permutation importance and deterministic,
+   standalone Tungsten source export for fitted classification trees shipped;
+   Gini/MSE feature importances remain.
 8. **Calibration** — `CalibratedClassifierCV` (Platt / isotonic). **Shipped.**
 9. **DataFrame parity** — multi-key group_by, value_counts, sort, drop_duplicates, melt, fillna, masks.
 10. **Time series** — shift, lag, gap-aware resample.
@@ -120,7 +121,7 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
 
 1. Broader sklearn differentials on standard tabular datasets plus
    wall-clock and memory baselines.
-2. Tree feature importances and export.
+2. Tree feature importances and broader ensemble export.
 3. SVC class-weight convenience plus a bounded/chunked kernel cache for
    larger training sets.
 4. A persistable named-operation alternative to arbitrary-closure

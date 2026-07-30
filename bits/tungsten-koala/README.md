@@ -644,6 +644,45 @@ pairs with `Metrics.roc_auc` and `Metrics.log_loss` exactly as
 `GaussianNB`'s does — `predict_proba(x, label)` hands over the flat
 column.
 
+### Standalone source export
+
+A fitted classifier with numeric labels can be lowered to deterministic
+Tungsten source for a latency-sensitive consumer such as Wassat:
+
+```tungsten
+model = DecisionTreeClassifier.new(3).fit(training_features, arm_ids)
+artifact = DecisionTreeExport.export(
+  model,
+  [:variables, :clauses, :literal_count], # required ordered feature ABI
+  :wassat_select_arm                      # configurable function name
+)
+
+source = artifact[:source]                # write via your build tooling
+artifact[:schema_checksum]
+```
+
+The generated file has no Koala dependency: it is nested
+`features[i].to_f <= ~threshold` comparisons ending in exact numeric
+predictions. It also defines `wassat_select_arm_schema_version`,
+`wassat_select_arm_schema_checksum`, and
+`wassat_select_arm_feature_count`. The prediction function requires the
+checksum. Pin the artifact's value independently beside the code that builds
+`features`, so a regenerated router with reordered inputs fails loudly:
+
+```tungsten
+WASSAT_ROUTER_SCHEMA = 1846011820 # copied from artifact[:schema_checksum]
+arm = wassat_select_arm(features, WASSAT_ROUTER_SCHEMA)
+```
+
+Feature names must be unique ASCII identifiers and match the fitted width;
+their order is written into the header and covered by the checksum.
+Renaming or reordering a feature changes the checksum. Integer and finite
+Float predictions are emitted as exact source literals; symbolic labels,
+nonfinite values, invalid names, malformed trees, and unfitted models
+return `nil`. The generated checksum helper is useful for inspection, but
+using it directly as the predictor argument would bypass the independent
+drift check.
+
 ### Hyperparameters — all four are real, tunable `params`
 
 | param | default | meaning |

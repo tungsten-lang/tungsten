@@ -160,7 +160,7 @@
   # "irreducible".
   -> factor(search_limit = 250_000)
     raise "factorization is only defined for univariate polynomials" if @ring.arity != 1
-    if @ring.field.class_name == "FiniteField"
+    if @ring.field.finite_field?
       return factor_finite_field(search_limit)
     if @ring.field.class_name != "RationalField"
       raise "factorization is currently implemented over ℚ and finite fields"

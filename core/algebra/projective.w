@@ -62,7 +62,7 @@
 
 
 + ProjectiveSpace<K, N>
-  with K in (ℚ RationalField FiniteField NumberField)
+  with K in (ℚ RationalField FiniteField NumberField SimpleExtensionField)
 
   # The algebra surface rewrite injects the actual field object and N:
   #

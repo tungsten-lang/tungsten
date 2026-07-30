@@ -42,8 +42,14 @@
   -> exact?
     true
 
+  -> finite_field?
+    true
+
   -> prime_field?
     @degree == 1
+
+  -> absolute_degree
+    @degree
 
   -> irreducibility_certified?
     true
@@ -110,6 +116,22 @@
     if value_class == "Integer" || value_class == "Int" || value_class == "BigInt"
       return value if value >= 0 && value < @order
     coerce(value)
+
+  -> embed_from(source_field, value)
+    return normalize_element(value) if source_field == self
+    if source_field.class_name == "RationalField"
+      return coerce(value)
+    if source_field.class_name == "FiniteField"
+      if source_field.prime_field? && source_field.characteristic == @characteristic
+        return coerce(value)
+    raise "no certified field embedding from " + source_field.to_s + " into " + to_s
+
+  # Canonical enumeration index used by finite-field algorithms. Packed
+  # finite fields already use exactly this integer representation.
+  -> element_from_index(index)
+    if index < 0 || index >= @order
+      raise "finite-field element index out of range"
+    index
 
   -> zero
     0

@@ -22,6 +22,15 @@
   -> normalize_element(value)
     coerce(value)
 
+  # Embed an already-normalized element of an explicitly named source field.
+  # This is deliberately distinct from coerce, whose Integers and Arrays are
+  # external scalar syntax. Extension fields override this to preserve packed
+  # or structured source-field elements without reinterpretation.
+  -> embed_from(source_field, value)
+    if source_field == self
+      return normalize_element(value)
+    raise "no certified field embedding from " + source_field.to_s + " into " + to_s
+
   -> zero
     raise "Field#zero is not implemented for " + self.class_name
 
@@ -75,6 +84,9 @@
   -> exact?
     raise "Field#exact? is not implemented for " + self.class_name
 
+  -> finite_field?
+    false
+
   -> characteristic
     raise "Field#characteristic is not implemented for " + self.class_name
 
@@ -114,6 +126,11 @@
 
   -> normalize_element(value)
     coerce(value)
+
+  -> embed_from(source_field, value)
+    if source_field == self
+      return normalize_element(value)
+    raise "no certified field embedding from " + source_field.to_s + " into ℚ"
 
   -> zero
     Rational.new(0)
@@ -164,6 +181,9 @@
 
   -> exact?
     true
+
+  -> finite_field?
+    false
 
   -> characteristic
     0

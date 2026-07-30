@@ -12,7 +12,7 @@
 
 + Polynomial
   -> require_finite_factor_domain
-    if @ring.arity != 1 || @ring.field.class_name != "FiniteField"
+    if @ring.arity != 1 || !@ring.field.finite_field?
       raise "finite-field factorization needs a univariate polynomial over a finite field"
     @ring.field.prepare_arithmetic!
 
@@ -98,7 +98,7 @@
       coefficient = remaining % field.order
       if !field.zero?(coefficient)
         polynomial = polynomial + @ring.monomial_raw(
-          coefficient, [exponent])
+          field.element_from_index(coefficient), [exponent])
       remaining = remaining / field.order
       exponent += 1
     polynomial
@@ -145,7 +145,7 @@
         if field.characteristic == 2
           trace = @ring.zero
           term = candidate.rem(polynomial)
-          iterations = field.degree * factor_degree
+          iterations = field.absolute_degree * factor_degree
           i = 0
           while i < iterations
             trace = (trace + term).rem(polynomial)
@@ -270,7 +270,7 @@
         constants += 1
       else
         return false if !factor.eql?(factor.monic)
-        if @polynomial.ring.field.class_name == "FiniteField"
+        if @polynomial.ring.field.finite_field?
           return false if !factor.finite_field_irreducible?
         elsif @polynomial.ring.field.class_name == "RationalField"
           pieces = factor.factor(@search_limit)

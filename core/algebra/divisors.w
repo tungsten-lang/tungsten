@@ -44,6 +44,11 @@
 # curve.space; source-space ownership never leaks into the formal divisor
 # layer.
 + Place
+  -> .place?(value)
+    return false if value == nil
+    name = value.class_name
+    name == "Place" || name == "ClosedPlace"
+
   -> new(@curve, point)
     if point.class_name != "ProjectivePoint"
       raise "a degree-one place needs a ProjectivePoint"
@@ -82,7 +87,7 @@
 
   -> -/1
     other = @1
-    if !other.is_a?(Place)
+    if !Place.place?(other)
       raise "a place can only be subtracted from another place"
     if other.curve != @curve
       raise "places belong to different curves"
@@ -115,11 +120,14 @@
 # point of P^2: their intersection would be a base-field-rational point.
 # Consequently [line, chart, irreducible factor] is an intrinsic equality key
 # for the higher-degree places represented here.
-+ ClosedPlace < Place
++ ClosedPlace
   -> new(@curve, @line, factor, @parameter_chart, @factorization)
     if factor.class_name != "Polynomial" || factor.ring.arity != 1
       raise "a closed place needs a univariate defining polynomial"
     @factor = factor.monic
+    @residue_field_cache = nil
+    @residue_curve_cache = nil
+    @residue_point_cache = nil
     if @factor.degree <= 1
       raise "degree-one factors must be represented by rational Place objects"
     if !certified?
@@ -127,6 +135,12 @@
 
   -> line
     @line
+
+  -> curve
+    @curve
+
+  -> space
+    @curve.space
 
   -> parameter_chart
     @parameter_chart
@@ -155,11 +169,74 @@
   -> closed?
     true
 
+  -> to_divisor
+    Divisor.new(@curve, [[1, self]])
+
+  -> -/1
+    other = @1
+    if !Place.place?(other)
+      raise "a place can only be subtracted from another place"
+    if other.curve != @curve
+      raise "places belong to different curves"
+    Divisor.new(@curve, [[1, self], [-1, other]])
+
+  -> */1
+    to_divisor.multiply(@1)
+
+  -> ==/1
+    self.eql?(@1)
+
   -> point
-    raise "a closed place of degree " + degree.to_s + " has no coefficient-field ProjectivePoint"
+    residue_point
 
   -> coordinates
-    raise "closed-place coordinates require a residue-field realization"
+    residue_point.coordinates
+
+  -> residue_field
+    if @residue_field_cache == nil
+      @residue_field_cache = SimpleExtensionField.new(
+        @factor, @factor.ring.names[0])
+    @residue_field_cache
+
+  -> residue_curve
+    if @residue_curve_cache == nil
+      @residue_curve_cache = @curve.change_field(residue_field)
+    @residue_curve_cache
+
+  -> residue_space
+    residue_curve.space
+
+  -> residue_line
+    extension = residue_field
+    coefficients = []
+    @line.coefficients.each ->
+      coefficients.push(extension.embed_from(@curve.field, item))
+    Line.raw(residue_space, coefficients)
+
+  # The residue generator is the affine line parameter satisfying the
+  # irreducible defining polynomial. Evaluating the exact P^1
+  # parameterization realizes the closed point on the base-changed curve.
+  -> residue_point
+    if @residue_point_cache == nil
+      extension = residue_field
+      parameter_ring = PolynomialRing.new(
+        @line.parameter_ring.names, extension)
+      parameters = @parameter_chart == 1 ? [extension.generator, extension.one] : [extension.one, extension.generator]
+      coordinates = []
+      @line.parameterization.each ->
+        lifted = item.change_ring(parameter_ring)
+        coordinates.push(lifted.evaluate_raw(parameters))
+      candidate = residue_space.point_raw(coordinates)
+      if !residue_curve.contains?(candidate)
+        raise "closed-place residue point does not lie on the base-changed curve"
+      @residue_point_cache = candidate
+    @residue_point_cache
+
+  -> residue_certificate
+    ClosedPlaceResidueCertificate.new(self)
+
+  -> residue_coordinates_certified?
+    residue_certificate.verified?
 
   -> certified?
     return false if @curve.class_name != "Curve"
@@ -192,6 +269,49 @@
     to_s
 
 
++ ClosedPlaceResidueCertificate
+  -> new(@place)
+
+  -> place
+    @place
+
+  -> field
+    @place.residue_field
+
+  -> point
+    @place.residue_point
+
+  -> verified?
+    return false if @place.class_name != "ClosedPlace"
+    return false if !@place.certified?
+    extension = @place.residue_field
+    return false if extension.class_name != "SimpleExtensionField"
+    return false if extension.base_field != @place.curve.field
+    return false if extension.degree != @place.degree
+    return false if !extension.defining_polynomial.eql?(
+      @place.defining_polynomial)
+    return false if !extension.modulus_certificate.verified?
+    point = @place.residue_point
+    return false if point.space != @place.residue_space
+    return false if !@place.residue_curve.contains?(point)
+    return false if !@place.residue_line.contains?(point)
+    extension.zero?(
+      extension.defining_polynomial.change_ring(
+        PolynomialRing.new(
+          extension.defining_polynomial.ring.names,
+          extension)).at_raw(extension.generator))
+
+  -> certified?
+    verified?
+
+  -> to_s
+    label = "ClosedPlaceResidueCertificate(degree "
+    label + @place.degree.to_s + ")"
+
+  -> inspect
+    to_s
+
+
 # A normalized finite formal sum sum n_P P.  Terms are kept in insertion order
 # because the first tranche only handles very small divisors; normalization
 # combines equal places and removes zero coefficients exactly.
@@ -209,7 +329,7 @@
       coefficient_class = coefficient.class_name
       if coefficient_class != "Integer" && coefficient_class != "Int" && coefficient_class != "BigInt"
         raise "divisor coefficients must be integers"
-      if !place.is_a?(Place)
+      if !Place.place?(place)
         raise "a divisor term needs a Place"
       if place.curve != @curve
         raise "divisor place belongs to a different curve"
@@ -252,7 +372,7 @@
     self
 
   -> coefficient(place)
-    if !place.is_a?(Place) || place.curve != @curve
+    if !Place.place?(place) || place.curve != @curve
       raise "place belongs to a different curve"
     i = 0
     while i < @terms.size
@@ -284,7 +404,7 @@
 
   -> +/1
     other = @1
-    if other.is_a?(Place)
+    if Place.place?(other)
       other = other.to_divisor
     if other.class_name != "Divisor"
       raise "divisor addition needs a Divisor or Place"
@@ -294,7 +414,7 @@
 
   -> -/1
     other = @1
-    if other.is_a?(Place)
+    if Place.place?(other)
       other = other.to_divisor
     if other.class_name != "Divisor"
       raise "divisor subtraction needs a Divisor or Place"

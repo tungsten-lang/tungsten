@@ -26,6 +26,7 @@ core/algebra/polynomial_resultant.w
 core/algebra/polynomial_gcd.w
 core/algebra/polynomial_factor.w # exact factorization over ℚ
 core/algebra/polynomial_factor_finite.w # complete finite-field factorization
+core/algebra/simple_extension.w   # certified K[a]/(m) quotient fields
 core/algebra/real_roots.w          # Sturm isolation and certified RootOf values
 core/algebra/algebraic_real.w      # exact RootOf arithmetic and certificates
 core/algebra/expression.w          # symbolic factor and exact real solve facade
@@ -65,6 +66,8 @@ F = FiniteField.new(5)
 F125 = FiniteField.extension(5, 3)
 F256 = FiniteField.extension(2, 8)
 R = PolynomialRing.new([:t], F)
+t = R.generator(0)
+E = Algebra.extension(t**2 + t + 1, :a)
 K = NumberField.new(x**3 + x**2*2 - x*9 - 12, :a)
 ```
 
@@ -110,6 +113,35 @@ proof.certificate.verified?                 # independently replays product
 The certificate also proves each returned nonconstant factor irreducible with
 Rabin's criterion. Equal-degree candidate enumeration has an explicit limit
 and raises `unknown` on exhaustion instead of returning a partial result.
+
+`SimpleExtensionField` is the exact quotient \(K[a]/(m)\) for an explicit base
+field and a certified irreducible modulus. It supplies the missing tower-field
+representation: unlike packed absolute finite fields, an extension of
+\(\mathbb F_{p^r}\) retains a canonical embedding of that particular base
+presentation.
+
+```w
+F4 = FiniteField.extension(2, 2)
+R = PolynomialRing.new([:u], F4)
+u = R.generator(0)
+a = R.monomial_raw(F4.generator, R.zero_exponents)
+F16_over_F4 = Algebra.extension(u**2 + u + a, :b)
+b = F16_over_F4.generator
+
+b**2 + b + F16_over_F4.embed_base_element(F4.generator) # 0
+F16_over_F4.order                         # 16
+F16_over_F4.trace(b)                      # trace to F4
+F16_over_F4.norm(b)                       # norm to F4
+F16_over_F4.modulus_certificate.verified?
+```
+
+Every base change names both source and target through `Field#embed_from`.
+This preserves packed base-field residues and rejects a map between unrelated
+finite-field presentations unless Tungsten actually knows the embedding.
+Finite simple extensions support enumeration, Frobenius, polynomial
+factorization, exact determinants, projective normalization, and curve point
+counts. The same quotient API works over ℚ; use `NumberField` when
+maximal-order arithmetic or certified real embeddings are required.
 
 `NumberField` arithmetic is degree-generic. The defining polynomial is
 certified irreducible over ℚ, and elements expose exact minimal and
@@ -188,9 +220,18 @@ intersection.factorization.certificate.verified?
 The construction accounts for the omitted point at infinity, preserves
 inseparable multiplicities as divisor coefficients, and reconstructs the same
 divisor from either affine chart on the parameter line. A higher-degree
-`ClosedPlace` intentionally raises on `point`: materializing its coordinates
-requires a residue-field realization, while its irreducible defining
-polynomial remains available as `residue_polynomial`.
+`ClosedPlace` builds its certified `SimpleExtensionField`, base-changes the
+curve and line, and realizes `point` over that residue field:
+
+```w
+P = D.terms.detect -> item[1].degree > 1
+closed = P[1]
+closed.residue_polynomial
+closed.residue_field
+closed.residue_curve.contains?(closed.point)       # true
+closed.residue_line.contains?(closed.point)        # true
+closed.residue_certificate.verified?               # true
+```
 
 The compact grammar is intentionally confined to algebra entry points. It
 does not add global implicit multiplication or change ordinary numeric
@@ -202,17 +243,17 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Layer | Available now | Boundary |
 | --- | --- | --- |
 | Symbolic expressions | Exact π/e and radicals; canonical simplify, expand, collect, differentiation, elementary antiderivatives; exact formal Taylor series and removable finite limits; exact univariate ℚ factor facade; arbitrary exact real roots as rationals, radicals, or certified `RootOf` constants; exact arithmetic and symbolic transcendentals over real algebraic constants | No assumptions, piecewise forms, Laurent/Puiseux series, infinite/directional limits, general multivariate factorization, complex algebraic-root object, general higher-degree radical formulas, or Risch integration |
-| Fields | Exact `RationalField`; prime fields and arbitrary extensions `𝔽_{p^n}` with Integer-encoded power-basis elements, Rabin-certified moduli, Frobenius orbits, trace, norm, and certified minimal polynomials; arbitrary-degree irreducible `NumberField`s over ℚ with exact power-basis arithmetic, minimal/characteristic polynomials, trace, norm, integrality, Sturm signatures, and certified real embeddings; certified cubic integral bases and maximal-order discriminants | Explicit embeddings between differently presented finite fields, complex algebraic embeddings, noncubic number-field maximal orders/integral bases, and general number-field isomorphism algorithms are not implemented. Modulus/factor search and cubic maximal-order search are explicitly resource-bounded and raise instead of guessing |
+| Fields | Exact `RationalField`; packed prime fields and arbitrary absolute extensions `𝔽_{p^n}`; certified simple extensions `K[a]/(m)` over ℚ or finite fields with explicit base embeddings, structured finite towers, arithmetic, Frobenius, trace, norm, and enumeration; arbitrary-degree irreducible `NumberField`s over ℚ with exact power-basis arithmetic, minimal/characteristic polynomials, trace, norm, integrality, Sturm signatures, and certified real embeddings; certified cubic integral bases and maximal-order discriminants | Automatic isomorphisms/embeddings between differently presented finite fields, simple extensions over coefficient fields whose polynomials cannot yet be factored, complex algebraic embeddings, noncubic number-field maximal orders/integral bases, and general number-field isomorphism algorithms are not implemented. Modulus/factor search and cubic maximal-order search are explicitly resource-bounded and raise instead of guessing |
 | Polynomials | Sparse sorted terms; merge-multiply; dense univariate quotient arithmetic; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ and arbitrary finite fields as **unit × monic irreducibles**, with replay certificates; exact Sturm counts, Cauchy bounds, and certified isolation of every distinct real root | Kronecker and deterministic equal-degree factor search, Gröbner elimination, and root-interval splitting have explicit resource limits; complex-root isolation, complex algebraic-number arithmetic, and multivariate factorization are not implemented |
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders | Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
-| Projective geometry | Arbitrary `ℙⁿ` over ℚ, finite fields, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
+| Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
 | Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension | Singular-curve normalization is not implemented |
 | Elliptic curves | Composition around a plane cubic model; short Weierstrass group law over ℚ and `𝔽_p` (char ≠ 2, 3); `EllipticJacobian` view | Arbitrary plane cubic → Weierstrass needs a rational flex (not implemented) |
 | Hyperelliptic curves | Exact `y² = f(x)` models, Mumford pairs, Cantor composition; monic odd-degree over ℚ, monic-or-scalable over `𝔽_p` | Even-degree models still raise for Jacobian arithmetic |
-| Finite-curve arithmetic | Exact reduction from ℚ, base change to arbitrary-degree finite extensions, projective point counts, Frobenius traces, zeta numerators (regressed through a genus-six plane quintic), and genus-three real Weil cubics | Full zeta numerators currently start over a prime field; direct/fiber point counting is exact but exponential in field size, and higher-genus Weil-polynomial postprocessing is not yet generalized beyond the existing curve/zeta primitives |
+| Finite-curve arithmetic | Exact reduction from ℚ, certified base change through explicit field embeddings, packed absolute and structured tower extensions, projective point counts, Frobenius traces, zeta numerators (regressed through a genus-six plane quintic), and genus-three real Weil cubics | Full zeta numerators currently start over a prime field; direct/fiber point counting is exact but exponential in field size, and higher-genus Weil-polynomial postprocessing is not yet generalized beyond the existing curve/zeta primitives |
 | Galois groups | Exact general groups in degrees at most three over ℚ; a certified classifier for irreducible reciprocal genus-three Weil sextics using modular irreducibility witnesses and exact Kummer square classes | This is not a general sextic classifier. Missing modular witnesses and unsupported shapes raise `unknown` or a capability error |
 | Ternary quartic invariants | Exact Macaulay resultant, integral-normalized ternary-quartic discriminant, and Magma-default-scale `I27` via `dixmier_ohno.last` | The other twelve Dixmier–Ohno invariants are not implemented; `dixmier_ohno` intentionally returns a partial object |
-| Lines and bitangents | Exact line restriction; certified intersection divisors over ℚ and arbitrary finite fields, including residue degrees, multiplicities, and both parameter charts; complete base-field-rational bitangent enumeration for plane quartics over odd finite fields | Line-intersection factorization over number fields, explicit residue-field coordinate realizations, and geometric bitangents over the algebraic closure are not implemented |
+| Lines and bitangents | Exact line restriction; certified intersection divisors over ℚ and arbitrary finite fields, including residue degrees, multiplicities, both parameter charts, and explicit points on certified residue fields; complete base-field-rational bitangent enumeration for plane quartics over odd finite fields | Line-intersection factorization over number fields and geometric bitangents over the algebraic closure are not implemented |
 | Divisors | Exact formal arithmetic on rational and line-presented higher-degree closed places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic outside the existing Jacobian models, and general principality tests are not implemented |
 | Rational points | Complete exact bounded search for primitive points on `aX³Z + bXY²Z + g(Y,Z)`, with nonzero same-sign `a,b` and nonzero `Y⁴` coefficient | This is not a general plane-curve point finder and does not prove that no points exist above the requested height |
 | Geometric automorphisms | Exact triviality certificate over `Qbar` for smooth rational plane quartics with the unique normalized hyperflex `[1:0:0]`, tangent `Z=0`, and identity stabilizer | It is not an arbitrary plane-quartic automorphism-group algorithm and does not enumerate nontrivial groups |

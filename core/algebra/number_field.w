@@ -303,6 +303,9 @@
   -> exact?
     true
 
+  -> finite_field?
+    false
+
   -> irreducible?
     true
 
@@ -374,6 +377,12 @@
 
   -> normalize_element(value)
     coerce(value)
+
+  -> embed_from(source_field, value)
+    return normalize_element(value) if source_field == self
+    if source_field.class_name == "RationalField"
+      return coerce(value)
+    raise "no certified field embedding from " + source_field.to_s + " into " + to_s
 
   -> zero
     NumberFieldElement.new(self, zero_coefficients)

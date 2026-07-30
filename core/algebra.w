@@ -20,6 +20,7 @@ use core/algebra/polynomial_resultant
 use core/algebra/polynomial_gcd
 use core/algebra/polynomial_factor
 use core/algebra/polynomial_factor_finite
+use core/algebra/simple_extension
 use core/algebra/real_roots
 use core/algebra/groebner
 use core/algebra/algebraic_real
@@ -54,6 +55,12 @@ use core/algebra/galois
 
   -> .number_field(polynomial, name = :a)
     NumberField.new(polynomial, name)
+
+  -> .extension(polynomial, name = :a)
+    SimpleExtensionField.new(polynomial, name)
+
+  -> .simple_extension(polynomial, name = :a)
+    SimpleExtensionField.new(polynomial, name)
 
   -> .rational_projective_plane(x = :X, y = :Y, z = :Z)
     ProjectiveSpace<ℚ, 2>.new(x, y, z)

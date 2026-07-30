@@ -171,24 +171,18 @@
         raise "polynomial base change requires matching generator names"
       i += 1
     out = []
-    same_field = @ring.field == target_ring.field
     self.each_term -> (coefficient, exponents)
-      if same_field
-        converted = target_ring.field.normalize_element(coefficient)
-      else
-        converted = target_ring.field.coerce(coefficient)
+      converted = target_ring.field.embed_from(
+        @ring.field, coefficient)
       out.push([converted, exponents])
     Polynomial.new(target_ring, out)
 
 + Curve
   -> finite_field?
-    field.class_name == "FiniteField"
+    field.finite_field?
 
   -> change_field(target_field)
-    if target_field.class_name != "FiniteField"
-      raise "curve base change currently supports finite target fields"
-    if field.class_name == "FiniteField" && !field.prime_field? && field != target_field
-      raise "base change from a non-prime finite field is not implemented"
+    target_field = Field.require_supported(target_field)
     target_space = ProjectiveSpace<FiniteField, 2>.new(
       target_field, 2, @space.coordinate_names)
     Curve.new(target_space, @equation.change_ring(target_space.ring))
@@ -228,14 +222,16 @@
   -> direct_affine_point_count
     q = field.order
     total = 0
-    y = 0
-    while y < q
-      x = 0
-      while x < q
+    y_index = 0
+    while y_index < q
+      y = field.element_from_index(y_index)
+      x_index = 0
+      while x_index < q
+        x = field.element_from_index(x_index)
         value = @equation.evaluate_raw([x, y, field.one])
         total += 1 if field.zero?(value)
-        x += 1
-      y += 1
+        x_index += 1
+      y_index += 1
     total
 
   # Count roots in each affine fiber by deg gcd(g(X), X^q-X). The temporary
@@ -251,8 +247,9 @@
 
     q = field.order
     total = 0
-    y = 0
-    while y < q
+    y_index = 0
+    while y_index < q
+      y = field.element_from_index(y_index)
       y_powers = [field.one]
       y_degree = @equation.degree_in(1)
       power = 1
@@ -280,7 +277,7 @@
         total += q
       else
         total += dense_finite_root_count(fiber, q)
-      y += 1
+      y_index += 1
     total
 
   # Fast exact path for an affine equation
@@ -327,13 +324,14 @@
 
     q = field.order
     total = 0
-    y = 0
-    while y < q
+    y_index = 0
+    while y_index < q
+      y = field.element_from_index(y_index)
       m0 = field.multiply(dense_at(by_x[0], y), inverse_leading)
       m1 = field.multiply(dense_at(by_x[1], y), inverse_leading)
       m2 = field.multiply(dense_at(by_x[2], y), inverse_leading)
       total += monic_cubic_finite_root_count(m0, m1, m2, q)
-      y += 1
+      y_index += 1
     total
 
   -> dense_at(coefficients, value)
@@ -559,11 +557,12 @@
   -> points_at_infinity_count
     q = field.order
     total = 0
-    slope = 0
-    while slope < q
+    slope_index = 0
+    while slope_index < q
+      slope = field.element_from_index(slope_index)
       value = @equation.evaluate_raw([field.one, slope, field.zero])
       total += 1 if field.zero?(value)
-      slope += 1
+      slope_index += 1
     value = @equation.evaluate_raw([field.zero, field.one, field.zero])
     total += 1 if field.zero?(value)
     total

@@ -74,13 +74,19 @@ quartic_check("intersection.general.factor_degrees",
               general_intersection.factorization.factors.map -> item.degree,
               [0, 1, 3])
 
-closed_point_failed = false
-begin
-  cubic_place.point
-rescue error
-  closed_point_failed = error.to_s.include?("no coefficient-field")
-quartic_check("intersection.closed_point_is_loud",
-              closed_point_failed, true)
+quartic_check("intersection.general.residue_field",
+              cubic_place.residue_field.class_name,
+              "SimpleExtensionField")
+quartic_check("intersection.general.residue_field_degree",
+              cubic_place.residue_field.degree, 3)
+quartic_check("intersection.general.residue_point_on_curve",
+              cubic_place.residue_curve.contains?(cubic_place.point),
+              true)
+quartic_check("intersection.general.residue_point_on_line",
+              cubic_place.residue_line.contains?(cubic_place.point),
+              true)
+quartic_check("intersection.general.residue_certificate",
+              cubic_place.residue_certificate.verified?, true)
 
 tampered_intersection = LineIntersectionCertificate.new(
   curve, general_line, Divisor.new(curve, []),
@@ -174,6 +180,10 @@ quartic_check("intersection.F5.factor_degrees",
               [0, 1, 1, 2])
 quartic_check("intersection.F5.closed_certificate",
               intersection5.divisor.terms[2][1].certified?, true)
+quartic_check("intersection.F5.residue_point_certificate",
+              intersection5.divisor.terms[2][1].
+                residue_coordinates_certified?,
+              true)
 
 # Inseparable multiplicities become divisor coefficients rather than
 # duplicate place objects: (Y²+YZ+Z²)² on X=0 is twice one quadratic place.
@@ -219,6 +229,14 @@ quartic_check("intersection.F4.multiplicity",
               intersection4_places.divisor.terms[0][0], 2)
 quartic_check("intersection.F4.certified",
               intersection4_places.certified?, true)
+quartic_check("intersection.F4.residue_field_order",
+              intersection4_places.divisor.terms[0][1].
+                residue_field.order,
+              16)
+quartic_check("intersection.F4.residue_point_certificate",
+              intersection4_places.divisor.terms[0][1].
+                residue_coordinates_certified?,
+              true)
 
 full_counts = env("TUNGSTEN_QUARTIC_FULL") == "1"
 if full_counts

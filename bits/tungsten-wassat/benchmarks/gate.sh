@@ -7,7 +7,7 @@
 # concurrent agents have twice rebuilt bin/wassat into a silent no-op mid-run
 # and produced fake TIMEOUTs from it.
 #
-# Covers the eight library spec files, the 200-case differential in BOTH
+# Covers the Wassat library specs, the 200-case differential in BOTH
 # default and WASSAT_RAW_AT=0 modes, and php87 --proof verified by wrat.
 #
 # The spec check parses the "N examples: N passed, M failed" summary and
@@ -18,10 +18,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WASSAT_BIN="${1:?usage: gate.sh <wassat-binary> [wrat-binary]}"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/wassat-gate.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
-TUNGSTEN="$ROOT/bin/tungsten"
+TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
 WRAT_BIN="${2:-$TMP/wrat}"
 cd "$ROOT"
 fail=0
+
+echo "### router tooling"
+python3 bits/tungsten-wassat/benchmarks/router_tools_test.py || fail=1
 
 echo "### smoke"
 "$WASSAT_BIN" --version || { echo "FATAL: --version"; exit 2; }
@@ -34,9 +37,17 @@ fi
 
 echo
 echo "### library specs"
-for spec in solver cli preprocess incremental sls trim explain portfolio; do
+for spec in solver cli preprocess incremental sls trim explain portfolio multiplier fermat sum_of_three_cubes mdp automata_sync ternary_affine ais coloring covering directed_kernel edge_matching sliding_puzzle stedman hantzsche_wendt knight_tour local_core latin_csp; do
   path="bits/tungsten-wassat/spec/${spec}_spec.w"
-  if [[ "$spec" == "cli" || "$spec" == "preprocess" || "$spec" == "portfolio" ]]; then
+  # `solver` includes true concurrent CAS/conflict-budget regressions and SLS
+  # now exercises the same native atomic cancellation ABI. Run both against
+  # the compiled runtime; compiler/test/test_interpreter.w separately pins the
+  # source interpreter's single-threaded mirror of those calls.
+  # Everything compiles except the interpreter-only trio; a new spec added to
+  # the loop above therefore defaults to the compiled engine — the safe side,
+  # since only interpreter-tolerant specs belong in the exclusion list.
+  case "$spec" in incremental|trim|explain) gate_compile=0 ;; *) gate_compile=1 ;; esac
+  if [[ "$gate_compile" == "1" ]]; then
     if ! "$TUNGSTEN" compile "$path" --out "$TMP/gate-$spec" --no-lto >/dev/null 2>&1; then
       echo "  FAIL [$spec] compile failed"; fail=1; continue
     fi

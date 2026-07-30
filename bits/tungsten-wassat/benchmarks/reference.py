@@ -44,12 +44,14 @@ than failing, so the suite still runs on a bare checkout:
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -72,6 +74,10 @@ NOISE_MS = float(os.environ.get("NOISE_MS", "8")) / 1000.0
 FRONTIER_BUDGET = float(os.environ.get("FRONTIER_BUDGET", "60"))
 SURVEY_BUDGET = float(os.environ.get("SURVEY_BUDGET", "120"))
 COMP_BUDGET = float(os.environ.get("COMP_BUDGET", "60"))
+LYMPH_BUDGET = float(os.environ.get("LYMPH_BUDGET", "5"))
+LYMPH_REPS = int(os.environ.get("LYMPH_REPS", "5"))
+XORSHIFT_BUDGET = float(os.environ.get("XORSHIFT_BUDGET", "30"))
+XORSHIFT_REPS = int(os.environ.get("XORSHIFT_REPS", "1"))
 # A row counts as a tie when the two times are within TIE_BAND of each other;
 # below TIE_FLOOR seconds the row is process-startup noise and always ties.
 TIE_BAND = float(os.environ.get("TIE_BAND", "1.10"))
@@ -185,14 +191,58 @@ COMPETITION: list[tuple[str, str, str, str, float | None, float | None, float | 
     ("sc2026: generic-csp", "connm-ue-csp-sat-n600-d0.04-s17930", "connm-ue-csp-sat-n600-d0.04-s1793042357.used-as.sat04-975.cnf", "unsat", 30.42, 48.95, 37.71),
     ("sc2026: hgen", "170225812", "170225812.cnf", "sat", 0.39, 14.08, 34.86),
     ("sc2026: station-repacking", "41-119494", "41-119494.cnf", "sat", 6.31, 124.51, 27.90),
+    # Direct binary-DFA image encoding.  The strict structural shortcut
+    # recovers the Černý merge/cycle letters and constructs a checked word;
+    # only the two LymphoSAT variants solved this row in the published field.
+    ("sc2026: automata-synchronization", "crn_40_1521_s", "crn_40_1521_s--b358bf711108.cnf", "sat", 0.16, None, None),
     ("sc2026: cellular-automata", "spg_200_301", "spg_200_301.cnf", "unsat", 17.55, 70.95, 309.27),
-    # WRONG-ANSWER WITNESS: wassat --fast reports UNSATISFIABLE here in ~12s.
-    # SC2026 records these SATISFIABLE with a verified model (green_lymphosat,
-    # 0.04s); 29 of 31 entrants, CaDiCaL 3 and Kissat included, timed out at
-    # 5000s. Siblings 1/2/4/6/8/9/10/12/13/14/15 behave identically. This row
-    # is meant to keep the suite red until the fast-only technique is fixed;
-    # --proof mode does not reproduce the claim (it times out instead).
-    ("sc2026: lymphosat-only", "16", "16.cnf", "sat", 0.04, None, None),
+    # Explicit clique obstructions in graph-coloring encodings.  These are
+    # retained as individual competition rows because only two field entrants
+    # solved either mulsol instance, while the generic structural certificate
+    # in lib/coloring.w decides all five without CDCL.
+    ("sc2026: graph-coloring", "adv_gc_n100_k10_UNSAT_s42", "adv_gc_n100_k10_UNSAT_s42.cnf", "unsat", 0.57, 122.94, 0.92),
+    ("sc2026: graph-coloring", "adv_gc_n100_k14_UNSAT_s42", "adv_gc_n100_k14_UNSAT_s42.cnf", "unsat", 62.91, None, 486.86),
+    ("sc2026: graph-coloring", "adv_gc_n300_k10_UNSAT_s42", "adv_gc_n300_k10_UNSAT_s42.cnf", "unsat", 0.97, 113.58, 3.05),
+    ("sc2026: graph-coloring", "mulsol.i.2.30", "mulsol.i.2.30.cnf", "unsat", 0.18, None, None),
+    ("sc2026: graph-coloring", "mulsol.i.4.30", "mulsol.i.4.30.cnf", "unsat", 0.18, None, None),
+]
+
+# These twelve official rows are exact ternary-affine GF(3) systems; only two
+# of 31 entrants solved them. The dedicated section checks every sibling in
+# Main-compatible proof mode without making two generic local rivals consume a
+# timeout per row.
+LYMPHOSAT = [
+    ("1", "1.cnf", 0.04),
+    ("2", "2.cnf", 0.04),
+    ("4", "4.cnf", 0.04),
+    ("6", "6.cnf", 0.04),
+    ("8", "8.cnf", 0.04),
+    ("9", "9.cnf", 0.04),
+    ("10", "10.cnf", 0.04),
+    ("12", "12.cnf", 0.04),
+    ("13", "13.cnf", 0.04),
+    ("14", "14.cnf", 0.04),
+    ("15", "15.cnf", 0.04),
+    ("16", "16.cnf", 0.04),
+]
+
+# Eleven official SAT rows that render a complete 32-bit xorshift/fold circuit
+# and pin its accumulator word. The generic local rivals need minutes on
+# competition hardware; keep them in a Wassat-only model-checked lane so the
+# maintained reference suite can track the circuit-native specialist without
+# paying 22 rival timeouts.
+XORSHIFT = [
+    ("r14_110", "xorshift_r14_110.cnf", 262.79),
+    ("r14_31", "xorshift_r14_31.cnf", 191.73),
+    ("r14_42", "xorshift_r14_42.cnf", 712.55),
+    ("r14_7", "xorshift_r14_7.cnf", 309.72),
+    ("r14_85", "xorshift_r14_85.cnf", 390.65),
+    ("r15_104", "xorshift_r15_104.cnf", 547.36),
+    ("r15_113", "xorshift_r15_113.cnf", 1235.19),
+    ("r15_175", "xorshift_r15_175.cnf", 1580.73),
+    ("r15_191", "xorshift_r15_191.cnf", 1088.34),
+    ("r16_119", "xorshift_r16_119.cnf", 636.97),
+    ("r16_180", "xorshift_r16_180.cnf", 760.58),
 ]
 
 FRONTIER = []
@@ -200,6 +250,33 @@ for name, env_name in (("lr5_37", "LR5_37"), ("lr5_41", "LR5_41")):
     path = os.environ.get(env_name)
     if path:
         FRONTIER.append((name, path))
+
+
+def benchmark_path(root: Path, relative: str) -> Path:
+    """Resolve both legacy names and `sc2026.py fetch --all` hash suffixes."""
+    direct = root / relative
+    if direct.is_file():
+        return direct
+    index_path = root / "index.json"
+    if not index_path.is_file():
+        return direct
+    try:
+        index = json.loads(index_path.read_text())
+    except (OSError, ValueError):
+        return direct
+    wanted = Path(relative).stem
+    normalized_wanted = wanted.replace(".cnf", "")
+    matches = [
+        root / f"{stem}.cnf"
+        for stem in index
+        if (
+            stem == wanted
+            or stem.startswith(wanted + "--")
+            or stem.rsplit("--", 1)[0].replace(".cnf", "") == normalized_wanted
+        )
+    ]
+    matches = [path for path in matches if path.is_file()]
+    return matches[0] if len(matches) == 1 else direct
 
 
 def solvers():
@@ -369,7 +446,7 @@ def survey_section(title: str, rows, root: Path, budget: float, published: bool,
     print(header)
     for row in rows:
         family, name, rel, expect = row[0], row[1], row[2], row[3]
-        path = str(root / rel)
+        path = str(benchmark_path(root, rel))
         if family != last_family:
             print(f"  -- {family} --")
             last_family = family
@@ -434,6 +511,151 @@ def scoreboard(tally: dict) -> None:
           f"{tot[0]:3d} {tot[1]:3d} {tot[2]:3d} {tot[3]:8d} {tot[4]:8d}  "
           f"{fmt_geomean(geomean(all_ratios)):>22s}")
     print("    (geomean > 1 means wassat is faster than the best installed rival)")
+
+
+def output_model(text: str) -> set[int]:
+    values: set[int] = set()
+    for line in text.splitlines():
+        if line.startswith("v "):
+            values.update(int(token) for token in line[2:].split() if token != "0")
+    return values
+
+
+def dimacs_model_satisfies(path: Path, assignment: set[int]) -> bool:
+    clause: list[int] = []
+    for line in path.read_text().splitlines():
+        if not line or line.startswith(("c", "p")):
+            continue
+        for token in line.split():
+            literal = int(token)
+            if literal == 0:
+                if not any(lit in assignment for lit in clause):
+                    return False
+                clause.clear()
+            else:
+                clause.append(literal)
+    return not clause
+
+
+def lymphosat_section() -> int:
+    """Check all twelve official GF(3) rows without 24 generic timeouts.
+
+    `--drat path` deliberately exercises the Main-compatible path: SAT models
+    are self-certifying and must leave no empty/stale proof artifact behind.
+    Published times are printed only as competition-hardware context.
+    """
+    print("\n== SAT Competition 2026 lymphosat family (Main-compatible SAT path) ==")
+    if not SC2026.is_dir():
+        print(f"  skipped: {SC2026} not present")
+        return 0
+    failures = solved = 0
+    print(f"  {'instance':12s} {'wassat':>9s} {'field best*':>12s}  result")
+    with tempfile.TemporaryDirectory(prefix="wassat-lymphosat-") as directory:
+        root = Path(directory)
+        for name, rel, field_best in LYMPHOSAT:
+            path = benchmark_path(SC2026, rel)
+            if not path.is_file():
+                print(f"  {name:12s} MISSING")
+                continue
+            times: list[float] = []
+            output = ""
+            proof = root / f"{name}.drat"
+            for _ in range(LYMPH_REPS):
+                t0 = time.perf_counter()
+                try:
+                    proc = subprocess.run(
+                        [WASSAT, str(path), "--drat", str(proof)],
+                        capture_output=True, text=True, timeout=LYMPH_BUDGET,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired:
+                    proc = None
+                times.append(time.perf_counter() - t0)
+                if proc is None:
+                    output = ""
+                    break
+                output = proc.stdout
+                if proc.returncode != 10 or verdict_of(output) != "SATISFIABLE":
+                    break
+                if proof.exists():
+                    break
+            model = output_model(output)
+            ok = (
+                len(times) == LYMPH_REPS
+                and verdict_of(output) == "SATISFIABLE"
+                and not proof.exists()
+                and dimacs_model_satisfies(path, model)
+            )
+            elapsed = statistics.median(times)
+            result = "verified SAT model" if ok else "FAIL"
+            print(f"  {name:12s} {elapsed:8.3f}s {field_best:11.2f}s  {result}")
+            if ok:
+                solved += 1
+            else:
+                failures += 1
+    print(f"  {solved}/{len(LYMPHOSAT)} official rows solved with checked models")
+    print("  * published competition hardware; shown as context, not a local ratio")
+    return failures
+
+
+def xorshift_section() -> int:
+    """Track the official xorshift-circuit SAT family with checked models.
+
+    A timeout is performance evidence, not a correctness failure. Any emitted
+    answer must still be SAT with exit 10 and satisfy the original DIMACS.
+    """
+    print("\n== SAT Competition 2026 xorshift family (exact circuit preimages) ==")
+    if not SC2026.is_dir():
+        print(f"  skipped: {SC2026} not present")
+        return 0
+    failures = solved = present = 0
+    print(f"  {'instance':12s} {'wassat':>9s} {'field best*':>12s}  result")
+    for name, rel, field_best in XORSHIFT:
+        path = benchmark_path(SC2026, rel)
+        if not path.is_file():
+            print(f"  {name:12s} MISSING")
+            continue
+        present += 1
+        times: list[float] = []
+        output = ""
+        timed_out = False
+        for _ in range(XORSHIFT_REPS):
+            t0 = time.perf_counter()
+            try:
+                proc = subprocess.run(
+                    [WASSAT, str(path), "--fast"],
+                    capture_output=True, text=True, timeout=XORSHIFT_BUDGET,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                proc = None
+            times.append(time.perf_counter() - t0)
+            if proc is None:
+                timed_out = True
+                output = ""
+                break
+            output = proc.stdout
+            if proc.returncode != 10 or verdict_of(output) != "SATISFIABLE":
+                break
+        if timed_out:
+            print(f"  {name:12s} {XORSHIFT_BUDGET:8.2f}s {field_best:11.2f}s  UNSOLVED")
+            continue
+        model = output_model(output)
+        ok = (
+            len(times) == XORSHIFT_REPS
+            and verdict_of(output) == "SATISFIABLE"
+            and dimacs_model_satisfies(path, model)
+        )
+        elapsed = statistics.median(times)
+        result = "verified SAT model" if ok else "FAIL"
+        print(f"  {name:12s} {elapsed:8.3f}s {field_best:11.2f}s  {result}")
+        if ok:
+            solved += 1
+        else:
+            failures += 1
+    print(f"  {solved}/{present} present official rows solved with checked models")
+    print("  * published competition hardware; shown as context, not a local ratio")
+    return failures
 
 
 def tracked_section(title, instances, budget, expect=None) -> int:
@@ -528,6 +750,8 @@ def main() -> None:
         print("\n  published columns are the competition's own instance-wise results:")
         print("  different hardware and a 5000s budget, so they rank the field, not our clock.")
 
+    failures += xorshift_section()
+    failures += lymphosat_section()
     failures += frontier_section()
     failures += lrc13_section()
 

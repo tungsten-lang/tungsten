@@ -728,6 +728,18 @@ while i < args.size()
     # runtime archive it links against is still the cached -O3 build.
     clang_opt = dev_mode ? "-O0" : "-O3"
 
+  # Parallel codegen: -O3 on one big module is single-threaded and ~90% of
+  # a large build's wall. When homebrew LLVM is present, llvm-split the
+  # module ~14 ways and compile the parts with parallel clang -c, then feed
+  # the objects to the link below (self-compile codegen 13.5s -> ~5s; the
+  # produced compiler emits byte-identical IR). Strictly best-effort: any
+  # failure falls back to the single-TU path. Gated to plain -O3 native
+  # builds — dev -O0 doesn't need it, and PGO/custom flags must not mix
+  # homebrew-clang instrumentation with Apple's profile runtime.
+  parallel_objs = nil
+  if clang_opt == "-O3" && cross_target == "" && !doing_lto && !frame_pointers && env("TUNGSTEN_PARALLEL_CODEGEN") != "0"
+    parallel_objs = parallel_codegen_objects(ll_path, verbose)
+
   clang_cmd = StringBuffer(0)
   clang_cmd << host_c_compiler()
   clang_cmd << " "
@@ -866,7 +878,10 @@ while i < args.size()
 
   includes -> clang_cmd << inc + " "
 
-  clang_cmd << ll_path
+  if parallel_objs != nil
+    clang_cmd << parallel_objs
+  else
+    clang_cmd << ll_path
 
   if needs_zstd
     zlf = zstd_ldflags
@@ -1401,6 +1416,54 @@ while i < args.size()
   if v == nil
     return ""
   v
+
+# Split the emitted module and compile the parts with parallel clang -c.
+# Returns the space-joined .o paths, or nil for "use the single-TU path"
+# (missing toolchain, or any split/compile failure). Uses homebrew LLVM's
+# llvm-split + clang: llvm-split without -preserve-locals promotes module-
+# local symbols so partitions distribute (with it, every function glued to
+# the shared globals lands in one partition and nothing parallelizes), and
+# its bitcode output needs a matching-version clang to read.
+-> parallel_codegen_objects(ll_path, verbose)
+  llvm_bin = "/opt/homebrew/opt/llvm/bin"
+  if !file?(llvm_bin + "/llvm-split") || !file?(llvm_bin + "/clang")
+    return nil
+  parts = 14
+  prefix = ll_path + ".part"
+  q_ll = dev_runtime_shell_quote(ll_path)
+  q_prefix = dev_runtime_shell_quote(prefix)
+  if system(dev_runtime_shell_quote(llvm_bin + "/llvm-split") + " -j " + parts.to_s() + " -o " + q_prefix + " " + q_ll) != true
+    return nil
+  flags = "-O3 -DNDEBUG " + march_flags() + " -fmerge-all-constants "
+  on macos
+    flags = flags + "-fveclib=Darwin_libsystem_m "
+  cmd = StringBuffer(1024)
+  objs = StringBuffer(512)
+  i = 0
+  while i < parts
+    part = prefix + i.to_s()
+    if !file?(part)
+      return nil
+    cmd << dev_runtime_shell_quote(llvm_bin + "/clang")
+    cmd << " "
+    cmd << flags
+    cmd << "-c -x ir "
+    cmd << dev_runtime_shell_quote(part)
+    cmd << " -o "
+    cmd << dev_runtime_shell_quote(part + ".o")
+    cmd << " & "
+    objs << dev_runtime_shell_quote(part + ".o")
+    objs << " "
+    i += 1
+  cmd << "wait"
+  if system(cmd.to_s()) != true
+    return nil
+  i = 0
+  while i < parts
+    if !file?(prefix + i.to_s() + ".o")
+      return nil
+    i += 1
+  objs.to_s()
 
 -> incremental_cache_slot(file_path, out_path)
   dir = env("TUNGSTEN_CACHE_DIR")

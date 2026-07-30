@@ -11,47 +11,79 @@
 
 + Math
 
-  # Hyperbolic (exact, just compose with exp).
+  # Hyperbolic functions.  The sign-split tanh form never computes inf/inf,
+  # and the small-x sinh path uses expm1 to avoid cancellation.
 
-  # tanh(x) = (e^(2x) - 1) / (e^(2x) + 1)
-  # Stable form across the full f32 range; saturates at ±1 for |x| > ~9.
   -> .tanh(x) f64
-    e2x = Math.exp(~2.0 * x)
-    (e2x - ~1.0) / (e2x + ~1.0)
+    if x >= ~0.0
+      decay = Math.exp(~-2.0 * x)
+      return (~1.0 - decay) / (~1.0 + decay)
+    decay = Math.exp(~2.0 * x)
+    (decay - ~1.0) / (decay + ~1.0)
 
-  # sinh(x) = (e^x - e^-x) / 2
   -> .sinh(x) f64
+    return x if x == ~0.0
+    return ~0.0 - Math.sinh(~0.0 - x) if x < ~0.0
+    if x < ~0.5
+      delta = Math.expm1(x)
+      return delta * (~2.0 + delta) / (~2.0 * (~1.0 + delta))
     ex = Math.exp(x)
     (ex - ~1.0 / ex) / ~2.0
 
-  # cosh(x) = (e^x + e^-x) / 2
   -> .cosh(x) f64
-    ex = Math.exp(x)
+    magnitude = Math.abs(x)
+    ex = Math.exp(magnitude)
     (ex + ~1.0 / ex) / ~2.0
 
   # Inverse hyperbolic.
 
-  # asinh(x) = ln(x + sqrt(x² + 1))
   -> .asinh(x) f64
-    Math.log(x + Math.sqrt(x * x + ~1.0))
+    return x if x == ~0.0
+    return ~0.0 - Math.asinh(~0.0 - x) if x < ~0.0
+    if x > ~1.0e154
+      return Math.log(x) + ~0.6931471805599453
+    root = Math.sqrt(~1.0 + x * x)
+    Math.log1p(x + x * x / (~1.0 + root))
 
-  # acosh(x) = ln(x + sqrt(x² - 1))   for x >= 1
   -> .acosh(x) f64
-    Math.log(x + Math.sqrt(x * x - ~1.0))
+    if x > ~1.0e154
+      return Math.log(x) + ~0.6931471805599453
+    offset = x - ~1.0
+    Math.log1p(offset + Math.sqrt(offset * (x + ~1.0)))
 
-  # atanh(x) = 0.5 * ln((1 + x) / (1 - x))   for |x| < 1
   -> .atanh(x) f64
-    ~0.5 * Math.log((~1.0 + x) / (~1.0 - x))
+    return x if x == ~0.0
+    return ~0.0 - Math.atanh(~0.0 - x) if x < ~0.0
+    ~0.5 * Math.log1p((~2.0 * x) / (~1.0 - x))
 
   # Exp/log family (derived).
 
-  # expm1(x) = e^x - 1. Note: less precise near x=0 than libm's expm1
-  # (which is engineered to avoid the catastrophic cancellation).
+  # expm1 and log1p use convergent local series where direct subtraction or
+  # addition would discard the low bits.
   -> .expm1(x) f64
+    magnitude = Math.abs(x)
+    if magnitude < ~1.0e-5
+      term = x
+      sum = x
+      n = 2
+      while n <= 24
+        term = term * x / (n + ~0.0)
+        sum += term
+        n += 1
+      return sum
     Math.exp(x) - ~1.0
 
-  # log1p(x) = ln(1 + x). Same accuracy caveat as above near x=0.
   -> .log1p(x) f64
+    magnitude = Math.abs(x)
+    if magnitude < ~1.0e-4
+      term = x
+      sum = x
+      n = 2
+      while n <= 40
+        term *= ~0.0 - x
+        sum += term / (n + ~0.0)
+        n += 1
+      return sum
     Math.log(~1.0 + x)
 
   # log2(x) = ln(x) / ln(2)
@@ -77,10 +109,17 @@
     else
       ~0.0 - Math.exp(Math.log(~0.0 - x) / ~3.0)
 
-  # hypot(a, b) = sqrt(a² + b²). Naive form — risks overflow when
-  # |a|, |b| > ~2^63. For ML-scale inputs this is fine.
+  # Scaled hypot avoids both overflow and destructive underflow.
   -> .hypot(a, b) f64
-    Math.sqrt(a * a + b * b)
+    left = Math.abs(a)
+    right = Math.abs(b)
+    if right > left
+      temporary = left
+      left = right
+      right = temporary
+    return ~0.0 if left == ~0.0
+    ratio = right / left
+    left * Math.sqrt(~1.0 + ratio * ratio)
 
   # Truncation (round toward zero).
   -> .trunc(x) f64
@@ -106,10 +145,14 @@
 
   # asin(x) = atan(x / sqrt(1 - x²))   for |x| < 1
   -> .asin(x) f64
+    return ~1.5707963267948966 if x == ~1.0
+    return ~-1.5707963267948966 if x == ~-1.0
     Math.atan(x / Math.sqrt(~1.0 - x * x))
 
   # acos(x) = π/2 - asin(x)
   -> .acos(x) f64
+    return ~0.0 if x == ~1.0
+    return ~3.141592653589793 if x == ~-1.0
     ~1.5707963267948966 - Math.asin(x)
 
   # atan2(y, x) — quadrant-correct atan(y/x).

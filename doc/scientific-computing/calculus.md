@@ -1,0 +1,93 @@
+# Calculus
+
+`use calculus` loads the smooth numeric calculus layer. It complements exact
+polynomial methods in `use algebra`: `Polynomial#derivative`,
+`#antiderivative`, and `#definite_integral` stay exact over the coefficient
+field, while `Calculus` propagates floating Taylor and differential data
+through arbitrary user functions.
+
+## Arbitrary-order derivatives and Taylor series
+
+`TaylorJet` stores normalized Taylor coefficients
+`a[k] = f^(k)(x₀) / k!`. Products use convolution; division and elementary
+transcendentals use formal series recurrences.
+
+```w
+use calculus
+
+f = -> (x) x.exp * x.sin
+
+Calculus.derivative(f, ~0.0)     # 1
+Calculus.derivative(f, ~0.0, 3)  # 2
+
+jet = Calculus.taylor(f, ~0.0, 7)
+jet.coefficients
+jet.derivatives
+```
+
+Inside a differentiated closure, call elementary functions on the active
+value (`x.exp`, `x.log`, `x.sin`, `x.cos`, `x.tan`, `x.sinh`, `x.cosh`,
+`x.tanh`, `x.sqrt`). `Math.sin(x)` and the other `Math` primitives are the
+raw scalar libm surface and intentionally accept real scalars rather than
+active calculus objects.
+
+## Gradients, Jacobians, and Hessians
+
+`Differential` carries a value, gradient, and Hessian. The exact first- and
+second-order chain rules are evaluated once through the closure:
+
+```w
+surface = -> (v)
+  x = v[0]
+  y = v[1]
+  x * x * y + (x * y).sin
+
+Calculus.gradient(surface, [~1.0, ~2.0])
+Calculus.hessian(surface, [~1.0, ~2.0])
+Calculus.value_gradient_hessian(surface, [~1.0, ~2.0])
+
+mapping = -> (v) [v[0] * v[1], v[0].sin + v[1].cos]
+Calculus.jacobian(mapping, [~2.0, ~3.0])
+```
+
+The supported elementary functions are `exp`, `log`, `sqrt`, `sin`, `cos`,
+`tan`, `sinh`, `cosh`, `tanh`, `asin`, `acos`, `atan`, and constant powers.
+Branches and singular points retain their ordinary analytic limitations.
+
+## Adaptive integration
+
+`Calculus.integrate` uses adaptive Simpson subdivision on a finite interval.
+The result never hides the stopping condition:
+
+```w
+result = Calculus.integrate(
+  -> (x) Math.sin(x),
+  ~0.0,
+  ~3.141592653589793,
+  ~1.0e-10,  # absolute tolerance
+  ~1.0e-10,  # relative tolerance
+  20         # maximum subdivision depth
+)
+
+result.value
+result.error_estimate
+result.evaluations
+result.intervals
+result.converged?
+```
+
+`QuadratureResult#certified?` is always false. Its error is the accumulated
+Simpson/Richardson estimate, not an interval-arithmetic proof. Improper,
+oscillatory-specialized, singular, and multidimensional quadrature remain
+future capabilities.
+
+## Transcendental accuracy
+
+The derived `Math` layer now uses cancellation-safe local series for `expm1`
+and `log1p`, sign-stable saturation for `tanh`, scaled `hypot`, stable inverse
+hyperbolic formulas, and exact inverse-trig endpoint handling. These are still
+binary64 numerical functions, not symbolic transcendental expressions.
+
+Current operator dispatch is receiver-directed: write `x * ~2.0` inside an
+active closure. Reverse scalar operations such as `~2.0 * x` need a future
+general reverse-operator protocol.

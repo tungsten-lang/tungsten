@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(171 total), grouped by area, with its declaration, a one-line
+(175 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -52,6 +52,10 @@ summary from the source header, and a link to the source.
 | `Special` | `+ Special` | Special — transcendental / special functions (SciPy `scipy.special` analogue). | [`core/special.w`](../core/special.w) |
 | `Stats` | — | Stats — distributions, descriptive stats, sampling. | [`core/stats.w`](../core/stats.w) |
 | `Tensor` | — | core/tensor.w — N-dimensional dense Tensor (language type). | [`core/tensor.w`](../core/tensor.w) |
+| `Calculus` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
+| `TaylorJet` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
+| `Differential` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
+| `QuadratureResult` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
 | `Dual` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
 | `Tape` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
 | `Autodiff` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |

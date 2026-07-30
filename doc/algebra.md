@@ -5,6 +5,11 @@ geometry layers. `Rational` remains a numeric scalar in
 `core/numeric/rational.w`; `Field` is the algebra-side protocol describing how
 such scalars behave as coefficients.
 
+Exact polynomial derivatives and integrals live here. Smooth numerical
+Taylor series, gradients, Hessians, and quadrature are provided by
+`use calculus`; see
+[scientific-computing/calculus.md](scientific-computing/calculus.md).
+
 The trust model, Wassat/WRAT boundary, descent dependency graph, and
 FLT-scale roadmap are in [certified-mathematics.md](certified-mathematics.md).
 

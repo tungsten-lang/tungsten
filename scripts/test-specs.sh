@@ -273,6 +273,7 @@ compiled_specs=(
   spec/core/control_flow_spec.w
   spec/core/classes_spec.w
   spec/core/arrays_hashes_spec.w
+  spec/core/calculus_spec.w
   spec/core/enumerable_native_spec.w
   spec/core/network_native_spec.w
   spec/core/system_spec.w
@@ -324,6 +325,7 @@ interpreter_specs=(
   spec/interpreter/uuid_byte_revisit_spec.w
   spec/interpreter/dot_elementwise_spec.w
   spec/core/base64_native_spec.w
+  spec/core/calculus_spec.w
   spec/core/system_spec.w
   spec/numeric/complex_spec.w
   spec/numeric/hypercomplex_mul_spec.w

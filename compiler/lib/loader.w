@@ -1150,15 +1150,17 @@ use parser
   -> find_core_root(dir)
     if dir != ""
       parts = dir.split("/")
-      result = ""
       i = parts.size()
       while i > 0
         candidate = parts[0...i].join("/")
+        # NEAREST ancestor wins. The walk used to continue upward and keep
+        # the SHALLOWEST match, so a checkout nested inside another
+        # (git worktrees under .claude/worktrees/, a vendored repo) silently
+        # compiled the OUTER repo's core/ — stage identity checks then raced
+        # against concurrent edits in the outer tree.
         if file?(candidate + "/core/tungsten.w")
-          result = candidate
+          return candidate
         i -= 1
-      if result != ""
-        return result
     if file?("core/tungsten.w")
       return "."
     # Install-root fallback: compiling a .w file whose ancestry AND cwd both

@@ -71,4 +71,18 @@ gds_bump
 gds_bump
 gds_check("demote.gvar_helper_mutation", $gds_counter, "3")
 
+# (g) var read ONLY inside an ELSIF arm of a fn: elsif_clauses are
+# [condition, body] packed pairs invisible to ast_children — the walker
+# must descend them or the read sees an unset global (wassat covering's
+# WASSAT_COVER_MAX_EDGES regression shape).
+g_elsif_only = 77
+-> gds_elsif_read(n)
+  if n == 1
+    1
+  elsif n == g_elsif_only - 75
+    g_elsif_only
+  else
+    3
+gds_check("demote.elsif_only_read", gds_elsif_read(2), "77")
+
 << "global demotion scopes: ok"

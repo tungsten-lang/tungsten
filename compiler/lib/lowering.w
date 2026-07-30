@@ -98,6 +98,24 @@ use lowering/definitions
       if p[0] != :str
         evr_walk(p[1], refs, nested)
       pi += 1
+  # elsif_clauses are [condition, body] packed pairs — the same
+  # ast_children blindness. A var read ONLY inside an elsif arm was
+  # demoted (wassat's WASSAT_COVER_MAX_EDGES read nil in covering).
+  # mark_subtree_escape walks them explicitly for the same reason.
+  if k == :if
+    ecs = node.elsif_clauses
+    if ecs != nil
+      ei = 0
+      while ei < ecs.size()
+        ec = ecs[ei]
+        evr_walk(ec[0], refs, nested)
+        ebody = ec[1]
+        if ebody != nil
+          bi = 0
+          while bi < ebody.size()
+            evr_walk(ebody[bi], refs, nested)
+            bi += 1
+        ei += 1
   kids = ast_children(node)
   ki = 0
   while ki < kids.size()

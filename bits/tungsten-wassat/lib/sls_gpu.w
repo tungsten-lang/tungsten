@@ -13,6 +13,8 @@
 #           5 seed   6 (unused)  7 (unused)
 #   ctrl:   0 found flag  1 winning walker id
 
+use atomic_stop
+
 ## i32[]: fla, fcs, fcl, asg, satc, crit, ulist, upos, uc, rngbuf, params
 @gpu fn wassat_sls_gpu_init(fla, fcs, fcl, asg, satc, crit, ulist, upos, uc, rngbuf, params)
   wid = gpu.thread_position_in_grid.x ## i32
@@ -308,7 +310,7 @@
   done = 0
   chunk_flips = 200000
   while done < max_flips && !found
-    if stop_cell != nil && stop_cell[0] != 0
+    if wassat_stop_requested?(stop_cell)
       max_flips = done
     else
       this_chunk = chunk_flips

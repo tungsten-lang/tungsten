@@ -32,6 +32,7 @@
 
 use cnf
 use policy
+use atomic_stop
 use sls
 
 UNASSIGNED = 0
@@ -112,12 +113,28 @@ WASSAT_PROOF_DRAT = 2
     @hstate = i64[2]              # heap size / EVSIDS increment
     @rassign = i64[nv + 1]       # isolated scratch assignment for proof replay
     @pstate = i64[8]             # qhead / tsize / conflict / bail / props
-    @astate = i64[6]             # scalars across the native analyze call
+    @astate = i64[11]            # scalars across native analyze / OTFS
     @lbuf = i64[nv + 3]          # learned clause, reused every conflict
     @obuf = i64[nv + 3]          # watch-ordered copy of the learned clause
     @mbuf = i64[nv + 3]          # minimisation scratch
     @mstk = i64[nv + 3]          # recursive-minimisation DFS stack
     @mclr = i64[nv + 3]          # marks to clear after minimisation
+    # Append-only on-the-fly strengthening. During analysis, a resolvent that
+    # subsumes its reason yields the reason without the pivot as an additional
+    # implied clause. Keeping the old reason avoids watch/reason surgery; the
+    # stronger side lemma still installs the new propagation edge. Proof modes
+    # stay on the ordinary learned-clause path until side-lemma hints exist.
+    @otfs_allowed = @proof_mode == WASSAT_PROOF_NONE && env("WASSAT_OTFS") != "0"
+    @use_otfs = false
+    # These buffers are disjoint in time: proof replay never runs in the
+    # proof-free mode where OTFS is enabled. Reusing its native work arrays
+    # keeps the strengthening detector at zero additional bytes per arm.
+    @otfs_hits = 0
+    @otfs_installed = 0
+    @otfs_dominated = 0
+    @otfs_units = 0
+    @otfs_conflicts = 0
+    @pending_conflict = -1
     @lbd_seen = i64[nv + 2]      # scratch for literal-block-distance
     @lbd_stamp = 0
     @trail = i64[nv + 2]
@@ -328,12 +345,20 @@ WASSAT_PROOF_DRAT = 2
     # tables (worker threads must not allocate); on exhaustion the arm
     # compacts via reduce_db, then retires loudly.
     @stop_cell = nil
+    # Optional aggregate conflict budget for a whole in-process race.
+    # state[0] is the CAS-protected global ticket count; state[arm_slot] is
+    # this logical arm's atomic contribution. A nil state leaves ordinary
+    # one-shot and per-slice budgets bit-for-bit on their established path.
+    @conflict_budget_state = nil
+    @conflict_budget_limit = 0
+    @conflict_budget_arm_slot = 0
     @ring = nil
     @ring_cap = 0
     @ring_maxlen = 0
     @ring_stride = 0
     @arm_id = 0
     @read_ticket = 0
+    @share_publish = true
     @credit = nil              # per-author install credit; see set_share_credit
     @fixed_caps = false
     @retired = false
@@ -785,11 +810,20 @@ WASSAT_PROOF_DRAT = 2
     @astate[1] = @tsize
     @astate[2] = alevel
     @astate[5] = @conflicts
+    @astate[6] = 0
+    @astate[9] = @use_otfs ? 1 : 0
     wassat_analyze(@arena, @assign, @level, @reason, @seen, @cmeta,
                    @trail, @lbuf, @mbuf, @mstk, @mclr, @activity, @heap,
                    @heappos, @hstate, @astate, @nvars, @cused,
-                   @vq_next, @vq_prev, @vq_stamp, @vq_state)
+                   @vq_next, @vq_prev, @vq_stamp, @vq_state,
+                   @pwork, @rassign)
     @lsize = @astate[3]
+    if @astate[6] > 0
+      @otfs_hits += 1
+      @lbd_stamp += 1
+      @astate[8] = wassat_lbd_buf(
+        @pwork, @level, @lbd_seen, @astate[6], @lbd_stamp
+      )
     @astate[4]
 
   # All-UIP shrinking: between analysis and LBD/storage, replace each
@@ -843,6 +877,44 @@ WASSAT_PROOF_DRAT = 2
     marked.each -> (v)
       @seen[v] = 0
     core
+
+  # Finish the ordinary failed-assumption path in one place so the owner of a
+  # race's final conflict ticket can preserve the same core without admitting
+  # another conflict. Returns the internal -2 query verdict.
+  -> fail_assumption(a)
+    @failed_core = self.analyze_final(a)
+    blocking = []
+    @failed_core.each -> (l)
+      blocking.push(0 - l)
+    self.log_clause(blocking) unless @proof_mode == WASSAT_PROOF_NONE
+    bi = self.store_clause(blocking, blocking.size)
+    -2
+
+  # A conflict can learn the clause that falsifies an active assumption, but
+  # the ordinary loop observes that only on its next conflict-free iteration.
+  # At the hard shared-budget boundary peers must stop immediately and this
+  # owner must not analyze another conflict, yet dropping that one propagation
+  # tail would erase a valid failed-assumption core. Close only the existing
+  # trail here: preserve a newly exposed conflict for a later slice, advance
+  # already-satisfied assumption levels without making decisions, and report
+  # a falsified assumption if one is now visible.
+  -> finish_final_ticket_assumptions
+    return 0 if @pending_conflict >= 0 || @dlevel >= @nassump
+    confl = self.propagate
+    if confl >= 0
+      @pending_conflict = confl
+      return 0
+    while @dlevel < @nassump
+      a = @assump[@dlevel]
+      av = self.value(a)
+      if av > 0
+        @trail_lim[@dlevel] = @tsize
+        @dlevel += 1
+      elsif av < 0
+        return self.fail_assumption(a)
+      else
+        return 0
+    0
 
   # ---- branching ----------------------------------------------------------
 
@@ -946,8 +1018,7 @@ WASSAT_PROOF_DRAT = 2
     res[base + @nvars + 4] = 0
     res[base + @nvars + 5] = ccall("__w_clock_ms")
     if (status == 1 || status == 0 - 1) && @stop_cell != nil
-      @stop_cell[1] = status
-      @stop_cell[0] = 1
+      won = wassat_stop_publish(@stop_cell, status)
     0
 
   -> lucky_probe
@@ -959,7 +1030,7 @@ WASSAT_PROOF_DRAT = 2
     # A racing search may have answered while this arm was constructing its
     # solver. Do not start four full propagation sweeps after the answer is
     # already known.
-    return 0 if @stop_cell != nil && @stop_cell[0] != 0
+    return 0 if wassat_stop_requested?(@stop_cell)
     tl = wassat_prof_clock
     # A miss must leave the saved phases alone: `enqueue` writes @phase on
     # every assignment, so a failed dive would otherwise reseed every phase
@@ -983,9 +1054,9 @@ WASSAT_PROOF_DRAT = 2
       sphase[v] = @phase[v]
       v += 1
     r = self.lucky_dive(0 - 1, 0)
-    r = self.lucky_dive(1, 0) if r == 0 && (@stop_cell == nil || @stop_cell[0] == 0)
-    r = self.lucky_dive(0 - 1, 1) if r == 0 && (@stop_cell == nil || @stop_cell[0] == 0)
-    r = self.lucky_dive(1, 1) if r == 0 && (@stop_cell == nil || @stop_cell[0] == 0)
+    r = self.lucky_dive(1, 0) if r == 0 && !wassat_stop_requested?(@stop_cell)
+    r = self.lucky_dive(0 - 1, 1) if r == 0 && !wassat_stop_requested?(@stop_cell)
+    r = self.lucky_dive(1, 1) if r == 0 && !wassat_stop_requested?(@stop_cell)
     if r != 1
       v = 0
       while v <= @nvars
@@ -999,7 +1070,7 @@ WASSAT_PROOF_DRAT = 2
   # up. Returns 1 for a total assignment, -1 for root-level UNSAT, 0 for a
   # dive that got stuck (the trail is returned to a propagated root).
   -> lucky_dive(pol, backward)
-    return 0 if @stop_cell != nil && @stop_cell[0] != 0
+    return 0 if wassat_stop_requested?(@stop_cell)
     # backjump(0) declares the whole remaining trail propagated (it sets
     # @qhead to the trail size), so it is NOT a safe way to reach a
     # propagated root: load_flat deliberately hands the solver its input
@@ -1012,7 +1083,7 @@ WASSAT_PROOF_DRAT = 2
       return 0 - 1
     stuck = 0
     i = 0
-    while i < @nvars && stuck == 0 && (@stop_cell == nil || @stop_cell[0] == 0)
+    while i < @nvars && stuck == 0 && !wassat_stop_requested?(@stop_cell)
       v = backward == 0 ? i + 1 : @nvars - i
       if @assign[v] == 0
         l = pol > 0 ? v : 0 - v
@@ -1038,7 +1109,7 @@ WASSAT_PROOF_DRAT = 2
       i += 1
     # Cancellation is not a logical outcome. Unwind the private arm and let
     # lucky_probe report a miss; the winning arm owns the real verdict.
-    if @stop_cell != nil && @stop_cell[0] != 0
+    if wassat_stop_requested?(@stop_cell)
       self.backjump(0)
       return 0
     if stuck == 2
@@ -1066,6 +1137,35 @@ WASSAT_PROOF_DRAT = 2
       @bphase[v] = pol
     0
 
+  # A refute-only solver over an exact subset of the input keeps the original
+  # DIMACS variable numbers so that its learned clauses can be replayed
+  # directly against the full formula.  Most of those coordinates may not
+  # occur in the subset at all; letting the decision heuristic visit them
+  # turns a 3k-variable local core with sparse ids into a 315k-variable search.
+  #
+  # Mark absent coordinates as harmless level-zero assignments, exactly like
+  # load_flat retires variables removed by preprocessing.  The caller supplies
+  # a dense 0/1 mark array and may only use the resulting solver as a
+  # refutation scout: a SAT model of the subset says nothing about the full
+  # formula, while an UNSAT proof remains valid because no stored clause
+  # contains a retired coordinate.
+  -> retire_absent_variables(used)
+    raise "used-variable mark array is too small" if used.size <= @nvars
+    @input_clauses.each -> (clause)
+      clause.each -> (lit)
+        v = lit < 0 ? 0 - lit : lit
+        raise "cannot retire live variable [v]" if used[v] == 0
+    v = 1
+    while v <= @nvars
+      if used[v] == 0 && @assign[v] == 0
+        @assign[v] = -1
+        @lassign[v << 1] = -1
+        @lassign[(v << 1) + 1] = 1
+        @level[v] = 0
+        @reason[v] = -1
+      v += 1
+    0
+
   # All-positive saved phases: bmc-style circuit encodings often sit in a
   # different basin family under inverted polarity (default is negative).
   -> set_positive_phases
@@ -1081,10 +1181,20 @@ WASSAT_PROOF_DRAT = 2
   # target-phase descents, and chrono disturbs them), while the fresh
   # post-probe-miss main solver takes it from the start (mid-run switches
   # measured strictly worse than either pure mode on ibm-12).
+
   # Race axis: All-UIP shrinking, per arm. Global policy keeps it off (see
   # policy.w use_shrinking); this is how the race samples it anyway.
   -> enable_shrink
     @use_shrink = true
+    0
+
+  # Search-time on-the-fly strengthening is deliberately a coordinator-owned
+  # diversity axis. The generic solver starts on the established first-UIP
+  # trajectory; recognized local cores and spare portfolio arms opt in
+  # automatically. Proof modes and the internal all-off ablation remain
+  # ineligible even if a caller asks.
+  -> enable_otfs
+    @use_otfs = @otfs_allowed
     0
 
   # Race axis: trail reuse on restart, per arm. Global policy keeps it off
@@ -1272,6 +1382,28 @@ WASSAT_PROOF_DRAT = 2
     @stop_cell = cell
     0
 
+  # Attach a hard aggregate conflict budget shared by every race arm.
+  #
+  # Layout:
+  #   state[0]        total tickets already reserved across the race
+  #   state[arm_slot] conflicts charged to this logical arm
+  #
+  # `limit` is absolute in state[0]'s units, so a scout continuation can seed
+  # state[0] with already-spent work before attaching its solver. Reallocated
+  # implementations of one logical arm reuse the same arm_slot and therefore
+  # preserve its accounting. Configuration happens on the coordinator before
+  # spawning a worker; the conflict loop performs no allocation.
+  -> set_shared_conflict_budget(state, limit, arm_slot)
+    raise "shared conflict budget needs a positive limit" if limit <= 0
+    raise "shared conflict budget reserves state[0] for the total" if arm_slot <= 0
+    raise "shared conflict budget arm slot [arm_slot] is out of range" if arm_slot >= state.size
+    raise "shared conflict budget counter must be non-negative" if state[0] < 0
+    raise "shared conflict budget counter [state[0]] exceeds limit [limit]" if state[0] > limit
+    @conflict_budget_state = state
+    @conflict_budget_limit = limit
+    @conflict_budget_arm_slot = arm_slot
+    0
+
   # Freeze capacities: grow-in-thread is forbidden, exhaustion retires the
   # arm. Call on the main thread after construction.
   -> enable_fixed_caps
@@ -1291,13 +1423,14 @@ WASSAT_PROOF_DRAT = 2
 
   # Join the sharing ring: ring[0] is the atomic ticket; slot t%cap starts
   # at 8 + slot*stride with [seq, src_arm, len, lits...].
-  -> enable_sharing(ring, cap, maxlen, arm_id)
+  -> enable_sharing(ring, cap, maxlen, arm_id, publish = true)
     @ring = ring
     @ring_cap = cap
     @ring_maxlen = maxlen
     @ring_stride = 3 + maxlen
     @arm_id = arm_id
     @read_ticket = 0
+    @share_publish = publish
     0
 
   # Shared per-author install counter for the adaptive race: cell k counts the
@@ -1341,7 +1474,7 @@ WASSAT_PROOF_DRAT = 2
   # Garden-arm diversity: randomize the initial saved phases from a seed
   # (xorshift). Call before solving; sound because phases only steer
   # branching polarity. Seed 0 keeps the all-negative default.
-  -> reseed_phases(seed)
+  -> reseed_phases(seed, target_basin = false)
     return 0 if seed == 0
     # machine-int typing is load-bearing: untyped xorshift has no 64-bit
     # wrap, promotes to BigInt, and turns this loop quadratic
@@ -1351,7 +1484,12 @@ WASSAT_PROOF_DRAT = 2
       rng = rng ^ (rng << 13)
       rng = rng ^ (rng >> 7)
       rng = rng ^ (rng << 17)
-      @phase[v] = (rng & 1) == 1 ? 1 : -1
+      pol = (rng & 1) == 1 ? 1 : -1
+      @phase[v] = pol
+      # Target phases are enabled on every raw and prepared solver, so branch
+      # decisions read @bphase. Keep the historical phase-only seed normally;
+      # the narrowly measured planning route also seeds that target basin.
+      @bphase[v] = pol if target_basin || @config.use_planning_diversity
       v += 1
     0
 
@@ -1360,10 +1498,17 @@ WASSAT_PROOF_DRAT = 2
   # input ids, preprocessing additions sit between them), and fresh
   # derivations continue from next_gid.
   -> seed_proof_ids(ids, next_gid)
+    unless ids.size == @ncl
+      raise "proof-id table has [ids.size] entries for [@ncl] stored clauses"
     i = 0
+    prev = 0
     while i < ids.size
-      @gid[i] = ids[i]
+      gid = ids[i]
+      raise "proof ids must be positive and strictly increasing" if gid <= prev
+      @gid[i] = gid
+      prev = gid
       i += 1
+    raise "next proof id [next_gid] does not follow the seeded ids" if next_gid <= prev
     @next_gid = next_gid
     0
 
@@ -1703,17 +1848,16 @@ WASSAT_PROOF_DRAT = 2
     self.subsume_learned
     # histogram LBD values to find a cut that removes about half
     total = 0
-    hist = @rhist
     i = 0
     while i < 64
-      hist[i] = 0
+      @rhist[i] = 0
       i += 1
     ci = 0
     while ci < @ncl
       if @alive[ci] == 1 && @clbd[ci] > 0
         b = @clbd[ci]
         b = 63 if b > 63
-        hist[b] += 1
+        @rhist[b] += 1
         total += 1
       ci += 1
     cut = 63
@@ -1722,7 +1866,7 @@ WASSAT_PROOF_DRAT = 2
       acc = 0
       b = 63
       while b >= 2 && acc < half
-        acc += hist[b]
+        acc += @rhist[b]
         cut = b
         b -= 1
 
@@ -1781,19 +1925,18 @@ WASSAT_PROOF_DRAT = 2
       # PROOF_NONE neither assigns meaning to nor reads, so inside this
       # branch it is free scratch.
       if @fixed_caps
-        map = @gid
         nn = 0
         ci = 0
         while ci < @ncl
           if @alive[ci] == 1
-            map[ci] = nn
+            @gid[ci] = nn
             nn += 1
           else
-            map[ci] = -1
+            @gid[ci] = -1
           ci += 1
         ci = 0
         while ci < @ncl
-          nci = map[ci]
+          nci = @gid[ci]
           if nci >= 0
             st = @cmeta[2 * ci]
             n = @cmeta[2 * ci + 1]
@@ -1812,7 +1955,7 @@ WASSAT_PROOF_DRAT = 2
         v = 1
         while v <= @nvars
           r = @reason[v]
-          @reason[v] = map[r] if r >= 0
+          @reason[v] = @gid[r] if r >= 0
           v += 1
         # binary-list entries pack the clause index, so they must be rebuilt
         self.rebuild_binaries
@@ -1903,8 +2046,10 @@ WASSAT_PROOF_DRAT = 2
                                 @asg_count) == 1
             @share_filtered += 1 unless ok
           if ok
-            status = self.import_clause(n)
-            if status >= 0
+            imported = self.import_clause(n)
+            if imported < 0
+              status = 0 - 1
+            elsif imported > 0
               @share_imports += 1
               # Credit the AUTHOR, not the importer. An arm whose lemmas other
               # arms actually install is contributing to the race's finish
@@ -1921,10 +2066,11 @@ WASSAT_PROOF_DRAT = 2
     status
 
   # Assignment-aware install of the clause in @mbuf[0..n) at level zero:
-  # satisfied -> skip; all-false -> the formula is refuted (shared clauses
-  # are formula-implied); unit -> store, enqueue, propagate; otherwise store
-  # watching two non-false literals. Capacity exhaustion drops the import
-  # (sharing is an optimization, never worth corruption).
+  # Returns 1 only when a clause was actually installed, 0 when it was skipped,
+  # and -1 when it refutes the formula. Satisfied clauses and capacity drops
+  # must not receive author credit. Unit clauses are stored, enqueued and
+  # propagated; other clauses watch two non-false literals. Capacity exhaustion
+  # drops the import (sharing is an optimization, never worth corruption).
   -> import_clause(n)
     sat = false
     unassigned = 0
@@ -1955,7 +2101,59 @@ WASSAT_PROOF_DRAT = 2
       self.enqueue(@mbuf[0], ci)
       confl = self.propagate
       return -1 if confl >= 0
-    0
+    1
+
+  # Install one OTFS side lemma under the current post-backjump assignment.
+  # The detector already proved it is a duplicate-free, formula-implied
+  # clause of size at least two. Non-false literals move into the watch
+  # positions. An all-false lemma becomes the next conflict; a unit lemma is
+  # enqueued immediately. Capacity pressure merely drops the optimization.
+  -> install_otfs_clause(n, lbd)
+    return -1 if n < 2
+    if @fixed_caps && (@asize + n + 4 > @acap || @ncl + 2 >= @ccap)
+      return -1
+    front = 0
+    unit_level = 0
+    i = 0
+    while i < n
+      lv = self.value(@pwork[i])
+      if lv < 0
+        v = @pwork[i].abs
+        unit_level = @level[v] if @level[v] > unit_level
+      else
+        tmp = @pwork[front]
+        @pwork[front] = @pwork[i]
+        @pwork[i] = tmp
+        front += 1
+      i += 1
+    ci = self.store_clause(@pwork, n)
+    @clbd[ci] = lbd
+    @nlearned += 1
+    @otfs_installed += 1
+    if front == 0
+      @otfs_conflicts += 1
+      return ci
+    if front == 1 && self.value(@pwork[0]) == 0
+      self.enqueue_lvl(@pwork[0], ci, unit_level)
+      @otfs_units += 1
+    -1
+
+  # The ordinary first-UIP clause is often exactly the OTFS side lemma. If
+  # minimisation made it even stronger, installing the side lemma would only
+  # duplicate watches and database pressure. Event rates are low enough that
+  # this exact set test can stay off the native analysis loop.
+  -> otfs_dominated?(learned_n, candidate_n)
+    return false if learned_n > candidate_n
+    i = 0
+    while i < learned_n
+      found = false
+      j = 0
+      while j < candidate_n && !found
+        found = true if @lbuf[i] == @pwork[j]
+        j += 1
+      return false unless found
+      i += 1
+    true
 
   # ---- search -------------------------------------------------------------
 
@@ -1967,10 +2165,32 @@ WASSAT_PROOF_DRAT = 2
       # Cooperative cancellation: another arm answered. Checked at the top
       # of every iteration — the only place a worker can be stopped.
       confl = -1
-      if @stop_cell != nil && @stop_cell[0] != 0
+      conflict_ticket = -1
+      if wassat_stop_requested?(@stop_cell)
         limited = true
       else
-        confl = self.propagate
+        if @pending_conflict >= 0
+          confl = @pending_conflict
+          @pending_conflict = -1
+        else
+          confl = self.propagate
+      # Reserve aggregate work BEFORE counting or analyzing this conflict.
+      # A failed reservation leaves the implication trail untouched so this
+      # solver can still be continued under a later slice; no arm-local or
+      # global counter is allowed to overshoot the hard race cap.
+      if !limited && confl >= 0 && @conflict_budget_state != nil
+        conflict_ticket = ccall(
+          "__w_arr_try_inc_below", @conflict_budget_state, 0,
+          @conflict_budget_limit
+        )
+        if conflict_ticket == 0
+          @pending_conflict = confl
+          limited = true
+        else
+          z = ccall(
+            "__w_arr_fetch_add", @conflict_budget_state,
+            @conflict_budget_arm_slot, 1
+          )
       if limited
         0
       elsif confl >= 0
@@ -2022,7 +2242,7 @@ WASSAT_PROOF_DRAT = 2
           lbd = self.compute_lbd_buf(n)
           self.log_learned_direct(n, confl)
           # low-LBD learned clauses are the sharing currency
-          self.share_export(n) if @ring != nil && lbd <= @share_lbd && n <= @ring_maxlen
+          self.share_export(n) if @ring != nil && @share_publish && lbd <= @share_lbd && n <= @ring_maxlen
           # Fixed capacities: with the learned clause safely captured, an
           # exhausted arena may now be compacted (backjump to 0 + reduce_db)
           # without corrupting analysis. If it still cannot take the clause
@@ -2094,6 +2314,12 @@ WASSAT_PROOF_DRAT = 2
                 ci = self.store_clause(@obuf, n)
                 @clbd[ci] = lbd
                 self.enqueue_lvl(asserting, ci, target)
+            if @astate[6] > 0
+              if self.otfs_dominated?(n, @astate[6])
+                @otfs_dominated += 1
+              else
+                otfs_confl = self.install_otfs_clause(@astate[6], @astate[8])
+                @pending_conflict = otfs_confl if otfs_confl >= 0
             # Exponential moving averages (fixed-point << 16): the fast/slow
             # LBD ratio is the restart trigger, the trail EMA its blocker.
             @nlearned += 1 if n > 1
@@ -2123,7 +2349,7 @@ WASSAT_PROOF_DRAT = 2
             # level zero with assignment-aware installs.
             if @ring != nil
               @import_pending += 1
-              if @import_pending >= 2048
+              if @import_pending >= 2048 && @pending_conflict < 0
                 @import_pending = 0
                 self.backjump(0)
                 rc = self.share_import
@@ -2133,6 +2359,19 @@ WASSAT_PROOF_DRAT = 2
                   result = -1
             if stop_conflicts > 0 && @conflicts >= stop_conflicts
               limited = true
+        # The owner of the final aggregate ticket processes that conflict
+        # completely. If it did not decide the formula, publish cooperative
+        # budget exhaustion only afterwards; every other arm either observes
+        # the stop or fails its next CAS reservation. A formula-decisive last
+        # conflict returns normally so solve_shared_budget can publish its
+        # verdict. UNSAT-under-assumptions (-2) also stops peers, but must keep
+        # returning its failed core rather than being converted to UNKNOWN.
+        if conflict_ticket == @conflict_budget_limit
+          if (result == 0 || result == -2) && @stop_cell != nil
+            z = wassat_stop_cancel(@stop_cell)
+          if result == 0
+            result = self.finish_final_ticket_assumptions
+            limited = true if result == 0
       else
         # Frontier escalation: a search still undecided after this many
         # conflicts is not going to be decided by the current
@@ -2243,13 +2482,7 @@ WASSAT_PROOF_DRAT = 2
               @dlevel += 1
             elsif av < 0
               # falsified: the query is UNSAT under these assumptions
-              @failed_core = self.analyze_final(a)
-              blocking = []
-              @failed_core.each -> (l)
-                blocking.push(0 - l)
-              self.log_clause(blocking) unless @proof_mode == WASSAT_PROOF_NONE
-              bi = self.store_clause(blocking, blocking.size)
-              result = -2
+              result = self.fail_assumption(a)
             else
               @decisions_made += 1
               @trail_lim[@dlevel] = @tsize
@@ -2309,11 +2542,16 @@ WASSAT_PROOF_DRAT = 2
     @reduce_step = @config.reduce_step
     @auto_vivify = @config.use_vivification
     @use_shrink = @config.use_shrinking
+    # `.from_flat*` constructs an allocation shell with an empty boxed clause
+    # list, then installs the real formula policy here. Lucky is formula
+    # shaped, so retaining the shell's cached value silently bypasses gates
+    # such as the dense-ternary ntil policy.
+    @lucky_pending = @config.use_lucky
     sncl = art["fncl"]
     # size the arena and tables for the live clauses plus learning headroom
     total = 0
-    sfcl = art["fcl"]
-    salive = art["falive"]
+    sfcl = art["fcl"] ## i64[]
+    salive = art["falive"] ## i64[]
     synth = art["fsynth"] == true ? 1 : 0
     i = 0
     while i < sncl
@@ -2391,6 +2629,32 @@ WASSAT_PROOF_DRAT = 2
       elsif self.value(l) < 0
         @ok = false
       u += 1
+    # Preprocessing has removed every occurrence of BVE-eliminated and
+    # substituted variables from this artifact.  On strongly reduced kernels,
+    # keeping them unassigned makes both EVSIDS and VMTF branch on semantically
+    # dead coordinates before they can report a model.  On mildly reduced
+    # kernels those otherwise-useless decision levels can nevertheless perturb
+    # the search trajectory enough to help, so select this treatment from the
+    # artifact rather than imposing it globally.  The measured split is:
+    # substantial equivalence compression (>= 5%) or a BVE-dominated kernel
+    # (>= 60%) benefits; smaller reductions retain the original diversified
+    # trajectory.  Model reconstruction overwrites the placeholders below.
+    stats = art["stats"]
+    retire_gone = stats["vars_substituted"] * 20 >= @nvars
+    retire_gone = true if stats["vars_eliminated"] * 5 >= @nvars * 3
+    if retire_gone
+      gone = art["gone"] ## i64[]
+      v = 1
+      while v <= @nvars
+        if gone[v] != 0 && @assign[v] == 0
+          # Level-zero but deliberately absent from the propagation trail:
+          # no live clause contains this coordinate.
+          @assign[v] = -1
+          @lassign[v << 1] = -1
+          @lassign[(v << 1) + 1] = 1
+          @level[v] = 0
+          @reason[v] = -1
+        v += 1
     @raw_flat = art["raw"] == true
     self.prepare_walk unless lean
     0
@@ -2765,8 +3029,7 @@ WASSAT_PROOF_DRAT = 2
     res[base + @nvars + 5] = ccall("__w_clock_ms")
     # first decisive answer raises the stop flag for every other arm
     if (status == 1 || status == 0 - 1) && @stop_cell != nil
-      @stop_cell[1] = status
-      @stop_cell[0] = 1
+      won = wassat_stop_publish(@stop_cell, status)
     0
 
   # Progress telemetry for the adaptive race, written into this arm's private
@@ -2823,6 +3086,7 @@ WASSAT_PROOF_DRAT = 2
   # the query that produced it.
   -> reset_query
     self.backjump(0)
+    @pending_conflict = -1
     @failed_core = []
     @terminal_status = 0 unless @formula_unsat
     0
@@ -2855,6 +3119,9 @@ WASSAT_PROOF_DRAT = 2
       "conflicts": @conflicts, "decisions": @decisions_made,
       "props": @pstate[4],
       "shrink_seen": @shst[1], "shrink_removed": @shst[2],
+      "otfs_hits": @otfs_hits, "otfs_installed": @otfs_installed,
+      "otfs_dominated": @otfs_dominated,
+      "otfs_units": @otfs_units, "otfs_conflicts": @otfs_conflicts,
       "restarts": @restart_count, "reduces": @reductions }
 
   # A positive conflict budget is additional work for this call. Returning
@@ -4239,7 +4506,7 @@ WASSAT_PROOF_DRAT = 2
 #
 #   st[0] = conflicting clause   st[1] = trail size   st[2] = decision level
 #   st[3] = learned clause size  st[4] = backjump level
--> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[])
+-> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst, otfs, otmark) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   confl = st[0]
   tsize = st[1]
   dl = st[2]
@@ -4248,6 +4515,8 @@ WASSAT_PROOF_DRAT = 2
   index = tsize - 1
   cl = confl
   size = 1
+  resolved = 0
+  otfs_on = st[9] == 1
   keep_going = true
 
   while keep_going
@@ -4262,27 +4531,75 @@ WASSAT_PROOF_DRAT = 2
       pv = p
       if pv < 0
         pv = 0 - pv
-    j = 0
-    while j < n
-      q = ar[stx + j]
-      vq = q
-      if q < 0
-        vq = 0 - q
-      if vq != pv && sn[vq] == 0 && lvl[vq] > 0
-        sn[vq] = 1
-        # MiniSat-style EVSIDS bumps the whole conflict graph as it is first
-        # discovered, not merely the literals surviving minimisation. The
-        # latter throws away precisely the variables whose reasons explain a
-        # conflict and produced noticeably poorer branching on structured
-        # quotient formulas.
-        z = wassat_evsids_bump(act, heap, hpos, hst, vq, nv)
-        z = wassat_vmtf_front(vqn, vqp, vqs, vst, vq)
-        if lvl[vq] >= dl
-          counter += 1
-        else
-          out[size] = q
-          size += 1
-      j += 1
+    # Keep the ordinary first-UIP scan branch-free. OTFS is enabled on one
+    # specialist (and selected local cores), while every protected baseline
+    # arm executes this loop for every reason literal. Splitting the uncommon
+    # path here avoids taxing all of those arms with an always-false test.
+    if otfs_on
+      antecedent = 1
+      j = 0
+      while j < n
+        q = ar[stx + j]
+        vq = q
+        if q < 0
+          vq = 0 - q
+        antecedent += 1 if vq != pv && lvl[vq] > 0
+        if vq != pv && sn[vq] == 0 && lvl[vq] > 0
+          sn[vq] = 1
+          # MiniSat-style EVSIDS bumps the whole conflict graph as it is first
+          # discovered, not merely the literals surviving minimisation.
+          z = wassat_evsids_bump(act, heap, hpos, hst, vq, nv)
+          z = wassat_vmtf_front(vqn, vqp, vqs, vst, vq)
+          if lvl[vq] >= dl
+            counter += 1
+          else
+            out[size] = q
+            size += 1
+        j += 1
+      resolvent = counter + size - 1
+      if resolved > 0 && antecedent > 2 && resolvent < antecedent
+        st[10] += 1
+        gen = st[10]
+        valid = 1
+        cand = 0
+        j = 0
+        while j < n
+          q = ar[stx + j]
+          vq = q
+          if q < 0
+            vq = 0 - q
+          if vq != pv && lvl[vq] > 0
+            if otmark[vq] == gen
+              valid = 0
+            else
+              otmark[vq] = gen
+              stk[cand] = q
+              cand += 1
+          j += 1
+        if valid == 1 && cand == antecedent - 1 && cand >= 2
+          if st[6] == 0 || cand < st[6]
+            j = 0
+            while j < cand
+              otfs[j] = stk[j]
+              j += 1
+            st[6] = cand
+    else
+      j = 0
+      while j < n
+        q = ar[stx + j]
+        vq = q
+        if q < 0
+          vq = 0 - q
+        if vq != pv && sn[vq] == 0 && lvl[vq] > 0
+          sn[vq] = 1
+          z = wassat_evsids_bump(act, heap, hpos, hst, vq, nv)
+          z = wassat_vmtf_front(vqn, vqp, vqs, vst, vq)
+          if lvl[vq] >= dl
+            counter += 1
+          else
+            out[size] = q
+            size += 1
+        j += 1
     # Pivot selection: the next SAME-LEVEL literal of the cone, walking
     # the trail downward. Under chronological backtracking, seen literals
     # with lvl < dl (cone members already routed to `out`) can sit ABOVE
@@ -4304,6 +4621,7 @@ WASSAT_PROOF_DRAT = 2
     index -= 1
     sn[av] = 0
     counter -= 1
+    resolved += 1
     if counter > 0
       cl = rsn[av]
     else
@@ -5280,10 +5598,31 @@ WASSAT_PROOF_DRAT = 2
       out = lines.join("\n") + "\n" unless lines.empty?
   out
 
+# SAT Competition value lines may not exceed 4096 characters.  Reserve room
+# for the final " 0" while packing every model so the last line is terminated
+# and earlier value lines need no artificial terminator.
+WASSAT_VALUE_LINE_MAX = 4096
+
+-> wassat_model_value_text(model)
+  lines = []
+  line = "v"
+  model.each -> (lit)
+    token = " " + lit.to_s
+    if line.size > 1 && line.size + token.size + 2 > WASSAT_VALUE_LINE_MAX
+      lines.push(line)
+      line = "v"
+    line = line + token
+  line = line + " 0"
+  lines.push(line)
+  lines.join("\n") + "\n"
+
+-> wassat_sat_text(model)
+  "s SATISFIABLE\n" + wassat_model_value_text(model)
+
 # Render a solver result in DIMACS competition output format.
 -> wassat_result_text(result)
   if result["status"] == 1
-    "s SATISFIABLE\nv " + result["model"].join(" ") + " 0\n"
+    wassat_sat_text(result["model"])
   elsif result["status"] == 0
     "s UNKNOWN\n"
   else

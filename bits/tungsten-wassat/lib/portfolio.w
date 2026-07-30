@@ -24,6 +24,9 @@
 # exit status and marked out, never respawned; zero live CDCL arms in proof
 # mode is a loud fatal error, never a hang.
 
+use atomic_stop
+use ../../../core/bit_ops
+
 WASSAT_ARM_MARATHON = 0        # rare restarts, saved phases (the default core)
 WASSAT_ARM_GARDEN = 1          # randomized initial phases (diversity)
 WASSAT_ARM_SLS = 2             # local search, models only
@@ -455,35 +458,754 @@ WASSAT_ARM_SLS = 2             # local search, models only
 # Two of those rows are 200k and 553k clauses, far outside the window that was
 # there.
 #
-# Builds inside the thread, exactly like wassat_lucky_arm_body: construction
-# normalises the clause list, which is real work that does not belong on the
-# critical path.
+# Builds inside its first thread slice, exactly like wassat_lucky_arm_body:
+# construction normalises the raw artifact, which is real work that does not
+# belong on the critical path. Later slices resume that same walker object.
 #
 # MODEL ONLY — local search cannot refute, so this arm never writes -1. Its
 # model is in the ORIGINAL formula's variable space (it walks formula's own
 # clauses, not a rendering), which is the same space the raw arms answer in,
 # so the coordinator treats an SLS win exactly like a raw win.
--> wassat_sls_arm_body(nv, formula, res, base, stop, flips, seed)
-  # The stop cell reaches the CONSTRUCTOR too: normalising a multi-million-
-  # clause formula takes seconds of boxed work, and the join must never wait
-  # on an arm whose race is already decided.
-  s = WassatSls.new(formula["nvars"], [], stop, formula)
-  s.set_stop_cell(stop)
-  # Free the core when the walk stops improving -- see set_plateau.
-  s.set_plateau(wassat_sls_plateau_window, wassat_sls_plateau_windows)
-  r = s.solve(flips, seed)
+#
+# A bounded Metaflip-style repair is MODEL ONLY. Freeze every variable outside
+# the exact unsatisfied-clause fringe of the walker's true best snapshot, solve
+# under those assumptions, and grow the fringe only from failed-assumption
+# cores. Formula-level UNSAT (an empty core) is deliberately non-decisive.
+-> wassat_sls_frozen_repair(formula, art, best_bits, best_assign,
+                            best_unsat, stop, conflict_cap = 0,
+                            budget_state = nil, budget_limit = 0,
+                            budget_slot = 0)
+  miss = { "sat": false, "model": [], "attempted": false, "rounds": 0,
+           "core_rounds": 0, "conflicts": 0, "relaxed": 0 }
+  return miss if wassat_stop_requested?(stop)
+  return miss unless art["raw"] == true
+  return miss unless wassat_sls_repair_eligible?(formula)
+  return miss if best_unsat < 1 || best_unsat > WASSAT_SLS_REPAIR_MAX_UNSAT
+
+  nv = formula["nvars"]
+  mutable = i64[nv + 1]
+  meta = i64[2]
+  wassat_sls_mark_fringe(
+    art["fla"], art["fcs"], art["fcl"], art["fncl"],
+    best_bits, mutable, meta
+  )
+  # The snapshot/count equality is an exact hand-off contract between the SLS
+  # kernel and repair. A stale endpoint or malformed snapshot is a miss, never
+  # a larger guessed neighbourhood.
+  return miss unless meta[0] == best_unsat
+  return miss if meta[1] < 1 || meta[1] > WASSAT_SLS_REPAIR_MAX_FRINGE
+  miss["attempted"] = true
+  miss["relaxed"] = meta[1]
+
+  repair = Wassat.from_flat(nv, art, 0)
+  repair.enable_fixed_caps
+  repair.set_stop_cell(stop)
+  if budget_state != nil
+    repair.set_shared_conflict_budget(
+      budget_state, budget_limit, budget_slot
+    )
+  repair.set_phases(best_assign)
+  previous_conflicts = 0
+  round = 0
+  while round < WASSAT_SLS_REPAIR_ROUNDS
+    return miss if wassat_stop_requested?(stop)
+    allowance = wassat_sls_repair_round_conflicts(round)
+    internal_left = WASSAT_SLS_REPAIR_MAX_CONFLICTS - miss["conflicts"]
+    return miss if internal_left <= 0
+    allowance = internal_left if allowance > internal_left
+    if conflict_cap > 0
+      caller_left = conflict_cap - miss["conflicts"]
+      return miss if caller_left <= 0
+      allowance = caller_left if allowance > caller_left
+
+    assumptions = []
+    v = 1
+    while v <= nv
+      assumptions.push(best_bits[v] == 1 ? v : 0 - v) if mutable[v] == 0
+      v += 1
+    # Poll immediately before every persistent-solver query. The solver itself
+    # also polls the same cell at each conflict.
+    return miss if wassat_stop_requested?(stop)
+    r = repair.solve_assuming_budget(assumptions, allowance)
+    delta = r["conflicts"] - previous_conflicts
+    delta = 0 if delta < 0
+    miss["conflicts"] += delta
+    previous_conflicts = r["conflicts"]
+    miss["rounds"] += 1
+
+    if r["status"] == 1
+      unless wassat_model_satisfies?(formula, r["model"])
+        raise "internal error: frozen-fringe repair model does not satisfy the input formula"
+      miss["sat"] = true
+      miss["model"] = r["model"]
+      return miss
+    if r["status"] == 0 - 1
+      core = r["core"]
+      # Empty means the raw formula itself was refuted. This model-only lane
+      # has no certificate channel, so it must not publish or stop the race.
+      return miss if core.empty?
+      added = 0
+      core.each -> (l)
+        v = l.abs
+        if mutable[v] == 0
+          mutable[v] = 1
+          added += 1
+      return miss if added == 0
+      miss["relaxed"] += added
+      miss["core_rounds"] += 1
+      return miss if miss["relaxed"] > WASSAT_SLS_REPAIR_MAX_FRINGE
+    round += 1
+  miss
+
+# One bounded/resumable SLS slice. The first call constructs from the ALREADY
+# BUILT raw artifact and places the walker in `out`; later calls continue it.
+# Result-slab tail:
+#   +nv+1 repair won    +nv+2 repair inspected    +nv+3 walk finished
+#   +nv+4 flips         +nv+5 end ms              +nv+6 start ms
+#   +nv+7 repair conflicts (cumulative)
+-> wassat_sls_arm_body_round(nv, formula, art, res, base, stop,
+                             target_flips, total_flips, seed, out,
+                             first, repair_allowed, repair_conflict_cap,
+                             budget_state = nil, budget_limit = 0,
+                             budget_slot = 0)
+  res[base + nv + 6] = ccall("__w_clock_ms") if first
+  s = nil
+  if first
+    # The stop cell reaches the CONSTRUCTOR too. Importantly, the source is
+    # `art`, not the shared parser Hash: every race arm consumes the same
+    # already-built raw artifact and no second formula view is rebuilt.
+    s = WassatSls.new(nv, [], stop, art)
+    s.set_stop_cell(stop)
+    s.set_plateau(wassat_sls_plateau_window, wassat_sls_plateau_windows)
+    out.push(s)
+  else
+    return 0 if out.empty?
+    s = out[0]
+
+  prefix_target = target_flips
+  if repair_allowed && res[base + nv + 2] == 0 && target_flips > WASSAT_SLS_REPAIR_PREFIX_FLIPS
+    prefix_target = WASSAT_SLS_REPAIR_PREFIX_FLIPS
+  if first
+    r = s.solve(prefix_target, seed)
+  else
+    r = s.continue_solve(prefix_target, seed)
+
+  if !r["sat"] && !wassat_stop_requested?(stop) && repair_allowed && res[base + nv + 2] == 0 && r["flips"] >= WASSAT_SLS_REPAIR_PREFIX_FLIPS
+    res[base + nv + 2] = 1
+    rr = wassat_sls_frozen_repair(
+      formula, art, r["best_bits"], r["best_assign"], r["best_unsat"],
+      stop, repair_conflict_cap, budget_state, budget_limit, budget_slot
+    )
+    res[base + nv + 7] += rr["conflicts"]
+    if rr["sat"]
+      r["sat"] = true
+      r["model"] = rr["model"]
+      res[base + nv + 1] = 1
+
+  # In an unbounded race the first slice may have paused only to attempt the
+  # prefix repair. Resume straight through to its requested ceiling. Bounded
+  # and adaptive races pass a finite per-round target and resume next round.
+  if !r["sat"] && !wassat_stop_requested?(stop) && target_flips > r["flips"]
+    r = s.continue_solve(target_flips, seed)
+
+  res[base + nv + 4] = r["flips"]
+  res[base + nv + 5] = ccall("__w_clock_ms")
+  finished = r["sat"] || r["flips"] >= total_flips || r["retired"]
+  res[base + nv + 3] = 1 if finished
   if r["sat"]
     m = r["model"]
     v = 1
     while v <= nv
       res[base + v] = m[v - 1] > 0 ? 1 : 0
       v += 1
-    res[base + nv + 4] = r["flips"]
     res[base] = 1
     # first decisive answer raises the stop flag for every other arm
-    stop[1] = 1
-    stop[0] = 1
+    won = wassat_stop_publish(stop, 1)
   0
+
+# Scout wrapper: its caller raises `stop` as soon as the decisive scout work
+# ends, so even the nominally long target cannot become an orphaned join.
+-> wassat_sls_arm_body(nv, formula, art, res, base, stop, flips, seed,
+                       repair_allowed = false, repair_conflict_cap = 0,
+                       budget_state = nil, budget_limit = 0,
+                       budget_slot = 0)
+  out = []
+  wassat_sls_arm_body_round(
+    nv, formula, art, res, base, stop, flips, flips, seed, out, true,
+    repair_allowed, repair_conflict_cap,
+    budget_state, budget_limit, budget_slot
+  )
+  0
+
+# ---- xorshift circuit specialist ----------------------------------------------
+#
+# The SC2026 xorshift family is not merely "XOR-heavy".  It is a complete,
+# topologically ordered 32-bit circuit: variables 1..32 are the only inputs,
+# every later variable is defined once by XOR/AND/OR, and exactly 32 trailing
+# units pin one output word.  The high-level circuit is
+#
+#   state = input; accumulator = input
+#   state = xorshift32(state); accumulator {xor/add}= state
+#
+# for a formula-specific sequence of folds.  One final xorshift state is
+# rendered but unused. A full gate scan followed by an exact wire-graph match
+# recovers the fold sequence automatically; there is no filename or user
+# switch in the decision.
+#
+# Once recognized, exhaustive preimage search has only 2^32 candidates and a
+# tiny native evaluator.  It is bounded and MODEL ONLY: exhausting the domain
+# says nothing to the coordinator.  A hit is replayed through every recognized
+# gate and checked against the ORIGINAL CNF before the shared SAT flag moves.
+
+WASSAT_XS32_MASK = 4294967295
+WASSAT_XS32_DOMAIN = 4294967296
+WASSAT_XS32_MAX_FOLDS = 20
+WASSAT_XS32_MAX_WORKERS = 10
+
+-> wassat_xs32_step(x) (i64) i64
+  y = x & WASSAT_XS32_MASK ## i64
+  y = (y ^ (y << 13)) & WASSAT_XS32_MASK
+  y = y ^ (y >> 17)
+  (y ^ (y << 5)) & WASSAT_XS32_MASK
+
+-> wassat_xs32_fold(x, add_mask, nfolds) (i64 i64 i64) i64
+  state = x & WASSAT_XS32_MASK ## i64
+  accumulator = state ## i64
+  i = 0 ## i64
+  while i < nfolds
+    state = wassat_xs32_step(state)
+    if ((add_mask >> i) & 1) == 1
+      accumulator = (accumulator + state) & WASSAT_XS32_MASK
+    else
+      accumulator = accumulator ^ state
+    i += 1
+  accumulator
+
+# Evaluate one three-clause gate definition on a proposed input/output triple.
+# Returns 1 iff every clause is satisfied and every literal belongs to the
+# proposed variables.  The recognizer calls this only during its bounded
+# 8-row truth-table check.
+-> wassat_gate3_clauses_hold(fla, fcs, fcl, ci, a, av, b, bv, o, ov) (i64[] i64[] i64[] i64 i64 i64 i64 i64 i64 i64) i64
+  q = 0 ## i64
+  while q < 3
+    off = fcs[ci + q] ## i64
+    len = fcl[ci + q] ## i64
+    return 0 unless (q == 0 && len == 3) || (q > 0 && len == 2)
+    sat = 0 ## i64
+    j = 0 ## i64
+    while j < len
+      lit = fla[off + j] ## i64
+      var = lit < 0 ? 0 - lit : lit ## i64
+      val = 0 - 1 ## i64
+      val = av if var == a
+      val = bv if var == b
+      val = ov if var == o
+      return 0 if val < 0
+      truth = lit > 0 ? val : 1 - val ## i64
+      sat = 1 if truth == 1
+      j += 1
+    return 0 if sat == 0
+    q += 1
+  1
+
+# Replay the topological gate program. `values` is supplied by the caller so
+# fingerprinting can reuse one allocation and a winning arm can retain the
+# complete original-variable assignment for the final CNF check.
+-> wassat_xs32_circuit_eval(types, lhs, rhs, unit_vars, nv, input, values) (i64[] i64[] i64[] i64[] i64 i64 i64[]) i64
+  v = 1 ## i64
+  while v <= 32
+    values[v] = (input >> (v - 1)) & 1
+    v += 1
+  while v <= nv
+    a = values[lhs[v]] ## i64
+    b = values[rhs[v]] ## i64
+    kind = types[v] ## i64
+    values[v] = a ^ b if kind == 1
+    values[v] = a & b if kind == 2
+    values[v] = a | b if kind == 3
+    v += 1
+  word = 0 ## i64
+  i = 0 ## i64
+  while i < 32
+    word = word | (values[unit_vars[i]] << i)
+    i += 1
+  word
+
+# Gate inputs are commutative. The CNF recognizer stores them in variable-id
+# order, while the structural matcher names them by bit-level role.
+-> wassat_xs32_gate_is?(types, lhs, rhs, gate, kind, a, b)
+  return false unless types[gate] == kind
+  return true if lhs[gate] == a && rhs[gate] == b
+  lhs[gate] == b && rhs[gate] == a
+
+# Match the exact 19+15+27 gate rendering of:
+#
+#   x ^= x << 13; x ^= x >> 17; x ^= x << 5
+#
+# `cursor` advances only after the whole operation matches.
+-> wassat_xs32_match_step(types, lhs, rhs, input, cursor, nv)
+  word = i64[32]
+  old = i64[32]
+  i = 0
+  while i < 32
+    word[i] = input[i]
+    old[i] = input[i]
+    i += 1
+  gate = cursor[0]
+  i = 13
+  while i < 32
+    return nil if gate > nv
+    return nil unless wassat_xs32_gate_is?(
+      types, lhs, rhs, gate, 1, old[i], old[i - 13]
+    )
+    word[i] = gate
+    gate += 1
+    i += 1
+  i = 0
+  while i < 32
+    old[i] = word[i]
+    i += 1
+  i = 0
+  while i < 15
+    return nil if gate > nv
+    return nil unless wassat_xs32_gate_is?(
+      types, lhs, rhs, gate, 1, old[i], old[i + 17]
+    )
+    word[i] = gate
+    gate += 1
+    i += 1
+  i = 0
+  while i < 32
+    old[i] = word[i]
+    i += 1
+  i = 5
+  while i < 32
+    return nil if gate > nv
+    return nil unless wassat_xs32_gate_is?(
+      types, lhs, rhs, gate, 1, old[i], old[i - 5]
+    )
+    word[i] = gate
+    gate += 1
+    i += 1
+  cursor[0] = gate
+  word
+
+# Match one bitwise accumulator XOR. Outputs are one consecutive 32-gate run.
+-> wassat_xs32_match_word_xor(types, lhs, rhs, a, b, cursor, nv)
+  out = i64[32]
+  gate = cursor[0]
+  i = 0
+  while i < 32
+    return nil if gate > nv
+    return nil unless wassat_xs32_gate_is?(
+      types, lhs, rhs, gate, 1, a[i], b[i]
+    )
+    out[i] = gate
+    gate += 1
+    i += 1
+  cursor[0] = gate
+  out
+
+# Match the generator's exact 189-gate ripple adder. The sum outputs are
+# emitted in bit order but are interleaved with carry auxiliaries.
+-> wassat_xs32_match_add(types, lhs, rhs, a, b, cursor, nv)
+  out = i64[32]
+  gate = cursor[0]
+  return nil if gate + 188 > nv
+  return nil unless wassat_xs32_gate_is?(
+    types, lhs, rhs, gate, 1, a[0], b[0]
+  )
+  out[0] = gate
+  gate += 1
+  return nil unless wassat_xs32_gate_is?(
+    types, lhs, rhs, gate, 2, a[0], b[0]
+  )
+  carry = gate
+  gate += 1
+  return nil unless wassat_xs32_gate_is?(
+    types, lhs, rhs, gate, 3, a[0], b[0]
+  )
+  gate += 1
+
+  i = 1
+  while i < 32
+    return nil unless wassat_xs32_gate_is?(
+      types, lhs, rhs, gate, 1, a[i], b[i]
+    )
+    pair = gate
+    gate += 1
+    return nil unless wassat_xs32_gate_is?(
+      types, lhs, rhs, gate, 1, carry, pair
+    )
+    out[i] = gate
+    gate += 1
+    return nil unless wassat_xs32_gate_is?(
+      types, lhs, rhs, gate, 2, a[i], b[i]
+    )
+    both = gate
+    gate += 1
+    return nil unless wassat_xs32_gate_is?(
+      types, lhs, rhs, gate, 3, a[i], b[i]
+    )
+    a_or_b = gate
+    gate += 1
+    return nil unless wassat_xs32_gate_is?(
+      types, lhs, rhs, gate, 2, carry, a_or_b
+    )
+    carried = gate
+    gate += 1
+    return nil unless wassat_xs32_gate_is?(
+      types, lhs, rhs, gate, 3, both, carried
+    )
+    carry = gate
+    gate += 1
+    i += 1
+  cursor[0] = gate
+  out
+
+# A strict, complete circuit recognizer.  It accepts only:
+#   * 32 primary inputs and one definition for every later variable;
+#   * consecutive four-clause xor(a,b,out) or three-clause AND/OR definitions;
+#   * the exact xorshift32 and fold wire graph, ending in one unused step;
+#   * 32 trailing units pinning exactly the final accumulator outputs; and
+#   * redundant semantic agreement on four independent evaluations.
+#
+# Returning nil is the normal generic-formula path.
+-> wassat_xs32_circuit_plan(nv, formula)
+  return nil unless formula.has_key?("nvars") && formula["nvars"] == nv
+  return nil if nv < 128 || nv > 10000
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
+  ncl = formula["flat_ncl"]
+  return nil if ncl < 500 || ncl > 100000
+  return nil if ncl < 32
+  unit_start = ncl - 32
+  ci = unit_start
+  while ci < ncl
+    return nil unless fcl[ci] == 1
+    ci += 1
+  return nil if unit_start > 0 && fcl[unit_start - 1] == 1
+
+  types = i64[nv + 1]
+  lhs = i64[nv + 1]
+  rhs = i64[nv + 1]
+  expected = 33
+  ci = 0
+  nxor = 0
+  nand = 0
+  nor = 0
+  while expected <= nv
+    return nil if ci >= unit_start
+    accepted = false
+
+    # Four complete, distinct patterns of one parity over the same three
+    # variables are an exact width-three XOR. The largest variable is the
+    # newly defined output and the parity must encode out = a xor b.
+    if ci + 4 <= unit_start
+      all_three = true
+      q = 0
+      while q < 4
+        all_three = false unless fcl[ci + q] == 3
+        q += 1
+      if all_three
+        vars = []
+        off = fcs[ci]
+        j = 0
+        while j < 3
+          lit = fla[off + j]
+          var = lit < 0 ? 0 - lit : lit
+          vars.push(var)
+          j += 1
+        # Three-element insertion sort.
+        if vars[0] > vars[1]
+          z = vars[0]
+          vars[0] = vars[1]
+          vars[1] = z
+        if vars[1] > vars[2]
+          z = vars[1]
+          vars[1] = vars[2]
+          vars[2] = z
+        if vars[0] > vars[1]
+          z = vars[0]
+          vars[0] = vars[1]
+          vars[1] = z
+        if vars[0] != vars[1] && vars[1] != vars[2] && vars[2] == expected && vars[0] < expected && vars[1] < expected
+          seen = i64[8]
+          parity = 0 - 1
+          good = true
+          q = 0
+          while q < 4
+            pattern = 0
+            par = 0
+            matched = 0
+            off = fcs[ci + q]
+            j = 0
+            while j < 3
+              lit = fla[off + j]
+              var = lit < 0 ? 0 - lit : lit
+              k = 0
+              k = 1 if var == vars[1]
+              k = 2 if var == vars[2]
+              good = false unless var == vars[k]
+              matched = matched | (1 << k)
+              if lit < 0
+                pattern = pattern | (1 << k)
+                par = par ^ 1
+              j += 1
+            good = false unless matched == 7
+            parity = par if parity < 0
+            good = false unless par == parity
+            good = false if seen[pattern] == 1
+            seen[pattern] = 1
+            q += 1
+          # xor(a,b,out)=0, hence out=a xor b.
+          if good && parity == 1
+            types[expected] = 1
+            lhs[expected] = vars[0]
+            rhs[expected] = vars[1]
+            nxor += 1
+            ci += 4
+            expected += 1
+            accepted = true
+
+    unless accepted
+      return nil if ci + 3 > unit_start
+      return nil unless fcl[ci] == 3 && fcl[ci + 1] == 2 && fcl[ci + 2] == 2
+      vars = []
+      off = fcs[ci]
+      j = 0
+      while j < 3
+        lit = fla[off + j]
+        var = lit < 0 ? 0 - lit : lit
+        vars.push(var)
+        j += 1
+      if vars[0] > vars[1]
+        z = vars[0]
+        vars[0] = vars[1]
+        vars[1] = z
+      if vars[1] > vars[2]
+        z = vars[1]
+        vars[1] = vars[2]
+        vars[2] = z
+      if vars[0] > vars[1]
+        z = vars[0]
+        vars[0] = vars[1]
+        vars[1] = z
+      return nil unless vars[0] != vars[1] && vars[1] != vars[2]
+      return nil unless vars[2] == expected && vars[0] < expected && vars[1] < expected
+      table = 0
+      av = 0
+      while av < 2
+        bv = 0
+        while bv < 2
+          found = 0 - 1
+          ov = 0
+          while ov < 2
+            if wassat_gate3_clauses_hold(
+              fla, fcs, fcl, ci, vars[0], av, vars[1], bv, expected, ov
+            ) == 1
+              return nil if found >= 0
+              found = ov
+            ov += 1
+          return nil if found < 0
+          table = table | (found << (av * 2 + bv))
+          bv += 1
+        av += 1
+      return nil unless table == 8 || table == 14
+      types[expected] = table == 8 ? 2 : 3
+      lhs[expected] = vars[0]
+      rhs[expected] = vars[1]
+      nand += 1 if table == 8
+      nor += 1 if table == 14
+      ci += 3
+      expected += 1
+  return nil unless ci == unit_start
+
+  # Match the dataflow itself. Gate counts are not a family recognizer: an
+  # unrelated circuit can have the same totals and collide on finitely many
+  # sample evaluations. Here every expected wire must be the next defined
+  # variable, so a successful plan is the exact xorshift/fold program.
+  state = i64[32]
+  accumulator = i64[32]
+  i = 0
+  while i < 32
+    state[i] = i + 1
+    accumulator[i] = i + 1
+    i += 1
+  cursor = i64[1]
+  cursor[0] = 33
+  nfolds = 0
+  nadd = 0
+  add_mask = 0
+  while nfolds <= WASSAT_XS32_MAX_FOLDS
+    next_state = wassat_xs32_match_step(
+      types, lhs, rhs, state, cursor, nv
+    )
+    return nil if next_state == nil
+    state = next_state
+    # The generator renders one final state transition whose outputs are
+    # intentionally unused. It must consume every remaining gate definition.
+    break if cursor[0] == nv + 1
+    return nil if cursor[0] > nv
+    return nil if nfolds == WASSAT_XS32_MAX_FOLDS
+
+    folded = wassat_xs32_match_word_xor(
+      types, lhs, rhs, accumulator, state, cursor, nv
+    )
+    if folded == nil
+      folded = wassat_xs32_match_add(
+        types, lhs, rhs, accumulator, state, cursor, nv
+      )
+      return nil if folded == nil
+      add_mask = add_mask | (1 << nfolds)
+      nadd += 1
+    accumulator = folded
+    nfolds += 1
+  return nil unless cursor[0] == nv + 1
+  return nil if nfolds <= 0 || nfolds > WASSAT_XS32_MAX_FOLDS
+
+  # Retain gate-count equations as redundant whole-program invariants.
+  expected_xor = 61 * (nfolds + 1) + 32 * (nfolds - nadd) + 63 * nadd
+  return nil unless nxor == expected_xor
+  return nil unless nand == 63 * nadd && nor == 63 * nadd
+
+  # Units can appear in any clause order. Match them as a set against the
+  # structurally recovered accumulator and derive target bits by accumulator
+  # position, not by variable id (ripple-add auxiliaries create gaps).
+  unit_vars = i64[32]
+  used_units = i64[32]
+  target = 0
+  i = 0
+  while i < 32
+    unit_vars[i] = accumulator[i]
+    found_unit = 0 - 1
+    q = 0
+    while q < 32
+      lit = fla[fcs[unit_start + q]]
+      var = lit < 0 ? 0 - lit : lit
+      if var == accumulator[i]
+        return nil if found_unit >= 0
+        found_unit = q
+      q += 1
+    return nil if found_unit < 0 || used_units[found_unit] == 1
+    used_units[found_unit] = 1
+    lit = fla[fcs[unit_start + found_unit]]
+    target = target | (1 << i) if lit > 0
+    i += 1
+
+  # Redundant semantic assertion: exact structural matching is the admission
+  # gate, while these samples guard future edits to either evaluator.
+  values = i64[nv + 1]
+  samples = [1, 0x12345678, 0x9e3779b9, 0xdeadbeef]
+  i = 0
+  while i < samples.size
+    actual = wassat_xs32_circuit_eval(
+      types, lhs, rhs, unit_vars, nv, samples[i], values
+    )
+    return nil unless wassat_xs32_fold(
+      samples[i], add_mask, nfolds
+    ) == actual
+    i += 1
+  {
+    "types": types, "lhs": lhs, "rhs": rhs, "unit_vars": unit_vars,
+    "target": target, "add_mask": add_mask, "nfolds": nfolds,
+    "nxor": nxor, "nand": nand, "nor": nor
+  }
+
+# One allocation-free contiguous partition of the 32-bit preimage domain.
+# `found[slot]` stores candidate+1 before the private stop cell is published.
+-> wassat_xs32_partition(target, add_mask, nfolds, lo, hi,
+                         race_stop, local_stop, found, slot) (i64 i64 i64 i64 i64 i64[] i64[] i64[] i64) i64
+  x = lo ## i64
+  while x < hi
+    if (x & 4095) == 0
+      return 0 if wassat_stop_requested?(race_stop)
+      return 0 if wassat_stop_requested?(local_stop)
+    # Keep the hot 2^32-candidate kernel in one typed function. Tungsten's
+    # current native pipeline does not inline the helper chain even under
+    # release LTO; spelling out the fold here avoids one call per candidate
+    # and one xorshift-step call per fold.
+    state = x & WASSAT_XS32_MASK ## i64
+    accumulator = state ## i64
+    fold = 0 ## i64
+    while fold < nfolds
+      y = (state ^ (state << 13)) & WASSAT_XS32_MASK ## i64
+      y = y ^ (y >> 17)
+      state = (y ^ (y << 5)) & WASSAT_XS32_MASK
+      if ((add_mask >> fold) & 1) == 1
+        accumulator = (accumulator + state) & WASSAT_XS32_MASK
+      else
+        accumulator = accumulator ^ state
+      fold += 1
+    if accumulator == target
+      found[slot] = x + 1
+      won = wassat_stop_publish(local_stop, 1)
+      return 1
+    x += 1
+  0
+
+-> wassat_xs32_circuit_arm_body(nv, formula, plan, res, base, stop,
+                                metrics = nil)
+  return 0 if plan == nil || wassat_stop_requested?(stop)
+  started = ccall("__w_clock_ms")
+  res[base + nv + 6] = started
+  workers = System.cpu_count - 3
+  workers = 1 if workers < 1
+  workers = WASSAT_XS32_MAX_WORKERS if workers > WASSAT_XS32_MAX_WORKERS
+  local_stop = i64[4]
+  found = i64[workers]
+  handles = []
+  slot = 0
+  while slot < workers
+    lo = (WASSAT_XS32_DOMAIN * slot) / workers
+    hi = (WASSAT_XS32_DOMAIN * (slot + 1)) / workers
+    target = plan["target"]
+    add_mask = plan["add_mask"]
+    nfolds = plan["nfolds"]
+    worker_slot = slot
+    handles.push(Thread.new -> wassat_xs32_partition(
+      target, add_mask, nfolds, lo, hi, stop, local_stop, found, worker_slot
+    ))
+    slot += 1
+  handles.each -> (handle)
+    z = handle.join
+  return 0 if wassat_stop_requested?(stop)
+
+  candidate = 0 - 1
+  slot = 0
+  while slot < workers
+    candidate = found[slot] - 1 if found[slot] > 0
+    slot += 1
+  res[base + nv + 5] = ccall("__w_clock_ms")
+  if metrics != nil
+    metrics[2] = plan["nfolds"] if metrics.size > 2
+    metrics[3] = workers if metrics.size > 3
+    metrics[4] = candidate if metrics.size > 4
+    metrics[5] = res[base + nv + 5] - started if metrics.size > 5
+  # Exhaustion is deliberately non-decisive: this lane has no proof channel.
+  return 0 if candidate < 0
+
+  values = i64[nv + 1]
+  word = wassat_xs32_circuit_eval(
+    plan["types"], plan["lhs"], plan["rhs"], plan["unit_vars"],
+    nv, candidate, values
+  )
+  return 0 unless word == plan["target"]
+  model = []
+  v = 1
+  while v <= nv
+    res[base + v] = values[v]
+    model.push(values[v] == 1 ? v : 0 - v)
+    v += 1
+  return 0 unless wassat_model_satisfies?(formula, model)
+  # Payload before publication. +nv+2 tags the circuit specialist so the CLI
+  # does not report it as a one-point Gaussian-elimination model.
+  res[base + nv + 2] = 1
+  res[base + nv + 4] = nv - 32
+  res[base] = 1
+  won = wassat_stop_publish(stop, 1)
+  1
 
 # ---- XOR refutation arm --------------------------------------------------------
 #
@@ -502,20 +1224,52 @@ WASSAT_ARM_SLS = 2             # local search, models only
 # has 2^(k-1) DISTINCT sign patterns all of the same negation parity p. The
 # constraint is then xor(vars) = p^1.
 #
-# SOUNDNESS needs no coverage gate: the accepted groups are a SUBSET of the
-# formula's constraints, and an unsatisfiable subset refutes the whole
-# formula. Clauses that fit no perfect group are simply not rows. The arm can
+# A common tree-parity rendering replaces one clause of a width-three XOR
+# group by a stronger binary subclause. Recognize that form conservatively:
+# exactly three distinct same-parity patterns, exactly one signed binary
+# subclause of the missing pattern, and that binary must belong to exactly one
+# such near-group. The binary implies the missing ternary clause, so the XOR
+# row is still a logical consequence of the input.
+#
+# SOUNDNESS needs no coverage gate: complete groups are present verbatim, and
+# every accepted near-group is implied by clauses present in the formula. An
+# inconsistent system of those consequences refutes the whole formula.
+# Clauses that fit neither strict form are simply not rows. The arm can
 # therefore run on every instance; on a non-XOR formula it finds few or no
 # rows, fails to refute, and reports nothing.
 #
-# MODEL-FREE AND REFUTE-ONLY: a consistent system says nothing (the non-XOR
-# clauses still constrain), so the only signal this arm ever raises is -1.
-# Fast path only -- a GE refutation has no DRAT justification here.
--> wassat_xor_arm_body(nv, formula, res, base, stop)
+# A consistent subsystem does not by itself prove SAT because non-XOR clauses
+# may remain. For a bounded dense kernel, however, back-substitute one exact
+# GF(2) solution and check it against the ORIGINAL CNF. If the reduced system
+# has a small affine dimension, enumerate its free coordinates under a static
+# literal-work bound rather than trying only the all-free-zero point. Every
+# candidate is checked against every original clause; a passing candidate is
+# a self-certifying SAT model and a miss reports nothing. Fast path only -- a
+# GE refutation has no DRAT justification here.
+WASSAT_XOR_ENUM_MAX_FREE = 24
+WASSAT_XOR_ENUM_MAX_LITERAL_WORK = 134217728
+WASSAT_XOR_ARM_MAX_MS = 100
+WASSAT_XOR_GRACE_NEAR_ROWS = 16
+
+-> wassat_xor_should_stop?(stop, deadline_ms)
+  return true if wassat_stop_requested?(stop)
+  deadline_ms > 0 && ccall("__w_clock_ms") >= deadline_ms
+
+-> wassat_xor_grace_requested?(res, base, nv)
+  return false unless res.size > base + nv + 3
+  ccall("__w_arr_load_acq", res, base + nv + 3) == 1
+
+-> wassat_xor_arm_body(nv, formula, res, base, stop, metrics = nil,
+                       circuit_plan = nil, deadline_ms = 0)
+  if circuit_plan != nil
+    hit = wassat_xs32_circuit_arm_body(
+      nv, formula, circuit_plan, res, base, stop, metrics
+    )
+    return 0 if hit == 1 || wassat_stop_requested?(stop)
   # Flat mirrors, not boxed clauses: this arm runs in a worker thread.
-  fla = formula["flat_lits"]
-  fcs = formula["flat_offs"]
-  fcl = formula["flat_lens"]
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
   ncl = formula["flat_ncl"]
   # Grouping hashes every clause; bound the work since this is a side arm.
   return 0 if ncl > 100000 || ncl < 4
@@ -525,7 +1279,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
   gbad = {}
   ci = 0
   while ci < ncl
-    return 0 if (ci & 1023) == 0 && stop[0] != 0
+    return 0 if (ci & 1023) == 0 && wassat_xor_should_stop?(stop, deadline_ms)
     co = fcs[ci]
     k = fcl[ci]
     if k >= 2 && k <= 24
@@ -573,66 +1327,243 @@ WASSAT_ARM_SLS = 2             # local search, models only
         gbad[key] = true if pats[pat] != nil
         pats[pat] = 1
     ci += 1
-  # incremental GE over the accepted groups, rows as var-bitmask words + rhs
-  nw = (nv >> 6) + 1
-  pivots = []
-  nrows = 0
-  refuted = false
+  # Find the strict width-three near-groups before selecting rows. A supporting
+  # binary clause is accepted only if it is the sole clause on that signed
+  # variable pair and is owned by exactly one near-group. Both restrictions
+  # are conservative: ambiguous shapes fall through to generic search.
+  near_support = {}
+  support_owners = {}
   gkeys = gvars.keys
   gi = 0
   while gi < gkeys.size
+    return 0 if (gi & 63) == 0 && wassat_xor_should_stop?(stop, deadline_ms)
     key = gkeys[gi]
     gi += 1
-    unless refuted || gbad[key] || nrows > 4096
+    unless gbad[key]
+      vs = gvars[key]
+      pats = gpats[key]
+      if vs.size == 3 && pats.size == 3
+        missing = 0 - 1
+        pat = 0
+        while pat < 8
+          parity = ((pat >> 0) & 1) ^ ((pat >> 1) & 1) ^ ((pat >> 2) & 1)
+          missing = pat if parity == gpar[key] && pats[pat] == nil
+          pat += 1
+        if missing >= 0
+          support = nil
+          nsupport = 0
+          a = 0
+          while a < 3
+            b = a + 1
+            while b < 3
+              bkey = "[vs[a]],[vs[b]]"
+              bpats = gpats[bkey]
+              bpat = ((missing >> a) & 1) | (((missing >> b) & 1) << 1)
+              if bpats != nil && !gbad[bkey] && bpats.size == 1 && bpats[bpat] != nil
+                support = bkey + ":" + bpat.to_s
+                nsupport += 1
+              b += 1
+            a += 1
+          if nsupport == 1
+            near_support[key] = support
+            owners = support_owners[support]
+            support_owners[support] = owners == nil ? 1 : owners + 1
+
+  # Select accepted rows first and compress their variable coordinates.
+  # DIMACS permits a huge declared variable bound with only a tiny active
+  # parity kernel. Allocating every row across `nv` made 4096 accepted rows
+  # quadratic in the declaration rather than the actual XOR subsystem.
+  accepted = []
+  near_rows = 0
+  dense = {}
+  dense_vars = []
+  gi = 0
+  while gi < gkeys.size && accepted.size < 4096
+    return 0 if (gi & 63) == 0 && wassat_xor_should_stop?(stop, deadline_ms)
+    key = gkeys[gi]
+    gi += 1
+    unless gbad[key]
       vs = gvars[key]
       k = vs.size
-      if gpats[key].size == (1 << (k - 1))
-        nrows += 1
-        row = i64[nw]
+      support = near_support[key]
+      complete = gpats[key].size == (1 << (k - 1))
+      implied = support != nil && support_owners[support] == 1
+      if complete || implied
+        accepted.push(key)
+        near_rows += 1 if implied
         i = 0
         while i < k
           v = vs[i]
-          row[v >> 6] = row[v >> 6] | (1 << (v & 63))
+          if dense[v] == nil
+            dense[v] = dense_vars.size
+            dense_vars.push(v)
           i += 1
-        rhs = gpar[key] ^ 1
-        # reduce by existing pivots, lowest set bit as pivot position
-        pi = 0
-        while pi < pivots.size
-          pv = pivots[pi]
-          prow = pv[0]
-          pw = pv[2]
-          pb = pv[3]
-          if ((row[pw] >> pb) & 1) == 1
-            w = 0
-            while w < nw
-              row[w] = row[w] ^ prow[w]
-              w += 1
-            rhs = rhs ^ pv[1]
-          pi += 1
-        # find this row's pivot
-        pw = 0 - 1
-        pb = 0
-        w = 0
-        while w < nw && pw < 0
-          if row[w] != 0
-            pw = w
-            b = 0
-            while b < 64
-              if ((row[w] >> b) & 1) == 1
-                pb = b
-                b = 64
-              else
-                b += 1
-          w += 1
-        if pw < 0
-          refuted = true if rhs == 1
-        else
-          pivots.push([row, rhs, pw, pb])
+
+  # Incremental GE over accepted groups. Rows are bitsets over only the
+  # participating coordinates; `metrics` is a test/diagnostic sink.
+  nw = (dense.size >> 6) + 1
+  if metrics != nil
+    metrics[0] = dense.size
+    metrics[1] = nw
+    metrics[2] = accepted.size if metrics.size > 2
+    metrics[3] = near_rows if metrics.size > 3
+  if near_rows >= WASSAT_XOR_GRACE_NEAR_ROWS && res.size > base + nv + 3
+    z = ccall("__w_arr_store_rel", res, base + nv + 3, 1)
+  pivots = []
+  nrows = 0
+  refuted = false
+  gi = 0
+  while gi < accepted.size
+    return 0 if (gi & 63) == 0 && wassat_xor_should_stop?(stop, deadline_ms)
+    key = accepted[gi]
+    gi += 1
+    unless refuted
+      vs = gvars[key]
+      k = vs.size
+      nrows += 1
+      row = i64[nw]
+      i = 0
+      while i < k
+        d = dense[vs[i]]
+        row[d >> 6] = row[d >> 6] | (1 << (d & 63))
+        i += 1
+      rhs = gpar[key] ^ 1
+      # Reduce by existing pivots, lowest set bit as pivot position. Poll
+      # inside both potentially long dimensions so a refutation by another
+      # arm does not leave a dense elimination join behind.
+      pi = 0
+      while pi < pivots.size
+        return 0 if (pi & 63) == 0 && wassat_xor_should_stop?(stop, deadline_ms)
+        pv = pivots[pi]
+        prow = pv[0]
+        pw = pv[2]
+        pb = pv[3]
+        if ((row[pw] >> pb) & 1) == 1
+          w = 0
+          while w < nw
+            return 0 if (w & 1023) == 0 && wassat_xor_should_stop?(stop, deadline_ms)
+            row[w] = row[w] ^ prow[w]
+            w += 1
+          rhs = rhs ^ pv[1]
+        pi += 1
+
+      # Find this row's pivot.
+      pw = 0 - 1
+      pb = 0
+      w = 0
+      while w < nw && pw < 0
+        return 0 if (w & 1023) == 0 && wassat_xor_should_stop?(stop, deadline_ms)
+        if row[w] != 0
+          pw = w
+          b = 0
+          while b < 64
+            if ((row[w] >> b) & 1) == 1
+              pb = b
+              b = 64
+            else
+              b += 1
+        w += 1
+      if pw < 0
+        refuted = true if rhs == 1
+      else
+        pivots.push([row, rhs, pw, pb])
   if refuted
     res[base] = 0 - 1
     res[base + nv + 4] = nrows
-    stop[1] = 0 - 1
-    stop[0] = 1
+    won = wassat_stop_publish(stop, 0 - 1)
+  elsif dense.size > 0 && dense.size <= 4096 && formula.has_key?("nvars") && formula["nvars"] == nv && res.size >= base + nv + 8
+    # Rows are reduced against every EARLIER pivot before insertion, so a row
+    # can depend only on free variables and LATER pivots. Reverse insertion
+    # order is therefore a valid back-substitution order.
+    # Keep each candidate in the same packed representation as the GE rows.
+    # Back-substitution then computes one row parity with `nw` native popcounts
+    # instead of scanning every dense coordinate for every pivot.
+    value_words = i64[nw]
+    pivoted = i64[dense.size]
+    pi = 0
+    while pi < pivots.size
+      pv = pivots[pi]
+      pivoted[pv[2] * 64 + pv[3]] = 1
+      pi += 1
+    free = []
+    d = 0
+    while d < dense.size
+      free.push(d) if pivoted[d] == 0
+      d += 1
+
+    # The zero-free point preserves the old cheap candidate on every shape.
+    # Full affine enumeration is allowed only when both dimension and total
+    # verification work are bounded. A losing lane therefore cannot turn one
+    # small XOR kernel into an unbounded 2^rank scan.
+    candidates = 1
+    if free.size <= WASSAT_XOR_ENUM_MAX_FREE
+      full = 1 << free.size
+      literal_work = full * formula["flat_nlits"]
+      candidates = full if literal_work <= WASSAT_XOR_ENUM_MAX_LITERAL_WORK
+
+    # `sign` is in ORIGINAL variable space and is reused across candidates.
+    # Variables outside the accepted subsystem default false. wassat_verify_flat
+    # scans every original clause; the canonical model guard is repeated once
+    # on a hit before publication.
+    sign = i64[nv + 1]
+    v = 1
+    while v <= nv
+      sign[v] = 0 - 1
+      v += 1
+    verify = i64[2]
+    verify[1] = ncl
+    mask = 0
+    while mask < candidates
+      return 0 if wassat_xor_should_stop?(stop, deadline_ms)
+      w = 0
+      while w < nw
+        value_words[w] = 0
+        w += 1
+      fi = 0
+      while fi < free.size
+        if ((mask >> fi) & 1) == 1
+          d = free[fi]
+          value_words[d >> 6] = value_words[d >> 6] | (1 << (d & 63))
+        fi += 1
+
+      pi = pivots.size - 1
+      while pi >= 0
+        return 0 if (pi & 63) == 0 && wassat_xor_should_stop?(stop, deadline_ms)
+        pv = pivots[pi]
+        row = pv[0]
+        pivot = pv[2] * 64 + pv[3]
+        value = pv[1]
+        w = 0
+        while w < nw
+          value = value ^ (BitOps.count_ones_u64(row[w] & value_words[w]) & 1)
+          w += 1
+        if value == 1
+          value_words[pivot >> 6] = value_words[pivot >> 6] | (1 << (pivot & 63))
+        pi -= 1
+
+      d = 0
+      while d < dense_vars.size
+        bit = (value_words[d >> 6] >> (d & 63)) & 1
+        sign[dense_vars[d]] = bit == 1 ? 1 : 0 - 1
+        d += 1
+      wassat_verify_flat(fla, fcs, fcl, sign, verify)
+      if verify[0] == 1
+        model = []
+        v = 1
+        while v <= nv
+          model.push(sign[v] == 1 ? v : 0 - v)
+          v += 1
+        unless wassat_model_satisfies?(formula, model)
+          raise "internal error: affine xor model does not satisfy the input formula"
+        v = 1
+        while v <= nv
+          res[base + v] = sign[v] == 1 ? 1 : 0
+          v += 1
+        res[base + nv + 4] = nrows
+        res[base] = 1
+        won = wassat_stop_publish(stop, 1)
+        break
+      mask += 1
   0
 
 # The bounded CDCL scout, as an arm. It is the same search the coordinator used
@@ -643,9 +1574,13 @@ WASSAT_ARM_SLS = 2             # local search, models only
 #
 # `out` is its private channel for the boxed result: the coordinator reports
 # conflicts, decisions and propagations from it.
--> wassat_scout_arm_body(nv, art, stop, cap, wall, raw, simplify, out)
+-> wassat_scout_arm_body(nv, art, stop, cap, wall, raw, simplify, out,
+                         budget_state = nil, budget_limit = 0,
+                         budget_slot = 0)
   s = Wassat.from_flat(nv, art, 0)
   s.set_stop_cell(stop)
+  if budget_state != nil
+    s.set_shared_conflict_budget(budget_state, budget_limit, budget_slot)
   s.simplify_raw if simplify
   t0 = ccall("__w_clock_ms")
   slice = cap < 512 ? cap : 512
@@ -655,21 +1590,21 @@ WASSAT_ARM_SLS = 2             # local search, models only
   # decides at 1,733 conflicts when quiet and falls off a cliff to a full
   # 11k-conflict main solve when busy. A raw kernel's scout is already bounded
   # by its conflict cap, so it runs on conflicts alone and is reproducible.
-  while spr["status"] == 0 && spr["conflicts"] < cap && stop[0] == 0 && (raw || ccall("__w_clock_ms") - t0 < wall)
+  while spr["status"] == 0 && spr["conflicts"] < cap && !wassat_stop_requested?(stop) && (raw || ccall("__w_clock_ms") - t0 < wall)
     rem = cap - spr["conflicts"]
     slice = rem < 512 ? rem : 512
     spr = s.solve_budget(slice)
-  # Publish the answer to the co-running arms -- the lucky arm was short enough
-  # that this never mattered, the SLS arm is not.
-  if spr["status"] == 1 || spr["status"] == 0 - 1
-    stop[1] = spr["status"]
-    stop[0] = 1
   out.push(spr)
   # Keep the live solver beside the detached result. A scout miss has already
   # paid construction, propagation, conflicts, learned clauses and heuristic
   # state; the main race can continue that exact search instead of throwing
   # all of it away and rebuilding four solvers from the original formula.
   out.push(s)
+  # Publish the answer to the co-running arms only after the result payload is
+  # complete. The lucky arm was short enough that this never mattered, the SLS
+  # arm is not.
+  if spr["status"] == 1 || spr["status"] == 0 - 1
+    won = wassat_stop_publish(stop, spr["status"])
   0
 
 # Raw-kernel basin race: K allocation-free arms over the SAME flat artifact,
@@ -682,13 +1617,83 @@ WASSAT_ARM_SLS = 2             # local search, models only
 # Build the raw arms and the state they race over, returned as a bundle so
 # the coordinator can run the race in SLICES and do main-thread work — which
 # is to say preprocessing — in the gaps between them.
--> wassat_race_build(nv, art, threads, formula, incumbent = nil, incumbent_conflicts = 0)
+-> wassat_otfs_specialist_count(formula, matrix_threads, pre_workers,
+                                  sls_worker, incumbent_worker,
+                                  resident_cdcl_arenas = 0,
+                                  resident_sls_arenas = 0,
+                                  resident_preprocess_arenas = 0)
+  return 0 if env("WASSAT_OTFS") == "0" || matrix_threads < 2
+  requested = 1
+  if env("WASSAT_OTFS_SPECIALISTS") != nil
+    requested = wassat_decimal_in_range(
+      "WASSAT_OTFS_SPECIALISTS", env("WASSAT_OTFS_SPECIALISTS"), 0, 1
+    )
+  return 0 if requested == 0
+  # The specialist is additive: never trade away an established basin for a
+  # sharply two-sided technique. WASSAT_ARMS is the deterministic width pin
+  # used by A/B measurements, so an automatic arm must not silently widen it;
+  # WASSAT_OTFS_SPECIALISTS remains the explicit override for specialist A/B.
+  return 0 if env("WASSAT_ARMS") != nil && env("WASSAT_OTFS_SPECIALISTS") == nil
+  # Count every worker already planned by the coordinator. Preprocessing, SLS
+  # and a scout continuation are registered after race construction, but they
+  # still consume cores once the race starts.
+  workers = matrix_threads + pre_workers + sls_worker + incumbent_worker
+  return 0 if System.cpu_count <= workers
+  # Arena accounting is deliberately broader than runnable-worker accounting.
+  # The completed scout/lucky solvers and scout SLS allocation remain resident
+  # in this non-collecting runtime. Count those, every raw/preprocessed solver,
+  # the race SLS arena, and this proposed specialist.
+  cdcl_arenas = resident_cdcl_arenas + matrix_threads + pre_workers + incumbent_worker + 1
+  sls_arenas = resident_sls_arenas + sls_worker
+  preprocess_arenas = resident_preprocess_arenas + pre_workers
+  return 0 unless wassat_race_memory_fits?(
+    formula, cdcl_arenas, sls_arenas, preprocess_arenas
+  )
+  1
+
+-> wassat_race_build(nv, art, threads, formula, incumbent = nil,
+                     incumbent_conflicts = 0, pre_workers = 0, sls_worker = 0,
+                     scout_solvers = 0, scout_sls_arenas = 0,
+                     resident_preprocess_arenas = 0)
   # Continuation is additive. Replacing matrix arm 3 made qwh.35 lose its
   # repeatable 4,366-conflict trajectory; the scout has already allocated its
   # solver, so keeping it as one extra arm restores that diversity without
   # another large allocation.
   matrix_threads = threads
+  incumbent_worker = incumbent == nil ? 0 : 1
+  resident_cdcl_arenas = scout_solvers - incumbent_worker
+  resident_cdcl_arenas = 0 if resident_cdcl_arenas < 0
+  # SLS is optional. Apply the complete resident-memory gate before an OTFS
+  # specialist is considered so the specialist can never crowd an accepted
+  # walker out after construction.
+  base_cdcl_arenas = resident_cdcl_arenas + matrix_threads + pre_workers + incumbent_worker
+  preprocess_arenas = resident_preprocess_arenas + pre_workers
+  if sls_worker > 0
+    unless wassat_race_memory_fits?(
+      formula, base_cdcl_arenas, scout_sls_arenas + 1,
+      preprocess_arenas
+    )
+      sls_worker = 0
+  otfs_specialists = wassat_otfs_specialist_count(
+    formula, matrix_threads, pre_workers, sls_worker, incumbent_worker,
+    resident_cdcl_arenas, scout_sls_arenas, resident_preprocess_arenas
+  )
+  otfs_index = matrix_threads
+  threads += otfs_specialists
   threads += 1 if incumbent != nil
+  incumbent_index = incumbent == nil ? 0 - 1 : threads - 1
+  cdcl_arenas = resident_cdcl_arenas + threads + pre_workers
+  sls_arenas = scout_sls_arenas + sls_worker
+  # Repair owns one additional full CDCL arena while the SLS arena stays live.
+  # Unknown host memory fails closed for this new specialist; the established
+  # race itself retains its old unknown-memory behaviour.
+  repair_allowed = false
+  if sls_worker > 0 && System.physical_memory_bytes > 0
+    repair_allowed = wassat_sls_repair_eligible?(formula)
+    if repair_allowed
+      repair_allowed = wassat_race_memory_fits?(
+        formula, cdcl_arenas + 1, sls_arenas, preprocess_arenas
+      )
   # Capacity for the raw arms, the two preprocessed renderings and the SLS
   # arm (slot threads+2, always reserved so indices never move), allocated
   # once: `res` is addressed by arm index and must not move after an arm has
@@ -714,11 +1719,15 @@ WASSAT_ARM_SLS = 2             # local search, models only
   solvers = []
   a = 0
   while a < threads
-    # Preserve every established matrix arm. The extra last slot is the scout
-    # continuation; it must not displace an arm with a different basin.
+    # Preserve every established matrix arm. The OTFS specialist clones arm
+    # 1, the configuration that wins both ntil34 and mrpp6 under global OTFS,
+    # without removing arm 1's ordinary first-UIP trajectory. The optional
+    # final slot is still the scout continuation.
     continued = incumbent != nil && a == threads - 1
+    specialist = a >= otfs_index && a < otfs_index + otfs_specialists
     s = continued ? incumbent : Wassat.from_flat(nv, art, 0)
     offsets[a] = incumbent_conflicts if continued
+    s.enable_otfs if specialist
     s.enable_fixed_caps
     s.set_stop_cell(stop)
     # A lone raw arm has nobody to share with — the preprocessing arms solve
@@ -728,8 +1737,14 @@ WASSAT_ARM_SLS = 2             # local search, models only
     # matrix perturbed qwh.35's repeatable 4,366-conflict winning basin. Its
     # value is the state it already learned, not another source of clauses.
     if threads > 1 && !continued
-      s.enable_sharing(ring, ring_cap, ring_maxlen, a)
-      s.set_share_credit(credit)
+      # The specialist may import the matrix's glue clauses, but does not
+      # publish its changed trajectory back into the baseline arms. Thus the
+      # hedge can win without perturbing the configurations it protects.
+      s.enable_sharing(ring, ring_cap, ring_maxlen, a, !specialist)
+      # Import-only specialists must also stay out of adaptive author-credit:
+      # accepting a baseline clause is evidence about the specialist, not a
+      # contribution that should change the protected arm's allocation.
+      s.set_share_credit(credit) unless specialist
     if continued
       # Keep every bit of the scout trajectory. In particular, do not run
       # raw simplification after search has begun or overwrite the phases it
@@ -742,17 +1757,18 @@ WASSAT_ARM_SLS = 2             # local search, models only
       s.enable_chrono
       s.simplify_raw if art["config"].force_simplify?
     else
-      wassat_race_matrix_config(a, cfgs, a * WASSAT_CFG_STRIDE)
+      source = specialist ? 1 : a
+      wassat_race_matrix_config(source, cfgs, a * WASSAT_CFG_STRIDE)
       # TRAIL REUSE axis, set here rather than in the native matrix because the
       # assignment is policy-driven (see policy.w trail_reuse_mask). Two-sided
       # and trajectory-dependent: forced on every arm it wins 2bitadd_10 and
       # schooltt but turns f1000 from 5.7s into a >150s timeout, twice.
-      cfgs[a * WASSAT_CFG_STRIDE + 7] = (art["config"].trail_reuse_mask >> a) & 1
+      cfgs[a * WASSAT_CFG_STRIDE + 7] = (art["config"].trail_reuse_mask >> source) & 1
       # STABLE-ONLY axis (kissat --stable=2), same mask form. Violently
       # two-sided as a global -- 2bitadd_10 0.32x and ContextModel 0.29x FOR
       # it, dspam 20.21x and f600 3.70x against -- which is the textbook case
       # for racing it instead of choosing it.
-      cfgs[a * WASSAT_CFG_STRIDE + 8] = (art["config"].stable_only_mask >> a) & 1
+      cfgs[a * WASSAT_CFG_STRIDE + 8] = (art["config"].stable_only_mask >> source) & 1
       wassat_race_apply_config(s, cfgs, a * WASSAT_CFG_STRIDE,
                                art["config"].force_simplify?,
                                art["config"].use_vmtf(art["raw"] == true))
@@ -761,7 +1777,14 @@ WASSAT_ARM_SLS = 2             # local search, models only
   { "nv": nv, "solvers": solvers, "res": res, "stop": stop, "threads": threads,
     "cap": cap, "pre": [], "formula": formula, "tel": tel, "cfgs": cfgs,
     "art": art, "ring": ring, "ring_cap": ring_cap, "ring_maxlen": ring_maxlen,
-    "credit": credit, "offsets": offsets, "sls": [] }
+    "credit": credit, "offsets": offsets, "sls": [],
+    "matrix_threads": matrix_threads, "incumbent_index": incumbent_index,
+    "otfs_index": otfs_index, "otfs_specialists": otfs_specialists,
+    "sls_allowed": sls_worker > 0, "sls_repair_allowed": repair_allowed,
+    "resident_cdcl_arenas": cdcl_arenas,
+    "resident_sls_arenas": sls_arenas,
+    "resident_preprocess_arenas": preprocess_arenas,
+    "repair_cdcl_arenas": repair_allowed ? 1 : 0 }
 
 # ---- arm configuration as data ------------------------------------------------
 #
@@ -889,8 +1912,12 @@ WASSAT_TEL_STRIDE = 8
 
 # Register the SLS arm. Occupies the fixed slot threads+2 so it never collides
 # with a preprocessing arm, whatever pre_arms turns out to be.
--> wassat_race_add_sls(race, flips, seed)
-  race["sls"].push({ "flips": flips, "seed": seed })
+-> wassat_race_add_sls(race, flips, seed, art = nil)
+  return 0 unless race["sls_allowed"] == true
+  source = art == nil ? race["art"] : art
+  race["sls"].push(
+    { "flips": flips, "seed": seed, "out": [], "art": source }
+  )
   0
 
 # Register a PREPROCESSING arm: its own preprocessor (never shared — two
@@ -934,7 +1961,9 @@ WASSAT_TEL_STRIDE = 8
 # in the middle, so round 0 is as long as the rendering takes and the barrier
 # after it is the one place a raw arm can be left waiting — which is why round
 # 0 is also the longest slice the race ever hands out.
--> wassat_pre_arm_body(pre, formula, nv, res, base, heavy, stop, out, budget, tel, tbase, round)
+-> wassat_pre_arm_body(pre, formula, nv, res, base, heavy, stop, out, budget,
+                       tel, tbase, round, budget_state = nil,
+                       budget_limit = 0, budget_slot = 0)
   t0 = ccall("__w_clock_ms")
   if round > 0
     # Nothing to resume: this arm refuted during rendering, or won with the
@@ -945,16 +1974,19 @@ WASSAT_TEL_STRIDE = 8
     sr.export_telemetry(tel, tbase)
     tel[tbase + 7] = tel[tbase + 7] + (ccall("__w_clock_ms") - t0)
     return 0
+  pre.set_stop_cell(stop)
   rendered = pre.run_light_flat(formula)
+  return 0 if rendered == nil
   rendered = pre.run_heavy if heavy && rendered["status"] == 0
+  return 0 if rendered == nil
+  return 0 if wassat_stop_requested?(stop)
   out.push(rendered["stack"])
   out.push(rendered["stats"])
   # A refutation during preprocessing is a real answer: report it the way an
   # arm reports one, so the coordinator needs no second channel for it.
   if rendered["status"] != 0
     res[base] = 0 - 1
-    stop[1] = 0 - 1
-    stop[0] = 1
+    won = wassat_stop_publish(stop, 0 - 1)
     return 0
   # The former late-lucky shot built a complete throwaway solver for every
   # rendering. Across 154 measured races it produced no answer and only added
@@ -963,6 +1995,8 @@ WASSAT_TEL_STRIDE = 8
   s = Wassat.from_flat(nv, rendered, 0)
   s.enable_fixed_caps
   s.set_stop_cell(stop)
+  if budget_state != nil
+    s.set_shared_conflict_budget(budget_state, budget_limit, budget_slot)
   out.push(s)
   s.solve_shared_budget(res, base, budget)
   s.export_telemetry(tel, tbase)
@@ -1133,7 +2167,9 @@ WASSAT_AXIS_SLOTS = 10
 
 # Run the race: every raw arm over the flat artifact, plus one arm per
 # preprocessed rendering that renders and then solves, all concurrently.
-# `budget` caps each arm's conflicts (0 = unlimited). While the arms are live
+# `budget` caps aggregate race conflicts (0 = unlimited) through a shared
+# lock-free ticket pool. Per-round arm slices remain scheduling boundaries,
+# not independent copies of the CLI allowance. While the arms are live
 # the main thread does nothing but join — inline caches are process-global,
 # so the coordinator must not dispatch until every arm has stopped.
 #
@@ -1155,17 +2191,30 @@ WASSAT_AXIS_SLOTS = 10
 #     case — is a pure loss.
 -> wassat_race_run(race, budget)
   nv = race["nv"]
-  res = race["res"]
-  stop = race["stop"]
+  res = race["res"] ## i64[]
+  stop = race["stop"] ## i64[]
   solvers = race["solvers"]
   threads = race["threads"]
+  matrix_threads = race["matrix_threads"]
   pre = race["pre"]
   formula = race["formula"]
-  tel = race["tel"]
-  cfgs = race["cfgs"]
+  tel = race["tel"] ## i64[]
+  cfgs = race["cfgs"] ## i64[]
   art = race["art"]
   cap = race["cap"]
-  offsets = race["offsets"]
+  offsets = race["offsets"] ## i64[]
+  # A finite CLI cap is one lock-free ticket pool shared by every CDCL
+  # implementation in the race. Slot zero is the exact aggregate; each
+  # logical arm owns one disjoint contribution slot. Reallocated solvers reuse
+  # their logical slot and SLS's optional exact repair uses its fixed slot.
+  conflict_budget = nil
+  if budget > 0
+    conflict_budget = i64[cap + 1]
+    a = 0
+    while a < threads
+      solvers[a].set_shared_conflict_budget(conflict_budget, budget, a + 1)
+      a += 1
+  race["conflict_budget"] = conflict_budget
   total = threads + pre.size
   # The SLS arm sits at a FIXED slot past both preprocessing slots, so its
   # index does not move with pre_arms. It is deliberately outside `total`:
@@ -1185,10 +2234,10 @@ WASSAT_AXIS_SLOTS = 10
   # barrier is pure idle time at the join. WASSAT_REALLOC=0 keeps the barriers
   # and the telemetry while suppressing the respawn, which is the ablation that
   # separates the cost of the mechanism from its value.
-  sliceable = threads > 1
+  sliceable = matrix_threads > 1
   realloc = sliceable ? wassat_race_reallocate : 0
   round1 = sliceable ? wassat_race_round1_conflicts : 0
-  credit = race["credit"]
+  credit = race["credit"] ## i64[]
   metric = wassat_race_reward_metric
   realloc_every = wassat_race_realloc_every
   live = i64[cap]
@@ -1202,6 +2251,17 @@ WASSAT_AXIS_SLOTS = 10
   axis_cnt = i64[WASSAT_AXIS_SLOTS]
   axis_pulls = 0
   nrealloc = 0
+  # A scout continuation starts this race with cumulative solver counters.
+  # Seed its telemetry baseline before round zero so the scout's work is not
+  # scored or charged to the race a second time.
+  incumbent_index = race["incumbent_index"]
+  if incumbent_index >= 0
+    tb = incumbent_index * WASSAT_TEL_STRIDE
+    solvers[incumbent_index].export_telemetry(tel, tb)
+    k = 0
+    while k < WASSAT_TEL_STRIDE
+      prev[tb + k] = tel[tb + k]
+      k += 1
   a = 0
   while a < total
     live[a] = 1
@@ -1212,6 +2272,7 @@ WASSAT_AXIS_SLOTS = 10
   running = 1
   while running == 1
     handles = []
+    sls_handle = nil
     a = 0
     while a < threads
       if live[a] == 1
@@ -1232,15 +2293,64 @@ WASSAT_AXIS_SLOTS = 10
         tbase = (threads + p) * WASSAT_TEL_STRIDE
         pre_slice = slice[threads + p]
         pre_round = round
-        handles.push(Thread.new -> wassat_pre_arm_body(pp, formula, nv, res, base, heavy, stop, out, pre_slice, tel, tbase, pre_round))
+        pre_slot = threads + p + 1
+        handles.push(Thread.new -> wassat_pre_arm_body(
+          pp, formula, nv, res, base, heavy, stop, out, pre_slice, tel,
+          tbase, pre_round, conflict_budget, budget, pre_slot
+        ))
       p += 1
-    if round == 0 && sls.size > 0
+    if sls.size > 0 && res[sls_base + nv + 3] == 0
       spec = sls[0]
       sflips = spec["flips"]
       sseed = spec["seed"]
-      handles.push(Thread.new -> wassat_sls_arm_body(nv, formula, res, sls_base, stop, sflips, sseed))
+      sout = spec["out"]
+      sart = spec["art"]
+      # Default unbounded races retain the established long walker. Bounded
+      # or explicitly rounded races advance it in 200k-flip slices, so a
+      # finite CDCL budget can never leave a 200M-flip orphan at the join.
+      starget = sflips
+      if budget > 0 || round1 > 0
+        starget = WASSAT_SLS_REPAIR_PREFIX_FLIPS * (round + 1)
+        starget = sflips if starget > sflips || starget < 0
+      repair_allowed = race["sls_repair_allowed"] == true
+      repair_cap = 0
+      if budget > 0
+        repair_cap = budget - ccall("__w_arr_load_acq", conflict_budget, 0)
+        repair_allowed = false if repair_cap <= 0
+      first_sls = sout.empty?
+      sls_handle = Thread.new -> wassat_sls_arm_body_round(
+        nv, formula, sart, res, sls_base, stop, starget, sflips, sseed,
+        sout, first_sls, repair_allowed, repair_cap,
+        conflict_budget, budget, sls_idx + 1
+      )
     handles.each -> (h)
       z = h.join
+    # Join decisive CDCL work FIRST. If this was its final bounded slice (or
+    # every live arm retired/stalled), signal the model-only walker before
+    # joining it. The old all-handles join could wait behind the walker's full
+    # 200M ceiling after every CDCL arm had already returned UNKNOWN.
+    if sls_handle != nil
+      decisive_now = 0
+      a = 0
+      while a < total
+        st = res[a * (nv + 8)]
+        decisive_now = 1 if st == 1 || st == 0 - 1
+        a += 1
+      cdcl_can_continue = 0
+      if decisive_now == 0 && round1 > 0
+        a = 0
+        while a < total
+          if live[a] == 1
+            tb = a * WASSAT_TEL_STRIDE
+            dconf = tel[tb] - prev[tb]
+            next_spent = spent[a] + dconf
+            can = res[a * (nv + 8)] != 2 && dconf > 0
+            can = false if budget > 0 && next_spent >= budget
+            cdcl_can_continue = 1 if can
+          a += 1
+      if decisive_now == 1 || round1 == 0 || cdcl_can_continue == 0
+        z = wassat_stop_cancel(stop)
+      z = sls_handle.join
     # ---- barrier: every arm is stopped, the coordinator may dispatch again --
     #
     # Everything from here to the next spawn runs with no worker live, which is
@@ -1248,7 +2358,10 @@ WASSAT_AXIS_SLOTS = 10
     # process-global, so the coordinator scores, sorts, allocates and builds
     # replacement solvers HERE and does nothing but join while arms run.
     running = 0
-    if round1 > 0
+    budget_done = false
+    if conflict_budget != nil
+      budget_done = ccall("__w_arr_load_acq", conflict_budget, 0) >= budget
+    if round1 > 0 && !budget_done
       decided = 0
       a = 0
       while a < total
@@ -1263,6 +2376,7 @@ WASSAT_AXIS_SLOTS = 10
         # reports "nothing here to resume"), or out of aggregate budget.
         best = 0
         nlive = 0
+        nconfig_live = 0
         a = 0
         while a < total
           score[a] = 0
@@ -1274,7 +2388,7 @@ WASSAT_AXIS_SLOTS = 10
             dcredit = credit[a] - pcredit[a]
             spent[a] = spent[a] + dconf
             score[a] = wassat_race_arm_score(metric, dconf, dms, dprop, dcredit, tel[tb + 6], tel[tb + 3])
-            best = score[a] if score[a] > best
+            best = score[a] if a < matrix_threads && score[a] > best
             if trace
               z = ccall("__w_eprint", "c trace r[round] arm[a] conf=[tel[tb]] d=[dconf] ms=[dms] lbdf=[tel[tb + 3] >> 16] lbds=[tel[tb + 4] >> 16] trail=[tel[tb + 5] >> 16] learnt=[tel[tb + 6]] dec=[tel[tb + 1]] prop=[tel[tb + 2]] credit=[credit[a]] score=[score[a]]\n")
             pcredit[a] = credit[a]
@@ -1286,22 +2400,24 @@ WASSAT_AXIS_SLOTS = 10
               # from a shared conflict count: arms in a diversified race differ
               # by up to 3x in conflicts per second, and a shared slice would
               # make every barrier wait on the slowest arm.
-              rate = (dconf * round_ms) / dms
+              ms = dms < 1 ? 1 : dms
+              rate = (dconf * round_ms) / ms
               slice[a] = rate < 1000 ? 1000 : rate
               slice[a] = budget - spent[a] if budget > 0 && spent[a] + slice[a] > budget
               nlive += 1
+              nconfig_live += 1 if a < matrix_threads
             k = 0
             while k < WASSAT_TEL_STRIDE
               prev[tb + k] = tel[tb + k]
               k += 1
           a += 1
         running = 1 if nlive > 0
-        if realloc > 0 && best > 0 && nlive > 1
+        if realloc > 0 && best > 0 && nconfig_live > 1
           # Bank each arm's reward against the axis levels its configuration
           # carries, normalised to 0..1000 against the round's best arm so the
           # scale is the same whatever the instance or the round length.
           a = 0
-          while a < threads
+          while a < matrix_threads
             if live[a] == 1
               cb = a * WASSAT_CFG_STRIDE
               r = (score[a] * 1000) / best
@@ -1317,7 +2433,7 @@ WASSAT_AXIS_SLOTS = 10
           # pinned one. `sorted` is reused every round; m is small (<= 64).
           m = 0
           a = 0
-          while a < threads
+          while a < matrix_threads
             if live[a] == 1
               sorted[m] = score[a]
               m += 1
@@ -1334,7 +2450,7 @@ WASSAT_AXIS_SLOTS = 10
           med = m > 0 ? sorted[m / 2] : 0
           worst = 0 - 1
           a = 1
-          while a < threads
+          while a < matrix_threads
             if live[a] == 1 && (worst < 0 || score[a] < score[worst])
               worst = a
             a += 1
@@ -1352,10 +2468,19 @@ WASSAT_AXIS_SLOTS = 10
             wassat_race_new_config(cfgs, cb, axis_rew, axis_cnt, nrealloc,
                                    nrealloc % 4 == 3 ? 1 : 0)
             ns = Wassat.from_flat(nv, art, 0)
+            is_otfs = worst >= race["otfs_index"] && worst < race["otfs_index"] + race["otfs_specialists"]
+            ns.enable_otfs if is_otfs
             ns.enable_fixed_caps
             ns.set_stop_cell(stop)
-            ns.enable_sharing(race["ring"], race["ring_cap"], race["ring_maxlen"], worst)
-            ns.set_share_credit(credit)
+            if conflict_budget != nil
+              ns.set_shared_conflict_budget(
+                conflict_budget, budget, worst + 1
+              )
+            ns.enable_sharing(
+              race["ring"], race["ring_cap"], race["ring_maxlen"], worst,
+              !is_otfs
+            )
+            ns.set_share_credit(credit) unless is_otfs
             wassat_race_apply_config(ns, cfgs, cb,
                                      art["config"].force_simplify?,
                                      art["config"].use_vmtf(art["raw"] == true))
@@ -1370,6 +2495,9 @@ WASSAT_AXIS_SLOTS = 10
               tel[tb + k] = 0
               prev[tb + k] = 0
               k += 1
+            # A replacement is a fresh solver, not the scout continuation it
+            # may have displaced. Its final conflict count has no old offset.
+            offsets[worst] = 0
             slice[worst] = round1
             slice[worst] = budget - spent[worst] if budget > 0 && spent[worst] + slice[worst] > budget
             nrealloc += 1
@@ -1385,7 +2513,7 @@ WASSAT_AXIS_SLOTS = 10
     a += 1
   if sls.size > 0
     ms = res[sls_base + nv + 5] - res[sls_base + nv + 6]
-    wassat_prof_note("race.arm[sls_idx] sls status=[res[sls_base]] flips=[res[sls_base + nv + 4]]")
+    wassat_prof_note("race.arm[sls_idx] sls status=[res[sls_base]] flips=[res[sls_base + nv + 4]] repair_conflicts=[res[sls_base + nv + 7]] repair_won=[res[sls_base + nv + 1]] ms=[ms]")
   status = 0
   winner = -1
   a = 0
@@ -1406,10 +2534,14 @@ WASSAT_AXIS_SLOTS = 10
     status = 1
     winner = sls_idx
   model = []
-  conflicts = 0
+  repair_conflicts = sls.size > 0 ? res[sls_base + nv + 7] : 0
+  conflicts = repair_conflicts
+  if conflict_budget != nil
+    conflicts = ccall("__w_arr_load_acq", conflict_budget, 0)
   if winner >= 0
     base = winner * (nv + 8)
-    conflicts = res[base + nv + 4] - offsets[winner]
+    if winner != sls_idx && conflict_budget == nil
+      conflicts += res[base + nv + 4] - offsets[winner]
     if status == 1
       v = 1
       while v <= nv
@@ -1420,8 +2552,11 @@ WASSAT_AXIS_SLOTS = 10
   # rendering won (-1 = the raw one). Getting this wrong is caught by the
   # model check against the original formula, never passed off as an answer.
   { "status": status, "model": model, "winner": winner, "conflicts": conflicts,
+    "conflict_budget": conflict_budget,
     "pre_index": (winner >= threads && winner != sls_idx) ? winner - threads : 0 - 1,
-    "sls_won": winner == sls_idx }
+    "sls_won": winner == sls_idx,
+    "sls_repair_won": winner == sls_idx && res[sls_base + nv + 1] == 1,
+    "sls_repair_conflicts": repair_conflicts }
 
 -> wassat_run_fast_portfolio(input, threads, share, gpu)
   cnf_text = read_file(input)
@@ -1526,6 +2661,10 @@ WASSAT_AXIS_SLOTS = 10
     solvers.push(s)
     a += 1
 
+  # Materialize before any worker starts; the helper handles both raw and
+  # lazily boxed preprocessed artifacts.
+  gpu_formula = gpu ? wassat_gpu_formula(art, nv) : nil
+
   handles = []
   a = 0
   while a < threads
@@ -1541,13 +2680,12 @@ WASSAT_AXIS_SLOTS = 10
   # sidecar) degrades to a CPU-only race, never an error.
   gpu_model = []
   if gpu
-    reduced = { "nvars": nv, "clauses": art["clauses"] }
     metal_path = wassat_metal_path
     begin
-      gr = wassat_sls_gpu_solve(reduced, 512, 2000000000, 9001, 48, metal_path, stop)
+      gr = wassat_sls_gpu_solve(gpu_formula, 512, 2000000000, 9001, 48, metal_path, stop)
       if gr["sat"]
         gpu_model = gr["model"]
-        stop[0] = 1
+        won = wassat_stop_publish(stop, 1)
     rescue e
       << "c arm gpu-sls unavailable: [e]"
 
@@ -1589,7 +2727,7 @@ WASSAT_AXIS_SLOTS = 10
     model = wassat_reconstruct_model(art["stack"], reduced_model, nv)
     unless wassat_model_satisfies?(formula, model)
       raise "internal error: winning arm's model does not satisfy the original formula"
-    print("s SATISFIABLE\nv " + model.join(" ") + " 0\n")
+    print(wassat_sat_text(model))
   elsif verdict == "UNSAT"
     << "s UNSATISFIABLE"
   else
@@ -1610,6 +2748,30 @@ WASSAT_AXIS_SLOTS = 10
   if verdict == "UNSAT"
     exit(20)
   0
+
+# GPU SLS consumes boxed clauses, but raw and large lazy artifacts deliberately
+# leave art["clauses"] empty. Rebuild only the live selected clauses from the
+# flat artifact. MAIN THREAD ONLY: calling this after worker spawn would race
+# boxed inline caches in addition to feeding raw artifacts an empty formula.
+-> wassat_gpu_formula(art, nv)
+  clauses = art["clauses"]
+  if clauses.empty? && art["fncl"] > 0
+    clauses = []
+    synthetic = art["fsynth"] == true
+    ci = 0
+    while ci < art["fncl"]
+      alive = synthetic
+      alive = art["falive"][ci] == 1 && art["ftaut"][ci] == 0 unless synthetic
+      if alive
+        clause = []
+        j = 0
+        while j < art["fcl"][ci]
+          clause.push(art["fla"][art["fcs"][ci] + j])
+          j += 1
+        clauses.push(clause)
+      ci += 1
+    art["clauses"] = clauses
+  { "nvars": nv, "clauses": clauses }
 
 # ---- portfolio CLI -----------------------------------------------------------
 #
@@ -1690,7 +2852,7 @@ WASSAT_AXIS_SLOTS = 10
     raise e
   port.cleanup
   if r["verdict"] == "SAT"
-    print("s SATISFIABLE\nv " + r["model"].join(" ") + " 0\n")
+    print(wassat_sat_text(r["model"]))
   elsif r["verdict"] == "UNSAT"
     << "s UNSATISFIABLE"
   else

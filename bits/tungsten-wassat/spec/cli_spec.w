@@ -89,6 +89,13 @@ describe "Tungsten Wassat CLI" ->
       options = wassat_cli_options(["problem.cnf", "--fast", "--conflicts", "2500"])
       expect(options["conflicts"]).to eq(2500)
 
+    it "allocates each stage only from the remaining aggregate conflicts" ->
+      expect(wassat_stage_conflict_cap(0, 19, 1000)).to eq(1000)
+      expect(wassat_stage_conflict_cap(25, 19, 1000)).to eq(6)
+      expect(wassat_stage_conflict_cap(25, 25, 1000)).to eq(0)
+      expect(wassat_stage_conflict_cap(25, 31, 1000)).to eq(0)
+      expect(wassat_stage_conflict_cap(2500, 19, 1000)).to eq(1000)
+
     it "rejects controls that could silently become unlimited" ->
       expect(-> () wassat_cli_options(["problem.cnf", "--fast", "--conflicts", "oops"])).to raise_error
       expect(-> () wassat_cli_options(["problem.cnf", "--fast", "--conflicts", "-1"])).to raise_error
@@ -140,6 +147,32 @@ describe "Tungsten Wassat CLI" ->
         i += 1
       expect(WassatConfig.new(42, compact_choice).race_route?).to eq(false)
       expect(WassatConfig.new(0, []).race_route?).to eq(false)
+
+    it "bounds discarded scout work on million-clause raw kernels" ->
+      counts = i64[8]
+      below = WassatConfig.new(1, [])
+      below.adopt_counts(999999, counts)
+      large = WassatConfig.new(1, [])
+      large.adopt_counts(1000000, counts)
+      expect(below.probe_conflicts(true)).to eq(2000)
+      expect(large.probe_conflicts(true)).to eq(512)
+      expect(large.probe_conflicts(false)).to eq(4000)
+
+    it "bypasses discarded scout work only on dense low-variable ternary tasks" ->
+      counts = i64[8]
+      counts[4] = 240000
+      dense = WassatConfig.new(289, [])
+      dense.adopt_counts(242594, counts)
+      expect(dense.short_dense_ternary_scout?).to eq(true)
+      expect(dense.use_lucky).to eq(false)
+      expect(dense.probe_conflicts(true)).to eq(128)
+      expect(dense.probe_conflicts(false)).to eq(4000)
+
+      wide = WassatConfig.new(513, [])
+      wide.adopt_counts(242594, counts)
+      expect(wide.short_dense_ternary_scout?).to eq(false)
+      expect(wide.use_lucky).to eq(true)
+      expect(wide.probe_conflicts(true)).to eq(2000)
 
     it "keeps measured-losing vivification out of the automatic policy" ->
       clauses = []
@@ -233,6 +266,26 @@ describe "Tungsten Wassat CLI" ->
       expect(out.index("s SATISFIABLE") != nil).to eq(true)
       expect(out.index("v ") != nil).to eq(true)
 
+    it "keeps every large-model value line within the competition limit" ->
+      bin = cli_test_bin
+      sat = "/tmp/wassat-cli-large-model.cnf"
+      clauses = []
+      v = 1
+      while v <= 4000
+        clauses.push("[v] 0")
+        v += 1
+      text = "p cnf 4000 4000\n" + clauses.join("\n") + "\n"
+      expect(write_file(sat, text)).to eq(true)
+      expect(cli_exits(bin + " " + sat + " --fast > /tmp/wassat-cli-large-model.out 2>&1", 10)).to eq(true)
+      lines = read_file("/tmp/wassat-cli-large-model.out").split("\n")
+      values = []
+      lines.each -> (line)
+        if line.starts_with?("v ")
+          expect(line.size <= WASSAT_VALUE_LINE_MAX).to eq(true)
+          values.push(line)
+      expect(values.size > 1).to eq(true)
+      expect(values[values.size - 1].ends_with?(" 0")).to eq(true)
+
     it "writes a WRAT certificate that the independent checker verifies" ->
       bin = cli_test_bin
       text = cli_php_cnf(4, 3)
@@ -281,7 +334,10 @@ describe "Tungsten Wassat CLI" ->
   # Aggregate --conflicts cap: NO CDCL stage (scout probe, raw race, final
   # solve) may push the total past the requested budget. PHP(6,5) is decided
   # only after ~143 conflicts, so a small cap must return UNKNOWN with a
-  # conflict count that never exceeds the cap.
+  # conflict count that never exceeds the cap. Disable the automatic
+  # pigeonhole/coloring and exact-cover certificates here: this test is
+  # specifically about aggregate CDCL accounting, while their own specs cover
+  # those zero-conflict verdict paths.
   context "aggregate conflict budget" ->
     it "solves within an unlimited budget but stops at a small cap" ->
       bin = cli_test_bin
@@ -289,17 +345,17 @@ describe "Tungsten Wassat CLI" ->
       cnf = "/tmp/wassat-cli-budget.cnf"
       expect(write_file(cnf, text)).to eq(true)
 
-      expect(cli_exits(bin + " " + cnf + " --fast --conflicts 0 > /tmp/wassat-cli-budget0.out 2>&1", 20)).to eq(true)
+      expect(cli_exits("WASSAT_COLORING=0 WASSAT_COVERING=0 " + bin + " " + cnf + " --fast --conflicts 0 > /tmp/wassat-cli-budget0.out 2>&1", 20)).to eq(true)
       expect(read_file("/tmp/wassat-cli-budget0.out").index("s UNSATISFIABLE") != nil).to eq(true)
 
       # a bounded run that stops UNKNOWN is exit 0, not a verdict code
-      expect(cli_exits(bin + " " + cnf + " --fast --conflicts 1 > /tmp/wassat-cli-budget1.out 2>&1", 0)).to eq(true)
+      expect(cli_exits("WASSAT_COLORING=0 WASSAT_COVERING=0 " + bin + " " + cnf + " --fast --conflicts 1 > /tmp/wassat-cli-budget1.out 2>&1", 0)).to eq(true)
       out1 = read_file("/tmp/wassat-cli-budget1.out")
       expect(out1.index("s UNKNOWN") != nil).to eq(true)
       # aggregate conflicts reported must not exceed the cap of 1
       expect(out1.index("c conflicts: 1,") != nil || out1.index("c conflicts: 0,") != nil).to eq(true)
 
-      expect(cli_exits(bin + " " + cnf + " --fast --conflicts 2 > /tmp/wassat-cli-budget2.out 2>&1", 0)).to eq(true)
+      expect(cli_exits("WASSAT_COLORING=0 WASSAT_COVERING=0 " + bin + " " + cnf + " --fast --conflicts 2 > /tmp/wassat-cli-budget2.out 2>&1", 0)).to eq(true)
       out2 = read_file("/tmp/wassat-cli-budget2.out")
       expect(out2.index("s UNKNOWN") != nil).to eq(true)
       expect(out2.index("c conflicts: 3,") == nil).to eq(true)

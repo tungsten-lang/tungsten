@@ -27,6 +27,8 @@
 #   A clause contributes only when unsatisfied (every member could make it)
 #   or critically satisfied (only its one true variable can break it).
 
+use atomic_stop
+
 WASSAT_SLS_WEIGHT_CAP_MULT = 16
 
 + WassatSls
@@ -37,15 +39,22 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   # other arm has answered (measured: lucky wins Large-result_b23 in ~0.4s and
   # the join then waited 5.3s on this constructor). An aborted intake marks
   # the walker unusable (@aborted); solve returns "no model" immediately.
-  # `flat` is the parser's formula Hash (flat_lits/flat_offs/flat_lens/flat_ncl)
-  # or nil. When present the boxed clause list is never touched: normalisation
-  # reads the i64[] mirrors and writes this walker's own flat arrays directly,
-  # which is both faster and thread-safe (a worker must never subscript a boxed
-  # Array -- see the SIGBUS note on the stop cell below).
+  # `flat` is either the parser's formula Hash
+  # (flat_lits/flat_offs/flat_lens/flat_ncl), the already-built raw artifact
+  # (fla/fcs/fcl/fncl), or nil. When present the boxed clause list is never
+  # touched: normalisation reads the i64[] mirrors and writes this walker's own
+  # flat arrays directly, which is both faster and thread-safe (a worker must
+  # never subscript a boxed Array -- see the SIGBUS note on the stop cell
+  # below). The portfolio passes the raw artifact so the SLS arm cannot
+  # accidentally rebuild a second view from the shared parser Hash.
   -> new(@nvars, @input_clauses, stop, flat_in)
-    # Same guard as WassatPreprocess: a formula without flat mirrors is boxed.
+    # Same guard as WassatPreprocess: an input without either trusted mirror
+    # layout is boxed.
     flat = flat_in
-    flat = nil if flat != nil && !flat.has_key?("flat_ncl")
+    if flat != nil
+      parsed = flat.has_key?("flat_ncl")
+      artifact = flat.has_key?("fncl") && flat.has_key?("raw") && flat["raw"] == true
+      flat = nil unless parsed || artifact
     nv = @nvars
     @impossible = false
     @aborted = false
@@ -66,10 +75,11 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       # Two native passes over the flat mirrors: size, then fill. `pm` carries
       # the counts back; a stamp array does dedupe and tautology detection in
       # O(1) per literal with no allocation at all.
-      sfla = flat["flat_lits"]
-      sfcs = flat["flat_offs"]
-      sfcl = flat["flat_lens"]
-      sncl = flat["flat_ncl"]
+      parsed = flat.has_key?("flat_ncl")
+      sfla = parsed ? flat["flat_lits"] : flat["fla"]
+      sfcs = parsed ? flat["flat_offs"] : flat["fcs"]
+      sfcl = parsed ? flat["flat_lens"] : flat["fcl"]
+      sncl = parsed ? flat["flat_ncl"] : flat["fncl"]
       stamp = i64[2 * nv + 4]
       scell = stop == nil ? i64[4] : stop
       pm = i64[6]
@@ -100,7 +110,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
         cnt += 1
         unless @aborted
           if (cnt & 4095) == 0 && stop != nil
-            @aborted = true if stop[0] != 0
+            @aborted = true if wassat_stop_requested?(stop)
           unless @aborted
             @impossible = true if c.size == 0
             uniq = []
@@ -171,7 +181,13 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     # through, and the best one is what a phase seed wants.
     @bag = i64[nv + 1]
     @wtr = i64[nv + 4]
-    @st = i64[12]
+    # st[12] is the resume bit.  The portfolio may pause one eligible walk
+    # at a fixed prefix to try an exact frozen-fringe repair, then resume the
+    # SAME weighted trajectory if the repair misses.  Keeping this bit in the
+    # native state block lets wassat_sls_run preserve both @bag and the
+    # flip-since-best trail across that cold detour.
+    @st = i64[13]
+    @started = false
     # Interrupt cell, polled by the flip loop. Private by default so a
     # standalone walk behaves exactly as before; a race arm swaps in the
     # shared cell so a win by any other arm stops this one immediately
@@ -199,7 +215,9 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   -> solve(max_flips, seed)
     if @impossible || @aborted
       return { "sat": false, "model": [], "flips": 0, "restarts": 0,
-               "best_unsat": 1, "seed": seed }
+               "best_unsat": 1, "seed": seed, "assign": [],
+               "best_assign": [], "best_bits": i64[1],
+               "retired": true }
 
     # seeded initial assignment (xorshift64*); ## i64 prevents BigInt
     # promotion (untyped shifts never wrap)
@@ -217,22 +235,49 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       @lastf[v] = 0
       v += 1
     self.run_from_assignment(max_flips, rng)
+    @started = true
+    self.result(seed)
 
+  # Resume a prefix-bounded walk without resetting its assignment, weights,
+  # configuration-change state, RNG, best snapshot, or flip-since-best trail.
+  # `max_flips` is the new TOTAL ceiling, not an additional allowance.
+  -> continue_solve(max_flips, seed)
+    return self.result(seed) unless @started
+    return self.result(seed) if max_flips <= @st[4] || @st[9] == 1
+    @st[5] = max_flips
+    @st[12] = 1
+    wassat_sls_run(@fla, @fcs, @fcl, @och, @ocn, @ocv, @asg, @satc, @crit,
+                   @wght, @score, @ccf, @lastf, @ulist, @upos, @gstk, @gin,
+                   @bag, @wtr, @st, @stop, @plateau)
+    self.result(seed)
+
+  # Detached result construction.  `best_bits` is the allocation-stable
+  # native snapshot consumed by frozen-fringe repair; `best_assign` is its
+  # literal-form public twin.  Before this split the miss payload labelled as
+  # a near-solution was built from @asg, the arbitrary FINAL assignment, even
+  # though @bag already retained the strictly better point.
+  -> result(seed)
     model = []
     if @st[9] == 1
       v = 1
       while v <= @nvars
         model.push(@asg[v] == 1 ? v : 0 - v)
         v += 1
-    # The final assignment is returned even on a miss: a near-solution is
-    # exactly the polarity seed CDCL wants (cms5's CCAnr/'polar stb' trick).
+    # A miss returns the BEST assignment, not the arbitrary endpoint: a
+    # near-solution is exactly the polarity/frozen-core seed CDCL wants
+    # (cms5's CCAnr/'polar stb' trick).
     assign = []
+    best_bits = i64[@nvars + 1]
     v = 1
     while v <= @nvars
-      assign.push(@asg[v] == 1 ? v : 0 - v)
+      bit = @bag[v]
+      best_bits[v] = bit
+      assign.push(bit == 1 ? v : 0 - v)
       v += 1
     { "sat": @st[9] == 1, "model": model, "assign": assign, "flips": @st[4],
-      "restarts": 0, "best_unsat": @st[7], "seed": seed }
+      "best_assign": assign.dup, "best_bits": best_bits,
+      "restarts": 0, "best_unsat": @st[7], "seed": seed,
+      "retired": @plateau[2] == 1 }
 
   # Everything downstream of the initial assignment: clause states, weights,
   # scores, the good-variable stack, then the flip loop. @asg must already
@@ -302,6 +347,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     @st[9] = 0
     @st[10] = 0
     @st[11] = 0
+    @st[12] = 0
     wassat_sls_run(@fla, @fcs, @fcl, @och, @ocn, @ocv, @asg, @satc, @crit,
                    @wght, @score, @ccf, @lastf, @ulist, @upos, @gstk, @gin,
                    @bag, @wtr, @st, @stop, @plateau)
@@ -397,6 +443,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 #   st[4] flips   st[5] max flips  st[6] rng state     st[7] best unsat
 #   st[8] total weight             st[9] 1 = model found
 #   st[10] flip-trail size         st[11] flip trail overflowed
+#   st[12] resume existing native state (preserve best snapshot/trail)
 # Pass 1: count surviving clauses and literals. A clause is dropped when it is
 # a tautology; duplicate literals collapse. `stamp` holds a per-literal
 # generation so both tests are O(1) with no allocation -- the same trick the
@@ -413,9 +460,12 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   ci = 0
   while ci < ncl
     if (ci & 8191) == 0
-      if stp[0] != 0
+      if wassat_stop_load(stp) != 0
         pm[5] = 1
-        ci = ncl
+        # Do not use `ci = ncl` as a loop-break sentinel here: the clause
+        # body follows this poll in the same iteration, so that form reads
+        # fcs[ncl]/fcl[ncl]. Parser mirrors are exactly ncl entries long.
+        return 0
     o = fcs[ci]
     n = fcl[ci]
     empty = 1 if n == 0
@@ -456,9 +506,12 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   ci = 0
   while ci < ncl
     if (ci & 8191) == 0
-      if stp[0] != 0
+      if wassat_stop_load(stp) != 0
         pm[5] = 1
-        ci = ncl
+        # See the sizing pass above. A pre-raised stop must return before
+        # touching the first clause, not redirect the current read one past
+        # the end of an exact-sized mirror.
+        return 0
     o = fcs[ci]
     n = fcl[ci]
     gen += 1
@@ -519,13 +572,15 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   # is O(nv) per improvement; instead flipped variables are trailed and the
   # snapshot is patched with just that delta (kissat's trick), with a full
   # copy as the overflow fallback once the trail passes nv/4.
-  wtn = 0
-  wovf = 0
+  resume = st[12]
+  wtn = resume == 1 ? st[10] : 0
+  wovf = resume == 1 ? st[11] : 0
   wtcap = nv / 4 + 1
-  vb = 1
-  while vb <= nv
-    bag[vb] = asg[vb]
-    vb += 1
+  if resume == 0
+    vb = 1
+    while vb <= nv
+      bag[vb] = asg[vb]
+      vb += 1
 
   # Plateau retirement. A walker that has stopped improving its best-unsat
   # count will not answer, and on an UNSAT instance it never can -- it just
@@ -541,7 +596,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   plat_run = 0
   plat_next = plat_win
   plat_stop = 0
-  while ucount > 0 && step < maxflips && stp[0] == 0 && plat_stop == 0
+  while ucount > 0 && step < maxflips && wassat_stop_load(stp) == 0 && plat_stop == 0
     if plat_win > 0 && step >= plat_next
       plat_next = step + plat_win
       if best < plat_ref
@@ -818,7 +873,47 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   st[9] = found
   st[10] = wtn
   st[11] = wovf
+  st[12] = 1
   0
+
+# Mark the smallest exact SAT-repair fringe around a best SLS snapshot:
+# every variable in every currently unsatisfied clause is mutable; all other
+# variables may be frozen to their snapshot values.  The caller can then grow
+# this set from failed-assumption cores without ever guessing which frozen
+# coordinate blocked the extension.
+#
+# meta[0] = unsatisfied clauses, meta[1] = distinct mutable variables.
+-> wassat_sls_mark_fringe(fla, fcs, fcl, ncl, bits, mutable, meta) (i64[] i64[] i64[] i64 i64[] i64[] i64[]) i64
+  meta[0] = 0
+  meta[1] = 0
+  ci = 0
+  while ci < ncl
+    o = fcs[ci]
+    n = fcl[ci]
+    satisfied = 0
+    j = 0
+    while j < n
+      l = fla[o + j]
+      v = l
+      v = 0 - l if l < 0
+      bit = bits[v]
+      if (l > 0 && bit == 1) || (l < 0 && bit == 0)
+        satisfied = 1
+        j = n
+      else
+        j += 1
+    if satisfied == 0
+      meta[0] += 1
+      j = 0
+      while j < n
+        v = fla[o + j]
+        v = 0 - v if v < 0
+        if mutable[v] == 0
+          mutable[v] = 1
+          meta[1] += 1
+        j += 1
+    ci += 1
+  meta[0]
 
 # Worst-case sizing for a walk over a solver's arena: how many irredundant
 # clauses are alive and how many literals they hold. Learned clauses carry a

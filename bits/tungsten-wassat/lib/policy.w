@@ -186,6 +186,80 @@ WASSAT_CONGRUENCE_DEFAULT = true
   return wassat_decimal_in_range("WASSAT_SLS_FLIPS", env("WASSAT_SLS_FLIPS"), 0, 2000000000) if env("WASSAT_SLS_FLIPS") != nil
   200000000
 
+# Conservative resident-size estimates shared by every race resource gate.
+# Counts are ARENAS, not live threads: this runtime has no collector, so the
+# scout's completed lucky/SLS allocations remain resident while the raw race
+# runs. A continuation is still one arena and must not be counted twice.
+-> wassat_cdcl_arena_bytes(formula)
+  25165824 + 24 * formula["flat_nlits"] + 96 * formula["flat_ncl"]
+
+-> wassat_preprocess_arena_bytes(formula)
+  # A live preprocessor retains roughly six 2*ncl clause tables, three
+  # 2*nlits literal/occurrence arenas, and its variable/probe scratch while
+  # the solver built from its rendering is also live. Keep it separate from
+  # that later CDCL arena; treating the arm as only one of the two was the
+  # peak-residency accounting bug.
+  25165824 + 48 * formula["flat_nlits"] + 96 * formula["flat_ncl"] + 128 * formula["nvars"]
+
+-> wassat_sls_arena_bytes(formula)
+  lits = formula["flat_nlits"]
+  ncl = formula["flat_ncl"]
+  nv = formula["nvars"]
+  # Three literal-sized arrays; seven clause-sized arrays; the variable
+  # arrays plus the constructor's native deduplication stamp. Add one MiB for
+  # descriptors, state, and the deliberately conservative small-formula floor.
+  1048576 + (3 * lits + 7 * ncl + 12 * nv) * 8
+
+-> wassat_race_memory_fits?(formula, cdcl_arenas, sls_arenas,
+                            preprocess_arenas = 0)
+  memory = System.physical_memory_bytes ## i64
+  # These gates add optional resident arenas. Unknown capacity fails closed;
+  # the baseline serial/raw solver remains available without them.
+  return false if memory <= 0
+  estimated = wassat_cdcl_arena_bytes(formula) * cdcl_arenas
+  estimated += wassat_sls_arena_bytes(formula) * sls_arenas
+  estimated += wassat_preprocess_arena_bytes(formula) * preprocess_arenas
+  estimated <= memory / 3
+
+# Metaflip-style frozen-core / exact-fringe repair.  These are internal
+# resource limits, not tuning options: the arm inspects the walk it actually
+# obtained and changes technique only for a small, demonstrated near miss.
+#
+# The 200k prefix is above every cheap SLS hit except the longer structured
+# rows (n384 finishes at 105,627 flips), while the official ntil33, 41-119494
+# and st_540 screens are already within 1/1/4 clauses at 100k.  A failed
+# repair resumes the bit-identical weighted walk from this boundary.
+WASSAT_SLS_REPAIR_PREFIX_FLIPS = 200000
+WASSAT_SLS_REPAIR_MAX_UNSAT = 8
+WASSAT_SLS_REPAIR_MAX_VARS = 50000
+WASSAT_SLS_REPAIR_MAX_CLAUSES = 750000
+WASSAT_SLS_REPAIR_MAX_FRINGE = 4096
+WASSAT_SLS_REPAIR_MAX_MB = 256
+WASSAT_SLS_REPAIR_ROUNDS = 4
+# Total internal repair allowance: the geometric sum of
+# wassat_sls_repair_round_conflicts over WASSAT_SLS_REPAIR_ROUNDS
+# (256+512+1024+2048 = 3840). Derived from the round count so a changed
+# schedule can never silently desync the budget check in portfolio.w.
+WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
+
+-> wassat_sls_repair_round_conflicts(round)
+  # Four persistent-solver queries cost at most 256+512+1024+2048 = 3840
+  # conflicts.  The geometric allowance is for the growing fringe, not a
+  # restart policy: learned blocking clauses survive every query.
+  256 << round
+
+-> wassat_sls_repair_eligible?(formula)
+  return false unless formula.has_key?("flat_ncl")
+  nv = formula["nvars"]
+  ncl = formula["flat_ncl"]
+  return false if nv < 1 || nv > WASSAT_SLS_REPAIR_MAX_VARS
+  return false if ncl < 1 || ncl > WASSAT_SLS_REPAIR_MAX_CLAUSES
+  # Same deliberately conservative resident-size estimate as the additive
+  # CDCL specialist gate.  The repair solver overlaps the existing SLS arena,
+  # so it gets its own hard 256 MiB ceiling rather than relying on host RAM.
+  bytes = wassat_cdcl_arena_bytes(formula)
+  bytes <= WASSAT_SLS_REPAIR_MAX_MB * 1048576
+
 # SLS plateau retirement: improvement window in flips, and how many
 # consecutive windows without progress retire the arm. 0 disables.
 # OFF (0), and the reason is a lesson worth keeping. On a hand-picked set of
@@ -221,7 +295,11 @@ WASSAT_CONGRUENCE_DEFAULT = true
 # lot: Large_b23 0.678 -> 0.474s, Large_b24 1.745 -> 1.306, sembuster_4200
 # 0.274 -> 0.190, sembuster_7500 0.430 -> 0.296, scc_9630 0.438 -> 0.301.
 # DivS_568_11 sits below the ceiling and is unchanged at 0.97x, so the rows
-# the walker actually wins keep their arm.
+# the walker actually wins keep their arm. DivS_862_11 is the boundary case:
+# its 261.6MiB arena missed this blanket limit by 2%, silently deleting the
+# arm that solves it in ~4s. `wassat_sls_arm_memory_allowed?` below admits
+# that narrow dense/few-variable shape up to 288MiB without reviving the
+# 441MiB-1.1GiB walkers responsible for the contention result above.
 -> wassat_sls_max_arena_mb
   return wassat_decimal_in_range("WASSAT_SLS_MAX_MB", env("WASSAT_SLS_MAX_MB"), 0, 1000000) if env("WASSAT_SLS_MAX_MB") != nil
   256
@@ -229,10 +307,22 @@ WASSAT_CONGRUENCE_DEFAULT = true
 # Estimated SLS arena for a parsed formula, in MB. Mirrors the array sizing in
 # WassatSls#new; approximate by design, it only has to rank instances.
 -> wassat_sls_arena_mb(formula)
-  lits = formula["flat_nlits"]
-  ncl = formula["flat_ncl"]
+  wassat_sls_arena_bytes(formula) / 1048576
+
+# Formula-directed exception to the generic SLS arena ceiling. Dense formulas
+# over a very small reusable variable set are exactly where the CCAnr arm pays:
+# DivS_568/862 carry roughly one thousand clauses per variable and both solve
+# after only hundreds of flips. Keep the exception narrow and bounded so large
+# application formulas do not regain the memory-bandwidth interference the
+# generic 256MiB ceiling removed. An explicit developer override remains exact.
+-> wassat_sls_arm_memory_allowed?(formula)
+  cap = wassat_sls_max_arena_mb
+  used = wassat_sls_arena_mb(formula)
+  return true if cap == 0 || used <= cap
+  return false if env("WASSAT_SLS_MAX_MB") != nil
   nv = formula["nvars"]
-  (3 * lits + 5 * ncl + 8 * nv) * 8 / 1048576
+  ncl = formula["flat_ncl"]
+  nv > 0 && nv <= 2048 && ncl >= 500000 && ncl >= nv * 512 && used <= 288
 
 -> wassat_sls_plateau_window
   return wassat_decimal_in_range("WASSAT_SLS_PLATEAU", env("WASSAT_SLS_PLATEAU"), 0, 2000000000) if env("WASSAT_SLS_PLATEAU") != nil
@@ -469,6 +559,11 @@ WASSAT_CONGRUENCE_DEFAULT = true
     @nclauses > 0
 
   -> stage_pre_after_scout?
+    # Training/ablation hook for the formula router. Keep this override out of
+    # the public CLI: it exists so one binary can collect exact counterfactual
+    # labels for Koala without compiler drift between policy columns.
+    if env("WASSAT_STAGE_PRE") != nil
+      return env("WASSAT_STAGE_PRE") == "1"
     # A staged exception for the dense random-3-SAT band: take the focused
     # raw SAT shot first, then—only after that shot misses—avoid paying for
     # six concurrent long searches on the upper end of the family. This is a
@@ -508,19 +603,35 @@ WASSAT_CONGRUENCE_DEFAULT = true
     return env("WASSAT_SUBST") == "1" if env("WASSAT_SUBST") != nil
     WASSAT_SUBST_DEFAULT
 
+  -> short_dense_ternary_scout?
+    # The SC2026 ntil family is a tiny-variable, enormous, almost-all-ternary
+    # encoding. Flame profiles on ntil33/34/35 attribute 1.4--2.6 seconds to
+    # the decision-free lucky arena before the productive raw arms can run.
+    # The gate is deliberately structural: across the 400 official instances
+    # it selects exactly the nine ntil siblings, without consulting names.
+    @nvars <= 512 && @nclauses >= 100000 && @ternary * 4 >= @nclauses * 3
+
   -> use_lucky
     # kissat's lucky phases (lucky.c): four decision-free greedy dives run
-    # once, before the first branching decision. Not shape-gated, because the
-    # cost is bounded by a propagation sweep on any shape and the payoff is
-    # the whole instance: the SC2026 miter ak128modbtbg2msisc is answered by
-    # the forward-true dive with zero conflicts, where an 8-arm CDCL race
-    # needs 14.4s to rediscover the same assignment. WASSAT_LUCKY=0 turns it
-    # off for ablation.
-    env("WASSAT_LUCKY") != "0"
+    # once, before the first branching decision. The default remains enabled:
+    # the SC2026 miter ak128modbtbg2msisc is answered by the forward-true dive
+    # with zero conflicts, where an 8-arm CDCL race needs 14.4s to rediscover
+    # the same assignment. The one measured exception is the strict dense
+    # low-variable ternary shape above. On ntil33, bypassing lucky preserves
+    # the exact 14,354-conflict raw-arm winner and cuts 3.40s to 2.06s; ntil34
+    # and ntil35 save 2.5s and 2.1s of otherwise discarded scout work.
+    return env("WASSAT_LUCKY") != "0" if env("WASSAT_LUCKY") != nil
+    !self.short_dense_ternary_scout?
 
   # Ternary count, for sizing the congruence pass's scratch tables.
   -> ternary_count
     @ternary
+
+  # Longest input clause, exposed so exact structural lanes can reject an
+  # impossible family before allocating their incidence tables. The value is
+  # computed once from the parser's flat length array in `.from_lens`.
+  -> max_clause_size
+    @max_clause
 
   -> use_congruence(raw)
     # Congruence closure: ternary strengthening (extract_binaries) plus AND
@@ -752,6 +863,20 @@ WASSAT_CONGRUENCE_DEFAULT = true
     return env("WASSAT_VIVIFY") == "1" if env("WASSAT_VIVIFY") != nil
     false
 
+  # Multi-agent path-planning encodings with this narrow width mix are
+  # unusually trajectory-sensitive. Across the tracked breadth corpus the
+  # gate matches exactly the two MRPP rows; across all 178 locally available
+  # 2026 instances it matches only mrpp_8x8. On that row, twelve raw arms plus
+  # the two representation arms cut the median roughly in half, while four
+  # arms leave most of the available phase basins unsampled.
+  -> use_planning_diversity
+    return false if @nvars < 1000 || @nclauses < 20000
+    return false if @units < 128 || @max_clause != 5
+    wide = @nclauses - @units - @binary - @ternary
+    return false if wide * 6 < @nclauses || wide * 3 > @nclauses
+    return false if @binary * 3 < @nclauses || @binary * 2 > @nclauses
+    @ternary * 4 >= @nclauses
+
   -> raw_race_arms
     # Re-enabled 2026-07-25 after the fault was isolated and fixed: the
     # SIGBUS was an inline-cache publication tear (key stored before
@@ -836,7 +961,10 @@ WASSAT_CONGRUENCE_DEFAULT = true
     cores = System.cpu_count ## i64
     arms = cores - 2
     arms = 1 if arms < 1
-    arms = 4 if arms > 4
+    if self.use_planning_diversity
+      arms = 12 if arms > 12
+    else
+      arms = 4 if arms > 4
 
     # A clause-count ladder could not predict useful diversity, but formula
     # size DOES predict resident memory. Estimate the fixed flat solver
@@ -873,6 +1001,29 @@ WASSAT_CONGRUENCE_DEFAULT = true
     raw ? 150 : 120
 
   -> probe_conflicts(raw)
+    if env("WASSAT_PROBE_CONFLICTS") != nil
+      return wassat_decimal_in_range(
+        "WASSAT_PROBE_CONFLICTS", env("WASSAT_PROBE_CONFLICTS"),
+        1, 2000000000
+      )
+    # Once the expensive lucky arena is absent on the strict dense ternary
+    # shape, 128 conflicts are enough to hand off to its productive raw race.
+    # Paired ntil33 runs improve 2.06s -> 2.00s with the same verified arm-3
+    # model; siblings reduce the scout from 66/84ms to 11/12ms. Keep this
+    # behind the same shape gate: globally forcing 128 cancels the fast exact
+    # XOR arm on mod2 instances.
+    return 128 if raw && self.short_dense_ternary_scout?
+    # Bound discarded work on million-clause raw kernels.  The ordinary
+    # 2,000-conflict scout costs ~3.2s on schooltt and is not continued.
+    # A 128-conflict experiment was faster there, but was too aggressive:
+    # linked_list_swap_contents_safety_unwind45 has a deterministic scout
+    # refutation at 242 conflicts and fell through into a long race at 128.
+    # The native first slice is 512 conflicts; that preserves the refutation
+    # (about 4.9s at either cap in interleaved runs) while keeping schooltt's
+    # scout around 0.65s instead of 3.2s.  Keep the full cap below the
+    # threshold so the bmc-ibm-6/10 class retains its known 1-2k-conflict
+    # scout wins.
+    return 512 if raw && @nclauses >= 1000000
     raw ? 2000 : 4000
 
   -> reduce_limit

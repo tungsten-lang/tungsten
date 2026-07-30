@@ -90,7 +90,18 @@ run_wassat_spec() {
   local status
 
   name="$(basename "${path%.w}")"
-  if [[ "$name" == "cli_spec" || "$name" == "preprocess_spec" || "$name" == "portfolio_spec" ]]; then
+  # Compile-and-run set, mirroring benchmarks/gate.sh: these exercise the
+  # native DIMACS parser, process portfolio, or atomic-cancellation ABI that
+  # exist only in compiled programs. The interpreted remainder (solver, sls,
+  # incremental, trim, explain, algebra_certificate) stays interpreted here;
+  # gate.sh separately compiles solver/sls for the concurrency regressions.
+  case "$name" in
+    cli_spec|preprocess_spec|portfolio_spec|multiplier_spec|ternary_affine_spec|ais_spec|coloring_spec|covering_spec|directed_kernel_spec|local_core_spec|latin_csp_spec|fermat_spec|sum_of_three_cubes_spec|mdp_spec|automata_sync_spec|edge_matching_spec|sliding_puzzle_spec|stedman_spec|hantzsche_wendt_spec|knight_tour_spec)
+      compile_wassat_spec=1 ;;
+    *)
+      compile_wassat_spec=0 ;;
+  esac
+  if [[ "$compile_wassat_spec" == "1" ]]; then
     spec_bin="$TMP_ROOT/wassat-$name"
     echo "compile+run $path (WASSAT_TEST_BIN=$wassat_bin)"
     if ! "$TUNGSTEN" compile "$path" --out "$spec_bin" --no-lto >/dev/null; then
@@ -356,6 +367,23 @@ wassat_specs=(
   bits/tungsten-wassat/spec/explain_spec.w
   bits/tungsten-wassat/spec/algebra_certificate_spec.w
   bits/tungsten-wassat/spec/portfolio_spec.w
+  bits/tungsten-wassat/spec/multiplier_spec.w
+  bits/tungsten-wassat/spec/ternary_affine_spec.w
+  bits/tungsten-wassat/spec/ais_spec.w
+  bits/tungsten-wassat/spec/coloring_spec.w
+  bits/tungsten-wassat/spec/covering_spec.w
+  bits/tungsten-wassat/spec/directed_kernel_spec.w
+  bits/tungsten-wassat/spec/local_core_spec.w
+  bits/tungsten-wassat/spec/latin_csp_spec.w
+  bits/tungsten-wassat/spec/fermat_spec.w
+  bits/tungsten-wassat/spec/sum_of_three_cubes_spec.w
+  bits/tungsten-wassat/spec/mdp_spec.w
+  bits/tungsten-wassat/spec/automata_sync_spec.w
+  bits/tungsten-wassat/spec/edge_matching_spec.w
+  bits/tungsten-wassat/spec/sliding_puzzle_spec.w
+  bits/tungsten-wassat/spec/stedman_spec.w
+  bits/tungsten-wassat/spec/hantzsche_wendt_spec.w
+  bits/tungsten-wassat/spec/knight_tour_spec.w
 )
 
 # The independent proof checker ships as its own bit with no shared parsing

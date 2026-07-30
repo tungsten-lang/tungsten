@@ -30,6 +30,15 @@ ALL_FOUR = "p cnf 2 4\n1 2 0\n1 -2 0\n-1 2 0\n-1 -2 0\n"
 # independently-budgeted continuation calls.
 ALL_EIGHT = "p cnf 3 8\n1 2 3 0\n1 2 -3 0\n1 -2 3 0\n1 -2 -3 0\n-1 2 3 0\n-1 2 -3 0\n-1 -2 3 0\n-1 -2 -3 0\n"
 
+# The first conflict has an intermediate resolvent that subsumes one reason:
+# OTFS learns (5 v 2), while ordinary first-UIP learns the incomparable
+# assumption-blocking clause (5 v 1).
+OTFS_INSTALL = [[-2, 5, 1], [3, 5, 2], [4, 5, 2], [-3, -4, 5, 2]]
+
+# Here the same resolution pattern yields (1 v 4), exactly the final
+# first-UIP clause. The side lemma must be recognized but not installed.
+OTFS_DOMINATED = [[2, 1, 4], [3, 1, 4], [-2, -3, 1, 4]]
+
 # Satisfiable: implication chain 1 -> 2 -> 3, with 1 asserted.
 CHAIN = "p cnf 3 3\n1 0\n-1 2 0\n-2 3 0\n"
 
@@ -54,6 +63,17 @@ EMPTY_CLAUSE = "p cnf 1 1\n0\n"
         hit = true if m == l
     ok = false unless hit
   ok
+
+# Hammer the runtime CAS primitive from a worker without allocating. Every
+# successful global ticket is charged atomically to this worker's slot.
+-> wassat_ticket_hammer(state, arm_slot, limit, attempts) (i64[] i64 i64 i64)
+  i = 0
+  while i < attempts
+    ticket = ccall("__w_arr_try_inc_below", state, 0, limit)
+    if ticket > 0
+      z = ccall("__w_arr_fetch_add", state, arm_slot, 1)
+    i += 1
+  0
 
 describe "Tungsten Wassat" ->
 
@@ -88,6 +108,90 @@ describe "Tungsten Wassat" ->
     it "accepts a formula with no clauses" ->
       r = wassat_solve(NO_CLAUSES)
       expect(r["sat"]).to eq(true)
+
+    it "seeds the target-phase basin used by diversified race arms" ->
+      s = Wassat.new(32, [], WASSAT_PROOF_NONE, 0)
+      s.enable_frontier_mode
+      s.reseed_phases(15485863, true)
+      r = s.solve_budget(0)
+      expect(r["status"]).to eq(1)
+      positive = 0
+      negative = 0
+      r["model"].each -> (lit)
+        if lit > 0
+          positive += 1
+        else
+          negative += 1
+      expect(positive > 0).to eq(true)
+      expect(negative > 0).to eq(true)
+
+    it "does not branch on variables removed from a flat artifact" ->
+      # Mirrors a sparse preprocessed kernel with a large declared capacity:
+      # variable 1 remains as a unit and every other coordinate has been
+      # eliminated or substituted.  The reduced solver must not spend one
+      # decision per dead coordinate before recognizing the model.
+      text = "p cnf 4096 1\n1 0\n"
+      art = wassat_preprocess(text, WASSAT_PROOF_NONE)
+      v = 2
+      while v <= 4096
+        art["gone"][v] = 1
+        v += 1
+      art["stats"]["vars_eliminated"] = 4095
+      s = Wassat.from_flat(4096, art, 0)
+      r = s.solve_budget(0)
+      expect(r["status"]).to eq(1)
+      expect(r["decisions"]).to eq(0)
+      model = wassat_reconstruct_model(art["stack"], r["model"], 4096)
+      expect(wassat_model_satisfies?(wassat_parse_cnf(text), model)).to eq(true)
+
+    it "refreshes formula-shaped lucky policy when a flat artifact is loaded" ->
+      # from_flat_lucky first builds an empty-clause allocation shell. The
+      # shell enables lucky by default; the real dense-ternary configuration
+      # disables it. Keep the artifact tiny while giving its policy the exact
+      # production histogram, so this pins the state hand-off without a
+      # 200,000-clause fixture.
+      formula = wassat_parse_cnf_native("p cnf 272 1\n1 2 3 0\n")
+      art = wassat_raw_artifact(formula, 272)
+      counts = i64[8]
+      counts[0] = 600000
+      counts[1] = 4
+      counts[3] = 1380
+      counts[4] = 199027
+      dense = WassatConfig.new(272, [])
+      dense.adopt_counts(200920, counts)
+      expect(dense.use_lucky).to eq(false)
+      art["config"] = dense
+
+      s = Wassat.from_flat_lucky(272, art)
+      res = i64[280]
+      s.lucky_shared(res, 0)
+      expect(res[0]).to eq(0)
+      expect(res[273]).to eq(0)
+
+  context "competition output" ->
+    it "wraps large models without losing or duplicating literals" ->
+      model = []
+      v = 1
+      while v <= 4000
+        model.push((v & 1) == 0 ? v : 0 - v)
+        v += 1
+      lines = wassat_sat_text(model).strip.split("\n")
+      expect(lines[0]).to eq("s SATISFIABLE")
+      expect(lines.size > 2).to eq(true)
+      observed = []
+      i = 1
+      while i < lines.size
+        line = lines[i]
+        expect(line.starts_with?("v ")).to eq(true)
+        expect(line.size <= WASSAT_VALUE_LINE_MAX).to eq(true)
+        expect(line.ends_with?(" 0")).to eq(i == lines.size - 1)
+        tokens = wassat_tokenize(line)
+        j = 1
+        while j < tokens.size
+          observed.push(tokens[j].to_i) unless tokens[j] == "0"
+          j += 1
+        i += 1
+      expect(observed).to eq(model)
 
   context "bounded search" ->
     it "reports UNKNOWN rather than UNSAT when its conflict budget expires" ->
@@ -172,6 +276,198 @@ describe "Tungsten Wassat" ->
       sat_again = sat_solver.solve_budget(1)
       expect(sat_again["status"]).to eq(1)
       expect(sat_again["model"].size).to eq(2)
+
+  context "atomic cooperative stop cells" ->
+    it "publishes payload and status before readers observe the flag" ->
+      stop = i64[4]
+      payload = i64[1]
+      observed = i64[2]
+      reader = Thread.new ->
+        while !wassat_stop_requested?(stop)
+          z = 0
+        observed[0] = payload[0]
+        observed[1] = wassat_stop_status(stop)
+      writer = Thread.new ->
+        payload[0] = 8675309
+        won = wassat_stop_publish(stop, 0 - 1)
+      z = writer.join
+      z = reader.join
+      expect(observed[0]).to eq(8675309)
+      expect(observed[1]).to eq(-1)
+
+    it "keeps the first decisive status under racing publishers" ->
+      stop = i64[4]
+      won = i64[4]
+      h1 = Thread.new -> won[0] = wassat_stop_publish(stop, 1)
+      h2 = Thread.new -> won[1] = wassat_stop_publish(stop, 0 - 1)
+      h3 = Thread.new -> won[2] = wassat_stop_publish(stop, 1)
+      h4 = Thread.new -> won[3] = wassat_stop_publish(stop, 0 - 1)
+      z = h1.join
+      z = h2.join
+      z = h3.join
+      z = h4.join
+      expect(won[0] + won[1] + won[2] + won[3]).to eq(1)
+      status = wassat_stop_status(stop)
+      expected = 0
+      expected = 1 if won[0] == 1 || won[2] == 1
+      expected = -1 if won[1] == 1 || won[3] == 1
+      expect(status).to eq(expected)
+      expect(wassat_stop_requested?(stop)).to eq(true)
+      # Neither cancellation nor a late verdict may overwrite the winner.
+      z = wassat_stop_cancel(stop)
+      z = wassat_stop_publish(stop, 0 - status)
+      expect(wassat_stop_status(stop)).to eq(status)
+
+  context "shared aggregate conflict tickets" ->
+    it "never overshoots under concurrent native CAS reservations" ->
+      state = i64[5]
+      h1 = Thread.new -> wassat_ticket_hammer(state, 1, 37, 256)
+      h2 = Thread.new -> wassat_ticket_hammer(state, 2, 37, 256)
+      h3 = Thread.new -> wassat_ticket_hammer(state, 3, 37, 256)
+      h4 = Thread.new -> wassat_ticket_hammer(state, 4, 37, 256)
+      z = h1.join
+      z = h2.join
+      z = h3.join
+      z = h4.join
+      expect(state[0]).to eq(37)
+      expect(state[1] + state[2] + state[3] + state[4]).to eq(37)
+
+    it "caps two solver arms exactly and accounts every ticket once" ->
+      f = wassat_parse_cnf(ALL_EIGHT)
+      s1 = Wassat.new(f["nvars"], f["clauses"], WASSAT_PROOF_NONE, 0)
+      s2 = Wassat.new(f["nvars"], f["clauses"], WASSAT_PROOF_NONE, 0)
+      stop = i64[2]
+      state = i64[3]
+      stride = f["nvars"] + 8
+      res = i64[2 * stride]
+      s1.set_stop_cell(stop)
+      s2.set_stop_cell(stop)
+      s1.set_shared_conflict_budget(state, 3, 1)
+      s2.set_shared_conflict_budget(state, 3, 2)
+      s1.enable_fixed_caps
+      s2.enable_fixed_caps
+      h1 = Thread.new -> s1.solve_shared_budget(res, 0, 0)
+      h2 = Thread.new -> s2.solve_shared_budget(res, stride, 0)
+      z = h1.join
+      z = h2.join
+      expect(state[0]).to eq(3)
+      expect(state[1] + state[2]).to eq(3)
+      charged = res[f["nvars"] + 4] + res[stride + f["nvars"] + 4]
+      expect(charged).to eq(3)
+      expect(res[0]).to eq(0)
+      expect(res[stride]).to eq(0)
+      expect(wassat_stop_requested?(stop)).to eq(true)
+      expect(wassat_stop_status(stop)).to eq(0)
+
+    it "keeps a decisive UNSAT verdict from the final allowed conflict" ->
+      f = wassat_parse_cnf(ALL_FOUR)
+      s = Wassat.new(f["nvars"], f["clauses"], WASSAT_PROOF_NONE, 0)
+      stop = i64[2]
+      state = i64[2]
+      res = i64[f["nvars"] + 8]
+      s.set_stop_cell(stop)
+      s.set_shared_conflict_budget(state, 2, 1)
+      s.solve_shared_budget(res, 0, 0)
+      expect(res[0]).to eq(-1)
+      expect(state[0]).to eq(2)
+      expect(state[1]).to eq(2)
+      expect(wassat_stop_requested?(stop)).to eq(true)
+      expect(wassat_stop_status(stop)).to eq(-1)
+
+    it "preserves a failed-assumption core exposed by the final ticket" ->
+      # Globally satisfiable (set 1=false), but assumption 1 makes 2 and -2
+      # collide. The one learned unit exposes the core only after that final
+      # conflict has been processed.
+      s = Wassat.new(2, [[-1, 2], [-1, -2]], WASSAT_PROOF_NONE, 0)
+      stop = i64[2]
+      state = i64[2]
+      s.set_stop_cell(stop)
+      s.set_shared_conflict_budget(state, 1, 1)
+      r = s.solve_assuming_budget([1], 0)
+      expect(r["status"]).to eq(-1)
+      expect(r["core"]).to eq([1])
+      expect(r["conflicts"]).to eq(1)
+      expect(state[0]).to eq(1)
+      expect(state[1]).to eq(1)
+      expect(wassat_stop_requested?(stop)).to eq(true)
+      # This is query-local UNSAT, not a formula verdict for peers.
+      expect(wassat_stop_status(stop)).to eq(0)
+
+    it "charges frozen repair against a finite scout ticket pool" ->
+      f = wassat_parse_cnf_native(CHAIN)
+      art = wassat_raw_artifact(f, f["nvars"])
+      bits = i64[f["nvars"] + 1]
+      stop = i64[4]
+      state = i64[3]
+      # Model an ordinary scout having consumed slot 1's first ticket; the
+      # repair gets exactly the one remaining ticket through logical slot 2.
+      state[0] = 1
+      state[1] = 1
+      r = wassat_sls_frozen_repair(
+        f, art, bits, [-1, -2, -3], 1, stop, 3840, state, 2, 2
+      )
+      expect(r["attempted"]).to eq(true)
+      expect(r["conflicts"]).to eq(1)
+      expect(r["core_rounds"]).to eq(1)
+      expect(state[0]).to eq(2)
+      expect(state[1] + state[2]).to eq(2)
+      expect(wassat_stop_requested?(stop)).to eq(true)
+      expect(wassat_stop_status(stop)).to eq(0)
+
+    it "keeps per-call slices additional and does not publish their boundary" ->
+      f = wassat_parse_cnf(ALL_EIGHT)
+      s = Wassat.new(f["nvars"], f["clauses"], WASSAT_PROOF_NONE, 0)
+      stop = i64[2]
+      state = i64[2]
+      res = i64[f["nvars"] + 8]
+      s.set_stop_cell(stop)
+      s.set_shared_conflict_budget(state, 10, 1)
+      s.solve_shared_budget(res, 0, 1)
+      expect(res[0]).to eq(0)
+      expect(state[0]).to eq(1)
+      expect(wassat_stop_requested?(stop)).to eq(false)
+      s.solve_shared_budget(res, 0, 1)
+      expect(res[0]).to eq(0)
+      expect(state[0]).to eq(2)
+      expect(state[1]).to eq(2)
+      expect(wassat_stop_requested?(stop)).to eq(false)
+
+  context "on-the-fly strengthening" ->
+    it "installs an implied side lemma not dominated by first-UIP" ->
+      s = Wassat.new(5, OTFS_INSTALL, WASSAT_PROOF_NONE, 0)
+      s.enable_otfs
+      r = s.solve_assuming([-1, -5])
+      expect(r["status"]).to eq(-1)
+      expect(r["core"]).to eq([-5, -1])
+      expect(r["otfs_hits"]).to eq(1)
+      expect(r["otfs_installed"]).to eq(1)
+      expect(r["otfs_dominated"]).to eq(0)
+
+    it "skips a side lemma already dominated by first-UIP" ->
+      s = Wassat.new(4, OTFS_DOMINATED, WASSAT_PROOF_NONE, 0)
+      s.enable_otfs
+      r = s.solve_assuming([-1, -4])
+      expect(r["status"]).to eq(-1)
+      expect(r["core"]).to eq([-4, -1])
+      expect(r["otfs_hits"]).to eq(1)
+      expect(r["otfs_installed"]).to eq(0)
+      expect(r["otfs_dominated"]).to eq(1)
+
+    it "keeps side-lemma strengthening out of hinted proof mode" ->
+      s1 = Wassat.new(5, OTFS_INSTALL, WASSAT_PROOF_WRAT, 0)
+      s1.enable_otfs
+      r1 = s1.solve_assuming([-1, -5])
+      expect(r1["status"]).to eq(-1)
+      expect(r1["otfs_hits"]).to eq(0)
+      expect(r1["otfs_installed"]).to eq(0)
+
+    it "keeps side-lemma strengthening out of raw proof mode" ->
+      s2 = Wassat.new(5, OTFS_INSTALL, WASSAT_PROOF_DRAT, 0)
+      s2.enable_otfs
+      r2 = s2.solve_assuming([-1, -5])
+      expect(r2["status"]).to eq(-1)
+      expect(r2["otfs_hits"]).to eq(0)
+      expect(r2["otfs_installed"]).to eq(0)
 
   context "fixed-capacity search (portfolio arm safety)" ->
     # Regression for the fixed-capacity portfolio SIGBUS: capacity exhaustion

@@ -41,12 +41,22 @@
 
 use cnf
 use policy
+use atomic_stop
 
 WASSAT_PRE_PROBE_CAP = 2000
 WASSAT_PRE_OCC_PRODUCT_CAP = 4096
 WASSAT_PRE_MAX_PASSES = 10
 WASSAT_PRE_PROBE_TICKS = 2000000
 WASSAT_PRE_BUCKET_CAP = 1024
+
+# Physical capacities of the reusable BVE scratch.  These are memory-layout
+# facts, not experiment knobs: native scans must never be told that either
+# typed array is larger than the allocation below.  Resolvent volume and
+# resolvent count are independent bounds because one is packed into
+# @bve_out, while every distinct resolvent consumes one slot in BOTH
+# @bve_hash and @bve_hpos.
+WASSAT_PRE_BVE_OUT_CAPACITY = 131072
+WASSAT_PRE_BVE_HASH_CAPACITY = 8192
 
 # Ticks one native subsumption chunk may retire before it returns to the
 # driver, so that the tick budget and the wall deadline get a say. Without
@@ -81,6 +91,20 @@ WASSAT_PRE_SUB_CHUNK_TICKS = 2000000
 # invalidate every tick figure quoted in policy.w, so the deadline stays the
 # mechanism, exactly as wassat_pre_stage_ms says it is.
 WASSAT_PRE_SUBST_CHECK_EVERY = 256
+
+# Exact binary-AND definition elimination.  The recognizer is intentionally
+# bounded: a missed gate only forgoes a reduction, while an accepted gate is
+# eliminated with the complete definition-aware resolvent basis described in
+# `try_eliminate_and2`.  The candidate cap bounds scratch memory at about
+# 3.2MB (four i64 words per candidate).
+WASSAT_PRE_AND2_CANDIDATE_CAP = 100000
+WASSAT_PRE_AND2_BASE_SCAN_CAP = 256
+WASSAT_PRE_AND2_SIDE_SCAN_CAP = 4096
+WASSAT_PRE_AND2_PAIR_CAP = 4096
+WASSAT_PRE_AND2_OCC_SCAN_CAP = 262144
+WASSAT_PRE_AND2_FIND_TICK_CAP = 64000000
+WASSAT_PRE_AND2_MAX_NVARS = 2000000
+WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
 
 + WassatPreprocess
   # `flat` is the parser formula Hash or nil. With it, the constructor takes
@@ -164,6 +188,7 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
     @ticks = 0
     @tick_budget = 0             # 0 = derived from formula size in `run`
     @deadline_ms = 0             # 0 = no wall-clock stop (see set_deadline_ms)
+    @stop_cell = nil             # shared portfolio cancellation flag
     @probe_cap = WASSAT_PRE_PROBE_CAP
     # Clauses the substitution rewrite has walked, across every variable and
     # every class of the whole pass. It has to span calls: a class is a list
@@ -179,6 +204,12 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
     # Lonely Runner class: margin 0 eliminated 44 variables, the pass-2
     # margin unlocked 573 of 976 (CaDiCaL's inprocessing gets 596).
     @bve_margin = 0
+    # Experiment overrides are process environment, so read and validate
+    # them once per preprocessor rather than once per pivot in run_bve's hot
+    # loop.  -1 means the automatic per-pass margin remains in force.
+    @bve_margin_override = wassat_bve_margin_override(-1)
+    @bve_occ_cap = wassat_bve_occ_cap_override(WASSAT_PRE_OCC_PRODUCT_CAP)
+    @bve_out_cap = wassat_bve_outcap_override(WASSAT_PRE_BVE_OUT_CAPACITY)
 
     # stats
     @probes_run = 0
@@ -188,16 +219,21 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
     @clauses_subsumed = 0
     @clauses_strengthened = 0
     @vars_eliminated = 0
+    @and2_candidates = 0
+    @and2_eliminated = 0
+    @and2_done = false
 
     # native-call scratch
     @pst = i64[4]                # qhead / tsize / conflict / ticks
     @subscan_pm = i64[10]
     @subscan_out = i64[16384]    # survivor triples: 3 slots each + header
-    @bve_pm = i64[12]
-    @bve_out = i64[131072]       # packed resolvents: [len, aci, bci, lits...]*
-    @bve_hash = i64[8192]        # per-candidate resolvent dedup hashes (bucket)
-    @bve_hpos = i64[8192]        # header offset of each committed resolvent —
-                                 # lets a hash match confirm EXACT set equality
+    @bve_pm = i64[13]
+    @bve_out = i64[WASSAT_PRE_BVE_OUT_CAPACITY]
+                                 # packed: [len, aci, bci, lits...]*
+    @bve_hash = i64[WASSAT_PRE_BVE_HASH_CAPACITY]
+                                 # per-candidate dedup hashes (bucket)
+    @bve_hpos = i64[WASSAT_PRE_BVE_HASH_CAPACITY]
+                                 # header offsets; hash hits confirm exact sets
 
     # reusable BFS scratch for implication paths (allocated on first use);
     # a fresh boxed array per path was the substitution phase's entire cost
@@ -235,9 +271,9 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
   -> intake_flat(parse)
     @fqhead = 0
     ncl = parse["flat_ncl"]
-    lits = parse["flat_lits"]
-    offs = parse["flat_offs"]
-    lens = parse["flat_lens"]
+    lits = parse["flat_lits"] ## i64[]
+    offs = parse["flat_offs"] ## i64[]
+    lens = parse["flat_lens"] ## i64[]
     pm = i64[8]
     pm[0] = ncl
     wassat_pre_intake(lits, offs, lens, @fla, @fcs, @fcl, @falive, @ftaut,
@@ -278,6 +314,7 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
     tp = wassat_prof_clock
     self.intake_flat(parse)
     tp = wassat_prof("pre.intake_flat", tp)
+    return nil if self.cancelled
     # Raw-kernel policy, measured on the bmc family: on big structured
     # instances substitution made search HARDER (ibm-12: 12.2k conflicts on
     # the substituted kernel, 6.5k after heavy repair, 4.9k raw) and every
@@ -293,10 +330,13 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
     @raw_kernel = raw
     self.run_probing if @status == 0 && !raw
     tp = wassat_prof("pre.probing", tp)
+    return nil if self.cancelled
     self.run_substitution if @status == 0 && !raw
     tp = wassat_prof("pre.substitution", tp)
+    return nil if self.cancelled
     self.sweep_satisfied if @status == 0
     tp = wassat_prof("pre.sweep", tp)
+    return nil if self.cancelled
     art = self.artifact
     tp = wassat_prof("pre.artifact", tp)
     art
@@ -350,6 +390,19 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
   -> set_deadline_ms(ms)
     @deadline_ms = ms <= 0 ? 0 : ccall("__w_clock_ms") + ms
     0
+
+  # A portfolio answer makes a losing rendering disposable.  The same shared
+  # cell already stops every search arm; preprocessing checks it at its
+  # bounded technique/chunk boundaries so the coordinator's join is not held
+  # behind work whose artifact can no longer win.  Five-run interleaved
+  # medians on raw-winning rows: bmc-ibm-12 0.785s -> 0.465s and ibm-k70
+  # 0.843s -> 0.580s; the MD5 preprocessed winner stayed neutral at 0.373s.
+  -> set_stop_cell(cell)
+    @stop_cell = cell
+    0
+
+  -> cancelled
+    wassat_stop_requested?(@stop_cell)
 
   -> freeze(v)
     @frozen[v] = 1
@@ -750,6 +803,7 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
     0
 
   -> within_budget
+    return false if self.cancelled
     return false if @deadline_ms > 0 && ccall("__w_clock_ms") >= @deadline_ms
     @tick_budget == 0 || @ticks < @tick_budget
 
@@ -1235,6 +1289,141 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
 
   # ---- technique 4: bounded variable elimination ----------------------------
 
+  # Recognize exact binary AND definitions and eliminate their output before
+  # general subsumption consumes the heavy-pass budget.
+  #
+  # For an output literal `o` and inputs `a,b`, the definition is:
+  #
+  #   (o | -a | -b)  (-o | a)  (-o | b)
+  #
+  # Other clauses may mention either polarity of `o`.  Full BVE would cross
+  # every positive occurrence with every negative occurrence.  The definition
+  # makes the non-gate/non-gate cross-products redundant: it is sufficient to
+  # resolve every non-gate `(o | P)` with both binary sides, and the base with
+  # every non-gate `(-o | N)`.  If P is false, the first pair forces a and b;
+  # the base/N resolvent then forces N.  This is the complete Davis-Putnam
+  # projection, factored through the gate rather than materialized
+  # quadratically.
+  #
+  # Each emitted clause is still a direct two-parent RUP resolvent.  Additions
+  # precede deletions, and the ordinary BVE reconstruction stack records every
+  # positive-variable parent, so proof and SAT-model obligations stay exactly
+  # the same as `try_eliminate`.
+  -> run_and2_bve
+    return false if @and2_done
+    @and2_done = true
+    # An interrupted substitution class deliberately keeps its helper
+    # binaries live.  They are reconstruction obligations, not ordinary
+    # formula structure, and must not be mistaken for gate sides.
+    return false unless @helper_mark.empty?
+    return false if @nvars > WASSAT_PRE_AND2_MAX_NVARS
+    return false if @ncl > WASSAT_PRE_AND2_MAX_CLAUSES
+
+    cap = @nvars
+    cap = WASSAT_PRE_AND2_CANDIDATE_CAP if cap > WASSAT_PRE_AND2_CANDIDATE_CAP
+    return false if cap <= 0
+    cands = i64[4 * cap + 1]
+    pm = i64[8]
+    pm[0] = @nvars
+    pm[1] = cap
+    pm[2] = WASSAT_PRE_AND2_BASE_SCAN_CAP
+    pm[3] = WASSAT_PRE_AND2_SIDE_SCAN_CAP
+    pm[6] = WASSAT_PRE_AND2_FIND_TICK_CAP
+    wassat_pre_find_and2(@fla, @fcs, @fcl, @falive, @ftaut, @oh, @on, @ov,
+                         @passign, @gone, @frozen, cands, pm)
+    @and2_candidates = pm[4]
+    @ticks += pm[5]
+
+    progress = false
+    i = 0
+    while i < @and2_candidates && @status == 0 && self.within_budget
+      base = 4 * i
+      if self.try_eliminate_and2(cands[base], cands[base + 1],
+                                 cands[base + 2], cands[base + 3])
+        progress = true
+      i += 1
+    wassat_prof_note("pre.and2 candidates=[@and2_candidates] eliminated=[@and2_eliminated] find_ticks=[pm[5]]")
+    progress
+
+  -> try_eliminate_and2(out_lit, base_ci, side1_ci, side2_ci)
+    v = out_lit.abs
+    return false if @frozen[v] == 1 || @passign[v] != 0 || @gone[v] != 0
+
+    @bve_pm[0] = out_lit
+    @bve_pm[1] = base_ci
+    @bve_pm[2] = side1_ci
+    @bve_pm[3] = side2_ci
+    @bve_pm[4] = WASSAT_PRE_AND2_PAIR_CAP
+    @bve_pm[5] = WASSAT_PRE_BVE_OUT_CAPACITY
+    @bve_pm[6] = 0
+    @bve_pm[7] = 0
+    @bve_pm[8] = 0
+    @bve_pm[9] = @lgen
+    @bve_pm[10] = WASSAT_PRE_AND2_OCC_SCAN_CAP
+    @bve_pm[11] = 0
+    @bve_pm[12] = WASSAT_PRE_BVE_HASH_CAPACITY
+    wassat_pre_and2_bve_scan(@fla, @fcs, @fcl, @falive, @ftaut, @oh, @on,
+                             @ov, @lstamp, @bve_hash, @bve_hpos, @bve_out,
+                             @bve_pm)
+    @ticks += @bve_pm[8]
+    @lgen = @bve_pm[9]
+    return false if @bve_pm[6] == 0
+
+    # Snapshot the original pivot clauses before storing any resolvent.
+    # Resolvents never contain the pivot, but this also makes the proof and
+    # reconstruction ordering explicit.
+    pos = self.live_occ(2 * v)
+    neg = self.live_occ(2 * v + 1)
+
+    count = @bve_pm[7]
+    units = []
+    off = 0
+    i = 0
+    while i < count
+      n = @bve_out[off]
+      aci = @bve_out[off + 1]
+      bci = @bve_out[off + 2]
+      res = []
+      j = 0
+      while j < n
+        res.push(@bve_out[off + 3 + j])
+        j += 1
+      gid = @next_gid
+      self.plog_add(gid, res, [@fpgid[aci], @fpgid[bci]])
+      nci = self.store(res)
+      if res.size == 1
+        units.push(nci)
+      off += 3 + n
+      i += 1
+
+    @stack.push({ "kind": "bve_var", "pivot": v })
+    pos.each -> (ci)
+      @stack.push({ "kind": "bve", "pivot": v,
+                    "lits": self.lits_of(ci).dup })
+    parents = []
+    pos.each -> (ci)
+      parents.push(ci)
+    neg.each -> (ci)
+      parents.push(ci)
+    self.delete_batch(parents)
+    @gone[v] = 1
+    @vars_eliminated += 1
+    @and2_eliminated += 1
+    # Propagate only after every pivot parent is gone.  Otherwise a new unit
+    # can make a still-live parent imply the pivot, and derive a replacement
+    # unit containing a variable that the artifact already marks eliminated.
+    units.each -> (nci)
+      if @status == 0
+        l = @fla[@fcs[nci]]
+        lv = self.value(l)
+        if lv < 0
+          self.refute(nci)
+        elsif lv == 0
+          self.assign(l, nci)
+          confl = self.propagate_root
+          self.refute(confl) if confl >= 0
+    true
+
   # Eliminate v when the set of non-tautological resolvents is no larger
   # than the clauses it replaces, with bounds on literal volume and pairing
   # work. Atomic: either every resolvent is added and every original
@@ -1242,12 +1431,12 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
   -> try_eliminate(v)
     return false if @frozen[v] == 1 || @passign[v] != 0 || @gone[v] != 0
     @bve_pm[0] = v
-    @bve_pm[1] = wassat_bve_margin_override(@bve_margin)
-    @bve_pm[2] = wassat_bve_occ_cap_override(WASSAT_PRE_OCC_PRODUCT_CAP)
-    @bve_pm[3] = wassat_bve_outcap_override(131072)
+    @bve_pm[1] = @bve_margin_override < 0 ? @bve_margin : @bve_margin_override
+    @bve_pm[2] = @bve_occ_cap
+    @bve_pm[3] = @bve_out_cap
     @bve_pm[4] = 0
     @bve_pm[5] = 0
-    @bve_pm[6] = 0
+    @bve_pm[6] = WASSAT_PRE_BVE_HASH_CAPACITY
     @bve_pm[7] = 0
     wassat_pre_bve_scan(@fla, @fcs, @fcl, @falive, @ftaut, @oh, @on, @ov,
                         @lstamp, @bve_hash, @bve_hpos, @bve_out, @bve_pm, @lgen)
@@ -1258,6 +1447,7 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
     # commit from the packed buffer: all resolvents added, all originals
     # deleted, or nothing — the atomicity contract is unchanged
     count = @bve_pm[5]
+    units = []
     pos = self.live_occ(2 * v)
     neg = self.live_occ(2 * v + 1)
     off = 0
@@ -1274,14 +1464,8 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
       gid = @next_gid
       self.plog_add(gid, res, [@fpgid[aci], @fpgid[bci]])
       nci = self.store(res)
-      if res.size == 1 && @status == 0
-        lv = self.value(res[0])
-        if lv < 0
-          self.refute(nci)
-        elsif lv == 0
-          self.assign(res[0], nci)
-          confl = self.propagate_root
-          self.refute(confl) if confl >= 0
+      if res.size == 1
+        units.push(nci)
       off += 3 + n
       i += 1
     @stack.push({ "kind": "bve_var", "pivot": v })
@@ -1295,6 +1479,16 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
     self.delete_batch(parents)
     @gone[v] = 1
     @vars_eliminated += 1
+    units.each -> (nci)
+      if @status == 0
+        l = @fla[@fcs[nci]]
+        lv = self.value(l)
+        if lv < 0
+          self.refute(nci)
+        elsif lv == 0
+          self.assign(l, nci)
+          confl = self.propagate_root
+          self.refute(confl) if confl >= 0
     true
 
   -> live_occ(li)
@@ -1376,8 +1570,10 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
     tp = wassat_prof_clock
     self.heavy_rounds
     tp = wassat_prof("pre.heavy_rounds", tp)
+    return nil if self.cancelled
     self.sweep_satisfied if @status == 0
     tp = wassat_prof("pre.heavy_sweep", tp)
+    return nil if self.cancelled
     art = self.artifact
     tp = wassat_prof("pre.heavy_artifact", tp)
     art
@@ -1393,6 +1589,13 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
     0
 
   -> heavy_rounds
+    # Gate definitions are cheap, exact structure.  Run them before the
+    # quadratic candidate scans: on spg_200_301 the old ordering spent the
+    # bounded heavy allowance in subsumption before ordinary BVE reached
+    # roughly sixty thousand removable definitions.  The bounded pass removes
+    # 59,502 variables there in a 321ms heavy round; three interleaved solves
+    # moved the median from 117.32s to 83.62s (all new runs 82.14--84.07s).
+    self.run_and2_bve if @status == 0 && self.within_budget
     passes = 0
     progress = true
     while progress && @status == 0 && self.within_budget && passes < WASSAT_PRE_MAX_PASSES
@@ -1417,7 +1620,20 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
 
   -> run
     self.init_budget
-    self.intake
+    # The CLI parser already owns a complete flat rendering.  Reuse it in
+    # certificate mode too: intake_flat assigns the same sequential axiom
+    # ids, records the same root reasons, and materializes boxed clauses
+    # lazily through lits_of when proof construction actually needs them.
+    #
+    # Besides avoiding one Array allocation per input clause, this is required
+    # by the native CLI: eagerly materializing the parser's lazy clauses and
+    # feeding them through the intake block SIGBUSed inside store() in compiled
+    # proof runs. The typed flat mirrors are pinned for the preprocessor's
+    # lifetime and avoid that unsafe boxed hand-off.
+    if @flat == nil
+      self.intake
+    else
+      self.intake_flat(@flat)
     self.run_probing if @status == 0
     self.run_substitution if @status == 0
     self.heavy_rounds
@@ -1508,6 +1724,8 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
                  "clauses_subsumed": @clauses_subsumed,
                  "clauses_strengthened": @clauses_strengthened,
                  "vars_eliminated": @vars_eliminated,
+                 "and2_candidates": @and2_candidates,
+                 "and2_eliminated": @and2_eliminated,
                  "ticks": @ticks } }
 
 # Native root-level unit propagation over the flat clause arena and the
@@ -1530,14 +1748,19 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
   v
 
 # The packed resolvent buffer. NOT a policy knob in disguise: a pivot whose
-# resolvents overflow it is rejected outright (`base + rl >= outcap ->
-# feasible = 0`), so this bound silently CONVERTS a more permissive margin
-# into FEWER eliminations -- measured on minand064, margin 0 eliminates
-# 11,820 variables and margin 16 eliminates zero, purely from buffer
-# overflow. Any margin experiment has to raise this in step or it measures
-# the buffer instead of the margin.
+# resolvents overflow it is rejected atomically (`base + rl >= outcap ->
+# feasible = 0`).  The allocation is fixed at
+# WASSAT_PRE_BVE_OUT_CAPACITY; an environment experiment may LOWER the
+# logical cap but may not pretend the physical buffer grew.  Oversized values
+# are rejected loudly instead of turning a margin experiment into unchecked
+# native writes.  Raising the physical limit requires changing the allocation
+# and both independently bounded hash-position arrays together.
 -> wassat_bve_outcap_override(v)
-  return wassat_decimal_in_range("WASSAT_BVE_OUTCAP", env("WASSAT_BVE_OUTCAP"), 1024, 2000000000) if env("WASSAT_BVE_OUTCAP") != nil
+  if env("WASSAT_BVE_OUTCAP") != nil
+    return wassat_decimal_in_range(
+      "WASSAT_BVE_OUTCAP", env("WASSAT_BVE_OUTCAP"),
+      1024, WASSAT_PRE_BVE_OUT_CAPACITY
+    )
   v
 
 # Cap on hyper-binary clauses derived per non-failing probe. 0 disables.
@@ -1770,23 +1993,442 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
   pm[6] = sci
   0
 
+# Find exact two-input AND definitions in ascending variable order.
+#
+# A candidate record is four words:
+#
+#   [output literal, ternary base clause, binary side 1, binary side 2]
+#
+# The output literal may be negative.  Candidates are only suggestions: the
+# commit scan below revalidates every literal and every clause after earlier
+# eliminations.  Scan caps are completeness bounds only; reaching one skips a
+# possible gate and can never change the formula.
+#
+#   pm[0] nvars             pm[1] candidate capacity
+#   pm[2] base bucket cap   pm[3] side bucket cap
+#   pm[4] count(out)        pm[5] work ticks(out)
+#   pm[6] work cap (0 = uncapped)
+-> wassat_pre_find_and2(fla, fcs, fcl, falive, ftaut, och, ocn, ocv, asg, gone, frozen, out, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+  nv = pm[0]
+  cap = pm[1]
+  bcap = pm[2]
+  scap = pm[3]
+  tickcap = pm[6]
+  count = 0
+  ticks = 0
+  v = 1
+  while v <= nv && count < cap && (tickcap == 0 || ticks < tickcap)
+    if asg[v] == 0 && gone[v] == 0 && frozen[v] == 0
+      polarity = 0
+      found_gate = 0
+      while polarity < 2 && found_gate == 0 && (tickcap == 0 || ticks < tickcap)
+        o = v
+        if polarity == 1
+          o = 0 - v
+        oli = v + v
+        if o < 0
+          oli = oli + 1
+        nli = v + v
+        if o > 0
+          nli = nli + 1
+        scanned = 0
+        w = och[oli]
+        while w >= 0 && scanned < bcap && found_gate == 0 && (tickcap == 0 || ticks < tickcap)
+          ci = ocv[w]
+          scanned = scanned + 1
+          ticks = ticks + 1
+          if falive[ci] == 1 && ftaut[ci] == 0 && fcl[ci] == 3
+            stx = fcs[ci]
+            oc = 0
+            qn = 0
+            q1 = 0
+            q2 = 0
+            j = 0
+            while j < 3
+              l = fla[stx + j]
+              if l == o
+                oc = oc + 1
+              else
+                if qn == 0
+                  q1 = l
+                else
+                  q2 = l
+                qn = qn + 1
+              j = j + 1
+            valid = 1
+            if oc != 1 || qn != 2
+              valid = 0
+            if valid == 1
+              a1 = q1
+              a2 = q2
+              if a1 < 0
+                a1 = 0 - a1
+              if a2 < 0
+                a2 = 0 - a2
+              if a1 == v || a2 == v || q1 == q2 || q1 == 0 - q2
+                valid = 0
+            if valid == 1
+              s1 = -1
+              s2 = -1
+              sw = och[nli]
+              sscan = 0
+              while sw >= 0 && sscan < scap && (s1 < 0 || s2 < 0) && (tickcap == 0 || ticks < tickcap)
+                sci = ocv[sw]
+                sscan = sscan + 1
+                ticks = ticks + 1
+                if falive[sci] == 1 && ftaut[sci] == 0 && fcl[sci] == 2
+                  sst = fcs[sci]
+                  nc = 0
+                  other = 0
+                  k = 0
+                  while k < 2
+                    sl = fla[sst + k]
+                    if sl == 0 - o
+                      nc = nc + 1
+                    else
+                      other = sl
+                    k = k + 1
+                  if nc == 1
+                    if other == 0 - q1 && s1 < 0
+                      s1 = sci
+                    elsif other == 0 - q2 && s2 < 0
+                      s2 = sci
+                sw = ocn[sw]
+              if s1 >= 0 && s2 >= 0 && s1 != s2
+                base = 4 * count
+                out[base] = o
+                out[base + 1] = ci
+                out[base + 2] = s1
+                out[base + 3] = s2
+                count = count + 1
+                found_gate = 1
+          w = ocn[w]
+        polarity = polarity + 1
+    v = v + 1
+  pm[4] = count
+  pm[5] = ticks
+  0
+
+# Feasibility scan for one exact two-input AND definition.
+#
+# Instead of the quadratic full cross-product, emit the factored projection:
+#
+#   each non-base clause containing o   x each binary gate side
+#   ternary gate base                  x each non-side clause containing -o
+#
+# Gate/gate pairs are tautologies.  Non-gate/non-gate pairs follow by
+# resolving the clauses above through the two gate inputs, so materializing
+# them is redundant.  The boxed driver commits the packed direct resolvents
+# add-first/delete-second and uses the ordinary BVE reconstruction records.
+#
+# Rejected unless the factored basis has no clause growth, at most one extra
+# literal (arity - 1), no more than the pair cap, and fits the output buffer.
+#
+#   pm[0] output literal   pm[1] base ci     pm[2..3] side cis
+#   pm[4] pair cap         pm[5] output capacity
+#   pm[6] feasible(out)    pm[7] resolvent count(out)
+#   pm[8] ticks(out)       pm[9] next generation(in/out)
+#   pm[10] occurrence-node cap (0 = uncapped)
+#   pm[11] occurrence nodes visited(out)
+#   pm[12] hash/header capacity
+-> wassat_pre_and2_bve_scan(fla, fcs, fcl, falive, ftaut, och, ocn, ocv, lstamp, hbuf, hpos, out, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+  o = pm[0]
+  baseci = pm[1]
+  side1 = pm[2]
+  side2 = pm[3]
+  paircap = pm[4]
+  outcap = pm[5]
+  gen = pm[9]
+  occcap = pm[10]
+  hashcap = pm[12]
+  # The caller passes logical bounds for experiments, but these native loops
+  # also defend the actual reusable allocations.  Packed output and
+  # hash/header slots are separate resources and are clamped independently.
+  outcap = WASSAT_PRE_BVE_OUT_CAPACITY if outcap > WASSAT_PRE_BVE_OUT_CAPACITY
+  hashcap = WASSAT_PRE_BVE_HASH_CAPACITY if hashcap > WASSAT_PRE_BVE_HASH_CAPACITY
+  pm[6] = 0
+  pm[7] = 0
+  ticks = 0
+  occvisits = 0
+
+  v = o
+  if v < 0
+    v = 0 - v
+  valid = 1
+  if baseci == side1 || baseci == side2 || side1 == side2
+    valid = 0
+  if valid == 1
+    if falive[baseci] != 1 || ftaut[baseci] != 0 || fcl[baseci] != 3
+      valid = 0
+    if falive[side1] != 1 || ftaut[side1] != 0 || fcl[side1] != 2
+      valid = 0
+    if falive[side2] != 1 || ftaut[side2] != 0 || fcl[side2] != 2
+      valid = 0
+
+  # Revalidate the exact definition after earlier candidates may have
+  # deleted clauses that shared a gate input/output.
+  q1 = 0
+  q2 = 0
+  if valid == 1
+    stx = fcs[baseci]
+    oc = 0
+    qn = 0
+    j = 0
+    while j < 3
+      l = fla[stx + j]
+      if l == o
+        oc = oc + 1
+      else
+        if qn == 0
+          q1 = l
+        else
+          q2 = l
+        qn = qn + 1
+      j = j + 1
+    if oc != 1 || qn != 2
+      valid = 0
+    if valid == 1
+      a1 = q1
+      a2 = q2
+      if a1 < 0
+        a1 = 0 - a1
+      if a2 < 0
+        a2 = 0 - a2
+      if a1 == v || a2 == v || q1 == q2 || q1 == 0 - q2
+        valid = 0
+
+  r1 = 0
+  r2 = 0
+  if valid == 1
+    si = 0
+    while si < 2 && valid == 1
+      sci = side1
+      if si == 1
+        sci = side2
+      sst = fcs[sci]
+      nc = 0
+      other = 0
+      j = 0
+      while j < 2
+        l = fla[sst + j]
+        if l == 0 - o
+          nc = nc + 1
+        else
+          other = l
+        j = j + 1
+      if nc != 1
+        valid = 0
+      else
+        if si == 0
+          r1 = other
+        else
+          r2 = other
+      si = si + 1
+    unless (r1 == 0 - q1 && r2 == 0 - q2) || (r1 == 0 - q2 && r2 == 0 - q1)
+      valid = 0
+
+  oli = v + v
+  if o < 0
+    oli = oli + 1
+  nli = v + v
+  if o > 0
+    nli = nli + 1
+
+  # Count the exact old volume and reject duplicated pivots.  A duplicated
+  # occurrence would make the intrusive list visit a clause more than once
+  # and is outside the reconstruction invariant used by ordinary BVE.
+  old_count = 0
+  old_lits = 0
+  if valid == 1
+    side = 0
+    while side < 2 && valid == 1
+      li = oli
+      if side == 1
+        li = nli
+      w = och[li]
+      while w >= 0 && valid == 1
+        occvisits = occvisits + 1
+        ticks = ticks + 1
+        if occcap > 0 && occvisits > occcap
+          valid = 0
+        ci = ocv[w]
+        if valid == 1 && falive[ci] == 1 && ftaut[ci] == 0
+          n = fcl[ci]
+          pc = 0
+          j = 0
+          while j < n
+            l = fla[fcs[ci] + j]
+            av = l
+            if av < 0
+              av = 0 - av
+            if av == v
+              pc = pc + 1
+            j = j + 1
+          if pc != 1
+            valid = 0
+          old_count = old_count + 1
+          old_lits = old_lits + n
+        w = ocn[w]
+      side = side + 1
+
+  count = 0
+  pairs = 0
+  new_lits = 0
+  off = 0
+  phase = 0
+  while phase < 3 && valid == 1
+    li = oli
+    fixed = side1
+    if phase == 1
+      fixed = side2
+    elsif phase == 2
+      li = nli
+      fixed = baseci
+    w = och[li]
+    while w >= 0 && valid == 1
+      occvisits = occvisits + 1
+      ticks = ticks + 1
+      if occcap > 0 && occvisits > occcap
+        valid = 0
+      ci = ocv[w]
+      eligible = valid == 1 && falive[ci] == 1 && ftaut[ci] == 0
+      if phase < 2
+        eligible = false if ci == baseci
+      else
+        eligible = false if ci == side1 || ci == side2
+      if eligible
+        pairs = pairs + 1
+        if pairs > paircap
+          valid = 0
+        else
+          aci = ci
+          bci = fixed
+          if phase == 2
+            aci = fixed
+            bci = ci
+          astx = fcs[aci]
+          an = fcl[aci]
+          bstx = fcs[bci]
+          bn = fcl[bci]
+          ticks = ticks + an + bn
+          gen = gen + 1
+          taut = 0
+          rl = 0
+          hdr = off
+          dst = off + 3
+          j = 0
+          while j < an
+            l = fla[astx + j]
+            av = l
+            if av < 0
+              av = 0 - av
+            if av != v
+              lidx = av + av
+              if l < 0
+                lidx = lidx + 1
+              if lstamp[lidx] != gen
+                lstamp[lidx] = gen
+                if dst + rl < outcap
+                  out[dst + rl] = l
+                rl = rl + 1
+            j = j + 1
+          j = 0
+          while j < bn && taut == 0
+            l = fla[bstx + j]
+            av = l
+            if av < 0
+              av = 0 - av
+            if av != v
+              lidx = av + av
+              opposite = lidx + 1
+              if l < 0
+                lidx = lidx + 1
+                opposite = lidx - 1
+              if lstamp[opposite] == gen
+                taut = 1
+              else
+                if lstamp[lidx] != gen
+                  lstamp[lidx] = gen
+                  if dst + rl < outcap
+                    out[dst + rl] = l
+                  rl = rl + 1
+            j = j + 1
+          if taut == 0
+            if dst + rl >= outcap
+              valid = 0
+            else
+              h = 0
+              j = 0
+              while j < rl
+                x = out[dst + j] * 2654435761
+                x = x ^ (x >> 13)
+                h = h ^ (x * 40503)
+                j = j + 1
+              h = h ^ rl
+              isdup = 0
+              j = 0
+              while j < count && isdup == 0
+                if hbuf[j] == h && out[hpos[j]] == rl
+                  prev = hpos[j]
+                  same = 1
+                  p = 0
+                  while p < rl && same == 1
+                    hit = 0
+                    q = 0
+                    while q < rl && hit == 0
+                      if out[prev + 3 + q] == out[dst + p]
+                        hit = 1
+                      q = q + 1
+                    if hit == 0
+                      same = 0
+                    p = p + 1
+                  if same == 1
+                    isdup = 1
+                j = j + 1
+              if isdup == 0
+                if count >= hashcap
+                  valid = 0
+                else
+                  hbuf[count] = h
+                  hpos[count] = hdr
+                  out[hdr] = rl
+                  out[hdr + 1] = aci
+                  out[hdr + 2] = bci
+                  count = count + 1
+                  new_lits = new_lits + rl
+                  off = dst + rl
+                  if count > old_count || new_lits > old_lits + 1
+                    valid = 0
+      w = ocn[w]
+    phase = phase + 1
+
+  pm[6] = valid
+  pm[7] = count
+  pm[8] = ticks
+  pm[9] = gen
+  pm[11] = occvisits
+  0
+
 # Native BVE feasibility scan for one pivot: walks both occurrence lists,
 # forms every resolvent over the flat literal arena (tautologies skipped via
-# generation stamps, duplicates collapsed by an order-independent 64-bit
-# hash — a collision only under-counts growth, which is a size POLICY, never
-# soundness), applies the growth bounds, and on success leaves the packed
-# resolvents [len, aci, bci, lits...]* in `out` for the boxed commit. The
+# generation stamps, duplicates bucketed by an order-independent 64-bit hash
+# and then compared exactly), applies the growth bounds, and on success leaves
+# the packed resolvents [len, aci, bci, lits...]* in `out` for the boxed commit.
+# The
 # boxed path used to build every rejected candidate's resolvents as Arrays
 # with sort.join dedup keys — the dominant cost of the heavy round.
 #
 #   pm[0] pivot  pm[1] margin  pm[2] occ-product cap  pm[3] out capacity
-#   pm[4] feasible(out)  pm[5] resolvent count(out)  pm[6] unused
+#   pm[4] feasible(out)  pm[5] resolvent count(out)  pm[6] hash/header cap
 #   pm[7] ticks(out)  pm[8] next lgen(out)
 -> wassat_pre_bve_scan(fla, fcs, fcl, falive, ftaut, och, ocn, ocv, lstamp, hbuf, hpos, out, pm, lgen0) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64)
   v = pm[0]
   margin = pm[1]
   prodcap = pm[2]
   outcap = pm[3]
+  hashcap = pm[6]
+  outcap = WASSAT_PRE_BVE_OUT_CAPACITY if outcap > WASSAT_PRE_BVE_OUT_CAPACITY
+  hashcap = WASSAT_PRE_BVE_HASH_CAPACITY if hashcap > WASSAT_PRE_BVE_HASH_CAPACITY
   gen = lgen0
   ticks = 0
   pm[4] = 0
@@ -1936,18 +2578,21 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
                         isdup = 1
                     j = j + 1
                   if isdup == 0
-                    hbuf[count] = h
-                    hpos[count] = hdr
-                    out[hdr] = rl
-                    out[hdr + 1] = aci
-                    out[hdr + 2] = bci
-                    count = count + 1
-                    new_lits = new_lits + rl
-                    off = base + rl
-                    if count > old_count + margin
+                    if count >= hashcap
                       feasible = 0
-                    if new_lits > old_lits + 16 * margin
-                      feasible = 0
+                    else
+                      hbuf[count] = h
+                      hpos[count] = hdr
+                      out[hdr] = rl
+                      out[hdr + 1] = aci
+                      out[hdr + 2] = bci
+                      count = count + 1
+                      new_lits = new_lits + rl
+                      off = base + rl
+                      if count > old_count + margin
+                        feasible = 0
+                      if new_lits > old_lits + 16 * margin
+                        feasible = 0
             wb = ocn[wb]
         wa = ocn[wa]
       pm[4] = feasible
@@ -2047,10 +2692,12 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
                "clauses_subsumed": 0,
                "clauses_strengthened": 0,
                "vars_eliminated": 0,
+               "and2_candidates": 0,
+               "and2_eliminated": 0,
                "ticks": 0 } }
 
 -> wassat_pre_stats_text(stats, pre_ms)
-  "probes=[stats["probes"]] probes_failed=[stats["probes_failed"]] vars_substituted=[stats["vars_substituted"]] clauses_subsumed=[stats["clauses_subsumed"]] clauses_strengthened=[stats["clauses_strengthened"]] vars_eliminated=[stats["vars_eliminated"]] preprocess_ms=[pre_ms]"
+  "probes=[stats["probes"]] probes_failed=[stats["probes_failed"]] vars_substituted=[stats["vars_substituted"]] clauses_subsumed=[stats["clauses_subsumed"]] clauses_strengthened=[stats["clauses_strengthened"]] vars_eliminated=[stats["vars_eliminated"]] and2_candidates=[stats["and2_candidates"]] and2_eliminated=[stats["and2_eliminated"]] preprocess_ms=[pre_ms]"
 
 # Preprocess CNF text and return the artifact.
 -> wassat_preprocess(cnf_text, proof_mode)
@@ -2093,13 +2740,13 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
 # with freeze(var) BEFORE preprocessing ran; discovering it here is a hard
 # error, never a silent wrong answer.
 -> wassat_check_assumptions(art, assumptions)
-  gone = art["gone"]
+  gone = art["gone"] ## i64[]
   assumptions.each -> (a)
     raise "assumption literal must not be zero" if a == 0
     v = a.abs
     raise "assumption literal [a] exceeds preprocessed variable count [gone.size - 1]" if v >= gone.size
     unless gone[v] == 0
-      kind = gone[v] == 1 ? "eliminated" : "substituted"
+      kind = gone[v] == 2 ? "substituted" : "eliminated"
       raise "assumption names [kind] variable [v]; freeze it before preprocessing"
   0
 

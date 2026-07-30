@@ -1065,6 +1065,24 @@ use hashing
   out << "}\n"
   out.to_s()
 
+# Boxed-numeric -> raw double. The fast arm unboxes a double-tagged WValue
+# (sub bias + bitcast); ints/Decimals/BigInts take the w_num_to_f64 call.
+-> num_to_f64_fast_helper_ir()
+  out = StringBuffer(480)
+  out << "define private double @__w_num_to_f64_fast(i64 %v) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %ub = sub i64 %v, 281474976710656\n"
+  out << "  %isd = icmp ule i64 %ub, -2251799813685249\n"
+  out << "  br i1 %isd, label %fast, label %slow\n"
+  out << "fast:\n"
+  out << "  %d = bitcast i64 %ub to double\n"
+  out << "  ret double %d\n"
+  out << "slow:\n"
+  out << "  %sv = call double @w_num_to_f64(i64 %v)\n"
+  out << "  ret double %sv\n"
+  out << "}\n"
+  out.to_s()
+
 -> to_i64_fast_helper_ir()
   out = StringBuffer(480)
   out << "define private i64 @__w_to_i64_fast(i64 %v) alwaysinline nounwind {\n"
@@ -1878,6 +1896,8 @@ ewscope_md_state = {ids: {}, order: []}
           iname = inst[:name]
           if !known_fns.has_key?(iname) && !ccall_needed.has_key?(iname)
             ccall_needed[iname] = inst[:args].size()
+        if inst[:op] == :call_num_to_f64 && !ccall_needed.has_key?("__w_num_to_f64_fast")
+          ccall_needed["__w_num_to_f64_fast"] = 1
         fns = runtime_fns_for_inst(inst, mod[:string_wvalues])
         if fns != nil
           ri = 0
@@ -2188,6 +2208,10 @@ ewscope_md_state = {ids: {}, order: []}
     if decls_out.index("@w_to_i64(") == nil
       decls_out = decls_out + "declare i64 @w_to_i64(i64) nounwind\n"
     decls_out = decls_out + to_i64_fast_helper_ir() + "\n"
+  if ccall_needed.has_key?("__w_num_to_f64_fast")
+    if decls_out.index("@w_num_to_f64(") == nil
+      decls_out = decls_out + "declare double @w_num_to_f64(i64) nounwind memory(read)\n"
+    decls_out = decls_out + num_to_f64_fast_helper_ir() + "\n"
 
   # Emit declarations for call targets not defined in this module. The
   # already-declared check was a decls_out.index(search_str) — a full strstr
@@ -2944,8 +2968,11 @@ ewscope_md_state = {ids: {}, order: []}
 
   # Numeric->raw-double coercion of a boxed WValue (ensure_raw_f64 fallback):
   # takes an i64 WValue (boxed double / Decimal / Int), returns a raw double.
+  # Routed through the alwaysinline helper so the boxed-double case (a :f64
+  # param arriving as a WValue, nbody's `dt`) folds to sub+bitcast inline
+  # instead of an out-of-line w_num_to_f64 call per use site.
   when :call_num_to_f64
-    inst[:temp] + " = call double @w_num_to_f64(i64 " + inst[:value] + ")"
+    inst[:temp] + " = call double @__w_num_to_f64_fast(i64 " + inst[:value] + ")"
 
   # Fused-elementwise loop ops (lowering/ops.w try_fuse_elementwise). The
   # header decode is hoisted out of the fused loop deliberately: the loop

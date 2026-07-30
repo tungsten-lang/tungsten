@@ -71,3 +71,12 @@ use core/calculus/quadrature
 
   -> .symbolic_hessian(expression, variables)
     Expression.wrap(expression).hessian(variables)
+
+  -> .antiderivative(expression, variable)
+    Expression.wrap(expression).antiderivative(variable)
+
+  -> .symbolic_integrate(expression, variable)
+    Expression.wrap(expression).antiderivative(variable)
+
+  -> .symbolic_integrate(expression, variable, lower, upper)
+    Expression.wrap(expression).definite_integral(variable, lower, upper)

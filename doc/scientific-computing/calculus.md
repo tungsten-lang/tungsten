@@ -7,7 +7,9 @@ field, while `Calculus` propagates floating Taylor and differential data
 through arbitrary user functions.
 
 It also exposes `Calculus.symbol` and `Calculus.symbols` for canonical
-expressions with exact symbolic derivatives; see
+expressions with exact symbolic derivatives and elementary antiderivatives;
+`Calculus.antiderivative` and `Calculus.symbolic_integrate` keep exact
+constants symbolic and fail loudly for unsupported patterns. See
 [../symbolic.md](../symbolic.md).
 
 ## Arbitrary-order derivatives and Taylor series

@@ -51,8 +51,10 @@ check("simplify.exact_fraction",
       (Expression.constant(1) / 2).constant_value == Rational.new(1, 2))
 check("simplify.negative_power_exact",
       (Expression.constant(2)**-3).constant_value == Rational.new(1, 8))
-check("simplify.acos_zero",
-      close?(Expression.constant(0).acos.constant_value,
+check("simplify.acos_zero_exact",
+      Expression.constant(0).acos == Expression.pi / 2)
+check("simplify.acos_zero_value",
+      close?(Expression.constant(0).acos.evaluate({}),
              ~1.5707963267948966))
 
 free = (x.sin + y**2).free_variables

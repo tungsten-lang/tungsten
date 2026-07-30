@@ -25,6 +25,7 @@ core/algebra/polynomial.w          # rings, sparse ops, division, content
 core/algebra/polynomial_resultant.w
 core/algebra/polynomial_gcd.w
 core/algebra/polynomial_factor.w
+core/algebra/expression.w          # symbolic factor and exact real solve facade
 core/algebra/number_field.w         # exact cubic fields and maximal orders
 core/algebra/groebner.w            # Buchberger, Ideal, eliminate, saturate
 core/algebra/f2_linear.w           # replay-certified linear algebra over F2
@@ -104,6 +105,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 
 | Layer | Available now | Boundary |
 | --- | --- | --- |
+| Symbolic expressions | Exact π/e and radicals; canonical simplify, expand, collect, differentiation, elementary antiderivatives; exact univariate ℚ factor facade and exact real roots for linear/quadratic factors | No assumptions, piecewise forms, general multivariate factorization, complex algebraic-root object, general higher-degree radical solving, or Risch integration |
 | Fields | Exact `RationalField`; prime fields `𝔽_p`; extensions `𝔽_{p^n}` for `n ≤ 3` with Integer-encoded elements; exact irreducible cubic `NumberField`s over ℚ with arithmetic, Sturm signatures, integral bases, and maximal-order discriminants | Finite extensions above degree three and number fields of degree other than three are not implemented. Cubic maximal-order search is explicitly resource-bounded and raises `unknown` rather than guessing |
 | Polynomials | Sparse sorted terms; merge-multiply; dense univariate fast path; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ as **content × monic irreducibles** | Kronecker factor search has an explicit resource limit; multivariate factorization is not implemented |
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders | Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |

@@ -3,7 +3,8 @@
 # Expressions are immutable-by-convention trees built through simplifying
 # factories. They support exact arithmetic constants, elementary
 # transcendental functions, substitution, numerical/active-value evaluation,
-# symbolic differentiation, and conversion to exact polynomial rings.
+# symbolic differentiation and elementary integration, polynomial-shaped
+# manipulation, and conversion to exact polynomial rings.
 #
 #   x, y = Expression.variables([:x, :y])
 #   f = (x**2 + y**2).sqrt + (x * y).sin
@@ -39,7 +40,21 @@ use core/math
 
   -> .constant(value)
     return value if value.class_name == "Expression"
+    if value.class_name == "Rational" && value.denominator == 1
+      value = value.numerator
     Expression.node("constant", [value])
+
+  -> .named_constant(name)
+    text = name.to_s
+    if text != "pi" && text != "e"
+      raise "unknown symbolic named constant: " + text
+    Expression.node("named_constant", [text])
+
+  -> .pi
+    Expression.named_constant(:pi)
+
+  -> .e
+    Expression.named_constant(:e)
 
   -> .variable(name)
     text = name.to_s
@@ -59,6 +74,9 @@ use core/math
   -> variable?
     @operation == "variable"
 
+  -> named_constant?
+    @operation == "named_constant"
+
   -> constant_value
     raise "expression is not constant" if !constant?
     @arguments[0]
@@ -70,6 +88,10 @@ use core/math
   -> variable_text
     raise "expression is not a variable" if !variable?
     @arguments[0]
+
+  -> named_constant_name
+    raise "expression is not a named constant" if !named_constant?
+    @arguments[0].to_sym
 
   -> .integer?(value)
     name = value.class_name
@@ -95,6 +117,111 @@ use core/math
       "Decimal", "Decimal32", "Decimal64", "Decimal128"
     ]
     scalar_names.include?(name)
+
+  -> .exact_value?(value)
+    Expression.integer?(value) || value.class_name == "Rational"
+
+  -> .perfect_square_root(value)
+    if Expression.integer?(value)
+      return nil if value < 0
+      root = value.isqrt
+      return root if root * root == value
+      return nil
+    if value.class_name == "Rational"
+      return nil if value.negative?
+      numerator_root = value.numerator.isqrt
+      denominator_root = value.denominator.isqrt
+      if numerator_root * numerator_root == value.numerator
+        if denominator_root * denominator_root == value.denominator
+          return Rational.new(numerator_root, denominator_root)
+      return nil
+    nil
+
+  -> .integer_cube_root(value)
+    negative = value < 0
+    magnitude = negative ? 0 - value : value
+    low = 0
+    high = magnitude
+    root = 0
+    while low <= high
+      middle = (low + high) / 2
+      cube = middle * middle * middle
+      if cube <= magnitude
+        root = middle
+        low = middle + 1
+      else
+        high = middle - 1
+    negative ? 0 - root : root
+
+  -> .perfect_cube_root(value)
+    if Expression.integer?(value)
+      root = Expression.integer_cube_root(value)
+      return root if root * root * root == value
+      return nil
+    if value.class_name == "Rational"
+      numerator_root = Expression.integer_cube_root(value.numerator)
+      denominator_root = Expression.integer_cube_root(value.denominator)
+      if numerator_root * numerator_root * numerator_root == value.numerator
+        if denominator_root * denominator_root * denominator_root == value.denominator
+          return Rational.new(numerator_root, denominator_root)
+      return nil
+    nil
+
+  -> .integer_square_decomposition(value)
+    outside = 1
+    inside = 1
+    value.factor.each -> (prime_power)
+      outside = outside * prime_power.prime ** (prime_power.exponent / 2)
+      if prime_power.exponent.odd?
+        inside = inside * prime_power.prime
+    [outside, inside]
+
+  -> .square_decomposition(value)
+    if Expression.integer?(value)
+      return nil if value <= 0
+      return nil if value.bit_length > 32
+      return Expression.integer_square_decomposition(value)
+    if value.class_name == "Rational"
+      return nil if value.numerator <= 0
+      return nil if value.numerator.bit_length > 32
+      return nil if value.denominator.bit_length > 32
+      top = Expression.integer_square_decomposition(value.numerator)
+      bottom = Expression.integer_square_decomposition(value.denominator)
+      return [
+        Rational.new(top[0], bottom[0]),
+        Rational.new(top[1], bottom[1])
+      ]
+    nil
+
+  -> .integer_cube_decomposition(value)
+    sign = value < 0 ? -1 : 1
+    magnitude = value < 0 ? 0 - value : value
+    outside = sign
+    inside = 1
+    magnitude.factor.each -> (prime_power)
+      outside = outside * prime_power.prime ** (prime_power.exponent / 3)
+      remainder = prime_power.exponent % 3
+      inside = inside * prime_power.prime ** remainder if remainder > 0
+    [outside, inside]
+
+  -> .cube_decomposition(value)
+    if Expression.integer?(value)
+      return nil if value == 0
+      magnitude = value < 0 ? 0 - value : value
+      return nil if magnitude.bit_length > 32
+      return Expression.integer_cube_decomposition(value)
+    if value.class_name == "Rational"
+      return nil if value.zero?
+      magnitude = value.numerator < 0 ? 0 - value.numerator : value.numerator
+      return nil if magnitude.bit_length > 32
+      return nil if value.denominator.bit_length > 32
+      top = Expression.integer_cube_decomposition(value.numerator)
+      bottom = Expression.integer_cube_decomposition(value.denominator)
+      return [
+        Rational.new(top[0], bottom[0]),
+        Rational.new(top[1], bottom[1])
+      ]
+    nil
 
   -> .sort_expressions(values)
     out = []
@@ -282,6 +409,18 @@ use core/math
     if left.constant? && right.constant?
       return Expression.constant(
         Expression.divide_constants(left.constant_value, right.constant_value))
+    if right.constant? && left.operation == "multiply"
+      pieces = left.arguments
+      if pieces.size > 1 && pieces[0].constant?
+        coefficient = Expression.divide_constants(
+          pieces[0].constant_value, right.constant_value)
+        return Expression.product(
+          [Expression.constant(coefficient)] + pieces.copy(1, pieces.size - 1))
+    if right.constant? && left.operation == "add"
+      pieces = []
+      left.arguments.each -> (argument)
+        pieces.push(Expression.divide(argument, right))
+      return Expression.sum(pieces)
     Expression.node("divide", [left, right])
 
   -> .power(base, exponent)
@@ -296,7 +435,10 @@ use core/math
         if Expression.integer?(base_value) && Expression.integer?(value) && value < 0
           denominator = base_value ** (0 - value)
           return Expression.constant(Rational.new(1, denominator))
-        return Expression.constant(base_value ** value)
+        if !Expression.exact_value?(base_value) || Expression.integer?(value)
+          return Expression.constant(base_value ** value)
+        if value.class_name == "Rational" && value.denominator == 1
+          return Expression.constant(base_value ** value.numerator)
       if left.operation == "power" && Expression.integer?(value)
         inner = left.arguments
         if inner[1].constant? && Expression.integer?(inner[1].constant_value)
@@ -353,26 +495,121 @@ use core/math
     return Math.abs(value) if operation == "abs"
     raise "unknown symbolic unary operation: " + operation
 
+  -> .named_constant_value(name)
+    return Math.acos(~-1.0) if name.to_s == "pi"
+    return Math.exp(~1.0) if name.to_s == "e"
+    raise "unknown symbolic named constant: " + name.to_s
+
+  # Return [handled, exact expression]. Exact arguments never fall through to
+  # libm merely because a simplifier happened to see them.
+  -> .exact_unary(operation, value)
+    zero = Expression.zero_value?(value)
+    one = Expression.one_value?(value)
+    negative_one = Expression.negative_one_value?(value)
+
+    if zero
+      if operation == "cos" || operation == "cosh" || operation == "exp"
+        return [true, Expression.constant(1)]
+      if operation == "acos"
+        return [true, Expression.pi / Expression.constant(2)]
+      zero_operations = [
+        "sqrt", "sin", "tan", "sinh", "tanh", "asin", "atan", "asinh",
+        "atanh", "expm1", "log1p", "cbrt", "abs"
+      ]
+      return [true, Expression.constant(0)] if zero_operations.include?(operation)
+
+    if one
+      logarithm = operation == "log" || operation == "log2" || operation == "log10"
+      return [true, Expression.constant(0)] if logarithm || operation == "acos" || operation == "acosh"
+      return [true, Expression.e] if operation == "exp"
+      return [true, Expression.pi / Expression.constant(2)] if operation == "asin"
+      return [true, Expression.pi / Expression.constant(4)] if operation == "atan"
+      identity = operation == "sqrt" || operation == "cbrt" || operation == "abs"
+      return [true, Expression.constant(1)] if identity
+
+    if negative_one
+      return [true, Expression.constant(1)] if operation == "abs"
+      return [true, Expression.constant(-1)] if operation == "cbrt"
+      return [true, Expression.negate(Expression.pi / Expression.constant(2))] if operation == "asin"
+      return [true, Expression.negate(Expression.pi / Expression.constant(4))] if operation == "atan"
+      return [true, Expression.pi] if operation == "acos"
+
+    if operation == "sqrt"
+      root = Expression.perfect_square_root(value)
+      return [true, Expression.constant(root)] if root != nil
+      decomposition = Expression.square_decomposition(value)
+      if decomposition != nil && !Expression.one_value?(decomposition[0])
+        radical = Expression.node(
+          "sqrt", [Expression.constant(decomposition[1])])
+        return [true, Expression.constant(decomposition[0]) * radical]
+    if operation == "cbrt"
+      root = Expression.perfect_cube_root(value)
+      return [true, Expression.constant(root)] if root != nil
+      decomposition = Expression.cube_decomposition(value)
+      if decomposition != nil && !Expression.one_value?(decomposition[0])
+        radical = Expression.node(
+          "cbrt", [Expression.constant(decomposition[1])])
+        return [true, Expression.constant(decomposition[0]) * radical]
+    return [true, Expression.constant(value.abs)] if operation == "abs"
+    [false, nil]
+
+  # Recognize exact rational multiples of pi in canonical multiply/divide
+  # forms. This is intentionally small and sound; a future assumptions layer
+  # can add general trigonometric reduction.
+  -> .pi_multiple(expression)
+    return Rational.new(1) if expression.named_constant? && expression.named_constant_name == :pi
+    if expression.operation == "multiply"
+      pieces = expression.arguments
+      if pieces.size == 2 && pieces[0].constant?
+        coefficient = pieces[0].constant_value
+        if Expression.exact_value?(coefficient)
+          rest = Expression.pi_multiple(pieces[1])
+          return Rational.coerce(coefficient) * rest if rest != nil
+    if expression.operation == "divide"
+      pieces = expression.arguments
+      if pieces[1].constant? && Expression.exact_value?(pieces[1].constant_value)
+        numerator = Expression.pi_multiple(pieces[0])
+        if numerator != nil
+          return numerator / Rational.coerce(pieces[1].constant_value)
+    nil
+
+  -> .trig_pi_value(operation, expression)
+    coefficient = Expression.pi_multiple(expression)
+    return [false, nil] if coefficient == nil
+    denominator = coefficient.denominator
+    return [false, nil] if denominator != 1 && denominator != 2
+    half_turns = denominator == 1 ? coefficient.numerator * 2 : coefficient.numerator
+    residue = half_turns % 4
+    residue += 4 if residue < 0
+    if operation == "sin"
+      values = [0, 1, 0, -1]
+      return [true, Expression.constant(values[residue])]
+    if operation == "cos"
+      values = [1, 0, -1, 0]
+      return [true, Expression.constant(values[residue])]
+    if operation == "tan" && residue.even?
+      return [true, Expression.constant(0)]
+    [false, nil]
+
   -> .unary(operation, argument)
     name = operation.to_s
     expression = Expression.wrap(argument)
 
     if expression.constant?
       value = expression.constant_value
-      if Expression.zero_value?(value)
-        if name == "cos" || name == "cosh" || name == "exp"
-          return Expression.constant(1)
-        logarithm = name == "log" || name == "log2" || name == "log10"
-        if !logarithm && name != "acosh" && name != "acos"
-          return Expression.constant(0)
-      if Expression.one_value?(value)
-        return Expression.constant(0) if name == "log"
-        identity = name == "sqrt" || name == "cbrt" || name == "abs"
-        return Expression.constant(1) if identity
+      if Expression.exact_value?(value)
+        exact = Expression.exact_unary(name, value)
+        return exact[1] if exact[0]
+        return Expression.node(name, [expression])
       return Expression.constant(Expression.apply_unary(name, value))
 
     if name == "log" && expression.operation == "exp"
       return expression.arguments[0]
+    if name == "log" && expression.named_constant? && expression.named_constant_name == :e
+      return Expression.constant(1)
+    if name == "sin" || name == "cos" || name == "tan"
+      exact_trig = Expression.trig_pi_value(name, expression)
+      return exact_trig[1] if exact_trig[0]
     if name == "abs" && expression.operation == "abs"
       return expression
     if name == "sqrt" && expression.operation == "power"
@@ -481,7 +718,7 @@ use core/math
     !(self == @1)
 
   -> simplify
-    return self if constant? || variable?
+    return self if constant? || variable? || named_constant?
     simplified = []
     @arguments.each -> (argument)
       simplified.push(argument.simplify)
@@ -493,7 +730,7 @@ use core/math
 
   -> derivative(variable)
     sought = variable.to_s
-    return Expression.constant(0) if constant?
+    return Expression.constant(0) if constant? || named_constant?
     if variable?
       return Expression.constant(@arguments[0] == sought ? 1 : 0)
 
@@ -553,8 +790,8 @@ use core/math
     return derivative / (Expression.constant(1) - argument**2) if @operation == "atanh"
     return argument.exp * derivative if @operation == "expm1"
     return derivative / (Expression.constant(1) + argument) if @operation == "log1p"
-    return derivative / (Expression.constant(~0.6931471805599453) * argument) if @operation == "log2"
-    return derivative / (Expression.constant(~2.302585092994046) * argument) if @operation == "log10"
+    return derivative / (Expression.constant(2).log * argument) if @operation == "log2"
+    return derivative / (Expression.constant(10).log * argument) if @operation == "log10"
     return derivative / (Expression.constant(3) * argument.cbrt**2) if @operation == "cbrt"
     return argument * derivative / argument.abs if @operation == "abs"
     raise "cannot differentiate symbolic operation: " + @operation
@@ -581,7 +818,7 @@ use core/math
     if variable?
       out.push(@arguments[0]) if !out.include?(@arguments[0])
       return out
-    if !constant?
+    if !constant? && !named_constant?
       @arguments.each -> (argument)
         argument.collect_variable_texts(out)
     out
@@ -613,7 +850,7 @@ use core/math
 
   -> substitute(bindings)
     raise "expression substitution needs a Hash" if bindings.class_name != "Hash"
-    if constant?
+    if constant? || named_constant?
       return self
     if variable?
       text = @arguments[0]
@@ -657,6 +894,7 @@ use core/math
   -> evaluate(bindings)
     raise "expression evaluation needs a Hash" if bindings.class_name != "Hash"
     return @arguments[0] if constant?
+    return Expression.named_constant_value(@arguments[0]) if named_constant?
     if variable?
       text = @arguments[0]
       return bindings[text] if bindings.has_key?(text)
@@ -691,14 +929,262 @@ use core/math
     evaluate(bindings)
 
   -> complexity
-    return 1 if constant? || variable?
+    return 1 if constant? || variable? || named_constant?
     total = 1
     @arguments.each -> (argument)
       total += argument.complexity
     total
 
+  -> .distribute(left, right)
+    left_terms = left.operation == "add" ? left.arguments : [left]
+    right_terms = right.operation == "add" ? right.arguments : [right]
+    products = []
+    left_terms.each -> (left_term)
+      right_terms.each -> (right_term)
+        products.push(Expression.product([left_term, right_term]))
+    Expression.sum(products)
+
+  # Expand products and nonnegative integral powers without changing
+  # transcendental nodes or turning exact coefficients into approximations.
+  -> expand
+    return self if constant? || variable? || named_constant?
+    if @operation == "add"
+      terms = []
+      @arguments.each -> (argument)
+        terms.push(argument.expand)
+      return Expression.sum(terms)
+    if @operation == "multiply"
+      result = Expression.constant(1)
+      @arguments.each -> (argument)
+        result = Expression.distribute(result, argument.expand)
+      return result
+    if @operation == "power"
+      base = @arguments[0].expand
+      exponent = @arguments[1]
+      if exponent.constant?
+        value = exponent.constant_value
+        if Expression.integer?(value) && value >= 0
+          result = Expression.constant(1)
+          factor = base
+          n = value
+          while n > 0
+            result = Expression.distribute(result, factor) if n.odd?
+            n = n / 2
+            factor = Expression.distribute(factor, factor) if n > 0
+          return result
+      return Expression.power(base, exponent.expand)
+    if @operation == "divide"
+      return Expression.divide(@arguments[0].expand, @arguments[1].expand)
+    Expression.unary(@operation, @arguments[0].expand)
+
+  -> .zero_expression?(expression)
+    expression.constant? && Expression.zero_value?(expression.constant_value)
+
+  -> .coefficient_map_add_entry(entries, degree, coefficient)
+    i = 0
+    while i < entries.size
+      if entries[i][0] == degree
+        combined = entries[i][1] + coefficient
+        if Expression.zero_expression?(combined)
+          entries.delete_at(i)
+        else
+          entries[i][1] = combined
+        return entries
+      i += 1
+    entries.push([degree, coefficient]) if !Expression.zero_expression?(coefficient)
+    entries
+
+  -> .coefficient_map_add(left, right)
+    out = []
+    left.each -> (entry)
+      Expression.coefficient_map_add_entry(out, entry[0], entry[1])
+    right.each -> (entry)
+      Expression.coefficient_map_add_entry(out, entry[0], entry[1])
+    out
+
+  -> .coefficient_map_multiply(left, right)
+    out = []
+    left.each -> (left_entry)
+      right.each -> (right_entry)
+        Expression.coefficient_map_add_entry(
+          out,
+          left_entry[0] + right_entry[0],
+          left_entry[1] * right_entry[1])
+    out
+
+  # Sparse coefficients when this expression is viewed as a polynomial in
+  # one selected variable. Other symbols and named constants are coefficients.
+  -> coefficient_terms(variable)
+    sought = variable.to_s
+    return [[0, self]] if !depends_on?(sought)
+    if variable?
+      return [[1, Expression.constant(1)]] if @arguments[0] == sought
+      return [[0, self]]
+    if @operation == "add"
+      result = []
+      @arguments.each -> (argument)
+        result = Expression.coefficient_map_add(
+          result, argument.coefficient_terms(sought))
+      return result
+    if @operation == "multiply"
+      result = [[0, Expression.constant(1)]]
+      @arguments.each -> (argument)
+        result = Expression.coefficient_map_multiply(
+          result, argument.coefficient_terms(sought))
+      return result
+    if @operation == "power"
+      exponent = @arguments[1]
+      valid = exponent.constant?
+      valid = Expression.integer?(exponent.constant_value) if valid
+      valid = exponent.constant_value >= 0 if valid
+      if valid
+        result = [[0, Expression.constant(1)]]
+        factor = @arguments[0].coefficient_terms(sought)
+        n = exponent.constant_value
+        while n > 0
+          result = Expression.coefficient_map_multiply(result, factor) if n.odd?
+          n = n / 2
+          factor = Expression.coefficient_map_multiply(factor, factor) if n > 0
+        return result
+    if @operation == "divide" && !@arguments[1].depends_on?(sought)
+      result = []
+      @arguments[0].coefficient_terms(sought).each -> (entry)
+        result.push([entry[0], entry[1] / @arguments[1]])
+      return result
+    raise "expression is not polynomial in " + sought
+
+  -> degree_in(variable)
+    entries = coefficient_terms(variable)
+    return -1 if entries.size == 0
+    result = entries[0][0]
+    entries.each -> (entry)
+      result = entry[0] if entry[0] > result
+    result
+
+  -> coefficient(variable, degree)
+    if !Expression.integer?(degree) || degree < 0
+      raise "symbolic coefficient degree must be a nonnegative integer"
+    entries = coefficient_terms(variable)
+    i = 0
+    while i < entries.size
+      return entries[i][1] if entries[i][0] == degree
+      i += 1
+    Expression.constant(0)
+
+  -> collect(variable)
+    sought = variable.to_s
+    symbol = Expression.variable(sought)
+    terms = []
+    coefficient_terms(sought).each -> (entry)
+      if entry[0] == 0
+        terms.push(entry[1])
+      else
+        terms.push(entry[1] * (symbol ** entry[0]))
+    Expression.sum(terms)
+
+  -> linear_rate(variable)
+    rate = derivative(variable)
+    if rate.depends_on?(variable)
+      raise "symbolic antiderivative needs a linear inner expression"
+    if Expression.zero_expression?(rate)
+      raise "symbolic antiderivative has zero inner derivative"
+    rate
+
+  -> .scale_by_reciprocal(expression, denominator)
+    reciprocal = Expression.divide(Expression.constant(1), denominator)
+    Expression.wrap(expression) * reciprocal
+
+  -> antiderivative_power(base, exponent, variable)
+    rate = base.linear_rate(variable)
+    next_exponent = exponent + 1
+    if Expression.zero_value?(next_exponent)
+      return Expression.scale_by_reciprocal(base.abs.log, rate)
+    denominator = rate * Expression.constant(next_exponent)
+    Expression.scale_by_reciprocal(base ** next_exponent, denominator)
+
+  # Elementary, exact antiderivatives. Unsupported integration patterns fail
+  # loudly instead of switching to numerical quadrature or returning a guess.
+  -> antiderivative(variable)
+    sought = variable.to_s
+    symbol = Expression.variable(sought)
+    return self * symbol if !depends_on?(sought)
+    if variable?
+      if @arguments[0] == sought
+        return symbol**2 * Expression.constant(Rational.new(1, 2))
+
+    if @operation == "add"
+      terms = []
+      @arguments.each -> (argument)
+        terms.push(argument.antiderivative(sought))
+      return Expression.sum(terms)
+
+    if @operation == "multiply"
+      independent = []
+      dependent = []
+      @arguments.each -> (argument)
+        if argument.depends_on?(sought)
+          dependent.push(argument)
+        else
+          independent.push(argument)
+      if dependent.size == 1
+        return Expression.product(independent) * dependent[0].antiderivative(sought)
+
+    if @operation == "divide"
+      numerator = @arguments[0]
+      denominator = @arguments[1]
+      if !denominator.depends_on?(sought)
+        return Expression.scale_by_reciprocal(
+          numerator.antiderivative(sought), denominator)
+      if !numerator.depends_on?(sought)
+        rate = denominator.linear_rate(sought)
+        return Expression.scale_by_reciprocal(
+          numerator * denominator.abs.log, rate)
+
+    if @operation == "power" && @arguments[1].constant?
+      exponent = @arguments[1].constant_value
+      if Expression.exact_value?(exponent)
+        return antiderivative_power(@arguments[0], exponent, sought)
+
+    argument = @arguments[0]
+    rate = argument.linear_rate(sought)
+    return Expression.scale_by_reciprocal(argument.exp, rate) if @operation == "exp"
+    return Expression.scale_by_reciprocal(-argument.cos, rate) if @operation == "sin"
+    return Expression.scale_by_reciprocal(argument.sin, rate) if @operation == "cos"
+    return Expression.scale_by_reciprocal(argument.cosh, rate) if @operation == "sinh"
+    return Expression.scale_by_reciprocal(argument.sinh, rate) if @operation == "cosh"
+    if @operation == "sqrt"
+      return antiderivative_power(argument, Rational.new(1, 2), sought)
+    if @operation == "cbrt"
+      return antiderivative_power(argument, Rational.new(1, 3), sought)
+    if @operation == "log"
+      return Expression.scale_by_reciprocal(
+        argument * argument.log - argument, rate)
+    if @operation == "expm1"
+      return Expression.scale_by_reciprocal(argument.exp - argument, rate)
+    if @operation == "log1p"
+      shifted = argument + 1
+      return Expression.scale_by_reciprocal(
+        shifted * shifted.log - shifted, rate)
+    if @operation == "abs"
+      return Expression.scale_by_reciprocal(
+        argument * argument.abs, rate * Expression.constant(2))
+    raise "no elementary symbolic antiderivative implemented for " + self.to_s
+
+  -> integrate(variable)
+    antiderivative(variable)
+
+  -> definite_integral(variable, lower, upper)
+    sought = variable.to_s
+    primitive = antiderivative(sought)
+    lower_bindings = {}
+    upper_bindings = {}
+    lower_bindings[sought.to_sym] = lower
+    upper_bindings[sought.to_sym] = upper
+    primitive.substitute(upper_bindings) - primitive.substitute(lower_bindings)
+
   -> polynomial_expression?
     return true if constant? || variable?
+    return false if named_constant?
     if @operation == "add" || @operation == "multiply"
       i = 0
       while i < @arguments.size
@@ -720,6 +1206,8 @@ use core/math
     if ring.class_name != "PolynomialRing"
       raise "symbolic polynomial conversion needs a PolynomialRing"
     return ring.constant(@arguments[0]) if constant?
+    if named_constant?
+      raise "named transcendental constant is not a polynomial coefficient: " + @arguments[0]
     if variable?
       index = ring.index_of(@arguments[0])
       raise "symbolic variable is not in polynomial ring: " + @arguments[0] if index == nil
@@ -776,6 +1264,9 @@ use core/math
   -> render(parent_precedence = 0)
     return @arguments[0].to_s if constant?
     return @arguments[0] if variable?
+    if named_constant?
+      return "π" if @arguments[0] == "pi"
+      return "e"
 
     text = ""
     if @operation == "add"

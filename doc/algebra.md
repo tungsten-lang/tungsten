@@ -523,10 +523,60 @@ These are sheets of the chosen \(x\)-projection. A ramified pair can be two
 parameterizations of the same geometric branch: for the cusp
 \(y^2=x^3\), the sheets \(y=\pm x^{3/2}\) are related by \(t\mapsto -t\)
 after setting \(x=t^2\). Every returned object therefore reports
-`projection_sheet?`, and `ramified?` exposes this warning. Root-of-unity orbit
-grouping into normalized geometric branches is a separate capability still
-under construction; sheet counts must not be used as branch counts or
-intersection multiplicities.
+`projection_sheet?`, and `ramified?` exposes this warning. Sheet counts must
+not be used as branch counts or intersection multiplicities.
+
+`local_normalization` performs the next finite, exact step. It converts every
+sheet packet to a primitive parameterization jet, replays substitution into
+the source equation, verifies that the packets cover every resolved
+Newton-edge factor, and applies the root-of-unity orbit formula:
+
+```w
+normalization = (y**2 - x**3).local_normalization(
+  0, 1, nil, 4)
+
+normalization.projection_sheets.size       # 2
+normalization.geometric_branch_count       # 1
+
+packet = normalization.parametrizations[0]
+packet.x_series                            # t^2
+packet.y_series                            # t^3 or -t^3
+packet.ramification_index                  # 2
+packet.geometric_branch_weight             # 1/2
+packet.certificate.verified?               # true
+packet.certificate.kernel_checked?         # true
+```
+
+The two certificate levels are intentionally different.
+`LocalPlaneParametrizationCertificate` and
+`PlaneProjectionSheetCoverCertificate` replay finite exact arithmetic.
+`PlaneCurveLocalNormalizationCertificate` then labels the classical
+Newton--Puiseux parameter-orbit statement as a `trusted_theorem_import`;
+`kernel_checked?` is false for that theorem step. Its arithmetic replay must
+still succeed, and the sum of packet weights must be integral, before
+`geometric_branch_count` is exposed.
+
+An algebraic packet contributes its residue degree as well as its
+ramification. Thus \(y^2=2x\) is one degree-two packet of weight \(2/2=1\);
+the cusp is two rational packets of weight \(1/2\) each. Repeated-tangent
+recursion and affine/projective chart facades use the same normalization
+surface:
+
+```w
+shared = ((y - x)**2 - x**3).local_normalization
+shared.geometric_branch_count                    # 1
+
+C.local_normalization([0, 0], 2, 4).
+  geometric_branch_count                         # 1
+Algebra.local_normalization(y**2 - x**3).
+  certificate.verified?                          # true
+```
+
+This object is finite normalization *jet data*, not the completed local ring:
+`finite_jet?` is true and `complete_local_ring?` is false. General conductor
+and delta-invariant arithmetic is still pending. `delta` currently delegates
+only to the already-certified ordinary multiple-point formula and raises on a
+cusp rather than guessing.
 
 The current lift handles squarefree characteristic factors and recursively
 refines repeated rational linear factors, subject to the exact factorization

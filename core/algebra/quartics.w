@@ -133,6 +133,22 @@
       result = result + term
     result
 
+  # Dehomogenize a binary line restriction into the complementary affine
+  # parameter. chart=1 means [u:v]=[t:1]; chart=0 means [1:t]. The returned
+  # polynomial lives in an actual univariate ring, so exact factorization and
+  # residue-degree computations apply directly.
+  -> affine_restriction(polynomial, chart = 1)
+    if chart != 0 && chart != 1
+      raise "line parameter chart must be zero or one"
+    restricted = restrict(polynomial)
+    remaining = chart == 0 ? 1 : 0
+    affine_ring = PolynomialRing.new(
+      [@parameter_ring.names[remaining]], field)
+    terms = []
+    restricted.each_term -> (coefficient, exponents)
+      terms.push([coefficient, [exponents[remaining]]])
+    Polynomial.new(affine_ring, terms)
+
   -> point(parameters)
     if parameters.class_name != "Array" || parameters.size != 2
       raise "a line parameter point needs two homogeneous coordinates"
@@ -182,31 +198,167 @@
     line.restrict(self)
 
 
++ LineIntersectionCertificate
+  -> new(@curve, @line, @divisor, @factorization,
+         @parameter_chart = 1)
+
+  -> curve
+    @curve
+
+  -> line
+    @line
+
+  -> divisor
+    @divisor
+
+  -> factorization
+    @factorization
+
+  -> parameter_chart
+    @parameter_chart
+
+  -> verified?
+    return false if @curve.class_name != "Curve"
+    return false if @line.class_name != "Line" || @line.space != @curve.space
+    return false if @divisor.class_name != "Divisor" || @divisor.curve != @curve
+    return false if @factorization.class_name != "PolynomialFactorization"
+    return false if @parameter_chart != 0 && @parameter_chart != 1
+    restricted = @curve.equation.restrict_to(@line)
+    return false if restricted.zero?
+    return false if !restricted.homogeneous?
+    return false if restricted.degree != @curve.degree
+    affine = @line.affine_restriction(
+      @curve.equation, @parameter_chart)
+    return false if !@factorization.polynomial.eql?(affine)
+    return false if !@factorization.certificate.verified?
+    expected = @curve.intersection_divisor_from_factorization(
+      @line, @factorization, @parameter_chart)
+    expected.eql?(@divisor)
+
+  -> certified?
+    verified?
+
+  -> to_s
+    "LineIntersectionCertificate(degree " + @divisor.degree.to_s + ")"
+
+  -> inspect
+    to_s
+
+
++ LineIntersection
+  -> new(@curve, @line, @divisor, @factorization,
+         @parameter_chart = 1)
+    if !certificate.verified?
+      raise "line-intersection certificate failed"
+
+  -> curve
+    @curve
+
+  -> line
+    @line
+
+  -> divisor
+    @divisor
+
+  -> factorization
+    @factorization
+
+  -> parameter_chart
+    @parameter_chart
+
+  -> certificate
+    LineIntersectionCertificate.new(
+      @curve, @line, @divisor, @factorization, @parameter_chart)
+
+  -> certified?
+    certificate.verified?
+
+  -> to_s
+    "LineIntersection(" + @divisor.to_s + ")"
+
+  -> inspect
+    to_s
+
+
 + Curve
-  # Exact intersection divisor for restrictions supported by one monomial.
-  # If f|L = c*u^a*v^b, its zeros are a*[0:1] + b*[1:0] on the parameter
-  # line.  This includes a hyperflex c*v^4 -> 4*[1:0]. General binary
-  # factorization and residue-field places are intentionally not guessed.
-  -> intersection_divisor(line)
+  # Reconstruct the scheme-theoretic line-intersection divisor from a
+  # certified factorization of one affine P^1 chart. Linear factors become
+  # rational Place objects; irreducibles of degree > 1 become ClosedPlace
+  # objects carrying their residue polynomial and proof. The omitted degree
+  # is precisely the multiplicity of the rational point at infinity.
+  -> intersection_divisor_from_factorization(line, factorization, parameter_chart = 1)
+    if line.class_name != "Line" || line.space != @space
+      raise "intersection line belongs to a different projective plane"
+    if factorization.class_name != "PolynomialFactorization"
+      raise "line intersection needs a certified polynomial factorization"
+    if parameter_chart != 0 && parameter_chart != 1
+      raise "line parameter chart must be zero or one"
+    affine = line.affine_restriction(@equation, parameter_chart)
+    if !factorization.polynomial.eql?(affine)
+      raise "factorization belongs to a different line restriction"
+    if !factorization.certified?
+      raise "line-restriction factorization is not certified"
+
+    terms = []
+    infinity_multiplicity = degree - affine.degree
+    if infinity_multiplicity < 0
+      raise "line restriction exceeds the curve's degree"
+    if infinity_multiplicity > 0
+      infinity_parameters = parameter_chart == 1 ? [field.one, field.zero] : [field.zero, field.one]
+      terms.push([
+        infinity_multiplicity,
+        place(line.point_raw(infinity_parameters))
+      ])
+
+    factors = factorization.factors
+    i = 0
+    while i < factors.size
+      factor = factors[i]
+      if factor.degree == 1
+        root = field.divide(
+          field.negate(factor.coeff(0)), factor.coeff(1))
+        parameters = parameter_chart == 1 ? [root, field.one] : [field.one, root]
+        terms.push([1, place(line.point_raw(parameters))])
+      elsif factor.degree > 1
+        terms.push([
+          1,
+          ClosedPlace.new(
+            self, line, factor, parameter_chart, factorization)
+        ])
+      i += 1
+
+    divisor = Divisor.new(self, terms)
+    if divisor.degree != degree
+      raise "line-intersection divisor failed Bezout degree"
+    divisor
+
+  # Exact line intersection over coefficient fields with certified
+  # univariate factorization (currently Q and arbitrary finite fields).
+  -> line_intersection(line, factor_search_limit = 250_000)
     if line.class_name != "Line" || line.space != @space
       raise "intersection line belongs to a different projective plane"
     restricted = @equation.restrict_to(line)
     if restricted.zero?
       raise "intersection divisor is undefined when the line is a curve component"
-    if restricted.terms.size != 1
-      raise "intersection divisor currently requires a monomial line restriction"
-
-    term = restricted.terms[0]
-    exponents = term[1]
-    if exponents[0] + exponents[1] != degree
+    if !restricted.homogeneous? || restricted.degree != degree
       raise "line restriction lost the curve's homogeneous degree"
 
-    terms = []
-    if exponents[0] > 0
-      terms.push([exponents[0], place(line.point([0, 1]))])
-    if exponents[1] > 0
-      terms.push([exponents[1], place(line.point([1, 0]))])
-    Divisor.new(self, terms)
+    parameter_chart = 1
+    affine = line.affine_restriction(@equation, parameter_chart)
+    factorization = affine.factor_with_certificate(factor_search_limit)
+    divisor = intersection_divisor_from_factorization(
+      line, factorization, parameter_chart)
+    LineIntersection.new(
+      self, line, divisor, factorization, parameter_chart)
+
+  -> intersection(line, factor_search_limit = 250_000)
+    line_intersection(line, factor_search_limit)
+
+  -> intersection_divisor(line, factor_search_limit = 250_000)
+    line_intersection(line, factor_search_limit).divisor
+
+  -> intersection_certificate(line, factor_search_limit = 250_000)
+    line_intersection(line, factor_search_limit).certificate
 
   -> binary_quartic_coefficients(polynomial)
     if polynomial.ring.arity != 2 || polynomial.degree != 4 || !polynomial.homogeneous?

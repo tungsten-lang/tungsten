@@ -231,10 +231,10 @@
 
   -> factor_with_certificate(search_limit = 250_000)
     PolynomialFactorization.new(
-      self, factor(search_limit), search_limit)
+      self, self.factor(search_limit), search_limit)
 
   -> factorization(search_limit = 250_000)
-    factor_with_certificate(search_limit)
+    self.factor_with_certificate(search_limit)
 
 
 + PolynomialFactorizationCertificate

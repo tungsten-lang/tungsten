@@ -137,6 +137,9 @@ finite_factor_check("F4.equal_degree.irreducible",
 
 # Certificates replay product and irreducibility, and reject an annihilating
 # but reducible "factorization" containing only the source polynomial.
+# The local named `factor` also guards native lowering hygiene: method bodies
+# must dispatch through `self`, not capture a same-named script binding.
+factor = "unrelated local binding"
 certified = extension_product.factor_with_certificate
 finite_factor_check("certificate.verified",
                     certified.certificate.verified?, true)

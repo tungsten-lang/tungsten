@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(188 total), grouped by area, with its declaration, a one-line
+(191 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -131,7 +131,10 @@ summary from the source header, and a link to the source.
 | `CurveZetaFunction` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `Line` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `Place` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ClosedPlace` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `Divisor` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `LineIntersection` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `LineIntersectionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `DivisorPrincipalityResult` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `SelmerConstraintBlock` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `SelmerConstraintSystem` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

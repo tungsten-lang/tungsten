@@ -34,8 +34,8 @@ core/algebra/groebner.w            # Buchberger, Ideal, eliminate, saturate
 core/algebra/f2_linear.w           # replay-certified linear algebra over F2
 core/algebra/projective.w          # projective spaces and normalized points
 core/algebra/curves.w              # plane, elliptic, and hyperelliptic models
-core/algebra/divisors.w            # degree-one places, small certified decisions
-core/algebra/quartics.w            # lines, intersections, finite-field bitangents
+core/algebra/divisors.w            # rational/closed places, formal divisors
+core/algebra/quartics.w            # certified line intersections and bitangents
 core/algebra/descent.w             # BPS preparation, bitangent proofs, F2 kernel
 core/algebra/point_search.w        # exact bounded search for one quartic family
 core/algebra/quartic_invariants.w  # ternary resultant, discriminant, I27
@@ -170,6 +170,28 @@ explicit: use `point_raw`, `homogenize_raw`, `at_raw`, `evaluate_raw`,
 `substitute_raw`, `monomial_raw`, `monomial_multiply_raw`, `Line.raw`, or
 `Algebra.determinant_raw` only when a value is already encoded by `F`.
 
+Plane-curve line intersections over ℚ and arbitrary finite fields factor the
+binary restriction exactly. Rational roots become ordinary `Place` objects;
+higher-degree irreducibles become certified `ClosedPlace` objects whose degree
+is the residue-field degree:
+
+```w
+L = Line.new(P2, B)
+intersection = C.line_intersection(L)
+intersection.certified?                    # true
+D = intersection.divisor
+D.degree                                   # degree(C), by Bézout
+D.terms.map -> item[1].residue_degree
+intersection.factorization.certificate.verified?
+```
+
+The construction accounts for the omitted point at infinity, preserves
+inseparable multiplicities as divisor coefficients, and reconstructs the same
+divisor from either affine chart on the parameter line. A higher-degree
+`ClosedPlace` intentionally raises on `point`: materializing its coordinates
+requires a residue-field realization, while its irreducible defining
+polynomial remains available as `residue_polynomial`.
+
 The compact grammar is intentionally confined to algebra entry points. It
 does not add global implicit multiplication or change ordinary numeric
 operator dispatch. Enabling it requires a real `use algebra` (or
@@ -190,8 +212,8 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Finite-curve arithmetic | Exact reduction from ℚ, base change to arbitrary-degree finite extensions, projective point counts, Frobenius traces, zeta numerators (regressed through a genus-six plane quintic), and genus-three real Weil cubics | Full zeta numerators currently start over a prime field; direct/fiber point counting is exact but exponential in field size, and higher-genus Weil-polynomial postprocessing is not yet generalized beyond the existing curve/zeta primitives |
 | Galois groups | Exact general groups in degrees at most three over ℚ; a certified classifier for irreducible reciprocal genus-three Weil sextics using modular irreducibility witnesses and exact Kummer square classes | This is not a general sextic classifier. Missing modular witnesses and unsupported shapes raise `unknown` or a capability error |
 | Ternary quartic invariants | Exact Macaulay resultant, integral-normalized ternary-quartic discriminant, and Magma-default-scale `I27` via `dixmier_ohno.last` | The other twelve Dixmier–Ohno invariants are not implemented; `dixmier_ohno` intentionally returns a partial object |
-| Lines and bitangents | Exact line restriction; intersection divisors for monomial restrictions; complete base-field-rational bitangent enumeration for plane quartics over odd finite fields | General binary-form factorization into residue-field places and geometric bitangents over the algebraic closure are not implemented |
-| Divisors | Exact formal arithmetic on rational degree-one places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic, and general principality tests are not implemented |
+| Lines and bitangents | Exact line restriction; certified intersection divisors over ℚ and arbitrary finite fields, including residue degrees, multiplicities, and both parameter charts; complete base-field-rational bitangent enumeration for plane quartics over odd finite fields | Line-intersection factorization over number fields, explicit residue-field coordinate realizations, and geometric bitangents over the algebraic closure are not implemented |
+| Divisors | Exact formal arithmetic on rational and line-presented higher-degree closed places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic outside the existing Jacobian models, and general principality tests are not implemented |
 | Rational points | Complete exact bounded search for primitive points on `aX³Z + bXY²Z + g(Y,Z)`, with nonzero same-sign `a,b` and nonzero `Y⁴` coefficient | This is not a general plane-curve point finder and does not prove that no points exist above the requested height |
 | Geometric automorphisms | Exact triviality certificate over `Qbar` for smooth rational plane quartics with the unique normalized hyperflex `[1:0:0]`, tangent `Z=0`, and identity stabilizer | It is not an arbitrary plane-quartic automorphism-group algorithm and does not enumerate nontrivial groups |
 | Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified geometric prefix for BPS generalized explicit 2-descent; arbitrary-degree quotient number fields; for the shell-width quartic, a checked degree-27 bitangent projection split into squarefree pieces of degrees 6, 9, and 12 | The BPS divisor/function family, finite-product étale algebra layer, noncubic maximal orders, unconditional S-class groups and S-units, a certified ambient square-class basis, theta Galois modules, p-adic local images, and the comparison kernel remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |

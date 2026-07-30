@@ -1,5 +1,5 @@
-# Exact line restrictions, hyperflex intersections, and finite-field
-# bitangent enumeration for the shell-width quartic.
+# Exact line restrictions, certified closed-place intersections, and
+# finite-field bitangent enumeration for the shell-width quartic.
 #
 # Run both ways:
 #   bin/tungsten run spec/core/algebra_quartics_spec.w
@@ -16,6 +16,8 @@ use core/algebra/quartics
     equal = got.eql?(want)
   elsif got.class_name == "ProjectivePoint" && want.class_name == "ProjectivePoint"
     equal = got.space == want.space && got.to_s == want.to_s
+  elsif got.class_name == "Array" && want.class_name == "Array"
+    equal = got.to_s == want.to_s
   if !equal
     raise "FAIL " + name + ": got " + got.to_s + ", want " + want.to_s
   << "PASS " + name
@@ -49,12 +51,79 @@ quartic_check("intersection.hyperflex_point",
               intersection.terms[0][1].point, p2.point(1, 0, 0))
 quartic_check("intersection.display", intersection.to_s, "4*\[1:0:0\]")
 
-general_intersection_failed = false
+general_line = Line.new(p2, B)
+general_intersection = curve.line_intersection(general_line)
+general_divisor = general_intersection.divisor
+quartic_check("intersection.general.certified",
+              general_intersection.certified?, true)
+quartic_check("intersection.general.degree", general_divisor.degree, 4)
+quartic_check("intersection.general.term_count",
+              general_divisor.terms.size, 2)
+quartic_check("intersection.general.residue_degrees",
+              general_divisor.terms.map -> item[1].degree,
+              [1, 3])
+quartic_check("intersection.general.rational_point",
+              general_divisor.terms[0][1].point,
+              p2.point(0, 9, 1))
+cubic_place = general_divisor.terms[1][1]
+quartic_check("intersection.general.closed_place",
+              cubic_place.class_name, "ClosedPlace")
+quartic_check("intersection.general.closed_certificate",
+              cubic_place.certified?, true)
+quartic_check("intersection.general.factor_degrees",
+              general_intersection.factorization.factors.map -> item.degree,
+              [0, 1, 3])
+
+closed_point_failed = false
 begin
-  curve.intersection_divisor(Line.new(p2, B))
+  cubic_place.point
 rescue error
-  general_intersection_failed = error.to_s.include?("monomial line restriction")
-quartic_check("intersection.general_is_loud", general_intersection_failed, true)
+  closed_point_failed = error.to_s.include?("no coefficient-field")
+quartic_check("intersection.closed_point_is_loud",
+              closed_point_failed, true)
+
+tampered_intersection = LineIntersectionCertificate.new(
+  curve, general_line, Divisor.new(curve, []),
+  general_intersection.factorization)
+quartic_check("intersection.certificate.rejects_divisor",
+              tampered_intersection.verified?, false)
+
+component_curve = Curve.new(p2, B*S**3)
+component_failed = false
+begin
+  component_curve.intersection_divisor(general_line)
+rescue error
+  component_failed = error.to_s.include?("curve component")
+quartic_check("intersection.component_is_loud", component_failed, true)
+
+# The two parameter charts reconstruct the same divisor. This exercises a
+# mixed restriction with finite roots and a nonzero point-at-infinity
+# multiplicity, rather than only the monomial hyperflex case.
+mixed_curve = Curve.new(
+  p2, B**4 + S*(S - Z)*Z**2)
+mixed_line = Line.new(p2, B)
+mixed_intersection = mixed_curve.line_intersection(mixed_line)
+mixed_affine_zero = mixed_line.affine_restriction(
+  mixed_curve.equation, 0)
+mixed_factorization_zero = mixed_affine_zero.factor_with_certificate
+mixed_divisor_zero = mixed_curve.intersection_divisor_from_factorization(
+  mixed_line, mixed_factorization_zero, 0)
+quartic_check("intersection.chart_round_trip",
+              mixed_divisor_zero, mixed_intersection.divisor)
+quartic_check("intersection.mixed.degree",
+              mixed_intersection.divisor.degree, 4)
+quartic_check("intersection.mixed.infinity_multiplicity",
+              mixed_intersection.divisor.coefficient(
+                mixed_curve.place(mixed_line.point([1, 0]))),
+              2)
+quartic_check("intersection.mixed.zero_multiplicity",
+              mixed_intersection.divisor.coefficient(
+                mixed_curve.place(mixed_line.point([0, 1]))),
+              1)
+quartic_check("intersection.mixed.one_multiplicity",
+              mixed_intersection.divisor.coefficient(
+                mixed_curve.place(mixed_line.point([1, 1]))),
+              1)
 
 invalid_line_failed = false
 begin
@@ -88,6 +157,68 @@ quartic_check("line.extension_external_integer",
 quartic_check("line.extension_raw_integer",
               Line.raw(p2_25, [1, 5, 0]).coefficients.to_s,
               [1, t25, 0].to_s)
+
+# General intersections over a prime field preserve the factor residue
+# degrees. For B=0 mod 5 the restriction has two rational roots and one
+# quadratic closed point.
+curve5 = curve.reduce(5)
+intersection5 = curve5.line_intersection(
+  Line.new(curve5.space, curve5.space.coords[0]))
+quartic_check("intersection.F5.certified", intersection5.certified?, true)
+quartic_check("intersection.F5.degree", intersection5.divisor.degree, 4)
+quartic_check("intersection.F5.residue_degrees",
+              intersection5.divisor.terms.map -> item[1].degree,
+              [1, 1, 2])
+quartic_check("intersection.F5.factor_degrees",
+              intersection5.factorization.factors.map -> item.degree,
+              [0, 1, 1, 2])
+quartic_check("intersection.F5.closed_certificate",
+              intersection5.divisor.terms[2][1].certified?, true)
+
+# Inseparable multiplicities become divisor coefficients rather than
+# duplicate place objects: (Y²+YZ+Z²)² on X=0 is twice one quadratic place.
+field2_places = FiniteField.new(2)
+p2_places = ProjectiveSpace<FiniteField, 2>.new(
+  Algebra.field(field2_places), 2, [:X, :Y, :Z])
+x_places = p2_places.coords[0]
+y_places = p2_places.coords[1]
+z_places = p2_places.coords[2]
+quadratic_place_form = y_places**2 + y_places*z_places + z_places**2
+repeated_place_curve = Curve.new(
+  p2_places, x_places**4 + quadratic_place_form**2)
+repeated_intersection = repeated_place_curve.line_intersection(
+  Line.new(p2_places, x_places))
+quartic_check("intersection.F2.repeated.term_count",
+              repeated_intersection.divisor.terms.size, 1)
+quartic_check("intersection.F2.repeated.multiplicity",
+              repeated_intersection.divisor.terms[0][0], 2)
+quartic_check("intersection.F2.repeated.residue_degree",
+              repeated_intersection.divisor.terms[0][1].degree, 2)
+quartic_check("intersection.F2.repeated.certified",
+              repeated_intersection.certified?, true)
+
+# The same construction works when the coefficient field is itself an
+# extension. Packed coefficients remain raw elements of F4 throughout.
+field4_places = FiniteField.extension(2, 2)
+a4_places = field4_places.generator
+p2_4_places = ProjectiveSpace<FiniteField, 2>.new(
+  Algebra.field(field4_places), 2, [:X, :Y, :Z])
+x4_places = p2_4_places.coords[0]
+y4_places = p2_4_places.coords[1]
+z4_places = p2_4_places.coords[2]
+q4_places = y4_places**2 + y4_places*z4_places
+q4_places += p2_4_places.ring.monomial_raw(
+  a4_places, [0, 0, 2])
+curve4_places = Curve.new(
+  p2_4_places, x4_places**4 + q4_places**2)
+intersection4_places = curve4_places.line_intersection(
+  Line.new(p2_4_places, x4_places))
+quartic_check("intersection.F4.residue_degree",
+              intersection4_places.divisor.terms[0][1].degree, 2)
+quartic_check("intersection.F4.multiplicity",
+              intersection4_places.divisor.terms[0][0], 2)
+quartic_check("intersection.F4.certified",
+              intersection4_places.certified?, true)
 
 full_counts = env("TUNGSTEN_QUARTIC_FULL") == "1"
 if full_counts

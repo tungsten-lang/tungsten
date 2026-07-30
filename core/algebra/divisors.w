@@ -1,4 +1,5 @@
-# Exact degree-one places and small formal divisors on projective curves.
+# Exact rational and line-presented closed places, with small formal divisors
+# on projective curves.
 #
 # This is deliberately not a general divisor-class implementation.  It
 # provides the exact formal arithmetic needed to reduce known rational points
@@ -38,8 +39,10 @@
 
 
 # A degree-one place represented by a rational point over the curve's
-# coefficient field.  The ProjectivePoint is always rehomed into curve.space;
-# source-space ownership never leaks into the formal divisor layer.
+# coefficient field. ClosedPlace below extends the same arithmetic protocol
+# for higher residue degrees. The ProjectivePoint is always rehomed into
+# curve.space; source-space ownership never leaks into the formal divisor
+# layer.
 + Place
   -> new(@curve, point)
     if point.class_name != "ProjectivePoint"
@@ -65,7 +68,13 @@
   -> degree
     1
 
+  -> residue_degree
+    degree
+
   -> rational?
+    true
+
+  -> closed?
     true
 
   -> to_divisor
@@ -73,7 +82,7 @@
 
   -> -/1
     other = @1
-    if other.class_name != "Place"
+    if !other.is_a?(Place)
       raise "a place can only be subtracted from another place"
     if other.curve != @curve
       raise "places belong to different curves"
@@ -96,6 +105,93 @@
     "Place(" + to_s + ")"
 
 
+# A higher-degree closed point obtained from an irreducible factor of a
+# line-restricted plane curve. The presentation records the affine chart on
+# the parameter P^1 and the complete certified factorization of that
+# restriction. Degree-one factors are deliberately materialized as ordinary
+# Place objects instead.
+#
+# Two distinct base-field lines cannot contain the same non-rational closed
+# point of P^2: their intersection would be a base-field-rational point.
+# Consequently [line, chart, irreducible factor] is an intrinsic equality key
+# for the higher-degree places represented here.
++ ClosedPlace < Place
+  -> new(@curve, @line, factor, @parameter_chart, @factorization)
+    if factor.class_name != "Polynomial" || factor.ring.arity != 1
+      raise "a closed place needs a univariate defining polynomial"
+    @factor = factor.monic
+    if @factor.degree <= 1
+      raise "degree-one factors must be represented by rational Place objects"
+    if !certified?
+      raise "closed-place presentation failed certification"
+
+  -> line
+    @line
+
+  -> parameter_chart
+    @parameter_chart
+
+  -> defining_polynomial
+    @factor
+
+  -> residue_polynomial
+    @factor
+
+  -> factorization
+    @factorization
+
+  -> factorization_certificate
+    @factorization.certificate
+
+  -> degree
+    @factor.degree
+
+  -> residue_degree
+    degree
+
+  -> rational?
+    false
+
+  -> closed?
+    true
+
+  -> point
+    raise "a closed place of degree " + degree.to_s + " has no coefficient-field ProjectivePoint"
+
+  -> coordinates
+    raise "closed-place coordinates require a residue-field realization"
+
+  -> certified?
+    return false if @curve.class_name != "Curve"
+    return false if @line.class_name != "Line" || @line.space != @curve.space
+    return false if @parameter_chart != 0 && @parameter_chart != 1
+    return false if @factorization.class_name != "PolynomialFactorization"
+    return false if !@factorization.certified?
+    source = @line.affine_restriction(
+      @curve.equation, @parameter_chart)
+    return false if !@factorization.polynomial.eql?(source)
+    return false if @factor.ring != source.ring || @factor.degree <= 1
+    found = false
+    @factorization.factors.each ->
+      if item.degree > 0 && item.monic.eql?(@factor)
+        found = true
+    found
+
+  -> eql?(other)
+    return false if other.class_name != "ClosedPlace"
+    return false if @curve != other.curve
+    return false if !@line.eql?(other.line)
+    return false if @parameter_chart != other.parameter_chart
+    @factor.eql?(other.defining_polynomial)
+
+  -> to_s
+    label = "ClosedPlace(deg " + degree.to_s + ", "
+    label + @factor.to_s + " on " + @line.to_s + ")"
+
+  -> inspect
+    to_s
+
+
 # A normalized finite formal sum sum n_P P.  Terms are kept in insertion order
 # because the first tranche only handles very small divisors; normalization
 # combines equal places and removes zero coefficients exactly.
@@ -113,7 +209,7 @@
       coefficient_class = coefficient.class_name
       if coefficient_class != "Integer" && coefficient_class != "Int" && coefficient_class != "BigInt"
         raise "divisor coefficients must be integers"
-      if place.class_name != "Place"
+      if !place.is_a?(Place)
         raise "a divisor term needs a Place"
       if place.curve != @curve
         raise "divisor place belongs to a different curve"
@@ -156,7 +252,7 @@
     self
 
   -> coefficient(place)
-    if place.class_name != "Place" || place.curve != @curve
+    if !place.is_a?(Place) || place.curve != @curve
       raise "place belongs to a different curve"
     i = 0
     while i < @terms.size
@@ -188,7 +284,7 @@
 
   -> +/1
     other = @1
-    if other.class_name == "Place"
+    if other.is_a?(Place)
       other = other.to_divisor
     if other.class_name != "Divisor"
       raise "divisor addition needs a Divisor or Place"
@@ -198,7 +294,7 @@
 
   -> -/1
     other = @1
-    if other.class_name == "Place"
+    if other.is_a?(Place)
       other = other.to_divisor
     if other.class_name != "Divisor"
       raise "divisor subtraction needs a Divisor or Place"

@@ -152,6 +152,34 @@
                * helper before shifts; stage 0 must mirror that ccall_nobox. */
               int64_t raw = value_is_int(args[1]) ? value_as_int(args[1]) : (int64_t)args[1];
               result = int_value(raw);
+            } else if (fn_len == sizeof("__w_bit_ctpop_u32") - 1 &&
+                       memcmp(fn, "__w_bit_ctpop_u32", sizeof("__w_bit_ctpop_u32") - 1) == 0 &&
+                       argc == 2) {
+              uint32_t raw = (uint32_t)(value_is_int(args[1])
+                                           ? value_as_int(args[1])
+                                           : (int64_t)args[1]);
+              result = int_value((int64_t)__builtin_popcount(raw));
+            } else if (fn_len == sizeof("__w_bit_ctpop_u64") - 1 &&
+                       memcmp(fn, "__w_bit_ctpop_u64", sizeof("__w_bit_ctpop_u64") - 1) == 0 &&
+                       argc == 2) {
+              uint64_t raw = (uint64_t)(value_is_int(args[1])
+                                           ? value_as_int(args[1])
+                                           : (int64_t)args[1]);
+              result = int_value((int64_t)__builtin_popcountll(raw));
+            } else if (fn_len == sizeof("__w_bit_cttz_u32") - 1 &&
+                       memcmp(fn, "__w_bit_cttz_u32", sizeof("__w_bit_cttz_u32") - 1) == 0 &&
+                       argc == 2) {
+              uint32_t raw = (uint32_t)(value_is_int(args[1])
+                                           ? value_as_int(args[1])
+                                           : (int64_t)args[1]);
+              result = int_value(raw == 0 ? 32 : (int64_t)__builtin_ctz(raw));
+            } else if (fn_len == sizeof("__w_bit_cttz_u64") - 1 &&
+                       memcmp(fn, "__w_bit_cttz_u64", sizeof("__w_bit_cttz_u64") - 1) == 0 &&
+                       argc == 2) {
+              uint64_t raw = (uint64_t)(value_is_int(args[1])
+                                           ? value_as_int(args[1])
+                                           : (int64_t)args[1]);
+              result = int_value(raw == 0 ? 64 : (int64_t)__builtin_ctzll(raw));
             } else if (fn_len == 18 && memcmp(fn, "w_is_ast_node_full", 18) == 0 && argc == 3) {
               // Fused is_ast_node? check (fix #5): nil/W_PACKED_NODE/
               // Hash-with-:node in a single dispatch. Mirrors

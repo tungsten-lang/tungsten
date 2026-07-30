@@ -82,6 +82,8 @@ test: $(BIN)
 		diff -u tests/positional_arity.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/string_buffer_size.w | \
 		diff -u tests/string_buffer_size.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/bit_count_intrinsics.w | \
+		diff -u tests/bit_count_intrinsics.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --check-ast tests/parenthesized_type_hint.w
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --check-ast tests/operator_method_name.w
 	cd ../.. && TUNGSTEN_LEX64_TABLE=languages/tungsten/tungsten.lex64 \

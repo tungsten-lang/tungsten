@@ -1082,6 +1082,36 @@ use hashing
   out << "}\n"
   out.to_s()
 
+# Fixed-width bit-count helpers used by core/bit_ops.w. Keep these as private
+# always-inline wrappers instead of ordinary runtime calls: the public source
+# methods remain interpreter/C-VM compatible through ccall_nobox, while native
+# builds expose the exact LLVM operations even at -O0. For cttz, false is the
+# is_zero_poison flag, so zero has the source-level result 32/64.
+-> bit_count_intrinsic_helper_ir(helper_name, intrinsic_name, width, trailing)
+  llvm_type = "i" + width.to_s()
+  out = StringBuffer(420)
+  out << "declare " + llvm_type + " @llvm." + intrinsic_name + "." + llvm_type + "(" + llvm_type
+  if trailing
+    out << ", i1 immarg"
+  out << ")\n"
+  out << "define private i64 @" + helper_name + "(i64 %v) alwaysinline nounwind willreturn memory(none) {\n"
+  out << "entry:\n"
+  value = "%v"
+  if width == 32
+    out << "  %v32 = trunc i64 %v to i32\n"
+    value = "%v32"
+  out << "  %count = call " + llvm_type + " @llvm." + intrinsic_name + "." + llvm_type + "(" + llvm_type + " " + value
+  if trailing
+    out << ", i1 false"
+  out << ")\n"
+  if width == 32
+    out << "  %result = zext i32 %count to i64\n"
+    out << "  ret i64 %result\n"
+  else
+    out << "  ret i64 %count\n"
+  out << "}\n"
+  out.to_s()
+
 -> filter_runtime_decls(decls, used_fns)
   lines = decls.split("\n")
   out = StringBuffer(decls.size())
@@ -2188,6 +2218,19 @@ ewscope_md_state = {ids: {}, order: []}
     if decls_out.index("@w_to_i64(") == nil
       decls_out = decls_out + "declare i64 @w_to_i64(i64) nounwind\n"
     decls_out = decls_out + to_i64_fast_helper_ir() + "\n"
+
+  bit_count_intrinsic_specs = [
+    ["__w_bit_ctpop_u32", "ctpop", 32, false],
+    ["__w_bit_ctpop_u64", "ctpop", 64, false],
+    ["__w_bit_cttz_u32", "cttz", 32, true],
+    ["__w_bit_cttz_u64", "cttz", 64, true]
+  ]
+  bci = 0
+  while bci < bit_count_intrinsic_specs.size()
+    spec = bit_count_intrinsic_specs[bci]
+    if ccall_needed.has_key?(spec[0])
+      decls_out = decls_out + bit_count_intrinsic_helper_ir(spec[0], spec[1], spec[2], spec[3]) + "\n"
+    bci += 1
 
   # Emit declarations for call targets not defined in this module. The
   # already-declared check was a decls_out.index(search_str) — a full strstr

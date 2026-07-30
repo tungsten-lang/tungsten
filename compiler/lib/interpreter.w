@@ -1538,6 +1538,44 @@ use target
       # Raw byte pointer of a slab/heap String, reboxed like the u8 data-ptr
       # case above; raw_load/store convert it back explicitly.
       return ccall("w_int", ccall_nobox("w_string_data_ptr", args[1]))
+    when "__w_bit_ctpop_u32"
+      if args.size() != 2
+        raise "__w_bit_ctpop_u32 expects one argument"
+      x = args[1] & 0xFFFFFFFF
+      count = 0
+      while x != 0
+        x = x & (x - 1)
+        count += 1
+      return count
+    when "__w_bit_ctpop_u64"
+      if args.size() != 2
+        raise "__w_bit_ctpop_u64 expects one argument"
+      x = args[1] & 0xFFFFFFFFFFFFFFFF
+      count = 0
+      while x != 0
+        x = x & (x - 1)
+        count += 1
+      return count
+    when "__w_bit_cttz_u32"
+      if args.size() != 2
+        raise "__w_bit_cttz_u32 expects one argument"
+      x = args[1] & 0xFFFFFFFF
+      return 32 if x == 0
+      count = 0
+      while (x & 1) == 0
+        x = x >> 1
+        count += 1
+      return count
+    when "__w_bit_cttz_u64"
+      if args.size() != 2
+        raise "__w_bit_cttz_u64 expects one argument"
+      x = args[1] & 0xFFFFFFFFFFFFFFFF
+      return 64 if x == 0
+      count = 0
+      while (x & 1) == 0
+        x = x >> 1
+        count += 1
+      return count
 
     raise "Unsupported ccall_nobox '[cname]' in interpreter"
 

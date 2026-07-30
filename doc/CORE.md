@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(266 total), grouped by area, with its declaration, a one-line
+(275 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -168,6 +168,15 @@ summary from the source header, and a link to the source.
 | `NumberFieldElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldMinimalPolynomialCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldRealEmbedding` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldArchimedeanPlace` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldArchimedeanData` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldArchimedeanDataCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductArchimedeanPlace` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductArchimedeanData` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductArchimedeanDataCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldQuadraticResidueCharacter` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldSUnitSquareClassBasis` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldSUnitSquareClassBasisCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `MonomialOrder` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `PolynomialRing` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `Polynomial` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

@@ -29,6 +29,14 @@ autoload_check("integral ideal class",
                NumberFieldIdeal.class_name, "Class")
 autoload_check("fractional ideal class",
                NumberFieldFractionalIdeal.class_name, "Class")
+autoload_check("archimedean data class",
+               NumberFieldArchimedeanData.class_name, "Class")
+autoload_check("etale archimedean data class",
+               EtaleProductArchimedeanData.class_name, "Class")
+autoload_check("S-unit basis class",
+               NumberFieldSUnitSquareClassBasis.class_name, "Class")
+autoload_check("quadratic residue character class",
+               NumberFieldQuadraticResidueCharacter.class_name, "Class")
 autoload_check("ideal factorization class",
                AlgebraIdealFactorization.class_name, "Class")
 autoload_check("BPS function data class",

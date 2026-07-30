@@ -33,7 +33,9 @@ use core/algebra/expression
 use core/algebra/number_field
 use core/algebra/prime_ideals
 use core/algebra/ideal_arithmetic
+use core/algebra/archimedean
 use core/algebra/f2_linear
+use core/algebra/s_units
 use core/algebra/projective
 use core/algebra/curves
 use core/algebra/divisors

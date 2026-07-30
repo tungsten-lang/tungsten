@@ -1113,6 +1113,7 @@
     @integral_product_order = nil
     @maximal_product_order_computation = nil
     @s_prime_data = nil
+    @archimedean_data = nil
 
   -> curve
     @curve
@@ -1174,6 +1175,7 @@
     @bps_function_data = nil
     @maximal_product_order_computation = nil
     @s_prime_data = nil
+    @archimedean_data = nil
     @bitangent_scheme_certificate
 
   -> bitangent_scheme_certificate
@@ -1186,6 +1188,7 @@
     if @integral_product_order != order
       @maximal_product_order_computation = nil
       @s_prime_data = nil
+      @archimedean_data = nil
     @integral_product_order = order
     if !@integral_product_order.certificate.verified?
       raise "bitangent integral product order failed certification"
@@ -1193,6 +1196,22 @@
 
   -> integral_product_order
     @integral_product_order
+
+  -> certify_archimedean_data(search_limit = 250_000)
+    if @integral_product_order == nil
+      certify_integral_product_order
+    @archimedean_data = @integral_product_order.archimedean_data(
+      search_limit)
+    if !@archimedean_data.certificate.verified?
+      raise "bitangent archimedean place data failed certification"
+    @archimedean_data
+
+  -> archimedean_data
+    @archimedean_data
+
+  -> archimedean_certificate
+    return nil if @archimedean_data == nil
+    @archimedean_data.certificate
 
   -> certify_maximal_product_order(
        factor_search_limit = 1_000_000,
@@ -1307,9 +1326,21 @@
         "finite prime ideals above S", "complete",
         "certified residue fields, ramification indices, and residue degrees",
         @s_prime_data.certificate))
+    if @archimedean_data == nil
+      out.push(DescentRequirement.new(
+        "archimedean places", "missing",
+        "isolate every real embedding and count every complex conjugate pair"))
+    else
+      out.push(DescentRequirement.new(
+        "archimedean places", "complete",
+        "exact Sturm-isolated real places and complex-pair counts",
+        @archimedean_data.certificate))
     out.push(DescentRequirement.new(
-      "S-class group and S-units", "missing",
-      "must be unconditional; a GRH bound is conditional, not certified"))
+      "S-class group 2-torsion", "missing",
+      "prove Cl(O_L,S)[2] = 0; a GRH bound is conditional, not certified"))
+    out.push(DescentRequirement.new(
+      "product S-unit square-class basis", "missing",
+      "certify component generators and quotient by diagonal rational S-units"))
     out.push(DescentRequirement.new(
       "theta Galois module", "missing",
       "identify the 28/315 incidence structure and decomposition actions"))

@@ -285,6 +285,28 @@
       factor = multiply(factor, factor) if remaining > 0
     result
 
+  # Exact square testing in F_q.  In characteristic two Frobenius is an
+  # automorphism, so every element has a unique square root.  For odd q,
+  # Euler's criterion distinguishes the two cosets of F_q^*/F_q^{*2}.
+  -> square?(value)
+    element = normalize_element(value)
+    return true if element == zero
+    return true if @characteristic == 2
+    one?(power(element, (@order - 1) / 2))
+
+  # Return 0 on zero and +/-1 on the two multiplicative square classes.
+  # A signed quadratic character is deliberately unavailable in
+  # characteristic two, where the square-class quotient is trivial.
+  -> quadratic_character(value)
+    if @characteristic == 2
+      raise "quadratic character is not signed in characteristic two"
+    element = normalize_element(value)
+    return 0 if element == zero
+    criterion = power(element, (@order - 1) / 2)
+    return 1 if one?(criterion)
+    return -1 if equal?(criterion, negate(one))
+    raise "Euler criterion produced a nonquadratic residue-field value"
+
   -> inverse(value)
     element = normalize_element(value)
     raise "division by zero in finite field" if element == 0

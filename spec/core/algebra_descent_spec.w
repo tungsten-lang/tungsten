@@ -198,6 +198,17 @@ if env("TUNGSTEN_DESCENT_FULL") == "1"
                 scales.to_s, "\[16, 64, 256\]")
   descent_check("integral_order.requirement_complete",
                 setup.requirements[4].complete?, true)
+  archimedean_data = setup.certify_archimedean_data
+  descent_check("archimedean.certified",
+                archimedean_data.certified?, true)
+  archimedean_degree = archimedean_data.signature[0]
+  archimedean_degree += 2 * archimedean_data.signature[1]
+  descent_check("archimedean.degree",
+                archimedean_degree, 27)
+  descent_check("archimedean.component_count",
+                archimedean_data.component_signatures.size, 3)
+  descent_check("archimedean.requirement_complete",
+                setup.requirements[8].complete?, true)
   bps_value = bps_data.evaluate(affine_known_point)
   descent_check("bps_functions.full_value_unit",
                 bps_value.unit?, true)

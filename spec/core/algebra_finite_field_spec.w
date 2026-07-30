@@ -36,6 +36,15 @@ finite_check("prime.multiply", f5.multiply(3, 4), 2)
 finite_check("prime.inverse", f5.inverse(2), 3)
 finite_check("prime.divide", f5.divide(3, 2), 4)
 finite_check("prime.rational_coercion", f5.coerce(Rational.new(1, 2)), 3)
+finite_check("prime.zero_is_square", f5.square?(0), true)
+finite_check("prime.square", f5.square?(4), true)
+finite_check("prime.nonsquare", f5.square?(2), false)
+finite_check("prime.quadratic_character_zero",
+             f5.quadratic_character(0), 0)
+finite_check("prime.quadratic_character_square",
+             f5.quadratic_character(4), 1)
+finite_check("prime.quadratic_character_nonsquare",
+             f5.quadratic_character(2), -1)
 finite_check("prime.projective_normalization",
              f5.normalize_projective_coordinates([2, 4, 0]).to_s,
              "\[1, 2, 0\]")
@@ -46,6 +55,10 @@ finite_check("extension.degree", f25.degree, 2)
 finite_check("extension.order", f25.order, 25)
 finite_check("extension.t_squared", f25.multiply(t25, t25), 3)
 finite_check("extension.inverse", f25.multiply(t25, f25.inverse(t25)), 1)
+finite_check("extension.square", f25.square?(f25.power(t25, 2)), true)
+finite_check("extension.nonsquare", f25.square?(t25), false)
+finite_check("extension.quadratic_character",
+             f25.quadratic_character(t25), -1)
 
 f125 = FiniteField.new(5, [1, 1, 0, 1])
 t125 = f125.encode_coefficients([0, 1])
@@ -81,6 +94,17 @@ finite_check("quartic_extension.inverse_frobenius",
              f16.inverse_frobenius(f16.frobenius(t16)), t16)
 finite_check("quartic_extension.trace", f16.trace(t16), 0)
 finite_check("quartic_extension.norm", f16.norm(t16), 1)
+finite_check("characteristic_two.every_element_square",
+             f16.square?(t16), true)
+
+characteristic_two_character_failed = false
+begin
+  f16.quadratic_character(t16)
+rescue error
+  characteristic_two_character_failed = "[error]".include?(
+    "characteristic two")
+finite_check("characteristic_two.signed_character_is_loud",
+             characteristic_two_character_failed, true)
 
 r2 = PolynomialRing.new([:x], FiniteField.new(2))
 x2 = r2.generator(0)

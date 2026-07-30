@@ -153,8 +153,11 @@ subspace dimensions, including a zero cuspidal symbol space at level 2.
 Prime Hecke operators (including bad-prime \(U_p\)), exact characteristic
 polynomials, prime-level degeneracy maps, old subspaces, and canonical new
 Hecke quotients are also present with finite replay certificates and named
-theorem imports. There is still no mod-\(p\) Galois-representation layer,
-eigenform/newform q-expansion recovery, level-lowering proof, or
+theorem imports. A two-dimensional new quotient can be recovered as one
+normalized rational weight-two newform, including its exact q-expansion from
+the Hecke/Euler recurrences. There is still no mod-\(p\)
+Galois-representation layer, general splitting of multiple or
+number-field-valued eigenpackets, level-lowering proof, or
 modularity-lifting kernel. `tungsten-wassat`'s `fermat.w` is a finite SAT
 benchmark, not that arithmetic infrastructure.
 
@@ -164,8 +167,8 @@ A useful staged target is an **FLT application checker**:
 2. certify minimal models, local reduction, discriminants, and conductors;
 3. compute the finite modular-form calculation at the final level
    (the level-2 dimension, weight-two Manin-symbol, prime Hecke, and old/new
-   quotient calculations are implemented; eigenforms and mod-\(p\)
-   congruence data remain);
+   quotient calculations are implemented, as is the one-rational-packet
+   newform case; general eigenpackets and mod-\(p\) congruence data remain);
 4. apply Ribet and Wiles--Taylor--Wiles as explicit trusted theorem imports.
 
 That would be useful and honest, but still relative to those imports. A fully

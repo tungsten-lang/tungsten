@@ -244,8 +244,10 @@ different:
    generators, relations, cusp boundaries, and cuspidal dimensions are also
    implemented; exact prime Hecke operators, degeneracy maps, old subspaces,
    and canonical new Hecke quotients have replay certificates and explicit
-   Heilbronn/Atkin--Lehner--Li theorem imports; composite Hecke indices,
-   eigenform coefficient fields, and newform q-expansion recovery remain);
+   Heilbronn/Atkin--Lehner--Li theorem imports; one rational weight-two
+   eigenpacket can be recovered with exact Euler-recurrence q-coefficients;
+   composite Hecke indices, multiple-packet splitting, and non-rational
+   eigenform coefficient fields remain);
 5. local/global Galois cohomology, Selmer and dual Selmer groups,
    Poitou--Tate duality, and deformation rings;
 6. a kernel-checked Ribet level-lowering theorem;

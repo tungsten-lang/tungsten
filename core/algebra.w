@@ -47,6 +47,7 @@ use core/algebra/q_expansion
 use core/algebra/modular_symbols
 use core/algebra/hecke
 use core/algebra/old_new
+use core/algebra/newforms
 use core/algebra/divisors
 use core/algebra/quartics
 use core/algebra/descent
@@ -154,6 +155,11 @@ use core/algebra/galois
                             search_limit = 1_000_000)
     WeightTwoModularSymbols.new(
       level, 2, search_limit).old_new_decomposition
+
+  -> .rational_newform(level, precision = 12,
+                       search_limit = 1_000_000)
+    RationalWeightTwoNewform.new(
+      level, precision, search_limit)
 
   # Exact determinant over an explicit coefficient field.  This is
   # intentionally separate from LinAlg's floating-point determinant path.

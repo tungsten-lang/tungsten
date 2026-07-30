@@ -346,6 +346,7 @@ core_specs=(
   spec/core/byte_array_view_flatten_spec.w
   spec/core/byte_array_view_reallocation_spec.w
   spec/core/memory_mapped_view_spec.w
+  spec/core/process_spawn_argv_ownership_spec.w
 )
 
 metal_specs=(

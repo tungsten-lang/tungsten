@@ -346,6 +346,35 @@ while i < args.size()
     return "-lonig"
   ""
 
+# mimalloc as the default allocator for compiled binaries. The runtime is
+# malloc-heavy (alloc family, strings, bigint) and mimalloc measured
+# -15.5% on new_string / -11% on new_hash via DYLD interposition; linking
+# the static archive makes it the default with no code change (macOS: zone
+# registration in a constructor; Linux: link-order malloc interposition —
+# the archive precedes libc). Gated on the library actually being present
+# so machines without it build exactly as before; TUNGSTEN_NO_MIMALLOC=1
+# opts out. Cross-compiles skip it (host archive is wrong-arch).
+-> mimalloc_link_flags
+  if env("TUNGSTEN_NO_MIMALLOC") == "1"
+    return ""
+  candidates = ["/opt/homebrew/lib/libmimalloc.a", "/usr/local/lib/libmimalloc.a", "/usr/lib/libmimalloc.a"]
+  found = ""
+  candidates.each ->(c)
+    if found == "" && file?(c)
+      found = c
+  if found != ""
+    return found
+  # Debian/Ubuntu multiarch ships only the shared lib
+  # (/usr/lib/<triple>/libmimalloc.so, package libmimalloc-dev). Linking the
+  # .so ahead of libc interposes malloc for this binary. Validated on
+  # ubuntu:24.04 arm64 (glibc 6.34 -> mimalloc 5.70 ns/op on a malloc micro
+  # -- a smaller win than macOS's xzone 11 -> 4 ns, but still positive).
+  on linux
+    found = capture("ls /usr/lib/*/libmimalloc.a /usr/lib/*/libmimalloc.so 2>/dev/null | head -1").strip()
+    if found != ""
+      return found
+  ""
+
 -> archive_tool
   ar = env("TUNGSTEN_AR")
   if ar == nil || ar == ""
@@ -843,6 +872,12 @@ while i < args.size()
   if olf != ""
     clang_cmd << " "
     clang_cmd << olf
+
+  if cross_target == ""
+    mif = mimalloc_link_flags()
+    if mif != ""
+      clang_cmd << " "
+      clang_cmd << mif
 
   # Framework links. Accelerate is unconditional (runtime.c calls
   # cblas_sgemm/dgemm directly); everything else only when the bridges are

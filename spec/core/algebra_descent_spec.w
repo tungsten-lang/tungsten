@@ -114,6 +114,71 @@ descent_check("bitangent_algebra.component_maps",
 descent_check("integral_order.initially_missing",
               setup.requirements[4].status, "missing")
 
+bps_data = setup.certify_divisor_function_data
+descent_check("bps_functions.certified",
+              bps_data.certified?, true)
+descent_check("bps_functions.true_setup",
+              setup.true_setup?, true)
+descent_check("bps_functions.setup_certified",
+              setup.certified?, true)
+descent_check("bps_functions.etale_degree",
+              bps_data.etale_degree, 27)
+descent_check("bps_functions.component_degrees",
+              bps_data.component_degrees.to_s,
+              "\[6, 9, 12\]")
+descent_check("bps_functions.contact_components",
+              bps_data.contact_components.size, 3)
+descent_check("bps_functions.contact_certified",
+              bps_data.contact_components.all? ->
+                item.certified?,
+              true)
+descent_check("bps_functions.beta_components",
+              bps_data.beta_components.size, 3)
+descent_check("bps_functions.beta_certified",
+              bps_data.beta_components.all? ->
+                item.certified?,
+              true)
+bps_beta_degrees = bps_data.beta_components.map ->
+  item.relative_degree
+descent_check("bps_functions.beta_relative_degrees",
+              bps_beta_degrees.to_s, "\[0, 0, 0\]")
+descent_check("bps_functions.function_certified",
+              bps_data.function_components.all? ->
+                item.certified?,
+              true)
+bps_multipliers = bps_data.function_components.map ->
+  item.divisor_multiplier
+descent_check("bps_functions.divisor_multiplier",
+              bps_multipliers.to_s, "\[2, 2, 2\]")
+descent_check("bps_functions.theorem_import",
+              bps_data.certificate.proof_kind,
+              :trusted_theorem_import)
+descent_check("bps_functions.requirement_complete",
+              setup.requirements[5].complete?, true)
+
+affine_known_point = C.space.point([0, 9, 1])
+bps_component_values = bps_data.evaluate_components(
+  affine_known_point)
+descent_check("bps_functions.point_component_count",
+              bps_component_values.size, 3)
+descent_check("bps_functions.point_values_are_units",
+              bps_component_values.all? ->
+                item.unit?,
+              true)
+scaled_known_point = C.space.point([0, 18, 2])
+scaled_bps_values = bps_data.evaluate_components(
+  scaled_known_point)
+descent_check("bps_functions.projective_scale_invariant",
+              scaled_bps_values.to_s,
+              bps_component_values.to_s)
+bps_pole_is_loud = false
+begin
+  bps_data.evaluate_components(hyperflex.point)
+rescue error
+  bps_pole_is_loud = true
+descent_check("bps_functions.pole_is_loud",
+              bps_pole_is_loud, true)
+
 # The degree-27 CRT replay constructs three large Bezout idempotents. Keep the
 # ordinary regression quick; the same native suite with this flag checks both
 # the full executable product decomposition and the component power orders.
@@ -133,6 +198,12 @@ if env("TUNGSTEN_DESCENT_FULL") == "1"
                 scales.to_s, "\[16, 64, 256\]")
   descent_check("integral_order.requirement_complete",
                 setup.requirements[4].complete?, true)
+  bps_value = bps_data.evaluate(affine_known_point)
+  descent_check("bps_functions.full_value_unit",
+                bps_value.unit?, true)
+  descent_check("bps_functions.CRT_round_trip",
+                bps_value.components.to_s,
+                bps_component_values.to_s)
 
 if env("TUNGSTEN_DESCENT_MAXIMAL") == "1"
   maximal_order = setup.certify_maximal_product_order
@@ -226,9 +297,7 @@ rank_error = false
 begin
   setup.rank_upper_bound
 rescue e
-  blocker = "integral power product order"
-  if setup.integral_product_order != nil
-    blocker = "BPS divisor and function data"
+  blocker = setup.missing_requirements[0].name
   rank_error = e.to_s.index(blocker) != nil
 descent_check("setup.rank_gate", rank_error, true)
 

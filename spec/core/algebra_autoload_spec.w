@@ -31,6 +31,8 @@ autoload_check("fractional ideal class",
                NumberFieldFractionalIdeal.class_name, "Class")
 autoload_check("ideal factorization class",
                AlgebraIdealFactorization.class_name, "Class")
+autoload_check("BPS function data class",
+               PlaneQuarticBPSFunctionData.class_name, "Class")
 
 plane = Algebra.rational_projective_plane
 autoload_check("projective", plane.dimension, 2)

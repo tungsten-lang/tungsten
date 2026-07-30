@@ -39,6 +39,7 @@ use core/algebra/curves
 use core/algebra/divisors
 use core/algebra/quartics
 use core/algebra/descent
+use core/algebra/descent_functions
 use core/algebra/point_search
 use core/algebra/quartic_invariants
 use core/algebra/automorphisms

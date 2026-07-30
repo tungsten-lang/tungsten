@@ -45,6 +45,7 @@ core/algebra/curves.w              # plane, elliptic, and hyperelliptic models
 core/algebra/divisors.w            # rational/closed places, formal divisors
 core/algebra/quartics.w            # certified line intersections and bitangents
 core/algebra/descent.w             # BPS preparation, bitangent proofs, F2 kernel
+core/algebra/descent_functions.w   # contact divisors and BPS line ratios
 core/algebra/point_search.w        # exact bounded search for one quartic family
 core/algebra/quartic_invariants.w  # ternary resultant, discriminant, I27
 core/algebra/automorphisms.w       # normalized-hyperflex certificate
@@ -364,7 +365,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Divisors | Exact formal arithmetic on rational and line-presented higher-degree closed places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic outside the existing Jacobian models, and general principality tests are not implemented |
 | Rational points | Complete exact bounded search for primitive points on `aX³Z + bXY²Z + g(Y,Z)`, with nonzero same-sign `a,b` and nonzero `Y⁴` coefficient | This is not a general plane-curve point finder and does not prove that no points exist above the requested height |
 | Geometric automorphisms | Exact triviality certificate over `Qbar` for smooth rational plane quartics with the unique normalized hyperflex `[1:0:0]`, tangent `Z=0`, and identity stabilizer | It is not an arbitrary plane-quartic automorphism-group algorithm and does not enumerate nontrivial groups |
-| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified geometric prefix for BPS generalized explicit 2-descent; arbitrary-degree quotient number fields; for the shell-width quartic, an executable certified degree-27 étale algebra, maximal product order, and all 20 finite primes above `S = {2,3,13}` with exact `e/f` data | The BPS divisor/function family, archimedean S-places, unconditional S-class groups and S-units, a certified ambient square-class basis, theta Galois modules, p-adic local images, and the comparison kernel remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
+| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, and all 20 finite primes above `S = {2,3,13}` with exact `e/f` data | Archimedean S-places, unconditional S-class groups and S-units, a certified ambient square-class basis, theta Galois modules, p-adic local images, and the comparison kernel remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
 
 `Curve#hyperelliptic_plane_model?` is specifically the smooth plane-model
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
@@ -540,8 +541,10 @@ A rational hyperflex supplies the rational odd theta characteristic in
 Bruin--Poonen--Stoll section 6.5. Its intersection certificate verifies
 `l.C = 4P = 2(2P)`. Removing that member is the geometric step that prepares
 a degree-27 true descent setup instead of the generic degree-28 fake setup.
-The object remains an incomplete preparation until the BPS
-divisor/line-bundle family and functions are constructed:
+The bitangent scheme is a geometric preparation. Calling
+`certify_divisor_function_data` constructs and verifies the BPS
+divisor/line-bundle family and functions, at which point the object is a
+certified true setup. The later arithmetic descent remains incomplete:
 
 ```w
 infinity = Line.new(C.space, [0, 0, 1])
@@ -561,6 +564,13 @@ E = scheme.etale_algebra
 E.dimension                # 27
 E.certificate.verified?    # true
 E.decomposition_certificate.verified?
+F = setup.certify_divisor_function_data
+F.component_degrees        # [6, 9, 12]
+F.certificate.verified?    # true
+setup.true_setup?          # true
+setup.certified?           # true
+value = F.evaluate(C.space.point([0, 9, 1]))
+value.unit?                # true
 O = setup.certify_integral_product_order
 O.component_ranks          # [6, 9, 12]
 O.rank                     # 27
@@ -583,6 +593,14 @@ adds the distinguished hyperflex. The final exhaustion step explicitly carries
 a `SmoothPlaneQuarticBitangentCountCertificate`. It checks the hypotheses of
 the classical 28-bitangent theorem and records that theorem as a trusted
 mathematical import, not as a proof-assistant-checked derivation.
+On each degree-6/9/12 étale component, the function-data certificate
+reconstructs a normalized quadratic `q` and checks all five coefficients of
+the binary-quartic identity `l.C = a*q²`. The distinguished certificate gives
+`l0.C = 4P`. Applying BPS section 6.5 then produces
+`beta'_l = beta_l - 2P` and `f_l = l/l0`, with
+`div(f_l) = 2*beta'_l`. The BPS comparison is recorded as a trusted theorem
+import with checked hypotheses; the component polynomial identities
+themselves are replayed exactly.
 The degree labels describe a checked squarefree product presentation. They
 construct the exact finite étale quotient, executable CRT decomposition, and
 certified product of the three integral power orders obtained by scaling the

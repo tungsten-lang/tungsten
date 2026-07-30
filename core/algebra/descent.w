@@ -1109,6 +1109,7 @@
     if @hyperflex_certificate.curve != @curve
       raise "distinguished hyperflex belongs to a different curve"
     @bitangent_scheme_certificate = nil
+    @bps_function_data = nil
     @integral_product_order = nil
     @maximal_product_order_computation = nil
     @s_prime_data = nil
@@ -1170,6 +1171,7 @@
     if !@bitangent_scheme_certificate.certified?
       raise "plane-quartic bitangent scheme did not verify as 27 plus the distinguished hyperflex"
     @integral_product_order = nil
+    @bps_function_data = nil
     @maximal_product_order_computation = nil
     @s_prime_data = nil
     @bitangent_scheme_certificate
@@ -1278,9 +1280,15 @@
         "integral power product order", "complete",
         "certified monogenic Z-orders for each etale component",
         @integral_product_order.certificate))
-    out.push(DescentRequirement.new(
-      "BPS divisor and function data", "missing",
-      "construct Delta', beta', and f with div(f) = 2 beta'"))
+    if @bps_function_data == nil
+      out.push(DescentRequirement.new(
+        "BPS divisor and function data", "missing",
+        "construct Delta', beta', and f with div(f) = 2 beta'"))
+    else
+      out.push(DescentRequirement.new(
+        "BPS divisor and function data", "complete",
+        "certified contact quadratics and line-ratio functions l/l0",
+        @bps_function_data.certificate))
     if @maximal_product_order_computation == nil
       out.push(DescentRequirement.new(
         "etale algebra maximal orders", "missing",

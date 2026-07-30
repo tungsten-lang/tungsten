@@ -75,6 +75,9 @@ release_mode   = false
 dev_mode       = false
 fast_mode      = false
 math_mode      = :precise
+# Incremental-cache channel out of emit_ir (mutated, never reassigned —
+# fn-body assignment to a top-level var would shadow, not write).
+g_incremental  = {manifest: nil}
 intern_algo    = "raw"
 runtime_archive = nil
 # Build-time defines from `-D NAME=VALUE` args. Accumulates across
@@ -346,16 +349,19 @@ while i < args.size()
     return "-lonig"
   ""
 
-# mimalloc as the default allocator for compiled binaries. The runtime is
-# malloc-heavy (alloc family, strings, bigint) and mimalloc measured
-# -15.5% on new_string / -11% on new_hash via DYLD interposition; linking
-# the static archive makes it the default with no code change (macOS: zone
-# registration in a constructor; Linux: link-order malloc interposition —
-# the archive precedes libc). Gated on the library actually being present
-# so machines without it build exactly as before; TUNGSTEN_NO_MIMALLOC=1
-# opts out. Cross-compiles skip it (host archive is wrong-arch).
+# mimalloc for compiled binaries — OPT-IN via TUNGSTEN_MIMALLOC=1. The
+# runtime is malloc-heavy and mimalloc measured -15.5% on new_string /
+# -11% on new_hash (macOS: zone registration; Linux: link-order malloc
+# interposition, validated in ubuntu:24.04 docker). NOT the default:
+# on macOS 26 (xzone malloc) homebrew mimalloc 3.4's zone interposition
+# SIGSEGVs when LIBC-INTERNAL allocation runs through it — a two-line C
+# repro is just realpath(path, NULL) linked against libmimalloc.a
+# (crash in mi_theap_malloc_zero_aligned_at_generic). Any binary touching
+# realpath/getaddrinfo-style paths would be a landmine, so the measured
+# alloc-family win stays behind an explicit flag until a fixed mimalloc
+# release is verified.
 -> mimalloc_link_flags
-  if env("TUNGSTEN_NO_MIMALLOC") == "1"
+  if env("TUNGSTEN_MIMALLOC") != "1"
     return ""
   candidates = ["/opt/homebrew/lib/libmimalloc.a", "/usr/local/lib/libmimalloc.a", "/usr/lib/libmimalloc.a"]
   found = ""
@@ -488,6 +494,7 @@ while i < args.size()
   loader = Loader.new(verbose)
   load_started_at = clock
   ast = loader.load_program_ast(file_path)
+  g_incremental[:manifest] = loader.manifest_files()
   if ast_stats
     count_kinds(ast, g_ast_stats_counts)
   if env("TUNGSTEN_STOP_AFTER_LOAD_PARSE") == "1"
@@ -1372,9 +1379,122 @@ while i < args.size()
     << "SAMEKIND " + pk.to_s() + " " + rec[:same].to_s() + "/" + rec[:total].to_s()
     i += 1
 
+# ── Incremental compile cache ─────────────────────────────────────────────
+# `tungsten compile` / `-o` re-lowered and re-linked byte-identical inputs
+# every run (identical self-compile retires an identical 53.6B instructions).
+# Cache the final binary + sidemap keyed by (compiler binary identity,
+# codegen-relevant flags, entry path) and validated by the loader's
+# (path, mtime_ns) manifest of every file the build read — the same
+# freshness rule the ruby AST cache uses. Compiled-runtime only (the C VM
+# lacks the w_executable_path ccall, and bootstrap stages must not share
+# entries across compiler binaries — exe path+mtime is part of the
+# identity). TUNGSTEN_INCREMENTAL=0 disables (the PGO post-step sets it:
+# a cache hit would skip the very work being profiled).
+
+-> incremental_cache_enabled?
+  if env("TUNGSTEN_INCREMENTAL") == "0"
+    return false
+  runtime_identity() == "compiled-runtime"
+
+-> incremental_env_s(name)
+  v = env(name)
+  if v == nil
+    return ""
+  v
+
+-> incremental_cache_slot(file_path, out_path)
+  dir = env("TUNGSTEN_CACHE_DIR")
+  if dir == nil || dir == ""
+    home = env("HOME")
+    if home == nil || home == ""
+      return nil
+    dir = home + "/.tungsten/cache"
+  if system("mkdir -p " + dev_runtime_shell_quote(dir)) != true
+    return nil
+  dir + "/irbin-" + (file_path + "__" + out_path).replace("/", "_").replace(":", "_")
+
+-> incremental_identity(file_path, out_path)
+  exe = ccall("w_executable_path")
+  em = file_mtime_ns(exe)
+  if em == nil
+    return nil
+  defs = ""
+  dk = build_defines.keys().sort()
+  dki = 0
+  while dki < dk.size()
+    defs = defs + dk[dki] + "=" + build_defines[dk[dki]] + ";"
+    dki += 1
+  ra = runtime_archive == nil ? "" : runtime_archive
+  ["irbin-v1", file_path, out_path, exe, em.to_s(), release_mode.to_s(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), defs].join("|")
+
+# Valid cached binary for this identity? Reads the manifest, revalidates
+# every recorded (path, mtime_ns), and on success installs the cached
+# binary + sidemap at out_path. Any surprise → miss (rebuild).
+-> incremental_try_reuse(slot, identity, out_path, verbose)
+  manifest = read_file(slot + ".manifest")
+  if manifest == nil
+    return false
+  lines = manifest.split("\n")
+  if lines.size() < 1 || lines[0] != identity
+    return false
+  i = 1
+  while i < lines.size()
+    line = lines[i]
+    if line != ""
+      tab = line.index("\t")
+      if tab == nil
+        return false
+      mt = line.slice(0, tab)
+      pathpart = line.slice(tab + 1, line.size() - tab - 1)
+      cur = file_mtime_ns(pathpart)
+      if cur == nil || cur.to_s() != mt
+        return false
+    i += 1
+  if !file?(slot + ".bin")
+    return false
+  q_out = dev_runtime_shell_quote(out_path)
+  if system("cp -p " + dev_runtime_shell_quote(slot + ".bin") + " " + q_out) != true
+    return false
+  if file?(slot + ".sidemap")
+    system("cp -p " + dev_runtime_shell_quote(slot + ".sidemap") + " " + dev_runtime_shell_quote(out_path + ".sidemap"))
+  true
+
+-> incremental_store(slot, identity, out_path, sidemap_path)
+  files = g_incremental[:manifest]
+  if files == nil
+    return nil
+  parts = [identity]
+  i = 0
+  while i < files.size()
+    parts.push(files[i][1].to_s() + "\t" + files[i][0])
+    i += 1
+  q_slot_bin = dev_runtime_shell_quote(slot + ".bin")
+  tmp = slot + ".bin.tmp"
+  if system("cp -p " + dev_runtime_shell_quote(out_path) + " " + dev_runtime_shell_quote(tmp)) != true
+    return nil
+  system("mv -f " + dev_runtime_shell_quote(tmp) + " " + q_slot_bin)
+  if file?(sidemap_path)
+    system("cp -p " + dev_runtime_shell_quote(sidemap_path) + " " + dev_runtime_shell_quote(slot + ".sidemap"))
+  write_file(slot + ".manifest", parts.join("\n") + "\n")
+  nil
+
 -> compile_one(file_path, out_path, emit_wire, verbose, intern_algo, emit_ll_only_arg = false)
   if out_path == nil
     out_path = file_path.replace(".w", ".wc")
+
+  # Cache probe: full binary path only (no --emit-wire/--emit-ll/--ll —
+  # those want the intermediate artifacts).
+  incr_slot = nil
+  incr_id = nil
+  if !emit_wire && !emit_ll_only_arg && !keep_ll && incremental_cache_enabled?
+    incr_slot = incremental_cache_slot(file_path, out_path)
+    if incr_slot != nil
+      incr_id = incremental_identity(file_path, out_path)
+    if incr_slot != nil && incr_id != nil
+      if incremental_try_reuse(incr_slot, incr_id, out_path, verbose)
+        << ""
+        << "Built [out_path] (cache)"
+        return true
 
   implicit_ll = uses_implicit_ll_path() ## bool
   sidemap_path = out_path + ".sidemap"
@@ -1395,6 +1515,8 @@ while i < args.size()
   if ok
     << ""
     << "Built [out_path]"
+    if incr_slot != nil && incr_id != nil
+      incremental_store(incr_slot, incr_id, out_path, sidemap_path)
 
   ok
 

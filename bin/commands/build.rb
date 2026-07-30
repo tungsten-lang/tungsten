@@ -702,7 +702,8 @@ run_pgo_post_step = lambda do |stage2_bin, label|
   # 3a: Rebuild the compiler with profiling instrumentation. The stage-2
   # binary re-emits its own IR (~2s) and clang links it with our flags.
   puts "    #{dim}instrumenting...#{reset}"
-  instr_env = { "TUNGSTEN_CLANG_OPT" => "-O3 -fprofile-generate=#{pgo_dir} -mllvm -vp-counters-per-site=8" }
+  instr_env = { "TUNGSTEN_CLANG_OPT" => "-O3 -fprofile-generate=#{pgo_dir} -mllvm -vp-counters-per-site=8",
+              "TUNGSTEN_INCREMENTAL" => "0" }
   unless system(instr_env, stage2_bin, "compile", TUNGSTEN_W, "--out", pgo_instrumented, chdir: ROOT)
     $stderr.puts "#{red}PGO instrumentation build failed#{reset}"
     exit 1
@@ -710,7 +711,7 @@ run_pgo_post_step = lambda do |stage2_bin, label|
 
   # 3b: Run instrumented binary on representative workload (compile itself)
   puts "    #{dim}profiling...#{reset}"
-  profile_env = { "LLVM_PROFILE_FILE" => pgo_profraw }
+  profile_env = { "LLVM_PROFILE_FILE" => pgo_profraw, "TUNGSTEN_INCREMENTAL" => "0" }
   unless system(profile_env, pgo_instrumented, "compile", TUNGSTEN_W, "--out", File.join(pgo_dir, "train-out"), chdir: ROOT)
     $stderr.puts "#{red}PGO profiling run failed#{reset}"
     exit 1
@@ -728,7 +729,8 @@ run_pgo_post_step = lambda do |stage2_bin, label|
   # 3d: Rebuild with profile data
   puts "    #{dim}optimizing...#{reset}"
   opt_env = { "TUNGSTEN_CLANG_OPT" =>
-    "-O3 -fprofile-use=#{pgo_profdata} -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date" }
+    "-O3 -fprofile-use=#{pgo_profdata} -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date",
+    "TUNGSTEN_INCREMENTAL" => "0" }
   unless system(opt_env, stage2_bin, "compile", TUNGSTEN_W, "--out", pgo_optimized, chdir: ROOT)
     $stderr.puts "#{red}PGO optimization build failed#{reset}"
     exit 1

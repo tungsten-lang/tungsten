@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(334 total), grouped by area, with its declaration, a one-line
+(335 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -59,6 +59,7 @@ summary from the source header, and a link to the source.
 | `CertifiedTranscendentals` | — | Exact rational enclosures for elementary transcendental values. | [`core/calculus/certified_transcendentals.w`](../core/calculus/certified_transcendentals.w) |
 | `FormalPowerSeries` | — | FormalPowerSeries — exact truncated Taylor algebra. | [`core/calculus/series.w`](../core/calculus/series.w) |
 | `FormalLaurentSeries` | — | FormalLaurentSeries — exact truncated meromorphic local algebra. | [`core/calculus/laurent.w`](../core/calculus/laurent.w) |
+| `FormalPuiseuxSeries` | — | FormalPuiseuxSeries — exact rational-power local algebra. | [`core/calculus/puiseux.w`](../core/calculus/puiseux.w) |
 | `TaylorJet` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
 | `Differential` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
 | `QuadratureResult` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |

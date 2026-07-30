@@ -424,8 +424,10 @@ use core/calculus/series
           arguments[0], variable, center, maximum_power)
         return base.integer_power(exponent.constant_value)
 
+    argument_index = (
+      expression.operation == "polygamma" ? 1 : 0)
     argument = Expression.laurent_from_expression(
-      arguments[0], variable, center, maximum_power)
+      arguments[argument_index], variable, center, maximum_power)
     if !argument.regular?
       raise (
         "symbolic operation " + expression.operation +

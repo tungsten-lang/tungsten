@@ -33,12 +33,12 @@ Calculus.limit(x.sin / x, :x, 0)  # exact 1
 ```
 
 Formal cancellation handles removable finite-point singularities. Genuine
-poles use the separate Laurent surface below. Logarithmic terms and
-fractional-power branch points still raise because transseries and Puiseux
-series are not yet represented. A formal truncation is algebraic data, not a
-convergence or remainder-error certificate. Differentiation lowers its
-retained order, antiderivation raises it, and `truncate` refuses to
-manufacture unavailable coefficients.
+poles use the separate Laurent surface below, while rational-power branch
+points use Puiseux series. Logarithmic terms and general transseries still
+raise. A formal truncation is algebraic data, not a convergence or
+remainder-error certificate. Differentiation lowers its retained order,
+antiderivation raises it, and `truncate` refuses to manufacture unavailable
+coefficients.
 
 ## Laurent series, poles, and residues
 
@@ -65,9 +65,41 @@ geometric = Calculus.laurent_series(
 Products and quotients retain only coefficients justified by both operands'
 known windows. Addition detects exact cancellation of leading pole terms.
 Integrating a nonzero residue raises because the result needs a logarithm.
-Likewise `exp(1/x)` raises as an essential singularity, and `sqrt(x)` at zero
-raises because it needs Puiseux powers. `search_margin` is an explicit,
-bounded amount of extra internal precision for nested expressions.
+Likewise `exp(1/x)` raises as an essential singularity. `sqrt(x)` at zero is
+handled by the Puiseux surface below. `search_margin` is an explicit, bounded
+amount of extra internal precision for nested expressions.
+
+## Puiseux series and ramified branches
+
+`FormalPuiseuxSeries` uses an integer index `k` and a positive ramification
+index `e` to represent the power `(x-center)^(k/e)`. Coefficients are exact
+`Expression` objects. Arithmetic between different denominators refines both
+series to their least common ramification index:
+
+```w
+x = Calculus.symbol(:x)
+
+root = x.sqrt.puiseux_series(:x, 0, 4)
+root.ramification_index                         # 2
+root.valuation                                  # 1/2
+root.coefficient(Rational.new(1, 2))            # 1
+
+branched = (x*(Expression.constant(1) + x)).sqrt
+branched.puiseux_series(:x, 0, 3)
+# x^(1/2) + 1/2*x^(3/2) - 1/8*x^(5/2) + O(x^(7/2))
+
+x.sqrt.exp.puiseux_series(:x, 0, 3)
+(x.sqrt + x.cbrt).puiseux_series(:x, 0, 3)
+# the mixed result has ramification index 6
+```
+
+The implementation supports exact rational powers, arithmetic, quotient
+valuation, differentiation, shifted centers, and analytic unary composition
+in the local parameter. It represents one formal branch: it does not choose
+or certify an analytic branch cut. `log(sqrt(x))` still raises because its
+answer contains `log(x)`; essential singularities and automatic
+Newton--Puiseux solving of an implicit polynomial equation are separate
+future capabilities.
 
 ## Arbitrary-order derivatives and Taylor series
 

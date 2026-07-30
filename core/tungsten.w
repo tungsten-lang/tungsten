@@ -47,6 +47,7 @@
   auto :CertifiedTranscendentals, "calculus/certified_transcendentals"
   auto :FormalPowerSeries, "calculus/series"
   auto :FormalLaurentSeries, "calculus/laurent"
+  auto :FormalPuiseuxSeries, "calculus/puiseux"
   auto :TaylorJet,    "calculus"
   auto :Differential, "calculus"
   auto :QuadratureResult, "calculus"

@@ -18,6 +18,7 @@ use core/expression
 use core/calculus/certified_transcendentals
 use core/calculus/series
 use core/calculus/laurent
+use core/calculus/puiseux
 use core/calculus/jet
 use core/calculus/differential
 use core/calculus/quadrature
@@ -144,6 +145,12 @@ use core/calculus/quadrature
                   point = 0, search_margin = 8)
     Expression.wrap(expression).pole_order_at(
       variable, point, search_margin)
+
+  -> .puiseux_series(expression, variable,
+                      center = 0, order = 6,
+                      search_margin = 8)
+    Expression.wrap(expression).puiseux_series(
+      variable, center, order, search_margin)
 
   -> .limit(expression, variable, point, order = 8)
     Expression.wrap(expression).limit(variable, point, order)

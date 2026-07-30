@@ -56,6 +56,11 @@ laurent_check("nested.constant",
 laurent_check("nested.quartic",
               nested.coefficient(4) == one)
 
+digamma = (one + x).digamma.laurent_series(:x, 0, 3)
+laurent_check("polygamma.argument",
+              digamma.coefficient(0) == -Expression.euler_gamma &&
+              digamma.coefficient(1) == (Expression.pi**2)/6)
+
 cancelled = (
   FormalLaurentSeries.new([1, 1], -1) +
   FormalLaurentSeries.new([-1, 2], -1))

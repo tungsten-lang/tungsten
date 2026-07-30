@@ -374,7 +374,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders | Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
 | Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension | Singular-curve normalization is not implemented |
-| Local plane geometry | Exact lower Newton polygons over ℚ; characteristic polynomials and candidate valuations; coefficient-by-coefficient exact Newton--Hensel lifting for squarefree characteristic polynomials; degree-one rational branches and higher-degree conjugate branch packets over certified `SimpleExtensionField` residue fields; exact `FormalPuiseuxSeries` branches on affine/projective charts; trace/norm access through the packet field; small replay certificates that check the edge, irreducible factor, residue field, leading root, local parameter, and substituted residual through the requested order | Repeated characteristic roots still require recursive Newton-polygon refinement. Common/vertical component extraction, analytic branch cuts, and normalization from the resulting branches are not implemented; unsupported cases and bounded factorization exhaustion raise |
+| Local plane geometry | Exact lower Newton polygons over ℚ; characteristic polynomials and candidate valuations; dense exact Newton--Hensel lifting for simple factors; recursive coordinate transforms for repeated rational linear factors and shared tangents; degree-one rational branches and higher-degree conjugate branch packets over certified `SimpleExtensionField` residue fields; exact `FormalPuiseuxSeries` branches on affine/projective charts; trace/norm access through the packet field; small replay certificates for direct and recursive lifts | Repeated higher-degree algebraic factors, nonreduced/common or vertical component extraction, analytic branch cuts, and normalization from the resulting branches are not implemented; recursion/factorization bounds and unsupported cases raise |
 | Elliptic curves | Composition around a plane cubic model; short Weierstrass group law over ℚ and `𝔽_p` (char ≠ 2, 3); exact integral long-Weierstrass \(a_i,b_i,c_4,c_6,\Delta,j\) invariants and projective closure; replay-certified admissible transformations; bounded exhaustive local and global minimal models; the complete Tate state machine over ℚ, including wild conductor exponents at 2 and 3, Kodaira symbols, Tamagawa numbers, split multiplicative status, and certified conductors; checked primitive Frey models; `EllipticJacobian` view | Arbitrary plane cubic → Weierstrass needs a rational flex; Tate local data over number fields, isogenies, and mod-\(p\) representations are not implemented |
 | Modular forms | Exact `Gamma0(N)` index, cusp count, order-2/order-3 elliptic points, and \(X_0(N)\) genus; even-weight `CuspForms` and `ModularForms` dimensions; Sturm bounds; rational and number-field truncated q-series; certified level-one \(E_4,E_6,\Delta\) expansions and \(E_4^3-E_6^2=1728\Delta\); exhaustive weight-two \(P^1(\mathbb Z/N\mathbb Z)\) Manin symbols, sparse \(S/R\) relations, cusp boundaries, relative/cuspidal dimensions, and bounded exact rational cuspidal bases; exact \(T_n/U_{p^r}\) matrices from Cremona--Heilbronn prime sums plus Hecke recurrences, characteristic polynomials, degeneracy maps, old subspaces, and canonical new Hecke quotients; deterministic simultaneous newform-packet splitting by a primitive Hecke element, rational or exact number-field coefficient fields, and normalized packet q-expansions; theorem-labelled replay certificates; in particular the level-55 new quotient splits into coefficient-field degrees 1 and 2 | Dimension, Sturm, classical modularity, Manin-presentation, Hecke semisimplicity and multiplicity one, Heilbronn-action, Hecke-recurrence, Atkin--Lehner--Li, and eigenform formulas are named trusted theorem imports, not kernel proofs. Higher-weight symbols, characters, nebentypus, embeddings between independently presented coefficient fields, and analytic newform invariants are not implemented. Dense rational quotient coordinates are resource-bounded |
 | Hyperelliptic curves | Exact `y² = f(x)` models, Mumford pairs, Cantor composition; monic odd-degree over ℚ, monic-or-scalable over `𝔽_p` | Even-degree models still raise for Jacobian arithmetic |
@@ -450,6 +450,25 @@ This is deliberately a packet rather than two decimal roots: selecting a
 complex or real embedding is a later analytic operation, while the algebraic
 branch and all of its conjugates remain exact.
 
+Repeated rational tangents trigger a new translated Newton polygon:
+
+```w
+shared = (y - x)**2 - x**3
+branches = shared.puiseux_branches(0, 1, nil, 4)
+# y = x + x^(3/2)
+# y = x - x^(3/2)
+
+branches[0].certificate.class_name
+# RecursiveLocalPlaneBranchCertificate
+branches[0].certificate.verified?               # true
+```
+
+The recursive certificate replays `x=s^q`, `y=c*s^p+z`, removes the common
+power of `s`, verifies the nested branch certificate, reconstructs the
+combined ramification, and finally substitutes the result into the original
+equation. `recursion_limit` defaults to 8 and is an explicit last argument
+when a caller wants a different resource bound.
+
 Affine and projective curves expose the same operation on a chart:
 
 ```w
@@ -461,12 +480,13 @@ C.newton_polygon([0, 0], 2).valuations          # [3/2]
 C.puiseux_branches([0, 0], 2, 4)                # Y = +/- X^3/2
 ```
 
-The current lift is complete under its stated squarefree-characteristic
-hypothesis, subject to the exact factorization search bound. A repeated
-characteristic root, a common dependent-variable component, or a vertical
-component raises with a capability message. Inspecting `newton_polygon`
-remains available in those cases; Tungsten does not return an empty branch
-list and imply that the local curve has no branches.
+The current lift handles squarefree characteristic factors and recursively
+refines repeated rational linear factors, subject to the exact factorization
+and recursion bounds. A repeated higher-degree algebraic factor, a
+nonreduced/common dependent-variable component, or a vertical component raises
+with a capability message. Inspecting `newton_polygon` remains available in
+those cases; Tungsten does not return an empty branch list and imply that the
+local curve has no branches.
 
 ## Modular forms and q-expansions
 

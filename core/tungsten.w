@@ -273,6 +273,7 @@
   auto :NewtonPolygonCertificate, "algebra"
   auto :LocalPlaneBranch,       "algebra"
   auto :LocalPlaneBranchCertificate, "algebra"
+  auto :RecursiveLocalPlaneBranchCertificate, "algebra"
   auto :CurveZetaFunction,      "algebra"
   auto :Line,                   "algebra"
   auto :Place,                  "algebra"

@@ -305,9 +305,10 @@ such as `exp(1/x)` and logarithmic terms such as `log(sqrt(x))` still raise.
 `use algebra` adds exact Newton polygons and certified Puiseux lifts for
 rational plane equations with squarefree characteristic polynomials.
 Irreducible factors produce exact conjugate branch packets over certified
-simple-extension fields; repeated-root recursion remains an explicit
-boundary. Sign-dependent forms such as `abs(x)` also raise when the center
-does not determine a smooth branch.
+simple-extension fields, and repeated rational tangents are recursively
+refined. Repeated higher-degree algebraic factors and nonreduced component
+extraction remain explicit boundaries. Sign-dependent forms such as `abs(x)`
+also raise when the center does not determine a smooth branch.
 
 ## Current boundary
 

@@ -172,10 +172,12 @@ use core/algebra/galois
   -> .puiseux_branches(polynomial, x_variable = 0,
                         y_variable = 1, center = nil,
                         maximum_power = 6,
-                        search_margin = 0)
+                        search_margin = 0,
+                        recursion_limit = 8)
     polynomial.puiseux_branches(
       x_variable, y_variable, center,
-      maximum_power, search_margin)
+      maximum_power, search_margin,
+      recursion_limit)
 
   # Exact determinant over an explicit coefficient field.  This is
   # intentionally separate from LinAlg's floating-point determinant path.

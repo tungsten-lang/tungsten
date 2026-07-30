@@ -393,6 +393,65 @@ use core/calculus/puiseux
     FormalPuiseuxSeries.new(
       coefficients, 0, ramification_index, variable, center)
 
+  # Replace u by s^q and v by c*s^p+z, then remove the common s-power.
+  # This is the recursive Newton-polygon chart for a repeated rational
+  # characteristic root c at valuation p/q.
+  -> .repeated_root_transform(polynomial, numerator,
+                               denominator, root)
+    if polynomial.ring.field.class_name != "RationalField"
+      raise "repeated-root transform currently requires RationalField"
+    ring = PolynomialRing.new(
+      [:s, :z], polynomial.ring.field, polynomial.ring.order)
+    generators = ring.generators
+    s = generators[0]
+    z = generators[1]
+    result = ring.zero
+    polynomial.each_term -> (coefficient, exponents)
+      term = ring.constant(coefficient)
+      term *= s**(exponents[0]*denominator)
+      term *= (s**numerator*root + z)**exponents[1]
+      result += term
+    minimum_s = nil
+    result.each_term -> (coefficient, exponents)
+      minimum_s = exponents[0] if (
+        minimum_s == nil || exponents[0] < minimum_s)
+    terms = []
+    result.each_term -> (coefficient, exponents)
+      terms.push([
+        coefficient,
+        [exponents[0] - minimum_s, exponents[1]]
+      ])
+    Polynomial.new(ring, terms)
+
+  -> .combine_recursive_branch(variable, center,
+                                 maximum_power,
+                                 initial_numerator,
+                                 initial_denominator,
+                                 initial_root,
+                                 recursive_branch)
+    field = recursive_branch.coefficient_field
+    recursive = recursive_branch.displacement_series
+    recursive_ramification = recursive.ramification_index
+    total_ramification = (
+      initial_denominator*recursive_ramification)
+    maximum_index = maximum_power*total_ramification
+    recursive_cutoff = maximum_index
+    recursive_coefficients = PlaneLocalGeometry.field_coefficients(
+      recursive, field, recursive_cutoff)
+    coefficients = PlaneLocalGeometry.field_zeros(
+      field, maximum_index + 1)
+    index = 0
+    while index <= maximum_index
+      coefficients[index] = recursive_coefficients[index]
+      index += 1
+    leading_index = initial_numerator*recursive_ramification
+    leading = field.embed_from(RationalField.new, initial_root)
+    coefficients[leading_index] = field.add(
+      coefficients[leading_index], leading)
+    FormalPuiseuxSeries.new(
+      coefficients, 0, total_ramification,
+      variable, center)
+
 
 + NewtonPolygonEdge
   -> new(@polynomial, @left, @right)
@@ -464,6 +523,20 @@ use core/calculus/puiseux
     @characteristic_polynomial.factor.each ->
       out.push(item.monic) if item.degree > 0
     out
+
+  -> factor_groups
+    groups = []
+    irreducible_factors.each -> (factor)
+      found = nil
+      index = 0
+      while index < groups.size
+        found = index if groups[index][0] == factor
+        index += 1
+      if found == nil
+        groups.push([factor, 1])
+      else
+        groups[found][1] += 1
+    groups
 
   -> characteristic_evaluate(value, coefficient_field = nil)
     field = (
@@ -721,24 +794,117 @@ use core/calculus/puiseux
      "through order " + @maximum_power.to_s)
 
 
++ RecursiveLocalPlaneBranchCertificate
+  -> new(@local_polynomial, @edge, @initial_factor,
+         @initial_root, @transformed_polynomial,
+         @recursive_branch, @coordinate_series,
+         @displacement_series, @maximum_power)
+    @coefficient_field = @recursive_branch.coefficient_field
+
+  -> local_polynomial
+    @local_polynomial
+
+  -> edge
+    @edge
+
+  -> initial_factor
+    @initial_factor
+
+  -> initial_root
+    @initial_root
+
+  -> transformed_polynomial
+    @transformed_polynomial
+
+  -> recursive_branch
+    @recursive_branch
+
+  -> coordinate_series
+    @coordinate_series
+
+  -> displacement_series
+    @displacement_series
+
+  -> maximum_power
+    @maximum_power
+
+  -> coefficient_field
+    @coefficient_field
+
+  -> defining_factor
+    @recursive_branch.defining_factor
+
+  -> residue_degree
+    @recursive_branch.residue_degree
+
+  -> factor_multiplicity
+    multiplicity = 0
+    @edge.factor_groups.each -> (group)
+      multiplicity = group[1] if group[0] == @initial_factor
+    multiplicity
+
+  -> residual
+    PlaneLocalGeometry.field_residual_series(
+      @local_polynomial, @coefficient_field,
+      @coordinate_series, @displacement_series,
+      @maximum_power)
+
+  -> verified?
+    return false if !@edge.verified?
+    return false if @initial_factor.degree != 1
+    return false if factor_multiplicity < 2
+    rational_field = @local_polynomial.ring.field
+    return false if !rational_field.zero?(
+      @edge.characteristic_evaluate(
+        @initial_root, rational_field))
+    expected_transform = PlaneLocalGeometry.repeated_root_transform(
+      @local_polynomial, @edge.valuation.numerator,
+      @edge.valuation.denominator, @initial_root)
+    return false if expected_transform != @transformed_polynomial
+    return false if !@recursive_branch.certificate.verified?
+    expected_series = PlaneLocalGeometry.combine_recursive_branch(
+      @coordinate_series.variable, @coordinate_series.center,
+      @maximum_power, @edge.valuation.numerator,
+      @edge.valuation.denominator, @initial_root,
+      @recursive_branch)
+    return false if expected_series != @displacement_series
+    return false if !PlaneLocalGeometry.coordinate_parameter?(
+      @coordinate_series, @maximum_power)
+    return false if @displacement_series.valuation != @edge.valuation
+    leading = @coefficient_field.embed_from(
+      rational_field, @initial_root)
+    return false if (
+      @displacement_series.coefficient(@edge.valuation) !=
+      Expression.constant(leading))
+    PlaneLocalGeometry.vanishes_through?(
+      residual, @maximum_power)
+
+  -> statement
+    ("the recursively transformed Puiseux branch solves the local " +
+     "plane equation through order " + @maximum_power.to_s)
+
+
 + LocalPlaneBranch
   -> new(@source_polynomial, @local_polynomial,
          @x_variable, @y_variable, @center_x, @center_y,
          @edge, @leading_coefficient,
          @coordinate_series, @displacement_series,
          @maximum_power, coefficient_field = nil,
-         defining_factor = nil)
+         defining_factor = nil, supplied_certificate = nil)
     @coefficient_field = (
       coefficient_field == nil ?
       @local_polynomial.ring.field : coefficient_field)
     @defining_factor = defining_factor
     @series = (
       @displacement_series + Expression.constant(@center_y))
-    @certificate = LocalPlaneBranchCertificate.new(
-      @local_polynomial, @edge, @leading_coefficient,
-      @coordinate_series, @displacement_series,
-      @maximum_power, @coefficient_field,
-      @defining_factor)
+    if supplied_certificate == nil
+      @certificate = LocalPlaneBranchCertificate.new(
+        @local_polynomial, @edge, @leading_coefficient,
+        @coordinate_series, @displacement_series,
+        @maximum_power, @coefficient_field,
+        @defining_factor)
+    else
+      @certificate = supplied_certificate
     raise "local branch certificate did not verify" if !@certificate.verified?
 
   -> source_polynomial
@@ -822,10 +988,13 @@ use core/calculus/puiseux
 
   -> puiseux_branches(x_variable = 0, y_variable = 1,
                        center = nil, maximum_power = 6,
-                       search_margin = 0)
+                       search_margin = 0,
+                       recursion_limit = 8)
     FormalPowerSeries.validate_order(maximum_power)
     if !Expression.integer?(search_margin) || search_margin < 0
       raise "local branch search margin must be nonnegative"
+    if !Expression.integer?(recursion_limit) || recursion_limit < 0
+      raise "local branch recursion limit must be nonnegative"
     point = center == nil ? [0, 0] : center
     local = local_plane_polynomial(
       x_variable, y_variable, point)
@@ -846,11 +1015,6 @@ use core/calculus/puiseux
       raise (
         "no positive-valuation Newton edge; swap the local variables " +
         "or extract a vertical component")
-    polygon.edges.each -> (edge)
-      if !edge.squarefree_characteristic?
-        raise (
-          "automatic Puiseux lifting needs recursive refinement for a " +
-          "repeated characteristic root; inspect newton_polygon")
     variable_index = PlaneLocalGeometry.variable_index(
       self, x_variable)
     variable = @ring.names[variable_index]
@@ -861,17 +1025,62 @@ use core/calculus/puiseux
     branches = []
 
     polygon.edges.each -> (edge)
-      edge.irreducible_factors.each -> (factor)
-        if factor.degree == 1
-          coefficient_field = local.ring.field
-          root = coefficient_field.divide(
-            coefficient_field.negate(factor.coeff(0)),
+      edge.factor_groups.each -> (factor_group)
+        factor = factor_group[0]
+        multiplicity = factor_group[1]
+        if multiplicity > 1
+          if recursion_limit == 0
+            raise "Puiseux repeated-root recursion limit exceeded"
+          if factor.degree != 1
+            raise (
+              "repeated algebraic characteristic factors are not yet " +
+              "supported by recursive Puiseux lifting")
+          rational_field = local.ring.field
+          initial_root = rational_field.divide(
+            rational_field.negate(factor.coeff(0)),
             factor.coeff(1))
+          transformed = PlaneLocalGeometry.repeated_root_transform(
+            local, edge.valuation.numerator,
+            edge.valuation.denominator, initial_root)
+          recursive_order = (
+            working_power*edge.valuation.denominator)
+          recursive_branches = transformed.puiseux_branches(
+            0, 1, nil, recursive_order, 0,
+            recursion_limit - 1)
+          recursive_branches.each -> (recursive_branch)
+            if recursive_branch.valuation <= edge.valuation.numerator
+              raise (
+                "recursive Puiseux correction did not increase valuation")
+            displacement = PlaneLocalGeometry.combine_recursive_branch(
+              variable, point[0], working_power,
+              edge.valuation.numerator,
+              edge.valuation.denominator, initial_root,
+              recursive_branch)
+            retained = displacement.truncate(maximum_power)
+            coordinate = PlaneLocalGeometry.coordinate_series(
+              variable, point[0], maximum_power,
+              displacement.ramification_index)
+            certificate = RecursiveLocalPlaneBranchCertificate.new(
+              local, edge, factor, initial_root, transformed,
+              recursive_branch, coordinate, retained, maximum_power)
+            branches.push(LocalPlaneBranch.new(
+              self, local, variable, dependent,
+              point[0], point[1], edge, initial_root,
+              coordinate, retained, maximum_power,
+              recursive_branch.coefficient_field,
+              recursive_branch.defining_factor, certificate))
         else
-          coefficient_field = SimpleExtensionField.new(
-            factor, :c)
-          root = coefficient_field.generator
-        if edge.nondegenerate_root?(root, coefficient_field)
+          if factor.degree == 1
+            coefficient_field = local.ring.field
+            root = coefficient_field.divide(
+              coefficient_field.negate(factor.coeff(0)),
+              factor.coeff(1))
+          else
+            coefficient_field = SimpleExtensionField.new(
+              factor, :c)
+            root = coefficient_field.generator
+          if !edge.nondegenerate_root?(root, coefficient_field)
+            raise "simple characteristic factor had a vanishing derivative"
           ramification = edge.valuation.denominator
           leading_index = edge.valuation.numerator
           coordinate = PlaneLocalGeometry.coordinate_series(
@@ -905,13 +1114,14 @@ use core/calculus/puiseux
     @equation.newton_polygon(indices[0], indices[1], point)
 
   -> puiseux_branches(point, maximum_power = 6,
-                       search_margin = 0)
+                       search_margin = 0,
+                       recursion_limit = 8)
     if point.class_name != "Array" || point.size != 2
       raise "affine local point must have two coordinates"
     indices = local_coordinate_indices
     @equation.puiseux_branches(
       indices[0], indices[1], point,
-      maximum_power, search_margin)
+      maximum_power, search_margin, recursion_limit)
 
 
 + Curve
@@ -920,6 +1130,8 @@ use core/calculus/puiseux
 
   -> puiseux_branches(point, chart = nil,
                        maximum_power = 6,
-                       search_margin = 0)
+                       search_margin = 0,
+                       recursion_limit = 8)
     affine_chart(chart).puiseux_branches(
-      point, maximum_power, search_margin)
+      point, maximum_power, search_margin,
+      recursion_limit)

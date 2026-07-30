@@ -102,8 +102,9 @@ calculus layer does not itself solve implicit equations. With `use algebra`,
 a rational plane polynomial has `newton_polygon` and `puiseux_branches`;
 the current exact lift handles squarefree characteristic polynomials.
 Irreducible higher-degree factors become conjugate branch packets over
-certified simple-extension fields; repeated roots still require recursive
-refinement and raise.
+certified simple-extension fields. Repeated rational linear factors trigger
+recursive translated Newton polygons; repeated higher-degree algebraic
+factors and nonreduced component extraction still raise.
 
 ## Arbitrary-order derivatives and Taylor series
 

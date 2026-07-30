@@ -180,14 +180,61 @@ local_check("algebraic_branch.mixed_certificates",
             mixed_packets[0].certificate.verified? &&
             mixed_packets[1].certificate.verified?)
 
-repeated_edge = (y**2 - x)**2
-repeated_rejected = false
+shared_tangent = (y - x)**2 - x**3
+shared_branches = shared_tangent.puiseux_branches(
+  0, 1, nil, 4, 0, 8)
+shared_positive = shared_branches.detect ->
+  (item.series.coefficient(Rational.new(3, 2)) ==
+   Expression.constant(1))
+local_check("recursive_tangent.branch_count",
+            shared_branches.size == 2)
+local_check("recursive_tangent.coefficients",
+            shared_positive.series.coefficient(1) ==
+              Expression.constant(1) &&
+            shared_positive.series.coefficient(
+              Rational.new(3, 2)) == Expression.constant(1))
+local_check("recursive_tangent.certificate",
+            shared_positive.certificate.class_name ==
+              "RecursiveLocalPlaneBranchCertificate" &&
+            shared_positive.certificate.verified?)
+
+four_tangent_branches = (
+  ((y - x)**2 - x**3) *
+  ((y - x)**2 - x**3*4)).puiseux_branches(
+    0, 1, nil, 4, 0, 8)
+local_check("recursive_tangent.four_branches",
+            four_tangent_branches.size == 4)
+local_check("recursive_tangent.four_certificates",
+            four_tangent_branches[0].certificate.verified? &&
+            four_tangent_branches[1].certificate.verified? &&
+            four_tangent_branches[2].certificate.verified? &&
+            four_tangent_branches[3].certificate.verified?)
+
+recursion_limit_rejected = false
 begin
-  repeated_edge.puiseux_branches
+  shared_tangent.puiseux_branches(0, 1, nil, 4, 0, 0)
 rescue error
-  repeated_rejected = true
-local_check("boundary.repeated_characteristic_root",
-            repeated_rejected)
+  recursion_limit_rejected = true
+local_check("boundary.recursion_limit",
+            recursion_limit_rejected)
+
+repeated_algebraic = (y**2 - x*2)**2 - x**3
+repeated_algebraic_rejected = false
+begin
+  repeated_algebraic.puiseux_branches
+rescue error
+  repeated_algebraic_rejected = true
+local_check("boundary.repeated_algebraic_factor",
+            repeated_algebraic_rejected)
+
+nonreduced = (y - x)**2
+nonreduced_rejected = false
+begin
+  nonreduced.puiseux_branches
+rescue error
+  nonreduced_rejected = true
+local_check("boundary.nonreduced_component",
+            nonreduced_rejected)
 
 off_curve_rejected = false
 begin

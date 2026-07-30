@@ -374,7 +374,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders | Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
 | Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension | Singular-curve normalization is not implemented |
-| Local plane geometry | Exact lower Newton polygons over ℚ; characteristic polynomials and candidate valuations; dense exact Newton--Hensel lifting for simple factors; recursive coordinate transforms for repeated rational linear factors and shared tangents; degree-one rational branches and higher-degree conjugate branch packets over certified `SimpleExtensionField` residue fields; exact `FormalPuiseuxSeries` branches on affine/projective charts; trace/norm access through the packet field; small replay certificates for direct and recursive lifts | Repeated higher-degree algebraic factors, nonreduced/common or vertical component extraction, analytic branch cuts, and normalization from the resulting branches are not implemented; recursion/factorization bounds and unsupported cases raise |
+| Local plane geometry | Exact local multiplicity and tangent cones; rational, algebraic, and vertical tangent-direction packets with multiplicities; ordinary-point recognition and theorem-labelled \(\delta=m(m-1)/2\); exact lower Newton polygons, characteristic polynomials, and candidate valuations; dense exact Newton--Hensel lifting for simple factors; recursive coordinate transforms for repeated rational linear factors and shared tangents; degree-one rational sheets and higher-degree conjugate sheet packets over certified `SimpleExtensionField` residue fields; exact `FormalPuiseuxSeries` output on affine/projective charts; trace/norm access through the packet field; small replay certificates for invariants and direct/recursive lifts | Root-of-unity sheet orbit grouping into normalized geometric branches, repeated higher-degree algebraic factors, nonreduced/common or vertical component extraction, analytic branch cuts, and general singularity \(\delta\)-invariants are not implemented; recursion/factorization bounds and unsupported cases raise |
 | Elliptic curves | Composition around a plane cubic model; short Weierstrass group law over ℚ and `𝔽_p` (char ≠ 2, 3); exact integral long-Weierstrass \(a_i,b_i,c_4,c_6,\Delta,j\) invariants and projective closure; replay-certified admissible transformations; bounded exhaustive local and global minimal models; the complete Tate state machine over ℚ, including wild conductor exponents at 2 and 3, Kodaira symbols, Tamagawa numbers, split multiplicative status, and certified conductors; checked primitive Frey models; `EllipticJacobian` view | Arbitrary plane cubic → Weierstrass needs a rational flex; Tate local data over number fields, isogenies, and mod-\(p\) representations are not implemented |
 | Modular forms | Exact `Gamma0(N)` index, cusp count, order-2/order-3 elliptic points, and \(X_0(N)\) genus; even-weight `CuspForms` and `ModularForms` dimensions; Sturm bounds; rational and number-field truncated q-series; certified level-one \(E_4,E_6,\Delta\) expansions and \(E_4^3-E_6^2=1728\Delta\); exhaustive weight-two \(P^1(\mathbb Z/N\mathbb Z)\) Manin symbols, sparse \(S/R\) relations, cusp boundaries, relative/cuspidal dimensions, and bounded exact rational cuspidal bases; exact \(T_n/U_{p^r}\) matrices from Cremona--Heilbronn prime sums plus Hecke recurrences, characteristic polynomials, degeneracy maps, old subspaces, and canonical new Hecke quotients; deterministic simultaneous newform-packet splitting by a primitive Hecke element, rational or exact number-field coefficient fields, and normalized packet q-expansions; theorem-labelled replay certificates; in particular the level-55 new quotient splits into coefficient-field degrees 1 and 2 | Dimension, Sturm, classical modularity, Manin-presentation, Hecke semisimplicity and multiplicity one, Heilbronn-action, Hecke-recurrence, Atkin--Lehner--Li, and eigenform formulas are named trusted theorem imports, not kernel proofs. Higher-weight symbols, characters, nebentypus, embeddings between independently presented coefficient fields, and analytic newform invariants are not implemented. Dense rational quotient coordinates are resource-bounded |
 | Hyperelliptic curves | Exact `y² = f(x)` models, Mumford pairs, Cantor composition; monic odd-degree over ℚ, monic-or-scalable over `𝔽_p` | Even-degree models still raise for Jacobian arithmetic |
@@ -391,7 +391,46 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
 explicit double-cover model belongs in `HyperellipticCurve`.
 
-## Newton polygons and local branches
+## Local multiplicity and tangent cones
+
+`singularity_at` translates a rational plane equation exactly and extracts its
+lowest homogeneous part. The result distinguishes multiplicity from the
+number and fields of definition of tangent directions:
+
+```w
+R = PolynomialRing.new([:x, :y], Algebra.rational_field, :lex)
+x, y = R.generators
+
+node = (y**2 - x**2 - x**3).singularity_at
+node.multiplicity                         # 2
+node.tangent_cone                         # y^2 - x^2
+node.slope_polynomial                     # slope^2 - 1
+node.tangent_direction_count              # 2
+node.ordinary_singularity?                # true
+node.certificate.verified?                # true
+
+cusp = (y**2 - x**3).singularity_at
+cusp.multiplicity                         # 2
+cusp.tangent_directions[0].multiplicity   # 2
+cusp.ordinary?                            # false
+```
+
+An irreducible slope factor is a conjugate tangent packet and exposes its
+certified residue field; a missing finite-slope degree is recorded as a
+vertical direction. For an ordinary \(m\)-fold point, `delta` returns
+\(m(m-1)/2\). Its certificate replays multiplicity and squarefree tangent
+directions, then labels the classical delta formula as a
+`trusted_theorem_import`; the theorem's proof is not kernel-checked.
+Nonordinary points raise rather than applying that formula.
+
+The same entry point is available on a chart:
+
+```w
+C.singularity_at([0, 0], 2)
+Algebra.local_singularity(y**2 - x**3)
+```
+
+## Newton polygons and local sheets
 
 For a rational plane equation, `newton_polygon` translates the selected point
 to the origin, computes the negative-slope lower hull, and attaches the exact
@@ -409,13 +448,13 @@ N.edges[0].rational_roots            # [1, -1]
 N.certificate.verified?              # true
 ```
 
-When every edge polynomial is squarefree, `puiseux_branches` factors it over
-ℚ and performs exact coefficient-by-coefficient Newton--Hensel lifting. The
-result is not a floating approximation:
+When every edge polynomial is squarefree, `puiseux_sheets` factors it over
+ℚ and performs exact Newton--Hensel lifting. `puiseux_branches` remains the
+conventional alias. The result is not a floating approximation:
 
 ```w
-branches = f.puiseux_branches(0, 1, nil, 4)
-positive = branches.detect ->
+sheets = f.puiseux_sheets(0, 1, nil, 4)
+positive = sheets.detect ->
   item.leading_coefficient == Rational.new(1)
 
 positive.valuation                              # 1/2
@@ -454,13 +493,13 @@ Repeated rational tangents trigger a new translated Newton polygon:
 
 ```w
 shared = (y - x)**2 - x**3
-branches = shared.puiseux_branches(0, 1, nil, 4)
+sheets = shared.puiseux_sheets(0, 1, nil, 4)
 # y = x + x^(3/2)
 # y = x - x^(3/2)
 
-branches[0].certificate.class_name
+sheets[0].certificate.class_name
 # RecursiveLocalPlaneBranchCertificate
-branches[0].certificate.verified?               # true
+sheets[0].certificate.verified?                 # true
 ```
 
 The recursive certificate replays `x=s^q`, `y=c*s^p+z`, removes the common
@@ -477,8 +516,17 @@ X, Y, Z = P2.coords
 C = Curve.new(P2, Y**2*Z - X**3)
 
 C.newton_polygon([0, 0], 2).valuations          # [3/2]
-C.puiseux_branches([0, 0], 2, 4)                # Y = +/- X^3/2
+C.puiseux_sheets([0, 0], 2, 4)                  # Y = +/- X^3/2
 ```
+
+These are sheets of the chosen \(x\)-projection. A ramified pair can be two
+parameterizations of the same geometric branch: for the cusp
+\(y^2=x^3\), the sheets \(y=\pm x^{3/2}\) are related by \(t\mapsto -t\)
+after setting \(x=t^2\). Every returned object therefore reports
+`projection_sheet?`, and `ramified?` exposes this warning. Root-of-unity orbit
+grouping into normalized geometric branches is a separate capability still
+under construction; sheet counts must not be used as branch counts or
+intersection multiplicities.
 
 The current lift handles squarefree characteristic factors and recursively
 refines repeated rational linear factors, subject to the exact factorization

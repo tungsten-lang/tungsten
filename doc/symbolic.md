@@ -302,13 +302,18 @@ and supports exact rational powers, quotients, differentiation, shifted
 centers, and analytic unary composition in the local parameter. It records a
 formal branch but does not infer analytic branch cuts. Essential singularities
 such as `exp(1/x)` and logarithmic terms such as `log(sqrt(x))` still raise.
-`use algebra` adds exact Newton polygons and certified Puiseux lifts for
+`use algebra` adds exact local multiplicity/tangent-cone data, Newton polygons,
+and certified Puiseux-sheet lifts for
 rational plane equations with squarefree characteristic polynomials.
 Irreducible factors produce exact conjugate branch packets over certified
 simple-extension fields, and repeated rational tangents are recursively
 refined. Repeated higher-degree algebraic factors and nonreduced component
 extraction remain explicit boundaries. Sign-dependent forms such as `abs(x)`
 also raise when the center does not determine a smooth branch.
+
+The explicit name `puiseux_sheets` is preferred when projection semantics
+matter. Ramified sheets related by a root-of-unity change of local parameter
+can represent one geometric branch; orbit grouping is not yet inferred.
 
 ## Current boundary
 

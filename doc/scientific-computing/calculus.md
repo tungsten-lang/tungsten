@@ -99,12 +99,18 @@ in the local parameter. It represents one formal branch: it does not choose
 or certify an analytic branch cut. `log(sqrt(x))` still raises because its
 answer contains `log(x)`; essential singularities remain separate. The
 calculus layer does not itself solve implicit equations. With `use algebra`,
-a rational plane polynomial has `newton_polygon` and `puiseux_branches`;
+a rational plane polynomial has `newton_polygon` and `puiseux_sheets`
+(`puiseux_branches` is the conventional alias);
 the current exact lift handles squarefree characteristic polynomials.
-Irreducible higher-degree factors become conjugate branch packets over
+Irreducible higher-degree factors become conjugate sheet packets over
 certified simple-extension fields. Repeated rational linear factors trigger
 recursive translated Newton polygons; repeated higher-degree algebraic
 factors and nonreduced component extraction still raise.
+
+Ramified results are sheets of the selected projection until algebraic
+root-of-unity reparameterization orbits are grouped. In particular, the two
+formal sheets `+x^(3/2)` and `-x^(3/2)` of a cusp describe one normalized
+geometric branch. Do not infer a geometric branch count from the array size.
 
 ## Arbitrary-order derivatives and Taylor series
 

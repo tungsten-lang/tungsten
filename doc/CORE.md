@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(341 total), grouped by area, with its declaration, a one-line
+(345 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -232,6 +232,10 @@ summary from the source header, and a link to the source.
 | `LocalPlaneBranch` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `LocalPlaneBranchCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `RecursiveLocalPlaneBranchCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneTangentDirection` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneCurveLocalSingularity` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneCurveLocalSingularityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `OrdinaryPlanePointDeltaCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `CurveZetaFunction` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `Line` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `Place` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

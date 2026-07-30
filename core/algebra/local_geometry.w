@@ -452,6 +452,33 @@ use core/calculus/puiseux
       coefficients, 0, total_ramification,
       variable, center)
 
+  -> .multiplicity(local_polynomial)
+    minimum = nil
+    local_polynomial.each_term -> (coefficient, exponents)
+      degree = exponents[0] + exponents[1]
+      minimum = degree if minimum == nil || degree < minimum
+    minimum
+
+  -> .tangent_cone(local_polynomial)
+    multiplicity = PlaneLocalGeometry.multiplicity(local_polynomial)
+    terms = []
+    local_polynomial.each_term -> (coefficient, exponents)
+      if exponents[0] + exponents[1] == multiplicity
+        terms.push([coefficient, exponents])
+    Polynomial.new(local_polynomial.ring, terms)
+
+  -> .tangent_slope_polynomial(tangent_cone)
+    field = tangent_cone.ring.field
+    ring = PolynomialRing.new([:slope], field, :lex)
+    result = ring.zero
+    tangent_cone.each_term -> (coefficient, exponents)
+      result += ring.monomial(coefficient, [exponents[1]])
+    result
+
+  -> .vertical_tangent_multiplicity(tangent_cone,
+                                     slope_polynomial)
+    tangent_cone.degree - slope_polynomial.degree
+
 
 + NewtonPolygonEdge
   -> new(@polynomial, @left, @right)
@@ -958,6 +985,14 @@ use core/calculus/puiseux
   -> rational?
     @coefficient_field.class_name == "RationalField"
 
+  # A ramified y(x) expansion is a sheet of the x-projection. Sheets related
+  # by a root-of-unity reparameterization can describe one geometric branch.
+  -> projection_sheet?
+    true
+
+  -> ramified?
+    ramification_index > 1
+
   -> valuation
     @edge.valuation
 
@@ -967,6 +1002,261 @@ use core/calculus/puiseux
   -> to_s
     ("LocalPlaneBranch(" + @y_variable.to_s + " = " +
      @series.to_expression.to_s + ")")
+
+  -> inspect
+    to_s
+
+
++ PlaneTangentDirection
+  -> new(@defining_factor, @multiplicity, vertical = false)
+    @vertical = vertical
+    if @multiplicity < 1
+      raise "tangent-direction multiplicity must be positive"
+    if !@vertical
+      if @defining_factor == nil || @defining_factor.degree < 1
+        raise "finite tangent direction needs a defining factor"
+
+  -> .vertical(multiplicity = 1)
+    PlaneTangentDirection.new(nil, multiplicity, true)
+
+  -> defining_factor
+    @defining_factor
+
+  -> multiplicity
+    @multiplicity
+
+  -> vertical?
+    @vertical
+
+  -> residue_degree
+    @vertical ? 1 : @defining_factor.degree
+
+  -> rational?
+    residue_degree == 1
+
+  -> slope
+    return nil if @vertical
+    if @defining_factor.degree != 1
+      raise "algebraic tangent direction has no rational slope"
+    field = @defining_factor.ring.field
+    field.divide(
+      field.negate(@defining_factor.coeff(0)),
+      @defining_factor.coeff(1))
+
+  -> residue_field
+    return RationalField.new if rational?
+    SimpleExtensionField.new(@defining_factor, :slope)
+
+  -> to_s
+    if @vertical
+      return (
+        "TangentDirection(vertical, mult=" +
+        @multiplicity.to_s + ")")
+    ("TangentDirection(" + @defining_factor.to_s +
+     ", mult=" + @multiplicity.to_s + ")")
+
+  -> inspect
+    to_s
+
+
++ PlaneCurveLocalSingularityCertificate
+  -> new(@source_polynomial, @x_variable, @y_variable,
+         @point, @local_polynomial, @multiplicity,
+         @tangent_cone, @slope_polynomial,
+         @vertical_multiplicity, @directions)
+
+  -> verified?
+    expected_local = PlaneLocalGeometry.translated_polynomial(
+      @source_polynomial, @x_variable, @y_variable,
+      @point[0], @point[1])
+    return false if expected_local != @local_polynomial
+    return false if !@local_polynomial.ring.field.zero?(
+      @local_polynomial.coeff([0, 0]))
+    expected_multiplicity = PlaneLocalGeometry.multiplicity(
+      @local_polynomial)
+    return false if expected_multiplicity != @multiplicity
+    expected_cone = PlaneLocalGeometry.tangent_cone(
+      @local_polynomial)
+    return false if expected_cone != @tangent_cone
+    return false if !@tangent_cone.homogeneous?
+    return false if @tangent_cone.degree != @multiplicity
+    expected_slope = PlaneLocalGeometry.tangent_slope_polynomial(
+      @tangent_cone)
+    return false if expected_slope != @slope_polynomial
+    expected_vertical = (
+      PlaneLocalGeometry.vertical_tangent_multiplicity(
+        @tangent_cone, @slope_polynomial))
+    return false if expected_vertical != @vertical_multiplicity
+
+    reconstructed = @slope_polynomial.ring.one
+    vertical_seen = false
+    @directions.each -> (direction)
+      if direction.vertical?
+        return false if vertical_seen
+        vertical_seen = true
+        return false if (
+          direction.multiplicity != @vertical_multiplicity)
+      else
+        reconstructed *= (
+          direction.defining_factor**direction.multiplicity)
+    if @vertical_multiplicity == 0
+      return false if vertical_seen
+    else
+      return false if !vertical_seen
+    reconstructed.monic == @slope_polynomial.monic
+
+  -> certified?
+    verified?
+
+  -> statement
+    "the displayed multiplicity and tangent directions are exact"
+
+
++ OrdinaryPlanePointDeltaCertificate
+  -> new(@singularity)
+
+  -> singularity
+    @singularity
+
+  -> delta
+    multiplicity = @singularity.multiplicity
+    multiplicity*(multiplicity - 1)/2
+
+  -> theorem
+    "an ordinary plane m-fold point has delta invariant m(m-1)/2"
+
+  -> theorem_reference
+    "classical ordinary multiple-point delta formula"
+
+  -> proof_kind
+    :trusted_theorem_import
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    verified?
+
+  -> verified?
+    (@singularity.certificate.verified? &&
+     @singularity.ordinary?)
+
+  -> certified?
+    verified?
+
+
++ PlaneCurveLocalSingularity
+  -> new(@source_polynomial, @x_variable, @y_variable,
+         point = nil)
+    @point = point == nil ? [0, 0] : point
+    if @point.class_name != "Array" || @point.size != 2
+      raise "plane singularity point must have two coordinates"
+    @local_polynomial = PlaneLocalGeometry.translated_polynomial(
+      @source_polynomial, @x_variable, @y_variable,
+      @point[0], @point[1])
+    if @local_polynomial.zero?
+      raise "the zero equation has no finite local multiplicity"
+    if !@local_polynomial.ring.field.zero?(
+         @local_polynomial.coeff([0, 0]))
+      raise "singularity point is not on the plane equation"
+    @multiplicity = PlaneLocalGeometry.multiplicity(
+      @local_polynomial)
+    @tangent_cone = PlaneLocalGeometry.tangent_cone(
+      @local_polynomial)
+    @slope_polynomial = (
+      PlaneLocalGeometry.tangent_slope_polynomial(
+        @tangent_cone))
+    @vertical_multiplicity = (
+      PlaneLocalGeometry.vertical_tangent_multiplicity(
+        @tangent_cone, @slope_polynomial))
+    @directions = []
+    groups = []
+    @slope_polynomial.factor.each -> (factor)
+      if factor.degree > 0
+        monic = factor.monic
+        found = nil
+        index = 0
+        while index < groups.size
+          found = index if groups[index][0] == monic
+          index += 1
+        if found == nil
+          groups.push([monic, 1])
+        else
+          groups[found][1] += 1
+    groups.each -> (group)
+      @directions.push(
+        PlaneTangentDirection.new(group[0], group[1]))
+    if @vertical_multiplicity > 0
+      @directions.push(
+        PlaneTangentDirection.vertical(@vertical_multiplicity))
+    @certificate = PlaneCurveLocalSingularityCertificate.new(
+      @source_polynomial, @x_variable, @y_variable,
+      @point, @local_polynomial, @multiplicity,
+      @tangent_cone, @slope_polynomial,
+      @vertical_multiplicity, @directions)
+    if !@certificate.verified?
+      raise "local singularity certificate did not verify"
+
+  -> source_polynomial
+    @source_polynomial
+
+  -> point
+    @point
+
+  -> local_polynomial
+    @local_polynomial
+
+  -> multiplicity
+    @multiplicity
+
+  -> tangent_cone
+    @tangent_cone
+
+  -> slope_polynomial
+    @slope_polynomial
+
+  -> vertical_tangent_multiplicity
+    @vertical_multiplicity
+
+  -> tangent_directions
+    @directions
+
+  -> certificate
+    @certificate
+
+  -> smooth?
+    @multiplicity == 1
+
+  -> singular?
+    @multiplicity > 1
+
+  -> tangent_direction_count
+    count = 0
+    @directions.each -> count += item.residue_degree
+    count
+
+  -> ordinary?
+    return false if tangent_direction_count != @multiplicity
+    @directions.each ->
+      return false if item.multiplicity != 1
+    true
+
+  -> ordinary_singularity?
+    singular? && ordinary?
+
+  -> delta
+    if !ordinary?
+      raise "delta formula currently requires an ordinary plane point"
+    @multiplicity*(@multiplicity - 1)/2
+
+  -> delta_certificate
+    certificate = OrdinaryPlanePointDeltaCertificate.new(self)
+    raise "ordinary-point delta certificate did not verify" if !certificate.verified?
+    certificate
+
+  -> to_s
+    ("PlaneCurveLocalSingularity(mult=" + @multiplicity.to_s +
+     ", tangents=" + tangent_direction_count.to_s + ")")
 
   -> inspect
     to_s
@@ -985,6 +1275,15 @@ use core/calculus/puiseux
                      center = nil)
     NewtonPolygon.new(
       local_plane_polynomial(x_variable, y_variable, center))
+
+  -> local_singularity(x_variable = 0, y_variable = 1,
+                        point = nil)
+    PlaneCurveLocalSingularity.new(
+      self, x_variable, y_variable, point)
+
+  -> singularity_at(x_variable = 0, y_variable = 1,
+                      point = nil)
+    local_singularity(x_variable, y_variable, point)
 
   -> puiseux_branches(x_variable = 0, y_variable = 1,
                        center = nil, maximum_power = 6,
@@ -1097,6 +1396,14 @@ use core/calculus/puiseux
             coefficient_field, factor))
     branches
 
+  -> puiseux_sheets(x_variable = 0, y_variable = 1,
+                     center = nil, maximum_power = 6,
+                     search_margin = 0,
+                     recursion_limit = 8)
+    puiseux_branches(
+      x_variable, y_variable, center,
+      maximum_power, search_margin, recursion_limit)
+
 
 + AffineChart
   -> local_coordinate_indices
@@ -1113,6 +1420,13 @@ use core/calculus/puiseux
     indices = local_coordinate_indices
     @equation.newton_polygon(indices[0], indices[1], point)
 
+  -> singularity_at(point)
+    if point.class_name != "Array" || point.size != 2
+      raise "affine local point must have two coordinates"
+    indices = local_coordinate_indices
+    @equation.singularity_at(
+      indices[0], indices[1], point)
+
   -> puiseux_branches(point, maximum_power = 6,
                        search_margin = 0,
                        recursion_limit = 8)
@@ -1123,10 +1437,20 @@ use core/calculus/puiseux
       indices[0], indices[1], point,
       maximum_power, search_margin, recursion_limit)
 
+  -> puiseux_sheets(point, maximum_power = 6,
+                     search_margin = 0,
+                     recursion_limit = 8)
+    puiseux_branches(
+      point, maximum_power, search_margin,
+      recursion_limit)
+
 
 + Curve
   -> newton_polygon(point, chart = nil)
     affine_chart(chart).newton_polygon(point)
+
+  -> singularity_at(point, chart = nil)
+    affine_chart(chart).singularity_at(point)
 
   -> puiseux_branches(point, chart = nil,
                        maximum_power = 6,
@@ -1135,3 +1459,11 @@ use core/calculus/puiseux
     affine_chart(chart).puiseux_branches(
       point, maximum_power, search_margin,
       recursion_limit)
+
+  -> puiseux_sheets(point, chart = nil,
+                     maximum_power = 6,
+                     search_margin = 0,
+                     recursion_limit = 8)
+    puiseux_branches(
+      point, chart, maximum_power,
+      search_margin, recursion_limit)

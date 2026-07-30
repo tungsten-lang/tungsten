@@ -169,12 +169,27 @@ use core/algebra/galois
     polynomial.newton_polygon(
       x_variable, y_variable, center)
 
+  -> .local_singularity(polynomial, x_variable = 0,
+                         y_variable = 1, point = nil)
+    polynomial.local_singularity(
+      x_variable, y_variable, point)
+
   -> .puiseux_branches(polynomial, x_variable = 0,
                         y_variable = 1, center = nil,
                         maximum_power = 6,
                         search_margin = 0,
                         recursion_limit = 8)
     polynomial.puiseux_branches(
+      x_variable, y_variable, center,
+      maximum_power, search_margin,
+      recursion_limit)
+
+  -> .puiseux_sheets(polynomial, x_variable = 0,
+                      y_variable = 1, center = nil,
+                      maximum_power = 6,
+                      search_margin = 0,
+                      recursion_limit = 8)
+    polynomial.puiseux_sheets(
       x_variable, y_variable, center,
       maximum_power, search_margin,
       recursion_limit)

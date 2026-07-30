@@ -52,11 +52,11 @@ core/algebra/curves.w              # plane, elliptic, and hyperelliptic models
 core/algebra/elliptic.w            # integral Weierstrass and Frey certificates
 core/algebra/elliptic_tate.w       # Tate local data, Kodaira, conductors
 core/algebra/modular_forms.w       # Gamma0, X0, dimensions, Sturm bounds
-core/algebra/q_expansion.w         # exact q-series, E4, E6, Delta
+core/algebra/q_expansion.w         # rational/number-field q-series, E4/E6/Delta
 core/algebra/modular_symbols.w     # weight-two Manin symbols and boundaries
 core/algebra/hecke.w               # certified prime Hecke operators
 core/algebra/old_new.w             # degeneracy maps and old/new Hecke quotient
-core/algebra/newforms.w            # rational weight-two eigenforms and q-series
+core/algebra/newforms.w            # simultaneous weight-two Hecke eigenpackets
 core/algebra/divisors.w            # rational/closed places, formal divisors
 core/algebra/quartics.w            # certified line intersections and bitangents
 core/algebra/descent.w             # BPS preparation, bitangent proofs, F2 kernel
@@ -374,7 +374,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
 | Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension | Singular-curve normalization is not implemented |
 | Elliptic curves | Composition around a plane cubic model; short Weierstrass group law over ℚ and `𝔽_p` (char ≠ 2, 3); exact integral long-Weierstrass \(a_i,b_i,c_4,c_6,\Delta,j\) invariants and projective closure; replay-certified admissible transformations; bounded exhaustive local and global minimal models; the complete Tate state machine over ℚ, including wild conductor exponents at 2 and 3, Kodaira symbols, Tamagawa numbers, split multiplicative status, and certified conductors; checked primitive Frey models; `EllipticJacobian` view | Arbitrary plane cubic → Weierstrass needs a rational flex; Tate local data over number fields, isogenies, and mod-\(p\) representations are not implemented |
-| Modular forms | Exact `Gamma0(N)` index, cusp count, order-2/order-3 elliptic points, and \(X_0(N)\) genus; even-weight `CuspForms` and `ModularForms` dimensions; Sturm bounds and q-expansion precision; exact truncated q-series; certified level-one \(E_4,E_6,\Delta\) expansions and \(E_4^3-E_6^2=1728\Delta\); exhaustive weight-two \(P^1(\mathbb Z/N\mathbb Z)\) Manin symbols, sparse \(S/R\) relations, cusp boundaries, relative/cuspidal dimensions, and bounded exact rational cuspidal bases; exact \(T_n/U_{p^r}\) matrices from Cremona--Heilbronn prime sums plus Hecke recurrences, characteristic polynomials, degeneracy maps, old subspaces, and canonical new Hecke quotients; normalized rational weight-two newforms when the new quotient is one two-dimensional sign pair, with Euler-recurrence q-expansions; theorem-labelled replay certificates; in particular \(\dim S_2(\Gamma_0(2))=0\) | Dimension, Sturm, classical modularity, Manin-presentation, Heilbronn-action, Hecke-recurrence, Atkin--Lehner--Li, and eigenform Euler formulas are named trusted theorem imports, not kernel proofs. Higher-weight symbols, characters, multiple-packet splitting, non-rational eigenform coefficient fields, and general newform recovery are not implemented. Dense rational quotient coordinates are resource-bounded |
+| Modular forms | Exact `Gamma0(N)` index, cusp count, order-2/order-3 elliptic points, and \(X_0(N)\) genus; even-weight `CuspForms` and `ModularForms` dimensions; Sturm bounds; rational and number-field truncated q-series; certified level-one \(E_4,E_6,\Delta\) expansions and \(E_4^3-E_6^2=1728\Delta\); exhaustive weight-two \(P^1(\mathbb Z/N\mathbb Z)\) Manin symbols, sparse \(S/R\) relations, cusp boundaries, relative/cuspidal dimensions, and bounded exact rational cuspidal bases; exact \(T_n/U_{p^r}\) matrices from Cremona--Heilbronn prime sums plus Hecke recurrences, characteristic polynomials, degeneracy maps, old subspaces, and canonical new Hecke quotients; deterministic simultaneous newform-packet splitting by a primitive Hecke element, rational or exact number-field coefficient fields, and normalized packet q-expansions; theorem-labelled replay certificates; in particular the level-55 new quotient splits into coefficient-field degrees 1 and 2 | Dimension, Sturm, classical modularity, Manin-presentation, Hecke semisimplicity and multiplicity one, Heilbronn-action, Hecke-recurrence, Atkin--Lehner--Li, and eigenform formulas are named trusted theorem imports, not kernel proofs. Higher-weight symbols, characters, nebentypus, embeddings between independently presented coefficient fields, and analytic newform invariants are not implemented. Dense rational quotient coordinates are resource-bounded |
 | Hyperelliptic curves | Exact `y² = f(x)` models, Mumford pairs, Cantor composition; monic odd-degree over ℚ, monic-or-scalable over `𝔽_p` | Even-degree models still raise for Jacobian arithmetic |
 | Finite-curve arithmetic | Exact reduction from ℚ, certified base change through explicit field embeddings, packed absolute and structured tower extensions, projective point counts, Frobenius traces, zeta numerators (regressed through a genus-six plane quintic), and genus-three real Weil cubics | Full zeta numerators currently start over a prime field; direct/fiber point counting is exact but exponential in field size, and higher-genus Weil-polynomial postprocessing is not yet generalized beyond the existing curve/zeta primitives |
 | Galois groups | Exact general groups in degrees at most three over ℚ; a certified classifier for irreducible reciprocal genus-three Weil sextics using modular irreducibility witnesses and exact Kummer square classes | This is not a general sextic classifier. Missing modular witnesses and unsupported shapes raise `unknown` or a capability error |
@@ -432,6 +432,20 @@ f = Algebra.rational_newform(33, 16, 100_000_000)
 f.q_expansion
 # q + q² - q³ - q⁴ - 2q⁵ - q⁶ + 4q⁷ - 3q⁸ + ... + O(q¹⁶)
 f.certificate.verified?
+
+packets = Algebra.eigenpackets(55, 100_000_000)
+packets.packets.map -> item.coefficient_field_degree
+# [1, 2]
+
+g = packets[1]
+K = g.coefficient_field              # ℚ(theta), theta² - 2theta - 1 = 0
+g.hecke_eigenvalue(2)                # theta
+g.hecke_eigenvalue(3)                # 2 - 2theta
+g.hecke_eigenvalue_certified?(3)     # true
+g.q_expansion(8)
+# q + theta*q² + (2-2theta)*q³ + (2theta-1)*q⁴ - q⁵
+#   + (-2theta-2)*q⁶ - 2q⁷ + O(q⁸)
+g.q_expansion_certificate(8).verified? # true
 ```
 
 `QExpansion` records a hard precision boundary. Reading an unknown
@@ -439,6 +453,9 @@ coefficient raises; addition and multiplication retain only the common known
 precision. The classical-form certificate independently checks divisor-sum
 or Euler-product coefficients and the \(E_4/E_6/\Delta\) identity. It labels
 the fact that these series are modular as a trusted theorem import.
+`FieldQExpansion` provides the same hard boundary and exact arithmetic over
+an explicit coefficient field; it never converts algebraic coefficients to
+floating point.
 
 `WeightTwoModularSymbols` exhausts the right-coset model
 \(P^1(\mathbb Z/N\mathbb Z)\), stores the two Manin relations per generator
@@ -468,13 +485,27 @@ finite matrices are replayed exactly; their interpretation as Hecke and
 old/new objects cites the Heilbronn and Atkin--Lehner--Li theorems as trusted
 imports.
 
-When the new quotient has dimension two, it is the plus/minus modular-symbol
-pair for one rational newform. `RationalWeightTwoNewform` checks that every
-needed prime operator is scalar on that quotient and uses the exact good-prime
-recurrence \(a_{p^r}=a_pa_{p^{r-1}}-p\,a_{p^{r-2}}\), the bad-prime Euler
-factor, and multiplicativity to recover a normalized q-expansion. It rejects
-larger new quotients instead of guessing how to split multiple or
-number-field-valued packets.
+`WeightTwoHeckeEigenpacketDecomposition` builds a deterministic rational
+linear combination of \(T_n\) through Sturm's bound. It stops as soon as the
+separator has the maximum possible squarefree characteristic-polynomial
+degree, factors that polynomial over \(\mathbb Q\), and takes exact kernels.
+Each irreducible factor \(h\) must occur as \(h^2\): the two copies are the
+plus/minus modular-symbol periods. This splits multiple rational forms and
+Galois orbits without choosing a numerically convenient prime.
+
+For a degree-\(d\) packet, every requested \(T_n\) is solved exactly as a
+polynomial of degree below \(d\) in the separator. The resulting element of
+\(\mathbb Q[\theta]/(h)\) is the normalized coefficient \(a_n\), so q-series
+may have exact number-field coefficients. The certificate replays the
+separator, factor kernels, direct-sum rank, and used Hecke actions. Its
+interpretation uses the named semisimplicity, multiplicity-one, and
+plus/minus-period theorems; those are not kernel proofs.
+
+`RationalWeightTwoNewform` remains the compact compatibility API when the
+entire new quotient is one two-dimensional rational packet. It uses the exact
+good-prime recurrence
+\(a_{p^r}=a_pa_{p^{r-1}}-p\,a_{p^{r-2}}\), the bad-prime Euler factor, and
+multiplicativity.
 
 ## Archimedean places and S-unit square classes
 

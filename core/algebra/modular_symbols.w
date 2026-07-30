@@ -429,6 +429,7 @@
     @cuspidal_dimension = @relative_dimension - @boundary_rank
     @quotient_data = nil
     @cuspidal_basis_coordinates = nil
+    @cuspidal_basis_solver = nil
     @cuspidal_basis = nil
     @hecke_operators = {}
     @certificate = WeightTwoModularSymbolsCertificate.new(self)
@@ -739,6 +740,12 @@
         copied.push(entry)
       out.push(copied)
     out
+
+  -> cuspidal_basis_solver
+    if @cuspidal_basis_solver == nil
+      @cuspidal_basis_solver = HeckeLinearAlgebra.row_span_solver(
+        cuspidal_basis_coordinates)
+    @cuspidal_basis_solver
 
   -> hecke_operator(index)
     if !ModularFormsArithmetic.integer?(index) || index < 1

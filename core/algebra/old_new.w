@@ -190,12 +190,14 @@
   -> produce_cuspidal_one
     source_basis = @source.cuspidal_basis_coordinates
     target_basis = @target.cuspidal_basis_coordinates
+    target_solver = @target.cuspidal_basis_solver
     out = []
     source_basis.each -> (vector)
       relative_image = HeckeLinearAlgebra.row_vector_matrix(
         vector, @relative_one)
-      out.push(HeckeLinearAlgebra.row_span_coordinates(
-        target_basis, relative_image))
+      out.push(
+        HeckeLinearAlgebra.row_span_coordinates_with_solver(
+          target_solver, relative_image))
     out
 
   # The second prime-level degeneracy map is p^(-1) d_1 T_p on

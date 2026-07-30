@@ -82,6 +82,9 @@ At a high level:
   loci, elliptic and hyperelliptic Jacobian arithmetic in the documented
   model classes, divisors, point counts, zeta numerators, Weil cubics, and
   focused plane-quartic machinery;
+- weight-two modular arithmetic includes Manin symbols, every \(T_n\),
+  old/new quotients, simultaneous rational and number-field Hecke
+  eigenpackets, and exact normalized q-expansions;
 - important boundaries remain: general multivariate factorization, complex
   algebraic-number embeddings, arbitrary plane-cubic conversion, general
   function fields and divisor class groups, fast general point counting,
@@ -157,15 +160,16 @@ layer. Weight-two Manin symbols now model
 \(P^1(\mathbb Z/N\mathbb Z)\), their relations, cusp boundary, and cuspidal
 subspace dimensions, including a zero cuspidal symbol space at level 2.
 Hecke operators at every positive index (including bad-prime \(U_{p^r}\)),
-exact characteristic polynomials, prime-level degeneracy maps, old subspaces, and canonical new
-Hecke quotients are also present with finite replay certificates and named
-theorem imports. A two-dimensional new quotient can be recovered as one
-normalized rational weight-two newform, including its exact q-expansion from
-the Hecke/Euler recurrences. There is still no mod-\(p\)
-Galois-representation layer, general splitting of multiple or
-number-field-valued eigenpackets, level-lowering proof, or
-modularity-lifting kernel. `tungsten-wassat`'s `fermat.w` is a finite SAT
-benchmark, not that arithmetic infrastructure.
+exact characteristic polynomials, prime-level degeneracy maps, old subspaces,
+and canonical new Hecke quotients are also present with finite replay
+certificates and named theorem imports. The new quotient is split
+simultaneously into Galois eigenpackets by a certified primitive Hecke
+element. Rational packets and exact number-field packets both expose
+normalized q-expansions; level 55, for example, splits into coefficient-field
+degrees 1 and 2. There is still no mod-\(p\) Galois-representation layer,
+level-lowering proof, or modularity-lifting kernel.
+`tungsten-wassat`'s `fermat.w` is a finite SAT benchmark, not that arithmetic
+infrastructure.
 
 A useful staged target is an **FLT application checker**:
 
@@ -173,8 +177,8 @@ A useful staged target is an **FLT application checker**:
 2. certify minimal models, local reduction, discriminants, and conductors;
 3. compute the finite modular-form calculation at the final level
    (the level-2 dimension, weight-two Manin-symbol, prime Hecke, and old/new
-   quotient calculations are implemented, as is the one-rational-packet
-   newform case; general eigenpackets and mod-\(p\) congruence data remain);
+   quotient calculations and general weight-two eigenpackets are implemented;
+   mod-\(p\) congruence data remains);
 4. apply Ribet and Wiles--Taylor--Wiles as explicit trusted theorem imports.
 
 That would be useful and honest, but still relative to those imports. A fully

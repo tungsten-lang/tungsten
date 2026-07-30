@@ -7,6 +7,15 @@
 # use the exact multiplicative and prime-power Hecke relations.
 
 + HeckeLinearAlgebra
+  -> .zero_matrix(rows, columns = nil)
+    width = columns == nil ? rows : columns
+    matrix = []
+    i = 0
+    while i < rows
+      matrix.push(ModularSymbolsLinearAlgebra.zero_vector(width))
+      i += 1
+    matrix
+
   -> .identity(size)
     matrix = []
     i = 0
@@ -16,6 +25,41 @@
       matrix.push(row)
       i += 1
     matrix
+
+  -> .transpose(matrix, columns = nil)
+    width = columns
+    if matrix.size > 0
+      width = matrix[0].size
+      matrix.each -> (row)
+        raise "matrix rows have inconsistent sizes" if row.size != width
+    elsif width == nil
+      raise "empty matrix transpose needs an explicit column count"
+    out = HeckeLinearAlgebra.zero_matrix(width, matrix.size)
+    i = 0
+    while i < matrix.size
+      j = 0
+      while j < width
+        out[j][i] = Rational.coerce(matrix[i][j])
+        j += 1
+      i += 1
+    out
+
+  -> .matrix_add(left, right)
+    raise "matrix addition dimensions do not match" if left.size != right.size
+    out = []
+    i = 0
+    while i < left.size
+      raise "matrix addition dimensions do not match" if left[i].size != right[i].size
+      row = []
+      j = 0
+      while j < left[i].size
+        row.push(
+          Rational.coerce(left[i][j]) +
+          Rational.coerce(right[i][j]))
+        j += 1
+      out.push(row)
+      i += 1
+    out
 
   -> .matrix_product(left, right)
     return [] if left.size == 0
@@ -70,6 +114,37 @@
       out.push(row)
     out
 
+  # Evaluate a univariate rational polynomial at a square matrix.  Horner's
+  # rule keeps the number of exact matrix products linear in the degree.
+  -> .matrix_polynomial(polynomial, matrix)
+    if (polynomial.class_name != "Polynomial" ||
+        polynomial.ring.arity != 1 ||
+        polynomial.ring.field.class_name != "RationalField")
+      raise "matrix-polynomial evaluation needs a univariate rational polynomial"
+    size = matrix.size
+    matrix.each -> (row)
+      raise "matrix-polynomial evaluation needs a square matrix" if row.size != size
+    result = HeckeLinearAlgebra.zero_matrix(size)
+    identity = HeckeLinearAlgebra.identity(size)
+    degree = polynomial.degree
+    while degree >= 0
+      result = HeckeLinearAlgebra.matrix_product(result, matrix)
+      coefficient = polynomial.coeff(degree)
+      if !coefficient.zero?
+        result = HeckeLinearAlgebra.matrix_add(
+          result,
+          HeckeLinearAlgebra.matrix_scale(identity, coefficient))
+      degree -= 1
+    result
+
+  # Row vectors v satisfying v*matrix = 0.
+  -> .left_kernel(matrix)
+    size = matrix.size
+    matrix.each -> (row)
+      raise "left kernel needs a square matrix" if row.size != size
+    ModularSymbolsLinearAlgebra.nullspace(
+      HeckeLinearAlgebra.transpose(matrix, size), size)
+
   -> .row_vector_matrix(vector, matrix)
     return [] if matrix.size == 0
     raise "row-vector/matrix dimensions do not match" if vector.size != matrix.size
@@ -90,10 +165,9 @@
 
   # Coordinates c such that c*basis = vector, where basis consists of
   # independent row vectors.
-  -> .row_span_coordinates(basis, vector)
-    return [] if basis.size == 0 && vector.size == 0
+  -> .row_span_solver(basis)
     if basis.size == 0
-      raise "vector does not lie in the zero row span"
+      return [basis, [], []]
     reduced = ModularSymbolsLinearAlgebra.rref(basis)
     pivots = reduced[1]
     if pivots.size != basis.size
@@ -105,6 +179,15 @@
         restricted.push(row[column])
       square.push(restricted)
     inverse = ExactRationalLinearAlgebra.inverse(square)
+    [basis, pivots, inverse]
+
+  -> .row_span_coordinates_with_solver(solver, vector)
+    basis = solver[0]
+    pivots = solver[1]
+    inverse = solver[2]
+    return [] if basis.size == 0 && vector.size == 0
+    if basis.size == 0
+      raise "vector does not lie in the zero row span"
     selected = []
     pivots.each -> (column)
       selected.push(Rational.coerce(vector[column]))
@@ -116,6 +199,10 @@
          reconstructed, vector)
       raise "vector does not lie in the requested row span"
     coordinates
+
+  -> .row_span_coordinates(basis, vector)
+    HeckeLinearAlgebra.row_span_coordinates_with_solver(
+      HeckeLinearAlgebra.row_span_solver(basis), vector)
 
   -> .characteristic_polynomial(matrix)
     size = matrix.size
@@ -226,10 +313,12 @@
 
   -> .restrict_operator(matrix, invariant_basis)
     out = []
+    solver = HeckeLinearAlgebra.row_span_solver(invariant_basis)
     invariant_basis.each -> (vector)
       image = HeckeLinearAlgebra.row_vector_matrix(vector, matrix)
-      out.push(HeckeLinearAlgebra.row_span_coordinates(
-        invariant_basis, image))
+      out.push(
+        HeckeLinearAlgebra.row_span_coordinates_with_solver(
+          solver, image))
     out
 
   -> .quotient_operator(matrix, relations)
@@ -610,12 +699,14 @@
 
   -> produce_cuspidal_matrix
     basis = @space.cuspidal_basis_coordinates
+    solver = @space.cuspidal_basis_solver
     out = []
     basis.each -> (vector)
       image = HeckeLinearAlgebra.row_vector_matrix(
         vector, @relative_matrix)
-      out.push(HeckeLinearAlgebra.row_span_coordinates(
-        basis, image))
+      out.push(
+        HeckeLinearAlgebra.row_span_coordinates_with_solver(
+          solver, image))
     out
 
   -> relative_matrix

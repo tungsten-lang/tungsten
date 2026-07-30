@@ -5,6 +5,156 @@
 # that replay their divisor-sum/product formulas and the
 # E4^3 - E6^2 = 1728*Delta identity.
 
++ FieldQExpansion
+  -> new(coefficient_field, coefficients)
+    @coefficient_field = Field.require_supported(coefficient_field)
+    if coefficients.class_name != "Array" || coefficients.size < 1
+      raise "q-expansion coefficients must be a nonempty Array"
+    @coefficients = []
+    coefficients.each -> (coefficient)
+      @coefficients.push(@coefficient_field.coerce(coefficient))
+
+  -> coefficient_field
+    @coefficient_field
+
+  -> precision
+    @coefficients.size
+
+  -> coefficients
+    out = []
+    @coefficients.each -> (coefficient)
+      out.push(coefficient)
+    out
+
+  -> coefficient(index)
+    if !ModularFormsArithmetic.integer?(index) || index < 0
+      raise "q-expansion coefficient index must be nonnegative"
+    if index >= precision
+      raise "q-expansion coefficient is beyond known precision"
+    @coefficients[index]
+
+  -> [](index)
+    coefficient(index)
+
+  -> at(index)
+    coefficient(index)
+
+  -> valuation
+    index = 0
+    while index < precision
+      return index if !@coefficient_field.zero?(@coefficients[index])
+      index += 1
+    nil
+
+  -> zero?
+    valuation == nil
+
+  -> truncate(new_precision)
+    if (!ModularFormsArithmetic.integer?(new_precision) ||
+        new_precision < 1)
+      raise "q-expansion precision must be positive"
+    if new_precision > precision
+      raise "cannot infer unknown q-expansion coefficients"
+    out = []
+    index = 0
+    while index < new_precision
+      out.push(@coefficients[index])
+      index += 1
+    FieldQExpansion.new(@coefficient_field, out)
+
+  -> require_compatible(other)
+    if (other.class_name != "FieldQExpansion" ||
+        other.coefficient_field != @coefficient_field)
+      raise "q-expansions belong to different coefficient fields"
+    other
+
+  -> +(other)
+    right = require_compatible(other)
+    known = precision < right.precision ? precision : right.precision
+    out = []
+    index = 0
+    while index < known
+      out.push(@coefficient_field.add(
+        @coefficients[index], right.coefficient(index)))
+      index += 1
+    FieldQExpansion.new(@coefficient_field, out)
+
+  -> negate
+    out = []
+    @coefficients.each -> (coefficient)
+      out.push(@coefficient_field.negate(coefficient))
+    FieldQExpansion.new(@coefficient_field, out)
+
+  -> -@
+    negate
+
+  -> -(other)
+    self + require_compatible(other).negate
+
+  -> scale(scalar)
+    factor = @coefficient_field.coerce(scalar)
+    out = []
+    @coefficients.each -> (coefficient)
+      out.push(@coefficient_field.multiply(coefficient, factor))
+    FieldQExpansion.new(@coefficient_field, out)
+
+  -> *(other)
+    right = require_compatible(other)
+    known = precision < right.precision ? precision : right.precision
+    out = []
+    index = 0
+    while index < known
+      out.push(@coefficient_field.zero)
+      index += 1
+    i = 0
+    while i < known
+      j = 0
+      while i + j < known
+        out[i + j] = @coefficient_field.add(
+          out[i + j],
+          @coefficient_field.multiply(
+            @coefficients[i], right.coefficient(j)))
+        j += 1
+      i += 1
+    FieldQExpansion.new(@coefficient_field, out)
+
+  -> ==(other)
+    return false if other == nil
+    return false if other.class_name != "FieldQExpansion"
+    return false if other.coefficient_field != @coefficient_field
+    return false if other.precision != precision
+    index = 0
+    while index < precision
+      if !@coefficient_field.equal?(
+           @coefficients[index], other.coefficient(index))
+        return false
+      index += 1
+    true
+
+  -> eql?(other)
+    self == other
+
+  -> to_s
+    terms = []
+    index = 0
+    while index < precision
+      coefficient = @coefficients[index]
+      if !@coefficient_field.zero?(coefficient)
+        if index == 0
+          terms.push(coefficient.to_s)
+        elsif index == 1
+          terms.push(coefficient.to_s + "*q")
+        else
+          terms.push(
+            coefficient.to_s + "*q^" + index.to_s)
+      index += 1
+    body = terms.empty? ? "0" : terms.join(" + ")
+    body + " + O(q^" + precision.to_s + ")"
+
+  -> inspect
+    to_s
+
+
 + QExpansion
   -> new(coefficients)
     if coefficients.class_name != "Array" || coefficients.size < 1

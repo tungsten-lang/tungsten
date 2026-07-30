@@ -161,6 +161,10 @@ use core/algebra/galois
     RationalWeightTwoNewform.new(
       level, precision, search_limit)
 
+  -> .eigenpackets(level, search_limit = 1_000_000)
+    WeightTwoHeckeEigenpacketDecomposition.new(
+      level, search_limit)
+
   # Exact determinant over an explicit coefficient field.  This is
   # intentionally separate from LinAlg's floating-point determinant path.
   #

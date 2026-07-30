@@ -1550,7 +1550,11 @@ use target
     when "__w_bit_ctpop_u64"
       if args.size() != 2
         raise "__w_bit_ctpop_u64 expects one argument"
-      x = args[1] & 0xFFFFFFFFFFFFFFFF
+      # Built from i48-safe literals, NOT 0xFFFFFFFFFFFFFFFF: the C VM's
+      # parser wraps >int64 hex literals while the native parser promotes
+      # them to BigInt, so the bare literal lowers differently on the two
+      # bootstrap hosts and breaks stage-1/stage-2 byte identity.
+      x = args[1] & ((0xFFFFFFFF << 32) | 0xFFFFFFFF)
       count = 0
       while x != 0
         x = x & (x - 1)
@@ -1569,7 +1573,8 @@ use target
     when "__w_bit_cttz_u64"
       if args.size() != 2
         raise "__w_bit_cttz_u64 expects one argument"
-      x = args[1] & 0xFFFFFFFFFFFFFFFF
+      # Same i48-safe mask spelling as ctpop_u64 above (stage identity).
+      x = args[1] & ((0xFFFFFFFF << 32) | 0xFFFFFFFF)
       return 64 if x == 0
       count = 0
       while (x & 1) == 0

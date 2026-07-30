@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(285 total), grouped by area, with its declaration, a one-line
+(293 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -170,6 +170,11 @@ summary from the source header, and a link to the source.
 | `NumberFieldRealEmbedding` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldModularIrreducibilityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldModularDegreeIrreducibilityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldRelativeModularIrreducibilityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldTowerIrreducibilityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIsomorphicModelIrreducibilityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ExactGramLatticeReduction` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ExactGramLatticeReductionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldArchimedeanPlace` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldArchimedeanData` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldArchimedeanDataCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
@@ -185,6 +190,9 @@ summary from the source header, and a link to the source.
 | `NumberFieldSClassTwoTorsionProof` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldSClassTwoTorsionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldSClassTwoTorsionSearch` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIdealGeneratorSearch` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIdealGeneratorCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIdealGeneratorBounds` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `EtaleProductSClassTwoTorsionProof` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `EtaleProductSClassTwoTorsionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `MonomialOrder` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

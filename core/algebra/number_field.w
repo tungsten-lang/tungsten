@@ -406,11 +406,288 @@
     to_s
 
 
-+ NumberField < Field
-  -> new(polynomial, name = :a)
-    initialize_number_field(polynomial, name, 1_000_000, 250_000)
++ NumberFieldRelativeModularIrreducibilityCertificate
+  -> new(@polynomial, @prime_ideal)
 
-  -> initialize_number_field(polynomial, name, irreducibility_limit, order_limit)
+  -> polynomial
+    @polynomial
+
+  -> prime_ideal
+    @prime_ideal
+
+  -> reduced_polynomial
+    field = @polynomial.ring.field
+    finite_field = @prime_ideal.residue_field
+    finite_ring = PolynomialRing.new(
+      @polynomial.ring.names, finite_field)
+    terms = []
+    @polynomial.each_term -> (coefficient, exponents)
+      terms.push([
+        @prime_ideal.reduce(field.coerce(coefficient)),
+        exponents
+      ])
+    Polynomial.new(finite_ring, terms)
+
+  -> verified?
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    answer
+
+  -> verify!
+    return false if @polynomial.class_name != "Polynomial"
+    return false if @polynomial.ring.arity != 1
+    return false if @polynomial.degree < 2
+    field = @polynomial.ring.field
+    return false if field.class_name != "NumberField"
+    return false if @prime_ideal.class_name != "NumberFieldPrimeIdeal"
+    return false if @prime_ideal.field != field
+    return false if !@prime_ideal.certificate.verified?
+    return false if !@polynomial.eql?(@polynomial.monic)
+    coefficients = @polynomial.coefficients
+    i = 0
+    while i < coefficients.size
+      return false if !field.coerce(coefficients[i]).integral?
+      i += 1
+    reduction = reduced_polynomial
+    return false if reduction.degree != @polynomial.degree
+    reduction.finite_field_irreducible?
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :relative_modular_rabin
+
+  -> kernel_checked?
+    true
+
+  -> to_s
+    text = "relative irreducibility modulo "
+    text + @prime_ideal.to_s
+
+  -> inspect
+    to_s
+
+
++ NumberFieldTowerIrreducibilityCertificate
+  -> new(@polynomial, @relative_polynomial,
+         @relative_certificate)
+    @extension_cache = nil
+
+  -> polynomial
+    @polynomial
+
+  -> relative_polynomial
+    @relative_polynomial
+
+  -> relative_certificate
+    @relative_certificate
+
+  -> base_field
+    @relative_polynomial.ring.field
+
+  -> extension
+    if @extension_cache == nil
+      @extension_cache = SimpleExtensionField.new(
+        @relative_polynomial, :z, 250_000,
+        @relative_certificate)
+    @extension_cache
+
+  -> evaluate_over_extension(polynomial, value)
+    result = extension.zero
+    power = extension.one
+    i = 0
+    while i <= polynomial.degree
+      coefficient = polynomial.coeff(i)
+      if coefficient != Rational.new(0)
+        term = extension.multiply(
+          extension.coerce(coefficient), power)
+        result = extension.add(result, term)
+      power = extension.multiply(power, value)
+      i += 1
+    result
+
+  -> absolute_coordinates(value)
+    out = []
+    extension.normalize_element(value).coefficients.each -> (coefficient)
+      base = base_field.coerce(coefficient)
+      base.coefficients.each -> (entry)
+        out.push(entry)
+    out
+
+  -> power_coordinate_columns(value)
+    columns = []
+    power = extension.one
+    expected = base_field.degree * extension.degree
+    i = 0
+    while i < expected
+      columns.push(absolute_coordinates(power))
+      power = extension.multiply(power, value)
+      i += 1
+    columns
+
+  -> primitive_element_determinant
+    matrix = ExactRationalLinearAlgebra.matrix_from_columns(
+      power_coordinate_columns(extension.generator))
+    Algebra.determinant(matrix, RationalField.new)
+
+  -> verified?
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    answer
+
+  -> verify!
+    return false if @polynomial.class_name != "Polynomial"
+    return false if @polynomial.ring.arity != 1
+    return false if @polynomial.ring.field.class_name != "RationalField"
+    return false if @relative_polynomial.class_name != "Polynomial"
+    return false if base_field.class_name != "NumberField"
+    return false if !base_field.irreducibility_certified?
+    expected = "NumberFieldRelativeModularIrreducibilityCertificate"
+    return false if @relative_certificate.class_name != expected
+    return false if !@relative_certificate.verified?
+    return false if !@relative_certificate.polynomial.eql?(
+      @relative_polynomial)
+    absolute_degree = base_field.degree * @relative_polynomial.degree
+    return false if @polynomial.degree != absolute_degree
+    return false if extension.modulus_certificate != @relative_certificate
+    value = evaluate_over_extension(
+      @polynomial, extension.generator)
+    return false if !extension.zero?(value)
+    !primitive_element_determinant.zero?
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :relative_modular_tower
+
+  -> kernel_checked?
+    true
+
+  -> to_s
+    text = "tower irreducibility of degree "
+    text + @polynomial.degree.to_s
+
+  -> inspect
+    to_s
+
+
++ NumberFieldIsomorphicModelIrreducibilityCertificate
+  -> new(@polynomial, @model_polynomial,
+         @root_expression, @model_certificate)
+    @model_field_cache = nil
+    @root_cache = nil
+
+  -> polynomial
+    @polynomial
+
+  -> model_polynomial
+    @model_polynomial
+
+  -> root_expression
+    @root_expression
+
+  -> model_certificate
+    @model_certificate
+
+  -> model_field
+    if @model_field_cache == nil
+      @model_field_cache = NumberField.new(
+        @model_polynomial, :b,
+        @model_certificate)
+    @model_field_cache
+
+  -> model_root
+    if @root_cache == nil
+      value = model_field.zero
+      power = model_field.one
+      i = 0
+      while i <= @root_expression.degree
+        coefficient = @root_expression.coeff(i)
+        value += power * coefficient if coefficient != Rational.new(0)
+        power *= model_field.generator
+        i += 1
+      @root_cache = value
+    @root_cache
+
+  -> same_coefficients?(left, right)
+    return false if left.degree != right.degree
+    i = 0
+    while i <= left.degree
+      return false if left.coeff(i) != right.coeff(i)
+      i += 1
+    true
+
+  -> verified?
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    answer
+
+  -> verify!
+    return false if @polynomial.class_name != "Polynomial"
+    return false if @polynomial.ring.arity != 1
+    return false if @polynomial.ring.field.class_name != "RationalField"
+    return false if @model_polynomial.class_name != "Polynomial"
+    return false if @model_polynomial.ring.arity != 1
+    return false if @model_polynomial.ring.field.class_name != "RationalField"
+    return false if @root_expression.class_name != "Polynomial"
+    return false if @root_expression.ring.arity != 1
+    return false if @root_expression.ring.field.class_name != "RationalField"
+    return false if !NumberField.valid_irreducibility_certificate?(
+      @model_polynomial, @model_certificate)
+    return false if model_field.evaluate(
+      @polynomial, model_root) != model_field.zero
+    minimum = model_field.minimal_polynomial(model_root)
+    minimum_certificate = NumberFieldMinimalPolynomialCertificate.new(
+      model_field, model_root, minimum)
+    return false if !minimum_certificate.verified?
+    same_coefficients?(
+      @polynomial.monic, minimum.monic)
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :isomorphic_irreducible_model
+
+  -> kernel_checked?
+    true
+
+  -> to_s
+    text = "irreducible via degree-"
+    text + @model_polynomial.degree.to_s + " isomorphic model"
+
+  -> inspect
+    to_s
+
+
++ NumberField < Field
+  -> new(polynomial)
+    initialize_number_field(
+      polynomial, :a, 1_000_000, 250_000)
+
+  -> new(polynomial, name)
+    initialize_number_field(
+      polynomial, name, 1_000_000, 250_000)
+
+  -> new(polynomial, name, irreducibility_certificate)
+    initialize_number_field(
+      polynomial, name, 1_000_000, 250_000,
+      irreducibility_certificate)
+
+  -> initialize_number_field(
+       polynomial, name, irreducibility_limit,
+       order_limit, supplied_certificate = nil)
     if polynomial.class_name != "Polynomial"
       raise "NumberField defining polynomial must be a Polynomial"
     if polynomial.ring.arity != 1 || polynomial.degree < 2
@@ -418,7 +695,14 @@
     if polynomial.ring.field.class_name != "RationalField"
       raise "NumberField is currently implemented only over ℚ"
 
-    NumberField.certify_irreducible(polynomial, irreducibility_limit)
+    if supplied_certificate == nil
+      @irreducibility_certificate = NumberField.certify_irreducible(
+        polynomial, irreducibility_limit)
+    else
+      if !NumberField.valid_irreducibility_certificate?(
+           polynomial, supplied_certificate)
+        raise "supplied number-field irreducibility certificate failed"
+      @irreducibility_certificate = supplied_certificate
     @name = name
     @defining_polynomial = polynomial.monic
     @degree = @defining_polynomial.degree
@@ -579,7 +863,13 @@
     true
 
   -> irreducibility_certified?
-    true
+    return true if @irreducibility_certificate == true
+    NumberField.valid_irreducibility_certificate?(
+      @defining_polynomial,
+      @irreducibility_certificate)
+
+  -> irreducibility_certificate
+    @irreducibility_certificate
 
   -> field_discriminant_certified?
     cubic? || @generic_maximal_order_computation != nil
@@ -1333,6 +1623,69 @@
   # this is a short proof of irreducibility over Q. An irreducible polynomial
   # need not have such a reduction, so failure to find one falls back to
   # exhaustive, resource-bounded Kronecker factorization.
+  -> .valid_irreducibility_certificate?(
+       polynomial, certificate)
+    return false if certificate == nil
+    name = certificate.class_name
+    supported = name == "NumberFieldModularIrreducibilityCertificate"
+    supported = true if name == "NumberFieldModularDegreeIrreducibilityCertificate"
+    supported = true if name == "NumberFieldTowerIrreducibilityCertificate"
+    supported = true if name == "NumberFieldIsomorphicModelIrreducibilityCertificate"
+    return false if !supported
+    return false if !certificate.verified?
+    return false if certificate.polynomial.class_name != "Polynomial"
+    certificate.polynomial.monic.eql?(polynomial.monic)
+
+  -> .relative_modular_irreducibility_certificate(
+       polynomial, rational_prime_limit = 100,
+       factor_search_limit = 250_000,
+       generator_search_limit = 250_000)
+    if polynomial.class_name != "Polynomial"
+      raise "relative modular irreducibility needs a Polynomial"
+    field = polynomial.ring.field
+    if field.class_name != "NumberField"
+      raise "relative modular irreducibility needs a number-field coefficient field"
+    rational_prime = 2
+    while rational_prime <= rational_prime_limit
+      if rational_prime.prime?
+        primes = field.prime_ideals_above(
+          rational_prime, factor_search_limit,
+          generator_search_limit)
+        prime_index = 0
+        while prime_index < primes.size
+          certificate = NumberFieldRelativeModularIrreducibilityCertificate.new(
+            polynomial.monic, primes[prime_index])
+          return certificate if certificate.verified?
+          prime_index += 1
+      rational_prime += 1
+    nil
+
+  -> .tower_irreducibility_certificate(
+       polynomial, relative_polynomial,
+       relative_certificate = nil)
+    certificate = relative_certificate
+    if certificate == nil
+      certificate = NumberField.relative_modular_irreducibility_certificate(
+        relative_polynomial)
+    if certificate == nil
+      raise "relative modular irreducibility search exhausted"
+    result = NumberFieldTowerIrreducibilityCertificate.new(
+      polynomial, relative_polynomial,
+      certificate)
+    if !result.verified?
+      raise "tower irreducibility certificate failed"
+    result
+
+  -> .isomorphic_model_irreducibility_certificate(
+       polynomial, model_polynomial,
+       root_expression, model_certificate)
+    result = NumberFieldIsomorphicModelIrreducibilityCertificate.new(
+      polynomial, model_polynomial,
+      root_expression, model_certificate)
+    if !result.verified?
+      raise "isomorphic-model irreducibility certificate failed"
+    result
+
   -> .modular_irreducibility_certificate(
        polynomial, search_count = 64)
     if polynomial.class_name != "Polynomial"

@@ -40,6 +40,18 @@ autoload_check("quadratic residue character class",
 autoload_check("modular irreducibility class",
                NumberFieldModularIrreducibilityCertificate.class_name,
                "Class")
+autoload_check("relative irreducibility class",
+               NumberFieldRelativeModularIrreducibilityCertificate.class_name,
+               "Class")
+autoload_check("tower irreducibility class",
+               NumberFieldTowerIrreducibilityCertificate.class_name,
+               "Class")
+autoload_check("exact LLL class",
+               ExactGramLatticeReduction.class_name, "Class")
+autoload_check("ideal generator search class",
+               NumberFieldIdealGeneratorSearch.class_name, "Class")
+autoload_check("ideal generator bounds class",
+               NumberFieldIdealGeneratorBounds.class_name, "Class")
 autoload_check("Minkowski factor base class",
                NumberFieldMinkowskiFactorBase.class_name, "Class")
 autoload_check("S-class proof class",

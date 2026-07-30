@@ -679,7 +679,8 @@
       i += 1
     if index == nil
       raise "can only lift a certified primitive idempotent"
-    if @lifted_idempotents_cache[index] == nil
+    cached = @lifted_idempotents_cache[index]
+    if cached == nil
       lifted = @quotient.lift(sought)
       rounds = 0
       bound = 1
@@ -694,8 +695,9 @@
       if !equal?(@quotient.project(lifted), sought)
         raise "Frobenius idempotent lift changed its reduced component"
       @lifted_idempotents_cache[index] = lifted
+      cached = lifted
     out = []
-    @lifted_idempotents_cache[index].each -> (entry)
+    cached.each -> (entry)
       out.push(entry)
     out
 

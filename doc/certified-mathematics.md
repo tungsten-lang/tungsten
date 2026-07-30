@@ -122,8 +122,10 @@ explicit descent:
 10. decompose `2`, `3`, and `13` in all maximal components, certifying the 20
    finite primes above the candidate finite set S, their residue fields,
    ramification indices, and residue degrees; canonical integral and
-   fractional ideal arithmetic is available componentwise after this step,
-   but the product S-class and S-unit algorithms are not;
+   fractional ideal arithmetic is available componentwise after this step;
+   exact Frobenius-LLL relation search now certifies trivial S-class
+   2-torsion for the degree-6 component, while the degree-9 and degree-12
+   component proofs and product S-unit construction remain open;
 11. intersect future global, norm, unramified, and local conditions with the
    replay-certified F2 kernel.
 

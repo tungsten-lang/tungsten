@@ -25,6 +25,7 @@ use core/algebra/etale_algebra
 use core/algebra/integer_lattice
 use core/algebra/orders
 use core/algebra/maximal_orders
+use core/algebra/lattice_reduction
 use core/algebra/residue_algebra
 use core/algebra/real_roots
 use core/algebra/groebner

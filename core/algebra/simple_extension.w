@@ -145,7 +145,15 @@
     initialize_simple_extension(
       polynomial, name, factor_search_limit)
 
-  -> initialize_simple_extension(polynomial, name, factor_search_limit)
+  -> new(polynomial, name, factor_search_limit,
+         modulus_certificate)
+    initialize_simple_extension(
+      polynomial, name, factor_search_limit,
+      modulus_certificate)
+
+  -> initialize_simple_extension(
+       polynomial, name, factor_search_limit,
+       supplied_certificate = nil)
     if polynomial.class_name != "Polynomial"
       raise "simple extension modulus must be a Polynomial"
     if polynomial.ring.arity != 1 || polynomial.degree < 2
@@ -154,11 +162,15 @@
     @name = name
     @defining_polynomial = polynomial.monic
     @degree = @defining_polynomial.degree
-    @modulus_factorization = @defining_polynomial.factor_with_certificate(
-      factor_search_limit)
-    certificate = SimpleExtensionModulusCertificate.new(
-      @base_field, @defining_polynomial, @modulus_factorization)
-    if !certificate.verified?
+    @modulus_factorization = nil
+    if supplied_certificate == nil
+      @modulus_factorization = @defining_polynomial.factor_with_certificate(
+        factor_search_limit)
+      @modulus_certificate = SimpleExtensionModulusCertificate.new(
+        @base_field, @defining_polynomial, @modulus_factorization)
+    else
+      @modulus_certificate = supplied_certificate
+    if !valid_modulus_certificate?(@modulus_certificate)
       raise "simple extension modulus is reducible over its base field"
 
     coefficients = @defining_polynomial.coefficients
@@ -173,6 +185,15 @@
     @generator = SimpleExtensionElement.raw(
       self, generator_coefficients)
     self
+
+  -> valid_modulus_certificate?(certificate)
+    name = certificate.class_name
+    supported = name == "SimpleExtensionModulusCertificate"
+    supported = true if name == "NumberFieldRelativeModularIrreducibilityCertificate"
+    return false if !supported
+    return false if !certificate.verified?
+    return false if certificate.polynomial.ring != @defining_polynomial.ring
+    certificate.polynomial.monic.eql?(@defining_polynomial)
 
   -> coefficient_field?
     true
@@ -224,10 +245,10 @@
     true
 
   -> modulus_certificate
-    SimpleExtensionModulusCertificate.new(
-      @base_field, @defining_polynomial, @modulus_factorization)
+    @modulus_certificate
 
   -> factorization_certificate
+    return nil if @modulus_factorization == nil
     @modulus_factorization.certificate
 
   -> base_zero_coefficients

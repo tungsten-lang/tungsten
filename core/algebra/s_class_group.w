@@ -10,6 +10,218 @@
 # The ideal arithmetic, prime decompositions, relation vectors, and F2 rank
 # are replayed exactly.  Minkowski's theorem is a named trusted theorem import.
 
++ NumberFieldIdealGeneratorCertificate
+  -> new(@search)
+
+  -> search
+    @search
+
+  -> proof_kind
+    :exact_principal_ideal
+
+  -> kernel_checked?
+    true
+
+  -> verified?
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    answer
+
+  -> verify!
+    expected = "NumberFieldIdealGeneratorSearch"
+    return false if @search.class_name != expected
+    ideal = @search.ideal
+    return false if ideal.class_name != "NumberFieldIdeal"
+    return false if !ideal.certificate.verified?
+    field = ideal.field
+    generator = @search.generator
+    return false if generator == nil
+    return false if generator.field != field
+    return false if !generator.integral?
+    return false if generator.norm.abs != Rational.new(ideal.norm)
+    principal = field.principal_ideal(generator)
+    principal.eql?(ideal)
+
+  -> certified?
+    verified?
+
+  -> to_s
+    "NumberFieldIdealGeneratorCertificate"
+
+  -> inspect
+    to_s
+
+
++ NumberFieldIdealGeneratorBounds
+  -> new(@coefficient_bound = 2,
+         @element_limit = 100_000,
+         @odd_power_limit = 3)
+    if @coefficient_bound < 1 || @element_limit < 1
+      raise "principal-generator search bounds must be positive"
+    if @odd_power_limit < 1
+      raise "principal ideal odd-power limit must be positive"
+
+  -> coefficient_bound
+    @coefficient_bound
+
+  -> element_limit
+    @element_limit
+
+  -> odd_power_limit
+    @odd_power_limit
+
+
++ NumberFieldIdealGeneratorSearch
+  -> new(@ideal, @coefficient_bound = 2,
+         @element_limit = 100_000)
+    if @ideal.class_name != "NumberFieldIdeal"
+      raise "principal-generator search needs a NumberFieldIdeal"
+    if @coefficient_bound < 1 || @element_limit < 1
+      raise "principal-generator search bounds must be positive"
+    @field = @ideal.field
+    @generator = nil
+    @tested_elements = 0
+    @coordinate_basis = @ideal.algebra_ideal.reduced_frobenius_coordinate_basis
+    search
+    @certificate_cache = NumberFieldIdealGeneratorCertificate.new(
+      self)
+
+  -> ideal
+    @ideal
+
+  -> field
+    @field
+
+  -> generator
+    @generator
+
+  -> found?
+    @generator != nil
+
+  -> tested_elements
+    @tested_elements
+
+  -> primitive_oriented_vector?(vector)
+    divisor = 0
+    first_nonzero = nil
+    vector.each -> (coefficient)
+      if coefficient != 0
+        divisor = divisor.gcd(coefficient.abs)
+        first_nonzero = coefficient if first_nonzero == nil
+    return false if first_nonzero == nil
+    first_nonzero > 0 && divisor == 1
+
+  -> vector_height(vector)
+    height = 0
+    vector.each -> (coefficient)
+      height = coefficient.abs if coefficient.abs > height
+    height
+
+  -> order_coordinates(vector)
+    coordinates = []
+    i = 0
+    while i < @ideal.order.rank
+      value = 0 ## big
+      basis_index = 0
+      while basis_index < vector.size
+        term = vector[basis_index] * @coordinate_basis[basis_index][i]
+        value += term
+        basis_index += 1
+      coordinates.push(value)
+      i += 1
+    coordinates
+
+  -> candidate_generator(coordinates)
+    norm = @ideal.order.norm_from_coordinates(
+      coordinates)
+    return nil if norm.abs != @ideal.norm
+    generic = @ideal.order.element(coordinates)
+    element = @field.generic_order_vector_to_element(
+      generic.coefficients)
+    return nil if element.norm.abs != Rational.new(@ideal.norm)
+    return element if @field.principal_ideal(
+      element).eql?(@ideal)
+    nil
+
+  -> search
+    height = 1
+    while height <= @coefficient_bound
+      radix = 2 * height + 1
+      code = 0
+      total = radix ** @coordinate_basis.size
+      while code < total
+        vector = []
+        remaining = code
+        i = 0
+        while i < @coordinate_basis.size
+          vector.push((remaining % radix) - height)
+          remaining = remaining / radix
+          i += 1
+        selected = vector_height(vector) == height
+        selected = false if !primitive_oriented_vector?(vector)
+        if selected
+          @tested_elements += 1
+          return nil if @tested_elements > @element_limit
+          coordinates = order_coordinates(vector)
+          element = candidate_generator(coordinates)
+          if element != nil
+            @generator = element
+            return element
+        code += 1
+      height += 1
+    nil
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    found? && certificate.verified?
+
+  -> result
+    @generator
+
+  -> to_s
+    text = "NumberFieldIdealGeneratorSearch(tested "
+    text + @tested_elements.to_s + ")"
+
+  -> inspect
+    to_s
+
+
++ NumberFieldIdeal
+  -> principal_generator_search(
+       coefficient_bound = 2,
+       element_limit = 100_000)
+    NumberFieldIdealGeneratorSearch.new(
+      self, coefficient_bound, element_limit)
+
+  -> principal_generator(
+       coefficient_bound = 2,
+       element_limit = 100_000)
+    search = principal_generator_search(
+      coefficient_bound, element_limit)
+    if !search.found?
+      raise "principal-generator search limit exceeded; principality unknown"
+    search.generator
+
+
++ NumberFieldPrimeIdeal
+  -> principal_generator_search(
+       coefficient_bound = 2,
+       element_limit = 100_000)
+    as_ideal.principal_generator_search(
+      coefficient_bound, element_limit)
+
+  -> principal_generator(
+       coefficient_bound = 2,
+       element_limit = 100_000)
+    as_ideal.principal_generator(
+      coefficient_bound, element_limit)
+
+
 + NumberFieldMinkowskiFactorBaseCertificate
   -> new(@factor_base)
     @verified_cache = nil
@@ -63,7 +275,24 @@
         j += 1
       i += 1
 
-    expected = @factor_base.enumerate_minkowski_primes
+    decompositions = @factor_base.minkowski_decompositions
+    expected = []
+    rational_prime = 2
+    decomposition_index = 0
+    while rational_prime <= @factor_base.bound
+      if rational_prime.prime?
+        return false if decomposition_index >= decompositions.size
+        decomposition = decompositions[decomposition_index]
+        expected_class = "NumberFieldPrimeDecomposition"
+        return false if decomposition.class_name != expected_class
+        return false if decomposition.field != field
+        return false if decomposition.prime != rational_prime
+        return false if !decomposition.certificate.verified?
+        decomposition.prime_ideals.each -> (prime)
+          expected.push(prime) if prime.norm <= @factor_base.bound
+        decomposition_index += 1
+      rational_prime += 1
+    return false if decomposition_index != decompositions.size
     actual = @factor_base.minkowski_primes
     return false if !@factor_base.same_prime_lists?(
       expected, actual)
@@ -110,6 +339,7 @@
     @bound = compute_bound
     if @bound > @rational_prime_limit
       raise "Minkowski factor-base prime limit exceeded; class-group proof unknown"
+    @minkowski_decompositions = []
     @minkowski_primes = enumerate_minkowski_primes
     @primes = []
     @minkowski_primes.each -> (prime)
@@ -153,14 +383,17 @@
     @bound
 
   -> enumerate_minkowski_primes
+    if @minkowski_primes != nil
+      return minkowski_primes
     out = []
     rational_prime = 2
     while rational_prime <= @bound
       if rational_prime.prime?
-        decomposition = @field.prime_ideals_above(
+        decomposition = @field.prime_decomposition(
           rational_prime, @factor_search_limit,
           @generator_search_limit)
-        decomposition.each -> (prime)
+        @minkowski_decompositions.push(decomposition)
+        decomposition.prime_ideals.each -> (prime)
           out.push(prime) if prime.norm <= @bound
       rational_prime += 1
     out
@@ -177,6 +410,12 @@
     out = []
     @minkowski_primes.each -> (prime)
       out.push(prime)
+    out
+
+  -> minkowski_decompositions
+    out = []
+    @minkowski_decompositions.each -> (decomposition)
+      out.push(decomposition)
     out
 
   -> s_primes
@@ -442,18 +681,28 @@
          @element_limit = 100_000,
          rational_prime_limit = 100_000,
          factor_search_limit = 250_000,
-         generator_search_limit = 250_000)
+         generator_search_limit = 250_000,
+         ideal_generator_bounds = nil)
     if @field.class_name != "NumberField"
       raise "S-class relation search needs a NumberField"
     if @coefficient_bound < 0 || @element_limit < 1
       raise "S-class relation search bounds must be positive"
+    if ideal_generator_bounds == nil
+      ideal_generator_bounds = NumberFieldIdealGeneratorBounds.new
+    if ideal_generator_bounds.class_name != "NumberFieldIdealGeneratorBounds"
+      raise "S-class ideal-generator bounds have the wrong type"
+    @ideal_generator_coefficient_bound = ideal_generator_bounds.coefficient_bound
+    @ideal_generator_element_limit = ideal_generator_bounds.element_limit
+    @ideal_generator_odd_power_limit = ideal_generator_bounds.odd_power_limit
     @factor_base = NumberFieldMinkowskiFactorBase.new(
       @field, s_primes, rational_prime_limit,
       factor_search_limit, generator_search_limit)
     @relation_elements = []
     @relation_vectors = []
     @tested_elements = 0
+    @tested_ideal_elements = 0
     @rank = matrix_rank(s_prime_rows)
+    seed_principal_factor_base_generators if @rank < @factor_base.size
     seed_rational_relations if @rank < @factor_base.size
     search if @rank < @factor_base.size
     if @rank != @factor_base.size
@@ -475,6 +724,9 @@
 
   -> tested_elements
     @tested_elements
+
+  -> tested_ideal_elements
+    @tested_ideal_elements
 
   -> s_prime_rows
     rows = []
@@ -521,6 +773,14 @@
         result += basis[i] * vector[i]
       i += 1
     result
+
+  -> reduced_order_basis
+    out = []
+    reduced = @field.certify_maximal_order.reduced_frobenius_basis
+    reduced.each -> (generic)
+      out.push(@field.generic_order_vector_to_element(
+        generic.coefficients))
+    out
 
   # A principal ideal supported on the factor base can only have rational norm
   # primes represented by that base.  Strip those primes before asking the
@@ -575,6 +835,40 @@
       return true
     false
 
+  # A principal factor-base ideal contributes a unit-vector relation.  Search
+  # in an exact Frobenius-LLL basis of that ideal before enumerating arbitrary
+  # order elements.  Every accepted generator is still replayed through the
+  # ordinary principal-ideal relation certificate.
+  -> seed_principal_factor_base_generators
+    prime_index = 0
+    while prime_index < @factor_base.size
+      unit = []
+      @factor_base.size.times -> unit.push(0)
+      unit[prime_index] = 1
+      rows = current_rows
+      old_rank = matrix_rank(rows)
+      rows.push(unit)
+      if matrix_rank(rows) > old_rank
+        prime = @factor_base.primes[prime_index]
+        odd_power = 1
+        found = false
+        while odd_power <= @ideal_generator_odd_power_limit && !found
+          ideal = prime.as_ideal ** odd_power
+          search = ideal.principal_generator_search(
+            @ideal_generator_coefficient_bound,
+            @ideal_generator_element_limit)
+          @tested_ideal_elements += search.tested_elements
+          if search.found?
+            relation = candidate_relation(search.generator)
+            if relation != nil
+              add_relation_if_independent(
+                search.generator, relation)
+              found = true
+              return true if @rank == @factor_base.size
+          odd_power += 2
+      prime_index += 1
+    nil
+
   # Rational primes give inexpensive canonical principal relations.  They are
   # not primitive coefficient vectors, so seed them explicitly before the
   # bounded small-element enumeration.
@@ -593,7 +887,7 @@
     nil
 
   -> search
-    basis = @field.integral_basis
+    basis = reduced_order_basis
     height = 1
     while height <= @coefficient_bound
       radix = 2 * height + 1
@@ -836,9 +1130,11 @@
        element_limit = 100_000,
        rational_prime_limit = 100_000,
        factor_search_limit = 250_000,
-       generator_search_limit = 250_000)
+       generator_search_limit = 250_000,
+       ideal_generator_bounds = nil)
     NumberFieldSClassTwoTorsionSearch.new(
       self, s_primes, coefficient_bound,
       element_limit, rational_prime_limit,
       factor_search_limit,
-      generator_search_limit).proof
+      generator_search_limit,
+      ideal_generator_bounds).proof

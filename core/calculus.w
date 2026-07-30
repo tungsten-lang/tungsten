@@ -17,6 +17,7 @@ use core/numeric/rational
 use core/expression
 use core/calculus/certified_transcendentals
 use core/calculus/series
+use core/calculus/laurent
 use core/calculus/jet
 use core/calculus/differential
 use core/calculus/quadrature
@@ -127,6 +128,22 @@ use core/calculus/quadrature
 
   -> .formal_series(expression, variable, center = 0, order = 6)
     Expression.wrap(expression).series(variable, center, order)
+
+  -> .laurent_series(expression, variable,
+                      center = 0, order = 6,
+                      search_margin = 8)
+    Expression.wrap(expression).laurent_series(
+      variable, center, order, search_margin)
+
+  -> .residue(expression, variable,
+               point = 0, search_margin = 8)
+    Expression.wrap(expression).residue(
+      variable, point, search_margin)
+
+  -> .pole_order(expression, variable,
+                  point = 0, search_margin = 8)
+    Expression.wrap(expression).pole_order_at(
+      variable, point, search_margin)
 
   -> .limit(expression, variable, point, order = 8)
     Expression.wrap(expression).limit(variable, point, order)

@@ -270,17 +270,29 @@ Calculus.limit((x + 1).log / x, :x, 0)   # 1
 ```
 
 The order is a truncation contract, not a convergence or error certificate.
-Genuine poles require Laurent series, and branch points such as `sqrt(x)` at
-zero require Puiseux series; both currently raise explicitly. Sign-dependent
-forms such as `abs(x)` also raise when the center does not determine a smooth
-branch.
+Genuine poles use `FormalLaurentSeries`:
+
+```w
+pole = (x.sin / (x*x)).laurent_series(:x, 0, 5)
+pole.pole_order                             # 1
+pole.residue                                # 1
+pole.principal_part
+pole.regular_part
+```
+
+Laurent arithmetic retains an explicit lower and upper known power and
+supports derivatives and meromorphic antiderivatives. A nonzero residue
+requires a logarithmic integral and raises. Branch points such as `sqrt(x)`
+at zero require Puiseux series and still raise explicitly, as do essential
+singularities such as `exp(1/x)`. Sign-dependent forms such as `abs(x)` also
+raise when the center does not determine a smooth branch.
 
 ## Current boundary
 
 This is a canonical simplifier, exact differentiator, elementary integrator,
 and rational-polynomial front end, not yet a complete computer algebra system.
 It does not currently provide assumptions/refinement, piecewise expressions,
-infinite or directional limits, Laurent/Puiseux series, general
+infinite or directional limits, Puiseux or logarithmic transseries, general
 transcendental equation solving, complex algebraic root objects, general
 multivariate factorization, exact transcendental-value comparison, a general
 symbolic special-function catalogue beyond `erf` / `erfc` and the

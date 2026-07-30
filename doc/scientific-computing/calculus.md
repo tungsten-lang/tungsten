@@ -33,11 +33,41 @@ Calculus.limit(x.sin / x, :x, 0)  # exact 1
 ```
 
 Formal cancellation handles removable finite-point singularities. Genuine
-poles, logarithmic terms, and fractional-power branch points raise because
-Laurent and Puiseux series are not yet represented. A formal truncation is
-algebraic data, not a convergence or remainder-error certificate.
-Differentiation lowers its retained order, antiderivation raises it, and
-`truncate` refuses to manufacture unavailable coefficients.
+poles use the separate Laurent surface below. Logarithmic terms and
+fractional-power branch points still raise because transseries and Puiseux
+series are not yet represented. A formal truncation is algebraic data, not a
+convergence or remainder-error certificate. Differentiation lowers its
+retained order, antiderivation raises it, and `truncate` refuses to
+manufacture unavailable coefficients.
+
+## Laurent series, poles, and residues
+
+`FormalLaurentSeries` retains a finite lower power and an explicit highest
+known power. It supports exact meromorphic arithmetic, differentiation,
+principal/regular parts, pole order, and residues:
+
+```w
+x = Calculus.symbol(:x)
+one = Expression.constant(1)
+
+pole = (x.sin / (x*x)).laurent_series(:x, 0, 5)
+pole.minimum_power                 # -1
+pole.residue                       # 1
+pole.coefficient(1)                # -1/6
+pole.principal_part
+pole.regular_part
+
+geometric = Calculus.laurent_series(
+  one / (x*(one - x)), :x, 0, 5)
+# x^-1 + 1 + x + x^2 + ... + x^5 + O(x^6)
+```
+
+Products and quotients retain only coefficients justified by both operands'
+known windows. Addition detects exact cancellation of leading pole terms.
+Integrating a nonzero residue raises because the result needs a logarithm.
+Likewise `exp(1/x)` raises as an essential singularity, and `sqrt(x)` at zero
+raises because it needs Puiseux powers. `search_margin` is an explicit,
+bounded amount of extra internal precision for nested expressions.
 
 ## Arbitrary-order derivatives and Taylor series
 

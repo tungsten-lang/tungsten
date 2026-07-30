@@ -726,7 +726,7 @@
   while pi < reassigned.size()
     pname = reassigned[pi]
     ptr = ensure_var_slot(new_fn, pname)
-    emit_instruction(new_fn, {op: :store_i64, value: "%" + pname, ptr: ptr})
+    emit_instruction(new_fn, {op: :store_i64, value: "%" + llvm_safe_name(pname), ptr: ptr})
     pi += 1
 
   # Lower block body with implicit return for last expression.

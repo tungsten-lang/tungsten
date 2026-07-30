@@ -427,3 +427,93 @@
   if value_type == nil
     value_type = "i64"
   emit_instruction(wfn, {op: :store_global, name: name, value: value_reg, type: value_type})
+
+# -- LLVM symbol names --
+#
+# An unquoted LLVM symbol admits only [-a-zA-Z$._0-9], but a Tungsten
+# identifier is UAX#31 and may hold any Unicode — `α`, `β_x`, `μ1`. Emitting
+# those raw produces `%α` / `@global.α`, which clang rejects outright.
+# Transliterate every character outside the LLVM set to `_uXXXXXX_`, the
+# codepoint in six lowercase hex digits (enough for all of U+10FFFF).
+#
+# Two properties this relies on:
+#
+#   - Identity on names that are already LLVM-safe. The compiler's own
+#     sources are pure ASCII, so stage 1 and stage 2 emit byte-identical
+#     IR and the self-host fixed-point check is unaffected.
+#   - Idempotent — a mangled name is itself LLVM-safe, so applying this at
+#     both the lowering site and the emitter site is harmless. That is what
+#     makes it safe to sprinkle at every `"%" + name` construction without
+#     tracking which ones a given name already flowed through.
+#
+# Quoting (`%"α"`) is the other legal spelling, but register names get
+# suffixed downstream (`t + ".ltag"` in render_guarded_i48), and
+# `%"α".ltag` is not valid LLVM. Transliteration survives suffixing.
+
+-> llvm_safe_char?(ch)
+  if ch >= "a" && ch <= "z"
+    return true
+  if ch >= "A" && ch <= "Z"
+    return true
+  if ch >= "0" && ch <= "9"
+    return true
+  ch in ("_" "." "$" "-")
+
+# True when chars[i] starts a literal `_u` + 6 lowercase hex + `_` run --
+# the exact shape the escape loop below emits. Such a run in a SOURCE name
+# must itself be escaped, or the mangling is not injective: `α` and the
+# legal identifier `_u0003b1_` would both lower to `_u0003b1_` (observed as
+# a clang "redefinition of global" error, and a silent merge for locals).
+-> llvm_escape_marker_at?(chars, i)
+  if i + 8 >= chars.size()
+    return false
+  if chars[i] != "_" || chars[i + 1] != "u"
+    return false
+  if chars[i + 8] != "_"
+    return false
+  j = i + 2
+  while j < i + 8
+    ch = chars[j]
+    digit = ch >= "0" && ch <= "9"
+    if digit == false && (ch < "a" || ch > "f")
+      return false
+    j += 1
+  true
+
+-> llvm_safe_name(name)
+  chars = name.chars()
+  i = 0
+  clean = true
+  while i < chars.size()
+    if llvm_safe_char?(chars[i]) == false
+      clean = false
+      break
+    if llvm_escape_marker_at?(chars, i)
+      clean = false
+      break
+    i += 1
+  if clean
+    return name
+  hex_chars = "0123456789abcdef"
+  out = StringBuffer(name.size() + 8)
+  i = 0
+  while i < chars.size()
+    ch = chars[i]
+    if llvm_escape_marker_at?(chars, i)
+      # Escape the run's leading underscore (0x5f) so the literal marker
+      # text survives as data. Decoding left-to-right inverts this: the
+      # emitted `_u00005f_` consumes the underscore, and the following
+      # `uXXXXXX_` no longer parses as a marker.
+      out << "_u00005f_"
+    elsif llvm_safe_char?(ch)
+      out << ch
+    else
+      code = ch.ord()
+      out << "_u"
+      shift = 20
+      while shift >= 0
+        out << hex_chars.slice((code >> shift) & 15, 1)
+        shift -= 4
+      out << "_"
+    i += 1
+  out.to_s()

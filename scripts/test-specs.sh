@@ -236,6 +236,8 @@ compiled_specs=(
   spec/compiler/strbuf_bytes_spec.w
   spec/compiler/int_bigint_promotion_spec.w
   spec/compiler/ivar_param_type_spec.w
+  spec/compiler/llvm_name_mangling_injective_spec.w
+  spec/compiler/top_level_method_name_hygiene_spec.w
   spec/compiler/u64_raw_multiply_spec.w
   spec/compiler/conditional_reassign_param_spec.w
   spec/compiler/begin_rescue_value_spec.w
@@ -285,6 +287,12 @@ cuda_emit_specs=(
 )
 
 interpreter_specs=(
+  # Engine-parity pins: these compiler specs assert values that must hold
+  # identically interpreted (compiled-only verification has missed clobbered
+  # interpreter.w hunks before).
+  spec/compiler/int_bigint_promotion_spec.w
+  spec/compiler/ivar_param_type_spec.w
+  spec/compiler/llvm_name_mangling_injective_spec.w
   spec/interpreter/float_leaf_native_spec.w
   spec/interpreter/big_array_cap_empty_revisit_spec.w
   spec/interpreter/hash_size_view_field_spec.w

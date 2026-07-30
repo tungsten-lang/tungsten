@@ -47,7 +47,7 @@
   variant = recv_type_variant_tag(recv_type)
   if variant == nil
     return nil
-  "__w_" + class_name.gsub(":", "__") + "_" + mangle_method_name(method_name) + "_" + variant
+  "__w_" + llvm_safe_name(class_name.gsub(":", "__")) + "_" + mangle_method_name(method_name) + "_" + variant
 
 # Phase 6e (v0): single-pass non-recursive escape pre-pass for SmallArray.new.
 # Walks a single body (a flat list of statements), finds each assign of

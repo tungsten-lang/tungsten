@@ -1921,7 +1921,7 @@ ewscope_md_state = {ids: {}, order: []}
     ck = 0
     while ck < class_keys.size()
       globals_out << "@class."
-      globals_out << class_keys[ck].gsub(":", "__")
+      globals_out << llvm_safe_name(class_keys[ck].gsub(":", "__"))
       globals_out << " = internal global i64 0\n"
       ck += 1
     if class_keys.size() > 0
@@ -1946,7 +1946,7 @@ ewscope_md_state = {ids: {}, order: []}
     while ti < tlv_keys.size()
       nm = tlv_keys[ti]
       globals_out << "@global."
-      globals_out << nm
+      globals_out << llvm_safe_name(nm)
       cv = const_values[nm]
       if cv != nil
         globals_out << " = internal constant i64 "
@@ -1982,7 +1982,7 @@ ewscope_md_state = {ids: {}, order: []}
     ci = 0
     while ci < cvg_keys.size()
       globals_out << "@cvar."
-      globals_out << cvg_keys[ci].gsub(":", "__")
+      globals_out << llvm_safe_name(cvg_keys[ci].gsub(":", "__"))
       globals_out << " = internal global i64 0\n"
       ci += 1
     if cvg_keys.size() > 0
@@ -2418,7 +2418,7 @@ ewscope_md_state = {ids: {}, order: []}
       i += 1
   i = 0
   while i < f[:params].size()
-    parts.push("i64 %" + f[:params][i])
+    parts.push("i64 %" + llvm_safe_name(f[:params][i]))
     i += 1
   parts.join(", ")
 
@@ -3775,7 +3775,7 @@ ewscope_md_state = {ids: {}, order: []}
       parts << t + ".om = and i64 " + inst[:receiver] + ", -16\n  "
       parts << t + ".op = inttoptr i64 " + t + ".om to ptr\n  "
       parts << t + ".oc = load i16, ptr " + t + ".op, align 2\n  "
-      parts << t + ".cw = load i64, ptr @class." + inst[:devirt_class].gsub(":", "__") + "\n  "
+      parts << t + ".cw = load i64, ptr @class." + llvm_safe_name(inst[:devirt_class].gsub(":", "__")) + "\n  "
       parts << t + ".cm = and i64 " + t + ".cw, -16\n  "
       parts << t + ".cp = inttoptr i64 " + t + ".cm to ptr\n  "
       parts << t + ".cip = getelementptr i8, ptr " + t + ".cp, i64 16\n  "
@@ -3964,7 +3964,7 @@ ewscope_md_state = {ids: {}, order: []}
       parts << inst[:temp] + " = call i64 @w_class_new_wv(i64 " + inst[:temp] + ".name, i64 " + super_arg + ")"
       parts.to_s()
   when :class_store
-    "store i64 " + inst[:value] + ", ptr @class." + inst[:class_name].gsub(":", "__")
+    "store i64 " + inst[:value] + ", ptr @class." + llvm_safe_name(inst[:class_name].gsub(":", "__"))
   when :type_class_register
     "call void @w_type_class_register_wv(i32 " + inst[:dispatch_key].to_s() + ", i64 " + inst[:class_temp] + ")"
   when :node_kind_class_register
@@ -4002,21 +4002,21 @@ ewscope_md_state = {ids: {}, order: []}
       parts << "call void @w_class_add_static_method_wv(i64 " + inst[:class_temp] + ", i64 " + inst[:class_temp] + ".smname.wv, ptr @" + inst[:fn_name] + ", i32 " + inst[:arity].to_s() + ")"
       parts.to_s()
   when :load_class
-    inst[:temp] + " = load i64, ptr @class." + inst[:class_name].gsub(":", "__")
+    inst[:temp] + " = load i64, ptr @class." + llvm_safe_name(inst[:class_name].gsub(":", "__"))
   when :store_global
     t = inst[:type]
     if t == nil
       t = "i64"
-    "store " + t + " " + inst[:value] + ", ptr @global." + inst[:name]
+    "store " + t + " " + inst[:value] + ", ptr @global." + llvm_safe_name(inst[:name])
   when :load_global
     t = inst[:type]
     if t == nil
       t = "i64"
-    inst[:temp] + " = load " + t + ", ptr @global." + inst[:name]
+    inst[:temp] + " = load " + t + ", ptr @global." + llvm_safe_name(inst[:name])
   when :store_cvar
-    "store i64 " + inst[:value] + ", ptr @cvar." + inst[:cvar_key].gsub(":", "__")
+    "store i64 " + inst[:value] + ", ptr @cvar." + llvm_safe_name(inst[:cvar_key].gsub(":", "__"))
   when :load_cvar
-    inst[:temp] + " = load i64, ptr @cvar." + inst[:cvar_key].gsub(":", "__")
+    inst[:temp] + " = load i64, ptr @cvar." + llvm_safe_name(inst[:cvar_key].gsub(":", "__"))
   when :typed_array_get_inline
     # Inline typed array read: unmask → slots ptr (off 16) → start i32 (off 4) → GEP → load → ext
     # Phase 4 i32 demote moved offsets: slots 32→16, start 8→4. Start is now
@@ -4583,7 +4583,7 @@ ewscope_md_state = {ids: {}, order: []}
     if string_wvs != nil
       swv = string_wvs[inst[:name_str_id]]
     if swv != nil
-      cn = inst[:class_name].gsub(":", "__")
+      cn = llvm_safe_name(inst[:class_name].gsub(":", "__"))
       parts = StringBuffer(128)
       parts << "%" + cn + ".cls = call i64 @w_class_new_wv(i64 " + llvm_wvalue_literal(swv) + ", i64 " + w_nil.to_s() + ")\n  "
       parts << "store i64 %" + cn + ".cls, ptr @class." + cn
@@ -4593,7 +4593,7 @@ ewscope_md_state = {ids: {}, order: []}
       lbr = "\["
       rbr = "]"
       bl = inst[:name_byte_len].to_s()
-      cn = inst[:class_name].gsub(":", "__")
+      cn = llvm_safe_name(inst[:class_name].gsub(":", "__"))
       parts = StringBuffer(192)
       parts << "%" + cn + ".ptr = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:name_str_id].to_s() + ", i32 0, i32 0\n  "
       parts << "%" + cn + ".name = call i64 @w_string(ptr %" + cn + ".ptr)\n  "

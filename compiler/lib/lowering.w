@@ -2009,13 +2009,13 @@ use lowering/definitions
         # int corrupts it ("expected int, got object"). Boxed-ABI fns keep the
         # nanunbox path below.
         if wfn[:raw_i64_signature] == true
-          return typed_value(raw_machine_value_type(raw_type), cast_raw_machine_int(wfn, "%" + name, :i64, raw_type))
-        return typed_value(raw_machine_value_type(raw_type), ensure_raw_machine_int(wfn, typed_value(:i64, "%" + name), raw_type, raw_type))
+          return typed_value(raw_machine_value_type(raw_type), cast_raw_machine_int(wfn, "%" + llvm_safe_name(name), :i64, raw_type))
+        return typed_value(raw_machine_value_type(raw_type), ensure_raw_machine_int(wfn, typed_value(:i64, "%" + llvm_safe_name(name)), raw_type, raw_type))
       if machine_float
         if raw_type in (:f32 :raw_f32)
-          return typed_value(:raw_f32, ensure_raw_f32(wfn, typed_value(:i64, "%" + name)))
-        return typed_value(:raw_f64, ensure_raw_f64(wfn, typed_value(:i64, "%" + name)))
-      return typed_value(:i64, "%" + name)
+          return typed_value(:raw_f32, ensure_raw_f32(wfn, typed_value(:i64, "%" + llvm_safe_name(name))))
+        return typed_value(:raw_f64, ensure_raw_f64(wfn, typed_value(:i64, "%" + llvm_safe_name(name))))
+      return typed_value(:i64, "%" + llvm_safe_name(name))
     i += 1
 
   # Check if it's a built-in runtime class

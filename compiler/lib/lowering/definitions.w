@@ -98,7 +98,7 @@
   i = 0
   while i < 12
     if i < n
-      remap_args.push("%" + arg_slot_names[i])
+      remap_args.push("%" + llvm_safe_name(arg_slot_names[i]))
     else
       remap_args.push(w_nil.to_s())
     i += 1
@@ -108,7 +108,7 @@
   i = 0
   while i < n
     slot_temp = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :call_direct_i64, temp: slot_temp, name: "w_kwargs_slot_" + i.to_s(), args: [did, "%" + arg_slot_names[i]]})
+    emit_instruction(new_fn, {op: :call_direct_i64, temp: slot_temp, name: "w_kwargs_slot_" + i.to_s(), args: [did, "%" + llvm_safe_name(arg_slot_names[i])]})
     kw_rebound[arg_slot_names[i]] = slot_temp
     child_ctx[:bindings][arg_slot_names[i]] = slot_temp
     i += 1
@@ -122,7 +122,7 @@
   kw_rebound = child_ctx[:kw_rebound]
   if kw_rebound != nil && kw_rebound[pname] != nil
     return kw_rebound[pname]
-  "%" + pname
+  "%" + llvm_safe_name(pname)
 
 -> method_lowering_analysis(node)
   cached = ast_get(node, :lowering_analysis)
@@ -718,7 +718,7 @@
     pt = child_var_types[pname]
     if is_raw_int_storage_type(pt)
       if raw_i64_sig || raw_int_sig
-        child_ctx[:bindings][pname] = "%" + pname
+        child_ctx[:bindings][pname] = "%" + llvm_safe_name(pname)
       elsif pt in (:i64 :u64)
         # Checked unbox: a boxed caller passes values >2^47 as heap bigint
         # boxes, which the plain shl/ashr nanunbox would pass through as
@@ -800,10 +800,10 @@
         emit_instruction(new_fn, {op: :store_i64, value: child_ctx[:bindings][pname], ptr: ptr})
     else
       if is_raw_int_storage_type(child_var_types[pname])
-        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + pname), child_var_types[pname], child_var_types[pname])
+        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + llvm_safe_name(pname)), child_var_types[pname], child_var_types[pname])
         emit_instruction(new_fn, {op: machine_store_op(child_var_types[pname]), value: raw, ptr: ptr})
       else
-        emit_instruction(new_fn, {op: :store_i64, value: "%" + pname, ptr: ptr})
+        emit_instruction(new_fn, {op: :store_i64, value: "%" + llvm_safe_name(pname), ptr: ptr})
     pi += 1
 
   captured_params = find_captured_params_in_body(body, param_names_list)
@@ -822,10 +822,10 @@
         else
           emit_instruction(new_fn, {op: :store_i64, value: child_ctx[:bindings][pname], ptr: ptr})
       elsif is_raw_int_storage_type(child_var_types[pname])
-        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + pname), child_var_types[pname], child_var_types[pname])
+        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + llvm_safe_name(pname)), child_var_types[pname], child_var_types[pname])
         emit_instruction(new_fn, {op: machine_store_op(child_var_types[pname]), value: raw, ptr: ptr})
       else
-        emit_instruction(new_fn, {op: :store_i64, value: "%" + pname, ptr: ptr})
+        emit_instruction(new_fn, {op: :store_i64, value: "%" + llvm_safe_name(pname), ptr: ptr})
     pi += 1
 
   # Lower body with implicit return for last expression
@@ -1332,7 +1332,7 @@
         collect_ivars_from_exprs(expr.expressions, ivars)
 
 -> register_class_method(main_fn, mod, cname, mname, arity)
-  mfn_name = "__w_" + cname.gsub(":", "__") + "_" + mangle_method_name(mname) + "__a" + arity.to_s()
+  mfn_name = "__w_" + llvm_safe_name(cname.gsub(":", "__")) + "_" + mangle_method_name(mname) + "__a" + arity.to_s()
   mstr_id = module_string_constant(mod, mname)
   mbyte_len = utf8_byte_length(mname) + 1
   cls_reload = next_temp(main_fn)
@@ -1343,13 +1343,13 @@
   "__a" + method_runtime_arity(node).to_s()
 
 -> class_method_function_name(cname, node)
-  prefix = "__w_" + cname.gsub(":", "__") + "_"
+  prefix = "__w_" + llvm_safe_name(cname.gsub(":", "__")) + "_"
   # Static methods (class methods) don't carry an arity suffix — the
   # raw-i64 ABI relies on the bare name + a `__boxed` wrapper variant
   # for dynamic dispatch (test #980 / #1005 / #1062). Instance methods
   # keep the arity suffix so multiple-arity overloads can coexist.
   if node.is_class_method == true
-    return "__w_" + cname.gsub(":", "__") + "_S_" + mangle_method_name(node.name)
+    return "__w_" + llvm_safe_name(cname.gsub(":", "__")) + "_S_" + mangle_method_name(node.name)
   prefix + mangle_method_name(node.name) + method_arity_suffix(node)
 
 -> register_class_method_def(main_fn, mod, cname, node)
@@ -1416,7 +1416,7 @@
   false
 
 -> static_method_wrapper_name(cname, mname)
-  "__w_" + cname.gsub(":", "__") + "_S_" + mangle_method_name(mname) + "__boxed"
+  "__w_" + llvm_safe_name(cname.gsub(":", "__")) + "_S_" + mangle_method_name(mname) + "__boxed"
 
 -> normalized_static_param_types(node)
   if node.param_types == nil
@@ -1610,10 +1610,10 @@
     pname = param_runtime_name(params[i])
     pt = child_var_types[pname]
     if is_machine_int64_type(pt)
-      raw = ensure_raw_machine_int(wrapper_fn, typed_value(:i64, "%" + pname), pt, pt)
+      raw = ensure_raw_machine_int(wrapper_fn, typed_value(:i64, "%" + llvm_safe_name(pname)), pt, pt)
       call_args.push(raw)
     else
-      call_args.push("%" + pname)
+      call_args.push("%" + llvm_safe_name(pname))
     i += 1
 
   temp = next_temp(wrapper_fn)
@@ -1789,7 +1789,7 @@
     pt = child_var_types[pname]
     if is_raw_int_storage_type(pt)
       if raw_abi && is_machine_int64_type(pt)
-        child_ctx[:bindings][pname] = "%" + pname
+        child_ctx[:bindings][pname] = "%" + llvm_safe_name(pname)
       elsif pt in (:i64 :u64)
         # Checked unbox, mirroring lower_method_def: a boxed caller passes
         # values >2^47 as heap BigInt boxes, which the plain shl/ashr
@@ -1846,10 +1846,10 @@
         emit_instruction(new_fn, {op: :store_i64, value: child_ctx[:bindings][pname], ptr: ptr})
     else
       if is_raw_int_storage_type(child_var_types[pname])
-        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + pname), child_var_types[pname], child_var_types[pname])
+        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + llvm_safe_name(pname)), child_var_types[pname], child_var_types[pname])
         emit_instruction(new_fn, {op: machine_store_op(child_var_types[pname]), value: raw, ptr: ptr})
       else
-        emit_instruction(new_fn, {op: :store_i64, value: "%" + pname, ptr: ptr})
+        emit_instruction(new_fn, {op: :store_i64, value: "%" + llvm_safe_name(pname), ptr: ptr})
     pi += 1
 
   captured_params = find_captured_params_in_body(body, param_names)
@@ -1868,10 +1868,10 @@
         else
           emit_instruction(new_fn, {op: :store_i64, value: child_ctx[:bindings][pname], ptr: ptr})
       elsif is_raw_int_storage_type(child_var_types[pname])
-        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + pname), child_var_types[pname], child_var_types[pname])
+        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + llvm_safe_name(pname)), child_var_types[pname], child_var_types[pname])
         emit_instruction(new_fn, {op: machine_store_op(child_var_types[pname]), value: raw, ptr: ptr})
       else
-        emit_instruction(new_fn, {op: :store_i64, value: "%" + pname, ptr: ptr})
+        emit_instruction(new_fn, {op: :store_i64, value: "%" + llvm_safe_name(pname), ptr: ptr})
     pi += 1
 
   # Lower body with implicit return for last expression
@@ -2103,12 +2103,12 @@
     i = 0
     while i < wfn[:params].size()
       if wfn[:params][i] == block_name
-        block_reg = "%" + block_name
+        block_reg = "%" + llvm_safe_name(block_name)
         break
       i += 1
 
   if block_reg == nil
-    block_reg = "%" + block_name
+    block_reg = "%" + llvm_safe_name(block_name)
 
   # Lower yield arguments
   arg_regs = []

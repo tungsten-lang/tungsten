@@ -49,3 +49,12 @@ use core/calculus/quadrature
 
   -> .abs(value)
     value < ~0.0 ? ~0.0 - value : value
+
+  # Norm used by numerical error estimators. Unlike `abs`, this also accepts
+  # Complex and the normed Hypercomplex types.
+  -> .magnitude(value)
+    value.abs
+
+  -> .scale_value(value, scalar)
+    return value.scale(scalar) if value.respond_to?("scale")
+    value * scalar

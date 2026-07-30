@@ -27,9 +27,10 @@ jet.derivatives
 
 Inside a differentiated closure, call elementary functions on the active
 value (`x.exp`, `x.log`, `x.sin`, `x.cos`, `x.tan`, `x.sinh`, `x.cosh`,
-`x.tanh`, `x.sqrt`). `Math.sin(x)` and the other `Math` primitives are the
-raw scalar libm surface and intentionally accept real scalars rather than
-active calculus objects.
+`x.tanh`, `x.asin`, `x.acos`, `x.atan`, `x.asinh`, `x.acosh`, `x.atanh`,
+`x.expm1`, `x.log1p`, `x.log2`, `x.log10`, `x.cbrt`, `x.sqrt`). `Math.sin(x)`
+and the other `Math` primitives are the raw scalar surface and intentionally
+accept real scalars rather than active calculus objects.
 
 ## Gradients, Jacobians, and Hessians
 
@@ -50,14 +51,16 @@ mapping = -> (v) [v[0] * v[1], v[0].sin + v[1].cos]
 Calculus.jacobian(mapping, [~2.0, ~3.0])
 ```
 
-The supported elementary functions are `exp`, `log`, `sqrt`, `sin`, `cos`,
-`tan`, `sinh`, `cosh`, `tanh`, `asin`, `acos`, `atan`, and constant powers.
-Branches and singular points retain their ordinary analytic limitations.
+The same elementary surface is supported by `Differential`, along with
+piecewise-smooth `abs` and constant powers. Branches and singular points retain
+their ordinary analytic limitations; `abs` at zero and `cbrt` derivatives at
+zero fail loudly.
 
 ## Adaptive integration
 
-`Calculus.integrate` uses adaptive Simpson subdivision on a finite interval.
-The result never hides the stopping condition:
+`Calculus.integrate` uses adaptive Simpson subdivision on a finite real
+parameter interval. Integrands may return real or complex values. The result
+never hides the stopping condition:
 
 ```w
 result = Calculus.integrate(
@@ -76,6 +79,17 @@ result.intervals
 result.converged?
 ```
 
+For example, complex quadrature uses the same call:
+
+```w
+i = Complex<f64>.i
+wave = Calculus.integrate(
+  -> (x) i.scale(x).exp,
+  ~0.0,
+  ~3.141592653589793)
+# wave.value ≈ 0 + 2i
+```
+
 `QuadratureResult#certified?` is always false. Its error is the accumulated
 Simpson/Richardson estimate, not an interval-arithmetic proof. Improper,
 oscillatory-specialized, singular, and multidimensional quadrature remain
@@ -85,8 +99,9 @@ future capabilities.
 
 The derived `Math` layer now uses cancellation-safe local series for `expm1`
 and `log1p`, sign-stable saturation for `tanh`, scaled `hypot`, stable inverse
-hyperbolic formulas, and exact inverse-trig endpoint handling. These are still
-binary64 numerical functions, not symbolic transcendental expressions.
+hyperbolic formulas, a binary64-accurate range-reduced `atan`, and exact
+inverse-trig endpoint handling. These are still binary64 numerical functions,
+not symbolic transcendental expressions.
 
 Current operator dispatch is receiver-directed: write `x * ~2.0` inside an
 active closure. Reverse scalar operations such as `~2.0 * x` need a future

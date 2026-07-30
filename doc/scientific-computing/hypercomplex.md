@@ -20,3 +20,38 @@ Tungsten's tower is rare in production languages:
 
 Do not hide the tower in a bit: it is a **language identity** feature.
 Ensure autoload rows stay registered in `core/tungsten.w`.
+
+## Complex analysis
+
+`Complex<T>` has polar constructors and principal elementary functions:
+
+```w
+i = Complex<f64>.i
+z = Complex<f64>.polar(~2.0, ~0.7)
+
+z.exp
+z.log
+z.sqrt
+z.sin
+z.cos
+z.tan
+z.sinh
+z.cosh
+z.tanh
+z.asin
+z.acos
+z.atan
+z.asinh
+z.acosh
+z.atanh
+z.pow(~0.5)
+```
+
+`**` remains exact integer exponentiation by squaring; `pow` is the principal
+complex power `exp(exponent * log(z))`. Branch-sensitive functions use the
+principal logarithm with argument in `(−π, π]`.
+
+`Calculus.integrate` accepts complex-valued integrands and reports a real norm
+for its error estimate. Taylor jets and multivariate differentials support the
+same real elementary-function names, so analytic formulas need minimal changes
+when moving between evaluation modes.

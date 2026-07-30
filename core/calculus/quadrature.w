@@ -39,7 +39,8 @@
 
 + Calculus
   -> .simpson(a, b, fa, fm, fb)
-    (b - a) * (fa + ~4.0 * fm + fb) / ~6.0
+    weighted = fa + Calculus.scale_value(fm, ~4.0) + fb
+    Calculus.scale_value(weighted, (b - a) / ~6.0)
 
   # Internal return tuple:
   # [corrected value, error estimate, new evaluations, leaf intervals, ok]
@@ -52,8 +53,8 @@
     left = Calculus.simpson(a, middle, fa, fl, fm)
     right = Calculus.simpson(middle, b, fm, fr, fb)
     delta = left + right - whole
-    error = Calculus.abs(delta) / ~15.0
-    corrected = left + right + delta / ~15.0
+    error = Calculus.magnitude(delta) / ~15.0
+    corrected = left + right + Calculus.scale_value(delta, ~1.0 / ~15.0)
 
     if error <= tolerance
       return [corrected, error, 2, 2, true]
@@ -96,12 +97,12 @@
     fb = f(b)
     whole = Calculus.simpson(a, b, fa, fm, fb)
     tolerance = abs_tol
-    relative = rel_tol * Calculus.abs(whole)
+    relative = rel_tol * Calculus.magnitude(whole)
     tolerance = relative if relative > tolerance
     result = Calculus.adaptive_simpson(
       f, a, b, fa, fm, fb, whole, tolerance, max_depth)
     QuadratureResult.new(
-      sign * result[0],
+      Calculus.scale_value(result[0], sign),
       result[1],
       3 + result[2],
       result[3],

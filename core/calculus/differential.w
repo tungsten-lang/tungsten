@@ -166,6 +166,67 @@
     first = ~1.0 - value * value
     self.unary_transform(value, first, ~0.0 - ~2.0 * value * first)
 
+  -> asinh
+    base = ~1.0 + @value * @value
+    root = Math.sqrt(base)
+    self.unary_transform(
+      Math.asinh(@value),
+      ~1.0 / root,
+      (~0.0 - @value) / (base * root))
+
+  -> acosh
+    base = @value * @value - ~1.0
+    root = Math.sqrt(base)
+    self.unary_transform(
+      Math.acosh(@value),
+      ~1.0 / root,
+      (~0.0 - @value) / (base * root))
+
+  -> atanh
+    base = ~1.0 - @value * @value
+    self.unary_transform(
+      Math.atanh(@value),
+      ~1.0 / base,
+      (~2.0 * @value) / (base * base))
+
+  -> expm1
+    exponential = Math.exp(@value)
+    self.unary_transform(Math.expm1(@value), exponential, exponential)
+
+  -> log1p
+    inverse = ~1.0 / (~1.0 + @value)
+    self.unary_transform(
+      Math.log1p(@value), inverse, ~0.0 - inverse * inverse)
+
+  -> log2
+    inverse_log_two = ~1.4426950408889634
+    inverse = ~1.0 / @value
+    self.unary_transform(
+      Math.log2(@value),
+      inverse_log_two * inverse,
+      ~0.0 - inverse_log_two * inverse * inverse)
+
+  -> log10
+    inverse_log_ten = ~0.4342944819032518
+    inverse = ~1.0 / @value
+    self.unary_transform(
+      Math.log10(@value),
+      inverse_log_ten * inverse,
+      ~0.0 - inverse_log_ten * inverse * inverse)
+
+  -> cbrt
+    value = Math.cbrt(@value)
+    raise "Differential.cbrt is singular at zero" if value == ~0.0
+    first = ~1.0 / (~3.0 * value * value)
+    second = (~-2.0) / (~9.0 * value * value * value * value * value)
+    self.unary_transform(value, first, second)
+
+  -> abs
+    raise "Differential.abs is not differentiable at zero" if @value == ~0.0
+    if @value < ~0.0
+      return self.unary_transform(~0.0 - @value, ~-1.0, ~0.0)
+    self.unary_transform(@value, ~1.0, ~0.0)
+
   -> asin
     base = ~1.0 - @value * @value
     root = Math.sqrt(base)

@@ -113,6 +113,8 @@
   -> .hypot(a, b) f64
     left = Math.abs(a)
     right = Math.abs(b)
+    return left if left.infinite?
+    return right if right.infinite?
     if right > left
       temporary = left
       left = right
@@ -130,18 +132,34 @@
 
   # Inverse trig (radians).
 
-  # atan(x) — Bhaskara-style 6th-order polynomial in [−1, 1], range
-  # reduction via atan(x) = π/2 − atan(1/x) for |x| > 1. Accurate to
-  # ~1e-6 across the full f32 range. Plenty for ML angle work.
+  # atan(x) uses exact quadrant-preserving range reduction to
+  # |x| <= tan(pi/8), followed by the alternating Taylor series through
+  # degree 49. The reduced remainder is below binary64 rounding scale.
+  -> .atan_series(x) f64
+    square = x * x
+    term = x
+    sum = x
+    denominator = 3
+    sign = ~-1.0
+    while denominator <= 49
+      term *= square
+      sum += sign * term / (denominator + ~0.0)
+      sign = ~0.0 - sign
+      denominator += 2
+    sum
+
+  -> .atan_positive(x) f64
+    if x > ~1.0
+      return ~1.5707963267948966 - Math.atan_positive(~1.0 / x)
+    if x > ~0.41421356237309503
+      reduced = (x - ~1.0) / (x + ~1.0)
+      return ~0.7853981633974483 + Math.atan_series(reduced)
+    Math.atan_series(x)
+
   -> .atan(x) f64
     if x < ~0.0
-      ~0.0 - Math.atan(~0.0 - x)
-    elsif x > ~1.0
-      ~1.5707963267948966 - Math.atan(~1.0 / x)
-    else
-      # Polynomial approx for x in [0, 1], minimax fit.
-      x2 = x * x
-      x * (~0.999866 + x2 * (~-0.330299 + x2 * (~0.180141 + x2 * (~-0.085133 + x2 * ~0.020835))))
+      return ~0.0 - Math.atan_positive(~0.0 - x)
+    Math.atan_positive(x)
 
   # asin(x) = atan(x / sqrt(1 - x²))   for |x| < 1
   -> .asin(x) f64

@@ -82,6 +82,11 @@
       n += 1
     TaylorJet.new(out)
 
+  -> scale(scalar)
+    out = []
+    @coefficients.each -> out.push(item * scalar)
+    TaylorJet.new(out)
+
   -> /(other)
     rhs = self.coerce(other)
     raise "TaylorJet division by a zero constant term" if rhs.value == ~0.0
@@ -102,7 +107,7 @@
 
   -> **(exponent)
     if !Calculus.integer?(exponent)
-      return (self.jet_log * exponent).jet_exp
+      return self.jet_log.scale(exponent).jet_exp
     return TaylorJet.constant(~1.0, self.order) if exponent == 0
     return (self ** (0 - exponent)).reciprocal if exponent < 0
     result = TaylorJet.constant(~1.0, self.order)
@@ -238,6 +243,55 @@
   -> tanh
     pair = self.sinh_cosh
     pair[0] / pair[1]
+
+  -> asin
+    one = TaylorJet.constant(~1.0, self.order)
+    derivative = self.derivative / (one - self * self).sqrt
+    derivative.antiderivative(Math.asin(self.value))
+
+  -> acos
+    one = TaylorJet.constant(~1.0, self.order)
+    derivative = -(self.derivative / (one - self * self).sqrt)
+    derivative.antiderivative(Math.acos(self.value))
+
+  -> atan
+    one = TaylorJet.constant(~1.0, self.order)
+    derivative = self.derivative / (one + self * self)
+    derivative.antiderivative(Math.atan(self.value))
+
+  -> asinh
+    one = TaylorJet.constant(~1.0, self.order)
+    derivative = self.derivative / (one + self * self).sqrt
+    derivative.antiderivative(Math.asinh(self.value))
+
+  -> acosh
+    one = TaylorJet.constant(~1.0, self.order)
+    derivative = self.derivative / (self * self - one).sqrt
+    derivative.antiderivative(Math.acosh(self.value))
+
+  -> atanh
+    one = TaylorJet.constant(~1.0, self.order)
+    derivative = self.derivative / (one - self * self)
+    derivative.antiderivative(Math.atanh(self.value))
+
+  -> expm1
+    out = self.jet_exp.coefficients
+    out[0] -= ~1.0
+    TaylorJet.new(out)
+
+  -> log1p
+    (self + ~1.0).jet_log
+
+  -> log2
+    self.jet_log.scale(~1.4426950408889634)
+
+  -> log10
+    self.jet_log.scale(~0.4342944819032518)
+
+  -> cbrt
+    exponent = ~1.0 / ~3.0
+    return -((-self) ** exponent) if self.value < ~0.0
+    self ** exponent
 
   -> sqrt
     root = Math.sqrt(self.value)

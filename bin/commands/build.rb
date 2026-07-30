@@ -104,15 +104,17 @@ end
 # (implementations/c/build/tungsten-c) — fastest, no separate Spinel
 # install needed. --spinel opts into the precompiled spinel stage0
 # path. --ruby (or TUNGSTEN_BOOTSTRAP=ruby) is the legacy
-# pure-Ruby fallback. PGO also forks off into the Ruby path because
-# the PGO instrumentation lives there.
+# pure-Ruby fallback. PGO is a post-step on stage-2 .ll and runs on
+# whichever bootstrap produced it (historically it forced the slow Ruby
+# path, which made --pgo unused in practice; the C path's stage2-c.ll
+# feeds it just as well — measured −16% instructions on self-compile).
 if spinel_requested && !spinel_available
   $stderr.puts "Spinel not found at #{SPINEL_BIN} — `--spinel` requested but unavailable. Run `rake deps` to install Spinel."
   exit 1
 end
 
 use_spinel_bootstrap = spinel_requested
-use_c_bootstrap = !ruby_bootstrap_requested && !spinel_requested && !pgo_build
+use_c_bootstrap = !ruby_bootstrap_requested && !spinel_requested
 
 build_cache_dir = File.join(ROOT, "build/cache")
 FileUtils.mkdir_p(build_cache_dir)
@@ -679,6 +681,67 @@ zstd_cflags, zstd_libs = cached_system_deps("zstd_flags", [
   [cflags, libs]
 end
 
+# PGO post-step, shared by every bootstrap path that produced a stage-2
+# compiler: re-link the compiler via ITS OWN driver with clang profile
+# flags (the driver owns the full link line -- runtime archive, onig/zstd,
+# frameworks -- so no source list to keep in sync here), profile it
+# compiling the compiler, merge, and rebuild with -fprofile-use.
+# Measured: 53.6B -> 44.9B instructions retired on self-compile (-16%).
+run_pgo_post_step = lambda do |stage2_bin, label|
+  puts
+  puts "#{bold}==> PGO: profile-guided optimization#{reset}"
+  t_pgo_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+  pgo_dir = File.join(build_scratch_dir, "pgo")
+  pgo_profraw = File.join(pgo_dir, "default-%p.profraw")
+  pgo_profdata = File.join(pgo_dir, "default.profdata")
+  pgo_instrumented = File.join(pgo_dir, "tungsten-instrumented")
+  pgo_optimized = File.join(pgo_dir, "tungsten-pgo")
+  FileUtils.mkdir_p(pgo_dir)
+
+  # 3a: Rebuild the compiler with profiling instrumentation. The stage-2
+  # binary re-emits its own IR (~2s) and clang links it with our flags.
+  puts "    #{dim}instrumenting...#{reset}"
+  instr_env = { "TUNGSTEN_CLANG_OPT" => "-O3 -fprofile-generate=#{pgo_dir} -mllvm -vp-counters-per-site=8" }
+  unless system(instr_env, stage2_bin, "compile", TUNGSTEN_W, "--out", pgo_instrumented, chdir: ROOT)
+    $stderr.puts "#{red}PGO instrumentation build failed#{reset}"
+    exit 1
+  end
+
+  # 3b: Run instrumented binary on representative workload (compile itself)
+  puts "    #{dim}profiling...#{reset}"
+  profile_env = { "LLVM_PROFILE_FILE" => pgo_profraw }
+  unless system(profile_env, pgo_instrumented, "compile", TUNGSTEN_W, "--out", File.join(pgo_dir, "train-out"), chdir: ROOT)
+    $stderr.puts "#{red}PGO profiling run failed#{reset}"
+    exit 1
+  end
+
+  # 3c: Merge profile data
+  llvm_profdata = `xcrun -f llvm-profdata 2>/dev/null`.strip
+  llvm_profdata = "llvm-profdata" if llvm_profdata.empty?
+  raws = Dir.glob(File.join(pgo_dir, "*.profraw"))
+  unless raws.any? && system(llvm_profdata, "merge", "-sparse", *raws, "-o", pgo_profdata)
+    $stderr.puts "#{red}llvm-profdata merge failed#{reset}"
+    exit 1
+  end
+
+  # 3d: Rebuild with profile data
+  puts "    #{dim}optimizing...#{reset}"
+  opt_env = { "TUNGSTEN_CLANG_OPT" =>
+    "-O3 -fprofile-use=#{pgo_profdata} -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date" }
+  unless system(opt_env, stage2_bin, "compile", TUNGSTEN_W, "--out", pgo_optimized, chdir: ROOT)
+    $stderr.puts "#{red}PGO optimization build failed#{reset}"
+    exit 1
+  end
+
+  t_pgo_end = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  puts "    #{dim}PGO: #{ms(t_pgo_end - t_pgo_start)}#{reset}"
+
+  puts
+  install_compiler.call(pgo_optimized, label)
+end
+
+
 # Stage 1 and stage 2 both link this archive with --no-lto. Keeping LLVM
 # bitcode here made clang reprocess the runtime during each supposedly
 # no-LTO link; native objects cut several seconds while preserving emitted IR.
@@ -1134,7 +1197,14 @@ unless bit_only
       end
 
       puts
-      install_compiler.call(stage2, "C VM")
+      if pgo_build
+        # PGO rides the stage-2 IR this path just emitted and verified; the
+        # shared post-step below (instrument → profile → merge → rebuild)
+        # installs the optimized binary instead of plain stage 2.
+        run_pgo_post_step.call(stage2, "C VM + PGO")
+      else
+        install_compiler.call(stage2, "C VM")
+      end
     end
   elsif use_spinel_bootstrap
     stage1 = File.join(build_scratch_dir, "tungsten-stage1")
@@ -1356,73 +1426,7 @@ unless bit_only
     end
 
     if pgo_build
-      puts
-      puts "#{bold}==> PGO: profile-guided optimization#{reset}"
-      t_pgo_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-
-      pgo_dir = File.join(build_scratch_dir, "pgo")
-      pgo_profraw = File.join(pgo_dir, "default.profraw")
-      pgo_profdata = File.join(pgo_dir, "default.profdata")
-      pgo_instrumented = File.join(pgo_dir, "tungsten-instrumented")
-      pgo_optimized = File.join(pgo_dir, "tungsten-pgo")
-      FileUtils.mkdir_p(pgo_dir)
-
-      # 3a: Recompile stage-2 IR with profiling instrumentation
-      puts "    #{dim}instrumenting...#{reset}"
-      pgo_ll = stage2_ll.dup
-      unless File.exist?(pgo_ll)
-        $stderr.puts "#{red}No stage-2 .ll at #{pgo_ll} — cannot PGO#{reset}"
-        exit 1
-      end
-      pgo_instr_flags = %w[-O3 -DNDEBUG -march=native -mtune=native -fprofile-generate -mllvm -vp-counters-per-site=8]
-      pgo_instr_flags += RUBY_PLATFORM =~ /darwin/ ? %w[-Wl,-dead_strip -Wl,-stack_size,0x8000000] : %w[-fuse-ld=lld -Wl,--gc-sections]
-      pgo_instr_flags += onig_cflags + onig_libs
-      pgo_srcs = runtime_srcs.map { |s| File.join(RUNTIME_DIR, s) }
-      # Check if the compiler IR uses zstd
-      if File.read(pgo_ll).include?("@w_slab_init_static_zstd(") || File.read(pgo_ll).include?("@w_zstd_compress_llvm_escaped(")
-        pgo_srcs << File.join(RUNTIME_DIR, "slab_zstd.c")
-        zstd_cf = `pkg-config --cflags libzstd 2>/dev/null`.split
-        zstd_lf = `pkg-config --libs libzstd 2>/dev/null`.split
-        pgo_instr_flags += zstd_cf + zstd_lf
-      end
-      unless system(runtime_cc, *pgo_instr_flags, pgo_ll, *pgo_srcs, "-o", pgo_instrumented)
-        $stderr.puts "#{red}PGO instrumentation build failed#{reset}"
-        exit 1
-      end
-
-      # 3b: Run instrumented binary on representative workload (compile itself)
-      puts "    #{dim}profiling...#{reset}"
-      ENV["LLVM_PROFILE_FILE"] = pgo_profraw
-      unless system(pgo_instrumented, "compile", TUNGSTEN_W, "--out", "/dev/null")
-        $stderr.puts "#{red}PGO profiling run failed#{reset}"
-        exit 1
-      end
-      ENV.delete("LLVM_PROFILE_FILE")
-
-      # 3c: Merge profile data
-      llvm_profdata = `xcrun -f llvm-profdata 2>/dev/null`.strip
-      llvm_profdata = "llvm-profdata" if llvm_profdata.empty?
-      unless system(llvm_profdata, "merge", "-sparse", pgo_profraw, "-o", pgo_profdata)
-        $stderr.puts "#{red}llvm-profdata merge failed#{reset}"
-        exit 1
-      end
-
-      # 3d: Rebuild with profile data
-      puts "    #{dim}optimizing...#{reset}"
-      pgo_opt_flags = %w[-O3 -DNDEBUG -march=native -mtune=native -flto] + ["-fprofile-use=#{pgo_profdata}"]
-      pgo_opt_flags += RUBY_PLATFORM =~ /darwin/ ? %w[-Wl,-dead_strip -Wl,-stack_size,0x8000000] : %w[-fuse-ld=lld -Wl,--gc-sections]
-      pgo_opt_flags += onig_cflags + onig_libs
-      pgo_opt_flags += zstd_cf + zstd_lf if defined?(zstd_cf) && zstd_cf
-      unless system(runtime_cc, *pgo_opt_flags, pgo_ll, *pgo_srcs, "-o", pgo_optimized)
-        $stderr.puts "#{red}PGO optimization build failed#{reset}"
-        exit 1
-      end
-
-      t_pgo_end = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      puts "    #{dim}PGO: #{ms(t_pgo_end - t_pgo_start)}#{reset}"
-
-      puts
-      install_compiler.call(pgo_optimized, "PGO")
+      run_pgo_post_step.call(stage2, "PGO")
     else
       puts
       install_compiler.call(stage2)

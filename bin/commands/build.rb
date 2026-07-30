@@ -608,7 +608,7 @@ puts "#{bold}==> Runtime: compiling C sources#{reset}"
 t_runtime_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
 tls_enabled = ENV["TLS"] || ENV["TUNGSTEN_TLS"]
-runtime_srcs = %w[runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c tls_stub.c aks.c slab_zstd.c]
+runtime_srcs = %w[runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c tls_stub.c aks.c]
 runtime_srcs << platform_event_src if platform_event_src
 runtime_srcs << "tls.c" if tls_enabled
 metal_enabled = RUBY_PLATFORM =~ /darwin/
@@ -679,6 +679,20 @@ zstd_cflags, zstd_libs = cached_system_deps("zstd_flags", [
   end
   [cflags, libs]
 end
+
+# Mirror bootstrap.sh's optional-zstd contract: hosts without libzstd (or with
+# TUNGSTEN_BOOTSTRAP_DISABLE_ZSTD=1) link runtime/slab_zstd_stub.c — same
+# symbols, aborts only if a zstd slab path is actually exercised — instead of
+# dying on <zstd.h> at compile. Every successful detection above ends with a
+# non-empty zstd_libs, so that is the availability test. The chosen source
+# joins runtime_srcs before runtime_dependency_files is computed, so stub and
+# real archives hash to different cache keys automatically.
+zstd_available = zstd_libs.any? && ENV["TUNGSTEN_BOOTSTRAP_DISABLE_ZSTD"] != "1"
+unless zstd_available
+  zstd_cflags = []
+  zstd_libs = []
+end
+runtime_srcs << (zstd_available ? "slab_zstd.c" : "slab_zstd_stub.c")
 
 # Stage 1 and stage 2 both link this archive with --no-lto. Keeping LLVM
 # bitcode here made clang reprocess the runtime during each supposedly
@@ -1387,11 +1401,10 @@ unless bit_only
       pgo_instr_flags += onig_cflags + onig_libs
       pgo_srcs = runtime_srcs.map { |s| File.join(RUNTIME_DIR, s) }
       # Check if the compiler IR uses zstd
+      # runtime_srcs already carries slab_zstd.c (or the stub) — appending it
+      # again here put the same file on the link line twice: duplicate symbols.
       if File.read(pgo_ll).include?("@w_slab_init_static_zstd(") || File.read(pgo_ll).include?("@w_zstd_compress_llvm_escaped(")
-        pgo_srcs << File.join(RUNTIME_DIR, "slab_zstd.c")
-        zstd_cf = `pkg-config --cflags libzstd 2>/dev/null`.split
-        zstd_lf = `pkg-config --libs libzstd 2>/dev/null`.split
-        pgo_instr_flags += zstd_cf + zstd_lf
+        pgo_instr_flags += zstd_cflags + zstd_libs
       end
       unless system(runtime_cc, *pgo_instr_flags, pgo_ll, *pgo_srcs, "-o", pgo_instrumented)
         $stderr.puts "#{red}PGO instrumentation build failed#{reset}"

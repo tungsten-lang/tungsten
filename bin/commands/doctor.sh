@@ -87,7 +87,7 @@ fi
 if printf '#include <zstd.h>\n' | clang $zstd_cflags -E -x c - >/dev/null 2>&1; then
   check "libzstd (zstd.h)" "ok" 1
 else
-  check "libzstd (zstd.h)" "not found" 0
+  check "libzstd (optional)" "not found — compressed string slabs disabled" 1
 fi
 
 # Linux native links compile runtime/openblas_bridge.c only when IR needs BLAS

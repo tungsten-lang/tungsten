@@ -52,6 +52,12 @@ step() { printf '\n%s==> %s%s\n' "$bold" "$*" "$reset"; }
 ok()   { printf '    %s%s%s %s\n' "$green" "$1" "$reset" "${2:-}"; }
 die()  { printf '%serror:%s %s\n' "$red" "$reset" "$*" >&2; exit 1; }
 
+disable_zstd="${TUNGSTEN_BOOTSTRAP_DISABLE_ZSTD:-0}"
+case "$disable_zstd" in
+  0|1) ;;
+  *) die "TUNGSTEN_BOOTSTRAP_DISABLE_ZSTD must be 0 or 1" ;;
+esac
+
 sha256_stdin() {
   if command -v shasum >/dev/null 2>&1; then
     shasum -a 256 | awk '{print $1}'
@@ -186,22 +192,68 @@ case "$UNAME_S" in
   *)      EVENT_SRC=event_epoll.c;  METAL_SRCS="" ;;
 esac
 
-RUNTIME_SRCS=(runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c tls_stub.c aks.c slab_zstd.c "$EVENT_SRC")
+if [ -n "${TUNGSTEN_ZSTD_CFLAGS+x}" ]; then
+  zstd_cflags="$TUNGSTEN_ZSTD_CFLAGS"
+else
+  zstd_cflags="$(pkg-config --cflags libzstd 2>/dev/null || true)"
+  if [ -z "$zstd_cflags" ] && [ -f /opt/homebrew/include/zstd.h ]; then
+    zstd_cflags="-I/opt/homebrew/include"
+  fi
+fi
+
+if [ -n "${TUNGSTEN_ZSTD_LDFLAGS+x}" ]; then
+  zstd_libs="$TUNGSTEN_ZSTD_LDFLAGS"
+  zstd_probe_libs="$zstd_libs"
+else
+  zstd_libs="$(pkg-config --libs libzstd 2>/dev/null || true)"
+  if [ -z "$zstd_libs" ] &&
+     { [ -f /opt/homebrew/lib/libzstd.a ] ||
+       [ -f /opt/homebrew/lib/libzstd.dylib ]; }; then
+    zstd_libs="-L/opt/homebrew/lib -lzstd"
+  fi
+  zstd_probe_libs="${zstd_libs:--lzstd}"
+fi
+
+zstd_available=0
+if [ "$disable_zstd" -eq 0 ]; then
+  # Probe the complete contract, not just the header: minimal competition
+  # images may provide libzstd.so.1 without either zstd.h or the -lzstd linker
+  # name supplied by the development package.
+  # shellcheck disable=SC2086
+  if printf '#include <zstd.h>\nint main(void){return (int)ZSTD_isError(0);}\n' |
+       "$BOOTSTRAP_CC" $zstd_cflags -x c - $zstd_probe_libs -o /dev/null \
+         >/dev/null 2>&1; then
+    zstd_available=1
+    zstd_libs="$zstd_probe_libs"
+  fi
+fi
+
+if [ "$zstd_available" -eq 1 ]; then
+  ZSTD_RUNTIME_SRC=slab_zstd.c
+else
+  # A failed probe silently downgrades to the stub only on the auto-detect
+  # path. Explicitly configured zstd flags are a statement of intent: if
+  # they cannot link the probe, fail loudly instead of shipping a compiler
+  # whose compressed-slab support quietly vanished.
+  if [ "$disable_zstd" -eq 0 ] &&
+     { [ -n "${TUNGSTEN_ZSTD_CFLAGS+x}" ] || [ -n "${TUNGSTEN_ZSTD_LDFLAGS+x}" ]; }; then
+    printf 'error: TUNGSTEN_ZSTD_CFLAGS/TUNGSTEN_ZSTD_LDFLAGS are set but the zstd link probe failed\n' >&2
+    printf '       (cflags: %s | libs: %s)\n' "$zstd_cflags" "$zstd_probe_libs" >&2
+    printf '       Fix the flags, unset them for auto-detection, or set TUNGSTEN_BOOTSTRAP_DISABLE_ZSTD=1.\n' >&2
+    exit 1
+  fi
+  ZSTD_RUNTIME_SRC=slab_zstd_stub.c
+  zstd_cflags=""
+  zstd_libs=""
+fi
+
+RUNTIME_SRCS=(
+  runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c tls_stub.c aks.c
+  "$ZSTD_RUNTIME_SRC" "$EVENT_SRC"
+)
 # shellcheck disable=SC2206
 for m in $METAL_SRCS; do RUNTIME_SRCS+=("$m"); done
 
-zstd_cflags="$(pkg-config --cflags libzstd 2>/dev/null || true)"
-if [ -z "$zstd_cflags" ] && [ -f /opt/homebrew/include/zstd.h ]; then
-  zstd_cflags="-I/opt/homebrew/include"
-fi
-zstd_libs="$(pkg-config --libs libzstd 2>/dev/null || true)"
-if [ -z "$zstd_libs" ]; then
-  if [ -f /opt/homebrew/lib/libzstd.a ] || [ -f /opt/homebrew/lib/libzstd.dylib ]; then
-    zstd_libs="-L/opt/homebrew/lib -lzstd"
-  else
-    zstd_libs="-lzstd"
-  fi
-fi
 cflags=(-O2 -DNDEBUG -pthread $zstd_cflags)
 if [ "$UNAME_S" = Linux ]; then cflags+=(-D_DEFAULT_SOURCE); fi
 runtime_objc_flags=(-O2 -DNDEBUG -c -x objective-c)
@@ -289,8 +341,8 @@ export TUNGSTEN_CLANG_OPT="${TUNGSTEN_CLANG_OPT:--O0}"
 # the C VM. Off for `tungsten build` so stage1/stage2 keep identical ASTs.
 export TUNGSTEN_C_FAST_PARSE="${TUNGSTEN_C_FAST_PARSE:-1}"
 
-if [ -z "${TUNGSTEN_ZSTD_CFLAGS:-}" ]; then export TUNGSTEN_ZSTD_CFLAGS="$zstd_cflags"; fi
-if [ -z "${TUNGSTEN_ZSTD_LDFLAGS:-}" ]; then export TUNGSTEN_ZSTD_LDFLAGS="$zstd_libs"; fi
+export TUNGSTEN_ZSTD_CFLAGS="$zstd_cflags"
+export TUNGSTEN_ZSTD_LDFLAGS="$zstd_libs"
 export TUNGSTEN_CC="${TUNGSTEN_CC:-$BOOTSTRAP_CC}"
 export TUNGSTEN_AR="${TUNGSTEN_AR:-$BOOTSTRAP_AR}"
 export TUNGSTEN_OS="${TUNGSTEN_OS:-$UNAME_S}"

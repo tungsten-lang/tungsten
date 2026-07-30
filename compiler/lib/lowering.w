@@ -1864,6 +1864,56 @@ use lowering/definitions
     return nil
   target + name.slice(c, name.size() - c)
 
+# A bare identifier in an instance-method body is ambiguous between an
+# implicit `self.name()` call and one of Tungsten's module-scope bindings.
+# Top-level bindings are predeclared before method bodies are lowered so
+# functions may read globals initialized later. That prepass must not,
+# however, retroactively capture a method that is already part of the
+# receiver's class hierarchy:
+#
+#   -> normalize(x)
+#     equal?(x, zero)
+#   ...
+#   zero = some_unrelated_value
+#
+# The interpreter resolves `zero` as a method when normalize runs before the
+# later assignment. Prefer a statically-known instance method here; unknown
+# names retain the existing top-level-global behavior. The hierarchy walk is
+# also required for ordinary inherited helpers.
+-> class_has_instance_method?(mod, class_name, method_name)
+  if class_name == nil || mod[:class_method_asts] == nil
+    return false
+  current = class_name
+  guard = 0
+  while current != nil && guard < 64
+    if mod[:class_method_asts][current + "." + method_name] != nil
+      return true
+    supers = mod[:class_super_names]
+    current = supers == nil ? nil : supers[current]
+    guard += 1
+  false
+
+-> lower_implicit_self_bare_method(ctx, name)
+  wfn = ctx[:func]
+  self_val = lower_var(ctx, Tungsten:AST:Var.new("__self"))
+  self_reg = ensure_i64_value(wfn, self_val)
+  method_name_tv = lower_string(ctx, Tungsten:AST:String.new(name))
+  method_name_val = ensure_i64_value(wfn, method_name_tv)
+  temp_args = next_temp(wfn)
+  temp = next_temp(wfn)
+  ic_id = ctx[:mod][:next_ic]
+  ctx[:mod][:next_ic] = ic_id + 1
+  emit_instruction(wfn, {
+    op: :call_method_i64,
+    temp: temp,
+    temp_args_val: temp_args,
+    receiver: self_reg,
+    method_name_val: method_name_val,
+    args: [],
+    ic_id: ic_id
+  })
+  typed_value(:i64, temp)
+
 # Materialize all temp bindings to var slots. Called before control flow
 # (if, while, case, etc.) and closures so that cross-block reads and
 # capture analysis find values in var_slots.
@@ -2062,6 +2112,12 @@ use lowering/definitions
     emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_argv", args: []})
     return typed_value(:i64, temp)
 
+  # A declared method on self is lexical to the class and wins over a
+  # same-spelled module binding predeclared by the top-level analysis pass.
+  if ctx[:class_name] != nil && ctx[:is_class_method] != true
+    if class_has_instance_method?(ctx[:mod], ctx[:class_name], name)
+      return lower_implicit_self_bare_method(ctx, name)
+
   # Check if it's a top-level (module-scope) variable
   if ctx[:mod][:top_level_vars][name] == true
     temp = next_temp(wfn)
@@ -2111,24 +2167,7 @@ use lowering/definitions
   # Implicit self dispatch: inside a class, bare `foo` resolves as self.foo().
   # This handles accessor methods (ro/rw) and any zero-arg instance method.
   if ctx[:class_name] != nil
-    self_val = lower_var(ctx, Tungsten:AST:Var.new("__self"))
-    self_reg = ensure_i64_value(wfn, self_val)
-    method_name_tv = lower_string(ctx, Tungsten:AST:String.new(name))
-    method_name_val = ensure_i64_value(wfn, method_name_tv)
-    temp_args = next_temp(wfn)
-    temp = next_temp(wfn)
-    ic_id = ctx[:mod][:next_ic]
-    ctx[:mod][:next_ic] = ic_id + 1
-    emit_instruction(wfn, {
-      op: :call_method_i64,
-      temp: temp,
-      temp_args_val: temp_args,
-      receiver: self_reg,
-      method_name_val: method_name_val,
-      args: [],
-      ic_id: ic_id
-    })
-    return typed_value(:i64, temp)
+    return lower_implicit_self_bare_method(ctx, name)
 
   # Undefined variable — treat as nil
   typed_value(:i64, w_nil.to_s())

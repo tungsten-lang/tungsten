@@ -1077,7 +1077,10 @@ use target
           return cs[:w_class]
         if cs.has_key?(:rt) && cs[:rt] == :class
           return cs
-    if env.defined?(name)
+    # Locals and parameters win, but stop at the current method frame. A
+    # module binding lives beyond that barrier and must not capture a declared
+    # zero-arg method on self with the same name.
+    if env.defined_locally_or_in_scope?(name)
       return env.get(name)
     # File is a compiler intrinsic rather than an autoload-registry entry.
     # Its Mmap constructor needs the small core/mmap facade in the tree walker;
@@ -1094,6 +1097,14 @@ use target
     expanded = expand_constant_alias(name)
     if expanded != nil && @classes.has_key?(expanded)
       return @classes[expanded]
+    # Match compiled lowering: a declared instance method is lexical to the
+    # receiver and wins over a same-spelled module binding. This check must
+    # precede @env below because method-frame Environment reads deliberately
+    # reach through their write barrier to top-level bindings.
+    s = current_self()
+    m = implicit_self_method(s, name, 0, false)
+    if m != nil
+      return call_w_method(s, m, [], nil, env)
     if @env.defined?(name)
       return @env.get(name)
     # Try as bare method call

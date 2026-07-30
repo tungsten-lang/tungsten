@@ -294,6 +294,7 @@ interpreter_specs=(
   spec/compiler/int_bigint_promotion_spec.w
   spec/compiler/ivar_param_type_spec.w
   spec/compiler/llvm_name_mangling_injective_spec.w
+  spec/compiler/top_level_method_name_hygiene_spec.w
   spec/interpreter/float_leaf_native_spec.w
   spec/interpreter/big_array_cap_empty_revisit_spec.w
   spec/interpreter/hash_size_view_field_spec.w

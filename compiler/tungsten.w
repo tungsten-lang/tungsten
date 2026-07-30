@@ -1446,6 +1446,11 @@ while i < args.size()
   q_prefix = dev_runtime_shell_quote(prefix)
   if system(dev_runtime_shell_quote(llvm_bin + "/llvm-split") + " -j " + parts.to_s() + " -o " + q_prefix + " " + q_ll) != true
     return nil
+  # Stale part objects from a previous run would satisfy the existence
+  # check below even when a clang job fails (sh's bare `wait` exits 0
+  # regardless of job status) — clear them so every .o linked was
+  # produced by THIS spawn.
+  system("rm -f " + q_prefix + "*.o")
   flags = "-O3 -DNDEBUG " + march_flags() + " -fmerge-all-constants "
   on macos
     flags = flags + "-fveclib=Darwin_libsystem_m "
@@ -1535,7 +1540,7 @@ while i < args.size()
     defs = defs + dk[dki] + "=" + build_defines[dk[dki]] + ";"
     dki += 1
   ra = runtime_archive == nil ? "" : runtime_archive
-  ["irbin-v2", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), release_mode.to_s(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_C_INCLUDES"), defs].join("|")
+  ["irbin-v2", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), release_mode.to_s(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
 
 # Valid cached binary for this identity? Reads the manifest, revalidates
 # every recorded (path, mtime_ns), and on success installs the cached

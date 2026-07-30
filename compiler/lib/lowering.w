@@ -82,7 +82,7 @@ use lowering/definitions
     return nil
   k = ast_kind(node)
   nested = in_nested
-  if k in (:fn_def :method_def :class_def :module_def :block)
+  if k in (:fn_def :method_def :class_def :module_def :trait_def :block)
     nested = true
   if nested && k == :var && node.name != nil
     refs[node.name] = true

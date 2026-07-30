@@ -35,7 +35,7 @@ use runtime_types
 # node past 61 bytes), w_str_append (may realloc its receiver's buffer
 # into the result), w_hash_set / w_array_push (store the value).
 -> is_nonretaining_consumer(name)
-  name in ("w_string_byte_length" "w_hash_get" "w_eq" "w_neq" "__w_streq_fast" "__w_eq_fast" "__w_neq_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_string_index" "w_string_rindex" "w_string_count")
+  name in ("w_string_byte_length" "w_hash_get" "w_eq" "w_neq" "__w_streq_fast" "__w_streq2_fast" "__w_eq_fast" "__w_neq_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_string_index" "w_string_rindex" "w_string_count")
 
 # Mark temps that escape through this instruction.
 -> mark_escapes(inst, escaped)

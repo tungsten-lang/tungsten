@@ -25052,18 +25052,25 @@ static WMethod *w_cacheable_type_class_method(WValue recv, WValue name,
     return m;
 }
 
+/* Set by w_method_dispatch's GENERIC constructor block (and only there) to
+ * the init WMethod it selected, assigned as the block RETURNS — a nested
+ * `.new` inside an init re-enters the block, so an assignment made before
+ * init ran would be clobbered and the OUTER class would publish the inner
+ * init. w_method_call_slow reads it to decide that a `.new` dispatch is
+ * IC-cacheable: the special-cased builtin constructors (Response /
+ * ByteArray / BoolArray / Rational / ...) return before the generic block,
+ * never set it, and therefore never publish. The recv twin pins the pair
+ * to the class actually dispatched: without it, a class-method call whose
+ * BODY constructs some object would leave that ctor here and the publish
+ * below would cache it under the class-method's key. */
+static __thread WMethod *g_generic_ctor_selected;
+static __thread WValue g_generic_ctor_recv;
+
 /* Out-of-line slow path: cache miss → full dispatch + populate IC.
  * Only runs on first call per call site (or on type-change); the hot
  * fast path lives in w_method_call_cached below and is inlined into
  * every IR call site under LTO. */
 __attribute__((visibility("hidden")))
-/* Set by w_method_dispatch's GENERIC constructor block (and only there) to
- * the init WMethod it selected. w_method_call_slow reads it to decide that a
- * `.new` dispatch is IC-cacheable: the special-cased builtin constructors
- * (Response / ByteArray / BoolArray / Rational / ...) return before the
- * generic block, never set it, and therefore never publish. */
-static __thread WMethod *g_generic_ctor_selected;
-
 WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
                           WInlineCache *cache, uint64_t key) {
     /* Init IC tables on first slow-path entry. The cached fast path can
@@ -25100,6 +25107,7 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
     }
 
     g_generic_ctor_selected = NULL;
+    g_generic_ctor_recv = 0;
     WValue result = w_method_dispatch(recv, name, &stack_args, W_NIL);
 
     if (key >= 0x100 && w_is_instance(recv)) {
@@ -25126,7 +25134,8 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
          * allocate + init directly. Only the GENERIC ctor block sets
          * g_generic_ctor_selected, so builtin specials never publish. */
         WMethod *cm = g_generic_ctor_selected;
-        if (cm && cm->arity - 1 == argc && argc <= 8) {
+        if (cm && g_generic_ctor_recv == recv && w_hash_key_eq(name, WN_new) &&
+            cm->arity - 1 == argc && argc <= 8) {
             w_ic_publish(cache, key, cm->fn_ptr, -2 - argc);
         }
     }
@@ -25635,7 +25644,6 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
             WValue obj = w_object_new(recv);
             WMethod *m = w_method_lookup_arity(klass, WN_new, args->size + 1);
             if (!m) m = w_method_lookup(klass, WN_new);
-            g_generic_ctor_selected = m;  /* IC-cacheable: generic path taken */
             if (m) {
                 int expected = m->arity - 1;
                 WValue a[16];
@@ -25699,6 +25707,11 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
                          klass->name);
                 w_raise(w_string(cbuf));
             }
+            /* Publish-on-exit: init already ran, so any nested `.new` it
+             * performed has been and gone — this assignment makes the
+             * OUTERMOST selection the one w_method_call_slow observes. */
+            g_generic_ctor_selected = m;
+            g_generic_ctor_recv = recv;
             return obj;
         }
 

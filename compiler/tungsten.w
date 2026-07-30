@@ -1086,6 +1086,22 @@ while i < args.size()
   config << value
   config << "\n"
 
+# The runtime sources an archive build reads — shared by the archive's own
+# mtime-freshness check and the incremental compile cache's manifest, so
+# the two invalidation rules can never drift.
+-> dev_runtime_base_files(ev, generated_thresholds)
+  bases = ["runtime.c", "terminal_input.c", "runtime.h", "wvalue.h",
+           "event_loop.h", "ssmr_witness.h", "w_char_table.c", "aks.c", "tls_stub.c"]
+  if ev == "event_*.c"
+    bases.push("event_kqueue.c")
+    bases.push("event_epoll.c")
+    bases.push("event_iouring.c")
+  else
+    bases.push(ev)
+  if generated_thresholds == "present"
+    bases.push("generated/bigint_thresholds.h")
+  bases
+
 -> dev_runtime_archive_path(runtime_root, cc_identity, ar_identity, compile_flags, event_source, generated_thresholds)
   config = StringBuffer(0)
   config << "dev-runtime-archive-v4\n"
@@ -1134,16 +1150,7 @@ while i < args.size()
   evo = ev.replace(".c", ".o")
 
   # Freshness: reuse the cached archive iff it is newer than every base source.
-  bases = ["runtime.c", "terminal_input.c", "runtime.h", "wvalue.h",
-           "event_loop.h", "ssmr_witness.h", "w_char_table.c", "aks.c", "tls_stub.c"]
-  if ev == "event_*.c"
-    bases.push("event_kqueue.c")
-    bases.push("event_epoll.c")
-    bases.push("event_iouring.c")
-  else
-    bases.push(ev)
-  if generated_thresholds == "present"
-    bases.push("generated/bigint_thresholds.h")
+  bases = dev_runtime_base_files(ev, generated_thresholds)
 
   fresh = StringBuffer(0)
   fresh << "test -e "
@@ -1470,6 +1477,36 @@ while i < args.size()
     i += 1
   objs.to_s()
 
+# Runtime source (path, mtime_ns) rows for the incremental manifest. The
+# cached binary embeds the runtime archive, whose PATH is stable across
+# runtime-source edits (dev_runtime_archive_path hashes config, not
+# content) and whose rebuild happens AFTER the cache probe — so a touched
+# runtime source must invalidate cached binaries here, over exactly the
+# file set the archive's own freshness check watches.
+-> incremental_runtime_entries
+  runtime_dir = resolve_runtime_dir
+  ev = runtime_event_source
+  runtime_root = dev_runtime_source_identity(runtime_dir, runtime_identity())
+  gt = file?(runtime_root + "/generated/bigint_thresholds.h") ? "present" : "absent"
+  bases = dev_runtime_base_files(ev, gt)
+  entries = []
+  bi = 0
+  while bi < bases.size()
+    p = runtime_root + "/" + bases[bi]
+    mt = file_mtime_ns(p)
+    if mt != nil
+      entries.push([p, mt])
+    bi += 1
+  entries
+
+-> incremental_abs_path(p)
+  if p.starts_with?("/")
+    return p
+  pwd = capture("pwd -P 2>/dev/null").strip()
+  if pwd == ""
+    return p
+  pwd + "/" + p
+
 -> incremental_cache_slot(file_path, out_path)
   dir = env("TUNGSTEN_CACHE_DIR")
   if dir == nil || dir == ""
@@ -1479,7 +1516,12 @@ while i < args.size()
     dir = home + "/.tungsten/cache"
   if system("mkdir -p " + dev_runtime_shell_quote(dir)) != true
     return nil
-  dir + "/irbin-" + (file_path + "__" + out_path).replace("/", "_").replace(":", "_")
+  # Hash ABSOLUTE paths into the slot name: embedding them verbatim
+  # overflowed NAME_MAX on deep trees (every store failed "File name too
+  # long"), and relative invocations from two different projects must not
+  # share a slot. The identity line keeps the readable paths.
+  key = incremental_abs_path(file_path) + "__" + incremental_abs_path(out_path)
+  dir + "/irbin-" + wyhash64_hex_string(key)
 
 -> incremental_identity(file_path, out_path)
   exe = ccall("w_executable_path")
@@ -1493,7 +1535,7 @@ while i < args.size()
     defs = defs + dk[dki] + "=" + build_defines[dk[dki]] + ";"
     dki += 1
   ra = runtime_archive == nil ? "" : runtime_archive
-  ["irbin-v1", file_path, out_path, exe, em.to_s(), release_mode.to_s(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), defs].join("|")
+  ["irbin-v2", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), release_mode.to_s(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_C_INCLUDES"), defs].join("|")
 
 # Valid cached binary for this identity? Reads the manifest, revalidates
 # every recorded (path, mtime_ns), and on success installs the cached
@@ -1536,6 +1578,11 @@ while i < args.size()
   while i < files.size()
     parts.push(files[i][1].to_s() + "\t" + files[i][0])
     i += 1
+  rt = incremental_runtime_entries
+  ri = 0
+  while ri < rt.size()
+    parts.push(rt[ri][1].to_s() + "\t" + rt[ri][0])
+    ri += 1
   q_slot_bin = dev_runtime_shell_quote(slot + ".bin")
   tmp = slot + ".bin.tmp"
   if system("cp -p " + dev_runtime_shell_quote(out_path) + " " + dev_runtime_shell_quote(tmp)) != true

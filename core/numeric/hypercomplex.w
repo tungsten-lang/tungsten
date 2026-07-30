@@ -361,6 +361,6 @@
   # Conversion
 
   -> to_s
-    class_name + "(" + components.join(", ") + ")"
+    class.to_s + "(" + components.join(", ") + ")"
 
   -> hash

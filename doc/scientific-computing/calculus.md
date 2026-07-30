@@ -134,6 +134,43 @@ Simpson/Richardson estimate, not an interval-arithmetic proof. Improper,
 oscillatory-specialized, singular, and multidimensional quadrature remain
 future capabilities.
 
+## Certified transcendental enclosures
+
+For proof-oriented real evaluation at rational arguments, `Calculus` has a
+separate exact enclosure surface:
+
+```w
+tolerance = Rational.new(1, 10**30)
+
+pi_value = Calculus.certified_pi(tolerance)
+pi_value.lower_bound
+pi_value.upper_bound
+pi_value.width <= tolerance                 # true
+pi_value.certificate.verified?              # true
+
+Calculus.certified_e(tolerance)
+Calculus.certified_exp(Rational.new(3, 2), tolerance)
+Calculus.certified_log(2, tolerance)
+Calculus.certified_sin(Rational.new(1, 3), tolerance)
+Calculus.certified_cos(Rational.new(1, 3), tolerance)
+Calculus.certified_atan(1, tolerance)
+```
+
+These are `CertifiedTranscendentalValue` objects with
+`CertifiedRealInterval` endpoints in \(\mathbb Q\). They do not pad a
+binary64 result. Exponential uses positive Taylor terms plus a geometric
+tail bound; logarithm uses exact powers-of-two reduction and the atanh
+series; sine and cosine use the alternating Taylor remainder; arctangent
+uses small-argument transformations; and \(\pi\) uses Machin's identity.
+The certificate replays every rational operation and width. The analytic
+series and remainder theorems are explicit trusted theorem imports, not
+kernel-formalized proofs.
+
+The optional term limit fails with `unknown`-style capability errors rather
+than returning a wider unlabelled approximation. This surface is deliberately
+distinct from the current binary64 `Interval`, whose endpoints do not yet
+have full IEEE-1788 outward rounding.
+
 ## Transcendental accuracy
 
 The derived `Math` layer now uses cancellation-safe local series for `expm1`
@@ -152,14 +189,29 @@ Special.betainc(a, b, x)     # regularized incomplete beta
 Special.zeta(s)              # integer or real s > 1
 Special.hurwitz_zeta(s, a)   # real s > 1, a > 0
 Special.lambert_w(x)         # principal real W, x >= -1/e
+
+z = Complex<f64>.new([~0.4, ~-0.3])
+Special.complex_log_gamma(z)       # principal complex log-Gamma
+Special.complex_gamma(z)
+Special.complex_erf(z)             # power-series branch, |z| <= 4
+Special.complex_lambert_w(z, -2)   # explicit integer branch
 ```
 
 Incomplete gamma switches between its convergent lower series and a Lentz
 continued fraction for the small upper tail; incomplete beta likewise selects
 the stable side of its continued fraction. Hurwitz zeta uses an
 Euler--Maclaurin tail. Differential fixtures cover central values and small
-tails against SciPy 1.17.1. These are high-accuracy binary64 algorithms, not
-interval certificates, and complex branches are not yet represented.
+tails against SciPy 1.17.1. Principal complex Gamma/log-Gamma use Lanczos plus
+reflection, complex erf uses its entire power series on the documented disk,
+and complex Lambert W exposes every integer branch and checks the final
+defining-equation residual. Their differential fixtures come from SageMath
+10.9.
+
+These `Special` methods are high-accuracy binary64 algorithms, not interval
+certificates; use the `Calculus.certified_*` subset above when an exact
+rational enclosure is required. Complex zeta/polylogarithms, asymptotic
+complex erf outside the current disk, and certified complex balls remain
+future layers.
 
 Current operator dispatch is receiver-directed: write `x * ~2.0` inside an
 active closure. Reverse scalar operations such as `~2.0 * x` need a future

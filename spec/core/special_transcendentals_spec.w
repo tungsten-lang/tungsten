@@ -19,6 +19,13 @@ use calculus
            ", want " + want.to_s + ", error " + error.to_s)
   << "PASS " + name
 
+-> special_complex_close(name, got, real, imaginary,
+                          tolerance = ~3.0e-13)
+  special_close(name + ".real", got.real, real,
+                tolerance, tolerance)
+  special_close(name + ".imag", got.imag, imaginary,
+                tolerance, tolerance)
+
 special_close("gammainc.lower_series",
               Special.gammainc(~0.5, ~0.1),
               ~0.34527915398142317)
@@ -107,3 +114,64 @@ rescue error
 if !lambert_domain
   raise "FAIL lambertw.domain"
 << "PASS lambertw.domain"
+
+# Principal complex Gamma/log-Gamma, entire erf, and integer Lambert-W
+# branches. Fixtures are differential records from SageMath 10.9.
+complex_z = Complex<f64>.new([~0.4, ~-0.3])
+special_complex_close(
+  "complex.log_gamma",
+  Special.complex_log_gamma(complex_z),
+  ~0.5279912253710829, ~0.6575604927958080)
+special_complex_close(
+  "complex.gamma",
+  Special.complex_gamma(complex_z),
+  ~1.3419819788320783, ~1.0362830129822285)
+special_complex_close(
+  "complex.erf",
+  Special.complex_erf(complex_z),
+  ~0.4644372129795614, ~-0.2944398077693171)
+
+complex_w0_argument = Complex<f64>.new([~1.0, ~1.0])
+complex_w0 = Special.complex_lambert_w(
+  complex_w0_argument)
+special_complex_close(
+  "complex.lambertw.branch0", complex_w0,
+  ~0.6569660692304364, ~0.3254503394134150)
+special_complex_close(
+  "complex.lambertw.branch0.identity",
+  complex_w0*complex_w0.exp,
+  ~1.0, ~1.0)
+
+complex_branch_argument = Complex<f64>.new([~2.0, ~-3.0])
+complex_w1 = Special.complex_lambertw(
+  complex_branch_argument, 1)
+special_complex_close(
+  "complex.lambertw.branch1", complex_w1,
+  ~-0.03158280838987505, ~3.721107986637061)
+complex_w_minus_two = Special.complex_lambert_w(
+  complex_branch_argument, -2)
+special_complex_close(
+  "complex.lambertw.branch_minus2", complex_w_minus_two,
+  ~-1.1972601078812846, ~-11.877910111617443)
+special_complex_close(
+  "complex.lambertw.branch_minus2.identity",
+  complex_w_minus_two*complex_w_minus_two.exp,
+  ~2.0, ~-3.0, ~8.0e-13)
+
+complex_branch_error = false
+begin
+  Special.complex_lambert_w(complex_z, ~0.5)
+rescue error
+  complex_branch_error = true
+if !complex_branch_error
+  raise "FAIL complex.lambertw.branch_type"
+<< "PASS complex.lambertw.branch_type"
+
+complex_erf_radius = false
+begin
+  Special.complex_erf(Complex<f64>.real(~5.0))
+rescue error
+  complex_erf_radius = true
+if !complex_erf_radius
+  raise "FAIL complex.erf.radius"
+<< "PASS complex.erf.radius"

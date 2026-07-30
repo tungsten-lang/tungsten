@@ -37,13 +37,19 @@ of every theorem for which that claim might be useful.
 Bare `π`, `τ`, `ϕ`/`φ`, `ℯ`, and `ℇ` are numeric `Float` constants. Exact
 symbolic work uses `Expression.pi` and `Expression.e`; these remain named
 objects so, for example, `sin(π/6)` can simplify exactly before any floating
-evaluation.
+evaluation. Proof-oriented numeric bounds use `Calculus.certified_pi`,
+`certified_e`, `certified_exp`, `certified_log`, `certified_sin`,
+`certified_cos`, and `certified_atan`; their endpoints and replay arithmetic
+are exact rationals.
 
 The real `Special` surface includes stable regularized incomplete
 gamma/beta tails, real and Hurwitz zeta for \(s>1\), and principal Lambert W;
 Lambert W also propagates through arbitrary Taylor derivatives and
-gradient/Hessian automatic differentiation. Complex branches and
-interval-certified transcendental enclosures remain separate future layers.
+gradient/Hessian automatic differentiation. The complex surface includes
+principal Gamma/log-Gamma, complex erf on its power-series disk, and explicit
+integer Lambert-W branches. Exact rational enclosures are available for the
+certified real elementary subset above; certified complex balls remain a
+future layer.
 
 ## Exact algebra and geometry
 

@@ -9,6 +9,107 @@
 # Stats that consume these live in core/stats.w.
 
 + Special
+  # ---- principal complex branches ----
+
+  -> .complex(value, imaginary = ~0.0)
+    Complex<f64>.new([value, imaginary])
+
+  # Principal complex log-Gamma from the same Lanczos coefficients as the
+  # positive-real implementation. Reflection uses principal complex log and
+  # therefore makes the branch choice explicit.
+  -> .complex_log_gamma(value)
+    z = value
+    one = Special.complex(~1.0)
+    if z.real < ~0.5
+      pi = ~3.14159265358979323846
+      reflected = Special.complex_log_gamma(one - z)
+      sine = z.scale(pi).sin
+      return (
+        Special.complex(Math.log(pi)) -
+        sine.log - reflected)
+    shifted = z - one
+    coefficients = Special.lanczos_coeff
+    series = Special.complex(coefficients[0])
+    index = 1
+    while index < coefficients.size
+      denominator = shifted + Special.complex(index + ~0.0)
+      series += Special.complex(coefficients[index]) / denominator
+      index += 1
+    t = shifted + Special.complex(Special.lanczos_g + ~0.5)
+    (Special.complex(~0.91893853320467274178) +
+     (shifted + Special.complex(~0.5))*t.log -
+     t + series.log)
+
+  -> .complex_lgamma(value)
+    Special.complex_log_gamma(value)
+
+  -> .complex_gamma(value)
+    Special.complex_log_gamma(value).exp
+
+  # Entire complex erf power series. The explicit radius guard avoids
+  # presenting cancellation-dominated large-|z| evaluation as reliable.
+  -> .complex_erf(value)
+    z = value
+    if z.abs > ~4.0
+      raise "Special.complex_erf: |z| > 4 needs an asymptotic branch"
+    factor = ~1.12837916709551257390
+    z_squared = z.sq
+    term = z
+    sum = Special.complex(~0.0)
+    index = 0
+    while index < 500
+      sum += term
+      ratio = (
+        (~0.0 - (2*index + ~1.0)) /
+        ((index + ~1.0)*(2*index + ~3.0)))
+      term = term*z_squared.scale(ratio)
+      if term.abs <= ~2.0e-16*(~1.0 + sum.abs)
+        return sum.scale(factor)
+      index += 1
+    raise "Special.complex_erf: series did not converge"
+
+  # Integer branches of complex Lambert W, refined with Halley's method.
+  # The returned value always satisfies a residual-based convergence check;
+  # failure raises instead of returning the last iterate.
+  -> .complex_lambert_w(value, branch = 0)
+    branch_class = branch.class
+    integral = (
+      branch_class == Integer ||
+      branch_class == Int ||
+      branch_class == BigInt)
+    if !integral
+      raise "Special.complex_lambert_w: branch must be an integer"
+    z = value
+    if z.abs == ~0.0
+      return Special.complex(~0.0) if branch == 0
+      raise "Special.complex_lambert_w: nonprincipal branches have a pole at zero"
+    one = Special.complex(~1.0)
+    two = Special.complex(~2.0)
+    if branch == 0 && z.abs < ~0.75
+      w = z
+    else
+      logarithm = z.log + Complex<f64>.i.scale(
+        ~6.28318530717958647693*(branch + ~0.0))
+      w = logarithm - logarithm.log
+    iterations = 0
+    while iterations < 50
+      exponential = w.exp
+      residual = w*exponential - z
+      denominator = (
+        exponential*(w + one) -
+        (w + two)*residual / (w.scale(~2.0) + two))
+      step = residual / denominator
+      w -= step
+      if step.abs <= ~3.0e-15*(~1.0 + w.abs)
+        final_residual = (w*w.exp - z).abs
+        if final_residual <= ~2.0e-14*(~1.0 + z.abs)
+          return w
+      iterations += 1
+    raise "Special.complex_lambert_w: Halley iteration did not converge"
+
+  -> .complex_lambertw(value, branch = 0)
+    Special.complex_lambert_w(value, branch)
+
   # ---- error function ----
   # erf(x) = P(1/2, x^2). The lower incomplete-gamma series is stable for
   # x^2 < 3/2; the complementary continued fraction avoids cancellation in

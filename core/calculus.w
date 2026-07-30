@@ -13,7 +13,9 @@
 #   Calculus.integrate(f, a, b, abs_tol, rel_tol, max_depth)
 
 use core/math
+use core/numeric/rational
 use core/expression
+use core/calculus/certified_transcendentals
 use core/calculus/series
 use core/calculus/jet
 use core/calculus/differential
@@ -56,6 +58,41 @@ use core/calculus/quadrature
   # Complex and the normed Hypercomplex types.
   -> .magnitude(value)
     value.abs
+
+  -> .certified_exp(value, tolerance = nil,
+                     term_limit = 10_000)
+    CertifiedTranscendentals.exp(
+      value, tolerance, term_limit)
+
+  -> .certified_log(value, tolerance = nil,
+                     term_limit = 10_000)
+    CertifiedTranscendentals.log(
+      value, tolerance, term_limit)
+
+  -> .certified_sin(value, tolerance = nil,
+                     term_limit = 10_000)
+    CertifiedTranscendentals.sin(
+      value, tolerance, term_limit)
+
+  -> .certified_cos(value, tolerance = nil,
+                     term_limit = 10_000)
+    CertifiedTranscendentals.cos(
+      value, tolerance, term_limit)
+
+  -> .certified_atan(value, tolerance = nil,
+                      term_limit = 10_000)
+    CertifiedTranscendentals.atan(
+      value, tolerance, term_limit)
+
+  -> .certified_pi(tolerance = nil,
+                    term_limit = 10_000)
+    CertifiedTranscendentals.pi(
+      tolerance, term_limit)
+
+  -> .certified_e(tolerance = nil,
+                   term_limit = 10_000)
+    CertifiedTranscendentals.e(
+      tolerance, term_limit)
 
   -> .scale_value(value, scalar)
     return value.scale(scalar) if value.respond_to?("scale")

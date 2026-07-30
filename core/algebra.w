@@ -40,6 +40,7 @@ use core/algebra/s_units
 use core/algebra/s_class_group
 use core/algebra/projective
 use core/algebra/curves
+use core/algebra/elliptic
 use core/algebra/divisors
 use core/algebra/quartics
 use core/algebra/descent
@@ -102,6 +103,15 @@ use core/algebra/galois
 
   -> .rational_projective_plane(x = :X, y = :Y, z = :Z)
     ProjectiveSpace<ℚ, 2>.new(x, y, z)
+
+  -> .integral_weierstrass(a1, a2, a3, a4, a6)
+    IntegralWeierstrassModel.new(a1, a2, a3, a4, a6)
+
+  -> .frey_curve(a, b, exponent)
+    FreyCurve.new(a, b, exponent)
+
+  -> .frey_curve_from_solution(a, b, c, exponent)
+    FreyCurve.from_fermat_solution(a, b, c, exponent)
 
   # Exact determinant over an explicit coefficient field.  This is
   # intentionally separate from LinAlg's floating-point determinant path.

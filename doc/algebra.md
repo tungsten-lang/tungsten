@@ -28,7 +28,7 @@ core/algebra/polynomial_factor.w
 core/algebra/real_roots.w          # Sturm isolation and certified RootOf values
 core/algebra/algebraic_real.w      # exact RootOf arithmetic and certificates
 core/algebra/expression.w          # symbolic factor and exact real solve facade
-core/algebra/number_field.w        # exact cubic fields and maximal orders
+core/algebra/number_field.w        # exact number fields; cubic maximal orders
 core/algebra/groebner.w            # Buchberger, Ideal, eliminate, saturate
 core/algebra/f2_linear.w           # replay-certified linear algebra over F2
 core/algebra/projective.w          # projective spaces and normalized points
@@ -65,6 +65,33 @@ F125 = FiniteField.extension(5, 3)
 R = PolynomialRing.new([:t], F)
 K = NumberField.new(x**3 + x**2*2 - x*9 - 12, :a)
 ```
+
+`NumberField` arithmetic is degree-generic. The defining polynomial is
+certified irreducible over ℚ, and elements expose exact minimal and
+characteristic polynomials, trace, norm, integrality, and certified real
+embeddings:
+
+```w
+K4 = NumberField.new(x**4 + 1, :a)
+a = K4.generator
+b = a + a**3
+
+b.minimal_polynomial                     # x² + 2
+b.minimal_polynomial_certificate.verified?
+b.characteristic_polynomial              # (x² + 2)²
+b.trace                                  # 0
+b.norm                                   # 4
+
+R = Poly<NumberField>.new(Algebra.field(K4), [:u])
+P2K = ProjectiveSpace<NumberField, 2>.new(
+  Algebra.field(K4), 2, [:X, :Y, :Z])
+```
+
+The type argument is the `NumberField` family tag; `Algebra.field(K4)` is the
+actual coefficient field object. Power-basis arithmetic, discriminants, and
+signatures work in every supported degree. Integral bases, maximal-order
+indices, and field discriminants remain certified only for cubics; asking for
+one on a noncubic field raises instead of relabeling the power-order value.
 
 Inside a curve declaration, adjacency is local polynomial multiplication.
 Both superscript and ASCII powers are accepted, and coefficients may be
@@ -108,10 +135,10 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Layer | Available now | Boundary |
 | --- | --- | --- |
 | Symbolic expressions | Exact π/e and radicals; canonical simplify, expand, collect, differentiation, elementary antiderivatives; exact formal Taylor series and removable finite limits; exact univariate ℚ factor facade; arbitrary exact real roots as rationals, radicals, or certified `RootOf` constants; exact arithmetic and symbolic transcendentals over real algebraic constants | No assumptions, piecewise forms, Laurent/Puiseux series, infinite/directional limits, general multivariate factorization, complex algebraic-root object, general higher-degree radical formulas, or Risch integration |
-| Fields | Exact `RationalField`; prime fields `𝔽_p`; extensions `𝔽_{p^n}` for `n ≤ 3` with Integer-encoded elements; exact irreducible cubic `NumberField`s over ℚ with arithmetic, Sturm signatures, integral bases, and maximal-order discriminants | Finite extensions above degree three and number fields of degree other than three are not implemented. Cubic maximal-order search is explicitly resource-bounded and raises `unknown` rather than guessing |
+| Fields | Exact `RationalField`; prime fields `𝔽_p`; extensions `𝔽_{p^n}` for `n ≤ 3` with Integer-encoded elements; arbitrary-degree irreducible `NumberField`s over ℚ with exact power-basis arithmetic, minimal/characteristic polynomials, trace, norm, integrality, Sturm signatures, and certified real embeddings; certified cubic integral bases and maximal-order discriminants | Finite-field extensions above degree three, complex algebraic embeddings, noncubic maximal orders/integral bases, and general field-isomorphism algorithms are not implemented. Irreducibility factor search and cubic maximal-order search are explicitly resource-bounded and raise instead of guessing |
 | Polynomials | Sparse sorted terms; merge-multiply; dense univariate fast path; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ as **content × monic irreducibles**; exact Sturm counts, Cauchy bounds, and certified isolation of every distinct real root | Kronecker factor search, Gröbner elimination, and root-interval splitting have explicit resource limits; complex-root isolation, complex algebraic-number arithmetic, and multivariate factorization are not implemented |
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders | Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
-| Projective geometry | Arbitrary `ℙⁿ` over ℚ and finite fields, normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
+| Projective geometry | Arbitrary `ℙⁿ` over ℚ, finite fields, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
 | Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension | Singular-curve normalization is not implemented |
 | Elliptic curves | Composition around a plane cubic model; short Weierstrass group law over ℚ and `𝔽_p` (char ≠ 2, 3); `EllipticJacobian` view | Arbitrary plane cubic → Weierstrass needs a rational flex (not implemented) |
 | Hyperelliptic curves | Exact `y² = f(x)` models, Mumford pairs, Cantor composition; monic odd-degree over ℚ, monic-or-scalable over `𝔽_p` | Even-degree models still raise for Jacobian arithmetic |
@@ -122,7 +149,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Divisors | Exact formal arithmetic on rational degree-one places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic, and general principality tests are not implemented |
 | Rational points | Complete exact bounded search for primitive points on `aX³Z + bXY²Z + g(Y,Z)`, with nonzero same-sign `a,b` and nonzero `Y⁴` coefficient | This is not a general plane-curve point finder and does not prove that no points exist above the requested height |
 | Geometric automorphisms | Exact triviality certificate over `Qbar` for smooth rational plane quartics with the unique normalized hyperflex `[1:0:0]`, tangent `Z=0`, and identity stabilizer | It is not an arbitrary plane-quartic automorphism-group algorithm and does not enumerate nontrivial groups |
-| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified geometric prefix for BPS generalized explicit 2-descent; for the shell-width quartic, a checked degree-27 bitangent projection split into squarefree pieces of degrees 6, 9, and 12 | The BPS divisor/function family, arbitrary-degree étale algebras/maximal orders, unconditional S-class groups and S-units, a certified ambient square-class basis, theta Galois modules, p-adic local images, and the comparison kernel remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
+| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified geometric prefix for BPS generalized explicit 2-descent; arbitrary-degree quotient number fields; for the shell-width quartic, a checked degree-27 bitangent projection split into squarefree pieces of degrees 6, 9, and 12 | The BPS divisor/function family, finite-product étale algebra layer, noncubic maximal orders, unconditional S-class groups and S-units, a certified ambient square-class basis, theta Galois modules, p-adic local images, and the comparison kernel remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
 
 `Curve#hyperelliptic_plane_model?` is specifically the smooth plane-model
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
@@ -313,8 +340,10 @@ adds the distinguished hyperflex. The final exhaustion step explicitly carries
 a `SmoothPlaneQuarticBitangentCountCertificate`. It checks the hypotheses of
 the classical 28-bitangent theorem and records that theorem as a trusted
 mathematical import, not as a proof-assistant-checked derivation.
-The degree labels describe a checked squarefree product presentation; they
-are not yet separate arbitrary-degree `NumberField` objects.
+The degree labels describe a checked squarefree product presentation. Each
+irreducible factor can now define an arbitrary-degree `NumberField`, but the
+projection pieces have not yet been factored and assembled into a certified
+finite-product étale algebra with maximal orders.
 
 The global, norm, unramified, and local conditions eventually produced by the
 arithmetic layers meet in an exact F2 kernel:

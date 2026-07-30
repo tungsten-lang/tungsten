@@ -1,4 +1,4 @@
-# Exact cubic number-field regressions.
+# Exact arbitrary-degree number-field regressions.
 # Run both ways:
 #   bin/tungsten run spec/core/algebra_number_field_spec.w
 #   bin/tungsten compile spec/core/algebra_number_field_spec.w --out /tmp/algebra-number-field-spec
@@ -130,6 +130,132 @@ number_field_check("sturm.one_real", one_real.real_root_count, 1)
 number_field_check("signature.one_real", one_real_field.signature.to_s, "\[1, 1\]")
 number_field_check("signature.not_totally_real", one_real_field.totally_real?, false)
 
+# Quotient-field arithmetic is degree-generic. Cubic-only maximal-order
+# capabilities remain explicit instead of returning a power-order value under
+# the field-discriminant name.
+quadratic = x**2 + 1
+quadratic_field = NumberField.new(quadratic, :i)
+i = quadratic_field.generator
+number_field_check("quadratic.degree", quadratic_field.degree, 2)
+number_field_check("quadratic.relation", i**2, -1)
+number_field_check("quadratic.inverse",
+                   (i + 1) * (i + 1).inverse, quadratic_field.one)
+number_field_check("quadratic.signature",
+                   quadratic_field.signature.to_s, "\[0, 1\]")
+number_field_check("quadratic.power_basis_size",
+                   quadratic_field.power_basis.size, 2)
+number_field_check("quadratic.generator_minpoly",
+                   i.minimal_polynomial, quadratic)
+number_field_check("quadratic.generator_minpoly_certificate",
+                   i.minimal_polynomial_certificate.verified?, true)
+number_field_check("quadratic.trace", i.trace, Rational.new(0))
+number_field_check("quadratic.norm", i.norm, Rational.new(1))
+number_field_check("quadratic.integral", i.integral?, true)
+number_field_check("quadratic.nonintegral_rational",
+                   quadratic_field.coerce(Rational.new(1, 2)).integral?, false)
+
+sqrt2_field = NumberField.new(x**2 - 2, :s)
+real_embeddings = sqrt2_field.real_embeddings
+number_field_check("quadratic.real_embedding_count",
+                   real_embeddings.size, 2)
+number_field_check("quadratic.real_embedding_certificate",
+                   real_embeddings[0].verified?, true)
+number_field_check("quadratic.real_embedding_generator",
+                   real_embeddings[1].image(sqrt2_field.generator),
+                   real_embeddings[1].root)
+
+quartic = x**4 + 1
+quartic_field = NumberField.new(quartic, :q)
+q = quartic_field.generator
+number_field_check("quartic.degree", quartic_field.degree, 4)
+number_field_check("quartic.relation", q**4, -1)
+number_field_check("quartic.inverse",
+                   (q**3 + q + 1) * (q**3 + q + 1).inverse,
+                   quartic_field.one)
+number_field_check("quartic.signature",
+                   quartic_field.signature.to_s, "\[0, 2\]")
+number_field_check("quartic.power_basis_discriminant",
+                   quartic_field.power_basis_discriminant, Rational.new(256))
+number_field_check("quartic.power_basis_discriminant_certified",
+                   quartic_field.power_basis_discriminant_certified?, true)
+number_field_check("quartic.field_discriminant_not_certified",
+                   quartic_field.field_discriminant_certified?, false)
+number_field_check("quartic.maximal_order_not_certified",
+                   quartic_field.maximal_order_certified?, false)
+
+quadratic_subfield_element = q + q**3
+number_field_check("quartic.element_minpoly",
+                   quadratic_subfield_element.minimal_polynomial, x**2 + 2)
+number_field_check("quartic.element_charpoly",
+                   quadratic_subfield_element.characteristic_polynomial,
+                   x**4 + x**2*4 + 4)
+number_field_check("quartic.element_minpoly_certificate",
+                   quadratic_subfield_element.minimal_polynomial_certificate.verified?,
+                   true)
+nonminimal_certificate = NumberFieldMinimalPolynomialCertificate.new(
+  quartic_field, quadratic_subfield_element,
+  quadratic_subfield_element.characteristic_polynomial)
+number_field_check("quartic.element_minpoly_certificate_rejects_charpoly",
+                   nonminimal_certificate.verified?, false)
+number_field_check("quartic.element_trace",
+                   quadratic_subfield_element.trace, Rational.new(0))
+number_field_check("quartic.element_norm",
+                   quadratic_subfield_element.norm, Rational.new(4))
+
+# NumberField is an actual Field object at the polynomial/projective layers,
+# while NumberField remains the compile-time family tag.
+quartic_poly = Poly<NumberField>.new(
+  Algebra.field(quartic_field), [:u])
+u4 = quartic_poly.generator
+number_field_check("quartic.poly_field",
+                   (u4 + q) * (u4 - q),
+                   u4**2 - quartic_poly.ring.constant(q*q))
+quartic_plane = ProjectiveSpace<NumberField, 2>.new(
+  Algebra.field(quartic_field), 2, [:X, :Y, :Z])
+quartic_point = quartic_plane.point([q, 1, 0])
+number_field_check("quartic.projective_field",
+                   quartic_plane.field, quartic_field)
+number_field_check("quartic.projective_normalized_pivot",
+                   quartic_point[0], quartic_field.one)
+
+quintic = x**5 - 2
+quintic_field = NumberField.new(quintic, :v)
+v = quintic_field.generator
+number_field_check("quintic.degree", quintic_field.degree, 5)
+number_field_check("quintic.relation", v**5, 2)
+number_field_check("quintic.inverse",
+                   (v + 1) / (v + 1), quintic_field.one)
+number_field_check("quintic.signature",
+                   quintic_field.signature.to_s, "\[1, 2\]")
+number_field_check("quintic.generator_norm", v.norm, Rational.new(2))
+
+field_mismatch_failed = false
+begin
+  q + sqrt2_field.generator
+rescue error
+  field_mismatch_failed = "[error]".include?(
+    "number-field elements belong to different fields")
+number_field_check("number_field_mismatch_is_loud",
+                   field_mismatch_failed, true)
+
+noncubic_discriminant_failed = false
+begin
+  quartic_field.discriminant
+rescue error
+  noncubic_discriminant_failed = "[error]".include?(
+    "certified only for cubic number fields")
+number_field_check("noncubic_field_discriminant_is_loud",
+                   noncubic_discriminant_failed, true)
+
+noncubic_roots_failed = false
+begin
+  quartic.roots_in(quartic_field)
+rescue error
+  noncubic_roots_failed = "[error]".include?(
+    "complete only for cubic number fields")
+number_field_check("noncubic_roots_in_is_loud",
+                   noncubic_roots_failed, true)
+
 reducible_failed = false
 begin
   NumberField.new(x**3 - x)
@@ -139,10 +265,18 @@ number_field_check("reducible_is_loud", reducible_failed, true)
 
 wrong_degree_failed = false
 begin
-  NumberField.new(x**2 + 1)
+  NumberField.new(x + 1)
 rescue error
-  wrong_degree_failed = "[error]".include?("univariate cubic")
+  wrong_degree_failed = "[error]".include?("degree at least two")
 number_field_check("wrong_degree_is_loud", wrong_degree_failed, true)
+
+reducible_quartic_failed = false
+begin
+  NumberField.new(x**4 - 1)
+rescue error
+  reducible_quartic_failed = "[error]".include?("reducible over ℚ")
+number_field_check("reducible_quartic_is_loud",
+                   reducible_quartic_failed, true)
 
 unknown_failed = false
 begin
@@ -150,5 +284,14 @@ begin
 rescue error
   unknown_failed = "[error]".include?("reducibility unknown")
 number_field_check("resource_unknown_is_loud", unknown_failed, true)
+
+higher_degree_unknown_failed = false
+begin
+  NumberField.certify_irreducible(x**4 + 1, 0)
+rescue error
+  higher_degree_unknown_failed = "[error]".include?(
+    "Kronecker factor search limit exceeded")
+number_field_check("higher_degree_resource_unknown_is_loud",
+                   higher_degree_unknown_failed, true)
 
 << "algebra_number_field_spec: all checks passed"

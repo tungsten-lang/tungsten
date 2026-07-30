@@ -922,7 +922,7 @@
 #   Poly<ℚ>.new(:x, :y) -> Poly<ℚ>.new(Algebra.field("ℚ"), [:x, :y])
 
 + Poly<K>
-  with K in (ℚ RationalField FiniteField)
+  with K in (ℚ RationalField FiniteField NumberField)
 
   -> new(field: Field, names)
     raise "Poly field constructor needs an Array of generator names" if names.class_name != "Array"

@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(182 total), grouped by area, with its declaration, a one-line
+(184 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -98,6 +98,8 @@ summary from the source header, and a link to the source.
 | `FiniteField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldMinimalPolynomialCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldRealEmbedding` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `MonomialOrder` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `PolynomialRing` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `Polynomial` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

@@ -1,9 +1,9 @@
 # Projective spaces and points over supported coefficient fields.
 #
 # Generic dimension N is a value parameter: a projective N-space has N + 1
-# homogeneous coordinates. K is a field tag. The constraint is deliberately
-# narrow until another concrete field exists; unsupported tags are compile
-# errors instead of quietly constructing a rational polynomial ring.
+# homogeneous coordinates. K is a field-family tag; the constructor receives
+# the actual field object. Unsupported tags are compile errors instead of
+# quietly constructing a rational polynomial ring.
 
 + ProjectivePoint
   -> new(@space, coordinates)
@@ -62,7 +62,7 @@
 
 
 + ProjectiveSpace<K, N>
-  with K in (ℚ RationalField FiniteField)
+  with K in (ℚ RationalField FiniteField NumberField)
 
   # The algebra surface rewrite injects the actual field object and N:
   #

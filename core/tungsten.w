@@ -140,6 +140,8 @@
   auto :FiniteField,            "algebra"
   auto :NumberField,            "algebra"
   auto :NumberFieldElement,     "algebra"
+  auto :NumberFieldMinimalPolynomialCertificate, "algebra"
+  auto :NumberFieldRealEmbedding, "algebra"
   auto :MonomialOrder,          "algebra"
   auto :PolynomialRing,         "algebra"
   auto :Polynomial,             "algebra"

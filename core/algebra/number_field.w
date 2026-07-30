@@ -1,8 +1,10 @@
-# Exact cubic number fields.
+# Exact number fields.
 #
-# A NumberField is Q[a]/(f), where f is a certified irreducible cubic. Field
-# elements use the power basis 1, a, a^2 with Rational coefficients. The
-# maximal-order calculation is deliberately cubic-specific. If O is the
+# A NumberField is Q[a]/(f), where f is a certified irreducible univariate
+# polynomial. Field elements use the power basis 1, a, ..., a^(n-1) with
+# Rational coefficients. Arithmetic, signatures, and power-order
+# discriminants work in every degree. The maximal-order calculation is
+# deliberately cubic-specific. If O is the
 # integral power order and M contains O with index m, then m^2 divides disc(O).
 # A minimal proper overorder M/O has elementary p-group quotient: O+pM is an
 # intermediate order, so minimality forces pM into O. Since 1 is primitive in
@@ -70,14 +72,126 @@
       right = @field.coerce(other)
     else
       return false
+    right_coefficients = right.coefficients
     i = 0
-    while i < 3
-      return false if @coefficients[i] != right.coefficients[i]
+    while i < @field.degree
+      return false if @coefficients[i] != right_coefficients[i]
       i += 1
     true
 
   -> to_s
     @field.element_to_s(self)
+
+  -> inspect
+    to_s
+
+  -> trace
+    @field.trace(self)
+
+  -> norm
+    @field.norm(self)
+
+  -> minimal_polynomial
+    @field.minimal_polynomial(self)
+
+  -> minimal_polynomial_certificate
+    @field.minimal_polynomial_certificate(self)
+
+  -> characteristic_polynomial
+    @field.characteristic_polynomial(self)
+
+  -> algebraic_degree
+    minimal_polynomial.degree
+
+  -> integral?
+    @field.integral_element?(self)
+
+
++ NumberFieldMinimalPolynomialCertificate
+  -> new(@field, element, @polynomial)
+    @element = @field.coerce(element)
+
+  -> field
+    @field
+
+  -> element
+    @field.coerce(@element)
+
+  -> polynomial
+    @polynomial
+
+  # Replay both halves of minimality: the displayed monic polynomial
+  # annihilates the element, and no shorter Krylov prefix is dependent.
+  -> verified?
+    return false if @field.class_name != "NumberField"
+    return false if @polynomial.class_name != "Polynomial"
+    return false if @polynomial.ring.arity != 1
+    return false if @polynomial.ring.field.class_name != "RationalField"
+    return false if @polynomial.degree < 1 || @polynomial.degree > @field.degree
+    return false if !@polynomial.eql?(@polynomial.monic)
+    return false if !@field.evaluate(@polynomial, @element).zero?
+    degree = 1
+    while degree < @polynomial.degree
+      return false if @field.power_relation(@element, degree) != nil
+      degree += 1
+    relation = @field.power_relation(@element, @polynomial.degree)
+    return false if relation == nil
+    expected = @field.polynomial_from_power_relation(
+      relation, @polynomial.degree)
+    expected.eql?(@polynomial)
+
+  -> certified?
+    verified?
+
+  -> to_s
+    "NumberFieldMinimalPolynomialCertificate(" + @polynomial.to_s + ")"
+
+  -> inspect
+    to_s
+
+
++ NumberFieldRealEmbedding
+  -> new(@field, root)
+    @root = root.refined(0)
+    if !verified?
+      raise "invalid certified real embedding of a number field"
+
+  -> field
+    @field
+
+  -> root
+    @root.refined(0)
+
+  -> verified?
+    return false if @field.class_name != "NumberField"
+    return false if @root.class_name != "AlgebraicRealRoot"
+    return false if !@root.certificate.verified?
+    @root.defining_polynomial.eql?(@field.defining_polynomial)
+
+  -> certified?
+    verified?
+
+  # Evaluate a power-basis element at the selected certified real root.
+  # AlgebraicRealArithmetic keeps every intermediate image exact.
+  -> image(value)
+    element = @field.coerce(value)
+    return @root.refined(0) if element.eql?(@field.generator)
+    coefficients = element.coefficients
+    result = coefficients[coefficients.size - 1]
+    i = coefficients.size - 2
+    while i >= 0
+      result = AlgebraicRealArithmetic.compute(
+        result, @root, "*").value
+      result = AlgebraicRealArithmetic.compute(
+        result, coefficients[i], "+").value
+      i -= 1
+    result
+
+  -> call(value)
+    image(value)
+
+  -> to_s
+    "RealEmbedding(" + @field.to_s + ", root " + @root.root_index.to_s + ")"
 
   -> inspect
     to_s
@@ -90,23 +204,42 @@
   -> initialize_number_field(polynomial, name, irreducibility_limit, order_limit)
     if polynomial.class_name != "Polynomial"
       raise "NumberField defining polynomial must be a Polynomial"
-    if polynomial.ring.arity != 1 || polynomial.degree != 3
-      raise "NumberField currently needs a univariate cubic"
+    if polynomial.ring.arity != 1 || polynomial.degree < 2
+      raise "NumberField needs a univariate polynomial of degree at least two"
     if polynomial.ring.field.class_name != "RationalField"
       raise "NumberField is currently implemented only over ℚ"
 
-    NumberField.certify_irreducible_cubic(polynomial, irreducibility_limit)
+    NumberField.certify_irreducible(polynomial, irreducibility_limit)
     @name = name
     @defining_polynomial = polynomial.monic
+    @degree = @defining_polynomial.degree
     @power_basis_discriminant = @defining_polynomial.discriminant
     @order_search_limit = order_limit
 
     defining_coefficients = @defining_polynomial.coefficients
-    @relation = [
-      defining_coefficients[0],
-      defining_coefficients[1],
-      defining_coefficients[2]]
+    @relation = []
+    i = 0
+    while i < @degree
+      @relation.push(defining_coefficients[i])
+      i += 1
 
+    generator_coefficients = zero_coefficients
+    generator_coefficients[1] = Rational.new(1)
+    @generator = NumberFieldElement.new(self, generator_coefficients)
+    initialize_cubic_maximal_order(polynomial) if cubic?
+    self
+
+  ro :name, :defining_polynomial, :power_basis_discriminant, :generator
+
+  -> cubic?
+    @degree == 3
+
+  -> require_cubic_maximal_order(capability)
+    if !cubic?
+      raise capability + " is currently certified only for cubic number fields; power-basis arithmetic remains available"
+    true
+
+  -> initialize_cubic_maximal_order(polynomial)
     primitive = NumberField.primitive_integer_coefficients(polynomial)
     leading = primitive[3]
     @integral_generator_scale = leading
@@ -125,27 +258,41 @@
     if @maximal_order_index * @maximal_order_index != quotient
       raise "maximal-order index invariant failed"
 
-    @generator = NumberFieldElement.new(self, [0, 1, 0])
     @integral_basis = []
     @integral_basis_vectors.each -> (vector)
       @integral_basis.push(coerce([
         vector[0],
         vector[1] * @integral_generator_scale,
         vector[2] * @integral_generator_scale * @integral_generator_scale]))
-    self
 
-  ro :name, :defining_polynomial, :integral_defining_polynomial
-  ro :power_basis_discriminant, :integral_power_basis_discriminant
-  ro :field_discriminant, :maximal_order_index, :generator
-  ro :integral_generator_scale
+  -> integral_defining_polynomial
+    require_cubic_maximal_order("integral defining polynomial")
+    @integral_defining_polynomial
+
+  -> integral_power_basis_discriminant
+    require_cubic_maximal_order("integral power-basis discriminant")
+    @integral_power_basis_discriminant
+
+  -> field_discriminant
+    require_cubic_maximal_order("maximal-order field discriminant")
+    @field_discriminant
+
+  -> maximal_order_index
+    require_cubic_maximal_order("maximal-order index")
+    @maximal_order_index
+
+  -> integral_generator_scale
+    require_cubic_maximal_order("integral generator scale")
+    @integral_generator_scale
 
   -> integral_basis
+    require_cubic_maximal_order("integral basis")
     out = []
     @integral_basis.each -> out.push(item)
     out
 
   -> degree
-    3
+    @degree
 
   -> characteristic
     0
@@ -163,13 +310,19 @@
     true
 
   -> field_discriminant_certified?
+    cubic?
+
+  -> maximal_order_certified?
+    cubic?
+
+  -> power_basis_discriminant_certified?
     true
 
   # Number-field discriminant means the discriminant of the maximal order.
   # power_basis_discriminant remains available when the defining generator's
   # order is what the caller wants to inspect.
   -> discriminant
-    @field_discriminant
+    field_discriminant
 
   -> normalize_scalar(value)
     Rational.coerce(value)
@@ -178,20 +331,33 @@
     raise "number-field coefficients must be an Array" if coefficients.class_name != "Array"
     values = []
     coefficients.each -> values.push(normalize_scalar(item))
-    while values.size < 3
+    while values.size < @degree
       values.push(Rational.new(0))
     i = values.size - 1
-    while i >= 3
+    while i >= @degree
       leading = values[i]
       if !leading.zero?
-        shift = i - 3
+        shift = i - @degree
         j = 0
-        while j < 3
+        while j < @degree
           values[shift + j] = values[shift + j] - leading * @relation[j]
           j += 1
       values[i] = Rational.new(0)
       i -= 1
-    [values[0], values[1], values[2]]
+    out = []
+    i = 0
+    while i < @degree
+      out.push(values[i])
+      i += 1
+    out
+
+  -> zero_coefficients
+    values = []
+    i = 0
+    while i < @degree
+      values.push(Rational.new(0))
+      i += 1
+    values
 
   -> coerce(value)
     if value.class_name == "NumberFieldElement"
@@ -202,24 +368,37 @@
     value_class = value.class_name
     if value_class != "Integer" && value_class != "Int" && value_class != "BigInt" && value_class != "Rational"
       raise "cannot coerce " + value_class + " into " + to_s
-    NumberFieldElement.new(self, [normalize_scalar(value), 0, 0])
+    coefficients = zero_coefficients
+    coefficients[0] = normalize_scalar(value)
+    NumberFieldElement.new(self, coefficients)
 
   -> normalize_element(value)
     coerce(value)
 
   -> zero
-    NumberFieldElement.new(self, [0, 0, 0])
+    NumberFieldElement.new(self, zero_coefficients)
 
   -> one
-    NumberFieldElement.new(self, [1, 0, 0])
+    coefficients = zero_coefficients
+    coefficients[0] = Rational.new(1)
+    NumberFieldElement.new(self, coefficients)
 
   -> zero?(value)
     coefficients = coerce(value).coefficients
-    coefficients[0].zero? && coefficients[1].zero? && coefficients[2].zero?
+    i = 0
+    while i < @degree
+      return false if !coefficients[i].zero?
+      i += 1
+    true
 
   -> one?(value)
     coefficients = coerce(value).coefficients
-    coefficients[0].one? && coefficients[1].zero? && coefficients[2].zero?
+    return false if !coefficients[0].one?
+    i = 1
+    while i < @degree
+      return false if !coefficients[i].zero?
+      i += 1
+    true
 
   -> equal?(left, right)
     coerce(left).eql?(coerce(right))
@@ -227,15 +406,18 @@
   -> add(left, right)
     a = coerce(left).coefficients
     b = coerce(right).coefficients
-    NumberFieldElement.new(self, [
-      a[0] + b[0], a[1] + b[1], a[2] + b[2]])
+    sum = []
+    i = 0
+    while i < @degree
+      sum.push(a[i] + b[i])
+      i += 1
+    NumberFieldElement.new(self, sum)
 
   -> negate(value)
     coefficients = coerce(value).coefficients
-    NumberFieldElement.new(self, [
-      0 - coefficients[0],
-      0 - coefficients[1],
-      0 - coefficients[2]])
+    negative = []
+    coefficients.each -> negative.push(0 - item)
+    NumberFieldElement.new(self, negative)
 
   -> subtract(left, right)
     add(left, negate(right))
@@ -243,24 +425,195 @@
   -> multiply(left, right)
     a = coerce(left).coefficients
     b = coerce(right).coefficients
-    product = [
-      a[0] * b[0],
-      a[0] * b[1] + a[1] * b[0],
-      a[0] * b[2] + a[1] * b[1] + a[2] * b[0],
-      a[1] * b[2] + a[2] * b[1],
-      a[2] * b[2]]
+    product = []
+    i = 0
+    while i < @degree * 2 - 1
+      product.push(Rational.new(0))
+      i += 1
+    i = 0
+    while i < @degree
+      j = 0
+      while j < @degree
+        product[i + j] = product[i + j] + a[i] * b[j]
+        j += 1
+      i += 1
     NumberFieldElement.new(self, product)
 
   -> inverse(value)
     element = coerce(value)
     raise "division by zero in number field" if zero?(element)
-    a = element.coefficients
-    columns = []
-    columns.push(a)
-    columns.push(reduce_coefficients([0, a[0], a[1], a[2]]))
-    columns.push(reduce_coefficients([0, 0, a[0], a[1], a[2]]))
-    solution = solve_rational_coordinates([1, 0, 0], columns)
-    NumberFieldElement.new(self, solution)
+    polynomial = element_polynomial(element)
+    bezout = polynomial.xgcd(@defining_polynomial)
+    gcd_coefficient = bezout[0].coefficients[0]
+    if bezout[0].degree != 0 || gcd_coefficient.zero?
+      raise "nonzero number-field element was not invertible; defining polynomial invariant failed"
+    inverse_polynomial = bezout[1] / gcd_coefficient
+    NumberFieldElement.new(self, inverse_polynomial.coefficients)
+
+  -> element_polynomial(value)
+    coefficients = coerce(value).coefficients
+    x = @defining_polynomial.ring.generator(0)
+    polynomial = @defining_polynomial.ring.zero
+    i = coefficients.size - 1
+    while i >= 0
+      polynomial = polynomial * x + coefficients[i]
+      i -= 1
+    polynomial
+
+  -> power_basis
+    basis = []
+    value = one
+    i = 0
+    while i < @degree
+      basis.push(value)
+      value = multiply(value, @generator)
+      i += 1
+    basis
+
+  # Solve vector = sum basis[j]*c[j] over Q. A nil result certifies that the
+  # vector is outside the supplied span. The caller uses only independent
+  # Krylov prefixes, so every coefficient column must have a pivot.
+  -> solve_rational_span(vector, basis)
+    columns = basis.size
+    matrix = []
+    row = 0
+    while row < @degree
+      entries = []
+      column = 0
+      while column < columns
+        entries.push(Rational.coerce(basis[column][row]))
+        column += 1
+      entries.push(Rational.coerce(vector[row]))
+      matrix.push(entries)
+      row += 1
+
+    pivot_rows = []
+    pivot_row = 0
+    column = 0
+    while column < columns
+      pivot = pivot_row
+      while pivot < @degree && matrix[pivot][column].zero?
+        pivot += 1
+      return nil if pivot == @degree
+      if pivot != pivot_row
+        temporary = matrix[pivot_row]
+        matrix[pivot_row] = matrix[pivot]
+        matrix[pivot] = temporary
+      pivot_value = matrix[pivot_row][column]
+      cell = column
+      while cell <= columns
+        matrix[pivot_row][cell] = matrix[pivot_row][cell] / pivot_value
+        cell += 1
+      row = 0
+      while row < @degree
+        if row != pivot_row && !matrix[row][column].zero?
+          factor = matrix[row][column]
+          cell = column
+          while cell <= columns
+            matrix[row][cell] = matrix[row][cell] - factor * matrix[pivot_row][cell]
+            cell += 1
+        row += 1
+      pivot_rows.push(pivot_row)
+      pivot_row += 1
+      column += 1
+
+    row = pivot_row
+    while row < @degree
+      all_zero = true
+      column = 0
+      while column < columns
+        all_zero = false if !matrix[row][column].zero?
+        column += 1
+      if all_zero && !matrix[row][columns].zero?
+        return nil
+      row += 1
+
+    solution = []
+    column = 0
+    while column < columns
+      solution.push(matrix[pivot_rows[column]][columns])
+      column += 1
+    solution
+
+  # The first exact dependence among 1, b, b^2, ... is the monic minimal
+  # polynomial of b. Failed span solves certify independence of every shorter
+  # prefix, rather than merely finding an annihilating polynomial.
+  -> power_relation(value, relation_degree)
+    if relation_degree < 1 || relation_degree > @degree
+      raise "power-relation degree must lie between one and the field degree"
+    element = coerce(value)
+    basis = []
+    power_value = one
+    i = 0
+    while i < relation_degree
+      basis.push(power_value.coefficients)
+      power_value = multiply(power_value, element)
+      i += 1
+    solve_rational_span(power_value.coefficients, basis)
+
+  -> polynomial_from_power_relation(relation, relation_degree)
+    if relation.class_name != "Array" || relation.size != relation_degree
+      raise "power relation has the wrong arity"
+    x = @defining_polynomial.ring.generator(0)
+    polynomial = x**relation_degree
+    i = 0
+    while i < relation.size
+      polynomial = polynomial - x**i * relation[i]
+      i += 1
+    polynomial.monic
+
+  -> minimal_polynomial(value)
+    element = coerce(value)
+    basis = [one.coefficients]
+    power_value = element
+    relation_degree = 1
+    while relation_degree <= @degree
+      relation = solve_rational_span(power_value.coefficients, basis)
+      if relation != nil
+        polynomial = polynomial_from_power_relation(
+          relation, relation_degree)
+        if !evaluate(polynomial, element).zero?
+          raise "minimal-polynomial relation invariant failed"
+        return polynomial
+      basis.push(power_value.coefficients)
+      power_value = multiply(power_value, element)
+      relation_degree += 1
+    raise "number-field power dependence invariant failed"
+
+  -> minimal_polynomial_certified?(value)
+    minimal_polynomial_certificate(value).verified?
+
+  -> minimal_polynomial_certificate(value)
+    element = coerce(value)
+    NumberFieldMinimalPolynomialCertificate.new(
+      self, element, minimal_polynomial(element))
+
+  # Multiplication by b on K has characteristic polynomial
+  # minpoly_b(T)^[K:Q(b)]. This also supplies exact trace and norm without
+  # numerical embeddings or a floating determinant.
+  -> characteristic_polynomial(value)
+    polynomial = minimal_polynomial(value)
+    if @degree % polynomial.degree != 0
+      raise "minimal-polynomial degree does not divide number-field degree"
+    polynomial ** (@degree / polynomial.degree)
+
+  -> trace(value)
+    polynomial = characteristic_polynomial(value)
+    0 - polynomial.coeff(@degree - 1)
+
+  -> norm(value)
+    polynomial = characteristic_polynomial(value)
+    constant = polynomial.coeff(0)
+    @degree.odd? ? 0 - constant : constant
+
+  -> integral_element?(value)
+    polynomial = minimal_polynomial(value)
+    coefficients = polynomial.coefficients
+    i = 0
+    while i < coefficients.size
+      return false if coefficients[i].denominator != 1
+      i += 1
+    true
 
   -> divide(left, right)
     multiply(left, inverse(right))
@@ -314,13 +667,24 @@
 
   -> signature
     real = @defining_polynomial.real_root_count
-    [real, (3 - real) / 2]
+    [real, (@degree - real) / 2]
 
   -> signature_certified?
     true
 
   -> totally_real?
-    signature[0] == 3
+    signature[0] == @degree
+
+  -> real_embeddings(search_limit = 250_000)
+    embeddings = []
+    @defining_polynomial.real_roots(search_limit).each -> (root)
+      embeddings.push(NumberFieldRealEmbedding.new(self, root))
+    if embeddings.size != signature[0]
+      raise "real-embedding count disagrees with the certified signature"
+    embeddings
+
+  -> complex_embedding_pair_count
+    signature[1]
 
   -> evaluate(polynomial, value)
     if polynomial.class_name != "Polynomial" || polynomial.ring.arity != 1
@@ -337,12 +701,12 @@
 
   -> same_monic_polynomial?(polynomial)
     return false if polynomial.class_name != "Polynomial"
-    return false if polynomial.ring.arity != 1 || polynomial.degree != 3
+    return false if polynomial.ring.arity != 1 || polynomial.degree != @degree
     return false if polynomial.ring.field.class_name != "RationalField"
     left = @defining_polynomial.coefficients
     right = polynomial.monic.coefficients
     i = 0
-    while i < 4
+    while i <= @degree
       return false if left[i] != right[i]
       i += 1
     true
@@ -355,6 +719,8 @@
       raise "roots_in needs a univariate polynomial"
     if polynomial.ring.field.class_name != "RationalField"
       raise "roots_in is currently implemented only for polynomials over ℚ"
+    if !cubic?
+      raise "roots_in is currently complete only for cubic number fields"
     raise "roots_in currently supports degree at most three" if polynomial.degree > 3
 
     roots = []
@@ -395,6 +761,7 @@
 
   # Solve B*c = vector, where the three entries of B are its columns.
   -> solve_rational_coordinates(vector, basis)
+    require_cubic_maximal_order("cubic order coordinate solve")
     matrix = []
     row = 0
     while row < 3
@@ -432,6 +799,7 @@
     [matrix[0][3], matrix[1][3], matrix[2][3]]
 
   -> multiply_power_vectors(left, right)
+    require_cubic_maximal_order("cubic integral-power multiplication")
     product = [Rational.new(0), Rational.new(0), Rational.new(0),
                Rational.new(0), Rational.new(0)]
     i = 0
@@ -455,6 +823,7 @@
     [product[0], product[1], product[2]]
 
   -> determinant_of_basis(basis)
+    require_cubic_maximal_order("cubic order basis determinant")
     a = basis[0]
     b = basis[1]
     c = basis[2]
@@ -464,6 +833,7 @@
     first - second + third
 
   -> order_discriminant(basis)
+    require_cubic_maximal_order("cubic order discriminant")
     determinant = determinant_of_basis(basis)
     value = determinant * determinant * @integral_power_basis_discriminant
     if value.denominator != 1
@@ -471,6 +841,7 @@
     value.numerator
 
   -> order_closed?(basis)
+    require_cubic_maximal_order("cubic order closure test")
     i = 0
     while i < 3
       j = i
@@ -486,6 +857,7 @@
     true
 
   -> discriminant_factorization
+    require_cubic_maximal_order("cubic order discriminant factorization")
     remaining = @integral_power_basis_discriminant.abs
     factors = []
     candidate = 2
@@ -513,9 +885,11 @@
   # bounds need no floating-point approximation and are valid for every cubic
   # field. They are used only to reject impossible overorder indices.
   -> minkowski_discriminant_lower_bound
+    require_cubic_maximal_order("cubic Minkowski discriminant bound")
     @defining_polynomial.real_root_count == 3 ? 21 : 12
 
   -> possible_order_indices
+    require_cubic_maximal_order("cubic possible-order indices")
     indices = [1]
     discriminant_factorization.each -> (factor)
       maximum = factor[1] / 2
@@ -551,6 +925,7 @@
   # enumerates each index-m sublattice of Z^3 once (a*d*f=m). Taking duals
   # enumerates every index-m lattice containing the integral power order.
   -> hnf_dual_basis(a, b, c, d, e, f)
+    require_cubic_maximal_order("cubic overorder HNF")
     [
       [Rational.new(1, a), Rational.new(0), Rational.new(0)],
       [Rational.new(0 - b, a * d), Rational.new(1, d), Rational.new(0)],
@@ -562,6 +937,7 @@
   # If base_basis is B and relative_basis is T, return the columns of B*T in
   # integral-power-basis coordinates.
   -> compose_order_bases(base_basis, relative_basis)
+    require_cubic_maximal_order("cubic order-basis composition")
     out = []
     column = 0
     while column < 3
@@ -579,6 +955,7 @@
     out
 
   -> closed_relative_overorder_of_index(base_basis, index)
+    require_cubic_maximal_order("cubic relative overorder search")
     attempts = 0
     a = 1
     while a <= index
@@ -608,6 +985,7 @@
     nil
 
   -> closed_overorder_of_index(index)
+    require_cubic_maximal_order("cubic overorder search")
     identity = [
       [Rational.new(1), Rational.new(0), Rational.new(0)],
       [Rational.new(0), Rational.new(1), Rational.new(0)],
@@ -625,6 +1003,7 @@
   # order has a closed overorder of index p or p^2. Conversely, exhausting all
   # of the corresponding dual HNFs proves that no proper overorder exists.
   -> maximize_integral_order
+    require_cubic_maximal_order("cubic maximal-order search")
     basis = [
       [Rational.new(1), Rational.new(0), Rational.new(0)],
       [Rational.new(0), Rational.new(1), Rational.new(0)],
@@ -669,6 +1048,24 @@
         raise "cubic local overorder discriminant invariant failed"
       basis = extension
       discriminant = next_discriminant
+
+  # Exact irreducibility certification over Q. Quadratics and cubics use the
+  # rational-root criterion; higher degrees use exhaustive Kronecker
+  # factorization. The latter is resource-bounded and raises instead of
+  # treating an unfinished search as an irreducibility proof.
+  -> .certify_irreducible(polynomial, search_limit = 250_000)
+    if polynomial.class_name != "Polynomial" || polynomial.ring.arity != 1 || polynomial.degree < 2
+      raise "number-field irreducibility certification needs a univariate polynomial of degree at least two"
+    if polynomial.ring.field.class_name != "RationalField"
+      raise "number-field irreducibility certification is only implemented over ℚ"
+    if polynomial.degree == 3
+      return NumberField.certify_irreducible_cubic(polynomial, search_limit)
+
+    monic = polynomial.monic
+    factors = monic.factor(search_limit)
+    if factors.size != 1 || !factors[0].eql?(monic)
+      raise "number field defining polynomial is reducible over ℚ"
+    true
 
   -> .primitive_integer_coefficients(polynomial)
     coefficients = polynomial.coefficients

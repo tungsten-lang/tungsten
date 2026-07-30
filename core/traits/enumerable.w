@@ -91,16 +91,22 @@ trait Enumerable
           out.push(item)
   # @todo initialize type of array
   -> __enumerable_find_pair(block)
+    found = nil
+    seen = false
     self.each -> (first, second)
-      if block(first, second)
-        return [first, second]
-    nil
+      if !seen && block(first, second)
+        found = [first, second]
+        seen = true
+    found
 
   -> __enumerable_find_single(block)
+    found = nil
+    seen = false
     self.each -> (item)
-      if block(item)
-        return item
-    nil
+      if !seen && block(item)
+        found = item
+        seen = true
+    found
 
   -> find(&block)
     mode = __enumerable_iteration_mode
@@ -142,46 +148,48 @@ trait Enumerable
 
   -> all?/&
     pairs = __enumerable_yields_pair?
+    answer = true
     consumer = -> (first, second)
-      matched = false
-      if pairs
-        matched = &(first, second)
-      else
-        matched = &(first)
-      return false unless matched
+      if answer
+        if pairs
+          answer = &(first, second)
+        else
+          answer = &(first)
     __enumerable_each(consumer)
-    true
+    answer
 
   -> any?
     pairs = __enumerable_yields_pair?
+    answer = false
     consumer = -> (first, second)
-      return true if pairs || first
+      if !answer
+        answer = pairs || first
     __enumerable_each(consumer)
-    false
+    answer
 
   -> any?/&
     pairs = __enumerable_yields_pair?
+    answer = false
     consumer = -> (first, second)
-      matched = false
-      if pairs
-        matched = &(first, second)
-      else
-        matched = &(first)
-      return true if matched
+      if !answer
+        if pairs
+          answer = &(first, second)
+        else
+          answer = &(first)
     __enumerable_each(consumer)
-    false
+    answer
 
   -> none?/&
     pairs = __enumerable_yields_pair?
+    answer = true
     consumer = -> (first, second)
-      matched = false
-      if pairs
-        matched = &(first, second)
-      else
-        matched = &(first)
-      return false if matched
+      if answer
+        if pairs
+          answer = !&(first, second)
+        else
+          answer = !&(first)
     __enumerable_each(consumer)
-    true
+    answer
 
   -> count() 0
     consumer = -> (first, second)
@@ -388,23 +396,31 @@ trait Enumerable
 
   -> first
     pairs = __enumerable_yields_pair?
+    out = nil
+    seen = false
     consumer = -> (first, second)
-      if pairs
-        return [first, second]
-      else
-        return first
+      if !seen
+        if pairs
+          out = [first, second]
+        else
+          out = first
+        seen = true
     __enumerable_each(consumer)
-    nil
+    out
 
   -> include?(value)
     pairs = __enumerable_yields_pair?
+    found = false
     consumer = -> (first, second)
-      item = first
-      if pairs
-        item = [first, second]
-      return true if item == value
+      if !found
+        if pairs
+          if value.class_name == "Array" && value.size == 2
+            found = (
+              first == value[0] && second == value[1])
+        else
+          found = first == value
     __enumerable_each(consumer)
-    false
+    found
 
   -> flat_map(&block) []
     mode = __enumerable_iteration_mode
@@ -568,10 +584,11 @@ trait Enumerable
     __enumerable_each(consumer)
 
   -> empty?
+    found = false
     consumer = -> (first, second)
-      return false
+      found = true
     __enumerable_each(consumer)
-    true
+    !found
 
   -> sort
     to_a.sort

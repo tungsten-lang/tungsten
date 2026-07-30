@@ -276,7 +276,9 @@
       interp.call_block(block, [elem, idx])
 
   when "any?"
-    if type(recv) == "Hash" && block != nil
+    if block == nil
+      recv.any?
+    elsif type(recv) == "Hash"
       recv.any? -> (k, v)
         interp.truthy?(interp.call_block(block, [k, v]))
     else
@@ -284,7 +286,9 @@
         interp.truthy?(interp.apply_iteratee(block, args, elem))
 
   when "all?"
-    if type(recv) == "Hash" && block != nil
+    if block == nil
+      recv.all?
+    elsif type(recv) == "Hash"
       recv.all? -> (k, v)
         interp.truthy?(interp.call_block(block, [k, v]))
     else

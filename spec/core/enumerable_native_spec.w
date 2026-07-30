@@ -45,4 +45,59 @@ reduced = hash.reduce(0) -> (sum, pair)
   sum + pair[1]
 check("hash reduce entry", reduced == 16)
 
+found_pair = hash.find -> (key, value)
+  value == 5
+check("hash find pair",
+      found_pair[0] == :b && found_pair[1] == 5)
+check("hash detect missing",
+      (hash.detect -> (key, value) value == 99) == nil)
+check("hash first pair", hash.first.size == 2)
+check("hash include pair", hash.include?([:b, 5]))
+check("hash include is not key lookup",
+      !hash.include?(:b) && hash.key?(:b))
+check("hash all false", !(hash.all? -> (key, value) value < 9))
+check("hash any true", hash.any? -> (key, value) value == 9)
+check("hash none false", !(hash.none? -> (key, value) value == 2))
+check("hash any no block", hash.any?)
+check("hash empty false", !hash.empty?)
+check("empty hash predicates",
+      !({}.any?) && {}.empty?)
+
+check("array all false", !([1, 2, 3].all? -> item < 3))
+check("array any true", [1, 2, 3].any? -> item == 2)
+check("array none false", !([1, 2, 3].none? -> item == 2))
+check("array any truthy", [nil, false, 7].any?)
+check("array empty", [].empty?)
+
++ EachOnly
+  is Enumerable
+
+  -> new(@items)
+
+  -> each(&block)
+    index = 0
+    while index < @items.size
+      block(@items[index])
+      index += 1
+
+each_only = EachOnly.new([4, 7, 9])
+find_calls = 0
+generic_found = each_only.find -> (item)
+  find_calls += 1
+  item > 4
+check("generic find",
+      generic_found == 7 && find_calls == 2)
+check("generic first", each_only.first == 4)
+check("generic include", each_only.include?(9))
+all_calls = 0
+generic_all = each_only.all? -> (item)
+  all_calls += 1
+  item < 7
+check("generic all false",
+      !generic_all && all_calls == 2)
+check("generic any true", each_only.any? -> item == 7)
+check("generic none false", !(each_only.none? -> item == 4))
+check("generic empty false", !each_only.empty?)
+check("generic empty true", EachOnly.new([]).empty?)
+
 << "enumerable_native_spec: all checks passed"

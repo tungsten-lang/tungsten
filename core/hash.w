@@ -24,6 +24,18 @@
     each -> (key, value)
       block.call(key, value)
 
+  # Enumerable treats a pair-yielding collection's element as [key, value].
+  # Define this directly so the interpreter's generic host include? builtin
+  # cannot substitute Ruby Hash's key-membership semantics on one engine.
+  -> include?(entry)
+    return false if (
+      entry.class_name != "Array" || entry.size != 2)
+    found = false
+    each -> (key, value)
+      if !found
+        found = key == entry[0] && value == entry[1]
+    found
+
   # Non-destructive union: a new hash with self's entries plus other's, where
   # other wins on a key collision (Ruby Hash#merge, no-block form). The
   # receiver is untouched.

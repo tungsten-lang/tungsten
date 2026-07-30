@@ -1110,6 +1110,7 @@
       raise "distinguished hyperflex belongs to a different curve"
     @bitangent_scheme_certificate = nil
     @integral_product_order = nil
+    @maximal_product_order_computation = nil
 
   -> curve
     @curve
@@ -1167,6 +1168,8 @@
       self, primary, boundary, projection)
     if !@bitangent_scheme_certificate.certified?
       raise "plane-quartic bitangent scheme did not verify as 27 plus the distinguished hyperflex"
+    @integral_product_order = nil
+    @maximal_product_order_computation = nil
     @bitangent_scheme_certificate
 
   -> bitangent_scheme_certificate
@@ -1175,13 +1178,39 @@
   -> certify_integral_product_order
     if @bitangent_scheme_certificate == nil
       certify_bitangent_scheme
-    @integral_product_order = @bitangent_scheme_certificate.integral_product_order
+    order = @bitangent_scheme_certificate.integral_product_order
+    if @integral_product_order != order
+      @maximal_product_order_computation = nil
+    @integral_product_order = order
     if !@integral_product_order.certificate.verified?
       raise "bitangent integral product order failed certification"
     @integral_product_order
 
   -> integral_product_order
     @integral_product_order
+
+  -> certify_maximal_product_order(
+       factor_search_limit = 1_000_000,
+       step_limit = 10_000)
+    if @integral_product_order == nil
+      certify_integral_product_order
+    computation = @integral_product_order.maximal_order_with_certificate(
+      factor_search_limit, step_limit)
+    @maximal_product_order_computation = computation
+    if !@maximal_product_order_computation.certificate.verified?
+      raise "bitangent maximal product order failed certification"
+    @maximal_product_order_computation.order
+
+  -> maximal_product_order
+    return nil if @maximal_product_order_computation == nil
+    @maximal_product_order_computation.order
+
+  -> maximal_product_order_computation
+    @maximal_product_order_computation
+
+  -> maximal_product_order_certificate
+    return nil if @maximal_product_order_computation == nil
+    @maximal_product_order_computation.certificate
 
   -> requirements
     out = []
@@ -1219,9 +1248,15 @@
     out.push(DescentRequirement.new(
       "BPS divisor and function data", "missing",
       "construct Delta', beta', and f with div(f) = 2 beta'"))
-    out.push(DescentRequirement.new(
-      "etale algebra maximal orders", "missing",
-      "integral closures and product orders for the degree 6, 9, and 12 components are required"))
+    if @maximal_product_order_computation == nil
+      out.push(DescentRequirement.new(
+        "etale algebra maximal orders", "missing",
+        "compute certified integral closures of the degree 6, 9, and 12 components"))
+    else
+      out.push(DescentRequirement.new(
+        "etale algebra maximal orders", "complete",
+        "degree-generic Round 2 fixed points for all three components",
+        @maximal_product_order_computation.certificate))
     out.push(DescentRequirement.new(
       "S-class group and S-units", "missing",
       "must be unconditional; a GRH bound is conditional, not certified"))

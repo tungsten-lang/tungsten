@@ -17,6 +17,10 @@ order = MonogenicOrder.new(x**2 - x - 1)
 autoload_check("monogenic order", order.maximal?, true)
 autoload_check("product order class",
                EtaleProductOrder.class_name, "Class")
+autoload_check("general order class",
+               AlgebraOrder.class_name, "Class")
+autoload_check("maximal certificate class",
+               MaximalOrderCertificate.class_name, "Class")
 
 plane = Algebra.rational_projective_plane
 autoload_check("projective", plane.dimension, 2)

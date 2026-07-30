@@ -130,9 +130,8 @@ number_field_check("sturm.one_real", one_real.real_root_count, 1)
 number_field_check("signature.one_real", one_real_field.signature.to_s, "\[1, 1\]")
 number_field_check("signature.not_totally_real", one_real_field.totally_real?, false)
 
-# Quotient-field arithmetic is degree-generic. Cubic-only maximal-order
-# capabilities remain explicit instead of returning a power-order value under
-# the field-discriminant name.
+# Quotient-field arithmetic is degree-generic. Maximal-order data are lazy for
+# noncubics, so the capability state changes only after a certificate exists.
 quadratic = x**2 + 1
 quadratic_field = NumberField.new(quadratic, :i)
 i = quadratic_field.generator
@@ -182,6 +181,17 @@ number_field_check("quartic.field_discriminant_not_certified",
                    quartic_field.field_discriminant_certified?, false)
 number_field_check("quartic.maximal_order_not_certified",
                    quartic_field.maximal_order_certified?, false)
+quartic_maximal = quartic_field.certify_maximal_order
+number_field_check("quartic.field_discriminant",
+                   quartic_field.field_discriminant, 256)
+number_field_check("quartic.maximal_order_index",
+                   quartic_field.maximal_order_index, 1)
+number_field_check("quartic.integral_basis_size",
+                   quartic_field.integral_basis.size, 4)
+number_field_check("quartic.maximal_order_certificate",
+                   quartic_field.maximal_order_certificate.verified?, true)
+number_field_check("quartic.field_discriminant_now_certified",
+                   quartic_field.field_discriminant_certified?, true)
 
 quadratic_subfield_element = q + q**3
 number_field_check("quartic.element_minpoly",
@@ -229,6 +239,20 @@ number_field_check("quintic.signature",
                    quintic_field.signature.to_s, "\[1, 2\]")
 number_field_check("quintic.generator_norm", v.norm, Rational.new(2))
 
+# A deliberately scaled quartic presentation exercises the conversion from
+# the generic etale-order basis back to NumberField elements.
+scaled_quartic_field = NumberField.new(x**4 + 16, :w)
+number_field_check("scaled_quartic.field_discriminant",
+                   scaled_quartic_field.field_discriminant, 256)
+number_field_check("scaled_quartic.maximal_order_index",
+                   scaled_quartic_field.maximal_order_index, 64)
+number_field_check("scaled_quartic.integral_basis.1",
+                   scaled_quartic_field.integral_basis[1],
+                   scaled_quartic_field.generator / 2)
+number_field_check("scaled_quartic.maximal_order_certificate",
+                   scaled_quartic_field.maximal_order_certificate.verified?,
+                   true)
+
 field_mismatch_failed = false
 begin
   q + sqrt2_field.generator
@@ -238,14 +262,10 @@ rescue error
 number_field_check("number_field_mismatch_is_loud",
                    field_mismatch_failed, true)
 
-noncubic_discriminant_failed = false
-begin
-  quartic_field.discriminant
-rescue error
-  noncubic_discriminant_failed = "[error]".include?(
-    "certified only for cubic number fields")
-number_field_check("noncubic_field_discriminant_is_loud",
-                   noncubic_discriminant_failed, true)
+number_field_check("noncubic_field_discriminant",
+                   quartic_field.discriminant, 256)
+number_field_check("polynomial_quartic_field_discriminant",
+                   quartic.field_discriminant, 256)
 
 noncubic_roots_failed = false
 begin

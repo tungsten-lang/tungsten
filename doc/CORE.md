@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(207 total), grouped by area, with its declaration, a one-line
+(221 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -113,6 +113,20 @@ summary from the source header, and a link to the source.
 | `EtaleProductOrder` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `EtaleProductOrderElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `EtaleProductOrderCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ExactRationalLinearAlgebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PrimeLinearAlgebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraOrderLattice` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraOrder` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraOrderCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraOrderIdeal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraOrderIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PMaximalOrderStepCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PMaximalOrderCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PMaximalOrderComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `MaximalOrderCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `MaximalOrderComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductMaximalOrderCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductMaximalOrderComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldMinimalPolynomialCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

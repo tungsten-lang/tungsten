@@ -134,6 +134,24 @@ if env("TUNGSTEN_DESCENT_FULL") == "1"
   descent_check("integral_order.requirement_complete",
                 setup.requirements[4].complete?, true)
 
+if env("TUNGSTEN_DESCENT_MAXIMAL") == "1"
+  maximal_order = setup.certify_maximal_product_order
+  maximal_computation = setup.maximal_product_order_computation
+  descent_check("maximal_order.certified",
+                maximal_computation.certified?, true)
+  descent_check("maximal_order.rank", maximal_order.rank, 27)
+  descent_check("maximal_order.component_ranks",
+                maximal_order.component_ranks.to_s, "\[6, 9, 12\]")
+  maximal_discriminants = maximal_order.component_orders.map ->
+    item.discriminant
+  descent_check("maximal_order.component_discriminants",
+                maximal_discriminants.to_s,
+                "\[1168128, 133451615232, 1364523024384\]")
+  descent_check("maximal_order.strict_overorder",
+                maximal_computation.index > 1, true)
+  descent_check("maximal_order.requirement_complete",
+                setup.requirements[6].complete?, true)
+
 reference_component = bitangent_scheme.primary_certificate.components[0]
 component_chart = bitangent_scheme.primary_chart
 factor_coefficients = [59049, -52488, 8748, 3240, -1152, 96, 16]
@@ -174,7 +192,7 @@ begin
   setup.rank_upper_bound
 rescue e
   blocker = "integral power product order"
-  if env("TUNGSTEN_DESCENT_FULL") == "1"
+  if setup.integral_product_order != nil
     blocker = "BPS divisor and function data"
   rank_error = e.to_s.index(blocker) != nil
 descent_check("setup.rank_gate", rank_error, true)

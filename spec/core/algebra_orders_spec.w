@@ -72,7 +72,7 @@ order_check("pure_cubic.discriminant", pure_cubic.discriminant, -108)
 order_check("pure_cubic.maximal", pure_cubic.maximal?, true)
 
 # Z[sqrt(5)] has index two in the maximal order. The obstruction is an exact
-# modular gcd, and maximal_order refuses to manufacture an absent overorder.
+# modular gcd; Round 2 constructs and certifies the missing overorder.
 sqrt5 = Algebra.order(x**2 - 5)
 sqrt5_at_2 = sqrt5.index_certificate(2)
 order_check("sqrt5.discriminant", sqrt5.discriminant, 20)
@@ -84,13 +84,12 @@ order_check("sqrt5.at_2.obstruction",
             sqrt5_at_2.obstruction, sqrt5_mod_2_x + 1)
 order_check("sqrt5.obstructed_primes", sqrt5.obstructed_primes, [2])
 order_check("sqrt5.not_maximal", sqrt5.maximal?, false)
-
-maximal_order_failed = false
-begin
-  sqrt5.maximal_order
-rescue error
-  maximal_order_failed = "[error]".include?("nonmaximal at")
-order_check("sqrt5.overorder_is_loud", maximal_order_failed, true)
+sqrt5_maximal = sqrt5.maximal_order_with_certificate
+order_check("sqrt5.maximal_order.index", sqrt5_maximal.index, 2)
+order_check("sqrt5.maximal_order.discriminant",
+            sqrt5_maximal.order.discriminant, 5)
+order_check("sqrt5.maximal_order.certificate",
+            sqrt5_maximal.certificate.verified?, true)
 
 # The classic pure-cubic index obstruction at 3 is also detected.
 cuberoot10 = Algebra.order(x**3 - 10)

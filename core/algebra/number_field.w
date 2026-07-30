@@ -3,8 +3,9 @@
 # A NumberField is Q[a]/(f), where f is a certified irreducible univariate
 # polynomial. Field elements use the power basis 1, a, ..., a^(n-1) with
 # Rational coefficients. Arithmetic, signatures, and power-order
-# discriminants work in every degree. The maximal-order calculation is
-# deliberately cubic-specific. If O is the
+# discriminants work in every degree. Degree-generic maximal orders use the
+# certified Round 2 implementation in maximal_orders.w. The older cubic
+# lattice search below remains as an independent regression oracle. If O is the
 # integral power order and M contains O with index m, then m^2 divides disc(O).
 # A minimal proper overorder M/O has elementary p-group quotient: O+pM is an
 # intermediate order, so minimality forces pM into O. Since 1 is primitive in
@@ -215,6 +216,10 @@
     @degree = @defining_polynomial.degree
     @power_basis_discriminant = @defining_polynomial.discriminant
     @order_search_limit = order_limit
+    @source_order_polynomial = polynomial
+    @generic_monogenic_order = nil
+    @generic_maximal_order_computation = nil
+    @generic_integral_basis = nil
 
     defining_coefficients = @defining_polynomial.coefficients
     @relation = []
@@ -238,6 +243,58 @@
     if !cubic?
       raise capability + " is currently certified only for cubic number fields; power-basis arithmetic remains available"
     true
+
+  -> monogenic_order
+    if @generic_monogenic_order == nil
+      @generic_monogenic_order = MonogenicOrder.new(
+        @source_order_polynomial)
+    @generic_monogenic_order
+
+  -> certify_maximal_order(
+       factor_search_limit = 1_000_000,
+       step_limit = 10_000)
+    if @generic_maximal_order_computation == nil
+      computation = monogenic_order.maximal_order_with_certificate(
+        factor_search_limit, step_limit)
+      @generic_maximal_order_computation = computation
+      if !@generic_maximal_order_computation.certificate.verified?
+        raise "number-field maximal order failed certification"
+      if cubic?
+        generic_discriminant = @generic_maximal_order_computation.order.discriminant
+        if generic_discriminant != @field_discriminant
+          raise "generic and cubic maximal-order discriminants disagree"
+    @generic_maximal_order_computation.order
+
+  -> maximal_order_computation
+    return nil if @generic_maximal_order_computation == nil
+    @generic_maximal_order_computation
+
+  -> maximal_order_certificate
+    certify_maximal_order
+    @generic_maximal_order_computation.certificate
+
+  -> maximal_order
+    certify_maximal_order
+
+  -> generic_integral_basis
+    if @generic_integral_basis == nil
+      order = certify_maximal_order
+      scale = monogenic_order.generator_scale
+      @generic_integral_basis = []
+      order.basis_vectors.each -> (vector)
+        coefficients = []
+        power = 1 ## big
+        i = 0
+        while i < @degree
+          coefficients.push(
+            Rational.coerce(vector[i]) * power)
+          power *= scale
+          i += 1
+        @generic_integral_basis.push(coerce(coefficients))
+    out = []
+    @generic_integral_basis.each -> (element)
+      out.push(element)
+    out
 
   -> initialize_cubic_maximal_order(polynomial)
     primitive = NumberField.primitive_integer_coefficients(polynomial)
@@ -266,30 +323,33 @@
         vector[2] * @integral_generator_scale * @integral_generator_scale]))
 
   -> integral_defining_polynomial
-    require_cubic_maximal_order("integral defining polynomial")
-    @integral_defining_polynomial
+    return @integral_defining_polynomial if cubic?
+    monogenic_order.integral_polynomial
 
   -> integral_power_basis_discriminant
-    require_cubic_maximal_order("integral power-basis discriminant")
-    @integral_power_basis_discriminant
+    return @integral_power_basis_discriminant if cubic?
+    monogenic_order.discriminant
 
   -> field_discriminant
-    require_cubic_maximal_order("maximal-order field discriminant")
-    @field_discriminant
+    return @field_discriminant if cubic?
+    certify_maximal_order.discriminant
 
   -> maximal_order_index
-    require_cubic_maximal_order("maximal-order index")
-    @maximal_order_index
+    return @maximal_order_index if cubic?
+    certify_maximal_order
+    @generic_maximal_order_computation.index
 
   -> integral_generator_scale
-    require_cubic_maximal_order("integral generator scale")
-    @integral_generator_scale
+    return @integral_generator_scale if cubic?
+    monogenic_order.generator_scale
 
   -> integral_basis
-    require_cubic_maximal_order("integral basis")
-    out = []
-    @integral_basis.each -> out.push(item)
-    out
+    if cubic?
+      out = []
+      @integral_basis.each -> (element)
+        out.push(element)
+      return out
+    generic_integral_basis
 
   -> degree
     @degree
@@ -313,10 +373,10 @@
     true
 
   -> field_discriminant_certified?
-    cubic?
+    cubic? || @generic_maximal_order_computation != nil
 
   -> maximal_order_certified?
-    cubic?
+    field_discriminant_certified?
 
   -> power_basis_discriminant_certified?
     true
@@ -1159,8 +1219,10 @@
 
 + Polynomial
   -> field_discriminant
-    if @ring.arity != 1 || degree != 3 || @ring.field.class_name != "RationalField"
-      raise "field_discriminant currently needs an irreducible cubic over ℚ"
+    invalid = @ring.arity != 1 || degree < 2
+    invalid = true if @ring.field.class_name != "RationalField"
+    if invalid
+      raise "field_discriminant needs a univariate polynomial of degree at least two over ℚ"
     NumberField.new(self).field_discriminant
 
   -> roots_in(number_field)

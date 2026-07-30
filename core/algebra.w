@@ -22,7 +22,9 @@ use core/algebra/polynomial_factor
 use core/algebra/polynomial_factor_finite
 use core/algebra/simple_extension
 use core/algebra/etale_algebra
+use core/algebra/integer_lattice
 use core/algebra/orders
+use core/algebra/maximal_orders
 use core/algebra/real_roots
 use core/algebra/groebner
 use core/algebra/algebraic_real
@@ -75,6 +77,12 @@ use core/algebra/galois
 
   -> .product_order(polynomials)
     EtaleProductOrder.new(polynomials)
+
+  -> .maximal_order(
+       order, factor_search_limit = 1_000_000,
+       step_limit = 10_000)
+    order.maximal_order(
+      factor_search_limit, step_limit)
 
   -> .rational_projective_plane(x = :X, y = :Y, z = :Z)
     ProjectiveSpace<ℚ, 2>.new(x, y, z)

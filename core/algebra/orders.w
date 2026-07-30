@@ -12,8 +12,8 @@
 # Its trace-form discriminant is exact. At every prime p whose square divides
 # the discriminant, Dedekind's index criterion certifies whether p divides
 # [O_max : Z[beta]]. Passing all such primes proves maximality. Failure proves
-# that the displayed power order is nonmaximal, but does not pretend to
-# construct the missing overorder.
+# that the displayed power order is nonmaximal; maximal_orders.w then uses
+# degree-generic Round 2 multiplier rings to construct the integral closure.
 
 + IntegralGeneratorTransformCertificate
   -> new(@source_polynomial, @integral_polynomial, @scale)
@@ -295,6 +295,7 @@
     @integral_polynomial = transformed[1]
     @algebra = EtaleAlgebra.new(@integral_polynomial)
     @discriminant_cache = nil
+    @algebra_order_cache = nil
     if !certificate.verified?
       raise "monogenic order failed certification"
 
@@ -384,6 +385,69 @@
   -> certified?
     certificate.verified?
 
+  -> algebra_order
+    if @algebra_order_cache == nil
+      @algebra_order_cache = AlgebraOrder.power_order(self)
+    @algebra_order_cache
+
+  -> as_algebra_order
+    algebra_order
+
+  # If beta is the displayed integral generator and
+  #
+  #   g(T) = T^n + sum c_i T^i,
+  #
+  # then gamma=beta/d is integral exactly when d^(n-i) divides every c_i.
+  # Taking the largest such d gives a certified power overorder before the
+  # general Round 2 loop starts.
+  -> integral_generator_divisor(
+       factor_search_limit = 1_000_000)
+    factors = algebra_order.factor_discriminant(
+      factor_search_limit)
+    divisor = 1 ## big
+    factors.each -> (factor)
+      prime = factor[0]
+      maximum = nil
+      i = 0
+      while i < rank
+        coefficient = @integral_polynomial.coeff(i)
+        if coefficient.denominator != 1
+          raise "integral generator polynomial has a nonintegral coefficient"
+        value = coefficient.numerator.abs
+        if value != 0
+          valuation = 0
+          while value % prime == 0
+            value = value / prime
+            valuation += 1
+          bound = valuation / (rank - i)
+          maximum = bound if maximum == nil || bound < maximum
+        i += 1
+      divisor *= prime ** maximum if maximum != nil && maximum > 0
+    divisor
+
+  -> integral_generator_overorder(
+       factor_search_limit = 1_000_000)
+    divisor = integral_generator_divisor(
+      factor_search_limit)
+    return algebra_order if divisor == 1
+    vectors = []
+    i = 0
+    while i < rank
+      vector = []
+      j = 0
+      while j < rank
+        coefficient = Rational.new(0)
+        if i == j
+          coefficient = Rational.new(1, divisor ** i)
+        vector.push(coefficient)
+        j += 1
+      vectors.push(vector)
+      i += 1
+    overorder = AlgebraOrder.new(@algebra, vectors)
+    if !overorder.contains_order?(algebra_order)
+      raise "integral generator overorder does not contain its power order"
+    overorder
+
   -> coerce(value)
     element = @algebra.coerce(value)
     if !contains?(element)
@@ -437,12 +501,32 @@
     maximality_certificate(
       factor_search_limit).obstructed_primes
 
-  -> maximal_order(factor_search_limit = 1_000_000)
+  -> maximal_order(
+       factor_search_limit = 1_000_000,
+       step_limit = 10_000)
     certificate = maximality_certificate(
       factor_search_limit)
     return self if certificate.maximal?
-    primes = certificate.obstructed_primes
-    raise "power order is nonmaximal at " + primes.to_s + "; general overorder construction is not implemented"
+    maximal_order_with_certificate(
+      factor_search_limit, step_limit).order
+
+  -> maximal_order_with_certificate(
+       factor_search_limit = 1_000_000,
+       step_limit = 10_000)
+    seed = integral_generator_overorder(
+      factor_search_limit)
+    MaximalOrderComputation.new(
+      algebra_order, factor_search_limit,
+      step_limit, seed)
+
+  -> p_maximal_order_with_certificate(
+       prime, step_limit = 10_000)
+    algebra_order.p_maximal_order_with_certificate(
+      prime, step_limit)
+
+  -> p_maximal_order(prime, step_limit = 10_000)
+    p_maximal_order_with_certificate(
+      prime, step_limit).order
 
   # Exact bounded trial division. Exhaustion is "unknown", never a claim that
   # the unfactored cofactor is prime.
@@ -585,7 +669,13 @@
       raise "etale product order needs component polynomials"
     @component_orders = []
     polynomials.each ->
-      @component_orders.push(MonogenicOrder.new(item))
+      item_class = item.class_name
+      supported_order = item_class == "MonogenicOrder"
+      supported_order = true if item_class == "AlgebraOrder"
+      if supported_order
+        @component_orders.push(item)
+      else
+        @component_orders.push(MonogenicOrder.new(item))
     if !certificate.verified?
       raise "etale product order failed certification"
 
@@ -618,6 +708,18 @@
 
   -> certified?
     certificate.verified?
+
+  -> component_algebra_orders
+    out = []
+    @component_orders.each ->
+      item_class = item.class_name
+      if item_class == "MonogenicOrder"
+        out.push(item.algebra_order)
+      elsif item_class == "AlgebraOrder"
+        out.push(item)
+      else
+        raise "unsupported etale product order component"
+    out
 
   -> coerce(value)
     if value.class_name == "EtaleProductOrderElement"
@@ -725,16 +827,20 @@
   -> maximality_certificates(factor_search_limit = 1_000_000)
     out = []
     @component_orders.each ->
-      out.push(item.maximality_certificate(
-        factor_search_limit))
+      if item.class_name == "MonogenicOrder"
+        out.push(item.maximality_certificate(
+          factor_search_limit))
+      else
+        out.push(item.maximal_order_with_certificate(
+          factor_search_limit).certificate)
     out
 
   -> maximal?(factor_search_limit = 1_000_000)
-    certificates = maximality_certificates(
-      factor_search_limit)
+    components = @component_orders
     i = 0
-    while i < certificates.size
-      return false if !certificates[i].maximal?
+    while i < components.size
+      return false if !components[i].maximal?(
+        factor_search_limit)
       i += 1
     true
 
@@ -745,9 +851,24 @@
     i = 0
     while i < certificates.size
       if !certificates[i].maximal?
-        out.push([i, certificates[i].obstructed_primes])
+        primes = []
+        if certificates[i].respond_to?("obstructed_primes")
+          primes = certificates[i].obstructed_primes
+        out.push([i, primes])
       i += 1
     out
+
+  -> maximal_order_with_certificate(
+       factor_search_limit = 1_000_000,
+       step_limit = 10_000)
+    EtaleProductMaximalOrderComputation.new(
+      self, factor_search_limit, step_limit)
+
+  -> maximal_order(
+       factor_search_limit = 1_000_000,
+       step_limit = 10_000)
+    maximal_order_with_certificate(
+      factor_search_limit, step_limit).order
 
   -> to_s
     "EtaleProductOrder(" + component_ranks.to_s + ")"

@@ -5,6 +5,9 @@ geometry layers. `Rational` remains a numeric scalar in
 `core/numeric/rational.w`; `Field` is the algebra-side protocol describing how
 such scalars behave as coefficients.
 
+New to the mathematics stack? Start with the cross-cutting map in
+[mathematics.md](mathematics.md); this page is the detailed algebra reference.
+
 Exact polynomial derivatives and integrals live here. Smooth numerical
 Taylor series, gradients, Hessians, and quadrature are provided by
 `use calculus`; see
@@ -746,6 +749,13 @@ S.certificate.verified?
 Ainf = setup.certify_archimedean_data
 Ainf.signature[0] + 2*Ainf.signature[1]  # 27
 Ainf.certificate.verified?
+# U6/U9/U12 are independently certified component bases.
+Q = setup.certify_s_unit_square_class_quotient(
+  [[U6], [U9], [U12]])
+Q.ambient_dimension        # 35
+Q.diagonal_rank            # 4
+Q.dimension                 # 31
+Q.certificate.verified?
 ```
 
 For the shell-width quartic, the bitangent certificate checks supplied
@@ -775,8 +785,11 @@ shell-width presentation the three certified maximal-order discriminants are
 `1168128`, `133451615232`, and `1364523024384`.
 The finite \(S\)-place layer then decomposes \(2\), \(3\), and \(13\) in every
 component. It certifies 4, 9, and 7 primes respectively, including all residue
-fields and ramification/residue-degree signatures. This is finite-prime data,
-not an S-class-group or S-unit computation. The archimedean layer directly
+fields and ramification/residue-degree signatures. By itself this is
+finite-prime data, not an S-class-group or S-unit computation. Separate
+component certificates establish the shell-width S-class and S-unit claims;
+`certify_s_unit_square_class_quotient` binds the latter to this setup's actual
+maximal order and S-prime set. The archimedean layer directly
 Sturm-isolates the real roots of each squarefree component and records the
 remaining complex conjugate pairs. It deliberately avoids requiring a full
 irreducible factorization of the degree-6/9/12 presentations.

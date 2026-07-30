@@ -11,3 +11,7 @@ use core/plot
 ```
 
 Class stays `PlotExt` so it doesn’t collide with drawille’s `Plot`.
+
+This is not yet a scene-graph or mathematical-animation toolkit. The planned
+2D/3D, timeline, formula-morphing, interactive-documentation, and deterministic
+rendering layers are mapped in [../mathematics.md](../mathematics.md).

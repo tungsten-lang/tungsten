@@ -91,6 +91,14 @@ the exact refutation query by appending the negation of its normalized claim;
 an UNSAT proof therefore cannot be relabeled as a different consequence.
 Clause labels remain diagnostic metadata.
 
+Wrat verifies file certificates through an allocation-bounded mmap scanner.
+Hinted WRAT/LRAT can be packed losslessly as WRATB: sequential addition ids
+are implicit and literals/reference deltas use varints. On the representative
+149,751-addition shell-width/LRC proof this reduced 80.3 MB to 32.2 MB and
+native verifier RSS from the old 7.01 GB whole-proof path to 186 MB. Large
+research replays remain opt-in; the default suite checks small proof identities
+and format round-trips rather than imposing multi-gigabyte jobs.
+
 WRAT does **not** certify the arithmetic-to-CNF translation, maximal orders,
 class groups, unit groups, p-adic lifting, local constancy, duality theorems,
 or a modularity theorem. Those need their own semantic checkers or

@@ -1115,6 +1115,7 @@
     @s_prime_data = nil
     @archimedean_data = nil
     @s_class_two_torsion_proof = nil
+    @s_unit_square_class_quotient = nil
 
   -> curve
     @curve
@@ -1178,6 +1179,7 @@
     @s_prime_data = nil
     @archimedean_data = nil
     @s_class_two_torsion_proof = nil
+    @s_unit_square_class_quotient = nil
     @bitangent_scheme_certificate
 
   -> bitangent_scheme_certificate
@@ -1192,6 +1194,7 @@
       @s_prime_data = nil
       @archimedean_data = nil
       @s_class_two_torsion_proof = nil
+      @s_unit_square_class_quotient = nil
     @integral_product_order = order
     if !@integral_product_order.certificate.verified?
       raise "bitangent integral product order failed certification"
@@ -1226,6 +1229,7 @@
     @maximal_product_order_computation = computation
     @s_prime_data = nil
     @s_class_two_torsion_proof = nil
+    @s_unit_square_class_quotient = nil
     if !@maximal_product_order_computation.certificate.verified?
       raise "bitangent maximal product order failed certification"
     @maximal_product_order_computation.order
@@ -1256,6 +1260,7 @@
       primes, factor_search_limit,
       generator_search_limit)
     @s_class_two_torsion_proof = nil
+    @s_unit_square_class_quotient = nil
     if !@s_prime_data.certificate.verified?
       raise "bitangent S-prime data failed certification"
     @s_prime_data
@@ -1290,6 +1295,28 @@
   -> s_class_two_torsion_certificate
     return nil if @s_class_two_torsion_proof == nil
     @s_class_two_torsion_proof.certificate
+
+  # Bind independently certified component S-unit bases to this setup's
+  # actual maximal product order and S-prime set.  Generator discovery may be
+  # external; the quotient certificate replays support, local coordinates,
+  # component dimensions, and the diagonal rational rank.
+  -> certify_s_unit_square_class_quotient(component_bases)
+    if @maximal_product_order_computation == nil
+      certify_maximal_product_order
+    if @s_prime_data == nil
+      certify_s_prime_data
+    @s_unit_square_class_quotient = maximal_product_order.s_unit_square_class_quotient(
+      @s_prime_data.rational_primes, component_bases)
+    if !@s_unit_square_class_quotient.certificate.verified?
+      raise "bitangent product S-unit quotient failed certification"
+    @s_unit_square_class_quotient
+
+  -> s_unit_square_class_quotient
+    @s_unit_square_class_quotient
+
+  -> s_unit_square_class_quotient_certificate
+    return nil if @s_unit_square_class_quotient == nil
+    @s_unit_square_class_quotient.certificate
 
   -> requirements
     out = []
@@ -1369,9 +1396,15 @@
         "S-class group 2-torsion", "complete",
         "Minkowski factor bases and odd principal-relation quotients",
         @s_class_two_torsion_proof.certificate))
-    out.push(DescentRequirement.new(
-      "product S-unit square-class basis", "missing",
-      "certify component generators and quotient by diagonal rational S-units"))
+    if @s_unit_square_class_quotient == nil
+      out.push(DescentRequirement.new(
+        "product S-unit square-class basis", "missing",
+        "certify component generators and quotient by diagonal rational S-units"))
+    else
+      out.push(DescentRequirement.new(
+        "product S-unit square-class basis", "complete",
+        "certified component bases and diagonal rational quotient of dimension " + @s_unit_square_class_quotient.dimension.to_s,
+        @s_unit_square_class_quotient.certificate))
     out.push(DescentRequirement.new(
       "theta Galois module", "missing",
       "identify the 28/315 incidence structure and decomposition actions"))

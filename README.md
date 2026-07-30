@@ -45,6 +45,10 @@ _Are you an agent?_
 bin/tungsten start --agent
 ```
 
+_Here for mathematics?_ The [mathematics map](doc/mathematics.md) routes exact
+algebra, symbolic calculus, numerical computing, certificates, and plotting,
+and clearly marks what is implemented versus still frontier work.
+
 ## Ecosystem
 
 __Bit__ is Tungsten's package manager. Find, install, and test shared code.

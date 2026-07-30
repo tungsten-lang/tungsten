@@ -42,6 +42,17 @@ the original polynomial, replays each isolating certificate, and verifies
 strict ordering. A decimal or floating-point approximation derived from an
 interval is useful output, but it is not the certificate.
 
+`AlgebraicRealOperationCertificate` binds an exact `+`, `-`, `*`, or `/`
+statement to two certified real operands. Its replay reconstructs the
+block-order Gröbner eliminant for the operation (or the direct polynomial
+transform for a rational operand), recomputes the propagated rational
+interval, proves that the eliminant has exactly one real root there, and
+checks that the returned rational or `AlgebraicRealRoot` is that root.
+`AlgebraicRealComputation#value` is convenient exact output;
+`#certificate` is the statement-bound proof object. A root-isolation
+certificate alone proves what a `RootOf` value denotes, not that it was the
+result of a claimed arithmetic operation.
+
 `F2LinearSystemCertificate` is the reference finite certificate. It replays
 elementary row operations, validates canonical RREF, and independently checks
 the particular solution and kernel basis. `ExplicitSelmerIntersectionCertificate`

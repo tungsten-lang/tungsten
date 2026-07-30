@@ -1892,11 +1892,29 @@ use target
     apply_binary_op(node_op, left, right)
 
   -> apply_binary_op(op, left, right)
+    # Ordered user values compare through their polymorphic `<=>`. Dispatching
+    # here before the primitive `<`/`>` arms keeps Comparable classes out of
+    # the packed-number runtime path; a user object on the right is compared
+    # in reverse so `1 < algebraic_root` works too.
+    if op in (:LT :LTE :GT :GTE)
+      comparison = nil
+      reversed = false
+      if type(left) == "Hash" && left.has_key?(:rt) && left[:rt] == :object
+        comparison = dispatch_method(left, "<=>", [right], nil, nil)
+      elsif type(right) == "Hash" && right.has_key?(:rt) && right[:rt] == :object
+        comparison = dispatch_method(right, "<=>", [left], nil, nil)
+        reversed = true
+      if comparison != nil
+        comparison = 0 - comparison if reversed
+        return comparison < 0 if op == :LT
+        return comparison <= 0 if op == :LTE
+        return comparison > 0 if op == :GT
+        return comparison >= 0
+
     # Object operands dispatch their own operator method (a + b -> a.+(b)),
     # mirroring the compiled operator-overload path and the `·` arm below —
-    # covers the hypercomplex tower, Vec/Mat, etc. Arithmetic/bitwise here,
-    # `==`/`!=` just below; ordering comparisons (< > <= >=) fall through
-    # to the primitive arms unchanged.
+    # covers the hypercomplex tower, Vec/Mat, etc. Arithmetic/bitwise here and
+    # `==`/`!=` just below; ordering comparisons were handled above.
     if type(left) == "Hash" && left.has_key?(:rt) && left[:rt] == :object
       opn = binop_method_name(op)
       if opn != nil

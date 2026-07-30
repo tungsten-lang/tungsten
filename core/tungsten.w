@@ -145,6 +145,8 @@
   auto :Polynomial,             "algebra"
   auto :IntegerPolynomial,      "algebra"
   auto :AlgebraicRealRoot,      "algebra"
+  auto :AlgebraicRealComputation, "algebra"
+  auto :AlgebraicRealOperationCertificate, "algebra"
   auto :RootIsolationCertificate, "algebra"
   auto :RealRootIsolation,      "algebra"
   auto :Poly,                   "algebra"

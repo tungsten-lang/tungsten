@@ -20,9 +20,10 @@ use core/algebra/polynomial_resultant
 use core/algebra/polynomial_gcd
 use core/algebra/polynomial_factor
 use core/algebra/real_roots
+use core/algebra/groebner
+use core/algebra/algebraic_real
 use core/algebra/expression
 use core/algebra/number_field
-use core/algebra/groebner
 use core/algebra/f2_linear
 use core/algebra/projective
 use core/algebra/curves

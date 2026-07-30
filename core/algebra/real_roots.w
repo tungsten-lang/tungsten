@@ -290,6 +290,18 @@
   -> defining_polynomial
     @defining_polynomial
 
+  -> minimal_polynomial(search_limit = 250_000)
+    selected = nil
+    @defining_polynomial.unique_irreducible_factors(search_limit).each -> (piece)
+      count = piece.sturm_root_count(@lower, @upper)
+      if count == 1
+        if selected != nil
+          raise "algebraic-real interval selected multiple irreducible factors"
+        selected = piece.monic
+    if selected == nil
+      raise "algebraic-real interval selected no irreducible factor"
+    selected
+
   -> root_index
     @root_index
 
@@ -380,8 +392,24 @@
   -> <=>(other)
     if other.class_name != "AlgebraicRealRoot"
       return compare_rational(other)
-    if @defining_polynomial == other.defining_polynomial
+    left_polynomial = canonical_defining_polynomial
+    right_polynomial = other.canonical_defining_polynomial
+    if left_polynomial == right_polynomial
       return @root_index <=> other.root_index
+
+    # Distinct presentations may still select a root of the same rational
+    # factor. Detect that algebraically before interval refinement: otherwise
+    # equal roots would overlap forever and eventually hit the separation
+    # limit.
+    common = left_polynomial.gcd(right_polynomial)
+    if common.degree > 0
+      left_count = common.sturm_root_count(@lower, @upper)
+      right_count = common.sturm_root_count(
+        other.lower_bound, other.upper_bound)
+      if left_count == 1 && right_count == 1
+        left_index = common.sturm_root_index_before(@lower)
+        right_index = common.sturm_root_index_before(other.lower_bound)
+        return left_index <=> right_index
 
     steps = 0
     while true
@@ -394,6 +422,40 @@
       else
         other.refine!
       steps += 1
+
+  -> canonical_defining_polynomial
+    ring = PolynomialRing.new([:__root], RationalField.new)
+    @defining_polynomial.rename_into(ring).monic
+
+  -> eql?(other)
+    return false if other.class_name != "AlgebraicRealRoot"
+    (self <=> other) == 0
+
+  -> ==/1
+    other = @1
+    return (self <=> other) == 0 if other.class_name == "AlgebraicRealRoot"
+    name = other.class_name
+    rational = name == "Rational" || name == "Integer" || name == "Int" || name == "BigInt"
+    return (self <=> other) == 0 if rational
+    false
+
+  -> <(other)
+    (self <=> other) < 0
+
+  -> <=(other)
+    (self <=> other) <= 0
+
+  -> >(other)
+    (self <=> other) > 0
+
+  -> >=(other)
+    (self <=> other) >= 0
+
+  -> zero?
+    (self <=> Rational.new(0)) == 0
+
+  -> one?
+    (self <=> Rational.new(1)) == 0
 
   -> sign
     self <=> Rational.new(0)

@@ -138,6 +138,31 @@ complete `RealRootIsolation` certificate checks the exact distinct-root count,
 every rational root or certified algebraic factor, and strict ordering of the
 returned list. There is no silent floating-point fallback.
 
+`AlgebraicRealRoot` values participate in exact arithmetic. The result
+polynomial is obtained by exact elimination, while certified rational
+intervals select the intended real embedding:
+
+```w
+R = PolynomialRing.new([:t], RationalField.new)
+t = R.generator(0)
+sqrt2 = (t**2 - 2).real_roots[1]
+sqrt3 = (t**2 - 3).real_roots[1]
+
+sqrt2 + sqrt3       # RootOf(z^4 - 10z^2 + 1, 3)
+sqrt2 * sqrt3       # RootOf(z^2 - 6, 1)
+sqrt2 * sqrt2       # 2
+
+checked = sqrt2.multiply_with_certificate(sqrt3)
+checked.value
+checked.certificate.certified?  # true
+```
+
+Expression constants combine these values exactly, including algebraic
+coefficients of like symbolic terms and rational-left division. Elementary
+functions remain symbolic (`Expression.constant(sqrt2).exp` is
+`exp(RootOf(...))`); evaluating that expression deliberately produces a
+machine approximation.
+
 ## Elementary symbolic integration
 
 `antiderivative` supports exact polynomial powers, constant multiples, affine
@@ -208,9 +233,9 @@ and rational-polynomial front end, not yet a complete computer algebra system.
 It does not currently provide assumptions/refinement, piecewise expressions,
 infinite or directional limits, Laurent/Puiseux series, general
 transcendental equation solving, complex algebraic root objects, general
-multivariate factorization, arithmetic between general `RootOf`
-presentations, or Risch-style integration. Polynomial-native Gröbner bases,
-ideals, and geometry remain in `use algebra`.
+multivariate factorization, exact transcendental-value comparison, or
+Risch-style integration. Polynomial-native Gröbner bases, ideals, and
+geometry remain in `use algebra`.
 
 Operator dispatch is still receiver-directed. Write `x*2`, not `2*x`, until
 the language has a general reverse-operator protocol.

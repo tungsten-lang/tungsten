@@ -26,6 +26,7 @@ core/algebra/polynomial_resultant.w
 core/algebra/polynomial_gcd.w
 core/algebra/polynomial_factor.w
 core/algebra/real_roots.w          # Sturm isolation and certified RootOf values
+core/algebra/algebraic_real.w      # exact RootOf arithmetic and certificates
 core/algebra/expression.w          # symbolic factor and exact real solve facade
 core/algebra/number_field.w        # exact cubic fields and maximal orders
 core/algebra/groebner.w            # Buchberger, Ideal, eliminate, saturate
@@ -106,9 +107,9 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 
 | Layer | Available now | Boundary |
 | --- | --- | --- |
-| Symbolic expressions | Exact π/e and radicals; canonical simplify, expand, collect, differentiation, elementary antiderivatives; exact formal Taylor series and removable finite limits; exact univariate ℚ factor facade; arbitrary exact real roots as rationals, radicals, or certified `RootOf` constants | No assumptions, piecewise forms, Laurent/Puiseux series, infinite/directional limits, general multivariate factorization, complex algebraic-root object, arithmetic between general `RootOf` presentations, general higher-degree radical formulas, or Risch integration |
+| Symbolic expressions | Exact π/e and radicals; canonical simplify, expand, collect, differentiation, elementary antiderivatives; exact formal Taylor series and removable finite limits; exact univariate ℚ factor facade; arbitrary exact real roots as rationals, radicals, or certified `RootOf` constants; exact arithmetic and symbolic transcendentals over real algebraic constants | No assumptions, piecewise forms, Laurent/Puiseux series, infinite/directional limits, general multivariate factorization, complex algebraic-root object, general higher-degree radical formulas, or Risch integration |
 | Fields | Exact `RationalField`; prime fields `𝔽_p`; extensions `𝔽_{p^n}` for `n ≤ 3` with Integer-encoded elements; exact irreducible cubic `NumberField`s over ℚ with arithmetic, Sturm signatures, integral bases, and maximal-order discriminants | Finite extensions above degree three and number fields of degree other than three are not implemented. Cubic maximal-order search is explicitly resource-bounded and raises `unknown` rather than guessing |
-| Polynomials | Sparse sorted terms; merge-multiply; dense univariate fast path; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ as **content × monic irreducibles**; exact Sturm counts, Cauchy bounds, and certified isolation of every distinct real root | Kronecker factor search and root-interval splitting have explicit resource limits; complex-root isolation, algebraic-number arithmetic, and multivariate factorization are not implemented |
+| Polynomials | Sparse sorted terms; merge-multiply; dense univariate fast path; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ as **content × monic irreducibles**; exact Sturm counts, Cauchy bounds, and certified isolation of every distinct real root | Kronecker factor search, Gröbner elimination, and root-interval splitting have explicit resource limits; complex-root isolation, complex algebraic-number arithmetic, and multivariate factorization are not implemented |
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders | Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ and finite fields, normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
 | Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension | Singular-curve normalization is not implemented |
@@ -158,6 +159,40 @@ that the sorted list is complete for the original polynomial. Repeated roots
 appear once. Approximation is derived from a refinable certified interval but
 is not itself a proof object. Unsupported coefficient fields and the zero
 polynomial fail loudly.
+
+Real algebraic values support exact `+`, `-`, `*`, `/`, integer powers,
+negation, reciprocal, comparison across different defining presentations, and
+exact `floor`, `ceil`, `round`, and `truncate`:
+
+```w
+sqrt2 = (x**2 - 2).real_roots[1]
+sqrt3 = (x**2 - 3).real_roots[1]
+
+sqrt2 + sqrt3       # RootOf(z^4 - 10z^2 + 1, 3)
+sqrt2 * sqrt3       # RootOf(z^2 - 6, 1)
+sqrt2 * sqrt2       # 2
+sqrt2**-1           # RootOf(z^2 - 1/2, 1)
+sqrt2.floor         # 1
+
+product = sqrt2.multiply_with_certificate(sqrt3)
+product.value
+product.elimination_polynomial
+product.certificate.certified?  # true
+```
+
+For two algebraic operands, exact block-order Gröbner elimination constructs
+the polynomial satisfied by every conjugate result. Rational interval
+arithmetic then refines the selected operand embeddings until only one real
+root remains, and exact factorization recovers its irreducible factor.
+Rational translations, scalings, and reciprocals use direct polynomial
+transforms. `AlgebraicRealOperationCertificate` reconstructs the eliminant and
+enclosure and verifies the unique selected root. Factor, Gröbner-pair, and
+refinement limits raise instead of returning an uncertified approximation.
+
+Ordinary operator dispatch remains receiver-directed, so write `sqrt2 / 2`.
+For a rational left operand use
+`Algebra.real_algebraic_value(2, "/", sqrt2)`; symbolic `Expression`
+constants handle either operand order.
 
 ## Quartic arithmetic
 

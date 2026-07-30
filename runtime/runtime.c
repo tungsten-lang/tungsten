@@ -15937,6 +15937,37 @@ WValue w_neq(WValue a, WValue b) {
     return w_eq(a, b) == W_TRUE ? W_FALSE : W_TRUE;
 }
 
+/* Compare a user instance through its `<=>` override. Object's bodyless
+ * declaration is only the builtin fallback contract and must not recurse
+ * back through w_lt/w_gt. Ordered user classes (Comparable, algebraic roots,
+ * heaps, etc.) provide a real override returning -1/0/1. */
+static int w_instance_spaceship_compare(WValue a, WValue b) {
+    WObject *obj = (WObject *)w_as_ptr(a);
+    WClass *klass = g_class_table[obj->class_id];
+    WValue name = w_string("<=>");
+    WMethod *method = w_method_lookup(klass, name);
+    static WMethod *object_spaceship = NULL;
+    static int object_spaceship_init = 0;
+    if (!object_spaceship_init) {
+        object_spaceship_init = 1;
+        for (int ci = 0; ci < W_MAX_CLASSES; ci++) {
+            WClass *candidate = g_class_table[ci];
+            if (candidate && candidate->name &&
+                strcmp(candidate->name, "Object") == 0) {
+                object_spaceship = w_method_lookup(candidate, name);
+                break;
+            }
+        }
+    }
+    if (!method || method == object_spaceship)
+        w_raise_type_error("%s does not define <=>", a, b);
+    WValue result = w_method_call_fast(a, name, &b, 1);
+    if (!w_is_int(result))
+        w_raise_type_error("%s#<=> did not return an Integer", result, a);
+    int64_t comparison = w_as_int(result);
+    return comparison < 0 ? -1 : (comparison > 0 ? 1 : 0);
+}
+
 WValue w_lt(WValue a, WValue b) {
     if (w_is_int(a) && w_is_int(b))
         return w_bool(w_as_int(a) < w_as_int(b));
@@ -15971,6 +16002,10 @@ WValue w_lt(WValue a, WValue b) {
         return w_bool(w_string_compare(a, b) < 0);
     }
 
+    if (w_is_instance(a))
+        return w_bool(w_instance_spaceship_compare(a, b) < 0);
+    if (w_is_instance(b))
+        return w_bool(w_instance_spaceship_compare(b, a) > 0);
     return w_bool(as_int(a) < as_int(b));
 }
 
@@ -16066,6 +16101,10 @@ WValue w_gt(WValue a, WValue b) {
         return w_bool(w_string_compare(a, b) > 0);
     }
 
+    if (w_is_instance(a))
+        return w_bool(w_instance_spaceship_compare(a, b) > 0);
+    if (w_is_instance(b))
+        return w_bool(w_instance_spaceship_compare(b, a) < 0);
     return w_bool(as_int(a) > as_int(b));
 }
 
@@ -16102,6 +16141,10 @@ WValue w_lte(WValue a, WValue b) {
         return w_bool(w_string_compare(a, b) <= 0);
     }
 
+    if (w_is_instance(a))
+        return w_bool(w_instance_spaceship_compare(a, b) <= 0);
+    if (w_is_instance(b))
+        return w_bool(w_instance_spaceship_compare(b, a) >= 0);
     return w_bool(as_int(a) <= as_int(b));
 }
 
@@ -16138,6 +16181,10 @@ WValue w_gte(WValue a, WValue b) {
         return w_bool(w_string_compare(a, b) >= 0);
     }
 
+    if (w_is_instance(a))
+        return w_bool(w_instance_spaceship_compare(a, b) >= 0);
+    if (w_is_instance(b))
+        return w_bool(w_instance_spaceship_compare(b, a) <= 0);
     return w_bool(as_int(a) >= as_int(b));
 }
 

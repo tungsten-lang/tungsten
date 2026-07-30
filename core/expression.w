@@ -114,12 +114,31 @@ use core/math
       "Integer", "Int", "BigInt",
       "Float", "Float16", "Float32", "Float64", "Float80", "Float128",
       "Float256", "Rational",
-      "Decimal", "Decimal32", "Decimal64", "Decimal128"
+      "Decimal", "Decimal32", "Decimal64", "Decimal128",
+      "AlgebraicRealRoot"
     ]
     scalar_names.include?(name)
 
   -> .exact_value?(value)
+    exact = Expression.integer?(value) || value.class_name == "Rational"
+    exact || value.class_name == "AlgebraicRealRoot"
+
+  -> .rational_exact_value?(value)
     Expression.integer?(value) || value.class_name == "Rational"
+
+  -> .add_constant_values(left, right)
+    algebraic = left.class_name == "AlgebraicRealRoot"
+    algebraic = algebraic || right.class_name == "AlgebraicRealRoot"
+    if algebraic
+      return AlgebraicRealArithmetic.value(left, right, "+")
+    left + right
+
+  -> .multiply_constant_values(left, right)
+    algebraic = left.class_name == "AlgebraicRealRoot"
+    algebraic = algebraic || right.class_name == "AlgebraicRealRoot"
+    if algebraic
+      return AlgebraicRealArithmetic.value(left, right, "*")
+    left * right
 
   -> .perfect_square_root(value)
     if Expression.integer?(value)
@@ -265,7 +284,8 @@ use core/math
         if piece.constant?
           value = piece.constant_value
           if constant_seen
-            constant_total = constant_total + value
+            constant_total = Expression.add_constant_values(
+              constant_total, value)
           else
             constant_total = value
             constant_seen = true
@@ -285,7 +305,8 @@ use core/math
           break
         i += 1
       if found >= 0
-        groups[found][1] = groups[found][1] + coefficient
+        groups[found][1] = Expression.add_constant_values(
+          groups[found][1], coefficient)
       else
         groups.push([base, coefficient])
 
@@ -316,7 +337,11 @@ use core/math
 
   -> .negate(value)
     expression = Expression.wrap(value)
-    return Expression.constant(0 - expression.constant_value) if expression.constant?
+    if expression.constant?
+      constant = expression.constant_value
+      if constant.class_name == "AlgebraicRealRoot"
+        return Expression.constant(constant.negate)
+      return Expression.constant(0 - constant)
     Expression.product([Expression.constant(-1), expression])
 
   # Return [base, positive integral multiplicity] for multiplicative
@@ -347,7 +372,8 @@ use core/math
             zero_factor = true
           else
             if constant_seen
-              constant_total = constant_total * value
+              constant_total = Expression.multiply_constant_values(
+                constant_total, value)
             else
               constant_total = value
               constant_seen = true
@@ -424,6 +450,10 @@ use core/math
 
   -> .divide_constants(numerator, denominator)
     raise "symbolic division by zero" if Expression.zero_value?(denominator)
+    algebraic = numerator.class_name == "AlgebraicRealRoot"
+    algebraic = algebraic || denominator.class_name == "AlgebraicRealRoot"
+    if algebraic
+      return AlgebraicRealArithmetic.value(numerator, denominator, "/")
     if Expression.integer?(numerator) && Expression.integer?(denominator)
       return Rational.new(numerator, denominator)
     numerator / denominator
@@ -509,6 +539,8 @@ use core/math
     Expression.node("power", [left, right])
 
   -> .apply_unary(operation, value)
+    if value.class_name == "AlgebraicRealRoot"
+      return Expression.apply_unary(operation, value.to_f)
     if value.respond_to?(operation)
       return value.exp if operation == "exp"
       return value.log if operation == "log"
@@ -621,12 +653,12 @@ use core/math
       pieces = expression.arguments
       if pieces.size == 2 && pieces[0].constant?
         coefficient = pieces[0].constant_value
-        if Expression.exact_value?(coefficient)
+        if Expression.rational_exact_value?(coefficient)
           rest = Expression.pi_multiple(pieces[1])
           return Rational.coerce(coefficient) * rest if rest != nil
     if expression.operation == "divide"
       pieces = expression.arguments
-      if pieces[1].constant? && Expression.exact_value?(pieces[1].constant_value)
+      if pieces[1].constant? && Expression.rational_exact_value?(pieces[1].constant_value)
         numerator = Expression.pi_multiple(pieces[0])
         if numerator != nil
           return numerator / Rational.coerce(pieces[1].constant_value)
@@ -929,22 +961,38 @@ use core/math
     ].include?(name)
 
   -> .add_values(left, right)
+    algebraic = left.class_name == "AlgebraicRealRoot"
+    algebraic = algebraic || right.class_name == "AlgebraicRealRoot"
+    if algebraic
+      return AlgebraicRealArithmetic.value(left, right, "+")
     if Expression.scalar_value?(left) && Expression.active_value?(right)
       return right + left
     left + right
 
   -> .multiply_values(left, right)
+    algebraic = left.class_name == "AlgebraicRealRoot"
+    algebraic = algebraic || right.class_name == "AlgebraicRealRoot"
+    if algebraic
+      return AlgebraicRealArithmetic.value(left, right, "*")
     if Expression.scalar_value?(left) && Expression.active_value?(right)
       return right.scale(left) if right.respond_to?("scale")
       return right * left
     left * right
 
   -> .subtract_values(left, right)
+    algebraic = left.class_name == "AlgebraicRealRoot"
+    algebraic = algebraic || right.class_name == "AlgebraicRealRoot"
+    if algebraic
+      return AlgebraicRealArithmetic.value(left, right, "-")
     if Expression.scalar_value?(left) && Expression.active_value?(right)
       return (-right) + left
     left - right
 
   -> .divide_values(left, right)
+    algebraic = left.class_name == "AlgebraicRealRoot"
+    algebraic = algebraic || right.class_name == "AlgebraicRealRoot"
+    if algebraic
+      return AlgebraicRealArithmetic.value(left, right, "/")
     if Expression.scalar_value?(left) && Expression.active_value?(right)
       if right.respond_to?("reciprocal")
         inverse = right.reciprocal

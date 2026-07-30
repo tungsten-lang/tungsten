@@ -58,7 +58,9 @@ invariant_check("cusp.delta_certificate",
                 cusp.certificate.proof_kind ==
                   :trusted_theorem_import &&
                 !cusp.certificate.kernel_checked? &&
-                cusp.certificate.theorem_dependencies.size == 2)
+                cusp.certificate.theorem_dependencies.size == 3 &&
+                cusp.computation_method ==
+                  :derivative_resultant)
 
 smooth = (y - x**2).local_delta_invariant(
   0, 1, nil, 2)
@@ -127,12 +129,41 @@ tampered_discriminant = (
 invariant_check("discriminant.tamper_rejected",
                 !tampered_discriminant.verified?)
 
-nondistinguished = x*y**2 + y - x
-nondistinguished_rejected = false
-begin
-  nondistinguished.local_delta_invariant(
+nondistinguished = (
+  x*y**2 + y - x).local_delta_invariant(
     0, 1, nil, 3)
-rescue error
-  nondistinguished_rejected = true
-invariant_check("boundary.distinguished",
-                nondistinguished_rejected)
+invariant_check("polar.smooth",
+                nondistinguished.delta == 0 &&
+                nondistinguished.milnor_number == 0 &&
+                nondistinguished.computation_method ==
+                  :polar_intersection &&
+                nondistinguished.polar_intersection.
+                  multiplicity == 0 &&
+                nondistinguished.projection_intersection.
+                  multiplicity == 1)
+invariant_check("polar.certificate",
+                nondistinguished.polar_certificate.verified? &&
+                nondistinguished.polar_certificate.proof_kind ==
+                  :trusted_theorem_import &&
+                !nondistinguished.polar_certificate.
+                  kernel_checked?)
+
+nondistinguished_cusp_equation = (
+  (R.one + x*y)*(y**2 - x**3))
+nondistinguished_cusp = (
+  nondistinguished_cusp_equation.local_delta_invariant(
+    0, 1, nil, 4))
+invariant_check("polar.cusp",
+                nondistinguished_cusp.delta == 1 &&
+                nondistinguished_cusp.milnor_number == 2 &&
+                nondistinguished_cusp.branch_count == 1 &&
+                nondistinguished_cusp.computation_method ==
+                  :polar_intersection)
+
+tampered_polar = PlaneCurveLocalPolarCertificate.new(
+  nondistinguished.normalization,
+  nondistinguished.polar_intersection,
+  nondistinguished.projection_intersection,
+  nondistinguished.milnor_number + 1)
+invariant_check("polar.tamper_rejected",
+                !tampered_polar.verified?)

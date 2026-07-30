@@ -5,7 +5,7 @@
 # valuation. Finite substitution is replay-checked; summing valuations over
 # normalized geometric branches is recorded as a classical theorem import.
 
-use core/algebra/local_invariants
+use core/algebra/local_normalization
 
 + PlaneLocalGeometry
   -> .same_field_coefficients?(coefficient_field, left, right)

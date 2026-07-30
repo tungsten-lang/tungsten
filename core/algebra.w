@@ -43,8 +43,8 @@ use core/algebra/projective
 use core/algebra/curves
 use core/algebra/local_geometry
 use core/algebra/local_normalization
-use core/algebra/local_invariants
 use core/algebra/local_intersection
+use core/algebra/local_invariants
 use core/algebra/elliptic
 use core/algebra/elliptic_tate
 use core/algebra/modular_forms

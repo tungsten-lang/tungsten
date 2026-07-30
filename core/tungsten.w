@@ -284,6 +284,7 @@
   auto :PlaneCurveLocalNormalization, "algebra"
   auto :PlaneCurveLocalNormalizationCertificate, "algebra"
   auto :PlaneCurveLocalDiscriminantCertificate, "algebra"
+  auto :PlaneCurveLocalPolarCertificate, "algebra"
   auto :PlaneCurveLocalDeltaInvariant, "algebra"
   auto :PlaneCurveLocalDeltaCertificate, "algebra"
   auto :LocalPlaneParametrizationIntersection, "algebra"

@@ -375,7 +375,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders; representation-carrying Buchberger production with exact reduction, ideal-membership, source-containment, and S-pair witnesses | The Buchberger criterion is named as a trusted theorem import around exact replayed identities. Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
 | Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension, and finite exact local normalization jets | Completed local normalization rings and global normalization morphisms are not implemented |
-| Local plane geometry | Exact local multiplicity and tangent cones; rational, algebraic, and vertical tangent-direction packets; lower Newton polygons and dense exact Newton--Hensel lifting; recursive repeated rational tangents; rational and algebraic Puiseux sheet packets; primitive parameterization jets; replayed source substitution and complete Newton-factor covers; theorem-labelled root-of-unity orbit branch counts; exact bivariate derivative resultants, Milnor numbers, general reduced \(y\)-distinguished delta invariants, and local intersection multiplicities | Repeated higher-degree algebraic factors, component extraction, automatic Weierstrass coordinate changes, completed local rings, semigroups/conductors, and analytic branch cuts remain missing. The Newton--Puiseux orbit, Milnor/delta, and branch-valuation formulas are explicit trusted theorem imports; precision and unsupported cases raise |
+| Local plane geometry | Exact local multiplicity and tangent cones; rational, algebraic, and vertical tangent-direction packets; lower Newton polygons and dense exact Newton--Hensel lifting; recursive repeated rational tangents; rational and algebraic Puiseux sheet packets; primitive parameterization jets; replayed source substitution and complete Newton-factor covers; theorem-labelled root-of-unity orbit branch counts; exact bivariate derivative resultants, polar intersections, Milnor numbers, general reduced delta invariants, and local intersection multiplicities | Repeated higher-degree algebraic factors, component extraction, completed local rings, semigroups/conductors, and analytic branch cuts remain missing. The Newton--Puiseux orbit, Milnor/delta, polar, and branch-valuation formulas are explicit trusted theorem imports; precision and unsupported cases raise |
 | Elliptic curves | Composition around a plane cubic model; short Weierstrass group law over ℚ and `𝔽_p` (char ≠ 2, 3); exact integral long-Weierstrass \(a_i,b_i,c_4,c_6,\Delta,j\) invariants and projective closure; replay-certified admissible transformations; bounded exhaustive local and global minimal models; the complete Tate state machine over ℚ, including wild conductor exponents at 2 and 3, Kodaira symbols, Tamagawa numbers, split multiplicative status, and certified conductors; checked primitive Frey models; `EllipticJacobian` view | Arbitrary plane cubic → Weierstrass needs a rational flex; Tate local data over number fields, isogenies, and mod-\(p\) representations are not implemented |
 | Modular forms | Exact `Gamma0(N)` index, cusp count, order-2/order-3 elliptic points, and \(X_0(N)\) genus; even-weight `CuspForms` and `ModularForms` dimensions; Sturm bounds; rational and number-field truncated q-series; certified level-one \(E_4,E_6,\Delta\) expansions and \(E_4^3-E_6^2=1728\Delta\); exhaustive weight-two \(P^1(\mathbb Z/N\mathbb Z)\) Manin symbols, sparse \(S/R\) relations, cusp boundaries, relative/cuspidal dimensions, and bounded exact rational cuspidal bases; exact \(T_n/U_{p^r}\) matrices from Cremona--Heilbronn prime sums plus Hecke recurrences, characteristic polynomials, degeneracy maps, old subspaces, and canonical new Hecke quotients; deterministic simultaneous newform-packet splitting by a primitive Hecke element, rational or exact number-field coefficient fields, and normalized packet q-expansions; theorem-labelled replay certificates; in particular the level-55 new quotient splits into coefficient-field degrees 1 and 2 | Dimension, Sturm, classical modularity, Manin-presentation, Hecke semisimplicity and multiplicity one, Heilbronn-action, Hecke-recurrence, Atkin--Lehner--Li, and eigenform formulas are named trusted theorem imports, not kernel proofs. Higher-weight symbols, characters, nebentypus, embeddings between independently presented coefficient fields, and analytic newform invariants are not implemented. Dense rational quotient coordinates are resource-bounded |
 | Hyperelliptic curves | Exact `y² = f(x)` models, Mumford pairs, Cantor composition; monic odd-degree over ℚ, monic-or-scalable over `𝔽_p` | Even-degree models still raise for Jacobian arithmetic |
@@ -625,12 +625,33 @@ works for smooth points, nodes, cusps, tacnodes, ordinary multiple points,
 algebraic branch packets, repeated tangents, and shifted affine/projective
 charts.
 
-The current exact formula deliberately requires a reduced,
-\(y\)-distinguished presentation. If the dependent-variable leading
-coefficient vanishes at the point, it raises with a request to change local
-coordinates or compute a Weierstrass polynomial. Computing that coordinate
-change, completed local rings, value semigroups, and conductor ideals remains
-future work.
+For a reduced germ that is not \(y\)-distinguished, the same public call falls
+back to the polar formula
+
+\[
+  \mu=I_0(f,f_y)-I_0(f,x)+1.
+\]
+
+Both intersections are computed by the certified normalization-packet engine:
+
+```w
+f = x*y**2 + y - x
+local = f.local_delta_invariant(0, 1, nil, 4)
+
+local.computation_method                   # polar_intersection
+local.polar_intersection.multiplicity      # 0
+local.projection_intersection.multiplicity # 1
+local.milnor_number                        # 0
+local.delta                                # 0
+local.polar_certificate.verified?          # true
+```
+
+The polar identity is another named `trusted_theorem_import`; both underlying
+intersection certificates still replay their finite substitutions exactly.
+This removes the manual Weierstrass-coordinate requirement for supported
+reduced germs. Completed local rings, value semigroups, conductor ideals,
+component extraction, and cases whose necessary contact exceeds the requested
+precision remain future work.
 
 ## Local intersection multiplicity
 

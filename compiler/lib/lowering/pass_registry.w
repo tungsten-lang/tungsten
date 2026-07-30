@@ -429,8 +429,14 @@
   # through its slot/binding. Skipping the store un-pins the value from
   # ownership analysis (a :store_global marks it escaped), restoring frees
   # for top-level loop temps.
+  #
+  # $-sigil gvars are EXEMPT: they are the explicit global mechanism —
+  # written through lower_gvar_set from ANY scope and read via load_global
+  # everywhere — so the "fn-body assignment shadows, main-only needs no
+  # mirror" premise never holds for them (evr_walk records :var reads
+  # only; a demoted $global made the spec DSL's $spec_depth read nil).
   evr = ctx[:mod][:extern_var_refs]
-  if evr != nil && evr[name] != true
+  if evr != nil && evr[name] != true && !name.starts_with?("$")
     return
   if value_type == nil
     value_type = "i64"

@@ -43,20 +43,13 @@ trait GlobalReader
 host = TraitReaderHost.new
 gds_check("demote.trait_method_read", host.trait_read, "44")
 
-# (d) var referenced ONLY inside string interpolation within a fn
-# TODO(compiler bug, demotion pass of 363b54c): the top-level demotion
-# reference walker does not descend into string-interpolation parts, so a
-# var whose only out-of-main read sits inside an interpolated string is
-# wrongly demoted — compiled this returns "value=" (interpreter is correct,
-# and TUNGSTEN_DEMOTE_TOP_LEVEL=0 compiles correctly). Soft-probe until
-# lowering fixes the walker, then upgrade to gds_check.
+# (d) var referenced ONLY inside string interpolation within a fn.
+# Regression guard: interpolation parts are packed-body pairs invisible to
+# ast_children, so evr_walk must special-case them — a wrongly demoted var
+# made this print "value=" compiled.
 -> interp_read
   "value=[g_interp]"
-interp_got = interp_read
-if interp_got == "value=44"
-  << "PASS demote.fn_interp_read"
-else
-  << "KNOWNBUG demote.fn_interp_read got " + interp_got + " want value=44 (demotion misses interp-only reads)"
+gds_check("demote.fn_interp_read", interp_read, "value=44")
 
 # (e) main-only loop accumulator: demotable, must still compute
 acc = 0
@@ -65,5 +58,17 @@ while i < 10
   acc = acc + i
   i += 1
 gds_check("demote.main_only_accumulator", acc, "45")
+
+# (f) $-sigil gvar mutated through a helper fn and read back at top level:
+# gvars are the explicit global mechanism (lower_gvar_set stores from ANY
+# scope), so the demotion skip must never apply to them. A demoted
+# $spec_depth-style counter read nil inside the spec DSL ("nil + int").
+$gds_counter = 0
+-> gds_bump
+  $gds_counter = $gds_counter + 1
+gds_bump
+gds_bump
+gds_bump
+gds_check("demote.gvar_helper_mutation", $gds_counter, "3")
 
 << "global demotion scopes: ok"

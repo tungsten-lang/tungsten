@@ -830,6 +830,7 @@
 + BitangentProjectionCertificate
   -> new(@chart, @projection, @relation)
     @components = nil
+    @etale_algebra_cache = nil
     @verified_cache = nil
     @verified_fingerprint = nil
 
@@ -840,6 +841,7 @@
     @projection = @components[0].factor.ring.one
     @components.each -> @projection = @projection * item.factor
     @relation = nil
+    @etale_algebra_cache = nil
     @verified_cache = nil
     @verified_fingerprint = nil
 
@@ -858,6 +860,28 @@
     return out if @components == nil
     @components.each -> out.push(item)
     out
+
+  # The checked squarefree projection is exactly the coordinate algebra of
+  # this reduced affine bitangent chart. Supplied 6/9/12 pieces become a CRT
+  # decomposition; they are not assumed irreducible.
+  -> etale_algebra
+    if !verified?
+      raise "unverified bitangent projection has no certified etale algebra"
+    if @etale_algebra_cache == nil
+      if @components == nil
+        @etale_algebra_cache = EtaleAlgebra.new(@projection)
+      else
+        factors = []
+        @components.each -> factors.push(item.factor)
+        @etale_algebra_cache = EtaleAlgebra.new(
+          @projection, factors, self)
+    @etale_algebra_cache
+
+  -> etale_algebra_certificate
+    etale_algebra.certificate
+
+  -> etale_algebra_decomposition_certificate
+    etale_algebra.decomposition_certificate
 
   -> degree
     @projection.degree
@@ -1139,17 +1163,24 @@
       out.push(DescentRequirement.new(
         "geometric bitangent scheme", "missing",
         "compute and certify the remaining 27 reduced bitangents"))
+      out.push(DescentRequirement.new(
+        "finite etale bitangent algebra", "missing",
+        "construct the squarefree quotient after certifying the bitangent scheme"))
     else
       out.push(DescentRequirement.new(
         "geometric bitangent scheme", "complete",
         "checked degree-27 presentation plus the distinguished hyperflex",
         @bitangent_scheme_certificate))
+      out.push(DescentRequirement.new(
+        "finite etale bitangent algebra", "complete",
+        "squarefree quotient with checked CRT component decomposition",
+        @bitangent_scheme_certificate.etale_algebra_certificate))
     out.push(DescentRequirement.new(
       "BPS divisor and function data", "missing",
       "construct Delta', beta', and f with div(f) = 2 beta'"))
     out.push(DescentRequirement.new(
-      "etale algebra maximal order", "missing",
-      "arbitrary-degree number fields and product orders are required"))
+      "etale algebra maximal orders", "missing",
+      "integral closures and product orders for the degree 6, 9, and 12 components are required"))
     out.push(DescentRequirement.new(
       "S-class group and S-units", "missing",
       "must be unconditional; a GRH bound is conditional, not certified"))
@@ -1210,6 +1241,17 @@
 
   -> projection_polynomial
     @primary_certificate.eliminant
+
+  -> etale_algebra
+    if !verified?
+      raise "unverified bitangent scheme has no certified etale algebra"
+    @primary_certificate.etale_algebra
+
+  -> etale_algebra_certificate
+    etale_algebra.certificate
+
+  -> etale_algebra_decomposition_certificate
+    etale_algebra.decomposition_certificate
 
   -> component_degrees
     out = []

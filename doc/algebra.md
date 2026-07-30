@@ -27,6 +27,7 @@ core/algebra/polynomial_gcd.w
 core/algebra/polynomial_factor.w # exact factorization over ℚ
 core/algebra/polynomial_factor_finite.w # complete finite-field factorization
 core/algebra/simple_extension.w   # certified K[a]/(m) quotient fields
+core/algebra/etale_algebra.w      # squarefree quotients and CRT products
 core/algebra/real_roots.w          # Sturm isolation and certified RootOf values
 core/algebra/algebraic_real.w      # exact RootOf arithmetic and certificates
 core/algebra/expression.w          # symbolic factor and exact real solve facade
@@ -143,6 +144,33 @@ factorization, exact determinants, projective normalization, and curve point
 counts. The same quotient API works over ℚ; use `NumberField` when
 maximal-order arithmetic or certified real embeddings are required.
 
+A finite étale algebra is represented directly as a squarefree quotient
+\(K[t]/(f)\). Supplied pairwise-coprime components give a certified Chinese
+remainder decomposition without claiming the components are irreducible
+fields:
+
+```w
+R = PolynomialRing.new([:t], RationalField.new)
+t = R.generator(0)
+f1 = t**2 - 1
+f2 = t**2 - 2
+A = Algebra.etale_algebra(f1*f2, [f1, f2])
+a = A.generator
+
+A.certificate.verified?
+A.decomposition_certificate.verified?
+A.component_degrees                         # [2, 2]
+A.primitive_idempotents
+A.from_components((a**3 + a + 3).components) == a**3 + a + 3
+a.trace
+a.norm
+```
+
+Units use exact extended gcd; nonzero zero divisors raise on inversion.
+Multiplication-matrix trace and norm work over any supported exact base field.
+The CRT certificate replays idempotence, orthogonality, sum-to-one, and every
+component image.
+
 `NumberField` arithmetic is degree-generic. The defining polynomial is
 certified irreducible over ℚ, and elements expose exact minimal and
 characteristic polynomials, trace, norm, integrality, and certified real
@@ -244,6 +272,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | --- | --- | --- |
 | Symbolic expressions | Exact π/e and radicals; canonical simplify, expand, collect, differentiation, elementary antiderivatives; exact formal Taylor series and removable finite limits; exact univariate ℚ factor facade; arbitrary exact real roots as rationals, radicals, or certified `RootOf` constants; exact arithmetic and symbolic transcendentals over real algebraic constants | No assumptions, piecewise forms, Laurent/Puiseux series, infinite/directional limits, general multivariate factorization, complex algebraic-root object, general higher-degree radical formulas, or Risch integration |
 | Fields | Exact `RationalField`; packed prime fields and arbitrary absolute extensions `𝔽_{p^n}`; certified simple extensions `K[a]/(m)` over ℚ or finite fields with explicit base embeddings, structured finite towers, arithmetic, Frobenius, trace, norm, and enumeration; arbitrary-degree irreducible `NumberField`s over ℚ with exact power-basis arithmetic, minimal/characteristic polynomials, trace, norm, integrality, Sturm signatures, and certified real embeddings; certified cubic integral bases and maximal-order discriminants | Automatic isomorphisms/embeddings between differently presented finite fields, simple extensions over coefficient fields whose polynomials cannot yet be factored, complex algebraic embeddings, noncubic number-field maximal orders/integral bases, and general number-field isomorphism algorithms are not implemented. Modulus/factor search and cubic maximal-order search are explicitly resource-bounded and raise instead of guessing |
+| Finite étale algebras | Certified squarefree quotients `K[t]/(f)`; exact quotient arithmetic; units and zero divisors; multiplication-matrix trace/norm; supplied CRT components, primitive idempotents, component maps, reconstruction, and replay certificates | Integral closures/maximal product orders, prime ideals, S-units, and class groups are not implemented |
 | Polynomials | Sparse sorted terms; merge-multiply; dense univariate quotient arithmetic; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ and arbitrary finite fields as **unit × monic irreducibles**, with replay certificates; exact Sturm counts, Cauchy bounds, and certified isolation of every distinct real root | Kronecker and deterministic equal-degree factor search, Gröbner elimination, and root-interval splitting have explicit resource limits; complex-root isolation, complex algebraic-number arithmetic, and multivariate factorization are not implemented |
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders | Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
@@ -257,7 +286,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Divisors | Exact formal arithmetic on rational and line-presented higher-degree closed places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic outside the existing Jacobian models, and general principality tests are not implemented |
 | Rational points | Complete exact bounded search for primitive points on `aX³Z + bXY²Z + g(Y,Z)`, with nonzero same-sign `a,b` and nonzero `Y⁴` coefficient | This is not a general plane-curve point finder and does not prove that no points exist above the requested height |
 | Geometric automorphisms | Exact triviality certificate over `Qbar` for smooth rational plane quartics with the unique normalized hyperflex `[1:0:0]`, tangent `Z=0`, and identity stabilizer | It is not an arbitrary plane-quartic automorphism-group algorithm and does not enumerate nontrivial groups |
-| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified geometric prefix for BPS generalized explicit 2-descent; arbitrary-degree quotient number fields; for the shell-width quartic, a checked degree-27 bitangent projection split into squarefree pieces of degrees 6, 9, and 12 | The BPS divisor/function family, finite-product étale algebra layer, noncubic maximal orders, unconditional S-class groups and S-units, a certified ambient square-class basis, theta Galois modules, p-adic local images, and the comparison kernel remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
+| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified geometric prefix for BPS generalized explicit 2-descent; arbitrary-degree quotient number fields; for the shell-width quartic, an executable certified degree-27 étale algebra with squarefree CRT components of degrees 6, 9, and 12 | The BPS divisor/function family, component maximal orders, unconditional S-class groups and S-units, a certified ambient square-class basis, theta Galois modules, p-adic local images, and the comparison kernel remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
 
 `Curve#hyperelliptic_plane_model?` is specifically the smooth plane-model
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
@@ -433,8 +462,8 @@ A rational hyperflex supplies the rational odd theta characteristic in
 Bruin--Poonen--Stoll section 6.5. Its intersection certificate verifies
 `l.C = 4P = 2(2P)`. Removing that member is the geometric step that prepares
 a degree-27 true descent setup instead of the generic degree-28 fake setup.
-The object remains an incomplete preparation until the BPS étale scheme,
-divisor/line-bundle family, and functions are constructed:
+The object remains an incomplete preparation until the BPS
+divisor/line-bundle family and functions are constructed:
 
 ```w
 infinity = Line.new(C.space, [0, 0, 1])
@@ -450,6 +479,10 @@ setup.certified?                          # false
 scheme = setup.certify_bitangent_scheme
 scheme.component_degrees  # [6, 9, 12]
 scheme.certified?          # true
+E = scheme.etale_algebra
+E.dimension                # 27
+E.certificate.verified?    # true
+E.decomposition_certificate.verified?
 ```
 
 For the shell-width quartic, the bitangent certificate checks supplied
@@ -461,10 +494,10 @@ adds the distinguished hyperflex. The final exhaustion step explicitly carries
 a `SmoothPlaneQuarticBitangentCountCertificate`. It checks the hypotheses of
 the classical 28-bitangent theorem and records that theorem as a trusted
 mathematical import, not as a proof-assistant-checked derivation.
-The degree labels describe a checked squarefree product presentation. Each
-irreducible factor can now define an arbitrary-degree `NumberField`, but the
-projection pieces have not yet been factored and assembled into a certified
-finite-product étale algebra with maximal orders.
+The degree labels describe a checked squarefree product presentation. They now
+construct the exact finite étale quotient and executable CRT decomposition;
+the pieces are not assumed irreducible. Integral closures and maximal product
+orders for those components remain a separate arithmetic requirement.
 
 The global, norm, unramified, and local conditions eventually produced by the
 arithmetic layers meet in an exact F2 kernel:

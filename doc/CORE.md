@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(195 total), grouped by area, with its declaration, a one-line
+(199 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -101,6 +101,10 @@ summary from the source header, and a link to the source.
 | `SimpleExtensionField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `SimpleExtensionElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `SimpleExtensionModulusCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleAlgebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleAlgebraElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleAlgebraCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleAlgebraDecompositionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldMinimalPolynomialCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

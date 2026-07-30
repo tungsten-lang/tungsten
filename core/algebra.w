@@ -21,6 +21,7 @@ use core/algebra/polynomial_gcd
 use core/algebra/polynomial_factor
 use core/algebra/polynomial_factor_finite
 use core/algebra/simple_extension
+use core/algebra/etale_algebra
 use core/algebra/real_roots
 use core/algebra/groebner
 use core/algebra/algebraic_real
@@ -61,6 +62,12 @@ use core/algebra/galois
 
   -> .simple_extension(polynomial, name = :a)
     SimpleExtensionField.new(polynomial, name)
+
+  -> .etale_algebra(polynomial)
+    EtaleAlgebra.new(polynomial)
+
+  -> .etale_algebra(polynomial, components)
+    EtaleAlgebra.new(polynomial, components)
 
   -> .rational_projective_plane(x = :X, y = :Y, z = :Z)
     ProjectiveSpace<ℚ, 2>.new(x, y, z)

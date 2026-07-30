@@ -99,7 +99,9 @@ explicit descent:
 5. prove their product squarefree modulo 5 and recover all 28 geometric
    bitangents, using the classical 28-bitangent theorem as an explicit trusted
    import whose hypotheses are checked;
-6. intersect future global, norm, unramified, and local conditions with the
+6. construct the certified degree-27 étale quotient and its executable
+   `6 + 9 + 12` Chinese-remainder decomposition;
+7. intersect future global, norm, unramified, and local conditions with the
    replay-certified F2 kernel.
 
 This is not yet a BPS true setup: `Delta'`, the divisor/line-bundle family
@@ -108,7 +110,6 @@ remaining path is:
 
 ```text
 construct Delta', beta', f, and the descent map
-  -> construct the degree-27 product etale algebra
   -> arbitrary-degree maximal product order
   -> select and certify S (candidate contains infinity, 2, 3, 13)
   -> finite prime ideals and archimedean places above S

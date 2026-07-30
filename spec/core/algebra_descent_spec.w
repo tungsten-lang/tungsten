@@ -94,6 +94,33 @@ descent_check("bitangent_scheme.count_theorem_import",
 descent_check("bitangent_scheme.count_not_kernel_checked",
               bitangent_scheme.count_certificate.kernel_checked?, false)
 
+bitangent_algebra = bitangent_scheme.etale_algebra
+descent_check("bitangent_algebra.certified",
+              bitangent_algebra.certified?, true)
+descent_check("bitangent_algebra.dimension",
+              bitangent_algebra.dimension, 27)
+descent_check("bitangent_algebra.component_degrees",
+              bitangent_algebra.component_degrees.to_s,
+              "\[6, 9, 12\]")
+descent_check("bitangent_algebra.source_certificate",
+              bitangent_algebra.certificate.source_certificate,
+              bitangent_scheme.primary_certificate)
+descent_check("bitangent_algebra.generator_relation",
+              bitangent_algebra.from_polynomial(
+                bitangent_scheme.projection_polynomial.monic).zero?,
+              true)
+descent_check("bitangent_algebra.component_maps",
+              bitangent_algebra.generator.components.size, 3)
+
+# The degree-27 CRT replay constructs three large Bezout idempotents. Keep the
+# ordinary regression quick; the same native suite with this flag checks the
+# full executable product decomposition.
+if env("TUNGSTEN_DESCENT_FULL") == "1"
+  descent_check("bitangent_algebra.CRT_certificate",
+                bitangent_algebra.
+                  decomposition_certificate.verified?,
+                true)
+
 reference_component = bitangent_scheme.primary_certificate.components[0]
 component_chart = bitangent_scheme.primary_chart
 factor_coefficients = [59049, -52488, 8748, 3240, -1152, 96, 16]

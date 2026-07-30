@@ -97,9 +97,12 @@ The implementation supports exact rational powers, arithmetic, quotient
 valuation, differentiation, shifted centers, and analytic unary composition
 in the local parameter. It represents one formal branch: it does not choose
 or certify an analytic branch cut. `log(sqrt(x))` still raises because its
-answer contains `log(x)`; essential singularities and automatic
-Newton--Puiseux solving of an implicit polynomial equation are separate
-future capabilities.
+answer contains `log(x)`; essential singularities remain separate. The
+calculus layer does not itself solve implicit equations. With `use algebra`,
+a rational plane polynomial has `newton_polygon` and `puiseux_branches`;
+the current exact lift handles edges whose characteristic polynomials split
+into distinct nonzero rational roots and raises on unresolved algebraic or
+repeated roots.
 
 ## Arbitrary-order derivatives and Taylor series
 

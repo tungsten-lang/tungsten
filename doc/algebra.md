@@ -49,6 +49,7 @@ core/algebra/s_units.w             # certified S-unit square-class bases
 core/algebra/s_class_group.w       # Minkowski S-class 2-torsion certificates
 core/algebra/projective.w          # projective spaces and normalized points
 core/algebra/curves.w              # plane, elliptic, and hyperelliptic models
+core/algebra/local_geometry.w      # Newton polygons and Puiseux branch lifts
 core/algebra/elliptic.w            # integral Weierstrass and Frey certificates
 core/algebra/elliptic_tate.w       # Tate local data, Kodaira, conductors
 core/algebra/modular_forms.w       # Gamma0, X0, dimensions, Sturm bounds
@@ -365,7 +366,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 
 | Layer | Available now | Boundary |
 | --- | --- | --- |
-| Symbolic expressions | Exact π/e/Euler-γ and radicals; common-angle trig on the π/12 lattice; parity and circular/hyperbolic squared identities; canonical simplify, expand, collect, differentiation, elementary antiderivatives; symbolic `erf` / `erfc` and gamma/log-gamma/polygamma through evaluation, differentiation, integration where elementary, exact series, arbitrary-order jets, and Hessians; exact integer/half-integer gamma and integer polygamma/zeta values; exact formal Taylor, Laurent, and rational-power Puiseux series, removable finite limits, poles, principal/regular parts, residues, and ramified local branches; exact univariate ℚ factor facade; arbitrary exact real roots as rationals, radicals, or certified `RootOf` constants; exact arithmetic and symbolic transcendentals over real algebraic constants | No assumptions, piecewise forms, logarithmic/general transseries, automatic Newton--Puiseux solving of implicit equations, infinite/directional limits, a general symbolic special-function catalogue beyond the implemented families, general multivariate factorization, complex algebraic-root object, general higher-degree radical formulas, or Risch integration |
+| Symbolic expressions | Exact π/e/Euler-γ and radicals; common-angle trig on the π/12 lattice; parity and circular/hyperbolic squared identities; canonical simplify, expand, collect, differentiation, elementary antiderivatives; symbolic `erf` / `erfc` and gamma/log-gamma/polygamma through evaluation, differentiation, integration where elementary, exact series, arbitrary-order jets, and Hessians; exact integer/half-integer gamma and integer polygamma/zeta values; exact formal Taylor, Laurent, and rational-power Puiseux series, removable finite limits, poles, principal/regular parts, residues, and ramified local branches; exact univariate ℚ factor facade; arbitrary exact real roots as rationals, radicals, or certified `RootOf` constants; exact arithmetic and symbolic transcendentals over real algebraic constants | No assumptions, piecewise forms, logarithmic/general transseries, infinite/directional limits, a general symbolic special-function catalogue beyond the implemented families, general multivariate factorization, complex algebraic-root object, general higher-degree radical formulas, or Risch integration |
 | Fields | Exact `RationalField`; packed prime fields and arbitrary absolute extensions `𝔽_{p^n}` with exact square tests and quadratic characters; certified simple extensions `K[a]/(m)` over ℚ or finite fields with explicit base embeddings, structured finite towers, arithmetic, Frobenius, trace, norm, and enumeration; arbitrary-degree irreducible `NumberField`s over ℚ with modular-Rabin, modular factor-degree, Kronecker, relative-tower, or exact isomorphic-model certificates; exact power-basis arithmetic, minimal/characteristic polynomials, trace, norm, integrality, Sturm signatures, real embeddings, integral bases, maximal-order indices, field discriminants, and replay-certified supplied S-unit square-class bases | Automatic isomorphisms/embeddings between differently presented finite fields, complex algebraic embeddings, automatic unit-group generators, and general number-field isomorphism algorithms are not implemented. Modulus, factor, and maximal-order searches are explicitly resource-bounded and raise instead of guessing |
 | Finite étale algebras | Certified squarefree quotients `K[t]/(f)`; exact quotient arithmetic; units and zero divisors; multiplication-matrix trace/norm; supplied CRT components, primitive idempotents, component maps, reconstruction, degree-generic integral closures, prime ideals and finite residue fields above rational primes, exact real-place sign maps without assuming irreducible components, replay-certified product S-class 2-torsion proofs, and supplied product S-unit square classes modulo diagonal rational S-units | Automatic product unit discovery, full product class-group structures, and complex embeddings with selected numerical values are not implemented |
 | Integral orders | Degree-generic monogenic and arbitrary-lattice ℤ-orders; exact membership, discriminant, units, trace, and norm, including bound-certified modular reconstruction for larger integer norm matrices; exact Frobenius-Gram LLL with replay certificates plus explicitly bounded floating producer reduction; Dedekind local index certificates; Pohst--Zassenhaus Round 2 p-maximal overorders and global maximal-order certificates; certified p-radicals, prime ideals, residue maps, ramification indices, and residue degrees; canonical full-rank HNF integral ideals with sum, product, powers, norm, containment, prime valuations, certified factorization, and bounded exact principal-generator search; invertible fractional ideals as finite signed prime valuations, including principal fractional ideals and exact rational norms; product-order finite S-place data; unconditional certificates for `Cl(O_K,S)[2] = 0` from Minkowski factor bases and odd principal-relation quotients; checkpointable relation witnesses and certified transfer through an exact isomorphic field model | Full class-group structures and algorithms that discover unit-group bases are not implemented. Supplied number-field S-unit square-class bases can be certified. Fractional ideals currently use their certified prime-factor representation rather than an explicit fractional lattice. Discriminant factorization, Round 2 steps, relation search, finite-field factorization, residue-generator search, and ideal factorization are resource-bounded and raise `unknown` on exhaustion |
@@ -373,6 +374,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders | Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
 | Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension | Singular-curve normalization is not implemented |
+| Local plane geometry | Exact lower Newton polygons over ℚ; characteristic polynomials and candidate valuations; coefficient-by-coefficient rational Newton--Hensel lifting of every distinct nonzero rational characteristic root; exact `FormalPuiseuxSeries` branches on affine/projective charts; small replay certificates that check the supporting edge, leading root, local parameter, and substituted residual through the requested order | Automatic lifting currently requires every relevant characteristic polynomial to split into distinct nonzero rational roots. Algebraic leading coefficients, repeated-root recursive Newton polygons, component extraction, analytic branch cuts, and normalization from the resulting branches are not implemented; unsupported cases raise |
 | Elliptic curves | Composition around a plane cubic model; short Weierstrass group law over ℚ and `𝔽_p` (char ≠ 2, 3); exact integral long-Weierstrass \(a_i,b_i,c_4,c_6,\Delta,j\) invariants and projective closure; replay-certified admissible transformations; bounded exhaustive local and global minimal models; the complete Tate state machine over ℚ, including wild conductor exponents at 2 and 3, Kodaira symbols, Tamagawa numbers, split multiplicative status, and certified conductors; checked primitive Frey models; `EllipticJacobian` view | Arbitrary plane cubic → Weierstrass needs a rational flex; Tate local data over number fields, isogenies, and mod-\(p\) representations are not implemented |
 | Modular forms | Exact `Gamma0(N)` index, cusp count, order-2/order-3 elliptic points, and \(X_0(N)\) genus; even-weight `CuspForms` and `ModularForms` dimensions; Sturm bounds; rational and number-field truncated q-series; certified level-one \(E_4,E_6,\Delta\) expansions and \(E_4^3-E_6^2=1728\Delta\); exhaustive weight-two \(P^1(\mathbb Z/N\mathbb Z)\) Manin symbols, sparse \(S/R\) relations, cusp boundaries, relative/cuspidal dimensions, and bounded exact rational cuspidal bases; exact \(T_n/U_{p^r}\) matrices from Cremona--Heilbronn prime sums plus Hecke recurrences, characteristic polynomials, degeneracy maps, old subspaces, and canonical new Hecke quotients; deterministic simultaneous newform-packet splitting by a primitive Hecke element, rational or exact number-field coefficient fields, and normalized packet q-expansions; theorem-labelled replay certificates; in particular the level-55 new quotient splits into coefficient-field degrees 1 and 2 | Dimension, Sturm, classical modularity, Manin-presentation, Hecke semisimplicity and multiplicity one, Heilbronn-action, Hecke-recurrence, Atkin--Lehner--Li, and eigenform formulas are named trusted theorem imports, not kernel proofs. Higher-weight symbols, characters, nebentypus, embeddings between independently presented coefficient fields, and analytic newform invariants are not implemented. Dense rational quotient coordinates are resource-bounded |
 | Hyperelliptic curves | Exact `y² = f(x)` models, Mumford pairs, Cantor composition; monic odd-degree over ℚ, monic-or-scalable over `𝔽_p` | Even-degree models still raise for Jacobian arithmetic |
@@ -388,6 +390,64 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 `Curve#hyperelliptic_plane_model?` is specifically the smooth plane-model
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
 explicit double-cover model belongs in `HyperellipticCurve`.
+
+## Newton polygons and local branches
+
+For a rational plane equation, `newton_polygon` translates the selected point
+to the origin, computes the negative-slope lower hull, and attaches the exact
+characteristic polynomial to every edge:
+
+```w
+R = PolynomialRing.new([:x, :y], Algebra.rational_field, :lex)
+x, y = R.generators
+f = y**2 - x*(x + 1)
+
+N = f.newton_polygon
+N.valuations                         # [1/2]
+N.edges[0].characteristic_polynomial # C^2 - 1
+N.edges[0].rational_roots            # [1, -1]
+N.certificate.verified?              # true
+```
+
+When every edge polynomial splits into distinct nonzero rational roots,
+`puiseux_branches` performs exact coefficient-by-coefficient Newton--Hensel
+lifting. The result is not a floating approximation:
+
+```w
+branches = f.puiseux_branches(0, 1, nil, 4)
+positive = branches.detect ->
+  item.leading_coefficient == Rational.new(1)
+
+positive.valuation                              # 1/2
+positive.series                                 # x^1/2 + 1/2*x^3/2 - ...
+positive.series.coefficient(Rational.new(5, 2)) # -1/8
+positive.certificate.verified?                  # true
+```
+
+The certificate is intentionally small. It replays the lower-edge support,
+checks that the leading coefficient is a simple characteristic root, checks
+that the independent coordinate really is the local parameter, and
+substitutes the retained branch back into the translated equation through the
+requested order. The producer uses dense rational coefficient arrays on this
+hot path and converts to `FormalPuiseuxSeries` only at the boundary.
+
+Affine and projective curves expose the same operation on a chart:
+
+```w
+P2 = ProjectiveSpace<ℚ, 2>.new(:X, :Y, :Z)
+X, Y, Z = P2.coords
+C = Curve.new(P2, Y**2*Z - X**3)
+
+C.newton_polygon([0, 0], 2).valuations          # [3/2]
+C.puiseux_branches([0, 0], 2, 4)                # Y = +/- X^3/2
+```
+
+The current lift is complete only under its stated split/nondegenerate
+rational-root hypothesis. A non-rational leading coefficient, a repeated
+characteristic root, a common dependent-variable component, or a vertical
+component raises with a capability message. Inspecting `newton_polygon`
+remains available in those cases; Tungsten does not return an empty branch
+list and imply that the local curve has no branches.
 
 ## Modular forms and q-expansions
 

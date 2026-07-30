@@ -40,6 +40,7 @@ use core/algebra/s_units
 use core/algebra/s_class_group
 use core/algebra/projective
 use core/algebra/curves
+use core/algebra/local_geometry
 use core/algebra/elliptic
 use core/algebra/elliptic_tate
 use core/algebra/modular_forms
@@ -67,10 +68,8 @@ use core/algebra/galois
   -> .rational_field
     RationalField.new
 
-  -> .finite_field(characteristic)
-    FiniteField.new(characteristic)
-
-  -> .finite_field(characteristic, degree)
+  -> .finite_field(characteristic, degree = nil)
+    return FiniteField.new(characteristic) if degree == nil
     FiniteField.extension(characteristic, degree)
 
   -> .number_field(polynomial, name = :a)
@@ -164,6 +163,19 @@ use core/algebra/galois
   -> .eigenpackets(level, search_limit = 1_000_000)
     WeightTwoHeckeEigenpacketDecomposition.new(
       level, search_limit)
+
+  -> .newton_polygon(polynomial, x_variable = 0,
+                      y_variable = 1, center = nil)
+    polynomial.newton_polygon(
+      x_variable, y_variable, center)
+
+  -> .puiseux_branches(polynomial, x_variable = 0,
+                        y_variable = 1, center = nil,
+                        maximum_power = 6,
+                        search_margin = 8)
+    polynomial.puiseux_branches(
+      x_variable, y_variable, center,
+      maximum_power, search_margin)
 
   # Exact determinant over an explicit coefficient field.  This is
   # intentionally separate from LinAlg's floating-point determinant path.

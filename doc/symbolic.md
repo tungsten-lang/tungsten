@@ -301,10 +301,12 @@ Puiseux arithmetic refines mixed denominators to a common ramification index
 and supports exact rational powers, quotients, differentiation, shifted
 centers, and analytic unary composition in the local parameter. It records a
 formal branch but does not infer analytic branch cuts. Essential singularities
-such as `exp(1/x)`, logarithmic terms such as `log(sqrt(x))`, and automatic
-Newton--Puiseux solution of implicit equations still raise. Sign-dependent
-forms such as `abs(x)` also raise when the center does not determine a smooth
-branch.
+such as `exp(1/x)` and logarithmic terms such as `log(sqrt(x))` still raise.
+`use algebra` adds exact Newton polygons and certified Puiseux lifts for
+rational plane equations with distinct rational characteristic roots;
+algebraic leading roots and repeated-root recursion remain explicit
+boundaries. Sign-dependent forms such as `abs(x)` also raise when the center
+does not determine a smooth branch.
 
 ## Current boundary
 
@@ -312,12 +314,12 @@ This is a canonical simplifier, exact differentiator, elementary integrator,
 and rational-polynomial front end, not yet a complete computer algebra system.
 It does not currently provide assumptions/refinement, piecewise expressions,
 infinite or directional limits, logarithmic/general transseries, automatic
-Newton--Puiseux solution of implicit equations, general transcendental
-equation solving, complex algebraic root objects, general multivariate
-factorization, exact transcendental-value comparison, a general symbolic
-special-function catalogue beyond `erf` / `erfc` and the gamma/polygamma
-family, or Risch-style integration. Polynomial-native Gröbner bases, ideals,
-and geometry remain in `use algebra`.
+repeated-root/algebraic-coefficient Newton--Puiseux recursion, general
+transcendental equation solving, complex algebraic root objects, general
+multivariate factorization, exact transcendental-value comparison, a general
+symbolic special-function catalogue beyond `erf` / `erfc` and the
+gamma/polygamma family, or Risch-style integration. Polynomial-native
+Gröbner bases, ideals, and geometry remain in `use algebra`.
 
 Operator dispatch is still receiver-directed. Write `x*2`, not `2*x`, until
 the language has a general reverse-operator protocol.

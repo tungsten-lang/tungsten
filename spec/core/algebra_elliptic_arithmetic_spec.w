@@ -94,11 +94,9 @@ elliptic_check("additive.kind", at5.kind, :additive)
 elliptic_check("additive.tame_exponent", at5.conductor_exponent, 2)
 elliptic_check("additive.certificate", at5.certificate.verified?, true)
 
-# The opposite Frey orientation is wild additive at 2. It remains explicit
-# `unknown` until the small-prime branches of Tate's algorithm are present.
-wild_unknown = false
-begin
-  FreyCurve.new(2, 3, 5).conductor
-rescue error
-  wild_unknown = error.to_s.include?("Tate")
-elliptic_check("wild_additive_fails_loudly", wild_unknown, true)
+# The opposite Frey orientation is wild additive at 2. Tate's algorithm
+# supplies exponent 4 there, so the complete conductor is 2^4*3*5*11.
+wild_frey = FreyCurve.new(2, 3, 5)
+elliptic_check("wild_additive_conductor", wild_frey.conductor, 2640)
+elliptic_check("wild_additive_exponent",
+               wild_frey.model.local_reduction(2).conductor_exponent, 4)

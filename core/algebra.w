@@ -41,6 +41,7 @@ use core/algebra/s_class_group
 use core/algebra/projective
 use core/algebra/curves
 use core/algebra/elliptic
+use core/algebra/elliptic_tate
 use core/algebra/divisors
 use core/algebra/quartics
 use core/algebra/descent

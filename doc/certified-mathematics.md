@@ -91,13 +91,19 @@ do not prove minimality. The search is resource-bounded and returns
 
 On a certified minimal model, \(\Delta\not\equiv0\bmod p\) certifies good
 reduction and \(c_4\not\equiv0\bmod p\) certifies multiplicative reduction.
-The conductor exponent is respectively 0 or 1; additive reduction at
-\(p\geq5\) is tame with exponent 2. Additive reduction at 2 or 3 still raises
-because the wild branches of Tate's algorithm are not implemented.
+`EllipticTateLocalDataCertificate` then replays Tate's complete state machine
+over \(\mathbb Q\), every integral translation, residue-field root test,
+Kodaira symbol, Tamagawa number, split multiplicative flag, and Ogg conductor
+formula. This includes the wild additive branches at 2 and 3. The basic
+reduction certificate uses the resulting Tate certificate whenever the
+conductor exponent cannot be inferred from good, multiplicative, or tame
+additive reduction alone.
 `EllipticConductorCertificate` composes the minimal-model certificate, exact
 discriminant factorization, every local reduction certificate, and the
 reconstructed conductor. This certifies the displayed arithmetic result; it
-does not by itself supply modularity or level lowering.
+does not by itself supply modularity or level lowering. The current Tate
+checker is for rational integral models; a number-field version needs prime
+ideals, uniformizers, and residue-field translations.
 
 ## Wassat and Wrat
 
@@ -226,11 +232,11 @@ different:
    (the constructor and invariant certificate now exist; uniform exponent
    reduction remains);
 2. general integral Weierstrass models, admissible changes, minimal models,
-   invariants, and a certified Tate algorithm at every prime (all but the
-   full Tate/Kodaira classification and wild 2/3 branches now exist);
+   invariants, and a certified Tate algorithm at every rational prime
+   (implemented over \(\mathbb Q\), including wild 2/3 branches);
 3. conductors, component groups, finite-flat local conditions, and mod-p
-   Galois representations (conductors are certified outside wild additive
-   2/3; the remaining structures are missing);
+   Galois representations (conductors and Tamagawa numbers are implemented;
+   the representation-theoretic structures are missing);
 4. modular symbols, q-expansions, Hecke algebras, old/new quotients, newforms,
    and Sturm-bound certificates;
 5. local/global Galois cohomology, Selmer and dual Selmer groups,

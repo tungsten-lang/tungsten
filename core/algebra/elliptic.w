@@ -1,8 +1,8 @@
 # General integral Weierstrass models and FLT-oriented Frey curves.
 #
 # The short Weierstrass group law remains in curves.w.  This file supplies the
-# integral arithmetic layer needed before full Tate/Kodaira classification,
-# modular representations, and modular-form spaces can be added.
+# integral arithmetic layer used by elliptic_tate.w. Modular representations
+# and modular-form spaces remain separate future layers.
 # Its certificates replay finite polynomial identities; they do not import
 # modularity, level lowering, or any other theorem from the proof of FLT.
 
@@ -289,7 +289,13 @@
 
   -> local_reduction(prime, search_limit = 250_000)
     local = local_minimal_model_computation(prime, search_limit)
-    EllipticLocalReduction.new(local.model, prime, local.certificate)
+    EllipticLocalReduction.new(
+      local.model, prime, local.certificate, search_limit)
+
+  -> tate_local_data(prime, search_limit = 250_000)
+    local = local_minimal_model_computation(prime, search_limit)
+    EllipticTateLocalData.new(
+      local.model, prime, local.certificate, search_limit)
 
   -> conductor_computation(search_limit = 250_000)
     EllipticConductorComputation.new(self, search_limit)
@@ -596,7 +602,7 @@
 
 + EllipticLocalReductionCertificate
   -> new(@model, @prime, @kind, @conductor_exponent,
-         @minimality_certificate)
+         @minimality_certificate, @tate_data = nil)
 
   -> verified?
     answer = false
@@ -622,7 +628,15 @@
       return @kind == :good && @conductor_exponent == 0
     if c4_valuation == 0
       return @kind == :multiplicative && @conductor_exponent == 1
-    expected_exponent = @prime >= 5 ? 2 : nil
+    if @prime < 5
+      return false if @tate_data.class_name != "EllipticTateLocalData"
+      return false if !@tate_data.source.same_model?(@model)
+      return false if @tate_data.prime != @prime
+      return false if !@tate_data.certificate.verified?
+      return false if @tate_data.kind != :additive
+      return false if @tate_data.conductor_exponent != @conductor_exponent
+      return @kind == :additive
+    expected_exponent = 2
     @kind == :additive && @conductor_exponent == expected_exponent
 
   -> certified?
@@ -637,10 +651,12 @@
 
 
 + EllipticLocalReduction
-  -> new(@model, @prime, @minimality_certificate)
+  -> new(@model, @prime, @minimality_certificate,
+         @search_limit = 250_000)
     @delta_valuation = IntegralWeierstrassModel.valuation(
       @model.discriminant, @prime)
     @c4_valuation = IntegralWeierstrassModel.valuation(@model.c4, @prime)
+    @tate_data = nil
     if @delta_valuation == 0
       @kind = :good
       @conductor_exponent = 0
@@ -649,9 +665,14 @@
       @conductor_exponent = 1
     else
       @kind = :additive
-      @conductor_exponent = @prime >= 5 ? 2 : nil
+      @conductor_exponent = 2
+      if @prime < 5
+        @tate_data = EllipticTateLocalData.new(
+          @model, @prime, @minimality_certificate, @search_limit)
+        @conductor_exponent = @tate_data.conductor_exponent
     @certificate = EllipticLocalReductionCertificate.new(
-      @model, @prime, @kind, @conductor_exponent, @minimality_certificate)
+      @model, @prime, @kind, @conductor_exponent,
+      @minimality_certificate, @tate_data)
     raise "local reduction certificate failed" if !@certificate.verified?
 
   -> model
@@ -682,12 +703,25 @@
     good? || multiplicative?
 
   -> conductor_exponent
-    if @conductor_exponent == nil
-      raise "wild additive conductor exponents at 2 and 3 require Tate's algorithm"
     @conductor_exponent
 
   -> known_conductor_exponent
     @conductor_exponent
+
+  -> tate_data
+    if @tate_data == nil
+      @tate_data = EllipticTateLocalData.new(
+        @model, @prime, @minimality_certificate, @search_limit)
+    @tate_data
+
+  -> kodaira_symbol
+    tate_data.kodaira_symbol
+
+  -> tamagawa_number
+    tate_data.tamagawa_number
+
+  -> split?
+    tate_data.split?
 
   -> certificate
     @certificate
@@ -762,10 +796,8 @@
       local_computation = @model.local_minimal_model_computation(
         factor.prime, @search_limit)
       local = EllipticLocalReduction.new(
-        @model, factor.prime, local_computation.certificate)
+        @model, factor.prime, local_computation.certificate, @search_limit)
       exponent = local.known_conductor_exponent
-      if exponent == nil
-        raise "conductor unknown: wild additive reduction requires Tate's algorithm"
       @local_reductions.push(local)
       @conductor *= factor.prime**exponent
     @certificate = EllipticConductorCertificate.new(

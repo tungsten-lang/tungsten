@@ -53,9 +53,6 @@ rescue error
   false_solution_rejected = error.to_s.include?("do not satisfy")
 frey_check("frey.false_solution_rejected", false_solution_rejected, true)
 
-conductor_unavailable = false
-begin
-  frey.conductor
-rescue error
-  conductor_unavailable = error.to_s.include?("Tate")
-frey_check("frey.conductor_fails_loudly", conductor_unavailable, true)
+frey_check("frey.conductor", frey.conductor, 2640)
+frey_check("frey.conductor_certificate",
+           frey.model.conductor_computation.certificate.verified?, true)

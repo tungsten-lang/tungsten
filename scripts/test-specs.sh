@@ -280,6 +280,7 @@ compiled_specs=(
   spec/core/expression_calculus_spec.w
   spec/core/expression_algebra_spec.w
   spec/core/expression_exact_spec.w
+  spec/core/expression_special_spec.w
   spec/core/expression_transcendental_spec.w
   spec/core/expression_solve_spec.w
   spec/core/algebra_real_roots_spec.w
@@ -352,6 +353,7 @@ interpreter_specs=(
   spec/core/expression_calculus_spec.w
   spec/core/expression_algebra_spec.w
   spec/core/expression_exact_spec.w
+  spec/core/expression_special_spec.w
   spec/core/expression_transcendental_spec.w
   spec/core/expression_solve_spec.w
   spec/core/algebra_real_roots_spec.w

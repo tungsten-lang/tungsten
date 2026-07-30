@@ -4,32 +4,81 @@
 # and thin compositions). Special functions are the denser catalogue used by
 # physics, stats, and numerical analysis: gamma, erf, Bessel, beta, …
 #
-# Accuracy: series / continued-fraction approximations good to ~1e-10 relative
-# on the principal domains documented per function. For edge cases prefer
-# libm when a runtime bridge exists.
-#
-# Lives at core/sci/special.w. Stats that consume these: core/sci/stats.w.
+# Accuracy: series / continued-fraction approximations are generally good to
+# near machine precision on the principal domains documented per function.
+# Stats that consume these live in core/stats.w.
 
 + Special
   # ---- error function ----
-  # Abramowitz & Stegun ~7.1.26 rational approximation; max error ~1.5e-7.
+  # erf(x) = P(1/2, x^2). The lower incomplete-gamma series is stable for
+  # x^2 < 3/2; the complementary continued fraction avoids cancellation in
+  # the tails. Both stop at a machine-double relative threshold.
+
+  -> .log_sqrt_pi
+    ~0.5723649429247001
+
+  -> .gamma_half_lower(z)
+    return ~0.0 if z == ~0.0
+    a = ~0.5
+    ap = a
+    term = ~1.0 / a
+    sum = term
+    n = 1
+    while n < 200
+      ap += ~1.0
+      term *= z / ap
+      sum += term
+      if term < sum * ~1.0e-16
+        n = 200
+      else
+        n += 1
+    scale = Math.exp(~0.0 - z + a * Math.log(z) - Special.log_sqrt_pi)
+    sum * scale
+
+  -> .gamma_half_upper(z)
+    a = ~0.5
+    tiny = ~1.0e-300
+    b = z + ~1.0 - a
+    c = ~1.0 / tiny
+    d = ~1.0 / b
+    fraction = d
+    n = 1
+    while n < 200
+      index = n + ~0.0
+      coefficient = (~0.0 - index) * (index - a)
+      b += ~2.0
+      d = coefficient * d + b
+      d = tiny if d < tiny && d > ~0.0 - tiny
+      c = b + coefficient / c
+      c = tiny if c < tiny && c > ~0.0 - tiny
+      d = ~1.0 / d
+      delta = d * c
+      fraction *= delta
+      error = delta - ~1.0
+      error = ~0.0 - error if error < ~0.0
+      if error < ~1.0e-16
+        n = 200
+      else
+        n += 1
+    scale = Math.exp(~0.0 - z + a * Math.log(z) - Special.log_sqrt_pi)
+    fraction * scale
 
   -> .erf(x)
-    if x < ~0.0
-      return ~0.0 - Special.erf(~0.0 - x)
-    # constants
-    p = ~0.3275911
-    a1 = ~0.254829592
-    a2 = ~0.0 - ~0.284496736
-    a3 = ~1.421413741
-    a4 = ~0.0 - ~1.453152027
-    a5 = ~1.061405429
-    t = ~1.0 / (~1.0 + p * x)
-    y = ~1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(~0.0 - x * x)
-    y
+    return ~0.0 if x == ~0.0
+    negative = x < ~0.0
+    magnitude = negative ? ~0.0 - x : x
+    z = magnitude * magnitude
+    value = Special.gamma_half_lower(z)
+    value = ~1.0 - Special.gamma_half_upper(z) if z >= ~1.5
+    negative ? ~0.0 - value : value
 
   -> .erfc(x)
-    ~1.0 - Special.erf(x)
+    if x < ~0.0
+      return ~2.0 - Special.erfc(~0.0 - x)
+    return ~1.0 if x == ~0.0
+    z = x * x
+    return ~1.0 - Special.gamma_half_lower(z) if z < ~1.5
+    Special.gamma_half_upper(z)
 
   # ---- gamma / digamma family ----
   # Lanczos approximation g=5, n=6 (numerical recipes style).

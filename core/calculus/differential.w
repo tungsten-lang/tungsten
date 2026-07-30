@@ -230,6 +230,18 @@
       return self.unary_transform(~0.0 - @value, ~-1.0, ~0.0)
     self.unary_transform(@value, ~1.0, ~0.0)
 
+  -> erf
+    first = ~2.0 / Math.sqrt(~3.141592653589793)
+    first *= Math.exp(~0.0 - @value * @value)
+    second = (~0.0 - ~2.0) * @value * first
+    self.unary_transform(Special.erf(@value), first, second)
+
+  -> erfc
+    first = (~0.0 - ~2.0) / Math.sqrt(~3.141592653589793)
+    first *= Math.exp(~0.0 - @value * @value)
+    second = (~0.0 - ~2.0) * @value * first
+    self.unary_transform(Special.erfc(@value), first, second)
+
   -> asin
     base = ~1.0 - @value * @value
     root = Math.sqrt(base)

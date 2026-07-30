@@ -303,6 +303,18 @@
       i += 1
     TaylorJet.constant(~0.0, self.order)
 
+  -> erf
+    exponential = (-(self * self)).jet_exp
+    slope = self.derivative * exponential
+    scale = ~2.0 / Math.sqrt(~3.141592653589793)
+    slope.scale(scale).antiderivative(Special.erf(self.value))
+
+  -> erfc
+    exponential = (-(self * self)).jet_exp
+    slope = self.derivative * exponential
+    scale = (~0.0 - ~2.0) / Math.sqrt(~3.141592653589793)
+    slope.scale(scale).antiderivative(Special.erfc(self.value))
+
   -> sqrt
     root = Math.sqrt(self.value)
     if root == ~0.0

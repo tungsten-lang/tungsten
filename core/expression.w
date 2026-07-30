@@ -14,6 +14,7 @@
 # `use calculus` exposes the shorter `Calculus.symbol` / `.symbols` facade.
 
 use core/math
+use core/special
 
 + Expression
   -> new(operation, arguments)
@@ -617,6 +618,8 @@ use core/math
       return value.log10 if operation == "log10"
       return value.cbrt if operation == "cbrt"
       return value.abs if operation == "abs"
+      return value.erf if operation == "erf"
+      return value.erfc if operation == "erfc"
     return Math.exp(value) if operation == "exp"
     return Math.log(value) if operation == "log"
     return Math.sqrt(value) if operation == "sqrt"
@@ -638,6 +641,8 @@ use core/math
     return Math.log10(value) if operation == "log10"
     return Math.cbrt(value) if operation == "cbrt"
     return Math.abs(value) if operation == "abs"
+    return Special.erf(value) if operation == "erf"
+    return Special.erfc(value) if operation == "erfc"
     raise "unknown symbolic unary operation: " + operation
 
   -> .named_constant_value(name)
@@ -659,9 +664,10 @@ use core/math
         return [true, Expression.pi / Expression.constant(2)]
       zero_operations = [
         "sqrt", "sin", "tan", "sinh", "tanh", "asin", "atan", "asinh",
-        "atanh", "expm1", "log1p", "cbrt", "abs"
+        "atanh", "expm1", "log1p", "cbrt", "abs", "erf"
       ]
       return [true, Expression.constant(0)] if zero_operations.include?(operation)
+      return [true, Expression.constant(1)] if operation == "erfc"
 
     if one
       logarithm = operation == "log" || operation == "log2" || operation == "log10"
@@ -822,7 +828,7 @@ use core/math
     if positive_argument != nil
       odd_operations = [
         "sin", "tan", "sinh", "tanh", "asin", "atan", "asinh", "atanh",
-        "cbrt"
+        "cbrt", "erf"
       ]
       if odd_operations.include?(name)
         return Expression.negate(
@@ -830,6 +836,9 @@ use core/math
       even_operations = ["cos", "cosh", "abs"]
       if even_operations.include?(name)
         return Expression.unary(name, positive_argument)
+      if name == "erfc"
+        return Expression.subtract(
+          Expression.constant(2), Expression.unary(name, positive_argument))
     if name == "abs" && expression.operation == "abs"
       return expression
     if name == "sqrt" && expression.operation == "power"
@@ -921,6 +930,12 @@ use core/math
 
   -> abs
     Expression.unary("abs", self)
+
+  -> erf
+    Expression.unary("erf", self)
+
+  -> erfc
+    Expression.unary("erfc", self)
 
   -> ==/1
     other = @1
@@ -1014,6 +1029,14 @@ use core/math
     return derivative / (Expression.constant(10).log * argument) if @operation == "log10"
     return derivative / (Expression.constant(3) * argument.cbrt**2) if @operation == "cbrt"
     return argument * derivative / argument.abs if @operation == "abs"
+    if @operation == "erf" || @operation == "erfc"
+      scale = @operation == "erfc" ? -2 : 2
+      return Expression.product([
+        Expression.constant(scale),
+        Expression.constant(1) / Expression.pi.sqrt,
+        (-(argument**2)).exp,
+        derivative
+      ])
     raise "cannot differentiate symbolic operation: " + @operation
 
   -> diff(variable)
@@ -1406,6 +1429,20 @@ use core/math
     if @operation == "abs"
       return Expression.scale_by_reciprocal(
         argument * argument.abs, rate * Expression.constant(2))
+    if @operation == "erf"
+      primitive = argument * argument.erf
+      primitive += Expression.product([
+        Expression.constant(1) / Expression.pi.sqrt,
+        (-(argument**2)).exp
+      ])
+      return Expression.scale_by_reciprocal(primitive, rate)
+    if @operation == "erfc"
+      primitive = argument * argument.erfc
+      primitive -= Expression.product([
+        Expression.constant(1) / Expression.pi.sqrt,
+        (-(argument**2)).exp
+      ])
+      return Expression.scale_by_reciprocal(primitive, rate)
     raise "no elementary symbolic antiderivative implemented for " + self.to_s
 
   -> integrate(variable)
@@ -1513,23 +1550,40 @@ use core/math
         pieces.push(argument.render(10))
       text = pieces.join(" + ").replace("+ -", "- ")
     elsif @operation == "multiply"
-      pieces = []
-      start = 0
-      negative_coefficient = false
-      if @arguments.size > 1 && @arguments[0].constant?
-        negative_coefficient = Expression.negative_one_value?(@arguments[0].constant_value)
-      if negative_coefficient
-        start = 1
-        rest = []
-        i = start
-        while i < @arguments.size
-          rest.push(@arguments[i].render(20))
-          i += 1
-        text = "-" + rest.join("*")
+      numerator_factors = []
+      reciprocal_denominators = []
+      @arguments.each -> (factor)
+        reciprocal = factor.operation == "divide"
+        reciprocal = reciprocal && factor.arguments[0].constant?
+        if reciprocal
+          reciprocal = Expression.one_value?(
+            factor.arguments[0].constant_value)
+        if reciprocal
+          reciprocal_denominators.push(factor.arguments[1])
+        else
+          numerator_factors.push(factor)
+      if reciprocal_denominators.size > 0
+        numerator = Expression.product(numerator_factors)
+        denominator = Expression.product(reciprocal_denominators)
+        text = numerator.render(21) + "/" + denominator.render(21)
       else
-        @arguments.each -> (argument)
-          pieces.push(argument.render(20))
-        text = pieces.join("*")
+        pieces = []
+        start = 0
+        negative_coefficient = false
+        if @arguments.size > 1 && @arguments[0].constant?
+          negative_coefficient = Expression.negative_one_value?(@arguments[0].constant_value)
+        if negative_coefficient
+          start = 1
+          rest = []
+          i = start
+          while i < @arguments.size
+            rest.push(@arguments[i].render(20))
+            i += 1
+          text = "-" + rest.join("*")
+        else
+          @arguments.each -> (argument)
+            pieces.push(argument.render(20))
+          text = pieces.join("*")
     elsif @operation == "divide"
       text = @arguments[0].render(21) + "/" + @arguments[1].render(21)
     elsif @operation == "power"

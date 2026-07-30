@@ -1,17 +1,20 @@
 # Special functions & stats — naming
 
-## Why `core/sci/special` not stuffed into `math`?
+## Why `core/special` is not stuffed into `math`
 
 | Name | Verdict |
 |------|---------|
 | `core/math` | Elementary only (exp/log/sin). Keep thin. |
-| **`core/sci/special`** | denser catalogue (erf, gamma, Bessel) |
-| **`core/sci/stats`** | distributions |
-| Whole package | `core/sci/*` is the science stack — not a junk drawer if each file is one concern |
+| **`core/special`** | denser catalogue (erf, gamma, Bessel) |
+| **`core/stats`** | distributions |
+| Whole package | The science stack stays separated by mathematical concern. |
 
 ## Special (`core/special.w`)
 
 erf, erfc, gamma, lgamma, beta, j0/j1, logistic, softplus, gammainc, factorial.
+`erf` and `erfc` use complementary incomplete-gamma algorithms so both central
+values and small tails retain near-machine precision. `use calculus` also
+exposes them as `Expression#erf` and `Expression#erfc`.
 
 ## Stats (`core/stats.w`)
 

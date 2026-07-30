@@ -473,6 +473,24 @@ use core/expression
     return FormalPowerSeries.constant(0, order, variable, @center) if zero?
     raise "formal series abs needs a known nonzero sign at the center"
 
+  -> erf
+    if order == 0
+      return FormalPowerSeries.new(
+        [value.erf], variable, @center)
+    exponential = (-(self * self)).exp.truncate(order - 1)
+    slope = derivative * exponential
+    scale = Expression.constant(2) / Expression.pi.sqrt
+    slope.scale(scale).antiderivative(value.erf)
+
+  -> erfc
+    if order == 0
+      return FormalPowerSeries.new(
+        [value.erfc], variable, @center)
+    exponential = (-(self * self)).exp.truncate(order - 1)
+    slope = derivative * exponential
+    scale = Expression.constant(-2) / Expression.pi.sqrt
+    slope.scale(scale).antiderivative(value.erfc)
+
   -> compose(delta)
     inner = coerce(delta)
     if !Expression.zero_expression?(inner.value)
@@ -571,6 +589,8 @@ use core/expression
     return series.log10 if operation == "log10"
     return series.cbrt if operation == "cbrt"
     return series.abs if operation == "abs"
+    return series.erf if operation == "erf"
+    return series.erfc if operation == "erfc"
     raise "formal series does not support symbolic operation: " + operation
 
   -> .series_from_expression(expression, variable, center, order)

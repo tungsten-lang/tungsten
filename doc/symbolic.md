@@ -56,6 +56,22 @@ asin acos atan asinh acosh atanh
 expm1 log1p log2 log10 cbrt abs
 ```
 
+The Gaussian error functions are symbolic special functions rather than
+elementary ones:
+
+```w
+x.erf
+x.erfc
+x.erf.derivative(:x)       # 2*exp(-x^2)/sqrt(π)
+(x.erf / x).limit(:x, 0)   # 2/sqrt(π)
+```
+
+They use the same expression evaluation path, exact differentiation and affine
+antiderivatives, formal series, `TaylorJet`, and second-order `Differential`
+automatic differentiation. `Special.erf` and `Special.erfc` provide
+near-machine-precision numeric values, including non-cancelling tail
+evaluation for `erfc`.
+
 ## Substitution and evaluation
 
 `substitute` returns another simplified expression. `evaluate` accepts String
@@ -174,7 +190,7 @@ machine approximation.
 
 `antiderivative` supports exact polynomial powers, constant multiples, affine
 substitution for powers and common elementary functions, logarithmic
-reciprocals, and a small set of standard forms:
+reciprocals, `erf` / `erfc`, and a small set of standard forms:
 
 ```w
 primitive = (x**3 + 2*x + 3).antiderivative(:x)
@@ -212,11 +228,11 @@ Calculus.series((x + 1).sqrt, :x, 0, 5)
 ```
 
 Series support exact arithmetic, division, integer and symbolic constant
-powers, composition, derivatives, antiderivatives, and every elementary
-function supported by `Expression`. Differentiation lowers retained order by
-one and integration raises it by one; `truncate` can discard coefficients but
-never invent higher precision. `to_expression` returns the retained
-polynomial, and `at` evaluates that truncation exactly.
+powers, composition, derivatives, antiderivatives, every elementary function
+supported by `Expression`, and `erf` / `erfc`. Differentiation lowers retained
+order by one and integration raises it by one; `truncate` can discard
+coefficients but never invent higher precision. `to_expression` returns the
+retained polynomial, and `at` evaluates that truncation exactly.
 
 Common removable singularities are cancelled by formal valuation:
 
@@ -240,9 +256,10 @@ and rational-polynomial front end, not yet a complete computer algebra system.
 It does not currently provide assumptions/refinement, piecewise expressions,
 infinite or directional limits, Laurent/Puiseux series, general
 transcendental equation solving, complex algebraic root objects, general
-multivariate factorization, exact transcendental-value comparison, or
-Risch-style integration. Polynomial-native Gröbner bases, ideals, and
-geometry remain in `use algebra`.
+multivariate factorization, exact transcendental-value comparison, a general
+symbolic special-function catalogue beyond `erf` / `erfc`, or Risch-style
+integration. Polynomial-native Gröbner bases, ideals, and geometry remain in
+`use algebra`.
 
 Operator dispatch is still receiver-directed. Write `x*2`, not `2*x`, until
 the language has a general reverse-operator protocol.

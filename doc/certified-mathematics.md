@@ -133,8 +133,10 @@ divisor-of-a-ratio identity as named trusted theorem imports. It is not yet a
 completed Selmer computation. The remaining path is:
 
 ```text
-add and certify the archimedean places to finite S = {2, 3, 13}
-  -> unconditional S-class group and S-unit basis
+certified finite and archimedean places for S = {2, 3, 13}
+  -> instantiate the available unconditional S-class 2-torsion proof
+     on every verified field factor of the degree-6/9/12 etale algebra
+  -> compute and certify the product S-unit basis and diagonal quotient
   -> certified ambient square-class basis
   -> theta Galois module and comparison kernel
   -> certified p-adic local images

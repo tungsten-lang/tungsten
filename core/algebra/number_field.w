@@ -198,6 +198,214 @@
     to_s
 
 
++ NumberFieldModularIrreducibilityCertificate
+  -> new(@polynomial, @prime)
+
+  -> polynomial
+    @polynomial
+
+  -> prime
+    @prime
+
+  -> reduced_polynomial
+    if @polynomial.class_name != "Polynomial"
+      raise "modular irreducibility needs a polynomial"
+    finite_field = FiniteField.new(@prime)
+    finite_ring = PolynomialRing.new(
+      @polynomial.ring.names, finite_field)
+    terms = []
+    @polynomial.each_term -> (coefficient, exponents)
+      reduced = finite_field.embed_from(
+        @polynomial.ring.field, coefficient)
+      terms.push([reduced, exponents])
+    Polynomial.new(finite_ring, terms)
+
+  -> verified?
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    answer
+
+  -> verify!
+    return false if @polynomial.class_name != "Polynomial"
+    return false if @polynomial.ring.arity != 1
+    return false if @polynomial.degree < 2
+    return false if @polynomial.ring.field.class_name != "RationalField"
+    return false if !@prime.prime?
+    reduction = reduced_polynomial
+    return false if reduction.degree != @polynomial.degree
+    reduction.finite_field_irreducible?
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :modular_rabin
+
+  -> kernel_checked?
+    true
+
+  -> to_s
+    "irreducible modulo " + @prime.to_s
+
+  -> inspect
+    to_s
+
+
++ NumberFieldModularDegreeIrreducibilityCertificate
+  -> new(@polynomial, primes,
+         @factor_search_limit = 250_000)
+    @primes = []
+    @factorizations = []
+    primes.each -> (prime)
+      @primes.push(prime)
+      helper = NumberFieldModularDegreeIrreducibilityCertificate
+      factorization = helper.factorization_at(
+        @polynomial, prime, @factor_search_limit)
+      @factorizations.push(factorization)
+
+  -> new(@polynomial, primes, factorizations,
+         @factor_search_limit)
+    @primes = []
+    primes.each -> (prime)
+      @primes.push(prime)
+    @factorizations = []
+    factorizations.each -> (factorization)
+      @factorizations.push(factorization)
+
+  -> polynomial
+    @polynomial
+
+  -> primes
+    out = []
+    @primes.each -> (prime)
+      out.push(prime)
+    out
+
+  -> factorizations
+    out = []
+    @factorizations.each -> (factorization)
+      out.push(factorization)
+    out
+
+  -> factor_degree_patterns
+    out = []
+    @factorizations.each -> (factorization)
+      degrees = []
+      factorization.factors.each -> (factor)
+        degrees.push(factor.degree) if factor.degree > 0
+      out.push(degrees)
+    out
+
+  -> .reduction_at(polynomial, prime)
+    integral = NumberField.primitive_integral_polynomial(
+      polynomial)
+    finite_field = FiniteField.new(prime)
+    finite_ring = PolynomialRing.new(
+      integral.ring.names, finite_field)
+    terms = []
+    integral.each_term -> (coefficient, exponents)
+      terms.push([
+        finite_field.coerce(coefficient.numerator),
+        exponents
+      ])
+    Polynomial.new(finite_ring, terms)
+
+  -> .factorization_at(
+       polynomial, prime,
+       factor_search_limit = 250_000)
+    helper = NumberFieldModularDegreeIrreducibilityCertificate
+    reduction = helper.reduction_at(polynomial, prime)
+    reduction.factor_with_certificate(
+      factor_search_limit)
+
+  -> candidate_degrees(factorization)
+    degree = @polynomial.degree
+    possible = []
+    (degree + 1).times -> possible.push(false)
+    possible[0] = true
+    factorization.factors.each -> (factor)
+      factor_degree = factor.degree
+      if factor_degree > 0
+        current = degree - factor_degree
+        while current >= 0
+          if possible[current]
+            possible[current + factor_degree] = true
+          current -= 1
+    out = []
+    candidate = 1
+    while candidate * 2 <= degree
+      out.push(candidate) if possible[candidate]
+      candidate += 1
+    out
+
+  -> remaining_degrees
+    remaining = []
+    candidate = 1
+    while candidate * 2 <= @polynomial.degree
+      remaining.push(candidate)
+      candidate += 1
+    @factorizations.each -> (factorization)
+      local = candidate_degrees(factorization)
+      kept = []
+      remaining.each -> (degree)
+        kept.push(degree) if local.include?(degree)
+      remaining = kept
+    remaining
+
+  -> verified?
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    answer
+
+  -> verify!
+    return false if @polynomial.class_name != "Polynomial"
+    return false if @polynomial.ring.arity != 1
+    return false if @polynomial.degree < 2
+    return false if @polynomial.ring.field.class_name != "RationalField"
+    return false if @primes.size == 0
+    return false if @primes.size != @factorizations.size
+    i = 0
+    while i < @primes.size
+      return false if !@primes[i].prime?
+      j = 0
+      while j < i
+        return false if @primes[j] == @primes[i]
+        j += 1
+      helper = NumberFieldModularDegreeIrreducibilityCertificate
+      reduction = helper.reduction_at(
+        @polynomial, @primes[i])
+      return false if reduction.degree != @polynomial.degree
+      factorization = @factorizations[i]
+      expected_factorization_class = "PolynomialFactorization"
+      return false if factorization.class_name != expected_factorization_class
+      return false if !factorization.polynomial.eql?(reduction)
+      return false if !factorization.certificate.verified?
+      i += 1
+    remaining_degrees.size == 0
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :modular_factor_degree_exclusion
+
+  -> kernel_checked?
+    true
+
+  -> to_s
+    text = "modular factor-degree irreducibility at "
+    text + @primes.to_s
+
+  -> inspect
+    to_s
+
+
 + NumberField < Field
   -> new(polynomial, name = :a)
     initialize_number_field(polynomial, name, 1_000_000, 250_000)
@@ -1120,9 +1328,80 @@
       discriminant = next_discriminant
 
   # Exact irreducibility certification over Q. Quadratics and cubics use the
-  # rational-root criterion; higher degrees use exhaustive Kronecker
-  # factorization. The latter is resource-bounded and raises instead of
-  # treating an unfinished search as an irreducibility proof.
+  # rational-root criterion. Higher degrees first seek an irreducible
+  # reduction modulo a good prime and replay Rabin's finite-field criterion;
+  # this is a short proof of irreducibility over Q. An irreducible polynomial
+  # need not have such a reduction, so failure to find one falls back to
+  # exhaustive, resource-bounded Kronecker factorization.
+  -> .modular_irreducibility_certificate(
+       polynomial, search_count = 64)
+    if polynomial.class_name != "Polynomial"
+      raise "modular irreducibility search needs a Polynomial"
+    tried = 0
+    candidate = 2
+    while tried < search_count
+      if candidate.prime?
+        tried += 1
+        certificate = NumberFieldModularIrreducibilityCertificate.new(
+          polynomial, candidate)
+        return certificate if certificate.verified?
+      candidate = candidate == 2 ? 3 : candidate + 2
+    nil
+
+  -> .primitive_integral_polynomial(polynomial)
+    if polynomial.class_name != "Polynomial"
+      raise "primitive integral conversion needs a Polynomial"
+    if polynomial.ring.arity != 1
+      raise "primitive integral conversion needs one variable"
+    if polynomial.ring.field.class_name != "RationalField"
+      raise "primitive integral conversion is implemented over Q"
+    common = 1 ## big
+    polynomial.coefficients.each -> (coefficient)
+      common = common.lcm(coefficient.denominator)
+    integers = []
+    polynomial.coefficients.each -> (coefficient)
+      multiplier = common / coefficient.denominator
+      integers.push(coefficient.numerator * multiplier)
+    divisor = 0 ## big
+    integers.each -> (coefficient)
+      divisor = divisor.gcd(coefficient.abs)
+    integers = integers.map -> item / divisor
+    if integers[integers.size - 1] < 0
+      integers = integers.map -> 0 - item
+    terms = []
+    i = 0
+    while i < integers.size
+      if integers[i] != 0
+        terms.push([Rational.new(integers[i]), [i]])
+      i += 1
+    Polynomial.new(polynomial.ring, terms)
+
+  -> .modular_degree_irreducibility_certificate(
+       polynomial, search_count = 32,
+       factor_search_limit = 250_000)
+    primes = []
+    factorizations = []
+    candidate = 2
+    tried = 0
+    while tried < search_count
+      if candidate.prime?
+        tried += 1
+        helper = NumberFieldModularDegreeIrreducibilityCertificate
+        reduction = helper.reduction_at(
+          polynomial, candidate)
+        if reduction.degree == polynomial.degree
+          factorization = reduction.factor_with_certificate(
+            factor_search_limit)
+          primes.push(candidate)
+          factorizations.push(factorization)
+          certificate = NumberFieldModularDegreeIrreducibilityCertificate.new(
+            polynomial, primes,
+            factorizations,
+            factor_search_limit)
+          return certificate if certificate.verified?
+      candidate = candidate == 2 ? 3 : candidate + 2
+    nil
+
   -> .certify_irreducible(polynomial, search_limit = 250_000)
     if polynomial.class_name != "Polynomial" || polynomial.ring.arity != 1 || polynomial.degree < 2
       raise "number-field irreducibility certification needs a univariate polynomial of degree at least two"
@@ -1132,6 +1411,15 @@
       return NumberField.certify_irreducible_cubic(polynomial, search_limit)
 
     monic = polynomial.monic
+    modular_count = search_limit < 64 ? search_limit : 64
+    modular = NumberField.modular_irreducibility_certificate(
+      monic, modular_count)
+    return modular if modular != nil
+    degree_modular = nil
+    if search_limit > 0
+      degree_modular = NumberField.modular_degree_irreducibility_certificate(
+        monic, 8, search_limit)
+    return degree_modular if degree_modular != nil
     factors = monic.factor(search_limit)
     if factors.size != 1 || !factors[0].eql?(monic)
       raise "number field defining polynomial is reducible over ℚ"

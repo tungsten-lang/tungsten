@@ -37,6 +37,15 @@ autoload_check("S-unit basis class",
                NumberFieldSUnitSquareClassBasis.class_name, "Class")
 autoload_check("quadratic residue character class",
                NumberFieldQuadraticResidueCharacter.class_name, "Class")
+autoload_check("modular irreducibility class",
+               NumberFieldModularIrreducibilityCertificate.class_name,
+               "Class")
+autoload_check("Minkowski factor base class",
+               NumberFieldMinkowskiFactorBase.class_name, "Class")
+autoload_check("S-class proof class",
+               NumberFieldSClassTwoTorsionProof.class_name, "Class")
+autoload_check("product S-class proof class",
+               EtaleProductSClassTwoTorsionProof.class_name, "Class")
 autoload_check("ideal factorization class",
                AlgebraIdealFactorization.class_name, "Class")
 autoload_check("BPS function data class",

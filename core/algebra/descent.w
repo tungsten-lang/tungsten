@@ -1114,6 +1114,7 @@
     @maximal_product_order_computation = nil
     @s_prime_data = nil
     @archimedean_data = nil
+    @s_class_two_torsion_proof = nil
 
   -> curve
     @curve
@@ -1176,6 +1177,7 @@
     @maximal_product_order_computation = nil
     @s_prime_data = nil
     @archimedean_data = nil
+    @s_class_two_torsion_proof = nil
     @bitangent_scheme_certificate
 
   -> bitangent_scheme_certificate
@@ -1189,6 +1191,7 @@
       @maximal_product_order_computation = nil
       @s_prime_data = nil
       @archimedean_data = nil
+      @s_class_two_torsion_proof = nil
     @integral_product_order = order
     if !@integral_product_order.certificate.verified?
       raise "bitangent integral product order failed certification"
@@ -1222,6 +1225,7 @@
       factor_search_limit, step_limit)
     @maximal_product_order_computation = computation
     @s_prime_data = nil
+    @s_class_two_torsion_proof = nil
     if !@maximal_product_order_computation.certificate.verified?
       raise "bitangent maximal product order failed certification"
     @maximal_product_order_computation.order
@@ -1251,6 +1255,7 @@
     @s_prime_data = maximal_product_order.s_prime_data(
       primes, factor_search_limit,
       generator_search_limit)
+    @s_class_two_torsion_proof = nil
     if !@s_prime_data.certificate.verified?
       raise "bitangent S-prime data failed certification"
     @s_prime_data
@@ -1265,6 +1270,26 @@
   -> s_prime_ideals
     return [] if @s_prime_data == nil
     @s_prime_data.prime_ideals
+
+  -> certify_s_class_two_torsion(component_proofs)
+    if @maximal_product_order_computation == nil
+      certify_maximal_product_order
+    if @s_prime_data == nil
+      certify_s_prime_data
+    @s_class_two_torsion_proof = EtaleProductSClassTwoTorsionProof.new(
+      maximal_product_order,
+      @s_prime_data.rational_primes,
+      component_proofs)
+    if !@s_class_two_torsion_proof.certificate.verified?
+      raise "bitangent product S-class 2-torsion proof failed"
+    @s_class_two_torsion_proof
+
+  -> s_class_two_torsion_proof
+    @s_class_two_torsion_proof
+
+  -> s_class_two_torsion_certificate
+    return nil if @s_class_two_torsion_proof == nil
+    @s_class_two_torsion_proof.certificate
 
   -> requirements
     out = []
@@ -1335,9 +1360,15 @@
         "archimedean places", "complete",
         "exact Sturm-isolated real places and complex-pair counts",
         @archimedean_data.certificate))
-    out.push(DescentRequirement.new(
-      "S-class group 2-torsion", "missing",
-      "prove Cl(O_L,S)[2] = 0; a GRH bound is conditional, not certified"))
+    if @s_class_two_torsion_proof == nil
+      out.push(DescentRequirement.new(
+        "S-class group 2-torsion", "missing",
+        "prove Cl(O_L,S)[2] = 0; a GRH bound is conditional, not certified"))
+    else
+      out.push(DescentRequirement.new(
+        "S-class group 2-torsion", "complete",
+        "Minkowski factor bases and odd principal-relation quotients",
+        @s_class_two_torsion_proof.certificate))
     out.push(DescentRequirement.new(
       "product S-unit square-class basis", "missing",
       "certify component generators and quotient by diagonal rational S-units"))

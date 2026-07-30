@@ -163,6 +163,50 @@ number_field_check("quadratic.real_embedding_generator",
                    real_embeddings[1].image(sqrt2_field.generator),
                    real_embeddings[1].root)
 
+# A single irreducible good reduction is a short certificate over Q.  Rabin's
+# finite-field criterion replays this degree-four witness modulo 2, avoiding
+# exhaustive Kronecker factor search.
+modular_quartic = x**4 + x + 1
+modular_certificate = NumberField.modular_irreducibility_certificate(
+  modular_quartic)
+number_field_check("modular_irreducibility.prime",
+                   modular_certificate.prime, 2)
+number_field_check("modular_irreducibility.certified",
+                   modular_certificate.verified?, true)
+number_field_check("modular_irreducibility.proof_kind",
+                   modular_certificate.proof_kind, :modular_rabin)
+number_field_check("modular_irreducibility.kernel_checked",
+                   modular_certificate.kernel_checked?, true)
+modular_field = NumberField.new(modular_quartic, :m)
+number_field_check("modular_irreducibility.field_degree",
+                   modular_field.degree, 4)
+
+# Some irreducible polynomials have no irreducible reduction.  Intersecting
+# the possible factor-degree subset sums from several exact finite-field
+# factorizations still rules out every rational factor degree.
+a4_quartic = x**4 - x**3*3 + x**2*3 + x*2 + 1
+single_modular = NumberField.modular_irreducibility_certificate(
+  a4_quartic, 16)
+number_field_check("modular_degree.no_single_witness",
+                   single_modular == nil, true)
+degree_certificate = NumberField.modular_degree_irreducibility_certificate(
+  a4_quartic, 16)
+number_field_check("modular_degree.primes",
+                   degree_certificate.primes.to_s, "\[2, 3, 5\]")
+number_field_check("modular_degree.patterns",
+                   degree_certificate.factor_degree_patterns.to_s,
+                   "\[\[1, 3\], \[1, 3\], \[2, 2\]\]")
+number_field_check("modular_degree.remaining",
+                   degree_certificate.remaining_degrees.size, 0)
+number_field_check("modular_degree.certified",
+                   degree_certificate.verified?, true)
+number_field_check("modular_degree.proof_kind",
+                   degree_certificate.proof_kind,
+                   :modular_factor_degree_exclusion)
+a4_field = NumberField.new(a4_quartic, :h)
+number_field_check("modular_degree.field_degree",
+                   a4_field.degree, 4)
+
 quartic = x**4 + 1
 quartic_field = NumberField.new(quartic, :q)
 q = quartic_field.generator

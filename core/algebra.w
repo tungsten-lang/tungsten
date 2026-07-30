@@ -36,6 +36,7 @@ use core/algebra/ideal_arithmetic
 use core/algebra/archimedean
 use core/algebra/f2_linear
 use core/algebra/s_units
+use core/algebra/s_class_group
 use core/algebra/projective
 use core/algebra/curves
 use core/algebra/divisors

@@ -281,6 +281,8 @@ compiled_specs=(
   spec/core/expression_algebra_spec.w
   spec/core/expression_exact_spec.w
   spec/core/expression_solve_spec.w
+  spec/core/formal_series_spec.w
+  spec/core/formal_series_autoload_spec.w
   spec/core/enumerable_native_spec.w
   spec/core/network_native_spec.w
   spec/core/system_spec.w
@@ -340,6 +342,8 @@ interpreter_specs=(
   spec/core/expression_algebra_spec.w
   spec/core/expression_exact_spec.w
   spec/core/expression_solve_spec.w
+  spec/core/formal_series_spec.w
+  spec/core/formal_series_autoload_spec.w
   spec/core/system_spec.w
   spec/numeric/complex_spec.w
   spec/numeric/hypercomplex_mul_spec.w

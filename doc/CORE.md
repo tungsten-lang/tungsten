@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(176 total), grouped by area, with its declaration, a one-line
+(177 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -54,6 +54,7 @@ summary from the source header, and a link to the source.
 | `Tensor` | — | core/tensor.w — N-dimensional dense Tensor (language type). | [`core/tensor.w`](../core/tensor.w) |
 | `Expression` | — | Expression — canonical symbolic real expressions. | [`core/expression.w`](../core/expression.w) |
 | `Calculus` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
+| `FormalPowerSeries` | — | FormalPowerSeries — exact truncated Taylor algebra. | [`core/calculus/series.w`](../core/calculus/series.w) |
 | `TaylorJet` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
 | `Differential` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
 | `QuadratureResult` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |

@@ -355,6 +355,31 @@ use core/math
           flattened.push(piece)
     return Expression.constant(0) if zero_factor
 
+    # Cancel an explicit denominator against an identical product factor.
+    # This matches the existing x/x simplification and keeps rational
+    # transcendental coefficients canonical (for example log(2)/log(2)).
+    cancellation_left = 0
+    while cancellation_left < flattened.size
+      factor = flattened[cancellation_left]
+      if factor.operation == "divide"
+        pieces = factor.arguments
+        cancellation_right = 0
+        while cancellation_right < flattened.size
+          if cancellation_right != cancellation_left
+            if flattened[cancellation_right] == pieces[1]
+              rewritten = []
+              if constant_seen
+                rewritten.push(Expression.constant(constant_total))
+              i = 0
+              while i < flattened.size
+                if i != cancellation_left && i != cancellation_right
+                  rewritten.push(flattened[i])
+                i += 1
+              rewritten.push(pieces[0])
+              return Expression.product(rewritten)
+          cancellation_right += 1
+      cancellation_left += 1
+
     groups = []
     flattened.each -> (factor)
       pair = Expression.base_and_power(factor)
@@ -382,6 +407,12 @@ use core/math
 
     if constant_seen
       return Expression.constant(constant_total) if factors.size == 0
+      if factors.size == 1 && factors[0].operation == "divide"
+        quotient = factors[0].arguments
+        if quotient[0].constant?
+          combined = constant_total * quotient[0].constant_value
+          return Expression.divide(
+            Expression.constant(combined), quotient[1])
       if !Expression.one_value?(constant_total)
         factors = [Expression.constant(constant_total)] + factors
     return Expression.constant(1) if factors.size == 0
@@ -406,9 +437,37 @@ use core/math
     return Expression.constant(1) if left == right
     return left if right.constant? && Expression.one_value?(right.constant_value)
     return Expression.negate(left) if right.constant? && Expression.negative_one_value?(right.constant_value)
+    if left.operation == "multiply"
+      numerator_factors = left.arguments
+      i = 0
+      while i < numerator_factors.size
+        if numerator_factors[i] == right
+          remaining = []
+          j = 0
+          while j < numerator_factors.size
+            remaining.push(numerator_factors[j]) if j != i
+            j += 1
+          return Expression.product(remaining)
+        i += 1
     if left.constant? && right.constant?
       return Expression.constant(
         Expression.divide_constants(left.constant_value, right.constant_value))
+    if right.operation == "multiply"
+      denominator_factors = right.arguments
+      if denominator_factors.size > 1 && denominator_factors[0].constant?
+        reciprocal = Expression.divide_constants(
+          1, denominator_factors[0].constant_value)
+        scaled_numerator = Expression.product([
+          Expression.constant(reciprocal), left
+        ])
+        remaining = denominator_factors.copy(
+          1, denominator_factors.size - 1)
+        denominator_base = Expression.product(remaining)
+        denominator_base = remaining[0] if remaining.size == 1
+        return Expression.divide(scaled_numerator, denominator_base)
+    if right.constant? && Expression.exact_value?(right.constant_value)
+      reciprocal = Expression.divide_constants(1, right.constant_value)
+      return Expression.product([Expression.constant(reciprocal), left])
     if right.constant? && left.operation == "multiply"
       pieces = left.arguments
       if pieces.size > 1 && pieces[0].constant?
@@ -865,7 +924,9 @@ use core/math
 
   -> .active_value?(value)
     name = value.class_name
-    ["TaylorJet", "Differential", "Polynomial", "Complex"].include?(name)
+    [
+      "TaylorJet", "Differential", "FormalPowerSeries", "Polynomial", "Complex"
+    ].include?(name)
 
   -> .add_values(left, right)
     if Expression.scalar_value?(left) && Expression.active_value?(right)

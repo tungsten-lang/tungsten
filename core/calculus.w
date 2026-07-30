@@ -14,6 +14,7 @@
 
 use core/math
 use core/expression
+use core/calculus/series
 use core/calculus/jet
 use core/calculus/differential
 use core/calculus/quadrature
@@ -80,3 +81,15 @@ use core/calculus/quadrature
 
   -> .symbolic_integrate(expression, variable, lower, upper)
     Expression.wrap(expression).definite_integral(variable, lower, upper)
+
+  -> .series(expression, variable, center = 0, order = 6)
+    Expression.wrap(expression).series(variable, center, order)
+
+  -> .formal_series(expression, variable, center = 0, order = 6)
+    Expression.wrap(expression).series(variable, center, order)
+
+  -> .limit(expression, variable, point, order = 8)
+    Expression.wrap(expression).limit(variable, point, order)
+
+  -> .symbolic_limit(expression, variable, point, order = 8)
+    Expression.wrap(expression).limit(variable, point, order)

@@ -56,6 +56,20 @@ check("trig.cos_pi", pi.cos == Expression.constant(-1))
 check("trig.cos_half_pi", (pi / 2).cos == Expression.constant(0))
 check("trig.tan_pi", pi.tan == Expression.constant(0))
 
+log_two = Expression.constant(2).log
+check("rational_form.cancel_factor",
+      (Expression.constant(1) / log_two) * log_two ==
+        Expression.constant(1))
+check("rational_form.combine_scalar",
+      (Expression.constant(1) / (Expression.constant(2) * log_two)) * 2 ==
+        Expression.constant(1) / log_two)
+check("rational_form.exact_denominator",
+      (x + y) / 2 == (x + y) * Rational.new(1, 2))
+check("rational_form.cancel_numerator_factor",
+      (x*y) / x == y)
+check("rational_form.cancel_scaled_factor",
+      x / (x*2) == Expression.constant(Rational.new(1, 2)))
+
 cube = (x + 1)**3
 expanded_cube = cube.expand
 expected_cube = x**3 + x**2*3 + x*3 + 1

@@ -12,6 +12,33 @@ expressions with exact symbolic derivatives and elementary antiderivatives;
 constants symbolic and fail loudly for unsupported patterns. See
 [../symbolic.md](../symbolic.md).
 
+## Exact formal series
+
+`FormalPowerSeries` complements the floating `TaylorJet`. It stores exact
+`Expression` coefficients for powers of `(x - center)` and supports symbolic
+parameters, π/e, radicals, arithmetic, composition, and elementary
+transcendentals:
+
+```w
+x, y = Calculus.symbols([:x, :y])
+
+exact = (x*y).exp.series(:x, 0, 5)
+exact.coefficients
+exact.derivative
+exact.antiderivative
+exact.to_expression
+
+Calculus.series(x.sin, :x, 0, 7)
+Calculus.limit(x.sin / x, :x, 0)  # exact 1
+```
+
+Formal cancellation handles removable finite-point singularities. Genuine
+poles, logarithmic terms, and fractional-power branch points raise because
+Laurent and Puiseux series are not yet represented. A formal truncation is
+algebraic data, not a convergence or remainder-error certificate.
+Differentiation lowers its retained order, antiderivation raises it, and
+`truncate` refuses to manufacture unavailable coefficients.
+
 ## Arbitrary-order derivatives and Taylor series
 
 `TaylorJet` stores normalized Taylor coefficients

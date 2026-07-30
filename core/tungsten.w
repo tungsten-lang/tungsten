@@ -42,6 +42,7 @@
   auto :Tensor,       "tensor"
   auto :Expression,   "expression"
   auto :Calculus,     "calculus"
+  auto :FormalPowerSeries, "calculus/series"
   auto :TaylorJet,    "calculus"
   auto :Differential, "calculus"
   auto :QuadratureResult, "calculus"

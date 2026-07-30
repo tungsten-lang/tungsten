@@ -139,15 +139,57 @@ This API is deliberately separate from adaptive numerical quadrature.
 Unsupported elementary patterns raise with the expression that could not be
 integrated; no numeric approximation is substituted.
 
+## Exact formal series and finite limits
+
+`use calculus` adds `FormalPowerSeries`, whose coefficient of degree `n` is
+the exact symbolic coefficient of `(x - center)^n`:
+
+```w
+use calculus
+
+s = x.exp.series(:x, 0, 6)
+s.coefficients
+# [1, 1, 1/2, 1/6, 1/24, 1/120, 1/720]
+
+(x*y).exp.series(:x, 0, 4).coefficients
+# [1, y, 1/2*y^2, 1/6*y^3, 1/24*y^4]
+
+(Expression.pi*x).sin.series(:x, 0, 3)
+x.log.series(:x, 1, 5)
+Calculus.series((x + 1).sqrt, :x, 0, 5)
+```
+
+Series support exact arithmetic, division, integer and symbolic constant
+powers, composition, derivatives, antiderivatives, and every elementary
+function supported by `Expression`. Differentiation lowers retained order by
+one and integration raises it by one; `truncate` can discard coefficients but
+never invent higher precision. `to_expression` returns the retained
+polynomial, and `at` evaluates that truncation exactly.
+
+Common removable singularities are cancelled by formal valuation:
+
+```w
+(x.sin / x).series(:x, 0, 6)
+(x.sin / x).limit(:x, 0)                 # 1
+((Expression.constant(1) - x.cos) / x**2).limit(:x, 0)  # 1/2
+Calculus.limit((x + 1).log / x, :x, 0)   # 1
+```
+
+The order is a truncation contract, not a convergence or error certificate.
+Genuine poles require Laurent series, and branch points such as `sqrt(x)` at
+zero require Puiseux series; both currently raise explicitly. Sign-dependent
+forms such as `abs(x)` also raise when the center does not determine a smooth
+branch.
+
 ## Current boundary
 
 This is a canonical simplifier, exact differentiator, elementary integrator,
 and rational-polynomial front end, not yet a complete computer algebra system.
 It does not currently provide assumptions/refinement, piecewise expressions,
-limits, series at singularities, general transcendental equation solving,
-complex algebraic root objects, general multivariate factorization, or
-Risch-style integration. Polynomial-native Gröbner bases, ideals, and geometry
-remain in `use algebra`.
+infinite or directional limits, Laurent/Puiseux series, general
+transcendental equation solving, complex algebraic root objects, general
+multivariate factorization, or Risch-style integration. Polynomial-native
+Gröbner bases, ideals, and geometry remain in `use algebra`.
 
 Operator dispatch is still receiver-directed. Write `x*2`, not `2*x`, until
 the language has a general reverse-operator protocol.

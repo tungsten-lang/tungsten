@@ -17006,6 +17006,30 @@ WValue w_str_concat(WValue a, WValue b) {
     return w_box_ptr(r, W_SUBTAG_GENERIC);
 }
 
+/* Concat variants that FREE one operand when the result did not retain
+ * it. The compiler emits these only for operands it proved fresh and
+ * anonymous (an unnamed subexpression temp whose producing instruction
+ * guarantees an independent allocation, e.g. w_int_to_s, or the previous
+ * link of an interpolation concat chain). Retention analysis is exact:
+ * every w_str_concat result is either inline/slab/heap-FLAT storage
+ * built by copying (never aliasing an operand's buffer) or a rope that
+ * references BOTH operands — so "result is not a rope and not the
+ * operand itself" proves the operand is dead. Non-heap operands
+ * (inline/slab/rope) are left alone. */
+WValue w_str_concat_free_rhs(WValue a, WValue b) {
+    WValue r = w_str_concat(a, b);
+    if (r != b && !w_is_rope(r) && w_is_heap_str(b))
+        free(w_as_heap_str(b));
+    return r;
+}
+
+WValue w_str_concat_free_lhs(WValue a, WValue b) {
+    WValue r = w_str_concat(a, b);
+    if (r != a && !w_is_rope(r) && w_is_heap_str(a))
+        free(w_as_heap_str(a));
+    return r;
+}
+
 /* Mutable append to a heap string. Grows via realloc if needed.
  * Only safe when the caller owns the sole reference (compiler-proven).
  * Returns a new WValue — may be a different pointer after realloc. */

@@ -20,7 +20,7 @@ use runtime_types
   # w_int_to_s guarantees an independent result for every input.
   if op == :call_direct_i64
     name = inst[:name]
-    return name in ("w_string" "w_hash_new" "w_array_new" "w_strbuf_new" "w_str_concat" "w_int_to_s")
+    return name in ("w_string" "w_hash_new" "w_array_new" "w_strbuf_new" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_int_to_s")
   false
 
 # Runtime calls that only READ their arguments: no argument pointer is

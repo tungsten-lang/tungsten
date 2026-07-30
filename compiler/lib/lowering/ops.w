@@ -1202,7 +1202,21 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     lhs_reg = ensure_i64_value(wfn, lhs)
     rhs_reg = ensure_i64_value(wfn, rhs)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_str_concat", args: [lhs_reg, rhs_reg]})
+    # `pre + i.to_s()`: when the RHS is syntactically an anonymous call
+    # whose lowering's LAST emitted instruction is a guaranteed-fresh
+    # string producer with this very temp (w_int_to_s mints an
+    # independent heap string per call), no name can alias it and this
+    # concat is its only consumer — route through the freeing variant so
+    # the intermediate doesn't leak (str_concat primitive: 482MB RSS at
+    # 30M iterations from exactly this temp). Both syntactic anonymity
+    # AND last-instruction identity are required: a bare var RHS
+    # binding-forwards an earlier temp that IS nameable.
+    cname = "w_str_concat"
+    if node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :call
+      li = last_emitted_instruction(wfn)
+      if li != nil && li[:op] == :call_direct_i64 && li[:name] == "w_int_to_s" && li[:temp] == rhs_reg
+        cname = "w_str_concat_free_rhs"
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: cname, args: [lhs_reg, rhs_reg]})
     return typed_value(:i64, temp)
 
   machine_type = machine_int_result_type(lt, rt)

@@ -175,6 +175,7 @@
   wfn = ctx[:func]
   parts = node.parts
   result = nil
+  result_is_chain = false
   i = 0
   while i < parts.size()
     part = parts[i]
@@ -190,8 +191,15 @@
       result = part_reg
     else
       concat = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: concat, name: "w_str_concat", args: [result, part_reg]})
+      # Chain links after the first concat: `result` is the PREVIOUS
+      # concat's temp — anonymous by construction (interpolation builds
+      # it; no user name exists) and consumed only here, so the freeing
+      # variant reclaims each intermediate of an N-part interpolation
+      # instead of leaking N-2 strings per evaluation.
+      cn = i >= 2 && result_is_chain ? "w_str_concat_free_lhs" : "w_str_concat"
+      emit_instruction(wfn, {op: :call_direct_i64, temp: concat, name: cn, args: [result, part_reg]})
       result = concat
+      result_is_chain = true
     i += 1
   if result == nil
     return lower_string(ctx, Tungsten:AST:String.new(""))

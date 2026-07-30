@@ -156,8 +156,8 @@ application. Exact finite-precision q-series and certified level-one
 layer. Weight-two Manin symbols now model
 \(P^1(\mathbb Z/N\mathbb Z)\), their relations, cusp boundary, and cuspidal
 subspace dimensions, including a zero cuspidal symbol space at level 2.
-Prime Hecke operators (including bad-prime \(U_p\)), exact characteristic
-polynomials, prime-level degeneracy maps, old subspaces, and canonical new
+Hecke operators at every positive index (including bad-prime \(U_{p^r}\)),
+exact characteristic polynomials, prime-level degeneracy maps, old subspaces, and canonical new
 Hecke quotients are also present with finite replay certificates and named
 theorem imports. A two-dimensional new quotient can be recovered as one
 normalized rational weight-two newform, including its exact q-expansion from

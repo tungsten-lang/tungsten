@@ -740,17 +740,23 @@
       out.push(copied)
     out
 
-  -> hecke_operator(prime)
-    key = prime.to_s
+  -> hecke_operator(index)
+    if !ModularFormsArithmetic.integer?(index) || index < 1
+      raise "Hecke operator index must be a positive integer"
+    key = index.to_s
     if @hecke_operators[key] == nil
-      @hecke_operators[key] = WeightTwoHeckeOperator.new(self, prime)
+      if index.prime?
+        @hecke_operators[key] = WeightTwoHeckeOperator.new(self, index)
+      else
+        @hecke_operators[key] = WeightTwoCompositeHeckeOperator.new(
+          self, index)
     @hecke_operators[key]
 
-  -> hecke_matrix(prime)
-    hecke_operator(prime).relative_matrix
+  -> hecke_matrix(index)
+    hecke_operator(index).relative_matrix
 
-  -> cuspidal_hecke_matrix(prime)
-    hecke_operator(prime).cuspidal_matrix
+  -> cuspidal_hecke_matrix(index)
+    hecke_operator(index).cuspidal_matrix
 
   -> certificate
     @certificate

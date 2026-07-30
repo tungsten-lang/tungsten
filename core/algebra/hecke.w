@@ -1,9 +1,10 @@
-# Exact prime Hecke operators on weight-two Gamma_0(N) modular symbols.
+# Exact Hecke operators on weight-two Gamma_0(N) modular symbols.
 #
 # The producer uses Cremona's Heilbronn matrices.  Its certificate replays
 # every matrix image, the Manin-quotient reduction, the cuspidal restriction,
 # and characteristic-polynomial determinants.  The theorem that this finite
-# matrix sum realizes T_p is an explicit trusted import.
+# matrix sum realizes T_p is an explicit trusted import. Composite indices
+# use the exact multiplicative and prime-power Hecke relations.
 
 + HeckeLinearAlgebra
   -> .identity(size)
@@ -40,6 +41,33 @@
         k += 1
       out.push(row)
       i += 1
+    out
+
+  -> .matrix_subtract(left, right)
+    raise "matrix subtraction dimensions do not match" if left.size != right.size
+    out = []
+    i = 0
+    while i < left.size
+      raise "matrix subtraction dimensions do not match" if left[i].size != right[i].size
+      row = []
+      j = 0
+      while j < left[i].size
+        row.push(
+          Rational.coerce(left[i][j]) -
+          Rational.coerce(right[i][j]))
+        j += 1
+      out.push(row)
+      i += 1
+    out
+
+  -> .matrix_scale(matrix, scalar)
+    factor = Rational.coerce(scalar)
+    out = []
+    matrix.each -> (source)
+      row = []
+      source.each -> (entry)
+        row.push(Rational.coerce(entry)*factor)
+      out.push(row)
     out
 
   -> .row_vector_matrix(vector, matrix)
@@ -215,6 +243,17 @@
         matrix[source], map))
     out
 
+  -> .verify_characteristic_polynomial(matrix, polynomial)
+    size = matrix.size
+    return false if polynomial.degree != size
+    return false if polynomial.leading_coefficient != Rational.new(1)
+    value = 0
+    while value <= size
+      expected = HeckeLinearAlgebra.shifted_determinant(matrix, value)
+      return false if polynomial.at(value) != expected
+      value += 1
+    true
+
 
 + HeilbronnCremonaMatrices
   -> new(@prime)
@@ -299,6 +338,156 @@
 
   -> to_s
     "HeilbronnCremona(p=" + @prime.to_s + ")"
+
+  -> inspect
+    to_s
+
+
++ WeightTwoCompositeHeckeOperator
+  -> new(@space, @index)
+    if @space.class_name != "WeightTwoModularSymbols"
+      raise "composite Hecke operator needs a weight-two modular-symbol space"
+    valid_index = ModularFormsArithmetic.integer?(@index) && @index >= 1
+    if !valid_index || @index.prime?
+      raise "composite Hecke operator needs one or a composite positive index"
+    @relative_matrix = produce_matrix(false)
+    @cuspidal_matrix = produce_matrix(true)
+    @relative_characteristic_polynomial = (
+      HeckeLinearAlgebra.characteristic_polynomial(@relative_matrix))
+    @cuspidal_characteristic_polynomial = (
+      HeckeLinearAlgebra.characteristic_polynomial(@cuspidal_matrix))
+    @certificate = WeightTwoCompositeHeckeOperatorCertificate.new(self)
+    if !@certificate.verified?
+      raise "composite Hecke operator certificate failed"
+
+  -> space
+    @space
+
+  -> index
+    @index
+
+  -> prime_power_matrix(prime, exponent, cuspidal)
+    dimension = cuspidal ? @space.cuspidal_dimension : @space.relative_dimension
+    return HeckeLinearAlgebra.identity(dimension) if exponent == 0
+    prime_operator = @space.hecke_operator(prime)
+    base = cuspidal ? prime_operator.cuspidal_matrix : prime_operator.relative_matrix
+    return base if exponent == 1
+    if @space.level % prime == 0
+      result = base
+      power = 2
+      while power <= exponent
+        result = HeckeLinearAlgebra.matrix_product(result, base)
+        power += 1
+      return result
+    previous_previous = HeckeLinearAlgebra.identity(dimension)
+    previous = base
+    power = 2
+    while power <= exponent
+      product = HeckeLinearAlgebra.matrix_product(base, previous)
+      correction = HeckeLinearAlgebra.matrix_scale(
+        previous_previous, prime)
+      current = HeckeLinearAlgebra.matrix_subtract(
+        product, correction)
+      previous_previous = previous
+      previous = current
+      power += 1
+    previous
+
+  -> produce_matrix(cuspidal)
+    dimension = cuspidal ? @space.cuspidal_dimension : @space.relative_dimension
+    result = HeckeLinearAlgebra.identity(dimension)
+    @index.factor.each -> (factor)
+      component = prime_power_matrix(
+        factor.prime, factor.exponent, cuspidal)
+      result = HeckeLinearAlgebra.matrix_product(result, component)
+    result
+
+  -> relative_matrix
+    ModularSymbolsLinearAlgebra.copy_matrix(@relative_matrix)
+
+  -> cuspidal_matrix
+    ModularSymbolsLinearAlgebra.copy_matrix(@cuspidal_matrix)
+
+  -> relative_characteristic_polynomial
+    @relative_characteristic_polynomial
+
+  -> characteristic_polynomial
+    @cuspidal_characteristic_polynomial
+
+  -> cuspidal_characteristic_polynomial
+    @cuspidal_characteristic_polynomial
+
+  -> certificate
+    @certificate
+
+  -> certified?
+    @certificate.verified?
+
+  -> to_s
+    ("T_" + @index.to_s + " on ModularSymbols(Gamma0(" +
+      @space.level.to_s + "), weight=2)")
+
+  -> inspect
+    to_s
+
+
++ WeightTwoCompositeHeckeOperatorCertificate
+  -> new(@operator)
+    @verified_cache = nil
+
+  -> operator
+    @operator
+
+  -> theorem
+    "weight-two Hecke multiplicativity and prime-power recurrences"
+
+  -> theorem_reference
+    "Miyake, Modular Forms, Hecke algebra relations for Gamma_0(N)"
+
+  -> proof_kind
+    :trusted_theorem_import
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    verified?
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    if @operator.class_name != "WeightTwoCompositeHeckeOperator"
+      return false
+    return false if !@operator.space.certificate.verified?
+    return false if @operator.index < 1 || @operator.index.prime?
+    expected_relative = @operator.produce_matrix(false)
+    expected_cuspidal = @operator.produce_matrix(true)
+    return false if !ModularSymbolsLinearAlgebra.same_matrix?(
+      @operator.relative_matrix, expected_relative)
+    return false if !ModularSymbolsLinearAlgebra.same_matrix?(
+      @operator.cuspidal_matrix, expected_cuspidal)
+    return false if !HeckeLinearAlgebra.verify_characteristic_polynomial(
+      @operator.relative_matrix,
+      @operator.relative_characteristic_polynomial)
+    HeckeLinearAlgebra.verify_characteristic_polynomial(
+      @operator.cuspidal_matrix,
+      @operator.cuspidal_characteristic_polynomial)
+
+  -> certified?
+    verified?
+
+  -> to_s
+    ("WeightTwoCompositeHeckeOperatorCertificate(N=" +
+      @operator.space.level.to_s + ", n=" +
+      @operator.index.to_s + ")")
 
   -> inspect
     to_s
@@ -491,15 +680,8 @@
     answer
 
   -> verify_characteristic_polynomial(matrix, polynomial)
-    size = matrix.size
-    return false if polynomial.degree != size
-    return false if polynomial.leading_coefficient != Rational.new(1)
-    value = 0
-    while value <= size
-      expected = HeckeLinearAlgebra.shifted_determinant(matrix, value)
-      return false if polynomial.at(value) != expected
-      value += 1
-    true
+    HeckeLinearAlgebra.verify_characteristic_polynomial(
+      matrix, polynomial)
 
   -> verify!
     return false if @operator.class_name != "WeightTwoHeckeOperator"

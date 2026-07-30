@@ -40,6 +40,20 @@ hecke_check("level11.T2.certificate", t11_2.certified?, true)
 hecke_check("level11.T3.cuspidal_charpoly",
             m11.hecke_operator(3).characteristic_polynomial,
             x**2 + x*2 + 1)
+hecke_check("level11.T1.cuspidal_charpoly",
+            m11.hecke_operator(1).characteristic_polynomial,
+            x**2 - x*2 + 1)
+hecke_check("level11.T4.cuspidal_charpoly",
+            m11.hecke_operator(4).characteristic_polynomial,
+            x**2 - x*4 + 4)
+hecke_check("level11.T8.cuspidal_charpoly",
+            m11.hecke_operator(8).characteristic_polynomial,
+            x**2)
+hecke_check("level11.T25.cuspidal_charpoly",
+            m11.hecke_operator(25).characteristic_polynomial,
+            x**2 + x*8 + 16)
+hecke_check("level11.T12.certificate",
+            m11.hecke_operator(12).certified?, true)
 
 # At p=2 | 14 some Heilbronn images are nonprimitive in P^1(Z/14Z).
 # Dropping exactly those images gives the U_2 operator below.
@@ -54,6 +68,12 @@ hecke_check("level14.U2.cuspidal_charpoly",
 hecke_check("level14.T3.cuspidal_charpoly",
             m14.hecke_operator(3).characteristic_polynomial,
             x**2 + x*4 + 4)
+hecke_check("level14.U4.cuspidal_charpoly",
+            m14.hecke_operator(4).characteristic_polynomial,
+            x**2 - x*2 + 1)
+hecke_check("level14.T10.cuspidal_charpoly",
+            m14.hecke_operator(10).characteristic_polynomial,
+            x**2)
 
 # A non-scalar, two-newform cuspidal action catches row/column and
 # cuspidal-restriction mistakes that repeated elliptic eigenvalues cannot.
@@ -61,13 +81,23 @@ m37 = WeightTwoModularSymbols.new(37)
 hecke_check("level37.T3.cuspidal_charpoly",
             m37.hecke_operator(3).characteristic_polynomial,
             x**4 + x**3*4 - x**2*2 - x*12 + 9)
+hecke_check("level37.T9.cuspidal_charpoly",
+            m37.hecke_operator(9).characteristic_polynomial,
+            x**4 - x**3*8 - x**2*8 + x*96 + 144)
 
 not_prime = false
 begin
-  m11.hecke_operator(4)
+  WeightTwoHeckeOperator.new(m11, 4)
 rescue error
   not_prime = error.to_s.include?("needs a prime")
 hecke_check("operator.nonprime_rejected", not_prime, true)
+
+bad_index = false
+begin
+  m11.hecke_operator(0)
+rescue error
+  bad_index = true
+hecke_check("operator.nonpositive_rejected", bad_index, true)
 
 bounded = false
 begin

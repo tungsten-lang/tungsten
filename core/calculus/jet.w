@@ -347,6 +347,27 @@
   -> gamma
     self.log_gamma.jet_exp
 
+  # Solve w*exp(w)=self in the truncated Taylor algebra. Newton iteration
+  # doubles the number of correct coefficients; order+1 bounded iterations
+  # also covers the zero-centered series without dividing by self.
+  -> lambert_w
+    branch_point = ~-0.36787944117144232160
+    if self.value == branch_point
+      raise "TaylorJet.lambert_w is singular at -1/e"
+    estimate = TaylorJet.constant(
+      Special.lambert_w(self.value), self.order)
+    iteration = 0
+    while iteration <= self.order
+      exponential = estimate.jet_exp
+      residual = estimate*exponential - self
+      derivative = exponential*(estimate + ~1.0)
+      estimate = estimate - residual / derivative
+      iteration += 1
+    estimate
+
+  -> lambertw
+    self.lambert_w
+
   -> sqrt
     root = Math.sqrt(self.value)
     if root == ~0.0

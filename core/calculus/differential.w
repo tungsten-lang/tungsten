@@ -269,6 +269,19 @@
     second = value * (psi * psi + Special.trigamma(@value))
     self.unary_transform(value, first, second)
 
+  -> lambert_w
+    value = Special.lambert_w(@value)
+    if @value == ~0.0
+      return self.unary_transform(value, ~1.0, ~-2.0)
+    first = value / (@value*(~1.0 + value))
+    second = (
+      (~0.0 - value*value*(~2.0 + value)) /
+      (@value*@value*(~1.0 + value)**3))
+    self.unary_transform(value, first, second)
+
+  -> lambertw
+    self.lambert_w
+
   -> asin
     base = ~1.0 - @value * @value
     root = Math.sqrt(base)

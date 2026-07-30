@@ -39,6 +39,12 @@ symbolic work uses `Expression.pi` and `Expression.e`; these remain named
 objects so, for example, `sin(π/6)` can simplify exactly before any floating
 evaluation.
 
+The real `Special` surface includes stable regularized incomplete
+gamma/beta tails, real and Hurwitz zeta for \(s>1\), and principal Lambert W;
+Lambert W also propagates through arbitrary Taylor derivatives and
+gradient/Hessian automatic differentiation. Complex branches and
+interval-certified transcendental enclosures remain separate future layers.
+
 ## Exact algebra and geometry
 
 `use algebra` loads one dependency chain:

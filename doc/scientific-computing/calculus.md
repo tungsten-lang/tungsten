@@ -65,6 +65,12 @@ value (`x.exp`, `x.log`, `x.sin`, `x.cos`, `x.tan`, `x.sinh`, `x.cosh`,
 and the other `Math` primitives are the raw scalar surface and intentionally
 accept real scalars rather than active calculus objects.
 
+The principal real Lambert W branch is active as `x.lambert_w` (or
+`x.lambertw`) for both arbitrary-order `TaylorJet` propagation and
+gradient/Hessian `Differential` propagation. At the origin the implementation
+uses the analytic limits \(W'(0)=1\) and \(W''(0)=-2\); the branch point
+\(-1/e\) is correctly treated as singular for differentiation.
+
 ## Gradients, Jacobians, and Hessians
 
 `Differential` carries a value, gradient, and Hessian. The exact first- and
@@ -135,6 +141,25 @@ and `log1p`, sign-stable saturation for `tanh`, scaled `hypot`, stable inverse
 hyperbolic formulas, a binary64-accurate range-reduced `atan`, and exact
 inverse-trig endpoint handling. These are still binary64 numerical functions,
 not symbolic transcendental expressions.
+
+`Special` supplies the denser real transcendental catalogue. In addition to
+`erf`/`erfc`, gamma/polygamma, beta, and Bessel \(J_0,J_1\), it now provides:
+
+```w
+Special.gammainc(a, x)       # regularized lower P(a,x)
+Special.gammaincc(a, x)      # cancellation-safe upper Q(a,x)
+Special.betainc(a, b, x)     # regularized incomplete beta
+Special.zeta(s)              # integer or real s > 1
+Special.hurwitz_zeta(s, a)   # real s > 1, a > 0
+Special.lambert_w(x)         # principal real W, x >= -1/e
+```
+
+Incomplete gamma switches between its convergent lower series and a Lentz
+continued fraction for the small upper tail; incomplete beta likewise selects
+the stable side of its continued fraction. Hurwitz zeta uses an
+Euler--Maclaurin tail. Differential fixtures cover central values and small
+tails against SciPy 1.17.1. These are high-accuracy binary64 algorithms, not
+interval certificates, and complex branches are not yet represented.
 
 Current operator dispatch is receiver-directed: write `x * ~2.0` inside an
 active closure. Reverse scalar operations such as `~2.0 * x` need a future

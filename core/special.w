@@ -211,16 +211,46 @@
   -> .trigamma(x)
     Special.polygamma(1, x)
 
-  # Integer zeta values s>1, evaluated through
-  # psi^(s-1)(1) = (-1)^s (s-1)! zeta(s).
+  # Integer zeta values use
+  # psi^(s-1)(1) = (-1)^s (s-1)! zeta(s). Real s>1 is handled by the
+  # Euler-Maclaurin Hurwitz-zeta path below.
   -> .zeta(s)
     name = s.class_name
     integral = name == "Integer" || name == "Int" || name == "BigInt"
-    if !integral || s <= 1
-      raise "Special.zeta currently requires an integer s > 1"
-    sign = s.even? ? ~1.0 : ~-1.0
-    (sign * Special.polygamma(s - 1, ~1.0) /
-     Special.float_factorial(s - 1))
+    if integral
+      raise "Special.zeta requires s > 1" if s <= 1
+      sign = s.even? ? ~1.0 : ~-1.0
+      return (sign * Special.polygamma(s - 1, ~1.0) /
+              Special.float_factorial(s - 1))
+    Special.hurwitz_zeta(s, ~1.0)
+
+  # Principal real Hurwitz zeta for s>1 and a>0.  Euler-Maclaurin with
+  # five Bernoulli corrections gives near-binary64 accuracy after shifting
+  # the tail to a+24.
+  -> .hurwitz_zeta(s, a)
+    if s <= ~1.0 || a <= ~0.0
+      raise "Special.hurwitz_zeta requires s > 1 and a > 0"
+    shifted = a
+    sum = ~0.0
+    while shifted < ~24.0
+      sum += ~1.0 / shifted**s
+      shifted += ~1.0
+    sum += shifted**(~1.0 - s) / (s - ~1.0)
+    sum += ~0.5 * shifted**(~0.0 - s)
+    coefficients = [
+      ~0.083333333333333333333,
+      ~-0.001388888888888888889,
+      ~0.000033068783068783069,
+      ~-0.000000826719576719577,
+      ~0.000000020876756987868
+    ]
+    k = 1
+    while k <= coefficients.size
+      rising = Special.rising_factorial(s, 2*k - 1)
+      sum += (coefficients[k - 1] * rising /
+              shifted**(s + 2*k - 1))
+      k += 1
+    sum
 
   # factorials via gamma(n+1) for non-negative integers / reals
   -> .factorial(n)
@@ -274,31 +304,164 @@
   # ---- sigmoid / softplus (ML-adjacent, kept with special) ----
 
   -> .logistic(x)
-    ~1.0 / (~1.0 + Math.exp(~0.0 - x))
+    if x >= ~0.0
+      return ~1.0 / (~1.0 + Math.exp(~0.0 - x))
+    exponential = Math.exp(x)
+    exponential / (~1.0 + exponential)
 
   -> .softplus(x)
     if x > ~20.0
       return x
-    Math.log(~1.0 + Math.exp(x))
+    return Math.exp(x) if x < ~-20.0
+    Math.log1p(Math.exp(x))
 
-  # ---- incomplete gamma (lower, series for x < a+1) ----
+  # ---- regularized incomplete gamma ----
+
+  -> .gammainc_series(a, x)
+    ap = a
+    sum = ~1.0 / a
+    term = sum
+    n = 1
+    while n < 500
+      ap += ~1.0
+      term *= x / ap
+      sum += term
+      relative = term / sum
+      relative = ~0.0 - relative if relative < ~0.0
+      if relative < ~1.0e-16
+        n = 500
+      else
+        n += 1
+    sum * Math.exp(~0.0 - x + a*Math.log(x) - Special.lgamma(a))
+
+  # Lentz continued fraction for Q(a,x). This is the stable tail branch;
+  # computing it as 1-P would erase the small result.
+  -> .gammaincc_fraction(a, x)
+    tiny = ~1.0e-300
+    b = x + ~1.0 - a
+    c = ~1.0 / tiny
+    d = ~1.0 / b
+    fraction = d
+    n = 1
+    while n < 500
+      index = n + ~0.0
+      coefficient = (~0.0 - index)*(index - a)
+      b += ~2.0
+      d = coefficient*d + b
+      d = tiny if d < tiny && d > ~0.0 - tiny
+      c = b + coefficient / c
+      c = tiny if c < tiny && c > ~0.0 - tiny
+      d = ~1.0 / d
+      delta = d*c
+      fraction *= delta
+      error = delta - ~1.0
+      error = ~0.0 - error if error < ~0.0
+      if error < ~1.0e-16
+        n = 500
+      else
+        n += 1
+    (Math.exp(~0.0 - x + a*Math.log(x) - Special.lgamma(a)) *
+     fraction)
 
   -> .gammainc(a, x)
     if x < ~0.0 || a <= ~0.0
       raise "Special.gammainc: domain"
-    if x == ~0.0
-      return ~0.0
-    # series
-    ap = a
-    sum = ~1.0 / a
-    del = sum
-    n = 1
-    while n < 200
-      ap = ap + ~1.0
-      del = del * x / ap
-      sum = sum + del
-      if del < sum * ~1.0e-12
-        n = 200
-      else
-        n = n + 1
-    Math.exp(~0.0 - x + a * Math.log(x) - Special.lgamma(a)) * sum
+    return ~0.0 if x == ~0.0
+    if x < a + ~1.0
+      return Special.gammainc_series(a, x)
+    ~1.0 - Special.gammaincc_fraction(a, x)
+
+  -> .gammaincc(a, x)
+    if x < ~0.0 || a <= ~0.0
+      raise "Special.gammaincc: domain"
+    return ~1.0 if x == ~0.0
+    if x < a + ~1.0
+      return ~1.0 - Special.gammainc_series(a, x)
+    Special.gammaincc_fraction(a, x)
+
+  # ---- regularized incomplete beta ----
+
+  -> .betainc_fraction(a, b, x)
+    maximum = 300
+    epsilon = ~3.0e-16
+    tiny = ~1.0e-300
+    qab = a + b
+    qap = a + ~1.0
+    qam = a - ~1.0
+    c = ~1.0
+    d = ~1.0 - qab*x / qap
+    d = tiny if d < tiny && d > ~0.0 - tiny
+    d = ~1.0 / d
+    h = d
+    m = 1
+    while m <= maximum
+      m2 = 2*m
+      mm = m + ~0.0
+      aa = mm*(b - mm)*x / ((qam + m2)*(a + m2))
+      d = ~1.0 + aa*d
+      d = tiny if d < tiny && d > ~0.0 - tiny
+      c = ~1.0 + aa / c
+      c = tiny if c < tiny && c > ~0.0 - tiny
+      d = ~1.0 / d
+      h *= d*c
+      aa = (~0.0 - (a + mm)*(qab + mm)*x /
+            ((a + m2)*(qap + m2)))
+      d = ~1.0 + aa*d
+      d = tiny if d < tiny && d > ~0.0 - tiny
+      c = ~1.0 + aa / c
+      c = tiny if c < tiny && c > ~0.0 - tiny
+      d = ~1.0 / d
+      delta = d*c
+      h *= delta
+      error = delta - ~1.0
+      error = ~0.0 - error if error < ~0.0
+      return h if error < epsilon
+      m += 1
+    h
+
+  -> .betainc(a, b, x)
+    if a <= ~0.0 || b <= ~0.0 || x < ~0.0 || x > ~1.0
+      raise "Special.betainc: domain"
+    return ~0.0 if x == ~0.0
+    return ~1.0 if x == ~1.0
+    front = Math.exp(
+      Special.lgamma(a + b) - Special.lgamma(a) -
+      Special.lgamma(b) + a*Math.log(x) + b*Math.log1p(~0.0 - x))
+    if x < (a + ~1.0) / (a + b + ~2.0)
+      return front*Special.betainc_fraction(a, b, x) / a
+    ~1.0 - (
+      front*Special.betainc_fraction(b, a, ~1.0 - x) / b)
+
+  # ---- principal real Lambert W ----
+
+  -> .lambert_w(x)
+    branch_point = ~-0.36787944117144232160
+    if x < branch_point
+      raise "Special.lambert_w: principal real branch needs x >= -1/e"
+    return ~-1.0 if x == branch_point
+    return ~0.0 if x == ~0.0
+    if x < ~-0.3
+      p = Math.sqrt(~2.0*(~2.718281828459045*x + ~1.0))
+      w = (~-1.0 + p - p*p / ~3.0 +
+           ~0.15277777777777778*p*p*p)
+    elsif x < ~3.0
+      w = Math.log1p(x)
+    else
+      logarithm = Math.log(x)
+      w = logarithm - Math.log(logarithm)
+    iterations = 0
+    while iterations < 30
+      exponential = Math.exp(w)
+      residual = w*exponential - x
+      denominator = (
+        exponential*(w + ~1.0) -
+        (w + ~2.0)*residual / (~2.0*w + ~2.0))
+      step = residual / denominator
+      w -= step
+      error = step < ~0.0 ? ~0.0 - step : step
+      return w if error <= ~2.0e-15*(~1.0 + (w < ~0.0 ? ~0.0 - w : w))
+      iterations += 1
+    w
+
+  -> .lambertw(x)
+    Special.lambert_w(x)

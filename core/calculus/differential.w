@@ -100,6 +100,9 @@
       i += 1
     Differential.new(@value * rhs.value, gradient, hessian)
 
+  -> scale(scalar)
+    self.unary_transform(@value * scalar, scalar, ~0.0)
+
   -> reciprocal
     raise "Differential division by zero" if @value == ~0.0
     inverse = ~1.0 / @value

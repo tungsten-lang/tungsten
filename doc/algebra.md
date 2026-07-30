@@ -9,6 +9,8 @@ Exact polynomial derivatives and integrals live here. Smooth numerical
 Taylor series, gradients, Hessians, and quadrature are provided by
 `use calculus`; see
 [scientific-computing/calculus.md](scientific-computing/calculus.md).
+Canonical symbolic expressions and the exact `Expression` ↔ `Polynomial`
+bridge are documented in [symbolic.md](symbolic.md).
 
 The trust model, Wassat/WRAT boundary, descent dependency graph, and
 FLT-scale roadmap are in [certified-mathematics.md](certified-mathematics.md).

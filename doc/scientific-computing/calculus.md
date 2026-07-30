@@ -6,6 +6,10 @@ polynomial methods in `use algebra`: `Polynomial#derivative`,
 field, while `Calculus` propagates floating Taylor and differential data
 through arbitrary user functions.
 
+It also exposes `Calculus.symbol` and `Calculus.symbols` for canonical
+expressions with exact symbolic derivatives; see
+[../symbolic.md](../symbolic.md).
+
 ## Arbitrary-order derivatives and Taylor series
 
 `TaylorJet` stores normalized Taylor coefficients

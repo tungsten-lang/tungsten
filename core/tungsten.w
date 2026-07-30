@@ -40,6 +40,7 @@
   auto :Special,      "special"
   auto :Stats,        "stats"
   auto :Tensor,       "tensor"
+  auto :Expression,   "expression"
   auto :Calculus,     "calculus"
   auto :TaylorJet,    "calculus"
   auto :Differential, "calculus"

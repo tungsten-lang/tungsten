@@ -293,6 +293,16 @@
     return -((-self) ** exponent) if self.value < ~0.0
     self ** exponent
 
+  -> abs
+    return self if self.value > ~0.0
+    return -self if self.value < ~0.0
+    i = 1
+    while i <= self.order
+      if @coefficients[i] != ~0.0
+        raise "TaylorJet.abs is not analytic at zero"
+      i += 1
+    TaylorJet.constant(~0.0, self.order)
+
   -> sqrt
     root = Math.sqrt(self.value)
     if root == ~0.0

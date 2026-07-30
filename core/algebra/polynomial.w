@@ -912,6 +912,9 @@
   -> inspect
     to_s
 
+  -> to_expression
+    Expression.from_polynomial(self)
+
 
 # `Poly<K>.new(:x).generator` remains the concise univariate entry point.
 # The algebra surface rewrite uses the field-first array constructor:

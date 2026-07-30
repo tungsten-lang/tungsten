@@ -275,6 +275,10 @@ compiled_specs=(
   spec/core/arrays_hashes_spec.w
   spec/core/calculus_spec.w
   spec/core/calculus_complex_spec.w
+  spec/core/expression_spec.w
+  spec/core/expression_autoload_spec.w
+  spec/core/expression_calculus_spec.w
+  spec/core/expression_algebra_spec.w
   spec/core/enumerable_native_spec.w
   spec/core/network_native_spec.w
   spec/core/system_spec.w
@@ -328,6 +332,10 @@ interpreter_specs=(
   spec/core/base64_native_spec.w
   spec/core/calculus_spec.w
   spec/core/calculus_complex_spec.w
+  spec/core/expression_spec.w
+  spec/core/expression_autoload_spec.w
+  spec/core/expression_calculus_spec.w
+  spec/core/expression_algebra_spec.w
   spec/core/system_spec.w
   spec/numeric/complex_spec.w
   spec/numeric/hypercomplex_mul_spec.w

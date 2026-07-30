@@ -13,6 +13,7 @@
 #   Calculus.integrate(f, a, b, abs_tol, rel_tol, max_depth)
 
 use core/math
+use core/expression
 use core/calculus/jet
 use core/calculus/differential
 use core/calculus/quadrature
@@ -58,3 +59,15 @@ use core/calculus/quadrature
   -> .scale_value(value, scalar)
     return value.scale(scalar) if value.respond_to?("scale")
     value * scalar
+
+  -> .symbol(name)
+    Expression.variable(name)
+
+  -> .symbols(names)
+    Expression.variables(names)
+
+  -> .symbolic_gradient(expression, variables)
+    Expression.wrap(expression).gradient(variables)
+
+  -> .symbolic_hessian(expression, variables)
+    Expression.wrap(expression).hessian(variables)

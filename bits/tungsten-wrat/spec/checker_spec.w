@@ -80,6 +80,33 @@ describe "Tungsten Wrat" ->
       r = wrat_verify(UNIT_CONTRADICTION, "3 d 1 0\n4 0 1 2 0\n")
       expect(r["verified"]).to eq(false)
 
+  context "streaming and packed certificates" ->
+    it "packs hinted WRAT, preserves deletion semantics, and replays WRATB" ->
+      text = "wrat 1\n3 1 0 1 0\n3 d 3 0\n4 0 1 2 0\n"
+      info = wrat_packed_measure(wrat_scanner_for_text(text))
+      packed = wrat_pack_into(wrat_scanner_for_text(text), info)
+      expect(info["additions"]).to eq(2)
+      expect(info["deletions"]).to eq(1)
+      expect(packed.size < text.size).to eq(true)
+
+      scanner = wrat_scanner_for_bytes(packed)
+      formula = wrat_parse_cnf(UNIT_CONTRADICTION)
+      r = wrat_checker_for(formula, scanner.format).check_stream(scanner)
+      expect(r["verified"]).to eq(true)
+      expect(scanner.format).to eq("wratb")
+      expect(r["records"]).to eq(3)
+
+    it "reports bounded record buffers and logical database storage" ->
+      r = wrat_verify(UNIT_CONTRADICTION, "wrat 1\n3 0 1 2 0\n")
+      expect(r["peak_record_literals"]).to eq(0)
+      expect(r["peak_record_hints"]).to eq(2)
+      expect(r["peak_live_clauses"]).to eq(3)
+      expect(r["peak_live_literals"]).to eq(2)
+
+    it "still parses trailing records after deriving the empty clause" ->
+      bad_tail = "wrat 1\n3 0 1 2 0\ngarbage\n"
+      expect(-> () wrat_verify(UNIT_CONTRADICTION, bad_tail)).to raise_error
+
   # The checker must trust the formula's OWN declared dimensions, independently
   # of any solver: it enforces exactly one `p cnf V C` header, the declared
   # clause count, and the declared variable bound. Otherwise a file declaring

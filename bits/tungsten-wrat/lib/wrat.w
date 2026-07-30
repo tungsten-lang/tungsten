@@ -9,11 +9,13 @@
 # Supported dialects:
 #
 #   .wrat   Tungsten-native, hinted (near-linear checking)
+#   .wratb  packed Tungsten-native hints (same checks, smaller and streamable)
 #   .lrat   same hinted body, no header
-#   .drat   unhinted; checked by full propagation with a RAT fallback
+#   .drat   unhinted; checked by watched propagation with a RAT fallback
 #
 # Usage:
 #   wrat <problem.cnf> <proof>      check a refutation
+#   wrat pack <proof> <proof.wratb> pack hinted WRAT/LRAT
 #   wrat version                    print the version
 #   wrat help                       usage
 
@@ -21,6 +23,8 @@
 use version
 use dimacs
 use proof
+use stream
+use packed
 use checker
 
 -> wrat_print_usage
@@ -28,6 +32,7 @@ use checker
   << ""
   << "USAGE"
   << "    wrat <problem.cnf> <proof.wrat|.lrat|.drat>"
+  << "    wrat pack <proof.wrat|.lrat> <proof.wratb>"
   << "    wrat version"
   << "    wrat help"
   << ""
@@ -46,15 +51,29 @@ use checker
 
 -> wrat_check_files_unchecked(cnf_path, proof_path)
   cnf = read_file(cnf_path)
-  prf = read_file(proof_path)
-  result = wrat_verify(cnf, prf)
-  << "c format: [result["format"]], steps checked: [result["steps"]]"
-  if result["verified"]
-    << "s VERIFIED"
+  prf = File.mmap(proof_path)
+  begin
+    result = wrat_verify_mmap(cnf, prf)
+    << "c format: [result["format"]], steps checked: [result["steps"]]"
+    << "c storage: peak [result["peak_live_clauses"]] live clauses / [result["peak_live_literals"]] live literals; record buffers [result["peak_record_literals"]] literals / [result["peak_record_hints"]] hints"
+    if result["verified"]
+      << "s VERIFIED"
+      0
+    else
+      << "c [result["reason"]]"
+      << "s NOT VERIFIED"
+      1
+  ensure
+    prf.close
+
+-> wrat_pack_files(input_path, output_path)
+  begin
+    info = wrat_pack_file(input_path, output_path)
+    << "c packed [info["additions"]] additions and [info["deletions"]] deletions"
+    << "c bytes: [info["input_bytes"]] -> [info["output_bytes"]]"
     0
-  else
-    << "c [result["reason"]]"
-    << "s NOT VERIFIED"
+  rescue e
+    << "c pack error: [e]"
     1
 
 # Dispatch recognized command-line arguments. The executable entry point
@@ -68,6 +87,8 @@ use checker
     << "Tungsten Wrat [WRAT_VERSION]"
   elsif cmd == "help" || cmd == "--help" || cmd == "-h"
     wrat_print_usage
+  elsif cmd == "pack" && args.size >= 3
+    exit(wrat_pack_files(args[1], args[2]))
   elsif args.size >= 2
     exit(wrat_check_files(args[0], args[1]))
   else

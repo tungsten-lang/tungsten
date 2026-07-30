@@ -20,8 +20,11 @@ f.free_variables
 Construction simplifies immediately. Addition and multiplication are
 flattened and sorted, exact constants are combined, like terms and repeated
 factors are collected, neutral elements disappear, and safe real identities
-such as `log(exp(x)) = x` and `sqrt(x²) = abs(x)` are applied. Variables are
-real unless a future assumptions layer says otherwise.
+such as `log(exp(x)) = x`, `sqrt(x²) = abs(x)`,
+`sin(x)² + cos(x)² = 1`, and `cosh(x)² - sinh(x)² = 1` are applied. Odd/even
+parity is canonicalized when the argument is syntactically negative. Variables
+are real unless a future assumptions layer says otherwise. `Calculus.simplify`
+rebuilds an existing expression through the same canonical factories.
 
 Exact inputs stay exact. Irrational elementary values are represented rather
 than prematurely evaluated:
@@ -33,13 +36,17 @@ Expression.constant(2).sqrt      # sqrt(2), not a Float
 Expression.constant(144).sqrt    # 12
 Expression.constant(1).exp       # e
 (Expression.pi / 2).sin          # 1
+(Expression.pi / 12).sin         # (sqrt(6) - sqrt(2))/4
+Expression.constant(Rational.new(1, 2)).asin  # π/6
 ```
 
 Named constants evaluate numerically only when `evaluate` is requested.
 Perfect roots are reduced exactly. Square and cube factors are also extracted
 from modest-size exact radicals, so `sqrt(8)` canonicalizes to `2*sqrt(2)`;
 large non-perfect radicands stay symbolic rather than triggering unbounded
-trial factorization.
+trial factorization. Circular functions reduce every rational multiple of π on
+the π/12 lattice (the standard 15-degree common angles); poles such as
+`tan(π/2)` remain symbolic.
 
 The elementary surface matches numeric calculus:
 

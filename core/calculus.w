@@ -67,6 +67,9 @@ use core/calculus/quadrature
   -> .symbols(names)
     Expression.variables(names)
 
+  -> .simplify(expression)
+    Expression.wrap(expression).simplify
+
   -> .symbolic_gradient(expression, variables)
     Expression.wrap(expression).gradient(variables)
 

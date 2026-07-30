@@ -271,6 +271,55 @@ use core/math
         return [coefficient, base]
     [1, term]
 
+  # Recognize unary_function(argument)^2 without making assumptions about the
+  # argument. This is enough to apply the globally valid circular and
+  # hyperbolic Pythagorean identities during additive normalization.
+  -> .unary_square_argument(base, operation)
+    return nil if base.operation != "power"
+    pieces = base.arguments
+    return nil if !pieces[1].constant?
+    return nil if pieces[1].constant_value != 2
+    unary = pieces[0]
+    return nil if unary.operation != operation
+    unary.arguments[0]
+
+  # Remove matched c*sin(x)^2 + c*cos(x)^2 and
+  # c*cosh(x)^2 - c*sinh(x)^2 groups, returning the updated constant state.
+  -> .collapse_squared_identities(groups, constant_seen, constant_total)
+    i = 0
+    while i < groups.size
+      base = groups[i][0]
+      argument = Expression.unary_square_argument(base, "sin")
+      target_operation = "cos"
+      opposite_coefficient = false
+      if argument == nil
+        argument = Expression.unary_square_argument(base, "cosh")
+        target_operation = "sinh"
+        opposite_coefficient = true
+
+      if argument != nil
+        j = 0
+        while j < groups.size
+          if j != i
+            other_argument = Expression.unary_square_argument(
+              groups[j][0], target_operation)
+            expected = groups[i][1]
+            expected = 0 - expected if opposite_coefficient
+            if other_argument == argument && groups[j][1] == expected
+              contribution = groups[i][1]
+              groups[i][1] = 0
+              groups[j][1] = 0
+              if constant_seen
+                constant_total = Expression.add_constant_values(
+                  constant_total, contribution)
+              else
+                constant_total = contribution
+                constant_seen = true
+              break
+          j += 1
+      i += 1
+    [constant_seen, constant_total]
+
   # Canonical n-ary sum. Constants are combined exactly and like terms with
   # identical canonical bases have their coefficients collected.
   -> .sum(values)
@@ -309,6 +358,11 @@ use core/math
           groups[found][1], coefficient)
       else
         groups.push([base, coefficient])
+
+    identity_state = Expression.collapse_squared_identities(
+      groups, constant_seen, constant_total)
+    constant_seen = identity_state[0]
+    constant_total = identity_state[1]
 
     terms = []
     groups.each -> (group)
@@ -625,6 +679,15 @@ use core/math
       return [true, Expression.negate(Expression.pi / Expression.constant(4))] if operation == "atan"
       return [true, Expression.pi] if operation == "acos"
 
+    half = Rational.new(1, 2)
+    if value == half
+      return [true, Expression.pi / Expression.constant(6)] if operation == "asin"
+      return [true, Expression.pi / Expression.constant(3)] if operation == "acos"
+    if value == 0 - half
+      return [true, Expression.negate(Expression.pi / Expression.constant(6))] if operation == "asin"
+      if operation == "acos"
+        return [true, Expression.constant(2) * Expression.pi / Expression.constant(3)]
+
     if operation == "sqrt"
       root = Expression.perfect_square_root(value)
       return [true, Expression.constant(root)] if root != nil
@@ -664,23 +727,77 @@ use core/math
           return numerator / Rational.coerce(pieces[1].constant_value)
     nil
 
+  -> .pi_twelfth_sine(residue)
+    k = residue
+    sign = 1
+    if k > 12
+      k -= 12
+      sign = -1
+    if k > 6
+      k = 12 - k
+
+    value = Expression.constant(0)
+    sqrt_two = Expression.constant(2).sqrt
+    sqrt_three = Expression.constant(3).sqrt
+    sqrt_six = Expression.constant(6).sqrt
+    value = (sqrt_six - sqrt_two) / Expression.constant(4) if k == 1
+    value = Expression.constant(Rational.new(1, 2)) if k == 2
+    value = sqrt_two / Expression.constant(2) if k == 3
+    value = sqrt_three / Expression.constant(2) if k == 4
+    value = (sqrt_six + sqrt_two) / Expression.constant(4) if k == 5
+    value = Expression.constant(1) if k == 6
+    sign < 0 ? Expression.negate(value) : value
+
+  -> .pi_twelfth_tangent(residue)
+    k = residue % 12
+    return nil if k == 6
+    sqrt_three = Expression.constant(3).sqrt
+    two = Expression.constant(2)
+    return Expression.constant(0) if k == 0
+    return two - sqrt_three if k == 1
+    return sqrt_three / Expression.constant(3) if k == 2
+    return Expression.constant(1) if k == 3
+    return sqrt_three if k == 4
+    return two + sqrt_three if k == 5
+    return Expression.negate(two + sqrt_three) if k == 7
+    return Expression.negate(sqrt_three) if k == 8
+    return Expression.constant(-1) if k == 9
+    return Expression.negate(sqrt_three / Expression.constant(3)) if k == 10
+    Expression.negate(two - sqrt_three)
+
   -> .trig_pi_value(operation, expression)
     coefficient = Expression.pi_multiple(expression)
     return [false, nil] if coefficient == nil
     denominator = coefficient.denominator
-    return [false, nil] if denominator != 1 && denominator != 2
-    half_turns = denominator == 1 ? coefficient.numerator * 2 : coefficient.numerator
-    residue = half_turns % 4
-    residue += 4 if residue < 0
+    scaled_numerator = coefficient.numerator * 12
+    return [false, nil] if scaled_numerator % denominator != 0
+    twelfths = scaled_numerator / denominator
+    residue = twelfths % 24
+    residue += 24 if residue < 0
     if operation == "sin"
-      values = [0, 1, 0, -1]
-      return [true, Expression.constant(values[residue])]
+      return [true, Expression.pi_twelfth_sine(residue)]
     if operation == "cos"
-      values = [1, 0, -1, 0]
-      return [true, Expression.constant(values[residue])]
-    if operation == "tan" && residue.even?
-      return [true, Expression.constant(0)]
+      cosine_residue = (residue + 6) % 24
+      return [true, Expression.pi_twelfth_sine(cosine_residue)]
+    if operation == "tan"
+      tangent = Expression.pi_twelfth_tangent(residue)
+      return [true, tangent] if tangent != nil
     [false, nil]
+
+  # Return the positive counterpart of a syntactically negative exact
+  # argument. No sign assumptions about variables are introduced.
+  -> .positive_negative_argument(expression)
+    if expression.constant?
+      value = expression.constant_value
+      if Expression.rational_exact_value?(value) && value < 0
+        return Expression.constant(0 - value)
+    if expression.operation == "multiply"
+      pieces = expression.arguments
+      if pieces.size > 1 && pieces[0].constant?
+        coefficient = pieces[0].constant_value
+        if Expression.rational_exact_value?(coefficient) && coefficient < 0
+          return Expression.negate(expression)
+    nil
 
   -> .unary(operation, argument)
     name = operation.to_s
@@ -691,8 +808,8 @@ use core/math
       if Expression.exact_value?(value)
         exact = Expression.exact_unary(name, value)
         return exact[1] if exact[0]
-        return Expression.node(name, [expression])
-      return Expression.constant(Expression.apply_unary(name, value))
+      else
+        return Expression.constant(Expression.apply_unary(name, value))
 
     if name == "log" && expression.operation == "exp"
       return expression.arguments[0]
@@ -701,6 +818,18 @@ use core/math
     if name == "sin" || name == "cos" || name == "tan"
       exact_trig = Expression.trig_pi_value(name, expression)
       return exact_trig[1] if exact_trig[0]
+    positive_argument = Expression.positive_negative_argument(expression)
+    if positive_argument != nil
+      odd_operations = [
+        "sin", "tan", "sinh", "tanh", "asin", "atan", "asinh", "atanh",
+        "cbrt"
+      ]
+      if odd_operations.include?(name)
+        return Expression.negate(
+          Expression.unary(name, positive_argument))
+      even_operations = ["cos", "cosh", "abs"]
+      if even_operations.include?(name)
+        return Expression.unary(name, positive_argument)
     if name == "abs" && expression.operation == "abs"
       return expression
     if name == "sqrt" && expression.operation == "power"

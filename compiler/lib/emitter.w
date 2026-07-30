@@ -894,6 +894,44 @@ use hashing
   out << "}\n"
   out.to_s()
 
+# Var-var `a == b` under a :string type fact. Faithful w_eq specialization:
+#   bits equal                          -> W_TRUE  (w_eq's a == b arm)
+#   BOTH canonical stringy (mode 0-6)   -> W_FALSE (equal canonical content
+#      interns to one WValue, so differing bits prove inequality; symbol
+#      bit 0 rides in the bits so strings never fold equal to symbols)
+#   anything else -> w_eq. One canonical side alone is NOT enough: the other
+#   side could be a short rope with equal content, which only w_eq resolves.
+-> streq2_fast_helper_ir()
+  out = StringBuffer(760)
+  out << "define private i64 @__w_streq2_fast(i64 %a, i64 %b) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %eqb = icmp eq i64 %a, %b\n"
+  out << "  br i1 %eqb, label %t, label %c\n"
+  out << "t:\n"
+  out << "  ret i64 2\n"
+  out << "c:\n"
+  out << "  %ha = lshr i64 %a, 48\n"
+  out << "  %sa = icmp eq i64 %ha, 65529\n"
+  out << "  %ma = lshr i64 %a, 1\n"
+  out << "  %ma3 = and i64 %ma, 7\n"
+  out << "  %na = icmp ne i64 %ma3, 7\n"
+  out << "  %ca = and i1 %sa, %na\n"
+  out << "  %hb = lshr i64 %b, 48\n"
+  out << "  %sb = icmp eq i64 %hb, 65529\n"
+  out << "  %mb = lshr i64 %b, 1\n"
+  out << "  %mb3 = and i64 %mb, 7\n"
+  out << "  %nb = icmp ne i64 %mb3, 7\n"
+  out << "  %cb = and i1 %sb, %nb\n"
+  out << "  %canon = and i1 %ca, %cb\n"
+  out << "  br i1 %canon, label %f, label %s\n"
+  out << "f:\n"
+  out << "  ret i64 1\n"
+  out << "s:\n"
+  out << "  %sv = call i64 @w_eq(i64 %a, i64 %b)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
 # Boxed + / - fast path (lowering's op map routes :PLUS/:MINUS here). Both
 # operands inline Ints (tag 0xFFFA) -> sign-extended 48-bit payload add/sub
 # with an i48 fit check on the result; a fitting result re-boxes inline.
@@ -1334,7 +1372,7 @@ ewscope_md_state = {ids: {}, order: []}
   direct_range_metadata_suffix("i64", w_tag_char + subtype_span * 3, w_tag_char + subtype_span * 4)
 
 -> wvalue_bool_call?(name)
-  name in ("w_bool" "w_eq" "w_neq" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "__w_streq_fast" "w_hash_has_key" "__w_file_exists" "__w_write_file" "w_ipv4_in_cidr")
+  name in ("w_bool" "w_eq" "w_neq" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "__w_streq_fast" "__w_streq2_fast" "w_hash_has_key" "__w_file_exists" "__w_write_file" "w_ipv4_in_cidr")
 
 -> known_call_range_metadata_suffix(inst, llvm_type)
   suffix = range_metadata_suffix(inst, llvm_type)
@@ -2176,6 +2214,12 @@ ewscope_md_state = {ids: {}, order: []}
     if decls_out.index("@w_eq(") == nil
       decls_out = decls_out + "declare i64 @w_eq(i64, i64) nounwind\n"
     decls_out = decls_out + streq_fast_helper_ir() + "\n"
+
+  # Var-var string == fast path (lowering's :string type-fact arm).
+  if ccall_needed.has_key?("__w_streq2_fast")
+    if decls_out.index("@w_eq(") == nil
+      decls_out = decls_out + "declare i64 @w_eq(i64, i64) nounwind\n"
+    decls_out = decls_out + streq2_fast_helper_ir() + "\n"
 
   # Boxed +/- fast paths (op map routes :PLUS/:MINUS to these helpers).
   arith_fast_specs = [

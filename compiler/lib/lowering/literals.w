@@ -269,7 +269,17 @@
     emit_instruction(wfn, {op: :call_recycle_or_new_array, temp: arr})
     track_recycle_temp(wfn, arr, :array)
     return typed_value(:i64, arr)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: arr, name: "w_array_new_empty", args: []})
+  # Non-empty literal: allocate at the EXACT final size once and store each
+  # element straight into its slot (alwaysinline helper -> load slots ptr +
+  # store). The old shape -- w_array_new_empty + one w_array_push per
+  # element -- paid a call, a grow check, and an ebits-dispatched
+  # array_write per element (~40% of the new_array primitive). Empty []
+  # keeps w_array_new_empty for the recycle-pool reuse.
+  n_elems = node.elements.size()
+  if n_elems > 0
+    emit_instruction(wfn, {op: :call_direct_i64, temp: arr, name: "w_array_new_uninit_sized", args: ["65", n_elems.to_s()]})
+  else
+    emit_instruction(wfn, {op: :call_direct_i64, temp: arr, name: "w_array_new_empty", args: []})
   i = 0
   while i < node.elements.size()
     elem = node.elements[i]
@@ -291,7 +301,7 @@
         val = typed_value(raw_float_value_type(ht), raw)
     val_reg = ensure_i64_value(wfn, val)
     push_temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: push_temp, name: "w_array_push", args: [arr, val_reg]})
+    emit_instruction(wfn, {op: :call_direct_i64, temp: push_temp, name: "__w_array_lit_store", args: [arr, i.to_s(), val_reg]})
     i += 1
   typed_value(:i64, arr)
 

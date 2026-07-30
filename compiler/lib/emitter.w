@@ -1065,6 +1065,25 @@ use hashing
   out << "}\n"
   out.to_s()
 
+# Array-literal slot store: the literal was just allocated at exact size by
+# w_array_new_uninit_sized (fresh, unaliased, start == 0, i < size), so the
+# store is a bare slots[i] = val with no grow check or ebits dispatch.
+# WArray layout: flags/ebits/pad (8B) start+size (8B at +4/+8) cap (+12),
+# slots ptr at +16 (see runtime.h; static-asserted there).
+-> array_lit_store_helper_ir()
+  out = StringBuffer(480)
+  out << "define private i64 @__w_array_lit_store(i64 %arr, i64 %i, i64 %val) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %m = and i64 %arr, -16\n"
+  out << "  %ap = inttoptr i64 %m to ptr\n"
+  out << "  %sp = getelementptr inbounds i8, ptr %ap, i64 16\n"
+  out << "  %slots = load ptr, ptr %sp\n"
+  out << "  %ep = getelementptr inbounds i64, ptr %slots, i64 %i\n"
+  out << "  store i64 %val, ptr %ep\n"
+  out << "  ret i64 %arr\n"
+  out << "}\n"
+  out.to_s()
+
 # Boxed-numeric -> raw double. The fast arm unboxes a double-tagged WValue
 # (sub bias + bitcast); ints/Decimals/BigInts take the w_num_to_f64 call.
 -> num_to_f64_fast_helper_ir()
@@ -2212,6 +2231,8 @@ ewscope_md_state = {ids: {}, order: []}
     if decls_out.index("@w_num_to_f64(") == nil
       decls_out = decls_out + "declare double @w_num_to_f64(i64) nounwind memory(read)\n"
     decls_out = decls_out + num_to_f64_fast_helper_ir() + "\n"
+  if ccall_needed.has_key?("__w_array_lit_store")
+    decls_out = decls_out + array_lit_store_helper_ir() + "\n"
 
   # Emit declarations for call targets not defined in this module. The
   # already-declared check was a decls_out.index(search_str) — a full strstr

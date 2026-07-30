@@ -3846,6 +3846,14 @@ use target
         raise "Rational.new expects one or two arguments"
       denominator = args.size() == 2 ? args[1] : 1
       return ccall("w_rational_new", args[0], denominator)
+    # ByteArray/BoolArray are Array facades whose `.new` the compiled
+    # engine intercepts in runtime dispatch (WArray with ebits=8/1). The
+    # scaffold classes define no `-> new`, so without this arm the tree
+    # walker raised "no constructor accepts 1 argument(s)".
+    if w_class[:name] == "ByteArray"
+      return ccall("w_bytes_new", args.size() > 0 ? args[0] : 0)
+    if w_class[:name] == "BoolArray"
+      return ccall("w_bool_array_new", args.size() > 0 ? args[0] : 0)
     obj = {rt: :object, w_class: w_class, ivars: {}}
     # Arity-aware constructor selection: overloaded `-> new` definitions must
     # resolve like the compiled engine (exact name+arity first, then the

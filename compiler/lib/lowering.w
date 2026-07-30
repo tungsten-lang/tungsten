@@ -1573,8 +1573,15 @@ use lowering/definitions
         emit_instruction(main_fn, {op: :class_store, value: cls_temp, class_name: cname})
 
         # Register type dispatch key if this class maps to a built-in type.
+        # ByteArray/BoolArray/TypedArray are Array FACADES (same WArray
+        # struct, same subtag 0x0A, distinguished only by ebits) — their
+        # scaffold classes must NOT register, or they clobber the Array
+        # class binding for every array in the program: dynamic dispatch
+        # consults g_type_class[0x0A] and the empty facade class hides all
+        # of Array's ported methods ("undefined method 'size' for Array").
+        # Their `.new` is intercepted by name in runtime dispatch instead.
         dkey = type_dispatch_key(cname)
-        if dkey != nil
+        if dkey != nil && !(cname in ("ByteArray" "BoolArray" "TypedArray"))
           emit_instruction(main_fn, {op: :type_class_register, dispatch_key: dkey, class_temp: cls_temp})
 
         # Per-kind node dispatch: AST [slab] classes register for their

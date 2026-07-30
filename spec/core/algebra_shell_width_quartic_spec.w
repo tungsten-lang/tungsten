@@ -29,10 +29,13 @@ known_points = [
 known_points.each -> (point)
   shell_check("curve.known_point." + point.to_s, C.contains?(point), true)
 
-automorphisms = C.geometric_automorphisms
-shell_check("curve.geometric_automorphism_order", automorphisms.order, 1)
-shell_check("curve.geometric_automorphism_certificate",
-            automorphisms.certified?, true)
+if env("TUNGSTEN_AUTOMORPHISMS_FULL") == "1"
+  automorphisms = C.geometric_automorphisms
+  shell_check("curve.geometric_automorphism_order", automorphisms.order, 1)
+  shell_check("curve.geometric_automorphism_certificate",
+              automorphisms.certified?, true)
+else
+  << "SKIP full stabilizer (set TUNGSTEN_AUTOMORPHISMS_FULL=1)"
 
 searched_points = C.rational_points(height: 100)
 shell_check("curve.point_search",

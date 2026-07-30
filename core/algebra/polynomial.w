@@ -81,14 +81,27 @@
     if @name == "lex"
       return lex_compare(a, b, first, last)
     if @name == "grlex"
-      ad = total_degree(a, first, last)
-      bd = total_degree(b, first, last)
+      # This comparator is the dominant Gröbner hot path. Accumulate both
+      # degrees in one scan instead of making two dynamically dispatched
+      # total_degree calls and traversing the exponent vectors twice.
+      ad = 0
+      bd = 0
+      i = first
+      while i < last
+        ad += a[i]
+        bd += b[i]
+        i += 1
       return 1 if ad > bd
       return -1 if ad < bd
       return lex_compare(a, b, first, last)
     if @name == "grevlex"
-      ad = total_degree(a, first, last)
-      bd = total_degree(b, first, last)
+      ad = 0
+      bd = 0
+      i = first
+      while i < last
+        ad += a[i]
+        bd += b[i]
+        i += 1
       return 1 if ad > bd
       return -1 if ad < bd
       i = last - 1

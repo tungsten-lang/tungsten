@@ -1095,7 +1095,12 @@ The bounded point search is exhaustive only inside its documented structural
 family and height box. The automorphism result is geometric, not merely
 rational: its certificate proves uniqueness of the normalized hyperflex over
 the algebraic closure and then proves that its saturated projective stabilizer
-is the identity.
+is the identity. That final seven-variable Gröbner replay is currently a
+compiled capability: the focused native regression takes well under a second,
+while the generic tree-walking interpreter can retain roughly 10 GB of
+temporary polynomial objects. The standard interpreter suite therefore skips
+it; run the compiled fixture with
+`TUNGSTEN_AUTOMORPHISMS_FULL=1` for the full certificate.
 
 Known points can be reduced to degree-one places for the narrow certified
 divisor decision:

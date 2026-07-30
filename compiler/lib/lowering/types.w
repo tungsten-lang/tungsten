@@ -96,6 +96,7 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
     "Char"           => 0xD3
     # W_PACKED subtypes — runtime's w_dispatch_key returns 0xE0|subtype
     # when v >> 48 == 0xFFFE so each packed kind can register its own class.
+    "Rational"       => 0xE2
     "Tungsten:AST:Node"      => 0xE3
     "Date"          => 0xE4
     "IPv4"          => 0xE5

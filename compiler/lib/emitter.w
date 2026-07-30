@@ -299,6 +299,8 @@ use hashing
   out << declare_fn("w_ipv6_from_string", wv, "ptr, i32")
   out << declare_fn("w_rational", wv, "i32, i32")
   out << declare_fn("w_rational_new", wv, wv2)
+  out << declare_fn("w_rational_numerator", wv, wv)
+  out << declare_fn("w_rational_denominator", wv, wv)
   out << declare_fn("w_box_char", wv, "i32")
   out << declare_fn("w_color", wv, "i32, i32, i32, i32")
   out << declare_fn("w_register_unit", "void", "i32, ptr")

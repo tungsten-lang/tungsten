@@ -72,6 +72,33 @@ refuses to return a rank bound. Its columns do not yet carry a certified
 ambient square-class basis, so its name denotes an explicit constraint
 intersection rather than the true arithmetic Selmer group.
 
+## Certified integral elliptic arithmetic
+
+`WeierstrassInvariantsCertificate` replays the integral \(a_i\), \(b_i\),
+\(c_4,c_6,\Delta\), and \(j\) identities. An
+`IntegralWeierstrassTransformationCertificate` checks every coefficient in
+an admissible change
+
+\[
+x=u^2x'+r,\qquad y=u^3y'+u^2sx'+t
+\]
+
+and independently checks that \(c_4,c_6,\Delta\) scale by
+\(u^4,u^6,u^{12}\). Local minimization searches the complete finite residue
+box \(r\bmod p^2,s\bmod p,t\bmod p^3\) whenever invariant valuations alone
+do not prove minimality. The search is resource-bounded and returns
+`unknown` rather than silently accepting an unproved minimum.
+
+On a certified minimal model, \(\Delta\not\equiv0\bmod p\) certifies good
+reduction and \(c_4\not\equiv0\bmod p\) certifies multiplicative reduction.
+The conductor exponent is respectively 0 or 1; additive reduction at
+\(p\geq5\) is tame with exponent 2. Additive reduction at 2 or 3 still raises
+because the wild branches of Tate's algorithm are not implemented.
+`EllipticConductorCertificate` composes the minimal-model certificate, exact
+discriminant factorization, every local reduction certificate, and the
+reconstructed conductor. This certifies the displayed arithmetic result; it
+does not by itself supply modularity or level lowering.
+
 ## Wassat and Wrat
 
 Wassat is appropriate after an arithmetic checker has regenerated a bounded
@@ -195,11 +222,15 @@ problem. Fermat's Last Theorem needs a uniform theorem about an infinite
 family of Frey elliptic curves, so the missing layers are substantially
 different:
 
-1. elementary exponent reduction and a checked Frey-curve construction;
+1. elementary exponent reduction and a checked Frey-curve construction
+   (the constructor and invariant certificate now exist; uniform exponent
+   reduction remains);
 2. general integral Weierstrass models, admissible changes, minimal models,
-   invariants, and a certified Tate algorithm at every prime;
+   invariants, and a certified Tate algorithm at every prime (all but the
+   full Tate/Kodaira classification and wild 2/3 branches now exist);
 3. conductors, component groups, finite-flat local conditions, and mod-p
-   Galois representations;
+   Galois representations (conductors are certified outside wild additive
+   2/3; the remaining structures are missing);
 4. modular symbols, q-expansions, Hecke algebras, old/new quotients, newforms,
    and Sturm-bound certificates;
 5. local/global Galois cohomology, Selmer and dual Selmer groups,

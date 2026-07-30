@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(297 total), grouped by area, with its declaration, a one-line
+(307 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -258,6 +258,16 @@ summary from the source header, and a link to the source.
 | `EllipticJacobian` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `WeierstrassInvariantsCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `IntegralWeierstrassModel` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `IntegralWeierstrassTransformationCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `IntegralWeierstrassTransformation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticLocalMinimalModelCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticLocalMinimalModelComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticMinimalModelCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticMinimalModelComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticLocalReductionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticLocalReduction` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticConductorCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticConductorComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `FreyCurveCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `FreyCurve` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `HyperellipticCurve` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

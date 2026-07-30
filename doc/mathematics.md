@@ -114,28 +114,35 @@ kernel and rational \(J[2]\), and the final Selmer/rank bound.
 
 ## Fermat and modularity
 
-Tungsten now has the first exact application-level primitive: integral
+Tungsten now has the first exact application-level layer: integral
 Weierstrass models compute and certify the standard \(b_i,c_4,c_6,\Delta,j\)
-invariants and their projective cubic, while `FreyCurve` checks primitive
-integral data, prime exponent \(p\geq5\), the optional Fermat equality, and
-the model
+invariants and their projective cubic. Admissible changes of variables replay
+the \(u^4,u^6,u^{12}\) scaling identities. A bounded exhaustive search over
+\(r\bmod p^2,s\bmod p,t\bmod p^3\) certifies local and global minimal models.
+Good, multiplicative, and tame additive reduction then give certified
+conductor exponents. `FreyCurve` checks primitive integral data, prime
+exponent \(p\geq5\), the optional Fermat equality, and the model
 
 ```w
 frey = Algebra.frey_curve(2, 3, 5)
 frey.model.coefficients
 frey.certificate.verified?
 
+# This orientation has a certified u=2 minimalization and conductor:
+normalized = Algebra.frey_curve(3, 2, 5)
+normalized.model.minimal_model.coefficients
+normalized.conductor                         # 330
+
 # This stricter form accepts only an actual proposed solution:
 # Algebra.frey_curve_from_solution(a, b, c, p)
 ```
 
 This does **not** complete the Wiles/Ribet stack. There is still no certified
-minimal-model/Tate algorithm, conductor pipeline, mod-\(p\)
-Galois-representation layer, modular-symbol and newform system,
-level-lowering proof, or modularity-lifting kernel. The `minimal_model` and
-`conductor` entry points raise capability errors rather than infer a theorem
-from a nonminimal equation. `tungsten-wassat`'s `fermat.w` is a finite SAT
-benchmark, not that arithmetic infrastructure.
+full Tate/Kodaira algorithm: wild additive conductor exponents at 2 and 3
+raise `unknown` instead of guessing. There is also no mod-\(p\)
+Galois-representation layer, modular-symbol and newform system, level-lowering
+proof, or modularity-lifting kernel. `tungsten-wassat`'s `fermat.w` is a
+finite SAT benchmark, not that arithmetic infrastructure.
 
 A useful staged target is an **FLT application checker**:
 

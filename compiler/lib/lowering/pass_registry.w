@@ -424,6 +424,14 @@
   cv = ctx[:mod][:top_level_const_values]
   if cv != nil && cv[name] != nil
     return
+  # Global demotion (collect_extern_var_refs): a top-level var never
+  # referenced from a nested scope needs no @global mirror — main reads it
+  # through its slot/binding. Skipping the store un-pins the value from
+  # ownership analysis (a :store_global marks it escaped), restoring frees
+  # for top-level loop temps.
+  evr = ctx[:mod][:extern_var_refs]
+  if evr != nil && evr[name] != true
+    return
   if value_type == nil
     value_type = "i64"
   emit_instruction(wfn, {op: :store_global, name: name, value: value_reg, type: value_type})

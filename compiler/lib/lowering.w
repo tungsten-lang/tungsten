@@ -51,6 +51,48 @@ use lowering/definitions
     st = {}
   infer_type(expr.value, st, mod[:fn_return_types], lowering_infer_maps)
 
+# ── Top-level global demotion prepass ─────────────────────────────────────
+# A top-level var lowers to a main-fn slot/binding PLUS a mirror store to
+# @global.NAME on every assignment. The mirror exists for other scopes
+# (fn/method/class bodies and closures resolve module vars via load_global),
+# but ownership analysis treats :store_global as an escape, so EVERY
+# top-level heap value was pinned (zero frees in whole-script programs;
+# RSS grew without bound on top-level loops). Collect the set of var names
+# actually referenced inside a nested executable scope — fn_def /
+# method_def / class_def / module_def bodies and :block (closure/lambda)
+# literals; emit_store_global_unless_const skips the mirror for everything
+# else. main itself always resolves through slots/bindings first
+# (lower_var checks them before the top_level_vars fallback), so a skipped
+# mirror is unobservable from straight-line main code. @global emission is
+# untouched (a never-stored global is dead weight, not a hazard).
+# Gated by TUNGSTEN_DEMOTE_TOP_LEVEL (default on) for bisection.
+-> collect_extern_var_refs(mod, expressions)
+  mod[:extern_var_refs] = {}
+  if env("TUNGSTEN_DEMOTE_TOP_LEVEL") == "0"
+    mod[:extern_var_refs] = nil
+    return nil
+  i = 0
+  while i < expressions.size()
+    evr_walk(expressions[i], mod[:extern_var_refs], false)
+    i += 1
+  nil
+
+-> evr_walk(node, refs, in_nested)
+  if node == nil || !is_ast_node?(node)
+    return nil
+  k = ast_kind(node)
+  nested = in_nested
+  if k in (:fn_def :method_def :class_def :module_def :block)
+    nested = true
+  if nested && k == :var && node.name != nil
+    refs[node.name] = true
+  kids = ast_children(node)
+  ki = 0
+  while ki < kids.size()
+    evr_walk(kids[ki], refs, nested)
+    ki += 1
+  nil
+
 -> collect_top_level_static_types(mod, expressions)
   if mod[:top_level_static_types] == nil
     mod[:top_level_static_types] = {}
@@ -1479,6 +1521,7 @@ use lowering/definitions
   preregister_top_level_raw_abis(mod, ast.expressions)
 
   collect_top_level_static_types(mod, ast.expressions)
+  collect_extern_var_refs(mod, ast.expressions)
 
   # Tier-a call-site parameter type inference: seed unannotated top-level
   # fn params from the unanimous concrete type seen across all call sites

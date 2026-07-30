@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(310 total), grouped by area, with its declaration, a one-line
+(323 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -273,6 +273,19 @@ summary from the source header, and a link to the source.
 | `EllipticConductorComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `FreyCurveCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `FreyCurve` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ModularFormsArithmetic` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `Gamma0InvariantsCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `Gamma0` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ModularCurveX0` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ModularFormSpaceDimensionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `CuspForms` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ModularForms` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `SturmBoundCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `SturmBound` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `QExpansion` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ClassicalModularForms` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ClassicalModularFormCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ClassicalModularForm` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `HyperellipticCurve` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `MumfordDivisor` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `HyperellipticJacobian` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

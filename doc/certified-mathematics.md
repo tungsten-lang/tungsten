@@ -238,13 +238,16 @@ different:
    Galois representations (conductors and Tamagawa numbers are implemented;
    the representation-theoretic structures are missing);
 4. modular symbols, q-expansions, Hecke algebras, old/new quotients, newforms,
-   and Sturm-bound certificates;
+   and Sturm-bound certificates (the exact \(\Gamma_0(N)\) invariants,
+   dimension formulas, Sturm certificates, and classical level-one
+   \(E_4,E_6,\Delta\) q-expansions are implemented);
 5. local/global Galois cohomology, Selmer and dual Selmer groups,
    Poitou--Tate duality, and deformation rings;
 6. a kernel-checked Ribet level-lowering theorem;
 7. a kernel-checked Wiles--Taylor--Wiles modularity-lifting theorem, including
    `R=T`, Taylor--Wiles patching, Langlands--Tunnell, and the 3--5 switch;
-8. the finite certificate that weight-two level 2 has no cusp form, followed
+8. the finite certificate that weight-two level 2 has no cusp form
+   (implemented relative to the named classical dimension theorem), followed
    by composition of all preceding dependencies.
 
 Wassat can check bounded subgroup, incidence, congruence, and finite-module

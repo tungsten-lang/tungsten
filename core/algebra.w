@@ -42,6 +42,8 @@ use core/algebra/projective
 use core/algebra/curves
 use core/algebra/elliptic
 use core/algebra/elliptic_tate
+use core/algebra/modular_forms
+use core/algebra/q_expansion
 use core/algebra/divisors
 use core/algebra/quartics
 use core/algebra/descent
@@ -113,6 +115,27 @@ use core/algebra/galois
 
   -> .frey_curve_from_solution(a, b, c, exponent)
     FreyCurve.from_fermat_solution(a, b, c, exponent)
+
+  -> .gamma0(level)
+    Gamma0.new(level)
+
+  -> .modular_curve_x0(level)
+    ModularCurveX0.new(level)
+
+  -> .cusp_forms(level, weight = 2)
+    CuspForms.new(level, weight)
+
+  -> .modular_forms(level, weight = 2)
+    ModularForms.new(level, weight)
+
+  -> .eisenstein_e4(precision = 12)
+    ClassicalModularForms.e4(precision)
+
+  -> .eisenstein_e6(precision = 12)
+    ClassicalModularForms.e6(precision)
+
+  -> .modular_delta(precision = 12)
+    ClassicalModularForms.delta(precision)
 
   # Exact determinant over an explicit coefficient field.  This is
   # intentionally separate from LinAlg's floating-point determinant path.

@@ -51,6 +51,8 @@ core/algebra/projective.w          # projective spaces and normalized points
 core/algebra/curves.w              # plane, elliptic, and hyperelliptic models
 core/algebra/elliptic.w            # integral Weierstrass and Frey certificates
 core/algebra/elliptic_tate.w       # Tate local data, Kodaira, conductors
+core/algebra/modular_forms.w       # Gamma0, X0, dimensions, Sturm bounds
+core/algebra/q_expansion.w         # exact q-series, E4, E6, Delta
 core/algebra/divisors.w            # rational/closed places, formal divisors
 core/algebra/quartics.w            # certified line intersections and bitangents
 core/algebra/descent.w             # BPS preparation, bitangent proofs, F2 kernel
@@ -368,6 +370,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
 | Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension | Singular-curve normalization is not implemented |
 | Elliptic curves | Composition around a plane cubic model; short Weierstrass group law over ℚ and `𝔽_p` (char ≠ 2, 3); exact integral long-Weierstrass \(a_i,b_i,c_4,c_6,\Delta,j\) invariants and projective closure; replay-certified admissible transformations; bounded exhaustive local and global minimal models; the complete Tate state machine over ℚ, including wild conductor exponents at 2 and 3, Kodaira symbols, Tamagawa numbers, split multiplicative status, and certified conductors; checked primitive Frey models; `EllipticJacobian` view | Arbitrary plane cubic → Weierstrass needs a rational flex; Tate local data over number fields, isogenies, and mod-\(p\) representations are not implemented |
+| Modular forms | Exact `Gamma0(N)` index, cusp count, order-2/order-3 elliptic points, and \(X_0(N)\) genus; even-weight `CuspForms` and `ModularForms` dimensions; Sturm bounds and q-expansion precision; exact truncated q-series; certified level-one \(E_4,E_6,\Delta\) expansions and \(E_4^3-E_6^2=1728\Delta\); theorem-labelled replay certificates; in particular \(\dim S_2(\Gamma_0(2))=0\) | Dimension, Sturm, and classical modularity formulas are named trusted theorem imports, not kernel proofs. General Eisenstein series, Hecke operators/algebras, modular symbols, old/new decomposition, characters, and newforms are not implemented |
 | Hyperelliptic curves | Exact `y² = f(x)` models, Mumford pairs, Cantor composition; monic odd-degree over ℚ, monic-or-scalable over `𝔽_p` | Even-degree models still raise for Jacobian arithmetic |
 | Finite-curve arithmetic | Exact reduction from ℚ, certified base change through explicit field embeddings, packed absolute and structured tower extensions, projective point counts, Frobenius traces, zeta numerators (regressed through a genus-six plane quintic), and genus-three real Weil cubics | Full zeta numerators currently start over a prime field; direct/fiber point counting is exact but exponential in field size, and higher-genus Weil-polynomial postprocessing is not yet generalized beyond the existing curve/zeta primitives |
 | Galois groups | Exact general groups in degrees at most three over ℚ; a certified classifier for irreducible reciprocal genus-three Weil sextics using modular irreducibility witnesses and exact Kummer square classes | This is not a general sextic classifier. Missing modular witnesses and unsupported shapes raise `unknown` or a capability error |
@@ -381,6 +384,35 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 `Curve#hyperelliptic_plane_model?` is specifically the smooth plane-model
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
 explicit double-cover model belongs in `HyperellipticCurve`.
+
+## Modular forms and q-expansions
+
+The first modular-form layer is exact and intentionally narrow:
+
+```w
+G = Gamma0.new(11)
+G.index                              # 12
+G.genus                              # 1
+S = CuspForms.new(G, 2)
+S.dimension                          # 1
+S.sturm_bound                        # 2
+
+flt_terminal = CuspForms.new(2, 2)
+flt_terminal.dimension               # 0
+flt_terminal.dimension_certificate.verified?
+
+E4 = ClassicalModularForms.e4(12)
+E6 = ClassicalModularForms.e6(12)
+Delta = ClassicalModularForms.delta(12)
+(E4.q_expansion**3 - E6.q_expansion**2).scale(
+  Rational.new(1, 1728)) == Delta.q_expansion
+```
+
+`QExpansion` records a hard precision boundary. Reading an unknown
+coefficient raises; addition and multiplication retain only the common known
+precision. The classical-form certificate independently checks divisor-sum
+or Euler-product coefficients and the \(E_4/E_6/\Delta\) identity. It labels
+the fact that these series are modular as a trusted theorem import.
 
 ## Archimedean places and S-unit square classes
 

@@ -1190,6 +1190,42 @@ use target
       # values are boxed, so make that one mixed-ABI conversion explicit here.
       ebits = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
       return ccall_rawargs("__w_mmap_as_typed", args[1], ebits)
+    # The tree walker executes on one host thread, so ordinary typed-array
+    # accesses are the exact semantic mirror of these compiled C11 atomics.
+    # Keep the narrow allowlist explicit: source cannot turn an arbitrary
+    # ccall string into native memory access, while libraries using atomic
+    # publication remain interpreter-compatible.
+    when "__w_arr_load_acq"
+      if args.size() != 3
+        raise "__w_arr_load_acq expects an array and index"
+      return ccall("w_array_get", args[1], args[2])
+    when "__w_arr_store_rel"
+      if args.size() != 4
+        raise "__w_arr_store_rel expects an array, index, and value"
+      z = ccall("w_array_set", args[1], args[2], args[3])
+      return nil
+    when "__w_arr_fetch_add"
+      if args.size() != 4
+        raise "__w_arr_fetch_add expects an array, index, and delta"
+      old = ccall("w_array_get", args[1], args[2])
+      z = ccall("w_array_set", args[1], args[2], old + args[3])
+      return old
+    when "__w_arr_compare_exchange"
+      if args.size() != 5
+        raise "__w_arr_compare_exchange expects an array, index, expected, and desired"
+      if ccall("w_array_get", args[1], args[2]) == args[3]
+        z = ccall("w_array_set", args[1], args[2], args[4])
+        return 1
+      return 0
+    when "__w_arr_try_inc_below"
+      if args.size() != 4
+        raise "__w_arr_try_inc_below expects an array, index, and limit"
+      current = ccall("w_array_get", args[1], args[2])
+      if current < args[3]
+        current += 1
+        z = ccall("w_array_set", args[1], args[2], current)
+        return current
+      return 0
     when "w_int"
       # A compiled source method uses w_int only to turn a raw signed i64 into
       # its canonical immediate/BigInt WValue. Integers are already arbitrary

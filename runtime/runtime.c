@@ -26220,6 +26220,38 @@ WValue __w_arr_fetch_add(WValue arr_val, WValue idx_val, WValue delta) {
                                   w_as_int(delta)));
 }
 
+WValue __w_arr_compare_exchange(WValue arr_val, WValue idx_val,
+                                WValue expected_val, WValue desired_val) {
+    int64_t expected = w_as_int(expected_val);
+    bool exchanged = atomic_compare_exchange_strong_explicit(
+        w_i64_slot_atomic(arr_val, idx_val), &expected, w_as_int(desired_val),
+        memory_order_acq_rel, memory_order_acquire);
+    return w_int(exchanged ? 1 : 0);
+}
+
+/* Reserve one ticket without ever advancing the shared counter past `limit`.
+ * Returns the new positive count to the winner, or zero when the budget is
+ * already exhausted.  A fetch-add followed by rollback is not equivalent:
+ * several racing workers can all observe/temporarily publish values above the
+ * cap, and the solver must decide whether to analyze a conflict before doing
+ * any such speculative increment. */
+WValue __w_arr_try_inc_below(WValue arr_val, WValue idx_val,
+                             WValue limit_val) {
+    _Atomic int64_t *slot = w_i64_slot_atomic(arr_val, idx_val);
+    int64_t limit = w_as_int(limit_val);
+    int64_t current = atomic_load_explicit(slot, memory_order_acquire);
+
+    while (current < limit) {
+        int64_t next = current + 1;
+        if (atomic_compare_exchange_weak_explicit(
+                slot, &current, next,
+                memory_order_acq_rel, memory_order_acquire))
+            return w_int(next);
+        /* On failure C11 writes the newly observed value into `current`. */
+    }
+    return w_int(0);
+}
+
 WValue w_atomic_increment(WValue a) {
     int64_t old = atomic_fetch_add(&as_atomic(a)->value, 1);
     return w_box_int(old + 1);

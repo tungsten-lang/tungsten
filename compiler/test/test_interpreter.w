@@ -32,6 +32,10 @@ assert_eq eval("\[1, 2, 3].size"), 3
 assert_eq eval("a = u8\[4]\na.size"), 4
 assert_true eval("a = \[1]\na$flags >= 0")
 
+test "mirrors typed-array atomic publication helpers"
+code = "a = i64\[2]\nz = ccall(\"__w_arr_store_rel\", a, 0, 4)\nloaded = ccall(\"__w_arr_load_acq\", a, 0)\nold = ccall(\"__w_arr_fetch_add\", a, 0, 3)\nwon = ccall(\"__w_arr_compare_exchange\", a, 0, 7, 9)\nlost = ccall(\"__w_arr_compare_exchange\", a, 0, 7, 11)\nt1 = ccall(\"__w_arr_try_inc_below\", a, 1, 2)\nt2 = ccall(\"__w_arr_try_inc_below\", a, 1, 2)\nt3 = ccall(\"__w_arr_try_inc_below\", a, 1, 2)\n\[loaded, old, won, lost, a\[0], t1, t2, t3, a\[1]]"
+assert_eq eval(code), [4, 4, 1, 0, 9, 1, 2, 0, 2]
+
 test "only routes supported scalar native data fields"
 field_interp = Interpreter.new()
 assert_true field_interp.native_data_field_supported?({name: "Array"}, "flags")

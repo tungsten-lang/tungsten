@@ -50,8 +50,51 @@ The main solver inspects variable, clause, literal, binary, ternary, and unit
 counts. That policy chooses among raw or preprocessed kernels, bounded local
 search, a CDCL probe, diversified raw-kernel arms, EVSIDS or VMTF branching,
 target phases, trial-propagation lookahead, learned-clause vivification, and
-database reduction. The choice is deterministic for a formula, so repeated
-runs remain reproducible.
+database reduction. Policy selection is deterministic for a formula. Concurrent
+races intentionally sample several search trajectories, however, so the winning
+arm and wall time can vary with scheduling.
+
+Selected local cores use append-only on-the-fly strengthening (OTFS). When CPU
+and memory remain after the ordinary fast-mode workers are counted, the raw
+race also adds one import-only OTFS specialist without replacing or publishing
+into the established arms. OTFS never mutates a live reason clause and remains
+disabled in proof modes.
+
+Strict, bounded structural recognizers run before generic search when the
+formula shape warrants them. One recognizes four-value domains constrained by
+complete ternary Latin relations, finds a small generating set, and searches
+only those seed domains while propagation determines the rest. Its SAT models
+are checked against the original CNF; exact UNSAT answers remain fast-only
+until that route has proof emission.
+
+Another recognizer accepts only a complete, topologically ordered 32-bit
+xorshift/fold circuit: variables 1--32 are its sole inputs, every later
+variable has the expected XOR/AND/OR definition, and exactly one accumulator
+word is pinned by trailing units. Wassat reconstructs the exact sequence of
+word XORs and ripple additions, then partitions the bounded 2^32 input
+domain across native workers. This lane is model-only: a preimage is replayed
+through every gate and checked against the original CNF before SAT publication,
+while domain exhaustion publishes no verdict.
+
+Additional model-only lanes recognize canonical fixed-width Fermat circuits;
+the public 4--60-bit sum-of-three-cubes layout, under a strict operand,
+eight-bit cube-anchor, and pinned-result signature; Bryant-style 8--36-bit
+Minimum Disagreement Parity samples with their exact unary error counter;
+synchronizing automata; edge-matching grids; and the compact 5x5
+sliding-puzzle transition encoding. A further strict lane reconstructs compact
+guarded-transition encodings for Stedman and Erin triples and searches their
+induced Hamiltonian cycle. Two clean-room lanes construct Gardam's published
+21-term Hantzsche--Wendt group-ring unit from the group law, and recover
+distance-pruned knight-tour position/square supports before generating a tour
+without a stored solution table. Sum-of-three-cubes searches non-negative
+roots below 2048.
+The lanes otherwise use bounded arithmetic, information-set decoding, or
+combinatorial search, then construct or complete a Boolean assignment. A
+structural miss or exhausted bound falls through; a hit is still published
+only after the complete model satisfies the original DIMACS.
+The MDP recognizer follows Randal E. Bryant's MIT-licensed public generator;
+the complete license is retained in
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 Every SAT model is reconstructed after preprocessing and checked against the
 original formula before it is printed.
@@ -149,6 +192,12 @@ wassat sls problem.cnf --gpu --flips 10000000 --seed 1 \
 exact requested flip bound, including a final partial dispatch and zero flips.
 Every reported model passes the original-formula check.
 
+Fast mode also races a CPU SLS specialist when the parsed task fits its
+resident-memory policy. The ordinary ceiling is 256 MiB to protect the CDCL
+arms from allocator and memory-bandwidth interference. A bounded automatic
+exception keeps the specialist on dense few-variable kernels up to 288 MiB;
+this is formula inspection, not a user-selected solver mode.
+
 ## Library API
 
 ```tungsten
@@ -212,6 +261,46 @@ is never presented as a descent or rank certificate.
 
 ## Verification and benchmarks
 
+Competition-facing build/run wrappers, source-only staging, strict SAT-model
+checks, and the DRAT-to-`cake_lpr` preflight are maintained in
+[`competition/`](competition/README.md). The Main entrypoint writes ASCII DRAT
+to the required `proof.out`; the Parallel entrypoint runs the trusted adaptive
+fast path, including shared-memory races when the formula policy selects them.
+
+The maintained system-description source is
+[`docs/satcomp-system-description.md`](docs/satcomp-system-description.md).
+Render its revision and line-count placeholders into the one- or two-page PDF
+with:
+
+```sh
+python3 bits/tungsten-wassat/benchmarks/render_system_description.py
+```
+
+Formula-router experiments use paired same-binary interventions rather than
+passive portfolio winners. The collector strips ambient `WASSAT_*` settings,
+interleaves policies, verifies SAT models, records all repetitions, and assigns
+families to deterministic disjoint splits. The labeler emits signed PAR-2
+utility, and the compiled Koala trainer compares shallow trees, a small random
+forest, linear SVC, logistic regression, and pure-L2 ElasticNet. Its pinned
+31-feature ABI includes bounded exact-one coverage, binary occurrence-graph
+sketches, and variable-occurrence concentration. It exports a standalone
+Tungsten tree only when validation beats the conservative baseline:
+
+```sh
+python3 bits/tungsten-wassat/benchmarks/router_dataset.py \
+  --dir /path/to/sc2026 --solver /path/to/wassat --out /tmp/router.jsonl \
+  --policy sls_off:WASSAT_SLS_FLIPS=0 --policy baseline \
+  --verdict sat --timeout 2 --reps 3
+python3 bits/tungsten-wassat/benchmarks/router_labels.py /tmp/router.jsonl \
+  --baseline sls_off --treatment baseline --out /tmp/router.csv
+bin/tungsten -o /tmp/train-router \
+  bits/tungsten-wassat/benchmarks/train_router.w
+/tmp/train-router /tmp/router.csv /tmp/generated_router.w
+```
+
+The environment policies above are internal measurement interventions, not
+solver modes. A failed export gate leaves the runtime policy unchanged.
+
 The default repository spec gate builds a fresh Wassat CLI and runs all Wassat
 specs, including the native parser, process portfolio, deadlines, atomic proof
 publishing, randomized continuation agreement, compiled CLI smoke tests
@@ -243,6 +332,13 @@ Set `SATLIB_ROOT` to add the optional SATLIB parity families. Set `LR5_37`
 and/or `LR5_41` to add frontier instances.  The suite always materializes
 three pinned LRC(13) Goddyn--Wong terminal-lift CNFs (p=181, 223, 281) under
 `/tmp`, checks their SHA-256 digests, and requires their known UNSAT verdicts.
+When the official 2026 corpus is present, the dedicated xorshift lane checks
+all eleven emitted models against the original DIMACS:
+
+```sh
+SATBENCH_2026=/path/to/2026-main WASSAT=/path/to/wassat \
+  XORSHIFT_BUDGET=30 python3 bits/tungsten-wassat/benchmarks/reference.py
+```
 They exercise a structured certificate workload; they do not constitute an
 LRC(13) proof.  No benchmark script assumes a specific checkout path.
 
@@ -251,8 +347,11 @@ LRC(13) proof.  No benchmark script assumes a specific checkout path.
 Wassat supports incremental solving through assumption literals
 (`solve_assuming` / `solve_assuming_budget`) over one persistent learned
 database, with a failed-assumption core on UNSAT; it does not support
-incremental clause addition/removal, nor native XOR/XNF reasoning. Proof
-portfolio workers do not share learned clauses, by design; the shared threaded
+incremental clause addition/removal, nor native XOR/XNF input syntax. The
+trusted fast path does recognize bounded CNF-rendered parity subsystems:
+Gaussian elimination can refute an inconsistent subset or back-substitute a
+candidate model, but SAT is published only after checking every original
+clause. Proof portfolio workers do not share learned clauses, by design; the shared threaded
 portfolio is trusted-only (`--fast`), and the implicit raw-kernel thread race
 is enabled only after passing sustained fixed-capacity stress. GPU local
 search currently uses Metal and is model-only.

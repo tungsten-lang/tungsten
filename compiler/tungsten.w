@@ -728,16 +728,21 @@ while i < args.size()
     # runtime archive it links against is still the cached -O3 build.
     clang_opt = dev_mode ? "-O0" : "-O3"
 
-  # Parallel codegen: -O3 on one big module is single-threaded and ~90% of
-  # a large build's wall. When homebrew LLVM is present, llvm-split the
-  # module ~14 ways and compile the parts with parallel clang -c, then feed
-  # the objects to the link below (self-compile codegen 13.5s -> ~5s; the
-  # produced compiler emits byte-identical IR). Strictly best-effort: any
-  # failure falls back to the single-TU path. Gated to plain -O3 native
-  # builds — dev -O0 doesn't need it, and PGO/custom flags must not mix
-  # homebrew-clang instrumentation with Apple's profile runtime.
+  # Parallel codegen — OPT-IN via TUNGSTEN_PARALLEL_CODEGEN=1. -O3 on one
+  # big module is single-threaded and ~90% of a large build's wall; with
+  # homebrew LLVM present, llvm-split the module ~14 ways and compile the
+  # parts with parallel clang -c (self-compile codegen 13.5s -> ~5s, -o
+  # wall 23.5s -> 17.2s). NOT the default: the parts must be compiled by
+  # HOMEBREW clang (Apple clang can't read llvm-split's newer bitcode, and
+  # its textual IR carries newer-only attributes), and brew LLVM 22's
+  # arm64 codegen measured 1.54x MORE instructions on nbody's hot fp loop
+  # than Apple clang on identical IR — a silent runtime-quality trade is
+  # unacceptable, so the build-speed win is explicit. Any failure falls
+  # back to the single-TU path. Plain -O3 native builds only (dev -O0
+  # doesn't need it; PGO must not mix brew instrumentation with Apple's
+  # profile runtime).
   parallel_objs = nil
-  if clang_opt == "-O3" && cross_target == "" && !doing_lto && !frame_pointers && env("TUNGSTEN_PARALLEL_CODEGEN") != "0"
+  if clang_opt == "-O3" && cross_target == "" && !doing_lto && !frame_pointers && env("TUNGSTEN_PARALLEL_CODEGEN") == "1"
     parallel_objs = parallel_codegen_objects(ll_path, verbose)
 
   clang_cmd = StringBuffer(0)

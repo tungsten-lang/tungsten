@@ -1111,6 +1111,7 @@
     @bitangent_scheme_certificate = nil
     @integral_product_order = nil
     @maximal_product_order_computation = nil
+    @s_prime_data = nil
 
   -> curve
     @curve
@@ -1170,6 +1171,7 @@
       raise "plane-quartic bitangent scheme did not verify as 27 plus the distinguished hyperflex"
     @integral_product_order = nil
     @maximal_product_order_computation = nil
+    @s_prime_data = nil
     @bitangent_scheme_certificate
 
   -> bitangent_scheme_certificate
@@ -1181,6 +1183,7 @@
     order = @bitangent_scheme_certificate.integral_product_order
     if @integral_product_order != order
       @maximal_product_order_computation = nil
+      @s_prime_data = nil
     @integral_product_order = order
     if !@integral_product_order.certificate.verified?
       raise "bitangent integral product order failed certification"
@@ -1197,6 +1200,7 @@
     computation = @integral_product_order.maximal_order_with_certificate(
       factor_search_limit, step_limit)
     @maximal_product_order_computation = computation
+    @s_prime_data = nil
     if !@maximal_product_order_computation.certificate.verified?
       raise "bitangent maximal product order failed certification"
     @maximal_product_order_computation.order
@@ -1211,6 +1215,35 @@
   -> maximal_product_order_certificate
     return nil if @maximal_product_order_computation == nil
     @maximal_product_order_computation.certificate
+
+  -> default_descent_primes
+    [2, 3, 13]
+
+  -> certify_s_prime_data(
+       rational_primes = nil,
+       factor_search_limit = 250_000,
+       generator_search_limit = 250_000)
+    primes = rational_primes
+    primes = default_descent_primes if primes == nil
+    if @maximal_product_order_computation == nil
+      certify_maximal_product_order
+    @s_prime_data = maximal_product_order.s_prime_data(
+      primes, factor_search_limit,
+      generator_search_limit)
+    if !@s_prime_data.certificate.verified?
+      raise "bitangent S-prime data failed certification"
+    @s_prime_data
+
+  -> s_prime_data
+    @s_prime_data
+
+  -> s_prime_certificate
+    return nil if @s_prime_data == nil
+    @s_prime_data.certificate
+
+  -> s_prime_ideals
+    return [] if @s_prime_data == nil
+    @s_prime_data.prime_ideals
 
   -> requirements
     out = []
@@ -1257,6 +1290,15 @@
         "etale algebra maximal orders", "complete",
         "degree-generic Round 2 fixed points for all three components",
         @maximal_product_order_computation.certificate))
+    if @s_prime_data == nil
+      out.push(DescentRequirement.new(
+        "finite prime ideals above S", "missing",
+        "decompose 2, 3, and 13 in every maximal etale component"))
+    else
+      out.push(DescentRequirement.new(
+        "finite prime ideals above S", "complete",
+        "certified residue fields, ramification indices, and residue degrees",
+        @s_prime_data.certificate))
     out.push(DescentRequirement.new(
       "S-class group and S-units", "missing",
       "must be unconditional; a GRH bound is conditional, not certified"))

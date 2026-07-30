@@ -220,6 +220,7 @@
     @generic_monogenic_order = nil
     @generic_maximal_order_computation = nil
     @generic_integral_basis = nil
+    @generic_integral_basis_inverse = nil
 
     defining_coefficients = @defining_polynomial.coefficients
     @relation = []

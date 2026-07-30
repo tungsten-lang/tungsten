@@ -31,6 +31,8 @@ core/algebra/etale_algebra.w      # squarefree quotients and CRT products
 core/algebra/orders.w             # monogenic orders and Dedekind certificates
 core/algebra/integer_lattice.w    # exact lattices and prime-field kernels
 core/algebra/maximal_orders.w     # degree-generic Round 2 integral closures
+core/algebra/residue_algebra.w    # reduced O/pO and primitive idempotents
+core/algebra/prime_ideals.w       # residue maps and certified primes above p
 core/algebra/real_roots.w          # Sturm isolation and certified RootOf values
 core/algebra/algebraic_real.w      # exact RootOf arithmetic and certificates
 core/algebra/expression.w          # symbolic factor and exact real solve facade
@@ -214,6 +216,35 @@ nonmonic presentations practical without changing the proof boundary.
 `Algebra.product_order` composes component integral closures, arithmetic, and
 certificates.
 
+Prime decomposition works from the actual maximal-order lattice, including at
+index divisors where factoring the original defining polynomial modulo \(p\)
+would be invalid:
+
+```w
+K = NumberField.new(x**2 - 5, :a)
+at_11 = K.prime_decomposition(11)
+
+at_11.residue_degrees                    # [1, 1]
+at_11.ramification_indices               # [1, 1]
+at_11.norms                              # [11, 11]
+P = at_11.prime_ideals[0]
+P.contains?(K.coerce(11))                # true
+P.reduce(K.generator)                    # element of P.residue_field
+P.certificate.verified?                  # true
+```
+
+The implementation forms \(O/\sqrt{pO}\), splits that reduced finite algebra
+with the Frobenius fixed space, and constructs each prime as the kernel of a
+surjective map to a certified finite residue field. Frobenius-lifted primitive
+idempotents in \(O/pO\) determine the local dimensions \(e_i f_i\). The
+certificate replays the idempotents, residue maps, kernel lattices, norms,
+ramification indices, residue degrees, and
+\(\sum_i e_i f_i=[K:\mathbb Q]\). This follows the general finite-separable
+algebra factorization described in
+[Stein, Algorithm 4.3.7 and 4.3.9](https://wstein.org/edu/2010/581b/stein-algebraic_number_theory.pdf).
+Finite étale product orders expose the same API, and `s_prime_data([2,3,13])`
+collects certified finite places for descent.
+
 `NumberField` arithmetic is degree-generic. The defining polynomial is
 certified irreducible over ℚ, and elements expose exact minimal and
 characteristic polynomials, trace, norm, integrality, and certified real
@@ -317,8 +348,8 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | --- | --- | --- |
 | Symbolic expressions | Exact π/e and radicals; canonical simplify, expand, collect, differentiation, elementary antiderivatives; exact formal Taylor series and removable finite limits; exact univariate ℚ factor facade; arbitrary exact real roots as rationals, radicals, or certified `RootOf` constants; exact arithmetic and symbolic transcendentals over real algebraic constants | No assumptions, piecewise forms, Laurent/Puiseux series, infinite/directional limits, general multivariate factorization, complex algebraic-root object, general higher-degree radical formulas, or Risch integration |
 | Fields | Exact `RationalField`; packed prime fields and arbitrary absolute extensions `𝔽_{p^n}`; certified simple extensions `K[a]/(m)` over ℚ or finite fields with explicit base embeddings, structured finite towers, arithmetic, Frobenius, trace, norm, and enumeration; arbitrary-degree irreducible `NumberField`s over ℚ with exact power-basis arithmetic, minimal/characteristic polynomials, trace, norm, integrality, Sturm signatures, real embeddings, integral bases, maximal-order indices, and field discriminants | Automatic isomorphisms/embeddings between differently presented finite fields, complex algebraic embeddings, and general number-field isomorphism algorithms are not implemented. Modulus, factor, and maximal-order searches are explicitly resource-bounded and raise instead of guessing |
-| Finite étale algebras | Certified squarefree quotients `K[t]/(f)`; exact quotient arithmetic; units and zero divisors; multiplication-matrix trace/norm; supplied CRT components, primitive idempotents, component maps, reconstruction, degree-generic integral closures, and replay certificates | Prime ideals, S-units, and class groups are not implemented |
-| Integral orders | Degree-generic monogenic and arbitrary-lattice ℤ-orders; exact membership, discriminant, units, trace, and norm; Dedekind local index certificates; Pohst--Zassenhaus Round 2 p-maximal overorders and global maximal-order certificates; direct products of component integral closures | General order ideals beyond certified p-radicals, prime ideals, class groups, and unit-group bases are not implemented. Discriminant factorization and Round 2 steps are resource-bounded and raise `unknown` on exhaustion |
+| Finite étale algebras | Certified squarefree quotients `K[t]/(f)`; exact quotient arithmetic; units and zero divisors; multiplication-matrix trace/norm; supplied CRT components, primitive idempotents, component maps, reconstruction, degree-generic integral closures, prime ideals and finite residue fields above rational primes, and replay certificates | General fractional-ideal arithmetic, S-units, and class groups are not implemented |
+| Integral orders | Degree-generic monogenic and arbitrary-lattice ℤ-orders; exact membership, discriminant, units, trace, and norm; Dedekind local index certificates; Pohst--Zassenhaus Round 2 p-maximal overorders and global maximal-order certificates; certified p-radicals, prime ideals, residue maps, ramification indices, residue degrees, and product-order finite S-place data | General integral/fractional ideal products, inverses, valuations, class groups, and unit-group bases are not implemented. Discriminant factorization, Round 2 steps, finite-field factorization, and residue-generator search are resource-bounded and raise `unknown` on exhaustion |
 | Polynomials | Sparse sorted terms; merge-multiply; dense univariate quotient arithmetic; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ and arbitrary finite fields as **unit × monic irreducibles**, with replay certificates; exact Sturm counts, Cauchy bounds, and certified isolation of every distinct real root | Kronecker and deterministic equal-degree factor search, Gröbner elimination, and root-interval splitting have explicit resource limits; complex-root isolation, complex algebraic-number arithmetic, and multivariate factorization are not implemented |
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders | Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
@@ -332,7 +363,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Divisors | Exact formal arithmetic on rational and line-presented higher-degree closed places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic outside the existing Jacobian models, and general principality tests are not implemented |
 | Rational points | Complete exact bounded search for primitive points on `aX³Z + bXY²Z + g(Y,Z)`, with nonzero same-sign `a,b` and nonzero `Y⁴` coefficient | This is not a general plane-curve point finder and does not prove that no points exist above the requested height |
 | Geometric automorphisms | Exact triviality certificate over `Qbar` for smooth rational plane quartics with the unique normalized hyperflex `[1:0:0]`, tangent `Z=0`, and identity stabilizer | It is not an arbitrary plane-quartic automorphism-group algorithm and does not enumerate nontrivial groups |
-| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified geometric prefix for BPS generalized explicit 2-descent; arbitrary-degree quotient number fields; for the shell-width quartic, an executable certified degree-27 étale algebra and maximal product order with components of degrees 6, 9, and 12 | The BPS divisor/function family, unconditional S-class groups and S-units, a certified ambient square-class basis, theta Galois modules, p-adic local images, and the comparison kernel remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
+| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified geometric prefix for BPS generalized explicit 2-descent; arbitrary-degree quotient number fields; for the shell-width quartic, an executable certified degree-27 étale algebra, maximal product order, and all 20 finite primes above `S = {2,3,13}` with exact `e/f` data | The BPS divisor/function family, archimedean S-places, unconditional S-class groups and S-units, a certified ambient square-class basis, theta Galois modules, p-adic local images, and the comparison kernel remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
 
 `Curve#hyperelliptic_plane_model?` is specifically the smooth plane-model
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
@@ -536,6 +567,10 @@ O.certificate.verified?    # true
 M = setup.certify_maximal_product_order
 M.component_ranks          # [6, 9, 12]
 setup.maximal_product_order_certificate.verified?
+S = setup.certify_s_prime_data
+S.rational_primes          # [2, 3, 13]
+S.factor_count             # 20
+S.certificate.verified?
 ```
 
 For the shell-width quartic, the bitangent certificate checks supplied
@@ -555,6 +590,10 @@ constructs the integral closure in each finite étale component and certifies
 the product order by fixed points at every discriminant prime. For the
 shell-width presentation the three certified maximal-order discriminants are
 `1168128`, `133451615232`, and `1364523024384`.
+The finite \(S\)-place layer then decomposes \(2\), \(3\), and \(13\) in every
+component. It certifies 4, 9, and 7 primes respectively, including all residue
+fields and ramification/residue-degree signatures. This is finite-prime data,
+not an S-class-group or S-unit computation.
 
 The global, norm, unramified, and local conditions eventually produced by the
 arithmetic layers meet in an exact F2 kernel:

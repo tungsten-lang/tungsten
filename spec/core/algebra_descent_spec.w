@@ -152,6 +152,41 @@ if env("TUNGSTEN_DESCENT_MAXIMAL") == "1"
   descent_check("maximal_order.requirement_complete",
                 setup.requirements[6].complete?, true)
 
+if env("TUNGSTEN_DESCENT_S_PRIMES") == "1"
+  s_prime_data = setup.certify_s_prime_data
+  descent_check("s_primes.certified",
+                s_prime_data.certified?, true)
+  descent_check("s_primes.rational_primes",
+                s_prime_data.rational_primes.to_s,
+                "\[2, 3, 13\]")
+  descent_check("s_primes.factor_count",
+                s_prime_data.factor_count, 20)
+  s_prime_data.decompositions.each -> (decomposition)
+    local_degree = 0
+    decomposition.prime_ideals.each -> (ideal)
+      local_degree += ideal.ramification_index * ideal.residue_degree
+    descent_check(
+      "s_primes.degree_" + decomposition.prime.to_s,
+      local_degree, 27)
+    signatures = []
+    decomposition.component_decompositions.each -> (component)
+      signatures.push([
+        component.ramification_indices,
+        component.residue_degrees
+      ])
+    expected_signatures = ""
+    if decomposition.prime == 2
+      expected_signatures = "\[\[\[6\], \[1\]\], \[\[6, 3\], \[1, 1\]\], \[\[6\], \[2\]\]\]"
+    elsif decomposition.prime == 3
+      expected_signatures = "\[\[\[2, 2\], \[2, 1\]\], \[\[2, 1, 2, 1\], \[2, 1, 1, 2\]\], \[\[2, 2, 2\], \[2, 2, 2\]\]\]"
+    elsif decomposition.prime == 13
+      expected_signatures = "\[\[\[3, 1\], \[1, 3\]\], \[\[3\], \[3\]\], \[\[1, 1, 3, 3\], \[3, 3, 1, 1\]\]\]"
+    descent_check(
+      "s_primes.signature_" + decomposition.prime.to_s,
+      signatures.to_s, expected_signatures)
+  descent_check("s_primes.requirement_complete",
+                setup.requirements[7].complete?, true)
+
 reference_component = bitangent_scheme.primary_certificate.components[0]
 component_chart = bitangent_scheme.primary_chart
 factor_coefficients = [59049, -52488, 8748, 3240, -1152, 96, 16]

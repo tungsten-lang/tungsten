@@ -21,6 +21,10 @@ autoload_check("general order class",
                AlgebraOrder.class_name, "Class")
 autoload_check("maximal certificate class",
                MaximalOrderCertificate.class_name, "Class")
+autoload_check("prime ideal class",
+               AlgebraPrimeIdeal.class_name, "Class")
+autoload_check("prime decomposition class",
+               AlgebraPrimeDecomposition.class_name, "Class")
 
 plane = Algebra.rational_projective_plane
 autoload_check("projective", plane.dimension, 2)

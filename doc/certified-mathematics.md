@@ -105,7 +105,10 @@ explicit descent:
    components, with exact generator transforms and rank 27;
 8. compute the degree-generic Round 2 integral closure of all three
    components and certify the maximal product order;
-9. intersect future global, norm, unramified, and local conditions with the
+9. decompose `2`, `3`, and `13` in all maximal components, certifying the 20
+   finite primes above the candidate finite set S, their residue fields,
+   ramification indices, and residue degrees;
+10. intersect future global, norm, unramified, and local conditions with the
    replay-certified F2 kernel.
 
 This is not yet a BPS true setup: `Delta'`, the divisor/line-bundle family
@@ -114,8 +117,7 @@ remaining path is:
 
 ```text
 construct Delta', beta', f, and the descent map
-  -> select and certify S (candidate contains infinity, 2, 3, 13)
-  -> finite prime ideals and archimedean places above S
+  -> add and certify the archimedean places to finite S = {2, 3, 13}
   -> unconditional S-class group and S-unit basis
   -> certified ambient square-class basis
   -> theta Galois module and comparison kernel

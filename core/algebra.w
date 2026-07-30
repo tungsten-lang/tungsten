@@ -25,11 +25,13 @@ use core/algebra/etale_algebra
 use core/algebra/integer_lattice
 use core/algebra/orders
 use core/algebra/maximal_orders
+use core/algebra/residue_algebra
 use core/algebra/real_roots
 use core/algebra/groebner
 use core/algebra/algebraic_real
 use core/algebra/expression
 use core/algebra/number_field
+use core/algebra/prime_ideals
 use core/algebra/f2_linear
 use core/algebra/projective
 use core/algebra/curves
@@ -83,6 +85,14 @@ use core/algebra/galois
        step_limit = 10_000)
     order.maximal_order(
       factor_search_limit, step_limit)
+
+  -> .prime_decomposition(
+       order, prime,
+       factor_search_limit = 250_000,
+       generator_search_limit = 250_000)
+    order.prime_decomposition(
+      prime, factor_search_limit,
+      generator_search_limit)
 
   -> .rational_projective_plane(x = :X, y = :Y, z = :Z)
     ProjectiveSpace<ℚ, 2>.new(x, y, z)

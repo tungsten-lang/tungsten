@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(221 total), grouped by area, with its declaration, a one-line
+(239 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -127,6 +127,24 @@ summary from the source header, and a link to the source.
 | `MaximalOrderComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `EtaleProductMaximalOrderCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `EtaleProductMaximalOrderComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PrimeVectorQuotient` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `OrderResidueAlgebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `OrderResidueAlgebraCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `OrderResidueFieldMap` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `OrderResidueFieldMapCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrimeIdeal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrimeIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrimeDecomposition` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrimeDecompositionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldPrimeIdeal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldPrimeIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldPrimeDecomposition` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductPrimeIdeal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductPrimeIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductPrimeDecomposition` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductPrimeDecompositionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductSPrimeData` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductSPrimeDataCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `NumberFieldMinimalPolynomialCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

@@ -19537,24 +19537,41 @@ WValue __w_proc_spawn(WValue argv_val) {
     if (argc < 1) return w_int(-1);
     char **argv = (char **)malloc(sizeof(char *) * (argc + 1));
     if (!argv) return w_int(-1);
+    memset(argv, 0, sizeof(char *) * (argc + 1));
     for (int i = 0; i < argc; i++) {
         WValue s = arr->slots[arr->start + i];
-        argv[i] = (char *)as_str(s);
+        /* as_str() may return one of a small ring of thread-local buffers for
+         * inline strings. Keeping those pointers while converting later
+         * arguments lets the ring wrap and silently changes earlier argv
+         * entries. posix_spawnp() needs stable strings, so take ownership of
+         * every argument before asking as_str() for the next one. */
+        const char *text = as_str(s);
+        argv[i] = strdup(text);
+        if (!argv[i]) {
+            for (int j = 0; j < i; j++) free(argv[j]);
+            free(argv);
+            return w_int(-1);
+        }
     }
-    argv[argc] = NULL;
 
     posix_spawnattr_t attr;
-    if (posix_spawnattr_init(&attr) != 0) { free(argv); return w_int(-1); }
+    if (posix_spawnattr_init(&attr) != 0) {
+        for (int i = 0; i < argc; i++) free(argv[i]);
+        free(argv);
+        return w_int(-1);
+    }
     short flags = POSIX_SPAWN_SETPGROUP;
     if (posix_spawnattr_setflags(&attr, flags) != 0 ||
         posix_spawnattr_setpgroup(&attr, 0) != 0) {
         posix_spawnattr_destroy(&attr);
+        for (int i = 0; i < argc; i++) free(argv[i]);
         free(argv);
         return w_int(-1);
     }
     pid_t pid = -1;
     int err = posix_spawnp(&pid, argv[0], NULL, &attr, argv, environ);
     posix_spawnattr_destroy(&attr);
+    for (int i = 0; i < argc; i++) free(argv[i]);
     free(argv);
     if (err != 0) return w_int(-(int64_t)err);
     return w_int((int64_t)pid);

@@ -47,7 +47,7 @@ use core/special
 
   -> .named_constant(name)
     text = name.to_s
-    if text != "pi" && text != "e"
+    if text != "pi" && text != "e" && text != "euler_gamma"
       raise "unknown symbolic named constant: " + text
     Expression.node("named_constant", [text])
 
@@ -56,6 +56,9 @@ use core/special
 
   -> .e
     Expression.named_constant(:e)
+
+  -> .euler_gamma
+    Expression.named_constant(:euler_gamma)
 
   -> .variable(name)
     text = name.to_s
@@ -242,6 +245,89 @@ use core/special
         Rational.new(top[1], bottom[1])
       ]
     nil
+
+  -> .integer_factorial(value)
+    raise "symbolic factorial needs a nonnegative integer" if value < 0
+    result = 1
+    i = 2
+    while i <= value
+      result *= i
+      i += 1
+    result
+
+  -> .generalized_harmonic(count, exponent)
+    result = Rational.new(0)
+    k = 1
+    while k <= count
+      result += Rational.new(1, k**exponent)
+      k += 1
+    result
+
+  -> .exact_gamma(value)
+    if Expression.integer?(value)
+      return nil if value <= 0
+      return Expression.constant(Expression.integer_factorial(value - 1))
+    if value.class_name == "Rational" && value.denominator == 2
+      numerator = value.numerator
+      return nil if numerator.even?
+      k = (numerator - 1) / 2
+      coefficient = Rational.new(1)
+      if k >= 0
+        coefficient = Rational.new(
+          Expression.integer_factorial(2*k),
+          4**k * Expression.integer_factorial(k))
+      else
+        n = 0 - k
+        coefficient = Rational.new(
+          (-4)**n * Expression.integer_factorial(n),
+          Expression.integer_factorial(2*n))
+      return Expression.constant(coefficient) * Expression.pi.sqrt
+    nil
+
+  # Exact zeta constants needed by integer polygamma values. Odd values remain
+  # named transcendental nodes; selected even values reduce to powers of pi.
+  -> .zeta(value)
+    if !Expression.integer?(value) || value <= 1
+      raise "symbolic zeta currently requires an integer greater than one"
+    pi = Expression.pi
+    return pi**2 / Expression.constant(6) if value == 2
+    return pi**4 / Expression.constant(90) if value == 4
+    return pi**6 / Expression.constant(945) if value == 6
+    return pi**8 / Expression.constant(9450) if value == 8
+    return pi**10 / Expression.constant(93555) if value == 10
+    if value == 12
+      return (Expression.constant(691) * pi**12 /
+        Expression.constant(638512875))
+    Expression.node("zeta", [Expression.constant(value)])
+
+  -> .exact_polygamma(order, value)
+    integer_value = nil
+    integer_value = value if Expression.integer?(value)
+    if value.class_name == "Rational" && value.denominator == 1
+      integer_value = value.numerator
+    return nil if integer_value == nil || integer_value <= 0
+    harmonic = Expression.generalized_harmonic(
+      integer_value - 1, order + 1)
+    if order == 0
+      return Expression.constant(harmonic) - Expression.euler_gamma
+    sign = order.odd? ? 1 : -1
+    factor = sign * Expression.integer_factorial(order)
+    tail = Expression.zeta(order + 1) - Expression.constant(harmonic)
+    Expression.constant(factor) * tail
+
+  -> .polygamma(order, argument)
+    if !Expression.integer?(order) || order < 0
+      raise "symbolic polygamma order must be a nonnegative integer"
+    expression = Expression.wrap(argument)
+    if expression.constant?
+      value = expression.constant_value
+      if Expression.exact_value?(value)
+        exact = Expression.exact_polygamma(order, value)
+        return exact if exact != nil
+      else
+        return Expression.constant(Special.polygamma(order, value))
+    Expression.node(
+      "polygamma", [Expression.constant(order), expression])
 
   -> .sort_expressions(values)
     out = []
@@ -620,6 +706,8 @@ use core/special
       return value.abs if operation == "abs"
       return value.erf if operation == "erf"
       return value.erfc if operation == "erfc"
+      return value.gamma if operation == "gamma"
+      return value.log_gamma if operation == "log_gamma"
     return Math.exp(value) if operation == "exp"
     return Math.log(value) if operation == "log"
     return Math.sqrt(value) if operation == "sqrt"
@@ -643,11 +731,15 @@ use core/special
     return Math.abs(value) if operation == "abs"
     return Special.erf(value) if operation == "erf"
     return Special.erfc(value) if operation == "erfc"
+    return Special.gamma(value) if operation == "gamma"
+    return Special.log_gamma(value) if operation == "log_gamma"
+    return Special.zeta(value) if operation == "zeta"
     raise "unknown symbolic unary operation: " + operation
 
   -> .named_constant_value(name)
     return Math.acos(~-1.0) if name.to_s == "pi"
     return Math.exp(~1.0) if name.to_s == "e"
+    return ~0.5772156649015329 if name.to_s == "euler_gamma"
     raise "unknown symbolic named constant: " + name.to_s
 
   # Return [handled, exact expression]. Exact arguments never fall through to
@@ -656,6 +748,16 @@ use core/special
     zero = Expression.zero_value?(value)
     one = Expression.one_value?(value)
     negative_one = Expression.negative_one_value?(value)
+
+    if operation == "gamma"
+      exact_gamma = Expression.exact_gamma(value)
+      return [true, exact_gamma] if exact_gamma != nil
+    if operation == "log_gamma"
+      if one || value == 2
+        return [true, Expression.constant(0)]
+    if operation == "zeta"
+      if Expression.integer?(value) && value > 1
+        return [true, Expression.zeta(value)]
 
     if zero
       if operation == "cos" || operation == "cosh" || operation == "exp"
@@ -937,6 +1039,24 @@ use core/special
   -> erfc
     Expression.unary("erfc", self)
 
+  -> gamma
+    Expression.unary("gamma", self)
+
+  -> log_gamma
+    Expression.unary("log_gamma", self)
+
+  -> lgamma
+    log_gamma
+
+  -> polygamma(order)
+    Expression.polygamma(order, self)
+
+  -> digamma
+    Expression.polygamma(0, self)
+
+  -> trigamma
+    Expression.polygamma(1, self)
+
   -> ==/1
     other = @1
     return false if other.class_name != "Expression"
@@ -961,6 +1081,9 @@ use core/special
     return Expression.product(simplified) if @operation == "multiply"
     return Expression.divide(simplified[0], simplified[1]) if @operation == "divide"
     return Expression.power(simplified[0], simplified[1]) if @operation == "power"
+    if @operation == "polygamma"
+      return Expression.polygamma(
+        simplified[0].constant_value, simplified[1])
     Expression.unary(@operation, simplified[0])
 
   -> derivative(variable)
@@ -1006,8 +1129,18 @@ use core/special
       logarithmic += exponent * base.derivative(sought) / base
       return self * logarithmic
 
+    if @operation == "polygamma"
+      order = @arguments[0].constant_value
+      argument = @arguments[1]
+      return (Expression.polygamma(order + 1, argument) *
+        argument.derivative(sought))
+    if @operation == "zeta"
+      return Expression.constant(0)
+
     argument = @arguments[0]
     derivative = argument.derivative(sought)
+    return self * argument.digamma * derivative if @operation == "gamma"
+    return argument.digamma * derivative if @operation == "log_gamma"
     return argument.exp * derivative if @operation == "exp"
     return derivative / argument if @operation == "log"
     return derivative / (Expression.constant(2) * argument.sqrt) if @operation == "sqrt"
@@ -1184,6 +1317,11 @@ use core/special
       return Expression.divide_values(values[0], values[1])
     if @operation == "power"
       return values[0] ** values[1]
+    if @operation == "polygamma"
+      order = values[0]
+      argument = values[1]
+      return argument.polygamma(order) if argument.respond_to?("polygamma")
+      return Special.polygamma(order, argument)
     Expression.apply_unary(@operation, values[0])
 
   -> at(bindings)
@@ -1236,6 +1374,9 @@ use core/special
       return Expression.power(base, exponent.expand)
     if @operation == "divide"
       return Expression.divide(@arguments[0].expand, @arguments[1].expand)
+    if @operation == "polygamma"
+      return Expression.polygamma(
+        @arguments[0].constant_value, @arguments[1].expand)
     Expression.unary(@operation, @arguments[0].expand)
 
   -> .zero_expression?(expression)
@@ -1406,6 +1547,14 @@ use core/special
       if Expression.exact_value?(exponent)
         return antiderivative_power(@arguments[0], exponent, sought)
 
+    if @operation == "polygamma"
+      order = @arguments[0].constant_value
+      argument = @arguments[1]
+      rate = argument.linear_rate(sought)
+      primitive = argument.log_gamma
+      primitive = Expression.polygamma(order - 1, argument) if order > 0
+      return Expression.scale_by_reciprocal(primitive, rate)
+
     argument = @arguments[0]
     rate = argument.linear_rate(sought)
     return Expression.scale_by_reciprocal(argument.exp, rate) if @operation == "exp"
@@ -1541,7 +1690,8 @@ use core/special
     return @arguments[0] if variable?
     if named_constant?
       return "π" if @arguments[0] == "pi"
-      return "e"
+      return "e" if @arguments[0] == "e"
+      return "γ"
 
     text = ""
     if @operation == "add"
@@ -1588,6 +1738,15 @@ use core/special
       text = @arguments[0].render(21) + "/" + @arguments[1].render(21)
     elsif @operation == "power"
       text = @arguments[0].render(31) + "^" + @arguments[1].render(30)
+    elsif @operation == "gamma"
+      text = "Γ(" + @arguments[0].render(0) + ")"
+    elsif @operation == "log_gamma"
+      text = "logΓ(" + @arguments[0].render(0) + ")"
+    elsif @operation == "zeta"
+      text = "ζ(" + @arguments[0].render(0) + ")"
+    elsif @operation == "polygamma"
+      text = ("polygamma(" + @arguments[0].render(0) +
+        ", " + @arguments[1].render(0) + ")")
     else
       text = @operation + "(" + @arguments[0].render(0) + ")"
 

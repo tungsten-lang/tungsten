@@ -454,7 +454,7 @@ use core/expression
   -> constant_sign
     if value.named_constant?
       name = value.named_constant_name
-      return 1 if name == :pi || name == :e
+      return 1 if name == :pi || name == :e || name == :euler_gamma
     if value.constant?
       scalar = value.constant_value
       if Expression.scalar_value?(scalar)
@@ -490,6 +490,51 @@ use core/expression
     slope = derivative * exponential
     scale = Expression.constant(-2) / Expression.pi.sqrt
     slope.scale(scale).antiderivative(value.erfc)
+
+  # Compose the Taylor coefficients
+  #   d^k/dx^k polygamma(m,x) = polygamma(m+k,x)
+  # around the exact constant term.
+  -> polygamma(index)
+    if !Expression.integer?(index) || index < 0
+      raise "formal polygamma order must be a nonnegative integer"
+    outer_coefficients = []
+    factorial = 1
+    k = 0
+    while k <= order
+      outer_coefficients.push(
+        value.polygamma(index + k) / Expression.constant(factorial))
+      k += 1
+      factorial *= k
+    outer = FormalPowerSeries.new(
+      outer_coefficients, variable, @center)
+    constant = FormalPowerSeries.constant(
+      value, order, variable, @center)
+    outer.compose(self - constant)
+
+  -> log_gamma
+    if order == 0
+      return FormalPowerSeries.new(
+        [value.log_gamma], variable, @center)
+    psi = polygamma(0).truncate(order - 1)
+    slope = derivative * psi
+    slope.antiderivative(value.log_gamma)
+
+  -> gamma
+    if order == 0
+      return FormalPowerSeries.new(
+        [value.gamma], variable, @center)
+    logarithmic_slope = derivative * polygamma(0).truncate(order - 1)
+    out = [value.gamma]
+    n = 1
+    while n <= order
+      coefficient_value = Expression.constant(0)
+      k = 0
+      while k < n
+        coefficient_value += logarithmic_slope.coefficient(k) * out[n - 1 - k]
+        k += 1
+      out.push(coefficient_value / Expression.constant(n))
+      n += 1
+    FormalPowerSeries.new(out, variable, @center)
 
   -> compose(delta)
     inner = coerce(delta)
@@ -591,6 +636,8 @@ use core/expression
     return series.abs if operation == "abs"
     return series.erf if operation == "erf"
     return series.erfc if operation == "erfc"
+    return series.gamma if operation == "gamma"
+    return series.log_gamma if operation == "log_gamma"
     raise "formal series does not support symbolic operation: " + operation
 
   -> .series_from_expression(expression, variable, center, order)
@@ -600,6 +647,9 @@ use core/expression
     if expression.variable?
       if expression.variable_text == variable.to_s
         return FormalPowerSeries.variable(variable, center, order)
+      return FormalPowerSeries.constant(
+        expression, order, variable, center)
+    if !expression.depends_on?(variable)
       return FormalPowerSeries.constant(
         expression, order, variable, center)
 
@@ -655,6 +705,10 @@ use core/expression
       exponent = Expression.series_from_expression(
         arguments[1], variable, center, order)
       return base ** exponent
+    if expression.operation == "polygamma"
+      argument = Expression.series_from_expression(
+        arguments[1], variable, center, order)
+      return argument.polygamma(arguments[0].constant_value)
     argument = Expression.series_from_expression(
       arguments[0], variable, center, order)
     Expression.apply_series_unary(expression.operation, argument)

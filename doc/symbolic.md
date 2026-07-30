@@ -72,6 +72,31 @@ automatic differentiation. `Special.erf` and `Special.erfc` provide
 near-machine-precision numeric values, including non-cancelling tail
 evaluation for `erfc`.
 
+The positive-real gamma family is integrated at the same depth:
+
+```w
+Expression.constant(5).gamma                    # 24
+Expression.constant(Rational.new(1, 2)).gamma   # sqrt(π)
+Expression.constant(1).digamma                  # -γ
+Expression.constant(1).trigamma                 # π²/6
+Expression.constant(1).polygamma(2)             # -2*ζ(3)
+
+x.gamma.derivative(:x)       # Γ(x)*polygamma(0,x)
+x.log_gamma.derivative(:x)   # polygamma(0,x)
+x.trigamma.antiderivative(:x)
+x.gamma.series(:x, 1, 4)
+```
+
+Here `Expression.euler_gamma` is the exact named Euler–Mascheroni constant
+\(\gamma\), distinct from the numeric bare constant `ℇ`.
+`Expression.zeta(n)` retains odd integer zeta values as named
+transcendentals and reduces common positive even values to rational powers of
+\(\pi\). `Special.digamma`, `Special.polygamma`, and integer
+`Special.zeta` provide near-machine-precision numeric values. Formal series,
+arbitrary-order `TaylorJet`, and gradient/Hessian `Differential` evaluation
+all use analytic derivative recurrences, not finite differences. Numeric
+polygamma currently requires a positive real argument.
+
 ## Substitution and evaluation
 
 `substitute` returns another simplified expression. `evaluate` accepts String
@@ -229,10 +254,11 @@ Calculus.series((x + 1).sqrt, :x, 0, 5)
 
 Series support exact arithmetic, division, integer and symbolic constant
 powers, composition, derivatives, antiderivatives, every elementary function
-supported by `Expression`, and `erf` / `erfc`. Differentiation lowers retained
-order by one and integration raises it by one; `truncate` can discard
-coefficients but never invent higher precision. `to_expression` returns the
-retained polynomial, and `at` evaluates that truncation exactly.
+supported by `Expression`, `erf` / `erfc`, and the gamma/polygamma family.
+Differentiation lowers retained order by one and integration raises it by one;
+`truncate` can discard coefficients but never invent higher precision.
+`to_expression` returns the retained polynomial, and `at` evaluates that
+truncation exactly.
 
 Common removable singularities are cancelled by formal valuation:
 
@@ -257,9 +283,9 @@ It does not currently provide assumptions/refinement, piecewise expressions,
 infinite or directional limits, Laurent/Puiseux series, general
 transcendental equation solving, complex algebraic root objects, general
 multivariate factorization, exact transcendental-value comparison, a general
-symbolic special-function catalogue beyond `erf` / `erfc`, or Risch-style
-integration. Polynomial-native Gröbner bases, ideals, and geometry remain in
-`use algebra`.
+symbolic special-function catalogue beyond `erf` / `erfc` and the
+gamma/polygamma family, or Risch-style integration. Polynomial-native Gröbner
+bases, ideals, and geometry remain in `use algebra`.
 
 Operator dispatch is still receiver-directed. Write `x*2`, not `2*x`, until
 the language has a general reverse-operator protocol.

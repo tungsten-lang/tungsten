@@ -315,6 +315,38 @@
     scale = (~0.0 - ~2.0) / Math.sqrt(~3.141592653589793)
     slope.scale(scale).antiderivative(Special.erfc(self.value))
 
+  -> polygamma(index)
+    name = index.class_name
+    integral = name == "Integer" || name == "Int" || name == "BigInt"
+    if !integral || index < 0
+      raise "TaylorJet.polygamma order must be a nonnegative integer"
+    delta = self - TaylorJet.constant(self.value, self.order)
+    result = TaylorJet.constant(~0.0, self.order)
+    k = self.order
+    while k >= 0
+      coefficient_value = Special.polygamma(index + k, self.value)
+      coefficient_value /= Special.float_factorial(k)
+      result = (result * delta +
+        TaylorJet.constant(coefficient_value, self.order))
+      k -= 1
+    result
+
+  -> digamma
+    self.polygamma(0)
+
+  -> trigamma
+    self.polygamma(1)
+
+  -> log_gamma
+    slope = self.derivative * self.digamma
+    slope.antiderivative(Special.log_gamma(self.value))
+
+  -> lgamma
+    self.log_gamma
+
+  -> gamma
+    self.log_gamma.jet_exp
+
   -> sqrt
     root = Math.sqrt(self.value)
     if root == ~0.0

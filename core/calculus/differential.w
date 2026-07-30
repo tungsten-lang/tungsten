@@ -242,6 +242,33 @@
     second = (~0.0 - ~2.0) * @value * first
     self.unary_transform(Special.erfc(@value), first, second)
 
+  -> polygamma(order)
+    first = Special.polygamma(order + 1, @value)
+    second = Special.polygamma(order + 2, @value)
+    self.unary_transform(
+      Special.polygamma(order, @value), first, second)
+
+  -> digamma
+    self.polygamma(0)
+
+  -> trigamma
+    self.polygamma(1)
+
+  -> log_gamma
+    first = Special.digamma(@value)
+    second = Special.trigamma(@value)
+    self.unary_transform(Special.log_gamma(@value), first, second)
+
+  -> lgamma
+    self.log_gamma
+
+  -> gamma
+    value = Special.gamma(@value)
+    psi = Special.digamma(@value)
+    first = value * psi
+    second = value * (psi * psi + Special.trigamma(@value))
+    self.unary_transform(value, first, second)
+
   -> asin
     base = ~1.0 - @value * @value
     root = Math.sqrt(base)

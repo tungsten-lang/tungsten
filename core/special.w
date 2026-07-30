@@ -81,33 +81,37 @@
     Special.gamma_half_upper(z)
 
   # ---- gamma / digamma family ----
-  # Lanczos approximation g=5, n=6 (numerical recipes style).
+  # Nine-term Lanczos approximation with g=7.
 
   -> .lanczos_g
-    ~5.0
+    ~7.0
 
   -> .lanczos_coeff
-    [~1.000000000190015,
-     ~76.18009172947146,
-     ~0.0 - ~86.50532032941677,
-     ~24.01409824083091,
-     ~0.0 - ~1.231739572450155,
-     ~0.001208650973866179,
-     ~0.0 - ~0.000005395239384953]
+    [
+      ~0.99999999999980993,
+      ~676.5203681218851,
+      ~-1259.1392167224028,
+      ~771.32342877765313,
+      ~-176.61502916214059,
+      ~12.507343278686905,
+      ~-0.13857109526572012,
+      ~0.0000099843695780195716,
+      ~0.00000015056327351493116
+    ]
 
   -> .log_gamma(x)
     if x <= ~0.0
       raise "Special.log_gamma: x must be > 0"
-    # reflection for (0,1) via Γ(x)Γ(1−x)=π/sin(πx) handled at gamma()
-    g = Special.lanczos_g
-    c = Special.lanczos_coeff
-    tmp = x + g + ~0.5
-    ser = c[0]
+    shifted = x - ~1.0
+    coefficients = Special.lanczos_coeff
+    series = coefficients[0]
     i = 1
-    while i < c.size()
-      ser = ser + c[i] / (x + (i + ~0.0))
-      i = i + 1
-    Math.log(~2.5066282746310005 * ser / x) + (x + ~0.5) * Math.log(tmp) - tmp
+    while i < coefficients.size
+      series += coefficients[i] / (shifted + (i + ~0.0))
+      i += 1
+    t = shifted + Special.lanczos_g + ~0.5
+    (~0.91893853320467274178 +
+      (shifted + ~0.5) * Math.log(t) - t + Math.log(series))
 
   -> .gamma(x)
     if x < ~0.5
@@ -117,6 +121,106 @@
 
   -> .lgamma(x)
     Special.log_gamma(x)
+
+  -> .float_factorial(n)
+    result = ~1.0
+    i = 2
+    while i <= n
+      result *= i + ~0.0
+      i += 1
+    result
+
+  -> .rising_factorial(value, count)
+    result = ~1.0
+    i = 0
+    while i < count
+      result *= value + (i + ~0.0)
+      i += 1
+    result
+
+  # B_(2k)/(2k), k=1..8. These drive differentiated asymptotic
+  # expansions for every positive-order polygamma.
+  -> .digamma_bernoulli_coefficients
+    [
+      ~0.083333333333333333,
+      ~-0.0083333333333333333,
+      ~0.0039682539682539683,
+      ~-0.0041666666666666667,
+      ~0.0075757575757575758,
+      ~-0.021092796092796093,
+      ~0.083333333333333333,
+      ~-0.44325980392156863
+    ]
+
+  # Principal real digamma. Recurrence moves small positive arguments into
+  # the rapidly convergent Bernoulli asymptotic regime.
+  -> .digamma(x)
+    raise "Special.digamma: x must be > 0" if x <= ~0.0
+    shifted = x
+    correction = ~0.0
+    while shifted < ~10.0
+      correction -= ~1.0 / shifted
+      shifted += ~1.0
+    inverse = ~1.0 / shifted
+    inverse_squared = inverse * inverse
+    power = inverse_squared
+    value = Math.log(shifted) - ~0.5 * inverse
+    coefficients = Special.digamma_bernoulli_coefficients
+    i = 0
+    while i < coefficients.size
+      value -= coefficients[i] * power
+      power *= inverse_squared
+      i += 1
+    value + correction
+
+  # Positive-real polygamma of integral order. For m>=1 this differentiates
+  # the same Bernoulli expansion exactly and applies
+  #   psi_m(x) = psi_m(x+1) + (-1)^(m+1) m!/x^(m+1).
+  -> .polygamma(order, x)
+    integer_name = order.class_name
+    integral_order = integer_name == "Integer" || integer_name == "Int"
+    integral_order = true if integer_name == "BigInt"
+    if !integral_order || order < 0
+      raise "Special.polygamma: order must be a nonnegative integer"
+    return Special.digamma(x) if order == 0
+    raise "Special.polygamma: x must be > 0" if x <= ~0.0
+
+    factorial = Special.float_factorial(order)
+    recurrence_sign = order.odd? ? ~1.0 : ~-1.0
+    shifted = x
+    correction = ~0.0
+    while shifted < ~10.0
+      correction += recurrence_sign * factorial / shifted**(order + 1)
+      shifted += ~1.0
+
+    derivative_sign = order.odd? ? ~-1.0 : ~1.0
+    log_sign = order.odd? ? ~1.0 : ~-1.0
+    half_sign = order.odd? ? ~1.0 : ~-1.0
+    value = log_sign * Special.float_factorial(order - 1) / shifted**order
+    value += half_sign * factorial / (~2.0 * shifted**(order + 1))
+
+    coefficients = Special.digamma_bernoulli_coefficients
+    k = 1
+    while k <= coefficients.size
+      rising = Special.rising_factorial(2*k + ~0.0, order)
+      denominator = shifted**(2*k + order)
+      value -= coefficients[k - 1] * derivative_sign * rising / denominator
+      k += 1
+    value + correction
+
+  -> .trigamma(x)
+    Special.polygamma(1, x)
+
+  # Integer zeta values s>1, evaluated through
+  # psi^(s-1)(1) = (-1)^s (s-1)! zeta(s).
+  -> .zeta(s)
+    name = s.class_name
+    integral = name == "Integer" || name == "Int" || name == "BigInt"
+    if !integral || s <= 1
+      raise "Special.zeta currently requires an integer s > 1"
+    sign = s.even? ? ~1.0 : ~-1.0
+    (sign * Special.polygamma(s - 1, ~1.0) /
+     Special.float_factorial(s - 1))
 
   # factorials via gamma(n+1) for non-negative integers / reals
   -> .factorial(n)

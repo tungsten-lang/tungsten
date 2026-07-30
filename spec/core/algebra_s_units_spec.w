@@ -76,6 +76,12 @@ sunit_check("sunit.ramified.coordinates",
 sunit_check("sunit.ramified.certified", U2.certified?, true)
 sunit_check("sunit.support.accepts_S_unit", U2.s_unit?(a2 / 2), true)
 sunit_check("sunit.support.rejects_outside_S", U2.s_unit?(3), false)
+ramified_search = NumberFieldSUnitSquareClassBasisSearch.new(
+  K2, [P2], [-1, epsilon2, a2], 3)
+sunit_check("sunit.search.recognizes_S_prime",
+            ramified_search.s_rational_prime?(2), true)
+sunit_check("sunit.search.rejects_non_S_prime",
+            ramified_search.s_rational_prime?(3), false)
 
 outside_support_failed = false
 begin

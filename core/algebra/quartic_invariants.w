@@ -65,9 +65,12 @@
 
   -> .ternary_unmixed(forms, degree)
     transformations = MacaulayResultant.permutation_matrices
-    transformations.each -> (matrix)
+    transformation_index = 0
+    while transformation_index < transformations.size
+      matrix = transformations[transformation_index]
       value = MacaulayResultant.transformed_quotient(forms, degree, matrix)
       return value if value != nil
+      transformation_index += 1
 
     # Along this Vandermonde family det(A)=2.  Each entry has degree at most
     # two in t, while the cubic extraneous minor has size nine, so testing

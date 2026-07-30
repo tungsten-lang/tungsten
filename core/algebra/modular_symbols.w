@@ -305,10 +305,13 @@
       return false if pair[0].gcd(pair[1]).gcd(@line.level) != 1
       return false if @line.index_of(pair[0], pair[1]) != i
       if !@line.level.prime?
-        units.each -> (unit)
+        unit_index = 0
+        while unit_index < units.size
+          unit = units[unit_index]
           cc = @line.level == 1 ? 0 : (unit*pair[0]) % @line.level
           dd = @line.level == 1 ? 0 : (unit*pair[1]) % @line.level
           return false if @line.index_of(cc, dd) != i
+          unit_index += 1
       i += 1
     true
 
@@ -830,12 +833,21 @@
     boundary = @space.boundary_matrix
     return false if @space.cusps.size != group.number_of_cusps
     return false if @space.boundary_rank != group.number_of_cusps - 1
-    expected_relations.each -> (relation)
-      boundary.each -> (row)
+    relation_index = 0
+    while relation_index < expected_relations.size
+      relation = expected_relations[relation_index]
+      row_index = 0
+      while row_index < boundary.size
+        row = boundary[row_index]
         value = 0
-        relation.each -> (term)
+        term_index = 0
+        while term_index < relation.size
+          term = relation[term_index]
           value += row[term[0]]*term[1]
+          term_index += 1
         return false if value != 0
+        row_index += 1
+      relation_index += 1
 
     expected_cuspidal = expected_relative - @space.boundary_rank
     return false if @space.cuspidal_dimension != expected_cuspidal

@@ -450,8 +450,10 @@
     row
 
   -> s_rational_prime?(prime)
-    @s_primes.each -> (s_prime)
-      return true if s_prime.rational_prime == prime
+    index = 0
+    while index < @s_primes.size
+      return true if @s_primes[index].rational_prime == prime
+      index += 1
     false
 
   -> try_character(prime_ideal)
@@ -482,9 +484,11 @@
           rational_prime,
           @factor_search_limit,
           @generator_search_limit)
-        decomposition.each -> (prime_ideal)
-          try_character(prime_ideal)
+        decomposition_index = 0
+        while decomposition_index < decomposition.size
+          try_character(decomposition[decomposition_index])
           return true if matrix_rank(@local_rows) == target
+          decomposition_index += 1
         return true if matrix_rank(@local_rows) == target
       rational_prime += 1
     message = "S-unit auxiliary character search limit exceeded; rank "

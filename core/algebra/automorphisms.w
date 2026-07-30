@@ -267,11 +267,18 @@
     # The displayed identity matrix is an actual solution, so containment of
     # every coordinate difference proves equality with that reduced point
     # rather than an accidentally empty saturated scheme.
-    @stabilizer_ideal.source_generators.each ->
-      value = item.evaluate(@stabilizer_identity_coordinates)
+    generators = @stabilizer_ideal.source_generators
+    index = 0
+    while index < generators.size
+      value = generators[index].evaluate(
+        @stabilizer_identity_coordinates)
       return false if !@curve.field.zero?(value)
-    @stabilizer_identity_equations.each ->
-      return false if !@stabilizer_ideal.contains?(item)
+      index += 1
+    index = 0
+    while index < @stabilizer_identity_equations.size
+      return false if !@stabilizer_ideal.contains?(
+        @stabilizer_identity_equations[index])
+      index += 1
     true
 
 

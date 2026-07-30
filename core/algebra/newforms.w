@@ -519,7 +519,10 @@
       return false
 
     combined = []
-    @decomposition.packets.each -> (packet)
+    packets = @decomposition.packets
+    packet_index = 0
+    while packet_index < packets.size
+      packet = packets[packet_index]
       factor = packet.separator_polynomial
       return false if factor.degree < 1
       return false if !factor.eql?(factor.monic)
@@ -556,6 +559,7 @@
               expected_characteristic)
             return false
         index += 1
+      packet_index += 1
     if ModularSymbolsLinearAlgebra.rank(combined) != dimension
       return false
     @decomposition.packets.size == 0 || dimension > 0

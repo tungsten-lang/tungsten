@@ -168,8 +168,10 @@
       return false if !place.verified?
       return false if !place.real? || place.index != i
       root = place.embedding.root
-      seen_roots.each -> (other)
-        return false if root == other
+      seen_index = 0
+      while seen_index < seen_roots.size
+        return false if root == seen_roots[seen_index]
+        seen_index += 1
       seen_roots.push(root)
       i += 1
 

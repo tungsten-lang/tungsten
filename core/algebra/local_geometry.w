@@ -604,8 +604,10 @@ use core/calculus/puiseux
   -> fully_split_nondegenerate_over_rationals?
     roots = rational_roots
     return false if roots.size != @characteristic_polynomial.degree
-    roots.each ->
-      return false if !nondegenerate_root?(item)
+    index = 0
+    while index < roots.size
+      return false if !nondegenerate_root?(roots[index])
+      index += 1
     true
 
   -> same_point?(left, right)
@@ -1090,7 +1092,9 @@ use core/calculus/puiseux
 
     reconstructed = @slope_polynomial.ring.one
     vertical_seen = false
-    @directions.each -> (direction)
+    direction_index = 0
+    while direction_index < @directions.size
+      direction = @directions[direction_index]
       if direction.vertical?
         return false if vertical_seen
         vertical_seen = true
@@ -1099,6 +1103,7 @@ use core/calculus/puiseux
       else
         reconstructed *= (
           direction.defining_factor**direction.multiplicity)
+      direction_index += 1
     if @vertical_multiplicity == 0
       return false if vertical_seen
     else
@@ -1237,8 +1242,10 @@ use core/calculus/puiseux
 
   -> ordinary?
     return false if tangent_direction_count != @multiplicity
-    @directions.each ->
-      return false if item.multiplicity != 1
+    index = 0
+    while index < @directions.size
+      return false if @directions[index].multiplicity != 1
+      index += 1
     true
 
   -> ordinary_singularity?

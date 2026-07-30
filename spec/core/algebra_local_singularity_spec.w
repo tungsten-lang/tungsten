@@ -129,6 +129,21 @@ tampered = PlaneCurveLocalSingularityCertificate.new(
   node.tangent_directions)
 singularity_check("certificate.tamper_rejected",
                   !tampered.verified?)
+duplicate_vertical_directions = []
+vertical.tangent_directions.each ->
+  duplicate_vertical_directions.push(item)
+duplicate_vertical_directions.push(
+  PlaneTangentDirection.vertical(
+    vertical.vertical_tangent_multiplicity))
+duplicate_vertical_certificate = (
+  PlaneCurveLocalSingularityCertificate.new(
+    vertical.source_polynomial, 0, 1, vertical.point,
+    vertical.local_polynomial, vertical.multiplicity,
+    vertical.tangent_cone, vertical.slope_polynomial,
+    vertical.vertical_tangent_multiplicity,
+    duplicate_vertical_directions))
+singularity_check("certificate.duplicate_vertical_rejected",
+                  !duplicate_vertical_certificate.verified?)
 
 off_curve_rejected = false
 begin

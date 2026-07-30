@@ -424,8 +424,11 @@
       return false
     space = @decomposition.space
     return false if !space.certificate.verified?
-    @decomposition.degeneracy_maps.each -> (map)
-      return false if !map.certificate.verified?
+    maps = @decomposition.degeneracy_maps
+    map_index = 0
+    while map_index < maps.size
+      return false if !maps[map_index].certificate.verified?
+      map_index += 1
     old_basis = @decomposition.old_basis
     return false if ModularSymbolsLinearAlgebra.rank(old_basis) != old_basis.size
     return false if (

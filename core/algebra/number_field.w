@@ -751,41 +751,7 @@
     denominator_square = denominator_root * denominator_root == rational.denominator
     numerator_square && denominator_square
 
-
-# Exact Sturm root counts over Q. Repeated factors are removed first, so the
-# result counts distinct real roots for any nonzero univariate polynomial.
 + Polynomial
-  -> sturm_sequence
-    if @ring.arity != 1 || @ring.field.class_name != "RationalField"
-      raise "Sturm sequences are currently implemented only for univariate polynomials over ℚ"
-    raise "the zero polynomial has no finite Sturm sequence" if zero?
-    derivative_polynomial = derivative(0)
-    return [self] if derivative_polynomial.zero?
-    squarefree_part = self / gcd(derivative_polynomial)
-    sequence = [squarefree_part, squarefree_part.derivative(0)]
-    while !sequence[sequence.size - 1].zero?
-      count = sequence.size
-      remainder = sequence[count - 2].rem(sequence[count - 1])
-      break if remainder.zero?
-      sequence.push(remainder.negate)
-    sequence
-
-  -> sturm_variations_at_infinity(sequence, positive)
-    variations = 0
-    previous = 0
-    sequence.each -> (polynomial)
-      if !polynomial.zero?
-        sign = polynomial.leading_coefficient.negative? ? -1 : 1
-        sign = 0 - sign if !positive && polynomial.degree.odd?
-        variations += 1 if previous != 0 && previous != sign
-        previous = sign
-    variations
-
-  -> real_root_count
-    return 0 if degree <= 0
-    sequence = sturm_sequence
-    sturm_variations_at_infinity(sequence, false) - sturm_variations_at_infinity(sequence, true)
-
   -> field_discriminant
     if @ring.arity != 1 || degree != 3 || @ring.field.class_name != "RationalField"
       raise "field_discriminant currently needs an irreducible cubic over ℚ"

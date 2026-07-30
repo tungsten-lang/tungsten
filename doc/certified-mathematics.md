@@ -26,6 +26,22 @@ The target proof-object contract is:
 - explicit conditional assumptions and theorem imports;
 - a failure or `unknown` result instead of a guessed theorem.
 
+## Certified real algebraic roots
+
+`RootIsolationCertificate` is a replayable arithmetic certificate for one
+real root of a univariate polynomial over ℚ. It checks squarefreeness,
+non-root rational endpoints, an exact Sturm count of one on the open interval,
+and the ordered number of roots to the left. Refining an
+`AlgebraicRealRoot` bisects that interval and repeats the exact Sturm
+obligation.
+
+`RealRootIsolation` is the completeness certificate. It compares the returned
+list size with the polynomial's exact distinct-real-root count, checks every
+rational root directly, checks that every algebraic defining factor divides
+the original polynomial, replays each isolating certificate, and verifies
+strict ordering. A decimal or floating-point approximation derived from an
+interval is useful output, but it is not the certificate.
+
 `F2LinearSystemCertificate` is the reference finite certificate. It replays
 elementary row operations, validates canonical RREF, and independently checks
 the particular solution and kernel basis. `ExplicitSelmerIntersectionCertificate`

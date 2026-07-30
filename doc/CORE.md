@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(177 total), grouped by area, with its declaration, a one-line
+(180 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -102,6 +102,9 @@ summary from the source header, and a link to the source.
 | `PolynomialRing` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `Polynomial` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `IntegerPolynomial` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraicRealRoot` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `RootIsolationCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `RealRootIsolation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `Poly` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `MacaulayResultant` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `PartialDixmierOhnoInvariants` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

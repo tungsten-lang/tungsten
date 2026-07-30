@@ -67,17 +67,9 @@ use core/expression
       (center + radical) / denominator
     ]
 
-  -> .append_unique_expression(values, candidate)
-    i = 0
-    while i < values.size
-      return values if values[i] == candidate
-      i += 1
-    values.push(candidate)
-    values
-
-  # Exact real roots for every polynomial whose rational factorization has
-  # only linear and quadratic factors. Irreducible higher-degree factors fail
-  # loudly; there is no silent numerical fallback.
+  # Exact real roots. Linear roots stay Rational, quadratic roots retain their
+  # familiar radical form, and higher irreducible factors become certified
+  # AlgebraicRealRoot constants with refinable rational isolating intervals.
   -> real_roots(variable = nil)
     selected = univariate_variable(variable)
     if selected == nil
@@ -89,12 +81,17 @@ use core/expression
     polynomial = pair[1]
     raise "zero polynomial has infinitely many roots" if polynomial.zero?
     roots = []
-    polynomial.factor.each -> (piece)
-      if piece.degree > 0
-        piece_roots = Expression.real_roots_of_degree_at_most_two(piece)
-        piece_roots.each -> (root)
-          Expression.append_unique_expression(roots, root)
-    Expression.sort_expressions(roots)
+    polynomial.real_roots.each -> (value)
+      if value.class_name == "AlgebraicRealRoot"
+        factor = value.defining_polynomial
+        if factor.degree == 2
+          explicit = Expression.real_roots_of_degree_at_most_two(factor)
+          roots.push(explicit[value.root_index])
+        else
+          roots.push(Expression.constant(value))
+      else
+        roots.push(Expression.constant(value))
+    roots
 
   -> solve(variable = nil)
     real_roots(variable)

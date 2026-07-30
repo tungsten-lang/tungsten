@@ -54,12 +54,11 @@ rescue error
   multivariate_raised = true
 check("factor.multivariate_is_loud", multivariate_raised)
 
-irreducible_cubic_raised = false
-begin
-  (x**3 - x + 1).solve(:x)
-rescue error
-  irreducible_cubic_raised = true
-check("solve.irreducible_cubic_is_loud", irreducible_cubic_raised)
+irreducible_cubic_roots = (x**3 - x + 1).solve(:x)
+check("solve.irreducible_cubic.count",
+      irreducible_cubic_roots.size == 1)
+check("solve.irreducible_cubic.certified",
+      irreducible_cubic_roots[0].constant_value.certified?)
 
 zero_raised = false
 begin

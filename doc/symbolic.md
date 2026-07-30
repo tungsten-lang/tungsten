@@ -111,12 +111,32 @@ use algebra
 (x**2 - 1).factor_list(:x)
 (x**2 - 2).solve(:x)       # [-sqrt(2), sqrt(2)]
 Algebra.solve(x**4 - 1, :x)
+(x**3 - x + 1).solve(:x)    # [RootOf(x^3 - x + 1, 0)]
 ```
 
-`factor` is exact univariate factorization over ℚ. `solve` returns distinct
-exact real roots whenever every rational irreducible factor has degree at most
-two. A polynomial with an irreducible factor of higher degree raises instead
-of silently switching to floating-point root finding.
+`factor` is exact univariate factorization over ℚ. `solve` returns all
+distinct exact real roots. Linear roots remain rational and quadratic roots
+retain their readable radical form. Higher-degree roots are exact
+`AlgebraicRealRoot` constants represented by a defining irreducible polynomial,
+an ordered root index, and a rational interval whose unique root is certified
+by exact Sturm replay:
+
+```w
+root_expression = (x**3 - x + 1).solve(:x)[0]
+root = root_expression.constant_value
+
+root.certified?          # true
+root.interval            # exact rational endpoints
+root.refined(20)         # a narrower independently certified value
+root.approximation(30)   # Rational midpoint, not a certificate
+root.to_f                # convenient machine approximation
+```
+
+Polynomial users can call `sturm_root_count`, `real_root_count`,
+`cauchy_root_bound`, `real_root_isolation`, and `real_roots` directly. The
+complete `RealRootIsolation` certificate checks the exact distinct-root count,
+every rational root or certified algebraic factor, and strict ordering of the
+returned list. There is no silent floating-point fallback.
 
 ## Elementary symbolic integration
 
@@ -188,8 +208,9 @@ and rational-polynomial front end, not yet a complete computer algebra system.
 It does not currently provide assumptions/refinement, piecewise expressions,
 infinite or directional limits, Laurent/Puiseux series, general
 transcendental equation solving, complex algebraic root objects, general
-multivariate factorization, or Risch-style integration. Polynomial-native
-Gröbner bases, ideals, and geometry remain in `use algebra`.
+multivariate factorization, arithmetic between general `RootOf`
+presentations, or Risch-style integration. Polynomial-native Gröbner bases,
+ideals, and geometry remain in `use algebra`.
 
 Operator dispatch is still receiver-directed. Write `x*2`, not `2*x`, until
 the language has a general reverse-operator protocol.

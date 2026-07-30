@@ -2687,118 +2687,246 @@ static WValue bigint_mod_any(WValue a, WValue b) {
     return bigint_normalize(r);
 }
 
-static __uint128_t bigint_mag_top2(const uint64_t *limbs, int32_t len) {
-    return ((__uint128_t)limbs[len - 1] << 64) | limbs[len - 2];
+/* ---- GCD: u64 fast path + Lehmer batching for multi-limb operands ----
+ *
+ * The previous implementation was one-limb-quotient Euclid: one 128/64
+ * divide plus one freshly ALLOCATED remainder bigint per step -- O(n)
+ * allocating steps for similar-sized operands (bigint_gcd_any was 45% of
+ * rational_harmonic samples). Lehmer batches ~30 Euclid steps into a 2x2
+ * cofactor matrix computed on the leading 63 bits, then applies it to the
+ * full magnitudes in one linear-combination pass over reusable scratch
+ * buffers: no allocation inside the loop. */
+
+static uint64_t w_gcd_u64(uint64_t a, uint64_t b) {
+    while (b) { uint64_t t = a % b; a = b; b = t; }
+    return a;
 }
 
-static WValue bigint_submul_u64_positive(const uint64_t *xl, int32_t xlen,
-                                         const uint64_t *yl, int32_t ylen,
-                                         uint64_t q) {
-    WBigint *r = bigint_alloc(xlen);
-    uint64_t carry = 0, borrow = 0;
-
-    for (int32_t i = 0; i < xlen; i++) {
-        __uint128_t prod = carry;
-        if (i < ylen) prod += (__uint128_t)yl[i] * q;
-        uint64_t sub = (uint64_t)prod;
-        carry = (uint64_t)(prod >> 64);
-
-        uint64_t xi = xl[i];
-        uint64_t lo = xi - sub;
-        uint64_t borrow1 = xi < sub;
-        uint64_t limb = lo - borrow;
-        uint64_t borrow2 = lo < borrow;
-        r->limbs[i] = limb;
-        borrow = borrow1 + borrow2;
-    }
-
-    if (carry != 0 || borrow != 0) {
-        free(r);
-        return W_NIL;
-    }
-
-    r->size = xlen;
-    return bigint_normalize(r);
+/* x mod y0 for a raw magnitude, one 128/64 divide per limb. */
+static uint64_t mag_mod_u64(const uint64_t *x, int32_t n, uint64_t y0) {
+    __uint128_t rem = 0;
+    for (int32_t i = n - 1; i >= 0; i--)
+        rem = ((rem << 64) | x[i]) % y0;
+    return (uint64_t)rem;
 }
 
-static int bigint_gcd_quotient_step(WValue *x, WValue *y) {
-    if (bigint_compare(*x, *y) < 0) {
-        WValue tmp = *x;
-        *x = *y;
-        *y = tmp;
-        return 1;
+static int32_t mag_norm_len(const uint64_t *p, int32_t n) {
+    while (n > 0 && p[n - 1] == 0) n--;
+    return n;
+}
+
+static int64_t mag_bitlen(const uint64_t *p, int32_t n) {
+    if (n == 0) return 0;
+    return (int64_t)(n - 1) * 64 + (64 - __builtin_clzll(p[n - 1]));
+}
+
+/* Leading 63 bits of x, and the bits of y at the SAME bit positions
+ * (0 when y is more than a limb shorter). 63-bit digits leave headroom so
+ * the simulate loop's cofactor-corrected sums can never wrap u64. */
+static void mag_top_digits(const uint64_t *x, int32_t xlen,
+                           const uint64_t *y, int32_t ylen,
+                           uint64_t *xh_out, uint64_t *yh_out) {
+    int32_t top = xlen - 1;
+    int lz = __builtin_clzll(x[top]);
+    uint64_t xh = x[top] << lz;
+    uint64_t yh = 0;
+    if (lz && top > 0) xh |= x[top - 1] >> (64 - lz);
+    if (ylen > top) {
+        yh = y[top] << lz;
+        if (lz && top > 0) yh |= y[top - 1] >> (64 - lz);
+    } else if (ylen == top && lz) {
+        yh = y[top - 1] >> (64 - lz);
     }
+    *xh_out = xh >> 1;
+    *yh_out = yh >> 1;
+}
 
-    uint64_t sx, sy;
-    int32_t xlen, ylen;
-    const uint64_t *xl = integer_limbs(*x, &sx, &xlen);
-    const uint64_t *yl = integer_limbs(*y, &sy, &ylen);
-    int32_t xabs = xlen < 0 ? -xlen : xlen;
-    int32_t yabs = ylen < 0 ? -ylen : ylen;
+/* Knuth Algorithm L inner loop: simulate Euclid on the leading digits,
+ * accumulating the cofactor matrix. Returns the number of steps taken
+ * (0 = caller must do a full division step). On return the true update is
+ * X' = a*X + b*Y, Y' = c*X + d*Y with SIGNED cofactors whose sign pattern
+ * alternates with parity: even steps => a,d >= 0 and b,c <= 0; odd steps
+ * the reverse. Both X' and Y' are true Euclid remainders, so >= 0. */
+static int lehmer_simulate(uint64_t xh, uint64_t yh,
+                           int64_t *pa, int64_t *pb, int64_t *pc, int64_t *pd) {
+    int64_t a = 1, b = 0, c = 0, d = 1;
+    int steps = 0;
+    for (;;) {
+        __int128 yc = (__int128)yh + c;
+        __int128 yd = (__int128)yh + d;
+        if (yc <= 0 || yd <= 0) break;
+        __int128 xa = (__int128)xh + a;
+        __int128 xb = (__int128)xh + b;
+        if (xa < 0 || xb < 0) break;
+        uint64_t q1 = (uint64_t)xa / (uint64_t)yc;
+        uint64_t q2 = (uint64_t)xb / (uint64_t)yd;
+        if (q1 != q2 || q1 == 0) break;
+        /* cofactors grow ~Fibonacci; bail before i64 products overflow */
+        if (llabs(c) > (INT64_MAX >> 2) / (int64_t)q1 ||
+            llabs(d) > (INT64_MAX >> 2) / (int64_t)q1) break;
+        int64_t t;
+        t = a - (int64_t)q1 * c; a = c; c = t;
+        t = b - (int64_t)q1 * d; b = d; d = t;
+        uint64_t r = xh - q1 * yh; xh = yh; yh = r;
+        steps++;
+    }
+    *pa = a; *pb = b; *pc = c; *pd = d;
+    return steps;
+}
 
-    if (xabs != yabs || yabs < 2) return 0;
+/* r = u*x - v*y over raw magnitudes (0 <= u,v < 2^63), n output limbs.
+ * The caller guarantees the true result is >= 0 and fits n limbs. Returns
+ * the normalized length, or -1 if the invariant check failed. */
+static int32_t mag_linear_comb(uint64_t *r, int32_t n,
+                               const uint64_t *x, int32_t xlen, uint64_t u,
+                               const uint64_t *y, int32_t ylen, uint64_t v) {
+    __uint128_t cu = 0, cv = 0;
+    uint64_t borrow = 0;
+    for (int32_t i = 0; i < n; i++) {
+        cu += (__uint128_t)u * (i < xlen ? x[i] : 0);
+        cv += (__uint128_t)v * (i < ylen ? y[i] : 0);
+        uint64_t pu = (uint64_t)cu; cu >>= 64;
+        uint64_t pv = (uint64_t)cv; cv >>= 64;
+        uint64_t d1 = pu - pv;
+        uint64_t b1 = pu < pv;
+        uint64_t d2 = d1 - borrow;
+        uint64_t b2 = d1 < borrow;
+        r[i] = d2;
+        borrow = b1 | b2;
+    }
+    if (cu != cv + borrow) return -1;
+    return mag_norm_len(r, n);
+}
 
-    __uint128_t xhi = bigint_mag_top2(xl, xabs);
-    __uint128_t yhi = bigint_mag_top2(yl, yabs);
-    if (yhi == 0) return 0;
+/* x -= y << d, in place. Caller guarantees y << d <= x (so the borrow
+ * always resolves inside x's xlen limbs). */
+static void mag_sub_shifted(uint64_t *x, int32_t xlen,
+                            const uint64_t *y, int32_t ylen, uint64_t d) {
+    int32_t s = (int32_t)(d >> 6);
+    int r = (int)(d & 63);
+    uint64_t borrow = 0;
+    uint64_t carry_bits = 0;
+    for (int32_t i = 0; i <= ylen && s + i < xlen; i++) {
+        uint64_t yl = i < ylen ? y[i] : 0;
+        uint64_t sub = r ? ((yl << r) | carry_bits) : yl;
+        if (r) carry_bits = yl >> (64 - r);
+        uint64_t xi = x[s + i];
+        uint64_t d1 = xi - sub;
+        uint64_t b1 = xi < sub;
+        uint64_t d2 = d1 - borrow;
+        uint64_t b2 = d1 < borrow;
+        x[s + i] = d2;
+        borrow = b1 | b2;
+    }
+    for (int32_t i = s + ylen + 1; borrow && i < xlen; i++) {
+        uint64_t xi = x[i];
+        x[i] = xi - 1;
+        borrow = xi == 0;
+    }
+}
 
-    __uint128_t den = yhi == ~((__uint128_t)0) ? yhi : yhi + 1;
-    uint64_t q = (uint64_t)(xhi / den);
-    if (q == 0) q = 1;
-
-    WValue rem = bigint_submul_u64_positive(xl, xabs, yl, yabs, q);
-    if (rem == W_NIL) return 0;
-    *x = *y;
-    *y = rem;
-    return 1;
+/* x <- x mod y via binary shift-subtract; returns the new length. Only a
+ * fallback for the rare shapes Lehmer cannot batch (e.g. y far shorter
+ * than x), so simplicity beats speed here. */
+static int32_t mag_mod_binary(uint64_t *x, int32_t xlen,
+                              const uint64_t *y, int32_t ylen) {
+    for (;;) {
+        xlen = mag_norm_len(x, xlen);
+        if (mag_cmp(x, xlen, y, ylen) < 0) return xlen;
+        int64_t d = mag_bitlen(x, xlen) - mag_bitlen(y, ylen);
+        /* y << d can exceed x by under one bit; y << (d-1) never does */
+        mag_sub_shifted(x, xlen, y, ylen, d > 0 ? (uint64_t)(d - 1) : 0);
+    }
 }
 
 static WValue bigint_gcd_any(WValue a, WValue b) {
-    /* Take absolute values, then Euclidean algorithm */
-    /* Make working copies that are always positive */
-    WValue x = a, y = b;
+    uint64_t sa, sb;
+    int32_t alen, blen;
+    const uint64_t *al = integer_limbs(a, &sa, &alen);
+    const uint64_t *bl = integer_limbs(b, &sb, &blen);
+    int32_t an = alen < 0 ? -alen : alen;
+    int32_t bn = blen < 0 ? -blen : blen;
 
-    /* Ensure positive */
-    if (w_is_int(x)) {
-        int64_t v = w_as_int(x);
-        x = v < 0 ? (v == W_INT48_MIN ? bigint_from_i64(-v) : w_box_int(-v)) : x;
+    /* u64 fast path: both magnitudes fit one limb, zero allocation */
+    if (an <= 1 && bn <= 1) {
+        uint64_t g = w_gcd_u64(an ? al[0] : 0, bn ? bl[0] : 0);
+        if (g <= (uint64_t)W_INT48_MAX) return w_box_int((int64_t)g);
+        WBigint *r = bigint_alloc(1);
+        r->limbs[0] = g;
+        r->size = 1;
+        return bigint_normalize(r);
+    }
+
+    /* scratch: x, y and two matrix-apply outputs, one malloc for all four */
+    int32_t cap = an > bn ? an : bn;
+    uint64_t *buf = (uint64_t *)malloc((size_t)cap * 4 * sizeof(uint64_t));
+    uint64_t *x = buf, *y = buf + cap;
+    uint64_t *nx = buf + 2 * (size_t)cap, *ny = buf + 3 * (size_t)cap;
+    int32_t xlen, ylen;
+    if (mag_cmp(al, an, bl, bn) >= 0) {
+        memcpy(x, al, (size_t)an * 8); xlen = an;
+        memcpy(y, bl, (size_t)bn * 8); ylen = bn;
     } else {
-        WBigint *bx = w_as_bigint(x);
-        if (bx->size < 0) {
-            int32_t n = -bx->size;
-            WBigint *pos = bigint_alloc(n);
-            for (int32_t i = 0; i < n; i++) pos->limbs[i] = bx->limbs[i];
-            pos->size = n;
-            x = bigint_box(pos);
+        memcpy(x, bl, (size_t)bn * 8); xlen = bn;
+        memcpy(y, al, (size_t)an * 8); ylen = an;
+    }
+
+    while (ylen > 1) {
+        uint64_t xh, yh;
+        mag_top_digits(x, xlen, y, ylen, &xh, &yh);
+        int64_t A, B, C, D;
+        int steps = yh ? lehmer_simulate(xh, yh, &A, &B, &C, &D) : 0;
+        if (steps > 0) {
+            int32_t nxl, nyl;
+            if (!(steps & 1)) { /* even parity: A,D >= 0; B,C <= 0 */
+                nxl = mag_linear_comb(nx, xlen, x, xlen, (uint64_t)A,
+                                      y, ylen, (uint64_t)(-B));
+                nyl = mag_linear_comb(ny, xlen, y, ylen, (uint64_t)D,
+                                      x, xlen, (uint64_t)(-C));
+            } else {            /* odd parity: A,D <= 0; B,C >= 0 */
+                nxl = mag_linear_comb(nx, xlen, y, ylen, (uint64_t)B,
+                                      x, xlen, (uint64_t)(-A));
+                nyl = mag_linear_comb(ny, xlen, x, xlen, (uint64_t)C,
+                                      y, ylen, (uint64_t)(-D));
+            }
+            if (nxl >= 0 && nyl >= 0) {
+                uint64_t *t;
+                int32_t tl;
+                t = x; x = nx; nx = t;
+                t = y; y = ny; ny = t;
+                xlen = nxl; ylen = nyl;
+                if (mag_cmp(x, xlen, y, ylen) < 0) {
+                    t = x; x = y; y = t;
+                    tl = xlen; xlen = ylen; ylen = tl;
+                }
+                continue;
+            }
+            /* invariant check failed: fall through to a division step */
+        }
+        xlen = mag_mod_binary(x, xlen, y, ylen);
+        uint64_t *t = x; x = y; y = t;
+        int32_t tl = xlen; xlen = ylen; ylen = tl;
+    }
+
+    WValue result;
+    if (ylen == 0) {
+        WBigint *r = bigint_alloc(xlen);
+        memcpy(r->limbs, x, (size_t)xlen * 8);
+        r->size = xlen;
+        result = bigint_normalize(r);
+    } else {
+        uint64_t g = w_gcd_u64(mag_mod_u64(x, xlen, y[0]), y[0]);
+        if (g <= (uint64_t)W_INT48_MAX) {
+            result = w_box_int((int64_t)g);
+        } else {
+            WBigint *r = bigint_alloc(1);
+            r->limbs[0] = g;
+            r->size = 1;
+            result = bigint_normalize(r);
         }
     }
-    if (w_is_int(y)) {
-        int64_t v = w_as_int(y);
-        y = v < 0 ? (v == W_INT48_MIN ? bigint_from_i64(-v) : w_box_int(-v)) : y;
-    } else {
-        WBigint *by = w_as_bigint(y);
-        if (by->size < 0) {
-            int32_t n = -by->size;
-            WBigint *pos = bigint_alloc(n);
-            for (int32_t i = 0; i < n; i++) pos->limbs[i] = by->limbs[i];
-            pos->size = n;
-            y = bigint_box(pos);
-        }
-    }
-
-    /* Euclidean: while y != 0, (x, y) = (y, x % y) */
-    while (1) {
-        int y_zero;
-        if (w_is_int(y)) y_zero = (w_as_int(y) == 0);
-        else { WBigint *by = w_as_bigint(y); y_zero = (by->size == 0); }
-        if (y_zero) return x;
-
-        if (bigint_gcd_quotient_step(&x, &y)) continue;
-
-        WValue rem = bigint_mod_any(x, y);
-        x = y;
-        y = rem;
-    }
+    free(buf);
+    return result;
 }
 
 /* ---- Bigint comparison ---- */

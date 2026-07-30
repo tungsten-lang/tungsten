@@ -169,9 +169,13 @@ explicit descent:
    56 on their complete Minkowski factor bases. Each model-field theorem
    transfers to the original bitangent presentation through an exact
    isomorphic-model certificate. Supplied S-unit square-class bases have
-   dimensions 9, 12, and 14; their certified product has dimension 35 and
-   quotient by the rank-4 diagonal rational subgroup has dimension 31;
-11. intersect future global, norm, unramified, and local conditions with the
+   dimensions 9, 12, and 14; their certified true-descent product has
+   dimension 35;
+11. compute the exact norm map to
+   \(\mathbb Q(S,2)=\langle-1,2,3,13\rangle\); its certified rank is 4, so
+   the norm-one kernel inside the 35-dimensional true ambient has dimension
+   31;
+12. intersect future theta-module and local-image conditions with that
    replay-certified F2 kernel.
 
 Step 7 is the BPS true setup. Its certificate checks the component polynomial
@@ -182,14 +186,25 @@ completed Selmer computation. The remaining path is:
 ```text
 certified finite and archimedean places for S = {2, 3, 13}
   -> certified S-class 2-torsion in all degree-6/9/12 factors
-  -> certified 31-dimensional ambient square-class quotient
-  -> norm and unramified constraints
+  -> certified 35-dimensional true ambient square-class space
+  -> certified rank-4 global norm map and 31-dimensional kernel
   -> theta Galois module and comparison kernel
   -> certified p-adic local images
   -> explicit Selmer upper bound
   -> BPS comparison and rational J[2]
   -> Mordell-Weil rank upper bound
 ```
+
+An earlier implementation divided the degree-27 true target by the rank-four
+diagonal rational subgroup and reported dimension 31. BPS section 6.5 says
+that removing the rational distinguished bitangent produces a true setup,
+whose target is \(L'^\times/L'^{\times2}\), not a second diagonal quotient.
+The corrected ambient dimension is 35. The equivalent fake setup uses all 28
+bitangents: its rational component contributes four dimensions before the
+rank-four diagonal quotient, again leaving dimension 35. The independently
+computed global norm map from the true ambient also has rank four, so its
+kernel has dimension 31. That kernel—not the erroneous true-target
+quotient—is the useful 31-dimensional space.
 
 The durable degree-6/9/12 S-class witness artifacts and supplied S-unit
 generators live in `spec/fixtures/algebra/`. Their authoritative checks are

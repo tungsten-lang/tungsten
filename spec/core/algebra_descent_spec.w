@@ -312,6 +312,24 @@ rescue e
   rank_error = e.to_s.index(blocker) != nil
 descent_check("setup.rank_gate", rank_error, true)
 
+wrong_true_quotient_is_loud = false
+begin
+  setup.certify_s_unit_square_class_quotient([])
+rescue e
+  wrong_true_quotient_is_loud = e.to_s.index(
+    "does not quotient by diagonal") != nil
+descent_check("setup.rejects_true_diagonal_quotient",
+              wrong_true_quotient_is_loud, true)
+
+missing_s_class_is_loud = false
+begin
+  setup.certify_s_unit_square_class_space([])
+rescue e
+  missing_s_class_is_loud = e.to_s.index(
+    "certify S-class 2-torsion") != nil
+descent_check("setup.s_unit_space_requires_s_class_proof",
+              missing_s_class_is_loud, true)
+
 conditions = SelmerConstraintSystem.new(5)
 conditions.add_condition(
   "global norm",

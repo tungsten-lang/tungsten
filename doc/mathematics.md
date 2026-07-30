@@ -108,26 +108,42 @@ global-arithmetic prefix: the 27 non-distinguished bitangents, finite étale
 decomposition of degrees \(6+9+12\), contact quadratics, the true-setup
 functions \(l/l_0\), maximal product order, finite and archimedean places,
 S-class 2-torsion witnesses, supplied S-unit bases, and the diagonal rational
-quotient.
+square-class bookkeeping.
 
-That quotient is a 31-dimensional vector space over \(\mathbf F_2\):
+The resulting true-descent ambient is a 35-dimensional vector space over
+\(\mathbf F_2\):
 
 ```text
 component S-unit square classes:  9 + 12 + 14 = 35 dimensions
-diagonal rational classes:       <-1, 2, 3, 13> = 4 dimensions
-ambient descent quotient:         35 - 4 = 31 dimensions
+true degree-27 target:            L'^x / L'^{x2}
+ambient descent space:            35 dimensions
 ```
 
 Its purpose is to turn an infinite multiplicative square-class problem into
-finite linear algebra. A candidate descent value is represented by 31 bits.
+finite linear algebra. A candidate descent value is represented by 35 bits.
 Norm, unramified, Galois, and p-adic local-image conditions will cut out
 subspaces or affine slices; the Selmer image must lie in their intersection.
-The number 31 is not the dimension of the curve, its Jacobian, or its
-Mordell--Weil rank.
 
-The descent is not finished. Missing links are the theta Galois module, norm
-and unramified constraints, certified p-adic local images, the BPS comparison
-kernel and rational \(J[2]\), and the final Selmer/rank bound.
+What, then, was the previously reported 31-dimensional space? It came from
+quotienting the degree-27 true target by the four rational classes
+\(\langle-1,2,3,13\rangle\). That is not the BPS true-descent group and has
+no role in the current computation. In the equivalent fake setup one keeps
+all 28 bitangents: the rational component first adds those same four
+dimensions, and the diagonal quotient removes them, leaving 35 again. This
+correction is exactly why certificate scope and named theorem boundaries
+matter.
+
+There is, however, a different and useful 31-dimensional space. Tungsten now
+computes the exact norm of every one of the 35 certified generators. The
+resulting map to
+\(\mathbb Q(S,2)=\langle-1,2,3,13\rangle\) has certified rank four, so its
+norm-one kernel has dimension \(35-4=31\). BPS Lemma 6.16, recorded as a
+trusted theorem import after checking the true-setup hypotheses, places the
+descent image in this kernel.
+
+The descent is not finished. Missing links are the theta Galois module,
+certified p-adic local images, the BPS comparison kernel and rational
+\(J[2]\), and the final Selmer/rank bound.
 
 ## Fermat and modularity
 

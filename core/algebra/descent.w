@@ -1115,7 +1115,8 @@
     @s_prime_data = nil
     @archimedean_data = nil
     @s_class_two_torsion_proof = nil
-    @s_unit_square_class_quotient = nil
+    @s_unit_square_class_space = nil
+    @global_norm_constraint = nil
 
   -> curve
     @curve
@@ -1179,7 +1180,8 @@
     @s_prime_data = nil
     @archimedean_data = nil
     @s_class_two_torsion_proof = nil
-    @s_unit_square_class_quotient = nil
+    @s_unit_square_class_space = nil
+    @global_norm_constraint = nil
     @bitangent_scheme_certificate
 
   -> bitangent_scheme_certificate
@@ -1194,7 +1196,8 @@
       @s_prime_data = nil
       @archimedean_data = nil
       @s_class_two_torsion_proof = nil
-      @s_unit_square_class_quotient = nil
+      @s_unit_square_class_space = nil
+      @global_norm_constraint = nil
     @integral_product_order = order
     if !@integral_product_order.certificate.verified?
       raise "bitangent integral product order failed certification"
@@ -1229,7 +1232,8 @@
     @maximal_product_order_computation = computation
     @s_prime_data = nil
     @s_class_two_torsion_proof = nil
-    @s_unit_square_class_quotient = nil
+    @s_unit_square_class_space = nil
+    @global_norm_constraint = nil
     if !@maximal_product_order_computation.certificate.verified?
       raise "bitangent maximal product order failed certification"
     @maximal_product_order_computation.order
@@ -1260,7 +1264,8 @@
       primes, factor_search_limit,
       generator_search_limit)
     @s_class_two_torsion_proof = nil
-    @s_unit_square_class_quotient = nil
+    @s_unit_square_class_space = nil
+    @global_norm_constraint = nil
     if !@s_prime_data.certificate.verified?
       raise "bitangent S-prime data failed certification"
     @s_prime_data
@@ -1285,6 +1290,8 @@
       maximal_product_order,
       @s_prime_data.rational_primes,
       component_proofs)
+    @s_unit_square_class_space = nil
+    @global_norm_constraint = nil
     if !@s_class_two_torsion_proof.certificate.verified?
       raise "bitangent product S-class 2-torsion proof failed"
     @s_class_two_torsion_proof
@@ -1296,27 +1303,41 @@
     return nil if @s_class_two_torsion_proof == nil
     @s_class_two_torsion_proof.certificate
 
-  # Bind independently certified component S-unit bases to this setup's
-  # actual maximal product order and S-prime set.  Generator discovery may be
-  # external; the quotient certificate replays support, local coordinates,
-  # component dimensions, and the diagonal rational rank.
-  -> certify_s_unit_square_class_quotient(component_bases)
+  # Bind independently certified component S-unit bases to this true setup's
+  # actual maximal product order and S-prime set.  BPS section 6.5 removes the
+  # rational distinguished bitangent, so the target is L'^x/L'^{x2}, not a
+  # further quotient by diagonal rational square classes.
+  -> certify_s_unit_square_class_space(component_bases)
+    if @s_class_two_torsion_proof == nil
+      raise "certify S-class 2-torsion before identifying S-units with the true descent ambient"
     if @maximal_product_order_computation == nil
       certify_maximal_product_order
     if @s_prime_data == nil
       certify_s_prime_data
-    @s_unit_square_class_quotient = maximal_product_order.s_unit_square_class_quotient(
+    @s_unit_square_class_space = maximal_product_order.s_unit_square_class_space(
       @s_prime_data.rational_primes, component_bases)
-    if !@s_unit_square_class_quotient.certificate.verified?
-      raise "bitangent product S-unit quotient failed certification"
-    @s_unit_square_class_quotient
+    @global_norm_constraint = nil
+    if !@s_unit_square_class_space.certificate.verified?
+      raise "bitangent product S-unit space failed certification"
+    @s_unit_square_class_space
+
+  -> s_unit_square_class_space
+    @s_unit_square_class_space
+
+  -> s_unit_square_class_space_certificate
+    return nil if @s_unit_square_class_space == nil
+    @s_unit_square_class_space.certificate
+
+  # This historical name encoded the wrong group for a true setup.  Fail
+  # loudly so existing scripts cannot continue a descent in dimension 31.
+  -> certify_s_unit_square_class_quotient(component_bases)
+    raise "a BPS true setup does not quotient by diagonal rational classes; use certify_s_unit_square_class_space"
 
   -> s_unit_square_class_quotient
-    @s_unit_square_class_quotient
+    raise "a BPS true setup has an S-unit square-class space, not a diagonal quotient"
 
   -> s_unit_square_class_quotient_certificate
-    return nil if @s_unit_square_class_quotient == nil
-    @s_unit_square_class_quotient.certificate
+    raise "a BPS true setup has an S-unit square-class space, not a diagonal quotient"
 
   -> requirements
     out = []
@@ -1396,15 +1417,24 @@
         "S-class group 2-torsion", "complete",
         "Minkowski factor bases and odd principal-relation quotients",
         @s_class_two_torsion_proof.certificate))
-    if @s_unit_square_class_quotient == nil
+    if @s_unit_square_class_space == nil
       out.push(DescentRequirement.new(
         "product S-unit square-class basis", "missing",
-        "certify component generators and quotient by diagonal rational S-units"))
+        "certify component generators in the true degree-27 etale algebra"))
     else
       out.push(DescentRequirement.new(
         "product S-unit square-class basis", "complete",
-        "certified component bases and diagonal rational quotient of dimension " + @s_unit_square_class_quotient.dimension.to_s,
-        @s_unit_square_class_quotient.certificate))
+        "certified true-descent ambient space of dimension " + @s_unit_square_class_space.dimension.to_s,
+        @s_unit_square_class_space.certificate))
+    if @global_norm_constraint == nil
+      out.push(DescentRequirement.new(
+        "global norm condition", "missing",
+        "construct the exact norm map and its BPS norm-one kernel"))
+    else
+      out.push(DescentRequirement.new(
+        "global norm condition", "complete",
+        "exact component norms and the theorem-backed norm-one kernel",
+        @global_norm_constraint.certificate))
     out.push(DescentRequirement.new(
       "theta Galois module", "missing",
       "identify the 28/315 incidence structure and decomposition actions"))

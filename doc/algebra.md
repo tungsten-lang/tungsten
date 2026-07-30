@@ -63,6 +63,7 @@ core/algebra/divisors.w            # rational/closed places, formal divisors
 core/algebra/quartics.w            # certified line intersections and bitangents
 core/algebra/descent.w             # BPS preparation, bitangent proofs, F2 kernel
 core/algebra/descent_functions.w   # contact divisors and BPS line ratios
+core/algebra/descent_norm.w        # true S-unit ambient and global norm kernel
 core/algebra/point_search.w        # exact bounded search for one quartic family
 core/algebra/quartic_invariants.w  # ternary resultant, discriminant, I27
 core/algebra/automorphisms.w       # normalized-hyperflex certificate
@@ -386,7 +387,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Divisors | Exact formal arithmetic on rational and line-presented higher-degree closed places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic outside the existing Jacobian models, and general principality tests are not implemented |
 | Rational points | Complete exact bounded search for primitive points on `aX³Z + bXY²Z + g(Y,Z)`, with nonzero same-sign `a,b` and nonzero `Y⁴` coefficient | This is not a general plane-curve point finder and does not prove that no points exist above the requested height |
 | Geometric automorphisms | Exact triviality certificate over `Qbar` for smooth rational plane quartics with the unique normalized hyperflex `[1:0:0]`, tangent `Z=0`, and identity stabilizer | It is not an arbitrary plane-quartic automorphism-group algorithm and does not enumerate nontrivial groups |
-| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions; all shell-width degree-6/9/12 factors have replayed full-rank S-class proofs, and their supplied S-unit bases give dimensions `9 + 12 + 14 = 35` with a certified rank-4 diagonal quotient of dimension 31 | Theta Galois modules, norm and unramified constraints, p-adic local images, the comparison kernel, and the final Selmer bound remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
+| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions; all shell-width degree-6/9/12 factors have replayed full-rank S-class proofs, and their supplied S-unit bases give a certified true-descent ambient space of dimension `9 + 12 + 14 = 35`; exact component norms give a certified rank-4 map to `Q(S,2)` and a 31-dimensional norm-one kernel | Theta Galois modules, p-adic local images, the comparison kernel, and the final Selmer bound remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
 
 `Curve#hyperelliptic_plane_model?` is specifically the smooth plane-model
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
@@ -1203,13 +1204,23 @@ S.certificate.verified?
 Ainf = setup.certify_archimedean_data
 Ainf.signature[0] + 2*Ainf.signature[1]  # 27
 Ainf.certificate.verified?
+# P6/P9/P12 are the independently certified component S-class proofs.
+setup.certify_s_class_two_torsion([P6, P9, P12])
 # U6/U9/U12 are independently certified component bases.
-Q = setup.certify_s_unit_square_class_quotient(
+V = setup.certify_s_unit_square_class_space(
   [[U6], [U9], [U12]])
-Q.ambient_dimension        # 35
-Q.diagonal_rank            # 4
-Q.dimension                 # 31
-Q.certificate.verified?
+V.dimension                 # 35
+V.true_descent?             # true
+V.modulo_diagonal?          # false
+V.certificate.verified?
+N = V.norm_map
+N.target.dimension          # 4, with generators [-1, 2, 3, 13]
+N.kernel_certificate.rank   # 4
+N.kernel_dimension          # 31
+N.certificate.verified?
+# Once V is bound to the setup:
+global_norm = setup.certify_global_norm_condition
+global_norm.constraint_block.certified?
 ```
 
 For the shell-width quartic, the bitangent certificate checks supplied
@@ -1242,14 +1253,35 @@ component. It certifies 4, 9, and 7 primes respectively, including all residue
 fields and ramification/residue-degree signatures. By itself this is
 finite-prime data, not an S-class-group or S-unit computation. Separate
 component certificates establish the shell-width S-class and S-unit claims;
-`certify_s_unit_square_class_quotient` binds the latter to this setup's actual
+`certify_s_unit_square_class_space` binds the latter to this setup's actual
 maximal order and S-prime set. The archimedean layer directly
 Sturm-isolates the real roots of each squarefree component and records the
 remaining complex conjugate pairs. It deliberately avoids requiring a full
 irreducible factorization of the degree-6/9/12 presentations.
 
-The global, norm, unramified, and local conditions eventually produced by the
-arithmetic layers meet in an exact F2 kernel:
+The distinction between true and fake descent matters here. Removing the
+rational distinguished bitangent gives the degree-27 true setup of BPS
+section 6.5, whose target is \(L'^\times/L'^{\times2}\). It does **not**
+quotient those 27 components again by diagonal rational square classes. The
+historical 31-dimensional calculation did exactly that and was therefore not
+the BPS ambient group. The corrected true ambient has dimension 35. For the
+equivalent all-28-bitangent fake setup, adjoining the rational component adds
+four rational S-unit dimensions before the rank-four diagonal quotient, so
+its dimension is also 35. Independently computing the true norm map gives a
+rank-four map from the 35-dimensional ambient space to
+\(\mathbb Q(S,2)=\langle-1,2,3,13\rangle\). Its norm-one kernel is therefore
+31-dimensional. This is the useful 31-dimensional space: the same number
+appears, but for a different and mathematically valid reason.
+
+`EtaleProductSUnitNormMapCertificate` reconstructs every generator norm and
+the complete binary matrix exactly. `PlaneQuarticBPSNormConstraintCertificate`
+then checks the true setup and imports BPS Lemma 6.16 for the statement that
+the descent image lies in that kernel. On the current shell-width artifacts,
+the full native replay takes about 32 seconds and 11.4 GB RSS. It is an
+explicit opt-in research check, not part of the ordinary regression suite.
+
+The remaining theta and local conditions will meet the certified global norm
+condition in an exact F2 kernel:
 
 ```w
 conditions = SelmerConstraintSystem.new(5)

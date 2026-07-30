@@ -1,5 +1,5 @@
 # Replay supplied S-unit generators for all three shell-width bitangent-field
-# components and certify the diagonal rational S-unit quotient.
+# components and certify the direct true-descent S-unit square-class space.
 #
 #   bin/tungsten compile scripts/algebra/shell_width_s_units_verify.w \
 #     --out /tmp/shell-width-s-units-verify
@@ -7,8 +7,8 @@
 #     D12_GENERATORS [AUXILIARY_PRIME_LIMIT] [ONLY_DEGREE]
 #
 # Generator discovery is external to this checker. Every ideal support,
-# archimedean sign, auxiliary residue character, F2 rank, and diagonal
-# coordinate is reconstructed exactly.
+# archimedean sign, auxiliary residue character, and F2 rank is reconstructed
+# exactly.
 
 use algebra
 use core/file
@@ -197,11 +197,20 @@ exit(0) if only_degree != nil
 product_order = EtaleProductOrder.new([
   source6, source9, source12
 ])
-quotient = product_order.s_unit_square_class_quotient(
+space = product_order.s_unit_square_class_space(
   rational_s, [[bases[0]], [bases[1]], [bases[2]]])
-<< ["ambient_dimension", quotient.ambient_dimension]
-<< ["diagonal_rank", quotient.diagonal_rank]
-<< ["quotient_dimension", quotient.dimension]
-<< ["diagonal_matrix", quotient.diagonal_matrix]
-<< ["certified", quotient.certified?]
-<< ["proof_kind", quotient.certificate.proof_kind]
+<< ["dimension", space.dimension]
+<< ["true_descent", space.true_descent?]
+<< ["modulo_diagonal", space.modulo_diagonal?]
+<< ["certified", space.certified?]
+<< ["proof_kind", space.certificate.proof_kind]
+norm_map = space.norm_map
+raise "unexpected shell-width true ambient dimension" if space.dimension != 35
+raise "unexpected shell-width norm target dimension" if norm_map.target.dimension != 4
+raise "unexpected shell-width norm rank" if norm_map.kernel_certificate.rank != 4
+raise "unexpected shell-width norm kernel dimension" if norm_map.kernel_dimension != 31
+<< ["norm_target_dimension", norm_map.target.dimension]
+<< ["norm_matrix", norm_map.matrix]
+<< ["norm_rank", norm_map.kernel_certificate.rank]
+<< ["norm_kernel_dimension", norm_map.kernel_dimension]
+<< ["norm_certified", norm_map.certified?]

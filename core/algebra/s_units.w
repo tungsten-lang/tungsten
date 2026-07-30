@@ -681,6 +681,220 @@
     certificate.verified?
 
 
++ EtaleProductSUnitSquareClassSpaceCertificate
+  -> new(@space)
+    @verified_cache = nil
+
+  -> space
+    @space
+
+  -> theorem
+    "S-unit square classes commute with finite products"
+
+  -> theorem_reference
+    "Bruin-Poonen-Stoll sections 6.2 and 7.1"
+
+  -> proof_kind
+    :trusted_theorem_import
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> same_prime_sets?(left, right)
+    return false if left.size != right.size
+    i = 0
+    while i < left.size
+      found = false
+      j = 0
+      while j < right.size
+        found = true if left[i].eql?(right[j])
+        j += 1
+      return false if !found
+      i += 1
+    true
+
+  -> expected_s_primes(field)
+    out = []
+    @space.rational_primes.each -> (rational_prime)
+      field.prime_ideals_above(
+        rational_prime).each -> (prime)
+        out.push(prime)
+    out
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "EtaleProductSUnitSquareClassSpace"
+    return false if @space.class_name != expected
+    order = @space.order
+    return false if order.class_name != "EtaleProductOrder"
+    return false if !order.certificate.verified?
+    rational_primes = @space.rational_primes
+    i = 0
+    while i < rational_primes.size
+      return false if !rational_primes[i].prime?
+      j = 0
+      while j < i
+        return false if rational_primes[j] == rational_primes[i]
+        j += 1
+      i += 1
+
+    nested = @space.component_bases
+    return false if nested.size != order.component_count
+    component_orders = order.component_orders
+    dimension = 0
+    component_index = 0
+    while component_index < nested.size
+      bases = nested[component_index]
+      return false if bases.class_name != "Array" || bases.size == 0
+      component_order = component_orders[component_index]
+      if component_order.class_name == "MonogenicOrder"
+        component_polynomial = component_order.source_polynomial.monic
+      else
+        component_polynomial = component_order.algebra.defining_polynomial.monic
+      product = component_polynomial.ring.one
+      i = 0
+      while i < bases.size
+        basis = bases[i]
+        basis_class = basis.class_name
+        ordinary = basis_class == "NumberFieldSUnitSquareClassBasis"
+        transferred = basis_class == "NumberFieldIsomorphicSUnitSquareClassBasis"
+        return false if !ordinary && !transferred
+        return false if !basis.certificate.verified?
+        field = basis.field
+        polynomial = field.defining_polynomial
+        return false if polynomial.ring != component_polynomial.ring
+        j = 0
+        while j < i
+          previous = bases[j].field.defining_polynomial
+          return false if polynomial.gcd(previous).degree != 0
+          j += 1
+        product *= polynomial.monic
+        if ordinary
+          return false if !same_prime_sets?(
+            expected_s_primes(field), basis.s_primes)
+        else
+          return false if basis.rational_primes.to_s != rational_primes.to_s
+        dimension += basis.dimension
+        i += 1
+      return false if !product.monic.eql?(component_polynomial)
+      component_index += 1
+
+    valid = dimension == @space.dimension
+    valid && dimension == @space.ambient_dimension
+
+  -> certified?
+    verified?
+
+  -> to_s
+    text = "EtaleProductSUnitSquareClassSpaceCertificate(dim "
+    text + @space.dimension.to_s + ")"
+
+  -> inspect
+    to_s
+
+
+# The direct product of the component O_{L,S}^x/O_{L,S}^{x2} spaces.  Once
+# the corresponding S-class 2-torsion has independently been proved trivial,
+# this is L(2,S), the global finite ambient space for a true 2-descent setup.
+# It does not divide by diagonal rational classes: that quotient belongs to a
+# fake setup whose etale algebra includes every member of the original
+# Galois set.
++ EtaleProductSUnitSquareClassSpace
+  -> new(@order, rational_primes, component_bases)
+    if @order.class_name != "EtaleProductOrder"
+      raise "product S-unit space needs an EtaleProductOrder"
+    if rational_primes.class_name != "Array"
+      raise "product S-unit rational primes must be an Array"
+    if component_bases.class_name != "Array"
+      raise "product S-unit component bases must be an Array"
+    @rational_primes = []
+    rational_primes.each -> (prime)
+      @rational_primes.push(prime)
+    @component_bases = []
+    component_bases.each -> (bases)
+      if bases.class_name != "Array"
+        raise "each etale component needs an Array of S-unit bases"
+      copied = []
+      bases.each -> (basis)
+        copied.push(basis)
+      @component_bases.push(copied)
+    @flat_bases = []
+    @dimension = 0
+    @component_bases.each -> (bases)
+      bases.each -> (basis)
+        @flat_bases.push(basis)
+        @dimension += basis.dimension
+    @certificate_cache = EtaleProductSUnitSquareClassSpaceCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "product S-unit square-class space failed certification"
+
+  -> order
+    @order
+
+  -> rational_primes
+    out = []
+    @rational_primes.each -> (prime)
+      out.push(prime)
+    out
+
+  -> component_bases
+    out = []
+    @component_bases.each -> (bases)
+      copied = []
+      bases.each -> (basis)
+        copied.push(basis)
+      out.push(copied)
+    out
+
+  -> flat_bases
+    out = []
+    @flat_bases.each -> (basis)
+      out.push(basis)
+    out
+
+  -> ambient_dimension
+    @dimension
+
+  -> dimension
+    @dimension
+
+  -> coordinates(vector)
+    F2LinearAlgebra.validate_vector(vector, @dimension)
+    F2LinearAlgebra.copy_vector(vector)
+
+  -> true_descent?
+    true
+
+  -> modulo_diagonal?
+    false
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+  -> to_s
+    text = "EtaleProductSUnitSquareClassSpace(dim "
+    text + @dimension.to_s + ")"
+
+  -> inspect
+    to_s
+
+
 + EtaleProductSUnitSquareClassQuotientCertificate
   -> new(@quotient)
     @verified_cache = nil
@@ -976,6 +1190,11 @@
 
 
 + EtaleProductOrder
+  -> s_unit_square_class_space(
+       rational_primes, component_bases)
+    EtaleProductSUnitSquareClassSpace.new(
+      self, rational_primes, component_bases)
+
   -> s_unit_square_class_quotient(
        rational_primes, component_bases)
     EtaleProductSUnitSquareClassQuotient.new(

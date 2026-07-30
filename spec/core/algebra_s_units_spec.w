@@ -193,6 +193,41 @@ sunit_check("archimedean.product.certified",
 
 product_square_classes = product_order.s_unit_square_class_quotient(
   [], [[U5], [imaginary_units]])
+product_true_space = product_order.s_unit_square_class_space(
+  [], [[U5], [imaginary_units]])
+sunit_check("sunit.product.true_space_dimension",
+            product_true_space.dimension, 3)
+sunit_check("sunit.product.true_space_coordinates",
+            product_true_space.coordinates(
+              [1, 0, 1]).to_s,
+            "\[1, 0, 1\]")
+sunit_check("sunit.product.true_space_no_diagonal",
+            product_true_space.modulo_diagonal?, false)
+sunit_check("sunit.product.true_space_certified",
+            product_true_space.certified?, true)
+product_norm = product_true_space.norm_map
+sunit_check("sunit.product.norm.target_dimension",
+            product_norm.target.dimension, 1)
+sunit_check("sunit.product.norm.matrix",
+            product_norm.matrix.to_s, "\[\[0, 1, 0\]\]")
+sunit_check("sunit.product.norm.kernel_dimension",
+            product_norm.kernel_dimension, 2)
+sunit_check("sunit.product.norm.apply_nontrivial",
+            product_norm.apply([0, 1, 0]).to_s, "\[1\]")
+sunit_check("sunit.product.norm.apply_kernel",
+            product_norm.apply([1, 0, 1]).to_s, "\[0\]")
+sunit_check("sunit.product.norm.certified",
+            product_norm.certified?, true)
+sunit_check("sunit.product.norm.target_accepts_outside_square",
+            product_norm.target.coordinates(25).to_s, "\[0\]")
+outside_rational_s_failed = false
+begin
+  product_norm.target.coordinates(5)
+rescue error
+  outside_rational_s_failed = error.to_s.index(
+    "ramified outside S") != nil
+sunit_check("sunit.product.norm.target_rejects_outside_S",
+            outside_rational_s_failed, true)
 sunit_check("sunit.product.ambient_dimension",
             product_square_classes.ambient_dimension, 3)
 sunit_check("sunit.product.diagonal_rank",

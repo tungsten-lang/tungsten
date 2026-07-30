@@ -394,6 +394,7 @@ use core/algebra/local_geometry
       raise "local normalization certificate did not verify"
     @singularity = @source_polynomial.local_singularity(
       @x_variable, @y_variable, @point)
+    @local_delta_invariant = nil
 
   -> source_polynomial
     @source_polynomial
@@ -427,19 +428,6 @@ use core/algebra/local_geometry
 
   -> branch_count
     geometric_branch_count
-
-  -> delta
-    if !@singularity.ordinary?
-      raise (
-        "general delta from normalization jets is not yet implemented; " +
-        "the ordinary-point formula remains available")
-    @singularity.delta
-
-  -> delta_certificate
-    if !@singularity.ordinary?
-      raise (
-        "general delta certificate requires local conductor arithmetic")
-    @singularity.delta_certificate
 
   -> finite_jet?
     true

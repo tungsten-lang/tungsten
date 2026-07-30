@@ -150,10 +150,8 @@ incomplete_cover = PlaneProjectionSheetCoverCertificate.new(
 normalization_check("cover.incomplete_rejected",
                     !incomplete_cover.verified?)
 
-cusp_delta_rejected = false
-begin
-  cusp.delta
-rescue error
-  cusp_delta_rejected = true
-normalization_check("delta.boundary",
-                    cusp_delta_rejected)
+normalization_check("delta.general",
+                    cusp.delta == 1 &&
+                    cusp.delta_certificate.verified? &&
+                    cusp.delta_certificate.proof_kind ==
+                      :trusted_theorem_import)

@@ -573,10 +573,63 @@ Algebra.local_normalization(y**2 - x**3).
 ```
 
 This object is finite normalization *jet data*, not the completed local ring:
-`finite_jet?` is true and `complete_local_ring?` is false. General conductor
-and delta-invariant arithmetic is still pending. `delta` currently delegates
-only to the already-certified ordinary multiple-point formula and raises on a
-cusp rather than guessing.
+`finite_jet?` is true and `complete_local_ring?` is false.
+
+## Local discriminants, Milnor numbers, and delta invariants
+
+For a reduced plane equation that is \(y\)-distinguished at the selected point
+with constant nonzero \(y\)-leading coefficient, Tungsten now combines the
+normalization branch count with an exact bivariate resultant:
+
+```w
+local = (y**2 - x**3).local_delta_invariant(
+  0, 1, nil, 4)
+
+local.weierstrass_degree             # 2
+local.derivative_resultant           # -4*x^3
+local.discriminant_valuation         # 3
+local.milnor_number                  # 2
+local.branch_count                   # 1
+local.delta                          # 1
+
+local.discriminant_certificate.proof_kind
+# exact_bareiss_resultant
+local.discriminant_certificate.kernel_checked?  # true
+
+local.certificate.proof_kind
+# trusted_theorem_import
+local.certificate.kernel_checked?               # false
+```
+
+The bivariate surface is useful independently:
+
+```w
+f = y**2 - x**3
+f.resultant_in(f.derivative(1), :y)  # -4*x^3
+```
+
+Its Sylvester determinant uses fraction-free Bareiss elimination over
+\(\mathbb Q[x]\), and the certificate recomputes the exact resultant and its
+valuation. The final invariant uses the classical characteristic-zero
+identities
+
+\[
+  v_x(\operatorname{Res}_y(f,f_y))=\mu+n-1,\qquad
+  2\delta=\mu+r-1.
+\]
+
+Those identities and the Newton--Puiseux branch-orbit theorem are listed by
+`theorem_dependencies`; they are not relabelled as kernel proofs. The surface
+works for smooth points, nodes, cusps, tacnodes, ordinary multiple points,
+algebraic branch packets, repeated tangents, and shifted affine/projective
+charts.
+
+The current exact formula deliberately requires a reduced,
+\(y\)-distinguished presentation. If the dependent-variable leading
+coefficient vanishes at the point, it raises with a request to change local
+coordinates or compute a Weierstrass polynomial. Computing that coordinate
+change, completed local rings, value semigroups, and conductor ideals remains
+future work.
 
 The current lift handles squarefree characteristic factors and recursively
 refines repeated rational linear factors, subject to the exact factorization

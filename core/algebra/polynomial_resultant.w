@@ -196,7 +196,139 @@
       field_mul(@ring.field.coerce(sign), resultant(derivative(0))),
       leading_coefficient)
 
-  # View this polynomial as a polynomial in one selected variable. The
-  # returned coefficient remains in the same sparse ambient ring, with the
-  # selected exponent set to zero. Keeping one ring avoids inventing a
-  # recursive polynomial type while still supporting exact pseudo-remainders.
+  -> order_at_zero
+    if @ring.arity != 1
+      raise "order_at_zero is only defined for univariate polynomials"
+    return nil if zero?
+    exponent = 0
+    while exponent <= degree
+      return exponent if !field_zero?(coeff(exponent))
+      exponent += 1
+    nil
+
+  -> valuation_at_zero
+    order_at_zero
+
+  # Coefficients in one variable, represented as univariate polynomials in
+  # the other. This small recursive-polynomial boundary is enough for exact
+  # bivariate Sylvester resultants without changing Polynomial's sparse
+  # coefficient representation.
+  -> coefficient_polynomials_in(variable)
+    if @ring.arity != 2
+      raise "coefficient_polynomials_in currently requires two variables"
+    index = (
+      variable.class_name == "Integer" ?
+      variable : @ring.index_of(variable))
+    if index == nil || index < 0 || index >= 2
+      raise "unknown bivariate coefficient variable"
+    other = 1 - index
+    coefficient_ring = PolynomialRing.new(
+      [@ring.names[other]], @ring.field, @ring.order)
+    out = []
+    exponent = 0
+    while exponent <= degree_in(index)
+      out.push(coefficient_ring.zero)
+      exponent += 1
+    self.each_term -> (coefficient, exponents)
+      power = exponents[index]
+      out[power] += coefficient_ring.monomial(
+        coefficient, [exponents[other]])
+    out
+
+  # Fraction-free determinant over a univariate polynomial domain. Bareiss
+  # divisions are exact minors, preventing rational-function coefficient
+  # growth in the bivariate Sylvester matrix.
+  -> .polynomial_bareiss_determinant(matrix, ring)
+    size = matrix.size
+    return ring.one if size == 0
+    work = []
+    matrix.each -> (source_row)
+      if source_row.size != size
+        raise "polynomial determinant requires a square matrix"
+      row = []
+      source_row.each -> row.push(ring.coerce(item))
+      work.push(row)
+    sign = 1
+    previous = ring.one
+    pivot_index = 0
+    while pivot_index + 1 < size
+      pivot_row = pivot_index
+      while (pivot_row < size &&
+             work[pivot_row][pivot_index].zero?)
+        pivot_row += 1
+      return ring.zero if pivot_row == size
+      if pivot_row != pivot_index
+        temporary = work[pivot_index]
+        work[pivot_index] = work[pivot_row]
+        work[pivot_row] = temporary
+        sign = 0 - sign
+      pivot = work[pivot_index][pivot_index]
+      row_index = pivot_index + 1
+      while row_index < size
+        column_index = pivot_index + 1
+        while column_index < size
+          numerator = (
+            pivot*work[row_index][column_index] -
+            work[row_index][pivot_index]*
+              work[pivot_index][column_index])
+          work[row_index][column_index] = (
+            pivot_index == 0 ?
+            numerator : numerator / previous)
+          column_index += 1
+        work[row_index][pivot_index] = ring.zero
+        row_index += 1
+      previous = pivot
+      pivot_index += 1
+    result = work[size - 1][size - 1]
+    sign < 0 ? -result : result
+
+  # Exact bivariate resultant with respect to `variable`. The result is a
+  # univariate polynomial in the remaining variable.
+  -> bivariate_resultant(other, variable)
+    other = coerce(other)
+    if @ring.arity != 2
+      raise "bivariate_resultant requires a two-variable ring"
+    index = (
+      variable.class_name == "Integer" ?
+      variable : @ring.index_of(variable))
+    if index == nil || index < 0 || index >= 2
+      raise "unknown bivariate resultant variable"
+    left = coefficient_polynomials_in(index)
+    right = other.coefficient_polynomials_in(index)
+    m = degree_in(index)
+    n = other.degree_in(index)
+    coefficient_ring = left[0].ring
+    return coefficient_ring.zero if zero? || other.zero?
+    return left[0]**n if m == 0
+    return right[0]**m if n == 0
+
+    size = m + n
+    matrix = []
+    row_index = 0
+    while row_index < size
+      row = []
+      size.times -> row.push(coefficient_ring.zero)
+      matrix.push(row)
+      row_index += 1
+    row_index = 0
+    while row_index < n
+      coefficient_index = 0
+      while coefficient_index <= m
+        matrix[row_index][row_index + coefficient_index] = (
+          left[m - coefficient_index])
+        coefficient_index += 1
+      row_index += 1
+    row_index = 0
+    while row_index < m
+      coefficient_index = 0
+      while coefficient_index <= n
+        matrix[n + row_index][row_index + coefficient_index] = (
+          right[n - coefficient_index])
+        coefficient_index += 1
+      row_index += 1
+    Polynomial.polynomial_bareiss_determinant(
+      matrix, coefficient_ring)
+
+  -> resultant_in(other, variable)
+    return resultant(other) if @ring.arity == 1
+    bivariate_resultant(other, variable)

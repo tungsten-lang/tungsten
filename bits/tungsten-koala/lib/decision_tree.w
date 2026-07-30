@@ -351,6 +351,47 @@
       i += 1
     out
 
+  # Row indices sorted by one feature's numeric value, ties by original row
+  # index. Bottom-up stable merge sort keeps this O(n log n), deterministic,
+  # and portable across the interpreter and native engine without depending
+  # on Array#sort implementation details.
+  -> .sorted_feature_indices(rows, feature)
+    order = []
+    n = rows.size
+    n.times -> (i)
+      order.push(i)
+    width = 1
+    while width < n
+      merged = []
+      start = 0
+      while start < n
+        middle = start + width
+        middle = n if middle > n
+        stop = start + width * 2
+        stop = n if stop > n
+        left = start
+        right = middle
+        while left < middle || right < stop
+          take_left = false
+          take_left = true if right >= stop
+          if left < middle && right < stop
+            left_index = order[left]
+            right_index = order[right]
+            left_value = rows[left_index][feature].to_f
+            right_value = rows[right_index][feature].to_f
+            take_left = left_value < right_value
+            take_left = true if left_value == right_value && left_index < right_index
+          if take_left
+            merged.push(order[left])
+            left += 1
+          else
+            merged.push(order[right])
+            right += 1
+        start = stop
+      order = merged
+      width *= 2
+    order
+
   # The feature indices this node's split search will scan, ASCENDING.
   #
   # An ordinary tree scans EVERY feature: `cfg[:max_features]` is absent
@@ -453,38 +494,152 @@
   # all of them for an ordinary tree (unchanged), a fresh random subset per
   # node when the caller asked for one (a random forest). Either way they
   # arrive in ascending index order, so the rule above is untouched.
+  #
+  # Each feature is sorted ONCE, then scanned left-to-right while class
+  # counts or regression variance moments move across the boundary. Only the
+  # winning threshold partitions row storage. The former implementation
+  # rebuilt both partitions and recomputed both impurities at every candidate,
+  # making a node O(features * rows^2); this is
+  # O(features * rows * log(rows)) and allocates two partitions per node
+  # rather than two per candidate.
   -> .best_split(rows, ys, wts, cfg, parent_imp)
     k = cfg[:k]
     min_leaf = cfg[:min_leaf]
     crit = cfg[:crit]
-    nd = Estimator.weight_total(wts, rows.size).to_f
+    n = rows.size
+    nd = Estimator.weight_total(wts, n).to_f
     tol = parent_imp / 1000000000000.to_f
     best = nil
     bgain = 0.to_f
+    total_counts = DecisionTree.node_counts(ys, k, wts)
+
+    # Weighted Welford state for regression. Classification does not touch
+    # these values; computing them once outside the feature loop makes each
+    # feature sweep linear after sorting.
+    total_weight = 0.to_f
+    total_mean = 0.to_f
+    total_m2 = 0.to_f
+    if k == 0
+      i = 0
+      while i < n
+        weight = 1.to_f
+        weight = wts[i] if wts != nil
+        value = ys[i].to_f
+        next_weight = total_weight + weight
+        delta = value - total_mean
+        next_mean = total_mean + (weight / next_weight) * delta
+        total_m2 += weight * delta * (value - next_mean)
+        total_weight = next_weight
+        total_mean = next_mean
+        i += 1
+
     feats = DecisionTree.split_features(cfg)
     feats.each -> (j)
-      col = []
-      rows.each -> (r)
-        col.push(r[j].to_f)
-      uniq = DecisionTree.sorted_unique(col)
-      span = uniq.size - 1
-      span = 0 if span < 0
-      span.times -> (c)
-        thr = (uniq[c] + uniq[c + 1]) / 2.to_f
-        part = DecisionTree.partition(rows, ys, wts, j, thr)
-        ln = part[:lr].size
-        rn = part[:rr].size
-        if ln >= min_leaf && rn >= min_leaf
-          lws = part[:lws]
-          rws = part[:rws]
-          lwn = Estimator.weight_total(lws, ln)
-          rwn = Estimator.weight_total(rws, rn)
-          li = DecisionTree.impurity(part[:ly], DecisionTree.node_counts(part[:ly], k, lws), lwn, crit, lws)
-          ri = DecisionTree.impurity(part[:ry], DecisionTree.node_counts(part[:ry], k, rws), rwn, crit, rws)
-          gain = parent_imp - (lwn.to_f / nd) * li - (rwn.to_f / nd) * ri
+      order = DecisionTree.sorted_feature_indices(rows, j)
+      left_counts = nil
+      right_counts = nil
+      if k > 0
+        left_counts = []
+        right_counts = []
+        total_counts.each -> (count)
+          zero = 0
+          zero = 0.to_f if wts != nil
+          left_counts.push(zero)
+          right_counts.push(count)
+
+      left_weight = 0.to_f
+      right_weight = nd
+      left_mean = 0.to_f
+      right_mean = total_mean
+      left_m2 = 0.to_f
+      right_m2 = total_m2
+      suffix_constant = nil
+      left_constant = true
+      left_first = nil
+      if k == 0
+        suffix_constant = []
+        n.times -> (i)
+          suffix_constant.push(true)
+        suffix_position = n - 2
+        while suffix_position >= 0
+          current_target = ys[order[suffix_position]]
+          next_target = ys[order[suffix_position + 1]]
+          suffix_constant[suffix_position] = suffix_constant[suffix_position + 1] && current_target == next_target
+          suffix_position -= 1
+      position = 0
+      while position < n - 1
+        index = order[position]
+        weight = 1.to_f
+        weight = wts[index] if wts != nil
+        value = ys[index].to_f
+
+        if k > 0
+          class_index = ys[index]
+          left_counts[class_index] += weight
+          right_counts[class_index] -= weight
+          left_weight += weight
+          right_weight -= weight
+        else
+          left_first = value if position == 0
+          left_constant = false if value != left_first
+          next_left_weight = left_weight + weight
+          left_delta = value - left_mean
+          next_left_mean = left_mean + (weight / next_left_weight) * left_delta
+          left_m2 += weight * left_delta * (value - next_left_mean)
+          left_m2 = 0.to_f if left_constant
+          left_weight = next_left_weight
+          left_mean = next_left_mean
+
+          next_right_weight = right_weight - weight
+          if next_right_weight > 0.to_f
+            next_right_mean = right_mean - weight * (value - right_mean) / next_right_weight
+            right_m2 -= weight * (value - right_mean) * (value - next_right_mean)
+            right_m2 = 0.to_f if right_m2 < 0.to_f
+            # Removing rows can leave a few ulps instead of mathematical zero.
+            # Clamp only when the suffix is structurally constant; a
+            # magnitude heuristic would erase real variance around a large
+            # target offset.
+            right_m2 = 0.to_f if suffix_constant[position + 1]
+            right_mean = next_right_mean
+          else
+            right_mean = 0.to_f
+            right_m2 = 0.to_f
+          right_weight = next_right_weight
+
+        ln = position + 1
+        rn = n - ln
+        current_value = rows[index][j].to_f
+        next_value = rows[order[position + 1]][j].to_f
+        if current_value != next_value && ln >= min_leaf && rn >= min_leaf
+          li = 0.to_f
+          ri = 0.to_f
+          if k > 0
+            li = DecisionTree.gini(left_counts, left_weight)
+            ri = DecisionTree.gini(right_counts, right_weight)
+            if crit == "entropy"
+              li = DecisionTree.entropy(left_counts, left_weight)
+              ri = DecisionTree.entropy(right_counts, right_weight)
+          else
+            li = left_m2 / left_weight
+            ri = right_m2 / right_weight
+          gain = parent_imp - (left_weight / nd) * li - (right_weight / nd) * ri
           if best == nil || gain > bgain + tol
             bgain = gain
-            best = { feature: j, threshold: thr, gain: gain, lr: part[:lr], ly: part[:ly], lws: lws, rr: part[:rr], ry: part[:ry], rws: rws }
+            threshold = (current_value + next_value) / 2.to_f
+            best = { feature: j, threshold: threshold, gain: gain }
+        position += 1
+
+    # Materialize aligned child arrays exactly once, after every feature has
+    # competed. The recursive builder consumes the same best-split shape as
+    # before, so no caller or node representation changes.
+    if best != nil
+      part = DecisionTree.partition(rows, ys, wts, best[:feature], best[:threshold])
+      best[:lr] = part[:lr]
+      best[:ly] = part[:ly]
+      best[:lws] = part[:lws]
+      best[:rr] = part[:rr]
+      best[:ry] = part[:ry]
+      best[:rws] = part[:rws]
     best
 
   # --- Node construction ---

@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(353 total), grouped by area, with its declaration, a one-line
+(357 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -240,6 +240,10 @@ summary from the source header, and a link to the source.
 | `PlaneCurveLocalDiscriminantCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `PlaneCurveLocalDeltaInvariant` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `PlaneCurveLocalDeltaCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `LocalPlaneParametrizationIntersection` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `LocalPlaneParametrizationIntersectionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneCurveLocalIntersection` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneCurveLocalIntersectionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `PlaneTangentDirection` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `PlaneCurveLocalSingularity` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `PlaneCurveLocalSingularityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

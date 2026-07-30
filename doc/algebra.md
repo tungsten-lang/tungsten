@@ -631,6 +631,56 @@ coordinates or compute a Weierstrass polynomial. Computing that coordinate
 change, completed local rings, value semigroups, and conductor ideals remains
 future work.
 
+## Local intersection multiplicity
+
+The same normalization packets compute exact intersections with another local
+plane germ. Each packet certificate substitutes the target equation into
+\(x(t),y(t)\) over the packet's exact coefficient field and finds its first
+nonzero coefficient:
+
+```w
+cusp = y**2 - x**3
+
+horizontal = cusp.local_intersection(
+  y, 0, 1, nil, 4)
+horizontal.multiplicity                         # 3
+
+horizontal.packet_intersections[0].valuation    # 3
+horizontal.packet_intersections[0].
+  geometric_contribution                        # 3/2
+horizontal.packet_intersections[0].
+  certificate.kernel_checked?                   # true
+
+cusp.local_intersection_multiplicity(
+  x, 0, 1, nil, 4)                              # 2
+```
+
+The half-contributions in the first example are intentional: the two
+\(x\)-projection sheets of the cusp form one geometric branch, so their two
+weights \(1/2\) combine to one parameter valuation of 3. Nodes, tacnodes,
+algebraic packets, shifted points, and projective curves use the same entry
+point:
+
+```w
+(y**2 - x**4).local_intersection_multiplicity(
+  y, 0, 1, nil, 4)                              # 4
+
+C.local_intersection(other_curve, [0, 0], 2, 6).
+  multiplicity
+```
+
+`LocalPlaneParametrizationIntersectionCertificate` is a finite exact
+substitution check. The aggregate
+`PlaneCurveLocalIntersectionCertificate` separately records the classical
+branch-valuation formula as a `trusted_theorem_import`, so its
+`kernel_checked?` value is false.
+
+Precision is part of the contract. If the target vanishes through every
+retained parameter coefficient, Tungsten cannot distinguish very high contact
+from a common component and raises with a request to increase
+`maximum_power`. It never turns an all-zero truncated residual into a finite
+intersection number.
+
 The current lift handles squarefree characteristic factors and recursively
 refines repeated rational linear factors, subject to the exact factorization
 and recursion bounds. A repeated higher-degree algebraic factor, a

@@ -405,6 +405,12 @@ use core/algebra/local_geometry
   -> point
     @point
 
+  -> x_variable
+    @x_variable
+
+  -> y_variable
+    @y_variable
+
   -> projection_sheets
     @sheets
 

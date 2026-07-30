@@ -25033,6 +25033,13 @@ static WMethod *w_cacheable_type_class_method(WValue recv, WValue name,
  * fast path lives in w_method_call_cached below and is inlined into
  * every IR call site under LTO. */
 __attribute__((visibility("hidden")))
+/* Set by w_method_dispatch's GENERIC constructor block (and only there) to
+ * the init WMethod it selected. w_method_call_slow reads it to decide that a
+ * `.new` dispatch is IC-cacheable: the special-cased builtin constructors
+ * (Response / ByteArray / BoolArray / Rational / ...) return before the
+ * generic block, never set it, and therefore never publish. */
+static __thread WMethod *g_generic_ctor_selected;
+
 WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
                           WInlineCache *cache, uint64_t key) {
     /* Init IC tables on first slow-path entry. The cached fast path can
@@ -25068,6 +25075,7 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
         return w_type_class_method_call(type_method, recv, &stack_args);
     }
 
+    g_generic_ctor_selected = NULL;
     WValue result = w_method_dispatch(recv, name, &stack_args, W_NIL);
 
     if (key >= 0x100 && w_is_instance(recv)) {
@@ -25086,8 +25094,49 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
         if (m) {
             w_ic_publish(cache, key, m->fn_ptr, m->arity - 1 /* subtract class receiver */);
         }
+    } else if (w_is_class(recv)) {
+        /* Constructor: allocate-then-init can't ride a plain fn_ptr cache
+         * entry, so it was excluded and every `C.new` walked the strcmp
+         * cascade (~60% of the new_object primitive). Publish the selected
+         * init fn with arity code -(2+argc); the hit path re-runs
+         * allocate + init directly. Only the GENERIC ctor block sets
+         * g_generic_ctor_selected, so builtin specials never publish. */
+        WMethod *cm = g_generic_ctor_selected;
+        if (cm && cm->arity - 1 == argc && argc <= 8) {
+            w_ic_publish(cache, key, cm->fn_ptr, -2 - argc);
+        }
     }
     return result;
+}
+
+/* IC hit path for a cached constructor (arity code -(2+argc)): the cache
+ * guard proved recv is the exact class whose generic-path init was
+ * published; allocate and run init directly. Init's return value is
+ * discarded and the fresh instance returned, mirroring the generic path. */
+static WValue w_construct_cached(WValue recv, void *fn, int expected, WValue *a) {
+    WValue obj = w_object_new(recv);
+    typedef WValue (*fn0)(WValue);
+    typedef WValue (*fn1)(WValue, WValue);
+    typedef WValue (*fn2)(WValue, WValue, WValue);
+    typedef WValue (*fn3)(WValue, WValue, WValue, WValue);
+    typedef WValue (*fn4)(WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*fn5)(WValue, WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*fn6)(WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*fn7)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*fn8)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    switch (expected) {
+        case 0: ((fn0)fn)(obj); break;
+        case 1: ((fn1)fn)(obj, a[0]); break;
+        case 2: ((fn2)fn)(obj, a[0], a[1]); break;
+        case 3: ((fn3)fn)(obj, a[0], a[1], a[2]); break;
+        case 4: ((fn4)fn)(obj, a[0], a[1], a[2], a[3]); break;
+        case 5: ((fn5)fn)(obj, a[0], a[1], a[2], a[3], a[4]); break;
+        case 6: ((fn6)fn)(obj, a[0], a[1], a[2], a[3], a[4], a[5]); break;
+        case 7: ((fn7)fn)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6]); break;
+        case 8: ((fn8)fn)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]); break;
+        default: break;
+    }
+    return obj;
 }
 
 /* Inline-cached method dispatch — fast path. Plain `inline` lets LTO
@@ -25109,6 +25158,13 @@ WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc
     int32_t car = cache->arity;
     if (__builtin_expect(key == tk && fn != NULL &&
             key == atomic_load_explicit(&cache->type_key, memory_order_acquire), 1)) {
+        if (car <= -2) {
+            /* Cached constructor: arity code -(2+argc). Same-argc sites hit
+             * the direct allocate+init; a changed argc (splat) goes slow. */
+            if (-car - 2 == argc)
+                return w_construct_cached(recv, fn, argc, args_ptr);
+            return w_method_call_slow(recv, name, args_ptr, argc, cache, key);
+        }
         if (car < 0) {
             return ((WValue(*)(WValue, WValue*, int))fn)(recv, args_ptr, argc);
         }
@@ -25157,6 +25213,12 @@ WValue w_method_call_cached_0(WValue recv, WValue name, WInlineCache *cache) {
     int32_t car = cache->arity;
     if (__builtin_expect(key == tk && fn != NULL &&
             key == atomic_load_explicit(&cache->type_key, memory_order_acquire), 1)) {
+        if (car <= -2) {
+            /* Cached zero-arg constructor (arity code -2): allocate + init. */
+            if (car == -2)
+                return w_construct_cached(recv, fn, 0, NULL);
+            return w_method_call_slow(recv, name, NULL, 0, cache, key);
+        }
         if (car < 0) {
             return ((WValue(*)(WValue, WValue*, int))fn)(recv, NULL, 0);
         }
@@ -25549,6 +25611,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
             WValue obj = w_object_new(recv);
             WMethod *m = w_method_lookup_arity(klass, WN_new, args->size + 1);
             if (!m) m = w_method_lookup(klass, WN_new);
+            g_generic_ctor_selected = m;  /* IC-cacheable: generic path taken */
             if (m) {
                 int expected = m->arity - 1;
                 WValue a[16];

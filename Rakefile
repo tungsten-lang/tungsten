@@ -94,6 +94,7 @@ namespace :test do
   desc "Run the stage-0 C VM and bootstrap contract tests"
   task :c_vm do
     run_command "make", "test", chdir: File.join(ROOT, "implementations/c")
+    run_command "ruby", File.join(ROOT, "scripts/test-build-stage1-cache-identity.rb")
   end
 
   desc "Run implementations/ruby specs (RSpec)"

@@ -296,13 +296,9 @@ export TUNGSTEN_AR="${TUNGSTEN_AR:-$BOOTSTRAP_AR}"
 export TUNGSTEN_OS="${TUNGSTEN_OS:-$UNAME_S}"
 export TUNGSTEN_LEX64_TABLE="${TUNGSTEN_LEX64_TABLE:-$ROOT/languages/tungsten/tungsten.lex64}"
 
-STAGE1_INPUTS=("$COMPILER_W" "$TUNGSTEN_LEX64_TABLE")
-while IFS= read -r path; do STAGE1_INPUTS+=("$path"); done < <(
-  find "$ROOT/compiler/lib" -type f -name '*.w' -print | LC_ALL=C sort
-)
 stage1_identity="$({
   printf '%s\n' \
-    "bootstrap-stage-content-v1" \
+    "bootstrap-stage-content-v2" \
     "$TUNGSTEN_CLANG_OPT" "$TUNGSTEN_C_FAST_PARSE" \
     "$TUNGSTEN_ZSTD_CFLAGS" "$TUNGSTEN_ZSTD_LDFLAGS" \
     "${TUNGSTEN_ONIG_CFLAGS:-}" "${TUNGSTEN_ONIG_LDFLAGS:-}" \
@@ -310,9 +306,8 @@ stage1_identity="$({
     "$TOOLCHAIN_ENV_ID" \
     "$(tool_identity "$TUNGSTEN_CC")" "$(tool_identity "$TUNGSTEN_AR")" \
     "$(sha256_file "$C_INTERP")" "$(sha256_file "$RUNTIME_A")"
-  for path in "${STAGE1_INPUTS[@]}"; do
-    printf '%s\0%s\n' "${path#$ROOT/}" "$(sha256_file "$path")"
-  done
+  bootstrap_stage1_source_manifest \
+    "$ROOT" "$COMPILER_W" "$TUNGSTEN_LEX64_TABLE"
 } | sha256_stdin)"
 STAGE1="$CACHE/bootstrap-stage1-$stage1_identity"
 STAGE1_COMPLETE="$STAGE1.complete"

@@ -3,6 +3,7 @@ require "fileutils"
 require "digest"
 require "find"
 require "etc"
+require_relative "build_cache_inputs"
 
 # Compiler source directory. Override via `--compiler-dir <name>`
 # (or the TUNGSTEN_COMPILER env var) to bootstrap from an alternate
@@ -925,6 +926,8 @@ def restore_optional_file(cached, destination)
 end
 
 unless bit_only
+  compiler_source_paths =
+    TungstenBuildCacheInputs.compiler_source_paths(COMPILER_DIR_NAME)
   stage1 = File.join(build_scratch_dir, "tungsten.wc")
   stage2 = File.join(build_scratch_dir, "tungsten-self-hosted.wc")
   stage_ll_dir = File.join(build_scratch_dir, "ll")
@@ -944,18 +947,24 @@ unless bit_only
 
   unless use_c_bootstrap
     # Legacy Ruby/Spinel paths have broader interpreter/driver dependencies.
+    # The packed lexer table is a stage-1 input too (the C path hashes it in
+    # c_stage1_identity); tree_sha skips non-source extensions, so a
+    # regenerated .lex64 must be folded in explicitly or a stale stage is
+    # reused after a table rebuild.
+    legacy_lex_table = ENV.fetch("TUNGSTEN_LEX64_TABLE",
+                                 File.join(ROOT, "languages/tungsten/tungsten.lex64"))
     stage1_input_sha = tree_sha("implementations/ruby",
-                                File.join(COMPILER_DIR_NAME, "tungsten.w"),
-                                File.join(COMPILER_DIR_NAME, "lib"),
+                                *compiler_source_paths,
                                 "runtime", "bin/tungsten", "bin/commands/build.rb")
-    stage1_sha = Digest::SHA256.hexdigest("#{stage1_input_sha}:#{runtime_compile_key}")[0..15]
+    stage1_sha = Digest::SHA256.hexdigest(
+      "#{stage1_input_sha}:#{runtime_compile_key}:#{file_sha(legacy_lex_table)}"
+    )[0..15]
     stage1_cached = File.join(build_cache_dir, "stage1-#{stage1_sha}")
   end
 
   if use_c_bootstrap
-    c_stage_cache_schema = "c-stage-content-v1"
-    c_stage1_sources_sha = tree_sha(File.join(COMPILER_DIR_NAME, "tungsten.w"),
-                                    File.join(COMPILER_DIR_NAME, "lib"))
+    c_stage_cache_schema = "c-stage-content-v2"
+    c_stage1_sources_sha = tree_sha(*compiler_source_paths)
     puts
     puts "#{bold}==> Stage 0: implementations/c VM#{reset}"
     verb, c_vm_elapsed, c_interp_for_build, c_vm_key_for_build = ensure_c_interp.call
@@ -1307,8 +1316,7 @@ unless bit_only
     install_compiler.call(stage1, "stage 1 only")
     t2 = t1
   else
-    stage2_input_sha = tree_sha(File.join(COMPILER_DIR_NAME, "tungsten.w"),
-                                File.join(COMPILER_DIR_NAME, "lib"),
+    stage2_input_sha = tree_sha(*compiler_source_paths,
                                 "runtime", "bin/tungsten", "bin/commands/build.rb")
     stage2_sha = Digest::SHA256.hexdigest("#{stage1_sha}:#{stage2_input_sha}:#{bootstrap_compiler_clang_opt}")[0..15]
     stage2_cached = File.join(build_cache_dir, "stage2-#{stage2_sha}")

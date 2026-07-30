@@ -34,4 +34,71 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$stage1"
 chmod 755 "$stage1"
 bootstrap_require_executable "$stage1" "$log_path" "stage 1 (C VM)"
 
-printf 'bootstrap stage-1 artifact contract: ok\n'
+source_tree="$TMP/source-tree"
+compiler_w="$source_tree/compiler/tungsten.w"
+lex64_table="$source_tree/languages/tungsten/tungsten.lex64"
+mkdir -p \
+  "$source_tree/compiler/lib" \
+  "$source_tree/core/numeric" \
+  "$source_tree/languages/tungsten/lexers"
+printf 'compiler\n' > "$compiler_w"
+printf 'lexer\n' > "$lex64_table"
+printf 'compiler a\n' > "$source_tree/compiler/lib/a.w"
+printf 'compiler z\n' > "$source_tree/compiler/lib/z.w"
+printf 'core a\n' > "$source_tree/core/a.w"
+printf 'core numeric b\n' > "$source_tree/core/numeric/b.w"
+printf 'ignored\n' > "$source_tree/core/ignored.txt"
+printf 'lexer helper a\n' > "$source_tree/languages/tungsten/lexers/a.w"
+printf 'lexer helper z\n' > "$source_tree/languages/tungsten/lexers/z.w"
+
+actual_inputs="$TMP/actual-inputs"
+expected_inputs="$TMP/expected-inputs"
+bootstrap_stage1_source_inputs \
+  "$source_tree" "$compiler_w" "$lex64_table" > "$actual_inputs"
+printf '%s\n' \
+  "$compiler_w" \
+  "$lex64_table" \
+  "$source_tree/compiler/lib/a.w" \
+  "$source_tree/compiler/lib/z.w" \
+  "$source_tree/core/a.w" \
+  "$source_tree/core/numeric/b.w" \
+  "$source_tree/languages/tungsten/lexers/a.w" \
+  "$source_tree/languages/tungsten/lexers/z.w" > "$expected_inputs"
+if ! cmp -s "$expected_inputs" "$actual_inputs"; then
+  printf 'FAIL: stage-1 source inputs are incomplete or unstable\n' >&2
+  diff -u "$expected_inputs" "$actual_inputs" >&2 || true
+  exit 1
+fi
+
+identity_before="$(
+  bootstrap_stage1_source_manifest \
+    "$source_tree" "$compiler_w" "$lex64_table"
+)"
+printf 'core a changed\n' > "$source_tree/core/a.w"
+identity_after="$(
+  bootstrap_stage1_source_manifest \
+    "$source_tree" "$compiler_w" "$lex64_table"
+)"
+if [ "$identity_before" = "$identity_after" ]; then
+  printf 'FAIL: a core source edit did not change stage-1 source identity\n' >&2
+  exit 1
+fi
+
+printf 'lexer helper a changed\n' \
+  > "$source_tree/languages/tungsten/lexers/a.w"
+identity_after_lexer_change="$(
+  bootstrap_stage1_source_manifest \
+    "$source_tree" "$compiler_w" "$lex64_table"
+)"
+if [ "$identity_after" = "$identity_after_lexer_change" ]; then
+  printf 'FAIL: a lexer helper edit did not change stage-1 source identity\n' >&2
+  exit 1
+fi
+
+if ! grep -Fq 'bootstrap_stage1_source_manifest' \
+  "$ROOT/bin/commands/bootstrap.sh"; then
+  printf 'FAIL: bootstrap does not use the stage-1 source-input contract\n' >&2
+  exit 1
+fi
+
+printf 'bootstrap stage-1 artifact and source-cache contracts: ok\n'

@@ -293,13 +293,76 @@
     mark_subtree_escape(node.cidr, records)
   nil
 
-# True iff the expression is structurally raw-int — a literal int or an
-# arithmetic/bitwise op tree where every leaf is a known int source.
-# Var references are accepted only if the referenced var is already
-# declared with a machine-int type. Locals not yet promoted are rejected
-# (no fixed-point iteration in this MVP — false negatives cost perf only,
-# false positives would silently corrupt).
--> int_shaped_node?(node, declared_types)
+# Return the exact machine return type of a call whose lowering is already
+# proven to use a raw ABI.  The return annotation alone is insufficient:
+# dynamic dispatch and boxed-ABI methods can also be annotated `i64`, but
+# their LLVM register still contains a WValue at this point.
+-> resolved_raw_machine_call_return_type(node, mod)
+  if mod == nil || node == nil || !is_ast_node?(node) || ast_kind(node) != :call
+    return nil
+  # Attached blocks bypass both direct-static and raw top-level call paths.
+  if node.block != nil
+    return nil
+  # Built-in constructors are intercepted before known-static dispatch.  A
+  # same-named registry entry therefore does not prove which implementation
+  # lower_method_call will select.
+  if node.name == "new"
+    return nil
+
+  recv = node.receiver
+  if recv == nil
+    # Bare calls have several resolution lanes before the raw top-level
+    # fallback (intrinsics and typed overloads among them).  Proving that the
+    # name exists in raw_callable_fns is therefore insufficient to prove which
+    # callee lower_call will select.  Keep this analysis conservative until it
+    # can mirror that complete resolver.
+    return nil
+
+  # Mirror lower_method_call's direct-static receiver shapes exactly. Parser
+  # output uses both ClassRef and Var for constant-like names, and the lowering
+  # route resolves either through known_static_methods before generic dispatch.
+  if !(ast_kind(recv) in (:var :class_ref :call)) || recv.name == nil
+    return nil
+  methods = mod[:known_static_methods]
+  if methods == nil
+    return nil
+  recv_name = recv.name
+  info = methods[recv_name + "." + node.name]
+
+  # Mirror lower_method_call's inherited-static lookup. Only real static
+  # entries participate in the superclass walk; the same registry also holds
+  # typed instance methods used for `self.foo` devirtualization.
+  if info == nil && node.name != "new"
+    classes = mod[:known_classes]
+    supers = mod[:class_super_names]
+    if classes != nil && supers != nil && classes[recv_name] != nil
+      current = recv_name
+      guard = 0
+      while info == nil && guard < 64
+        current = supers[current]
+        if current == nil
+          break
+        candidate = methods[current + "." + node.name]
+        if candidate != nil && candidate[:is_static] == true
+          info = candidate
+        guard += 1
+
+  # The same registry also contains typed instance-method entries used only
+  # for `self.foo` devirtualization.  A class-style receiver must prove this
+  # is a real static method before its raw worker ABI can justify a raw local.
+  if info == nil || info[:is_static] != true || info[:raw_abi] != true
+    return nil
+  rt = info[:return_type]
+  if is_machine_int64_type(rt)
+    return rt
+  nil
+
+# True iff the expression is structurally raw-int — a literal int, an exactly
+# resolved raw machine-returning call, or an arithmetic/bitwise op tree where
+# every leaf is a known int source. Var references are accepted only if the
+# referenced var is already declared or tentatively promoted with a
+# machine-int type.
+-> int_shaped_node?(node, declared_types, mod = nil)
   if node == nil
     return false
   if !is_ast_node?(node)
@@ -318,8 +381,10 @@
   when :gvar
     return node.name == "$value"
   when :unary_op
-    return int_shaped_node?(node.operand, declared_types)
+    return int_shaped_node?(node.operand, declared_types, mod)
   when :call
+    if resolved_raw_machine_call_return_type(node, mod) != nil
+      return true
     name = node.name
     if name == "wvalue_bits" && node.receiver == nil && node.args != nil && node.args.size() == 1
       return true
@@ -350,11 +415,11 @@
     if name in ("\[]" "[]") && node.receiver != nil && node.args != nil && node.args.size() == 1
       recv = node.receiver
       if ast_kind(recv) == :var && is_typed_array_type?(declared_types[recv.name])
-        return int_shaped_node?(node.args[0], declared_types)
+        return int_shaped_node?(node.args[0], declared_types, mod)
   when :binary_op
     op = node.op
     if op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :LSHIFT :RSHIFT)
-      return int_shaped_node?(node.left, declared_types) && int_shaped_node?(node.right, declared_types)
+      return int_shaped_node?(node.left, declared_types, mod) && int_shaped_node?(node.right, declared_types, mod)
   else
     false
 
@@ -482,12 +547,12 @@
   else
     nil
 
--> visit_promote_list(nodes, records, declared_types)
+-> visit_promote_list(nodes, records, declared_types, mod = nil)
   if nodes == nil
     return nil
   i = 0
   while i < nodes.size()
-    visit_promote_node(nodes[i], records, declared_types)
+    visit_promote_node(nodes[i], records, declared_types, mod)
     i += 1
 
 # A `recv.each { … }` (and find/detect/all?/any?/none?) whose receiver is a range,
@@ -538,14 +603,14 @@
     return p
   nil
 
--> visit_promote_node(node, records, declared_types)
+-> visit_promote_node(node, records, declared_types, mod = nil)
   if node == nil
     return nil
   if !is_ast_node?(node)
     return nil
   t = ast_kind(node)
   if t in (:fastmath_block :strictmath_block :overflow_block)
-    visit_promote_list(node[:body], records, declared_types)
+    visit_promote_list(node[:body], records, declared_types, mod)
     return nil
 
 
@@ -556,7 +621,7 @@
     if target != nil && ast_kind(target) == :var
       vname = target.name
       rec = ensure_promote_record(records, vname)
-      if int_shaped_node?(value, declared_types)
+      if int_shaped_node?(value, declared_types, mod)
         rec[:has_int_assign] = true
       else
         rec[:has_other_assign] = true
@@ -565,7 +630,7 @@
     # mark only the truly escaping leaves, so a non-int-shaped RHS like
     # `sum + foo()` flags `foo()` args without dragging unrelated `sum` reads
     # along with it.
-    visit_promote_node(value, records, declared_types)
+    visit_promote_node(value, records, declared_types, mod)
     return nil
 
   when :string_interp
@@ -618,7 +683,7 @@
     if node.args != nil
       i = 0
       while i < node.args.size()
-        visit_promote_node(node.args[i], records, declared_types)
+        visit_promote_node(node.args[i], records, declared_types, mod)
         i += 1
     if node.block != nil
       inl = inlined_iterator_elem_type(node, declared_types)
@@ -640,7 +705,7 @@
           had_key = declared_types.has_key?(pname)
           old_val = declared_types[pname]
           declared_types[pname] = elem_t
-        visit_promote_list(node.block.body, records, declared_types)
+        visit_promote_list(node.block.body, records, declared_types, mod)
         if pname != nil && elem_t != nil
           if had_key
             declared_types[pname] = old_val
@@ -664,32 +729,32 @@
     if vals != nil
       j = 0
       while j < vals.size()
-        visit_promote_node(vals[j], records, declared_types)
+        visit_promote_node(vals[j], records, declared_types, mod)
         j += 1
     return nil
 
   when :print, :raise
     if node.value != nil
-      visit_promote_node(node.value, records, declared_types)
+      visit_promote_node(node.value, records, declared_types, mod)
     return nil
 
   when :if
-    visit_promote_node(node.condition, records, declared_types)
-    visit_promote_list(node.then_body, records, declared_types)
-    visit_promote_list(node.else_body, records, declared_types)
+    visit_promote_node(node.condition, records, declared_types, mod)
+    visit_promote_list(node.then_body, records, declared_types, mod)
+    visit_promote_list(node.else_body, records, declared_types, mod)
     if node.elsif_clauses != nil
       j = 0
       while j < node.elsif_clauses.size()
         clause = node.elsif_clauses[j]
         if clause != nil && type(clause) == "Array" && clause.size() >= 2
-          visit_promote_node(clause[0], records, declared_types)
-          visit_promote_list(clause[1], records, declared_types)
+          visit_promote_node(clause[0], records, declared_types, mod)
+          visit_promote_list(clause[1], records, declared_types, mod)
         j += 1
     return nil
 
   when :while
-    visit_promote_node(node.condition, records, declared_types)
-    visit_promote_list(node.body, records, declared_types)
+    visit_promote_node(node.condition, records, declared_types, mod)
+    visit_promote_list(node.body, records, declared_types, mod)
     return nil
 
   when :case
@@ -701,42 +766,42 @@
           if w.conditions != nil
             k = 0
             while k < w.conditions.size()
-              visit_promote_node(w.conditions[k], records, declared_types)
+              visit_promote_node(w.conditions[k], records, declared_types, mod)
               k += 1
-          visit_promote_list(w.body, records, declared_types)
+          visit_promote_list(w.body, records, declared_types, mod)
         j += 1
-    visit_promote_list(node.else_body, records, declared_types)
+    visit_promote_list(node.else_body, records, declared_types, mod)
     return nil
 
   when :case_value
     if node.subject != nil
-      visit_promote_node(node.subject, records, declared_types)
+      visit_promote_node(node.subject, records, declared_types, mod)
     if node.arms != nil
       j = 0
       while j < node.arms.size()
         a = node.arms[j]
         if a != nil
-          visit_promote_list(a.body, records, declared_types)
+          visit_promote_list(a.body, records, declared_types, mod)
         j += 1
-    visit_promote_list(node.else_body, records, declared_types)
+    visit_promote_list(node.else_body, records, declared_types, mod)
     return nil
 
   when :binary_op
-    visit_promote_node(node.left, records, declared_types)
-    visit_promote_node(node.right, records, declared_types)
+    visit_promote_node(node.left, records, declared_types, mod)
+    visit_promote_node(node.right, records, declared_types, mod)
     return nil
 
   when :unary_op
-    visit_promote_node(node.operand, records, declared_types)
+    visit_promote_node(node.operand, records, declared_types, mod)
     return nil
 
   when :and, :or
-    visit_promote_node(node.left, records, declared_types)
-    visit_promote_node(node.right, records, declared_types)
+    visit_promote_node(node.left, records, declared_types, mod)
+    visit_promote_node(node.right, records, declared_types, mod)
     return nil
 
   when :not
-    visit_promote_node(node.operand, records, declared_types)
+    visit_promote_node(node.operand, records, declared_types, mod)
     return nil
 
   # Safe leaves — known to never carry a var that flows to a non-int sink.
@@ -798,7 +863,7 @@
       i += 1
   promoted
 
--> raw_int_candidate_map(body, declared_types)
+-> raw_int_candidate_map(body, declared_types, mod = nil)
   candidates = {}
   hinted = {}
   collect_raw_candidate_names_list(body, candidates, hinted, declared_types)
@@ -835,7 +900,7 @@
       cki += 1
 
     records = {}
-    visit_promote_list(body, records, known)
+    visit_promote_list(body, records, known, mod)
     next_candidates = {}
     kept = 0
     i = 0

@@ -209,6 +209,7 @@ compiled_specs=(
   spec/compiler/ownership_phi_escape_spec.w
   spec/compiler/parser_packed_token_access_spec.w
   spec/compiler/raw_int_candidate_map_spec.w
+  spec/compiler/raw_static_machine_return_spec.w
   spec/compiler/recase_spec.w
   spec/compiler/recycle_inline_iterator_validation_spec.w
   spec/compiler/recycle_nonlocal_block_return_spec.w

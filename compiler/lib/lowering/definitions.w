@@ -655,7 +655,7 @@
   # module-wide raw-ABI prepass.
   populate_definition_var_types(node, child_var_types, mod)
 
-  child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types)
+  child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types, mod)
 
   # Detect raw-i64 ABI: when every param is ## i64:-annotated and there's
   # no block param or default, the fn takes raw int64_t directly. Callers
@@ -1226,7 +1226,7 @@
   target = detect_target()
   body = expand_on_guards(body, target)
   old_raw_int_candidates = ctx[:raw_int_candidates]
-  class_raw_int_candidates = raw_int_candidate_map(body, ctx[:var_types])
+  class_raw_int_candidates = raw_int_candidate_map(body, ctx[:var_types], mod)
   if old_raw_int_candidates != nil
     merged_raw_int_candidates = {}
     old_keys = old_raw_int_candidates.keys()
@@ -1749,7 +1749,7 @@
         child_var_types[pname] = normalize_type_symbol(pt[pti])
       pti += 1
 
-  child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types)
+  child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types, mod)
 
   block_return_buf = nil
   if needs_block_return

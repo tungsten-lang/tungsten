@@ -1502,7 +1502,7 @@ use lowering/definitions
     source_path: source_path,
     bindings: {},
     unboxed_vars: {},
-    raw_int_candidates: raw_int_candidate_map(ast.expressions, var_types),
+    raw_int_candidates: raw_int_candidate_map(ast.expressions, var_types, mod),
     method_name: nil,
     is_class_method: false,
     is_block: false,
@@ -2448,9 +2448,16 @@ use lowering/definitions
     # Genuinely-typed raw machine values (:raw_i64/u64/i128/u128 from typed
     # sources) prove their own rawness, so they skip the conservative
     # candidate-map gate below.
-    if machine_type == nil && val[:type] in (:raw_i64 :raw_u64 :raw_i128 :raw_u128)
-      machine_type = raw_value_machine_type(val[:type])
-      typed_raw_machine_value = true
+    if val[:type] in (:raw_i64 :raw_u64 :raw_i128 :raw_u128)
+      value_machine_type = raw_value_machine_type(val[:type])
+      if machine_type == nil
+        machine_type = value_machine_type
+      # A statically inferred machine type and the lowered value's actual
+      # representation are independent proofs. Honor the raw representation
+      # even when inference ran first, but require exact signedness/width so a
+      # raw u64 result cannot silently initialize an i64 slot (or vice versa).
+      if machine_type == value_machine_type
+        typed_raw_machine_value = true
     # :raw_int is the tag for BOTH ccall_nobox results AND plain int literals
     # (`0`). The literal case must still respect the candidate gate: an
     # escaping accumulator seeded `= 0` (e.g. `dot/1 0` summing floats via an

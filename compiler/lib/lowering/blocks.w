@@ -720,7 +720,7 @@
 
   # Pre-scan body for parameter reassignment
   body = block.body
-  child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types)
+  child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types, mod)
   reassigned = find_reassigned_params(body, block_params)
   pi = 0
   while pi < reassigned.size()

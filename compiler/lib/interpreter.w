@@ -3907,7 +3907,14 @@ use target
       return nil
     @loaded_files.push(path)
 
-    source = read_file(path)
+    source = path == nil ? nil : read_file(path)
+    # An unresolvable/unreadable use crashed as parse_source(nil) with no
+    # location — raise a real error naming what failed to resolve and from
+    # where instead.
+    if source == nil
+      shown = path == nil ? "(unresolved)" : path
+      from = @current_file == nil ? "top level" : @current_file
+      raise "use: cannot load '" + ast_get(node, :path) + "' (resolved to " + shown + ", from " + from + ")"
     prev_file = @current_file
     @current_file = path
     begin
@@ -3917,13 +3924,25 @@ use target
       @current_file = prev_file
 
   -> resolve_use_path(use_path, base_dir)
-    # `core/` prefix: always resolves to <project_root>/core/<rest>.w.
+    # `core/` prefix: resolves against the NEAREST ancestor that actually
+    # carries the requested core file — the interpreter twin of loader.w's
+    # find_core_root nearest-ancestor rule. The old single-candidate form
+    # asked find_use_project_root (shallowest Bitfile), which from a bit's
+    # lib dir returns the BIT root; a bit module reached via a ../..
+    # relative use then failed to resolve `use core/mmap` even though the
+    # project root's core/ was right there on the ancestry.
     if use_path.starts_with?("core/")
-      project_root = find_use_project_root(base_dir)
-      if project_root != ""
-        core_path = project_root + "/" + use_path + ".w"
-        if read_file(core_path) != nil
-          return core_path
+      if base_dir != ""
+        cparts = base_dir.split("/")
+        ci = cparts.size()
+        while ci > 0
+          core_candidate = cparts[0...ci].join("/") + "/" + use_path + ".w"
+          if read_file(core_candidate) != nil
+            return core_candidate
+          ci -= 1
+      cwd_candidate = use_path + ".w"
+      if read_file(cwd_candidate) != nil
+        return cwd_candidate
 
     path = use_path
     if !path.starts_with?("/")

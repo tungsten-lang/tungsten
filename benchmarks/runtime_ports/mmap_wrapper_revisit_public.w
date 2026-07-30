@@ -123,8 +123,8 @@ VIEW_WARMUP = 200_000
   check_typed_pair("as_u64", mapping.as_u64, mapping.__c_as_u64, 64, 8)
   check_typed_pair("as_i8", mapping.as_i8, mapping.__c_as_i8, 108, 64)
   check_typed_pair("as_i16", mapping.as_i16, mapping.__c_as_i16, 116, 32)
-  check_typed_pair("as_i32", mapping.as_i32, mapping.__c_as_i32, 32, 16)
-  check_typed_pair("as_i64", mapping.as_i64, mapping.__c_as_i64, 64, 8)
+  check_typed_pair("as_i32", mapping.as_i32, mapping.__c_as_i32, 33, 16)
+  check_typed_pair("as_i64", mapping.as_i64, mapping.__c_as_i64, 66, 8)
   check_typed_pair("as_f32", mapping.as_f32, mapping.__c_as_f32, -32, 16)
   check_typed_pair("as_f64", mapping.as_f64, mapping.__c_as_f64, -64, 8)
 
@@ -134,8 +134,8 @@ VIEW_WARMUP = 200_000
   check_typed_pair("as_u64.extra1", mapping.as_u64(1), mapping.__c_as_u64(1), 64, 8)
   check_typed_pair("as_i8.extra1", mapping.as_i8(1), mapping.__c_as_i8(1), 108, 64)
   check_typed_pair("as_i16.extra1", mapping.as_i16(1), mapping.__c_as_i16(1), 116, 32)
-  check_typed_pair("as_i32.extra1", mapping.as_i32(1), mapping.__c_as_i32(1), 32, 16)
-  check_typed_pair("as_i64.extra1", mapping.as_i64(1), mapping.__c_as_i64(1), 64, 8)
+  check_typed_pair("as_i32.extra1", mapping.as_i32(1), mapping.__c_as_i32(1), 33, 16)
+  check_typed_pair("as_i64.extra1", mapping.as_i64(1), mapping.__c_as_i64(1), 66, 8)
   check_typed_pair("as_f32.extra1", mapping.as_f32(1), mapping.__c_as_f32(1), -32, 16)
   check_typed_pair("as_f64.extra1", mapping.as_f64(1), mapping.__c_as_f64(1), -64, 8)
 
@@ -145,8 +145,8 @@ VIEW_WARMUP = 200_000
   check_typed_pair("as_u64.extra3", mapping.as_u64(1, 2, 3), mapping.__c_as_u64(1, 2, 3), 64, 8)
   check_typed_pair("as_i8.extra3", mapping.as_i8(1, 2, 3), mapping.__c_as_i8(1, 2, 3), 108, 64)
   check_typed_pair("as_i16.extra3", mapping.as_i16(1, 2, 3), mapping.__c_as_i16(1, 2, 3), 116, 32)
-  check_typed_pair("as_i32.extra3", mapping.as_i32(1, 2, 3), mapping.__c_as_i32(1, 2, 3), 32, 16)
-  check_typed_pair("as_i64.extra3", mapping.as_i64(1, 2, 3), mapping.__c_as_i64(1, 2, 3), 64, 8)
+  check_typed_pair("as_i32.extra3", mapping.as_i32(1, 2, 3), mapping.__c_as_i32(1, 2, 3), 33, 16)
+  check_typed_pair("as_i64.extra3", mapping.as_i64(1, 2, 3), mapping.__c_as_i64(1, 2, 3), 66, 8)
   check_typed_pair("as_f32.extra3", mapping.as_f32(1, 2, 3), mapping.__c_as_f32(1, 2, 3), -32, 16)
   check_typed_pair("as_f64.extra3", mapping.as_f64(1, 2, 3), mapping.__c_as_f64(1, 2, 3), -64, 8)
 

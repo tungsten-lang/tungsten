@@ -80,7 +80,7 @@ body_of() {
 }
 
 typed_methods=(as_u8 as_u16 as_u32 as_u64 as_i8 as_i16 as_i32 as_i64 as_f32 as_f64)
-typed_constants=(8 16 32 64 108 116 32 64 -32 -64)
+typed_constants=(8 16 32 64 108 116 33 66 -32 -64)
 typed_sizes=(64 32 16 8 64 32 16 8 16 8)
 for i in "${!typed_methods[@]}"; do
   method="${typed_methods[$i]}"

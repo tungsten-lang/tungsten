@@ -11326,7 +11326,7 @@ int64_t w_u1_index_unset(const uint8_t *data, int64_t bit_size) {
 
 /* Phase 6.5 (#59) i64/u64 SIMD scans. 2 lanes per 128-bit NEON cycle.
  * Bit-pattern equality — works for any 64-bit storage where the needle
- * has a unique bit pattern. Used for ebits=64 polymorphic arrays when
+ * has a unique bit pattern. Used for ebits=65 polymorphic arrays when
  * the needle is a NaN-boxed immediate (int, bool, nil) — those have
  * unique bit patterns so vceqq_u64 matches w_eq semantics for that
  * subset. Pointer-tagged values (strings, hashes, instances) require
@@ -16556,7 +16556,7 @@ WValue w_to_s(WValue v) {
         w_strbuf_append(sb, w_string("["));
         for (int32_t i = 0; i < arr->size; i++) {
             if (i > 0) w_strbuf_append(sb, w_string(", "));
-            /* #62: decode-aware load; arr->slots is WValue* only for ebits=64/65. */
+            /* #62: decode-aware load; arr->slots is WValue* only for ebits=65. */
             w_strbuf_append(sb, w_to_s(array_slot_load_decoded(arr, i)));
         }
         w_strbuf_append(sb, w_string("]"));
@@ -17469,7 +17469,7 @@ void w_hash_recycle(WValue v) {
 }
 
 /* Typed array pool — bucketed by element_bits. */
-#define TYPED_ARRAY_BUCKETS 7
+#define TYPED_ARRAY_BUCKETS 9
 static __thread WValue g_array_typed_pool[TYPED_ARRAY_BUCKETS][ARRAY_POOL_MAX];
 static __thread int g_array_typed_pool_count[TYPED_ARRAY_BUCKETS] = {0};
 
@@ -17482,6 +17482,8 @@ static inline int bits_to_bucket(int8_t bits) {
         case 64:  return 4;
         case 65:  return 5;
         case -64: return 6;
+        case 33:  return 7;
+        case 66:  return 8;
         default:  return -1;
     }
 }
@@ -20760,9 +20762,9 @@ static WValue w_ic_array_push(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_array_pop(WValue r, WValue *a, int c)     { (void)a; (void)c; return w_array_pop(r); }
 /* Phase 7+d (#62 fix): use array_slot_load_decoded for the typed-array
- * cases (ebits ∈ {1, 4, 8, 16, 32, -32, -64} — anything packed narrower
- * than WValue). The earlier slots[i] direct-index was correct only for
- * ebits == 64/65 (WValue-stride storage); on packed arrays it read
+ * cases (all ebits except 65, including packed u64 at ebits=64). The earlier
+ * slots[i] direct-index was correct only for ebits == 65 (WValue-stride
+ * storage); on packed arrays it read
  * misaligned bytes as a WValue and could fault past the allocation. */
 static WValue w_ic_array_shift(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -20825,22 +20827,27 @@ static WValue w_ic_array_include(WValue r, WValue *a, int c) {
                                          arr->size, (uint8_t)needle);
             return idx < 0 ? W_FALSE : W_TRUE;
         }
-        if (arr->ebits == 16 && needle >= -32768 && needle <= 65535) {
+        if (arr->ebits == 16 && needle >= 0 && needle <= UINT16_MAX) {
             int64_t idx = w_u16_scan_eq_threaded((const uint16_t *)arr->slots + arr->start,
                                          arr->size, (uint16_t)needle);
             return idx < 0 ? W_FALSE : W_TRUE;
         }
-        if (arr->ebits == 32 && needle >= INT32_MIN && needle <= UINT32_MAX) {
+        if (arr->ebits == 32 && needle >= 0 && needle <= UINT32_MAX) {
+            int64_t idx = w_u32_scan_eq_threaded((const uint32_t *)arr->slots + arr->start,
+                                         arr->size, (uint32_t)needle);
+            return idx < 0 ? W_FALSE : W_TRUE;
+        }
+        if (arr->ebits == 33 && needle >= INT32_MIN && needle <= INT32_MAX) {
             int64_t idx = w_u32_scan_eq_threaded((const uint32_t *)arr->slots + arr->start,
                                          arr->size, (uint32_t)needle);
             return idx < 0 ? W_FALSE : W_TRUE;
         }
     }
-    /* Polymorphic / non-u8 path: arr->slots is WValue* only when ebits=64
-     * (the w64 polymorphic bucket). For typed arrays, elements are packed
-     * narrower than WValue, so direct slots[] indexing reads garbage and
-     * can fault past the allocation. Use the array-tier accessor. */
-    if (arr->ebits == 65 || arr->ebits == 64) {
+    /* Polymorphic / non-u8 path: arr->slots is WValue* only when ebits=65
+     * (the w64 polymorphic bucket). Typed arrays contain raw scalar bit
+     * patterns—even u64 at the same physical width—so direct slots[] indexing
+     * misinterprets them as tagged WValues. Use the array-tier accessor. */
+    if (arr->ebits == 65) {
         for (int32_t i = 0; i < arr->size; i++)
             if (w_eq(arr->slots[arr->start + i], a[0]) == W_TRUE) return W_TRUE;
         return W_FALSE;
@@ -20877,13 +20884,14 @@ static WValue w_ic_array_raw_ptr(WValue r, WValue *a, int c) {
         : (uintptr_t)((uint8_t *)arr->slots + (int64_t)arr->start * (abs_bits / 8));
     return w_int((int64_t)base);
 }
-/* Polymorphic w64 arrays (ebits=64/65) hold tagged WValues, so the typed
- * uint64-compare paths read garbage. Fall back to array_slot_load_decoded
- * + w_value_compare for those — same path the original cascade used. */
+/* Polymorphic w64 arrays (ebits=65) hold tagged WValues, so use decoded
+ * WValue comparison. Packed u64 arrays (ebits=64) must stay on the unsigned
+ * reducer: decoding a value above INT64_MAX yields a BigInt, and the generic
+ * comparator's fallback would compare BigInt object addresses, not values. */
 static WValue w_ic_array_min(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     WArray *arr = (WArray *)w_as_ptr(r);
-    if (arr->ebits == 64 || arr->ebits == 65) {
+    if (arr->ebits == 65) {
         if (arr->size == 0) return W_NIL;
         WValue best = array_slot_load_decoded(arr, 0);
         for (int32_t i = 1; i < arr->size; i++) {
@@ -20899,7 +20907,7 @@ static WValue w_ic_array_min(WValue r, WValue *a, int c) {
 static WValue w_ic_array_max(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     WArray *arr = (WArray *)w_as_ptr(r);
-    if (arr->ebits == 64 || arr->ebits == 65) {
+    if (arr->ebits == 65) {
         if (arr->size == 0) return W_NIL;
         WValue best = array_slot_load_decoded(arr, 0);
         for (int32_t i = 1; i < arr->size; i++) {
@@ -20918,10 +20926,11 @@ static WValue w_ic_array_sum(WValue r, WValue *a, int c) {
      * sum(10) == sum() and [].sum(5) == 0. */
     WValue init = (c >= 1) ? a[0] : w_box_int(0);
     WArray *arr = (WArray *)w_as_ptr(r);
-    if (arr->ebits == 64 || arr->ebits == 65) {
-        /* Polymorphic / boxed array (WValue-stride storage). Elements may be
-         * ints, floats, decimals, or a mix, so accumulate through w_add, which
-         * promotes int+float and handles every numeric type. The old
+    if (arr->ebits == 65) {
+        /* Polymorphic WValue storage may contain ints, floats, decimals, or a
+         * mix, so accumulate through w_add. Packed u64 (ebits=64) uses the
+         * faster unsigned __int128 reducer below; WArray's INT32_MAX capacity
+         * bounds its maximum possible u64 sum below 2^95. The old
          * `total += w_as_int(elem)` read float/decimal WValue bits as an int
          * and returned garbage (e.g. [1.0,2.0,3.0].sum -> 768). w_add starts
          * from `init` (a small int 0 with no arg) and widens as needed. */
@@ -20940,6 +20949,15 @@ static WValue w_ic_array_sum(WValue r, WValue *a, int c) {
 static WValue w_ic_array_fastsum(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     WArray *arr = (WArray *)w_as_ptr(r);
+    if (arr->ebits == 65) {
+        /* Same hazard as w_ic_array_sum above: polymorphic WValue storage is
+         * neither float nor signed-int, so the unsigned reducer would
+         * accumulate raw NaN-box bit patterns. Accumulate through w_add. */
+        WValue acc = w_box_int(0);
+        for (int32_t i = 0; i < arr->size; i++)
+            acc = w_add(acc, array_slot_load_decoded(arr, i));
+        return acc;
+    }
     return array_is_float(arr) ? w_array_fastsum_float(r)
          : array_is_signed_int(arr) ? w_array_sum_signed(r)
                                      : w_array_sum_unsigned(r);
@@ -21042,10 +21060,13 @@ static WValue w_ic_array_count(WValue r, WValue *a, int c) {
             if (arr->ebits == 8 && needle >= 0 && needle <= 255)
                 return w_int(w_byte_scan_count_threaded((const uint8_t *)arr->slots + arr->start,
                                                         arr->size, (uint8_t)needle));
-            if (arr->ebits == 16 && needle >= -32768 && needle <= 65535)
+            if (arr->ebits == 16 && needle >= 0 && needle <= UINT16_MAX)
                 return w_int(w_u16_scan_count_threaded((const uint16_t *)arr->slots + arr->start,
                                                        arr->size, (uint16_t)needle));
-            if (arr->ebits == 32 && needle >= INT32_MIN && needle <= UINT32_MAX)
+            if (arr->ebits == 32 && needle >= 0 && needle <= UINT32_MAX)
+                return w_int(w_u32_scan_count_threaded((const uint32_t *)arr->slots + arr->start,
+                                                       arr->size, (uint32_t)needle));
+            if (arr->ebits == 33 && needle >= INT32_MIN && needle <= INT32_MAX)
                 return w_int(w_u32_scan_count_threaded((const uint32_t *)arr->slots + arr->start,
                                                        arr->size, (uint32_t)needle));
         }
@@ -21083,12 +21104,17 @@ static WValue w_ic_array_find_index(WValue r, WValue *a, int c) {
                                                   arr->size, (uint8_t)needle);
             return idx < 0 ? W_NIL : w_int(idx);
         }
-        if (arr->ebits == 16 && needle >= -32768 && needle <= 65535) {
+        if (arr->ebits == 16 && needle >= 0 && needle <= UINT16_MAX) {
             int64_t idx = w_u16_scan_eq_threaded((const uint16_t *)arr->slots + arr->start,
                                                  arr->size, (uint16_t)needle);
             return idx < 0 ? W_NIL : w_int(idx);
         }
-        if (arr->ebits == 32 && needle >= INT32_MIN && needle <= UINT32_MAX) {
+        if (arr->ebits == 32 && needle >= 0 && needle <= UINT32_MAX) {
+            int64_t idx = w_u32_scan_eq_threaded((const uint32_t *)arr->slots + arr->start,
+                                                 arr->size, (uint32_t)needle);
+            return idx < 0 ? W_NIL : w_int(idx);
+        }
+        if (arr->ebits == 33 && needle >= INT32_MIN && needle <= INT32_MAX) {
             int64_t idx = w_u32_scan_eq_threaded((const uint32_t *)arr->slots + arr->start,
                                                  arr->size, (uint32_t)needle);
             return idx < 0 ? W_NIL : w_int(idx);
@@ -21113,12 +21139,17 @@ static WValue w_ic_array_last_index(WValue r, WValue *a, int c) {
                                               arr->size, (uint8_t)needle);
             return idx < 0 ? W_NIL : w_int(idx);
         }
-        if (arr->ebits == 16 && needle >= -32768 && needle <= 65535) {
+        if (arr->ebits == 16 && needle >= 0 && needle <= UINT16_MAX) {
             int64_t idx = w_u16_scan_eq_rev((const uint16_t *)arr->slots + arr->start,
                                              arr->size, (uint16_t)needle);
             return idx < 0 ? W_NIL : w_int(idx);
         }
-        if (arr->ebits == 32 && needle >= INT32_MIN && needle <= UINT32_MAX) {
+        if (arr->ebits == 32 && needle >= 0 && needle <= UINT32_MAX) {
+            int64_t idx = w_u32_scan_eq_rev((const uint32_t *)arr->slots + arr->start,
+                                             arr->size, (uint32_t)needle);
+            return idx < 0 ? W_NIL : w_int(idx);
+        }
+        if (arr->ebits == 33 && needle >= INT32_MIN && needle <= INT32_MAX) {
             int64_t idx = w_u32_scan_eq_rev((const uint32_t *)arr->slots + arr->start,
                                              arr->size, (uint32_t)needle);
             return idx < 0 ? W_NIL : w_int(idx);
@@ -23907,9 +23938,9 @@ static WValue w_ic_mmap_view_at(WValue r, WValue *a, int c) {
         else if (strcmp(sym, "u16") == 0) ebits = 16;
         else if (strcmp(sym, "i16") == 0) ebits = 116;
         else if (strcmp(sym, "u32") == 0) ebits = 32;
-        else if (strcmp(sym, "i32") == 0) ebits = -32;
+        else if (strcmp(sym, "i32") == 0) ebits = 33;
         else if (strcmp(sym, "u64") == 0) ebits = 64;
-        else if (strcmp(sym, "i64") == 0) ebits = -64;
+        else if (strcmp(sym, "i64") == 0) ebits = 66;
         else if (strcmp(sym, "f32") == 0) ebits = -32;
         else if (strcmp(sym, "f64") == 0) ebits = -64;
         else if (strcmp(sym, "bf16") == 0) ebits = -116;
@@ -27063,7 +27094,15 @@ static WValue array_slot_load_decoded(WArray *a, int64_t i) {
     if (a->ebits == 1) {
         return array_read(a, abs_idx) ? W_TRUE : W_FALSE;
     }
-    return w_int((int64_t)array_read(a, abs_idx));
+    /* Unsigned 64-bit elements may exceed INT64_MAX and the immediate i48
+     * payload.  Converting through int64_t makes u64::MAX indistinguishable
+     * from -1; retain the full unsigned value in a WBigint instead.  Narrower
+     * unsigned element widths still fit w_int's signed input exactly. */
+    uint64_t raw = array_read(a, abs_idx);
+    if (a->ebits == 64 && raw > INT64_MAX) {
+        return w_u64(raw);
+    }
+    return w_int((int64_t)raw);
 }
 
 static inline void array_write_float(WArray *a, int64_t i, double val) {
@@ -28233,31 +28272,13 @@ WValue w_array_pop(WValue arr) {
     WArray *a = (WArray *)w_as_ptr(arr);
     if (a->size == 0) return W_NIL;
     a->size--;
-    if (array_is_wvalue(a)) {
-        return (WValue)array_read(a, a->start + a->size);
-    }
-    if (array_is_float(a)) {
-        return w_float(array_read_float(a, a->start + a->size));
-    }
-    if (array_is_signed_int(a)) {
-        return w_int(array_read_signed(a, a->start + a->size));
-    }
-    return w_int((int64_t)array_read(a, a->start + a->size));
+    return array_slot_load_decoded(a, a->size);
 }
 
 WValue w_array_shift(WValue arr) {
     WArray *a = (WArray *)w_as_ptr(arr);
     if (a->size == 0) return W_NIL;
-    WValue result;
-    if (array_is_wvalue(a)) {
-        result = (WValue)array_read(a, a->start);
-    } else if (array_is_float(a)) {
-        result = w_float(array_read_float(a, a->start));
-    } else if (array_is_signed_int(a)) {
-        result = w_int(array_read_signed(a, a->start));
-    } else {
-        result = w_int((int64_t)array_read(a, a->start));
-    }
+    WValue result = array_slot_load_decoded(a, 0);
     a->start++;
     a->size--;
     return result;
@@ -28356,23 +28377,7 @@ WValue w_array_get(WValue arr, WValue index) {
     int64_t i = w_as_int(index);
     if (i < 0) i += a->size;
     if (i < 0 || i >= a->size) return W_NIL;
-    if (array_is_wvalue(a)) {
-        return (WValue)array_read(a, a->start + i);
-    }
-    if (array_is_float(a)) {
-        return w_float(array_read_float(a, a->start + i));
-    }
-    if (a->ebits == 1) {
-        /* Bit-packed (u1 / BoolArray): surface the bit as W_TRUE / W_FALSE
-         * so callers don't have to know the underlying representation.
-         * Matches the IC get path and w_array_idxset's truthiness-on-
-         * write semantics. */
-        return array_read(a, a->start + i) ? W_TRUE : W_FALSE;
-    }
-    if (array_is_signed_int(a)) {
-        return w_int(array_read_signed(a, a->start + i));
-    }
-    return w_int((int64_t)array_read(a, a->start + i));
+    return array_slot_load_decoded(a, i);
 }
 
 /* Fused subscript-read + machine-int capture: `x = recv[i] ## i64/u64`
@@ -28482,19 +28487,7 @@ WValue w_array_get_i64(WValue arr, int64_t i) {
     WArray *a = (WArray *)w_as_ptr(arr);
     if (i < 0) i += a->size;
     if (i < 0 || i >= a->size) return W_NIL;
-    if (array_is_wvalue(a)) {
-        return (WValue)array_read(a, a->start + i);
-    }
-    if (array_is_float(a)) {
-        return w_float(array_read_float(a, a->start + i));
-    }
-    if (a->ebits == 1) {
-        return array_read(a, a->start + i) ? W_TRUE : W_FALSE;
-    }
-    if (array_is_signed_int(a)) {
-        return w_int(array_read_signed(a, a->start + i));
-    }
-    return w_int((int64_t)array_read(a, a->start + i));
+    return array_slot_load_decoded(a, i);
 }
 
 /* Shared core of the `[]=` writers: negative-index normalization, cap
@@ -28569,12 +28562,7 @@ WValue w_array_set_i64(WValue arr, int64_t i, WValue val) {
 WValue w_array_idx(WValue arr, WValue index) {
     WArray *a = (WArray *)w_as_ptr(arr);
     int64_t i = w_as_int(index);
-    if (array_is_wvalue(a)) return (WValue)array_read(a, a->start + i);
-    if (array_is_float(a)) return w_float(array_read_float(a, a->start + i));
-    /* Phase 6i.1b: ebits=1 (BoolArray) yields W_TRUE/W_FALSE. */
-    if (a->ebits == 1) return array_read(a, a->start + i) ? W_TRUE : W_FALSE;
-    if (array_is_signed_int(a)) return w_int(array_read_signed(a, a->start + i));
-    return w_int((int64_t)array_read(a, a->start + i));
+    return array_slot_load_decoded(a, i);
 }
 
 /* Raw-index twin of w_array_idx: the compiler emits this when the index is
@@ -28582,11 +28570,7 @@ WValue w_array_idx(WValue arr, WValue index) {
  * in hot array loops (core/array.w method bodies). */
 WValue w_array_idx_i64(WValue arr, int64_t i) {
     WArray *a = (WArray *)w_as_ptr(arr);
-    if (array_is_wvalue(a)) return (WValue)array_read(a, a->start + i);
-    if (array_is_float(a)) return w_float(array_read_float(a, a->start + i));
-    if (a->ebits == 1) return array_read(a, a->start + i) ? W_TRUE : W_FALSE;
-    if (array_is_signed_int(a)) return w_int(array_read_signed(a, a->start + i));
-    return w_int((int64_t)array_read(a, a->start + i));
+    return array_slot_load_decoded(a, i);
 }
 
 WValue w_array_idxset(WValue arr, WValue index, WValue val) {
@@ -28766,16 +28750,7 @@ WValue w_big_array_get(WValue arr, WValue index) {
     if (i < 0) i += a->size;
     if (i < 0 || i >= a->size) return W_NIL;
     WArray view = big_as_typed_view(a);
-    if (array_is_wvalue(&view)) {
-        return (WValue)array_read(&view, view.start + i);
-    }
-    if (array_is_float(&view)) {
-        return w_float(array_read_float(&view, view.start + i));
-    }
-    if (array_is_signed_int(&view)) {
-        return w_int(array_read_signed(&view, view.start + i));
-    }
-    return w_int((int64_t)array_read(&view, view.start + i));
+    return array_slot_load_decoded(&view, i);
 }
 
 WValue w_big_array_set(WValue arr, WValue index, WValue val) {
@@ -28801,10 +28776,7 @@ WValue w_big_array_idx(WValue arr, WValue index) {
     WBigArray *a = (WBigArray *)w_as_ptr(arr);
     int64_t i = w_as_int(index);
     WArray view = big_as_typed_view(a);
-    if (array_is_wvalue(&view)) return (WValue)array_read(&view, view.start + i);
-    if (array_is_float(&view)) return w_float(array_read_float(&view, view.start + i));
-    if (array_is_signed_int(&view)) return w_int(array_read_signed(&view, view.start + i));
-    return w_int((int64_t)array_read(&view, view.start + i));
+    return array_slot_load_decoded(&view, i);
 }
 
 WValue w_big_array_idxset(WValue arr, WValue index, WValue val) {
@@ -28933,16 +28905,7 @@ WValue w_small_array_get(WValue arr, WValue index) {
     view.size  = a->size;
     view.cap   = a->size;
     view.slots = (WValue *)a->slots;
-    if (array_is_wvalue(&view)) {
-        return (WValue)array_read(&view, i);
-    }
-    if (array_is_float(&view)) {
-        return w_float(array_read_float(&view, i));
-    }
-    if (array_is_signed_int(&view)) {
-        return w_int(array_read_signed(&view, i));
-    }
-    return w_int((int64_t)array_read(&view, i));
+    return array_slot_load_decoded(&view, i);
 }
 
 /* Bounds-checked SmallArray set. Negative indices wrap from end (i += size).
@@ -28984,10 +28947,7 @@ WValue w_small_array_idx(WValue arr, WValue index) {
     view.size  = a->size;
     view.cap   = a->size;
     view.slots = (WValue *)a->slots;
-    if (array_is_wvalue(&view)) return (WValue)array_read(&view, i);
-    if (array_is_float(&view)) return w_float(array_read_float(&view, i));
-    if (array_is_signed_int(&view)) return w_int(array_read_signed(&view, i));
-    return w_int((int64_t)array_read(&view, i));
+    return array_slot_load_decoded(&view, i);
 }
 
 WValue w_small_array_idxset(WValue arr, WValue index, WValue val) {
@@ -33301,10 +33261,10 @@ static void freeze_recursive(WValue v) {
     } else if (subtag == W_SUBTAG_ARRAY) {
         WArray *arr = (WArray *)ptr;
         /* #62: only polymorphic w64 arrays carry WValues that can be frozen.
-         * Typed arrays store raw scalars (ints/floats packed at < WValue
-         * width) — there's no nested object to recurse into, and reading
-         * arr->slots[i] as WValue would be a type-confused load. */
-        if (arr->ebits == 64 || arr->ebits == 65) {
+         * Typed arrays store raw scalar bit patterns—even u64 at the same
+         * physical width—so there is no nested object to recurse into and
+         * reading arr->slots[i] as WValue would be a type-confused load. */
+        if (arr->ebits == 65) {
             for (int32_t i = 0; i < arr->size; i++) {
                 freeze_recursive(arr->slots[arr->start + i]);
             }

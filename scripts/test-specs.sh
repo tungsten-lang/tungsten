@@ -224,6 +224,7 @@ compiled_specs=(
   spec/compiler/small_array_stack_escape_spec.w
   spec/compiler/small_array_stack_zero_init_spec.w
   spec/compiler/small_array_generic_spec.w
+  spec/compiler/typed_array_boxed_read_family_spec.w
   spec/compiler/masked_index_loop_spec.w
   spec/compiler/loop_version_array_spec.w
   spec/compiler/devirt_method_call_spec.w
@@ -296,6 +297,7 @@ interpreter_specs=(
   spec/interpreter/string_buffer_size_revisit_spec.w
   spec/interpreter/string_empty_native_spec.w
   spec/interpreter/string_to_s_native_spec.w
+  spec/interpreter/typed_array_signed_header_spec.w
   spec/interpreter/uuid_byte_revisit_spec.w
   spec/interpreter/dot_elementwise_spec.w
   spec/core/base64_native_spec.w
@@ -328,6 +330,7 @@ metal_specs=(
   spec/core/metal_f16_buffer_spec.w
   spec/core/metal_kernel_spec.w
   spec/core/metal_q8_matvec_spec.w
+  spec/core/metal_signed_array_bridge_spec.w
   spec/core/schedule_unroll_spec.w
 )
 
@@ -382,7 +385,10 @@ for spec in "${wrat_specs[@]}"; do
 done
 
 if [[ "${RUN_CORE_SPECS:-0}" == "1" ]]; then
-  ruby -e 'File.binwrite("/tmp/tungsten-mmap-view-smoke.bin", [1, 2, 3, 4].pack("V*"))'
+  # High-bit words pin the SIGNED view encodings (as_i32/as_i64 vs as_u32):
+  # a positive-only fixture decodes identically under the old unsigned
+  # encodings and cannot catch a sign-extension regression.
+  ruby -e 'File.binwrite("/tmp/tungsten-mmap-view-smoke.bin", [1, 2, 3, 4, 0xFFFFFFFF, 0xFFFFFFFE, 0x89ABCDEF, 0x01234567].pack("V*"))'
   for spec in "${core_specs[@]}"; do
     run_compiled_spec "$spec"
   done

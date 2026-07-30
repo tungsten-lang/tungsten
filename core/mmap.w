@@ -59,10 +59,10 @@
     ccall("__w_mmap_as_typed", self, 116)
 
   -> as_i32
-    ccall("__w_mmap_as_typed", self, 32)
+    ccall("__w_mmap_as_typed", self, 33)
 
   -> as_i64
-    ccall("__w_mmap_as_typed", self, 64)
+    ccall("__w_mmap_as_typed", self, 66)
 
   -> as_f32
     ccall("__w_mmap_as_typed", self, -32)

@@ -58,7 +58,7 @@
 # safetensors / GGUF file, view a tensor's slice, hand it to Metal —
 # the GPU and the file pages are the same physical bytes.
 #
-# Suitable element types: u8/i8/u16/i16/u32/u64/f32/f64/bf16/f8/f4.
+# Suitable element types: u8/i8/u16/i16/u32/i32/u64/i64/f32/f64/bf16/f8/f4.
 # Bit-packed (u1/u4) and polymorphic w64 arrays are rejected.
 # Page-aligned bases (mmap regions; arrays from `array_aligned`) take
 # the true zero-copy path; otherwise falls back to a one-shot copy.
@@ -77,8 +77,8 @@
 # breaks GPU binding.
 #
 # `ebits` encodes the element format: 8 = u8, 108 = i8, 16 = u16,
-# 116 = i16, 32 = u32, 64 = u64, -32 = f32, -64 = f64, -116 = bf16,
-# -108/-109 = f8, -104 = f4.
+# 116 = i16, 32 = u32, 33 = i32, 64 = u64, 66 = i64, -32 = f32,
+# -64 = f64, -116 = bf16, -108/-109 = f8, -104 = f4.
 # Declared `->` not `fn`: historically routed around broken impure-ccall
 # detection (fixed in the slab-AST guard repair); `->` retained to avoid churn.
 -> metal_array(ebits, size)

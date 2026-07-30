@@ -130,6 +130,22 @@ static id<MTLBuffer> scalar_autobox_lookup_or_make(uint8_t kind, uint32_t raw, i
     return buf;
 }
 
+/* Fixed-width raw scalar formats that may be exposed directly to Metal.
+ * Keep acceptance and physical-width normalization together: signed i32/i64
+ * use identity-preserving ebits 33/66, not their literal storage widths. */
+static int metal_array_storage_bits(int ebits, int64_t *bits_out) {
+    switch (ebits) {
+        case 8: case 16: case 32: case 33: case 64: case 66:
+        case 108: case 116:
+        case -32: case -64: case -116:
+        case -108: case -109: case -104:
+            *bits_out = w_array_storage_bits(ebits);
+            return *bits_out > 0;
+        default:
+            return 0;
+    }
+}
+
 /* Phase 7d (#12): transparent buffer arg — accept either a WMetalBuffer,
  * a WArray with GPU-eligible ebits, or a scalar int/double (autoboxed).
  * For WArray, wrap on-the-fly via newBufferWithBytesNoCopy (zero-copy
@@ -159,18 +175,10 @@ static id<MTLBuffer> metal_buffer_or_wrap_array(WValue v, id<MTLDevice> dev) {
     if (!w_is_array(v)) return nil;
     WArray *a = (WArray *)w_as_ptr(v);
     int e_int = (int)a->ebits;
-    if (e_int != 8 && e_int != 16 && e_int != 32 && e_int != 64 &&
-        e_int != -32 && e_int != -64 &&
-        e_int != -116 && e_int != -108 && e_int != -109 && e_int != -104 &&
-        e_int != 108 && e_int != 116) {
+    int64_t bits_per_elt;
+    if (!metal_array_storage_bits(e_int, &bits_per_elt)) {
         return nil;
     }
-    int64_t bits_per_elt;
-    if (e_int == -116 || e_int == 116) bits_per_elt = 16;
-    else if (e_int == -108 || e_int == -109 || e_int == 108) bits_per_elt = 8;
-    else if (e_int == -104) bits_per_elt = 4;
-    else if (e_int < 0) bits_per_elt = -e_int;
-    else bits_per_elt = e_int;
     if (a->size <= 0) return nil;
     int64_t byte_length = (a->size * bits_per_elt) / 8;
     void *base = (uint8_t *)a->slots + (a->start * bits_per_elt) / 8;
@@ -436,7 +444,8 @@ WValue w_metal_buffer_length(WValue buffer_v) {
  * keeping the WArray alive while the buffer is in use.
  *
  * Gated on ebits suitable for direct GPU consumption:
- *   8, 16, 32, 64, -32, -64 — byte- or element-aligned, dense layout
+ *   8, 16, 32, 33, 64, 66, -32, -64 — byte- or element-aligned,
+ *   dense layout (33/66 are signed i32/i64 encodings)
  * Rejected:
  *   1, 4    — bit-packed; GPU kernels would need to unpack each lane
  *   65      — polymorphic w64 stores NaN-boxed WValues, not raw values
@@ -478,6 +487,7 @@ WValue w_array_as_metal_buffer(WValue device_v, WValue arr_v) {
      * All float-family ebits are NEGATIVE; storage = abs(value) with
      * special low-precision codes for the wide ones:
      *   8/16/32/64       — unsigned ints, storage = bits
+     *   33 / 66          — i32 / i64, storage = 32 / 64
      *   108 / 116        — i8 / i16, storage = 8 / 16
      *   -32 / -64        — f32 / f64, storage = abs(bits)
      *   -116             — bf16, storage = 16
@@ -486,20 +496,10 @@ WValue w_array_as_metal_buffer(WValue device_v, WValue arr_v) {
      * Rejected: u1, u4 (bit-packed), 65 (polymorphic w64 stores
      * NaN-boxed WValue metadata, not raw values a kernel can consume). */
     int e_int = (int)e;
-    if (e_int != 8 && e_int != 16 && e_int != 32 && e_int != 64 &&
-        e_int != 108 && e_int != 116 &&
-        e_int != -32 && e_int != -64 &&
-        e_int != -116 && e_int != -108 && e_int != -109 && e_int != -104) {
-        w_raise(w_string("array.as_metal_buffer: requires fixed-width typed array (u8/i8/u16/i16/u32/u64/f32/f64/bf16/f8/f4)"));
-    }
     int64_t bits_per_elt;
-    if (e_int == -116) bits_per_elt = 16;
-    else if (e_int == -108 || e_int == -109) bits_per_elt = 8;
-    else if (e_int == -104) bits_per_elt = 4;
-    else if (e_int == 108) bits_per_elt = 8;
-    else if (e_int == 116) bits_per_elt = 16;
-    else if (e_int < 0) bits_per_elt = -e_int;
-    else bits_per_elt = e_int;
+    if (!metal_array_storage_bits(e_int, &bits_per_elt)) {
+        w_raise(w_string("array.as_metal_buffer: requires fixed-width typed array (u8/i8/u16/i16/u32/i32/u64/i64/f32/f64/bf16/f8/f4)"));
+    }
     int64_t byte_length = (logical_size * bits_per_elt) / 8;
     if (byte_length <= 0) {
         w_raise(w_string("array.as_metal_buffer: empty array"));
@@ -1471,14 +1471,11 @@ WValue w_metal_sync_array_from_buffer(WValue arr_v, WValue buf_v) {
         w_raise(w_string("Metal.sync: second arg must be a Metal buffer"));
     }
     WArray *a = (WArray *)w_as_ptr(arr_v);
-    int e_int = (int)a->ebits;
     int64_t bits_per_elt;
-    if (e_int == -116 || e_int == 116) bits_per_elt = 16;
-    else if (e_int == -108 || e_int == -109 || e_int == 108) bits_per_elt = 8;
-    else if (e_int == -104) bits_per_elt = 4;
-    else if (e_int < 0) bits_per_elt = -e_int;
-    else bits_per_elt = e_int;
-    if (bits_per_elt <= 0 || a->size <= 0) return W_NIL;
+    if (!metal_array_storage_bits((int)a->ebits, &bits_per_elt)) {
+        w_raise(w_string("Metal.sync: first arg must be a fixed-width typed array"));
+    }
+    if (a->size <= 0) return W_NIL;
     int64_t byte_length = (a->size * bits_per_elt) / 8;
     if (byte_length > b->size) byte_length = b->size;
     void *arr_base = (uint8_t *)a->slots + (a->start * bits_per_elt) / 8;

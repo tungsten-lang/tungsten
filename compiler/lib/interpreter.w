@@ -4150,10 +4150,14 @@ use target
       bits = 16
     elsif etype == "i16"
       bits = 116
-    elsif etype in ("u32" "i32")
+    elsif etype == "u32"
       bits = 32
-    elsif etype in ("u64" "i64")
+    elsif etype == "i32"
+      bits = 33
+    elsif etype == "u64"
       bits = 64
+    elsif etype == "i64"
+      bits = 66
     elsif etype == "f32"
       bits = 0 - 32
     elsif etype == "bf16"

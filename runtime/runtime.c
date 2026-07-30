@@ -17844,12 +17844,30 @@ static void w_hash_allocate_storage(WHash *hash, int64_t cap) {
     for (int64_t i = 0; i < cap; i++) hash->keys[i] = W_UNDEF;
 }
 
+/* Hash with the dominant key kinds inlined: canonical strings/symbols
+ * (storage modes 0-6) and inline ints hash by their bits alone. Results
+ * are bit-identical to w_hash_value's for every input — this only skips
+ * the call and its branch prelude on the hot kinds. */
+static inline uint64_t w_hash_value_fast(WValue key) {
+    if (w_is_stringy(key) && ((key >> 1) & 7) <= 6)
+        return w_hash_splitmix64(key);
+    if (w_is_int(key))
+        return w_hash_splitmix64(key);
+    return w_hash_value(key);
+}
+
 static int64_t w_hash_find_slot(WHash *hash, WValue key, int *found) {
     uint64_t mask = (uint64_t)(hash->cap - 1);
-    uint64_t idx = w_hash_value(key) & mask;
+    uint64_t idx = w_hash_value_fast(key) & mask;
     int64_t first_tombstone = -1;
     for (uint32_t probes = 0; probes < hash->cap; probes++) {
         WValue slot_key = hash->keys[idx];
+        /* identity hit first: canonical keys (inline/slab strings, symbols,
+         * ints) compare equal by bits, no w_hash_key_eq call needed */
+        if (slot_key == key) {
+            *found = 1;
+            return (int64_t)idx;
+        }
         if (slot_key == W_UNDEF) {
             *found = 0;
             return first_tombstone >= 0 ? first_tombstone : (int64_t)idx;

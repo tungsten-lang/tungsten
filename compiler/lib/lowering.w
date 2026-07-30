@@ -86,6 +86,18 @@ use lowering/definitions
     nested = true
   if nested && k == :var && node.name != nil
     refs[node.name] = true
+  # Interpolation parts are [tag, payload] packed-body pairs (W_PACKED_BODY,
+  # subtype 6) — not AST nodes — so ast_children skips them. Walk the expr
+  # payloads explicitly, or a var read only from inside "[x]" in a nested
+  # scope loses its @global mirror and the fn reads an unset global.
+  if k in (:string_interp :byte_array_interp)
+    ps = node.parts
+    pi = 0
+    while pi < ps.size()
+      p = ps[pi]
+      if p[0] != :str
+        evr_walk(p[1], refs, nested)
+      pi += 1
   kids = ast_children(node)
   ki = 0
   while ki < kids.size()

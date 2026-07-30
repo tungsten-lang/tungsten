@@ -196,7 +196,8 @@
       # it; no user name exists) and consumed only here, so the freeing
       # variant reclaims each intermediate of an N-part interpolation
       # instead of leaking N-2 strings per evaluation.
-      cn = i >= 2 && result_is_chain ? "w_str_concat_free_lhs" : "w_str_concat"
+      # env gate: TUNGSTEN_FREE=0 must silence every compiler-inserted free.
+      cn = i >= 2 && result_is_chain && env("TUNGSTEN_FREE") != "0" ? "w_str_concat_free_lhs" : "w_str_concat"
       emit_instruction(wfn, {op: :call_direct_i64, temp: concat, name: cn, args: [result, part_reg]})
       result = concat
       result_is_chain = true

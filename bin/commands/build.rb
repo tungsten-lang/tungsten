@@ -709,7 +709,10 @@ run_pgo_post_step = lambda do |stage2_bin, label|
     exit 1
   end
 
-  # 3b: Run instrumented binary on representative workload (compile itself)
+  # 3b: Run instrumented binary on representative workload (compile itself).
+  # pgo_dir persists across builds and %p mints one profraw per PID — purge
+  # first, or the merge blends profiles from OLDER compiler builds.
+  FileUtils.rm_f(Dir.glob(File.join(pgo_dir, "*.profraw")))
   puts "    #{dim}profiling...#{reset}"
   profile_env = { "LLVM_PROFILE_FILE" => pgo_profraw, "TUNGSTEN_INCREMENTAL" => "0" }
   unless system(profile_env, pgo_instrumented, "compile", TUNGSTEN_W, "--out", File.join(pgo_dir, "train-out"), chdir: ROOT)

@@ -390,8 +390,11 @@ static WBigint *mag_add(const uint64_t *a, int32_t alen, const uint64_t *b, int3
         r->limbs[i] = (uint64_t)s;
         carry = (uint64_t)(s >> 64);
     }
-    if (carry) { r->limbs[alen] = carry; r->size = alen + 1; }
-    else       { r->size = alen; }
+    /* Unconditional store: with carry == 0 the limb sits beyond size and is
+     * never read, but writing it keeps the raw-alloc buffer fully
+     * initialized (MSAN-clean, safe for any future cap-range reader). */
+    r->limbs[alen] = carry;
+    r->size = carry ? alen + 1 : alen;
     return r;
 }
 
@@ -17887,8 +17890,11 @@ static int64_t w_hash_find_slot(WHash *hash, WValue key, int *found) {
     for (uint32_t probes = 0; probes < hash->cap; probes++) {
         WValue slot_key = hash->keys[idx];
         /* identity hit first: canonical keys (inline/slab strings, symbols,
-         * ints) compare equal by bits, no w_hash_key_eq call needed */
-        if (slot_key == key) {
+         * ints) compare equal by bits, no w_hash_key_eq call needed. The
+         * key >= 0x10 guard (loop-invariant, hoisted) keeps sentinel-range
+         * bit patterns (W_UNDEF empty / W_MEMO_MISS tombstone, and the
+         * nil/bool singletons) on the explicit checks below. */
+        if (slot_key == key && key >= 0x10) {
             *found = 1;
             return (int64_t)idx;
         }

@@ -1211,8 +1211,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     # 30M iterations from exactly this temp). Both syntactic anonymity
     # AND last-instruction identity are required: a bare var RHS
     # binding-forwards an earlier temp that IS nameable.
+    # TUNGSTEN_FREE=0 is the documented kill switch for ALL compiler-inserted
+    # frees — the concat variants must honor it too or corruption triage
+    # can't rule them out.
     cname = "w_str_concat"
-    if node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :call
+    if env("TUNGSTEN_FREE") != "0" && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :call
       li = last_emitted_instruction(wfn)
       if li != nil && li[:op] == :call_direct_i64 && li[:name] == "w_int_to_s" && li[:temp] == rhs_reg
         cname = "w_str_concat_free_rhs"

@@ -1091,7 +1091,9 @@ while i < args.size()
 # the two invalidation rules can never drift.
 -> dev_runtime_base_files(ev, generated_thresholds)
   bases = ["runtime.c", "terminal_input.c", "runtime.h", "wvalue.h",
-           "event_loop.h", "ssmr_witness.h", "w_char_table.c", "aks.c", "tls_stub.c"]
+           "event_loop.h", "ssmr_witness.h", "w_char_table.c", "aks.c", "tls_stub.c",
+           "pdqsort.inc", "ipnsort.inc", "radixsort.inc", "timsort.inc",
+           "skasort.inc", "wolfsort.inc"]
   if ev == "event_*.c"
     bases.push("event_kqueue.c")
     bases.push("event_epoll.c")
@@ -1449,8 +1451,10 @@ while i < args.size()
   # Stale part objects from a previous run would satisfy the existence
   # check below even when a clang job fails (sh's bare `wait` exits 0
   # regardless of job status) — clear them so every .o linked was
-  # produced by THIS spawn.
-  system("rm -f " + q_prefix + "*.o")
+  # produced by THIS spawn. Each job also touches a .ok marker AFTER its
+  # clang succeeds; requiring the marker rejects truncated objects from
+  # jobs killed mid-write, which still leave a .o on disk.
+  system("rm -f " + q_prefix + "*.o " + q_prefix + "*.ok")
   flags = "-O3 -DNDEBUG " + march_flags() + " -fmerge-all-constants "
   on macos
     flags = flags + "-fveclib=Darwin_libsystem_m "
@@ -1468,6 +1472,8 @@ while i < args.size()
     cmd << dev_runtime_shell_quote(part)
     cmd << " -o "
     cmd << dev_runtime_shell_quote(part + ".o")
+    cmd << " && touch "
+    cmd << dev_runtime_shell_quote(part + ".ok")
     cmd << " & "
     objs << dev_runtime_shell_quote(part + ".o")
     objs << " "
@@ -1477,8 +1483,15 @@ while i < args.size()
     return nil
   i = 0
   while i < parts
-    if !file?(prefix + i.to_s() + ".o")
+    if !file?(prefix + i.to_s() + ".o") || !file?(prefix + i.to_s() + ".ok")
       return nil
+    i += 1
+  # Success: the split bitcode inputs and job markers served their purpose;
+  # only the .o files feed the link. Leaving parts behind leaked ~15 files
+  # per build when ll_path is a stable (--ll / source-adjacent) location.
+  i = 0
+  while i < parts
+    system("rm -f " + dev_runtime_shell_quote(prefix + i.to_s()) + " " + dev_runtime_shell_quote(prefix + i.to_s() + ".ok"))
     i += 1
   objs.to_s()
 
@@ -1512,7 +1525,7 @@ while i < args.size()
     return p
   pwd + "/" + p
 
--> incremental_cache_slot(file_path, out_path)
+-> incremental_cache_slot(file_path, out_path, identity)
   dir = env("TUNGSTEN_CACHE_DIR")
   if dir == nil || dir == ""
     home = env("HOME")
@@ -1521,13 +1534,20 @@ while i < args.size()
     dir = home + "/.tungsten/cache"
   if system("mkdir -p " + dev_runtime_shell_quote(dir)) != true
     return nil
-  # Hash ABSOLUTE paths into the slot name: embedding them verbatim
-  # overflowed NAME_MAX on deep trees (every store failed "File name too
-  # long"), and relative invocations from two different projects must not
-  # share a slot. The identity line keeps the readable paths.
-  key = incremental_abs_path(file_path) + "__" + incremental_abs_path(out_path)
+  # Hash ABSOLUTE paths AND the full identity into the slot name: verbatim
+  # paths overflowed NAME_MAX on deep trees (every store failed "File name
+  # too long"), relative invocations from two projects must not share a
+  # slot, and folding the identity in keeps differently-configured builds
+  # (--dev vs default, -D defines, env knobs) in separate slots — two
+  # concurrent writers can then never pair one config's manifest with the
+  # other's binary. The identity line in the manifest stays as a self-check.
+  key = incremental_abs_path(file_path) + "__" + incremental_abs_path(out_path) + "|" + identity
   dir + "/irbin-" + wyhash64_hex_string(key)
 
+# Freshness is mtime-based end to end: tools that preserve timestamps
+# (cp -p, rsync -t) defeat it, and ambient toolchain upgrades (Xcode/clang)
+# are not keyed — the exe mtime covers compiler rebuilds only. Accepted
+# dev-cache tradeoffs; `tungsten --clear-cache` is the escape hatch.
 -> incremental_identity(file_path, out_path)
   exe = ccall("w_executable_path")
   em = file_mtime_ns(exe)
@@ -1540,7 +1560,11 @@ while i < args.size()
     defs = defs + dk[dki] + "=" + build_defines[dk[dki]] + ";"
     dki += 1
   ra = runtime_archive == nil ? "" : runtime_archive
-  ["irbin-v2", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), release_mode.to_s(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
+  ram = ""
+  if ra != ""
+    ramv = file_mtime_ns(ra)
+    ram = ramv == nil ? "missing" : ramv.to_s()
+  ["irbin-v2", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), release_mode.to_s(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
 
 # Valid cached binary for this identity? Reads the manifest, revalidates
 # every recorded (path, mtime_ns), and on success installs the cached
@@ -1550,7 +1574,9 @@ while i < args.size()
   if manifest == nil
     return false
   lines = manifest.split("\n")
-  if lines.size() < 1 || lines[0] != identity
+  # >= 2: identity line plus at least one file row. A store always records
+  # the runtime base sources, so a rowless manifest is truncation damage.
+  if lines.size() < 2 || lines[0] != identity
     return false
   i = 1
   while i < lines.size()
@@ -1572,44 +1598,71 @@ while i < args.size()
     return false
   if file?(slot + ".sidemap")
     system("cp -p " + dev_runtime_shell_quote(slot + ".sidemap") + " " + dev_runtime_shell_quote(out_path + ".sidemap"))
+  else
+    # No cached sidemap: drop any stale one a previous non-cached build
+    # left beside out_path, or crash reports symbolize against old code.
+    system("rm -f " + dev_runtime_shell_quote(out_path + ".sidemap"))
   true
 
--> incremental_store(slot, identity, out_path, sidemap_path)
+-> incremental_store(slot, identity, out_path, sidemap_path, file_path)
   files = g_incremental[:manifest]
   if files == nil
     return nil
   parts = [identity]
   i = 0
   while i < files.size()
-    parts.push(files[i][1].to_s() + "\t" + files[i][0])
+    parts.push(files[i][1].to_s() + "\t" + incremental_abs_path(files[i][0]))
     i += 1
   rt = incremental_runtime_entries
   ri = 0
   while ri < rt.size()
     parts.push(rt[ri][1].to_s() + "\t" + rt[ri][0])
     ri += 1
+  # @gpu sidecars are emitted next to the SOURCE; recording them as rows
+  # means a deleted sidecar mtimes to nil at probe time and forces the
+  # rebuild that regenerates it.
+  gpu_exts = [".metal", ".cu"]
+  gi = 0
+  while gi < gpu_exts.size()
+    gp = file_path.replace(".w", gpu_exts[gi])
+    gm = file_mtime_ns(gp)
+    if gm != nil
+      parts.push(gm.to_s() + "\t" + incremental_abs_path(gp))
+    gi += 1
+  # Unique staging names (concurrent writers of the same slot must never
+  # interleave into one temp file) and manifest-last, atomic-rename
+  # publication: a reader sees either the old pair or the new pair.
+  nonce = clock.to_s()
   q_slot_bin = dev_runtime_shell_quote(slot + ".bin")
-  tmp = slot + ".bin.tmp"
+  tmp = slot + ".bin.tmp." + nonce
   if system("cp -p " + dev_runtime_shell_quote(out_path) + " " + dev_runtime_shell_quote(tmp)) != true
     return nil
-  system("mv -f " + dev_runtime_shell_quote(tmp) + " " + q_slot_bin)
+  if system("mv -f " + dev_runtime_shell_quote(tmp) + " " + q_slot_bin) != true
+    system("rm -f " + dev_runtime_shell_quote(tmp))
+    return nil
   if file?(sidemap_path)
     system("cp -p " + dev_runtime_shell_quote(sidemap_path) + " " + dev_runtime_shell_quote(slot + ".sidemap"))
-  write_file(slot + ".manifest", parts.join("\n") + "\n")
+  else
+    system("rm -f " + dev_runtime_shell_quote(slot + ".sidemap"))
+  mtmp = slot + ".manifest.tmp." + nonce
+  write_file(mtmp, parts.join("\n") + "\n")
+  if system("mv -f " + dev_runtime_shell_quote(mtmp) + " " + dev_runtime_shell_quote(slot + ".manifest")) != true
+    system("rm -f " + dev_runtime_shell_quote(mtmp))
   nil
 
 -> compile_one(file_path, out_path, emit_wire, verbose, intern_algo, emit_ll_only_arg = false)
   if out_path == nil
     out_path = file_path.replace(".w", ".wc")
 
-  # Cache probe: full binary path only (no --emit-wire/--emit-ll/--ll —
-  # those want the intermediate artifacts).
+  # Cache probe: full binary path only (no --emit-wire/--emit-ll/--ll and
+  # no TUNGSTEN_LL_PATH/TUNGSTEN_LL_DONE_MARKER — those flows consume
+  # intermediate artifacts a cache hit would never produce).
   incr_slot = nil
   incr_id = nil
-  if !emit_wire && !emit_ll_only_arg && !keep_ll && incremental_cache_enabled?
-    incr_slot = incremental_cache_slot(file_path, out_path)
-    if incr_slot != nil
-      incr_id = incremental_identity(file_path, out_path)
+  if !emit_wire && !emit_ll_only_arg && !keep_ll && incremental_env_s("TUNGSTEN_LL_PATH") == "" && incremental_env_s("TUNGSTEN_LL_DONE_MARKER") == "" && incremental_cache_enabled?
+    incr_id = incremental_identity(file_path, out_path)
+    if incr_id != nil
+      incr_slot = incremental_cache_slot(file_path, out_path, incr_id)
     if incr_slot != nil && incr_id != nil
       if incremental_try_reuse(incr_slot, incr_id, out_path, verbose)
         << ""
@@ -1636,7 +1689,7 @@ while i < args.size()
     << ""
     << "Built [out_path]"
     if incr_slot != nil && incr_id != nil
-      incremental_store(incr_slot, incr_id, out_path, sidemap_path)
+      incremental_store(incr_slot, incr_id, out_path, sidemap_path, file_path)
 
   ok
 

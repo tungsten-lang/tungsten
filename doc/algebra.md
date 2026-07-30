@@ -24,7 +24,8 @@ core/algebra/finite_field.w        # 𝔽_p and arbitrary finite extensions
 core/algebra/polynomial.w          # rings, sparse ops, division, content
 core/algebra/polynomial_resultant.w
 core/algebra/polynomial_gcd.w
-core/algebra/polynomial_factor.w
+core/algebra/polynomial_factor.w # exact factorization over ℚ
+core/algebra/polynomial_factor_finite.w # complete finite-field factorization
 core/algebra/real_roots.w          # Sturm isolation and certified RootOf values
 core/algebra/algebraic_real.w      # exact RootOf arithmetic and certificates
 core/algebra/expression.w          # symbolic factor and exact real solve facade
@@ -87,6 +88,28 @@ F16.minimal_polynomial_certificate(a, :x).verified?
 Deterministic modulus search is explicitly resource-bounded. Small geometry
 fields cache their exact multiplication table; larger fields retain sparse
 packed convolution and modular reduction.
+
+Univariate polynomials over prime and extension finite fields have complete
+factorization with multiplicity. The exact pipeline handles inseparable
+polynomials by recursive p-th roots, then uses distinct-degree factorization
+and deterministic equal-degree splitting:
+
+```w
+F4 = FiniteField.extension(2, 2)
+R4 = PolynomialRing.new([:x], F4)
+x = R4.generator(0)
+a = R4.monomial_raw(F4.generator, R4.zero_exponents)
+f = (x**2 + x + a) * (x**2 + a*x + a)
+
+f.factor
+proof = f.factor_with_certificate
+proof.certified?                            # true
+proof.certificate.verified?                 # independently replays product
+```
+
+The certificate also proves each returned nonconstant factor irreducible with
+Rabin's criterion. Equal-degree candidate enumeration has an explicit limit
+and raises `unknown` on exhaustion instead of returning a partial result.
 
 `NumberField` arithmetic is degree-generic. The defining polynomial is
 certified irreducible over ℚ, and elements expose exact minimal and
@@ -157,8 +180,8 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Layer | Available now | Boundary |
 | --- | --- | --- |
 | Symbolic expressions | Exact π/e and radicals; canonical simplify, expand, collect, differentiation, elementary antiderivatives; exact formal Taylor series and removable finite limits; exact univariate ℚ factor facade; arbitrary exact real roots as rationals, radicals, or certified `RootOf` constants; exact arithmetic and symbolic transcendentals over real algebraic constants | No assumptions, piecewise forms, Laurent/Puiseux series, infinite/directional limits, general multivariate factorization, complex algebraic-root object, general higher-degree radical formulas, or Risch integration |
-| Fields | Exact `RationalField`; prime fields and arbitrary extensions `𝔽_{p^n}` with Integer-encoded power-basis elements, Rabin-certified moduli, Frobenius orbits, trace, norm, and certified minimal polynomials; arbitrary-degree irreducible `NumberField`s over ℚ with exact power-basis arithmetic, minimal/characteristic polynomials, trace, norm, integrality, Sturm signatures, and certified real embeddings; certified cubic integral bases and maximal-order discriminants | Finite-field polynomial factorization and explicit embeddings between differently presented finite fields, complex algebraic embeddings, noncubic number-field maximal orders/integral bases, and general number-field isomorphism algorithms are not implemented. Modulus/factor search and cubic maximal-order search are explicitly resource-bounded and raise instead of guessing |
-| Polynomials | Sparse sorted terms; merge-multiply; dense univariate fast path; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ as **content × monic irreducibles**; exact Sturm counts, Cauchy bounds, and certified isolation of every distinct real root | Kronecker factor search, Gröbner elimination, and root-interval splitting have explicit resource limits; complex-root isolation, complex algebraic-number arithmetic, and multivariate factorization are not implemented |
+| Fields | Exact `RationalField`; prime fields and arbitrary extensions `𝔽_{p^n}` with Integer-encoded power-basis elements, Rabin-certified moduli, Frobenius orbits, trace, norm, and certified minimal polynomials; arbitrary-degree irreducible `NumberField`s over ℚ with exact power-basis arithmetic, minimal/characteristic polynomials, trace, norm, integrality, Sturm signatures, and certified real embeddings; certified cubic integral bases and maximal-order discriminants | Explicit embeddings between differently presented finite fields, complex algebraic embeddings, noncubic number-field maximal orders/integral bases, and general number-field isomorphism algorithms are not implemented. Modulus/factor search and cubic maximal-order search are explicitly resource-bounded and raise instead of guessing |
+| Polynomials | Sparse sorted terms; merge-multiply; dense univariate quotient arithmetic; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ and arbitrary finite fields as **unit × monic irreducibles**, with replay certificates; exact Sturm counts, Cauchy bounds, and certified isolation of every distinct real root | Kronecker and deterministic equal-degree factor search, Gröbner elimination, and root-interval splitting have explicit resource limits; complex-root isolation, complex algebraic-number arithmetic, and multivariate factorization are not implemented |
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders | Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, finite fields, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
 | Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension | Singular-curve normalization is not implemented |

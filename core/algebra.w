@@ -19,6 +19,7 @@ use core/algebra/polynomial
 use core/algebra/polynomial_resultant
 use core/algebra/polynomial_gcd
 use core/algebra/polynomial_factor
+use core/algebra/polynomial_factor_finite
 use core/algebra/real_roots
 use core/algebra/groebner
 use core/algebra/algebraic_real

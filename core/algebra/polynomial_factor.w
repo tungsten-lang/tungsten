@@ -1,5 +1,6 @@
 # Exact univariate factorization over ℚ.
 # Reopens Polynomial; load after polynomial_gcd.w.
+# Finite-field factorization is layered in polynomial_factor_finite.w.
 
 + Polynomial
   -> integer_divisors(value)
@@ -159,7 +160,10 @@
   # "irreducible".
   -> factor(search_limit = 250_000)
     raise "factorization is only defined for univariate polynomials" if @ring.arity != 1
-    raise "factorization is only implemented over ℚ" if @ring.field.class_name != "RationalField"
+    if @ring.field.class_name == "FiniteField"
+      return factor_finite_field(search_limit)
+    if @ring.field.class_name != "RationalField"
+      raise "factorization is currently implemented over ℚ and finite fields"
     return [@ring.one] if one?
     return [self] if zero?
 
@@ -200,4 +204,3 @@
 
   -> factors
     factor
-

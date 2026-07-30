@@ -180,25 +180,6 @@
       out.push([converted, exponents])
     Polynomial.new(target_ring, out)
 
-  # Binary powering in a quotient of a univariate polynomial ring. This is
-  # also useful for finite-field root counts via gcd(f, X^q-X).
-  -> power_mod(exponent, modulus)
-    if @ring.arity != 1
-      raise "polynomial modular powers require a univariate ring"
-    if exponent < 0
-      raise "polynomial modular exponent must be nonnegative"
-    modulus = @ring.coerce(modulus)
-    raise "polynomial modular power modulo zero" if modulus.zero?
-    result = @ring.one
-    factor = rem(modulus)
-    remaining = exponent
-    while remaining > 0
-      result = (result * factor).rem(modulus) if remaining.odd?
-      remaining = remaining / 2
-      factor = (factor * factor).rem(modulus) if remaining > 0
-    result
-
-
 + Curve
   -> finite_field?
     field.class_name == "FiniteField"

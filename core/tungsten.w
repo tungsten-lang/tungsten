@@ -148,6 +148,8 @@
   auto :PolynomialRing,         "algebra"
   auto :Polynomial,             "algebra"
   auto :IntegerPolynomial,      "algebra"
+  auto :PolynomialFactorization, "algebra"
+  auto :PolynomialFactorizationCertificate, "algebra"
   auto :AlgebraicRealRoot,      "algebra"
   auto :AlgebraicRealComputation, "algebra"
   auto :AlgebraicRealOperationCertificate, "algebra"

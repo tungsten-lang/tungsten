@@ -790,6 +790,86 @@
   -> rem(divisor)
     divmod(divisor)[1]
 
+  -> dense_element_trim(values)
+    out = []
+    values.each -> out.push(item)
+    while out.size > 0 && field_zero?(out[out.size - 1])
+      out.delete_at(out.size - 1)
+    out
+
+  -> dense_element_remainder(dividend, divisor)
+    remainder = dense_element_trim(dividend)
+    denominator = dense_element_trim(divisor)
+    raise "dense polynomial division by zero" if denominator.size == 0
+    denominator_degree = denominator.size - 1
+    denominator_leading = denominator[denominator_degree]
+    while remainder.size > 0 && remainder.size - 1 >= denominator_degree
+      remainder_degree = remainder.size - 1
+      scale = field_div(
+        remainder[remainder_degree], denominator_leading)
+      shift = remainder_degree - denominator_degree
+      i = 0
+      while i <= denominator_degree
+        target = shift + i
+        remainder[target] = field_add(
+          remainder[target],
+          field_neg(field_mul(scale, denominator[i])))
+        i += 1
+      remainder = dense_element_trim(remainder)
+    remainder
+
+  -> dense_element_multiply_mod(left, right, modulus)
+    return [] if left.size == 0 || right.size == 0
+    product = []
+    size = left.size + right.size - 1
+    i = 0
+    while i < size
+      product.push(@ring.field.zero)
+      i += 1
+    i = 0
+    while i < left.size
+      j = 0
+      while j < right.size
+        product[i + j] = field_add(
+          product[i + j], field_mul(left[i], right[j]))
+        j += 1
+      i += 1
+    dense_element_remainder(product, modulus)
+
+  -> polynomial_from_dense_elements(values)
+    terms = []
+    i = 0
+    while i < values.size
+      if !field_zero?(values[i])
+        terms.push([values[i], [i]])
+      i += 1
+    Polynomial.new(@ring, terms)
+
+  # Binary powering in a dense quotient kernel. This is shared by
+  # finite-field factorization, irreducibility tests, and point counts via
+  # gcd(f, X^q-X).
+  -> power_mod(exponent, modulus)
+    if @ring.arity != 1
+      raise "polynomial modular powers require a univariate ring"
+    if exponent < 0
+      raise "polynomial modular exponent must be nonnegative"
+    modulus = @ring.coerce(modulus)
+    raise "polynomial modular power modulo zero" if modulus.zero?
+    modulus_coefficients = modulus.coefficients
+    result = [@ring.field.one]
+    factor = dense_element_remainder(
+      coefficients, modulus_coefficients)
+    remaining = exponent
+    while remaining > 0
+      if remaining.odd?
+        result = dense_element_multiply_mod(
+          result, factor, modulus_coefficients)
+      remaining = remaining / 2
+      if remaining > 0
+        factor = dense_element_multiply_mod(
+          factor, factor, modulus_coefficients)
+    polynomial_from_dense_elements(result)
+
   -> /(divisor)
     result = divmod(divisor)
     raise "polynomial division is not exact" if !result[1].zero?

@@ -105,6 +105,51 @@ prime_check("number_field.generator_relation",
 prime_check("number_field.basis_size",
             k2_prime.basis.size, 2)
 
+# Away from the power-order index, the number-field facade uses the compact
+# Dedekind path.  Its certificate replays the finite-field maps and the exact
+# ideal identity pO = product P_i^e_i, without retaining a full Frobenius
+# residue algebra.
+k5 = K.prime_decomposition(5)
+prime_check("number_field.dedekind_ramified.class",
+            k5.algebra_decomposition.class_name,
+            "DedekindAlgebraPrimeDecomposition")
+prime_check("number_field.dedekind_ramified.e",
+            k5.ramification_indices, [2])
+prime_check("number_field.dedekind_ramified.f",
+            k5.residue_degrees, [1])
+prime_check("number_field.dedekind_ramified.certified",
+            k5.certificate.verified?, true)
+prime_check("number_field.dedekind_ramified.proof_kind",
+            k5.certificate.proof_kind,
+            :trusted_theorem_import)
+prime_check("number_field.dedekind_ramified.kernel_checked",
+            k5.certificate.kernel_checked?, false)
+prime_check("number_field.dedekind_ramified.arithmetic_replay",
+            k5.certificate.arithmetic_replay_checked?, true)
+
+k11 = K.prime_decomposition(11)
+prime_check("number_field.dedekind_split.f",
+            k11.residue_degrees, [1, 1])
+prime_check("number_field.dedekind_split.norms",
+            k11.norms, [11, 11])
+prime_check("number_field.dedekind_split.distinct",
+            k11.prime_ideals[0].eql?(
+              k11.prime_ideals[1]), false)
+dedekind_map = k11.prime_ideals[0].algebra_prime_ideal.residue_map
+prime_check("number_field.dedekind_map.proof_kind",
+            dedekind_map.certificate.proof_kind,
+            :exact_dedekind_residue_map)
+
+dedekind_index_failed = false
+begin
+  DedekindAlgebraPrimeDecomposition.new(
+    K.maximal_order_computation, 2)
+rescue error
+  dedekind_index_failed = "[error]".include?(
+    "index prime to p")
+prime_check("number_field.dedekind_rejects_index_prime",
+            dedekind_index_failed, true)
+
 # In a product, a prime ideal selects one component and contains every other
 # component.  At 5 the sqrt(5) component ramifies and the Gaussian component
 # splits, giving three primes in total.

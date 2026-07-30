@@ -328,6 +328,418 @@
     to_s
 
 
++ DedekindLinearRootCertificate
+  -> new(@maximal_order_computation, @prime, root)
+    @root = PrimeLinearAlgebra.normalize(
+      root, @prime)
+    source = @maximal_order_computation.source
+    polynomial = source.algebra.defining_polynomial
+    finite_ring = PolynomialRing.new(
+      polynomial.ring.names,
+      FiniteField.new(@prime))
+    @polynomial = polynomial.change_ring(
+      finite_ring).monic
+    @factor = finite_ring.generator(0) - @root
+
+  -> maximal_order_computation
+    @maximal_order_computation
+
+  -> prime
+    @prime
+
+  -> root
+    @root
+
+  -> polynomial
+    @polynomial
+
+  -> factor
+    @factor
+
+  -> polynomial_zero_at_root?
+    coefficients = @polynomial.coefficients
+    value = 0
+    i = coefficients.size - 1
+    while i >= 0
+      value = PrimeLinearAlgebra.normalize(
+        value * @root + coefficients[i],
+        @prime)
+      i -= 1
+    value == 0
+
+  -> verified?
+    expected = "MaximalOrderComputation"
+    return false if @maximal_order_computation.class_name != expected
+    return false if !@maximal_order_computation.certificate.verified?
+    return false if @prime < 2 || !@prime.prime?
+    return false if @maximal_order_computation.index % @prime == 0
+    return false if @root < 0 || @root >= @prime
+    source = @maximal_order_computation.source
+    source_polynomial = source.algebra.defining_polynomial
+    finite_ring = PolynomialRing.new(
+      source_polynomial.ring.names,
+      FiniteField.new(@prime))
+    expected_polynomial = source_polynomial.change_ring(
+      finite_ring).monic
+    return false if !@polynomial.eql?(expected_polynomial)
+    return false if !@factor.eql?(
+      finite_ring.generator(0) - @root)
+    polynomial_zero_at_root?
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :exact_modular_root
+
+  -> kernel_checked?
+    true
+
+
++ DedekindOrderResidueFieldMapCertificate
+  -> new(@residue_map)
+    @verified_cache = nil
+
+  -> residue_map
+    @residue_map
+
+  -> verified?
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    answer
+
+  -> verify!
+    return true if @verified_cache == true
+    expected = "DedekindOrderResidueFieldMap"
+    return false if @residue_map.class_name != expected
+    computation = @residue_map.maximal_order_computation
+    return false if computation.class_name != "MaximalOrderComputation"
+    return false if !computation.certificate.verified?
+    return false if !@residue_map.order.same_order?(
+      computation.order)
+    return false if !@residue_map.source_order.same_order?(
+      computation.source)
+    prime = @residue_map.prime
+    return false if prime < 2 || !prime.prime?
+    return false if computation.index % prime == 0
+
+    factorization = @residue_map.factorization
+    root_certificate = @residue_map.root_certificate
+    polynomial = nil
+    if factorization != nil
+      return false if factorization.class_name != "PolynomialFactorization"
+      return false if !factorization.certificate.verified?
+      polynomial = factorization.polynomial
+    else
+      expected_root_class = "DedekindLinearRootCertificate"
+      return false if root_certificate.class_name != expected_root_class
+      return false if !root_certificate.verified?
+      return false if root_certificate.maximal_order_computation != computation
+      return false if root_certificate.prime != prime
+      polynomial = root_certificate.polynomial
+    return false if polynomial.ring.field.class_name != "FiniteField"
+    return false if !polynomial.ring.field.prime_field?
+    return false if polynomial.ring.field.characteristic != prime
+    expected_polynomial = computation.source.algebra.defining_polynomial
+    finite_ring = PolynomialRing.new(
+      expected_polynomial.ring.names,
+      FiniteField.new(prime))
+    expected_reduction = expected_polynomial.change_ring(
+      finite_ring).monic
+    return false if !polynomial.eql?(expected_reduction)
+
+    factor = @residue_map.factor
+    return false if factor.class_name != "Polynomial"
+    return false if factor.ring != polynomial.ring
+    return false if factor.degree < 1
+    return false if !factor.eql?(factor.monic)
+    if factorization != nil
+      found = false
+      factors = factorization.factors
+      i = 0
+      while i < factors.size
+        found = true if factors[i].eql?(factor)
+        i += 1
+      return false if !found
+    else
+      return false if !root_certificate.factor.eql?(factor)
+
+    field = @residue_map.field
+    return false if field.class_name != "FiniteField"
+    return false if field.characteristic != prime
+    return false if field.degree != factor.degree
+    if factor.degree == 1
+      return false if !field.prime_field?
+    else
+      return false if field.modulus.to_s != factor.coefficients.to_s
+
+    expected_images = @residue_map.recompute_basis_images
+    return false if expected_images.to_s != @residue_map.basis_images.to_s
+    order_basis = @residue_map.order.basis
+    images = @residue_map.basis_images
+    return false if images.size != order_basis.size
+    image_columns = []
+    i = 0
+    while i < images.size
+      image_columns.push(field.element_coefficients(
+        images[i]))
+      i += 1
+    image_rank = PrimeLinearAlgebra.rank_columns(
+      image_columns, prime, field.degree)
+    return false if image_rank != field.degree
+
+    i = 0
+    while i < order_basis.size
+      return false if !field.equal?(
+        @residue_map.image(order_basis[i]),
+        images[i])
+      j = 0
+      while j < order_basis.size
+        source_product = @residue_map.order.algebra.multiply(
+          order_basis[i], order_basis[j])
+        image_product = field.multiply(
+          images[i], images[j])
+        return false if !field.equal?(
+          @residue_map.image(source_product),
+          image_product)
+        j += 1
+      i += 1
+
+    kernel = @residue_map.kernel_lattice
+    return false if !@residue_map.order.lattice.contains_lattice?(
+      kernel)
+    kernel_vectors = kernel.basis_vectors
+    i = 0
+    while i < kernel_vectors.size
+      element = @residue_map.order.algebra.coerce(
+        kernel_vectors[i])
+      return false if !field.zero?(
+        @residue_map.image(element))
+      i += 1
+    index = @residue_map.order.lattice.index_from(kernel)
+    return false if index != field.order
+    @verified_cache = true
+    true
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :exact_dedekind_residue_map
+
+  -> kernel_checked?
+    true
+
+  -> to_s
+    text = "DedekindOrderResidueFieldMapCertificate(F_"
+    text + @residue_map.field.order.to_s + ")"
+
+  -> inspect
+    to_s
+
+
++ DedekindOrderResidueFieldMap
+  -> new(@maximal_order_computation, @prime,
+         @factor, @factorization)
+    initialize_dedekind_residue_map(nil)
+
+  -> new(@maximal_order_computation, @prime,
+         @factor, @factorization,
+         root_certificate)
+    initialize_dedekind_residue_map(
+      root_certificate)
+
+  -> initialize_dedekind_residue_map(root_certificate)
+    expected = "MaximalOrderComputation"
+    if @maximal_order_computation.class_name != expected
+      raise "Dedekind residue map needs a maximal-order computation"
+    if !@maximal_order_computation.certificate.verified?
+      raise "Dedekind residue map needs a certified maximal order"
+    if @prime < 2 || !@prime.prime?
+      raise "Dedekind residue map needs a rational prime"
+    if @maximal_order_computation.index % @prime == 0
+      raise "Dedekind residue map needs index prime to p"
+    @order = @maximal_order_computation.order
+    @source_order = @maximal_order_computation.source
+    @root_certificate = root_certificate
+    if @factor.class_name != "Polynomial" || @factor.degree < 1
+      raise "Dedekind residue map needs a nonconstant factor"
+    if @factorization == nil && @root_certificate == nil
+      raise "Dedekind residue map needs a factor proof"
+    @residue_degree = @factor.degree
+    if @residue_degree == 1
+      @field = FiniteField.new(@prime)
+      if @root_certificate == nil
+        @root = @field.coerce(0 - @factor.coeff(0))
+      else
+        @root = @field.coerce(
+          @root_certificate.root)
+    else
+      @field = FiniteField.new(
+        @prime, @factor.coefficients)
+      @root = @field.generator
+    @basis_images = recompute_basis_images
+    @kernel_lattice_cache = nil
+    @certificate_cache = DedekindOrderResidueFieldMapCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "Dedekind residue-field map failed certification"
+
+  -> maximal_order_computation
+    @maximal_order_computation
+
+  -> order
+    @order
+
+  -> source_order
+    @source_order
+
+  -> prime
+    @prime
+
+  -> factor
+    @factor
+
+  -> factorization
+    @factorization
+
+  -> root_certificate
+    @root_certificate
+
+  -> residue_degree
+    @residue_degree
+
+  -> field
+    @field
+
+  -> root
+    @root
+
+  -> rational_mod_prime(value)
+    rational = Rational.coerce(value)
+    numerator = PrimeLinearAlgebra.normalize(
+      rational.numerator, @prime)
+    denominator = PrimeLinearAlgebra.normalize(
+      rational.denominator, @prime)
+    if denominator == 0
+      raise "order basis denominator is not invertible modulo p"
+    inverse = PrimeLinearAlgebra.inverse(
+      denominator, @prime)
+    @field.coerce(numerator * inverse)
+
+  -> evaluate_power_coordinates(coordinates)
+    value = @field.zero
+    power = @field.one
+    i = 0
+    while i < coordinates.size
+      coefficient = rational_mod_prime(
+        coordinates[i])
+      if !@field.zero?(coefficient)
+        value = @field.add(
+          value,
+          @field.multiply(coefficient, power))
+      power = @field.multiply(power, @root)
+      i += 1
+    value
+
+  -> recompute_basis_images
+    out = []
+    @order.basis_vectors.each -> (vector)
+      out.push(evaluate_power_coordinates(vector))
+    out
+
+  -> basis_images
+    out = []
+    @basis_images.each -> (image)
+      out.push(image)
+    out
+
+  -> image_order_coordinates(coordinates)
+    if coordinates.class_name != "Array"
+      raise "residue-field order coordinates must be an Array"
+    if coordinates.size != @order.rank
+      raise "residue-field order coordinates have the wrong dimension"
+    value = @field.zero
+    i = 0
+    while i < coordinates.size
+      coefficient = @field.coerce(coordinates[i])
+      if !@field.zero?(coefficient)
+        term = @field.multiply(
+          coefficient, @basis_images[i])
+        value = @field.add(value, term)
+      i += 1
+    value
+
+  -> integer_order_coordinates(value)
+    element = @order.coerce(value)
+    coordinates = @order.coordinates(element)
+    out = []
+    coordinates.each -> (coefficient)
+      if coefficient.denominator != 1
+        raise "residue-field source is not integral in its order"
+      out.push(coefficient.numerator)
+    out
+
+  -> image(value)
+    image_order_coordinates(
+      integer_order_coordinates(value))
+
+  -> reduce(value)
+    image(value)
+
+  -> kernel_basis_vectors
+    columns = []
+    i = 0
+    while i < @order.rank
+      columns.push(@field.element_coefficients(
+        @basis_images[i]))
+      i += 1
+    matrix = PrimeLinearAlgebra.matrix_from_columns(
+      columns, @residue_degree, @prime)
+    kernel = PrimeLinearAlgebra.kernel_data(
+      matrix, @prime, @order.rank)
+    relative = []
+    kernel[0].each -> (vector)
+      lifted = []
+      vector.each -> (coefficient)
+        lifted.push(Rational.new(coefficient))
+      relative.push(lifted)
+    kernel[1].each -> (pivot)
+      vector = []
+      i = 0
+      while i < @order.rank
+        value = i == pivot ? @prime : 0
+        vector.push(Rational.new(value))
+        i += 1
+      relative.push(vector)
+    if relative.size != @order.rank
+      raise "residue-field kernel lattice has the wrong rank"
+    ExactRationalLinearAlgebra.compose_columns(
+      @order.basis_vectors, relative)
+
+  -> kernel_lattice
+    if @kernel_lattice_cache == nil
+      @kernel_lattice_cache = AlgebraOrderLattice.new(
+        @order.algebra, kernel_basis_vectors)
+    @kernel_lattice_cache
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+  -> to_s
+    text = "DedekindOrderResidueFieldMap(p=" + @prime.to_s
+    text + ", f=" + @residue_degree.to_s + ")"
+
+  -> inspect
+    to_s
+
+
 + AlgebraPrimeIdealCertificate
   -> new(@prime_ideal)
     @verified_cache = nil
@@ -360,11 +772,13 @@
     expected_norm = @prime_ideal.rational_prime ** @prime_ideal.residue_degree
     if @prime_ideal.norm != expected_norm
       raise "prime-ideal norm is not p^f"
-    local_dimension = map.residue_algebra.local_dimension(
-      map.idempotent)
-    expected_local = @prime_ideal.ramification_index * @prime_ideal.residue_degree
-    if local_dimension != expected_local
-      raise "prime-ideal ramification data has the wrong local dimension"
+    if map.class_name == "OrderResidueFieldMap"
+      local_dimension = map.residue_algebra.local_dimension(
+        map.idempotent)
+      expected_local = @prime_ideal.ramification_index
+      expected_local *= @prime_ideal.residue_degree
+      if local_dimension != expected_local
+        raise "prime-ideal ramification data has the wrong local dimension"
     @verified_cache = true
     true
 
@@ -387,8 +801,11 @@
 
 + AlgebraPrimeIdeal
   -> new(@residue_map, @ramification_index)
-    if @residue_map.class_name != "OrderResidueFieldMap"
-      raise "prime ideal needs an OrderResidueFieldMap"
+    map_name = @residue_map.class_name
+    supported = map_name == "OrderResidueFieldMap"
+    supported = true if map_name == "DedekindOrderResidueFieldMap"
+    if !supported
+      raise "prime ideal needs a certified order residue-field map"
     if @ramification_index < 1
       raise "prime-ideal ramification index must be positive"
     @order = @residue_map.order
@@ -482,6 +899,243 @@
     text = "PrimeIdeal(p=" + rational_prime.to_s
     text + ", e=" + @ramification_index.to_s
     text + ", f=" + residue_degree.to_s + ")"
+
+  -> inspect
+    to_s
+
+
++ DedekindAlgebraPrimeDecompositionCertificate
+  -> new(@decomposition)
+    @verified_cache = nil
+
+  -> decomposition
+    @decomposition
+
+  -> theorem
+    "Dedekind factorization theorem away from the power-order index"
+
+  -> theorem_reference
+    "Dedekind-Kummer theorem"
+
+  -> verified?
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    answer
+
+  -> verify!
+    return true if @verified_cache == true
+    expected = "DedekindAlgebraPrimeDecomposition"
+    return false if @decomposition.class_name != expected
+    computation = @decomposition.maximal_order_computation
+    return false if computation.class_name != "MaximalOrderComputation"
+    return false if !computation.certificate.verified?
+    return false if !@decomposition.order.same_order?(
+      computation.order)
+    prime = @decomposition.prime
+    return false if prime < 2 || !prime.prime?
+    return false if computation.index % prime == 0
+
+    factorization = @decomposition.factorization
+    return false if factorization.class_name != "PolynomialFactorization"
+    return false if !factorization.certificate.verified?
+    factors = @decomposition.distinct_factors
+    multiplicities = @decomposition.multiplicities
+    ideals = @decomposition.prime_ideals
+    return false if factors.size == 0
+    return false if multiplicities.size != factors.size
+    return false if ideals.size != factors.size
+
+    reconstructed = factorization.polynomial.ring.one
+    degree_sum = 0
+    norm_product = 1 ## big
+    i = 0
+    while i < factors.size
+      factor = factors[i]
+      multiplicity = multiplicities[i]
+      return false if multiplicity < 1
+      power = 0
+      while power < multiplicity
+        reconstructed = reconstructed * factor
+        power += 1
+
+      ideal = ideals[i]
+      return false if !ideal.certificate.verified?
+      return false if !ideal.order.same_order?(
+        @decomposition.order)
+      return false if ideal.rational_prime != prime
+      return false if ideal.residue_degree != factor.degree
+      return false if ideal.ramification_index != multiplicity
+      return false if ideal.residue_map.class_name != "DedekindOrderResidueFieldMap"
+      return false if !ideal.residue_map.factor.eql?(factor)
+      j = 0
+      while j < i
+        return false if ideal.eql?(ideals[j])
+        j += 1
+      degree_sum += multiplicity * factor.degree
+      norm_product *= ideal.norm ** multiplicity
+      i += 1
+
+    return false if !reconstructed.eql?(
+      factorization.polynomial)
+    return false if degree_sum != @decomposition.order.rank
+    expected_norm = prime ** @decomposition.order.rank
+    return false if norm_product != expected_norm
+    @verified_cache = true
+    true
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :trusted_theorem_import
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> to_s
+    text = "DedekindAlgebraPrimeDecompositionCertificate(p="
+    text + @decomposition.prime.to_s + ")"
+
+  -> inspect
+    to_s
+
+
++ DedekindAlgebraPrimeDecomposition
+  -> new(@maximal_order_computation, @prime,
+         @factor_search_limit = 250_000)
+    expected = "MaximalOrderComputation"
+    if @maximal_order_computation.class_name != expected
+      raise "Dedekind prime decomposition needs a maximal-order computation"
+    if !@maximal_order_computation.certificate.verified?
+      raise "Dedekind prime decomposition needs a certified maximal order"
+    if @prime < 2 || !@prime.prime?
+      raise "Dedekind prime decomposition needs a rational prime"
+    if @maximal_order_computation.index % @prime == 0
+      raise "Dedekind prime decomposition needs index prime to p"
+    @order = @maximal_order_computation.order
+    source_polynomial = @maximal_order_computation.source.algebra.defining_polynomial
+    finite_ring = PolynomialRing.new(
+      source_polynomial.ring.names,
+      FiniteField.new(@prime))
+    reduced = source_polynomial.change_ring(
+      finite_ring).monic
+    @factorization = reduced.factor_with_certificate(
+      @factor_search_limit)
+    if !@factorization.certificate.verified?
+      raise "Dedekind modular factorization failed certification"
+    group_factors
+    @prime_ideals = []
+    i = 0
+    while i < @distinct_factors.size
+      map = DedekindOrderResidueFieldMap.new(
+        @maximal_order_computation, @prime,
+        @distinct_factors[i], @factorization)
+      @prime_ideals.push(AlgebraPrimeIdeal.new(
+        map, @multiplicities[i]))
+      i += 1
+    @certificate_cache = DedekindAlgebraPrimeDecompositionCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "Dedekind prime decomposition failed certification"
+
+  -> group_factors
+    @distinct_factors = []
+    @multiplicities = []
+    source = @factorization.factors
+    i = 0
+    while i < source.size
+      factor = source[i]
+      if factor.degree > 0
+        index = nil
+        j = 0
+        while j < @distinct_factors.size
+          if index == nil && @distinct_factors[j].eql?(factor)
+            index = j
+          j += 1
+        if index == nil
+          @distinct_factors.push(factor)
+          @multiplicities.push(1)
+        else
+          @multiplicities[index] += 1
+      i += 1
+    if @distinct_factors.size == 0
+      raise "Dedekind factorization has no nonconstant factors"
+
+  -> maximal_order_computation
+    @maximal_order_computation
+
+  -> order
+    @order
+
+  -> prime
+    @prime
+
+  -> factorization
+    @factorization
+
+  -> distinct_factors
+    out = []
+    @distinct_factors.each -> (factor)
+      out.push(factor)
+    out
+
+  -> multiplicities
+    out = []
+    @multiplicities.each -> (multiplicity)
+      out.push(multiplicity)
+    out
+
+  -> prime_ideals
+    out = []
+    @prime_ideals.each -> (ideal)
+      out.push(ideal)
+    out
+
+  -> factors
+    out = []
+    i = 0
+    while i < @prime_ideals.size
+      out.push([
+        @prime_ideals[i],
+        @multiplicities[i]
+      ])
+      i += 1
+    out
+
+  -> residue_degrees
+    out = []
+    @prime_ideals.each -> (ideal)
+      out.push(ideal.residue_degree)
+    out
+
+  -> ramification_indices
+    out = []
+    @multiplicities.each -> (multiplicity)
+      out.push(multiplicity)
+    out
+
+  -> norms
+    out = []
+    @prime_ideals.each -> (ideal)
+      out.push(ideal.norm)
+    out
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+  -> to_s
+    text = "DedekindAlgebraPrimeDecomposition(p="
+    text + @prime.to_s
+    text + ", factors=" + @prime_ideals.size.to_s + ")"
 
   -> inspect
     to_s
@@ -674,8 +1328,14 @@
 
 + NumberFieldPrimeIdealCertificate
   -> new(@prime_ideal)
+    @verified_cache = nil
 
   -> verified?
+    return @verified_cache if @verified_cache != nil
+    @verified_cache = verify!
+    @verified_cache
+
+  -> verify!
     return false if @prime_ideal.class_name != "NumberFieldPrimeIdeal"
     algebra_ideal = @prime_ideal.algebra_prime_ideal
     return false if !algebra_ideal.certificate.verified?
@@ -723,7 +1383,9 @@
     if !@algebra_prime_ideal.order.same_order?(
          @field.certify_maximal_order)
       raise "number-field prime ideal belongs to a different maximal order"
-    if !certificate.verified?
+    @certificate_cache = NumberFieldPrimeIdealCertificate.new(
+      self)
+    if !@certificate_cache.verified?
       raise "number-field prime ideal failed certification"
 
   -> field
@@ -769,7 +1431,7 @@
       coordinates)
 
   -> certificate
-    NumberFieldPrimeIdealCertificate.new(self)
+    @certificate_cache
 
   -> certified?
     certificate.verified?
@@ -802,7 +1464,10 @@
   -> new(@field, @algebra_decomposition)
     if @field.class_name != "NumberField"
       raise "number-field prime decomposition needs a NumberField"
-    if @algebra_decomposition.class_name != "AlgebraPrimeDecomposition"
+    decomposition_name = @algebra_decomposition.class_name
+    supported = decomposition_name == "AlgebraPrimeDecomposition"
+    supported = true if decomposition_name == "DedekindAlgebraPrimeDecomposition"
+    if !supported
       raise "number-field prime decomposition needs an algebra decomposition"
     @prime_ideals = []
     @algebra_decomposition.prime_ideals.each -> (ideal)
@@ -903,9 +1568,22 @@
   -> prime_decomposition(
        prime, factor_search_limit = 250_000,
        generator_search_limit = 250_000)
-    algebra_decomposition = certify_maximal_order.prime_decomposition(
-      prime, factor_search_limit,
-      generator_search_limit)
+    order = certify_maximal_order
+    computation = maximal_order_computation
+    prime_class = prime.class_name
+    integer_prime = prime_class == "Integer" || prime_class == "Int"
+    integer_prime = true if prime_class == "BigInt"
+    use_dedekind = integer_prime && prime >= 2
+    use_dedekind = use_dedekind && prime.prime?
+    if use_dedekind
+      use_dedekind = computation.index % prime != 0
+    if use_dedekind
+      algebra_decomposition = DedekindAlgebraPrimeDecomposition.new(
+        computation, prime, factor_search_limit)
+    else
+      algebra_decomposition = order.prime_decomposition(
+        prime, factor_search_limit,
+        generator_search_limit)
     NumberFieldPrimeDecomposition.new(
       self, algebra_decomposition)
 

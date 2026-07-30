@@ -8,6 +8,20 @@ use algebra
     raise text + ", want " + want.to_s
   << "PASS " + name
 
+lattice_check("integer_det.pivot",
+              ExactIntegerLinearAlgebra.determinant([
+                [0, 2, 1],
+                [3, 0, 4],
+                [5, 6, 0]
+              ]),
+              58)
+lattice_check("integer_det.singular",
+              ExactIntegerLinearAlgebra.determinant([
+                [1, 2],
+                [2, 4]
+              ]),
+              0)
+
 reduction = ExactGramLatticeReduction.new(
   [[1, 0], [0, 1]],
   [[4, 1], [1, 0]])
@@ -27,6 +41,20 @@ lattice_check("lll.proof_kind",
               :exact_lll)
 lattice_check("lll.kernel_checked",
               reduction.certificate.kernel_checked?, true)
+
+approximate_reduction = ExactGramLatticeReduction.new(
+  [[1, 0], [0, 1]],
+  [[4, 1], [1, 0]],
+  Rational.new(3, 4),
+  :approximate)
+lattice_check("lll.approximate_producer",
+              approximate_reduction.producer,
+              :approximate)
+lattice_check("lll.approximate_certified",
+              approximate_reduction.certified?, true)
+lattice_check("lll.approximate_reduced_basis",
+              approximate_reduction.reduced_basis.to_s,
+              reduction.reduced_basis.to_s)
 
 indefinite_failed = false
 begin

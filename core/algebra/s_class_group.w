@@ -84,7 +84,7 @@
     @field = @ideal.field
     @generator = nil
     @tested_elements = 0
-    @coordinate_basis = @ideal.algebra_ideal.reduced_frobenius_coordinate_basis
+    @coordinate_basis = @ideal.algebra_ideal.approximate_frobenius_coordinate_basis
     search
     @certificate_cache = NumberFieldIdealGeneratorCertificate.new(
       self)
@@ -222,6 +222,236 @@
       coefficient_bound, element_limit)
 
 
++ NumberFieldMinkowskiLinearPrimeSliceCertificate
+  -> new(@slice)
+    @verified_cache = nil
+
+  -> slice
+    @slice
+
+  -> theorem
+    "Dedekind-Kummer correspondence between linear factors and degree-one primes"
+
+  -> theorem_reference
+    "Dedekind factorization theorem away from the power-order index"
+
+  -> proof_kind
+    :trusted_theorem_import
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> polynomial_zero_at?(polynomial, root, prime)
+    coefficients = polynomial.coefficients
+    value = 0
+    i = coefficients.size - 1
+    while i >= 0
+      value = PrimeLinearAlgebra.normalize(
+        value * root + coefficients[i],
+        prime)
+      i -= 1
+    value == 0
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "NumberFieldMinkowskiLinearPrimeSlice"
+    return false if @slice.class_name != expected
+    field = @slice.field
+    return false if field.class_name != "NumberField"
+    prime = @slice.prime
+    bound = @slice.bound
+    return false if prime < 2 || !prime.prime?
+    return false if prime > bound
+    return false if prime * prime <= bound
+    computation = field.maximal_order_computation
+    return false if computation == nil
+    return false if !computation.certificate.verified?
+    return false if computation.index % prime == 0
+
+    polynomial = @slice.reduced_polynomial
+    finite_field = polynomial.ring.field
+    return false if finite_field.class_name != "FiniteField"
+    return false if !finite_field.prime_field?
+    return false if finite_field.characteristic != prime
+    source = computation.source.algebra.defining_polynomial
+    finite_ring = PolynomialRing.new(
+      source.ring.names, FiniteField.new(prime))
+    expected_polynomial = source.change_ring(
+      finite_ring).monic
+    return false if !polynomial.eql?(expected_polynomial)
+
+    expected_roots = []
+    constant = 0
+    while constant < prime
+      root = PrimeLinearAlgebra.normalize(
+        0 - constant, prime)
+      if polynomial_zero_at?(
+           polynomial, root, prime)
+        expected_roots.push(root)
+      constant += 1
+    roots = @slice.roots
+    return false if roots.to_s != expected_roots.to_s
+    certificates = @slice.root_certificates
+    ideals = @slice.prime_ideals
+    multiplicities = @slice.multiplicities
+    return false if certificates.size != roots.size
+    return false if ideals.size != roots.size
+    return false if multiplicities.size != roots.size
+
+    i = 0
+    while i < roots.size
+      root_certificate = certificates[i]
+      expected_class = "DedekindLinearRootCertificate"
+      return false if root_certificate.class_name != expected_class
+      return false if !root_certificate.verified?
+      return false if root_certificate.root != roots[i]
+      factor = root_certificate.factor
+      work = polynomial
+      multiplicity = 0
+      while work.degree > 0 && work.rem(factor).zero?
+        work = work / factor
+        multiplicity += 1
+      return false if multiplicity < 1
+      return false if multiplicities[i] != multiplicity
+
+      ideal = ideals[i]
+      return false if !ideal.certificate.verified?
+      return false if ideal.field != field
+      return false if ideal.rational_prime != prime
+      return false if ideal.residue_degree != 1
+      return false if ideal.ramification_index != multiplicity
+      map = ideal.algebra_prime_ideal.residue_map
+      return false if map.root_certificate != root_certificate
+      j = 0
+      while j < i
+        return false if ideal.eql?(ideals[j])
+        j += 1
+      i += 1
+    true
+
+  -> certified?
+    verified?
+
+
++ NumberFieldMinkowskiLinearPrimeSlice
+  -> new(@field, @prime, @bound)
+    if @field.class_name != "NumberField"
+      raise "Minkowski prime slice needs a NumberField"
+    if @prime < 2 || !@prime.prime?
+      raise "Minkowski prime slice needs a rational prime"
+    if @prime > @bound || @prime * @prime <= @bound
+      raise "linear Minkowski slice needs p <= B < p^2"
+    @field.certify_maximal_order
+    computation = @field.maximal_order_computation
+    if computation.index % @prime == 0
+      raise "linear Minkowski slice needs index prime to p"
+    source = computation.source.algebra.defining_polynomial
+    finite_ring = PolynomialRing.new(
+      source.ring.names, FiniteField.new(@prime))
+    @reduced_polynomial = source.change_ring(
+      finite_ring).monic
+    @roots = []
+    @root_certificates = []
+    @multiplicities = []
+    @prime_ideals = []
+    enumerate_degree_one_primes(computation)
+    @certificate_cache = NumberFieldMinkowskiLinearPrimeSliceCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "linear Minkowski prime slice failed certification"
+
+  -> enumerate_degree_one_primes(computation)
+    constant = 0
+    while constant < @prime
+      root = PrimeLinearAlgebra.normalize(
+        0 - constant, @prime)
+      if polynomial_zero_at_root?(root)
+        root_certificate = DedekindLinearRootCertificate.new(
+          computation, @prime, root)
+        factor = root_certificate.factor
+        work = @reduced_polynomial
+        multiplicity = 0
+        while work.degree > 0 && work.rem(factor).zero?
+          work = work / factor
+          multiplicity += 1
+        map = DedekindOrderResidueFieldMap.new(
+          computation, @prime, factor, nil,
+          root_certificate)
+        algebra_ideal = AlgebraPrimeIdeal.new(
+          map, multiplicity)
+        @roots.push(root)
+        @root_certificates.push(root_certificate)
+        @multiplicities.push(multiplicity)
+        @prime_ideals.push(NumberFieldPrimeIdeal.new(
+          @field, algebra_ideal))
+      constant += 1
+
+  -> polynomial_zero_at_root?(root)
+    coefficients = @reduced_polynomial.coefficients
+    value = 0
+    i = coefficients.size - 1
+    while i >= 0
+      value = PrimeLinearAlgebra.normalize(
+        value * root + coefficients[i],
+        @prime)
+      i -= 1
+    value == 0
+
+  -> field
+    @field
+
+  -> prime
+    @prime
+
+  -> bound
+    @bound
+
+  -> reduced_polynomial
+    @reduced_polynomial
+
+  -> roots
+    out = []
+    @roots.each -> (root)
+      out.push(root)
+    out
+
+  -> root_certificates
+    out = []
+    @root_certificates.each -> (certificate)
+      out.push(certificate)
+    out
+
+  -> multiplicities
+    out = []
+    @multiplicities.each -> (multiplicity)
+      out.push(multiplicity)
+    out
+
+  -> prime_ideals
+    out = []
+    @prime_ideals.each -> (ideal)
+      out.push(ideal)
+    out
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
 + NumberFieldMinkowskiFactorBaseCertificate
   -> new(@factor_base)
     @verified_cache = nil
@@ -275,24 +505,26 @@
         j += 1
       i += 1
 
-    decompositions = @factor_base.minkowski_decompositions
+    slices = @factor_base.minkowski_prime_slices
     expected = []
     rational_prime = 2
-    decomposition_index = 0
+    slice_index = 0
     while rational_prime <= @factor_base.bound
       if rational_prime.prime?
-        return false if decomposition_index >= decompositions.size
-        decomposition = decompositions[decomposition_index]
-        expected_class = "NumberFieldPrimeDecomposition"
-        return false if decomposition.class_name != expected_class
-        return false if decomposition.field != field
-        return false if decomposition.prime != rational_prime
-        return false if !decomposition.certificate.verified?
-        decomposition.prime_ideals.each -> (prime)
+        return false if slice_index >= slices.size
+        slice = slices[slice_index]
+        slice_class = slice.class_name
+        full = slice_class == "NumberFieldPrimeDecomposition"
+        linear = slice_class == "NumberFieldMinkowskiLinearPrimeSlice"
+        return false if !full && !linear
+        return false if slice.field != field
+        return false if slice.prime != rational_prime
+        return false if !slice.certificate.verified?
+        slice.prime_ideals.each -> (prime)
           expected.push(prime) if prime.norm <= @factor_base.bound
-        decomposition_index += 1
+        slice_index += 1
       rational_prime += 1
-    return false if decomposition_index != decompositions.size
+    return false if slice_index != slices.size
     actual = @factor_base.minkowski_primes
     return false if !@factor_base.same_prime_lists?(
       expected, actual)
@@ -339,7 +571,7 @@
     @bound = compute_bound
     if @bound > @rational_prime_limit
       raise "Minkowski factor-base prime limit exceeded; class-group proof unknown"
-    @minkowski_decompositions = []
+    @minkowski_prime_slices = []
     @minkowski_primes = enumerate_minkowski_primes
     @primes = []
     @minkowski_primes.each -> (prime)
@@ -389,11 +621,18 @@
     rational_prime = 2
     while rational_prime <= @bound
       if rational_prime.prime?
-        decomposition = @field.prime_decomposition(
-          rational_prime, @factor_search_limit,
-          @generator_search_limit)
-        @minkowski_decompositions.push(decomposition)
-        decomposition.prime_ideals.each -> (prime)
+        index = @field.maximal_order_index
+        use_linear_slice = rational_prime * rational_prime > @bound
+        use_linear_slice = false if index % rational_prime == 0
+        if use_linear_slice
+          slice = NumberFieldMinkowskiLinearPrimeSlice.new(
+            @field, rational_prime, @bound)
+        else
+          slice = @field.prime_decomposition(
+            rational_prime, @factor_search_limit,
+            @generator_search_limit)
+        @minkowski_prime_slices.push(slice)
+        slice.prime_ideals.each -> (prime)
           out.push(prime) if prime.norm <= @bound
       rational_prime += 1
     out
@@ -412,11 +651,14 @@
       out.push(prime)
     out
 
-  -> minkowski_decompositions
+  -> minkowski_prime_slices
     out = []
-    @minkowski_decompositions.each -> (decomposition)
-      out.push(decomposition)
+    @minkowski_prime_slices.each -> (slice)
+      out.push(slice)
     out
+
+  -> minkowski_decompositions
+    minkowski_prime_slices
 
   -> s_primes
     out = []
@@ -701,10 +943,15 @@
     @relation_vectors = []
     @tested_elements = 0
     @tested_ideal_elements = 0
-    @rank = matrix_rank(s_prime_rows)
-    seed_principal_factor_base_generators if @rank < @factor_base.size
+    @allowed_rational_primes = []
+    @factor_base.primes.each -> (prime)
+      rational_prime = prime.rational_prime
+      if !@allowed_rational_primes.include?(rational_prime)
+        @allowed_rational_primes.push(rational_prime)
+    initialize_rank_tracker
     seed_rational_relations if @rank < @factor_base.size
     search if @rank < @factor_base.size
+    seed_principal_factor_base_generators if @rank < @factor_base.size
     if @rank != @factor_base.size
       raise "S-class relation search limit exceeded; 2-torsion remains unknown"
     @proof = NumberFieldSClassTwoTorsionProof.new(
@@ -749,6 +996,44 @@
       system.add_equation(row)
     system.rank
 
+  -> initialize_rank_tracker
+    @pivot_rows = []
+    @factor_base.size.times -> @pivot_rows.push(nil)
+    @rank = 0
+    rows = s_prime_rows
+    i = 0
+    while i < rows.size
+      add_rank_row(rows[i])
+      i += 1
+
+  -> reduced_rank_row(vector)
+    F2LinearAlgebra.validate_vector(
+      vector, @factor_base.size)
+    work = F2LinearAlgebra.copy_vector(vector)
+    pivot = 0
+    while pivot < @factor_base.size
+      if work[pivot] == 1 && @pivot_rows[pivot] != nil
+        column = pivot
+        while column < @factor_base.size
+          work[column] = work[column] ^ @pivot_rows[pivot][column]
+          column += 1
+      pivot += 1
+    work
+
+  -> rank_row_independent?(vector)
+    work = reduced_rank_row(vector)
+    !F2LinearAlgebra.zero_vector?(work)
+
+  -> add_rank_row(vector)
+    work = reduced_rank_row(vector)
+    pivot = 0
+    while pivot < @factor_base.size && work[pivot] == 0
+      pivot += 1
+    return false if pivot == @factor_base.size
+    @pivot_rows[pivot] = work
+    @rank += 1
+    true
+
   -> primitive_vector?(vector)
     divisor = 0
     first_nonzero = nil
@@ -776,11 +1061,44 @@
 
   -> reduced_order_basis
     out = []
-    reduced = @field.certify_maximal_order.reduced_frobenius_basis
+    reduced = @field.certify_maximal_order.approximate_frobenius_basis
     reduced.each -> (generic)
       out.push(@field.generic_order_vector_to_element(
         generic.coefficients))
     out
+
+  -> reduced_order_coordinate_basis
+    @field.certify_maximal_order.approximate_frobenius_coordinate_basis
+
+  -> order_coordinates(vector, basis)
+    coordinates = []
+    coordinate = 0
+    while coordinate < @field.degree
+      value = 0 ## big
+      basis_index = 0
+      while basis_index < vector.size
+        value += vector[basis_index] * basis[basis_index][coordinate]
+        basis_index += 1
+      coordinates.push(value)
+      coordinate += 1
+    coordinates
+
+  -> element_from_order_coordinates(coordinates)
+    generic = @field.certify_maximal_order.element(
+      coordinates)
+    @field.generic_order_vector_to_element(
+      generic.coefficients)
+
+  -> integer_norm_support_within_factor_base?(norm)
+    return false if norm == 0
+    remaining = norm.abs
+    i = 0
+    while i < @allowed_rational_primes.size
+      rational_prime = @allowed_rational_primes[i]
+      while remaining % rational_prime == 0
+        remaining = remaining / rational_prime
+      i += 1
+    remaining == 1
 
   # A principal ideal supported on the factor base can only have rational norm
   # primes represented by that base.  Strip those primes before asking the
@@ -789,17 +1107,13 @@
   -> norm_support_within_factor_base?(element)
     norm = element.norm
     return false if norm == 0
-    allowed = []
-    @factor_base.primes.each -> (prime)
-      rational_prime = prime.rational_prime
-      allowed.push(rational_prime) if !allowed.include?(rational_prime)
     parts = [norm.numerator.abs, norm.denominator]
     part_index = 0
     while part_index < parts.size
       remaining = parts[part_index]
       allowed_index = 0
-      while allowed_index < allowed.size
-        rational_prime = allowed[allowed_index]
+      while allowed_index < @allowed_rational_primes.size
+        rational_prime = @allowed_rational_primes[allowed_index]
         while remaining % rational_prime == 0
           remaining = remaining / rational_prime
         allowed_index += 1
@@ -809,6 +1123,9 @@
 
   -> candidate_relation(element)
     return nil if !norm_support_within_factor_base?(element)
+    relation_from_supported_element(element)
+
+  -> relation_from_supported_element(element)
     ideal = @field.principal_fractional_ideal(element)
     factors = ideal.algebra_fractional_ideal.factors
     vector = []
@@ -823,32 +1140,37 @@
       i += 1
     vector
 
+  -> candidate_relation_from_order_coordinates(coordinates)
+    norm = @field.certify_maximal_order.norm_from_coordinates(
+      coordinates)
+    return nil if !integer_norm_support_within_factor_base?(
+      norm)
+    element = element_from_order_coordinates(
+      coordinates)
+    relation = relation_from_supported_element(
+      element)
+    return nil if relation == nil
+    [element, relation]
+
   -> add_relation_if_independent(element, relation)
-    rows = current_rows
-    old_rank = matrix_rank(rows)
-    rows.push(relation)
-    new_rank = matrix_rank(rows)
-    if new_rank > old_rank
+    if add_rank_row(relation)
       @relation_elements.push(element)
       @relation_vectors.push(relation)
-      @rank = new_rank
       return true
     false
 
   # A principal factor-base ideal contributes a unit-vector relation.  Search
-  # in an exact Frobenius-LLL basis of that ideal before enumerating arbitrary
-  # order elements.  Every accepted generator is still replayed through the
-  # ordinary principal-ideal relation certificate.
+  # in a floating Frobenius-LLL producer basis of that ideal before enumerating
+  # arbitrary order elements.  The producer makes no theorem claim; every
+  # accepted generator is replayed through the ordinary exact principal-ideal
+  # relation certificate.
   -> seed_principal_factor_base_generators
     prime_index = 0
     while prime_index < @factor_base.size
       unit = []
       @factor_base.size.times -> unit.push(0)
       unit[prime_index] = 1
-      rows = current_rows
-      old_rank = matrix_rank(rows)
-      rows.push(unit)
-      if matrix_rank(rows) > old_rank
+      if rank_row_independent?(unit)
         prime = @factor_base.primes[prime_index]
         odd_power = 1
         found = false
@@ -887,7 +1209,7 @@
     nil
 
   -> search
-    basis = reduced_order_basis
+    basis = reduced_order_coordinate_basis
     height = 1
     while height <= @coefficient_bound
       radix = 2 * height + 1
@@ -907,9 +1229,13 @@
           @tested_elements += 1
           if @tested_elements > @element_limit
             return nil
-          element = integral_element(vector, basis)
-          relation = candidate_relation(element)
-          if relation != nil
+          coordinates = order_coordinates(
+            vector, basis)
+          candidate = candidate_relation_from_order_coordinates(
+            coordinates)
+          if candidate != nil
+            element = candidate[0]
+            relation = candidate[1]
             add_relation_if_independent(element, relation)
             return true if @rank == @factor_base.size
         code += 1

@@ -11,6 +11,68 @@
 # producer optimization only; ideal and principal-relation certificates still
 # replay the resulting arithmetic exactly.
 
++ ExactIntegerLinearAlgebra
+  -> .integer_value?(value)
+    name = value.class_name
+    integer = name == "Integer" || name == "Int"
+    integer = true if name == "BigInt"
+    integer
+
+  # Fraction-free Bareiss elimination.  Every division is exact; this avoids
+  # constructing rational temporaries for integral multiplication matrices.
+  -> .determinant(matrix)
+    if matrix.class_name != "Array" || matrix.size < 1
+      raise "integer determinant needs a nonempty square matrix"
+    size = matrix.size
+    work = []
+    i = 0
+    while i < size
+      row = matrix[i]
+      if row.class_name != "Array" || row.size != size
+        raise "integer determinant needs a square matrix"
+      copied = []
+      j = 0
+      while j < size
+        value = row[j]
+        if !ExactIntegerLinearAlgebra.integer_value?(value)
+          raise "integer determinant entries must be integers"
+        copied.push(value)
+        j += 1
+      work.push(copied)
+      i += 1
+    return work[0][0] if size == 1
+
+    sign = 1
+    previous_pivot = 1
+    column = 0
+    while column < size - 1
+      pivot_row = column
+      while pivot_row < size && work[pivot_row][column] == 0
+        pivot_row += 1
+      return 0 if pivot_row == size
+      if pivot_row != column
+        temporary = work[column]
+        work[column] = work[pivot_row]
+        work[pivot_row] = temporary
+        sign = 0 - sign
+      pivot = work[column][column]
+      row = column + 1
+      while row < size
+        target_column = column + 1
+        while target_column < size
+          numerator = work[row][target_column] * pivot
+          numerator -= work[row][column] * work[column][target_column]
+          if numerator % previous_pivot != 0
+            raise "Bareiss determinant division was not exact"
+          work[row][target_column] = numerator / previous_pivot
+          target_column += 1
+        work[row][column] = 0
+        row += 1
+      previous_pivot = pivot
+      column += 1
+    sign * work[size - 1][size - 1]
+
+
 + ExactGramLatticeReductionCertificate
   -> new(@reduction)
     @verified_cache = nil
@@ -91,10 +153,33 @@
 
 
 + ExactGramLatticeReduction
-  -> new(gram_matrix, source_basis = nil,
-         delta = Rational.new(3, 4))
+  -> new(gram_matrix)
+    initialize_exact_gram_reduction(
+      gram_matrix, nil,
+      Rational.new(3, 4), :exact)
+
+  -> new(gram_matrix, source_basis)
+    initialize_exact_gram_reduction(
+      gram_matrix, source_basis,
+      Rational.new(3, 4), :exact)
+
+  -> new(gram_matrix, source_basis, delta)
+    initialize_exact_gram_reduction(
+      gram_matrix, source_basis,
+      delta, :exact)
+
+  -> new(gram_matrix, source_basis, delta,
+         producer)
+    initialize_exact_gram_reduction(
+      gram_matrix, source_basis,
+      delta, producer)
+
+  -> initialize_exact_gram_reduction(
+       gram_matrix, source_basis,
+       delta, producer)
     @gram_matrix = copy_rational_matrix(gram_matrix)
     @delta = Rational.coerce(delta)
+    @producer = producer
     if source_basis == nil
       @source_basis = integer_identity(@gram_matrix.size)
     else
@@ -103,7 +188,17 @@
       raise "exact LLL needs a full-rank integer basis and a positive-definite symmetric Gram matrix"
     @reduced_basis = copy_integer_matrix(@source_basis)
     @transformation = integer_identity(@source_basis.size)
-    reduce
+    if @producer == :approximate
+      reduce_approximately
+      exact_data = compute_gram_schmidt(
+        @reduced_basis)
+      if !reduced_conditions?(
+           exact_data[0], exact_data[1])
+        reduce
+    elsif @producer == :exact
+      reduce
+    else
+      raise "exact LLL producer must be exact or approximate"
     gram_schmidt = compute_gram_schmidt(@reduced_basis)
     @gram_schmidt_coefficients = gram_schmidt[0]
     @orthogonal_norms = gram_schmidt[1]
@@ -235,6 +330,9 @@
   -> delta
     @delta
 
+  -> producer
+    @producer
+
   -> gram_schmidt_coefficients
     copy_rational_matrix(@gram_schmidt_coefficients)
 
@@ -305,6 +403,93 @@
       i += 1
     out
 
+  -> approximate_inner_product(left, right)
+    value = ~0.0
+    i = 0
+    while i < rank
+      j = 0
+      while j < rank
+        left_value = left[i] + ~0.0
+        right_value = right[j] + ~0.0
+        gram_value = @gram_matrix[i][j].to_f
+        value += left_value * gram_value * right_value
+        j += 1
+      i += 1
+    value
+
+  -> compute_approximate_gram_schmidt(basis)
+    stars = []
+    mu = []
+    norms = []
+    i = 0
+    while i < basis.size
+      star = []
+      basis[i].each -> (entry)
+        star.push(entry + ~0.0)
+      row = []
+      basis.size.times -> row.push(~0.0)
+      j = 0
+      while j < i
+        coefficient = approximate_inner_product(
+          basis[i], stars[j]) / norms[j]
+        row[j] = coefficient
+        coordinate = 0
+        while coordinate < rank
+          star[coordinate] -= coefficient * stars[j][coordinate]
+          coordinate += 1
+        j += 1
+      stars.push(star)
+      mu.push(row)
+      norms.push(approximate_inner_product(
+        star, star))
+      i += 1
+    [mu, norms]
+
+  -> reduce_approximately
+    k = 1
+    steps = 0
+    while k < rank
+      steps += 1
+      if steps > 100_000
+        @reduced_basis = copy_integer_matrix(
+          @source_basis)
+        @transformation = integer_identity(rank)
+        return reduce
+      data = compute_approximate_gram_schmidt(
+        @reduced_basis)
+      mu = data[0]
+      norms = data[1]
+      j = k - 1
+      while j >= 0
+        quotient = mu[k][j].round
+        if quotient != 0
+          @reduced_basis[k] = subtract_multiple(
+            @reduced_basis[k],
+            @reduced_basis[j], quotient)
+          @transformation[k] = subtract_multiple(
+            @transformation[k],
+            @transformation[j], quotient)
+          data = compute_approximate_gram_schmidt(
+            @reduced_basis)
+          mu = data[0]
+          norms = data[1]
+        j -= 1
+
+      delta_float = @delta.to_f
+      threshold = delta_float - mu[k][k - 1] * mu[k][k - 1]
+      if norms[k] >= threshold * norms[k - 1]
+        k += 1
+      else
+        temporary = @reduced_basis[k]
+        @reduced_basis[k] = @reduced_basis[k - 1]
+        @reduced_basis[k - 1] = temporary
+        temporary = @transformation[k]
+        @transformation[k] = @transformation[k - 1]
+        @transformation[k - 1] = temporary
+        k -= 1
+        k = 1 if k < 1
+    self
+
   -> reduce
     k = 1
     while k < rank
@@ -366,6 +551,158 @@
 
   -> inspect
     to_s
+
+
++ ApproximateGramLatticeBasisSearch
+  -> new(gram_matrix, source_basis)
+    initialize_approximate_gram_search(
+      gram_matrix, source_basis, ~0.75)
+
+  -> new(gram_matrix, source_basis, delta)
+    initialize_approximate_gram_search(
+      gram_matrix, source_basis, delta)
+
+  -> initialize_approximate_gram_search(
+       gram_matrix, source_basis, delta)
+    @delta = delta + ~0.0
+    @gram_matrix = []
+    gram_matrix.each -> (source)
+      row = []
+      source.each -> (entry)
+        row.push(Rational.coerce(entry).to_f)
+      @gram_matrix.push(row)
+    @basis = []
+    source_basis.each -> (source)
+      row = []
+      source.each -> (entry)
+        if !ExactIntegerLinearAlgebra.integer_value?(entry)
+          raise "approximate LLL source basis must be integral"
+        row.push(entry)
+      @basis.push(row)
+    @completed = valid_shape?
+    reduce if @completed
+
+  -> valid_shape?
+    size = @gram_matrix.size
+    return false if size < 1
+    return false if @basis.size != size
+    i = 0
+    while i < size
+      return false if @gram_matrix[i].size != size
+      return false if @basis[i].size != size
+      i += 1
+    determinant = ExactIntegerLinearAlgebra.determinant(
+      @basis)
+    !determinant.zero?
+
+  -> rank
+    @basis.size
+
+  -> completed?
+    @completed
+
+  -> reduced_basis
+    out = []
+    @basis.each -> (source)
+      row = []
+      source.each -> (entry)
+        row.push(entry)
+      out.push(row)
+    out
+
+  -> finite_float?(value)
+    return false if value != value
+    value.abs < ~1.0e300
+
+  -> inner_product(left, right)
+    value = ~0.0
+    i = 0
+    while i < rank
+      j = 0
+      while j < rank
+        left_value = left[i] + ~0.0
+        right_value = right[j] + ~0.0
+        value += left_value * @gram_matrix[i][j] * right_value
+        j += 1
+      i += 1
+    value
+
+  -> gram_schmidt
+    stars = []
+    mu = []
+    norms = []
+    i = 0
+    while i < rank
+      star = []
+      @basis[i].each -> (entry)
+        star.push(entry + ~0.0)
+      row = []
+      rank.times -> row.push(~0.0)
+      j = 0
+      while j < i
+        return nil if norms[j] == ~0.0
+        coefficient = inner_product(
+          @basis[i], stars[j]) / norms[j]
+        return nil if !finite_float?(coefficient)
+        row[j] = coefficient
+        coordinate = 0
+        while coordinate < rank
+          star[coordinate] -= coefficient * stars[j][coordinate]
+          coordinate += 1
+        j += 1
+      norm = inner_product(star, star)
+      return nil if !finite_float?(norm) || norm <= ~0.0
+      stars.push(star)
+      mu.push(row)
+      norms.push(norm)
+      i += 1
+    [mu, norms]
+
+  -> subtract_multiple(target, source, multiplier)
+    out = []
+    i = 0
+    while i < target.size
+      out.push(target[i] - multiplier * source[i])
+      i += 1
+    out
+
+  -> reduce
+    k = 1
+    steps = 0
+    while k < rank
+      steps += 1
+      if steps > 100_000
+        @completed = false
+        return self
+      data = gram_schmidt
+      if data == nil
+        @completed = false
+        return self
+      mu = data[0]
+      norms = data[1]
+      j = k - 1
+      while j >= 0
+        quotient = mu[k][j].round
+        if quotient != 0
+          @basis[k] = subtract_multiple(
+            @basis[k], @basis[j], quotient)
+          data = gram_schmidt
+          if data == nil
+            @completed = false
+            return self
+          mu = data[0]
+          norms = data[1]
+        j -= 1
+      threshold = @delta - mu[k][k - 1] * mu[k][k - 1]
+      if norms[k] >= threshold * norms[k - 1]
+        k += 1
+      else
+        temporary = @basis[k]
+        @basis[k] = @basis[k - 1]
+        @basis[k - 1] = temporary
+        k -= 1
+        k = 1 if k < 1
+    self
 
 
 + AlgebraOrder
@@ -434,17 +771,35 @@
     out
 
   -> norm_from_coordinates(coordinates)
-    determinant = Algebra.determinant(
+    ExactIntegerLinearAlgebra.determinant(
       multiplication_matrix_from_coordinates(
-        coordinates),
-      RationalField.new)
-    if determinant.denominator != 1
-      raise "integral order element has nonintegral norm"
-    determinant.numerator
+        coordinates))
 
   -> reduced_frobenius_basis
     out = []
     frobenius_lattice_reduction.reduced_basis.each -> (coordinates)
+      out.push(element(coordinates))
+    out
+
+  -> approximate_frobenius_coordinate_basis
+    source = []
+    i = 0
+    while i < rank
+      row = []
+      j = 0
+      while j < rank
+        row.push(i == j ? 1 : 0)
+        j += 1
+      source.push(row)
+      i += 1
+    search = ApproximateGramLatticeBasisSearch.new(
+      frobenius_gram_matrix, source)
+    return source if !search.completed?
+    search.reduced_basis
+
+  -> approximate_frobenius_basis
+    out = []
+    approximate_frobenius_coordinate_basis.each -> (coordinates)
       out.push(element(coordinates))
     out
 
@@ -466,6 +821,14 @@
     ExactGramLatticeReduction.new(
       @order.frobenius_gram_matrix,
       order_coordinate_basis)
+
+  -> approximate_frobenius_coordinate_basis
+    source = order_coordinate_basis
+    search = ApproximateGramLatticeBasisSearch.new(
+      @order.frobenius_gram_matrix,
+      source)
+    return source if !search.completed?
+    search.reduced_basis
 
   -> reduced_frobenius_coordinate_basis
     frobenius_lattice_reduction.reduced_basis

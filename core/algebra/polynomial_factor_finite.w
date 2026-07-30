@@ -241,6 +241,7 @@
   -> new(@polynomial, factors, @search_limit = 250_000)
     @factors = []
     factors.each -> @factors.push(item)
+    @verified_cache = nil
 
   -> polynomial
     @polynomial
@@ -251,6 +252,11 @@
     out
 
   -> verified?
+    return @verified_cache if @verified_cache != nil
+    @verified_cache = verify!
+    @verified_cache
+
+  -> verify!
     return false if @polynomial.class_name != "Polynomial"
     return false if @polynomial.ring.arity != 1
     return false if @factors.size == 0
@@ -299,7 +305,9 @@
   -> new(@polynomial, factors, @search_limit = 250_000)
     @factors = []
     factors.each -> @factors.push(item)
-    if !certificate.verified?
+    @certificate_cache = PolynomialFactorizationCertificate.new(
+      @polynomial, @factors, @search_limit)
+    if !@certificate_cache.verified?
       raise "polynomial factorization certificate failed"
 
   -> polynomial
@@ -311,8 +319,7 @@
     out
 
   -> certificate
-    PolynomialFactorizationCertificate.new(
-      @polynomial, @factors, @search_limit)
+    @certificate_cache
 
   -> certified?
     certificate.verified?

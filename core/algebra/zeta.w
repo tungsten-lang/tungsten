@@ -230,6 +230,7 @@
   -> point_count
     if !finite_field?
       raise "point_count requires a finite-field curve"
+    field.prepare_arithmetic!
     q = field.order
     count = q <= 64 ? direct_affine_point_count : fiber_affine_point_count
     count + points_at_infinity_count

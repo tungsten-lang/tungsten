@@ -8,6 +8,23 @@ use algebra
     raise "FAIL " + name + ": got " + got.to_s + ", want " + want.to_s
   << "PASS " + name
 
+-> monic_irreducible_count(field, degree)
+  count = 0
+  code = 0
+  limit = field.characteristic ** degree
+  while code < limit
+    remaining = code
+    coefficients = []
+    i = 0
+    while i < degree
+      coefficients.push(remaining % field.characteristic)
+      remaining = remaining / field.characteristic
+      i += 1
+    coefficients.push(1)
+    count += 1 if field.modulus_irreducible?(coefficients)
+    code += 1
+  count
+
 f5 = FiniteField.new(5)
 finite_check("prime.characteristic", f5.characteristic, 5)
 finite_check("prime.degree", f5.degree, 1)
@@ -41,6 +58,66 @@ auto125 = f5.extension(3)
 finite_check("extension.auto_quadratic", auto25.order, 25)
 finite_check("extension.auto_cubic", auto125.order, 125)
 
+# Rabin-certified extensions and the packed base-p representation are
+# degree-generic. The deterministic degree-four modulus over F_2 is
+# x^4+x+1; unlike a mere root test, the certificate rejects rootless products
+# of irreducible quadratics.
+f16 = FiniteField.extension(2, 4)
+t16 = f16.generator
+finite_check("quartic_extension.order", f16.order, 16)
+finite_check("quartic_extension.modulus",
+             f16.modulus.to_s, "\[1, 1, 0, 0, 1\]")
+finite_check("quartic_extension.modulus_certificate",
+             f16.modulus_certificate.verified?, true)
+finite_check("quartic_extension.relation",
+             f16.power(t16, 4), f16.encode_coefficients([1, 1]))
+finite_check("quartic_extension.inverse",
+             f16.multiply(t16, f16.inverse(t16)), f16.one)
+finite_check("quartic_extension.power_basis",
+             f16.power_basis.size, 4)
+finite_check("quartic_extension.frobenius_period",
+             f16.frobenius(t16, 4), t16)
+finite_check("quartic_extension.inverse_frobenius",
+             f16.inverse_frobenius(f16.frobenius(t16)), t16)
+finite_check("quartic_extension.trace", f16.trace(t16), 0)
+finite_check("quartic_extension.norm", f16.norm(t16), 1)
+
+r2 = PolynomialRing.new([:x], FiniteField.new(2))
+x2 = r2.generator(0)
+finite_check("quartic_extension.minimal_polynomial",
+             f16.minimal_polynomial(t16, :x),
+             x2**4 + x2 + 1)
+finite_check("quartic_extension.minimal_polynomial_certificate",
+             f16.minimal_polynomial_certificate(t16, :x).verified?, true)
+subfield_element = f16.add(t16, f16.frobenius(t16))
+finite_check("quartic_extension.subfield_orbit",
+             f16.frobenius_orbit(subfield_element).size, 2)
+finite_check("quartic_extension.subfield_minimal_polynomial",
+             f16.minimal_polynomial(subfield_element, :x),
+             x2**2 + x2 + 1)
+nonminimal_finite_certificate = FiniteFieldMinimalPolynomialCertificate.new(
+  f16, subfield_element, (x2**2 + x2 + 1)**2)
+finite_check("quartic_extension.minimal_certificate_rejects_charpoly",
+             nonminimal_finite_certificate.verified?, false)
+
+f256 = FiniteField.extension(2, 8)
+t256 = f256.generator
+finite_check("degree_eight_extension.order", f256.order, 256)
+finite_check("degree_eight_extension.modulus_certificate",
+             f256.modulus_certificate.verified?, true)
+finite_check("degree_eight_extension.inverse",
+             f256.multiply(t256, f256.inverse(t256)), f256.one)
+finite_check("degree_eight_extension.orbit",
+             f256.frobenius_orbit(t256).size, 8)
+finite_check("rabin.irreducible_count.F2.degree4",
+             monic_irreducible_count(FiniteField.new(2), 4), 3)
+finite_check("rabin.irreducible_count.F2.degree6",
+             monic_irreducible_count(FiniteField.new(2), 6), 9)
+finite_check("rabin.irreducible_count.F2.degree8",
+             monic_irreducible_count(FiniteField.new(2), 8), 30)
+finite_check("rabin.irreducible_count.F3.degree4",
+             monic_irreducible_count(FiniteField.new(3), 4), 18)
+
 field_axioms = true
 f25.each_element -> (a)
   f25.each_element -> (b)
@@ -49,6 +126,15 @@ f25.each_element -> (a)
     if a != 0
       field_axioms = false if f25.multiply(a, f25.inverse(a)) != 1
 finite_check("extension.field_axioms", field_axioms, true)
+
+quartic_field_axioms = true
+f16.each_element -> (a)
+  f16.each_element -> (b)
+    quartic_field_axioms = false if f16.add(a, b) != f16.add(b, a)
+    quartic_field_axioms = false if f16.multiply(a, b) != f16.multiply(b, a)
+    if a != 0
+      quartic_field_axioms = false if f16.multiply(a, f16.inverse(a)) != 1
+finite_check("quartic_extension.field_axioms", quartic_field_axioms, true)
 
 # Polynomial arithmetic must never fall back to Integer operations: every
 # coefficient is reduced by the owning finite field.
@@ -166,6 +252,24 @@ rescue error
   reducible_failed = "[error]".include?("irreducible")
 finite_check("reducible_modulus_is_loud", reducible_failed, true)
 
+rootless_reducible_failed = false
+begin
+  # x^4+x^2+1 = (x^2+x+1)^2 over F_2, but has no F_2-root.
+  FiniteField.new(2, [1, 0, 1, 0, 1])
+rescue error
+  rootless_reducible_failed = "[error]".include?("irreducible")
+finite_check("rootless_reducible_modulus_is_loud",
+             rootless_reducible_failed, true)
+
+extension_search_unknown = false
+begin
+  FiniteField.extension(2, 8, 1)
+rescue error
+  extension_search_unknown = "[error]".include?(
+    "extension construction unknown")
+finite_check("extension_search_limit_is_loud",
+             extension_search_unknown, true)
+
 # Polynomial arithmetic over 𝔽_p routes coefficients through the field, so
 # residues never escape as unreduced Integers.
 ring = PolynomialRing.new([:x], f5)
@@ -194,5 +298,26 @@ finite_check("elliptic.extension.external_integer",
              curve25.point(5, 1).x, f25.zero)
 finite_check("elliptic.extension.raw_integer",
              curve25.point_raw(5, 12).x, t25)
+
+# A smooth plane quintic has genus six, so its zeta workflow constructs and
+# counts over extension degrees one through six. This is the end-to-end
+# regression that the historical cubic cap made impossible.
+plane2 = ProjectiveSpace<FiniteField, 2>.new(
+  Algebra.field(FiniteField.new(2)), 2, [:X, :Y, :Z])
+fermat_coordinates = plane2.coords
+fermat_quintic = Curve.new(
+  plane2,
+  fermat_coordinates[0]**5 +
+    fermat_coordinates[1]**5 +
+    fermat_coordinates[2]**5)
+fermat_zeta = fermat_quintic.zeta
+finite_check("geometry.genus_six", fermat_quintic.genus, 6)
+finite_check("geometry.genus_six_extension_counts",
+             fermat_zeta.counts.to_s, "\[3, 5, 9, 65, 33, 65\]")
+finite_check("geometry.genus_six_zeta_degree",
+             fermat_zeta.numerator.degree, 12)
+finite_check("geometry.genus_six_zeta_numerator",
+             fermat_zeta.numerator.to_s,
+             "64T^12 + 48T^8 + 12T^4 + 1")
 
 << "algebra_finite_field_spec: all checks passed"

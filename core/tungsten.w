@@ -138,6 +138,8 @@
   auto :Field,                  "algebra"
   auto :RationalField,          "algebra"
   auto :FiniteField,            "algebra"
+  auto :FiniteFieldModulusCertificate, "algebra"
+  auto :FiniteFieldMinimalPolynomialCertificate, "algebra"
   auto :NumberField,            "algebra"
   auto :NumberFieldElement,     "algebra"
   auto :NumberFieldMinimalPolynomialCertificate, "algebra"

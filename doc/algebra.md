@@ -20,7 +20,7 @@ FLT-scale roadmap are in [certified-mathematics.md](certified-mathematics.md).
 ```text
 core/algebra.w                     # orchestrator + Algebra facade
 core/algebra/field.w               # Field protocol, RationalField
-core/algebra/finite_field.w        # 𝔽_p and 𝔽_{p^n} (n ≤ 3)
+core/algebra/finite_field.w        # 𝔽_p and arbitrary finite extensions
 core/algebra/polynomial.w          # rings, sparse ops, division, content
 core/algebra/polynomial_resultant.w
 core/algebra/polynomial_gcd.w
@@ -62,9 +62,31 @@ C.assert_homogeneous(4)
 x = Poly<ℚ>.new(:x).generator
 F = FiniteField.new(5)
 F125 = FiniteField.extension(5, 3)
+F256 = FiniteField.extension(2, 8)
 R = PolynomialRing.new([:t], F)
 K = NumberField.new(x**3 + x**2*2 - x*9 - 12, :a)
 ```
+
+Finite extensions use a packed base-\(p\) power basis in every degree. Rabin's
+Frobenius/GCD criterion certifies the selected modulus, including composite
+degrees where “no base-field root” would be insufficient:
+
+```w
+F16 = FiniteField.extension(2, 4)
+a = F16.generator
+
+F16.modulus                              # [1, 1, 0, 0, 1]
+F16.modulus_certificate.verified?
+F16.frobenius(a, 4) == a
+F16.trace(a)                             # 0 in F₂
+F16.norm(a)                              # 1 in F₂
+F16.minimal_polynomial(a, :x)            # x⁴ + x + 1
+F16.minimal_polynomial_certificate(a, :x).verified?
+```
+
+Deterministic modulus search is explicitly resource-bounded. Small geometry
+fields cache their exact multiplication table; larger fields retain sparse
+packed convolution and modular reduction.
 
 `NumberField` arithmetic is degree-generic. The defining polynomial is
 certified irreducible over ℚ, and elements expose exact minimal and
@@ -135,14 +157,14 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Layer | Available now | Boundary |
 | --- | --- | --- |
 | Symbolic expressions | Exact π/e and radicals; canonical simplify, expand, collect, differentiation, elementary antiderivatives; exact formal Taylor series and removable finite limits; exact univariate ℚ factor facade; arbitrary exact real roots as rationals, radicals, or certified `RootOf` constants; exact arithmetic and symbolic transcendentals over real algebraic constants | No assumptions, piecewise forms, Laurent/Puiseux series, infinite/directional limits, general multivariate factorization, complex algebraic-root object, general higher-degree radical formulas, or Risch integration |
-| Fields | Exact `RationalField`; prime fields `𝔽_p`; extensions `𝔽_{p^n}` for `n ≤ 3` with Integer-encoded elements; arbitrary-degree irreducible `NumberField`s over ℚ with exact power-basis arithmetic, minimal/characteristic polynomials, trace, norm, integrality, Sturm signatures, and certified real embeddings; certified cubic integral bases and maximal-order discriminants | Finite-field extensions above degree three, complex algebraic embeddings, noncubic maximal orders/integral bases, and general field-isomorphism algorithms are not implemented. Irreducibility factor search and cubic maximal-order search are explicitly resource-bounded and raise instead of guessing |
+| Fields | Exact `RationalField`; prime fields and arbitrary extensions `𝔽_{p^n}` with Integer-encoded power-basis elements, Rabin-certified moduli, Frobenius orbits, trace, norm, and certified minimal polynomials; arbitrary-degree irreducible `NumberField`s over ℚ with exact power-basis arithmetic, minimal/characteristic polynomials, trace, norm, integrality, Sturm signatures, and certified real embeddings; certified cubic integral bases and maximal-order discriminants | Finite-field polynomial factorization and explicit embeddings between differently presented finite fields, complex algebraic embeddings, noncubic number-field maximal orders/integral bases, and general number-field isomorphism algorithms are not implemented. Modulus/factor search and cubic maximal-order search are explicitly resource-bounded and raise instead of guessing |
 | Polynomials | Sparse sorted terms; merge-multiply; dense univariate fast path; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ as **content × monic irreducibles**; exact Sturm counts, Cauchy bounds, and certified isolation of every distinct real root | Kronecker factor search, Gröbner elimination, and root-interval splitting have explicit resource limits; complex-root isolation, complex algebraic-number arithmetic, and multivariate factorization are not implemented |
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders | Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, finite fields, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
 | Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension | Singular-curve normalization is not implemented |
 | Elliptic curves | Composition around a plane cubic model; short Weierstrass group law over ℚ and `𝔽_p` (char ≠ 2, 3); `EllipticJacobian` view | Arbitrary plane cubic → Weierstrass needs a rational flex (not implemented) |
 | Hyperelliptic curves | Exact `y² = f(x)` models, Mumford pairs, Cantor composition; monic odd-degree over ℚ, monic-or-scalable over `𝔽_p` | Even-degree models still raise for Jacobian arithmetic |
-| Finite-curve arithmetic | Exact reduction from ℚ, base change to supported finite extensions, projective point counts, Frobenius traces, zeta numerators, and genus-three real Weil cubics | Full zeta numerators start over a prime field and presently reach genus three because extension fields stop at degree three |
+| Finite-curve arithmetic | Exact reduction from ℚ, base change to arbitrary-degree finite extensions, projective point counts, Frobenius traces, zeta numerators (regressed through a genus-six plane quintic), and genus-three real Weil cubics | Full zeta numerators currently start over a prime field; direct/fiber point counting is exact but exponential in field size, and higher-genus Weil-polynomial postprocessing is not yet generalized beyond the existing curve/zeta primitives |
 | Galois groups | Exact general groups in degrees at most three over ℚ; a certified classifier for irreducible reciprocal genus-three Weil sextics using modular irreducibility witnesses and exact Kummer square classes | This is not a general sextic classifier. Missing modular witnesses and unsupported shapes raise `unknown` or a capability error |
 | Ternary quartic invariants | Exact Macaulay resultant, integral-normalized ternary-quartic discriminant, and Magma-default-scale `I27` via `dixmier_ohno.last` | The other twelve Dixmier–Ohno invariants are not implemented; `dixmier_ohno` intentionally returns a partial object |
 | Lines and bitangents | Exact line restriction; intersection divisors for monomial restrictions; complete base-field-rational bitangent enumeration for plane quartics over odd finite fields | General binary-form factorization into residue-field places and geometric bitangents over the algebraic closure are not implemented |
@@ -244,6 +266,19 @@ genus-three curve, `Curve#weil_cubic` returns the real cubic associated to the
 reciprocal degree-six numerator. The focused sextic Galois classifier checks
 the reciprocal form, Weil bounds, irreducibility witnesses, and Kummer square
 classes before returning a certified group.
+
+There is no longer a degree-three extension ceiling. For the smooth Fermat
+quintic \(X^5+Y^5+Z^5=0\) over \(\mathbb F_2\), the genus-six regression
+computes
+
+```text
+#C(F_{2^n}), n=1..6: [3, 5, 9, 65, 33, 65]
+L(T):                 1 + 12T^4 + 48T^8 + 64T^12
+```
+
+The reference point counter remains exponential in the extension-field size;
+the small-field multiplication cache changes performance, not the exact
+counting contract.
 
 For cubic fields, `Polynomial#roots_in` recognizes the defining presentation,
 handles the cyclic cubic case exactly, and can rule out roots when certified

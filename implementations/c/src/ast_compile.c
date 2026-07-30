@@ -1404,6 +1404,24 @@ static int compile_expr(TcAstValue node, TcChunk *chunk, TcError *err) {
       ast_node_is(node, "trait_include")) {
     return emit_nil(chunk, err);
   }
+  if (ast_node_is(node, "yield")) {
+    /*
+     * The stage-0 VM has no closure bytecode; historically parse_ast.c
+     * represented `yield args` as the equivalent implicit-receiver call and
+     * the VM compiled it through compile_call.  Preserve that stage-0
+     * behavior while retaining the real :yield node in the AST handed to the
+     * self-hosted lowerer.
+     */
+    TcAstValue *args = ast_get(node, "args");
+    if (!args || args->kind != TC_AST_ARRAY) {
+      tc_error_set(err, "yield node missing args");
+      return 0;
+    }
+    for (size_t i = 0; i < args->as.array->count; i++) {
+      if (!compile_expr(args->as.array->items[i], chunk, err)) return 0;
+    }
+    return emit_call_op(chunk, "yield", 5, args->as.array->count, 0, err);
+  }
   if (ast_node_is(node, "in_test")) return compile_in_test(node, chunk, err);
   if (ast_node_is(node, "array")) return compile_array(node, chunk, err);
   if (ast_node_is(node, "hash_literal")) return compile_hash(node, chunk, err);

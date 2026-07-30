@@ -86,6 +86,9 @@ test: $(BIN)
 		diff -u tests/bit_count_intrinsics.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --check-ast tests/parenthesized_type_hint.w
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --check-ast tests/operator_method_name.w
+	@test "$$(TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 \
+		$(BIN) --dump-ast tests/yield_ast.w | grep -o ':node => :yield' | wc -l | tr -d ' ')" = 3
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/yield_ast.w
 	cd ../.. && TUNGSTEN_LEX64_TABLE=languages/tungsten/tungsten.lex64 \
 		implementations/c/build/tungsten-c implementations/c/tests/project_relative_use.w
 	bash ../../scripts/test-bootstrap-stage1-artifact.sh

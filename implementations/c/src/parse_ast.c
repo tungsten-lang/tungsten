@@ -2035,6 +2035,22 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
     }
     return node;
   }
+  if (token_is_keyword_at_ast(p, start, "yield")) {
+    TcAstValue args;
+    if (!parse_call_args_after_name_ast(p, start + 1, end, &args, err)) {
+      return tc_ast_nil();
+    }
+    TcAstValue node = node_hash(p, "yield", start, err);
+    if (node.kind != TC_AST_HASH) {
+      tc_ast_free(args);
+      return node;
+    }
+    if (!tc_ast_hash_set(node, "args", args, err)) {
+      tc_ast_free(node);
+      return tc_ast_nil();
+    }
+    return node;
+  }
   if (token_is_keyword_at_ast(p, start, "break") || token_is_keyword_at_ast(p, start, "next")) {
     return node_hash(p, token_is_keyword_at_ast(p, start, "break") ? "break" : "next", start, err);
   }

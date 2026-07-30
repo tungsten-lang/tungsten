@@ -72,6 +72,125 @@
       column += 1
     sign * work[size - 1][size - 1]
 
+  # A simple exact Leibniz bound:
+  #
+  #   |det(A)| <= product_i sum_j |a_ij|.
+  #
+  # It is weaker than Hadamard's Euclidean bound, but entirely integral and
+  # cheap to certify.
+  -> .determinant_bound(matrix)
+    if matrix.class_name != "Array" || matrix.size < 1
+      raise "integer determinant needs a nonempty square matrix"
+    size = matrix.size
+    bound = 1 ## big
+    i = 0
+    while i < size
+      row = matrix[i]
+      if row.class_name != "Array" || row.size != size
+        raise "integer determinant needs a square matrix"
+      row_sum = 0 ## big
+      j = 0
+      while j < size
+        value = row[j]
+        if !ExactIntegerLinearAlgebra.integer_value?(value)
+          raise "integer determinant entries must be integers"
+        row_sum += value.abs
+        j += 1
+      return 0 if row_sum == 0
+      bound *= row_sum
+      i += 1
+    bound
+
+  -> .determinant_mod_prime(matrix, prime)
+    if prime < 2 || !prime.prime?
+      raise "modular determinant needs a prime modulus"
+    size = matrix.size
+    work = []
+    i = 0
+    while i < size
+      if matrix[i].class_name != "Array" || matrix[i].size != size
+        raise "modular determinant needs a square matrix"
+      row = []
+      j = 0
+      while j < size
+        value = matrix[i][j]
+        if !ExactIntegerLinearAlgebra.integer_value?(value)
+          raise "modular determinant entries must be integers"
+        row.push(PrimeLinearAlgebra.normalize(
+          value, prime))
+        j += 1
+      work.push(row)
+      i += 1
+    determinant = 1
+    column = 0
+    while column < size
+      pivot = column
+      while pivot < size && work[pivot][column] == 0
+        pivot += 1
+      return 0 if pivot == size
+      if pivot != column
+        temporary = work[column]
+        work[column] = work[pivot]
+        work[pivot] = temporary
+        determinant = PrimeLinearAlgebra.normalize(
+          0 - determinant, prime)
+      pivot_value = work[column][column]
+      determinant = PrimeLinearAlgebra.normalize(
+        determinant * pivot_value, prime)
+      inverse = PrimeLinearAlgebra.inverse(
+        pivot_value, prime)
+      row = column + 1
+      while row < size
+        if work[row][column] != 0
+          factor = PrimeLinearAlgebra.normalize(
+            work[row][column] * inverse, prime)
+          target = column
+          while target < size
+            product = factor * work[column][target]
+            work[row][target] = PrimeLinearAlgebra.normalize(
+              work[row][target] - product, prime)
+            target += 1
+        row += 1
+      column += 1
+    determinant
+
+  # Reconstruct det(A) from prime-field images.  Once the product M of the
+  # pairwise-coprime moduli exceeds twice the certified bound B, exactly one
+  # integer in [-B, B] has the accumulated residue.  This is an exact
+  # determinant algorithm, not a probabilistic modular test.
+  -> .modular_determinant(matrix)
+    bound = ExactIntegerLinearAlgebra.determinant_bound(
+      matrix)
+    return 0 if bound == 0
+    residue = 0 ## big
+    modulus_product = 1 ## big
+    candidate = 65_521
+    while modulus_product <= bound * 2
+      while candidate > 2 && !candidate.prime?
+        candidate -= 2
+      if candidate <= 2
+        raise "modular determinant exhausted its certified prime table"
+      prime = candidate
+      image = ExactIntegerLinearAlgebra.determinant_mod_prime(
+        matrix, prime)
+      current_image = PrimeLinearAlgebra.normalize(
+        residue, prime)
+      delta = PrimeLinearAlgebra.normalize(
+        image - current_image, prime)
+      inverse = PrimeLinearAlgebra.inverse(
+        PrimeLinearAlgebra.normalize(
+          modulus_product, prime), prime)
+      correction = PrimeLinearAlgebra.normalize(
+        delta * inverse, prime)
+      residue += modulus_product * correction
+      modulus_product *= prime
+      candidate -= 2
+    signed = residue
+    signed -= modulus_product if signed > modulus_product / 2
+    if signed.abs > bound
+      raise "modular determinant reconstruction exceeds its exact bound"
+    signed
+
 
 + ExactGramLatticeReductionCertificate
   -> new(@reduction)
@@ -556,15 +675,30 @@
 + ApproximateGramLatticeBasisSearch
   -> new(gram_matrix, source_basis)
     initialize_approximate_gram_search(
-      gram_matrix, source_basis, ~0.75)
+      gram_matrix, source_basis, ~0.75,
+      200)
 
   -> new(gram_matrix, source_basis, delta)
     initialize_approximate_gram_search(
-      gram_matrix, source_basis, delta)
+      gram_matrix, source_basis, delta,
+      200)
+
+  -> new(gram_matrix, source_basis, delta,
+         step_limit)
+    initialize_approximate_gram_search(
+      gram_matrix, source_basis, delta,
+      step_limit)
 
   -> initialize_approximate_gram_search(
-       gram_matrix, source_basis, delta)
+       gram_matrix, source_basis, delta,
+       step_limit)
     @delta = delta + ~0.0
+    if !ExactIntegerLinearAlgebra.integer_value?(step_limit)
+      raise "approximate LLL step limit must be an integer"
+    if step_limit < 1
+      raise "approximate LLL step limit must be positive"
+    @step_limit = step_limit
+    @steps = 0
     @gram_matrix = []
     gram_matrix.each -> (source)
       row = []
@@ -600,6 +734,12 @@
 
   -> completed?
     @completed
+
+  -> step_limit
+    @step_limit
+
+  -> steps
+    @steps
 
   -> reduced_basis
     out = []
@@ -668,10 +808,9 @@
 
   -> reduce
     k = 1
-    steps = 0
     while k < rank
-      steps += 1
-      if steps > 100_000
+      @steps += 1
+      if @steps > @step_limit
         @completed = false
         return self
       data = gram_schmidt
@@ -771,9 +910,13 @@
     out
 
   -> norm_from_coordinates(coordinates)
-    ExactIntegerLinearAlgebra.determinant(
-      multiplication_matrix_from_coordinates(
-        coordinates))
+    matrix = multiplication_matrix_from_coordinates(
+      coordinates)
+    if matrix.size < 6
+      return ExactIntegerLinearAlgebra.determinant(
+        matrix)
+    ExactIntegerLinearAlgebra.modular_determinant(
+      matrix)
 
   -> reduced_frobenius_basis
     out = []

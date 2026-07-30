@@ -637,6 +637,26 @@
   -> ideal_power(exponent)
     as_ideal ** exponent
 
+  # Valuation walks need consecutive powers and reuse them across many
+  # elements. Keep that cache separate so an arbitrary call to
+  # ideal_power(n) retains exponentiation-by-squaring behavior instead of
+  # materializing every power through n.
+  -> valuation_ideal_power(exponent)
+    if !IntegerLinearAlgebra.integer_value?(exponent)
+      raise "prime-ideal exponent must be an integer"
+    if exponent < 0
+      raise "prime-ideal power exponent must be nonnegative"
+    if @ideal_power_cache == nil
+      @ideal_power_cache = [
+        AlgebraOrderIdeal.unit(@order),
+        as_ideal
+      ]
+    while @ideal_power_cache.size <= exponent
+      previous = @ideal_power_cache[
+        @ideal_power_cache.size - 1]
+      @ideal_power_cache.push(
+        previous.raw_product(as_ideal))
+    @ideal_power_cache[exponent]
 
 + ExactIntegerArithmetic
   -> .factor_pairs(value, search_limit = 1_000_000)
@@ -718,9 +738,19 @@
       raise "finite prime valuation is not an integer"
     if value < 0
       raise "integral prime valuation cannot be negative"
-    power = prime_ideal.as_ideal ** value
-    next_power = power.raw_product(
-      prime_ideal.as_ideal)
+    if value == 0
+      if target_kind == :element
+        return false if prime_ideal.contains?(target)
+      elsif target_kind == :ideal
+        return false if prime_ideal.as_ideal.contains_ideal?(
+          target)
+      else
+        raise "unknown prime-valuation target kind"
+      @verified_cache = true
+      return true
+    power = prime_ideal.valuation_ideal_power(value)
+    next_power = prime_ideal.valuation_ideal_power(
+      value + 1)
     contained = false
     contained_next = false
     if target_kind == :element
@@ -767,6 +797,8 @@
       @target = @order.coerce(target)
     if @target_kind == :element && @target.zero?
       @value = :infinity
+    elsif !target_in_prime?
+      @value = 0
     else
       compute_finite_valuation
     @certificate_cache = AlgebraPrimeValuationCertificate.new(
@@ -775,11 +807,10 @@
       raise "prime valuation failed certification"
 
   -> compute_finite_valuation
-    prime_power = AlgebraOrderIdeal.unit(@order)
     @value = 0
     while true
-      next_power = prime_power.raw_product(
-        @prime_ideal.as_ideal)
+      next_power = @prime_ideal.valuation_ideal_power(
+        @value + 1)
       contained = false
       if @target_kind == :element
         contained = next_power.contains?(@target)
@@ -790,7 +821,11 @@
       if @value >= @step_limit
         raise "prime valuation step limit exceeded; valuation unknown"
       @value += 1
-      prime_power = next_power
+
+  -> target_in_prime?
+    if @target_kind == :element
+      return @prime_ideal.contains?(@target)
+    @prime_ideal.as_ideal.contains_ideal?(@target)
 
   -> prime_ideal
     @prime_ideal

@@ -21,6 +21,43 @@ lattice_check("integer_det.singular",
                 [2, 4]
               ]),
               0)
+lattice_check("integer_det.modular_pivot",
+              ExactIntegerLinearAlgebra.modular_determinant([
+                [0, 2, 1],
+                [3, 0, 4],
+                [5, 6, 0]
+              ]),
+              58)
+lattice_check("integer_det.modular_singular",
+              ExactIntegerLinearAlgebra.modular_determinant([
+                [1, 2],
+                [2, 4]
+              ]),
+              0)
+large_triangular = [
+  [1_000_003, 2, 3, 5, 7, 11],
+  [0, -1_000_033, 13, 17, 19, 23],
+  [0, 0, 1_000_037, 29, 31, 37],
+  [0, 0, 0, 1_000_081, 41, 43],
+  [0, 0, 0, 0, 1_000_099, 47],
+  [0, 0, 0, 0, 0, 1_000_117]
+]
+large_determinant = 1 ## big
+large_determinant *= 1_000_003
+large_determinant *= -1_000_033
+large_determinant *= 1_000_037
+large_determinant *= 1_000_081
+large_determinant *= 1_000_099
+large_determinant *= 1_000_117
+lattice_check("integer_det.modular_reconstructs_signed",
+              ExactIntegerLinearAlgebra.modular_determinant(
+                large_triangular),
+              large_determinant)
+lattice_check("integer_det.modular_matches_bareiss",
+              ExactIntegerLinearAlgebra.modular_determinant(
+                large_triangular),
+              ExactIntegerLinearAlgebra.determinant(
+                large_triangular))
 
 reduction = ExactGramLatticeReduction.new(
   [[1, 0], [0, 1]],
@@ -55,6 +92,15 @@ lattice_check("lll.approximate_certified",
 lattice_check("lll.approximate_reduced_basis",
               approximate_reduction.reduced_basis.to_s,
               reduction.reduced_basis.to_s)
+
+bounded_producer = ApproximateGramLatticeBasisSearch.new(
+  [[1, 0], [0, 1]],
+  [[4, 1], [1, 0]],
+  ~0.75, 1)
+lattice_check("lll.bounded_producer.limit",
+              bounded_producer.step_limit, 1)
+lattice_check("lll.bounded_producer.steps",
+              bounded_producer.steps <= 2, true)
 
 indefinite_failed = false
 begin
@@ -98,6 +144,13 @@ lattice_check("ideal_generator.reconstructs",
                 generator_search.generator).eql?(
                   prime.as_ideal),
               true)
+exact_generator_search = prime.principal_generator_search(
+  1, 10, :exact)
+lattice_check("ideal_generator.exact_producer",
+              exact_generator_search.reduction_producer,
+              :exact)
+lattice_check("ideal_generator.exact_certified",
+              exact_generator_search.certified?, true)
 
 nonprincipal_field = NumberField.new(
   t**2 + 5, :b)

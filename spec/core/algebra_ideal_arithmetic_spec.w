@@ -93,8 +93,22 @@ valuation_certificate = above_5.valuation_with_certificate(
   O.algebra.coerce(25))
 ideal_check("valuation.certificate",
             valuation_certificate.certificate.verified?, true)
+zero_valuation = above_5.valuation_with_certificate(
+  O.one)
+ideal_check("valuation.unit_is_zero",
+            zero_valuation.value, 0)
+ideal_check("valuation.unit_certificate",
+            zero_valuation.certificate.verified?, true)
 ideal_check("valuation.ideal_power",
             above_5.ideal_valuation(P**3), 3)
+ideal_check("prime.power.arbitrary",
+            above_5.ideal_power(8), P**8)
+unit_ideal_valuation = above_5.ideal_valuation_with_certificate(
+  unit)
+ideal_check("valuation.unit_ideal_is_zero",
+            unit_ideal_valuation.value, 0)
+ideal_check("valuation.unit_ideal_certificate",
+            unit_ideal_valuation.certificate.verified?, true)
 
 valuation_limit_failed = false
 begin

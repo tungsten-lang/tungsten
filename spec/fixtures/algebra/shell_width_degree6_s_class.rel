@@ -1,0 +1,13 @@
+# tungsten-s-class-relations-v1
+# theorem=Cl(O_K,S)[2]=0
+# field_component_degree=6
+# field_discriminant=1168128
+# rational_S=2,3,13
+# factor_base_size=9
+# relation_rank=9
+# model_certified=true
+# source_transfer_certified=true
+1/1,1/1,-1/1,0/1,0/1,0/1
+-2/1,-2/1,-3/1,0/1,-1/1,1/1
+-1/1,1/1,-2/1,1/1,0/1,0/1
+3/1,2/1,2/1,0/1,1/1,-1/1

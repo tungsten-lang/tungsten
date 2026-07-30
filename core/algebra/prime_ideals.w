@@ -1568,6 +1568,14 @@
   -> prime_decomposition(
        prime, factor_search_limit = 250_000,
        generator_search_limit = 250_000)
+    if @prime_decomposition_primes_cache == nil
+      @prime_decomposition_primes_cache = []
+      @prime_decompositions_cache = []
+    cache_index = 0
+    while cache_index < @prime_decomposition_primes_cache.size
+      if @prime_decomposition_primes_cache[cache_index] == prime
+        return @prime_decompositions_cache[cache_index]
+      cache_index += 1
     order = certify_maximal_order
     computation = maximal_order_computation
     prime_class = prime.class_name
@@ -1584,8 +1592,11 @@
       algebra_decomposition = order.prime_decomposition(
         prime, factor_search_limit,
         generator_search_limit)
-    NumberFieldPrimeDecomposition.new(
+    result = NumberFieldPrimeDecomposition.new(
       self, algebra_decomposition)
+    @prime_decomposition_primes_cache.push(prime)
+    @prime_decompositions_cache.push(result)
+    result
 
   -> prime_ideals_above(
        prime, factor_search_limit = 250_000,

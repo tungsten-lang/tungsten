@@ -58,11 +58,43 @@
 + NumberFieldIdealGeneratorBounds
   -> new(@coefficient_bound = 2,
          @element_limit = 100_000,
-         @odd_power_limit = 3)
+         @odd_power_limit = 3,
+         @reduction_producer = :approximate,
+         @ideal_attempt_limit = 100_000,
+         @total_element_limit = 100_000_000,
+         @prime_start_index = 0,
+         @prime_count = nil,
+         @relation_anchor_index = nil,
+         @minimum_odd_power = 1,
+         @use_anchored_relations = true)
     if @coefficient_bound < 1 || @element_limit < 1
       raise "principal-generator search bounds must be positive"
     if @odd_power_limit < 1
       raise "principal ideal odd-power limit must be positive"
+    if @minimum_odd_power < 1 || @minimum_odd_power.even?
+      raise "principal ideal minimum power must be positive and odd"
+    if @minimum_odd_power > @odd_power_limit
+      raise "principal ideal minimum power exceeds its power limit"
+    if @ideal_attempt_limit < 1 || @total_element_limit < 1
+      raise "principal ideal total search bounds must be positive"
+    if !IntegerLinearAlgebra.integer_value?(@prime_start_index)
+      raise "principal ideal prime start must be an integer"
+    if @prime_start_index < 0
+      raise "principal ideal prime start must be nonnegative"
+    if @prime_count != nil
+      if !IntegerLinearAlgebra.integer_value?(@prime_count)
+        raise "principal ideal prime count must be an integer"
+      if @prime_count < 1
+        raise "principal ideal prime count must be positive"
+    if @relation_anchor_index != nil
+      if !IntegerLinearAlgebra.integer_value?(@relation_anchor_index)
+        raise "principal relation anchor must be an integer"
+      if @relation_anchor_index < 0
+        raise "principal relation anchor must be nonnegative"
+    supported = @reduction_producer == :approximate
+    supported = true if @reduction_producer == :exact
+    if !supported
+      raise "principal-generator reduction must be exact or approximate"
 
   -> coefficient_bound
     @coefficient_bound
@@ -73,10 +105,35 @@
   -> odd_power_limit
     @odd_power_limit
 
+  -> reduction_producer
+    @reduction_producer
+
+  -> ideal_attempt_limit
+    @ideal_attempt_limit
+
+  -> total_element_limit
+    @total_element_limit
+
+  -> prime_start_index
+    @prime_start_index
+
+  -> prime_count
+    @prime_count
+
+  -> relation_anchor_index
+    @relation_anchor_index
+
+  -> minimum_odd_power
+    @minimum_odd_power
+
+  -> use_anchored_relations?
+    @use_anchored_relations
+
 
 + NumberFieldIdealGeneratorSearch
   -> new(@ideal, @coefficient_bound = 2,
-         @element_limit = 100_000)
+         @element_limit = 100_000,
+         @reduction_producer = :approximate)
     if @ideal.class_name != "NumberFieldIdeal"
       raise "principal-generator search needs a NumberFieldIdeal"
     if @coefficient_bound < 1 || @element_limit < 1
@@ -84,7 +141,12 @@
     @field = @ideal.field
     @generator = nil
     @tested_elements = 0
-    @coordinate_basis = @ideal.algebra_ideal.approximate_frobenius_coordinate_basis
+    if @reduction_producer == :exact
+      @coordinate_basis = @ideal.algebra_ideal.reduced_frobenius_coordinate_basis
+    elsif @reduction_producer == :approximate
+      @coordinate_basis = @ideal.algebra_ideal.approximate_frobenius_coordinate_basis
+    else
+      raise "principal-generator reduction must be exact or approximate"
     search
     @certificate_cache = NumberFieldIdealGeneratorCertificate.new(
       self)
@@ -104,6 +166,9 @@
   -> tested_elements
     @tested_elements
 
+  -> reduction_producer
+    @reduction_producer
+
   -> primitive_oriented_vector?(vector)
     divisor = 0
     first_nonzero = nil
@@ -119,6 +184,11 @@
     vector.each -> (coefficient)
       height = coefficient.abs if coefficient.abs > height
     height
+
+  -> centered_coefficient(digit)
+    return 0 if digit == 0
+    return (digit + 1) / 2 if digit.odd?
+    0 - digit / 2
 
   -> order_coordinates(vector)
     coordinates = []
@@ -157,7 +227,8 @@
         remaining = code
         i = 0
         while i < @coordinate_basis.size
-          vector.push((remaining % radix) - height)
+          digit = remaining % radix
+          vector.push(centered_coefficient(digit))
           remaining = remaining / radix
           i += 1
         selected = vector_height(vector) == height
@@ -194,15 +265,19 @@
 + NumberFieldIdeal
   -> principal_generator_search(
        coefficient_bound = 2,
-       element_limit = 100_000)
+       element_limit = 100_000,
+       reduction_producer = :approximate)
     NumberFieldIdealGeneratorSearch.new(
-      self, coefficient_bound, element_limit)
+      self, coefficient_bound, element_limit,
+      reduction_producer)
 
   -> principal_generator(
        coefficient_bound = 2,
-       element_limit = 100_000)
+       element_limit = 100_000,
+       reduction_producer = :approximate)
     search = principal_generator_search(
-      coefficient_bound, element_limit)
+      coefficient_bound, element_limit,
+      reduction_producer)
     if !search.found?
       raise "principal-generator search limit exceeded; principality unknown"
     search.generator
@@ -211,15 +286,19 @@
 + NumberFieldPrimeIdeal
   -> principal_generator_search(
        coefficient_bound = 2,
-       element_limit = 100_000)
+       element_limit = 100_000,
+       reduction_producer = :approximate)
     as_ideal.principal_generator_search(
-      coefficient_bound, element_limit)
+      coefficient_bound, element_limit,
+      reduction_producer)
 
   -> principal_generator(
        coefficient_bound = 2,
-       element_limit = 100_000)
+       element_limit = 100_000,
+       reduction_producer = :approximate)
     as_ideal.principal_generator(
-      coefficient_bound, element_limit)
+      coefficient_bound, element_limit,
+      reduction_producer)
 
 
 + NumberFieldMinkowskiLinearPrimeSliceCertificate
@@ -708,11 +787,9 @@
     @element = @factor_base.field.coerce(value)
     if @element.zero?
       raise "zero has no principal ideal-class relation"
-    relation_field = @factor_base.field
-    @fractional_ideal = relation_field.principal_fractional_ideal(
-      @element)
     @vector = compute_vector
-    if !verified?
+    @verified_cache = @vector != nil
+    if !@verified_cache
       raise "principal ideal is not supported on the displayed factor base"
 
   -> factor_base
@@ -725,12 +802,66 @@
     @element
 
   -> fractional_ideal
-    @fractional_ideal
+    field.principal_fractional_ideal(@element)
 
   -> compute_vector
+    coordinates = field.maximal_order_coordinates(
+      @element)
+    if coordinates != nil
+      return compute_integral_vector(coordinates)
+    fractional = fractional_ideal
+    return nil if !fractional.certificate.verified?
+    compute_vector_from_fractional_ideal(
+      fractional)
+
+  # For algebraic integers, certify the relation directly from exact
+  # P-adic valuations.  The norm identity
+  #
+  #   ord_p |Norm(a)| = sum(P above p) f(P/p) ord_P(a)
+  #
+  # proves that no omitted prime above p divides (a).  This avoids building,
+  # factoring, and retaining a generic principal ideal for every relation.
+  # Non-integral elements continue through the general fractional-ideal
+  # certificate below.
+  -> compute_integral_vector(coordinates)
+    order = field.certify_maximal_order
+    order_element = order.element(coordinates)
+    norm = order.norm_from_coordinates(coordinates)
+    return nil if norm == 0
+    remaining = norm.abs
+    primes = @factor_base.primes
+    vector = []
+    primes.size.times -> vector.push(0)
+    handled_rational_primes = []
+    prime_index = 0
+    while prime_index < primes.size
+      rational_prime = primes[prime_index].rational_prime
+      if !handled_rational_primes.include?(rational_prime)
+        handled_rational_primes.push(rational_prime)
+        rational_exponent = 0
+        while remaining % rational_prime == 0
+          remaining = remaining / rational_prime
+          rational_exponent += 1
+        if rational_exponent > 0
+          accounted_exponent = 0
+          local_index = 0
+          while local_index < primes.size
+            prime = primes[local_index]
+            if prime.rational_prime == rational_prime
+              valuation = prime.algebra_prime_ideal.valuation(
+                order_element, rational_exponent)
+              vector[local_index] = valuation.abs % 2
+              accounted_exponent += prime.residue_degree * valuation
+            local_index += 1
+          return nil if accounted_exponent != rational_exponent
+      prime_index += 1
+    return nil if remaining != 1
+    vector
+
+  -> compute_vector_from_fractional_ideal(fractional_ideal)
     vector = []
     @factor_base.size.times -> vector.push(0)
-    algebra_ideal = @fractional_ideal.algebra_fractional_ideal
+    algebra_ideal = fractional_ideal.algebra_fractional_ideal
     factors = algebra_ideal.factors
     factor_index = 0
     while factor_index < factors.size
@@ -749,10 +880,7 @@
 
   -> verified?
     return false if !@factor_base.certificate.verified?
-    return false if !@fractional_ideal.certificate.verified?
-    recomputed = compute_vector
-    return false if recomputed == nil || @vector == nil
-    F2LinearAlgebra.same_vector?(recomputed, @vector)
+    @verified_cache
 
   -> certified?
     verified?
@@ -835,17 +963,22 @@
 
 
 + NumberFieldSClassTwoTorsionProof
-  -> new(@factor_base, relation_elements)
+  -> new(@factor_base, relation_evidence)
     expected_class = "NumberFieldMinkowskiFactorBase"
     if @factor_base.class_name != expected_class
       raise "S-class proof needs a Minkowski factor base"
-    if relation_elements.class_name != "Array"
+    if relation_evidence.class_name != "Array"
       raise "S-class principal relations must be an Array"
     @principal_relations = []
-    relation_elements.each -> (element)
-      @principal_relations.push(
-        NumberFieldPrincipalClassRelation.new(
-          @factor_base, element))
+    relation_evidence.each -> (evidence)
+      if evidence.class_name == "NumberFieldPrincipalClassRelation"
+        if evidence.factor_base != @factor_base || !evidence.verified?
+          raise "S-class relation certificate has the wrong factor base"
+        @principal_relations.push(evidence)
+      else
+        @principal_relations.push(
+          NumberFieldPrincipalClassRelation.new(
+            @factor_base, evidence))
     @relation_matrix = s_prime_rows
     @principal_relations.each -> (relation)
       @relation_matrix.push(relation.vector)
@@ -917,6 +1050,178 @@
     to_s
 
 
++ NumberFieldIsomorphicSClassTwoTorsionCertificate
+  -> new(@proof)
+    @verified_cache = nil
+
+  -> proof
+    @proof
+
+  -> theorem
+    "field isomorphisms preserve localized ideal class groups"
+
+  -> theorem_reference
+    "functoriality of Cl(O_K,S) under Q-algebra isomorphism"
+
+  -> proof_kind
+    :trusted_theorem_import
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> same_prime_sets?(left, right)
+    return false if left.size != right.size
+    i = 0
+    while i < left.size
+      found = false
+      j = 0
+      while j < right.size
+        found = true if left[i].eql?(right[j])
+        j += 1
+      return false if !found
+      i += 1
+    true
+
+  -> primes_above(field, rational_primes)
+    out = []
+    rational_primes.each -> (rational_prime)
+      field.prime_ideals_above(
+        rational_prime).each -> (prime)
+        out.push(prime)
+    out
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "NumberFieldIsomorphicSClassTwoTorsionProof"
+    return false if @proof.class_name != expected
+    source = @proof.source_field
+    model = @proof.model_field
+    return false if source.class_name != "NumberField"
+    return false if model.class_name != "NumberField"
+    isomorphism = source.irreducibility_certificate
+    expected_certificate = "NumberFieldIsomorphicModelIrreducibilityCertificate"
+    return false if isomorphism.class_name != expected_certificate
+    return false if !isomorphism.verified?
+    return false if isomorphism.model_field != model
+
+    rational_primes = @proof.rational_primes
+    i = 0
+    while i < rational_primes.size
+      prime = rational_primes[i]
+      return false if !prime.prime?
+      j = 0
+      while j < i
+        return false if rational_primes[j] == prime
+        j += 1
+      i += 1
+
+    model_proof = @proof.model_proof
+    expected_proof = "NumberFieldSClassTwoTorsionProof"
+    return false if model_proof.class_name != expected_proof
+    return false if model_proof.field != model
+    return false if !model_proof.certificate.verified?
+    expected_model_primes = primes_above(
+      model, rational_primes)
+    return false if !same_prime_sets?(
+      expected_model_primes, model_proof.s_primes)
+
+    expected_source_primes = primes_above(
+      source, rational_primes)
+    same_prime_sets?(
+      expected_source_primes, @proof.s_primes)
+
+  -> certified?
+    verified?
+
+  -> proves_two_torsion_trivial?
+    verified?
+
+  -> to_s
+    "NumberFieldIsomorphicSClassTwoTorsionCertificate"
+
+  -> inspect
+    to_s
+
+
++ NumberFieldIsomorphicSClassTwoTorsionProof
+  -> new(@source_field, rational_primes,
+         @model_proof)
+    if @source_field.class_name != "NumberField"
+      raise "isomorphic S-class proof needs a source number field"
+    if rational_primes.class_name != "Array"
+      raise "isomorphic S-class rational primes must be an Array"
+    @rational_primes = []
+    rational_primes.each -> (prime)
+      @rational_primes.push(prime)
+    certificate = @source_field.irreducibility_certificate
+    expected = "NumberFieldIsomorphicModelIrreducibilityCertificate"
+    if certificate.class_name != expected
+      raise "source field has no certified isomorphic model"
+    @model_field = certificate.model_field
+    @s_primes = []
+    @rational_primes.each -> (rational_prime)
+      @source_field.prime_ideals_above(
+        rational_prime).each -> (prime)
+        @s_primes.push(prime)
+    @certificate_cache = NumberFieldIsomorphicSClassTwoTorsionCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "isomorphic S-class 2-torsion transfer failed certification"
+
+  -> source_field
+    @source_field
+
+  -> field
+    @source_field
+
+  -> model_field
+    @model_field
+
+  -> model_proof
+    @model_proof
+
+  -> rational_primes
+    out = []
+    @rational_primes.each -> (prime)
+      out.push(prime)
+    out
+
+  -> s_primes
+    out = []
+    @s_primes.each -> (prime)
+      out.push(prime)
+    out
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+  -> two_torsion_trivial?
+    certified?
+
+  -> to_s
+    text = "IsomorphicSClassTwoTorsionProof("
+    text + @source_field.to_s + " via "
+    text + @model_field.to_s + ")"
+
+  -> inspect
+    to_s
+
+
 + NumberFieldSClassTwoTorsionSearch
   -> new(@field, s_primes = nil,
          @coefficient_bound = 4,
@@ -924,7 +1229,9 @@
          rational_prime_limit = 100_000,
          factor_search_limit = 250_000,
          generator_search_limit = 250_000,
-         ideal_generator_bounds = nil)
+         ideal_generator_bounds = nil,
+         initial_relation_elements = nil,
+         @require_complete = true)
     if @field.class_name != "NumberField"
       raise "S-class relation search needs a NumberField"
     if @coefficient_bound < 0 || @element_limit < 1
@@ -936,26 +1243,60 @@
     @ideal_generator_coefficient_bound = ideal_generator_bounds.coefficient_bound
     @ideal_generator_element_limit = ideal_generator_bounds.element_limit
     @ideal_generator_odd_power_limit = ideal_generator_bounds.odd_power_limit
+    @ideal_generator_reduction_producer = ideal_generator_bounds.reduction_producer
+    @ideal_generator_attempt_limit = ideal_generator_bounds.ideal_attempt_limit
+    @ideal_generator_total_element_limit = ideal_generator_bounds.total_element_limit
+    @ideal_generator_prime_start = ideal_generator_bounds.prime_start_index
+    @ideal_generator_prime_count = ideal_generator_bounds.prime_count
+    @ideal_generator_minimum_odd_power = ideal_generator_bounds.minimum_odd_power
+    @ideal_generator_use_anchored_relations = ideal_generator_bounds.use_anchored_relations?
     @factor_base = NumberFieldMinkowskiFactorBase.new(
       @field, s_primes, rational_prime_limit,
       factor_search_limit, generator_search_limit)
     @relation_elements = []
     @relation_vectors = []
+    @principal_relations = []
     @tested_elements = 0
     @tested_ideal_elements = 0
+    @tested_ideals = 0
+    @attempted_factor_base_indices = []
+    @resolved_factor_base_indices = []
+    @principal_relation_anchor_index = ideal_generator_bounds.relation_anchor_index
+    if @principal_relation_anchor_index != nil
+      if @principal_relation_anchor_index >= @factor_base.size
+        raise "principal relation anchor is outside the factor base"
     @allowed_rational_primes = []
+    @factor_base_prime_groups = []
+    @factor_base_index_groups = []
+    prime_index = 0
     @factor_base.primes.each -> (prime)
       rational_prime = prime.rational_prime
-      if !@allowed_rational_primes.include?(rational_prime)
+      group_index = rational_prime_group_index(
+        rational_prime)
+      if group_index == nil
         @allowed_rational_primes.push(rational_prime)
+        @factor_base_prime_groups.push([])
+        @factor_base_index_groups.push([])
+        group_index = @allowed_rational_primes.size - 1
+      @factor_base_prime_groups[group_index].push(prime)
+      @factor_base_index_groups[group_index].push(prime_index)
+      prime_index += 1
     initialize_rank_tracker
+    seed_initial_relations(initial_relation_elements)
     seed_rational_relations if @rank < @factor_base.size
     search if @rank < @factor_base.size
     seed_principal_factor_base_generators if @rank < @factor_base.size
-    if @rank != @factor_base.size
-      raise "S-class relation search limit exceeded; 2-torsion remains unknown"
-    @proof = NumberFieldSClassTwoTorsionProof.new(
-      @factor_base, @relation_elements)
+    @proof = nil
+    if @rank == @factor_base.size
+      @proof = NumberFieldSClassTwoTorsionProof.new(
+        @factor_base, @principal_relations)
+    elsif @require_complete
+      message = "S-class relation search limit exceeded; rank "
+      message += @rank.to_s + " of " + @factor_base.size.to_s
+      message += " after " + @tested_elements.to_s + " order elements and "
+      message += @tested_ideal_elements.to_s + " ideal elements in "
+      message += @tested_ideals.to_s + " ideal searches; "
+      raise message + "2-torsion remains unknown"
 
   -> field
     @field
@@ -969,11 +1310,57 @@
       out.push(element)
     out
 
+  -> relation_vectors
+    F2LinearAlgebra.copy_matrix(
+      @relation_vectors)
+
+  -> relation_coordinate_witnesses
+    out = []
+    @relation_elements.each -> (element)
+      coefficients = []
+      element.coefficients.each -> (coefficient)
+        coefficients.push(coefficient)
+      out.push(coefficients)
+    out
+
+  -> rank
+    @rank
+
+  -> complete?
+    @proof != nil
+
+  -> require_complete?
+    @require_complete
+
   -> tested_elements
     @tested_elements
 
   -> tested_ideal_elements
     @tested_ideal_elements
+
+  -> tested_ideals
+    @tested_ideals
+
+  -> attempted_factor_base_indices
+    out = []
+    @attempted_factor_base_indices.each -> (index)
+      out.push(index)
+    out
+
+  -> resolved_factor_base_indices
+    out = []
+    @resolved_factor_base_indices.each -> (index)
+      out.push(index)
+    out
+
+  -> principal_relation_anchor_index
+    @principal_relation_anchor_index
+
+  -> unresolved_factor_base_indices
+    out = []
+    @attempted_factor_base_indices.each -> (index)
+      out.push(index) if !@resolved_factor_base_indices.include?(index)
+    out
 
   -> s_prime_rows
     rows = []
@@ -1005,6 +1392,20 @@
     while i < rows.size
       add_rank_row(rows[i])
       i += 1
+
+  -> seed_initial_relations(elements)
+    return nil if elements == nil
+    if elements.class_name != "Array"
+      raise "initial S-class relations must be an Array"
+    i = 0
+    while i < elements.size
+      element = @field.coerce(elements[i])
+      evidence = NumberFieldPrincipalClassRelation.new(
+        @factor_base, element)
+      add_relation_if_independent(
+        element, evidence.vector, evidence)
+      i += 1
+    nil
 
   -> reduced_rank_row(vector)
     F2LinearAlgebra.validate_vector(
@@ -1049,6 +1450,11 @@
     vector.each -> (coefficient)
       height = coefficient.abs if coefficient.abs > height
     height
+
+  -> centered_coefficient(digit)
+    return 0 if digit == 0
+    return (digit + 1) / 2 if digit.odd?
+    0 - digit / 2
 
   -> integral_element(vector, basis)
     result = @field.zero
@@ -1100,6 +1506,77 @@
       i += 1
     remaining == 1
 
+  -> rational_prime_group_index(rational_prime)
+    i = 0
+    while i < @allowed_rational_primes.size
+      return i if @allowed_rational_primes[i] == rational_prime
+      i += 1
+    nil
+
+  # The factorization of the rational element p has valuation e(P/p) at
+  # every P above p.  The residue-degree identity detects whether this factor
+  # base contains all of those primes without constructing any ideal powers.
+  -> rational_prime_relation(rational_prime)
+    group_index = rational_prime_group_index(
+      rational_prime)
+    return nil if group_index == nil
+    primes = @factor_base_prime_groups[group_index]
+    indices = @factor_base_index_groups[group_index]
+    accounted_degree = 0
+    vector = []
+    @factor_base.size.times -> vector.push(0)
+    i = 0
+    while i < primes.size
+      prime = primes[i]
+      ramification = prime.ramification_index
+      accounted_degree += ramification * prime.residue_degree
+      vector[indices[i]] = ramification % 2
+      i += 1
+    return nil if accounted_degree != @field.degree
+    vector
+
+  # Compute a candidate relation directly against the already-certified
+  # factor-base primes.  Search candidates are producer calculations; every
+  # independent row is promoted to a NumberFieldPrincipalClassRelation,
+  # which replays the exact valuation calculation before the row enters the
+  # proof.
+  #
+  # The exponent of p in |Norm(element)| must equal
+  #
+  #   sum over P above p of f(P/p) * v_P(element).
+  #
+  # Requiring equality detects a prime divisor above p that is absent from
+  # the displayed factor base.
+  -> integral_factor_base_relation(order_element, norm)
+    return nil if norm == 0
+    remaining = norm.abs
+    vector = []
+    @factor_base.size.times -> vector.push(0)
+    group_index = 0
+    while group_index < @allowed_rational_primes.size
+      rational_prime = @allowed_rational_primes[group_index]
+      rational_exponent = 0
+      while remaining % rational_prime == 0
+        remaining = remaining / rational_prime
+        rational_exponent += 1
+      if rational_exponent > 0
+        accounted_exponent = 0
+        primes = @factor_base_prime_groups[group_index]
+        indices = @factor_base_index_groups[group_index]
+        local_index = 0
+        while local_index < primes.size
+          prime = primes[local_index]
+          valuation = prime.algebra_prime_ideal.valuation(
+            order_element, rational_exponent)
+          if valuation > 0
+            vector[indices[local_index]] = valuation.abs % 2
+            accounted_exponent += prime.residue_degree * valuation
+          local_index += 1
+        return nil if accounted_exponent != rational_exponent
+      group_index += 1
+    return nil if remaining != 1
+    vector
+
   # A principal ideal supported on the factor base can only have rational norm
   # primes represented by that base.  Strip those primes before asking the
   # ideal layer for residue-algebra decompositions; this cheaply rejects small
@@ -1126,6 +1603,13 @@
     relation_from_supported_element(element)
 
   -> relation_from_supported_element(element)
+    coordinates = @field.maximal_order_coordinates(element)
+    if coordinates != nil
+      order = @field.certify_maximal_order
+      order_element = order.element(coordinates)
+      norm = order.norm_from_coordinates(coordinates)
+      return integral_factor_base_relation(
+        order_element, norm)
     ideal = @field.principal_fractional_ideal(element)
     factors = ideal.algebra_fractional_ideal.factors
     vector = []
@@ -1141,21 +1625,34 @@
     vector
 
   -> candidate_relation_from_order_coordinates(coordinates)
-    norm = @field.certify_maximal_order.norm_from_coordinates(
-      coordinates)
+    order = @field.certify_maximal_order
+    norm = order.norm_from_coordinates(coordinates)
     return nil if !integer_norm_support_within_factor_base?(
       norm)
+    order_element = order.element(coordinates)
+    relation = integral_factor_base_relation(
+      order_element, norm)
+    return nil if relation == nil
     element = element_from_order_coordinates(
       coordinates)
-    relation = relation_from_supported_element(
-      element)
-    return nil if relation == nil
     [element, relation]
 
-  -> add_relation_if_independent(element, relation)
+  -> add_relation_if_independent(
+       element, relation, evidence = nil)
     if add_rank_row(relation)
+      if evidence == nil
+        evidence = NumberFieldPrincipalClassRelation.new(
+          @factor_base, element)
+      if evidence.factor_base != @factor_base
+        raise "principal relation evidence changes the factor base"
+      if !evidence.verified?
+        raise "principal relation evidence is not certified"
+      if !F2LinearAlgebra.same_vector?(
+           evidence.vector, relation)
+        raise "principal relation producer disagrees with its certificate"
       @relation_elements.push(element)
-      @relation_vectors.push(relation)
+      @relation_vectors.push(evidence.vector)
+      @principal_relations.push(evidence)
       return true
     false
 
@@ -1164,30 +1661,80 @@
   # arbitrary order elements.  The producer makes no theorem claim; every
   # accepted generator is replayed through the ordinary exact principal-ideal
   # relation certificate.
+  -> ideal_search_budget_exhausted?
+    return true if @tested_ideals >= @ideal_generator_attempt_limit
+    @tested_ideal_elements >= @ideal_generator_total_element_limit
+
+  -> try_principal_ideal_relation(ideal, relation)
+    return false if ideal_search_budget_exhausted?
+    remaining_limit = @ideal_generator_total_element_limit
+    remaining_limit -= @tested_ideal_elements
+    element_limit = @ideal_generator_element_limit
+    element_limit = remaining_limit if remaining_limit < element_limit
+    @tested_ideals += 1
+    search = ideal.principal_generator_search(
+      @ideal_generator_coefficient_bound,
+      element_limit,
+      @ideal_generator_reduction_producer)
+    @tested_ideal_elements += search.tested_elements
+    return false if !search.certified?
+    add_relation_if_independent(
+      search.generator, relation)
+    true
+
+  -> anchored_relation(prime_index, unit)
+    return false if @principal_relation_anchor_index == nil
+    anchor_index = @principal_relation_anchor_index
+    return false if anchor_index == prime_index
+    anchor = @factor_base.primes[anchor_index]
+    prime = @factor_base.primes[prime_index]
+
+    pair = []
+    @factor_base.size.times -> pair.push(0)
+    pair[anchor_index] = 1
+    pair[prime_index] = 1
+    pair_ideal = anchor.as_ideal * prime.as_ideal
+    return true if try_principal_ideal_relation(
+      pair_ideal, pair)
+    return false if ideal_search_budget_exhausted?
+
+    square_ideal = anchor.as_ideal ** 2
+    square_ideal = square_ideal * prime.as_ideal
+    try_principal_ideal_relation(
+      square_ideal, unit)
+
   -> seed_principal_factor_base_generators
-    prime_index = 0
-    while prime_index < @factor_base.size
+    prime_index = @ideal_generator_prime_start
+    stop_index = @factor_base.size
+    if @ideal_generator_prime_count != nil
+      requested_stop = prime_index + @ideal_generator_prime_count
+      stop_index = requested_stop if requested_stop < stop_index
+    while prime_index < stop_index
       unit = []
       @factor_base.size.times -> unit.push(0)
       unit[prime_index] = 1
       if rank_row_independent?(unit)
+        @attempted_factor_base_indices.push(prime_index)
         prime = @factor_base.primes[prime_index]
-        odd_power = 1
         found = false
-        while odd_power <= @ideal_generator_odd_power_limit && !found
+        if @ideal_generator_use_anchored_relations
+          found = anchored_relation(
+            prime_index, unit)
+        found_by_power = false
+        odd_power = @ideal_generator_odd_power_limit
+        odd_power -= 1 if odd_power.even?
+        while odd_power >= @ideal_generator_minimum_odd_power && !found
+          return nil if ideal_search_budget_exhausted?
           ideal = prime.as_ideal ** odd_power
-          search = ideal.principal_generator_search(
-            @ideal_generator_coefficient_bound,
-            @ideal_generator_element_limit)
-          @tested_ideal_elements += search.tested_elements
-          if search.found?
-            relation = candidate_relation(search.generator)
-            if relation != nil
-              add_relation_if_independent(
-                search.generator, relation)
-              found = true
-              return true if @rank == @factor_base.size
-          odd_power += 2
+          found_by_power = try_principal_ideal_relation(
+            ideal, unit)
+          found = found_by_power
+          odd_power -= 2
+        if found
+          @resolved_factor_base_indices.push(prime_index)
+          if found_by_power && @principal_relation_anchor_index == nil
+            @principal_relation_anchor_index = prime_index
+          return true if @rank == @factor_base.size
       prime_index += 1
     nil
 
@@ -1200,9 +1747,9 @@
       if rational_prime.prime?
         @tested_elements += 1
         return nil if @tested_elements > @element_limit
-        element = @field.coerce(rational_prime)
-        relation = candidate_relation(element)
+        relation = rational_prime_relation(rational_prime)
         if relation != nil
+          element = @field.coerce(rational_prime)
           add_relation_if_independent(element, relation)
           return true if @rank == @factor_base.size
       rational_prime += 1
@@ -1220,7 +1767,8 @@
         remaining = code
         i = 0
         while i < basis.size
-          vector.push((remaining % radix) - height)
+          digit = remaining % radix
+          vector.push(centered_coefficient(digit))
           remaining = remaining / radix
           i += 1
         selected_vector = vector_height(vector) == height
@@ -1249,14 +1797,17 @@
     @proof
 
   -> certificate
+    if @proof == nil
+      raise "incomplete S-class search has no certificate"
     @proof.certificate
 
   -> certified?
-    @proof.certified?
+    @proof != nil && @proof.certified?
 
   -> to_s
-    text = "SClassTwoTorsionSearch(tested "
-    text + @tested_elements.to_s + ")"
+    text = "SClassTwoTorsionSearch(rank "
+    text += @rank.to_s + "/" + @factor_base.size.to_s
+    text + ", tested " + @tested_elements.to_s + ")"
 
   -> inspect
     to_s
@@ -1329,20 +1880,25 @@
       i += 1
     component_proofs = @proof.component_proofs
     return false if component_proofs.size != order.component_count
-    component_orders = order.component_algebra_orders
+    component_orders = order.component_orders
     component_index = 0
     while component_index < component_proofs.size
       proofs = component_proofs[component_index]
       return false if proofs.class_name != "Array"
       return false if proofs.size == 0
-      component_polynomial = component_orders[
-        component_index].algebra.defining_polynomial.monic
+      component_order = component_orders[component_index]
+      if component_order.class_name == "MonogenicOrder"
+        component_polynomial = component_order.source_polynomial.monic
+      else
+        component_polynomial = component_order.algebra.defining_polynomial.monic
       product = component_polynomial.ring.one
       i = 0
       while i < proofs.size
         field_proof = proofs[i]
-        proof_class = "NumberFieldSClassTwoTorsionProof"
-        return false if field_proof.class_name != proof_class
+        proof_class = field_proof.class_name
+        ordinary = proof_class == "NumberFieldSClassTwoTorsionProof"
+        transferred = proof_class == "NumberFieldIsomorphicSClassTwoTorsionProof"
+        return false if !ordinary && !transferred
         return false if !field_proof.certificate.verified?
         field = field_proof.field
         polynomial = field.defining_polynomial
@@ -1464,3 +2020,60 @@
       factor_search_limit,
       generator_search_limit,
       ideal_generator_bounds).proof
+
+  -> search_s_class_two_torsion(
+       s_primes = nil,
+       coefficient_bound = 4,
+       element_limit = 100_000,
+       rational_prime_limit = 100_000,
+       factor_search_limit = 250_000,
+       generator_search_limit = 250_000,
+       ideal_generator_bounds = nil,
+       initial_relation_elements = nil)
+    NumberFieldSClassTwoTorsionSearch.new(
+      self, s_primes, coefficient_bound,
+      element_limit, rational_prime_limit,
+      factor_search_limit,
+      generator_search_limit,
+      ideal_generator_bounds,
+      initial_relation_elements, false)
+
+  -> certify_s_class_two_torsion_from_relations(
+       s_primes, relation_elements,
+       rational_prime_limit = 100_000,
+       factor_search_limit = 250_000,
+       generator_search_limit = 250_000)
+    factor_base = NumberFieldMinkowskiFactorBase.new(
+      self, s_primes, rational_prime_limit,
+      factor_search_limit, generator_search_limit)
+    NumberFieldSClassTwoTorsionProof.new(
+      factor_base, relation_elements)
+
+  -> certify_s_class_two_torsion_via_isomorphic_model(
+       rational_primes,
+       coefficient_bound = 4,
+       element_limit = 100_000,
+       rational_prime_limit = 100_000,
+       factor_search_limit = 250_000,
+       generator_search_limit = 250_000,
+       ideal_generator_bounds = nil)
+    certificate = irreducibility_certificate
+    expected = "NumberFieldIsomorphicModelIrreducibilityCertificate"
+    if certificate.class_name != expected
+      raise "number field has no certified isomorphic model"
+    model = certificate.model_field
+    model_s_primes = []
+    rational_primes.each -> (rational_prime)
+      model.prime_ideals_above(
+        rational_prime,
+        factor_search_limit,
+        generator_search_limit).each -> (prime)
+        model_s_primes.push(prime)
+    model_proof = model.certify_s_class_two_torsion(
+      model_s_primes, coefficient_bound,
+      element_limit, rational_prime_limit,
+      factor_search_limit,
+      generator_search_limit,
+      ideal_generator_bounds)
+    NumberFieldIsomorphicSClassTwoTorsionProof.new(
+      self, rational_primes, model_proof)

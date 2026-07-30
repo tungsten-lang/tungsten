@@ -224,6 +224,7 @@ compiled_specs=(
   spec/compiler/small_array_stack_escape_spec.w
   spec/compiler/small_array_stack_zero_init_spec.w
   spec/compiler/small_array_generic_spec.w
+  spec/compiler/small_array_wide_element_boxing_spec.w
   spec/compiler/typed_array_boxed_read_family_spec.w
   spec/compiler/masked_index_loop_spec.w
   spec/compiler/loop_version_array_spec.w

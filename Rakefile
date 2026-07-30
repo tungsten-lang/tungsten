@@ -149,6 +149,7 @@ namespace :test do
   desc "Run compiled/interpreted Tungsten specs, including core runtime specs"
   task :tungsten do
     run_command "make", "specs", env: { "RUN_CORE_SPECS" => "1" }
+    run_command "bash", File.join(ROOT, "scripts/test-small-array-wide-element-boxing-wire.sh")
   end
 end
 

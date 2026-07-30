@@ -1371,6 +1371,18 @@
       elem_type = small_array_to_typed_array_type(recv_type)
       if elem_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16)
         return raw_float_from_bits_i64(wfn, temp, elem_type)
+      # A 64-bit SmallArray element cannot use the generic :raw_int path:
+      # ensure_i64_value nanboxes :raw_int by masking it to the signed i48
+      # payload, corrupting wide i64/u64 values.  Preserve the element's
+      # machine signedness so boxing uses __w_int_fast / w_u64, exactly as the
+      # regular typed-array load below does.  w64 slots already contain a
+      # fully tagged WValue and must not be boxed at all.
+      if elem_type == :typed_array_w64
+        return typed_value(:i64, temp)
+      if elem_type == :typed_array_i64
+        return typed_value(:raw_i64, temp)
+      if elem_type == :typed_array_u64
+        return typed_value(:raw_u64, temp)
       return typed_value(:raw_int, temp)
     if method_name == "\[]=" && node.args.size() == 2
       if sa_hl

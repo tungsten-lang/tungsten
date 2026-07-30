@@ -363,9 +363,11 @@ parser = OptionParser.new do |opts|
     exit 0
   end
 
-  opts.on "--clear-cache", "Clear all .memo cache files" do
-    cache_dir = File.join(Dir.home, ".tungsten", "cache")
-    files = Dir.glob(File.join(cache_dir, "*.memo"))
+  opts.on "--clear-cache", "Clear all .memo and incremental binary (irbin-*) cache files" do
+    cache_dir = ENV["TUNGSTEN_CACHE_DIR"]
+    cache_dir = File.join(Dir.home, ".tungsten", "cache") if cache_dir.nil? || cache_dir.empty?
+    files = (Dir.glob(File.join(cache_dir, "*.memo")) + Dir.glob(File.join(cache_dir, "irbin-*")))
+            .select { |f| File.file?(f) }
     files.each { |f| File.delete(f) }
     puts "Cleared #{files.size} cache file#{"s" unless files.size == 1}"
     exit 0

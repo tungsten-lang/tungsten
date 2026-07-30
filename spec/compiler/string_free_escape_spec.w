@@ -170,3 +170,25 @@ while gi < 500
   gathered = gathered + gi.to_s()
   gi = gi + 1
 check("escape.accumulator", gathered.size(), "1390")
+
+# Multi-part interpolation with mixed storage modes: each iteration builds
+# "[a]-[b]-[c]-[d]" from two heap-length parts (>= 8 chars), a short inline
+# literal, and an int, then compares against a twin assembled purely with
+# .to_s + concatenation. The freeing concat/interp variants must reclaim
+# only the anonymous intermediates — a premature free of a part corrupts
+# one of the two strings within a few thousand malloc recycles.
+-> interp_mix(n)
+  bad = 0 ## i64
+  i = 0 ## i64
+  while i < n
+    a = i.to_s() + "-heap-sized-part"
+    b = i % 7
+    c = "in"
+    d = i.to_s() + PAD
+    got = "[a]-[b]-[c]-[d]"
+    want = a.to_s() + "-" + b.to_s() + "-" + c.to_s() + "-" + d.to_s()
+    if got != want
+      bad = bad + 1
+    i = i + 1
+  bad
+check("free.interp_mix_twin", interp_mix(10000), "0")

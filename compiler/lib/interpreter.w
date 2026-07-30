@@ -3849,11 +3849,17 @@ use target
     # ByteArray/BoolArray are Array facades whose `.new` the compiled
     # engine intercepts in runtime dispatch (WArray with ebits=8/1). The
     # scaffold classes define no `-> new`, so without this arm the tree
-    # walker raised "no constructor accepts 1 argument(s)".
+    # walker raised "no constructor accepts 1 argument(s)". Both C fns
+    # take a RAW int64 length — marshal like eval_typed_array_new does
+    # (a boxed int truncates into a bogus cap/size).
     if w_class[:name] == "ByteArray"
-      return ccall("w_bytes_new", args.size() > 0 ? args[0] : 0)
+      bn = args.size() > 0 ? args[0] : 0
+      bn_raw = ccall_nobox("w_numeric_to_i64", bn) ## i64
+      return ccall_rawargs("w_bytes_new", bn_raw)
     if w_class[:name] == "BoolArray"
-      return ccall("w_bool_array_new", args.size() > 0 ? args[0] : 0)
+      bn = args.size() > 0 ? args[0] : 0
+      bn_raw = ccall_nobox("w_numeric_to_i64", bn) ## i64
+      return ccall_rawargs("w_bool_array_new", bn_raw)
     obj = {rt: :object, w_class: w_class, ivars: {}}
     # Arity-aware constructor selection: overloaded `-> new` definitions must
     # resolve like the compiled engine (exact name+arity first, then the

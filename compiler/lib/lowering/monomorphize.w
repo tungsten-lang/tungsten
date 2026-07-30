@@ -1509,6 +1509,39 @@
     i += 1
   nil
 
+# Mathematical prime-field tags carry a value (`𝔽_5`, `F_7`) while a generic
+# constraint names the implementation family (`FiniteField`). They are type
+# arguments, not source classes: the algebra rewrite injects the concrete
+# field object into the constructor, and the specialization keeps the tag so
+# distinct surface types remain distinct. Accept only the prime-field spelling
+# here; malformed or extension-looking tags still fail the generic constraint
+# instead of being silently collapsed to FiniteField.
+-> finite_field_generic_tag?(actual)
+  if actual == nil
+    return false
+  text = actual.to_s()
+  prefix_size = 0
+  if text.starts_with?("𝔽_")
+    prefix_size = "𝔽_".size()
+  elsif text.starts_with?("F_")
+    prefix_size = 2
+  else
+    return false
+  if text.size() <= prefix_size
+    return false
+  digits = text.slice(prefix_size, text.size() - prefix_size)
+  chars = digits.chars()
+  i = 0
+  while i < chars.size()
+    if chars[i] < "0" || chars[i] > "9"
+      return false
+    i += 1
+  true
+
+-> generic_constraint_type_matches?(allowed, actual)
+  return true if allowed == actual
+  allowed == "FiniteField" && finite_field_generic_tag?(actual)
+
 -> specialize_generic_class(template_name, type_args, mod)
   template = mod[:generic_class_templates][template_name]
   if template == nil
@@ -1536,7 +1569,7 @@
           found = false
           ai = 0
           while ai < allowed.size()
-            if allowed[ai] == actual
+            if generic_constraint_type_matches?(allowed[ai], actual)
               found = true
             ai += 1
           if !found

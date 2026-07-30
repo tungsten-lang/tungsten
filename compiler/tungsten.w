@@ -72,6 +72,7 @@ g_ast_stats_delta_cross = {}
 g_ast_stats_meta = {same_arena_real: 0, cross_arena: 0, child_inline: 0, negative_delta: 0}
 g_ast_stats_same_kind = {}
 release_mode   = false
+dev_mode       = false
 fast_mode      = false
 math_mode      = :precise
 intern_algo    = "raw"
@@ -106,6 +107,7 @@ while i < args.size()
     << "  --lto            Whole-program LTO (leaner binary; default links a fast native runtime archive)"
     << "  --frame-pointers Keep frame pointers (for profiling/debugging)"
     << "  --release        Skip debug safety checks and stacktrace metadata"
+    << "  --dev            Fast edit-test builds: clang -O0 (~2.8x faster link; binary ~2x slower)"
     << "  --fast, -fast    Fast FP: FMA + reassociation + reciprocals + nnan/ninf"
     << "  --strict-math    Strict IEEE 754: no FMA, no contraction"
     << "  --ll             Write LLVM IR (.ll) next to the binary"
@@ -144,6 +146,8 @@ while i < args.size()
       ccall("w_setenv", "TUNGSTEN_MARCH_ARGS", portable_march_flags())
   elsif arg == "--native"
     release_mode = true
+  elsif arg == "--dev"
+    dev_mode = true
   elsif arg == "--fast" || arg == "-fast"
     fast_mode = true
     math_mode = :fast
@@ -681,7 +685,12 @@ while i < args.size()
     runtime_objs = dev_runtime_archive(verbose)
   clang_opt = env("TUNGSTEN_CLANG_OPT")
   if clang_opt == nil || clang_opt == ""
-    clang_opt = "-O3"
+    # --dev: clang -O0 on the emitted module. Measured on the self-hosted
+    # compiler: link 19.5s -> 5.2s (-O1 is no cheaper than -O3's 18s; only
+    # -O0 skips the expensive passes), full build 2.8x faster, produced
+    # binary ~2.2x slower — the right trade for edit-test loops. The
+    # runtime archive it links against is still the cached -O3 build.
+    clang_opt = dev_mode ? "-O0" : "-O3"
 
   clang_cmd = StringBuffer(0)
   clang_cmd << host_c_compiler()

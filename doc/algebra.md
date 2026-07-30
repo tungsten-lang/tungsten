@@ -44,6 +44,7 @@ core/algebra/expression.w          # symbolic factor and exact real solve facade
 core/algebra/number_field.w        # exact number fields and integral bases
 core/algebra/archimedean.w         # exact real places and complex-pair counts
 core/algebra/groebner.w            # Buchberger, Ideal, eliminate, saturate
+core/algebra/groebner_certificates.w # proof-producing Buchberger witnesses
 core/algebra/f2_linear.w           # replay-certified linear algebra over F2
 core/algebra/s_units.w             # certified S-unit square-class bases
 core/algebra/s_class_group.w       # Minkowski S-class 2-torsion certificates
@@ -371,10 +372,10 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Finite étale algebras | Certified squarefree quotients `K[t]/(f)`; exact quotient arithmetic; units and zero divisors; multiplication-matrix trace/norm; supplied CRT components, primitive idempotents, component maps, reconstruction, degree-generic integral closures, prime ideals and finite residue fields above rational primes, exact real-place sign maps without assuming irreducible components, replay-certified product S-class 2-torsion proofs, and supplied product S-unit square classes modulo diagonal rational S-units | Automatic product unit discovery, full product class-group structures, and complex embeddings with selected numerical values are not implemented |
 | Integral orders | Degree-generic monogenic and arbitrary-lattice ℤ-orders; exact membership, discriminant, units, trace, and norm, including bound-certified modular reconstruction for larger integer norm matrices; exact Frobenius-Gram LLL with replay certificates plus explicitly bounded floating producer reduction; Dedekind local index certificates; Pohst--Zassenhaus Round 2 p-maximal overorders and global maximal-order certificates; certified p-radicals, prime ideals, residue maps, ramification indices, and residue degrees; canonical full-rank HNF integral ideals with sum, product, powers, norm, containment, prime valuations, certified factorization, and bounded exact principal-generator search; invertible fractional ideals as finite signed prime valuations, including principal fractional ideals and exact rational norms; product-order finite S-place data; unconditional certificates for `Cl(O_K,S)[2] = 0` from Minkowski factor bases and odd principal-relation quotients; checkpointable relation witnesses and certified transfer through an exact isomorphic field model | Full class-group structures and algorithms that discover unit-group bases are not implemented. Supplied number-field S-unit square-class bases can be certified. Fractional ideals currently use their certified prime-factor representation rather than an explicit fractional lattice. Discriminant factorization, Round 2 steps, relation search, finite-field factorization, residue-generator search, and ideal factorization are resource-bounded and raise `unknown` on exhaustion |
 | Polynomials | Sparse sorted terms; merge-multiply; dense univariate quotient arithmetic; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ and arbitrary finite fields as **unit × monic irreducibles**, with replay certificates; exact Sturm counts, Cauchy bounds, and certified isolation of every distinct real root | Kronecker and deterministic equal-degree factor search, Gröbner elimination, and root-interval splitting have explicit resource limits; complex-root isolation, complex algebraic-number arithmetic, and multivariate factorization are not implemented |
-| Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders | Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
+| Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders; representation-carrying Buchberger production with exact reduction, ideal-membership, source-containment, and S-pair witnesses | The Buchberger criterion is named as a trusted theorem import around exact replayed identities. Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
-| Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension | Singular-curve normalization is not implemented |
-| Local plane geometry | Exact local multiplicity and tangent cones; rational, algebraic, and vertical tangent-direction packets with multiplicities; ordinary-point recognition and theorem-labelled \(\delta=m(m-1)/2\); exact lower Newton polygons, characteristic polynomials, and candidate valuations; dense exact Newton--Hensel lifting for simple factors; recursive coordinate transforms for repeated rational linear factors and shared tangents; degree-one rational sheets and higher-degree conjugate sheet packets over certified `SimpleExtensionField` residue fields; exact `FormalPuiseuxSeries` output on affine/projective charts; trace/norm access through the packet field; small replay certificates for invariants and direct/recursive lifts | Root-of-unity sheet orbit grouping into normalized geometric branches, repeated higher-degree algebraic factors, nonreduced/common or vertical component extraction, analytic branch cuts, and general singularity \(\delta\)-invariants are not implemented; recursion/factorization bounds and unsupported cases raise |
+| Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension, and finite exact local normalization jets | Completed local normalization rings and global normalization morphisms are not implemented |
+| Local plane geometry | Exact local multiplicity and tangent cones; rational, algebraic, and vertical tangent-direction packets; lower Newton polygons and dense exact Newton--Hensel lifting; recursive repeated rational tangents; rational and algebraic Puiseux sheet packets; primitive parameterization jets; replayed source substitution and complete Newton-factor covers; theorem-labelled root-of-unity orbit branch counts; exact bivariate derivative resultants, Milnor numbers, general reduced \(y\)-distinguished delta invariants, and local intersection multiplicities | Repeated higher-degree algebraic factors, component extraction, automatic Weierstrass coordinate changes, completed local rings, semigroups/conductors, and analytic branch cuts remain missing. The Newton--Puiseux orbit, Milnor/delta, and branch-valuation formulas are explicit trusted theorem imports; precision and unsupported cases raise |
 | Elliptic curves | Composition around a plane cubic model; short Weierstrass group law over ℚ and `𝔽_p` (char ≠ 2, 3); exact integral long-Weierstrass \(a_i,b_i,c_4,c_6,\Delta,j\) invariants and projective closure; replay-certified admissible transformations; bounded exhaustive local and global minimal models; the complete Tate state machine over ℚ, including wild conductor exponents at 2 and 3, Kodaira symbols, Tamagawa numbers, split multiplicative status, and certified conductors; checked primitive Frey models; `EllipticJacobian` view | Arbitrary plane cubic → Weierstrass needs a rational flex; Tate local data over number fields, isogenies, and mod-\(p\) representations are not implemented |
 | Modular forms | Exact `Gamma0(N)` index, cusp count, order-2/order-3 elliptic points, and \(X_0(N)\) genus; even-weight `CuspForms` and `ModularForms` dimensions; Sturm bounds; rational and number-field truncated q-series; certified level-one \(E_4,E_6,\Delta\) expansions and \(E_4^3-E_6^2=1728\Delta\); exhaustive weight-two \(P^1(\mathbb Z/N\mathbb Z)\) Manin symbols, sparse \(S/R\) relations, cusp boundaries, relative/cuspidal dimensions, and bounded exact rational cuspidal bases; exact \(T_n/U_{p^r}\) matrices from Cremona--Heilbronn prime sums plus Hecke recurrences, characteristic polynomials, degeneracy maps, old subspaces, and canonical new Hecke quotients; deterministic simultaneous newform-packet splitting by a primitive Hecke element, rational or exact number-field coefficient fields, and normalized packet q-expansions; theorem-labelled replay certificates; in particular the level-55 new quotient splits into coefficient-field degrees 1 and 2 | Dimension, Sturm, classical modularity, Manin-presentation, Hecke semisimplicity and multiplicity one, Heilbronn-action, Hecke-recurrence, Atkin--Lehner--Li, and eigenform formulas are named trusted theorem imports, not kernel proofs. Higher-weight symbols, characters, nebentypus, embeddings between independently presented coefficient fields, and analytic newform invariants are not implemented. Dense rational quotient coordinates are resource-bounded |
 | Hyperelliptic curves | Exact `y² = f(x)` models, Mumford pairs, Cantor composition; monic odd-degree over ℚ, monic-or-scalable over `𝔽_p` | Even-degree models still raise for Jacobian arithmetic |
@@ -1319,3 +1320,33 @@ J.eliminate(1)         # ideal in k[v]
 
 Elimination is correct when the monomial order eliminates the first `count`
 variables (lex with those variables first, or a matching product order).
+
+For calculations that need an auditable ideal proof rather than only a
+computed basis, use the representation-carrying producer:
+
+```w
+I = Ideal.new([x**2 - y, x*y - 1])
+G = I.certified_groebner_basis
+
+G.certified?                         # true
+G.certificate.source_reductions
+G.certificate.s_pair_reductions
+
+witness = G.membership_certificate(x**3 - 1)
+witness.verified?                    # true
+witness.multipliers                  # h_i with x^3-1 = sum h_i f_i
+```
+
+Every `PolynomialReductionCertificate` checks
+\(p=\sum q_i g_i+r\) by exact polynomial arithmetic. Every basis polynomial
+also carries explicit multipliers in the original generators, so the
+certificate proves both ideal containments rather than merely checking that a
+possibly larger ideal reduces the inputs to zero. S-pair reductions are
+likewise explicit zero-remainder identities.
+
+The final implication from those identities to “this is a Gröbner basis” is
+the classical Buchberger criterion. It is exposed as a
+`trusted_theorem_import` with `kernel_checked? == false`; the polynomial
+identities themselves are replay-checked. This producer/verifier split is the
+path for expensive compiled computations to emit compact witnesses instead of
+forcing every consumer to rerun Buchberger.

@@ -29,6 +29,7 @@ use core/algebra/lattice_reduction
 use core/algebra/residue_algebra
 use core/algebra/real_roots
 use core/algebra/groebner
+use core/algebra/groebner_certificates
 use core/algebra/algebraic_real
 use core/algebra/expression
 use core/algebra/number_field

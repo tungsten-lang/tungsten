@@ -42,6 +42,9 @@ if env("TUNGSTEN_AUTOMORPHISMS_FULL") == "1"
                      certificate.tangent, Line.new(p2, Z))
   automorphism_check("certificate.no_affine_hyperflex",
                      certificate.affine_hyperflex_ideal.unit?, true)
+  automorphism_check("certificate.stabilizer_groebner",
+                     certificate.stabilizer_groebner_basis.
+                       certified?, true)
 
   stabilizer = certificate.stabilizer_ideal
   parameter_ring = stabilizer.ring
@@ -57,7 +60,8 @@ if env("TUNGSTEN_AUTOMORPHISMS_FULL") == "1"
   ]
   expected_identity.each -> (relation)
     automorphism_check("stabilizer.contains." + relation.to_s,
-                       stabilizer.contains?(relation), true)
+                       certificate.stabilizer_groebner_basis.
+                         contains?(relation), true)
 else
   << "SKIP full stabilizer (set TUNGSTEN_AUTOMORPHISMS_FULL=1)"
 

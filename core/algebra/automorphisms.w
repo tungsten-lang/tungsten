@@ -54,6 +54,8 @@
     validate_curve
     certify_unique_normalized_hyperflex
     build_stabilizer_ideal
+    @stabilizer_groebner_basis = (
+      @stabilizer_ideal.certified_groebner_basis)
     if !stabilizer_is_identity?
       raise "normalized hyperflex stabilizer is not certified trivial"
 
@@ -72,9 +74,13 @@
   -> stabilizer_ideal
     @stabilizer_ideal
 
+  -> stabilizer_groebner_basis
+    @stabilizer_groebner_basis
+
   -> stabilizer_basis
     out = []
-    @stabilizer_ideal.basis.each -> out.push(item)
+    @stabilizer_groebner_basis.basis.each ->
+      out.push(item)
     out
 
   -> method_name
@@ -86,6 +92,7 @@
   -> certified?
     return false if !@unique_hyperflex_certified
     return false if !@affine_hyperflex_ideal.unit?
+    return false if !@stabilizer_groebner_basis.certified?
     stabilizer_is_identity?
 
   -> to_s
@@ -276,7 +283,7 @@
       index += 1
     index = 0
     while index < @stabilizer_identity_equations.size
-      return false if !@stabilizer_ideal.contains?(
+      return false if !@stabilizer_groebner_basis.contains?(
         @stabilizer_identity_equations[index])
       index += 1
     true

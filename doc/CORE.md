@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(357 total), grouped by area, with its declaration, a one-line
+(361 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -217,6 +217,10 @@ summary from the source header, and a link to the source.
 | `GeometricAutomorphismGroup` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `PlaneQuarticAutomorphismCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `GroebnerBasis` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `CertifiedGroebnerBasis` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `GroebnerBasisCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PolynomialReductionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `PolynomialIdealMembershipCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `Ideal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `F2LinearAlgebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `F2LinearSystem` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

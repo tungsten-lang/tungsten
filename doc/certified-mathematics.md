@@ -123,9 +123,13 @@ explicit descent:
    finite primes above the candidate finite set S, their residue fields,
    ramification indices, and residue degrees; canonical integral and
    fractional ideal arithmetic is available componentwise after this step;
-   exact Frobenius-LLL relation search now certifies trivial S-class
-   2-torsion for the degree-6 component, while the degree-9 and degree-12
-   component proofs and product S-unit construction remain open;
+   exact relation witnesses now certify trivial S-class 2-torsion for the
+   degree-6, degree-9, and degree-12 components, with full ranks 9, 187, and
+   56 on their complete Minkowski factor bases. Each model-field theorem
+   transfers to the original bitangent presentation through an exact
+   isomorphic-model certificate. Supplied S-unit square-class bases have
+   dimensions 9, 12, and 14; their certified product has dimension 35 and
+   quotient by the rank-4 diagonal rational subgroup has dimension 31;
 11. intersect future global, norm, unramified, and local conditions with the
    replay-certified F2 kernel.
 
@@ -136,16 +140,37 @@ completed Selmer computation. The remaining path is:
 
 ```text
 certified finite and archimedean places for S = {2, 3, 13}
-  -> instantiate the available unconditional S-class 2-torsion proof
-     on every verified field factor of the degree-6/9/12 etale algebra
-  -> compute and certify the product S-unit basis and diagonal quotient
-  -> certified ambient square-class basis
+  -> certified S-class 2-torsion in all degree-6/9/12 factors
+  -> certified 31-dimensional ambient square-class quotient
+  -> norm and unramified constraints
   -> theta Galois module and comparison kernel
   -> certified p-adic local images
   -> explicit Selmer upper bound
   -> BPS comparison and rational J[2]
   -> Mordell-Weil rank upper bound
 ```
+
+The durable degree-6/9/12 S-class witness artifacts and supplied S-unit
+generators live in `spec/fixtures/algebra/`. Their authoritative checks are
+opt-in native replays; for example:
+
+```sh
+bin/tungsten compile scripts/algebra/shell_width_degree9_verify.w \
+  --out /tmp/shell-width-degree9-verify
+/tmp/shell-width-degree9-verify \
+  spec/fixtures/algebra/shell_width_degree9_s_class.rel
+```
+
+The verifier ignores claimed metadata, reconstructs both fields, replays every
+principal-ideal relation, checks full F2 rank, and constructs the source-field
+transfer proof. On an 18-core, 128-GiB Mac17,6, reference native S-class
+replays took 0.41 seconds / 51 MB (degree 6), 18.5 seconds / 9.46 GB
+(degree 9), and 22.1 seconds / 7.17 GB (degree 12), so the larger two remain
+outside the default regression suite. The witness files themselves are only
+hundreds of bytes to about 12 KB. The field isomorphism and arithmetic are
+exact; functoriality of localized class groups and the Minkowski generation
+theorem remain named trusted mathematical imports rather than kernel-checked
+formal proofs.
 
 A GRH-assisted class-group result must remain conditional. A certified
 explicit-Selmer upper bound may still bound the true 2-Selmer dimension after

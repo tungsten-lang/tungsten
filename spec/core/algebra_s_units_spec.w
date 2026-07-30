@@ -110,6 +110,41 @@ sunit_check("sunit.imaginary.minus_one_is_square",
 sunit_check("sunit.imaginary.certified",
             imaginary_units.certified?, true)
 
+searched_imaginary_units = imaginary_field.certify_s_unit_square_class_basis(
+  [], [i], 7)
+sunit_check("sunit.search.imaginary.certified",
+            searched_imaginary_units.certified?, true)
+sunit_check("sunit.search.imaginary.character_count",
+            searched_imaginary_units.residue_characters.size, 1)
+sunit_check("sunit.search.imaginary.character_prime",
+            searched_imaginary_units.residue_characters[
+              0].prime_ideal.rational_prime,
+            5)
+
+short_character_search_failed = false
+begin
+  imaginary_field.certify_s_unit_square_class_basis([], [i], 3)
+rescue error
+  short_character_search_failed = "[error]".include?(
+    "auxiliary character search limit exceeded")
+sunit_check("sunit.search.limit_is_loud",
+            short_character_search_failed, true)
+
+sunit_isomorphism = NumberField.isomorphic_model_irreducibility_certificate(
+  t**2 - 20, t**2 - 5, t*2,
+  K5.irreducibility_certificate)
+sunit_isomorphic_source = NumberField.new(
+  t**2 - 20, :c, sunit_isomorphism)
+isomorphic_sunit_basis = NumberFieldIsomorphicSUnitSquareClassBasis.new(
+  sunit_isomorphic_source, [], U5)
+sunit_check("sunit.isomorphic.certified",
+            isomorphic_sunit_basis.certified?, true)
+sunit_check("sunit.isomorphic.dimension",
+            isomorphic_sunit_basis.dimension, 2)
+sunit_check("sunit.isomorphic.minus_one",
+            isomorphic_sunit_basis.coordinates(-1).to_s,
+            U5.coordinates(-1).to_s)
+
 characteristic_two_failed = false
 begin
   p2_character = NumberFieldQuadraticResidueCharacter.new(P2)
@@ -149,6 +184,31 @@ sunit_check("archimedean.product.real_signs",
             "\[-1, 1\]")
 sunit_check("archimedean.product.certified",
             product_arch.certified?, true)
+
+product_square_classes = product_order.s_unit_square_class_quotient(
+  [], [[U5], [imaginary_units]])
+sunit_check("sunit.product.ambient_dimension",
+            product_square_classes.ambient_dimension, 3)
+sunit_check("sunit.product.diagonal_rank",
+            product_square_classes.diagonal_rank, 1)
+sunit_check("sunit.product.quotient_dimension",
+            product_square_classes.dimension, 2)
+sunit_check("sunit.product.diagonal_matrix",
+            product_square_classes.diagonal_matrix.to_s,
+            "\[\[1, 0, 0\]\]")
+sunit_check("sunit.product.diagonal_vanishes",
+            product_square_classes.quotient_coordinates(
+              [1, 0, 0]).to_s,
+            "\[0, 0\]")
+sunit_check("sunit.product.nontrivial_coordinate",
+            product_square_classes.quotient_coordinates(
+              [0, 1, 0]).to_s,
+            "\[1, 0\]")
+sunit_check("sunit.product.certified",
+            product_square_classes.certified?, true)
+sunit_check("sunit.product.proof_kind",
+            product_square_classes.certificate.proof_kind,
+            :trusted_theorem_import)
 
 # Direct Sturm isolation remains complete for a reducible squarefree quotient
 # and sign evaluation detects an exact rational zero without factoring.

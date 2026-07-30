@@ -356,8 +356,8 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | --- | --- | --- |
 | Symbolic expressions | Exact π/e and radicals; canonical simplify, expand, collect, differentiation, elementary antiderivatives; exact formal Taylor series and removable finite limits; exact univariate ℚ factor facade; arbitrary exact real roots as rationals, radicals, or certified `RootOf` constants; exact arithmetic and symbolic transcendentals over real algebraic constants | No assumptions, piecewise forms, Laurent/Puiseux series, infinite/directional limits, general multivariate factorization, complex algebraic-root object, general higher-degree radical formulas, or Risch integration |
 | Fields | Exact `RationalField`; packed prime fields and arbitrary absolute extensions `𝔽_{p^n}` with exact square tests and quadratic characters; certified simple extensions `K[a]/(m)` over ℚ or finite fields with explicit base embeddings, structured finite towers, arithmetic, Frobenius, trace, norm, and enumeration; arbitrary-degree irreducible `NumberField`s over ℚ with modular-Rabin, modular factor-degree, Kronecker, relative-tower, or exact isomorphic-model certificates; exact power-basis arithmetic, minimal/characteristic polynomials, trace, norm, integrality, Sturm signatures, real embeddings, integral bases, maximal-order indices, field discriminants, and replay-certified supplied S-unit square-class bases | Automatic isomorphisms/embeddings between differently presented finite fields, complex algebraic embeddings, automatic unit-group generators, and general number-field isomorphism algorithms are not implemented. Modulus, factor, and maximal-order searches are explicitly resource-bounded and raise instead of guessing |
-| Finite étale algebras | Certified squarefree quotients `K[t]/(f)`; exact quotient arithmetic; units and zero divisors; multiplication-matrix trace/norm; supplied CRT components, primitive idempotents, component maps, reconstruction, degree-generic integral closures, prime ideals and finite residue fields above rational primes, exact real-place sign maps without assuming irreducible components, and replay certificates | Product S-unit generators, class groups, and complex embeddings with selected numerical values are not implemented |
-| Integral orders | Degree-generic monogenic and arbitrary-lattice ℤ-orders; exact membership, discriminant, units, trace, and norm; exact Frobenius-Gram LLL with replay certificates; Dedekind local index certificates; Pohst--Zassenhaus Round 2 p-maximal overorders and global maximal-order certificates; certified p-radicals, prime ideals, residue maps, ramification indices, and residue degrees; canonical full-rank HNF integral ideals with sum, product, powers, norm, containment, prime valuations, certified factorization, and bounded exact principal-generator search; invertible fractional ideals as finite signed prime valuations, including principal fractional ideals and exact rational norms; product-order finite S-place data; unconditional certificates for `Cl(O_K,S)[2] = 0` from Minkowski factor bases and odd principal-relation quotients | Full class-group structures and algorithms that discover unit-group bases are not implemented. Supplied number-field S-unit square-class bases can be certified. Fractional ideals currently use their certified prime-factor representation rather than an explicit fractional lattice. Discriminant factorization, Round 2 steps, relation search, finite-field factorization, residue-generator search, and ideal factorization are resource-bounded and raise `unknown` on exhaustion |
+| Finite étale algebras | Certified squarefree quotients `K[t]/(f)`; exact quotient arithmetic; units and zero divisors; multiplication-matrix trace/norm; supplied CRT components, primitive idempotents, component maps, reconstruction, degree-generic integral closures, prime ideals and finite residue fields above rational primes, exact real-place sign maps without assuming irreducible components, replay-certified product S-class 2-torsion proofs, and supplied product S-unit square classes modulo diagonal rational S-units | Automatic product unit discovery, full product class-group structures, and complex embeddings with selected numerical values are not implemented |
+| Integral orders | Degree-generic monogenic and arbitrary-lattice ℤ-orders; exact membership, discriminant, units, trace, and norm, including bound-certified modular reconstruction for larger integer norm matrices; exact Frobenius-Gram LLL with replay certificates plus explicitly bounded floating producer reduction; Dedekind local index certificates; Pohst--Zassenhaus Round 2 p-maximal overorders and global maximal-order certificates; certified p-radicals, prime ideals, residue maps, ramification indices, and residue degrees; canonical full-rank HNF integral ideals with sum, product, powers, norm, containment, prime valuations, certified factorization, and bounded exact principal-generator search; invertible fractional ideals as finite signed prime valuations, including principal fractional ideals and exact rational norms; product-order finite S-place data; unconditional certificates for `Cl(O_K,S)[2] = 0` from Minkowski factor bases and odd principal-relation quotients; checkpointable relation witnesses and certified transfer through an exact isomorphic field model | Full class-group structures and algorithms that discover unit-group bases are not implemented. Supplied number-field S-unit square-class bases can be certified. Fractional ideals currently use their certified prime-factor representation rather than an explicit fractional lattice. Discriminant factorization, Round 2 steps, relation search, finite-field factorization, residue-generator search, and ideal factorization are resource-bounded and raise `unknown` on exhaustion |
 | Polynomials | Sparse sorted terms; merge-multiply; dense univariate quotient arithmetic; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ and arbitrary finite fields as **unit × monic irreducibles**, with replay certificates; exact Sturm counts, Cauchy bounds, and certified isolation of every distinct real root | Kronecker and deterministic equal-degree factor search, Gröbner elimination, and root-interval splitting have explicit resource limits; complex-root isolation, complex algebraic-number arithmetic, and multivariate factorization are not implemented |
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders | Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
@@ -371,7 +371,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Divisors | Exact formal arithmetic on rational and line-presented higher-degree closed places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic outside the existing Jacobian models, and general principality tests are not implemented |
 | Rational points | Complete exact bounded search for primitive points on `aX³Z + bXY²Z + g(Y,Z)`, with nonzero same-sign `a,b` and nonzero `Y⁴` coefficient | This is not a general plane-curve point finder and does not prove that no points exist above the requested height |
 | Geometric automorphisms | Exact triviality certificate over `Qbar` for smooth rational plane quartics with the unique normalized hyperflex `[1:0:0]`, tangent `Z=0`, and identity stabilizer | It is not an arbitrary plane-quartic automorphism-group algorithm and does not enumerate nontrivial groups |
-| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions, and the shell-width degree-6 component now has a replayed full-rank proof | The degree-9 and degree-12 shell-width S-class relations, discovery and diagonal quotient of product S-unit bases, theta Galois modules, p-adic local images, and the comparison kernel remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
+| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions; all shell-width degree-6/9/12 factors have replayed full-rank S-class proofs, and their supplied S-unit bases give dimensions `9 + 12 + 14 = 35` with a certified rank-4 diagonal quotient of dimension 31 | Theta Galois modules, norm and unramified constraints, p-adic local images, the comparison kernel, and the final Selmer bound remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
 
 `Curve#hyperelliptic_plane_model?` is specifically the smooth plane-model
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
@@ -424,6 +424,13 @@ This certifies supplied generators; it does not discover them, compute an
 \(S\)-class group, or prove the BPS condition
 \(\mathrm{Cl}(\mathcal O_{L,S})[2]=0\).
 
+For a certified product order, independently certified field bases compose
+and can be quotiented by the diagonal classes of \(-1\) and the rational
+primes in \(S\). The checker reconstructs the product decomposition, verifies
+every component basis and complete set of \(S\)-primes, computes the diagonal
+coordinate matrix, and certifies its rank before reporting quotient
+coordinates.
+
 The complementary \(S\)-class 2-torsion certificate does not need the full
 class-group structure. `minkowski_factor_base` enumerates every prime ideal
 needed to generate the class group. Principal ideal factorizations and the
@@ -447,10 +454,80 @@ order two. Bounded relation discovery raises `unknown` if it cannot reach full
 rank. A product proof accepts arrays of field proofs only after reconstructing
 each squarefree étale component from pairwise-coprime irreducible defining
 polynomials and checking every field prime above the rational \(S\).
-Relation discovery first applies exact Frobenius-Gram LLL to factor-base
-ideals and searches for generators of odd powers. A returned generator carries
-an exact principal-ideal certificate; exhaustion is reported as unknown rather
-than as nonprincipality.
+Relation discovery can select exact Frobenius-Gram LLL or a step-bounded
+floating producer and searches odd prime-ideal powers largest-first. Once an
+odd-power witness is found, anchored products \(AP_i\) and \(A^2P_i\) provide
+sparse relation candidates. Every accepted integral relation is replayed from
+exact prime valuations plus the norm identity; non-integral relations use the
+general principal fractional-ideal certificate. No floating result is proof
+evidence.
+
+Long searches can return a noncertified checkpoint instead of raising. The
+checkpoint reports rank, attempted/resolved factor-base indices, its anchor,
+and power-basis coefficient arrays for every accepted element. Supplying those
+arrays to a later search replays them exactly, and the final proof can be
+constructed without rerunning discovery:
+
+```w
+bounds = NumberFieldIdealGeneratorBounds.new(
+  1, 1000, 3, :exact,
+  20, 20_000, 0, 20)
+checkpoint = K.search_s_class_two_torsion(
+  [P2], 0, 1000,
+  100_000, 250_000, 250_000,
+  bounds)
+
+checkpoint.complete?                    # false is not a theorem
+checkpoint.rank
+witnesses = checkpoint.relation_coordinate_witnesses
+checkpoint.resolved_factor_base_indices
+
+# Persist and merge exact witnesses from later factor-base slices first.
+proof = K.certify_s_class_two_torsion_from_relations(
+  [P2], witnesses)
+```
+
+The last call succeeds only when the replayed relation matrix has full rank.
+An incomplete checkpoint has `certified? == false`, and asking it for a
+certificate raises.
+
+When a poorly conditioned field presentation has a
+`NumberFieldIsomorphicModelIrreducibilityCertificate`, a complete model-field
+proof can be transferred back with
+`certify_s_class_two_torsion_via_isomorphic_model`. The certificate checks the
+field isomorphism, both complete sets of primes above the same rational
+\(S\), and the model proof. Functoriality of the localized class group is an
+explicit trusted theorem import; all field, prime, ideal, relation, and
+rank data remain replay checked.
+
+The shell-width degree-6, degree-9, and degree-12 components have durable
+sets of 4, 182, and 48 exact power-basis witnesses in
+`spec/fixtures/algebra/`. Replaying them gives full ranks 9, 187, and 56 on
+their complete Minkowski factor bases, constructs the ordinary model-field
+proofs, and transfers them to the original bitangent presentations. These are
+opt-in native certificate lanes:
+
+```sh
+bin/tungsten compile scripts/algebra/shell_width_degree9_verify.w \
+  --out /tmp/shell-width-degree9-verify
+/tmp/shell-width-degree9-verify \
+  spec/fixtures/algebra/shell_width_degree9_s_class.rel
+```
+
+The verifier reconstructs all theorem inputs and does not trust the artifact
+headers. On an 18-core, 128-GiB Mac17,6, reference native replays took
+0.41 seconds / 51 MB for degree 6, 18.5 seconds / 9.46 GB for degree 9, and
+22.1 seconds / 7.17 GB for degree 12. The ordinary suite checks artifact
+structure; the explicit commands check the mathematical certificates. The
+remaining high peak RSS is a known heavy-lane cost, not the size of the
+checked-in witnesses.
+
+Minkowski enumeration uses complete certified decompositions for small or
+index-dividing rational primes. For \(p^2\) above the bound it stores only
+certified linear Dedekind slices, because higher-residue-degree primes cannot
+enter the factor base. Successful rational-prime decompositions are cached on
+the immutable field object.
+Exhaustion is reported as unknown rather than as nonprincipality.
 Minkowski generation and compatibility with finite products are named trusted
 theorem imports; prime decompositions, ideal factorizations, relation support,
 and F₂ rank are replayed exactly.

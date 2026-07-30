@@ -110,9 +110,7 @@
     @embedding.image(value)
 
   -> sign(value)
-    result = image(value)
-    return 0 if result.zero?
-    result.negative? ? -1 : 1
+    @embedding.sign(value)
 
   # The R^*/R^{*2} coordinate: negative is 1 and positive is 0.
   # C^*/C^{*2} is trivial, so a complex pair always contributes zero.

@@ -188,6 +188,68 @@
       i -= 1
     result
 
+  # Determine only the sign without constructing the exact algebraic image.
+  # Interval Horner evaluation is refined around the certified root until the
+  # image interval avoids zero. An irreducible defining polynomial and a
+  # nonzero power-basis element cannot share that root.
+  -> sign(value)
+    element = @field.coerce(value)
+    return 0 if element.zero?
+    coefficients = element.coefficients
+    defining = @root.defining_polynomial
+    sequence = defining.sturm_sequence
+    lower = @root.lower_bound
+    upper = @root.upper_bound
+    refinements = 0
+    while refinements < 10_000
+      interval = polynomial_interval(
+        coefficients, lower, upper)
+      return -1 if interval[1] < 0
+      return 1 if interval[0] > 0
+      middle = (lower + upper) / Rational.new(2)
+      if defining.at(middle).zero?
+        exact = evaluate_coefficients(
+          coefficients, middle)
+        return 0 if exact.zero?
+        return exact.negative? ? -1 : 1
+      left_count = defining.sturm_root_count_with_sequence(
+        sequence, lower, middle)
+      if left_count == 1
+        upper = middle
+      else
+        lower = middle
+      refinements += 1
+    raise "could not determine exact number-field embedding sign"
+
+  -> evaluate_coefficients(coefficients, value)
+    result = Rational.new(0)
+    i = coefficients.size - 1
+    while i >= 0
+      result = result * value + coefficients[i]
+      i -= 1
+    result
+
+  -> polynomial_interval(coefficients, lower, upper)
+    result_lower = Rational.new(0)
+    result_upper = Rational.new(0)
+    i = coefficients.size - 1
+    while i >= 0
+      products = [
+        result_lower * lower,
+        result_lower * upper,
+        result_upper * lower,
+        result_upper * upper
+      ]
+      product_lower = products[0]
+      product_upper = products[0]
+      products.each -> (product)
+        product_lower = product if product < product_lower
+        product_upper = product if product > product_upper
+      result_lower = product_lower + coefficients[i]
+      result_upper = product_upper + coefficients[i]
+      i -= 1
+    [result_lower, result_upper]
+
   -> call(value)
     image(value)
 
@@ -408,6 +470,8 @@
 
 + NumberFieldRelativeModularIrreducibilityCertificate
   -> new(@polynomial, @prime_ideal)
+    @reduced_polynomial_cache = nil
+    @verified_cache = nil
 
   -> polynomial
     @polynomial
@@ -416,24 +480,29 @@
     @prime_ideal
 
   -> reduced_polynomial
-    field = @polynomial.ring.field
-    finite_field = @prime_ideal.residue_field
-    finite_ring = PolynomialRing.new(
-      @polynomial.ring.names, finite_field)
-    terms = []
-    @polynomial.each_term -> (coefficient, exponents)
-      terms.push([
-        @prime_ideal.reduce(field.coerce(coefficient)),
-        exponents
-      ])
-    Polynomial.new(finite_ring, terms)
+    if @reduced_polynomial_cache == nil
+      field = @polynomial.ring.field
+      finite_field = @prime_ideal.residue_field
+      finite_ring = PolynomialRing.new(
+        @polynomial.ring.names, finite_field)
+      terms = []
+      @polynomial.each_term -> (coefficient, exponents)
+        terms.push([
+          @prime_ideal.reduce(field.coerce(coefficient)),
+          exponents
+        ])
+      @reduced_polynomial_cache = Polynomial.new(
+        finite_ring, terms)
+    @reduced_polynomial_cache
 
   -> verified?
+    return @verified_cache if @verified_cache != nil
     answer = false
     begin
       answer = verify!
     rescue error
       answer = false
+    @verified_cache = answer
     answer
 
   -> verify!
@@ -476,6 +545,8 @@
   -> new(@polynomial, @relative_polynomial,
          @relative_certificate)
     @extension_cache = nil
+    @primitive_element_determinant_cache = nil
+    @verified_cache = nil
 
   -> polynomial
     @polynomial
@@ -530,16 +601,21 @@
     columns
 
   -> primitive_element_determinant
-    matrix = ExactRationalLinearAlgebra.matrix_from_columns(
-      power_coordinate_columns(extension.generator))
-    Algebra.determinant(matrix, RationalField.new)
+    if @primitive_element_determinant_cache == nil
+      matrix = ExactRationalLinearAlgebra.matrix_from_columns(
+        power_coordinate_columns(extension.generator))
+      @primitive_element_determinant_cache = Algebra.determinant(
+        matrix, RationalField.new)
+    @primitive_element_determinant_cache
 
   -> verified?
+    return @verified_cache if @verified_cache != nil
     answer = false
     begin
       answer = verify!
     rescue error
       answer = false
+    @verified_cache = answer
     answer
 
   -> verify!
@@ -584,6 +660,7 @@
          @root_expression, @model_certificate)
     @model_field_cache = nil
     @root_cache = nil
+    @verified_cache = nil
 
   -> polynomial
     @polynomial
@@ -626,11 +703,13 @@
     true
 
   -> verified?
+    return @verified_cache if @verified_cache != nil
     answer = false
     begin
       answer = verify!
     rescue error
       answer = false
+    @verified_cache = answer
     answer
 
   -> verify!

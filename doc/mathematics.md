@@ -85,10 +85,10 @@ At a high level:
   decomposition, exact ideals, valuations, selected S-unit and S-class
   certificates, and archimedean places;
 - geometry includes arbitrary projective spaces, plane curves, singular
-  loci, exact Newton polygons and certified rational nondegenerate Puiseux
-  branches, elliptic and hyperelliptic Jacobian arithmetic in the documented
-  model classes, divisors, point counts, zeta numerators, Weil cubics, and
-  focused plane-quartic machinery;
+  loci, exact Newton polygons and certified rational or algebraic-conjugate
+  nondegenerate Puiseux branches, elliptic and hyperelliptic Jacobian
+  arithmetic in the documented model classes, divisors, point counts, zeta
+  numerators, Weil cubics, and focused plane-quartic machinery;
 - weight-two modular arithmetic includes Manin symbols, every \(T_n\),
   old/new quotients, simultaneous rational and number-field Hecke
   eigenpackets, and exact normalized q-expansions;

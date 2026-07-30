@@ -172,7 +172,7 @@ use core/algebra/galois
   -> .puiseux_branches(polynomial, x_variable = 0,
                         y_variable = 1, center = nil,
                         maximum_power = 6,
-                        search_margin = 8)
+                        search_margin = 0)
     polynomial.puiseux_branches(
       x_variable, y_variable, center,
       maximum_power, search_margin)

@@ -482,6 +482,8 @@ use core/special
       constant = expression.constant_value
       if constant.class_name == "AlgebraicRealRoot"
         return Expression.constant(constant.negate)
+      if constant.respond_to?("negate")
+        return Expression.constant(constant.negate)
       return Expression.constant(0 - constant)
     Expression.product([Expression.constant(-1), expression])
 

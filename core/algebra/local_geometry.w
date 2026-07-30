@@ -123,20 +123,31 @@ use core/calculus/puiseux
     true
 
   -> .rational_zeros(size)
+    PlaneLocalGeometry.field_zeros(RationalField.new, size)
+
+  -> .field_zeros(coefficient_field, size)
     out = []
-    size.times -> out.push(Rational.new(0))
+    size.times -> out.push(coefficient_field.zero)
     out
 
   -> .rational_convolution(left, right, maximum_index)
-    out = PlaneLocalGeometry.rational_zeros(maximum_index + 1)
+    PlaneLocalGeometry.field_convolution(
+      RationalField.new, left, right, maximum_index)
+
+  -> .field_convolution(coefficient_field, left, right,
+                        maximum_index)
+    out = PlaneLocalGeometry.field_zeros(
+      coefficient_field, maximum_index + 1)
     i = 0
     while i < left.size && i <= maximum_index
-      if !left[i].zero?
+      if !coefficient_field.zero?(left[i])
         j = 0
         available = maximum_index - i
         while j < right.size && j <= available
-          if !right[j].zero?
-            out[i + j] += left[i]*right[j]
+          if !coefficient_field.zero?(right[j])
+            product = coefficient_field.multiply(left[i], right[j])
+            out[i + j] = coefficient_field.add(
+              out[i + j], product)
           j += 1
       i += 1
     out
@@ -146,38 +157,122 @@ use core/calculus/puiseux
   # y require convolution. This is the hot exact path used by Hensel lifting.
   -> .evaluate_rational_local(polynomial, ramification_index,
                                y_coefficients, maximum_index)
-    if polynomial.ring.field.class_name != "RationalField"
-      raise "rational local evaluation requires RationalField"
+    PlaneLocalGeometry.evaluate_field_local(
+      polynomial, RationalField.new, ramification_index,
+      y_coefficients, maximum_index)
+
+  -> .evaluate_field_local(polynomial, coefficient_field,
+                            ramification_index,
+                            y_coefficients, maximum_index)
+    Field.require_supported(coefficient_field)
     y_powers = [
-      PlaneLocalGeometry.rational_zeros(maximum_index + 1)]
-    y_powers[0][0] = Rational.new(1)
+      PlaneLocalGeometry.field_zeros(
+        coefficient_field, maximum_index + 1)]
+    y_powers[0][0] = coefficient_field.one
     degree = 1
     while degree <= polynomial.degree_in(1)
-      y_powers.push(PlaneLocalGeometry.rational_convolution(
-        y_powers[degree - 1], y_coefficients,
-        maximum_index))
+      y_powers.push(PlaneLocalGeometry.field_convolution(
+        coefficient_field, y_powers[degree - 1],
+        y_coefficients, maximum_index))
       degree += 1
 
-    result = PlaneLocalGeometry.rational_zeros(maximum_index + 1)
+    result = PlaneLocalGeometry.field_zeros(
+      coefficient_field, maximum_index + 1)
     polynomial.each_term -> (coefficient, exponents)
       shift = exponents[0]*ramification_index
       power = y_powers[exponents[1]]
+      scalar = coefficient_field.embed_from(
+        polynomial.ring.field, coefficient)
       source = 0
       while source < power.size && source + shift <= maximum_index
-        if !power[source].zero?
-          result[source + shift] += coefficient*power[source]
+        if !coefficient_field.zero?(power[source])
+          product = coefficient_field.multiply(
+            scalar, power[source])
+          result[source + shift] = coefficient_field.add(
+            result[source + shift], product)
         source += 1
     result
 
   -> .rational_coefficients(series, maximum_index)
+    PlaneLocalGeometry.field_coefficients(
+      series, RationalField.new, maximum_index)
+
+  -> .field_coefficients(series, coefficient_field,
+                          maximum_index)
     out = []
     index = 0
     while index <= maximum_index
       coefficient = series.coefficient_index(index)
       if !coefficient.constant?
-        raise "certified rational local branch has a symbolic coefficient"
-      out.push(Rational.coerce(coefficient.constant_value))
+        raise "certified local branch has a symbolic coefficient"
+      out.push(coefficient_field.normalize_element(
+        coefficient.constant_value))
       index += 1
+    out
+
+  -> .field_valuation(coefficient_field, coefficients)
+    index = 0
+    while index < coefficients.size
+      return index if !coefficient_field.zero?(coefficients[index])
+      index += 1
+    nil
+
+  -> .field_vanishes_through?(coefficient_field, coefficients,
+                               maximum_index)
+    index = 0
+    while index <= maximum_index
+      return false if (
+        index < coefficients.size &&
+        !coefficient_field.zero?(coefficients[index]))
+      index += 1
+    true
+
+  # Quotient of possibly shifted exact power series. The returned dense array
+  # is indexed in the common local parameter and truncated at maximum_index.
+  -> .field_series_divide(coefficient_field, numerator,
+                           denominator, maximum_index)
+    numerator_value = PlaneLocalGeometry.field_valuation(
+      coefficient_field, numerator)
+    if numerator_value == nil
+      return PlaneLocalGeometry.field_zeros(
+        coefficient_field, maximum_index + 1)
+    denominator_value = PlaneLocalGeometry.field_valuation(
+      coefficient_field, denominator)
+    raise "local series division by zero" if denominator_value == nil
+    quotient_value = numerator_value - denominator_value
+    if quotient_value < 0
+      raise "local Newton correction acquired a pole"
+    shifted_order = maximum_index - quotient_value
+    if shifted_order < 0
+      return PlaneLocalGeometry.field_zeros(
+        coefficient_field, maximum_index + 1)
+    inverse_leading = coefficient_field.inverse(
+      denominator[denominator_value])
+    shifted = []
+    order = 0
+    while order <= shifted_order
+      source_index = numerator_value + order
+      value = (
+        source_index < numerator.size ?
+        numerator[source_index] : coefficient_field.zero)
+      divisor_index = 1
+      while divisor_index <= order
+        denominator_index = denominator_value + divisor_index
+        if denominator_index < denominator.size
+          product = coefficient_field.multiply(
+            denominator[denominator_index],
+            shifted[order - divisor_index])
+          value = coefficient_field.subtract(value, product)
+        divisor_index += 1
+      shifted.push(coefficient_field.multiply(
+        value, inverse_leading))
+      order += 1
+    out = PlaneLocalGeometry.field_zeros(
+      coefficient_field, maximum_index + 1)
+    order = 0
+    while order < shifted.size
+      out[quotient_value + order] = shifted[order]
+      order += 1
     out
 
   -> .coordinate_parameter?(series, maximum_power)
@@ -196,58 +291,105 @@ use core/calculus/puiseux
   -> .rational_residual_series(polynomial, coordinate_series,
                                 displacement_series,
                                 maximum_power)
+    PlaneLocalGeometry.field_residual_series(
+      polynomial, RationalField.new, coordinate_series,
+      displacement_series, maximum_power)
+
+  -> .field_residual_series(polynomial, coefficient_field,
+                             coordinate_series,
+                             displacement_series,
+                             maximum_power)
     pair = coordinate_series.common_ramification(
       displacement_series)
     coordinate = pair[0]
     displacement = pair[1]
     cutoff = maximum_power*coordinate.ramification_index
-    coefficients = PlaneLocalGeometry.rational_coefficients(
-      displacement, cutoff)
-    residual = PlaneLocalGeometry.evaluate_rational_local(
-      polynomial, coordinate.ramification_index,
-      coefficients, cutoff)
+    coefficients = PlaneLocalGeometry.field_coefficients(
+      displacement, coefficient_field, cutoff)
+    residual = PlaneLocalGeometry.evaluate_field_local(
+      polynomial, coefficient_field,
+      coordinate.ramification_index, coefficients, cutoff)
     FormalPuiseuxSeries.new(
       residual, 0, coordinate.ramification_index,
       coordinate.variable, coordinate.center)
 
-  # Coefficient-by-coefficient Newton--Hensel lift. If y=c*s^p+... and the
-  # leading coefficient of f_y(s^q,y) is D*s^d, then the coefficient a_n
-  # first enters f in degree n+d with coefficient D. Exact division therefore
-  # determines a_n without rebuilding symbolic Expression trees.
+  # Dense exact Newton--Hensel lift. Raw coefficient-field arrays avoid
+  # symbolic Expression trees, and full Newton corrections double the known
+  # precision instead of solving one coefficient with a fresh evaluation.
   -> .lift_rational_branch(polynomial, variable, center,
                             maximum_power, ramification_index,
                             leading_index, leading_coefficient)
+    PlaneLocalGeometry.lift_field_branch(
+      polynomial, RationalField.new, variable, center,
+      maximum_power, ramification_index,
+      leading_index, leading_coefficient)
+
+  -> .lift_field_branch(polynomial, coefficient_field,
+                         variable, center,
+                         maximum_power, ramification_index,
+                         leading_index, leading_coefficient)
     maximum_index = maximum_power*ramification_index
-    coefficients = PlaneLocalGeometry.rational_zeros(maximum_index + 1)
-    coefficients[leading_index] = Rational.coerce(leading_coefficient)
+    coefficients = PlaneLocalGeometry.field_zeros(
+      coefficient_field, maximum_index + 1)
+    coefficients[leading_index] = (
+      coefficient_field.normalize_element(leading_coefficient))
     derivative = polynomial.derivative(1)
     derivative_limit = (
       maximum_index +
       polynomial.degree*(
         ramification_index + leading_index))
-    derivative_values = PlaneLocalGeometry.evaluate_rational_local(
-      derivative, ramification_index,
+    derivative_values = PlaneLocalGeometry.evaluate_field_local(
+      derivative, coefficient_field, ramification_index,
       coefficients, derivative_limit)
     derivative_index = nil
     index = 0
     while index < derivative_values.size
-      if !derivative_values[index].zero?
+      if !coefficient_field.zero?(derivative_values[index])
         derivative_index = index
         break
       index += 1
     if derivative_index == nil
       raise "Puiseux Hensel derivative vanished"
-    derivative_leading = derivative_values[derivative_index]
-
-    index = leading_index + 1
-    while index <= maximum_index
-      target = index + derivative_index
-      residual = PlaneLocalGeometry.evaluate_rational_local(
-        polynomial, ramification_index,
-        coefficients, target)[target]
-      coefficients[index] = (
-        residual.negate / derivative_leading)
-      index += 1
+    full_evaluation_limit = maximum_index + derivative_index
+    evaluation_limit = leading_index + derivative_index + 1
+    evaluation_limit = full_evaluation_limit if (
+      evaluation_limit > full_evaluation_limit)
+    iteration = 0
+    iteration_limit = 8*maximum_index + 16
+    finished = false
+    while iteration < iteration_limit && !finished
+      residual = PlaneLocalGeometry.evaluate_field_local(
+        polynomial, coefficient_field, ramification_index,
+        coefficients, evaluation_limit)
+      if PlaneLocalGeometry.field_vanishes_through?(
+           coefficient_field, residual, evaluation_limit)
+        if evaluation_limit == full_evaluation_limit
+          finished = true
+        else
+          evaluation_limit = 2*evaluation_limit + 1
+          evaluation_limit = full_evaluation_limit if (
+            evaluation_limit > full_evaluation_limit)
+      else
+        derivative_values = PlaneLocalGeometry.evaluate_field_local(
+          derivative, coefficient_field, ramification_index,
+          coefficients, evaluation_limit)
+        correction_limit = evaluation_limit - derivative_index
+        correction_limit = maximum_index if (
+          correction_limit > maximum_index)
+        correction = PlaneLocalGeometry.field_series_divide(
+          coefficient_field, residual, derivative_values,
+          correction_limit)
+        if PlaneLocalGeometry.field_vanishes_through?(
+             coefficient_field, correction, correction_limit)
+          raise "local Newton correction lost retained precision"
+        index = 0
+        while index <= correction_limit
+          coefficients[index] = coefficient_field.subtract(
+            coefficients[index], correction[index])
+          index += 1
+      iteration += 1
+    if !finished
+      raise "Puiseux field Newton lift did not converge"
     FormalPuiseuxSeries.new(
       coefficients, 0, ramification_index, variable, center)
 
@@ -317,9 +459,47 @@ use core/calculus/puiseux
         out.push(root)
     out
 
-  -> nondegenerate_root?(root)
-    return false if !@characteristic_polynomial.at(root).zero?
-    !@characteristic_polynomial.derivative(0).at(root).zero?
+  -> irreducible_factors
+    out = []
+    @characteristic_polynomial.factor.each ->
+      out.push(item.monic) if item.degree > 0
+    out
+
+  -> characteristic_evaluate(value, coefficient_field = nil)
+    field = (
+      coefficient_field == nil ?
+      @polynomial.ring.field : coefficient_field)
+    result = field.zero
+    degree = @characteristic_polynomial.degree
+    while degree >= 0
+      result = field.multiply(result, value)
+      coefficient = field.embed_from(
+        @characteristic_polynomial.ring.field,
+        @characteristic_polynomial.coeff(degree))
+      result = field.add(result, coefficient)
+      degree -= 1
+    result
+
+  -> nondegenerate_root?(root, coefficient_field = nil)
+    field = (
+      coefficient_field == nil ?
+      @polynomial.ring.field : coefficient_field)
+    return false if !field.zero?(
+      characteristic_evaluate(root, field))
+    derivative = @characteristic_polynomial.derivative(0)
+    value = field.zero
+    degree = derivative.degree
+    while degree >= 0
+      value = field.multiply(value, root)
+      coefficient = field.embed_from(
+        derivative.ring.field, derivative.coeff(degree))
+      value = field.add(value, coefficient)
+      degree -= 1
+    !field.zero?(value)
+
+  -> squarefree_characteristic?
+    @characteristic_polynomial.gcd(
+      @characteristic_polynomial.derivative(0)).degree == 0
 
   -> fully_split_nondegenerate_over_rationals?
     roots = rational_roots
@@ -467,7 +647,17 @@ use core/calculus/puiseux
 + LocalPlaneBranchCertificate
   -> new(@local_polynomial, @edge, @leading_coefficient,
          @coordinate_series, @displacement_series,
-         @maximum_power)
+         @maximum_power, coefficient_field = nil,
+         defining_factor = nil)
+    @coefficient_field = (
+      coefficient_field == nil ?
+      @local_polynomial.ring.field : coefficient_field)
+    if defining_factor == nil
+      generator = @edge.characteristic_polynomial.ring.generator(0)
+      @defining_factor = (
+        generator - @leading_coefficient).monic
+    else
+      @defining_factor = defining_factor.monic
 
   -> local_polynomial
     @local_polynomial
@@ -487,14 +677,36 @@ use core/calculus/puiseux
   -> maximum_power
     @maximum_power
 
+  -> coefficient_field
+    @coefficient_field
+
+  -> defining_factor
+    @defining_factor
+
+  -> residue_degree
+    @defining_factor.degree
+
   -> residual
-    PlaneLocalGeometry.rational_residual_series(
-      @local_polynomial, @coordinate_series,
+    PlaneLocalGeometry.field_residual_series(
+      @local_polynomial, @coefficient_field, @coordinate_series,
       @displacement_series, @maximum_power)
 
   -> verified?
     return false if !@edge.verified?
-    return false if !@edge.nondegenerate_root?(@leading_coefficient)
+    return false if !@edge.squarefree_characteristic?
+    return false if !@edge.characteristic_polynomial.rem(
+      @defining_factor).zero?
+    if @defining_factor.degree == 1
+      return false if (
+        @coefficient_field.class_name != "RationalField")
+    else
+      return false if (
+        @coefficient_field.class_name != "SimpleExtensionField")
+      return false if (
+        @coefficient_field.defining_polynomial != @defining_factor)
+      return false if !@coefficient_field.modulus_certificate.verified?
+    return false if !@edge.nondegenerate_root?(
+      @leading_coefficient, @coefficient_field)
     return false if !PlaneLocalGeometry.coordinate_parameter?(
       @coordinate_series, @maximum_power)
     return false if (
@@ -514,13 +726,19 @@ use core/calculus/puiseux
          @x_variable, @y_variable, @center_x, @center_y,
          @edge, @leading_coefficient,
          @coordinate_series, @displacement_series,
-         @maximum_power)
+         @maximum_power, coefficient_field = nil,
+         defining_factor = nil)
+    @coefficient_field = (
+      coefficient_field == nil ?
+      @local_polynomial.ring.field : coefficient_field)
+    @defining_factor = defining_factor
     @series = (
       @displacement_series + Expression.constant(@center_y))
     @certificate = LocalPlaneBranchCertificate.new(
       @local_polynomial, @edge, @leading_coefficient,
       @coordinate_series, @displacement_series,
-      @maximum_power)
+      @maximum_power, @coefficient_field,
+      @defining_factor)
     raise "local branch certificate did not verify" if !@certificate.verified?
 
   -> source_polynomial
@@ -562,6 +780,18 @@ use core/calculus/puiseux
   -> certificate
     @certificate
 
+  -> coefficient_field
+    @coefficient_field
+
+  -> defining_factor
+    @certificate.defining_factor
+
+  -> residue_degree
+    @certificate.residue_degree
+
+  -> rational?
+    @coefficient_field.class_name == "RationalField"
+
   -> valuation
     @edge.valuation
 
@@ -592,7 +822,7 @@ use core/calculus/puiseux
 
   -> puiseux_branches(x_variable = 0, y_variable = 1,
                        center = nil, maximum_power = 6,
-                       search_margin = 8)
+                       search_margin = 0)
     FormalPowerSeries.validate_order(maximum_power)
     if !Expression.integer?(search_margin) || search_margin < 0
       raise "local branch search margin must be nonnegative"
@@ -617,11 +847,10 @@ use core/calculus/puiseux
         "no positive-valuation Newton edge; swap the local variables " +
         "or extract a vertical component")
     polygon.edges.each -> (edge)
-      if !edge.fully_split_nondegenerate_over_rationals?
+      if !edge.squarefree_characteristic?
         raise (
-          "automatic Puiseux lifting currently requires every " +
-          "characteristic polynomial to split into distinct nonzero " +
-          "rational roots; inspect newton_polygon for the unresolved edge")
+          "automatic Puiseux lifting needs recursive refinement for a " +
+          "repeated characteristic root; inspect newton_polygon")
     variable_index = PlaneLocalGeometry.variable_index(
       self, x_variable)
     variable = @ring.names[variable_index]
@@ -632,26 +861,31 @@ use core/calculus/puiseux
     branches = []
 
     polygon.edges.each -> (edge)
-      edge.rational_roots.each -> (root)
-        if edge.nondegenerate_root?(root)
+      edge.irreducible_factors.each -> (factor)
+        if factor.degree == 1
+          coefficient_field = local.ring.field
+          root = coefficient_field.divide(
+            coefficient_field.negate(factor.coeff(0)),
+            factor.coeff(1))
+        else
+          coefficient_field = SimpleExtensionField.new(
+            factor, :c)
+          root = coefficient_field.generator
+        if edge.nondegenerate_root?(root, coefficient_field)
           ramification = edge.valuation.denominator
           leading_index = edge.valuation.numerator
           coordinate = PlaneLocalGeometry.coordinate_series(
             variable, point[0], working_power, ramification)
-          displacement = PlaneLocalGeometry.lift_rational_branch(
-            local, variable, point[0], working_power,
-            ramification, leading_index, root)
-          if !PlaneLocalGeometry.vanishes_through?(
-               PlaneLocalGeometry.rational_residual_series(
-                 local, coordinate, displacement, working_power),
-               working_power)
-            raise "Puiseux Hensel lift did not reach requested precision"
+          displacement = PlaneLocalGeometry.lift_field_branch(
+            local, coefficient_field, variable, point[0],
+            working_power, ramification, leading_index, root)
           retained = displacement.truncate(maximum_power)
           retained_coordinate = coordinate.truncate(maximum_power)
           branches.push(LocalPlaneBranch.new(
             self, local, variable, dependent,
             point[0], point[1], edge, root,
-            retained_coordinate, retained, maximum_power))
+            retained_coordinate, retained, maximum_power,
+            coefficient_field, factor))
     branches
 
 
@@ -671,7 +905,7 @@ use core/calculus/puiseux
     @equation.newton_polygon(indices[0], indices[1], point)
 
   -> puiseux_branches(point, maximum_power = 6,
-                       search_margin = 8)
+                       search_margin = 0)
     if point.class_name != "Array" || point.size != 2
       raise "affine local point must have two coordinates"
     indices = local_coordinate_indices
@@ -686,6 +920,6 @@ use core/calculus/puiseux
 
   -> puiseux_branches(point, chart = nil,
                        maximum_power = 6,
-                       search_margin = 8)
+                       search_margin = 0)
     affine_chart(chart).puiseux_branches(
       point, maximum_power, search_margin)

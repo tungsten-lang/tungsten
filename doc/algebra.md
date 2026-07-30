@@ -374,7 +374,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders | Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
 | Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension | Singular-curve normalization is not implemented |
-| Local plane geometry | Exact lower Newton polygons over ℚ; characteristic polynomials and candidate valuations; coefficient-by-coefficient rational Newton--Hensel lifting of every distinct nonzero rational characteristic root; exact `FormalPuiseuxSeries` branches on affine/projective charts; small replay certificates that check the supporting edge, leading root, local parameter, and substituted residual through the requested order | Automatic lifting currently requires every relevant characteristic polynomial to split into distinct nonzero rational roots. Algebraic leading coefficients, repeated-root recursive Newton polygons, component extraction, analytic branch cuts, and normalization from the resulting branches are not implemented; unsupported cases raise |
+| Local plane geometry | Exact lower Newton polygons over ℚ; characteristic polynomials and candidate valuations; coefficient-by-coefficient exact Newton--Hensel lifting for squarefree characteristic polynomials; degree-one rational branches and higher-degree conjugate branch packets over certified `SimpleExtensionField` residue fields; exact `FormalPuiseuxSeries` branches on affine/projective charts; trace/norm access through the packet field; small replay certificates that check the edge, irreducible factor, residue field, leading root, local parameter, and substituted residual through the requested order | Repeated characteristic roots still require recursive Newton-polygon refinement. Common/vertical component extraction, analytic branch cuts, and normalization from the resulting branches are not implemented; unsupported cases and bounded factorization exhaustion raise |
 | Elliptic curves | Composition around a plane cubic model; short Weierstrass group law over ℚ and `𝔽_p` (char ≠ 2, 3); exact integral long-Weierstrass \(a_i,b_i,c_4,c_6,\Delta,j\) invariants and projective closure; replay-certified admissible transformations; bounded exhaustive local and global minimal models; the complete Tate state machine over ℚ, including wild conductor exponents at 2 and 3, Kodaira symbols, Tamagawa numbers, split multiplicative status, and certified conductors; checked primitive Frey models; `EllipticJacobian` view | Arbitrary plane cubic → Weierstrass needs a rational flex; Tate local data over number fields, isogenies, and mod-\(p\) representations are not implemented |
 | Modular forms | Exact `Gamma0(N)` index, cusp count, order-2/order-3 elliptic points, and \(X_0(N)\) genus; even-weight `CuspForms` and `ModularForms` dimensions; Sturm bounds; rational and number-field truncated q-series; certified level-one \(E_4,E_6,\Delta\) expansions and \(E_4^3-E_6^2=1728\Delta\); exhaustive weight-two \(P^1(\mathbb Z/N\mathbb Z)\) Manin symbols, sparse \(S/R\) relations, cusp boundaries, relative/cuspidal dimensions, and bounded exact rational cuspidal bases; exact \(T_n/U_{p^r}\) matrices from Cremona--Heilbronn prime sums plus Hecke recurrences, characteristic polynomials, degeneracy maps, old subspaces, and canonical new Hecke quotients; deterministic simultaneous newform-packet splitting by a primitive Hecke element, rational or exact number-field coefficient fields, and normalized packet q-expansions; theorem-labelled replay certificates; in particular the level-55 new quotient splits into coefficient-field degrees 1 and 2 | Dimension, Sturm, classical modularity, Manin-presentation, Hecke semisimplicity and multiplicity one, Heilbronn-action, Hecke-recurrence, Atkin--Lehner--Li, and eigenform formulas are named trusted theorem imports, not kernel proofs. Higher-weight symbols, characters, nebentypus, embeddings between independently presented coefficient fields, and analytic newform invariants are not implemented. Dense rational quotient coordinates are resource-bounded |
 | Hyperelliptic curves | Exact `y² = f(x)` models, Mumford pairs, Cantor composition; monic odd-degree over ℚ, monic-or-scalable over `𝔽_p` | Even-degree models still raise for Jacobian arithmetic |
@@ -409,9 +409,9 @@ N.edges[0].rational_roots            # [1, -1]
 N.certificate.verified?              # true
 ```
 
-When every edge polynomial splits into distinct nonzero rational roots,
-`puiseux_branches` performs exact coefficient-by-coefficient Newton--Hensel
-lifting. The result is not a floating approximation:
+When every edge polynomial is squarefree, `puiseux_branches` factors it over
+ℚ and performs exact coefficient-by-coefficient Newton--Hensel lifting. The
+result is not a floating approximation:
 
 ```w
 branches = f.puiseux_branches(0, 1, nil, 4)
@@ -425,11 +425,30 @@ positive.certificate.verified?                  # true
 ```
 
 The certificate is intentionally small. It replays the lower-edge support,
-checks that the leading coefficient is a simple characteristic root, checks
-that the independent coordinate really is the local parameter, and
-substitutes the retained branch back into the translated equation through the
-requested order. The producer uses dense rational coefficient arrays on this
-hot path and converts to `FormalPuiseuxSeries` only at the boundary.
+checks the irreducible characteristic factor and its certified residue field,
+checks that the leading coefficient is a simple root, checks that the
+independent coordinate really is the local parameter, and substitutes the
+retained branch back into the translated equation through the requested
+order. The producer uses dense exact coefficient arrays on this hot path and
+converts to `FormalPuiseuxSeries` only at the boundary.
+
+An irreducible factor of degree greater than one gives one closed/conjugate
+branch packet over its certified simple-extension field:
+
+```w
+packet = (y**2 - x*(x + 1)*2).puiseux_branches[0]
+packet.residue_degree                         # 2
+packet.coefficient_field                      # ℚ(c), c^2 = 2
+packet.coefficient_field.trace(
+  packet.leading_coefficient)                 # 0
+packet.coefficient_field.norm(
+  packet.leading_coefficient)                 # -2
+packet.certificate.verified?                  # true
+```
+
+This is deliberately a packet rather than two decimal roots: selecting a
+complex or real embedding is a later analytic operation, while the algebraic
+branch and all of its conjugates remain exact.
 
 Affine and projective curves expose the same operation on a chart:
 
@@ -442,8 +461,8 @@ C.newton_polygon([0, 0], 2).valuations          # [3/2]
 C.puiseux_branches([0, 0], 2, 4)                # Y = +/- X^3/2
 ```
 
-The current lift is complete only under its stated split/nondegenerate
-rational-root hypothesis. A non-rational leading coefficient, a repeated
+The current lift is complete under its stated squarefree-characteristic
+hypothesis, subject to the exact factorization search bound. A repeated
 characteristic root, a common dependent-variable component, or a vertical
 component raises with a capability message. Inspecting `newton_polygon`
 remains available in those cases; Tungsten does not return an empty branch

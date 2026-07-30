@@ -303,9 +303,10 @@ centers, and analytic unary composition in the local parameter. It records a
 formal branch but does not infer analytic branch cuts. Essential singularities
 such as `exp(1/x)` and logarithmic terms such as `log(sqrt(x))` still raise.
 `use algebra` adds exact Newton polygons and certified Puiseux lifts for
-rational plane equations with distinct rational characteristic roots;
-algebraic leading roots and repeated-root recursion remain explicit
-boundaries. Sign-dependent forms such as `abs(x)` also raise when the center
+rational plane equations with squarefree characteristic polynomials.
+Irreducible factors produce exact conjugate branch packets over certified
+simple-extension fields; repeated-root recursion remains an explicit
+boundary. Sign-dependent forms such as `abs(x)` also raise when the center
 does not determine a smooth branch.
 
 ## Current boundary

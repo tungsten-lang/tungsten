@@ -14,8 +14,24 @@
   -> new(@field, coefficients, raw)
     initialize_simple_extension_element(coefficients, raw)
 
+  # Internal constructor for an owned, already normalized coefficient vector
+  # of exactly field.degree entries. Callers must not retain and mutate it.
+  -> new(@field, coefficients, raw, reduced)
+    if reduced
+      if coefficients.class_name != "Array"
+        raise "reduced simple-extension coefficients must be an Array"
+      if coefficients.size != @field.degree
+        raise "reduced simple-extension coefficient count mismatch"
+      @coefficients = coefficients
+      self
+    else
+      initialize_simple_extension_element(coefficients, raw)
+
   -> .raw(field, coefficients)
     SimpleExtensionElement.new(field, coefficients, true)
+
+  -> .reduced(field, coefficients)
+    SimpleExtensionElement.new(field, coefficients, true, true)
 
   -> initialize_simple_extension_element(coefficients, raw)
     @coefficients = @field.reduce_coefficients(coefficients, raw)
@@ -28,6 +44,11 @@
     out = []
     @coefficients.each -> out.push(item)
     out
+
+  # Field arithmetic owns the element and never mutates this vector.
+  # Public callers use coefficients, which still returns a copy.
+  -> raw_coefficients
+    @coefficients
 
   -> zero?
     @field.zero?(self)
@@ -80,7 +101,7 @@
       return false if !scalar
       right = @field.coerce(other)
 
-    right_coefficients = right.coefficients
+    right_coefficients = right.raw_coefficients
     i = 0
     while i < @field.degree
       if !@field.base_field.equal?(
@@ -291,8 +312,37 @@
       i += 1
     out
 
+  # Hot-path reducer for a fresh coefficient vector already normalized in the
+  # base field. It may mutate the owned input and allocates only the final
+  # degree-sized vector.
+  -> reduce_owned_coefficients(values)
+    while values.size < @degree
+      values.push(@base_field.zero)
+    i = values.size - 1
+    while i >= @degree
+      leading = values[i]
+      if !@base_field.zero?(leading)
+        shift = i - @degree
+        j = 0
+        while j < @degree
+          correction = @base_field.multiply(
+            leading, @relation[j])
+          values[shift + j] = @base_field.subtract(
+            values[shift + j], correction)
+          j += 1
+      i -= 1
+    out = []
+    i = 0
+    while i < @degree
+      out.push(values[i])
+      i += 1
+    out
+
   -> element_raw(coefficients)
     SimpleExtensionElement.raw(self, coefficients)
+
+  -> element_reduced(coefficients)
+    SimpleExtensionElement.reduced(self, coefficients)
 
   # Public arrays contain external base-field scalars. Use element_raw when
   # the coefficients are already normalized elements of a packed base field.
@@ -317,7 +367,7 @@
   -> embed_base_element(value)
     coefficients = base_zero_coefficients
     coefficients[0] = @base_field.normalize_element(value)
-    SimpleExtensionElement.raw(self, coefficients)
+    element_reduced(coefficients)
 
   -> embed_from(source_field, value)
     return normalize_element(value) if source_field == self
@@ -325,15 +375,15 @@
     embed_base_element(base_value)
 
   -> zero
-    SimpleExtensionElement.raw(self, base_zero_coefficients)
+    element_reduced(base_zero_coefficients)
 
   -> one
     coefficients = base_zero_coefficients
     coefficients[0] = @base_field.one
-    SimpleExtensionElement.raw(self, coefficients)
+    element_reduced(coefficients)
 
   -> zero?(value)
-    coefficients = normalize_element(value).coefficients
+    coefficients = normalize_element(value).raw_coefficients
     i = 0
     while i < @degree
       return false if !@base_field.zero?(coefficients[i])
@@ -341,7 +391,7 @@
     true
 
   -> one?(value)
-    coefficients = normalize_element(value).coefficients
+    coefficients = normalize_element(value).raw_coefficients
     return false if !@base_field.one?(coefficients[0])
     i = 1
     while i < @degree
@@ -353,28 +403,44 @@
     normalize_element(left).eql?(normalize_element(right))
 
   -> add(left, right)
-    a = normalize_element(left).coefficients
-    b = normalize_element(right).coefficients
+    a = normalize_element(left).raw_coefficients
+    b = normalize_element(right).raw_coefficients
     out = []
     i = 0
     while i < @degree
       out.push(@base_field.add(a[i], b[i]))
       i += 1
-    SimpleExtensionElement.raw(self, out)
+    element_reduced(out)
 
   -> negate(value)
-    coefficients = normalize_element(value).coefficients
+    coefficients = normalize_element(value).raw_coefficients
     out = []
     coefficients.each ->
       out.push(@base_field.negate(item))
-    SimpleExtensionElement.raw(self, out)
+    element_reduced(out)
 
   -> subtract(left, right)
     add(left, negate(right))
 
   -> multiply(left, right)
-    a = normalize_element(left).coefficients
-    b = normalize_element(right).coefficients
+    a = normalize_element(left).raw_coefficients
+    b = normalize_element(right).raw_coefficients
+    if @degree == 2
+      constant = @base_field.multiply(a[0], b[0])
+      linear = @base_field.add(
+        @base_field.multiply(a[0], b[1]),
+        @base_field.multiply(a[1], b[0]))
+      quadratic = @base_field.multiply(a[1], b[1])
+      if !@base_field.zero?(quadratic)
+        if !@base_field.zero?(@relation[0])
+          constant = @base_field.subtract(
+            constant,
+            @base_field.multiply(quadratic, @relation[0]))
+        if !@base_field.zero?(@relation[1])
+          linear = @base_field.subtract(
+            linear,
+            @base_field.multiply(quadratic, @relation[1]))
+      return element_reduced([constant, linear])
     product = []
     i = 0
     while i < @degree * 2 - 1
@@ -389,12 +455,12 @@
           @base_field.multiply(a[i], b[j]))
         j += 1
       i += 1
-    SimpleExtensionElement.raw(self, product)
+    element_reduced(reduce_owned_coefficients(product))
 
   -> element_polynomial(value)
     element = normalize_element(value)
     terms = []
-    coefficients = element.coefficients
+    coefficients = element.raw_coefficients
     i = 0
     while i < coefficients.size
       if !@base_field.zero?(coefficients[i])
@@ -469,7 +535,7 @@
     basis = power_basis
     column = 0
     while column < @degree
-      image = multiply(value, basis[column]).coefficients
+      image = multiply(value, basis[column]).raw_coefficients
       row = 0
       while row < @degree
         rows[row][column] = image[row]
@@ -494,7 +560,7 @@
     raise "a simple extension has no canonical ordering"
 
   -> element_to_s(value)
-    coefficients = normalize_element(value).coefficients
+    coefficients = normalize_element(value).raw_coefficients
     parts = []
     coefficients.each ->
       parts.push(@base_field.element_to_s(item))
@@ -600,7 +666,7 @@
     projected
 
   -> project_to_base(value)
-    coefficients = normalize_element(value).coefficients
+    coefficients = normalize_element(value).raw_coefficients
     i = 1
     while i < coefficients.size
       if !@base_field.zero?(coefficients[i])

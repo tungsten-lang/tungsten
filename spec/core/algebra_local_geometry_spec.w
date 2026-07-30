@@ -28,7 +28,7 @@ local_check("polygon.tamper_rejected",
             !missing_edge_certificate.verified?)
 
 branches = branched_equation.puiseux_branches(
-  0, 1, nil, 4, 4)
+  0, 1, nil, 4, 0)
 local_check("branches.count", branches.size == 2)
 positive = branches.detect ->
   item.leading_coefficient == Rational.new(1)
@@ -66,7 +66,7 @@ local_check("branches.tamper_rejected",
             !tampered_branch_certificate.verified?)
 
 cusp = y**2 - x**3
-cusp_branches = cusp.puiseux_branches(0, 1, nil, 4, 4)
+cusp_branches = cusp.puiseux_branches(0, 1, nil, 4, 0)
 cusp_positive = cusp_branches.detect ->
   item.leading_coefficient == Rational.new(1)
 local_check("cusp.valuation",
@@ -77,7 +77,7 @@ local_check("cusp.exact_branch",
 
 implicit = y**2 - y - x
 implicit_branch = implicit.puiseux_branches(
-  0, 1, nil, 4, 4)[0]
+  0, 1, nil, 4, 0)[0]
 local_check("implicit_function.linear",
             implicit_branch.series.coefficient(1) ==
             Expression.constant(-1))
@@ -88,7 +88,7 @@ local_check("implicit_function.quartic",
 two_edge_equation = y**3 - x*y + x**3
 two_edge_polygon = two_edge_equation.newton_polygon
 two_edge_branches = two_edge_equation.puiseux_branches(
-  0, 1, nil, 5, 4)
+  0, 1, nil, 5, 0)
 local_check("multiple_edges.valuations",
             two_edge_polygon.valuations.size == 2 &&
             two_edge_polygon.valuations[0] == Rational.new(1, 2) &&
@@ -102,7 +102,7 @@ local_check("multiple_edges.certificates",
 
 shifted = (y - 3)**2 - (x - 2)
 shifted_branches = shifted.puiseux_branches(
-  :x, :y, [2, 3], 3, 4)
+  :x, :y, [2, 3], 3, 0)
 local_check("shifted.center",
             shifted_branches[0].series.center ==
             Expression.constant(2))
@@ -117,7 +117,7 @@ Y = projective_coordinates[1]
 Z = projective_coordinates[2]
 curve = Curve.new(P2, Y**2*Z - X**3)
 curve_polygon = curve.newton_polygon([0, 0], 2)
-curve_branches = curve.puiseux_branches([0, 0], 2, 4, 4)
+curve_branches = curve.puiseux_branches([0, 0], 2, 4, 0)
 local_check("curve.facade_polygon",
             curve_polygon.valuations[0] == Rational.new(3, 2))
 local_check("curve.facade_branches",
@@ -125,19 +125,60 @@ local_check("curve.facade_branches",
             curve_branches[0].certificate.verified?)
 
 facade = Algebra.puiseux_branches(
-  branched_equation, 0, 1, nil, 3, 4)
+  branched_equation, 0, 1, nil, 3, 0)
 local_check("algebra.facade",
             facade.size == 2 &&
             Algebra.newton_polygon(branched_equation).certificate.verified?)
 
-nonrational_edge = y**2 - x*2
-nonrational_rejected = false
-begin
-  nonrational_edge.puiseux_branches
-rescue error
-  nonrational_rejected = true
-local_check("boundary.nonrational_leading_root",
-            nonrational_rejected)
+algebraic_edge = y**2 - x*(x + 1)*2
+algebraic_packets = algebraic_edge.puiseux_branches(
+  0, 1, nil, 4, 0)
+algebraic_packet = algebraic_packets[0]
+algebraic_field = algebraic_packet.coefficient_field
+algebraic_root = algebraic_packet.leading_coefficient
+local_check("algebraic_branch.packet_count",
+            algebraic_packets.size == 1)
+local_check("algebraic_branch.residue_degree",
+            algebraic_packet.residue_degree == 2 &&
+            algebraic_field.degree == 2)
+local_check("algebraic_branch.trace_norm",
+            algebraic_field.trace(algebraic_root) == Rational.new(0) &&
+            algebraic_field.norm(algebraic_root) == Rational.new(-2))
+local_check("algebraic_branch.coefficient",
+            algebraic_packet.series.coefficient(
+              Rational.new(3, 2)) ==
+            Expression.constant(
+              algebraic_field.divide(algebraic_root, 2)))
+local_check("algebraic_branch.certificate",
+            algebraic_packet.certificate.verified?)
+algebraic_expression = Expression.constant(algebraic_root)
+local_check("algebraic_branch.expression_arithmetic",
+            Expression.zero_expression?(
+              algebraic_expression - algebraic_expression))
+
+cubic_algebraic_edge = y**3 - x*2
+cubic_packet = cubic_algebraic_edge.puiseux_branches(
+  0, 1, nil, 3, 0)[0]
+local_check("algebraic_branch.cubic_degree",
+            cubic_packet.residue_degree == 3 &&
+            cubic_packet.valuation == Rational.new(1, 3))
+local_check("algebraic_branch.cubic_norm",
+            cubic_packet.coefficient_field.norm(
+              cubic_packet.leading_coefficient) == Rational.new(2))
+local_check("algebraic_branch.cubic_certificate",
+            cubic_packet.certificate.verified?)
+
+mixed_characteristic = (
+  y**3 - x*y**2 - x**2*y*2 + x**3*2)
+mixed_packets = mixed_characteristic.puiseux_branches(
+  0, 1, nil, 3, 0)
+local_check("algebraic_branch.mixed_packets",
+            mixed_packets.size == 2 &&
+            mixed_packets[0].residue_degree +
+              mixed_packets[1].residue_degree == 3)
+local_check("algebraic_branch.mixed_certificates",
+            mixed_packets[0].certificate.verified? &&
+            mixed_packets[1].certificate.verified?)
 
 repeated_edge = (y**2 - x)**2
 repeated_rejected = false

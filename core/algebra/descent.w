@@ -1118,6 +1118,7 @@
     @s_unit_square_class_space = nil
     @global_norm_constraint = nil
     @theta_frobenius_constraints = []
+    @theta_fiber_certificates = []
 
   -> curve
     @curve
@@ -1184,6 +1185,7 @@
     @s_unit_square_class_space = nil
     @global_norm_constraint = nil
     @theta_frobenius_constraints = []
+    @theta_fiber_certificates = []
     @bitangent_scheme_certificate
 
   -> bitangent_scheme_certificate
@@ -1441,6 +1443,9 @@
     if @theta_frobenius_constraints.size > 0
       theta_explanation = @theta_frobenius_constraints.size.to_s
       theta_explanation = theta_explanation + " exact Frobenius cycle constraints are available; a common arithmetic labeling is still missing"
+    if @theta_fiber_certificates.size > 0
+      theta_explanation = @theta_fiber_certificates.size.to_s
+      theta_explanation = theta_explanation + " exact finite-fiber theta labelings are available; a common characteristic-zero labeling is still missing"
     out.push(DescentRequirement.new(
       "theta Galois module", "missing", theta_explanation))
     out.push(DescentRequirement.new(

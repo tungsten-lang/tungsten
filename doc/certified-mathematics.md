@@ -179,7 +179,12 @@ explicit descent:
     certified good-prime factorizations to Frobenius cycle-type constraints;
     these constrain conjugacy classes but deliberately do not claim a common
     arithmetic labeling;
-13. intersect the future labeled theta-module and local-image conditions with
+13. over \(\mathbb F_{5^6}\), reconstruct all 28 reduced bitangents and
+    contact quadratics, check the 315 conic incidences, label the complete
+    finite fiber by odd characteristics, and recover the exact Frobenius
+    element; this is one certified finite fiber, not yet a common
+    characteristic-zero splitting-field labeling;
+14. intersect the future globally labeled theta-module and local-image conditions with
     that replay-certified F2 kernel.
 
 Step 7 is the BPS true setup. Its certificate checks the component polynomial
@@ -194,6 +199,7 @@ certified finite and archimedean places for S = {2, 3, 13}
   -> certified rank-4 global norm map and 31-dimensional kernel
   -> certified canonical 28/315 theta incidence
   -> certified Sp6(F2) actions and primewise Frobenius cycle constraints
+  -> certified p=5 splitting-field incidence labeling and Frobenius element
   -> common shell-width theta labeling, global action, and comparison kernel
   -> certified p-adic local images
   -> explicit Selmer upper bound

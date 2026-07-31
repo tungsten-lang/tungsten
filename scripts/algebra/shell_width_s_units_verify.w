@@ -236,3 +236,34 @@ if local_prime_text != nil && local_prime_text != ""
     raise "unexpected shell-width 13-adic target dimension" if local_map.target_dimension != 14
     raise "unexpected shell-width 13-adic localization rank" if local_map.rank != 13
     raise "unexpected shell-width 13-adic kernel dimension" if local_map.kernel_dimension != 22
+
+if env("TUNGSTEN_SUNIT_POINT_VALUES") == "1"
+  P2 = ProjectiveSpace<ℚ, 2>.new(:B, :S, :Z)
+  B = P2.coords[0]
+  S = P2.coords[1]
+  Z = P2.coords[2]
+  equation = B**3 * Z * 16 + B * S**2 * Z * 48
+  equation -= S**4 * 3
+  equation += S**3 * Z * 8
+  equation += S**2 * Z**2 * 162
+  equation += Z**4 * 729
+  curve = Curve.new(P2, equation)
+  infinity = Line.new(P2, [0, 0, 1])
+  descent_setup = curve.jacobian.two_descent_setup(
+    distinguished_bitangent: infinity)
+  function_data = descent_setup.certify_divisor_function_data
+  point_a = P2.point([0, 9, 1])
+  point_b = P2.point([-3, -3, 1])
+  point_value = function_data.certify_point_difference(
+    space, point_a, point_b)
+  expected_point_vector = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0
+  ]
+  if point_value.coordinates.to_s != expected_point_vector.to_s
+    raise "unexpected shell-width rational point-difference descent vector"
+  << ["point_difference", [point_a, point_b]]
+  << ["point_difference_vector", point_value.coordinates]
+  << ["point_difference_norm", point_value.norm_vector]
+  << ["point_difference_certified", point_value.certified?]

@@ -67,6 +67,7 @@ core/algebra/quartics.w            # certified line intersections and bitangents
 core/algebra/descent.w             # BPS preparation, bitangent proofs, F2 kernel
 core/algebra/descent_functions.w   # contact divisors and BPS line ratios
 core/algebra/descent_norm.w        # true S-unit ambient and global norm kernel
+core/algebra/descent_points.w      # certified rational point-difference images
 core/algebra/theta.w               # canonical 28/315 theta incidence modules
 core/algebra/theta_actions.w       # exact Sp6(F2) and Frobenius cycle constraints
 core/algebra/theta_fibers.w        # finite-splitting-field theta labelings
@@ -397,7 +398,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Divisors | Exact formal arithmetic on rational and line-presented higher-degree closed places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic outside the existing Jacobian models, and general principality tests are not implemented |
 | Rational points | Complete exact bounded search for primitive points on `aX³Z + bXY²Z + g(Y,Z)`, with nonzero same-sign `a,b` and nonzero `Y⁴` coefficient | This is not a general plane-curve point finder and does not prove that no points exist above the requested height |
 | Geometric automorphisms | Exact triviality certificate over `Qbar` for smooth rational plane quartics with the unique normalized hyperflex `[1:0:0]`, tangent `Z=0`, and identity stabilizer | It is not an arbitrary plane-quartic automorphism-group algorithm and does not enumerate nontrivial groups |
-| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions; all shell-width degree-6/9/12 factors have replayed full-rank S-class proofs, and their supplied S-unit bases give a certified true-descent ambient space of dimension `9 + 12 + 14 = 35`; exact component norms give a certified rank-4 map to `Q(S,2)` and a 31-dimensional norm-one kernel; exact odd-prime localization matrices now map that ambient basis to every number-field completion above `p`; the canonical genus-three theta model exhausts 28 odd characteristics, 315 syzygetic quadruples, and module dimensions `0,1,7,21,27,28`; exact `Sp6(F2)` matrices induce replay-certified incidence permutations; certified good-prime factorizations constrain Frobenius cycle types; the shell-width reduction at 5 has a complete arithmetic labeling over `F_(5^6)` whose 315 contact-conic incidences and exact Frobenius element are replayed; and exact relative factorization over the degree-6 component gives subdegrees `1,1,2,2,2,2,3,3,6,6`, identifying the global theta subgroup up to conjugacy as subgroup-table class 693 of order 36 | The completeness of GAP's 1,369-class subgroup table is a named trusted external classification, not replayed internally. Odd-prime ambient localization is not a Jacobian local-image computation. A common characteristic-zero root-to-theta labeling, dyadic and bad-reduction local arithmetic, certified descent-function local images, the comparison kernel, and the final Selmer bound remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
+| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; statement-bound coordinate certificates express new S-units in those bases; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions; all shell-width degree-6/9/12 factors have replayed full-rank S-class proofs, and their supplied S-unit bases give a certified true-descent ambient space of dimension `9 + 12 + 14 = 35`; exact component norms give a certified rank-4 map to `Q(S,2)` and a 31-dimensional norm-one kernel; the rational divisor `[0:9:1]-[-3:-3:1]` has a certified nonzero 35-bit BPS image in that kernel; exact odd-prime localization matrices map the ambient basis to every number-field completion above `p`; the canonical genus-three theta model exhausts 28 odd characteristics, 315 syzygetic quadruples, and module dimensions `0,1,7,21,27,28`; exact `Sp6(F2)` matrices induce replay-certified incidence permutations; certified good-prime factorizations constrain Frobenius cycle types; the shell-width reduction at 5 has a complete arithmetic labeling over `F_(5^6)` whose 315 contact-conic incidences and exact Frobenius element are replayed; and exact relative factorization over the degree-6 component gives subdegrees `1,1,2,2,2,2,3,3,6,6`, identifying the global theta subgroup up to conjugacy as subgroup-table class 693 of order 36 | The completeness of GAP's 1,369-class subgroup table is a named trusted external classification, not replayed internally. A known rational image element is a lower bound, not a Selmer upper bound. Odd-prime ambient localization is not a complete Jacobian local-image computation. A common characteristic-zero root-to-theta labeling, dyadic and bad-reduction local arithmetic, certified descent-function local images, the comparison kernel, and the final Selmer bound remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
 
 `Curve#hyperelliptic_plane_model?` is specifically the smooth plane-model
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
@@ -1338,6 +1339,12 @@ N.certificate.verified?
 # Once V is bound to the setup:
 global_norm = setup.certify_global_norm_condition
 global_norm.constraint_block.certified?
+P = C.space.point([0, 9, 1])
+Q = C.space.point([-3, -3, 1])
+known_image = setup.certify_point_difference_descent_value(P, Q)
+known_image.coordinates
+known_image.norm_vector       # [0, 0, 0, 0]
+known_image.certified?
 ```
 
 For the shell-width quartic, the bitangent certificate checks supplied
@@ -1401,6 +1408,18 @@ embeddings directly through Sturm isolation instead of unrelated rational
 factorization. The degree-9 and degree-12 stages still peak near 1.9 GB and
 4.8 GB independently, so this remains an explicit opt-in research check, not
 part of the ordinary regression suite.
+
+The rational divisor
+\([0:9:1]-[-3:-3:1]\) now supplies one explicit, nonzero known image element.
+Its certified coordinate vector, grouped by the degree-6/9/12 components, is
+`000000000 000000000000 00011101110000`; its four norm coordinates are zero.
+`PlaneQuarticBPSPointDifferenceCertificate` replays the two exact function
+evaluations, every statement-bound S-unit coordinate computation, and the
+norm calculation. It names the BPS sections 6.4--6.5 theorem that identifies
+this square class with the image of `[P-Q]`. This proves a lower-bound image
+element; it does not enumerate a local image or prove a Selmer upper bound.
+The complete point-value lane currently takes about 23.5 seconds and 9.92 GB
+peak RSS on the machine described above, so it is also opt-in.
 
 The canonical finite theta module is independently executable:
 

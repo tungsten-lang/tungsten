@@ -141,6 +141,16 @@ norm-one kernel has dimension \(35-4=31\). BPS Lemma 6.16, recorded as a
 trusted theorem import after checking the true-setup hypotheses, places the
 descent image in this kernel.
 
+This kernel now contains a certified, nonzero known image element. Evaluating
+the BPS function family on the rational divisor
+\([0:9:1]-[-3:-3:1]\), expressing the result in the certified component
+S-unit bases, and replaying the norm gives
+`000000000 000000000000 00011101110000`, grouped by the degree-6/9/12
+components, with zero norm. Exact arithmetic and the coordinate binding are
+replayed internally; the theorem identifying this value with the image of
+the divisor class is a named BPS sections 6.4--6.5 import. One known image
+element is a lower bound, not a local-image enumeration or Selmer upper bound.
+
 The descent is not finished. Exact `Sp6(F2)` matrices now induce
 replay-certified permutations of the 28 characteristics, and certified
 good-prime factorization can bind a candidate permutation to the resulting

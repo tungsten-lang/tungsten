@@ -175,27 +175,32 @@ explicit descent:
    \(\mathbb Q(S,2)=\langle-1,2,3,13\rangle\); its certified rank is 4, so
    the norm-one kernel inside the 35-dimensional true ambient has dimension
    31;
-12. construct exact `Sp6(F2)` actions on the 28 odd characteristics and bind
+12. evaluate the BPS function family on the rational divisor
+    \([0:9:1]-[-3:-3:1]\), certify its nonzero coordinates in the 35-dimensional
+    S-unit basis, and replay its zero norm; BPS sections 6.4--6.5 are the named
+    theorem import identifying this exact value with the image of the divisor
+    class, so this is one known image element rather than a Selmer upper bound;
+13. construct exact `Sp6(F2)` actions on the 28 odd characteristics and bind
     certified good-prime factorizations to Frobenius cycle-type constraints;
     these constrain conjugacy classes but deliberately do not claim a common
     arithmetic labeling;
-13. over \(\mathbb F_{5^6}\), reconstruct all 28 reduced bitangents and
+14. over \(\mathbb F_{5^6}\), reconstruct all 28 reduced bitangents and
     contact quadratics, check the 315 conic incidences, label the complete
     finite fiber by odd characteristics, and recover the exact Frobenius
     element; this is one certified finite fiber, not yet a common
     characteristic-zero splitting-field labeling;
-14. factor the degree-27 projection exactly over its degree-6 component,
+15. factor the degree-27 projection exactly over its degree-6 component,
     certify the nine relative factors by residue-degree exclusion, and use
     the resulting stabilizer subdegrees to identify the global theta subgroup
     up to conjugacy as class 693 of order 36; finite group replay is internal,
     while completeness of GAP's 1,369 subgroup classes is a named trusted
     import;
-15. at odd rational primes, compute exact valuation/residue square classes in
+16. at odd rational primes, compute exact valuation/residue square classes in
     every number-field completion and replay the resulting block
     global-to-local matrix on the certified 35-dimensional ambient basis;
     separately, enumerate and certify the complete residue-disk cover at
     good-reduction primes;
-16. intersect the future explicitly labeled theta-module and local-image
+17. intersect the future explicitly labeled theta-module and local-image
     conditions with that replay-certified F2 kernel.
 
 Step 7 is the BPS true setup. Its certificate checks the component polynomial
@@ -208,6 +213,7 @@ certified finite and archimedean places for S = {2, 3, 13}
   -> certified S-class 2-torsion in all degree-6/9/12 factors
   -> certified 35-dimensional true ambient square-class space
   -> certified rank-4 global norm map and 31-dimensional kernel
+  -> certified rational point-difference image element
   -> certified canonical 28/315 theta incidence
   -> certified Sp6(F2) actions and primewise Frobenius cycle constraints
   -> certified p=5 splitting-field incidence labeling and Frobenius element

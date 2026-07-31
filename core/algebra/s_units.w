@@ -369,6 +369,10 @@
       raise "S-unit signature is outside the certified square-class basis"
     solution.particular_solution
 
+  -> coordinates_with_certificate(value)
+    NumberFieldSUnitCoordinates.new(
+      self, value)
+
   -> equivalent_mod_squares?(left, right)
     coordinates(left).to_s == coordinates(right).to_s
 
@@ -384,6 +388,127 @@
 
   -> inspect
     to_s
+
+
++ NumberFieldSUnitCoordinatesCertificate
+  -> new(@coordinates)
+    @verified_cache = nil
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "NumberFieldSUnitCoordinates"
+    return false if @coordinates.class_name != expected
+    basis = @coordinates.basis
+    return false if !basis.certificate.verified?
+    value = @coordinates.value
+    return false if value.zero? || value.field != basis.field
+    computation = @coordinates.principal_computation
+    return false if !computation.certificate.verified?
+    return false if !computation.order.same_order?(
+      basis.field.certify_maximal_order)
+    return false if computation.value != basis.field.generic_algebra_element(
+      value)
+    ideal = @coordinates.fractional_ideal
+    return false if !computation.ideal.eql?(
+      ideal.algebra_fractional_ideal)
+    return false if !ideal.certificate.verified?
+    return false if !basis.support_within_s?(ideal)
+    target = basis.signature_vector_with_ideal(
+      value, ideal)
+    system = F2LinearSystem.new(basis.dimension)
+    matrix = basis.local_matrix
+    index = 0
+    while index < matrix.size
+      system.add_equation(matrix[index], target[index])
+      index += 1
+    solution = system.solve
+    return false if solution.inconsistent?
+    F2LinearAlgebra.same_vector?(
+      solution.particular_solution,
+      @coordinates.vector)
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :trusted_s_unit_theorem_with_exact_coordinate_replay
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+
++ NumberFieldSUnitCoordinates
+  -> new(@basis, value)
+    if @basis.class_name != "NumberFieldSUnitSquareClassBasis"
+      raise "S-unit coordinates need an ordinary certified basis"
+    if !@basis.certificate.verified?
+      raise "S-unit coordinate basis is uncertified"
+    @value = @basis.field.coerce(value)
+    raise "zero has no multiplicative S-unit coordinates" if @value.zero?
+    algebra_value = @basis.field.generic_algebra_element(
+      @value)
+    order = @basis.field.certify_maximal_order
+    @principal_computation = order.principal_fractional_ideal_with_certificate(
+      algebra_value)
+    @fractional_ideal = NumberFieldFractionalIdeal.new(
+      @basis.field, @principal_computation.ideal)
+    if !@basis.support_within_s?(@fractional_ideal)
+      raise "number-field element has valuation outside S"
+    target = @basis.signature_vector_with_ideal(
+      @value, @fractional_ideal)
+    system = F2LinearSystem.new(@basis.dimension)
+    matrix = @basis.local_matrix
+    index = 0
+    while index < matrix.size
+      system.add_equation(matrix[index], target[index])
+      index += 1
+    solution = system.solve
+    if solution.inconsistent?
+      raise "S-unit signature is outside the certified square-class basis"
+    @vector = solution.particular_solution
+    @certificate_cache = NumberFieldSUnitCoordinatesCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "S-unit coordinates failed certification"
+
+  -> basis
+    @basis
+
+  -> field
+    @basis.field
+
+  -> value
+    @value
+
+  -> principal_computation
+    @principal_computation
+
+  -> fractional_ideal
+    @fractional_ideal
+
+  -> vector
+    F2LinearAlgebra.copy_vector(@vector)
+
+  -> coordinates
+    vector
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
 
 
 + NumberFieldSUnitSquareClassBasisSearch
@@ -732,6 +857,94 @@
   -> coordinates(value)
     @model_basis.coordinates(
       source_to_model(value))
+
+  -> coordinates_with_certificate(value)
+    NumberFieldIsomorphicSUnitCoordinates.new(
+      self, value)
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
++ NumberFieldIsomorphicSUnitCoordinatesCertificate
+  -> new(@coordinates)
+    @verified_cache = nil
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "NumberFieldIsomorphicSUnitCoordinates"
+    return false if @coordinates.class_name != expected
+    basis = @coordinates.basis
+    return false if !basis.certificate.verified?
+    value = @coordinates.value
+    return false if value.zero? || value.field != basis.field
+    model_value = basis.source_to_model(value)
+    inner = @coordinates.model_coordinates
+    return false if !inner.certificate.verified?
+    return false if inner.basis != basis.model_basis
+    return false if inner.value != model_value
+    F2LinearAlgebra.same_vector?(
+      inner.vector, @coordinates.vector)
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :trusted_isomorphic_s_unit_coordinate_transfer
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+
++ NumberFieldIsomorphicSUnitCoordinates
+  -> new(@basis, value)
+    expected = "NumberFieldIsomorphicSUnitSquareClassBasis"
+    if @basis.class_name != expected
+      raise "isomorphic S-unit coordinates need a transferred basis"
+    if !@basis.certificate.verified?
+      raise "isomorphic S-unit coordinate basis is uncertified"
+    @value = @basis.field.coerce(value)
+    model_value = @basis.source_to_model(@value)
+    @model_coordinates = NumberFieldSUnitCoordinates.new(
+      @basis.model_basis, model_value)
+    @vector = @model_coordinates.vector
+    @certificate_cache = NumberFieldIsomorphicSUnitCoordinatesCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "isomorphic S-unit coordinates failed certification"
+
+  -> basis
+    @basis
+
+  -> field
+    @basis.field
+
+  -> value
+    @value
+
+  -> model_coordinates
+    @model_coordinates
+
+  -> vector
+    F2LinearAlgebra.copy_vector(@vector)
+
+  -> coordinates
+    vector
 
   -> certificate
     @certificate_cache

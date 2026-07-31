@@ -61,6 +61,7 @@ use core/algebra/quartics
 use core/algebra/descent
 use core/algebra/descent_functions
 use core/algebra/descent_norm
+use core/algebra/descent_points
 use core/algebra/theta
 use core/algebra/theta_actions
 use core/algebra/theta_fibers

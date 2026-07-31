@@ -45,6 +45,14 @@ sunit_check("sunit.real_quadratic.not_kernel_theorem",
             U5.certificate.kernel_checked?, false)
 sunit_check("sunit.real_quadratic.coordinates",
             U5.coordinates(epsilon5).to_s, "\[0, 1\]")
+epsilon5_coordinates = U5.coordinates_with_certificate(
+  epsilon5)
+sunit_check("sunit.real_quadratic.coordinate_certificate",
+            epsilon5_coordinates.certified?, true)
+sunit_check("sunit.real_quadratic.coordinate_vector",
+            epsilon5_coordinates.vector.to_s, "\[0, 1\]")
+sunit_check("sunit.real_quadratic.coordinate_binding",
+            epsilon5_coordinates.value, epsilon5)
 sunit_check("sunit.real_quadratic.square_equivalence",
             U5.equivalent_mod_squares?(
               epsilon5, epsilon5 * epsilon5**2), true)
@@ -158,6 +166,12 @@ sunit_check("sunit.isomorphic.generator_roundtrip",
               isomorphic_sunit_basis.generators[1]) ==
               U5.generators[1],
             true)
+isomorphic_coordinates = isomorphic_sunit_basis.coordinates_with_certificate(
+  isomorphic_sunit_basis.generators[1])
+sunit_check("sunit.isomorphic.coordinate_certificate",
+            isomorphic_coordinates.certified?, true)
+sunit_check("sunit.isomorphic.coordinate_vector",
+            isomorphic_coordinates.vector.to_s, "\[0, 1\]")
 
 characteristic_two_failed = false
 begin

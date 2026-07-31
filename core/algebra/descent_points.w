@@ -260,7 +260,7 @@
 # Rational divisor differences provide a replayable lower bound for a local
 # Jacobian image. They cannot prove that the displayed span is the complete
 # local image; callers must not use this object as a Selmer upper bound.
-+ PlaneQuarticBPSKnownOddLocalImageCertificate
++ PlaneQuarticBPSKnownLocalImageCertificate
   -> new(@image)
     @verified_cache = nil
 
@@ -281,10 +281,15 @@
     answer
 
   -> verify!
-    expected = "PlaneQuarticBPSKnownOddLocalImage"
-    return false if @image.class_name != expected
+    image_class = @image.class_name
+    supported_image = image_class == "PlaneQuarticBPSKnownLocalImage"
+    supported_image = true if image_class == "PlaneQuarticBPSKnownOddLocalImage"
+    return false if !supported_image
     local_map = @image.local_map
-    return false if local_map.class_name != "EtaleProductOddLocalSquareClassMap"
+    map_class = local_map.class_name
+    supported_map = map_class == "EtaleProductOddLocalSquareClassMap"
+    supported_map = true if map_class == "EtaleProductDyadicLocalSquareClassMap"
+    return false if !supported_map
     return false if !local_map.certificate.verified?
     values = @image.global_values
     vectors = @image.vectors
@@ -321,7 +326,7 @@
     verified?
 
   -> proof_kind
-    :trusted_global_to_local_functoriality_with_exact_span_replay
+    :global_to_local_functoriality_exact_span
 
   -> arithmetic_replay_checked?
     true
@@ -336,11 +341,13 @@
     false
 
 
-+ PlaneQuarticBPSKnownOddLocalImage
++ PlaneQuarticBPSKnownLocalImage
   -> new(@local_map, global_values)
-    expected = "EtaleProductOddLocalSquareClassMap"
-    if @local_map.class_name != expected
-      raise "known local image needs an odd product localization map"
+    map_class = @local_map.class_name
+    supported = map_class == "EtaleProductOddLocalSquareClassMap"
+    supported = true if map_class == "EtaleProductDyadicLocalSquareClassMap"
+    if !supported
+      raise "known local image needs a product localization map"
     if !@local_map.certificate.verified?
       raise "known local image has an uncertified localization map"
     if global_values.class_name != "Array"
@@ -362,10 +369,10 @@
       @vectors.push(vector)
       system.add_equation(vector)
     @span_certificate = system.certificate
-    @certificate_cache = PlaneQuarticBPSKnownOddLocalImageCertificate.new(
+    @certificate_cache = PlaneQuarticBPSKnownLocalImageCertificate.new(
       self)
     if !@certificate_cache.verified?
-      raise "known odd local image failed certification"
+      raise "known local image failed certification"
 
   -> local_map
     @local_map
@@ -410,6 +417,12 @@
     certificate.verified?
 
 
++ PlaneQuarticBPSKnownOddLocalImage < PlaneQuarticBPSKnownLocalImage
+
+
++ PlaneQuarticBPSKnownOddLocalImageCertificate < PlaneQuarticBPSKnownLocalImageCertificate
+
+
 + PlaneQuarticBPSFunctionData
   -> certify_point_difference(space, positive, negative)
     PlaneQuarticBPSPointDifferenceDescentValue.new(
@@ -430,4 +443,10 @@
 + EtaleProductOddLocalSquareClassMap
   -> certify_known_jacobian_image(global_values)
     PlaneQuarticBPSKnownOddLocalImage.new(
+      self, global_values)
+
+
++ EtaleProductDyadicLocalSquareClassMap
+  -> certify_known_jacobian_image(global_values)
+    PlaneQuarticBPSKnownLocalImage.new(
       self, global_values)

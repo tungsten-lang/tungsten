@@ -286,6 +286,8 @@ compiled_specs=(
   spec/core/algebra_real_roots_spec.w
   spec/core/algebra_ideal_arithmetic_spec.w
   spec/core/algebra_lattice_reduction_spec.w
+  spec/core/algebra_p_adic_number_field_spec.w
+  spec/core/algebra_p_adic_dyadic_spec.w
   spec/core/algebra_s_class_group_spec.w
   spec/core/algebra_s_units_spec.w
   spec/core/algebra_shell_width_degree6_artifact_spec.w

@@ -134,12 +134,16 @@
     answer
 
   -> verify!
-    expected = "NumberFieldOddPrimeValuationProfile"
-    return false if @profile.class_name != expected
+    profile_class = @profile.class_name
+    supported = profile_class == "NumberFieldOddPrimeValuationProfile"
+    supported = true if profile_class == "NumberFieldPrimeValuationProfile"
+    return false if !supported
     field = @profile.field
     return false if field.class_name != "NumberField"
     prime = @profile.rational_prime
-    return false if !prime.prime? || prime == 2
+    return false if !prime.prime?
+    if profile_class == "NumberFieldOddPrimeValuationProfile"
+      return false if prime == 2
     value = @profile.value
     return false if value.zero? || value.field != field
     primes = field.prime_ideals_above(prime)
@@ -179,13 +183,16 @@
     verified?
 
   -> proof_kind
-    :exact_odd_prime_valuation_profile
+    :exact_prime_valuation_profile
 
   -> kernel_checked?
     true
 
 
-# All valuations above one odd rational prime. A supplied principal-ideal
+# All valuations above one rational prime. The historical
+# NumberFieldOddPrimeValuationProfile name remains the checked entry point for
+# odd-local arithmetic; NumberFieldPrimeValuationProfile uses the same exact
+# engine at 2. A supplied principal-ideal
 # computation is reused when a certified S-unit basis already owns it;
 # standalone callers use direct localized valuation certificates instead.
 + NumberFieldOddPrimeValuationProfile
@@ -194,8 +201,12 @@
          @principal_computation = nil)
     if @field.class_name != "NumberField"
       raise "valuation profile needs a NumberField"
-    if !@rational_prime.prime? || @rational_prime == 2
-      raise "valuation profile currently needs an odd rational prime"
+    if !@rational_prime.prime?
+      raise "valuation profile needs a rational prime"
+    wrong_odd_prime = @rational_prime == 2
+    wrong_odd_prime = false if self.class_name != "NumberFieldOddPrimeValuationProfile"
+    if wrong_odd_prime
+      raise "odd valuation profile needs an odd rational prime"
     @value = @field.coerce(value)
     raise "zero has no finite valuation profile" if @value.zero?
     @values = []
@@ -269,6 +280,9 @@
     certificate.verified?
 
 
++ NumberFieldPrimeValuationProfile < NumberFieldOddPrimeValuationProfile
+
+
 + NumberFieldUniformizerAdjustedValuationProfileCertificate
   -> new(@profile)
     @verified_cache = nil
@@ -319,8 +333,11 @@
 
 + NumberFieldUniformizerAdjustedValuationProfile
   -> new(@source, @prime_ideal, @uniformizer, @exponent)
-    if @source.class_name != "NumberFieldOddPrimeValuationProfile"
-      raise "adjusted valuation profile needs a base profile"
+    source_class = @source.class_name
+    valid_source = source_class == "NumberFieldOddPrimeValuationProfile"
+    valid_source = true if source_class == "NumberFieldPrimeValuationProfile"
+    if !valid_source
+      raise "adjusted valuation profile needs a certified base profile"
     if @prime_ideal.class_name != "NumberFieldPrimeIdeal"
       raise "adjusted valuation profile needs a number-field prime"
     if @uniformizer.class_name != "NumberFieldPrimeUniformizer"
@@ -457,7 +474,9 @@
     index = 0
     while index < candidates.size
       candidate = candidates[index]
-      data = separated_uniformizer_data(candidate)
+      data = nil
+      if valuation_shape_candidate?(candidate)
+        data = separated_uniformizer_data(candidate)
       return [candidate, data] if data != nil
       index += 1
     left = 0
@@ -467,15 +486,52 @@
         scalar = 1
         while scalar <= 16
           candidate = candidates[left] + candidates[right] * scalar
-          data = separated_uniformizer_data(candidate)
+          data = nil
+          if valuation_shape_candidate?(candidate)
+            data = separated_uniformizer_data(candidate)
           return [candidate, data] if data != nil
           candidate = candidates[left] - candidates[right] * scalar
-          data = separated_uniformizer_data(candidate)
+          data = nil
+          if valuation_shape_candidate?(candidate)
+            data = separated_uniformizer_data(candidate)
           return [candidate, data] if data != nil
           scalar += 1
         right += 1
       left += 1
+
+    combination_count = 2 ** candidates.size
+    if combination_count > 1_000_000
+      raise "uniformizer binary-combination search limit exceeded"
+    code = 1
+    while code < combination_count
+      remaining = code
+      candidate = field.zero
+      candidate_index = 0
+      while candidate_index < candidates.size
+        if remaining % 2 == 1
+          candidate += candidates[candidate_index]
+        remaining = remaining / 2
+        candidate_index += 1
+      if valuation_shape_candidate?(candidate)
+        data = separated_uniformizer_data(candidate)
+        return [candidate, data] if data != nil
+      code += 1
     raise "prime-ideal basis contained no valuation-one uniformizer"
+
+  # Cheap exact screen in P/P^2 and at the other primes over p. The accepted
+  # candidate is still followed by full statement-bound valuation
+  # computations in separated_uniformizer_data.
+  -> valuation_shape_candidate?(candidate)
+    algebra_element = field.generic_algebra_element(
+      candidate)
+    square = @prime_ideal.algebra_prime_ideal.valuation_ideal_power(
+      2)
+    return false if square.contains?(algebra_element)
+    field.prime_ideals_above(
+      @prime_ideal.rational_prime).each -> (other)
+      if !other.eql?(@prime_ideal)
+        return false if other.contains?(candidate)
+    true
 
   -> separated_uniformizer_data(candidate)
     answer = true
@@ -494,6 +550,46 @@
 
   -> certified?
     certificate.verified?
+
+
++ NumberFieldLocalResidueReduction
+  -> new(@prime_ideal)
+    if @prime_ideal.class_name != "NumberFieldPrimeIdeal"
+      raise "local residue reduction needs a number-field prime"
+    if !@prime_ideal.certificate.verified?
+      raise "local residue reduction has an uncertified prime"
+
+  -> prime_ideal
+    @prime_ideal
+
+  -> field
+    @prime_ideal.field
+
+  -> residue_field
+    @prime_ideal.residue_field
+
+  # Clear rational denominators prime to p, then use the certified maximal
+  # order residue map. Localized callers first clear poles at the other primes
+  # above p with separated uniformizers.
+  -> reduction(value)
+    element = field.coerce(value)
+    raise "zero is not a local unit" if element.zero?
+    order = field.certify_maximal_order
+    algebra_element = field.generic_algebra_element(
+      element)
+    coordinates = order.coordinates(algebra_element)
+    denominator = 1 ## big
+    coordinates.each -> (coefficient)
+      denominator = denominator.lcm(
+        coefficient.denominator)
+    if denominator % @prime_ideal.rational_prime == 0
+      raise "local residue denominator is not invertible"
+    integral = field.multiply(element, denominator)
+    reduced = @prime_ideal.reduce(integral)
+    if residue_field.zero?(reduced)
+      raise "number-field element is not a unit at the local prime"
+    residue_field.divide(
+      reduced, residue_field.coerce(denominator))
 
 
 + NumberFieldLocalUnitResidueCertificate
@@ -562,10 +658,10 @@
         return false if denominator_valuations[prime_index] != 0
       prime_index += 1
 
-    character = NumberFieldQuadraticResidueCharacter.new(
+    reduction = NumberFieldLocalResidueReduction.new(
       prime)
-    numerator_residue = character.reduction(numerator)
-    denominator_residue = character.reduction(denominator)
+    numerator_residue = reduction.reduction(numerator)
+    denominator_residue = reduction.reduction(denominator)
     residue = prime.residue_field.divide(
       numerator_residue, denominator_residue)
     prime.residue_field.equal?(
@@ -594,6 +690,7 @@
     raise "zero has no local unit residue" if @value.zero?
     profile_class = @valuation_profile.class_name
     valid_profile = profile_class == "NumberFieldOddPrimeValuationProfile"
+    valid_profile = true if profile_class == "NumberFieldPrimeValuationProfile"
     adjusted_class = "NumberFieldUniformizerAdjustedValuationProfile"
     valid_profile = true if profile_class == adjusted_class
     if !valid_profile || !@valuation_profile.certificate.verified?
@@ -618,10 +715,10 @@
             other, exponent, uniformizer])
     @numerator = numerator
     @denominator = denominator
-    character = NumberFieldQuadraticResidueCharacter.new(
+    reduction = NumberFieldLocalResidueReduction.new(
       @prime_ideal)
-    numerator_residue = character.reduction(@numerator)
-    denominator_residue = character.reduction(@denominator)
+    numerator_residue = reduction.reduction(@numerator)
+    denominator_residue = reduction.reduction(@denominator)
     @residue = @prime_ideal.residue_field.divide(
       numerator_residue, denominator_residue)
     @certificate_cache = NumberFieldLocalUnitResidueCertificate.new(
@@ -938,9 +1035,15 @@
     @uniformizer_cache
 
   -> local_square_class(value)
+    if rational_prime == 2
+      return NumberFieldDyadicLocalSquareClass.new(
+        self, value)
     NumberFieldOddLocalSquareClass.new(self, value)
 
   -> local_square_class_map(generators, valuation_profiles = nil)
+    if rational_prime == 2
+      return NumberFieldDyadicLocalSquareClassMap.new(
+        self, generators, valuation_profiles)
     NumberFieldOddLocalSquareClassMap.new(
       self, generators, valuation_profiles)
 

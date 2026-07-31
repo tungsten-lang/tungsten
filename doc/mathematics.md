@@ -150,10 +150,11 @@ components, with zero norm. Exact arithmetic and the coordinate binding are
 replayed internally; the theorem identifying this value with the image of
 the divisor class is a named BPS sections 6.4--6.5 import. One known image
 element is a lower bound, not a local-image enumeration or Selmer upper bound.
-Its certified restrictions span one known dimension in each currently
-implemented odd local target: `000000000000111111` at \(p=3\) and
-`00000001010101` at \(p=13\). These are explicitly labeled lower bounds on
-the local images, not complete local-image calculations.
+Its certified restrictions span one known dimension in every finite local
+target in \(S\): `00000000000000000000000000000010110` at \(p=2\),
+`000000000000111111` at \(p=3\), and `00000001010101` at \(p=13\).
+These are explicitly labeled lower bounds on the local images, not complete
+local-image calculations.
 
 The descent is not finished. Exact `Sp6(F2)` matrices now induce
 replay-certified permutations of the 28 characteristics, and certified
@@ -175,13 +176,15 @@ Selmer/rank bound.
 The local-field foundation is now executable but should not be confused with
 that missing local image. Tungsten computes exact rational square classes in
 \(\mathbb Q_p\), simple-root Hensel lifts, odd-prime square classes in
-number-field completions, good-reduction residue-disk covers, and certified
+number-field completions, complete dyadic square classes through the
+higher-unit filtration, good-reduction residue-disk covers, and certified
 global-to-local matrices from the 35-dimensional \(S\)-unit ambient space.
-For the shell-width artifacts the \(p=3\) matrix has target dimension 18 and
-rank 17, while the \(p=13\) matrix has target dimension 14 and rank 13.
-The remaining BPS step is to prove which of those local vectors actually come
-from local Jacobian divisor classes, including dyadic and bad-reduction
-places.
+For the shell-width artifacts the \(p=2\) matrix has target dimension 35 and
+rank 29, the \(p=3\) matrix has target dimension 18 and rank 17, and the
+\(p=13\) matrix has target dimension 14 and rank 13. The remaining BPS step is
+to prove which of those local vectors actually come from local Jacobian
+divisor classes, especially through bad-reduction regular models and
+descent-function constancy on residue disks.
 
 The finite reference theta module itself is now present: it constructs the 28
 odd quadratic refinements of the symplectic form on \(\mathbb F_2^6\),

@@ -195,13 +195,15 @@ explicit descent:
     up to conjugacy as class 693 of order 36; finite group replay is internal,
     while completeness of GAP's 1,369 subgroup classes is a named trusted
     import;
-16. at odd rational primes, compute exact valuation/residue square classes in
-    every number-field completion and replay the resulting block
+16. at every rational prime in \(S\), compute complete local square classes
+    in every number-field completion and replay the resulting block
     global-to-local matrix on the certified 35-dimensional ambient basis;
+    the dyadic lane uses the full higher-unit filtration through
+    \(U_{2e+1}\), including the critical Artin--Schreier cokernel;
     separately, enumerate and certify the complete residue-disk cover at
     good-reduction primes; the known rational divisor class restricts to a
-    certified one-dimensional lower-bound subspace at both 3 and 13, while
-    completeness of either local image remains unproved;
+    certified one-dimensional lower-bound subspace at 2, 3, and 13, while
+    completeness of each local Jacobian image remains unproved;
 17. intersect the future explicitly labeled theta-module and local-image
     conditions with that replay-certified F2 kernel.
 
@@ -221,8 +223,8 @@ certified finite and archimedean places for S = {2, 3, 13}
   -> certified p=5 splitting-field incidence labeling and Frobenius element
   -> certified characteristic-zero subdegrees and global subgroup up to conjugacy
   -> common shell-width root labeling and comparison kernel
-  -> certified odd-prime ambient localization and good-reduction residue disks
-  -> dyadic/bad-reduction arithmetic and certified Jacobian local images
+  -> certified odd and dyadic ambient localization and good-reduction residue disks
+  -> bad-reduction regular models and certified Jacobian local images
   -> explicit Selmer upper bound
   -> BPS comparison and rational J[2]
   -> Mordell-Weil rank upper bound
@@ -240,10 +242,12 @@ kernel has dimension 31. That kernel—not the erroneous true-target
 quotient—is the useful 31-dimensional space.
 
 The combined S-unit and norm replay is a heavyweight, opt-in native lane. On
-an 18-core, 128-GiB Mac17,6, including the certified \(p=3\) ambient
-localization takes about 20.2 seconds and 7.79 GB peak RSS; the \(p=13\) lane
-takes about 19.7 seconds and 7.61 GB. Their localization matrices have
-dimensions/ranks \(18/17\) and \(14/13\), respectively. The standard suite
+an 18-core, 128-GiB Mac17,6, the certified \(p=2\) ambient localization takes
+about 39.5 seconds and 11.71 GB peak RSS, the \(p=3\) lane about 20.2 seconds
+and 7.79 GB, and the \(p=13\) lane about 19.7 seconds and 7.61 GB. Their
+localization matrices have dimensions/ranks \(35/29\), \(18/17\), and
+\(14/13\), respectively. Adding the certified rational point-difference to
+the dyadic lane takes about 44.7 seconds and 14.80 GB. The standard suite
 checks smaller identities and artifact structure. The checked-in witnesses
 are small. The peak comes from exact high-degree S-unit arithmetic in a
 runtime that does not yet reclaim completed object graphs, not from loading a

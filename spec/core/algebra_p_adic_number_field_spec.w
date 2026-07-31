@@ -95,12 +95,12 @@ local_square_check("product_local.linear_replay",
                    product_local.certificate.linear_kernel_replay_checked?,
                    true)
 
-dyadic = false
-begin
-  k.prime_ideals_above(2)[0].local_square_class(1)
-rescue error
-  dyadic = true
-local_square_check("local.dyadic_loud", dyadic, true)
+dyadic_unit = k.prime_ideals_above(2)[0].local_square_class(1)
+local_square_check("local.dyadic_dispatch",
+                   dyadic_unit.vector.to_s,
+                   "\[0, 0, 0, 0\]")
+local_square_check("local.dyadic_certified",
+                   dyadic_unit.certified?, true)
 
 product_dyadic = false
 begin

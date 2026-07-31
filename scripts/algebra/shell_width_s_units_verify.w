@@ -219,7 +219,7 @@ local_prime_text = env("TUNGSTEN_SUNIT_LOCAL_PRIME")
 local_map = nil
 if local_prime_text != nil && local_prime_text != ""
   local_prime = local_prime_text.to_i
-  local_map = space.odd_localization_map(local_prime)
+  local_map = space.localization_map(local_prime)
   << ["local_prime", local_prime]
   << ["local_factor_count", local_map.local_factor_count]
   << ["local_target_dimension", local_map.target_dimension]
@@ -227,7 +227,12 @@ if local_prime_text != nil && local_prime_text != ""
   << ["local_rank", local_map.rank]
   << ["local_kernel_dimension", local_map.kernel_dimension]
   << ["local_certified", local_map.certified?]
-  if local_prime == 3
+  if local_prime == 2
+    raise "unexpected shell-width 2-adic factor count" if local_map.local_factor_count != 4
+    raise "unexpected shell-width 2-adic target dimension" if local_map.target_dimension != 35
+    raise "unexpected shell-width 2-adic localization rank" if local_map.rank != 29
+    raise "unexpected shell-width 2-adic kernel dimension" if local_map.kernel_dimension != 6
+  elsif local_prime == 3
     raise "unexpected shell-width 3-adic factor count" if local_map.local_factor_count != 9
     raise "unexpected shell-width 3-adic target dimension" if local_map.target_dimension != 18
     raise "unexpected shell-width 3-adic localization rank" if local_map.rank != 17
@@ -277,7 +282,14 @@ if env("TUNGSTEN_SUNIT_POINT_VALUES") == "1"
     << ["known_local_lower_bound_only", known_local.lower_bound_only?]
     << ["known_local_certified", known_local.certified?]
     expected_local_vector = nil
-    if known_local.rational_prime == 3
+    if known_local.rational_prime == 2
+      expected_local_vector = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1, 0, 1, 1, 0
+      ]
+    elsif known_local.rational_prime == 3
       expected_local_vector = [
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         1, 1, 1, 1, 1, 1

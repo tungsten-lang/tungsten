@@ -41,6 +41,7 @@ use core/algebra/f2_linear
 use core/algebra/s_units
 use core/algebra/s_class_group
 use core/algebra/p_adic_number_field
+use core/algebra/p_adic_dyadic
 use core/algebra/projective
 use core/algebra/curves
 use core/algebra/p_adic_geometry

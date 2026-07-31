@@ -59,6 +59,7 @@ use core/algebra/descent
 use core/algebra/descent_functions
 use core/algebra/descent_norm
 use core/algebra/theta
+use core/algebra/theta_actions
 use core/algebra/point_search
 use core/algebra/quartic_invariants
 use core/algebra/automorphisms

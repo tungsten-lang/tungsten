@@ -65,6 +65,7 @@ core/algebra/descent.w             # BPS preparation, bitangent proofs, F2 kerne
 core/algebra/descent_functions.w   # contact divisors and BPS line ratios
 core/algebra/descent_norm.w        # true S-unit ambient and global norm kernel
 core/algebra/theta.w               # canonical 28/315 theta incidence modules
+core/algebra/theta_actions.w       # exact Sp6(F2) and Frobenius cycle constraints
 core/algebra/point_search.w        # exact bounded search for one quartic family
 core/algebra/quartic_invariants.w  # ternary resultant, discriminant, I27
 core/algebra/automorphisms.w       # normalized-hyperflex certificate
@@ -388,7 +389,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Divisors | Exact formal arithmetic on rational and line-presented higher-degree closed places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic outside the existing Jacobian models, and general principality tests are not implemented |
 | Rational points | Complete exact bounded search for primitive points on `aX³Z + bXY²Z + g(Y,Z)`, with nonzero same-sign `a,b` and nonzero `Y⁴` coefficient | This is not a general plane-curve point finder and does not prove that no points exist above the requested height |
 | Geometric automorphisms | Exact triviality certificate over `Qbar` for smooth rational plane quartics with the unique normalized hyperflex `[1:0:0]`, tangent `Z=0`, and identity stabilizer | It is not an arbitrary plane-quartic automorphism-group algorithm and does not enumerate nontrivial groups |
-| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions; all shell-width degree-6/9/12 factors have replayed full-rank S-class proofs, and their supplied S-unit bases give a certified true-descent ambient space of dimension `9 + 12 + 14 = 35`; exact component norms give a certified rank-4 map to `Q(S,2)` and a 31-dimensional norm-one kernel; the canonical genus-three theta model exhausts 28 odd characteristics, 315 syzygetic quadruples, and module dimensions `0,1,7,21,27,28` | Identifying the shell-width bitangent labels and decomposition actions with the canonical theta incidence, p-adic local images, the comparison kernel, and the final Selmer bound remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
+| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions; all shell-width degree-6/9/12 factors have replayed full-rank S-class proofs, and their supplied S-unit bases give a certified true-descent ambient space of dimension `9 + 12 + 14 = 35`; exact component norms give a certified rank-4 map to `Q(S,2)` and a 31-dimensional norm-one kernel; the canonical genus-three theta model exhausts 28 odd characteristics, 315 syzygetic quadruples, and module dimensions `0,1,7,21,27,28`; exact `Sp6(F2)` matrices induce replay-certified incidence permutations and certified good-prime factorizations can constrain Frobenius cycle types | A common arithmetic labeling of the shell-width roots by the 28 theta characteristics, the resulting global Galois action, p-adic local images, the comparison kernel, and the final Selmer bound remain missing. A matching cycle type alone is explicitly not accepted as a labeling. `Jacobian#rank` and `rank_upper_bound` still raise |
 
 `Curve#hyperelliptic_plane_model?` is specifically the smooth plane-model
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
@@ -1294,17 +1295,64 @@ theta.odd_characteristics.size       # 28
 theta.syzygetic_quadruples.size       # 315
 theta.module_dimensions               # [0, 1, 7, 21, 27, 28]
 theta.certificate.verified?           # true
+
+T = SymplecticF2Map.transvection(
+  theta.space, theta.space.vector(1))
+sigma = GenusThreeThetaPermutation.new(theta, T)
+sigma.cycle_lengths                   # sixteen 1s and six 2s
+sigma.certificate.verified?           # checks all 315 incidences
+action = ThetaPermutationAction.new(theta, [sigma])
+action.orbit_sizes
+action.certificate.verified?
 ```
 
 Six-bit characteristics index the quadratic refinements of the standard
 symplectic form on \(\mathbb F_2^6\). The implementation exhausts the 28
 Arf-invariant-one forms and all four-subsets with zero affine sum. Packed
-28-bit row reduction then replays the BPS module dimensions. The finite
-enumeration is exact; Riemann--Mumford and the identification of this
-canonical incidence with a smooth plane quartic's bitangents are named
-trusted theorem imports. Tungsten has not yet matched the shell-width
-degree-6/9/12 roots to these 28 labels or certified their global and local
-permutation actions.
+28-bit row reduction then replays the BPS module dimensions. Exact
+symplectic matrices act by pullback on the quadratic refinements; their
+certificates check the pairing on a basis, reconstruct the resulting
+permutation, and verify every one of the 315 incidence blocks. A finite set
+of such permutations can be certified as a group action by exhausting its
+orbits.
+
+At a good prime, the degree-27 bitangent projection may be factored over the
+finite field and tied to a candidate theta permutation:
+
+```w
+constraint = setup.certify_theta_frobenius_constraint(
+  5, candidate, candidate.fixed_indices[0])
+
+constraint.factor_degrees             # [3, 6, 6, 6, 6]
+constraint.cycle_lengths               # [1, 3, 6, 6, 6, 6]
+constraint.certificate.verified?
+constraint.certificate.proof_kind      # :trusted_theorem_import
+constraint.arithmetic_labeling_certified? # false
+```
+
+The finite replay checks the exact reduction, unchanged degree,
+squarefreeness, irreducible factor certificates, one fixed distinguished
+theta characteristic, and equality of the two cycle partitions. The
+factor-degree/Frobenius-orbit theorem is a named trusted import. Most
+importantly, this object is only a conjugacy-class constraint: it does not say
+which degree-27 root is which theta label, and constraints at different
+primes do not create a common labeling by themselves. Riemann--Mumford and
+the identification of the canonical incidence with a smooth plane quartic's
+bitangents likewise remain named trusted theorem imports. Constructing and
+certifying that common arithmetic labeling is the next BPS boundary.
+
+The shell-width factorization replay is deliberately opt-in:
+
+```sh
+TUNGSTEN_THETA_FROBENIUS=1 \
+  bin/tungsten run spec/core/algebra_theta_actions_spec.w
+```
+
+The interpreter currently takes about 38.7 seconds and 7.0 GB peak RSS on
+the reference host because completed exact-arithmetic object graphs remain
+live; the compiled native replay takes about 0.03 seconds and 31 MB peak RSS.
+The default suite checks the finite symplectic and incidence identities
+without running this high-degree interpreted factorization.
 
 The remaining theta and local conditions will meet the certified global norm
 condition in an exact F2 kernel:

@@ -324,6 +324,17 @@
       out.push(form)
     out
 
+  -> odd_characteristic_index(characteristic)
+    @space.validate(characteristic)
+    i = 0
+    while i < @odd_characteristics.size
+      if F2LinearAlgebra.same_vector?(
+           @odd_characteristics[i].characteristic,
+           characteristic)
+        return i
+      i += 1
+    nil
+
   -> syzygetic_quadruples
     F2LinearAlgebra.copy_matrix(@syzygetic_quadruples)
 

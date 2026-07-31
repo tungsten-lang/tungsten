@@ -175,8 +175,12 @@ explicit descent:
    \(\mathbb Q(S,2)=\langle-1,2,3,13\rangle\); its certified rank is 4, so
    the norm-one kernel inside the 35-dimensional true ambient has dimension
    31;
-12. intersect future theta-module and local-image conditions with that
-   replay-certified F2 kernel.
+12. construct exact `Sp6(F2)` actions on the 28 odd characteristics and bind
+    certified good-prime factorizations to Frobenius cycle-type constraints;
+    these constrain conjugacy classes but deliberately do not claim a common
+    arithmetic labeling;
+13. intersect the future labeled theta-module and local-image conditions with
+    that replay-certified F2 kernel.
 
 Step 7 is the BPS true setup. Its certificate checks the component polynomial
 identities exactly and records the section 6.5 fake-to-true comparison and the
@@ -189,7 +193,8 @@ certified finite and archimedean places for S = {2, 3, 13}
   -> certified 35-dimensional true ambient square-class space
   -> certified rank-4 global norm map and 31-dimensional kernel
   -> certified canonical 28/315 theta incidence
-  -> shell-width theta labeling, Galois actions, and comparison kernel
+  -> certified Sp6(F2) actions and primewise Frobenius cycle constraints
+  -> common shell-width theta labeling, global action, and comparison kernel
   -> certified p-adic local images
   -> explicit Selmer upper bound
   -> BPS comparison and rational J[2]

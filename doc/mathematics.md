@@ -141,16 +141,22 @@ norm-one kernel has dimension \(35-4=31\). BPS Lemma 6.16, recorded as a
 trusted theorem import after checking the true-setup hypotheses, places the
 descent image in this kernel.
 
-The descent is not finished. Missing links are the arithmetic theta labeling
-and Galois actions, certified p-adic local images, the BPS comparison kernel
-and rational \(J[2]\), and the final Selmer/rank bound.
+The descent is not finished. Exact `Sp6(F2)` matrices now induce
+replay-certified permutations of the 28 characteristics, and certified
+good-prime factorization can bind a candidate permutation to the resulting
+Frobenius cycle partition. That constrains a conjugacy class; it is not an
+arithmetic root-to-theta labeling. Missing links are a common arithmetic
+labeling and global Galois action, certified p-adic local images, the BPS
+comparison kernel and rational \(J[2]\), and the final Selmer/rank bound.
 
 The finite reference theta module itself is now present: it constructs the 28
 odd quadratic refinements of the symplectic form on \(\mathbb F_2^6\),
 exhausts the 315 syzygetic quadruples, and replay-checks the canonical module
-dimensions \(0,1,7,21,27,28\). What remains is the arithmetic identification:
-match the shell-width bitangent roots to those labels and certify the global
-and local Galois permutation actions.
+dimensions \(0,1,7,21,27,28\). It also verifies exact symplectic generators,
+their complete incidence-preserving permutations, finite action orbits, and
+primewise Frobenius cycle constraints. What remains is the arithmetic
+identification: match the shell-width bitangent roots to those labels in one
+compatible model and certify the global and local Galois permutation actions.
 
 ## Fermat and modularity
 

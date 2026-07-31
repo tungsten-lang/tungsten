@@ -110,6 +110,21 @@ describe "DecisionTree sorted feature sweep" ->
     slow = TreeSplitReference.brute(rows, ys, weights, cfg, parent)
     expect(TreeSplitReference.same_split?(fast, slow)).to be_true
 
+  it "matches weighted brute force with eight classes for gini and entropy" ->
+    rows = []
+    ys = []
+    weights = []
+    32.times -> (i)
+      rows.push([(i * 7) % 31, (i * 13 + 5) % 29, (i * i + 3) % 23])
+      ys.push((i * 5 + i / 7) % 8)
+      weights.push(((i * 3) % 5 + 1).to_f)
+    ["gini", "entropy"].each -> (criterion)
+      cfg = { k: 8, min_leaf: 2, crit: criterion, nf: 3 }
+      parent = TreeSplitReference.classification_parent(ys, 8, weights, criterion)
+      fast = DecisionTree.best_split(rows, ys, weights, cfg, parent)
+      slow = TreeSplitReference.brute(rows, ys, weights, cfg, parent)
+      expect(TreeSplitReference.same_split?(fast, slow)).to be_true
+
   it "matches brute-force regression while preserving exact pure-child gain" ->
     rows = [[0], [1], [10], [11]]
     ys = [1.to_f, 1.to_f, 9.to_f, 9.to_f]
@@ -156,6 +171,18 @@ describe "DecisionTree sorted feature sweep" ->
     expect(best[:lws].size + best[:rws].size).to eq(weights.size)
     expect(best[:lr].size).to eq(3)
 
+  it "skips child index maps when no presorted recursion consumes them" ->
+    rows = [[0], [1], [8], [9]]
+    ys = [0, 0, 1, 1]
+    mapped = DecisionTree.partition(rows, ys, nil, 0, 4.5)
+    lean = DecisionTree.partition(rows, ys, nil, 0, 4.5, false, false)
+    expect(mapped[:left_indices].join(",")).to eq("0,1")
+    expect(mapped[:right_indices].join(",")).to eq("2,3")
+    expect(lean[:left_indices]).to be_nil
+    expect(lean[:right_indices]).to be_nil
+    expect(lean[:lr].size).to eq(mapped[:lr].size)
+    expect(lean[:rr].size).to eq(mapped[:rr].size)
+
   it "keeps full classifier and regressor predictions unchanged" ->
     classifier = DecisionTreeClassifier.new
     classifier.fit([[0, 0], [0, 1], [1, 0], [1, 1]], [:a, :b, :b, :a])
@@ -165,3 +192,41 @@ describe "DecisionTree sorted feature sweep" ->
     regressor.fit([[0], [1], [10], [11]], [1, 1, 9, 9])
     expect(regressor.predict([[0], [1], [10], [11]]).join(",")).to eq("1,1,9,9")
     expect(regressor.tree[:gain]).to eq(16)
+
+  it "projects large batches to flat arrays without making the public tree stale" ->
+    model = DecisionTreeClassifier.new(1)
+    model.fit([[0], [1], [8], [9]], [0, 0, 1, 1])
+    queries = []
+    40.times -> (i)
+      queries.push([i % 10])
+    expected = []
+    expected_probabilities = []
+    queries.each -> (row)
+      leaf = DecisionTree.descend(model.tree, row)
+      expected.push(leaf[:prediction])
+      expected_probabilities.push(DecisionTree.proba_of(leaf))
+    expect(model.predict(queries).join(",")).to eq(expected.join(","))
+    probabilities = model.predict_proba(queries)
+    expect(probabilities.to_s).to eq(expected_probabilities.to_s)
+    expected_column = []
+    expected_probabilities.each -> (row)
+      expected_column.push(row[1])
+    expect(model.predict_proba(queries, 1).to_s).to eq(expected_column.to_s)
+    second_probability = probabilities[1][0]
+    probabilities[0][0] = 123.to_f
+    expect(probabilities[1][0]).to eq(second_probability)
+
+    # `tree` remains the source of truth: the next batch rebuilds its compact
+    # program and observes an intentional mutation immediately.
+    model.tree[:left][:prediction] = 7
+    expect(model.predict(queries)[0]).to eq(7)
+    expect(model.predict([[0]])[0]).to eq(7)
+    model.tree[:left][:counts] = [0, 2]
+    expect(model.predict_proba(queries)[0].to_s).to eq("\[0, 1\]")
+
+    regressor = DecisionTreeRegressor.new(2)
+    regressor.fit([[0], [1], [2], [8], [9], [10]], [0, 1, 2, 8, 9, 10])
+    regression_expected = []
+    queries.each -> (row)
+      regression_expected.push(DecisionTree.descend(regressor.tree, row)[:prediction])
+    expect(regressor.predict(queries).join(",")).to eq(regression_expected.join(","))

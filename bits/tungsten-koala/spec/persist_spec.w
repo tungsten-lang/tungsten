@@ -261,14 +261,22 @@ describe "Persist round-trip: DecisionTreeClassifier" ->
     expect(back.tree[:left][:leaf]).to eq(model.tree[:left][:leaf])
     expect(back.predict_proba(Fx.queries, "a").join(",")).to eq(model.predict_proba(Fx.queries, "a").join(","))
 
-  it "preserves all four hyperparameters and the class order" ->
-    model = DecisionTreeClassifier.new(2, 3, 2, :entropy)
+  it "preserves all seven hyperparameters and the class order" ->
+    alpha = 1.to_f / 50.to_f
+    min_gain = 3.to_f / 1000.to_f
+    min_weight = 1.to_f / 10.to_f
+    model = DecisionTreeClassifier.new(
+      2, 3, 2, :entropy, alpha, min_gain, min_weight
+    )
     model.fit(Fx.frame, Fx.labels)
     back = Fx.cycle(model)
     expect(back.params[:max_depth]).to eq(2)
     expect(back.params[:min_samples_split]).to eq(3)
     expect(back.params[:min_samples_leaf]).to eq(2)
     expect(back.params[:criterion].to_s).to eq("entropy")
+    expect(back.params[:ccp_alpha]).to eq(alpha)
+    expect(back.params[:min_impurity_decrease]).to eq(min_gain)
+    expect(back.params[:min_weight_fraction_leaf]).to eq(min_weight)
     expect(back.classes.join(",")).to eq(model.classes.join(","))
     expect(Fx.preds(back)).to eq(Fx.preds(model))
 

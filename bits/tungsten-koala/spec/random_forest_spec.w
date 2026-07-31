@@ -256,6 +256,14 @@ describe "RandomForest machinery" ->
     # resample is genuinely WITH replacement, not a permutation.
     expect(zeros > 0).to be_true
 
+  it "draws exactly max_samples rows when a smaller bootstrap is requested" ->
+    counts = RandomForest.draw_counts(40, 12345, 11)
+    total = 0
+    counts.each -> (c)
+      total += c
+    expect(counts.size).to eq(40)
+    expect(total).to eq(11)
+
   it "breaks an argmax tie to the lowest index, as the trees do" ->
     expect(RandomForest.argmax([1.to_f, 1.to_f, 1.to_f])).to eq(0)
     expect(RandomForest.argmax([1.to_f, 2.to_f, 2.to_f])).to eq(1)
@@ -291,20 +299,40 @@ describe "a forest of one tree, with the randomness switched off" ->
 
   it "is the DecisionTreeRegressor it was built from, node for node" ->
     data = Fx.reg(64, 13, 0, 4)
-    tree = DecisionTreeRegressor.new
+    tree = DecisionTreeRegressor.new(nil, 5)
     tree.fit(data[:rows], data[:ys])
-    forest = RandomForestRegressor.new(1, :all, nil, 1, 0, nil, false)
+    forest = RandomForestRegressor.new(1, :all, nil, 1, 0, nil, false, 0, 0, 5)
     forest.fit(data[:rows], data[:ys])
     expect(DecisionTree.render(forest.trees[0], "", []).join("\n")).to eq(tree.tree_lines.join("\n"))
     expect(Fx.preds(forest, data[:rows])).to eq(Fx.preds(tree, data[:rows]))
 
-  it "honours max_depth and min_samples_leaf exactly as the tree does" ->
+  it "honours max_depth, min_samples_split and min_samples_leaf exactly as the tree does" ->
     data = Fx.clf(64, 11, 0, 4)
-    tree = DecisionTreeClassifier.new(2, nil, 3)
+    tree = DecisionTreeClassifier.new(2, 5, 3)
     tree.fit(data[:rows], data[:labels])
-    forest = RandomForestClassifier.new(1, :all, 2, 3, 0, nil, false)
+    forest = RandomForestClassifier.new(1, :all, 2, 3, 0, nil, false, 0, 0, 5)
     forest.fit(data[:rows], data[:labels])
     expect(DecisionTree.render(forest.trees[0], "", []).join("\n")).to eq(tree.tree_lines.join("\n"))
+
+  it "honours min_weight_fraction_leaf exactly as weighted trees do" ->
+    x = [[0], [1], [2], [3], [4], [5]]
+    weights = [8, 1, 1, 1, 1, 1]
+    fraction = 3.to_f / 10.to_f
+    clf_tree = DecisionTreeClassifier.new(
+      3, 2, 1, :gini, 0, 0, fraction
+    ).fit(x, [0, 0, 0, 1, 0, 1], weights)
+    clf_forest = RandomForestClassifier.new(
+      1, :all, 3, 1, 0, :gini, false, 0, 0, 2, nil, fraction
+    ).fit(x, [0, 0, 0, 1, 0, 1], weights)
+    expect(DecisionTree.render(clf_forest.trees[0], "", []).join("\n")).to eq(clf_tree.tree_lines.join("\n"))
+
+    reg_tree = DecisionTreeRegressor.new(
+      3, 2, 1, :mse, 0, 0, fraction
+    ).fit(x, [0, 0, 0, 10, 0, 10], weights)
+    reg_forest = RandomForestRegressor.new(
+      1, :all, 3, 1, 0, :mse, false, 0, 0, 2, nil, fraction
+    ).fit(x, [0, 0, 0, 10, 0, 10], weights)
+    expect(DecisionTree.render(reg_forest.trees[0], "", []).join("\n")).to eq(reg_tree.tree_lines.join("\n"))
 
   it "has no out-of-bag score, because nothing was left out" ->
     data = Fx.small
@@ -497,9 +525,14 @@ describe "RandomForestClassifier" ->
     expect(p[:seed]).to be_nil
     expect(p[:criterion].to_s).to eq("gini")
     expect(p[:bootstrap]).to be_true
+    expect(p[:ccp_alpha]).to eq(0)
+    expect(p[:min_impurity_decrease]).to eq(0)
+    expect(p[:min_samples_split]).to eq(2)
+    expect(p[:max_samples]).to be_nil
+    expect(p[:min_weight_fraction_leaf]).to eq(0)
 
   it "round-trips every hyperparameter through with_params" ->
-    model = RandomForestClassifier.new(7, :log2, 3, 2, 9, :entropy, false)
+    model = RandomForestClassifier.new(7, :log2, 3, 2, 9, :entropy, true, 0.01, 0.02, 5, 12, 0.3)
     again = model.with_params(model.params)
     p = again.params
     expect(p[:n_estimators]).to eq(7)
@@ -508,15 +541,22 @@ describe "RandomForestClassifier" ->
     expect(p[:min_samples_leaf]).to eq(2)
     expect(p[:seed]).to eq(9)
     expect(p[:criterion].to_s).to eq("entropy")
-    expect(p[:bootstrap]).to be_false
+    expect(p[:bootstrap]).to be_true
+    expect(p[:ccp_alpha]).to eq(0.01)
+    expect(p[:min_impurity_decrease]).to eq(0.02)
+    expect(p[:min_samples_split]).to eq(5)
+    expect(p[:max_samples]).to eq(12)
+    expect(p[:min_weight_fraction_leaf]).to eq(0.3)
     # with_params CLONES: the receiver is untouched and still unfitted.
     expect(again.fitted?).to be_false
     expect(model.with_params({ n_estimators: 3 }).n_estimators).to eq(3)
     expect(model.n_estimators).to eq(7)
 
-  it "clamps min_samples_leaf in the constructor, so params tells the truth" ->
+  it "clamps both sample floors in the constructor, so params tells the truth" ->
     expect(RandomForestClassifier.new(5, nil, nil, 0).min_samples_leaf).to eq(1)
     expect(RandomForestClassifier.new(5, nil, nil, -4).min_samples_leaf).to eq(1)
+    expect(RandomForestClassifier.new(5, nil, nil, 1, nil, nil, nil, nil, nil, 0).min_samples_split).to eq(2)
+    expect(RandomForestClassifier.new(5, nil, nil, 1, nil, nil, nil, nil, nil, -4).min_samples_split).to eq(2)
 
   it "honours sample weights, and refuses an unusable vector" ->
     data = Fx.small
@@ -539,6 +579,18 @@ describe "RandomForestClassifier" ->
     model = RandomForestClassifier.new(6, :sqrt, nil, 1, 5, :entropy)
     expect(model.fit(data[:rows], data[:labels])).not_to be_nil
     expect(model.score(data[:rows], data[:labels]) > 0.to_f).to be_true
+
+  it "fits a deterministic smaller bootstrap with a valid oob score" ->
+    data = Fx.clf(64, 19, 0, 4)
+    one = RandomForestClassifier.new(
+      8, :sqrt, 4, 1, 7, :gini, true, 0, 0, 2, 32
+    )
+    two = one.with_params(one.params)
+    expect(one.fit(data[:rows], data[:labels])).not_to be_nil
+    expect(two.fit(data[:rows], data[:labels])).not_to be_nil
+    expect(Persist.dumps(one)).to eq(Persist.dumps(two))
+    expect(one.oob_score).not_to be_nil
+    expect(one.params[:max_samples]).to eq(32)
 
 # --- The regressor's surface ----------------------------------------
 
@@ -563,9 +615,14 @@ describe "RandomForestRegressor" ->
     expect(p[:max_features]).to be_nil
     expect(p[:criterion].to_s).to eq("mse")
     expect(p[:bootstrap]).to be_true
+    expect(p[:ccp_alpha]).to eq(0)
+    expect(p[:min_impurity_decrease]).to eq(0)
+    expect(p[:min_samples_split]).to eq(2)
+    expect(p[:max_samples]).to be_nil
+    expect(p[:min_weight_fraction_leaf]).to eq(0)
 
   it "round-trips every hyperparameter through with_params" ->
-    model = RandomForestRegressor.new(4, 2, 5, 3, 11, :variance, false)
+    model = RandomForestRegressor.new(4, 2, 5, 3, 11, :variance, true, 0.01, 0.02, 6, 12, 0.3)
     p = model.with_params(model.params).params
     expect(p[:n_estimators]).to eq(4)
     expect(p[:max_features]).to eq(2)
@@ -573,7 +630,12 @@ describe "RandomForestRegressor" ->
     expect(p[:min_samples_leaf]).to eq(3)
     expect(p[:seed]).to eq(11)
     expect(p[:criterion].to_s).to eq("variance")
-    expect(p[:bootstrap]).to be_false
+    expect(p[:bootstrap]).to be_true
+    expect(p[:ccp_alpha]).to eq(0.01)
+    expect(p[:min_impurity_decrease]).to eq(0.02)
+    expect(p[:min_samples_split]).to eq(6)
+    expect(p[:max_samples]).to eq(12)
+    expect(p[:min_weight_fraction_leaf]).to eq(0.3)
 
   it "reports an out-of-bag R²" ->
     data = Fx.small_reg
@@ -628,6 +690,23 @@ describe "RandomForest degenerate input" ->
     expect(RandomForestRegressor.new(5, nil, nil, 1, 1, :gini).fit(reg[:rows], reg[:ys])).to be_nil
     expect(RandomForestRegressor.new(5, :nonsense).fit(reg[:rows], reg[:ys])).to be_nil
 
+  it "refuses an invalid max_samples or one without bootstrap" ->
+    data = Fx.small
+    expect(RandomForestClassifier.new(5, nil, nil, 1, 1, nil, true, 0, 0, 2, 0).fit(data[:rows], data[:labels])).to be_nil
+    expect(RandomForestClassifier.new(5, nil, nil, 1, 1, nil, true, 0, 0, 2, 25).fit(data[:rows], data[:labels])).to be_nil
+    expect(RandomForestClassifier.new(5, nil, nil, 1, 1, nil, false, 0, 0, 2, 12).fit(data[:rows], data[:labels])).to be_nil
+    expect(RandomForestRegressor.new(5, nil, nil, 1, 1, nil, true, 0, 0, 2, :half).fit(data[:rows], Fx.small_reg[:ys])).to be_nil
+
+  it "refuses a min_weight_fraction_leaf outside zero through one half" ->
+    data = Fx.small
+    low = 0.to_f - 1.to_f / 100.to_f
+    expect(RandomForestClassifier.new(
+      5, nil, nil, 1, 1, nil, true, 0, 0, 2, nil, low
+    ).fit(data[:rows], data[:labels])).to be_nil
+    expect(RandomForestRegressor.new(
+      5, nil, nil, 1, 1, nil, true, 0, 0, 2, nil, 0.5001
+    ).fit(data[:rows], Fx.small_reg[:ys])).to be_nil
+
   it "returns nil for a query whose width is not the fitted width" ->
     data = Fx.small
     model = RandomForestClassifier.new(5, :all, nil, 1, 1)
@@ -643,12 +722,71 @@ describe "RandomForest degenerate input" ->
     expect(model.fit(rows, labels)).not_to be_nil
     expect(model.predict(rows).join(",")).to eq("a,a,a,a")
 
+# --- Batch prediction projection -------------------------------------
+
+describe "RandomForest flat batch prediction" ->
+  it "matches direct soft voting and observes public classifier tree mutations" ->
+    data = Fx.small
+    model = RandomForestClassifier.new(5, :all, 3, 1, 17, :gini, false)
+    model.fit(data[:rows], data[:labels])
+    queries = []
+    40.times -> (i)
+      queries.push(data[:rows][i % data[:rows].size])
+    expected = []
+    expected_column = []
+    expected_labels = []
+    queries.each -> (row)
+      probability = RandomForest.vote_row(model.trees, row, model.classes.size)
+      expected.push(probability)
+      expected_column.push(probability[0])
+      expected_labels.push(model.classes[RandomForest.argmax(probability)])
+    expect(model.predict_proba(queries).to_s).to eq(expected.to_s)
+    expect(model.predict_proba(queries, model.classes[0]).to_s).to eq(expected_column.to_s)
+    expect(model.predict(queries).to_s).to eq(expected_labels.to_s)
+
+    leaf = DecisionTree.descend(model.trees[0], queries[0])
+    forced = []
+    model.classes.size.times -> (c)
+      forced.push(0)
+    forced[0] = leaf[:weight]
+    leaf[:counts] = forced
+    mutated = []
+    mutated_column = []
+    mutated_labels = []
+    queries.each -> (row)
+      probability = RandomForest.vote_row(model.trees, row, model.classes.size)
+      mutated.push(probability)
+      mutated_column.push(probability[0])
+      mutated_labels.push(model.classes[RandomForest.argmax(probability)])
+    expect(model.predict_proba(queries).to_s).to eq(mutated.to_s)
+    expect(model.predict_proba(queries, model.classes[0]).to_s).to eq(mutated_column.to_s)
+    expect(model.predict(queries).to_s).to eq(mutated_labels.to_s)
+
+  it "matches direct mean prediction and observes regressor tree mutations" ->
+    data = Fx.small_reg
+    model = RandomForestRegressor.new(5, :all, 3, 1, 17, :mse, false)
+    model.fit(data[:rows], data[:ys])
+    queries = []
+    40.times -> (i)
+      queries.push(data[:rows][i % data[:rows].size])
+    expected = []
+    queries.each -> (row)
+      expected.push(RandomForest.mean_row(model.trees, row))
+    expect(model.predict(queries).to_s).to eq(expected.to_s)
+
+    leaf = DecisionTree.descend(model.trees[0], queries[0])
+    leaf[:prediction] = 123.to_f
+    mutated = []
+    queries.each -> (row)
+      mutated.push(RandomForest.mean_row(model.trees, row))
+    expect(model.predict(queries).to_s).to eq(mutated.to_s)
+
 # --- Persistence -----------------------------------------------------
 
 describe "RandomForest persistence" ->
   it "round-trips a classifier, every tree of it, predicting identically" ->
     data = Fx.small
-    model = RandomForestClassifier.new(8, :sqrt, 3, 1, 17)
+    model = RandomForestClassifier.new(8, :sqrt, 3, 1, 17, :gini, true, 0.001, 0.002, 5, 12, 0.1)
     model.fit(data[:rows], data[:labels])
     again = Fx.cycle(model)
     expect(again).not_to be_nil
@@ -665,15 +803,24 @@ describe "RandomForest persistence" ->
     expect(again.params[:max_features].to_s).to eq("sqrt")
     expect(again.params[:max_depth]).to eq(3)
     expect(again.params[:seed]).to eq(17)
+    expect(again.params[:ccp_alpha]).to eq(0.001)
+    expect(again.params[:min_impurity_decrease]).to eq(0.002)
+    expect(again.params[:min_samples_split]).to eq(5)
+    expect(again.params[:max_samples]).to eq(12)
+    expect(again.params[:min_weight_fraction_leaf]).to eq(0.1)
     expect(Fx.close?(again.oob_score, model.oob_score)).to be_true
 
   it "round-trips a regressor" ->
     data = Fx.small_reg
-    model = RandomForestRegressor.new(8, nil, nil, 1, 17, nil, true)
+    model = RandomForestRegressor.new(8, nil, nil, 1, 17, nil, true, 0.001, 0.002, 6, nil, 0.1)
     model.fit(data[:rows], data[:ys])
     again = Fx.cycle(model)
     expect(again).not_to be_nil
     expect(again.persist_name).to eq("RandomForestRegressor")
+    expect(again.params[:ccp_alpha]).to eq(0.001)
+    expect(again.params[:min_impurity_decrease]).to eq(0.002)
+    expect(again.params[:min_samples_split]).to eq(6)
+    expect(again.params[:min_weight_fraction_leaf]).to eq(0.1)
     expect(Fx.preds(again, data[:rows])).to eq(Fx.preds(model, data[:rows]))
     expect(Persist.dumps(again)).to eq(Persist.dumps(model))
 
@@ -697,8 +844,8 @@ describe "RandomForest persistence" ->
     tree = DecisionTreeClassifier.new
     tree.fit(data[:rows], data[:labels])
     ttext = Persist.dumps(tree)
-    # A forest has no min_samples_split and no single `tree`; a tree has no
-    # n_estimators and no `trees`. Each loader checks for its own state.
+    # A forest has no single `tree`; a tree has no n_estimators and no
+    # `trees`. Each loader checks for its own state.
     expect(Persist.loads(ftext.split("o RandomForestClassifier").join("o DecisionTreeClassifier"))).to be_nil
     expect(Persist.loads(ttext.split("o DecisionTreeClassifier").join("o RandomForestClassifier"))).to be_nil
     # A CLASSIFIER forest relabelled as a REGRESSOR one is refused too: it

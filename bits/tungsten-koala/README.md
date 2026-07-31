@@ -585,9 +585,41 @@ values is classified by the nearer side; taking only distinct values means
 a **constant feature offers no threshold at all** rather than a degenerate
 empty split.
 
+The split search sorts every feature once at the root
+(`O(features * rows log rows)`), then filters those orders into each child
+in linear time instead of sorting each subtree again. Its sweep moves
+sufficient statistics across one row at a time: squared class counts for
+gini, `c * log(c)` terms for entropy, and weighted variance moments for
+regression. Every threshold — including both missing-value assignments —
+is therefore scored in `O(1)` regardless of class count, and row arrays are
+materialized only for the winning threshold.
+
+`nil` and IEEE NaN feature cells are **learned missing values**, not values
+silently coerced to zero. At each candidate threshold the sweep scores both
+legal assignments — all missing rows left and all missing rows right — and
+stores the better direction as `node[:missing_left]`; an exact tie stays
+right. `min_samples_leaf` counts missing rows in whichever child receives
+them. If training saw no missing values at a node, an unseen missing query
+follows the larger child (ties right), matching scikit-learn 1.7.2. Integer
+and finite Float cells may be mixed with missing cells; infinities and other
+nonnumeric values still make fit or prediction return `nil`. Classifier and
+regressor forests inherit the same routing in every constituent tree.
+
 A node becomes a leaf when it is pure, when `n < min_samples_split`, when
 `depth == max_depth`, or when no admissible split exists. Its prediction
 is the majority class (classifier) or the mean target (regressor).
+
+For routing diagnostics, `leaf_indices(x)` returns the zero-based preorder
+node ID of the leaf reached by each row — the same numbering returned by
+scikit-learn's tree `apply`. IDs are rebuilt from the current public tree, so
+they reflect pruning, persistence, and even an intentional `model.tree`
+mutation. Koala's older `apply(x)` remains available when the caller wants the
+inspectable leaf hashes themselves:
+
+```tungsten
+ids = tree.leaf_indices([[0], [9]])
+tree.apply([[0]])[0][:prediction]
+```
 
 ### Determinism is a guarantee, and the tie-break rule is documented
 
@@ -624,6 +656,7 @@ model.fit([[0, 0], [1, 0], [0, 10], [1, 10]], [:lo, :lo, :hi, :hi])
 
 model.tree[:feature]             # => 1        the split feature
 model.tree[:threshold]           # => 5        midpoint of 0 and 10
+model.tree[:missing_left]        # => false    learned missing branch
 model.tree[:impurity]            # => 0.5      gini before the split
 model.tree[:gain]                # => 0.5      what the split bought
 model.tree[:n]                   # => 4        rows that reached this node
@@ -633,6 +666,7 @@ model.tree[:left][:counts]       # => [2, 0]   rows per class, `classes` order
 model.depth                      # => 1   edges to the deepest leaf
 model.node_count                 # => 3
 model.leaf_count                 # => 2
+model.feature_importances        # => [0, 1], normalized impurity decrease
 model.tree_lines.join("\n")
 # x1 <= 5
 #   leaf: lo (n=2)
@@ -642,12 +676,27 @@ model.tree_lines.join("\n")
 `predict_proba` is that leaf's class distribution, `counts / n`, so it
 pairs with `Metrics.roc_auc` and `Metrics.log_loss` exactly as
 `GaussianNB`'s does — `predict_proba(x, label)` hands over the flat
-column.
+column without constructing full probability rows or the other leaf-class
+values. Large probability batches share the flat tree projection used by
+label prediction; full output computes each leaf distribution once per call.
+`feature_importances` is weighted mean impurity decrease,
+normalized to sum to one; a stump returns one zero per feature.
+
+For batch prediction, the hash tree remains the public source of truth but
+Koala projects it once per call into parallel feature/threshold/child arrays.
+That removes repeated hash lookups from the row hot path without adding
+persisted state or making `tree`, `apply`, pruning, or export observe a
+different model. Query validation also records whether the batch contains any
+nil/NaN cell, so ordinary numeric batches skip missing-value checks inside
+every visited node. Tiny batches stay on direct hash descent; the projection
+is rebuilt for each larger call, so an intentional mutation through
+`model.tree` is visible immediately.
 
 ### Standalone source export
 
-A fitted classifier with numeric labels can be lowered to deterministic
-Tungsten source for a latency-sensitive consumer such as Wassat:
+A fitted classifier with Integer, finite Float, String, or Symbol labels, or a
+fitted regressor, can be lowered to deterministic Tungsten source for a
+latency-sensitive consumer such as Wassat:
 
 ```tungsten
 model = DecisionTreeClassifier.new(3).fit(training_features, arm_ids)
@@ -661,9 +710,10 @@ source = artifact[:source]                # write via your build tooling
 artifact[:schema_checksum]
 ```
 
-The generated file has no Koala dependency: it is nested
-`features[i].to_f <= ~threshold` comparisons ending in exact numeric
-predictions. It also defines `wassat_select_arm_schema_version`,
+The generated file has no Koala dependency: it is nested nil/NaN guards
+plus `features[i].to_f <= ~threshold` comparisons ending in exact source
+literals. The learned missing direction is compiled into each guard.
+It also defines `wassat_select_arm_schema_version`,
 `wassat_select_arm_schema_checksum`, and
 `wassat_select_arm_feature_count`. The prediction function requires the
 checksum. Pin the artifact's value independently beside the code that builds
@@ -677,13 +727,55 @@ arm = wassat_select_arm(features, WASSAT_ROUTER_SCHEMA)
 Feature names must be unique ASCII identifiers and match the fitted width;
 their order is written into the header and covered by the checksum.
 Renaming or reordering a feature changes the checksum. Integer and finite
-Float predictions are emitted as exact source literals; symbolic labels,
-nonfinite values, invalid names, malformed trees, and unfitted models
-return `nil`. The generated checksum helper is useful for inspection, but
-using it directly as the predictor argument would bypass the independent
-drift check.
+Float predictions are emitted as exact source literals, so regression leaves
+retain their round-trip f64 values. String and Symbol class labels are escaped
+as inert source, including brackets that would otherwise start interpolation;
+unsupported control characters, other label types, nonfinite values, invalid
+names, malformed trees, and unfitted models return `nil`. Generated predictors
+likewise return `nil` for nonnumeric or infinite inputs while accepting nil/NaN
+as missing. The generated checksum helper is useful for inspection, but using
+it directly as the predictor argument would bypass the independent drift
+check.
 
-### Hyperparameters — all four are real, tunable `params`
+Forests use the parallel `RandomForestExport` API and a distinct schema
+domain:
+
+```tungsten
+forest = RandomForestClassifier.new(50, :sqrt, 8, 2, 42).fit(x, arm_ids)
+artifact = RandomForestExport.export(
+  forest, [:variables, :clauses, :literal_count], :wassat_select_arm
+)
+```
+
+The standalone classifier source emits `wassat_select_arm` plus
+`wassat_select_arm_predict_proba`. Each generated tree adds its learned leaf
+distribution directly into one shared vote buffer; the totals are normalized
+after visiting trees in fitted order, and label prediction uses the same
+first-class tie break as the live forest.
+A `RandomForestRegressor` artifact instead averages exact round-trip leaf
+means. Both formats compile learned nil/NaN routing, validate finite numeric
+inputs and the ordered feature checksum, record the tree count, support the
+same Integer/Float/String/Symbol classifier labels as tree export, and require
+finite numeric regression predictions.
+
+For a nontrivial forest, prefer `RandomForestExport.export_compact` (or
+`source_compact`). It preserves the same predictor and probability contracts
+but concatenates every tree into immutable arrays traversed by one shared
+function. Nonnegative child values index split-only feature/threshold arrays;
+negative values encode dense leaf-only probability or regression-value
+indices. No placeholder thresholds are stored for leaves and no zero leaf
+outputs are stored for splits. The ordinary `export` remains the maximally
+direct nested-source form; compact export trades those repeated branch
+expressions for much smaller source and better instruction locality.
+
+`python bits/tungsten-koala/benchmarks/compare_random_forest_export.py`
+generates and compiles both exact 50-tree layouts used by its probe, then
+reports their bytes/lines, live-versus-unrolled-versus-compact single-row
+label and probability latency, raw samples, checksums, and explicit parity
+gates. This complements the batched throughput measurements in
+`decision_tree_speed.w`.
+
+### Hyperparameters — all seven are real, tunable `params`
 
 | param | default | meaning |
 | --- | --- | --- |
@@ -691,6 +783,9 @@ drift check.
 | `min_samples_split` | `2` | a node smaller than this is never split |
 | `min_samples_leaf` | `1` | a split leaving a side smaller than this is inadmissible |
 | `criterion` | `:gini` / `:mse` | see the table above |
+| `ccp_alpha` | `0` | minimal cost-complexity pruning strength; zero keeps the full tree |
+| `min_impurity_decrease` | `0` | minimum root-weighted impurity decrease required to grow a split |
+| `min_weight_fraction_leaf` | `0` | minimum fraction of fitted sample weight required in either child |
 
 `min_samples_leaf` can *change the answer*, not merely prune: on
 `x = 0,1,2,3` with `y = 0,0,0,1` the perfect split at 2.5 leaves one row
@@ -698,6 +793,34 @@ on the right, so a floor of 2 rejects it and the weaker 1.5 split (gain
 0.125) is taken instead. Both floors are clamped to their legal minimum in
 the **constructor**, so `params` always reports the value actually in
 force and `m.with_params(m.params)` is the identity.
+
+`ccp_alpha` applies weakest-link post-pruning after growth. A subtree is
+collapsed when its root-normalized impurity cost per removed leaf is at
+most alpha. The node already stores its own prediction, counts and
+impurity, so pruning needs no second pass over the training rows. Use the
+non-mutating path to select alpha:
+
+```tungsten
+prototype = DecisionTreeClassifier.new
+path = prototype.cost_complexity_pruning_path(x, y)
+path[:ccp_alphas]                # starts at 0, ends at the root-only tree
+path[:impurities]                # nondecreasing leaf impurity at each step
+
+pruned = DecisionTreeClassifier.new(nil, nil, nil, :gini, 0.005)
+pruned.fit(x, y)
+```
+
+The same `ccp_alpha` and path API apply to `DecisionTreeRegressor`.
+`min_impurity_decrease` acts earlier: it prevents a candidate split from
+growing unless `weight(node) / weight(root) * gain(node)` reaches the floor,
+matching scikit-learn's weighted definition. Zero preserves useful
+zero-gain structure such as XOR; any positive floor rejects it.
+
+`min_weight_fraction_leaf` is the weight-space counterpart to
+`min_samples_leaf`: every candidate child must carry at least that fraction
+of the fitted root's total sample weight. Its valid range is `0..0.5`.
+Missing rows count in the child selected by the learned missing direction,
+and integer sample weights remain exactly equivalent to duplicated rows.
 
 Because they are ordinary `params`, they round-trip through `with_params`
 and the rest of koala tunes them with no code aware trees exist:
@@ -1458,10 +1581,33 @@ ensemble earns its keep — the classifier goes `0.75 → 0.875` and the
 regressor R² `0.419 → 0.597` against their own single deep tree, which
 memorizes the flipped rows a forest votes away.
 
-### Hyperparameters (seven, all tunable `params`)
+Large forest batches use the same ephemeral parallel-array projection as a
+single tree, once per constituent tree and prediction call. Classifier leaf
+probabilities are materialized once per leaf, then accumulated in original
+tree order into one flat row-by-class buffer before the public probability
+rows are built, preserving soft-vote rounding and ties. A requested class
+column instead uses scalar leaf values and a one-value-per-row accumulator,
+without allocating the other classes. Regressors accumulate leaf means
+directly.
+The validation summary selects the same numeric-only fast path for every tree
+when the query batch has no missing cells.
+Small queries retain direct hash descent, and the projection is never
+persisted, so `trees`, mutation visibility, OOB scoring, and payloads keep
+their existing semantics.
+`forest.leaf_indices(x)` exposes the same traversal as a sample-major matrix:
+one row per query and one preorder leaf ID per fitted tree, matching
+scikit-learn forest `apply` shape and numbering.
+
+### Hyperparameters (twelve, all tunable `params`)
 
 `n_estimators`, `max_features`, `max_depth`, `min_samples_leaf`, `seed`,
-`criterion` and `bootstrap`. `max_features` is a symbol or an integer,
+`criterion`, `bootstrap`, `ccp_alpha`, `min_impurity_decrease` and
+`min_samples_split`, `max_samples`, and `min_weight_fraction_leaf`. The
+pruning and split floors expose
+the tree's post-growth, split-time, and node-size regularization independently
+to every estimator, and
+forest `feature_importances` averages the trees' normalized impurity
+decreases. `max_features` is a symbol or an integer,
 never a fraction — `:sqrt` (the classifier default), `:log2`, `:all`
 (plain bagging, and the regressor default), or a count clamped to
 `1..n_features` — because a float hyperparameter cannot survive `params`,
@@ -1471,9 +1617,17 @@ one seeded MINSTD stream (the one `Splitter` and `KFold` use), so the same
 seed and rows give a byte-identical forest — same thresholds, same
 predictions, same payload — on both engines; a nil seed is the fixed
 default stream, not entropy, because a forest nobody can reproduce is not
-a model. `min_samples_leaf` is clamped in the constructor so
-`with_params(params)` is the identity, while `n_estimators < 1`, an
-unknown `criterion` or an unknown `max_features` make `fit` return nil
+a model. `max_samples = nil` draws `n` bootstrap rows per tree; an integer
+in `1..n` draws exactly that many, reducing training work and usually tree
+correlation at the cost of exposing each tree to less data. It is valid only
+with `bootstrap = true`, matching scikit-learn's contract.
+`min_weight_fraction_leaf` is resolved independently inside every bootstrap
+sample, so `0.05` requires either child to carry at least five percent of that
+tree's sampled weight.
+`min_samples_leaf` and `min_samples_split` are clamped in the
+constructor so `with_params(params)` is the identity, while `n_estimators < 1`, an
+invalid `max_samples` or `min_weight_fraction_leaf`, unknown `criterion` or
+unknown `max_features` make `fit` return nil
 rather than silently fall back. They round-trip through `with_params`, so
 `GridSearch` tunes them and a `Pipeline` exposes them as
 `"forest.n_estimators"`.

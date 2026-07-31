@@ -24,8 +24,9 @@
 # — exhaustive hyperparameter search scoring every point of a param grid
 # by cross-validation, through the estimator contract alone), plus model
 # inspection (PermutationImportance — repeated score ablation for any fitted
-# estimator or mixed-column Pipeline) and deployment (DecisionTreeExport —
-# deterministic standalone Tungsten source for fitted classification trees).
+# estimator or mixed-column Pipeline) and deployment (DecisionTreeExport /
+# RandomForestExport — deterministic standalone Tungsten source for fitted
+# classification and regression trees and forests).
 #
 # All estimators answer ONE declared contract (lib/estimator_base.w):
 # `is Estimable` plus `is SupervisedEstimator` or
@@ -102,6 +103,7 @@ use gaussian_nb
 use decision_tree
 use decision_tree_export
 use random_forest
+use random_forest_export
 use gradient_boosting
 use svc
 use scaler

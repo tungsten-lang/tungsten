@@ -1,5 +1,5 @@
 # Deterministic standalone Tungsten source export for fitted classification
-# trees.
+# and regression trees.
 #
 #     model = DecisionTreeClassifier.new(3).fit(x, arm_ids)
 #     artifact = DecisionTreeExport.export(
@@ -14,12 +14,15 @@
 #   * three metadata functions (`<name>_schema_version`,
 #     `<name>_schema_checksum`, and `<name>_feature_count`);
 #   * one prediction function `<name>(features, feature_schema_checksum)`;
-#   * nested `if features[i].to_f <= ~threshold` comparisons, left first,
-#     ending directly in numeric class literals.
+#   * nested comparisons that route nil / NaN by the direction learned at
+#     fit time, then test `features[i].to_f <= ~threshold`, left first,
+#     ending directly in class-label or regression-value literals.
 #
 # The prediction function REQUIRES the schema checksum as its second argument
-# and rejects a mismatched checksum or feature count. The integration should
-# pin `artifact[:schema_checksum]` independently beside the code that builds
+# and rejects a mismatched checksum or feature count. It returns nil for a
+# nonnumeric or infinite feature, while accepting nil / NaN as missing, just
+# like the fitted model. The integration should pin
+# `artifact[:schema_checksum]` independently beside the code that builds
 # `features`; taking the value from the generated helper at every call would
 # defeat the drift guard:
 #
@@ -33,17 +36,19 @@
 # feature, so reordering or renaming a feature changes it deterministically on
 # both engines.
 #
-# Classification labels must be Integer or finite Float values. Thresholds and
-# Float labels use Tungsten's `~` f64 literal with Float#to_s's round-trip
+# Leaf predictions may be Integer, finite Float, String, or Symbol values.
+# Strings and Symbols are escaped as inert Tungsten source literals, including
+# brackets that would otherwise start interpolation. Thresholds and Float
+# predictions use Tungsten's `~` f64 literal with Float#to_s's round-trip
 # representation; the exporter verifies the text parses back to the identical
-# f64 before emitting it. Non-numeric labels are refused instead of being
-# quoted into a Wassat router accidentally.
+# f64 before emitting it. Unsupported labels are refused rather than embedded
+# as executable source.
 
 + DecisionTreeExport
   # Increment when the generated function contract or checksum payload
   # changes. It is deliberately part of both the artifact and the source.
   -> .schema_version
-    1
+    2
 
   # A small cross-engine checksum whose intermediate product stays inside the
   # interpreter's 48-bit integer range:
@@ -144,14 +149,64 @@
     out = text if DecisionTreeExport.function_name?(text)
     out
 
-  # Exact source literal for a numeric classification label. Integer arms are
-  # the normal Wassat case; finite f64 labels are supported without rounding.
+  # Quote an inert Tungsten String literal. Besides the ordinary escapes,
+  # brackets must be escaped because an unescaped `[` starts interpolation in
+  # a Tungsten string. Unsupported control characters are refused instead of
+  # being copied into generated source.
+  -> .string_literal(value)
+    out = nil
+    if value != nil && value.is_a?(String)
+      slash = 92.chr
+      quote = 34.chr
+      left_bracket = 91.chr
+      right_bracket = 93.chr
+      parts = []
+      ok = true
+      chars = value.chars
+      i = 0
+      while i < chars.size
+        ch = chars[i]
+        piece = ch
+        if ch == slash
+          piece = slash + slash
+        elsif ch == quote
+          piece = slash + quote
+        elsif ch == "\n"
+          piece = slash + "n"
+        elsif ch == "\r"
+          piece = slash + "r"
+        elsif ch == "\t"
+          piece = slash + "t"
+        elsif ch == left_bracket
+          piece = slash + left_bracket
+        elsif ch == right_bracket
+          piece = slash + right_bracket
+        elsif ch == 27.chr
+          piece = slash + "e"
+        elsif ch == 0.chr
+          piece = slash + "0"
+        elsif ch.ord < 32 || ch.ord == 127
+          ok = false
+        parts.push(piece) if ok
+        i += 1
+      out = quote + parts.join("") + quote if ok
+    out
+
+  # Exact source literal for a supported classification label or regression
+  # value. Integer arms remain the normal Wassat case; finite f64 labels are
+  # supported without rounding, while Strings and Symbols preserve their
+  # runtime type.
   -> .prediction_literal(value)
     out = nil
     if value != nil && value.is_a?(Integer)
       out = value.to_s
     elsif value != nil && value.is_a?(Float)
       out = DecisionTreeExport.float_literal(value)
+    elsif value != nil && value.is_a?(String)
+      out = DecisionTreeExport.string_literal(value)
+    elsif value != nil && value.is_a?(Symbol)
+      literal = DecisionTreeExport.string_literal(value.to_s)
+      out = literal + ".to_sym" if literal != nil
     out
 
   # Float#to_s is specified to produce a round-trip f64 spelling. Verify that
@@ -185,14 +240,30 @@
     elsif ok && node[:leaf] == false
       feature = node[:feature]
       threshold = node[:threshold]
+      missing_left = node[:missing_left]
       threshold_literal = nil
       threshold_literal = DecisionTreeExport.float_literal(threshold) if threshold != nil
       ok = false if feature == nil || !feature.is_a?(Integer)
       ok = false if feature != nil && (feature < 0 || feature >= feature_count)
       ok = false if threshold_literal == nil
       ok = false if node[:left] == nil || node[:right] == nil
+      # Trees persisted before schema v2 have no learned missing direction.
+      # Match live prediction's compatible fallback: larger child, ties right.
+      if ok && missing_left == nil
+        left_weight = node[:left][:weight]
+        right_weight = node[:right][:weight]
+        ok = false if left_weight == nil || right_weight == nil
+        missing_left = left_weight > right_weight if ok
+      elsif ok && missing_left != true && missing_left != false
+        ok = false
       if ok
-        lines.push(indent + "if features\[" + feature.to_s + "\].to_f <= " + threshold_literal)
+        cell = "features\[" + feature.to_s + "\]"
+        condition = nil
+        if missing_left
+          condition = cell + " == nil || (type(" + cell + ") == \"Float\" && " + cell + " != " + cell + ") || " + cell + ".to_f <= " + threshold_literal
+        else
+          condition = cell + " != nil && (type(" + cell + ") != \"Float\" || " + cell + " == " + cell + ") && " + cell + ".to_f <= " + threshold_literal
+        lines.push(indent + "if " + condition)
         ok = DecisionTreeExport.render_node(node[:left], feature_count, indent + "  ", lines)
       if ok
         lines.push(indent + "else")
@@ -203,9 +274,10 @@
 
   # Return a self-describing artifact hash, or nil for an unfitted/wrong model,
   # an invalid schema/function name, a malformed tree, a non-finite threshold,
-  # or a non-numeric class prediction.
+  # or an unsupported prediction.
   -> .export(model, feature_names, function_name = nil)
-    ok = model != nil && model.is_a?(DecisionTreeClassifier)
+    ok = model != nil
+    ok = model.is_a?(DecisionTreeClassifier) || model.is_a?(DecisionTreeRegressor) if ok
     ok = model.fitted? if ok
     ok = model.tree != nil && model.n_features != nil if ok
     names = nil
@@ -244,6 +316,13 @@
       feature_word = "features"
       feature_word = "feature" if count == 1
       lines.push("  raise \"" + name + ": expected " + count.to_s + " " + feature_word + "\" if features.size != " + count.to_s)
+      lines.push("  i = 0")
+      lines.push("  while i < features.size")
+      lines.push("    cell = features\[i\]")
+      lines.push("    kind = type(cell)")
+      lines.push("    valid = cell == nil || kind == \"Integer\" || (kind == \"Float\" && (cell != cell || cell - cell == 0.to_f))")
+      lines.push("    return nil if !valid")
+      lines.push("    i += 1")
       rendered = DecisionTreeExport.render_node(model.tree, count, "  ", lines)
       if rendered
         source = lines.join("\n") + "\n"

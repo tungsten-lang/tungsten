@@ -1230,24 +1230,30 @@ describe "Decision tree estimator contract" ->
     expect(DecisionTreeRegressor.new.supervised?).to be_true
     expect(DecisionTreeClassifier.new.fitted?).to be_false
 
-  it "reports all four hyperparameters and nothing learned" ->
+  it "reports all seven hyperparameters and nothing learned" ->
     m = DecisionTreeClassifier.new(3, 4, 2, :entropy)
-    expect(m.params.size).to eq(4)
+    expect(m.params.size).to eq(7)
     expect(m.params[:max_depth]).to eq(3)
     expect(m.params[:min_samples_split]).to eq(4)
     expect(m.params[:min_samples_leaf]).to eq(2)
     expect(m.params[:criterion].to_s).to eq("entropy")
-    # the defaults: unlimited depth, sklearn's 2 / 1, gini
+    expect(m.params[:ccp_alpha]).to eq(0)
+    expect(m.params[:min_impurity_decrease]).to eq(0)
+    expect(m.params[:min_weight_fraction_leaf]).to eq(0)
+    # the defaults: unlimited depth, sklearn's 2 / 1, gini, no pruning
     d = DecisionTreeClassifier.new
     expect(d.params[:max_depth]).to be_nil
     expect(d.params[:min_samples_split]).to eq(2)
     expect(d.params[:min_samples_leaf]).to eq(1)
     expect(d.params[:criterion].to_s).to eq("gini")
+    expect(d.params[:ccp_alpha]).to eq(0)
+    expect(d.params[:min_impurity_decrease]).to eq(0)
+    expect(d.params[:min_weight_fraction_leaf]).to eq(0)
     expect(DecisionTreeRegressor.new.params[:criterion].to_s).to eq("mse")
     # fitting adds no key — the tree itself never leaks into the search space
     m.fit([[0], [1], [10], [11]], [0, 0, 1, 1])
     expect(m.fitted?).to be_true
-    expect(m.params.size).to eq(4)
+    expect(m.params.size).to eq(7)
     expect(m.params[:max_depth]).to eq(3)
 
   it "round-trips params through with_params and clones unfitted" ->
@@ -1679,12 +1685,17 @@ describe "Estimator input coercion" ->
   # Coercion is defined ONCE on the neutral base — no estimator depends on a
   # concrete sibling for it any more.
   it "normalizes every accepted x shape from the neutral base" ->
+    expect(Estimator.feature_rows(nil)).to be_nil
     expect(Estimator.feature_rows([1, 2, 3]).to_s).to eq("\[\[1\], \[2\], \[3\]\]")
     expect(Estimator.feature_rows([[1, 2], [3, 4]]).to_s).to eq("\[\[1, 2\], \[3, 4\]\]")
     expect(Estimator.feature_rows([]).to_s).to eq("\[\]")
     expect(Estimator.feature_rows(Matrix.new([[1, 2], [3, 4]])).to_s).to eq("\[\[1, 2\], \[3, 4\]\]")
-    df = DataFrame.new([[:a, [1, 2]], [:b, [3, 4]]])
-    expect(Estimator.feature_rows(df).to_s).to eq("\[\[1, 3\], \[2, 4\]\]")
+    df = DataFrame.new([
+      [:name, ["left", "right"]],
+      [:a, [1.to_f / 2.to_f, 3.to_f / 2.to_f]],
+      [:b, [3.to_f, 4.to_f]]
+    ])
+    expect(Estimator.feature_rows(df).to_s).to eq("\[\[0.5, 3\], \[1.5, 4\]\]")
 
   it "normalizes every accepted y shape from the neutral base" ->
     expect(Estimator.target_values([1, 2]).to_s).to eq("\[1, 2\]")

@@ -12,8 +12,11 @@
 #     model.tree_count                 # how many actually grew
 #
 #     RandomForestClassifier.new(n_estimators, max_features, max_depth,
-#                                min_samples_leaf, seed, criterion, bootstrap)
-#     RandomForestRegressor.new(...the same seven...)
+#                                min_samples_leaf, seed, criterion, bootstrap,
+#                                ccp_alpha, min_impurity_decrease,
+#                                min_samples_split, max_samples,
+#                                min_weight_fraction_leaf)
+#     RandomForestRegressor.new(...the same twelve...)
 #
 # Where lib/decision_tree.w grows ONE tree, a forest grows many and
 # averages them. That is the whole idea, and it is worth being precise
@@ -88,7 +91,7 @@
 # default stream, not entropy (core Random exposes no seeded PRNG, and a
 # forest nobody can reproduce is not a model).
 #
-# --- Hyperparameters (seven, all real tunable `params`) ---
+# --- Hyperparameters (twelve, all real tunable `params`) ---
 #
 #     n_estimators       trees in the forest (default 10)
 #     max_features       features considered PER SPLIT:
@@ -104,6 +107,17 @@
 #     criterion          :gini / :entropy (classifier), :mse (regressor)
 #     bootstrap          true (default) = resample per tree; false = every
 #                        tree sees the whole sample
+#     ccp_alpha          minimal cost-complexity pruning strength (>= 0);
+#                        0 (default) keeps each fully grown tree
+#     min_impurity_decrease
+#                        minimum root-weighted impurity decrease required to
+#                        grow a split in each tree (>= 0)
+#     min_samples_split  a node smaller than this is never split (>= 2)
+#     max_samples        nil draws n bootstrap rows per tree; an Integer draws
+#                        that many (1..n), reducing fit cost and tree correlation
+#     min_weight_fraction_leaf
+#                        minimum fraction of each tree's bootstrap weight
+#                        required in either child (0..0.5)
 #
 # `max_features` is a SYMBOL or an INTEGER, never a fraction: a float
 # hyperparameter would have to survive `params`, `with_params`, a grid
@@ -115,14 +129,14 @@
 # max_features: [:sqrt, :all] }, 3)` — and a Pipeline exposes them as
 # "forest.n_estimators".
 #
-# CLAMPING follows lib/decision_tree.w: `min_samples_leaf` is clamped in
-# the CONSTRUCTOR, so `params` reports the value actually in force and
-# `m.with_params(m.params)` is the identity. `n_estimators` is NOT clamped,
-# deliberately — it is a size, not a bound, and "grow me zero trees" is a
-# request that cannot be honoured rather than one to quietly round up, so
-# it is checked at fit and makes fit return nil. A `max_features` or a
-# `criterion` this forest does not know does the same, never a silent
-# fallback.
+# CLAMPING follows lib/decision_tree.w: `min_samples_leaf` and
+# `min_samples_split` are clamped in the CONSTRUCTOR, so `params` reports
+# the values actually in force and `m.with_params(m.params)` is the
+# identity. `n_estimators` is NOT clamped, deliberately — it is a size,
+# not a bound, and "grow me zero trees" is a request that cannot be honoured
+# rather than one to quietly round up, so it is checked at fit and makes fit
+# return nil. A `max_features` or a `criterion` this forest does not know
+# does the same, never a silent fallback.
 #
 # --- The pinned relationship to a single tree ---
 #
@@ -138,11 +152,6 @@
 # just the predictions. It is the plumbing test: if bagging, subsampling
 # and averaging are wired correctly, switching them all off has to land
 # back on the tree they were built from.
-#
-# `min_samples_split` is not a forest hyperparameter — the trees use the
-# tree default (2). A forest controls complexity with `max_depth` and
-# `min_samples_leaf`; a third size knob would add a search dimension that
-# does nothing bagging does not already do.
 #
 # Accepted shapes are the estimators' shared ones (Estimator.feature_rows /
 # .target_values): x is a DataFrame, a Matrix, an array of row arrays or a
@@ -225,17 +234,19 @@
   # --- The bootstrap ---
 
   # How many times each of n rows was drawn in one bootstrap resample of
-  # size n, drawn WITH REPLACEMENT from `state`. A while loop over explicit
-  # indices accumulates the counter, the state and the counts vector.
-  -> .draw_counts(n, state)
+  # size `draws` (n by default), drawn WITH REPLACEMENT from `state`. A while
+  # loop over explicit indices accumulates the counter, state and counts.
+  -> .draw_counts(n, state, draws = nil)
     counts = []
     i = 0
     while i < n
       counts.push(0)
       i += 1
     st = state
+    draw_count = draws
+    draw_count = n if draw_count == nil
     d = 0
-    while d < n
+    while d < draw_count
       st = RandomForest.step(st)
       j = st % n
       counts[j] = counts[j] + 1
@@ -249,11 +260,11 @@
   # rows are dropped through the neutral Estimator.drop_zero_weights, and
   # their indices come back as `oob`. With it OFF every tree gets the whole
   # sample and the caller's weights untouched, and `oob` is empty.
-  -> .sample_of(rows, ys, wts, state, bootstrap)
+  -> .sample_of(rows, ys, wts, state, bootstrap, max_samples = nil)
     out = { rows: rows, ys: ys, wts: wts, oob: [] }
     if bootstrap
       n = rows.size
-      counts = RandomForest.draw_counts(n, state)
+      counts = RandomForest.draw_counts(n, state, max_samples)
       w = []
       oob = []
       i = 0
@@ -271,9 +282,10 @@
 
   # Every tree, as { trees: [root, ...], oob: [[index, ...], ...] }.
   #
-  # `plan` carries what the loop needs: k / classes / nf / limit / min_leaf
-  # / crit (the tree cfg), plus m (features per split), n_estimators,
-  # bootstrap and seed. Each tree draws TWO states off the master stream —
+  # `plan` carries what the loop needs: k / classes / nf / limit / min_split /
+  # min_leaf / crit (the tree cfg), plus m (features per split), n_estimators,
+  # bootstrap, max_samples, min_weight_fraction_leaf and seed. Each tree
+  # draws TWO states off the master stream —
   # one for its bootstrap, one for its per-split feature draws — so the two
   # sources of randomness cannot alias, and tree t's stream does not depend
   # on how many nodes tree t-1 happened to grow.
@@ -297,9 +309,15 @@
       boot_state = st
       st = RandomForest.step(st)
       feat_state = st
-      sample = RandomForest.sample_of(rows, ys, wts, boot_state, plan[:bootstrap])
-      cfg = { k: plan[:k], classes: plan[:classes], nf: nf, limit: plan[:limit], min_split: 2, min_leaf: plan[:min_leaf], crit: plan[:crit], max_features: mf, rng: feat_state }
-      trees.push(DecisionTree.build(sample[:rows], sample[:ys], sample[:wts], cfg, 0))
+      sample = RandomForest.sample_of(
+        rows, ys, wts, boot_state, plan[:bootstrap], plan[:max_samples]
+      )
+      root_weight = Estimator.weight_total(sample[:wts], sample[:rows].size).to_f
+      min_leaf_weight = plan[:min_weight_fraction_leaf] * root_weight
+      cfg = { k: plan[:k], classes: plan[:classes], nf: nf, limit: plan[:limit], min_split: plan[:min_split], min_leaf: plan[:min_leaf], min_leaf_weight: min_leaf_weight, crit: plan[:crit], max_features: mf, rng: feat_state, min_gain: plan[:min_gain], root_weight: root_weight }
+      tree = DecisionTree.build(sample[:rows], sample[:ys], sample[:wts], cfg, 0)
+      DecisionTree.prune(tree, plan[:ccp_alpha])
+      trees.push(tree)
       oob.push(sample[:oob])
       t += 1
     { trees: trees, oob: oob }
@@ -350,6 +368,110 @@
       e += 1
     out
 
+  # Batch soft voting projects each hash tree once, then walks its parallel
+  # arrays for every row. Full probabilities accumulate in one flat row*class
+  # buffer; a requested class column uses one scalar per row and per leaf, never
+  # constructing the other class values. Passing `labels` emits the winning
+  # label directly from those same totals: predict therefore avoids allocating
+  # and normalizing a probability row only to scan it again for argmax.
+  # Tree order within each row is unchanged, preserving floating-point
+  # accumulation and tie behavior exactly. Small batches keep direct hash
+  # descent so flattening a large forest cannot dominate one prediction.
+  -> .vote_rows(trees, rows, k, missing_possible = true, class_index = nil, labels = nil)
+    out = []
+    if rows.size < 32
+      rows.each -> (row)
+        if class_index == nil
+          probability = RandomForest.vote_row(trees, row, k)
+          if labels == nil
+            out.push(probability)
+          else
+            out.push(labels[RandomForest.argmax(probability)])
+        else
+          acc = 0.to_f
+          trees.each -> (tree)
+            leaf = DecisionTree.descend(tree, row)
+            acc += leaf[:counts][class_index].to_f / leaf[:weight].to_f
+          out.push(acc / trees.size.to_f)
+    else
+      votes = []
+      vote_count = rows.size
+      vote_count = rows.size * k if class_index == nil
+      vote_count.times -> (i)
+        votes.push(0.to_f)
+      trees.each -> (tree)
+        program = DecisionTree.prediction_program(tree, true, class_index)
+        features = program[0]
+        thresholds = program[1]
+        missing_directions = program[2]
+        left_indices = program[3]
+        right_indices = program[4]
+        probabilities = program[6]
+        i = 0
+        while i < rows.size
+          row = rows[i]
+          index = 0
+          if missing_possible
+            while features[index] >= 0
+              value = row[features[index]]
+              missing = DecisionTree.missing?(value)
+              go_left = missing_directions[index]
+              go_left = value <= thresholds[index] if !missing
+              if go_left
+                index = left_indices[index]
+              else
+                index = right_indices[index]
+          else
+            while features[index] >= 0
+              value = row[features[index]]
+              go_left = value <= thresholds[index]
+              if go_left
+                index = left_indices[index]
+              else
+                index = right_indices[index]
+          probability = probabilities[index]
+          if class_index == nil
+            offset = i * k
+            c = 0
+            while c < k
+              votes[offset + c] += probability[c]
+              c += 1
+          else
+            votes[i] += probability
+          i += 1
+      divisor = trees.size.to_f
+      if class_index == nil
+        i = 0
+        while i < rows.size
+          offset = i * k
+          if labels == nil
+            probability = []
+            c = 0
+            while c < k
+              probability.push(votes[offset + c] / divisor)
+              c += 1
+            out.push(probability)
+          else
+            # Compare the normalized values, as predict_proba + argmax did,
+            # so even a floating-point near-tie retains the old result.
+            best = 0
+            best_probability = votes[offset] / divisor
+            c = 1
+            while c < k
+              candidate = votes[offset + c] / divisor
+              if candidate > best_probability
+                best = c
+                best_probability = candidate
+              c += 1
+            out.push(labels[best])
+          i += 1
+      else
+        i = 0
+        while i < votes.size
+          out.push(votes[i] / divisor)
+          i += 1
+    out
+
   # One row's regression prediction: the plain MEAN of the trees' leaf
   # means.
   -> .mean_row(trees, row)
@@ -358,9 +480,74 @@
     t = 0
     while t < nt
       leaf = DecisionTree.descend(trees[t], row)
-      acc += leaf[:prediction].to_f
+      acc += leaf[:prediction]
       t += 1
     acc / nt.to_f
+
+  -> .mean_rows(trees, rows, missing_possible = true)
+    out = []
+    if rows.size < 32
+      rows.each -> (row)
+        out.push(RandomForest.mean_row(trees, row))
+    else
+      rows.size.times -> (i)
+        out.push(0.to_f)
+      trees.each -> (tree)
+        program = DecisionTree.prediction_program(tree)
+        features = program[0]
+        thresholds = program[1]
+        missing_directions = program[2]
+        left_indices = program[3]
+        right_indices = program[4]
+        predictions = program[5]
+        i = 0
+        while i < rows.size
+          row = rows[i]
+          index = 0
+          if missing_possible
+            while features[index] >= 0
+              value = row[features[index]]
+              missing = DecisionTree.missing?(value)
+              go_left = missing_directions[index]
+              go_left = value <= thresholds[index] if !missing
+              if go_left
+                index = left_indices[index]
+              else
+                index = right_indices[index]
+          else
+            while features[index] >= 0
+              value = row[features[index]]
+              go_left = value <= thresholds[index]
+              if go_left
+                index = left_indices[index]
+              else
+                index = right_indices[index]
+          out[i] += predictions[index]
+          i += 1
+      divisor = trees.size.to_f
+      i = 0
+      while i < out.size
+        out[i] = out[i] / divisor
+        i += 1
+    out
+
+  # One row per sample and one column per fitted tree, containing each
+  # reached leaf's zero-based preorder node index. This is the matrix shape
+  # and numbering of scikit-learn's forest `apply`. Project each tree once,
+  # then transpose its leaf-index column into the public row-major result.
+  -> .leaf_index_rows(trees, rows, missing_possible = true)
+    out = []
+    rows.size.times -> (i)
+      out.push([])
+    trees.each -> (tree)
+      indices = DecisionTree.batch_leaf_indices(
+        tree, rows, missing_possible
+      )
+      i = 0
+      while i < indices.size
+        out[i].push(indices[i])
+        i += 1
+    out
 
   # --- Out-of-bag scoring ---
 
@@ -477,12 +664,33 @@
   -> .shapes_ok?(rows, targets)
     ok = rows != nil && targets != nil
     ok = rows.size > 0 && rows.size == targets.size if ok
-    ok = rows[0].size > 0 if ok
-    if ok
-      width = rows[0].size
-      rows.each -> (r)
-        ok = false if r.size != width
+    ok = DecisionTree.usable_rows?(rows) if ok
     ok
+
+  # Mean of each tree's normalized impurity importance, normalized once
+  # more for numerical stability. This gives every estimator in the ensemble
+  # equal influence even when weighted bootstraps have different root totals.
+  -> .feature_importances(trees, n_features)
+    out = []
+    i = 0
+    while i < n_features
+      out.push(0.to_f)
+      i += 1
+    trees.each -> (tree)
+      one = DecisionTree.feature_importances(tree, n_features)
+      i = 0
+      while i < out.size
+        out[i] += one[i]
+        i += 1
+    total = 0.to_f
+    out.each -> (value)
+      total += value
+    if total > 0.to_f
+      i = 0
+      while i < out.size
+        out[i] = out[i] / total
+        i += 1
+    out
 
 # A bagged forest of CART classification trees: bootstrap resampling,
 # per-split feature subsampling, and a soft vote over the ensemble. See the
@@ -503,8 +711,13 @@
   ro :seed               # MINSTD seed; nil = the default stream
   ro :criterion          # :gini (default) or :entropy
   ro :bootstrap          # true (default) = resample per tree
+  ro :ccp_alpha          # >= 0; applied independently to every grown tree
+  ro :min_impurity_decrease # >= 0; minimum root-weighted split gain
+  ro :min_samples_split  # >= 2; node-size floor for every grown tree
+  ro :max_samples        # nil = n bootstrap draws; Integer = 1..n draws
+  ro :min_weight_fraction_leaf # 0..0.5 within each bootstrap sample
 
-  -> new(n_estimators = nil, max_features = nil, max_depth = nil, min_samples_leaf = nil, seed = nil, criterion = nil, bootstrap = nil)
+  -> new(n_estimators = nil, max_features = nil, max_depth = nil, min_samples_leaf = nil, seed = nil, criterion = nil, bootstrap = nil, ccp_alpha = nil, min_impurity_decrease = nil, min_samples_split = nil, max_samples = nil, min_weight_fraction_leaf = nil)
     ne = n_estimators
     ne = 10 if ne == nil
     ml = min_samples_leaf
@@ -514,6 +727,18 @@
     cr = :gini if cr == nil
     bs = bootstrap
     bs = true if bs == nil
+    alpha = ccp_alpha
+    alpha = 0.to_f if alpha == nil
+    alpha = alpha.to_f
+    min_gain = min_impurity_decrease
+    min_gain = 0.to_f if min_gain == nil
+    min_gain = min_gain.to_f
+    min_split = min_samples_split
+    min_split = 2 if min_split == nil
+    min_split = 2 if min_split < 2
+    min_weight_fraction = min_weight_fraction_leaf
+    min_weight_fraction = 0.to_f if min_weight_fraction == nil
+    min_weight_fraction = min_weight_fraction.to_f
     @n_estimators = ne
     @max_features = max_features
     @max_depth = max_depth
@@ -521,6 +746,11 @@
     @seed = seed
     @criterion = cr
     @bootstrap = bs
+    @ccp_alpha = alpha
+    @min_impurity_decrease = min_gain
+    @min_samples_split = min_split
+    @max_samples = max_samples
+    @min_weight_fraction_leaf = min_weight_fraction
     @fitted = false
     @classes = nil
     @trees = nil
@@ -534,6 +764,14 @@
   -> tree_count
     out = nil
     out = @trees.size if @fitted
+    out
+
+  # Mean of the trees' normalized impurity importances, normalized once
+  # more for numerical stability. A feature unused by every tree is zero;
+  # an all-stump forest returns all zeros.
+  -> feature_importances
+    out = nil
+    out = RandomForest.feature_importances(@trees, @n_features) if @fitted
     out
 
   # --- Estimable contract (see lib/estimator_base.w) ---
@@ -550,9 +788,9 @@
   -> supports_sample_weight?
     true
 
-  # The seven knobs a search varies — never the grown trees.
+  # The twelve knobs a search varies — never the grown trees.
   -> params
-    { n_estimators: @n_estimators, max_features: @max_features, max_depth: @max_depth, min_samples_leaf: @min_samples_leaf, seed: @seed, criterion: @criterion, bootstrap: @bootstrap }
+    { n_estimators: @n_estimators, max_features: @max_features, max_depth: @max_depth, min_samples_leaf: @min_samples_leaf, seed: @seed, criterion: @criterion, bootstrap: @bootstrap, ccp_alpha: @ccp_alpha, min_impurity_decrease: @min_impurity_decrease, min_samples_split: @min_samples_split, max_samples: @max_samples, min_weight_fraction_leaf: @min_weight_fraction_leaf }
 
   # A NEW, UNFITTED RandomForestClassifier with `overrides` applied; self is
   # left untouched. Unmentioned keys carry over, so with_params(params)
@@ -565,7 +803,12 @@
     sd = Estimator.opt(overrides, :seed, @seed)
     cr = Estimator.opt(overrides, :criterion, @criterion)
     bs = Estimator.opt(overrides, :bootstrap, @bootstrap)
-    RandomForestClassifier.new(ne, mf, md, ml, sd, cr, bs)
+    alpha = Estimator.opt(overrides, :ccp_alpha, @ccp_alpha)
+    min_gain = Estimator.opt(overrides, :min_impurity_decrease, @min_impurity_decrease)
+    min_split = Estimator.opt(overrides, :min_samples_split, @min_samples_split)
+    max_samples = Estimator.opt(overrides, :max_samples, @max_samples)
+    min_weight_fraction = Estimator.opt(overrides, :min_weight_fraction_leaf, @min_weight_fraction_leaf)
+    RandomForestClassifier.new(ne, mf, md, ml, sd, cr, bs, alpha, min_gain, min_split, max_samples, min_weight_fraction)
 
   # --- Fit ---
 
@@ -586,6 +829,14 @@
     ok = RandomForest.shapes_ok?(rows, labels)
     ok = false if !DecisionTree.criterion_ok?(@criterion, false)
     ok = false if @n_estimators < 1
+    ok = false if @ccp_alpha < 0.to_f
+    ok = false if @min_impurity_decrease < 0.to_f
+    ok = false if @min_weight_fraction_leaf < 0.to_f
+    ok = false if @min_weight_fraction_leaf > 1.to_f / 2.to_f
+    if @max_samples != nil
+      ok = false if !@max_samples.is_a?(Integer)
+      ok = false if @max_samples.is_a?(Integer) && @max_samples < 1
+      ok = false if !@bootstrap
     wts = nil
     wts = Estimator.weight_values(sample_weight, rows.size) if ok && sample_weight != nil
     ok = false if sample_weight != nil && wts == nil
@@ -594,6 +845,7 @@
       rows = trimmed[:rows]
       labels = trimmed[:targets]
       wts = trimmed[:weights]
+    ok = false if ok && @max_samples != nil && @max_samples > rows.size
     nf = 0
     nf = rows[0].size if ok
     mf = -1
@@ -610,7 +862,7 @@
       limit = @max_depth
       limit = -1 if limit == nil
       limit = 0 if limit < 0 && @max_depth != nil
-      plan = { k: classes.size, classes: classes, nf: nf, limit: limit, min_leaf: @min_samples_leaf, crit: @criterion.to_s, m: mf, n_estimators: @n_estimators, bootstrap: @bootstrap, seed: @seed }
+      plan = { k: classes.size, classes: classes, nf: nf, limit: limit, min_split: @min_samples_split, min_leaf: @min_samples_leaf, min_weight_fraction_leaf: @min_weight_fraction_leaf, crit: @criterion.to_s, m: mf, n_estimators: @n_estimators, bootstrap: @bootstrap, max_samples: @max_samples, seed: @seed, ccp_alpha: @ccp_alpha, min_gain: @min_impurity_decrease }
       grown = RandomForest.grow(rows, ys, wts, plan)
       @classes = classes
       @n_features = nf
@@ -628,11 +880,19 @@
     rows = Estimator.feature_rows(x) if @fitted
     out = nil
     if rows != nil
-      nf = @n_features
-      ok = true
-      rows.each -> (r)
-        ok = false if r.size != nf
-      out = rows if ok
+      status = DecisionTree.row_status(rows, true, @n_features)
+      out = rows if status >= 0
+    out
+
+  # Zero-based preorder leaf ID for every [sample, tree], matching the shape
+  # of scikit-learn's RandomForestClassifier.apply.
+  -> leaf_indices(x)
+    rows = nil
+    rows = Estimator.feature_rows(x) if @fitted
+    out = nil
+    if rows != nil
+      status = DecisionTree.row_status(rows, true, @n_features)
+      out = RandomForest.leaf_index_rows(@trees, rows, status > 0) if status >= 0
     out
 
   # The ensemble's mean class distribution per row. With no label: one
@@ -641,36 +901,36 @@
   # Metrics.log_loss. nil before fit, on a width mismatch, or for a label
   # the fit never saw.
   -> predict_proba(x, pos_label = nil)
-    rows = self.query_rows(x)
+    rows = nil
+    rows = Estimator.feature_rows(x) if @fitted
     out = nil
     if rows != nil
-      trees = @trees
-      k = @classes.size
-      probs = []
-      rows.each -> (r)
-        probs.push(RandomForest.vote_row(trees, r, k))
-      if pos_label == nil
-        out = probs
-      else
-        idx = DecisionTree.label_index(@classes, pos_label)
-        if idx >= 0
-          col = []
-          probs.each -> (p)
-            col.push(p[idx])
-          out = col
+      status = DecisionTree.row_status(rows, true, @n_features)
+      if status >= 0
+        trees = @trees
+        k = @classes.size
+        if pos_label == nil
+          out = RandomForest.vote_rows(trees, rows, k, status > 0)
+        else
+          idx = DecisionTree.label_index(@classes, pos_label)
+          if idx >= 0
+            out = RandomForest.vote_rows(trees, rows, k, status > 0, idx)
     out
 
   # Predicted labels for x: the class with the largest mean probability,
-  # ties to the first-seen label.
+  # ties to the first-seen label. The batch voter emits labels directly so
+  # this does not materialize a probability matrix that the caller did not
+  # request.
   -> predict(x)
-    probs = self.predict_proba(x)
     out = nil
-    if probs != nil
-      classes = @classes
-      preds = []
-      probs.each -> (p)
-        preds.push(classes[RandomForest.argmax(p)])
-      out = preds
+    rows = nil
+    rows = Estimator.feature_rows(x) if @fitted
+    if rows != nil
+      status = DecisionTree.row_status(rows, true, @n_features)
+      if status >= 0
+        out = RandomForest.vote_rows(
+          @trees, rows, @classes.size, status > 0, nil, @classes
+        )
     out
 
   # Accuracy (Metrics.accuracy) of self's predictions on x against y,
@@ -698,7 +958,7 @@
   # the forest is a plain ARRAY of those, so the format's generic array and
   # hash nodes carry the whole recursion for free.
   -> to_state
-    { n_estimators: @n_estimators, max_features: @max_features, max_depth: @max_depth, min_samples_leaf: @min_samples_leaf, seed: @seed, criterion: @criterion, bootstrap: @bootstrap, classes: @classes, trees: @trees, n_features: @n_features, oob_score: @oob_score }
+    { n_estimators: @n_estimators, max_features: @max_features, max_depth: @max_depth, min_samples_leaf: @min_samples_leaf, seed: @seed, criterion: @criterion, bootstrap: @bootstrap, ccp_alpha: @ccp_alpha, min_impurity_decrease: @min_impurity_decrease, min_samples_split: @min_samples_split, max_samples: @max_samples, min_weight_fraction_leaf: @min_weight_fraction_leaf, classes: @classes, trees: @trees, n_features: @n_features, oob_score: @oob_score }
 
   -> .load_state(st)
     out = nil
@@ -706,7 +966,7 @@
     ok = st[:n_estimators] != nil && st[:min_samples_leaf] != nil && st[:criterion] != nil if ok
     ok = st[:classes] != nil && st[:trees] != nil && st[:n_features] != nil if ok
     if ok
-      model = RandomForestClassifier.new(st[:n_estimators], st[:max_features], st[:max_depth], st[:min_samples_leaf], st[:seed], st[:criterion], st[:bootstrap])
+      model = RandomForestClassifier.new(st[:n_estimators], st[:max_features], st[:max_depth], st[:min_samples_leaf], st[:seed], st[:criterion], st[:bootstrap], st[:ccp_alpha], st[:min_impurity_decrease], st[:min_samples_split], st[:max_samples], st[:min_weight_fraction_leaf])
       out = model.restore_state(st)
     out
 
@@ -742,17 +1002,33 @@
   ro :seed               # MINSTD seed; nil = the default stream
   ro :criterion          # :mse (default; :variance is accepted as an alias)
   ro :bootstrap          # true (default) = resample per tree
+  ro :ccp_alpha          # >= 0; applied independently to every grown tree
+  ro :min_impurity_decrease # >= 0; minimum root-weighted split gain
+  ro :min_samples_split  # >= 2; node-size floor for every grown tree
+  ro :max_samples        # nil = n bootstrap draws; Integer = 1..n draws
+  ro :min_weight_fraction_leaf # 0..0.5 within each bootstrap sample
 
-  -> new(n_estimators = nil, max_features = nil, max_depth = nil, min_samples_leaf = nil, seed = nil, criterion = nil, bootstrap = nil)
+  -> new(n_estimators = nil, max_features = nil, max_depth = nil, min_samples_leaf = nil, seed = nil, criterion = nil, bootstrap = nil, ccp_alpha = nil, min_impurity_decrease = nil, min_samples_split = nil, max_samples = nil, min_weight_fraction_leaf = nil)
     ne = n_estimators
     ne = 10 if ne == nil
     ml = min_samples_leaf
     ml = 1 if ml == nil
-    ml = 1 if ml < 1
     cr = criterion
     cr = :mse if cr == nil
     bs = bootstrap
     bs = true if bs == nil
+    alpha = ccp_alpha
+    alpha = 0.to_f if alpha == nil
+    alpha = alpha.to_f
+    min_gain = min_impurity_decrease
+    min_gain = 0.to_f if min_gain == nil
+    min_gain = min_gain.to_f
+    min_split = min_samples_split
+    min_split = 2 if min_split == nil
+    min_split = 2 if min_split < 2
+    min_weight_fraction = min_weight_fraction_leaf
+    min_weight_fraction = 0.to_f if min_weight_fraction == nil
+    min_weight_fraction = min_weight_fraction.to_f
     @n_estimators = ne
     @max_features = max_features
     @max_depth = max_depth
@@ -760,6 +1036,11 @@
     @seed = seed
     @criterion = cr
     @bootstrap = bs
+    @ccp_alpha = alpha
+    @min_impurity_decrease = min_gain
+    @min_samples_split = min_split
+    @max_samples = max_samples
+    @min_weight_fraction_leaf = min_weight_fraction
     @fitted = false
     @trees = nil
     @n_features = nil
@@ -771,6 +1052,12 @@
   -> tree_count
     out = nil
     out = @trees.size if @fitted
+    out
+
+  # Mean normalized MSE decrease across the fitted trees; nil before fit.
+  -> feature_importances
+    out = nil
+    out = RandomForest.feature_importances(@trees, @n_features) if @fitted
     out
 
   # --- Estimable contract (see lib/estimator_base.w) ---
@@ -785,7 +1072,7 @@
     true
 
   -> params
-    { n_estimators: @n_estimators, max_features: @max_features, max_depth: @max_depth, min_samples_leaf: @min_samples_leaf, seed: @seed, criterion: @criterion, bootstrap: @bootstrap }
+    { n_estimators: @n_estimators, max_features: @max_features, max_depth: @max_depth, min_samples_leaf: @min_samples_leaf, seed: @seed, criterion: @criterion, bootstrap: @bootstrap, ccp_alpha: @ccp_alpha, min_impurity_decrease: @min_impurity_decrease, min_samples_split: @min_samples_split, max_samples: @max_samples, min_weight_fraction_leaf: @min_weight_fraction_leaf }
 
   -> with_params(overrides)
     ne = Estimator.opt(overrides, :n_estimators, @n_estimators)
@@ -795,7 +1082,12 @@
     sd = Estimator.opt(overrides, :seed, @seed)
     cr = Estimator.opt(overrides, :criterion, @criterion)
     bs = Estimator.opt(overrides, :bootstrap, @bootstrap)
-    RandomForestRegressor.new(ne, mf, md, ml, sd, cr, bs)
+    alpha = Estimator.opt(overrides, :ccp_alpha, @ccp_alpha)
+    min_gain = Estimator.opt(overrides, :min_impurity_decrease, @min_impurity_decrease)
+    min_split = Estimator.opt(overrides, :min_samples_split, @min_samples_split)
+    max_samples = Estimator.opt(overrides, :max_samples, @max_samples)
+    min_weight_fraction = Estimator.opt(overrides, :min_weight_fraction_leaf, @min_weight_fraction_leaf)
+    RandomForestRegressor.new(ne, mf, md, ml, sd, cr, bs, alpha, min_gain, min_split, max_samples, min_weight_fraction)
 
   # --- Fit ---
 
@@ -805,8 +1097,17 @@
     rows = Estimator.feature_rows(x)
     targets = Estimator.target_values(y)
     ok = RandomForest.shapes_ok?(rows, targets)
+    ok = DecisionTree.numeric_targets?(targets) if ok
     ok = false if !DecisionTree.criterion_ok?(@criterion, true)
     ok = false if @n_estimators < 1
+    ok = false if @ccp_alpha < 0.to_f
+    ok = false if @min_impurity_decrease < 0.to_f
+    ok = false if @min_weight_fraction_leaf < 0.to_f
+    ok = false if @min_weight_fraction_leaf > 1.to_f / 2.to_f
+    if @max_samples != nil
+      ok = false if !@max_samples.is_a?(Integer)
+      ok = false if @max_samples.is_a?(Integer) && @max_samples < 1
+      ok = false if !@bootstrap
     wts = nil
     wts = Estimator.weight_values(sample_weight, rows.size) if ok && sample_weight != nil
     ok = false if sample_weight != nil && wts == nil
@@ -815,6 +1116,7 @@
       rows = trimmed[:rows]
       targets = trimmed[:targets]
       wts = trimmed[:weights]
+    ok = false if ok && @max_samples != nil && @max_samples > rows.size
     nf = 0
     nf = rows[0].size if ok
     mf = -1
@@ -828,7 +1130,7 @@
       limit = @max_depth
       limit = -1 if limit == nil
       limit = 0 if limit < 0 && @max_depth != nil
-      plan = { k: 0, classes: nil, nf: nf, limit: limit, min_leaf: @min_samples_leaf, crit: "mse", m: mf, n_estimators: @n_estimators, bootstrap: @bootstrap, seed: @seed }
+      plan = { k: 0, classes: nil, nf: nf, limit: limit, min_split: @min_samples_split, min_leaf: @min_samples_leaf, min_weight_fraction_leaf: @min_weight_fraction_leaf, crit: "mse", m: mf, n_estimators: @n_estimators, bootstrap: @bootstrap, max_samples: @max_samples, seed: @seed, ccp_alpha: @ccp_alpha, min_gain: @min_impurity_decrease }
       grown = RandomForest.grow(rows, ys, wts, plan)
       @n_features = nf
       @trees = grown[:trees]
@@ -844,23 +1146,28 @@
     rows = Estimator.feature_rows(x) if @fitted
     out = nil
     if rows != nil
-      nf = @n_features
-      ok = true
-      rows.each -> (r)
-        ok = false if r.size != nf
-      out = rows if ok
+      status = DecisionTree.row_status(rows, true, @n_features)
+      out = rows if status >= 0
+    out
+
+  # Zero-based preorder leaf ID for every [sample, tree].
+  -> leaf_indices(x)
+    rows = nil
+    rows = Estimator.feature_rows(x) if @fitted
+    out = nil
+    if rows != nil
+      status = DecisionTree.row_status(rows, true, @n_features)
+      out = RandomForest.leaf_index_rows(@trees, rows, status > 0) if status >= 0
     out
 
   # Predicted values for x — the mean of the trees' leaf means.
   -> predict(x)
-    rows = self.query_rows(x)
+    rows = nil
+    rows = Estimator.feature_rows(x) if @fitted
     out = nil
     if rows != nil
-      trees = @trees
-      preds = []
-      rows.each -> (r)
-        preds.push(RandomForest.mean_row(trees, r))
-      out = preds
+      status = DecisionTree.row_status(rows, true, @n_features)
+      out = RandomForest.mean_rows(@trees, rows, status > 0) if status >= 0
     out
 
   # R² (Metrics.r2) of self's predictions on x against y, weighted when
@@ -886,7 +1193,7 @@
   # As for the classifier, minus `classes` — a regression leaf predicts a
   # mean, so there are no labels to carry.
   -> to_state
-    { n_estimators: @n_estimators, max_features: @max_features, max_depth: @max_depth, min_samples_leaf: @min_samples_leaf, seed: @seed, criterion: @criterion, bootstrap: @bootstrap, trees: @trees, n_features: @n_features, oob_score: @oob_score }
+    { n_estimators: @n_estimators, max_features: @max_features, max_depth: @max_depth, min_samples_leaf: @min_samples_leaf, seed: @seed, criterion: @criterion, bootstrap: @bootstrap, ccp_alpha: @ccp_alpha, min_impurity_decrease: @min_impurity_decrease, min_samples_split: @min_samples_split, max_samples: @max_samples, min_weight_fraction_leaf: @min_weight_fraction_leaf, trees: @trees, n_features: @n_features, oob_score: @oob_score }
 
   -> .load_state(st)
     out = nil
@@ -899,7 +1206,7 @@
     # so this closes the other direction.
     ok = st[:classes] == nil if ok
     if ok
-      model = RandomForestRegressor.new(st[:n_estimators], st[:max_features], st[:max_depth], st[:min_samples_leaf], st[:seed], st[:criterion], st[:bootstrap])
+      model = RandomForestRegressor.new(st[:n_estimators], st[:max_features], st[:max_depth], st[:min_samples_leaf], st[:seed], st[:criterion], st[:bootstrap], st[:ccp_alpha], st[:min_impurity_decrease], st[:min_samples_split], st[:max_samples], st[:min_weight_fraction_leaf])
       out = model.restore_state(st)
     out
 

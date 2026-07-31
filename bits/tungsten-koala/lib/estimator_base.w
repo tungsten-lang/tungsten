@@ -141,10 +141,11 @@
 + Estimator
   # --- Input coercion (every accepted shape, one place) ---
 
-  # x as plain feature rows: a Matrix or DataFrame goes through its
-  # to_matrix (numeric columns only for a frame — nil when it has
-  # none), an array of arrays is taken as-is, and a flat array becomes
-  # one single-feature row per value.
+  # x as plain feature rows: a DataFrame is projected directly from its
+  # numeric columns, a Matrix goes through to_matrix/to_a, an array of arrays
+  # is taken as-is, and a flat array becomes one single-feature row per value.
+  # Keeping the frame path matrix-free avoids an allocation and also avoids the
+  # interpreter's generic-Matrix dispatch ambiguity for Float columns.
   -> .feature_rows(x)
     out = nil
     if type(x) == "Array"
@@ -159,8 +160,23 @@
             rows.push([v])
           out = rows
     else
-      m = x.to_matrix
-      out = m.to_a if m != nil
+      if x != nil
+        if x.respond_to?("column_names")
+          columns = []
+          x.column_names.each -> (name)
+            values = x.column_values(name)
+            columns.push(values) if Stats.numeric?(values)
+          if columns.size > 0
+            rows = []
+            x.row_count.times -> (r)
+              row = []
+              columns.each -> (column)
+                row.push(column[r])
+              rows.push(row)
+            out = rows
+        else
+          m = x.to_matrix
+          out = m.to_a if m != nil
     out
 
   # x as a DataFrame — the TRANSFORMER-side twin of feature_rows, and

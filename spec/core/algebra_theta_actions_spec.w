@@ -38,6 +38,22 @@ theta_action_check("transvection.theta_certified",
 theta_action_check("transvection.cycles",
                    transvection.cycle_lengths.to_s,
                    "\[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2\]")
+lifted_transvection = (
+  GenusThreeThetaPermutation.from_permutation(
+    incidence, transvection.permutation))
+theta_action_check("transvection.inverse_lift",
+                   lifted_transvection.transformation.
+                     matrix.to_s,
+                   transvection_map.matrix.to_s)
+transvection_group = FinitePermutationGroup.new([
+  FinitePermutation.new(transvection.permutation)
+])
+transvection_fixed = transvection_group.theta_fixed_space(
+  incidence)
+theta_action_check("transvection.subgroup_fixed_certified",
+                   transvection_fixed.certified?, true)
+theta_action_check("transvection.subgroup_fixed_dimension",
+                   transvection_fixed.dimension, 5)
 
 action = ThetaPermutationAction.new(
   incidence, [transvection])

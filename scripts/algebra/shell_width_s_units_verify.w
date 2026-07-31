@@ -223,6 +223,14 @@ if local_prime_text != nil && local_prime_text != ""
   << ["local_prime", local_prime]
   << ["local_factor_count", local_map.local_factor_count]
   << ["local_target_dimension", local_map.target_dimension]
+  local_theta_orbits = [1]
+  local_map.prime_ideals.each -> (prime_ideal)
+    local_theta_orbits.push(
+      prime_ideal.ramification_index *
+      prime_ideal.residue_degree)
+  << ["local_theta_orbit_degrees",
+      GenusThreeThetaPermutation.sort_integers(
+        local_theta_orbits)]
   << ["local_matrix", local_map.matrix]
   << ["local_rank", local_map.rank]
   << ["local_kernel_dimension", local_map.kernel_dimension]
@@ -245,11 +253,14 @@ if local_prime_text != nil && local_prime_text != ""
 
 function_data = nil
 descent_setup = nil
+p3_local_image_requested = (
+  env("TUNGSTEN_SUNIT_P3_LOCAL_IMAGE") == "1" ||
+  env("TUNGSTEN_SUNIT_IMPLICIT_LOCAL_IMAGE") == "1")
 need_descent_functions = (
   env("TUNGSTEN_SUNIT_POINT_VALUES") == "1" ||
   env("TUNGSTEN_SUNIT_GOOD_LOCAL_IMAGE") == "1" ||
   env("TUNGSTEN_SUNIT_SMOOTH_LOCAL_IMAGE") == "1" ||
-  env("TUNGSTEN_SUNIT_IMPLICIT_LOCAL_IMAGE") == "1")
+  p3_local_image_requested)
 if need_descent_functions
   P2 = ProjectiveSpace<ℚ, 2>.new(:B, :S, :Z)
   B = P2.coords[0]
@@ -374,7 +385,7 @@ if env("TUNGSTEN_SUNIT_SMOOTH_LOCAL_IMAGE") == "1"
     if smooth_image.dimension != 2 || !smooth_image.complete?
       raise "shell-width p=13 smooth disks did not complete the local image"
 
-if env("TUNGSTEN_SUNIT_IMPLICIT_LOCAL_IMAGE") == "1"
+if p3_local_image_requested
   if local_map == nil || local_map.rational_prime != 3
     raise "shell-width implicit local image currently needs local prime 3"
   cover3 = curve.p_adic_smooth_residue_disks(3, 8)
@@ -382,15 +393,29 @@ if env("TUNGSTEN_SUNIT_IMPLICIT_LOCAL_IMAGE") == "1"
     raise "unexpected shell-width p=3 smooth residue-disk count"
   implicit_a = cover3.disks[0].implicit_coordinate(2)
   implicit_b = cover3.disks[1].implicit_coordinate(2)
+  implicit_c = cover3.disks[2].implicit_coordinate(
+    2, [1])
+  implicit_d = cover3.disks[2].implicit_coordinate(
+    2, [2])
   implicit_image = function_data.implicit_disk_local_image(
-    local_map, [implicit_a, implicit_b])
+    local_map, [
+      implicit_a, implicit_b,
+      implicit_c, implicit_d])
   disk_values = implicit_image.disk_values
   << ["implicit_local_prime", implicit_image.rational_prime]
   << ["implicit_local_points", [
     implicit_a.reduction_point,
-    implicit_b.reduction_point]]
-  << ["implicit_local_values", [
-    disk_values[0].vector, disk_values[1].vector]]
+    implicit_b.reduction_point,
+    implicit_c.reduction_point]]
+  << ["implicit_local_centers", [
+    implicit_a.center_coordinates,
+    implicit_b.center_coordinates,
+    implicit_c.center_coordinates,
+    implicit_d.center_coordinates]]
+  implicit_vectors = []
+  disk_values.each -> (value)
+    implicit_vectors.push(value.vector)
+  << ["implicit_local_values", implicit_vectors]
   << ["implicit_local_basis", implicit_image.image_basis]
   << ["implicit_local_dimension", implicit_image.dimension]
   << ["implicit_local_lower_bound_only",
@@ -398,3 +423,70 @@ if env("TUNGSTEN_SUNIT_IMPLICIT_LOCAL_IMAGE") == "1"
   << ["implicit_local_certified", implicit_image.certified?]
   if implicit_image.dimension != 0
     raise "unexpected shell-width p=3 implicit-disk span"
+
+  singular_cells = cover3.singular_cells
+  if singular_cells.size != 4
+    raise "unexpected shell-width p=3 singular residue-class count"
+  origin_refinement = singular_cells[0].refine
+  central_refinement = (
+    origin_refinement.children[0].refine)
+  positive_cell = central_refinement.children[0]
+  positive_disk = positive_cell.refine.smooth_disks[0]
+  negative_cell = origin_refinement.children[2]
+  negative_disk = negative_cell.refine.smooth_disks[2]
+  positive_disk = positive_disk.subdisk([0, 0])
+  positive_disk = positive_disk.subdisk([0, 0])
+  negative_disk = negative_disk.subdisk([2, 2])
+  negative_disk = negative_disk.subdisk([2, 2])
+  hensel_image = function_data.hensel_disk_local_image(
+    local_map, [positive_disk, negative_disk])
+  hensel_vectors = []
+  hensel_image.disk_values.each -> (value)
+    hensel_vectors.push(value.vector)
+  << ["resolved_local_centers", [
+    positive_disk.center_coordinates,
+    negative_disk.center_coordinates]]
+  << ["resolved_local_values", hensel_vectors]
+  << ["resolved_local_basis", hensel_image.image_basis]
+  << ["resolved_local_dimension", hensel_image.dimension]
+  << ["resolved_local_lower_bound_only",
+      hensel_image.lower_bound_only?]
+  << ["resolved_local_certified",
+      hensel_image.certified?]
+  if hensel_image.dimension != 1
+    raise "unexpected shell-width p=3 resolved branch span"
+
+  local_theta_dimension = (
+    descent_setup.certify_local_theta_dimension(
+      local_map))
+  << ["local_theta_orbits",
+      local_theta_dimension.orbit_signature]
+  << ["local_theta_subgroups",
+      local_theta_dimension.compatible_subgroup_count]
+  << ["local_theta_possible_dimensions",
+      local_theta_dimension.possible_dimensions]
+  << ["local_theta_dimension",
+      local_theta_dimension.dimension]
+  << ["local_theta_certified",
+      local_theta_dimension.certified?]
+
+  combined_image = function_data.local_disk_image(
+    local_map, [
+      implicit_a,
+      positive_disk,
+      negative_disk],
+    local_theta_dimension)
+  << ["combined_local_basis",
+      combined_image.image_basis]
+  << ["combined_local_dimension",
+      combined_image.dimension]
+  << ["combined_local_lower_bound_only",
+      combined_image.lower_bound_only?]
+  << ["combined_local_complete",
+      combined_image.complete?]
+  << ["combined_local_certified",
+      combined_image.certified?]
+  if combined_image.dimension != 2
+    raise "unexpected shell-width p=3 combined disk span"
+  if !combined_image.complete?
+    raise "shell-width p=3 disk span did not complete the local image"

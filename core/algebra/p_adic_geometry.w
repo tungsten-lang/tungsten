@@ -49,10 +49,13 @@
 
   -> .free_variation_polynomial(
        curve, coordinates, pivot_index,
-       solved_index, free_index, prime)
+       solved_index, free_index, prime, depth = 1)
+    if depth < 1
+      raise "implicit p-adic variation depth must be positive"
     ring = PolynomialRing.new(
       [:u], RationalField.new, :lex)
     u = ring.generator(0)
+    step = prime**depth
     substitutions = []
     index = 0
     while index < coordinates.size
@@ -62,7 +65,7 @@
         substitutions.push(ring.zero)
       elsif index == free_index
         substitutions.push(
-          ring.constant(coordinates[index]) + u*prime)
+          ring.constant(coordinates[index]) + u*step)
       else
         raise "implicit plane disk has an unused coordinate"
       index += 1
@@ -121,6 +124,19 @@
       reduction_field.one)
     return false if !reduction_field.zero?(
       source.reduction_point.coordinates[solved])
+    digits = @disk.free_digits
+    expected_depth = digits.size + 1
+    return false if @disk.depth != expected_depth
+    return false if @disk.free_step != prime**expected_depth
+    expected_coordinates = []
+    source.reduction_point.coordinates.each ->
+      expected_coordinates.push(item)
+    place = prime
+    digits.each -> (digit)
+      return false if digit < 0 || digit >= prime
+      expected_coordinates[free] += digit*place
+      place *= prime
+    return false if expected_coordinates.to_s != coordinates.to_s
 
     source_value = curve.equation.evaluate(
       coordinates)
@@ -138,7 +154,8 @@
         derivative, prime) != 0)
 
     variation = PadicCurveImplicitArithmetic.free_variation_polynomial(
-      curve, coordinates, pivot, solved, free, prime)
+      curve, coordinates, pivot, solved, free,
+      prime, expected_depth)
     return false if variation != @disk.free_variation_polynomial
     return false if variation.coeff(0) != source_value
     exponent = 1
@@ -181,7 +198,8 @@
 
 
 + PadicCurveImplicitResidueDisk
-  -> new(@residue_disk, @solved_coordinate_index)
+  -> new(@residue_disk, @solved_coordinate_index,
+         free_digits = [])
     if @residue_disk.class_name != "PadicCurveResidueDisk"
       raise "implicit p-adic disk needs a residue disk"
     if !@residue_disk.smooth?
@@ -210,8 +228,27 @@
           index != @pivot_coordinate_index)
         @free_coordinate_index = index
       index += 1
+    if free_digits.class_name != "Array"
+      raise "implicit p-adic free digits must be an Array"
+    @free_digits = []
+    free_digits.each -> (digit)
+      digit_class = digit.class_name
+      integer_digit = digit_class == "Integer"
+      integer_digit = true if digit_class == "Int"
+      integer_digit = true if digit_class == "BigInt"
+      if (!integer_digit || digit < 0 ||
+          digit >= @residue_disk.prime)
+        raise "implicit p-adic free digit is out of range"
+      @free_digits.push(digit)
+    @depth = @free_digits.size + 1
+    @free_step = @residue_disk.prime**@depth
     @center_coordinates = []
     coordinates.each -> @center_coordinates.push(item)
+    place = @residue_disk.prime
+    @free_digits.each -> (digit)
+      @center_coordinates[@free_coordinate_index] += (
+        digit*place)
+      place *= @residue_disk.prime
     curve = @residue_disk.curve
     prime = @residue_disk.prime
     @source_value = curve.equation.evaluate(
@@ -233,7 +270,7 @@
         curve, @center_coordinates,
         @pivot_coordinate_index,
         @solved_coordinate_index,
-        @free_coordinate_index, prime))
+        @free_coordinate_index, prime, @depth))
     exponent = 1
     while exponent <= @free_variation_polynomial.degree
       coefficient = @free_variation_polynomial.coeff(
@@ -287,6 +324,17 @@
   -> free_coordinate_index
     @free_coordinate_index
 
+  -> free_digits
+    out = []
+    @free_digits.each -> out.push(item)
+    out
+
+  -> depth
+    @depth
+
+  -> free_step
+    @free_step
+
   -> source_value
     @source_value
 
@@ -307,6 +355,13 @@
 
   -> certified?
     certificate.verified?
+
+  -> refine(digit)
+    digits = free_digits
+    digits.push(digit)
+    PadicCurveImplicitResidueDisk.new(
+      @residue_disk, @solved_coordinate_index,
+      digits)
 
 
 + PadicCurveResidueDisk
@@ -361,9 +416,10 @@
   -> inspect
     to_s
 
-  -> implicit_coordinate(coordinate_index)
+  -> implicit_coordinate(coordinate_index,
+                          free_digits = [])
     PadicCurveImplicitResidueDisk.new(
-      self, coordinate_index)
+      self, coordinate_index, free_digits)
 
 
 + PadicCurveResidueDiskCoverCertificate

@@ -29,6 +29,20 @@ permutation_group_check("group.cycle_type",
                         S3.contains_cycle_lengths?([3]), true)
 permutation_group_check("group.certificate",
                         S3.certificate.verified?, true)
+subgroups = S3.subgroup_enumeration
+permutation_group_check("subgroups.certified",
+                        subgroups.certified?, true)
+permutation_group_check("subgroups.count",
+                        subgroups.size, 6)
+permutation_group_check("subgroups.exhaustion",
+                        subgroups.certificate.
+                          kernel_checked?, true)
+subgroup_orders = []
+subgroups.subgroups.each ->
+  subgroup_orders.push(item.order)
+permutation_group_check("subgroups.orders",
+                        subgroup_orders.to_s,
+                        "\[1, 2, 3, 2, 2, 6\]")
 
 bad = false
 begin

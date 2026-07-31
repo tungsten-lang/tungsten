@@ -214,13 +214,20 @@ explicit descent:
     \(1+3T+39T^3+169T^4\); its Jacobian order \(212=4\cdot53\) bounds the
     local 2-quotient by dimension two, and the twelve clean smooth-locus disks
     attain that bound, certifying the complete \(p=13\) BPS image;
-    at \(p=3\), certify implicit \(Z\)-coordinates on the smooth disks above
-    \([0:1:0]\) and \([1:2:0]\), including \(v_3(Z)=1\) and leading unit
-    \(Z/3=2\); exact local square-class replay shows that the two disk values
-    agree, so their point-difference span has dimension zero and remains an
-    explicitly lower-bound-only result;
+    at \(p=3\), recursively substitute and normalize every singular plane
+    cell, exhaust all next-digit strict-transform points, discard the three
+    empty branches, and certify the smooth Hensel disks containing
+    \([0:9:1]\) and \([-3:-3:1]\); their BPS difference supplies a second
+    local direction beyond the smooth infinity disk;
+    enumerate all 60 subgroups of the certified order-36 global theta group,
+    select the nine whose orbits match the exact local factor degrees
+    \(1,1,2,2,2,4,4,4,4,4\), reverse-lift their theta permutations to
+    `Sp6(F2)`, and replay that every compatible subgroup fixes a
+    two-dimensional subspace of \(J[2]\); the named decomposition-group and
+    local Kummer theorems therefore bound the local quotient by dimension
+    two, which the disk span attains, certifying the complete \(p=3\) image;
     the known rational divisor class still gives only a one-dimensional
-    lower-bound subspace at 2 and 3;
+    lower-bound subspace at 2;
 17. intersect the future explicitly labeled theta-module and local-image
     conditions with that replay-certified F2 kernel.
 
@@ -243,7 +250,8 @@ certified finite and archimedean places for S = {2, 3, 13}
   -> certified odd and dyadic ambient localization and good-reduction residue disks
   -> certified complete p=5 good-reduction BPS local image
   -> certified regular cuspidal model and complete p=13 BPS local image
-  -> recursive regular models and certified Jacobian local images at 2 and 3
+  -> certified recursive p=3 cells and complete local BPS image
+  -> recursive dyadic cells and a certified Jacobian local image at 2
   -> explicit Selmer upper bound
   -> BPS comparison and rational J[2]
   -> Mordell-Weil rank upper bound
@@ -267,10 +275,13 @@ and 7.79 GB, and the \(p=13\) lane about 19.7 seconds and 7.61 GB. Their
 localization matrices have dimensions/ranks \(35/29\), \(18/17\), and
 \(14/13\), respectively. The complete \(p=5\) good-reduction image lane takes
 about 19.8 seconds and 7.37 GB; the complete \(p=13\) cuspidal image lane takes
-about 20.2 seconds and 7.70 GB. The standard suite checks smaller identities
-and artifact structure. The checked-in witnesses are small. The peak comes
-from exact high-degree S-unit arithmetic in a runtime that does not yet
-reclaim completed object graphs, not from loading a giant certificate file.
+about 20.2 seconds and 7.70 GB. The complete \(p=3\) recursive-cell, subgroup,
+and local-image replay takes about 30.1 seconds and 11.96 GB. The standard
+suite checks smaller identities and artifact structure; all three complete
+local-image lanes are explicit opt-ins. The checked-in witnesses are small.
+The peak comes from exact high-degree S-unit arithmetic and finite subgroup
+enumeration in a runtime that does not yet reclaim completed object graphs,
+not from loading a giant certificate file.
 The former dyadic coordinate certificate recomputed its complete filtration
 and used 39.5 seconds / 11.71 GB; retaining its exact transcript removed that
 duplicate work without weakening the replay. Adding the certified rational

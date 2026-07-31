@@ -315,6 +315,157 @@
     stabilizer_orbits(point).each -> sizes.push(item.size)
     GenusThreeThetaPermutation.sort_integers(sizes)
 
+
++ FinitePermutationSubgroupArithmetic
+  -> .key(parent, subgroup)
+    members = {}
+    subgroup.elements.each -> (element)
+      members[element.key] = true
+    bits = []
+    parent.elements.each -> (element)
+      bits.push(members.has_key?(element.key) ? 1 : 0)
+    bits.join("")
+
+  -> .generated(parent, subgroup, element)
+    generators = subgroup.generators
+    generators.push(element)
+    FinitePermutationGroup.new(
+      generators, parent.order)
+
+
++ FinitePermutationSubgroupEnumerationCertificate
+  -> new(@enumeration)
+    @verified_cache = nil
+
+  -> theorem
+    "closure under adjoining every parent-group element exhausts all finite subgroups"
+
+  -> theorem_reference
+    "finite subgroup generation"
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "FinitePermutationSubgroupEnumeration"
+    return false if @enumeration.class_name != expected
+    parent = @enumeration.parent
+    return false if !parent.certificate.verified?
+    subgroups = @enumeration.subgroups
+    return false if subgroups.size == 0
+    parent_keys = {}
+    parent.elements.each -> (element)
+      parent_keys[element.key] = true
+    keys = {}
+    subgroups.each -> (subgroup)
+      return false if !subgroup.certificate.verified?
+      subgroup.elements.each -> (element)
+        return false if !parent_keys.has_key?(element.key)
+      key = FinitePermutationSubgroupArithmetic.key(
+        parent, subgroup)
+      return false if keys.has_key?(key)
+      keys[key] = true
+    return false if subgroups[0].order != 1
+
+    # Any subgroup has a finite generating sequence. Starting at the identity,
+    # closure under adjoining each next generator follows edges checked here,
+    # so every subgroup of the parent occurs in the supplied list.
+    subgroups.each -> (subgroup)
+      subgroup_members = {}
+      subgroup.elements.each -> (element)
+        subgroup_members[element.key] = true
+      parent.elements.each -> (element)
+        if !subgroup_members.has_key?(element.key)
+          generated = (
+            FinitePermutationSubgroupArithmetic.generated(
+              parent, subgroup, element))
+          key = FinitePermutationSubgroupArithmetic.key(
+            parent, generated)
+          return false if !keys.has_key?(key)
+    true
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :exact_finite_subgroup_exhaustion
+
+  -> kernel_checked?
+    true
+
+
++ FinitePermutationSubgroupEnumeration
+  -> new(@parent, subgroup_limit = 10_000)
+    if @parent.class_name != "FinitePermutationGroup"
+      raise "subgroup enumeration needs a finite permutation group"
+    if !@parent.certificate.verified?
+      raise "subgroup enumeration parent is uncertified"
+    identity = FinitePermutation.identity(
+      @parent.degree)
+    first = FinitePermutationGroup.new(
+      [identity], @parent.order)
+    @subgroups = [first]
+    seen = {}
+    seen[FinitePermutationSubgroupArithmetic.key(
+      @parent, first)] = true
+    cursor = 0
+    while cursor < @subgroups.size
+      subgroup = @subgroups[cursor]
+      members = {}
+      subgroup.elements.each -> (element)
+        members[element.key] = true
+      @parent.elements.each -> (element)
+        if !members.has_key?(element.key)
+          generated = (
+            FinitePermutationSubgroupArithmetic.generated(
+              @parent, subgroup, element))
+          key = FinitePermutationSubgroupArithmetic.key(
+            @parent, generated)
+          if !seen.has_key?(key)
+            if @subgroups.size >= subgroup_limit
+              raise "finite permutation subgroup limit exceeded"
+            seen[key] = true
+            @subgroups.push(generated)
+      cursor += 1
+    @certificate_cache = (
+      FinitePermutationSubgroupEnumerationCertificate.new(
+        self))
+    if !@certificate_cache.verified?
+      raise "finite permutation subgroup enumeration failed certification"
+
+  -> parent
+    @parent
+
+  -> subgroups
+    out = []
+    @subgroups.each -> out.push(item)
+    out
+
+  -> size
+    @subgroups.size
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
++ FinitePermutationGroup
+  -> subgroup_enumeration(subgroup_limit = 10_000)
+    FinitePermutationSubgroupEnumeration.new(
+      self, subgroup_limit)
+
+  -> subgroups(subgroup_limit = 10_000)
+    subgroup_enumeration(subgroup_limit).subgroups
+
   -> contains_cycle_lengths?(lengths)
     target = GenusThreeThetaPermutation.sort_integers(lengths).to_s
     @elements.any? -> item.cycle_lengths.to_s == target

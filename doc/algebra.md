@@ -383,7 +383,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | --- | --- | --- |
 | Symbolic expressions | Exact π/e/Euler-γ and radicals; common-angle trig on the π/12 lattice; parity and circular/hyperbolic squared identities; canonical simplify, expand, collect, differentiation, elementary antiderivatives; symbolic `erf` / `erfc` and gamma/log-gamma/polygamma through evaluation, differentiation, integration where elementary, exact series, arbitrary-order jets, and Hessians; exact integer/half-integer gamma and integer polygamma/zeta values; exact formal Taylor, Laurent, and rational-power Puiseux series, removable finite limits, poles, principal/regular parts, residues, and ramified local branches; exact univariate ℚ factor facade; arbitrary exact real roots as rationals, radicals, or certified `RootOf` constants; exact arithmetic and symbolic transcendentals over real algebraic constants | No assumptions, piecewise forms, logarithmic/general transseries, infinite/directional limits, a general symbolic special-function catalogue beyond the implemented families, general multivariate factorization, complex algebraic-root object, general higher-degree radical formulas, or Risch integration |
 | Fields | Exact `RationalField`; packed prime fields and arbitrary absolute extensions `𝔽_{p^n}` with exact square tests and quadratic characters; certified simple extensions `K[a]/(m)` over ℚ or finite fields with explicit base embeddings, structured finite towers, arithmetic, Frobenius, trace, norm, and enumeration; arbitrary-degree irreducible `NumberField`s over ℚ with modular-Rabin, modular factor-degree, Kronecker, relative-tower, or exact isomorphic-model certificates; exact power-basis arithmetic, minimal/characteristic polynomials, trace, norm, integrality, Sturm signatures, real embeddings, integral bases, maximal-order indices, field discriminants, and replay-certified supplied S-unit square-class bases | Automatic isomorphisms/embeddings between differently presented finite fields, complex algebraic embeddings, automatic unit-group generators, and general number-field isomorphism algorithms are not implemented. Modulus, factor, and maximal-order searches are explicitly resource-bounded and raise instead of guessing |
-| Local fields | Exact rational elements embedded in `Q_p`; valuations, unit residues, the complete rational square-class quotients (dimension 2 for odd `p`, dimension 3 for `p=2`), and replayed simple-root Hensel lifts; at odd number-field primes, certified uniformizers and square classes from exact ideal valuations plus residue quadratic characters; at dyadic number-field primes, complete `[K_P:Q_2]+2` coordinates from the exact higher-unit filtration through `U_(2e+1)`, including the critical Artin--Schreier cokernel; certified block localization matrices from a product S-unit space to every completion above any rational prime; plane-curve residue disks indexed by the complete good special fiber or the complete smooth locus of a bad fiber; exact BPS line-ratio residues on every clean disk; certified implicit-coordinate valuations, leading units, and lower-bound BPS spans on suitable odd bad-reduction disks; complete local-image certificates either from the good-reduction Frobenius-fixed `J[2]` dimension or a certified regular cuspidal model and normalization-Jacobian bound | Arbitrary completed `Q_p` elements, precision-tracked arithmetic beyond the exact rational subfield, general local field extensions as completed objects, general regular-model construction, recursive treatment of singular residue classes or general disks containing a zero or pole, and general local Jacobian arithmetic are not implemented. Hensel lifting, local square detection, nonempty residue disks, implicit-coordinate constancy, formal-group divisibility, generalized-Jacobian/Néron comparison, and the BPS map use named trusted theorems after exact hypothesis/result replay |
+| Local fields | Exact rational elements embedded in `Q_p`; valuations, unit residues, the complete rational square-class quotients (dimension 2 for odd `p`, dimension 3 for `p=2`), and replayed simple-root Hensel lifts; at odd number-field primes, certified uniformizers and square classes from exact ideal valuations plus residue quadratic characters; at dyadic number-field primes, complete `[K_P:Q_2]+2` coordinates from the exact higher-unit filtration through `U_(2e+1)`, including the critical Artin--Schreier cokernel; certified block localization matrices from a product S-unit space to every completion above any rational prime; plane-curve residue disks indexed by the complete good special fiber or the complete smooth locus of a bad fiber; exact recursive p-adic plane cells, strict-transform digit covers, smooth Hensel disks, and exact BPS line-ratio square classes on clean disks; certified implicit-coordinate valuations and leading units; complete local-image certificates from good-reduction Frobenius-fixed `J[2]`, a certified regular cuspidal model and normalization-Jacobian bound, or a certified local theta/decomposition-group fixed space | Arbitrary completed `Q_p` elements, precision-tracked arithmetic beyond the exact rational subfield, general local field extensions as completed objects, automatic global regular-model construction, general disks containing an unresolved zero or pole, and general local Jacobian arithmetic are not implemented. Hensel lifting, local square detection, nonempty residue disks, implicit-coordinate constancy, formal-group divisibility, decomposition-group/local-Kummer identification, generalized-Jacobian/Néron comparison, and the BPS map use named trusted theorems after exact hypothesis/result replay |
 | Finite étale algebras | Certified squarefree quotients `K[t]/(f)`; exact quotient arithmetic; units and zero divisors; multiplication-matrix trace/norm; supplied CRT components, primitive idempotents, component maps, reconstruction, degree-generic integral closures, prime ideals and finite residue fields above rational primes, exact real-place sign maps without assuming irreducible components, replay-certified product S-class 2-torsion proofs, and supplied product S-unit square classes modulo diagonal rational S-units | Automatic product unit discovery, full product class-group structures, and complex embeddings with selected numerical values are not implemented |
 | Integral orders | Degree-generic monogenic and arbitrary-lattice ℤ-orders; exact membership, discriminant, units, trace, and norm, including bound-certified modular reconstruction for larger integer norm matrices; exact Frobenius-Gram LLL with replay certificates plus explicitly bounded floating producer reduction; Dedekind local index certificates; Pohst--Zassenhaus Round 2 p-maximal overorders and global maximal-order certificates; certified p-radicals, prime ideals, residue maps, ramification indices, and residue degrees; canonical full-rank HNF integral ideals with sum, product, powers, norm, containment, prime valuations, certified factorization, and bounded exact principal-generator search; invertible fractional ideals as finite signed prime valuations, including principal fractional ideals and exact rational norms; product-order finite S-place data; unconditional certificates for `Cl(O_K,S)[2] = 0` from Minkowski factor bases and odd principal-relation quotients; checkpointable relation witnesses and certified transfer through an exact isomorphic field model | Full class-group structures and algorithms that discover unit-group bases are not implemented. Supplied number-field S-unit square-class bases can be certified. Fractional ideals currently use their certified prime-factor representation rather than an explicit fractional lattice. Discriminant factorization, Round 2 steps, relation search, finite-field factorization, residue-generator search, and ideal factorization are resource-bounded and raise `unknown` on exhaustion |
 | Polynomials | Sparse sorted terms; merge-multiply; dense univariate quotient arithmetic; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ and arbitrary finite fields as **unit × monic irreducibles**, with replay certificates; exact Sturm counts, Cauchy bounds, and certified isolation of every distinct real root | Kronecker and deterministic equal-degree factor search, Gröbner elimination, and root-interval splitting have explicit resource limits; complex-root isolation, complex algebraic-number arithmetic, and multivariate factorization are not implemented |
@@ -401,7 +401,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Divisors | Exact formal arithmetic on rational and line-presented higher-degree closed places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic outside the existing Jacobian models, and general principality tests are not implemented |
 | Rational points | Complete exact bounded search for primitive points on `aX³Z + bXY²Z + g(Y,Z)`, with nonzero same-sign `a,b` and nonzero `Y⁴` coefficient | This is not a general plane-curve point finder and does not prove that no points exist above the requested height |
 | Geometric automorphisms | Exact triviality certificate over `Qbar` for smooth rational plane quartics with the unique normalized hyperflex `[1:0:0]`, tangent `Z=0`, and identity stabilizer | It is not an arbitrary plane-quartic automorphism-group algorithm and does not enumerate nontrivial groups |
-| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; statement-bound coordinate certificates express new S-units in those bases; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions; all shell-width degree-6/9/12 factors have replayed full-rank S-class proofs, and their supplied S-unit bases give a certified true-descent ambient space of dimension `9 + 12 + 14 = 35`; exact component norms give a certified rank-4 map to `Q(S,2)` and a 31-dimensional norm-one kernel; the rational divisor `[0:9:1]-[-3:-3:1]` has a certified nonzero 35-bit BPS image in that kernel and certified one-dimensional lower-bound local spans at 2 and 3; complete odd and dyadic localization matrices map the ambient basis to every number-field completion above `p`; the canonical genus-three theta model exhausts 28 odd characteristics, 315 syzygetic quadruples, and module dimensions `0,1,7,21,27,28`; exact `Sp6(F2)` matrices induce replay-certified incidence permutations and certified fixed spaces; certified good-prime factorizations constrain Frobenius cycle types; the shell-width reduction at 5 has a complete arithmetic labeling over `F_(5^6)` whose 315 contact-conic incidences and exact Frobenius element are replayed, and its seven clean disks span the complete one-dimensional local image; at bad prime 13, a certified regular one-cusp model has genus-two normalization zeta numerator `1 + 3T + 39T^3 + 169T^4` and Jacobian order `212`, bounding the local 2-quotient by dimension 2, which twelve clean smooth-locus disks attain; at 3, two implicit-coordinate disks have exact equal local values and hence certify a zero-dimensional point-difference span rather than falsely claiming progress; and exact relative factorization over the degree-6 component identifies the global theta subgroup up to conjugacy as subgroup-table class 693 of order 36 | The completeness of GAP's 1,369-class subgroup table is a named trusted external classification, not replayed internally. A common characteristic-zero root-to-theta labeling, recursive/regular-model local analysis and complete images at 2 and 3, the comparison kernel, and the final Selmer bound remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
+| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; statement-bound coordinate certificates express new S-units in those bases; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions; all shell-width degree-6/9/12 factors have replayed full-rank S-class proofs, and their supplied S-unit bases give a certified true-descent ambient space of dimension `9 + 12 + 14 = 35`; exact component norms give a certified rank-4 map to `Q(S,2)` and a 31-dimensional norm-one kernel; the rational divisor `[0:9:1]-[-3:-3:1]` has a certified nonzero 35-bit BPS image in that kernel; complete odd and dyadic localization matrices map the ambient basis to every number-field completion above `p`; the canonical genus-three theta model exhausts 28 odd characteristics, 315 syzygetic quadruples, and module dimensions `0,1,7,21,27,28`; exact `Sp6(F2)` matrices induce replay-certified incidence permutations, subgroup enumeration, reverse theta lifts, and fixed spaces; exact relative factorization identifies the global theta subgroup up to conjugacy as subgroup-table class 693 of order 36; the shell-width reduction at 5 has a complete arithmetic labeling over `F_(5^6)` and a complete one-dimensional local image; at bad prime 13, a certified regular one-cusp model and twelve clean disks give the complete two-dimensional image; at bad prime 3, exact recursive strict-transform cells resolve all lifting residue branches, two rational Hensel disks add an independent class, and all nine decomposition subgroups compatible with the certified local factor degrees have fixed dimension 2, proving that the combined two-dimensional BPS span is complete | The completeness of GAP's 1,369-class subgroup table is a named trusted external classification, not replayed internally. A common characteristic-zero root-to-theta labeling, the complete dyadic BPS image, the comparison kernel, and the final Selmer bound remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
 
 `Curve#hyperelliptic_plane_model?` is specifically the smooth plane-model
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
@@ -1147,32 +1147,68 @@ image13.dimension                              # 2
 image13.complete?                              # true
 ```
 
-Thus \(p=13\) is no longer an open local-image condition. At \(p=3\), the
-special fiber is \(Z(B-S)^3\). Two smooth disks admit certified implicit
-\(Z\)-coordinates:
+Thus \(p=13\) is no longer an open local-image condition.
+
+At \(p=3\), the special fiber is \(Z(B-S)^3\). The first smooth disks admit
+certified implicit \(Z\)-coordinates:
 
 ```w
 cover3 = C.p_adic_smooth_residue_disks(3, 8)
-disks3 = [
-  cover3.disks[0].implicit_coordinate(2),
-  cover3.disks[1].implicit_coordinate(2)
-]
-image3 = function_data.implicit_disk_local_image(local3, disks3)
-image3.dimension                              # 0
-image3.lower_bound_only?                      # true
+infinity = cover3.disks[0].implicit_coordinate(2)
+
+singular = cover3.singular_cells
+first_digits = singular[0].refine
+central_digits = first_digits.children[0].refine
+positive = central_digits.children[0].refine.smooth_disks[0]
+negative = first_digits.children[2].refine.smooth_disks[2]
+
+resolved = function_data.hensel_disk_local_image(
+  local3, [positive, negative])
+resolved.dimension                            # 1
+resolved.lower_bound_only?                    # true
+```
+
+Every `PadicPlaneCurveCell` substitutes
+\(x=c_x+3^d u,\ y=c_y+3^d v\), removes the exact common power of 3, and
+enumerates every point of the primitive strict transform over \(\mathbb F_3\).
+Its certificate replays the substitution and finite point partition.
+`refine` returns every next digit, splitting them into smooth Hensel disks and
+singular child cells. The shell-width tree terminates: three initial singular
+classes have no lift, while the fourth resolves into the disks containing
+`[0:9:1]` and `[-3:-3:1]` (represented modulo the retained precision).
+
+The original smooth infinity disks all have the same certified 18-bit BPS
+class and therefore span zero by themselves. The two resolved finite disks
+have difference
+`000000000000111111`, giving one new dimension. Completeness comes from an
+independent upper bound:
+
+```w
+theta3 = setup.certify_local_theta_dimension(local3)
+theta3.orbit_signature
+# [1, 1, 2, 2, 2, 4, 4, 4, 4, 4]
+theta3.compatible_subgroup_count              # 9
+theta3.possible_dimensions                    # [2]
+
+image3 = function_data.local_disk_image(
+  local3, [infinity, positive, negative], theta3)
+image3.dimension                              # 2
+image3.complete?                              # true
 image3.certified?                             # true
 ```
 
-Both disks have \(v_3(Z)=1\), leading unit \(Z/3=2\), and the same certified
-18-bit BPS square class. Their point difference is therefore zero in the
-local target. The third smooth point is an exact zero of the source equation
-at the chosen center and needs deeper subdivision; the singular residue
-classes also remain uncovered. This is a certified negative result, so
-recursive refinement or a regular model is genuinely required rather than
-more special-fiber sampling.
+The checker enumerates all 60 subgroups of the certified order-36 global
+theta group. Exactly nine have the local factor orbit partition above.
+Reverse theta lifting recovers their `Sp6(F2)` actions, and all nine have a
+two-dimensional fixed subspace in \(J[2]\). The named local
+factor/decomposition-group and local Kummer theorems turn that exact finite
+calculation into \(\dim J(\mathbb Q_3)/2J(\mathbb Q_3)=2\). Because the
+explicit disk values span two dimensions, the \(p=3\) BPS image is complete.
+
 At \(p=2\), the special fiber is \((S+Z)^4\) and has no smooth point.
-Recursive refinement or blowups at 2 and 3, and general completed local
-extensions, remain future layers.
+The recursive cell representation is available, but dyadic BPS evaluation
+through its singular tree and an independent local-dimension certificate are
+the remaining bad-prime local work.
 
 The small rational and curve examples run in both engines. Exact
 number-field localization is intentionally an opt-in compiled lane: on the
@@ -1197,9 +1233,10 @@ takes about 31.5 seconds / 10.14 GB, the \(p=3\) lane about
 20.2 seconds / 7.79 GB, and the \(p=13\) lane about 19.7 seconds / 7.61 GB on
 the reference host. The complete \(p=5\) good-reduction image lane takes
 about 19.8 seconds / 7.37 GB; the complete \(p=13\) cuspidal image lane takes
-about 20.2 seconds / 7.70 GB. The \(p=3\) implicit-disk image lane takes
-about 20.8 seconds / 7.98 GB and remains opt-in. Before statement-bound
-transcript replay, the
+about 20.2 seconds / 7.70 GB. The complete \(p=3\) recursive-disk and local
+theta lane takes about 30.1 seconds / 11.96 GB and remains opt-in. It
+enumerates 60 subgroups, checks all nine compatible local actions, and is not
+part of the standard suite. Before statement-bound transcript replay, the
 dyadic lane took 39.5 seconds / 11.71 GB because coordinate certification
 repeated its local ideal arithmetic. The dyadic implementation follows 35
 filtration coordinates and does not enumerate the largest
@@ -1234,7 +1271,7 @@ TUNGSTEN_SUNIT_SMOOTH_LOCAL_IMAGE=1 \
   spec/fixtures/algebra/shell_width_degree12_s_units.rel
 
 TUNGSTEN_SUNIT_LOCAL_PRIME=3 \
-TUNGSTEN_SUNIT_IMPLICIT_LOCAL_IMAGE=1 \
+TUNGSTEN_SUNIT_P3_LOCAL_IMAGE=1 \
   /tmp/shell-width-s-units-verify \
   spec/fixtures/algebra/shell_width_degree6_s_units.rel \
   spec/fixtures/algebra/shell_width_degree9_s_units.rel \

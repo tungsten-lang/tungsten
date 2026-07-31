@@ -82,6 +82,118 @@ rescue error
   implicit_exact_rejected = true
 padic_geometry_check("implicit.exact_point_loud",
                      implicit_exact_rejected, true)
+implicit_c = cover3.disks[2].implicit_coordinate(
+  2, [1])
+implicit_d = cover3.disks[2].implicit_coordinate(
+  2, [2])
+padic_geometry_check("implicit.prefix_c_certified",
+                     implicit_c.certified?, true)
+padic_geometry_check("implicit.prefix_c_center",
+                     implicit_c.center_coordinates.to_s,
+                     "\[1, 3, 0\]")
+padic_geometry_check("implicit.prefix_c_digits",
+                     implicit_c.free_digits.to_s,
+                     "\[1\]")
+padic_geometry_check("implicit.prefix_c_depth",
+                     implicit_c.depth, 2)
+padic_geometry_check("implicit.prefix_c_step",
+                     implicit_c.free_step, 9)
+padic_geometry_check("implicit.prefix_c_valuation",
+                     implicit_c.solved_valuation, 5)
+padic_geometry_check("implicit.prefix_c_unit",
+                     implicit_c.solved_unit_residue, 1)
+padic_geometry_check("implicit.prefix_d_center",
+                     implicit_d.center_coordinates.to_s,
+                     "\[1, 6, 0\]")
+padic_geometry_check("implicit.prefix_d_valuation",
+                     implicit_d.solved_valuation, 5)
+implicit_nested = implicit_c.refine(2)
+padic_geometry_check("implicit.nested_certified",
+                     implicit_nested.certified?, true)
+padic_geometry_check("implicit.nested_center",
+                     implicit_nested.center_coordinates.to_s,
+                     "\[1, 21, 0\]")
+padic_geometry_check("implicit.nested_depth",
+                     implicit_nested.depth, 3)
+invalid_digit_rejected = false
+begin
+  cover3.disks[2].implicit_coordinate(2, [3])
+rescue error
+  invalid_digit_rejected = true
+padic_geometry_check("implicit.invalid_digit_loud",
+                     invalid_digit_rejected, true)
+
+singular_cells3 = cover3.singular_cells
+padic_geometry_check("cell.p3_singular_classes",
+                     singular_cells3.size, 4)
+origin_cell3 = singular_cells3[0]
+padic_geometry_check("cell.origin_certified",
+                     origin_cell3.certified?, true)
+padic_geometry_check("cell.origin_center",
+                     origin_cell3.center_coordinates.to_s,
+                     "\[0, 0, 1\]")
+padic_geometry_check("cell.origin_content",
+                     origin_cell3.content_valuation, 3)
+padic_geometry_check("cell.origin_reduction",
+                     origin_cell3.reduction_polynomial.to_s,
+                     "u^3 - v^3")
+padic_geometry_check("cell.origin_points",
+                     origin_cell3.residue_points.to_s,
+                     "\[\[0, 0\], \[1, 1\], \[2, 2\]\]")
+padic_geometry_check("cell.origin_singular",
+                     origin_cell3.singular_residue_point_count, 3)
+padic_geometry_check("cell.origin_kernel_boundary",
+                     origin_cell3.certificate.kernel_checked?, false)
+padic_geometry_check("cell.origin_exact_substitution",
+                     origin_cell3.certificate.
+                       substitution_kernel_checked?, true)
+origin_refinement3 = origin_cell3.refine
+padic_geometry_check("cell.refinement_certified",
+                     origin_refinement3.certified?, true)
+padic_geometry_check("cell.refinement_complete",
+                     origin_refinement3.certificate.
+                       complete_cover_checked?, true)
+padic_geometry_check("cell.first_children",
+                     (origin_refinement3.children.map ->
+                       item.center_coordinates).to_s,
+                     "\[\[0, 0, 1\], \[3, 3, 1\], \[6, 6, 1\]\]")
+padic_geometry_check("cell.first_smooth_branches",
+                     origin_refinement3.smooth_branch_count, 0)
+padic_geometry_check("cell.lifted_empty_classes",
+                     singular_cells3.copy(1, 3).all? ->
+                       item.empty?, true)
+central_refinement3 = (
+  origin_refinement3.children[0].refine)
+padic_geometry_check("cell.central_children",
+                     (central_refinement3.children.map ->
+                       item.center_coordinates).to_s,
+                     "\[\[0, 9, 1\], \[9, 18, 1\], \[18, 0, 1\]\]")
+padic_geometry_check("cell.central_survivor",
+                     central_refinement3.children[0].
+                       reduction_polynomial.to_s,
+                     "u - v")
+padic_geometry_check("cell.central_empty_children",
+                     central_refinement3.children.copy(
+                       1, 2).all? -> item.empty?, true)
+positive_cell3 = central_refinement3.children[0]
+positive_disks3 = positive_cell3.refine.smooth_disks
+padic_geometry_check("cell.positive_hensel_disks",
+                     positive_disks3.size, 3)
+padic_geometry_check("cell.positive_hensel_certified",
+                     positive_disks3.all? ->
+                       item.certified?, true)
+padic_geometry_check("cell.positive_hensel_center",
+                     positive_disks3[0].
+                       center_coordinates.to_s,
+                     "\[0, 9, 1\]")
+negative_cell3 = origin_refinement3.children[2]
+negative_disks3 = negative_cell3.refine.smooth_disks
+padic_geometry_check("cell.negative_hensel_disks",
+                     negative_disks3.size, 3)
+padic_geometry_check("cell.negative_hensel_center",
+                     negative_disks3[2].
+                       center_coordinates.to_s,
+                     "\[24, 24, 1\]")
 
 padic_geometry_check("cuspidal.two_primary_order",
                      PlaneQuarticCuspidalModelArithmetic.

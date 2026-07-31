@@ -152,8 +152,8 @@ the divisor class is a named BPS sections 6.4--6.5 import. One known image
 element is a lower bound, not a local-image enumeration or Selmer upper bound.
 Its certified restrictions give one known dimension at \(p=2\),
 `00000000000000000000000000000010110`, and at \(p=3\),
-`000000000000111111`. At \(p=13\), that known vector lies in the complete
-two-dimensional local image described below.
+`000000000000111111`. At \(p=3\) and \(p=13\), that known vector lies in the
+complete two-dimensional local images described below.
 
 The descent is not finished. Exact `Sp6(F2)` matrices now induce
 replay-certified permutations of the 28 characteristics, and certified
@@ -168,7 +168,7 @@ certifies the stabilizer subdegrees
 identifies, up to conjugacy, subgroup-table class 693 of order 36; the finite
 groups and incidence actions are replayed, while completeness of GAP's
 1,369-class subgroup table is an explicit trusted import. Missing links are
-a common characteristic-zero labeling, the local images at 2 and 3, the BPS
+a common characteristic-zero labeling, the local image at 2, the BPS
 comparison kernel and rational \(J[2]\), and the final Selmer/rank bound.
 
 The local-field foundation is now executable but should not be confused with
@@ -195,16 +195,21 @@ smooth-locus disks attain dimension two in the BPS target. Thus the
 
 For the shell-width artifacts the \(p=2\) matrix has target dimension 35 and
 rank 29, the \(p=3\) matrix has target dimension 18 and rank 17, and the
-\(p=13\) matrix has target dimension 14 and rank 13. The remaining local BPS
-steps are at 2 and 3. Modulo 3 the fiber is \(Z(B-S)^3\), and all three smooth
-rational disks meet a zero or pole of the chosen BPS functions. Tungsten now
-certifies implicit \(Z\)-coordinates and exact local square classes on two of
-those disks; their values agree, giving a certified zero-dimensional
-point-difference span rather than an incomplete result presented as progress.
-The third smooth disk and the singular residue classes still need recursive
-refinement. Modulo 2 the fiber is \((S+Z)^4\) and has no smooth point. Both
-primes therefore require further refinement or blowups rather than another
-special-fiber scan.
+\(p=13\) matrix has target dimension 14 and rank 13. At \(p=3\), where the
+special fiber is \(Z(B-S)^3\), exact recursive strict-transform cells now
+partition every next digit in the singular residue classes. Three classes
+have no \(\mathbb Q_3\)-lift; the remaining tree resolves into Hensel disks
+containing `[0:9:1]` and `[-3:-3:1]`. Together with a smooth infinity disk,
+their BPS values span dimension two. Independently, exact local factor degrees
+select nine of the 60 subgroups of the certified order-36 global theta group.
+All nine reverse-lift to `Sp6(F2)` actions with a two-dimensional fixed
+subspace. After the explicitly named decomposition-group and local Kummer
+theorems, this proves that the disk span is the complete local image.
+
+The remaining local BPS step is \(p=2\). Its special fiber is
+\((S+Z)^4\) and has no smooth point, so it needs the recursive dyadic cell
+tree, dyadic function evaluation through zeros and poles, and an independent
+local-dimension certificate.
 
 The finite reference theta module itself is now present: it constructs the 28
 odd quadratic refinements of the symplectic form on \(\mathbb F_2^6\),
@@ -214,8 +219,7 @@ their complete incidence-preserving permutations, finite action orbits, and
 primewise Frobenius cycle constraints. The shell-width prime-5 fiber has a
 complete arithmetic incidence labeling, and exact characteristic-zero
 subdegrees now determine the global subgroup up to conjugacy. What remains is
-an explicit compatible root labeling and the Jacobian/descent images at 2
-and 3.
+an explicit compatible root labeling and the Jacobian/descent image at 2.
 
 ## Fermat and modularity
 

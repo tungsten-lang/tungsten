@@ -357,6 +357,71 @@
       i += 1
     out
 
+  # The action on all 28 odd quadratic refinements is faithful. For each
+  # symplectic basis vector, the 28 pulled-back quadratic values uniquely
+  # recover its image among the 64 vectors of F2^6. Re-inducing the returned
+  # transformation certifies that the supplied incidence permutation was
+  # lifted exactly.
+  -> .from_permutation(incidence, value)
+    if incidence.class_name != "GenusThreeThetaIncidence"
+      raise "theta permutation lift needs genus-three incidence"
+    images = nil
+    if value.class_name == "FinitePermutation"
+      images = value.images
+    elsif value.class_name == "Array"
+      images = F2LinearAlgebra.copy_vector(value)
+    else
+      raise "theta permutation lift needs permutation images"
+    permutation = FinitePermutation.new(images)
+    if permutation.degree != 28
+      raise "theta permutation lift needs degree 28"
+    space = incidence.space
+    forms = incidence.odd_characteristics
+    columns = []
+    column = 0
+    while column < space.dimension
+      basis = space.vector(1 << column)
+      target_values = []
+      index = 0
+      while index < forms.size
+        target_values.push(
+          forms[permutation.apply(index)].evaluate(
+            basis))
+        index += 1
+      matches = []
+      encoded = 0
+      while encoded < (1 << space.dimension)
+        candidate = space.vector(encoded)
+        matches_candidate = true
+        index = 0
+        while index < forms.size && matches_candidate
+          if forms[index].evaluate(candidate) != (
+               target_values[index])
+            matches_candidate = false
+          index += 1
+        matches.push(candidate) if matches_candidate
+        encoded += 1
+      if matches.size != 1
+        raise "theta incidence action did not uniquely lift"
+      columns.push(matches[0])
+      column += 1
+    matrix = []
+    row = 0
+    while row < space.dimension
+      output_row = []
+      column = 0
+      while column < space.dimension
+        output_row.push(columns[column][row])
+        column += 1
+      matrix.push(output_row)
+      row += 1
+    result = GenusThreeThetaPermutation.new(
+      incidence, SymplecticF2Map.new(
+        space, matrix))
+    if result.permutation.to_s != images.to_s
+      raise "theta permutation lift changed the action"
+    result
+
   -> certificate
     @certificate_cache
 
@@ -496,6 +561,147 @@
 
   -> certified?
     certificate.verified?
+
+
++ ThetaPermutationSubgroupFixedSpaceCertificate
+  -> new(@fixed_space)
+    @verified_cache = nil
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "ThetaPermutationSubgroupFixedSpace"
+    return false if @fixed_space.class_name != expected
+    incidence = @fixed_space.incidence
+    return false if !incidence.certificate.verified?
+    subgroup = @fixed_space.subgroup
+    return false if !subgroup.certificate.verified?
+    lifts = @fixed_space.generator_lifts
+    generators = subgroup.generators
+    return false if lifts.size != generators.size
+    index = 0
+    while index < lifts.size
+      lift = lifts[index]
+      return false if !lift.certificate.verified?
+      return false if lift.incidence != incidence
+      return false if lift.permutation.to_s != (
+        generators[index].images.to_s)
+      index += 1
+    system = F2LinearSystem.new(
+      incidence.space.dimension)
+    lifts.each -> (lift)
+      matrix = lift.transformation.matrix
+      row = 0
+      while row < matrix.size
+        equation = []
+        column = 0
+        while column < matrix.size
+          value = matrix[row][column]
+          value = value ^ 1 if row == column
+          equation.push(value)
+          column += 1
+        system.add_equation(
+          equation, 0,
+          "theta subgroup fixed vector")
+        row += 1
+    replay = system.certificate
+    supplied = @fixed_space.linear_certificate
+    return false if !supplied.verified?
+    return false if !F2LinearAlgebra.same_matrix?(
+      replay.matrix, supplied.matrix)
+    return false if replay.rank != supplied.rank
+    replay.kernel_dimension == @fixed_space.dimension
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :exact_theta_subgroup_fixed_space
+
+  -> kernel_checked?
+    true
+
+
++ ThetaPermutationSubgroupFixedSpace
+  -> new(@incidence, @subgroup)
+    if @incidence.class_name != "GenusThreeThetaIncidence"
+      raise "theta fixed space needs genus-three incidence"
+    if @subgroup.class_name != "FinitePermutationGroup"
+      raise "theta fixed space needs a finite permutation group"
+    if !@subgroup.certificate.verified?
+      raise "theta fixed-space subgroup is uncertified"
+    if @subgroup.degree != 28
+      raise "theta fixed-space subgroup needs degree 28"
+    @generator_lifts = []
+    @subgroup.generators.each -> (generator)
+      @generator_lifts.push(
+        GenusThreeThetaPermutation.from_permutation(
+          @incidence, generator))
+    system = F2LinearSystem.new(
+      @incidence.space.dimension)
+    @generator_lifts.each -> (lift)
+      matrix = lift.transformation.matrix
+      row = 0
+      while row < matrix.size
+        equation = []
+        column = 0
+        while column < matrix.size
+          value = matrix[row][column]
+          value = value ^ 1 if row == column
+          equation.push(value)
+          column += 1
+        system.add_equation(
+          equation, 0,
+          "theta subgroup fixed vector")
+        row += 1
+    @linear_certificate = system.certificate
+    @certificate_cache = (
+      ThetaPermutationSubgroupFixedSpaceCertificate.new(
+        self))
+    if !@certificate_cache.verified?
+      raise "theta subgroup fixed-space certificate failed"
+
+  -> incidence
+    @incidence
+
+  -> subgroup
+    @subgroup
+
+  -> generator_lifts
+    out = []
+    @generator_lifts.each -> out.push(item)
+    out
+
+  -> linear_certificate
+    @linear_certificate
+
+  -> dimension
+    @linear_certificate.kernel_dimension
+
+  -> basis
+    @linear_certificate.kernel_basis
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
++ FinitePermutationGroup
+  -> theta_fixed_space(incidence = nil)
+    incidence = Algebra.genus_three_theta_incidence if (
+      incidence == nil)
+    ThetaPermutationSubgroupFixedSpace.new(
+      incidence, self)
 
 
 + ThetaBitangentFrobeniusConstraintCertificate

@@ -45,6 +45,7 @@ use core/algebra/p_adic_dyadic
 use core/algebra/projective
 use core/algebra/curves
 use core/algebra/p_adic_geometry
+use core/algebra/p_adic_charts
 use core/algebra/local_geometry
 use core/algebra/local_normalization
 use core/algebra/local_intersection
@@ -70,6 +71,7 @@ use core/algebra/p_adic_descent
 use core/algebra/permutation_groups
 use core/algebra/theta_galois
 use core/algebra/theta_subdegrees
+use core/algebra/local_theta
 use core/algebra/point_search
 use core/algebra/quartic_invariants
 use core/algebra/automorphisms

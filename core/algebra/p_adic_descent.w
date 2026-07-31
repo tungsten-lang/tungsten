@@ -511,6 +511,591 @@
       self, local_map, implicit_disks)
 
 
++ PlaneQuarticBPSHenselDiskArithmetic
+  -> .line_value_and_stability(
+       function, basis, coefficients,
+       disk, prime_ideal)
+    center = disk.center_coordinates
+    value = PlaneQuarticBPSGoodReductionLocalArithmetic.line_value(
+      function, basis, coefficients, center)
+    if value.zero?
+      raise "BPS Hensel-disk line vanishes at the cell center"
+    reducer = NumberFieldLocalResidueReduction.new(
+      prime_ideal)
+    disk.local_coordinate_indices.each -> (coordinate_index)
+      coefficient = (
+        PlaneQuarticBPSGoodReductionLocalArithmetic.arithmetic_value(
+          basis, coefficients[coordinate_index]))
+      relative_variation = (
+        coefficient*disk.step / value)
+      residue = reducer.reduction_allow_zero(
+        relative_variation)
+      if !prime_ideal.residue_field.zero?(residue)
+        raise "BPS line square class varies on the Hensel disk"
+    value
+
+  -> .value_data(function_data, local_map, disk)
+    if disk.class_name != "PadicPlaneCurveHenselDisk"
+      raise "BPS cell evaluation needs a p-adic Hensel disk"
+    if !disk.certificate.verified?
+      raise "BPS Hensel disk is uncertified"
+    if disk.curve != function_data.curve
+      raise "BPS Hensel disk changes the curve"
+    if disk.prime != local_map.rational_prime
+      raise "BPS Hensel disk changes the prime"
+    if disk.prime == 2
+      raise "BPS Hensel-disk evaluation currently needs an odd prime"
+    functions = function_data.function_components
+    nested_bases = local_map.source.component_bases
+    nested_maps = local_map.local_maps
+    if functions.size != nested_bases.size
+      raise "BPS Hensel-disk component count mismatch"
+    vector = []
+    square_classes = []
+    flat_index = 0
+    component_index = 0
+    while component_index < functions.size
+      function = functions[component_index]
+      bases = nested_bases[component_index]
+      basis_index = 0
+      while basis_index < bases.size
+        if flat_index >= nested_maps.size
+          raise "BPS Hensel-disk evaluation lost a local factor"
+        basis = bases[basis_index]
+        maps = nested_maps[flat_index]
+        maps.each -> (field_map)
+          prime = field_map.prime_ideal
+          numerator = (
+            PlaneQuarticBPSHenselDiskArithmetic.line_value_and_stability(
+              function, basis,
+              function.numerator_coefficients,
+              disk, prime))
+          denominator = (
+            PlaneQuarticBPSHenselDiskArithmetic.line_value_and_stability(
+              function, basis,
+              function.denominator_coefficients,
+              disk, prime))
+          square_class = prime.local_square_class(
+            numerator / denominator)
+          square_classes.push(square_class)
+          square_class.vector.each -> vector.push(item)
+        flat_index += 1
+        basis_index += 1
+      component_index += 1
+    if flat_index != nested_maps.size
+      raise "BPS Hensel-disk evaluation has unused local factors"
+    F2LinearAlgebra.validate_vector(
+      vector, local_map.target_dimension)
+    [vector, square_classes]
+
+
++ PlaneQuarticBPSHenselDiskValueCertificate
+  -> new(@value)
+    @verified_cache = nil
+
+  -> theorem
+    "strictly smaller linear variations preserve odd local square classes on a p-adic Hensel disk"
+
+  -> theorem_reference
+    "multivariate Hensel lemma, odd local square theorem, and Bruin-Poonen-Stoll sections 6 and 11"
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "PlaneQuarticBPSHenselDiskValue"
+    return false if @value.class_name != expected
+    data = @value.function_data
+    return false if data.class_name != "PlaneQuarticBPSFunctionData"
+    return false if !data.certificate.verified?
+    local_map = @value.local_map
+    return false if local_map.class_name != "EtaleProductOddLocalSquareClassMap"
+    return false if !local_map.certificate.verified?
+    disk = @value.disk
+    return false if disk.class_name != "PadicPlaneCurveHenselDisk"
+    return false if !disk.certificate.verified?
+    return false if disk.curve != data.curve
+    return false if disk.prime != local_map.rational_prime
+    compatible = PlaneQuarticBPSPointDifferenceArithmetic.same_component_polynomials?(
+      data, local_map.source)
+    return false if !compatible
+    replay = PlaneQuarticBPSHenselDiskArithmetic.value_data(
+      data, local_map, disk)
+    return false if !F2LinearAlgebra.same_vector?(
+      replay[0], @value.vector)
+    supplied = @value.square_classes
+    return false if replay[1].size != supplied.size
+    index = 0
+    while index < supplied.size
+      return false if !supplied[index].certificate.verified?
+      return false if !replay[1][index].certificate.verified?
+      return false if supplied[index].prime_ideal != (
+        replay[1][index].prime_ideal)
+      return false if supplied[index].value != (
+        replay[1][index].value)
+      return false if !F2LinearAlgebra.same_vector?(
+        supplied[index].vector,
+        replay[1][index].vector)
+      index += 1
+    true
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :trusted_bps_hensel_disk_with_exact_local_replay
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> local_descent_constancy_checked?
+    verified?
+
+
++ PlaneQuarticBPSHenselDiskValue
+  -> new(@function_data, @local_map, @disk)
+    result = PlaneQuarticBPSHenselDiskArithmetic.value_data(
+      @function_data, @local_map, @disk)
+    @vector = result[0]
+    @square_classes = result[1]
+    @certificate_cache = (
+      PlaneQuarticBPSHenselDiskValueCertificate.new(self))
+    if !@certificate_cache.verified?
+      raise "BPS Hensel-disk value failed certification"
+
+  -> function_data
+    @function_data
+
+  -> local_map
+    @local_map
+
+  -> disk
+    @disk
+
+  -> vector
+    F2LinearAlgebra.copy_vector(@vector)
+
+  -> square_classes
+    out = []
+    @square_classes.each -> out.push(item)
+    out
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
++ PlaneQuarticBPSHenselLocalImageCertificate
+  -> new(@image)
+    @verified_cache = nil
+
+  -> theorem
+    "point differences between certified Hensel disks lie in the BPS local Jacobian image"
+
+  -> theorem_reference
+    "multivariate Hensel lemma and Bruin-Poonen-Stoll sections 6 and 11"
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "PlaneQuarticBPSHenselLocalImage"
+    return false if @image.class_name != expected
+    data = @image.function_data
+    return false if !data.certificate.verified?
+    local_map = @image.local_map
+    return false if !local_map.certificate.verified?
+    disks = @image.disks
+    values = @image.disk_values
+    return false if disks.size == 0 || disks.size != values.size
+    index = 0
+    while index < disks.size
+      disk = disks[index]
+      value = values[index]
+      return false if disk.class_name != "PadicPlaneCurveHenselDisk"
+      return false if !disk.certificate.verified?
+      return false if disk.curve != data.curve
+      return false if disk.prime != local_map.rational_prime
+      return false if value.class_name != "PlaneQuarticBPSHenselDiskValue"
+      return false if !value.certificate.verified?
+      return false if value.function_data != data
+      return false if value.local_map != local_map
+      return false if value.disk != disk
+      index += 1
+    expected_vectors = []
+    base = values[0].vector
+    values.each -> (value)
+      expected_vectors.push(
+        PlaneQuarticBPSGoodReductionLocalArithmetic.difference(
+          value.vector, base))
+    return false if !F2LinearAlgebra.same_matrix?(
+      expected_vectors, @image.vectors)
+    span = @image.span_certificate
+    return false if !span.verified?
+    return false if span.width != local_map.target_dimension
+    return false if !F2LinearAlgebra.same_matrix?(
+      span.matrix, expected_vectors)
+    return false if !span.source_right_hand_side.all? ->
+      item == 0
+    span.rank == @image.dimension
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :trusted_bps_hensel_disk_exact_span
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> lower_bound_checked?
+    verified?
+
+  -> complete_local_image_checked?
+    false
+
+
++ PlaneQuarticBPSHenselLocalImage
+  -> new(@function_data, @local_map, disks)
+    if @function_data.class_name != "PlaneQuarticBPSFunctionData"
+      raise "BPS Hensel local image needs function data"
+    if !@function_data.certificate.verified?
+      raise "BPS Hensel function data is uncertified"
+    if @local_map.class_name != "EtaleProductOddLocalSquareClassMap"
+      raise "BPS Hensel local image needs an odd localization map"
+    if !@local_map.certificate.verified?
+      raise "BPS Hensel localization map is uncertified"
+    if disks.class_name != "Array" || disks.size == 0
+      raise "BPS Hensel local image needs disks"
+    @disks = []
+    @disk_values = []
+    disks.each -> (disk)
+      if disk.class_name != "PadicPlaneCurveHenselDisk"
+        raise "BPS Hensel local image contains a non-Hensel disk"
+      if disk.curve != @function_data.curve
+        raise "BPS Hensel local image changes the curve"
+      if disk.prime != @local_map.rational_prime
+        raise "BPS Hensel local image changes the prime"
+      @disks.push(disk)
+      @disk_values.push(
+        PlaneQuarticBPSHenselDiskValue.new(
+          @function_data, @local_map, disk))
+    @vectors = []
+    base = @disk_values[0].vector
+    @disk_values.each -> (value)
+      @vectors.push(
+        PlaneQuarticBPSGoodReductionLocalArithmetic.difference(
+          value.vector, base))
+    system = F2LinearSystem.new(
+      @local_map.target_dimension)
+    @vectors.each -> (vector)
+      system.add_equation(
+        vector, 0,
+        "resolved Hensel-disk point difference")
+    @span_certificate = system.certificate
+    @certificate_cache = (
+      PlaneQuarticBPSHenselLocalImageCertificate.new(self))
+    if !@certificate_cache.verified?
+      raise "BPS Hensel local image failed certification"
+
+  -> function_data
+    @function_data
+
+  -> local_map
+    @local_map
+
+  -> rational_prime
+    @local_map.rational_prime
+
+  -> disks
+    out = []
+    @disks.each -> out.push(item)
+    out
+
+  -> disk_values
+    out = []
+    @disk_values.each -> out.push(item)
+    out
+
+  -> vectors
+    F2LinearAlgebra.copy_matrix(@vectors)
+
+  -> target_dimension
+    @local_map.target_dimension
+
+  -> span_certificate
+    @span_certificate
+
+  -> dimension
+    @span_certificate.rank
+
+  -> image_basis
+    @span_certificate.rref.copy(
+      0, @span_certificate.rank)
+
+  -> lower_bound_only?
+    true
+
+  -> complete?
+    false
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
++ PlaneQuarticBPSFunctionData
+  -> hensel_disk_local_image(local_map, disks)
+    PlaneQuarticBPSHenselLocalImage.new(
+      self, local_map, disks)
+
+
++ PlaneQuarticBPSLocalDiskImageCertificate
+  -> new(@image)
+    @verified_cache = nil
+
+  -> theorem
+    "point differences between certified p-adic curve disks lie in the BPS local Jacobian image"
+
+  -> theorem_reference
+    "p-adic implicit and multivariate Hensel theorems, odd local square theorem, and Bruin-Poonen-Stoll sections 6 and 11"
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "PlaneQuarticBPSLocalDiskImage"
+    return false if @image.class_name != expected
+    data = @image.function_data
+    return false if data.class_name != "PlaneQuarticBPSFunctionData"
+    return false if !data.certificate.verified?
+    local_map = @image.local_map
+    return false if local_map.class_name != "EtaleProductOddLocalSquareClassMap"
+    return false if !local_map.certificate.verified?
+    entries = @image.disk_entries
+    return false if entries.size == 0
+    entries.each -> (entry)
+      return false if entry.size != 2
+      disk = entry[0]
+      value = entry[1]
+      disk_kind = disk.class_name
+      if disk_kind == "PadicCurveImplicitResidueDisk"
+        return false if value.class_name != (
+          "PlaneQuarticBPSImplicitDiskValue")
+        return false if value.implicit_disk != disk
+      elsif disk_kind == "PadicPlaneCurveHenselDisk"
+        return false if value.class_name != (
+          "PlaneQuarticBPSHenselDiskValue")
+        return false if value.disk != disk
+      else
+        return false
+      return false if !disk.certificate.verified?
+      return false if !value.certificate.verified?
+      return false if disk.curve != data.curve
+      return false if disk.prime != local_map.rational_prime
+      return false if value.function_data != data
+      return false if value.local_map != local_map
+
+    expected_vectors = []
+    base = entries[0][1].vector
+    entries.each -> (entry)
+      expected_vectors.push(
+        PlaneQuarticBPSGoodReductionLocalArithmetic.difference(
+          entry[1].vector, base))
+    return false if !F2LinearAlgebra.same_matrix?(
+      expected_vectors, @image.vectors)
+    span = @image.span_certificate
+    return false if !span.verified?
+    return false if span.width != local_map.target_dimension
+    return false if !F2LinearAlgebra.same_matrix?(
+      span.matrix, expected_vectors)
+    return false if !span.source_right_hand_side.all? ->
+      item == 0
+    return false if span.rank != @image.dimension
+    dimension_certificate = @image.dimension_certificate
+    if dimension_certificate != nil
+      expected = "PlaneQuarticLocalThetaDimension"
+      return false if dimension_certificate.class_name != expected
+      return false if !dimension_certificate.certificate.verified?
+      return false if dimension_certificate.function_data != data
+      return false if dimension_certificate.local_map != local_map
+      return false if @image.dimension > (
+        dimension_certificate.dimension_upper_bound)
+    true
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :trusted_bps_mixed_local_disk_exact_span
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> lower_bound_checked?
+    verified?
+
+  -> complete_local_image_checked?
+    return false if !verified?
+    bound = @image.dimension_certificate
+    return false if bound == nil
+    @image.dimension == bound.dimension_upper_bound
+
+
++ PlaneQuarticBPSLocalDiskImage
+  -> new(@function_data, @local_map, disks,
+         @dimension_certificate = nil)
+    if @function_data.class_name != "PlaneQuarticBPSFunctionData"
+      raise "BPS local disk image needs function data"
+    if !@function_data.certificate.verified?
+      raise "BPS local disk function data is uncertified"
+    if @local_map.class_name != "EtaleProductOddLocalSquareClassMap"
+      raise "BPS local disk image needs an odd localization map"
+    if !@local_map.certificate.verified?
+      raise "BPS local disk localization map is uncertified"
+    if disks.class_name != "Array" || disks.size == 0
+      raise "BPS local disk image needs disks"
+    if @dimension_certificate != nil
+      expected = "PlaneQuarticLocalThetaDimension"
+      if @dimension_certificate.class_name != expected
+        raise "unsupported BPS local disk dimension certificate"
+      if !@dimension_certificate.certificate.verified?
+        raise "BPS local disk dimension bound is uncertified"
+      if (@dimension_certificate.function_data != @function_data ||
+          @dimension_certificate.local_map != @local_map)
+        raise "BPS local disk dimension bound changes the problem"
+    @disk_entries = []
+    disks.each -> (disk)
+      value = nil
+      kind = disk.class_name
+      if kind == "PadicCurveImplicitResidueDisk"
+        value = @function_data.certify_implicit_disk_value(
+          @local_map, disk)
+      elsif kind == "PadicPlaneCurveHenselDisk"
+        value = PlaneQuarticBPSHenselDiskValue.new(
+          @function_data, @local_map, disk)
+      else
+        raise "unsupported BPS local disk kind"
+      @disk_entries.push([disk, value])
+    @vectors = []
+    base = @disk_entries[0][1].vector
+    @disk_entries.each -> (entry)
+      @vectors.push(
+        PlaneQuarticBPSGoodReductionLocalArithmetic.difference(
+          entry[1].vector, base))
+    system = F2LinearSystem.new(
+      @local_map.target_dimension)
+    @vectors.each -> (vector)
+      system.add_equation(
+        vector, 0,
+        "certified p-adic disk point difference")
+    @span_certificate = system.certificate
+    @certificate_cache = (
+      PlaneQuarticBPSLocalDiskImageCertificate.new(self))
+    if !@certificate_cache.verified?
+      raise "BPS local disk image failed certification"
+
+  -> function_data
+    @function_data
+
+  -> local_map
+    @local_map
+
+  -> rational_prime
+    @local_map.rational_prime
+
+  -> dimension_certificate
+    @dimension_certificate
+
+  -> disk_entries
+    out = []
+    @disk_entries.each -> (entry)
+      out.push([entry[0], entry[1]])
+    out
+
+  -> disks
+    out = []
+    @disk_entries.each -> (entry)
+      out.push(entry[0])
+    out
+
+  -> disk_values
+    out = []
+    @disk_entries.each -> (entry)
+      out.push(entry[1])
+    out
+
+  -> vectors
+    F2LinearAlgebra.copy_matrix(@vectors)
+
+  -> target_dimension
+    @local_map.target_dimension
+
+  -> span_certificate
+    @span_certificate
+
+  -> dimension
+    @span_certificate.rank
+
+  -> image_basis
+    @span_certificate.rref.copy(
+      0, @span_certificate.rank)
+
+  -> lower_bound_only?
+    !complete?
+
+  -> complete?
+    certificate.complete_local_image_checked?
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
++ PlaneQuarticBPSFunctionData
+  -> local_disk_image(local_map, disks,
+                      dimension_certificate = nil)
+    PlaneQuarticBPSLocalDiskImage.new(
+      self, local_map, disks,
+      dimension_certificate)
+
+
 + PlaneQuarticBPSGoodReductionLocalImageCertificate
   -> new(@image)
     @verified_cache = nil

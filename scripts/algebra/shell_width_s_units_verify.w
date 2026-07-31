@@ -216,6 +216,7 @@ raise "unexpected shell-width norm kernel dimension" if norm_map.kernel_dimensio
 << ["norm_certified", norm_map.certified?]
 
 local_prime_text = env("TUNGSTEN_SUNIT_LOCAL_PRIME")
+local_map = nil
 if local_prime_text != nil && local_prime_text != ""
   local_prime = local_prime_text.to_i
   local_map = space.odd_localization_map(local_prime)
@@ -267,3 +268,26 @@ if env("TUNGSTEN_SUNIT_POINT_VALUES") == "1"
   << ["point_difference_vector", point_value.coordinates]
   << ["point_difference_norm", point_value.norm_vector]
   << ["point_difference_certified", point_value.certified?]
+  if local_map != nil
+    known_local = local_map.certify_known_jacobian_image(
+      [point_value])
+    << ["known_local_prime", known_local.rational_prime]
+    << ["known_local_vectors", known_local.vectors]
+    << ["known_local_dimension", known_local.dimension]
+    << ["known_local_lower_bound_only", known_local.lower_bound_only?]
+    << ["known_local_certified", known_local.certified?]
+    expected_local_vector = nil
+    if known_local.rational_prime == 3
+      expected_local_vector = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1, 1, 1, 1, 1, 1
+      ]
+    elsif known_local.rational_prime == 13
+      expected_local_vector = [
+        0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1
+      ]
+    if expected_local_vector != nil
+      if known_local.vectors[0].to_s != expected_local_vector.to_s
+        raise "unexpected shell-width known odd-local image vector"
+      if known_local.dimension != 1
+        raise "unexpected shell-width known odd-local image dimension"

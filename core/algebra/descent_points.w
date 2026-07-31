@@ -257,6 +257,159 @@
     certificate.verified?
 
 
+# Rational divisor differences provide a replayable lower bound for a local
+# Jacobian image. They cannot prove that the displayed span is the complete
+# local image; callers must not use this object as a Selmer upper bound.
++ PlaneQuarticBPSKnownOddLocalImageCertificate
+  -> new(@image)
+    @verified_cache = nil
+
+  -> theorem
+    "restriction sends rational Jacobian classes into the odd local Jacobian image"
+
+  -> theorem_reference
+    "functoriality of the BPS descent map under Q -> Q_p"
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "PlaneQuarticBPSKnownOddLocalImage"
+    return false if @image.class_name != expected
+    local_map = @image.local_map
+    return false if local_map.class_name != "EtaleProductOddLocalSquareClassMap"
+    return false if !local_map.certificate.verified?
+    values = @image.global_values
+    vectors = @image.vectors
+    return false if values.size != vectors.size
+    index = 0
+    while index < values.size
+      value = values[index]
+      return false if value.class_name != "PlaneQuarticBPSPointDifferenceDescentValue"
+      return false if !value.certificate.verified?
+      return false if value.space != local_map.source
+      expected_vector = local_map.apply(
+        value.coordinates)
+      return false if !F2LinearAlgebra.same_vector?(
+        expected_vector, vectors[index])
+      index += 1
+    span = @image.span_certificate
+    return false if !span.verified?
+    return false if span.width != local_map.target_dimension
+    return false if !F2LinearAlgebra.same_matrix?(
+      span.matrix, vectors)
+    return false if !span.source_right_hand_side.all? -> item == 0
+    return false if span.rank != @image.dimension
+    basis = @image.basis
+    return false if basis.size != span.rank
+    reduced = span.rref
+    index = 0
+    while index < basis.size
+      return false if !F2LinearAlgebra.same_vector?(
+        basis[index], reduced[index])
+      index += 1
+    true
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :trusted_global_to_local_functoriality_with_exact_span_replay
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> lower_bound_checked?
+    true
+
+  -> complete_local_image_checked?
+    false
+
+  -> kernel_checked?
+    false
+
+
++ PlaneQuarticBPSKnownOddLocalImage
+  -> new(@local_map, global_values)
+    expected = "EtaleProductOddLocalSquareClassMap"
+    if @local_map.class_name != expected
+      raise "known local image needs an odd product localization map"
+    if !@local_map.certificate.verified?
+      raise "known local image has an uncertified localization map"
+    if global_values.class_name != "Array"
+      raise "known local image needs an array of global BPS values"
+    @global_values = []
+    @vectors = []
+    system = F2LinearSystem.new(
+      @local_map.target_dimension)
+    global_values.each -> (value)
+      value_class = "PlaneQuarticBPSPointDifferenceDescentValue"
+      if value.class_name != value_class
+        raise "known local image needs certified BPS point differences"
+      if !value.certificate.verified?
+        raise "known local image contains an uncertified BPS value"
+      if value.space != @local_map.source
+        raise "known local image changes the global S-unit space"
+      vector = @local_map.apply(value.coordinates)
+      @global_values.push(value)
+      @vectors.push(vector)
+      system.add_equation(vector)
+    @span_certificate = system.certificate
+    @certificate_cache = PlaneQuarticBPSKnownOddLocalImageCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "known odd local image failed certification"
+
+  -> local_map
+    @local_map
+
+  -> rational_prime
+    @local_map.rational_prime
+
+  -> global_values
+    out = []
+    @global_values.each -> out.push(item)
+    out
+
+  -> vectors
+    F2LinearAlgebra.copy_matrix(@vectors)
+
+  -> dimension
+    @span_certificate.rank
+
+  -> basis
+    out = []
+    reduced = @span_certificate.rref
+    index = 0
+    while index < @span_certificate.rank
+      out.push(F2LinearAlgebra.copy_vector(
+        reduced[index]))
+      index += 1
+    out
+
+  -> span_certificate
+    @span_certificate
+
+  -> lower_bound_only?
+    true
+
+  -> complete?
+    false
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
 + PlaneQuarticBPSFunctionData
   -> certify_point_difference(space, positive, negative)
     PlaneQuarticBPSPointDifferenceDescentValue.new(
@@ -272,3 +425,9 @@
     @bps_function_data.certify_point_difference(
       @s_unit_square_class_space,
       positive, negative)
+
+
++ EtaleProductOddLocalSquareClassMap
+  -> certify_known_jacobian_image(global_values)
+    PlaneQuarticBPSKnownOddLocalImage.new(
+      self, global_values)

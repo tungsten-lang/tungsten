@@ -150,6 +150,10 @@ components, with zero norm. Exact arithmetic and the coordinate binding are
 replayed internally; the theorem identifying this value with the image of
 the divisor class is a named BPS sections 6.4--6.5 import. One known image
 element is a lower bound, not a local-image enumeration or Selmer upper bound.
+Its certified restrictions span one known dimension in each currently
+implemented odd local target: `000000000000111111` at \(p=3\) and
+`00000001010101` at \(p=13\). These are explicitly labeled lower bounds on
+the local images, not complete local-image calculations.
 
 The descent is not finished. Exact `Sp6(F2)` matrices now induce
 replay-certified permutations of the 28 characteristics, and certified

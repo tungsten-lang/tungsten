@@ -199,7 +199,9 @@ explicit descent:
     every number-field completion and replay the resulting block
     global-to-local matrix on the certified 35-dimensional ambient basis;
     separately, enumerate and certify the complete residue-disk cover at
-    good-reduction primes;
+    good-reduction primes; the known rational divisor class restricts to a
+    certified one-dimensional lower-bound subspace at both 3 and 13, while
+    completeness of either local image remains unproved;
 17. intersect the future explicitly labeled theta-module and local-image
     conditions with that replay-certified F2 kernel.
 

@@ -207,6 +207,13 @@ computed global norm map from the true ambient also has rank four, so its
 kernel has dimension 31. That kernel—not the erroneous true-target
 quotient—is the useful 31-dimensional space.
 
+The combined S-unit and norm replay is a heavyweight, opt-in native lane. On
+an 18-core, 128-GiB Mac17,6 it currently takes about 18.9 seconds and 6.9 GB
+peak RSS; the standard suite checks smaller identities and artifact structure.
+The checked-in witnesses are small. The peak comes from exact high-degree
+field arithmetic in a runtime that does not yet reclaim completed object
+graphs, not from loading a giant certificate file.
+
 The durable degree-6/9/12 S-class witness artifacts and supplied S-unit
 generators live in `spec/fixtures/algebra/`. Their authoritative checks are
 opt-in native replays; for example:

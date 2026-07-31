@@ -180,6 +180,12 @@ number_field_check("modular_irreducibility.kernel_checked",
 modular_field = NumberField.new(modular_quartic, :m)
 number_field_check("modular_irreducibility.field_degree",
                    modular_field.degree, 4)
+# Real embeddings use direct Sturm isolation once the defining polynomial is
+# certified squarefree. A tiny isolation budget is enough here because there
+# are no real roots; routing through complete Q-factorization would exhaust
+# this same budget in Kronecker search.
+number_field_check("modular_irreducibility.direct_real_embeddings",
+                   modular_field.real_embeddings(1).size, 0)
 
 # Some irreducible polynomials have no irreducible reduction.  Intersecting
 # the possible factor-degree subset sums from several exact finite-field

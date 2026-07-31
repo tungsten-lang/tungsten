@@ -110,6 +110,58 @@
     positive = sturm_variations_at_infinity(sequence, true)
     negative - positive
 
+  # Isolate every root of an already squarefree rational polynomial directly,
+  # without first factoring it over Q. Number-field defining polynomials and
+  # finite etale quotient presentations are already certified squarefree; a
+  # complete rational factorization is unrelated to their real embeddings and
+  # can be exponentially more expensive than the Sturm replay needed here.
+  -> squarefree_real_root_isolation(split_limit = 250_000)
+    validate_sturm_domain
+    if !squarefree?
+      raise "direct real-root isolation needs a squarefree polynomial"
+    total = real_root_count
+    return RealRootIsolation.new(self, []) if total == 0
+    sequence = sturm_sequence
+    bound = cauchy_root_bound
+    stack = [[0 - bound, bound, total]]
+    roots = []
+    splits = 0
+    while stack.size > 0
+      entry = stack.pop
+      left = entry[0]
+      right = entry[1]
+      count = entry[2]
+      if count == 1
+        root_index = sturm_root_index_before_with_sequence(
+          sequence, left)
+        roots.push(AlgebraicRealRoot.new(
+          self.monic, left, right, root_index))
+      else
+        splits += 1
+        if splits > split_limit
+          raise "direct real-root isolation split limit exceeded"
+        middle = (left + right) / Rational.new(2)
+        if at(middle).zero?
+          roots.push(middle)
+          left_count = sturm_root_count_with_sequence(
+            sequence, left, middle)
+          right_count = sturm_root_count_with_sequence(
+            sequence, middle, right)
+        else
+          left_count = sturm_root_count_with_sequence(
+            sequence, left, middle)
+          right_count = count - left_count
+        stack.push([middle, right, right_count]) if right_count > 0
+        stack.push([left, middle, left_count]) if left_count > 0
+    sorted = Polynomial.sort_real_root_values(roots)
+    result = RealRootIsolation.new(self, sorted)
+    if !result.certified?
+      raise "direct real-root isolation completeness certificate failed"
+    result
+
+  -> squarefree_real_roots(split_limit = 250_000)
+    squarefree_real_root_isolation(split_limit).roots
+
   # Strict Cauchy bound: every complex root z satisfies |z| < B.
   -> cauchy_root_bound
     validate_sturm_domain

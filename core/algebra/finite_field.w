@@ -248,7 +248,11 @@
             product[shift + j] - leading * @modulus[j])
           j += 1
       exponent -= 1
-    encode_coefficients(product.slice(0, @degree))
+    # Reduction only needs the low-degree coefficients. This result must own
+    # its storage: `slice` creates a zero-copy view whose parent is a temporary
+    # multiplication buffer, and retaining those views makes every later
+    # parent-array growth walk an ever-growing view registry.
+    encode_coefficients(product.copy(0, @degree))
 
   # Small finite geometries evaluate the same field products many thousands
   # of times. A checked q^2 table turns those exact operations into one Array

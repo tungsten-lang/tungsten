@@ -1324,7 +1324,10 @@
 
   -> real_embeddings(search_limit = 250_000)
     embeddings = []
-    @defining_polynomial.real_roots(search_limit).each -> (root)
+    # The NumberField constructor has already certified irreducibility, hence
+    # squarefreeness in characteristic zero. Isolate the roots directly with
+    # Sturm sequences instead of factoring the defining polynomial over Q.
+    @defining_polynomial.squarefree_real_roots(search_limit).each -> (root)
       embeddings.push(NumberFieldRealEmbedding.new(self, root))
     if embeddings.size != signature[0]
       raise "real-embedding count disagrees with the certified signature"

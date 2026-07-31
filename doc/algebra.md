@@ -1278,8 +1278,13 @@ appears, but for a different and mathematically valid reason.
 the complete binary matrix exactly. `PlaneQuarticBPSNormConstraintCertificate`
 then checks the true setup and imports BPS Lemma 6.16 for the statement that
 the descent image lies in that kernel. On the current shell-width artifacts,
-the full native replay takes about 32 seconds and 11.4 GB RSS. It is an
-explicit opt-in research check, not part of the ordinary regression suite.
+the full native replay takes about 18.9 seconds and 6.9 GB RSS on an 18-core,
+128-GiB Mac17,6. This is down from 32.4 seconds and 11.4 GB after profiling
+removed retained finite-field array views and routed certified number-field
+embeddings directly through Sturm isolation instead of unrelated rational
+factorization. The degree-9 and degree-12 stages still peak near 1.9 GB and
+4.8 GB independently, so this remains an explicit opt-in research check, not
+part of the ordinary regression suite.
 
 The canonical finite theta module is independently executable:
 

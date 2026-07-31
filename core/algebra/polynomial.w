@@ -299,8 +299,11 @@
       coefficient = @ring.field.normalize_element(input[i][0])
       exponents = copy_exponents(input[i][1])
       raise "wrong monomial arity" if exponents.size != @ring.arity
-      exponents.each ->
-        raise "monomial exponents must be nonnegative integers" if item < 0
+      exponent_index = 0
+      while exponent_index < exponents.size
+        if exponents[exponent_index] < 0
+          raise "monomial exponents must be nonnegative integers"
+        exponent_index += 1
       if !field_zero?(coefficient)
         found = -1
         j = 0
@@ -517,22 +520,31 @@
 
   -> term_degree(term)
     degree = 0
-    term[1].each -> degree += item
+    i = 0
+    while i < term[1].size
+      degree += term[1][i]
+      i += 1
     degree
 
   -> degree
     return -1 if zero?
     result = 0
-    @terms.each ->
-      d = term_degree(item)
+    i = 0
+    while i < @terms.size
+      d = term_degree(@terms[i])
       result = d if d > result
+      i += 1
     result
 
   -> degree_in(variable)
     index = variable.class_name == "Integer" ? variable : @ring.index_of(variable)
     raise "unknown polynomial variable" if index == nil
     result = 0
-    @terms.each -> result = item[1][index] if item[1][index] > result
+    i = 0
+    while i < @terms.size
+      exponent = @terms[i][1][index]
+      result = exponent if exponent > result
+      i += 1
     result
 
   -> homogeneous?
@@ -899,7 +911,10 @@
     while i <= degree
       out.push(@ring.field.zero)
       i += 1
-    @terms.each -> out[item[1][0]] = item[0]
+    i = 0
+    while i < @terms.size
+      out[@terms[i][1][0]] = @terms[i][0]
+      i += 1
     out
 
   # Rational polynomial content: gcd(numerators) / lcm(denominators).

@@ -1885,7 +1885,10 @@
     while i < primes.size
       prime = primes[i]
       return false if prime < 2 || !prime.prime?
-      return false if primes.slice(0, i).include?(prime)
+      previous = 0
+      while previous < i
+        return false if primes[previous] == prime
+        previous += 1
       decomposition = decompositions[i]
       return false if decomposition.order != @data.order
       return false if decomposition.prime != prime

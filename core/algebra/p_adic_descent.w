@@ -105,6 +105,412 @@
     out
 
 
++ PlaneQuarticBPSImplicitDiskArithmetic
+  -> .value_data(function_data, local_map, implicit_disk)
+    if implicit_disk.class_name != "PadicCurveImplicitResidueDisk"
+      raise "implicit BPS evaluation needs an implicit residue disk"
+    if !implicit_disk.certificate.verified?
+      raise "implicit BPS residue disk is uncertified"
+    if implicit_disk.prime != local_map.rational_prime
+      raise "implicit BPS local data changes the prime"
+    if implicit_disk.prime == 2
+      raise "implicit BPS line evaluation currently needs an odd prime"
+    functions = function_data.function_components
+    nested_bases = local_map.source.component_bases
+    nested_maps = local_map.local_maps
+    if functions.size != nested_bases.size
+      raise "implicit BPS component count mismatch"
+    coordinates = implicit_disk.center_coordinates
+    solved = implicit_disk.solved_coordinate_index
+    coefficient_coordinates = [0, 0, 0]
+    coefficient_coordinates[solved] = 1
+    prime_power = (
+      implicit_disk.prime**implicit_disk.solved_valuation)
+    leading_unit = implicit_disk.solved_unit_residue
+    vector = []
+    square_classes = []
+    flat_index = 0
+    component_index = 0
+    while component_index < functions.size
+      function = functions[component_index]
+      bases = nested_bases[component_index]
+      basis_index = 0
+      while basis_index < bases.size
+        if flat_index >= nested_maps.size
+          raise "implicit BPS evaluation lost a local factor"
+        basis = bases[basis_index]
+        numerator = (
+          PlaneQuarticBPSGoodReductionLocalArithmetic.line_value(
+            function, basis,
+            function.numerator_coefficients,
+            coordinates))
+        denominator_at_center = (
+          PlaneQuarticBPSGoodReductionLocalArithmetic.line_value(
+            function, basis,
+            function.denominator_coefficients,
+            coordinates))
+        if !denominator_at_center.zero?
+          raise "implicit BPS denominator does not vanish at the center"
+        denominator_coefficient = (
+          PlaneQuarticBPSGoodReductionLocalArithmetic.line_value(
+            function, basis,
+            function.denominator_coefficients,
+            coefficient_coordinates))
+        if denominator_coefficient.zero?
+          raise "implicit BPS solved coordinate is absent from denominator"
+        coordinate_index = 0
+        while coordinate_index < coordinates.size
+          if coordinate_index != solved
+            probe = [0, 0, 0]
+            probe[coordinate_index] = 1
+            other_coefficient = (
+              PlaneQuarticBPSGoodReductionLocalArithmetic.line_value(
+                function, basis,
+                function.denominator_coefficients,
+                probe))
+            if !other_coefficient.zero?
+              raise "implicit BPS denominator is not the solved coordinate"
+          coordinate_index += 1
+        denominator_representative = (
+          denominator_coefficient *
+          prime_power * leading_unit)
+        ratio = numerator / denominator_representative
+
+        maps = nested_maps[flat_index]
+        maps.each -> (field_map)
+          prime = field_map.prime_ideal
+          reducer = NumberFieldLocalResidueReduction.new(
+            prime)
+          numerator_residue = reducer.reduction_allow_zero(
+            numerator)
+          if prime.residue_field.zero?(numerator_residue)
+            raise "implicit BPS numerator is not a local unit"
+          coordinate_index = 0
+          while coordinate_index < coordinates.size
+            coefficient = (
+              PlaneQuarticBPSGoodReductionLocalArithmetic.arithmetic_value(
+                basis,
+                function.numerator_coefficients[
+                  coordinate_index]))
+            reducer.reduction_allow_zero(coefficient)
+            coordinate_index += 1
+          denominator_residue = reducer.reduction_allow_zero(
+            denominator_coefficient)
+          if prime.residue_field.zero?(denominator_residue)
+            raise "implicit BPS denominator coefficient is not a local unit"
+          square_class = prime.local_square_class(ratio)
+          square_classes.push(square_class)
+          square_class.vector.each -> vector.push(item)
+        flat_index += 1
+        basis_index += 1
+      component_index += 1
+    if flat_index != nested_maps.size
+      raise "implicit BPS evaluation has unused local factors"
+    F2LinearAlgebra.validate_vector(
+      vector, local_map.target_dimension)
+    [vector, square_classes]
+
+
++ PlaneQuarticBPSImplicitDiskValueCertificate
+  -> new(@value)
+    @verified_cache = nil
+
+  -> theorem
+    "stable implicit-coordinate leading data determines the BPS square class throughout the residue disk"
+
+  -> theorem_reference
+    "odd local square theorem, p-adic implicit function theorem, and Bruin-Poonen-Stoll sections 6 and 11"
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "PlaneQuarticBPSImplicitDiskValue"
+    return false if @value.class_name != expected
+    data = @value.function_data
+    return false if data.class_name != "PlaneQuarticBPSFunctionData"
+    return false if !data.certificate.verified?
+    local_map = @value.local_map
+    return false if local_map.class_name != "EtaleProductOddLocalSquareClassMap"
+    return false if !local_map.certificate.verified?
+    disk = @value.implicit_disk
+    return false if disk.class_name != "PadicCurveImplicitResidueDisk"
+    return false if !disk.certificate.verified?
+    return false if disk.curve != data.curve
+    return false if disk.prime != local_map.rational_prime
+    compatible = PlaneQuarticBPSPointDifferenceArithmetic.same_component_polynomials?(
+      data, local_map.source)
+    return false if !compatible
+    replay = PlaneQuarticBPSImplicitDiskArithmetic.value_data(
+      data, local_map, disk)
+    return false if !F2LinearAlgebra.same_vector?(
+      replay[0], @value.vector)
+    supplied = @value.square_classes
+    return false if replay[1].size != supplied.size
+    index = 0
+    while index < supplied.size
+      return false if !supplied[index].certificate.verified?
+      return false if !replay[1][index].certificate.verified?
+      return false if (
+        supplied[index].prime_ideal !=
+        replay[1][index].prime_ideal)
+      return false if (
+        supplied[index].value != replay[1][index].value)
+      return false if !F2LinearAlgebra.same_vector?(
+        supplied[index].vector,
+        replay[1][index].vector)
+      index += 1
+    true
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :trusted_implicit_bps_disk_with_exact_local_square_classes
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> local_descent_constancy_checked?
+    verified?
+
+
++ PlaneQuarticBPSImplicitDiskValue
+  -> new(@function_data, @local_map, @implicit_disk)
+    result = PlaneQuarticBPSImplicitDiskArithmetic.value_data(
+      @function_data, @local_map, @implicit_disk)
+    @vector = result[0]
+    @square_classes = result[1]
+    @certificate_cache = PlaneQuarticBPSImplicitDiskValueCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "implicit BPS disk value failed certification"
+
+  -> function_data
+    @function_data
+
+  -> local_map
+    @local_map
+
+  -> implicit_disk
+    @implicit_disk
+
+  -> vector
+    F2LinearAlgebra.copy_vector(@vector)
+
+  -> square_classes
+    out = []
+    @square_classes.each -> out.push(item)
+    out
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
++ PlaneQuarticBPSFunctionData
+  -> certify_implicit_disk_value(local_map, implicit_disk)
+    PlaneQuarticBPSImplicitDiskValue.new(
+      self, local_map, implicit_disk)
+
+
++ PlaneQuarticBPSImplicitLocalImageCertificate
+  -> new(@image)
+    @verified_cache = nil
+
+  -> theorem
+    "point differences between certified implicit disks lie in the BPS local Jacobian image"
+
+  -> theorem_reference
+    "p-adic implicit function theorem and Bruin-Poonen-Stoll sections 6 and 11"
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "PlaneQuarticBPSImplicitLocalImage"
+    return false if @image.class_name != expected
+    data = @image.function_data
+    return false if data.class_name != "PlaneQuarticBPSFunctionData"
+    return false if !data.certificate.verified?
+    local_map = @image.local_map
+    return false if local_map.class_name != "EtaleProductOddLocalSquareClassMap"
+    return false if !local_map.certificate.verified?
+    disks = @image.implicit_disks
+    values = @image.disk_values
+    return false if disks.size == 0 || disks.size != values.size
+    index = 0
+    while index < disks.size
+      disk = disks[index]
+      value = values[index]
+      return false if disk.class_name != "PadicCurveImplicitResidueDisk"
+      return false if !disk.certificate.verified?
+      return false if disk.curve != data.curve
+      return false if disk.prime != local_map.rational_prime
+      return false if value.class_name != "PlaneQuarticBPSImplicitDiskValue"
+      return false if !value.certificate.verified?
+      return false if value.function_data != data
+      return false if value.local_map != local_map
+      return false if value.implicit_disk != disk
+      index += 1
+
+    expected_vectors = []
+    base = values[0].vector
+    values.each -> (value)
+      expected_vectors.push(
+        PlaneQuarticBPSGoodReductionLocalArithmetic.difference(
+          value.vector, base))
+    return false if !F2LinearAlgebra.same_matrix?(
+      expected_vectors, @image.vectors)
+    span = @image.span_certificate
+    return false if !span.verified?
+    return false if span.width != local_map.target_dimension
+    return false if !F2LinearAlgebra.same_matrix?(
+      span.matrix, expected_vectors)
+    return false if !span.source_right_hand_side.all? ->
+      item == 0
+    return false if span.rank != @image.dimension
+    true
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :trusted_bps_implicit_disk_exact_span
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> local_descent_constancy_checked?
+    verified?
+
+  -> lower_bound_checked?
+    verified?
+
+  -> complete_local_image_checked?
+    false
+
+
++ PlaneQuarticBPSImplicitLocalImage
+  -> new(@function_data, @local_map, implicit_disks)
+    if @function_data.class_name != "PlaneQuarticBPSFunctionData"
+      raise "implicit BPS local image needs function data"
+    if !@function_data.certificate.verified?
+      raise "implicit BPS function data is uncertified"
+    if @local_map.class_name != "EtaleProductOddLocalSquareClassMap"
+      raise "implicit BPS local image needs an odd localization map"
+    if !@local_map.certificate.verified?
+      raise "implicit BPS localization map is uncertified"
+    if (implicit_disks.class_name != "Array" ||
+        implicit_disks.size == 0)
+      raise "implicit BPS local image needs residue disks"
+    @implicit_disks = []
+    @disk_values = []
+    implicit_disks.each -> (disk)
+      if disk.class_name != "PadicCurveImplicitResidueDisk"
+        raise "implicit BPS local image contains a non-implicit disk"
+      if disk.curve != @function_data.curve
+        raise "implicit BPS local image changes the curve"
+      if disk.prime != @local_map.rational_prime
+        raise "implicit BPS local image changes the prime"
+      @implicit_disks.push(disk)
+      @disk_values.push(
+        @function_data.certify_implicit_disk_value(
+          @local_map, disk))
+    @vectors = []
+    base = @disk_values[0].vector
+    @disk_values.each -> (value)
+      @vectors.push(
+        PlaneQuarticBPSGoodReductionLocalArithmetic.difference(
+          value.vector, base))
+    system = F2LinearSystem.new(
+      @local_map.target_dimension)
+    @vectors.each -> (vector)
+      system.add_equation(
+        vector, 0,
+        "implicit residue-disk point difference")
+    @span_certificate = system.certificate
+    @certificate_cache = PlaneQuarticBPSImplicitLocalImageCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "implicit BPS local image failed certification"
+
+  -> function_data
+    @function_data
+
+  -> local_map
+    @local_map
+
+  -> rational_prime
+    @local_map.rational_prime
+
+  -> implicit_disks
+    out = []
+    @implicit_disks.each -> out.push(item)
+    out
+
+  -> disk_values
+    out = []
+    @disk_values.each -> out.push(item)
+    out
+
+  -> vectors
+    F2LinearAlgebra.copy_matrix(@vectors)
+
+  -> target_dimension
+    @local_map.target_dimension
+
+  -> span_certificate
+    @span_certificate
+
+  -> dimension
+    @span_certificate.rank
+
+  -> image_basis
+    @span_certificate.rref.copy(
+      0, @span_certificate.rank)
+
+  -> lower_bound_only?
+    true
+
+  -> complete?
+    false
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
++ PlaneQuarticBPSFunctionData
+  -> implicit_disk_local_image(local_map, implicit_disks)
+    PlaneQuarticBPSImplicitLocalImage.new(
+      self, local_map, implicit_disks)
+
+
 + PlaneQuarticBPSGoodReductionLocalImageCertificate
   -> new(@image)
     @verified_cache = nil

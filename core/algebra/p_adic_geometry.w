@@ -42,6 +42,273 @@
       index += 1
     false
 
+
++ PadicCurveImplicitArithmetic
+  -> .valuation(value, prime)
+    PadicField.new(prime, 4).coerce(value).valuation
+
+  -> .free_variation_polynomial(
+       curve, coordinates, pivot_index,
+       solved_index, free_index, prime)
+    ring = PolynomialRing.new(
+      [:u], RationalField.new, :lex)
+    u = ring.generator(0)
+    substitutions = []
+    index = 0
+    while index < coordinates.size
+      if index == pivot_index
+        substitutions.push(ring.one)
+      elsif index == solved_index
+        substitutions.push(ring.zero)
+      elsif index == free_index
+        substitutions.push(
+          ring.constant(coordinates[index]) + u*prime)
+      else
+        raise "implicit plane disk has an unused coordinate"
+      index += 1
+    result = ring.zero
+    curve.equation.each_term -> (coefficient, exponents)
+      term = ring.constant(coefficient)
+      index = 0
+      while index < exponents.size
+        term *= substitutions[index]**exponents[index]
+        index += 1
+      result += term
+    result
+
+
++ PadicCurveImplicitResidueDiskCertificate
+  -> new(@disk)
+    @verified_cache = nil
+
+  -> theorem
+    "an implicit-function residue disk with stable leading constant determines the valuation and leading unit of the solved coordinate"
+
+  -> theorem_reference
+    "p-adic implicit function theorem and simple-root Hensel lemma"
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "PadicCurveImplicitResidueDisk"
+    return false if @disk.class_name != expected
+    source = @disk.residue_disk
+    return false if source.class_name != "PadicCurveResidueDisk"
+    return false if !source.smooth?
+    curve = source.curve
+    prime = source.prime
+    return false if !prime.prime?
+    coordinates = @disk.center_coordinates
+    return false if coordinates.size != 3
+    pivot = @disk.pivot_coordinate_index
+    solved = @disk.solved_coordinate_index
+    free = @disk.free_coordinate_index
+    return false if pivot == solved || pivot == free || solved == free
+    return false if (
+      pivot < 0 || solved < 0 || free < 0 ||
+      pivot >= 3 || solved >= 3 || free >= 3)
+    reduction_field = source.reduction_curve.field
+    return false if !reduction_field.equal?(
+      source.reduction_point.coordinates[pivot],
+      reduction_field.one)
+    return false if !reduction_field.zero?(
+      source.reduction_point.coordinates[solved])
+
+    source_value = curve.equation.evaluate(
+      coordinates)
+    return false if source_value != @disk.source_value
+    return false if source_value == 0
+    valuation = PadicCurveImplicitArithmetic.valuation(
+      source_value, prime)
+    return false if valuation != @disk.solved_valuation
+    return false if valuation < 1
+    derivative = curve.equation.derivative(
+      solved).evaluate(coordinates)
+    return false if derivative != @disk.solved_derivative
+    return false if (
+      PadicCurveImplicitArithmetic.valuation(
+        derivative, prime) != 0)
+
+    variation = PadicCurveImplicitArithmetic.free_variation_polynomial(
+      curve, coordinates, pivot, solved, free, prime)
+    return false if variation != @disk.free_variation_polynomial
+    return false if variation.coeff(0) != source_value
+    exponent = 1
+    while exponent <= variation.degree
+      coefficient = variation.coeff(exponent)
+      if coefficient != 0
+        coefficient_valuation = (
+          PadicCurveImplicitArithmetic.valuation(
+            coefficient, prime))
+        return false if coefficient_valuation <= valuation
+      exponent += 1
+
+    padic = PadicField.new(prime, 4)
+    scaled = source_value / prime**valuation
+    scaled_residue = padic.coerce(scaled).unit_residue
+    derivative_residue = padic.coerce(
+      derivative).unit_residue
+    expected_residue = (
+      reduction_field.divide(
+        reduction_field.negate(
+          reduction_field.coerce(scaled_residue)),
+        reduction_field.coerce(derivative_residue)))
+    return false if expected_residue != @disk.solved_unit_residue
+    true
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :trusted_p_adic_implicit_disk_with_exact_leading_term
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> leading_coordinate_checked?
+    verified?
+
+
++ PadicCurveImplicitResidueDisk
+  -> new(@residue_disk, @solved_coordinate_index)
+    if @residue_disk.class_name != "PadicCurveResidueDisk"
+      raise "implicit p-adic disk needs a residue disk"
+    if !@residue_disk.smooth?
+      raise "implicit p-adic disk needs a smooth special-fiber point"
+    coordinates = @residue_disk.reduction_point.coordinates
+    if (@solved_coordinate_index < 0 ||
+        @solved_coordinate_index >= coordinates.size)
+      raise "implicit solved coordinate is out of range"
+    field = @residue_disk.reduction_curve.field
+    if !field.zero?(coordinates[@solved_coordinate_index])
+      raise "implicit solved coordinate must vanish on the special fiber"
+    @pivot_coordinate_index = nil
+    index = 0
+    while index < coordinates.size
+      if (index != @solved_coordinate_index &&
+          field.equal?(coordinates[index], field.one))
+        @pivot_coordinate_index = index
+        break
+      index += 1
+    if @pivot_coordinate_index == nil
+      raise "implicit p-adic disk needs a unit pivot coordinate"
+    @free_coordinate_index = nil
+    index = 0
+    while index < coordinates.size
+      if (index != @solved_coordinate_index &&
+          index != @pivot_coordinate_index)
+        @free_coordinate_index = index
+      index += 1
+    @center_coordinates = []
+    coordinates.each -> @center_coordinates.push(item)
+    curve = @residue_disk.curve
+    prime = @residue_disk.prime
+    @source_value = curve.equation.evaluate(
+      @center_coordinates)
+    if @source_value == 0
+      raise "implicit coordinate has no finite leading valuation"
+    @solved_valuation = PadicCurveImplicitArithmetic.valuation(
+      @source_value, prime)
+    if @solved_valuation < 1
+      raise "implicit disk center does not reduce to the curve"
+    @solved_derivative = curve.equation.derivative(
+      @solved_coordinate_index).evaluate(
+        @center_coordinates)
+    if PadicCurveImplicitArithmetic.valuation(
+         @solved_derivative, prime) != 0
+      raise "implicit solved derivative is not a p-adic unit"
+    @free_variation_polynomial = (
+      PadicCurveImplicitArithmetic.free_variation_polynomial(
+        curve, @center_coordinates,
+        @pivot_coordinate_index,
+        @solved_coordinate_index,
+        @free_coordinate_index, prime))
+    exponent = 1
+    while exponent <= @free_variation_polynomial.degree
+      coefficient = @free_variation_polynomial.coeff(
+        exponent)
+      if coefficient != 0
+        coefficient_valuation = (
+          PadicCurveImplicitArithmetic.valuation(
+            coefficient, prime))
+        if coefficient_valuation <= @solved_valuation
+          raise "implicit leading coordinate varies inside the residue disk"
+      exponent += 1
+    padic = @residue_disk.padic_field
+    scaled = @source_value / prime**@solved_valuation
+    scaled_residue = padic.coerce(scaled).unit_residue
+    derivative_residue = padic.coerce(
+      @solved_derivative).unit_residue
+    @solved_unit_residue = field.divide(
+      field.negate(field.coerce(scaled_residue)),
+      field.coerce(derivative_residue))
+    @certificate_cache = PadicCurveImplicitResidueDiskCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "implicit p-adic residue disk failed certification"
+
+  -> residue_disk
+    @residue_disk
+
+  -> curve
+    @residue_disk.curve
+
+  -> prime
+    @residue_disk.prime
+
+  -> precision
+    @residue_disk.precision
+
+  -> reduction_point
+    @residue_disk.reduction_point
+
+  -> center_coordinates
+    out = []
+    @center_coordinates.each -> out.push(item)
+    out
+
+  -> pivot_coordinate_index
+    @pivot_coordinate_index
+
+  -> solved_coordinate_index
+    @solved_coordinate_index
+
+  -> free_coordinate_index
+    @free_coordinate_index
+
+  -> source_value
+    @source_value
+
+  -> solved_derivative
+    @solved_derivative
+
+  -> free_variation_polynomial
+    @free_variation_polynomial
+
+  -> solved_valuation
+    @solved_valuation
+
+  -> solved_unit_residue
+    @solved_unit_residue
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
 + PadicCurveResidueDisk
   -> new(@curve, @padic_field, @reduction_curve, @reduction_point)
     if @curve.class_name != "Curve"
@@ -93,6 +360,10 @@
 
   -> inspect
     to_s
+
+  -> implicit_coordinate(coordinate_index)
+    PadicCurveImplicitResidueDisk.new(
+      self, coordinate_index)
 
 
 + PadicCurveResidueDiskCoverCertificate

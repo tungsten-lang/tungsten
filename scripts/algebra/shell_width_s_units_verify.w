@@ -248,7 +248,8 @@ descent_setup = nil
 need_descent_functions = (
   env("TUNGSTEN_SUNIT_POINT_VALUES") == "1" ||
   env("TUNGSTEN_SUNIT_GOOD_LOCAL_IMAGE") == "1" ||
-  env("TUNGSTEN_SUNIT_SMOOTH_LOCAL_IMAGE") == "1")
+  env("TUNGSTEN_SUNIT_SMOOTH_LOCAL_IMAGE") == "1" ||
+  env("TUNGSTEN_SUNIT_IMPLICIT_LOCAL_IMAGE") == "1")
 if need_descent_functions
   P2 = ProjectiveSpace<ℚ, 2>.new(:B, :S, :Z)
   B = P2.coords[0]
@@ -372,3 +373,28 @@ if env("TUNGSTEN_SUNIT_SMOOTH_LOCAL_IMAGE") == "1"
   if local_map.rational_prime == 13
     if smooth_image.dimension != 2 || !smooth_image.complete?
       raise "shell-width p=13 smooth disks did not complete the local image"
+
+if env("TUNGSTEN_SUNIT_IMPLICIT_LOCAL_IMAGE") == "1"
+  if local_map == nil || local_map.rational_prime != 3
+    raise "shell-width implicit local image currently needs local prime 3"
+  cover3 = curve.p_adic_smooth_residue_disks(3, 8)
+  if cover3.smooth_point_count != 3
+    raise "unexpected shell-width p=3 smooth residue-disk count"
+  implicit_a = cover3.disks[0].implicit_coordinate(2)
+  implicit_b = cover3.disks[1].implicit_coordinate(2)
+  implicit_image = function_data.implicit_disk_local_image(
+    local_map, [implicit_a, implicit_b])
+  disk_values = implicit_image.disk_values
+  << ["implicit_local_prime", implicit_image.rational_prime]
+  << ["implicit_local_points", [
+    implicit_a.reduction_point,
+    implicit_b.reduction_point]]
+  << ["implicit_local_values", [
+    disk_values[0].vector, disk_values[1].vector]]
+  << ["implicit_local_basis", implicit_image.image_basis]
+  << ["implicit_local_dimension", implicit_image.dimension]
+  << ["implicit_local_lower_bound_only",
+      implicit_image.lower_bound_only?]
+  << ["implicit_local_certified", implicit_image.certified?]
+  if implicit_image.dimension != 0
+    raise "unexpected shell-width p=3 implicit-disk span"

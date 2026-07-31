@@ -197,9 +197,14 @@ For the shell-width artifacts the \(p=2\) matrix has target dimension 35 and
 rank 29, the \(p=3\) matrix has target dimension 18 and rank 17, and the
 \(p=13\) matrix has target dimension 14 and rank 13. The remaining local BPS
 steps are at 2 and 3. Modulo 3 the fiber is \(Z(B-S)^3\), and all three smooth
-rational disks meet a zero or pole of the chosen BPS functions; modulo 2 the
-fiber is \((S+Z)^4\) and has no smooth point. Both therefore require recursive
-refinement or blowups rather than another special-fiber scan.
+rational disks meet a zero or pole of the chosen BPS functions. Tungsten now
+certifies implicit \(Z\)-coordinates and exact local square classes on two of
+those disks; their values agree, giving a certified zero-dimensional
+point-difference span rather than an incomplete result presented as progress.
+The third smooth disk and the singular residue classes still need recursive
+refinement. Modulo 2 the fiber is \((S+Z)^4\) and has no smooth point. Both
+primes therefore require further refinement or blowups rather than another
+special-fiber scan.
 
 The finite reference theta module itself is now present: it constructs the 28
 odd quadratic refinements of the symplectic form on \(\mathbb F_2^6\),

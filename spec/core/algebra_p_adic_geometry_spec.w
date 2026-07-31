@@ -54,6 +54,35 @@ padic_geometry_check("smooth_locus.cusp_tangent",
                      cuspidal_local.tangent_cone.to_s,
                      "4S^2")
 
+cover3 = C.p_adic_smooth_residue_disks(3, 8)
+padic_geometry_check("implicit.p3_smooth_disks",
+                     cover3.smooth_point_count, 3)
+implicit_a = cover3.disks[0].implicit_coordinate(2)
+implicit_b = cover3.disks[1].implicit_coordinate(2)
+padic_geometry_check("implicit.a_certified",
+                     implicit_a.certified?, true)
+padic_geometry_check("implicit.a_point",
+                     implicit_a.reduction_point.to_s,
+                     "\[0:1:0\]")
+padic_geometry_check("implicit.a_valuation",
+                     implicit_a.solved_valuation, 1)
+padic_geometry_check("implicit.a_unit",
+                     implicit_a.solved_unit_residue, 2)
+padic_geometry_check("implicit.b_point",
+                     implicit_b.reduction_point.to_s,
+                     "\[1:2:0\]")
+padic_geometry_check("implicit.b_valuation",
+                     implicit_b.solved_valuation, 1)
+padic_geometry_check("implicit.b_unit",
+                     implicit_b.solved_unit_residue, 2)
+implicit_exact_rejected = false
+begin
+  cover3.disks[2].implicit_coordinate(2)
+rescue error
+  implicit_exact_rejected = true
+padic_geometry_check("implicit.exact_point_loud",
+                     implicit_exact_rejected, true)
+
 padic_geometry_check("cuspidal.two_primary_order",
                      PlaneQuarticCuspidalModelArithmetic.
                        two_adic_valuation(212), 2)

@@ -214,6 +214,11 @@ explicit descent:
     \(1+3T+39T^3+169T^4\); its Jacobian order \(212=4\cdot53\) bounds the
     local 2-quotient by dimension two, and the twelve clean smooth-locus disks
     attain that bound, certifying the complete \(p=13\) BPS image;
+    at \(p=3\), certify implicit \(Z\)-coordinates on the smooth disks above
+    \([0:1:0]\) and \([1:2:0]\), including \(v_3(Z)=1\) and leading unit
+    \(Z/3=2\); exact local square-class replay shows that the two disk values
+    agree, so their point-difference span has dimension zero and remains an
+    explicitly lower-bound-only result;
     the known rational divisor class still gives only a one-dimensional
     lower-bound subspace at 2 and 3;
 17. intersect the future explicitly labeled theta-module and local-image

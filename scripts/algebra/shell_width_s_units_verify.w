@@ -214,3 +214,25 @@ raise "unexpected shell-width norm kernel dimension" if norm_map.kernel_dimensio
 << ["norm_rank", norm_map.kernel_certificate.rank]
 << ["norm_kernel_dimension", norm_map.kernel_dimension]
 << ["norm_certified", norm_map.certified?]
+
+local_prime_text = env("TUNGSTEN_SUNIT_LOCAL_PRIME")
+if local_prime_text != nil && local_prime_text != ""
+  local_prime = local_prime_text.to_i
+  local_map = space.odd_localization_map(local_prime)
+  << ["local_prime", local_prime]
+  << ["local_factor_count", local_map.local_factor_count]
+  << ["local_target_dimension", local_map.target_dimension]
+  << ["local_matrix", local_map.matrix]
+  << ["local_rank", local_map.rank]
+  << ["local_kernel_dimension", local_map.kernel_dimension]
+  << ["local_certified", local_map.certified?]
+  if local_prime == 3
+    raise "unexpected shell-width 3-adic factor count" if local_map.local_factor_count != 9
+    raise "unexpected shell-width 3-adic target dimension" if local_map.target_dimension != 18
+    raise "unexpected shell-width 3-adic localization rank" if local_map.rank != 17
+    raise "unexpected shell-width 3-adic kernel dimension" if local_map.kernel_dimension != 18
+  elsif local_prime == 13
+    raise "unexpected shell-width 13-adic factor count" if local_map.local_factor_count != 7
+    raise "unexpected shell-width 13-adic target dimension" if local_map.target_dimension != 14
+    raise "unexpected shell-width 13-adic localization rank" if local_map.rank != 13
+    raise "unexpected shell-width 13-adic kernel dimension" if local_map.kernel_dimension != 22

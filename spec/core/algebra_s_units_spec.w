@@ -150,6 +150,14 @@ sunit_check("sunit.isomorphic.dimension",
 sunit_check("sunit.isomorphic.minus_one",
             isomorphic_sunit_basis.coordinates(-1).to_s,
             U5.coordinates(-1).to_s)
+sunit_check("sunit.isomorphic.generator_count",
+            isomorphic_sunit_basis.generators.size,
+            isomorphic_sunit_basis.dimension)
+sunit_check("sunit.isomorphic.generator_roundtrip",
+            isomorphic_sunit_basis.source_to_model(
+              isomorphic_sunit_basis.generators[1]) ==
+              U5.generators[1],
+            true)
 
 characteristic_two_failed = false
 begin

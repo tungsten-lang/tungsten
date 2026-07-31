@@ -154,8 +154,20 @@ certifies the stabilizer subdegrees
 identifies, up to conjugacy, subgroup-table class 693 of order 36; the finite
 groups and incidence actions are replayed, while completeness of GAP's
 1,369-class subgroup table is an explicit trusted import. Missing links are
-a common characteristic-zero labeling, certified p-adic local images, the
-BPS comparison kernel and rational \(J[2]\), and the final Selmer/rank bound.
+a common characteristic-zero labeling, certified descent-function local
+images, the BPS comparison kernel and rational \(J[2]\), and the final
+Selmer/rank bound.
+
+The local-field foundation is now executable but should not be confused with
+that missing local image. Tungsten computes exact rational square classes in
+\(\mathbb Q_p\), simple-root Hensel lifts, odd-prime square classes in
+number-field completions, good-reduction residue-disk covers, and certified
+global-to-local matrices from the 35-dimensional \(S\)-unit ambient space.
+For the shell-width artifacts the \(p=3\) matrix has target dimension 18 and
+rank 17, while the \(p=13\) matrix has target dimension 14 and rank 13.
+The remaining BPS step is to prove which of those local vectors actually come
+from local Jacobian divisor classes, including dyadic and bad-reduction
+places.
 
 The finite reference theta module itself is now present: it constructs the 28
 odd quadratic refinements of the symplectic form on \(\mathbb F_2^6\),
@@ -165,7 +177,7 @@ their complete incidence-preserving permutations, finite action orbits, and
 primewise Frobenius cycle constraints. The shell-width prime-5 fiber has a
 complete arithmetic incidence labeling, and exact characteristic-zero
 subdegrees now determine the global subgroup up to conjugacy. What remains is
-an explicit compatible root labeling and the local Galois/descent images.
+an explicit compatible root labeling and the local Jacobian/descent images.
 
 ## Fermat and modularity
 

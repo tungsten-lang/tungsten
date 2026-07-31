@@ -147,8 +147,19 @@
 
     ideals = @basis.generator_fractional_ideals
     return false if ideals.size != @basis.generators.size
+    computations = @basis.generator_fractional_ideal_computations
+    return false if computations.size != ideals.size
     i = 0
     while i < ideals.size
+      computation = computations[i]
+      return false if !computation.certificate.verified?
+      return false if !computation.order.same_order?(
+        field.certify_maximal_order)
+      expected_value = field.generic_algebra_element(
+        @basis.generators[i])
+      return false if computation.value != expected_value
+      return false if !computation.ideal.eql?(
+        ideals[i].algebra_fractional_ideal)
       return false if !ideals[i].certificate.verified?
       return false if !@basis.support_within_s?(ideals[i])
       i += 1
@@ -198,11 +209,20 @@
     if @archimedean_data == nil
       @archimedean_data = @field.archimedean_data
     @generator_fractional_ideals = []
+    @generator_fractional_ideal_computations = []
+    order = @field.certify_maximal_order
     @generators.each -> (generator)
       if generator.zero?
         raise "zero cannot generate an S-unit square class"
+      algebra_value = @field.generic_algebra_element(
+        generator)
+      computation = order.principal_fractional_ideal_with_certificate(
+        algebra_value)
+      @generator_fractional_ideal_computations.push(
+        computation)
       @generator_fractional_ideals.push(
-        @field.principal_fractional_ideal(generator))
+        NumberFieldFractionalIdeal.new(
+          @field, computation.ideal))
     @local_matrix = compute_local_matrix
     @rank_certificate = compute_rank_certificate
     @certificate_cache = NumberFieldSUnitSquareClassBasisCertificate.new(
@@ -245,6 +265,12 @@
     out = []
     @generator_fractional_ideals.each -> (ideal)
       out.push(ideal)
+    out
+
+  -> generator_fractional_ideal_computations
+    out = []
+    @generator_fractional_ideal_computations.each ->
+      out.push(item)
     out
 
   -> support_within_s?(fractional_ideal)
@@ -612,8 +638,18 @@
       i += 1
     expected_model_primes = primes_above(
       model, rational_primes)
-    same_prime_sets?(
+    return false if !same_prime_sets?(
       expected_model_primes, model_basis.s_primes)
+    source_generators = @basis.generators
+    model_generators = model_basis.generators
+    return false if source_generators.size != model_generators.size
+    i = 0
+    while i < source_generators.size
+      image = @basis.source_to_model(
+        source_generators[i])
+      return false if image != model_generators[i]
+      i += 1
+    true
 
   -> certified?
     verified?
@@ -669,6 +705,29 @@
       result += power * coefficient
       power *= root
     result
+
+  -> model_to_source(value)
+    element = @model_field.coerce(value)
+    isomorphism = @source_field.irreducibility_certificate
+    root = isomorphism.model_root
+    image_basis = []
+    power = @model_field.one
+    i = 0
+    while i < @source_field.degree
+      image_basis.push(power.coefficients)
+      power *= root
+      i += 1
+    coordinates = @model_field.solve_rational_span(
+      element.coefficients, image_basis)
+    if coordinates == nil
+      raise "model element is outside the certified source-field image"
+    @source_field.coerce(coordinates)
+
+  -> generators
+    out = []
+    @model_basis.generators.each -> (generator)
+      out.push(model_to_source(generator))
+    out
 
   -> coordinates(value)
     @model_basis.coordinates(

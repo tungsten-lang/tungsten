@@ -190,8 +190,13 @@ explicit descent:
     up to conjugacy as class 693 of order 36; finite group replay is internal,
     while completeness of GAP's 1,369 subgroup classes is a named trusted
     import;
-15. intersect the future explicitly labeled theta-module and local-image conditions with
-    that replay-certified F2 kernel.
+15. at odd rational primes, compute exact valuation/residue square classes in
+    every number-field completion and replay the resulting block
+    global-to-local matrix on the certified 35-dimensional ambient basis;
+    separately, enumerate and certify the complete residue-disk cover at
+    good-reduction primes;
+16. intersect the future explicitly labeled theta-module and local-image
+    conditions with that replay-certified F2 kernel.
 
 Step 7 is the BPS true setup. Its certificate checks the component polynomial
 identities exactly and records the section 6.5 fake-to-true comparison and the
@@ -208,7 +213,8 @@ certified finite and archimedean places for S = {2, 3, 13}
   -> certified p=5 splitting-field incidence labeling and Frobenius element
   -> certified characteristic-zero subdegrees and global subgroup up to conjugacy
   -> common shell-width root labeling and comparison kernel
-  -> certified p-adic local images
+  -> certified odd-prime ambient localization and good-reduction residue disks
+  -> dyadic/bad-reduction arithmetic and certified Jacobian local images
   -> explicit Selmer upper bound
   -> BPS comparison and rational J[2]
   -> Mordell-Weil rank upper bound
@@ -226,11 +232,14 @@ kernel has dimension 31. That kernel—not the erroneous true-target
 quotient—is the useful 31-dimensional space.
 
 The combined S-unit and norm replay is a heavyweight, opt-in native lane. On
-an 18-core, 128-GiB Mac17,6 it currently takes about 18.9 seconds and 6.9 GB
-peak RSS; the standard suite checks smaller identities and artifact structure.
-The checked-in witnesses are small. The peak comes from exact high-degree
-field arithmetic in a runtime that does not yet reclaim completed object
-graphs, not from loading a giant certificate file.
+an 18-core, 128-GiB Mac17,6, including the certified \(p=3\) ambient
+localization takes about 20.2 seconds and 7.79 GB peak RSS; the \(p=13\) lane
+takes about 19.7 seconds and 7.61 GB. Their localization matrices have
+dimensions/ranks \(18/17\) and \(14/13\), respectively. The standard suite
+checks smaller identities and artifact structure. The checked-in witnesses
+are small. The peak comes from exact high-degree S-unit arithmetic in a
+runtime that does not yet reclaim completed object graphs, not from loading a
+giant certificate file.
 
 The durable degree-6/9/12 S-class witness artifacts and supplied S-unit
 generators live in `spec/fixtures/algebra/`. Their authoritative checks are

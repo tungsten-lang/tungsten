@@ -199,7 +199,9 @@ explicit descent:
     in every number-field completion and replay the resulting block
     global-to-local matrix on the certified 35-dimensional ambient basis;
     the dyadic lane uses the full higher-unit filtration through
-    \(U_{2e+1}\), including the critical Artin--Schreier cokernel;
+    \(U_{2e+1}\), including the critical Artin--Schreier cokernel, and its
+    certificate replays a retained statement-bound transcript rather than
+    reconstructing every local ideal computation;
     separately, enumerate and certify the complete residue-disk cover at
     good-reduction primes; the known rational divisor class restricts to a
     certified one-dimensional lower-bound subspace at 2, 3, and 13, while
@@ -243,15 +245,18 @@ quotient—is the useful 31-dimensional space.
 
 The combined S-unit and norm replay is a heavyweight, opt-in native lane. On
 an 18-core, 128-GiB Mac17,6, the certified \(p=2\) ambient localization takes
-about 39.5 seconds and 11.71 GB peak RSS, the \(p=3\) lane about 20.2 seconds
+about 31.5 seconds and 10.14 GB peak RSS, the \(p=3\) lane about 20.2 seconds
 and 7.79 GB, and the \(p=13\) lane about 19.7 seconds and 7.61 GB. Their
 localization matrices have dimensions/ranks \(35/29\), \(18/17\), and
-\(14/13\), respectively. Adding the certified rational point-difference to
-the dyadic lane takes about 44.7 seconds and 14.80 GB. The standard suite
-checks smaller identities and artifact structure. The checked-in witnesses
-are small. The peak comes from exact high-degree S-unit arithmetic in a
-runtime that does not yet reclaim completed object graphs, not from loading a
-giant certificate file.
+\(14/13\), respectively. The standard suite checks smaller identities and
+artifact structure. The checked-in witnesses are small. The peak comes from
+exact high-degree S-unit arithmetic in a runtime that does not yet reclaim
+completed object graphs, not from loading a giant certificate file. The
+former dyadic coordinate certificate recomputed its complete filtration and
+used 39.5 seconds / 11.71 GB; retaining its exact transcript removed that
+duplicate work without weakening the replay. Adding the certified rational
+point-difference now takes about 36.0 seconds / 13.23 GB, down from
+44.7 seconds / 14.80 GB.
 
 The durable degree-6/9/12 S-class witness artifacts and supplied S-unit
 generators live in `spec/fixtures/algebra/`. Their authoritative checks are

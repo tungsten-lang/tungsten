@@ -68,6 +68,11 @@ square = P2.dyadic_square_class(
 dyadic_check("ramified.square_zero",
               square.vector.to_s,
               "\[0, 0, 0, 0\]")
+dyadic_check("ramified.replay_certified",
+              square.replay_certificate.certified?, true)
+dyadic_check("ramified.replay_kind",
+              square.replay_certificate.proof_kind,
+              :dyadic_square_theorem_statement_bound_transcript)
 ramified_representatives = square.representatives
 ramified_map = P2.local_square_class_map(
   ramified_representatives)

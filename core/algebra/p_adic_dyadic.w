@@ -7,6 +7,29 @@
 # y |-> y^2+y. Together with valuation parity this gives
 # [K_P:Q_2]+2 exact square-class coordinates without enumerating O/P^(2e+1).
 
++ NumberFieldDyadicSquareClassReplayStep
+  -> new(@kind, @before, @difference_profile,
+         @coefficient_residue, @payload, @after)
+
+  -> kind
+    @kind
+
+  -> before
+    @before
+
+  -> difference_profile
+    @difference_profile
+
+  -> coefficient_residue
+    @coefficient_residue
+
+  -> payload
+    @payload
+
+  -> after
+    @after
+
+
 + NumberFieldDyadicSquareClassArithmetic
   -> .profile(prime_ideal, value)
     NumberFieldPrimeValuationProfile.new(
@@ -68,8 +91,11 @@
     size.times -> out.push(0)
     out
 
-  # Return [coordinate vector, final unit]. Every update multiplies by an
-  # explicit square or by the recorded square-class representative.
+  # Return [coordinate vector, final unit, replay certificate]. Every update
+  # multiplies by an explicit square or by the recorded square-class
+  # representative. Retaining the already-certified valuation and residue
+  # witnesses lets the consumer replay the transcript without performing the
+  # expensive local ideal arithmetic a second time.
   -> .coordinates(
        prime_ideal, value, valuation_profile = nil)
     if prime_ideal.class_name != "NumberFieldPrimeIdeal"
@@ -106,6 +132,7 @@
     residue_lift = NumberFieldDyadicSquareClassArithmetic.lift(
       prime_ideal, residue_square_root)
     current = unit * residue_lift**2
+    initial_current = current
 
     e = prime_ideal.ramification_index
     f = prime_ideal.residue_degree
@@ -116,8 +143,10 @@
     cutoff = 2*e + 1
     final_index = vector.size - 1
     steps = 0
+    replay_steps = []
 
     while current != field.one
+      before = current
       difference = current - field.one
       difference_profile = NumberFieldDyadicSquareClassArithmetic.profile(
         prime_ideal, difference)
@@ -131,11 +160,13 @@
       coefficient = coefficient_data[0]
 
       if depth < 2*e && depth.odd?
+        kind = :odd
         bits = residue_field.element_coefficients(
           coefficient)
         block = (depth - 1) / 2
         bit_index = 0
         factor = field.one
+        lifts = []
         residue_basis = residue_field.power_basis
         while bit_index < f
           bit = bits[bit_index]
@@ -143,12 +174,17 @@
           if bit == 1
             lift = NumberFieldDyadicSquareClassArithmetic.lift(
               prime_ideal, residue_basis[bit_index])
+            lifts.push(lift)
             representative = field.one
             representative += lift * uniformizer.element**depth
             factor *= representative
+          else
+            lifts.push(nil)
           bit_index += 1
         current *= factor
+        payload = [bits, lifts, factor]
       elsif depth < 2*e
+        kind = :even
         half_depth = depth / 2
         root = residue_field.inverse_frobenius(
           coefficient)
@@ -157,7 +193,9 @@
         square_root = field.one
         square_root += lift * uniformizer.element**half_depth
         current *= square_root**2
+        payload = [root, lift, square_root]
       elsif depth == 2*e
+        kind = :critical
         two_profile = NumberFieldDyadicSquareClassArithmetic.profile(
           prime_ideal, field.coerce(2))
         two_data = NumberFieldDyadicSquareClassArithmetic.residue_at_valuation(
@@ -169,6 +207,9 @@
           coefficient, d_square)
         deep_bit = residue_field.trace(normalized)
         vector[final_index] = deep_bit
+        trace_one = nil
+        deep_lift = nil
+        representative = field.one
         if deep_bit == 1
           trace_one = NumberFieldDyadicSquareClassArithmetic.trace_one(
             residue_field)
@@ -180,6 +221,13 @@
           representative += deep_lift * uniformizer.element**(2*e)
           current *= representative
 
+        intermediate = current
+        deep_profile = nil
+        deep_residue = nil
+        artin_preimage = nil
+        correction_root = nil
+        correction_lift = nil
+        square_root = nil
         if current != field.one
           deep_difference = current - field.one
           deep_profile = NumberFieldDyadicSquareClassArithmetic.profile(
@@ -192,30 +240,49 @@
               prime_ideal, deep_difference,
               deep_depth, uniformizer,
               deep_profile)
+            deep_residue = deep_data[2]
             deep_normalized = residue_field.divide(
               deep_data[0], d_square)
-            root = NumberFieldDyadicSquareClassArithmetic.artin_schreier_preimage(
+            artin_preimage = NumberFieldDyadicSquareClassArithmetic.artin_schreier_preimage(
               residue_field, deep_normalized)
-            root = residue_field.multiply(d, root)
-            lift = NumberFieldDyadicSquareClassArithmetic.lift(
-              prime_ideal, root)
+            correction_root = residue_field.multiply(
+              d, artin_preimage)
+            correction_lift = NumberFieldDyadicSquareClassArithmetic.lift(
+              prime_ideal, correction_root)
             square_root = field.one
-            square_root += lift * uniformizer.element**e
+            square_root += correction_lift * uniformizer.element**e
             current *= square_root**2
+        payload = [
+          two_profile, two_data[2], d, d_square,
+          normalized, deep_bit, trace_one, deep_lift,
+          representative, intermediate, deep_profile,
+          deep_residue, artin_preimage, correction_root,
+          correction_lift, square_root]
       else
         raise "dyadic unit-filtration depth is unsupported"
 
+      replay_steps.push(
+        NumberFieldDyadicSquareClassReplayStep.new(
+          kind, before, difference_profile,
+          coefficient_data[2], payload, current))
       steps += 1
       if steps > 4*e + 8
         raise "dyadic square-class filtration did not terminate"
 
+    tail_profile = nil
     if current != field.one
       tail = current - field.one
       tail_profile = NumberFieldDyadicSquareClassArithmetic.profile(
         prime_ideal, tail)
       if tail_profile.at(prime_ideal) < cutoff
         raise "dyadic square-class tail is not in U_(2e+1)"
-    [vector, current]
+    replay = NumberFieldDyadicSquareClassReplayCertificate.new(
+      prime_ideal, element, profile, valuation,
+      uniformizer, adjusted, residue_data[2],
+      residue_square_root, residue_lift,
+      initial_current, replay_steps, tail_profile,
+      vector, current)
+    [vector, current, replay]
 
   -> .representatives(prime_ideal)
     if prime_ideal.rational_prime != 2
@@ -253,6 +320,345 @@
     out
 
 
++ NumberFieldDyadicSquareClassReplayCertificate
+  -> new(@prime_ideal, @value, @valuation_profile,
+         @valuation, @uniformizer, @adjusted_profile,
+         @normalization_residue, @residue_square_root,
+         @residue_lift, @initial_current, @steps,
+         @tail_profile, @vector, @final_unit)
+    @verified_cache = nil
+
+  -> prime_ideal
+    @prime_ideal
+
+  -> value
+    @value
+
+  -> valuation_profile
+    @valuation_profile
+
+  -> vector
+    F2LinearAlgebra.copy_vector(@vector)
+
+  -> final_unit
+    @final_unit
+
+  -> steps
+    out = []
+    @steps.each -> out.push(item)
+    out
+
+  -> theorem
+    "the dyadic square-class coordinates replay through exact higher-unit filtration witnesses"
+
+  -> theorem_reference
+    "Local Square Theorem and the dyadic higher-unit squaring filtration"
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verified_residue_at_valuation?(
+       residue, source_profile, valuation)
+    return false if residue == nil
+    return false if residue.class_name != "NumberFieldLocalUnitResidue"
+    return false if !residue.certificate.verified?
+    return false if !residue.prime_ideal.eql?(@prime_ideal)
+    adjusted = residue.valuation_profile
+    return false if adjusted.class_name != "NumberFieldUniformizerAdjustedValuationProfile"
+    return false if adjusted.source != source_profile
+    return false if !adjusted.prime_ideal.eql?(@prime_ideal)
+    return false if adjusted.uniformizer != @uniformizer
+    return false if adjusted.exponent != valuation
+    return false if adjusted.at(@prime_ideal) != 0
+    residue.value == adjusted.value
+
+  -> verified_lift?(lift, residue)
+    return false if lift == nil
+    return false if lift.field != @prime_ideal.field
+    field = @prime_ideal.residue_field
+    field.equal?(@prime_ideal.reduce(lift), residue)
+
+  -> verify_odd_step(step, depth, coefficient,
+                     expected_vector)
+    payload = step.payload
+    return false if payload.size != 3
+    bits = payload[0]
+    lifts = payload[1]
+    factor = payload[2]
+    residue_field = @prime_ideal.residue_field
+    wanted_bits = residue_field.element_coefficients(
+      coefficient)
+    return false if !F2LinearAlgebra.same_vector?(
+      bits, wanted_bits)
+    f = @prime_ideal.residue_degree
+    return false if bits.size != f || lifts.size != f
+    block = (depth - 1) / 2
+    replay_factor = @prime_ideal.field.one
+    basis = residue_field.power_basis
+    index = 0
+    while index < f
+      bit = bits[index]
+      return false if bit != 0 && bit != 1
+      expected_vector[1 + block*f + index] = bit
+      if bit == 1
+        lift = lifts[index]
+        return false if !verified_lift?(
+          lift, basis[index])
+        representative = @prime_ideal.field.one
+        representative += lift * @uniformizer.element**depth
+        replay_factor *= representative
+      else
+        return false if lifts[index] != nil
+      index += 1
+    return false if factor != replay_factor
+    step.after == step.before * replay_factor
+
+  -> verify_even_step(step, depth, coefficient)
+    payload = step.payload
+    return false if payload.size != 3
+    root = payload[0]
+    lift = payload[1]
+    square_root = payload[2]
+    residue_field = @prime_ideal.residue_field
+    wanted_root = residue_field.inverse_frobenius(
+      coefficient)
+    return false if !residue_field.equal?(
+      root, wanted_root)
+    return false if !verified_lift?(lift, root)
+    wanted_square_root = @prime_ideal.field.one
+    wanted_square_root += lift * @uniformizer.element**(depth / 2)
+    return false if square_root != wanted_square_root
+    step.after == step.before * square_root**2
+
+  -> verify_critical_step(step, coefficient,
+                         expected_vector)
+    payload = step.payload
+    return false if payload.size != 16
+    two_profile = payload[0]
+    two_residue = payload[1]
+    d = payload[2]
+    d_square = payload[3]
+    normalized = payload[4]
+    deep_bit = payload[5]
+    trace_one = payload[6]
+    deep_lift = payload[7]
+    representative = payload[8]
+    intermediate = payload[9]
+    deep_profile = payload[10]
+    deep_residue = payload[11]
+    artin_preimage = payload[12]
+    correction_root = payload[13]
+    correction_lift = payload[14]
+    square_root = payload[15]
+
+    field = @prime_ideal.field
+    residue_field = @prime_ideal.residue_field
+    e = @prime_ideal.ramification_index
+    cutoff = 2*e + 1
+    two = field.coerce(2)
+    return false if two_profile == nil
+    return false if two_profile.class_name != "NumberFieldPrimeValuationProfile"
+    return false if !two_profile.certificate.verified?
+    return false if two_profile.value != two
+    return false if two_profile.rational_prime != 2
+    return false if two_profile.at(@prime_ideal) != e
+    return false if !verified_residue_at_valuation?(
+      two_residue, two_profile, e)
+    return false if !residue_field.equal?(
+      d, two_residue.residue)
+    wanted_d_square = residue_field.multiply(d, d)
+    return false if !residue_field.equal?(
+      d_square, wanted_d_square)
+    wanted_normalized = residue_field.divide(
+      coefficient, d_square)
+    return false if !residue_field.equal?(
+      normalized, wanted_normalized)
+    wanted_bit = residue_field.trace(normalized)
+    return false if deep_bit != wanted_bit
+    return false if deep_bit != 0 && deep_bit != 1
+    expected_vector[expected_vector.size - 1] = deep_bit
+
+    wanted_representative = field.one
+    if deep_bit == 1
+      return false if trace_one == nil
+      return false if residue_field.trace(trace_one) != 1
+      deep_coefficient = residue_field.multiply(
+        d_square, trace_one)
+      return false if !verified_lift?(
+        deep_lift, deep_coefficient)
+      wanted_representative += deep_lift * @uniformizer.element**(2*e)
+    else
+      return false if trace_one != nil
+      return false if deep_lift != nil
+    return false if representative != wanted_representative
+    wanted_intermediate = step.before * representative
+    return false if intermediate != wanted_intermediate
+
+    if intermediate == field.one
+      return false if deep_profile != nil
+      return false if deep_residue != nil
+      return false if artin_preimage != nil
+      return false if correction_root != nil
+      return false if correction_lift != nil
+      return false if square_root != nil
+      return step.after == intermediate
+
+    return false if deep_profile == nil
+    return false if deep_profile.class_name != "NumberFieldPrimeValuationProfile"
+    return false if !deep_profile.certificate.verified?
+    return false if deep_profile.value != intermediate - field.one
+    return false if deep_profile.rational_prime != 2
+    deep_depth = deep_profile.at(@prime_ideal)
+    if deep_depth >= cutoff
+      return false if deep_residue != nil
+      return false if artin_preimage != nil
+      return false if correction_root != nil
+      return false if correction_lift != nil
+      return false if square_root != nil
+      return step.after == intermediate
+
+    return false if deep_depth != 2*e
+    return false if !verified_residue_at_valuation?(
+      deep_residue, deep_profile, deep_depth)
+    deep_normalized = residue_field.divide(
+      deep_residue.residue, d_square)
+    return false if artin_preimage == nil
+    artin_image = residue_field.add(
+      residue_field.multiply(
+        artin_preimage, artin_preimage),
+      artin_preimage)
+    return false if !residue_field.equal?(
+      artin_image, deep_normalized)
+    wanted_correction_root = residue_field.multiply(
+      d, artin_preimage)
+    return false if !residue_field.equal?(
+      correction_root, wanted_correction_root)
+    return false if !verified_lift?(
+      correction_lift, correction_root)
+    wanted_square_root = field.one
+    wanted_square_root += correction_lift * @uniformizer.element**e
+    return false if square_root != wanted_square_root
+    step.after == intermediate * square_root**2
+
+  -> verify!
+    return false if @prime_ideal.class_name != "NumberFieldPrimeIdeal"
+    return false if @prime_ideal.rational_prime != 2
+    return false if !@prime_ideal.certificate.verified?
+    field = @prime_ideal.field
+    return false if @value.zero? || @value.field != field
+    return false if @valuation_profile.class_name != "NumberFieldPrimeValuationProfile"
+    return false if !@valuation_profile.certificate.verified?
+    return false if @valuation_profile.value != @value
+    return false if @valuation_profile.rational_prime != 2
+    return false if @valuation_profile.at(
+      @prime_ideal) != @valuation
+    return false if !@uniformizer.certificate.verified?
+    return false if !@uniformizer.prime_ideal.eql?(
+      @prime_ideal)
+    return false if @adjusted_profile.class_name != "NumberFieldUniformizerAdjustedValuationProfile"
+    return false if !@adjusted_profile.certificate.verified?
+    return false if @adjusted_profile.source != @valuation_profile
+    return false if !@adjusted_profile.prime_ideal.eql?(
+      @prime_ideal)
+    return false if @adjusted_profile.uniformizer != @uniformizer
+    return false if @adjusted_profile.exponent != @valuation
+    return false if @adjusted_profile.at(@prime_ideal) != 0
+    return false if @normalization_residue == nil
+    return false if !@normalization_residue.certificate.verified?
+    return false if @normalization_residue.valuation_profile != @adjusted_profile
+    return false if @normalization_residue.value != @adjusted_profile.value
+    residue_field = @prime_ideal.residue_field
+    inverse_residue = residue_field.inverse(
+      @normalization_residue.residue)
+    root_square = residue_field.multiply(
+      @residue_square_root, @residue_square_root)
+    return false if !residue_field.equal?(
+      root_square, inverse_residue)
+    return false if !verified_lift?(
+      @residue_lift, @residue_square_root)
+    wanted_initial = @adjusted_profile.value * @residue_lift**2
+    return false if @initial_current != wanted_initial
+
+    e = @prime_ideal.ramification_index
+    f = @prime_ideal.residue_degree
+    expected_dimension = e*f + 2
+    return false if @vector.size != expected_dimension
+    expected_vector = NumberFieldDyadicSquareClassArithmetic.zero_bits(
+      expected_dimension)
+    expected_vector[0] = @valuation.abs % 2
+    cutoff = 2*e + 1
+    return false if @steps.size > 4*e + 8
+    current = @initial_current
+    index = 0
+    while index < @steps.size
+      step = @steps[index]
+      return false if step.class_name != "NumberFieldDyadicSquareClassReplayStep"
+      return false if step.before != current
+      profile = step.difference_profile
+      return false if profile.class_name != "NumberFieldPrimeValuationProfile"
+      return false if !profile.certificate.verified?
+      return false if profile.value != current - field.one
+      return false if profile.rational_prime != 2
+      depth = profile.at(@prime_ideal)
+      return false if depth < 1 || depth >= cutoff
+      residue = step.coefficient_residue
+      return false if !verified_residue_at_valuation?(
+        residue, profile, depth)
+      coefficient = residue.residue
+      valid = false
+      if step.kind == :odd
+        return false if depth >= 2*e || !depth.odd?
+        valid = verify_odd_step(
+          step, depth, coefficient,
+          expected_vector)
+      elsif step.kind == :even
+        return false if depth >= 2*e || depth.odd?
+        valid = verify_even_step(
+          step, depth, coefficient)
+      elsif step.kind == :critical
+        return false if depth != 2*e
+        valid = verify_critical_step(
+          step, coefficient, expected_vector)
+      else
+        return false
+      return false if !valid
+      current = step.after
+      index += 1
+
+    return false if current != @final_unit
+    if current == field.one
+      return false if @tail_profile != nil
+    else
+      return false if @tail_profile == nil
+      return false if @tail_profile.class_name != "NumberFieldPrimeValuationProfile"
+      return false if !@tail_profile.certificate.verified?
+      return false if @tail_profile.value != current - field.one
+      return false if @tail_profile.rational_prime != 2
+      return false if @tail_profile.at(@prime_ideal) < cutoff
+    return false if !F2LinearAlgebra.same_vector?(
+      expected_vector, @vector)
+    true
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :dyadic_square_theorem_statement_bound_transcript
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> complete_square_class_coordinates?
+    true
+
+
 + NumberFieldDyadicLocalSquareClassCertificate
   -> new(@square_class)
     @verified_cache = nil
@@ -285,15 +691,20 @@
     return false if profile.class_name != "NumberFieldPrimeValuationProfile"
     return false if !profile.certificate.verified?
     return false if profile.value != value
-    replay = NumberFieldDyadicSquareClassArithmetic.coordinates(
-      prime, value, profile)
+    replay = @square_class.replay_certificate
+    return false if replay.class_name != "NumberFieldDyadicSquareClassReplayCertificate"
+    return false if !replay.verified?
+    return false if !replay.prime_ideal.eql?(prime)
+    return false if replay.value != value
+    return false if replay.valuation_profile != profile
     vector = @square_class.vector
     expected_dimension = prime.ramification_index
     expected_dimension *= prime.residue_degree
     expected_dimension += 2
     return false if vector.size != expected_dimension
     return false if !F2LinearAlgebra.same_vector?(
-      replay[0], vector)
+      replay.vector, vector)
+    return false if replay.final_unit != @square_class.final_unit
     representatives = @square_class.representatives
     representatives.size == expected_dimension
 
@@ -329,6 +740,7 @@
       @prime_ideal, @value, @valuation_profile)
     @vector = data[0]
     @final_unit = data[1]
+    @replay_certificate = data[2]
     @representatives = NumberFieldDyadicSquareClassArithmetic.representatives(
       @prime_ideal)
     @certificate_cache = NumberFieldDyadicLocalSquareClassCertificate.new(
@@ -359,6 +771,9 @@
 
   -> final_unit
     @final_unit
+
+  -> replay_certificate
+    @replay_certificate
 
   -> representatives
     out = []

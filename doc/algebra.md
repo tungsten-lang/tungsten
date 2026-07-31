@@ -1037,7 +1037,11 @@ one more. The result is the complete
 \([K_P:\mathbb Q_2]+2\)-dimensional square-class quotient. Exact ideal
 valuations, residue lifts, every filtration cancellation, and final
 \(U_{2e+1}\) membership are replayed; the Local Square Theorem and the
-higher-unit squaring filtration are named trusted imports.
+higher-unit squaring filtration are named trusted imports. The arithmetic
+pass retains a statement-bound transcript of its certified valuation
+profiles, localized residues, residue-field lifts, odd/even/critical updates,
+Artin--Schreier correction, and terminal unit. The certificate independently
+checks those identities instead of rebuilding the same principal ideals.
 
 A certified product \(S\)-unit space can be localized blockwise at every
 prime above a rational prime:
@@ -1090,7 +1094,7 @@ reference host the current quadratic product regression takes about
 2.18 GB, so it is not a standard interpreted regression lane. The compiled
 dyadic regression exhausts all 16 square classes in both ramified and
 unramified quadratic completions, plus a product localization map, in about
-0.38 seconds and 72 MB; it is registered only in the compiled suite.
+0.26 seconds and 49 MB; it is registered only in the compiled suite.
 
 The complete shell-width ambient localization is now replayed at every finite
 prime in \(S=\{2,3,13\}\):
@@ -1102,9 +1106,11 @@ p = 13:  7 local factors, target dimension 14, rank 13, kernel dimension 22
 ```
 
 With the supplied degree-6/9/12 S-unit artifacts, the native \(p=2\) lane
-takes about 39.5 seconds / 11.71 GB, the \(p=3\) lane about
+takes about 31.5 seconds / 10.14 GB, the \(p=3\) lane about
 20.2 seconds / 7.79 GB, and the \(p=13\) lane about 19.7 seconds / 7.61 GB on
-the reference host. The dyadic implementation follows 35 filtration
+the reference host. Before statement-bound transcript replay, the dyadic lane
+took 39.5 seconds / 11.71 GB because coordinate certification repeated its
+local ideal arithmetic. The dyadic implementation follows 35 filtration
 coordinates and does not enumerate the largest \(2^{26}\)-element residue
 quotient. Earlier versions factored an entire principal ideal for every
 single local valuation and rebuilt
@@ -1453,7 +1459,7 @@ API deliberately reports `lower_bound_only? == true` and `complete? == false`;
 these vectors cannot be used as a Selmer upper bound. Run the combined check
 by setting both `TUNGSTEN_SUNIT_POINT_VALUES=1` and
 `TUNGSTEN_SUNIT_LOCAL_PRIME` in the opt-in command above.
-The combined dyadic-plus-point lane takes about 44.7 seconds and 14.80 GB
+The combined dyadic-plus-point lane takes about 36.0 seconds and 13.23 GB
 peak RSS, and remains outside the standard regression suite.
 
 The canonical finite theta module is independently executable:

@@ -203,9 +203,12 @@ explicit descent:
     certificate replays a retained statement-bound transcript rather than
     reconstructing every local ideal computation;
     separately, enumerate and certify the complete residue-disk cover at
-    good-reduction primes; the known rational divisor class restricts to a
-    certified one-dimensional lower-bound subspace at 2, 3, and 13, while
-    completeness of each local Jacobian image remains unproved;
+    good-reduction primes; at \(p=5\), evaluate every BPS line ratio on all
+    seven clean disks, replay their exact residue square classes, and certify
+    that their one-dimensional span equals the independently checked
+    Frobenius-fixed \(J[2]\) dimension, hence is the complete local image;
+    the known rational divisor class restricts to a certified one-dimensional
+    lower-bound subspace at 2, 3, and 13, where completeness remains unproved;
 17. intersect the future explicitly labeled theta-module and local-image
     conditions with that replay-certified F2 kernel.
 
@@ -226,7 +229,8 @@ certified finite and archimedean places for S = {2, 3, 13}
   -> certified characteristic-zero subdegrees and global subgroup up to conjugacy
   -> common shell-width root labeling and comparison kernel
   -> certified odd and dyadic ambient localization and good-reduction residue disks
-  -> bad-reduction regular models and certified Jacobian local images
+  -> certified complete p=5 good-reduction BPS local image
+  -> bad-reduction regular models and certified Jacobian local images at 2, 3, 13
   -> explicit Selmer upper bound
   -> BPS comparison and rational J[2]
   -> Mordell-Weil rank upper bound
@@ -248,12 +252,13 @@ an 18-core, 128-GiB Mac17,6, the certified \(p=2\) ambient localization takes
 about 31.5 seconds and 10.14 GB peak RSS, the \(p=3\) lane about 20.2 seconds
 and 7.79 GB, and the \(p=13\) lane about 19.7 seconds and 7.61 GB. Their
 localization matrices have dimensions/ranks \(35/29\), \(18/17\), and
-\(14/13\), respectively. The standard suite checks smaller identities and
-artifact structure. The checked-in witnesses are small. The peak comes from
-exact high-degree S-unit arithmetic in a runtime that does not yet reclaim
-completed object graphs, not from loading a giant certificate file. The
-former dyadic coordinate certificate recomputed its complete filtration and
-used 39.5 seconds / 11.71 GB; retaining its exact transcript removed that
+\(14/13\), respectively. The complete \(p=5\) good-reduction image lane takes
+about 19.8 seconds and 7.37 GB. The standard suite checks smaller identities
+and artifact structure. The checked-in witnesses are small. The peak comes
+from exact high-degree S-unit arithmetic in a runtime that does not yet
+reclaim completed object graphs, not from loading a giant certificate file.
+The former dyadic coordinate certificate recomputed its complete filtration
+and used 39.5 seconds / 11.71 GB; retaining its exact transcript removed that
 duplicate work without weakening the replay. Adding the certified rational
 point-difference now takes about 36.0 seconds / 13.23 GB, down from
 44.7 seconds / 14.80 GB.

@@ -568,12 +568,14 @@
   -> residue_field
     @prime_ideal.residue_field
 
-  # Clear rational denominators prime to p, then use the certified maximal
-  # order residue map. Localized callers first clear poles at the other primes
-  # above p with separated uniformizers.
-  -> reduction(value)
+  # Reduce a number-field element that is integral at the displayed prime,
+  # permitting zero residue. This focused fast path handles a rational
+  # denominator prime to p directly; elements with poles at other primes
+  # above p still need NumberFieldLocalUnitResidue and its valuation-profile
+  # evidence.
+  -> reduction_allow_zero(value)
     element = field.coerce(value)
-    raise "zero is not a local unit" if element.zero?
+    return residue_field.zero if element.zero?
     order = field.certify_maximal_order
     algebra_element = field.generic_algebra_element(
       element)
@@ -586,10 +588,17 @@
       raise "local residue denominator is not invertible"
     integral = field.multiply(element, denominator)
     reduced = @prime_ideal.reduce(integral)
-    if residue_field.zero?(reduced)
-      raise "number-field element is not a unit at the local prime"
     residue_field.divide(
       reduced, residue_field.coerce(denominator))
+
+  # Clear rational denominators prime to p, then use the certified maximal
+  # order residue map. Localized callers first clear poles at the other primes
+  # above p with separated uniformizers.
+  -> reduction(value)
+    reduced = reduction_allow_zero(value)
+    if residue_field.zero?(reduced)
+      raise "number-field element is not a unit at the local prime"
+    reduced
 
 
 + NumberFieldLocalUnitResidueCertificate

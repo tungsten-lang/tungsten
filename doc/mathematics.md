@@ -169,7 +169,7 @@ certifies the stabilizer subdegrees
 identifies, up to conjugacy, subgroup-table class 693 of order 36; the finite
 groups and incidence actions are replayed, while completeness of GAP's
 1,369-class subgroup table is an explicit trusted import. Missing links are
-a common characteristic-zero labeling, certified descent-function local
+a common characteristic-zero labeling, the bad-prime descent-function local
 images, the BPS comparison kernel and rational \(J[2]\), and the final
 Selmer/rank bound.
 
@@ -179,6 +179,12 @@ that missing local image. Tungsten computes exact rational square classes in
 number-field completions, complete dyadic square classes through the
 higher-unit filtration, good-reduction residue-disk covers, and certified
 global-to-local matrices from the 35-dimensional \(S\)-unit ambient space.
+At odd good reduction it also evaluates the BPS functions exactly on every
+clean disk and proves completeness when their span reaches the independently
+certified Frobenius-fixed \(J[2]\) dimension. For the shell-width quartic at
+\(p=5\), seven clean disks span the full one-dimensional local image in its
+ten-dimensional square-class target.
+
 For the shell-width artifacts the \(p=2\) matrix has target dimension 35 and
 rank 29, the \(p=3\) matrix has target dimension 18 and rank 17, and the
 \(p=13\) matrix has target dimension 14 and rank 13. The remaining BPS step is
@@ -194,7 +200,8 @@ their complete incidence-preserving permutations, finite action orbits, and
 primewise Frobenius cycle constraints. The shell-width prime-5 fiber has a
 complete arithmetic incidence labeling, and exact characteristic-zero
 subdegrees now determine the global subgroup up to conjugacy. What remains is
-an explicit compatible root labeling and the local Jacobian/descent images.
+an explicit compatible root labeling and the bad-prime Jacobian/descent
+images.
 
 ## Fermat and modularity
 

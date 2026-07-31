@@ -82,6 +82,11 @@ theta_action_check("frobenius.cycles",
                    "\[1, 3, 6, 6, 6, 6\]")
 theta_action_check("frobenius.distinguished_fixed",
                    frobenius.fixed_indices.size, 1)
+theta_action_check("frobenius.fixed_2_torsion_dimension",
+                   frobenius_map.fixed_dimension, 1)
+theta_action_check("frobenius.fixed_2_torsion_certified",
+                   frobenius_map.fixed_subspace_certificate.verified?,
+                   true)
 
 if env("TUNGSTEN_THETA_FROBENIUS") == "1"
   C ⊂ ℙ²_ℚ (B, S, Z) : 16B³Z + 48BS²Z − 3S⁴ + 8S³Z + 162S²Z² + 729Z⁴ = 0

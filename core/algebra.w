@@ -66,6 +66,7 @@ use core/algebra/descent_points
 use core/algebra/theta
 use core/algebra/theta_actions
 use core/algebra/theta_fibers
+use core/algebra/p_adic_descent
 use core/algebra/permutation_groups
 use core/algebra/theta_galois
 use core/algebra/theta_subdegrees

@@ -75,6 +75,7 @@
     if matrix.class_name != "Array"
       raise "symplectic map matrix must be an Array"
     @matrix = F2LinearAlgebra.copy_matrix(matrix)
+    @fixed_subspace_certificate_cache = nil
     @certificate_cache = SymplecticF2MapCertificate.new(self)
     if !@certificate_cache.verified?
       raise "matrix does not preserve the symplectic F2 pairing"
@@ -93,6 +94,34 @@
       out.push(F2LinearAlgebra.dot(@matrix[row], vector))
       row += 1
     out
+
+  # The rational 2-torsion over a finite field is the fixed subspace of
+  # Frobenius on the geometric 2-torsion module.  Expose the exact kernel of
+  # self-I as a replay certificate so local descent can use its dimension as
+  # an independently checked upper bound.
+  -> fixed_subspace_certificate
+    if @fixed_subspace_certificate_cache == nil
+      system = F2LinearSystem.new(@space.dimension)
+      row = 0
+      while row < @space.dimension
+        equation = []
+        column = 0
+        while column < @space.dimension
+          value = @matrix[row][column]
+          value = value ^ 1 if row == column
+          equation.push(value)
+          column += 1
+        system.add_equation(
+          equation, 0, "Frobenius-fixed 2-torsion")
+        row += 1
+      @fixed_subspace_certificate_cache = system.certificate
+    @fixed_subspace_certificate_cache
+
+  -> fixed_dimension
+    fixed_subspace_certificate.kernel_dimension
+
+  -> fixed_basis
+    fixed_subspace_certificate.kernel_basis
 
   # self.compose(other)(x) = self(other(x)).
   -> compose(other)

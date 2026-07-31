@@ -20,6 +20,14 @@ local_square_check("prime.residue_degree",
                    prime.residue_degree, 1)
 local_square_check("prime.generator_image",
                    prime.reduce(k.generator), 3)
+local_reduction = NumberFieldLocalResidueReduction.new(
+  prime)
+local_square_check("prime.local_reduction_zero",
+                   local_reduction.reduction_allow_zero(
+                     k.generator - 3), 0)
+local_square_check("prime.local_reduction_denominator",
+                   local_reduction.reduction_allow_zero(
+                     k.generator / 2), 5)
 
 uniformizer = prime.uniformizer
 local_square_check("uniformizer.certified",

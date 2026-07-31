@@ -243,7 +243,12 @@ if local_prime_text != nil && local_prime_text != ""
     raise "unexpected shell-width 13-adic localization rank" if local_map.rank != 13
     raise "unexpected shell-width 13-adic kernel dimension" if local_map.kernel_dimension != 22
 
-if env("TUNGSTEN_SUNIT_POINT_VALUES") == "1"
+function_data = nil
+descent_setup = nil
+need_descent_functions = (
+  env("TUNGSTEN_SUNIT_POINT_VALUES") == "1" ||
+  env("TUNGSTEN_SUNIT_GOOD_LOCAL_IMAGE") == "1")
+if need_descent_functions
   P2 = ProjectiveSpace<ℚ, 2>.new(:B, :S, :Z)
   B = P2.coords[0]
   S = P2.coords[1]
@@ -258,6 +263,8 @@ if env("TUNGSTEN_SUNIT_POINT_VALUES") == "1"
   descent_setup = curve.jacobian.two_descent_setup(
     distinguished_bitangent: infinity)
   function_data = descent_setup.certify_divisor_function_data
+
+if env("TUNGSTEN_SUNIT_POINT_VALUES") == "1"
   point_a = P2.point([0, 9, 1])
   point_b = P2.point([-3, -3, 1])
   point_value = function_data.certify_point_difference(
@@ -303,3 +310,29 @@ if env("TUNGSTEN_SUNIT_POINT_VALUES") == "1"
         raise "unexpected shell-width known odd-local image vector"
       if known_local.dimension != 1
         raise "unexpected shell-width known odd-local image dimension"
+
+if env("TUNGSTEN_SUNIT_GOOD_LOCAL_IMAGE") == "1"
+  if local_map == nil || local_map.rational_prime != 5
+    raise "shell-width complete good local image currently needs local prime 5"
+  theta_fiber = descent_setup.certify_theta_fiber_at_five
+  good_local_image = function_data.good_reduction_local_image(
+    local_map, theta_fiber, 8)
+  << ["good_local_prime", good_local_image.rational_prime]
+  << ["good_local_clean_disks", good_local_image.clean_disk_count]
+  << ["good_local_target_dimension", good_local_image.target_dimension]
+  << ["good_local_expected_dimension", good_local_image.expected_dimension]
+  << ["good_local_dimension", good_local_image.dimension]
+  << ["good_local_basis", good_local_image.image_basis]
+  << ["good_local_complete", good_local_image.complete?]
+  << ["good_local_certified", good_local_image.certified?]
+  certificate = good_local_image.certificate
+  << ["good_local_residue_replay",
+      certificate.arithmetic_replay_checked?]
+  << ["good_local_frobenius_replay",
+      certificate.frobenius_fixed_dimension_replayed?]
+  if good_local_image.expected_dimension != 1
+    raise "unexpected shell-width p=5 Frobenius-fixed dimension"
+  if good_local_image.dimension != 1
+    raise "shell-width p=5 clean disks did not span the local image"
+  if !good_local_image.complete?
+    raise "shell-width p=5 local image is not complete"

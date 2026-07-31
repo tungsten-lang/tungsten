@@ -147,22 +147,25 @@ good-prime factorization can bind a candidate permutation to the resulting
 Frobenius cycle partition. The full reduction at 5 is stronger: over
 \(\mathbb F_{5^6}\), Tungsten reconstructs all 28 bitangents and contact
 quadratics, checks all 315 contact-conic incidences, labels the finite fiber
-by odd characteristics, and recovers the exact Frobenius element. That is
-still one finite fiber, not a compatible characteristic-zero labeling.
-Missing links are a common global labeling and Galois subgroup, certified
-p-adic local images, the BPS comparison kernel and rational \(J[2]\), and the
-final Selmer/rank bound.
+by odd characteristics, and recovers the exact Frobenius element. Exact
+factorization of the degree-27 projection over its degree-6 component now
+certifies the stabilizer subdegrees
+\(1,1,2,2,2,2,3,3,6,6\). Together with the global orbit partition this
+identifies, up to conjugacy, subgroup-table class 693 of order 36; the finite
+groups and incidence actions are replayed, while completeness of GAP's
+1,369-class subgroup table is an explicit trusted import. Missing links are
+a common characteristic-zero labeling, certified p-adic local images, the
+BPS comparison kernel and rational \(J[2]\), and the final Selmer/rank bound.
 
 The finite reference theta module itself is now present: it constructs the 28
 odd quadratic refinements of the symplectic form on \(\mathbb F_2^6\),
 exhausts the 315 syzygetic quadruples, and replay-checks the canonical module
 dimensions \(0,1,7,21,27,28\). It also verifies exact symplectic generators,
 their complete incidence-preserving permutations, finite action orbits, and
-primewise Frobenius cycle constraints. The shell-width prime-5 fiber now has
-a complete arithmetic incidence labeling as well. What remains is the
-characteristic-zero identification: match the shell-width roots in one
-compatible global model and certify the global and local Galois permutation
-actions.
+primewise Frobenius cycle constraints. The shell-width prime-5 fiber has a
+complete arithmetic incidence labeling, and exact characteristic-zero
+subdegrees now determine the global subgroup up to conjugacy. What remains is
+an explicit compatible root labeling and the local Galois/descent images.
 
 ## Fermat and modularity
 

@@ -61,6 +61,9 @@ use core/algebra/descent_norm
 use core/algebra/theta
 use core/algebra/theta_actions
 use core/algebra/theta_fibers
+use core/algebra/permutation_groups
+use core/algebra/theta_galois
+use core/algebra/theta_subdegrees
 use core/algebra/point_search
 use core/algebra/quartic_invariants
 use core/algebra/automorphisms

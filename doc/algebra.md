@@ -67,6 +67,9 @@ core/algebra/descent_norm.w        # true S-unit ambient and global norm kernel
 core/algebra/theta.w               # canonical 28/315 theta incidence modules
 core/algebra/theta_actions.w       # exact Sp6(F2) and Frobenius cycle constraints
 core/algebra/theta_fibers.w        # finite-splitting-field theta labelings
+core/algebra/permutation_groups.w  # bounded exact finite permutation groups
+core/algebra/theta_galois.w        # trusted-table subgroup-class replay
+core/algebra/theta_subdegrees.w    # exact relative factors and global subgroup
 core/algebra/point_search.w        # exact bounded search for one quartic family
 core/algebra/quartic_invariants.w  # ternary resultant, discriminant, I27
 core/algebra/automorphisms.w       # normalized-hyperflex certificate
@@ -390,7 +393,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Divisors | Exact formal arithmetic on rational and line-presented higher-degree closed places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic outside the existing Jacobian models, and general principality tests are not implemented |
 | Rational points | Complete exact bounded search for primitive points on `aX³Z + bXY²Z + g(Y,Z)`, with nonzero same-sign `a,b` and nonzero `Y⁴` coefficient | This is not a general plane-curve point finder and does not prove that no points exist above the requested height |
 | Geometric automorphisms | Exact triviality certificate over `Qbar` for smooth rational plane quartics with the unique normalized hyperflex `[1:0:0]`, tangent `Z=0`, and identity stabilizer | It is not an arbitrary plane-quartic automorphism-group algorithm and does not enumerate nontrivial groups |
-| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions; all shell-width degree-6/9/12 factors have replayed full-rank S-class proofs, and their supplied S-unit bases give a certified true-descent ambient space of dimension `9 + 12 + 14 = 35`; exact component norms give a certified rank-4 map to `Q(S,2)` and a 31-dimensional norm-one kernel; the canonical genus-three theta model exhausts 28 odd characteristics, 315 syzygetic quadruples, and module dimensions `0,1,7,21,27,28`; exact `Sp6(F2)` matrices induce replay-certified incidence permutations; certified good-prime factorizations constrain Frobenius cycle types; and the shell-width reduction at 5 has a complete arithmetic labeling over `F_(5^6)` whose 315 contact-conic incidences and exact Frobenius element are replayed | A common characteristic-zero labeling of the shell-width roots, the resulting global Galois subgroup, p-adic local images, the comparison kernel, and the final Selmer bound remain missing. A matching cycle type or one finite-fiber labeling alone is explicitly not promoted to that global claim. `Jacobian#rank` and `rank_upper_bound` still raise |
+| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions; all shell-width degree-6/9/12 factors have replayed full-rank S-class proofs, and their supplied S-unit bases give a certified true-descent ambient space of dimension `9 + 12 + 14 = 35`; exact component norms give a certified rank-4 map to `Q(S,2)` and a 31-dimensional norm-one kernel; the canonical genus-three theta model exhausts 28 odd characteristics, 315 syzygetic quadruples, and module dimensions `0,1,7,21,27,28`; exact `Sp6(F2)` matrices induce replay-certified incidence permutations; certified good-prime factorizations constrain Frobenius cycle types; the shell-width reduction at 5 has a complete arithmetic labeling over `F_(5^6)` whose 315 contact-conic incidences and exact Frobenius element are replayed; and exact relative factorization over the degree-6 component gives subdegrees `1,1,2,2,2,2,3,3,6,6`, identifying the global theta subgroup up to conjugacy as subgroup-table class 693 of order 36 | The completeness of GAP's 1,369-class subgroup table is a named trusted external classification, not replayed internally. A common characteristic-zero root-to-theta labeling, p-adic local images, the comparison kernel, and the final Selmer bound remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
 
 `Curve#hyperelliptic_plane_model?` is specifically the smooth plane-model
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
@@ -1392,6 +1395,49 @@ about 0.32 seconds and 97 MB peak RSS:
 TUNGSTEN_THETA_FIBER=1 \
   bin/tungsten run spec/core/algebra_theta_fibers_spec.w
 ```
+
+The characteristic-zero subgroup can now be identified without pretending
+that one finite fiber supplies a global labeling:
+
+```w
+subdegrees = setup.certify_theta_subdegrees
+subdegrees.orbit_signature          # [1, 6, 9, 12]
+subdegrees.relative_factor_degrees  # [1, 2, 2, 2, 2, 3, 3, 6, 6]
+subdegrees.stabilizer_subdegrees    # [1, 1, 2, 2, 2, 2, 3, 3, 6, 6]
+
+galois = setup.certify_theta_galois_subgroup
+galois.identified_candidate.class_id  # 693
+galois.identified_candidate.group.order # 36
+galois.identified_up_to_conjugacy?    # true
+galois.global_arithmetic_labeling_certified? # false
+```
+
+The checker multiplies nine displayed factors over the degree-6 number
+field back to the monic degree-27 projection. Every relative factor has an
+irreducibility proof. The sextics use two residue factorizations each:
+`[2,2,2]` and `[3,3]` have no common proper subset degree. The rational
+degree-9 and degree-12 components reuse their certified small tower models
+and exact isomorphisms. This matters operationally: the generic Kronecker
+fallback failed after 56.5 seconds and 41.5 GB RSS, while the structured
+compiled replay takes about 0.31 seconds and 64 MB RSS. The full lane is
+opt-in:
+
+```sh
+bin/tungsten compile spec/core/algebra_theta_subdegrees_spec.w \
+  --out /tmp/algebra-theta-subdegrees
+TUNGSTEN_THETA_SUBDEGREES=1 /tmp/algebra-theta-subdegrees
+```
+
+Tungsten exactly exhausts and checks each of the seven candidate permutation
+groups left by the orbit partition. The stabilizer subdegrees leave one
+candidate, class 693, of order 36; GAP reports its structure as
+`S3 x S3`. The group order, orbits, stabilizers, cycle types, and preservation
+of all 315 theta-incidence blocks are replayed internally. Exhaustiveness of
+the seven candidates still imports GAP's
+`ConjugacyClassesSubgroups(Sp(6,2))` table of 1,369 conjugacy classes. Thus the
+subgroup conclusion is certified up to conjugacy under a visible trusted
+finite-classification boundary. An explicit characteristic-zero bijection
+between individual roots and theta labels remains separate work.
 
 The remaining theta and local conditions will meet the certified global norm
 condition in an exact F2 kernel:

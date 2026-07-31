@@ -184,7 +184,13 @@ explicit descent:
     finite fiber by odd characteristics, and recover the exact Frobenius
     element; this is one certified finite fiber, not yet a common
     characteristic-zero splitting-field labeling;
-14. intersect the future globally labeled theta-module and local-image conditions with
+14. factor the degree-27 projection exactly over its degree-6 component,
+    certify the nine relative factors by residue-degree exclusion, and use
+    the resulting stabilizer subdegrees to identify the global theta subgroup
+    up to conjugacy as class 693 of order 36; finite group replay is internal,
+    while completeness of GAP's 1,369 subgroup classes is a named trusted
+    import;
+15. intersect the future explicitly labeled theta-module and local-image conditions with
     that replay-certified F2 kernel.
 
 Step 7 is the BPS true setup. Its certificate checks the component polynomial
@@ -200,7 +206,8 @@ certified finite and archimedean places for S = {2, 3, 13}
   -> certified canonical 28/315 theta incidence
   -> certified Sp6(F2) actions and primewise Frobenius cycle constraints
   -> certified p=5 splitting-field incidence labeling and Frobenius element
-  -> common shell-width theta labeling, global action, and comparison kernel
+  -> certified characteristic-zero subdegrees and global subgroup up to conjugacy
+  -> common shell-width root labeling and comparison kernel
   -> certified p-adic local images
   -> explicit Selmer upper bound
   -> BPS comparison and rational J[2]

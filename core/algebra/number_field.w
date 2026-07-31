@@ -541,6 +541,260 @@
     to_s
 
 
+# An exact degree-one residue map from a power-basis number field to F_p.
+# The defining polynomial must have a simple root at `root`; squarefreeness of
+# the full reduction makes the power order etale at p. Rational denominators
+# are accepted exactly when they are units modulo p.
++ NumberFieldPowerBasisPrimeReductionCertificate
+  -> new(@reduction)
+    @verified_cache = nil
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "NumberFieldPowerBasisPrimeReduction"
+    return false if @reduction.class_name != expected
+    field = @reduction.field
+    return false if field.class_name != "NumberField"
+    prime = @reduction.prime
+    return false if !prime.prime?
+    root = @reduction.root
+    return false if root < 0 || root >= prime
+    polynomial = @reduction.reduced_defining_polynomial
+    return false if polynomial.degree != field.degree
+    return false if !polynomial.at(root).zero?
+    polynomial.gcd(polynomial.derivative(0)).degree == 0
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :exact_unramified_power_basis_residue_map
+
+  -> kernel_checked?
+    true
+
+
++ NumberFieldPowerBasisPrimeReduction
+  -> new(@field, @prime, root)
+    if @field.class_name != "NumberField"
+      raise "power-basis reduction needs a NumberField"
+    if !@prime.prime?
+      raise "power-basis reduction needs a rational prime"
+    @finite_field = FiniteField.new(@prime)
+    @root = @finite_field.coerce(root)
+    @certificate_cache = NumberFieldPowerBasisPrimeReductionCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "power-basis prime reduction failed certification"
+
+  -> field
+    @field
+
+  -> prime
+    @prime
+
+  -> root
+    @root
+
+  -> residue_field
+    @finite_field
+
+  -> reduce_rational(value)
+    rational = value.class_name == "Rational" ? value : Rational.new(value)
+    if rational.denominator % @prime == 0
+      raise "coefficient is not integral at the selected prime"
+    numerator = @finite_field.coerce(rational.numerator)
+    denominator = @finite_field.coerce(rational.denominator)
+    @finite_field.divide(numerator, denominator)
+
+  -> reduce(value)
+    coefficients = @field.coerce(value).coefficients
+    answer = @finite_field.zero
+    power = @finite_field.one
+    i = 0
+    while i < coefficients.size
+      scalar = reduce_rational(coefficients[i])
+      answer = @finite_field.add(
+        answer, @finite_field.multiply(scalar, power))
+      power = @finite_field.multiply(power, @root)
+      i += 1
+    answer
+
+  -> reduced_defining_polynomial
+    source = @field.defining_polynomial
+    ring = PolynomialRing.new(
+      source.ring.names, @finite_field, :lex)
+    terms = []
+    source.each_term -> (coefficient, exponents)
+      terms.push([reduce_rational(coefficient), exponents])
+    Polynomial.new(ring, terms)
+
+  -> reduce_polynomial(polynomial)
+    if polynomial.class_name != "Polynomial"
+      raise "relative reduction needs a Polynomial"
+    if polynomial.ring.arity != 1
+      raise "relative reduction needs a univariate polynomial"
+    if polynomial.ring.field != @field
+      raise "relative polynomial belongs to a different number field"
+    ring = PolynomialRing.new(
+      polynomial.ring.names, @finite_field, :lex)
+    terms = []
+    polynomial.each_term -> (coefficient, exponents)
+      terms.push([reduce(coefficient), exponents])
+    Polynomial.new(ring, terms)
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
+# A monic relative polynomial is irreducible when good residue
+# factorizations leave no possible degree for a proper characteristic-zero
+# factor. For example, a sextic with patterns 2+2+2 and 3+3 has no common
+# proper subset degree.
++ NumberFieldRelativeModularDegreeIrreducibilityCertificate
+  -> new(@polynomial, reductions,
+         @factor_search_limit = 250_000)
+    @reductions = []
+    @factorizations = []
+    reductions.each -> (reduction)
+      @reductions.push(reduction)
+      reduced = reduction.reduce_polynomial(@polynomial)
+      @factorizations.push(
+        reduced.factor_with_certificate(
+          @factor_search_limit))
+    @verified_cache = nil
+
+  -> polynomial
+    @polynomial
+
+  -> reductions
+    out = []
+    @reductions.each -> out.push(item)
+    out
+
+  -> factorizations
+    out = []
+    @factorizations.each -> out.push(item)
+    out
+
+  -> factor_degree_patterns
+    out = []
+    @factorizations.each -> (factorization)
+      degrees = []
+      factorization.factors.each -> (factor)
+        degrees.push(factor.degree) if factor.degree > 0
+      helper = NumberFieldRelativeModularDegreeIrreducibilityCertificate
+      out.push(helper.sort_integers(degrees))
+    out
+
+  -> .sort_integers(values)
+    out = []
+    values.each -> out.push(item)
+    i = 1
+    while i < out.size
+      value = out[i]
+      position = i
+      while position > 0 && out[position - 1] > value
+        out[position] = out[position - 1]
+        position -= 1
+      out[position] = value
+      i += 1
+    out
+
+  -> candidate_degrees(factorization)
+    degree = @polynomial.degree
+    possible = []
+    (degree + 1).times -> possible.push(false)
+    possible[0] = true
+    factorization.factors.each -> (factor)
+      factor_degree = factor.degree
+      if factor_degree > 0
+        current = degree - factor_degree
+        while current >= 0
+          if possible[current]
+            possible[current + factor_degree] = true
+          current -= 1
+    out = []
+    candidate = 1
+    while candidate * 2 <= degree
+      out.push(candidate) if possible[candidate]
+      candidate += 1
+    out
+
+  -> remaining_degrees
+    remaining = []
+    candidate = 1
+    while candidate * 2 <= @polynomial.degree
+      remaining.push(candidate)
+      candidate += 1
+    @factorizations.each -> (factorization)
+      local = candidate_degrees(factorization)
+      kept = []
+      remaining.each -> (degree)
+        kept.push(degree) if local.include?(degree)
+      remaining = kept
+    remaining
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    return false if @polynomial.class_name != "Polynomial"
+    return false if @polynomial.ring.arity != 1
+    return false if @polynomial.degree < 2
+    field = @polynomial.ring.field
+    return false if field.class_name != "NumberField"
+    return false if !@polynomial.eql?(@polynomial.monic)
+    return false if @reductions.size == 0
+    return false if @reductions.size != @factorizations.size
+    i = 0
+    while i < @reductions.size
+      reduction = @reductions[i]
+      return false if reduction.field != field
+      return false if !reduction.certificate.verified?
+      reduced = reduction.reduce_polynomial(@polynomial)
+      return false if reduced.degree != @polynomial.degree
+      factorization = @factorizations[i]
+      return false if !factorization.polynomial.eql?(reduced)
+      return false if !factorization.certificate.verified?
+      i += 1
+    remaining_degrees.size == 0
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :relative_modular_factor_degree_exclusion
+
+  -> kernel_checked?
+    true
+
+  -> to_s
+    "relative modular degree exclusion " + factor_degree_patterns.to_s
+
+  -> inspect
+    to_s
+
+
 + NumberFieldTowerIrreducibilityCertificate
   -> new(@polynomial, @relative_polynomial,
          @relative_certificate)

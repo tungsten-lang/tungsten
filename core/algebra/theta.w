@@ -209,11 +209,12 @@
       while b < forms.size
         c = b + 1
         while c < forms.size
-          d = c + 1
-          while d < forms.size
-            if @incidence.syzygetic_indices?(a, b, c, d)
-              expected.push([a, b, c, d])
-            d += 1
+          label = @incidence.odd_label(a)
+          label = label ^ @incidence.odd_label(b)
+          label = label ^ @incidence.odd_label(c)
+          d = @incidence.odd_index_for_label(label)
+          if d != nil && d > c
+            expected.push([a, b, c, d])
           c += 1
         b += 1
       a += 1
@@ -284,11 +285,14 @@
     @space = SymplecticF2Space.new(3)
     @odd_characteristics = []
     @odd_labels = []
+    @odd_index_by_label = []
+    64.times -> @odd_index_by_label.push(-1)
     encoded = 0
     while encoded < 64
       form = ThetaQuadraticForm.new(
         @space, @space.vector(encoded))
       if form.odd?
+        @odd_index_by_label[encoded] = @odd_labels.size
         @odd_characteristics.push(form)
         @odd_labels.push(encoded)
       encoded += 1
@@ -299,11 +303,11 @@
       while b < @odd_characteristics.size
         c = b + 1
         while c < @odd_characteristics.size
-          d = c + 1
-          while d < @odd_characteristics.size
-            if syzygetic_indices?(a, b, c, d)
-              @syzygetic_quadruples.push([a, b, c, d])
-            d += 1
+          label = @odd_labels[a] ^ @odd_labels[b]
+          label = label ^ @odd_labels[c]
+          d = @odd_index_by_label[label]
+          if d > c
+            @syzygetic_quadruples.push([a, b, c, d])
           c += 1
         b += 1
       a += 1
@@ -324,6 +328,9 @@
       out.push(form)
     out
 
+  -> odd_labels
+    F2LinearAlgebra.copy_vector(@odd_labels)
+
   -> odd_characteristic_index(characteristic)
     @space.validate(characteristic)
     i = 0
@@ -334,6 +341,17 @@
         return i
       i += 1
     nil
+
+  -> odd_label(index)
+    if !F2LinearAlgebra.integer?(index) || index < 0 || index >= 28
+      raise "odd theta index is out of range"
+    @odd_labels[index]
+
+  -> odd_index_for_label(label)
+    if !F2LinearAlgebra.integer?(label) || label < 0 || label >= 64
+      raise "odd theta label is out of range"
+    index = @odd_index_by_label[label]
+    index < 0 ? nil : index
 
   -> syzygetic_quadruples
     F2LinearAlgebra.copy_matrix(@syzygetic_quadruples)
@@ -374,16 +392,35 @@
     out
 
   -> gamma_masks
+    pair_xors = []
+    row = 0
+    while row < 28
+      values = []
+      28.times -> values.push(0)
+      pair_xors.push(values)
+      row += 1
+
+    block_index = 0
+    while block_index < @syzygetic_quadruples.size
+      block = @syzygetic_quadruples[block_index]
+      mask = @syzygetic_masks[block_index]
+      left = 0
+      while left < block.size
+        right = left + 1
+        while right < block.size
+          a = block[left]
+          b = block[right]
+          pair_xors[a][b] = pair_xors[a][b] ^ mask
+          right += 1
+        left += 1
+      block_index += 1
+
     out = []
     i = 0
     while i < 28
       j = i + 1
       while j < 28
-        pair = (1 << i) | (1 << j)
-        value = 0
-        @syzygetic_masks.each -> (quadruple)
-          value = value ^ quadruple if (quadruple & pair) == pair
-        out.push(value)
+        out.push(pair_xors[i][j])
         j += 1
       i += 1
     out

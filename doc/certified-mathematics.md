@@ -207,8 +207,15 @@ explicit descent:
     seven clean disks, replay their exact residue square classes, and certify
     that their one-dimensional span equals the independently checked
     Frobenius-fixed \(J[2]\) dimension, hence is the complete local image;
-    the known rational divisor class restricts to a certified one-dimensional
-    lower-bound subspace at 2, 3, and 13, where completeness remains unproved;
+    at \(p=13\), prove by exact Gröbner identities that the bad fiber has one
+    geometric \(A_2\) cusp, check that the arithmetic surface is regular,
+    count its genus-two normalization over \(\mathbb F_{13}\) and
+    \(\mathbb F_{13^2}\), and recover zeta numerator
+    \(1+3T+39T^3+169T^4\); its Jacobian order \(212=4\cdot53\) bounds the
+    local 2-quotient by dimension two, and the twelve clean smooth-locus disks
+    attain that bound, certifying the complete \(p=13\) BPS image;
+    the known rational divisor class still gives only a one-dimensional
+    lower-bound subspace at 2 and 3;
 17. intersect the future explicitly labeled theta-module and local-image
     conditions with that replay-certified F2 kernel.
 
@@ -230,7 +237,8 @@ certified finite and archimedean places for S = {2, 3, 13}
   -> common shell-width root labeling and comparison kernel
   -> certified odd and dyadic ambient localization and good-reduction residue disks
   -> certified complete p=5 good-reduction BPS local image
-  -> bad-reduction regular models and certified Jacobian local images at 2, 3, 13
+  -> certified regular cuspidal model and complete p=13 BPS local image
+  -> recursive regular models and certified Jacobian local images at 2 and 3
   -> explicit Selmer upper bound
   -> BPS comparison and rational J[2]
   -> Mordell-Weil rank upper bound
@@ -253,7 +261,8 @@ about 31.5 seconds and 10.14 GB peak RSS, the \(p=3\) lane about 20.2 seconds
 and 7.79 GB, and the \(p=13\) lane about 19.7 seconds and 7.61 GB. Their
 localization matrices have dimensions/ranks \(35/29\), \(18/17\), and
 \(14/13\), respectively. The complete \(p=5\) good-reduction image lane takes
-about 19.8 seconds and 7.37 GB. The standard suite checks smaller identities
+about 19.8 seconds and 7.37 GB; the complete \(p=13\) cuspidal image lane takes
+about 20.2 seconds and 7.70 GB. The standard suite checks smaller identities
 and artifact structure. The checked-in witnesses are small. The peak comes
 from exact high-degree S-unit arithmetic in a runtime that does not yet
 reclaim completed object graphs, not from loading a giant certificate file.

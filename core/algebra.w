@@ -74,6 +74,7 @@ use core/algebra/point_search
 use core/algebra/quartic_invariants
 use core/algebra/automorphisms
 use core/algebra/zeta
+use core/algebra/regular_models
 use core/algebra/galois
 
 

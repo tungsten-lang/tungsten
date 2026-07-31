@@ -247,7 +247,8 @@ function_data = nil
 descent_setup = nil
 need_descent_functions = (
   env("TUNGSTEN_SUNIT_POINT_VALUES") == "1" ||
-  env("TUNGSTEN_SUNIT_GOOD_LOCAL_IMAGE") == "1")
+  env("TUNGSTEN_SUNIT_GOOD_LOCAL_IMAGE") == "1" ||
+  env("TUNGSTEN_SUNIT_SMOOTH_LOCAL_IMAGE") == "1")
 if need_descent_functions
   P2 = ProjectiveSpace<ℚ, 2>.new(:B, :S, :Z)
   B = P2.coords[0]
@@ -336,3 +337,38 @@ if env("TUNGSTEN_SUNIT_GOOD_LOCAL_IMAGE") == "1"
     raise "shell-width p=5 clean disks did not span the local image"
   if !good_local_image.complete?
     raise "shell-width p=5 local image is not complete"
+
+if env("TUNGSTEN_SUNIT_SMOOTH_LOCAL_IMAGE") == "1"
+  if local_map == nil || local_map.rational_prime == 2
+    raise "shell-width smooth-locus image needs an odd local prime"
+  dimension_certificate = nil
+  if local_map.rational_prime == 13
+    dimension_certificate = (
+      curve.certify_cuspidal_regular_model(
+        13, [1, 8, 1]))
+    << ["cuspidal_model_certified",
+        dimension_certificate.certified?]
+    << ["cuspidal_normalization_genus",
+        dimension_certificate.normalization_genus]
+    << ["cuspidal_normalization_zeta",
+        dimension_certificate.normalization_zeta_numerator]
+    << ["cuspidal_normalization_jacobian_order",
+        dimension_certificate.normalization_jacobian_order]
+    << ["cuspidal_local_dimension_bound",
+        dimension_certificate.dimension_upper_bound]
+  smooth_image = function_data.smooth_locus_local_image(
+    local_map, 8, dimension_certificate)
+  << ["smooth_local_prime", smooth_image.rational_prime]
+  << ["smooth_local_disks", smooth_image.cover.smooth_point_count]
+  << ["smooth_local_singular_classes",
+      smooth_image.cover.singular_point_count]
+  << ["smooth_local_clean_disks", smooth_image.clean_disk_count]
+  << ["smooth_local_target_dimension", smooth_image.target_dimension]
+  << ["smooth_local_upper_bound", smooth_image.dimension_upper_bound]
+  << ["smooth_local_dimension", smooth_image.dimension]
+  << ["smooth_local_basis", smooth_image.image_basis]
+  << ["smooth_local_complete", smooth_image.complete?]
+  << ["smooth_local_certified", smooth_image.certified?]
+  if local_map.rational_prime == 13
+    if smooth_image.dimension != 2 || !smooth_image.complete?
+      raise "shell-width p=13 smooth disks did not complete the local image"

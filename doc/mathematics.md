@@ -150,11 +150,10 @@ components, with zero norm. Exact arithmetic and the coordinate binding are
 replayed internally; the theorem identifying this value with the image of
 the divisor class is a named BPS sections 6.4--6.5 import. One known image
 element is a lower bound, not a local-image enumeration or Selmer upper bound.
-Its certified restrictions span one known dimension in every finite local
-target in \(S\): `00000000000000000000000000000010110` at \(p=2\),
-`000000000000111111` at \(p=3\), and `00000001010101` at \(p=13\).
-These are explicitly labeled lower bounds on the local images, not complete
-local-image calculations.
+Its certified restrictions give one known dimension at \(p=2\),
+`00000000000000000000000000000010110`, and at \(p=3\),
+`000000000000111111`. At \(p=13\), that known vector lies in the complete
+two-dimensional local image described below.
 
 The descent is not finished. Exact `Sp6(F2)` matrices now induce
 replay-certified permutations of the 28 characteristics, and certified
@@ -169,9 +168,8 @@ certifies the stabilizer subdegrees
 identifies, up to conjugacy, subgroup-table class 693 of order 36; the finite
 groups and incidence actions are replayed, while completeness of GAP's
 1,369-class subgroup table is an explicit trusted import. Missing links are
-a common characteristic-zero labeling, the bad-prime descent-function local
-images, the BPS comparison kernel and rational \(J[2]\), and the final
-Selmer/rank bound.
+a common characteristic-zero labeling, the local images at 2 and 3, the BPS
+comparison kernel and rational \(J[2]\), and the final Selmer/rank bound.
 
 The local-field foundation is now executable but should not be confused with
 that missing local image. Tungsten computes exact rational square classes in
@@ -185,12 +183,23 @@ certified Frobenius-fixed \(J[2]\) dimension. For the shell-width quartic at
 \(p=5\), seven clean disks span the full one-dimensional local image in its
 ten-dimensional square-class target.
 
+Bad reduction can use a certified smooth-locus cover plus an independent
+regular-model bound. At \(p=13\), proof-producing Gröbner identities isolate
+one rational \(A_2\) cusp and exact local arithmetic shows that the total
+surface is already regular. The genus-two normalization has zeta numerator
+\(1+3T+39T^3+169T^4\), hence Jacobian order \(212=4\cdot53\). Generalized
+Jacobian and Néron specialization theorems bound
+\(J(\mathbb Q_{13})/2J(\mathbb Q_{13})\) by dimension two; twelve clean
+smooth-locus disks attain dimension two in the BPS target. Thus the
+\(p=13\) local image is complete.
+
 For the shell-width artifacts the \(p=2\) matrix has target dimension 35 and
 rank 29, the \(p=3\) matrix has target dimension 18 and rank 17, and the
-\(p=13\) matrix has target dimension 14 and rank 13. The remaining BPS step is
-to prove which of those local vectors actually come from local Jacobian
-divisor classes, especially through bad-reduction regular models and
-descent-function constancy on residue disks.
+\(p=13\) matrix has target dimension 14 and rank 13. The remaining local BPS
+steps are at 2 and 3. Modulo 3 the fiber is \(Z(B-S)^3\), and all three smooth
+rational disks meet a zero or pole of the chosen BPS functions; modulo 2 the
+fiber is \((S+Z)^4\) and has no smooth point. Both therefore require recursive
+refinement or blowups rather than another special-fiber scan.
 
 The finite reference theta module itself is now present: it constructs the 28
 odd quadratic refinements of the symplectic form on \(\mathbb F_2^6\),
@@ -200,8 +209,8 @@ their complete incidence-preserving permutations, finite action orbits, and
 primewise Frobenius cycle constraints. The shell-width prime-5 fiber has a
 complete arithmetic incidence labeling, and exact characteristic-zero
 subdegrees now determine the global subgroup up to conjugacy. What remains is
-an explicit compatible root labeling and the bad-prime Jacobian/descent
-images.
+an explicit compatible root labeling and the Jacobian/descent images at 2
+and 3.
 
 ## Fermat and modularity
 

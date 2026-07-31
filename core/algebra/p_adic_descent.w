@@ -364,3 +364,278 @@
       local_map.rational_prime, precision)
     cover.bps_local_image(
       self, local_map, theta_fiber)
+
+
+# Even on a bad plane model, every smooth special-fiber point gives a
+# nonempty p-adic disk. Point differences from the clean smooth disks are
+# certified elements of the local BPS image. At an odd prime, the universal
+# bound dim J(Q_p)/2J(Q_p) <= 2g makes this a complete image if the span
+# reaches 2g; otherwise it remains an honest lower bound.
++ PlaneQuarticBPSSmoothLocusLocalImageCertificate
+  -> new(@image)
+    @verified_cache = nil
+
+  -> theorem
+    "clean smooth-locus point differences give a BPS local-image lower bound, complete when they attain the odd-prime 2g bound"
+
+  -> theorem_reference
+    "multivariate Hensel lifting, p-adic Lie-group multiplication by two, and Bruin-Poonen-Stoll sections 6 and 11"
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "PlaneQuarticBPSSmoothLocusLocalImage"
+    return false if @image.class_name != expected
+    data = @image.function_data
+    return false if data.class_name != "PlaneQuarticBPSFunctionData"
+    return false if !data.certificate.verified?
+    cover = @image.cover
+    return false if cover.class_name != "PadicCurveSmoothResidueDiskCover"
+    return false if !cover.certificate.verified?
+    return false if cover.curve != data.curve
+    prime = cover.prime
+    return false if prime == 2 || !prime.prime?
+
+    local_map = @image.local_map
+    return false if local_map.class_name != "EtaleProductOddLocalSquareClassMap"
+    return false if !local_map.certificate.verified?
+    return false if local_map.rational_prime != prime
+    compatible = PlaneQuarticBPSPointDifferenceArithmetic.same_component_polynomials?(
+      data, local_map.source)
+    return false if !compatible
+    dimension_certificate = @image.dimension_certificate
+    if dimension_certificate == nil
+      return false if (
+        @image.dimension_upper_bound != 2*data.curve.genus)
+    else
+      expected_bound = "PlaneQuarticCuspidalRegularModel"
+      return false if dimension_certificate.class_name != expected_bound
+      return false if !dimension_certificate.certificate.verified?
+      return false if dimension_certificate.curve != data.curve
+      return false if dimension_certificate.prime != prime
+      return false if (
+        dimension_certificate.dimension_upper_bound !=
+        @image.dimension_upper_bound)
+
+    entries = @image.disk_vectors
+    disks = cover.disks
+    return false if entries.size != disks.size
+    clean = []
+    index = 0
+    while index < disks.size
+      entry = entries[index]
+      return false if entry.size != 2
+      return false if entry[0] != disks[index]
+      replay = PlaneQuarticBPSGoodReductionLocalArithmetic.disk_vector(
+        data, local_map, disks[index])
+      if replay == nil
+        return false if entry[1] != nil
+      else
+        return false if entry[1] == nil
+        return false if !F2LinearAlgebra.same_vector?(
+          replay, entry[1])
+        clean.push(entry)
+      index += 1
+    return false if clean.size == 0
+    return false if clean[0][0] != @image.base_disk
+
+    expected_vectors = []
+    base = clean[0][1]
+    clean.each -> (entry)
+      expected_vectors.push(
+        PlaneQuarticBPSGoodReductionLocalArithmetic.difference(
+          entry[1], base))
+    return false if !F2LinearAlgebra.same_matrix?(
+      expected_vectors, @image.vectors)
+
+    span = @image.span_certificate
+    return false if !span.verified?
+    return false if span.width != local_map.target_dimension
+    return false if !F2LinearAlgebra.same_matrix?(
+      span.matrix, expected_vectors)
+    zero_right_hand_side = span.source_right_hand_side.all? ->
+      item == 0
+    return false if !zero_right_hand_side
+    return false if span.rank != @image.dimension
+    @image.dimension <= @image.dimension_upper_bound
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :trusted_odd_local_2g_bound_with_exact_residue_replay
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> finite_smooth_locus_replayed?
+    true
+
+  -> local_descent_constancy_checked?
+    true
+
+  -> complete_local_image_checked?
+    (verified? &&
+     @image.dimension == @image.dimension_upper_bound)
+
+
++ PlaneQuarticBPSSmoothLocusLocalImage
+  -> new(@function_data, @local_map, @cover,
+         @dimension_certificate = nil)
+    if @function_data.class_name != "PlaneQuarticBPSFunctionData"
+      raise "smooth-locus BPS local image needs function data"
+    if !@function_data.certificate.verified?
+      raise "smooth-locus BPS function data is uncertified"
+    if @local_map.class_name != "EtaleProductOddLocalSquareClassMap"
+      raise "smooth-locus BPS local image needs an odd localization map"
+    if !@local_map.certificate.verified?
+      raise "smooth-locus BPS localization map is uncertified"
+    if @cover.class_name != "PadicCurveSmoothResidueDiskCover"
+      raise "smooth-locus BPS local image needs a smooth-locus cover"
+    if !@cover.certificate.verified?
+      raise "smooth-locus BPS residue disks are uncertified"
+    if @cover.prime != @local_map.rational_prime
+      raise "smooth-locus BPS local data changes the prime"
+    if @cover.prime == 2
+      raise "smooth-locus BPS 2g bound needs an odd prime"
+    compatible = PlaneQuarticBPSPointDifferenceArithmetic.same_component_polynomials?(
+      @function_data, @local_map.source)
+    if !compatible
+      raise "smooth-locus BPS localization changes etale components"
+    if @dimension_certificate != nil
+      expected_bound = "PlaneQuarticCuspidalRegularModel"
+      if @dimension_certificate.class_name != expected_bound
+        raise "unsupported smooth-locus local dimension certificate"
+      if !@dimension_certificate.certificate.verified?
+        raise "smooth-locus local dimension bound is uncertified"
+      if (@dimension_certificate.curve != @function_data.curve ||
+          @dimension_certificate.prime != @cover.prime)
+        raise "smooth-locus local dimension bound changes the problem"
+
+    @disk_vectors = []
+    clean = []
+    @cover.disks.each -> (disk)
+      vector = PlaneQuarticBPSGoodReductionLocalArithmetic.disk_vector(
+        @function_data, @local_map, disk)
+      entry = [disk, vector]
+      @disk_vectors.push(entry)
+      clean.push(entry) if vector != nil
+    if clean.size == 0
+      raise "no smooth residue disk avoids every BPS zero and pole"
+    @base_disk = clean[0][0]
+    base_vector = clean[0][1]
+    @vectors = []
+    clean.each -> (entry)
+      @vectors.push(
+        PlaneQuarticBPSGoodReductionLocalArithmetic.difference(
+          entry[1], base_vector))
+    system = F2LinearSystem.new(
+      @local_map.target_dimension)
+    @vectors.each -> (vector)
+      system.add_equation(
+        vector, 0,
+        "clean smooth-locus point difference")
+    @span_certificate = system.certificate
+    @dimension_upper_bound = 2*@function_data.curve.genus
+    if @dimension_certificate != nil
+      @dimension_upper_bound = (
+        @dimension_certificate.dimension_upper_bound)
+    @certificate_cache = PlaneQuarticBPSSmoothLocusLocalImageCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "smooth-locus BPS local image failed certification"
+
+  -> function_data
+    @function_data
+
+  -> local_map
+    @local_map
+
+  -> cover
+    @cover
+
+  -> dimension_certificate
+    @dimension_certificate
+
+  -> rational_prime
+    @cover.prime
+
+  -> disk_vectors
+    out = []
+    @disk_vectors.each -> (entry)
+      vector = entry[1]
+      vector = F2LinearAlgebra.copy_vector(vector) if vector != nil
+      out.push([entry[0], vector])
+    out
+
+  -> clean_disk_count
+    count = 0
+    @disk_vectors.each ->
+      count += 1 if item[1] != nil
+    count
+
+  -> base_disk
+    @base_disk
+
+  -> vectors
+    F2LinearAlgebra.copy_matrix(@vectors)
+
+  -> target_dimension
+    @local_map.target_dimension
+
+  -> span_certificate
+    @span_certificate
+
+  -> dimension
+    @span_certificate.rank
+
+  -> dimension_upper_bound
+    @dimension_upper_bound
+
+  -> image_basis
+    @span_certificate.rref.copy(
+      0, @span_certificate.rank)
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+  -> complete?
+    certificate.complete_local_image_checked?
+
+  -> lower_bound_only?
+    !complete?
+
+  -> local_descent_image_certified?
+    complete?
+
+
++ PadicCurveSmoothResidueDiskCover
+  -> bps_smooth_locus_image(
+       function_data, local_map, dimension_certificate = nil)
+    PlaneQuarticBPSSmoothLocusLocalImage.new(
+      function_data, local_map, self,
+      dimension_certificate)
+
+
++ PlaneQuarticBPSFunctionData
+  -> smooth_locus_local_image(
+       local_map, precision = 20,
+       dimension_certificate = nil)
+    cover = curve.p_adic_smooth_residue_disks(
+      local_map.rational_prime, precision)
+    cover.bps_smooth_locus_image(
+      self, local_map, dimension_certificate)

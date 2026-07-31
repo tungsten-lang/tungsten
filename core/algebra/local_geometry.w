@@ -20,8 +20,6 @@ use core/calculus/puiseux
 
   -> .translated_polynomial(polynomial, x_variable, y_variable,
                             center_x, center_y)
-    if polynomial.ring.field.class_name != "RationalField"
-      raise "local Puiseux geometry currently requires the rational field"
     x_index = PlaneLocalGeometry.variable_index(
       polynomial, x_variable)
     y_index = PlaneLocalGeometry.variable_index(

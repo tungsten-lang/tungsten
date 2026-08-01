@@ -4044,7 +4044,7 @@ use target
   -> resolve_use_path(use_path, base_dir)
     # `core/` prefix: always resolves to <project_root>/core/<rest>.w.
     if use_path.starts_with?("core/")
-      project_root = find_use_project_root(base_dir)
+      project_root = find_use_core_root(base_dir)
       if project_root != ""
         core_path = project_root + "/" + use_path + ".w"
         if read_file(core_path) != nil
@@ -4101,6 +4101,22 @@ use target
       if read_file(lib_candidate) != nil
         return lib_candidate
 
+    # Standard library anchored on the install root rather than the caller's
+    # ancestry. `find_use_project_root` is Bitfile-anchored, so it is "" for
+    # any program outside a Tungsten project -- a script in ~/math, say -- and
+    # then every stdlib branch above is skipped, resolution falls through to a
+    # nonexistent sibling path, and read_file returns nil. The failure only
+    # surfaces later in parse_source/strip_bash_shebang as
+    # `undefined method 'starts_with?' for nil`.
+    core_root = find_use_core_root(base_dir)
+    if core_root != "" && core_root != project_root
+      core_candidate = core_root + "/core/" + use_path + ".w"
+      if read_file(core_candidate) != nil
+        return core_candidate
+      lib_candidate = core_root + "/lib/" + use_path + ".w"
+      if read_file(lib_candidate) != nil
+        return lib_candidate
+
     path
 
   -> resolve_use_bit(bit_name, sub_path, bit_home)
@@ -4121,6 +4137,31 @@ use target
     if read_file(prefixed) != nil
       return prefixed
     nil
+
+  # Anchored on core/tungsten.w (the stdlib marker) rather than a Bitfile, and
+  # carrying the install-root fallback that bin/tungsten exports as
+  # TUNGSTEN_ROOT. Mirrors loader.w:find_core_root so the interpreter and the
+  # compiled loader resolve the standard library identically: local project
+  # files against the program's own root, core files against the install root.
+  -> find_use_core_root(dir)
+    if dir != ""
+      parts = dir.split("/")
+      result = ""
+      i = parts.size()
+      while i > 0
+        candidate = parts[0...i].join("/")
+        if file?(candidate + "/core/tungsten.w")
+          result = candidate
+        i -= 1
+      if result != ""
+        return result
+    if file?("core/tungsten.w")
+      return "."
+    root = env("TUNGSTEN_ROOT")
+    if root != nil && root != ""
+      if file?(root + "/core/tungsten.w")
+        return root
+    ""
 
   -> find_use_project_root(dir)
     # Source-ancestry-first: walk up from the source file's directory.

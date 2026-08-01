@@ -1069,6 +1069,27 @@ use parser
       if file?(lib_candidate)
         return lib_candidate
 
+    # Stdlib fallback anchored on the install root rather than the caller's
+    # ancestry. `project_root` above is Bitfile-anchored, so it is empty for
+    # any program outside a Tungsten project — a script in ~/math, say — and
+    # then falls back to "." only when the *current working directory*
+    # happens to hold a Bitfile. That made `use algebra` succeed or fail
+    # depending on where the shell was sitting, with the failure surfacing
+    # far downstream as `undefined method 'starts_with?' for nil`.
+    #
+    # find_core_root is anchored on core/tungsten.w and already carries the
+    # TUNGSTEN_ROOT fallback that bin/tungsten exports, so consulting it here
+    # gives the intended split: local project files resolve against the
+    # program's own root, core files against the install root.
+    core_root = find_core_root(base_dir)
+    if core_root != "" && core_root != project_root
+      core_candidate = core_root + "/core/" + path + ".w"
+      if file?(core_candidate)
+        return core_candidate
+      lib_candidate = core_root + "/lib/" + path + ".w"
+      if file?(lib_candidate)
+        return lib_candidate
+
     resolved
 
   # Collapse `.` and `..` before recording a loaded file. Without this, the

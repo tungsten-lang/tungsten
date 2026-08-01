@@ -58,7 +58,9 @@ bootstrap_stage1_source_manifest() {
       openssl dgst -sha256 "${relative_inputs[@]}"
     fi
   )
-  for source_path in "${external_inputs[@]}"; do
+  # bash 3.2 (the macOS system shell) errors on "${arr[@]}" for an empty array
+  # under `set -u`; guard the expansion so an empty external set is not fatal.
+  for source_path in ${external_inputs[@]+"${external_inputs[@]}"}; do
     if command -v shasum >/dev/null 2>&1; then
       printf 'external:%s:%s\n' "$(basename "$source_path")" \
         "$(shasum -a 256 "$source_path" | awk '{print $1}')"

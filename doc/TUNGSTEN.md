@@ -35,7 +35,8 @@ COMMANDS
                          latched: file IO, sockets, process control, and
                          environment access are blocked or stubbed, and every
                          attempt is logged as one JSON line (--log PATH to
-                         send the log to a file instead of stderr)
+                         send the log to a file instead of stderr).
+                         Full guide: doc/SANDBOX.md
     console              Interactive REPL (also: wit(1))
     start                First-run welcome: what Tungsten is + your next step
     new NAME             Scaffold a new project
@@ -207,6 +208,14 @@ ENVIRONMENT
     W_HOME
     W_PATH
     W_VERBOSE
+    TUNGSTEN_SANDBOX
+        Set to 1 to latch the sandbox gate for the process: file IO, sockets,
+        process control, and environment access are blocked or stubbed, and
+        every attempt is logged. `tungsten sandbox` sets this for the program
+        it runs. See doc/SANDBOX.md.
+    TUNGSTEN_SANDBOX_LOG
+        Append the sandbox attempt log to this path instead of stderr, so the
+        log stays out of the program's own output.
     TUNGSTEN_GPU_DIALECTS
         Comma list of extra GPU dialect sidecars to emit for @gpu fn
         (e.g. cuda,wgsl). Metal is always emitted when kernels are present;

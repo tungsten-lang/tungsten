@@ -49,6 +49,19 @@ rescue e3
   system_raised = true
   check("sandbox.system.error_names_op", "[e3]".include?("system") == true)
 
+# Blocked ACTION: deleting a file. The atomic-publish family (unlink, mkdir_p,
+# temp_file_for, fsync_*, append_file_to) reaches the filesystem without going
+# through File.read/File.write, and was ungated until an extern-level audit
+# caught it — unlink DELETES, so this one is load-bearing.
+# Targets a throwaway path, not `probe`: unsandboxed this really deletes, and
+# deleting the probe would break the File.exist? observation below.
+unlink_raised = false
+begin
+  ccall("__w_unlink", probe + ".delete_me")
+rescue e4
+  unlink_raised = true
+  check("sandbox.unlink.error_names_op", "[e4]".include?("unlink") == true)
+
 # Stubbed OBSERVATIONS: benign values, never a raise.
 home = env("HOME")
 exists = File.exist?(probe)
@@ -61,14 +74,16 @@ if active
   check("sandbox.on.system_blocked", system_raised == true)
   check("sandbox.on.env_stubbed_nil", home == nil)
   check("sandbox.on.exist_stubbed_false", exists == false)
-  # write + read + system + env + exist? — every gated op is accounted for.
-  check("sandbox.on.attempts_counted", attempts >= 5)
+  check("sandbox.on.unlink_blocked", unlink_raised == true)
+  # write + read + system + unlink + env + exist? — every gated op is counted.
+  check("sandbox.on.attempts_counted", attempts >= 6)
 else
   check("sandbox.off.write_works", write_raised == false)
   check("sandbox.off.read_works", read_raised == false && read_back == payload)
   check("sandbox.off.system_works", system_raised == false)
   check("sandbox.off.env_real", home != nil)
   check("sandbox.off.exist_real", exists == true)
+  check("sandbox.off.unlink_works", unlink_raised == false)
   check("sandbox.off.no_attempts", attempts == 0)
 
 # Pure computation is never gated, in either mode.

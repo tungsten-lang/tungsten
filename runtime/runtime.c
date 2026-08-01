@@ -29745,6 +29745,7 @@ WValue __w_mkdtemp_in(WValue parent_val, WValue prefix_val) {
 /* Reserve a unique temporary file beside `destination`, ensuring the final
  * rename stays on the same filesystem. The caller owns unlinking it. */
 WValue __w_temp_file_for(WValue destination_val) {
+    w_sandbox_gate("temp_file_for", as_str(destination_val));
     const char *destination = as_str(destination_val);
     char path[4096];
     int wrote = snprintf(path, sizeof path, "%s.tmp.XXXXXX", destination);
@@ -29760,6 +29761,7 @@ WValue __w_temp_file_for(WValue destination_val) {
 
 /* Durability and cleanup helpers used by atomic artifact publishers. */
 WValue __w_fsync_path(WValue path_val) {
+    w_sandbox_gate("fsync_path", as_str(path_val));
     const char *path = as_str(path_val);
     int fd = open(path, O_RDONLY);
     if (fd < 0) return W_FALSE;
@@ -29769,6 +29771,7 @@ WValue __w_fsync_path(WValue path_val) {
 }
 
 WValue __w_fsync_parent(WValue path_val) {
+    w_sandbox_gate("fsync_parent", as_str(path_val));
     const char *source = as_str(path_val);
     char parent[4096];
     size_t len = strlen(source);
@@ -29791,6 +29794,7 @@ WValue __w_fsync_parent(WValue path_val) {
 }
 
 WValue __w_unlink(WValue path_val) {
+    w_sandbox_gate("unlink", as_str(path_val));
     return unlink(as_str(path_val)) == 0 || errno == ENOENT ? W_TRUE : W_FALSE;
 }
 
@@ -29799,6 +29803,7 @@ WValue __w_rmdir(WValue path_val) {
 }
 
 WValue __w_append_file_to(WValue destination_val, WValue source_val) {
+    w_sandbox_gate("append_file_to", as_str(destination_val));
     char destination[4096];
     snprintf(destination, sizeof destination, "%s", as_str(destination_val));
     const char *source = as_str(source_val);
@@ -29827,6 +29832,7 @@ WValue __w_append_file_to(WValue destination_val, WValue source_val) {
 
 /* Shell-free mkdir -p for coordinator work directories. */
 WValue __w_mkdir_p(WValue path_val) {
+    w_sandbox_gate("mkdir_p", as_str(path_val));
     const char *source = as_str(path_val);
     char path[4096];
     size_t len = strlen(source);

@@ -20,6 +20,8 @@
 # This is containment for observation (the log is the point), not a hardened
 # security boundary: ccall reaches any linked symbol directly.
 #
+# Full guide, including what it does NOT protect against: doc/SANDBOX.md
+#
 # Compiled programs only: the interpreter loads core classes from disk
 # mid-run, which the gate itself would block.
 + Sandbox

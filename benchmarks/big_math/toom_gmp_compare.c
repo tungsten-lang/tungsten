@@ -192,7 +192,9 @@ int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
-    static const int32_t toom2_sizes[] = {32, 40, 48, 64, 80, 96, 128};
+    static const int32_t toom2_sizes[] = {
+        16, 20, 24, 28, 32, 40, 48, 64, 80, 96, 128
+    };
     static const int32_t toom3_sizes[] = {128, 144, 160, 192, 224, 256, 320, 384, 512};
     static const int32_t toom4_sizes[] = {384, 448, 512, 640, 768, 1024, 1536, 2048};
     static const ToomCase cases[] = {

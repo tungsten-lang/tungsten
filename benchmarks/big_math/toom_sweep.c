@@ -11,6 +11,8 @@ static volatile uint64_t sweep_sink;
 typedef enum {
     ALG_SCHOOL,
     ALG_TOOM2,
+    ALG_TOOM2_SUM,
+    ALG_TOOM2_DIFF,
     ALG_TOOM3,
     ALG_TOOM4,
     ALG_NTT,
@@ -26,6 +28,7 @@ typedef struct {
 
 static int sweep_reps = 3;
 static int sweep_include_ntt = 0;
+static int sweep_square = 0;
 
 static double sweep_now(void) {
     struct timespec ts;
@@ -64,6 +67,8 @@ static int sweep_iters(int32_t n) {
 }
 
 static int sweep_alg_valid(SweepAlg alg, int32_t n) {
+    if (sweep_square && (alg == ALG_TOOM2_SUM || alg == ALG_TOOM2_DIFF))
+        return 0;
     switch (alg) {
     case ALG_TOOM3:
         return n >= 2;
@@ -84,12 +89,47 @@ static size_t sweep_scratch_len(int32_t n) {
 
 static void sweep_run_alg(SweepAlg alg, uint64_t *out, const uint64_t *a,
                           const uint64_t *b, int32_t n, uint64_t *scratch) {
+    if (sweep_square) {
+        switch (alg) {
+        case ALG_SCHOOL:
+            bn_sqr_school(out, a, n);
+            break;
+        case ALG_TOOM2:
+            bn_kara_sq(out, a, n, scratch);
+            break;
+        case ALG_TOOM2_SUM:
+        case ALG_TOOM2_DIFF:
+            break;
+        case ALG_TOOM3:
+            bn_toom3_sq(out, a, n, scratch);
+            break;
+        case ALG_TOOM4:
+            bn_toom4_sq(out, a, n, scratch);
+            break;
+        case ALG_NTT:
+            bn_ntt_sqr(out, a, n);
+            break;
+        case ALG_LADDER:
+            bn_sqr_eq(out, a, n, scratch);
+            break;
+        case ALG_DISPATCH:
+            bigint_sqr_dispatch(out, a, n);
+            break;
+        }
+        return;
+    }
     switch (alg) {
     case ALG_SCHOOL:
         bigint_mul_schoolbook_into(out, a, n, b, n);
         break;
     case ALG_TOOM2:
         bn_toom2(out, a, b, n, scratch);
+        break;
+    case ALG_TOOM2_SUM:
+        bn_toom2_sum(out, a, b, n, scratch);
+        break;
+    case ALG_TOOM2_DIFF:
+        bn_toom2_diff(out, a, b, n, scratch);
         break;
     case ALG_TOOM3:
         bn_toom3(out, a, b, n, scratch);
@@ -156,10 +196,14 @@ static double sweep_time_alg(SweepAlg alg, const uint64_t *a0, const uint64_t *b
     return best;
 }
 
-static const char *best_name(double school, double toom2, double toom3, double toom4, double ntt) {
+static const char *best_name(double school, double toom2, double toom2_sum,
+                             double toom2_diff, double toom3, double toom4,
+                             double ntt) {
     const char *name = "school";
     double best = school;
     if (toom2 >= 0.0 && toom2 < best) { best = toom2; name = "toom2"; }
+    if (toom2_sum >= 0.0 && toom2_sum < best) { best = toom2_sum; name = "t2sum"; }
+    if (toom2_diff >= 0.0 && toom2_diff < best) { best = toom2_diff; name = "t2diff"; }
     if (toom3 >= 0.0 && toom3 < best) { best = toom3; name = "toom3"; }
     if (toom4 >= 0.0 && toom4 < best) { best = toom4; name = "toom4"; }
     if (ntt >= 0.0 && ntt < best) { name = "ntt"; }
@@ -172,7 +216,7 @@ static void print_time(double value) {
 }
 
 static void usage(const char *prog) {
-    fprintf(stderr, "usage: %s [--ntt] [--reps N] [START:END[:STEP] | N ...]\n", prog);
+    fprintf(stderr, "usage: %s [--square] [--ntt] [--reps N] [START:END[:STEP] | N ...]\n", prog);
 }
 
 static int parse_range_arg(const char *arg, SweepRange *range) {
@@ -214,6 +258,8 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--ntt") == 0) {
             sweep_include_ntt = 1;
+        } else if (strcmp(argv[i], "--square") == 0) {
+            sweep_square = 1;
         } else if (strcmp(argv[i], "--reps") == 0) {
             if (++i >= argc) { usage(argv[0]); return 2; }
             sweep_reps = atoi(argv[i]);
@@ -227,11 +273,12 @@ int main(int argc, char **argv) {
         }
     }
 
-    printf("Forced Toom multiply sweep (best of %d, ns/op, equal-length limbs)\n", sweep_reps);
+    printf("Forced Toom %s sweep (best of %d, ns/op, equal-length limbs)\n",
+           sweep_square ? "square" : "multiply", sweep_reps);
     if (sweep_include_ntt) {
-        printf("limbs   school     toom2     toom3     toom4       ntt    ladder  dispatch  best\n");
+        printf("limbs   school     toom2     t2sum    t2diff     toom3     toom4       ntt    ladder  dispatch  best\n");
     } else {
-        printf("limbs   school     toom2     toom3     toom4    ladder  dispatch  best\n");
+        printf("limbs   school     toom2     t2sum    t2diff     toom3     toom4    ladder  dispatch  best\n");
     }
 
     size_t default_count = sizeof(sizes) / sizeof(sizes[0]);
@@ -252,10 +299,12 @@ int main(int argc, char **argv) {
             uint64_t *b = sweep_limbs(n, 0xfedcba9876543210ULL ^ (uint64_t)n);
             uint64_t *ref = (uint64_t *)calloc((size_t)2 * n + 4U, sizeof(uint64_t));
             if (!ref) die("out of memory in Toom sweep reference");
-            bigint_mul_schoolbook_into(ref, a, n, b, n);
+            bigint_mul_schoolbook_into(ref, a, n, sweep_square ? a : b, n);
 
             double school = sweep_time_alg(ALG_SCHOOL, a, b, ref, n, iters, "school");
             double toom2 = sweep_time_alg(ALG_TOOM2, a, b, ref, n, iters, "toom2");
+            double toom2_sum = sweep_time_alg(ALG_TOOM2_SUM, a, b, ref, n, iters, "t2sum");
+            double toom2_diff = sweep_time_alg(ALG_TOOM2_DIFF, a, b, ref, n, iters, "t2diff");
             double toom3 = sweep_time_alg(ALG_TOOM3, a, b, ref, n, iters, "toom3");
             double toom4 = sweep_time_alg(ALG_TOOM4, a, b, ref, n, iters, "toom4");
             double ntt = sweep_time_alg(ALG_NTT, a, b, ref, n, iters, "ntt");
@@ -265,12 +314,15 @@ int main(int argc, char **argv) {
             printf("%5d", n);
             print_time(school);
             print_time(toom2);
+            print_time(toom2_sum);
+            print_time(toom2_diff);
             print_time(toom3);
             print_time(toom4);
             if (sweep_include_ntt) print_time(ntt);
             print_time(ladder);
             print_time(dispatch);
-            printf("  %s\n", best_name(school, toom2, toom3, toom4, ntt));
+            printf("  %s\n", best_name(school, toom2, toom2_sum, toom2_diff,
+                                       toom3, toom4, ntt));
             free(ref);
             free(a);
             free(b);

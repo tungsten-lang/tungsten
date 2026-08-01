@@ -72,6 +72,10 @@ case "$1" in
   # --flags itself; names pass through as positional args.
   bench)
     shift
+    if [ "${1:-}" = "bignum" ]; then
+      shift
+      exec python3 "$ROOT/bin/commands/bench-bignum.py" "$@"
+    fi
     if [ ! -x "$COMPILER" ]; then
       echo "tungsten bench: build the compiler first — bin/tungsten build" >&2
       exit 1
@@ -92,6 +96,7 @@ case "$1" in
         -h|--help)
           echo "Usage: tungsten bench [primitive...] [--compare] [--baseline] [--runs N] [--list]"
           echo "       tungsten bench --suite [benchmark...] [--only LANGS] [--runs N] [--list]"
+          echo "       tungsten bench bignum [--quick] [--sizes CSV] [--operations CSV] [--json]"
           echo
           echo "  Default: Tungsten primitive-op velocity baseline (ops/sec). Each op is"
           echo "  auto-calibrated to ~1s after a 3s warmup. If bench_baseline.txt exists,"
@@ -107,6 +112,9 @@ case "$1" in
           echo "  --suite        run the cross-language ALGORITHM suite instead"
           echo "                 (Tungsten vs C/Rust/Go/Crystal/Ruby/Python)"
           echo "  --only LANGS   (suite) comma list, e.g. w,c,rust,go"
+          echo
+          echo "  bignum         compare boxed immutable integer operations across Tungsten,"
+          echo "                 GMP, and Python; also test result-buffer capacity policies"
           exit 0 ;;
         *)           bench_args+=("$1") ;;
       esac

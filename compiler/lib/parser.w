@@ -1303,6 +1303,17 @@ use ../../core/token
     Tungsten:AST:Call.new(target, "call", [left])
 
   # -- Operator precedence chain --
+  #
+  # Loosest to tightest:
+  #   or → and → in_test → comparison → equality →
+  #   bitwise_or → bitwise_xor → bitwise_and → addition → shift → mult → …
+  #
+  # Bitwise `& | ^` bind TIGHTER than comparison and equality, following
+  # Python, Ruby, Go and Rust — so `x & 1 == 1` means `(x & 1) == 1`.
+  # C, C++, Java and JavaScript order these the other way, which makes the
+  # same expression `x & (1 == 1)`; Ritchie called it a mistake he could not
+  # fix once code depended on it, and C compilers now warn about it. A
+  # language whose pitch is readable pseudocode should not inherit it.
 
   -> parse_or
     left = parse_and()
@@ -1326,7 +1337,7 @@ use ../../core/token
   # Lowered to a flat OR chain of equality comparisons at lowering
   # time; Phase 8 peephole promotes homogeneous chains to dispatch.
   -> parse_in_test
-    left = parse_bitwise_or()
+    left = parse_comparison()
     if at_kw?("in")
       advance()
       if !at_type?(T_LPAREN)
@@ -1367,11 +1378,11 @@ use ../../core/token
     left
 
   -> parse_bitwise_and
-    left = parse_comparison()
+    left = parse_addition()
     # Phase 4e dot-prefix: `.&` shares bitwise-and precedence with `&`.
     while at_type?(T_AMPERSAND) || at_type?(T_DOT_AMP)
       op = advance_op_sym()
-      right = parse_comparison()
+      right = parse_addition()
       left = Tungsten:AST:BinaryOp.new(left, op, right)
     left
 
@@ -1390,10 +1401,10 @@ use ../../core/token
     left
 
   -> parse_equality
-    left = parse_addition()
+    left = parse_bitwise_or()
     while parser_tok_type(@current_packed) in (T_EQ T_NEQ T_MATCH)
       op = advance_op_sym()
-      right = parse_addition()
+      right = parse_bitwise_or()
       left = Tungsten:AST:BinaryOp.new(left, op, right)
     left
 

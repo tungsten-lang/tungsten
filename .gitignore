@@ -73,6 +73,9 @@ runtime/tests/*.dSYM
 !compiler/lib/kernels/**/*.metal
 !bits/tungsten-llama/lib/kernels/**/*.metal
 !bits/tungsten-llama/lib/*.metal
+# tungsten-crypto's GPU miner. lib/gpu_search.metal is the @gpu emission that
+# lib/gpu_search.w loads by path at run time, so it must survive a clone.
+!bits/tungsten-crypto/lib/*.metal
 !benchmarks/matmul/metaflip/gpu_bundle/*.metal
 !benchmarks/matmul/metaflip/rect_gpu/*.metal
 !benchmarks/matmul/metaflip/simd_bundle/*.metal

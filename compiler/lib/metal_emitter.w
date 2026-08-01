@@ -124,6 +124,55 @@ use ast
     return wmma_scan(x.operand)
   false
 
+# True when a kernel body calls tg_sum / tg_max / tg_min — the only
+# constructs that read the threadgroup scratch arrays, and so the only
+# reason to declare them. Deliberately more thorough than wmma_scan: every
+# node kind that can hold a subexpression is walked, because a missed use
+# would emit MSL referencing an undeclared array.
+-> gpu_uses_tg_reduce?(node)
+  tg_reduce_scan(node.body)
+
+-> tg_reduce_scan(x)
+  if x == nil
+    return false
+  if type(x) == "Array"
+    i = 0
+    while i < x.size()
+      if tg_reduce_scan(x[i])
+        return true
+      i += 1
+    return false
+  if !is_ast_node?(x)
+    return false
+  k = ast_kind(x)
+  if k == :call
+    if ("" + x.name.to_s()) in ("tg_sum" "tg_max" "tg_min")
+      return true
+    if tg_reduce_scan(x.receiver)
+      return true
+    return tg_reduce_scan(x.args)
+  if k == :assign
+    if tg_reduce_scan(x.target)
+      return true
+    return tg_reduce_scan(x.value)
+  if k == :if
+    if tg_reduce_scan(x.condition) || tg_reduce_scan(x.then_body) || tg_reduce_scan(x.else_body)
+      return true
+    return tg_reduce_scan(x.elsif_clauses)
+  if k == :while
+    if tg_reduce_scan(x.condition)
+      return true
+    return tg_reduce_scan(x.body)
+  if k in (:binary_op :and :or)
+    if tg_reduce_scan(x.left)
+      return true
+    return tg_reduce_scan(x.right)
+  if k in (:not :unary_op)
+    return tg_reduce_scan(x.operand)
+  if k == :return
+    return tg_reduce_scan(x.value)
+  false
+
 # Threadgroup-wide reduction helpers — emitted into every kernel file
 # (always; unused inline functions cost nothing). Lifts the 32-lane
 # simdgroup-scope reductions to TG-wide reductions over up to 1024
@@ -914,10 +963,16 @@ use ast
     var_types: dup_hash(param_types),
     params: param_names,
     indent: 1,
-    gpu_fns: gpu_fns
+    gpu_fns: gpu_fns,
+    declared: {},
+    hoist: [],
+    tables: [],
+    renames: {},
+    unroll: {}
   }
   body = node.body
   n = body.size()
+  body_out = StringBuffer(256)
   bi = 0
   while bi < n
     stmt = body[bi]
@@ -927,15 +982,17 @@ use ast
     # device function's `return`. Earlier statements (assigns building up
     # locals) emit normally.
     if bi == n - 1 && gpu_is_value_expr?(stmt)
-      emit_indent(out, ctx)
-      out << "return "
-      out << emit_expr(ctx, stmt)
-      out << ";\n"
+      emit_indent(body_out, ctx)
+      body_out << "return "
+      body_out << emit_expr(ctx, stmt)
+      body_out << ";\n"
     else
-      emit_stmt(out, ctx, stmt)
+      emit_stmt(body_out, ctx, stmt)
     bi += 1
+  gpu_emit_hoisted(out, ctx)
+  out << body_out.to_s()
   out << "}\n"
-  out.to_s()
+  gpu_with_tables(ctx, out.to_s())
 
 # True when a body statement is a value-producing expression eligible to
 # be a device function's implicit return (vs. a control/store statement).
@@ -1025,10 +1082,19 @@ use ast
   out << ",\n  uint __simd_id \[\[simdgroup_index_in_threadgroup]\]\n"
   out << ") {\n"
   # Per-type scratch arrays for tg_sum/tg_max/tg_min helpers. Sized at
-  # 32 (max simdgroups per TG = 1024 / 32). Cheap (~256B) and unused if
-  # no tg_* call is made.
-  out << "  threadgroup float __tg_scratch_f\[32];\n"
-  out << "  threadgroup int   __tg_scratch_i\[32];\n"
+  # 32 (max simdgroups per TG = 1024 / 32).
+  #
+  # Declared ONLY when the kernel actually reduces. These were previously
+  # unconditional, on the reasoning that ~256 bytes is cheap and an unused
+  # threadgroup array costs nothing. On Apple Silicon it is not free:
+  # threadgroup memory is a per-core resource that bounds how many
+  # threadgroups can be resident, so a kernel that never reduces was still
+  # paying occupancy for scratch it never touched. Removing it from the
+  # SHA-256 miner in bits/tungsten-crypto is worth 1.55x (795 -> 1236 MH/s).
+  # Every `@gpu fn` that does no threadgroup reduction gets that back.
+  if gpu_uses_tg_reduce?(node)
+    out << "  threadgroup float __tg_scratch_f\[32];\n"
+    out << "  threadgroup int   __tg_scratch_i\[32];\n"
   # Scalar total thread count — folds the uint3 __tg_size to a single
   # integer for downstream divisions (e.g. tg_sum's __tg_size / 32).
   # The compiler optimizes this away when uint3 elements are known constants.
@@ -1041,16 +1107,24 @@ use ast
     var_types: dup_hash(param_types),
     params: param_names,
     indent: 1,
-    gpu_fns: gpu_fns
+    gpu_fns: gpu_fns,
+    declared: {},
+    hoist: [],
+    tables: [],
+    renames: {},
+    unroll: {}
   }
   body = node.body
+  body_out = StringBuffer(512)
   bi = 0
   while bi < body.size()
-    emit_stmt(out, ctx, body[bi])
+    emit_stmt(body_out, ctx, body[bi])
     bi += 1
+  gpu_emit_hoisted(out, ctx)
+  out << body_out.to_s()
 
   out << "}\n"
-  out.to_s()
+  gpu_with_tables(ctx, out.to_s())
 
 # ---- Subset checker helpers ----
 
@@ -1211,6 +1285,234 @@ use ast
     out << "  "
     i += 1
 
+# ---- Function-scoped locals ----
+#
+# Tungsten scopes a local to the whole enclosing function; C — and so MSL and
+# CUDA — scopes it to the nearest enclosing block. Emitting the declaration
+# where the first assignment happens is therefore only correct at the top
+# level of a body: a variable first written inside an `if` or `while` and
+# read after that block emits as `use of undeclared identifier`, and the
+# .metal only fails much later, inside `xcrun metal`.
+#
+# So a declaration introduced at nesting depth > 1 is split — the declaration
+# hoists to the top of the function and only the assignment stays where it
+# was written. Declarations at the top level keep their initializer form,
+# which leaves every kernel that never nests a first assignment byte-identical.
+
+-> gpu_local_declared?(ctx, vname)
+  d = ctx[:declared]
+  if d == nil
+    return false
+  d.has_key?(vname)
+
+# `decl` is the declarator without its trailing semicolon ("uint x",
+# "int w[16]"). `value` is the initializer, or nil for a bare declaration
+# such as a thread-private array.
+-> gpu_declare_local(out, ctx, vname, decl, value)
+  if ctx[:declared] != nil
+    ctx[:declared][vname] = true
+  if ctx[:hoist] != nil && ctx[:indent] > 1
+    ctx[:hoist].push("  " + decl + ";\n")
+    if value != nil
+      emit_indent(out, ctx)
+      out << vname
+      out << " = "
+      out << emit_expr(ctx, value)
+      out << ";\n"
+    return nil
+  emit_indent(out, ctx)
+  out << decl
+  if value != nil
+    out << " = "
+    out << emit_expr(ctx, value)
+  out << ";\n"
+  nil
+
+# Write the declarations collected while emitting a body. Called between a
+# function's prologue and its body text.
+-> gpu_emit_hoisted(out, ctx)
+  h = ctx[:hoist]
+  if h == nil
+    return nil
+  i = 0
+  while i < h.size()
+    out << h[i]
+    i += 1
+  nil
+
+# ---- Type-hint flags ----
+#
+# A local's `## TYPE` hint may carry space-separated flags after the type:
+#
+#   i = 3 ## u32 unroll
+#
+# The type still drives the declaration; a flag is advice to the emitter.
+# Flags are split here rather than in the parser, so no new surface syntax
+# is introduced and a hint without a space behaves exactly as it did.
+#
+# `unroll` marks a loop induction variable: every `while` whose condition
+# reads that variable is emitted under a full-unroll pragma. On a GPU that
+# is not a micro-optimization. A thread-private array indexed by the
+# induction variable (`w[i & 15]`) can only live in registers once every
+# index is a compile-time constant; while the loop rolls, the array is
+# stack traffic on every access. Unrolling is also what lets a constant
+# table (below) fold into the instruction stream. Measured on the SHA-256
+# miner in bits/tungsten-crypto: 502 -> 647 MH/s from unrolling alone, and
+# the constant table only pays at all once the loop is unrolled.
+
+-> gpu_hint_words(hint)
+  if hint == nil
+    return nil
+  if type(hint) != "String"
+    return nil
+  if hint.index(" ") == nil
+    return nil
+  parts = hint.split(" ")
+  words = []
+  i = 0
+  while i < parts.size()
+    p = parts[i].strip()
+    if p != ""
+      words.push(p)
+    i += 1
+  words
+
+# The declaration type, with any trailing flags removed.
+-> gpu_hint_type(hint)
+  words = gpu_hint_words(hint)
+  if words == nil || words.size() == 0
+    return hint
+  words[0]
+
+-> gpu_hint_flagged?(hint, flag)
+  words = gpu_hint_words(hint)
+  if words == nil
+    return false
+  i = 1
+  while i < words.size()
+    if words[i] == flag
+      return true
+    i += 1
+  false
+
+-> gpu_mark_unroll(ctx, vname, hint)
+  if !gpu_hint_flagged?(hint, "unroll")
+    return nil
+  if ctx[:unroll] == nil
+    ctx[:unroll] = {}
+  ctx[:unroll]["" + vname.to_s()] = true
+  nil
+
+# True when `expr` reads a variable marked `unroll`. Applied to a while
+# condition, this is what decides the loop carries the pragma. A bare
+# identifier can reach here as either a :var or a zero-arg self-:call
+# depending on parse position, so both spellings are checked.
+-> gpu_reads_unroll_var?(ctx, expr)
+  u = ctx[:unroll]
+  if u == nil || expr == nil
+    return false
+  if !is_ast_node?(expr)
+    return false
+  k = ast_kind(expr)
+  if k == :var
+    return u.has_key?("" + expr.name.to_s())
+  if k in (:binary_op :and :or)
+    if gpu_reads_unroll_var?(ctx, expr.left)
+      return true
+    return gpu_reads_unroll_var?(ctx, expr.right)
+  if k == :not
+    return gpu_reads_unroll_var?(ctx, expr.operand)
+  if k == :unary_op
+    return gpu_reads_unroll_var?(ctx, expr.operand)
+  if k == :call
+    if expr.receiver == nil && (expr.args == nil || expr.args.size() == 0)
+      return u.has_key?("" + expr.name.to_s())
+    return false
+  false
+
+# ---- Program-scope constant tables ----
+#
+# An array literal assigned to a local inside a `@gpu fn`:
+#
+#   k = [0x428a2f98, 0x71374491, ...] ## u32\[]
+#
+# becomes a program-scope `constant` table instead of a thread-private
+# array. MSL allows the `constant` address space only at program scope, so
+# the table is lifted out of the body and the local name is rewritten to a
+# mangled global; the kernel still reads it as `k[i]`.
+#
+# The alternative shapes both cost real throughput: a `## u32\[]` parameter
+# is a device load on every access, and a thread-private `u32[64]` filled
+# element by element is a per-thread copy. A program-scope constant is
+# neither — once the reading loop is unrolled the compiler folds the
+# entries into immediates. The SHA-256 round-constant table is exactly this
+# shape and it is worth 647 -> 829 MH/s there.
+
+-> gpu_const_table_name(ctx, vname)
+  owner = "fn"
+  if ctx[:node] != nil && ctx[:node].name != nil
+    owner = "" + ctx[:node].name.to_s()
+  "__gpu_const_" + owner + "_" + vname
+
+-> gpu_declare_const_table(ctx, vname, type_hint, value)
+  elt = msl_array_elt_type(type_hint)
+  if elt == nil
+    gpu_kernel_error(ctx[:node], "constant table `" + vname + "` needs an array type hint, e.g. `## u32\[]`")
+  elems = value.elements
+  if elems == nil || elems.size() == 0
+    gpu_kernel_error(ctx[:node], "constant table `" + vname + "` needs at least one element")
+  buf = StringBuffer(256)
+  if ctx[:dialect] == "cuda"
+    buf << "__device__ __constant__ "
+  else
+    buf << "constant "
+  buf << elt
+  buf << " "
+  buf << gpu_const_table_name(ctx, vname)
+  buf << "\["
+  buf << elems.size().to_s()
+  buf << "] = {"
+  i = 0
+  while i < elems.size()
+    if i > 0
+      buf << ", "
+    buf << emit_expr(ctx, elems[i])
+    i += 1
+  buf << "};\n"
+  if ctx[:tables] == nil
+    ctx[:tables] = []
+  ctx[:tables].push(buf.to_s())
+  if ctx[:renames] == nil
+    ctx[:renames] = {}
+  ctx[:renames][vname] = gpu_const_table_name(ctx, vname)
+  ctx[:var_types][vname] = type_hint
+  if ctx[:declared] != nil
+    ctx[:declared][vname] = true
+  nil
+
+# A local rewritten to a program-scope table reads under its mangled name.
+-> gpu_local_name(ctx, vname)
+  r = ctx[:renames]
+  if r != nil && r.has_key?(vname)
+    return r[vname]
+  vname
+
+# Program-scope text collected while emitting a body, placed ahead of the
+# function it belongs to. Returns `text` untouched when no table was
+# declared, which keeps every existing kernel byte-identical.
+-> gpu_with_tables(ctx, text)
+  t = ctx[:tables]
+  if t == nil || t.size() == 0
+    return text
+  out = StringBuffer(512)
+  i = 0
+  while i < t.size()
+    out << t[i]
+    i += 1
+  out << "\n"
+  out << text
+  out.to_s()
+
 -> emit_stmt(out, ctx, node)
   t = ast_kind(node)
   if t == :assign
@@ -1287,33 +1589,37 @@ use ast
       return nil
   if ast_kind(target) == :var
     vname = target.name
+    # A hint may carry flags after the type (`## u32 unroll`); consume them
+    # before the type is used for anything.
+    gpu_mark_unroll(ctx, vname, type_hint)
+    type_hint = gpu_hint_type(type_hint)
     value_type = infer_expr_type(ctx, value)
-    if ast_kind(value) == :typed_array
+    if ast_kind(value) == :array
+      # `k = [..] ## u32[]` — a program-scope constant table, not a local.
+      gpu_declare_const_table(ctx, vname, type_hint, value)
+    elsif ast_kind(value) == :typed_array
       # Thread-private fixed-size local array: `buf = i32[64]` → `int buf[64];`
       elt = value.element_type
       esc = msl_scalar_type(elt)
       if esc == nil
         gpu_kernel_error(ctx[:node], "unsupported local array element type `" + elt.to_s() + "`")
       ctx[:var_types][vname] = ("" + elt.to_s() + "\[]").to_sym()
+      gpu_declare_local(out, ctx, vname, esc + " " + vname + "\[" + emit_expr(ctx, ast_get(value, :size)) + "]", nil)
+    elsif gpu_local_declared?(ctx, vname)
+      # Already declared in this function. A local is function-scoped, so a
+      # repeated `## T` hint names the same variable, not a new one — and
+      # re-declaring it would either shadow the first (wrong) or collide.
       emit_indent(out, ctx)
-      out << esc
-      out << " "
       out << vname
-      out << "\["
-      out << emit_expr(ctx, ast_get(value, :size))
-      out << "];\n"
+      out << " = "
+      out << emit_expr(ctx, value)
+      out << ";\n"
     elsif type_hint != nil
       ctx[:var_types][vname] = type_hint
       scalar = msl_scalar_type(type_hint)
       if scalar == nil
         gpu_kernel_error(ctx[:node], "unsupported assign type `" + type_hint.to_s() + "`")
-      emit_indent(out, ctx)
-      out << scalar
-      out << " "
-      out << vname
-      out << " = "
-      out << emit_expr(ctx, value)
-      out << ";\n"
+      gpu_declare_local(out, ctx, vname, scalar + " " + vname, value)
     elsif ctx[:var_types].has_key?(vname)
       emit_indent(out, ctx)
       out << vname
@@ -1328,13 +1634,7 @@ use ast
       scalar = msl_scalar_type(value_type)
       if scalar == nil
         gpu_kernel_error(ctx[:node], "cannot infer MSL type for `" + vname + "`")
-      emit_indent(out, ctx)
-      out << scalar
-      out << " "
-      out << vname
-      out << " = "
-      out << emit_expr(ctx, value)
-      out << ";\n"
+      gpu_declare_local(out, ctx, vname, scalar + " " + vname, value)
   elsif ast_kind(target) == :call && target.name in ("\[]" "\[]=")
     # Array subscript assignment — fall through via call handling.
     gpu_kernel_error(ctx[:node], "use `a[i] = v` shape, not `a.\[]=`")
@@ -1401,6 +1701,14 @@ use ast
   out << "\n"
 
 -> emit_while(out, ctx, node)
+  # A loop over an induction variable tagged `## <type> unroll` is emitted
+  # fully unrolled. See gpu_mark_unroll for why that matters on a GPU.
+  if gpu_reads_unroll_var?(ctx, node.condition)
+    emit_indent(out, ctx)
+    if ctx[:dialect] == "cuda"
+      out << "#pragma unroll\n"
+    else
+      out << "#pragma clang loop unroll(full)\n"
   emit_indent(out, ctx)
   out << "while ("
   out << emit_expr(ctx, node.condition)
@@ -1477,7 +1785,7 @@ use ast
     ""
 
 -> emit_var(ctx, node)
-  node.name
+  gpu_local_name(ctx, node.name)
 
 -> binop_symbol(sym)
   # Direct symbol comparison — Tungsten's sym.to_s() can disagree with
@@ -1538,7 +1846,7 @@ use ast
   # than a :var node, so a no-receiver no-arg call whose name is a known
   # local or param is really a variable read — emit the bare name.
   if recv == nil && (args == nil || args.size() == 0) && ctx[:var_types] != nil && ctx[:var_types].has_key?("" + name.to_s())
-    return name.to_s()
+    return gpu_local_name(ctx, "" + name.to_s())
 
   if name == "\[]"
     if args == nil || args.size() != 1
@@ -2013,15 +2321,23 @@ use ast
     var_types: dup_hash(param_types),
     params: param_names,
     indent: 1,
-    dialect: "cuda"
+    dialect: "cuda",
+    declared: {},
+    hoist: [],
+    tables: [],
+    renames: {},
+    unroll: {}
   }
   body = node.body
+  body_out = StringBuffer(512)
   bi = 0
   while bi < body.size()
-    emit_stmt(out, ctx, body[bi])
+    emit_stmt(body_out, ctx, body[bi])
     bi += 1
+  gpu_emit_hoisted(out, ctx)
+  out << body_out.to_s()
   out << "}\n"
-  out.to_s()
+  gpu_with_tables(ctx, out.to_s())
 
 # Emit a `@gpu fn` with `## TYPE: ret` as a CUDA `__device__` helper.
 -> emit_device_fn_cuda(node, gpu_fns)
@@ -2066,15 +2382,23 @@ use ast
     params: param_names,
     indent: 1,
     dialect: "cuda",
-    gpu_fns: gpu_fns
+    gpu_fns: gpu_fns,
+    declared: {},
+    hoist: [],
+    tables: [],
+    renames: {},
+    unroll: {}
   }
   body = node.body
+  body_out = StringBuffer(256)
   bi = 0
   while bi < body.size()
-    emit_stmt(out, ctx, body[bi])
+    emit_stmt(body_out, ctx, body[bi])
     bi += 1
+  gpu_emit_hoisted(out, ctx)
+  out << body_out.to_s()
   out << "}\n"
-  out.to_s()
+  gpu_with_tables(ctx, out.to_s())
 
 -> emit_gpu_kernels_cuda(kernels)
   if kernels == nil || kernels.size() == 0

@@ -71,7 +71,8 @@ z = ffcpqt_expect("simulation lanes retained", steps[0] > 0 && steps[1] > 0 && s
 # Coordinator cadence: small fleets preserve exact historical steps; a J188
 # launch whose first median epoch is 40ms jumps directly to the measured
 # 3-second cadence; an extreme sample is bounded by the 128x cap.
-z = ffcpqt_expect("small fleet cadence unchanged", ffcp_epoch_target_ms(32) == 0)
+z = ffcpqt_expect("tiny fleet cadence unchanged", ffcp_epoch_target_ms(7) == 0)
+z = ffcpqt_expect("ordinary fleet amortized cadence", ffcp_epoch_target_ms(8) == 250 && ffcp_epoch_target_ms(12) == 250 && ffcp_epoch_target_ms(32) == 250)
 z = ffcpqt_expect("wide fleet threshold cadence", ffcp_epoch_target_ms(33) == 3000 && ffcp_epoch_target_ms(64) == 3000 && ffcp_epoch_target_ms(128) == 3000)
 z = ffcpqt_expect("wide fleet cadence", ffcp_epoch_target_ms(188) == 3000)
 wide_steps = ffcp_adapt_epoch_steps(500000, 40, 3000, 500000) ## i64

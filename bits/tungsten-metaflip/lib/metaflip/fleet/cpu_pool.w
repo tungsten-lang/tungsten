@@ -65,16 +65,17 @@
     next_steps = maximum
   next_steps
 
-# Wide fleets amortize the serial exact-intake/archive coordinator by making a
-# worker epoch long enough to contain useful parallel work.  Small fleets keep
-# the historical `--steps` cadence.  Full-fleet measurements put one wide
-# coordinator pass near two seconds, so large hosts use multi-second worker
-# phases and cap batching at 128 nominal chunks.  The larger ceiling matters
-# on very wide hosts: a 500k-step launch sample can be only ~40ms, while the
-# measured throughput knee is around 40-50M steps per epoch.
+# Amortize the serial exact-intake/archive coordinator by making a worker epoch
+# long enough to contain useful parallel work. On the normal 12-lane profile,
+# 500k steps take only about 10ms and leave workers parked at the round barrier;
+# a 250ms target keeps TUI/intake latency interactive while moving the fleet
+# beyond the measured throughput knee. Very wide hosts retain multi-second
+# phases and the existing 128-chunk cap. Tiny fleets keep historical cadence.
 -> ffcp_epoch_target_ms(workers) (i64) i64
-  if workers <= 32
+  if workers < 8
     return 0
+  if workers <= 32
+    return 250
   3000
 
 -> ffcp_adapt_epoch_steps(current_steps, elapsed_ms, target_ms, nominal_steps) (i64 i64 i64 i64) i64

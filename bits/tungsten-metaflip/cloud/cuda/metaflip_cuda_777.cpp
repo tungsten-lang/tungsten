@@ -3058,6 +3058,11 @@ int run_campaign(const Config& config) {
               << " epoch_door_score=" << door_admission.score
               << " epoch_door_source_replace="
               << (door_admission.source_replacement ? 1 : 0)
+              // Preserve the exact credit signal used by the adaptive
+              // scheduler so offline selectors need not infer it from the
+              // coarser result and door-action fields.
+              << " epoch_objective_useful="
+              << (epoch_objective_useful ? 1 : 0)
               << " harvest_epoch_completed="
               << policy.harvest_epoch.completed_groups
               << " harvest_epoch_improved=" << policy.harvest_epoch.improved_groups

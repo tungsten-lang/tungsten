@@ -1040,7 +1040,7 @@
 # chain offsets in locals avoids decoding the flat worker layout four times
 # per legal proposal while retaining ordinary typed-array accesses (which are
 # faster than raw loads for these short square chains on Apple silicon).
--> ffw_pressure_pair_balanced(st, u0, v0, w0, u1, v1, w1) (i64[] i64 i64 i64 i64 i64 i64) i64
+-> ffw_pressure_pair_balanced_until(st, u0, v0, w0, u1, v1, w1, stop_at) (i64[] i64 i64 i64 i64 i64 i64 i64) i64
   uo = st[44] ## i64
   vo = st[45] ## i64
   wo = st[46] ## i64
@@ -1070,6 +1070,7 @@
           samew = 1
         if samev + samew == 1
           count += 1
+          return count if stop_at > 0 && count >= stop_at
       c = st[unext + slot]
     c = st[vhead + ffw_hash(st, v)] ## i64
     while c != 0
@@ -1078,9 +1079,13 @@
         if st[uo + slot] != u
           if st[wo + slot] == w
             count += 1
+            return count if stop_at > 0 && count >= stop_at
       c = st[vnext + slot]
     query += 1
   count
+
+-> ffw_pressure_pair_balanced(st, u0, v0, w0, u1, v1, w1) (i64[] i64 i64 i64 i64 i64 i64) i64
+  ffw_pressure_pair_balanced_until(st, u0, v0, w0, u1, v1, w1, 0)
 
 -> ffw_pressure_plan_raw(data) (i64) i64
   shape = raw_load_u64(data, 3 * 8) ## i64
@@ -1117,7 +1122,7 @@
       secondary = 1
   primary * 3 + secondary
 
--> ffw_pressure_batch_raw(data, plan, u0, v0, w0, u1, v1, w1, query_count) (i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
+-> ffw_pressure_batch_raw_until(data, plan, u0, v0, w0, u1, v1, w1, query_count, stop_at) (i64 i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
   # Pressure is a read-only hash-chain traversal over the fixed flat worker
   # state.  Decode the typed-array storage once in the caller and use native
   # raw loads here; ordinary `st[index]` has to re-read the WArray slots/start
@@ -1230,6 +1235,7 @@
           sameb = 1
         if samea + sameb == 1
           total += 1
+          return total if stop_at > 0 && total >= stop_at
       c = raw_load_u64(data, (pnext + slot) * 8)
     y = skey ^ (skey >> 21) ^ (skey >> 42)
     bucket = ((y * 2654435761) >> 13) & hash_mask
@@ -1240,9 +1246,13 @@
         if raw_load_u64(data, (po + slot) * 8) != pkey
           if raw_load_u64(data, (to + slot) * 8) == tkey
             total += 1
+            return total if stop_at > 0 && total >= stop_at
       c = raw_load_u64(data, (snext + slot) * 8)
     query += 1
   total
+
+-> ffw_pressure_batch_raw(data, plan, u0, v0, w0, u1, v1, w1, query_count) (i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
+  ffw_pressure_batch_raw_until(data, plan, u0, v0, w0, u1, v1, w1, query_count, 0)
 
 -> ffw_pressure_raw(data, plan, u, v, w) (i64 i64 i64 i64 i64) i64
   ffw_pressure_batch_raw(data, plan, u, v, w, 0, 0, 0, 1)
@@ -1328,12 +1338,6 @@
       rank = ffw_remove_known_slot(st, second, rank)
       rank = ffw_toggle(st, au, av, aw, rank)
       rank = ffw_toggle(st, bu, bv, bw, rank)
-      new_pressure = 0 ## i64
-      if mode == 0
-        if st[3] > 49
-          new_pressure = ffw_pressure_batch_raw(pressure_data, pressure_plan, au, av, aw, bu, bv, bw, 2)
-        if st[3] <= 49
-          new_pressure = ffw_pressure_pair_balanced(st, au, av, aw, bu, bv, bw)
       new_bits = ffw_popcount(au) + ffw_popcount(av) + ffw_popcount(aw) ## i64
       new_bits += ffw_popcount(bu) + ffw_popcount(bv) + ffw_popcount(bw)
       accept = 0 ## i64
@@ -1341,16 +1345,28 @@
         accept = 1
       if rank == rank_before
         if mode == 0
-          ceiling = pressure_ceiling ## i64
-          if ceiling < 0
-            ceiling = 0
-          period = pressure_period ## i64
-          if period < 1
-            period = 1
-          pressure_slack = ceiling - ((st[13] / period) % (ceiling + 1)) ## i64
-          if new_pressure + pressure_slack >= old_pressure
-            if new_bits <= old_bits + st[17]
+          # Density is substantially cheaper than a second pair of pressure
+          # scans. A proposal that already exceeds the density budget cannot
+          # be accepted, so reject it before traversing the mutated chains.
+          if new_bits <= old_bits + st[17]
+            ceiling = pressure_ceiling ## i64
+            if ceiling < 0
+              ceiling = 0
+            period = pressure_period ## i64
+            if period < 1
+              period = 1
+            pressure_slack = ceiling - ((st[13] / period) % (ceiling + 1)) ## i64
+            needed_pressure = old_pressure - pressure_slack ## i64
+            if needed_pressure <= 0
               accept = 1
+            if needed_pressure > 0
+              new_pressure = 0 ## i64
+              if st[3] > 49
+                new_pressure = ffw_pressure_batch_raw_until(pressure_data, pressure_plan, au, av, aw, bu, bv, bw, 2, needed_pressure)
+              if st[3] <= 49
+                new_pressure = ffw_pressure_pair_balanced_until(st, au, av, aw, bu, bv, bw, needed_pressure)
+              if new_pressure >= needed_pressure
+                accept = 1
         if mode != 0
           if new_bits <= old_bits + st[17] + st[10]
             accept = 1
@@ -1466,12 +1482,6 @@
       rank = ffw_remove_known_slot(st, second, rank)
       rank = ffw_toggle(st, au, av, aw, rank)
       rank = ffw_toggle(st, bu, bv, bw, rank)
-      new_pressure = 0 ## i64
-      if mode == 0
-        if st[3] > 49
-          new_pressure = ffw_pressure_batch_raw(pressure_data, pressure_plan, au, av, aw, bu, bv, bw, 2)
-        if st[3] <= 49
-          new_pressure = ffw_pressure_pair_balanced(st, au, av, aw, bu, bv, bw)
       new_bits = ffw_popcount(au) + ffw_popcount(av) + ffw_popcount(aw) ## i64
       new_bits += ffw_popcount(bu) + ffw_popcount(bv) + ffw_popcount(bw)
       accept = 0 ## i64
@@ -1479,16 +1489,25 @@
         accept = 1
       if rank == rank_before
         if mode == 0
-          ceiling = pressure_ceiling ## i64
-          if ceiling < 0
-            ceiling = 0
-          period = pressure_period ## i64
-          if period < 1
-            period = 1
-          pressure_slack = ceiling - ((st[13] / period) % (ceiling + 1)) ## i64
-          if new_pressure + pressure_slack >= old_pressure
-            if new_bits <= old_bits + st[17]
+          if new_bits <= old_bits + st[17]
+            ceiling = pressure_ceiling ## i64
+            if ceiling < 0
+              ceiling = 0
+            period = pressure_period ## i64
+            if period < 1
+              period = 1
+            pressure_slack = ceiling - ((st[13] / period) % (ceiling + 1)) ## i64
+            needed_pressure = old_pressure - pressure_slack ## i64
+            if needed_pressure <= 0
               accept = 1
+            if needed_pressure > 0
+              new_pressure = 0 ## i64
+              if st[3] > 49
+                new_pressure = ffw_pressure_batch_raw_until(pressure_data, pressure_plan, au, av, aw, bu, bv, bw, 2, needed_pressure)
+              if st[3] <= 49
+                new_pressure = ffw_pressure_pair_balanced_until(st, au, av, aw, bu, bv, bw, needed_pressure)
+              if new_pressure >= needed_pressure
+                accept = 1
         if mode != 0
           if new_bits <= old_bits + st[17] + st[10]
             accept = 1

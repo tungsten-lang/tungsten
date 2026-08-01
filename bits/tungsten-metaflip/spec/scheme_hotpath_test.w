@@ -73,23 +73,34 @@ failures = 0 ## i64
   w1 = w0 ^ st[st[46] + slot1] ## i64
   expected0 = hot_pressure_reference(st,u0,v0,w0) ## i64
   expected1 = hot_pressure_reference(st,u1,v1,w1) ## i64
+  expected_pair = expected0 + expected1 ## i64
+  cutoff_one = expected_pair ## i64
+  cutoff_one = 1 if cutoff_one > 0
   data = ccall_nobox("w_array_data_ptr",st) ## i64
   ok = 1 ## i64
   if ffw_pressure(st,u0,v0,w0) != expected0
     ok = 0
-  if ffw_pressure_pair_balanced(st,u0,v0,w0,u1,v1,w1) != expected0 + expected1
+  if ffw_pressure_pair_balanced(st,u0,v0,w0,u1,v1,w1) != expected_pair
     ok = 0
-  if ffw_pressure_raw(data,1,u0,v0,w0) != expected0 || ffw_pressure_batch_raw(data,1,u0,v0,w0,u1,v1,w1,2) != expected0 + expected1
+  if ffw_pressure_pair_balanced_until(st,u0,v0,w0,u1,v1,w1,1) != cutoff_one
     ok = 0
-  if ffw_pressure_raw(data,2,u0,v0,w0) != expected0 || ffw_pressure_batch_raw(data,2,u0,v0,w0,u1,v1,w1,2) != expected0 + expected1
+  if ffw_pressure_pair_balanced_until(st,u0,v0,w0,u1,v1,w1,expected_pair + 1) != expected_pair
     ok = 0
-  if ffw_pressure_raw(data,3,u0,v0,w0) != expected0 || ffw_pressure_batch_raw(data,3,u0,v0,w0,u1,v1,w1,2) != expected0 + expected1
+  if ffw_pressure_raw(data,1,u0,v0,w0) != expected0 || ffw_pressure_batch_raw(data,1,u0,v0,w0,u1,v1,w1,2) != expected_pair
     ok = 0
-  if ffw_pressure_raw(data,5,u0,v0,w0) != expected0 || ffw_pressure_batch_raw(data,5,u0,v0,w0,u1,v1,w1,2) != expected0 + expected1
+  if ffw_pressure_batch_raw_until(data,1,u0,v0,w0,u1,v1,w1,2,1) != cutoff_one
     ok = 0
-  if ffw_pressure_raw(data,6,u0,v0,w0) != expected0 || ffw_pressure_batch_raw(data,6,u0,v0,w0,u1,v1,w1,2) != expected0 + expected1
+  if ffw_pressure_raw(data,2,u0,v0,w0) != expected0 || ffw_pressure_batch_raw(data,2,u0,v0,w0,u1,v1,w1,2) != expected_pair
     ok = 0
-  if ffw_pressure_raw(data,7,u0,v0,w0) != expected0 || ffw_pressure_batch_raw(data,7,u0,v0,w0,u1,v1,w1,2) != expected0 + expected1
+  if ffw_pressure_raw(data,3,u0,v0,w0) != expected0 || ffw_pressure_batch_raw(data,3,u0,v0,w0,u1,v1,w1,2) != expected_pair
+    ok = 0
+  if ffw_pressure_raw(data,5,u0,v0,w0) != expected0 || ffw_pressure_batch_raw(data,5,u0,v0,w0,u1,v1,w1,2) != expected_pair
+    ok = 0
+  if ffw_pressure_raw(data,6,u0,v0,w0) != expected0 || ffw_pressure_batch_raw(data,6,u0,v0,w0,u1,v1,w1,2) != expected_pair
+    ok = 0
+  if ffw_pressure_raw(data,7,u0,v0,w0) != expected0 || ffw_pressure_batch_raw(data,7,u0,v0,w0,u1,v1,w1,2) != expected_pair
+    ok = 0
+  if ffw_pressure_batch_raw_until(data,7,u0,v0,w0,u1,v1,w1,2,expected_pair + 1) != expected_pair
     ok = 0
   ok != 0
 

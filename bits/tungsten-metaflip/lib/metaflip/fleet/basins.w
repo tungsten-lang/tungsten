@@ -311,7 +311,11 @@ use ../strategies/escape
 
 # Least-used first, with a stable rotating tie break. Missing usage entries are
 # treated as zero, matching the coordinator's historical selector.
--> ffbi_least_used_seed_index(uses, size, stable_key) (i64[] i64 i64) i64
+# Coordinator usage counters are ordinary Arrays: the number of seed banks is
+# dynamic and these counters are grown with push.  Keep the scalar return type,
+# but do not require a raw i64[] here; doing so only surfaced once fleets grew
+# beyond the canonical twelve islands and entered this cheap scheduler.
+-> ffbi_least_used_seed_index(uses, size, stable_key) i64
   if size < 1
     return 0 - 1
   start = ffbi_rotating_seed_index(size, stable_key) ## i64

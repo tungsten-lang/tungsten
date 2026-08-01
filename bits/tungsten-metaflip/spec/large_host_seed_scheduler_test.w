@@ -22,6 +22,11 @@ uses[4] = 3
 failures += large_seed_expect("rotating least-used tie", ffbi_least_used_seed_index(uses, 5, 2) == 2)
 failures += large_seed_expect("next least-used tie", ffbi_least_used_seed_index(uses, 5, 1) == 1)
 
+# Production grows these counters as a polymorphic Array.  The >12-island path
+# must accept that representation as well as a fixed-width test buffer.
+boxed_uses = [2, 0, 0, 1, 3]
+failures += large_seed_expect("boxed coordinator counters", ffbi_least_used_seed_index(boxed_uses, 5, 2) == 2)
+
 # Simulate a wide fleet's cheap source scheduler. Across many extra islands,
 # every bank member must receive the same number of attempts up to one.
 balanced = i64[7]

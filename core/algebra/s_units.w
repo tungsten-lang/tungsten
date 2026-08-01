@@ -8,6 +8,29 @@
 # theorem import; every field, ideal, sign, residue, and row-reduction
 # calculation below is replayed exactly.
 
++ RationalUnivariatePolynomialTransport
+  # Number-field proof artifacts and an etale order may use distinct
+  # univariate polynomial-ring objects (and different generator names) for
+  # the same rational polynomial.  Transport coefficients explicitly rather
+  # than requiring object identity of those presentation rings.
+  -> .into(polynomial, target_ring)
+    return nil if polynomial.class_name != "Polynomial"
+    return nil if target_ring.class_name != "PolynomialRing"
+    return nil if polynomial.ring.arity != 1
+    return nil if target_ring.arity != 1
+    return nil if polynomial.ring.field.class_name != (
+      "RationalField")
+    return nil if target_ring.field.class_name != (
+      "RationalField")
+    out = target_ring.zero
+    variable = target_ring.generator(0)
+    power = target_ring.one
+    polynomial.coefficients.each -> (coefficient)
+      out += power * target_ring.field.coerce(coefficient)
+      power *= variable
+    out
+
+
 + NumberFieldQuadraticResidueCharacter
   -> new(@prime_ideal)
     if !verified?
@@ -516,7 +539,8 @@
          @auxiliary_prime_limit = 1_000,
          @factor_search_limit = 250_000,
          @generator_search_limit = 250_000,
-         archimedean_data = nil)
+         archimedean_data = nil,
+         character_unit_values = nil)
     if @field.class_name != "NumberField"
       raise "S-unit basis search needs a NumberField"
     if s_primes.class_name != "Array" || generators.class_name != "Array"
@@ -532,6 +556,15 @@
     @archimedean_data = archimedean_data
     if @archimedean_data == nil
       @archimedean_data = @field.archimedean_data
+    @character_unit_values = []
+    if character_unit_values != nil
+      if character_unit_values.class_name != "Array"
+        raise "S-unit character-unit values must be an Array"
+      character_unit_values.each -> (value)
+        element = @field.coerce(value)
+        if element.zero?
+          raise "zero cannot be required to be an auxiliary local unit"
+        @character_unit_values.push(element)
     expected = @field.signature[0] + @field.signature[1]
     expected += @s_primes.size
     if @generators.size != expected
@@ -610,6 +643,11 @@
   -> try_character(prime_ideal)
     character = NumberFieldQuadraticResidueCharacter.new(
       prime_ideal)
+    @character_unit_values.each -> (value)
+      begin
+        character.bit(value)
+      rescue error
+        return false
     row = nil
     begin
       row = character_row(character)
@@ -1045,11 +1083,16 @@
         return false if !ordinary && !transferred
         return false if !basis.certificate.verified?
         field = basis.field
-        polynomial = field.defining_polynomial
-        return false if polynomial.ring != component_polynomial.ring
+        polynomial = RationalUnivariatePolynomialTransport.into(
+          field.defining_polynomial,
+          component_polynomial.ring)
+        return false if polynomial == nil
         j = 0
         while j < i
-          previous = bases[j].field.defining_polynomial
+          previous = RationalUnivariatePolynomialTransport.into(
+            bases[j].field.defining_polynomial,
+            component_polynomial.ring)
+          return false if previous == nil
           return false if polynomial.gcd(previous).degree != 0
           j += 1
         product *= polynomial.monic
@@ -1259,11 +1302,16 @@
         return false if !ordinary && !transferred
         return false if !basis.certificate.verified?
         field = basis.field
-        polynomial = field.defining_polynomial
-        return false if polynomial.ring != component_polynomial.ring
+        polynomial = RationalUnivariatePolynomialTransport.into(
+          field.defining_polynomial,
+          component_polynomial.ring)
+        return false if polynomial == nil
         j = 0
         while j < i
-          previous = bases[j].field.defining_polynomial
+          previous = RationalUnivariatePolynomialTransport.into(
+            bases[j].field.defining_polynomial,
+            component_polynomial.ring)
+          return false if previous == nil
           return false if polynomial.gcd(previous).degree != 0
           j += 1
         product *= polynomial.monic

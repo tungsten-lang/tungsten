@@ -23,6 +23,7 @@ use core/algebra/polynomial_factor_finite
 use core/algebra/simple_extension
 use core/algebra/etale_algebra
 use core/algebra/integer_lattice
+use core/algebra/prime_subspace
 use core/algebra/orders
 use core/algebra/maximal_orders
 use core/algebra/lattice_reduction
@@ -43,7 +44,10 @@ use core/algebra/s_class_group
 use core/algebra/p_adic_number_field
 use core/algebra/p_adic_dyadic
 use core/algebra/projective
+use core/algebra/projective_heights
 use core/algebra/curves
+use core/algebra/c_ab
+use core/algebra/c_ab_divisors
 use core/algebra/p_adic_geometry
 use core/algebra/p_adic_charts
 use core/algebra/local_geometry
@@ -60,6 +64,8 @@ use core/algebra/old_new
 use core/algebra/newforms
 use core/algebra/divisors
 use core/algebra/quartics
+use core/algebra/cayley_octads
+use core/algebra/dixon
 use core/algebra/descent
 use core/algebra/descent_functions
 use core/algebra/descent_norm
@@ -70,8 +76,11 @@ use core/algebra/theta_fibers
 use core/algebra/p_adic_descent
 use core/algebra/permutation_groups
 use core/algebra/theta_galois
+use core/algebra/theta_determinantal
+use core/algebra/theta_octads
 use core/algebra/theta_subdegrees
 use core/algebra/local_theta
+use core/algebra/descent_comparison
 use core/algebra/point_search
 use core/algebra/quartic_invariants
 use core/algebra/automorphisms
@@ -129,6 +138,10 @@ use core/algebra/galois
 
   -> .rational_projective_plane(x = :X, y = :Y, z = :Z)
     ProjectiveSpace<ℚ, 2>.new(x, y, z)
+
+  -> .rational_projective_three_space(
+       u0 = :U0, u1 = :U1, u2 = :U2, u3 = :U3)
+    ProjectiveSpace<ℚ, 3>.new(u0, u1, u2, u3)
 
   -> .integral_weierstrass(a1, a2, a3, a4, a6)
     IntegralWeierstrassModel.new(a1, a2, a3, a4, a6)

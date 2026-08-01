@@ -52,7 +52,11 @@ core/algebra/s_class_group.w       # Minkowski S-class 2-torsion certificates
 core/algebra/p_adic_number_field.w # odd local number-field square classes
 core/algebra/p_adic_dyadic.w       # complete dyadic higher-unit filtration
 core/algebra/projective.w          # projective spaces and normalized points
+core/algebra/projective_heights.w  # certified homogeneous-map height bounds
 core/algebra/curves.w              # plane, elliptic, and hyperelliptic models
+core/algebra/prime_subspace.w      # canonical F_p subspace arithmetic
+core/algebra/c_ab.w                # one-point C_ab function spaces
+core/algebra/c_ab_divisors.w       # divisor spaces and KM AddFlip
 core/algebra/p_adic_geometry.w     # good-reduction residue-disk covers
 core/algebra/p_adic_descent.w      # certified good-reduction BPS local images
 core/algebra/regular_models.w      # cuspidal bad fibers and local bounds
@@ -67,6 +71,8 @@ core/algebra/old_new.w             # degeneracy maps and old/new Hecke quotient
 core/algebra/newforms.w            # simultaneous weight-two Hecke eigenpackets
 core/algebra/divisors.w            # rational/closed places, formal divisors
 core/algebra/quartics.w            # certified line intersections and bitangents
+core/algebra/cayley_octads.w       # determinantal, octad, and trace-zero etale nets
+core/algebra/dixon.w               # constructive inverse and finite Frobenius descent
 core/algebra/descent.w             # BPS preparation, bitangent proofs, F2 kernel
 core/algebra/descent_functions.w   # contact divisors and BPS line ratios
 core/algebra/descent_norm.w        # true S-unit ambient and global norm kernel
@@ -76,6 +82,8 @@ core/algebra/theta_actions.w       # exact Sp6(F2) and Frobenius cycle constrain
 core/algebra/theta_fibers.w        # finite-splitting-field theta labelings
 core/algebra/permutation_groups.w  # bounded exact finite permutation groups
 core/algebra/theta_galois.w        # trusted-table subgroup-class replay
+core/algebra/theta_determinantal.w # Galois-fixed even determinantal classes
+core/algebra/theta_octads.w        # Aronhold rows and induced octad actions
 core/algebra/theta_subdegrees.w    # exact relative factors and global subgroup
 core/algebra/point_search.w        # exact bounded search for one quartic family
 core/algebra/quartic_invariants.w  # ternary resultant, discriminant, I27
@@ -388,8 +396,8 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Integral orders | Degree-generic monogenic and arbitrary-lattice ℤ-orders; exact membership, discriminant, units, trace, and norm, including bound-certified modular reconstruction for larger integer norm matrices; exact Frobenius-Gram LLL with replay certificates plus explicitly bounded floating producer reduction; Dedekind local index certificates; Pohst--Zassenhaus Round 2 p-maximal overorders and global maximal-order certificates; certified p-radicals, prime ideals, residue maps, ramification indices, and residue degrees; canonical full-rank HNF integral ideals with sum, product, powers, norm, containment, prime valuations, certified factorization, and bounded exact principal-generator search; invertible fractional ideals as finite signed prime valuations, including principal fractional ideals and exact rational norms; product-order finite S-place data; unconditional certificates for `Cl(O_K,S)[2] = 0` from Minkowski factor bases and odd principal-relation quotients; checkpointable relation witnesses and certified transfer through an exact isomorphic field model | Full class-group structures and algorithms that discover unit-group bases are not implemented. Supplied number-field S-unit square-class bases can be certified. Fractional ideals currently use their certified prime-factor representation rather than an explicit fractional lattice. Discriminant factorization, Round 2 steps, relation search, finite-field factorization, residue-generator search, and ideal factorization are resource-bounded and raise `unknown` on exhaustion |
 | Polynomials | Sparse sorted terms; merge-multiply; dense univariate quotient arithmetic; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ and arbitrary finite fields as **unit × monic irreducibles**, with replay certificates; exact Sturm counts, Cauchy bounds, and certified isolation of every distinct real root | Kronecker and deterministic equal-degree factor search, Gröbner elimination, and root-interval splitting have explicit resource limits; complex-root isolation, complex algebraic-number arithmetic, and multivariate factorization are not implemented |
 | Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders; representation-carrying Buchberger production with exact reduction, ideal-membership, source-containment, and S-pair witnesses | The Buchberger criterion is named as a trusted theorem import around exact replayed identities. Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
-| Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize | `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
-| Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension, and finite exact local normalization jets | Completed local normalization rings and global normalization morphisms are not implemented |
+| Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize; over ℚ, certified integral homogeneous maps, Nullstellensatz height-defect bounds, exact forward orbits, and canonical dynamical-height enclosures | Automatic production of Nullstellensatz witnesses and non-rational dynamical heights are not implemented; `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
+| Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension, finite exact local normalization jets, certified one-point `C_ab` normal forms with exact `L(n infinity)` bases, prime-field function subspaces, evaluation kernels, multiplication/preimage, rational and line-presented closed-place divisors, Khuri--Makdisi AddFlip/sum/difference, deterministic affine moving zeros, zero/equality tests, scalar multiplication, exact element orders, and finite-group nondivisibility certificates | Completed local normalization rings, global normalization morphisms, extension-field subspaces beyond exact closed-place evaluation, multiplicity/jet divisors, rational Kummer coordinates and duplication maps for general Jacobians, Jacobian local-height corrections, and a general plane-curve Jacobian API are not implemented |
 | Local plane geometry | Exact local multiplicity and tangent cones; rational, algebraic, and vertical tangent-direction packets; lower Newton polygons and dense exact Newton--Hensel lifting; recursive repeated rational tangents; rational and algebraic Puiseux sheet packets; primitive parameterization jets; replayed source substitution and complete Newton-factor covers; theorem-labelled root-of-unity orbit branch counts; exact bivariate derivative resultants, polar intersections, Milnor numbers, general reduced delta invariants, and local intersection multiplicities | Repeated higher-degree algebraic factors, component extraction, completed local rings, semigroups/conductors, and analytic branch cuts remain missing. The Newton--Puiseux orbit, Milnor/delta, polar, and branch-valuation formulas are explicit trusted theorem imports; precision and unsupported cases raise |
 | Elliptic curves | Composition around a plane cubic model; short Weierstrass group law over ℚ and `𝔽_p` (char ≠ 2, 3); exact integral long-Weierstrass \(a_i,b_i,c_4,c_6,\Delta,j\) invariants and projective closure; replay-certified admissible transformations; bounded exhaustive local and global minimal models; the complete Tate state machine over ℚ, including wild conductor exponents at 2 and 3, Kodaira symbols, Tamagawa numbers, split multiplicative status, and certified conductors; checked primitive Frey models; `EllipticJacobian` view | Arbitrary plane cubic → Weierstrass needs a rational flex; Tate local data over number fields, isogenies, and mod-\(p\) representations are not implemented |
 | Modular forms | Exact `Gamma0(N)` index, cusp count, order-2/order-3 elliptic points, and \(X_0(N)\) genus; even-weight `CuspForms` and `ModularForms` dimensions; Sturm bounds; rational and number-field truncated q-series; certified level-one \(E_4,E_6,\Delta\) expansions and \(E_4^3-E_6^2=1728\Delta\); exhaustive weight-two \(P^1(\mathbb Z/N\mathbb Z)\) Manin symbols, sparse \(S/R\) relations, cusp boundaries, relative/cuspidal dimensions, and bounded exact rational cuspidal bases; exact \(T_n/U_{p^r}\) matrices from Cremona--Heilbronn prime sums plus Hecke recurrences, characteristic polynomials, degeneracy maps, old subspaces, and canonical new Hecke quotients; deterministic simultaneous newform-packet splitting by a primitive Hecke element, rational or exact number-field coefficient fields, and normalized packet q-expansions; theorem-labelled replay certificates; in particular the level-55 new quotient splits into coefficient-field degrees 1 and 2 | Dimension, Sturm, classical modularity, Manin-presentation, Hecke semisimplicity and multiplicity one, Heilbronn-action, Hecke-recurrence, Atkin--Lehner--Li, and eigenform formulas are named trusted theorem imports, not kernel proofs. Higher-weight symbols, characters, nebentypus, embeddings between independently presented coefficient fields, and analytic newform invariants are not implemented. Dense rational quotient coordinates are resource-bounded |
@@ -401,7 +409,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Divisors | Exact formal arithmetic on rational and line-presented higher-degree closed places; certified principality for zero and certified nonprincipality of exactly `2(Q-P)` on a smooth nonhyperelliptic curve of genus at least two (char ≠ 2) | General function-field divisors, divisor-class arithmetic outside the existing Jacobian models, and general principality tests are not implemented |
 | Rational points | Complete exact bounded search for primitive points on `aX³Z + bXY²Z + g(Y,Z)`, with nonzero same-sign `a,b` and nonzero `Y⁴` coefficient | This is not a general plane-curve point finder and does not prove that no points exist above the requested height |
 | Geometric automorphisms | Exact triviality certificate over `Qbar` for smooth rational plane quartics with the unique normalized hyperflex `[1:0:0]`, tangent `Z=0`, and identity stabilizer | It is not an arbitrary plane-quartic automorphism-group algorithm and does not enumerate nontrivial groups |
-| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; statement-bound coordinate certificates express new S-units in those bases; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions; all shell-width degree-6/9/12 factors have replayed full-rank S-class proofs, and their supplied S-unit bases give a certified true-descent ambient space of dimension `9 + 12 + 14 = 35`; exact component norms give a certified rank-4 map to `Q(S,2)` and a 31-dimensional norm-one kernel; the rational divisor `[0:9:1]-[-3:-3:1]` has a certified nonzero 35-bit BPS image in that kernel; complete odd and dyadic localization matrices map the ambient basis to every number-field completion above `p`; the canonical genus-three theta model exhausts 28 odd characteristics, 315 syzygetic quadruples, and module dimensions `0,1,7,21,27,28`; exact `Sp6(F2)` matrices induce replay-certified incidence permutations, subgroup enumeration, reverse theta lifts, and fixed spaces; exact relative factorization identifies the global theta subgroup up to conjugacy as subgroup-table class 693 of order 36; the shell-width reduction at 5 has a complete arithmetic labeling over `F_(5^6)` and a complete one-dimensional local image; at bad prime 13, a certified regular one-cusp model and twelve clean disks give the complete two-dimensional image; at bad prime 3, exact recursive strict-transform cells resolve all lifting residue branches, two rational Hensel disks add an independent class, and all nine decomposition subgroups compatible with the certified local factor degrees have fixed dimension 2, proving that the combined two-dimensional BPS span is complete | The completeness of GAP's 1,369-class subgroup table is a named trusted external classification, not replayed internally. A common characteristic-zero root-to-theta labeling, the complete dyadic BPS image, the comparison kernel, and the final Selmer bound remain missing. `Jacobian#rank` and `rank_upper_bound` still raise |
+| Descent and rank | Replay-certified F2 systems and intersections of statement-bound, caller-supplied constraints; a certified BPS degree-27 true setup for the shell-width quartic, with exact bitangent contact quadratics, functions `l/l0`, point evaluation in the étale algebra, maximal product order, all 20 finite primes above `S = {2,3,13}` with exact `e/f` data, and exact archimedean places; supplied number-field S-unit square-class bases are checked by ideal support plus a full-rank valuation/sign/residue matrix; statement-bound coordinate certificates express new S-units in those bases; S-class 2-torsion proofs compose across explicitly verified reducible étale decompositions; all shell-width degree-6/9/12 factors have replayed full-rank S-class proofs, and their supplied S-unit bases give a certified true-descent ambient space of dimension `9 + 12 + 14 = 35`; exact component norms give a certified rank-4 map to `Q(S,2)` and a 31-dimensional norm-one kernel; the rational divisor `[0:9:1]-[-3:-3:1]` has a certified nonzero 35-bit BPS image in that kernel; complete odd and dyadic localization matrices map the ambient basis to every number-field completion above `p`; the canonical genus-three theta model exhausts 28 odd characteristics, 315 syzygetic quadruples, and module dimensions `0,1,7,21,27,28`; exact `Sp6(F2)` matrices induce replay-certified incidence permutations, subgroup enumeration, reverse theta lifts, and fixed spaces; exact relative factorization identifies the global theta subgroup up to conjugacy as subgroup-table class 693 of order 36; the shell-width reduction at 5 has a complete arithmetic labeling over `F_(5^6)` and a complete one-dimensional local image; at bad prime 13, a certified regular one-cusp model and twelve clean disks give the complete two-dimensional image; at bad prime 3, exact recursive strict-transform cells resolve all lifting residue branches, two rational Hensel disks add an independent class, and all nine decomposition subgroups compatible with the certified local factor degrees have fixed dimension 2, proving that the combined two-dimensional BPS span is complete; at 2, exact Hensel-disk BPS evaluation spans the complete four-dimensional Kummer image; exact theta-module comparison proves `dim J(Q)[2] = dim K = 1`, with injective localization at both 2 and 3; the monolithic shell-width replay retains every arithmetic certificate through a dimension-two explicit intersection and certifies `dim Sel_2(J) <= 2` and `rank J(Q) <= 1` | The completeness of GAP's 1,369-class subgroup table is a named trusted external classification, not replayed internally. The Kummer sequence, Dirichlet S-unit theorem, global norm theorem, and BPS Theorem 10.14 are explicit trusted theorem imports. Generic `Jacobian#rank` and `rank_upper_bound` still raise unless supplied a curve-specific certificate |
 
 `Curve#hyperelliptic_plane_model?` is specifically the smooth plane-model
 test. Smooth plane curves of genus at least two are non-hyperelliptic; an
@@ -1278,6 +1286,40 @@ TUNGSTEN_SUNIT_P3_LOCAL_IMAGE=1 \
   spec/fixtures/algebra/shell_width_degree12_s_units.rel
 ```
 
+The same lane now replays the finite comparison in BPS Theorem 10.14.  For
+the shell-width true setup, the exact theta action gives
+
+```text
+dim J(Q)[2] = 1
+dim K = dim(R^dual(Q) / q(E^dual(Q))) = 1
+
+p = 2:  dim W_v = 1
+p = 3:  dim W_v = 1, rank(K -> W_v) = 1
+p = 5:  dim W_v = 0
+p = 13: dim W_v = 0
+```
+
+Thus the certified \(p=2\) and \(p=3\) localizations independently kill the
+global comparison kernel.
+`PlaneQuarticBPSRankUpperBound` packages the resulting implication from BPS
+Theorem 10.14: an arithmetic-certified explicit intersection of dimension
+\(d\) gives \(\dim Sel_2(J)\le d\), and therefore
+\(\operatorname{rank}J(\mathbb Q)\le d-1\).  It deliberately rejects a
+finite-only or transcript-only intersection; the local arithmetic producers
+must still be present as certificates. The shell-width rank lane recomputes
+and retains all of them in a single process:
+
+```sh
+/tmp/shell-width-s-units-verify \
+  spec/fixtures/algebra/shell_width_degree6_s_units.rel \
+  spec/fixtures/algebra/shell_width_degree9_s_units.rel \
+  spec/fixtures/algebra/shell_width_degree12_s_units.rel \
+  100 - - rank
+```
+
+It certifies an explicit-intersection dimension of two,
+\(\dim Sel_2(J)\le2\), and \(\operatorname{rank}J(\mathbb Q)\le1\).
+
 ## Certified real roots
 
 Univariate rational polynomials expose exact root counts and complete
@@ -1343,6 +1385,46 @@ Ordinary operator dispatch remains receiver-directed, so write `sqrt2 / 2`.
 For a rational left operand use
 `Algebra.real_algebraic_value(2, "/", sqrt2)`; symbolic `Expression`
 constants handle either operand order.
+
+## Projective dynamical heights
+
+Over `ℚ`, an integral homogeneous self-map can carry an exact global
+naive-height defect certificate. Supply homogeneous witnesses for
+
+```text
+R*X_i^D = sum_j G_(i,j)*F_j
+```
+
+for every projective coordinate. Tungsten replays each polynomial identity,
+checks integrality and homogeneity, and computes forward and reverse
+coefficient one-norms. The identities prove that the gcd removed when
+normalizing `F(x)` divides `R`; together the two coefficient bounds give
+
+```text
+|h(F(P)) - degree(F)*h(P)| <= log(max(A, B)).
+```
+
+Exact orbit iteration plus the geometric tail then encloses the canonical
+dynamical height:
+
+```w
+line = ProjectiveSpace<ℚ, 1>.new(:X, :Y)
+x = line.coords[0]
+y = line.coords[1]
+one = line.ring.one
+zero = line.ring.zero
+
+square = ProjectiveHomogeneousMap.new(line, [x**2, y**2])
+defect = ProjectiveHeightDefectBound.new(
+  square, 1, 2, [[one, zero], [zero, one]])
+height = ProjectiveCanonicalHeightEnclosure.new(
+  square, defect, line.point(2, 1), 4)
+```
+
+Here the defect is zero and the enclosure contains `log(2)`. For a Jacobian
+Kummer duplication map the degree is four. This generic layer does not invent
+that Kummer embedding or its duplication polynomials: they and the displayed
+identities remain curve-specific proof obligations.
 
 ## Quartic arithmetic
 
@@ -1417,6 +1499,68 @@ while the generic tree-walking interpreter can retain roughly 10 GB of
 temporary polynomial objects. The standard interpreter suite therefore skips
 it; run the compiled fixture with
 `TUNGSTEN_AUTOMORPHISMS_FULL=1` for the full certificate.
+
+The shell-width quartic is also a one-point \(C_{3,4}\) curve. At
+\([1:0:0]\), \(S\) and \(B\) have pole orders 3 and 4:
+
+```w
+model = Cp.c_ab_model(1, 0, 2, 3, 4)
+V = model.riemann_roch_space(14)
+
+V.dimension                         # 12 = 14 + 1 - genus
+V.basis                             # 1, S, B, S^2, SB, B^2, ...
+coordinates = V.coordinates(S^2 + 3*B + 4)
+product = model.multiply(B^2, B, 12)
+
+Q = Cp.space.point(0, 4, 1)
+R = Cp.space.point(2, 2, 1)
+WQ = V.vanishing_subspace([Q])
+WR = V.vanishing_subspace([R])
+WQR = WQ.intersection(WR)
+```
+
+The certificate checks the unique-infinity projective shape, nonsingularity,
+coprime pole orders, weighted equation, genus, normal-form reduction, and the
+Riemann--Roch dimension in the stable range. The monomial-basis theorem is
+kept as an explicit theorem dependency.
+
+Over prime fields, `PrimeFieldSubspace` stores the unique nonzero RREF rows
+of a subspace and replays containment, sums, intersections, orthogonal
+complements, coordinates, and kernels. `CAbEvaluationKernel` uses that layer
+to certify the simultaneous evaluation kernel in `L(n*infinity)`, while
+`CAbMultiplierPreimage` computes the exact linear division operation
+
+```text
+{ g in L(b*infinity) : gU is contained in W }.
+```
+
+`CAbEffectivePointDivisor`, `CAbEffectivePlaceDivisor`, and `CAbDivisorSpace`
+represent squarefree effective affine divisors by `L(n*infinity-D)`. Closed
+places presented by a line intersection are evaluated exactly in their simple
+residue extensions and expanded into prime-field rows. For `d0 >= 2g+1`,
+`CAbKhuriMakdisiRepresentative` constructs the standard subspace
+`L(2d0*infinity-D)`. `CAbKhuriMakdisiAddFlip` performs the complete
+multiply/intersect/choose-section/divide sequence, returning a certified
+representative of the negative sum; a second AddFlip against a certified
+affine principal zero gives the sum representative. The affine zero can be
+found deterministically by `CAbKhuriMakdisiAffineZero.search`; its independent
+certificate remains the authority for the resulting principal divisor.
+
+Certified differences and sums compose AddFlip traces. Exact intersection
+with the embedded `L(d0*infinity)` gives class-zero tests, from which equality,
+binary-chain scalar multiplication, and exact element orders are replayed.
+Given a certified order and the exact finite Jacobian order,
+`CAbKhuriMakdisiNondivisibility` identifies every prime `l` for which the
+element's `l`-primary order is maximal, proving it is not in `lJ(F_p)`. The
+shell regression covers rational and quadratic closed-place reductions and
+all of these operations over `F_17`; the research replay applies the same API
+at further good primes.
+
+The implementation currently handles squarefree rational or line-presented
+closed-place divisors on one-point `C_ab` models over prime fields. It does not
+yet encode higher point multiplicities, arbitrary extension-field divisor
+presentations, rational Kummer coordinates, canonical/local heights, or a
+general global Mordell--Weil saturation bound.
 
 Known points can be reduced to degree-one places for the narrow certified
 divisor decision:
@@ -1758,6 +1902,157 @@ the seven candidates still imports GAP's
 subgroup conclusion is certified up to conjugacy under a visible trusted
 finite-classification boundary. An explicit characteristic-zero bijection
 between individual roots and theta labels remains separate work.
+
+The determinantal layer now continues this finite calculation through the
+36 even theta characteristics. A fixed even characteristic is a candidate
+Galois-invariant symmetric determinantal class. For each such class,
+`ThetaCayleyOctadLabeling` exhaustively enumerates its eight compatible
+Aronhold sets, checks all azygetic triples, and verifies that the 28 pairwise
+row intersections recover every odd theta characteristic exactly once:
+
+```w
+fixed = galois.identified_candidate.group.determinantal_fixed_set
+fixed.fixed_count                         # 1
+fixed.fixed_characteristics[0].characteristic
+# [0, 0, 0, 1, 1, 1]
+
+octad = fixed.unique_fixed_octad_action
+octad.labeling.rows.size                  # 8
+octad.orbit_sizes                         # [2, 6]
+octad.group.order                         # 36
+octad.certificate.verified?
+```
+
+Every induced edge action is compared with the original 28-point generator,
+so this is an exact lift to the eight abstract octad points, not just a group
+with the same order. For the shell candidate the unique six-point octad orbit
+is generator-equivariantly isomorphic to the existing six-bitangent orbit;
+`matching_orbit_pairs` returns that unique map. The orbit split `[2,6]`
+induces edge orbits `1+12+9+6`, independently reproducing the checked
+bitangent signature `[1,6,9,12]`.
+
+These finite results do not themselves descend a matrix over Q. The
+classification of even theta characteristics by symmetric determinantal
+representations and the interpretation of the eight Aronhold rows as a
+geometric Cayley octad are named theorem imports. The shell subgroup is still
+identified only up to conjugacy, so `arithmetic_descent_certified?` and the
+global root-labeling flag remain false.
+
+When a degree-eight etale algebra is known, the complementary construction
+stays entirely over the base field. For a monic squarefree trace-zero octic
+`f`, `TraceZeroEtaleCayleyOctad` places the universal point
+`(1:a:a^2:a^4)` in `K[t]/(f)`, constructs its three rational quadrics, and
+forms the Hesse quartic without materializing the splitting field:
+
+```w
+R = PolynomialRing.new([:t], RationalField.new)
+t = R.generator(0)
+f = t**8 - t**6*5 - t**5 + t**4*7 + t**3 + t**2*4 + 1
+P2 = ProjectiveSpace<ℚ, 2>.new(:X, :Y, :Z)
+construction = Algebra.trace_zero_cayley_octad(f, P2)
+
+construction.etale_algebra.dimension     # 8
+construction.etale_algebra.generator.trace # 0
+construction.curve.nonsingular?          # true for this example
+construction.certificate.verified?
+```
+
+The certificate checks squarefreeness, trace zero, all three universal
+quadratic identities, symmetry, smoothness, and the exact determinant. Its
+geometric identification with the eight conjugate points is explicitly
+attributed to Elsenhans--Jahnel Proposition 2.6.
+
+For the shell fields, the small sextic model contains an exact square root of
+3. The relative degree-twelve bitangent model `z^2-z+u` has discriminant
+`1-4u`, and Tungsten checks explicit identities showing that this element is
+both `-beta_i^2` and `-3*beta_{-3}^2` in the sextic field. Thus the known
+degree-twelve compositum is simultaneously `K6(i)` and `K6(sqrt(-3))`.
+The exact class-693 subgroup lattice has three index-two subgroups: the
+sextic point stabilizer is contained in one, while the degree-twelve edge
+stabilizer is contained in all three.  Hence the degree-twelve field has
+exactly the quadratic subfields `Q(sqrt(3))`, `Q(i)`, and `Q(sqrt(-3))`, and
+the unresolved two-point component is one of the last two.
+
+`ThetaCayleyOctadFrobeniusClassTest` then uses the complete symplectic
+Frobenius matrix from the certified finite fiber at 5. Of the twelve subgroup
+elements with the same 28-point cycle shape, six are symplectically conjugate
+to that matrix and six have exhaustive intertwiner obstructions. Every
+conjugate element fixes the octad pair. Since `-1` is a square modulo 5 and
+`-3` is not, the two-point field is `Q(i)`. The finite conjugacy and subgroup
+lattice are kernel checked; binding the finite matrix to the arithmetic
+quartic, the Galois correspondence, quadratic splitting, and the global GAP
+class table remain named theorem imports.
+
+Consequently the trace-zero octic
+`(t^6-2t^5+t^4-2t^3-t^2+1)(t^2+2t+2)` constructs a smooth rational Hesse
+quartic with the required `2+6` etale Cayley-octad action. This comparison
+quartic is not the shell quartic over Q: both have good reduction at 5, but
+their exact point counts are 10 and 8 respectively.  Recovering the actual
+shell determinant representation therefore requires an inverse bitangent or
+arithmetic-theta construction; the abstract Galois set is insufficient.
+
+That inverse construction is now executable once three actual azygetic
+bitangents are supplied. `PlaneQuarticDixonRepresentation` implements Dixon's
+algorithm without materializing the six contact points.  For each line it
+computes the exact binary contact quadratic.  Divisibility of a cubic's line
+restriction by those three quadratics is a 12-by-16 linear kernel whose cubic
+projection has dimension four.  Six further affine linear systems produce
+
+```text
+v0i*v0j = v00*vij + f*hij.
+```
+
+Each equality has an exact `PolynomialIdealMembershipCertificate`.  Tungsten
+then forms the symmetric cubic matrix `V`, divides every entry of `adj(V)` by
+`f^2` with zero remainder, and independently certifies that the determinant
+of the resulting linear matrix is a nonzero scalar multiple of `f`.  The Edge
+quartic regression starts from the three lines in Plaumann--Sturmfels--Vinzant
+Example 2.6 and reconstructs a certified representation from the quartic and
+those lines alone.  The theorem that every azygetic triple makes this process
+succeed remains a named Dixon theorem boundary; a successful output is
+otherwise checked by polynomial identities.
+
+The shell reduction at 5 now exercises the same inverse over its certified
+splitting field.  Its bitangent Frobenius cycles are `[1,3,6,6,6,6]`: one line
+is defined over `F5`; the four lines over `F_(5^3)` are an exact syzygetic
+quadruple; and `F_(5^6)` is the first visible field containing an azygetic
+triple.  The finite theta fiber has exactly one Frobenius-fixed even
+characteristic.  A Cayley-octad triangle for that characteristic selects
+source lines `[2,4,22]`, and Dixon constructs and certifies the shell
+determinant over `F_(5^6)`:
+
+```w
+fiber = setup.certify_theta_fiber_at_five
+fiber.fixed_even_characteristics.size       # 1
+fiber.source_indices_defined_over(1).size   # 1
+fiber.source_indices_defined_over(3).size   # 4
+fiber.source_indices_defined_over(6).size   # 28
+dixon = fiber.dixon_representation
+dixon.contact_space_dimension               # 4
+dixon.relation_certificates.size            # 6
+dixon.representation.certified?              # true
+```
+
+This is an actual representation of the shell reduction, unlike the
+trace-zero comparison quartic.  `FiniteFieldDeterminantalFrobeniusDescent`
+then descends it explicitly.  It finds the Frobenius congruence by simultaneous
+linear intertwiners for `A^-1*B` and `A^-1*C`, normalizes the projective
+cocycle with an exhaustive finite-field norm equation, and solves additive
+and multiplicative Hilbert 90.  Re-embedding the resulting prime-field matrix
+into `F_(5^6)` is checked against the transformed source matrix, and its
+determinant is independently certified over `F5`:
+
+```text
+[ 2B+S       -B-S       -B+2S+Z    2B+3S     ]
+[ -B-S       -S+2Z       3B-S+Z    3B-S+Z    ]
+[ -B+2S+Z     3B-S+Z     Z          3B+S+Z   ]
+[ 2B+3S       3B-S+Z     3B+S+Z    3B-S+2Z  ]
+```
+
+This closes the finite descent at 5.  It is not yet a matrix over Q.  The next
+global obligation is to construct a characteristic-zero common bitangent
+field/labeling for the invariant even theta class and run the analogous
+descent, including its possible Brauer obstruction.
 
 The remaining theta and local conditions will meet the certified global norm
 condition in an exact F2 kernel:

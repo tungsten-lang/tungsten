@@ -180,6 +180,7 @@
     @splitting_field = FiniteField.new(
       @prime, @extension_modulus)
     @extension_degree = @splitting_field.degree
+    @splitting_curve_cache = nil
     @root_encodings = []
     root_encodings.each -> @root_encodings.push(item)
     @theta_labels = []
@@ -463,11 +464,167 @@
       seed += 1
     GenusThreeThetaPermutation.sort_integers(lengths)
 
+  -> source_indices_defined_over(extension_degree)
+    if !F2LinearAlgebra.integer?(extension_degree) || extension_degree <= 0
+      raise "finite bitangent field degree must be positive"
+    permutation = source_frobenius_permutation
+    out = []
+    source = 0
+    while source < permutation.size
+      image = source
+      extension_degree.times -> image = permutation[image]
+      out.push(source) if image == source
+      source += 1
+    out
+
+  -> every_source_triple_syzygetic?(indices)
+    left = 0
+    while left < indices.size
+      middle = left + 1
+      while middle < indices.size
+        right = middle + 1
+        while right < indices.size
+          return false if !source_triple_syzygetic?(
+            indices[left], indices[middle], indices[right])
+          right += 1
+        middle += 1
+      left += 1
+    true
+
+  # Materialize the good-reduction quartic and its 28 certified bitangents in
+  # the already-constructed finite splitting field.  This is intentionally a
+  # finite-fiber operation: it does not claim a characteristic-zero splitting
+  # field or a global arithmetic labeling.
+  -> splitting_curve
+    return @splitting_curve_cache if @splitting_curve_cache != nil
+    source = @scheme_certificate.setup.curve
+    space = ProjectiveSpace<FiniteField, 2>.new(
+      Algebra.field(@splitting_field), 2,
+      source.space.coordinate_names)
+    terms = []
+    source.equation.each_term -> (coefficient, exponents)
+      terms.push([
+        @splitting_field.embed_from(source.field, coefficient),
+        exponents])
+    @splitting_curve_cache = Curve.new(
+      space, Polynomial.new(space.ring, terms))
+    @splitting_curve_cache
+
+  -> splitting_bitangent_lines
+    curve = splitting_curve
+    chart = @scheme_certificate.primary_chart
+    free = chart.free_indices
+    lines = []
+    roots.each -> (root)
+      contact = contact_for_root(root)
+      coefficients = []
+      3.times -> coefficients.push(@splitting_field.zero)
+      coefficients[chart.pivot] = @splitting_field.one
+      coefficients[free[0]] = @splitting_field.negate(contact[1])
+      coefficients[free[1]] = @splitting_field.negate(contact[2])
+      lines.push(Line.raw(curve.space, coefficients))
+    lines.push(Line.raw(curve.space, [
+      @splitting_field.zero,
+      @splitting_field.zero,
+      @splitting_field.one]))
+    lines
+
+  -> source_triple_syzygetic?(left, middle, right)
+    labels = [
+      @theta_labels[left],
+      @theta_labels[middle],
+      @theta_labels[right]]
+    @incidence.syzygetic_quadruples.any? -> (block)
+      block.include?(labels[0]) && block.include?(labels[1]) && (
+        block.include?(labels[2]))
+
+  -> first_azygetic_source_triple
+    left = 0
+    while left < 28
+      middle = left + 1
+      while middle < 28
+        right = middle + 1
+        while right < 28
+          if !source_triple_syzygetic?(left, middle, right)
+            return [left, middle, right]
+          right += 1
+        middle += 1
+      left += 1
+    raise "finite theta fiber has no azygetic bitangent triple"
+
+  -> fixed_even_characteristics
+    fixed = []
+    encoded = 0
+    while encoded < 64
+      form = ThetaQuadraticForm.new(
+        @incidence.space, @incidence.space.vector(encoded))
+      if !form.odd?
+        image = @theta_permutation.transformed_characteristic(form)
+        if F2LinearAlgebra.same_vector?(
+             image, form.characteristic)
+          fixed.push(form)
+      encoded += 1
+    fixed
+
+  # A triangle of the Cayley octad attached to an even theta characteristic
+  # gives three azygetic bitangents in its determinantal class.  Translate
+  # the three abstract edge labels back to the arithmetic source ordering.
+  -> dixon_source_triple(even_characteristic = nil)
+    even = even_characteristic
+    if even == nil
+      fixed = fixed_even_characteristics
+      if fixed.size == 0
+        raise "finite Frobenius fixes no determinantal class"
+      even = fixed[0]
+    labeling = ThetaCayleyOctadLabeling.new(@incidence, even)
+    labels = [
+      labeling.edge_label(0, 1),
+      labeling.edge_label(0, 2),
+      labeling.edge_label(1, 2)]
+    inverse = source_index_by_theta_label
+    [inverse[labels[0]], inverse[labels[1]], inverse[labels[2]]]
+
+  -> dixon_representation(even_characteristic = nil)
+    lines = splitting_bitangent_lines
+    triple = dixon_source_triple(even_characteristic)
+    representation = splitting_curve.dixon_representation([
+      lines[triple[0]], lines[triple[1]], lines[triple[2]]])
+    if !representation.certified?
+      raise "finite theta-fiber Dixon representation failed certification"
+    representation
+
+  -> descended_dixon_representation(even_characteristic = nil)
+    dixon = dixon_representation(even_characteristic)
+    FiniteFieldDeterminantalFrobeniusDescent.new(
+      self, dixon.representation)
+
   -> certificate
     @certificate_cache
 
   -> certified?
     certificate.verified?
+
+  -> .shell_width_frobenius_matrix_at_five
+    [
+      [0, 1, 0, 0, 0, 0],
+      [0, 0, 1, 0, 0, 0],
+      [0, 1, 0, 1, 0, 0],
+      [1, 0, 1, 0, 1, 0],
+      [0, 1, 1, 0, 0, 1],
+      [1, 1, 0, 1, 0, 0]
+    ]
+
+  # The arithmetic binding of this exact symplectic map to the shell-width
+  # quartic is replayed by shell_width_at_five's full contact-incidence
+  # certificate.  Exposing the small map separately lets downstream finite
+  # group certificates avoid rebuilding the splitting field.
+  -> .shell_width_frobenius_at_five
+    incidence = Algebra.genus_three_theta_incidence
+    GenusThreeThetaPermutation.new(
+      incidence,
+      SymplecticF2Map.new(
+        incidence.space,
+        shell_width_frobenius_matrix_at_five))
 
   -> .shell_width_at_five(setup)
     roots = [
@@ -482,14 +639,7 @@
       24, 16, 18, 14, 12, 21, 22, 3,
       8, 15
     ]
-    matrix = [
-      [0, 1, 0, 0, 0, 0],
-      [0, 0, 1, 0, 0, 0],
-      [0, 1, 0, 1, 0, 0],
-      [1, 0, 1, 0, 1, 0],
-      [0, 1, 1, 0, 0, 1],
-      [1, 1, 0, 1, 0, 0]
-    ]
+    matrix = shell_width_frobenius_matrix_at_five
     modulus = [2, 0, 1, 4, 1, 0, 1]
     PlaneQuarticFiniteThetaFiber.new(
       setup.bitangent_scheme_certificate,

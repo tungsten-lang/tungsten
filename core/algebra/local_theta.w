@@ -1,13 +1,21 @@
-# Local 2-torsion dimensions from exact theta-factor orbits.
+# Local 2-torsion and Kummer dimensions from exact theta-factor orbits.
 #
 # A decomposition subgroup acts on the 28 odd theta characteristics. The
 # irreducible degrees over Q_p are its orbit sizes. Once the global theta
 # subgroup is certified up to conjugacy, exhaust every subgroup of the
 # representative having the exact local orbit partition and compute its
 # fixed subspace on J[2] = F2^6. If all candidates agree, the local rational
-# 2-torsion dimension is determined without choosing a root labeling.
+# 2-torsion dimension is determined without choosing a root labeling. At
+# p = 2, the dimension of J(Q_2)/2J(Q_2) has the additional genus-dimensional
+# contribution from the open Z_2^g subgroup of the compact p-adic Lie group.
 
 + PlaneQuarticLocalThetaArithmetic
+  -> .supported_local_map?(local_map)
+    map_class = local_map.class_name
+    if local_map.rational_prime == 2
+      return map_class == "EtaleProductDyadicLocalSquareClassMap"
+    map_class == "EtaleProductOddLocalSquareClassMap"
+
   -> .orbit_signature(function_data, local_map)
     if !PlaneQuarticBPSPointDifferenceArithmetic.same_component_polynomials?(
          function_data, local_map.source)
@@ -64,10 +72,10 @@
     @verified_cache = nil
 
   -> theorem
-    "local bitangent factor degrees determine the decomposition-subgroup orbit partition and hence the rational J[2] dimension when every compatible subgroup agrees"
+    "local bitangent factor degrees determine rational J[2], and local Kummer dimension also includes the 2-adic Lie contribution"
 
   -> theorem_reference
-    "decomposition-group orbits on roots, Riemann-Mumford theta characteristics, and prime-to-p Kummer theory for abelian varieties over local fields"
+    "decomposition-group orbits on roots, Riemann-Mumford theta characteristics, compact p-adic Lie groups, and local Kummer theory"
 
   -> verified?
     return @verified_cache if @verified_cache != nil
@@ -86,9 +94,10 @@
     return false if data.class_name != "PlaneQuarticBPSFunctionData"
     return false if !data.certificate.verified?
     local_map = @model.local_map
-    return false if local_map.class_name != "EtaleProductOddLocalSquareClassMap"
+    supported = PlaneQuarticLocalThetaArithmetic.supported_local_map?(
+      local_map)
+    return false if !supported
     return false if !local_map.certificate.verified?
-    return false if local_map.rational_prime == 2
     galois = @model.global_theta_certificate
     return false if galois.class_name != "ShellWidthThetaGaloisCertificate"
     return false if !galois.verified?
@@ -123,8 +132,22 @@
       return false if !fixed.certificate.verified?
       return false if fixed.subgroup != supplied[index]
       index += 1
-    dimensions = PlaneQuarticLocalThetaArithmetic.unique_dimensions(
+    torsion_dimensions = PlaneQuarticLocalThetaArithmetic.unique_dimensions(
       fixed_spaces)
+    return false if torsion_dimensions.to_s != (
+      @model.possible_torsion_dimensions.to_s)
+    return false if torsion_dimensions.size != 1
+    return false if torsion_dimensions[0] != (
+      @model.torsion_dimension)
+    expected_analytic_dimension = 0
+    if local_map.rational_prime == 2
+      expected_analytic_dimension = data.curve.genus
+    return false if expected_analytic_dimension != (
+      @model.analytic_dimension)
+    dimensions = []
+    torsion_dimensions.each -> (dimension)
+      dimensions.push(
+        dimension + expected_analytic_dimension)
     return false if dimensions.to_s != (
       @model.possible_dimensions.to_s)
     return false if dimensions.size != 1
@@ -160,8 +183,9 @@
       raise "local theta dimension needs BPS function data"
     if !@function_data.certificate.verified?
       raise "local theta function data is uncertified"
-    if @local_map.class_name != "EtaleProductOddLocalSquareClassMap"
-      raise "local theta dimension needs an odd localization map"
+    if !PlaneQuarticLocalThetaArithmetic.supported_local_map?(
+         @local_map)
+      raise "local theta dimension needs a matching product localization map"
     if !@local_map.certificate.verified?
       raise "local theta localization map is uncertified"
     if @global_theta_certificate.class_name != (
@@ -184,12 +208,20 @@
     @fixed_spaces = []
     @compatible_subgroups.each -> (subgroup)
       @fixed_spaces.push(subgroup.theta_fixed_space)
-    @possible_dimensions = (
+    @possible_torsion_dimensions = (
       PlaneQuarticLocalThetaArithmetic.unique_dimensions(
         @fixed_spaces))
-    if @possible_dimensions.size != 1
+    if @possible_torsion_dimensions.size != 1
       raise "local theta orbit partition does not determine J[2]"
-    @dimension = @possible_dimensions[0]
+    @torsion_dimension = @possible_torsion_dimensions[0]
+    @analytic_dimension = 0
+    if @local_map.rational_prime == 2
+      @analytic_dimension = @function_data.curve.genus
+    @possible_dimensions = []
+    @possible_torsion_dimensions.each -> (dimension)
+      @possible_dimensions.push(
+        dimension + @analytic_dimension)
+    @dimension = @torsion_dimension + @analytic_dimension
     @certificate_cache = (
       PlaneQuarticLocalThetaDimensionCertificate.new(self))
     if !@certificate_cache.verified?
@@ -232,6 +264,16 @@
   -> possible_dimensions
     F2LinearAlgebra.copy_vector(
       @possible_dimensions)
+
+  -> possible_torsion_dimensions
+    F2LinearAlgebra.copy_vector(
+      @possible_torsion_dimensions)
+
+  -> torsion_dimension
+    @torsion_dimension
+
+  -> analytic_dimension
+    @analytic_dimension
 
   -> dimension
     @dimension

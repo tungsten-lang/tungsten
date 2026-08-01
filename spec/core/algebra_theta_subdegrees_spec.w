@@ -49,6 +49,18 @@ if env("TUNGSTEN_THETA_SUBDEGREES") == "1"
   theta_subdegree_check("galois.table_boundary",
                         galois.subgroup_table_completeness_checked?,
                         false)
+
+  comparison = setup.certify_bps_true_finite_comparison
+  theta_subdegree_check("comparison.certified",
+                        comparison.certified?, true)
+  theta_subdegree_check("comparison.arithmetic_certified",
+                        comparison.arithmetic_certified?, true)
+  theta_subdegree_check("comparison.rational_two_torsion_dimension",
+                        comparison.rational_two_torsion_dimension, 1)
+  theta_subdegree_check("comparison.kernel_dimension",
+                        comparison.comparison_kernel_dimension, 1)
+  theta_subdegree_check("comparison.theorem_boundary",
+                        comparison.bps_theorem_10_14_complete?, false)
 else
   theta_subdegree_check("subdegrees.opt_in",
                         env("TUNGSTEN_THETA_SUBDEGREES"), nil)

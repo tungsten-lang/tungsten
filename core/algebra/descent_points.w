@@ -257,6 +257,345 @@
     certificate.verified?
 
 
+# A line-presented closed point has exact coordinates over its residue
+# extension, but evaluating every bitangent function in a tensor product
+# L_i tensor K is unnecessary. If g(t) is the monic residue polynomial and
+# h(t) is a restricted line, Res(g,h) is the norm of h at that closed point.
+# This keeps the result directly in the bitangent field L_i.
++ PlaneQuarticBPSClosedPlaceArithmetic
+  -> .number_field_form(field, target_space, coefficients)
+    if coefficients.class_name != "Array" || coefficients.size != 3
+      raise "closed-place BPS line needs three coefficients"
+    terms = []
+    index = 0
+    while index < coefficients.size
+      source = coefficients[index]
+      if source.class_name != "EtaleAlgebraElement"
+        raise "closed-place BPS coefficient is outside its etale component"
+      exponents = [0, 0, 0]
+      exponents[index] = 1
+      terms.push([
+        field.coerce(source.coefficients),
+        exponents
+      ])
+      index += 1
+    Polynomial.new(target_space.ring, terms)
+
+  -> .number_field_line(place, field, target_space)
+    coefficients = []
+    place.line.coefficients.each -> (coefficient)
+      coefficients.push(
+        field.embed_from(place.curve.field, coefficient))
+    Line.raw(target_space, coefficients)
+
+  -> .component_value(function, basis, place)
+    if place.class_name != "ClosedPlace" || !place.certified?
+      raise "closed-place BPS evaluation needs a certified closed place"
+    field = basis.field
+    if field.class_name != "NumberField"
+      raise "closed-place BPS evaluation needs a number-field S-unit basis"
+    if !PlaneQuarticBPSPointDifferenceArithmetic.same_univariate_polynomial?(
+           function.algebra.defining_polynomial,
+           field.defining_polynomial)
+      raise "closed-place BPS evaluation changes its bitangent field"
+    target_space = ProjectiveSpace<NumberField, 2>.new(
+      field, 2, place.space.coordinate_names)
+    target_line = number_field_line(
+      place, field, target_space)
+    numerator_form = number_field_form(
+      field, target_space,
+      function.numerator_coefficients)
+    denominator_form = number_field_form(
+      field, target_space,
+      function.denominator_coefficients)
+    numerator = target_line.affine_restriction(
+      numerator_form, place.parameter_chart)
+    denominator = target_line.affine_restriction(
+      denominator_form, place.parameter_chart)
+    factor = place.defining_polynomial.change_ring(
+      numerator.ring)
+    numerator_norm = factor.resultant(numerator)
+    denominator_norm = factor.resultant(denominator)
+    if field.zero?(numerator_norm)
+      raise "closed place meets a zero of a BPS function"
+    if field.zero?(denominator_norm)
+      raise "closed place meets a pole of a BPS function"
+    numerator_norm / denominator_norm
+
+  -> .component_values(function_data, space, place)
+    functions = function_data.function_components
+    nested = space.component_bases
+    if functions.size != nested.size
+      raise "closed-place BPS component count mismatch"
+    out = []
+    index = 0
+    while index < functions.size
+      bases = nested[index]
+      if bases.size != 1
+        raise "closed-place BPS evaluation currently needs one field basis per etale component"
+      out.push(component_value(
+        functions[index], bases[0], place))
+      index += 1
+    out
+
+  -> .quotient_values(function_data, space,
+                      positive, negative)
+    positive_values = component_values(
+      function_data, space, positive)
+    negative_values = component_values(
+      function_data, space, negative)
+    out = []
+    index = 0
+    while index < positive_values.size
+      out.push(
+        positive_values[index] / negative_values[index])
+      index += 1
+    out
+
+  -> .coordinate_certificates(
+       space, s_class_two_torsion_proof,
+       component_values)
+    nested = space.component_bases
+    if component_values.size != nested.size
+      raise "closed-place BPS coordinate component count mismatch"
+    expected_proof = "EtaleProductSClassTwoTorsionProof"
+    if s_class_two_torsion_proof.class_name != expected_proof
+      raise "closed-place BPS coordinates need a product S-class proof"
+    if !s_class_two_torsion_proof.certificate.verified?
+      raise "closed-place BPS product S-class proof is uncertified"
+    proof_nested = s_class_two_torsion_proof.component_proofs
+    if proof_nested.size != nested.size
+      raise "closed-place BPS S-class component count mismatch"
+    out = []
+    index = 0
+    while index < nested.size
+      bases = nested[index]
+      proofs = proof_nested[index]
+      if bases.size != 1
+        raise "closed-place BPS coordinates currently need one field basis per etale component"
+      if proofs.size != 1
+        raise "closed-place BPS coordinates currently need one S-class proof per etale component"
+      out.push(
+        bases[0].l2s_coordinates_with_certificate(
+          component_values[index],
+          proofs[0]))
+      index += 1
+    out
+
+  -> .coordinates_from_certificates(
+       space, component_values, certificates)
+    nested = space.component_bases
+    return nil if component_values.size != nested.size
+    return nil if certificates.size != nested.size
+    out = []
+    index = 0
+    while index < nested.size
+      bases = nested[index]
+      return nil if bases.size != 1
+      proof = certificates[index]
+      return nil if !proof.certificate.verified?
+      return nil if proof.basis != bases[0]
+      return nil if proof.value != component_values[index]
+      proof.vector.each -> out.push(item)
+      index += 1
+    return nil if out.size != space.dimension
+    F2LinearAlgebra.validate_vector(
+      out, space.dimension)
+    out
+
+
++ PlaneQuarticBPSClosedPlaceDifferenceCertificate
+  -> new(@descent_value)
+    @verified_cache = nil
+
+  -> theorem
+    "the BPS explicit map evaluates a closed divisor by residue-field norms; for a line-presented place these norms are exact resultants"
+
+  -> theorem_reference
+    "Bruin-Poonen-Stoll sections 6.4-6.5 and the resultant norm identity"
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "PlaneQuarticBPSClosedPlaceDifferenceDescentValue"
+    return false if @descent_value.class_name != expected
+    data = @descent_value.function_data
+    return false if data.class_name != "PlaneQuarticBPSFunctionData"
+    return false if !data.certificate.verified?
+    space = @descent_value.space
+    return false if space.class_name != (
+      "EtaleProductSUnitSquareClassSpace")
+    return false if !space.certificate.verified?
+    if !PlaneQuarticBPSPointDifferenceArithmetic.same_component_polynomials?(
+         data, space)
+      return false
+    s_class_proof = (
+      @descent_value.s_class_two_torsion_proof)
+    return false if s_class_proof.class_name != (
+      "EtaleProductSClassTwoTorsionProof")
+    return false if !s_class_proof.certificate.verified?
+    return false if s_class_proof.order != space.order
+    return false if s_class_proof.rational_primes.to_s != (
+      space.rational_primes.to_s)
+    positive = @descent_value.positive_place
+    negative = @descent_value.negative_place
+    return false if positive.class_name != "ClosedPlace"
+    return false if negative.class_name != "ClosedPlace"
+    return false if !positive.certified? || !negative.certified?
+    return false if positive.curve != data.curve
+    return false if negative.curve != data.curve
+    return false if positive.degree != negative.degree
+    expected_values = (
+      PlaneQuarticBPSClosedPlaceArithmetic.quotient_values(
+        data, space, positive, negative))
+    supplied_values = @descent_value.component_values
+    return false if expected_values.size != supplied_values.size
+    index = 0
+    while index < expected_values.size
+      return false if expected_values[index] != (
+        supplied_values[index])
+      index += 1
+    coordinates = (
+      PlaneQuarticBPSClosedPlaceArithmetic.coordinates_from_certificates(
+          space, expected_values,
+          @descent_value.coordinate_certificates))
+    return false if coordinates == nil
+    return false if !F2LinearAlgebra.same_vector?(
+      coordinates, @descent_value.coordinates)
+    norm_vector = space.norm_map.apply(coordinates)
+    return false if !F2LinearAlgebra.same_vector?(
+      norm_vector, @descent_value.norm_vector)
+    F2LinearAlgebra.zero_vector?(norm_vector)
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :trusted_bps_closed_divisor_map_with_exact_resultant_replay
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> known_jacobian_image_element?
+    verified?
+
+
++ PlaneQuarticBPSClosedPlaceDifferenceDescentValue
+  -> new(@function_data, @space,
+         @s_class_two_torsion_proof,
+         @positive_place,
+         @negative_place)
+    if @function_data.class_name != (
+         "PlaneQuarticBPSFunctionData")
+      raise "closed-place BPS difference needs certified function data"
+    if !@function_data.certificate.verified?
+      raise "closed-place BPS function data is uncertified"
+    if @space.class_name != (
+         "EtaleProductSUnitSquareClassSpace")
+      raise "closed-place BPS difference needs a product S-unit space"
+    if !@space.certificate.verified?
+      raise "closed-place BPS S-unit space is uncertified"
+    expected_proof = "EtaleProductSClassTwoTorsionProof"
+    if @s_class_two_torsion_proof.class_name != expected_proof
+      raise "closed-place BPS difference needs a product S-class proof"
+    if !@s_class_two_torsion_proof.certificate.verified?
+      raise "closed-place BPS product S-class proof is uncertified"
+    if @s_class_two_torsion_proof.order != @space.order
+      raise "closed-place BPS S-class proof changes the etale order"
+    if @s_class_two_torsion_proof.rational_primes.to_s != (
+         @space.rational_primes.to_s)
+      raise "closed-place BPS S-class proof changes S"
+    if !PlaneQuarticBPSPointDifferenceArithmetic.same_component_polynomials?(
+           @function_data, @space)
+      raise "closed-place BPS space changes the etale components"
+    if @positive_place.class_name != "ClosedPlace"
+      raise "closed-place BPS positive term is not a closed place"
+    if @negative_place.class_name != "ClosedPlace"
+      raise "closed-place BPS negative term is not a closed place"
+    if !@positive_place.certified? || !@negative_place.certified?
+      raise "closed-place BPS difference contains an uncertified place"
+    if @positive_place.curve != @function_data.curve
+      raise "closed-place BPS positive term changes the curve"
+    if @negative_place.curve != @function_data.curve
+      raise "closed-place BPS negative term changes the curve"
+    if @positive_place.degree != @negative_place.degree
+      raise "closed-place BPS difference must have degree zero"
+    @component_values = (
+      PlaneQuarticBPSClosedPlaceArithmetic.quotient_values(
+        @function_data, @space,
+        @positive_place, @negative_place))
+    @coordinate_certificates = (
+      PlaneQuarticBPSClosedPlaceArithmetic.coordinate_certificates(
+          @space, @s_class_two_torsion_proof,
+          @component_values))
+    @coordinates = (
+      PlaneQuarticBPSClosedPlaceArithmetic.coordinates_from_certificates(
+          @space, @component_values,
+          @coordinate_certificates))
+    if @coordinates == nil
+      raise "closed-place BPS coordinate certificates do not replay"
+    @norm_vector = @space.norm_map.apply(
+      @coordinates)
+    if !F2LinearAlgebra.zero_vector?(@norm_vector)
+      raise "closed-place BPS value violates the global norm condition"
+    @certificate_cache = (
+      PlaneQuarticBPSClosedPlaceDifferenceCertificate.new(
+        self))
+    if !@certificate_cache.verified?
+      raise "closed-place BPS descent value failed certification"
+
+  -> function_data
+    @function_data
+
+  -> space
+    @space
+
+  -> s_class_two_torsion_proof
+    @s_class_two_torsion_proof
+
+  -> positive_place
+    @positive_place
+
+  -> negative_place
+    @negative_place
+
+  -> component_values
+    out = []
+    @component_values.each -> out.push(item)
+    out
+
+  -> coordinate_certificates
+    out = []
+    @coordinate_certificates.each -> out.push(item)
+    out
+
+  -> coordinates
+    F2LinearAlgebra.copy_vector(@coordinates)
+
+  -> norm_vector
+    F2LinearAlgebra.copy_vector(@norm_vector)
+
+  -> zero_class?
+    F2LinearAlgebra.zero_vector?(@coordinates)
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
 # Rational divisor differences provide a replayable lower bound for a local
 # Jacobian image. They cannot prove that the displayed span is the complete
 # local image; callers must not use this object as a Selmer upper bound.
@@ -428,6 +767,13 @@
     PlaneQuarticBPSPointDifferenceDescentValue.new(
       self, space, positive, negative)
 
+  -> certify_closed_place_difference(
+       space, s_class_two_torsion_proof,
+       positive, negative)
+    PlaneQuarticBPSClosedPlaceDifferenceDescentValue.new(
+      self, space, s_class_two_torsion_proof,
+      positive, negative)
+
 
 + PlaneQuarticTwoDescentSetup
   -> certify_point_difference_descent_value(positive, negative)
@@ -437,6 +783,17 @@
       raise "certify the true S-unit square-class space before evaluating point differences"
     @bps_function_data.certify_point_difference(
       @s_unit_square_class_space,
+      positive, negative)
+
+  -> certify_closed_place_difference_descent_value(
+       positive, negative)
+    if @bps_function_data == nil
+      raise "certify BPS divisor/function data before evaluating closed-place differences"
+    if @s_unit_square_class_space == nil
+      raise "certify the true S-unit square-class space before evaluating closed-place differences"
+    @bps_function_data.certify_closed_place_difference(
+      @s_unit_square_class_space,
+      @s_class_two_torsion_proof,
       positive, negative)
 
 

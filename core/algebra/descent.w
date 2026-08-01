@@ -1450,19 +1450,37 @@
     if @theta_fiber_certificates.size > 0
       theta_explanation = @theta_fiber_certificates.size.to_s
       theta_explanation = theta_explanation + " exact finite-fiber theta labelings are available; a common characteristic-zero labeling is still missing"
-    if @theta_galois_certificate != nil
-      theta_explanation = "the global theta Galois subgroup is certified up to conjugacy as class 693 of order 36; an explicit common characteristic-zero labeling is still missing"
-    out.push(DescentRequirement.new(
-      "theta Galois module", "missing", theta_explanation))
+    if @theta_galois_certificate == nil
+      out.push(DescentRequirement.new(
+        "theta Galois module", "missing", theta_explanation))
+    else
+      theta_explanation = "exact arithmetic subdegrees identify class 693 of order 36 up to conjugacy; this suffices for invariant dimensions"
+      out.push(DescentRequirement.new(
+        "theta Galois module", "complete",
+        theta_explanation, @theta_galois_certificate))
     out.push(DescentRequirement.new(
       "local descent images", "missing",
       "certified p-adic residue disks and bitangent evaluations"))
     out.push(DescentRequirement.new(
       "explicit Selmer intersection", "missing",
       "the finite F2 kernel is available once arithmetic conditions exist"))
+    if @theta_galois_certificate == nil
+      out.push(DescentRequirement.new(
+        "BPS finite comparison module", "missing",
+        "certify the theta subgroup before computing K and rational J[2]"))
+    else
+      comparison = PlaneQuarticBPSTrueComparison.new(
+        @theta_galois_certificate)
+      explanation = "exact theta-module replay gives dim K = "
+      explanation = explanation + comparison.comparison_kernel_dimension.to_s
+      explanation = explanation + " and dim J(Q)[2] = "
+      explanation = explanation + comparison.rational_two_torsion_dimension.to_s
+      out.push(DescentRequirement.new(
+        "BPS finite comparison module", "complete",
+        explanation, comparison.certificate))
     out.push(DescentRequirement.new(
-      "BPS comparison and rank bound", "missing",
-      "certify the comparison kernel and rational J[2] dimension"))
+      "BPS Theorem 10.14 rank bound", "missing",
+      "combine the arithmetic-certified explicit intersection with a local comparison proving ker(kappa) = 0"))
     out
 
   -> missing_requirements

@@ -56,6 +56,38 @@ sunit_check("sunit.real_quadratic.coordinate_binding",
 sunit_check("sunit.real_quadratic.square_equivalence",
             U5.equivalent_mod_squares?(
               epsilon5, epsilon5 * epsilon5**2), true)
+class_proof5 = K5.certify_s_class_two_torsion
+l2s_epsilon5 = U5.l2s_coordinates_with_certificate(
+  epsilon5 * 9, class_proof5)
+sunit_check("sunit.real_quadratic.l2s.outside_square",
+            l2s_epsilon5.vector.to_s, "\[0, 1\]")
+sunit_check("sunit.real_quadratic.l2s.certified",
+            l2s_epsilon5.certified?, true)
+l2s_odd_support_failed = false
+begin
+  U5.l2s_coordinates_with_certificate(
+    epsilon5 * 3, class_proof5)
+rescue error
+  l2s_odd_support_failed = "[error]".include?(
+    "odd valuation outside S")
+sunit_check("sunit.real_quadratic.l2s.rejects_odd_support",
+            l2s_odd_support_failed, true)
+
+# Presentation-variable names are not arithmetic data.  A field proof over
+# Q[t] must bind to the same etale component presented over Q[y].
+alias_ring = PolynomialRing.new([:y], RationalField.new)
+y = alias_ring.generator(0)
+transported = RationalUnivariatePolynomialTransport.into(
+  t**2 - 5, alias_ring)
+sunit_check("sunit.transport.polynomial",
+            transported, y**2 - 5)
+alias_order = EtaleProductOrder.new([y**2 - 5])
+alias_space = alias_order.s_unit_square_class_space(
+  [], [[U5]])
+sunit_check("sunit.transport.product_certified",
+            alias_space.certified?, true)
+sunit_check("sunit.transport.product_dimension",
+            alias_space.dimension, 2)
 
 dependent_basis_failed = false
 begin
@@ -172,6 +204,17 @@ sunit_check("sunit.isomorphic.coordinate_certificate",
             isomorphic_coordinates.certified?, true)
 sunit_check("sunit.isomorphic.coordinate_vector",
             isomorphic_coordinates.vector.to_s, "\[0, 1\]")
+isomorphic_class_proof = (
+  NumberFieldIsomorphicSClassTwoTorsionProof.new(
+    sunit_isomorphic_source, [], class_proof5))
+isomorphic_l2s = (
+  isomorphic_sunit_basis.l2s_coordinates_with_certificate(
+    isomorphic_sunit_basis.generators[1] * 9,
+    isomorphic_class_proof))
+sunit_check("sunit.isomorphic.l2s.coordinate_vector",
+            isomorphic_l2s.vector.to_s, "\[0, 1\]")
+sunit_check("sunit.isomorphic.l2s.certified",
+            isomorphic_l2s.certified?, true)
 
 characteristic_two_failed = false
 begin

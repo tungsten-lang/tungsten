@@ -109,6 +109,17 @@
   -> inspect
     "Place(" + to_s + ")"
 
+  -> reduce_to(target_curve)
+    if @curve.field.class_name != "RationalField" || (
+         target_curve.field.class_name != "FiniteField")
+      raise "place reduction currently needs Q to a finite field"
+    expected = @curve.equation.change_ring(target_curve.space.ring)
+    if !expected.eql?(target_curve.equation)
+      raise "target curve is not the stated reduction"
+    if !target_curve.nonsingular?
+      raise "place reduction needs good reduction"
+    target_curve.place(@point)
+
 
 # A higher-degree closed point obtained from an irreducible factor of a
 # line-restricted plane curve. The presentation records the affine chart on
@@ -267,6 +278,176 @@
 
   -> inspect
     to_s
+
+  -> reduction(target_curve)
+    ClosedPlaceReduction.new(self, target_curve)
+
+  -> reduce_to(target_curve)
+    reduction(target_curve).divisor
+
+
++ ClosedPlaceReductionCertificate
+  -> new(@reduction)
+    @verified_cache = nil
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    return false if @reduction.class_name != "ClosedPlaceReduction"
+    source = @reduction.source_place
+    target_curve = @reduction.target_curve
+    return false if source.class_name != "ClosedPlace" || !source.certified?
+    return false if source.curve.field.class_name != "RationalField"
+    return false if target_curve.field.class_name != "FiniteField"
+    return false if !target_curve.field.prime_field?
+    return false if !target_curve.nonsingular?
+    expected_equation = source.curve.equation.change_ring(
+      target_curve.space.ring)
+    return false if !expected_equation.eql?(target_curve.equation)
+    reduced_line = @reduction.reduced_line
+    return false if reduced_line.space != target_curve.space
+    expected_coefficients = []
+    index = 0
+    while index < 3
+      expected_coefficients.push(target_curve.field.embed_from(
+        source.curve.field, source.line.coefficients[index]))
+      index += 1
+    expected_line = Line.raw(target_curve.space, expected_coefficients)
+    return false if !reduced_line.eql?(expected_line)
+    factorization = @reduction.factorization
+    return false if !factorization.certified?
+    return false if !factorization.polynomial.eql?(
+      @reduction.reduced_factor)
+    divisor = @reduction.divisor
+    return false if divisor.curve != target_curve
+    return false if divisor.degree != source.degree
+    terms = divisor.terms
+    index = 0
+    while index < terms.size
+      return false if terms[index][0] != 1
+      return false if terms[index][1].curve != target_curve
+      index += 1
+    true
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :exact_good_closed_place_reduction
+
+  -> theorem
+    "squarefree factorization of the reduced residue polynomial gives the good-reduction closed-place divisor"
+
+  -> theorem_reference
+    "reduction of an unramified closed point in a smooth model"
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+
++ ClosedPlaceReduction
+  -> new(@source_place, @target_curve)
+    if @source_place.class_name != "ClosedPlace" || (
+         !@source_place.certified?)
+      raise "closed-place reduction needs a certified closed place"
+    if @source_place.curve.field.class_name != "RationalField" || (
+         @target_curve.field.class_name != "FiniteField") || (
+         !@target_curve.field.prime_field?)
+      raise "closed-place reduction currently needs Q to F_p"
+    expected_equation = @source_place.curve.equation.change_ring(
+      @target_curve.space.ring)
+    if !expected_equation.eql?(@target_curve.equation)
+      raise "target curve is not the stated reduction"
+    if !@target_curve.nonsingular?
+      raise "closed-place reduction needs good reduction"
+
+    coefficients = []
+    index = 0
+    while index < 3
+      coefficients.push(@target_curve.field.embed_from(
+        @source_place.curve.field,
+        @source_place.line.coefficients[index]))
+      index += 1
+    @reduced_line = Line.raw(@target_curve.space, coefficients)
+    full_intersection = @target_curve.line_intersection(@reduced_line)
+    target_ring = @reduced_line.affine_restriction(
+      @target_curve.equation,
+      @source_place.parameter_chart).ring
+    @reduced_factor = @source_place.defining_polynomial.change_ring(
+      target_ring).monic
+    @factorization = @reduced_factor.factor_with_certificate
+
+    terms = []
+    seen = []
+    factors = @factorization.factors
+    index = 0
+    while index < factors.size
+      factor = factors[index]
+      if factor.degree > 0
+        previous = 0
+        while previous < seen.size
+          if seen[previous].eql?(factor)
+            raise "closed place has ramified or colliding reduction"
+          previous += 1
+        seen.push(factor)
+        place = nil
+        if factor.degree == 1
+          root = @target_curve.field.divide(
+            @target_curve.field.negate(factor.coeff(0)),
+            factor.coeff(1))
+          parameters = @source_place.parameter_chart == 1 ? (
+            [root, @target_curve.field.one]) : (
+            [@target_curve.field.one, root])
+          place = @target_curve.place(
+            @reduced_line.point_raw(parameters))
+        else
+          place = ClosedPlace.new(
+            @target_curve, @reduced_line, factor,
+            @source_place.parameter_chart,
+            full_intersection.factorization)
+        terms.push([1, place])
+      index += 1
+    @divisor = Divisor.new(@target_curve, terms)
+    if @divisor.degree != @source_place.degree
+      raise "closed-place reduction changed residue degree"
+    @certificate_cache = ClosedPlaceReductionCertificate.new(self)
+    if !@certificate_cache.verified?
+      raise "closed-place reduction failed certification"
+
+  -> source_place
+    @source_place
+
+  -> target_curve
+    @target_curve
+
+  -> reduced_line
+    @reduced_line
+
+  -> reduced_factor
+    @reduced_factor
+
+  -> factorization
+    @factorization
+
+  -> divisor
+    @divisor
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
 
 
 + ClosedPlaceResidueCertificate

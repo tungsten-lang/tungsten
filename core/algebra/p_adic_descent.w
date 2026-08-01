@@ -512,6 +512,33 @@
 
 
 + PlaneQuarticBPSHenselDiskArithmetic
+  -> .supported_local_map?(local_map)
+    map_class = local_map.class_name
+    if local_map.rational_prime == 2
+      return map_class == "EtaleProductDyadicLocalSquareClassMap"
+    map_class == "EtaleProductOddLocalSquareClassMap"
+
+  -> .certify_relative_variation(prime_ideal,
+                                  relative_variation)
+    return true if relative_variation.zero?
+    if prime_ideal.rational_prime == 2
+      required_valuation = (
+        2*prime_ideal.ramification_index + 1)
+      actual_valuation = prime_ideal.local_valuation(
+        relative_variation)
+      if actual_valuation < required_valuation
+        raise ("BPS dyadic line variation has valuation " +
+               actual_valuation.to_s + ", below required " +
+               required_valuation.to_s)
+      return true
+    reducer = NumberFieldLocalResidueReduction.new(
+      prime_ideal)
+    residue = reducer.reduction_allow_zero(
+      relative_variation)
+    if !prime_ideal.residue_field.zero?(residue)
+      raise "BPS line square class varies on the Hensel disk"
+    true
+
   -> .line_value_and_stability(
        function, basis, coefficients,
        disk, prime_ideal)
@@ -520,21 +547,17 @@
       function, basis, coefficients, center)
     if value.zero?
       raise "BPS Hensel-disk line vanishes at the cell center"
-    reducer = NumberFieldLocalResidueReduction.new(
-      prime_ideal)
     disk.local_coordinate_indices.each -> (coordinate_index)
       coefficient = (
         PlaneQuarticBPSGoodReductionLocalArithmetic.arithmetic_value(
           basis, coefficients[coordinate_index]))
       relative_variation = (
         coefficient*disk.step / value)
-      residue = reducer.reduction_allow_zero(
-        relative_variation)
-      if !prime_ideal.residue_field.zero?(residue)
-        raise "BPS line square class varies on the Hensel disk"
+      PlaneQuarticBPSHenselDiskArithmetic.certify_relative_variation(
+        prime_ideal, relative_variation)
     value
 
-  -> .value_data(function_data, local_map, disk)
+  -> .line_value_data(function_data, local_map, disk)
     if disk.class_name != "PadicPlaneCurveHenselDisk"
       raise "BPS cell evaluation needs a p-adic Hensel disk"
     if !disk.certificate.verified?
@@ -543,15 +566,15 @@
       raise "BPS Hensel disk changes the curve"
     if disk.prime != local_map.rational_prime
       raise "BPS Hensel disk changes the prime"
-    if disk.prime == 2
-      raise "BPS Hensel-disk evaluation currently needs an odd prime"
+    if !PlaneQuarticBPSHenselDiskArithmetic.supported_local_map?(
+         local_map)
+      raise "BPS Hensel-disk evaluation needs a matching product localization map"
     functions = function_data.function_components
     nested_bases = local_map.source.component_bases
     nested_maps = local_map.local_maps
     if functions.size != nested_bases.size
       raise "BPS Hensel-disk component count mismatch"
-    vector = []
-    square_classes = []
+    out = []
     flat_index = 0
     component_index = 0
     while component_index < functions.size
@@ -575,15 +598,33 @@
               function, basis,
               function.denominator_coefficients,
               disk, prime))
-          square_class = prime.local_square_class(
-            numerator / denominator)
-          square_classes.push(square_class)
-          square_class.vector.each -> vector.push(item)
+          out.push([prime, numerator, denominator])
         flat_index += 1
         basis_index += 1
       component_index += 1
     if flat_index != nested_maps.size
       raise "BPS Hensel-disk evaluation has unused local factors"
+    out
+
+  -> .stability_checked?(function_data, local_map, disk)
+    begin
+      PlaneQuarticBPSHenselDiskArithmetic.line_value_data(
+        function_data, local_map, disk)
+      return true
+    rescue error
+      return false
+
+  -> .value_data(function_data, local_map, disk)
+    line_values = (
+      PlaneQuarticBPSHenselDiskArithmetic.line_value_data(
+        function_data, local_map, disk))
+    vector = []
+    square_classes = []
+    line_values.each -> (entry)
+      square_class = entry[0].local_square_class(
+        entry[1] / entry[2])
+      square_classes.push(square_class)
+      square_class.vector.each -> vector.push(item)
     F2LinearAlgebra.validate_vector(
       vector, local_map.target_dimension)
     [vector, square_classes]
@@ -594,10 +635,10 @@
     @verified_cache = nil
 
   -> theorem
-    "strictly smaller linear variations preserve odd local square classes on a p-adic Hensel disk"
+    "sufficiently deep linear variations preserve local square classes on a p-adic Hensel disk"
 
   -> theorem_reference
-    "multivariate Hensel lemma, odd local square theorem, and Bruin-Poonen-Stoll sections 6 and 11"
+    "multivariate Hensel lemma, odd and dyadic local square theorems, and Bruin-Poonen-Stoll sections 6 and 11"
 
   -> verified?
     return @verified_cache if @verified_cache != nil
@@ -616,7 +657,10 @@
     return false if data.class_name != "PlaneQuarticBPSFunctionData"
     return false if !data.certificate.verified?
     local_map = @value.local_map
-    return false if local_map.class_name != "EtaleProductOddLocalSquareClassMap"
+    supported = (
+      PlaneQuarticBPSHenselDiskArithmetic.supported_local_map?(
+        local_map))
+    return false if !supported
     return false if !local_map.certificate.verified?
     disk = @value.disk
     return false if disk.class_name != "PadicPlaneCurveHenselDisk"
@@ -705,7 +749,7 @@
     "point differences between certified Hensel disks lie in the BPS local Jacobian image"
 
   -> theorem_reference
-    "multivariate Hensel lemma and Bruin-Poonen-Stoll sections 6 and 11"
+    "multivariate Hensel lemma, local square theorems, and Bruin-Poonen-Stoll sections 6 and 11"
 
   -> verified?
     return @verified_cache if @verified_cache != nil
@@ -783,8 +827,9 @@
       raise "BPS Hensel local image needs function data"
     if !@function_data.certificate.verified?
       raise "BPS Hensel function data is uncertified"
-    if @local_map.class_name != "EtaleProductOddLocalSquareClassMap"
-      raise "BPS Hensel local image needs an odd localization map"
+    if !PlaneQuarticBPSHenselDiskArithmetic.supported_local_map?(
+         @local_map)
+      raise "BPS Hensel local image needs a matching product localization map"
     if !@local_map.certificate.verified?
       raise "BPS Hensel localization map is uncertified"
     if disks.class_name != "Array" || disks.size == 0
@@ -882,7 +927,7 @@
     "point differences between certified p-adic curve disks lie in the BPS local Jacobian image"
 
   -> theorem_reference
-    "p-adic implicit and multivariate Hensel theorems, odd local square theorem, and Bruin-Poonen-Stoll sections 6 and 11"
+    "p-adic implicit and multivariate Hensel theorems, local square theorems, and Bruin-Poonen-Stoll sections 6 and 11"
 
   -> verified?
     return @verified_cache if @verified_cache != nil
@@ -901,7 +946,10 @@
     return false if data.class_name != "PlaneQuarticBPSFunctionData"
     return false if !data.certificate.verified?
     local_map = @image.local_map
-    return false if local_map.class_name != "EtaleProductOddLocalSquareClassMap"
+    supported = (
+      PlaneQuarticBPSHenselDiskArithmetic.supported_local_map?(
+        local_map))
+    return false if !supported
     return false if !local_map.certificate.verified?
     entries = @image.disk_entries
     return false if entries.size == 0
@@ -983,8 +1031,9 @@
       raise "BPS local disk image needs function data"
     if !@function_data.certificate.verified?
       raise "BPS local disk function data is uncertified"
-    if @local_map.class_name != "EtaleProductOddLocalSquareClassMap"
-      raise "BPS local disk image needs an odd localization map"
+    if !PlaneQuarticBPSHenselDiskArithmetic.supported_local_map?(
+         @local_map)
+      raise "BPS local disk image needs a matching product localization map"
     if !@local_map.certificate.verified?
       raise "BPS local disk localization map is uncertified"
     if disks.class_name != "Array" || disks.size == 0
@@ -1630,3 +1679,209 @@
       local_map.rational_prime, precision)
     cover.bps_smooth_locus_image(
       self, local_map, dimension_certificate)
+
+
+# A complete local BPS image W inside the product of local square-class
+# targets imposes the exact global condition loc(x) in W.  Over F2 this is
+# equivalent to q*loc(x) = 0 for every q in the orthogonal complement of W.
+# Keeping the annihilator and composition certificates separate makes the
+# global/local coordinate comparison replayable without choosing pivots by
+# hand.
++ PlaneQuarticBPSLocalImageConstraintArithmetic
+  -> .supported_image?(image)
+    image_class = image.class_name
+    return true if image_class == "PlaneQuarticBPSLocalDiskImage"
+    return true if image_class == "PlaneQuarticBPSGoodReductionLocalImage"
+    image_class == "PlaneQuarticBPSSmoothLocusLocalImage"
+
+  -> .annihilator_certificate(image)
+    system = F2LinearSystem.new(
+      image.target_dimension)
+    image.image_basis.each -> (vector)
+      system.add_equation(
+        vector, 0,
+        "complete local BPS image basis")
+    system.certificate
+
+  -> .compose(local_map, annihilator_basis)
+    compose_matrix(
+      local_map.matrix,
+      local_map.target_dimension,
+      local_map.source.dimension,
+      annihilator_basis)
+
+  -> .compose_matrix(localization, target_width,
+                     source_width, annihilator_basis)
+    if localization.size != target_width
+      raise "localization matrix has the wrong target height"
+    out = []
+    annihilator_basis.each -> (functional)
+      F2LinearAlgebra.validate_vector(
+        functional, target_width)
+      row = []
+      source_width.times -> row.push(0)
+      target_index = 0
+      while target_index < target_width
+        local_row = localization[target_index]
+        F2LinearAlgebra.validate_vector(
+          local_row, source_width)
+        if functional[target_index] == 1
+          source_index = 0
+          while source_index < source_width
+            row[source_index] = (
+              row[source_index] ^ local_row[source_index])
+            source_index += 1
+        target_index += 1
+      out.push(row)
+    out
+
+
++ PlaneQuarticBPSLocalImageConstraintCertificate
+  -> new(@constraint)
+    @verified_cache = nil
+
+  -> theorem
+    "a global descent class satisfies a local Selmer condition exactly when its localization lies in the complete BPS local image"
+
+  -> theorem_reference
+    "Bruin-Poonen-Stoll sections 9 through 11"
+
+  -> proof_kind
+    :trusted_bps_local_condition_with_exact_f2_preimage
+
+  -> kernel_checked?
+    true
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    expected = "PlaneQuarticBPSLocalImageConstraint"
+    return false if @constraint.class_name != expected
+    image = @constraint.local_image
+    supported = (
+      PlaneQuarticBPSLocalImageConstraintArithmetic.supported_image?(
+        image))
+    return false if !supported
+    return false if !image.certificate.verified?
+    return false if !image.complete?
+    local_map = image.local_map
+    return false if !local_map.certificate.verified?
+    return false if local_map.source != @constraint.source
+    return false if local_map.rational_prime != (
+      @constraint.rational_prime)
+
+    annihilator = @constraint.annihilator_certificate
+    return false if !annihilator.verified?
+    return false if annihilator.width != (
+      local_map.target_dimension)
+    return false if !F2LinearAlgebra.same_matrix?(
+      annihilator.matrix, image.image_basis)
+    return false if !annihilator.source_right_hand_side.all? ->
+      item == 0
+    expected_matrix = (
+      PlaneQuarticBPSLocalImageConstraintArithmetic.compose(
+        local_map, annihilator.kernel_basis))
+    F2LinearAlgebra.same_matrix?(
+      expected_matrix, @constraint.matrix)
+
+  -> verify_selmer_constraint(name, width, matrix,
+                              right_hand_side)
+    expected_name = (
+      "local image p=" +
+      @constraint.rational_prime.to_s)
+    return false if name.to_s != expected_name
+    return false if width != @constraint.source.dimension
+    return false if !F2LinearAlgebra.same_matrix?(
+      matrix, @constraint.matrix)
+    return false if right_hand_side.size != matrix.size
+    right_hand_side.all? -> item == 0
+
+  -> certified?
+    verified?
+
+
++ PlaneQuarticBPSLocalImageConstraint
+  -> new(@local_image)
+    supported = (
+      PlaneQuarticBPSLocalImageConstraintArithmetic.supported_image?(
+        @local_image))
+    if !supported
+      raise "local BPS constraint needs a supported local image"
+    if !@local_image.certificate.verified?
+      raise "local BPS constraint image is uncertified"
+    if !@local_image.complete?
+      raise "local BPS constraint needs the complete local image"
+    @source = @local_image.local_map.source
+    @rational_prime = @local_image.rational_prime
+    @annihilator_certificate = (
+      PlaneQuarticBPSLocalImageConstraintArithmetic.annihilator_certificate(
+        @local_image))
+    @matrix = (
+      PlaneQuarticBPSLocalImageConstraintArithmetic.compose(
+        @local_image.local_map,
+        @annihilator_certificate.kernel_basis))
+    @certificate_cache = (
+      PlaneQuarticBPSLocalImageConstraintCertificate.new(self))
+    if !@certificate_cache.verified?
+      raise "local BPS image constraint failed certification"
+
+  -> local_image
+    @local_image
+
+  -> source
+    @source
+
+  -> rational_prime
+    @rational_prime
+
+  -> annihilator_certificate
+    @annihilator_certificate
+
+  -> matrix
+    F2LinearAlgebra.copy_matrix(@matrix)
+
+  -> dimension
+    system = F2LinearSystem.new(@source.dimension)
+    @matrix.each -> (row)
+      system.add_equation(row)
+    system.certificate.kernel_dimension
+
+  -> constraint_block
+    right = []
+    @matrix.size.times -> right.push(0)
+    SelmerConstraintBlock.new(
+      "local image p=" + @rational_prime.to_s,
+      @source.dimension, @matrix, right,
+      certificate)
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
++ PlaneQuarticBPSLocalDiskImage
+  -> local_condition
+    PlaneQuarticBPSLocalImageConstraint.new(self)
+
+
++ PlaneQuarticBPSGoodReductionLocalImage
+  -> local_condition
+    PlaneQuarticBPSLocalImageConstraint.new(self)
+
+
++ PlaneQuarticBPSSmoothLocusLocalImage
+  -> local_condition
+    PlaneQuarticBPSLocalImageConstraint.new(self)

@@ -309,11 +309,35 @@
     setup = @constraint.setup
     return false if setup.class_name != "PlaneQuarticTwoDescentSetup"
     return false if !setup.true_setup? || !setup.certified?
-    class_certificate = setup.s_class_two_torsion_certificate
-    return false if class_certificate == nil
-    return false if !class_certificate.verified?
-    source = setup.s_unit_square_class_space
-    return false if source == nil
+    class_proof = @constraint.s_class_two_torsion_proof
+    return false if class_proof == nil
+    return false if !class_proof.certificate.verified?
+    source = @constraint.source
+    return false if source == nil || !source.certificate.verified?
+    return false if class_proof.order != source.order
+    if class_proof.rational_primes.to_s != (
+         source.rational_primes.to_s)
+      return false
+    function_data = setup.bps_function_data
+    return false if function_data == nil
+    return false if !function_data.certificate.verified?
+    source_components = source.order.component_orders
+    function_components = (
+      function_data.etale_algebra.component_polynomials)
+    return false if source_components.size != (
+      function_components.size)
+    i = 0
+    while i < source_components.size
+      order = source_components[i]
+      polynomial = order.algebra.defining_polynomial
+      if order.class_name == "MonogenicOrder"
+        polynomial = order.source_polynomial
+      transported = RationalUnivariatePolynomialTransport.into(
+        polynomial, function_components[i].ring)
+      return false if transported == nil
+      return false if !transported.monic.eql?(
+        function_components[i].monic)
+      i += 1
     norm_map = @constraint.norm_map
     return false if norm_map.source != source
     return false if !norm_map.certificate.verified?
@@ -337,15 +361,31 @@
 
 + PlaneQuarticBPSNormConstraint
   -> new(@setup)
+    @source = @setup.s_unit_square_class_space
+    @s_class_two_torsion_proof = (
+      @setup.s_class_two_torsion_proof)
+    initialize_norm_constraint
+
+  -> new(@setup, @source, @s_class_two_torsion_proof)
+    initialize_norm_constraint
+
+  -> initialize_norm_constraint
     @norm_map = EtaleProductSUnitNormMap.new(
-      @setup.s_unit_square_class_space)
+      @source)
     @certificate_cache = PlaneQuarticBPSNormConstraintCertificate.new(
       self)
     if !@certificate_cache.verified?
       raise "plane-quartic BPS norm constraint failed certification"
+    self
 
   -> setup
     @setup
+
+  -> source
+    @source
+
+  -> s_class_two_torsion_proof
+    @s_class_two_torsion_proof
 
   -> norm_map
     @norm_map
@@ -388,4 +428,13 @@
     @global_norm_constraint
 
   -> global_norm_constraint
+    @global_norm_constraint
+
+  # Bind a certified isomorphic presentation of the bitangent fields.  This
+  # is needed when local BPS function evaluation uses the raw bitangent
+  # generator while integral/maximal-order arithmetic uses a scaled one.
+  -> certify_global_norm_condition(
+       source, s_class_two_torsion_proof)
+    @global_norm_constraint = PlaneQuarticBPSNormConstraint.new(
+      self, source, s_class_two_torsion_proof)
     @global_norm_constraint

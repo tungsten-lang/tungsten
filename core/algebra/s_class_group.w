@@ -1222,6 +1222,367 @@
     to_s
 
 
+# The exact sequence
+#
+#   O_{K,S}^*/O_{K,S}^{*2} -> L(2,S) -> Cl(O_K,S)[2]
+#
+# identifies the finite-support square classes L(2,S) with the S-unit square
+# classes when the localized class group has no 2-torsion.  Unlike ordinary
+# NumberFieldSUnitCoordinates, the representative below may have nonzero
+# valuations outside S, but every such valuation must be even.  Auxiliary
+# quadratic characters are selected away from the representative's support,
+# and all ideal, sign, residue, and F2 calculations are replayed exactly.
++ NumberFieldL2SCoordinatesCertificate
+  -> new(@coordinates)
+    @verified_cache = nil
+
+  -> theorem
+    "the S-class exact sequence identifies L(2,S) with S-unit square classes when Cl(O_K,S)[2] is trivial"
+
+  -> theorem_reference
+    "Bruin-Poonen-Stoll section 12.6.4"
+
+  -> proof_kind
+    :trusted_s_class_exact_sequence_with_exact_coordinate_replay
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> same_prime_sets?(left, right)
+    return false if left.size != right.size
+    i = 0
+    while i < left.size
+      found = false
+      j = 0
+      while j < right.size
+        found = true if left[i].eql?(right[j])
+        j += 1
+      return false if !found
+      i += 1
+    true
+
+  -> verify!
+    expected = "NumberFieldL2SCoordinates"
+    return false if @coordinates.class_name != expected
+    basis = @coordinates.basis
+    return false if basis.class_name != "NumberFieldSUnitSquareClassBasis"
+    return false if !basis.certificate.verified?
+    proof = @coordinates.s_class_two_torsion_proof
+    return false if proof.class_name != "NumberFieldSClassTwoTorsionProof"
+    return false if !proof.certificate.verified?
+    return false if proof.field != basis.field
+    return false if !same_prime_sets?(
+      proof.s_primes, basis.s_primes)
+
+    value = @coordinates.value
+    return false if value.zero? || value.field != basis.field
+    computation = @coordinates.principal_computation
+    return false if !computation.certificate.verified?
+    return false if !computation.order.same_order?(
+      basis.field.certify_maximal_order)
+    return false if computation.value != basis.field.generic_algebra_element(
+      value)
+    ideal = @coordinates.fractional_ideal
+    return false if !computation.ideal.eql?(
+      ideal.algebra_fractional_ideal)
+    return false if !ideal.certificate.verified?
+    return false if !@coordinates.outside_s_valuations_even?
+
+    coordinate_basis = @coordinates.coordinate_basis
+    return false if coordinate_basis.class_name != (
+      "NumberFieldSUnitSquareClassBasis")
+    return false if !coordinate_basis.certificate.verified?
+    return false if coordinate_basis.field != basis.field
+    return false if coordinate_basis.generators.to_s != (
+      basis.generators.to_s)
+    return false if !same_prime_sets?(
+      coordinate_basis.s_primes, basis.s_primes)
+    target = coordinate_basis.signature_vector_with_ideal(
+      value, ideal)
+    system = F2LinearSystem.new(coordinate_basis.dimension)
+    matrix = coordinate_basis.local_matrix
+    index = 0
+    while index < matrix.size
+      system.add_equation(matrix[index], target[index])
+      index += 1
+    solution = system.solve
+    return false if solution.inconsistent?
+    F2LinearAlgebra.same_vector?(
+      solution.particular_solution,
+      @coordinates.vector)
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> certified?
+    verified?
+
+
++ NumberFieldL2SCoordinates
+  -> new(@basis, @s_class_two_torsion_proof, value,
+         auxiliary_prime_limit = 1_000)
+    if @basis.class_name != "NumberFieldSUnitSquareClassBasis"
+      raise "L(2,S) coordinates need an ordinary certified S-unit basis"
+    if !@basis.certificate.verified?
+      raise "L(2,S) coordinate basis is uncertified"
+    expected_proof = "NumberFieldSClassTwoTorsionProof"
+    if @s_class_two_torsion_proof.class_name != expected_proof
+      raise "L(2,S) coordinates need an ordinary S-class proof"
+    if !@s_class_two_torsion_proof.certificate.verified?
+      raise "L(2,S) S-class proof is uncertified"
+    if @s_class_two_torsion_proof.field != @basis.field
+      raise "L(2,S) basis and S-class proof change fields"
+    if !same_prime_sets?(
+         @s_class_two_torsion_proof.s_primes,
+         @basis.s_primes)
+      raise "L(2,S) basis and S-class proof change S"
+    @value = @basis.field.coerce(value)
+    raise "zero has no multiplicative L(2,S) coordinates" if @value.zero?
+    algebra_value = @basis.field.generic_algebra_element(
+      @value)
+    order = @basis.field.certify_maximal_order
+    @principal_computation = order.principal_fractional_ideal_with_certificate(
+      algebra_value)
+    @fractional_ideal = NumberFieldFractionalIdeal.new(
+      @basis.field, @principal_computation.ideal)
+    if !outside_s_valuations_even?
+      raise "number-field element has odd valuation outside S"
+
+    @coordinate_basis = @basis
+    begin
+      @coordinate_basis.signature_vector_with_ideal(
+        @value, @fractional_ideal)
+    rescue error
+      search = NumberFieldSUnitSquareClassBasisSearch.new(
+        @basis.field, @basis.s_primes,
+        @basis.generators, auxiliary_prime_limit,
+        250_000, 250_000,
+        @basis.archimedean_data, [@value])
+      @coordinate_basis = search.basis
+    target = @coordinate_basis.signature_vector_with_ideal(
+      @value, @fractional_ideal)
+    system = F2LinearSystem.new(@coordinate_basis.dimension)
+    matrix = @coordinate_basis.local_matrix
+    index = 0
+    while index < matrix.size
+      system.add_equation(matrix[index], target[index])
+      index += 1
+    solution = system.solve
+    if solution.inconsistent?
+      raise "L(2,S) signature is outside the certified square-class basis"
+    @vector = solution.particular_solution
+    @certificate_cache = NumberFieldL2SCoordinatesCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "L(2,S) coordinates failed certification"
+
+  -> same_prime_sets?(left, right)
+    return false if left.size != right.size
+    i = 0
+    while i < left.size
+      found = false
+      j = 0
+      while j < right.size
+        found = true if left[i].eql?(right[j])
+        j += 1
+      return false if !found
+      i += 1
+    true
+
+  -> s_prime_factor?(algebra_prime)
+    index = 0
+    while index < @basis.s_primes.size
+      prime = @basis.s_primes[index]
+      return true if prime.algebra_prime_ideal.eql?(algebra_prime)
+      index += 1
+    false
+
+  -> outside_s_valuations_even?
+    factors = @fractional_ideal.algebra_fractional_ideal.factors
+    index = 0
+    while index < factors.size
+      factor = factors[index]
+      if !s_prime_factor?(factor[0]) && factor[1].abs.odd?
+        return false
+      index += 1
+    true
+
+  -> basis
+    @basis
+
+  -> field
+    @basis.field
+
+  -> s_class_two_torsion_proof
+    @s_class_two_torsion_proof
+
+  -> value
+    @value
+
+  -> principal_computation
+    @principal_computation
+
+  -> fractional_ideal
+    @fractional_ideal
+
+  -> coordinate_basis
+    @coordinate_basis
+
+  -> vector
+    F2LinearAlgebra.copy_vector(@vector)
+
+  -> coordinates
+    vector
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
++ NumberFieldIsomorphicL2SCoordinatesCertificate
+  -> new(@coordinates)
+    @verified_cache = nil
+
+  -> theorem
+    "field isomorphisms preserve L(2,S), localized class groups, and square-class coordinates"
+
+  -> theorem_reference
+    "functoriality of localized square classes under Q-algebra isomorphism"
+
+  -> proof_kind
+    :trusted_isomorphic_l2s_coordinate_transfer
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    true
+
+  -> verify!
+    expected = "NumberFieldIsomorphicL2SCoordinates"
+    return false if @coordinates.class_name != expected
+    basis = @coordinates.basis
+    expected_basis = "NumberFieldIsomorphicSUnitSquareClassBasis"
+    return false if basis.class_name != expected_basis
+    return false if !basis.certificate.verified?
+    proof = @coordinates.s_class_two_torsion_proof
+    expected_proof = "NumberFieldIsomorphicSClassTwoTorsionProof"
+    return false if proof.class_name != expected_proof
+    return false if !proof.certificate.verified?
+    return false if proof.source_field != basis.source_field
+    return false if proof.model_field != basis.model_field
+    value = @coordinates.value
+    return false if value.zero? || value.field != basis.field
+    inner = @coordinates.model_coordinates
+    return false if inner.class_name != "NumberFieldL2SCoordinates"
+    return false if !inner.certificate.verified?
+    return false if inner.basis != basis.model_basis
+    return false if inner.s_class_two_torsion_proof != proof.model_proof
+    return false if inner.value != basis.source_to_model(value)
+    F2LinearAlgebra.same_vector?(
+      inner.vector, @coordinates.vector)
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> certified?
+    verified?
+
+
++ NumberFieldIsomorphicL2SCoordinates
+  -> new(@basis, @s_class_two_torsion_proof, value,
+         auxiliary_prime_limit = 1_000)
+    expected_basis = "NumberFieldIsomorphicSUnitSquareClassBasis"
+    if @basis.class_name != expected_basis
+      raise "isomorphic L(2,S) coordinates need a transferred basis"
+    if !@basis.certificate.verified?
+      raise "isomorphic L(2,S) basis is uncertified"
+    expected_proof = "NumberFieldIsomorphicSClassTwoTorsionProof"
+    if @s_class_two_torsion_proof.class_name != expected_proof
+      raise "isomorphic L(2,S) coordinates need a transferred S-class proof"
+    if !@s_class_two_torsion_proof.certificate.verified?
+      raise "isomorphic L(2,S) S-class proof is uncertified"
+    if @s_class_two_torsion_proof.source_field != @basis.source_field
+      raise "isomorphic L(2,S) basis and proof change source fields"
+    if @s_class_two_torsion_proof.model_field != @basis.model_field
+      raise "isomorphic L(2,S) basis and proof change model fields"
+    @value = @basis.field.coerce(value)
+    model_value = @basis.source_to_model(@value)
+    @model_coordinates = NumberFieldL2SCoordinates.new(
+      @basis.model_basis,
+      @s_class_two_torsion_proof.model_proof,
+      model_value, auxiliary_prime_limit)
+    @vector = @model_coordinates.vector
+    @certificate_cache = NumberFieldIsomorphicL2SCoordinatesCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "isomorphic L(2,S) coordinates failed certification"
+
+  -> basis
+    @basis
+
+  -> field
+    @basis.field
+
+  -> s_class_two_torsion_proof
+    @s_class_two_torsion_proof
+
+  -> value
+    @value
+
+  -> model_coordinates
+    @model_coordinates
+
+  -> vector
+    F2LinearAlgebra.copy_vector(@vector)
+
+  -> coordinates
+    vector
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+
++ NumberFieldSUnitSquareClassBasis
+  -> l2s_coordinates_with_certificate(
+       value, s_class_two_torsion_proof,
+       auxiliary_prime_limit = 1_000)
+    NumberFieldL2SCoordinates.new(
+      self, s_class_two_torsion_proof,
+      value, auxiliary_prime_limit)
+
+
++ NumberFieldIsomorphicSUnitSquareClassBasis
+  -> l2s_coordinates_with_certificate(
+       value, s_class_two_torsion_proof,
+       auxiliary_prime_limit = 1_000)
+    NumberFieldIsomorphicL2SCoordinates.new(
+      self, s_class_two_torsion_proof,
+      value, auxiliary_prime_limit)
+
+
 + NumberFieldSClassTwoTorsionSearch
   -> new(@field, s_primes = nil,
          @coefficient_bound = 4,
@@ -1901,11 +2262,16 @@
         return false if !ordinary && !transferred
         return false if !field_proof.certificate.verified?
         field = field_proof.field
-        polynomial = field.defining_polynomial
-        return false if polynomial.ring != component_polynomial.ring
+        polynomial = RationalUnivariatePolynomialTransport.into(
+          field.defining_polynomial,
+          component_polynomial.ring)
+        return false if polynomial == nil
         j = 0
         while j < i
-          previous = proofs[j].field.defining_polynomial
+          previous = RationalUnivariatePolynomialTransport.into(
+            proofs[j].field.defining_polynomial,
+            component_polynomial.ring)
+          return false if previous == nil
           return false if polynomial.gcd(previous).degree != 0
           j += 1
         product *= polynomial.monic

@@ -133,4 +133,38 @@ rescue error
   field_failed = "[error]".include?("coefficient fields")
 divisor_check("place.field_mismatch_is_loud", field_failed, true)
 
+# A certified quadratic place over Q reduces by factoring its residue
+# polynomial on the reduced line.  At p=17 both shell-width quadratics below
+# remain irreducible, so degree is preserved as one closed point.
+q_space = ProjectiveSpace<ℚ, 2>.new(:B, :S, :Z)
+qb = q_space.coords[0]
+qs = q_space.coords[1]
+qz = q_space.coords[2]
+q_equation = (
+  qb**3*qz*16 + qb*qs**2*qz*48 -
+  qs**4*3 + qs**3*qz*8 +
+  qs**2*qz**2*162 + qz**4*729)
+q_curve = Curve.new(q_space, q_equation)
+q_intersection = q_curve.line_intersection(
+  Line.new(q_space, [0, 1, -9]))
+q_place = nil
+q_intersection.divisor.terms.each -> (term)
+  q_place = term[1] if term[1].class_name == "ClosedPlace" && (
+    term[1].degree == 2)
+raise "FAIL closed_reduction.source_place" if q_place == nil
+<< "PASS closed_reduction.source_place"
+c17 = q_curve.reduce(17)
+rational_reduction17 = q_curve.place([0, 9, 1]).reduce_to(c17)
+divisor_check("place.reduce_to.coordinates",
+              rational_reduction17.point, c17.space.point(0, 9, 1))
+closed_reduction = q_place.reduction(c17)
+divisor_check("closed_reduction.certified", closed_reduction.certified?, true)
+divisor_check("closed_reduction.degree", closed_reduction.divisor.degree, 2)
+divisor_check("closed_reduction.term_count",
+              closed_reduction.divisor.terms.size, 1)
+divisor_check("closed_reduction.residue_degree",
+              closed_reduction.divisor.terms[0][1].degree, 2)
+divisor_check("closed_reduction.factor",
+              closed_reduction.reduced_factor.to_s, "B^2 + 3")
+
 << "algebra_divisors_spec: all checks passed"

@@ -193,6 +193,181 @@
       row += 1
     SymplecticF2Map.new(space, matrix)
 
+  -> conjugacy_test(other, candidate_limit = 1_000_000)
+    SymplecticF2ConjugacyTest.new(
+      self, other, candidate_limit)
+
+
++ SymplecticF2ConjugacyCertificate
+  -> new(@test)
+    @verified_cache = nil
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    return false if @test.class_name != "SymplecticF2ConjugacyTest"
+    left = @test.left
+    right = @test.right
+    return false if left.class_name != "SymplecticF2Map"
+    return false if right.class_name != "SymplecticF2Map"
+    return false if left.space != right.space
+    linear = @test.linear_certificate
+    return false if !linear.verified? || linear.inconsistent?
+    return false if linear.kernel_dimension != @test.kernel_dimension
+    return false if @test.candidate_count != (1 << linear.kernel_dimension)
+
+    # A positive result is checked directly.  A negative result replays the
+    # complete kernel enumeration, so nil means that every intertwiner in
+    # Hom_F2(left,right) was tested and none was symplectic.
+    expected = @test.recompute_conjugator(linear.kernel_basis)
+    actual = @test.conjugator
+    return false if (expected == nil) != (actual == nil)
+    if actual != nil
+      return false if actual.class_name != "SymplecticF2Map"
+      return false if actual.space != left.space
+      return false if expected.matrix.to_s != actual.matrix.to_s
+      return false if actual.compose(left).matrix.to_s != (
+        right.compose(actual).matrix.to_s)
+    true
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    @test.conjugate? ? (
+      :exact_symplectic_conjugacy_witness) : (
+      :exact_exhaustive_intertwiner_obstruction)
+
+  -> kernel_checked?
+    true
+
+
++ SymplecticF2ConjugacyTest
+  -> new(@left, @right, @candidate_limit = 1_000_000)
+    if @left.class_name != "SymplecticF2Map" || (
+       @right.class_name != "SymplecticF2Map")
+      raise "symplectic conjugacy needs two symplectic maps"
+    if @left.space != @right.space
+      raise "symplectic conjugacy maps belong to different spaces"
+    if !F2LinearAlgebra.integer?(@candidate_limit) || @candidate_limit < 1
+      raise "symplectic conjugacy candidate limit must be positive"
+    @linear_certificate = recompute_linear_certificate
+    if !@linear_certificate.verified? || @linear_certificate.inconsistent?
+      raise "symplectic conjugacy intertwiner system failed certification"
+    @kernel_dimension = @linear_certificate.kernel_dimension
+    @candidate_count = 1 << @kernel_dimension
+    if @candidate_count > @candidate_limit
+      raise "symplectic conjugacy candidate limit exceeded"
+    @conjugator = recompute_conjugator(
+      @linear_certificate.kernel_basis)
+    @certificate_cache = SymplecticF2ConjugacyCertificate.new(self)
+    if !@certificate_cache.verified?
+      raise "symplectic conjugacy test failed certification"
+
+  -> left
+    @left
+
+  -> right
+    @right
+
+  -> linear_certificate
+    @linear_certificate
+
+  -> kernel_dimension
+    @kernel_dimension
+
+  -> candidate_count
+    @candidate_count
+
+  -> conjugator
+    @conjugator
+
+  -> conjugate?
+    @conjugator != nil
+
+  -> recompute_linear_certificate
+    dimension = @left.space.dimension
+    width = dimension * dimension
+    left_matrix = @left.matrix
+    right_matrix = @right.matrix
+    system = F2LinearSystem.new(width)
+    row = 0
+    while row < dimension
+      column = 0
+      while column < dimension
+        equation = []
+        width.times -> equation.push(0)
+        inner = 0
+        while inner < dimension
+          left_index = row * dimension + inner
+          equation[left_index] = equation[left_index] ^ (
+            left_matrix[inner][column])
+          right_index = inner * dimension + column
+          equation[right_index] = equation[right_index] ^ (
+            right_matrix[row][inner])
+          inner += 1
+        system.add_equation(
+          equation, 0, "symplectic conjugacy intertwiner")
+        column += 1
+      row += 1
+    system.certificate
+
+  -> vector_to_matrix(vector)
+    dimension = @left.space.dimension
+    matrix = []
+    row = 0
+    while row < dimension
+      output_row = []
+      column = 0
+      while column < dimension
+        output_row.push(vector[row * dimension + column])
+        column += 1
+      matrix.push(output_row)
+      row += 1
+    matrix
+
+  -> recompute_conjugator(basis)
+    width = @left.space.dimension**2
+    mask = 0
+    total = 1 << basis.size
+    while mask < total
+      vector = []
+      width.times -> vector.push(0)
+      basis_index = 0
+      while basis_index < basis.size
+        if ((mask >> basis_index) & 1) == 1
+          cell = 0
+          while cell < width
+            vector[cell] = vector[cell] ^ basis[basis_index][cell]
+            cell += 1
+        basis_index += 1
+      begin
+        candidate = SymplecticF2Map.new(
+          @left.space, vector_to_matrix(vector))
+        if candidate.compose(@left).matrix.to_s == (
+           @right.compose(candidate).matrix.to_s)
+          return candidate
+      rescue error
+        # Most linear intertwiners are singular or nonsymplectic.  Exhaustive
+        # rejection of those matrices is the negative certificate.
+        candidate = nil
+      mask += 1
+    nil
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
 
 + GenusThreeThetaPermutationCertificate
   -> new(@theta_permutation)

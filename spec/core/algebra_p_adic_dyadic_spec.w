@@ -63,6 +63,26 @@ dyadic_check("ramified.e", P2.ramification_index, 2)
 dyadic_check("ramified.f", P2.residue_degree, 1)
 check_representative_basis("ramified", P2)
 check_all_classes("ramified", P2)
+dyadic_check(
+  "ramified.hensel_variation_zero",
+  PlaneQuarticBPSHenselDiskArithmetic.certify_relative_variation(
+    P2, K2.zero),
+  true)
+dyadic_check(
+  "ramified.hensel_variation_u5",
+  PlaneQuarticBPSHenselDiskArithmetic.certify_relative_variation(
+    P2, K2.coerce(8)),
+  true)
+ramified_shallow_variation_failed = false
+begin
+  PlaneQuarticBPSHenselDiskArithmetic.certify_relative_variation(
+    P2, K2.coerce(4))
+rescue error
+  ramified_shallow_variation_failed = true
+dyadic_check(
+  "ramified.hensel_variation_u4_rejected",
+  ramified_shallow_variation_failed,
+  true)
 square = P2.dyadic_square_class(
   (K2.one + a)**2)
 dyadic_check("ramified.square_zero",
@@ -98,6 +118,21 @@ dyadic_check("unramified.e", P5.ramification_index, 1)
 dyadic_check("unramified.f", P5.residue_degree, 2)
 check_representative_basis("unramified", P5)
 check_all_classes("unramified", P5)
+dyadic_check(
+  "unramified.hensel_variation_u3",
+  PlaneQuarticBPSHenselDiskArithmetic.certify_relative_variation(
+    P5, K5.coerce(8)),
+  true)
+unramified_shallow_variation_failed = false
+begin
+  PlaneQuarticBPSHenselDiskArithmetic.certify_relative_variation(
+    P5, K5.coerce(4))
+rescue error
+  unramified_shallow_variation_failed = true
+dyadic_check(
+  "unramified.hensel_variation_u2_rejected",
+  unramified_shallow_variation_failed,
+  true)
 
 # The product map uses the same complete local target and reuses each global
 # S-unit generator's statement-bound principal-ideal certificate.
@@ -120,6 +155,36 @@ dyadic_check("product.certified",
 dyadic_check("product.complete_coordinates",
               product_local.certificate.complete_square_class_coordinates?,
               true)
+
+# A local image W = <(1, 1, 0)> has annihilator
+# <(1, 1, 0), (0, 0, 1)>.  Composing these functionals with the exact
+# localization matrix must give its global preimage equations without any
+# pivot choices supplied by the caller.
+local_image_system = F2LinearSystem.new(3)
+local_image_system.add_equation([1, 1, 0])
+local_annihilator = local_image_system.certificate.kernel_basis
+localization = [
+  [1, 0, 1, 0],
+  [0, 1, 1, 0],
+  [0, 0, 1, 1]
+]
+global_preimage = (
+  PlaneQuarticBPSLocalImageConstraintArithmetic.compose_matrix(
+    localization, 3, 4, local_annihilator))
+preimage_system = F2LinearSystem.new(4)
+global_preimage.each -> (row)
+  preimage_system.add_equation(row)
+preimage_certificate = preimage_system.certificate
+dyadic_check("local_preimage.annihilator",
+              local_annihilator.to_s,
+              "\[\[1, 1, 0\], \[0, 0, 1\]\]")
+dyadic_check("local_preimage.matrix",
+              global_preimage.to_s,
+              "\[\[1, 1, 0, 0\], \[0, 0, 1, 1\]\]")
+dyadic_check("local_preimage.dimension",
+              preimage_certificate.kernel_dimension, 2)
+dyadic_check("local_preimage.certified",
+              preimage_certificate.certified?, true)
 
 odd_profile_failed = false
 begin

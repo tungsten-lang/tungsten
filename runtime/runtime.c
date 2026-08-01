@@ -32,6 +32,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
 #include <strings.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -434,8 +435,13 @@ static void bigint_release(WBigint *b) {
     }
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
     if (!pool->hot) {
+        /* `type = 0` alone is the parked marker and the duplicate-release
+         * guard (bigint_release_if_live tests only type).  Zeroing `size`
+         * too was redundant: every take path publishes a fresh size before
+         * the value escapes.  One store off the churn recurrence, which the
+         * decomposition showed is a flat ~0.9ns at every width and the whole
+         * of the copy-class deficit against GMP. */
         b->type = 0;
-        b->size = 0;
         pool->hot = b;
         pool->hot_cap = cap;
         return;
@@ -25409,6 +25415,32 @@ WValue w_bit_shr(WValue a, WValue b) {
 #define BN_COPY_FUSED_MAX 64
 #endif
 
+/* `type` (offset 0) and `size` (offset 4) share one 64-bit word, so a live
+ * result can publish both in a single store instead of two.  On the
+ * immutable-churn recurrence — release parks the buffer, the next take
+ * revives it — that word is written on every operation, and the
+ * decomposition showed this fixed cost, not the limb copy, is the whole
+ * copy-class deficit against GMP's caller-owned destination. */
+#if defined(__LITTLE_ENDIAN__) || (defined(__BYTE_ORDER__) && \
+    __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#define BN_HEADER_FUSED_PUBLISH 1
+#else
+#define BN_HEADER_FUSED_PUBLISH 0
+#endif
+static inline __attribute__((always_inline))
+void bigint_publish_header(WBigint *b, int32_t size) {
+#if BN_HEADER_FUSED_PUBLISH
+    _Static_assert(offsetof(WBigint, type) == 0, "type at 0");
+    _Static_assert(offsetof(WBigint, size) == 4, "size at 4");
+    uint64_t word = (uint64_t)W_TYPE_BIGINT |
+                    ((uint64_t)(uint32_t)size << 32);
+    memcpy(b, &word, sizeof word);      /* one str; no aliasing violation */
+#else
+    b->type = W_TYPE_BIGINT;
+    b->size = size;
+#endif
+}
+
 static WValue bigint_copy_signed_slow(WBigint *b, int32_t n, int negate) {
     WBigint *r = bigint_alloc_raw_hot(n);
     const uint64_t *restrict src = b->limbs;
@@ -25462,7 +25494,6 @@ WValue bigint_copy_signed(WBigint *b, int negate) {
                 hot_cap >= (uint32_t)n &&
                 (hot_cap == 1 || (hot_cap >> 1) < (uint32_t)n), 1)) {
             pool->hot = NULL;
-            hot->type = W_TYPE_BIGINT;
             const uint64_t *restrict src = b->limbs;
             uint64_t *restrict dst = hot->limbs;
             if (n == 1) {
@@ -25492,7 +25523,7 @@ WValue bigint_copy_signed(WBigint *b, int negate) {
                     vst1q_u64(dst + i + 6, vld1q_u64(src + i + 6));
                 }
             }
-            hot->size = negate ? -sz : n;
+            bigint_publish_header(hot, negate ? -sz : n);
             return bigint_box(hot);
         }
     }

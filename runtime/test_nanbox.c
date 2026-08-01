@@ -820,6 +820,18 @@ int main() {
         printf("  bigint single-limb quotient: OK\n");
     }
 
+    /* BigInt owns a dedicated object subtag; its header byte is allocation
+     * state for the recycler rather than part of dynamic dispatch. */
+    {
+        WValue v = bigint_dec("18446744073709551617");
+        assert(w_is_bigint(v));
+        assert(w_is_obj(v));
+        assert(w_subtag(v) == W_SUBTAG_BIGINT);
+        assert(w_as_bigint(v)->type == W_TYPE_BIGINT);
+        free(w_as_bigint(v));
+        printf("  bigint dedicated subtag: OK\n");
+    }
+
     /* Pointer alignment: w_as_ptr strips sub-tag correctly */
     {
         /* Simulate a 16-byte aligned pointer */

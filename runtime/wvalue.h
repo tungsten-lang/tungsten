@@ -158,11 +158,12 @@ typedef uint64_t WValue;
 /* ---- Object sub-tags (low 4 bits of value in 0x0000 space) ---- */
 /* Singletons 0-3 and sentinels 4-0xF are NOT objects.
    Objects: value >= 0x10 with top 16 bits == 0. */
-/* Phase 6i.2 subtag layout. Frees three slots (2, 3, 0xE) for future
- * promotions; ATOMIC and STRBUF claim previously-cold IPV6/BIGINT slots. */
+/* Phase 6i.2 subtag layout. BigInt reclaims one of the freed slots because
+ * arithmetic dispatch is hot enough that the generic-bucket header load is
+ * measurable; slots 3 and 0xE remain free for future promotions. */
 #define W_SUBTAG_GENERIC     0   /* type discriminator in struct header byte */
 #define W_SUBTAG_ATOMIC      1   /* Phase 6i.2: was IPV6 (demoted to W_TYPE_IPV6 = 6) */
-/* slot 2 free (was MAC; demoted to W_TYPE_MAC = 5) */
+#define W_SUBTAG_BIGINT      2   /* promoted from generic W_TYPE_BIGINT */
 /* slot 3 free (was ENCODED; demoted to W_TYPE_ENCODED = 8) */
 #define W_SUBTAG_INSTANCE    4   /* user-defined class instance (WObject) */
 #define W_SUBTAG_HASH        5
@@ -171,7 +172,7 @@ typedef uint64_t WValue;
 #define W_SUBTAG_RANGE       8
 #define W_SUBTAG_SMALL_ARRAY 9   /* Phase 6h: own subtag, no type byte */
 #define W_SUBTAG_ARRAY       0xA /* WArray; ebits=65 (w64) for polymorphic, else typed */
-#define W_SUBTAG_STRBUF      0xB /* Phase 6i.2: was BIGINT (demoted to W_TYPE_BIGINT = 0xB) */
+#define W_SUBTAG_STRBUF      0xB /* Phase 6i.2: claimed BigInt's former slot */
 #define W_SUBTAG_CLASS       0xC
 #define W_SUBTAG_UUID        0xD
 /* slot E free (was ERROR; never used a constructor — no demote needed) */
@@ -195,7 +196,7 @@ typedef uint64_t WValue;
 #define W_TYPE_ENCODED   8  /* Phase 6i.2: demoted from W_SUBTAG_ENCODED (was W_TYPE_STRBUF) */
 #define W_TYPE_ROPE      9
 /* Phase 6i.1b: 10 freed (was W_TYPE_BOOL_ARRAY — folded into W_SUBTAG_ARRAY ebits=1). */
-#define W_TYPE_BIGINT    11 /* Phase 6i.2: demoted from W_SUBTAG_BIGINT (was W_TYPE_TYPED_ARRAY) */
+#define W_TYPE_BIGINT    11 /* live/parked allocation marker; dispatch uses W_SUBTAG_BIGINT */
 /* Metal compute primitives — defined in runtime/metal.m on darwin,
  * stubbed on other platforms. The Tungsten facade lives in core/metal.w. */
 #define W_TYPE_METAL_DEVICE   12
@@ -483,17 +484,17 @@ static inline int w_is_domain_obj(WValue v) { return w_is_obj(v) && w_subtag(v) 
  * (they need struct access to read the type byte after demotion). w_is_error
  * removed — never had a constructor; the subtag was free real-estate. */
 
-/* Phase 6i.2: w_is_integer_any moved to runtime.h alongside w_is_bigint
- * (which now needs the WBigint struct visible to read its type byte). */
+/* w_is_integer_any and w_is_bigint live in runtime.h after WBigint is
+ * declared; BigInt itself now dispatches through a dedicated object subtag. */
 
 /* ---- Bigint (heap object) ----
    Variable-width limb array, like multi-byte UTF-8:
    - 1 limb (most values): fits in i48, stays inline
    - N limbs (overflow): heap-allocated, transparent to user code
    Sign is encoded in the sign of length (GMP convention).
-   Phase 6i.2: demoted from W_SUBTAG_BIGINT to W_SUBTAG_GENERIC + type byte. */
+   The type byte is retained as the live/parked recycler marker. */
 typedef struct {
-    uint8_t  type;      /* W_TYPE_BIGINT */
+    uint8_t  type;      /* W_TYPE_BIGINT while live; 0 while pooled */
     uint8_t  _pad[3];   /* align `size` at offset 4 */
     int32_t  size;      /* abs(size) = limb count; sign = number sign; 0 = zero */
     uint32_t cap;       /* allocated limbs */

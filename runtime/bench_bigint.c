@@ -50,6 +50,96 @@ static void bench_free_value(WValue value) {
     if (w_is_bigint(value)) free(w_as_bigint(value));
 }
 
+static int bench_bigint_recycle_check(void) {
+#if BN_BIGINT_RECYCLE
+    int bad = 0;
+    bigint_pool_release_thread();
+
+    WBigint *given = bigint_alloc_raw(65);
+    for (int32_t i = 0; i < 65; i++) given->limbs[i] = ~(uint64_t)i;
+    given->size = 65;
+    WBigint *given_address = given;
+    w_value_free(bigint_box(given));
+
+    WBigint *taken = bigint_alloc_raw(64);
+    if (taken != given_address || taken->cap < 64 ||
+        taken->type != W_TYPE_BIGINT || taken->size != 0) bad++;
+    for (int32_t i = 0; i < 64; i++) taken->limbs[i] = (uint64_t)i + 1;
+    taken->size = 64;
+    w_value_free(bigint_box(taken));
+
+    /* The zeroed allocator must restore calloc semantics across the full
+     * retained capacity, not just the caller's requested limb count. */
+    WBigint *zeroed = bigint_alloc(64);
+    if (zeroed != given_address || zeroed->cap < 64) bad++;
+    for (uint32_t i = 0; i < zeroed->cap; i++)
+        if (zeroed->limbs[i] != 0) bad++;
+
+    /* A parked allocation may be taken, but a still-live result must never
+     * be returned a second time. */
+    WBigint *simultaneous = bigint_alloc_raw(64);
+    if (simultaneous == zeroed) bad++;
+    free(zeroed);
+    free(simultaneous);
+    bigint_pool_release_thread();
+
+    /* Dedicated-subtag WValues still identify parked storage as BigInt, so
+     * the cleared allocation marker must make duplicate generic disposal a
+     * no-op. Otherwise the same address can be handed out twice as live. */
+    WBigint *duplicate = bigint_alloc_raw(8);
+    duplicate->size = 8;
+    WValue duplicate_value = bigint_box(duplicate);
+    w_value_free(duplicate_value);
+    w_value_free(duplicate_value);
+    WBigint *first_take = bigint_alloc_raw(8);
+    WBigint *second_take = bigint_alloc_raw(8);
+    if (first_take == second_take) {
+        bad++;
+        free(first_take);
+    } else {
+        free(first_take);
+        free(second_take);
+    }
+    bigint_pool_release_thread();
+
+    WBigint *oversized =
+        bigint_alloc_raw((int32_t)BN_BIGINT_POOL_MAX_CAP + 1);
+    oversized->size = (int32_t)BN_BIGINT_POOL_MAX_CAP + 1;
+    w_value_free(bigint_box(oversized));
+    if (bigint_pool_state.total != 0) bad++;
+
+    printf("BigInt capacity recycler: %s\n", bad ? "FAIL" : "give/take ok");
+    return bad;
+#else
+    printf("BigInt capacity recycler: disabled\n");
+    return 0;
+#endif
+}
+
+typedef struct {
+    const uint64_t *a;
+    const uint64_t *b;
+    const uint64_t *expected;
+    uint64_t *out;
+    int32_t n;
+    int ok;
+} ToomPoolStressJob;
+
+static void *bench_toom_pool_stress_worker(void *arg) {
+    ToomPoolStressJob *job = (ToomPoolStressJob *)arg;
+    job->ok = 1;
+    for (int rep = 0; rep < 3; rep++) {
+        bigint_mul_dispatch(job->out, job->a, job->n, job->b, job->n);
+        if (memcmp(job->out, job->expected,
+                   (size_t)(2 * job->n) * sizeof(uint64_t)) != 0) {
+            job->ok = 0;
+            break;
+        }
+    }
+    bn_ws_release_thread();
+    return NULL;
+}
+
 static int bench_iters_for_limbs(int32_t limbs) {
     if (limbs <= 32) return 2000;
     if (limbs <= 64) return 1000;
@@ -174,7 +264,9 @@ static int bench_div_single_equivalence(void) {
             uint64_t ref_rem, got_rem;
             WBigint *ref = bench_div_single_ref(a, limbs, divisors[d], &ref_rem);
             WBigint *got = mag_div_single(a, limbs, divisors[d], &got_rem);
-            int mismatch = ref_rem != got_rem || ref->size != got->size ||
+            uint64_t got_mod = mag_mod_single(a, limbs, divisors[d]);
+            int mismatch = ref_rem != got_rem || ref_rem != got_mod ||
+                           ref->size != got->size ||
                            memcmp(ref->limbs, got->limbs,
                                   (size_t)limbs * sizeof(uint64_t)) != 0;
             free(a);
@@ -189,7 +281,7 @@ static int bench_div_single_equivalence(void) {
         }
     }
 
-    printf("single-limb div equivalence: %d/%d exact quotient+remainder matches\n",
+    printf("single-limb div/mod equivalence: %d/%d exact quotient+remainder matches\n",
            checked, checked);
     return 0;
 }
@@ -531,6 +623,38 @@ static double bench_mersenne_square_direct(uint64_t p, int iters) {
     return elapsed * 1e9 / (double)iters;
 }
 
+static int bench_mersenne_127_fuzz(int count) {
+    uint64_t seed = 0x6a09e667f3bcc909ULL;
+    int bad = 0;
+    for (int i = 0; i < count; i++) {
+        seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+        uint64_t a0 = seed;
+        seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+        uint64_t a1 = seed & (UINT64_MAX >> 1);
+        if (i == 0) a0 = a1 = 0;
+        if (i == 1) { a0 = UINT64_MAX; a1 = UINT64_MAX >> 1; }
+        WBigint *s = bigint_alloc_raw(2);
+        s->limbs[0] = a0;
+        s->limbs[1] = a1;
+        s->size = a1 ? 2 : (a0 ? 1 : 0);
+        uint64_t prod[4], acc[3];
+        WValue expected;
+        if (s->size == 0) {
+            expected = w_box_int(0);
+        } else {
+            bigint_sqr_dispatch(prod, s->limbs, s->size);
+            expected = w_mersenne_reduce_product_limbs(
+                prod, 2 * s->size, 127, acc);
+        }
+        WValue actual = w_mersenne_square_mod_127(s->limbs, s->size);
+        if (w_eq(expected, actual) != W_TRUE) bad++;
+        bench_free_value(expected);
+        bench_free_value(actual);
+        free(s);
+    }
+    return bad;
+}
+
 static WValue bench_abs_integer(WValue v) {
     if (w_is_int(v)) {
         int64_t iv = w_as_int(v);
@@ -604,6 +728,7 @@ static double bench_gcd_shared_factor(int32_t limbs, int iters, int optimized) {
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
+    if (bench_bigint_recycle_check()) return 1;
     const int32_t equal_sizes[] = {32, 64, 256, 1024, 4096, 8192};
     const struct { int32_t hi, lo; } unbalanced[] = {
         {256, 32}, {1024, 64}, {4096, 256}, {8192, 512}
@@ -764,7 +889,14 @@ int main(int argc, char **argv) {
                mulmod_iters);
     }
 
-    printf("\nMersenne square-mod       generic     direct   iters\n");
+    {
+        int checked = 10000;
+        int bad = bench_mersenne_127_fuzz(checked);
+        printf("\nMersenne p=127 specialized fuzz: %d/%d match%s\n",
+               checked - bad, checked, bad ? "  *** MISMATCH ***" : "");
+        if (bad) return 1;
+    }
+    printf("Mersenne square-mod       generic     direct   iters\n");
     const struct { uint64_t p; int iters; } mersenne[] = {
         {127, 300}, {521, 80}, {1279, 24}, {3217, 8}
     };
@@ -1000,11 +1132,12 @@ int main(int argc, char **argv) {
     { uint64_t seed = 0x0c0ffee123456789ULL; int bad = 0, checked = 0;
       for (int t = 0; t < 250; t++) {
           int32_t vlen, ulen;
-          switch (t % 5) {
-          case 0: vlen = 128 + (int32_t)(seed % 130); break;      /* just over the gate */
-          case 1: vlen = 200 + (int32_t)(seed % 313); break;      /* mid, odd sizes */
-          case 2: vlen = 128; break;                              /* power-of-two-ish */
-          case 3: vlen = 129; break;                              /* odd → base-case heavy */
+          switch (t % 6) {
+          case 0: vlen = 64 + (int32_t)(seed % 64); break;        /* top-level gate window */
+          case 1: vlen = 128 + (int32_t)(seed % 130); break;
+          case 2: vlen = 200 + (int32_t)(seed % 313); break;      /* mid, odd sizes */
+          case 3: vlen = 64; break;                               /* exact crossover */
+          case 4: vlen = 65; break;                               /* odd → base-case heavy */
           default: vlen = 256 + (int32_t)(seed % 100); break;
           }
           seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
@@ -1045,7 +1178,7 @@ int main(int argc, char **argv) {
       if (bad) return 1;
       /* timing: 2n ÷ n */
       printf("BZ divmod (us)   n     knuth      bz\n");
-      const int32_t dn[] = {128, 256, 512, 1024, 2048};
+      const int32_t dn[] = {64, 72, 80, 96, 112, 128, 256, 512, 1024, 2048};
       for (size_t di = 0; di < sizeof(dn)/sizeof(dn[0]); di++) {
           int32_t n = dn[di];
           uint64_t *U = malloc((size_t)(2 * n) * 8), *V = malloc((size_t)n * 8);
@@ -1126,6 +1259,80 @@ int main(int argc, char **argv) {
         free(x); free(s); }
     }
 
+    /* Normalized reciprocal division leaf vs the compiler's exact u128
+     * quotient/remainder helper, including boundary numerators. */
+    { uint64_t seed = 0x6a09e667f3bcc909ULL; int bad = 0, checked = 0;
+      for (int t = 0; t < 200000; t++) {
+          seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+          uint64_t d = seed | (1ULL << 63);
+          seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+          uint64_t nh = (t % 7 == 0) ? d - 1 : seed & (d - 1);
+          seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+          uint64_t nl = (t % 11 == 0) ? ~0ULL : seed;
+          uint64_t dinv = (uint64_t)((~(__uint128_t)0) / d);
+          uint64_t got_r;
+          uint64_t got_q = bn_div_qr_preinv(nh, nl, d, dinv, &got_r);
+          __uint128_t num = ((__uint128_t)nh << 64) | nl;
+          uint64_t want_q = (uint64_t)(num / d);
+          uint64_t want_r = (uint64_t)(num % d);
+          if (got_q != want_q || got_r != want_r) bad++;
+          checked++;
+      }
+      printf("\npreinverse 2-by-1 div vs u128: %d/%d match%s\n",
+             checked-bad, checked, bad?"  *** MISMATCH ***":"");
+      if (bad) return 1;
+    }
+
+    /* mul_1 asm vs portable reference: random + all-ones, lengths spanning
+     * the 4x-unroll boundary (tails). */
+    { uint64_t seed = 0xa4093822299f31d0ULL; int bad = 0, checked = 0;
+      for (int t = 0; t < 400; t++) {
+          int32_t n = 1 + (int32_t)(seed % 41);
+          seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+          uint64_t up[48], r1[48], r2[48], v;
+          for (int32_t i = 0; i < n; i++) {
+              seed^=seed<<13;seed^=seed>>7;seed^=seed<<17;
+              up[i] = (t%5==1)?~0ULL:seed;
+          }
+          seed^=seed<<13;seed^=seed>>7;seed^=seed<<17;
+          v = (t%5==2)?~0ULL:seed;
+          uint64_t c1 = bn_mul_1(r1, up, n, v);
+          uint64_t c2 = bn_mul_1_ref(r2, up, n, v);
+          int ok = (c1 == c2) && memcmp(r1, r2, (size_t)n * 8) == 0;
+          if (!ok) bad++;
+          checked++;
+      }
+      printf("\nmul_1 asm vs ref: %d/%d match%s\n",
+             checked-bad, checked, bad?"  *** MISMATCH ***":"");
+      if (bad) return 1;
+    }
+
+    /* Signed-carry Lehmer pair kernel vs the four-carry portable oracle. */
+    { uint64_t seed = 0x243f6a8885a308d3ULL; int bad = 0, checked = 0;
+      for (int t = 0; t < 500; t++) {
+          int32_t n = 1 + (int32_t)(seed % 41);
+          uint64_t x[48], y[48], ax[48], ay[48], rx[48], ry[48], coeff[4];
+          for (int32_t i = 0; i < n; i++) {
+              seed^=seed<<13;seed^=seed>>7;seed^=seed<<17; x[i] = seed;
+              seed^=seed<<13;seed^=seed>>7;seed^=seed<<17; y[i] = seed;
+          }
+          for (int i = 0; i < 4; i++) {
+              seed^=seed<<13;seed^=seed>>7;seed^=seed<<17;
+              coeff[i] = seed & ((1ULL << 60) - 1);
+          }
+          int aok = mag_linear_comb_pair_core(ax, ay, n, x, y, coeff);
+          int rok = mag_linear_comb_pair_core_ref(rx, ry, n, x, y, coeff);
+          int ok = aok == rok
+                && memcmp(ax, rx, (size_t)n * 8) == 0
+                && memcmp(ay, ry, (size_t)n * 8) == 0;
+          if (!ok) bad++;
+          checked++;
+      }
+      printf("\nLehmer pair signed-carry asm vs ref: %d/%d match%s\n",
+             checked-bad, checked, bad?"  *** MISMATCH ***":"");
+      if (bad) return 1;
+    }
+
     /* submul_1 asm vs portable reference: random + all-ones, lengths spanning
      * the 4x-unroll boundary (tails). */
     { uint64_t seed = 0x5deece66d1234567ULL; int bad = 0, checked = 0;
@@ -1149,13 +1356,13 @@ int main(int argc, char **argv) {
       if (bad) return 1;
     }
 
-    /* SOS vs CIOS Montgomery: equivalence at k=3..64 (random + all-ones + tiny
-     * top limbs), then a crossover timing sweep. */
+    /* SOS vs CIOS Montgomery: equivalence at k=1 and k=3..96 (random +
+     * all-ones + tiny top limbs), then a crossover timing sweep. */
     { uint64_t seed = 0xabcdef0123456789ULL; int bad = 0, checked = 0;
       for (int t = 0; t < 300; t++) {
-          int32_t k = 3 + (int32_t)(seed % 62);
+          int32_t k = (t % 10 == 0) ? 1 : 3 + (int32_t)(seed % 94);
           seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
-          uint64_t N[66], A[66], B[66], o1[66], o2[66], T[134];
+          uint64_t N[98], A[98], B[98], o1[98], o2[98], T[198];
           for (int32_t i = 0; i < k; i++) { seed^=seed<<13;seed^=seed>>7;seed^=seed<<17; N[i] = seed; }
           N[0] |= 1ULL;
           if (t % 4 == 1) N[k-1] = 1;                     /* tiny top limb */
@@ -1175,10 +1382,10 @@ int main(int argc, char **argv) {
       printf("SOS vs CIOS mont: %d/%d match%s\n", checked-bad, checked, bad?"  *** MISMATCH ***":"");
       if (bad) return 1;
       printf("mont kernel (ns)   k     CIOS      SOS\n");
-      const int32_t ks[] = {4, 8, 16, 32, 64};
-      for (size_t ki = 0; ki < 5; ki++) {
+      const int32_t ks[] = {4, 8, 16, 32, 64, 96};
+      for (size_t ki = 0; ki < sizeof(ks) / sizeof(ks[0]); ki++) {
           int32_t k = ks[ki];
-          uint64_t N[66], A[66], B[66], o1[66], T[134];
+          uint64_t N[98], A[98], B[98], o1[98], T[198];
           uint64_t s2 = 0x123456789abcdefULL ^ (uint64_t)k;
           for (int32_t i = 0; i < k; i++) { s2^=s2<<13;s2^=s2>>7;s2^=s2<<17; N[i]=s2;
               s2^=s2<<13;s2^=s2>>7;s2^=s2<<17; A[i]=s2; s2^=s2<<13;s2^=s2>>7;s2^=s2<<17; B[i]=s2; }
@@ -1194,6 +1401,85 @@ int main(int argc, char **argv) {
           double ts = (bench_now() - t0) * 1e9 / it;
           printf("%18d %8.0f %8.0f  (%.2fx)\n", k, tc, ts, tc / ts);
       }
+    }
+
+    /* Symmetry-specialized Toom-6: compare its 11-point interpolation with
+     * the independently implemented Toom-4 rung near and above crossover. */
+    { uint64_t seed = 0x6eed0e6eed0e6eedULL; int bad = 0, checked = 0;
+      const int32_t sizes[] = {2560, 3072, 4096};
+      for (size_t si = 0; si < sizeof(sizes) / sizeof(sizes[0]); si++) {
+          int32_t n = sizes[si];
+          uint64_t *A = malloc((size_t)n * sizeof(uint64_t));
+          uint64_t *B = malloc((size_t)n * sizeof(uint64_t));
+          uint64_t *r6 = malloc((size_t)(2 * n) * sizeof(uint64_t));
+          uint64_t *r4 = malloc((size_t)(2 * n) * sizeof(uint64_t));
+          uint64_t *scratch = malloc(((size_t)16 * n + 1024) * sizeof(uint64_t));
+          if (!A || !B || !r6 || !r4 || !scratch) die("out of memory in Toom-6 fuzz");
+          for (int rep = 0; rep < 2; rep++) {
+              for (int32_t i = 0; i < n; i++) {
+                  seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+                  A[i] = rep ? UINT64_MAX : seed;
+                  seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+                  B[i] = rep ? UINT64_MAX : seed;
+              }
+              bn_toom6(r6, A, B, n, scratch);
+              bn_toom4(r4, A, B, n, scratch);
+              if (memcmp(r6, r4, (size_t)(2 * n) * sizeof(uint64_t)) != 0) bad++;
+              checked++;
+              bn_toom6_sq(r6, A, n, scratch);
+              bn_toom4_sq(r4, A, n, scratch);
+              if (memcmp(r6, r4, (size_t)(2 * n) * sizeof(uint64_t)) != 0) bad++;
+              checked++;
+          }
+          free(A); free(B); free(r6); free(r4); free(scratch);
+      }
+      printf("Toom-6 mul/square vs Toom-4: %d/%d match%s\n", checked - bad, checked,
+             bad ? "  *** MISMATCH ***" : "");
+      if (bad) return 1;
+    }
+
+    /* Concurrent callers: one uses the persistent point pool while the
+     * others take the no-oversubscription fallback. */
+    { enum { NJOBS = 4 }; const int32_t n = 2048;
+      ToomPoolStressJob jobs[NJOBS];
+      pthread_t threads[NJOBS];
+      int live[NJOBS];
+      uint64_t seed = 0xc011ab1ec011ab1eULL;
+      int bad = 0;
+      for (int j = 0; j < NJOBS; j++) {
+          uint64_t *A = malloc((size_t)n * sizeof(uint64_t));
+          uint64_t *B = malloc((size_t)n * sizeof(uint64_t));
+          uint64_t *expected = malloc((size_t)(2 * n) * sizeof(uint64_t));
+          uint64_t *out = malloc((size_t)(2 * n) * sizeof(uint64_t));
+          if (!A || !B || !expected || !out)
+              die("out of memory in concurrent Toom pool stress");
+          for (int32_t i = 0; i < n; i++) {
+              seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+              A[i] = seed;
+              seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+              B[i] = seed;
+          }
+          A[n - 1] |= 1ULL << 63;
+          B[n - 1] |= 1ULL << 63;
+          bigint_mul_schoolbook_into(expected, A, n, B, n);
+          jobs[j] = (ToomPoolStressJob){A, B, expected, out, n, 0};
+          live[j] = pthread_create(&threads[j], NULL,
+                                   bench_toom_pool_stress_worker,
+                                   &jobs[j]) == 0;
+          if (!live[j])
+              bench_toom_pool_stress_worker(&jobs[j]);
+      }
+      for (int j = 0; j < NJOBS; j++) {
+          if (live[j]) pthread_join(threads[j], NULL);
+          if (!jobs[j].ok) bad++;
+          free((void *)jobs[j].a);
+          free((void *)jobs[j].b);
+          free((void *)jobs[j].expected);
+          free(jobs[j].out);
+      }
+      printf("concurrent Toom pool stress: %d/%d match%s\n",
+             NJOBS - bad, NJOBS, bad ? "  *** MISMATCH ***" : "");
+      if (bad) return 1;
     }
 
     /* Schönhage–Strassen: equivalence vs the Goldilocks NTT (balanced) and vs
@@ -1242,17 +1528,21 @@ int main(int argc, char **argv) {
       printf("\nSSA fuzz (vs NTT + schoolbook): %d/%d match%s\n", checked - bad, checked,
              bad ? "  *** MISMATCH ***" : "");
       if (bad) return 1;
-      printf("dispatch decisions (model):\n");
+      printf("three-way multiply dispatch decisions (adjusted model):\n");
       const int32_t dn[] = {2048, 2560, 3072, 3584, 4096, 6144, 8192, 16384};
       for (size_t di = 0; di < sizeof(dn)/sizeof(dn[0]); di++) {
           int32_t n = dn[di];
           int32_t sw; long sL; uint64_t sK;
           double sc = ssa_choose(n, n, &sw, &sL, &sK);
-          double nc = ntt_cost_est(n);
-          printf("  n=%-6d ssa_est %8.0f  ntt_est %8.0f  -> %s\n", n, sc, nc, sc < nc ? "SSA" : "NTT");
+          if (sw <= 8) sc *= 1.45;
+          double nc = ntt_cost_est(n) * 1.65;
+          double tc = 6.7 * pow((double)n, 1.403677461);
+          static const char *names[] = {"Toom", "SSA", "NTT"};
+          printf("  n=%-6d toom %8.0f  ssa %8.0f  ntt %8.0f  -> %s\n",
+                 n, tc, sc, nc, names[bn_top_choice(n, n, 0)]);
       }
       printf("SSA vs NTT (us)    n       ntt       ssa\n");
-      const int32_t tn[] = {2048, 3072, 4096, 8192, 16384};
+      const int32_t tn[] = {2048, 3072, 4096, 6144, 8192, 16384};
       for (size_t ti = 0; ti < sizeof(tn)/sizeof(tn[0]); ti++) {
           int32_t n = tn[ti];
           uint64_t *A = malloc((size_t)n * 8), *B = malloc((size_t)n * 8);

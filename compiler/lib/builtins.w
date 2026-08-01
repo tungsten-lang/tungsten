@@ -385,6 +385,9 @@
   when "clock"
     clock()
 
+  when "clock_ms"
+    clock_ms()
+
   when "runtime_identity"
     runtime_identity()
 
@@ -434,7 +437,7 @@ builtin_names = [
   "join", "sort", "flatten", "uniq", "delete", "each", "map", "select",
   "reject", "reduce", "each_with_index", "map_with_index", "zip", "any?", "all?",
   "find", "count", "sum", "times", "keys", "values", "has_key?", "abs", "max", "min",
-  "respond_to?", "is_a?", "freeze", "argv", "clock", "runtime_identity",
+  "respond_to?", "is_a?", "freeze", "argv", "clock", "clock_ms", "runtime_identity",
   "capture", "system", "env", "ljust", "rjust", "round", "gets"
 ]
 

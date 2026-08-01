@@ -82,12 +82,13 @@ MANPAGE = manpage_lines.join("\n")
 # Compile-on-demand a bin/commands/*.w tool, then exec it with tool_args.
 # Interpretation is intentionally avoided: several stdlib methods (and JSON
 # edge cases) behave better on the compiled path.
--> run_command_w(rel_path, tool_args)
+# Compile a bin/commands/*.w entry on demand and return the native binary path.
+# Binaries are cached next to the source: bin/commands/fmt.w → bin/commands/fmt.
+-> ensure_command_binary(rel_path)
   if !system("test -x " + sh_quote(COMPILER))
     << "tungsten: bin/tungsten-compiler not found — run `bin/tungsten build` first"
     exit(1)
   entry = ROOT + "/" + rel_path
-  # Cache native binaries next to the source: bin/commands/fmt.w → bin/commands/fmt
   out_bin = entry.replace(".w", "")
   need = true
   if system("test -x " + sh_quote(out_bin))
@@ -100,7 +101,14 @@ MANPAGE = manpage_lines.join("\n")
       exit(1)
     if system("uname -s | grep -q Darwin")
       system("codesign --force -s - " + sh_quote(out_bin) + " >/dev/null 2>&1")
-  cmd = "BIT_HOME=" + sh_quote(ROOT + "/bits") + " TUNGSTEN_ROOT=" + sh_quote(ROOT) + " " + sh_quote(out_bin)
+  out_bin
+
+-> command_env_prefix
+  "BIT_HOME=" + sh_quote(ROOT + "/bits") + " TUNGSTEN_ROOT=" + sh_quote(ROOT) + " "
+
+-> run_command_w(rel_path, tool_args)
+  out_bin = ensure_command_binary(rel_path)
+  cmd = command_env_prefix + sh_quote(out_bin)
   i = 0
   while i < tool_args.size
     cmd = cmd + " " + sh_quote(tool_args[i])
@@ -108,6 +116,24 @@ MANPAGE = manpage_lines.join("\n")
   if system(cmd)
     exit(0)
   exit(1)
+
+# Same, but exits with the command's REAL status instead of collapsing it to
+# 0/1. `tungsten sandbox` reports the sandboxed program's own exit code —
+# callers must be able to tell `exit 3` from a crash — and system() only
+# answers "did it succeed".
+-> run_command_w_status(rel_path, tool_args)
+  out_bin = ensure_command_binary(rel_path)
+  cmd = command_env_prefix + sh_quote(out_bin)
+  i = 0
+  while i < tool_args.size
+    cmd = cmd + " " + sh_quote(tool_args[i])
+    i = i + 1
+  spawn_argv = []
+  spawn_argv.push("/bin/sh")
+  spawn_argv.push("-c")
+  spawn_argv.push(cmd)
+  proc = Process.spawn(spawn_argv)
+  exit(proc.wait)
 
 # Compile-on-demand a bit entry (flame/bit use `module` etc. the interpreter
 # does not support — they must be native binaries).
@@ -326,6 +352,9 @@ when "build"
 
 when "fmt"
   run_command_w("bin/commands/fmt.w", tool_argv_after_command("fmt"))
+
+when "sandbox"
+  run_command_w_status("bin/commands/sandbox.w", tool_argv_after_command("sandbox"))
 
 when "new"
   run_new(rest)

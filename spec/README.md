@@ -14,6 +14,8 @@ breaks.
 - `interpreter/` - specs that must run through `bin/tungsten run`.
 - `numeric/` - numeric tower and floating-point behavior specs.
 - `repl/` - PTY/system specs for the compiled REPL.
+- `api/` - response-shape contract for the `/api/run` + `/api/check` execution
+  engine (`services/api/lib/exec.w`). Opt-in via `RUN_API_SPECS=1`.
 - `fixtures/` - sample programs and legacy expression fixtures. These are not
   discovered as runnable specs.
 
@@ -24,7 +26,8 @@ make specs
 ```
 
 Set `RUN_CORE_SPECS=1` to include core runtime specs, `RUN_METAL_SPECS=1` to
-include Metal specs, and `RUN_REPL_SPECS=1` to include the PTY REPL scrub test.
+include Metal specs, `RUN_REPL_SPECS=1` to include the PTY REPL scrub test, and
+`RUN_API_SPECS=1` to include the API execution-engine contract spec.
 
 CUDA emit (`spec/compiler/gpu_cuda_emit_spec.w`) is included in the default
 set: the harness sets `TUNGSTEN_GPU_DIALECTS=cuda` at compile time and the

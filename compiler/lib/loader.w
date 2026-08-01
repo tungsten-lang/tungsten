@@ -689,6 +689,19 @@ use parser
       while vi < vals.size()
         collect_autoload_refs(vals[vi], defined, registry, seen, pending)
         vi += 1
+    # `"[Sandbox.active?]"` keeps its parts as [tag, payload] pairs in
+    # Node#parts, not as AST children, so the generic probes below never see
+    # them. A class named ONLY inside an interpolation would resolve to nil at
+    # runtime. Literal parts carry a String payload (tag :str); the rest carry
+    # an expression node.
+    if t in (:string_interp :byte_array_interp) && node.parts != nil
+      iparts = node.parts
+      pi = 0
+      while pi < iparts.size()
+        ipart = iparts[pi]
+        if ipart != nil && ipart[0] != :str
+          collect_autoload_refs(ipart[1], defined, registry, seen, pending)
+        pi += 1
     if node.args != nil
       ai = 0
       while ai < node.args.size()
@@ -755,6 +768,12 @@ use parser
       collect_autoload_refs(node.source, defined, registry, seen, pending)
     if node.func != nil && is_ast_node?(node.func)
       collect_autoload_refs(node.func, defined, registry, seen, pending)
+    # A trailing block hangs off `block`, which is none of the fields above, so
+    # a class named ONLY inside one (`lines.each -> (l) out.push(JSON.parse(l))`)
+    # never autoloaded and resolved to nil at runtime. The block node carries
+    # its own `body`, which the generic walk above picks up on recursion.
+    if node.block != nil && is_ast_node?(node.block)
+      collect_autoload_refs(node.block, defined, registry, seen, pending)
     nil
 
   # Native runtime entry points whose WValue result has source-defined methods.

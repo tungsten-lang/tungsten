@@ -258,6 +258,7 @@ compiled_specs=(
   spec/compiler/typed_helper_array_signature_spec.w
   spec/compiler/typed_overload_spec.w
   spec/compiler/uuid_byte_revisit_autoload_spec.w
+  spec/compiler/autoload_walker_fields_spec.w
   spec/compiler/view_field_var_spec.w
   spec/compiler/zero_arg_cached_dispatch_spec.w
   spec/interpreter/hash_size_view_field_spec.w
@@ -268,6 +269,9 @@ compiled_specs=(
   spec/core/base64_native_spec.w
   spec/core/global_sleep_spec.w
   spec/core/system_cpu_count_spec.w
+  spec/core/sandbox_spec.w
+  spec/core/clock_ms_spec.w
+  spec/core/json_parse_spec.w
   spec/core/string_to_i_bignum_spec.w
   spec/core/string_native_spec.w
   spec/core/control_flow_spec.w
@@ -330,6 +334,12 @@ interpreter_specs=(
   spec/compiler/ivar_param_type_spec.w
   spec/compiler/llvm_name_mangling_injective_spec.w
   spec/compiler/top_level_method_name_hygiene_spec.w
+  # clock_ms had to be registered in BOTH lowering.w and builtins.w; pin the
+  # interpreted side so a compiled-only fix cannot pass again.
+  spec/core/clock_ms_spec.w
+  # JSON.parse was compiled-only until the interpreter learned to resolve bare
+  # calls to sibling class methods; pin the interpreted side.
+  spec/core/json_parse_spec.w
   spec/interpreter/float_leaf_native_spec.w
   spec/interpreter/big_array_cap_empty_revisit_spec.w
   spec/interpreter/hash_size_view_field_spec.w
@@ -500,6 +510,15 @@ if [[ "${RUN_REPL_SPECS:-0}" == "1" ]]; then
   record_result "scrub_pty_spec.py" "$output" "$status"
 else
   echo "skip REPL PTY spec (set RUN_REPL_SPECS=1 to run)"
+fi
+
+# Response-shape contract for the /api/run + /api/check engine
+# (services/api/lib/exec.w). Opt-in because each check compiles and runs a small
+# program of its own, so it is slower than a normal spec.
+if [[ "${RUN_API_SPECS:-0}" == "1" ]]; then
+  run_compiled_spec spec/api/api_exec_spec.w
+else
+  echo "skip API contract spec (set RUN_API_SPECS=1 to run)"
 fi
 
 if [[ "$fail" -ne 0 ]]; then

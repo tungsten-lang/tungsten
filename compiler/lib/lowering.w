@@ -1318,6 +1318,7 @@ use lowering/definitions
   mod[:known_calls]["type"] = "__w_type"
   mod[:known_calls]["wymix"] = "__w_wymix"  # inlined, never actually called
   mod[:known_calls]["clock"] = "__w_clock"
+  mod[:known_calls]["clock_ms"] = "__w_clock_ms"
   mod[:known_calls]["env"] = "__w_env"
   mod[:known_calls]["runtime_identity"] = "__w_runtime_identity"
   mod[:known_calls]["print"] = "__w_print"

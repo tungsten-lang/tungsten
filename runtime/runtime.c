@@ -18878,6 +18878,78 @@ WValue w_sync_handle_kind_support(WValue v) {
  * immediately and must not be retained for the process lifetime. */
 void w_value_free(WValue v);
 
+/* ==== Sandbox mode ==========================================================
+ * TUNGSTEN_SANDBOX=1 (or Sandbox.enable) latches a process-wide gate over the
+ * externs that reach outside the process: file IO, sockets, process control,
+ * and environment access. Every attempt is logged — one JSON line to
+ * TUNGSTEN_SANDBOX_LOG (or stderr) — then either raised as a catchable error
+ * (actions: reads, writes, spawn, connect) or answered with a benign stub
+ * (observations: env → nil, exists? → false), so harmless programs keep
+ * running while every probe still lands in the log. This is containment for
+ * observation, not a hardened security boundary: ccall reaches any linked
+ * symbol directly. `bin/tungsten sandbox file.w` is the front door. */
+static volatile int w_sandbox_state = -1; /* -1 unresolved, 0 off, 1 latched */
+static FILE *w_sandbox_log_sink = NULL;
+static volatile long w_sandbox_attempts = 0;
+
+static int w_sandbox_on(void) {
+    if (w_sandbox_state < 0) {
+        const char *e = getenv("TUNGSTEN_SANDBOX");
+        int on = (e && *e && strcmp(e, "0") != 0) ? 1 : 0;
+        if (on) {
+            const char *lp = getenv("TUNGSTEN_SANDBOX_LOG");
+            if (lp && *lp) w_sandbox_log_sink = fopen(lp, "a");
+        }
+        w_sandbox_state = on;
+    }
+    return w_sandbox_state;
+}
+
+static void w_sandbox_log_attempt(const char *action, const char *op,
+                                  const char *detail) {
+    __sync_fetch_and_add(&w_sandbox_attempts, 1);
+    FILE *out = w_sandbox_log_sink ? w_sandbox_log_sink : stderr;
+    fprintf(out, "{\"sandbox\":\"%s\",\"op\":\"%s\",\"detail\":\"", action, op);
+    for (const unsigned char *p = (const unsigned char *)(detail ? detail : "");
+         *p; p++) {
+        if (*p == '"' || *p == '\\') fprintf(out, "\\%c", *p);
+        else if (*p < 0x20) fprintf(out, "\\u%04x", *p);
+        else fputc(*p, out);
+    }
+    fputs("\"}\n", out);
+    fflush(out);
+}
+
+/* Blocked action: log the attempt, then raise a catchable error. */
+void w_sandbox_gate(const char *op, const char *detail) {
+    if (!w_sandbox_on()) return;
+    w_sandbox_log_attempt("block", op, detail);
+    char msg[128];
+    snprintf(msg, sizeof msg, "sandbox: %s blocked", op);
+    w_raise(w_string(msg));
+}
+
+/* Stubbed observation: log it and report active; the caller answers with a
+ * benign value (nil / false) instead of touching the outside world. */
+int w_sandbox_stub(const char *op, const char *detail) {
+    if (!w_sandbox_on()) return 0;
+    w_sandbox_log_attempt("stub", op, detail);
+    return 1;
+}
+
+/* ccall surface for core/sandbox.w */
+WValue w_sandbox_enabled_p(void) { return w_bool(w_sandbox_on()); }
+
+WValue w_sandbox_latch(void) {
+    w_sandbox_on();      /* resolve env config + log sink first */
+    w_sandbox_state = 1; /* one-way: there is no disable */
+    return W_TRUE;
+}
+
+WValue w_sandbox_attempt_count(void) {
+    return w_int((int64_t)w_sandbox_attempts);
+}
+
 static WValue w_read_file_bytes_path(const char *path) {
     int fd = open(path, O_RDONLY);
     if (fd < 0) return W_NIL;
@@ -18918,7 +18990,9 @@ static WValue w_read_file_bytes_path(const char *path) {
 }
 
 WValue __w_read_file_bytes(WValue path_val) {
-    return w_read_file_bytes_path(as_str(path_val));
+    const char *path = as_str(path_val);
+    w_sandbox_gate("read_file", path);
+    return w_read_file_bytes_path(path);
 }
 
 WValue __w_read_file(WValue path_val) {
@@ -18942,6 +19016,7 @@ WValue __w_read_file(WValue path_val) {
  * non-owning typed-array views. */
 WValue __w_file_mmap(WValue path_val) {
     const char *path = as_str(path_val);
+    w_sandbox_gate("mmap", path);
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
         char buf[256];
@@ -19331,12 +19406,14 @@ WValue w_runtime_dir(void) {
 
 WValue __w_file_exists(WValue path_val) {
     const char *path = as_str(path_val);
+    if (w_sandbox_stub("file_exists", path)) return W_FALSE;
     struct stat st;
     return (stat(path, &st) == 0) ? W_TRUE : W_FALSE;
 }
 
 WValue __w_file_directory(WValue path_val) {
     const char *path = as_str(path_val);
+    if (w_sandbox_stub("file_directory", path)) return W_FALSE;
     struct stat st;
     if (stat(path, &st) != 0) return W_FALSE;
     return S_ISDIR(st.st_mode) ? W_TRUE : W_FALSE;
@@ -19344,6 +19421,7 @@ WValue __w_file_directory(WValue path_val) {
 
 WValue __w_file_size(WValue path_val) {
     const char *path = as_str(path_val);
+    if (w_sandbox_stub("file_size", path)) return W_NIL;
     struct stat st;
     if (stat(path, &st) != 0) return W_NIL;
     return w_int((int64_t)st.st_size);
@@ -19351,6 +19429,7 @@ WValue __w_file_size(WValue path_val) {
 
 WValue __w_file_read_dir(WValue path_val) {
     const char *path = as_str(path_val);
+    w_sandbox_gate("read_dir", path);
     DIR *dir = opendir(path);
     if (!dir) return W_NIL;
     WValue result = w_array_new_empty();
@@ -19395,10 +19474,12 @@ static WValue w_write_file_mode(WValue path_val, WValue content_val, const char 
 }
 
 WValue __w_write_file(WValue path_val, WValue content_val) {
+    w_sandbox_gate("write_file", as_str(path_val));
     return w_write_file_mode(path_val, content_val, "wb");
 }
 
 WValue __w_append_file(WValue path_val, WValue content_val) {
+    w_sandbox_gate("append_file", as_str(path_val));
     return w_write_file_mode(path_val, content_val, "ab");
 }
 
@@ -19450,6 +19531,7 @@ static int64_t w_stat_mtime_ns(const struct stat *st) {
 
 WValue __w_file_mtime_ns(WValue path_val) {
     const char *path = as_str(path_val);
+    if (w_sandbox_stub("file_mtime_ns", path)) return W_NIL;
     struct stat st;
     if (stat(path, &st) != 0) return W_NIL;
     return w_int(w_stat_mtime_ns(&st));
@@ -19536,6 +19618,7 @@ static void w_system_child_cleanup(void *arg) {
  * uninterruptible from the keyboard whenever any thread is inside system(). */
 WValue __w_system(WValue cmd_val) {
     const char *cmd = as_str(cmd_val);
+    w_sandbox_gate("system", cmd);
     char *spawn_argv[] = { "sh", "-c", (char *)cmd, NULL };
     posix_spawnattr_t attr;
     if (posix_spawnattr_init(&attr) != 0) return W_FALSE;
@@ -19581,6 +19664,7 @@ WValue __w_system(WValue cmd_val) {
 /* argv comes as an Array of strings; execs directly (no shell). Returns the
  * pid, or -errno style negative on failure. */
 WValue __w_proc_spawn(WValue argv_val) {
+    w_sandbox_gate("proc_spawn", "");
     WArray *arr = (WArray *)w_as_ptr(argv_val);
     int argc = (int)arr->size;
     if (argc < 1) return w_int(-1);
@@ -19631,6 +19715,7 @@ WValue __w_proc_spawn(WValue argv_val) {
  *   -2  wait failed (no such child)
  *   >=0 exit code, or 256+signal when signal-terminated. */
 WValue __w_proc_wait(WValue pid_val, WValue block_val) {
+    w_sandbox_gate("proc_wait", "");
     pid_t pid = (pid_t)w_as_int(pid_val);
     int block = (int)w_as_int(block_val);
     int status = 0;
@@ -19648,6 +19733,7 @@ WValue __w_proc_wait(WValue pid_val, WValue block_val) {
 
 /* Signal the child's whole process group (it leads its own). */
 WValue __w_proc_kill(WValue pid_val, WValue sig_val) {
+    w_sandbox_gate("proc_kill", "");
     pid_t pid = (pid_t)w_as_int(pid_val);
     int sig = (int)w_as_int(sig_val);
     if (pid <= 1) return W_FALSE;
@@ -19656,6 +19742,7 @@ WValue __w_proc_kill(WValue pid_val, WValue sig_val) {
 
 /* Liveness probe: signal 0 to the process (not the group). */
 WValue __w_proc_alive(WValue pid_val) {
+    if (w_sandbox_stub("proc_alive", "")) return W_FALSE;
     pid_t pid = (pid_t)w_as_int(pid_val);
     if (pid <= 1) return W_FALSE;
     return kill(pid, 0) == 0 ? W_TRUE : W_FALSE;
@@ -19665,6 +19752,7 @@ WValue __w_proc_alive(WValue pid_val) {
  * without forking a shell. The first path is copied out before the second
  * as_str() call so the thread-local ring buffer cannot alias the two. */
 WValue __w_rename(WValue old_val, WValue new_val) {
+    w_sandbox_gate("rename", as_str(old_val));
     char oldp[4096];
     snprintf(oldp, sizeof oldp, "%s", as_str(old_val));
     const char *newp = as_str(new_val);
@@ -19675,6 +19763,7 @@ WValue __w_rename(WValue old_val, WValue new_val) {
 /* Create a unique temporary directory below TMPDIR (or /tmp). `prefix` is a
  * filename component supplied by trusted application code, not a path. */
 WValue __w_mkdtemp(WValue prefix_val) {
+    w_sandbox_gate("mkdtemp", "");
     const char *base = getenv("TMPDIR");
     if (!base || !*base) base = "/tmp";
     const char *prefix = as_str(prefix_val);
@@ -19811,6 +19900,7 @@ WValue __w_mkdir_p(WValue path_val) {
  * a local buffer before the second as_str() call so the thread-local ring
  * buffer can never alias the two; setenv() then copies both internally. */
 WValue w_setenv(WValue name_val, WValue value_val) {
+    w_sandbox_gate("setenv", as_str(name_val));
     char name[256];
     snprintf(name, sizeof name, "%s", as_str(name_val));
     const char *value = as_str(value_val);
@@ -19820,6 +19910,7 @@ WValue w_setenv(WValue name_val, WValue value_val) {
 
 WValue __w_capture(WValue cmd_val) {
     const char *cmd = as_str(cmd_val);
+    w_sandbox_gate("capture", cmd);
     FILE *fp = popen(cmd, "r");
     if (!fp) return w_string("");
 
@@ -19924,6 +20015,7 @@ WValue __w_elapsed_seconds_since_ticks(int64_t start_ticks) {
 
 WValue __w_env(WValue name_val) {
     const char *name = as_str(name_val);
+    if (w_sandbox_stub("env", name)) return W_NIL;
     const char *val = getenv(name);
     if (!val) return W_NIL;
     return w_string(val);
@@ -20085,6 +20177,7 @@ WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
 
 WValue __w_file_id(WValue path_val) {
     const char *path = as_str(path_val);
+    if (w_sandbox_stub("file_id", path)) return W_NIL;
     struct stat st;
     if (stat(path, &st) != 0) return W_NIL;
     char identity[96];
@@ -26557,6 +26650,7 @@ static int w_fd_set_nonblocking(int fd) {
 }
 
 WValue w_socket_tcp_listen(const char *host, int port, int backlog) {
+    w_sandbox_gate("socket_listen", host);
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
         w_raise(w_string("socket: creation failed"));
@@ -26611,6 +26705,7 @@ WValue w_socket_tcp_listen(const char *host, int port, int backlog) {
 }
 
 WValue w_socket_accept(WValue listener) {
+    w_sandbox_gate("socket_accept", "");
     WSocket *ls = as_socket(listener);
     if (!ls->listening) {
         w_raise(w_string("socket: accept on non-listening socket"));
@@ -30688,6 +30783,7 @@ WValue w_socket_write_slice(WValue sock, WValue bytes_val, WValue off_val, WValu
 #include <netdb.h>
 
 static int w_socket_tcp_connect_fd_impl(const char *host, int port, int64_t deadline_ticks, int raise_errors) {
+    w_sandbox_gate("socket_connect", host);
     char port_str[16];
     snprintf(port_str, sizeof(port_str), "%d", port);
 
@@ -33154,6 +33250,7 @@ static void *h3_serve_thread_fn(void *arg) {
 #endif
 
 WValue w_socket_serve_http(WValue listener, WValue handler, int workers) {
+    w_sandbox_gate("serve_http", "");
     WSocket *ls = (WSocket *)w_as_ptr(listener);
     if (!ls || !ls->listening) {
         w_raise(w_string("serve_http: requires a listening socket"));

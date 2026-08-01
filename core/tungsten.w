@@ -74,6 +74,7 @@
   auto :Random,       "random"
   auto :Range,        "range"
   auto :Regex,        "regex"
+  auto :Sandbox,      "sandbox"
   auto :SmallArray,   "small_array"
   # string.w is the legacy API/design scaffold and is not accepted by the
   # current parser. Runtime-backed String dispatch loads this small native

@@ -690,6 +690,7 @@ static WQuicConn *quic_new_connection(int fd,
 /* ---- Public API ---- */
 
 void w_http3_serve(int port, WClosure *handler, const char *cert_path, const char *key_path) {
+    w_sandbox_gate("http3_serve", "");
     ensure_quic_ssl_ctx();
 
     /* Load cert/key if provided directly (overrides defaults from ensure_quic_ssl_ctx) */

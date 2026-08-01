@@ -19,6 +19,7 @@ static const char *sci_path(WValue v, char *buf, size_t buf_size) {
 
 /* Read n big-endian IEEE float32 values at byte offset in path → poly Array of Float. */
 WValue w_sci_fits_f32_be(WValue path_wv, WValue offset_wv, WValue n_wv) {
+    w_sandbox_gate("sci_io", "");
     char path[1024];
     sci_path(path_wv, path, sizeof(path));
     int64_t off = w_as_int(offset_wv);
@@ -53,6 +54,7 @@ WValue w_sci_fits_f32_be(WValue path_wv, WValue offset_wv, WValue n_wv) {
 }
 
 WValue w_sci_mat_level5_ok(WValue path_wv) {
+    w_sandbox_gate("sci_io", "");
     char path[1024];
     sci_path(path_wv, path, sizeof(path));
     FILE *fp = fopen(path, "rb");
@@ -68,6 +70,7 @@ WValue w_sci_mat_level5_ok(WValue path_wv) {
 /* HDF5 superblock v0/v2/v3 sniff — returns a poly Hash-like Array of fields
  * as boxed values for Tungsten. Full object-header walk is future work. */
 WValue w_sci_hdf5_superblock(WValue path_wv) {
+    w_sandbox_gate("sci_io", "");
     char path[1024];
     sci_path(path_wv, path, sizeof(path));
     FILE *fp = fopen(path, "rb");
@@ -149,6 +152,7 @@ static void wr_nc_string(FILE *fp, const char *s) {
 
 /* Write 1-D f32 array (poly or typed) to classic NetCDF path. */
 WValue w_sci_netcdf_write_f32_1d(WValue path_wv, WValue data_wv) {
+    w_sandbox_gate("sci_io", "");
     char path[1024];
     sci_path(path_wv, path, sizeof(path));
     if (!w_is_array(data_wv)) {
@@ -199,6 +203,7 @@ WValue w_sci_netcdf_write_f32_1d(WValue path_wv, WValue data_wv) {
 }
 
 WValue w_sci_netcdf_read_f32_1d(WValue path_wv) {
+    w_sandbox_gate("sci_io", "");
     char path[1024];
     sci_path(path_wv, path, sizeof(path));
     FILE *fp = fopen(path, "rb");
@@ -897,6 +902,7 @@ static WValue h5_foreign_read_named(const char *path, const char *want) {
  * Real HDF5 tools won't read the dataset body; our SciIO will.
  */
 WValue w_sci_hdf5_write_f32_1d(WValue path_wv, WValue data_wv) {
+    w_sandbox_gate("sci_io", "");
     char path[1024];
     sci_path(path_wv, path, sizeof(path));
     if (!w_is_array(data_wv)) {
@@ -922,6 +928,7 @@ WValue w_sci_hdf5_write_f32_1d(WValue path_wv, WValue data_wv) {
 }
 
 WValue w_sci_hdf5_read_f32_1d(WValue path_wv) {
+    w_sandbox_gate("sci_io", "");
     char path[1024];
     sci_path(path_wv, path, sizeof(path));
     FILE *fp = fopen(path, "rb");
@@ -983,6 +990,7 @@ static int read_u32_le(FILE *fp, uint32_t *v) {
 }
 
 WValue w_sci_hdf5_write_datasets(WValue path_wv, WValue names_wv, WValue arrays_wv) {
+    w_sandbox_gate("sci_io", "");
     /* names: Array of String; arrays: Array of Array of Float — same length */
     char path[1024];
     sci_path(path_wv, path, sizeof(path));
@@ -1025,6 +1033,7 @@ WValue w_sci_hdf5_write_datasets(WValue path_wv, WValue names_wv, WValue arrays_
 
 /* List dataset names → poly Array of String */
 WValue w_sci_hdf5_list(WValue path_wv) {
+    w_sandbox_gate("sci_io", "");
     char path[1024];
     sci_path(path_wv, path, sizeof(path));
     FILE *fp = fopen(path, "rb");
@@ -1071,6 +1080,7 @@ WValue w_sci_hdf5_list(WValue path_wv) {
 }
 
 WValue w_sci_hdf5_read_named(WValue path_wv, WValue name_wv) {
+    w_sandbox_gate("sci_io", "");
     char path[1024], want[256];
     sci_path(path_wv, path, sizeof(path));
     sci_path(name_wv, want, sizeof(want));
@@ -1134,6 +1144,7 @@ WValue w_sci_hdf5_read_named(WValue path_wv, WValue name_wv) {
  * PAR1
  */
 WValue w_sci_parquet_write_f32(WValue path_wv, WValue names_wv, WValue arrays_wv) {
+    w_sandbox_gate("sci_io", "");
     char path[1024];
     sci_path(path_wv, path, sizeof(path));
     WArray *names = (WArray *)w_as_ptr(names_wv);
@@ -1162,6 +1173,7 @@ WValue w_sci_parquet_write_f32(WValue path_wv, WValue names_wv, WValue arrays_wv
 }
 
 WValue w_sci_parquet_read_f32(WValue path_wv, WValue name_wv) {
+    w_sandbox_gate("sci_io", "");
     char path[1024], want[256];
     sci_path(path_wv, path, sizeof(path));
     sci_path(name_wv, want, sizeof(want));
@@ -1208,6 +1220,7 @@ WValue w_sci_parquet_read_f32(WValue path_wv, WValue name_wv) {
  *   0        raw LE f32 chunk (entire array)
  */
 WValue w_sci_zarr_write_f32_1d(WValue dir_wv, WValue data_wv) {
+    w_sandbox_gate("sci_io", "");
     char dir[1024];
     sci_path(dir_wv, dir, sizeof(dir));
     if (!w_is_array(data_wv)) {
@@ -1251,6 +1264,7 @@ WValue w_sci_zarr_write_f32_1d(WValue dir_wv, WValue data_wv) {
 }
 
 WValue w_sci_zarr_read_f32_1d(WValue dir_wv) {
+    w_sandbox_gate("sci_io", "");
     char dir[1024];
     sci_path(dir_wv, dir, sizeof(dir));
     char chunk_path[1100];

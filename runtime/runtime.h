@@ -692,6 +692,14 @@ void w_exception_pop(void);
 void w_raise(WValue msg);
 WValue w_exception_error(void);
 
+/* ---- Sandbox mode (TUNGSTEN_SANDBOX=1) ----
+ * Gate over externs that reach outside the process. w_sandbox_gate logs the
+ * attempt and raises when the sandbox is latched (no-op otherwise);
+ * w_sandbox_stub logs and returns 1 so the caller can answer with a benign
+ * value instead. Defined in runtime.c. */
+void w_sandbox_gate(const char *op, const char *detail);
+int w_sandbox_stub(const char *op, const char *detail);
+
 /* ---- Recycle cleanup stack ----
  * Thread-local cleanup stack tracks ## recycle allocations that need
  * pool-push on exception unwind. Each compile-time-emitted recycle_or_new

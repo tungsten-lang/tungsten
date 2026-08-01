@@ -86,6 +86,7 @@ summary from the source header, and a link to the source.
 | `Random` | `+ Random` | — | [`core/random.w`](../core/random.w) |
 | `Range` | `+ Range` | — | [`core/range.w`](../core/range.w) |
 | `Regex` | `+ Regex` | Regex — a homegrown regular-expression engine, written in Tungsten. | [`core/regex.w`](../core/regex.w) |
+| `Sandbox` | `+ Sandbox` | Sandboxed execution — the runtime's gate over everything outside the process. | [`core/sandbox.w`](../core/sandbox.w) |
 | `SmallArray` | `+ SmallArray` | Frozen, stack-allocatable, packed array. Up to 255 elements. | [`core/small_array.w`](../core/small_array.w) |
 | `String` | `+ String` | Native String methods that are safe to express over the WValue itself. | [`core/string_native.w`](../core/string_native.w) |
 | `StringBuffer` | `+ StringBuffer` | string_buffer - mutable UTF-8 string builder | [`core/string_buffer.w`](../core/string_buffer.w) |

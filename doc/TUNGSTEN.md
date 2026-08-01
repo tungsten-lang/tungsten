@@ -31,6 +31,11 @@ COMMANDS
 
     compile FILE         Compile a .w file to a native binary (-o FILE)
     run FILE             Interpret a .w file
+    sandbox FILE         Compile FILE, then run it with the sandbox gate
+                         latched: file IO, sockets, process control, and
+                         environment access are blocked or stubbed, and every
+                         attempt is logged as one JSON line (--log PATH to
+                         send the log to a file instead of stderr)
     console              Interactive REPL (also: wit(1))
     start                First-run welcome: what Tungsten is + your next step
     new NAME             Scaffold a new project
@@ -59,6 +64,8 @@ EXAMPLES
     tungsten --check file.w
     tungsten -e "<< 'hello world'"
     tungsten start
+    tungsten sandbox untrusted.w
+    tungsten sandbox --log attempts.jsonl untrusted.w
     tungsten bootstrap
     tungsten build
     tungsten console

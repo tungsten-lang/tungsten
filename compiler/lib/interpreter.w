@@ -2986,8 +2986,17 @@ use target
     if type(recv) == "Hash" && recv.has_key?(:rt)
       if recv[:rt] == :object
         return lookup_method(recv[:w_class], name, argc, has_block)
-      # Class/module sentinels are interpreter Hashes, not primitive Hash
-      # receivers. Do not accidentally dispatch Hash instance methods on them.
+      # Inside a class method (`-> .parse`) self is the class sentinel, and a
+      # bare call there names a sibling CLASS method — `parse_value_b(s, ...)`
+      # in core/json.w is the canonical case. The compiled engine resolves it;
+      # without this the interpreter raised "Undefined method 'parse_value_b'"
+      # and JSON.parse was unusable interpreted.
+      #
+      # Only :class_methods are consulted, so the guard below still holds: a
+      # class/module sentinel can never accidentally dispatch a Hash instance
+      # method just because it is represented as an interpreter Hash.
+      if recv[:rt] == :class
+        return lookup_class_method(recv, name)
       return nil
     w_class = primitive_runtime_class(recv)
     if w_class == nil

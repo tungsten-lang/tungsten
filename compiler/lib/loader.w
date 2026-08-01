@@ -11,6 +11,8 @@ use parser
     @service_bindings_id = canonical_service_bindings(@service_bindings)
     @autoload_registry = nil
     @autoload_loaded = {}
+    @manifest_poisoned = false
+    @manifest_wanted = false
 
   # Parse the shell-wrapper-exported TUNGSTEN_SERVICE_BINDINGS env var.
   # Format: "name1=bit1,name2=bit2". Missing/empty → empty hash.
@@ -51,6 +53,10 @@ use parser
       @manifest_files = []
       @runtime_id = runtime_identity()
       @cacheable = @runtime_id.starts_with?("ruby ")
+      # Manifest recording engages for the ruby AST cache AND the compiled
+      # driver's incremental binary cache. The C VM stage-0 lacks the bare
+      # file_mtime_ns builtin, so it must not attempt to record at all.
+      @manifest_wanted = @cacheable || @runtime_id == "compiled-runtime"
 
       cached = read_ast_cache(resolved)
       if cached != nil
@@ -975,16 +981,27 @@ use parser
 
     true
 
+  # Record (path, mtime_ns) for every loaded file — for the ruby AST cache
+  # AND the compiled driver's incremental binary cache (which keys on this
+  # manifest; the ruby-only @cacheable never engages there). A missing
+  # mtime poisons both consumers.
   -> record_manifest_file(path)
-    if !@cacheable
+    if @manifest_wanted != true
       return nil
     mtime = file_mtime_ns(path)
     if mtime == nil
       @cacheable = false
       @manifest_files = []
+      @manifest_poisoned = true
       return nil
     @manifest_files.push([path, mtime])
     mtime
+
+  # Driver accessors for the incremental compile cache.
+  -> manifest_files
+    if @manifest_poisoned == true || @manifest_wanted != true
+      return nil
+    @manifest_files
 
   -> resolve_path(path, from_file = nil)
     # Service registry: if `path` is a bare service name (no slash)
@@ -1190,15 +1207,17 @@ use parser
   -> find_core_root(dir)
     if dir != ""
       parts = dir.split("/")
-      result = ""
       i = parts.size()
       while i > 0
         candidate = parts[0...i].join("/")
+        # NEAREST ancestor wins. The walk used to continue upward and keep
+        # the SHALLOWEST match, so a checkout nested inside another
+        # (git worktrees under .claude/worktrees/, a vendored repo) silently
+        # compiled the OUTER repo's core/ — stage identity checks then raced
+        # against concurrent edits in the outer tree.
         if file?(candidate + "/core/tungsten.w")
-          result = candidate
+          return candidate
         i -= 1
-      if result != ""
-        return result
     if file?("core/tungsten.w")
       return "."
     # Install-root fallback: compiling a .w file whose ancestry AND cwd both

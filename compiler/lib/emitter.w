@@ -896,6 +896,44 @@ use hashing
   out << "}\n"
   out.to_s()
 
+# Var-var `a == b` under a :string type fact. Faithful w_eq specialization:
+#   bits equal                          -> W_TRUE  (w_eq's a == b arm)
+#   BOTH canonical stringy (mode 0-6)   -> W_FALSE (equal canonical content
+#      interns to one WValue, so differing bits prove inequality; symbol
+#      bit 0 rides in the bits so strings never fold equal to symbols)
+#   anything else -> w_eq. One canonical side alone is NOT enough: the other
+#   side could be a short rope with equal content, which only w_eq resolves.
+-> streq2_fast_helper_ir()
+  out = StringBuffer(760)
+  out << "define private i64 @__w_streq2_fast(i64 %a, i64 %b) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %eqb = icmp eq i64 %a, %b\n"
+  out << "  br i1 %eqb, label %t, label %c\n"
+  out << "t:\n"
+  out << "  ret i64 2\n"
+  out << "c:\n"
+  out << "  %ha = lshr i64 %a, 48\n"
+  out << "  %sa = icmp eq i64 %ha, 65529\n"
+  out << "  %ma = lshr i64 %a, 1\n"
+  out << "  %ma3 = and i64 %ma, 7\n"
+  out << "  %na = icmp ne i64 %ma3, 7\n"
+  out << "  %ca = and i1 %sa, %na\n"
+  out << "  %hb = lshr i64 %b, 48\n"
+  out << "  %sb = icmp eq i64 %hb, 65529\n"
+  out << "  %mb = lshr i64 %b, 1\n"
+  out << "  %mb3 = and i64 %mb, 7\n"
+  out << "  %nb = icmp ne i64 %mb3, 7\n"
+  out << "  %cb = and i1 %sb, %nb\n"
+  out << "  %canon = and i1 %ca, %cb\n"
+  out << "  br i1 %canon, label %f, label %s\n"
+  out << "f:\n"
+  out << "  ret i64 1\n"
+  out << "s:\n"
+  out << "  %sv = call i64 @w_eq(i64 %a, i64 %b)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
 # Boxed + / - fast path (lowering's op map routes :PLUS/:MINUS here). Both
 # operands inline Ints (tag 0xFFFA) -> sign-extended 48-bit payload add/sub
 # with an i48 fit check on the result; a fitting result re-boxes inline.
@@ -1064,6 +1102,43 @@ use hashing
   out << "slow:\n"
   out << "  %sv = call i64 @w_int(i64 %v)\n"
   out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
+# Array-literal slot store: the literal was just allocated at exact size by
+# w_array_new_uninit_sized (fresh, unaliased, start == 0, i < size), so the
+# store is a bare slots[i] = val with no grow check or ebits dispatch.
+# WArray layout: flags/ebits/pad (8B) start+size (8B at +4/+8) cap (+12),
+# slots ptr at +16 (see runtime.h; static-asserted there).
+-> array_lit_store_helper_ir()
+  out = StringBuffer(480)
+  out << "define private i64 @__w_array_lit_store(i64 %arr, i64 %i, i64 %val) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %m = and i64 %arr, -16\n"
+  out << "  %ap = inttoptr i64 %m to ptr\n"
+  out << "  %sp = getelementptr inbounds i8, ptr %ap, i64 16\n"
+  out << "  %slots = load ptr, ptr %sp\n"
+  out << "  %ep = getelementptr inbounds i64, ptr %slots, i64 %i\n"
+  out << "  store i64 %val, ptr %ep\n"
+  out << "  ret i64 %arr\n"
+  out << "}\n"
+  out.to_s()
+
+# Boxed-numeric -> raw double. The fast arm unboxes a double-tagged WValue
+# (sub bias + bitcast); ints/Decimals/BigInts take the w_num_to_f64 call.
+-> num_to_f64_fast_helper_ir()
+  out = StringBuffer(480)
+  out << "define private double @__w_num_to_f64_fast(i64 %v) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %ub = sub i64 %v, 281474976710656\n"
+  out << "  %isd = icmp ule i64 %ub, -2251799813685249\n"
+  out << "  br i1 %isd, label %fast, label %slow\n"
+  out << "fast:\n"
+  out << "  %d = bitcast i64 %ub to double\n"
+  out << "  ret double %d\n"
+  out << "slow:\n"
+  out << "  %sv = call double @w_num_to_f64(i64 %v)\n"
+  out << "  ret double %sv\n"
   out << "}\n"
   out.to_s()
 
@@ -1358,7 +1433,7 @@ ewscope_md_state = {ids: {}, order: []}
   direct_range_metadata_suffix("i64", w_tag_char + subtype_span * 3, w_tag_char + subtype_span * 4)
 
 -> wvalue_bool_call?(name)
-  name in ("w_bool" "w_eq" "w_neq" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "__w_streq_fast" "w_hash_has_key" "__w_file_exists" "__w_write_file" "w_ipv4_in_cidr")
+  name in ("w_bool" "w_eq" "w_neq" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "__w_streq_fast" "__w_streq2_fast" "w_hash_has_key" "__w_file_exists" "__w_write_file" "w_ipv4_in_cidr")
 
 -> known_call_range_metadata_suffix(inst, llvm_type)
   suffix = range_metadata_suffix(inst, llvm_type)
@@ -1939,6 +2014,8 @@ ewscope_md_state = {ids: {}, order: []}
           iname = inst[:name]
           if !known_fns.has_key?(iname) && !ccall_needed.has_key?(iname)
             ccall_needed[iname] = inst[:args].size()
+        if inst[:op] == :call_num_to_f64 && !ccall_needed.has_key?("__w_num_to_f64_fast")
+          ccall_needed["__w_num_to_f64_fast"] = 1
         fns = runtime_fns_for_inst(inst, mod[:string_wvalues])
         if fns != nil
           ri = 0
@@ -2199,6 +2276,12 @@ ewscope_md_state = {ids: {}, order: []}
       decls_out = decls_out + "declare i64 @w_eq(i64, i64) nounwind\n"
     decls_out = decls_out + streq_fast_helper_ir() + "\n"
 
+  # Var-var string == fast path (lowering's :string type-fact arm).
+  if ccall_needed.has_key?("__w_streq2_fast")
+    if decls_out.index("@w_eq(") == nil
+      decls_out = decls_out + "declare i64 @w_eq(i64, i64) nounwind\n"
+    decls_out = decls_out + streq2_fast_helper_ir() + "\n"
+
   # Boxed +/- fast paths (op map routes :PLUS/:MINUS to these helpers).
   arith_fast_specs = [
     ["__w_add_fast", "w_add", "add"],
@@ -2249,6 +2332,12 @@ ewscope_md_state = {ids: {}, order: []}
     if decls_out.index("@w_to_i64(") == nil
       decls_out = decls_out + "declare i64 @w_to_i64(i64) nounwind\n"
     decls_out = decls_out + to_i64_fast_helper_ir() + "\n"
+  if ccall_needed.has_key?("__w_num_to_f64_fast")
+    if decls_out.index("@w_num_to_f64(") == nil
+      decls_out = decls_out + "declare double @w_num_to_f64(i64) nounwind memory(read)\n"
+    decls_out = decls_out + num_to_f64_fast_helper_ir() + "\n"
+  if ccall_needed.has_key?("__w_array_lit_store")
+    decls_out = decls_out + array_lit_store_helper_ir() + "\n"
 
   bit_count_intrinsic_specs = [
     ["__w_bit_ctpop_u32", "ctpop", 32, false],
@@ -3068,8 +3157,11 @@ ewscope_md_state = {ids: {}, order: []}
 
   # Numeric->raw-double coercion of a boxed WValue (ensure_raw_f64 fallback):
   # takes an i64 WValue (boxed double / Decimal / Int), returns a raw double.
+  # Routed through the alwaysinline helper so the boxed-double case (a :f64
+  # param arriving as a WValue, nbody's `dt`) folds to sub+bitcast inline
+  # instead of an out-of-line w_num_to_f64 call per use site.
   when :call_num_to_f64
-    inst[:temp] + " = call double @w_num_to_f64(i64 " + inst[:value] + ")"
+    inst[:temp] + " = call double @__w_num_to_f64_fast(i64 " + inst[:value] + ")"
 
   # Fused-elementwise loop ops (lowering/ops.w try_fuse_elementwise). The
   # header decode is hoisted out of the fused loop deliberately: the loop

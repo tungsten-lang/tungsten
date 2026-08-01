@@ -20,6 +20,12 @@ if [[ ! -x "$COMPILER" ]]; then
   exit 1
 fi
 
+# Per-spec compiles land at PID-unique $TMP_ROOT paths, so caching them only
+# mints garbage cache entries — keep the incremental binary cache off for the
+# whole suite. The cache lifecycle test below re-enables it per step against
+# an isolated TUNGSTEN_CACHE_DIR.
+export TUNGSTEN_INCREMENTAL=0
+
 record_result() {
   local name="$1"
   local output="$2"
@@ -189,6 +195,77 @@ run_cuda_emit_spec() {
   rm -f "$ll_path" "$ll_path.done" "$metal_path" "$cuda_path"
 }
 
+# ── Incremental binary cache lifecycle ────────────────────────────────────
+# One compile step of the lifecycle test: expects a cache hit ("(cache)" in
+# the driver output) or a miss, with TUNGSTEN_INCREMENTAL set explicitly so
+# the suite-wide export above does not leak in.
+cache_lifecycle_step() {
+  local label="$1"
+  local expect="$2"   # yes|no — whether "(cache)" must appear
+  local inc="$3"      # TUNGSTEN_INCREMENTAL value for this step
+  local src="$4"
+  local out="$5"
+  local output
+  local status
+  local hit
+
+  set +e
+  output="$(TUNGSTEN_CACHE_DIR="$cache_lifecycle_dir" TUNGSTEN_INCREMENTAL="$inc" \
+    "$TUNGSTEN" compile "$src" --out "$out" 2>&1)"
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]]; then
+    echo "FAIL [cache_lifecycle] $label: compile exited $status" >&2
+    printf '%s\n' "$output" >&2
+    fail=1
+    return
+  fi
+  hit="no"
+  if printf '%s\n' "$output" | grep -qF "(cache)"; then
+    hit="yes"
+  fi
+  if [[ "$hit" != "$expect" ]]; then
+    echo "FAIL [cache_lifecycle] $label: expected cache=$expect, got cache=$hit" >&2
+    fail=1
+  else
+    echo "PASS [cache_lifecycle] $label (cache=$hit)"
+  fi
+}
+
+run_cache_lifecycle_test() {
+  local dir="$TMP_ROOT/cache-test"
+  local src="$dir/prog.w"
+  local out="$dir/prog"
+  local deep
+  local i
+
+  cache_lifecycle_dir="$dir/cache"
+  mkdir -p "$dir"
+  printf '<< "cache lifecycle probe"\n' > "$src"
+  echo "cache lifecycle test (TUNGSTEN_CACHE_DIR=$cache_lifecycle_dir)"
+
+  cache_lifecycle_step "cold compile misses" no 1 "$src" "$out"
+  cache_lifecycle_step "identical recompile hits" yes 1 "$src" "$out"
+
+  touch "$src"
+  cache_lifecycle_step "touched source misses" no 1 "$src" "$out"
+
+  touch "$ROOT/runtime/runtime.c"
+  cache_lifecycle_step "touched runtime source misses" no 1 "$src" "$out"
+
+  cache_lifecycle_step "TUNGSTEN_INCREMENTAL=0 misses" no 0 "$src" "$out"
+
+  # A ~200-char nested output path: slot names hash the absolute paths, so
+  # storing must not overflow NAME_MAX and the second compile must hit.
+  deep="$dir"
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    deep="$deep/deep-cache-path-seg"
+  done
+  mkdir -p "$deep"
+  cache_lifecycle_step "deep output path cold compile misses" no 1 "$src" "$deep/prog"
+  cache_lifecycle_step "deep output path recompile hits" yes 1 "$src" "$deep/prog"
+}
+
 compiled_specs=(
   spec/compiler/ast_body_native_spec.w
   spec/compiler/array_compact_autoload_spec.w
@@ -225,6 +302,7 @@ compiled_specs=(
   spec/compiler/recycle_inline_iterator_validation_spec.w
   spec/compiler/recycle_nonlocal_block_return_spec.w
   spec/compiler/recycle_terminated_scope_spec.w
+  spec/compiler/source_argc1_constructor_exclusion_spec.w
   spec/compiler/source_argc1_exact_ivar_spec.w
   spec/compiler/source_argc1_hint_compat_spec.w
   spec/compiler/string_dynamic_dispatch_spec.w
@@ -245,6 +323,8 @@ compiled_specs=(
   spec/compiler/typed_receiver_string_routes_spec.w
   spec/compiler/string_free_escape_spec.w
   spec/compiler/constructor_arity_spec.w
+  spec/compiler/ctor_inline_cache_nested_spec.w
+  spec/compiler/global_demotion_scopes_spec.w
   spec/compiler/strbuf_bytes_spec.w
   spec/compiler/int_bigint_promotion_spec.w
   spec/compiler/ivar_param_type_spec.w
@@ -310,6 +390,7 @@ compiled_specs=(
   spec/core/formal_series_spec.w
   spec/core/formal_series_autoload_spec.w
   spec/core/enumerable_native_spec.w
+  spec/core/hash_identity_probe_spec.w
   spec/core/network_native_spec.w
   spec/core/system_spec.w
   benchmarks/runtime_ports/array_leaf_no_use_factories.w
@@ -320,6 +401,7 @@ compiled_specs=(
   spec/numeric/bit_ops_spec.w
   spec/numeric/complex_spec.w
   spec/numeric/fp_math_mode_spec.w
+  spec/numeric/gcd_spec.w
   spec/numeric/hypercomplex_mul_spec.w
   spec/numeric/int_spec.w
   spec/numeric/interval_spec.w
@@ -355,6 +437,8 @@ interpreter_specs=(
   spec/interpreter/int_to_i_native_spec.w
   spec/interpreter/ipv4_octets_native_spec.w
   spec/interpreter/mmap_size_relaxed_spec.w
+  spec/compiler/source_argc1_constructor_exclusion_spec.w
+  spec/numeric/gcd_spec.w
   spec/interpreter/range_primitive_dispatch_spec.w
   spec/numeric/bit_ops_spec.w
   spec/numeric/rational_spec.w
@@ -461,6 +545,8 @@ wrat_specs=(
 for spec in "${compiled_specs[@]}"; do
   run_compiled_spec "$spec"
 done
+
+run_cache_lifecycle_test
 
 for spec in "${cuda_emit_specs[@]}"; do
   run_cuda_emit_spec "$spec"

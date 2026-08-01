@@ -72,8 +72,12 @@ g_ast_stats_delta_cross = {}
 g_ast_stats_meta = {same_arena_real: 0, cross_arena: 0, child_inline: 0, negative_delta: 0}
 g_ast_stats_same_kind = {}
 release_mode   = false
+dev_mode       = false
 fast_mode      = false
 math_mode      = :precise
+# Incremental-cache channel out of emit_ir (mutated, never reassigned —
+# fn-body assignment to a top-level var would shadow, not write).
+g_incremental  = {manifest: nil}
 intern_algo    = "raw"
 runtime_archive = nil
 # Build-time defines from `-D NAME=VALUE` args. Accumulates across
@@ -106,6 +110,7 @@ while i < args.size()
     << "  --lto            Whole-program LTO (leaner binary; default links a fast native runtime archive)"
     << "  --frame-pointers Keep frame pointers (for profiling/debugging)"
     << "  --release        Skip debug safety checks and stacktrace metadata"
+    << "  --dev            Fast edit-test builds: clang -O0 (~2.8x faster link; binary ~2x slower)"
     << "  --fast, -fast    Fast FP: FMA + reassociation + reciprocals + nnan/ninf"
     << "  --strict-math    Strict IEEE 754: no FMA, no contraction"
     << "  --ll             Write LLVM IR (.ll) next to the binary"
@@ -144,6 +149,8 @@ while i < args.size()
       ccall("w_setenv", "TUNGSTEN_MARCH_ARGS", portable_march_flags())
   elsif arg == "--native"
     release_mode = true
+  elsif arg == "--dev"
+    dev_mode = true
   elsif arg == "--fast" || arg == "-fast"
     fast_mode = true
     math_mode = :fast
@@ -342,6 +349,38 @@ while i < args.size()
     return "-lonig"
   ""
 
+# mimalloc for compiled binaries — OPT-IN via TUNGSTEN_MIMALLOC=1. The
+# runtime is malloc-heavy and mimalloc measured -15.5% on new_string /
+# -11% on new_hash (macOS: zone registration; Linux: link-order malloc
+# interposition, validated in ubuntu:24.04 docker). NOT the default:
+# on macOS 26 (xzone malloc) homebrew mimalloc 3.4's zone interposition
+# SIGSEGVs when LIBC-INTERNAL allocation runs through it — a two-line C
+# repro is just realpath(path, NULL) linked against libmimalloc.a
+# (crash in mi_theap_malloc_zero_aligned_at_generic). Any binary touching
+# realpath/getaddrinfo-style paths would be a landmine, so the measured
+# alloc-family win stays behind an explicit flag until a fixed mimalloc
+# release is verified.
+-> mimalloc_link_flags
+  if env("TUNGSTEN_MIMALLOC") != "1"
+    return ""
+  candidates = ["/opt/homebrew/lib/libmimalloc.a", "/usr/local/lib/libmimalloc.a", "/usr/lib/libmimalloc.a"]
+  found = ""
+  candidates.each ->(c)
+    if found == "" && file?(c)
+      found = c
+  if found != ""
+    return found
+  # Debian/Ubuntu multiarch ships only the shared lib
+  # (/usr/lib/<triple>/libmimalloc.so, package libmimalloc-dev). Linking the
+  # .so ahead of libc interposes malloc for this binary. Validated on
+  # ubuntu:24.04 arm64 (glibc 6.34 -> mimalloc 5.70 ns/op on a malloc micro
+  # -- a smaller win than macOS's xzone 11 -> 4 ns, but still positive).
+  on linux
+    found = capture("ls /usr/lib/*/libmimalloc.a /usr/lib/*/libmimalloc.so 2>/dev/null | head -1").strip()
+    if found != ""
+      return found
+  ""
+
 -> archive_tool
   ar = env("TUNGSTEN_AR")
   if ar == nil || ar == ""
@@ -455,6 +494,7 @@ while i < args.size()
   loader = Loader.new(verbose)
   load_started_at = clock
   ast = loader.load_program_ast(file_path)
+  g_incremental[:manifest] = loader.manifest_files()
   if ast_stats
     count_kinds(ast, g_ast_stats_counts)
   if env("TUNGSTEN_STOP_AFTER_LOAD_PARSE") == "1"
@@ -681,7 +721,29 @@ while i < args.size()
     runtime_objs = dev_runtime_archive(verbose)
   clang_opt = env("TUNGSTEN_CLANG_OPT")
   if clang_opt == nil || clang_opt == ""
-    clang_opt = "-O3"
+    # --dev: clang -O0 on the emitted module. Measured on the self-hosted
+    # compiler: link 19.5s -> 5.2s (-O1 is no cheaper than -O3's 18s; only
+    # -O0 skips the expensive passes), full build 2.8x faster, produced
+    # binary ~2.2x slower — the right trade for edit-test loops. The
+    # runtime archive it links against is still the cached -O3 build.
+    clang_opt = dev_mode ? "-O0" : "-O3"
+
+  # Parallel codegen — OPT-IN via TUNGSTEN_PARALLEL_CODEGEN=1. -O3 on one
+  # big module is single-threaded and ~90% of a large build's wall; with
+  # homebrew LLVM present, llvm-split the module ~14 ways and compile the
+  # parts with parallel clang -c (self-compile codegen 13.5s -> ~5s, -o
+  # wall 23.5s -> 17.2s). NOT the default: the parts must be compiled by
+  # HOMEBREW clang (Apple clang can't read llvm-split's newer bitcode, and
+  # its textual IR carries newer-only attributes), and brew LLVM 22's
+  # arm64 codegen measured 1.54x MORE instructions on nbody's hot fp loop
+  # than Apple clang on identical IR — a silent runtime-quality trade is
+  # unacceptable, so the build-speed win is explicit. Any failure falls
+  # back to the single-TU path. Plain -O3 native builds only (dev -O0
+  # doesn't need it; PGO must not mix brew instrumentation with Apple's
+  # profile runtime).
+  parallel_objs = nil
+  if clang_opt == "-O3" && cross_target == "" && !doing_lto && !frame_pointers && env("TUNGSTEN_PARALLEL_CODEGEN") == "1"
+    parallel_objs = parallel_codegen_objects(ll_path, verbose)
 
   clang_cmd = StringBuffer(0)
   clang_cmd << host_c_compiler()
@@ -821,7 +883,10 @@ while i < args.size()
 
   includes -> clang_cmd << inc + " "
 
-  clang_cmd << ll_path
+  if parallel_objs != nil
+    clang_cmd << parallel_objs
+  else
+    clang_cmd << ll_path
 
   if needs_zstd
     zlf = zstd_ldflags
@@ -834,6 +899,12 @@ while i < args.size()
   if olf != ""
     clang_cmd << " "
     clang_cmd << olf
+
+  if cross_target == ""
+    mif = mimalloc_link_flags()
+    if mif != ""
+      clang_cmd << " "
+      clang_cmd << mif
 
   # Framework links. Accelerate is unconditional (runtime.c calls
   # cblas_sgemm/dgemm directly); everything else only when the bridges are
@@ -1015,6 +1086,24 @@ while i < args.size()
   config << value
   config << "\n"
 
+# The runtime sources an archive build reads — shared by the archive's own
+# mtime-freshness check and the incremental compile cache's manifest, so
+# the two invalidation rules can never drift.
+-> dev_runtime_base_files(ev, generated_thresholds)
+  bases = ["runtime.c", "terminal_input.c", "runtime.h", "wvalue.h",
+           "event_loop.h", "ssmr_witness.h", "w_char_table.c", "aks.c", "tls_stub.c",
+           "pdqsort.inc", "ipnsort.inc", "radixsort.inc", "timsort.inc",
+           "skasort.inc", "wolfsort.inc"]
+  if ev == "event_*.c"
+    bases.push("event_kqueue.c")
+    bases.push("event_epoll.c")
+    bases.push("event_iouring.c")
+  else
+    bases.push(ev)
+  if generated_thresholds == "present"
+    bases.push("generated/bigint_thresholds.h")
+  bases
+
 -> dev_runtime_archive_path(runtime_root, cc_identity, ar_identity, compile_flags, event_source, generated_thresholds)
   config = StringBuffer(0)
   config << "dev-runtime-archive-v4\n"
@@ -1063,16 +1152,7 @@ while i < args.size()
   evo = ev.replace(".c", ".o")
 
   # Freshness: reuse the cached archive iff it is newer than every base source.
-  bases = ["runtime.c", "terminal_input.c", "runtime.h", "wvalue.h",
-           "event_loop.h", "ssmr_witness.h", "w_char_table.c", "aks.c", "tls_stub.c"]
-  if ev == "event_*.c"
-    bases.push("event_kqueue.c")
-    bases.push("event_epoll.c")
-    bases.push("event_iouring.c")
-  else
-    bases.push(ev)
-  if generated_thresholds == "present"
-    bases.push("generated/bigint_thresholds.h")
+  bases = dev_runtime_base_files(ev, generated_thresholds)
 
   fresh = StringBuffer(0)
   fresh << "test -e "
@@ -1328,9 +1408,266 @@ while i < args.size()
     << "SAMEKIND " + pk.to_s() + " " + rec[:same].to_s() + "/" + rec[:total].to_s()
     i += 1
 
+# ── Incremental compile cache ─────────────────────────────────────────────
+# `tungsten compile` / `-o` re-lowered and re-linked byte-identical inputs
+# every run (identical self-compile retires an identical 53.6B instructions).
+# Cache the final binary + sidemap keyed by (compiler binary identity,
+# codegen-relevant flags, entry path) and validated by the loader's
+# (path, mtime_ns) manifest of every file the build read — the same
+# freshness rule the ruby AST cache uses. Compiled-runtime only (the C VM
+# lacks the w_executable_path ccall, and bootstrap stages must not share
+# entries across compiler binaries — exe path+mtime is part of the
+# identity). TUNGSTEN_INCREMENTAL=0 disables (the PGO post-step sets it:
+# a cache hit would skip the very work being profiled).
+
+-> incremental_cache_enabled?
+  if env("TUNGSTEN_INCREMENTAL") == "0"
+    return false
+  runtime_identity() == "compiled-runtime"
+
+-> incremental_env_s(name)
+  v = env(name)
+  if v == nil
+    return ""
+  v
+
+# Split the emitted module and compile the parts with parallel clang -c.
+# Returns the space-joined .o paths, or nil for "use the single-TU path"
+# (missing toolchain, or any split/compile failure). Uses homebrew LLVM's
+# llvm-split + clang: llvm-split without -preserve-locals promotes module-
+# local symbols so partitions distribute (with it, every function glued to
+# the shared globals lands in one partition and nothing parallelizes), and
+# its bitcode output needs a matching-version clang to read.
+-> parallel_codegen_objects(ll_path, verbose)
+  llvm_bin = "/opt/homebrew/opt/llvm/bin"
+  if !file?(llvm_bin + "/llvm-split") || !file?(llvm_bin + "/clang")
+    return nil
+  parts = 14
+  prefix = ll_path + ".part"
+  q_ll = dev_runtime_shell_quote(ll_path)
+  q_prefix = dev_runtime_shell_quote(prefix)
+  if system(dev_runtime_shell_quote(llvm_bin + "/llvm-split") + " -j " + parts.to_s() + " -o " + q_prefix + " " + q_ll) != true
+    return nil
+  # Stale part objects from a previous run would satisfy the existence
+  # check below even when a clang job fails (sh's bare `wait` exits 0
+  # regardless of job status) — clear them so every .o linked was
+  # produced by THIS spawn. Each job also touches a .ok marker AFTER its
+  # clang succeeds; requiring the marker rejects truncated objects from
+  # jobs killed mid-write, which still leave a .o on disk.
+  system("rm -f " + q_prefix + "*.o " + q_prefix + "*.ok")
+  flags = "-O3 -DNDEBUG " + march_flags() + " -fmerge-all-constants "
+  on macos
+    flags = flags + "-fveclib=Darwin_libsystem_m "
+  cmd = StringBuffer(1024)
+  objs = StringBuffer(512)
+  i = 0
+  while i < parts
+    part = prefix + i.to_s()
+    if !file?(part)
+      return nil
+    cmd << dev_runtime_shell_quote(llvm_bin + "/clang")
+    cmd << " "
+    cmd << flags
+    cmd << "-c -x ir "
+    cmd << dev_runtime_shell_quote(part)
+    cmd << " -o "
+    cmd << dev_runtime_shell_quote(part + ".o")
+    cmd << " && touch "
+    cmd << dev_runtime_shell_quote(part + ".ok")
+    cmd << " & "
+    objs << dev_runtime_shell_quote(part + ".o")
+    objs << " "
+    i += 1
+  cmd << "wait"
+  if system(cmd.to_s()) != true
+    return nil
+  i = 0
+  while i < parts
+    if !file?(prefix + i.to_s() + ".o") || !file?(prefix + i.to_s() + ".ok")
+      return nil
+    i += 1
+  # Success: the split bitcode inputs and job markers served their purpose;
+  # only the .o files feed the link. Leaving parts behind leaked ~15 files
+  # per build when ll_path is a stable (--ll / source-adjacent) location.
+  i = 0
+  while i < parts
+    system("rm -f " + dev_runtime_shell_quote(prefix + i.to_s()) + " " + dev_runtime_shell_quote(prefix + i.to_s() + ".ok"))
+    i += 1
+  objs.to_s()
+
+# Runtime source (path, mtime_ns) rows for the incremental manifest. The
+# cached binary embeds the runtime archive, whose PATH is stable across
+# runtime-source edits (dev_runtime_archive_path hashes config, not
+# content) and whose rebuild happens AFTER the cache probe — so a touched
+# runtime source must invalidate cached binaries here, over exactly the
+# file set the archive's own freshness check watches.
+-> incremental_runtime_entries
+  runtime_dir = resolve_runtime_dir
+  ev = runtime_event_source
+  runtime_root = dev_runtime_source_identity(runtime_dir, runtime_identity())
+  gt = file?(runtime_root + "/generated/bigint_thresholds.h") ? "present" : "absent"
+  bases = dev_runtime_base_files(ev, gt)
+  entries = []
+  bi = 0
+  while bi < bases.size()
+    p = runtime_root + "/" + bases[bi]
+    mt = file_mtime_ns(p)
+    if mt != nil
+      entries.push([p, mt])
+    bi += 1
+  entries
+
+-> incremental_abs_path(p)
+  if p.starts_with?("/")
+    return p
+  pwd = capture("pwd -P 2>/dev/null").strip()
+  if pwd == ""
+    return p
+  pwd + "/" + p
+
+-> incremental_cache_slot(file_path, out_path, identity)
+  dir = env("TUNGSTEN_CACHE_DIR")
+  if dir == nil || dir == ""
+    home = env("HOME")
+    if home == nil || home == ""
+      return nil
+    dir = home + "/.tungsten/cache"
+  if system("mkdir -p " + dev_runtime_shell_quote(dir)) != true
+    return nil
+  # Hash ABSOLUTE paths AND the full identity into the slot name: verbatim
+  # paths overflowed NAME_MAX on deep trees (every store failed "File name
+  # too long"), relative invocations from two projects must not share a
+  # slot, and folding the identity in keeps differently-configured builds
+  # (--dev vs default, -D defines, env knobs) in separate slots — two
+  # concurrent writers can then never pair one config's manifest with the
+  # other's binary. The identity line in the manifest stays as a self-check.
+  key = incremental_abs_path(file_path) + "__" + incremental_abs_path(out_path) + "|" + identity
+  dir + "/irbin-" + wyhash64_hex_string(key)
+
+# Freshness is mtime-based end to end: tools that preserve timestamps
+# (cp -p, rsync -t) defeat it, and ambient toolchain upgrades (Xcode/clang)
+# are not keyed — the exe mtime covers compiler rebuilds only. Accepted
+# dev-cache tradeoffs; `tungsten --clear-cache` is the escape hatch.
+-> incremental_identity(file_path, out_path)
+  exe = ccall("w_executable_path")
+  em = file_mtime_ns(exe)
+  if em == nil
+    return nil
+  defs = ""
+  dk = build_defines.keys().sort()
+  dki = 0
+  while dki < dk.size()
+    defs = defs + dk[dki] + "=" + build_defines[dk[dki]] + ";"
+    dki += 1
+  ra = runtime_archive == nil ? "" : runtime_archive
+  ram = ""
+  if ra != ""
+    ramv = file_mtime_ns(ra)
+    ram = ramv == nil ? "missing" : ramv.to_s()
+  ["irbin-v2", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), release_mode.to_s(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
+
+# Valid cached binary for this identity? Reads the manifest, revalidates
+# every recorded (path, mtime_ns), and on success installs the cached
+# binary + sidemap at out_path. Any surprise → miss (rebuild).
+-> incremental_try_reuse(slot, identity, out_path, verbose)
+  manifest = read_file(slot + ".manifest")
+  if manifest == nil
+    return false
+  lines = manifest.split("\n")
+  # >= 2: identity line plus at least one file row. A store always records
+  # the runtime base sources, so a rowless manifest is truncation damage.
+  if lines.size() < 2 || lines[0] != identity
+    return false
+  i = 1
+  while i < lines.size()
+    line = lines[i]
+    if line != ""
+      tab = line.index("\t")
+      if tab == nil
+        return false
+      mt = line.slice(0, tab)
+      pathpart = line.slice(tab + 1, line.size() - tab - 1)
+      cur = file_mtime_ns(pathpart)
+      if cur == nil || cur.to_s() != mt
+        return false
+    i += 1
+  if !file?(slot + ".bin")
+    return false
+  q_out = dev_runtime_shell_quote(out_path)
+  if system("cp -p " + dev_runtime_shell_quote(slot + ".bin") + " " + q_out) != true
+    return false
+  if file?(slot + ".sidemap")
+    system("cp -p " + dev_runtime_shell_quote(slot + ".sidemap") + " " + dev_runtime_shell_quote(out_path + ".sidemap"))
+  else
+    # No cached sidemap: drop any stale one a previous non-cached build
+    # left beside out_path, or crash reports symbolize against old code.
+    system("rm -f " + dev_runtime_shell_quote(out_path + ".sidemap"))
+  true
+
+-> incremental_store(slot, identity, out_path, sidemap_path, file_path)
+  files = g_incremental[:manifest]
+  if files == nil
+    return nil
+  parts = [identity]
+  i = 0
+  while i < files.size()
+    parts.push(files[i][1].to_s() + "\t" + incremental_abs_path(files[i][0]))
+    i += 1
+  rt = incremental_runtime_entries
+  ri = 0
+  while ri < rt.size()
+    parts.push(rt[ri][1].to_s() + "\t" + rt[ri][0])
+    ri += 1
+  # @gpu sidecars are emitted next to the SOURCE; recording them as rows
+  # means a deleted sidecar mtimes to nil at probe time and forces the
+  # rebuild that regenerates it.
+  gpu_exts = [".metal", ".cu"]
+  gi = 0
+  while gi < gpu_exts.size()
+    gp = file_path.replace(".w", gpu_exts[gi])
+    gm = file_mtime_ns(gp)
+    if gm != nil
+      parts.push(gm.to_s() + "\t" + incremental_abs_path(gp))
+    gi += 1
+  # Unique staging names (concurrent writers of the same slot must never
+  # interleave into one temp file) and manifest-last, atomic-rename
+  # publication: a reader sees either the old pair or the new pair.
+  nonce = clock.to_s()
+  q_slot_bin = dev_runtime_shell_quote(slot + ".bin")
+  tmp = slot + ".bin.tmp." + nonce
+  if system("cp -p " + dev_runtime_shell_quote(out_path) + " " + dev_runtime_shell_quote(tmp)) != true
+    return nil
+  if system("mv -f " + dev_runtime_shell_quote(tmp) + " " + q_slot_bin) != true
+    system("rm -f " + dev_runtime_shell_quote(tmp))
+    return nil
+  if file?(sidemap_path)
+    system("cp -p " + dev_runtime_shell_quote(sidemap_path) + " " + dev_runtime_shell_quote(slot + ".sidemap"))
+  else
+    system("rm -f " + dev_runtime_shell_quote(slot + ".sidemap"))
+  mtmp = slot + ".manifest.tmp." + nonce
+  write_file(mtmp, parts.join("\n") + "\n")
+  if system("mv -f " + dev_runtime_shell_quote(mtmp) + " " + dev_runtime_shell_quote(slot + ".manifest")) != true
+    system("rm -f " + dev_runtime_shell_quote(mtmp))
+  nil
+
 -> compile_one(file_path, out_path, emit_wire, verbose, intern_algo, emit_ll_only_arg = false)
   if out_path == nil
     out_path = file_path.replace(".w", ".wc")
+
+  # Cache probe: full binary path only (no --emit-wire/--emit-ll/--ll and
+  # no TUNGSTEN_LL_PATH/TUNGSTEN_LL_DONE_MARKER — those flows consume
+  # intermediate artifacts a cache hit would never produce).
+  incr_slot = nil
+  incr_id = nil
+  if !emit_wire && !emit_ll_only_arg && !keep_ll && incremental_env_s("TUNGSTEN_LL_PATH") == "" && incremental_env_s("TUNGSTEN_LL_DONE_MARKER") == "" && incremental_cache_enabled?
+    incr_id = incremental_identity(file_path, out_path)
+    if incr_id != nil
+      incr_slot = incremental_cache_slot(file_path, out_path, incr_id)
+    if incr_slot != nil && incr_id != nil
+      if incremental_try_reuse(incr_slot, incr_id, out_path, verbose)
+        << ""
+        << "Built [out_path] (cache)"
+        return true
 
   implicit_ll = uses_implicit_ll_path() ## bool
   sidemap_path = out_path + ".sidemap"
@@ -1351,6 +1688,8 @@ while i < args.size()
   if ok
     << ""
     << "Built [out_path]"
+    if incr_slot != nil && incr_id != nil
+      incremental_store(incr_slot, incr_id, out_path, sidemap_path, file_path)
 
   ok
 

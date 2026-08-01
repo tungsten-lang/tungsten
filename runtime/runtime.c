@@ -26075,6 +26075,16 @@ static WValue w_decimal_to_string(char *stackbuf, size_t stackcap, int64_t sig, 
     return w_string(stackbuf);
 }
 
+/* Two-digit pairs "00".."99" for the itoa fast path: one divide per TWO
+ * digits instead of one per digit (measured 1.57x on the conversion; itoa
+ * was 23% of the new_string primitive). */
+static const char w_itoa_pairs[201] =
+    "0001020304050607080910111213141516171819"
+    "2021222324252627282930313233343536373839"
+    "4041424344454647484950515253545556575859"
+    "6061626364656667686970717273747576777879"
+    "8081828384858687888990919293949596979899";
+
 /* Fast int-to-string without snprintf. Handles all int48 values.
  * Returns SSO-5 for ≤5 digits, heap/slab string for longer. */
 static inline WValue w_int_to_str(int64_t n) {
@@ -26084,11 +26094,21 @@ static inline WValue w_int_to_str(int64_t n) {
     if (n < 0) { neg = 1; u = (uint64_t)(-n); }
     else { u = (uint64_t)n; }
 
-    /* Write digits in reverse */
+    /* Write digits in reverse, two at a time via the pair table */
     char *p = buf + 20;
     *p = '\0';
-    if (u == 0) { *--p = '0'; }
-    else { while (u > 0) { *--p = '0' + (char)(u % 10); u /= 10; } }
+    while (u >= 100) {
+        unsigned r = (unsigned)(u % 100);
+        u /= 100;
+        *--p = w_itoa_pairs[r * 2 + 1];
+        *--p = w_itoa_pairs[r * 2];
+    }
+    if (u >= 10) {
+        *--p = w_itoa_pairs[u * 2 + 1];
+        *--p = w_itoa_pairs[u * 2];
+    } else {
+        *--p = '0' + (char)u;
+    }
     if (neg) *--p = '-';
 
     size_t len = (size_t)(buf + 20 - p);
@@ -26709,6 +26729,30 @@ WValue w_str_concat(WValue a, WValue b) {
     r->total_len = total;
     r->flat = 0;
     return w_box_ptr(r, W_SUBTAG_GENERIC);
+}
+
+/* Concat variants that FREE one operand when the result did not retain
+ * it. The compiler emits these only for operands it proved fresh and
+ * anonymous (an unnamed subexpression temp whose producing instruction
+ * guarantees an independent allocation, e.g. w_int_to_s, or the previous
+ * link of an interpolation concat chain). Retention analysis is exact:
+ * every w_str_concat result is either inline/slab/heap-FLAT storage
+ * built by copying (never aliasing an operand's buffer) or a rope that
+ * references BOTH operands — so "result is not a rope and not the
+ * operand itself" proves the operand is dead. Non-heap operands
+ * (inline/slab/rope) are left alone. */
+WValue w_str_concat_free_rhs(WValue a, WValue b) {
+    WValue r = w_str_concat(a, b);
+    if (r != b && !w_is_rope(r) && w_is_heap_str(b))
+        free(w_as_heap_str(b));
+    return r;
+}
+
+WValue w_str_concat_free_lhs(WValue a, WValue b) {
+    WValue r = w_str_concat(a, b);
+    if (r != a && !w_is_rope(r) && w_is_heap_str(a))
+        free(w_as_heap_str(a));
+    return r;
 }
 
 /* Mutable append to a heap string. Grows via realloc if needed.
@@ -27551,12 +27595,33 @@ static void w_hash_allocate_storage(WHash *hash, int64_t cap) {
     for (int64_t i = 0; i < cap; i++) hash->keys[i] = W_UNDEF;
 }
 
+/* Hash with the dominant key kinds inlined: canonical strings/symbols
+ * (storage modes 0-6) and inline ints hash by their bits alone. Results
+ * are bit-identical to w_hash_value's for every input — this only skips
+ * the call and its branch prelude on the hot kinds. */
+static inline uint64_t w_hash_value_fast(WValue key) {
+    if (w_is_stringy(key) && ((key >> 1) & 7) <= 6)
+        return w_hash_splitmix64(key);
+    if (w_is_int(key))
+        return w_hash_splitmix64(key);
+    return w_hash_value(key);
+}
+
 static int64_t w_hash_find_slot(WHash *hash, WValue key, int *found) {
     uint64_t mask = (uint64_t)(hash->cap - 1);
-    uint64_t idx = w_hash_value(key) & mask;
+    uint64_t idx = w_hash_value_fast(key) & mask;
     int64_t first_tombstone = -1;
     for (uint32_t probes = 0; probes < hash->cap; probes++) {
         WValue slot_key = hash->keys[idx];
+        /* identity hit first: canonical keys (inline/slab strings, symbols,
+         * ints) compare equal by bits, no w_hash_key_eq call needed. The
+         * key >= 0x10 guard (loop-invariant, hoisted) keeps sentinel-range
+         * bit patterns (W_UNDEF empty / W_MEMO_MISS tombstone, and the
+         * nil/bool singletons) on the explicit checks below. */
+        if (slot_key == key && key >= 0x10) {
+            *found = 1;
+            return (int64_t)idx;
+        }
         if (slot_key == W_UNDEF) {
             *found = 0;
             return first_tombstone >= 0 ? first_tombstone : (int64_t)idx;
@@ -35970,6 +36035,20 @@ static WMethod *w_cacheable_type_class_method(WValue recv, WValue name,
     return m;
 }
 
+/* Set by w_method_dispatch's GENERIC constructor block (and only there) to
+ * the init WMethod it selected, assigned as the block RETURNS — a nested
+ * `.new` inside an init re-enters the block, so an assignment made before
+ * init ran would be clobbered and the OUTER class would publish the inner
+ * init. w_method_call_slow reads it to decide that a `.new` dispatch is
+ * IC-cacheable: the special-cased builtin constructors (Response /
+ * ByteArray / BoolArray / Rational / ...) return before the generic block,
+ * never set it, and therefore never publish. The recv twin pins the pair
+ * to the class actually dispatched: without it, a class-method call whose
+ * BODY constructs some object would leave that ctor here and the publish
+ * below would cache it under the class-method's key. */
+static __thread WMethod *g_generic_ctor_selected;
+static __thread WValue g_generic_ctor_recv;
+
 /* Out-of-line slow path: cache miss → full dispatch + populate IC.
  * Only runs on first call per call site (or on type-change); the hot
  * fast path lives in w_method_call_cached below and is inlined into
@@ -36010,6 +36089,8 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
         return w_type_class_method_call(type_method, recv, &stack_args);
     }
 
+    g_generic_ctor_selected = NULL;
+    g_generic_ctor_recv = 0;
     WValue result = w_method_dispatch(recv, name, &stack_args, W_NIL);
 
     if (key >= 0x100 && w_is_instance(recv)) {
@@ -36028,8 +36109,50 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
         if (m) {
             w_ic_publish(cache, key, m->fn_ptr, m->arity - 1 /* subtract class receiver */);
         }
+    } else if (w_is_class(recv)) {
+        /* Constructor: allocate-then-init can't ride a plain fn_ptr cache
+         * entry, so it was excluded and every `C.new` walked the strcmp
+         * cascade (~60% of the new_object primitive). Publish the selected
+         * init fn with arity code -(2+argc); the hit path re-runs
+         * allocate + init directly. Only the GENERIC ctor block sets
+         * g_generic_ctor_selected, so builtin specials never publish. */
+        WMethod *cm = g_generic_ctor_selected;
+        if (cm && g_generic_ctor_recv == recv && w_hash_key_eq(name, WN_new) &&
+            cm->arity - 1 == argc && argc <= 8) {
+            w_ic_publish(cache, key, cm->fn_ptr, -2 - argc);
+        }
     }
     return result;
+}
+
+/* IC hit path for a cached constructor (arity code -(2+argc)): the cache
+ * guard proved recv is the exact class whose generic-path init was
+ * published; allocate and run init directly. Init's return value is
+ * discarded and the fresh instance returned, mirroring the generic path. */
+static WValue w_construct_cached(WValue recv, void *fn, int expected, WValue *a) {
+    WValue obj = w_object_new(recv);
+    typedef WValue (*fn0)(WValue);
+    typedef WValue (*fn1)(WValue, WValue);
+    typedef WValue (*fn2)(WValue, WValue, WValue);
+    typedef WValue (*fn3)(WValue, WValue, WValue, WValue);
+    typedef WValue (*fn4)(WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*fn5)(WValue, WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*fn6)(WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*fn7)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*fn8)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    switch (expected) {
+        case 0: ((fn0)fn)(obj); break;
+        case 1: ((fn1)fn)(obj, a[0]); break;
+        case 2: ((fn2)fn)(obj, a[0], a[1]); break;
+        case 3: ((fn3)fn)(obj, a[0], a[1], a[2]); break;
+        case 4: ((fn4)fn)(obj, a[0], a[1], a[2], a[3]); break;
+        case 5: ((fn5)fn)(obj, a[0], a[1], a[2], a[3], a[4]); break;
+        case 6: ((fn6)fn)(obj, a[0], a[1], a[2], a[3], a[4], a[5]); break;
+        case 7: ((fn7)fn)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6]); break;
+        case 8: ((fn8)fn)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]); break;
+        default: break;
+    }
+    return obj;
 }
 
 /* Inline-cached method dispatch — fast path. Plain `inline` lets LTO
@@ -36051,6 +36174,13 @@ WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc
     int32_t car = cache->arity;
     if (__builtin_expect(key == tk && fn != NULL &&
             key == atomic_load_explicit(&cache->type_key, memory_order_acquire), 1)) {
+        if (car <= -2) {
+            /* Cached constructor: arity code -(2+argc). Same-argc sites hit
+             * the direct allocate+init; a changed argc (splat) goes slow. */
+            if (-car - 2 == argc)
+                return w_construct_cached(recv, fn, argc, args_ptr);
+            return w_method_call_slow(recv, name, args_ptr, argc, cache, key);
+        }
         if (car < 0) {
             return ((WValue(*)(WValue, WValue*, int))fn)(recv, args_ptr, argc);
         }
@@ -36099,6 +36229,12 @@ WValue w_method_call_cached_0(WValue recv, WValue name, WInlineCache *cache) {
     int32_t car = cache->arity;
     if (__builtin_expect(key == tk && fn != NULL &&
             key == atomic_load_explicit(&cache->type_key, memory_order_acquire), 1)) {
+        if (car <= -2) {
+            /* Cached zero-arg constructor (arity code -2): allocate + init. */
+            if (car == -2)
+                return w_construct_cached(recv, fn, 0, NULL);
+            return w_method_call_slow(recv, name, NULL, 0, cache, key);
+        }
         if (car < 0) {
             return ((WValue(*)(WValue, WValue*, int))fn)(recv, NULL, 0);
         }
@@ -36554,6 +36690,11 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
                          klass->name);
                 w_raise(w_string(cbuf));
             }
+            /* Publish-on-exit: init already ran, so any nested `.new` it
+             * performed has been and gone — this assignment makes the
+             * OUTERMOST selection the one w_method_call_slow observes. */
+            g_generic_ctor_selected = m;
+            g_generic_ctor_recv = recv;
             return obj;
         }
 

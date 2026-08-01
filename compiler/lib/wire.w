@@ -166,6 +166,15 @@
 -> emit_instruction(f, instruction)
   current_block(f)[:instructions].push(instruction)
 
+# The most recently emitted instruction of the current block, or nil for an
+# empty block. Lets a lowerer inspect what an operand's lowering actually
+# produced (e.g. the fresh-string proof for w_str_concat_free_rhs).
+-> last_emitted_instruction(f)
+  instrs = current_block(f)[:instructions]
+  if instrs.size() == 0
+    return nil
+  instrs[instrs.size() - 1]
+
 # Early-return emitter. Ordinary implicit/final returns are emitted only after
 # their function body has been lowered and need no per-site metadata. Keeping
 # this work out of emit_instruction leaves the universal hot path unchanged.

@@ -18,7 +18,11 @@ second = ip.octets(123, "ignored")
 
 check_octets("octets", first, 192, 0, 2, 1)
 check_octets("surplus arguments", second, 192, 0, 2, 1)
-check("ordinary Array capacity", first.cap, 8)
+# Ordinary (growable, non-view) array: cap covers the 4 octets. The exact
+# value is an allocator detail — array literals allocate EXACT size
+# (cap 4) since the exact-size literal change, where the old empty+push
+# growth doubled to 8; the push test below proves growability.
+check("ordinary Array capacity", first.cap >= 4, true)
 check("fresh allocation", wvalue_bits(first) == wvalue_bits(second), false)
 
 first[0] = 9

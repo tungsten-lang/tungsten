@@ -1109,6 +1109,26 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   lt = infer_type(node.left, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
   rt = infer_type(node.right, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
 
+  # Var-var string == / != under a :string type fact on either side: route
+  # through __w_streq2_fast — bits equal -> true, BOTH canonical stringy
+  # (tag 0xFFF9, mode 0-6) -> false, anything else (mode-7 heap, ropes,
+  # stale facts, non-strings) -> w_eq. Semantics-preserving for every
+  # value, so a stale/wrong fact only costs the two inline checks; the
+  # fact just picks the sites where the fold PAYS (w_eq was the compiler
+  # self-profile's #1 leaf at ~15%, dominated by canonical-key compares).
+  # The literal arm above already took every site with a constant operand.
+  if op in (:EQ :NEQ) && (lt == :string || rt == :string)
+    lhs_tv2 = lower_expression(ctx, node.left)
+    lhs_reg2 = ensure_i64_value(wfn, lhs_tv2)
+    rhs_tv2 = lower_expression(ctx, node.right)
+    rhs_reg2 = ensure_i64_value(wfn, rhs_tv2)
+    sv2 = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: sv2, name: "__w_streq2_fast", args: [lhs_reg2, rhs_reg2]})
+    temp2 = next_temp(wfn)
+    pred2 = op == :EQ ? "eq" : "ne"
+    emit_instruction(wfn, {op: :icmp_i64, temp: temp2, pred: pred2, lhs: sv2, rhs: w_true.to_s()})
+    return typed_value(:i1, temp2)
+
   # Unicode vector / matrix products. For known WArray-backed receivers,
   # lower straight to the float kernels. Otherwise preserve normal method
   # dispatch so user-defined `-> ·(other)` / `-> ×(other)` / `-> ⊙(other)`
@@ -1194,7 +1214,24 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     lhs_reg = ensure_i64_value(wfn, lhs)
     rhs_reg = ensure_i64_value(wfn, rhs)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_str_concat", args: [lhs_reg, rhs_reg]})
+    # `pre + i.to_s()`: when the RHS is syntactically an anonymous call
+    # whose lowering's LAST emitted instruction is a guaranteed-fresh
+    # string producer with this very temp (w_int_to_s mints an
+    # independent heap string per call), no name can alias it and this
+    # concat is its only consumer — route through the freeing variant so
+    # the intermediate doesn't leak (str_concat primitive: 482MB RSS at
+    # 30M iterations from exactly this temp). Both syntactic anonymity
+    # AND last-instruction identity are required: a bare var RHS
+    # binding-forwards an earlier temp that IS nameable.
+    # TUNGSTEN_FREE=0 is the documented kill switch for ALL compiler-inserted
+    # frees — the concat variants must honor it too or corruption triage
+    # can't rule them out.
+    cname = "w_str_concat"
+    if env("TUNGSTEN_FREE") != "0" && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :call
+      li = last_emitted_instruction(wfn)
+      if li != nil && li[:op] == :call_direct_i64 && li[:name] == "w_int_to_s" && li[:temp] == rhs_reg
+        cname = "w_str_concat_free_rhs"
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: cname, args: [lhs_reg, rhs_reg]})
     return typed_value(:i64, temp)
 
   machine_type = machine_int_result_type(lt, rt)

@@ -878,14 +878,22 @@
         while i < args.size()
           arg_tv = lower_expression(ctx, args[i])
           # Mixed raw ABI: typed-array params take the boxed handle as-is;
-          # scalar params take raw machine ints.
+          # scalar params take raw machine ints; embedded ll/asm kernels take
+          # the start-corrected element-0 data address.
           if pkinds != nil && pkinds[i] == :arr
             arg_regs.push(ensure_i64_value(wfn, arg_tv))
+          elsif pkinds != nil && pkinds[i] == :arrptr
+            handle = ensure_i64_value(wfn, arg_tv)
+            tda = next_temp(wfn)
+            emit_instruction(wfn, {op: :ta_data_addr, temp: tda, value: handle})
+            arg_regs.push(tda)
           else
             arg_regs.push(ensure_raw_machine_int(wfn, arg_tv, :i64, arg_types[i]))
           i += 1
         temp = next_temp(wfn)
         emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: typed_target, args: arg_regs})
+        if is_u64_type(ctx[:mod][:fn_return_types][typed_key])
+          return typed_value(:raw_u64, temp)
         return typed_value(:raw_i64, temp)
 
       arg_regs = []
@@ -939,11 +947,18 @@
               arg_tv = lower_expression(ctx, args[i])
               if pkinds != nil && pkinds[i] == :arr
                 arg_regs.push(guard_typed_array_arg(ctx, ensure_i64_value(wfn, arg_tv), fallback_types[i], arg_types[i], name, i))
+              elsif pkinds != nil && pkinds[i] == :arrptr
+                handle = guard_typed_array_arg(ctx, ensure_i64_value(wfn, arg_tv), fallback_types[i], arg_types[i], name, i)
+                tda = next_temp(wfn)
+                emit_instruction(wfn, {op: :ta_data_addr, temp: tda, value: handle})
+                arg_regs.push(tda)
               else
                 arg_regs.push(ensure_raw_machine_int(wfn, arg_tv, :i64, fallback_types[i]))
               i += 1
             temp = next_temp(wfn)
             emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fallback_target, args: arg_regs})
+            if is_u64_type(ctx[:mod][:fn_return_types][fallback_key])
+              return typed_value(:raw_u64, temp)
             return typed_value(:raw_i64, temp)
 
           arg_regs = []
@@ -1018,6 +1033,11 @@
       arg_tv = lower_expression(ctx, args[i])
       if pkinds != nil && pkinds[i] == :arr
         arg_regs.push(ensure_i64_value(wfn, arg_tv))
+      elsif pkinds != nil && pkinds[i] == :arrptr
+        handle = ensure_i64_value(wfn, arg_tv)
+        tda = next_temp(wfn)
+        emit_instruction(wfn, {op: :ta_data_addr, temp: tda, value: handle})
+        arg_regs.push(tda)
       else
         arg_type = infer_type(args[i], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
         arg_regs.push(ensure_raw_machine_int(wfn, arg_tv, :i64, arg_type))
@@ -1028,6 +1048,11 @@
         arg_regs.push("0")
     temp = next_temp(wfn)
     emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: raw_target, args: arg_regs})
+    # Preserve unsignedness across the raw call boundary: a u64-returning
+    # callee's value must later box via w_u64, not the signed int fast path
+    # (which prints values >= 2^63 as negative).
+    if is_u64_type(ctx[:mod][:fn_return_types][name])
+      return typed_value(:raw_u64, temp)
     return typed_value(:raw_i64, temp)
 
   # Known function → direct call

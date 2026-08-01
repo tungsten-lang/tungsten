@@ -1355,6 +1355,12 @@ use target
       return ccall("w_int_to_str_boxed", args[1])
     when "w_int_to_str_base_boxed"
       return ccall("w_int_to_str_base_boxed", args[1], args[2])
+    when "bigint_powmod_any"
+      return ccall("bigint_powmod_any", args[1], args[2], args[3])
+    when "w_bigint_neg_bang"
+      return ccall("w_bigint_neg_bang", args[1])
+    when "w_bigint_abs_bang"
+      return ccall("w_bigint_abs_bang", args[1])
     when "w_str_to_sym"
       return ccall("w_str_to_sym", args[1])
     when "w_algebra_rewrite_source"

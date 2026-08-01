@@ -76,9 +76,15 @@
   case t
   when :u64
     "w_u64"
+  when :raw_u64
+    "w_u64"
   when :i128
     "w_i128"
+  when :raw_i128
+    "w_i128"
   when :u128
+    "w_u128"
+  when :raw_u128
     "w_u128"
   else
     "__w_int_fast"
@@ -87,9 +93,15 @@
   case t
   when :u64
     "w_to_u64"
+  when :raw_u64
+    "w_to_u64"
   when :i128
     "w_to_i128"
+  when :raw_i128
+    "w_to_i128"
   when :u128
+    "w_to_u128"
+  when :raw_u128
     "w_to_u128"
   else
     "__w_to_i64_fast"

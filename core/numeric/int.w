@@ -126,20 +126,19 @@
     return 0 if self == 0 || @1 == 0
     ((self / gcd(@1)) * @1).abs
 
-  # Modular exponentiation: (self ** e) mod m, via square-and-multiply.
-  # Operands stay reduced mod m, so cost is e.bit_length squarings — the
-  # inner operation of Fermat/PRP screening and Proth proofs. Cost is
-  # dominated by the underlying bignum multiply.
+  # Modular exponentiation: (self ** e) mod m — the inner operation of
+  # Fermat/PRP screening and Proth proofs. Routed to the runtime intrinsic
+  # `bigint_powmod_any` (runtime/runtime.c): sliding-window square-and-multiply
+  # through the Montgomery/Barrett modular-multiplication machinery, walking
+  # e's bits straight off its limbs. Result is in [0, |m|). A negative
+  # exponent keeps the former .w loop's behavior exactly: the ladder never
+  # ran, so the result is 1 (after the `self % m` step, preserving its
+  # division error for m == 0).
   -> modpow(e, m)
-    r = 1
-    b = self % m
-    x = e
-    while x > 0
-      if x.odd?
-        r = (r * b) % m
-      b = (b * b) % m
-      x = x / 2
-    r
+    if e < 0
+      mp_b = self % m
+      return 1
+    ccall("bigint_powmod_any", self, e, m)
 
   # Ruby-style Integer#pow: pow(e) == self ** e; pow(e, m) == modpow(e, m).
   # Matches Integer#pow on small ints so `n.pow(e, m)` works for any integer.
@@ -214,7 +213,10 @@
       raise "Int#isqrt: negative receiver"
     if self < 2
       return self
-    sq_x = 10 ** ((self.to_s.size + 1) / 2)
+    # 2^ceil(b/2) >= sqrt(self) for b = bit_length: a tight overestimate that
+    # costs one shift.  (The former 10^(digits/2) guess paid a full decimal
+    # conversion just to count digits.)
+    sq_x = 1 << ((self.bit_length + 1) / 2)
     sq_y = (sq_x + self / sq_x) / 2
     while sq_y < sq_x
       sq_x = sq_y

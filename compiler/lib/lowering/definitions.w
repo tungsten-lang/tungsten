@@ -538,6 +538,60 @@
 # typed forward call was emitted boxed even when the later callee was lowered
 # with a raw-i64 signature.  Both ABIs are LLVM i64, making the mismatch link
 # cleanly and then corrupt values at runtime.
+# Embedded LLVM IR / assembly bodies.  A top-level typed fn whose entire body
+# is a single `ll <<~IR` or `asm <<~ASM` call (one string-literal argument,
+# usually a heredoc — heredocs lex as raw text, so IR/asm brackets never
+# interpolate) carries that text into the module verbatim:
+#
+#   fn add_carry_chain(rp, ap, bp, n) (u64[] u64[] u64[] i64) i64
+#     ll <<~IR
+#       ...LLVM IR; params are %rp %ap %bp %n (i64; arrays arrive as the
+#       element-0 data address, start-corrected)...
+#       ret i64 %carry
+#     IR
+#
+# `asm` bodies are whole-function AArch64 assembly emitted as module-level
+# asm under the fn's symbol; parameters arrive per AAPCS64 in x0..x7 (arrays
+# as data addresses), the return travels in x0, and the body must `ret`.
+# Both forms are compile-only (no interpreter/stage-0 execution) and callers
+# use the raw ABI — no boxing on either side.  This exists for kernels LLVM
+# cannot pattern-match from portable code (multi-limb carry chains: the
+# vectorizer cannot touch a loop-carried carry, and the flag spills across
+# back-edges — LLVM issue #74493).
+-> embedded_body_directive(node)
+  body = node.body
+  if body == nil || body.size() != 1
+    return nil
+  st = body[0]
+  if ast_kind(st) != :call
+    return nil
+  cname = st.name
+  if cname != "ll" && cname != "asm"
+    return nil
+  cargs = st.args
+  if cargs == nil || cargs.size() != 1
+    return nil
+  if ast_kind(cargs[0]) != :string
+    return nil
+  [cname, cargs[0].value]
+
+-> embedded_param_kinds(node, child_var_types, source_path, directive)
+  kinds = []
+  i = 0
+  while i < node.params.size()
+    pname = param_runtime_name(node.params[i])
+    pt = child_var_types[pname]
+    if is_typed_array_type?(pt)
+      kinds.push(:arrptr)
+    elsif pt == :i64 || pt == :u64
+      kinds.push(:scalar)
+    else
+      raise compile_error_for_node(:E_LOWER_EMBEDDED_BODY, "fn '" + node.name + "': embedded " + directive + " bodies take only machine-int (## i64/u64) or typed-array parameters", source_path, node)
+    i += 1
+  if directive == "asm" && kinds.size() > 8
+    raise compile_error_for_node(:E_LOWER_EMBEDDED_BODY, "fn '" + node.name + "': asm bodies pass parameters in registers x0-x7 (max 8)", source_path, node)
+  kinds
+
 -> preregister_top_level_raw_abis(mod, expressions)
   i = 0
   while i < expressions.size()
@@ -545,17 +599,25 @@
     if ast_kind(node) in (:method_def :fn_def)
       child_var_types = {}
       populate_definition_var_types(node, child_var_types, mod)
-      rt = nil
-      if node.return_type != nil
-        rt = normalize_type_symbol(node.return_type)
-      else
-        rt = infer_fn_return_type(node, lowering_infer_maps)
-      flags = definition_raw_abi_flags(node, true, mod[:fn_return_types], rt, child_var_types)
-      if flags[0] || flags[1]
+      embedded = nil
+      if node.param_types != nil
+        embedded = embedded_body_directive(node)
+      if embedded != nil
         call_key = method_call_key_for_def(node)
         mod[:raw_callable_fns][call_key] = function_name_for_def(node)
-        if flags[0]
-          mod[:raw_fn_param_kinds][call_key] = raw_param_kinds(node.params, child_var_types)
+        mod[:raw_fn_param_kinds][call_key] = embedded_param_kinds(node, child_var_types, nil, embedded[0])
+      else
+        rt = nil
+        if node.return_type != nil
+          rt = normalize_type_symbol(node.return_type)
+        else
+          rt = infer_fn_return_type(node, lowering_infer_maps)
+        flags = definition_raw_abi_flags(node, true, mod[:fn_return_types], rt, child_var_types)
+        if flags[0] || flags[1]
+          call_key = method_call_key_for_def(node)
+          mod[:raw_callable_fns][call_key] = function_name_for_def(node)
+          if flags[0]
+            mod[:raw_fn_param_kinds][call_key] = raw_param_kinds(node.params, child_var_types)
     i += 1
   nil
 
@@ -609,6 +671,26 @@
   new_fn[:source_path] = ctx[:source_path]
   new_fn[:source_line] = node.line
   mod[:functions].push(new_fn)
+
+  # Embedded `ll` / `asm` body: the text goes to the emitter verbatim, no
+  # normal body lowering.  Top-level typed fns only; see
+  # embedded_body_directive for the contract.
+  if ctx[:class_name] == nil && node.param_types != nil
+    embedded = embedded_body_directive(node)
+    if embedded != nil
+      embed_types = {}
+      populate_definition_var_types(node, embed_types, mod)
+      mod[:raw_callable_fns][call_key] = fn_name
+      mod[:raw_fn_param_kinds][call_key] = embedded_param_kinds(node, embed_types, ctx[:source_path], embedded[0])
+      if mod[:fn_return_types][call_key] == nil
+        mod[:fn_return_types][call_key] = :i64
+      new_fn[:raw_i64_signature] = true
+      new_fn[:raw_return_type] = :i64
+      if embedded[0] == "ll"
+        new_fn[:embedded_ll] = embedded[1]
+      else
+        new_fn[:embedded_asm] = embedded[1]
+      return nil
 
   needs_block_return = analysis[:needs_block_return]
   if needs_block_return

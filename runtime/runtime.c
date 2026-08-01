@@ -245,22 +245,368 @@ static int bigint_compare(WValue a, WValue b);
 
 /* ---- Bigint core ---- */
 
+/*
+ * Recycle dead BigInt result allocations by limb capacity.  A returned
+ * BigInt cannot itself live in operation-specific TLS storage: the value may
+ * escape and must remain immutable across the next arithmetic call.  The
+ * safe hand-off point is instead w_value_free (or an internal normalization
+ * that demotes the result to i48), where ownership has already ended.
+ *
+ * Keep two allocations per logarithmic size class.  The largest retained
+ * object is 16K limbs (128 KiB), bounding retained storage below roughly
+ * 512 KiB per thread even if every bucket is full.  New pool-sized results
+ * reserve a power-of-two limb capacity: the mixed-size trace in
+ * `tungsten bench bignum --capacity-only` showed four allocations and about
+ * 20 KiB retained versus twelve allocations and 35 KiB for exact growth at
+ * 1024 limbs.  It also makes the common take path a direct bucket pop.  Define
+ * BN_BIGINT_POWER2_CAP=0 to retain exact-capacity best-fit behavior.
+ */
+#ifndef BN_BIGINT_RECYCLE
+#define BN_BIGINT_RECYCLE 1
+#endif
+#define BN_BIGINT_POOL_BUCKETS 15
+#define BN_BIGINT_POOL_PER_BUCKET 2
+#define BN_BIGINT_POOL_MAX_CAP (1U << (BN_BIGINT_POOL_BUCKETS - 1))
+#ifndef BN_BIGINT_POWER2_CAP
+#define BN_BIGINT_POWER2_CAP 1
+#endif
+#ifndef BN_BIGINT_HOT_SLOT
+#define BN_BIGINT_HOT_SLOT 1
+#endif
+/* Hybrid capacity class: powers of two up to BN_BIGINT_HYBRID_P2_LIMIT, then
+ * multiples of BN_BIGINT_HYBRID_QUANTUM (both must be powers of two).  Off by
+ * default; see the capacity benchmarks in benchmarks/big_math. */
+#ifndef BN_BIGINT_HYBRID_CAP
+#define BN_BIGINT_HYBRID_CAP 0
+#endif
+#ifndef BN_BIGINT_HYBRID_P2_LIMIT
+#define BN_BIGINT_HYBRID_P2_LIMIT 32
+#endif
+#ifndef BN_BIGINT_HYBRID_QUANTUM
+#define BN_BIGINT_HYBRID_QUANTUM 32
+#endif
+
+#if BN_BIGINT_RECYCLE
+typedef struct {
+#if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
+    WBigint *hot;
+    /* Mirror of hot->cap, valid whenever hot != NULL.  The hot-slot take is
+     * on the immutable-churn critical path (release stores hot -> next take
+     * loads it); reading the capacity from the pool struct instead of
+     * through the just-forwarded pointer removes a dependent L1 load from
+     * that recurrence. */
+    uint32_t hot_cap;
+#endif
+    WBigint *slot[BN_BIGINT_POOL_BUCKETS][BN_BIGINT_POOL_PER_BUCKET];
+    uint8_t count[BN_BIGINT_POOL_BUCKETS];
+    uint8_t total;
+} WBigintPool;
+static __thread WBigintPool bigint_pool_state;
+
+static inline int bigint_pool_bucket(uint32_t cap) {
+    return cap > 1 ? 31 - __builtin_clz(cap) : 0;
+}
+
+static WBigint *bigint_pool_take(uint32_t min_cap) {
+    WBigintPool *pool = &bigint_pool_state;
+    if (min_cap > BN_BIGINT_POOL_MAX_CAP) return NULL;
+
+#if BN_BIGINT_HYBRID_CAP
+    /* Hybrid capacities (powers of two up to the limit, then a fixed
+     * quantum) put MANY distinct capacities in one logarithmic bucket, so
+     * unlike the pure power-of-two path a buffer found in the requested
+     * bucket is not automatically large enough.  Only that first bucket
+     * needs the check: every higher bucket starts at 2^(first+1) > min_cap. */
+    WBigint *hot = pool->hot;
+    if (hot && hot->cap == min_cap) {
+        pool->hot = NULL;
+        hot->type = W_TYPE_BIGINT;
+        hot->size = 0;
+        return hot;
+    }
+    int hot_bucket =
+        hot && hot->cap >= min_cap
+            ? bigint_pool_bucket(hot->cap)
+            : BN_BIGINT_POOL_BUCKETS;
+    int first = bigint_pool_bucket(min_cap);
+    for (int bucket = first; bucket < BN_BIGINT_POOL_BUCKETS; bucket++) {
+        if (bucket == hot_bucket) {
+            pool->hot = NULL;
+            hot->type = W_TYPE_BIGINT;
+            hot->size = 0;
+            return hot;
+        }
+        int count = pool->count[bucket];
+        if (!count) continue;
+        int pick = count - 1;
+        if (bucket == first) {
+            pick = -1;
+            for (int i = 0; i < count; i++) {
+                uint32_t c = pool->slot[bucket][i]->cap;
+                if (c >= min_cap &&
+                    (pick < 0 || c < pool->slot[bucket][pick]->cap))
+                    pick = i;
+            }
+            if (pick < 0) continue;
+        }
+        WBigint *result = pool->slot[bucket][pick];
+        int last = --pool->count[bucket];
+        pool->slot[bucket][pick] = pool->slot[bucket][last];
+        pool->slot[bucket][last] = NULL;
+        result->type = W_TYPE_BIGINT;
+        result->size = 0;
+        return result;
+    }
+    return NULL;
+#elif BN_BIGINT_POWER2_CAP
+#if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
+    WBigint *hot = pool->hot;
+    if (hot && hot->cap == min_cap) {
+        pool->hot = NULL;
+        hot->type = W_TYPE_BIGINT;
+        hot->size = 0;
+        return hot;
+    }
+    int hot_bucket =
+        hot && hot->cap >= min_cap
+            ? bigint_pool_bucket(hot->cap)
+            : BN_BIGINT_POOL_BUCKETS;
+#endif
+    int first = min_cap > 1 ? 32 - __builtin_clz(min_cap - 1) : 0;
+    for (int bucket = first; bucket < BN_BIGINT_POOL_BUCKETS; bucket++) {
+#if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
+        if (bucket == hot_bucket) {
+            pool->hot = NULL;
+            hot->type = W_TYPE_BIGINT;
+            hot->size = 0;
+            return hot;
+        }
+#endif
+        int count = pool->count[bucket];
+        if (!count) continue;
+        WBigint *result = pool->slot[bucket][--count];
+        pool->slot[bucket][count] = NULL;
+        pool->count[bucket] = (uint8_t)count;
+        result->type = W_TYPE_BIGINT;
+        result->size = 0;
+        return result;
+    }
+    return NULL;
+#else
+    if (pool->total == 0) return NULL;
+    int first = bigint_pool_bucket(min_cap);
+    WBigint *best = NULL;
+    int best_bucket = -1;
+    int best_index = -1;
+    for (int bucket = first; bucket < BN_BIGINT_POOL_BUCKETS; bucket++) {
+        int count = pool->count[bucket];
+        for (int i = 0; i < count; i++) {
+            WBigint *candidate = pool->slot[bucket][i];
+            if (candidate->cap >= min_cap &&
+                (!best || candidate->cap < best->cap)) {
+                best = candidate;
+                best_bucket = bucket;
+                best_index = i;
+            }
+        }
+        /* Every later bucket is at least twice this one's lower bound.  Once
+         * this bucket supplied a fit, it is necessarily the global best fit. */
+        if (best) break;
+    }
+    if (!best) return NULL;
+
+    int last = --pool->count[best_bucket];
+    pool->slot[best_bucket][best_index] = pool->slot[best_bucket][last];
+    pool->slot[best_bucket][last] = NULL;
+    pool->total--;
+    best->type = W_TYPE_BIGINT;
+    best->size = 0;
+    return best;
+#endif
+}
+
+static void bigint_release(WBigint *b) {
+    WBigintPool *pool = &bigint_pool_state;
+    uint32_t cap = b->cap;
+    if (cap == 0 || cap > BN_BIGINT_POOL_MAX_CAP) {
+        free(b);
+        return;
+    }
+#if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
+    if (!pool->hot) {
+        b->type = 0;
+        b->size = 0;
+        pool->hot = b;
+        pool->hot_cap = cap;
+        return;
+    }
+#endif
+    int bucket = bigint_pool_bucket(cap);
+    int count = pool->count[bucket];
+    if (count >= BN_BIGINT_POOL_PER_BUCKET) {
+        free(b);
+        return;
+    }
+    /* Mark parked storage as non-BigInt.  This also makes an immediate
+     * accidental duplicate w_value_free a no-op instead of pooling twice. */
+    b->type = 0;
+    b->size = 0;
+    pool->slot[bucket][count] = b;
+    pool->count[bucket] = (uint8_t)(count + 1);
+#if !BN_BIGINT_POWER2_CAP
+    pool->total++;
+#endif
+}
+
+/*
+ * A released BigInt keeps its object subtag in the boxed WValue, so the
+ * cleared header byte remains the duplicate-release guard.  Arithmetic
+ * internals call bigint_release only for known-live allocations; generic
+ * WValue disposal uses this checked wrapper.
+ */
+static inline __attribute__((always_inline))
+void bigint_release_if_live(WBigint *b) {
+    if (__builtin_expect(b->type == W_TYPE_BIGINT, 1))
+        bigint_release(b);
+}
+
+static void bigint_pool_release_thread(void) {
+    WBigintPool *pool = &bigint_pool_state;
+#if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
+    free(pool->hot);
+    pool->hot = NULL;
+#endif
+    for (int bucket = 0; bucket < BN_BIGINT_POOL_BUCKETS; bucket++) {
+        int count = pool->count[bucket];
+        for (int i = 0; i < count; i++) {
+            free(pool->slot[bucket][i]);
+            pool->slot[bucket][i] = NULL;
+        }
+        pool->count[bucket] = 0;
+    }
+    pool->total = 0;
+}
+#else
+static inline WBigint *bigint_pool_take(uint32_t min_cap) {
+    (void)min_cap;
+    return NULL;
+}
+static inline void bigint_release(WBigint *b) { free(b); }
+static inline void bigint_release_if_live(WBigint *b) { free(b); }
+static inline void bigint_pool_release_thread(void) {}
+#endif
+
+static inline uint32_t bigint_alloc_capacity(uint32_t requested) {
+#if BN_BIGINT_HYBRID_CAP
+    /* Powers of two while their proportional waste is cheap in absolute
+     * terms, then a fixed quantum.  Power-of-two rounding wastes up to 50%
+     * of the allocation at every scale (8 limbs at 16, but 512 limbs — 4 KiB
+     * — at 1024); a quantum caps the waste at `quantum` limbs outright. */
+    if (requested > 1 && requested <= BN_BIGINT_POOL_MAX_CAP) {
+        if (requested <= BN_BIGINT_HYBRID_P2_LIMIT)
+            return 1U << (32 - __builtin_clz(requested - 1));
+        return (requested + (BN_BIGINT_HYBRID_QUANTUM - 1U)) &
+               ~(uint32_t)(BN_BIGINT_HYBRID_QUANTUM - 1U);
+    }
+#elif BN_BIGINT_POWER2_CAP
+    if (requested > 1 && requested <= BN_BIGINT_POOL_MAX_CAP)
+        return 1U << (32 - __builtin_clz(requested - 1));
+#endif
+    return requested;
+}
+
 static WBigint *bigint_alloc(int32_t cap) {
+    uint32_t alloc_cap = bigint_alloc_capacity((uint32_t)cap);
+    WBigint *b = bigint_pool_take(alloc_cap);
+    if (b) {
+        memset(b->limbs, 0, (size_t)b->cap * sizeof(uint64_t));
+        return b;
+    }
     /* calloc guarantees 16-byte alignment on macOS/glibc */
-    size_t sz = sizeof(WBigint) + (size_t)cap * sizeof(uint64_t);
+    size_t sz = sizeof(WBigint) + (size_t)alloc_cap * sizeof(uint64_t);
     /* Round up to 16-byte alignment for w_box_ptr */
     sz = (sz + 15) & ~(size_t)15;
-    WBigint *b = (WBigint *)calloc(1, sz);
-    b->type = W_TYPE_BIGINT;  /* Phase 6i.2: stamp dispatch byte (was implicit via subtag) */
-    b->cap = cap;
+    b = (WBigint *)calloc(1, sz);
+    b->type = W_TYPE_BIGINT;  /* live allocation marker; dispatch uses the object subtag */
+    b->cap = alloc_cap;
     b->size = 0;
     return b;
 }
 
-/* Phase 6i.2: bigint demoted from W_SUBTAG_BIGINT to W_SUBTAG_GENERIC; the
- * `type` byte at offset 0 is the dispatch discriminator. */
+/* Like bigint_alloc, but leave the limb storage uninitialized for operations
+ * that overwrite every published limb before returning.  Avoiding a redundant
+ * zero-fill matters for bandwidth-bound chains of BigInt additions. */
+#ifndef BN_RAW_HEADER_STORES
+#define BN_RAW_HEADER_STORES 1
+#endif
+static WBigint *bigint_alloc_raw(int32_t cap) {
+    uint32_t alloc_cap = bigint_alloc_capacity((uint32_t)cap);
+    WBigint *b = bigint_pool_take(alloc_cap);
+    if (b) return b;
+    size_t sz = sizeof(WBigint) + (size_t)alloc_cap * sizeof(uint64_t);
+    sz = (sz + 15) & ~(size_t)15;
+    b = (WBigint *)malloc(sz);
+#if BN_RAW_HEADER_STORES
+    b->type = W_TYPE_BIGINT;
+    b->size = 0;
+    b->cap = alloc_cap;
+#else
+    memset(b, 0, sizeof(WBigint));
+    b->type = W_TYPE_BIGINT;
+    b->cap = alloc_cap;
+#endif
+    return b;
+}
+
+/*
+ * Fixed-shape arithmetic normally consumes exactly the buffer most recently
+ * handed back by the immutable-result churn.  Bypass the out-of-line
+ * best-fit search for that overwhelmingly common exact-hot hit; a miss keeps
+ * the full allocator's larger-fit and malloc behavior.
+ */
+static inline __attribute__((always_inline))
+WBigint *bigint_alloc_raw_hot(int32_t cap) {
+#if BN_BIGINT_RECYCLE && BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
+    uint32_t requested = (uint32_t)cap;
+    WBigintPool *pool = &bigint_pool_state;
+    WBigint *hot = pool->hot;
+    uint32_t hot_cap = pool->hot_cap;
+    if (__builtin_expect(
+            hot != NULL &&
+            hot_cap >= requested &&
+            (hot_cap == 1 || (hot_cap >> 1) < requested), 1)) {
+        pool->hot = NULL;
+        hot->type = W_TYPE_BIGINT;
+        /* Raw callers publish their final signed size after filling limbs. */
+        return hot;
+    }
+#endif
+    return bigint_alloc_raw(cap);
+}
+
+/*
+ * A few fixed-width kernels already know the allocator's exact power-of-two
+ * capacity class.  On their hot-slot hit, avoid recomputing the smallest-fit
+ * range check.  The fallback still goes through the general pool/malloc path.
+ */
+static inline __attribute__((always_inline))
+WBigint *bigint_alloc_raw_hot_exact(uint32_t exact_cap) {
+#if BN_BIGINT_RECYCLE && BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
+    WBigintPool *pool = &bigint_pool_state;
+    WBigint *hot = pool->hot;
+    if (__builtin_expect(hot != NULL && pool->hot_cap == exact_cap, 1)) {
+        pool->hot = NULL;
+        hot->type = W_TYPE_BIGINT;
+        return hot;
+    }
+#endif
+    return bigint_alloc_raw((int32_t)exact_cap);
+}
+
+/* BigInt has a dedicated object subtag; the header type byte remains an
+ * allocation-state marker for the give/take pool, not a dispatch load. */
 static inline WValue bigint_box(WBigint *b) {
-    return w_box_ptr(b, W_SUBTAG_GENERIC);
+    return w_box_ptr(b, W_SUBTAG_BIGINT);
 }
 
 /* Try to demote a bigint back to inline i48; otherwise box as heap bigint */
@@ -270,15 +616,144 @@ static WValue bigint_normalize(WBigint *b) {
     while (abs_len > 0 && b->limbs[abs_len - 1] == 0) abs_len--;
     if (b->size < 0) b->size = -abs_len; else b->size = abs_len;
 
-    if (abs_len == 0) { free(b); return w_box_int(0); }
+    if (abs_len == 0) { bigint_release(b); return w_box_int(0); }
     if (abs_len == 1 && b->limbs[0] <= (uint64_t)W_INT48_MAX) {
         int64_t val = (int64_t)b->limbs[0];
         if (b->size < 0) val = -val;
         if (val >= W_INT48_MIN && val <= W_INT48_MAX) {
-            free(b); return w_box_int(val);
+            bigint_release(b); return w_box_int(val);
         }
     }
     return bigint_box(b);
+}
+
+/*
+ * mag_add establishes a stronger postcondition than most magnitude kernels:
+ * the result is nonzero and its published top limb is nonzero.  Avoid
+ * rescanning that known-normalized result; retain only the one-limb i48
+ * demotion check.
+ */
+#ifndef BN_ADD_KNOWN_NORMALIZED
+#define BN_ADD_KNOWN_NORMALIZED 1
+#endif
+static inline WValue bigint_finish_mag_add(WBigint *b) {
+#if BN_ADD_KNOWN_NORMALIZED
+    int32_t abs_len = b->size < 0 ? -b->size : b->size;
+    if (abs_len == 1 && b->limbs[0] <= (uint64_t)W_INT48_MAX) {
+        int64_t value = (int64_t)b->limbs[0];
+        if (b->size < 0) value = -value;
+        if (value >= W_INT48_MIN && value <= W_INT48_MAX) {
+            bigint_release(b);
+            return w_box_int(value);
+        }
+    }
+    return bigint_box(b);
+#else
+    return bigint_normalize(b);
+#endif
+}
+
+/*
+ * mag_sub trims its result before returning.  It may produce zero, unlike
+ * mag_add, but does not need bigint_normalize to repeat the top-limb scan.
+ */
+#ifndef BN_SUB_KNOWN_NORMALIZED
+#define BN_SUB_KNOWN_NORMALIZED 1
+#endif
+static inline WValue bigint_finish_mag_sub(WBigint *b) {
+#if BN_SUB_KNOWN_NORMALIZED
+    int32_t abs_len = b->size < 0 ? -b->size : b->size;
+    if (abs_len == 0) {
+        bigint_release(b);
+        return w_box_int(0);
+    }
+    if (abs_len == 1 && b->limbs[0] <= (uint64_t)W_INT48_MAX) {
+        int64_t value = (int64_t)b->limbs[0];
+        if (b->size < 0) value = -value;
+        if (value >= W_INT48_MIN && value <= W_INT48_MAX) {
+            bigint_release(b);
+            return w_box_int(value);
+        }
+    }
+    return bigint_box(b);
+#else
+    return bigint_normalize(b);
+#endif
+}
+
+static inline __attribute__((always_inline))
+WValue bigint_finish_one_limb(uint64_t magnitude, int negative) {
+    if (magnitude == 0) return w_box_int(0);
+    if (magnitude <= (uint64_t)W_INT48_MAX) {
+        int64_t value = (int64_t)magnitude;
+        return w_box_int(negative ? -value : value);
+    }
+    WBigint *result = bigint_alloc_raw_hot(1);
+    result->limbs[0] = magnitude;
+    result->size = negative ? -1 : 1;
+    return bigint_box(result);
+}
+
+#ifndef BN_ADDSUB_11_FAST
+#define BN_ADDSUB_11_FAST 1
+#endif
+static inline __attribute__((always_inline))
+WValue bigint_add_one_limb_magnitudes(
+    uint64_t a, int a_negative, uint64_t b, int b_negative) {
+    if (a_negative == b_negative) {
+        uint64_t sum = a + b;
+        uint64_t carry = sum < a;
+        if (!carry) return bigint_finish_one_limb(sum, a_negative);
+        WBigint *result = bigint_alloc_raw_hot(2);
+        result->limbs[0] = sum;
+        result->limbs[1] = 1;
+        result->size = a_negative ? -2 : 2;
+        return bigint_box(result);
+    }
+    if (a == b) return w_box_int(0);
+    if (a > b) return bigint_finish_one_limb(a - b, a_negative);
+    return bigint_finish_one_limb(b - a, b_negative);
+}
+
+#ifndef BN_ADDSUB_22_FAST
+#define BN_ADDSUB_22_FAST 1
+#endif
+static inline __attribute__((always_inline))
+WValue bigint_add_two_limb_magnitudes(
+    const uint64_t *a, int a_negative,
+    const uint64_t *b, int b_negative) {
+    if (a_negative == b_negative) {
+        uint64_t low = a[0] + b[0];
+        uint64_t carry_low = low < a[0];
+        uint64_t high_sum = a[1] + b[1];
+        uint64_t carry_high = high_sum < a[1];
+        uint64_t high = high_sum + carry_low;
+        carry_high |= high < high_sum;
+        WBigint *result = bigint_alloc_raw_hot(3);
+        result->limbs[0] = low;
+        result->limbs[1] = high;
+        result->limbs[2] = carry_high;
+        int32_t size = carry_high ? 3 : 2;
+        result->size = a_negative ? -size : size;
+        return bigint_box(result);
+    }
+
+    int compare = a[1] != b[1]
+        ? (a[1] > b[1] ? 1 : -1)
+        : (a[0] > b[0] ? 1 : (a[0] < b[0] ? -1 : 0));
+    if (compare == 0) return w_box_int(0);
+    const uint64_t *larger = compare > 0 ? a : b;
+    const uint64_t *smaller = compare > 0 ? b : a;
+    int negative = compare > 0 ? a_negative : b_negative;
+    uint64_t low = larger[0] - smaller[0];
+    uint64_t borrow = larger[0] < smaller[0];
+    uint64_t high = larger[1] - smaller[1] - borrow;
+    if (high == 0) return bigint_finish_one_limb(low, negative);
+    WBigint *result = bigint_alloc_raw_hot(2);
+    result->limbs[0] = low;
+    result->limbs[1] = high;
+    result->size = negative ? -2 : 2;
+    return bigint_box(result);
 }
 
 static WValue bigint_from_i64(int64_t v) {
@@ -351,6 +826,11 @@ static const uint64_t *integer_limbs(WValue v, uint64_t *stack_limb, int32_t *ou
 
 /* ---- Magnitude operations (unsigned) ---- */
 
+static uint64_t bn_add_n(uint64_t *r, const uint64_t *a,
+                         const uint64_t *b, int32_t m);
+static uint64_t bn_sub_n(uint64_t *r, const uint64_t *a,
+                         const uint64_t *b, int32_t m);
+
 static int mag_cmp(const uint64_t *a, int32_t alen, const uint64_t *b, int32_t blen) {
     if (alen != blen) return alen > blen ? 1 : -1;
     for (int32_t i = alen - 1; i >= 0; i--) {
@@ -359,52 +839,575 @@ static int mag_cmp(const uint64_t *a, int32_t alen, const uint64_t *b, int32_t b
     return 0;
 }
 
-static WBigint *mag_add(const uint64_t *a, int32_t alen, const uint64_t *b, int32_t blen) {
+#ifndef BN_ADDSUB_INLINE_MAG
+#define BN_ADDSUB_INLINE_MAG 0
+#endif
+#if BN_ADDSUB_INLINE_MAG
+#define BN_ADDSUB_MAG_ATTR inline __attribute__((always_inline))
+#else
+#define BN_ADDSUB_MAG_ATTR
+#endif
+
+static BN_ADDSUB_MAG_ATTR WBigint *mag_add(
+    const uint64_t *a, int32_t alen,
+    const uint64_t *b, int32_t blen) {
     if (alen < blen) {
         const uint64_t *t = a; a = b; b = t;
         int32_t tl = alen; alen = blen; blen = tl;
     }
-    WBigint *r = bigint_alloc(alen + 1);
-    uint64_t carry = 0;
-    for (int32_t i = 0; i < blen; i++) {
-        __uint128_t s = (__uint128_t)a[i] + b[i] + carry;
-        r->limbs[i] = (uint64_t)s;
-        carry = (uint64_t)(s >> 64);
+    WBigint *r = bigint_alloc_raw(alen + 1);
+    uint64_t carry = bn_add_n(r->limbs, a, b, blen);
+    int32_t i = blen;
+    for (; carry && i < alen; i++) {
+        uint64_t ai = a[i];
+        r->limbs[i] = ai + 1;
+        carry = r->limbs[i] == 0;
     }
-    for (int32_t i = blen; i < alen; i++) {
-        __uint128_t s = (__uint128_t)a[i] + carry;
-        r->limbs[i] = (uint64_t)s;
-        carry = (uint64_t)(s >> 64);
-    }
+    if (i < alen)
+        memcpy(r->limbs + i, a + i, (size_t)(alen - i) * sizeof(uint64_t));
     if (carry) { r->limbs[alen] = carry; r->size = alen + 1; }
     else       { r->size = alen; }
     return r;
 }
 
-static WBigint *mag_sub(const uint64_t *a, int32_t alen, const uint64_t *b, int32_t blen) {
+static BN_ADDSUB_MAG_ATTR WBigint *mag_sub(
+    const uint64_t *a, int32_t alen,
+    const uint64_t *b, int32_t blen) {
     /* Assumes |a| >= |b| */
-    WBigint *r = bigint_alloc(alen);
-    uint64_t borrow = 0;
-    for (int32_t i = 0; i < blen; i++) {
-        uint64_t ai = a[i], bi = b[i];
-        uint64_t diff = ai - bi - borrow;
-        borrow = (ai < bi + borrow || (borrow && bi == UINT64_MAX)) ? 1 : 0;
-        r->limbs[i] = diff;
-    }
-    for (int32_t i = blen; i < alen; i++) {
+    WBigint *r = bigint_alloc_raw(alen);
+    uint64_t borrow = bn_sub_n(r->limbs, a, b, blen);
+    int32_t i = blen;
+    for (; borrow && i < alen; i++) {
         uint64_t ai = a[i];
-        uint64_t diff = ai - borrow;
-        borrow = (ai < borrow) ? 1 : 0;
-        r->limbs[i] = diff;
+        r->limbs[i] = ai - 1;
+        borrow = ai == 0;
     }
+    if (i < alen)
+        memcpy(r->limbs + i, a + i, (size_t)(alen - i) * sizeof(uint64_t));
     r->size = alen;
     while (r->size > 0 && r->limbs[r->size - 1] == 0) r->size--;
     return r;
 }
 
+#undef BN_ADDSUB_MAG_ATTR
+
 /* ---- Signed bigint arithmetic ---- */
 
-static WValue bigint_add_any(WValue a, WValue b) {
+#ifndef BN_ADDSUB_EQUAL_FAST
+#define BN_ADDSUB_EQUAL_FAST 1
+#endif
+
+#if defined(__aarch64__)
+#define BN_FIXED_ADDSUB(name, first, chain, final)                         \
+static inline __attribute__((always_inline))                              \
+uint64_t name(uint64_t *r, const uint64_t *a, const uint64_t *b) {        \
+    uint64_t flag;                                                         \
+    __asm__ volatile(                                                      \
+        first                                                              \
+        chain                                                              \
+        final                                                              \
+        : [flag] "=&r"(flag)                                               \
+        : [rp] "r"(r), [ap] "r"(a), [bp] "r"(b)                           \
+        : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11",             \
+          "x12", "x13", "x14", "x15", "cc", "memory");                   \
+    return flag;                                                           \
+}
+
+BN_FIXED_ADDSUB(
+    bn_add3_fixed,
+    "ldp x4, x5, [%[ap]]\n\t"
+    "ldr x6, [%[ap], #16]\n\t"
+    "ldp x8, x9, [%[bp]]\n\t"
+    "ldr x10, [%[bp], #16]\n\t",
+    "adds x12, x4, x8\n\t"
+    "adcs x13, x5, x9\n\t"
+    "adcs x14, x6, x10\n\t",
+    "stp x12, x13, [%[rp]]\n\t"
+    "str x14, [%[rp], #16]\n\t"
+    "cset %[flag], hs")
+
+BN_FIXED_ADDSUB(
+    bn_add4_fixed,
+    "ldp x4, x5, [%[ap]]\n\t"
+    "ldp x6, x7, [%[ap], #16]\n\t"
+    "ldp x8, x9, [%[bp]]\n\t"
+    "ldp x10, x11, [%[bp], #16]\n\t",
+    "adds x12, x4, x8\n\t"
+    "adcs x13, x5, x9\n\t"
+    "adcs x14, x6, x10\n\t"
+    "adcs x15, x7, x11\n\t",
+    "stp x12, x13, [%[rp]]\n\t"
+    "stp x14, x15, [%[rp], #16]\n\t"
+    "cset %[flag], hs")
+
+BN_FIXED_ADDSUB(
+    bn_add8_fixed,
+    "ldp x4, x5, [%[ap]]\n\t"
+    "ldp x6, x7, [%[ap], #16]\n\t"
+    "ldp x8, x9, [%[bp]]\n\t"
+    "ldp x10, x11, [%[bp], #16]\n\t",
+    "adds x12, x4, x8\n\t"
+    "adcs x13, x5, x9\n\t"
+    "adcs x14, x6, x10\n\t"
+    "adcs x15, x7, x11\n\t"
+    "stp x12, x13, [%[rp]]\n\t"
+    "stp x14, x15, [%[rp], #16]\n\t"
+    "ldp x4, x5, [%[ap], #32]\n\t"
+    "ldp x6, x7, [%[ap], #48]\n\t"
+    "ldp x8, x9, [%[bp], #32]\n\t"
+    "ldp x10, x11, [%[bp], #48]\n\t"
+    "adcs x12, x4, x8\n\t"
+    "adcs x13, x5, x9\n\t"
+    "adcs x14, x6, x10\n\t"
+    "adcs x15, x7, x11\n\t",
+    "stp x12, x13, [%[rp], #32]\n\t"
+    "stp x14, x15, [%[rp], #48]\n\t"
+    "cset %[flag], hs")
+
+BN_FIXED_ADDSUB(
+    bn_add16_fixed,
+    "ldp x4, x5, [%[ap]]\n\t"
+    "ldp x6, x7, [%[ap], #16]\n\t"
+    "ldp x8, x9, [%[bp]]\n\t"
+    "ldp x10, x11, [%[bp], #16]\n\t",
+    "adds x12, x4, x8\n\t"
+    "adcs x13, x5, x9\n\t"
+    "adcs x14, x6, x10\n\t"
+    "adcs x15, x7, x11\n\t"
+    "stp x12, x13, [%[rp]]\n\t"
+    "stp x14, x15, [%[rp], #16]\n\t"
+    "ldp x4, x5, [%[ap], #32]\n\t"
+    "ldp x6, x7, [%[ap], #48]\n\t"
+    "ldp x8, x9, [%[bp], #32]\n\t"
+    "ldp x10, x11, [%[bp], #48]\n\t"
+    "adcs x12, x4, x8\n\t"
+    "adcs x13, x5, x9\n\t"
+    "adcs x14, x6, x10\n\t"
+    "adcs x15, x7, x11\n\t"
+    "stp x12, x13, [%[rp], #32]\n\t"
+    "stp x14, x15, [%[rp], #48]\n\t"
+    "ldp x4, x5, [%[ap], #64]\n\t"
+    "ldp x6, x7, [%[ap], #80]\n\t"
+    "ldp x8, x9, [%[bp], #64]\n\t"
+    "ldp x10, x11, [%[bp], #80]\n\t"
+    "adcs x12, x4, x8\n\t"
+    "adcs x13, x5, x9\n\t"
+    "adcs x14, x6, x10\n\t"
+    "adcs x15, x7, x11\n\t"
+    "stp x12, x13, [%[rp], #64]\n\t"
+    "stp x14, x15, [%[rp], #80]\n\t"
+    "ldp x4, x5, [%[ap], #96]\n\t"
+    "ldp x6, x7, [%[ap], #112]\n\t"
+    "ldp x8, x9, [%[bp], #96]\n\t"
+    "ldp x10, x11, [%[bp], #112]\n\t"
+    "adcs x12, x4, x8\n\t"
+    "adcs x13, x5, x9\n\t"
+    "adcs x14, x6, x10\n\t"
+    "adcs x15, x7, x11\n\t",
+    "stp x12, x13, [%[rp], #96]\n\t"
+    "stp x14, x15, [%[rp], #112]\n\t"
+    "cset %[flag], hs")
+
+#define BN_FIXED_ADDSUB24(name, first_op, next_op, condition)             \
+BN_FIXED_ADDSUB(                                                          \
+    name,                                                                 \
+    "ldp x4, x5, [%[ap]]\n\t"                                           \
+    "ldp x6, x7, [%[ap], #16]\n\t"                                      \
+    "ldp x8, x9, [%[bp]]\n\t"                                           \
+    "ldp x10, x11, [%[bp], #16]\n\t",                                   \
+    first_op " x12, x4, x8\n\t"                                         \
+    next_op " x13, x5, x9\n\t"                                          \
+    next_op " x14, x6, x10\n\t"                                         \
+    next_op " x15, x7, x11\n\t"                                         \
+    "stp x12, x13, [%[rp]]\n\t"                                         \
+    "stp x14, x15, [%[rp], #16]\n\t"                                    \
+    "ldp x4, x5, [%[ap], #32]\n\t"                                     \
+    "ldp x6, x7, [%[ap], #48]\n\t"                                     \
+    "ldp x8, x9, [%[bp], #32]\n\t"                                     \
+    "ldp x10, x11, [%[bp], #48]\n\t"                                   \
+    next_op " x12, x4, x8\n\t"                                          \
+    next_op " x13, x5, x9\n\t"                                          \
+    next_op " x14, x6, x10\n\t"                                         \
+    next_op " x15, x7, x11\n\t"                                         \
+    "stp x12, x13, [%[rp], #32]\n\t"                                    \
+    "stp x14, x15, [%[rp], #48]\n\t"                                    \
+    "ldp x4, x5, [%[ap], #64]\n\t"                                     \
+    "ldp x6, x7, [%[ap], #80]\n\t"                                     \
+    "ldp x8, x9, [%[bp], #64]\n\t"                                     \
+    "ldp x10, x11, [%[bp], #80]\n\t"                                   \
+    next_op " x12, x4, x8\n\t"                                          \
+    next_op " x13, x5, x9\n\t"                                          \
+    next_op " x14, x6, x10\n\t"                                         \
+    next_op " x15, x7, x11\n\t"                                         \
+    "stp x12, x13, [%[rp], #64]\n\t"                                    \
+    "stp x14, x15, [%[rp], #80]\n\t"                                    \
+    "ldp x4, x5, [%[ap], #96]\n\t"                                     \
+    "ldp x6, x7, [%[ap], #112]\n\t"                                    \
+    "ldp x8, x9, [%[bp], #96]\n\t"                                     \
+    "ldp x10, x11, [%[bp], #112]\n\t"                                  \
+    next_op " x12, x4, x8\n\t"                                          \
+    next_op " x13, x5, x9\n\t"                                          \
+    next_op " x14, x6, x10\n\t"                                         \
+    next_op " x15, x7, x11\n\t"                                         \
+    "stp x12, x13, [%[rp], #96]\n\t"                                    \
+    "stp x14, x15, [%[rp], #112]\n\t"                                   \
+    "ldp x4, x5, [%[ap], #128]\n\t"                                    \
+    "ldp x6, x7, [%[ap], #144]\n\t"                                    \
+    "ldp x8, x9, [%[bp], #128]\n\t"                                    \
+    "ldp x10, x11, [%[bp], #144]\n\t"                                  \
+    next_op " x12, x4, x8\n\t"                                          \
+    next_op " x13, x5, x9\n\t"                                          \
+    next_op " x14, x6, x10\n\t"                                         \
+    next_op " x15, x7, x11\n\t"                                         \
+    "stp x12, x13, [%[rp], #128]\n\t"                                   \
+    "stp x14, x15, [%[rp], #144]\n\t"                                   \
+    "ldp x4, x5, [%[ap], #160]\n\t"                                    \
+    "ldp x6, x7, [%[ap], #176]\n\t"                                    \
+    "ldp x8, x9, [%[bp], #160]\n\t"                                    \
+    "ldp x10, x11, [%[bp], #176]\n\t"                                  \
+    next_op " x12, x4, x8\n\t"                                          \
+    next_op " x13, x5, x9\n\t"                                          \
+    next_op " x14, x6, x10\n\t"                                         \
+    next_op " x15, x7, x11\n\t",                                        \
+    "stp x12, x13, [%[rp], #160]\n\t"                                   \
+    "stp x14, x15, [%[rp], #176]\n\t"                                   \
+    "cset %[flag], " condition)
+
+BN_FIXED_ADDSUB24(bn_add24_fixed, "adds", "adcs", "hs")
+BN_FIXED_ADDSUB24(bn_sub24_fixed, "subs", "sbcs", "lo")
+
+#undef BN_FIXED_ADDSUB24
+
+/* 32 limbs: eight 4-limb groups, immediate offsets, one flag chain. */
+#define BN_FIXED_ADDSUB32_GROUP(op, base)                                 \
+    "ldp x4, x5, [%[ap], #" #base "]\n\t"                                \
+    "ldp x6, x7, [%[ap], #" #base "+16]\n\t"                             \
+    "ldp x8, x9, [%[bp], #" #base "]\n\t"                                \
+    "ldp x10, x11, [%[bp], #" #base "+16]\n\t"                           \
+    op " x12, x4, x8\n\t"                                                 \
+    op " x13, x5, x9\n\t"                                                 \
+    op " x14, x6, x10\n\t"                                                \
+    op " x15, x7, x11\n\t"                                                \
+    "stp x12, x13, [%[rp], #" #base "]\n\t"                              \
+    "stp x14, x15, [%[rp], #" #base "+16]\n\t"
+
+#define BN_FIXED_ADDSUB32(name, first_op, next_op, condition)             \
+BN_FIXED_ADDSUB(                                                          \
+    name,                                                                 \
+    "ldp x4, x5, [%[ap]]\n\t"                                           \
+    "ldp x6, x7, [%[ap], #16]\n\t"                                      \
+    "ldp x8, x9, [%[bp]]\n\t"                                           \
+    "ldp x10, x11, [%[bp], #16]\n\t",                                   \
+    first_op " x12, x4, x8\n\t"                                         \
+    next_op " x13, x5, x9\n\t"                                          \
+    next_op " x14, x6, x10\n\t"                                         \
+    next_op " x15, x7, x11\n\t"                                         \
+    "stp x12, x13, [%[rp]]\n\t"                                         \
+    "stp x14, x15, [%[rp], #16]\n\t"                                    \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 32)                                  \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 64)                                  \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 96)                                  \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 128)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 160)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 192)                                 \
+    "ldp x4, x5, [%[ap], #224]\n\t"                                     \
+    "ldp x6, x7, [%[ap], #240]\n\t"                                     \
+    "ldp x8, x9, [%[bp], #224]\n\t"                                     \
+    "ldp x10, x11, [%[bp], #240]\n\t"                                   \
+    next_op " x12, x4, x8\n\t"                                          \
+    next_op " x13, x5, x9\n\t"                                          \
+    next_op " x14, x6, x10\n\t"                                         \
+    next_op " x15, x7, x11\n\t",                                        \
+    "stp x12, x13, [%[rp], #224]\n\t"                                   \
+    "stp x14, x15, [%[rp], #240]\n\t"                                   \
+    "cset %[flag], " condition)
+
+BN_FIXED_ADDSUB32(bn_add32_fixed, "adds", "adcs", "hs")
+BN_FIXED_ADDSUB32(bn_sub32_fixed, "subs", "sbcs", "lo")
+
+#undef BN_FIXED_ADDSUB32
+
+/* 40/48/64 limbs: same shape, more middle groups.  The head/tail fragments
+ * are comma-free so each expands as a single BN_FIXED_ADDSUB argument. */
+#define BN_FIXED_ADDSUB_HEAD(first_op, next_op)                           \
+    "ldp x4, x5, [%[ap]]\n\t"                                           \
+    "ldp x6, x7, [%[ap], #16]\n\t"                                      \
+    "ldp x8, x9, [%[bp]]\n\t"                                           \
+    "ldp x10, x11, [%[bp], #16]\n\t"                                    \
+    first_op " x12, x4, x8\n\t"                                         \
+    next_op " x13, x5, x9\n\t"                                          \
+    next_op " x14, x6, x10\n\t"                                         \
+    next_op " x15, x7, x11\n\t"                                         \
+    "stp x12, x13, [%[rp]]\n\t"                                         \
+    "stp x14, x15, [%[rp], #16]\n\t"
+
+#define BN_FIXED_ADDSUB_TAIL(next_op, base, condition)                    \
+    "ldp x4, x5, [%[ap], #" #base "]\n\t"                               \
+    "ldp x6, x7, [%[ap], #" #base "+16]\n\t"                            \
+    "ldp x8, x9, [%[bp], #" #base "]\n\t"                               \
+    "ldp x10, x11, [%[bp], #" #base "+16]\n\t"                          \
+    next_op " x12, x4, x8\n\t"                                          \
+    next_op " x13, x5, x9\n\t"                                          \
+    next_op " x14, x6, x10\n\t"                                         \
+    next_op " x15, x7, x11\n\t"                                         \
+    "stp x12, x13, [%[rp], #" #base "]\n\t"                             \
+    "stp x14, x15, [%[rp], #" #base "+16]\n\t"                          \
+    "cset %[flag], " condition
+
+#define BN_FIXED_ADDSUB40(name, first_op, next_op, condition)             \
+BN_FIXED_ADDSUB(                                                          \
+    name,                                                                 \
+    BN_FIXED_ADDSUB_HEAD(first_op, next_op),                              \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 32)                                  \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 64)                                  \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 96)                                  \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 128)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 160)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 192)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 224)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 256),                                \
+    BN_FIXED_ADDSUB_TAIL(next_op, 288, condition))
+
+#define BN_FIXED_ADDSUB48(name, first_op, next_op, condition)             \
+BN_FIXED_ADDSUB(                                                          \
+    name,                                                                 \
+    BN_FIXED_ADDSUB_HEAD(first_op, next_op),                              \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 32)                                  \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 64)                                  \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 96)                                  \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 128)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 160)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 192)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 224)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 256)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 288)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 320),                                \
+    BN_FIXED_ADDSUB_TAIL(next_op, 352, condition))
+
+#define BN_FIXED_ADDSUB64(name, first_op, next_op, condition)             \
+BN_FIXED_ADDSUB(                                                          \
+    name,                                                                 \
+    BN_FIXED_ADDSUB_HEAD(first_op, next_op),                              \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 32)                                  \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 64)                                  \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 96)                                  \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 128)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 160)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 192)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 224)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 256)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 288)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 320)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 352)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 384)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 416)                                 \
+    BN_FIXED_ADDSUB32_GROUP(next_op, 448),                                \
+    BN_FIXED_ADDSUB_TAIL(next_op, 480, condition))
+
+BN_FIXED_ADDSUB40(bn_add40_fixed, "adds", "adcs", "hs")
+BN_FIXED_ADDSUB40(bn_sub40_fixed, "subs", "sbcs", "lo")
+BN_FIXED_ADDSUB48(bn_add48_fixed, "adds", "adcs", "hs")
+BN_FIXED_ADDSUB48(bn_sub48_fixed, "subs", "sbcs", "lo")
+BN_FIXED_ADDSUB64(bn_add64_fixed, "adds", "adcs", "hs")
+BN_FIXED_ADDSUB64(bn_sub64_fixed, "subs", "sbcs", "lo")
+
+#undef BN_FIXED_ADDSUB40
+#undef BN_FIXED_ADDSUB48
+#undef BN_FIXED_ADDSUB64
+#undef BN_FIXED_ADDSUB_HEAD
+#undef BN_FIXED_ADDSUB_TAIL
+#undef BN_FIXED_ADDSUB32_GROUP
+
+BN_FIXED_ADDSUB(
+    bn_sub3_fixed,
+    "ldp x4, x5, [%[ap]]\n\t"
+    "ldr x6, [%[ap], #16]\n\t"
+    "ldp x8, x9, [%[bp]]\n\t"
+    "ldr x10, [%[bp], #16]\n\t",
+    "subs x12, x4, x8\n\t"
+    "sbcs x13, x5, x9\n\t"
+    "sbcs x14, x6, x10\n\t",
+    "stp x12, x13, [%[rp]]\n\t"
+    "str x14, [%[rp], #16]\n\t"
+    "cset %[flag], lo")
+
+BN_FIXED_ADDSUB(
+    bn_sub4_fixed,
+    "ldp x4, x5, [%[ap]]\n\t"
+    "ldp x6, x7, [%[ap], #16]\n\t"
+    "ldp x8, x9, [%[bp]]\n\t"
+    "ldp x10, x11, [%[bp], #16]\n\t",
+    "subs x12, x4, x8\n\t"
+    "sbcs x13, x5, x9\n\t"
+    "sbcs x14, x6, x10\n\t"
+    "sbcs x15, x7, x11\n\t",
+    "stp x12, x13, [%[rp]]\n\t"
+    "stp x14, x15, [%[rp], #16]\n\t"
+    "cset %[flag], lo")
+
+BN_FIXED_ADDSUB(
+    bn_sub8_fixed,
+    "ldp x4, x5, [%[ap]]\n\t"
+    "ldp x6, x7, [%[ap], #16]\n\t"
+    "ldp x8, x9, [%[bp]]\n\t"
+    "ldp x10, x11, [%[bp], #16]\n\t",
+    "subs x12, x4, x8\n\t"
+    "sbcs x13, x5, x9\n\t"
+    "sbcs x14, x6, x10\n\t"
+    "sbcs x15, x7, x11\n\t"
+    "stp x12, x13, [%[rp]]\n\t"
+    "stp x14, x15, [%[rp], #16]\n\t"
+    "ldp x4, x5, [%[ap], #32]\n\t"
+    "ldp x6, x7, [%[ap], #48]\n\t"
+    "ldp x8, x9, [%[bp], #32]\n\t"
+    "ldp x10, x11, [%[bp], #48]\n\t"
+    "sbcs x12, x4, x8\n\t"
+    "sbcs x13, x5, x9\n\t"
+    "sbcs x14, x6, x10\n\t"
+    "sbcs x15, x7, x11\n\t",
+    "stp x12, x13, [%[rp], #32]\n\t"
+    "stp x14, x15, [%[rp], #48]\n\t"
+    "cset %[flag], lo")
+
+BN_FIXED_ADDSUB(
+    bn_sub16_fixed,
+    "ldp x4, x5, [%[ap]]\n\t"
+    "ldp x6, x7, [%[ap], #16]\n\t"
+    "ldp x8, x9, [%[bp]]\n\t"
+    "ldp x10, x11, [%[bp], #16]\n\t",
+    "subs x12, x4, x8\n\t"
+    "sbcs x13, x5, x9\n\t"
+    "sbcs x14, x6, x10\n\t"
+    "sbcs x15, x7, x11\n\t"
+    "stp x12, x13, [%[rp]]\n\t"
+    "stp x14, x15, [%[rp], #16]\n\t"
+    "ldp x4, x5, [%[ap], #32]\n\t"
+    "ldp x6, x7, [%[ap], #48]\n\t"
+    "ldp x8, x9, [%[bp], #32]\n\t"
+    "ldp x10, x11, [%[bp], #48]\n\t"
+    "sbcs x12, x4, x8\n\t"
+    "sbcs x13, x5, x9\n\t"
+    "sbcs x14, x6, x10\n\t"
+    "sbcs x15, x7, x11\n\t"
+    "stp x12, x13, [%[rp], #32]\n\t"
+    "stp x14, x15, [%[rp], #48]\n\t"
+    "ldp x4, x5, [%[ap], #64]\n\t"
+    "ldp x6, x7, [%[ap], #80]\n\t"
+    "ldp x8, x9, [%[bp], #64]\n\t"
+    "ldp x10, x11, [%[bp], #80]\n\t"
+    "sbcs x12, x4, x8\n\t"
+    "sbcs x13, x5, x9\n\t"
+    "sbcs x14, x6, x10\n\t"
+    "sbcs x15, x7, x11\n\t"
+    "stp x12, x13, [%[rp], #64]\n\t"
+    "stp x14, x15, [%[rp], #80]\n\t"
+    "ldp x4, x5, [%[ap], #96]\n\t"
+    "ldp x6, x7, [%[ap], #112]\n\t"
+    "ldp x8, x9, [%[bp], #96]\n\t"
+    "ldp x10, x11, [%[bp], #112]\n\t"
+    "sbcs x12, x4, x8\n\t"
+    "sbcs x13, x5, x9\n\t"
+    "sbcs x14, x6, x10\n\t"
+    "sbcs x15, x7, x11\n\t",
+    "stp x12, x13, [%[rp], #96]\n\t"
+    "stp x14, x15, [%[rp], #112]\n\t"
+    "cset %[flag], lo")
+
+#undef BN_FIXED_ADDSUB
+#endif
+
+static inline __attribute__((always_inline))
+uint64_t bn_add_equal_fast(uint64_t *r, const uint64_t *a,
+                           const uint64_t *b, int32_t len) {
+#if defined(__aarch64__)
+    /* len 3 keeps its one-compare entry; one range test keeps the rest of
+     * the fixed-size ladder off the large-length path. */
+    if (len == 3) return bn_add3_fixed(r, a, b);
+    if (len <= 64) {
+        if (len == 4) return bn_add4_fixed(r, a, b);
+        if (len == 8) return bn_add8_fixed(r, a, b);
+        if (len == 16) return bn_add16_fixed(r, a, b);
+        if (len == 24) return bn_add24_fixed(r, a, b);
+        if (len == 32) return bn_add32_fixed(r, a, b);
+        if (len == 40) return bn_add40_fixed(r, a, b);
+        if (len == 48) return bn_add48_fixed(r, a, b);
+        if (len == 64) return bn_add64_fixed(r, a, b);
+    }
+#endif
+    return bn_add_n(r, a, b, len);
+}
+
+static inline __attribute__((always_inline))
+uint64_t bn_sub_equal_fast(uint64_t *r, const uint64_t *a,
+                           const uint64_t *b, int32_t len) {
+#if defined(__aarch64__)
+    if (len == 3) return bn_sub3_fixed(r, a, b);
+    if (len <= 64) {
+        if (len == 4) return bn_sub4_fixed(r, a, b);
+        if (len == 8) return bn_sub8_fixed(r, a, b);
+        if (len == 16) return bn_sub16_fixed(r, a, b);
+        if (len == 24) return bn_sub24_fixed(r, a, b);
+        if (len == 32) return bn_sub32_fixed(r, a, b);
+        if (len == 40) return bn_sub40_fixed(r, a, b);
+        if (len == 48) return bn_sub48_fixed(r, a, b);
+        if (len == 64) return bn_sub64_fixed(r, a, b);
+    }
+#endif
+    return bn_sub_n(r, a, b, len);
+}
+
+static inline __attribute__((always_inline))
+WValue bigint_add_equal_fast(
+    const uint64_t *a, const uint64_t *b, int32_t len, int negative) {
+#ifndef BN_ADD_EXACT_HOT_CLASS
+#define BN_ADD_EXACT_HOT_CLASS 1
+#endif
+#ifndef BN_SUB_EXACT_HOT_CLASS
+#define BN_SUB_EXACT_HOT_CLASS 0
+#endif
+#if BN_ADD_EXACT_HOT_CLASS
+    WBigint *r = bigint_alloc_raw_hot_exact(
+        bigint_alloc_capacity((uint32_t)len + 1U));
+#else
+    WBigint *r = bigint_alloc_raw_hot(len + 1);
+#endif
+    uint64_t carry = bn_add_equal_fast(r->limbs, a, b, len);
+    /* Unconditional store: the carry-out of a dense random sum is ~50/50, so
+     * a conditional store is an unpredictable branch.  Capacity is len+1 and
+     * a zero limb beyond `size` is inert. */
+    r->limbs[len] = carry;
+    int32_t size = len + (int32_t)carry;
+    r->size = negative ? -size : size;
+    return bigint_box(r);
+}
+
+static inline __attribute__((always_inline))
+WValue bigint_sub_equal_fast(
+    const uint64_t *a, const uint64_t *b, int32_t len,
+    int compare, int a_negative, int b_negative) {
+    if (compare == 0) return w_box_int(0);
+    const uint64_t *larger = compare > 0 ? a : b;
+    const uint64_t *smaller = compare > 0 ? b : a;
+    int negative = compare > 0 ? a_negative : b_negative;
+#if BN_SUB_EXACT_HOT_CLASS
+    WBigint *r = bigint_alloc_raw_hot_exact(
+        bigint_alloc_capacity((uint32_t)len));
+#else
+    WBigint *r = bigint_alloc_raw_hot(len);
+#endif
+    (void)bn_sub_equal_fast(r->limbs, larger, smaller, len);
+    if (r->limbs[len - 1] != 0) {
+        r->size = negative ? -len : len;
+        return bigint_box(r);
+    }
+    r->size = len;
+    while (r->size > 0 && r->limbs[r->size - 1] == 0) r->size--;
+    if (negative && r->size > 0) r->size = -r->size;
+    return bigint_finish_mag_sub(r);
+}
+
+static __attribute__((noinline))
+WValue bigint_add_any_generic(WValue a, WValue b) {
     uint64_t sa, sb;
     int32_t alen, blen;
     const uint64_t *al = integer_limbs(a, &sa, &alen);
@@ -417,10 +1420,30 @@ static WValue bigint_add_any(WValue a, WValue b) {
     if (a_abs == 0) return b; /* 0 + b = b */
     if (b_abs == 0) return a; /* a + 0 = a */
 
+#if BN_ADDSUB_11_FAST
+    if (a_abs == 1 && b_abs == 1)
+        return bigint_add_one_limb_magnitudes(
+            al[0], a_neg, bl[0], b_neg);
+#endif
+#if BN_ADDSUB_22_FAST
+    if (a_abs == 2 && b_abs == 2)
+        return bigint_add_two_limb_magnitudes(
+            al, a_neg, bl, b_neg);
+#endif
+#if BN_ADDSUB_EQUAL_FAST
+    if (a_abs == b_abs && a_abs >= 3) {
+        if (a_neg == b_neg)
+            return bigint_add_equal_fast(al, bl, a_abs, a_neg);
+        return bigint_sub_equal_fast(
+            al, bl, a_abs, mag_cmp(al, a_abs, bl, b_abs),
+            a_neg, b_neg);
+    }
+#endif
+
     if (a_neg == b_neg) {
         WBigint *r = mag_add(al, a_abs, bl, b_abs);
         if (a_neg) r->size = -r->size;
-        return bigint_normalize(r);
+        return bigint_finish_mag_add(r);
     } else {
         int cmp = mag_cmp(al, a_abs, bl, b_abs);
         if (cmp == 0) return w_box_int(0);
@@ -429,11 +1452,12 @@ static WValue bigint_add_any(WValue a, WValue b) {
         if (cmp > 0) { r = mag_sub(al, a_abs, bl, b_abs); result_neg = a_neg; }
         else          { r = mag_sub(bl, b_abs, al, a_abs); result_neg = b_neg; }
         if (result_neg && r->size > 0) r->size = -r->size;
-        return bigint_normalize(r);
+        return bigint_finish_mag_sub(r);
     }
 }
 
-static WValue bigint_sub_any(WValue a, WValue b) {
+static __attribute__((noinline))
+WValue bigint_sub_any_generic(WValue a, WValue b) {
     uint64_t sa, sb;
     int32_t alen, blen;
     const uint64_t *al = integer_limbs(a, &sa, &alen);
@@ -448,15 +1472,36 @@ static WValue bigint_sub_any(WValue a, WValue b) {
     if (a_abs == 0) {
         WBigint *r = mag_sub(bl, b_abs, al, 0);
         if (effective_b_neg && r->size > 0) r->size = -r->size;
-        return bigint_normalize(r);
+        return bigint_finish_mag_sub(r);
     }
+
+#if BN_ADDSUB_11_FAST
+    if (a_abs == 1 && b_abs == 1)
+        return bigint_add_one_limb_magnitudes(
+            al[0], a_neg, bl[0], effective_b_neg);
+#endif
+#if BN_ADDSUB_22_FAST
+    if (a_abs == 2 && b_abs == 2)
+        return bigint_add_two_limb_magnitudes(
+            al, a_neg, bl, effective_b_neg);
+#endif
+#if BN_ADDSUB_EQUAL_FAST
+    if (a_abs == b_abs && a_abs >= 3) {
+        if (a_neg == effective_b_neg)
+            return bigint_add_equal_fast(
+                al, bl, a_abs, a_neg);
+        return bigint_sub_equal_fast(
+            al, bl, a_abs, mag_cmp(al, a_abs, bl, b_abs),
+            a_neg, effective_b_neg);
+    }
+#endif
 
     /* Dispatch directly on the effective signs instead of allocating and
      * copying a sign-flipped b only to feed it back through bigint_add_any. */
     if (a_neg == effective_b_neg) {
         WBigint *r = mag_add(al, a_abs, bl, b_abs);
         if (a_neg) r->size = -r->size;
-        return bigint_normalize(r);
+        return bigint_finish_mag_add(r);
     }
 
     int cmp = mag_cmp(al, a_abs, bl, b_abs);
@@ -466,7 +1511,62 @@ static WValue bigint_sub_any(WValue a, WValue b) {
     if (cmp > 0) { r = mag_sub(al, a_abs, bl, b_abs); result_neg = a_neg; }
     else         { r = mag_sub(bl, b_abs, al, a_abs); result_neg = effective_b_neg; }
     if (result_neg && r->size > 0) r->size = -r->size;
-    return bigint_normalize(r);
+    return bigint_finish_mag_sub(r);
+}
+
+#ifndef BN_ADDSUB_BOXED_EQUAL_FAST
+#define BN_ADDSUB_BOXED_EQUAL_FAST 1
+#endif
+
+static inline __attribute__((always_inline))
+WValue bigint_add_any(WValue a, WValue b) {
+#if BN_ADDSUB_BOXED_EQUAL_FAST
+    if (w_is_bigint(a) && w_is_bigint(b)) {
+        WBigint *aa = w_as_bigint(a);
+        WBigint *bb = w_as_bigint(b);
+        int32_t n = aa->size;
+        if (n > 0 && bb->size == n) {
+            /* n >= 3 first: one predictable branch on the equal_fast route
+             * instead of falling through the ==1/==2 pair. */
+            if (n > 2)
+                return bigint_add_equal_fast(
+                    aa->limbs, bb->limbs, n, 0);
+            if (n == 2)
+                return bigint_add_two_limb_magnitudes(
+                    aa->limbs, 0, bb->limbs, 0);
+            return bigint_add_one_limb_magnitudes(
+                aa->limbs[0], 0, bb->limbs[0], 0);
+        }
+    }
+#endif
+    return bigint_add_any_generic(a, b);
+}
+
+static inline __attribute__((always_inline))
+WValue bigint_sub_any(WValue a, WValue b) {
+#if BN_ADDSUB_BOXED_EQUAL_FAST
+    if (w_is_bigint(a) && w_is_bigint(b)) {
+        WBigint *aa = w_as_bigint(a);
+        WBigint *bb = w_as_bigint(b);
+        int32_t n = aa->size;
+        if (n > 0 && bb->size == n) {
+            if (n > 2) {
+                int compare = aa->limbs[n - 1] != bb->limbs[n - 1]
+                    ? (aa->limbs[n - 1] > bb->limbs[n - 1] ? 1 : -1)
+                    : mag_cmp(aa->limbs, n, bb->limbs, n);
+                return bigint_sub_equal_fast(
+                    aa->limbs, bb->limbs, n,
+                    compare, 0, 1);
+            }
+            if (n == 2)
+                return bigint_add_two_limb_magnitudes(
+                    aa->limbs, 0, bb->limbs, 1);
+            return bigint_add_one_limb_magnitudes(
+                aa->limbs[0], 0, bb->limbs[0], 1);
+        }
+    }
+#endif
+    return bigint_sub_any_generic(a, b);
 }
 
 /* ====================================================================
@@ -497,21 +1597,137 @@ static WValue bigint_sub_any(WValue a, WValue b) {
 #endif
 
 #ifndef BN_KARA_THRESHOLD
-#define BN_KARA_THRESHOLD 48   /* <= : schoolbook (retuned for the asm addmul_1
-                                * base kernel — was 32 with the serial-C kernel;
-                                * a faster basecase pushes the crossover up) */
+#define BN_KARA_THRESHOLD 24   /* <= : schoolbook */
+#endif
+
+#ifndef BN_MUL_SPLIT_48
+#define BN_MUL_SPLIT_48 1
+#endif
+#ifndef BN_MUL_SPLIT_48_DIFF
+#define BN_MUL_SPLIT_48_DIFF 1
+#endif
+#ifndef BN_MUL_SPLIT_40_BLOCKS
+#define BN_MUL_SPLIT_40_BLOCKS 1
+#endif
+
+#ifndef BN_MUL_TOP_DIFF_22
+#define BN_MUL_TOP_DIFF_22 1
+#endif
+
+#ifndef BN_MUL_TOP_DIFF_24
+#define BN_MUL_TOP_DIFF_24 1
+#endif
+#ifndef BN_MUL_EQ12
+#define BN_MUL_EQ12 1
+#endif
+
+#ifndef BN_TOOM2_DIFFERENCE
+#define BN_TOOM2_DIFFERENCE 1
+#endif
+/* Difference-form Toom-2 window: engage from DIFF_MIN limbs, except the
+ * single sweep-measured hole at DIFF_SKIP where the sum form wins. */
+#ifndef BN_TOOM2_DIFF_MIN
+#define BN_TOOM2_DIFF_MIN 25
+#endif
+#ifndef BN_TOOM2_DIFF_SKIP
+#define BN_TOOM2_DIFF_SKIP 28
+#endif
+#ifndef BN_TOOM3_SINGLE_SHIFT
+#define BN_TOOM3_SINGLE_SHIFT 1
+#endif
+#ifndef BN_TOOM3_INTERP_SHIFT
+#define BN_TOOM3_INTERP_SHIFT 1
+#endif
+#ifndef BN_TOOM_COPY_V0
+#define BN_TOOM_COPY_V0 1
 #endif
 #ifndef BN_TOOM3_THRESHOLD
-#define BN_TOOM3_THRESHOLD 128 /* < : Toom-2 */
+#define BN_TOOM3_THRESHOLD 368 /* < : Toom-2 */
 #endif
 #ifndef BN_TOOM4_THRESHOLD
-#define BN_TOOM4_THRESHOLD 384 /* < : Toom-3, >= : Toom-4 */
+#define BN_TOOM4_THRESHOLD 456 /* < : Toom-3, >= : Toom-4 */
+#endif
+#ifndef BN_TOOM6_THRESHOLD
+#define BN_TOOM6_THRESHOLD INT32_MAX
+#endif
+#ifndef BN_TOOM_PAR_THRESHOLD
+#define BN_TOOM_PAR_THRESHOLD 576
+#endif
+#ifndef BN_TOOM2_PAR_THRESHOLD
+#define BN_TOOM2_PAR_THRESHOLD 512
+#endif
+#ifndef BN_KARA_SQ_PAR_THRESHOLD
+#define BN_KARA_SQ_PAR_THRESHOLD 512
+#endif
+#ifndef BN_RECT_PAR_THRESHOLD
+#define BN_RECT_PAR_THRESHOLD 256
+#endif
+#ifndef BN_TOOM_POOL_SPIN
+#define BN_TOOM_POOL_SPIN 32768
+#endif
+#ifndef BN_TOOM_PAR_THREADS
+#define BN_TOOM_PAR_THREADS 4
+#endif
+#ifndef BN_TOOM_PAR_SMALL_THREADS
+#define BN_TOOM_PAR_SMALL_THREADS 3
+#endif
+#ifndef BN_TOOM_PAR_LARGE_THRESHOLD
+#define BN_TOOM_PAR_LARGE_THRESHOLD 1280
+#endif
+#ifndef BN_SQR_TOOM_PAR_THREADS
+#define BN_SQR_TOOM_PAR_THREADS BN_TOOM_PAR_SMALL_THREADS
+#endif
+#ifndef BN_SQR_TOOM_PAR_LARGE_THRESHOLD
+#define BN_SQR_TOOM_PAR_LARGE_THRESHOLD BN_TOOM_PAR_LARGE_THRESHOLD
+#endif
+#ifndef BN_SSA_PAR_THRESHOLD
+#define BN_SSA_PAR_THRESHOLD 8192
+#endif
+#ifndef BN_SSA_PAR_THREADS
+#define BN_SSA_PAR_THREADS 4
+#endif
+/* Squaring has different crossovers: its diagonal basecase stays profitable
+ * longer, and the one-operand Toom evaluation costs shift both upper rungs. */
+#ifndef BN_SQR_KARA_THRESHOLD
+#define BN_SQR_KARA_THRESHOLD 56
+#endif
+#ifndef BN_SQR16_FUSED_CROSS
+#define BN_SQR16_FUSED_CROSS 1
+#endif
+#ifndef BN_SQR_KARA_DIFFERENCE
+#define BN_SQR_KARA_DIFFERENCE 1
+#endif
+/* A narrow exception to the general square crossover.  Karatsuba wins at
+ * 48-56 limbs, while splitting the 25-47-limb range remains slower than the
+ * diagonal base case. */
+#ifndef BN_SQR_TOP_KARA_MIN
+#define BN_SQR_TOP_KARA_MIN 48
+#endif
+#ifndef BN_SQR_TOOM3_THRESHOLD
+#define BN_SQR_TOOM3_THRESHOLD 392
+#endif
+/* Difference-form Karatsuba removed Toom-3's former narrow 384-limb win.
+ * Toom-4 becomes consistently faster from 616 limbs. */
+#ifndef BN_SQR_TOOM3_LIMIT
+#define BN_SQR_TOOM3_LIMIT 392
+#endif
+#ifndef BN_SQR_TOOM4_THRESHOLD
+#define BN_SQR_TOOM4_THRESHOLD 616
+#endif
+#ifndef BN_SQR_TOOM6_THRESHOLD
+#define BN_SQR_TOOM6_THRESHOLD INT32_MAX
+#endif
+#ifndef BN_PAR_TOOM_LIMIT
+#define BN_PAR_TOOM_LIMIT 16384
 #endif
 /* >= : Goldilocks single-prime NTT (the O(n log n) top rung).  Measured C
  * crossover after twiddle/workspace caching: NTT beats Toom-4 from ~2048 limbs.
  * That covers the range where a Toom-6 rung would otherwise be considered. */
 #ifndef BN_NTT_THRESHOLD
 #define BN_NTT_THRESHOLD 2048
+#endif
+#ifndef BN_LOPSIDED_STITCH
+#define BN_LOPSIDED_STITCH 1
 #endif
 
 /* ---- addmul_1: rp[0..n) += up[0..n)·v, returns the carry limb -----------
@@ -531,47 +1747,262 @@ static uint64_t bn_addmul_1_ref(uint64_t *rp, const uint64_t *up, int32_t n, uin
     return carry;
 }
 #if defined(__aarch64__)
+/*
+ * Keep the complete leaf routine in caller-saved x0..x17.  Expressing only
+ * the flag chains as inline assembly made Clang allocate x19..x24 for the
+ * four products/results, adding six register saves and restores to every
+ * schoolbook row and every Toom base case.  This has the same two-chain
+ * four-limb schedule but no stack traffic or call prologue.
+ */
+/* Cluster the small-multiply hot set in one compact text section: their
+ * timings are layout-sensitive (±5-10% from I-cache/BTB aliasing when
+ * unrelated edits shuffle the TU), and a fixed relative layout removes the
+ * per-build lottery. */
+#define BN_HOT_SECTION section("__TEXT,__bnhot,regular,pure_instructions")
+
+__attribute__((naked, noinline, aligned(256), BN_HOT_SECTION))
 static uint64_t bn_addmul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v) {
-    uint64_t carry = 0;
-    int32_t i = 0;
-    for (; i + 4 <= n; i += 4) {
-        __uint128_t p0 = (__uint128_t)up[i]     * v;
-        __uint128_t p1 = (__uint128_t)up[i + 1] * v;
-        __uint128_t p2 = (__uint128_t)up[i + 2] * v;
-        __uint128_t p3 = (__uint128_t)up[i + 3] * v;
-        uint64_t l0 = (uint64_t)p0, h0 = (uint64_t)(p0 >> 64);
-        uint64_t l1 = (uint64_t)p1, h1 = (uint64_t)(p1 >> 64);
-        uint64_t l2 = (uint64_t)p2, h2 = (uint64_t)(p2 >> 64);
-        uint64_t l3 = (uint64_t)p3, h3 = (uint64_t)(p3 >> 64);
-        uint64_t r0 = rp[i], r1 = rp[i + 1], r2 = rp[i + 2], r3 = rp[i + 3];
-        uint64_t s0, s1, s2, s3;
-        __asm__("adds %[s0], %[l0], %[cy]\n\t"
-                "adcs %[s1], %[l1], %[h0]\n\t"
-                "adcs %[s2], %[l2], %[h1]\n\t"
-                "adcs %[s3], %[l3], %[h2]\n\t"
-                "adc  %[cy], %[h3], xzr\n\t"
-                "adds %[r0], %[r0], %[s0]\n\t"
-                "adcs %[r1], %[r1], %[s1]\n\t"
-                "adcs %[r2], %[r2], %[s2]\n\t"
-                "adcs %[r3], %[r3], %[s3]\n\t"
-                "adc  %[cy], %[cy], xzr"
-                : [s0] "=&r"(s0), [s1] "=&r"(s1), [s2] "=&r"(s2), [s3] "=&r"(s3),
-                  [r0] "+&r"(r0), [r1] "+&r"(r1), [r2] "+&r"(r2), [r3] "+&r"(r3),
-                  [cy] "+&r"(carry)
-                : [l0] "r"(l0), [l1] "r"(l1), [l2] "r"(l2), [l3] "r"(l3),
-                  [h0] "r"(h0), [h1] "r"(h1), [h2] "r"(h2), [h3] "r"(h3)
-                : "cc");
-        rp[i] = r0; rp[i + 1] = r1; rp[i + 2] = r2; rp[i + 3] = r3;
-    }
-    for (; i < n; i++) {
-        __uint128_t p = (__uint128_t)up[i] * v + rp[i] + carry;
-        rp[i] = (uint64_t)p;
-        carry = (uint64_t)(p >> 64);
-    }
-    return carry;
+    __asm__(
+        "mov x15, xzr\n"
+        /* Consume 1- and 2-limb prefixes so the pipelined body sees a
+         * multiple of four without retaining a remainder counter. */
+        "tbz w2, #0, 1f\n"
+        "ldr x4, [x1], #8\n"
+        "mul x8, x4, x3\n"
+        "umulh x12, x4, x3\n"
+        "ldr x4, [x0]\n"
+        "adds x8, x4, x8\n"
+        "cinc x15, x12, hs\n"
+        "str x8, [x0], #8\n"
+        "1:\n"
+        "tbz w2, #1, 2f\n"
+        "ldp x4, x5, [x1], #16\n"
+        "mul x8, x4, x3\n"
+        "umulh x12, x4, x3\n"
+        "mul x9, x5, x3\n"
+        "umulh x13, x5, x3\n"
+        "adds x8, x8, x15\n"
+        "adcs x9, x9, x12\n"
+        "ldp x4, x5, [x0]\n"
+        "adc x15, x13, xzr\n"
+        "adds x8, x4, x8\n"
+        "adcs x9, x5, x9\n"
+        "cinc x15, x15, hs\n"
+        "stp x8, x9, [x0], #16\n"
+        "2:\n"
+        "lsr x2, x2, #2\n"
+        "cbz x2, 5f\n"
+        "ldp x4, x5, [x1], #32\n"
+        "ldp x6, x7, [x1, #-16]\n"
+        "b 4f\n"
+        "3:\n"
+        /* Store the completed block while the next block's multiplies are
+         * becoming ready, hiding more of MUL/UMULH latency. */
+        "ldp x4, x5, [x1], #32\n"
+        "ldp x6, x7, [x1, #-16]\n"
+        "adds x8, x16, x8\n"
+        "adcs x9, x17, x9\n"
+        "stp x8, x9, [x0], #32\n"
+        "adcs x10, x12, x10\n"
+        "adcs x11, x13, x11\n"
+        "stp x10, x11, [x0, #-16]\n"
+        "cinc x15, x15, hs\n"
+        "4:\n"
+        "sub x2, x2, #1\n"
+        "mul x8, x4, x3\n"
+        "umulh x12, x4, x3\n"
+        "mul x9, x5, x3\n"
+        "umulh x13, x5, x3\n"
+        "adds x8, x8, x15\n"
+        "mul x10, x6, x3\n"
+        "umulh x14, x6, x3\n"
+        "adcs x9, x9, x12\n"
+        "mul x11, x7, x3\n"
+        "umulh x15, x7, x3\n"
+        "adcs x10, x10, x13\n"
+        "ldp x16, x17, [x0]\n"
+        "adcs x11, x11, x14\n"
+        "ldp x12, x13, [x0, #16]\n"
+        "adc x15, x15, xzr\n"
+        "cbnz x2, 3b\n"
+        "adds x8, x16, x8\n"
+        "adcs x9, x17, x9\n"
+        "adcs x10, x12, x10\n"
+        "adcs x11, x13, x11\n"
+        "stp x8, x9, [x0]\n"
+        "stp x10, x11, [x0, #16]\n"
+        "cinc x0, x15, hs\n"
+        "ret\n"
+        "5:\n"
+        "mov x0, x15\n"
+        "ret\n"
+    );
 }
+
+/* Fixed multiples of four use this entry from the 12x12 and 20x20 leaves.
+ * The caller supplies a positive block count, so the hot row starts directly
+ * at the pipelined body instead of decoding 1/2-limb prefixes every time. */
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_addmul_1_blocks(
+    uint64_t *rp, const uint64_t *up, int32_t blocks, uint64_t v) {
+    __asm__(
+        "mov x15, xzr\n"
+        "ldp x4, x5, [x1], #32\n"
+        "ldp x6, x7, [x1, #-16]\n"
+        "b 2f\n"
+        "1:\n"
+        "ldp x4, x5, [x1], #32\n"
+        "ldp x6, x7, [x1, #-16]\n"
+        "adds x8, x16, x8\n"
+        "adcs x9, x17, x9\n"
+        "stp x8, x9, [x0], #32\n"
+        "adcs x10, x12, x10\n"
+        "adcs x11, x13, x11\n"
+        "stp x10, x11, [x0, #-16]\n"
+        "cinc x15, x15, hs\n"
+        "2:\n"
+        "sub x2, x2, #1\n"
+        "mul x8, x4, x3\n"
+        "umulh x12, x4, x3\n"
+        "mul x9, x5, x3\n"
+        "umulh x13, x5, x3\n"
+        "adds x8, x8, x15\n"
+        "mul x10, x6, x3\n"
+        "umulh x14, x6, x3\n"
+        "adcs x9, x9, x12\n"
+        "mul x11, x7, x3\n"
+        "umulh x15, x7, x3\n"
+        "adcs x10, x10, x13\n"
+        "ldp x16, x17, [x0]\n"
+        "adcs x11, x11, x14\n"
+        "ldp x12, x13, [x0, #16]\n"
+        "adc x15, x15, xzr\n"
+        "cbnz x2, 1b\n"
+        "adds x8, x16, x8\n"
+        "adcs x9, x17, x9\n"
+        "adcs x10, x12, x10\n"
+        "adcs x11, x13, x11\n"
+        "stp x8, x9, [x0]\n"
+        "stp x10, x11, [x0, #16]\n"
+        "cinc x0, x15, hs\n"
+        "ret\n"
+    );
+}
+
+/* Straight-line fixed-length rows for the schoolbook leaves (12/20/24
+ * limbs).  The generic entry decodes 1/2-limb prefixes and carries loop
+ * control per 4-limb block; a 12-limb row amortizes that over only three
+ * blocks, and the eq12/eq20/eq24 kernels issue one row per source limb.
+ * These bodies keep the exact two-flag-chain block schedule of the loop but
+ * with immediate addressing and no branches.  v arrives in x2. */
+#define BN_AM1F_BLOCK0                                                    \
+    "ldp x4, x5, [x1]\n\t"                                                \
+    "ldp x6, x7, [x1, #16]\n\t"                                           \
+    "mul x8, x4, x2\n\t"                                                  \
+    "umulh x12, x4, x2\n\t"                                               \
+    "mul x9, x5, x2\n\t"                                                  \
+    "umulh x13, x5, x2\n\t"                                               \
+    "mul x10, x6, x2\n\t"                                                 \
+    "umulh x14, x6, x2\n\t"                                               \
+    "adds x9, x9, x12\n\t"                                                \
+    "mul x11, x7, x2\n\t"                                                 \
+    "umulh x15, x7, x2\n\t"                                               \
+    "adcs x10, x10, x13\n\t"                                              \
+    "ldp x16, x17, [x0]\n\t"                                              \
+    "adcs x11, x11, x14\n\t"                                              \
+    "ldp x12, x13, [x0, #16]\n\t"                                         \
+    "adc x15, x15, xzr\n\t"                                               \
+    "adds x8, x16, x8\n\t"                                                \
+    "adcs x9, x17, x9\n\t"                                                \
+    "adcs x10, x12, x10\n\t"                                              \
+    "adcs x11, x13, x11\n\t"                                              \
+    "stp x8, x9, [x0]\n\t"                                                \
+    "stp x10, x11, [x0, #16]\n\t"                                         \
+    "cinc x15, x15, hs\n\t"
+
+#define BN_AM1F_BLOCK(o)                                                  \
+    "ldp x4, x5, [x1, #" #o "]\n\t"                                       \
+    "ldp x6, x7, [x1, #" #o "+16]\n\t"                                    \
+    "mul x8, x4, x2\n\t"                                                  \
+    "umulh x12, x4, x2\n\t"                                               \
+    "mul x9, x5, x2\n\t"                                                  \
+    "umulh x13, x5, x2\n\t"                                               \
+    "adds x8, x8, x15\n\t"                                                \
+    "mul x10, x6, x2\n\t"                                                 \
+    "umulh x14, x6, x2\n\t"                                               \
+    "adcs x9, x9, x12\n\t"                                                \
+    "mul x11, x7, x2\n\t"                                                 \
+    "umulh x15, x7, x2\n\t"                                               \
+    "adcs x10, x10, x13\n\t"                                              \
+    "ldp x16, x17, [x0, #" #o "]\n\t"                                     \
+    "adcs x11, x11, x14\n\t"                                              \
+    "ldp x12, x13, [x0, #" #o "+16]\n\t"                                  \
+    "adc x15, x15, xzr\n\t"                                               \
+    "adds x8, x16, x8\n\t"                                                \
+    "adcs x9, x17, x9\n\t"                                                \
+    "adcs x10, x12, x10\n\t"                                              \
+    "adcs x11, x13, x11\n\t"                                              \
+    "stp x8, x9, [x0, #" #o "]\n\t"                                       \
+    "stp x10, x11, [x0, #" #o "+16]\n\t"                                  \
+    "cinc x15, x15, hs\n\t"
+
+#define BN_AM1F_TAIL                                                      \
+    "mov x0, x15\n\t"                                                     \
+    "ret\n\t"
+
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_addmul_1_f12(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    __asm__(
+        BN_AM1F_BLOCK0
+        BN_AM1F_BLOCK(32)
+        BN_AM1F_BLOCK(64)
+        BN_AM1F_TAIL
+    );
+}
+
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_addmul_1_f20(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    __asm__(
+        BN_AM1F_BLOCK0
+        BN_AM1F_BLOCK(32)
+        BN_AM1F_BLOCK(64)
+        BN_AM1F_BLOCK(96)
+        BN_AM1F_BLOCK(128)
+        BN_AM1F_TAIL
+    );
+}
+
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_addmul_1_f24(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    __asm__(
+        BN_AM1F_BLOCK0
+        BN_AM1F_BLOCK(32)
+        BN_AM1F_BLOCK(64)
+        BN_AM1F_BLOCK(96)
+        BN_AM1F_BLOCK(128)
+        BN_AM1F_BLOCK(160)
+        BN_AM1F_TAIL
+    );
+}
+
+#undef BN_AM1F_BLOCK0
+#undef BN_AM1F_BLOCK
+#undef BN_AM1F_TAIL
 #else
 #define bn_addmul_1 bn_addmul_1_ref
+static inline uint64_t bn_addmul_1_blocks(
+    uint64_t *rp, const uint64_t *up, int32_t blocks, uint64_t v) {
+    return bn_addmul_1(rp, up, blocks * 4, v);
+}
+static inline uint64_t bn_addmul_1_f12(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    return bn_addmul_1_ref(rp, up, 12, v);
+}
+static inline uint64_t bn_addmul_1_f20(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    return bn_addmul_1_ref(rp, up, 20, v);
+}
+static inline uint64_t bn_addmul_1_f24(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    return bn_addmul_1_ref(rp, up, 24, v);
+}
 #endif
 
 /* submul_1: rp[0..n) -= up[0..n)·v; returns the borrow word (∈ [0, v]) to
@@ -594,57 +2025,185 @@ static uint64_t bn_submul_1_ref(uint64_t *rp, const uint64_t *up, int32_t n, uin
     return borrow;
 }
 #if defined(__aarch64__)
+/*
+ * As with addmul_1, keep the whole hot leaf in caller-saved registers.  The
+ * previous inline-asm form made Clang spill six callee-saved registers around
+ * every quotient digit.  This version pipelines four MUL/UMULH pairs, forms
+ * the shifted product with one ADCS chain, then subtracts it with one SBCS
+ * chain.  Prefixes of one and two limbs leave the main loop a multiple of four.
+ */
+__attribute__((naked, noinline, aligned(64)))
 static uint64_t bn_submul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v) {
-    uint64_t borrow = 0;
-    int32_t i = 0;
-    for (; i + 4 <= n; i += 4) {
-        __uint128_t p0 = (__uint128_t)up[i]     * v;
-        __uint128_t p1 = (__uint128_t)up[i + 1] * v;
-        __uint128_t p2 = (__uint128_t)up[i + 2] * v;
-        __uint128_t p3 = (__uint128_t)up[i + 3] * v;
-        uint64_t l0 = (uint64_t)p0, h0 = (uint64_t)(p0 >> 64);
-        uint64_t l1 = (uint64_t)p1, h1 = (uint64_t)(p1 >> 64);
-        uint64_t l2 = (uint64_t)p2, h2 = (uint64_t)(p2 >> 64);
-        uint64_t l3 = (uint64_t)p3, h3 = (uint64_t)(p3 >> 64);
-        uint64_t r0 = rp[i], r1 = rp[i + 1], r2 = rp[i + 2], r3 = rp[i + 3];
-        uint64_t s0, s1, s2, s3;
-        __asm__("adds %[s0], %[l0], %[bw]\n\t"    /* chain X: lows + shifted highs */
-                "adcs %[s1], %[l1], %[h0]\n\t"
-                "adcs %[s2], %[l2], %[h1]\n\t"
-                "adcs %[s3], %[l3], %[h2]\n\t"
-                "adc  %[bw], %[h3], xzr\n\t"
-                "subs %[r0], %[r0], %[s0]\n\t"    /* chain Y: subtract from rp */
-                "sbcs %[r1], %[r1], %[s1]\n\t"
-                "sbcs %[r2], %[r2], %[s2]\n\t"
-                "sbcs %[r3], %[r3], %[s3]\n\t"
-                "cinc %[bw], %[bw], cc"           /* borrow-out folds into the word */
-                : [s0] "=&r"(s0), [s1] "=&r"(s1), [s2] "=&r"(s2), [s3] "=&r"(s3),
-                  [r0] "+&r"(r0), [r1] "+&r"(r1), [r2] "+&r"(r2), [r3] "+&r"(r3),
-                  [bw] "+&r"(borrow)
-                : [l0] "r"(l0), [l1] "r"(l1), [l2] "r"(l2), [l3] "r"(l3),
-                  [h0] "r"(h0), [h1] "r"(h1), [h2] "r"(h2), [h3] "r"(h3)
-                : "cc");
-        rp[i] = r0; rp[i + 1] = r1; rp[i + 2] = r2; rp[i + 3] = r3;
-    }
-    for (; i < n; i++) {
-        __uint128_t prod = (__uint128_t)up[i] * v;
-        uint64_t lo = (uint64_t)prod, hi = (uint64_t)(prod >> 64);
-        uint64_t s = lo + borrow;
-        uint64_t c = s < lo;
-        uint64_t r = rp[i];
-        rp[i] = r - s;
-        borrow = hi + c + (r < s);
-    }
-    return borrow;
+    __asm__(
+        "adds x15, xzr, xzr\n"
+        "tbz w2, #0, 1f\n"
+        "ldr x4, [x1], #8\n"
+        "mul x8, x4, x3\n"
+        "umulh x12, x4, x3\n"
+        "ldr x4, [x0]\n"
+        "subs x8, x4, x8\n"
+        "cinc x15, x12, lo\n"
+        "str x8, [x0], #8\n"
+        "1:\n"
+        "tbz w2, #1, 2f\n"
+        "ldp x4, x5, [x1], #16\n"
+        "mul x8, x4, x3\n"
+        "umulh x12, x4, x3\n"
+        "mul x9, x5, x3\n"
+        "umulh x13, x5, x3\n"
+        "adds x8, x8, x15\n"
+        "adcs x9, x9, x12\n"
+        "ldp x4, x5, [x0]\n"
+        "adc x15, x13, xzr\n"
+        "subs x8, x4, x8\n"
+        "sbcs x9, x5, x9\n"
+        "cinc x15, x15, lo\n"
+        "stp x8, x9, [x0], #16\n"
+        "2:\n"
+        "lsr x2, x2, #2\n"
+        "cbz x2, 5f\n"
+        "ldp x4, x5, [x1], #32\n"
+        "ldp x6, x7, [x1, #-16]\n"
+        "b 4f\n"
+        "5:\n"
+        "mov x0, x15\n"
+        "ret\n"
+        "nop\n"
+        "nop\n"
+        "3:\n"
+        "ldp x4, x5, [x1], #32\n"
+        "ldp x6, x7, [x1, #-16]\n"
+        "subs x8, x16, x8\n"
+        "sbcs x9, x17, x9\n"
+        "stp x8, x9, [x0], #32\n"
+        "sbcs x10, x12, x10\n"
+        "sbcs x11, x13, x11\n"
+        "stp x10, x11, [x0, #-16]\n"
+        "cinc x15, x15, lo\n"
+        "4:\n"
+        "sub x2, x2, #1\n"
+        "mul x8, x4, x3\n"
+        "umulh x12, x4, x3\n"
+        "mul x9, x5, x3\n"
+        "umulh x13, x5, x3\n"
+        "adds x8, x8, x15\n"
+        "mul x10, x6, x3\n"
+        "umulh x14, x6, x3\n"
+        "adcs x9, x9, x12\n"
+        "mul x11, x7, x3\n"
+        "umulh x15, x7, x3\n"
+        "adcs x10, x10, x13\n"
+        "ldp x16, x17, [x0]\n"
+        "adcs x11, x11, x14\n"
+        "ldp x12, x13, [x0, #16]\n"
+        "adc x15, x15, xzr\n"
+        "cbnz x2, 3b\n"
+        "subs x8, x16, x8\n"
+        "sbcs x9, x17, x9\n"
+        "sbcs x10, x12, x10\n"
+        "sbcs x11, x13, x11\n"
+        "stp x8, x9, [x0]\n"
+        "stp x10, x11, [x0, #16]\n"
+        "cinc x0, x15, lo\n"
+        "ret\n"
+    );
 }
 #else
 #define bn_submul_1 bn_submul_1_ref
 #endif
 
+/* rp = mp - up*v, returning the borrow word.  Unlike bn_submul_1 this writes
+ * from a distinct minuend, which lets GCD replay a Euclid row without first
+ * copying mp into rp. */
+static uint64_t bn_submul_from_1_ref(uint64_t *rp, const uint64_t *mp,
+                                    const uint64_t *up, int32_t n,
+                                    uint64_t v) {
+    uint64_t borrow = 0;
+    for (int32_t i = 0; i < n; i++) {
+        __uint128_t prod = (__uint128_t)up[i] * v;
+        uint64_t lo = (uint64_t)prod, hi = (uint64_t)(prod >> 64);
+        uint64_t s = lo + borrow;
+        uint64_t c = s < lo;
+        uint64_t m = mp[i];
+        rp[i] = m - s;
+        borrow = hi + c + (m < s);
+    }
+    return borrow;
+}
+#if defined(__aarch64__)
+__attribute__((naked, noinline, aligned(64)))
+static uint64_t bn_submul_from_1(uint64_t *rp, const uint64_t *mp,
+                                const uint64_t *up, int32_t n, uint64_t v) {
+    __asm__(
+        "mov x17, xzr\n"
+        "tbz w3, #0, 1f\n"
+        "ldr x5, [x2], #8\n"
+        "mul x9, x5, x4\n"
+        "umulh x13, x5, x4\n"
+        "ldr x5, [x1], #8\n"
+        "adds x9, x9, x17\n"
+        "adc x17, x13, xzr\n"
+        "subs x9, x5, x9\n"
+        "cinc x17, x17, lo\n"
+        "str x9, [x0], #8\n"
+        "1:\n"
+        "tbz w3, #1, 2f\n"
+        "ldp x5, x6, [x2], #16\n"
+        "mul x9, x5, x4\n"
+        "umulh x13, x5, x4\n"
+        "mul x10, x6, x4\n"
+        "umulh x14, x6, x4\n"
+        "adds x9, x9, x17\n"
+        "adcs x10, x10, x13\n"
+        "adc x17, x14, xzr\n"
+        "ldp x5, x6, [x1], #16\n"
+        "subs x9, x5, x9\n"
+        "sbcs x10, x6, x10\n"
+        "cinc x17, x17, lo\n"
+        "stp x9, x10, [x0], #16\n"
+        "2:\n"
+        "lsr w3, w3, #2\n"
+        "cbz w3, 4f\n"
+        "3:\n"
+        "ldp x5, x6, [x2], #16\n"
+        "ldp x7, x8, [x2], #16\n"
+        "mul x9, x5, x4\n"
+        "umulh x13, x5, x4\n"
+        "mul x10, x6, x4\n"
+        "umulh x14, x6, x4\n"
+        "mul x11, x7, x4\n"
+        "umulh x15, x7, x4\n"
+        "mul x12, x8, x4\n"
+        "umulh x16, x8, x4\n"
+        "adds x9, x9, x17\n"
+        "adcs x10, x10, x13\n"
+        "adcs x11, x11, x14\n"
+        "adcs x12, x12, x15\n"
+        "adc x17, x16, xzr\n"
+        "ldp x5, x6, [x1], #16\n"
+        "ldp x7, x8, [x1], #16\n"
+        "subs x9, x5, x9\n"
+        "sbcs x10, x6, x10\n"
+        "sbcs x11, x7, x11\n"
+        "sbcs x12, x8, x12\n"
+        "cinc x17, x17, lo\n"
+        "stp x9, x10, [x0], #16\n"
+        "stp x11, x12, [x0], #16\n"
+        "subs w3, w3, #1\n"
+        "b.ne 3b\n"
+        "4:\n"
+        "mov x0, x17\n"
+        "ret\n"
+    );
+}
+#else
+#define bn_submul_from_1 bn_submul_from_1_ref
+#endif
+
 /* mul_1: rp[0..n) = up[0..n)·v (WRITE, not add); returns the high word.
  * The write-not-accumulate twin of addmul_1, used for the first row of a
  * schoolbook product so the result buffer needs no pre-zeroing there. */
-static uint64_t bn_mul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v) {
+static uint64_t bn_mul_1_ref(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v) {
     uint64_t carry = 0;
     for (int32_t i = 0; i < n; i++) {
         __uint128_t p = (__uint128_t)up[i] * v + carry;
@@ -653,15 +2212,677 @@ static uint64_t bn_mul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v
     }
     return carry;
 }
+#if defined(__aarch64__)
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_mul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v) {
+    __asm__(
+        "mov x17, xzr\n"
+        "tbz w2, #0, 1f\n"
+        "ldr x4, [x1], #8\n"
+        "mul x8, x4, x3\n"
+        "umulh x12, x4, x3\n"
+        "adds x8, x8, x17\n"
+        "cinc x17, x12, hs\n"
+        "str x8, [x0], #8\n"
+        "1:\n"
+        "tbz w2, #1, 2f\n"
+        "ldp x4, x5, [x1], #16\n"
+        "mul x8, x4, x3\n"
+        "umulh x12, x4, x3\n"
+        "mul x9, x5, x3\n"
+        "umulh x13, x5, x3\n"
+        "adds x8, x8, x17\n"
+        "adcs x9, x9, x12\n"
+        "adc x17, x13, xzr\n"
+        "stp x8, x9, [x0], #16\n"
+        "2:\n"
+        "lsr x2, x2, #2\n"
+        "cbz x2, 4f\n"
+        "3:\n"
+        "ldp x4, x5, [x1], #32\n"
+        "ldp x6, x7, [x1, #-16]\n"
+        "mul x8, x4, x3\n"
+        "umulh x12, x4, x3\n"
+        "mul x9, x5, x3\n"
+        "umulh x13, x5, x3\n"
+        "mul x10, x6, x3\n"
+        "umulh x14, x6, x3\n"
+        "mul x11, x7, x3\n"
+        "umulh x15, x7, x3\n"
+        "adds x8, x8, x17\n"
+        "adcs x9, x9, x12\n"
+        "adcs x10, x10, x13\n"
+        "adcs x11, x11, x14\n"
+        "adc x17, x15, xzr\n"
+        "stp x8, x9, [x0], #32\n"
+        "stp x10, x11, [x0, #-16]\n"
+        "subs x2, x2, #1\n"
+        "b.ne 3b\n"
+        "4:\n"
+        "mov x0, x17\n"
+        "ret\n"
+    );
+}
+
+/* Straight-line fixed-length mul_1 rows, matching the addmul f-kernels:
+ * row 0 of each schoolbook leaf.  v arrives in x2. */
+#define BN_M1F_BLOCK0                                                     \
+    "ldp x4, x5, [x1]\n\t"                                                \
+    "ldp x6, x7, [x1, #16]\n\t"                                           \
+    "mul x8, x4, x2\n\t"                                                  \
+    "umulh x12, x4, x2\n\t"                                               \
+    "mul x9, x5, x2\n\t"                                                  \
+    "umulh x13, x5, x2\n\t"                                               \
+    "mul x10, x6, x2\n\t"                                                 \
+    "umulh x14, x6, x2\n\t"                                               \
+    "adds x9, x9, x12\n\t"                                                \
+    "mul x11, x7, x2\n\t"                                                 \
+    "umulh x15, x7, x2\n\t"                                               \
+    "adcs x10, x10, x13\n\t"                                              \
+    "adcs x11, x11, x14\n\t"                                              \
+    "adc x15, x15, xzr\n\t"                                               \
+    "stp x8, x9, [x0]\n\t"                                                \
+    "stp x10, x11, [x0, #16]\n\t"
+
+#define BN_M1F_BLOCK(o)                                                   \
+    "ldp x4, x5, [x1, #" #o "]\n\t"                                       \
+    "ldp x6, x7, [x1, #" #o "+16]\n\t"                                    \
+    "mul x8, x4, x2\n\t"                                                  \
+    "umulh x12, x4, x2\n\t"                                               \
+    "mul x9, x5, x2\n\t"                                                  \
+    "umulh x13, x5, x2\n\t"                                               \
+    "mul x10, x6, x2\n\t"                                                 \
+    "umulh x14, x6, x2\n\t"                                               \
+    "adds x8, x8, x15\n\t"                                                \
+    "mul x11, x7, x2\n\t"                                                 \
+    "umulh x15, x7, x2\n\t"                                               \
+    "adcs x9, x9, x12\n\t"                                                \
+    "adcs x10, x10, x13\n\t"                                              \
+    "adcs x11, x11, x14\n\t"                                              \
+    "adc x15, x15, xzr\n\t"                                               \
+    "stp x8, x9, [x0, #" #o "]\n\t"                                       \
+    "stp x10, x11, [x0, #" #o "+16]\n\t"
+
+#define BN_M1F_TAIL                                                       \
+    "mov x0, x15\n\t"                                                     \
+    "ret\n\t"
+
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_mul_1_f12(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    __asm__(
+        BN_M1F_BLOCK0
+        BN_M1F_BLOCK(32)
+        BN_M1F_BLOCK(64)
+        BN_M1F_TAIL
+    );
+}
+
+__attribute__((naked, noinline, aligned(64)))
+static uint64_t bn_mul_1_f20(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    __asm__(
+        BN_M1F_BLOCK0
+        BN_M1F_BLOCK(32)
+        BN_M1F_BLOCK(64)
+        BN_M1F_BLOCK(96)
+        BN_M1F_BLOCK(128)
+        BN_M1F_TAIL
+    );
+}
+
+__attribute__((naked, noinline, aligned(64)))
+static uint64_t bn_mul_1_f24(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    __asm__(
+        BN_M1F_BLOCK0
+        BN_M1F_BLOCK(32)
+        BN_M1F_BLOCK(64)
+        BN_M1F_BLOCK(96)
+        BN_M1F_BLOCK(128)
+        BN_M1F_BLOCK(160)
+        BN_M1F_TAIL
+    );
+}
+
+#undef BN_M1F_BLOCK0
+#undef BN_M1F_BLOCK
+#undef BN_M1F_TAIL
+#else
+#define bn_mul_1 bn_mul_1_ref
+static inline uint64_t bn_mul_1_f12(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    return bn_mul_1_ref(rp, up, 12, v);
+}
+static inline uint64_t bn_mul_1_f20(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    return bn_mul_1_ref(rp, up, 20, v);
+}
+static inline uint64_t bn_mul_1_f24(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    return bn_mul_1_ref(rp, up, 24, v);
+}
+#endif
+
+static inline __attribute__((always_inline))
+uint64_t bn_addmul_4_inline(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    uint64_t carry = 0;
+#define BN_ADDMUL4_STEP(i) do { \
+    __uint128_t p = (__uint128_t)up[i] * v + rp[i] + carry; \
+    rp[i] = (uint64_t)p; \
+    carry = (uint64_t)(p >> 64); \
+} while (0)
+    BN_ADDMUL4_STEP(0);
+    BN_ADDMUL4_STEP(1);
+    BN_ADDMUL4_STEP(2);
+    BN_ADDMUL4_STEP(3);
+#undef BN_ADDMUL4_STEP
+    return carry;
+}
+
+static inline __attribute__((always_inline))
+uint64_t bn_addmul_8_inline(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    uint64_t carry = 0;
+#define BN_ADDMUL8_STEP(i) do { \
+    __uint128_t p = (__uint128_t)up[i] * v + rp[i] + carry; \
+    rp[i] = (uint64_t)p; \
+    carry = (uint64_t)(p >> 64); \
+} while (0)
+    BN_ADDMUL8_STEP(0);
+    BN_ADDMUL8_STEP(1);
+    BN_ADDMUL8_STEP(2);
+    BN_ADDMUL8_STEP(3);
+    BN_ADDMUL8_STEP(4);
+    BN_ADDMUL8_STEP(5);
+    BN_ADDMUL8_STEP(6);
+    BN_ADDMUL8_STEP(7);
+#undef BN_ADDMUL8_STEP
+    return carry;
+}
+
+static inline __attribute__((always_inline))
+void bn_mul_eq2_inline(uint64_t *out, const uint64_t *a, const uint64_t *b) {
+    __uint128_t p00 = (__uint128_t)a[0] * b[0];
+    __uint128_t p01 = (__uint128_t)a[0] * b[1];
+    __uint128_t p10 = (__uint128_t)a[1] * b[0];
+    __uint128_t p11 = (__uint128_t)a[1] * b[1];
+    out[0] = (uint64_t)p00;
+    __uint128_t middle = (p00 >> 64) + (uint64_t)p01 + (uint64_t)p10;
+    out[1] = (uint64_t)middle;
+    __uint128_t upper = (p01 >> 64) + (p10 >> 64)
+                      + (uint64_t)p11 + (middle >> 64);
+    out[2] = (uint64_t)upper;
+    out[3] = (uint64_t)(p11 >> 64) + (uint64_t)(upper >> 64);
+}
+
+static inline __attribute__((always_inline))
+void bn_mul_eq3_inline(uint64_t *out, const uint64_t *a, const uint64_t *b) {
+    uint64_t acc0 = 0, acc1 = 0, acc2 = 0;
+#define BN_MUL3_ADD(i, j) do { \
+    __uint128_t product = (__uint128_t)a[i] * b[j]; \
+    uint64_t lo = (uint64_t)product, hi = (uint64_t)(product >> 64); \
+    uint64_t old = acc0; \
+    acc0 += lo; \
+    uint64_t carry = acc0 < old; \
+    old = acc1; \
+    acc1 += hi; \
+    acc2 += acc1 < old; \
+    old = acc1; \
+    acc1 += carry; \
+    acc2 += acc1 < old; \
+} while (0)
+#define BN_MUL3_EMIT(column) do { \
+    out[column] = acc0; \
+    acc0 = acc1; \
+    acc1 = acc2; \
+    acc2 = 0; \
+} while (0)
+    BN_MUL3_ADD(0, 0); BN_MUL3_EMIT(0);
+    BN_MUL3_ADD(0, 1); BN_MUL3_ADD(1, 0); BN_MUL3_EMIT(1);
+    BN_MUL3_ADD(0, 2); BN_MUL3_ADD(1, 1); BN_MUL3_ADD(2, 0);
+    BN_MUL3_EMIT(2);
+    BN_MUL3_ADD(1, 2); BN_MUL3_ADD(2, 1); BN_MUL3_EMIT(3);
+    BN_MUL3_ADD(2, 2); BN_MUL3_EMIT(4);
+    out[5] = acc0;
+#undef BN_MUL3_EMIT
+#undef BN_MUL3_ADD
+}
+
+/* Four limbs sit below the point where the pipelined leaf's throughput can
+ * repay three function entries. Keep the complete 4x4 multiply inline. */
+static inline __attribute__((always_inline))
+void bn_mul_eq4_inline(uint64_t *out, const uint64_t *a, const uint64_t *b) {
+    out[4] = bn_mul_1(out, b, 4, a[0]);
+    out[5] = bn_addmul_4_inline(out + 1, b, a[1]);
+    out[6] = bn_addmul_4_inline(out + 2, b, a[2]);
+    out[7] = bn_addmul_4_inline(out + 3, b, a[3]);
+}
+
+static inline __attribute__((always_inline))
+void bn_mul_eq8_inline(uint64_t *out, const uint64_t *a, const uint64_t *b) {
+    out[8] = bn_mul_1(out, b, 8, a[0]);
+    out[9]  = bn_addmul_8_inline(out + 1, b, a[1]);
+    out[10] = bn_addmul_8_inline(out + 2, b, a[2]);
+    out[11] = bn_addmul_8_inline(out + 3, b, a[3]);
+    out[12] = bn_addmul_8_inline(out + 4, b, a[4]);
+    out[13] = bn_addmul_8_inline(out + 5, b, a[5]);
+    out[14] = bn_addmul_8_inline(out + 6, b, a[6]);
+    out[15] = bn_addmul_8_inline(out + 7, b, a[7]);
+}
+
+/* Karatsuba at 24 and 48 limbs bottoms out in 12x12 products.  Keep their
+ * fixed row count out of the generic schoolbook loop, just as for the 24-limb
+ * crossover leaf below. */
+__attribute__((noinline))
+__attribute__((BN_HOT_SECTION, aligned(64)))
+static void bn_mul_eq12(uint64_t *out, const uint64_t *a, const uint64_t *b) {
+    out[12] = bn_mul_1_f12(out, b, a[0]);
+#define BN_MUL12_ROW(i) \
+    out[12 + (i)] = bn_addmul_1_f12(out + (i), b, a[(i)])
+    BN_MUL12_ROW(1);
+    BN_MUL12_ROW(2);
+    BN_MUL12_ROW(3);
+    BN_MUL12_ROW(4);
+    BN_MUL12_ROW(5);
+    BN_MUL12_ROW(6);
+    BN_MUL12_ROW(7);
+    BN_MUL12_ROW(8);
+    BN_MUL12_ROW(9);
+    BN_MUL12_ROW(10);
+    BN_MUL12_ROW(11);
+#undef BN_MUL12_ROW
+}
+
+__attribute__((noinline))
+__attribute__((BN_HOT_SECTION, aligned(64)))
+static void bn_mul_eq20(uint64_t *out, const uint64_t *a, const uint64_t *b) {
+    out[20] = bn_mul_1_f20(out, b, a[0]);
+#define BN_MUL20_ROW(i) \
+    out[20 + (i)] = bn_addmul_1_f20(out + (i), b, a[(i)])
+    BN_MUL20_ROW(1);
+    BN_MUL20_ROW(2);
+    BN_MUL20_ROW(3);
+    BN_MUL20_ROW(4);
+    BN_MUL20_ROW(5);
+    BN_MUL20_ROW(6);
+    BN_MUL20_ROW(7);
+    BN_MUL20_ROW(8);
+    BN_MUL20_ROW(9);
+    BN_MUL20_ROW(10);
+    BN_MUL20_ROW(11);
+    BN_MUL20_ROW(12);
+    BN_MUL20_ROW(13);
+    BN_MUL20_ROW(14);
+    BN_MUL20_ROW(15);
+    BN_MUL20_ROW(16);
+    BN_MUL20_ROW(17);
+    BN_MUL20_ROW(18);
+    BN_MUL20_ROW(19);
+#undef BN_MUL20_ROW
+}
+
+/* The last schoolbook size is frequent both directly and as a Toom child.
+ * Spell out its rows so address generation and the outer loop do not sit
+ * between successive calls to the pipelined addmul leaf. */
+__attribute__((noinline))
+__attribute__((BN_HOT_SECTION, aligned(64)))
+static void bn_mul_eq24(uint64_t *out, const uint64_t *a, const uint64_t *b) {
+    out[24] = bn_mul_1_f24(out, b, a[0]);
+#define BN_MUL24_ROW(i) \
+    out[24 + (i)] = bn_addmul_1_f24(out + (i), b, a[(i)])
+    BN_MUL24_ROW(1);
+    BN_MUL24_ROW(2);
+    BN_MUL24_ROW(3);
+    BN_MUL24_ROW(4);
+    BN_MUL24_ROW(5);
+    BN_MUL24_ROW(6);
+    BN_MUL24_ROW(7);
+    BN_MUL24_ROW(8);
+    BN_MUL24_ROW(9);
+    BN_MUL24_ROW(10);
+    BN_MUL24_ROW(11);
+    BN_MUL24_ROW(12);
+    BN_MUL24_ROW(13);
+    BN_MUL24_ROW(14);
+    BN_MUL24_ROW(15);
+    BN_MUL24_ROW(16);
+    BN_MUL24_ROW(17);
+    BN_MUL24_ROW(18);
+    BN_MUL24_ROW(19);
+    BN_MUL24_ROW(20);
+    BN_MUL24_ROW(21);
+    BN_MUL24_ROW(22);
+    BN_MUL24_ROW(23);
+#undef BN_MUL24_ROW
+}
+
+static inline __attribute__((always_inline))
+void bn_sqr1_inline(uint64_t *out, const uint64_t *a) {
+    __uint128_t product = (__uint128_t)a[0] * a[0];
+    out[0] = (uint64_t)product;
+    out[1] = (uint64_t)(product >> 64);
+}
+
+static inline __attribute__((always_inline))
+void bn_sqr2_inline(uint64_t *out, const uint64_t *a) {
+    uint64_t acc0 = 0, acc1 = 0, acc2 = 0;
+#define BN_SQR2_ADD(i, j, copies) do { \
+    __uint128_t product = (__uint128_t)a[i] * a[j]; \
+    uint64_t lo = (uint64_t)product, hi = (uint64_t)(product >> 64); \
+    uint64_t top = 0; \
+    if ((copies) == 2) { top = hi >> 63; hi = (hi << 1) | (lo >> 63); lo <<= 1; } \
+    uint64_t old = acc0; \
+    acc0 += lo; \
+    uint64_t carry = acc0 < old; \
+    old = acc1; \
+    acc1 += hi; \
+    acc2 += top + (acc1 < old); \
+    old = acc1; \
+    acc1 += carry; \
+    acc2 += acc1 < old; \
+} while (0)
+#define BN_SQR2_EMIT(column) do { \
+    out[column] = acc0; \
+    acc0 = acc1; \
+    acc1 = acc2; \
+    acc2 = 0; \
+} while (0)
+    BN_SQR2_ADD(0, 0, 1); BN_SQR2_EMIT(0);
+    BN_SQR2_ADD(0, 1, 2); BN_SQR2_EMIT(1);
+    BN_SQR2_ADD(1, 1, 1); BN_SQR2_EMIT(2);
+    out[3] = acc0;
+#undef BN_SQR2_EMIT
+#undef BN_SQR2_ADD
+}
+
+static inline __attribute__((always_inline))
+void bn_sqr3_inline(uint64_t *out, const uint64_t *a) {
+    uint64_t acc0 = 0, acc1 = 0, acc2 = 0;
+#define BN_SQR3_ADD(i, j, copies) do { \
+    __uint128_t product = (__uint128_t)a[i] * a[j]; \
+    uint64_t lo = (uint64_t)product, hi = (uint64_t)(product >> 64); \
+    uint64_t top = 0; \
+    if ((copies) == 2) { top = hi >> 63; hi = (hi << 1) | (lo >> 63); lo <<= 1; } \
+    uint64_t old = acc0; \
+    acc0 += lo; \
+    uint64_t carry = acc0 < old; \
+    old = acc1; \
+    acc1 += hi; \
+    acc2 += top + (acc1 < old); \
+    old = acc1; \
+    acc1 += carry; \
+    acc2 += acc1 < old; \
+} while (0)
+#define BN_SQR3_EMIT(column) do { \
+    out[column] = acc0; \
+    acc0 = acc1; \
+    acc1 = acc2; \
+    acc2 = 0; \
+} while (0)
+    BN_SQR3_ADD(0, 0, 1); BN_SQR3_EMIT(0);
+    BN_SQR3_ADD(0, 1, 2); BN_SQR3_EMIT(1);
+    BN_SQR3_ADD(0, 2, 2); BN_SQR3_ADD(1, 1, 1); BN_SQR3_EMIT(2);
+    BN_SQR3_ADD(1, 2, 2); BN_SQR3_EMIT(3);
+    BN_SQR3_ADD(2, 2, 1); BN_SQR3_EMIT(4);
+    out[5] = acc0;
+#undef BN_SQR3_EMIT
+#undef BN_SQR3_ADD
+}
+
+static inline __attribute__((always_inline))
+void bn_sqr4_inline(uint64_t *out, const uint64_t *a) {
+    uint64_t acc0 = 0, acc1 = 0, acc2 = 0;
+#define BN_SQR4_ADD(i, j, copies) do { \
+    __uint128_t product = (__uint128_t)a[i] * a[j]; \
+    uint64_t lo = (uint64_t)product, hi = (uint64_t)(product >> 64); \
+    uint64_t top = 0; \
+    if ((copies) == 2) { top = hi >> 63; hi = (hi << 1) | (lo >> 63); lo <<= 1; } \
+    uint64_t old = acc0; \
+    acc0 += lo; \
+    uint64_t carry = acc0 < old; \
+    old = acc1; \
+    acc1 += hi; \
+    acc2 += top + (acc1 < old); \
+    old = acc1; \
+    acc1 += carry; \
+    acc2 += acc1 < old; \
+} while (0)
+#define BN_SQR4_EMIT(column) do { \
+    out[column] = acc0; \
+    acc0 = acc1; \
+    acc1 = acc2; \
+    acc2 = 0; \
+} while (0)
+    BN_SQR4_ADD(0, 0, 1); BN_SQR4_EMIT(0);
+    BN_SQR4_ADD(0, 1, 2); BN_SQR4_EMIT(1);
+    BN_SQR4_ADD(0, 2, 2); BN_SQR4_ADD(1, 1, 1); BN_SQR4_EMIT(2);
+    BN_SQR4_ADD(0, 3, 2); BN_SQR4_ADD(1, 2, 2); BN_SQR4_EMIT(3);
+    BN_SQR4_ADD(1, 3, 2); BN_SQR4_ADD(2, 2, 1); BN_SQR4_EMIT(4);
+    BN_SQR4_ADD(2, 3, 2); BN_SQR4_EMIT(5);
+    BN_SQR4_ADD(3, 3, 1); BN_SQR4_EMIT(6);
+    out[7] = acc0;
+#undef BN_SQR4_EMIT
+#undef BN_SQR4_ADD
+}
+
+#define BN_SQR_SMALL_ADD(i, j, copies) do { \
+    __uint128_t product = (__uint128_t)a[i] * a[j]; \
+    uint64_t lo = (uint64_t)product, hi = (uint64_t)(product >> 64); \
+    uint64_t top = 0; \
+    if ((copies) == 2) { top = hi >> 63; hi = (hi << 1) | (lo >> 63); lo <<= 1; } \
+    uint64_t old = acc0; \
+    acc0 += lo; \
+    uint64_t add_carry = acc0 < old; \
+    old = acc1; \
+    acc1 += hi; \
+    acc2 += top + (acc1 < old); \
+    old = acc1; \
+    acc1 += add_carry; \
+    acc2 += acc1 < old; \
+} while (0)
+#define BN_SQR_SMALL_EMIT(column) do { \
+    out[column] = acc0; \
+    acc0 = acc1; \
+    acc1 = acc2; \
+    acc2 = 0; \
+} while (0)
+
+static __attribute__((noinline))
+void bn_sqr5(uint64_t *out, const uint64_t *a) {
+    uint64_t acc0 = 0, acc1 = 0, acc2 = 0;
+    BN_SQR_SMALL_ADD(0, 0, 1); BN_SQR_SMALL_EMIT(0);
+    BN_SQR_SMALL_ADD(0, 1, 2); BN_SQR_SMALL_EMIT(1);
+    BN_SQR_SMALL_ADD(0, 2, 2); BN_SQR_SMALL_ADD(1, 1, 1); BN_SQR_SMALL_EMIT(2);
+    BN_SQR_SMALL_ADD(0, 3, 2); BN_SQR_SMALL_ADD(1, 2, 2); BN_SQR_SMALL_EMIT(3);
+    BN_SQR_SMALL_ADD(0, 4, 2); BN_SQR_SMALL_ADD(1, 3, 2); BN_SQR_SMALL_ADD(2, 2, 1); BN_SQR_SMALL_EMIT(4);
+    BN_SQR_SMALL_ADD(1, 4, 2); BN_SQR_SMALL_ADD(2, 3, 2); BN_SQR_SMALL_EMIT(5);
+    BN_SQR_SMALL_ADD(2, 4, 2); BN_SQR_SMALL_ADD(3, 3, 1); BN_SQR_SMALL_EMIT(6);
+    BN_SQR_SMALL_ADD(3, 4, 2); BN_SQR_SMALL_EMIT(7);
+    BN_SQR_SMALL_ADD(4, 4, 1); BN_SQR_SMALL_EMIT(8);
+    out[9] = acc0;
+}
+
+static __attribute__((noinline))
+void bn_sqr6(uint64_t *out, const uint64_t *a) {
+    uint64_t acc0 = 0, acc1 = 0, acc2 = 0;
+    BN_SQR_SMALL_ADD(0, 0, 1); BN_SQR_SMALL_EMIT(0);
+    BN_SQR_SMALL_ADD(0, 1, 2); BN_SQR_SMALL_EMIT(1);
+    BN_SQR_SMALL_ADD(0, 2, 2); BN_SQR_SMALL_ADD(1, 1, 1); BN_SQR_SMALL_EMIT(2);
+    BN_SQR_SMALL_ADD(0, 3, 2); BN_SQR_SMALL_ADD(1, 2, 2); BN_SQR_SMALL_EMIT(3);
+    BN_SQR_SMALL_ADD(0, 4, 2); BN_SQR_SMALL_ADD(1, 3, 2); BN_SQR_SMALL_ADD(2, 2, 1); BN_SQR_SMALL_EMIT(4);
+    BN_SQR_SMALL_ADD(0, 5, 2); BN_SQR_SMALL_ADD(1, 4, 2); BN_SQR_SMALL_ADD(2, 3, 2); BN_SQR_SMALL_EMIT(5);
+    BN_SQR_SMALL_ADD(1, 5, 2); BN_SQR_SMALL_ADD(2, 4, 2); BN_SQR_SMALL_ADD(3, 3, 1); BN_SQR_SMALL_EMIT(6);
+    BN_SQR_SMALL_ADD(2, 5, 2); BN_SQR_SMALL_ADD(3, 4, 2); BN_SQR_SMALL_EMIT(7);
+    BN_SQR_SMALL_ADD(3, 5, 2); BN_SQR_SMALL_ADD(4, 4, 1); BN_SQR_SMALL_EMIT(8);
+    BN_SQR_SMALL_ADD(4, 5, 2); BN_SQR_SMALL_EMIT(9);
+    BN_SQR_SMALL_ADD(5, 5, 1); BN_SQR_SMALL_EMIT(10);
+    out[11] = acc0;
+}
+
+static __attribute__((noinline))
+void bn_sqr7(uint64_t *out, const uint64_t *a) {
+    uint64_t acc0 = 0, acc1 = 0, acc2 = 0;
+    BN_SQR_SMALL_ADD(0, 0, 1); BN_SQR_SMALL_EMIT(0);
+    BN_SQR_SMALL_ADD(0, 1, 2); BN_SQR_SMALL_EMIT(1);
+    BN_SQR_SMALL_ADD(0, 2, 2); BN_SQR_SMALL_ADD(1, 1, 1); BN_SQR_SMALL_EMIT(2);
+    BN_SQR_SMALL_ADD(0, 3, 2); BN_SQR_SMALL_ADD(1, 2, 2); BN_SQR_SMALL_EMIT(3);
+    BN_SQR_SMALL_ADD(0, 4, 2); BN_SQR_SMALL_ADD(1, 3, 2); BN_SQR_SMALL_ADD(2, 2, 1); BN_SQR_SMALL_EMIT(4);
+    BN_SQR_SMALL_ADD(0, 5, 2); BN_SQR_SMALL_ADD(1, 4, 2); BN_SQR_SMALL_ADD(2, 3, 2); BN_SQR_SMALL_EMIT(5);
+    BN_SQR_SMALL_ADD(0, 6, 2); BN_SQR_SMALL_ADD(1, 5, 2); BN_SQR_SMALL_ADD(2, 4, 2); BN_SQR_SMALL_ADD(3, 3, 1); BN_SQR_SMALL_EMIT(6);
+    BN_SQR_SMALL_ADD(1, 6, 2); BN_SQR_SMALL_ADD(2, 5, 2); BN_SQR_SMALL_ADD(3, 4, 2); BN_SQR_SMALL_EMIT(7);
+    BN_SQR_SMALL_ADD(2, 6, 2); BN_SQR_SMALL_ADD(3, 5, 2); BN_SQR_SMALL_ADD(4, 4, 1); BN_SQR_SMALL_EMIT(8);
+    BN_SQR_SMALL_ADD(3, 6, 2); BN_SQR_SMALL_ADD(4, 5, 2); BN_SQR_SMALL_EMIT(9);
+    BN_SQR_SMALL_ADD(4, 6, 2); BN_SQR_SMALL_ADD(5, 5, 1); BN_SQR_SMALL_EMIT(10);
+    BN_SQR_SMALL_ADD(5, 6, 2); BN_SQR_SMALL_EMIT(11);
+    BN_SQR_SMALL_ADD(6, 6, 1); BN_SQR_SMALL_EMIT(12);
+    out[13] = acc0;
+}
+
+#undef BN_SQR_SMALL_EMIT
+#undef BN_SQR_SMALL_ADD
+
+static inline __attribute__((always_inline))
+void bn_sqr8_inline(uint64_t *out, const uint64_t *a) {
+    uint64_t acc0 = 0, acc1 = 0, acc2 = 0;
+#define BN_SQR8_ADD(i, j, copies) do { \
+    __uint128_t product = (__uint128_t)a[i] * a[j]; \
+    uint64_t lo = (uint64_t)product, hi = (uint64_t)(product >> 64); \
+    uint64_t top = 0; \
+    if ((copies) == 2) { top = hi >> 63; hi = (hi << 1) | (lo >> 63); lo <<= 1; } \
+    uint64_t old = acc0; \
+    acc0 += lo; \
+    uint64_t carry = acc0 < old; \
+    old = acc1; \
+    acc1 += hi; \
+    acc2 += top + (acc1 < old); \
+    old = acc1; \
+    acc1 += carry; \
+    acc2 += acc1 < old; \
+} while (0)
+#define BN_SQR8_EMIT(column) do { \
+    out[column] = acc0; \
+    acc0 = acc1; \
+    acc1 = acc2; \
+    acc2 = 0; \
+} while (0)
+    BN_SQR8_ADD(0, 0, 1); BN_SQR8_EMIT(0);
+    BN_SQR8_ADD(0, 1, 2); BN_SQR8_EMIT(1);
+    BN_SQR8_ADD(0, 2, 2); BN_SQR8_ADD(1, 1, 1); BN_SQR8_EMIT(2);
+    BN_SQR8_ADD(0, 3, 2); BN_SQR8_ADD(1, 2, 2); BN_SQR8_EMIT(3);
+    BN_SQR8_ADD(0, 4, 2); BN_SQR8_ADD(1, 3, 2); BN_SQR8_ADD(2, 2, 1); BN_SQR8_EMIT(4);
+    BN_SQR8_ADD(0, 5, 2); BN_SQR8_ADD(1, 4, 2); BN_SQR8_ADD(2, 3, 2); BN_SQR8_EMIT(5);
+    BN_SQR8_ADD(0, 6, 2); BN_SQR8_ADD(1, 5, 2); BN_SQR8_ADD(2, 4, 2); BN_SQR8_ADD(3, 3, 1); BN_SQR8_EMIT(6);
+    BN_SQR8_ADD(0, 7, 2); BN_SQR8_ADD(1, 6, 2); BN_SQR8_ADD(2, 5, 2); BN_SQR8_ADD(3, 4, 2); BN_SQR8_EMIT(7);
+    BN_SQR8_ADD(1, 7, 2); BN_SQR8_ADD(2, 6, 2); BN_SQR8_ADD(3, 5, 2); BN_SQR8_ADD(4, 4, 1); BN_SQR8_EMIT(8);
+    BN_SQR8_ADD(2, 7, 2); BN_SQR8_ADD(3, 6, 2); BN_SQR8_ADD(4, 5, 2); BN_SQR8_EMIT(9);
+    BN_SQR8_ADD(3, 7, 2); BN_SQR8_ADD(4, 6, 2); BN_SQR8_ADD(5, 5, 1); BN_SQR8_EMIT(10);
+    BN_SQR8_ADD(4, 7, 2); BN_SQR8_ADD(5, 6, 2); BN_SQR8_EMIT(11);
+    BN_SQR8_ADD(5, 7, 2); BN_SQR8_ADD(6, 6, 1); BN_SQR8_EMIT(12);
+    BN_SQR8_ADD(6, 7, 2); BN_SQR8_EMIT(13);
+    BN_SQR8_ADD(7, 7, 1); BN_SQR8_EMIT(14);
+    out[15] = acc0;
+#undef BN_SQR8_EMIT
+#undef BN_SQR8_ADD
+}
+
+static inline __attribute__((always_inline))
+void bn_sqr16_split(uint64_t *out, const uint64_t *a) {
+    uint64_t cross[BN_SQR16_FUSED_CROSS ? 16 : 17];
+    bn_sqr8_inline(out, a);
+    bn_sqr8_inline(out + 16, a + 8);
+    bn_mul_eq8_inline(cross, a, a + 8);
+#if BN_SQR16_FUSED_CROSS
+    uint64_t shift_carry = 0;
+    uint64_t add_carry = 0;
+    for (int32_t i = 0; i < 16; i++) {
+        uint64_t value = cross[i];
+        uint64_t doubled = (value << 1) | shift_carry;
+        shift_carry = value >> 63;
+        __uint128_t sum = (__uint128_t)out[8 + i] + doubled + add_carry;
+        out[8 + i] = (uint64_t)sum;
+        add_carry = (uint64_t)(sum >> 64);
+    }
+    uint64_t increment = shift_carry + add_carry;
+    int32_t i = 16;
+    while (increment && i < 24) {
+        __uint128_t sum = (__uint128_t)out[8 + i] + increment;
+        out[8 + i] = (uint64_t)sum;
+        increment = (uint64_t)(sum >> 64);
+        i++;
+    }
+#else
+    uint64_t carry = 0;
+    for (int32_t i = 0; i < 16; i++) {
+        uint64_t v = cross[i];
+        cross[i] = (v << 1) | carry;
+        carry = v >> 63;
+    }
+    cross[16] = carry;
+    int32_t count = 16 + (carry != 0);
+    uint64_t add_carry = 0;
+    int32_t i = 0;
+    for (; i < count; i++) {
+        __uint128_t sum = (__uint128_t)out[8 + i] + cross[i] + add_carry;
+        out[8 + i] = (uint64_t)sum;
+        add_carry = (uint64_t)(sum >> 64);
+    }
+    for (; add_carry && i < 24; i++) {
+        out[8 + i] += 1;
+        add_carry = out[8 + i] == 0;
+    }
+#endif
+}
 
 /* out[0..na+nb) = a[0..na) * b[0..nb)  (plain O(n*m) schoolbook).
  * The caller need not zero out. The first multiplier row is written with
- * mul_1 (not addmul into a zeroed buffer), so only the high limbs above that
- * first partial product are zeroed — eliminating the O(na+nb) pre-zero pass
- * that dominated bignum×small products (factorial's inner multiply). */
+ * mul_1 (not addmul into a zeroed buffer).  Each later row consumes the carry
+ * written by its predecessor and then writes the next high limb, so no output
+ * pre-zeroing is necessary. */
+__attribute__((BN_HOT_SECTION, aligned(64)))
 static void bigint_mul_schoolbook_into(uint64_t *out,
                                         const uint64_t *a, int32_t na,
                                         const uint64_t *b, int32_t nb) {
+    if (na == 1 && nb == 1) {
+        __uint128_t product = (__uint128_t)a[0] * b[0];
+        out[0] = (uint64_t)product;
+        out[1] = (uint64_t)(product >> 64);
+        return;
+    }
+    if (na == 2 && nb == 2) {
+        __uint128_t p00 = (__uint128_t)a[0] * b[0];
+        __uint128_t p01 = (__uint128_t)a[0] * b[1];
+        __uint128_t p10 = (__uint128_t)a[1] * b[0];
+        __uint128_t p11 = (__uint128_t)a[1] * b[1];
+        out[0] = (uint64_t)p00;
+        __uint128_t mid = (p00 >> 64) + (uint64_t)p01 + (uint64_t)p10;
+        out[1] = (uint64_t)mid;
+        __uint128_t high = (mid >> 64) + (p01 >> 64) + (p10 >> 64) +
+                           (uint64_t)p11;
+        out[2] = (uint64_t)high;
+        out[3] = (uint64_t)(p11 >> 64) + (uint64_t)(high >> 64);
+        return;
+    }
+#ifndef BN_MUL_EQ3_INLINE
+#define BN_MUL_EQ3_INLINE 1
+#endif
+#if BN_MUL_EQ3_INLINE
+    if (na == 3 && nb == 3) {
+        bn_mul_eq3_inline(out, a, b);
+        return;
+    }
+#endif
+    if (na == 4 && nb == 4) {
+        bn_mul_eq4_inline(out, a, b);
+        return;
+    }
+    if (na == 8 && nb == 8) {
+        bn_mul_eq8_inline(out, a, b);
+        return;
+    }
+#if BN_MUL_EQ12
+    if (na == 12 && nb == 12) {
+        bn_mul_eq12(out, a, b);
+        return;
+    }
+#endif
+    if (na == 24 && nb == 24) {
+        bn_mul_eq24(out, a, b);
+        return;
+    }
     int32_t tot = na + nb;
     if (na <= 0 || nb <= 0) {
         for (int32_t k = 0; k < tot; k++) out[k] = 0;
@@ -669,12 +2890,333 @@ static void bigint_mul_schoolbook_into(uint64_t *out,
     }
     /* Row 0: write b·a[0] into out[0..nb), carry into out[nb]. */
     out[nb] = bn_mul_1(out, b, nb, a[0]);
-    /* Zero only the limbs above row 0 that later addmul rows accumulate into. */
-    for (int32_t k = nb + 1; k < tot; k++) out[k] = 0;
     /* Rows 1..na-1: accumulate as usual. */
     for (int32_t i = 1; i < na; i++)
         out[i + nb] = bn_addmul_1(out + i, b, nb, a[i]);
 }
+
+/* ==== NEON bitmask-carry hybrid add/sub (aarch64) =======================
+ * Breaks the 1-limb/cycle serialized ADCS/SBCS flag-chain wall for large
+ * equal-length operands.  Five-region multi-stream layout
+ * [A scalar | N1 neon | C scalar | N2 neon | E scalar]: the two NEON groups
+ * run one phase apart so every scalar chain runs with its true carry, and
+ * each NEON block's carries resolve exactly through the G/P bitmask formula
+ * C = ((G<<1|cin)+P)^P (exact because G&P == 0).  Fully non-speculative and
+ * branchless on data: all-propagate inputs (e.g. Mersenne limbs) run at the
+ * same speed as random data.  Measured on Apple M5 Max: 1.15x over the ADCS
+ * chain at 512 limbs, 1.31x at 1024, 1.39x at 2048; crossover ~384. */
+#ifndef BN_ADDSUB_NEON_HYBRID
+#define BN_ADDSUB_NEON_HYBRID 1
+#endif
+#ifndef BN_ADDSUB_NEON_HYBRID_MIN
+#define BN_ADDSUB_NEON_HYBRID_MIN 384
+#endif
+#if defined(__aarch64__) && BN_ADDSUB_NEON_HYBRID
+#include <arm_neon.h>
+
+/* ADCS run with carry-in (cmp cin,#1 sets C = cin>=1; m == 0 passes cin
+ * through).  Same block schedule as bn_add_n's chain. */
+static uint64_t bn_hyb_adcs_run(uint64_t *r, const uint64_t *a,
+                                const uint64_t *b, uint64_t m, uint64_t cin) {
+    uint64_t blocks = m >> 3; uint64_t n = m; uint64_t carry;
+    __asm__ volatile(
+        "cmp %[cin], #1\n\t"
+        "tbz %w[n], #0, 1f\n\t" "ldr x4, [%[ap]], #8\n\t" "ldr x8, [%[bp]], #8\n\t"
+        "adcs x12, x4, x8\n\t" "str x12, [%[rp]], #8\n\t" "1:\n\t"
+        "tbz %w[n], #1, 2f\n\t" "ldp x4, x5, [%[ap]], #16\n\t" "ldp x8, x9, [%[bp]], #16\n\t"
+        "adcs x12, x4, x8\n\t" "adcs x13, x5, x9\n\t" "stp x12, x13, [%[rp]], #16\n\t" "2:\n\t"
+        "tbz %w[n], #2, 3f\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t" "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t" "ldp x10, x11, [%[bp], #-16]\n\t"
+        "adcs x12, x4, x8\n\t" "adcs x13, x5, x9\n\t" "adcs x14, x6, x10\n\t" "adcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t" "stp x14, x15, [%[rp], #-16]\n\t" "3:\n\t"
+        "cbz %[blocks], 5f\n\t" "4:\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t" "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t" "ldp x10, x11, [%[bp], #-16]\n\t"
+        "adcs x12, x4, x8\n\t" "adcs x13, x5, x9\n\t" "adcs x14, x6, x10\n\t" "adcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t" "stp x14, x15, [%[rp], #-16]\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t" "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t" "ldp x10, x11, [%[bp], #-16]\n\t"
+        "adcs x12, x4, x8\n\t" "adcs x13, x5, x9\n\t" "adcs x14, x6, x10\n\t" "adcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t" "stp x14, x15, [%[rp], #-16]\n\t"
+        "sub %[blocks], %[blocks], #1\n\t" "cbnz %[blocks], 4b\n\t" "5:\n\t"
+        "cset %[carry], hs"
+        : [carry] "=&r"(carry), [rp] "+&r"(r), [ap] "+&r"(a), [bp] "+&r"(b), [blocks] "+&r"(blocks)
+        : [n] "r"(n), [cin] "r"(cin)
+        : "x4","x5","x6","x7","x8","x9","x10","x11","x12","x13","x14","x15","cc","memory");
+    return carry;
+}
+
+/* SBCS run with borrow-in (cmp xzr,bin sets C = bin==0, i.e. NOT-borrow). */
+static uint64_t bn_hyb_sbcs_run(uint64_t *r, const uint64_t *a,
+                                const uint64_t *b, uint64_t m, uint64_t bin) {
+    uint64_t blocks = m >> 3; uint64_t n = m; uint64_t borrow;
+    __asm__ volatile(
+        "cmp xzr, %[bin]\n\t"
+        "tbz %w[n], #0, 1f\n\t" "ldr x4, [%[ap]], #8\n\t" "ldr x8, [%[bp]], #8\n\t"
+        "sbcs x12, x4, x8\n\t" "str x12, [%[rp]], #8\n\t" "1:\n\t"
+        "tbz %w[n], #1, 2f\n\t" "ldp x4, x5, [%[ap]], #16\n\t" "ldp x8, x9, [%[bp]], #16\n\t"
+        "sbcs x12, x4, x8\n\t" "sbcs x13, x5, x9\n\t" "stp x12, x13, [%[rp]], #16\n\t" "2:\n\t"
+        "tbz %w[n], #2, 3f\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t" "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t" "ldp x10, x11, [%[bp], #-16]\n\t"
+        "sbcs x12, x4, x8\n\t" "sbcs x13, x5, x9\n\t" "sbcs x14, x6, x10\n\t" "sbcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t" "stp x14, x15, [%[rp], #-16]\n\t" "3:\n\t"
+        "cbz %[blocks], 5f\n\t" "4:\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t" "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t" "ldp x10, x11, [%[bp], #-16]\n\t"
+        "sbcs x12, x4, x8\n\t" "sbcs x13, x5, x9\n\t" "sbcs x14, x6, x10\n\t" "sbcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t" "stp x14, x15, [%[rp], #-16]\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t" "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t" "ldp x10, x11, [%[bp], #-16]\n\t"
+        "sbcs x12, x4, x8\n\t" "sbcs x13, x5, x9\n\t" "sbcs x14, x6, x10\n\t" "sbcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t" "stp x14, x15, [%[rp], #-16]\n\t"
+        "sub %[blocks], %[blocks], #1\n\t" "cbnz %[blocks], 4b\n\t" "5:\n\t"
+        "cset %[borrow], lo"
+        : [borrow] "=&r"(borrow), [rp] "+&r"(r), [ap] "+&r"(a), [bp] "+&r"(b), [blocks] "+&r"(blocks)
+        : [n] "r"(n), [bin] "r"(bin)
+        : "x4","x5","x6","x7","x8","x9","x10","x11","x12","x13","x14","x15","cc","memory");
+    return borrow;
+}
+
+/* 8 u64-lane compare masks -> 16 byte masks, order-preserving. */
+static inline uint8x16_t bn_hyb_pack16(
+    uint64x2_t m0, uint64x2_t m1, uint64x2_t m2, uint64x2_t m3,
+    uint64x2_t m4, uint64x2_t m5, uint64x2_t m6, uint64x2_t m7) {
+    uint32x4_t x0 = vuzp1q_u32(vreinterpretq_u32_u64(m0), vreinterpretq_u32_u64(m1));
+    uint32x4_t x1 = vuzp1q_u32(vreinterpretq_u32_u64(m2), vreinterpretq_u32_u64(m3));
+    uint32x4_t x2 = vuzp1q_u32(vreinterpretq_u32_u64(m4), vreinterpretq_u32_u64(m5));
+    uint32x4_t x3 = vuzp1q_u32(vreinterpretq_u32_u64(m6), vreinterpretq_u32_u64(m7));
+    uint16x8_t y0 = vuzp1q_u16(vreinterpretq_u16_u32(x0), vreinterpretq_u16_u32(x1));
+    uint16x8_t y1 = vuzp1q_u16(vreinterpretq_u16_u32(x2), vreinterpretq_u16_u32(x3));
+    return vuzp1q_u8(vreinterpretq_u8_u16(y0), vreinterpretq_u8_u16(y1));
+}
+
+/* 64 byte masks -> 64-bit mask, bit i = limb i. */
+static inline uint64_t bn_hyb_mask64(
+    uint8x16_t c0, uint8x16_t c1, uint8x16_t c2, uint8x16_t c3) {
+    const uint8x16_t weights = {1,2,4,8,16,32,64,128, 1,2,4,8,16,32,64,128};
+    uint8x16_t t0 = vpaddq_u8(vandq_u8(c0, weights), vandq_u8(c1, weights));
+    uint8x16_t t1 = vpaddq_u8(vandq_u8(c2, weights), vandq_u8(c3, weights));
+    uint8x16_t t  = vpaddq_u8(t0, t1);
+    t = vpaddq_u8(t, t);
+    return vgetq_lane_u64(vreinterpretq_u64_u8(t), 0);
+}
+
+/* pass 1 (add): r = a + b limbwise; emit packed generate/propagate masks. */
+static inline void bn_hyb_add_pass1(uint64_t *r, const uint64_t *a,
+                                    const uint64_t *b, uint64_t *G, uint64_t *P) {
+    const uint64x2_t ones = vdupq_n_u64(~0ULL);
+    uint8x16_t gB[4], pB[4];
+#pragma clang loop unroll(full)
+    for (int c = 0; c < 4; c++) {
+        uint64x2_t g[8], p[8];
+        const uint64_t *ac = a + 16 * c, *bc = b + 16 * c;
+        uint64_t *rc = r + 16 * c;
+        for (int j = 0; j < 8; j++) {
+            uint64x2_t va = vld1q_u64(ac + 2 * j);
+            uint64x2_t vb = vld1q_u64(bc + 2 * j);
+            uint64x2_t vs = vaddq_u64(va, vb);
+            vst1q_u64(rc + 2 * j, vs);
+            g[j] = vcgtq_u64(va, vs);
+            p[j] = vceqq_u64(vs, ones);
+        }
+        gB[c] = bn_hyb_pack16(g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7]);
+        pB[c] = bn_hyb_pack16(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
+    }
+    *G = bn_hyb_mask64(gB[0], gB[1], gB[2], gB[3]);
+    *P = bn_hyb_mask64(pB[0], pB[1], pB[2], pB[3]);
+}
+
+/* pass 1 (sub): r = a - b limbwise; G = borrow-generate, P = propagate. */
+static inline void bn_hyb_sub_pass1(uint64_t *r, const uint64_t *a,
+                                    const uint64_t *b, uint64_t *G, uint64_t *P) {
+    uint8x16_t gB[4], pB[4];
+#pragma clang loop unroll(full)
+    for (int c = 0; c < 4; c++) {
+        uint64x2_t g[8], p[8];
+        const uint64_t *ac = a + 16 * c, *bc = b + 16 * c;
+        uint64_t *rc = r + 16 * c;
+        for (int j = 0; j < 8; j++) {
+            uint64x2_t va = vld1q_u64(ac + 2 * j);
+            uint64x2_t vb = vld1q_u64(bc + 2 * j);
+            uint64x2_t vd = vsubq_u64(va, vb);
+            vst1q_u64(rc + 2 * j, vd);
+            g[j] = vcgtq_u64(vb, va);
+            p[j] = vceqzq_u64(vd);
+        }
+        gB[c] = bn_hyb_pack16(g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7]);
+        pB[c] = bn_hyb_pack16(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
+    }
+    *G = bn_hyb_mask64(gB[0], gB[1], gB[2], gB[3]);
+    *P = bn_hyb_mask64(pB[0], pB[1], pB[2], pB[3]);
+}
+
+/* Resolve one 64-limb block: C = per-limb carry-in mask; returns the block
+ * carry-out.  Exact because G & P == 0. */
+static inline uint64_t bn_hyb_carry_formula(uint64_t G, uint64_t P,
+                                            uint64_t cin, uint64_t *C) {
+    uint64_t X = (G << 1) | cin;
+    unsigned __int128 T = (unsigned __int128)X + P;
+    *C = (uint64_t)T ^ P;
+    return (uint64_t)(T >> 64) | (G >> 63);
+}
+
+/* pass 2: apply the resolved per-limb carry/borrow bits. */
+static inline void bn_hyb_add_pass2(uint64_t *r, uint64_t C) {
+    uint64x2_t vc = vdupq_n_u64(C);
+    const uint64x2_t w0 = {1u << 0, 1u << 1}, w1 = {1u << 2, 1u << 3};
+    const uint64x2_t w2 = {1u << 4, 1u << 5}, w3 = {1u << 6, 1u << 7};
+    for (int c = 0; c < 8; c++) {
+        uint64_t *rc = r + 8 * c;
+        uint64x2_t r0 = vld1q_u64(rc + 0), r1 = vld1q_u64(rc + 2);
+        uint64x2_t r2 = vld1q_u64(rc + 4), r3 = vld1q_u64(rc + 6);
+        r0 = vsubq_u64(r0, vtstq_u64(vc, w0));
+        r1 = vsubq_u64(r1, vtstq_u64(vc, w1));
+        r2 = vsubq_u64(r2, vtstq_u64(vc, w2));
+        r3 = vsubq_u64(r3, vtstq_u64(vc, w3));
+        vst1q_u64(rc + 0, r0); vst1q_u64(rc + 2, r1);
+        vst1q_u64(rc + 4, r2); vst1q_u64(rc + 6, r3);
+        vc = vshrq_n_u64(vc, 8);
+    }
+}
+
+static inline void bn_hyb_sub_pass2(uint64_t *r, uint64_t C) {
+    uint64x2_t vc = vdupq_n_u64(C);
+    const uint64x2_t w0 = {1u << 0, 1u << 1}, w1 = {1u << 2, 1u << 3};
+    const uint64x2_t w2 = {1u << 4, 1u << 5}, w3 = {1u << 6, 1u << 7};
+    for (int c = 0; c < 8; c++) {
+        uint64_t *rc = r + 8 * c;
+        uint64x2_t r0 = vld1q_u64(rc + 0), r1 = vld1q_u64(rc + 2);
+        uint64x2_t r2 = vld1q_u64(rc + 4), r3 = vld1q_u64(rc + 6);
+        r0 = vaddq_u64(r0, vtstq_u64(vc, w0));
+        r1 = vaddq_u64(r1, vtstq_u64(vc, w1));
+        r2 = vaddq_u64(r2, vtstq_u64(vc, w2));
+        r3 = vaddq_u64(r3, vtstq_u64(vc, w3));
+        vst1q_u64(rc + 0, r0); vst1q_u64(rc + 2, r1);
+        vst1q_u64(rc + 4, r2); vst1q_u64(rc + 6, r3);
+        vc = vshrq_n_u64(vc, 8);
+    }
+}
+
+/* Cadence constants tuned by sweep on Apple M5 (see the section comment).
+ * A-chunk limbs per phase-1 block, and C's percentage of the leftover
+ * scalar limbs in phase 2. */
+#define BN_HYB_A_CHUNK 48
+#define BN_HYB_C_SHARE 50
+#define BN_HYB_SUPER_BLOCKS 240
+#define BN_HYB_SUPER_LIMBS (BN_HYB_SUPER_BLOCKS * 232)
+
+/* One round (n <= BN_HYB_SUPER_LIMBS).  op = 0 add, 1 sub. */
+static uint64_t bn_hyb_round(uint64_t *r, const uint64_t *a, const uint64_t *b,
+                             int64_t n, uint64_t cin, int op) {
+    int64_t nb = n / 232;
+    if (nb > BN_HYB_SUPER_BLOCKS) nb = BN_HYB_SUPER_BLOCKS;
+    if (nb <= 0)
+        return op ? bn_hyb_sbcs_run(r, a, b, (uint64_t)n, cin)
+                  : bn_hyb_adcs_run(r, a, b, (uint64_t)n, cin);
+    int64_t mA = BN_HYB_A_CHUNK;
+    int64_t nA = nb * mA;
+    int64_t rest = n - nA - (nb << 7);
+    int64_t nC = (rest * BN_HYB_C_SHARE / 100) & ~7;
+    int64_t cap = 56 * nb;
+    if (nC > cap) nC = cap;
+    int64_t offN1 = nA, offC = offN1 + (nb << 6), offN2 = offC + nC;
+    int64_t offE = offN2 + (nb << 6);
+    int64_t nE = n - offE;
+
+    uint64_t G[BN_HYB_SUPER_BLOCKS], P[BN_HYB_SUPER_BLOCKS];
+    uint64_t CM1[BN_HYB_SUPER_BLOCKS], CM2[BN_HYB_SUPER_BLOCKS];
+    uint64_t carry = cin;
+
+    /* phase 1: A's true chain interleaved 1:1 with pass1 over N1 */
+    for (int64_t k = 0; k < nb; k++) {
+        if (op) bn_hyb_sub_pass1(r + offN1 + (k << 6), a + offN1 + (k << 6),
+                                 b + offN1 + (k << 6), &G[k], &P[k]);
+        else    bn_hyb_add_pass1(r + offN1 + (k << 6), a + offN1 + (k << 6),
+                                 b + offN1 + (k << 6), &G[k], &P[k]);
+        int64_t off = k * mA;
+        carry = op ? bn_hyb_sbcs_run(r + off, a + off, b + off, (uint64_t)mA, carry)
+                   : bn_hyb_adcs_run(r + off, a + off, b + off, (uint64_t)mA, carry);
+    }
+
+    /* link: resolve N1 carries; `carry` becomes C's true seed */
+    for (int64_t k = 0; k < nb; k++)
+        carry = bn_hyb_carry_formula(G[k], P[k], carry, &CM1[k]);
+
+    /* phase 2: pass2(N1) + pass1(N2) + C's true chain */
+    {
+        int64_t mb = (nC / nb) & ~7, mx = (nC - nb * mb) >> 3, coff = 0;
+        for (int64_t k = 0; k < nb; k++) {
+            if (op) {
+                bn_hyb_sub_pass2(r + offN1 + (k << 6), CM1[k]);
+                bn_hyb_sub_pass1(r + offN2 + (k << 6), a + offN2 + (k << 6),
+                                 b + offN2 + (k << 6), &G[k], &P[k]);
+            } else {
+                bn_hyb_add_pass2(r + offN1 + (k << 6), CM1[k]);
+                bn_hyb_add_pass1(r + offN2 + (k << 6), a + offN2 + (k << 6),
+                                 b + offN2 + (k << 6), &G[k], &P[k]);
+            }
+            int64_t mc = mb + (k < mx ? 8 : 0);
+            if (k == nb - 1) mc = nC - coff;
+            if (mc) {
+                int64_t oc = offC + coff;
+                carry = op ? bn_hyb_sbcs_run(r + oc, a + oc, b + oc, (uint64_t)mc, carry)
+                           : bn_hyb_adcs_run(r + oc, a + oc, b + oc, (uint64_t)mc, carry);
+                coff += mc;
+            }
+        }
+    }
+
+    /* link: resolve N2 carries; `carry` becomes E's true seed */
+    for (int64_t k = 0; k < nb; k++)
+        carry = bn_hyb_carry_formula(G[k], P[k], carry, &CM2[k]);
+
+    /* phase 3: pass2(N2) + E's true chain (absorbs the tail) */
+    {
+        int64_t mb = (nE / nb) & ~7, mx = (nE - nb * mb) >> 3, eoff = 0;
+        for (int64_t k = 0; k < nb; k++) {
+            if (op) bn_hyb_sub_pass2(r + offN2 + (k << 6), CM2[k]);
+            else    bn_hyb_add_pass2(r + offN2 + (k << 6), CM2[k]);
+            int64_t me = mb + (k < mx ? 8 : 0);
+            if (k == nb - 1) me = nE - eoff;
+            if (me) {
+                int64_t oe = offE + eoff;
+                carry = op ? bn_hyb_sbcs_run(r + oe, a + oe, b + oe, (uint64_t)me, carry)
+                           : bn_hyb_adcs_run(r + oe, a + oe, b + oe, (uint64_t)me, carry);
+                eoff += me;
+            }
+        }
+    }
+    return carry;
+}
+
+static uint64_t bn_add_n_hybrid(uint64_t *r, const uint64_t *a,
+                                const uint64_t *b, int32_t n) {
+    uint64_t carry = 0;
+    int64_t i = 0, total = n;
+    while (i < total) {
+        int64_t chunk = (total - i) < BN_HYB_SUPER_LIMBS
+            ? (total - i) : BN_HYB_SUPER_LIMBS;
+        carry = bn_hyb_round(r + i, a + i, b + i, chunk, carry, 0);
+        i += chunk;
+    }
+    return carry;
+}
+
+static uint64_t bn_sub_n_hybrid(uint64_t *r, const uint64_t *a,
+                                const uint64_t *b, int32_t n) {
+    uint64_t borrow = 0;
+    int64_t i = 0, total = n;
+    while (i < total) {
+        int64_t chunk = (total - i) < BN_HYB_SUPER_LIMBS
+            ? (total - i) : BN_HYB_SUPER_LIMBS;
+        borrow = bn_hyb_round(r + i, a + i, b + i, chunk, borrow, 1);
+        i += chunk;
+    }
+    return borrow;
+}
+#endif /* __aarch64__ && BN_ADDSUB_NEON_HYBRID */
 
 /* ---- magnitude primitives on uint64_t* (fixed length m) ---- */
 
@@ -684,81 +3226,423 @@ static void bigint_mul_schoolbook_into(uint64_t *out,
  * chain per 4-limb block via `cmp cy,#1` (C := cy≥1); borrow re-enters inverted
  * via `cmp xzr,bw` (C := bw==0, sbcs consumes NOT-borrow). Portable fallbacks
  * remain for other arches. */
-static uint64_t bn_add_n(uint64_t *r, const uint64_t *a, const uint64_t *b, int32_t m) {
-    uint64_t carry = 0;
-    int32_t i = 0;
-#if defined(__aarch64__)
-    for (; i + 4 <= m; i += 4) {
-        uint64_t a0 = a[i], a1 = a[i+1], a2 = a[i+2], a3 = a[i+3];
-        __asm__("cmp %[cy], #1\n\t"
-                "adcs %[a0], %[a0], %[b0]\n\t"
-                "adcs %[a1], %[a1], %[b1]\n\t"
-                "adcs %[a2], %[a2], %[b2]\n\t"
-                "adcs %[a3], %[a3], %[b3]\n\t"
-                "cset %[cy], cs"
-                : [a0] "+&r"(a0), [a1] "+&r"(a1), [a2] "+&r"(a2), [a3] "+&r"(a3), [cy] "+&r"(carry)
-                : [b0] "r"(b[i]), [b1] "r"(b[i+1]), [b2] "r"(b[i+2]), [b3] "r"(b[i+3])
-                : "cc");
-        r[i] = a0; r[i+1] = a1; r[i+2] = a2; r[i+3] = a3;
-    }
+#ifndef BN_ADDSUB_BLOCK8
+#define BN_ADDSUB_BLOCK8 1
 #endif
-    for (; i < m; i++) {
+__attribute__((BN_HOT_SECTION, aligned(64)))
+static uint64_t bn_add_n(uint64_t *r, const uint64_t *a, const uint64_t *b, int32_t m) {
+#if defined(__aarch64__)
+#if BN_ADDSUB_NEON_HYBRID
+    if (__builtin_expect(m >= BN_ADDSUB_NEON_HYBRID_MIN, 0))
+        return bn_add_n_hybrid(r, a, b, m);
+#endif
+#if BN_ADDSUB_BLOCK8
+    /* 16-limb main blocks: the mid-range lengths (65..383) that stay on this
+     * chain pay half the loop-control of the former 8-limb blocks. */
+    uint64_t blocks = (uint32_t)m >> 4;
+    uint64_t n = (uint32_t)m;
+    uint64_t carry;
+    __asm__ volatile(
+        "cmn xzr, xzr\n\t"
+        "tbz %w[n], #0, 1f\n\t"
+        "ldr x4, [%[ap]], #8\n\t"
+        "ldr x8, [%[bp]], #8\n\t"
+        "adcs x12, x4, x8\n\t"
+        "str x12, [%[rp]], #8\n\t"
+        "1:\n\t"
+        "tbz %w[n], #1, 2f\n\t"
+        "ldp x4, x5, [%[ap]], #16\n\t"
+        "ldp x8, x9, [%[bp]], #16\n\t"
+        "adcs x12, x4, x8\n\t"
+        "adcs x13, x5, x9\n\t"
+        "stp x12, x13, [%[rp]], #16\n\t"
+        "2:\n\t"
+        "tbz %w[n], #2, 3f\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t"
+        "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t"
+        "ldp x10, x11, [%[bp], #-16]\n\t"
+        "adcs x12, x4, x8\n\t"
+        "adcs x13, x5, x9\n\t"
+        "adcs x14, x6, x10\n\t"
+        "adcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t"
+        "stp x14, x15, [%[rp], #-16]\n\t"
+        "3:\n\t"
+        "tbz %w[n], #3, 7f\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t"
+        "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t"
+        "ldp x10, x11, [%[bp], #-16]\n\t"
+        "adcs x12, x4, x8\n\t"
+        "adcs x13, x5, x9\n\t"
+        "adcs x14, x6, x10\n\t"
+        "adcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t"
+        "stp x14, x15, [%[rp], #-16]\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t"
+        "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t"
+        "ldp x10, x11, [%[bp], #-16]\n\t"
+        "adcs x12, x4, x8\n\t"
+        "adcs x13, x5, x9\n\t"
+        "adcs x14, x6, x10\n\t"
+        "adcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t"
+        "stp x14, x15, [%[rp], #-16]\n\t"
+        "7:\n\t"
+        "cbz %[blocks], 5f\n\t"
+        "4:\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t"
+        "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t"
+        "ldp x10, x11, [%[bp], #-16]\n\t"
+        "adcs x12, x4, x8\n\t"
+        "adcs x13, x5, x9\n\t"
+        "adcs x14, x6, x10\n\t"
+        "adcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t"
+        "stp x14, x15, [%[rp], #-16]\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t"
+        "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t"
+        "ldp x10, x11, [%[bp], #-16]\n\t"
+        "adcs x12, x4, x8\n\t"
+        "adcs x13, x5, x9\n\t"
+        "adcs x14, x6, x10\n\t"
+        "adcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t"
+        "stp x14, x15, [%[rp], #-16]\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t"
+        "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t"
+        "ldp x10, x11, [%[bp], #-16]\n\t"
+        "adcs x12, x4, x8\n\t"
+        "adcs x13, x5, x9\n\t"
+        "adcs x14, x6, x10\n\t"
+        "adcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t"
+        "stp x14, x15, [%[rp], #-16]\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t"
+        "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t"
+        "ldp x10, x11, [%[bp], #-16]\n\t"
+        "adcs x12, x4, x8\n\t"
+        "adcs x13, x5, x9\n\t"
+        "adcs x14, x6, x10\n\t"
+        "adcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t"
+        "stp x14, x15, [%[rp], #-16]\n\t"
+        "sub %[blocks], %[blocks], #1\n\t"
+        "cbnz %[blocks], 4b\n\t"
+        "5:\n\t"
+        "cset %[carry], hs"
+        : [carry] "=&r"(carry), [rp] "+&r"(r), [ap] "+&r"(a),
+          [bp] "+&r"(b), [blocks] "+&r"(blocks)
+        : [n] "r"(n)
+        : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11",
+          "x12", "x13", "x14", "x15", "cc", "memory");
+    return carry;
+#else
+    uint64_t blocks = (uint32_t)m >> 2;
+    uint64_t n = (uint32_t)m;
+    uint64_t carry;
+    /*
+     * Preserve C across the complete traversal.  The previous four-limb C
+     * loop materialized carry with CSET and restored it with CMP for every
+     * block.  Loads, stores, TBZ, SUB, and CBNZ do not touch NZCV, so one
+     * uninterrupted ADCS chain avoids both instructions per four limbs.
+     * Prefixing n%4 limbs leaves a branch-free four-limb body.
+     */
+    __asm__ volatile(
+        "cmn xzr, xzr\n\t"
+        "tbz %w[n], #0, 1f\n\t"
+        "ldr x4, [%[ap]], #8\n\t"
+        "ldr x8, [%[bp]], #8\n\t"
+        "adcs x12, x4, x8\n\t"
+        "str x12, [%[rp]], #8\n\t"
+        "1:\n\t"
+        "tbz %w[n], #1, 2f\n\t"
+        "ldp x4, x5, [%[ap]], #16\n\t"
+        "ldp x8, x9, [%[bp]], #16\n\t"
+        "adcs x12, x4, x8\n\t"
+        "adcs x13, x5, x9\n\t"
+        "stp x12, x13, [%[rp]], #16\n\t"
+        "2:\n\t"
+        "cbz %[blocks], 4f\n\t"
+        "3:\n\t"
+        "ldp x4, x5, [%[ap]], #16\n\t"
+        "ldp x6, x7, [%[ap]], #16\n\t"
+        "ldp x8, x9, [%[bp]], #16\n\t"
+        "ldp x10, x11, [%[bp]], #16\n\t"
+        "adcs x12, x4, x8\n\t"
+        "adcs x13, x5, x9\n\t"
+        "stp x12, x13, [%[rp]], #16\n\t"
+        "adcs x12, x6, x10\n\t"
+        "adcs x13, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #16\n\t"
+        "sub %[blocks], %[blocks], #1\n\t"
+        "cbnz %[blocks], 3b\n\t"
+        "4:\n\t"
+        "cset %[carry], hs"
+        : [carry] "=&r"(carry), [rp] "+&r"(r), [ap] "+&r"(a),
+          [bp] "+&r"(b), [blocks] "+&r"(blocks)
+        : [n] "r"(n)
+        : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11",
+          "x12", "x13", "cc", "memory");
+    return carry;
+#endif
+#else
+    uint64_t carry = 0;
+    for (int32_t i = 0; i < m; i++) {
         __uint128_t s = (__uint128_t)a[i] + b[i] + carry;
         r[i] = (uint64_t)s;
         carry = (uint64_t)(s >> 64);
     }
     return carry;
+#endif
 }
 
 /* r[0..m) = a[0..m) - b[0..m) ; returns borrow-out (assumes a>=b for exact use) */
+__attribute__((BN_HOT_SECTION, aligned(64)))
 static uint64_t bn_sub_n(uint64_t *r, const uint64_t *a, const uint64_t *b, int32_t m) {
-    uint64_t borrow = 0;
-    int32_t i = 0;
 #if defined(__aarch64__)
-    for (; i + 4 <= m; i += 4) {
-        uint64_t a0 = a[i], a1 = a[i+1], a2 = a[i+2], a3 = a[i+3];
-        __asm__("cmp xzr, %[bw]\n\t"
-                "sbcs %[a0], %[a0], %[b0]\n\t"
-                "sbcs %[a1], %[a1], %[b1]\n\t"
-                "sbcs %[a2], %[a2], %[b2]\n\t"
-                "sbcs %[a3], %[a3], %[b3]\n\t"
-                "cset %[bw], cc"
-                : [a0] "+&r"(a0), [a1] "+&r"(a1), [a2] "+&r"(a2), [a3] "+&r"(a3), [bw] "+&r"(borrow)
-                : [b0] "r"(b[i]), [b1] "r"(b[i+1]), [b2] "r"(b[i+2]), [b3] "r"(b[i+3])
-                : "cc");
-        r[i] = a0; r[i+1] = a1; r[i+2] = a2; r[i+3] = a3;
-    }
+#if BN_ADDSUB_NEON_HYBRID
+    if (__builtin_expect(m >= BN_ADDSUB_NEON_HYBRID_MIN, 0))
+        return bn_sub_n_hybrid(r, a, b, m);
 #endif
-    for (; i < m; i++) {
+#if BN_ADDSUB_BLOCK8
+    /* 16-limb main blocks; see bn_add_n. */
+    uint64_t blocks = (uint32_t)m >> 4;
+    uint64_t n = (uint32_t)m;
+    uint64_t borrow;
+    __asm__ volatile(
+        "cmp xzr, xzr\n\t"
+        "tbz %w[n], #0, 1f\n\t"
+        "ldr x4, [%[ap]], #8\n\t"
+        "ldr x8, [%[bp]], #8\n\t"
+        "sbcs x12, x4, x8\n\t"
+        "str x12, [%[rp]], #8\n\t"
+        "1:\n\t"
+        "tbz %w[n], #1, 2f\n\t"
+        "ldp x4, x5, [%[ap]], #16\n\t"
+        "ldp x8, x9, [%[bp]], #16\n\t"
+        "sbcs x12, x4, x8\n\t"
+        "sbcs x13, x5, x9\n\t"
+        "stp x12, x13, [%[rp]], #16\n\t"
+        "2:\n\t"
+        "tbz %w[n], #2, 3f\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t"
+        "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t"
+        "ldp x10, x11, [%[bp], #-16]\n\t"
+        "sbcs x12, x4, x8\n\t"
+        "sbcs x13, x5, x9\n\t"
+        "sbcs x14, x6, x10\n\t"
+        "sbcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t"
+        "stp x14, x15, [%[rp], #-16]\n\t"
+        "3:\n\t"
+        "tbz %w[n], #3, 7f\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t"
+        "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t"
+        "ldp x10, x11, [%[bp], #-16]\n\t"
+        "sbcs x12, x4, x8\n\t"
+        "sbcs x13, x5, x9\n\t"
+        "sbcs x14, x6, x10\n\t"
+        "sbcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t"
+        "stp x14, x15, [%[rp], #-16]\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t"
+        "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t"
+        "ldp x10, x11, [%[bp], #-16]\n\t"
+        "sbcs x12, x4, x8\n\t"
+        "sbcs x13, x5, x9\n\t"
+        "sbcs x14, x6, x10\n\t"
+        "sbcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t"
+        "stp x14, x15, [%[rp], #-16]\n\t"
+        "7:\n\t"
+        "cbz %[blocks], 5f\n\t"
+        "4:\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t"
+        "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t"
+        "ldp x10, x11, [%[bp], #-16]\n\t"
+        "sbcs x12, x4, x8\n\t"
+        "sbcs x13, x5, x9\n\t"
+        "sbcs x14, x6, x10\n\t"
+        "sbcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t"
+        "stp x14, x15, [%[rp], #-16]\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t"
+        "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t"
+        "ldp x10, x11, [%[bp], #-16]\n\t"
+        "sbcs x12, x4, x8\n\t"
+        "sbcs x13, x5, x9\n\t"
+        "sbcs x14, x6, x10\n\t"
+        "sbcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t"
+        "stp x14, x15, [%[rp], #-16]\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t"
+        "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t"
+        "ldp x10, x11, [%[bp], #-16]\n\t"
+        "sbcs x12, x4, x8\n\t"
+        "sbcs x13, x5, x9\n\t"
+        "sbcs x14, x6, x10\n\t"
+        "sbcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t"
+        "stp x14, x15, [%[rp], #-16]\n\t"
+        "ldp x4, x5, [%[ap]], #32\n\t"
+        "ldp x6, x7, [%[ap], #-16]\n\t"
+        "ldp x8, x9, [%[bp]], #32\n\t"
+        "ldp x10, x11, [%[bp], #-16]\n\t"
+        "sbcs x12, x4, x8\n\t"
+        "sbcs x13, x5, x9\n\t"
+        "sbcs x14, x6, x10\n\t"
+        "sbcs x15, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #32\n\t"
+        "stp x14, x15, [%[rp], #-16]\n\t"
+        "sub %[blocks], %[blocks], #1\n\t"
+        "cbnz %[blocks], 4b\n\t"
+        "5:\n\t"
+        "cset %[borrow], lo"
+        : [borrow] "=&r"(borrow), [rp] "+&r"(r), [ap] "+&r"(a),
+          [bp] "+&r"(b), [blocks] "+&r"(blocks)
+        : [n] "r"(n)
+        : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11",
+          "x12", "x13", "x14", "x15", "cc", "memory");
+    return borrow;
+#else
+    uint64_t blocks = (uint32_t)m >> 2;
+    uint64_t n = (uint32_t)m;
+    uint64_t borrow;
+    __asm__ volatile(
+        "cmp xzr, xzr\n\t"
+        "tbz %w[n], #0, 1f\n\t"
+        "ldr x4, [%[ap]], #8\n\t"
+        "ldr x8, [%[bp]], #8\n\t"
+        "sbcs x12, x4, x8\n\t"
+        "str x12, [%[rp]], #8\n\t"
+        "1:\n\t"
+        "tbz %w[n], #1, 2f\n\t"
+        "ldp x4, x5, [%[ap]], #16\n\t"
+        "ldp x8, x9, [%[bp]], #16\n\t"
+        "sbcs x12, x4, x8\n\t"
+        "sbcs x13, x5, x9\n\t"
+        "stp x12, x13, [%[rp]], #16\n\t"
+        "2:\n\t"
+        "cbz %[blocks], 4f\n\t"
+        "3:\n\t"
+        "ldp x4, x5, [%[ap]], #16\n\t"
+        "ldp x6, x7, [%[ap]], #16\n\t"
+        "ldp x8, x9, [%[bp]], #16\n\t"
+        "ldp x10, x11, [%[bp]], #16\n\t"
+        "sbcs x12, x4, x8\n\t"
+        "sbcs x13, x5, x9\n\t"
+        "stp x12, x13, [%[rp]], #16\n\t"
+        "sbcs x12, x6, x10\n\t"
+        "sbcs x13, x7, x11\n\t"
+        "stp x12, x13, [%[rp]], #16\n\t"
+        "sub %[blocks], %[blocks], #1\n\t"
+        "cbnz %[blocks], 3b\n\t"
+        "4:\n\t"
+        "cset %[borrow], lo"
+        : [borrow] "=&r"(borrow), [rp] "+&r"(r), [ap] "+&r"(a),
+          [bp] "+&r"(b), [blocks] "+&r"(blocks)
+        : [n] "r"(n)
+        : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11",
+          "x12", "x13", "cc", "memory");
+    return borrow;
+#endif
+#else
+    uint64_t borrow = 0;
+    for (int32_t i = 0; i < m; i++) {
         __uint128_t d = (__uint128_t)a[i] - b[i] - borrow;
         r[i] = (uint64_t)d;
         borrow = (uint64_t)(-(int64_t)(d >> 64)) & 1;
     }
     return borrow;
+#endif
 }
 
 /* out[oo..) += b[0..n) with carry propagation up to `room` limbs of out */
+__attribute__((BN_HOT_SECTION, aligned(64)))
 static void bn_addto(uint64_t *out, int32_t room, const uint64_t *b, int32_t n) {
-    uint64_t carry = 0;
-    int32_t i = 0;
-    for (; i < n && i < room; i++) {
-        __uint128_t s = (__uint128_t)out[i] + b[i] + carry;
-        out[i] = (uint64_t)s;
-        carry = (uint64_t)(s >> 64);
-    }
+    int32_t count = n < room ? n : room;
+    uint64_t carry = bn_add_n(out, out, b, count);
+    int32_t i = count;
     for (; carry && i < room; i++) {
-        __uint128_t s = (__uint128_t)out[i] + carry;
-        out[i] = (uint64_t)s;
-        carry = (uint64_t)(s >> 64);
+        out[i]++;
+        carry = out[i] == 0;
     }
 }
 
 /* compare m-limb magnitudes: 1 if a>b, -1 if a<b, 0 if equal */
-static int bn_cmp_n(const uint64_t *a, const uint64_t *b, int32_t m) {
+#if defined(__aarch64__)
+__attribute__((noinline))
+#endif
+static int bn_cmp_n_core(const uint64_t *a, const uint64_t *b, int32_t m) {
+#if defined(__aarch64__)
+    int result;
+    int64_t i = m;
+    __asm__ volatile(
+        "tbz %w[idx], #0, 1f\n\t"
+        "sub %[idx], %[idx], #1\n\t"
+        "ldr x4, [%[ap], %[idx], lsl #3]\n\t"
+        "ldr x6, [%[bp], %[idx], lsl #3]\n\t"
+        "cmp x4, x6\n\t"
+        "b.ne 2f\n\t"
+        "1:\n\t"
+        "subs %[idx], %[idx], #2\n\t"
+        "b.lt 3f\n\t"
+        "add x8, %[ap], %[idx], lsl #3\n\t"
+        "add x9, %[bp], %[idx], lsl #3\n\t"
+        "ldp x4, x5, [x8]\n\t"
+        "ldp x6, x7, [x9]\n\t"
+        "cmp x5, x7\n\t"
+        "b.ne 2f\n\t"
+        "cmp x4, x6\n\t"
+        "b.eq 1b\n\t"
+        "2:\n\t"
+        "mov %w[result], #1\n\t"
+        "cneg %w[result], %w[result], lo\n\t"
+        "b 4f\n\t"
+        "3:\n\t"
+        "mov %w[result], wzr\n\t"
+        "4:"
+        : [result] "=&r"(result), [idx] "+&r"(i)
+        : [ap] "r"(a), [bp] "r"(b)
+        : "x4", "x5", "x6", "x7", "x8", "x9", "cc", "memory");
+    return result;
+#else
     for (int32_t i = m - 1; i >= 0; i--) {
         if (a[i] != b[i]) return a[i] > b[i] ? 1 : -1;
     }
     return 0;
+#endif
+}
+
+static inline __attribute__((always_inline))
+int bn_cmp_n(const uint64_t *a, const uint64_t *b, int32_t m) {
+#define BN_CMP_WORD(i) do { \
+    if (a[(i)] != b[(i)]) return a[(i)] > b[(i)] ? 1 : -1; \
+} while (0)
+    if (__builtin_expect(m <= 4, 0)) {
+        switch (m) {
+        case 4: BN_CMP_WORD(3);
+        case 3: BN_CMP_WORD(2);
+        case 2: BN_CMP_WORD(1);
+        case 1: BN_CMP_WORD(0);
+        default: return 0;
+        }
+    }
+#undef BN_CMP_WORD
+    return bn_cmp_n_core(a, b, m);
 }
 
 /* r[0..m) = a[0..m) * c  (c a small constant); returns carry-out */
@@ -817,6 +3701,20 @@ static void bn_dbl(uint64_t *r, const uint64_t *a, int32_t m) {
     }
 }
 
+/* r = a << sh for 1 <= sh < 64, returning the carry limb.  Forward traversal
+ * is in-place safe. */
+static uint64_t bn_shl_copy(uint64_t *r, const uint64_t *a,
+                            int32_t m, int sh) {
+    uint64_t carry = 0;
+    int rsh = 64 - sh;
+    for (int32_t i = 0; i < m; i++) {
+        uint64_t value = a[i];
+        r[i] = (value << sh) | carry;
+        carry = value >> rsh;
+    }
+    return carry;
+}
+
 /* logical shift-right by 1 of an m-limb magnitude (in place) */
 static void bn_shr1(uint64_t *w, int32_t m) {
     uint64_t carry = 0;
@@ -866,18 +3764,15 @@ static void bn_divexact1(uint64_t *w, int32_t m, uint64_t c) {
 }
 
 /* out[oo..) -= b[0..n) with borrow propagation up to `room` limbs */
+__attribute__((BN_HOT_SECTION, aligned(64)))
 static uint64_t bn_subfrom(uint64_t *out, int32_t room, const uint64_t *b, int32_t n) {
-    uint64_t borrow = 0;
-    int32_t i = 0;
-    for (; i < n && i < room; i++) {
-        __uint128_t d = (__uint128_t)out[i] - b[i] - borrow;
-        out[i] = (uint64_t)d;
-        borrow = (uint64_t)(-(int64_t)(d >> 64)) & 1;
-    }
+    int32_t count = n < room ? n : room;
+    uint64_t borrow = bn_sub_n(out, out, b, count);
+    int32_t i = count;
     for (; borrow && i < room; i++) {
-        __uint128_t d = (__uint128_t)out[i] - borrow;
-        out[i] = (uint64_t)d;
-        borrow = (uint64_t)(-(int64_t)(d >> 64)) & 1;
+        uint64_t oi = out[i];
+        out[i] = oi - 1;
+        borrow = oi == 0;
     }
     return borrow;
 }
@@ -885,44 +3780,257 @@ static uint64_t bn_subfrom(uint64_t *out, int32_t room, const uint64_t *b, int32
 /* ---- recursive equal-length dispatcher (forward decl) ---- */
 static void bn_mul_eq(uint64_t *out, const uint64_t *a, const uint64_t *b,
                       int32_t n, uint64_t *scratch);
+static void bn_sqr_eq(uint64_t *out, const uint64_t *a,
+                      int32_t n, uint64_t *scratch);
+static size_t bn_scratch_need(int32_t n);
+static size_t bn_sqr_scratch_need(int32_t n);
+__attribute__((BN_HOT_SECTION, aligned(64)))
+static void bn_toom2_sum(uint64_t *out,
+                         const uint64_t *a, const uint64_t *b,
+                         int32_t n, uint64_t *scratch);
+static void bn_toom2_parallel_products(
+    uint64_t *z0, uint64_t *z2, uint64_t *z1,
+    const uint64_t *a0, const uint64_t *b0,
+    const uint64_t *a1, const uint64_t *b1,
+    const uint64_t *da, const uint64_t *db,
+    int32_t child, uint64_t *scratch);
 
-/* Toom-2 / Karatsuba on equal-length n-limb operands.
- * out has exactly 2n limbs.  scratch supplies the work arena. */
+/* dst = |hi - lo| with lo implicitly zero-padded to hn limbs.
+ * Return one when hi < lo, i.e. when the un-absolute difference is negative. */
+static int bn_abs_split_diff(uint64_t *dst,
+                             const uint64_t *lo, int32_t ln,
+                             const uint64_t *hi, int32_t hn) {
+    int cmp = 0;
+    for (int32_t i = hn - 1; i >= 0; i--) {
+        uint64_t lv = i < ln ? lo[i] : 0;
+        if (hi[i] != lv) {
+            cmp = hi[i] > lv ? 1 : -1;
+            break;
+        }
+    }
+    if (cmp >= 0) {
+        uint64_t borrow = bn_sub_n(dst, hi, lo, ln);
+        for (int32_t i = ln; i < hn; i++) {
+            uint64_t value = hi[i];
+            dst[i] = value - borrow;
+            borrow = value < borrow;
+        }
+    } else {
+        uint64_t borrow = bn_sub_n(dst, lo, hi, ln);
+        for (int32_t i = ln; i < hn; i++) {
+            uint64_t value = 0 - hi[i];
+            uint64_t high_borrow = hi[i] != 0;
+            uint64_t result = value - borrow;
+            dst[i] = result;
+            borrow = high_borrow | (value < borrow);
+        }
+    }
+    return cmp < 0;
+}
+
+/* Fixed-shape absolute half-difference: dst[0..half) = |hi - lo| on equal
+ * half widths.  The top limbs of random operands almost always differ, so
+ * the compare scan settles on its first probe. */
+static inline __attribute__((always_inline))
+int bn_abs_diff_half(uint64_t *dst, const uint64_t *lo, const uint64_t *hi,
+                     int32_t half) {
+    int32_t i = half - 1;
+    while (i > 0 && hi[i] == lo[i]) i--;
+    if (hi[i] >= lo[i]) {
+        bn_sub_equal_fast(dst, hi, lo, half);
+        return 0;
+    }
+    bn_sub_equal_fast(dst, lo, hi, half);
+    return 1;
+}
+
+/* bn_toom2_diff specialized to its hottest even shapes (24/40/48 limbs):
+ * fixed half split, stack scratch, direct schoolbook/nested children, and
+ * fixed-width interpolation.  The cross term z0+z2-z1 is non-negative and
+ * < 2^(64*(n+1)) with top limb in {0,1}, so limb n of the accumulator lives
+ * in a register through interpolation instead of a spare scratch limb.
+ * The signed intermediate (sign-agreeing case) keeps that register as the
+ * two's-complement top limb; adding z2 restores a positive value. */
+#define BN_TOOM2_DIFF_FIXED(name, HALF, child_mul)                        \
+__attribute__((noinline, BN_HOT_SECTION, aligned(64)))                    \
+static void name(uint64_t *out, const uint64_t *a, const uint64_t *b) {   \
+    uint64_t da[HALF], db[HALF], z1[2 * HALF];                            \
+    int da_neg = bn_abs_diff_half(da, a, a + HALF, HALF);                 \
+    int db_neg = bn_abs_diff_half(db, b, b + HALF, HALF);                 \
+    child_mul(out, a, b);                       /* z0 = a0*b0 */          \
+    child_mul(out + 2 * HALF, a + HALF, b + HALF); /* z2 = a1*b1 */       \
+    child_mul(z1, da, db);                      /* |a1-a0|*|b1-b0| */     \
+    uint64_t top;                                                         \
+    if (da_neg == db_neg)                                                 \
+        top = 0 - bn_sub_equal_fast(z1, out, z1, 2 * HALF);               \
+    else                                                                  \
+        top = bn_add_equal_fast(z1, z1, out, 2 * HALF);                   \
+    top += bn_add_equal_fast(z1, z1, out + 2 * HALF, 2 * HALF);           \
+    uint64_t inc =                                                        \
+        top + bn_add_equal_fast(out + HALF, out + HALF, z1, 2 * HALF);    \
+    for (int32_t i = 3 * HALF; inc && i < 4 * HALF; i++) {                \
+        uint64_t o = out[i];                                              \
+        out[i] = o + inc;                                                 \
+        inc = out[i] < o;                                                 \
+    }                                                                     \
+}
+
+BN_TOOM2_DIFF_FIXED(bn_toom2_diff24, 12, bn_mul_eq12)
+#if BN_MUL_SPLIT_40_BLOCKS
+BN_TOOM2_DIFF_FIXED(bn_toom2_diff40, 20, bn_mul_eq20)
+#endif
+#if BN_MUL_SPLIT_48
+BN_TOOM2_DIFF_FIXED(bn_toom2_diff48, 24, bn_toom2_diff24)
+#endif
+
+#undef BN_TOOM2_DIFF_FIXED
+
+/* Absolute-difference Karatsuba.  Keeping this out of line prevents its
+ * larger register set from expanding the ordinary sum-form prologue. */
+__attribute__((noinline))
+__attribute__((BN_HOT_SECTION, aligned(64)))
+static void bn_toom2_diff(uint64_t *out,
+                          const uint64_t *a, const uint64_t *b,
+                          int32_t n, uint64_t *scratch) {
+    if (n == 24) { bn_toom2_diff24(out, a, b); return; }
+#if BN_MUL_SPLIT_40_BLOCKS
+    if (n == 40) { bn_toom2_diff40(out, a, b); return; }
+#endif
+#if BN_MUL_SPLIT_48
+    if (n == 48) { bn_toom2_diff48(out, a, b); return; }
+#endif
+    int32_t half = n >> 1;
+    int32_t hin = n - half;
+    uint64_t *da = scratch;
+    uint64_t *db = da + hin;
+    uint64_t *z1 = db + hin;
+    uint64_t *next = z1 + 2 * hin + 1;
+
+    int da_neg = bn_abs_split_diff(da, a, half, a + half, hin);
+    int db_neg = bn_abs_split_diff(db, b, half, b + half, hin);
+    int products_done = 0;
+
+    if (!(n & 1) && n >= BN_TOOM2_PAR_THRESHOLD &&
+        n <= BN_PAR_TOOM_LIMIT) {
+        bn_toom2_parallel_products(
+            out, out + 2 * half, z1,
+            a, b, a + half, b + half, da, db, half, next);
+        products_done = 1;
+    }
+
+#if BN_MUL_SPLIT_40_BLOCKS
+    if (!products_done && n == 40) {
+        bn_mul_eq20(out, a, b);
+        bn_mul_eq20(out + 2 * half, a + half, b + half);
+    } else
+#endif
+#if BN_MUL_SPLIT_48
+    if (!products_done && n == 48) {
+#if BN_MUL_SPLIT_48_DIFF
+        bn_toom2_diff(out, a, b, half, next);
+        bn_toom2_diff(out + 2 * half, a + half, b + half, hin, next);
+#else
+        bn_toom2_sum(out, a, b, half, next);
+        bn_toom2_sum(out + 2 * half, a + half, b + half, hin, next);
+#endif
+    } else if (!products_done)
+#endif
+    {
+        if (!products_done) {
+            bn_mul_eq(out, a, b, half, next);
+            bn_mul_eq(out + 2 * half, a + half, b + half, hin, next);
+        }
+    }
+
+    /* z1 starts as |a1-a0|*|b1-b0|.  When the signs agree, form z0-z1
+     * directly instead of first negating z1 and then adding z0; the latter
+     * traversed the full coefficient twice.  One spare limb represents the
+     * temporary signed value until adding z2 makes the cross term positive. */
+#if BN_MUL_SPLIT_40_BLOCKS
+    if (!products_done && n == 40) {
+        bn_mul_eq20(z1, da, db);
+    } else
+#endif
+#if BN_MUL_SPLIT_48
+    if (!products_done && n == 48) {
+#if BN_MUL_SPLIT_48_DIFF
+        bn_toom2_diff(z1, da, db, hin, next);
+#else
+        bn_toom2_sum(z1, da, db, hin, next);
+#endif
+    } else if (!products_done)
+#endif
+        if (!products_done)
+            bn_mul_eq(z1, da, db, hin, next);
+    z1[2 * hin] = 0;
+    if (da_neg == db_neg) {
+        int32_t z0_len = 2 * half;
+        uint64_t borrow = bn_sub_n(z1, out, z1, z0_len);
+        for (int32_t i = z0_len; i <= 2 * hin; i++) {
+            uint64_t value = 0 - z1[i];
+            uint64_t high_borrow = z1[i] != 0;
+            uint64_t result = value - borrow;
+            z1[i] = result;
+            borrow = high_borrow | (value < borrow);
+        }
+    } else {
+        bn_addto(z1, 2 * hin + 1, out, 2 * half);
+    }
+    bn_addto(z1, 2 * hin + 1, out + 2 * half, 2 * hin);
+
+    int32_t cross_len = 2 * hin + 1;
+    int32_t room = 2 * n - half;
+    if (cross_len > room) cross_len = room;
+    bn_addto(out + half, room, z1, cross_len);
+}
+
+__attribute__((noinline))
+__attribute__((BN_HOT_SECTION, aligned(64)))
+static void bn_toom2_sum(uint64_t *out,
+                         const uint64_t *a, const uint64_t *b,
+                         int32_t n, uint64_t *scratch) {
+    int32_t half = n >> 1;
+    int32_t hin = n - half;
+    int32_t slen = hin + 1;
+    uint64_t *sa = scratch;
+    uint64_t *sb = sa + slen;
+    uint64_t *z1 = sb + slen;
+    uint64_t *next = z1 + 2 * slen;
+
+    memcpy(sa, a + half, (size_t)hin * sizeof(uint64_t));
+    sa[hin] = 0;
+    bn_addto(sa, slen, a, half);
+    memcpy(sb, b + half, (size_t)hin * sizeof(uint64_t));
+    sb[hin] = 0;
+    bn_addto(sb, slen, b, half);
+
+    bn_mul_eq(out, a, b, half, next);
+    bn_mul_eq(out + 2 * half, a + half, b + half, hin, next);
+    bn_mul_eq(z1, sa, sb, slen, next);
+    bn_subfrom(z1, 2 * slen, out, 2 * half);
+    bn_subfrom(z1, 2 * slen, out + 2 * half, 2 * hin);
+    bn_addto(out + half, 2 * n - half, z1, 2 * slen);
+}
+
+/* Toom-2 / Karatsuba on equal-length n-limb operands.  Near the schoolbook
+ * crossover, the absolute-difference identity keeps the third recursive
+ * child at the high-half width instead of growing it by one limb.  Direct
+ * sweeps select the narrow sizes where that repays its extra interpolation. */
+__attribute__((BN_HOT_SECTION, aligned(64)))
 static void bn_toom2(uint64_t *out, const uint64_t *a, const uint64_t *b,
                      int32_t n, uint64_t *scratch) {
     if (n <= BN_KARA_THRESHOLD) {
         bigint_mul_schoolbook_into(out, a, n, b, n);
         return;
     }
-    int32_t half = n >> 1;
-    int32_t hin = n - half;       /* high part length (>= half) */
-    int32_t slen = hin + 1;       /* sum length (one carry limb) */
-
-    /* scratch layout: sa[slen] sb[slen] z1[2*slen], then recurse below */
-    uint64_t *sa = scratch;
-    uint64_t *sb = sa + slen;
-    uint64_t *z1 = sb + slen;
-    uint64_t *next = z1 + 2 * slen;
-
-    /* sa = a_lo + a_hi, sb = b_lo + b_hi (each padded to slen) */
-    for (int32_t i = 0; i < hin; i++) sa[i] = a[half + i];
-    sa[hin] = 0;
-    bn_addto(sa, slen, a, half);
-    for (int32_t i = 0; i < hin; i++) sb[i] = b[half + i];
-    sb[hin] = 0;
-    bn_addto(sb, slen, b, half);
-
-    /* out_lo = a_lo*b_lo (2*half limbs), out_hi = a_hi*b_hi (2*hin limbs) */
-    bn_mul_eq(out, a, b, half, next);
-    bn_mul_eq(out + 2 * half, a + half, b + half, hin, next);
-
-    /* z1 = sa*sb (2*slen limbs), then z1 -= out_lo, z1 -= out_hi */
-    bn_mul_eq(z1, sa, sb, slen, next);
-    bn_subfrom(z1, 2 * slen, out, 2 * half);
-    bn_subfrom(z1, 2 * slen, out + 2 * half, 2 * hin);
-
-    /* out += z1 << (half limbs) */
-    bn_addto(out + half, 2 * n - half, z1, 2 * slen);
+#if BN_TOOM2_DIFFERENCE
+    if (n >= BN_TOOM2_DIFF_MIN && n != BN_TOOM2_DIFF_SKIP &&
+        n < BN_TOOM3_THRESHOLD) {
+        bn_toom2_diff(out, a, b, n, scratch);
+        return;
+    }
+#endif
+    bn_toom2_sum(out, a, b, n, scratch);
 }
 
 /* Load `cnt` limbs of src into a kp1-buffer, zero-padding to kp1. */
@@ -932,8 +4040,352 @@ static void bn_load(uint64_t *dst, const uint64_t *src, int32_t cnt, int32_t kp1
     for (; i < kp1; i++) dst[i] = 0;
 }
 
+typedef struct {
+    int parallel;
+    int square;
+    int keep_workers_hot;
+    int count;
+    int capacity;
+    int thread_limit;
+    int32_t n;
+    size_t operand_limbs;
+    size_t scratch_need;
+    uint64_t *memory;
+    uint64_t *sequential_scratch;
+    uint64_t *out[11];
+    const uint64_t *a[11];
+    const uint64_t *b[11];
+} WToomPointSet;
+
+typedef struct {
+    WToomPointSet *set;
+    int start;
+    int end;
+    uint64_t *scratch;
+} WToomPointJob;
+
+static _Thread_local int bn_toom_parallel_depth;
+static _Thread_local int bn_toom_no_spin;
+#ifndef BN_TOOM_POINT_TLS_MEMORY
+#define BN_TOOM_POINT_TLS_MEMORY 1
+#endif
+#if BN_TOOM_POINT_TLS_MEMORY
+static _Thread_local uint64_t *bn_toom_point_memory;
+static _Thread_local size_t bn_toom_point_memory_cap;
+
+static uint64_t *bn_toom_point_memory_get(size_t limbs) {
+    if (limbs > bn_toom_point_memory_cap) {
+        size_t ncap = limbs + limbs / 2 + 64;
+        uint64_t *next =
+            (uint64_t *)malloc(ncap * sizeof(uint64_t));
+        if (!next) return NULL;
+        free(bn_toom_point_memory);
+        bn_toom_point_memory = next;
+        bn_toom_point_memory_cap = ncap;
+    }
+    return bn_toom_point_memory;
+}
+#endif
+
+static void bn_toom_point_set_init(WToomPointSet *set, int32_t n,
+                                   uint64_t *sequential_scratch,
+                                   int capacity, int square,
+                                   int enable_parallel, int thread_limit) {
+    memset(set, 0, sizeof(*set));
+    set->n = n;
+    set->capacity = capacity;
+    set->square = square;
+    set->keep_workers_hot = !bn_toom_no_spin;
+    set->thread_limit = thread_limit < BN_TOOM_PAR_THREADS ?
+                        thread_limit : BN_TOOM_PAR_THREADS;
+    if (set->thread_limit < 1) set->thread_limit = 1;
+    set->sequential_scratch = sequential_scratch;
+    if (!enable_parallel || bn_toom_parallel_depth)
+        return;
+    set->scratch_need = square ? bn_sqr_scratch_need(n) : bn_scratch_need(n);
+    set->operand_limbs = (size_t)(square ? capacity : 2 * capacity) * n;
+    size_t total = set->operand_limbs +
+                   (size_t)set->thread_limit * set->scratch_need;
+#if BN_TOOM_POINT_TLS_MEMORY
+    set->memory = bn_toom_point_memory_get(total);
+#else
+    set->memory = (uint64_t *)malloc(total * sizeof(uint64_t));
+#endif
+    set->parallel = set->memory != NULL;
+}
+
+static void bn_toom_point_set_add(WToomPointSet *set, uint64_t *out,
+                                  const uint64_t *a, const uint64_t *b) {
+    if (!set->parallel) {
+        if (set->square)
+            bn_sqr_eq(out, a, set->n, set->sequential_scratch);
+        else
+            bn_mul_eq(out, a, b, set->n, set->sequential_scratch);
+        return;
+    }
+    int i = set->count++;
+    if (i >= set->capacity)
+        die("Toom point scheduler capacity");
+    uint64_t *ca = set->memory +
+                   (size_t)(set->square ? i : 2 * i) * set->n;
+    uint64_t *cb = ca + set->n;
+    memcpy(ca, a, (size_t)set->n * sizeof(uint64_t));
+    if (!set->square)
+        memcpy(cb, b, (size_t)set->n * sizeof(uint64_t));
+    set->out[i] = out;
+    set->a[i] = ca;
+    set->b[i] = set->square ? NULL : cb;
+}
+
+static void bn_toom_point_set_add_padded(
+    WToomPointSet *set, uint64_t *out,
+    const uint64_t *a, int32_t na, const uint64_t *b, int32_t nb) {
+    if (!set->parallel) {
+        die("padded Toom point requires the scheduler arena");
+    }
+    int i = set->count++;
+    if (i >= set->capacity || na < 0 || nb < 0 ||
+        na > set->n || nb > set->n)
+        die("padded Toom point scheduler bounds");
+    uint64_t *ca = set->memory + (size_t)(2 * i) * set->n;
+    uint64_t *cb = ca + set->n;
+    memcpy(ca, a, (size_t)na * sizeof(uint64_t));
+    memset(ca + na, 0, (size_t)(set->n - na) * sizeof(uint64_t));
+    memcpy(cb, b, (size_t)nb * sizeof(uint64_t));
+    memset(cb + nb, 0, (size_t)(set->n - nb) * sizeof(uint64_t));
+    set->out[i] = out;
+    set->a[i] = ca;
+    set->b[i] = cb;
+}
+
+static void bn_toom_point_range(WToomPointJob *job) {
+    bn_toom_parallel_depth++;
+    for (int i = job->start; i < job->end; i++) {
+        if (job->set->square)
+            bn_sqr_eq(job->set->out[i], job->set->a[i],
+                      job->set->n, job->scratch);
+        else
+            bn_mul_eq(job->set->out[i], job->set->a[i], job->set->b[i],
+                      job->set->n, job->scratch);
+    }
+    bn_toom_parallel_depth--;
+}
+
+static void *bn_toom_point_worker(void *arg) {
+    bn_toom_point_range((WToomPointJob *)arg);
+    return NULL;
+}
+
+typedef struct {
+    int slot;
+    uint64_t seen_generation;
+} WToomPoolWorker;
+
+typedef struct {
+    pthread_mutex_t lock;
+    pthread_mutex_t submit_lock;
+    pthread_cond_t work_ready[BN_TOOM_PAR_THREADS > 1 ?
+                              BN_TOOM_PAR_THREADS - 1 : 1];
+    pthread_cond_t work_done;
+    _Atomic uint64_t generation;
+    int worker_count;
+    int active_workers;
+    _Atomic int pending_workers;
+    WToomPointJob jobs[BN_TOOM_PAR_THREADS > 1 ?
+                       BN_TOOM_PAR_THREADS - 1 : 1];
+    WToomPoolWorker workers[BN_TOOM_PAR_THREADS > 1 ?
+                            BN_TOOM_PAR_THREADS - 1 : 1];
+} WToomPool;
+
+static WToomPool bn_toom_pool;
+static pthread_once_t bn_toom_pool_once = PTHREAD_ONCE_INIT;
+
+static void bn_toom_pool_after_fork_child(void) {
+    /* Detached workers do not survive fork.  Leave the once-token complete
+     * but force child-process calls onto the self-contained local fallback. */
+    bn_toom_pool.worker_count = 0;
+    bn_toom_pool.active_workers = 0;
+    atomic_store_explicit(
+        &bn_toom_pool.pending_workers, 0, memory_order_relaxed);
+}
+
+static inline void bn_toom_pool_spin_hint(void) {
+#if defined(__aarch64__)
+    __asm__ volatile("yield");
+#elif defined(__x86_64__)
+    __asm__ volatile("pause");
+#else
+    atomic_signal_fence(memory_order_seq_cst);
+#endif
+}
+
+static void *bn_toom_pool_worker(void *arg) {
+    WToomPoolWorker *worker = (WToomPoolWorker *)arg;
+    WToomPool *pool = &bn_toom_pool;
+    int spin_budget = 0;
+    for (;;) {
+        uint64_t generation = worker->seen_generation;
+        for (int spin = 0; spin < spin_budget; spin++) {
+            generation = atomic_load_explicit(
+                &pool->generation, memory_order_acquire);
+            if (generation != worker->seen_generation) break;
+            bn_toom_pool_spin_hint();
+        }
+        if (generation == worker->seen_generation) {
+            pthread_mutex_lock(&pool->lock);
+            while ((generation = atomic_load_explicit(
+                        &pool->generation, memory_order_acquire)) ==
+                   worker->seen_generation)
+                pthread_cond_wait(
+                    &pool->work_ready[worker->slot], &pool->lock);
+            pthread_mutex_unlock(&pool->lock);
+        }
+        worker->seen_generation = generation;
+        if (worker->slot >= pool->active_workers)
+            continue;
+        WToomPointJob job = pool->jobs[worker->slot];
+        bn_toom_point_range(&job);
+        spin_budget =
+            job.set->keep_workers_hot ? BN_TOOM_POOL_SPIN : 0;
+        if (atomic_fetch_sub_explicit(
+                &pool->pending_workers, 1, memory_order_acq_rel) == 1) {
+            pthread_mutex_lock(&pool->lock);
+            pthread_cond_signal(&pool->work_done);
+            pthread_mutex_unlock(&pool->lock);
+        }
+    }
+}
+
+static void bn_toom_pool_init(void) {
+    WToomPool *pool = &bn_toom_pool;
+    pthread_mutex_init(&pool->lock, NULL);
+    pthread_mutex_init(&pool->submit_lock, NULL);
+    pthread_cond_init(&pool->work_done, NULL);
+    (void)pthread_atfork(NULL, NULL, bn_toom_pool_after_fork_child);
+    atomic_init(&pool->generation, 1);
+    atomic_init(&pool->pending_workers, 0);
+    for (int i = 0; i < BN_TOOM_PAR_THREADS - 1; i++) {
+        pthread_cond_init(&pool->work_ready[i], NULL);
+        pool->workers[i].slot = i;
+        pool->workers[i].seen_generation =
+            atomic_load_explicit(&pool->generation, memory_order_relaxed);
+        pthread_t thread;
+        if (pthread_create(&thread, NULL, bn_toom_pool_worker,
+                           &pool->workers[i]) != 0)
+            break;
+        pthread_detach(thread);
+        pool->worker_count++;
+    }
+}
+
+/* Run the worker ranges on persistent threads.  A nonblocking submit lock
+ * avoids serializing independent caller threads: if the pool is occupied,
+ * the caller falls back to the per-call worker path below. */
+static int bn_toom_pool_run(WToomPointJob *jobs, int threads) {
+    pthread_once(&bn_toom_pool_once, bn_toom_pool_init);
+    WToomPool *pool = &bn_toom_pool;
+    if (threads - 1 > pool->worker_count)
+        return 0;
+    if (pthread_mutex_trylock(&pool->submit_lock) != 0)
+        return -1;
+    pthread_mutex_lock(&pool->lock);
+    pool->active_workers = threads - 1;
+    atomic_store_explicit(
+        &pool->pending_workers, threads - 1, memory_order_relaxed);
+    for (int i = 0; i < pool->active_workers; i++)
+        pool->jobs[i] = jobs[i + 1];
+    atomic_fetch_add_explicit(
+        &pool->generation, 1, memory_order_release);
+    for (int i = 0; i < pool->active_workers; i++)
+        pthread_cond_signal(&pool->work_ready[i]);
+    pthread_mutex_unlock(&pool->lock);
+
+    bn_toom_point_range(&jobs[0]);
+
+    pthread_mutex_lock(&pool->lock);
+    while (atomic_load_explicit(
+               &pool->pending_workers, memory_order_acquire))
+        pthread_cond_wait(&pool->work_done, &pool->lock);
+    pthread_mutex_unlock(&pool->lock);
+    pthread_mutex_unlock(&pool->submit_lock);
+    return 1;
+}
+
+static void bn_toom_point_set_run(WToomPointSet *set) {
+    if (!set->parallel)
+        return;
+    int threads = set->thread_limit < set->count ?
+                  set->thread_limit : set->count;
+    WToomPointJob jobs[BN_TOOM_PAR_THREADS > 0 ? BN_TOOM_PAR_THREADS : 1];
+    pthread_t workers[BN_TOOM_PAR_THREADS > 1 ? BN_TOOM_PAR_THREADS - 1 : 1];
+    int live[BN_TOOM_PAR_THREADS > 1 ? BN_TOOM_PAR_THREADS - 1 : 1];
+    uint64_t *scratch = set->memory + set->operand_limbs;
+    int base = set->count / threads;
+    int extra = set->count % threads;
+    for (int t = 0; t < threads; t++) {
+        jobs[t].set = set;
+        jobs[t].start = t * base + (t < extra ? t : extra);
+        jobs[t].end = jobs[t].start + base + (t < extra);
+        jobs[t].scratch = scratch + (size_t)t * set->scratch_need;
+    }
+    int pooled = threads > 1 ? bn_toom_pool_run(jobs, threads) : 0;
+    if (pooled > 0) {
+#if !BN_TOOM_POINT_TLS_MEMORY
+        free(set->memory);
+#endif
+        set->memory = NULL;
+        return;
+    }
+    if (pooled < 0) {
+        WToomPointJob fallback = {set, 0, set->count, scratch};
+        bn_toom_point_range(&fallback);
+#if !BN_TOOM_POINT_TLS_MEMORY
+        free(set->memory);
+#endif
+        set->memory = NULL;
+        return;
+    }
+    for (int t = 1; t < threads; t++)
+        live[t - 1] =
+            pthread_create(&workers[t - 1], NULL, bn_toom_point_worker,
+                           &jobs[t]) == 0;
+    bn_toom_point_range(&jobs[0]);
+    for (int t = 1; t < threads; t++) {
+        if (live[t - 1])
+            pthread_join(workers[t - 1], NULL);
+        else
+            bn_toom_point_range(&jobs[t]);
+    }
+#if !BN_TOOM_POINT_TLS_MEMORY
+    free(set->memory);
+#endif
+    set->memory = NULL;
+}
+
+/*
+ * Difference-form Toom-2 has three independent, equal-width child products.
+ * At the 512-limb rung each child is already large enough to amortize the
+ * persistent worker-pool handoff.  Reuse the same point scheduler as Toom-4
+ * rather than creating another thread protocol.
+ */
+static void bn_toom2_parallel_products(
+    uint64_t *z0, uint64_t *z2, uint64_t *z1,
+    const uint64_t *a0, const uint64_t *b0,
+    const uint64_t *a1, const uint64_t *b1,
+    const uint64_t *da, const uint64_t *db,
+    int32_t child, uint64_t *scratch) {
+    WToomPointSet points;
+    bn_toom_point_set_init(
+        &points, child, scratch, 3, 0, 1, 3);
+    bn_toom_point_set_add(&points, z0, a0, b0);
+    bn_toom_point_set_add(&points, z2, a1, b1);
+    bn_toom_point_set_add(&points, z1, da, db);
+    bn_toom_point_set_run(&points);
+}
+
 /* Toom-3 on equal-length n-limb operands (n large enough that k>=1).
  * Mirrors toom3() in toom_ladder.w. out has 2n limbs. */
+__attribute__((BN_HOT_SECTION, aligned(64)))
 static void bn_toom3(uint64_t *out, const uint64_t *a, const uint64_t *b,
                      int32_t n, uint64_t *scratch) {
     int32_t k   = (n + 2) / 3;
@@ -974,11 +4426,11 @@ static void bn_toom3(uint64_t *out, const uint64_t *a, const uint64_t *b,
     bn_load(pb2, b + k2, n2k, kp1);
 
     /* v0 = a0*b0 */
-    bn_mul_eq(v0, pa0, pb0, kp1, ksc);
-    for (int32_t i = tk; i < w; i++) v0[i] = 0;
+    bn_mul_eq(v0, pa0, pb0, k, ksc);
+    for (int32_t i = 2 * k; i < w; i++) v0[i] = 0;
     /* vinf = a2*b2 */
-    bn_mul_eq(vinf, pa2, pb2, kp1, ksc);
-    for (int32_t i = tk; i < w; i++) vinf[i] = 0;
+    bn_mul_eq(vinf, pa2, pb2, n2k, ksc);
+    for (int32_t i = 2 * n2k; i < w; i++) vinf[i] = 0;
     /* v1 = (a0+a1+a2)(b0+b1+b2) */
     bn_add_n(ea, pa0, pa1, kp1); bn_add_n(ea, ea, pa2, kp1);
     bn_add_n(eb, pb0, pb1, kp1); bn_add_n(eb, eb, pb2, kp1);
@@ -998,11 +4450,21 @@ static void bn_toom3(uint64_t *out, const uint64_t *a, const uint64_t *b,
     for (int32_t i = tk; i < w; i++) vm1[i] = 0;
     /* v2 = (a0+2a1+4a2)(b0+2b1+4b2) */
     memcpy(ea, pa0, (size_t)kp1 * sizeof(uint64_t));
+#if BN_TOOM3_SINGLE_SHIFT
+    bn_shl_copy(tt, pa1, kp1, 1); bn_add_n(ea, ea, tt, kp1);
+    bn_shl_copy(tt, pa2, kp1, 2); bn_add_n(ea, ea, tt, kp1);
+#else
     bn_dbl(tt, pa1, kp1); bn_add_n(ea, ea, tt, kp1);
     bn_dbl(tt, pa2, kp1); bn_dbl(tt, tt, kp1); bn_add_n(ea, ea, tt, kp1);
+#endif
     memcpy(eb, pb0, (size_t)kp1 * sizeof(uint64_t));
+#if BN_TOOM3_SINGLE_SHIFT
+    bn_shl_copy(tt, pb1, kp1, 1); bn_add_n(eb, eb, tt, kp1);
+    bn_shl_copy(tt, pb2, kp1, 2); bn_add_n(eb, eb, tt, kp1);
+#else
     bn_dbl(tt, pb1, kp1); bn_add_n(eb, eb, tt, kp1);
     bn_dbl(tt, pb2, kp1); bn_dbl(tt, tt, kp1); bn_add_n(eb, eb, tt, kp1);
+#endif
     bn_mul_eq(v2, ea, eb, kp1, ksc);
     for (int32_t i = tk; i < w; i++) v2[i] = 0;
 
@@ -1018,8 +4480,13 @@ static void bn_toom3(uint64_t *out, const uint64_t *a, const uint64_t *b,
     /* e = (v2 - v0 - 4 c2 - 16 vinf)/2 */
     memcpy(te, v2, (size_t)w * sizeof(uint64_t));
     bn_sub_n(te, te, v0, w);
+#if BN_TOOM3_INTERP_SHIFT
+    bn_shl_copy(tf, cc2, w, 2); bn_sub_n(te, te, tf, w);
+    bn_shl_copy(tf, vinf, w, 4);
+#else
     bn_dbl(tf, cc2, w); bn_dbl(tf, tf, w); bn_sub_n(te, te, tf, w);
     bn_dbl(tf, vinf, w); bn_dbl(tf, tf, w); bn_dbl(tf, tf, w); bn_dbl(tf, tf, w);
+#endif
     bn_sub_n(te, te, tf, w);
     bn_shr1(te, w);
     /* c3 = (e - f)/3 */
@@ -1030,8 +4497,14 @@ static void bn_toom3(uint64_t *out, const uint64_t *a, const uint64_t *b,
 
     /* recompose: out = v0 + c1 X + c2 X^2 + c3 X^3 + vinf X^4 */
     int32_t tn = 2 * n;
+#if BN_TOOM_COPY_V0
+    int32_t v0_copy = w < tn ? w : tn;
+    memcpy(out, v0, (size_t)v0_copy * sizeof(uint64_t));
+    memset(out + v0_copy, 0, (size_t)(tn - v0_copy) * sizeof(uint64_t));
+#else
     for (int32_t i = 0; i < tn; i++) out[i] = 0;
     bn_addto(out,      tn,      v0,   w);
+#endif
     bn_addto(out + k,  tn - k,  cc1,  w);
     bn_addto(out + k2, tn - k2, cc2,  w);
     bn_addto(out + k3, tn - k3, cc3,  w);
@@ -1039,6 +4512,7 @@ static void bn_toom3(uint64_t *out, const uint64_t *a, const uint64_t *b,
 }
 
 /* Toom-4 on equal-length n-limb operands.  Mirrors toom4() in toom_ladder.w. */
+__attribute__((BN_HOT_SECTION, aligned(64)))
 static void bn_toom4(uint64_t *out, const uint64_t *a, const uint64_t *b,
                      int32_t n, uint64_t *scratch) {
     int32_t k   = (n + 3) / 4;
@@ -1081,6 +4555,11 @@ static void bn_toom4(uint64_t *out, const uint64_t *a, const uint64_t *b,
     uint64_t *cc5 = cc4 + w;
     uint64_t *ta  = cc5 + w;
     uint64_t *ksc = ta + w;
+    WToomPointSet points;
+    bn_toom_point_set_init(&points, kp1, ksc, 7, 0,
+                           n >= BN_TOOM_PAR_THRESHOLD,
+                           n >= BN_TOOM_PAR_LARGE_THRESHOLD ?
+                           BN_TOOM_PAR_THREADS : BN_TOOM_PAR_SMALL_THREADS);
 
     bn_load(pa0, a, k, kp1);
     bn_load(pa1, a + k, k, kp1);
@@ -1091,15 +4570,20 @@ static void bn_toom4(uint64_t *out, const uint64_t *a, const uint64_t *b,
     bn_load(pb2, b + k2, k, kp1);
     bn_load(pb3, b + k3, n3k, kp1);
 
-    bn_mul_eq(v0, pa0, pb0, kp1, ksc);
-    for (int32_t i = tk; i < w; i++) v0[i] = 0;
-    bn_mul_eq(vinf, pa3, pb3, kp1, ksc);
-    for (int32_t i = tk; i < w; i++) vinf[i] = 0;
+    if (points.parallel) {
+        bn_toom_point_set_add(&points, v0, pa0, pb0);
+        bn_toom_point_set_add(&points, vinf, pa3, pb3);
+    } else {
+        /* Endpoint values cannot carry into the evaluation padding limb. */
+        bn_mul_eq(v0, pa0, pb0, k, ksc);
+        for (int32_t i = 2 * k; i < w; i++) v0[i] = 0;
+        bn_mul_eq(vinf, pa3, pb3, n3k, ksc);
+        for (int32_t i = 2 * n3k; i < w; i++) vinf[i] = 0;
+    }
     /* v1 = A(1)B(1) */
     bn_add_n(ea, pa0, pa1, kp1); bn_add_n(ea, ea, pa2, kp1); bn_add_n(ea, ea, pa3, kp1);
     bn_add_n(eb, pb0, pb1, kp1); bn_add_n(eb, eb, pb2, kp1); bn_add_n(eb, eb, pb3, kp1);
-    bn_mul_eq(v1, ea, eb, kp1, ksc);
-    for (int32_t i = tk; i < w; i++) v1[i] = 0;
+    bn_toom_point_set_add(&points, v1, ea, eb);
     /* vm1 = A(-1)B(-1) ; A(-1) = (a0+a2)-(a1+a3) */
     bn_add_n(t1, pa0, pa2, kp1); bn_add_n(t2, pa1, pa3, kp1);
     int sa = 0, ca = bn_cmp_n(t1, t2, kp1);
@@ -1108,8 +4592,7 @@ static void bn_toom4(uint64_t *out, const uint64_t *a, const uint64_t *b,
     int sbb = 0, cb = bn_cmp_n(t1, t2, kp1);
     if (cb < 0) { bn_sub_n(eb, t2, t1, kp1); sbb = 1; } else { bn_sub_n(eb, t1, t2, kp1); }
     int svm1 = (sa != sbb) ? 1 : 0;
-    bn_mul_eq(vm1, ea, eb, kp1, ksc);
-    for (int32_t i = tk; i < w; i++) vm1[i] = 0;
+    bn_toom_point_set_add(&points, vm1, ea, eb);
     /* v2 = A(2)B(2) ; A(2) = a0+2a1+4a2+8a3 */
     memcpy(ea, pa0, (size_t)kp1*sizeof(uint64_t));
     bn_mul1(t1, pa1, 2, kp1); bn_add_n(ea, ea, t1, kp1);
@@ -1119,8 +4602,7 @@ static void bn_toom4(uint64_t *out, const uint64_t *a, const uint64_t *b,
     bn_mul1(t1, pb1, 2, kp1); bn_add_n(eb, eb, t1, kp1);
     bn_mul1(t1, pb2, 4, kp1); bn_add_n(eb, eb, t1, kp1);
     bn_mul1(t1, pb3, 8, kp1); bn_add_n(eb, eb, t1, kp1);
-    bn_mul_eq(v2, ea, eb, kp1, ksc);
-    for (int32_t i = tk; i < w; i++) v2[i] = 0;
+    bn_toom_point_set_add(&points, v2, ea, eb);
     /* vm2 = A(-2)B(-2) ; A(-2) = (a0+4a2)-(2a1+8a3) */
     bn_mul1(t2, pa2, 4, kp1); bn_add_n(t1, pa0, t2, kp1);
     bn_mul1(ea, pa1, 2, kp1); bn_mul1(t2, pa3, 8, kp1); bn_add_n(ea, ea, t2, kp1);
@@ -1131,8 +4613,7 @@ static void bn_toom4(uint64_t *out, const uint64_t *a, const uint64_t *b,
     sbb = 0; cb = bn_cmp_n(t1, eb, kp1);
     if (cb < 0) { bn_sub_n(eb, eb, t1, kp1); sbb = 1; } else { bn_sub_n(eb, t1, eb, kp1); }
     int svm2 = (sa != sbb) ? 1 : 0;
-    bn_mul_eq(vm2, ea, eb, kp1, ksc);
-    for (int32_t i = tk; i < w; i++) vm2[i] = 0;
+    bn_toom_point_set_add(&points, vm2, ea, eb);
     /* v3 = A(3)B(3) ; A(3) = a0+3a1+9a2+27a3 */
     memcpy(ea, pa0, (size_t)kp1*sizeof(uint64_t));
     bn_mul1(t1, pa1, 3, kp1); bn_add_n(ea, ea, t1, kp1);
@@ -1142,8 +4623,12 @@ static void bn_toom4(uint64_t *out, const uint64_t *a, const uint64_t *b,
     bn_mul1(t1, pb1, 3, kp1); bn_add_n(eb, eb, t1, kp1);
     bn_mul1(t1, pb2, 9, kp1); bn_add_n(eb, eb, t1, kp1);
     bn_mul1(t1, pb3, 27, kp1); bn_add_n(eb, eb, t1, kp1);
-    bn_mul_eq(v3, ea, eb, kp1, ksc);
-    for (int32_t i = tk; i < w; i++) v3[i] = 0;
+    bn_toom_point_set_add(&points, v3, ea, eb);
+    bn_toom_point_set_run(&points);
+    uint64_t *point_values[7] = {v0, vinf, v1, vm1, v2, vm2, v3};
+    for (int point = 0; point < 7; point++)
+        for (int32_t i = tk; i < w; i++)
+            point_values[point][i] = 0;
 
     /* ---- interpolate ---- */
     /* SE = (v1+vm1)/2 - v0 - vinf ; SO = (v1-vm1)/2 */
@@ -1155,14 +4640,14 @@ static void bn_toom4(uint64_t *out, const uint64_t *a, const uint64_t *b,
     if (svm2 == 0) { bn_add_n(ta, v2, vm2, w); bn_sub_n(to2, v2, vm2, w); }
     else           { bn_sub_n(ta, v2, vm2, w); bn_add_n(to2, v2, vm2, w); }
     bn_shr1(ta, w); bn_sub_n(ta, ta, v0, w);
-    bn_mul1(uu, vinf, 64, w); bn_sub_n(teo, ta, uu, w); /* uu used as temp */
+    bn_shl_copy(uu, vinf, w, 6); bn_sub_n(teo, ta, uu, w); /* uu used as temp */
     bn_shrk(to2, w, 2);
     /* w3 = v3 - v0 - 729 vinf (into vv) */
     memcpy(vv, v3, (size_t)w*sizeof(uint64_t));
     bn_sub_n(vv, vv, v0, w);
     bn_mul1(uu, vinf, 729, w); bn_sub_n(vv, vv, uu, w);
     /* c4 = (TE - 4 SE)/12 ; c2 = SE - c4 */
-    bn_mul1(uu, se, 4, w); bn_sub_n(cc4, teo, uu, w);
+    bn_shl_copy(uu, se, w, 2); bn_sub_n(cc4, teo, uu, w);
     bn_shrk(cc4, w, 2); bn_divexact1(cc4, w, 3);
     bn_sub_n(cc2, se, cc4, w);
     /* U = (TO2 - SO)/3 (into uu) */
@@ -1180,8 +4665,14 @@ static void bn_toom4(uint64_t *out, const uint64_t *a, const uint64_t *b,
     bn_sub_n(cc1, so2, cc3, w); bn_sub_n(cc1, cc1, cc5, w);
 
     int32_t tn = 2 * n;
+#if BN_TOOM_COPY_V0
+    int32_t v0_copy = w < tn ? w : tn;
+    memcpy(out, v0, (size_t)v0_copy * sizeof(uint64_t));
+    memset(out + v0_copy, 0, (size_t)(tn - v0_copy) * sizeof(uint64_t));
+#else
     for (int32_t i = 0; i < tn; i++) out[i] = 0;
     bn_addto(out,      tn,      v0,   w);
+#endif
     bn_addto(out + k,  tn - k,  cc1,  w);
     bn_addto(out + k2, tn - k2, cc2,  w);
     bn_addto(out + k3, tn - k3, cc3,  w);
@@ -1190,13 +4681,185 @@ static void bn_toom4(uint64_t *out, const uint64_t *a, const uint64_t *b,
     bn_addto(out + k6, tn - k6, vinf, w);
 }
 
+/* Symmetry-specialized 11-point Toom-6. Pairing f(t) with f(-t) splits the
+ * interpolation into a degree-5 polynomial in t^2 (even coefficients) and a
+ * degree-4 polynomial in t^2 (odd coefficients). This needs 56 small-scalar
+ * passes instead of a generic inverse Vandermonde's 121. */
+static const int32_t BN_TOOM6_EVEN_W[6][6] = {
+    {3628800, 0, 0, 0, 0, 0},
+    {-5311152, 3024000, -432000, 72000, -9000, 576},
+    {1926540, -1401960, 524280, -97380, 12610, -820},
+    {-257796, 203490, -98280, 27405, -3990, 273},
+    {13860, -11340, 6120, -2070, 390, -30},
+    {-252, 210, -120, 45, -10, 1}
+};
+static const int32_t BN_TOOM6_ODD_W[5][5] = {
+    {6048000, -1728000, 432000, -72000, 5760},
+    {-2803920, 2097120, -584280, 100880, -8200},
+    {406980, -393120, 164430, -31920, 2730},
+    {-22680, 24480, -12420, 3120, -300},
+    {420, -480, 270, -80, 10}
+};
+
+static void bn_toom6_add_chunk(uint64_t *out, int32_t e,
+                               const uint64_t *a, int32_t n,
+                               int32_t k, int chunk) {
+    int32_t off = chunk * k;
+    if (off >= n) return;
+    int32_t len = n - off < k ? n - off : k;
+    bn_addto(out, e, a + off, len);
+}
+
+static void bn_toom6_eval_parity(uint64_t *out, const uint64_t *a, int32_t n,
+                                 int32_t k, int start, uint64_t z, int32_t e) {
+    memset(out, 0, (size_t)e * sizeof(uint64_t));
+    bn_toom6_add_chunk(out, e, a, n, k, start);
+    for (int chunk = start - 2; chunk >= 0; chunk -= 2) {
+        (void)bn_mul1(out, out, z, e);
+        bn_toom6_add_chunk(out, e, a, n, k, chunk);
+    }
+}
+
+/* Evaluate both A(x) and |A(-x)| from the same even/odd partials. */
+static int bn_toom6_eval_pair(uint64_t *pos, uint64_t *neg,
+                              const uint64_t *a, int32_t n,
+                              int32_t k, uint64_t x, int32_t e) {
+    uint64_t z = x * x;
+    bn_toom6_eval_parity(pos, a, n, k, 4, z, e);
+    bn_toom6_eval_parity(neg, a, n, k, 5, z, e);
+    (void)bn_mul1(neg, neg, x, e);
+    int cmp = bn_cmp_n(pos, neg, e);
+    (void)bn_add_n(pos, pos, neg, e);
+    bn_dbl(neg, neg, e);
+    if (cmp >= 0) {
+        bn_sub_n(neg, pos, neg, e);
+        return 0;
+    }
+    bn_sub_n(neg, neg, pos, e);
+    return 1;
+}
+
+static void bn_toom6_interp_row(uint64_t *coef,
+                                uint64_t *pos, uint64_t *neg,
+                                const uint64_t *values, int count,
+                                int32_t p, int32_t c,
+                                const int32_t *weights, int shift) {
+    memset(pos, 0, (size_t)c * sizeof(uint64_t));
+    memset(neg, 0, (size_t)c * sizeof(uint64_t));
+    for (int i = 0; i < count; i++) {
+        int32_t sw = weights[i];
+        if (!sw) continue;
+        uint64_t uw = sw < 0 ? (uint64_t)(-(int64_t)sw) : (uint64_t)sw;
+        uint64_t *acc = sw < 0 ? neg : pos;
+        uint64_t carry = bn_addmul_1(acc, values + i * (size_t)p, p, uw);
+        uint64_t old = acc[p];
+        acc[p] = old + carry;
+        acc[p + 1] += acc[p] < old;
+    }
+    if (bn_cmp_n(pos, neg, c) < 0)
+        die("Toom-6 interpolation sign invariant");
+    bn_sub_n(coef, pos, neg, c);
+    bn_shrk(coef, c, shift);
+    bn_divexact1(coef, c, 14175);
+}
+
+static void bn_toom6(uint64_t *out, const uint64_t *a, const uint64_t *b,
+                     int32_t n, uint64_t *scratch) {
+    int32_t k = (n + 5) / 6;
+    int32_t e = k + 1;
+    int32_t p = 2 * e;
+    int32_t c = p + 2;
+    uint64_t *even = scratch;                      /* six raw even values */
+    uint64_t *odd = even + 6 * (size_t)p;          /* five raw odd values */
+    uint64_t *ea = odd + 5 * (size_t)p;
+    uint64_t *eb = ea + e;
+    uint64_t *wa = eb + e;
+    uint64_t *wb = wa + e;
+    uint64_t *pos = wb + e;
+    uint64_t *neg = pos + c;
+    uint64_t *tmp = neg + c;
+    uint64_t *child = tmp + c;
+    WToomPointSet points;
+    int negative_product[5];
+    bn_toom_point_set_init(&points, e, child, 11, 0,
+                           n >= BN_TOOM_PAR_THRESHOLD,
+                           n >= BN_TOOM_PAR_LARGE_THRESHOLD ?
+                           BN_TOOM_PAR_THREADS : BN_TOOM_PAR_SMALL_THREADS);
+
+    /* t=0: f(0)=a0*b0 is already the first even sample. */
+    bn_load(ea, a, n < k ? n : k, e);
+    bn_load(eb, b, n < k ? n : k, e);
+    bn_toom_point_set_add(&points, even, ea, eb);
+
+    for (int t = 1; t <= 5; t++) {
+        uint64_t *yp = even + t * (size_t)p;
+        uint64_t *ym = odd + (t - 1) * (size_t)p;
+        int aneg = bn_toom6_eval_pair(ea, wa, a, n, k, (uint64_t)t, e);
+        int bneg = bn_toom6_eval_pair(eb, wb, b, n, k, (uint64_t)t, e);
+        negative_product[t - 1] = aneg ^ bneg;
+        bn_toom_point_set_add(&points, yp, ea, eb);
+        bn_toom_point_set_add(&points, ym, wa, wb);
+    }
+    bn_toom_point_set_run(&points);
+
+    for (int t = 1; t <= 5; t++) {
+        uint64_t *yp = even + t * (size_t)p;
+        uint64_t *ym = odd + (t - 1) * (size_t)p;
+        if (negative_product[t - 1]) {
+            /* f(t)+f(-t)=yp-ym; f(t)-f(-t)=yp+ym. */
+            if (bn_cmp_n(yp, ym, p) < 0)
+                die("Toom-6 even evaluation sign invariant");
+            bn_add_n(tmp, yp, ym, p);
+            bn_sub_n(yp, yp, ym, p);
+            memcpy(ym, tmp, (size_t)p * sizeof(uint64_t));
+        } else {
+            /* f(t)+f(-t)=yp+ym; f(t)-f(-t)=yp-ym. */
+            if (bn_cmp_n(yp, ym, p) < 0)
+                die("Toom-6 odd evaluation sign invariant");
+            bn_sub_n(tmp, yp, ym, p);
+            bn_add_n(yp, yp, ym, p);
+            memcpy(ym, tmp, (size_t)p * sizeof(uint64_t));
+        }
+    }
+
+    memset(out, 0, (size_t)(2 * n) * sizeof(uint64_t));
+    for (int j = 0; j < 6; j++) {
+        bn_toom6_interp_row(pos, pos, neg, even, 6, p, c,
+                            BN_TOOM6_EVEN_W[j], 8);
+        int32_t base = 2 * j * k;
+        if (base < 2 * n) {
+            int32_t room = 2 * n - base;
+            int32_t len = c;
+            while (len > 0 && pos[len - 1] == 0) len--;
+            if (len > room) len = room;
+            bn_addto(out + base, room, pos, len);
+        }
+    }
+    for (int j = 0; j < 5; j++) {
+        bn_toom6_interp_row(pos, pos, neg, odd, 5, p, c,
+                            BN_TOOM6_ODD_W[j], 9);
+        int32_t base = (2 * j + 1) * k;
+        if (base < 2 * n) {
+            int32_t room = 2 * n - base;
+            int32_t len = c;
+            while (len > 0 && pos[len - 1] == 0) len--;
+            if (len > room) len = room;
+            bn_addto(out + base, room, pos, len);
+        }
+    }
+}
+
 /* Recursive equal-length dispatcher (the `mul_t3` rung of the ladder). */
 static void bn_mul_eq(uint64_t *out, const uint64_t *a, const uint64_t *b,
                       int32_t n, uint64_t *scratch) {
     if (n <= BN_KARA_THRESHOLD)      bigint_mul_schoolbook_into(out, a, n, b, n);
+    else if ((n >= 400 && n <= 432) ||
+             (n >= 456 && n <= 520) ||
+             (n >= 536 && n <= 544)) bn_toom2_diff(out, a, b, n, scratch);
     else if (n < BN_TOOM3_THRESHOLD) bn_toom2(out, a, b, n, scratch);
     else if (n < BN_TOOM4_THRESHOLD) bn_toom3(out, a, b, n, scratch);
-    else                             bn_toom4(out, a, b, n, scratch);
+    else if (n < BN_TOOM6_THRESHOLD) bn_toom4(out, a, b, n, scratch);
+    else                             bn_toom6(out, a, b, n, scratch);
 }
 
 /* Upper bound on scratch limbs needed by bn_mul_eq for an n-limb multiply.
@@ -1208,23 +4871,30 @@ static size_t bn_scratch_need(int32_t n) {
     while (n > BN_KARA_THRESHOLD) {
         int32_t k, kp1, w, frame, child;
         if (n < BN_TOOM3_THRESHOLD) {
-            /* Toom-2 frame: sa,sb (slen) + z1 (2*slen) ; slen=hin+1 */
+            /* The sum frame is the larger of the two Toom-2 forms. */
             int32_t half = n >> 1, hin = n - half, slen = hin + 1;
-            frame = 2 * slen + 2 * slen;
-            child = slen;        /* largest sub-multiply length */
+            frame = 4 * slen;
+            child = slen;
         } else if (n < BN_TOOM4_THRESHOLD) {
             k = (n + 2) / 3; kp1 = k + 1; w = 2 * k + 4;
             /* pa0..pb2 (6*kp1) + ea,eb,tt (3*kp1) + v0,v1,vm1,v2,vinf (5*w)
              * + ta,tb,cc1,cc2,cc3,te,tf (7*w) */
             frame = 9 * kp1 + 12 * w;
             child = kp1;
-        } else {
+        } else if (n < BN_TOOM6_THRESHOLD) {
             k = (n + 3) / 4; kp1 = k + 1; w = 2 * k + 4;
             /* pa0..pb3 (8*kp1) + ea,eb,t1,t2 (4*kp1)
              * + v0,v1,vm1,v2,vm2,v3,vinf,se,so2,teo,to2,uu,vv,ce,
              *   cc1,cc2,cc3,cc4,cc5,ta (20*w) */
             frame = 12 * kp1 + 20 * w;
             child = kp1;
+        } else {
+            k = (n + 5) / 6;
+            int32_t e = k + 1, p = 2 * e, c = p + 2;
+            /* even[6*p], odd[5*p], ea/eb/wa/wb[4*e],
+             * pos/neg/tmp[3*c], followed by the largest e-limb child. */
+            frame = 11 * p + 4 * e + 3 * c;
+            child = e;
         }
         total += (size_t)frame;
         n = child;
@@ -1495,9 +5165,27 @@ static void bn_ntt_sqr(uint64_t *out, const uint64_t *a, int32_t n) {
                                  * (both step functions of transform length). */
 #endif
 
-/* pointwise products recurse into the ladder dispatchers (defined below) */
-static void bigint_mul_dispatch(uint64_t *out, const uint64_t *a, int32_t na,
-                                const uint64_t *b, int32_t nb);
+/* pointwise products recurse into the ladder dispatchers (defined below).
+ * Keep the one-limb front door inline: calling the full dispatcher costs more
+ * than the multiply itself at this size. */
+static void bigint_mul_dispatch_core(uint64_t *out,
+                                     const uint64_t *a, int32_t na,
+                                     const uint64_t *b, int32_t nb);
+static inline __attribute__((always_inline))
+void bigint_mul_dispatch(uint64_t *out, const uint64_t *a, int32_t na,
+                         const uint64_t *b, int32_t nb) {
+    if (__builtin_expect(na == 1 && nb == 1, 0)) {
+        __uint128_t product = (__uint128_t)a[0] * b[0];
+        out[0] = (uint64_t)product;
+        out[1] = (uint64_t)(product >> 64);
+        return;
+    }
+    if (__builtin_expect(na == 2 && nb == 2, 0)) {
+        bn_mul_eq2_inline(out, a, b);
+        return;
+    }
+    bigint_mul_dispatch_core(out, a, na, b, nb);
+}
 static void bigint_sqr_dispatch(uint64_t *out, const uint64_t *a, int32_t na);
 
 static __thread uint64_t *w_ssa_ws = NULL;
@@ -1554,43 +5242,79 @@ static void ssa_sub(uint64_t *r, const uint64_t *a, const uint64_t *b, int32_t m
     ssa_fix(r, m, (int64_t)at - (int64_t)bt - (int64_t)bo);
 }
 
+#if defined(__aarch64__)
+/* Complete fused limb pass in caller-saved registers.  Returning carry in bit
+ * 0 and borrow in bit 1 leaves only the two rare canonicalization fixes in C.
+ * Keeping this out of inline assembly avoids the eight live result registers
+ * forcing compiler spills around every four-limb butterfly. */
+__attribute__((naked, noinline))
+static uint64_t ssa_addsub_core(uint64_t *u, uint64_t *dout,
+                                const uint64_t *v, int32_t m) {
+    __asm__(
+        "mov x16, xzr\n"
+        "mov x17, xzr\n"
+        "cmp w3, #4\n"
+        "b.lt 2f\n"
+        "1:\n"
+        "ldp x4, x5, [x0]\n"
+        "ldp x6, x7, [x0, #16]\n"
+        "ldp x8, x9, [x2], #32\n"
+        "ldp x10, x11, [x2, #-16]\n"
+        "cmp x16, #1\n"
+        "adcs x12, x4, x8\n"
+        "adcs x13, x5, x9\n"
+        "adcs x14, x6, x10\n"
+        "adcs x15, x7, x11\n"
+        "cset x16, cs\n"
+        "cmp xzr, x17\n"
+        "sbcs x4, x4, x8\n"
+        "sbcs x5, x5, x9\n"
+        "sbcs x6, x6, x10\n"
+        "sbcs x7, x7, x11\n"
+        "cset x17, cc\n"
+        "stp x12, x13, [x0], #32\n"
+        "stp x14, x15, [x0, #-16]\n"
+        "stp x4, x5, [x1], #32\n"
+        "stp x6, x7, [x1, #-16]\n"
+        "sub w3, w3, #4\n"
+        "cmp w3, #4\n"
+        "b.ge 1b\n"
+        "2:\n"
+        "cbz w3, 4f\n"
+        "3:\n"
+        "ldr x4, [x0]\n"
+        "ldr x8, [x2], #8\n"
+        "cmp x16, #1\n"
+        "adcs x12, x4, x8\n"
+        "cset x16, cs\n"
+        "cmp xzr, x17\n"
+        "sbcs x4, x4, x8\n"
+        "cset x17, cc\n"
+        "str x12, [x0], #8\n"
+        "str x4, [x1], #8\n"
+        "subs w3, w3, #1\n"
+        "b.ne 3b\n"
+        "4:\n"
+        "orr x0, x16, x17, lsl #1\n"
+        "ret\n"
+    );
+}
+#endif
+
 /* Fused butterfly add/sub: usum ← u+v and dout ← u−v (mod p) in ONE pass —
  * u and the second operand load once (separate ssa_add + ssa_sub load them
- * twice). The two flag chains per 4-limb block are SEQUENTIAL (NZCV is a
- * single stream; chains cannot interleave), so the win is memory traffic,
- * not flag ops. dout must not alias u or v. */
+ * twice). dout must not alias u or v. */
 static void ssa_addsub(uint64_t *u, uint64_t *dout, const uint64_t *v, int32_t m) {
     uint64_t ut = u[m], vt = v[m];
-    uint64_t cy = 0, bw = 0;
-    int32_t i = 0;
+    uint64_t cy, bw;
 #if defined(__aarch64__)
-    for (; i + 4 <= m; i += 4) {
-        uint64_t u0 = u[i], u1 = u[i+1], u2 = u[i+2], u3 = u[i+3];
-        uint64_t v0 = v[i], v1 = v[i+1], v2 = v[i+2], v3 = v[i+3];
-        uint64_t s0, s1, s2, s3, d0, d1, d2, d3;
-        __asm__("cmp  %[cy], #1\n\t"
-                "adcs %[s0], %[u0], %[v0]\n\t"
-                "adcs %[s1], %[u1], %[v1]\n\t"
-                "adcs %[s2], %[u2], %[v2]\n\t"
-                "adcs %[s3], %[u3], %[v3]\n\t"
-                "cset %[cy], cs\n\t"
-                "cmp  xzr, %[bw]\n\t"
-                "sbcs %[d0], %[u0], %[v0]\n\t"
-                "sbcs %[d1], %[u1], %[v1]\n\t"
-                "sbcs %[d2], %[u2], %[v2]\n\t"
-                "sbcs %[d3], %[u3], %[v3]\n\t"
-                "cset %[bw], cc"
-                : [s0] "=&r"(s0), [s1] "=&r"(s1), [s2] "=&r"(s2), [s3] "=&r"(s3),
-                  [d0] "=&r"(d0), [d1] "=&r"(d1), [d2] "=&r"(d2), [d3] "=&r"(d3),
-                  [cy] "+&r"(cy), [bw] "+&r"(bw)
-                : [u0] "r"(u0), [u1] "r"(u1), [u2] "r"(u2), [u3] "r"(u3),
-                  [v0] "r"(v0), [v1] "r"(v1), [v2] "r"(v2), [v3] "r"(v3)
-                : "cc");
-        u[i] = s0; u[i+1] = s1; u[i+2] = s2; u[i+3] = s3;
-        dout[i] = d0; dout[i+1] = d1; dout[i+2] = d2; dout[i+3] = d3;
-    }
-#endif
-    for (; i < m; i++) {
+    uint64_t flags = ssa_addsub_core(u, dout, v, m);
+    cy = flags & 1U;
+    bw = flags >> 1;
+#else
+    cy = 0;
+    bw = 0;
+    for (int32_t i = 0; i < m; i++) {
         uint64_t uv = u[i], vv = v[i];
         __uint128_t ss = (__uint128_t)uv + vv + cy;
         u[i] = (uint64_t)ss; cy = (uint64_t)(ss >> 64);
@@ -1600,6 +5324,7 @@ static void ssa_addsub(uint64_t *u, uint64_t *dout, const uint64_t *v, int32_t m
         uint64_t b2 = t < bw;
         dout[i] = d; bw = b1 | b2;
     }
+#endif
     ssa_fix(u, m, (int64_t)(cy + ut + vt));
     ssa_fix(dout, m, (int64_t)ut - (int64_t)vt - (int64_t)bw);
 }
@@ -1626,32 +5351,57 @@ static void ssa_shl(uint64_t *r, const uint64_t *x, uint64_t s, int32_t m, uint6
     }
     int32_t q = (int32_t)(s >> 6);
     int rb = (int)(s & 63);
-    for (int32_t i = 0; i < q; i++) r[i] = 0;        /* A = (lo << s) mod 2^K */
+    uint64_t bw = 0;
     if (rb == 0) {
-        for (int32_t i = q; i < m; i++) r[i] = x[i - q];
+        /* Word-aligned twiddles are common. Form A-B directly instead of
+         * writing A and then revisiting its low q limbs to subtract B. */
+        int32_t j = 0;
+        for (; j < q && x[m + j - q] == 0; j++) r[j] = 0;
+        if (j < q) {
+            r[j] = 0 - x[m + j - q];
+            j++;
+            for (; j < q; j++) r[j] = ~x[m + j - q];
+            bw = 1;
+        }
+        int32_t alen = m - q;
+        j = 0;
+        if (bw) {
+            for (; j < alen && x[j] == 0; j++) r[q + j] = UINT64_MAX;
+            if (j < alen) {
+                r[q + j] = x[j] - 1;
+                j++;
+                bw = 0;
+            }
+        }
+        if (j < alen)
+            memcpy(r + q + j, x + j, (size_t)(alen - j) * sizeof(uint64_t));
     } else {
+        for (int32_t i = 0; i < q; i++) r[i] = 0;    /* A = (lo << s) mod 2^K */
         for (int32_t i = m - 1; i >= q; i--) {
             uint64_t hi2 = x[i - q] << rb;
             uint64_t lo2 = (i - q - 1 >= 0) ? (x[i - q - 1] >> (64 - rb)) : 0;
             r[i] = hi2 | lo2;
         }
+        /* subtract B = lo >> (K−s): the spilled top s bits, limbs 0..q */
+        for (int32_t j = 0; j <= q; j++) {
+            int32_t idx = m + j - q;
+            uint64_t hi_src = (idx < m) ? x[idx] : 0;
+            uint64_t lo_src = (idx - 1 >= 0 && idx - 1 < m) ? x[idx - 1] : 0;
+            uint64_t bj = (hi_src << rb) | (lo_src >> (64 - rb));
+            uint64_t old = r[j];
+            uint64_t t = old - bj;
+            uint64_t b1 = old < bj;
+            uint64_t d = t - bw;
+            uint64_t b2 = t < bw;
+            r[j] = d;
+            bw = b1 | b2;
+        }
+        for (int32_t j = q + 1; j < m && bw; j++) {
+            uint64_t old = r[j];
+            r[j] = old - 1;
+            bw = old == 0;
+        }
     }
-    /* subtract B = lo >> (K−s): the spilled top s bits, limbs 0..q */
-    uint64_t bw = 0;
-    for (int32_t j = 0; j <= q; j++) {
-        int32_t idx = m + j - q;
-        uint64_t hi_src = (idx < m) ? x[idx] : 0;
-        uint64_t lo_src = (idx - 1 >= 0 && idx - 1 < m) ? x[idx - 1] : 0;
-        uint64_t bj = rb ? ((hi_src << rb) | (lo_src >> (64 - rb))) : hi_src;
-        uint64_t old = r[j];
-        uint64_t t = old - bj;
-        uint64_t b1 = old < bj;
-        uint64_t d = t - bw;
-        uint64_t b2 = t < bw;
-        r[j] = d;
-        bw = b1 | b2;
-    }
-    for (int32_t j = q + 1; j < m && bw; j++) { uint64_t old = r[j]; r[j] = old - 1; bw = (old == 0); }
     int64_t c = -(int64_t)bw;                        /* wrap ⇒ value = e_now + 1 */
     if (x[m]) {                                      /* − top·2^s: one bit at limb q */
         uint64_t bit = 1ULL << rb;
@@ -1694,11 +5444,17 @@ static void ssa_pointwise(uint64_t *dst, const uint64_t *a, const uint64_t *b,
     while (an > 0 && a[an - 1] == 0) an--;
     while (bl2 > 0 && blo[bl2 - 1] == 0) bl2--;
     if (at || bt) { for (int32_t i = 0; i < m; i++) tsave[i] = a[i]; }  /* alo survives dst write */
-    for (int32_t i = 0; i < 2 * m; i++) prod[i] = 0;
+    int32_t plen = 0;
     if (an && bl2) {
-        if (b) bigint_mul_dispatch(prod, a, an, blo, bl2);
-        else   bigint_sqr_dispatch(prod, a, an);
+        if (b) {
+            bigint_mul_dispatch(prod, a, an, blo, bl2);
+            plen = an + bl2;
+        } else {
+            bigint_sqr_dispatch(prod, a, an);
+            plen = 2 * an;
+        }
     }
+    for (int32_t i = plen; i < 2 * m; i++) prod[i] = 0;
     const uint64_t *bkeep = b ? blo : tsave;          /* blo copy for the at-correction */
     for (int32_t i = 0; i < m; i++) dst[i] = prod[i];
     uint64_t bo = bn_sub_n(dst, dst, prod + m, m);    /* value ≡ lo − hi */
@@ -1738,6 +5494,11 @@ static double ssa_choose(int32_t na, int32_t nb, int32_t *w_out, long *L_out, ui
                         + 3.0 * (double)L * (md + 1) * 0.5;
             if ((4 * Kb / (uint64_t)L) & 1)          /* odd finest-stage twiddles */
                 cost += 3.0 * (double)(L / 4) * 2.0 * (md + 1) * 0.7;
+            /* At L>=2048, the extra odd half-twiddle pass is memory-bound
+             * enough that two to eight extra plain-family limbs are cheaper.
+             * Measured at 16384 limbs: 2.23ms plain vs 2.34ms half-family. */
+            if (fam && L >= 2048)
+                cost *= 1.10;
             cost *= 1.6;                             /* calibration vs measured */
             if (!best_w || cost < best_cost) { best_w = w; best_L = L; best_K = Kb; best_cost = cost; }
         }
@@ -1754,6 +5515,193 @@ static double ntt_cost_est(int32_t n) {
     long ncoef = ((long)n * 64 + B - 1) / B;
     long L0 = 1L << ssa_ceil_log2(2 * ncoef);
     return (3.0 * (double)(L0 / 2) * ssa_ceil_log2(L0) + (double)L0) * 1.2;
+}
+
+enum {
+    BN_TOP_TOOM = 0,
+    BN_TOP_SSA = 1,
+    BN_TOP_NTT = 2
+};
+
+/* Transform costs are step functions, while the Toom-4 ladder is smooth
+ * between its recursion resonances.  Comparing only SSA with NTT forced one
+ * transform even immediately after both transform lengths doubled.  Calibrate
+ * all three against the forced-kernel sweep on Apple arm64:
+ *
+ *   multiply Toom-4 ~= 6.7 * n^log_4(7)
+ *   square   Toom-4 ~= 5.0 * n^log_4(7)
+ *
+ * The raw SSA model is accurate once its piece width reaches 16 limbs; its
+ * first (w=8) multiply window needs the measured setup correction.  Squaring
+ * saves one operand transform, hence its separate SSA/NTT factors. */
+static int bn_top_choice(int32_t na, int32_t nb, int square) {
+    int32_t n = na > nb ? na : nb;
+    if (n < BN_SSA_THRESHOLD && n < BN_NTT_THRESHOLD)
+        return BN_TOP_TOOM;
+    /* The bounded point scheduler changes the medium-size Toom cost curve
+     * from the serial model below. Direct measurements keep seven-way Toom-4
+     * ahead through 14K; the parallel SSA transform takes over around 16K. */
+    if (n < BN_PAR_TOOM_LIMIT)
+        return BN_TOP_TOOM;
+    double toom = (square ? 5.0 : 6.7) * pow((double)n, 1.403677461);
+    double ssa = 1e30;
+    double ntt = 1e30;
+    if (n >= BN_SSA_THRESHOLD) {
+        int32_t sw;
+        long sL;
+        uint64_t sK;
+        ssa = ssa_choose(na, nb, &sw, &sL, &sK);
+        if (!sw) {
+            ssa = 1e30;
+        } else if (square) {
+            ssa *= sw <= 8 ? 0.92 : 0.66;
+        } else if (sw <= 8) {
+            ssa *= 1.45;
+        }
+    }
+    if (n >= BN_NTT_THRESHOLD)
+        ntt = ntt_cost_est(n) * (square ? 1.15 : 1.65);
+    if (ssa < toom && ssa <= ntt) return BN_TOP_SSA;
+    if (ntt < toom) return BN_TOP_NTT;
+    return BN_TOP_TOOM;
+}
+
+static inline __attribute__((always_inline))
+int bn_top_choice_fast(int32_t na, int32_t nb, int square) {
+    int32_t n = na > nb ? na : nb;
+    if (__builtin_expect(n < BN_SSA_THRESHOLD && n < BN_NTT_THRESHOLD, 1))
+        return BN_TOP_TOOM;
+    return bn_top_choice(na, nb, square);
+}
+
+typedef struct {
+    uint64_t *a;
+    long length;
+    int32_t m;
+    uint64_t K;
+    uint64_t *t1;
+    uint64_t *t2;
+    int parallel;
+} WSSAForwardJob;
+
+static void ssa_forward_range(WSSAForwardJob *job, long start, long end,
+                              long first_len, long last_len) {
+    uint64_t *A = job->a;
+    int32_t m = job->m;
+    int32_t S = m + 1;
+    uint64_t K = job->K;
+    for (long len = first_len; len >= last_len; len >>= 1) {
+        uint64_t steph = 2 * K / (uint64_t)len;
+        for (long base = start; base < end; base += 2 * len) {
+            for (long j = 0; j < len; j++) {
+                uint64_t *u = A + (base + j) * S;
+                uint64_t *v = A + (base + j + len) * S;
+                ssa_addsub(u, job->t1, v, m);
+                ssa_shl_half(v, job->t1, (steph * (uint64_t)j) % (4 * K),
+                             m, K, job->t2);
+            }
+        }
+    }
+}
+
+typedef struct {
+    WSSAForwardJob *job;
+    long start;
+    long end;
+    long first_len;
+    long last_len;
+} WSSAForwardRangeJob;
+
+static void *ssa_forward_range_worker(void *arg) {
+    WSSAForwardRangeJob *range = (WSSAForwardRangeJob *)arg;
+    ssa_forward_range(range->job, range->start, range->end,
+                      range->first_len, range->last_len);
+    return NULL;
+}
+
+static void ssa_forward_transform(WSSAForwardJob *job) {
+    long L = job->length;
+    if (!job->parallel || L < 4) {
+        ssa_forward_range(job, 0, L, L / 2, 1);
+        return;
+    }
+    ssa_forward_range(job, 0, L, L / 2, L / 2);
+    uint64_t right_t1[job->m + 1];
+    uint64_t right_t2[job->m + 1];
+    WSSAForwardJob other = *job;
+    other.t1 = right_t1;
+    other.t2 = right_t2;
+    WSSAForwardRangeJob right = {&other, L / 2, L, L / 4, 1};
+    pthread_t worker;
+    int live = pthread_create(&worker, NULL, ssa_forward_range_worker, &right) == 0;
+    ssa_forward_range(job, 0, L / 2, L / 4, 1);
+    if (live) pthread_join(worker, NULL);
+    else ssa_forward_range(&other, L / 2, L, L / 4, 1);
+}
+
+static void *ssa_forward_worker(void *arg) {
+    ssa_forward_transform((WSSAForwardJob *)arg);
+    return NULL;
+}
+
+typedef struct {
+    uint64_t *a;
+    long start;
+    long end;
+    long first_len;
+    long last_len;
+    int32_t m;
+    uint64_t K;
+    uint64_t *t1;
+    uint64_t *t2;
+} WSSAInverseRangeJob;
+
+static void ssa_inverse_range(WSSAInverseRangeJob *job) {
+    int32_t S = job->m + 1;
+    for (long len = job->first_len; len <= job->last_len; len <<= 1) {
+        uint64_t steph = 2 * job->K / (uint64_t)len;
+        for (long base = job->start; base < job->end; base += 2 * len) {
+            for (long j = 0; j < len; j++) {
+                uint64_t *u = job->a + (base + j) * S;
+                uint64_t *v = job->a + (base + j + len) * S;
+                uint64_t sh = (4 * job->K - steph * (uint64_t)j) % (4 * job->K);
+                ssa_shl_half(job->t1, v, sh, job->m, job->K, job->t2);
+                ssa_addsub(u, v, job->t1, job->m);
+            }
+        }
+    }
+}
+
+static void *ssa_inverse_range_worker(void *arg) {
+    ssa_inverse_range((WSSAInverseRangeJob *)arg);
+    return NULL;
+}
+
+typedef struct {
+    uint64_t *a;
+    const uint64_t *b;
+    long start;
+    long end;
+    int32_t m;
+    uint64_t *scratch;
+} WSSAPointJob;
+
+static void bn_ws_release_thread(void);
+
+static void ssa_pointwise_range(WSSAPointJob *job) {
+    int32_t S = job->m + 1;
+    uint64_t *prod = job->scratch;
+    uint64_t *tsave = prod + 2 * (size_t)job->m + 2;
+    for (long i = job->start; i < job->end; i++)
+        ssa_pointwise(job->a + i * S, job->a + i * S,
+                      job->b ? job->b + i * S : NULL,
+                      job->m, prod, tsave);
+}
+
+static void *ssa_pointwise_worker(void *arg) {
+    ssa_pointwise_range((WSSAPointJob *)arg);
+    bn_ws_release_thread();
+    return NULL;
 }
 
 /* out[0..na+nb) = a·b (b == NULL: square, nb ignored → na). */
@@ -1773,8 +5721,13 @@ static void bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na,
     uint64_t K = best_K;
     int32_t m = (int32_t)(K / 64);
     int32_t S = m + 1;
+    int parallel = na >= BN_SSA_PAR_THRESHOLD && nb >= BN_SSA_PAR_THRESHOLD;
+    int point_threads = parallel ? BN_SSA_PAR_THREADS : 1;
+    if (point_threads < 1) point_threads = 1;
+    size_t point_stride = 3 * (size_t)m + 2;
 
-    size_t total = (size_t)L * S * (b ? 2 : 1) + 3 * (size_t)S + (2 * (size_t)m + 2) + (size_t)m;
+    size_t total = (size_t)L * S * (b ? 2 : 1)
+                 + 4 * (size_t)S + (size_t)point_threads * point_stride;
     uint64_t *ws = ssa_ws_get_zeroed(total);
     if (!ws) { bigint_mul_schoolbook_into(out, a, na, b ? b : a, nb); return; }
     uint64_t *fa = ws;
@@ -1782,8 +5735,8 @@ static void bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na,
     uint64_t *t1 = fa + (size_t)L * S * (b ? 2 : 1);
     uint64_t *t2 = t1 + S;
     uint64_t *t3 = t2 + S;
-    uint64_t *prod = t3 + S;
-    uint64_t *tsave = prod + 2 * (size_t)m + 2;
+    uint64_t *t4 = t3 + S;
+    uint64_t *point_ws = t4 + S;
 
     /* pack: piece i = limbs [i·w, i·w+w) (workspace pre-zeroed ⇒ padding) */
     long pa = (na + w - 1) / w;
@@ -1801,38 +5754,57 @@ static void bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na,
         }
     }
 
-    /* forward DIF (natural → bit-reversed): stage half-size len pairs (u, v) →
-     * (u+v, ω^j·(u−v)) with ω_{2len}^j = 2^{(K/len)·j} — a pure shift. */
-    for (int pass = 0; pass < (b ? 2 : 1); pass++) {
-        uint64_t *A = pass ? fb : fa;
-        for (long len = L / 2; len >= 1; len >>= 1) {
-            uint64_t steph = 2 * K / (uint64_t)len;      /* half-bit units */
-            for (long base = 0; base < L; base += 2 * len) {
-                for (long j2 = 0; j2 < len; j2++) {
-                    uint64_t *u = A + (base + j2) * S;
-                    uint64_t *v = A + (base + j2 + len) * S;
-                    ssa_addsub(u, t1, v, m);          /* u ← u+v, t1 ← u−v */
-                    ssa_shl_half(v, t1, (steph * (uint64_t)j2) % (4 * K), m, K, t3);
-                }
-            }
-        }
+    /* Forward DIF. For large multiplies the operand transforms are independent;
+     * run B on one worker while the caller transforms A. */
+    WSSAForwardJob fa_job = {fa, L, m, K, t1, t2, parallel};
+    WSSAForwardJob fb_job = {fb, L, m, K, t3, t4, parallel};
+    pthread_t forward_thread;
+    int forward_live = 0;
+    if (parallel && b && pthread_create(&forward_thread, NULL, ssa_forward_worker, &fb_job) == 0)
+        forward_live = 1;
+    ssa_forward_transform(&fa_job);
+    if (b) {
+        if (forward_live) pthread_join(forward_thread, NULL);
+        else ssa_forward_transform(&fb_job);
     }
 
-    for (long i = 0; i < L; i++)
-        ssa_pointwise(fa + i * S, fa + i * S, b ? fb + i * S : NULL, m, prod, tsave);
+    WSSAPointJob point_jobs[BN_SSA_PAR_THREADS > 0 ? BN_SSA_PAR_THREADS : 1];
+    pthread_t point_workers[BN_SSA_PAR_THREADS > 1 ? BN_SSA_PAR_THREADS - 1 : 1];
+    int point_live[BN_SSA_PAR_THREADS > 1 ? BN_SSA_PAR_THREADS - 1 : 1];
+    for (int t = 0; t < point_threads; t++) {
+        point_jobs[t].a = fa;
+        point_jobs[t].b = b ? fb : NULL;
+        point_jobs[t].start = L * t / point_threads;
+        point_jobs[t].end = L * (t + 1) / point_threads;
+        point_jobs[t].m = m;
+        point_jobs[t].scratch = point_ws + (size_t)t * point_stride;
+    }
+    for (int t = 1; t < point_threads; t++) {
+        point_live[t - 1] =
+            pthread_create(&point_workers[t - 1], NULL, ssa_pointwise_worker,
+                           &point_jobs[t]) == 0;
+        if (!point_live[t - 1]) ssa_pointwise_range(&point_jobs[t]);
+    }
+    ssa_pointwise_range(&point_jobs[0]);
+    for (int t = 1; t < point_threads; t++)
+        if (point_live[t - 1]) pthread_join(point_workers[t - 1], NULL);
 
-    /* inverse DIT (bit-reversed → natural): ω^{−j} = 2^{2K − (K/len)·j} */
-    for (long len = 1; len <= L / 2; len <<= 1) {
-        uint64_t steph = 2 * K / (uint64_t)len;
-        for (long base = 0; base < L; base += 2 * len) {
-            for (long j2 = 0; j2 < len; j2++) {
-                uint64_t *u = fa + (base + j2) * S;
-                uint64_t *v = fa + (base + j2 + len) * S;
-                uint64_t sh = (4 * K - steph * (uint64_t)j2) % (4 * K);
-                ssa_shl_half(t1, v, sh, m, K, t3);
-                ssa_addsub(u, v, t1, m);              /* u ← u+t1, v ← u−t1 */
-            }
-        }
+    /* Inverse DIT: both halves are independent through len=L/4; only the
+     * final len=L/2 stage couples them. */
+    if (parallel) {
+        WSSAInverseRangeJob left = {fa, 0, L / 2, 1, L / 4, m, K, t1, t2};
+        WSSAInverseRangeJob right = {fa, L / 2, L, 1, L / 4, m, K, t3, t4};
+        pthread_t inverse_thread;
+        int inverse_live =
+            pthread_create(&inverse_thread, NULL, ssa_inverse_range_worker, &right) == 0;
+        ssa_inverse_range(&left);
+        if (inverse_live) pthread_join(inverse_thread, NULL);
+        else ssa_inverse_range(&right);
+        WSSAInverseRangeJob final = {fa, 0, L, L / 2, L / 2, m, K, t1, t2};
+        ssa_inverse_range(&final);
+    } else {
+        WSSAInverseRangeJob inverse = {fa, 0, L, 1, L / 2, m, K, t1, t2};
+        ssa_inverse_range(&inverse);
     }
     /* scale by 1/L = 2^(2K − klog)  (2^(2K) ≡ 1 in the ring) */
     for (long i = 0; i < L; i++) {
@@ -1864,26 +5836,84 @@ static void bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na,
  * ==================================================================== */
 static void bn_sqr_eq(uint64_t *out, const uint64_t *a, int32_t n, uint64_t *scratch);
 
-/* out[0..2n) = a[0..n)^2 (schoolbook: diagonal + doubled off-diagonal, ~2x). */
+/* out[0..2n) = a[0..n)^2 (schoolbook: diagonal + doubled off-diagonal, ~2x).
+ * No zero pass: row 0 WRITES out[1..n] via mul_1; each later row i adds into
+ * already-written slots out[2i+1..n+i) and writes its carry at the fresh slot
+ * out[n+i], so only out[0] and out[2n-1] need explicit zeroing (6-12% off the
+ * 9-32 limb range, which powmod's k = 17..47 squarings ride). */
+__attribute__((BN_HOT_SECTION, aligned(64)))
 static void bn_sqr_school(uint64_t *out, const uint64_t *a, int32_t n) {
-    int32_t tot = 2 * n;
-    for (int32_t i = 0; i < tot; i++) out[i] = 0;
-    for (int32_t i = 0; i < n; i++)            /* a_i·a_j lands at i+j (j>i) */
+    if (n < 2) {
+        __uint128_t p = (__uint128_t)a[0] * a[0];
+        out[0] = (uint64_t)p;
+        out[1] = (uint64_t)(p >> 64);
+        return;
+    }
+    out[n] = bn_mul_1(out + 1, a + 1, n - 1, a[0]);
+    for (int32_t i = 1; i < n - 1; i++)        /* a_i·a_j lands at i+j (j>i) */
         out[n + i] = bn_addmul_1(out + 2 * i + 1, a + i + 1, n - i - 1, a[i]);
-    uint64_t c = 0;
-    for (int32_t k = 0; k < tot; k++) { uint64_t v = out[k]; out[k] = (v << 1) | c; c = v >> 63; }
-    uint64_t carry = 0;
+    out[0] = 0;
+    out[2 * n - 1] = 0;
+    uint64_t double_carry = 0, carry = 0;
     for (int32_t i = 0; i < n; i++) {
         __uint128_t p = (__uint128_t)a[i] * a[i];
-        __uint128_t s = (__uint128_t)out[2*i] + (uint64_t)p + carry;
+        uint64_t v = out[2*i];
+        uint64_t doubled = (v << 1) | double_carry;
+        double_carry = v >> 63;
+        __uint128_t s = (__uint128_t)doubled + (uint64_t)p + carry;
         out[2*i] = (uint64_t)s;
-        __uint128_t s2 = (__uint128_t)out[2*i+1] + (uint64_t)(p >> 64) + (uint64_t)(s >> 64);
+        v = out[2*i+1];
+        doubled = (v << 1) | double_carry;
+        double_carry = v >> 63;
+        __uint128_t s2 = (__uint128_t)doubled + (uint64_t)(p >> 64) + (uint64_t)(s >> 64);
         out[2*i+1] = (uint64_t)s2;
         carry = (uint64_t)(s2 >> 64);
     }
 }
+
 static void bn_kara_sq(uint64_t *out, const uint64_t *a, int32_t n, uint64_t *scratch) {
     if (n <= BN_KARA_THRESHOLD) { bn_sqr_school(out, a, n); return; }
+#if BN_SQR_KARA_DIFFERENCE
+    /* The smaller difference child wins at 48 limbs and above the recursive
+     * square cutoff.  For 49-56 limbs its signed reconstruction costs more
+     * than the single limb saved from the middle schoolbook square. */
+    if (n == 48 || n > BN_SQR_KARA_THRESHOLD) {
+        int32_t half = n >> 1, hin = n - half;
+        uint64_t *da = scratch, *z1 = da + hin, *next = z1 + 2 * hin + 1;
+        (void)bn_abs_split_diff(da, a, half, a + half, hin);
+        if (!(n & 1) && n >= BN_KARA_SQ_PAR_THRESHOLD &&
+            n <= BN_PAR_TOOM_LIMIT) {
+            WToomPointSet points;
+            bn_toom_point_set_init(
+                &points, half, next, 3, 1, 1, 3);
+            bn_toom_point_set_add(&points, out, a, NULL);
+            bn_toom_point_set_add(
+                &points, out + 2 * half, a + half, NULL);
+            bn_toom_point_set_add(&points, z1, da, NULL);
+            bn_toom_point_set_run(&points);
+        } else {
+            bn_sqr_eq(out, a, half, next);
+            bn_sqr_eq(out + 2 * half, a + half, hin, next);
+            bn_sqr_eq(z1, da, hin, next);
+        }
+
+        /* 2*a0*a1 = a0^2 + a1^2 - (a1-a0)^2.  Keep one sign limb while
+         * subtracting the difference square from z0, then add z2 to make the
+         * cross coefficient nonnegative before accumulating it at beta^half. */
+        z1[2 * hin] = 0;
+        uint64_t borrow = bn_sub_n(z1, out, z1, 2 * half);
+        for (int32_t i = 2 * half; i <= 2 * hin; i++) {
+            uint64_t value = 0 - z1[i];
+            uint64_t high_borrow = z1[i] != 0;
+            uint64_t result = value - borrow;
+            z1[i] = result;
+            borrow = high_borrow | (value < borrow);
+        }
+        bn_addto(z1, 2 * hin + 1, out + 2 * half, 2 * hin);
+        bn_addto(out + half, 2 * n - half, z1, 2 * hin + 1);
+        return;
+    }
+#endif
     int32_t half = n >> 1, hin = n - half, slen = hin + 1;
     uint64_t *sa = scratch, *z1 = sa + slen, *next = z1 + 2 * slen;
     for (int32_t i = 0; i < hin; i++) sa[i] = a[half + i]; sa[hin] = 0; bn_addto(sa, slen, a, half);
@@ -1929,24 +5959,33 @@ static void bn_toom4_sq(uint64_t *out, const uint64_t *a, int32_t n, uint64_t *s
     uint64_t *pa0=scratch,*pa1=pa0+kp1,*pa2=pa1+kp1,*pa3=pa2+kp1,*ea=pa3+kp1,*t1=ea+kp1,*t2=t1+kp1;
     uint64_t *v0=t2+kp1,*v1=v0+w,*vm1=v1+w,*v2=vm1+w,*vm2=v2+w,*v3=vm2+w,*vinf=v3+w;
     uint64_t *se=vinf+w,*so2=se+w,*teo=so2+w,*to2=teo+w,*uu=to2+w,*vv=uu+w,*ce=vv+w,*cc1=ce+w,*cc2=cc1+w,*cc3=cc2+w,*cc4=cc3+w,*cc5=cc4+w,*ta=cc5+w,*ksc=ta+w;
+    WToomPointSet points;
+    bn_toom_point_set_init(&points,kp1,ksc,7,1,
+                           n>=BN_TOOM_PAR_THRESHOLD,
+                           n>=BN_SQR_TOOM_PAR_LARGE_THRESHOLD ?
+                           BN_TOOM_PAR_THREADS : BN_SQR_TOOM_PAR_THREADS);
     bn_load(pa0,a,k,kp1);bn_load(pa1,a+k,k,kp1);bn_load(pa2,a+k2,k,kp1);bn_load(pa3,a+k3,n3k,kp1);
-    bn_sqr_eq(v0,pa0,kp1,ksc); for(int32_t i=tk;i<w;i++)v0[i]=0;
-    bn_sqr_eq(vinf,pa3,kp1,ksc); for(int32_t i=tk;i<w;i++)vinf[i]=0;
+    bn_toom_point_set_add(&points,v0,pa0,NULL);
+    bn_toom_point_set_add(&points,vinf,pa3,NULL);
     bn_add_n(ea,pa0,pa1,kp1);bn_add_n(ea,ea,pa2,kp1);bn_add_n(ea,ea,pa3,kp1);
-    bn_sqr_eq(v1,ea,kp1,ksc); for(int32_t i=tk;i<w;i++)v1[i]=0;
+    bn_toom_point_set_add(&points,v1,ea,NULL);
     bn_add_n(t1,pa0,pa2,kp1);bn_add_n(t2,pa1,pa3,kp1);
     if(bn_cmp_n(t1,t2,kp1)<0) bn_sub_n(ea,t2,t1,kp1); else bn_sub_n(ea,t1,t2,kp1);
-    bn_sqr_eq(vm1,ea,kp1,ksc); for(int32_t i=tk;i<w;i++)vm1[i]=0;
+    bn_toom_point_set_add(&points,vm1,ea,NULL);
     memcpy(ea,pa0,(size_t)kp1*sizeof(uint64_t));
     bn_mul1(t1,pa1,2,kp1);bn_add_n(ea,ea,t1,kp1);bn_mul1(t1,pa2,4,kp1);bn_add_n(ea,ea,t1,kp1);bn_mul1(t1,pa3,8,kp1);bn_add_n(ea,ea,t1,kp1);
-    bn_sqr_eq(v2,ea,kp1,ksc); for(int32_t i=tk;i<w;i++)v2[i]=0;
+    bn_toom_point_set_add(&points,v2,ea,NULL);
     bn_mul1(t2,pa2,4,kp1);bn_add_n(t1,pa0,t2,kp1);
     bn_mul1(ea,pa1,2,kp1);bn_mul1(t2,pa3,8,kp1);bn_add_n(ea,ea,t2,kp1);
     if(bn_cmp_n(t1,ea,kp1)<0) bn_sub_n(ea,ea,t1,kp1); else bn_sub_n(ea,t1,ea,kp1);
-    bn_sqr_eq(vm2,ea,kp1,ksc); for(int32_t i=tk;i<w;i++)vm2[i]=0;
+    bn_toom_point_set_add(&points,vm2,ea,NULL);
     memcpy(ea,pa0,(size_t)kp1*sizeof(uint64_t));
     bn_mul1(t1,pa1,3,kp1);bn_add_n(ea,ea,t1,kp1);bn_mul1(t1,pa2,9,kp1);bn_add_n(ea,ea,t1,kp1);bn_mul1(t1,pa3,27,kp1);bn_add_n(ea,ea,t1,kp1);
-    bn_sqr_eq(v3,ea,kp1,ksc); for(int32_t i=tk;i<w;i++)v3[i]=0;
+    bn_toom_point_set_add(&points,v3,ea,NULL);
+    bn_toom_point_set_run(&points);
+    uint64_t *point_values[7]={v0,vinf,v1,vm1,v2,vm2,v3};
+    for(int point=0;point<7;point++)
+        for(int32_t i=tk;i<w;i++)point_values[point][i]=0;
     bn_add_n(ta,v1,vm1,w);bn_sub_n(so2,v1,vm1,w);
     bn_shr1(ta,w);bn_sub_n(ta,ta,v0,w);bn_sub_n(se,ta,vinf,w); bn_shr1(so2,w);
     bn_add_n(ta,v2,vm2,w);bn_sub_n(to2,v2,vm2,w);
@@ -1963,12 +6002,131 @@ static void bn_toom4_sq(uint64_t *out, const uint64_t *a, int32_t n, uint64_t *s
     bn_addto(out,tn,v0,w);bn_addto(out+k,tn-k,cc1,w);bn_addto(out+k2,tn-k2,cc2,w);bn_addto(out+k3,tn-k3,cc3,w);
     bn_addto(out+k4,tn-k4,cc4,w);bn_addto(out+k5,tn-k5,cc5,w);bn_addto(out+k6,tn-k6,vinf,w);
 }
+
+static void bn_toom6_sq(uint64_t *out, const uint64_t *a, int32_t n,
+                        uint64_t *scratch) {
+    int32_t k = (n + 5) / 6;
+    int32_t e = k + 1;
+    int32_t p = 2 * e;
+    int32_t c = p + 2;
+    uint64_t *even = scratch;
+    uint64_t *odd = even + 6 * (size_t)p;
+    uint64_t *ea = odd + 5 * (size_t)p;
+    uint64_t *wa = ea + e;
+    uint64_t *pos = wa + e;
+    uint64_t *neg = pos + c;
+    uint64_t *tmp = neg + c;
+    uint64_t *child = tmp + c;
+    WToomPointSet points;
+    bn_toom_point_set_init(&points,e,child,11,1,
+                           n>=BN_TOOM_PAR_THRESHOLD,
+                           n>=BN_SQR_TOOM_PAR_LARGE_THRESHOLD ?
+                           BN_TOOM_PAR_THREADS : BN_SQR_TOOM_PAR_THREADS);
+
+    bn_load(ea, a, n < k ? n : k, e);
+    bn_toom_point_set_add(&points,even,ea,NULL);
+    for (int t = 1; t <= 5; t++) {
+        uint64_t *yp = even + t * (size_t)p;
+        uint64_t *ym = odd + (t - 1) * (size_t)p;
+        (void)bn_toom6_eval_pair(ea, wa, a, n, k, (uint64_t)t, e);
+        bn_toom_point_set_add(&points,yp,ea,NULL);
+        bn_toom_point_set_add(&points,ym,wa,NULL);
+    }
+    bn_toom_point_set_run(&points);
+    for (int t = 1; t <= 5; t++) {
+        uint64_t *yp = even + t * (size_t)p;
+        uint64_t *ym = odd + (t - 1) * (size_t)p;
+        if (bn_cmp_n(yp, ym, p) < 0)
+            die("Toom-6 square odd evaluation sign invariant");
+        (void)bn_add_n(tmp, yp, ym, p);
+        (void)bn_sub_n(ym, yp, ym, p);
+        memcpy(yp, tmp, (size_t)p * sizeof(uint64_t));
+    }
+
+    memset(out, 0, (size_t)(2 * n) * sizeof(uint64_t));
+    for (int j = 0; j < 6; j++) {
+        bn_toom6_interp_row(pos, pos, neg, even, 6, p, c,
+                            BN_TOOM6_EVEN_W[j], 8);
+        int32_t base = 2 * j * k;
+        if (base < 2 * n) {
+            int32_t room = 2 * n - base;
+            int32_t len = c;
+            while (len > 0 && pos[len - 1] == 0) len--;
+            if (len > room) len = room;
+            bn_addto(out + base, room, pos, len);
+        }
+    }
+    for (int j = 0; j < 5; j++) {
+        bn_toom6_interp_row(pos, pos, neg, odd, 5, p, c,
+                            BN_TOOM6_ODD_W[j], 9);
+        int32_t base = (2 * j + 1) * k;
+        if (base < 2 * n) {
+            int32_t room = 2 * n - base;
+            int32_t len = c;
+            while (len > 0 && pos[len - 1] == 0) len--;
+            if (len > room) len = room;
+            bn_addto(out + base, room, pos, len);
+        }
+    }
+}
+
 /* Recursive equal-length squaring dispatcher (mirrors bn_mul_eq). */
 static void bn_sqr_eq(uint64_t *out, const uint64_t *a, int32_t n, uint64_t *scratch) {
-    if (n <= BN_KARA_THRESHOLD)      bn_sqr_school(out, a, n);
-    else if (n < BN_TOOM3_THRESHOLD) bn_kara_sq(out, a, n, scratch);
-    else if (n < BN_TOOM4_THRESHOLD) bn_toom3_sq(out, a, n, scratch);
-    else                             bn_toom4_sq(out, a, n, scratch);
+    switch (n) {
+    case 1:  bn_sqr1_inline(out, a); return;
+    case 2:  bn_sqr2_inline(out, a); return;
+    case 3:  bn_sqr3_inline(out, a); return;
+    case 4:  bn_sqr4_inline(out, a); return;
+    case 5:  bn_sqr5(out, a); return;
+    case 6:  bn_sqr6(out, a); return;
+    case 7:  bn_sqr7(out, a); return;
+    case 8:  bn_sqr8_inline(out, a); return;
+    case 16: bn_sqr16_split(out, a); return;
+    default: break;
+    }
+    if (n < 9)                       bigint_mul_schoolbook_into(out, a, n, a, n);
+    else if (n < BN_SQR_TOP_KARA_MIN) bn_sqr_school(out, a, n);
+    else if (n <= BN_SQR_KARA_THRESHOLD) bn_kara_sq(out, a, n, scratch);
+    else if (n < BN_SQR_TOOM3_THRESHOLD) bn_kara_sq(out, a, n, scratch);
+    else if (n < BN_SQR_TOOM3_LIMIT) bn_toom3_sq(out, a, n, scratch);
+    else if (n < BN_SQR_TOOM4_THRESHOLD) bn_kara_sq(out, a, n, scratch);
+    else if (n < BN_SQR_TOOM6_THRESHOLD) bn_toom4_sq(out, a, n, scratch);
+    else                             bn_toom6_sq(out, a, n, scratch);
+}
+
+/* The square ladder has independently tuned crossovers.  Use the multiply
+ * frame bounds (which are conservative for the corresponding square kernels)
+ * while walking the square recursion tree. */
+static size_t bn_sqr_scratch_need(int32_t n) {
+    size_t total = 0;
+    while (n >= BN_SQR_TOP_KARA_MIN) {
+        int32_t k, kp1, w, frame, child;
+        if (n < BN_SQR_TOOM3_THRESHOLD) {
+            int32_t half = n >> 1, hin = n - half, slen = hin + 1;
+            frame = 4 * slen;
+            child = slen;
+        } else if (n < BN_SQR_TOOM3_LIMIT) {
+            k = (n + 2) / 3; kp1 = k + 1; w = 2 * k + 4;
+            frame = 9 * kp1 + 12 * w;
+            child = kp1;
+        } else if (n < BN_SQR_TOOM4_THRESHOLD) {
+            int32_t half = n >> 1, hin = n - half, slen = hin + 1;
+            frame = 4 * slen;
+            child = slen;
+        } else if (n < BN_SQR_TOOM6_THRESHOLD) {
+            k = (n + 3) / 4; kp1 = k + 1; w = 2 * k + 4;
+            frame = 12 * kp1 + 20 * w;
+            child = kp1;
+        } else {
+            k = (n + 5) / 6;
+            int32_t e = k + 1, p = 2 * e, c = p + 2;
+            frame = 11 * p + 2 * e + 3 * c;
+            child = e;
+        }
+        total += (size_t)frame;
+        n = child;
+    }
+    return total + 64;
 }
 
 /* Thread-local reusable limb workspace for the multiply/square dispatchers —
@@ -1979,11 +6137,50 @@ static void bn_sqr_eq(uint64_t *out, const uint64_t *a, int32_t n, uint64_t *scr
  * calloc-zeroed scratch; a memset of warm pages is far cheaper than cold calloc
  * pages, and the malloc/free churn disappears). Recursion inside the kernels
  * passes scratch explicitly and never re-enters the dispatchers, so a single
- * per-thread buffer is safe; sequential dispatcher calls (e.g. Barrett's two
- * multiplies) each re-memset before use. */
+ * per-thread buffer is safe.  Toom/Karatsuba overwrite every live scratch
+ * limb, so their dispatchers take the arena uninitialized; NTT callers that
+ * rely on zero padding explicitly request the zeroed form. */
 static __thread uint64_t *bn_ws = NULL;
 static __thread size_t bn_ws_cap = 0;
-static uint64_t *bn_ws_get_zeroed(size_t limbs) {
+typedef struct {
+    uint64_t *key;
+    size_t key_cap;
+    uint64_t *reciprocal;
+    size_t reciprocal_cap;
+    uint64_t *product;
+    size_t product_cap;
+    uint64_t *verification;
+    size_t verification_cap;
+    int32_t n;
+    int state; /* 0 empty, 1/2 admission hits, 3 ready, -1 rejected */
+} WDivReciprocalCache;
+static __thread WDivReciprocalCache bn_div_recip_cache;
+#define BN_RECT_WS_DEPTH 32
+static __thread uint64_t *bn_rect_ws[BN_RECT_WS_DEPTH];
+static __thread size_t bn_rect_ws_cap[BN_RECT_WS_DEPTH];
+static __thread int bn_rect_depth;
+static void bn_ws_release_thread(void) {
+    free(bn_ws);
+    bn_ws = NULL;
+    bn_ws_cap = 0;
+#if BN_TOOM_POINT_TLS_MEMORY
+    free(bn_toom_point_memory);
+    bn_toom_point_memory = NULL;
+    bn_toom_point_memory_cap = 0;
+#endif
+    for (int i = 0; i < BN_RECT_WS_DEPTH; i++) {
+        free(bn_rect_ws[i]);
+        bn_rect_ws[i] = NULL;
+        bn_rect_ws_cap[i] = 0;
+    }
+    bn_rect_depth = 0;
+    free(bn_div_recip_cache.key);
+    free(bn_div_recip_cache.reciprocal);
+    free(bn_div_recip_cache.product);
+    free(bn_div_recip_cache.verification);
+    memset(&bn_div_recip_cache, 0, sizeof(bn_div_recip_cache));
+}
+static uint64_t *bn_ws_get(size_t limbs) {
     if (limbs > bn_ws_cap) {
         free(bn_ws);
         size_t ncap = limbs + limbs / 2 + 64;      /* 1.5x headroom */
@@ -1991,20 +6188,134 @@ static uint64_t *bn_ws_get_zeroed(size_t limbs) {
         bn_ws_cap = bn_ws ? ncap : 0;
         if (!bn_ws) return NULL;                    /* caller falls back to calloc */
     }
-    memset(bn_ws, 0, limbs * sizeof(uint64_t));
     return bn_ws;
+}
+static uint64_t *bn_ws_get_zeroed(size_t limbs) {
+    uint64_t *p = bn_ws_get(limbs);
+    if (p) memset(p, 0, limbs * sizeof(uint64_t));
+    return p;
+}
+
+/* Lopsided multiplication re-enters the dispatcher for balanced chunks, so
+ * its product cannot live in bn_ws.  Cache one buffer per recursion depth;
+ * depth grows only when the final partial chunk is itself lopsided. */
+static uint64_t *bn_rect_ws_get(size_t limbs, int *owned) {
+    int depth = bn_rect_depth;
+    if (depth >= BN_RECT_WS_DEPTH) {
+        *owned = 1;
+        return (uint64_t *)malloc(limbs * sizeof(uint64_t));
+    }
+    *owned = 0;
+    if (limbs > bn_rect_ws_cap[depth]) {
+        free(bn_rect_ws[depth]);
+        size_t ncap = limbs + limbs / 2 + 16;
+        bn_rect_ws[depth] = (uint64_t *)malloc(ncap * sizeof(uint64_t));
+        bn_rect_ws_cap[depth] = bn_rect_ws[depth] ? ncap : 0;
+    }
+    return bn_rect_ws[depth];
+}
+
+/*
+ * A near-2:1 product consists of two independent short-side-width products.
+ * Running those concurrently is both cheaper than padding both operands to
+ * the long width and the exact shape needed by reciprocal quotient estimates.
+ */
+static int bn_mul_rect_parallel(
+    uint64_t *out, const uint64_t *big, int32_t hi,
+    const uint64_t *small, int32_t lo) {
+    if (lo < BN_RECT_PAR_THRESHOLD || lo > BN_PAR_TOOM_LIMIT ||
+        hi <= lo || hi > 2 * lo ||
+        (int64_t)2 * hi < (int64_t)3 * lo)
+        return 0;
+
+    int owned;
+    /*
+     * This dispatcher may itself be the final partial product of an outer
+     * lopsided stitch.  Advance the depth so its temporary can never alias
+     * that outer product buffer.
+     */
+    bn_rect_depth++;
+    uint64_t *upper = bn_rect_ws_get((size_t)(2 * lo), &owned);
+    bn_rect_depth--;
+    if (!upper) return 0;
+
+    WToomPointSet points;
+    bn_toom_point_set_init(&points, lo, NULL, 2, 0, 1, 2);
+    if (!points.parallel) {
+        if (owned) free(upper);
+        return 0;
+    }
+    int32_t high_len = hi - lo;
+    bn_toom_point_set_add_padded(
+        &points, out, big, lo, small, lo);
+    bn_toom_point_set_add_padded(
+        &points, upper, big + lo, high_len, small, lo);
+    bn_toom_point_set_run(&points);
+
+    uint64_t carry = bn_add_n(out + lo, out + lo, upper, lo);
+    memcpy(out + 2 * lo, upper + lo,
+           (size_t)high_len * sizeof(uint64_t));
+    int32_t i = 0;
+    while (carry && i < high_len) {
+        __uint128_t sum = (__uint128_t)out[2 * lo + i] + carry;
+        out[2 * lo + i] = (uint64_t)sum;
+        carry = (uint64_t)(sum >> 64);
+        i++;
+    }
+    if (carry) die("internal parallel rectangular multiply overflow");
+    if (owned) free(upper);
+    return 1;
+}
+
+__attribute__((noinline))
+static void bn_sqr_top_kara(uint64_t *out, const uint64_t *a, int32_t n) {
+    int32_t half = n >> 1, hin = n - half, slen = hin + 1;
+    size_t need = (size_t)(4 * slen);
+    uint64_t *sc = bn_ws_get(need);
+    int owned = 0;
+    if (!sc) { sc = (uint64_t *)malloc(need * sizeof(uint64_t)); owned = 1; }
+    bn_kara_sq(out, a, n, sc);
+    if (owned) free(sc);
 }
 
 /* Public magnitude squaring with size dispatch.  out must have 2*na limbs. */
 static void bigint_sqr_dispatch(uint64_t *out, const uint64_t *a, int32_t na) {
-    if (na >= BN_SSA_THRESHOLD) {             /* SSA vs NTT by cost model */
-        int32_t sw; long sL; uint64_t sK;
-        if (ssa_choose(na, na, &sw, &sL, &sK) < ntt_cost_est(na) && sw) {
-            bn_ssa_mul(out, a, na, NULL, 0);
-            return;
-        }
+    /* Keep the leaf path as short as multiplication's.  In particular, avoid
+     * the transform cost model and TLS-workspace lookup for tiny squares. */
+    switch (na) {
+    case 1:  bn_sqr1_inline(out, a); return;
+    case 2:  bn_sqr2_inline(out, a); return;
+    case 3:  bn_sqr3_inline(out, a); return;
+    case 4:  bn_sqr4_inline(out, a); return;
+    case 5:  bn_sqr5(out, a); return;
+    case 6:  bn_sqr6(out, a); return;
+    case 7:  bn_sqr7(out, a); return;
+    case 8:  bn_sqr8_inline(out, a); return;
+    case 16: bn_sqr16_split(out, a); return;
+    default: break;
     }
-    if (na >= BN_NTT_THRESHOLD) {
+    if (na < 9) {
+        bigint_mul_schoolbook_into(out, a, na, a, na);
+        return;
+    }
+    if (na < 16) {
+        bn_sqr_school(out, a, na);
+        return;
+    }
+    if (na <= BN_SQR_KARA_THRESHOLD) {
+        if (na >= BN_SQR_TOP_KARA_MIN)
+            bn_sqr_top_kara(out, a, na);
+        else
+            bn_sqr_school(out, a, na);
+        return;
+    }
+
+    int top = bn_top_choice_fast(na, na, 1);
+    if (top == BN_TOP_SSA) {
+        bn_ssa_mul(out, a, na, NULL, 0);
+        return;
+    }
+    if (top == BN_TOP_NTT) {
         size_t need = (size_t)(2 * na + 4);
         uint64_t *prod = bn_ws_get_zeroed(need);
         int owned = 0;
@@ -2014,10 +6325,10 @@ static void bigint_sqr_dispatch(uint64_t *out, const uint64_t *a, int32_t na) {
         if (owned) free(prod);
         return;
     }
-    size_t need = bn_scratch_need(na);
-    uint64_t *sc = bn_ws_get_zeroed(need);
+    size_t need = bn_sqr_scratch_need(na);
+    uint64_t *sc = bn_ws_get(need);
     int owned = 0;
-    if (!sc) { sc = (uint64_t *)calloc(need, sizeof(uint64_t)); owned = 1; }
+    if (!sc) { sc = (uint64_t *)malloc(need * sizeof(uint64_t)); owned = 1; }
     bn_sqr_eq(out, a, na, sc);
     if (owned) free(sc);
 }
@@ -2028,80 +6339,150 @@ static void bigint_sqr_dispatch(uint64_t *out, const uint64_t *a, int32_t na) {
  * the caller owns a result buffer with that spare capacity, let NTT write there
  * directly and avoid the temporary product plus copy-back. */
 static void bigint_sqr_dispatch_cap(uint64_t *out, int32_t out_cap, const uint64_t *a, int32_t na) {
-    /* Keep the capacity-aware heap-BigInt path on the same SSA-vs-NTT policy
-     * as bigint_sqr_dispatch.  Previously every public square at/above the NTT
-     * threshold jumped straight to NTT here, even in the transform-length
-     * windows where the cost model (and measurements) select SSA.  SSA writes
-     * exactly 2*na limbs, so it needs no NTT carry-room special case. */
-    if (na >= BN_SSA_THRESHOLD && out_cap >= 2 * na) {
-        int32_t sw; long sL; uint64_t sK;
-        if (ssa_choose(na, na, &sw, &sL, &sK) < ntt_cost_est(na) && sw) {
-            bn_ssa_mul(out, a, na, NULL, 0);
-            return;
-        }
+    if (na <= BN_SQR_KARA_THRESHOLD) {
+        bigint_sqr_dispatch(out, a, na);
+        return;
     }
-    if (na >= BN_NTT_THRESHOLD && out_cap >= 2 * na + 2) {
+    int top = bn_top_choice_fast(na, na, 1);
+    /* SSA writes exactly 2*na limbs, while NTT needs two carry limbs. */
+    if (top == BN_TOP_SSA && out_cap >= 2 * na) {
+        bn_ssa_mul(out, a, na, NULL, 0);
+        return;
+    }
+    if (top == BN_TOP_NTT && out_cap >= 2 * na + 2) {
         bn_ntt_sqr(out, a, na);
         return;
     }
     bigint_sqr_dispatch(out, a, na);
 }
 
+__attribute__((noinline))
+static void bn_mul_top_diff_small(uint64_t *out,
+                                  const uint64_t *a, const uint64_t *b,
+                                  int32_t n) {
+    /* The maximum n=24 frame is da[12], db[12], z1[25]. */
+    uint64_t scratch[49];
+    bn_toom2_diff(out, a, b, n, scratch);
+}
+
 /* Public magnitude multiply with size dispatch.  out must have na+nb limbs. */
-static void bigint_mul_dispatch(uint64_t *out,
-                                const uint64_t *a, int32_t na,
-                                const uint64_t *b, int32_t nb) {
+static void bigint_mul_dispatch_core(uint64_t *out,
+                                     const uint64_t *a, int32_t na,
+                                     const uint64_t *b, int32_t nb) {
     int32_t lo = na < nb ? na : nb;
     int32_t hi = na < nb ? nb : na;
 
     /* Small short side: schoolbook (balancing gains nothing below the
      * Karatsuba floor). */
     if (lo <= BN_KARA_THRESHOLD) {
+        if (na == nb &&
+            ((BN_MUL_TOP_DIFF_22 && na == 22) ||
+             (BN_MUL_TOP_DIFF_24 && na == 24))) {
+            bn_mul_top_diff_small(out, a, b, na);
+            return;
+        }
         bigint_mul_schoolbook_into(out, a, na, b, nb);
         return;
+    }
+
+#ifndef BN_MUL_SMALL_EQ_DIRECT
+#define BN_MUL_SMALL_EQ_DIRECT 1
+#endif
+#if BN_MUL_SMALL_EQ_DIRECT
+    /* Equal operands just above the schoolbook floor always resolve to the
+     * Toom-2 rung: a fixed stack frame replaces the per-call top-choice
+     * model, the scratch-need walk, and the TLS workspace lookup.  352 limbs
+     * covers bn_toom2's recursion frames for any n <= 64 at every plausible
+     * BN_KARA_THRESHOLD. */
+    if (na == nb && na <= 64) {
+        uint64_t scratch[352];
+        bn_toom2(out, a, b, na, scratch);
+        return;
+    }
+#endif
+
+    /*
+     * Split the almost-2:1 band before the balanced top-choice model pads it
+     * to the full long width.  Each half product has the short-side width and
+     * writes to a disjoint destination until the final linear-time stitch.
+     */
+    if (hi > lo) {
+        const uint64_t *big = na >= nb ? a : b;
+        const uint64_t *small = na >= nb ? b : a;
+        if (bn_mul_rect_parallel(out, big, hi, small, lo))
+            return;
     }
 
     /* Lopsided with a LARGE short side (e.g. 8192×512): previously schoolbook —
      * O(hi·lo) with no subquadratic help. Split the long operand into lo-limb
      * chunks, multiply each chunk with the balanced ladder (chunk ≤ lo keeps the
      * recursion in the ≤2× band), and accumulate the shifted products. Cost
-     * becomes ⌈hi/lo⌉ balanced lo×lo multiplies. prod is a plain malloc, not the
-     * thread workspace — the recursive dispatch below owns bn_ws. */
+     * becomes ⌈hi/lo⌉ balanced lo×lo multiplies. A separate depth-indexed TLS
+     * cache keeps prod alive while recursive dispatch owns bn_ws. */
     if (hi > 2 * lo) {
         const uint64_t *big = na >= nb ? a : b;
         const uint64_t *sml = na >= nb ? b : a;
         int32_t tot = na + nb;
+#if BN_LOPSIDED_STITCH
+        /* Consecutive lo-limb chunk products overlap in exactly lo limbs.
+         * Copy each untouched upper half rather than zeroing the full result
+         * and adding into those zeros.  A carry beyond an upper half is held
+         * for the next boundary, where it belongs. */
+        uint64_t pending = 0;
+#else
         for (int32_t i = 0; i < tot; i++) out[i] = 0;
-        uint64_t *prod = (uint64_t *)malloc((size_t)(2 * lo) * sizeof(uint64_t));
+#endif
+        int prod_owned;
+        uint64_t *prod = bn_rect_ws_get((size_t)(2 * lo), &prod_owned);
         if (!prod) { bigint_mul_schoolbook_into(out, a, na, b, nb); return; }
         for (int32_t off = 0; off < hi; off += lo) {
             int32_t clen = (hi - off < lo) ? hi - off : lo;
+            int nested_lopsided =
+                clen > BN_KARA_THRESHOLD && lo > 2 * clen;
+            if (nested_lopsided) bn_rect_depth++;
             bigint_mul_dispatch(prod, big + off, clen, sml, lo);
+            if (nested_lopsided) bn_rect_depth--;
+#if BN_LOPSIDED_STITCH
+            if (off == 0) {
+                memcpy(out, prod, (size_t)(clen + lo) * sizeof(uint64_t));
+                continue;
+            }
+            uint64_t carry = bn_add_n(out + off, out + off, prod, lo);
+            memcpy(out + off + lo, prod + lo,
+                   (size_t)clen * sizeof(uint64_t));
+            uint64_t increment = carry + pending;
+            int32_t i = 0;
+            while (increment && i < clen) {
+                __uint128_t sum = (__uint128_t)out[off + lo + i] + increment;
+                out[off + lo + i] = (uint64_t)sum;
+                increment = (uint64_t)(sum >> 64);
+                i++;
+            }
+            pending = increment;
+#else
             bn_addto(out + off, tot - off, prod, clen + lo);
+#endif
         }
-        free(prod);
+#if BN_LOPSIDED_STITCH
+        if (pending) die("internal lopsided multiply overflow");
+#endif
+        if (prod_owned) free(prod);
         return;
     }
 
-    /* Balanced-ish and large: pad both to n = hi and run the ladder.
-     * Result is na+nb limbs; the ladder writes 2*hi limbs, so we use a
-     * temporary 2*hi buffer and copy back na+nb of it. */
+    /* Balanced-ish and large: pad both to n = hi when their lengths differ.
+     * Equal-length inputs already satisfy the ladder contract and `out` has
+     * exactly 2n limbs, so that common case needs scratch only. */
     int32_t n = hi;
 
-    /* O(n log n) top rung: Goldilocks single-prime NTT for large balanced
-     * operands (pad the shorter side to n; the NTT writes 2n+2 limbs). */
-    /* Top rungs: SSA vs Goldilocks NTT by cost model — both are step
-     * functions of transform length, so a single threshold misdispatches in
-     * the windows where one algorithm's L has stepped and the other's hasn't
-     * (e.g. 3072 limbs: NTT still rides its 2048-class transform). */
-    if (n >= BN_SSA_THRESHOLD) {
-        int32_t sw; long sL; uint64_t sK;
-        if (ssa_choose(na, nb, &sw, &sL, &sK) < ntt_cost_est(n) && sw) {
-            bn_ssa_mul(out, a, na, b, nb);
-            return;
-        }
+    /* Top rung: compare the smooth Toom ladder with both quantized transform
+     * families.  Padding/carry-room details are handled by each branch. */
+    int top = bn_top_choice_fast(na, nb, 0);
+    if (top == BN_TOP_SSA) {
+        bn_ssa_mul(out, a, na, b, nb);
+        return;
     }
-    if (n >= BN_NTT_THRESHOLD) {
+    if (top == BN_TOP_NTT) {
         size_t total = (size_t)n + (size_t)n + (size_t)(2 * n + 4);
         uint64_t *ws = bn_ws_get_zeroed(total);
         int owned = 0;
@@ -2117,18 +6498,29 @@ static void bigint_mul_dispatch(uint64_t *out,
     }
 
     size_t need = bn_scratch_need(n);
+    if (na == n && nb == n) {
+        uint64_t *sc = bn_ws_get(need);
+        int owned = 0;
+        if (!sc) { sc = (uint64_t *)malloc(need * sizeof(uint64_t)); owned = 1; }
+        bn_mul_eq(out, a, b, n, sc);
+        if (owned) free(sc);
+        return;
+    }
+
     /* one contiguous arena: padded a (n) + padded b (n) + product (2n) + scratch */
     size_t total = (size_t)n + (size_t)n + (size_t)(2 * n) + need;
-    uint64_t *arena = bn_ws_get_zeroed(total);
+    uint64_t *arena = bn_ws_get(total);
     int owned = 0;
-    if (!arena) { arena = (uint64_t *)calloc(total, sizeof(uint64_t)); owned = 1; }
+    if (!arena) { arena = (uint64_t *)malloc(total * sizeof(uint64_t)); owned = 1; }
     uint64_t *pa = arena;
     uint64_t *pb = pa + n;
     uint64_t *prod = pb + n;
     uint64_t *sc = prod + 2 * n;
 
     for (int32_t i = 0; i < na; i++) pa[i] = a[i];
+    for (int32_t i = na; i < n; i++) pa[i] = 0;
     for (int32_t i = 0; i < nb; i++) pb[i] = b[i];
+    for (int32_t i = nb; i < n; i++) pb[i] = 0;
 
     bn_mul_eq(prod, pa, pb, n, sc);
 
@@ -2143,19 +6535,16 @@ static void bigint_mul_dispatch_cap(uint64_t *out, int32_t out_cap,
     int32_t lo = na < nb ? na : nb;
     int32_t hi = na < nb ? nb : na;
 
-    /* As above, capacity is an output-layout concern, not a reason to bypass
-     * the top-rung policy.  SSA emits exactly na+nb limbs and can therefore
-     * write directly to every valid caller buffer. */
-    if (lo > BN_KARA_THRESHOLD && hi <= 2 * lo && hi >= BN_SSA_THRESHOLD &&
-        out_cap >= na + nb) {
-        int32_t sw; long sL; uint64_t sK;
-        if (ssa_choose(na, nb, &sw, &sL, &sK) < ntt_cost_est(hi) && sw) {
-            bn_ssa_mul(out, a, na, b, nb);
-            return;
-        }
+    int balanced = lo > BN_KARA_THRESHOLD && hi <= 2 * lo;
+    int top = balanced ? bn_top_choice_fast(na, nb, 0) : BN_TOP_TOOM;
+    /* Capacity is an output-layout concern, not a reason to bypass the policy.
+     * SSA emits exactly na+nb limbs and can use every valid caller buffer. */
+    if (top == BN_TOP_SSA && out_cap >= na + nb) {
+        bn_ssa_mul(out, a, na, b, nb);
+        return;
     }
 
-    if (lo > BN_KARA_THRESHOLD && hi <= 2 * lo && hi >= BN_NTT_THRESHOLD && out_cap >= 2 * hi + 2) {
+    if (top == BN_TOP_NTT && out_cap >= 2 * hi + 2) {
         int32_t n = hi;
         if (na == n && nb == n) {
             bn_ntt_mul(out, a, b, n);
@@ -2179,7 +6568,98 @@ static void bigint_mul_dispatch_cap(uint64_t *out, int32_t out_cap,
     bigint_mul_dispatch(out, a, na, b, nb);
 }
 
-static WValue bigint_mul_any(WValue a, WValue b) {
+/* Short two-stream kernels (schoolbook rows, diagonal squares) stall when
+ * the result buffer lands within the LSU's 12-bit disambiguation window of
+ * an operand: every operand load false-matches in-flight result stores
+ * (measured up to 2.4x on 32-64 limb shapes; the offset is a heap-layout
+ * lottery that environment size flips).  When the allocated result hazards
+ * against an operand, compute into a page-offset-corrected per-thread
+ * buffer and copy out. */
+#ifndef BN_EQ_PAGE_HAZARD_GUARD
+#define BN_EQ_PAGE_HAZARD_GUARD 1
+#endif
+#ifndef BN_PAGE_HAZARD_WINDOW
+#define BN_PAGE_HAZARD_WINDOW 256u
+#endif
+#if BN_EQ_PAGE_HAZARD_GUARD
+static inline int bn_page_hazard(const uint64_t *dst, const uint64_t *src) {
+    uintptr_t delta = ((uintptr_t)dst - (uintptr_t)src) & 4095u;
+    return delta < BN_PAGE_HAZARD_WINDOW ||
+           delta > 4096u - BN_PAGE_HAZARD_WINDOW;
+}
+static __thread uint64_t *bn_eq_redirect;
+static uint64_t *bn_eq_redirect_slot(const uint64_t *a, const uint64_t *b) {
+    if (!bn_eq_redirect) {
+        /* 128 result limbs + a full page of placement slack. */
+        bn_eq_redirect = (uint64_t *)malloc((128 + 512) * sizeof(uint64_t));
+        if (!bn_eq_redirect) return NULL;
+    }
+    for (uint32_t off = 0; off < 512; off += 64) {
+        uint64_t *candidate = bn_eq_redirect + off;
+        if (!bn_page_hazard(candidate, a) && !bn_page_hazard(candidate, b))
+            return candidate;
+    }
+    return NULL;
+}
+#endif
+
+static WValue bigint_mul_positive_equal(
+    WBigint *a, WBigint *b, int32_t n) {
+    if (n == 1) {
+        __uint128_t product =
+            (__uint128_t)a->limbs[0] * b->limbs[0];
+        uint64_t low = (uint64_t)product;
+        uint64_t high = (uint64_t)(product >> 64);
+        if (high == 0) return bigint_finish_one_limb(low, 0);
+        WBigint *r = bigint_alloc_raw_hot(2);
+        r->limbs[0] = low;
+        r->limbs[1] = high;
+        r->size = 2;
+        return bigint_box(r);
+    }
+
+    int32_t cap = n + n;
+    if (n > BN_KARA_THRESHOLD && n >= BN_NTT_THRESHOLD)
+        cap = 2 * n + 2;
+    WBigint *r = bigint_alloc_raw_hot(cap);
+    uint64_t *dst = r->limbs;
+#ifndef BN_EQ_PAGE_HAZARD_FORCE
+#define BN_EQ_PAGE_HAZARD_FORCE 0 /* test hook: always take the redirect */
+#endif
+#if BN_EQ_PAGE_HAZARD_GUARD
+    int redirected = 0;
+    if (n <= 64 &&
+        (BN_EQ_PAGE_HAZARD_FORCE ||
+         bn_page_hazard(dst, a->limbs) || bn_page_hazard(dst, b->limbs))) {
+        uint64_t *safe = bn_eq_redirect_slot(a->limbs, b->limbs);
+        if (safe) { dst = safe; redirected = 1; }
+    }
+#endif
+    if (a == b) {
+        bigint_sqr_dispatch_cap(
+            dst, (int32_t)(redirected ? 2 * n : (int32_t)r->cap),
+            a->limbs, n);
+    } else if (n <= 16) {
+        /* Tiny products resolve to the inline fixed kernels inside the
+         * schoolbook entry; the cap/top-choice dispatch layers cost more
+         * than the multiply at this size. */
+        bigint_mul_schoolbook_into(dst, a->limbs, n, b->limbs, n);
+    } else {
+        bigint_mul_dispatch_cap(
+            dst, (int32_t)(redirected ? 2 * n : (int32_t)r->cap),
+            a->limbs, n, b->limbs, n);
+    }
+#if BN_EQ_PAGE_HAZARD_GUARD
+    if (redirected)
+        memcpy(r->limbs, dst, (size_t)(2 * n) * sizeof(uint64_t));
+#endif
+    int32_t size = 2 * n - (r->limbs[2 * n - 1] == 0);
+    r->size = size;
+    return bigint_box(r);
+}
+
+static __attribute__((noinline))
+WValue bigint_mul_any_generic(WValue a, WValue b) {
     uint64_t sa, sb;
     int32_t alen, blen;
     const uint64_t *al = integer_limbs(a, &sa, &alen);
@@ -2191,15 +6671,48 @@ static WValue bigint_mul_any(WValue a, WValue b) {
 
     if (a_abs == 0 || b_abs == 0) return w_box_int(0);
 
+#ifndef BN_MUL_11_FAST
+#define BN_MUL_11_FAST 1
+#endif
+#if BN_MUL_11_FAST
+    if (a_abs == 1 && b_abs == 1) {
+        __uint128_t product = (__uint128_t)al[0] * bl[0];
+        WBigint *r = bigint_alloc_raw_hot(2);
+        r->limbs[0] = (uint64_t)product;
+        r->limbs[1] = (uint64_t)(product >> 64);
+        int32_t size = r->limbs[1] != 0 ? 2 : 1;
+        r->size = result_neg ? -size : size;
+        return bigint_finish_mag_add(r);
+    }
+#endif
+
     int32_t cap = a_abs + b_abs;
     int32_t lo = a_abs < b_abs ? a_abs : b_abs;
     int32_t hi = a_abs < b_abs ? b_abs : a_abs;
     if (lo > BN_KARA_THRESHOLD && hi <= 2 * lo && hi >= BN_NTT_THRESHOLD) cap = 2 * hi + 2;
+#ifndef BN_MUL_RAW_RESULT
+#define BN_MUL_RAW_RESULT 1
+#endif
+#if BN_MUL_RAW_RESULT
+    WBigint *r = bigint_alloc_raw_hot(cap);
+#else
     WBigint *r = bigint_alloc(cap);
-    /* Squaring fast path: |a| == |b| (same limbs, or equal magnitudes) routes
-     * to the squaring ladder (one operand evaluated; ~1.4x).  The sign is still
-     * applied via result_neg below, so x*(-x) = -x^2 stays correct. */
-    if (a_abs == b_abs && (al == bl || memcmp(al, bl, (size_t)a_abs * sizeof(uint64_t)) == 0)) {
+#endif
+    /* Squaring fast path: pointer-identical magnitudes route to the one-input
+     * ladder.  Comparing every equal-length x*y with memcmp penalized ordinary
+     * multiplication merely to detect separately allocated equal values;
+     * those remain correct through the multiply ladder.  The common x*x form
+     * naturally shares its limb pointer; result_neg remains authoritative for
+     * every sign combination. */
+#ifndef BN_MUL_VALUE_EQUAL_SQR
+#define BN_MUL_VALUE_EQUAL_SQR 0
+#endif
+    if (a_abs == b_abs &&
+        (al == bl
+#if BN_MUL_VALUE_EQUAL_SQR
+         || memcmp(al, bl, (size_t)a_abs * sizeof(uint64_t)) == 0
+#endif
+        )) {
         bigint_sqr_dispatch_cap(r->limbs, (int32_t)r->cap, al, a_abs);
     } else {
         bigint_mul_dispatch_cap(r->limbs, (int32_t)r->cap, al, a_abs, bl, b_abs);
@@ -2207,14 +6720,271 @@ static WValue bigint_mul_any(WValue a, WValue b) {
     r->size = a_abs + b_abs;
     while (r->size > 0 && r->limbs[r->size - 1] == 0) r->size--;
     if (result_neg && r->size > 0) r->size = -r->size;
+#ifndef BN_MUL_KNOWN_NORMALIZED
+#define BN_MUL_KNOWN_NORMALIZED 1
+#endif
+#if BN_MUL_KNOWN_NORMALIZED
+    /* The multiply path already trimmed its top limbs immediately above. */
+    return bigint_finish_mag_add(r);
+#else
     return bigint_normalize(r);
+#endif
+}
+
+static inline __attribute__((always_inline))
+WValue bigint_mul_any(WValue a, WValue b) {
+#ifndef BN_MUL_POSITIVE_EQUAL_FAST
+#define BN_MUL_POSITIVE_EQUAL_FAST 1
+#endif
+#ifndef BN_MUL_POSITIVE_PAIR_FAST
+#define BN_MUL_POSITIVE_PAIR_FAST 1
+#endif
+#ifndef BN_MUL_POSITIVE_EQUAL_FAST_MAX
+#define BN_MUL_POSITIVE_EQUAL_FAST_MAX 16
+#endif
+#ifndef BN_MUL_POSITIVE_PAIR_FAST_MAX
+#define BN_MUL_POSITIVE_PAIR_FAST_MAX 16
+#endif
+#ifndef BN_MUL_POSITIVE_PAIR_24
+#define BN_MUL_POSITIVE_PAIR_24 1
+#endif
+#ifndef BN_MUL_POSITIVE_PAIR_40
+#define BN_MUL_POSITIVE_PAIR_40 1
+#endif
+#if BN_MUL_POSITIVE_EQUAL_FAST
+    if (a == b && w_is_bigint(a)) {
+        WBigint *ba = w_as_bigint(a);
+        int32_t n = ba->size;
+        if (n == 1) {
+            __uint128_t product =
+                (__uint128_t)ba->limbs[0] * ba->limbs[0];
+            uint64_t low = (uint64_t)product;
+            uint64_t high = (uint64_t)(product >> 64);
+            if (high == 0)
+                return bigint_finish_one_limb(low, 0);
+            WBigint *r = bigint_alloc_raw_hot(2);
+            r->limbs[0] = low;
+            r->limbs[1] = high;
+            r->size = 2;
+            return bigint_box(r);
+        }
+        if (n > 1 && n <= BN_MUL_POSITIVE_EQUAL_FAST_MAX)
+            return bigint_mul_positive_equal(ba, ba, n);
+    }
+#endif
+#if BN_MUL_POSITIVE_PAIR_FAST
+    if (w_is_bigint(a) && w_is_bigint(b)) {
+        WBigint *ba = w_as_bigint(a);
+        WBigint *bb = w_as_bigint(b);
+        int32_t n = ba->size;
+        if (n == 1 && bb->size == 1) {
+            __uint128_t product =
+                (__uint128_t)ba->limbs[0] * bb->limbs[0];
+            uint64_t low = (uint64_t)product;
+            uint64_t high = (uint64_t)(product >> 64);
+            if (high == 0)
+                return bigint_finish_one_limb(low, 0);
+            WBigint *r = bigint_alloc_raw_hot(2);
+            r->limbs[0] = low;
+            r->limbs[1] = high;
+            r->size = 2;
+            return bigint_box(r);
+        }
+        if (n > 1 &&
+            (n <= BN_MUL_POSITIVE_PAIR_FAST_MAX ||
+             (BN_MUL_POSITIVE_PAIR_24 && n == 24) ||
+             (BN_MUL_POSITIVE_PAIR_40 && n == 40)) &&
+            bb->size == n)
+            return bigint_mul_positive_equal(ba, bb, n);
+    }
+#endif
+    return bigint_mul_any_generic(a, b);
 }
 
 /* ---- Bigint division (schoolbook, Knuth Algorithm D simplified) ---- */
 
+/* For normalized d and nh < d, divide nh:B+nl by d using a precomputed
+ * reciprocal.  This is GMP's udiv_qrnnd_preinv correction scheme: one
+ * multiply-high plus two bounded corrections replace the compiler's
+ * multi-instruction __udivmodti4 helper for every quotient limb. */
+static inline uint64_t bn_div_qr_preinv(uint64_t nh, uint64_t nl,
+                                        uint64_t d, uint64_t dinv,
+                                        uint64_t *rem) {
+    __uint128_t p = (__uint128_t)nh * dinv;
+    uint64_t pl = (uint64_t)p;
+    uint64_t ph = (uint64_t)(p >> 64);
+    uint64_t ql = pl + nl;
+    uint64_t carry = ql < pl;
+    uint64_t q = ph + nh + 1 + carry;
+    uint64_t r = nl - q * d;
+    uint64_t mask = (uint64_t)-(r > ql);
+    q += mask;
+    r += mask & d;
+    if (r >= d) {
+        r -= d;
+        q++;
+    }
+    *rem = r;
+    return q;
+}
+
+/* floor((2^19 - 3*2^8) / d9) for d9 in [256, 511]: the 11-bit seed of the
+ * Moller-Granlund division-free reciprocal iteration below. */
+static const uint16_t bn_invert_limb_table[256] = {
+    0x7fd, 0x7f5, 0x7ed, 0x7e5, 0x7dd, 0x7d5, 0x7ce, 0x7c6,
+    0x7bf, 0x7b7, 0x7b0, 0x7a8, 0x7a1, 0x79a, 0x792, 0x78b,
+    0x784, 0x77d, 0x776, 0x76f, 0x768, 0x761, 0x75b, 0x754,
+    0x74d, 0x747, 0x740, 0x739, 0x733, 0x72c, 0x726, 0x720,
+    0x719, 0x713, 0x70d, 0x707, 0x700, 0x6fa, 0x6f4, 0x6ee,
+    0x6e8, 0x6e2, 0x6dc, 0x6d6, 0x6d1, 0x6cb, 0x6c5, 0x6bf,
+    0x6ba, 0x6b4, 0x6ae, 0x6a9, 0x6a3, 0x69e, 0x698, 0x693,
+    0x68d, 0x688, 0x683, 0x67d, 0x678, 0x673, 0x66e, 0x669,
+    0x664, 0x65e, 0x659, 0x654, 0x64f, 0x64a, 0x645, 0x640,
+    0x63c, 0x637, 0x632, 0x62d, 0x628, 0x624, 0x61f, 0x61a,
+    0x616, 0x611, 0x60c, 0x608, 0x603, 0x5ff, 0x5fa, 0x5f6,
+    0x5f1, 0x5ed, 0x5e9, 0x5e4, 0x5e0, 0x5dc, 0x5d7, 0x5d3,
+    0x5cf, 0x5cb, 0x5c6, 0x5c2, 0x5be, 0x5ba, 0x5b6, 0x5b2,
+    0x5ae, 0x5aa, 0x5a6, 0x5a2, 0x59e, 0x59a, 0x596, 0x592,
+    0x58e, 0x58a, 0x586, 0x583, 0x57f, 0x57b, 0x577, 0x574,
+    0x570, 0x56c, 0x568, 0x565, 0x561, 0x55e, 0x55a, 0x556,
+    0x553, 0x54f, 0x54c, 0x548, 0x545, 0x541, 0x53e, 0x53a,
+    0x537, 0x534, 0x530, 0x52d, 0x52a, 0x526, 0x523, 0x520,
+    0x51c, 0x519, 0x516, 0x513, 0x50f, 0x50c, 0x509, 0x506,
+    0x503, 0x500, 0x4fc, 0x4f9, 0x4f6, 0x4f3, 0x4f0, 0x4ed,
+    0x4ea, 0x4e7, 0x4e4, 0x4e1, 0x4de, 0x4db, 0x4d8, 0x4d5,
+    0x4d2, 0x4cf, 0x4cc, 0x4ca, 0x4c7, 0x4c4, 0x4c1, 0x4be,
+    0x4bb, 0x4b9, 0x4b6, 0x4b3, 0x4b0, 0x4ad, 0x4ab, 0x4a8,
+    0x4a5, 0x4a3, 0x4a0, 0x49d, 0x49b, 0x498, 0x495, 0x493,
+    0x490, 0x48d, 0x48b, 0x488, 0x486, 0x483, 0x481, 0x47e,
+    0x47c, 0x479, 0x477, 0x474, 0x472, 0x46f, 0x46d, 0x46a,
+    0x468, 0x465, 0x463, 0x461, 0x45e, 0x45c, 0x459, 0x457,
+    0x455, 0x452, 0x450, 0x44e, 0x44b, 0x449, 0x447, 0x444,
+    0x442, 0x440, 0x43e, 0x43b, 0x439, 0x437, 0x435, 0x432,
+    0x430, 0x42e, 0x42c, 0x42a, 0x428, 0x425, 0x423, 0x421,
+    0x41f, 0x41d, 0x41b, 0x419, 0x417, 0x414, 0x412, 0x410,
+    0x40e, 0x40c, 0x40a, 0x408, 0x406, 0x404, 0x402, 0x400,
+};
+
+/* floor((B^2-1)/d) - B for normalized d (top bit set), computed with the
+ * branchless Moller-Granlund Newton iteration: a table seed refined to 21,
+ * 34, then 64 bits.  This replaces a __udivti3 libcall (and the TLS cache
+ * that amortized it) with ~15 straight-line multiply/shift instructions. */
+static inline uint64_t bn_invert_limb(uint64_t d) {
+    uint64_t v0 = bn_invert_limb_table[(d >> 55) - 256];
+    uint64_t d40 = (d >> 24) + 1;
+    uint64_t v1 = (v0 << 11) - ((v0 * v0 * d40) >> 40) - 1;
+    uint64_t v2 = (v1 << 13) +
+                  ((v1 * ((1ULL << 60) - v1 * d40)) >> 47);
+    uint64_t d0 = d & 1;
+    uint64_t d63 = (d >> 1) + d0;                      /* ceil(d/2) */
+    uint64_t e = ((v2 >> 1) & (0 - d0)) - v2 * d63;
+    uint64_t v3 = (v2 << 31) +
+                  ((uint64_t)(((__uint128_t)v2 * e) >> 64) >> 1);
+    uint64_t v4 =
+        v3 - (uint64_t)((((__uint128_t)v3 * d) + d) >> 64) - d;
+    return v4;
+}
+
+/* Two-entry per-thread inverse cache: repeated division by one divisor
+ * (radix conversion, modular loops, the common n/1 shapes) skips the
+ * ~12-cycle invert_limb chain.  Divisors here are normalized (top bit
+ * set), so the zero-initialized entries can never false-hit. */
+static __thread uint64_t bn_div_preinv_d[2];
+static __thread uint64_t bn_div_preinv_v[2];
+static __thread uint8_t bn_div_preinv_next;
+
+static uint64_t bn_div_preinv(uint64_t d) {
+    if (bn_div_preinv_d[0] == d) return bn_div_preinv_v[0];
+    if (bn_div_preinv_d[1] == d) return bn_div_preinv_v[1];
+    uint64_t v = bn_invert_limb(d);
+    int slot = bn_div_preinv_next & 1;
+    bn_div_preinv_next ^= 1;
+    bn_div_preinv_d[slot] = d;
+    bn_div_preinv_v[slot] = v;
+    return v;
+}
+
+/* floor((B^3-1)/(d1*B+d0)) - B for normalized d1 (GMP's invert_pi1): the
+ * 2-limb reciprocal seeding the 3-by-2 division steps below. */
+static inline uint64_t bn_invert_pi1(uint64_t d1, uint64_t d0) {
+    uint64_t v = bn_invert_limb(d1);
+    uint64_t p = d1 * v;
+    p += d0;
+    if (p < d0) {
+        v--;
+        uint64_t mask = 0 - (uint64_t)(p >= d1);
+        p -= d1;
+        v += mask;
+        p -= mask & d1;
+    }
+    __uint128_t t = (__uint128_t)d0 * v;
+    uint64_t t1 = (uint64_t)(t >> 64);
+    uint64_t t0 = (uint64_t)t;
+    p += t1;
+    if (p < t1) {
+        v--;
+        if (p >= d1 && (p > d1 || t0 >= d0)) v--;
+    }
+    return v;
+}
+
+/* Divide (n2,n1,n0) by the normalized 2-limb divisor (d1,d0) with the
+ * precomputed 3/2 reciprocal: one umulh + a few adds and one unlikely fixup
+ * (GMP's udiv_qr_3by2).  Requires (n2,n1) < (d1,d0); yields the exact digit
+ * and 2-limb remainder, so no refine loop and no add-back are needed. */
+static inline uint64_t bn_udiv_qr_3by2(uint64_t n2, uint64_t n1, uint64_t n0,
+                                       uint64_t d1, uint64_t d0,
+                                       uint64_t dinv,
+                                       uint64_t *r1p, uint64_t *r0p) {
+    __uint128_t qq = (__uint128_t)n2 * dinv;
+    qq += ((__uint128_t)n2 << 64) | n1;
+    uint64_t q = (uint64_t)(qq >> 64);
+    uint64_t q0 = (uint64_t)qq;
+    __uint128_t r = ((__uint128_t)(n1 - d1 * q) << 64) | n0;
+    r -= ((__uint128_t)d1 << 64) | d0;
+    r -= (__uint128_t)q * d0;
+    uint64_t r1 = (uint64_t)(r >> 64);
+    q++;
+    uint64_t mask = 0 - (uint64_t)(r1 >= q0);
+    q += mask;
+    r += ((__uint128_t)(mask & d1) << 64) | (mask & d0);
+    if (__builtin_expect(
+            r >= (((__uint128_t)d1 << 64) | d0), 0)) {
+        /* The empty asm keeps clang from if-converting this ~never-taken
+         * fixup into a csel chain on the per-digit critical path. */
+        __asm__ volatile("");
+        q++;
+        r -= ((__uint128_t)d1 << 64) | d0;
+    }
+    *r1p = (uint64_t)(r >> 64);
+    *r0p = (uint64_t)r;
+    return q;
+}
+
+static uint64_t mag_div_wide_preinv(uint64_t *quotient,
+                                    const uint64_t *a, int32_t alen,
+                                    uint64_t d) {
+    unsigned shift = (unsigned)__builtin_clzll(d);
+    uint64_t normalized_d = d << shift;
+    uint64_t dinv = bn_div_preinv(normalized_d);
+    uint64_t rem = shift ? a[alen - 1] >> (64 - shift) : 0;
+    for (int32_t i = alen - 1; i >= 0; i--) {
+        uint64_t low = a[i] << shift;
+        if (shift && i > 0) low |= a[i - 1] >> (64 - shift);
+        uint64_t q =
+            bn_div_qr_preinv(rem, low, normalized_d, dinv, &rem);
+        if (quotient) quotient[i] = q;
+    }
+    return shift ? rem >> shift : rem;
+}
+
+#ifndef BN_DIV_SINGLE_PREINV
+#define BN_DIV_SINGLE_PREINV 1
+#endif
+
 /* Divide bigint magnitude by a single uint64_t divisor. Returns quotient, writes remainder. */
 static WBigint *mag_div_single(const uint64_t *a, int32_t alen, uint64_t d, uint64_t *rem) {
-    WBigint *q = bigint_alloc(alen);
+    WBigint *q = bigint_alloc_raw_hot(alen);
     if (d == 0) die("division by zero");
 
     if (d == 1) {
@@ -2259,7 +7029,9 @@ static WBigint *mag_div_single(const uint64_t *a, int32_t alen, uint64_t d, uint
         }
         *rem = r;
     } else {
-        /* Wide non-power-of-two divisor: retain the exact 128/64 fallback. */
+#if BN_DIV_SINGLE_PREINV
+        *rem = mag_div_wide_preinv(q->limbs, a, alen, d);
+#else
         __uint128_t r = 0;
         for (int32_t i = alen - 1; i >= 0; i--) {
             r = (r << 64) | a[i];
@@ -2267,10 +7039,60 @@ static WBigint *mag_div_single(const uint64_t *a, int32_t alen, uint64_t d, uint
             r %= d;
         }
         *rem = (uint64_t)r;
+#endif
     }
     q->size = alen;
     while (q->size > 0 && q->limbs[q->size - 1] == 0) q->size--;
     return q;
+}
+
+/* Exact reduction for x < 2^64 using floor(2^64 / d).  The multiply-high
+ * quotient can undershoot by at most one, so a single correction suffices. */
+static inline uint64_t mag_reduce_u64_recip(uint64_t x, uint64_t d,
+                                            uint64_t reciprocal) {
+    uint64_t q = (uint64_t)(((__uint128_t)x * reciprocal) >> 64);
+    uint64_t r = x - q * d;
+    if (r >= d) r -= d;
+    return r;
+}
+
+typedef struct {
+    uint64_t d;
+    uint64_t reciprocal;
+    uint64_t bmod;
+    uint64_t pow_b[513];
+    uint16_t max_power;
+    uint8_t valid;
+} WMod1Plan;
+
+static __thread WMod1Plan w_mod1_plans[2];
+static __thread unsigned w_mod1_plan_next;
+
+static const WMod1Plan *mag_mod1_plan(uint64_t d, int block) {
+    WMod1Plan *plan = NULL;
+    for (int i = 0; i < 2; i++) {
+        if (w_mod1_plans[i].valid && w_mod1_plans[i].d == d) {
+            plan = &w_mod1_plans[i];
+            break;
+        }
+    }
+    if (!plan) {
+        plan = &w_mod1_plans[w_mod1_plan_next++ & 1U];
+        plan->d = d;
+        plan->reciprocal = UINT64_MAX / d;
+        uint64_t rem_max = UINT64_MAX - plan->reciprocal * d;
+        if (rem_max == d - 1) plan->reciprocal++;
+        plan->bmod = rem_max + 1;
+        if (plan->bmod == d) plan->bmod = 0;
+        plan->pow_b[0] = 1;
+        plan->max_power = 0;
+        plan->valid = 1;
+    }
+    for (int i = (int)plan->max_power + 1; i <= block; i++)
+        plan->pow_b[i] = mag_reduce_u64_recip(
+            plan->pow_b[i - 1] * plan->bmod, d, plan->reciprocal);
+    if (plan->max_power < block) plan->max_power = (uint16_t)block;
+    return plan;
 }
 
 static uint64_t mag_mod_single(const uint64_t *a, int32_t alen, uint64_t d) {
@@ -2282,36 +7104,832 @@ static uint64_t mag_mod_single(const uint64_t *a, int32_t alen, uint64_t d) {
     if (d == 1) return 0;
     if ((d & (d - 1)) == 0) return alen > 0 ? (a[0] & (d - 1)) : 0;
     if (d <= UINT32_MAX) {
+        if (alen >= 8) {
+            /*
+             * Fold blocks of base-2^64 limbs.  Let B = 2^64 mod d.
+             * A block contributes
+             *
+             *   r*B^8 + a[7]*B^7 + ... + a[1]*B + a[0]  (mod d).
+             *
+             * Every B^i is below the 32-bit divisor, so the nine products fit
+             * in u128.  Reducing the high and low halves uses exact
+             * multiply-high reciprocal reductions; high*B + low remains below
+             * 2^64 because both residues are below d.  Even a 512-limb block
+             * fits comfortably in u128 (the sum is below 2^105).  Four
+             * independent accumulators hide multiply latency, then one
+             * reduction handles the whole block.
+             */
+            /* The two-entry plan cache amortizes power-table setup.  With warm
+             * plans the best fold tracks the input's power-of-two scale,
+             * flattening at 512 limbs; wider plans add cold-cache/TLS cost for
+             * little further reduction in the number of folds. */
+            int block = alen >= 512 ? 512 :
+                        alen >= 256 ? 256 :
+                        alen >= 128 ? 128 :
+                        alen >= 64  ? 64 :
+                        alen >= 32  ? 32 :
+                        alen >= 16  ? 16 : 8;
+            const WMod1Plan *plan = mag_mod1_plan(d, block);
+            uint64_t reciprocal = plan->reciprocal;
+            uint64_t bmod = plan->bmod;
+            const uint64_t *pow_b = plan->pow_b;
+
+            uint64_t r = 0;
+            int32_t pos = alen;
+            int width = pos % block;
+            if (width == 0) width = block;
+            while (pos > 0) {
+                int32_t base = pos - width;
+                __uint128_t acc0 = (__uint128_t)r * pow_b[width];
+                __uint128_t acc1 = 0, acc2 = 0, acc3 = 0;
+                int j = 0;
+                for (; j + 4 <= width; j += 4) {
+                    acc0 += (__uint128_t)a[base + j] * pow_b[j];
+                    acc1 += (__uint128_t)a[base + j + 1] * pow_b[j + 1];
+                    acc2 += (__uint128_t)a[base + j + 2] * pow_b[j + 2];
+                    acc3 += (__uint128_t)a[base + j + 3] * pow_b[j + 3];
+                }
+                for (; j < width; j++)
+                    acc0 += (__uint128_t)a[base + j] * pow_b[j];
+                __uint128_t acc = (acc0 + acc1) + (acc2 + acc3);
+                uint64_t hi_rem = mag_reduce_u64_recip(
+                    (uint64_t)(acc >> 64), d, reciprocal);
+                uint64_t lo_rem = mag_reduce_u64_recip(
+                    (uint64_t)acc, d, reciprocal);
+                r = mag_reduce_u64_recip(hi_rem * bmod + lo_rem,
+                                         d, reciprocal);
+                pos = base;
+                width = block;
+            }
+            return r;
+        }
+
         /* floor(2^64 / d).  For x < 2^64, high64(x * reciprocal)
          * underestimates floor(x / d) by at most one, so one conditional
          * subtraction completes an exact Barrett reduction. */
         uint64_t reciprocal = UINT64_MAX / d;
-        if (UINT64_MAX % d == d - 1) reciprocal++;
+        if (UINT64_MAX - reciprocal * d == d - 1) reciprocal++;
         uint64_t r = 0;
         for (int32_t i = alen - 1; i >= 0; i--) {
             uint64_t x = (r << 32) | (a[i] >> 32);
-            uint64_t q = (uint64_t)(((__uint128_t)x * reciprocal) >> 64);
-            r = x - q * d;
-            if (r >= d) r -= d;
+            r = mag_reduce_u64_recip(x, d, reciprocal);
 
             x = (r << 32) | (a[i] & UINT32_MAX);
-            q = (uint64_t)(((__uint128_t)x * reciprocal) >> 64);
-            r = x - q * d;
-            if (r >= d) r -= d;
+            r = mag_reduce_u64_recip(x, d, reciprocal);
         }
         return r;
     }
+#if BN_DIV_SINGLE_PREINV
+    return mag_div_wide_preinv(NULL, a, alen, d);
+#else
     __uint128_t r = 0;
     for (int32_t i = alen - 1; i >= 0; i--) {
         r = (r << 64) | a[i];
         r %= d;
     }
     return (uint64_t)r;
+#endif
 }
+
+#ifndef BN_DIV_TRIANGULAR_Q_CERTIFIED
+#define BN_DIV_TRIANGULAR_Q_CERTIFIED 1
+#endif
+#ifndef BN_DIV_TRIANGULAR_Q_MIN
+#define BN_DIV_TRIANGULAR_Q_MIN 2
+#endif
+#ifndef BN_DIV_TRIANGULAR_Q_MAX
+#define BN_DIV_TRIANGULAR_Q_MAX 384
+#endif
+#ifndef BN_DIV_Q_LAZY_LOW
+#define BN_DIV_Q_LAZY_LOW 1
+#endif
+#ifndef BN_DIV_Q_FIRST_01
+#define BN_DIV_Q_FIRST_01 1
+#endif
+#ifndef BN_DIV_Q_ALIAS_NORMALIZED_V
+#define BN_DIV_Q_ALIAS_NORMALIZED_V 1
+#endif
+#ifndef BN_DIV_63_DIRECT
+#define BN_DIV_63_DIRECT 1
+#endif
+
+#if BN_DIV_TRIANGULAR_Q_CERTIFIED
+static inline __attribute__((always_inline))
+uint64_t bn_submul_fixed_2(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    uint64_t borrow = 0;
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t i = 0; i < 2; i++) {
+        __uint128_t product = (__uint128_t)up[i] * v;
+        uint64_t low = (uint64_t)product;
+        uint64_t sum = low + borrow;
+        uint64_t carry = sum < low;
+        uint64_t old = rp[i];
+        rp[i] = old - sum;
+        borrow =
+            (uint64_t)(product >> 64) + carry + (old < sum);
+    }
+    return borrow;
+}
+
+static inline __attribute__((always_inline))
+uint64_t bn_submul_fixed_3(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    uint64_t borrow = 0;
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t i = 0; i < 3; i++) {
+        __uint128_t product = (__uint128_t)up[i] * v;
+        uint64_t low = (uint64_t)product;
+        uint64_t sum = low + borrow;
+        uint64_t carry = sum < low;
+        uint64_t old = rp[i];
+        rp[i] = old - sum;
+        borrow =
+            (uint64_t)(product >> 64) + carry + (old < sum);
+    }
+    return borrow;
+}
+
+
+static inline __attribute__((always_inline))
+uint64_t mag_div_q_triangular_digit(
+    uint64_t *un, const uint64_t *vn, int32_t vlen,
+    int32_t j, int32_t skip, uint64_t d1, uint64_t d0, uint64_t dinv,
+    int cheap_zero_or_one, uint64_t *r1p, uint64_t *r0p) {
+    /* The remainder's top two limbs travel in registers (*r1p, *r0p) across
+     * digits, GMP sbpi1-style: a digit loads one fresh low limb, runs one
+     * 3-by-2 step, and multiply-subtracts only the row limbs BELOW the
+     * 3-by-2 window.  No per-digit top-limb stores or reloads remain. */
+    uint64_t r1 = *r1p;
+    uint64_t r0 = *r0p;
+    int32_t row = vlen - skip;
+    int32_t low = row - 2;
+    uint64_t n0 = un[j + vlen - 2];
+    uint64_t q;
+    if (cheap_zero_or_one && r1 == 0) {
+        q = r0 > d1 || (r0 == d1 && n0 >= d0);
+        if (q) {
+            uint64_t bw = low > 0
+                ? bn_sub_n(un + j + skip, un + j + skip, vn + skip, low)
+                : 0;
+            __uint128_t lhs = ((__uint128_t)r0 << 64) | n0;
+            __uint128_t rhs =
+                ((((__uint128_t)d1 << 64) | d0)) + bw;
+            if (__builtin_expect(lhs < rhs, 0)) {
+                /* 2-limb prefix tied the divisor but the low limbs fell
+                 * short: undo, the digit is 0. */
+                q = 0;
+                if (low > 0)
+                    (void)bn_add_n(un + j + skip, un + j + skip,
+                                   vn + skip, low);
+            } else {
+                lhs -= rhs;
+                *r1p = (uint64_t)(lhs >> 64);
+                *r0p = (uint64_t)lhs;
+                return 1;
+            }
+        }
+        *r1p = r0;
+        *r0p = n0;
+        return q;
+    }
+    if (__builtin_expect(r1 >= d1 && (r1 > d1 || r0 >= d0), 0)) {
+        /* Digit saturates at B-1: materialize the register limbs, run the
+         * classic full-row multiply-subtract with top-borrow add-back (a
+         * saturated estimate never refined downward in the old scheme, so
+         * the digit value is unchanged), and reload. */
+        un[j + vlen] = r1;
+        un[j + vlen - 1] = r0;
+        q = UINT64_MAX;
+        uint64_t bw = bn_submul_1(un + j + skip, vn + skip, row, q);
+        uint64_t top = un[j + vlen];
+        un[j + vlen] = top - bw;
+        if (top < bw) {
+            q--;
+            uint64_t carry = bn_add_n(
+                un + j + skip, un + j + skip, vn + skip, row);
+            un[j + vlen] += carry;
+        }
+        *r1p = un[j + vlen - 1];
+        *r0p = un[j + vlen - 2];
+        return q;
+    }
+    q = bn_udiv_qr_3by2(r1, r0, n0, d1, d0, dinv, &r1, &r0);
+    /* The 3-by-2 step consumed the top two divisor limbs exactly; only the
+     * row's lower limbs remain for the multiply-subtract. */
+    uint64_t cy = low > 0
+        ? bn_submul_1(un + j + skip, vn + skip, low, q)
+        : 0;
+    uint64_t cy1 = r0 < cy;
+    r0 -= cy;
+    uint64_t cy2 = r1 < cy1;
+    r1 -= cy1;
+    if (__builtin_expect(cy2 != 0, 0)) {
+        q--;
+        uint64_t carry = low > 0
+            ? bn_add_n(un + j + skip, un + j + skip, vn + skip, low)
+            : 0;
+        __uint128_t s = (__uint128_t)r0 + d0 + carry;
+        r0 = (uint64_t)s;
+        r1 += d1 + (uint64_t)(s >> 64);
+    }
+    *r1p = r1;
+    *r0p = r0;
+    return q;
+}
+
+#if BN_DIV_63_DIRECT
+/*
+ * The 6-by-3 quotient leaf is too small to amortize the generic triangular
+ * loop and variable-width submul entry.  Spell out its four quotient digits;
+ * the last digit needs only the high two divisor limbs under the same
+ * certificate used by the general triangular path.
+ */
+static inline __attribute__((always_inline))
+uint64_t mag_div_q_63_digit(
+    uint64_t *un, const uint64_t *vn, int32_t j, int skip,
+    uint64_t d1, uint64_t d0, uint64_t dinv, int cheap_zero_or_one) {
+    uint64_t n2 = un[j + 3];
+    uint64_t n1 = un[j + 2];
+    uint64_t n0 = un[j + 1];
+    uint64_t q;
+    if (cheap_zero_or_one && n2 == 0) {
+        q = n1 > d1 || (n1 == d1 && n0 >= d0);
+        if (q) {
+            uint64_t borrow = 0;
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+            for (int32_t i = 0; i < 3; i++) {
+                uint64_t old = un[j + i];
+                uint64_t sub = vn[i] + borrow;
+                uint64_t overflow = sub < vn[i];
+                un[j + i] = old - sub;
+                borrow = overflow | (old < sub);
+            }
+            if (borrow) {
+                /* the 2-limb prefix tied the divisor but the low limbs
+                 * fell short: undo, digit is 0 */
+                q = 0;
+                uint64_t carry = 0;
+                for (int32_t i = 0; i < 3; i++) {
+                    __uint128_t sum =
+                        (__uint128_t)un[j + i] + vn[i] + carry;
+                    un[j + i] = (uint64_t)sum;
+                    carry = (uint64_t)(sum >> 64);
+                }
+            }
+        }
+        return q;
+    }
+    if (__builtin_expect(n2 >= d1 && (n2 > d1 || n1 >= d0), 0)) {
+        /* Digit saturates at B-1: full-row multiply-subtract, classic
+         * top-borrow add-back.  Identical to the previous refine-loop
+         * outcome (a saturated estimate never refines downward). */
+        q = UINT64_MAX;
+        uint64_t bw = skip
+            ? bn_submul_fixed_2(un + j + 1, vn + 1, q)
+            : bn_submul_fixed_3(un + j, vn, q);
+        uint64_t top = un[j + 3];
+        un[j + 3] = top - bw;
+        if (top < bw) {
+            q--;
+            uint64_t carry = 0;
+            int32_t first = skip ? 1 : 0;
+            for (int32_t i = first; i < 3; i++) {
+                __uint128_t sum = (__uint128_t)un[j + i] + vn[i] + carry;
+                un[j + i] = (uint64_t)sum;
+                carry = (uint64_t)(sum >> 64);
+            }
+            un[j + 3] += carry;
+        }
+        return q;
+    }
+    uint64_t r1, r0;
+    q = bn_udiv_qr_3by2(n2, n1, n0, d1, d0, dinv, &r1, &r0);
+    if (!skip) {
+        /* One low divisor limb remains below the 3-by-2 window. */
+        __uint128_t p = (__uint128_t)q * vn[0];
+        uint64_t plo = (uint64_t)p;
+        uint64_t old = un[j];
+        un[j] = old - plo;
+        uint64_t cy = (uint64_t)(p >> 64) + (old < plo);
+        uint64_t cy1 = r0 < cy;
+        r0 -= cy;
+        uint64_t cy2 = r1 < cy1;
+        r1 -= cy1;
+        if (__builtin_expect(cy2 != 0, 0)) {
+            q--;
+            __uint128_t s = (__uint128_t)un[j] + vn[0];
+            un[j] = (uint64_t)s;
+            s = (__uint128_t)r0 + vn[1] + (uint64_t)(s >> 64);
+            r0 = (uint64_t)s;
+            r1 += vn[2] + (uint64_t)(s >> 64);
+        }
+    }
+    un[j + 3] = 0;
+    un[j + 2] = r1;
+    un[j + 1] = r0;
+    return q;
+}
+
+static __attribute__((no_stack_protector))
+WBigint *mag_div_q_63_certified(
+    const uint64_t *u, const uint64_t *v) {
+    uint64_t un[7], vn_work[3];
+    const uint64_t *vn;
+    int shift = __builtin_clzll(v[2]);
+    if (shift) {
+        vn_work[2] = (v[2] << shift) | (v[1] >> (64 - shift));
+        vn_work[1] = (v[1] << shift) | (v[0] >> (64 - shift));
+        vn_work[0] = v[0] << shift;
+        vn = vn_work;
+        un[6] = u[5] >> (64 - shift);
+        un[5] = (u[5] << shift) | (u[4] >> (64 - shift));
+        un[4] = (u[4] << shift) | (u[3] >> (64 - shift));
+        un[3] = (u[3] << shift) | (u[2] >> (64 - shift));
+        un[2] = (u[2] << shift) | (u[1] >> (64 - shift));
+        un[1] = (u[1] << shift) | (u[0] >> (64 - shift));
+    } else {
+        vn = v;
+        un[6] = 0;
+        un[5] = u[5];
+        un[4] = u[4];
+        un[3] = u[3];
+        un[2] = u[2];
+        un[1] = u[1];
+    }
+
+    WBigint *q = bigint_alloc_raw_hot_exact(4);
+    uint64_t d1 = vn[2];
+    uint64_t d0 = vn[1];
+    uint64_t dinv = bn_invert_pi1(d1, d0);
+    q->limbs[3] =
+        mag_div_q_63_digit(un, vn, 3, 0, d1, d0, dinv, 1);
+    q->limbs[2] =
+        mag_div_q_63_digit(un, vn, 2, 0, d1, d0, dinv, 0);
+    q->limbs[1] =
+        mag_div_q_63_digit(un, vn, 1, 0, d1, d0, dinv, 0);
+    q->limbs[0] =
+        mag_div_q_63_digit(un, vn, 0, 1, d1, d0, dinv, 0);
+
+    if (un[6] != 0 || un[5] != 0 || un[4] != 0 ||
+        un[3] != 0 || un[2] == 0 || un[2] >= vn[2]) {
+        bigint_release(q);
+        return NULL;
+    }
+    q->size = q->limbs[3] ? 4 :
+              q->limbs[2] ? 3 :
+              q->limbs[1] ? 2 :
+              q->limbs[0] ? 1 : 0;
+    return q;
+}
+#endif
+
+/*
+ * Quotient-only Knuth division can omit a growing low triangle of each
+ * multiply-subtract row.  For a 2n/n division, digit j skips
+ *
+ *     s(j) = max(0, n - j - 2)
+ *
+ * low divisor limbs.  The working residual W therefore differs from the true
+ * residual R = U-QV by the nonnegative omitted amount
+ *
+ *     E = sum(q[j] * (V mod B^s(j)) * B^j).
+ *
+ * Every nonzero summand is strictly below B^(n-1), and there are n-2 of them,
+ * so E < (n-2)*B^(n-1).  The candidate quotient is rigorously exact whenever
+ *
+ *     (n-2)*B^(n-1) <= W < V,
+ *
+ * because then 0 < W-E = U-QV < V.  The bound is normally tiny relative to a
+ * normalized n-limb divisor.  If either comparison is inconclusive, return
+ * NULL and let the ordinary full division prove the result.
+ */
+static __attribute__((noinline, no_stack_protector))
+WBigint *mag_div_q_triangular_certified(
+    const uint64_t *u, int32_t ulen,
+    const uint64_t *v, int32_t vlen) {
+    if (vlen < BN_DIV_TRIANGULAR_Q_MIN ||
+        vlen > BN_DIV_TRIANGULAR_Q_MAX ||
+        ulen != 2 * vlen)
+        return NULL;
+
+    int shift = __builtin_clzll(v[vlen - 1]);
+    int32_t m = ulen - vlen;
+    /* Kick off the long serial reciprocal chain before the normalization
+     * copies so the two overlap in the out-of-order window. */
+    uint64_t d1, d0;
+    if (shift) {
+        d1 = (v[vlen - 1] << shift) | (v[vlen - 2] >> (64 - shift));
+        d0 = v[vlen - 2] << shift;
+        if (vlen > 2) d0 |= v[vlen - 3] >> (64 - shift);
+    } else {
+        d1 = v[vlen - 1];
+        d0 = v[vlen - 2];
+    }
+    uint64_t dinv = bn_invert_pi1(d1, d0);
+    uint64_t local[3 * 64 + 1];
+    uint64_t *memory = local;
+    int memory_owned = 0;
+    if (vlen > 64) {
+        memory = bn_ws_get((size_t)(3 * vlen + 1));
+        if (!memory) {
+            memory =
+                (uint64_t *)malloc((size_t)(3 * vlen + 1) * sizeof(uint64_t));
+            memory_owned = memory != NULL;
+        }
+        if (!memory) return NULL;
+    }
+    uint64_t *un = memory;
+    uint64_t *vn_work = un + 2 * vlen + 1;
+    const uint64_t *vn;
+
+#if BN_DIV_Q_LAZY_LOW
+    /* Leave the prefix below the lowest triangular row unmaterialized. */
+    int32_t active_lo = vlen - 2;
+#else
+    int32_t active_lo = 0;
+#endif
+    if (shift) {
+        vn = vn_work;
+        for (int32_t i = vlen - 1; i > 0; i--)
+            vn_work[i] =
+                (v[i] << shift) | (v[i - 1] >> (64 - shift));
+        vn_work[0] = v[0] << shift;
+        un[ulen] = u[ulen - 1] >> (64 - shift);
+        for (int32_t i = ulen - 1; i > active_lo; i--)
+            un[i] = (u[i] << shift) | (u[i - 1] >> (64 - shift));
+        if (active_lo)
+            un[active_lo] =
+                (u[active_lo] << shift) |
+                (u[active_lo - 1] >> (64 - shift));
+        else
+            un[0] = u[0] << shift;
+    } else {
+#if BN_DIV_Q_ALIAS_NORMALIZED_V
+        vn = v;
+#else
+        memcpy(vn_work, v, (size_t)vlen * sizeof(uint64_t));
+        vn = vn_work;
+#endif
+        memcpy(un + active_lo, u + active_lo,
+               (size_t)(ulen - active_lo) * sizeof(uint64_t));
+        un[ulen] = 0;
+    }
+
+    WBigint *q = bigint_alloc_raw_hot(m + 1);
+    uint64_t r1 = un[ulen];
+    uint64_t r0 = un[ulen - 1];
+    int32_t j = m;
+#if BN_DIV_Q_FIRST_01
+    q->limbs[j] = mag_div_q_triangular_digit(
+        un, vn, vlen, j, 0, d1, d0, dinv, 1, &r1, &r0);
+    j--;
+#endif
+    for (; j >= 0; j--) {
+        int32_t skip = m - j - 2;
+        if (skip < 0) skip = 0;
+        q->limbs[j] = mag_div_q_triangular_digit(
+            un, vn, vlen, j, skip, d1, d0, dinv, 0, &r1, &r0);
+    }
+    /* Land the register-carried remainder top limbs where the certificate
+     * (and the non-lazy variant's scan) expect them. */
+    un[vlen - 1] = r1;
+    un[vlen - 2] = r0;
+
+#if BN_DIV_Q_LAZY_LOW
+    /*
+     * The low prefix is unmaterialized.  Use only limbs vlen-1 and above
+     * for a sufficient certificate, falling back if equal top limbs make
+     * the W < V comparison inconclusive.  There is no need to rescan limbs
+     * vlen..ulen: every quotient-digit step clears its own top position, and
+     * all omitted products are strictly below B^(vlen-1), so they cannot
+     * change any of those already-cleared limbs.
+     */
+    uint64_t wtop = un[vlen - 1];
+    uint64_t error_bound_top = (uint64_t)(vlen - 2);
+    if (wtop < error_bound_top || wtop >= vn[vlen - 1]) {
+#else
+    int32_t wlen = ulen + 1;
+    while (wlen > 0 && un[wlen - 1] == 0) wlen--;
+    uint64_t error_bound_top = (uint64_t)(vlen - 2);
+    int above_error_bound =
+        wlen > vlen ||
+        (wlen == vlen && un[vlen - 1] >= error_bound_top);
+    if (!above_error_bound ||
+        mag_cmp(un, wlen, vn, vlen) >= 0) {
+#endif
+        bigint_release(q);
+        if (memory_owned) free(memory);
+        return NULL;
+    }
+
+    /*
+     * This entry accepts exactly 2n live dividend limbs over n live divisor
+     * limbs.  Hence B^(2n-1) <= U < B^(2n) and V < B^n, so the quotient has
+     * either n or n+1 limbs; limb n alone decides which.  Avoid a generic
+     * backwards normalization scan on every division.
+     */
+    int32_t qlen = m + (q->limbs[m] != 0);
+    q->size = qlen;
+    if (memory_owned) free(memory);
+    return q;
+}
+#endif
+
+/*
+ * Fixed 6-by-3-limb remainder kernel.  The quotient-only 6/3 leaf above has
+ * no remainder twin, so 6/3 mod used to fall into the generic Knuth entry
+ * (arena copies, large stack frame).  With the 3-by-2 step the remainder is
+ * exact: four digits, each one udiv_qr_3by2 plus a single low-limb
+ * multiply-subtract, the running remainder's top two limbs in registers.
+ */
+#ifndef BN_MOD_63_DIRECT
+#define BN_MOD_63_DIRECT 1
+#endif
+
+#if BN_MOD_63_DIRECT
+static __attribute__((no_stack_protector))
+WBigint *mag_mod_63(const uint64_t *u, const uint64_t *v) {
+    uint64_t un[5], vn_work[3];
+    const uint64_t *vn;
+    int shift = __builtin_clzll(v[2]);
+    uint64_t r1, r0;
+    if (shift) {
+        vn_work[2] = (v[2] << shift) | (v[1] >> (64 - shift));
+        vn_work[1] = (v[1] << shift) | (v[0] >> (64 - shift));
+        vn_work[0] = v[0] << shift;
+        vn = vn_work;
+        r1 = u[5] >> (64 - shift);
+        r0 = (u[5] << shift) | (u[4] >> (64 - shift));
+        un[4] = (u[4] << shift) | (u[3] >> (64 - shift));
+        un[3] = (u[3] << shift) | (u[2] >> (64 - shift));
+        un[2] = (u[2] << shift) | (u[1] >> (64 - shift));
+        un[1] = (u[1] << shift) | (u[0] >> (64 - shift));
+        un[0] = u[0] << shift;
+    } else {
+        vn = v;
+        r1 = 0;
+        r0 = u[5];
+        un[4] = u[4];
+        un[3] = u[3];
+        un[2] = u[2];
+        un[1] = u[1];
+        un[0] = u[0];
+    }
+    uint64_t d1 = vn[2];
+    uint64_t d0 = vn[1];
+    uint64_t dl = vn[0];
+    uint64_t dinv = bn_invert_pi1(d1, d0);
+    int32_t jtop = 3;
+    if (r1 == 0) {
+        /* Unshifted top: the leading digit is 0 or 1; decide with a 2-limb
+         * compare and one conditional 3-limb subtract. */
+        uint64_t n0 = un[4];
+        if (r0 > d1 || (r0 == d1 && n0 >= d0)) {
+            uint64_t b0 = un[3] < dl;
+            un[3] -= dl;
+            __uint128_t lhs = ((__uint128_t)r0 << 64) | n0;
+            __uint128_t rhs =
+                ((((__uint128_t)d1 << 64) | d0)) + b0;
+            if (__builtin_expect(lhs < rhs, 0)) {
+                /* prefix tie, low limb fell short: digit is 0, undo */
+                un[3] += dl;
+                r1 = r0;
+                r0 = n0;
+            } else {
+                lhs -= rhs;
+                r1 = (uint64_t)(lhs >> 64);
+                r0 = (uint64_t)lhs;
+            }
+        } else {
+            r1 = r0;
+            r0 = n0;
+        }
+        jtop = 2;
+    }
+    for (int32_t j = jtop; j >= 0; j--) {
+        uint64_t n0 = un[j + 1];
+        if (__builtin_expect(r1 >= d1 && (r1 > d1 || r0 >= d0), 0)) {
+            /* Saturated digit: subtract (B-1)*V from the 4-limb window. */
+            uint64_t w[4];
+            w[0] = un[j];
+            w[1] = n0;
+            w[2] = r0;
+            w[3] = r1;
+            uint64_t borrow = 0;
+            for (int32_t i = 0; i < 3; i++) {
+                __uint128_t product = (__uint128_t)vn[i] * UINT64_MAX;
+                uint64_t lowp = (uint64_t)product;
+                uint64_t sum = lowp + borrow;
+                uint64_t carry = sum < lowp;
+                uint64_t old = w[i];
+                w[i] = old - sum;
+                borrow =
+                    (uint64_t)(product >> 64) + carry + (old < sum);
+            }
+            uint64_t top = w[3];
+            w[3] = top - borrow;
+            if (top < borrow) {
+                uint64_t carry = 0;
+                for (int32_t i = 0; i < 3; i++) {
+                    __uint128_t sum =
+                        (__uint128_t)w[i] + vn[i] + carry;
+                    w[i] = (uint64_t)sum;
+                    carry = (uint64_t)(sum >> 64);
+                }
+                w[3] += carry;
+            }
+            un[j] = w[0];
+            r0 = w[1];
+            r1 = w[2];
+        } else {
+            uint64_t q =
+                bn_udiv_qr_3by2(r1, r0, n0, d1, d0, dinv, &r1, &r0);
+            __uint128_t p = (__uint128_t)q * dl;
+            uint64_t plo = (uint64_t)p;
+            uint64_t old = un[j];
+            un[j] = old - plo;
+            uint64_t cy = (uint64_t)(p >> 64) + (old < plo);
+            uint64_t cy1 = r0 < cy;
+            r0 -= cy;
+            uint64_t cy2 = r1 < cy1;
+            r1 -= cy1;
+            if (__builtin_expect(cy2 != 0, 0)) {
+                __uint128_t s = (__uint128_t)un[j] + dl;
+                un[j] = (uint64_t)s;
+                s = (__uint128_t)r0 + d0 + (uint64_t)(s >> 64);
+                r0 = (uint64_t)s;
+                r1 += d1 + (uint64_t)(s >> 64);
+            }
+        }
+    }
+    WBigint *r = bigint_alloc_raw_hot(3);
+    if (shift) {
+        r->limbs[0] = (un[0] >> shift) | (r0 << (64 - shift));
+        r->limbs[1] = (r0 >> shift) | (r1 << (64 - shift));
+        r->limbs[2] = r1 >> shift;
+    } else {
+        r->limbs[0] = un[0];
+        r->limbs[1] = r0;
+        r->limbs[2] = r1;
+    }
+    r->size = 3;
+    while (r->size > 0 && r->limbs[r->size - 1] == 0) r->size--;
+    return r;
+}
+#endif
+
+/*
+ * Fixed 4-by-2-limb Knuth leaf.  This is the first genuinely multi-limb
+ * division shape used by the bignum benchmarks, but the generic path pays for
+ * two bounded-arena copies, three variable-width submul calls, and loop
+ * control.  Keep the exact Algorithm D estimate/correction rules while
+ * spelling out the two-limb multiply-subtract and normalization.
+ */
+#ifndef BN_DIVMOD_42
+#define BN_DIVMOD_42 1
+#endif
+#ifndef BN_DIVMOD_42_DIRECT
+#define BN_DIVMOD_42_DIRECT 1
+#endif
+
+#if BN_DIVMOD_42
+typedef struct {
+    uint64_t q0, q1, q2;
+    uint64_t r0, r1;
+} WDivmod42;
+
+static inline __attribute__((always_inline))
+WDivmod42 mag_divmod_42_core(const uint64_t *u, const uint64_t *v) {
+    uint64_t un[5];
+    uint64_t vn_work[2];
+    const uint64_t *vn;
+    int shift = __builtin_clzll(v[1]);
+    if (shift) {
+        vn_work[0] = v[0] << shift;
+        vn_work[1] = (v[1] << shift) | (v[0] >> (64 - shift));
+        vn = vn_work;
+        un[0] = u[0] << shift;
+        un[1] = (u[1] << shift) | (u[0] >> (64 - shift));
+        un[2] = (u[2] << shift) | (u[1] >> (64 - shift));
+        un[3] = (u[3] << shift) | (u[2] >> (64 - shift));
+        un[4] = u[3] >> (64 - shift);
+    } else {
+        vn = v;
+        un[0] = u[0];
+        un[1] = u[1];
+        un[2] = u[2];
+        un[3] = u[3];
+        un[4] = 0;
+    }
+
+    /*
+     * GMP mpn_divrem_2: the whole division is three straight-line 3-by-2
+     * steps with the remainder carried in registers.  The top digit's
+     * precondition (un[4],un[3]) < (d1,d0) always holds: the 2-limb divisor
+     * IS the full divisor here, so a violation would force the quotient to
+     * a fourth limb, impossible for a 4-limb dividend over a >= B divisor.
+     */
+    uint64_t d1 = vn[1];
+    uint64_t d0 = vn[0];
+    uint64_t dinv = bn_invert_pi1(d1, d0);
+    uint64_t r1 = un[4];
+    uint64_t r0 = un[3];
+    WDivmod42 result;
+    if (r1 == 0) {
+        /* Unshifted top (always so when the divisor is pre-normalized):
+         * the leading digit is 0 or 1, decided by a 2-limb compare exactly
+         * like GMP divrem_2's qh step -- no 3-by-2 needed. */
+        uint64_t n0 = un[2];
+        if (r0 > d1 || (r0 == d1 && n0 >= d0)) {
+            result.q2 = 1;
+            __uint128_t t = (((__uint128_t)r0 << 64) | n0) -
+                            (((__uint128_t)d1 << 64) | d0);
+            r1 = (uint64_t)(t >> 64);
+            r0 = (uint64_t)t;
+        } else {
+            result.q2 = 0;
+            r1 = r0;
+            r0 = n0;
+        }
+    } else {
+        result.q2 =
+            bn_udiv_qr_3by2(r1, r0, un[2], d1, d0, dinv, &r1, &r0);
+    }
+    result.q1 = bn_udiv_qr_3by2(r1, r0, un[1], d1, d0, dinv, &r1, &r0);
+    result.q0 = bn_udiv_qr_3by2(r1, r0, un[0], d1, d0, dinv, &r1, &r0);
+    if (shift) {
+        result.r0 = (r0 >> shift) | (r1 << (64 - shift));
+        result.r1 = r1 >> shift;
+    } else {
+        result.r0 = r0;
+        result.r1 = r1;
+    }
+    return result;
+}
+
+static __attribute__((no_stack_protector))
+WBigint *mag_div_42(const uint64_t *u, const uint64_t *v) {
+    WDivmod42 result = mag_divmod_42_core(u, v);
+    WBigint *q = bigint_alloc_raw_hot(3);
+    q->limbs[0] = result.q0;
+    q->limbs[1] = result.q1;
+    q->limbs[2] = result.q2;
+    q->size = result.q2 ? 3 : result.q1 ? 2 : result.q0 ? 1 : 0;
+    return q;
+}
+
+static __attribute__((no_stack_protector))
+WBigint *mag_mod_42(const uint64_t *u, const uint64_t *v) {
+    WDivmod42 result = mag_divmod_42_core(u, v);
+    WBigint *r = bigint_alloc_raw_hot(2);
+    r->limbs[0] = result.r0;
+    r->limbs[1] = result.r1;
+    r->size = result.r1 ? 2 : result.r0 ? 1 : 0;
+    return r;
+}
+
+static __attribute__((no_stack_protector))
+void mag_divmod_42(const uint64_t *u, const uint64_t *v,
+                          WBigint **q_out, WBigint **r_out) {
+    if (q_out && !r_out) {
+        *q_out = mag_div_42(u, v);
+        return;
+    }
+    if (r_out && !q_out) {
+        *r_out = mag_mod_42(u, v);
+        return;
+    }
+
+    WDivmod42 result = mag_divmod_42_core(u, v);
+    if (q_out) {
+        WBigint *q = bigint_alloc_raw_hot(3);
+        q->limbs[0] = result.q0;
+        q->limbs[1] = result.q1;
+        q->limbs[2] = result.q2;
+        q->size = result.q2 ? 3 :
+                  result.q1 ? 2 :
+                  result.q0 ? 1 : 0;
+        *q_out = q;
+    }
+    if (r_out) {
+        WBigint *r = bigint_alloc_raw_hot(2);
+        r->limbs[0] = result.r0;
+        r->limbs[1] = result.r1;
+        r->size = result.r1 ? 2 : result.r0 ? 1 : 0;
+        *r_out = r;
+    }
+}
+#endif
 
 /* Multi-limb division: a / b → quotient and remainder.
    Simplified Knuth Algorithm D for base 2^64. */
-static void mag_divmod_knuth(const uint64_t *u, int32_t ulen,
+static __attribute__((no_stack_protector))
+void mag_divmod_knuth(const uint64_t *u, int32_t ulen,
                              const uint64_t *v, int32_t vlen,
                              WBigint **q_out, WBigint **r_out) {
     if (vlen == 0) die("division by zero");
@@ -2354,10 +7972,29 @@ static void mag_divmod_knuth(const uint64_t *u, int32_t ulen,
     /* Normalize: shift so top bit of divisor is set */
     int shift = __builtin_clzll(v[vlen - 1]);
     int32_t m = ulen - vlen;
+    /* Start the serial reciprocal chain before the normalization copies so
+     * the two overlap in the out-of-order window. */
+    uint64_t d1, d0;
+    if (shift) {
+        d1 = (v[vlen - 1] << shift) | (v[vlen - 2] >> (64 - shift));
+        d0 = v[vlen - 2] << shift;
+        if (vlen > 2) d0 |= v[vlen - 3] >> (64 - shift);
+    } else {
+        d1 = v[vlen - 1];
+        d0 = v[vlen - 2];
+    }
+    uint64_t dinv = bn_invert_pi1(d1, d0);
 
-    /* Allocate working copies with extra space */
-    uint64_t *un = (uint64_t *)calloc(ulen + 1, sizeof(uint64_t));
-    uint64_t *vn = (uint64_t *)calloc(vlen, sizeof(uint64_t));
+    /* B–Z leaves and ordinary small divisions fit in a bounded stack arena,
+     * avoiding two malloc/free pairs per Knuth call. */
+    uint64_t un_local[129], vn_local[64];
+    int heap_work = ulen > 128 || vlen > 64;
+    uint64_t *un = heap_work
+        ? (uint64_t *)malloc((size_t)(ulen + 1) * sizeof(uint64_t))
+        : un_local;
+    uint64_t *vn = heap_work
+        ? (uint64_t *)malloc((size_t)vlen * sizeof(uint64_t))
+        : vn_local;
 
     /* Shift divisor left */
     if (shift > 0) {
@@ -2379,36 +8016,56 @@ static void mag_divmod_knuth(const uint64_t *u, int32_t ulen,
         un[ulen] = 0;
     }
 
-    WBigint *q = q_out ? bigint_alloc(m + 1) : NULL;
+    WBigint *q = q_out ? bigint_alloc_raw_hot(m + 1) : NULL;
+    /* Remainder top-2 limbs live in registers across digits (GMP sbpi1). */
+    uint64_t r1 = un[ulen];
+    uint64_t r0 = un[ulen - 1];
 
     for (int32_t j = m; j >= 0; j--) {
-        /* Estimate quotient digit */
-        __uint128_t num = ((__uint128_t)un[j + vlen] << 64) | un[j + vlen - 1];
-        __uint128_t qhat = num / vn[vlen - 1];
-        __uint128_t rhat = num % vn[vlen - 1];
-
-        /* Refine estimate */
-        while (qhat > UINT64_MAX ||
-               (vlen >= 2 && qhat * vn[vlen - 2] > (rhat << 64) + un[j + vlen - 2])) {
-            qhat--;
-            rhat += vn[vlen - 1];
-            if (rhat > UINT64_MAX) break;
+        uint64_t qhat;
+        if (__builtin_expect(r1 >= d1 && (r1 > d1 || r0 >= d0), 0)) {
+            /* Digit saturates at B-1 (GMP sbpi1's special case):
+             * materialize, full-row multiply-subtract with the classic
+             * top-borrow add-back, reload. */
+            un[j + vlen] = r1;
+            un[j + vlen - 1] = r0;
+            qhat = UINT64_MAX;
+            uint64_t bw = bn_submul_1(un + j, vn, vlen, qhat);
+            uint64_t top = un[j + vlen];
+            un[j + vlen] = top - bw;
+            if (top < bw) {
+                qhat--;
+                uint64_t carry = bn_add_n(un + j, un + j, vn, vlen);
+                un[j + vlen] += carry;
+            }
+            r1 = un[j + vlen - 1];
+            r0 = un[j + vlen - 2];
+        } else {
+            /* Exact digit and top-2 remainder limbs in one 3-by-2 step;
+             * only vlen-2 low divisor limbs remain for the subtract. */
+            qhat = bn_udiv_qr_3by2(r1, r0, un[j + vlen - 2],
+                                   d1, d0, dinv, &r1, &r0);
+            uint64_t cy = vlen > 2
+                ? bn_submul_1(un + j, vn, vlen - 2, qhat)
+                : 0;
+            uint64_t cy1 = r0 < cy;
+            r0 -= cy;
+            uint64_t cy2 = r1 < cy1;
+            r1 -= cy1;
+            if (__builtin_expect(cy2 != 0, 0)) {
+                qhat--;
+                uint64_t carry = vlen > 2
+                    ? bn_add_n(un + j, un + j, vn, vlen - 2)
+                    : 0;
+                __uint128_t s = (__uint128_t)r0 + d0 + carry;
+                r0 = (uint64_t)s;
+                r1 += d1 + (uint64_t)(s >> 64);
+            }
         }
-
-        /* Multiply and subtract (asm submul_1 kernel; borrow word out) */
-        uint64_t bw = bn_submul_1(un + j, vn, vlen, (uint64_t)qhat);
-        uint64_t top = un[j + vlen];
-        un[j + vlen] = top - bw;
-
-        if (q) q->limbs[j] = (uint64_t)qhat;
-
-        /* If we subtracted too much (top borrow), add back one divisor */
-        if (top < bw) {
-            if (q) q->limbs[j]--;
-            uint64_t carry = bn_add_n(un + j, un + j, vn, vlen);
-            un[j + vlen] += carry;
-        }
+        if (q) q->limbs[j] = qhat;
     }
+    un[vlen - 1] = r1;
+    un[vlen - 2] = r0;
 
     if (q_out) {
         q->size = m + 1;
@@ -2417,7 +8074,7 @@ static void mag_divmod_knuth(const uint64_t *u, int32_t ulen,
     }
 
     if (r_out) {
-        WBigint *r = bigint_alloc(vlen);
+        WBigint *r = bigint_alloc_raw_hot(vlen);
         if (shift > 0) {
             for (int32_t i = 0; i < vlen - 1; i++)
                 r->limbs[i] = (un[i] >> shift) | (un[i + 1] << (64 - shift));
@@ -2430,8 +8087,10 @@ static void mag_divmod_knuth(const uint64_t *u, int32_t ulen,
         *r_out = r;
     }
 
-    free(un);
-    free(vn);
+    if (heap_work) {
+        free(un);
+        free(vn);
+    }
 }
 
 /* ---- Burnikel–Ziegler recursive division --------------------------------
@@ -2444,8 +8103,45 @@ static void mag_divmod_knuth(const uint64_t *u, int32_t ulen,
  * (top bit of the divisor set) at entry keeps every recursive divisor
  * normalized, since B1 inherits the top bit. Base cases fall back to Knuth. */
 #ifndef BZ_THRESHOLD
-#define BZ_THRESHOLD 64
+#define BZ_THRESHOLD 48
 #endif
+#ifndef BZ_TOP_THRESHOLD
+#define BZ_TOP_THRESHOLD 64
+#endif
+#ifndef BN_BZ_SKIP_ZERO_TOP_DIGIT
+#define BN_BZ_SKIP_ZERO_TOP_DIGIT 1
+#endif
+#ifndef BN_BZ_ALIAS_NORMALIZED_TOP
+#define BN_BZ_ALIAS_NORMALIZED_TOP 1
+#endif
+#ifndef BN_BZ_ZERO_PADDING_ONLY
+#define BN_BZ_ZERO_PADDING_ONLY 1
+#endif
+
+static __thread uint64_t *bz_ws = NULL;
+static __thread size_t bz_ws_cap = 0;
+#ifdef BN_BZ_PROFILE_COUNTS
+static uint64_t bz_profile_mul_calls;
+static uint64_t bz_profile_mul_q_limbs;
+static uint64_t bz_profile_mul_b_limbs;
+static uint64_t bz_profile_mul_equal;
+static uint64_t bz_profile_mul_full;
+static uint64_t bz_profile_clamped;
+static uint64_t bz_profile_mul_bins[12];
+static int32_t bz_profile_shape_count;
+static int32_t bz_profile_shape_k[32];
+static int32_t bz_profile_shape_q[32];
+static int32_t bz_profile_shape_b[32];
+#endif
+static uint64_t *bz_ws_get(size_t limbs) {
+    if (limbs > bz_ws_cap) {
+        free(bz_ws);
+        size_t ncap = limbs + limbs / 2 + 64;
+        bz_ws = (uint64_t *)malloc(ncap * sizeof(uint64_t));
+        bz_ws_cap = bz_ws ? ncap : 0;
+    }
+    return bz_ws;
+}
 
 static inline int32_t bz_trim(const uint64_t *a, int32_t n) {
     while (n > 0 && a[n - 1] == 0) n--;
@@ -2458,15 +8154,150 @@ static void bz_dec1(uint64_t *q, int32_t n) {          /* q -= 1, borrow-propaga
         if (old != 0) break;
     }
 }
+
+/* Allocation-free Knuth leaf for B–Z's fixed-width q/r buffers. */
+static __attribute__((no_stack_protector))
+void bz_base_div_into(const uint64_t *u, int32_t ulen,
+                             const uint64_t *v, int32_t vlen,
+                             uint64_t *q, int32_t qw,
+                             uint64_t *r, int32_t rw,
+                             int skip_zero_top) {
+    for (int32_t i = 0; i < qw; i++) q[i] = 0;
+    for (int32_t i = 0; i < rw; i++) r[i] = 0;
+    ulen = bz_trim(u, ulen);
+    if (ulen == 0) return;
+    if (ulen < vlen || (ulen == vlen && mag_cmp(u, ulen, v, vlen) < 0)) {
+        int32_t copy = ulen < rw ? ulen : rw;
+        memcpy(r, u, (size_t)copy * sizeof(uint64_t));
+        return;
+    }
+
+    /* B–Z reaches this helper with multi-limb divisors. */
+    if (vlen == 1) {
+        __uint128_t rem = 0;
+        for (int32_t i = ulen - 1; i >= 0; i--) {
+            rem = (rem << 64) | u[i];
+            if (i < qw) q[i] = (uint64_t)(rem / v[0]);
+            rem %= v[0];
+        }
+        if (rw) r[0] = (uint64_t)rem;
+        return;
+    }
+
+    uint64_t un_local[129], vn_local[64];
+    int heap_work = ulen > 128 || vlen > 64;
+    int shift = __builtin_clzll(v[vlen - 1]);
+    /* Start the serial reciprocal chain before the normalization copies so
+     * the two overlap in the out-of-order window. */
+    uint64_t d1, d0;
+    if (shift) {
+        d1 = (v[vlen - 1] << shift) | (v[vlen - 2] >> (64 - shift));
+        d0 = v[vlen - 2] << shift;
+        if (vlen > 2) d0 |= v[vlen - 3] >> (64 - shift);
+    } else {
+        d1 = v[vlen - 1];
+        d0 = v[vlen - 2];
+    }
+    uint64_t dinv = bn_invert_pi1(d1, d0);
+    uint64_t *un = heap_work
+        ? (uint64_t *)malloc((size_t)(ulen + 1) * sizeof(uint64_t))
+        : un_local;
+    uint64_t *vn_work = shift
+        ? (heap_work
+            ? (uint64_t *)malloc((size_t)vlen * sizeof(uint64_t))
+            : vn_local)
+        : NULL;
+
+    const uint64_t *vn;
+    if (shift) {
+        for (int32_t i = vlen - 1; i > 0; i--)
+            vn_work[i] = (v[i] << shift) | (v[i - 1] >> (64 - shift));
+        vn_work[0] = v[0] << shift;
+        vn = vn_work;
+        un[ulen] = u[ulen - 1] >> (64 - shift);
+        for (int32_t i = ulen - 1; i > 0; i--)
+            un[i] = (u[i] << shift) | (u[i - 1] >> (64 - shift));
+        un[0] = u[0] << shift;
+    } else {
+        /* B-Z normalizes once at the top, so recursive leaves can read their
+         * divisor slice directly instead of copying it into a local arena. */
+        vn = v;
+        memcpy(un, u, (size_t)ulen * sizeof(uint64_t));
+        un[ulen] = 0;
+    }
+
+    int32_t m = ulen - vlen;
+#if BN_BZ_SKIP_ZERO_TOP_DIGIT
+    /* D2n/1n guarantees u < v*B^n and provides only n quotient limbs, so the
+     * Knuth digit at position n is known to be zero.  Avoid an estimate and a
+     * complete multiply-subtract row for that artificial leading digit. */
+    if (skip_zero_top && m >= qw) m = qw - 1;
+#else
+    (void)skip_zero_top;
+#endif
+    /* Remainder top-2 limbs live in registers across digits (GMP sbpi1). */
+    uint64_t r1 = un[m + vlen];
+    uint64_t r0 = un[m + vlen - 1];
+    for (int32_t j = m; j >= 0; j--) {
+        uint64_t qhat;
+        if (__builtin_expect(r1 >= d1 && (r1 > d1 || r0 >= d0), 0)) {
+            un[j + vlen] = r1;
+            un[j + vlen - 1] = r0;
+            qhat = UINT64_MAX;
+            uint64_t bw = bn_submul_1(un + j, vn, vlen, qhat);
+            uint64_t top = un[j + vlen];
+            un[j + vlen] = top - bw;
+            if (top < bw) {
+                qhat--;
+                uint64_t carry = bn_add_n(un + j, un + j, vn, vlen);
+                un[j + vlen] += carry;
+            }
+            r1 = un[j + vlen - 1];
+            r0 = un[j + vlen - 2];
+        } else {
+            qhat = bn_udiv_qr_3by2(r1, r0, un[j + vlen - 2],
+                                   d1, d0, dinv, &r1, &r0);
+            uint64_t cy = vlen > 2
+                ? bn_submul_1(un + j, vn, vlen - 2, qhat)
+                : 0;
+            uint64_t cy1 = r0 < cy;
+            r0 -= cy;
+            uint64_t cy2 = r1 < cy1;
+            r1 -= cy1;
+            if (__builtin_expect(cy2 != 0, 0)) {
+                qhat--;
+                uint64_t carry = vlen > 2
+                    ? bn_add_n(un + j, un + j, vn, vlen - 2)
+                    : 0;
+                __uint128_t s = (__uint128_t)r0 + d0 + carry;
+                r0 = (uint64_t)s;
+                r1 += d1 + (uint64_t)(s >> 64);
+            }
+        }
+        if (j < qw) q[j] = qhat;
+    }
+    un[vlen - 1] = r1;
+    un[vlen - 2] = r0;
+
+    int32_t copy = vlen < rw ? vlen : rw;
+    if (shift) {
+        for (int32_t i = 0; i < copy; i++) {
+            uint64_t hi = i + 1 < vlen ? un[i + 1] : 0;
+            r[i] = (un[i] >> shift) | (hi << (64 - shift));
+        }
+    } else {
+        memcpy(r, un, (size_t)copy * sizeof(uint64_t));
+    }
+    if (heap_work) {
+        free(un);
+        free(vn_work);
+    }
+}
+
 /* Knuth base case with fixed-width outputs (zero-padded to qw / rw limbs). */
 static void bz_base_div(const uint64_t *a, int32_t alen, const uint64_t *b, int32_t blen,
                         uint64_t *q, int32_t qw, uint64_t *r, int32_t rw) {
-    WBigint *qq = NULL, *rr = NULL;
-    mag_divmod_knuth(a, bz_trim(a, alen), b, blen, &qq, &rr);
-    int32_t ql = qq->size, rl = rr->size;
-    for (int32_t i = 0; i < qw; i++) q[i] = i < ql ? qq->limbs[i] : 0;
-    for (int32_t i = 0; i < rw; i++) r[i] = i < rl ? rr->limbs[i] : 0;
-    free(qq); free(rr);
+    bz_base_div_into(a, alen, b, blen, q, qw, r, rw, 1);
 }
 
 static void bz_d3n2n(const uint64_t *a, const uint64_t *b, int32_t n,
@@ -2512,47 +8343,101 @@ static void bz_d3n2n(const uint64_t *a, const uint64_t *b, int32_t n,
         /* a < b·β^k forces A2 ≤ Bhi, so here A2 == Bhi: clamp Q̂ = β^k − 1 and
          * R1 = A12 − Q̂·Bhi = A1 + Bhi (may carry into limb k). */
         for (int32_t i = 0; i < k; i++) q[i] = ~0ULL;
-        uint64_t c = 0;
-        for (int32_t i = 0; i < k; i++) {
-            __uint128_t s = (__uint128_t)A12[i] + Bhi[i] + c;
-            r1[i] = (uint64_t)s;
-            c = (uint64_t)(s >> 64);
-        }
-        r1[k] = c;
+        r1[k] = bn_add_n(r1, A12, Bhi, k);
+#ifdef BN_BZ_PROFILE_COUNTS
+        bz_profile_clamped++;
+#endif
     }
     /* D = Q̂·Blo */
     int32_t qt = bz_trim(q, k), b0t = bz_trim(Blo, k);
-    for (int32_t i = 0; i < 2 * k; i++) dd[i] = 0;
-    if (qt && b0t) bigint_mul_dispatch(dd, q, qt, Blo, b0t);
+    int32_t dlen = 0;
+    if (qt && b0t) {
+#ifdef BN_BZ_PROFILE_COUNTS
+        int32_t width = qt > b0t ? qt : b0t;
+        int bin = 0;
+        while (bin < 11 && (1 << bin) < width) bin++;
+        bz_profile_mul_calls++;
+        bz_profile_mul_q_limbs += (uint64_t)qt;
+        bz_profile_mul_b_limbs += (uint64_t)b0t;
+        bz_profile_mul_equal += qt == b0t;
+        bz_profile_mul_full += qt == k && b0t == k;
+        bz_profile_mul_bins[bin]++;
+        if ((qt != k || b0t != k) && bz_profile_shape_count < 32) {
+            int32_t shape = bz_profile_shape_count++;
+            bz_profile_shape_k[shape] = k;
+            bz_profile_shape_q[shape] = qt;
+            bz_profile_shape_b[shape] = b0t;
+        }
+#endif
+        bigint_mul_dispatch(dd, q, qt, Blo, b0t);
+        dlen = qt + b0t;
+    }
+    for (int32_t i = dlen; i < 2 * k; i++) dd[i] = 0;
     /* R̂ = R1·β^k + A0 − D over W = 2k+2 limbs; borrow-out ⇒ negative. */
     int32_t W = 2 * k + 2;
     for (int32_t i = 0; i < k; i++) rh[i] = A0[i];
     for (int32_t i = 0; i <= k; i++) rh[k + i] = r1[i];
     rh[W - 1] = 0;
-    uint64_t bw = 0;
-    for (int32_t i = 0; i < W; i++) {
-        uint64_t dv = i < 2 * k ? dd[i] : 0;
-        uint64_t av = rh[i];
-        uint64_t t  = av - dv;
-        uint64_t b1 = av < dv;
-        uint64_t d2 = t - bw;
-        uint64_t b2 = t < bw;
-        rh[i] = d2;
-        bw = b1 | b2;
+    uint64_t bw = bn_sub_n(rh, rh, dd, 2 * k);
+    for (int32_t i = 2 * k; bw && i < W; i++) {
+        uint64_t old = rh[i];
+        rh[i] = old - 1;
+        bw = old == 0;
     }
     int neg = (int)bw;
     while (neg) {                          /* R̂ ∈ (−2B, B): ≤ 2 corrections */
-        uint64_t c = 0;
-        for (int32_t i = 0; i < W; i++) {
-            uint64_t bv = i < n ? b[i] : 0;
-            __uint128_t s = (__uint128_t)rh[i] + bv + c;
-            rh[i] = (uint64_t)s;
-            c = (uint64_t)(s >> 64);
+        uint64_t c = bn_add_n(rh, rh, b, n);
+        for (int32_t i = n; c && i < W; i++) {
+            uint64_t old = rh[i];
+            rh[i] = old + 1;
+            c = rh[i] == 0;
         }
         bz_dec1(q, k);
         if (c) neg = 0;                    /* wrapped back to non-negative */
     }
     for (int32_t i = 0; i < n; i++) r[i] = rh[i];
+}
+
+/* ---- Approximate quotient-only B-Z spine (divappr, GMP dc_divappr_q
+ * shape), for the root-only sqrt division.  Structure mirrors
+ * bz_d2n1n/bz_d3n2n exactly, except the LOW half of every level recurses
+ * approximately and the bottom-spine correction products (Q-hat times Blo,
+ * one M(k) per level) are skipped along with all remainder work.  The
+ * result never falls below the true quotient and exceeds it by at most
+ * ~2 units of the lowest limb per skipped level (the amount the skipped
+ * add-back corrections could have removed) — the caller's certificate
+ * window absorbs that.  Preconditions as bz_d2n1n: a (2n limbs) < b*B^n,
+ * b top-bit-normalized. */
+static void bz_d3n2n_q(const uint64_t *a, const uint64_t *b, int32_t n,
+                       uint64_t *q, uint64_t *sc);
+
+static void bz_d2n1n_q(const uint64_t *a, const uint64_t *b, int32_t n,
+                       uint64_t *q, uint64_t *sc) {
+    if ((n & 1) || n <= BZ_THRESHOLD) {
+        bz_base_div_into(a, 2 * n, b, n, q, n, q, 0, 1);
+        return;
+    }
+    int32_t k = n >> 1;
+    uint64_t *r1 = sc;                     /* n limbs */
+    uint64_t *t3 = sc + n;                 /* 3k limbs */
+    uint64_t *sc2 = t3 + 3 * k;
+    bz_d3n2n(a + k, b, n, q + k, r1, sc2); /* exact: its rem feeds the low */
+    for (int32_t i = 0; i < k; i++) t3[i] = a[i];
+    for (int32_t i = 0; i < n; i++) t3[k + i] = r1[i];
+    bz_d3n2n_q(t3, b, n, q, sc2);
+}
+
+static void bz_d3n2n_q(const uint64_t *a, const uint64_t *b, int32_t n,
+                       uint64_t *q, uint64_t *sc) {
+    int32_t k = n >> 1;
+    const uint64_t *A12 = a + k;
+    const uint64_t *Bhi = b + k;
+    if (mag_cmp(A12 + k, bz_trim(A12 + k, k), Bhi, k) < 0) {
+        bz_d2n1n_q(A12, Bhi, k, q, sc);
+    } else {
+        for (int32_t i = 0; i < k; i++) q[i] = ~0ULL;
+    }
+    /* Q-hat correction against Blo intentionally skipped. */
 }
 
 /* Top level: normalize once, walk the dividend in n-limb blocks from the top,
@@ -2570,25 +8455,40 @@ static void mag_divmod_bz(const uint64_t *u, int32_t ulen,
                  + (size_t)n                    /* rt  */
                  + (size_t)(tmax * n)           /* qf  */
                  + (size_t)(12 * n + 64);       /* recursion scratch */
-    uint64_t *mem = (uint64_t *)calloc(total, sizeof(uint64_t));
+    uint64_t *mem = bz_ws_get(total);
     if (!mem) { mag_divmod_knuth(u, ulen, v, vlen, q_out, r_out); return; }
-    uint64_t *vn = mem;
-    uint64_t *un = vn + n;
+    uint64_t *vn_work = mem;
+    uint64_t *un = vn_work + n;
     uint64_t *Z  = un + tmax * n;
     uint64_t *rt = Z + 2 * n;
     uint64_t *qf = rt + n;
     uint64_t *sc = qf + tmax * n;
+    /* Only the block-padded dividend relies on implicit zeros.  Its live
+     * prefix is overwritten immediately below, so clear only the padding. */
+#if BN_BZ_ZERO_PADDING_ONLY
+    memset(un + ulen, 0,
+           (size_t)(tmax * n - ulen) * sizeof(uint64_t));
+#else
+    memset(un, 0, (size_t)(tmax * n) * sizeof(uint64_t));
+#endif
 
+    const uint64_t *vn;
     if (shift > 0) {
         for (int32_t i = vlen - 1; i > 0; i--)
-            vn[i] = (v[i] << shift) | (v[i - 1] >> (64 - shift));
-        vn[0] = v[0] << shift;
+            vn_work[i] = (v[i] << shift) | (v[i - 1] >> (64 - shift));
+        vn_work[0] = v[0] << shift;
+        vn = vn_work;
         un[ulen] = u[ulen - 1] >> (64 - shift);
         for (int32_t i = ulen - 1; i > 0; i--)
             un[i] = (u[i] << shift) | (u[i - 1] >> (64 - shift));
         un[0] = u[0] << shift;
     } else {
-        for (int32_t i = 0; i < vlen; i++) vn[i] = v[i];
+#if BN_BZ_ALIAS_NORMALIZED_TOP
+        vn = v;
+#else
+        vn = vn_work;
+        for (int32_t i = 0; i < vlen; i++) vn_work[i] = v[i];
+#endif
         for (int32_t i = 0; i < ulen; i++) un[i] = u[i];
     }
     int32_t ut = bz_trim(un, ulen + 1);
@@ -2598,6 +8498,13 @@ static void mag_divmod_bz(const uint64_t *u, int32_t ulen,
     /* top block must be < vn (D2n/1n precondition); else grow by a zero block */
     if (mag_cmp(un + (t - 1) * n, bz_trim(un + (t - 1) * n, n), vn, n) >= 0) t++;
 
+    /*
+     * Recursive division interleaves correction products with substantial
+     * serial quotient/remainder work.  Let its workers sleep immediately
+     * after each product; the short post-job spin that helps back-to-back
+     * standalone multiplies only steals execution resources here.
+     */
+    bn_toom_no_spin++;
     for (int32_t i = 0; i < 2 * n; i++) Z[i] = un[(t - 2) * n + i];
     for (int32_t i = t - 2; i >= 0; i--) {
         bz_d2n1n(Z, vn, n, qf + (size_t)i * n, rt, sc);
@@ -2606,16 +8513,17 @@ static void mag_divmod_bz(const uint64_t *u, int32_t ulen,
             for (int32_t j = 0; j < n; j++) Z[n + j] = rt[j];
         }
     }
+    bn_toom_no_spin--;
 
     if (q_out) {
         int32_t ql = bz_trim(qf, (t - 1) * n);
-        WBigint *qb = bigint_alloc(ql > 0 ? ql : 1);
+        WBigint *qb = bigint_alloc_raw_hot(ql > 0 ? ql : 1);
         for (int32_t i = 0; i < ql; i++) qb->limbs[i] = qf[i];
         qb->size = ql;
         *q_out = qb;
     }
     if (r_out) {
-        WBigint *rb = bigint_alloc(n);
+        WBigint *rb = bigint_alloc_raw_hot(n);
         if (shift > 0) {
             for (int32_t i = 0; i < n - 1; i++)
                 rb->limbs[i] = (rt[i] >> shift) | (rt[i + 1] << (64 - shift));
@@ -2627,7 +8535,267 @@ static void mag_divmod_bz(const uint64_t *u, int32_t ulen,
         while (rb->size > 0 && rb->limbs[rb->size - 1] == 0) rb->size--;
         *r_out = rb;
     }
-    free(mem);
+}
+
+#ifndef BN_DIV_RECIP_Q_MIN
+#define BN_DIV_RECIP_Q_MIN 256
+#endif
+#ifndef BN_DIV_RECIP_Q_MAX
+#define BN_DIV_RECIP_Q_MAX BN_BIGINT_POOL_MAX_CAP
+#endif
+#ifndef BN_DIV_RECIP_Q_GUARD_LIMBS
+#define BN_DIV_RECIP_Q_GUARD_LIMBS 1
+#endif
+#ifndef BN_DIV_RECIP_R_MIN
+#define BN_DIV_RECIP_R_MIN 1024
+#endif
+#ifndef BN_DIV_BARRETT_R_MIN
+#define BN_DIV_BARRETT_R_MIN 4
+#endif
+#ifndef BN_DIV_BARRETT_LOW_MUL_MAX
+#define BN_DIV_BARRETT_LOW_MUL_MAX 56
+#endif
+#ifndef BN_DIV_BARRETT_LOW_MUL_MIN
+#define BN_DIV_BARRETT_LOW_MUL_MIN 24
+#endif
+
+static int bn_div_recip_reserve(
+    uint64_t **memory, size_t *capacity, size_t need) {
+    if (need <= *capacity) return 1;
+    size_t next_cap = need + need / 2 + 16;
+    uint64_t *next =
+        (uint64_t *)realloc(*memory, next_cap * sizeof(uint64_t));
+    if (!next) return 0;
+    *memory = next;
+    *capacity = next_cap;
+    return 1;
+}
+
+/* Low rn limbs of a*b.  Barrett reduction below never observes the upper
+ * half of q3*D; for small operands, triangular addmul rows are cheaper than
+ * computing and then discarding a complete balanced product. */
+static void bn_mul_low(
+    uint64_t *rp, int32_t rn,
+    const uint64_t *a, int32_t an,
+    const uint64_t *b, int32_t bn) {
+    if (an > bn) {
+        const uint64_t *swap_limbs = a;
+        int32_t swap_len = an;
+        a = b;
+        an = bn;
+        b = swap_limbs;
+        bn = swap_len;
+    }
+    memset(rp, 0, (size_t)rn * sizeof(uint64_t));
+    int32_t rows = an < rn ? an : rn;
+    for (int32_t i = 0; i < rows; i++) {
+        int32_t row = bn < rn - i ? bn : rn - i;
+        (void)bn_addmul_1(rp + i, b, row, a[i]);
+    }
+}
+
+/*
+ * With g guard limbs, cache R = floor(B^(2n+g) / D) after seeing the same
+ * n-limb divisor three times.  For U < B^(2n), let
+ *
+ *     UR = q0 B^(2n+g) + T,  0 <= T < B^(2n+g).
+ *
+ * Since B^(2n+g) = RD + S with 0 <= S < D,
+ *
+ *     0 <= U/D - UR/B^(2n+g) < B^(-g).
+ *
+ * Therefore q0 is the exact quotient whenever
+ *
+ *     T < B^(2n+g) - B^(2n).
+ *
+ * That certificate fails only when T's top g limbs are all UINT64_MAX
+ * (probability about B^-g for ordinary inputs); the ordinary division path
+ * handles that case.  One 64-bit guard limb is already enough to make the
+ * failure probability 2^-64 while keeping the steady-state product near
+ * 2n-by-n.  No quotient-times-divisor verification product is needed.
+ */
+static int mag_divmod_reciprocal_certified(
+    const uint64_t *u, int32_t ulen,
+    const uint64_t *v, int32_t vlen,
+    WBigint **q_out, WBigint **r_out) {
+    if (vlen > BN_DIV_RECIP_Q_MAX ||
+        ulen != 2 * vlen || !(v[vlen - 1] >> 63) ||
+        (q_out && vlen < BN_DIV_RECIP_Q_MIN) ||
+        (r_out && vlen <
+            (q_out ? BN_DIV_RECIP_R_MIN : BN_DIV_BARRETT_R_MIN)))
+        return 0;
+
+    WDivReciprocalCache *cache = &bn_div_recip_cache;
+    size_t n = (size_t)vlen;
+    int same =
+        cache->state != 0 && cache->n == vlen &&
+        cache->key_cap >= n &&
+        memcmp(cache->key, v, n * sizeof(uint64_t)) == 0;
+    if (!same) {
+        if (!bn_div_recip_reserve(&cache->key, &cache->key_cap, n)) {
+            cache->state = 0;
+            return 0;
+        }
+        memcpy(cache->key, v, n * sizeof(uint64_t));
+        cache->n = vlen;
+        cache->state = 1;
+        return 0;
+    }
+    if (cache->state < 0) return 0;
+    if (cache->state == 1) {
+        cache->state = 2;
+        return 0;
+    }
+
+    size_t guard = BN_DIV_RECIP_Q_GUARD_LIMBS;
+    size_t reciprocal_len = n + guard + 1;
+    size_t product_len = 3 * n + guard + 2;
+    if (!bn_div_recip_reserve(
+            &cache->reciprocal, &cache->reciprocal_cap, reciprocal_len) ||
+        !bn_div_recip_reserve(
+            &cache->product, &cache->product_cap, product_len)) {
+        cache->state = -1;
+        return 0;
+    }
+
+    if (cache->state == 2) {
+        size_t numerator_len = 2 * n + guard + 1;
+        memset(cache->product, 0, numerator_len * sizeof(uint64_t));
+        cache->product[2 * n + guard] = 1;
+        WBigint *reciprocal;
+        mag_divmod_bz(
+            cache->product, (int32_t)numerator_len,
+            v, vlen, &reciprocal, NULL);
+        int32_t rlen = reciprocal->size;
+        if (rlen <= 0 || (size_t)rlen > reciprocal_len) {
+            bigint_release(reciprocal);
+            cache->state = -1;
+            return 0;
+        }
+        memcpy(cache->reciprocal, reciprocal->limbs,
+               (size_t)rlen * sizeof(uint64_t));
+        memset(cache->reciprocal + rlen, 0,
+               (reciprocal_len - (size_t)rlen) * sizeof(uint64_t));
+        bigint_release(reciprocal);
+        cache->state = 3;
+    }
+
+    /*
+     * R/B = floor(B^(2n)/D) is the ordinary Barrett reciprocal mu.  For a
+     * remainder-only 2n/n division, using q1=floor(U/B^(n-1)) turns the first
+     * product into (n+1)-by-(n+1), rather than the 2n-by-(n+2) product needed
+     * to recover the exact quotient below.  The low n+1 limbs of U-q3*D are
+     * congruent to U modulo D and, because D is normalized, need at most two
+     * subtractions of D.  Both products use the existing TLS work buffers.
+     */
+    if (r_out && !q_out && vlen >= BN_DIV_BARRETT_R_MIN) {
+        size_t barrett_product_len = 2 * n + 2;
+        if (!bn_div_recip_reserve(
+                &cache->product, &cache->product_cap,
+                barrett_product_len) ||
+            !bn_div_recip_reserve(
+                &cache->verification, &cache->verification_cap,
+                barrett_product_len))
+            return 0;
+
+/* Below this divisor width the two Barrett products sit at the parallel-Toom
+ * floor: the pool's sleep/wake between them costs more than the split saves
+ * (~7% at 512 limbs), while 1024-limb products keep a large parallel win. */
+#ifndef BN_DIV_RECIP_PAR_MIN
+#define BN_DIV_RECIP_PAR_MIN 768
+#endif
+        int sequential_products = vlen < BN_DIV_RECIP_PAR_MIN;
+        if (sequential_products) bn_toom_parallel_depth++;
+
+        const uint64_t *q1 = u + n - 1;
+        const uint64_t *mu = cache->reciprocal + 1;
+        bigint_mul_dispatch(
+            cache->product, q1, vlen + 1, mu, vlen + 1);
+
+        const uint64_t *q3 = cache->product + n + 1;
+        int32_t q3_len = vlen + 1;
+        while (q3_len > 0 && q3[q3_len - 1] == 0)
+            q3_len--;
+        if (vlen >= BN_DIV_BARRETT_LOW_MUL_MIN &&
+            vlen <= BN_DIV_BARRETT_LOW_MUL_MAX) {
+            bn_mul_low(
+                cache->verification, vlen + 1,
+                q3, q3_len, v, vlen);
+        } else {
+            memset(cache->verification, 0,
+                   barrett_product_len * sizeof(uint64_t));
+            if (q3_len > 0)
+                bigint_mul_dispatch(
+                    cache->verification, q3, q3_len, v, vlen);
+        }
+        if (sequential_products) bn_toom_parallel_depth--;
+
+        uint64_t *reduced = cache->product;
+        (void)bn_sub_n(
+            reduced, u, cache->verification, vlen + 1);
+        for (int correction = 0; correction < 2; correction++) {
+            if (reduced[n] == 0 &&
+                mag_cmp(reduced, vlen, v, vlen) < 0)
+                break;
+            uint64_t borrow =
+                bn_sub_n(reduced, reduced, v, vlen);
+            reduced[n] -= borrow;
+        }
+        if (reduced[n] != 0 ||
+            mag_cmp(reduced, vlen, v, vlen) >= 0)
+            return 0;
+
+        WBigint *r = bigint_alloc_raw_hot(vlen);
+        memcpy(r->limbs, reduced, n * sizeof(uint64_t));
+        r->size = vlen;
+        while (r->size > 0 && r->limbs[r->size - 1] == 0)
+            r->size--;
+        *r_out = r;
+        return 1;
+    }
+
+    bigint_mul_dispatch(
+        cache->product, u, ulen,
+        cache->reciprocal, (int32_t)reciprocal_len);
+
+    for (size_t i = 2 * n; i < 2 * n + guard; i++) {
+        if (cache->product[i] != UINT64_MAX) {
+            const uint64_t *q_limbs =
+                cache->product + 2 * n + guard;
+            int32_t q_len = vlen + 1;
+            while (q_len > 0 && q_limbs[q_len - 1] == 0)
+                q_len--;
+            if (r_out) {
+                size_t verification_len = 2 * n + 2;
+                if (!bn_div_recip_reserve(
+                        &cache->verification,
+                        &cache->verification_cap,
+                        verification_len))
+                    return 0;
+                memset(cache->verification, 0,
+                       verification_len * sizeof(uint64_t));
+                bigint_mul_dispatch(
+                    cache->verification,
+                    q_limbs, q_len, v, vlen);
+                WBigint *r = bigint_alloc_raw_hot(vlen);
+                (void)bn_sub_n(
+                    r->limbs, u, cache->verification, vlen);
+                r->size = vlen;
+                while (r->size > 0 && r->limbs[r->size - 1] == 0)
+                    r->size--;
+                *r_out = r;
+            }
+            if (q_out) {
+                WBigint *q = bigint_alloc_raw_hot(vlen + 1);
+                memcpy(q->limbs, q_limbs,
+                       (size_t)q_len * sizeof(uint64_t));
+                q->size = q_len;
+                *q_out = q;
+            }
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /* Dispatcher: B–Z pays off only when BOTH the divisor and the quotient are
@@ -2635,14 +8803,122 @@ static void mag_divmod_bz(const uint64_t *u, int32_t ulen,
 static void mag_divmod(const uint64_t *u, int32_t ulen,
                        const uint64_t *v, int32_t vlen,
                        WBigint **q_out, WBigint **r_out) {
-    if (vlen >= 2 * BZ_THRESHOLD && ulen - vlen >= BZ_THRESHOLD) {
+#if BN_DIVMOD_42
+    if (ulen == 4 && vlen == 2) {
+        mag_divmod_42(u, v, q_out, r_out);
+        return;
+    }
+#endif
+#if BN_MOD_63_DIRECT
+    if (ulen == 6 && vlen == 3 && r_out && !q_out) {
+        *r_out = mag_mod_63(u, v);
+        return;
+    }
+#endif
+    if ((q_out || r_out) &&
+        mag_divmod_reciprocal_certified(
+            u, ulen, v, vlen, q_out, r_out))
+        return;
+    if (q_out && !r_out) {
+#if BN_DIV_TRIANGULAR_Q_CERTIFIED
+#if BN_DIV_63_DIRECT
+        if (ulen == 6 && vlen == 3) {
+            WBigint *q = mag_div_q_63_certified(u, v);
+            if (q) {
+                *q_out = q;
+                return;
+            }
+        }
+#endif
+        WBigint *q =
+            mag_div_q_triangular_certified(u, ulen, v, vlen);
+        if (q) {
+            *q_out = q;
+            return;
+        }
+#endif
+    }
+    if (vlen >= BZ_TOP_THRESHOLD && ulen - vlen >= BZ_THRESHOLD) {
         mag_divmod_bz(u, ulen, v, vlen, q_out, r_out);
         return;
     }
     mag_divmod_knuth(u, ulen, v, vlen, q_out, r_out);
 }
 
-static WValue bigint_div_any(WValue a, WValue b) {
+/* Exact division q = n / d for KNOWN divisors (d | n, d != 0), Hensel /
+ * Jebelean style: strip d's 2-adic part (n carries it too), then produce
+ * quotient limbs low-to-high as q_i = r_i * (-d)^-1 ... * inv mod B with a
+ * truncated submul row — everything runs mod B^qn, so there is no
+ * normalization, no quotient estimation, and no borrow correction.  About
+ * half the work of a full division for one-limb divisors and strictly less
+ * for multi-limb ones.  Only valid when d divides n exactly. */
+static WBigint *mag_divexact(const uint64_t *np, int32_t nn,
+                             const uint64_t *dp, int32_t dn) {
+    /* 2-adic valuation of d: whole limbs, then bits. */
+    int32_t zl = 0;
+    while (dp[zl] == 0) zl++;                   /* d != 0 */
+    int tz = __builtin_ctzll(dp[zl]);
+    np += zl;
+    nn -= zl;
+    dp += zl;
+    dn -= zl;
+    int32_t qn = nn - dn + 1;                   /* floor may need one less */
+    if (qn <= 0) qn = 1;
+    WBigint *q = bigint_alloc_raw_hot(qn);
+    /* Only the low qn limbs of the shifted r and d ever matter (mod B^qn). */
+    int32_t dw = dn < qn ? dn : qn;
+    uint64_t d0v, dstack[64];
+    uint64_t *dv = NULL;
+    const uint64_t *dsh;
+    uint64_t rstack[128];
+    uint64_t *r = qn <= 128
+        ? rstack
+        : (uint64_t *)malloc((size_t)qn * sizeof(uint64_t));
+    if (!r) die("divexact: out of memory");
+    if (tz == 0) {
+        dsh = dp;
+        d0v = dp[0];
+        for (int32_t i = 0; i < qn; i++) r[i] = np[i];
+    } else {
+        dv = dw <= 64
+            ? dstack
+            : (uint64_t *)malloc((size_t)dw * sizeof(uint64_t));
+        if (!dv) die("divexact: out of memory");
+        for (int32_t i = 0; i < dw; i++) {
+            uint64_t hi = i + 1 < dn ? dp[i + 1] : 0;
+            dv[i] = (dp[i] >> tz) | (hi << (64 - tz));
+        }
+        dsh = dv;
+        d0v = dv[0];
+        for (int32_t i = 0; i < qn; i++) {
+            uint64_t hi = i + 1 < nn ? np[i + 1] : 0;
+            r[i] = (np[i] >> tz) | (hi << (64 - tz));
+        }
+    }
+    uint64_t inv = bn_modinv_odd(d0v);
+    for (int32_t i = 0; i < qn; i++) {
+        uint64_t qi = r[i] * inv;
+        q->limbs[i] = qi;
+        int32_t row = dw < qn - i ? dw : qn - i;
+        if (row > 1 || (row == 1 && i + 1 < qn)) {
+            uint64_t bw = bn_submul_1(r + i, dsh, row, qi);
+            for (int32_t k = i + row; bw && k < qn; k++) {
+                uint64_t old = r[k];
+                r[k] = old - bw;
+                bw = old < bw;
+            }
+        }
+    }
+    if (r != rstack) free(r);
+    if (dv && dv != dstack) free(dv);
+    int32_t qs = qn;
+    while (qs > 0 && q->limbs[qs - 1] == 0) qs--;
+    q->size = qs;
+    return q;
+}
+
+static __attribute__((noinline))
+WValue bigint_div_any_generic(WValue a, WValue b) {
     uint64_t sa, sb;
     int32_t alen, blen;
     const uint64_t *al = integer_limbs(a, &sa, &alen);
@@ -2655,12 +8931,29 @@ static WValue bigint_div_any(WValue a, WValue b) {
     if (a_abs == 0) return w_box_int(0);
 
     WBigint *q;
-    mag_divmod(al, a_abs, bl, b_abs, &q, NULL);
+    if (b_abs == 1) {
+        uint64_t rem;
+        q = mag_div_single(al, a_abs, bl[0], &rem);
+#if BN_DIVMOD_42 && BN_DIVMOD_42_DIRECT
+    } else if (a_abs == 4 && b_abs == 2) {
+        q = mag_div_42(al, bl);
+#endif
+    } else {
+        mag_divmod(al, a_abs, bl, b_abs, &q, NULL);
+    }
     if (result_neg && q->size > 0) q->size = -q->size;
+#ifndef BN_DIV_KNOWN_NORMALIZED
+#define BN_DIV_KNOWN_NORMALIZED 1
+#endif
+#if BN_DIV_KNOWN_NORMALIZED
+    return bigint_finish_mag_sub(q);
+#else
     return bigint_normalize(q);
+#endif
 }
 
-static WValue bigint_mod_any(WValue a, WValue b) {
+static __attribute__((noinline))
+WValue bigint_mod_any_generic(WValue a, WValue b) {
     uint64_t sa, sb;
     int32_t alen, blen;
     const uint64_t *al = integer_limbs(a, &sa, &alen);
@@ -2682,126 +8975,2369 @@ static WValue bigint_mod_any(WValue a, WValue b) {
     }
 
     WBigint *r;
+#if BN_DIVMOD_42 && BN_DIVMOD_42_DIRECT
+    if (a_abs == 4 && b_abs == 2)
+        r = mag_mod_42(al, bl);
+    else
+#endif
     mag_divmod(al, a_abs, bl, b_abs, NULL, &r);
     if (a_neg && r->size > 0) r->size = -r->size;
+#if BN_DIV_KNOWN_NORMALIZED
+    return bigint_finish_mag_sub(r);
+#else
     return bigint_normalize(r);
+#endif
 }
 
-static __uint128_t bigint_mag_top2(const uint64_t *limbs, int32_t len) {
-    return ((__uint128_t)limbs[len - 1] << 64) | limbs[len - 2];
-}
+#ifndef BN_DIVMOD_42_BOXED_FAST
+#define BN_DIVMOD_42_BOXED_FAST 1
+#endif
+#ifndef BN_DIVMOD_21_BOXED_FAST
+#define BN_DIVMOD_21_BOXED_FAST 1
+#endif
+#ifndef BN_DIV_63_BOXED_FAST
+#define BN_DIV_63_BOXED_FAST 1
+#endif
+#ifndef BN_DIV_POSITIVE_2N_N_BOXED_FAST
+#define BN_DIV_POSITIVE_2N_N_BOXED_FAST 1
+#endif
 
-static WValue bigint_submul_u64_positive(const uint64_t *xl, int32_t xlen,
-                                         const uint64_t *yl, int32_t ylen,
-                                         uint64_t q) {
-    WBigint *r = bigint_alloc(xlen);
-    uint64_t carry = 0, borrow = 0;
-
-    for (int32_t i = 0; i < xlen; i++) {
-        __uint128_t prod = carry;
-        if (i < ylen) prod += (__uint128_t)yl[i] * q;
-        uint64_t sub = (uint64_t)prod;
-        carry = (uint64_t)(prod >> 64);
-
-        uint64_t xi = xl[i];
-        uint64_t lo = xi - sub;
-        uint64_t borrow1 = xi < sub;
-        uint64_t limb = lo - borrow;
-        uint64_t borrow2 = lo < borrow;
-        r->limbs[i] = limb;
-        borrow = borrow1 + borrow2;
+static inline __attribute__((always_inline))
+WValue bigint_div_any(WValue a, WValue b) {
+#if BN_DIVMOD_21_BOXED_FAST || (BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST) || \
+    (BN_DIV_TRIANGULAR_Q_CERTIFIED && BN_DIV_63_DIRECT && \
+     BN_DIV_63_BOXED_FAST) || BN_DIV_POSITIVE_2N_N_BOXED_FAST
+    if (w_is_bigint(a) && w_is_bigint(b)) {
+        WBigint *aa = w_as_bigint(a);
+        WBigint *bb = w_as_bigint(b);
+#if BN_DIVMOD_21_BOXED_FAST
+        if (aa->size == 2 && bb->size == 1) {
+            uint64_t remainder;
+            return bigint_finish_mag_sub(
+                mag_div_single(
+                    aa->limbs, 2, bb->limbs[0], &remainder));
+        }
+#endif
+#if BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST
+        if (aa->size == 4 && bb->size == 2)
+            return bigint_finish_mag_sub(
+                mag_div_42(aa->limbs, bb->limbs));
+#endif
+#if BN_DIV_TRIANGULAR_Q_CERTIFIED && BN_DIV_63_DIRECT && BN_DIV_63_BOXED_FAST
+        if (aa->size == 6 && bb->size == 3) {
+            WBigint *q =
+                mag_div_q_63_certified(aa->limbs, bb->limbs);
+            if (q) return bigint_finish_mag_sub(q);
+        }
+#endif
+#if BN_DIV_POSITIVE_2N_N_BOXED_FAST
+        /*
+         * Balanced positive division is the dominant public bignum shape.
+         * Its boxed operands already expose the unsigned limb arrays and
+         * exact lengths, so avoid rebuilding that information in the generic
+         * signed/type-polymorphic entry before dispatching the same magnitude
+         * kernel.
+         */
+        if (bb->size >= 4 && aa->size > 0 &&
+            (aa->size & 1) == 0 && bb->size == aa->size / 2) {
+            WBigint *q;
+#if BN_DIV_TRIANGULAR_Q_CERTIFIED
+            /*
+             * Below the cached-reciprocal crossover, quotient-only 2n/n
+             * division goes straight to the triangular certificate.  Keeping
+             * that sizeable kernel out of line also prevents mag_divmod's
+             * ordinary dispatcher from inheriting its large fixed stack
+             * frame.  A rare inconclusive certificate falls back to the full
+             * dispatcher unchanged.
+             */
+            if (bb->size < BN_DIV_RECIP_Q_MIN) {
+                q = mag_div_q_triangular_certified(
+                    aa->limbs, aa->size, bb->limbs, bb->size);
+                if (q) return bigint_finish_mag_sub(q);
+            }
+#endif
+            mag_divmod(
+                aa->limbs, aa->size, bb->limbs, bb->size, &q, NULL);
+            return bigint_finish_mag_sub(q);
+        }
+#endif
     }
-
-    if (carry != 0 || borrow != 0) {
-        free(r);
-        return W_NIL;
-    }
-
-    r->size = xlen;
-    return bigint_normalize(r);
+#endif
+    return bigint_div_any_generic(a, b);
 }
 
-static int bigint_gcd_quotient_step(WValue *x, WValue *y) {
-    if (bigint_compare(*x, *y) < 0) {
-        WValue tmp = *x;
-        *x = *y;
-        *y = tmp;
+static inline __attribute__((always_inline))
+WValue bigint_mod_any(WValue a, WValue b) {
+#if BN_DIVMOD_21_BOXED_FAST || (BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST) || \
+    BN_MOD_63_DIRECT || BN_DIV_POSITIVE_2N_N_BOXED_FAST
+    if (w_is_bigint(a) && w_is_bigint(b)) {
+        WBigint *aa = w_as_bigint(a);
+        WBigint *bb = w_as_bigint(b);
+#if BN_DIVMOD_21_BOXED_FAST
+        if (aa->size == 2 && bb->size == 1)
+            return bigint_finish_one_limb(
+                mag_mod_single(aa->limbs, 2, bb->limbs[0]), 0);
+#endif
+#if BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST
+        if (aa->size == 4 && bb->size == 2)
+            return bigint_finish_mag_sub(
+                mag_mod_42(aa->limbs, bb->limbs));
+#endif
+#if BN_MOD_63_DIRECT
+        if (aa->size == 6 && bb->size == 3)
+            return bigint_finish_mag_sub(
+                mag_mod_63(aa->limbs, bb->limbs));
+#endif
+#if BN_DIV_POSITIVE_2N_N_BOXED_FAST
+        /*
+         * Mirror of bigint_div_any's balanced positive fast path: the boxed
+         * operands already expose the unsigned limb arrays and exact
+         * lengths, so skip the noinline generic entry and its duplicate
+         * integer_limbs walk before dispatching the same magnitude kernel.
+         */
+        if (bb->size >= 4 && aa->size > 0 &&
+            (aa->size & 1) == 0 && bb->size == aa->size / 2) {
+            WBigint *r;
+            mag_divmod(
+                aa->limbs, aa->size, bb->limbs, bb->size, NULL, &r);
+            return bigint_finish_mag_sub(r);
+        }
+#endif
+    }
+#endif
+    return bigint_mod_any_generic(a, b);
+}
+
+/* ---- Integer square root: divide-and-conquer sqrtrem ------------------
+ *
+ * Zimmermann's "Karatsuba square root" (INRIA RR-3805): normalize so the
+ * operand spans an even number of limbs with its top limb >= 2^62 (an even
+ * bit shift keeps the root exact: isqrt(a*4^k) = isqrt(a)*2^k), then split
+ * a = a3*B^(2h) rest and recurse:
+ *
+ *   s', r' = sqrtrem(high 2h limbs)
+ *   q , u  = divmod(r'*B^l + a1, 2s')      (divide by s', halve the quotient)
+ *   s      = s'*B^l + q
+ *   r      = u*B^l + a0 - q^2              (fix-up: s -= 1; r += 2s+1)
+ *
+ * The division and the q^2 product ride the existing subquadratic
+ * mag_divmod / bigint_sqr_dispatch engines, so the whole root costs a small
+ * constant times one full-size division. Int#isqrt only keeps the root, but
+ * the recursion needs remainders internally, so sqrtrem is the worker. */
+
+/* floor sqrt + remainder of one normalized limb (hi >= 2^62): hardware
+ * double sqrt seed (error well under one ulp of the 32-bit root), exact
+ * integer fixup.  The root has bit 31 set. */
+static inline uint64_t bn_sqrtrem1(uint64_t hi, uint64_t *rp) {
+    uint64_t s = (uint64_t)__builtin_sqrt((double)hi);
+    if (s > 0xFFFFFFFFULL) s = 0xFFFFFFFFULL;
+    uint64_t r = hi - s * s;
+    while ((int64_t)r < 0) { r += 2 * s - 1; s--; }        /* <= 1 pass */
+    while (r > 2 * s) { r -= 2 * s + 1; s++; }             /* <= 1 pass */
+    *rp = r;
+    return s;
+}
+
+/* sqrtrem base case: {np, 2} with np[1] >= 2^62. Root (top bit set) in
+ * sp[0], remainder low limb in np[0]; returns its B^1 limb (rem <= 2s).
+ * GMP sqrtrem2 shape: 32-bit root of the top limb, one 64/64 integer
+ * divide to extend it, exact 128-bit fixup (no fdiv anywhere). */
+static uint64_t bn_sqrtrem2(uint64_t *sp, uint64_t *np) {
+    uint64_t hi = np[1], lo = np[0];
+    uint64_t r1;
+    uint64_t s1 = bn_sqrtrem1(hi, &r1);           /* 2^31 <= s1 < 2^32 */
+    /* Next 32 root bits: q = floor((r1:lo) / (2 s1)) approximated on the
+     * top bits (r1 <= 2 s1 < 2^33, so the shift cannot overflow). */
+    uint64_t num = (r1 << 31) | (lo >> 33);
+    uint64_t q = num / s1;
+    if (q >> 32) q = 0xFFFFFFFFULL;
+    uint64_t s = (s1 << 32) | q;
+    unsigned __int128 a = ((unsigned __int128)hi << 64) | lo;
+    unsigned __int128 rem = a - (unsigned __int128)s * s;
+    /* |error| <= 3: each pass moves the root by one. */
+    while ((__int128)rem < 0) {
+        rem += 2 * (unsigned __int128)s - 1;
+        s--;
+    }
+    while (rem > 2 * (unsigned __int128)s) {
+        rem -= 2 * (unsigned __int128)s + 1;
+        s++;
+    }
+    sp[0] = s;
+    np[0] = (uint64_t)rem;
+    return (uint64_t)(rem >> 64);
+}
+
+/* Exact floor sqrt of a 128-bit value (any normalization). */
+static uint64_t bn_isqrt_u128(unsigned __int128 a) {
+    uint64_t hi = (uint64_t)(a >> 64);
+    if (hi == 0) {
+        uint64_t v = (uint64_t)a;
+        if (v == 0) return 0;
+        uint64_t s = (uint64_t)__builtin_sqrt((double)v);
+        if (s > 0xFFFFFFFFULL) s = 0xFFFFFFFFULL;
+        while (s * s > v) s--;
+        while (v - s * s > 2 * s) s++;
+        return s;
+    }
+    int sh = __builtin_clzll(hi) & ~1;
+    unsigned __int128 an = a << sh;
+    uint64_t nl[2] = { (uint64_t)an, (uint64_t)(an >> 64) };
+    uint64_t sr;
+    (void)bn_sqrtrem2(&sr, nl);
+    return sr >> (sh >> 1);
+}
+
+static inline uint64_t bn_sqrt_sub_1(uint64_t *p, int32_t n, uint64_t v) {
+    for (int32_t i = 0; i < n && v; i++) {
+        uint64_t old = p[i];
+        p[i] = old - v;
+        v = old < v;
+    }
+    return v;
+}
+
+static inline uint64_t bn_sqrt_add_1(uint64_t *p, int32_t n, uint64_t v) {
+    for (int32_t i = 0; i < n && v; i++) {
+        uint64_t old = p[i];
+        p[i] = old + v;
+        v = p[i] < old;
+    }
+    return v;
+}
+
+/* Divide {up, l+h} by the bit-63-normalized divisor {vp, h}: quotient into
+ * qp[0..l) (returns its carry limb, <= 2), remainder into up[0..h). The
+ * dividend may carry high zero limbs (the recursive remainder can be tiny).
+ * h <= 2 runs allocation-free on the reciprocal step primitives; larger h
+ * rides mag_divmod. */
+static uint64_t bn_sqrt_divrem(uint64_t *up, int32_t l, int32_t h,
+                               const uint64_t *vp, uint64_t *qp) {
+    if (h == 1) {
+        uint64_t d = vp[0];
+        uint64_t dinv = bn_invert_limb(d);
+        uint64_t r = up[l];
+        uint64_t carry = 0;
+        if (r >= d) { carry = 1; r -= d; }      /* B/d <= 2: one step */
+        for (int32_t i = l - 1; i >= 0; i--)
+            qp[i] = bn_div_qr_preinv(r, up[i], d, dinv, &r);
+        up[0] = r;
+        return carry;
+    }
+    if (h == 2) {
+        uint64_t d1 = vp[1], d0 = vp[0];
+        uint64_t dinv = bn_invert_pi1(d1, d0);
+        uint64_t r1 = up[l + 1], r0 = up[l];
+        uint64_t carry = 0;
+        if (r1 > d1 || (r1 == d1 && r0 >= d0)) {
+            uint64_t borrow = r0 < d0;
+            r0 -= d0;
+            r1 -= d1 + borrow;
+            carry = 1;
+        }
+        for (int32_t i = l - 1; i >= 0; i--)
+            qp[i] = bn_udiv_qr_3by2(r1, r0, up[i], d1, d0, dinv, &r1, &r0);
+        up[0] = r0;
+        up[1] = r1;
+        return carry;
+    }
+    int32_t ulen = l + h;
+    while (ulen > 0 && up[ulen - 1] == 0) ulen--;
+    if (ulen < h || (ulen == h && mag_cmp(up, ulen, vp, h) < 0)) {
+        memset(qp, 0, (size_t)l * sizeof(uint64_t));
+        return 0;          /* quotient 0; dividend == remainder, in place */
+    }
+    if (h < 64) {
+        /* Allocation-free Knuth straight into the caller's buffers (the
+         * divisor is already normalized, and l + h <= 126 keeps the leaf
+         * on its stack arena).  Pre-fold the top block below the divisor
+         * so the quotient fits l limbs exactly (r' <= 2s': one pass). */
+        uint64_t carry = 0;
+        while (ulen == l + h &&
+               mag_cmp(up + l, bz_trim(up + l, h), vp, h) >= 0) {
+            (void)bn_sub_n(up + l, up + l, vp, h);
+            carry++;                            /* r' <= 2s': <= 2 passes */
+            while (ulen > 0 && up[ulen - 1] == 0) ulen--;
+        }
+        uint64_t rbuf[64];      /* r must not alias the dividend: the leaf
+                                 * zeroes its r buffer before reading u */
+        bz_base_div_into(up, ulen, vp, h, qp, l, rbuf, h, 1);
+        memcpy(up, rbuf, (size_t)h * sizeof(uint64_t));
+        return carry;
+    }
+    WBigint *q, *r;
+    mag_divmod(up, ulen, vp, h, &q, &r);
+    int32_t rlen = r->size;
+    memcpy(up, r->limbs, (size_t)rlen * sizeof(uint64_t));
+    memset(up + rlen, 0, (size_t)(h - rlen) * sizeof(uint64_t));
+    bigint_release(r);
+    int32_t qlen = q->size;
+    uint64_t carry = qlen > l ? q->limbs[l] : 0;
+    if (qlen > l) qlen = l;
+    memcpy(qp, q->limbs, (size_t)qlen * sizeof(uint64_t));
+    memset(qp + qlen, 0, (size_t)(l - qlen) * sizeof(uint64_t));
+    bigint_release(q);
+    return carry;
+}
+
+/* In-place divide-and-conquer sqrtrem: np holds 2n limbs with
+ * np[2n-1] >= 2^62. On return sp[0..n) is floor(sqrt) (top bit set),
+ * np[0..n) the remainder's low limbs, and the returned carry (0 or 1) its
+ * B^n limb (rem <= 2s < 2*B^n). np[n..2n) is consumed as scratch. */
+static uint64_t bn_dc_sqrtrem(uint64_t *np, uint64_t *sp, int32_t n) {
+    if (n == 1) return bn_sqrtrem2(sp, np);
+    int32_t l = n >> 1, h = n - l;              /* 1 <= l <= h */
+    /* Root of the high 2h limbs (a prefix, so it stays normalized). */
+    uint64_t q = bn_dc_sqrtrem(np + 2 * l, sp + l, h);
+    /* r' = q*B^h + {np+2l, h} <= 2s'. Fold a set carry as r' - s' (exact:
+     * r' >= B^h > s' forces r' - s' < B^h since r' <= 2s'), which pre-adds
+     * B^l to the quotient below. */
+    if (q) (void)bn_sub_n(np + 2 * l, np + 2 * l, sp + l, h);
+    /* Q = floor((r'*B^l + a1) / s'), u = that remainder (at np+l). */
+    q += bn_sqrt_divrem(np + l, l, h, sp + l, sp);
+    /* The step really divides by 2s': halve Q, returning the dropped bit
+     * times s' to u. Afterwards q-hat = q*B^l + {sp,l}; q == 1 forces
+     * {sp,l} == 0 (Q <= 2*B^l with equality exactly when q ends up set). */
+    uint64_t c0 = sp[0] & 1;
+    for (int32_t i = 0; i + 1 < l; i++)
+        sp[i] = (sp[i] >> 1) | (sp[i + 1] << 63);
+    sp[l - 1] = (sp[l - 1] >> 1) | (q << 63);
+    q >>= 1;
+    int64_t cc = 0;
+    if (c0) cc = (int64_t)bn_add_n(np + l, np + l, sp + l, h);
+    /* r = u*B^l + a0 - q-hat^2 (a0 = {np, l}, untouched so far). */
+    if (q) {
+        /* q-hat = B^l exactly: q-hat^2 = B^2l. */
+        if (2 * l == n) cc -= 1;
+        else cc -= (int64_t)bn_sqrt_sub_1(np + 2 * l, n - 2 * l, 1);
+        /* The candidate root B^n always overshoots (a < B^2n): step down to
+         * B^n - 1 now, r += 2(B^n - 1) + 1. */
+        for (int32_t i = 0; i < n; i++) sp[i] = UINT64_MAX;
+        cc += 2;
+        cc -= (int64_t)bn_sqrt_sub_1(np, n, 1);
+    } else {
+        uint64_t *sq = np + n;                  /* dead upper half */
+        if (l == 1) {
+            unsigned __int128 p = (unsigned __int128)sp[0] * sp[0];
+            sq[0] = (uint64_t)p;
+            sq[1] = (uint64_t)(p >> 64);
+        } else {
+            bigint_sqr_dispatch(sq, sp, l);
+        }
+        uint64_t borrow = bn_sub_n(np, np, sq, 2 * l);
+        if (2 * l == n) cc -= (int64_t)borrow;
+        else cc -= (int64_t)bn_sqrt_sub_1(np + 2 * l, n - 2 * l, borrow);
+    }
+    while (cc < 0) {                            /* at most one pass */
+        (void)bn_sqrt_sub_1(sp, n, 1);
+        cc += (int64_t)bn_add_n(np, np, sp, n);
+        cc += (int64_t)bn_add_n(np, np, sp, n);
+        cc += (int64_t)bn_sqrt_add_1(np, n, 1);
+    }
+    return (uint64_t)cc;
+}
+
+/* Quotient-only guarded divide for the root-only top level: {up, l1 + h} /
+ * {vp, h} (vp bit-63-normalized), quotient into qp[0..l1) plus a returned
+ * carry limb.  Unlike bn_sqrt_divrem this never writes the dividend (the
+ * uncertified fallback re-reads it) and never materializes a remainder —
+ * mag_divmod's quotient-only path is 15-35% cheaper than divrem at the
+ * sizes the sqrt recursion feeds it. */
+static uint64_t bn_sqrt_divq_guard(const uint64_t *up, int32_t l1, int32_t h,
+                                   const uint64_t *vp, uint64_t *qp) {
+    if (h == 1) {
+        uint64_t d = vp[0];
+        uint64_t dinv = bn_invert_limb(d);
+        uint64_t r = up[l1];
+        uint64_t carry = 0;
+        if (r >= d) { carry = 1; r -= d; }      /* B/d <= 2: one step */
+        for (int32_t i = l1 - 1; i >= 0; i--)
+            qp[i] = bn_div_qr_preinv(r, up[i], d, dinv, &r);
+        return carry;
+    }
+    if (h == 2) {
+        uint64_t d1 = vp[1], d0 = vp[0];
+        uint64_t dinv = bn_invert_pi1(d1, d0);
+        uint64_t r1 = up[l1 + 1], r0 = up[l1];
+        uint64_t carry = 0;
+        if (r1 > d1 || (r1 == d1 && r0 >= d0)) {
+            uint64_t borrow = r0 < d0;
+            r0 -= d0;
+            r1 -= d1 + borrow;
+            carry = 1;
+        }
+        for (int32_t i = l1 - 1; i >= 0; i--)
+            qp[i] = bn_udiv_qr_3by2(r1, r0, up[i], d1, d0, dinv, &r1, &r0);
+        return carry;
+    }
+    int32_t ulen = l1 + h;
+    while (ulen > 0 && up[ulen - 1] == 0) ulen--;
+    if (ulen < h || (ulen == h && mag_cmp(up, ulen, vp, h) < 0)) {
+        memset(qp, 0, (size_t)l1 * sizeof(uint64_t));
+        return 0;
+    }
+    /* Prefer the triangular quotient-only engine outright: the dispatch
+     * would try the cached-reciprocal path first, whose full 2n-by-(n+2)
+     * product costs ~2 M(n) sequentially and thrashes the parallel-Toom
+     * pool awake when run in the sqrt call pattern. */
+    WBigint *q = ulen == 2 * h
+        ? mag_div_q_triangular_certified(up, ulen, vp, h)
+        : NULL;
+    if (!q) {
+        int sequential = h < BN_DIV_RECIP_PAR_MIN;
+        if (sequential) bn_toom_parallel_depth++;
+        mag_divmod(up, ulen, vp, h, &q, NULL);
+        if (sequential) bn_toom_parallel_depth--;
+    }
+    int32_t qlen = q->size;
+    uint64_t carry = qlen > l1 ? q->limbs[l1] : 0;
+    if (qlen > l1) qlen = l1;
+    memcpy(qp, q->limbs, (size_t)qlen * sizeof(uint64_t));
+    memset(qp + qlen, 0, (size_t)(l1 - qlen) * sizeof(uint64_t));
+    bigint_release(q);
+    return carry;
+}
+
+/* Top-level root-only variant: the same balanced split as the sqrtrem
+ * recursion (keeping every engine call on the power-of-two-friendly
+ * sizes), but quotient-only, remainder-free, and square-free.
+ *
+ * Divide with ONE GUARD LIMB below the true quotient.  When h == l + 1 the
+ * dividend {np + l - 1, 2h} over s' is already the ulen == 2*vlen shape the
+ * fast quotient-only engines (triangular-certified / cached-reciprocal)
+ * want; when h == l, extend one more limb down and pad the divisor with a
+ * low zero limb ({sp + l - 1, h + 1} with sp[l-1] = 0) — the quotient is
+ * unchanged (rho*B + extra < s'B) and the shape stays 2(h+1) over (h+1).
+ * Either way Q' = floor((r'*B^(l+1) + a1*B + np[l-1]) / s'), l+2 limbs
+ * including the carry, and the root candidate is s'*B^l + floor(Q'/2B).
+ * With g = the dropped 65-bit chunk of Q',
+ *
+ *     sqrt(A) - cand = g/2^65 + eps - theta,   0 <= eps < 2^-63,
+ *
+ * where theta = c^2/(2 s' B^l) is the AM-GM correction: < 2^-64 for
+ * h == l + 1, and < 1 but computable to ~2^-50 relative from the top two
+ * limbs of c and s' when h == l.  Whenever g - theta*2^65 sits 2^16 clear
+ * of 0 and 2^65 the floor is certified with no square and no remainder
+ * (below 0 certifies cand - 1).  Returns 1 when certified; 0 (probability
+ * ~2^-48) sends the caller down the exact full-sqrtrem path.  qp needs
+ * l + 2 limbs. */
+static int bn_dc_sqrt_only(uint64_t *np, uint64_t *sp, uint64_t *qp,
+                           int32_t n) {
+    if (n <= 2) {
+        (void)bn_dc_sqrtrem(np, sp, n);
         return 1;
     }
+    int32_t l = n >> 1, h = n - l;              /* h == l or l + 1 */
+    uint64_t q = bn_dc_sqrtrem(np + 2 * l, sp + l, h);
+    /* Fold r' strictly below s' (r' <= 2s': at most two subtractions,
+     * each pre-adding B^(l+1) to Q'), so every divide below sees its
+     * dividend under divisor * B^(quotient limbs). */
+    if (q) (void)bn_sub_n(np + 2 * l, np + 2 * l, sp + l, h);
+    while (mag_cmp(np + 2 * l, bz_trim(np + 2 * l, h), sp + l, h) >= 0) {
+        (void)bn_sub_n(np + 2 * l, np + 2 * l, sp + l, h);
+        q++;                                    /* r' <= 2s': <= 2 passes */
+    }
+    int32_t t = h == l;                         /* min divisor pad limbs */
+    int32_t e = 0;                              /* guard limbs below root */
+    int divided = 0;
+    if (h + t > BN_DIV_TRIANGULAR_Q_MAX) {
+        /* Approximate B-Z quotient (divappr): pad the divisor to a
+         * multiple-of-8 width so the recursion stays on even splits down
+         * to the Knuth base.  Each pad limb cancels one extra dividend
+         * limb, so the quotient is unchanged apart from e extra guard
+         * limbs appearing below it. */
+        int32_t p = t;
+        while ((h + p) & 7) p++;
+        uint64_t *sc = bz_ws_get((size_t)(12 * (h + p) + 64));
+        if (sc) {
+            e = h - l - 1 + p;
+            for (int32_t i = 0; i < p; i++) sp[l - p + i] = 0;
+            bn_toom_no_spin++;
+            bz_d2n1n_q(np + 2 * l - h - 2 * p, sp + l - p, h + p, qp, sc);
+            bn_toom_no_spin--;
+            divided = 1;
+        }
+    }
+    if (!divided) {
+        if (t) sp[l - 1] = 0;                   /* divisor {sp+l-1, h+t} */
+        q += bn_sqrt_divq_guard(np + l - 1 - t, l + 1, h + t, sp + l - t, qp);
+    }
+    uint64_t g_lo = qp[e], g_hi = qp[e + 1] & 1;    /* dropped 65-bit chunk */
+    for (int32_t i = 0; i + 1 < l; i++)
+        sp[i] = (qp[i + e + 1] >> 1) | (qp[i + e + 2] << 63);
+    sp[l - 1] = (qp[l + e] >> 1) | (q << 63);
+    q >>= 1;
+    if (q) {
+        /* Quotient overflow: the unhalved Q' reached 2B^(l+1), so the
+         * candidate is >= (s'+1)B^l.  But sqrt(A) < (s'+1)B^l always
+         * (a1 B^l + a0 < B^2l), while the floor bound gives sqrt(A) >
+         * (s'+1)B^l - 1.  Exactly: root = s'*B^l + (B^l - 1), certified. */
+        for (int32_t i = 0; i < l; i++) sp[i] = UINT64_MAX;
+        return 1;
+    }
+    double th;
+    if (t) {
+        /* theta*2^65 ~= cd^2/(sd*2^64) from the top two limbs of c, s'. */
+        double cd = (double)sp[l - 1] * 18446744073709551616.0 +
+                    (double)sp[l - 2];
+        double sd = (double)sp[n - 1] * 18446744073709551616.0 +
+                    (double)sp[n - 2];
+        th = cd * cd / sd / 18446744073709551616.0;
+    } else {
+        th = 2.0;                               /* theta*2^65 < 2 */
+    }
+    double gd = (g_hi ? 18446744073709551616.0 : 0.0) + (double)g_lo;
+    double diff = gd - th;
+    if (diff > 65536.0 && diff < 36893488147419037696.0)
+        return 1;                               /* < 2^65 - 2^16 */
+    if (diff < -65536.0) {
+        /* certified cand - 1 (frac < 0; frac > -1 always) */
+        (void)bn_sqrt_sub_1(sp, n, 1);
+        return 1;
+    }
+    return 0;
+}
 
-    uint64_t sx, sy;
-    int32_t xlen, ylen;
-    const uint64_t *xl = integer_limbs(*x, &sx, &xlen);
-    const uint64_t *yl = integer_limbs(*y, &sy, &ylen);
-    int32_t xabs = xlen < 0 ? -xlen : xlen;
-    int32_t yabs = ylen < 0 ? -ylen : ylen;
+static __thread uint64_t *bn_sqrt_ws = NULL;
+static __thread size_t bn_sqrt_ws_cap = 0;
 
-    if (xabs != yabs || yabs < 2) return 0;
+/* Integer square root of any non-negative int48-or-bigint WValue; exact
+ * floor(sqrt(a)). Negative receivers die with Int#isqrt's message. */
+WValue bigint_isqrt_any(WValue a) {
+    uint64_t sa;
+    int32_t alen;
+    const uint64_t *al = integer_limbs(a, &sa, &alen);
+    if (alen < 0) die("Int#isqrt: negative receiver");
+    if (alen == 0) return w_box_int(0);
+    if (alen <= 2) {
+        unsigned __int128 v = alen == 2
+            ? ((unsigned __int128)al[1] << 64) | al[0]
+            : (unsigned __int128)al[0];
+        uint64_t root = bn_isqrt_u128(v);
+        if (root <= (uint64_t)W_INT48_MAX) return w_box_int((int64_t)root);
+        WBigint *r = bigint_alloc_raw_hot(1);
+        r->limbs[0] = root;
+        r->size = 1;
+        return bigint_box(r);
+    }
+    /* Normalize into the workspace: 2m limbs, top limb >= 2^62. */
+    int32_t m = (alen + 1) >> 1;
+    int32_t wide = 2 * m;
+    int32_t shift =
+        (int32_t)((((int64_t)(wide - alen) << 6) +
+                   __builtin_clzll(al[alen - 1])) & ~1LL);   /* even, < 128 */
+    if ((size_t)wide > bn_sqrt_ws_cap) {
+        free(bn_sqrt_ws);
+        size_t cap = (size_t)wide + (size_t)wide / 4 + 16;
+        bn_sqrt_ws = (uint64_t *)malloc(cap * sizeof(uint64_t));
+        if (!bn_sqrt_ws) { bn_sqrt_ws_cap = 0; die("isqrt: out of memory"); }
+        bn_sqrt_ws_cap = cap;
+    }
+    uint64_t *np = bn_sqrt_ws;
+    int32_t off = shift >> 6;                   /* == wide - alen */
+    int b = shift & 63;
+    if (off) np[0] = 0;
+    if (b == 0) {
+        memcpy(np + off, al, (size_t)alen * sizeof(uint64_t));
+    } else {
+        np[off] = al[0] << b;
+        for (int32_t i = 1; i < alen; i++)
+            np[off + i] = (al[i] << b) | (al[i - 1] >> (64 - b));
+    }
+    WBigint *res = bigint_alloc_raw_hot(m);
+    /* Guard-limb quotient buffer ((m-1)/2 + 2 limbs) fits in the workspace
+     * slack past the 2m operand limbs (cap >= 2m + m/2 + 16). */
+    if (!bn_dc_sqrt_only(np, res->limbs, np + wide, m)) {
+        /* Uncertified guard window (~2^-56): the workspace was consumed,
+         * so re-normalize and take the exact full-sqrtrem path. */
+        if (off) np[0] = 0;
+        if (b == 0) {
+            memcpy(np + off, al, (size_t)alen * sizeof(uint64_t));
+        } else {
+            np[off] = al[0] << b;
+            for (int32_t i = 1; i < alen; i++)
+                np[off + i] = (al[i] << b) | (al[i - 1] >> (64 - b));
+        }
+        (void)bn_dc_sqrtrem(np, res->limbs, m);
+    }
+    int32_t back = shift >> 1;                  /* < 64 */
+    if (back) {
+        for (int32_t i = 0; i + 1 < m; i++)
+            res->limbs[i] =
+                (res->limbs[i] >> back) | (res->limbs[i + 1] << (64 - back));
+        res->limbs[m - 1] >>= back;
+    }
+    /* Root of a 2m-limb normalized value stays >= B^(m-1) after the shift
+     * back, so the top limb is nonzero and no i48 demotion applies (m>=2). */
+    res->size = m;
+    return bigint_box(res);
+}
 
-    __uint128_t xhi = bigint_mag_top2(xl, xabs);
-    __uint128_t yhi = bigint_mag_top2(yl, yabs);
-    if (yhi == 0) return 0;
+/* ---- GCD: u64 fast path + Lehmer batching for multi-limb operands ----
+ *
+ * The previous implementation was one-limb-quotient Euclid: one 128/64
+ * divide plus one freshly allocated remainder bigint per step. Lehmer batches
+ * many Euclid steps into a 2x2 cofactor matrix computed on the leading 63
+ * bits, then applies it to the full magnitudes in one linear-combination pass
+ * over reusable scratch buffers. */
+#if defined(BN_GCD_PROFILE_NOINLINE)
+#define BN_GCD_PROFILE_ATTR __attribute__((noinline))
+#else
+#define BN_GCD_PROFILE_ATTR
+#endif
 
-    __uint128_t den = yhi == ~((__uint128_t)0) ? yhi : yhi + 1;
-    uint64_t q = (uint64_t)(xhi / den);
-    if (q == 0) q = 1;
+#ifndef BN_GCD_U64_ASM
+#define BN_GCD_U64_ASM 1
+#endif
+#ifndef BN_GCD_U64_BRANCHY
+#define BN_GCD_U64_BRANCHY 0
+#endif
+#if defined(__aarch64__) && BN_GCD_U64_ASM
+__attribute__((naked, noinline, aligned(64)))
+static uint64_t bn_gcd_u64_binary(uint64_t a, uint64_t b) {
+    __asm__(
+        "cbz x0, 3f\n"
+        "cbz x1, 4f\n"
+        "rbit x2, x0\n"
+        "rbit x3, x1\n"
+        "clz x2, x2\n"
+        "clz x3, x3\n"
+        "lsr x0, x0, x2\n"
+        "lsr x1, x1, x3\n"
+        "cmp x2, x3\n"
+        "csel x2, x2, x3, lo\n"
+        "1:\n"
+#if BN_GCD_U64_BRANCHY
+        "subs x3, x0, x1\n"
+        "b.eq 2f\n"
+        "b.lo 5f\n"
+        "rbit x4, x3\n"
+        "clz x4, x4\n"
+        "lsr x0, x3, x4\n"
+        "b 1b\n"
+        "5:\n"
+        "neg x3, x3\n"
+        "rbit x4, x3\n"
+        "clz x4, x4\n"
+        "lsr x1, x3, x4\n"
+        "b 1b\n"
+#else
+        "subs x3, x0, x1\n"
+        "b.eq 2f\n"
+        /*
+         * Align the loop and begin its independent rbit/clz chain before
+         * consuming the subtraction flags.  On Apple AArch64 this overlaps
+         * trailing-zero latency with cneg/csel instead of serializing them.
+         */
+        "nop\n"
+        "nop\n"
+        "nop\n"
+        "6:\n"
+        "rbit x4, x3\n"
+        "clz x4, x4\n"
+        "cneg x3, x3, lo\n"
+        "csel x0, x1, x0, hs\n"
+        "lsr x1, x3, x4\n"
+        "subs x3, x0, x1\n"
+        "b.ne 6b\n"
+#endif
+        "2:\n"
+        "lsl x0, x0, x2\n"
+        "ret\n"
+        "3:\n"
+        "mov x0, x1\n"
+        "4:\n"
+        "ret\n"
+    );
+}
+#endif
 
-    WValue rem = bigint_submul_u64_positive(xl, xabs, yl, yabs, q);
-    if (rem == W_NIL) return 0;
-    *x = *y;
-    *y = rem;
+/* Binary GCD for two nonzero words, force-inlined so call sites overlap the
+ * trailing-zero prologue with operand loads instead of paying a naked-call
+ * boundary.  ctz(d) == ctz(-d), so the trailing-zero chain of the raw
+ * difference starts before the sign of the difference is resolved — the same
+ * schedule as the hand-written loop in bn_gcd_u64_binary. */
+static inline __attribute__((always_inline))
+uint64_t bn_gcd_u64_nonzero(uint64_t a, uint64_t b) {
+#if defined(__aarch64__) && BN_GCD_U64_ASM
+    /* Same loop schedule as bn_gcd_u64_binary: the rbit/clz chain of the raw
+     * difference starts before cneg/csel resolve its sign (ctz(d) == ctz(-d)).
+     * Inlined, minus that function's zero checks, which are dead here. */
+    uint64_t sh, t3, t4;
+    __asm__(
+        "rbit %[t3], %[a]\n\t"
+        "rbit %[t4], %[b]\n\t"
+        "clz %[t3], %[t3]\n\t"
+        "clz %[t4], %[t4]\n\t"
+        "lsr %[a], %[a], %[t3]\n\t"
+        "lsr %[b], %[b], %[t4]\n\t"
+        "cmp %[t3], %[t4]\n\t"
+        "csel %[sh], %[t3], %[t4], lo\n\t"
+        "subs %[t3], %[a], %[b]\n\t"
+        "b.eq 2f\n"
+        "1:\n\t"
+        "rbit %[t4], %[t3]\n\t"
+        "clz %[t4], %[t4]\n\t"
+        "cneg %[t3], %[t3], lo\n\t"
+        "csel %[a], %[b], %[a], hs\n\t"
+        "lsr %[b], %[t3], %[t4]\n\t"
+        "subs %[t3], %[a], %[b]\n\t"
+        "b.ne 1b\n"
+        "2:\n\t"
+        "lsl %[a], %[a], %[sh]\n"
+        : [a] "+&r"(a), [b] "+&r"(b), [sh] "=&r"(sh),
+          [t3] "=&r"(t3), [t4] "=&r"(t4)
+        :
+        : "cc");
+    return a;
+#else
+    unsigned az = (unsigned)__builtin_ctzll(a);
+    unsigned bz = (unsigned)__builtin_ctzll(b);
+    unsigned shift = az < bz ? az : bz;
+    a >>= az;
+    b >>= bz;
+    while (a != b) {
+        uint64_t d = a - b;
+        unsigned tz = (unsigned)__builtin_ctzll(d);
+        uint64_t lo = a < b ? a : b;
+        uint64_t mag = a < b ? (uint64_t)-d : d;
+        b = lo;
+        a = mag >> tz;
+    }
+    return a << shift;
+#endif
+}
+
+static uint64_t w_gcd_u64(uint64_t a, uint64_t b) {
+#ifndef BN_GCD_U64_BINARY
+#define BN_GCD_U64_BINARY 1
+#endif
+#if BN_GCD_U64_BINARY
+#if defined(__aarch64__) && BN_GCD_U64_ASM
+    return bn_gcd_u64_binary(a, b);
+#else
+    if (a == 0) return b;
+    if (b == 0) return a;
+    unsigned common_shift = (unsigned)__builtin_ctzll(a | b);
+    a >>= (unsigned)__builtin_ctzll(a);
+    do {
+        b >>= (unsigned)__builtin_ctzll(b);
+        if (a > b) {
+            uint64_t swap = a;
+            a = b;
+            b = swap;
+        }
+        b -= a;
+    } while (b != 0);
+    return a << common_shift;
+#endif
+#else
+    while (b) {
+        uint64_t t = a % b;
+        a = b;
+        b = t;
+    }
+    return a;
+#endif
+}
+
+#ifndef BN_GCD_22_ASM
+#define BN_GCD_22_ASM 1
+#endif
+#ifndef BN_GCD_22_BRANCHY
+#define BN_GCD_22_BRANCHY 0
+#endif
+#if defined(__aarch64__) && BN_GCD_22_ASM
+/* Register-only binary GCD for two already-odd magnitudes.
+ * Arguments are (u_hi, u_lo, v_hi, v_lo); __int128 returns (lo, hi) in
+ * (x0, x1) under AAPCS64. */
+__attribute__((naked, noinline, aligned(64)))
+static unsigned __int128 bn_gcd_odd_22(
+    uint64_t u_hi, uint64_t u_lo, uint64_t v_hi, uint64_t v_lo) {
+    __asm__(
+        /* Subtract, retain the smaller operand, and strip all powers of two
+         * from the absolute difference. */
+        "1:\n"
+        "subs x4, x1, x3\n"
+        "cbz x4, 4f\n"
+        "sbcs x5, x0, x2\n"
+        "rbit x6, x4\n"
+#if BN_GCD_22_BRANCHY
+        "b.hs 7f\n"
+        "neg x4, x4\n"
+        "mvn x5, x5\n"
+        "mov x3, x1\n"
+        "mov x2, x0\n"
+        "7:\n"
+#else
+        "cneg x4, x4, lo\n"
+        "cinv x5, x5, lo\n"
+        "csel x3, x3, x1, hs\n"
+        "csel x2, x2, x0, hs\n"
+#endif
+        "clz x6, x6\n"          /* nonzero even low difference: 1..63 */
+        "neg x7, x6\n"
+        "lsr x1, x4, x6\n"
+        "lsl x7, x5, x7\n"
+        "lsr x0, x5, x6\n"
+        "orr x1, x1, x7\n"
+        "orr x7, x0, x2\n"
+        "cbnz x7, 1b\n"
+
+        /* Both magnitudes now fit one limb. */
+        "2:\n"
+#if BN_GCD_22_BRANCHY
+        "subs x4, x1, x3\n"
+        "b.eq 5f\n"
+        "b.lo 8f\n"
+        "rbit x5, x4\n"
+        "clz x5, x5\n"
+        "lsr x1, x4, x5\n"
+        "b 2b\n"
+        "8:\n"
+        "neg x4, x4\n"
+        "rbit x5, x4\n"
+        "clz x5, x5\n"
+        "lsr x3, x4, x5\n"
+        "b 2b\n"
+#else
+        "subs x4, x1, x3\n"
+        "b.eq 5f\n"
+        "nop\n"
+        "nop\n"
+        "9:\n"
+        "rbit x5, x4\n"
+        "clz x5, x5\n"
+        "cneg x4, x4, lo\n"
+        "csel x1, x3, x1, hs\n"
+        "lsr x3, x4, x5\n"
+        "subs x4, x1, x3\n"
+        "b.ne 9b\n"
+#endif
+
+        /* Low limbs matched but the high limbs did not. */
+        "4:\n"
+        "subs x5, x0, x2\n"
+        "b.eq 6f\n"
+        "cneg x5, x5, lo\n"
+        "csel x2, x2, x0, hs\n"
+        "rbit x6, x5\n"
+        "clz x6, x6\n"
+        "lsr x1, x5, x6\n"
+        "mov x0, xzr\n"
+        "cbnz x2, 1b\n"
+        "b 2b\n"
+
+        "5:\n"
+        "mov x0, x1\n"
+        "mov x1, xzr\n"
+        "ret\n"
+
+        /* Equal two-limb operands. */
+        "6:\n"
+        "mov x4, x0\n"
+        "mov x0, x1\n"
+        "mov x1, x4\n"
+        "ret\n"
+    );
+}
+
+static inline int bn_ctz_2(uint64_t hi, uint64_t lo) {
+    return lo ? __builtin_ctzll(lo) : 64 + __builtin_ctzll(hi);
+}
+
+static inline void bn_rshift_2(
+    uint64_t *hi, uint64_t *lo, int shift) {
+    if (shift >= 64) {
+        *lo = *hi >> (shift - 64);
+        *hi = 0;
+    } else if (shift) {
+        *lo = (*lo >> shift) | (*hi << (64 - shift));
+        *hi >>= shift;
+    }
+}
+
+static unsigned __int128 bn_gcd_22(
+    uint64_t uh, uint64_t ul, uint64_t vh, uint64_t vl) {
+    int us = bn_ctz_2(uh, ul);
+    int vs = bn_ctz_2(vh, vl);
+    int common = us < vs ? us : vs;
+    bn_rshift_2(&uh, &ul, us);
+    bn_rshift_2(&vh, &vl, vs);
+    unsigned __int128 odd = bn_gcd_odd_22(uh, ul, vh, vl);
+    return odd << common;
+}
+#endif
+
+/* x mod y0 for a raw magnitude.  Reuse the single-limb remainder dispatcher
+ * so GCD's final reduction also benefits from reciprocal/block folding when
+ * the last divisor is narrow. */
+static uint64_t mag_mod_u64(const uint64_t *x, int32_t n, uint64_t y0) {
+    return mag_mod_single(x, n, y0);
+}
+
+static BN_GCD_PROFILE_ATTR int32_t mag_norm_len(const uint64_t *p, int32_t n) {
+    while (n > 0 && p[n - 1] == 0) n--;
+    return n;
+}
+
+static int64_t mag_bitlen(const uint64_t *p, int32_t n) {
+    if (n == 0) return 0;
+    return (int64_t)(n - 1) * 64 + (64 - __builtin_clzll(p[n - 1]));
+}
+
+/* Leading bits of x, and the bits of y at the same bit positions. */
+#ifndef BN_GCD_TOP_BITS
+#define BN_GCD_TOP_BITS 63
+#endif
+static BN_GCD_PROFILE_ATTR void mag_top_digits(
+    const uint64_t *x, int32_t xlen,
+    const uint64_t *y, int32_t ylen,
+    uint64_t *xh_out, uint64_t *yh_out) {
+    int32_t top = xlen - 1;
+    int lz = __builtin_clzll(x[top]);
+    uint64_t xh = x[top] << lz;
+    uint64_t yh = 0;
+    if (lz && top > 0) xh |= x[top - 1] >> (64 - lz);
+    if (ylen > top) {
+        yh = y[top] << lz;
+        if (lz && top > 0) yh |= y[top - 1] >> (64 - lz);
+    } else if (ylen == top && lz) {
+        yh = y[top - 1] >> (64 - lz);
+    }
+#if BN_GCD_TOP_BITS == 63
+    /* The spare bit prevents cofactor-corrected sums from wrapping u64. */
+    *xh_out = xh >> 1;
+    *yh_out = yh >> 1;
+#elif BN_GCD_TOP_BITS == 64
+    *xh_out = xh;
+    *yh_out = yh;
+#else
+#error "BN_GCD_TOP_BITS must be 63 or 64"
+#endif
+}
+
+#ifndef BN_GCD_DOUBLE_LEHMER
+#define BN_GCD_DOUBLE_LEHMER 1
+#endif
+/* Engage the fused 128-bit window from 32 limbs: single 63-bit windows die
+ * at ~18 steps (window precision crosses the growing cofactors), while the
+ * double window reaches the ~33-step cofactor bound, halving the number of
+ * full-width pair passes for everything above this threshold. */
+#ifndef BN_GCD_DOUBLE_LEHMER_THRESHOLD
+#define BN_GCD_DOUBLE_LEHMER_THRESHOLD 32
+#endif
+#ifndef BN_GCD_DOUBLE_LEHMER_ROUNDS
+#define BN_GCD_DOUBLE_LEHMER_ROUNDS 2
+#endif
+
+#if BN_GCD_DOUBLE_LEHMER
+/* Leading 128 bits of x, and the bits of y at the same positions. */
+static BN_GCD_PROFILE_ATTR void mag_top_double(
+    const uint64_t *x, int32_t xlen,
+    const uint64_t *y, int32_t ylen,
+    uint64_t *xh_out, uint64_t *xl_out,
+    uint64_t *yh_out, uint64_t *yl_out) {
+    int32_t top = xlen - 1;
+    int lz = __builtin_clzll(x[top]);
+    uint64_t x1 = x[top];
+    uint64_t x0 = top > 0 ? x[top - 1] : 0;
+    uint64_t xm = top > 1 ? x[top - 2] : 0;
+    uint64_t y1 = top < ylen ? y[top] : 0;
+    uint64_t y0 = top > 0 && top - 1 < ylen ? y[top - 1] : 0;
+    uint64_t ym = top > 1 && top - 2 < ylen ? y[top - 2] : 0;
+    *xh_out = (x1 << lz) | (lz ? x0 >> (64 - lz) : 0);
+    *xl_out = (x0 << lz) | (lz ? xm >> (64 - lz) : 0);
+    *yh_out = (y1 << lz) | (lz ? y0 >> (64 - lz) : 0);
+    *yl_out = (y0 << lz) | (lz ? ym >> (64 - lz) : 0);
+}
+
+static inline int gcd_u128_mul_u64(
+    __uint128_t x, uint64_t y, __uint128_t *out) {
+    uint64_t xl = (uint64_t)x;
+    uint64_t xh = (uint64_t)(x >> 64);
+    __uint128_t lp = (__uint128_t)xl * y;
+    __uint128_t hp0 = (__uint128_t)xh * y;
+    __uint128_t hp = hp0 + (uint64_t)(lp >> 64);
+    if (hp < hp0 || hp >> 64) return 0;
+    *out = (hp << 64) | (uint64_t)lp;
+    return 1;
+}
+#endif
+
+/* Knuth Algorithm L inner loop. Returns the number of simulated Euclid steps;
+ * zero tells the caller to perform a full-magnitude fallback step. */
+#ifndef BN_GCD_SMALL_QUOTIENT_BOUNDS
+#define BN_GCD_SMALL_QUOTIENT_BOUNDS 1
+#endif
+#ifndef BN_GCD_FAST_QUOTIENT_ONE
+#define BN_GCD_FAST_QUOTIENT_ONE 1
+#endif
+#ifndef BN_GCD_SMALL_FAST_QUOTIENT_TWO
+#define BN_GCD_SMALL_FAST_QUOTIENT_TWO 1
+#endif
+#ifndef BN_GCD_SMALL_SINGLE_TRIAL_DIVIDE
+#define BN_GCD_SMALL_SINGLE_TRIAL_DIVIDE 1
+#endif
+#ifdef BN_GCD_PROFILE_COUNTS
+static uint64_t gcd_profile_sim_calls;
+static uint64_t gcd_profile_sim_steps;
+static uint64_t gcd_profile_fast_q1;
+static uint64_t gcd_profile_pair_calls;
+static uint64_t gcd_profile_pair_limbs;
+static uint64_t gcd_profile_matrix_products;
+static uint64_t gcd_profile_matrix_product_work;
+static uint64_t gcd_profile_matrix_product_bins[12];
+#endif
+/* Cofactor magnitude limit (2^61 - 1) / q, indexed by quotient.  A wider
+ * 2^62 limit was tried and lifts the quadratic loop ~2% (longer batches),
+ * but it degrades the HGCD band badly: slice batches carry near-overflow
+ * cofactors into the accumulated matrices and chained blocks at 1.5-2K limbs
+ * lose more than the batching gain. */
+static const uint64_t bn_gcd_cofactor_bounds[17] = {
+    0,
+    2305843009213693951ULL, 1152921504606846975ULL,
+    768614336404564650ULL,  576460752303423487ULL,
+    461168601842738790ULL,  384307168202282325ULL,
+    329406144173384850ULL,  288230376151711743ULL,
+    256204778801521550ULL,  230584300921369395ULL,
+    209622091746699450ULL,  192153584101141162ULL,
+    177372539170284150ULL,  164703072086692425ULL,
+    153722867280912930ULL,  144115188075855871ULL
+};
+
+static BN_GCD_PROFILE_ATTR int lehmer_simulate(
+    uint64_t xh, uint64_t yh,
+    int64_t *pa, int64_t *pb, int64_t *pc, int64_t *pd,
+    uint64_t *quotients) {
+    int64_t a = 1, b = 0, c = 0, d = 1;
+    int steps = 0;
+    for (;;) {
+        __int128 yc = (__int128)yh + c;
+        __int128 yd = (__int128)yh + d;
+        if (yc <= 0 || yd <= 0) break;
+        __int128 xa = (__int128)xh + a;
+        __int128 xb = (__int128)xh + b;
+        if (xa < 0 || xb < 0) break;
+#if BN_GCD_TOP_BITS == 64
+        if (yc > UINT64_MAX || yd > UINT64_MAX ||
+            xa > UINT64_MAX || xb > UINT64_MAX)
+            break;
+#endif
+#if BN_GCD_FAST_QUOTIENT_ONE
+        uint64_t xau = (uint64_t)xa, xbu = (uint64_t)xb;
+        uint64_t ycu = (uint64_t)yc, ydu = (uint64_t)yd;
+        if (xau < ycu || xbu < ydu) break;
+        uint64_t q1, q2;
+        uint64_t xr = xau - ycu, yr = xbu - ydu;
+        if (xr < ycu && yr < ydu) {
+            q1 = 1;
+            q2 = 1;
+#ifdef BN_GCD_PROFILE_COUNTS
+            gcd_profile_fast_q1++;
+#endif
+        } else {
+            q1 = xau / ycu;
+            q2 = xbu / ydu;
+        }
+#else
+        uint64_t q1 = (uint64_t)xa / (uint64_t)yc;
+        uint64_t q2 = (uint64_t)xb / (uint64_t)yd;
+#endif
+        if (q1 != q2 || q1 == 0) break;
+#if BN_GCD_SMALL_QUOTIENT_BOUNDS
+        if (q1 > INT64_MAX) break;
+        uint64_t bound = q1 <= 16 ? bn_gcd_cofactor_bounds[q1]
+                                  : (uint64_t)((INT64_MAX >> 2) /
+                                               (int64_t)q1);
+#else
+        int64_t bound = (INT64_MAX >> 2) / (int64_t)q1;
+#endif
+        if ((uint64_t)llabs(c) > (uint64_t)bound ||
+            (uint64_t)llabs(d) > (uint64_t)bound)
+            break;
+        if (quotients && steps >= 96) break;
+        if (quotients) quotients[steps] = q1;
+        int64_t t;
+        t = a - (int64_t)q1 * c; a = c; c = t;
+        t = b - (int64_t)q1 * d; b = d; d = t;
+        uint64_t r = xh - q1 * yh;
+        xh = yh;
+        yh = r;
+        steps++;
+    }
+    *pa = a;
+    *pb = b;
+    *pc = c;
+    *pd = d;
+#ifdef BN_GCD_PROFILE_COUNTS
+    gcd_profile_sim_calls++;
+    gcd_profile_sim_steps += (uint64_t)steps;
+#endif
+    return steps;
+}
+
+#if BN_GCD_SMALL_FAST_QUOTIENT_TWO
+/* Small random GCDs spend most of their time in the two trial divisions in
+ * Algorithm L.  Keep a separate <=4-limb simulator so recognizing quotient
+ * two does not add a branch or perturb register allocation in the large-GCD
+ * loop. */
+static int lehmer_simulate_small_q2(
+    uint64_t xh, uint64_t yh,
+    int64_t *pa, int64_t *pb, int64_t *pc, int64_t *pd) {
+    int64_t a = 1, b = 0, c = 0, d = 1;
+    int steps = 0;
+    for (;;) {
+        __int128 yc = (__int128)yh + c;
+        __int128 yd = (__int128)yh + d;
+        if (yc <= 0 || yd <= 0) break;
+        __int128 xa = (__int128)xh + a;
+        __int128 xb = (__int128)xh + b;
+        if (xa < 0 || xb < 0) break;
+
+        uint64_t xau = (uint64_t)xa, xbu = (uint64_t)xb;
+        uint64_t ycu = (uint64_t)yc, ydu = (uint64_t)yd;
+        if (xau < ycu || xbu < ydu) break;
+        uint64_t q1, q2;
+        uint64_t xr = xau - ycu, yr = xbu - ydu;
+        if (xr < ycu && yr < ydu) {
+            q1 = q2 = 1;
+#ifdef BN_GCD_PROFILE_COUNTS
+            gcd_profile_fast_q1++;
+#endif
+        } else if (xr >= ycu && yr >= ydu &&
+                   xr - ycu < ycu && yr - ydu < ydu) {
+            q1 = q2 = 2;
+        } else {
+            q1 = xau / ycu;
+#if BN_GCD_SMALL_SINGLE_TRIAL_DIVIDE
+            __uint128_t qp = (__uint128_t)q1 * ydu;
+            if (qp > xbu || (uint64_t)(xbu - qp) >= ydu) break;
+            q2 = q1;
+#else
+            q2 = xbu / ydu;
+#endif
+        }
+        if (q1 != q2 || q1 == 0 || q1 > INT64_MAX) break;
+        uint64_t bound = q1 <= 16 ? bn_gcd_cofactor_bounds[q1]
+                                  : (uint64_t)((INT64_MAX >> 2) /
+                                               (int64_t)q1);
+        if ((uint64_t)llabs(c) > bound || (uint64_t)llabs(d) > bound)
+            break;
+        int64_t t;
+        t = a - (int64_t)q1 * c; a = c; c = t;
+        t = b - (int64_t)q1 * d; b = d; d = t;
+        uint64_t r = xh - q1 * yh;
+        xh = yh;
+        yh = r;
+        steps++;
+    }
+    *pa = a;
+    *pb = b;
+    *pc = c;
+    *pd = d;
+#ifdef BN_GCD_PROFILE_COUNTS
+    gcd_profile_sim_calls++;
+    gcd_profile_sim_steps += (uint64_t)steps;
+#endif
+    return steps;
+}
+#endif
+
+/* Keep the <=4-limb entry separate from the double-window simulator below.
+ * Otherwise Clang merges both into one function and every tiny GCD pays the
+ * latter's 96-quotient stack frame and callee-save prologue. */
+#if BN_GCD_SMALL_FAST_QUOTIENT_TWO
+__attribute__((noinline))
+static int lehmer_simulate_small_magnitudes(
+    const uint64_t *x, int32_t xlen,
+    const uint64_t *y, int32_t ylen,
+    int64_t *pa, int64_t *pb, int64_t *pc, int64_t *pd) {
+    uint64_t xh, yh;
+    mag_top_digits(x, xlen, y, ylen, &xh, &yh);
+    return yh ? lehmer_simulate_small_q2(
+        xh, yh, pa, pb, pc, pd) : 0;
+}
+
+__attribute__((noinline))
+static int lehmer_simulate_2_magnitudes(
+    const uint64_t *x, const uint64_t *y,
+    int64_t *pa, int64_t *pb, int64_t *pc, int64_t *pd) {
+    int lz = __builtin_clzll(x[1]);
+    uint64_t xh = x[1] << lz;
+    uint64_t yh = y[1] << lz;
+    if (lz) {
+        xh |= x[0] >> (64 - lz);
+        yh |= y[0] >> (64 - lz);
+    }
+    xh >>= 1;
+    yh >>= 1;
+    return yh ? lehmer_simulate_small_q2(
+        xh, yh, pa, pb, pc, pd) : 0;
+}
+#endif
+
+#if BN_GCD_DOUBLE_LEHMER
+/* Fused double-window Lehmer.  Algorithm L quotient selection runs on a
+ * 64-bit leading window while each accepted quotient is applied immediately
+ * to the 128-bit pair.  One loop replaces the previous collect-then-replay
+ * split (a 96-entry quotient buffer plus a second pass of redundant bound
+ * re-checks), and the window division chain overlaps the 128-bit
+ * multiply-subtract chain instead of serializing after it. */
+static BN_GCD_PROFILE_ATTR int lehmer_simulate_double(
+    uint64_t xh, uint64_t xl, uint64_t yh, uint64_t yl,
+    int64_t *pa, int64_t *pb, int64_t *pc, int64_t *pd) {
+    __uint128_t x = ((__uint128_t)xh << 64) | xl;
+    __uint128_t y = ((__uint128_t)yh << 64) | yl;
+    int64_t a = 1, b = 0, c = 0, d = 1;
+    int steps = 0;
+    for (int round = 0; round < BN_GCD_DOUBLE_LEHMER_ROUNDS; round++) {
+        uint64_t xhi = (uint64_t)(x >> 64);
+        uint64_t yhi = (uint64_t)(y >> 64);
+        if (!xhi || !yhi) break;
+        int lz = __builtin_clzll(xhi);
+        uint64_t xt = (xhi << lz) |
+                      (lz ? (uint64_t)x >> (64 - lz) : 0);
+        uint64_t yt = (yhi << lz) |
+                      (lz ? (uint64_t)y >> (64 - lz) : 0);
+        if (!yt) break;
+        int64_t la = 1, lb = 0, lc = 0, ld = 1;
+        int local_steps = 0;
+        int stalled = 0;
+        for (;;) {
+            /* Window quotient selection, identical to lehmer_simulate. */
+            __int128 yc = (__int128)yt + lc;
+            __int128 yd = (__int128)yt + ld;
+            if (yc <= 0 || yd <= 0) break;
+            __int128 xa = (__int128)xt + la;
+            __int128 xb = (__int128)xt + lb;
+            if (xa < 0 || xb < 0) break;
+            uint64_t xau = (uint64_t)xa, xbu = (uint64_t)xb;
+            uint64_t ycu = (uint64_t)yc, ydu = (uint64_t)yd;
+            if (xau < ycu || xbu < ydu) break;
+            uint64_t q1, q2;
+            uint64_t xr = xau - ycu, yr = xbu - ydu;
+            if (xr < ycu && yr < ydu) {
+                q1 = 1;
+                q2 = 1;
+#ifdef BN_GCD_PROFILE_COUNTS
+                gcd_profile_fast_q1++;
+#endif
+            } else {
+                /* Two independent trial divisions pipeline on separate
+                 * ports; a single division plus multiply-verify was tried
+                 * and serializes into the step's dependency chain, losing
+                 * more at large widths than it saves. */
+                q1 = xau / ycu;
+                q2 = xbu / ydu;
+            }
+            if (q1 != q2 || q1 == 0 || q1 > INT64_MAX) break;
+            uint64_t bound = q1 <= 16 ? bn_gcd_cofactor_bounds[q1]
+                                      : (uint64_t)((INT64_MAX >> 2) /
+                                                   (int64_t)q1);
+            /* The window cofactors validate the quotient; the accumulated
+             * cofactors are what the caller applies.  Both must stay clear
+             * of int64 overflow. */
+            if ((uint64_t)llabs(lc) > bound ||
+                (uint64_t)llabs(ld) > bound ||
+                (uint64_t)llabs(c) > bound ||
+                (uint64_t)llabs(d) > bound) {
+                stalled = 1;
+                break;
+            }
+            __uint128_t product;
+            if (!gcd_u128_mul_u64(y, q1, &product) || product > x) {
+                stalled = 1;
+                break;
+            }
+            int64_t t;
+            t = la - (int64_t)q1 * lc; la = lc; lc = t;
+            t = lb - (int64_t)q1 * ld; lb = ld; ld = t;
+            uint64_t wr = xt - q1 * yt;
+            xt = yt;
+            yt = wr;
+            t = a - (int64_t)q1 * c; a = c; c = t;
+            t = b - (int64_t)q1 * d; b = d; d = t;
+            __uint128_t r = x - product;
+            x = y;
+            y = r;
+            local_steps++;
+            steps++;
+        }
+#ifdef BN_GCD_PROFILE_COUNTS
+        gcd_profile_sim_calls++;
+        gcd_profile_sim_steps += (uint64_t)local_steps;
+#endif
+        if (!local_steps || stalled) break;
+    }
+    *pa = a;
+    *pb = b;
+    *pc = c;
+    *pd = d;
+    return steps;
+}
+#endif
+
+static inline int lehmer_simulate_magnitudes(
+    const uint64_t *x, int32_t xlen,
+    const uint64_t *y, int32_t ylen,
+    int64_t *pa, int64_t *pb, int64_t *pc, int64_t *pd) {
+#if BN_GCD_DOUBLE_LEHMER
+    if (xlen >= BN_GCD_DOUBLE_LEHMER_THRESHOLD) {
+        uint64_t xh, xl, yh, yl;
+        mag_top_double(x, xlen, y, ylen, &xh, &xl, &yh, &yl);
+        return yh ? lehmer_simulate_double(
+            xh, xl, yh, yl, pa, pb, pc, pd) : 0;
+    }
+#endif
+    uint64_t xh, yh;
+    mag_top_digits(x, xlen, y, ylen, &xh, &yh);
+    return yh ? lehmer_simulate(xh, yh, pa, pb, pc, pd, NULL) : 0;
+}
+
+/* Apply both rows of a Lehmer matrix in one pass:
+ *
+ *   rx = ux*x - vx*y
+ *   ry = uy*y - vy*x
+ *
+ * Both inputs have zero-filled normalized tails through n limbs. */
+static int mag_linear_comb_pair_core_ref(
+    uint64_t *rx, uint64_t *ry, int32_t n,
+    const uint64_t *x, const uint64_t *y,
+    const uint64_t coeff[4]) {
+    uint64_t ux = coeff[0], vx = coeff[1], uy = coeff[2], vy = coeff[3];
+    __uint128_t cux = 0, cvy = 0, cuy = 0, cvx = 0;
+    uint64_t bx = 0, by = 0;
+    for (int32_t i = 0; i < n; i++) {
+        uint64_t xi = x[i];
+        uint64_t yi = y[i];
+        cux += (__uint128_t)ux * xi;
+        cvy += (__uint128_t)vx * yi;
+        cuy += (__uint128_t)uy * yi;
+        cvx += (__uint128_t)vy * xi;
+
+        uint64_t x0 = (uint64_t)cux - (uint64_t)cvy;
+        uint64_t xb0 = (uint64_t)cux < (uint64_t)cvy;
+        uint64_t x1 = x0 - bx;
+        uint64_t xb1 = x0 < bx;
+        rx[i] = x1;
+        bx = xb0 | xb1;
+
+        uint64_t y0 = (uint64_t)cuy - (uint64_t)cvx;
+        uint64_t yb0 = (uint64_t)cuy < (uint64_t)cvx;
+        uint64_t y1 = y0 - by;
+        uint64_t yb1 = y0 < by;
+        ry[i] = y1;
+        by = yb0 | yb1;
+
+        cux >>= 64;
+        cvy >>= 64;
+        cuy >>= 64;
+        cvx >>= 64;
+    }
+    return cux == cvy + bx && cuy == cvx + by;
+}
+
+#ifndef BN_GCD_SERIAL_ROW_SCHEDULE
+#define BN_GCD_SERIAL_ROW_SCHEDULE 1
+#endif
+
+#if defined(__aarch64__) && BN_GCD_SERIAL_ROW_SCHEDULE
+/* One-pass pair update with a row-serial product schedule.  This variant uses
+ * only caller-saved registers.  The fallback interleaved schedule below keeps
+ * more products in flight but needs x19 and is slightly slower at 256 limbs. */
+#define MAG_LINEAR_COMB_PAIR_SERIAL_STEP \
+        "ldr x15, [x3], #8\n" \
+        "ldr x16, [x4], #8\n" \
+        "mul x12, x15, x5\n" \
+        "umulh x17, x15, x5\n" \
+        "mul x13, x16, x6\n" \
+        "umulh x14, x16, x6\n" \
+        "adds x12, x12, x9\n" \
+        "asr x9, x9, #63\n" \
+        "adc x17, x17, x9\n" \
+        "subs x12, x12, x13\n" \
+        "sbc x9, x17, x14\n" \
+        "str x12, [x0], #8\n" \
+        "mul x12, x16, x7\n" \
+        "umulh x17, x16, x7\n" \
+        "mul x13, x15, x8\n" \
+        "umulh x14, x15, x8\n" \
+        "adds x12, x12, x11\n" \
+        "asr x11, x11, #63\n" \
+        "adc x17, x17, x11\n" \
+        "subs x12, x12, x13\n" \
+        "sbc x11, x17, x14\n" \
+        "str x12, [x1], #8\n"
+
+__attribute__((naked, noinline, aligned(64)))
+static int mag_linear_comb_pair_core(uint64_t *rx, uint64_t *ry, int32_t n,
+                                     const uint64_t *x, const uint64_t *y,
+                                     const uint64_t coeff[4]) {
+    __asm__(
+        "mov x17, x5\n"
+        "ldp x5, x6, [x17]\n"
+        "ldp x7, x8, [x17, #16]\n"
+        "mov x9, xzr\n"
+        "mov x11, xzr\n"
+        "tbz w2, #0, 1f\n"
+        MAG_LINEAR_COMB_PAIR_SERIAL_STEP
+        "1:\n"
+        "tbz w2, #1, 2f\n"
+        MAG_LINEAR_COMB_PAIR_SERIAL_STEP
+        MAG_LINEAR_COMB_PAIR_SERIAL_STEP
+        "2:\n"
+        "lsr w2, w2, #2\n"
+        "cbz w2, 4f\n"
+        "3:\n"
+        MAG_LINEAR_COMB_PAIR_SERIAL_STEP
+        MAG_LINEAR_COMB_PAIR_SERIAL_STEP
+        MAG_LINEAR_COMB_PAIR_SERIAL_STEP
+        MAG_LINEAR_COMB_PAIR_SERIAL_STEP
+        "subs w2, w2, #1\n"
+        "b.ne 3b\n"
+        "4:\n"
+        "orr x9, x9, x11\n"
+        "cmp x9, xzr\n"
+        "cset w0, eq\n"
+        "ret\n"
+    );
+}
+#undef MAG_LINEAR_COMB_PAIR_SERIAL_STEP
+#elif defined(__aarch64__)
+/* Track each row as one signed carry:
+ *
+ *   t = positive_product - negative_product + signed_carry
+ *
+ * Its low limb is the output and its signed high limb is the next carry.
+ * This replaces four independent unsigned carries plus two borrows, saving
+ * four flag/materialization instructions per input limb. */
+#ifndef BN_GCD_LINEAR_COMB_UNROLL
+#define BN_GCD_LINEAR_COMB_UNROLL 4
+#endif
+#define MAG_LINEAR_COMB_PAIR_STEP \
+        "ldr x15, [x3], #8\n" \
+        "ldr x16, [x4], #8\n" \
+        "mul x12, x15, x5\n" \
+        "umulh x17, x15, x5\n" \
+        "mul x13, x16, x6\n" \
+        "umulh x19, x16, x6\n" \
+        "mul x14, x16, x7\n" \
+        "umulh x16, x16, x7\n" \
+        "mul x10, x15, x8\n" \
+        "umulh x15, x15, x8\n" \
+        "adds x12, x12, x9\n" \
+        "asr x9, x9, #63\n" \
+        "adc x17, x17, x9\n" \
+        "subs x12, x12, x13\n" \
+        "sbc x9, x17, x19\n" \
+        "str x12, [x0], #8\n" \
+        "adds x14, x14, x11\n" \
+        "asr x11, x11, #63\n" \
+        "adc x16, x16, x11\n" \
+        "subs x14, x14, x10\n" \
+        "sbc x11, x16, x15\n" \
+        "str x14, [x1], #8\n"
+
+__attribute__((naked, noinline))
+static int mag_linear_comb_pair_core(uint64_t *rx, uint64_t *ry, int32_t n,
+                                     const uint64_t *x, const uint64_t *y,
+                                     const uint64_t coeff[4]) {
+    __asm__(
+        "stp x19, x20, [sp, #-16]!\n"
+        "mov x17, x5\n"
+        "ldp x5, x6, [x17]\n"       /* ux, vx */
+        "ldp x7, x8, [x17, #16]\n"  /* uy, vy */
+        "mov x9, xzr\n"             /* signed carry rx */
+        "mov x11, xzr\n"            /* signed carry ry */
+#if BN_GCD_LINEAR_COMB_UNROLL == 2
+        "lsr w20, w2, #1\n"
+        "cbz w20, 2f\n"
+        "1:\n"
+        MAG_LINEAR_COMB_PAIR_STEP
+        MAG_LINEAR_COMB_PAIR_STEP
+        "subs w20, w20, #1\n"
+        "b.ne 1b\n"
+        "2:\n"
+        "tbz w2, #0, 3f\n"
+        MAG_LINEAR_COMB_PAIR_STEP
+        "3:\n"
+#elif BN_GCD_LINEAR_COMB_UNROLL == 4
+        "tbz w2, #0, 1f\n"
+        MAG_LINEAR_COMB_PAIR_STEP
+        "1:\n"
+        "tbz w2, #1, 2f\n"
+        MAG_LINEAR_COMB_PAIR_STEP
+        MAG_LINEAR_COMB_PAIR_STEP
+        "2:\n"
+        "lsr w20, w2, #2\n"
+        "cbz w20, 4f\n"
+        "3:\n"
+        MAG_LINEAR_COMB_PAIR_STEP
+        MAG_LINEAR_COMB_PAIR_STEP
+        MAG_LINEAR_COMB_PAIR_STEP
+        MAG_LINEAR_COMB_PAIR_STEP
+        "subs w20, w20, #1\n"
+        "b.ne 3b\n"
+        "4:\n"
+#else
+#error "BN_GCD_LINEAR_COMB_UNROLL must be 2 or 4"
+#endif
+        "orr x9, x9, x11\n"
+        "cmp x9, xzr\n"
+        "cset w0, eq\n"
+        "ldp x19, x20, [sp], #16\n"
+        "ret\n"
+    );
+}
+#undef MAG_LINEAR_COMB_PAIR_STEP
+#else
+#define mag_linear_comb_pair_core mag_linear_comb_pair_core_ref
+#endif
+
+#ifndef BN_GCD_TWO_STEP_REPLAY
+#define BN_GCD_TWO_STEP_REPLAY 1
+#endif
+#ifndef BN_GCD_FUSED_REPLAY_SUBMUL
+#define BN_GCD_FUSED_REPLAY_SUBMUL 1
+#endif
+#ifndef BN_GCD_FUSED_REPLAY_THRESHOLD
+#define BN_GCD_FUSED_REPLAY_THRESHOLD 32
+#endif
+
+static int mag_linear_comb_pair(uint64_t *rx, uint64_t *ry, int32_t n,
+                                const uint64_t *x, const uint64_t *y,
+                                uint64_t ux, uint64_t vx,
+                                uint64_t uy, uint64_t vy,
+                                int32_t *rxlen, int32_t *rylen) {
+#ifdef BN_GCD_PROFILE_COUNTS
+    gcd_profile_pair_calls++;
+    gcd_profile_pair_limbs += (uint64_t)n;
+#endif
+#if BN_GCD_TWO_STEP_REPLAY
+    /* A two-quotient Euclid matrix has the exact shape
+     *
+     *   [ 1,             -q1 ]
+     *   [ -q2, 1 + q1 * q2 ].
+     *
+     * Replaying its two rows sequentially replaces four scalar products per
+     * limb with two multiply-subtracts (and q=1 becomes a plain subtract).
+     * Borrow checks provide the same nonnegative-result guard as the generic
+     * signed-carry kernel. */
+    if (ux == 1 && vx != 0 && vy != 0 &&
+        (__uint128_t)vx * vy + 1 == uy) {
+        uint64_t borrow;
+        if (vx == 1) {
+            borrow = bn_sub_n(rx, x, y, n);
+        } else {
+#if BN_GCD_FUSED_REPLAY_SUBMUL
+            if (n >= BN_GCD_FUSED_REPLAY_THRESHOLD) {
+                borrow = bn_submul_from_1(rx, x, y, n, vx);
+            } else {
+                memcpy(rx, x, (size_t)n * sizeof(uint64_t));
+                borrow = bn_submul_1(rx, y, n, vx);
+            }
+#else
+            memcpy(rx, x, (size_t)n * sizeof(uint64_t));
+            borrow = bn_submul_1(rx, y, n, vx);
+#endif
+        }
+        if (borrow) return 0;
+        if (vy == 1) {
+            borrow = bn_sub_n(ry, y, rx, n);
+        } else {
+#if BN_GCD_FUSED_REPLAY_SUBMUL
+            if (n >= BN_GCD_FUSED_REPLAY_THRESHOLD) {
+                borrow = bn_submul_from_1(ry, y, rx, n, vy);
+            } else {
+                memcpy(ry, y, (size_t)n * sizeof(uint64_t));
+                borrow = bn_submul_1(ry, rx, n, vy);
+            }
+#else
+            memcpy(ry, y, (size_t)n * sizeof(uint64_t));
+            borrow = bn_submul_1(ry, rx, n, vy);
+#endif
+        }
+        if (borrow) return 0;
+        *rxlen = mag_norm_len(rx, n);
+        *rylen = mag_norm_len(ry, n);
+        return 1;
+    }
+#endif
+    uint64_t coeff[4] = {ux, vx, uy, vy};
+    if (!mag_linear_comb_pair_core(rx, ry, n, x, y, coeff)) return 0;
+    *rxlen = mag_norm_len(rx, n);
+    *rylen = mag_norm_len(ry, n);
     return 1;
 }
 
-static WValue bigint_gcd_any(WValue a, WValue b) {
-    /* Take absolute values, then Euclidean algorithm */
-    /* Make working copies that are always positive */
-    WValue x = a, y = b;
+/* A leading-slice half-GCD block.  Lehmer's scalar matrix is excellent while its
+ * entries fit one limb, but a full GCD still makes O(n) passes over n-limb
+ * operands.  For large inputs, reduce only the leading quarter, accumulate the
+ * inverse transform M with arbitrary-size nonnegative entries, then apply
+ * M^-1 to the full operands using four subquadratic multiplies.
+ *
+ * The leading slice can occasionally choose a quotient invalidated by the
+ * omitted low limbs.  This is harmless: the exact full-width application is
+ * accepted only when both signed differences are nonnegative and the maximum
+ * operand size decreases.  Since det(M) is always +/-1, every accepted block
+ * preserves gcd exactly. */
+#ifndef BN_GCD_HGCD_THRESHOLD
+#define BN_GCD_HGCD_THRESHOLD 1024
+#endif
+#ifndef BN_GCD_HGCD_RECURSIVE_THRESHOLD
+#define BN_GCD_HGCD_RECURSIVE_THRESHOLD 4096
+#endif
+/* Workspace is sized for the largest slice, one quarter of the operand.
+ * With the low-split row application (products against only the low p limbs
+ * plus the shifted slice residue), the deepest slice the workspace allows --
+ * a quarter -- wins everywhere below 2K limbs: apply cost per removed limb
+ * is ~4*p*disc and p shrinks as the slice grows, while denser slices also
+ * feed the multiply ladder larger, better-discounted chunks.  Above 2K the
+ * pre-existing eighth/fifth/sixth ladder is retained.  Keeping the choice
+ * keyed to the current xlen (not the workspace cap) lets a large GCD select
+ * the geometry again after every successful reduction. */
+#ifndef BN_GCD_HGCD_TOP_DEN
+#define BN_GCD_HGCD_TOP_DEN 4
+#endif
+#ifndef BN_GCD_HGCD_DEN5_THRESHOLD
+#define BN_GCD_HGCD_DEN5_THRESHOLD 2048
+#endif
+#ifndef BN_GCD_HGCD_DEN6_THRESHOLD
+#define BN_GCD_HGCD_DEN6_THRESHOLD 640
+#endif
+#ifndef BN_GCD_HGCD_DEN8_THRESHOLD
+#define BN_GCD_HGCD_DEN8_THRESHOLD 1536
+#endif
+#ifndef BN_GCD_HGCD_LARGE_DEN5_THRESHOLD
+#define BN_GCD_HGCD_LARGE_DEN5_THRESHOLD 3072
+#endif
+#ifndef BN_GCD_HGCD_RECURSIVE_DEN_THRESHOLD
+#define BN_GCD_HGCD_RECURSIVE_DEN_THRESHOLD 6144
+#endif
 
-    /* Ensure positive */
-    if (w_is_int(x)) {
-        int64_t v = w_as_int(x);
-        x = v < 0 ? (v == W_INT48_MIN ? bigint_from_i64(-v) : w_box_int(-v)) : x;
-    } else {
-        WBigint *bx = w_as_bigint(x);
-        if (bx->size < 0) {
-            int32_t n = -bx->size;
-            WBigint *pos = bigint_alloc(n);
-            for (int32_t i = 0; i < n; i++) pos->limbs[i] = bx->limbs[i];
-            pos->size = n;
-            x = bigint_box(pos);
+static inline int gcd_hgcd_top_den(int32_t n) {
+    if (n < BN_GCD_HGCD_DEN5_THRESHOLD) return BN_GCD_HGCD_TOP_DEN;
+    if (n < BN_GCD_HGCD_DEN6_THRESHOLD) return 5;
+    if (n < BN_GCD_HGCD_DEN8_THRESHOLD) return 6;
+    if (n < BN_GCD_HGCD_LARGE_DEN5_THRESHOLD) return 8;
+    if (n < BN_GCD_HGCD_RECURSIVE_DEN_THRESHOLD) return 5;
+    return 6;
+}
+
+/* Matrix caps carry 12 limbs of slack: the first block of a GCD runs at
+ * xlen == cap, where a full half-slice reduction produces entries within a
+ * couple of limbs of hcap/2, and a tight cap makes the final tree multiply
+ * overflow and discard the entire block. */
+static size_t gcd_hgcd_level_ws_need(int32_t cap) {
+    int32_t hcap = (cap + BN_GCD_HGCD_TOP_DEN - 1)
+                 / BN_GCD_HGCD_TOP_DEN;
+    int32_t mcap = (hcap + 1) / 2 + 12;
+    int32_t pcap = cap + mcap + 2;
+    int32_t max_matrices = 2 * hcap;
+    int depth = 0;
+    for (int32_t n = max_matrices; n > 1; n = (n + 1) / 2) depth++;
+    size_t tree_stride = (size_t)12 * mcap + 2;
+    return (size_t)4 * hcap
+         + (size_t)4 * max_matrices
+         + (size_t)12 * mcap
+         + tree_stride * (size_t)depth
+         + (size_t)2 * pcap;
+}
+
+static size_t gcd_hgcd_ws_need(int32_t cap) {
+    size_t total = gcd_hgcd_level_ws_need(cap);
+    int32_t hcap = (cap + BN_GCD_HGCD_TOP_DEN - 1)
+                 / BN_GCD_HGCD_TOP_DEN;
+    if (hcap >= BN_GCD_HGCD_RECURSIVE_THRESHOLD)
+        total += gcd_hgcd_level_ws_need(hcap);
+    return total;
+}
+
+static int32_t gcd_matrix_product(uint64_t *out,
+                                  const uint64_t *a, int32_t an,
+                                  const uint64_t *b, int32_t bn) {
+    if (an == 0 || bn == 0) return 0;
+    /* The product tree's lower levels are dominated by 1x1 leaves; skip the
+     * general multiply dispatch for them. */
+    if (an == 1 && bn == 1) {
+        __uint128_t prod = (__uint128_t)a[0] * b[0];
+        uint64_t hi = (uint64_t)(prod >> 64);
+        out[0] = (uint64_t)prod;
+        out[1] = hi;
+        return hi ? 2 : 1;
+    }
+#ifdef BN_GCD_PROFILE_COUNTS
+    int32_t width = an > bn ? an : bn;
+    int bin = 0;
+    while (width > 1 && bin < 11) {
+        width = (width + 1) >> 1;
+        bin++;
+    }
+    gcd_profile_matrix_products++;
+    gcd_profile_matrix_product_work += (uint64_t)an * (uint64_t)bn;
+    gcd_profile_matrix_product_bins[bin]++;
+#endif
+    bigint_mul_dispatch(out, a, an, b, bn);
+    return mag_norm_len(out, an + bn);
+}
+
+static int32_t gcd_matrix_add_products(uint64_t *out, int32_t cap,
+                                       uint64_t *a, int32_t an,
+                                       uint64_t *b, int32_t bn) {
+    int32_t n = an > bn ? an : bn;
+    if (n == 0) return 0;
+    if (n >= cap) return -1;
+    if (an < n) memset(a + an, 0, (size_t)(n - an) * sizeof(uint64_t));
+    if (bn < n) memset(b + bn, 0, (size_t)(n - bn) * sizeof(uint64_t));
+    uint64_t carry = bn_add_n(out, a, b, n);
+    if (carry) out[n++] = carry;
+    return n;
+}
+
+static int gcd_matrix_multiply(uint64_t *out[4], int32_t ol[4],
+                               uint64_t *left[4], const int32_t ll[4],
+                               uint64_t *right[4], const int32_t rl[4],
+                               int32_t cap, uint64_t *p0, uint64_t *p1) {
+    for (int row = 0; row < 2; row++) {
+        for (int col = 0; col < 2; col++) {
+            int oi = 2 * row + col;
+            int32_t n0 = gcd_matrix_product(
+                p0, left[2 * row], ll[2 * row],
+                right[col], rl[col]);
+            int32_t n1 = gcd_matrix_product(
+                p1, left[2 * row + 1], ll[2 * row + 1],
+                right[2 + col], rl[2 + col]);
+            ol[oi] = gcd_matrix_add_products(out[oi], cap, p0, n0, p1, n1);
+            if (ol[oi] < 0) return 0;
         }
     }
-    if (w_is_int(y)) {
-        int64_t v = w_as_int(y);
-        y = v < 0 ? (v == W_INT48_MIN ? bigint_from_i64(-v) : w_box_int(-v)) : y;
-    } else {
-        WBigint *by = w_as_bigint(y);
-        if (by->size < 0) {
-            int32_t n = -by->size;
-            WBigint *pos = bigint_alloc(n);
-            for (int32_t i = 0; i < n; i++) pos->limbs[i] = by->limbs[i];
-            pos->size = n;
-            y = bigint_box(pos);
+    return 1;
+}
+
+/* Ordered product of scalar 2x2 matrices.  Each recursion level owns fixed
+ * output and product slices; normalized prefixes alone reach multiplication. */
+static int gcd_matrix_product_tree(const uint64_t *leaves, int32_t count,
+                                   uint64_t *out[4], int32_t ol[4],
+                                   int32_t cap, uint64_t *scratch) {
+    if (count == 1) {
+        for (int i = 0; i < 4; i++) {
+            uint64_t v = leaves[i];
+            if (v) out[i][0] = v;
+            ol[i] = v != 0;
+        }
+        return 1;
+    }
+    int32_t left_count = count / 2;
+    int32_t right_count = count - left_count;
+    uint64_t *left[4] = {
+        scratch, scratch + cap, scratch + 2 * cap, scratch + 3 * cap
+    };
+    uint64_t *right[4] = {
+        scratch + 4 * cap, scratch + 5 * cap,
+        scratch + 6 * cap, scratch + 7 * cap
+    };
+    uint64_t *p0 = scratch + 8 * cap;
+    uint64_t *p1 = p0 + 2 * cap + 1;
+    uint64_t *child = p1 + 2 * cap + 1;
+    int32_t ll[4], rl[4];
+    if (!gcd_matrix_product_tree(leaves, left_count, left, ll, cap, child) ||
+        !gcd_matrix_product_tree(leaves + (size_t)4 * left_count,
+                                 right_count, right, rl, cap, child))
+        return 0;
+    return gcd_matrix_multiply(out, ol, left, ll, right, rl, cap, p0, p1);
+}
+
+/* out = pc*low(pv) - nc*low(nv) + hi << (64*p), validated nonnegative.
+ *
+ * The block's reduced slice value IS the leading combination already:
+ * hx_final = pc*slice(pv) - nc*slice(nv) exactly, because every batch applies
+ * an exact unimodular map to the slice pair while the same matrices
+ * accumulate into cur.  So the full-width row application only needs fresh
+ * products against the LOW p limbs of each operand plus the shifted slice
+ * residue -- at top_den 4 that is a quarter less multiplication work than
+ * multiplying the whole operands. */
+static int gcd_hgcd_apply_row_low(uint64_t *out, int32_t out_cap,
+                                  const uint64_t *pc, int32_t pcn,
+                                  const uint64_t *pv,
+                                  const uint64_t *nc, int32_t ncn,
+                                  const uint64_t *nv, int32_t p,
+                                  const uint64_t *hi, int32_t hin,
+                                  uint64_t *p0, uint64_t *p1,
+                                  int32_t prod_cap, int32_t *out_len) {
+    int32_t n0 = gcd_matrix_product(p0, pc, pcn, pv, mag_norm_len(pv, p));
+    int32_t n1 = gcd_matrix_product(p1, nc, ncn, nv, mag_norm_len(nv, p));
+    if (n0 > prod_cap || n1 > prod_cap) return 0;
+    if (hin) {
+        int32_t hi_end = p + hin;
+        if (hi_end > prod_cap) return 0;
+        if (n0 < hi_end) {
+            memset(p0 + n0, 0, (size_t)(hi_end - n0) * sizeof(uint64_t));
+            n0 = hi_end;
+        }
+        uint64_t carry = bn_add_n(p0 + p, p0 + p, hi, hin);
+        int32_t i = p + hin;
+        while (carry) {
+            if (i >= n0) {
+                if (i >= prod_cap) return 0;
+                p0[i] = carry;
+                n0 = i + 1;
+                break;
+            }
+            uint64_t s = p0[i] + 1;
+            p0[i] = s;
+            carry = s == 0;
+            i++;
         }
     }
+    if (mag_cmp(p0, n0, p1, n1) < 0) return 0;
+    int32_t n = n0 > n1 ? n0 : n1;
+    if (n1 < n) memset(p1 + n1, 0, (size_t)(n - n1) * sizeof(uint64_t));
+    if (n0 < n) memset(p0 + n0, 0, (size_t)(n - n0) * sizeof(uint64_t));
+    if (bn_sub_n(p0, p0, p1, n)) return 0;
+    n = mag_norm_len(p0, n);
+    if (n > out_cap) return 0;
+    if (n) memcpy(out, p0, (size_t)n * sizeof(uint64_t));
+    memset(out + n, 0, (size_t)(out_cap - n) * sizeof(uint64_t));
+    *out_len = n;
+    return 1;
+}
 
-    /* Euclidean: while y != 0, (x, y) = (y, x % y) */
-    while (1) {
-        int y_zero;
-        if (w_is_int(y)) y_zero = (w_as_int(y) == 0);
-        else { WBigint *by = w_as_bigint(y); y_zero = (by->size == 0); }
-        if (y_zero) return x;
+static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
+                          const uint64_t *y, int32_t ylen,
+                          uint64_t *rx, uint64_t *ry, int32_t cap,
+                          uint64_t *mem, int32_t *rxlen, int32_t *rylen,
+                          uint64_t *out_matrix[4], int32_t out_ml[4],
+                          int *out_det, int allow_recursive) {
+    /* Geometry follows the current operand, not the workspace cap: cap never
+     * shrinks across reductions, xlen does.  Safe because every top_den >= 4
+     * keeps h = xlen - p <= ceil(xlen/4) <= hcap. */
+    int top_den = gcd_hgcd_top_den(xlen);
+    int32_t p = (int32_t)(((int64_t)(top_den - 1) * xlen) / top_den);
+    int32_t h = xlen - p;
+    int32_t hcap = (cap + BN_GCD_HGCD_TOP_DEN - 1)
+                 / BN_GCD_HGCD_TOP_DEN;
+    int32_t mcap = (hcap + 1) / 2 + 12;
+    int32_t prod_cap = cap + mcap + 2;
+    if (h < 8 || ylen <= p) return 0;
 
-        if (bigint_gcd_quotient_step(&x, &y)) continue;
+    uint64_t *hx = mem;
+    uint64_t *hy = hx + hcap;
+    uint64_t *hnx = hy + hcap;
+    uint64_t *hny = hnx + hcap;
+    int32_t max_matrices = 2 * hcap;
+    uint64_t *leaves = hny + hcap;
+    uint64_t *matrix = leaves + (size_t)4 * max_matrices;
+    uint64_t *acc[4] = {
+        matrix, matrix + mcap, matrix + 2 * mcap, matrix + 3 * mcap
+    };
+    uint64_t *step_matrix = matrix + 4 * mcap;
+    uint64_t *step[4] = {
+        step_matrix, step_matrix + mcap,
+        step_matrix + 2 * mcap, step_matrix + 3 * mcap
+    };
+    uint64_t *tmp_matrix = matrix + 8 * mcap;
+    uint64_t *tmp[4] = {
+        tmp_matrix, tmp_matrix + mcap,
+        tmp_matrix + 2 * mcap, tmp_matrix + 3 * mcap
+    };
+    int depth = 0;
+    for (int32_t z = max_matrices; z > 1; z = (z + 1) / 2) depth++;
+    size_t tree_stride = (size_t)12 * mcap + 2;
+    uint64_t *tree_scratch = matrix + 12 * mcap;
+    uint64_t *prod0 = tree_scratch + tree_stride * (size_t)depth;
+    uint64_t *prod1 = prod0 + prod_cap;
+    uint64_t *child_mem = mem + gcd_hgcd_level_ws_need(cap);
 
-        WValue rem = bigint_mod_any(x, y);
-        x = y;
-        y = rem;
+    memset(hx, 0, (size_t)4 * hcap * sizeof(uint64_t));
+    memcpy(hx, x + p, (size_t)(xlen - p) * sizeof(uint64_t));
+    memcpy(hy, y + p, (size_t)(ylen - p) * sizeof(uint64_t));
+    int32_t hxl = mag_norm_len(hx, h);
+    int32_t hyl = mag_norm_len(hy, ylen - p);
+    if (!hyl || mag_cmp(hx, hxl, hy, hyl) < 0) return 0;
+
+    int det = 1;
+    int success = 0;
+    int have_acc = 0;
+    int used_recursive = 0;
+    int32_t al[4] = {0, 0, 0, 0};
+    int32_t matrix_count = 0;
+    int32_t target = h / 2 + 1;
+    /* One child block removes only the first quarter of a large leading
+     * slice.  The scalar product tree finishes the lower quarter: this keeps
+     * the approximation stable and avoids a cascade of tiny matrix products. */
+    int32_t recursive_stop = h - h / 4;
+
+    while (hxl > target && hyl > 0) {
+        if (allow_recursive && h >= BN_GCD_HGCD_RECURSIVE_THRESHOLD &&
+            hxl > recursive_stop) {
+            int32_t sl[4], hnxl, hnyl;
+            int step_det;
+            step[0] = step_matrix;
+            step[1] = step_matrix + mcap;
+            step[2] = step_matrix + 2 * mcap;
+            step[3] = step_matrix + 3 * mcap;
+            if (gcd_hgcd_block(hx, hxl, hy, hyl, hnx, hny, hcap,
+                               child_mem, &hnxl, &hnyl,
+                               step, sl, &step_det, 0)) {
+                uint64_t *ht = hx; hx = hnx; hnx = ht;
+                ht = hy; hy = hny; hny = ht;
+                hxl = hnxl;
+                hyl = hnyl;
+                if (mag_cmp(hx, hxl, hy, hyl) < 0) {
+                    ht = hx; hx = hy; hy = ht;
+                    int32_t lt = hxl; hxl = hyl; hyl = lt;
+                    ht = step[0]; step[0] = step[1]; step[1] = ht;
+                    ht = step[2]; step[2] = step[3]; step[3] = ht;
+                    lt = sl[0]; sl[0] = sl[1]; sl[1] = lt;
+                    lt = sl[2]; sl[2] = sl[3]; sl[3] = lt;
+                    step_det = -step_det;
+                }
+                if (!have_acc) {
+                    for (int i = 0; i < 4; i++) {
+                        if (sl[i])
+                            memcpy(acc[i], step[i],
+                                   (size_t)sl[i] * sizeof(uint64_t));
+                        al[i] = sl[i];
+                    }
+                    have_acc = 1;
+                } else {
+                    int32_t tl[4];
+                    if (!gcd_matrix_multiply(tmp, tl, acc, al, step, sl,
+                                             mcap, prod0, prod1))
+                        return 0;
+                    for (int i = 0; i < 4; i++) {
+                        ht = acc[i]; acc[i] = tmp[i]; tmp[i] = ht;
+                        al[i] = tl[i];
+                    }
+                }
+                det *= step_det;
+                success = 1;
+                used_recursive = 1;
+                continue;
+            }
+        }
+
+        int64_t A, B, C, D;
+        int steps = lehmer_simulate_magnitudes(
+            hx, hxl, hy, hyl, &A, &B, &C, &D);
+        if (!steps) break;
+        int32_t hnxl, hnyl;
+        int valid;
+        if (!(steps & 1)) {
+            valid = mag_linear_comb_pair(
+                hnx, hny, hxl, hx, hy,
+                (uint64_t)A, (uint64_t)(-B),
+                (uint64_t)D, (uint64_t)(-C), &hnxl, &hnyl);
+        } else {
+            valid = mag_linear_comb_pair(
+                hnx, hny, hxl, hy, hx,
+                (uint64_t)B, (uint64_t)(-A),
+                (uint64_t)C, (uint64_t)(-D), &hnxl, &hnyl);
+        }
+        if (!valid) break;
+
+        uint64_t e00, e01, e10, e11;
+        if (!(steps & 1)) {
+            e00 = (uint64_t)D;    e01 = (uint64_t)(-B);
+            e10 = (uint64_t)(-C); e11 = (uint64_t)A;
+        } else {
+            e00 = (uint64_t)(-D); e01 = (uint64_t)B;
+            e10 = (uint64_t)C;    e11 = (uint64_t)(-A);
+        }
+        if (matrix_count >= max_matrices) return 0;
+        uint64_t *leaf = leaves + (size_t)4 * matrix_count++;
+        leaf[0] = e00; leaf[1] = e01; leaf[2] = e10; leaf[3] = e11;
+        det = (steps & 1) ? -det : det;
+        uint64_t *ht = hx; hx = hnx; hnx = ht;
+        ht = hy; hy = hny; hny = ht;
+        hxl = hnxl;
+        hyl = hnyl;
+        if (mag_cmp(hx, hxl, hy, hyl) < 0) {
+            ht = hx; hx = hy; hy = ht;
+            int32_t lt = hxl; hxl = hyl; hyl = lt;
+            if (matrix_count >= max_matrices) return 0;
+            leaf = leaves + (size_t)4 * matrix_count++;
+            leaf[0] = 0; leaf[1] = 1; leaf[2] = 1; leaf[3] = 0;
+            det = -det;
+        }
+        success = 1;
+    }
+    /* Accept partial reductions.  A batch invalidated by the omitted low
+     * limbs near the slice's precision limit merely shortens the block; the
+     * full-width application below still validates whatever prefix was
+     * accumulated.  Insist on enough progress to amortize that application. */
+    int32_t min_remove = h / 8 < 8 ? 8 : h / 8;
+    if (!success || hxl > h - min_remove) return 0;
+    uint64_t *cur[4];
+    int32_t cl[4];
+    if (matrix_count) {
+        uint64_t *tail[4];
+        if (have_acc) {
+            tail[0] = step_matrix;
+            tail[1] = step_matrix + mcap;
+            tail[2] = step_matrix + 2 * mcap;
+            tail[3] = step_matrix + 3 * mcap;
+        } else {
+            for (int i = 0; i < 4; i++) tail[i] = acc[i];
+        }
+        int32_t tl[4];
+        if (!gcd_matrix_product_tree(leaves, matrix_count, tail, tl,
+                                     mcap, tree_scratch))
+            return 0;
+        if (have_acc) {
+            if (!gcd_matrix_multiply(tmp, cl, acc, al, tail, tl,
+                                     mcap, prod0, prod1))
+                return 0;
+            for (int i = 0; i < 4; i++) cur[i] = tmp[i];
+        } else {
+            for (int i = 0; i < 4; i++) {
+                cur[i] = acc[i];
+                cl[i] = tl[i];
+            }
+        }
+    } else {
+        if (!have_acc) return 0;
+        for (int i = 0; i < 4; i++) {
+            cur[i] = acc[i];
+            cl[i] = al[i];
+        }
+    }
+    int ok;
+    if (det > 0) {
+        ok = gcd_hgcd_apply_row_low(rx, cap, cur[3], cl[3], x,
+                                    cur[1], cl[1], y, p, hx, hxl,
+                                    prod0, prod1, prod_cap, rxlen)
+          && gcd_hgcd_apply_row_low(ry, cap, cur[0], cl[0], y,
+                                    cur[2], cl[2], x, p, hy, hyl,
+                                    prod0, prod1, prod_cap, rylen);
+    } else {
+        ok = gcd_hgcd_apply_row_low(rx, cap, cur[1], cl[1], y,
+                                    cur[3], cl[3], x, p, hx, hxl,
+                                    prod0, prod1, prod_cap, rxlen)
+          && gcd_hgcd_apply_row_low(ry, cap, cur[2], cl[2], x,
+                                    cur[0], cl[0], y, p, hy, hyl,
+                                    prod0, prod1, prod_cap, rylen);
+    }
+    if (!ok && used_recursive)
+        return gcd_hgcd_block(x, xlen, y, ylen, rx, ry, cap,
+                              mem, rxlen, rylen,
+                              out_matrix, out_ml, out_det, 0);
+    if (!ok) return 0;
+    int32_t out_max = *rxlen > *rylen ? *rxlen : *rylen;
+    if (out_max >= xlen && used_recursive)
+        return gcd_hgcd_block(x, xlen, y, ylen, rx, ry, cap,
+                              mem, rxlen, rylen,
+                              out_matrix, out_ml, out_det, 0);
+    if (out_max >= xlen) return 0;
+    if (out_matrix) {
+        for (int i = 0; i < 4; i++) {
+            if (cl[i])
+                memcpy(out_matrix[i], cur[i],
+                       (size_t)cl[i] * sizeof(uint64_t));
+            out_ml[i] = cl[i];
+        }
+        *out_det = det;
+    }
+    return 1;
+}
+
+/* x -= y << d, in place. The caller guarantees y << d <= x. */
+static void mag_sub_shifted(uint64_t *x, int32_t xlen,
+                            const uint64_t *y, int32_t ylen, uint64_t d) {
+    int32_t s = (int32_t)(d >> 6);
+    int r = (int)(d & 63);
+    if (r == 0) {
+        int32_t room = xlen - s;
+        int32_t count = ylen < room ? ylen : room;
+        uint64_t borrow = bn_sub_n(x + s, x + s, y, count);
+        for (int32_t i = s + count; borrow && i < xlen; i++) {
+            uint64_t xi = x[i];
+            x[i] = xi - 1;
+            borrow = xi == 0;
+        }
+        return;
+    }
+    uint64_t borrow = 0;
+    uint64_t carry_bits = 0;
+    for (int32_t i = 0; i <= ylen && s + i < xlen; i++) {
+        uint64_t yl = i < ylen ? y[i] : 0;
+        uint64_t sub = r ? ((yl << r) | carry_bits) : yl;
+        if (r) carry_bits = yl >> (64 - r);
+        uint64_t xi = x[s + i];
+        uint64_t d1 = xi - sub;
+        uint64_t b1 = xi < sub;
+        uint64_t d2 = d1 - borrow;
+        uint64_t b2 = d1 < borrow;
+        x[s + i] = d2;
+        borrow = b1 | b2;
+    }
+    for (int32_t i = s + ylen + 1; borrow && i < xlen; i++) {
+        uint64_t xi = x[i];
+        x[i] = xi - 1;
+        borrow = xi == 0;
     }
 }
 
+/* Fallback for shapes whose leading digits cannot batch. */
+static BN_GCD_PROFILE_ATTR int32_t mag_mod_binary(
+    uint64_t *x, int32_t xlen,
+    const uint64_t *y, int32_t ylen) {
+    for (;;) {
+        xlen = mag_norm_len(x, xlen);
+        if (mag_cmp(x, xlen, y, ylen) < 0) return xlen;
+        int64_t d = mag_bitlen(x, xlen) - mag_bitlen(y, ylen);
+        mag_sub_shifted(x, xlen, y, ylen, d > 0 ? (uint64_t)(d - 1) : 0);
+    }
+}
+#undef BN_GCD_PROFILE_ATTR
+
+static __thread uint64_t *gcd_ws = NULL;
+static __thread size_t gcd_ws_cap = 0;
+static uint64_t *gcd_ws_get(size_t limbs) {
+    if (limbs > gcd_ws_cap) {
+        free(gcd_ws);
+        size_t ncap = limbs + limbs / 2 + 64;
+        gcd_ws = (uint64_t *)malloc(ncap * sizeof(uint64_t));
+        gcd_ws_cap = gcd_ws ? ncap : 0;
+    }
+    return gcd_ws;
+}
+
+static __attribute__((noinline))
+WValue bigint_gcd_any_generic(WValue a, WValue b) {
+    uint64_t sa, sb;
+    int32_t alen, blen;
+    const uint64_t *al = integer_limbs(a, &sa, &alen);
+    const uint64_t *bl = integer_limbs(b, &sb, &blen);
+    int32_t an = alen < 0 ? -alen : alen;
+    int32_t bn = blen < 0 ? -blen : blen;
+
+    if (an <= 1 && bn <= 1) {
+        uint64_t av = an ? al[0] : 0;
+        uint64_t bv = bn ? bl[0] : 0;
+        uint64_t g = (av && bv) ? bn_gcd_u64_nonzero(av, bv) : (av | bv);
+        if (g <= (uint64_t)W_INT48_MAX) return w_box_int((int64_t)g);
+        WBigint *r = bigint_alloc_raw(1);
+        r->limbs[0] = g;
+        r->size = 1;
+        return bigint_normalize(r);
+    }
+#if defined(__aarch64__) && BN_GCD_22_ASM
+    if (an == 2 && bn == 2) {
+        unsigned __int128 g =
+            bn_gcd_22(al[1], al[0], bl[1], bl[0]);
+        uint64_t hi = (uint64_t)(g >> 64);
+        if (!hi) return bigint_from_u64((uint64_t)g);
+        WBigint *r = bigint_alloc_raw(2);
+        r->limbs[0] = (uint64_t)g;
+        r->limbs[1] = hi;
+        r->size = 2;
+        return bigint_normalize(r);
+    }
+#endif
+    int32_t cap = an > bn ? an : bn;
+    size_t hgcd_need = cap >= BN_GCD_HGCD_THRESHOLD
+        ? gcd_hgcd_ws_need(cap) : 0;
+    uint64_t *buf = gcd_ws_get((size_t)cap * 4 + hgcd_need);
+    if (!buf) die("out of memory in bigint gcd");
+    uint64_t *x = buf;
+    uint64_t *y = buf + cap;
+    uint64_t *nx = buf + 2 * (size_t)cap;
+    uint64_t *ny = buf + 3 * (size_t)cap;
+    int32_t xlen, ylen;
+    if (mag_cmp(al, an, bl, bn) >= 0) {
+        memcpy(x, al, (size_t)an * sizeof(uint64_t));
+        memcpy(y, bl, (size_t)bn * sizeof(uint64_t));
+        xlen = an;
+        ylen = bn;
+    } else {
+        memcpy(x, bl, (size_t)bn * sizeof(uint64_t));
+        memcpy(y, al, (size_t)an * sizeof(uint64_t));
+        xlen = bn;
+        ylen = an;
+    }
+    if (ylen < cap)
+        memset(y + ylen, 0, (size_t)(cap - ylen) * sizeof(uint64_t));
+    int32_t hgcd_retry_at = INT32_MAX;
+    while (ylen > 1) {
+        if (xlen >= BN_GCD_HGCD_THRESHOLD && xlen <= hgcd_retry_at) {
+            int32_t nxl, nyl;
+            if (gcd_hgcd_block(x, xlen, y, ylen, nx, ny, cap,
+                               buf + (size_t)4 * cap, &nxl, &nyl,
+                               NULL, NULL, NULL, 1)) {
+                uint64_t *t;
+                int32_t tl;
+                t = x; x = nx; nx = t;
+                t = y; y = ny; ny = t;
+                xlen = nxl;
+                ylen = nyl;
+                if (mag_cmp(x, xlen, y, ylen) < 0) {
+                    t = x; x = y; y = t;
+                    tl = xlen; xlen = ylen; ylen = tl;
+                }
+                hgcd_retry_at = INT32_MAX;
+                continue;
+            }
+            int32_t cooldown = xlen / 8;
+            if (cooldown < 1) cooldown = 1;
+            hgcd_retry_at = xlen - cooldown;
+        }
+        int64_t A, B, C, D;
+        int steps;
+#if BN_GCD_SMALL_FAST_QUOTIENT_TWO
+        if (xlen == 2)
+            steps = lehmer_simulate_2_magnitudes(
+                x, y, &A, &B, &C, &D);
+        else if (xlen <= 4)
+            steps = lehmer_simulate_small_magnitudes(
+                x, xlen, y, ylen, &A, &B, &C, &D);
+        else
+#endif
+            steps = lehmer_simulate_magnitudes(
+                x, xlen, y, ylen, &A, &B, &C, &D);
+        if (steps > 0) {
+            int32_t nxl, nyl;
+            int valid;
+            if (!(steps & 1)) {
+                valid = mag_linear_comb_pair(
+                    nx, ny, xlen, x, y,
+                    (uint64_t)A, (uint64_t)(-B),
+                    (uint64_t)D, (uint64_t)(-C), &nxl, &nyl);
+            } else {
+                valid = mag_linear_comb_pair(
+                    nx, ny, xlen, y, x,
+                    (uint64_t)B, (uint64_t)(-A),
+                    (uint64_t)C, (uint64_t)(-D), &nxl, &nyl);
+            }
+            if (valid) {
+                uint64_t *t;
+                int32_t tl;
+                t = x; x = nx; nx = t;
+                t = y; y = ny; ny = t;
+                xlen = nxl;
+                ylen = nyl;
+                if (mag_cmp(x, xlen, y, ylen) < 0) {
+                    t = x; x = y; y = t;
+                    tl = xlen; xlen = ylen; ylen = tl;
+                }
+                continue;
+            }
+        }
+        xlen = mag_mod_binary(x, xlen, y, ylen);
+        uint64_t *t = x;
+        x = y;
+        y = t;
+        int32_t tl = xlen;
+        xlen = ylen;
+        ylen = tl;
+    }
+
+    WValue result;
+    if (ylen == 0) {
+        /* Every result limb is replaced by the workspace copy below.  Raw
+         * allocation preserves recycler give/take semantics without clearing
+         * the retained capacity immediately before overwriting it. */
+        WBigint *r = bigint_alloc_raw(xlen);
+        memcpy(r->limbs, x, (size_t)xlen * sizeof(uint64_t));
+        r->size = xlen;
+        result = bigint_normalize(r);
+    } else {
+        uint64_t g = w_gcd_u64(mag_mod_u64(x, xlen, y[0]), y[0]);
+        if (g <= (uint64_t)W_INT48_MAX) {
+            result = w_box_int((int64_t)g);
+        } else {
+            WBigint *r = bigint_alloc_raw(1);
+            r->limbs[0] = g;
+            r->size = 1;
+            result = bigint_normalize(r);
+        }
+    }
+    return result;
+}
+
+#ifndef BN_GCD_BOXED_SMALL_FAST
+#define BN_GCD_BOXED_SMALL_FAST 1
+#endif
+
+static inline __attribute__((always_inline))
+WValue bigint_gcd_any(WValue a, WValue b) {
+#if BN_GCD_BOXED_SMALL_FAST
+    if (w_is_bigint(a) && w_is_bigint(b)) {
+        WBigint *aa = w_as_bigint(a);
+        WBigint *bb = w_as_bigint(b);
+        int32_t an = aa->size < 0 ? -aa->size : aa->size;
+        int32_t bn = bb->size < 0 ? -bb->size : bb->size;
+        if (an == 1 && bn == 1) {
+            /* Normalized one-limb bigints guarantee limbs[0] != 0, so the
+             * zero checks and the out-of-line call are pure overhead here. */
+            uint64_t g = bn_gcd_u64_nonzero(aa->limbs[0], bb->limbs[0]);
+            if (g <= (uint64_t)W_INT48_MAX)
+                return w_box_int((int64_t)g);
+            WBigint *r = bigint_alloc_raw(1);
+            r->limbs[0] = g;
+            r->size = 1;
+            return bigint_normalize(r);
+        }
+        if (an <= 1 && bn <= 1) {
+            uint64_t g = w_gcd_u64(
+                an ? aa->limbs[0] : 0,
+                bn ? bb->limbs[0] : 0);
+            if (g <= (uint64_t)W_INT48_MAX)
+                return w_box_int((int64_t)g);
+            WBigint *r = bigint_alloc_raw(1);
+            r->limbs[0] = g;
+            r->size = 1;
+            return bigint_normalize(r);
+        }
+#if defined(__aarch64__) && BN_GCD_22_ASM
+        if (an == 2 && bn == 2) {
+            unsigned __int128 g =
+                bn_gcd_22(
+                    aa->limbs[1], aa->limbs[0],
+                    bb->limbs[1], bb->limbs[0]);
+            uint64_t hi = (uint64_t)(g >> 64);
+            if (!hi) return bigint_from_u64((uint64_t)g);
+            WBigint *r = bigint_alloc_raw(2);
+            r->limbs[0] = (uint64_t)g;
+            r->limbs[1] = hi;
+            r->size = 2;
+            return bigint_normalize(r);
+        }
+#endif
+    }
+#endif
+    return bigint_gcd_any_generic(a, b);
+}
+
 /* ---- Bigint comparison ---- */
+
+/* Equal-length magnitude scan for the boxed compare entry.  mag_cmp's
+ * one-limb-per-iteration backward loop pays a compare-and-branch per limb;
+ * on long equal prefixes (the common shape when compares actually have to
+ * scan) pairing limbs halves the branch count while keeping the exact
+ * most-significant-difference contract.  Kept local to bigint_compare so
+ * the shared mag_cmp used by the division/gcd machinery is untouched. */
+static int bigint_compare_mag(const uint64_t *a, const uint64_t *b,
+                              int32_t len) {
+    int32_t i = len - 1;
+    if (len & 1) {
+        if (a[i] != b[i]) return a[i] > b[i] ? 1 : -1;
+        i--;
+    } else if (len == 2) {
+        /* Two limbs: two sequential compares beat the paired reduction. */
+        if (a[1] != b[1]) return a[1] > b[1] ? 1 : -1;
+        if (a[0] != b[0]) return a[0] > b[0] ? 1 : -1;
+        return 0;
+    }
+    for (; i > 0; i -= 2) {
+        if (((a[i] ^ b[i]) | (a[i - 1] ^ b[i - 1])) != 0) {
+            if (a[i] != b[i]) return a[i] > b[i] ? 1 : -1;
+            return a[i - 1] > b[i - 1] ? 1 : -1;
+        }
+    }
+    return 0;
+}
 
 static int bigint_compare(WValue a, WValue b) {
     uint64_t sa, sb;
@@ -2817,45 +11353,87 @@ static int bigint_compare(WValue a, WValue b) {
     if (a_neg && !b_neg) return -1;
     if (!a_neg && b_neg) return 1;
 
-    int cmp = mag_cmp(al, a_abs, bl, b_abs);
+    int cmp = a_abs != b_abs ? (a_abs > b_abs ? 1 : -1)
+                             : bigint_compare_mag(al, bl, a_abs);
     return a_neg ? -cmp : cmp;
 }
 
 /* ---- Bigint to_s ---- */
 
-/* Decimal writer, base algorithm: repeated single-limb division by 10^18,
+/* Decimal writer, base algorithm: repeated single-limb division by 10^19,
  * O(chunks·limbs). pad_width == 0 writes unpadded and returns the digit count;
  * pad_width > 0 writes exactly pad_width digits (zero-padded; caller guarantees
  * x < 10^pad_width). Works at any size — the D&C path uses it as the base case
- * and the bigint bench uses it as the reference oracle at large sizes. */
+ * and the bigint bench uses it as the reference oracle at large sizes.
+ *
+ * The per-limb step is a Möller–Granlund 2/1 division with a compile-time
+ * reciprocal: 10^19 is the largest power of ten in a limb AND is already
+ * normalized (top bit set), so each step is a few multiplies instead of the
+ * __udivmodti4 library call that `(__uint128_t)x / 10^18` compiles to. */
+#define W_DEC_P19      10000000000000000000ULL      /* 10^19, normalized */
+#define W_DEC_P19_INV  0xd83c94fb6d2ac34aULL        /* floor((2^128-1)/10^19) - 2^64 */
+/* q = floor((u1·B + u0) / 10^19), remainder returned; requires u1 < 10^19. */
+static inline uint64_t w_dec_divstep19(uint64_t u1, uint64_t u0, uint64_t *q_out) {
+    __uint128_t t = (__uint128_t)W_DEC_P19_INV * u1 + (((__uint128_t)u1 << 64) | u0);
+    uint64_t q1 = (uint64_t)(t >> 64) + 1;
+    uint64_t q0 = (uint64_t)t;
+    uint64_t r = u0 - q1 * W_DEC_P19;
+    /* first adjustment fires ~half the time: keep it branch-free */
+    uint64_t mask = (uint64_t)0 - (uint64_t)(r > q0);
+    q1 += mask;
+    r += mask & W_DEC_P19;
+    if (__builtin_expect(r >= W_DEC_P19, 0)) { q1++; r -= W_DEC_P19; }
+    *q_out = q1;
+    return r;
+}
+static const char w_dec_2dig[201] =
+    "0001020304050607080910111213141516171819"
+    "2021222324252627282930313233343536373839"
+    "4041424344454647484950515253545556575859"
+    "6061626364656667686970717273747576777879"
+    "8081828384858687888990919293949596979899";
+/* Write exactly 19 decimal digits of c (c < 10^19) at dst. */
+static inline void w_dec_emit19(char *dst, uint64_t c) {
+    for (int32_t d = 18; d >= 2; d -= 2) {
+        uint64_t p = c % 100; c /= 100;
+        dst[d - 1] = w_dec_2dig[2 * p];
+        dst[d]     = w_dec_2dig[2 * p + 1];
+    }
+    dst[0] = (char)('0' + c);
+}
+#define W_DEC_STACK_LIMBS 128
 static int32_t w_dec_chunks_write(const uint64_t *xl, int32_t xlen, char *dst, int32_t pad_width) {
-    static const uint64_t POW10_18 = 1000000000000000000ULL;
     while (xlen > 0 && xl[xlen - 1] == 0) xlen--;
     if (xlen == 0) {
         if (pad_width == 0) { dst[0] = '0'; return 1; }
         for (int32_t i = 0; i < pad_width; i++) dst[i] = '0';
         return pad_width;
     }
-    uint64_t *work = (uint64_t *)malloc((size_t)xlen * sizeof(uint64_t));
+    uint64_t work_stack[W_DEC_STACK_LIMBS];
+    uint64_t chunks_stack[W_DEC_STACK_LIMBS + W_DEC_STACK_LIMBS / 32 + 2];
+    int32_t chunks_cap = xlen + xlen / 32 + 2;    /* ceil(xlen·19.266/19) + 1 */
+    uint64_t *work, *chunks;
+    if (xlen <= W_DEC_STACK_LIMBS) {
+        work = work_stack;
+        chunks = chunks_stack;
+    } else {
+        work = (uint64_t *)malloc((size_t)xlen * sizeof(uint64_t));
+        chunks = (uint64_t *)malloc((size_t)chunks_cap * sizeof(uint64_t));
+    }
     for (int32_t i = 0; i < xlen; i++) work[i] = xl[i];
-    int32_t chunks_cap = xlen * 20 / 18 + 2;
-    uint64_t *chunks = (uint64_t *)malloc((size_t)chunks_cap * sizeof(uint64_t));
     int32_t nchunks = 0, wlen = xlen;
     while (wlen > 0) {
-        __uint128_t rem = 0;
-        for (int32_t i = wlen - 1; i >= 0; i--) {
-            rem = (rem << 64) | work[i];
-            work[i] = (uint64_t)(rem / POW10_18);
-            rem = rem % POW10_18;
-        }
-        chunks[nchunks++] = (uint64_t)rem;
+        uint64_t rem = 0;
+        for (int32_t i = wlen - 1; i >= 0; i--)
+            rem = w_dec_divstep19(rem, work[i], &work[i]);
+        chunks[nchunks++] = rem;
         while (wlen > 0 && work[wlen - 1] == 0) wlen--;
     }
     int32_t pos = 0;
     char tmp[20];
     if (pad_width > 0) {
         /* right-align all chunks in the fixed field; zero-fill the head */
-        int32_t head = pad_width - (nchunks - 1) * 18;   /* head chunk field ≥ 1 */
+        int32_t head = pad_width - (nchunks - 1) * 19;   /* head chunk field ≥ 1 */
         uint64_t c = chunks[nchunks - 1];
         for (int32_t d = head - 1; d >= 0; d--) { dst[d] = (char)('0' + (c % 10)); c /= 10; }
         pos = head;
@@ -2867,12 +11445,10 @@ static int32_t w_dec_chunks_write(const uint64_t *xl, int32_t xlen, char *dst, i
         for (int32_t i = tmplen - 1; i >= 0; i--) dst[pos++] = tmp[i];
     }
     for (int32_t ci = nchunks - 2; ci >= 0; ci--) {
-        uint64_t c = chunks[ci];
-        for (int32_t d = 17; d >= 0; d--) { tmp[d] = (char)('0' + (c % 10)); c /= 10; }
-        for (int32_t d = 0; d < 18; d++) dst[pos++] = tmp[d];
+        w_dec_emit19(dst + pos, chunks[ci]);
+        pos += 19;
     }
-    free(chunks);
-    free(work);
+    if (work != work_stack) { free(chunks); free(work); }
     return pos;
 }
 
@@ -2905,20 +11481,189 @@ static int w_p10c_grow(void) {              /* materialize level top+1; 0 on all
     return 1;
 }
 
-/* Divide-and-conquer decimal writer: split x by P_j (one subquadratic
- * mag_divmod), head unpadded / tail zero-padded to exactly 18·2^j digits.
- * O(M(n)·log n) versus the base algorithm's O(n²/18). */
-#define W_TO_S_DC_LIMBS 32
+/* Per-level Barrett reciprocals mu_j = floor(B^(2n_j)/P_j) (exactly n_j+1
+ * limbs), built lazily beside the P_j ladder.  The generic divisor-keyed
+ * reciprocal cache (bn_div_recip_cache) never engages for the D&C writer:
+ * P_j is never normalized (its top limb never has the high bit set) and the
+ * recursion cycles through several divisors, so the single-slot cache would
+ * restart its warmup at every level.  With mu_j cached, every split
+ * division is two dispatch multiplies (HAC 14.42) instead of a full
+ * normalize + Burnikel–Ziegler run. */
+static __thread uint64_t *w_p10c_mu[W_P10_CACHE_MAX];
+
+/* Odd parts 5^(18·2^j) = P_j >> (18·2^j): multiplying by P_j is a multiply
+ * by the ~28%-shorter 5^p followed by a p-bit shift, which both the parser's
+ * combine step and the Barrett remainder product exploit. */
+static __thread uint64_t *w_p10c_five[W_P10_CACHE_MAX];
+static __thread int32_t   w_p10c_five_len[W_P10_CACHE_MAX];
+static int w_p10c_five_build(int j) {
+    if (w_p10c_five[j]) return 1;
+    int32_t pl = w_p10c_len[j];
+    int64_t p = (int64_t)18 << j;            /* digits = 2-adic valuation */
+    int32_t sh = (int32_t)(p >> 6);
+    int bs = (int)(p & 63);
+    int32_t n5 = pl - sh;
+    uint64_t *f = (uint64_t *)malloc((size_t)n5 * sizeof(uint64_t));
+    if (!f) return 0;
+    const uint64_t *src = w_p10c_limbs[j] + sh;
+    if (bs == 0) {
+        memcpy(f, src, (size_t)n5 * sizeof(uint64_t));
+    } else {
+        for (int32_t k = 0; k < n5; k++)
+            f[k] = (src[k] >> bs) |
+                   (k + 1 < n5 ? src[k + 1] << (64 - bs) : 0);
+    }
+    while (n5 > 0 && f[n5 - 1] == 0) n5--;
+    w_p10c_five[j] = f;
+    w_p10c_five_len[j] = n5;
+    return 1;
+}
+
+static int w_p10c_mu_build(int j) {
+    int32_t n = w_p10c_len[j];
+    int32_t num_len = 2 * n + 1;
+    uint64_t *num = (uint64_t *)calloc((size_t)num_len, sizeof(uint64_t));
+    if (!num) return 0;
+    num[2 * n] = 1;                          /* B^(2n) */
+    WBigint *q = NULL;
+    mag_divmod(num, num_len, w_p10c_limbs[j], n, &q, NULL);
+    free(num);
+    if (!q) return 0;
+    uint64_t *mu = NULL;
+    if (q->size == n + 1) {                  /* B^(n-1) ≤ P_j < B^n ⇒ n+1 limbs */
+        mu = (uint64_t *)malloc((size_t)(n + 1) * sizeof(uint64_t));
+        if (mu) memcpy(mu, q->limbs, (size_t)(n + 1) * sizeof(uint64_t));
+    }
+    free(q);
+    w_p10c_mu[j] = mu;
+    return mu != NULL;
+}
+
+/* Barrett split division u / P_j for ulen ≤ 2n_j:
+ * q̂ = floor(floor(u/B^(n-1))·mu_j / B^(n+1)) ∈ {q-2, q-1, q}; the remainder
+ * is recovered mod B^(n+1) (exact — r < 3·P_j < B^(n+1)) and corrected by at
+ * most two subtractions of P_j (HAC 14.42/14.43).  Returns 0 to have the
+ * caller fall back to mag_divmod. */
+static int w_dec_divmod_pj(const uint64_t *u, int32_t ulen, int j,
+                           WBigint **q_out, WBigint **r_out) {
+    int32_t n = w_p10c_len[j];
+    const uint64_t *d = w_p10c_limbs[j];
+    while (ulen > 0 && u[ulen - 1] == 0) ulen--;
+    if (ulen > 2 * n) return 0;
+    if (ulen < n || mag_cmp(u, ulen, d, n) < 0) {      /* q = 0, r = u */
+        WBigint *qb = bigint_alloc_raw(1);
+        qb->limbs[0] = 0;
+        qb->size = 0;
+        WBigint *rb = bigint_alloc_raw(ulen > 0 ? ulen : 1);
+        memcpy(rb->limbs, u, (size_t)ulen * sizeof(uint64_t));
+        rb->size = ulen;
+        *q_out = qb;
+        *r_out = rb;
+        return 1;
+    }
+    if (!w_p10c_mu[j] && !w_p10c_mu_build(j)) return 0;
+    const uint64_t *mu = w_p10c_mu[j];
+    int32_t m = ulen - (n - 1);                        /* q1 limbs, 1 ≤ m ≤ n+1 */
+    /* Only the top T = m+1 limbs of mu can influence q̂'s m limbs: the
+     * dropped q1·mu_lo tail is < B^(m-T) ≤ B^(-1) of a unit, costing at most
+     * one more unit of underestimate (q̂ ∈ {q-3..q}).  Unbalanced splits
+     * (m ≪ n) turn the first product from M(m,n) into M(m,m). */
+    int32_t T = m + 1 > n + 1 ? n + 1 : m + 1;
+    const uint64_t *muh = mu + (n + 1 - T);
+    int32_t tlen = m + T;
+    uint64_t *t = (uint64_t *)malloc((size_t)(tlen + m + n) * sizeof(uint64_t));
+    if (!t) return 0;
+    uint64_t *prod = t + tlen;                         /* q̂·(P_j or 5^p) */
+    bigint_mul_dispatch(t, u + (n - 1), m, muh, T);    /* q1·mu_hi */
+    const uint64_t *qh = t + T;                        /* q̂ = (q1·mu_hi)/B^T */
+    int32_t qlen = m;
+    while (qlen > 0 && qh[qlen - 1] == 0) qlen--;
+    WBigint *qb = bigint_alloc_raw(m);
+    memcpy(qb->limbs, qh, (size_t)qlen * sizeof(uint64_t));
+    WBigint *rb = bigint_alloc_raw(n + 1);
+    /* Remainder product q̂·P_j: multiply by the odd part 5^p and account for
+     * the 2^p factor as a bit offset inside the subtraction below. */
+    int32_t prodlen = 0, sh = 0;
+    int bs = 0;
+    if (qlen > 0) {
+        if (w_p10c_five[j] || w_p10c_five_build(j)) {
+            int64_t p = (int64_t)18 << j;
+            sh = (int32_t)(p >> 6);
+            bs = (int)(p & 63);
+            /* The subtraction below only reads product limbs < L: clip q̂ to
+             * L limbs — the low L limbs of (q̂ mod B^L)·5^p match the true
+             * product's. */
+            int32_t L = n + 1 - sh;
+            int32_t qc = qlen < L ? qlen : L;
+            bigint_mul_dispatch(prod, qb->limbs, qc, w_p10c_five[j],
+                                w_p10c_five_len[j]);
+            prodlen = qc + w_p10c_five_len[j];
+        } else {
+            bigint_mul_dispatch(prod, qb->limbs, qlen, d, n);
+            prodlen = qlen + n;
+        }
+    }
+    /* r = (u - (q̂·odd) << p) mod B^(n+1) */
+    uint64_t borrow = 0;
+    for (int32_t k = 0; k < n + 1; k++) {
+        uint64_t uv = k < ulen ? u[k] : 0;
+        int32_t idx = k - sh;
+        uint64_t pv = 0;
+        if (idx >= 0) {
+            uint64_t hi2 = idx < prodlen ? prod[idx] : 0;
+            if (bs) {
+                uint64_t lo2 = idx > 0 && idx - 1 < prodlen ? prod[idx - 1] : 0;
+                pv = (hi2 << bs) | (lo2 >> (64 - bs));
+            } else {
+                pv = hi2;
+            }
+        }
+        uint64_t d1 = uv - pv;
+        uint64_t b1 = d1 > uv;
+        uint64_t d2 = d1 - borrow;
+        borrow = b1 | (d2 > d1);
+        rb->limbs[k] = d2;
+    }
+    free(t);
+    /* while r ≥ P_j: r -= P_j, q̂ += 1  (at most three times) */
+    int32_t rl = n + 1;
+    while (rl > 0 && rb->limbs[rl - 1] == 0) rl--;
+    int guard = 0;
+    while (mag_cmp(rb->limbs, rl, d, n) >= 0) {
+        if (++guard > 5) { free(qb); free(rb); return 0; }  /* can't happen */
+        uint64_t bw = bn_sub_n(rb->limbs, rb->limbs, d, n);
+        if (rl > n) rb->limbs[n] -= bw;
+        while (rl > 0 && rb->limbs[rl - 1] == 0) rl--;
+        int32_t k = 0;
+        while (k < qlen && ++qb->limbs[k] == 0) k++;
+        if (k == qlen) qb->limbs[qlen++] = 1;
+    }
+    qb->size = qlen;
+    rb->size = rl;
+    *q_out = qb;
+    *r_out = rb;
+    return 1;
+}
+
+/* Divide-and-conquer decimal writer: split x by P_j (one Barrett division
+ * against the cached reciprocal, mag_divmod as fallback), head unpadded /
+ * tail zero-padded to exactly 18·2^j digits.  O(M(n)·log n) versus the base
+ * algorithm's O(n²/19). */
+#ifndef W_TO_S_DC_LIMBS
+#define W_TO_S_DC_LIMBS 24
+#endif
 static int32_t w_dec_write(const uint64_t *xl, int32_t xlen, char *dst, int32_t pad_width) {
     while (xlen > 0 && xl[xlen - 1] == 0) xlen--;
     if (xlen <= W_TO_S_DC_LIMBS) return w_dec_chunks_write(xl, xlen, dst, pad_width);
     int j;
     if (pad_width > 0) {
-        /* largest j with 18·2^(j+1) < pad_width keeps the split balanced and the
-         * head field ≥ 18·2^j ≥ 1. Cache is already materialized ≥ j: the parent
-         * split established level j_parent > j. */
+        /* largest j with 18·2^j < pad_width ≤ 18·2^(j+1): balanced split
+         * (head = pad - 18·2^j ≤ 18·2^j, and ≥ 1), which also keeps
+         * x < 10^pad ≤ P_j² — the Barrett division's input range.  Cache is
+         * already materialized ≥ j: the parent split established a level
+         * above j. */
         j = 0;
-        while ((36 << (j + 1)) <= pad_width && j + 1 <= w_p10c_top) j++;
+        while (((int64_t)18 << (j + 1)) < (int64_t)pad_width && j + 1 <= w_p10c_top) j++;
     } else {
         /* unpadded head: need the largest j with P_j ≤ x (q ≥ 1 keeps the head
          * free of leading zeros); grow the cache until P_top > x. */
@@ -2934,7 +11679,8 @@ static int32_t w_dec_write(const uint64_t *xl, int32_t xlen, char *dst, int32_t 
                           mag_cmp(w_p10c_limbs[j], w_p10c_len[j], xl, xlen) > 0))) j--;
     }
     WBigint *q = NULL, *r = NULL;
-    mag_divmod(xl, xlen, w_p10c_limbs[j], w_p10c_len[j], &q, &r);
+    if (!w_dec_divmod_pj(xl, xlen, j, &q, &r))
+        mag_divmod(xl, xlen, w_p10c_limbs[j], w_p10c_len[j], &q, &r);
     int32_t D = 18 << j;
     int32_t hd;
     if (pad_width > 0) {
@@ -15273,8 +24019,185 @@ WValue w_mul(WValue a, WValue b) {
 /* Parse a decimal integer string into an inline int or BigInt, promoting on
  * overflow. The compiler emits a call here for integer literals beyond the
  * i64 range, which a wrapped machine literal can't represent. Underscores are
- * tolerated; a leading +/- sign is honored. Accumulates via the promoting
- * w_mul/w_add, so the result is exact at any magnitude. */
+ * tolerated; a leading +/- sign is honored. Parses on raw limb buffers
+ * (base case + divide-and-conquer below), so the result is exact at any
+ * magnitude with no boxed intermediates. */
+/* SWAR digit helpers (little-endian byte order, which every supported
+ * target uses).  w_dec_digits8 tests whether all 8 bytes of a word are
+ * ASCII digits; w_dec_parse8 converts them (first byte most significant)
+ * in three multiply steps instead of an 8-deep dependency chain. */
+static inline uint64_t w_dec_load8(const char *p) {
+    uint64_t w;
+    memcpy(&w, p, 8);
+    return w;
+}
+static inline int w_dec_digits8(uint64_t w) {
+    return ((w & 0xF0F0F0F0F0F0F0F0ULL) |
+            (((w + 0x0606060606060606ULL) & 0xF0F0F0F0F0F0F0F0ULL) >> 4))
+           == 0x3333333333333333ULL;
+}
+static inline uint64_t w_dec_parse8(uint64_t w) {
+    w &= 0x0F0F0F0F0F0F0F0FULL;
+    w = (w * 2561ULL) >> 8;                              /* digit pairs */
+    w = ((w & 0x00FF00FF00FF00FFULL) * 6553601ULL) >> 16;    /* quads */
+    w = ((w & 0x0000FFFF0000FFFFULL) * 42949672960001ULL) >> 32;
+    return w;
+}
+
+/* Raw base case: base-10^19 Horner directly on a limb buffer, batching two
+ * 19-digit chunks per in-place pass (one mul_2 by the 2-limb constant 10^38
+ * instead of two mul_1 passes — half the passes and half the carry-chain
+ * latency), no boxed values and no allocation.  Returns the (trimmed) limb
+ * count. */
+static inline uint64_t w_dec_parse19(const char *p) {
+    /* 19 = 8 + 8 + 3, all in-bounds within the clean digit range */
+    uint64_t c = w_dec_parse8(w_dec_load8(p));
+    c = c * 100000000ULL + w_dec_parse8(w_dec_load8(p + 8));
+    return c * 1000ULL +
+           (uint64_t)(p[16] - '0') * 100ULL +
+           (uint64_t)(p[17] - '0') * 10ULL +
+           (uint64_t)(p[18] - '0');
+}
+static int32_t w_dec_parse_raw_base(const char *digits, size_t len, uint64_t *out) {
+    static const uint64_t P38_LO = (uint64_t)(((__uint128_t)W_DEC_P19 * W_DEC_P19));
+    static const uint64_t P38_HI = (uint64_t)(((__uint128_t)W_DEC_P19 * W_DEC_P19) >> 64);
+    if (len == 0) return 0;
+    size_t first = len % 19;
+    if (first == 0) first = 19;
+    uint64_t chunk = 0;
+    size_t i = 0;
+    for (; i < first; i++) chunk = chunk * 10ULL + (uint64_t)(digits[i] - '0');
+    int32_t n = 0;
+    if (chunk) out[n++] = chunk;
+    while (len - i >= 38) {
+        uint64_t c1 = w_dec_parse19(digits + i);
+        uint64_t c0 = w_dec_parse19(digits + i + 19);
+        i += 38;
+        /* out = out·10^38 + (c1·10^19 + c0), in place: carry pair
+         * (carry1:carry0) is the pending value at the next position. */
+        __uint128_t cc = (__uint128_t)c1 * W_DEC_P19 + c0;
+        uint64_t carry0 = (uint64_t)cc;
+        uint64_t carry1 = (uint64_t)(cc >> 64);
+        for (int32_t k = 0; k < n; k++) {
+            uint64_t x = out[k];
+            __uint128_t t0 = (__uint128_t)x * P38_LO + carry0;
+            __uint128_t t1 = (__uint128_t)x * P38_HI + (uint64_t)(t0 >> 64) + carry1;
+            out[k] = (uint64_t)t0;
+            carry0 = (uint64_t)t1;
+            carry1 = (uint64_t)(t1 >> 64);
+        }
+        if (carry0 || carry1) out[n++] = carry0;
+        if (carry1) out[n++] = carry1;
+    }
+    while (i < len) {
+        chunk = w_dec_parse19(digits + i);
+        i += 19;
+        /* out = out·10^19 + chunk: mul_1 by a constant with the chunk as the
+         * incoming carry. */
+        uint64_t carry = chunk;
+        for (int32_t k = 0; k < n; k++) {
+            __uint128_t t = (__uint128_t)out[k] * W_DEC_P19 + carry;
+            out[k] = (uint64_t)t;
+            carry = (uint64_t)(t >> 64);
+        }
+        if (carry) out[n++] = carry;
+    }
+    return n;
+}
+
+/* Divide-and-conquer decimal parse into a raw limb buffer: split so the LOW
+ * part is exactly 18·2^j digits (matching the writer's cached P_j =
+ * 10^(18·2^j) squaring ladder, w_p10c_*), then value = high·P_j + low — one
+ * subquadratic multiply per node into the destination buffer plus a raw
+ * add-in-place: O(M(n)·log n) versus Horner's O(n²/19), with no boxed
+ * intermediates.  `out` needs w_dec_limb_cap(len) limbs; returns the
+ * (trimmed) limb count.  The read-side twin of the D&C writer above. */
+#ifndef W_FROM_S_DC_DIGITS
+#define W_FROM_S_DC_DIGITS 576   /* = 18·32 digits ≈ 32 limbs, like W_TO_S_DC_LIMBS */
+#endif
+static inline int32_t w_dec_limb_cap(size_t len) {
+    /* limbs(10^len - 1) = floor(len·log2(10)/64) + 1; 3322/1000 > log2(10).
+     * +3 covers that, the combine's untrimmed hn+pl product, and its carry. */
+    return (int32_t)(len * 3322 / 64000) + 3;
+}
+static int w_p10c_grow(void);
+static int32_t w_dec_parse_raw(const char *digits, size_t len, uint64_t *out) {
+    if (len <= W_FROM_S_DC_DIGITS)
+        return w_dec_parse_raw_base(digits, len, out);
+    /* Largest cached-power width p = 18·2^j with p < len (then high = len-p
+     * <= p, keeping the recursion balanced within 2x). */
+    int j = 0;
+    size_t p = 18;
+    while ((p << 1) < len) { p <<= 1; j++; }
+    while (w_p10c_top < j) {
+        if (!w_p10c_grow())
+            return w_dec_parse_raw_base(digits, len, out);
+    }
+    int32_t cap = w_dec_limb_cap(p);
+    uint64_t *tmp = NULL;
+    if (w_p10c_five[j] || w_p10c_five_build(j))
+        /* tmp: high parse (≤ cap) | prod5: high·5^p (≤ cap + n5 + 1) */
+        tmp = (uint64_t *)malloc(
+            (2 * (size_t)cap + (size_t)w_p10c_five_len[j] + 1) * sizeof(uint64_t));
+    if (!tmp) {
+        /* No odd-part cache: fall back to the plain P_j multiply + add. */
+        tmp = (uint64_t *)malloc((size_t)cap * sizeof(uint64_t));
+        if (!tmp)
+            return w_dec_parse_raw_base(digits, len, out);
+        int32_t hn = w_dec_parse_raw(digits, len - p, tmp);
+        if (hn == 0) {                   /* all-zero high digits: low only */
+            free(tmp);
+            return w_dec_parse_raw(digits + (len - p), p, out);
+        }
+        int32_t pl = w_p10c_len[j];
+        bigint_mul_dispatch(out, tmp, hn, w_p10c_limbs[j], pl);
+        int32_t rn = hn + pl;
+        while (rn > 0 && out[rn - 1] == 0) rn--;
+        int32_t ln = w_dec_parse_raw(digits + (len - p), p, tmp);
+        uint64_t carry = ln ? bn_add_n(out, out, tmp, ln) : 0;
+        for (int32_t k = ln; carry && k < rn; k++)
+            carry = (++out[k] == 0);
+        if (carry) out[rn++] = 1;
+        free(tmp);
+        return rn;
+    }
+    /* low → out, high → tmp, prod5 = high·5^p → tmp+cap; then one fused
+     * pass computes out = (prod5 << p) + low (p = 18·2^j is also P_j's
+     * 2-adic valuation, so high·P_j = (high·5^p) << p). */
+    int32_t ln = w_dec_parse_raw(digits + (len - p), p, out);
+    int32_t hn = w_dec_parse_raw(digits, len - p, tmp);
+    if (hn == 0) {                       /* all-zero high digits: low only */
+        free(tmp);
+        return ln;
+    }
+    uint64_t *prod5 = tmp + cap;
+    int32_t n5 = w_p10c_five_len[j];
+    bigint_mul_dispatch(prod5, tmp, hn, w_p10c_five[j], n5);
+    int32_t p5len = hn + n5;
+    int32_t sh = (int32_t)(p >> 6);
+    int bs = (int)(p & 63);
+    int32_t rn = sh + p5len + 1;         /* + spill slot; trimmed below */
+    for (int32_t k = ln; k < sh; k++) out[k] = 0;
+    uint64_t carry = 0;
+    for (int32_t k = sh; k < rn; k++) {
+        int32_t idx = k - sh;
+        uint64_t hi2 = idx < p5len ? prod5[idx] : 0;
+        uint64_t pv;
+        if (bs) {
+            uint64_t lo2 = idx > 0 && idx - 1 < p5len ? prod5[idx - 1] : 0;
+            pv = (hi2 << bs) | (lo2 >> (64 - bs));
+        } else {
+            pv = hi2;
+        }
+        __uint128_t sum = (__uint128_t)pv + (k < ln ? out[k] : 0) + carry;
+        out[k] = (uint64_t)sum;
+        carry = (uint64_t)(sum >> 64);
+    }
+    while (rn > 0 && out[rn - 1] == 0) rn--;
+    free(tmp);
+    return rn;
+}
+
 WValue w_bigint_from_dec_str(WValue str) {
     const char *s = as_str(str);
     if (!s) return w_box_int(0);
@@ -15282,36 +24205,60 @@ WValue w_bigint_from_dec_str(WValue str) {
     int neg = 0;
     if (s[0] == '-') { neg = 1; i = 1; }
     else if (s[0] == '+') { i = 1; }
-    /* Base-10^18 chunking: fold digits into a u64 and do ONE bigint mul+add per
-     * 18 digits instead of per digit — 18× fewer O(len) bigint operations, so
-     * parsing drops from ~digits² to ~digits²/18 limb work. Underscores are
-     * skipped without counting; parsing still stops at the first non-digit.
-     * w_int (range-checked) boxes the chunk/scale — both can exceed 2^48. */
-    static const uint64_t POW10[19] = {
-        1ULL, 10ULL, 100ULL, 1000ULL, 10000ULL, 100000ULL, 1000000ULL,
-        10000000ULL, 100000000ULL, 1000000000ULL, 10000000000ULL,
-        100000000000ULL, 1000000000000ULL, 10000000000000ULL,
-        100000000000000ULL, 1000000000000000ULL, 10000000000000000ULL,
-        100000000000000000ULL, 1000000000000000000ULL
-    };
-    WValue acc = w_box_int(0);
-    uint64_t chunk = 0;
-    int clen = 0;
-    for (; s[i]; i++) {
-        char c = s[i];
-        if (c == '_') continue;
+    /* One scan finds the digit run (stop at the first non-digit) and whether
+     * it contains underscores; a clean run is parsed straight from the
+     * source with no copy.  The run is scanned a word at a time while clean
+     * (strlen bounds the loads), dropping to per-char handling at the first
+     * word that isn't all digits. */
+    size_t start = i;
+    size_t count = 0;
+    int has_sep = 0;
+    size_t k = start;
+    size_t limit = start + (strlen(s + start) & ~(size_t)7);
+    while (k < limit && w_dec_digits8(w_dec_load8(s + k))) k += 8;
+    count = k - start;
+    for (; s[k]; k++) {
+        char c = s[k];
+        if (c == '_') { has_sep = 1; continue; }
         if (c < '0' || c > '9') break;
-        chunk = chunk * 10ULL + (uint64_t)(c - '0');
-        if (++clen == 18) {
-            acc = w_add(w_mul(acc, w_int((int64_t)POW10[18])), w_int((int64_t)chunk));
-            chunk = 0;
-            clen = 0;
-        }
+        count++;
     }
-    if (clen > 0)
-        acc = w_add(w_mul(acc, w_int((int64_t)POW10[clen])), w_int((int64_t)chunk));
-    if (neg) acc = w_sub(w_box_int(0), acc);
-    return acc;
+    if (count == 0) return w_box_int(0);
+    if (count <= 18) {
+        /* Fits a u64 (10^18 < 2^63): stream it, skipping separators. */
+        uint64_t v = 0;
+        for (size_t k = start; s[k]; k++) {
+            char c = s[k];
+            if (c == '_') continue;
+            if (c < '0' || c > '9') break;
+            v = v * 10ULL + (uint64_t)(c - '0');
+        }
+        if (v <= (uint64_t)W_INT48_MAX)
+            return w_box_int(neg ? -(int64_t)v : (int64_t)v);
+        WBigint *r = bigint_alloc_raw(1);
+        r->limbs[0] = v;
+        r->size = neg ? -1 : 1;
+        return bigint_box(r);
+    }
+    const char *digits = s + start;
+    char *scratch = NULL;
+    if (has_sep) {
+        scratch = (char *)malloc(count);
+        if (!scratch) return w_box_int(0);
+        size_t d = 0;
+        for (size_t k = start; s[k] && d < count; k++) {
+            char c = s[k];
+            if (c == '_') continue;
+            if (c < '0' || c > '9') break;
+            scratch[d++] = c;
+        }
+        digits = scratch;
+    }
+    WBigint *r = bigint_alloc_raw(w_dec_limb_cap(count));
+    int32_t n = w_dec_parse_raw(digits, count, r->limbs);
+    free(scratch);
+    r->size = neg ? -n : n;
+    return bigint_normalize(r);
 }
 
 WValue w_div(WValue a, WValue b) {
@@ -15534,6 +24481,124 @@ static inline uint64_t negate_limb(uint64_t x, uint64_t *carry) {
     return t;
 }
 
+/*
+ * Both-positive, equal-width heap BigInts are the dominant boxed benchmark
+ * and generated-code shape.  Keep that case outside the sign/coercion kernel:
+ * besides avoiding two generic WValue decodes, selecting the operation before
+ * the limb loop lets Clang emit a straight vectorized AND/OR/XOR kernel.
+ */
+static inline __attribute__((always_inline))
+WValue bignum_bitwise_positive_equal(
+    char op, const WBigint *a, const WBigint *b, int32_t n) {
+    if (n == 1)
+        return bigint_finish_one_limb(
+            apply_bitop(op, a->limbs[0], b->limbs[0]), 0);
+
+    const uint64_t *restrict al = a->limbs;
+    const uint64_t *restrict bl = b->limbs;
+    WBigint *r = bigint_alloc_raw_hot(n);
+    uint64_t *restrict rl = r->limbs;
+    if (n == 2) {
+        switch (op) {
+        case '&':
+            r->limbs[0] = a->limbs[0] & b->limbs[0];
+            r->limbs[1] = a->limbs[1] & b->limbs[1];
+            break;
+        case '|':
+            r->limbs[0] = a->limbs[0] | b->limbs[0];
+            r->limbs[1] = a->limbs[1] | b->limbs[1];
+            r->size = 2;
+            return bigint_box(r);
+        default:
+            r->limbs[0] = a->limbs[0] ^ b->limbs[0];
+            r->limbs[1] = a->limbs[1] ^ b->limbs[1];
+            break;
+        }
+        r->size = 2;
+        if (r->limbs[1] != 0) return bigint_box(r);
+        return bigint_normalize(r);
+    }
+    if (n == 8) {
+#define BN_BITWISE_EIGHT(OPERATOR) do {                                   \
+        r->limbs[0] = a->limbs[0] OPERATOR b->limbs[0];                   \
+        r->limbs[1] = a->limbs[1] OPERATOR b->limbs[1];                   \
+        r->limbs[2] = a->limbs[2] OPERATOR b->limbs[2];                   \
+        r->limbs[3] = a->limbs[3] OPERATOR b->limbs[3];                   \
+        r->limbs[4] = a->limbs[4] OPERATOR b->limbs[4];                   \
+        r->limbs[5] = a->limbs[5] OPERATOR b->limbs[5];                   \
+        r->limbs[6] = a->limbs[6] OPERATOR b->limbs[6];                   \
+        r->limbs[7] = a->limbs[7] OPERATOR b->limbs[7];                   \
+    } while (0)
+        switch (op) {
+            case '&': BN_BITWISE_EIGHT(&); break;
+            case '|': BN_BITWISE_EIGHT(|); break;
+            default:  BN_BITWISE_EIGHT(^); break;
+        }
+#undef BN_BITWISE_EIGHT
+        r->size = 8;
+        if (op == '|' || r->limbs[7] != 0) return bigint_box(r);
+        return bigint_normalize(r);
+    }
+    if (n == 3) {
+        switch (op) {
+        case '&':
+            r->limbs[0] = a->limbs[0] & b->limbs[0];
+            r->limbs[1] = a->limbs[1] & b->limbs[1];
+            r->limbs[2] = a->limbs[2] & b->limbs[2];
+            break;
+        case '|':
+            r->limbs[0] = a->limbs[0] | b->limbs[0];
+            r->limbs[1] = a->limbs[1] | b->limbs[1];
+            r->limbs[2] = a->limbs[2] | b->limbs[2];
+            r->size = 3;
+            return bigint_box(r);
+        default:
+            r->limbs[0] = a->limbs[0] ^ b->limbs[0];
+            r->limbs[1] = a->limbs[1] ^ b->limbs[1];
+            r->limbs[2] = a->limbs[2] ^ b->limbs[2];
+            break;
+        }
+        r->size = 3;
+        if (r->limbs[2] != 0) return bigint_box(r);
+        return bigint_normalize(r);
+    }
+    if (n <= 4) {
+#define BN_BITWISE_SMALL(OPERATOR) do {                                   \
+        r->limbs[0] = a->limbs[0] OPERATOR b->limbs[0];                   \
+        r->limbs[1] = a->limbs[1] OPERATOR b->limbs[1];                   \
+        if (n > 2) r->limbs[2] = a->limbs[2] OPERATOR b->limbs[2];        \
+        if (n > 3) r->limbs[3] = a->limbs[3] OPERATOR b->limbs[3];        \
+    } while (0)
+        switch (op) {
+            case '&': BN_BITWISE_SMALL(&); break;
+            case '|': BN_BITWISE_SMALL(|); break;
+            default:  BN_BITWISE_SMALL(^); break;
+        }
+#undef BN_BITWISE_SMALL
+        r->size = n;
+        if (op == '|' || r->limbs[n - 1] != 0) return bigint_box(r);
+        return bigint_normalize(r);
+    }
+    switch (op) {
+        case '&':
+            for (int32_t i = 0; i < n; i++)
+                rl[i] = al[i] & bl[i];
+            break;
+        case '|':
+            for (int32_t i = 0; i < n; i++)
+                rl[i] = al[i] | bl[i];
+            r->size = n;
+            return bigint_box(r);  /* normalized inputs make the top OR nonzero */
+        default:
+            for (int32_t i = 0; i < n; i++)
+                rl[i] = al[i] ^ bl[i];
+            break;
+    }
+    r->size = n;
+    if (r->limbs[n - 1] != 0) return bigint_box(r);
+    return bigint_normalize(r);
+}
+
 /* Full-width, sign-aware (two's-complement) bitwise op for arbitrary-precision
  * integers, matching Python/CPython int semantics. `op` is '&', '|' or '^'.
  * Reached only when at least one operand is a bigint; the other may be an
@@ -15542,7 +24607,8 @@ static inline uint64_t negate_limb(uint64_t x, uint64_t *carry) {
  * each operand is materialized into an n-limb two's-complement view on the fly,
  * the op is applied limb-by-limb, and a negative result is converted back to
  * magnitude. */
-static WValue bignum_bitwise(char op, WValue a, WValue b) {
+static __attribute__((noinline))
+WValue bignum_bitwise_generic(char op, WValue a, WValue b) {
     a = bitwise_as_integer(a);
     b = bitwise_as_integer(b);
 
@@ -15553,6 +24619,44 @@ static WValue bignum_bitwise(char op, WValue a, WValue b) {
     int nega = (la < 0), negb = (lb < 0);
     int32_t nla = (la < 0) ? -la : la;
     int32_t nlb = (lb < 0) ? -lb : lb;
+
+    /* Positive magnitudes need neither sign-extension nor two's-complement
+     * conversion.  Keep this common path as a straight limb kernel; it also
+     * avoids allocating the otherwise mandatory extra sign limb. */
+    if (!nega && !negb) {
+        int32_t common = nla < nlb ? nla : nlb;
+        int32_t n = op == '&' ? common : (nla > nlb ? nla : nlb);
+        if (n == 0) return w_box_int(0);
+#ifndef BN_BITWISE_11_FAST
+#define BN_BITWISE_11_FAST 1
+#endif
+#if BN_BITWISE_11_FAST
+        if (n == 1)
+            return bigint_finish_one_limb(
+                apply_bitop(op, ma[0], mb[0]), 0);
+#endif
+        WBigint *r = bigint_alloc_raw(n);
+        for (int32_t i = 0; i < common; i++)
+            r->limbs[i] = apply_bitop(op, ma[i], mb[i]);
+        if (n > common) {
+            const uint64_t *longer = nla > nlb ? ma : mb;
+            memcpy(r->limbs + common, longer + common,
+                   (size_t)(n - common) * sizeof(uint64_t));
+        }
+        r->size = n;
+#ifndef BN_BITWISE_KNOWN_NORMALIZED
+#define BN_BITWISE_KNOWN_NORMALIZED 1
+#endif
+#if BN_BITWISE_KNOWN_NORMALIZED
+        /* A visibly nonzero published top limb proves the result is already
+         * normalized.  OR always takes this path for nonzero inputs; AND/XOR
+         * use it when their top operation did not cancel to zero. */
+        if (r->limbs[n - 1] != 0)
+            return bigint_finish_mag_add(r);
+#endif
+        return bigint_normalize(r);
+    }
+
     /* +1 limb guarantees room for the sign extension even when the top
      * magnitude limb has its high bit set. */
     int32_t n = (nla > nlb ? nla : nlb) + 1;
@@ -15561,7 +24665,7 @@ static WValue bignum_bitwise(char op, WValue a, WValue b) {
      * (nega/negb are 0/1, so the bitwise op equals the logical one). */
     int negr = (int)apply_bitop(op, (uint64_t)nega, (uint64_t)negb);
 
-    WBigint *r = bigint_alloc(n);
+    WBigint *r = bigint_alloc_raw(n);
     /* Running carries for the on-the-fly 2's-complement negation of each
      * negative operand and (when negr) of the result. Seeded to 1. */
     uint64_t carry_a = 1, carry_b = 1, carry_r = 1;
@@ -15580,36 +24684,577 @@ static WValue bignum_bitwise(char op, WValue a, WValue b) {
     return bigint_normalize(r);   /* trims leading zeros; re-boxes small if it fits i48 */
 }
 
+static inline __attribute__((always_inline))
+WValue bignum_bitwise(char op, WValue a, WValue b) {
+    if (w_is_bigint(a) && w_is_bigint(b)) {
+        WBigint *ba = w_as_bigint(a);
+        WBigint *bb = w_as_bigint(b);
+        if (ba->size == 1 && bb->size == 1)
+            return bigint_finish_one_limb(
+                apply_bitop(op, ba->limbs[0], bb->limbs[0]), 0);
+        if (ba->size > 1 && ba->size == bb->size)
+            return bignum_bitwise_positive_equal(op, ba, bb, ba->size);
+    }
+    return bignum_bitwise_generic(op, a, b);
+}
+
+/* Straight positive heap-BigInt kernels for the common sub-limb shift. */
+static inline __attribute__((always_inline))
+__attribute__((BN_HOT_SECTION, aligned(64)))
+WValue bignum_shl_positive_tiny(const WBigint *a, unsigned k) {
+    int32_t n = a->size;
+    const uint64_t *src = a->limbs;
+    uint64_t carry = src[n - 1] >> (64U - k);
+    if (n == 1) {
+        uint64_t low = src[0] << k;
+        if (!carry) return bigint_finish_one_limb(low, 0);
+        WBigint *r = bigint_alloc_raw_hot(2);
+        r->limbs[0] = low;
+        r->limbs[1] = carry;
+        r->size = 2;
+        return bigint_box(r);
+    }
+    int32_t outn = n + (carry != 0);
+    WBigint *r = bigint_alloc_raw_hot(outn);
+    r->limbs[0] = src[0] << k;
+    r->limbs[1] = (src[1] << k) | (src[0] >> (64U - k));
+    if (n > 2)
+        r->limbs[2] =
+            (src[2] << k) | (src[1] >> (64U - k));
+    if (n > 3)
+        r->limbs[3] =
+            (src[3] << k) | (src[2] >> (64U - k));
+    if (carry) r->limbs[n] = carry;
+    r->size = outn;
+    return bigint_box(r);
+}
+
+static inline __attribute__((always_inline))
+__attribute__((BN_HOT_SECTION, aligned(64)))
+WValue bignum_shr_positive_tiny(const WBigint *a, unsigned k) {
+    int32_t n = a->size;
+    const uint64_t *src = a->limbs;
+    if (n == 1)
+        return bigint_finish_one_limb(src[0] >> k, 0);
+    uint64_t top = src[n - 1] >> k;
+    int32_t outn = n - (top == 0);
+    WBigint *r = bigint_alloc_raw_hot(outn);
+    r->limbs[0] =
+        (src[0] >> k) | (src[1] << (64U - k));
+    if (n > 2)
+        r->limbs[1] =
+            (src[1] >> k) | (src[2] << (64U - k));
+    else if (outn == 2)
+        r->limbs[1] = top;
+    if (n > 3)
+        r->limbs[2] =
+            (src[2] >> k) | (src[3] << (64U - k));
+    else if (n == 3 && outn == 3)
+        r->limbs[2] = top;
+    if (n == 4 && outn == 4) r->limbs[3] = top;
+    r->size = outn;
+    if (outn > 1) return bigint_box(r);
+    return bigint_finish_mag_sub(r);
+}
+
+static inline __attribute__((always_inline))
+__attribute__((BN_HOT_SECTION, aligned(64)))
+WValue bignum_shl_positive_eight(const WBigint *a, unsigned k) {
+    const uint64_t *src = a->limbs;
+    uint64_t carry = src[7] >> (64U - k);
+    int32_t outn = 8 + (carry != 0);
+    WBigint *r = bigint_alloc_raw_hot_exact(carry ? 16U : 8U);
+#ifndef BN_SHIFT_NEON_8
+#define BN_SHIFT_NEON_8 1
+#endif
+#if defined(__aarch64__) && BN_SHIFT_NEON_8
+    uint64_t *dst = r->limbs;
+    dst[0] = src[0] << k;
+    int64x2_t left_count = vdupq_n_s64((int64_t)k);
+    int64x2_t right_count = vdupq_n_s64((int64_t)k - 64);
+    uint64x2_t previous = vld1q_u64(src);
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t pair = 0; pair < 3; pair++) {
+        uint64x2_t next = vld1q_u64(src + 2 * pair + 2);
+        uint64x2_t current = vextq_u64(previous, next, 1);
+        vst1q_u64(
+            dst + 2 * pair + 1,
+            vorrq_u64(
+                vshlq_u64(current, left_count),
+                vshlq_u64(previous, right_count)));
+        previous = next;
+    }
+    dst[7] = (src[7] << k) | (src[6] >> (64U - k));
+#else
+    r->limbs[0] = src[0] << k;
+    r->limbs[1] = (src[1] << k) | (src[0] >> (64U - k));
+    r->limbs[2] = (src[2] << k) | (src[1] >> (64U - k));
+    r->limbs[3] = (src[3] << k) | (src[2] >> (64U - k));
+    r->limbs[4] = (src[4] << k) | (src[3] >> (64U - k));
+    r->limbs[5] = (src[5] << k) | (src[4] >> (64U - k));
+    r->limbs[6] = (src[6] << k) | (src[5] >> (64U - k));
+    r->limbs[7] = (src[7] << k) | (src[6] >> (64U - k));
+#endif
+    if (carry) r->limbs[8] = carry;
+    r->size = outn;
+    return bigint_box(r);
+}
+
+static inline __attribute__((always_inline))
+__attribute__((BN_HOT_SECTION, aligned(64)))
+WValue bignum_shr_positive_eight(const WBigint *a, unsigned k) {
+    const uint64_t *src = a->limbs;
+    uint64_t top = src[7] >> k;
+    int32_t outn = 8 - (top == 0);
+    WBigint *r = bigint_alloc_raw_hot_exact(8);
+#if defined(__aarch64__) && BN_SHIFT_NEON_8
+    uint64_t *dst = r->limbs;
+    int64x2_t right_count = vdupq_n_s64(-(int64_t)k);
+    int64x2_t left_count = vdupq_n_s64(64 - (int64_t)k);
+    uint64x2_t current = vld1q_u64(src);
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t pair = 0; pair < 3; pair++) {
+        uint64x2_t next = vld1q_u64(src + 2 * pair + 2);
+        uint64x2_t higher = vextq_u64(current, next, 1);
+        vst1q_u64(
+            dst + 2 * pair,
+            vorrq_u64(
+                vshlq_u64(current, right_count),
+                vshlq_u64(higher, left_count)));
+        current = next;
+    }
+    dst[6] = (src[6] >> k) | (src[7] << (64U - k));
+#else
+    r->limbs[0] = (src[0] >> k) | (src[1] << (64U - k));
+    r->limbs[1] = (src[1] >> k) | (src[2] << (64U - k));
+    r->limbs[2] = (src[2] >> k) | (src[3] << (64U - k));
+    r->limbs[3] = (src[3] >> k) | (src[4] << (64U - k));
+    r->limbs[4] = (src[4] >> k) | (src[5] << (64U - k));
+    r->limbs[5] = (src[5] >> k) | (src[6] << (64U - k));
+    r->limbs[6] = (src[6] >> k) | (src[7] << (64U - k));
+#endif
+    if (outn == 8) r->limbs[7] = top;
+    r->size = outn;
+    return bigint_box(r);
+}
+
+#ifndef BN_SHIFT_FIXED_8
+#define BN_SHIFT_FIXED_8 1
+#endif
+#ifndef BN_SHIFT_FIXED_16
+#define BN_SHIFT_FIXED_16 1
+#endif
+#ifndef BN_SHIFT_FIXED_24
+#define BN_SHIFT_FIXED_24 1
+#endif
+#ifndef BN_SHIFT_NEON_16
+#define BN_SHIFT_NEON_16 1
+#endif
+#if BN_SHIFT_FIXED_16
+static inline __attribute__((always_inline))
+WValue bignum_shl_positive_16(const WBigint *a, unsigned k) {
+    const uint64_t *restrict src = a->limbs;
+    uint64_t carry = src[15] >> (64U - k);
+    int32_t outn = 16 + (carry != 0);
+    WBigint *r = bigint_alloc_raw_hot_exact(carry ? 32U : 16U);
+    uint64_t *restrict dst = r->limbs;
+    dst[0] = src[0] << k;
+#if defined(__aarch64__) && BN_SHIFT_NEON_16
+    int64x2_t left_count = vdupq_n_s64((int64_t)k);
+    int64x2_t right_count = vdupq_n_s64((int64_t)k - 64);
+    uint64x2_t previous = vld1q_u64(src);
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t pair = 0; pair < 7; pair++) {
+        uint64x2_t next = vld1q_u64(src + 2 * pair + 2);
+        uint64x2_t current = vextq_u64(previous, next, 1);
+        uint64x2_t shifted =
+            vorrq_u64(
+                vshlq_u64(current, left_count),
+                vshlq_u64(previous, right_count));
+        vst1q_u64(dst + 2 * pair + 1, shifted);
+        previous = next;
+    }
+    dst[15] = (src[15] << k) | (src[14] >> (64U - k));
+#else
+#if defined(__clang__)
+#pragma clang loop vectorize(enable) interleave(enable)
+#endif
+    for (int32_t i = 1; i < 16; i++)
+        dst[i] = (src[i] << k) | (src[i - 1] >> (64U - k));
+#endif
+    if (carry) dst[16] = carry;
+    r->size = outn;
+    return bigint_box(r);
+}
+
+static inline __attribute__((always_inline))
+WValue bignum_shr_positive_16(const WBigint *a, unsigned k) {
+    const uint64_t *restrict src = a->limbs;
+    uint64_t top = src[15] >> k;
+    int32_t outn = 16 - (top == 0);
+    WBigint *r = bigint_alloc_raw_hot_exact(16);
+    uint64_t *restrict dst = r->limbs;
+#if defined(__aarch64__) && BN_SHIFT_NEON_16
+    int64x2_t right_count = vdupq_n_s64(-(int64_t)k);
+    int64x2_t left_count = vdupq_n_s64(64 - (int64_t)k);
+    uint64x2_t current = vld1q_u64(src);
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t pair = 0; pair < 7; pair++) {
+        uint64x2_t next = vld1q_u64(src + 2 * pair + 2);
+        uint64x2_t higher = vextq_u64(current, next, 1);
+        uint64x2_t shifted =
+            vorrq_u64(
+                vshlq_u64(current, right_count),
+                vshlq_u64(higher, left_count));
+        vst1q_u64(dst + 2 * pair, shifted);
+        current = next;
+    }
+    dst[14] = (src[14] >> k) | (src[15] << (64U - k));
+#else
+#if defined(__clang__)
+#pragma clang loop vectorize(enable) interleave(enable)
+#endif
+    for (int32_t i = 0; i < 15; i++)
+        dst[i] = (src[i] >> k) | (src[i + 1] << (64U - k));
+#endif
+    if (outn == 16) dst[15] = top;
+    r->size = outn;
+    return bigint_box(r);
+}
+#endif
+
+#if BN_SHIFT_FIXED_24
+static inline __attribute__((always_inline))
+WValue bignum_shl_positive_24(const WBigint *a, unsigned k) {
+    const uint64_t *restrict src = a->limbs;
+    uint64_t carry = src[23] >> (64U - k);
+    int32_t outn = 24 + (carry != 0);
+    WBigint *r = bigint_alloc_raw_hot_exact(32);
+    uint64_t *restrict dst = r->limbs;
+    dst[0] = src[0] << k;
+#if defined(__aarch64__)
+    int64x2_t left_count = vdupq_n_s64((int64_t)k);
+    int64x2_t right_count = vdupq_n_s64((int64_t)k - 64);
+    uint64x2_t previous = vld1q_u64(src);
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t pair = 0; pair < 11; pair++) {
+        uint64x2_t next = vld1q_u64(src + 2 * pair + 2);
+        uint64x2_t current = vextq_u64(previous, next, 1);
+        vst1q_u64(
+            dst + 2 * pair + 1,
+            vorrq_u64(
+                vshlq_u64(current, left_count),
+                vshlq_u64(previous, right_count)));
+        previous = next;
+    }
+    dst[23] = (src[23] << k) | (src[22] >> (64U - k));
+#else
+    for (int32_t i = 1; i < 24; i++)
+        dst[i] =
+            (src[i] << k) | (src[i - 1] >> (64U - k));
+#endif
+    if (carry) dst[24] = carry;
+    r->size = outn;
+    return bigint_box(r);
+}
+
+static inline __attribute__((always_inline))
+WValue bignum_shr_positive_24(const WBigint *a, unsigned k) {
+    const uint64_t *restrict src = a->limbs;
+    uint64_t top = src[23] >> k;
+    int32_t outn = 24 - (top == 0);
+    WBigint *r = bigint_alloc_raw_hot_exact(32);
+    uint64_t *restrict dst = r->limbs;
+#if defined(__aarch64__)
+    int64x2_t right_count = vdupq_n_s64(-(int64_t)k);
+    int64x2_t left_count = vdupq_n_s64(64 - (int64_t)k);
+    uint64x2_t current = vld1q_u64(src);
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t pair = 0; pair < 11; pair++) {
+        uint64x2_t next = vld1q_u64(src + 2 * pair + 2);
+        uint64x2_t higher = vextq_u64(current, next, 1);
+        vst1q_u64(
+            dst + 2 * pair,
+            vorrq_u64(
+                vshlq_u64(current, right_count),
+                vshlq_u64(higher, left_count)));
+        current = next;
+    }
+    dst[22] = (src[22] >> k) | (src[23] << (64U - k));
+#else
+    for (int32_t i = 0; i < 23; i++)
+        dst[i] =
+            (src[i] >> k) | (src[i + 1] << (64U - k));
+#endif
+    if (outn == 24) dst[23] = top;
+    r->size = outn;
+    return bigint_box(r);
+}
+#endif
+
+#ifndef BN_SHIFT_POSITIVE_SMALL_INLINE
+#define BN_SHIFT_POSITIVE_SMALL_INLINE 1
+#endif
+#if BN_SHIFT_POSITIVE_SMALL_INLINE
+#define BN_SHIFT_SMALL_ATTR inline __attribute__((always_inline))
+#else
+#define BN_SHIFT_SMALL_ATTR
+#endif
+#ifndef BN_SHL_NEON_SMALL_MAX
+#define BN_SHL_NEON_SMALL_MAX 0
+#endif
+#ifndef BN_SHR_NEON_SMALL_MAX
+#define BN_SHR_NEON_SMALL_MAX 24
+#endif
+
+static BN_SHIFT_SMALL_ATTR
+WValue bignum_shl_positive_small(const WBigint *a, unsigned k) {
+    int32_t n = a->size;
+    const uint64_t *restrict src = a->limbs;
+    uint64_t carry = src[n - 1] >> (64U - k);
+    if (n == 1) {
+        uint64_t low = src[0] << k;
+        if (!carry) return bigint_finish_one_limb(low, 0);
+        WBigint *r = bigint_alloc_raw_hot(2);
+        r->limbs[0] = low;
+        r->limbs[1] = carry;
+        r->size = 2;
+        return bigint_box(r);
+    }
+    int32_t outn = n + (carry != 0);
+    WBigint *r = bigint_alloc_raw_hot(outn);
+    uint64_t *restrict dst = r->limbs;
+    dst[0] = src[0] << k;
+#if defined(__aarch64__) && BN_SHL_NEON_SMALL_MAX
+    if (n <= BN_SHL_NEON_SMALL_MAX) {
+        int64x2_t left_count = vdupq_n_s64((int64_t)k);
+        int64x2_t right_count = vdupq_n_s64((int64_t)k - 64);
+        int32_t i = 1;
+        for (; i + 1 < n; i += 2) {
+            uint64x2_t current = vld1q_u64(src + i);
+            uint64x2_t previous = vld1q_u64(src + i - 1);
+            vst1q_u64(
+                dst + i,
+                vorrq_u64(
+                    vshlq_u64(current, left_count),
+                    vshlq_u64(previous, right_count)));
+        }
+        if (i < n)
+            dst[i] =
+                (src[i] << k) | (src[i - 1] >> (64U - k));
+    } else {
+        for (int32_t i = 1; i < n; i++)
+            dst[i] =
+                (src[i] << k) | (src[i - 1] >> (64U - k));
+    }
+#else
+    /* Load/store page-offset hazard: a src load whose low 12 address bits
+     * match an in-flight dst store false-conflicts in the LSU (a heap-layout
+     * lottery that environment size can flip; measured up to 2.4x here).
+     * Stores trail loads in iteration order, so the dangerous (src-dst)
+     * offsets for the ascending and descending loops lie in opposite
+     * half-planes: walk the direction whose trailing stores sit on the safe
+     * side.  Both loops carry the previous limb in a register (one load per
+     * limb). */
+/* Which page-delta half-plane makes the DESCENDING walk the safe choice.
+ * Calibrated on Apple M: ascending false-matches when src sits just below
+ * dst mod 4096 (high delta), descending when just above (low delta). */
+#ifndef BN_SHIFT_DESCEND_ON_LOW
+#define BN_SHIFT_DESCEND_ON_LOW 1 /* calibrated on Apple M (see above) */
+#endif
+    uintptr_t page_delta =
+        ((uintptr_t)src - (uintptr_t)dst) & 4095u;
+    int descend = BN_SHIFT_DESCEND_ON_LOW
+        ? page_delta < 2048u : page_delta >= 2048u;
+    if (descend) {
+        uint64_t current = src[n - 1];
+        for (int32_t i = n - 1; i >= 1; i--) {
+            uint64_t previous = src[i - 1];
+            dst[i] = (current << k) | (previous >> (64U - k));
+            current = previous;
+        }
+    } else {
+        uint64_t previous = src[0];
+        for (int32_t i = 1; i < n; i++) {
+            uint64_t current = src[i];
+            dst[i] = (current << k) | (previous >> (64U - k));
+            previous = current;
+        }
+    }
+#endif
+    if (carry) dst[n] = carry;
+    r->size = outn;
+    return bigint_box(r);
+}
+
+static BN_SHIFT_SMALL_ATTR
+WValue bignum_shr_positive_small(const WBigint *a, unsigned k) {
+    int32_t n = a->size;
+    const uint64_t *restrict src = a->limbs;
+    if (n == 1)
+        return bigint_finish_one_limb(src[0] >> k, 0);
+    uint64_t top = src[n - 1] >> k;
+    int32_t outn = n - (top == 0);
+    WBigint *r = bigint_alloc_raw_hot(outn);
+    uint64_t *restrict dst = r->limbs;
+#if defined(__aarch64__) && BN_SHR_NEON_SMALL_MAX
+    if (n <= BN_SHR_NEON_SMALL_MAX) {
+        int64x2_t right_count = vdupq_n_s64(-(int64_t)k);
+        int64x2_t left_count = vdupq_n_s64(64 - (int64_t)k);
+        int32_t i = 0;
+        for (; i + 2 < n; i += 2) {
+            uint64x2_t current = vld1q_u64(src + i);
+            uint64x2_t higher = vld1q_u64(src + i + 1);
+            vst1q_u64(
+                dst + i,
+                vorrq_u64(
+                    vshlq_u64(current, right_count),
+                    vshlq_u64(higher, left_count)));
+        }
+        if (i + 1 < n)
+            dst[i] =
+                (src[i] >> k) | (src[i + 1] << (64U - k));
+    } else {
+        for (int32_t i = 0; i + 1 < n && i < outn; i++)
+            dst[i] =
+                (src[i] >> k) | (src[i + 1] << (64U - k));
+    }
+#else
+    /* Direction-selected walk; see bignum_shl_positive_small. */
+    uintptr_t page_delta =
+        ((uintptr_t)src - (uintptr_t)dst) & 4095u;
+    int descend = BN_SHIFT_DESCEND_ON_LOW
+        ? page_delta < 2048u : page_delta >= 2048u;
+    if (descend) {
+        uint64_t current = src[n - 1];
+        for (int32_t i = n - 2; i >= 0; i--) {
+            uint64_t lower = src[i];
+            dst[i] = (lower >> k) | (current << (64U - k));
+            current = lower;
+        }
+    } else {
+        uint64_t current = src[0];
+        for (int32_t i = 0; i + 1 < n; i++) {
+            uint64_t next = src[i + 1];
+            dst[i] = (current >> k) | (next << (64U - k));
+            current = next;
+        }
+    }
+#endif
+    if (outn == n) dst[n - 1] = top;
+    r->size = outn;
+    if (outn > 1) return bigint_box(r);
+    return bigint_finish_mag_sub(r);
+}
+
+#undef BN_SHIFT_SMALL_ATTR
+
+#ifndef BN_SHIFT_POSITIVE_SMALL
+#define BN_SHIFT_POSITIVE_SMALL 1
+#endif
+#ifndef BN_SHL_POSITIVE_SMALL_MAX
+#define BN_SHL_POSITIVE_SMALL_MAX 64
+#endif
+
 /* Logical left shift by `k` bits (k >= 0) of any integer WValue. Sign is
  * preserved (a << k == a * 2^k). */
-static WValue bignum_shl(WValue a, int64_t k) {
+static __attribute__((noinline))
+WValue bignum_shl_generic(WValue a, int64_t k) {
     uint64_t sbuf;
     int32_t la;
     const uint64_t *ma = integer_limbs(a, &sbuf, &la);
     if (la == 0) return w_box_int(0);
     int neg = la < 0;
     int32_t nmag = neg ? -la : la;
+#ifndef BN_SHIFT_1_FAST
+#define BN_SHIFT_1_FAST 1
+#endif
+#if BN_SHIFT_1_FAST
+    if (nmag == 1 && k < 64) {
+        __uint128_t shifted = (__uint128_t)ma[0] << (unsigned)k;
+        uint64_t low = (uint64_t)shifted;
+        uint64_t high = (uint64_t)(shifted >> 64);
+        if (high == 0) return bigint_finish_one_limb(low, neg);
+        WBigint *result = bigint_alloc_raw(2);
+        result->limbs[0] = low;
+        result->limbs[1] = high;
+        result->size = neg ? -2 : 2;
+        return bigint_box(result);
+    }
+#endif
     int64_t limb_shift = k >> 6;        /* k / 64 */
     int bit_shift = (int)(k & 63);      /* k % 64 */
     int64_t outn64 = (int64_t)nmag + limb_shift + 1;
     if (outn64 > (int64_t)INT32_MAX) { w_raise(w_string("shift result too large")); return W_NIL; }
     int32_t outn = (int32_t)outn64;
-    WBigint *r = bigint_alloc(outn);    /* calloc zeroes limbs */
+    WBigint *r = bigint_alloc_raw(outn);
+    for (int64_t j = 0; j < limb_shift; j++) r->limbs[j] = 0;
     if (bit_shift == 0) {
         memcpy(r->limbs + limb_shift, ma, (size_t)nmag * sizeof(uint64_t));
+        r->limbs[limb_shift + nmag] = 0;
     } else {
-        for (int32_t j = 0; j < nmag; j++) {
-            r->limbs[j + limb_shift]     |= ma[j] << bit_shift;
-            r->limbs[j + limb_shift + 1] |= ma[j] >> (64 - bit_shift);
-        }
+        r->limbs[limb_shift] = ma[0] << bit_shift;
+        for (int32_t j = 1; j < nmag; j++)
+            r->limbs[j + limb_shift] =
+                (ma[j] << bit_shift) | (ma[j - 1] >> (64 - bit_shift));
+        r->limbs[limb_shift + nmag] = ma[nmag - 1] >> (64 - bit_shift);
     }
-    r->size = neg ? -outn : outn;
+    int32_t result_n =
+        bit_shift != 0 && r->limbs[outn - 1] != 0 ? outn : outn - 1;
+    r->size = neg ? -result_n : result_n;
+#ifndef BN_SHL_KNOWN_NORMALIZED
+#define BN_SHL_KNOWN_NORMALIZED 1
+#endif
+#if BN_SHL_KNOWN_NORMALIZED
+    return bigint_finish_mag_add(r);
+#else
     return bigint_normalize(r);
+#endif
+}
+
+static inline __attribute__((always_inline))
+WValue bignum_shl(WValue a, int64_t k) {
+#if BN_SHIFT_POSITIVE_SMALL
+    if (k > 0 && k < 64 && w_is_bigint(a)) {
+        WBigint *big = w_as_bigint(a);
+        if (big->size == 1)
+            return bignum_shl_positive_small(big, (unsigned)k);
+        if (big->size > 1 && big->size <= 4)
+            return bignum_shl_positive_tiny(big, (unsigned)k);
+        if (BN_SHIFT_FIXED_8 && big->size == 8)
+            return bignum_shl_positive_eight(big, (unsigned)k);
+#if BN_SHIFT_FIXED_16
+        if (big->size == 16)
+            return bignum_shl_positive_16(big, (unsigned)k);
+#endif
+#if BN_SHIFT_FIXED_24
+        if (big->size == 24)
+            return bignum_shl_positive_24(big, (unsigned)k);
+#endif
+        if (big->size > 4 &&
+            big->size <= BN_SHL_POSITIVE_SMALL_MAX)
+            return bignum_shl_positive_small(big, (unsigned)k);
+    }
+#endif
+    return bignum_shl_generic(a, k);
 }
 
 /* Arithmetic right shift by `k` bits (k >= 0) of any integer WValue:
  * floor(a / 2^k). Negative values round toward -infinity, matching Python. */
-static WValue bignum_shr(WValue a, int64_t k) {
+static __attribute__((noinline))
+WValue bignum_shr_generic(WValue a, int64_t k) {
     uint64_t sbuf;
     int32_t la;
     const uint64_t *ma = integer_limbs(a, &sbuf, &la);
@@ -15623,6 +25268,15 @@ static WValue bignum_shr(WValue a, int64_t k) {
          * (floor rounds a negative toward -infinity). */
         return neg ? w_box_int(-1) : w_box_int(0);
     }
+#if BN_SHIFT_1_FAST
+    if (nmag == 1) {
+        uint64_t magnitude = ma[0] >> bit_shift;
+        if (neg && bit_shift &&
+            (ma[0] & ((1ULL << bit_shift) - 1ULL)) != 0)
+            magnitude++;
+        return bigint_finish_one_limb(magnitude, neg);
+    }
+#endif
     int32_t outn = nmag - (int32_t)limb_shift;
     /* For a negative value, detect whether any 1-bit is shifted out; if so the
      * magnitude must be rounded up by 1 (toward -infinity). */
@@ -15631,16 +25285,64 @@ static WValue bignum_shr(WValue a, int64_t k) {
         for (int32_t j = 0; j < limb_shift && !sticky; j++) if (ma[j] != 0) sticky = 1;
         if (!sticky && bit_shift && (ma[limb_shift] & ((1ULL << bit_shift) - 1))) sticky = 1;
     }
-    WBigint *r = bigint_alloc(outn + 1);   /* +1 for a possible rounding carry */
-    /* Copy the surviving limb window, then shift it down by the sub-limb part. */
-    memcpy(r->limbs, ma + limb_shift, (size_t)outn * sizeof(uint64_t));
-    if (bit_shift) bn_shrk(r->limbs, outn, bit_shift);
+    /* Only negative floor-rounding can grow the shifted magnitude.  Positive
+     * shifts request exactly the published width instead of crossing a
+     * power-of-two pool boundary (for example 64 -> 128 limbs). */
+    int32_t alloc_n = neg ? outn + 1 : outn;
+    WBigint *r = bigint_alloc_raw(alloc_n);
+    /* Write the shifted window directly.  Copy-then-bn_shrk traversed the
+     * magnitude twice and consumed twice the memory bandwidth. */
+    if (bit_shift == 0) {
+        memcpy(r->limbs, ma + limb_shift, (size_t)outn * sizeof(uint64_t));
+    } else {
+        const uint64_t *src = ma + limb_shift;
+        for (int32_t j = 0; j + 1 < outn; j++)
+            r->limbs[j] =
+                (src[j] >> bit_shift) | (src[j + 1] << (64 - bit_shift));
+        r->limbs[outn - 1] = src[outn - 1] >> bit_shift;
+    }
+    if (neg) r->limbs[outn] = 0;
     if (neg && sticky) {
         uint64_t one = 1;
         bn_addto(r->limbs, outn + 1, &one, 1);   /* round magnitude up (toward -inf) */
     }
-    r->size = neg ? -(outn + 1) : (outn + 1);
+    int32_t result_n =
+        neg && r->limbs[outn] != 0 ? outn + 1 : outn;
+    if (result_n == outn && r->limbs[outn - 1] == 0) result_n--;
+    r->size = neg ? -result_n : result_n;
+#ifndef BN_SHR_KNOWN_NORMALIZED
+#define BN_SHR_KNOWN_NORMALIZED 1
+#endif
+#if BN_SHR_KNOWN_NORMALIZED
+    if (result_n > 1) return bigint_box(r);
+    return bigint_finish_mag_sub(r);
+#else
     return bigint_normalize(r);
+#endif
+}
+
+static inline __attribute__((always_inline))
+WValue bignum_shr(WValue a, int64_t k) {
+#if BN_SHIFT_POSITIVE_SMALL
+    if (k > 0 && k < 64 && w_is_bigint(a)) {
+        WBigint *big = w_as_bigint(a);
+        if (big->size > 0 && big->size <= 4)
+            return bignum_shr_positive_tiny(big, (unsigned)k);
+        if (BN_SHIFT_FIXED_8 && big->size == 8)
+            return bignum_shr_positive_eight(big, (unsigned)k);
+#if BN_SHIFT_FIXED_16
+        if (big->size == 16)
+            return bignum_shr_positive_16(big, (unsigned)k);
+#endif
+#if BN_SHIFT_FIXED_24
+        if (big->size == 24)
+            return bignum_shr_positive_24(big, (unsigned)k);
+#endif
+        if (big->size > 4)
+            return bignum_shr_positive_small(big, (unsigned)k);
+    }
+#endif
+    return bignum_shr_generic(a, k);
 }
 
 /* Shared dispatcher for &, |, ^: native both-int fast path first (the hot
@@ -15689,7 +25391,119 @@ WValue w_bit_shr(WValue a, WValue b) {
     return bignum_shr(a, k);
 }
 
-WValue w_neg(WValue v) {
+/* Copy-class bigint negate/abs: fresh buffer + limb copy + sign twiddle, the
+ * same cost shape as mpz_neg/mpz_abs.  Magnitude is unchanged, so the
+ * source's normalization carries over.
+ *
+ * The copy is an explicit NEON block loop rather than memcpy: it avoids the
+ * libc size-dispatch (worth ~10% at 8-64 limbs) and slightly beats memcpy's
+ * sustained rate at 256-1024 limbs on Apple M.  Calibration (scratchpad
+ * copyprobe, all (src-dst)&4095 offsets x {64,256,1024} limbs) shows a
+ * single-load-stream copy is flat across page deltas — the 4K load/store
+ * false-match hazard needs two input streams — so unlike the shift kernels
+ * no direction selection is needed. */
+/* Widest limb count handled by the fused inline copy (hot-slot take + copy +
+ * box, no out-of-line call).  Above it, the call overhead is small next to
+ * the copy itself. */
+#ifndef BN_COPY_FUSED_MAX
+#define BN_COPY_FUSED_MAX 64
+#endif
+
+static WValue bigint_copy_signed_slow(WBigint *b, int32_t n, int negate) {
+    WBigint *r = bigint_alloc_raw_hot(n);
+    const uint64_t *restrict src = b->limbs;
+    uint64_t *restrict dst = r->limbs;
+#if defined(__aarch64__)
+    int32_t copy_n = n;
+#if BN_BIGINT_POWER2_CAP
+    /* Capacity classes above 8 limbs are multiples of 8 (powers of two, or
+     * 32-limb quanta in the hybrid config), so for 4 < n <= pool-max both
+     * allocations hold the next multiple of 8: overshoot kills the tail
+     * branches and leaves a pure 8-limb block loop.  Beyond the pool max,
+     * capacities are exact and the copy must honor n. */
+    if (n > 4 && n <= (int32_t)BN_BIGINT_POOL_MAX_CAP)
+        copy_n = (n + 7) & ~7;
+#endif
+    int32_t i = 0;
+    for (; i + 8 <= copy_n; i += 8) {
+        vst1q_u64(dst + i,     vld1q_u64(src + i));
+        vst1q_u64(dst + i + 2, vld1q_u64(src + i + 2));
+        vst1q_u64(dst + i + 4, vld1q_u64(src + i + 4));
+        vst1q_u64(dst + i + 6, vld1q_u64(src + i + 6));
+    }
+    for (; i + 2 <= copy_n; i += 2)
+        vst1q_u64(dst + i, vld1q_u64(src + i));
+    if (i < copy_n) dst[i] = src[i];
+#else
+    memcpy(dst, src, (size_t)n * sizeof(uint64_t));
+#endif
+    r->size = negate ? -b->size : n;
+    return bigint_box(r);
+}
+
+static inline __attribute__((always_inline))
+WValue bigint_copy_signed(WBigint *b, int negate) {
+    int32_t sz = b->size;
+    int32_t n = sz < 0 ? -sz : sz;
+    if (__builtin_expect(n == 0, 0)) return w_box_int(0);
+#if defined(__aarch64__) && BN_BIGINT_RECYCLE && BN_BIGINT_HOT_SLOT && \
+    BN_BIGINT_POWER2_CAP
+    /* Fused small path: hot-slot take + straight-line copy + box, no call.
+     * Every bigint's cap is a power-of-two capacity class (>= its limb
+     * count), on the source and the accepted hot buffer alike, so the copy
+     * may overshoot n up to the class width — limbs beyond `size` are inert
+     * and the reads/writes stay inside both allocations. */
+    if (n <= BN_COPY_FUSED_MAX) {
+        WBigintPool *pool = &bigint_pool_state;
+        WBigint *hot = pool->hot;
+        uint32_t hot_cap = pool->hot_cap;
+        if (__builtin_expect(
+                hot != NULL &&
+                hot_cap >= (uint32_t)n &&
+                (hot_cap == 1 || (hot_cap >> 1) < (uint32_t)n), 1)) {
+            pool->hot = NULL;
+            hot->type = W_TYPE_BIGINT;
+            const uint64_t *restrict src = b->limbs;
+            uint64_t *restrict dst = hot->limbs;
+            if (n == 1) {
+                dst[0] = src[0];
+            } else if (n == 2) {
+                vst1q_u64(dst, vld1q_u64(src));
+            } else if (n <= 4) {
+                vst1q_u64(dst,     vld1q_u64(src));
+                vst1q_u64(dst + 2, vld1q_u64(src + 2));
+            } else if (n <= 8) {
+                vst1q_u64(dst,     vld1q_u64(src));
+                vst1q_u64(dst + 2, vld1q_u64(src + 2));
+                vst1q_u64(dst + 4, vld1q_u64(src + 4));
+                vst1q_u64(dst + 6, vld1q_u64(src + 6));
+            } else {
+                /* 9..BN_COPY_FUSED_MAX: one compact 8-limb block loop kept
+                 * INLINE.  Both buffers hold at least the next multiple of 8
+                 * (their power-of-two / quantum capacity class), so the
+                 * overshoot needs no tail branch.  A loop rather than
+                 * straight-line rungs: the rungs' code size measurably
+                 * displaced the 1-8 limb cells via I-cache/BTB pressure. */
+                int32_t copy_n = (n + 7) & ~7;
+                for (int32_t i = 0; i < copy_n; i += 8) {
+                    vst1q_u64(dst + i,     vld1q_u64(src + i));
+                    vst1q_u64(dst + i + 2, vld1q_u64(src + i + 2));
+                    vst1q_u64(dst + i + 4, vld1q_u64(src + i + 4));
+                    vst1q_u64(dst + i + 6, vld1q_u64(src + i + 6));
+                }
+            }
+            hot->size = negate ? -sz : n;
+            return bigint_box(hot);
+        }
+    }
+#endif
+    return bigint_copy_signed_slow(b, n, negate);
+}
+
+/* Non-bigint arms of w_neg, out of line so the exported entry stays a thin
+ * shrink-wrappable fast path for the copy-class bigint case.  Inline-i48
+ * negation is normally emitted directly by codegen, not routed here. */
+static __attribute__((noinline)) WValue w_neg_generic(WValue v) {
     if (w_is_rational_any(v)) {
         WValue numerator, denominator;
         rational_parts(v, &numerator, &denominator);
@@ -15718,6 +25532,12 @@ WValue w_neg(WValue v) {
     if (w_is_instance(v))
         return w_method_call_fast(v, w_string("-@"), NULL, 0);
     return w_box_int_checked(-as_int(v));
+}
+
+WValue w_neg(WValue v) {
+    if (w_is_bigint(v))
+        return bigint_copy_signed(w_as_bigint(v), 1);
+    return w_neg_generic(v);
 }
 
 /* ---- Comparison ---- */
@@ -19172,9 +28992,113 @@ WValue w_math_ceil(WValue x)  { return w_float(ceil(w_math_to_double(x))); }
 WValue w_math_round(WValue x) { return w_float(round(w_math_to_double(x))); }
 WValue w_math_abs(WValue x)   { return w_float(fabs(w_math_to_double(x))); }
 
+/* Integer-only multiply for the pow ladder: mirrors w_mul's two integer
+ * rows (small×small stays inline with i48 overflow promotion, everything
+ * else goes to bigint_mul_any, which owns the pointer-equal squaring fast
+ * path).  The ladder is integer-pure by construction, so w_mul's
+ * decimal/currency/quantity/rational/complex dispatch preamble is dead
+ * weight on every step. */
+static inline WValue w_pow_int_mul(WValue x, WValue y) {
+    if (w_is_int(x) && w_is_int(y)) {
+        __int128 r = (__int128)w_as_int(x) * w_as_int(y);
+        if (r >= W_INT48_MIN && r <= W_INT48_MAX)
+            return w_box_int((int64_t)r);
+        return bigint_from_i128(r);
+    }
+    return bigint_mul_any(x, y);
+}
+
+/* Small-base integer pow kernel: base of 1..4 limbs, 2 <= e <= 34.  The
+ * result is bounded by n*e <= 136 limbs, so the whole left-to-right
+ * exponentiation runs in stack limb buffers through the raw magnitude
+ * dispatchers; the only heap touch is the final boxed result (the last
+ * squaring or base-multiply writes straight into its limbs).  This is
+ * where the boxed ladder's per-step dispatch + alloc dominated: a 1-limb
+ * a**5 spent ~85% of its time outside the multiply kernels. */
+/* Kernel gate: every intermediate (and the result) is bounded by n*e
+ * limbs, so one product cap sizes the stack buffers for any base/exponent
+ * mix — 48-limb a**5 and 1-limb a**272 both qualify. */
+#define W_POW_SMALL_MAX_RESULT 272
+
+/* Squaring front-end for the pow kernel: the 1..4-limb bodies are
+ * always_inline, so expanding them here skips the out-of-line dispatcher
+ * call that dominated 1-limb a**e. */
+static inline __attribute__((always_inline))
+void w_pow_small_sqr(uint64_t *out, const uint64_t *a, int32_t len) {
+    switch (len) {
+    case 1: bn_sqr1_inline(out, a); return;
+    case 2: bn_sqr2_inline(out, a); return;
+    case 3: bn_sqr3_inline(out, a); return;
+    case 4: bn_sqr4_inline(out, a); return;
+    default: bigint_sqr_dispatch(out, a, len); return;
+    }
+}
+
+static WValue w_pow_small_bigint(const uint64_t *bl, int32_t n,
+                                 int negative, uint64_t e) {
+    uint64_t bufs[2][W_POW_SMALL_MAX_RESULT + 8];
+    int which = 0;
+    /* The first squaring reads the base limbs in place; bl is only ever a
+     * read operand, so no initial copy into the ping-pong buffers. */
+    const uint64_t *cur = bl;
+    int32_t len = n;
+    WBigint *r = bigint_alloc_raw_hot((int32_t)((uint64_t)n * e));
+    int bit = 63 - __builtin_clzll(e);
+    while (--bit >= 0) {
+        int last = bit == 0;
+        int mul_step = (e >> bit) & 1;
+        uint64_t *out = (last && !mul_step) ? r->limbs : bufs[which];
+        w_pow_small_sqr(out, cur, len);
+        len *= 2;
+        while (len > 1 && out[len - 1] == 0) len--;
+        cur = out;
+        which ^= 1;
+        if (mul_step) {
+            uint64_t *mout = last ? r->limbs : bufs[which];
+            /* Base-first operand order: schoolbook's row loop runs over
+             * the first operand, so this is one mul_1/addmul_1 row per
+             * base limb instead of len one-limb rows.  n and len both fit
+             * far under the Karatsuba floor, so schoolbook is exactly what
+             * the full dispatcher would pick — call it directly. */
+            if (n == 1) {
+                mout[len] = bn_mul_1(mout, cur, len, bl[0]);
+            } else if (n <= BN_KARA_THRESHOLD) {
+                bigint_mul_schoolbook_into(mout, bl, n, cur, len);
+            } else {
+                bigint_mul_dispatch(mout, bl, n, cur, len);
+            }
+            len += n;
+            while (len > 1 && mout[len - 1] == 0) len--;
+            cur = mout;
+            which ^= 1;
+        }
+    }
+    /* Fresh, already-trimmed result: finish inline instead of paying the
+     * out-of-line bigint_normalize rescan. */
+    if (len == 1 && r->limbs[0] <= (uint64_t)W_INT48_MAX) {
+        int64_t value = (int64_t)r->limbs[0];
+        bigint_release(r);
+        return w_box_int((negative && (e & 1)) ? -value : value);
+    }
+    r->size = (negative && (e & 1)) ? -len : len;
+    return bigint_box(r);
+}
+
 WValue w_pow(WValue base, WValue ex) {
     if (w_is_int(ex)) {
         int64_t e = w_as_int(ex);
+        /* Integer bases are the hot boxed-pow shape and are tag-disjoint
+         * from the rational/quantity rows below, so dispatch them before
+         * those probes.  Bigint bases of 1..4 limbs with modest exponents
+         * take the dedicated stack-buffer kernel. */
+        if (e >= 2 && e <= W_POW_SMALL_MAX_RESULT && w_is_bigint(base)) {
+            WBigint *bb = w_as_bigint(base);
+            int32_t n = bb->size < 0 ? -bb->size : bb->size;
+            if (n >= 1 &&
+                (uint64_t)n * (uint64_t)e <= W_POW_SMALL_MAX_RESULT)
+                return w_pow_small_bigint(
+                    bb->limbs, n, bb->size < 0, (uint64_t)e);
+        }
         if (w_is_rational_any(base)) {
             WValue factor = base;
             uint64_t magnitude;
@@ -19206,15 +29130,42 @@ WValue w_pow(WValue base, WValue ex) {
             return result;
         }
         if (e >= 0 && w_is_integer_any(base)) {
-            WValue result = w_int(1);
+            if (e == 0) return w_int(1);
+            if (e == 1) return base;
+            /* (Small bigint bases already took the stack kernel above.) */
+            /* Binary ladder aliasing the result to the factor at the
+             * lowest set bit (values are immutable, so sharing is safe):
+             * this drops the historical result=1 seed and its initial
+             * 1×n multiply + allocation.  Dead intermediate generations
+             * go back to the bigint pool — nothing here escapes. */
+            uint64_t m = (uint64_t)e;
             WValue factor = base;
-            while (e > 0) {
-                if ((e & 1) != 0)
-                    result = w_mul(result, factor);
-                e >>= 1;
-                if (e > 0)
-                    factor = w_mul(factor, factor);
+            while ((m & 1) == 0) {
+                WValue next = w_pow_int_mul(factor, factor);
+                if (factor != base && w_is_bigint(factor))
+                    bigint_release_if_live(w_as_bigint(factor));
+                factor = next;
+                m >>= 1;
             }
+            WValue result = factor;
+            m >>= 1;
+            while (m > 0) {
+                WValue next = w_pow_int_mul(factor, factor);
+                if (factor != base && factor != result &&
+                    w_is_bigint(factor))
+                    bigint_release_if_live(w_as_bigint(factor));
+                factor = next;
+                if ((m & 1) != 0) {
+                    WValue merged = w_pow_int_mul(result, factor);
+                    if (result != base && result != factor &&
+                        w_is_bigint(result))
+                        bigint_release_if_live(w_as_bigint(result));
+                    result = merged;
+                }
+                m >>= 1;
+            }
+            if (factor != result && factor != base && w_is_bigint(factor))
+                bigint_release_if_live(w_as_bigint(factor));
             return result;
         }
     }
@@ -20314,6 +30265,8 @@ static WValue WN_negative_q = 0, WN_positive_q = 0;
 static WValue WN_prime_q = 0;
 static WValue WN_prime_12k_q = 0;
 static WValue WN_prime_30k_q = 0;
+static WValue WN_isqrt = 0;
+static WValue WN_neg_bang = 0, WN_abs_bang = 0;
 static WValue WN_downcase = 0, WN_upcase = 0, WN_swapcase = 0, WN_capitalize = 0;
 static WValue WN_ascii_q = 0, WN_valid_utf8_q = 0;
 static WValue WN_prepend = 0, WN_append = 0, WN_to_sym = 0, WN_infinite_q = 0;
@@ -20494,6 +30447,9 @@ static void w_init_method_names(void) {
     WN_prime_q       = w_string("prime?");
     WN_prime_12k_q   = w_string("prime_12k?");
     WN_prime_30k_q   = w_string("prime_30k?");
+    WN_isqrt         = w_string("isqrt");
+    WN_neg_bang      = w_string("neg!");
+    WN_abs_bang      = w_string("abs!");
     WN_ends_with_q  = w_string("ends_with?");
     WN_replace      = w_string("replace");
     WN_rindex       = w_string("rindex");
@@ -22478,10 +32434,21 @@ static WValue w_prime_bn_mulmod(WValue a, WValue b, WValue m) {
     return w_mod(w_mul(a, b), m);
 }
 
-/* Montgomery (CIOS) applies for moduli of 3..W_MONT_MAX_LIMBS limbs: below,
- * the k=2 register-Barrett path wins; above, Barrett's subquadratic (Karatsuba+)
- * multiplies beat CIOS's fixed 2k² schoolbook. */
-#define W_MONT_MAX_LIMBS 64
+/* Montgomery (CIOS) applies for odd one-limb and 3..W_MONT_MAX_LIMBS moduli:
+ * k=2 has a dedicated register-Barrett path; above the cap, Barrett's
+ * subquadratic multiplies beat CIOS's fixed 2k² schoolbook. */
+#ifndef W_MONT_MAX_LIMBS
+#define W_MONT_MAX_LIMBS 96
+#endif
+/* Keep CIOS storage independent of the policy cutoff so threshold tuning does
+ * not reshape this function (or every function laid out after it).  CIOS is
+ * used once during Montgomery context setup even when timed products use SOS. */
+#ifndef W_MONT_CIOS_CAPACITY
+#define W_MONT_CIOS_CAPACITY 128
+#endif
+#if W_MONT_MAX_LIMBS > W_MONT_CIOS_CAPACITY
+#error "W_MONT_MAX_LIMBS exceeds W_MONT_CIOS_CAPACITY"
+#endif
 
 typedef struct {
     WValue modulus;
@@ -22515,8 +32482,8 @@ static void w_mont_cios_mul(uint64_t *out,
                             const uint64_t *a, int32_t alen,
                             const uint64_t *b, int32_t blen,
                             const uint64_t *n, int32_t k, uint64_t nprime) {
-    uint64_t t[W_MONT_MAX_LIMBS + 2];
-    uint64_t bp[W_MONT_MAX_LIMBS];
+    uint64_t t[W_MONT_CIOS_CAPACITY + 2];
+    uint64_t bp[W_MONT_CIOS_CAPACITY];
     for (int32_t j = 0; j < k; j++) bp[j] = j < blen ? b[j] : 0;
     for (int32_t j = 0; j <= k + 1; j++) t[j] = 0;
     for (int32_t i = 0; i < k; i++) {
@@ -22573,15 +32540,11 @@ static void w_mont_cios_mul(uint64_t *out,
 #ifndef W_MONT_SOS_MIN
 #define W_MONT_SOS_MIN 8
 #endif
-static void w_mont_sos_mul(uint64_t *out, const uint64_t *a, int32_t alen,
-                           const uint64_t *b, int32_t blen,
-                           const uint64_t *n, int32_t k, uint64_t nprime,
-                           uint64_t *T) {
-    for (int32_t i = 0; i <= 2 * k + 1; i++) T[i] = 0;
-    int32_t at = alen, bt = blen;
-    while (at > 0 && a[at - 1] == 0) at--;
-    while (bt > 0 && b[bt - 1] == 0) bt--;
-    if (at && bt) bigint_mul_dispatch(T, a, at, b, bt);
+/* REDC half of SOS Montgomery: T[0..2k+1] holds the (zero-padded) product;
+ * k bn_addmul_1 rows clear the low limbs, then one conditional subtract.
+ * Shared by the multiply and squaring entries. */
+static void w_mont_sos_redc(uint64_t *out, uint64_t *T,
+                            const uint64_t *n, int32_t k, uint64_t nprime) {
     for (int32_t i = 0; i < k; i++) {
         uint64_t m = T[i] * nprime;                 /* makes T[i] vanish */
         uint64_t c = bn_addmul_1(T + i, n, k, m);
@@ -22597,6 +32560,428 @@ static void w_mont_sos_mul(uint64_t *out, const uint64_t *a, int32_t alen,
     }
     if (ge) bn_sub_n(out, T + k, n, k);
     else    for (int32_t j = 0; j < k; j++) out[j] = T[k + j];
+}
+static void w_mont_sos_mul(uint64_t *out, const uint64_t *a, int32_t alen,
+                           const uint64_t *b, int32_t blen,
+                           const uint64_t *n, int32_t k, uint64_t nprime,
+                           uint64_t *T) {
+    for (int32_t i = 0; i <= 2 * k + 1; i++) T[i] = 0;
+    int32_t at = alen, bt = blen;
+    while (at > 0 && a[at - 1] == 0) at--;
+    while (bt > 0 && b[bt - 1] == 0) bt--;
+    if (at && bt) bigint_mul_dispatch(T, a, at, b, bt);
+    w_mont_sos_redc(out, T, n, k, nprime);
+}
+/* Squaring twin: the product half rides bigint_sqr_dispatch (~0.7 of a
+ * same-size multiply); the REDC half is identical. Modular exponentiation is
+ * mostly squarings, so powmod collects most of the sqr/mul gap for free. */
+#ifndef W_MONT_SOS_SQR_MIN
+#define W_MONT_SOS_SQR_MIN W_MONT_SOS_MIN
+#endif
+static void w_mont_sos_sqr(uint64_t *out, const uint64_t *a, int32_t alen,
+                           const uint64_t *n, int32_t k, uint64_t nprime,
+                           uint64_t *T) {
+    for (int32_t i = 0; i <= 2 * k + 1; i++) T[i] = 0;
+    int32_t at = alen;
+    while (at > 0 && a[at - 1] == 0) at--;
+    if (at) bigint_sqr_dispatch(T, a, at);
+    w_mont_sos_redc(out, T, n, k, nprime);
+}
+
+/* ---- powmod's dual-row REDC (aarch64) ----
+ * REDC rows come in pairs: m = (T[i] + T[i+1]·B)·(−n⁻¹ mod B²) mod B², then
+ * one fused two-scalar pass T += m·n — half the T-row load/store traffic of
+ * two bn_addmul_1 rows and ~10% faster end to end. Only powmod uses it; the
+ * primality paths keep w_mont_sos_redc untouched. */
+#if defined(__aarch64__)
+#define W_POWM_REDC2 1
+/* rp[0..n) += up[0..n) · (v0 + v1·B); the leftover carry pair is added into
+ * rp[n], rp[n+1]; returns the final 0/1 carry beyond rp[n+1]. The carry pair
+ * obeys c ≤ v0 + v1·B + 1, so its high limb cannot wrap while v0 and v1 are
+ * not simultaneously all-ones — the caller guards that (rare) pair. */
+__attribute__((naked, noinline, aligned(64)))
+static uint64_t bn_powm_addmul_2(uint64_t *rp, const uint64_t *up, int32_t n,
+                                 uint64_t v0, uint64_t v1) {
+    __asm__(
+        "mov x5, xzr\n"            /* c0 */
+        "mov x6, xzr\n"            /* c1 */
+        "tbz w2, #0, 1f\n"
+        "ldr x7, [x1], #8\n"       /* odd-length prefix limb */
+        "mul x9, x7, x3\n"
+        "umulh x10, x7, x3\n"
+        "mul x11, x7, x4\n"
+        "umulh x12, x7, x4\n"
+        "ldr x8, [x0]\n"
+        "adds x9, x9, x8\n"
+        "adcs x5, x10, x11\n"
+        "adc  x6, x12, xzr\n"
+        "str x9, [x0], #8\n"
+        "1:\n"
+        "lsr w2, w2, #1\n"
+        "cbz w2, 3f\n"
+        "2:\n"
+        "ldp x7, x8, [x1], #16\n"
+        "mul   x9,  x7, x3\n"      /* l00 */
+        "umulh x10, x7, x3\n"      /* h00 */
+        "mul   x11, x7, x4\n"      /* l01 */
+        "umulh x12, x7, x4\n"      /* h01 */
+        "mul   x13, x8, x3\n"      /* l10 */
+        "umulh x14, x8, x3\n"      /* h10 */
+        "mul   x15, x8, x4\n"      /* l11 */
+        "umulh x16, x8, x4\n"      /* h11 */
+        /* carry-independent accumulation (not loop-carried) */
+        "adds  x10, x10, x11\n"    /* s1 = h00 + l01 */
+        "cset  x11, hs\n"
+        "adds  x10, x10, x13\n"    /* s1 += l10 */
+        "cinc  x11, x11, hs\n"     /* f12 ≤ 2 */
+        "adds  x12, x12, x14\n"    /* c0acc = h01 + h10 */
+        "cset  x14, hs\n"
+        "adds  x12, x12, x15\n"    /* c0acc += l11 */
+        "cinc  x14, x14, hs\n"
+        "adds  x12, x12, x11\n"    /* c0acc += f12 */
+        "cinc  x14, x14, hs\n"     /* f34 ≤ 3 */
+        "add   x16, x16, x14\n"    /* c1acc = h11 + f34 */
+        /* memory chain */
+        "ldp x7, x8, [x0]\n"
+        "adds  x9,  x9,  x7\n"     /* t0 = l00 + r0 */
+        "adcs  x10, x10, x8\n"     /* t1 = s1 + r1 */
+        "adcs  x12, x12, xzr\n"
+        "adc   x16, x16, xzr\n"
+        /* short loop-carried chain */
+        "adds  x9,  x9,  x5\n"     /* t0 += c0 */
+        "adcs  x10, x10, x6\n"     /* t1 += c1 */
+        "adcs  x5,  x12, xzr\n"    /* c0 out */
+        "adc   x6,  x16, xzr\n"    /* c1 out */
+        "stp x9, x10, [x0], #16\n"
+        "sub w2, w2, #1\n"
+        "cbnz w2, 2b\n"
+        "3:\n"
+        "ldp x7, x8, [x0]\n"
+        "adds x7, x7, x5\n"
+        "adcs x8, x8, x6\n"
+        "stp x7, x8, [x0]\n"
+        "cset x0, hs\n"
+        "ret\n"
+    );
+}
+
+/* Pairs-structure REDC (the shape GMP's redc_2 uses): two plain addmul_1
+ * rows per pair with the pair's carries PARKED in the just-retired low slots
+ * (row 0's carry sits at T[i+k] so row 1's addmul_1 absorbs it in-stream; the
+ * combined limb then moves down to retired slot T[i], carry-for-column i+k),
+ * and one final add_n folds the parked column T[0..k) into T[k..2k). No
+ * per-row carry-propagation walks, and every inner loop is the asm addmul_1
+ * kernel. Measures 15-25% faster than the dual-row asm at k = 8..128 and at
+ * parity with mpn_redc_2. The dual-row kernel keeps the k < 8 path where its
+ * single-call overhead wins. */
+static void w_powm_redc2_pairs(uint64_t *out, uint64_t *T, const uint64_t *n,
+                               int32_t k, uint64_t np0, uint64_t np1) {
+    int32_t i = 0;
+    for (; i + 2 <= k; i += 2) {
+        uint64_t t0 = T[i], t1 = T[i + 1];
+        __uint128_t p = (__uint128_t)t0 * np0;
+        uint64_t m0 = (uint64_t)p;
+        uint64_t m1 = (uint64_t)(p >> 64) + t0 * np1 + t1 * np0;
+        uint64_t saved = T[i + k];
+        T[i + k] = bn_addmul_1(T + i, n, k, m0);         /* park cy0 on top */
+        uint64_t cy1 = bn_addmul_1(T + i + 1, n, k, m1); /* absorbs parked cy0 */
+        T[i] = T[i + k];      /* retired slot i <- carry for column i+k */
+        T[i + 1] = cy1;       /* retired slot i+1 <- carry for column i+k+1 */
+        T[i + k] = saved;
+    }
+    if (i < k) {                                         /* odd k tail row */
+        uint64_t m = T[i] * np0;
+        T[i] = bn_addmul_1(T + i, n, k, m);
+    }
+    uint64_t cy = bn_add_n(out, T + k, T, k);
+    int ge = cy != 0;
+    if (!ge) {
+        ge = 1;
+        for (int32_t j = k - 1; j >= 0; j--)
+            if (out[j] != n[j]) { ge = out[j] > n[j]; break; }
+    }
+    if (ge) bn_sub_n(out, out, n, k);
+}
+
+static void w_powm_redc2(uint64_t *out, uint64_t *T, const uint64_t *n,
+                         int32_t k, uint64_t np0, uint64_t np1) {
+    if (k >= 8) { w_powm_redc2_pairs(out, T, n, k, np0, np1); return; }
+    int32_t i = 0;
+    for (; i + 1 < k; i += 2) {
+        uint64_t t0 = T[i], t1 = T[i + 1];
+        __uint128_t p = (__uint128_t)t0 * np0;
+        uint64_t m0 = (uint64_t)p;
+        uint64_t m1 = (uint64_t)(p >> 64) + t0 * np1 + t1 * np0;
+        if (__builtin_expect((m0 & m1) == ~0ULL, 0)) {
+            /* carry-pair invariant guard: split into two classic rows */
+            uint64_t c = bn_addmul_1(T + i, n, k, m0);
+            int32_t q = i + k;
+            while (c) { uint64_t old = T[q]; T[q] = old + c; c = (T[q] < old); q++; }
+            c = bn_addmul_1(T + i + 1, n, k, m1);
+            q = i + 1 + k;
+            while (c) { uint64_t old = T[q]; T[q] = old + c; c = (T[q] < old); q++; }
+            continue;
+        }
+        uint64_t c = bn_powm_addmul_2(T + i, n, k, m0, m1);
+        for (int32_t q = i + k + 2; c; q++) {
+            uint64_t old = T[q];
+            T[q] = old + c;
+            c = T[q] < old;
+        }
+    }
+    for (; i < k; i++) {                          /* odd k tail row */
+        uint64_t m = T[i] * np0;
+        uint64_t c = bn_addmul_1(T + i, n, k, m);
+        int32_t q = i + k;
+        while (c) { uint64_t old = T[q]; T[q] = old + c; c = (T[q] < old); q++; }
+    }
+    int ge = T[2 * k] != 0;
+    if (!ge) {
+        ge = 1;
+        for (int32_t j = k - 1; j >= 0; j--)
+            if (T[k + j] != n[j]) { ge = T[k + j] > n[j]; break; }
+    }
+    if (ge) bn_sub_n(out, T + k, n, k);
+    else    for (int32_t j = 0; j < k; j++) out[j] = T[k + j];
+}
+#else
+#define W_POWM_REDC2 0
+#endif
+
+/* ---- Subquadratic REDC for large k (mirrors GMP's redc_n idea) ----
+ * Row-based REDC costs k² limb-products no matter how good the row kernel;
+ * past ~96 limbs a mullo + one Toom multiply is cheaper: m = T_lo·(−n⁻¹ mod
+ * B^k) via a truncated (mullo) product, U = m·n through the mul dispatcher,
+ * then (T + U)/B^k = T_hi + U_hi + (T_lo ≠ 0) — the low halves cancel to
+ * B^k·c exactly, c = (T_lo ≠ 0). Result < 2n ⇒ one conditional subtract.
+ * Measured 0.73-0.77 of the pairs REDC at k = 96/128. The k-limb inverse is
+ * Newton-lifted once per powmod call (~2 mullos, amortized over ~64k rows). */
+#ifndef W_POWM_REDC_MULLO_MIN
+#define W_POWM_REDC_MULLO_MIN 96
+#endif
+#ifndef W_MULLO_BASE_MAX
+#define W_MULLO_BASE_MAX 32
+#endif
+/* out[0..n) = (a·b) mod B^n (basecase: truncated rows) */
+static void w_mullo_base(uint64_t *out, const uint64_t *a, const uint64_t *b,
+                         int32_t n) {
+    (void)bn_mul_1(out, b, n, a[0]);
+    for (int32_t i = 1; i < n; i++)
+        (void)bn_addmul_1(out + i, b, n - i, a[i]);
+}
+/* Karatsuba-style mullo: full a0·b0 + B^h·(mullo(a1,b0) + mullo(a0,b1)).
+ * scratch: ≥ n limbs at every level (h cross buffer + recursion). */
+static void w_mullo_n(uint64_t *out, const uint64_t *a, const uint64_t *b,
+                      int32_t n, uint64_t *scratch) {
+    if (n <= W_MULLO_BASE_MAX || (n & 1)) { w_mullo_base(out, a, b, n); return; }
+    int32_t h = n >> 1;
+    bigint_mul_dispatch(out, a, h, b, h);        /* a0·b0 full: out[0..n) */
+    uint64_t *cross = scratch;
+    w_mullo_n(cross, a + h, b, h, scratch + h);  /* a1·b0 mod B^h */
+    bn_addto(out + h, h, cross, h);
+    w_mullo_n(cross, a, b + h, h, scratch + h);  /* a0·b1 mod B^h */
+    bn_addto(out + h, h, cross, h);
+}
+/* Newton lift: mip[0..k) = −n⁻¹ mod B^k from the single-limb inverse.
+ * m' = m·(2 + n·m) mod B^{2s}. tmp: 3k limbs. */
+static void w_mont_ninv_k(uint64_t *mip, const uint64_t *n, int32_t k,
+                          uint64_t np0, uint64_t *tmp) {
+    uint64_t *t1 = tmp, *t2 = tmp + k, *sc = tmp + 2 * k;
+    mip[0] = np0;
+    int32_t cur = 1;
+    while (cur < k) {
+        int32_t next = 2 * cur <= k ? 2 * cur : k;
+        for (int32_t j = cur; j < next; j++) mip[j] = 0;
+        w_mullo_n(t1, n, mip, next, sc);         /* n·m mod B^next */
+        uint64_t c = 2;                          /* t1 = 2 + t1 */
+        for (int32_t j = 0; j < next && c; j++) {
+            uint64_t old = t1[j];
+            t1[j] = old + c;
+            c = t1[j] < old;
+        }
+        w_mullo_n(t2, mip, t1, next, sc);
+        for (int32_t j = 0; j < next; j++) mip[j] = t2[j];
+        cur = next;
+    }
+}
+/* T: 2k limbs (top slots zero). scratch: ≥ 4k+2 limbs. */
+static void w_powm_redc_mullo(uint64_t *out, uint64_t *T, const uint64_t *n,
+                              int32_t k, const uint64_t *mip,
+                              uint64_t *scratch) {
+    uint64_t *m = scratch;               /* k */
+    uint64_t *U = scratch + k;           /* 2k */
+    uint64_t *sc = scratch + 3 * k;      /* mullo scratch */
+    w_mullo_n(m, T, mip, k, sc);
+    bigint_mul_dispatch(U, m, k, n, k);
+    uint64_t c = 0;
+    for (int32_t j = 0; j < k; j++) if (T[j]) { c = 1; break; }
+    uint64_t cy = bn_add_n(out, T + k, U + k, k);
+    for (int32_t j = 0; c && j < k; j++) {
+        out[j]++;
+        c = out[j] == 0;
+    }
+    cy += c;
+    int ge = cy != 0;
+    if (!ge) {
+        ge = 1;
+        for (int32_t j = k - 1; j >= 0; j--)
+            if (out[j] != n[j]) { ge = out[j] > n[j]; break; }
+    }
+    if (ge) bn_sub_n(out, out, n, k);
+}
+
+/* Fully-inlined fixed-k modular squaring (k = 4, 8): the inline squaring
+ * kernel feeds a completely unrolled REDC on a stack-resident T — no calls,
+ * no dispatch, no row-function overhead. ~35% faster than the generic
+ * SOS route at k = 4. Preconditions: a < n (ladder invariant), odd n. */
+#define W_POWM_DEF_SQRREDC(K, SQRFN)                                         \
+static __attribute__((unused)) void w_powm_sqrredc##K(uint64_t *out, const uint64_t *a, \
+                              const uint64_t *n, uint64_t np0) {             \
+    uint64_t T[2 * K + 1];                                                   \
+    SQRFN(T, a);                                                             \
+    T[2 * K] = 0;                                                            \
+    uint64_t hi = 0;                     /* carry column above T[i+K] */     \
+    for (int32_t i = 0; i < K; i++) {                                        \
+        uint64_t m = T[i] * np0;                                             \
+        __uint128_t c = 0;                                                   \
+        for (int32_t j = 0; j < K; j++) {                                    \
+            __uint128_t s = (__uint128_t)m * n[j] + T[i + j] + (uint64_t)c;  \
+            T[i + j] = (uint64_t)s;                                          \
+            c = s >> 64;                                                     \
+        }                                                                    \
+        __uint128_t s2 = (__uint128_t)T[i + K] + (uint64_t)c + hi;           \
+        T[i + K] = (uint64_t)s2;                                             \
+        hi = (uint64_t)(s2 >> 64);                                           \
+    }                                                                        \
+    T[2 * K] += hi;                                                          \
+    int ge = T[2 * K] != 0;                                                  \
+    if (!ge) {                                                               \
+        ge = 1;                                                              \
+        for (int32_t j = K - 1; j >= 0; j--)                                 \
+            if (T[K + j] != n[j]) { ge = T[K + j] > n[j]; break; }           \
+    }                                                                        \
+    if (ge) {                                                                \
+        uint64_t bw = 0;                                                     \
+        for (int32_t j = 0; j < K; j++) {                                    \
+            uint64_t tv = T[K + j] - n[j];                                   \
+            uint64_t b1 = T[K + j] < n[j];                                   \
+            uint64_t d = tv - bw;                                            \
+            uint64_t b2 = tv < bw;                                           \
+            out[j] = d;                                                      \
+            bw = b1 | b2;                                                    \
+        }                                                                    \
+    } else {                                                                 \
+        for (int32_t j = 0; j < K; j++) out[j] = T[K + j];                   \
+    }                                                                        \
+}
+W_POWM_DEF_SQRREDC(4, bn_sqr4_inline)
+W_POWM_DEF_SQRREDC(8, bn_sqr8_inline)
+W_POWM_DEF_SQRREDC(16, bn_sqr16_split)
+
+/* Same shape for the window multiplies (both operands k-limb padded, < n). */
+#define W_POWM_DEF_MULREDC(K, MULFN)                                         \
+static __attribute__((unused)) void w_powm_mulredc##K(uint64_t *out, const uint64_t *a, \
+                              const uint64_t *b, const uint64_t *n,          \
+                              uint64_t np0) {                                \
+    uint64_t T[2 * K + 1];                                                   \
+    MULFN(T, a, b);                                                          \
+    T[2 * K] = 0;                                                            \
+    uint64_t hi = 0;                                                         \
+    for (int32_t i = 0; i < K; i++) {                                        \
+        uint64_t m = T[i] * np0;                                             \
+        __uint128_t c = 0;                                                   \
+        for (int32_t j = 0; j < K; j++) {                                    \
+            __uint128_t s = (__uint128_t)m * n[j] + T[i + j] + (uint64_t)c;  \
+            T[i + j] = (uint64_t)s;                                          \
+            c = s >> 64;                                                     \
+        }                                                                    \
+        __uint128_t s2 = (__uint128_t)T[i + K] + (uint64_t)c + hi;           \
+        T[i + K] = (uint64_t)s2;                                             \
+        hi = (uint64_t)(s2 >> 64);                                           \
+    }                                                                        \
+    T[2 * K] += hi;                                                          \
+    int ge = T[2 * K] != 0;                                                  \
+    if (!ge) {                                                               \
+        ge = 1;                                                              \
+        for (int32_t j = K - 1; j >= 0; j--)                                 \
+            if (T[K + j] != n[j]) { ge = T[K + j] > n[j]; break; }           \
+    }                                                                        \
+    if (ge) {                                                                \
+        uint64_t bw = 0;                                                     \
+        for (int32_t j = 0; j < K; j++) {                                    \
+            uint64_t tv = T[K + j] - n[j];                                   \
+            uint64_t b1 = T[K + j] < n[j];                                   \
+            uint64_t d = tv - bw;                                            \
+            uint64_t b2 = tv < bw;                                           \
+            out[j] = d;                                                      \
+            bw = b1 | b2;                                                    \
+        }                                                                    \
+    } else {                                                                 \
+        for (int32_t j = 0; j < K; j++) out[j] = T[K + j];                   \
+    }                                                                        \
+}
+W_POWM_DEF_MULREDC(4, bn_mul_eq4_inline)
+W_POWM_DEF_MULREDC(8, bn_mul_eq8_inline)
+
+/* powmod's Montgomery ops on raw k-limb rows (high-zero padded, no trims kept):
+ * product through the sqr/mul dispatchers, reduction through the dual-row
+ * REDC when available, else the shared single-row REDC. Only the top two
+ * product slots need pre-clearing — the dispatchers write 2·len limbs. */
+static inline void w_powm_mont_sqr(uint64_t *out, const uint64_t *a, int32_t k,
+                                   const uint64_t *n, uint64_t np0, uint64_t np1,
+                                   const uint64_t *mip, uint64_t *T) {
+    if (k == 4) { w_powm_sqrredc4(out, a, n, np0); return; }
+#if !W_POWM_REDC2
+    /* Without the pairs REDC the fused C kernels still win at 8/16. With it
+     * (aarch64), sqr_dispatch + pairs REDC beats them by 12% / 32%. */
+    if (k == 8) { w_powm_sqrredc8(out, a, n, np0); return; }
+    if (k == 16) { w_powm_sqrredc16(out, a, n, np0); return; }
+#endif
+    bigint_sqr_dispatch(T, a, k);       /* zero-padded rows: exact-k dispatch */
+    T[2 * k] = 0;
+    T[2 * k + 1] = 0;
+    if (mip) { w_powm_redc_mullo(out, T, n, k, mip, T + 2 * k + 2); return; }
+#if W_POWM_REDC2
+    w_powm_redc2(out, T, n, k, np0, np1);
+#else
+    (void)np1;
+    w_mont_sos_redc(out, T, n, k, np0);
+#endif
+}
+static inline void w_powm_mont_mul(uint64_t *out, const uint64_t *a,
+                                   const uint64_t *b, int32_t blen, int32_t k,
+                                   const uint64_t *n, uint64_t np0, uint64_t np1,
+                                   const uint64_t *mip, uint64_t *T) {
+    if (blen == k) {
+        if (k == 4) { w_powm_mulredc4(out, a, b, n, np0); return; }
+        if (k == 8) { w_powm_mulredc8(out, a, b, n, np0); return; }
+    }
+    int32_t bt = blen;
+    while (bt > 0 && b[bt - 1] == 0) bt--;
+    if (!bt) { for (int32_t j = 0; j < k; j++) out[j] = 0; return; }
+    bigint_mul_dispatch(T, a, k, b, bt);
+    for (int32_t j = k + bt; j <= 2 * k + 1; j++) T[j] = 0;
+    if (mip) { w_powm_redc_mullo(out, T, n, k, mip, T + 2 * k + 2); return; }
+#if W_POWM_REDC2
+    w_powm_redc2(out, T, n, k, np0, np1);
+#else
+    (void)np1;
+    w_mont_sos_redc(out, T, n, k, np0);
+#endif
+}
+/* Domain exit is REDC of the bare value (MontMul(x, 1)) — no multiply. */
+static void w_powm_mont_exit(uint64_t *out, const uint64_t *x, int32_t k,
+                             const uint64_t *n, uint64_t np0, uint64_t np1,
+                             const uint64_t *mip, uint64_t *T) {
+    for (int32_t j = 0; j < k; j++) T[j] = x[j];
+    for (int32_t j = k; j <= 2 * k + 1; j++) T[j] = 0;
+    if (mip) { w_powm_redc_mullo(out, T, n, k, mip, T + 2 * k + 2); return; }
+#if W_POWM_REDC2
+    w_powm_redc2(out, T, n, k, np0, np1);
+#else
+    (void)np1;
+    w_mont_sos_redc(out, T, n, k, np0);
+#endif
 }
 
 static WValue w_bigint_pow_base_limbs(int32_t limb_index) {
@@ -22631,7 +33016,11 @@ static WValue w_mag_low_limbs_value(WValue t, int32_t keep_limbs) {
 
 static int32_t w_prime_sub_mag_inplace(uint64_t *a, int32_t alen, const uint64_t *b, int32_t blen);
 
-static void w_prime_modctx_init(WPrimeModCtx *ctx, WValue modulus) {
+/* mont_cap: largest limb count admitted to Montgomery mode (0 forces Barrett —
+ * required for EVEN moduli, whose limb 0 has no inverse mod 2^64). The prime
+ * paths always pass W_MONT_MAX_LIMBS with an odd modulus; bigint_powmod_any
+ * passes 0 for even moduli and its own cap for odd ones. */
+static void w_prime_modctx_init_cap(WPrimeModCtx *ctx, WValue modulus, int32_t mont_cap) {
     uint64_t sm;
     int32_t mlen;
     const uint64_t *mlimbs = integer_limbs(modulus, &sm, &mlen);
@@ -22664,9 +33053,9 @@ static void w_prime_modctx_init(WPrimeModCtx *ctx, WValue modulus) {
         ctx->slotv[i] = bigint_box(ctx->slot[i]);
     }
 
-    /* Domain setup. Montgomery for 3..W_MONT_MAX_LIMBS limbs; k=2 keeps the
+    /* Domain setup. k=1 and 3..mont_cap use Montgomery; k=2 keeps the
      * register-Barrett fast path and large k keeps Barrett (subquadratic muls). */
-    ctx->mont = (mlen >= 3 && mlen <= W_MONT_MAX_LIMBS);
+    ctx->mont = mont_cap > 0 && (mlen == 1 || (mlen >= 3 && mlen <= mont_cap));
     ctx->nprime = 0;
     ctx->r2b = NULL;
     ctx->r2v = 0;
@@ -22698,6 +33087,10 @@ static void w_prime_modctx_init(WPrimeModCtx *ctx, WValue modulus) {
         for (int32_t i = 0; i < mlen; i++) ctx->nm1mb->limbs[i] = mlimbs[i];
         ctx->nm1mb->size = w_prime_sub_mag_inplace(ctx->nm1mb->limbs, mlen, &onelimb, 1);
     }
+}
+
+static void w_prime_modctx_init(WPrimeModCtx *ctx, WValue modulus) {
+    w_prime_modctx_init_cap(ctx, modulus, W_MONT_MAX_LIMBS);
 }
 
 static void w_prime_modctx_fini(WPrimeModCtx *ctx) {
@@ -23005,8 +33398,40 @@ static int32_t w_prime_modctx_mul_bigint_into(WBigint *dest, WPrimeModCtx *ctx,
         while (rl > 0 && dest->limbs[rl - 1] == 0) rl--;
         return rl;
     }
+    if (aabs == 0 || babs == 0) return 0;   /* zero divisors exist mod composite n */
     bigint_mul_dispatch(ctx->work, a->limbs, aabs, b->limbs, babs);
     int32_t plen = aabs + babs;
+    while (plen > 0 && ctx->work[plen - 1] == 0) plen--;
+    return w_prime_modctx_reduce_into(dest->limbs, ctx, ctx->work, plen);
+}
+
+/* Modular squaring into dest (capacity ≥ ctx->limbs+2): same contract as
+ * w_prime_modctx_mul_bigint_into with b == a, but the product half rides the
+ * squaring dispatcher where one exists (SOS Montgomery and Barrett modes; the
+ * k==2 register path and small-k CIOS interleave multiply and reduction, so
+ * they square via their multiply). dest may alias a. */
+static int32_t w_prime_modctx_sqr_bigint_into(WBigint *dest, WPrimeModCtx *ctx, WBigint *a) {
+    int32_t aabs = a->size < 0 ? -a->size : a->size;
+    if (ctx->limbs == 2)
+        return w_prime_modctx_mul2_into(dest->limbs, ctx, a->limbs, aabs, a->limbs, aabs);
+    int32_t k = ctx->limbs;
+    uint64_t smod; int32_t lmod;
+    const uint64_t *nlimbs = integer_limbs(ctx->modulus, &smod, &lmod);
+    if (ctx->mont) {
+        if (k >= W_MONT_SOS_SQR_MIN)
+            w_mont_sos_sqr(dest->limbs, a->limbs, aabs, nlimbs, k, ctx->nprime, ctx->work);
+        else
+            w_mont_cios_mul(dest->limbs, a->limbs, aabs, a->limbs, aabs,
+                            nlimbs, k, ctx->nprime);
+        int32_t rl = k;
+        while (rl > 0 && dest->limbs[rl - 1] == 0) rl--;
+        return rl;
+    }
+    int32_t at = aabs;
+    while (at > 0 && a->limbs[at - 1] == 0) at--;
+    if (at == 0) return 0;
+    bigint_sqr_dispatch(ctx->work, a->limbs, at);
+    int32_t plen = 2 * at;
     while (plen > 0 && ctx->work[plen - 1] == 0) plen--;
     return w_prime_modctx_reduce_into(dest->limbs, ctx, ctx->work, plen);
 }
@@ -23484,6 +33909,339 @@ static int w_prime_test_proth(WValue n) {
     return prime;
 }
 
+/* ---- General modular exponentiation (Int#modpow / Integer#pow(e, m)) ----
+ * pow(a, e, m) over int48/BigInt WValues, result in [0, |m|) — the same
+ * normalization GMP's mpz_powm uses. Reuses the WPrimeModCtx machinery above:
+ * Montgomery (CIOS below W_MONT_SOS_MIN limbs, SOS with asm-kernel product +
+ * addmul_1 REDC above) for odd moduli up to W_POWM_MONT_MAX_LIMBS limbs, the
+ * k==2 register-Barrett path, and subquadratic Barrett beyond the cap and for
+ * even moduli (which Montgomery cannot represent). The exponent is walked
+ * MSB→LSB straight off its limbs with a sliding window of GMP-powm widths;
+ * squarings ride w_prime_modctx_sqr_bigint_into. Unlike the primality users,
+ * powmod must leave the Montgomery domain: entry is MontMul(x, R²), exit is
+ * MontMul(x, 1) = x·R⁻¹. */
+#ifndef W_POWM_MONT_MAX_LIMBS
+#define W_POWM_MONT_MAX_LIMBS W_MONT_CIOS_CAPACITY
+#endif
+#if W_POWM_MONT_MAX_LIMBS > W_MONT_CIOS_CAPACITY
+#error "W_POWM_MONT_MAX_LIMBS exceeds W_MONT_CIOS_CAPACITY (ctx setup runs one CIOS mul)"
+#endif
+
+static inline int w_powm_bit(const uint64_t *l, int32_t len, int i) {
+    int32_t limb = i >> 6;
+    if (limb >= len) return 0;
+    return (int)((l[limb] >> (i & 63)) & 1ULL);
+}
+
+/* Bits lo..lo+cnt-1 of the magnitude (cnt ≤ 8), LSB-first packing. */
+static inline int w_powm_bits(const uint64_t *l, int32_t len, int lo, int cnt) {
+    int v = 0;
+    for (int j = cnt - 1; j >= 0; j--) v = (v << 1) | w_powm_bit(l, len, lo + j);
+    return v;
+}
+
+/* Sliding-window width for an eb-bit exponent — GMP powm's thresholds. */
+static int w_powm_window_bits(int eb) {
+    if (eb < 7) return 1;
+    if (eb < 25) return 2;
+    if (eb < 81) return 3;
+    if (eb < 241) return 4;
+    if (eb < 673) return 5;
+    if (eb < 1793) return 6;
+    if (eb < 4609) return 7;
+    return 8;
+}
+
+/* Single-limb odd modulus: pure register Montgomery (w_mont_mul), no ctx and
+ * no allocation. Sliding window over e's bits. Measured against the fixed-
+ * window + branchless-csel variants: the data-dependent conditional subtract
+ * and per-bit branch are effectively free on Apple cores, while csel adds two
+ * serial cycles to every multiply — sliding+branchy wins by ~35%. b0 is the
+ * base already reduced into [0, n). */
+static WValue w_powmod_u64_odd(uint64_t b0, const uint64_t *el, int32_t elen,
+                               int eb, uint64_t n) {
+    if (b0 == 0) return w_box_int(0);            /* eb ≥ 1 here */
+    uint64_t np = 0ULL - w_mont_ninv(n);
+    uint64_t one_m = (0ULL - n) % n;             /* R mod n (hardware u64 divide) */
+    uint64_t r2 = (n <= 0xFFFFFFFFULL)
+                    ? (one_m * one_m) % n
+                    : (uint64_t)(((__uint128_t)one_m * one_m) % n);
+    uint64_t bm = w_mont_mul(b0, r2, n, np);
+    int wbits = w_powm_window_bits(eb);
+    if (wbits > 6) wbits = 6;
+    int tcount = 1 << (wbits - 1);
+    uint64_t tbl[32];                            /* odd powers b^1, b^3, … */
+    tbl[0] = bm;
+    if (tcount > 1) {
+        uint64_t b2 = w_mont_mul(bm, bm, n, np);
+        for (int t = 1; t < tcount; t++) tbl[t] = w_mont_mul(tbl[t - 1], b2, n, np);
+    }
+    int i = eb - 1;
+    uint64_t x;
+    {
+        int l = i - wbits + 1;
+        if (l < 0) l = 0;
+        while (!w_powm_bit(el, elen, l)) l++;
+        x = tbl[w_powm_bits(el, elen, l, i - l + 1) >> 1];
+        i = l - 1;
+    }
+    while (i >= 0) {
+        if (!w_powm_bit(el, elen, i)) {
+            x = w_mont_mul(x, x, n, np);
+            i--;
+        } else {
+            int l = i - wbits + 1;
+            if (l < 0) l = 0;
+            while (!w_powm_bit(el, elen, l)) l++;
+            for (int s = i - l + 1; s > 0; s--) x = w_mont_mul(x, x, n, np);
+            x = w_mont_mul(x, tbl[w_powm_bits(el, elen, l, i - l + 1) >> 1], n, np);
+            i = l - 1;
+        }
+    }
+    uint64_t res = w_mont_mul(x, 1ULL, n, np);   /* domain exit: x·R⁻¹ */
+    if (res <= (uint64_t)W_INT48_MAX) return w_box_int((int64_t)res);
+    return bigint_from_u64(res);
+}
+
+WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
+    if (!w_is_integer_any(base) || !w_is_integer_any(expv) ||
+        !w_is_integer_any(modv))
+        die("modpow: integer operands required");
+    uint64_t sb, se, sm;
+    int32_t lb, le, lm;
+    const uint64_t *el = integer_limbs(expv, &se, &le);
+    if (le < 0) die("modpow: negative exponent");
+    const uint64_t *ml = integer_limbs(modv, &sm, &lm);
+    int32_t mabs = lm < 0 ? -lm : lm;
+    if (mabs == 0) die("modpow: modulus must be nonzero");
+    if (mabs == 1 && ml[0] == 1ULL) return w_box_int(0);   /* mod ±1 → 0 */
+    int eb = w_prime_mag_bit_length(el, le < 0 ? -le : le);
+    if (eb == 0) return w_box_int(1);                      /* e == 0 → 1 % m, |m| > 1 */
+
+    const uint64_t *bl = integer_limbs(base, &sb, &lb);
+    int bneg = lb < 0;
+    int32_t babs = bneg ? -lb : lb;
+
+    if (mabs == 1) {
+        uint64_t n = ml[0];
+        uint64_t b0 = babs == 1 ? (bl[0] < n ? bl[0] : bl[0] % n)
+                    : babs      ? mag_mod_single(bl, babs, n)
+                                : 0;
+        if (bneg && b0) b0 = n - b0;
+        if (n & 1ULL) return w_powmod_u64_odd(b0, el, le < 0 ? -le : le, eb, n);
+        /* even single-limb modulus: rare — fall through to the Barrett ctx */
+    }
+
+    /* Reduce the base into [0, |m|): truncated remainder (sign of the
+     * dividend), then one magnitude fold for negative bases. The general
+     * division keeps oversized bases out of Barrett's x < b^(2k) window. */
+    WValue r0v = base;
+    if (babs >= mabs) r0v = bigint_mod_any(base, modv);
+    uint64_t sr; int32_t lr;
+    const uint64_t *rl0 = integer_limbs(r0v, &sr, &lr);
+    int rneg = lr < 0;
+    int32_t rabs = rneg ? -lr : lr;
+    if (rabs == 0) return w_box_int(0);                    /* base ≡ 0, e ≥ 1 */
+
+    /* The ctx wants a positive modulus value; |m| drives everything else. */
+    WBigint *mposb = NULL;
+    WValue modmag = modv;
+    if (lm < 0) {
+        if (mabs == 1 && ml[0] <= (uint64_t)W_INT48_MAX) {
+            modmag = w_box_int((int64_t)ml[0]);
+        } else {
+            mposb = bigint_alloc(mabs);
+            for (int32_t i = 0; i < mabs; i++) mposb->limbs[i] = ml[i];
+            mposb->size = mabs;
+            modmag = bigint_box(mposb);
+        }
+    }
+
+    WPrimeModCtx ctx;
+    w_prime_modctx_init_cap(&ctx, modmag,
+                            (ml[0] & 1ULL) ? W_POWM_MONT_MAX_LIMBS : 0);
+    int32_t k = ctx.limbs, cap = k + 2;
+    int wbits = w_powm_window_bits(eb);
+    int32_t tcount = 1 << (wbits - 1);
+    int32_t elen = le < 0 ? -le : le;
+
+    if (ctx.mont && k >= 3) {
+        /* Fast Montgomery ladder on raw k-limb rows: direct dispatcher +
+         * REDC calls, no per-op WValue plumbing, dual-row REDC on aarch64,
+         * and a multiply-free REDC domain exit. */
+        uint64_t smod2; int32_t lmod2;
+        const uint64_t *nl = integer_limbs(ctx.modulus, &smod2, &lmod2);
+        uint64_t np0 = ctx.nprime, np1;
+        {   /* high limb of −n⁻¹ mod B² by one Newton lift of the B-inverse */
+            uint64_t i0 = w_mont_ninv(nl[0]);
+            __uint128_t ni = (__uint128_t)nl[0] * i0;
+            uint64_t e2 = (uint64_t)(ni >> 64) + nl[1] * i0;
+            np1 = ~(0ULL - i0 * e2);
+        }
+        uint64_t *T = ctx.work;                     /* 12k+16 ≥ 6k+4 limbs */
+        int use_mullo = k >= W_POWM_REDC_MULLO_MIN;
+        uint64_t *arena =
+            (uint64_t *)malloc(((size_t)tcount + 1 + (use_mullo ? 1 : 0)) *
+                               (size_t)k * sizeof(uint64_t));
+        uint64_t *x = arena + (size_t)tcount * (size_t)k;
+        const uint64_t *mip = NULL;
+        if (use_mullo) {                            /* Newton k-limb inverse */
+            uint64_t *mipw = arena + ((size_t)tcount + 1) * (size_t)k;
+            w_mont_ninv_k(mipw, nl, k, np0, T);     /* T free until ladder */
+            mip = mipw;
+        }
+#define W_POWM_ROW(t) (arena + (size_t)(t) * (size_t)k)
+        if (rneg) {                                 /* plain base = |m| − |r| */
+            for (int32_t j = 0; j < k; j++) x[j] = ml[j];
+            (void)w_prime_sub_mag_inplace(x, k, rl0, rabs);
+        } else {
+            for (int32_t j = 0; j < rabs; j++) x[j] = rl0[j];
+            for (int32_t j = rabs; j < k; j++) x[j] = 0;
+        }
+        {   /* domain entry: tbl[0] = MontMul(base, R²) = base·R */
+            WBigint *r2 = ctx.r2b;
+            int32_t r2l = r2->size < 0 ? -r2->size : r2->size;
+            w_powm_mont_mul(W_POWM_ROW(0), x, r2->limbs, r2l, k, nl, np0, np1, mip, T);
+        }
+        if (tcount > 1) {                           /* odd powers via base² (staged in x) */
+            w_powm_mont_sqr(x, W_POWM_ROW(0), k, nl, np0, np1, mip, T);
+            for (int32_t t = 1; t < tcount; t++)
+                w_powm_mont_mul(W_POWM_ROW(t), W_POWM_ROW(t - 1), x, k, k,
+                                nl, np0, np1, mip, T);
+        }
+        int i = eb - 1;
+        {
+            int l = i - wbits + 1;
+            if (l < 0) l = 0;
+            while (!w_powm_bit(el, elen, l)) l++;
+            const uint64_t *seed =
+                W_POWM_ROW(w_powm_bits(el, elen, l, i - l + 1) >> 1);
+            for (int32_t j = 0; j < k; j++) x[j] = seed[j];
+            i = l - 1;
+        }
+        while (i >= 0) {
+            if (!w_powm_bit(el, elen, i)) {
+                w_powm_mont_sqr(x, x, k, nl, np0, np1, mip, T);
+                i--;
+            } else {
+                int l = i - wbits + 1;
+                if (l < 0) l = 0;
+                while (!w_powm_bit(el, elen, l)) l++;
+                for (int s = i - l + 1; s > 0; s--)
+                    w_powm_mont_sqr(x, x, k, nl, np0, np1, mip, T);
+                w_powm_mont_mul(x, x,
+                                W_POWM_ROW(w_powm_bits(el, elen, l, i - l + 1) >> 1),
+                                k, k, nl, np0, np1, mip, T);
+                i = l - 1;
+            }
+        }
+        w_powm_mont_exit(x, x, k, nl, np0, np1, mip, T);
+#undef W_POWM_ROW
+        int32_t rl2 = k;
+        while (rl2 > 0 && x[rl2 - 1] == 0) rl2--;
+        WValue result;
+        if (rl2 == 0) {
+            result = w_box_int(0);
+        } else if (rl2 == 1 && x[0] <= (uint64_t)W_INT48_MAX) {
+            result = w_box_int((int64_t)x[0]);
+        } else {
+            WBigint *r = bigint_alloc(rl2);
+            for (int32_t j = 0; j < rl2; j++) r->limbs[j] = x[j];
+            r->size = rl2;
+            result = bigint_normalize(r);
+        }
+        free(arena);
+        w_prime_modctx_fini(&ctx);
+        if (mposb) free(mposb);
+        return result;
+    }
+
+    /* Stable working buffers: the result, one scratch (base², later the plain
+     * 1 for domain exit), and the odd-power window table b^1, b^3, …, all in
+     * the ctx's domain. */
+    WBigint *xbuf = bigint_alloc(cap);
+    WBigint *gg = bigint_alloc(cap);
+    WBigint *tbl[128];                                     /* wbits ≤ 8 */
+    for (int32_t t = 0; t < tcount; t++) tbl[t] = bigint_alloc(cap);
+
+    if (rneg) {                                            /* |m| − |r| */
+        for (int32_t i = 0; i < k; i++) xbuf->limbs[i] = ml[i];
+        xbuf->size = w_prime_sub_mag_inplace(xbuf->limbs, k, rl0, rabs);
+    } else {
+        for (int32_t i = 0; i < rabs; i++) xbuf->limbs[i] = rl0[i];
+        xbuf->size = rabs;
+    }
+
+    /* Domain entry: tbl[0] = base·R (Montgomery) or the plain base (Barrett). */
+    if (ctx.mont) {
+        tbl[0]->size = w_prime_modctx_mul_bigint_into(tbl[0], &ctx, xbuf, ctx.r2b);
+    } else {
+        int32_t bs = xbuf->size;
+        for (int32_t i = 0; i < bs; i++) tbl[0]->limbs[i] = xbuf->limbs[i];
+        tbl[0]->size = bs;
+    }
+    if (tcount > 1) {
+        gg->size = w_prime_modctx_sqr_bigint_into(gg, &ctx, tbl[0]);
+        for (int32_t t = 1; t < tcount; t++)
+            tbl[t]->size = w_prime_modctx_mul_bigint_into(tbl[t], &ctx, tbl[t - 1], gg);
+    }
+
+    /* Left-to-right sliding window over e's bits. The leading window seeds the
+     * accumulator directly (no initial 1·x multiply). */
+    int i = eb - 1;
+    {
+        int l = i - wbits + 1;
+        if (l < 0) l = 0;
+        while (!w_powm_bit(el, elen, l)) l++;
+        WBigint *seed = tbl[w_powm_bits(el, elen, l, i - l + 1) >> 1];
+        int32_t ss = seed->size;
+        for (int32_t j = 0; j < ss; j++) xbuf->limbs[j] = seed->limbs[j];
+        xbuf->size = ss;
+        i = l - 1;
+    }
+    while (i >= 0) {
+        if (!w_powm_bit(el, elen, i)) {
+            xbuf->size = w_prime_modctx_sqr_bigint_into(xbuf, &ctx, xbuf);
+            i--;
+        } else {
+            int l = i - wbits + 1;
+            if (l < 0) l = 0;
+            while (!w_powm_bit(el, elen, l)) l++;
+            for (int s = i - l + 1; s > 0; s--)
+                xbuf->size = w_prime_modctx_sqr_bigint_into(xbuf, &ctx, xbuf);
+            xbuf->size = w_prime_modctx_mul_bigint_into(
+                xbuf, &ctx, xbuf, tbl[w_powm_bits(el, elen, l, i - l + 1) >> 1]);
+            i = l - 1;
+        }
+    }
+
+    if (ctx.mont) {                                        /* exit: MontMul(x, 1) = x·R⁻¹ */
+        gg->limbs[0] = 1ULL;
+        gg->size = 1;
+        xbuf->size = w_prime_modctx_mul_bigint_into(xbuf, &ctx, xbuf, gg);
+    }
+
+    int32_t rl2 = xbuf->size;
+    WValue result;
+    if (rl2 == 0) {
+        result = w_box_int(0);
+    } else if (rl2 == 1 && xbuf->limbs[0] <= (uint64_t)W_INT48_MAX) {
+        result = w_box_int((int64_t)xbuf->limbs[0]);
+    } else {
+        WBigint *r = bigint_alloc(rl2);
+        for (int32_t j = 0; j < rl2; j++) r->limbs[j] = xbuf->limbs[j];
+        r->size = rl2;
+        result = bigint_normalize(r);
+    }
+
+    free(xbuf);
+    free(gg);
+    for (int32_t t = 0; t < tcount; t++) free(tbl[t]);
+    w_prime_modctx_fini(&ctx);
+    if (mposb) free(mposb);
+    return result;
+}
+
 /* If a positive bigint magnitude (nlimbs 64-bit little-endian limbs) equals
  * 2^p - 1, return p; otherwise 0. A Mersenne magnitude is all-ones in binary:
  * every limb below the top is ~0, and the top limb is itself all-ones, which
@@ -23596,12 +34354,13 @@ static void w_mersenne_acc_sub_mod(uint64_t *acc, int32_t nlimbs, uint64_t top_m
     }
 }
 
-static WValue w_mersenne_reduce_product_limbs(const uint64_t *prod, int32_t prod_len, uint64_t p) {
+static WValue w_mersenne_reduce_product_limbs(const uint64_t *prod, int32_t prod_len,
+                                               uint64_t p, uint64_t *acc) {
     int32_t nlimbs = (int32_t)((p + 63ULL) >> 6);
     uint32_t bit_shift = (uint32_t)(p & 63ULL);
     uint32_t top_bits = bit_shift == 0 ? 64U : bit_shift;
     uint64_t top_mask = top_bits == 64U ? ~0ULL : ((1ULL << top_bits) - 1ULL);
-    uint64_t *acc = (uint64_t *)calloc((size_t)nlimbs + 1, sizeof(uint64_t));
+    memset(acc, 0, ((size_t)nlimbs + 1) * sizeof(uint64_t));
 
     int32_t low_len = prod_len < nlimbs ? prod_len : nlimbs;
     for (int32_t i = 0; i < low_len; i++) acc[i] = prod[i];
@@ -23621,10 +34380,74 @@ static WValue w_mersenne_reduce_product_limbs(const uint64_t *prod, int32_t prod
     w_mersenne_fold_overflow(acc, nlimbs, top_bits, top_mask);
     if (w_mersenne_acc_ge_mod(acc, nlimbs, top_mask)) w_mersenne_acc_sub_mod(acc, nlimbs, top_mask);
 
-    WBigint *r = bigint_alloc(nlimbs);
+    WBigint *r = bigint_alloc_raw(nlimbs);
     for (int32_t i = 0; i < nlimbs; i++) r->limbs[i] = acc[i];
     r->size = nlimbs;
-    free(acc);
+    return bigint_normalize(r);
+}
+
+/* Lucas-Lehmer repeatedly squares residues of one fixed size.  Keep its
+ * product and reduction accumulator in a separate TLS arena: the square
+ * dispatcher already owns bn_ws for recursive scratch, so sharing that arena
+ * would allow a growth realloc to invalidate the product pointer. */
+static __thread uint64_t *w_mersenne_ws = NULL;
+static __thread size_t w_mersenne_ws_cap = 0;
+static uint64_t *w_mersenne_ws_get(size_t limbs) {
+    if (limbs > w_mersenne_ws_cap) {
+        free(w_mersenne_ws);
+        size_t ncap = limbs + limbs / 2 + 16;
+        w_mersenne_ws = (uint64_t *)malloc(ncap * sizeof(uint64_t));
+        w_mersenne_ws_cap = w_mersenne_ws ? ncap : 0;
+    }
+    return w_mersenne_ws;
+}
+
+/* The p=127 Lucas-Lehmer residue is exactly two limbs.  Avoid routing its
+ * four-word square through the generic dispatcher and fold loops: construct
+ * the square directly, then use 2^127 == 1 for a two-word end-around carry. */
+static WValue w_mersenne_square_mod_127(const uint64_t *a, int32_t n) {
+    uint64_t a0 = a[0];
+    uint64_t a1 = n > 1 ? a[1] : 0;
+    __uint128_t z0 = (__uint128_t)a0 * a0;
+    __uint128_t z1 = (__uint128_t)a0 * a1;
+    __uint128_t z2 = (__uint128_t)a1 * a1;
+    uint64_t z1lo = (uint64_t)z1;
+    uint64_t z1hi = (uint64_t)(z1 >> 64);
+    uint64_t cross0 = z1lo << 1;
+    uint64_t cross1 = (z1hi << 1) | (z1lo >> 63);
+    uint64_t cross2 = z1hi >> 63;
+    __uint128_t t1 = (__uint128_t)(uint64_t)(z0 >> 64) + cross0;
+    __uint128_t t2 = (__uint128_t)(uint64_t)z2 + cross1 + (uint64_t)(t1 >> 64);
+    uint64_t p0 = (uint64_t)z0;
+    uint64_t p1 = (uint64_t)t1;
+    uint64_t p2 = (uint64_t)t2;
+    uint64_t p3 = (uint64_t)(z2 >> 64) + cross2 + (uint64_t)(t2 >> 64);
+
+    const uint64_t mask = UINT64_MAX >> 1;
+    uint64_t r0 = p0;
+    uint64_t r1 = p1 & mask;
+    uint64_t h0 = (p1 >> 63) | (p2 << 1);
+    uint64_t h1 = (p2 >> 63) | (p3 << 1);
+    __uint128_t s0 = (__uint128_t)r0 + h0;
+    __uint128_t s1 = (__uint128_t)r1 + h1 + (uint64_t)(s0 >> 64);
+    r0 = (uint64_t)s0;
+    r1 = (uint64_t)s1;
+    uint64_t overflow = r1 >> 63;
+    r1 &= mask;
+    while (overflow) {
+        uint64_t old = r0;
+        r0 += overflow;
+        uint64_t carry = r0 < old;
+        r1 += carry;
+        overflow = r1 >> 63;
+        r1 &= mask;
+    }
+    if (r0 == UINT64_MAX && r1 == mask)
+        return w_box_int(0);
+    WBigint *r = bigint_alloc_raw(2);
+    r->limbs[0] = r0;
+    r->limbs[1] = r1;
+    r->size = r1 ? 2 : (r0 ? 1 : 0);
     return bigint_normalize(r);
 }
 
@@ -23633,11 +34456,22 @@ static WValue w_mersenne_square_mod(WValue s, uint64_t p) {
     int32_t slen;
     const uint64_t *slimbs = integer_limbs(s, &scratch, &slen);
     if (slen <= 0) return w_box_int(0);
+    if (p == 127 && slen <= 2)
+        return w_mersenne_square_mod_127(slimbs, slen);
 
-    uint64_t *prod = (uint64_t *)calloc((size_t)(2 * slen + 4), sizeof(uint64_t));
+    int32_t nlimbs = (int32_t)((p + 63ULL) >> 6);
+    size_t prod_limbs = (size_t)(2 * slen);
+    size_t total = prod_limbs + (size_t)nlimbs + 1;
+    uint64_t *prod = w_mersenne_ws_get(total);
+    int owned = 0;
+    if (!prod) {
+        prod = (uint64_t *)malloc(total * sizeof(uint64_t));
+        owned = 1;
+    }
+    if (!prod) die("out of memory");
     bigint_sqr_dispatch(prod, slimbs, slen);
-    WValue r = w_mersenne_reduce_product_limbs(prod, 2 * slen, p);
-    free(prod);
+    WValue r = w_mersenne_reduce_product_limbs(prod, 2 * slen, p, prod + prod_limbs);
+    if (owned) free(prod);
     return r;
 }
 
@@ -23843,13 +34677,26 @@ static WValue w_ic_int_gcd(WValue r, WValue *a, int c) {
     WValue arg = a[0];
     if (w_is_int(r) && w_is_int(arg)) {
         int64_t v = w_as_int(r);
-        int64_t x = v < 0 ? -v : v;
         int64_t y = w_as_int(arg);
-        y = y < 0 ? -y : y;
-        while (y != 0) { int64_t t = y; y = x % y; x = t; }
-        return w_int(x);
+        uint64_t xm = (uint64_t)(v < 0 ? -v : v);
+        uint64_t ym = (uint64_t)(y < 0 ? -y : y);
+        if (xm && ym)
+            return w_int((int64_t)bn_gcd_u64_nonzero(xm, ym));
+        return w_int((int64_t)(xm | ym));
     }
     return bigint_gcd_any(r, arg);
+}
+/* Int#isqrt — bodyless in core/numeric/int.w like prime?; both receiver
+ * shapes route here (inline int via the 0xFA table, BigInt via its own). */
+static WValue w_ic_int_isqrt(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    int64_t n = w_as_int(r);
+    if (n < 0) die("Int#isqrt: negative receiver");
+    return w_int((int64_t)bn_isqrt_u128((unsigned __int128)(uint64_t)n));
+}
+static WValue w_ic_bigint_isqrt(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    return bigint_isqrt_any(r);
 }
 
 /* Bigint builtin wrappers (Phase 7+m) */
@@ -23869,39 +34716,112 @@ static WValue w_ic_bigint_abs(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     WBigint *b = w_as_bigint(r);
     if (b->size >= 0) return r;
-    int32_t n = -b->size;
-    WBigint *pos = bigint_alloc(n);
-    for (int32_t i = 0; i < n; i++) pos->limbs[i] = b->limbs[i];
-    pos->size = n;
-    return bigint_normalize(pos);
+    return bigint_copy_signed(b, 0);
+}
+
+/*
+ * In-place sign mutation (the `!` convention: Array#sort!, Hash#merge!).
+ * A heap BigInt's magnitude lives in its limb array and its sign in the
+ * `size` field, so negation and absolute value are a single field write —
+ * O(1) regardless of width, with no allocation, no copy, and no pool
+ * traffic.  The copying forms (`-x`, `abs`) remain the default; these are
+ * for the cases where the caller owns the value and wants the mutation,
+ * exactly like sorting an array in place.
+ *
+ * Only heap BigInts can be mutated: an inline i48 integer is a value, not
+ * a reference, so there is nothing to mutate.  The bang methods therefore
+ * live on BigInt and return the receiver.
+ */
+static WValue w_ic_bigint_neg_bang(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    WBigint *b = w_as_bigint(r);
+    b->size = -b->size;
+    return r;
+}
+static WValue w_ic_bigint_abs_bang(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    WBigint *b = w_as_bigint(r);
+    if (b->size < 0) b->size = -b->size;
+    return r;
+}
+
+/* ccall-able wrappers so the interpreter reaches the same mutation the
+ * compiled IC path uses (bodyless BigInt#neg!/#abs! delegate here). */
+WValue w_bigint_neg_bang(WValue v) {
+    if (!w_is_bigint(v)) die("neg! requires a BigInt receiver");
+    return w_ic_bigint_neg_bang(v, NULL, 0);
+}
+WValue w_bigint_abs_bang(WValue v) {
+    if (!w_is_bigint(v)) die("abs! requires a BigInt receiver");
+    return w_ic_bigint_abs_bang(v, NULL, 0);
 }
 static WValue w_ic_integer_lcm(WValue r, WValue *a, int c) {
     if (c < 1) die("lcm requires 1 argument");
     WValue arg = a[0];
     if (!w_is_integer_any(arg)) die("lcm requires an integer argument");
 
-    int r_zero = w_is_int(r) ? w_as_int(r) == 0 : w_as_bigint(r)->size == 0;
-    int a_zero = w_is_int(arg) ? w_as_int(arg) == 0 : w_as_bigint(arg)->size == 0;
-    if (r_zero || a_zero) return w_int(0);
+    uint64_t r_scratch, a_scratch;
+    int32_t rlen, alen;
+    const uint64_t *rl = integer_limbs(r, &r_scratch, &rlen);
+    const uint64_t *al = integer_limbs(arg, &a_scratch, &alen);
+    int32_t r_abs = rlen < 0 ? -rlen : rlen;
+    int32_t a_abs = alen < 0 ? -alen : alen;
+    if (r_abs == 0 || a_abs == 0) return w_int(0);
 
-    WValue product;
-    if (w_is_int(r) && w_is_int(arg)) {
-        int64_t rv = w_as_int(r), av = w_as_int(arg);
-        uint64_t x = rv < 0 ? 0ULL - (uint64_t)rv : (uint64_t)rv;
-        uint64_t y = av < 0 ? 0ULL - (uint64_t)av : (uint64_t)av;
-        while (y != 0) { uint64_t t = y; y = x % y; x = t; }
-        /* x divides rv exactly. Dividing first avoids a needless BigInt
-         * intermediate whenever the operands share a large factor. */
-        WValue quotient = w_box_int_checked(rv / (int64_t)x);
-        product = w_mul(quotient, arg);
-    } else {
-        WValue divisor = bigint_gcd_any(r, arg);
-        product = w_mul(w_div(r, divisor), arg);
+    if (r_abs == 1 && a_abs == 1) {
+        /* One-limb pair (inline ints and 1-limb bigints alike): u64 gcd,
+         * exact u64 quotient, one 128-bit product, boxed once.  lcm is
+         * nonnegative by definition, so magnitudes suffice. */
+        uint64_t x = rl[0], y = al[0];
+        uint64_t g = bn_gcd_u64_nonzero(x, y);
+        /* Random operands are usually coprime; skip the udiv then. */
+        uint64_t q = g == 1 ? x : x / g;
+        __uint128_t product = (__uint128_t)q * y;
+        uint64_t low = (uint64_t)product;
+        uint64_t high = (uint64_t)(product >> 64);
+        if (high == 0) return bigint_finish_one_limb(low, 0);
+        WBigint *out = bigint_alloc_raw_hot(2);
+        out->limbs[0] = low;
+        out->limbs[1] = high;
+        out->size = 2;
+        return bigint_box(out);
     }
 
-    if (w_is_int(product))
-        return w_as_int(product) < 0 ? w_sub(w_int(0), product) : product;
-    return w_ic_bigint_abs(product, NULL, 0);
+    /* Multi-limb: |r/g * arg| through the direct bigint entries — the
+     * w_div/w_mul dispatch preambles are integer-dead weight here.  Random
+     * operands are almost always coprime, so a unit gcd skips the exact
+     * division (and its allocation) entirely. */
+    WValue divisor = bigint_gcd_any(r, arg);
+    WValue product;
+    if (w_is_int(divisor) && w_as_int(divisor) == 1) {
+        product = bigint_mul_any(r, arg);
+    } else {
+        /* g | r by construction: Jebelean exact division (about half the
+         * cost of bigint_div_any's estimate-and-correct path). */
+        uint64_t d_scratch;
+        int32_t dlen;
+        const uint64_t *dl = integer_limbs(divisor, &d_scratch, &dlen);
+        int32_t d_abs = dlen < 0 ? -dlen : dlen;
+        WValue quotient = bigint_finish_mag_sub(
+            mag_divexact(rl, r_abs, dl, d_abs));
+        product = bigint_mul_any(quotient, arg);
+        if (divisor != r && divisor != arg && divisor != quotient &&
+            divisor != product && w_is_bigint(divisor))
+            bigint_release_if_live(w_as_bigint(divisor));
+        if (quotient != r && quotient != arg && quotient != product &&
+            w_is_bigint(quotient))
+            bigint_release_if_live(w_as_bigint(quotient));
+    }
+
+    if (w_is_int(product)) {
+        int64_t pv = w_as_int(product);
+        return pv < 0 ? w_box_int(-pv) : product;
+    }
+    /* The product is a fresh allocation no one else references; flip the
+     * sign in place instead of taking w_ic_bigint_abs's positive copy. */
+    WBigint *pb = w_as_bigint(product);
+    if (pb->size < 0) pb->size = -pb->size;
+    return product;
 }
 static WValue w_ic_bigint_prev(WValue r, WValue *a, int c) { (void)a; (void)c; return w_sub(r, w_int(1)); }
 static WValue w_ic_bigint_succ(WValue r, WValue *a, int c) { (void)a; (void)c; return w_add(r, w_int(1)); }
@@ -24343,6 +35263,7 @@ static WICEntry w_ic_int_table[] = {
     {0, w_ic_int_prime_12k_q},
     {0, w_ic_int_prime_30k_q},
     {0, w_ic_integer_lcm},
+    {0, w_ic_int_isqrt},
     {0, NULL}
 };
 
@@ -24419,6 +35340,9 @@ static WICEntry w_ic_bigint_table[] = {    /* Phase 7+m */
     {0, w_ic_bigint_succ},
     {0, w_ic_bigint_succ},      /* next */
     {0, w_ic_integer_lcm},
+    {0, w_ic_bigint_isqrt},
+    {0, w_ic_bigint_neg_bang},
+    {0, w_ic_bigint_abs_bang},
     {0, NULL}
 };
 
@@ -24876,6 +35800,7 @@ static void w_init_ic_tables(void) {
     w_ic_int_table[9].name    = WN_prime_12k_q;
     w_ic_int_table[10].name   = WN_prime_30k_q;
     /* Slot 11 (lcm) retired to core/integer.w; bigint receivers keep theirs. */
+    w_ic_int_table[12].name   = WN_isqrt;
     /* BigArray (Phase 7+p) */
     w_ic_big_array_table[0].name   = WN_idx;
     w_ic_big_array_table[1].name   = WN_idxset;
@@ -24928,6 +35853,9 @@ static void w_init_ic_tables(void) {
     w_ic_bigint_table[6].name  = WN_succ;
     w_ic_bigint_table[7].name  = WN_next;
     w_ic_bigint_table[8].name  = WN_lcm;
+    w_ic_bigint_table[9].name  = WN_isqrt;
+    w_ic_bigint_table[10].name = WN_neg_bang;
+    w_ic_bigint_table[11].name = WN_abs_bang;
     /* Channel (Phase 7+m) */
     w_ic_channel_table[0].name = WN_send;
     w_ic_channel_table[1].name = WN_close;
@@ -24983,7 +35911,7 @@ static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WV
         case 0x05: table = w_ic_hash_table;    break;  /* Phase 7+l */
         case 0x01: table = w_ic_atomic_table;  break;  /* Phase 7+m */
         case 0x84: table = w_ic_channel_table; break;  /* 0x80 | W_TYPE_CHANNEL=4 */
-        case 0x8B: table = w_ic_bigint_table;  break;  /* 0x80 | W_TYPE_BIGINT=11 */
+        case W_SUBTAG_BIGINT: table = w_ic_bigint_table; break;
         case 0x0B: table = w_ic_strbuf_table;  break;  /* W_SUBTAG_STRBUF (Phase 7+n) */
         case 0x07: table = w_ic_regex_table;   break;  /* W_SUBTAG_REGEX (Phase 7+o) */
         case 0x81: table = w_ic_thread_table;  break;  /* 0x80 | W_TYPE_THREAD=1 */
@@ -26029,6 +36957,47 @@ void w_thread_unregister(void) {
 
 static void w_thread_mark_stopped(void *arg) {
     WThread *t = (WThread *)arg;
+    /*
+     * Pooled BigInts and arithmetic arenas are already dead, but their
+     * backing allocations are ordinary TLS pointers.  Return all bignum
+     * buffers to the system when a language thread exits instead of retaining
+     * them until process shutdown.
+     */
+    bigint_pool_release_thread();
+    bn_ws_release_thread();
+    free(w_ssa_ws);
+    w_ssa_ws = NULL;
+    w_ssa_ws_cap = 0;
+    free(bz_ws);
+    bz_ws = NULL;
+    bz_ws_cap = 0;
+    free(gcd_ws);
+    gcd_ws = NULL;
+    gcd_ws_cap = 0;
+    free(w_mersenne_ws);
+    w_mersenne_ws = NULL;
+    w_mersenne_ws_cap = 0;
+    for (int i = 0; i < 2; i++) {
+        free(w_ntt_workspace[i]);
+        w_ntt_workspace[i] = NULL;
+        w_ntt_workspace_cap[i] = 0;
+    }
+    for (int i = 0; i < 33; i++) {
+        WNTTPlan *plan = w_ntt_plan_cache[i];
+        if (!plan) continue;
+        free(plan->tw_forward);
+        free(plan->tw_inverse);
+        free(plan);
+        w_ntt_plan_cache[i] = NULL;
+    }
+    for (int i = 0; i <= w_p10c_top; i++) {
+        free(w_p10c_limbs[i]);
+        w_p10c_limbs[i] = NULL;
+        w_p10c_len[i] = 0;
+        free(w_p10c_mu[i]);
+        w_p10c_mu[i] = NULL;
+    }
+    w_p10c_top = -1;
     t->alive = 0;
 }
 
@@ -33427,12 +44396,13 @@ WValue w_freeze(WValue obj) {
     return obj;
 }
 
-/* Free a WValue if it's a heap-allocated type. Safe to call on any value.
- * Frees mode-7 heap strings and bigint boxes. Arrays, hashes, objects have
- * more complex lifetimes and are not freed by this function.
+/* Release a WValue if it's a heap-allocated type. Safe to call on any value.
+ * Frees mode-7 heap strings and returns bounded-size BigInt boxes to the
+ * thread-local capacity recycler. Arrays, hashes, objects have more complex
+ * lifetimes and are not freed by this function.
  * Bigints: a single calloc (limbs are a flexible array member, see
- * bigint_alloc) and never interned — every bigint_from_* mints a fresh
- * allocation, so freeing a provably-dead box is safe. The compiler emits
+ * bigint_alloc) and never interned — every bigint_from_* mints or takes a
+ * distinct allocation, so releasing a provably-dead box is safe. The compiler emits
  * this for call-argument temps it boxed itself (raw machine int >48 bits
  * boxed via w_int for a typed callee that unboxes on entry); without it,
  * every such call leaked one WBigint (75 MB/s in the 49-bit-mask
@@ -33444,7 +44414,7 @@ void w_value_free(WValue v) {
         return;
     }
     if (w_is_bigint(v)) {
-        free(w_as_bigint(v));
+        bigint_release_if_live(w_as_bigint(v));
         return;
     }
     /* Array (W_SUBTAG_ARRAY). w_array_new mints calloc(WArray) + calloc(slots)

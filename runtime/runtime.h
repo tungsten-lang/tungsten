@@ -501,6 +501,8 @@ WValue w_pow(WValue base, WValue exp);
 WValue w_div(WValue a, WValue b);
 WValue w_mod(WValue a, WValue b);
 WValue w_neg(WValue v);
+WValue w_bigint_neg_bang(WValue v);
+WValue w_bigint_abs_bang(WValue v);
 
 /* ---- Comparison ---- */
 WValue w_eq(WValue a, WValue b);
@@ -1662,8 +1664,8 @@ static inline int w_is_small_array(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_SMALL_ARRAY;
 }
 
-/* Phase 6i.2: IPv6, MAC, Encoded, BigInt demoted to W_SUBTAG_GENERIC.
- * Each predicate now reads the type byte at offset 0 of the heap struct. */
+/* Phase 6i.2 generic-bucket predicates read the type byte at offset 0 of the
+ * heap struct.  BigInt was subsequently promoted into its own free subtag. */
 static inline int w_is_ipv6(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_GENERIC &&
            ((WNetAddr *)w_as_ptr(v))->type == W_TYPE_IPV6;
@@ -1677,12 +1679,10 @@ static inline int w_is_encoded(WValue v) {
            ((WEncodedValue *)w_as_ptr(v))->type == W_TYPE_ENCODED;
 }
 static inline int w_is_bigint(WValue v) {
-    return w_is_obj(v) && w_subtag(v) == W_SUBTAG_GENERIC &&
-           ((WBigint *)w_as_ptr(v))->type == W_TYPE_BIGINT;
+    return w_is_obj(v) && w_subtag(v) == W_SUBTAG_BIGINT;
 }
-/* True if v is an inline i48 int OR a heap-allocated bigint. Defined here
- * (rather than in wvalue.h) because w_is_bigint now needs the WBigint
- * struct definition from this file. */
+/* True if v is an inline i48 int OR a heap-allocated BigInt. Kept beside the
+ * other runtime object predicates for one shared integer-classification path. */
 static inline int w_is_integer_any(WValue v) { return w_is_int(v) || w_is_bigint(v); }
 
 /* ---- StringBuffer (mutable growable byte buffer) ----

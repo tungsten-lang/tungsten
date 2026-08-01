@@ -1233,35 +1233,64 @@ use hashing
   o << "!31421 = !{!31420, !31420, i64 0}\n"
   o.to_s()
 
-# Loop-vectorizer opt-out for masked-index while loops (lowering stamps the
-# latch :br with novec:true — see lowering/analysis.w loop_masked_array_index?).
+# Per-loop latch metadata (lowering stamps the latch :br):
+#   novec:true   — loop-vectorizer opt-out for masked-index while loops
+#                  (lowering/analysis.w loop_masked_array_index?)
+#   unroll8:true — `llvm.loop.unroll.count 8` for carry-intrinsic loops
+#                  (lowering/analysis.w loop_has_carry_intrinsic?); the
+#                  carry flag spills across the back-edge (llvm.org
+#                  #74493) and LLVM won't unroll these on its own —
+#                  unrolling amortizes the spill (+25% mpn_add_n shape,
+#                  +8% mpn_addmul_1 on Apple M5). Vectorization stays
+#                  ENABLED for these: novec measured neutral-to-harmful.
 # Each marked latch gets its OWN distinct self-referential !llvm.loop node:
 # LLVM uses the node as the loop's identity, and sharing one node across loops
 # measurably degrades the unroller's output (6.7B vs 8.5B ops/s on the masked
 # reduce). IDs run upward from 31423, above the fixed TBAA block; allocation
 # follows render order, which is deterministic, so stage identity holds. The
-# counter is a top-level container mutated in place (rebinding a top-level name
+# state is a top-level container mutated in place (rebinding a top-level name
 # from a function shadows instead of writing through — see detect_target_memo).
-novec_md_state = {count: 0}
+novec_md_state = {kinds: []}
 
--> novec_loop_md_ref()
-  k = novec_md_state[:count]
-  novec_md_state[:count] = k + 1
+-> latch_loop_md_ref(kind)
+  ks = novec_md_state[:kinds]
+  k = ks.size()
+  ks.push(kind)
   (31423 + k).to_s()
 
-# One shared string-tuple node (!31422) + a distinct per-loop node per marked
-# latch. Rendered AFTER all functions (emit_artifact's final concat), so the
-# counter is final. Emits nothing when no loop was marked.
+# Shared string-tuple nodes (!31422 novec, !31413 unroll8 — 31413 sits just
+# below the fixed TBAA block, clear of the upward-running per-loop IDs) + a
+# distinct per-loop node per marked latch. Rendered AFTER all functions
+# (emit_artifact's final concat), so the list is final. Emits nothing when no
+# loop was marked.
 -> novec_loop_md_defs()
-  n = novec_md_state[:count]
+  ks = novec_md_state[:kinds]
+  n = ks.size()
   if n == 0
     return ""
   o = StringBuffer(64)
-  o << "!31422 = !{!\"llvm.loop.vectorize.enable\", i1 false}\n"
+  any_novec = false
+  any_unroll = false
+  i = 0
+  while i < n
+    if ks[i] == :novec || ks[i] == :both
+      any_novec = true
+    if ks[i] == :unroll || ks[i] == :both
+      any_unroll = true
+    i += 1
+  if any_novec
+    o << "!31422 = !{!\"llvm.loop.vectorize.enable\", i1 false}\n"
+  if any_unroll
+    o << "!31413 = !{!\"llvm.loop.unroll.count\", i32 8}\n"
   i = 0
   while i < n
     id = (31423 + i).to_s()
-    o << "!" + id + " = distinct !{!" + id + ", !31422}\n"
+    if ks[i] == :both
+      o << "!" + id + " = distinct !{!" + id + ", !31422, !31413}\n"
+    elsif ks[i] == :unroll
+      o << "!" + id + " = distinct !{!" + id + ", !31413}\n"
+    else
+      o << "!" + id + " = distinct !{!" + id + ", !31422}\n"
     i += 1
   o.to_s()
 
@@ -2339,7 +2368,57 @@ ewscope_md_state = {ids: {}, order: []}
     return label
   current
 
+# Embedded `ll` body: the fn's LLVM IR was written by hand in the source.
+# Emit the define wrapper with the .w parameter names (all i64: machine ints
+# raw, typed arrays as start-corrected element-0 data addresses) and splice
+# the text verbatim.  The body owns its control flow and must `ret`.
+-> emit_embedded_ll_function(f)
+  out = StringBuffer(1024 + f[:embedded_ll].size())
+  out << "define internal i64 @"
+  out << f[:name]
+  out << "("
+  out << emit_param_signature(f)
+  out << ") nounwind {\n"
+  out << f[:embedded_ll]
+  if !f[:embedded_ll].ends_with?("\n")
+    out << "\n"
+  out << "}\n"
+  out.to_s()
+
+# Embedded `asm` body: whole-function AArch64 assembly emitted as
+# module-level asm under the fn's (Darwin-mangled) symbol, plus a declare so
+# raw-ABI call sites link against it.  Parameters arrive per AAPCS64 in
+# x0..x7; the body must `ret`.
+-> emit_embedded_asm_function(f)
+  out = StringBuffer(1024 + f[:embedded_asm].size())
+  out << "module asm \".text\"\n"
+  out << "module asm \".balign 64\"\n"
+  out << "module asm \".globl _" + f[:name] + "\"\n"
+  out << "module asm \"_" + f[:name] + ":\"\n"
+  lines = f[:embedded_asm].split("\n")
+  i = 0
+  while i < lines.size()
+    line = lines[i]
+    if line.strip().size() > 0
+      out << "module asm \"" + escape_llvm_string(line) + "\"\n"
+    i += 1
+  out << "declare i64 @"
+  out << f[:name]
+  out << "("
+  parts = []
+  j = 0
+  while j < f[:params].size()
+    parts.push("i64")
+    j += 1
+  out << parts.join(", ")
+  out << ") nounwind\n"
+  out.to_s()
+
 -> emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers = false, host_fn_attrs = "", attr_groups = nil)
+  if f[:embedded_ll] != nil
+    return emit_embedded_ll_function(f)
+  if f[:embedded_asm] != nil
+    return emit_embedded_asm_function(f)
   out = StringBuffer(4096)
   ret_ty = f[:return_type]
   attr_text = function_attr_text(frame_pointers, host_fn_attrs)
@@ -3884,8 +3963,12 @@ ewscope_md_state = {ids: {}, order: []}
 
   # Control flow
   when :br
-    if inst[:novec] == true
-      "br label %" + inst[:label] + ", !llvm.loop !" + novec_loop_md_ref()
+    if inst[:novec] == true && inst[:unroll8] == true
+      "br label %" + inst[:label] + ", !llvm.loop !" + latch_loop_md_ref(:both)
+    elsif inst[:novec] == true
+      "br label %" + inst[:label] + ", !llvm.loop !" + latch_loop_md_ref(:novec)
+    elsif inst[:unroll8] == true
+      "br label %" + inst[:label] + ", !llvm.loop !" + latch_loop_md_ref(:unroll)
     else
       "br label %" + inst[:label]
   when :cond_br

@@ -1427,6 +1427,66 @@
     return masked_subtree_refs?(node.right, assigned)
   false
 
+# ── Carry-intrinsic loop detection (LLVM unroller opt-in) ──────────────
+# A while loop whose body calls `addcarry`/`subborrow` is a multi-word
+# carry-chain kernel (bignum add_n / sub_n / addmul_1 shapes). LLVM will
+# not unroll these on its own (runtime trip count + flag-carried
+# dependence), and the carry flag spills across the back-edge (llvm.org
+# #74493), so lower_while stamps `llvm.loop.unroll.count 8` on exactly
+# these latches (the emitter's :br unroll8 flag) to amortize the spill
+# and loop overhead. Measured on Apple M5: +25% on the add_n shape, +8%
+# on addmul_1, neutral on sub_n / mul_1. Vectorization is deliberately
+# left ENABLED — a vectorize-disable on these loops measured
+# neutral-to-harmful (and badly hurts neighboring vectorizable shifts).
+# Nested while loops run their own lower_while pass and stamp their own
+# latch, so this walker does not descend into them (same convention as
+# loop_masked_array_index?).
+-> loop_has_carry_intrinsic?(nodes)
+  if nodes == nil
+    return false
+  i = 0
+  while i < nodes.size()
+    if expr_has_carry_intrinsic?(nodes[i])
+      return true
+    i += 1
+  false
+
+-> expr_has_carry_intrinsic?(node)
+  if node == nil
+    return false
+  case ast_kind(node)
+  when :call
+    if node.receiver == nil && (node.name == "addcarry" || node.name == "subborrow")
+      return true
+    if node.receiver != nil && is_ast_node?(node.receiver) && expr_has_carry_intrinsic?(node.receiver)
+      return true
+    return loop_has_carry_intrinsic?(node.args)
+  when :assign, :compound_assign
+    return expr_has_carry_intrinsic?(node.value)
+  when :binary_op
+    if expr_has_carry_intrinsic?(node.left)
+      return true
+    return expr_has_carry_intrinsic?(node.right)
+  when :if
+    if expr_has_carry_intrinsic?(node.condition)
+      return true
+    if loop_has_carry_intrinsic?(node.then_body)
+      return true
+    if loop_has_carry_intrinsic?(node.else_body)
+      return true
+    ec = node.elsif_clauses
+    if ec != nil
+      j = 0
+      while j < ec.size()
+        clause = ec[j]
+        if expr_has_carry_intrinsic?(clause[0])
+          return true
+        if loop_has_carry_intrinsic?(clause[1])
+          return true
+        j += 1
+    return false
+  false
+
 # ── Loop versioning for untyped-array element loops ────────────────────
 # `while i < a.size` / `while i < n` bodies whose array accesses go through
 # the polymorphic __w_array_*_fast helpers keep a per-iteration bounds check

@@ -15,7 +15,10 @@
  * Include the runtime directly so the benchmark can time the internal BigInt
  * kernels without adding exported benchmark-only APIs.
  */
-#include "../../runtime/runtime.c"
+#ifndef TUNGSTEN_RUNTIME_SOURCE
+#define TUNGSTEN_RUNTIME_SOURCE "../../runtime/runtime.c"
+#endif
+#include TUNGSTEN_RUNTIME_SOURCE
 
 static volatile uint64_t bench_sink;
 
@@ -71,12 +74,14 @@ static void bench_free_value(WValue value) {
 }
 
 static int bench_iters_for_limbs(int32_t limbs) {
-    if (limbs <= 64) return 1000;
-    if (limbs <= 256) return 300;
-    if (limbs <= 1024) return 80;
-    if (limbs <= 4096) return 16;
-    if (limbs <= 8192) return 8;
-    return 4;
+    if (limbs <= 8) return 2000000;
+    if (limbs <= 16) return 500000;
+    if (limbs <= 64) return 100000;
+    if (limbs <= 256) return 10000;
+    if (limbs <= 1024) return 1000;
+    if (limbs <= 4096) return 100;
+    if (limbs <= 8192) return 40;
+    return 20;
 }
 
 static int bench_iters_for_mod(int32_t limbs) {
@@ -86,6 +91,41 @@ static int bench_iters_for_mod(int32_t limbs) {
     if (limbs <= 256) return 1000;
     if (limbs <= 1024) return 100;
     return 30;
+}
+
+static int bench_iters_for_linear(int32_t limbs) {
+    if (limbs <= 4) return 2000000;
+    if (limbs <= 16) return 1000000;
+    if (limbs <= 64) return 300000;
+    if (limbs <= 256) return 100000;
+    if (limbs <= 1024) return 20000;
+    return 5000;
+}
+
+static int bench_iters_for_boxed_linear(int32_t limbs) {
+    if (limbs <= 16) return 500000;
+    if (limbs <= 64) return 300000;
+    if (limbs <= 256) return 200000;
+    if (limbs <= 1024) return 100000;
+    return 20000;
+}
+
+static int bench_iters_for_divmod(int32_t limbs) {
+    if (limbs <= 4) return 500000;
+    if (limbs <= 16) return 100000;
+    if (limbs <= 64) return 20000;
+    if (limbs <= 256) return 5000;
+    if (limbs <= 1024) return 500;
+    return 100;
+}
+
+static int bench_iters_for_gcd(int32_t limbs) {
+    if (limbs <= 4) return 100000;
+    if (limbs <= 16) return 20000;
+    if (limbs <= 64) return 5000;
+    if (limbs <= 256) return 500;
+    if (limbs <= 1024) return 100;
+    return 20;
 }
 
 static void assert_same_limbs(const char *label, const uint64_t *a, const uint64_t *b, int32_t n) {
@@ -99,6 +139,121 @@ static void assert_same_limbs(const char *label, const uint64_t *a, const uint64
 
 static double ratio(double tungsten, double gmp) {
     return gmp > 0.0 ? tungsten / gmp : 0.0;
+}
+
+static double bench_tungsten_add(const uint64_t *a, const uint64_t *b,
+                                 int32_t limbs, int iters) {
+    uint64_t *out = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    if (!out) die("out of memory in add benchmark");
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        uint64_t carry = bn_add_n(out, a, b, limbs);
+        bench_sink ^= out[(unsigned)i % (unsigned)limbs] ^ carry ^ (uint64_t)i;
+    }
+    double elapsed = bench_now() - start;
+    free(out);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_tungsten_sub(const uint64_t *a, const uint64_t *b,
+                                 int32_t limbs, int iters) {
+    uint64_t *out = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    if (!out) die("out of memory in subtract benchmark");
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        uint64_t borrow = bn_sub_n(out, a, b, limbs);
+        bench_sink ^= out[(unsigned)i % (unsigned)limbs] ^ borrow ^ (uint64_t)i;
+    }
+    double elapsed = bench_now() - start;
+    free(out);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_tungsten_cmp(const uint64_t *a, const uint64_t *b,
+                                 int32_t limbs, int iters) {
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        bench_sink ^= (uint64_t)(bn_cmp_n(a, b, limbs) + 1) + (uint64_t)i;
+    }
+    return (bench_now() - start) * 1e9 / (double)iters;
+}
+
+/* The previous compiler-scheduled four-limb ARM64 kernel, retained here as a
+ * benchmark oracle while tuning the production leaf-assembly pipeline. */
+static uint64_t bench_addmul_1_old(uint64_t *rp, const uint64_t *up,
+                                   int32_t n, uint64_t v) {
+    uint64_t carry = 0;
+    int32_t i = 0;
+#if defined(__aarch64__)
+    for (; i + 4 <= n; i += 4) {
+        __uint128_t p0 = (__uint128_t)up[i] * v;
+        __uint128_t p1 = (__uint128_t)up[i + 1] * v;
+        __uint128_t p2 = (__uint128_t)up[i + 2] * v;
+        __uint128_t p3 = (__uint128_t)up[i + 3] * v;
+        uint64_t l0 = (uint64_t)p0, h0 = (uint64_t)(p0 >> 64);
+        uint64_t l1 = (uint64_t)p1, h1 = (uint64_t)(p1 >> 64);
+        uint64_t l2 = (uint64_t)p2, h2 = (uint64_t)(p2 >> 64);
+        uint64_t l3 = (uint64_t)p3, h3 = (uint64_t)(p3 >> 64);
+        uint64_t r0 = rp[i], r1 = rp[i + 1], r2 = rp[i + 2], r3 = rp[i + 3];
+        uint64_t s0, s1, s2, s3;
+        __asm__("adds %[s0], %[l0], %[cy]\n\t"
+                "adcs %[s1], %[l1], %[h0]\n\t"
+                "adcs %[s2], %[l2], %[h1]\n\t"
+                "adcs %[s3], %[l3], %[h2]\n\t"
+                "adc  %[cy], %[h3], xzr\n\t"
+                "adds %[r0], %[r0], %[s0]\n\t"
+                "adcs %[r1], %[r1], %[s1]\n\t"
+                "adcs %[r2], %[r2], %[s2]\n\t"
+                "adcs %[r3], %[r3], %[s3]\n\t"
+                "adc  %[cy], %[cy], xzr"
+                : [s0] "=&r"(s0), [s1] "=&r"(s1), [s2] "=&r"(s2), [s3] "=&r"(s3),
+                  [r0] "+&r"(r0), [r1] "+&r"(r1), [r2] "+&r"(r2), [r3] "+&r"(r3),
+                  [cy] "+&r"(carry)
+                : [l0] "r"(l0), [l1] "r"(l1), [l2] "r"(l2), [l3] "r"(l3),
+                  [h0] "r"(h0), [h1] "r"(h1), [h2] "r"(h2), [h3] "r"(h3)
+                : "cc");
+        rp[i] = r0; rp[i + 1] = r1; rp[i + 2] = r2; rp[i + 3] = r3;
+    }
+#endif
+    for (; i < n; i++) {
+        __uint128_t p = (__uint128_t)up[i] * v + rp[i] + carry;
+        rp[i] = (uint64_t)p;
+        carry = (uint64_t)(p >> 64);
+    }
+    return carry;
+}
+
+typedef uint64_t (*bench_addmul_1_fn)(uint64_t *, const uint64_t *, int32_t, uint64_t);
+
+static double bench_tungsten_mul_1(bench_addmul_1_fn fn,
+                                   const uint64_t *up,
+                                   int32_t limbs, int iters) {
+    uint64_t *rp = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    if (!rp) die("out of memory in mul_1 benchmark");
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        uint64_t carry = fn(rp, up, limbs, 0xd6e8feb86659fd93ULL);
+        bench_sink ^= rp[(unsigned)i % (unsigned)limbs] ^ carry ^ (uint64_t)i;
+    }
+    double elapsed = bench_now() - start;
+    free(rp);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_tungsten_addmul_1(bench_addmul_1_fn fn,
+                                      const uint64_t *rp0, const uint64_t *up,
+                                      int32_t limbs, int iters) {
+    uint64_t *rp = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    if (!rp) die("out of memory in addmul_1 benchmark");
+    memcpy(rp, rp0, (size_t)limbs * sizeof(uint64_t));
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        uint64_t carry = fn(rp, up, limbs, 0xd6e8feb86659fd93ULL);
+        bench_sink ^= rp[(unsigned)i % (unsigned)limbs] ^ carry ^ (uint64_t)i;
+    }
+    double elapsed = bench_now() - start;
+    free(rp);
+    return elapsed * 1e9 / (double)iters;
 }
 
 static double bench_tungsten_mul(const uint64_t *a0, const uint64_t *b, int32_t limbs, int iters) {
@@ -115,6 +270,67 @@ static double bench_tungsten_mul(const uint64_t *a0, const uint64_t *b, int32_t 
         bench_sink ^= out[(unsigned)i % ((unsigned)limbs * 2U)];
     }
     double elapsed = bench_now() - start;
+    free(out);
+    free(a);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_tungsten_mul_rect(
+    const uint64_t *a0, int32_t na, const uint64_t *b, int32_t nb,
+    int iters) {
+    uint64_t *a = (uint64_t *)malloc((size_t)na * sizeof(uint64_t));
+    uint64_t *out =
+        (uint64_t *)calloc((size_t)na + (size_t)nb + 4, sizeof(uint64_t));
+    if (!a || !out) die("out of memory in rectangular multiply benchmark");
+    memcpy(a, a0, (size_t)na * sizeof(uint64_t));
+    uint64_t saved = a[0];
+    bigint_mul_dispatch(out, a, na, b, nb);
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        a[0] = saved + (uint64_t)i;
+        bigint_mul_dispatch(out, a, na, b, nb);
+        bench_sink ^= out[(unsigned)i % ((unsigned)na + (unsigned)nb)];
+    }
+    double elapsed = bench_now() - start;
+    free(out);
+    free(a);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_tungsten_mul_serial(const uint64_t *a0, const uint64_t *b,
+                                        int32_t limbs, int iters) {
+    bn_toom_parallel_depth++;
+    double elapsed = bench_tungsten_mul(a0, b, limbs, iters);
+    bn_toom_parallel_depth--;
+    return elapsed;
+}
+
+static double bench_tungsten_mul_ladder(
+    const uint64_t *a0, const uint64_t *b, int32_t limbs,
+    int iters, int kernel) {
+    uint64_t *a = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    uint64_t *out =
+        (uint64_t *)malloc(((size_t)limbs * 2 + 4) * sizeof(uint64_t));
+    size_t scratch_limbs = (size_t)limbs * 128 + 4096;
+    uint64_t *scratch =
+        (uint64_t *)malloc(scratch_limbs * sizeof(uint64_t));
+    if (!a || !out || !scratch)
+        die("out of memory in multiply ladder benchmark");
+    memcpy(a, a0, (size_t)limbs * sizeof(uint64_t));
+    uint64_t saved = a[0];
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        a[0] = saved + (uint64_t)i;
+        switch (kernel) {
+        case 0: bn_toom2_diff(out, a, b, limbs, scratch); break;
+        case 1: bn_toom2_sum(out, a, b, limbs, scratch); break;
+        case 2: bn_toom3(out, a, b, limbs, scratch); break;
+        default: bn_toom4(out, a, b, limbs, scratch); break;
+        }
+        bench_sink ^= out[(unsigned)i % ((unsigned)limbs * 2U)];
+    }
+    double elapsed = bench_now() - start;
+    free(scratch);
     free(out);
     free(a);
     return elapsed * 1e9 / (double)iters;
@@ -139,11 +355,198 @@ static double bench_tungsten_sqr(const uint64_t *a0, int32_t limbs, int iters) {
     return elapsed * 1e9 / (double)iters;
 }
 
+static double bench_tungsten_sqr_path(const uint64_t *a0, int32_t limbs,
+                                      int iters, int karatsuba) {
+    uint64_t *a = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    uint64_t *out = (uint64_t *)calloc((size_t)limbs * 2 + 4, sizeof(uint64_t));
+    if (!a || !out) die("out of memory in square path benchmark");
+    memcpy(a, a0, (size_t)limbs * sizeof(uint64_t));
+    uint64_t saved = a[0];
+    if (karatsuba) bn_sqr_top_kara(out, a, limbs);
+    else bn_sqr_school(out, a, limbs);
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        a[0] = saved + (uint64_t)i;
+        if (karatsuba) bn_sqr_top_kara(out, a, limbs);
+        else bn_sqr_school(out, a, limbs);
+        bench_sink ^= out[(unsigned)i % ((unsigned)limbs * 2U)];
+    }
+    double elapsed = bench_now() - start;
+    free(out);
+    free(a);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_tungsten_sqr_ladder(const uint64_t *a0, int32_t limbs,
+                                        int iters, int kernel) {
+    uint64_t *a = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    uint64_t *out = (uint64_t *)malloc(((size_t)limbs * 2 + 4) * sizeof(uint64_t));
+    size_t scratch_limbs = (size_t)limbs * 128 + 4096;
+    uint64_t *scratch = (uint64_t *)malloc(scratch_limbs * sizeof(uint64_t));
+    if (!a || !out || !scratch) die("out of memory in square ladder benchmark");
+    memcpy(a, a0, (size_t)limbs * sizeof(uint64_t));
+    uint64_t saved = a[0];
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        a[0] = saved + (uint64_t)i;
+        if (kernel == 2) bn_toom4_sq(out, a, limbs, scratch);
+        else if (kernel == 1) bn_toom3_sq(out, a, limbs, scratch);
+        else bn_kara_sq(out, a, limbs, scratch);
+        bench_sink ^= out[(unsigned)i % ((unsigned)limbs * 2U)];
+    }
+    double elapsed = bench_now() - start;
+    free(scratch);
+    free(out);
+    free(a);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_tungsten_sqr_serial(const uint64_t *a0, int32_t limbs,
+                                        int iters) {
+    bn_toom_parallel_depth++;
+    double elapsed = bench_tungsten_sqr(a0, limbs, iters);
+    bn_toom_parallel_depth--;
+    return elapsed;
+}
+
 static double bench_tungsten_mod1(const uint64_t *a, int32_t limbs, int iters) {
     double start = bench_now();
     for (int i = 0; i < iters; i++) {
         bench_sink ^= mag_mod_single(a, limbs, 1000000007ULL + (uint64_t)(i & 1));
     }
+    return (bench_now() - start) * 1e9 / (double)iters;
+}
+
+/* Previous small-divisor path: two reciprocal reductions per input limb. */
+static uint64_t bench_mag_mod_single_serial32(const uint64_t *a, int32_t alen,
+                                              uint64_t d) {
+    if (d == 1) return 0;
+    if ((d & (d - 1)) == 0) return alen > 0 ? (a[0] & (d - 1)) : 0;
+    if (d <= UINT32_MAX) {
+        uint64_t reciprocal = UINT64_MAX / d;
+        if (UINT64_MAX % d == d - 1) reciprocal++;
+        uint64_t r = 0;
+        for (int32_t i = alen - 1; i >= 0; i--) {
+            uint64_t x = (r << 32) | (a[i] >> 32);
+            uint64_t q = (uint64_t)(((__uint128_t)x * reciprocal) >> 64);
+            r = x - q * d;
+            if (r >= d) r -= d;
+            x = (r << 32) | (a[i] & UINT32_MAX);
+            q = (uint64_t)(((__uint128_t)x * reciprocal) >> 64);
+            r = x - q * d;
+            if (r >= d) r -= d;
+        }
+        return r;
+    }
+    __uint128_t r = 0;
+    for (int32_t i = alen - 1; i >= 0; i--) {
+        r = (r << 64) | a[i];
+        r %= d;
+    }
+    return (uint64_t)r;
+}
+
+static double bench_tungsten_mod1_serial32(const uint64_t *a, int32_t limbs,
+                                           int iters) {
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        bench_sink ^= bench_mag_mod_single_serial32(a, limbs,
+                                                    1000000007ULL + (uint64_t)(i & 1));
+    }
+    return (bench_now() - start) * 1e9 / (double)iters;
+}
+
+static uint64_t bench_mag_mod_single_block(const uint64_t *a, int32_t alen,
+                                           uint64_t d, int block) {
+    uint64_t reciprocal = UINT64_MAX / d;
+    uint64_t rem_max = UINT64_MAX - reciprocal * d;
+    if (rem_max == d - 1) reciprocal++;
+    uint64_t bmod = rem_max + 1;
+    if (bmod == d) bmod = 0;
+    uint64_t pow_b[33];
+    pow_b[0] = 1;
+    for (int i = 1; i <= block; i++)
+        pow_b[i] = mag_reduce_u64_recip(pow_b[i - 1] * bmod, d, reciprocal);
+
+    uint64_t r = 0;
+    int32_t pos = alen;
+    int width = pos % block;
+    if (width == 0) width = block;
+    while (pos > 0) {
+        int32_t base = pos - width;
+        __uint128_t acc0 = (__uint128_t)r * pow_b[width];
+        __uint128_t acc1 = 0, acc2 = 0, acc3 = 0;
+        int j = 0;
+        for (; j + 4 <= width; j += 4) {
+            acc0 += (__uint128_t)a[base + j] * pow_b[j];
+            acc1 += (__uint128_t)a[base + j + 1] * pow_b[j + 1];
+            acc2 += (__uint128_t)a[base + j + 2] * pow_b[j + 2];
+            acc3 += (__uint128_t)a[base + j + 3] * pow_b[j + 3];
+        }
+        for (; j < width; j++)
+            acc0 += (__uint128_t)a[base + j] * pow_b[j];
+        __uint128_t acc = (acc0 + acc1) + (acc2 + acc3);
+        uint64_t hi_rem = mag_reduce_u64_recip(
+            (uint64_t)(acc >> 64), d, reciprocal);
+        uint64_t lo_rem = mag_reduce_u64_recip(
+            (uint64_t)acc, d, reciprocal);
+        r = mag_reduce_u64_recip(hi_rem * bmod + lo_rem, d, reciprocal);
+        pos = base;
+        width = block;
+    }
+    return r;
+}
+
+static double bench_tungsten_mod1_block(const uint64_t *a, int32_t limbs,
+                                        int block, int iters) {
+    double start = bench_now();
+    for (int i = 0; i < iters; i++)
+        bench_sink ^= bench_mag_mod_single_block(
+            a, limbs, 1000000007ULL + (uint64_t)(i & 1), block);
+    return (bench_now() - start) * 1e9 / (double)iters;
+}
+
+static uint64_t bench_mag_mod_single_block_cached(const uint64_t *a, int32_t alen,
+                                                  uint64_t d, int block) {
+    const WMod1Plan *plan = mag_mod1_plan(d, block);
+    uint64_t reciprocal = plan->reciprocal;
+    uint64_t bmod = plan->bmod;
+    const uint64_t *pow_b = plan->pow_b;
+    uint64_t r = 0;
+    int32_t pos = alen;
+    int width = pos % block;
+    if (width == 0) width = block;
+    while (pos > 0) {
+        int32_t base = pos - width;
+        __uint128_t acc0 = (__uint128_t)r * pow_b[width];
+        __uint128_t acc1 = 0, acc2 = 0, acc3 = 0;
+        int j = 0;
+        for (; j + 4 <= width; j += 4) {
+            acc0 += (__uint128_t)a[base + j] * pow_b[j];
+            acc1 += (__uint128_t)a[base + j + 1] * pow_b[j + 1];
+            acc2 += (__uint128_t)a[base + j + 2] * pow_b[j + 2];
+            acc3 += (__uint128_t)a[base + j + 3] * pow_b[j + 3];
+        }
+        for (; j < width; j++)
+            acc0 += (__uint128_t)a[base + j] * pow_b[j];
+        __uint128_t acc = (acc0 + acc1) + (acc2 + acc3);
+        uint64_t hi_rem = mag_reduce_u64_recip(
+            (uint64_t)(acc >> 64), d, reciprocal);
+        uint64_t lo_rem = mag_reduce_u64_recip(
+            (uint64_t)acc, d, reciprocal);
+        r = mag_reduce_u64_recip(hi_rem * bmod + lo_rem, d, reciprocal);
+        pos = base;
+        width = block;
+    }
+    return r;
+}
+
+static double bench_tungsten_mod1_block_cached(const uint64_t *a, int32_t limbs,
+                                               int block, int iters) {
+    double start = bench_now();
+    for (int i = 0; i < iters; i++)
+        bench_sink ^= bench_mag_mod_single_block_cached(
+            a, limbs, 1000000007ULL + (uint64_t)(i & 1), block);
     return (bench_now() - start) * 1e9 / (double)iters;
 }
 
@@ -163,6 +566,138 @@ static double bench_tungsten_mod1_ref(const uint64_t *a, int32_t limbs, int iter
                                                1000000007ULL + (uint64_t)(i & 1));
     }
     return (bench_now() - start) * 1e9 / (double)iters;
+}
+
+static double bench_tungsten_divmod(const uint64_t *u, const uint64_t *v,
+                                    int32_t limbs, int iters) {
+    bigint_pool_release_thread();
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        WBigint *q, *r;
+        mag_divmod(u, 2 * limbs, v, limbs, &q, &r);
+        unsigned qi = q->size > 0 ? (unsigned)i % (unsigned)q->size : 0;
+        unsigned ri = r->size > 0 ? (unsigned)i % (unsigned)r->size : 0;
+        bench_sink ^= (q->size > 0 ? q->limbs[qi] : 0) ^
+                      (r->size > 0 ? r->limbs[ri] : 0) ^ (uint64_t)i;
+        bigint_release(q);
+        bigint_release(r);
+    }
+    double elapsed = bench_now() - start;
+    bigint_pool_release_thread();
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_tungsten_divmod_path(const uint64_t *u, const uint64_t *v,
+                                         int32_t limbs, int iters, int path) {
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        WBigint *q, *r;
+        if (path == 1)
+            mag_divmod_knuth(u, 2 * limbs, v, limbs, &q, &r);
+        else
+            mag_divmod_bz(u, 2 * limbs, v, limbs, &q, &r);
+        unsigned qi = q->size > 0 ? (unsigned)i % (unsigned)q->size : 0;
+        unsigned ri = r->size > 0 ? (unsigned)i % (unsigned)r->size : 0;
+        bench_sink ^= (q->size > 0 ? q->limbs[qi] : 0) ^
+                      (r->size > 0 ? r->limbs[ri] : 0) ^ (uint64_t)i;
+        free(q);
+        free(r);
+    }
+    return (bench_now() - start) * 1e9 / (double)iters;
+}
+
+static double bench_tungsten_divmod_into(const uint64_t *u, const uint64_t *v,
+                                         int32_t limbs, int iters) {
+    uint64_t *q = (uint64_t *)malloc(((size_t)limbs + 1) * sizeof(uint64_t));
+    uint64_t *r = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    if (!q || !r) die("out of memory in Tungsten divmod-into benchmark");
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        bz_base_div_into(u, 2 * limbs, v, limbs,
+                         q, limbs + 1, r, limbs, 0);
+        bench_sink ^= q[(unsigned)i % (unsigned)(limbs + 1)] ^
+                      r[(unsigned)i % (unsigned)limbs] ^ (uint64_t)i;
+    }
+    double elapsed = bench_now() - start;
+    free(q);
+    free(r);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_tungsten_submul1(const uint64_t *u, const uint64_t *r0,
+                                     int32_t limbs, uint64_t v, int iters) {
+    uint64_t *r = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    if (!r) die("out of memory in Tungsten submul1 benchmark");
+    memcpy(r, r0, (size_t)limbs * sizeof(uint64_t));
+    uint64_t borrow = 0;
+    double start = bench_now();
+    for (int i = 0; i < iters; i++)
+        borrow ^= bn_submul_1(r, u, limbs, v);
+    double elapsed = bench_now() - start;
+    bench_sink ^= borrow ^ r[(unsigned)iters % (unsigned)limbs];
+    free(r);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static void bench_gcd_operands(int32_t limbs, WValue *a_out, WValue *b_out) {
+    WValue common = bench_bigint(limbs, 0xd6e8feb86659fd93ULL ^ (uint64_t)limbs);
+    *a_out = bigint_mul_any(common, w_box_int(65537));
+    *b_out = bigint_mul_any(common, w_box_int(65539));
+    bench_free_value(common);
+}
+
+static void bench_gcd_random_operands(int32_t limbs, WValue *a_out, WValue *b_out) {
+    *a_out = bench_bigint(limbs, 0x3f84d5b5b5470917ULL ^ (uint64_t)limbs);
+    *b_out = bench_bigint(limbs, 0x9216d5d98979fb1bULL ^ (uint64_t)limbs);
+}
+
+#ifndef BN_BENCH_GCD_RECYCLE
+#define BN_BENCH_GCD_RECYCLE 1
+#endif
+
+static double bench_tungsten_gcd(int32_t limbs, int iters) {
+    WValue a, b;
+    bench_gcd_operands(limbs, &a, &b);
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        WValue g = bigint_gcd_any(a, b);
+        bench_sink ^= (uint64_t)integer_low_i64(g) ^ (uint64_t)i;
+        /* GMP reuses zg across iterations.  Return Tungsten's dead immutable
+         * result through the runtime handoff so its limb capacity is likewise
+         * available to the next GCD result. */
+        if (g != a && g != b) {
+#if BN_BENCH_GCD_RECYCLE
+            w_value_free(g);
+#else
+            bench_free_value(g);
+#endif
+        }
+    }
+    double elapsed = bench_now() - start;
+    bench_free_value(a);
+    bench_free_value(b);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_tungsten_gcd_random(int32_t limbs, int iters) {
+    WValue a, b;
+    bench_gcd_random_operands(limbs, &a, &b);
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        WValue g = bigint_gcd_any(a, b);
+        bench_sink ^= (uint64_t)integer_low_i64(g) ^ (uint64_t)i;
+        if (g != a && g != b) {
+#if BN_BENCH_GCD_RECYCLE
+            w_value_free(g);
+#else
+            bench_free_value(g);
+#endif
+        }
+    }
+    double elapsed = bench_now() - start;
+    bench_free_value(a);
+    bench_free_value(b);
+    return elapsed * 1e9 / (double)iters;
 }
 
 static double bench_tungsten_ctx_mulmod(int32_t limbs, int iters) {
@@ -201,6 +736,469 @@ static double bench_tungsten_ctx_mulmod(int32_t limbs, int iters) {
     return elapsed * 1e9 / (double)iters;
 }
 
+static double bench_tungsten_bitwise(char op, int32_t limbs, int iters) {
+    WValue a = bench_bigint(limbs, 0x082efa98ec4e6c89ULL ^ (uint64_t)limbs);
+    WValue b = bench_bigint(limbs, 0x452821e638d01377ULL ^ (uint64_t)limbs);
+    WValue warm = bignum_bitwise(op, a, b);
+    w_value_free(warm);
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        WValue r = bignum_bitwise(op, a, b);
+        bench_sink ^= (uint64_t)integer_low_i64(r) ^ (uint64_t)i;
+        w_value_free(r);
+    }
+    double elapsed = bench_now() - start;
+    bigint_pool_release_thread();
+    bench_free_value(a);
+    bench_free_value(b);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_tungsten_shift(int left, int32_t limbs, int iters) {
+    WValue a = bench_bigint(limbs, 0xbe5466cf34e90c6cULL ^ (uint64_t)limbs);
+    WValue warm = left ? bignum_shl(a, 13) : bignum_shr(a, 13);
+    w_value_free(warm);
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        WValue r = left ? bignum_shl(a, 13) : bignum_shr(a, 13);
+        bench_sink ^= (uint64_t)integer_low_i64(r) ^ (uint64_t)i;
+        w_value_free(r);
+    }
+    double elapsed = bench_now() - start;
+    bigint_pool_release_thread();
+    bench_free_value(a);
+    return elapsed * 1e9 / (double)iters;
+}
+
+enum {
+    BENCH_BOXED_ADD,
+    BENCH_BOXED_SUB,
+    BENCH_BOXED_MUL,
+    BENCH_BOXED_SQR,
+    BENCH_BOXED_DIV,
+    BENCH_BOXED_MOD,
+    BENCH_BOXED_AND,
+    BENCH_BOXED_OR,
+    BENCH_BOXED_XOR,
+    BENCH_BOXED_SHL,
+    BENCH_BOXED_SHR,
+    BENCH_BOXED_GCD,
+    BENCH_BOXED_CMP,
+    BENCH_BOXED_NEG,
+    BENCH_BOXED_ABS,
+    BENCH_BOXED_NEG_BANG,
+    BENCH_BOXED_ABS_BANG,
+    BENCH_BOXED_POW,
+    BENCH_BOXED_POWMOD,
+    BENCH_BOXED_LCM,
+    BENCH_BOXED_ISQRT,
+    BENCH_BOXED_TOSTR,
+    BENCH_BOXED_FROMSTR
+};
+
+/* a^BENCH_BOXED_POW_EXP for the pow lane (mpz_pow_ui / a**5 elsewhere). */
+#define BENCH_BOXED_POW_EXP 5
+/* Third-operand seed for the powmod modulus; the Python driver mirrors it. */
+#define BENCH_BOXED_M_SEED 0xa4093822299f31d0ULL
+
+static int bench_boxed_op_parse(const char *name) {
+    if (strcmp(name, "add") == 0) return BENCH_BOXED_ADD;
+    if (strcmp(name, "sub") == 0) return BENCH_BOXED_SUB;
+    if (strcmp(name, "mul") == 0) return BENCH_BOXED_MUL;
+    if (strcmp(name, "sqr") == 0) return BENCH_BOXED_SQR;
+    if (strcmp(name, "div") == 0) return BENCH_BOXED_DIV;
+    if (strcmp(name, "mod") == 0) return BENCH_BOXED_MOD;
+    if (strcmp(name, "and") == 0) return BENCH_BOXED_AND;
+    if (strcmp(name, "or") == 0) return BENCH_BOXED_OR;
+    if (strcmp(name, "xor") == 0) return BENCH_BOXED_XOR;
+    if (strcmp(name, "shl") == 0) return BENCH_BOXED_SHL;
+    if (strcmp(name, "shr") == 0) return BENCH_BOXED_SHR;
+    if (strcmp(name, "gcd") == 0) return BENCH_BOXED_GCD;
+    if (strcmp(name, "cmp") == 0) return BENCH_BOXED_CMP;
+    if (strcmp(name, "neg") == 0) return BENCH_BOXED_NEG;
+    if (strcmp(name, "abs") == 0) return BENCH_BOXED_ABS;
+    if (strcmp(name, "negbang") == 0) return BENCH_BOXED_NEG_BANG;
+    if (strcmp(name, "absbang") == 0) return BENCH_BOXED_ABS_BANG;
+    if (strcmp(name, "pow") == 0) return BENCH_BOXED_POW;
+    if (strcmp(name, "powmod") == 0) return BENCH_BOXED_POWMOD;
+    if (strcmp(name, "lcm") == 0) return BENCH_BOXED_LCM;
+    if (strcmp(name, "isqrt") == 0) return BENCH_BOXED_ISQRT;
+    if (strcmp(name, "tostr") == 0) return BENCH_BOXED_TOSTR;
+    if (strcmp(name, "fromstr") == 0) return BENCH_BOXED_FROMSTR;
+    return -1;
+}
+
+static int32_t bench_boxed_a_limbs(int op, int32_t limbs) {
+    /* div/mod keep their historical 2N/N shape; isqrt takes a 2N-limb
+     * operand so the result is N limbs (the row's size column). */
+    if (op == BENCH_BOXED_DIV || op == BENCH_BOXED_MOD ||
+        op == BENCH_BOXED_ISQRT)
+        return 2 * limbs;
+    return limbs;
+}
+
+/*
+ * Operand contract shared by the correctness check, the Tungsten lane, and
+ * the GMP lane (the Python driver mirrors it exactly):
+ *   cmp:    b equals a except in the LOWEST limb (bit 0 flipped), so the
+ *           comparison must scan the full length — random operands would
+ *           short-circuit at the top limb and measure nothing.
+ *   abs:    a is negative (sign flipped on the boxed bigint).
+ *   powmod: *m_out is a deterministic odd n-limb modulus (bench_bigint
+ *           already sets limb 0's low bit); e is the regular b operand.
+ */
+static void bench_boxed_operands(int op, int32_t limbs,
+                                 WValue *a_out, WValue *b_out,
+                                 WValue *m_out) {
+    WValue a = bench_bigint(bench_boxed_a_limbs(op, limbs),
+                            0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+    WValue b;
+    if (op == BENCH_BOXED_CMP) {
+        b = bench_clone_integer(a);
+        w_as_bigint(b)->limbs[0] ^= 1ULL;
+    } else {
+        b = bench_bigint(limbs, 0x13198a2e03707344ULL ^ (uint64_t)limbs);
+    }
+    if (op == BENCH_BOXED_ABS || op == BENCH_BOXED_ABS_BANG)
+        w_as_bigint(a)->size = -w_as_bigint(a)->size;
+    *m_out = W_NIL;
+    if (op == BENCH_BOXED_POWMOD)
+        *m_out = bench_bigint(limbs, BENCH_BOXED_M_SEED ^ (uint64_t)limbs);
+    *a_out = a;
+    *b_out = b;
+}
+
+/* Release a dead intermediate through the runtime handoff unless it aliases
+ * a value the caller still holds. */
+static void bench_boxed_free_dead(WValue dead, WValue keep1, WValue keep2,
+                                  WValue keep3) {
+    if (dead == keep1 || dead == keep2 || dead == keep3) return;
+    if (w_is_bigint(dead)) w_value_free(dead);
+}
+
+/*
+ * Mirror of core/numeric/int.w Int#modpow exactly as compiled Tungsten runs
+ * it today: LSB-first square-and-multiply where every step goes through the
+ * boxed entry points (bigint_mul_any / bigint_mod_any / bigint_div_any by
+ * two, odd test on limb 0) under the same immutable-result churn discipline.
+ * Aliasing guards matter: mul-by-one and mod-below-modulus may return an
+ * operand unchanged, so a value is only released once nothing live equals it.
+ */
+static WValue bench_tungsten_powmod_once(WValue a, WValue e, WValue m) {
+    WValue zero = w_box_int(0);
+    WValue two = w_box_int(2);
+    WValue r = w_box_int(1);
+    WValue b = bigint_mod_any(a, m);
+    WValue x = e;
+    while (bigint_compare(x, zero) > 0) {
+        if (integer_low_i64(x) & 1) {
+            WValue product = bigint_mul_any(r, b);
+            WValue next_r = bigint_mod_any(product, m);
+            if (product != next_r && product != r && product != b &&
+                product != x)
+                bench_boxed_free_dead(product, a, e, m);
+            if (r != next_r && r != b && r != x)
+                bench_boxed_free_dead(r, a, e, m);
+            r = next_r;
+        }
+        WValue square = bigint_mul_any(b, b);
+        WValue next_b = bigint_mod_any(square, m);
+        if (square != next_b && square != b && square != r && square != x)
+            bench_boxed_free_dead(square, a, e, m);
+        if (b != next_b && b != r && b != x)
+            bench_boxed_free_dead(b, a, e, m);
+        b = next_b;
+        WValue next_x = bigint_div_any(x, two);
+        if (x != next_x && x != r && x != b)
+            bench_boxed_free_dead(x, a, e, m);
+        x = next_x;
+    }
+    if (b != r) bench_boxed_free_dead(b, a, e, m);
+    if (x != r && x != b) bench_boxed_free_dead(x, a, e, m);
+    return r;
+}
+
+/*
+ * Mirror of core/numeric/int.w Int#isqrt: Newton's method from the tight
+ * 2^ceil(bit_length/2) overestimate, every step through the boxed entry
+ * points (bignum_shl for the guess, bigint_div_any / bigint_add_any /
+ * division by two, bigint_compare for the loop test).
+ */
+static WValue bench_tungsten_isqrt_once(WValue a) {
+    uint64_t scratch;
+    int32_t len;
+    const uint64_t *al = integer_limbs(a, &scratch, &len);
+    int64_t bits = mag_bitlen(al, len < 0 ? -len : len);
+    WValue two = w_box_int(2);
+    WValue x = bignum_shl(w_box_int(1), (bits + 1) / 2);
+    for (;;) {
+        WValue quotient = bigint_div_any(a, x);
+        WValue sum = bigint_add_any(x, quotient);
+        WValue y = bigint_div_any(sum, two);
+        if (quotient != sum && quotient != y && quotient != x)
+            bench_boxed_free_dead(quotient, a, a, a);
+        if (sum != y && sum != x)
+            bench_boxed_free_dead(sum, a, a, a);
+        if (bigint_compare(y, x) < 0) {
+            if (x != y) bench_boxed_free_dead(x, a, a, a);
+            x = y;
+        } else {
+            if (y != x) bench_boxed_free_dead(y, a, a, a);
+            return x;
+        }
+    }
+}
+
+static WValue bench_boxed_op_apply(int op, WValue a, WValue b) {
+    switch (op) {
+    case BENCH_BOXED_ADD: return bigint_add_any(a, b);
+    case BENCH_BOXED_SUB: return bigint_sub_any(a, b);
+    case BENCH_BOXED_MUL: return bigint_mul_any(a, b);
+    case BENCH_BOXED_SQR: return bigint_mul_any(a, a);
+    case BENCH_BOXED_DIV: return bigint_div_any(a, b);
+    case BENCH_BOXED_MOD: return bigint_mod_any(a, b);
+    case BENCH_BOXED_AND: return bignum_bitwise('&', a, b);
+    case BENCH_BOXED_OR:  return bignum_bitwise('|', a, b);
+    case BENCH_BOXED_XOR: return bignum_bitwise('^', a, b);
+    case BENCH_BOXED_SHL: return bignum_shl(a, 13);
+    case BENCH_BOXED_SHR: return bignum_shr(a, 13);
+    case BENCH_BOXED_NEG_BANG: return w_ic_bigint_neg_bang(a, NULL, 0);
+    case BENCH_BOXED_ABS_BANG: return w_ic_bigint_abs_bang(a, NULL, 0);
+    case BENCH_BOXED_GCD: return bigint_gcd_any(a, b);
+    default: die("unknown boxed-result benchmark operation");
+    }
+    return W_NIL;
+}
+
+/*
+ * A native sample can be much shorter than the Python sample used to choose
+ * its iteration count.  In particular, a few milliseconds of tiny shifts or
+ * adds mostly measures Apple-silicon frequency ramp-up.  Warm for a fixed
+ * wall-clock interval under the same result-lifetime contract before starting
+ * either the Tungsten or GMP timer.
+ *
+ * Check the clock in small chunks for expensive nonlinear operations, but
+ * amortize the check for linear/tiny operations.  Warm-up work is intentionally
+ * not included in bench_sink's iteration-index stream.
+ */
+static int bench_boxed_warm_chunk(int op, int32_t limbs) {
+    if (op == BENCH_BOXED_POWMOD) return 1;
+    if (op == BENCH_BOXED_ISQRT && limbs >= 4) return 1;
+    if (op == BENCH_BOXED_LCM && limbs >= 16) return 1;
+    if ((op == BENCH_BOXED_DIV || op == BENCH_BOXED_MOD ||
+         op == BENCH_BOXED_GCD) && limbs >= 128)
+        return 1;
+    if ((op == BENCH_BOXED_MUL || op == BENCH_BOXED_SQR) && limbs >= 256)
+        return 8;
+    if ((op == BENCH_BOXED_POW || op == BENCH_BOXED_TOSTR ||
+         op == BENCH_BOXED_FROMSTR) && limbs >= 64)
+        return 8;
+    return 1024;
+}
+
+/*
+ * Model immutable result churn with one previous result still live while the
+ * next is computed.  In recycle mode, releasing that previous result makes
+ * its allocation available two generations later; no live operand/result is
+ * ever overwritten.  Direct mode uses malloc/free exactly as before.
+ */
+/*
+ * One noinline, cache-line-aligned timing function PER OPERATION.  When all
+ * lanes shared one giant switch, every kernel inlined into a single function
+ * whose internal layout reshuffled each time a lane was added — small-op
+ * cells (2-6 ns/op) would swing ±10% from I-cache/BTB placement alone,
+ * reading as phantom regressions.  A lane function's inner loop sits at a
+ * fixed offset from its own aligned entry, independent of the other lanes.
+ */
+typedef struct {
+    WValue a, b, m, parse_input;
+    WValue previous;
+    int recycle;
+    int warm_chunk;
+    int iters;
+} BenchLaneCtx;
+
+#define DEFINE_BENCH_LANE(NAME, APPLY)                                     \
+static double __attribute__((noinline, aligned(128)))                      \
+bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
+    WValue a = cx->a, b = cx->b, m = cx->m;                                \
+    WValue parse_input = cx->parse_input;                                  \
+    WValue previous = cx->previous;                                        \
+    int recycle = cx->recycle;                                             \
+    (void)a; (void)b; (void)m; (void)parse_input;                          \
+    double warm_start = bench_now();                                       \
+    do {                                                                   \
+        for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++) {          \
+            WValue result = (APPLY);                                       \
+            bench_sink ^= (uint64_t)integer_low_i64(result);               \
+            if (w_is_bigint(previous)) {                                   \
+                if (recycle)                                               \
+                    bigint_release_if_live(w_as_bigint(previous));         \
+                else free(w_as_bigint(previous));                          \
+            }                                                              \
+            previous = result;                                             \
+        }                                                                  \
+    } while (bench_now() - warm_start < 0.003);                            \
+    int iters = cx->iters;                                                 \
+    double timed_start = bench_now();                                      \
+    for (int timed_i = 0; timed_i < iters; timed_i++) {                    \
+        WValue result = (APPLY);                                           \
+        bench_sink ^= (uint64_t)integer_low_i64(result) ^                  \
+                      (uint64_t)timed_i;                                   \
+        if (w_is_bigint(previous)) {                                       \
+            if (recycle)                                                   \
+                bigint_release_if_live(w_as_bigint(previous));             \
+            else free(w_as_bigint(previous));                              \
+        }                                                                  \
+        previous = result;                                                 \
+    }                                                                      \
+    double elapsed = bench_now() - timed_start;                            \
+    cx->previous = previous;                                               \
+    return elapsed;                                                        \
+}
+
+DEFINE_BENCH_LANE(add, bigint_add_any(a, b))
+DEFINE_BENCH_LANE(sub, bigint_sub_any(a, b))
+DEFINE_BENCH_LANE(mul, bigint_mul_any(a, b))
+DEFINE_BENCH_LANE(sqr, bigint_mul_any(a, a))
+DEFINE_BENCH_LANE(div, bigint_div_any(a, b))
+DEFINE_BENCH_LANE(mod, bigint_mod_any(a, b))
+DEFINE_BENCH_LANE(band, bignum_bitwise('&', a, b))
+DEFINE_BENCH_LANE(bor, bignum_bitwise('|', a, b))
+DEFINE_BENCH_LANE(bxor, bignum_bitwise('^', a, b))
+DEFINE_BENCH_LANE(shl, bignum_shl(a, 13))
+DEFINE_BENCH_LANE(shr, bignum_shr(a, 13))
+DEFINE_BENCH_LANE(gcd, bigint_gcd_any(a, b))
+DEFINE_BENCH_LANE(neg, w_neg(a))
+DEFINE_BENCH_LANE(abs, w_ic_bigint_abs(a, NULL, 0))
+/* In-place sign mutation: O(1) field write, nothing allocated.  These
+ * return the RECEIVER, so they must not go through the result-churn macro
+ * (which would release the operand).  Compared against GMP's equivalent
+ * in-place mpz_neg(a,a) / mpz_abs(a,a), which are likewise O(1). */
+#define DEFINE_BENCH_INPLACE_LANE(NAME, APPLY)                             \
+static double __attribute__((noinline, aligned(128)))                      \
+bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
+    WValue a = cx->a;                                                      \
+    double warm_start = bench_now();                                       \
+    do {                                                                   \
+        for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++)            \
+            bench_sink ^= (uint64_t)integer_low_i64(APPLY);                \
+    } while (bench_now() - warm_start < 0.003);                            \
+    int iters = cx->iters;                                                 \
+    double timed_start = bench_now();                                      \
+    for (int timed_i = 0; timed_i < iters; timed_i++)                      \
+        bench_sink ^= (uint64_t)integer_low_i64(APPLY) ^ (uint64_t)timed_i;\
+    return bench_now() - timed_start;                                      \
+}
+DEFINE_BENCH_INPLACE_LANE(negbang, w_ic_bigint_neg_bang(a, NULL, 0))
+DEFINE_BENCH_INPLACE_LANE(absbang, w_ic_bigint_abs_bang(a, NULL, 0))
+DEFINE_BENCH_LANE(pow, w_pow(a, w_box_int(BENCH_BOXED_POW_EXP)))
+DEFINE_BENCH_LANE(powmod, bigint_powmod_any(a, b, m))
+DEFINE_BENCH_LANE(lcm, w_ic_integer_lcm(a, &b, 1))
+DEFINE_BENCH_LANE(isqrt, bigint_isqrt_any(a))
+DEFINE_BENCH_LANE(fromstr, w_bigint_from_dec_str(parse_input))
+
+/* cmp needs its volatile-operand slot (bigint_compare is a same-TU static;
+ * without it clang hoists the loop-invariant compare out of the loop). */
+static double __attribute__((noinline, aligned(128)))
+bench_lane_cmp(BenchLaneCtx *cx) {
+    volatile WValue cmp_operand = cx->a;
+    WValue b = cx->b;
+    double warm_start = bench_now();
+    do {
+        for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++)
+            bench_sink ^= (uint64_t)bigint_compare(cmp_operand, b);
+    } while (bench_now() - warm_start < 0.003);
+    int iters = cx->iters;
+    double timed_start = bench_now();
+    for (int timed_i = 0; timed_i < iters; timed_i++)
+        bench_sink ^= (uint64_t)bigint_compare(cmp_operand, b) ^
+                      (uint64_t)timed_i;
+    return bench_now() - timed_start;
+}
+
+/* tostr frees its string result every iteration (mirrors str(a) with no
+ * retained previous). */
+static double __attribute__((noinline, aligned(128)))
+bench_lane_tostr(BenchLaneCtx *cx) {
+    WValue a = cx->a;
+    double warm_start = bench_now();
+    do {
+        for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++) {
+            WValue text = w_to_s(a);
+            bench_sink ^= (uint64_t)w_string_byte_length(text);
+            w_value_free(text);
+        }
+    } while (bench_now() - warm_start < 0.003);
+    int iters = cx->iters;
+    double timed_start = bench_now();
+    for (int timed_i = 0; timed_i < iters; timed_i++) {
+        WValue text = w_to_s(a);
+        bench_sink ^= (uint64_t)w_string_byte_length(text) ^
+                      (uint64_t)timed_i;
+        w_value_free(text);
+    }
+    return bench_now() - timed_start;
+}
+
+static double bench_boxed_result_churn(int op, int32_t limbs, int iters,
+                                       int recycle) {
+    WValue a, b, m;
+    bench_boxed_operands(op, limbs, &a, &b, &m);
+    /* fromstr parses one fixed decimal string (precomputed outside timing);
+     * the correctness check verifies it byte-matches GMP's writer. */
+    WValue parse_input = W_NIL;
+    if (op == BENCH_BOXED_FROMSTR) parse_input = w_to_s(a);
+
+    bigint_pool_release_thread();
+    BenchLaneCtx cx;
+    cx.a = a;
+    cx.b = b;
+    cx.m = m;
+    cx.parse_input = parse_input;
+    cx.previous = W_NIL;
+    cx.recycle = recycle;
+    cx.warm_chunk = bench_boxed_warm_chunk(op, limbs);
+    cx.iters = iters;
+    double elapsed = 0.0;
+
+    switch (op) {
+    case BENCH_BOXED_ADD:    elapsed = bench_lane_add(&cx); break;
+    case BENCH_BOXED_SUB:    elapsed = bench_lane_sub(&cx); break;
+    case BENCH_BOXED_MUL:    elapsed = bench_lane_mul(&cx); break;
+    case BENCH_BOXED_SQR:    elapsed = bench_lane_sqr(&cx); break;
+    case BENCH_BOXED_DIV:    elapsed = bench_lane_div(&cx); break;
+    case BENCH_BOXED_MOD:    elapsed = bench_lane_mod(&cx); break;
+    case BENCH_BOXED_AND:    elapsed = bench_lane_band(&cx); break;
+    case BENCH_BOXED_OR:     elapsed = bench_lane_bor(&cx); break;
+    case BENCH_BOXED_XOR:    elapsed = bench_lane_bxor(&cx); break;
+    case BENCH_BOXED_SHL:    elapsed = bench_lane_shl(&cx); break;
+    case BENCH_BOXED_SHR:    elapsed = bench_lane_shr(&cx); break;
+    case BENCH_BOXED_GCD:    elapsed = bench_lane_gcd(&cx); break;
+    case BENCH_BOXED_CMP:    elapsed = bench_lane_cmp(&cx); break;
+    case BENCH_BOXED_NEG:    elapsed = bench_lane_neg(&cx); break;
+    case BENCH_BOXED_ABS:    elapsed = bench_lane_abs(&cx); break;
+    case BENCH_BOXED_NEG_BANG: elapsed = bench_lane_negbang(&cx); break;
+    case BENCH_BOXED_ABS_BANG: elapsed = bench_lane_absbang(&cx); break;
+    case BENCH_BOXED_POW:    elapsed = bench_lane_pow(&cx); break;
+    case BENCH_BOXED_POWMOD: elapsed = bench_lane_powmod(&cx); break;
+    case BENCH_BOXED_LCM:    elapsed = bench_lane_lcm(&cx); break;
+    case BENCH_BOXED_ISQRT:  elapsed = bench_lane_isqrt(&cx); break;
+    case BENCH_BOXED_FROMSTR: elapsed = bench_lane_fromstr(&cx); break;
+    case BENCH_BOXED_TOSTR:  elapsed = bench_lane_tostr(&cx); break;
+    default:
+        die("unknown boxed-result benchmark operation");
+    }
+
+    if (w_is_bigint(cx.previous)) free(w_as_bigint(cx.previous));
+    bigint_pool_release_thread();
+    bench_free_value(a);
+    bench_free_value(b);
+    bench_free_value(m);
+    if (op == BENCH_BOXED_FROMSTR) w_value_free(parse_input);
+    return elapsed * 1e9 / (double)iters;
+}
+
 static WValue bench_mersenne_value(uint64_t p) {
     int32_t limbs = (int32_t)((p + 63ULL) >> 6);
     uint32_t top_bits = (uint32_t)(p & 63ULL);
@@ -229,14 +1227,15 @@ static WValue bench_mersenne_residue(uint64_t p, uint64_t seed) {
 static double bench_tungsten_mersenne_square(uint64_t p, int iters) {
     WValue s = bench_mersenne_residue(p, 0x510e527fade682d1ULL ^ p);
     WValue warm = w_mersenne_square_mod(s, p);
-    bench_free_value(warm);
+    w_value_free(warm);
     double start = bench_now();
     for (int i = 0; i < iters; i++) {
         WValue r = w_mersenne_square_mod(s, p);
         bench_sink ^= integer_low_i64(r) + (uint64_t)i;
-        bench_free_value(r);
+        w_value_free(r);
     }
     double elapsed = bench_now() - start;
+    bigint_pool_release_thread();
     bench_free_value(s);
     return elapsed * 1e9 / (double)iters;
 }
@@ -250,7 +1249,10 @@ static int value_matches_mpz(WValue value, const mpz_t z) {
     uint64_t scratch;
     int32_t len;
     const uint64_t *limbs = integer_limbs(value, &scratch, &len);
-    if (len < 0) return 0;
+    int value_neg = len < 0;
+    int z_neg = mpz_sgn(z) < 0;
+    if (value_neg != z_neg) return 0;
+    if (len < 0) len = -len;
     while (len > 0 && limbs[len - 1] == 0) len--;
 
     size_t cap = (mpz_sizeinbase(z, 2) + 63U) / 64U + 1U;
@@ -263,6 +1265,123 @@ static int value_matches_mpz(WValue value, const mpz_t z) {
     int ok = (count == (size_t)len) && memcmp(tmp, limbs, (size_t)len * sizeof(uint64_t)) == 0;
     free(tmp);
     return ok;
+}
+
+static double bench_gmp_add(const uint64_t *a, const uint64_t *b,
+                            int32_t limbs, int iters) {
+    uint64_t *out = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    if (!out) die("out of memory in GMP add benchmark");
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        mp_limb_t carry = mpn_add_n((mp_limb_t *)out, (const mp_limb_t *)a,
+                                    (const mp_limb_t *)b, (mp_size_t)limbs);
+        bench_sink ^= out[(unsigned)i % (unsigned)limbs] ^ carry ^ (uint64_t)i;
+    }
+    double elapsed = bench_now() - start;
+    free(out);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_gmp_sub(const uint64_t *a, const uint64_t *b,
+                            int32_t limbs, int iters) {
+    uint64_t *out = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    if (!out) die("out of memory in GMP subtract benchmark");
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        mp_limb_t borrow = mpn_sub_n((mp_limb_t *)out, (const mp_limb_t *)a,
+                                     (const mp_limb_t *)b, (mp_size_t)limbs);
+        bench_sink ^= out[(unsigned)i % (unsigned)limbs] ^ borrow ^ (uint64_t)i;
+    }
+    double elapsed = bench_now() - start;
+    free(out);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_gmp_cmp(const uint64_t *a, const uint64_t *b,
+                            int32_t limbs, int iters) {
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        bench_sink ^= (uint64_t)(mpn_cmp((const mp_limb_t *)a,
+                                         (const mp_limb_t *)b,
+                                         (mp_size_t)limbs) + 1) + (uint64_t)i;
+    }
+    return (bench_now() - start) * 1e9 / (double)iters;
+}
+
+static double bench_gmp_addmul_1(const uint64_t *rp0, const uint64_t *up,
+                                 int32_t limbs, int iters) {
+    uint64_t *rp = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    if (!rp) die("out of memory in GMP addmul_1 benchmark");
+    memcpy(rp, rp0, (size_t)limbs * sizeof(uint64_t));
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        uint64_t carry = (uint64_t)mpn_addmul_1(
+            (mp_limb_t *)rp, (const mp_limb_t *)up, (mp_size_t)limbs,
+            (mp_limb_t)0xd6e8feb86659fd93ULL);
+        bench_sink ^= rp[(unsigned)i % (unsigned)limbs] ^ carry ^ (uint64_t)i;
+    }
+    double elapsed = bench_now() - start;
+    free(rp);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_gmp_mul_1(const uint64_t *up, int32_t limbs, int iters) {
+    uint64_t *rp = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    if (!rp) die("out of memory in GMP mul_1 benchmark");
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        uint64_t carry = (uint64_t)mpn_mul_1(
+            (mp_limb_t *)rp, (const mp_limb_t *)up, (mp_size_t)limbs,
+            (mp_limb_t)0xd6e8feb86659fd93ULL);
+        bench_sink ^= rp[(unsigned)i % (unsigned)limbs] ^ carry ^ (uint64_t)i;
+    }
+    double elapsed = bench_now() - start;
+    free(rp);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_gmp_bitwise(char op, int32_t limbs, int iters) {
+    uint64_t *a = bench_limbs(limbs, 0x082efa98ec4e6c89ULL ^ (uint64_t)limbs);
+    uint64_t *b = bench_limbs(limbs, 0x452821e638d01377ULL ^ (uint64_t)limbs);
+    mpz_t za, zb;
+    mpz_inits(za, zb, NULL);
+    gmp_import_limbs(za, a, limbs);
+    gmp_import_limbs(zb, b, limbs);
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        mpz_t zr;
+        mpz_init(zr);
+        if (op == '&') mpz_and(zr, za, zb);
+        else if (op == '|') mpz_ior(zr, za, zb);
+        else mpz_xor(zr, za, zb);
+        bench_sink ^= (uint64_t)mpz_get_ui(zr) ^ (uint64_t)i;
+        mpz_clear(zr);
+    }
+    double elapsed = bench_now() - start;
+    mpz_clears(za, zb, NULL);
+    free(a);
+    free(b);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_gmp_shift(int left, int32_t limbs, int iters) {
+    uint64_t *a = bench_limbs(limbs, 0xbe5466cf34e90c6cULL ^ (uint64_t)limbs);
+    mpz_t za;
+    mpz_init(za);
+    gmp_import_limbs(za, a, limbs);
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        mpz_t zr;
+        mpz_init(zr);
+        if (left) mpz_mul_2exp(zr, za, 13);
+        else mpz_fdiv_q_2exp(zr, za, 13);
+        bench_sink ^= (uint64_t)mpz_get_ui(zr) ^ (uint64_t)i;
+        mpz_clear(zr);
+    }
+    double elapsed = bench_now() - start;
+    mpz_clear(za);
+    free(a);
+    return elapsed * 1e9 / (double)iters;
 }
 
 static double bench_gmp_mul(const uint64_t *a0, const uint64_t *b, int32_t limbs, int iters) {
@@ -281,6 +1400,38 @@ static double bench_gmp_mul(const uint64_t *a0, const uint64_t *b, int32_t limbs
     double elapsed = bench_now() - start;
     free(out);
     free(a);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_gmp_mul_rect(
+    const uint64_t *a0, int32_t na, const uint64_t *b, int32_t nb,
+    int iters) {
+    const uint64_t *large = na >= nb ? a0 : b;
+    const uint64_t *small = na >= nb ? b : a0;
+    int32_t nl = na >= nb ? na : nb;
+    int32_t ns = na >= nb ? nb : na;
+    uint64_t *mutable_large =
+        (uint64_t *)malloc((size_t)nl * sizeof(uint64_t));
+    uint64_t *out =
+        (uint64_t *)calloc((size_t)na + (size_t)nb + 4, sizeof(uint64_t));
+    if (!mutable_large || !out)
+        die("out of memory in GMP rectangular multiply benchmark");
+    memcpy(mutable_large, large, (size_t)nl * sizeof(uint64_t));
+    uint64_t saved = mutable_large[0];
+    mpn_mul((mp_limb_t *)out,
+            (const mp_limb_t *)mutable_large, (mp_size_t)nl,
+            (const mp_limb_t *)small, (mp_size_t)ns);
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        mutable_large[0] = saved + (uint64_t)i;
+        mpn_mul((mp_limb_t *)out,
+                (const mp_limb_t *)mutable_large, (mp_size_t)nl,
+                (const mp_limb_t *)small, (mp_size_t)ns);
+        bench_sink ^= out[(unsigned)i % ((unsigned)na + (unsigned)nb)];
+    }
+    double elapsed = bench_now() - start;
+    free(out);
+    free(mutable_large);
     return elapsed * 1e9 / (double)iters;
 }
 
@@ -309,6 +1460,107 @@ static double bench_gmp_mod1(const uint64_t *a, int32_t limbs, int iters) {
         bench_sink ^= mpn_mod_1((const mp_limb_t *)a, (mp_size_t)limbs, 1000000007UL + (unsigned long)(i & 1));
     }
     return (bench_now() - start) * 1e9 / (double)iters;
+}
+
+static double bench_gmp_divmod(const uint64_t *u, const uint64_t *v,
+                               int32_t limbs, int iters) {
+    uint64_t *q = (uint64_t *)calloc((size_t)limbs + 1, sizeof(uint64_t));
+    uint64_t *r = (uint64_t *)calloc((size_t)limbs, sizeof(uint64_t));
+    if (!q || !r) die("out of memory in GMP divmod benchmark");
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        mpn_tdiv_qr((mp_limb_t *)q, (mp_limb_t *)r, 0,
+                    (const mp_limb_t *)u, (mp_size_t)(2 * limbs),
+                    (const mp_limb_t *)v, (mp_size_t)limbs);
+        bench_sink ^= q[(unsigned)i % (unsigned)(limbs + 1)] ^
+                      r[(unsigned)i % (unsigned)limbs] ^ (uint64_t)i;
+    }
+    double elapsed = bench_now() - start;
+    free(q);
+    free(r);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_gmp_divmod_fresh(const uint64_t *u, const uint64_t *v,
+                                     int32_t limbs, int iters) {
+    mpz_t zu, zv;
+    mpz_inits(zu, zv, NULL);
+    gmp_import_limbs(zu, u, 2 * limbs);
+    gmp_import_limbs(zv, v, limbs);
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        mpz_t zq, zr;
+        mpz_inits(zq, zr, NULL);
+        mpz_tdiv_qr(zq, zr, zu, zv);
+        bench_sink ^= (uint64_t)mpz_get_ui(zq) ^
+                      (uint64_t)mpz_get_ui(zr) ^ (uint64_t)i;
+        mpz_clears(zq, zr, NULL);
+    }
+    double elapsed = bench_now() - start;
+    mpz_clears(zu, zv, NULL);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_gmp_submul1(const uint64_t *u, const uint64_t *r0,
+                                int32_t limbs, uint64_t v, int iters) {
+    uint64_t *r = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    if (!r) die("out of memory in GMP submul1 benchmark");
+    memcpy(r, r0, (size_t)limbs * sizeof(uint64_t));
+    mp_limb_t borrow = 0;
+    double start = bench_now();
+    for (int i = 0; i < iters; i++)
+        borrow ^= mpn_submul_1((mp_limb_t *)r, (const mp_limb_t *)u,
+                              (mp_size_t)limbs, (mp_limb_t)v);
+    double elapsed = bench_now() - start;
+    bench_sink ^= (uint64_t)borrow ^ r[(unsigned)iters % (unsigned)limbs];
+    free(r);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_gmp_gcd(int32_t limbs, int iters) {
+    WValue a, b;
+    bench_gcd_operands(limbs, &a, &b);
+    uint64_t scratch;
+    int32_t len;
+    mpz_t za, zb, zg;
+    mpz_inits(za, zb, zg, NULL);
+    const uint64_t *al = integer_limbs(a, &scratch, &len);
+    gmp_import_limbs(za, al, len);
+    const uint64_t *bl = integer_limbs(b, &scratch, &len);
+    gmp_import_limbs(zb, bl, len);
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        mpz_gcd(zg, za, zb);
+        bench_sink ^= (uint64_t)mpz_getlimbn(zg, 0) ^ (uint64_t)i;
+    }
+    double elapsed = bench_now() - start;
+    mpz_clears(za, zb, zg, NULL);
+    bench_free_value(a);
+    bench_free_value(b);
+    return elapsed * 1e9 / (double)iters;
+}
+
+static double bench_gmp_gcd_random(int32_t limbs, int iters) {
+    WValue a, b;
+    bench_gcd_random_operands(limbs, &a, &b);
+    uint64_t scratch;
+    int32_t len;
+    mpz_t za, zb, zg;
+    mpz_inits(za, zb, zg, NULL);
+    const uint64_t *al = integer_limbs(a, &scratch, &len);
+    gmp_import_limbs(za, al, len);
+    const uint64_t *bl = integer_limbs(b, &scratch, &len);
+    gmp_import_limbs(zb, bl, len);
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        mpz_gcd(zg, za, zb);
+        bench_sink ^= (uint64_t)mpz_getlimbn(zg, 0) ^ (uint64_t)i;
+    }
+    double elapsed = bench_now() - start;
+    mpz_clears(za, zb, zg, NULL);
+    bench_free_value(a);
+    bench_free_value(b);
+    return elapsed * 1e9 / (double)iters;
 }
 
 static double bench_gmp_mulmod(int32_t limbs, int iters) {
@@ -381,6 +1633,819 @@ static void check_raw_against_gmp(int32_t limbs, const uint64_t *a, const uint64
     free(gm);
 }
 
+static void check_linear_against_gmp(int32_t limbs, const uint64_t *a, const uint64_t *b) {
+    uint64_t *tw = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    uint64_t *gm = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+    if (!tw || !gm) die("out of memory in linear GMP check");
+    uint64_t tc = bn_add_n(tw, a, b, limbs);
+    uint64_t gc = (uint64_t)mpn_add_n((mp_limb_t *)gm, (const mp_limb_t *)a,
+                                      (const mp_limb_t *)b, (mp_size_t)limbs);
+    if (tc != gc) die("add carry mismatch vs GMP");
+    assert_same_limbs("add", tw, gm, limbs);
+    tc = bn_sub_n(tw, a, b, limbs);
+    gc = (uint64_t)mpn_sub_n((mp_limb_t *)gm, (const mp_limb_t *)a,
+                             (const mp_limb_t *)b, (mp_size_t)limbs);
+    if (tc != gc) die("subtract borrow mismatch vs GMP");
+    assert_same_limbs("sub", tw, gm, limbs);
+    if ((bn_cmp_n(a, b, limbs) > 0) !=
+        (mpn_cmp((const mp_limb_t *)a, (const mp_limb_t *)b,
+                 (mp_size_t)limbs) > 0))
+        die("comparison mismatch vs GMP");
+    free(tw);
+    free(gm);
+}
+
+static void check_divmod_against_gmp(int32_t limbs, const uint64_t *u,
+                                     const uint64_t *v) {
+    WBigint *tq, *tr;
+    mag_divmod(u, 2 * limbs, v, limbs, &tq, &tr);
+    uint64_t *gq = (uint64_t *)calloc((size_t)limbs + 1, sizeof(uint64_t));
+    uint64_t *gr = (uint64_t *)calloc((size_t)limbs, sizeof(uint64_t));
+    if (!gq || !gr) die("out of memory in divmod GMP check");
+    mpn_tdiv_qr((mp_limb_t *)gq, (mp_limb_t *)gr, 0,
+                (const mp_limb_t *)u, (mp_size_t)(2 * limbs),
+                (const mp_limb_t *)v, (mp_size_t)limbs);
+    for (int32_t i = 0; i < limbs + 1; i++) {
+        uint64_t got = i < tq->size ? tq->limbs[i] : 0;
+        if (got != gq[i]) die("div quotient mismatch vs GMP");
+    }
+    for (int32_t i = 0; i < limbs; i++) {
+        uint64_t got = i < tr->size ? tr->limbs[i] : 0;
+        if (got != gr[i]) die("div remainder mismatch vs GMP");
+    }
+    free(tq);
+    free(tr);
+    free(gq);
+    free(gr);
+}
+
+static void check_gcd_against_gmp(int32_t limbs) {
+    WValue a, b;
+    bench_gcd_operands(limbs, &a, &b);
+    WValue tg = bigint_gcd_any(a, b);
+    uint64_t scratch;
+    int32_t len;
+    mpz_t za, zb, gg;
+    mpz_inits(za, zb, gg, NULL);
+    const uint64_t *al = integer_limbs(a, &scratch, &len);
+    gmp_import_limbs(za, al, len);
+    const uint64_t *bl = integer_limbs(b, &scratch, &len);
+    gmp_import_limbs(zb, bl, len);
+    mpz_gcd(gg, za, zb);
+    if (!value_matches_mpz(tg, gg)) die("gcd mismatch vs GMP");
+    mpz_clears(za, zb, gg, NULL);
+    if (tg != a && tg != b) bench_free_value(tg);
+    bench_free_value(a);
+    bench_free_value(b);
+}
+
+static void check_random_gcd_against_gmp(int32_t limbs) {
+    WValue a, b;
+    bench_gcd_random_operands(limbs, &a, &b);
+    WValue tg = bigint_gcd_any(a, b);
+    uint64_t scratch;
+    int32_t len;
+    mpz_t za, zb, gg;
+    mpz_inits(za, zb, gg, NULL);
+    const uint64_t *al = integer_limbs(a, &scratch, &len);
+    gmp_import_limbs(za, al, len);
+    const uint64_t *bl = integer_limbs(b, &scratch, &len);
+    gmp_import_limbs(zb, bl, len);
+    mpz_gcd(gg, za, zb);
+    if (!value_matches_mpz(tg, gg)) die("random gcd mismatch vs GMP");
+    mpz_clears(za, zb, gg, NULL);
+    if (tg != a && tg != b) bench_free_value(tg);
+    bench_free_value(a);
+    bench_free_value(b);
+}
+
+static uint64_t gcd_fuzz_next(uint64_t *state) {
+    uint64_t x = *state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *state = x;
+    return x;
+}
+
+static int fuzz_sqr_against_gmp(int cases, int32_t max_limbs) {
+    uint64_t state = 0x9e3779b97f4a7c15ULL;
+    for (int t = 0; t < cases; t++) {
+        int32_t limbs = t < 80
+            ? 1 + t
+            : 1 + (int32_t)(gcd_fuzz_next(&state) % (uint64_t)max_limbs);
+        if (limbs > max_limbs) limbs = max_limbs;
+        uint64_t *a = bench_limbs(limbs, gcd_fuzz_next(&state));
+        uint64_t *tw = (uint64_t *)calloc((size_t)2 * limbs + 4U, sizeof(uint64_t));
+        uint64_t *gm = (uint64_t *)calloc((size_t)2 * limbs + 4U, sizeof(uint64_t));
+        if (!a || !tw || !gm) die("out of memory in square fuzz");
+        bigint_sqr_dispatch(tw, a, limbs);
+        mpn_sqr((mp_limb_t *)gm, (const mp_limb_t *)a, (mp_size_t)limbs);
+        if (memcmp(tw, gm, (size_t)2 * limbs * sizeof(uint64_t)) != 0) {
+            fprintf(stderr, "square fuzz mismatch: case=%d limbs=%d\n", t, limbs);
+            free(gm);
+            free(tw);
+            free(a);
+            return 1;
+        }
+        free(gm);
+        free(tw);
+        free(a);
+    }
+    return 0;
+}
+
+static int fuzz_mul_against_gmp(int cases, int32_t max_limbs) {
+    uint64_t state = 0x243f6a8885a308d3ULL;
+    for (int t = 0; t < cases; t++) {
+        int32_t na = t < 80
+            ? 1 + t
+            : 1 + (int32_t)(gcd_fuzz_next(&state) % (uint64_t)max_limbs);
+        int32_t nb = t < 80
+            ? 1 + (int32_t)(((uint32_t)t * 37U) % 80U)
+            : 1 + (int32_t)(gcd_fuzz_next(&state) % (uint64_t)max_limbs);
+        if (na > max_limbs) na = max_limbs;
+        if (nb > max_limbs) nb = max_limbs;
+        uint64_t *a = bench_limbs(na, gcd_fuzz_next(&state));
+        uint64_t *b = bench_limbs(nb, gcd_fuzz_next(&state));
+        size_t product_limbs = (size_t)na + (size_t)nb;
+        uint64_t *tw = (uint64_t *)calloc(product_limbs + 4U, sizeof(uint64_t));
+        uint64_t *gm = (uint64_t *)calloc(product_limbs + 4U, sizeof(uint64_t));
+        if (!a || !b || !tw || !gm) die("out of memory in multiply fuzz");
+        bigint_mul_dispatch(tw, a, na, b, nb);
+        if (na >= nb)
+            mpn_mul((mp_limb_t *)gm, (const mp_limb_t *)a, (mp_size_t)na,
+                    (const mp_limb_t *)b, (mp_size_t)nb);
+        else
+            mpn_mul((mp_limb_t *)gm, (const mp_limb_t *)b, (mp_size_t)nb,
+                    (const mp_limb_t *)a, (mp_size_t)na);
+        if (memcmp(tw, gm, product_limbs * sizeof(uint64_t)) != 0) {
+            fprintf(stderr,
+                    "multiply fuzz mismatch: case=%d na=%d nb=%d\n",
+                    t, na, nb);
+            free(gm);
+            free(tw);
+            free(b);
+            free(a);
+            return 1;
+        }
+        free(gm);
+        free(tw);
+        free(b);
+        free(a);
+    }
+    return 0;
+}
+
+typedef struct {
+    int id;
+    int iters;
+    int32_t limbs;
+    _Atomic int *ready;
+    _Atomic int *go;
+    _Atomic int *bad;
+} BenchParallelMulStress;
+
+static void *bench_parallel_mul_stress_worker(void *opaque) {
+    BenchParallelMulStress *job = (BenchParallelMulStress *)opaque;
+    int32_t n = job->limbs;
+    uint64_t *a = bench_limbs(
+        n, 0x243f6a8885a308d3ULL ^ (uint64_t)job->id);
+    uint64_t *b = bench_limbs(
+        n, 0x13198a2e03707344ULL ^ ((uint64_t)job->id << 32));
+    uint64_t *tw =
+        (uint64_t *)malloc(((size_t)2 * n + 4) * sizeof(uint64_t));
+    uint64_t *gm =
+        (uint64_t *)malloc(((size_t)2 * n + 4) * sizeof(uint64_t));
+    if (!a || !b || !tw || !gm)
+        die("out of memory in parallel multiply stress");
+    uint64_t saved = a[0];
+    atomic_fetch_add_explicit(job->ready, 1, memory_order_release);
+    while (!atomic_load_explicit(job->go, memory_order_acquire))
+        bn_toom_pool_spin_hint();
+    for (int i = 0; i < job->iters; i++) {
+        a[0] = saved + (uint64_t)i;
+        bigint_mul_dispatch(tw, a, n, b, n);
+        mpn_mul_n((mp_limb_t *)gm, (const mp_limb_t *)a,
+                  (const mp_limb_t *)b, (mp_size_t)n);
+        if (memcmp(tw, gm, (size_t)2 * n * sizeof(uint64_t)) != 0) {
+            atomic_store_explicit(job->bad, 1, memory_order_release);
+            break;
+        }
+        bigint_sqr_dispatch(tw, a, n);
+        mpn_sqr((mp_limb_t *)gm, (const mp_limb_t *)a, (mp_size_t)n);
+        if (memcmp(tw, gm, (size_t)2 * n * sizeof(uint64_t)) != 0) {
+            atomic_store_explicit(job->bad, 1, memory_order_release);
+            break;
+        }
+    }
+    free(gm);
+    free(tw);
+    free(b);
+    free(a);
+    bn_ws_release_thread();
+    bigint_pool_release_thread();
+    return NULL;
+}
+
+static void stress_parallel_mul_against_gmp(
+    int threads, int iters, int32_t limbs) {
+    pthread_t *workers =
+        (pthread_t *)malloc((size_t)threads * sizeof(pthread_t));
+    BenchParallelMulStress *jobs =
+        (BenchParallelMulStress *)calloc(
+            (size_t)threads, sizeof(BenchParallelMulStress));
+    if (!workers || !jobs)
+        die("out of memory creating parallel multiply stress");
+    _Atomic int ready = 0;
+    _Atomic int go = 0;
+    _Atomic int bad = 0;
+    for (int t = 0; t < threads; t++) {
+        jobs[t].id = t;
+        jobs[t].iters = iters;
+        jobs[t].limbs = limbs;
+        jobs[t].ready = &ready;
+        jobs[t].go = &go;
+        jobs[t].bad = &bad;
+        if (pthread_create(
+                &workers[t], NULL,
+                bench_parallel_mul_stress_worker, &jobs[t]) != 0)
+            die("could not create parallel multiply stress worker");
+    }
+    while (atomic_load_explicit(&ready, memory_order_acquire) < threads)
+        bn_toom_pool_spin_hint();
+    atomic_store_explicit(&go, 1, memory_order_release);
+    for (int t = 0; t < threads; t++)
+        pthread_join(workers[t], NULL);
+    int failed = atomic_load_explicit(&bad, memory_order_acquire);
+    free(jobs);
+    free(workers);
+    if (failed) die("parallel multiply/square stress mismatch");
+    printf("parallel multiply/square stress vs GMP: %d threads x %d"
+           " iterations match (%d limbs)\n",
+           threads, iters, limbs);
+}
+
+static void fuzz_divmod_against_gmp(int cases, int32_t max_limbs) {
+    uint64_t state = 0xa4093822299f31d0ULL;
+    for (int t = 0; t < cases; t++) {
+        int32_t limbs = t < 80
+            ? 1 + t
+            : 1 + (int32_t)(gcd_fuzz_next(&state) % (uint64_t)max_limbs);
+        if (limbs > max_limbs) limbs = max_limbs;
+        uint64_t *v = bench_limbs(
+            limbs, gcd_fuzz_next(&state) ^ ((uint64_t)t << 32));
+        uint64_t *u;
+        if (limbs >= 8 && (t & 3) == 0) {
+            /*
+             * Construct U = QV+R so exact divisibility, V-1, and residuals
+             * around the triangular certificate's error bound are exercised
+             * deliberately instead of waiting for negligible-probability
+             * random hits.  Keeping Q's top below B/4 guarantees the sum fits
+             * in exactly 2*limbs limbs.
+             */
+            uint64_t *cq = bench_limbs(
+                limbs, gcd_fuzz_next(&state) ^ (uint64_t)t);
+            uint64_t *cr =
+                (uint64_t *)calloc((size_t)limbs, sizeof(uint64_t));
+            u = (uint64_t *)calloc((size_t)2 * limbs, sizeof(uint64_t));
+            if (!cq || !cr || !u)
+                die("out of memory constructing division fuzz case");
+            cq[limbs - 1] >>= 2;
+            switch ((t >> 2) % 6) {
+            case 0:                         /* R = 0 */
+                break;
+            case 1:                         /* R = 1 */
+                cr[0] = 1;
+                break;
+            case 2:                         /* R = V-1 */
+                memcpy(cr, v, (size_t)limbs * sizeof(uint64_t));
+                for (int32_t i = 0; i < limbs; i++) {
+                    uint64_t old = cr[i];
+                    cr[i] = old - 1;
+                    if (old != 0) break;
+                }
+                break;
+            case 3:                         /* R = error_bound-1 */
+                for (int32_t i = 0; i < limbs - 1; i++)
+                    cr[i] = UINT64_MAX;
+                cr[limbs - 1] = (uint64_t)(limbs - 3);
+                break;
+            case 4:                         /* R = error_bound */
+                cr[limbs - 1] = (uint64_t)(limbs - 2);
+                break;
+            default:                        /* R = error_bound+1 */
+                cr[0] = 1;
+                cr[limbs - 1] = (uint64_t)(limbs - 2);
+                break;
+            }
+            mpn_mul_n((mp_limb_t *)u, (const mp_limb_t *)cq,
+                      (const mp_limb_t *)v, (mp_size_t)limbs);
+            uint64_t carry = (uint64_t)mpn_add_n(
+                (mp_limb_t *)u, (const mp_limb_t *)u,
+                (const mp_limb_t *)cr, (mp_size_t)limbs);
+            for (int32_t i = limbs; carry && i < 2 * limbs; i++) {
+                uint64_t old = u[i];
+                u[i] = old + 1;
+                carry = u[i] == 0;
+            }
+            if (carry || u[2 * limbs - 1] == 0)
+                die("invalid constructed division fuzz width");
+            free(cr);
+            free(cq);
+        } else {
+            u = bench_limbs(
+                2 * limbs, gcd_fuzz_next(&state) ^ (uint64_t)t);
+            /* Cover every normalization shift, not only top-bit-set V. */
+            v[limbs - 1] >>= (unsigned)t & 63U;
+        }
+        uint64_t *gq =
+            (uint64_t *)calloc((size_t)limbs + 1U, sizeof(uint64_t));
+        uint64_t *gr =
+            (uint64_t *)calloc((size_t)limbs, sizeof(uint64_t));
+        if (!u || !v || !gq || !gr)
+            die("out of memory in division fuzz");
+
+        mpn_tdiv_qr((mp_limb_t *)gq, (mp_limb_t *)gr, 0,
+                    (const mp_limb_t *)u, (mp_size_t)(2 * limbs),
+                    (const mp_limb_t *)v, (mp_size_t)limbs);
+
+        WBigint *q;
+        mag_divmod(u, 2 * limbs, v, limbs, &q, NULL);
+        for (int32_t i = 0; i < limbs + 1; i++) {
+            uint64_t got = i < q->size ? q->limbs[i] : 0;
+            if (got != gq[i]) {
+                fprintf(stderr,
+                        "quotient-only division fuzz mismatch:"
+                        " case=%d limbs=%d limb=%d\n",
+                        t, limbs, i);
+                abort();
+            }
+        }
+
+        WBigint *r;
+        mag_divmod(u, 2 * limbs, v, limbs, NULL, &r);
+        for (int32_t i = 0; i < limbs; i++) {
+            uint64_t got = i < r->size ? r->limbs[i] : 0;
+            if (got != gr[i]) {
+                fprintf(stderr,
+                        "remainder-only division fuzz mismatch:"
+                        " case=%d limbs=%d limb=%d\n",
+                        t, limbs, i);
+                abort();
+            }
+        }
+
+        free(r);
+        free(q);
+        free(gr);
+        free(gq);
+        free(v);
+        free(u);
+    }
+    printf("multi-limb div/mod fuzz vs GMP: %d/%d mixed random/boundary"
+           " cases match (max %d divisor limbs)\n",
+           cases, cases, max_limbs);
+}
+
+static void fuzz_div_reciprocal_against_gmp(
+    int cases, int32_t limbs) {
+    uint64_t state = 0xbb67ae8584caa73bULL ^ (uint64_t)limbs;
+    uint64_t *v = NULL;
+    uint64_t *u =
+        (uint64_t *)malloc((size_t)2 * limbs * sizeof(uint64_t));
+    uint64_t *gq =
+        (uint64_t *)calloc((size_t)limbs + 1, sizeof(uint64_t));
+    uint64_t *gr =
+        (uint64_t *)calloc((size_t)limbs, sizeof(uint64_t));
+    if (!u || !gq || !gr)
+        die("out of memory in reciprocal division fuzz");
+    for (int t = 0; t < cases; t++) {
+        if ((t & 7) == 0) {
+            free(v);
+            v = bench_limbs(
+                limbs, gcd_fuzz_next(&state) ^ (uint64_t)t);
+        }
+        for (int32_t i = 0; i < 2 * limbs; i++)
+            u[i] = gcd_fuzz_next(&state);
+        u[2 * limbs - 1] |= 1ULL << 63;
+        memset(gq, 0, ((size_t)limbs + 1) * sizeof(uint64_t));
+        memset(gr, 0, (size_t)limbs * sizeof(uint64_t));
+        mpn_tdiv_qr((mp_limb_t *)gq, (mp_limb_t *)gr, 0,
+                    (const mp_limb_t *)u, (mp_size_t)(2 * limbs),
+                    (const mp_limb_t *)v, (mp_size_t)limbs);
+        WBigint *q;
+        mag_divmod(u, 2 * limbs, v, limbs, &q, NULL);
+        for (int32_t i = 0; i < limbs + 1; i++) {
+            uint64_t got = i < q->size ? q->limbs[i] : 0;
+            if (got != gq[i]) {
+                fprintf(stderr,
+                        "reciprocal quotient fuzz mismatch:"
+                        " case=%d limbs=%d limb=%d\n",
+                        t, limbs, i);
+                abort();
+            }
+        }
+        free(q);
+
+        WBigint *r;
+        mag_divmod(u, 2 * limbs, v, limbs, NULL, &r);
+        for (int32_t i = 0; i < limbs; i++) {
+            uint64_t got = i < r->size ? r->limbs[i] : 0;
+            if (got != gr[i]) {
+                fprintf(stderr,
+                        "reciprocal remainder fuzz mismatch:"
+                        " case=%d limbs=%d limb=%d\n",
+                        t, limbs, i);
+                abort();
+            }
+        }
+        free(r);
+
+        if ((t & 3) == 0) {
+            WBigint *both_q, *both_r;
+            mag_divmod(
+                u, 2 * limbs, v, limbs, &both_q, &both_r);
+            for (int32_t i = 0; i < limbs + 1; i++) {
+                uint64_t got =
+                    i < both_q->size ? both_q->limbs[i] : 0;
+                if (got != gq[i])
+                    die("reciprocal divmod quotient mismatch");
+            }
+            for (int32_t i = 0; i < limbs; i++) {
+                uint64_t got =
+                    i < both_r->size ? both_r->limbs[i] : 0;
+                if (got != gr[i])
+                    die("reciprocal divmod remainder mismatch");
+            }
+            free(both_r);
+            free(both_q);
+        }
+    }
+    free(v);
+    free(gr);
+    free(gq);
+    free(u);
+    printf("cached reciprocal div/mod fuzz vs GMP: %d/%d match"
+           " (%d-limb divisor)\n",
+           cases, cases, limbs);
+}
+
+static void gmp_import_value(mpz_t z, WValue v);
+
+static void fuzz_div_single_against_gmp(int cases, int32_t max_limbs) {
+    uint64_t state = 0xd1310ba698dfb5acULL;
+    mpz_t za, zd, zq, zr;
+    mpz_inits(za, zd, zq, zr, NULL);
+    for (int t = 0; t < cases; t++) {
+        int32_t limbs =
+            1 + (int32_t)(bench_rng(&state) % (uint64_t)max_limbs);
+        uint64_t *a = bench_limbs(limbs, bench_rng(&state));
+        uint64_t d;
+        switch (t & 7) {
+        case 0: d = 1; break;
+        case 1: d = 1ULL << (bench_rng(&state) & 63U); break;
+        case 2: d = UINT32_MAX; break;
+        case 3: d = UINT32_MAX + 1ULL; break;
+        case 4: d = UINT64_MAX; break;
+        default:
+            d = bench_rng(&state) | 1ULL;
+            break;
+        }
+
+        uint64_t remainder;
+        WBigint *q = mag_div_single(a, limbs, d, &remainder);
+        uint64_t mod_only = mag_mod_single(a, limbs, d);
+        gmp_import_limbs(za, a, limbs);
+        mpz_set_ui(zd, d);
+        mpz_tdiv_qr(zq, zr, za, zd);
+        WValue qv = bigint_box(q);
+        if (!value_matches_mpz(qv, zq) ||
+            remainder != (uint64_t)mpz_get_ui(zr) ||
+            mod_only != remainder) {
+            fprintf(stderr,
+                    "single-limb division fuzz mismatch case=%d limbs=%d"
+                    " divisor=%llu\n",
+                    t, limbs, (unsigned long long)d);
+            abort();
+        }
+        free(q);
+        free(a);
+    }
+    mpz_clears(za, zd, zq, zr, NULL);
+    printf("single-limb division fuzz vs GMP: %d/%d match"
+           " (max %d dividend limbs)\n",
+           cases, cases, max_limbs);
+}
+
+static void fuzz_add_sub_against_gmp(int cases, int32_t max_limbs) {
+    uint64_t state = 0x2ffd72dbd01adfb7ULL;
+    mpz_t za, zb, zg;
+    mpz_inits(za, zb, zg, NULL);
+    for (int t = 0; t < cases; t++) {
+        int32_t a_limbs =
+            1 + (int32_t)(bench_rng(&state) % (uint64_t)max_limbs);
+        int32_t b_limbs =
+            1 + (int32_t)(bench_rng(&state) % (uint64_t)max_limbs);
+        WValue a = bench_bigint(a_limbs, bench_rng(&state));
+        WValue b = bench_bigint(b_limbs, bench_rng(&state));
+        if (bench_rng(&state) & 1)
+            w_as_bigint(a)->size = -w_as_bigint(a)->size;
+        if (bench_rng(&state) & 1)
+            w_as_bigint(b)->size = -w_as_bigint(b)->size;
+        gmp_import_value(za, a);
+        gmp_import_value(zb, b);
+
+        WValue sum = bigint_add_any(a, b);
+        mpz_add(zg, za, zb);
+        if (!value_matches_mpz(sum, zg)) {
+            fprintf(stderr, "add fuzz mismatch case=%d a=%d b=%d\n",
+                    t, a_limbs, b_limbs);
+            abort();
+        }
+        WValue difference = bigint_sub_any(a, b);
+        mpz_sub(zg, za, zb);
+        if (!value_matches_mpz(difference, zg)) {
+            fprintf(stderr, "sub fuzz mismatch case=%d a=%d b=%d\n",
+                    t, a_limbs, b_limbs);
+            abort();
+        }
+
+        if (sum != a && sum != b) bench_free_value(sum);
+        if (difference != a && difference != b)
+            bench_free_value(difference);
+        bench_free_value(a);
+        bench_free_value(b);
+    }
+    mpz_clears(za, zb, zg, NULL);
+    printf("signed add/sub fuzz vs GMP: %d/%d match"
+           " (max %d limbs)\n",
+           cases, cases, max_limbs);
+}
+
+static void fuzz_bitwise_shifts_against_gmp(
+    int cases, int32_t max_limbs) {
+    uint64_t state = 0x9e3779b97f4a7c15ULL;
+    mpz_t za, zb, zg;
+    mpz_inits(za, zb, zg, NULL);
+    static const uint64_t boundary_shifts[] = {
+        0, 1, 13, 63, 64, 65, 127, 128, 129
+    };
+    for (int t = 0; t < cases; t++) {
+        int32_t a_limbs =
+            1 + (int32_t)(bench_rng(&state) % (uint64_t)max_limbs);
+        int32_t b_limbs = (t & 1)
+            ? a_limbs
+            : 1 + (int32_t)(
+                bench_rng(&state) % (uint64_t)max_limbs);
+        WValue a = bench_bigint(a_limbs, bench_rng(&state));
+        WValue b = bench_bigint(b_limbs, bench_rng(&state));
+        /* Force periodic equal magnitudes to exercise complete XOR
+         * cancellation and the normalized-zero result path. */
+        if ((t & 31) == 0 && a_limbs == b_limbs)
+            memcpy(w_as_bigint(b)->limbs, w_as_bigint(a)->limbs,
+                   (size_t)a_limbs * sizeof(uint64_t));
+        if (bench_rng(&state) & 1)
+            w_as_bigint(a)->size = -a_limbs;
+        if (bench_rng(&state) & 1)
+            w_as_bigint(b)->size = -b_limbs;
+        gmp_import_value(za, a);
+        gmp_import_value(zb, b);
+
+        const char ops[] = {'&', '|', '^'};
+        for (size_t oi = 0; oi < sizeof(ops); oi++) {
+            WValue got = bignum_bitwise(ops[oi], a, b);
+            if (ops[oi] == '&') mpz_and(zg, za, zb);
+            else if (ops[oi] == '|') mpz_ior(zg, za, zb);
+            else mpz_xor(zg, za, zb);
+            if (!value_matches_mpz(got, zg)) {
+                fprintf(stderr,
+                        "bitwise fuzz mismatch case=%d op=%c a=%d b=%d\n",
+                        t, ops[oi], a_limbs, b_limbs);
+                abort();
+            }
+            bench_free_value(got);
+        }
+
+        uint64_t k = t < (int)(
+            sizeof(boundary_shifts) / sizeof(boundary_shifts[0]))
+            ? boundary_shifts[t]
+            : bench_rng(&state) %
+                ((uint64_t)max_limbs * 64ULL + 130ULL);
+        WValue left = bignum_shl(a, (int64_t)k);
+        mpz_mul_2exp(zg, za, (mp_bitcnt_t)k);
+        if (!value_matches_mpz(left, zg)) {
+            fprintf(stderr,
+                    "left-shift fuzz mismatch case=%d limbs=%d shift=%llu\n",
+                    t, a_limbs, (unsigned long long)k);
+            abort();
+        }
+        bench_free_value(left);
+
+        WValue right = bignum_shr(a, (int64_t)k);
+        mpz_fdiv_q_2exp(zg, za, (mp_bitcnt_t)k);
+        if (!value_matches_mpz(right, zg)) {
+            fprintf(stderr,
+                    "right-shift fuzz mismatch case=%d limbs=%d shift=%llu\n",
+                    t, a_limbs, (unsigned long long)k);
+            abort();
+        }
+        bench_free_value(right);
+        bench_free_value(a);
+        bench_free_value(b);
+    }
+    mpz_clears(za, zb, zg, NULL);
+    bigint_pool_release_thread();
+    printf("bitwise/shift fuzz vs GMP: %d/%d match"
+           " (max %d limbs)\n",
+           cases, cases, max_limbs);
+}
+
+static void fuzz_boxed_mul_sqr_against_gmp(
+    int cases, int32_t max_limbs) {
+    uint64_t state = 0x3c6ef372fe94f82bULL;
+    mpz_t za, zb, zg;
+    mpz_inits(za, zb, zg, NULL);
+    for (int t = 0; t < cases; t++) {
+        int32_t a_limbs =
+            1 + (int32_t)(bench_rng(&state) % (uint64_t)max_limbs);
+        int32_t b_limbs = (t & 1)
+            ? a_limbs
+            : 1 + (int32_t)(
+                bench_rng(&state) % (uint64_t)max_limbs);
+        WValue a = bench_bigint(a_limbs, bench_rng(&state));
+        WValue b = bench_bigint(b_limbs, bench_rng(&state));
+        if (bench_rng(&state) & 1)
+            w_as_bigint(a)->size = -a_limbs;
+        if (bench_rng(&state) & 1)
+            w_as_bigint(b)->size = -b_limbs;
+        gmp_import_value(za, a);
+        gmp_import_value(zb, b);
+
+        WValue product = bigint_mul_any(a, b);
+        mpz_mul(zg, za, zb);
+        if (!value_matches_mpz(product, zg)) {
+            fprintf(stderr,
+                    "boxed multiply fuzz mismatch case=%d a=%d b=%d\n",
+                    t, a_limbs, b_limbs);
+            abort();
+        }
+        bench_free_value(product);
+
+        WValue square = bigint_mul_any(a, a);
+        mpz_mul(zg, za, za);
+        if (!value_matches_mpz(square, zg)) {
+            fprintf(stderr,
+                    "boxed square fuzz mismatch case=%d limbs=%d\n",
+                    t, a_limbs);
+            abort();
+        }
+        bench_free_value(square);
+        bench_free_value(a);
+        bench_free_value(b);
+    }
+    mpz_clears(za, zb, zg, NULL);
+    bigint_pool_release_thread();
+    printf("boxed multiply/square fuzz vs GMP: %d/%d match"
+           " (max %d limbs)\n",
+           cases, cases, max_limbs);
+}
+
+static void gmp_import_value(mpz_t z, WValue v) {
+    uint64_t scratch;
+    int32_t len;
+    const uint64_t *limbs = integer_limbs(v, &scratch, &len);
+    int neg = len < 0;
+    if (len < 0) len = -len;
+    gmp_import_limbs(z, limbs, len);
+    if (neg) mpz_neg(z, z);
+}
+
+static void fuzz_gcd_against_gmp(int cases, int32_t max_limbs) {
+    static const int32_t edges[] = {
+        2, 3, 63, 64, 65, 95, 96, 97, 127, 128, 129,
+        255, 256, 257, 511, 512, 513, 1023, 1024, 1025
+    };
+    uint64_t state = 0x8f3f73b5cf1c9adeULL;
+    mpz_t za, zb, zg;
+    mpz_inits(za, zb, zg, NULL);
+    for (int t = 0; t < cases; t++) {
+        int32_t limbs;
+        if ((t & 3) == 0) {
+            limbs = edges[(unsigned)t %
+                          (sizeof(edges) / sizeof(edges[0]))];
+            if (limbs > max_limbs) limbs = max_limbs;
+        } else {
+            limbs = 2 + (int32_t)(gcd_fuzz_next(&state) %
+                                  (uint64_t)(max_limbs - 1));
+        }
+        WValue a = bench_bigint(limbs, gcd_fuzz_next(&state));
+        WValue b;
+        switch (t % 5) {
+        case 0: /* Near-equal: omitted low limbs are maximally relevant. */
+            b = bench_clone_integer(a);
+            w_as_bigint(b)->limbs[0] ^=
+                1ULL << (unsigned)(gcd_fuzz_next(&state) & 63);
+            break;
+        case 1: { /* Different widths exercise high-slice rejection/fallback. */
+            int32_t short_limbs = limbs -
+                (int32_t)(gcd_fuzz_next(&state) %
+                          (uint64_t)(limbs / 3 + 1));
+            if (short_limbs < 2) short_limbs = 2;
+            b = bench_bigint(short_limbs, gcd_fuzz_next(&state));
+            break;
+        }
+        case 2: { /* Known shared factor with unrelated small cofactors. */
+            WValue common = bench_bigint(limbs, gcd_fuzz_next(&state));
+            bench_free_value(a);
+            a = bigint_mul_any(common, w_box_int(65537));
+            b = bigint_mul_any(common, w_box_int(65539));
+            bench_free_value(common);
+            break;
+        }
+        default:
+            b = bench_bigint(limbs, gcd_fuzz_next(&state));
+            break;
+        }
+        if ((t % 7) == 3) w_as_bigint(a)->size = -w_as_bigint(a)->size;
+        if ((t % 11) == 5) w_as_bigint(b)->size = -w_as_bigint(b)->size;
+
+        WValue got = bigint_gcd_any(a, b);
+        gmp_import_value(za, a);
+        gmp_import_value(zb, b);
+        mpz_gcd(zg, za, zb);
+        if (!value_matches_mpz(got, zg)) {
+            fprintf(stderr, "gcd fuzz mismatch case=%d limbs=%d\n", t, limbs);
+            abort();
+        }
+        if (got != a && got != b) bench_free_value(got);
+        bench_free_value(a);
+        bench_free_value(b);
+    }
+    mpz_clears(za, zb, zg, NULL);
+    printf("gcd fuzz vs GMP: %d/%d match (max %d limbs)\n",
+           cases, cases, max_limbs);
+}
+
+static void check_bitwise_shifts_against_gmp(int32_t limbs) {
+    WValue a = bench_bigint(limbs, 0x082efa98ec4e6c89ULL ^ (uint64_t)limbs);
+    WValue b = bench_bigint(limbs, 0x452821e638d01377ULL ^ (uint64_t)limbs);
+    mpz_t za, zb, zg;
+    mpz_inits(za, zb, zg, NULL);
+    uint64_t scratch;
+    int32_t len;
+    const uint64_t *al = integer_limbs(a, &scratch, &len);
+    gmp_import_limbs(za, al, len);
+    const uint64_t *bl = integer_limbs(b, &scratch, &len);
+    gmp_import_limbs(zb, bl, len);
+
+    for (int neg_a = 0; neg_a <= 1; neg_a++) {
+        for (int neg_b = 0; neg_b <= 1; neg_b++) {
+            w_as_bigint(a)->size = neg_a ? -limbs : limbs;
+            w_as_bigint(b)->size = neg_b ? -limbs : limbs;
+            if (neg_a) mpz_neg(za, za);
+            if (neg_b) mpz_neg(zb, zb);
+            const char ops[] = {'&', '|', '^'};
+            for (size_t oi = 0; oi < sizeof(ops); oi++) {
+                char op = ops[oi];
+                WValue tw = bignum_bitwise(op, a, b);
+                if (op == '&') mpz_and(zg, za, zb);
+                else if (op == '|') mpz_ior(zg, za, zb);
+                else mpz_xor(zg, za, zb);
+                if (!value_matches_mpz(tw, zg)) die("bitwise mismatch vs GMP");
+                bench_free_value(tw);
+            }
+            if (neg_a) mpz_neg(za, za);
+            if (neg_b) mpz_neg(zb, zb);
+        }
+    }
+
+    static const int64_t shifts[] = {0, 1, 13, 63, 64, 65, 127};
+    for (int neg = 0; neg <= 1; neg++) {
+        w_as_bigint(a)->size = neg ? -limbs : limbs;
+        if (neg) mpz_neg(za, za);
+        for (size_t i = 0; i < sizeof(shifts) / sizeof(shifts[0]); i++) {
+            int64_t k = shifts[i];
+            WValue left = bignum_shl(a, k);
+            mpz_mul_2exp(zg, za, (mp_bitcnt_t)k);
+            if (!value_matches_mpz(left, zg)) die("left shift mismatch vs GMP");
+            bench_free_value(left);
+
+            WValue right = bignum_shr(a, k);
+            mpz_fdiv_q_2exp(zg, za, (mp_bitcnt_t)k);
+            if (!value_matches_mpz(right, zg)) die("right shift mismatch vs GMP");
+            bench_free_value(right);
+        }
+        if (neg) mpz_neg(za, za);
+    }
+
+    w_as_bigint(a)->size = limbs;
+    w_as_bigint(b)->size = limbs;
+    mpz_clears(za, zb, zg, NULL);
+    bench_free_value(a);
+    bench_free_value(b);
+}
+
 static void check_mod1_against_gmp(const uint64_t *a, int32_t limbs) {
     static const uint64_t divisors[] = {
         1ULL, 2ULL, 3ULL, 7ULL, 0xffffULL, 0x10000ULL,
@@ -393,7 +2458,8 @@ static void check_mod1_against_gmp(const uint64_t *a, int32_t limbs) {
         uint64_t gm = (uint64_t)mpn_mod_1((const mp_limb_t *)a,
                                           (mp_size_t)limbs,
                                           (mp_limb_t)divisors[i]);
-        if (tw != gm) die("single-limb remainder mismatch vs GMP");
+        uint64_t serial32 = bench_mag_mod_single_serial32(a, limbs, divisors[i]);
+        if (tw != gm || serial32 != gm) die("single-limb remainder mismatch vs GMP");
     }
 }
 
@@ -440,18 +2506,1723 @@ static void check_mod_against_gmp(int32_t limbs) {
     bench_free_value(b);
     bench_free_value(m);
 }
+
+static void bench_gmp_boxed_apply(
+    int op, mpz_t out, const mpz_t a, const mpz_t b) {
+    switch (op) {
+    case BENCH_BOXED_ADD: mpz_add(out, a, b); break;
+    case BENCH_BOXED_SUB: mpz_sub(out, a, b); break;
+    case BENCH_BOXED_MUL: mpz_mul(out, a, b); break;
+    case BENCH_BOXED_SQR: mpz_mul(out, a, a); break;
+    case BENCH_BOXED_DIV: mpz_tdiv_q(out, a, b); break;
+    case BENCH_BOXED_MOD: mpz_tdiv_r(out, a, b); break;
+    case BENCH_BOXED_AND: mpz_and(out, a, b); break;
+    case BENCH_BOXED_OR:  mpz_ior(out, a, b); break;
+    case BENCH_BOXED_XOR: mpz_xor(out, a, b); break;
+    case BENCH_BOXED_SHL: mpz_mul_2exp(out, a, 13); break;
+    case BENCH_BOXED_SHR: mpz_fdiv_q_2exp(out, a, 13); break;
+    case BENCH_BOXED_GCD: mpz_gcd(out, a, b); break;
+    default: die("unknown GMP boxed benchmark operation");
+    }
+}
+
+static void check_boxed_op_against_gmp(int op, int32_t limbs) {
+    WValue a, b, m;
+    bench_boxed_operands(op, limbs, &a, &b, &m);
+    mpz_t za, zb, zm, zg;
+    mpz_inits(za, zb, zm, zg, NULL);
+    gmp_import_value(za, a);
+    gmp_import_value(zb, b);
+    if (w_is_bigint(m)) gmp_import_value(zm, m);
+
+    switch (op) {
+    case BENCH_BOXED_CMP: {
+        int tw = bigint_compare(a, b);
+        int gm = mpz_cmp(za, zb);
+        if ((tw > 0) != (gm > 0) || (tw < 0) != (gm < 0))
+            die("boxed cmp mismatch vs GMP");
+        break;
+    }
+    case BENCH_BOXED_NEG: {
+        WValue got = bigint_sub_any(w_box_int(0), a);
+        mpz_neg(zg, za);
+        if (!value_matches_mpz(got, zg)) die("boxed neg mismatch vs GMP");
+        if (got != a && got != b) bench_free_value(got);
+        break;
+    }
+    case BENCH_BOXED_ABS: {
+        WValue got = w_ic_bigint_abs(a, NULL, 0);
+        mpz_abs(zg, za);
+        if (!value_matches_mpz(got, zg)) die("boxed abs mismatch vs GMP");
+        if (got != a && got != b) bench_free_value(got);
+        break;
+    }
+    /* In-place forms mutate the receiver: verify against GMP's in-place
+     * result, then restore the operand so the timed run starts clean. */
+    case BENCH_BOXED_NEG_BANG: {
+        WValue got = w_ic_bigint_neg_bang(a, NULL, 0);
+        mpz_neg(zg, za);
+        if (got != a) die("neg! must return its receiver");
+        if (!value_matches_mpz(got, zg)) die("boxed neg! mismatch vs GMP");
+        w_as_bigint(a)->size = -w_as_bigint(a)->size;
+        break;
+    }
+    case BENCH_BOXED_ABS_BANG: {
+        WValue got = w_ic_bigint_abs_bang(a, NULL, 0);
+        mpz_abs(zg, za);
+        if (got != a) die("abs! must return its receiver");
+        if (!value_matches_mpz(got, zg)) die("boxed abs! mismatch vs GMP");
+        w_as_bigint(a)->size = -w_as_bigint(a)->size;
+        break;
+    }
+    case BENCH_BOXED_POW: {
+        WValue got = w_pow(a, w_box_int(BENCH_BOXED_POW_EXP));
+        mpz_pow_ui(zg, za, BENCH_BOXED_POW_EXP);
+        if (!value_matches_mpz(got, zg)) die("boxed pow mismatch vs GMP");
+        if (got != a && got != b) bench_free_value(got);
+        break;
+    }
+    case BENCH_BOXED_POWMOD: {
+        WValue got = bigint_powmod_any(a, b, m);
+        mpz_powm(zg, za, zb, zm);
+        if (!value_matches_mpz(got, zg)) die("boxed powmod mismatch vs GMP");
+        WValue naive = bench_tungsten_powmod_once(a, b, m);
+        if (!value_matches_mpz(naive, zg))
+            die("boxed powmod naive mirror mismatch vs GMP");
+        if (naive != a && naive != b && naive != m && naive != got)
+            bench_free_value(naive);
+        if (got != a && got != b && got != m) bench_free_value(got);
+        break;
+    }
+    case BENCH_BOXED_LCM: {
+        WValue got = w_ic_integer_lcm(a, &b, 1);
+        mpz_lcm(zg, za, zb);
+        if (!value_matches_mpz(got, zg)) die("boxed lcm mismatch vs GMP");
+        if (got != a && got != b) bench_free_value(got);
+        break;
+    }
+    case BENCH_BOXED_ISQRT: {
+        WValue got = bigint_isqrt_any(a);
+        mpz_sqrt(zg, za);
+        if (!value_matches_mpz(got, zg)) die("boxed isqrt mismatch vs GMP");
+        WValue naive = bench_tungsten_isqrt_once(a);
+        if (!value_matches_mpz(naive, zg))
+            die("boxed isqrt naive mirror mismatch vs GMP");
+        if (naive != a && naive != b && naive != got)
+            bench_free_value(naive);
+        if (got != a && got != b) bench_free_value(got);
+        break;
+    }
+    case BENCH_BOXED_TOSTR:
+    case BENCH_BOXED_FROMSTR: {
+        /* One check covers both directions: Tungsten's decimal writer must
+         * byte-match GMP's, and parsing that string must return the value. */
+        void (*gmp_free_fn)(void *, size_t);
+        mp_get_memory_functions(NULL, NULL, &gmp_free_fn);
+        WValue text = w_to_s(a);
+        char *expected = mpz_get_str(NULL, 10, za);
+        if (strcmp(as_str(text), expected) != 0)
+            die("boxed tostr mismatch vs GMP");
+        WValue parsed = w_bigint_from_dec_str(text);
+        if (!value_matches_mpz(parsed, za))
+            die("boxed fromstr mismatch vs GMP");
+        if (parsed != a) bench_free_value(parsed);
+        gmp_free_fn(expected, strlen(expected) + 1);
+        w_value_free(text);
+        break;
+    }
+    default: {
+        WValue got = bench_boxed_op_apply(op, a, b);
+        bench_gmp_boxed_apply(op, zg, za, zb);
+        if (!value_matches_mpz(got, zg))
+            die("boxed operation mismatch vs GMP");
+        if (got != a && got != b) bench_free_value(got);
+        break;
+    }
+    }
+    mpz_clears(za, zb, zm, zg, NULL);
+    bench_free_value(a);
+    bench_free_value(b);
+    bench_free_value(m);
+}
+
+/* Same one-previous-result-live contract as the Tungsten churn benchmark.
+ * Two alternating mpz destinations let GMP retain its own result capacity
+ * without overwriting the immediately previous immutable result. */
+static double bench_gmp_boxed_result_churn(
+    int op, int32_t limbs, int iters) {
+    WValue av, bv, mv;
+    bench_boxed_operands(op, limbs, &av, &bv, &mv);
+    mpz_t a, b, zm, result[2];
+    mpz_inits(a, b, zm, result[0], result[1], NULL);
+    gmp_import_value(a, av);
+    gmp_import_value(b, bv);
+    if (w_is_bigint(mv)) gmp_import_value(zm, mv);
+    /* tostr/fromstr: fixed operand means a fixed decimal length, so the
+     * result block size is constant; fromstr parses one precomputed string. */
+    void (*gmp_free_fn)(void *, size_t) = NULL;
+    char *dec = NULL;
+    size_t dec_block = 0;
+    if (op == BENCH_BOXED_TOSTR || op == BENCH_BOXED_FROMSTR) {
+        mp_get_memory_functions(NULL, NULL, &gmp_free_fn);
+        dec = mpz_get_str(NULL, 10, a);
+        dec_block = strlen(dec) + 1;
+    }
+    bench_free_value(av);
+    bench_free_value(bv);
+    bench_free_value(mv);
+
+    int warm_chunk = bench_boxed_warm_chunk(op, limbs);
+    int warm_index = 0;
+    double elapsed = 0.0;
+#define BENCH_BOXED_GMP_RUN(APPLY) do {                                   \
+        double warm_start = bench_now();                                  \
+        do {                                                              \
+            for (int warm_i = 0; warm_i < warm_chunk;                     \
+                 warm_i++, warm_index++) {                                \
+                mpz_ptr r = result[warm_index & 1];                       \
+                APPLY;                                                    \
+                bench_sink ^= (uint64_t)mpz_get_ui(r);                    \
+            }                                                             \
+        } while (bench_now() - warm_start < 0.003);                       \
+        double timed_start = bench_now();                                 \
+        for (int timed_i = 0; timed_i < iters; timed_i++) {               \
+            mpz_ptr r = result[timed_i & 1];                              \
+            APPLY;                                                        \
+            bench_sink ^= (uint64_t)mpz_get_ui(r) ^ (uint64_t)timed_i;   \
+        }                                                                 \
+        elapsed = bench_now() - timed_start;                              \
+    } while (0)
+
+    switch (op) {
+    case BENCH_BOXED_ADD:
+        BENCH_BOXED_GMP_RUN(mpz_add(r, a, b)); break;
+    case BENCH_BOXED_SUB:
+        BENCH_BOXED_GMP_RUN(mpz_sub(r, a, b)); break;
+    case BENCH_BOXED_MUL:
+        BENCH_BOXED_GMP_RUN(mpz_mul(r, a, b)); break;
+    case BENCH_BOXED_SQR:
+        BENCH_BOXED_GMP_RUN(mpz_mul(r, a, a)); break;
+    case BENCH_BOXED_DIV:
+        BENCH_BOXED_GMP_RUN(mpz_tdiv_q(r, a, b)); break;
+    case BENCH_BOXED_MOD:
+        BENCH_BOXED_GMP_RUN(mpz_tdiv_r(r, a, b)); break;
+    case BENCH_BOXED_AND:
+        BENCH_BOXED_GMP_RUN(mpz_and(r, a, b)); break;
+    case BENCH_BOXED_OR:
+        BENCH_BOXED_GMP_RUN(mpz_ior(r, a, b)); break;
+    case BENCH_BOXED_XOR:
+        BENCH_BOXED_GMP_RUN(mpz_xor(r, a, b)); break;
+    case BENCH_BOXED_SHL:
+        BENCH_BOXED_GMP_RUN(mpz_mul_2exp(r, a, 13)); break;
+    case BENCH_BOXED_SHR:
+        BENCH_BOXED_GMP_RUN(mpz_fdiv_q_2exp(r, a, 13)); break;
+    case BENCH_BOXED_GCD:
+        BENCH_BOXED_GMP_RUN(mpz_gcd(r, a, b)); break;
+    case BENCH_BOXED_CMP:
+        BENCH_BOXED_GMP_RUN(mpz_set_si(r, (long)mpz_cmp(a, b))); break;
+    case BENCH_BOXED_NEG:
+        BENCH_BOXED_GMP_RUN(mpz_neg(r, a)); break;
+    case BENCH_BOXED_ABS:
+        BENCH_BOXED_GMP_RUN(mpz_abs(r, a)); break;
+    case BENCH_BOXED_NEG_BANG:
+        /* in-place: GMP's own O(1) path (no copy when dest == source) */
+        BENCH_BOXED_GMP_RUN(mpz_neg(a, a)); break;
+    case BENCH_BOXED_ABS_BANG:
+        BENCH_BOXED_GMP_RUN(mpz_abs(a, a)); break;
+    case BENCH_BOXED_POW:
+        BENCH_BOXED_GMP_RUN(mpz_pow_ui(r, a, BENCH_BOXED_POW_EXP)); break;
+    case BENCH_BOXED_POWMOD:
+        BENCH_BOXED_GMP_RUN(mpz_powm(r, a, b, zm)); break;
+    case BENCH_BOXED_LCM:
+        BENCH_BOXED_GMP_RUN(mpz_lcm(r, a, b)); break;
+    case BENCH_BOXED_ISQRT:
+        BENCH_BOXED_GMP_RUN(mpz_sqrt(r, a)); break;
+    case BENCH_BOXED_FROMSTR:
+        BENCH_BOXED_GMP_RUN(mpz_set_str(r, dec, 10)); break;
+    case BENCH_BOXED_TOSTR: {
+        /* Mirror of the Tungsten lane: convert, observe, free every
+         * iteration through GMP's own allocator hooks. */
+        double warm_start = bench_now();
+        do {
+            for (int warm_i = 0; warm_i < warm_chunk; warm_i++) {
+                char *text = mpz_get_str(NULL, 10, a);
+                bench_sink ^= (uint64_t)(unsigned char)text[0];
+                gmp_free_fn(text, dec_block);
+            }
+        } while (bench_now() - warm_start < 0.003);
+        double timed_start = bench_now();
+        for (int timed_i = 0; timed_i < iters; timed_i++) {
+            char *text = mpz_get_str(NULL, 10, a);
+            bench_sink ^= (uint64_t)(unsigned char)text[0] ^
+                          (uint64_t)timed_i;
+            gmp_free_fn(text, dec_block);
+        }
+        elapsed = bench_now() - timed_start;
+        break;
+    }
+    default:
+        die("unknown GMP boxed benchmark operation");
+    }
+#undef BENCH_BOXED_GMP_RUN
+
+    if (dec) gmp_free_fn(dec, dec_block);
+    mpz_clears(a, b, zm, result[0], result[1], NULL);
+    return elapsed * 1e9 / (double)iters;
+}
 #endif
 
-int main(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
+/*
+ * Capacity-policy experiment for the immutable-result recycler.  It uses the
+ * production pool shape (15 logarithmic buckets, two buffers per bucket,
+ * smallest sufficient fit) and the same ownership overlap as BigInt
+ * operations: allocate the next result while the previous result is still
+ * live, then give the previous buffer back.
+ *
+ * The only variable is the capacity chosen on a miss.  This isolates whether
+ * exact one-limb growth, a fixed limb quantum, 1.5x reserve, or powers of two
+ * produce the best time/reuse/memory tradeoff for a mixed-size workload.
+ */
+typedef struct BenchCapacityBuffer {
+    uint32_t cap;
+    uint64_t limbs[];
+} BenchCapacityBuffer;
 
-    const int32_t sizes[] = {64, 256, 1024, 2048, 4096, 8192, 16384};
+typedef struct {
+    BenchCapacityBuffer *hot;
+    BenchCapacityBuffer
+        *slot[BN_BIGINT_POOL_BUCKETS][BN_BIGINT_POOL_PER_BUCKET];
+    uint8_t count[BN_BIGINT_POOL_BUCKETS];
+} BenchCapacityPool;
+
+typedef struct {
+    double ns_per_request;
+    double hit_percent;
+    double average_slack;
+    uint64_t allocations;
+    uint64_t frees;
+    uint64_t peak_limbs;
+    uint64_t retained_limbs;
+} BenchCapacityStats;
+
+enum {
+    BENCH_CAP_EXACT,
+    BENCH_CAP_QUANTUM_4,
+    BENCH_CAP_QUANTUM_8,
+    BENCH_CAP_QUANTUM_16,
+    BENCH_CAP_QUANTUM_32,
+    BENCH_CAP_GROW_50,
+    BENCH_CAP_POWER_2,
+    BENCH_CAP_P2_32_Q32,
+    BENCH_CAP_P2_64_Q64,
+    BENCH_CAP_P2_128_Q32,
+    BENCH_CAP_POLICY_COUNT
+};
+
+static const char *bench_capacity_policy_name(int policy) {
+    static const char *const names[BENCH_CAP_POLICY_COUNT] = {
+        "exact/+1", "quantum-4", "quantum-8", "quantum-16",
+        "quantum-32", "reserve-1.5x", "power-of-two",
+        "p2<=32+q32", "p2<=64+q64", "p2<=128+q32"
+    };
+    return names[policy];
+}
+
+/* Hybrid: powers of two while the absolute waste they cost is small, then a
+ * fixed limb quantum.  Power-of-two rounding wastes up to 50% of the
+ * allocation — 8 limbs at 16, but 512 limbs (4 KiB) at 1024 — while a fixed
+ * quantum caps waste at `quantum` limbs regardless of size.  Below the
+ * crossover, powers of two keep the size-class count (and so the pool's
+ * per-class reuse) low; above it, the quantum keeps memory bounded. */
+static uint32_t bench_capacity_hybrid(
+    uint32_t requested, uint32_t p2_limit, uint32_t quantum) {
+    if (requested <= p2_limit) {
+        uint32_t cap = 1;
+        while (cap < requested) cap <<= 1;
+        return cap;
+    }
+    return ((requested + quantum - 1U) / quantum) * quantum;
+}
+
+static uint32_t bench_capacity_round(
+    int policy, uint32_t requested, uint32_t max_cap) {
+    uint32_t cap = requested;
+    uint32_t quantum = 1;
+    switch (policy) {
+    case BENCH_CAP_QUANTUM_4: quantum = 4; break;
+    case BENCH_CAP_QUANTUM_8: quantum = 8; break;
+    case BENCH_CAP_QUANTUM_16: quantum = 16; break;
+    case BENCH_CAP_QUANTUM_32: quantum = 32; break;
+    case BENCH_CAP_GROW_50:
+        cap = requested + (requested + 1U) / 2U;
+        break;
+    case BENCH_CAP_POWER_2:
+        cap = 1;
+        while (cap < requested) cap <<= 1;
+        break;
+    case BENCH_CAP_P2_32_Q32:
+        cap = bench_capacity_hybrid(requested, 32U, 32U);
+        break;
+    case BENCH_CAP_P2_64_Q64:
+        cap = bench_capacity_hybrid(requested, 64U, 64U);
+        break;
+    case BENCH_CAP_P2_128_Q32:
+        cap = bench_capacity_hybrid(requested, 128U, 32U);
+        break;
+    default:
+        break;
+    }
+    if (quantum > 1)
+        cap = ((requested + quantum - 1U) / quantum) * quantum;
+    if (cap > max_cap) cap = max_cap;
+    if (cap < requested) cap = requested;
+    return cap;
+}
+
+static BenchCapacityBuffer *bench_capacity_take(
+    BenchCapacityPool *pool, uint32_t requested) {
+    int first = bigint_pool_bucket(requested);
+    BenchCapacityBuffer *best = NULL;
+    int best_bucket = -1;
+    int best_index = -1;
+    int hot_bucket =
+        pool->hot && pool->hot->cap >= requested
+            ? bigint_pool_bucket(pool->hot->cap)
+            : -1;
+    for (int bucket = first; bucket < BN_BIGINT_POOL_BUCKETS; bucket++) {
+        if (bucket == hot_bucket) {
+            best = pool->hot;
+            best_bucket = -2;
+        }
+        int count = pool->count[bucket];
+        for (int i = 0; i < count; i++) {
+            BenchCapacityBuffer *candidate = pool->slot[bucket][i];
+            if (candidate->cap >= requested &&
+                (!best || candidate->cap < best->cap)) {
+                best = candidate;
+                best_bucket = bucket;
+                best_index = i;
+            }
+        }
+        if (best) break;
+    }
+    if (!best) return NULL;
+    if (best_bucket == -2) {
+        pool->hot = NULL;
+        return best;
+    }
+    int last = --pool->count[best_bucket];
+    pool->slot[best_bucket][best_index] = pool->slot[best_bucket][last];
+    pool->slot[best_bucket][last] = NULL;
+    return best;
+}
+
+static void bench_capacity_release(
+    BenchCapacityPool *pool, BenchCapacityBuffer *buffer,
+    uint64_t *resident_limbs, uint64_t *frees) {
+    if (!pool->hot) {
+        pool->hot = buffer;
+        return;
+    }
+    int bucket = bigint_pool_bucket(buffer->cap);
+    int count = pool->count[bucket];
+    if (buffer->cap > BN_BIGINT_POOL_MAX_CAP ||
+        count >= BN_BIGINT_POOL_PER_BUCKET) {
+        *resident_limbs -= buffer->cap;
+        (*frees)++;
+        free(buffer);
+        return;
+    }
+    pool->slot[bucket][count] = buffer;
+    pool->count[bucket] = (uint8_t)(count + 1);
+}
+
+static void bench_capacity_pool_free(BenchCapacityPool *pool) {
+    free(pool->hot);
+    for (int bucket = 0; bucket < BN_BIGINT_POOL_BUCKETS; bucket++) {
+        for (int i = 0; i < pool->count[bucket]; i++)
+            free(pool->slot[bucket][i]);
+    }
+}
+
+static uint32_t *bench_capacity_trace(uint32_t max_limbs, uint32_t requests) {
+    uint32_t *trace =
+        (uint32_t *)malloc((size_t)requests * sizeof(uint32_t));
+    if (!trace) die("out of memory allocating capacity benchmark trace");
+    uint64_t state = 0x6a09e667f3bcc909ULL ^ max_limbs ^ requests;
+    uint32_t log_max = 0;
+    while ((1U << log_max) < max_limbs) log_max++;
+    uint32_t small_max = max_limbs < 32 ? max_limbs : 32;
+    for (uint32_t i = 0; i < requests; i++) {
+        uint64_t random = bench_rng(&state);
+        uint32_t step = i >> 3;
+        uint32_t requested;
+        switch (i & 7U) {
+        case 0:
+            requested = step % max_limbs + 1U;
+            break;
+        case 1:
+            requested = max_limbs - step % max_limbs;
+            break;
+        case 2:
+            requested = (uint32_t)(random % max_limbs) + 1U;
+            break;
+        case 3: {
+            uint32_t bit = (uint32_t)(random % (log_max + 1U));
+            uint32_t low = bit == 0 ? 1U : (1U << (bit - 1U)) + 1U;
+            uint32_t high = 1U << bit;
+            if (high > max_limbs) high = max_limbs;
+            requested = low + (uint32_t)(bench_rng(&state) %
+                                         (uint64_t)(high - low + 1U));
+            break;
+        }
+        case 4:
+            /* Slowly growing local values exercise incremental +1 demand. */
+            requested = (step / 8U) % max_limbs + 1U;
+            break;
+        case 5: {
+            /* Multiplication- and shift-shaped results around twice an input. */
+            uint32_t half = max_limbs > 1 ? max_limbs / 2U : 1U;
+            uint32_t base = (uint32_t)(random % half) + 1U;
+            requested = base * 2U + (uint32_t)(random >> 63);
+            if (requested > max_limbs) requested = max_limbs;
+            break;
+        }
+        case 6:
+            /* A realistic small-value-heavy lane with occasional large values. */
+            requested = (random & 7U)
+                ? (uint32_t)(bench_rng(&state) % small_max) + 1U
+                : (uint32_t)(bench_rng(&state) % max_limbs) + 1U;
+            break;
+        default:
+            requested = (uint32_t)(bench_rng(&state) % max_limbs) + 1U;
+            break;
+        }
+        trace[i] = requested;
+    }
+    return trace;
+}
+
+static BenchCapacityStats bench_capacity_policy(
+    int policy, const uint32_t *trace, uint32_t requests,
+    uint32_t max_limbs) {
+    BenchCapacityPool pool;
+    memset(&pool, 0, sizeof(pool));
+    BenchCapacityBuffer *previous = NULL;
+    uint64_t hits = 0;
+    uint64_t allocations = 0;
+    uint64_t frees = 0;
+    uint64_t slack = 0;
+    uint64_t resident_limbs = 0;
+    uint64_t peak_limbs = 0;
+
+    double start = bench_now();
+    for (uint32_t i = 0; i < requests; i++) {
+        uint32_t requested = trace[i];
+        BenchCapacityBuffer *next = bench_capacity_take(&pool, requested);
+        if (next) {
+            hits++;
+        } else {
+            uint32_t cap =
+                bench_capacity_round(policy, requested, max_limbs);
+            size_t bytes = sizeof(BenchCapacityBuffer) +
+                           (size_t)cap * sizeof(uint64_t);
+            next = (BenchCapacityBuffer *)malloc(bytes);
+            if (!next) die("out of memory in capacity benchmark");
+            next->cap = cap;
+            allocations++;
+            resident_limbs += cap;
+            if (resident_limbs > peak_limbs) peak_limbs = resident_limbs;
+        }
+        slack += (uint64_t)(next->cap - requested);
+        next->limbs[0] = (uint64_t)requested ^ i;
+        next->limbs[requested - 1U] =
+            ((uint64_t)requested << 32) ^ ((uint64_t)i << 1);
+        bench_sink ^= next->limbs[0] ^ next->limbs[requested - 1U];
+        if (previous)
+            bench_capacity_release(
+                &pool, previous, &resident_limbs, &frees);
+        previous = next;
+    }
+    if (previous)
+        bench_capacity_release(&pool, previous, &resident_limbs, &frees);
+    double elapsed = bench_now() - start;
+
+    BenchCapacityStats stats;
+    stats.ns_per_request = elapsed * 1e9 / (double)requests;
+    stats.hit_percent = (double)hits * 100.0 / (double)requests;
+    stats.average_slack = (double)slack / (double)requests;
+    stats.allocations = allocations;
+    stats.frees = frees;
+    stats.peak_limbs = peak_limbs;
+    stats.retained_limbs = resident_limbs;
+    bench_capacity_pool_free(&pool);
+    return stats;
+}
+
+int main(int argc, char **argv) {
+    if (argc == 5 && strcmp(argv[1], "--bench-capacity-policies") == 0) {
+        uint32_t max_limbs = (uint32_t)strtoul(argv[2], NULL, 10);
+        uint32_t requests = (uint32_t)strtoul(argv[3], NULL, 10);
+        int runs = atoi(argv[4]);
+        if (max_limbs == 0 || max_limbs > BN_BIGINT_POOL_MAX_CAP ||
+            requests < 1000 || runs <= 0)
+            die("capacity benchmark expects max limbs 1..16384,"
+                " at least 1000 requests, and positive runs");
+        uint32_t *trace = bench_capacity_trace(max_limbs, requests);
+        for (int policy = 0; policy < BENCH_CAP_POLICY_COUNT; policy++) {
+            BenchCapacityStats best = {0};
+            best.ns_per_request = 1e300;
+            for (int run = 0; run < runs; run++) {
+                BenchCapacityStats current = bench_capacity_policy(
+                    policy, trace, requests, max_limbs);
+                if (current.ns_per_request < best.ns_per_request)
+                    best = current;
+            }
+            printf("capacity\t%s\t%u\t%u\t%.3f\t%.3f\t%llu\t%.3f"
+                   "\t%.3f\t%.3f\n",
+                   bench_capacity_policy_name(policy), max_limbs, requests,
+                   best.ns_per_request, best.hit_percent,
+                   (unsigned long long)best.allocations,
+                   best.average_slack,
+                   (double)best.peak_limbs * 8.0 / 1024.0,
+                   (double)best.retained_limbs * 8.0 / 1024.0);
+        }
+        free(trace);
+        return 0;
+    }
+    /* Live-set view of the same trace: what each rounding policy costs when
+     * the values are all held simultaneously (an array/matrix of bignums)
+     * rather than churned one at a time through the recycler.  This is the
+     * scenario where per-allocation rounding waste is fully exposed. */
+    if (argc == 4 && strcmp(argv[1], "--bench-capacity-liveset") == 0) {
+        uint32_t max_limbs = (uint32_t)strtoul(argv[2], NULL, 10);
+        uint32_t requests = (uint32_t)strtoul(argv[3], NULL, 10);
+        if (max_limbs == 0 || max_limbs > BN_BIGINT_POOL_MAX_CAP ||
+            requests < 1000)
+            die("liveset expects max limbs 1..16384 and >= 1000 requests");
+        uint32_t *trace = bench_capacity_trace(max_limbs, requests);
+        uint8_t *seen = (uint8_t *)calloc((size_t)max_limbs + 1U, 1);
+        if (!seen) die("out of memory in liveset benchmark");
+        printf("policy\t\treq_MiB\talloc_MiB\twaste%%\tmax_waste%%\tclasses\n");
+        for (int policy = 0; policy < BENCH_CAP_POLICY_COUNT; policy++) {
+            memset(seen, 0, (size_t)max_limbs + 1U);
+            uint64_t req_total = 0, alloc_total = 0;
+            double worst = 0.0;
+            uint32_t classes = 0;
+            for (uint32_t i = 0; i < requests; i++) {
+                uint32_t r = trace[i];
+                uint32_t c = bench_capacity_round(policy, r, max_limbs);
+                req_total += r;
+                alloc_total += c;
+                double w = (double)(c - r) * 100.0 / (double)r;
+                if (w > worst) worst = w;
+                if (c <= max_limbs && !seen[c]) { seen[c] = 1; classes++; }
+            }
+            double req_mib = (double)req_total * 8.0 / (1024.0 * 1024.0);
+            double alloc_mib = (double)alloc_total * 8.0 / (1024.0 * 1024.0);
+            printf("%-14s\t%.2f\t%.2f\t%.2f\t%.1f\t%u\n",
+                   bench_capacity_policy_name(policy), req_mib, alloc_mib,
+                   ((double)alloc_total / (double)req_total - 1.0) * 100.0,
+                   worst, classes);
+        }
+        free(seen);
+        free(trace);
+        return 0;
+    }
+    if ((argc == 5 || argc == 6) &&
+        strcmp(argv[1], "--bench-boxed-compare") == 0) {
+        int op = bench_boxed_op_parse(argv[2]);
+        int32_t limbs = (int32_t)atoi(argv[3]);
+        int iters = atoi(argv[4]);
+        int reverse = argc == 6 && strcmp(argv[5], "reverse") == 0;
+        if (op < 0)
+            die("boxed comparison op must be add/sub/mul/sqr/div/mod/gcd/"
+                "and/or/xor/shl/shr/cmp/neg/abs/pow/powmod/lcm/isqrt/"
+                "tostr/fromstr");
+        if (limbs <= 0 || iters <= 0)
+            die("boxed comparison expects positive limbs and iterations");
+        if (argc == 6 && !reverse)
+            die("boxed comparison optional order must be reverse");
+#ifdef HAVE_GMP
+        check_boxed_op_against_gmp(op, limbs);
+        double tw, gm;
+        if (reverse) {
+            gm = bench_gmp_boxed_result_churn(op, limbs, iters);
+            tw = bench_boxed_result_churn(op, limbs, iters, 1);
+        } else {
+            tw = bench_boxed_result_churn(op, limbs, iters, 1);
+            gm = bench_gmp_boxed_result_churn(op, limbs, iters);
+        }
+        printf("boxed\t%s\t%d\t%d\t%.3f\t%.3f\n",
+               argv[2], limbs, iters, tw, gm);
+#else
+        die("boxed comparison requires GMP");
+#endif
+        return 0;
+    }
+    if (argc == 6 && strcmp(argv[1], "--profile-result-recycle") == 0) {
+        int op = bench_boxed_op_parse(argv[2]);
+        int32_t limbs = (int32_t)atoi(argv[3]);
+        int recycle = strcmp(argv[4], "pool") == 0;
+        int direct = strcmp(argv[4], "direct") == 0;
+        int iters = atoi(argv[5]);
+        if (op < 0 || (!recycle && !direct) || limbs <= 0 || iters <= 0)
+            die("profile result recycle expects op limbs direct|pool iterations");
+        double ns = bench_boxed_result_churn(op, limbs, iters, recycle);
+        printf("boxed-result profile %s %d limbs %s: %.1f ns sink=%llu\n",
+               argv[2], limbs, argv[4], ns,
+               (unsigned long long)bench_sink);
+        return 0;
+    }
+    if (argc == 5 && strcmp(argv[1], "--profile-gmp-result") == 0) {
+        int op = bench_boxed_op_parse(argv[2]);
+        int32_t limbs = (int32_t)atoi(argv[3]);
+        int iters = atoi(argv[4]);
+        if (op < 0 || limbs <= 0 || iters <= 0)
+            die("GMP result profile expects op limbs iterations");
+#ifdef HAVE_GMP
+        double ns = bench_gmp_boxed_result_churn(op, limbs, iters);
+        printf("GMP boxed-result profile %s %d limbs: %.1f ns sink=%llu\n",
+               argv[2], limbs, ns, (unsigned long long)bench_sink);
+#else
+        die("GMP result profile requires GMP");
+#endif
+        return 0;
+    }
+    if (argc == 5 && strcmp(argv[1], "--bench-result-recycle") == 0) {
+        int op = bench_boxed_op_parse(argv[2]);
+        int32_t limbs = (int32_t)atoi(argv[3]);
+        int iters = atoi(argv[4]);
+        if (op < 0)
+            die("result recycle op must be add/sub/mul/sqr/div/mod/gcd/"
+                "and/or/xor/shl/shr/cmp/neg/abs/pow/powmod/lcm/isqrt/"
+                "tostr/fromstr");
+        if (limbs <= 0 || iters <= 0)
+            die("result recycle benchmark expects positive limbs and iterations");
+        double direct = bench_boxed_result_churn(op, limbs, iters, 0);
+        double recycled = bench_boxed_result_churn(op, limbs, iters, 1);
+        printf("boxed-result %s %d limbs (%d iters): malloc/free %.1f ns,"
+               " give/take %.1f ns, speedup %.2fx\n",
+               argv[2], limbs, iters, direct, recycled,
+               recycled > 0.0 ? direct / recycled : 0.0);
+        return 0;
+    }
+    if (argc == 4 && strcmp(argv[1], "--bench-shift-iters") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        int iters = atoi(argv[3]);
+        if (limbs <= 0 || iters <= 0)
+            die("shift benchmark expects positive limbs and iterations");
+#ifdef HAVE_GMP
+        check_bitwise_shifts_against_gmp(limbs);
+        double tl = bench_tungsten_shift(1, limbs, iters);
+        double gl = bench_gmp_shift(1, limbs, iters);
+        double tr = bench_tungsten_shift(0, limbs, iters);
+        double gr = bench_gmp_shift(0, limbs, iters);
+        printf("shift %d limbs (%d iters): shl tungsten %.1f ns,"
+               " gmp %.1f ns, gap %.2fx; shr tungsten %.1f ns,"
+               " gmp %.1f ns, gap %.2fx\n",
+               limbs, iters, tl, gl, ratio(tl, gl),
+               tr, gr, ratio(tr, gr));
+#else
+        printf("shift %d limbs (%d iters): shl tungsten %.1f ns;"
+               " shr tungsten %.1f ns\n",
+               limbs, iters,
+               bench_tungsten_shift(1, limbs, iters),
+               bench_tungsten_shift(0, limbs, iters));
+#endif
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--profile-shift") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("shift profile limbs must be positive");
+        int iters = limbs <= 256 ? 30000000 :
+                    limbs <= 1024 ? 10000000 : 2000000;
+        (void)bench_tungsten_shift(1, limbs, iters);
+        printf("shift profile sink=%llu\n",
+               (unsigned long long)bench_sink);
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "--bench-mod1-blocks-cached") == 0) {
+        const int32_t sizes[] = {8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096};
+        printf("cached mod1 blocks (ns/op)\n");
+        printf("limbs   block8  block16  block32  block64 block128 block256 block512\n");
+        for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+            int32_t limbs = sizes[i];
+            int iters = bench_iters_for_mod(limbs) * 10;
+            uint64_t *a = bench_limbs(
+                limbs, 0x6a09e667f3bcc909ULL ^ (uint64_t)limbs);
+            double b8 = bench_tungsten_mod1_block_cached(a, limbs, 8, iters);
+            double b16 = bench_tungsten_mod1_block_cached(a, limbs, 16, iters);
+            double b32 = bench_tungsten_mod1_block_cached(a, limbs, 32, iters);
+            double b64 = bench_tungsten_mod1_block_cached(a, limbs, 64, iters);
+            double b128 = bench_tungsten_mod1_block_cached(a, limbs, 128, iters);
+            double b256 = bench_tungsten_mod1_block_cached(a, limbs, 256, iters);
+            double b512 = bench_tungsten_mod1_block_cached(a, limbs, 512, iters);
+            printf("%5d %8.1f %8.1f %8.1f %8.1f %8.1f %8.1f %8.1f\n",
+                   limbs, b8, b16, b32, b64, b128, b256, b512);
+            free(a);
+        }
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "--bench-mod1-blocks") == 0) {
+        const int32_t sizes[] = {8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096};
+#ifdef HAVE_GMP
+        printf("limbs   block8  block16  block32      gmp\n");
+#else
+        printf("limbs   block8  block16  block32\n");
+#endif
+        for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+            int32_t limbs = sizes[i];
+            int iters = bench_iters_for_mod(limbs) * 10;
+            uint64_t *a = bench_limbs(limbs, 0x6a09e667f3bcc909ULL ^ (uint64_t)limbs);
+            double b8 = bench_tungsten_mod1_block(a, limbs, 8, iters);
+            double b16 = bench_tungsten_mod1_block(a, limbs, 16, iters);
+            double b32 = bench_tungsten_mod1_block(a, limbs, 32, iters);
+#ifdef HAVE_GMP
+            double gm = bench_gmp_mod1(a, limbs, iters);
+            printf("%5d %8.1f %8.1f %8.1f %8.1f\n", limbs, b8, b16, b32, gm);
+#else
+            printf("%5d %8.1f %8.1f %8.1f\n", limbs, b8, b16, b32);
+#endif
+            free(a);
+        }
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--dispatch-cost") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        int32_t sw;
+        long sL;
+        uint64_t sK;
+        double ssa = ssa_choose(limbs, limbs, &sw, &sL, &sK);
+        printf("dispatch cost %d limbs: ssa=%.1f (w=%d L=%ld K=%llu) ntt=%.1f choices mul=%d sqr=%d\n",
+               limbs, ssa, sw, sL, (unsigned long long)sK, ntt_cost_est(limbs),
+               bn_top_choice(limbs, limbs, 0), bn_top_choice(limbs, limbs, 1));
+        return 0;
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-gcd") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t max_limbs = (int32_t)atoi(argv[3]);
+        if (cases <= 0 || max_limbs < 2)
+            die("gcd fuzz expects positive cases and max limbs >= 2");
+#ifdef HAVE_GMP
+        fuzz_gcd_against_gmp(cases, max_limbs);
+#else
+        die("gcd fuzz requires GMP");
+#endif
+        return 0;
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-sqr") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t max_limbs = (int32_t)atoi(argv[3]);
+        if (cases <= 0 || max_limbs <= 0)
+            die("square fuzz expects positive cases and max limbs");
+#ifdef HAVE_GMP
+        int bad = fuzz_sqr_against_gmp(cases, max_limbs);
+        printf("square fuzz vs GMP: %d/%d match (max %d limbs)%s\n",
+               cases - bad, cases, max_limbs,
+               bad ? "  *** MISMATCH ***" : "");
+        return bad ? 1 : 0;
+#else
+        die("square fuzz requires GMP");
+#endif
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-mul") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t max_limbs = (int32_t)atoi(argv[3]);
+        if (cases <= 0 || max_limbs <= 0)
+            die("multiply fuzz expects positive cases and max limbs");
+#ifdef HAVE_GMP
+        int bad = fuzz_mul_against_gmp(cases, max_limbs);
+        printf("multiply fuzz vs GMP: %d/%d match (max %d limbs)%s\n",
+               cases - bad, cases, max_limbs,
+               bad ? "  *** MISMATCH ***" : "");
+        return bad ? 1 : 0;
+#else
+        die("multiply fuzz requires GMP");
+#endif
+    }
+    if (argc == 5 && strcmp(argv[1], "--stress-parallel-mul") == 0) {
+        int threads = atoi(argv[2]);
+        int iters = atoi(argv[3]);
+        int32_t limbs = (int32_t)atoi(argv[4]);
+        if (threads < 2 || threads > 16 || iters <= 0 ||
+            limbs < BN_TOOM2_PAR_THRESHOLD)
+            die("parallel multiply stress expects 2..16 threads,"
+                " positive iterations, and a parallel limb width");
+#ifdef HAVE_GMP
+        stress_parallel_mul_against_gmp(threads, iters, limbs);
+#else
+        die("parallel multiply stress requires GMP");
+#endif
+        return 0;
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-div-single") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t max_limbs = (int32_t)atoi(argv[3]);
+        if (cases <= 0 || max_limbs <= 0)
+            die("single-limb division fuzz expects positive cases"
+                " and max limbs");
+#ifdef HAVE_GMP
+        fuzz_div_single_against_gmp(cases, max_limbs);
+        return 0;
+#else
+        die("single-limb division fuzz requires GMP");
+#endif
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-divmod") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t max_limbs = (int32_t)atoi(argv[3]);
+        if (cases <= 0 || max_limbs <= 0)
+            die("multi-limb division fuzz expects positive cases"
+                " and max limbs");
+#ifdef HAVE_GMP
+        fuzz_divmod_against_gmp(cases, max_limbs);
+        return 0;
+#else
+        die("multi-limb division fuzz requires GMP");
+#endif
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-div-recip") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t limbs = (int32_t)atoi(argv[3]);
+        int32_t min_limbs =
+            BN_DIV_BARRETT_R_MIN < BN_DIV_RECIP_Q_MIN
+                ? BN_DIV_BARRETT_R_MIN : BN_DIV_RECIP_Q_MIN;
+        if (cases <= 0 || limbs < min_limbs)
+            die("reciprocal division fuzz expects positive cases and"
+                " a supported divisor width");
+#ifdef HAVE_GMP
+        fuzz_div_reciprocal_against_gmp(cases, limbs);
+#else
+        die("reciprocal division fuzz requires GMP");
+#endif
+        return 0;
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-add-sub") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t max_limbs = (int32_t)atoi(argv[3]);
+        if (cases <= 0 || max_limbs <= 0)
+            die("add/sub fuzz expects positive cases and max limbs");
+#ifdef HAVE_GMP
+        fuzz_add_sub_against_gmp(cases, max_limbs);
+        return 0;
+#else
+        die("add/sub fuzz requires GMP");
+#endif
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-bitwise-shifts") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t max_limbs = (int32_t)atoi(argv[3]);
+        if (cases <= 0 || max_limbs <= 0)
+            die("bitwise/shift fuzz expects positive cases and max limbs");
+#ifdef HAVE_GMP
+        fuzz_bitwise_shifts_against_gmp(cases, max_limbs);
+        return 0;
+#else
+        die("bitwise/shift fuzz requires GMP");
+#endif
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-boxed-mul-sqr") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t max_limbs = (int32_t)atoi(argv[3]);
+        if (cases <= 0 || max_limbs <= 0)
+            die("boxed multiply/square fuzz expects positive cases"
+                " and max limbs");
+#ifdef HAVE_GMP
+        fuzz_boxed_mul_sqr_against_gmp(cases, max_limbs);
+        return 0;
+#else
+        die("boxed multiply/square fuzz requires GMP");
+#endif
+    }
+    if (argc == 4 && strcmp(argv[1], "--bench-linear-iters") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        int iters = atoi(argv[3]);
+        if (limbs <= 0 || iters <= 0)
+            die("linear benchmark expects positive limbs and iterations");
+        uint64_t *a = bench_limbs(
+            limbs, 0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+        uint64_t *b =
+            (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+        if (!b) die("out of memory preparing linear benchmark");
+        memcpy(b, a, (size_t)limbs * sizeof(uint64_t));
+        b[0] ^= 1ULL;
+#ifdef HAVE_GMP
+        check_linear_against_gmp(limbs, a, b);
+        double ta = bench_tungsten_add(a, b, limbs, iters);
+        double ga = bench_gmp_add(a, b, limbs, iters);
+        double ts = bench_tungsten_sub(a, b, limbs, iters);
+        double gs = bench_gmp_sub(a, b, limbs, iters);
+        printf("linear %d limbs (%d iters): add tungsten %.3f ns,"
+               " gmp %.3f ns, gap %.3fx; sub tungsten %.3f ns,"
+               " gmp %.3f ns, gap %.3fx\n",
+               limbs, iters, ta, ga, ratio(ta, ga),
+               ts, gs, ratio(ts, gs));
+#else
+        printf("linear %d limbs (%d iters): add tungsten %.3f ns;"
+               " sub tungsten %.3f ns\n",
+               limbs, iters,
+               bench_tungsten_add(a, b, limbs, iters),
+               bench_tungsten_sub(a, b, limbs, iters));
+#endif
+        free(a);
+        free(b);
+        return 0;
+    }
+    if (argc == 4 && strcmp(argv[1], "--bench-gcd-iters") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        int iters = atoi(argv[3]);
+        if (limbs <= 0 || iters <= 0)
+            die("gcd benchmark expects positive limbs and iterations");
+#ifdef HAVE_GMP
+        check_gcd_against_gmp(limbs);
+#ifdef BN_GCD_PROFILE_COUNTS
+        gcd_profile_sim_calls = 0;
+        gcd_profile_sim_steps = 0;
+        gcd_profile_fast_q1 = 0;
+        gcd_profile_pair_calls = 0;
+        gcd_profile_pair_limbs = 0;
+#endif
+        double tg = bench_tungsten_gcd(limbs, iters);
+#ifdef BN_GCD_PROFILE_COUNTS
+        uint64_t sim_calls = gcd_profile_sim_calls;
+        uint64_t sim_steps = gcd_profile_sim_steps;
+        uint64_t fast_q1 = gcd_profile_fast_q1;
+        uint64_t pair_calls = gcd_profile_pair_calls;
+        uint64_t pair_limbs = gcd_profile_pair_limbs;
+#endif
+        double gg = bench_gmp_gcd(limbs, iters);
+        printf("gcd %d limbs (%d iters): tungsten %.1f ns,"
+               " gmp %.1f ns, gap %.2fx\n",
+               limbs, iters, tg, gg, ratio(tg, gg));
+#ifdef BN_GCD_PROFILE_COUNTS
+        printf("  lehmer calls=%llu steps=%llu fast-q1=%llu"
+               " pair calls=%llu pair limbs=%llu\n",
+               (unsigned long long)sim_calls,
+               (unsigned long long)sim_steps,
+               (unsigned long long)fast_q1,
+               (unsigned long long)pair_calls,
+               (unsigned long long)pair_limbs);
+#endif
+#else
+        printf("gcd %d limbs (%d iters): tungsten %.1f ns\n",
+               limbs, iters, bench_tungsten_gcd(limbs, iters));
+#endif
+        return 0;
+    }
+    if (argc == 4 && strcmp(argv[1], "--bench-gcd-random-iters") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        int iters = atoi(argv[3]);
+        if (limbs <= 0 || iters <= 0)
+            die("random gcd benchmark expects positive limbs and iterations");
+#ifdef HAVE_GMP
+        check_random_gcd_against_gmp(limbs);
+#ifdef BN_GCD_PROFILE_COUNTS
+        gcd_profile_sim_calls = 0;
+        gcd_profile_sim_steps = 0;
+        gcd_profile_fast_q1 = 0;
+        gcd_profile_pair_calls = 0;
+        gcd_profile_pair_limbs = 0;
+        gcd_profile_matrix_products = 0;
+        gcd_profile_matrix_product_work = 0;
+        for (int i = 0; i < 12; i++) gcd_profile_matrix_product_bins[i] = 0;
+#endif
+        double tg = bench_tungsten_gcd_random(limbs, iters);
+#ifdef BN_GCD_PROFILE_COUNTS
+        uint64_t sim_calls = gcd_profile_sim_calls;
+        uint64_t sim_steps = gcd_profile_sim_steps;
+        uint64_t fast_q1 = gcd_profile_fast_q1;
+        uint64_t pair_calls = gcd_profile_pair_calls;
+        uint64_t pair_limbs = gcd_profile_pair_limbs;
+        uint64_t matrix_products = gcd_profile_matrix_products;
+        uint64_t matrix_work = gcd_profile_matrix_product_work;
+        uint64_t matrix_bins[12];
+        memcpy(matrix_bins, gcd_profile_matrix_product_bins,
+               sizeof(matrix_bins));
+#endif
+        double gg = bench_gmp_gcd_random(limbs, iters);
+        printf("random gcd %d limbs (%d iters): tungsten %.1f ns,"
+               " gmp %.1f ns, gap %.2fx\n",
+               limbs, iters, tg, gg, ratio(tg, gg));
+#ifdef BN_GCD_PROFILE_COUNTS
+        printf("  lehmer calls=%llu steps=%llu fast-q1=%llu"
+               " pair calls=%llu pair limbs=%llu\n",
+               (unsigned long long)sim_calls,
+               (unsigned long long)sim_steps,
+               (unsigned long long)fast_q1,
+               (unsigned long long)pair_calls,
+               (unsigned long long)pair_limbs);
+        printf("  matrix products=%llu schoolbook-work=%llu bins:",
+               (unsigned long long)matrix_products,
+               (unsigned long long)matrix_work);
+        for (int i = 0; i < 12; i++) {
+            if (matrix_bins[i])
+                printf(" <=%d:%llu", 1 << i,
+                       (unsigned long long)matrix_bins[i]);
+        }
+        printf("\n");
+#endif
+#else
+        printf("random gcd %d limbs (%d iters): tungsten %.1f ns\n",
+               limbs, iters, bench_tungsten_gcd_random(limbs, iters));
+#endif
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--bench-gcd-random") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("random gcd benchmark limbs must be positive");
+        int iters = bench_iters_for_gcd(limbs);
+#ifdef HAVE_GMP
+        check_random_gcd_against_gmp(limbs);
+        double tg = bench_tungsten_gcd_random(limbs, iters);
+        double gg = bench_gmp_gcd_random(limbs, iters);
+        printf("random gcd %d limbs: tungsten %.1f ns, gmp %.1f ns, gap %.2fx\n",
+               limbs, tg, gg, ratio(tg, gg));
+#else
+        printf("random gcd %d limbs: tungsten %.1f ns\n",
+               limbs, bench_tungsten_gcd_random(limbs, iters));
+#endif
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--profile-gcd-random") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("profile random gcd limbs must be positive");
+        int iters = limbs <= 64 ? 5000000 :
+                    limbs <= 256 ? 200000 : 1000;
+        (void)bench_tungsten_gcd_random(limbs, iters);
+        printf("random gcd profile sink=%llu\n", (unsigned long long)bench_sink);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--profile-gcd") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("profile gcd limbs must be positive");
+        int iters = limbs <= 64 ? 5000000 :
+                    limbs <= 256 ? 2000000 : 500000;
+        (void)bench_tungsten_gcd(limbs, iters);
+        printf("gcd profile sink=%llu\n", (unsigned long long)bench_sink);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--profile-divmod") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("profile divmod limbs must be positive");
+        int iters = limbs <= 4 ? 10000000 :
+                    limbs <= 16 ? 3000000 :
+                    limbs <= 64 ? 500000 :
+                    limbs <= 256 ? 50000 : 5000;
+        uint64_t *u = bench_limbs(2 * limbs,
+                                  0x13198a2e03707344ULL ^ (uint64_t)limbs);
+        uint64_t *v = bench_limbs(limbs,
+                                  0xa4093822299f31d0ULL ^ (uint64_t)limbs);
+        (void)bench_tungsten_divmod(u, v, limbs, iters);
+        free(u);
+        free(v);
+        printf("divmod profile sink=%llu\n", (unsigned long long)bench_sink);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--bench-submul1") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("submul1 benchmark limbs must be positive");
+        int iters = limbs <= 4 ? 10000000 :
+                    limbs <= 16 ? 5000000 :
+                    limbs <= 64 ? 1000000 :
+                    limbs <= 256 ? 200000 : 50000;
+        uint64_t *u = bench_limbs(limbs,
+                                  0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+        uint64_t *r = bench_limbs(limbs,
+                                  0x13198a2e03707344ULL ^ (uint64_t)limbs);
+        uint64_t v = 0xd6e8feb86659fd93ULL;
+        double tw = bench_tungsten_submul1(u, r, limbs, v, iters);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_submul1(u, r, limbs, v, iters);
+        printf("submul1 %d limbs: tungsten %.1f ns, gmp %.1f ns, gap %.2fx\n",
+               limbs, tw, gm, ratio(tw, gm));
+#else
+        printf("submul1 %d limbs: tungsten %.1f ns\n", limbs, tw);
+#endif
+        free(u);
+        free(r);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--bench-divmod-paths") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("divmod path benchmark limbs must be positive");
+        int iters = bench_iters_for_divmod(limbs);
+        uint64_t *u = bench_limbs(2 * limbs,
+                                  0x13198a2e03707344ULL ^ (uint64_t)limbs);
+        uint64_t *v = bench_limbs(limbs,
+                                  0xa4093822299f31d0ULL ^ (uint64_t)limbs);
+        double knuth = bench_tungsten_divmod_path(u, v, limbs, iters, 1);
+        double bz = bench_tungsten_divmod_path(u, v, limbs, iters, 2);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_divmod(u, v, limbs, iters);
+        printf("divmod paths %d limbs: knuth %.1f ns, bz %.1f ns, gmp %.1f ns"
+               " (best/gmp %.2fx)\n",
+               limbs, knuth, bz, gm, ratio(knuth < bz ? knuth : bz, gm));
+#else
+        printf("divmod paths %d limbs: knuth %.1f ns, bz %.1f ns\n",
+               limbs, knuth, bz);
+#endif
+        free(u);
+        free(v);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--bench-divmod-kernel") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("divmod kernel benchmark limbs must be positive");
+        int iters = bench_iters_for_divmod(limbs);
+        uint64_t *u = bench_limbs(2 * limbs,
+                                  0x13198a2e03707344ULL ^ (uint64_t)limbs);
+        uint64_t *v = bench_limbs(limbs,
+                                  0xa4093822299f31d0ULL ^ (uint64_t)limbs);
+        double tw = bench_tungsten_divmod_into(u, v, limbs, iters);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_divmod(u, v, limbs, iters);
+        printf("divmod kernel %d limbs: tungsten %.1f ns, gmp %.1f ns,"
+               " gap %.2fx\n", limbs, tw, gm, ratio(tw, gm));
+#else
+        printf("divmod kernel %d limbs: tungsten %.1f ns\n", limbs, tw);
+#endif
+        free(u);
+        free(v);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--bench-divmod") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("divmod benchmark limbs must be positive");
+        int iters = bench_iters_for_divmod(limbs);
+        uint64_t *u = bench_limbs(2 * limbs,
+                                  0x13198a2e03707344ULL ^ (uint64_t)limbs);
+        uint64_t *v = bench_limbs(limbs,
+                                  0xa4093822299f31d0ULL ^ (uint64_t)limbs);
+#ifdef HAVE_GMP
+        check_divmod_against_gmp(limbs, u, v);
+        double tw = bench_tungsten_divmod(u, v, limbs, iters);
+        double gm = bench_gmp_divmod(u, v, limbs, iters);
+        printf("divmod %d limbs: tungsten %.1f ns, gmp %.1f ns, gap %.2fx\n",
+               limbs, tw, gm, ratio(tw, gm));
+#else
+        printf("divmod %d limbs: tungsten %.1f ns\n", limbs,
+               bench_tungsten_divmod(u, v, limbs, iters));
+#endif
+        free(u);
+        free(v);
+        return 0;
+    }
+    if (argc == 4 && strcmp(argv[1], "--bench-divmod-iters") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        int iters = atoi(argv[3]);
+        if (limbs <= 0 || iters <= 0)
+            die("divmod benchmark expects positive limbs and iterations");
+        uint64_t *u = bench_limbs(2 * limbs,
+                                  0x13198a2e03707344ULL ^ (uint64_t)limbs);
+        uint64_t *v = bench_limbs(limbs,
+                                  0xa4093822299f31d0ULL ^ (uint64_t)limbs);
+#ifdef HAVE_GMP
+        check_divmod_against_gmp(limbs, u, v);
+#ifdef BN_BZ_PROFILE_COUNTS
+        bz_profile_mul_calls = 0;
+        bz_profile_mul_q_limbs = 0;
+        bz_profile_mul_b_limbs = 0;
+        bz_profile_mul_equal = 0;
+        bz_profile_mul_full = 0;
+        bz_profile_clamped = 0;
+        bz_profile_shape_count = 0;
+        for (int i = 0; i < 12; i++) bz_profile_mul_bins[i] = 0;
+#endif
+        double tw = bench_tungsten_divmod(u, v, limbs, iters);
+#ifdef BN_BZ_PROFILE_COUNTS
+        uint64_t bz_mul_calls = bz_profile_mul_calls;
+        uint64_t bz_mul_q_limbs = bz_profile_mul_q_limbs;
+        uint64_t bz_mul_b_limbs = bz_profile_mul_b_limbs;
+        uint64_t bz_mul_equal = bz_profile_mul_equal;
+        uint64_t bz_mul_full = bz_profile_mul_full;
+        uint64_t bz_clamped = bz_profile_clamped;
+        uint64_t bz_mul_bins[12];
+        int32_t bz_shape_count = bz_profile_shape_count;
+        int32_t bz_shape_k[32], bz_shape_q[32], bz_shape_b[32];
+        memcpy(bz_mul_bins, bz_profile_mul_bins, sizeof(bz_mul_bins));
+        memcpy(bz_shape_k, bz_profile_shape_k, sizeof(bz_shape_k));
+        memcpy(bz_shape_q, bz_profile_shape_q, sizeof(bz_shape_q));
+        memcpy(bz_shape_b, bz_profile_shape_b, sizeof(bz_shape_b));
+#endif
+        double gm = bench_gmp_divmod(u, v, limbs, iters);
+        printf("divmod %d limbs (%d iters): tungsten %.1f ns,"
+               " gmp %.1f ns, gap %.2fx\n",
+               limbs, iters, tw, gm, ratio(tw, gm));
+#ifdef BN_BZ_PROFILE_COUNTS
+        printf("  correction mul calls=%llu q-limbs=%llu b-limbs=%llu"
+               " equal=%llu full=%llu clamped=%llu bins:",
+               (unsigned long long)bz_mul_calls,
+               (unsigned long long)bz_mul_q_limbs,
+               (unsigned long long)bz_mul_b_limbs,
+               (unsigned long long)bz_mul_equal,
+               (unsigned long long)bz_mul_full,
+               (unsigned long long)bz_clamped);
+        for (int i = 0; i < 12; i++) {
+            if (bz_mul_bins[i])
+                printf(" <=%d:%llu", 1 << i,
+                       (unsigned long long)bz_mul_bins[i]);
+        }
+        printf("\n");
+        if (bz_shape_count) {
+            printf("  non-full correction shapes:");
+            for (int i = 0; i < bz_shape_count; i++)
+                printf(" k%d=%dx%d",
+                       bz_shape_k[i], bz_shape_q[i], bz_shape_b[i]);
+            printf("\n");
+        }
+#endif
+#else
+        printf("divmod %d limbs (%d iters): tungsten %.1f ns\n",
+               limbs, iters, bench_tungsten_divmod(u, v, limbs, iters));
+#endif
+        free(u);
+        free(v);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--profile-mul") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("profile multiply limbs must be positive");
+        int iters = limbs <= 8 ? 200000000 :
+                    limbs <= 64 ? 1000000 :
+                    limbs <= 256 ? 200000 :
+                    limbs <= 1024 ? 20000 :
+                    limbs <= 4096 ? 5000 : 1000;
+        uint64_t *a = bench_limbs(limbs,
+                                  0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+        uint64_t *b = bench_limbs(limbs,
+                                  0x13198a2e03707344ULL ^ (uint64_t)limbs);
+        (void)bench_tungsten_mul(a, b, limbs, iters);
+        free(a);
+        free(b);
+        printf("multiply profile sink=%llu\n", (unsigned long long)bench_sink);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--bench-mul1") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("mul_1 benchmark limbs must be positive");
+        int iters = bench_iters_for_linear(limbs);
+        uint64_t *up = bench_limbs(
+            limbs, 0x13198a2e03707344ULL ^ (uint64_t)limbs);
+        uint64_t *tw = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+        uint64_t *ref = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+        if (!tw || !ref) die("out of memory checking mul_1");
+        uint64_t tc = bn_mul_1(
+            tw, up, limbs, 0xd6e8feb86659fd93ULL);
+        uint64_t rc = bn_mul_1_ref(
+            ref, up, limbs, 0xd6e8feb86659fd93ULL);
+        if (tc != rc || memcmp(tw, ref, (size_t)limbs * sizeof(uint64_t)) != 0)
+            die("mul_1 mismatch vs reference");
+        double tn = bench_tungsten_mul_1(bn_mul_1, up, limbs, iters);
+        double tr = bench_tungsten_mul_1(bn_mul_1_ref, up, limbs, iters);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_mul_1(up, limbs, iters);
+        printf("mul1 %d limbs: tungsten %.1f ns, ref %.1f ns,"
+               " speedup %.2fx, gmp %.1f ns, gap %.2fx\n",
+               limbs, tn, tr, ratio(tr, tn), gm, ratio(tn, gm));
+#else
+        printf("mul1 %d limbs: tungsten %.1f ns, ref %.1f ns, speedup %.2fx\n",
+               limbs, tn, tr, ratio(tr, tn));
+#endif
+        free(ref);
+        free(tw);
+        free(up);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--profile-sqr") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("profile square limbs must be positive");
+        int iters = limbs <= 64 ? 1000000 :
+                    limbs <= 256 ? 200000 :
+                    limbs <= 1024 ? 20000 :
+                    limbs <= 4096 ? 5000 : 1000;
+        uint64_t *a = bench_limbs(limbs,
+                                  0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+        (void)bench_tungsten_sqr(a, limbs, iters);
+        free(a);
+        printf("square profile sink=%llu\n", (unsigned long long)bench_sink);
+        return 0;
+    }
+    if (argc == 4 && strcmp(argv[1], "--bench-mul-iters") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        int iters = atoi(argv[3]);
+        if (limbs <= 0 || iters <= 0)
+            die("multiply benchmark expects positive limbs and iterations");
+        uint64_t *a = bench_limbs(limbs,
+                                  0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+        uint64_t *b = bench_limbs(limbs,
+                                  0x13198a2e03707344ULL ^ (uint64_t)limbs);
+        double tw = bench_tungsten_mul(a, b, limbs, iters);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_mul(a, b, limbs, iters);
+        printf("multiply %d limbs (%d iters): tungsten %.1f ns,"
+               " gmp %.1f ns, gap %.2fx\n",
+               limbs, iters, tw, gm, ratio(tw, gm));
+#else
+        printf("multiply %d limbs (%d iters): tungsten %.1f ns\n",
+               limbs, iters, tw);
+#endif
+        free(a);
+        free(b);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--bench-mul") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("multiply benchmark limbs must be positive");
+        int iters = bench_iters_for_limbs(limbs);
+        uint64_t *a = bench_limbs(limbs,
+                                  0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+        uint64_t *b = bench_limbs(limbs,
+                                  0x13198a2e03707344ULL ^ (uint64_t)limbs);
+        double tw = bench_tungsten_mul(a, b, limbs, iters);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_mul(a, b, limbs, iters);
+        printf("multiply %d limbs: tungsten %.1f ns, gmp %.1f ns, gap %.2fx\n",
+               limbs, tw, gm, ratio(tw, gm));
+#else
+        printf("multiply %d limbs: tungsten %.1f ns\n", limbs, tw);
+#endif
+        free(a);
+        free(b);
+        return 0;
+    }
+    if (argc == 4 && strcmp(argv[1], "--bench-mul-ladder") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        int iters = atoi(argv[3]);
+        if (limbs <= BN_KARA_THRESHOLD || iters <= 0)
+            die("multiply ladder expects limbs above the Karatsuba floor"
+                " and positive iterations");
+        uint64_t *a = bench_limbs(
+            limbs, 0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+        uint64_t *b = bench_limbs(
+            limbs, 0x13198a2e03707344ULL ^ (uint64_t)limbs);
+        double diff = bench_tungsten_mul_ladder(a, b, limbs, iters, 0);
+        double sum = bench_tungsten_mul_ladder(a, b, limbs, iters, 1);
+        double toom3 = bench_tungsten_mul_ladder(a, b, limbs, iters, 2);
+        double toom4 = bench_tungsten_mul_ladder(a, b, limbs, iters, 3);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_mul(a, b, limbs, iters);
+        printf("multiply ladder %d limbs (%d iters): diff %.1f ns,"
+               " sum %.1f ns, toom3 %.1f ns, toom4 %.1f ns,"
+               " gmp %.1f ns\n",
+               limbs, iters, diff, sum, toom3, toom4, gm);
+#else
+        printf("multiply ladder %d limbs (%d iters): diff %.1f ns,"
+               " sum %.1f ns, toom3 %.1f ns, toom4 %.1f ns\n",
+               limbs, iters, diff, sum, toom3, toom4);
+#endif
+        free(a);
+        free(b);
+        return 0;
+    }
+    if (argc == 5 && strcmp(argv[1], "--bench-mul-rect") == 0) {
+        int32_t na = (int32_t)atoi(argv[2]);
+        int32_t nb = (int32_t)atoi(argv[3]);
+        int iters = atoi(argv[4]);
+        if (na <= 0 || nb <= 0 || iters <= 0)
+            die("rectangular multiply expects two positive limb counts"
+                " and positive iterations");
+        uint64_t *a = bench_limbs(
+            na, 0x243f6a8885a308d3ULL ^ (uint64_t)na);
+        uint64_t *b = bench_limbs(
+            nb, 0x13198a2e03707344ULL ^ (uint64_t)nb);
+        double tw = bench_tungsten_mul_rect(a, na, b, nb, iters);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_mul_rect(a, na, b, nb, iters);
+        printf("rectangular multiply %d x %d limbs (%d iters):"
+               " tungsten %.1f ns, gmp %.1f ns, gap %.2fx\n",
+               na, nb, iters, tw, gm, ratio(tw, gm));
+#else
+        printf("rectangular multiply %d x %d limbs (%d iters):"
+               " tungsten %.1f ns\n",
+               na, nb, iters, tw);
+#endif
+        free(a);
+        free(b);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--bench-sqr") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("square benchmark limbs must be positive");
+        int iters = bench_iters_for_limbs(limbs);
+        uint64_t *a = bench_limbs(limbs,
+                                  0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+        double tw = bench_tungsten_sqr(a, limbs, iters);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_sqr(a, limbs, iters);
+        printf("square %d limbs: tungsten %.1f ns, gmp %.1f ns, gap %.2fx\n",
+               limbs, tw, gm, ratio(tw, gm));
+#else
+        printf("square %d limbs: tungsten %.1f ns\n", limbs, tw);
+#endif
+        free(a);
+        return 0;
+    }
+    if (argc == 4 && strcmp(argv[1], "--bench-sqr-iters") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        int iters = atoi(argv[3]);
+        if (limbs <= 0 || iters <= 0)
+            die("square benchmark expects positive limbs and iterations");
+        uint64_t *a = bench_limbs(limbs,
+                                  0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+        double tw = bench_tungsten_sqr(a, limbs, iters);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_sqr(a, limbs, iters);
+        printf("square %d limbs (%d iters): tungsten %.1f ns,"
+               " gmp %.1f ns, gap %.2fx\n",
+               limbs, iters, tw, gm, ratio(tw, gm));
+#else
+        printf("square %d limbs (%d iters): tungsten %.1f ns\n",
+               limbs, iters, tw);
+#endif
+        free(a);
+        return 0;
+    }
+    if (argc == 4 && strcmp(argv[1], "--bench-sqr-paths") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        int iters = atoi(argv[3]);
+        if (limbs <= BN_KARA_THRESHOLD || iters <= 0)
+            die("square path benchmark expects limbs above the Karatsuba floor"
+                " and positive iterations");
+        uint64_t *a = bench_limbs(limbs,
+                                  0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+        double school = bench_tungsten_sqr_path(a, limbs, iters, 0);
+        double kara = bench_tungsten_sqr_path(a, limbs, iters, 1);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_sqr(a, limbs, iters);
+        printf("square paths %d limbs (%d iters): school %.1f ns,"
+               " karatsuba %.1f ns, gmp %.1f ns, best/gmp %.2fx\n",
+               limbs, iters, school, kara, gm,
+               ratio(school < kara ? school : kara, gm));
+#else
+        printf("square paths %d limbs (%d iters): school %.1f ns,"
+               " karatsuba %.1f ns\n", limbs, iters, school, kara);
+#endif
+        free(a);
+        return 0;
+    }
+    if (argc == 4 && strcmp(argv[1], "--bench-sqr-ladder") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        int iters = atoi(argv[3]);
+        if (limbs <= BN_KARA_THRESHOLD || iters <= 0)
+            die("square ladder benchmark expects limbs above the Karatsuba"
+                " floor and positive iterations");
+        uint64_t *a = bench_limbs(limbs,
+                                  0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+        double kara = bench_tungsten_sqr_ladder(a, limbs, iters, 0);
+        double toom3 = bench_tungsten_sqr_ladder(a, limbs, iters, 1);
+        double toom4 = bench_tungsten_sqr_ladder(a, limbs, iters, 2);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_sqr(a, limbs, iters);
+        printf("square ladder %d limbs (%d iters): karatsuba %.1f ns,"
+               " toom3 %.1f ns, toom4 %.1f ns, gmp %.1f ns\n",
+               limbs, iters, kara, toom3, toom4, gm);
+#else
+        printf("square ladder %d limbs (%d iters): karatsuba %.1f ns,"
+               " toom3 %.1f ns, toom4 %.1f ns\n",
+               limbs, iters, kara, toom3, toom4);
+#endif
+        free(a);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--bench-mul-parallel") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("parallel multiply benchmark limbs must be positive");
+        int iters = bench_iters_for_limbs(limbs);
+        uint64_t *a = bench_limbs(limbs,
+                                  0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+        uint64_t *b = bench_limbs(limbs,
+                                  0x13198a2e03707344ULL ^ (uint64_t)limbs);
+        double serial = bench_tungsten_mul_serial(a, b, limbs, iters);
+        double parallel = bench_tungsten_mul(a, b, limbs, iters);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_mul(a, b, limbs, iters);
+        printf("multiply paths %d limbs: serial %.1f ns, parallel %.1f ns,"
+               " gmp %.1f ns (parallel/serial %.2fx)\n",
+               limbs, serial, parallel, gm, ratio(parallel, serial));
+#else
+        printf("multiply paths %d limbs: serial %.1f ns, parallel %.1f ns"
+               " (parallel/serial %.2fx)\n",
+               limbs, serial, parallel, ratio(parallel, serial));
+#endif
+        free(a);
+        free(b);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--bench-sqr-parallel") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("parallel square benchmark limbs must be positive");
+        int iters = bench_iters_for_limbs(limbs);
+        uint64_t *a = bench_limbs(limbs,
+                                  0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+        double serial = bench_tungsten_sqr_serial(a, limbs, iters);
+        double parallel = bench_tungsten_sqr(a, limbs, iters);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_sqr(a, limbs, iters);
+        printf("square paths %d limbs: serial %.1f ns, parallel %.1f ns,"
+               " gmp %.1f ns (parallel/serial %.2fx)\n",
+               limbs, serial, parallel, gm, ratio(parallel, serial));
+#else
+        printf("square paths %d limbs: serial %.1f ns, parallel %.1f ns"
+               " (parallel/serial %.2fx)\n",
+               limbs, serial, parallel, ratio(parallel, serial));
+#endif
+        free(a);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--bench-mersenne") == 0) {
+        uint64_t p = (uint64_t)strtoull(argv[2], NULL, 10);
+        if (p < 2) die("Mersenne benchmark exponent must be at least two");
+        int iters = p <= 127 ? 1000000 :
+                    p <= 521 ? 200000 :
+                    p <= 1279 ? 50000 : 5000;
+        double tw = bench_tungsten_mersenne_square(p, iters);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_mersenne_square(p, iters);
+        printf("Mersenne square p=%llu: tungsten %.1f ns, gmp %.1f ns,"
+               " gap %.2fx\n", (unsigned long long)p, tw, gm, ratio(tw, gm));
+#else
+        printf("Mersenne square p=%llu: tungsten %.1f ns\n",
+               (unsigned long long)p, tw);
+#endif
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--profile-ctxmulmod") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("profile ctxmulmod limbs must be positive");
+        int iters = limbs <= 64 ? 1000000 :
+                    limbs <= 256 ? 200000 :
+                    limbs <= 1024 ? 20000 : 3000;
+        (void)bench_tungsten_ctx_mulmod(limbs, iters);
+        printf("ctxmulmod profile sink=%llu\n", (unsigned long long)bench_sink);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--bench-ctxmulmod") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("ctxmulmod benchmark limbs must be positive");
+        int iters = bench_iters_for_mod(limbs);
+#ifdef HAVE_GMP
+        check_mod_against_gmp(limbs);
+        double tw = bench_tungsten_ctx_mulmod(limbs, iters);
+        double gm = bench_gmp_mulmod(limbs, iters);
+        printf("ctxmulmod %d limbs: tungsten %.1f ns, gmp %.1f ns, gap %.2fx\n",
+               limbs, tw, gm, ratio(tw, gm));
+#else
+        printf("ctxmulmod %d limbs: tungsten %.1f ns\n", limbs,
+               bench_tungsten_ctx_mulmod(limbs, iters));
+#endif
+        return 0;
+    }
+
+    const int32_t sizes[] = {
+        4, 8, 16, 24, 32, 40, 48, 64,
+        256, 1024, 2048, 4096, 8192, 16384
+    };
     printf("Big math benchmark (ns/op, lower is better)\n");
 #ifdef HAVE_GMP
     printf("GMP comparison enabled\n\n");
 #else
     printf("GMP comparison disabled; install GMP and compile with -DHAVE_GMP -lgmp\n\n");
+#endif
+
+#ifdef HAVE_GMP
+    printf("raw linear kernels (worst-case compare scans every limb)\n");
+    printf("limbs  tungsten add  gmp add   gap  tungsten sub  gmp sub   gap  tungsten cmp  gmp cmp   gap\n");
+    const int32_t linear_sizes[] = {1, 4, 16, 64, 256, 1024, 4096};
+    for (size_t i = 0; i < sizeof(linear_sizes) / sizeof(linear_sizes[0]); i++) {
+        int32_t limbs = linear_sizes[i];
+        int iters = bench_iters_for_linear(limbs);
+        uint64_t *a = bench_limbs(limbs, 0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+        uint64_t *b = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+        if (!b) die("out of memory preparing linear benchmark");
+        memcpy(b, a, (size_t)limbs * sizeof(uint64_t));
+        b[0] ^= 1ULL;
+        check_linear_against_gmp(limbs, a, b);
+        double ta = bench_tungsten_add(a, b, limbs, iters);
+        double ga = bench_gmp_add(a, b, limbs, iters);
+        double ts = bench_tungsten_sub(a, b, limbs, iters);
+        double gs = bench_gmp_sub(a, b, limbs, iters);
+        double tc = bench_tungsten_cmp(a, b, limbs, iters);
+        double gc = bench_gmp_cmp(a, b, limbs, iters);
+        printf("%5d %13.1f %8.1f %5.2fx %13.1f %8.1f %5.2fx %13.1f %8.1f %5.2fx\n",
+               limbs, ta, ga, ratio(ta, ga), ts, gs, ratio(ts, gs),
+               tc, gc, ratio(tc, gc));
+        free(a);
+        free(b);
+    }
+    printf("\n");
+
+    printf("multiply-accumulate base kernel (rp += up * scalar)\n");
+    printf("limbs  tungsten pipelined  prior c4  speedup  gmp addmul1   gap\n");
+    const int32_t addmul_sizes[] = {4, 16, 64, 256, 1024, 4096};
+    for (size_t i = 0; i < sizeof(addmul_sizes) / sizeof(addmul_sizes[0]); i++) {
+        int32_t limbs = addmul_sizes[i];
+        int iters = bench_iters_for_linear(limbs) / 4;
+        uint64_t *up = bench_limbs(limbs, 0x13198a2e03707344ULL ^ (uint64_t)limbs);
+        uint64_t *rp0 = bench_limbs(limbs, 0xa4093822299f31d0ULL ^ (uint64_t)limbs);
+        uint64_t *tw = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+        uint64_t *old = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+        uint64_t *gm = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));
+        if (!tw || !old || !gm) die("out of memory checking addmul_1");
+        memcpy(tw, rp0, (size_t)limbs * sizeof(uint64_t));
+        memcpy(old, rp0, (size_t)limbs * sizeof(uint64_t));
+        memcpy(gm, rp0, (size_t)limbs * sizeof(uint64_t));
+        uint64_t tc = bn_addmul_1(tw, up, limbs, 0xd6e8feb86659fd93ULL);
+        uint64_t oc = bench_addmul_1_old(old, up, limbs, 0xd6e8feb86659fd93ULL);
+        uint64_t gc = (uint64_t)mpn_addmul_1(
+            (mp_limb_t *)gm, (const mp_limb_t *)up, (mp_size_t)limbs,
+            (mp_limb_t)0xd6e8feb86659fd93ULL);
+        if (tc != gc || oc != gc) die("addmul_1 carry mismatch vs GMP");
+        assert_same_limbs("addmul_1 pipelined", tw, gm, limbs);
+        assert_same_limbs("addmul_1 prior", old, gm, limbs);
+        double tn = bench_tungsten_addmul_1(bn_addmul_1, rp0, up, limbs, iters);
+        double to = bench_tungsten_addmul_1(bench_addmul_1_old, rp0, up, limbs, iters);
+        double gg = bench_gmp_addmul_1(rp0, up, limbs, iters);
+        printf("%5d %19.1f %9.1f %7.2fx %12.1f %5.2fx\n",
+               limbs, tn, to, ratio(to, tn), gg, ratio(tn, gg));
+        free(tw);
+        free(old);
+        free(gm);
+        free(up);
+        free(rp0);
+    }
+    printf("\n");
+
+    printf("immutable positive bitwise ops"
+           " (dead Tungsten capacity recycled; fresh GMP result)\n");
+    printf("limbs  tw and  gmp and   gap  tw or  gmp or   gap  tw xor  gmp xor   gap\n");
+    const int32_t bit_sizes[] = {1, 4, 16, 64, 256, 1024};
+    for (size_t i = 0; i < sizeof(bit_sizes) / sizeof(bit_sizes[0]); i++) {
+        int32_t limbs = bit_sizes[i];
+        int iters = bench_iters_for_boxed_linear(limbs);
+        check_bitwise_shifts_against_gmp(limbs);
+        double ta = bench_tungsten_bitwise('&', limbs, iters);
+        double ga = bench_gmp_bitwise('&', limbs, iters);
+        double to = bench_tungsten_bitwise('|', limbs, iters);
+        double go = bench_gmp_bitwise('|', limbs, iters);
+        double tx = bench_tungsten_bitwise('^', limbs, iters);
+        double gx = bench_gmp_bitwise('^', limbs, iters);
+        printf("%5d %7.1f %8.1f %5.2fx %6.1f %7.1f %5.2fx %7.1f %8.1f %5.2fx\n",
+               limbs, ta, ga, ratio(ta, ga), to, go, ratio(to, go),
+               tx, gx, ratio(tx, gx));
+    }
+    printf("\n");
+
+    printf("immutable positive shifts by 13 bits"
+           " (dead Tungsten capacity recycled; fresh GMP result)\n");
+    printf("limbs  tungsten shl  gmp shl   gap  tungsten shr  gmp shr   gap\n");
+    for (size_t i = 0; i < sizeof(bit_sizes) / sizeof(bit_sizes[0]); i++) {
+        int32_t limbs = bit_sizes[i];
+        int iters = bench_iters_for_boxed_linear(limbs);
+        double tl = bench_tungsten_shift(1, limbs, iters);
+        double gl = bench_gmp_shift(1, limbs, iters);
+        double tr = bench_tungsten_shift(0, limbs, iters);
+        double gr = bench_gmp_shift(0, limbs, iters);
+        printf("%5d %13.1f %8.1f %5.2fx %13.1f %8.1f %5.2fx\n",
+               limbs, tl, gl, ratio(tl, gl), tr, gr, ratio(tr, gr));
+    }
+    printf("\n");
 #endif
 
 #ifdef HAVE_GMP
@@ -484,32 +4255,68 @@ int main(int argc, char **argv) {
 
 #ifdef HAVE_GMP
     printf("\nsmall modulus and generic modular multiply\n");
-    printf("limbs  tungsten mod1  old mod1 speedup  gmp mod1   gap  tungsten ctxmulmod gmp mulmod   gap\n");
+    printf("limbs  tungsten mod1  serial32 speedup  gmp mod1   gap  tungsten ctxmulmod gmp mulmod   gap\n");
 #else
     printf("\nsmall modulus and generic modular multiply\n");
-    printf("limbs  tungsten mod1  old mod1 speedup  tungsten ctxmulmod\n");
+    printf("limbs  tungsten mod1  serial32 speedup  tungsten ctxmulmod\n");
 #endif
-    const int32_t mod_sizes[] = {1, 2, 4, 16, 64, 256, 1024, 2048};
+    const int32_t mod_sizes[] = {1, 2, 4, 16, 64, 128, 256, 512, 1024, 2048};
     for (size_t i = 0; i < sizeof(mod_sizes) / sizeof(mod_sizes[0]); i++) {
         int32_t limbs = mod_sizes[i];
         int iters = bench_iters_for_mod(limbs);
         uint64_t *a = bench_limbs(limbs, 0x6a09e667f3bcc909ULL ^ (uint64_t)limbs);
         double tw_mod1 = bench_tungsten_mod1(a, limbs, iters * 10);
-        double old_mod1 = bench_tungsten_mod1_ref(a, limbs, iters * 10);
+        double serial32_mod1 = bench_tungsten_mod1_serial32(a, limbs, iters * 10);
         double tw_mulmod = bench_tungsten_ctx_mulmod(limbs, iters);
 #ifdef HAVE_GMP
         check_mod_against_gmp(limbs);
         double gm_mod1 = bench_gmp_mod1(a, limbs, iters * 10);
         double gm_mulmod = bench_gmp_mulmod(limbs, iters);
         printf("%5d %14.1f %9.1f %6.2fx %9.1f %5.2fx %19.1f %10.1f %5.2fx\n",
-               limbs, tw_mod1, old_mod1, ratio(old_mod1, tw_mod1), gm_mod1,
+               limbs, tw_mod1, serial32_mod1, ratio(serial32_mod1, tw_mod1), gm_mod1,
                ratio(tw_mod1, gm_mod1), tw_mulmod, gm_mulmod, ratio(tw_mulmod, gm_mulmod));
 #else
         printf("%5d %14.1f %9.1f %6.2fx %19.1f\n",
-               limbs, tw_mod1, old_mod1, ratio(old_mod1, tw_mod1), tw_mulmod);
+               limbs, tw_mod1, serial32_mod1, ratio(serial32_mod1, tw_mod1), tw_mulmod);
 #endif
         free(a);
     }
+
+#ifdef HAVE_GMP
+    printf("\nimmutable-result divmod (dead Tungsten capacity recycled)"
+           " and shared-factor gcd\n");
+    printf("limbs  tungsten divmod  gmp divmod   gap  tungsten gcd  gmp gcd   gap\n");
+    const int32_t div_sizes[] = {4, 16, 64, 256, 1024};
+    for (size_t i = 0; i < sizeof(div_sizes) / sizeof(div_sizes[0]); i++) {
+        int32_t limbs = div_sizes[i];
+        int div_iters = bench_iters_for_divmod(limbs);
+        int gcd_iters = bench_iters_for_gcd(limbs);
+        uint64_t *u = bench_limbs(2 * limbs, 0x13198a2e03707344ULL ^ (uint64_t)limbs);
+        uint64_t *v = bench_limbs(limbs, 0xa4093822299f31d0ULL ^ (uint64_t)limbs);
+        check_divmod_against_gmp(limbs, u, v);
+        check_gcd_against_gmp(limbs);
+        double td = bench_tungsten_divmod(u, v, limbs, div_iters);
+        double gd = bench_gmp_divmod_fresh(u, v, limbs, div_iters);
+        double tg = bench_tungsten_gcd(limbs, gcd_iters);
+        double gg = bench_gmp_gcd(limbs, gcd_iters);
+        printf("%5d %16.1f %11.1f %5.2fx %13.1f %8.1f %5.2fx\n",
+               limbs, td, gd, ratio(td, gd), tg, gg, ratio(tg, gg));
+        free(u);
+        free(v);
+    }
+
+    printf("\nrandom same-width gcd\n");
+    printf("limbs  tungsten gcd  gmp gcd   gap\n");
+    for (size_t i = 0; i < sizeof(div_sizes) / sizeof(div_sizes[0]); i++) {
+        int32_t limbs = div_sizes[i];
+        int gcd_iters = bench_iters_for_gcd(limbs);
+        check_random_gcd_against_gmp(limbs);
+        double tg = bench_tungsten_gcd_random(limbs, gcd_iters);
+        double gg = bench_gmp_gcd_random(limbs, gcd_iters);
+        printf("%5d %13.1f %8.1f %5.2fx\n",
+               limbs, tg, gg, ratio(tg, gg));
+    }
+#endif
 
     printf("\nMersenne square mod: s^2 mod (2^p-1)\n");
 #ifdef HAVE_GMP

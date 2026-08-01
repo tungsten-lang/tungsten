@@ -1,9 +1,10 @@
 
 + BigInt < Int
   - data
-    # WBigint is a generic-subtag object. Lowering supplies the implicit type
-    # byte at offset 0; keep the explicit C alignment bytes visible here so
+    # BigInt has a dedicated NaN-box subtag, but WBigint retains its C header
+    # byte as the live/parked recycler marker. Keep it explicit so
     # length/capacity/limb0 land at offsets 4/8/16 respectively.
+    u8 _type
     u8[3] _pad
     i32 length
     u32 capacity
@@ -39,6 +40,26 @@
   -> positive?
     n = $length ## i64
     n > 0
+
+  # In-place sign mutation, following the `!` convention (Array#sort!,
+  # Hash#merge!). A BigInt keeps its magnitude in a limb array and its sign
+  # in a header field, so these are a single field write — O(1) at any
+  # width, allocating nothing, versus the copy that `-x` / `abs` must make
+  # to leave the receiver untouched. Use them when the receiver is yours;
+  # like any bang method they are visible through every reference to it.
+  # Compiled code dispatches these through the BigInt inline-cache table
+  # (w_ic_bigint_neg_bang / w_ic_bigint_abs_bang); the ccall bodies give the
+  # interpreter the same mutation.
+  #
+  # CAVEAT worth knowing: the runtime returns an operand unchanged for
+  # identity-shaped arithmetic (`x + 0`), so a value obtained that way can
+  # SHARE storage with its source and a bang method will be visible through
+  # both. Mutate values you constructed, exactly as with Array#sort!.
+  -> neg!
+    ccall("w_bigint_neg_bang", self)
+
+  -> abs!
+    ccall("w_bigint_abs_bang", self)
 
   # Conversion to the already-integral representation is receiver identity.
   # Do not normalize: callers can observe exact heap identity.

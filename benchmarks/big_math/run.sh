@@ -7,7 +7,10 @@ RUNTIME="$ROOT/runtime"
 CC=${CC:-clang}
 OUT="$DIR/bench_big_math"
 
-CFLAGS="-O3 -mcpu=native -Wno-deprecated-declarations"
+# -falign-functions=64: the bignum kernels are layout-sensitive (unaligned
+# hot-loop heads swing small-multiply timings by 10-20% between otherwise
+# identical builds); fixed alignment keeps benchmark results comparable.
+CFLAGS=${CFLAGS:-"-O3 -mcpu=native -falign-functions=64 -Wno-deprecated-declarations"}
 ONIG_CFLAGS=$(pkg-config --cflags oniguruma 2>/dev/null || true)
 ONIG_LDFLAGS=$(pkg-config --libs oniguruma 2>/dev/null || true)
 GMP_CFLAGS=$(pkg-config --cflags gmp 2>/dev/null || true)
@@ -41,5 +44,9 @@ esac
   "$EVENT_SRC" "$RUNTIME/terminal_input.c" "$RUNTIME/tls_stub.c" "$RUNTIME/aks.c" $METAL_SRC \
   $ONIG_LDFLAGS $GMP_LDFLAGS $PLATFORM_LDFLAGS \
   -o "$OUT"
+
+if [ "${1:-}" = "--build-only" ]; then
+  exit 0
+fi
 
 exec "$OUT" "$@"

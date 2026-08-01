@@ -272,6 +272,25 @@ use hashing
   buf << func[:return_type]
   buf << "|"
 
+  # Embedded ll/asm bodies carry no WIRE instructions — the verbatim text
+  # (plus the parameter names the IR/asm references) IS the content.  Without
+  # this, every embedded fn of the same arity hashes identically and the
+  # compact-symbol pass merges them.
+  if func[:embedded_ll] != nil || func[:embedded_asm] != nil
+    pi2 = 0
+    while pi2 < func[:params].size()
+      buf << func[:params][pi2]
+      buf << ","
+      pi2 += 1
+    buf << "|"
+    if func[:embedded_ll] != nil
+      buf << "LL|"
+      buf << func[:embedded_ll]
+    else
+      buf << "ASM|"
+      buf << func[:embedded_asm]
+    buf << "|"
+
   # Build label map: label → sequential index
   label_map = {}
   bi = 0

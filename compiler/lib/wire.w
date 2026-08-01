@@ -854,6 +854,26 @@
       si += 1
     if new_sarr != nil
       result[:s] = new_sarr
+  # Inline-asm builtin operands live in op-specific fields (outp/ap/bp/n/
+  # ooff/aoff/boff/bsc/na/nb/vp/twp/ivp/hq — see calls.w's asm_* lowerings).
+  # Gate the sweep on the op so the common path stays flat. Without this, a
+  # CSE-forwarded machine-int local passed as an asm-builtin operand (e.g.
+  # asm_add_no's n) kept referencing the eliminated load's temp — clang
+  # rejected the IR with `use of undefined value %tN`.
+  if inst[:op] in (:asm_add_n :asm_add_no :asm_sub_no :asm_addmul1 :asm_mulbase :asm_neon_umull :asm_neon_redc :asm_neon_redc4 :asm_neon_madd4 :asm_neon_msub4 :asm_neon_gadd2 :asm_neon_ntt_stage :asm_gold_stage :asm_gold_stage_inv)
+    asm_fields = [:outp, :ap, :bp, :vp, :twp, :ivp, :n, :ooff, :aoff, :boff, :bsc, :na, :nb, :hq]
+    fi = 0
+    while fi < asm_fields.size()
+      fk = asm_fields[fi]
+      fv = inst[fk]
+      if fv != nil
+        rep = subst[fv]
+        if rep != nil
+          if cloned == false
+            result = clone_inst(inst)
+            cloned = true
+          result[fk] = rep
+      fi += 1
   # Substitute within args array only if needed
   args = inst[:args]
   if args != nil

@@ -79,7 +79,7 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
     "BigArray"      => 0x92 # Phase 3: 0x80 | W_TYPE_BIG_ARRAY (18)
     "Mmap"          => 0x91 # 0x80 | W_TYPE_MMAP (17)
     "SmallArray"    => 0x09 # Phase 6h: own subtag (W_SUBTAG_SMALL_ARRAY); no type byte
-    "BigInt"        => 0x8B # Phase 6i.2: 0x80 | W_TYPE_BIGINT (11)
+    "BigInt"        => 0x02 # dedicated W_SUBTAG_BIGINT
     "Error"         => 0x93 # Phase 6i.2: 0x80 | W_TYPE_ERROR (19)
     "IPv6"          => 0x86 # Phase 6i.2: 0x80 | W_TYPE_IPV6 (6)
     "Mac"           => 0x85 # Phase 6i.2: 0x80 | W_TYPE_MAC (5)
@@ -685,13 +685,13 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
   t in (:i64 :raw_i64 :raw_int)
 
 -> is_u64_type(t)
-  t == :u64
+  t in (:u64 :raw_u64)
 
 -> is_i128_type(t)
-  t == :i128
+  t in (:i128 :raw_i128)
 
 -> is_u128_type(t)
-  t == :u128
+  t in (:u128 :raw_u128)
 
 -> is_machine_int128_type(t)
   is_i128_type(t) || is_u128_type(t)

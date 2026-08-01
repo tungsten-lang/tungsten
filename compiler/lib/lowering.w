@@ -1000,7 +1000,13 @@ use lowering/definitions
     return nil
   last = body[body.size() - 1]
   if ast_kind(last) == :return && last.value != nil
-    return infer_type(last.value, {}, {}, infer_maps)
+    last = last.value
+  # A machine-int `## hint` on the tail expression is authoritative — the
+  # general inferencer does not track hints, which loses u64-ness and later
+  # boxes the raw return through the signed int fast path.
+  if is_ast_node?(last) && last.type_hint != nil
+    if last.type_hint in ("i64" "u64" "i128" "u128")
+      return normalize_type_symbol(last.type_hint)
   infer_type(last, {}, {}, infer_maps)
 
 -> trait_include_name(mod, node)
@@ -2508,7 +2514,18 @@ use lowering/definitions
     # Genuinely-typed raw machine values (:raw_i64/u64/i128/u128 from typed
     # sources) prove their own rawness, so they skip the conservative
     # candidate-map gate below.
-    if val[:type] in (:raw_i64 :raw_u64 :raw_i128 :raw_u128)
+    # A wide integer literal also lowers as :raw_i64 so a boxing boundary can
+    # promote it without truncating to the i48 payload. It is not, by itself,
+    # an explicit machine-type proof: when the local escapes (notably through
+    # method dispatch or wvalue_bits), materialize one stable BigInt object so
+    # receiver identity is preserved. Non-literal typed producers retain the
+    # representation proof and may bypass the candidate-map gate.
+    value_is_int_literal = is_ast_node?(node.value) && ast_kind(node.value) == :int
+    if is_ast_node?(node.value) && ast_kind(node.value) == :unary_op
+      if node.value.op in (:PLUS :MINUS) && node.value.operand != nil
+        if ast_kind(node.value.operand) == :int
+          value_is_int_literal = true
+    if val[:type] in (:raw_i64 :raw_u64 :raw_i128 :raw_u128) && !value_is_int_literal
       value_machine_type = raw_value_machine_type(val[:type])
       if machine_type == nil
         machine_type = value_machine_type

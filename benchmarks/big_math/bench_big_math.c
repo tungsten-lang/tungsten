@@ -1010,6 +1010,12 @@ static int bench_boxed_warm_chunk(int op, int32_t limbs) {
  * reading as phantom regressions.  A lane function's inner loop sits at a
  * fixed offset from its own aligned entry, independent of the other lanes.
  */
+/* Warm-up window per timed call.  Each lane pays this before its timed
+ * region, and a sweep makes 2*(runs+1) lane calls per size, so the default
+ * 3ms dominates cheap operations.  The sweep shortens it: the caches and
+ * branch predictors are already warm from the pilot and preceding reps. */
+static double bench_warm_seconds = 0.003;
+
 typedef struct {
     WValue a, b, m, parse_input;
     WValue previous;
@@ -1038,7 +1044,7 @@ bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
             }                                                              \
             previous = result;                                             \
         }                                                                  \
-    } while (bench_now() - warm_start < 0.003);                            \
+    } while (bench_now() - warm_start < bench_warm_seconds);                            \
     int iters = cx->iters;                                                 \
     double timed_start = bench_now();                                      \
     for (int timed_i = 0; timed_i < iters; timed_i++) {                    \
@@ -1083,7 +1089,7 @@ bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
     do {                                                                   \
         for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++)            \
             bench_sink ^= (uint64_t)integer_low_i64(APPLY);                \
-    } while (bench_now() - warm_start < 0.003);                            \
+    } while (bench_now() - warm_start < bench_warm_seconds);                            \
     int iters = cx->iters;                                                 \
     double timed_start = bench_now();                                      \
     for (int timed_i = 0; timed_i < iters; timed_i++)                      \
@@ -1108,7 +1114,7 @@ bench_lane_cmp(BenchLaneCtx *cx) {
     do {
         for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++)
             bench_sink ^= (uint64_t)bigint_compare(cmp_operand, b);
-    } while (bench_now() - warm_start < 0.003);
+    } while (bench_now() - warm_start < bench_warm_seconds);
     int iters = cx->iters;
     double timed_start = bench_now();
     for (int timed_i = 0; timed_i < iters; timed_i++)
@@ -1129,7 +1135,7 @@ bench_lane_tostr(BenchLaneCtx *cx) {
             bench_sink ^= (uint64_t)w_string_byte_length(text);
             w_value_free(text);
         }
-    } while (bench_now() - warm_start < 0.003);
+    } while (bench_now() - warm_start < bench_warm_seconds);
     int iters = cx->iters;
     double timed_start = bench_now();
     for (int timed_i = 0; timed_i < iters; timed_i++) {
@@ -2684,7 +2690,7 @@ static double bench_gmp_boxed_result_churn(
                 APPLY;                                                    \
                 bench_sink ^= (uint64_t)mpz_get_ui(r);                    \
             }                                                             \
-        } while (bench_now() - warm_start < 0.003);                       \
+        } while (bench_now() - warm_start < bench_warm_seconds);                       \
         double timed_start = bench_now();                                 \
         for (int timed_i = 0; timed_i < iters; timed_i++) {               \
             mpz_ptr r = result[timed_i & 1];                              \
@@ -2750,7 +2756,7 @@ static double bench_gmp_boxed_result_churn(
                 bench_sink ^= (uint64_t)(unsigned char)text[0];
                 gmp_free_fn(text, dec_block);
             }
-        } while (bench_now() - warm_start < 0.003);
+        } while (bench_now() - warm_start < bench_warm_seconds);
         double timed_start = bench_now();
         for (int timed_i = 0; timed_i < iters; timed_i++) {
             char *text = mpz_get_str(NULL, 10, a);
@@ -3160,6 +3166,84 @@ int main(int argc, char **argv) {
         die("boxed comparison requires GMP");
 #endif
         return 0;
+    }
+    /*
+     * Batched sweep: calibrate and time every size for one operation inside a
+     * single process, emitting each row as soon as it is done.  The per-row
+     * cost of the old one-process-per-(op,size,rep) shape was dominated by
+     * fixed overhead — ~12ms of process spawn plus a fresh warm-up per rep —
+     * not by the timed region.  Reps run here, the warm-up is paid once per
+     * size, and stdout is flushed per row so a driver can stream results.
+     */
+    if (argc == 6 && strcmp(argv[1], "--bench-boxed-sweep") == 0) {
+#ifndef HAVE_GMP
+        die("boxed sweep requires GMP");
+#else
+        int op = bench_boxed_op_parse(argv[2]);
+        if (op < 0) die("unknown boxed sweep operation");
+        int runs = atoi(argv[4]);
+        double target_ms = atof(argv[5]);
+        if (runs <= 0 || target_ms <= 0.0)
+            die("boxed sweep expects positive runs and target-ms");
+        double target_ns = target_ms * 1e6;
+        bench_warm_seconds = 0.0005;   /* pilot + reps keep things warm */
+        /* Parse the whole list up front: strtok keeps static state, and the
+         * timed lanes below call into code that also tokenizes, which would
+         * silently truncate this loop after its first size. */
+        char sizes[512];
+        snprintf(sizes, sizeof sizes, "%s", argv[3]);
+        int32_t size_list[128];
+        int size_count = 0;
+        for (char *tok = strtok(sizes, ","); tok; tok = strtok(NULL, ",")) {
+            if (size_count >= (int)(sizeof size_list / sizeof size_list[0]))
+                die("boxed sweep supports at most 128 sizes");
+            int32_t v = (int32_t)atoi(tok);
+            if (v <= 0) die("boxed sweep sizes must be positive");
+            size_list[size_count++] = v;
+        }
+        for (int si = 0; si < size_count; si++) {
+            int32_t limbs = size_list[si];
+            check_boxed_op_against_gmp(op, limbs);
+            /* Adaptive pilot: start at a single operation and widen only
+             * while it is too short to time.  A fixed pilot is a trap at the
+             * slow end — 64 iterations of powmod at 128 limbs (~137ms each)
+             * costs ~9 seconds before the real measurement even starts. */
+            int pilot = 1;
+            double pt, pg, slowest;
+            for (;;) {
+                pt = bench_boxed_result_churn(op, limbs, pilot, 1);
+                pg = bench_gmp_boxed_result_churn(op, limbs, pilot);
+                slowest = pt > pg ? pt : pg;
+                if (slowest * pilot >= 20000.0 || pilot >= 4096) break;
+                pilot *= 16;                       /* still cheap: <20us so far */
+            }
+            if (slowest < 0.001) slowest = 0.001;
+            /* Floor of 1, not 16: when a single operation already exceeds
+             * the target window (powmod at 128 limbs runs ~137ms), forcing
+             * 16 of them costs seconds per rep and measures nothing extra —
+             * `runs` already provides the repetition. */
+            double want = target_ns / slowest;
+            int iters = want > 40000000.0 ? 40000000
+                      : (want < 1.0 ? 1 : (int)want);
+            double tw_best = 0.0, gm_best = 0.0;
+            for (int r = 0; r < runs; r++) {
+                double tw, gm;
+                if (r & 1) {                       /* alternate lane order */
+                    gm = bench_gmp_boxed_result_churn(op, limbs, iters);
+                    tw = bench_boxed_result_churn(op, limbs, iters, 1);
+                } else {
+                    tw = bench_boxed_result_churn(op, limbs, iters, 1);
+                    gm = bench_gmp_boxed_result_churn(op, limbs, iters);
+                }
+                if (r == 0 || tw < tw_best) tw_best = tw;
+                if (r == 0 || gm < gm_best) gm_best = gm;
+            }
+            printf("boxed\t%s\t%d\t%d\t%.3f\t%.3f\n",
+                   argv[2], limbs, iters, tw_best, gm_best);
+            fflush(stdout);                        /* stream to the driver */
+        }
+        return 0;
+#endif
     }
     if (argc == 6 && strcmp(argv[1], "--profile-result-recycle") == 0) {
         int op = bench_boxed_op_parse(argv[2]);

@@ -380,6 +380,75 @@ def capacity_results(max_limbs: int, requests: int, runs: int) -> list[dict[str,
     return results
 
 
+
+
+def harness_is_stale() -> bool:
+    """Rebuild only when a source is newer than the binary.
+
+    The unconditional rebuild cost ~7s on every invocation — far more than
+    the measurements themselves for anything short of a full sweep.
+    """
+    if not NATIVE.exists():
+        return True
+    built = NATIVE.stat().st_mtime
+    sources = [ROOT / "benchmarks" / "big_math" / "bench_big_math.c", BUILD]
+    runtime_dir = ROOT / "runtime"
+    if runtime_dir.is_dir():
+        sources += [
+            path
+            for pattern in ("*.c", "*.h", "*.m")
+            for path in runtime_dir.glob(pattern)
+        ]
+    return any(p.exists() and p.stat().st_mtime > built for p in sources)
+
+
+def sweep_operation(operation, sizes, runs, target_ms, on_row):
+    """Time every size for one operation in ONE process, streaming rows.
+
+    The native harness calibrates each size internally and prints a row as
+    soon as it finishes, so the ~12ms process spawn and the per-rep warm-up
+    are paid once per operation instead of once per (size, rep).
+    """
+    command = [
+        str(NATIVE), "--bench-boxed-sweep", operation,
+        ",".join(str(s) for s in sizes), str(runs), f"{target_ms:g}",
+    ]
+    rows = []
+    process = subprocess.Popen(
+        command, cwd=ROOT, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    for line in process.stdout:
+        fields = line.rstrip("\n").split("\t")
+        if len(fields) != 6 or fields[0] != "boxed":
+            continue
+        row = {
+            "operation": operation,
+            "limbs": int(fields[2]),
+            "bits": int(fields[2]) * 64,
+            "iterations": int(fields[3]),
+            "native_iterations": int(fields[3]),
+            "python_iterations": 0,
+            "tungsten_ns": float(fields[4]),
+            "gmp_ns": float(fields[5]),
+            "python_ns": 0.0,
+        }
+        row["tungsten_over_gmp"] = row["tungsten_ns"] / row["gmp_ns"]
+        row["tungsten_over_python"] = 0.0
+        row["fastest"] = (
+            "tungsten" if row["tungsten_ns"] < row["gmp_ns"] else "gmp"
+        )
+        rows.append(row)
+        on_row(row)
+    process.wait()
+    if process.returncode != 0:
+        detail = (process.stderr.read() or "").strip()
+        raise RuntimeError(
+            f"sweep failed for {operation}" + (f"\n{detail}" if detail else "")
+        )
+    return rows
+
+
 def format_time(value: float) -> str:
     if value < 1_000:
         return f"{value:.1f} ns"
@@ -388,11 +457,13 @@ def format_time(value: float) -> str:
     return f"{value / 1_000_000:.2f} ms"
 
 
-def print_results(results: list[dict[str, Any]], metadata: dict[str, Any]) -> None:
-    print(
-        f"Tungsten BigInt vs GMP {metadata['gmp_version']} vs "
-        f"Python {metadata['python_version']}"
+def print_results_header(metadata: dict[str, Any]) -> None:
+    lanes = (
+        f"Tungsten BigInt vs GMP {metadata['gmp_version']}"
+        + (f" vs Python {metadata['python_version']}"
+           if metadata.get("python_lane") else "")
     )
+    print(lanes)
     print(
         "Lower is better. Best-of-"
         f"{metadata['runs']}; operands are deterministic positive 64-bit limbs."
@@ -402,33 +473,54 @@ def print_results(results: list[dict[str, Any]], metadata: dict[str, Any]) -> No
         "is live; Tungsten and GMP may reuse dead result capacity."
     )
     print()
-    print(
-        f"{'op':<4} {'limbs':>6} {'bits':>8} {'N iters':>9} {'Py iters':>9} "
-        f"{'Tungsten':>11} {'GMP':>11} {'Python':>11} "
-        f"{'T/GMP':>7} {'T/Py':>7} {'fastest':>9}"
-    )
-    for row in results:
+    if metadata.get("python_lane"):
         print(
-            f"{row['operation']:<4} {row['limbs']:>6} {row['bits']:>8} "
-            f"{row['native_iterations']:>9} "
-            f"{row['python_iterations']:>9} "
+            f"{'op':<8} {'limbs':>6} {'bits':>8} {'N iters':>9} {'Py iters':>9} "
+            f"{'Tungsten':>11} {'GMP':>11} {'Python':>11} "
+            f"{'T/GMP':>7} {'T/Py':>7} {'fastest':>9}"
+        )
+    else:
+        print(
+            f"{'op':<8} {'limbs':>6} {'bits':>8} {'N iters':>9} "
+            f"{'Tungsten':>11} {'GMP':>11} {'T/GMP':>7} {'fastest':>9}"
+        )
+
+
+def print_result_row(row: dict[str, Any], python_lane: bool) -> None:
+    if python_lane:
+        print(
+            f"{row['operation']:<8} {row['limbs']:>6} {row['bits']:>8} "
+            f"{row['native_iterations']:>9} {row['python_iterations']:>9} "
             f"{format_time(row['tungsten_ns']):>11} "
             f"{format_time(row['gmp_ns']):>11} "
             f"{format_time(row['python_ns']):>11} "
             f"{row['tungsten_over_gmp']:>7.2f} "
             f"{row['tungsten_over_python']:>7.2f} "
-            f"{row['fastest']:>9}"
+            f"{row['fastest']:>9}",
+            flush=True,
         )
-    if results:
-        gmp_wins = sum(row["tungsten_ns"] < row["gmp_ns"] for row in results)
-        python_wins = sum(
-            row["tungsten_ns"] < row["python_ns"] for row in results
-        )
-        print()
+    else:
         print(
-            f"Tungsten faster than GMP in {gmp_wins}/{len(results)} cases; "
-            f"faster than Python in {python_wins}/{len(results)} cases."
+            f"{row['operation']:<8} {row['limbs']:>6} {row['bits']:>8} "
+            f"{row['native_iterations']:>9} "
+            f"{format_time(row['tungsten_ns']):>11} "
+            f"{format_time(row['gmp_ns']):>11} "
+            f"{row['tungsten_over_gmp']:>7.2f} "
+            f"{row['fastest']:>9}",
+            flush=True,
         )
+
+
+def print_results_summary(results: list[dict[str, Any]], python_lane: bool) -> None:
+    if not results:
+        return
+    gmp_wins = sum(row["tungsten_ns"] < row["gmp_ns"] for row in results)
+    print()
+    line = f"Tungsten faster than GMP in {gmp_wins}/{len(results)} cases"
+    if python_lane:
+        py = sum(row["tungsten_ns"] < row["python_ns"] for row in results)
+        line += f"; faster than Python in {py}/{len(results)} cases"
+    print(line + ".")
 
 
 def print_capacity(results: list[dict[str, Any]]) -> None:
@@ -501,6 +593,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="per-lane timing target (default: 20, or 5 quick)",
     )
     parser.add_argument(
+        "--python",
+        action="store_true",
+        help=(
+            "also time CPython ints. Off by default: the Python lane is "
+            "10-30x slower than the other two, so calibrating and running it "
+            "dominated the suite"
+        ),
+    )
+    parser.add_argument(
+        "--accurate",
+        action="store_true",
+        help=(
+            "longer timed regions and more reps (~8x slower). Default mode "
+            "agrees with this on ~94%% of win/lose verdicts, median 2.8%% "
+            "deviation; disagreements sit in the 1-7ns cells. Use this "
+            "before concluding anything about a cell within ~5%% of 1.0"
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="emit machine-readable JSON",
@@ -571,7 +682,12 @@ def main() -> int:
         parser.error("--capacity-requests must be at least 1000")
     target_ms = args.target_ms
     if target_ms is None:
-        target_ms = 5.0 if args.quick else 20.0
+        if args.accurate:
+            target_ms = 20.0
+        else:
+            target_ms = 1.0 if args.quick else 2.0
+    if args.accurate and args.runs == 3:
+        args.runs = 5
 
     if args.list:
         print("operations: " + ",".join(OPERATIONS))
@@ -587,12 +703,13 @@ def main() -> int:
         )
         return 0
 
-    print("Building native BigInt/GMP harness...", file=sys.stderr)
-    try:
-        run_checked([str(BUILD), "--build-only"])
-    except RuntimeError as error:
-        print(f"tungsten bench bignum: {error}", file=sys.stderr)
-        return 1
+    if harness_is_stale():
+        print("Building native BigInt/GMP harness...", file=sys.stderr)
+        try:
+            run_checked([str(BUILD), "--build-only"])
+        except RuntimeError as error:
+            print(f"tungsten bench bignum: {error}", file=sys.stderr)
+            return 1
 
     try:
         gmp_version = run_checked(
@@ -602,6 +719,7 @@ def main() -> int:
         gmp_version = "unknown"
     metadata = {
         "runs": args.runs,
+        "python_lane": bool(args.python),
         "target_ms": target_ms,
         "python_version": platform.python_version(),
         "gmp_version": gmp_version,
@@ -663,18 +781,33 @@ def main() -> int:
             f"(best of {args.runs})...",
             file=sys.stderr,
         )
+        streaming = not args.json
+        if streaming:
+            print_results_header(metadata)
         try:
             for operation in operations:
                 cap = SIZE_CAPS.get(operation)
-                for limbs in sizes:
-                    if cap is not None and limbs > cap:
-                        continue
-                    results.append(
-                        benchmark_case(
-                            operation,
-                            limbs,
-                            args.runs,
+                todo = [
+                    limbs for limbs in sizes
+                    if cap is None or limbs <= cap
+                ]
+                if not todo:
+                    continue
+                if args.python:
+                    for limbs in todo:
+                        row = benchmark_case(
+                            operation, limbs, args.runs,
                             round(target_ms * 1_000_000),
+                        )
+                        results.append(row)
+                        if streaming:
+                            print_result_row(row, python_lane=True)
+                else:
+                    results.extend(
+                        sweep_operation(
+                            operation, todo, args.runs, target_ms,
+                            (lambda row: print_result_row(row, python_lane=False))
+                            if streaming else (lambda row: None),
                         )
                     )
         except RuntimeError as error:
@@ -709,7 +842,10 @@ def main() -> int:
         )
     else:
         if not args.capacity_only:
-            print_results(results, metadata)
+            if args.python:
+                # non-streaming path already printed rows above
+                pass
+            print_results_summary(results, bool(args.python))
         print_capacity(capacities)
     return 0
 

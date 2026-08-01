@@ -39,3 +39,15 @@ q.neg!
 check("bang.arith_after", (p + q).to_s(), "0")
 check("bang.mul_after", (q * 0 - 1).to_s(), "-1")
 << "bang_spec: all checks passed"
+
+# Mixed-width isqrt in one process: the divide-and-conquer workspace grew on
+# the operand width alone, but it also holds a guard-limb quotient buffer
+# past that, so a later wider call whose operand still fit under a previous
+# capacity overflowed the allocation. Widths deliberately interleave.
+isq_ok = 1
+[200, 800, 1500, 400, 3000, 900, 64].each -> (bits)
+  isq_v = (1 << bits) + 12345
+  isq_r = isq_v.isqrt
+  if isq_r * isq_r > isq_v || (isq_r + 1) * (isq_r + 1) <= isq_v
+    isq_ok = 0
+check("isqrt.mixed_widths_one_process", isq_ok.to_s(), "1")

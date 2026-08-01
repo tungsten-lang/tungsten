@@ -9532,9 +9532,16 @@ WValue bigint_isqrt_any(WValue a) {
     int32_t shift =
         (int32_t)((((int64_t)(wide - alen) << 6) +
                    __builtin_clzll(al[alen - 1])) & ~1LL);   /* even, < 128 */
-    if ((size_t)wide > bn_sqrt_ws_cap) {
+    /* The workspace holds the 2m normalized operand limbs AND the
+     * guard-limb quotient buffer that bn_dc_sqrt_only writes at np + wide.
+     * Growing on `wide` alone was wrong: a later, larger call whose `wide`
+     * still fit under a previous inflated capacity skipped the regrow and
+     * ran the quotient buffer off the end (isqrt at 16 limbs then 24 limbs
+     * in one process — wide 48 under a cap of 56, needing 61). */
+    size_t need = (size_t)wide + (size_t)((m - 1) / 2) + 4;
+    if (need > bn_sqrt_ws_cap) {
         free(bn_sqrt_ws);
-        size_t cap = (size_t)wide + (size_t)wide / 4 + 16;
+        size_t cap = need + need / 4 + 16;
         bn_sqrt_ws = (uint64_t *)malloc(cap * sizeof(uint64_t));
         if (!bn_sqrt_ws) { bn_sqrt_ws_cap = 0; die("isqrt: out of memory"); }
         bn_sqrt_ws_cap = cap;

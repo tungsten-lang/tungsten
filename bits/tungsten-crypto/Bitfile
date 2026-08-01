@@ -1,0 +1,11 @@
+tungsten "tungsten-crypto-0.1.0"
+
+name "tungsten-crypto"
+version "0.1.0"
+
+# ARMv8 SHA-256 crypto-extension accelerator. Compiles everywhere: the NEON
+# path is #if-guarded and falls back to portable scalar C, and the entry
+# points probe at runtime before using the hardware instructions.
+includes ["runtime/sha256_hw.c"]
+
+bit "tungsten-spec", group: :spec

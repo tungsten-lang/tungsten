@@ -287,6 +287,14 @@ compiled_specs=(
   spec/core/expression_special_spec.w
   spec/core/expression_transcendental_spec.w
   spec/core/expression_solve_spec.w
+  spec/core/algebra_autoload_spec.w
+  spec/core/algebra_projective_heights_spec.w
+  spec/core/algebra_prime_subspace_spec.w
+  spec/core/algebra_c_ab_spec.w
+  spec/core/algebra_divisors_spec.w
+  # The full KM order certificate is intentionally native: the interpreter's
+  # boxed exact-linear-algebra path is prohibitively memory hungry.
+  spec/core/algebra_c_ab_divisors_spec.w
   spec/core/algebra_real_roots_spec.w
   spec/core/algebra_ideal_arithmetic_spec.w
   spec/core/algebra_lattice_reduction_spec.w

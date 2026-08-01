@@ -25478,12 +25478,12 @@ WValue bigint_copy_signed(WBigint *b, int negate) {
                 vst1q_u64(dst + 4, vld1q_u64(src + 4));
                 vst1q_u64(dst + 6, vld1q_u64(src + 6));
             } else {
-                /* 9..BN_COPY_FUSED_MAX: one compact 8-limb block loop kept
+                /* 9..BN_COPY_FUSED_MAX: compact 8-limb block loop, kept
                  * INLINE.  Both buffers hold at least the next multiple of 8
-                 * (their power-of-two / quantum capacity class), so the
-                 * overshoot needs no tail branch.  A loop rather than
-                 * straight-line rungs: the rungs' code size measurably
-                 * displaced the 1-8 limb cells via I-cache/BTB pressure. */
+                 * (their capacity class), so the overshoot needs no tail
+                 * branch.  A loop rather than straight-line rungs: rungs for
+                 * 9-16 measured a wash (16/32 better, 24/64 worse — inside
+                 * the layout-noise band) and cost code size. */
                 int32_t copy_n = (n + 7) & ~7;
                 for (int32_t i = 0; i < copy_n; i += 8) {
                     vst1q_u64(dst + i,     vld1q_u64(src + i));
@@ -25534,6 +25534,13 @@ static __attribute__((noinline)) WValue w_neg_generic(WValue v) {
     return w_box_int_checked(-as_int(v));
 }
 
+/* always_inline on an exported entry: callers in this translation unit get
+ * the copy-class fast path inlined (matching gmp.h, where mpz_neg is an
+ * inline function), while the out-of-line symbol is still emitted for the
+ * compiled-Tungsten ABI.  Measured: the call boundary alone, not the TLS
+ * thunk (0.07 ns, negligible), is what separated this from w_ic_bigint_abs,
+ * which is a static and already inlines. */
+__attribute__((always_inline))
 WValue w_neg(WValue v) {
     if (w_is_bigint(v))
         return bigint_copy_signed(w_as_bigint(v), 1);

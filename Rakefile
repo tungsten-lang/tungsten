@@ -57,7 +57,12 @@ end
 
 namespace :check do
   desc "Run generated-data and layout consistency checks in parallel"
-  multitask all: %i[units layouts core_doc]
+  multitask all: %i[units layouts core_doc claims]
+
+  desc "Verify capability comments have not gone stale against the code"
+  task :claims do
+    run_command "ruby", File.join(ROOT, "scripts/check_claim_staleness.rb")
+  end
 
   desc "Verify generated unit lookup tables match data/units.tsv"
   task :units do

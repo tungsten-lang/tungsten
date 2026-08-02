@@ -80,10 +80,17 @@ Sub-tag extraction: `v & 0xF`
 
 v4: BigInt left object space for its own top-level tag — `w_is_bigint` is
 one tag compare with no pointer dereference, and subtag 2 is freed. Bit 47
-(`S`) is reserved for the tag-sign encoding (negate as zero-copy tag flip);
-it is 0 today. Pointer extraction: `v & 0x0000_7FFF_FFFF_FFFF`. The
-dispatch key stays the historical `0x02`, so inline caches and the
-type-class tables are unchanged by the encoding move.
+(`S`) is the ACTIVE tag-sign overlay: the value's effective sign is the
+header sign XOR `S`, so `-x` and `abs` hand out the SAME buffer with `S`
+flipped — O(1), zero allocation, at every width. Every sign read from a
+boxed value goes through `w_bigint_view` (header alone is not the sign);
+magnitude reads are overlay-independent. The buffer's `shared` byte counts
+outstanding tag aliases so the recycler frees it exactly when the last
+reference dies. A tag-flipped value is a linked view: `y = -x` then
+`x.neg!` moves both consistently (the documented bang-sharing caveat).
+Pointer extraction: `v & 0x0000_7FFF_FFFF_FFFF`. The dispatch key stays
+the historical `0x02`, so inline caches and the type-class tables are
+unchanged by the encoding move.
 
 ---
 

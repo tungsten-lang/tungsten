@@ -535,14 +535,15 @@ static void bigint_release(WBigint *b) {
 static inline __attribute__((always_inline))
 void bigint_release_if_live(WBigint *b) {
     if (__builtin_expect(b->type != W_TYPE_BIGINT, 0)) return;
-    /* A shared buffer has an alias somewhere (tag-flipped negate, escape
-     * instrumentation); recycling it would hand its storage to the next
-     * allocation underneath that alias. Sharing is countless by design, so
-     * a shared buffer is simply never reclaimed here — the compiler's
-     * escape analysis stops freeing values it saw alias anyway; this guard
-     * is the runtime backstop that turns a wrong proof into a leak instead
-     * of a use-after-free. */
-    if (__builtin_expect(b->shared != 0, 0)) return;
+    /* The shared byte counts tag-sign aliases (see wvalue.h). While it is
+     * nonzero, a release means "one of the references died": swallow it
+     * and decrement (255 saturates and pins the buffer forever). The
+     * release that arrives at zero is the last reference — recycle. This
+     * keeps -x churn leak-free without taxing never-negated buffers. */
+    if (__builtin_expect(b->shared != 0, 0)) {
+        if (b->shared != 255) b->shared--;
+        return;
+    }
 #ifndef BN_BIGINT_RELEASE_INLINE_HANDOFF
 #define BN_BIGINT_RELEASE_INLINE_HANDOFF 1
 #endif
@@ -593,7 +594,10 @@ static inline WBigint *bigint_pool_take(uint32_t min_cap) {
 static inline void bigint_release(WBigint *b) { free(b); }
 static inline void bigint_release_cold(WBigint *b) { free(b); }
 static inline void bigint_release_if_live(WBigint *b) {
-    if (b->shared != 0) return;   /* alias may exist; leak, don't free */
+    if (b->shared != 0) {         /* one alias died; last one frees */
+        if (b->shared != 255) b->shared--;
+        return;
+    }
     free(b);
 }
 static inline void bigint_pool_release_thread(void) {}
@@ -974,8 +978,9 @@ static const uint64_t *integer_limbs(WValue v, uint64_t *stack_limb, int32_t *ou
         else { *stack_limb = (uint64_t)(-iv); *out_len = -1; }
         return stack_limb;
     }
-    WBigint *b = w_as_bigint(v);
-    *out_len = b->size;
+    int32_t bs;
+    WBigint *b = w_bigint_view(v, &bs); /* compose header sign with the tag-sign overlay */
+    *out_len = bs;
     return b->limbs;
 }
 
@@ -2068,10 +2073,10 @@ static inline __attribute__((always_inline))
 WValue bigint_add_any(WValue a, WValue b) {
 #if BN_ADDSUB_BOXED_EQUAL_FAST
     if (w_is_bigint(a) && w_is_bigint(b)) {
-        WBigint *aa = w_as_bigint(a);
-        WBigint *bb = w_as_bigint(b);
-        int32_t n = aa->size;
-        if (n > 0 && bb->size == n) {
+        int32_t n, bn;
+        WBigint *aa = w_bigint_view(a, &n);
+        WBigint *bb = w_bigint_view(b, &bn);
+        if (n > 0 && bn == n) {
             /* n >= 3 first: one predictable branch on the equal_fast route
              * instead of falling through the ==1/==2 pair. */
             if (n > 2)
@@ -2095,10 +2100,10 @@ WValue bigint_sub_any(WValue a, WValue b) {
 #endif
 #if BN_ADDSUB_BOXED_EQUAL_FAST
     if (w_is_bigint(a) && w_is_bigint(b)) {
-        WBigint *aa = w_as_bigint(a);
-        WBigint *bb = w_as_bigint(b);
-        int32_t n = aa->size;
-        if (n > 0 && bb->size == n) {
+        int32_t n, bn;
+        WBigint *aa = w_bigint_view(a, &n);
+        WBigint *bb = w_bigint_view(b, &bn);
+        if (n > 0 && bn == n) {
             if (n > 2) {
                 int compare = aa->limbs[n - 1] != bb->limbs[n - 1]
                     ? (aa->limbs[n - 1] > bb->limbs[n - 1] ? 1 : -1)
@@ -7852,6 +7857,9 @@ WValue bigint_mul_any(WValue a, WValue b) {
 #if BN_MUL_POSITIVE_EQUAL_FAST
     if (a == b && w_is_bigint(a)) {
         WBigint *ba = w_as_bigint(a);
+        /* Raw header size is safe here: a square's sign is fixed positive,
+         * so only the magnitude gate matters (overlay-flagged negatives with
+         * a positive header still square correctly on this path). */
         int32_t n = ba->size;
         if (n == 1) {
             __uint128_t product =
@@ -7878,10 +7886,10 @@ WValue bigint_mul_any(WValue a, WValue b) {
 #endif
 #if BN_MUL_POSITIVE_PAIR_FAST
     if (w_is_bigint(a) && w_is_bigint(b)) {
-        WBigint *ba = w_as_bigint(a);
-        WBigint *bb = w_as_bigint(b);
-        int32_t n = ba->size;
-        if (n == 1 && bb->size == 1) {
+        int32_t n, bn;
+        WBigint *ba = w_bigint_view(a, &n);
+        WBigint *bb = w_bigint_view(b, &bn);
+        if (n == 1 && bn == 1) {
             __uint128_t product =
                 (__uint128_t)ba->limbs[0] * bb->limbs[0];
             uint64_t low = (uint64_t)product;
@@ -7898,7 +7906,7 @@ WValue bigint_mul_any(WValue a, WValue b) {
             (n <= BN_MUL_POSITIVE_PAIR_FAST_MAX ||
              (BN_MUL_POSITIVE_PAIR_24 && n == 24) ||
              (BN_MUL_POSITIVE_PAIR_40 && n == 40)) &&
-            bb->size == n)
+            bn == n)
             return bigint_mul_positive_equal(ba, bb, n);
 
         /* Neither operand can be an inline +/-1 here.  Keep the ordinary
@@ -10198,10 +10206,11 @@ WValue bigint_div_any(WValue a, WValue b) {
     (BN_DIV_TRIANGULAR_Q_CERTIFIED && BN_DIV_63_DIRECT && \
      BN_DIV_63_BOXED_FAST) || BN_DIV_POSITIVE_2N_N_BOXED_FAST
     if (w_is_bigint(a) && w_is_bigint(b)) {
-        WBigint *aa = w_as_bigint(a);
-        WBigint *bb = w_as_bigint(b);
+        int32_t as, bs;
+        WBigint *aa = w_bigint_view(a, &as);
+        WBigint *bb = w_bigint_view(b, &bs);
 #if BN_DIVMOD_21_BOXED_FAST
-        if (aa->size == 2 && bb->size == 1) {
+        if (as == 2 && bs == 1) {
             uint64_t remainder;
             return bigint_finish_mag_sub(
                 mag_div_single(
@@ -10209,12 +10218,12 @@ WValue bigint_div_any(WValue a, WValue b) {
         }
 #endif
 #if BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST
-        if (aa->size == 4 && bb->size == 2)
+        if (as == 4 && bs == 2)
             return bigint_finish_mag_sub(
                 mag_div_42(aa->limbs, bb->limbs));
 #endif
 #if BN_DIV_TRIANGULAR_Q_CERTIFIED && BN_DIV_63_DIRECT && BN_DIV_63_BOXED_FAST
-        if (aa->size == 6 && bb->size == 3) {
+        if (as == 6 && bs == 3) {
             WBigint *q =
                 mag_div_q_63_certified(aa->limbs, bb->limbs);
             if (q) return bigint_finish_mag_sub(q);
@@ -10228,8 +10237,8 @@ WValue bigint_div_any(WValue a, WValue b) {
          * signed/type-polymorphic entry before dispatching the same magnitude
          * kernel.
          */
-        if (bb->size >= 4 && aa->size > 0 &&
-            (aa->size & 1) == 0 && bb->size == aa->size / 2) {
+        if (bs >= 4 && as > 0 &&
+            (as & 1) == 0 && bs == as / 2) {
             WBigint *q;
 #if BN_DIV_TRIANGULAR_Q_CERTIFIED
             /*
@@ -10240,14 +10249,14 @@ WValue bigint_div_any(WValue a, WValue b) {
              * frame.  A rare inconclusive certificate falls back to the full
              * dispatcher unchanged.
              */
-            if (bb->size < BN_DIV_RECIP_Q_MIN) {
+            if (bs < BN_DIV_RECIP_Q_MIN) {
                 q = mag_div_q_triangular_certified(
-                    aa->limbs, aa->size, bb->limbs, bb->size);
+                    aa->limbs, as, bb->limbs, bs);
                 if (q) return bigint_finish_mag_sub(q);
             }
 #endif
             mag_divmod(
-                aa->limbs, aa->size, bb->limbs, bb->size, &q, NULL);
+                aa->limbs, as, bb->limbs, bs, &q, NULL);
             return bigint_finish_mag_sub(q);
         }
 #endif
@@ -10269,20 +10278,21 @@ WValue bigint_mod_any(WValue a, WValue b) {
 #if BN_DIVMOD_21_BOXED_FAST || (BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST) || \
     BN_MOD_63_DIRECT || BN_DIV_POSITIVE_2N_N_BOXED_FAST
     if (w_is_bigint(a) && w_is_bigint(b)) {
-        WBigint *aa = w_as_bigint(a);
-        WBigint *bb = w_as_bigint(b);
+        int32_t as, bs;
+        WBigint *aa = w_bigint_view(a, &as);
+        WBigint *bb = w_bigint_view(b, &bs);
 #if BN_DIVMOD_21_BOXED_FAST
-        if (aa->size == 2 && bb->size == 1)
+        if (as == 2 && bs == 1)
             return bigint_finish_one_limb(
                 mag_mod_single(aa->limbs, 2, bb->limbs[0]), 0);
 #endif
 #if BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST
-        if (aa->size == 4 && bb->size == 2)
+        if (as == 4 && bs == 2)
             return bigint_finish_mag_sub(
                 mag_mod_42(aa->limbs, bb->limbs));
 #endif
 #if BN_MOD_63_DIRECT
-        if (aa->size == 6 && bb->size == 3)
+        if (as == 6 && bs == 3)
             return bigint_finish_mag_sub(
                 mag_mod_63(aa->limbs, bb->limbs));
 #endif
@@ -10293,11 +10303,11 @@ WValue bigint_mod_any(WValue a, WValue b) {
          * lengths, so skip the noinline generic entry and its duplicate
          * integer_limbs walk before dispatching the same magnitude kernel.
          */
-        if (bb->size >= 4 && aa->size > 0 &&
-            (aa->size & 1) == 0 && bb->size == aa->size / 2) {
+        if (bs >= 4 && as > 0 &&
+            (as & 1) == 0 && bs == as / 2) {
             WBigint *r;
             mag_divmod(
-                aa->limbs, aa->size, bb->limbs, bb->size, NULL, &r);
+                aa->limbs, as, bb->limbs, bs, NULL, &r);
             return bigint_finish_mag_sub(r);
         }
 #endif
@@ -12528,16 +12538,15 @@ static inline __attribute__((always_inline))
 WValue bigint_gcd_any(WValue a, WValue b) {
 #if BN_GCD_BOXED_SMALL_FAST
     if (w_is_bigint(a) && w_is_bigint(b)) {
-        WBigint *aa = w_as_bigint(a);
-        WBigint *bb = w_as_bigint(b);
+        int32_t as, bs;
+        WBigint *aa = w_bigint_view(a, &as);
+        WBigint *bb = w_bigint_view(b, &bs);
 #if BN_ALGEBRAIC_IDENTITY_FAST
         /* Both values are already known boxed.  Handle aliasing here so the
          * ordinary boxed-small lane does not first compare against every
          * mixed inline identity (zero and both signs of one). */
-        if (a == b) return aa->size > 0 ? a : w_neg(a);
+        if (a == b) return as > 0 ? a : w_neg(a);
 #endif
-        int32_t as = aa->size;
-        int32_t bs = bb->size;
         if (as == 1 && bs == 1)
             return bigint_gcd_boxed_one_limb(aa, bb);
         int32_t an = as < 0 ? -as : as;
@@ -12574,19 +12583,13 @@ WValue bigint_gcd_any(WValue a, WValue b) {
 #endif
 #if BN_ALGEBRAIC_IDENTITY_FAST
 #if !BN_GCD_BOXED_SMALL_FAST
-    if (a == b && w_is_bigint(a)) {
-        WBigint *same = w_as_bigint(a);
-        return same->size > 0 ? a : w_neg(a);
-    }
+    if (a == b && w_is_bigint(a))
+        return w_bigint_effective_negative(a) ? w_neg(a) : a;
 #endif
-    if (b == w_box_int(0) && w_is_bigint(a)) {
-        WBigint *big = w_as_bigint(a);
-        return big->size > 0 ? a : w_neg(a);
-    }
-    if (a == w_box_int(0) && w_is_bigint(b)) {
-        WBigint *big = w_as_bigint(b);
-        return big->size > 0 ? b : w_neg(b);
-    }
+    if (b == w_box_int(0) && w_is_bigint(a))
+        return w_bigint_effective_negative(a) ? w_neg(a) : a;
+    if (a == w_box_int(0) && w_is_bigint(b))
+        return w_bigint_effective_negative(b) ? w_neg(b) : b;
     if (a == w_box_int(1) || a == w_box_int(-1) ||
         b == w_box_int(1) || b == w_box_int(-1))
         return w_box_int(1);
@@ -12648,14 +12651,17 @@ int bigint_compare(WValue a, WValue b) {
     /* bigint_compare's callers have already established that both values are
      * integers, so a non-inline integer is a WBigint.  Keep the overwhelmingly
      * common boxed/boxed, positive, equal-width path out of integer_limbs.
-     * Heap integer WValues have a zero high tag while inline i48 values carry
-     * W_TAG_INT, so one combined tag test identifies the boxed pair; signed
-     * size and magnitude work can then proceed directly from their headers. */
-    if (__builtin_expect(((a | b) & W_TAG_MASK) == 0, 1)) {
-        WBigint *aa = w_as_bigint(a);
-        WBigint *bb = w_as_bigint(b);
-        int32_t as = aa->size;
-        if (__builtin_expect(as > 0 && as == bb->size, 1)) {
+     * Heap integers carry W_TAG_BIGINT (v4) while inline i48 values carry
+     * W_TAG_INT, so one combined tag test identifies the boxed pair (bit 47,
+     * the tag-sign overlay, sits below the mask and does not disturb it);
+     * signed size then composes via w_bigint_view. */
+    if (__builtin_expect(
+            (((a ^ W_TAG_BIGINT) | (b ^ W_TAG_BIGINT)) & W_TAG_MASK) == 0,
+            1)) {
+        int32_t as, bs;
+        WBigint *aa = w_bigint_view(a, &as);
+        WBigint *bb = w_bigint_view(b, &bs);
+        if (__builtin_expect(as > 0 && as == bs, 1)) {
             if (__builtin_expect(as == 1, 0)) {
                 uint64_t av = aa->limbs[0];
                 uint64_t bv = bb->limbs[0];
@@ -13066,10 +13072,12 @@ static inline WValue bigint_limb_to_s(uint64_t u, int neg) {
     return w_string_n(p, (size_t)(end - p));
 }
 
-static WValue bigint_to_s_impl(WBigint *b) {
-    int32_t abs_len = b->size < 0 ? -b->size : b->size;
+/* signed_size composes the header sign with the tag-sign overlay; callers
+ * unboxing a WValue must obtain it via w_bigint_view. */
+static WValue bigint_to_s_impl(WBigint *b, int32_t signed_size) {
+    int32_t abs_len = signed_size < 0 ? -signed_size : signed_size;
     if (abs_len == 0) return w_string("0");
-    int neg = b->size < 0;
+    int neg = signed_size < 0;
     if (abs_len == 1) return bigint_limb_to_s(b->limbs[0], neg);
     if (abs_len == 2) {
         /* Avoid a temporary heap output plus strlen for the other slab-sized
@@ -13092,11 +13100,11 @@ static WValue bigint_to_s_impl(WBigint *b) {
     return result;
 }
 
-static WValue bigint_to_s_base_impl(WBigint *b, int base) {
+static WValue bigint_to_s_base_impl(WBigint *b, int32_t signed_size, int base) {
     static const char digits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
-    int32_t abs_len = b->size < 0 ? -b->size : b->size;
+    int32_t abs_len = signed_size < 0 ? -signed_size : signed_size;
     if (abs_len == 0) return w_string("0");
-    if (base == 10) return bigint_to_s_impl(b);
+    if (base == 10) return bigint_to_s_impl(b, signed_size);
 
     uint64_t *work = (uint64_t *)malloc((size_t)abs_len * sizeof(uint64_t));
     if (!work) die("out of memory converting bigint to string");
@@ -13145,7 +13153,7 @@ static WValue bigint_to_s_base_impl(WBigint *b, int base) {
         }
     }
 
-    if (b->size < 0) buf[pos++] = '-';
+    if (signed_size < 0) buf[pos++] = '-';
     for (size_t i = 0, j = pos - 1; i < j; i++, j--) {
         char t = buf[i];
         buf[i] = buf[j];
@@ -13158,13 +13166,26 @@ static WValue bigint_to_s_base_impl(WBigint *b, int base) {
     return result;
 }
 
-static double bigint_to_double_impl(WBigint *b) {
-    int32_t n = b->size < 0 ? -b->size : b->size;
+static double bigint_to_double_impl(WBigint *b, int32_t signed_size) {
+    int32_t n = signed_size < 0 ? -signed_size : signed_size;
     double value = 0.0;
     for (int32_t i = n - 1; i >= 0; i--) {
         value = ldexp(value, 64) + (double)b->limbs[i];
     }
-    return b->size < 0 ? -value : value;
+    return signed_size < 0 ? -value : value;
+}
+
+/* Boxed-boundary wrappers: compose the tag-sign overlay once, here. */
+static inline WValue bigint_to_s_boxed(WValue v) {
+    int32_t s;
+    WBigint *b = w_bigint_view(v, &s);
+    return bigint_to_s_impl(b, s);
+}
+
+static inline double bigint_to_double_boxed(WValue v) {
+    int32_t s;
+    WBigint *b = w_bigint_view(v, &s);
+    return bigint_to_double_impl(b, s);
 }
 
 /* ---- Boxing constructors ---- */
@@ -13192,11 +13213,12 @@ WValue w_u64(uint64_t v) {
 uint64_t w_to_u64(WValue v) {
     if (w_is_int(v)) return (uint64_t)w_as_int(v);
     if (w_is_bigint(v)) {
-        WBigint *b = w_as_bigint(v);
-        int32_t abs_len = b->size < 0 ? -b->size : b->size;
+        int32_t bs;
+        WBigint *b = w_bigint_view(v, &bs);
+        int32_t abs_len = bs < 0 ? -bs : bs;
         if (abs_len == 0) return 0;
         uint64_t low = b->limbs[0];
-        if (b->size < 0) return (uint64_t)(0 - low);
+        if (bs < 0) return (uint64_t)(0 - low);
         return low;
     }
     return (uint64_t)as_int(v);
@@ -22873,14 +22895,15 @@ static int net_is_digit(char c) { return c >= '0' && c <= '9'; }
 int64_t w_numeric_to_i64(WValue v) {
     if (w_is_int(v)) return w_as_int(v);
     if (w_is_bigint(v)) {
-        WBigint *b = w_as_bigint(v);
-        int32_t abs_len = b->size < 0 ? -b->size : b->size;
+        int32_t bs;
+        WBigint *b = w_bigint_view(v, &bs);
+        int32_t abs_len = bs < 0 ? -bs : bs;
         if (abs_len == 0) return 0;
         if (abs_len == 1) {
             uint64_t magnitude = b->limbs[0];
-            if (b->size > 0 && magnitude <= (uint64_t)INT64_MAX)
+            if (bs > 0 && magnitude <= (uint64_t)INT64_MAX)
                 return (int64_t)magnitude;
-            if (b->size < 0 && magnitude <= (1ULL << 63)) {
+            if (bs < 0 && magnitude <= (1ULL << 63)) {
                 if (magnitude == (1ULL << 63)) return INT64_MIN;
                 return -(int64_t)magnitude;
             }
@@ -24544,8 +24567,8 @@ static inline uint64_t w_hash_splitmix64(uint64_t v) {
 static uint64_t w_hash_integer_value(WValue value) {
     if (w_is_int(value))
         return w_hash_splitmix64((uint64_t)w_as_int(value));
-    WBigint *big = w_as_bigint(value);
-    int32_t size = big->size;
+    int32_t size; /* composed sign: hash(x) must match every alias of x */
+    WBigint *big = w_bigint_view(value, &size);
     int32_t count = size < 0 ? -size : size;
     uint64_t hash = w_hash_wyhash((const uint8_t *)big->limbs,
                                  (size_t)count * sizeof(uint64_t));
@@ -24600,6 +24623,11 @@ static uint64_t w_hash_value(WValue v) {
         return w_hash_splitmix64(left ^ (right << 1) ^ (right >> 63) ^
                                  0xa4093822299f31d0ULL);
     }
+    /* Bigints hash by CONTENT (sign-composed limbs), not pointer identity:
+     * == is structural for them, decimals/rationals already hash by value
+     * here, and the tag-sign overlay means one value can wear two bit
+     * patterns over the same buffer. Pointer hashing split equal keys. */
+    if (w_is_bigint(v)) return w_hash_integer_value(v);
     return w_hash_splitmix64(v);
 }
 
@@ -24620,6 +24648,11 @@ static int w_hash_key_eq(WValue a, WValue b) {
         }
         return w_string_compare(a, b) == 0;
     }
+    /* Structural equality for integer keys, matching == and the content
+     * hash above: an inline int, a bigint, and a tag-flipped alias of an
+     * equal value are the same key. */
+    if (w_is_integer_any(a) && w_is_integer_any(b))
+        return bigint_compare(a, b) == 0;
     if (is_decimal_any(a) && is_decimal_any(b))
         return decimal_compare(a, b) == 0;
     if (w_is_rational_any(a) && w_is_rational_any(b)) {
@@ -24680,7 +24713,7 @@ static double as_float(WValue v) {
 
 static double integer_to_double(WValue v) {
     if (w_is_int(v)) return (double)w_as_int(v);
-    if (w_is_bigint(v)) return bigint_to_double_impl(w_as_bigint(v));
+    if (w_is_bigint(v)) return bigint_to_double_boxed(v);
     die("expected integer");
     return 0.0;
 }
@@ -24688,7 +24721,7 @@ static double integer_to_double(WValue v) {
 static double as_numeric_double(WValue v) {
     if (w_is_double(v)) return w_as_double(v);
     if (w_is_int(v)) return (double)w_as_int(v);
-    if (w_is_bigint(v)) return bigint_to_double_impl(w_as_bigint(v));
+    if (w_is_bigint(v)) return bigint_to_double_boxed(v);
     if (w_is_rational_any(v))
         return integer_to_double(w_rational_numerator(v)) /
                integer_to_double(w_rational_denominator(v));
@@ -24732,7 +24765,7 @@ double w_num_to_f64(WValue v) {
 static double cmp_numeric_double(WValue v) {
     if (w_is_double(v)) return w_as_double(v);
     if (w_is_int(v)) return (double)w_as_int(v);
-    if (w_is_bigint(v)) return bigint_to_double_impl(w_as_bigint(v));
+    if (w_is_bigint(v)) return bigint_to_double_boxed(v);
     if (w_is_rational_any(v))
         return integer_to_double(w_rational_numerator(v)) /
                integer_to_double(w_rational_denominator(v));
@@ -25834,34 +25867,37 @@ WValue w_mod(WValue a, WValue b) {
 /* Helper: extract low 64-bit word from any integer (inline or bigint) */
 static int64_t integer_low_i64(WValue v) {
     if (w_is_int(v)) return w_as_int(v);
-    WBigint *b = w_as_bigint(v);
-    int32_t abs_len = b->size < 0 ? -b->size : b->size;
+    int32_t bs;
+    WBigint *b = w_bigint_view(v, &bs);
+    int32_t abs_len = bs < 0 ? -bs : bs;
     if (abs_len == 0) return 0;
     int64_t lo = (int64_t)b->limbs[0];
-    return b->size < 0 ? -lo : lo;
+    return bs < 0 ? -lo : lo;
 }
 
 static unsigned __int128 integer_low_u128(WValue v) {
     if (w_is_int(v)) return (unsigned __int128)(int64_t)w_as_int(v);
     if (!w_is_bigint(v)) return (unsigned __int128)as_int(v);
-    WBigint *b = w_as_bigint(v);
-    int32_t abs_len = b->size < 0 ? -b->size : b->size;
+    int32_t bs;
+    WBigint *b = w_bigint_view(v, &bs);
+    int32_t abs_len = bs < 0 ? -bs : bs;
     if (abs_len == 0) return 0;
     unsigned __int128 lo = (unsigned __int128)b->limbs[0];
     if (abs_len > 1) lo |= ((unsigned __int128)b->limbs[1]) << 64;
-    if (b->size < 0) return (unsigned __int128)0 - lo;
+    if (bs < 0) return (unsigned __int128)0 - lo;
     return lo;
 }
 
 static __int128 integer_low_i128(WValue v) {
     if (w_is_int(v)) return (__int128)w_as_int(v);
     if (!w_is_bigint(v)) return (__int128)as_int(v);
-    WBigint *b = w_as_bigint(v);
-    int32_t abs_len = b->size < 0 ? -b->size : b->size;
+    int32_t bs;
+    WBigint *b = w_bigint_view(v, &bs);
+    int32_t abs_len = bs < 0 ? -bs : bs;
     if (abs_len == 0) return 0;
     unsigned __int128 mag = (unsigned __int128)b->limbs[0];
     if (abs_len > 1) mag |= ((unsigned __int128)b->limbs[1]) << 64;
-    if (b->size < 0) return -(__int128)mag;
+    if (bs < 0) return -(__int128)mag;
     return (__int128)mag;
 }
 
@@ -26164,13 +26200,14 @@ WValue bignum_bitwise(char op, WValue a, WValue b) {
     if (a == b) return op == '^' ? w_box_int(0) : a;
 #endif
     if (w_is_bigint(a) && w_is_bigint(b)) {
-        WBigint *ba = w_as_bigint(a);
-        WBigint *bb = w_as_bigint(b);
-        if (ba->size == 1 && bb->size == 1)
+        int32_t as, bs;
+        WBigint *ba = w_bigint_view(a, &as);
+        WBigint *bb = w_bigint_view(b, &bs);
+        if (as == 1 && bs == 1)
             return bigint_finish_one_limb(
                 apply_bitop(op, ba->limbs[0], bb->limbs[0]), 0);
-        if (ba->size > 1 && ba->size == bb->size)
-            return bignum_bitwise_positive_equal(op, ba, bb, ba->size);
+        if (as > 1 && as == bs)
+            return bignum_bitwise_positive_equal(op, ba, bb, as);
     }
     return bignum_bitwise_generic(op, a, b);
 }
@@ -26865,7 +26902,9 @@ WValue bignum_shl(WValue a, int64_t k) {
     if (k == 0) return a;
 #endif
 #if BN_SHIFT_POSITIVE_SMALL
-    if (k > 0 && k < 64 && w_is_bigint(a)) {
+    /* Overlay-clear values only: the positive kernels re-read big->size as
+     * the length, so the header must already be the effective sign. */
+    if (k > 0 && k < 64 && w_is_bigint(a) && !(a & W_BIGINT_SIGN_BIT)) {
         WBigint *big = w_as_bigint(a);
         if (big->size == 1)
             return bignum_shl_positive_small(big, (unsigned)k);
@@ -26975,7 +27014,8 @@ WValue bignum_shr(WValue a, int64_t k) {
     if (k == 0) return a;
 #endif
 #if BN_SHIFT_POSITIVE_SMALL
-    if (k > 0 && k < 64 && w_is_bigint(a)) {
+    /* Overlay-clear values only — see bignum_shl. */
+    if (k > 0 && k < 64 && w_is_bigint(a) && !(a & W_BIGINT_SIGN_BIT)) {
         WBigint *big = w_as_bigint(a);
         if (big->size > 0 && big->size <= 4)
             return bignum_shr_positive_tiny(big, (unsigned)k);
@@ -27479,8 +27519,16 @@ static __attribute__((noinline)) WValue w_neg_generic(WValue v) {
  * which is a static and already inlines. */
 __attribute__((always_inline))
 WValue w_neg(WValue v) {
-    if (w_is_bigint(v))
-        return bigint_copy_signed(w_as_bigint(v), 1);
+    if (w_is_bigint(v)) {
+        /* Tag-sign negate (v4): hand out the SAME buffer with the overlay
+         * bit flipped — O(1), zero allocation, at every width. The buffer
+         * becomes shared: bigint_release_if_live will refuse to recycle it
+         * (leak-not-UAF backstop), and mutating entries must copy. A zero
+         * magnitude never reaches here (it demotes to inline int before
+         * boxing). */
+        w_bigint_mark_shared(w_as_bigint(v));
+        return v ^ W_BIGINT_SIGN_BIT;
+    }
     return w_neg_generic(v);
 }
 
@@ -28217,7 +28265,7 @@ WValue w_to_s(WValue v) {
     if (w_is_int(v))    return w_int_to_str(w_as_int(v));
     if (w_is_nil(v))    return w_string("");
     if (w_is_bool(v))   return w_string(v == W_TRUE ? "true" : "false");
-    if (w_is_bigint(v)) return bigint_to_s_impl(w_as_bigint(v));
+    if (w_is_bigint(v)) return bigint_to_s_boxed(v);
 
     if (w_is_instant(v)) {
         int64_t ms = w_unbox_instant(v);
@@ -29507,6 +29555,7 @@ WValue w_native_data_field(WValue recv, WValue name_v) {
         if (strcmp(name, "flags") == 0) return w_int(h->flags);
     } else if (w_is_bigint(recv)) {
         WBigint *b = w_as_bigint(recv);
+        /* raw header view: $size composition with the tag-sign overlay happens in big_int.w */
         if (strcmp(name, "size") == 0) return w_int(b->size);
         /* `limb0` is the first u64 of WBigint's flexible tail. A size-zero
          * synthetic BigInt has no semantic limb, so keep direct field reads
@@ -31170,16 +31219,17 @@ WValue w_pow(WValue base, WValue ex) {
          * those probes.  Bigint bases of 1..4 limbs with modest exponents
          * take the dedicated stack-buffer kernel. */
         if (e >= 2 && e <= W_POW_SMALL_MAX_RESULT && w_is_bigint(base)) {
-            WBigint *bb = w_as_bigint(base);
-            int32_t n = bb->size < 0 ? -bb->size : bb->size;
+            int32_t bsz;
+            WBigint *bb = w_bigint_view(base, &bsz);
+            int32_t n = bsz < 0 ? -bsz : bsz;
             if (n >= 1 &&
                 (uint64_t)n * (uint64_t)e <= W_POW_SMALL_MAX_RESULT) {
 #if W_POW5_BIGINT1
                 if (n == 1 && e == 5)
-                    return w_pow5_bigint1(bb->limbs[0], bb->size < 0);
+                    return w_pow5_bigint1(bb->limbs[0], bsz < 0);
 #endif
                 return w_pow_small_bigint(
-                    bb->limbs, n, bb->size < 0, (uint64_t)e);
+                    bb->limbs, n, bsz < 0, (uint64_t)e);
             }
         }
         if (w_is_rational_any(base)) {
@@ -37052,7 +37102,7 @@ WValue w_int_to_str_base_boxed(WValue r, WValue base) {
  * which returns inline/slab/fresh-heap — never its input's buffer. */
 WValue w_int_to_s(WValue r) {
     if (w_is_int(r)) return w_int_to_str(w_as_int(r));
-    if (w_is_bigint(r)) return bigint_to_s_impl(w_as_bigint(r));
+    if (w_is_bigint(r)) return bigint_to_s_boxed(r);
     WValue s = w_to_s(r);
     if (w_is_heap_str(s)) {
         WString *ws = w_as_heap_str(s);
@@ -37143,11 +37193,13 @@ static WValue w_ic_bigint_isqrt(WValue r, WValue *a, int c) {
 /* Bigint builtin wrappers (Phase 7+m) */
 static WValue w_ic_bigint_to_s(WValue r, WValue *a, int c) {
     int base = w_to_s_base_arg(a, c);
-    return bigint_to_s_base_impl(w_as_bigint(r), base);
+    int32_t s;
+    WBigint *b = w_bigint_view(r, &s);
+    return bigint_to_s_base_impl(b, s, base);
 }
 static WValue w_ic_bigint_to_f(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    return w_box_double(bigint_to_double_impl(w_as_bigint(r)));
+    return w_box_double(bigint_to_double_boxed(r));
 }
 static WValue w_ic_bigint_gcd(WValue r, WValue *a, int c) {
     if (c < 1) die("gcd requires 1 argument");
@@ -37156,11 +37208,13 @@ static WValue w_ic_bigint_gcd(WValue r, WValue *a, int c) {
 static inline __attribute__((always_inline))
 WValue w_ic_bigint_abs(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WBigint *b = w_as_bigint(r);
-    /* The copy-class path is the expensive arm and should stay fall-through;
-     * positive values still retain the allocation-free identity return. */
-    if (__builtin_expect(b->size >= 0, 0)) return r;
-    return bigint_copy_signed(b, 0);
+    /* Tag-sign abs (v4): effective-positive values keep the identity
+     * return; effective-negative ones hand out the same buffer with the
+     * overlay bit set so header-sign XOR overlay composes positive —
+     * O(1), zero allocation, like w_neg. */
+    if (__builtin_expect(!w_bigint_effective_negative(r), 1)) return r;
+    w_bigint_mark_shared(w_as_bigint(r));
+    return r ^ W_BIGINT_SIGN_BIT;
 }
 
 static inline __attribute__((always_inline))
@@ -37186,18 +37240,12 @@ WValue w_ic_integer_lcm_generic(WValue r, WValue *a, int c) {
     if (!w_is_integer_any(arg)) die("lcm requires an integer argument");
 
 #if BN_ALGEBRAIC_IDENTITY_FAST
-    if (r == arg && w_is_bigint(r)) {
-        WBigint *same = w_as_bigint(r);
-        return same->size > 0 ? r : w_neg(r);
-    }
-    if ((arg == w_box_int(1) || arg == w_box_int(-1)) && w_is_bigint(r)) {
-        WBigint *big = w_as_bigint(r);
-        return big->size > 0 ? r : w_neg(r);
-    }
-    if ((r == w_box_int(1) || r == w_box_int(-1)) && w_is_bigint(arg)) {
-        WBigint *big = w_as_bigint(arg);
-        return big->size > 0 ? arg : w_neg(arg);
-    }
+    if (r == arg && w_is_bigint(r))
+        return w_bigint_effective_negative(r) ? w_neg(r) : r;
+    if ((arg == w_box_int(1) || arg == w_box_int(-1)) && w_is_bigint(r))
+        return w_bigint_effective_negative(r) ? w_neg(r) : r;
+    if ((r == w_box_int(1) || r == w_box_int(-1)) && w_is_bigint(arg))
+        return w_bigint_effective_negative(arg) ? w_neg(arg) : arg;
 #endif
 
     uint64_t r_scratch, a_scratch;
@@ -37245,10 +37293,13 @@ WValue w_ic_integer_lcm_generic(WValue r, WValue *a, int c) {
         int64_t pv = w_as_int(product);
         return pv < 0 ? w_box_int(-pv) : product;
     }
-    /* The product is a fresh allocation no one else references; flip the
-     * sign in place instead of taking w_ic_bigint_abs's positive copy. */
-    WBigint *pb = w_as_bigint(product);
-    if (pb->size < 0) pb->size = -pb->size;
+    /* lcm is nonnegative. The product is usually a fresh allocation, but the
+     * multiply's identity arms can return `arg` itself (quotient == 1), so
+     * take the O(1) overlay abs instead of flipping the header in place. */
+    if (w_bigint_effective_negative(product)) {
+        w_bigint_mark_shared(w_as_bigint(product));
+        return product ^ W_BIGINT_SIGN_BIT;
+    }
     return product;
 }
 
@@ -37260,15 +37311,14 @@ WValue w_ic_integer_lcm(WValue r, WValue *a, int c) {
     if (__builtin_expect(c >= 1, 1) && w_is_bigint(r)) {
         WValue arg = a[0];
         if (w_is_bigint(arg)) {
-            WBigint *rb = w_as_bigint(r);
-            WBigint *ab = w_as_bigint(arg);
-            int32_t rs = rb->size;
-            int32_t as = ab->size;
+            int32_t rs, as;
+            WBigint *rb = w_bigint_view(r, &rs);
+            WBigint *ab = w_bigint_view(arg, &as);
             if (__builtin_expect(
                     (rs == 1 || rs == -1) &&
                     (as == 1 || as == -1), 0)) {
                 if (r == arg)
-                    return rs > 0 ? r : bigint_copy_signed(rb, 0);
+                    return rs > 0 ? r : w_neg(r); /* lcm(x,x) = |x| */
                 return bigint_lcm_one_limb(rb->limbs[0], ab->limbs[0]);
             }
         }

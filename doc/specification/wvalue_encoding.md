@@ -264,7 +264,7 @@ bits 47-0:  signed integer value
 
 On ARM64 this compiles to a single `sbfx` instruction.
 
-Values exceeding this range overflow to heap BigInt objects (top-level tag 0xFFF8 since v4).
+Values exceeding this range overflow to heap BigInt objects (top-level tag 0xFFF8 since v4; payload bit 47 is the tag-sign overlay — effective sign = header XOR bit 47, making negate a zero-copy tag flip).
 
 ---
 

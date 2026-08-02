@@ -33,13 +33,23 @@
     low = $limb0 ## u64
     (low & 1) != 0
 
+  # Sign predicates compose the header sign with the tag-sign overlay
+  # (encoding v4): `-x` hands out the same buffer with bit 47 of the boxed
+  # value flipped, so `$size` alone is the HEADER's sign, not the value's.
+  # zero?/even?/odd? read magnitude/limb parity and need no composition.
   -> negative?
     n = $size ## i64
-    n < 0
+    if n == 0
+      return false
+    flip = (wvalue_bits(self) >> 47) & 1
+    flip == 1 ? n > 0 : n < 0
 
   -> positive?
     n = $size ## i64
-    n > 0
+    if n == 0
+      return false
+    flip = (wvalue_bits(self) >> 47) & 1
+    flip == 1 ? n < 0 : n > 0
 
   # In-place sign mutation, following the `!` convention (Array#sort!,
   # Hash#merge!). A BigInt keeps its magnitude in a limb array and its sign
@@ -51,6 +61,12 @@
   # identity-shaped arithmetic (`x + 0`), so a value obtained that way can
   # SHARE storage with its source and a bang method will be visible through
   # both. Mutate values you constructed, exactly as with Array#sort!.
+  # neg! flips the HEADER sign: every view of this buffer — including
+  # tag-flipped `-x` aliases — sees its own effective value negate, which
+  # is exactly the linked-view arithmetic (`y = -x; x.neg!` leaves y equal
+  # to the new -x, i.e. the old x). abs! must instead land the RECEIVER's
+  # effective sign on positive, so it composes with the receiver's own
+  # overlay bit before choosing the header sign.
   -> neg!
     n = $size ## i64
     $size = 0 - n
@@ -58,8 +74,13 @@
 
   -> abs!
     n = $size ## i64
-    if n < 0
-      $size = 0 - n
+    flip = (wvalue_bits(self) >> 47) & 1
+    if flip == 1
+      if n > 0
+        $size = 0 - n
+    else
+      if n < 0
+        $size = 0 - n
     self
 
   # Conversion to the already-integral representation is receiver identity.

@@ -1383,6 +1383,10 @@ use target
       return ccall("w_int_to_str_base_boxed", args[1], args[2])
     when "bigint_powmod_any"
       return ccall("bigint_powmod_any", args[1], args[2], args[3])
+    when "w_bigint_mark_shared_value"
+      return ccall("w_bigint_mark_shared_value", args[1])
+    when "w_bigint_shared_value"
+      return ccall("w_bigint_shared_value", args[1])
     when "w_str_to_sym"
       return ccall("w_str_to_sym", args[1])
     when "w_algebra_rewrite_source"
@@ -2123,6 +2127,13 @@ use target
       # w_neg -> `-@` instance dispatch. Primitives keep the `0 - x` arm.
       if type(operand) == "Hash" && operand.has_key?(:rt) && operand[:rt] == :object
         return dispatch_method(operand, "-@", [], nil, nil)
+      # BigInt negation must reach the runtime's w_neg, not the `0 - x`
+      # subtraction: w_neg is the tag-sign flip (encoding v4) — a zero-copy
+      # LINKED VIEW whose bang-mutation semantics both engines must share.
+      # `0 - x` would mint an independent copy and the engines would
+      # diverge exactly where the tag-sign spec pins them together.
+      if type(operand) == "BigInt"
+        return ccall("w_neg", operand)
       return 0 - operand
     raise "Unknown unary operator"
 

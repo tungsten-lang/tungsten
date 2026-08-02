@@ -69,8 +69,26 @@ static WValue bench_clone_integer(WValue value) {
     return bigint_box(copy);
 }
 
+/* Direct-lane free that honors the tag-alias count (v4): abs/neg lanes
+ * hold tag ALIASES of their fixtures in `previous`, and a raw free() there
+ * killed the fixture's buffer under the next iteration (ASAN UAF at
+ * abs@1). An aliased buffer dies only with its last reference; the
+ * non-recycle lanes keep their free-not-park semantics for unaliased
+ * buffers. */
+static void bench_direct_free(WBigint *b) {
+    if (b->shared) {
+        if (b->shared != 255) b->shared--;
+        return;
+    }
+    free(b);
+}
+
 static void bench_free_value(WValue value) {
-    if (w_is_bigint(value)) free(w_as_bigint(value));
+    /* Tag-sign overlays (v4) mean a bitwise-distinct result can share its
+     * buffer with a fixture (`abs`/`neg` return aliases): raw free() here
+     * double-freed. Route through the alias-counting release so the buffer
+     * dies exactly once, when its last reference is freed. */
+    if (w_is_bigint(value)) bigint_release_if_live(w_as_bigint(value));
 }
 
 static int bench_iters_for_limbs(int32_t limbs) {
@@ -817,6 +835,107 @@ static WValue bench_bigint_abs_bang_c_ref(WValue r, WValue *a, int c) {
 /* Third-operand seed for the powmod modulus; the Python driver mirrors it. */
 #define BENCH_BOXED_M_SEED 0xa4093822299f31d0ULL
 
+/* ---- Tag-sign differential fuzz (encoding v4) ----
+ *
+ * w_neg/w_abs hand out the SAME buffer with the overlay bit (bit 47)
+ * flipped; every boxed entry must compose header XOR overlay. This gate
+ * runs each op over all sign combinations twice — once with tag-flipped
+ * negatives, once with overlay-free header-signed COPIES — and requires
+ * identical results. Same-engine differential isolates the overlay
+ * machinery from any division/bitwise sign-convention questions; the
+ * convention-safe subset is additionally triangulated against GMP by the
+ * caller reusing check_boxed_op_against_gmp fixtures. Blocking: the R3
+ * migration does not land while this reports a single mismatch. */
+static void bench_boxed_operands(int op, int32_t limbs, WValue *a, WValue *b,
+                                 WValue *m);
+static WValue bench_boxed_op_apply(int op, WValue a, WValue b);
+
+static WValue fuzz_copy_negate(WValue v) {
+    if (!w_is_bigint(v)) return w_neg(v);
+    WBigint *b = w_as_bigint(v);
+    int overlay = (v & W_BIGINT_SIGN_BIT) ? 1 : 0;
+    return bigint_copy_signed(b, 1 ^ overlay);
+}
+
+static const struct { int op; const char *name; int unary; int rhs_sign_ok; }
+fuzz_tag_sign_ops[] = {
+    {BENCH_BOXED_ADD, "add", 0, 1}, {BENCH_BOXED_SUB, "sub", 0, 1},
+    {BENCH_BOXED_MUL, "mul", 0, 1}, {BENCH_BOXED_DIV, "div", 0, 1},
+    {BENCH_BOXED_MOD, "mod", 0, 1}, {BENCH_BOXED_AND, "and", 0, 1},
+    {BENCH_BOXED_OR,  "or",  0, 1}, {BENCH_BOXED_XOR, "xor", 0, 1},
+    {BENCH_BOXED_SHL, "shl", 0, 0}, {BENCH_BOXED_SHR, "shr", 0, 0},
+    {BENCH_BOXED_GCD, "gcd", 0, 1}, {BENCH_BOXED_CMP, "cmp", 0, 1},
+    {BENCH_BOXED_NEG, "neg", 1, 0}, {BENCH_BOXED_ABS, "abs", 1, 0},
+    {BENCH_BOXED_LCM, "lcm", 0, 1},
+    {BENCH_BOXED_TOSTR, "tostr", 1, 0},
+};
+
+static void fuzz_tag_sign_case(size_t oi, int32_t limbs) {
+    int op = fuzz_tag_sign_ops[oi].op;
+    const char *name = fuzz_tag_sign_ops[oi].name;
+    WValue a, b, m;
+    bench_boxed_operands(op == BENCH_BOXED_TOSTR ? BENCH_BOXED_ADD : op,
+                         limbs, &a, &b, &m);
+    int sb_max = fuzz_tag_sign_ops[oi].unary ? 1
+               : (fuzz_tag_sign_ops[oi].rhs_sign_ok ? 2 : 1);
+    for (int sa = 0; sa < 2; sa++) {
+        for (int sb = 0; sb < sb_max; sb++) {
+            WValue ta = sa ? w_neg(a) : a;
+            WValue tb = sb ? w_neg(b) : b;
+            WValue ca = sa ? fuzz_copy_negate(a) : a;
+            WValue cb = sb ? fuzz_copy_negate(b) : b;
+            if (op == BENCH_BOXED_CMP) {
+                int rt = bigint_compare(ta, tb);
+                int rc = bigint_compare(ca, cb);
+                if ((rt > 0) != (rc > 0) || (rt < 0) != (rc < 0))
+                    dief("tag-sign cmp mismatch limbs=%d sa=%d sb=%d",
+                         limbs, sa, sb);
+            } else if (op == BENCH_BOXED_TOSTR) {
+                WValue st = w_to_s(ta);
+                WValue sc = w_to_s(ca);
+                if (strcmp(as_str(st), as_str(sc)) != 0)
+                    dief("tag-sign tostr mismatch limbs=%d sa=%d", limbs, sa);
+            } else if (op == BENCH_BOXED_NEG) {
+                WValue rt = w_neg(ta);
+                WValue rc = fuzz_copy_negate(ca);
+                if (bigint_compare(rt, rc) != 0)
+                    dief("tag-sign neg mismatch limbs=%d sa=%d", limbs, sa);
+                /* involution through the overlay */
+                if (bigint_compare(w_neg(rt), ta) != 0)
+                    dief("tag-sign neg involution broke limbs=%d sa=%d",
+                         limbs, sa);
+            } else if (op == BENCH_BOXED_ABS) {
+                WValue rt = w_ic_bigint_abs(ta, NULL, 0);
+                if (w_is_bigint(rt) && w_bigint_effective_negative(rt))
+                    dief("tag-sign abs negative limbs=%d sa=%d", limbs, sa);
+                WValue rc = w_ic_bigint_abs(ca, NULL, 0);
+                if (bigint_compare(rt, rc) != 0)
+                    dief("tag-sign abs mismatch limbs=%d sa=%d", limbs, sa);
+            } else {
+                WValue rt, rc;
+                if (op == BENCH_BOXED_LCM) {
+                    rt = w_ic_integer_lcm(ta, &tb, 1);
+                    rc = w_ic_integer_lcm(ca, &cb, 1);
+                } else {
+                    rt = bench_boxed_op_apply(op, ta, tb);
+                    rc = bench_boxed_op_apply(op, ca, cb);
+                }
+                if (bigint_compare(rt, rc) != 0)
+                    dief("tag-sign %s mismatch limbs=%d sa=%d sb=%d",
+                         name, limbs, sa, sb);
+                /* the composed results must also HASH equal: hash keys by
+                 * value, and a tag-flipped result that hashes by header
+                 * would split equal keys */
+                if (w_hash_value(rt) != w_hash_value(rc))
+                    dief("tag-sign %s hash split limbs=%d sa=%d sb=%d",
+                         name, limbs, sa, sb);
+            }
+        }
+    }
+    /* Leak-tolerant by design: tag aliases pin their buffers (shared bit),
+     * so this fuzz loop does not free intermediates. */
+}
+
 static int bench_boxed_op_parse(const char *name) {
     if (strcmp(name, "add") == 0) return BENCH_BOXED_ADD;
     if (strcmp(name, "sub") == 0) return BENCH_BOXED_SUB;
@@ -1056,7 +1175,7 @@ bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
             if (w_is_bigint(previous)) {                                   \
                 if (recycle)                                               \
                     bigint_release_if_live(w_as_bigint(previous));         \
-                else free(w_as_bigint(previous));                          \
+                else bench_direct_free(w_as_bigint(previous));                          \
             }                                                              \
             previous = result;                                             \
         }                                                                  \
@@ -1070,7 +1189,7 @@ bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
         if (w_is_bigint(previous)) {                                       \
             if (recycle)                                                   \
                 bigint_release_if_live(w_as_bigint(previous));             \
-            else free(w_as_bigint(previous));                              \
+            else bench_direct_free(w_as_bigint(previous));                              \
         }                                                                  \
         previous = result;                                                 \
     }                                                                      \
@@ -1228,7 +1347,7 @@ static double bench_boxed_result_churn(int op, int32_t limbs, int iters,
         die("unknown boxed-result benchmark operation");
     }
 
-    if (w_is_bigint(cx.previous)) free(w_as_bigint(cx.previous));
+    if (w_is_bigint(cx.previous)) bench_direct_free(w_as_bigint(cx.previous));
     bigint_pool_release_thread();
     bench_free_value(a);
     bench_free_value(b);
@@ -2012,7 +2131,7 @@ static void check_tostr_one_limb_case(uint64_t magnitude, int negative,
     WBigint *b = bigint_alloc_raw(1);
     b->limbs[0] = magnitude;
     b->size = magnitude == 0 ? 0 : (negative ? -1 : 1);
-    WValue text = bigint_to_s_impl(b);
+    WValue text = bigint_to_s_impl(b, b->size);
 
     mpz_t expected_z;
     mpz_init(expected_z);
@@ -2043,7 +2162,7 @@ static void check_tostr_two_limb_case(uint64_t lo, uint64_t hi, int negative,
     b->limbs[0] = lo;
     b->limbs[1] = hi;
     b->size = negative ? -2 : 2;
-    WValue text = bigint_to_s_impl(b);
+    WValue text = bigint_to_s_impl(b, b->size);
 
     mpz_t expected_z;
     mpz_init(expected_z);
@@ -4007,6 +4126,21 @@ int main(int argc, char **argv) {
         }
         free(seen);
         free(trace);
+        return 0;
+    }
+    if ((argc == 2 || argc == 3) && strcmp(argv[1], "--fuzz-tag-sign") == 0) {
+        int32_t max_limbs = argc == 3 ? (int32_t)atoi(argv[2]) : 64;
+        if (max_limbs <= 0) die("fuzz-tag-sign expects positive max limbs");
+        for (size_t oi = 0;
+             oi < sizeof fuzz_tag_sign_ops / sizeof fuzz_tag_sign_ops[0];
+             oi++) {
+            for (int32_t l = 1; l <= max_limbs; l++)
+                fuzz_tag_sign_case(oi, l);
+            printf("tag-sign %s 1..%d: OK\n",
+                   fuzz_tag_sign_ops[oi].name, max_limbs);
+            fflush(stdout);
+        }
+        printf("tag-sign differential: CLEAN\n");
         return 0;
     }
     if ((argc == 5 || argc == 6) &&

@@ -520,15 +520,17 @@ static inline int w_is_domain_obj(WValue v) { return w_is_obj(v) && w_subtag(v) 
    The type byte is retained as the live/parked recycler marker. */
 typedef struct {
     uint8_t  type;      /* W_TYPE_BIGINT while live; 0 while pooled */
-    uint8_t  shared;    /* sticky: another reference may alias this buffer
-                           (set when -x hands out a tag-flipped alias, and
-                           by future escape-site instrumentation). Mutating
-                           entries that would repurpose the buffer must
-                           copy instead when set. Never cleared while live;
-                           reset on allocation/pool-take. A stale 1 on a
-                           recycled buffer costs one spurious copy; a stale
-                           0 is impossible (marking happens only on live,
-                           reachable values). */
+    uint8_t  shared;    /* saturating ALIAS COUNT: each tag-sign op (-x,
+                           abs) that hands out another reference over this
+                           buffer increments it (capped at 255 = immortal).
+                           bigint_release_if_live decrements-and-swallows
+                           while nonzero and recycles only at zero — N
+                           aliases mean at most N+1 releases, so the buffer
+                           returns to the pool exactly when the last
+                           reference dies (leak-proof churn) and never
+                           earlier (UAF-proof). Mutating entries must treat
+                           nonzero as "copy first". Same-thread only, like
+                           the pool itself. Reset on fresh allocation. */
     uint8_t  _pad[2];   /* align `size` at offset 4 */
     int32_t  size;      /* abs(size) = limb count; sign = number sign; 0 = zero */
     uint32_t cap;       /* allocated limbs */
@@ -536,14 +538,42 @@ typedef struct {
     uint64_t limbs[];   /* little-endian: limbs[0] is least significant */
 } WBigint;
 
-static inline void w_bigint_mark_shared(WBigint *b) { b->shared = 1; }
+static inline void w_bigint_mark_shared(WBigint *b) {
+    if (b->shared != 255) b->shared++;
+}
 static inline int  w_bigint_is_shared(const WBigint *b) { return b->shared != 0; }
+
+/* Tag-sign overlay (v4): bit 47 of a bigint value XORs with the header
+ * sign. Negate hands out the SAME buffer with this bit flipped — O(1),
+ * zero allocation — after marking it shared (see WBigint.shared). The
+ * effective sign of a boxed bigint is therefore NEVER b->size alone:
+ * every sign read from a WValue must go through w_bigint_view. Magnitude
+ * (|size|, limbs, cap) is overlay-independent. */
+#define W_BIGINT_SIGN_BIT 0x0000800000000000ULL
 
 static inline WBigint *w_as_bigint(WValue v) {
     /* v4: BigInt rides its own top-level tag (0xFFF8). Bits 0-46 carry the
      * pointer (user-space pointers stay under 2^47 on every supported
-     * platform); bit 47 is reserved for the tag-sign encoding. */
+     * platform); bit 47 is the tag-sign overlay, masked off here. */
     return (WBigint *)((void *)(uintptr_t)(v & 0x00007FFFFFFFFFFFULL));
+}
+
+/* The ONLY legal way to read a boxed bigint's signed size: composes the
+ * header sign with the tag-sign overlay. Returns the struct for limb
+ * access. */
+static inline WBigint *w_bigint_view(WValue v, int32_t *signed_size) {
+    WBigint *b = w_as_bigint(v);
+    int32_t s = b->size;
+    *signed_size = (v & W_BIGINT_SIGN_BIT) ? -s : s;
+    return b;
+}
+
+/* Effective-sign predicate (a zero magnitude is never negative, whatever
+ * the overlay bit says). */
+static inline int w_bigint_effective_negative(WValue v) {
+    int32_t s;
+    (void)w_bigint_view(v, &s);
+    return s < 0;
 }
 
 /* Generic object type checks (sub-tag 0, type from header byte).

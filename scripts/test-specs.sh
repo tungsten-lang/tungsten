@@ -400,6 +400,8 @@ compiled_specs=(
   benchmarks/runtime_ports/sync_wrapper_revisit_exact_factory.w
   spec/numeric/bigint_bang_spec.w
   spec/numeric/bigint_limb_sweep_spec.w
+  spec/numeric/bigint_tag_sign_spec.w
+  spec/compiler/bigint_shared_bit_spec.w
   spec/numeric/bigint_view_field_write_spec.w
   spec/compiler/hash_free_escape_spec.w
   spec/numeric/bit_ops_spec.w
@@ -450,6 +452,8 @@ interpreter_specs=(
   # fix must not pass alone.
   spec/numeric/bigint_bang_spec.w
   spec/numeric/bigint_limb_sweep_spec.w
+  spec/numeric/bigint_tag_sign_spec.w
+  spec/compiler/bigint_shared_bit_spec.w
   spec/numeric/bigint_view_field_write_spec.w
   spec/compiler/hash_free_escape_spec.w
   spec/numeric/bit_ops_spec.w

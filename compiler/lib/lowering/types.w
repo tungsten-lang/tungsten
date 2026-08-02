@@ -79,7 +79,12 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
     "BigArray"      => 0x92 # Phase 3: 0x80 | W_TYPE_BIG_ARRAY (18)
     "Mmap"          => 0x91 # 0x80 | W_TYPE_MMAP (17)
     "SmallArray"    => 0x09 # Phase 6h: own subtag (W_SUBTAG_SMALL_ARRAY); no type byte
-    "BigInt"        => 0x02 # dedicated W_SUBTAG_BIGINT
+    "BigInt"        => 0x02 # historical dispatch key; the VALUE now rides
+                            # the top-level 0xFFF8 tag (v4) and
+                            # w_dispatch_key maps it back to 0x02, keeping
+                            # this table, every IC, and
+                            # class_uses_implicit_type_byte? (key < 0x80)
+                            # unchanged across the encoding move
     "Error"         => 0x93 # Phase 6i.2: 0x80 | W_TYPE_ERROR (19)
     "IPv6"          => 0x86 # Phase 6i.2: 0x80 | W_TYPE_IPV6 (6)
     "Mac"           => 0x85 # Phase 6i.2: 0x80 | W_TYPE_MAC (5)

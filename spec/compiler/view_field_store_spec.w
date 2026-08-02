@@ -20,18 +20,18 @@ use ../../compiler/lib/emitter
 + BigInt
   # WBigint.length is a signed i32 at byte offset 4. Restrict the test values
   # to +/-1 so the mutated object remains a valid one-limb BigInt.
-  -> __store_length_for_spec(value) (i64) i64
-    $length = value
+  -> __store_size_for_spec(value) (i64) i64
+    $size = value
 
 number = -1_000_000_000_000_000 ## BigInt
-check("signed i32 read before store", number$length == -1)
-stored_positive = number.__store_length_for_spec(1)
+check("signed i32 read before store", number$size == -1)
+stored_positive = number.__store_size_for_spec(1)
 check("store expression returns converted value", stored_positive == 1)
-check("signed i32 read after positive store", number$length == 1)
+check("signed i32 read after positive store", number$size == 1)
 check("positive object remains valid", number == 1_000_000_000_000_000)
-stored_negative = number.__store_length_for_spec(-1)
+stored_negative = number.__store_size_for_spec(-1)
 check("negative store expression remains signed", stored_negative == -1)
-check("signed i32 read after negative store", number$length == -1)
+check("signed i32 read after negative store", number$size == -1)
 check("negative object remains valid", number == -1_000_000_000_000_000)
 
 # Pin the LLVM shape for signed/unsigned 32-bit and signed/unsigned 64-bit
@@ -59,7 +59,10 @@ u32_ir = render_instruction(u32_inst, nil, {}, nil, "")
 i64_ir = render_instruction(i64_inst, nil, {}, nil, "")
 u64_ir = render_instruction(u64_inst, nil, {}, nil, "")
 
-check("store masks the NaN-box subtag", i32_ir.include?("%signed.ptr = and i64 %self, -16"))
+# 140737488355312 = 0x00007FFF_FFFF_FFF0: strips the subtag nibble AND the
+# top-17 tag/sign bits, because BigInt receivers ride the 0xFFF8 top-level
+# tag (v4) rather than object space.
+check("store masks the NaN-box tag and subtag", i32_ir.include?("%signed.ptr = and i64 %self, 140737488355312"))
 check("signed i32 exact gep", i32_ir.include?("getelementptr i8, ptr %signed.bp, i64 4"))
 check("signed i32 truncates", i32_ir.include?("%signed.w = trunc i64 %next to i32"))
 check("signed i32 stores unaligned", i32_ir.include?("store i32 %signed.w, ptr %signed.gep, align 1"))

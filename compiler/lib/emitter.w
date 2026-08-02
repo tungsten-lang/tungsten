@@ -1131,7 +1131,7 @@ use hashing
   out << "define private double @__w_num_to_f64_fast(i64 %v) alwaysinline nounwind {\n"
   out << "entry:\n"
   out << "  %ub = sub i64 %v, 281474976710656\n"
-  out << "  %isd = icmp ule i64 %ub, -2251799813685249\n"
+  out << "  %isd = icmp ule i64 %ub, -4503599627370496\n"
   out << "  br i1 %isd, label %fast, label %slow\n"
   out << "fast:\n"
   out << "  %d = bitcast i64 %ub to double\n"
@@ -3544,12 +3544,20 @@ ewscope_md_state = {ids: {}, order: []}
   when :const_color
     inst[:temp] + " = call i64 @w_color(i32 " + inst[:r].to_s() + ", i32 " + inst[:g].to_s() + ", i32 " + inst[:b].to_s() + ", i32 " + inst[:a].to_s() + ")"
 
-  # View access: load byte from raw object pointer
+  # View access: load byte from raw object pointer.
+  # The receiver mask for EVERY view op is 140737488355312
+  # (0x00007FFF_FFFF_FFF0): it strips the low subtag nibble like the old
+  # -16 AND the top-17 tag/sign bits, because BigInt receivers now ride a
+  # top-level tag (0xFFF8, bit 47 reserved for tag-sign) rather than the
+  # object space. Object-space receivers have zero top bits, so the wider
+  # mask is a no-op for them. The array/hash/strbuf header derefs elsewhere
+  # in this file keep -16: they sit behind subtag guards a bigint cannot
+  # pass.
   when :view_load_byte
     ptr_raw = inst[:temp] + ".ptr"
     byte_ptr = inst[:temp] + ".bp"
     byte_val = inst[:temp] + ".b"
-    ptr_raw + " = and i64 " + inst[:ptr] + ", -16\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + inst[:index] + "\n  " + byte_val + " = load i8, ptr " + inst[:temp] + ".gep\n  " + inst[:temp] + ".zext = zext i8 " + byte_val + " to i64\n  " + w_int_call_with_range(inst[:temp], inst[:temp] + ".zext", 0, 256)
+    ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + inst[:index] + "\n  " + byte_val + " = load i8, ptr " + inst[:temp] + ".gep\n  " + inst[:temp] + ".zext = zext i8 " + byte_val + " to i64\n  " + w_int_call_with_range(inst[:temp], inst[:temp] + ".zext", 0, 256)
 
   # Fixed inline u8[N] field: load at the statically known field offset plus
   # the caller-checked dynamic index. No hidden bounds branch is emitted.
@@ -3557,7 +3565,7 @@ ewscope_md_state = {ids: {}, order: []}
     ptr_raw = inst[:temp] + ".ptr"
     byte_ptr = inst[:temp] + ".bp"
     byte_val = inst[:temp] + ".b"
-    ptr_raw + " = and i64 " + inst[:ptr] + ", -16\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".base = getelementptr i8, ptr " + byte_ptr + ", i64 " + inst[:offset].to_s() + "\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + inst[:temp] + ".base, i64 " + inst[:index] + "\n  " + byte_val + " = load i8, ptr " + inst[:temp] + ".gep\n  " + inst[:temp] + " = zext i8 " + byte_val + " to i64"
+    ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".base = getelementptr i8, ptr " + byte_ptr + ", i64 " + inst[:offset].to_s() + "\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + inst[:temp] + ".base, i64 " + inst[:index] + "\n  " + byte_val + " = load i8, ptr " + inst[:temp] + ".gep\n  " + inst[:temp] + " = zext i8 " + byte_val + " to i64"
 
   # View access: load bit from raw object pointer
   when :view_load_bit
@@ -3568,7 +3576,7 @@ ewscope_md_state = {ids: {}, order: []}
     byte_val = inst[:temp] + ".b"
     shifted = inst[:temp] + ".sh"
     masked = inst[:temp] + ".m"
-    ptr_raw + " = and i64 " + inst[:ptr] + ", -16\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + byte_idx + " = lshr i64 " + inst[:index] + ", 3\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + byte_idx + "\n  " + byte_val + " = load i8, ptr " + inst[:temp] + ".gep\n  " + bit_idx + " = and i64 " + inst[:index] + ", 7\n  " + bit_idx + ".trunc = trunc i64 " + bit_idx + " to i8\n  " + shifted + " = lshr i8 " + byte_val + ", " + bit_idx + ".trunc\n  " + masked + " = and i8 " + shifted + ", 1\n  " + inst[:temp] + ".zext = zext i8 " + masked + " to i64\n  " + w_int_call_with_range(inst[:temp], inst[:temp] + ".zext", 0, 2)
+    ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + byte_idx + " = lshr i64 " + inst[:index] + ", 3\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + byte_idx + "\n  " + byte_val + " = load i8, ptr " + inst[:temp] + ".gep\n  " + bit_idx + " = and i64 " + inst[:index] + ", 7\n  " + bit_idx + ".trunc = trunc i64 " + bit_idx + " to i8\n  " + shifted + " = lshr i8 " + byte_val + ", " + bit_idx + ".trunc\n  " + masked + " = and i8 " + shifted + ", 1\n  " + inst[:temp] + ".zext = zext i8 " + masked + " to i64\n  " + w_int_call_with_range(inst[:temp], inst[:temp] + ".zext", 0, 2)
 
   # View field: load a named field at known offset/size from raw object pointer
   when :view_load_field
@@ -3580,20 +3588,20 @@ ewscope_md_state = {ids: {}, order: []}
     extension = ftype.starts_with?("i") ? "sext" : "zext"
     if ftype.starts_with?("*")
       # Pointer field: load ptr, then ptrtoint
-      ptr_raw + " = and i64 " + inst[:ptr] + ", -16\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + ".p = load ptr, ptr " + inst[:temp] + ".gep\n  " + inst[:temp] + " = ptrtoint ptr " + inst[:temp] + ".p to i64"
+      ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + ".p = load ptr, ptr " + inst[:temp] + ".gep\n  " + inst[:temp] + " = ptrtoint ptr " + inst[:temp] + ".p to i64"
     elsif ftype == "f32"
-      ptr_raw + " = and i64 " + inst[:ptr] + ", -16\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + " = load float, ptr " + inst[:temp] + ".gep, align 1"
+      ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + " = load float, ptr " + inst[:temp] + ".gep, align 1"
     elsif ftype == "f64"
-      ptr_raw + " = and i64 " + inst[:ptr] + ", -16\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + " = load double, ptr " + inst[:temp] + ".gep, align 1"
+      ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + " = load double, ptr " + inst[:temp] + ".gep, align 1"
     elsif size == 1
-      ptr_raw + " = and i64 " + inst[:ptr] + ", -16\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + ".b = load i8, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = " + extension + " i8 " + inst[:temp] + ".b to i64"
+      ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + ".b = load i8, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = " + extension + " i8 " + inst[:temp] + ".b to i64"
     elsif size == 2
-      ptr_raw + " = and i64 " + inst[:ptr] + ", -16\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + ".h = load i16, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = " + extension + " i16 " + inst[:temp] + ".h to i64"
+      ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + ".h = load i16, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = " + extension + " i16 " + inst[:temp] + ".h to i64"
     elsif size == 4
-      ptr_raw + " = and i64 " + inst[:ptr] + ", -16\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + ".w = load i32, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = " + extension + " i32 " + inst[:temp] + ".w to i64"
+      ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + ".w = load i32, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = " + extension + " i32 " + inst[:temp] + ".w to i64"
     else
       # 8 bytes (i64)
-      ptr_raw + " = and i64 " + inst[:ptr] + ", -16\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + " = load i64, ptr " + inst[:temp] + ".gep"
+      ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + " = load i64, ptr " + inst[:temp] + ".gep"
 
   # View field: store a scalar at a known native-data offset and return the
   # value converted to the field's declared width. Native layouts can be
@@ -3607,7 +3615,7 @@ ewscope_md_state = {ids: {}, order: []}
     if size > 8
       raise "view_store_field cannot store fields wider than 64 bits"
     extension = ftype.starts_with?("i") ? "sext" : "zext"
-    prefix = ptr_raw + " = and i64 " + inst[:ptr] + ", -16\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  "
+    prefix = ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  "
     if ftype.starts_with?("*")
       prefix + inst[:temp] + ".p = inttoptr i64 " + inst[:value] + " to ptr\n  store ptr " + inst[:temp] + ".p, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = or i64 " + inst[:value] + ", 0"
     elsif ftype == "f32"

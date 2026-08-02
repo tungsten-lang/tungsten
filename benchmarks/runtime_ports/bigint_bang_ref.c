@@ -54,7 +54,7 @@ WValue w_bigbang_fixture(WValue index_value) {
     value->size = src->size;
     value->cap = src->cap;
     for (uint32_t i = 0; i < src->cap; ++i) value->limbs[i] = src->limbs[i];
-    return w_box_ptr(value, W_SUBTAG_BIGINT);
+    return W_TAG_BIGINT | (uint64_t)(uintptr_t)value;
 }
 
 WValue w_bigbang_case_count(void) {

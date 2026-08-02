@@ -418,9 +418,13 @@ typedef WValue TcValue;
 #define TC_TAG_HASH   0x5U
 #define TC_TAG_OBJECT 0x4U
 #define TC_TAG_AST    0x0U
-#define TC_TAG_HEAP_INT 0xBU  // matches runtime/wvalue.h's bigint nibble; we
-                              // use it for any int that overflows the 48-bit
-                              // signed payload of W_TAG_INT.
+#define TC_TAG_HEAP_INT 0xBU  // stage-0-private object nibble for any int
+                              // that overflows W_TAG_INT's 48-bit payload.
+                              // (Historically 'matched the bigint nibble';
+                              // the runtime's bigint now rides the 0xFFF8
+                              // top-level tag and 0xB is W_SUBTAG_STRBUF —
+                              // stage-0 values never reach the runtime, so
+                              // no collision either way.)
 
 // ── Constructors ─────────────────────────────────────────────────────────
 static inline TcValue tc_box_nil(void)         { return W_NIL; }

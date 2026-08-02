@@ -434,16 +434,23 @@ int main() {
     /* Exhaustive NaN collision: biased doubles must not land in tag space */
     {
         /* Every IEEE 754 double, when biased, must either:
-           - fall in the double range [0x0001..., 0xFFF8...]
-           - or be a NaN that gets canonicalized first
-           Check that no valid (non-NaN) double biases into 0xFFF9-0xFFFF */
+           - fall in the double range [0x0001..., 0xFFF1_0000_0000_0000]
+           - or be a NaN that gets canonicalized first (v4: the exact
+             ceiling — the largest boxable raw pattern is -inf)
+           Check that no valid (non-NaN) double biases into 0xFFF2-0xFFFF.
+           Whole-prefix bands 0xFFF2..0xFFF7 are free tag slots; 0xFFF8 is
+           bigint; the nonzero payloads of 0xFFF1 are also unreachable. */
         uint64_t tag_prefixes[] = {
+            0xFFF2000000000000ULL, 0xFFF3000000000000ULL,
+            0xFFF4000000000000ULL, 0xFFF5000000000000ULL,
+            0xFFF6000000000000ULL, 0xFFF7000000000000ULL,
+            0xFFF8000000000000ULL, /* W_TAG_BIGINT */
             0xFFF9000000000000ULL, 0xFFFA000000000000ULL,
             0xFFFB000000000000ULL, 0xFFFC000000000000ULL,
             0xFFFD000000000000ULL, 0xFFFE000000000000ULL,
             0xFFFF000000000000ULL,
         };
-        for (int t = 0; t < 7; t++) {
+        for (int t = 0; t < 14; t++) {
             /* If a raw double + BIAS == this tag prefix, that raw would be: */
             uint64_t raw = tag_prefixes[t] - W_DOUBLE_BIAS;
             /* Check: is this raw value a NaN? It must be, otherwise collision */
@@ -451,6 +458,10 @@ int main() {
                          ((raw & 0x000FFFFFFFFFFFFFULL) != 0);
             assert(is_nan); /* If not NaN, we have a collision! */
         }
+        /* And w_is_double itself must reject every tag prefix and accept
+           biased -inf, the true ceiling. */
+        for (int t = 0; t < 14; t++) assert(!w_is_double(tag_prefixes[t]));
+        assert(w_is_double(0xFFF0000000000000ULL + W_DOUBLE_BIAS));
         printf("  NaN collision proof (tag prefixes): OK\n");
     }
 
@@ -820,16 +831,18 @@ int main() {
         printf("  bigint single-limb quotient: OK\n");
     }
 
-    /* BigInt owns a dedicated object subtag; its header byte is allocation
-     * state for the recycler rather than part of dynamic dispatch. */
+    /* BigInt rides a dedicated top-level tag (v4); its header byte is
+     * allocation state for the recycler rather than part of dispatch. */
     {
         WValue v = bigint_dec("18446744073709551617");
         assert(w_is_bigint(v));
-        assert(w_is_obj(v));
-        assert(w_subtag(v) == W_SUBTAG_BIGINT);
+        assert(!w_is_obj(v));                 /* left object space in v4 */
+        assert((v & W_TAG_MASK) == W_TAG_BIGINT);
+        assert((v & (1ULL << 47)) == 0);      /* sign bit reserved, clear */
+        assert(!w_is_double(v));
         assert(w_as_bigint(v)->type == W_TYPE_BIGINT);
         free(w_as_bigint(v));
-        printf("  bigint dedicated subtag: OK\n");
+        printf("  bigint dedicated tag: OK\n");
     }
 
     /* Pointer alignment: w_as_ptr strips sub-tag correctly */

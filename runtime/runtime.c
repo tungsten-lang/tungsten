@@ -728,10 +728,16 @@ WBigint *bigint_alloc_raw_hot_exact(uint32_t exact_cap) {
     return bigint_alloc_raw((int32_t)exact_cap);
 }
 
-/* BigInt has a dedicated object subtag; the header type byte is used only as
- * a live/bucketed-allocation marker, not as a dispatch load. */
+/* BigInt has a dedicated top-level tag (v4); the header type byte is used
+ * only as a live/bucketed-allocation marker, not as a dispatch load. The
+ * payload carries the pointer in bits 0-46 (user-space pointers stay under
+ * 2^47 on every supported platform — asserted here because a violation
+ * corrupts silently); bit 47 is reserved for the tag-sign encoding. */
 static inline WValue bigint_box(WBigint *b) {
-    return w_box_ptr(b, W_SUBTAG_BIGINT);
+#ifndef NDEBUG
+    assert(((uintptr_t)b & ~0x00007FFFFFFFFFFFULL) == 0);
+#endif
+    return W_TAG_BIGINT | (uint64_t)(uintptr_t)b;
 }
 
 /* Try to demote a bigint back to inline i48; otherwise box as heap bigint */
@@ -24153,8 +24159,9 @@ static const char *w_type_label(WValue v) {
             default:  return "object/?";
         }
     }
-    if (tag < 0xFFF9000000000000ULL) return "double";
+    if (tag < 0xFFF2000000000000ULL) return "double";
     switch (tag >> 48) {
+        case 0xFFF8: return "bigint";
         case 0xFFF9: return (v & 1) ? "symbol" : "string";
         case 0xFFFA: return "int";
         case 0xFFFB: return "instant";
@@ -32645,7 +32652,12 @@ static inline uint64_t w_dispatch_key(WValue v) {
             return 0xE0u | W_PACKED_RATIONAL;
         return subtag;
     }
-    if (hi < 0xFFF9) return 0xFF;                       /* double */
+    /* BigInt's top-level tag (v4) keeps its historical dispatch key so
+     * every IC, registration table, and the compiler's type_dispatch_key
+     * stay valid across the encoding move. Tested before the double
+     * catch-all: a bigint classified as 0xFF would hit the Float table. */
+    if (hi == 0xFFF8) return W_SUBTAG_BIGINT;
+    if (hi < 0xFFF9) return 0xFF;                       /* double (<= 0xFFF1; 0xFFF2..0xFFF7 free) */
     /* W_TAG_PACKED (hi=0xFFFE) holds 8 packed-value subtypes (color,
      * complex, rational, NODE, date, ipv4, …) that need distinct
      * dispatch keys so each can register its own class. Map subtype
@@ -37838,6 +37850,16 @@ WValue w_value_fields(WValue vv) {
         return w_string(buf);
     }
     unsigned tag = (unsigned)((bits >> 48) & 0xFFFF);
+    if (tag == 0xFFF8) {        /* bigint (v4 top-level tag) */
+        uint64_t pl = bits & 0x00007FFFFFFFFFFFULL;
+        w_fld(&p, e, "tag", "bits 63..48", "0xFFF8", "bigint");
+        snprintf(raw, sizeof raw, "0x%012llX", (unsigned long long)pl);
+        w_fld(&p, e, "pointer", "bits 46..0", raw, "WBigint*");
+        w_fld(&p, e, "sign bit", "bit 47",
+              (bits & (1ULL << 47)) ? "1" : "0",
+              "reserved for tag-sign");
+        return w_string(buf);
+    }
     if (tag == 0xFFFA) {        /* 48-bit signed int */
         uint64_t pl = bits & W_PAYLOAD_MASK;
         w_fld(&p, e, "tag", "bits 63..48", "0xFFFA", "48-bit signed integer");

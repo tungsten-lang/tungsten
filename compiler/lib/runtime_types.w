@@ -12,6 +12,8 @@ w_memo_miss    = 4
 w_double_bias  = 281474976710656
 
 # Tag constants (signed i64 representation of uint64 bit patterns):
+# 0xFFF8000000000000 = -(8 * 2^48) = -2251799813685248   bigint (v4; bit 47
+#                                    of the payload reserved for tag-sign)
 # 0xFFF9000000000000 = -(7 * 2^48) = -1970324836974592   string/symbol
 # 0xFFFA000000000000 = -(6 * 2^48) = -1688849860263936   int
 # 0xFFFB000000000000 = -(5 * 2^48) = -1407374883553280   instant
@@ -19,6 +21,9 @@ w_double_bias  = 281474976710656
 # 0xFFFD000000000000 = -(3 * 2^48) = -844424930131968    numeric (decimal/currency/quantity)
 # 0xFFFE000000000000 = -(2 * 2^48) = -562949953421312    packed
 # 0xFFFF000000000000 = -(1 * 2^48) = -281474976710656    duration
+# 0xFFF2..0xFFF7 are free (v4): biased doubles end at -inf+bias =
+# 0xFFF1000000000000 because every NaN canonicalizes to qNaN before biasing.
+w_tag_bigint    = -2251799813685248
 w_tag_stringsym = -1970324836974592
 w_tag_int       = -1688849860263936
 w_tag_instant   = -1407374883553280

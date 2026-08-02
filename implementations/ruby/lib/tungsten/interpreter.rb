@@ -27,7 +27,11 @@ module Tungsten
     W_TAG_DURATION  = 0xFFFF_0000_0000_0000
 
     W_PAYLOAD_MASK  = 0x0000_FFFF_FFFF_FFFF
-    W_DOUBLE_MAX    = 0xFFF8_FFFF_FFFF_FFFF
+    # v4: exact ceiling — NaNs canonicalize to qNaN before biasing, so the
+    # largest boxable raw double is -inf and biased doubles end at
+    # 0xFFF1_0000_0000_0000. 0xFFF2..0xFFF7 free tags; 0xFFF8 = bigint.
+    W_DOUBLE_MAX    = 0xFFF1_0000_0000_0000
+    W_TAG_BIGINT    = 0xFFF8_0000_0000_0000
     W_TAG_MASK      = 0xFFFF_0000_0000_0000
 
     W_INT48_MAX = (1 << 47) - 1

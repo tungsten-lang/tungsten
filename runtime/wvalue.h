@@ -59,8 +59,18 @@
    0x0000_0000_0000_0005 - 0x0000_0000_0000_000F  reserved sentinels
    0x0000_0000_0000_00x0+                      heap objects (ptr | sub-tag nibble)
    ── biased doubles ────────────────────────────────────────
-   0x0001_0000_0000_0000 - 0xFFF8_FFFF_FFFF_FFFF  biased IEEE 754 doubles
+   0x0001_0000_0000_0000 - 0xFFF1_0000_0000_0000  biased IEEE 754 doubles
+     Every NaN canonicalizes to qNaN (0x7FF8...) in w_box_double BEFORE
+     biasing, so the largest raw pattern is -inf (0xFFF0_0000_0000_0000)
+     and the biased ceiling is exactly 0xFFF1_0000_0000_0000. The old
+     ceiling (0xFFF8_FFFF...) was defensive slack for un-normalized
+     negative-NaN payloads that the canonicalization funnel already
+     makes unrepresentable — reclaimed as seven tag slots (v4).
    ── tagged values ─────────────────────────────────────────
+   0xFFF1_(payload>0)                          reserved (payload 0 is biased -inf)
+   0xFFF2 - 0xFFF7                             free tag slots (v4)
+   0xFFF8_xxxx_xxxx_xxxx                       bigint  (WBigint*, 47-bit ptr;
+                                                bit 47 reserved for tag-sign)
    0xFFF9_xxxx_xxxx_xxxx                       string / symbol
    0xFFFA_xxxx_xxxx_xxxx                       int     (48-bit signed, no bias)
    0xFFFB_xxxx_xxxx_xxxx                       instant (48-bit signed Unix ms)
@@ -70,22 +80,24 @@
    0xFFFF_xxxx_xxxx_xxxx                       duration (1-bit mode + payload)
 
    ---- 0x0000 sub-tags (low nibble of 16-byte-aligned pointer) ----
+   Singleton values reuse nibbles 1-3 at ptr == 0; the W_SUBTAG_* defines
+   below are the authoritative object map (this list mirrors them):
    nibble 0, ptr == 0   →  nil
    nibble 0, ptr != 0   →  generic object (uint8_t type in struct header)
-   nibble 1             →  false  (singleton, not a pointer)
-   nibble 2             →  true   (singleton, not a pointer)
-   nibble 3             →  undef  (singleton, not a pointer)
+   nibble 1             →  atomic
+   nibble 2             →  free (was bigint; promoted to W_TAG_BIGINT in v4)
+   nibble 3             →  free
    nibble 4             →  struct (user-defined class instance)
    nibble 5             →  hash
    nibble 6             →  closure
    nibble 7             →  regex
    nibble 8             →  range
-   nibble 9             →  module
+   nibble 9             →  small array
    nibble A             →  array
-   nibble B             →  bigint
+   nibble B             →  string buffer
    nibble C             →  class
    nibble D             →  uuid
-   nibble E             →  error
+   nibble E             →  free
    nibble F             →  domain (heap-overflow currency/quantity/duration/rational)
 
    ---- String/Symbol (0xFFF9) ----
@@ -139,6 +151,8 @@ typedef uint64_t WValue;
 #define W_BIASED_NAN    0x7FF9000000000000ULL
 
 /* ---- Tag constants (high 16 bits) ---- */
+/* 0xFFF1 reserved (payload 0 is biased -inf); 0xFFF2-0xFFF7 free (v4). */
+#define W_TAG_BIGINT    0xFFF8000000000000ULL
 #define W_TAG_STRINGSYM 0xFFF9000000000000ULL
 #define W_TAG_INT       0xFFFA000000000000ULL
 #define W_TAG_INSTANT   0xFFFB000000000000ULL
@@ -163,7 +177,11 @@ typedef uint64_t WValue;
  * measurable; slots 3 and 0xE remain free for future promotions. */
 #define W_SUBTAG_GENERIC     0   /* type discriminator in struct header byte */
 #define W_SUBTAG_ATOMIC      1   /* Phase 6i.2: was IPV6 (demoted to W_TYPE_IPV6 = 6) */
-#define W_SUBTAG_BIGINT      2   /* promoted from generic W_TYPE_BIGINT */
+/* slot 2 free (v4: was BIGINT — promoted to the top-level W_TAG_BIGINT).
+ * W_SUBTAG_BIGINT survives ONLY as BigInt's stable dispatch key (0x02):
+ * w_dispatch_key maps the 0xFFF8 tag back to it so inline caches, the
+ * g_type_class table, and the compiler's type_dispatch_key stay valid. */
+#define W_SUBTAG_BIGINT      2
 /* slot 3 free (was ENCODED; demoted to W_TYPE_ENCODED = 8) */
 #define W_SUBTAG_INSTANCE    4   /* user-defined class instance (WObject) */
 #define W_SUBTAG_HASH        5
@@ -393,9 +411,16 @@ static inline int w_is_true(WValue v)      { return v == W_TRUE; }
 static inline int w_is_bool(WValue v)      { return v == W_FALSE || v == W_TRUE; }
 static inline int w_is_undef(WValue v)     { return v == W_UNDEF; }
 
-/* Double check: unsigned subtract wraps singletons/objects past threshold */
+/* Double check: unsigned subtract wraps singletons/objects past threshold.
+   Ceiling is EXACT (v4): w_box_double canonicalizes every NaN to qNaN
+   before biasing, so the largest boxable raw pattern is -inf
+   (0xFFF0_0000_0000_0000) and everything above biased -inf is tag space.
+   Mirrors that must move in lockstep: compiler/lib/emitter.w
+   num_to_f64_fast_helper_ir, implementations/ruby interpreter.rb
+   W_DOUBLE_MAX, runtime/test_nanbox.c, doc/WVALUE.md,
+   doc/specification/wvalue_encoding.md. */
 static inline int w_is_double(WValue v) {
-    return (v - W_DOUBLE_BIAS) <= 0xFFF7FFFFFFFFFFFFULL;
+    return (v - W_DOUBLE_BIAS) <= 0xFFF0000000000000ULL;
 }
 
 /* NaN is a double with a known bit pattern (IEEE 754: NaN != NaN) */
@@ -503,7 +528,10 @@ typedef struct {
 } WBigint;
 
 static inline WBigint *w_as_bigint(WValue v) {
-    return (WBigint *)((void *)(uintptr_t)(v & ~0xFULL));
+    /* v4: BigInt rides its own top-level tag (0xFFF8). Bits 0-46 carry the
+     * pointer (user-space pointers stay under 2^47 on every supported
+     * platform); bit 47 is reserved for the tag-sign encoding. */
+    return (WBigint *)((void *)(uintptr_t)(v & 0x00007FFFFFFFFFFFULL));
 }
 
 /* Generic object type checks (sub-tag 0, type from header byte).

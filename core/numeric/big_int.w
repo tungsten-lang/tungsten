@@ -1,7 +1,7 @@
 
 + BigInt < Int
   - data
-    # BigInt has a dedicated NaN-box subtag, but WBigint retains its C header
+    # BigInt rides a dedicated top-level NaN-box tag (0xFFF8, v4), but WBigint retains its C header
     # byte as the live/parked recycler marker. Keep it explicit so
     # size/capacity/limb0 land at offsets 4/8/16 respectively.
     u8 _type

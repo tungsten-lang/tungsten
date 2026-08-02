@@ -1678,7 +1678,8 @@ static inline int w_is_encoded(WValue v) {
            ((WEncodedValue *)w_as_ptr(v))->type == W_TYPE_ENCODED;
 }
 static inline int w_is_bigint(WValue v) {
-    return w_is_obj(v) && w_subtag(v) == W_SUBTAG_BIGINT;
+    /* v4: dedicated top-level tag — one compare, no object-range test. */
+    return (v & W_TAG_MASK) == W_TAG_BIGINT;
 }
 /* True if v is an inline i48 int OR a heap-allocated BigInt. Kept beside the
  * other runtime object predicates for one shared integer-classification path. */

@@ -57,7 +57,7 @@ regions ordered from low to high:
  0x0000_0000_0000_0004                      memo miss (internal sentinel)
  0x0000_0000_0000_0005 - 0x0000_0000_0000_000F  reserved sentinels
  0x0000_0000_0000_00x0+                     heap objects (ptr | sub-tag)
- 0x0001_0000_0000_0000 - 0xFFF8_FFFF_FFFF_FFFF  biased IEEE 754 doubles
+ 0x0001_0000_0000_0000 - 0xFFF1_0000_0000_0000  biased IEEE 754 doubles (v4 exact ceiling; 0xFFF2-0xFFF7 free, 0xFFF8 bigint)
  0xFFF9_xxxx_xxxx_xxxx                      string / symbol
  0xFFFA_xxxx_xxxx_xxxx                      int     (48-bit signed)
  0xFFFB_xxxx_xxxx_xxxx                      instant (48-bit signed Unix ms)
@@ -111,7 +111,7 @@ All heap-allocated objects use 16-byte-aligned pointers. The low 4 bits
 | 0x8 | range | range object |
 | 0x9 | module | module |
 | 0xA | array | dynamic array |
-| 0xB | bigint | arbitrary-precision integer |
+| 0xB | string buffer | mutable string builder (bigint moved to top-level tag 0xFFF8 in v4) |
 | 0xC | class | class metaobject |
 | 0xD | uuid | 128-bit UUID |
 | 0xE | error | error object |
@@ -143,7 +143,7 @@ This shifts the entire double range above the object/singleton space and below
 the tagged value space:
 
 - **Minimum biased:** `0x0001_0000_0000_0000` (represents `+0.0`)
-- **Maximum biased:** `0xFFF8_FFFF_FFFF_FFFF` (represents `-0.0` minus epsilon)
+- **Maximum biased:** `0xFFF1_0000_0000_0000` (biased -inf; exact in v4 — every NaN canonicalizes to qNaN before biasing)
 - **Biased NaN:** `0x7FF9_0000_0000_0000` (canonical quiet NaN)
 
 **NaN canonicalization:** All NaN variants (signaling, quiet, with payloads)
@@ -169,7 +169,7 @@ memcpy(&d, &bits, 8);
 
 **Type check:**
 ```c
-(v - 0x0001000000000000) <= 0xFFF7FFFFFFFFFFFF
+(v - 0x0001000000000000) <= 0xFFF0000000000000
 ```
 
 This is a single unsigned subtract + compare — no branch needed.
@@ -264,7 +264,7 @@ bits 47-0:  signed integer value
 
 On ARM64 this compiles to a single `sbfx` instruction.
 
-Values exceeding this range overflow to heap BigInt objects (sub-tag 0xB).
+Values exceeding this range overflow to heap BigInt objects (top-level tag 0xFFF8 since v4).
 
 ---
 
@@ -733,7 +733,7 @@ Type checks are designed for minimal instruction count:
 #define W_SUBTAG_RANGE    8
 #define W_SUBTAG_MODULE   9
 #define W_SUBTAG_ARRAY    0xA
-#define W_SUBTAG_BIGINT   0xB
+#define W_SUBTAG_BIGINT   2   /* v4: dispatch key only; the value rides top-level tag 0xFFF8 */
 #define W_SUBTAG_CLASS    0xC
 #define W_SUBTAG_UUID     0xD
 #define W_SUBTAG_ERROR    0xE

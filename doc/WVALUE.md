@@ -16,7 +16,11 @@ Reference implementation: `stages/tungsten/runtime/wvalue.h` (standalone C heade
 0x0000_0000_0000_0003                       undef
 0x0000_0000_0000_0004                       memo miss (internal)
 0x0000_0000_0000_00x0+                      heap objects (16-byte aligned ptr | 4-bit sub-tag)
-0x0001_0000_0000_0000 .. 0xFFF8_FFFF_FFFF_FFFF  biased IEEE 754 doubles
+0x0001_0000_0000_0000 .. 0xFFF1_0000_0000_0000  biased IEEE 754 doubles
+0xFFF1_(payload > 0)                        reserved (payload 0 = biased -inf)
+0xFFF2 .. 0xFFF7                            free tag slots (v4)
+0xFFF8_xxxx_xxxx_xxxx                       bigint (WBigint*, 47-bit pointer;
+                                            bit 47 reserved for tag-sign)
 0xFFF9_xxxx_xxxx_xxxx                       string / symbol (SSO-5)
 0xFFFA_xxxx_xxxx_xxxx                       int     (i48)
 0xFFFB_xxxx_xxxx_xxxx                       instant (Unix ms since epoch)
@@ -39,8 +43,9 @@ Truthiness: `v > 1` (unsigned). Only nil and false are falsey.
 └────────────────┴────────────────────────────────────────┴───────┘
 ```
 
-Sub-tags: 0=generic 4=struct 5=hash 6=closure 7=regex 8=range
-9=module A=array B=bigint C=class D=uuid E=error F=domain
+Sub-tags: 0=generic 1=atomic 2=free(was bigint, now tag 0xFFF8) 4=struct
+5=hash 6=closure 7=regex 8=range 9=small-array A=array B=string-buffer
+C=class D=uuid E=free F=domain
 
 Pointer extraction: `v & ~0xF`
 Sub-tag extraction: `v & 0xF`
@@ -55,7 +60,30 @@ Sub-tag extraction: `v & 0xF`
 
  All NaN variants normalized to canonical qNaN before biasing.
  Biased NaN = 0x7FF9_0000_0000_0000.
+
+ The ceiling is EXACT (v4): canonicalization makes -inf
+ (0xFFF0_0000_0000_0000) the largest boxable raw pattern, so biased
+ doubles end at 0xFFF1_0000_0000_0000 and the seven prefixes above it
+ (0xFFF2..0xFFF8) are tag space. Check: (v - bias) <= 0xFFF0_0000_0000_0000.
 ```
+
+---
+
+## BigInt (0xFFF8)
+
+```
+63              48 47 46                                            0
++----------------+--+-----------------------------------------------+
+|   0xFFF8       |S |      47-bit WBigint* (16-byte aligned)        |
++----------------+--+-----------------------------------------------+
+```
+
+v4: BigInt left object space for its own top-level tag — `w_is_bigint` is
+one tag compare with no pointer dereference, and subtag 2 is freed. Bit 47
+(`S`) is reserved for the tag-sign encoding (negate as zero-copy tag flip);
+it is 0 today. Pointer extraction: `v & 0x0000_7FFF_FFFF_FFFF`. The
+dispatch key stays the historical `0x02`, so inline caches and the
+type-class tables are unchanged by the encoding move.
 
 ---
 

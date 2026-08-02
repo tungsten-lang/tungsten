@@ -141,3 +141,11 @@ mpz_*_ui idiom) immediately found:
 Together with E3, this decomposes mulchain's 7.8x whole-loop gap: ~4x is
 per-op kernel, the remainder allocation-per-pass (E4's half). These rows
 are the acceptance meter for the N x 1 kernel work.
+
+**RESOLVED 2026-08-02 same session** (42cfad2, ee6131b, 0858cc4): mul1
+1.23-1.27x (bn_mul_1 arm; residual = alloc churn + kernel throughput),
+div1 0.42-1.09x (by-limb reciprocal arm + preinv branch fix), add1/sub1
+0.80 @16 and 0.27-0.44 above (single-pass N±word kernel). And E4 stage 1
+landed: qualifying accumulator loops mutate in place — E3 accumulate
+124 -> 11.8 ns/it, whole-loop gap 104x -> 9.8x. Remaining meters: mul1's
+~1.24x (kernel work), addchain (needs swap-shape analysis, stage 2).

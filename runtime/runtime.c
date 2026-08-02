@@ -856,6 +856,20 @@ WValue bigint_finish_one_limb(uint64_t magnitude, int negative) {
 #define BN_ALGEBRAIC_IDENTITY_FAST 1
 #endif
 
+/* |x| of a boxed BigInt as an alias of the SAME buffer: the value itself
+ * for effective-positive x, the O(1) tag-sign overlay flip otherwise
+ * (mirroring w_neg / w_ic_bigint_abs). Either way one more reference to
+ * the buffer escapes, so bump the saturating shared count first — that is
+ * what lets a later bigint_release_if_live of the "result" be swallowed
+ * instead of recycling the still-live operand. */
+static inline __attribute__((always_inline))
+WValue bigint_abs_alias(WValue v) {
+    w_bigint_mark_shared(w_as_bigint(v));
+    int32_t s;
+    (void)w_bigint_view(v, &s);
+    return s < 0 ? v ^ W_BIGINT_SIGN_BIT : v;
+}
+
 static inline __attribute__((always_inline))
 WValue bigint_add_one_limb_magnitudes(
     uint64_t a, int a_negative, uint64_t b, int b_negative) {
@@ -913,6 +927,93 @@ WValue bigint_add_two_limb_magnitudes(
     result->limbs[1] = high;
     result->size = negative ? -2 : 2;
     return bigint_box(result);
+}
+
+/* ---- N-limb ± 1-limb word fast path ----
+ * The small-mid band (~8..48 limbs) of bigint ± word is dominated by fixed
+ * per-op overhead, not carry propagation: the generic entry re-derives limb
+ * views and walks the size-dispatch arms, then mag_add/mag_sub pay an
+ * out-of-line bigint_pool_take plus a full bn_add_n/bn_sub_n call for a
+ * single limb.  This kernel is the whole operation in one forward pass:
+ * combine the word with limb 0, ripple the carry/borrow while it survives
+ * (usually zero limbs), memcpy the untouched tail, and handle the rare
+ * full-carry growth or top-limb shrink afterwards.
+ *
+ * Preconditions: alen >= 2 (so |a| > w and the mixed-sign case cannot flip
+ * the result sign or reach zero) and w != 0. */
+#ifndef BN_ADDSUB_WORD_FAST
+#define BN_ADDSUB_WORD_FAST 1
+#endif
+static WValue bigint_addsub_word(
+    const uint64_t *al, int32_t alen, int a_neg,
+    uint64_t w, int w_neg) {
+    if (a_neg == w_neg) {
+        /* Same effective sign: |a| + w, sign of a.  Exact-length allocation;
+         * the full-carry growth below is vanishingly rare. */
+        WBigint *r = bigint_alloc_raw_hot(alen);
+        uint64_t sum = al[0] + w;
+        uint64_t carry = sum < w;
+        r->limbs[0] = sum;
+        /* Fold the (data-dependent, so mispredict-prone) first carry into an
+         * unconditional limb-1 step; the loop then only handles the ~2^-64
+         * deeper ripple. */
+        uint64_t v1 = al[1] + carry;
+        carry = v1 < carry;
+        r->limbs[1] = v1;
+        int32_t i = 2;
+        while (carry && i < alen) {
+            uint64_t v = al[i] + 1;
+            r->limbs[i] = v;
+            carry = v == 0;
+            i++;
+        }
+        if (i < alen)
+            memcpy(r->limbs + i, al + i,
+                   (size_t)(alen - i) * sizeof(uint64_t));
+        if (__builtin_expect(carry != 0, 0)) {
+            /* Carry ran off the top: every rippled limb wrapped to zero, so
+             * the result is [sum, 0, ..., 0, 1] over alen + 1 limbs. */
+            if ((uint32_t)alen >= r->cap) {
+                WBigint *g = bigint_alloc_raw(alen + 1);
+                g->limbs[0] = r->limbs[0];
+                memset(g->limbs + 1, 0,
+                       (size_t)(alen - 1) * sizeof(uint64_t));
+                bigint_release(r);
+                r = g;
+            }
+            r->limbs[alen] = 1;
+            r->size = a_neg ? -(alen + 1) : alen + 1;
+            return bigint_box(r);
+        }
+        r->size = a_neg ? -alen : alen;
+        return bigint_box(r);
+    }
+    /* Opposite effective signs: |a| - w, sign of a (alen >= 2 => |a| > w). */
+    WBigint *r = bigint_alloc_raw_hot(alen);
+    uint64_t a0 = al[0];
+    uint64_t borrow = a0 < w;
+    r->limbs[0] = a0 - w;
+    /* Unconditional limb-1 step, as in the add branch above. */
+    uint64_t v1 = al[1];
+    r->limbs[1] = v1 - borrow;
+    borrow = v1 < borrow;
+    int32_t i = 2;
+    while (borrow && i < alen) {
+        uint64_t v = al[i];
+        r->limbs[i] = v - 1;
+        borrow = v == 0;
+        i++;
+    }
+    if (i < alen)
+        memcpy(r->limbs + i, al + i, (size_t)(alen - i) * sizeof(uint64_t));
+    int32_t rlen = alen - (r->limbs[alen - 1] == 0);
+    r->size = a_neg ? -rlen : rlen;
+    if (__builtin_expect(rlen < alen, 0)) {
+        /* Shrank by one limb (only when the top limb was 1 and the borrow
+         * consumed it); an alen == 2 result may demote to inline i48. */
+        return bigint_finish_mag_sub(r);
+    }
+    return bigint_box(r);
 }
 
 static WValue bigint_from_i64(int64_t v) {
@@ -1968,13 +2069,22 @@ WValue bigint_add_any_generic(WValue a, WValue b) {
     int32_t a_abs = a_neg ? -alen : alen;
     int32_t b_abs = b_neg ? -blen : blen;
 
-    if (a_abs == 0) return b; /* 0 + b = b */
-    if (b_abs == 0) return a; /* a + 0 = a */
+    /* Identity returns hand the OPERAND back as the result. Mark bigint
+     * aliases shared so a later release (or mutate-if-unique attempt) on
+     * the "result" cannot recycle/overwrite the still-live operand. */
+    if (a_abs == 0) return w_bigint_mark_shared_value(b); /* 0 + b = b */
+    if (b_abs == 0) return w_bigint_mark_shared_value(a); /* a + 0 = a */
 
 #if BN_ADDSUB_11_FAST
     if (a_abs == 1 && b_abs == 1)
         return bigint_add_one_limb_magnitudes(
             al[0], a_neg, bl[0], b_neg);
+#endif
+#if BN_ADDSUB_WORD_FAST
+    if (b_abs == 1 && a_abs >= 2)
+        return bigint_addsub_word(al, a_abs, a_neg, bl[0], b_neg);
+    if (a_abs == 1 && b_abs >= 2)
+        return bigint_addsub_word(bl, b_abs, b_neg, al[0], a_neg);
 #endif
 #if BN_ADDSUB_22_FAST
     if (a_abs == 2 && b_abs == 2)
@@ -2019,7 +2129,7 @@ WValue bigint_sub_any_generic(WValue a, WValue b) {
     int32_t a_abs = a_neg ? -alen : alen;
     int32_t b_abs = blen < 0 ? -blen : blen;
 
-    if (b_abs == 0) return a;
+    if (b_abs == 0) return w_bigint_mark_shared_value(a); /* a - 0 = a */
     if (a_abs == 0) {
         WBigint *r = mag_sub(bl, b_abs, al, 0);
         if (effective_b_neg && r->size > 0) r->size = -r->size;
@@ -2030,6 +2140,12 @@ WValue bigint_sub_any_generic(WValue a, WValue b) {
     if (a_abs == 1 && b_abs == 1)
         return bigint_add_one_limb_magnitudes(
             al[0], a_neg, bl[0], effective_b_neg);
+#endif
+#if BN_ADDSUB_WORD_FAST
+    if (b_abs == 1 && a_abs >= 2)
+        return bigint_addsub_word(al, a_abs, a_neg, bl[0], effective_b_neg);
+    if (a_abs == 1 && b_abs >= 2)
+        return bigint_addsub_word(bl, b_abs, effective_b_neg, al[0], a_neg);
 #endif
 #if BN_ADDSUB_22_FAST
     if (a_abs == 2 && b_abs == 2)
@@ -2088,6 +2204,15 @@ WValue bigint_add_any(WValue a, WValue b) {
             return bigint_add_one_limb_magnitudes(
                 aa->limbs[0], 0, bb->limbs[0], 0);
         }
+#if BN_ADDSUB_WORD_FAST
+        /* Boxed N ± 1 word shape (any signs): the generic re-dispatch costs
+         * more than the whole single-pass operation here. v4: `bn` is the
+         * COMPOSED sign from w_bigint_view above — never read ->size raw. */
+        int32_t n_abs = n < 0 ? -n : n;
+        if ((bn == 1 || bn == -1) && n_abs >= 2)
+            return bigint_addsub_word(
+                aa->limbs, n_abs, n < 0, bb->limbs[0], bn < 0);
+#endif
     }
 #endif
     return bigint_add_any_generic(a, b);
@@ -2118,6 +2243,14 @@ WValue bigint_sub_any(WValue a, WValue b) {
             return bigint_add_one_limb_magnitudes(
                 aa->limbs[0], 0, bb->limbs[0], 1);
         }
+#if BN_ADDSUB_WORD_FAST
+        /* Boxed N ± 1 word shape (any signs); subtraction flips b's sign.
+         * v4: `bn` is the composed sign from w_bigint_view above. */
+        int32_t n_abs = n < 0 ? -n : n;
+        if ((bn == 1 || bn == -1) && n_abs >= 2)
+            return bigint_addsub_word(
+                aa->limbs, n_abs, n < 0, bb->limbs[0], bn > 0);
+#endif
     }
 #endif
     return bigint_sub_any_generic(a, b);
@@ -8020,10 +8153,18 @@ static inline uint64_t bn_div_qr_preinv(uint64_t nh, uint64_t nl,
     uint64_t carry = ql < pl;
     uint64_t q = ph + nh + 1 + carry;
     uint64_t r = nl - q * d;
-    uint64_t mask = (uint64_t)-(r > ql);
-    q += mask;
-    r += mask & d;
-    if (r >= d) {
+    /* First correction: keep the r+d addend independent of the compare so
+     * both issue in parallel right after the msub, leaving one csel on the
+     * serial remainder chain (the quotient fixup rides off that chain). */
+    uint64_t adjusted = r + d;
+    int under = r > ql;
+    q -= (uint64_t)under;
+    r = under ? adjusted : r;
+    if (__builtin_expect(r >= d, 0)) {
+        /* The empty asm keeps clang from if-converting this rarely-taken
+         * second correction into a csel chain on the per-limb critical
+         * path (same trick as bn_udiv_qr_3by2 below). */
+        __asm__ volatile("");
         r -= d;
         q++;
     }
@@ -10265,8 +10406,8 @@ WValue bigint_mod_any_generic(WValue a, WValue b) {
 #ifndef BN_DIVMOD_42_BOXED_FAST
 #define BN_DIVMOD_42_BOXED_FAST 1
 #endif
-#ifndef BN_DIVMOD_21_BOXED_FAST
-#define BN_DIVMOD_21_BOXED_FAST 1
+#ifndef BN_DIV_BY_LIMB_BOXED_FAST
+#define BN_DIV_BY_LIMB_BOXED_FAST 1
 #endif
 #ifndef BN_DIV_63_BOXED_FAST
 #define BN_DIV_63_BOXED_FAST 1
@@ -10277,19 +10418,33 @@ WValue bigint_mod_any_generic(WValue a, WValue b) {
 
 static inline __attribute__((always_inline))
 WValue bigint_div_any(WValue a, WValue b) {
-#if BN_DIVMOD_21_BOXED_FAST || (BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST) || \
+#if BN_DIV_BY_LIMB_BOXED_FAST || (BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST) || \
     (BN_DIV_TRIANGULAR_Q_CERTIFIED && BN_DIV_63_DIRECT && \
      BN_DIV_63_BOXED_FAST) || BN_DIV_POSITIVE_2N_N_BOXED_FAST
     if (w_is_bigint(a) && w_is_bigint(b)) {
         int32_t as, bs;
         WBigint *aa = w_bigint_view(a, &as);
         WBigint *bb = w_bigint_view(b, &bs);
-#if BN_DIVMOD_21_BOXED_FAST
-        if (as == 2 && bs == 1) {
+#if BN_DIV_BY_LIMB_BOXED_FAST
+        /* N-limb by one-limb quotient (subsumes the old 2/1 arm): one
+         * backward pass of the reciprocal-by-word kernel.  Truncated
+         * division: quotient is negative iff the effective signs differ;
+         * the magnitude kernel already truncates toward zero. */
+        if (bs == 1 || bs == -1) {
+            int neg = (as < 0) != (bs < 0);
+            int32_t alen = as < 0 ? -as : as;
+            uint64_t d = bb->limbs[0];
+            if (alen == 0) return w_box_int(0);
+            if (alen == 1) {
+                /* One hardware divide; keep mag_div_single's error for a
+                 * denormal zero divisor. */
+                if (__builtin_expect(d == 0, 0)) die("division by zero");
+                return bigint_finish_one_limb(aa->limbs[0] / d, neg);
+            }
             uint64_t remainder;
-            return bigint_finish_mag_sub(
-                mag_div_single(
-                    aa->limbs, 2, bb->limbs[0], &remainder));
+            WBigint *q = mag_div_single(aa->limbs, alen, d, &remainder);
+            if (neg) q->size = -q->size;
+            return bigint_finish_mag_sub(q);
         }
 #endif
 #if BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST
@@ -10340,7 +10495,7 @@ WValue bigint_div_any(WValue a, WValue b) {
 #if BN_ALGEBRAIC_IDENTITY_FAST
     /* Check identities after the shaped boxed/boxed routes, keeping their
      * ordinary 2n/n benchmark path byte-for-byte free of extra branches. */
-    if (b == w_box_int(1)) return a;
+    if (b == w_box_int(1)) return w_bigint_mark_shared_value(a);
     if (b == w_box_int(-1)) return w_neg(a);
     /* A normalized heap BigInt is nonzero, so this preserves 0 / 0 raising. */
     if (a == b && w_is_bigint(a)) return w_box_int(1);
@@ -10350,16 +10505,22 @@ WValue bigint_div_any(WValue a, WValue b) {
 
 static inline __attribute__((always_inline))
 WValue bigint_mod_any(WValue a, WValue b) {
-#if BN_DIVMOD_21_BOXED_FAST || (BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST) || \
+#if BN_DIV_BY_LIMB_BOXED_FAST || (BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST) || \
     BN_MOD_63_DIRECT || BN_DIV_POSITIVE_2N_N_BOXED_FAST
     if (w_is_bigint(a) && w_is_bigint(b)) {
         int32_t as, bs;
         WBigint *aa = w_bigint_view(a, &as);
         WBigint *bb = w_bigint_view(b, &bs);
-#if BN_DIVMOD_21_BOXED_FAST
-        if (as == 2 && bs == 1)
+#if BN_DIV_BY_LIMB_BOXED_FAST
+        /* Sibling of bigint_div_any's by-limb arm: the same backward pass
+         * yields the one-limb remainder, which takes the dividend's
+         * effective sign (truncated division). */
+        if (bs == 1 || bs == -1) {
+            int32_t alen = as < 0 ? -as : as;
+            if (alen == 0) return w_box_int(0);
             return bigint_finish_one_limb(
-                mag_mod_single(aa->limbs, 2, bb->limbs[0]), 0);
+                mag_mod_single(aa->limbs, alen, bb->limbs[0]), as < 0);
+        }
 #endif
 #if BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST
         if (as == 4 && bs == 2)
@@ -10386,12 +10547,41 @@ WValue bigint_mod_any(WValue a, WValue b) {
             return bigint_finish_mag_sub(r);
         }
 #endif
+#if BN_ALGEBRAIC_IDENTITY_FAST
+        /* |a| < |b| (effective magnitudes): truncated division has a zero
+         * quotient, so the remainder IS a — sign included. The generic
+         * path would alloc-and-copy a's limbs (mag_divmod_knuth's
+         * short-dividend arm); alias the operand instead. One shared-count
+         * byte store replaces the copy. Checked after the shaped kernels
+         * so their hot lanes stay branch-free. */
+        {
+            int32_t an = as < 0 ? -as : as;
+            int32_t bn = bs < 0 ? -bs : bs;
+            if (an < bn ||
+                (an == bn &&
+                 mag_cmp(aa->limbs, an, bb->limbs, bn) < 0)) {
+                w_bigint_mark_shared(aa);
+                return a;
+            }
+        }
+#endif
     }
 #endif
 #if BN_ALGEBRAIC_IDENTITY_FAST
     if (b == w_box_int(1) || b == w_box_int(-1)) return w_box_int(0);
     /* A normalized heap BigInt is nonzero, so this preserves 0 % 0 raising. */
     if (a == b && w_is_bigint(a)) return w_box_int(0);
+    /* Inline % heap-BigInt with |a| < |b|: the remainder is a itself — an
+     * inline value copy, no aliasing or marking needed. Multi-limb b always
+     * exceeds the i48 range; a normalized one-limb b can still sit just
+     * above it, so compare the limb. */
+    if (w_is_int(a) && w_is_bigint(b)) {
+        int32_t bs;
+        WBigint *bb = w_bigint_view(b, &bs);
+        int64_t av = w_as_int(a);
+        uint64_t am = av < 0 ? (uint64_t)(-av) : (uint64_t)av;
+        if (bs > 1 || bs < -1 || bb->limbs[0] > am) return a;
+    }
 #endif
     return bigint_mod_any_generic(a, b);
 }
@@ -12620,7 +12810,7 @@ WValue bigint_gcd_any(WValue a, WValue b) {
         /* Both values are already known boxed.  Handle aliasing here so the
          * ordinary boxed-small lane does not first compare against every
          * mixed inline identity (zero and both signs of one). */
-        if (a == b) return as > 0 ? a : w_neg(a);
+        if (a == b) return bigint_abs_alias(a);
 #endif
         if (as == 1 && bs == 1)
             return bigint_gcd_boxed_one_limb(aa, bb);
@@ -12659,12 +12849,12 @@ WValue bigint_gcd_any(WValue a, WValue b) {
 #if BN_ALGEBRAIC_IDENTITY_FAST
 #if !BN_GCD_BOXED_SMALL_FAST
     if (a == b && w_is_bigint(a))
-        return w_bigint_effective_negative(a) ? w_neg(a) : a;
+        return bigint_abs_alias(a);
 #endif
     if (b == w_box_int(0) && w_is_bigint(a))
-        return w_bigint_effective_negative(a) ? w_neg(a) : a;
+        return bigint_abs_alias(a);
     if (a == w_box_int(0) && w_is_bigint(b))
-        return w_bigint_effective_negative(b) ? w_neg(b) : b;
+        return bigint_abs_alias(b);
     if (a == w_box_int(1) || a == w_box_int(-1) ||
         b == w_box_int(1) || b == w_box_int(-1))
         return w_box_int(1);
@@ -26180,21 +26370,50 @@ WValue bignum_bitwise_positive_equal(
  * magnitude. */
 static __attribute__((noinline))
 WValue bignum_bitwise_generic(char op, WValue a, WValue b) {
+#if BN_ALGEBRAIC_IDENTITY_FAST
+    WValue orig_a = a, orig_b = b;
+#endif
     a = bitwise_as_integer(a);
     b = bitwise_as_integer(b);
 
 #if BN_ALGEBRAIC_IDENTITY_FAST
-    if (a == b) return op == '^' ? w_box_int(0) : a;
+    /* Identity results below alias an operand. When that operand is a
+     * caller-owned BigInt, bump the shared count so releasing the result
+     * cannot recycle the still-live operand. A value bitwise_as_integer
+     * freshly minted (a coerced non-integer) is unaliased — marking it
+     * would swallow its only release, so compare against the original. */
+    if (a == b) {
+        if (op == '^') return w_box_int(0);
+        if (w_is_bigint(a) && a == orig_a)
+            w_bigint_mark_shared(w_as_bigint(a));
+        return a;
+    }
     WValue zero = w_box_int(0);
     WValue negative_one = w_box_int(-1);
-    if (b == zero)
-        return op == '&' ? zero : a;
-    if (a == zero)
-        return op == '&' ? zero : b;
-    if (b == negative_one && op != '^')
-        return op == '&' ? a : negative_one;
-    if (a == negative_one && op != '^')
-        return op == '&' ? b : negative_one;
+    if (b == zero) {
+        if (op == '&') return zero;
+        if (w_is_bigint(a) && a == orig_a)
+            w_bigint_mark_shared(w_as_bigint(a));
+        return a;
+    }
+    if (a == zero) {
+        if (op == '&') return zero;
+        if (w_is_bigint(b) && b == orig_b)
+            w_bigint_mark_shared(w_as_bigint(b));
+        return b;
+    }
+    if (b == negative_one && op != '^') {
+        if (op != '&') return negative_one;
+        if (w_is_bigint(a) && a == orig_a)
+            w_bigint_mark_shared(w_as_bigint(a));
+        return a;
+    }
+    if (a == negative_one && op != '^') {
+        if (op != '&') return negative_one;
+        if (w_is_bigint(b) && b == orig_b)
+            w_bigint_mark_shared(w_as_bigint(b));
+        return b;
+    }
 #endif
 
     uint64_t sa_buf, sb_buf;
@@ -26272,7 +26491,14 @@ WValue bignum_bitwise_generic(char op, WValue a, WValue b) {
 static inline __attribute__((always_inline))
 WValue bignum_bitwise(char op, WValue a, WValue b) {
 #if BN_ALGEBRAIC_IDENTITY_FAST
-    if (a == b) return op == '^' ? w_box_int(0) : a;
+    if (a == b) {
+        if (op == '^') return w_box_int(0);
+        /* x&x == x|x == x: hand the operand back as the result. Mark it
+         * shared first so a later release of the "result" cannot recycle
+         * the still-live operand. */
+        if (w_is_bigint(a)) w_bigint_mark_shared(w_as_bigint(a));
+        return a;
+    }
 #endif
     if (w_is_bigint(a) && w_is_bigint(b)) {
         int32_t as, bs;
@@ -26974,7 +27200,12 @@ WValue bignum_shl_generic(WValue a, int64_t k) {
 static inline __attribute__((always_inline))
 WValue bignum_shl(WValue a, int64_t k) {
 #if BN_ALGEBRAIC_IDENTITY_FAST
-    if (k == 0) return a;
+    if (k == 0) {
+        /* x << 0 == x: the result aliases the operand, so mark it shared
+         * before handing it out (release-of-result safety). */
+        if (w_is_bigint(a)) w_bigint_mark_shared(w_as_bigint(a));
+        return a;
+    }
 #endif
 #if BN_SHIFT_POSITIVE_SMALL
     /* Overlay-clear values only: the positive kernels re-read big->size as
@@ -27086,7 +27317,11 @@ WValue bignum_shr_generic(WValue a, int64_t k) {
 static inline __attribute__((always_inline))
 WValue bignum_shr(WValue a, int64_t k) {
 #if BN_ALGEBRAIC_IDENTITY_FAST
-    if (k == 0) return a;
+    if (k == 0) {
+        /* x >> 0 == x: alias return; mark shared like bignum_shl. */
+        if (w_is_bigint(a)) w_bigint_mark_shared(w_as_bigint(a));
+        return a;
+    }
 #endif
 #if BN_SHIFT_POSITIVE_SMALL
     /* Overlay-clear values only — see bignum_shl. */
@@ -27559,6 +27794,27 @@ static __attribute__((noinline)) WValue w_neg_generic(WValue v) {
     if (w_is_rational_any(v)) {
         WValue numerator, denominator;
         rational_parts(v, &numerator, &denominator);
+        /* A canonical rational keeps den > 0 and gcd(|num|, den) == 1,
+         * both invariant under numerator negation, so rebuilding through
+         * rational_from_parts (a full gcd plus two divisions) is pure
+         * overhead. A BigInt numerator (necessarily nonzero: a zero
+         * magnitude demotes to inline before boxing) negates as the O(1)
+         * tag-sign overlay flip over the SAME buffer; the new rational
+         * also shares the denominator buffer, so both take shared-count
+         * marks. Inline numerators keep the arithmetic path: negating the
+         * i48 minimum promotes, and the packed re-box has its own range
+         * checks. */
+        if (w_is_bigint(numerator)) {
+            w_bigint_mark_shared(w_as_bigint(numerator));
+            if (w_is_bigint(denominator))
+                w_bigint_mark_shared(w_as_bigint(denominator));
+            WBigRational *big =
+                (WBigRational *)calloc(1, sizeof(WBigRational));
+            big->domain_type = W_DOMAIN_RATIONAL;
+            big->numerator = numerator ^ W_BIGINT_SIGN_BIT;
+            big->denominator = denominator;
+            return w_box_ptr(big, W_SUBTAG_DOMAIN);
+        }
         return rational_from_parts(bigint_sub_any(w_int(0), numerator),
                                    denominator);
     }
@@ -36708,8 +36964,12 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
     }
     if (expv == one && !bneg &&
         (babs < mabs ||
-         (babs == mabs && mag_cmp(bl, babs, ml, mabs) < 0)))
+         (babs == mabs && mag_cmp(bl, babs, ml, mabs) < 0))) {
+        /* Alias return: mark shared so releasing the result cannot
+         * recycle the still-live base. */
+        if (w_is_bigint(base)) w_bigint_mark_shared(w_as_bigint(base));
         return base;                                     /* already canonical */
+    }
 #endif
 
     if (mabs == 1) {
@@ -37442,11 +37702,11 @@ WValue w_ic_integer_lcm_generic(WValue r, WValue *a, int c) {
 
 #if BN_ALGEBRAIC_IDENTITY_FAST
     if (r == arg && w_is_bigint(r))
-        return w_bigint_effective_negative(r) ? w_neg(r) : r;
+        return bigint_abs_alias(r);
     if ((arg == w_box_int(1) || arg == w_box_int(-1)) && w_is_bigint(r))
-        return w_bigint_effective_negative(r) ? w_neg(r) : r;
+        return bigint_abs_alias(r);
     if ((r == w_box_int(1) || r == w_box_int(-1)) && w_is_bigint(arg))
-        return w_bigint_effective_negative(arg) ? w_neg(arg) : arg;
+        return bigint_abs_alias(arg);
 #endif
 
     uint64_t r_scratch, a_scratch;
@@ -37519,7 +37779,7 @@ WValue w_ic_integer_lcm(WValue r, WValue *a, int c) {
                     (rs == 1 || rs == -1) &&
                     (as == 1 || as == -1), 0)) {
                 if (r == arg)
-                    return rs > 0 ? r : w_neg(r); /* lcm(x,x) = |x| */
+                    return bigint_abs_alias(r);   /* lcm(x,x) = |x| */
                 return bigint_lcm_one_limb(rb->limbs[0], ab->limbs[0]);
             }
         }

@@ -1037,6 +1037,32 @@ use target
       return value.to_s()
     w_to_s(value)
 
+  # Semantic, fail-closed label for REPL inspection.  Interpreted instances
+  # are host Hashes internally, but `? value` must never expose that storage.
+  # Prefer the object's zero-argument `inspect`, then `to_s`; a broken user
+  # formatter falls through to a stable logical class label.
+  -> w_try_inspection_formatter(value, name)
+    method = lookup_method(value[:w_class], name, 0)
+    if method == nil
+      return nil
+    begin
+      rendered = call_w_method(value, method, [], nil, @env)
+      return rendered if type(rendered) == "String"
+    rescue error
+      # Inspection is diagnostic. A faulty formatter must not make the object
+      # uninspectable or reveal its interpreter representation.
+      return nil
+    nil
+
+  -> w_inspection_label(value)
+    if type(value) == "Hash" && value.has_key?(:rt) && value[:rt] == :object
+      rendered = w_try_inspection_formatter(value, "inspect")
+      return rendered if rendered != nil
+      rendered = w_try_inspection_formatter(value, "to_s")
+      return rendered if rendered != nil
+      return "#<" + value[:w_class][:name].to_s() + ">"
+    w_inspect(value)
+
   # -- Control flow signals --
 
   -> signal_return(value)

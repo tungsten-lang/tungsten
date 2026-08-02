@@ -169,6 +169,20 @@ module Tungsten::AST
     # it_parses "-> foo(\narg1\n); end",           Def.new("foo", ["arg1".var], nil)
     # it_parses "-> foo(\narg1\n,\narg2\n)",       Def.new("foo", ["arg1".var, "arg2".var], nil)
 
+    it "continues method parameters on the line after a comma" do
+      result = described_class.parse(<<~W)
+        -> render(values, cols = 70,
+                  rows = 15)
+          values
+      W
+      defn = result.first
+
+      expect(defn).to be_a(Def)
+      expect(defn.args.map(&:name)).to eq(%w[values cols rows])
+      expect(defn.args[1].default).to eq(70.int)
+      expect(defn.args[2].default).to eq(15.int)
+    end
+
     # it_parses "-> []",      Def.new(:"[]", [], nil)
     # it_parses "-> self.[]", Def.new(:"[]", [], nil, "self".var)
 

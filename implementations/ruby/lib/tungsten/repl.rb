@@ -919,11 +919,39 @@ module Tungsten
       if error
         print_error(error)
       else
+        # Keep the one evaluated value alive in this interpreter. The optional
+        # Drawille adapter consumes this exact object; it must never re-run a
+        # side-effecting inspection expression from source.
+        @interpreter.set_variable("_", result)
         puts @interpreter.inspect_runtime_value(result)
+        rendered = drawille_inspection_output(result)
+        puts rendered unless rendered.empty?
         log_session(query, captured, plain_value(result), mode: :inspection)
       end
     rescue ArgumentError => e
       print_error(Tungsten::Error.new(e.message))
+    end
+
+    def drawille_inspection_output(value)
+      return "" unless value.is_a?(Runtime::WObject) || value.is_a?(::Array)
+      return "" unless drawille_inspection_available?
+
+      _, terminal_columns = terminal_size
+      columns = [[terminal_columns - 4, 32].max, 96].min
+      rendered = @interpreter.run("DrawilleInspection.render(_, #{columns}, 15)")
+      rendered.is_a?(String) ? rendered : ""
+    rescue StandardError
+      ""
+    end
+
+    def drawille_inspection_available?
+      return @drawille_inspection_available unless @drawille_inspection_available.nil?
+
+      path = File.join(REPO_ROOT, "bits", "tungsten-drawille", "lib", "inspection.w")
+      @interpreter.run("use #{path.inspect}")
+      @drawille_inspection_available = true
+    rescue StandardError
+      @drawille_inspection_available = false
     end
 
     PLOT_SUPERSCRIPTS = { "⁰" => "0", "¹" => "1", "²" => "2", "³" => "3", "⁴" => "4",

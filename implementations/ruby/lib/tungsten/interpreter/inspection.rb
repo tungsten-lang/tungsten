@@ -2,6 +2,10 @@
 
 module Tungsten
   class Interpreter
+    WOBJECT_FIELD_LIMIT = 12
+    WOBJECT_COLLECTION_PREVIEW_LIMIT = 6
+    WOBJECT_FIELD_VALUE_LIMIT = 120
+
     W_SUBTAG_NAMES = {
       0x0 => "generic object",
       0x4 => "struct",
@@ -161,6 +165,15 @@ module Tungsten
     end
 
     def inspect_runtime_value(value)
+      if value.is_a?(Runtime::WObject)
+        lines = [
+          inspection_header_line("result", inspection_safe_text(wobject_inspection_label(value), 240)),
+          inspection_header_line("type", value.w_class&.name || "Object")
+        ]
+        lines.concat(wobject_field_lines(value))
+        return lines.join("\n")
+      end
+
       coerced = coerce_value_to_wvalue(value)
 
       lines = [
@@ -188,6 +201,130 @@ module Tungsten
       end
 
       lines.join("\n")
+    end
+
+    def wobject_inspection_label(value)
+      %w[inspect to_s].each do |name|
+        method = value.w_class&.lookup_method(name)
+        next unless method && (method.params || []).empty?
+
+        begin
+          rendered = call_w_method(value, method, [])
+          return rendered if rendered.is_a?(String)
+        rescue StandardError
+          # Inspection must stay usable even when a user formatter is broken.
+          # Try the next semantic formatter, then fall back to the logical
+          # class label rather than exposing the Ruby WObject implementation.
+        end
+      end
+
+      "#<#{value.w_class&.name || 'Object'}>"
+    end
+
+    # Always show a bounded logical structure for WObjects. This is independent
+    # of optional Drawille rendering: unsupported objects and broken adapters
+    # remain useful to inspect without exposing WObject/Hash backing storage.
+    def wobject_field_lines(value)
+      fields = value.instance_vars
+      return [ inspection_header_line("fields", "none") ] unless fields.is_a?(::Hash) && !fields.empty?
+
+      pairs = fields.to_a
+      shown = [ pairs.length, WOBJECT_FIELD_LIMIT ].min
+      summary = pairs.length.to_s
+      summary += " (showing first #{shown})" if shown < pairs.length
+      lines = [ inspection_header_line("fields", summary) ]
+      pairs.first(shown).each do |name, field_value|
+        label = inspection_safe_text(name, 40)
+        lines << inspection_header_line(label, wobject_field_value(field_value))
+      end
+      if shown < pairs.length
+        lines << inspection_header_line("more", "#{pairs.length - shown} fields omitted")
+      end
+      lines
+    end
+
+    # Format logical field values without calling Ruby's object inspector on a
+    # WObject. Collections are shallow, bounded previews and carry a cycle set;
+    # unknown Ruby helper objects get a class-only label if #to_s contains an
+    # allocation address.
+    def wobject_field_value(value, depth = 0, seen = {})
+      return inspection_safe_text(wobject_inspection_label(value)) if value.is_a?(Runtime::WObject)
+      return value.name.to_s if value.is_a?(Runtime::WClass)
+      if value.is_a?(Runtime::WMethod)
+        owner = value.defining_class&.name
+        return "#<method #{owner ? "#{owner}#" : ""}#{value.name}>"
+      end
+
+      case value
+      when nil then "nil"
+      when true then "true"
+      when false then "false"
+      when ::String then "\"#{inspection_safe_text(value, WOBJECT_FIELD_VALUE_LIMIT, string_mode: true)}\""
+      when ::Symbol then ":#{inspection_safe_text(value)}"
+      when ::Numeric then inspection_safe_text(value.to_s)
+      when ::Range
+        op = value.exclude_end? ? "..." : ".."
+        "#{wobject_field_value(value.begin, depth + 1, seen)}#{op}#{wobject_field_value(value.end, depth + 1, seen)}"
+      when ::Array
+        return "[#{value.length} items]" if depth >= 2
+        return "[cycle]" if seen[value.object_id]
+
+        nested_seen = seen.merge(value.object_id => true)
+        shown = [ value.length, WOBJECT_COLLECTION_PREVIEW_LIMIT ].min
+        parts = value.first(shown).map { |item| wobject_field_value(item, depth + 1, nested_seen) }
+        parts << "… #{value.length - shown} more" if shown < value.length
+        inspection_safe_text("[#{parts.join(', ')}]")
+      when ::Hash
+        return "{#{value.length} entries}" if depth >= 2
+        return "{cycle}" if seen[value.object_id]
+
+        nested_seen = seen.merge(value.object_id => true)
+        pairs = value.to_a
+        shown = [ pairs.length, WOBJECT_COLLECTION_PREVIEW_LIMIT ].min
+        parts = pairs.first(shown).map do |key, item|
+          "#{wobject_field_value(key, depth + 1, nested_seen)}: #{wobject_field_value(item, depth + 1, nested_seen)}"
+        end
+        parts << "… #{pairs.length - shown} more" if shown < pairs.length
+        inspection_safe_text("{#{parts.join(', ')}}")
+      else
+        rendered = value.to_s
+        if rendered.start_with?("#<") && rendered.match?(/(?:^|:)0x[0-9a-f]+/i)
+          rendered = "#<#{value.class.name}>"
+        end
+        inspection_safe_text(rendered)
+      end
+    rescue StandardError
+      "#<#{value.class.name}>"
+    end
+
+    def inspection_safe_text(value, limit = WOBJECT_FIELD_VALUE_LIMIT, string_mode: false)
+      text = value.to_s
+      out = +""
+      truncated = false
+      text.each_char.with_index do |char, index|
+        if index >= limit
+          truncated = true
+          break
+        end
+        codepoint = char.ord
+        out << if char == "\n"
+                 "\\n"
+               elsif char == "\r"
+                 "\\r"
+               elsif char == "\t"
+                 "\\t"
+               elsif codepoint < 32 || codepoint == 127
+                 format("\\x%02X", codepoint)
+               elsif string_mode && char == '"'
+                 '\\"'
+               elsif string_mode && char == "\\"
+                 "\\\\"
+               else
+                 char
+               end
+      end
+      out << "…" if truncated
+      out
     end
 
     def completion_names

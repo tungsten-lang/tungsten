@@ -418,6 +418,17 @@ RSpec.describe Tungsten::Interpreter do
     expect(output("x = 10\n-> repeat(n)\n  i = 0\n  while i < n\n    yield i\n    i += 1\nrepeat(2) -> (i)\n  << i + x")).to eq("10\n11")
   end
 
+  it "writes plain block assignments through to captured locals" do
+    code = <<~W
+      minimum = 10
+      [7, 12, 3].each -> (value)
+        minimum = value if value < minimum
+      minimum
+    W
+
+    expect(run(code)).to eq(3)
+  end
+
   it "raises error on yield without block" do
     expect { run("-> bad\n  yield\nbad") }.to raise_error(Tungsten::Error, /without a block/)
   end
@@ -1131,6 +1142,89 @@ RSpec.describe Tungsten::Interpreter do
     expect(run("+ Foo\nFoo().type")).to eq("Foo")
   end
 
+  it "inspects WObjects through their Tungsten logical class and formatter" do
+    interpreter = described_class.new
+    value = interpreter.run(<<~W)
+      + AlgebraicThing
+        -> new(@coefficient)
+        -> inspect
+          "root(" + @coefficient.to_s() + ")"
+      AlgebraicThing.new(7)
+    W
+
+    inspected = interpreter.inspect_runtime_value(value)
+
+    expect(inspected).to include("result   root(7)")
+    expect(inspected).to include("type     AlgebraicThing")
+    expect(inspected).to include("fields   1")
+    expect(inspected).to include("@coefficient 7")
+    expect(inspected).not_to include("Tungsten::Runtime::WObject")
+    expect(inspected).not_to include("instance_vars")
+    expect(inspected).not_to include("wvalue")
+  end
+
+  it "falls back to a Tungsten WObject's to_s formatter" do
+    interpreter = described_class.new
+    value = interpreter.run(<<~W)
+      + NamedThing
+        -> to_s
+          "named thing"
+      NamedThing.new()
+    W
+
+    expect(interpreter.inspect_runtime_value(value)).to include("result   named thing")
+  end
+
+  it "keeps logical fields available when a WObject formatter fails" do
+    interpreter = described_class.new
+    value = interpreter.run(<<~W)
+      + BrokenAlgebraicThing
+        -> new(@coefficient, @basis)
+        -> inspect
+          raise "broken formatter"
+      BrokenAlgebraicThing.new(7, [1, 2, 3])
+    W
+    value.instance_vars["@cycle"] = value
+
+    inspected = interpreter.inspect_runtime_value(value)
+
+    expect(inspected).to include("result   #<BrokenAlgebraicThing>")
+    expect(inspected).to include("type     BrokenAlgebraicThing")
+    expect(inspected).to include("fields   3")
+    expect(inspected).to include("@coefficient 7")
+    expect(inspected).to include("@basis   [1, 2, 3]")
+    expect(inspected).to include("@cycle   #<BrokenAlgebraicThing>")
+    expect(inspected).not_to include("instance_vars")
+    expect(inspected).not_to match(/Tungsten::Runtime::WObject|:0x[0-9a-f]+/i)
+  end
+
+  it "bounds the number and size of logical WObject fields" do
+    interpreter = described_class.new
+    value = interpreter.run("+ WideThing\nWideThing.new()")
+    15.times { |index| value.instance_vars["@field#{index}"] = "x" * 200 }
+
+    inspected = interpreter.inspect_runtime_value(value)
+
+    expect(inspected).to include("fields   15 (showing first 12)")
+    expect(inspected).to include("more     3 fields omitted")
+    expect(inspected).to include("@field0  \"#{'x' * 120}…\"")
+    expect(inspected).not_to include("@field12")
+  end
+
+  it "escapes controls, quotes, and backslashes in logical string fields" do
+    interpreter = described_class.new
+    value = interpreter.run("+ EscapedThing\nEscapedThing.new()")
+    value.instance_vars["@payload"] = "quote\" slash\\path\e[31m\nnext\x01\x7F"
+
+    inspected = interpreter.inspect_runtime_value(value)
+    field_line = inspected.lines.find { |line| line.include?("@payload") }.chomp
+
+    expect(field_line).to include('quote\\" slash\\\\path')
+    expect(field_line).to include('\\x1B[31m\\nnext\\x01\\x7F')
+    expect(field_line).not_to include("\e")
+    expect(field_line).not_to include("\n")
+  end
+
   it "starts_with? and ends_with? work" do
     expect(run('"hello".starts_with?("hel")')).to eq(true)
     expect(run('"hello".starts_with?("xyz")')).to eq(false)
@@ -1158,6 +1252,18 @@ RSpec.describe Tungsten::Interpreter do
     expect(run('"42".to_i')).to eq(42)
     expect(run("2.9.to_i")).to eq(2)
     expect(run("-2.9.to_i")).to eq(-2)
+  end
+
+  it "encodes Unicode scalar values through Integer#chr as UTF-8" do
+    braille_blank = run("(0x2800).chr()")
+
+    expect(braille_blank).to eq("\u2800")
+    expect(braille_blank.encoding).to eq(Encoding::UTF_8)
+    expect(braille_blank.bytes).to eq([0xE2, 0xA0, 0x80])
+  end
+
+  it "preserves ASCII Integer#chr behavior" do
+    expect(run("(0x41).chr()")).to eq("A")
   end
 
   it "user-defined method overrides builtin puts" do
@@ -1827,6 +1933,13 @@ RSpec.describe Tungsten::Interpreter do
     it "combines source-defined helpers with Ruby libm fallbacks" do
       expect(run("Math.log_base(~8.0, ~2.0)")).to be_within(1e-12).of(3.0)
       expect(run("Math.sqrt(~9.0)")).to eq(3.0)
+    end
+
+    it "mirrors Float-returning Math floor and ceil intrinsics" do
+      expect(run("Math.floor(~2.7)")).to eq(2.0)
+      expect(run("Math.floor(~2.7)")).to be_a(Float)
+      expect(run("Math.ceil(~-2.7)")).to eq(-2.0)
+      expect(run("Math.ceil(~-2.7)")).to be_a(Float)
     end
   end
 

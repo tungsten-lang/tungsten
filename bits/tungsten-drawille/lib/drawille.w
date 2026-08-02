@@ -1,8 +1,9 @@
 # tungsten-drawille — Unicode braille plotting for Tungsten.
 #
 # A port of asciimoo/drawille (https://github.com/asciimoo/drawille). The
-# braille `Canvas` gives 2×4 sub-character resolution; `Plot` renders a
-# polynomial over a range as a line chart with dimmed `-` / `|` axes.
+# braille `Canvas` gives 2×4 sub-character resolution; `Plot` preserves the
+# CLI's polynomial chart, while `DrawilleInspection` owns type-aware bounded
+# scenes for core algebra, calculus, vector, curve, and projective objects.
 #
 # Library use:
 #     use bits/tungsten-drawille/lib/drawille
@@ -15,6 +16,8 @@
 use canvas
 use plot
 use argand
+use scene
+use inspection
 
 # Plot P(x) = Σ coeffs[k]·xᵏ over [lo, hi]; returns the chart string. With
 # `fill`, shades the area under the curve (the integral / AUC highlight);
@@ -22,6 +25,14 @@ use argand
 # is the list of real roots (each as x·10) to mark on a number line below.
 -> plot_poly(lo, hi, coeffs, fill = false, margin = 0, zeros = [], cols = 70, rows = 15)
   Plot.render(lo, hi, coeffs, cols, rows, fill, margin, zeros)
+
+# Public sampled-series surface for REPLs and other callers. Evaluation is
+# intentionally outside the renderer; Drawille owns sampling reduction,
+# projection, line/fill rasterization, axes, and endpoint labels.
+-> plot_series(values, x_lo = 0, x_hi = nil,
+               cols = 70, rows = 15, fill = false)
+  DrawilleInspection.render_series(
+    values, x_lo, x_hi, cols, rows, fill)
 
 # Argand mode: drawille --argand [--scale S] [--rows N] <re0> <im0> [<op> <re> <im> …]
 # Components are integers pre-scaled by S (so 0.8 arrives as 800, S=1000); the

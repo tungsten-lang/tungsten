@@ -2345,7 +2345,7 @@ module Tungsten
         @method[:splat_index] = index if @method[:splat_index].nil? && @method[:splat]
 
         if @token.comma?
-          next_token_skip_space
+          next_token_skip_whitespace
         else
           skip_space
           check_for :")"

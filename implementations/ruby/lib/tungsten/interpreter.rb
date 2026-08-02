@@ -1491,6 +1491,12 @@ module Tungsten
             "Class"
           elsif node.name == "name"
             recv.name
+          elsif recv.name == "Math" && %w[floor ceil].include?(node.name) && node.args&.size == 1
+            # Ruby's Math module has no floor/ceil module functions, while
+            # Tungsten exposes both as libm-backed Math class intrinsics. Keep
+            # the runtime contract here: both return Float WValues.
+            number = evaluate(node.args[0]).to_f
+            (node.name == "floor" ? number.floor : number.ceil).to_f
           else
             method = resolve_w_method(node, recv, node.name)
             if method
@@ -4045,6 +4051,12 @@ module Tungsten
         no_call_args?(arg_nodes) ? Runtime::Builtins.stable_to_i(recv) : NO_DIRECT_CALL
       when "to_f"
         recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? recv.to_f : NO_DIRECT_CALL
+      when "chr"
+        if recv.is_a?(::Integer) && no_call_args?(arg_nodes)
+          recv.chr(Encoding::UTF_8)
+        else
+          NO_DIRECT_CALL
+        end
       when "prev"
         recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? recv - 1 : NO_DIRECT_CALL
       when "next", "succ"
@@ -4647,7 +4659,13 @@ module Tungsten
           slot_names[params[i].name] = i
           i += 1
         end
-        collect_local_slot_names(callable_body(owner), slot_names)
+        # A block is a child scope, not a method barrier. Assignments to names
+        # already present in its captured frame must therefore write through
+        # Environment#set instead of being shadowed by preallocated slots.
+        # Explicit block parameters still own local slots. Methods/functions
+        # retain eager local-slot collection because their barrier owns every
+        # local assignment.
+        collect_local_slot_names(callable_body(owner), slot_names) unless owner.is_a?(AST::Block)
         slot_names.freeze
         owner.instance_variable_set(:@slot_names_template, slot_names)
       end

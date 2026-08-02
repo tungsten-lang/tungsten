@@ -48,6 +48,7 @@ bin/tungsten start --agent
 _Here for mathematics?_ The [mathematics map](doc/mathematics.md) routes exact
 algebra, symbolic calculus, numerical computing, certificates, and plotting,
 and clearly marks what is implemented versus still frontier work.
+For an interactive tour, try the verified [`wit` inspection gallery](doc/CONSOLE.md).
 
 ## Ecosystem
 

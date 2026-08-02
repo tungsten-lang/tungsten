@@ -18,11 +18,14 @@ ESC = b"\x1b"
 UP, DOWN, LEFT, RIGHT = ESC + b"[A", ESC + b"[B", ESC + b"[D", ESC + b"[C"
 
 
-def run(cmds, settle=0.55, rows=50, cols=100):
+def run(cmds, settle=0.55, rows=50, cols=100, env=None):
     """Spawn the REPL under a PTY, feed `cmds`, return the raw output bytes."""
     pid, fd = pty.fork()
     if pid == 0:
-        os.execv(BIN, [BIN, "--wit"])
+        child_env = os.environ.copy()
+        if env:
+            child_env.update(env)
+        os.execve(BIN, [BIN, "--wit"], child_env)
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
     out = bytearray()
 
@@ -47,10 +50,10 @@ def run(cmds, settle=0.55, rows=50, cols=100):
     return bytes(out)
 
 
-def screen(data):
+def screen(data, cols=None):
     """Replay output bytes into a screen grid; return the final visible lines."""
     s = data.decode("utf-8", "replace")
-    grid, row, col, maxrow, i = {}, 0, 0, 0, 0
+    grid, row, col, maxrow, i, wrap_pending = {}, 0, 0, 0, 0, False
     while i < len(s):
         c = s[i]
         if c == "\x1b":
@@ -77,15 +80,26 @@ def screen(data):
                 for (r, cc) in list(grid):
                     if r == row and cc >= col:
                         del grid[(r, cc)]
+            wrap_pending = False
             continue
         if c == "\r":
             col = 0
+            wrap_pending = False
         elif c == "\n":
             row += 1
             maxrow = max(maxrow, row)
+            wrap_pending = False
         else:
+            if cols is not None and wrap_pending:
+                row += 1
+                col = 0
+                maxrow = max(maxrow, row)
+                wrap_pending = False
             grid[(row, col)] = c
-            col += 1
+            if cols is not None and col == cols - 1:
+                wrap_pending = True
+            else:
+                col += 1
             maxrow = max(maxrow, row)
         i += 1
     lines = []
@@ -117,8 +131,8 @@ check("date scrub: edits the `wit> ? 2026-12-25` command line (no `scrub>` copy)
 lines = screen(run([b"? 2026-12-25\n", b"\n", UP, b"q"]))
 full = "\n".join(lines)
 check("date nudge: one inspection, day rolls 25->26 in place",
-      full.count("  result ") == 1 and "[26]" in full and "day      bits 27..23  26" in full
-      and "day      bits 27..23  25" not in full)
+      full.count("  result ") == 1 and "[26]" in full and "day      bits 28..24 26" in full
+      and "day      bits 28..24 25" not in full)
 
 # ── 3. scrubbing TWICE re-scrubs in place (no reprint) ─────────────────────
 lines = screen(run([b"? 2026-12-25\n", b"\n", b"q", b"\n", b"q"]))
@@ -164,12 +178,45 @@ check("July 4th renders fireworks art (\\|/ … /|\\)", "\\|/" in full and "/|\\
 def scene_height(expr):
     ls = screen(run([expr, b"q"]))
     top = next(i for i, l in enumerate(ls) if "result" in l)
-    bot = next(i for i, l in enumerate(ls) if l.startswith("u0x"))
+    bot = next(i for i, l in enumerate(ls) if "u0x" in l)
     return bot - top
 h5 = scene_height(b"? 2026-12-25\n")   # December 2026 = 5 weeks
 h6 = scene_height(b"? 2026-08-15\n")   # August 2026   = 6 weeks
 check("5-week month padded to the same scene height as a 6-week month",
       h5 == h6, f"5-week={h5} 6-week={h6}")
+
+# ── 10. wrapped algebra output scrubs in place at a narrow terminal ─────────
+# Delta's exact q-expansion is deliberately wider than 60 columns.  Counting
+# only newline-delimited lines leaves its soft-wrapped rows behind on every
+# arrow nudge; the final screen then contains duplicate stale expansions.
+lines = screen(run([
+    b"? ClassicalModularForms.delta(12)\n", b"\n", UP, DOWN, UP, b"q"
+], settle=0.9, rows=70, cols=60), cols=60)
+full = "\n".join(lines)
+check("wrapped Delta scrub: one inspection remains after repeated nudges",
+      full.count("  result ") == 1, f"result lines={full.count('  result ')}")
+check("wrapped Delta scrub: final nudge is delta(13), with no stale delta(12)",
+      "delta(13)" in full and "delta(12)" not in full,
+      "wrapped command/result rows were not fully repainted")
+
+# ── 11. dotted-call indexing and adapter-unavailable textual fallback ───────
+# Start with a deliberately stale scalar t, then replace it with the explicit
+# ring generator used by the documented example.  Disabling Drawille forces
+# the same fallback used if an optional adapter is absent or throws.
+lines = screen(run([
+    b"t = 7\n",
+    b"root_ring = PolynomialRing.new([:t])\n",
+    b"t = root_ring.generator(0)\n",
+    b"? (t*t - 2).real_roots[0]\n"
+], settle=0.8, rows=60, cols=100,
+   env={"TUNGSTEN_REPL_DRAWILLE": "0"}), cols=100)
+full = "\n".join(lines)
+check("algebraic root: `.real_roots[0]` parses after a dotted no-arg call",
+      "E_PARSE" not in full and "error:" not in full and "AlgebraicReal" in full,
+      "root inspection failed or t remained stale")
+check("algebraic root: textual type/fields survive without Drawille",
+      "  type " in full and "fields" in full,
+      "adapter-unavailable fallback omitted semantic inspection")
 
 print()
 if FAILS:

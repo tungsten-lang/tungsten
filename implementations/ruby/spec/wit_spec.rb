@@ -652,6 +652,53 @@ RSpec.describe Tungsten::REPL do
       expect(output).to include("note                                     exact immediate encoding")
     end
 
+    it "shows logical WObject inspection without Ruby backing metadata" do
+      interpreter = repl.instance_variable_get(:@interpreter)
+      interpreter.run(<<~W)
+        + ReplAlgebraicThing
+          -> new(@coefficient)
+          -> inspect
+            "semantic algebraic value " + @coefficient.to_s()
+      W
+
+      output = inspect_output("ReplAlgebraicThing.new(11)")
+
+      expect(output).to include("result   semantic algebraic value 11")
+      expect(output).to include("type     ReplAlgebraicThing")
+      expect(output).to include("fields   1")
+      expect(output).to include("@coefficient 11")
+      expect(output).not_to include("Tungsten::Runtime::WObject")
+      expect(output).not_to include("instance_vars")
+    end
+
+    it "appends a Drawille plot for numeric arrays evaluated once" do
+      interpreter = repl.instance_variable_get(:@interpreter)
+      interpreter.run("inspection_count = 0")
+
+      output = inspect_output("inspection_count += 1\n[inspection_count, 2, 3, 5, 8]")
+
+      expect(interpreter.run("inspection_count")).to eq(1)
+      expect(output).to include("type     Array")
+      expect(output).to include("5 numeric samples")
+      expect(output).to match(/[\u2801-\u28ff]/)
+      expect(interpreter.run("_")).to eq([1, 2, 3, 5, 8])
+    end
+
+    it "keeps textual inspection when optional Drawille rendering fails" do
+      interpreter = repl.instance_variable_get(:@interpreter)
+      allow(repl).to receive(:drawille_inspection_available?).and_return(true)
+      allow(interpreter).to receive(:run).and_call_original
+      allow(interpreter).to receive(:run)
+        .with(/\ADrawilleInspection\.render/)
+        .and_raise(Tungsten::Error, "adapter failed")
+
+      output = inspect_output("[1, 2, 3]")
+
+      expect(output).to include("result   [1, 2, 3]")
+      expect(output).to include("type     Array")
+      expect(output).not_to include("adapter failed")
+    end
+
     it "explains quantity aliases and custom dimensions" do
       pb_output = inspect_output("1pb")
 

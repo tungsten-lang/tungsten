@@ -2,7 +2,7 @@ tungsten "tungsten-0.0.1"
 
 name        "tungsten-drawille"
 version     "0.1.0"
-summary     "Unicode braille plotting for Tungsten (port of asciimoo/drawille)"
-description "A braille-canvas plotting library: 2x4 sub-character resolution drawing, plus a polynomial line-chart renderer with dimmed - / | axes. Used by the wit REPL's `?` command to plot ranged polynomials."
+summary     "Bounded Unicode-braille scenes and math inspection for Tungsten"
+description "A braille-canvas plotting library with clipped 2x4 sub-character rasterization, sampled-series/AUC charts, 3-D projection, and type-aware inspection adapters for Tungsten's algebra, calculus, geometry, vector, curve, and projective classes."
 license     "MIT OR Apache-2.0"
 authors     ["Tungsten Language Project"]

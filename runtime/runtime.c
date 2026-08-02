@@ -23433,9 +23433,9 @@ int w_unbox_location_offset_extern(WValue v) { return (int)w_unbox_location_offs
  * as every parsed file silently registering under file_id 1, with the
  * line/col tables read back nil everywhere except the one call frame
  * that had just set them locally. A C global sidesteps the ambiguity
- * entirely: file_id is assigned once per distinct path (linear scan —
- * a compile touches at most a few hundred files, so this is not
- * worth a hash table), and line_at/col_at are copied out of the
+ * entirely: file_id is assigned once per distinct path + source layout
+ * (linear scan — a compile touches at most a few hundred layouts, so this is
+ * not worth a hash table), and line_at/col_at are copied out of the
  * Tungsten Arrays the lexer built into flat, owned int32_t buffers,
  * so lookups after do zero Tungsten-side work. */
 typedef struct {
@@ -23452,17 +23452,38 @@ static uint32_t g_loc_file_cap = 0;
 int w_loc_register_file(WValue path, WValue line_at_arr, WValue col_at_arr) {
     char buf[6]; const char *s; size_t len;
     w_str_data(path, buf, &s, &len);
+    uint32_t n = (uint32_t)w_as_int(w_array_size(line_at_arr));
     for (uint32_t i = 0; i < g_loc_file_count; i++) {
         size_t plen = strlen(g_loc_files[i].path);
         if (plen == len && memcmp(g_loc_files[i].path, s, len) == 0) {
-            return (int)(i + 1);
+            /* REPL and hot-reload sources deliberately reuse paths such as
+             * "(eval)". Reusing a file id solely by path leaves new AST spans
+             * pointing into the first command's shorter line/column tables.
+             * Preserve old AST locations by reusing only an identical mapping;
+             * a changed layout receives a fresh immutable table. */
+            WLocFileTable *existing = &g_loc_files[i];
+            if (existing->len == n) {
+                int same = 1;
+                for (uint32_t j = 0; j < n; j++) {
+                    int32_t line = (int32_t)w_as_int(
+                        w_array_get(line_at_arr, w_int((int64_t)j)));
+                    int32_t col = (int32_t)w_as_int(
+                        w_array_get(col_at_arr, w_int((int64_t)j)));
+                    if (existing->line_at[j] != line || existing->col_at[j] != col) {
+                        same = 0;
+                        break;
+                    }
+                }
+                if (same) return (int)(i + 1);
+            }
         }
     }
+    if (g_loc_file_count >= 0x3FFFu)
+        die("source location file/layout table exhausted");
     if (g_loc_file_count == g_loc_file_cap) {
         g_loc_file_cap = g_loc_file_cap == 0 ? 8 : g_loc_file_cap * 2;
         g_loc_files = realloc(g_loc_files, g_loc_file_cap * sizeof(WLocFileTable));
     }
-    uint32_t n = (uint32_t)w_as_int(w_array_size(line_at_arr));
     int32_t *line_buf = malloc(sizeof(int32_t) * (n > 0 ? n : 1));
     int32_t *col_buf = malloc(sizeof(int32_t) * (n > 0 ? n : 1));
     for (uint32_t i = 0; i < n; i++) {

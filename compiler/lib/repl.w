@@ -44,6 +44,10 @@ HL_KEYWORDS = ["if", "else", "elsif", "unless", "case", "when", "then", "while",
 INSP_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 INSP_MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
+INSP_OBJECT_FIELD_LIMIT = 12
+INSP_COLLECTION_PREVIEW_LIMIT = 6
+INSP_FIELD_VALUE_LIMIT = 120
+INSP_RESULT_VALUE_LIMIT = 240
 
 + REPL
   -> new(@interpreter = nil, @jit_mode = false, @hot_mode = false)
@@ -142,9 +146,12 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
           inspect_expr = input.slice(1, input.size() - 1).strip()
           handle_inspect(inspect_expr)
           @last_scrub_src = inspect_expr
-          # +2: jump back over the inspection AND the `wit> ? …` command line
-          # itself, so the scrub repaints starting on that prompt line.
-          @scrub_jumpback = @last_inspect_lines + 2
+          # Jump back over the inspection, the (possibly wrapped) command line,
+          # and the blank prompt line on which Enter was pressed.  Counting
+          # logical newlines here leaves wrapped inspection rows behind and
+          # makes every scrub nudge appear to append another stale line.
+          command_rows = scrub_display_rows(prompt() + "? " + inspect_expr)
+          @scrub_jumpback = @last_inspect_lines + command_rows + 1
           next
         if input == ":help" || input.starts_with?(":help ")
           show_help(input.slice(5, input.size() - 5).strip())
@@ -419,7 +426,7 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
   -> print_shortcuts
     << BOLD + "Shortcuts:" + RESET
     << "  ?             " + DIM + "show this help" + RESET
-    << "  ? EXPR        " + DIM + "inspect EXPR — value + typed breakdown (try ? 2026-12-25)" + RESET
+    << "  ? EXPR        " + DIM + "inspect EXPR — semantic value/type + Drawille view when visual (try ? 2026-12-25)" + RESET
     << "  ? Σ(2x⁷+3x²)  " + DIM + "sum a polynomial (blank Enter scrubs it live); ? ∫(x², 0..2) plots + shades the AUC" + RESET
     << "  :help NAME    " + DIM + "stdlib docs — class summary, or Class#method source" + RESET
     << "  Tab           " + DIM + "complete keywords, your names, and stdlib methods after a dot" + RESET
@@ -765,7 +772,7 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
     # chars you typed at the prompt in place — not a separate `scrub>` copy.
     header = prompt() + "? " + shown + "   " + DIM + "↑↓/dial nudge · \[ \] { } bigger (mo/yr) · ←→ select · q" + RESET
     ccall("w_print", header + "\r\n" + body)
-    @scrub_lines = 1 + scrub_count_lines(body)
+    @scrub_lines = scrub_display_rows(header) + scrub_display_rows(body)
     ccall("w_flush")
 
   # `? expr` — inspect: evaluate the expression and show its value + runtime
@@ -779,9 +786,16 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
       @last_inspect_lines = @ins_count
       return
     begin
-      v = @interpreter.run("_ = (" + expr + ")")
+      # Bind the result once under a private REPL name.  Algebraic values are
+      # ordinary Tungsten objects inside the tree-walking interpreter, so the
+      # compiled REPL sees their host representation (a tagged Hash).  Keeping
+      # the actual value in the interpreter lets both its semantic formatter
+      # and Drawille inspect the SAME object without re-evaluating `expr`.
+      v = @interpreter.run(
+        "__wit_inspected_value = (" + expr + ")\n" +
+        "_ = __wit_inspected_value")
       @ins_count = 0
-      render_inspect(v, type(v))
+      render_inspect(v)
       @last_inspect_lines = @ins_count
     rescue e
       << BRIGHT_RED + "  error: " + RESET + e.to_s()
@@ -789,9 +803,9 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
   # Emit one inspection line — printed directly for a one-shot `? expr`, or
   # captured into @ins_buf (raw-mode \r\n line ends) so the scrub loop can
   # repaint the whole inspection IN PLACE as the value is nudged. @ins_count
-  # tracks the printed line total (so blank-Enter can jump back over it).
+  # tracks occupied terminal rows (so blank-Enter can jump back over wrapping).
   -> ins(s)
-    @ins_count = @ins_count + 1
+    @ins_count = @ins_count + scrub_display_rows(s)
     if @ins_buf == nil
       << s
     else
@@ -803,7 +817,7 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
     n = s.size()
     if n > 0 && s.slice(n - 1, 1) == "\n"
       s = s.slice(0, n - 1)
-    @ins_count = @ins_count + scrub_count_lines(s)
+    @ins_count = @ins_count + scrub_display_rows(s)
     if @ins_buf == nil
       << s
     else
@@ -822,21 +836,55 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
       i = i + 1
     out
 
-  -> scrub_count_lines(s)
-    c = 1
+  # Number of terminal rows occupied by a string at the current terminal
+  # width.  ANSI color sequences do not consume columns and UTF-8 codepoints
+  # count once (insp_vlen handles both), while a logical line may occupy many
+  # visual rows after terminal wrapping.  Scrub redraw/jumpback bookkeeping
+  # must use this rather than newline counts or stale rows accumulate.
+  -> scrub_display_rows(s)
+    cols = ccall("w_term_cols")
+    if cols < 1
+      cols = 80
+    lines = s.split("\n")
+    if lines.size() == 0
+      return 1
+    rows = 0
     i = 0
-    n = s.size()
-    while i < n
-      if s.slice(i, 1) == "\n"
-        c = c + 1
+    while i < lines.size()
+      line = lines[i]
+      if line.ends_with?("\r")
+        line = line.slice(0, line.size() - 1)
+      width = insp_vlen(line)
+      occupied = 1
+      if width > 0
+        occupied = (width + cols - 1) / cols
+      rows = rows + occupied
       i = i + 1
-    c
+    rows
 
   # Render the full inspection (result/type header + per-type scene + universal
   # breakdown) via ins(), so the same code serves `? expr` and the scrub repaint.
-  -> render_inspect(v, tn)
+  -> render_inspect(v)
+    tn = @interpreter.w_type_name(v)
     ins(DIM + "  result   " + RESET + insp_value_label(v, tn))
     ins(DIM + "  type     " + RESET + insp_type_label(tn))
+
+    # Interpreted user/core objects are not their backing Hash.  Ask Drawille
+    # for cheap semantic metadata and an optional visualization while the live
+    # object is still bound in the SAME interpreter.  Drawille owns every
+    # class-specific plotting decision; core/algebra stays dependency-free.
+    # A missing/incompatible bit is non-fatal: textual inspection still works.
+    if interpreted_object?(v) || tn == "Array"
+      rendered = drawille_inspection()
+      if rendered != nil && rendered != ""
+        ins_block(rendered)
+      # Arrays retain the ordinary element-by-element breakdown beneath a
+      # useful numeric/geometry view. Interpreted objects instead get a
+      # bounded logical field view; their host Hash is never shown.
+      if interpreted_object?(v)
+        inspect_logical_fields(v)
+        return
+
     if tn == "Date"
       inspect_date_scene(v)
     if tn == "Color"
@@ -846,6 +894,179 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
     if tn == "Quantity"
       inspect_quantity_metadata(v)
     insp_breakdown(v)
+
+  -> interpreted_object?(value)
+    type(value) == "Hash" && value.has_key?(:rt) && value[:rt] == :object
+
+  -> insp_other_control?(char)
+    char == "\x00" || char == "\x01" || char == "\x02" || char == "\x03" || char == "\x04" || char == "\x05" || char == "\x06" || char == "\x07" || char == "\x08" || char == "\x0B" || char == "\x0C" || char == "\x0E" || char == "\x0F" || char == "\x10" || char == "\x11" || char == "\x12" || char == "\x13" || char == "\x14" || char == "\x15" || char == "\x16" || char == "\x17" || char == "\x18" || char == "\x19" || char == "\x1A" || char == "\x1C" || char == "\x1D" || char == "\x1E" || char == "\x1F" || char == "\x7F"
+
+  # Keep one logical field on one terminal line and cap it by bytes. Besides
+  # bounding output, escaping controls prevents a field value from corrupting
+  # the surrounding inspection layout.
+  -> insp_safe_field_text(value, limit)
+    text = value == nil ? "nil" : value.to_s()
+    out = ""
+    i = 0
+    while i < text.size() && i < limit
+      char = text.slice(i, 1)
+      if char == "\n"
+        out += "\\n"
+      elsif char == "\r"
+        out += "\\r"
+      elsif char == "\t"
+        out += "\\t"
+      elsif char == "\e"
+        out += "\\x1B"
+      elsif insp_other_control?(char)
+        out += "\\x??"
+      else
+        out += char
+      i += 1
+    if i < text.size()
+      out += "…"
+    out
+
+  -> insp_safe_string_text(value, limit)
+    text = value == nil ? "nil" : value.to_s()
+    out = ""
+    i = 0
+    while i < text.size() && i < limit
+      char = text.slice(i, 1)
+      if char == "\n"
+        out += "\\n"
+      elsif char == "\r"
+        out += "\\r"
+      elsif char == "\t"
+        out += "\\t"
+      elsif char == "\e"
+        out += "\\x1B"
+      elsif insp_other_control?(char)
+        out += "\\x??"
+      elsif char == "\""
+        out += "\\\""
+      elsif char == "\\"
+        out += "\\\\"
+      else
+        out += char
+      i += 1
+    if i < text.size()
+      out += "…"
+    out
+
+  # Bounded semantic formatter for values held by an interpreted object's
+  # logical fields. Nested WObjects are represented by their Tungsten
+  # formatter/class, while arrays and user Hashes receive small previews.
+  -> insp_logical_field_value(value, depth = 0)
+    if interpreted_object?(value)
+      return insp_safe_field_text(@interpreter.w_inspection_label(value), INSP_FIELD_VALUE_LIMIT)
+    if value == nil
+      return "nil"
+    if value == true
+      return "true"
+    if value == false
+      return "false"
+    kind = type(value)
+    if kind == "String"
+      return "\"" + insp_safe_string_text(value, INSP_FIELD_VALUE_LIMIT) + "\""
+    if kind == "Symbol"
+      return ":" + insp_safe_field_text(value, INSP_FIELD_VALUE_LIMIT)
+    if kind == "Array"
+      if depth >= 2
+        return "\[" + value.size().to_s() + " items\]"
+      parts = []
+      limit = value.size()
+      if limit > INSP_COLLECTION_PREVIEW_LIMIT
+        limit = INSP_COLLECTION_PREVIEW_LIMIT
+      i = 0
+      while i < limit
+        parts.push(insp_logical_field_value(value[i], depth + 1))
+        i += 1
+      if value.size() > limit
+        parts.push("… " + (value.size() - limit).to_s() + " more")
+      return "\[" + parts.join(", ") + "\]"
+    if kind == "Hash"
+      if value.has_key?(:rt)
+        if value[:rt] == :range
+          op = value[:exclusive] == true ? "..." : ".."
+          return insp_logical_field_value(value[:from], depth + 1) + op + insp_logical_field_value(value[:to], depth + 1)
+        if value[:rt] == :class
+          return value[:name].to_s()
+        # Other tagged interpreter values are named semantically, never
+        # expanded into their implementation keys.
+        return "#<" + @interpreter.w_type_name(value) + ">"
+      if depth >= 2
+        return "{" + value.size().to_s() + " entries}"
+      keys = value.keys()
+      parts = []
+      limit = keys.size()
+      if limit > INSP_COLLECTION_PREVIEW_LIMIT
+        limit = INSP_COLLECTION_PREVIEW_LIMIT
+      i = 0
+      while i < limit
+        key = insp_logical_field_value(keys[i], depth + 1)
+        item = insp_logical_field_value(value[keys[i]], depth + 1)
+        parts.push(key + ": " + item)
+        i += 1
+      if keys.size() > limit
+        parts.push("… " + (keys.size() - limit).to_s() + " more")
+      return "{" + parts.join(", ") + "}"
+    insp_safe_field_text(@interpreter.w_inspection_label(value), INSP_FIELD_VALUE_LIMIT)
+
+  # Structural fallback for every interpreted object, including classes for
+  # which Drawille has no adapter and supported adapters that fail. The
+  # interpreter's storage keys are consumed here but never emitted as a Hash.
+  -> inspect_logical_fields(value)
+    fields = value[:ivars]
+    if type(fields) != "Hash" || fields.size() == 0
+      ins(insp_hline("fields", "none"))
+      return
+    keys = fields.keys()
+    shown = keys.size()
+    if shown > INSP_OBJECT_FIELD_LIMIT
+      shown = INSP_OBJECT_FIELD_LIMIT
+    summary = keys.size().to_s()
+    if shown < keys.size()
+      summary += " (showing first " + shown.to_s() + ")"
+    ins(insp_hline("fields", summary))
+    i = 0
+    while i < shown
+      name = insp_safe_field_text(keys[i], 40)
+      # Nested previews are individually bounded, but a matrix/array can still
+      # concatenate many bounded children into one enormous terminal line.
+      # Apply the field-level cap once more to the assembled semantic preview.
+      preview = insp_logical_field_value(fields[keys[i]])
+      ins(insp_hline(name, insp_safe_field_text(preview, INSP_FIELD_VALUE_LIMIT)))
+      i += 1
+    if shown < keys.size()
+      ins(insp_hline("more", (keys.size() - shown).to_s() + " fields omitted"))
+
+  -> drawille_columns
+    cols = ccall("w_term_cols") - 4
+    if cols < 32
+      return 32
+    if cols > 96
+      return 96
+    cols
+
+  # Load the optional renderer lazily into the user's interpreter and render
+  # the object bound by handle_inspect/build_inspect.  Adapter exceptions are
+  # deliberately swallowed here: `? value` must remain a reliable textual
+  # inspector even when a new visualization adapter is incomplete.
+  -> drawille_inspection
+    # Besides being useful on plain-text terminals, the opt-out gives the
+    # fallback contract a deterministic test path: adapter availability or an
+    # adapter exception must never prevent `? value` from showing its semantic
+    # type and logical fields.
+    if env("TUNGSTEN_REPL_DRAWILLE") == "0"
+      return ""
+    begin
+      return @interpreter.run(
+        "use drawille/inspection\n" +
+        "_ = DrawilleInspection.render(__wit_inspected_value, " +
+        drawille_columns().to_s + ", 15)")
+    rescue e
+      return ""
 
   # Unit prose is intentionally external to the compiler/runtime binary. Both
   # REPLs read data/unit_metadata.tsv so history edits do not require a rebuild.
@@ -914,9 +1135,11 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
           body = body.slice(0, n - 2)
         return body
       @ins_buf = nil
-      v = @interpreter.run("_ = (" + src + ")")
+      v = @interpreter.run(
+        "__wit_inspected_value = (" + src + ")\n" +
+        "_ = __wit_inspected_value")
       @ins_buf = ""
-      render_inspect(v, type(v))
+      render_inspect(v)
       body = @ins_buf
       @ins_buf = nil
       n = body.size()
@@ -1018,28 +1241,10 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
       i = i + 1
     seen
 
-  # Braille dot mask for (px 0-1, py 0-3) inside one cell.
-  -> braille_bit(px, py)
-    if px == 0
-      if py == 0
-        return 0x01
-      elsif py == 1
-        return 0x02
-      elsif py == 2
-        return 0x04
-      return 0x40
-    if py == 0
-      return 0x08
-    elsif py == 1
-      return 0x10
-    elsif py == 2
-      return 0x20
-    0x80
-
-  # Plot `poly` over the range and shade the area between the curve and the
-  # x-axis (the AUC) with braille dots. Sampling re-evaluates the polynomial
-  # through the interpreter at 64 x positions built from the ORIGINAL bound
-  # texts (integer-bound ranges stay float-clean via .to_f).
+  # Sample `poly` over the range, then hand the numeric series to Drawille.
+  # The REPL owns expression evaluation; Drawille owns viewport fitting,
+  # axes, AUC fill, labels, clipping, and every terminal-raster decision.
+  # Samples use the ORIGINAL bound texts so integer ranges stay float-clean.
   -> math_plot_auc(poly, var, range_text)
     dots_w = 64
     dots_h = 24
@@ -1062,11 +1267,20 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
       t_text = a_text
       a_text = b_text
       b_text = t_text
+      t_probe = a_probe
+      a_probe = b_probe
+      b_probe = t_probe
       ins(DIM + "  (bounds reversed — plotting " + a_text + ".." + b_text + "; value is negated)" + RESET)
-    ys = []
+    # Keep the sampled values inside the same interpreter as the expression.
+    # Besides avoiding a lossy/source-text round trip for Decimals and other
+    # numeric facades, this gives Drawille the original runtime values.
+    @interpreter.run("__wit_plot_values = []")
     col = 0
     while col < dots_w
-      sample_src = var + " = (" + a_text + ").to_f + " + col.to_s() + " * ((" + b_text + ") - (" + a_text + ")).to_f / " + (dots_w - 1).to_s() + "\n_ = (" + poly + ")"
+      sample_src = (var + " = (" + a_text + ").to_f + " + col.to_s() + " * ((" + b_text + ") - (" + a_text + ")).to_f / " + (dots_w - 1).to_s() + "\n" +
+        "__wit_plot_sample = (" + poly + ")\n" +
+        "__wit_plot_values.push(__wit_plot_sample)\n" +
+        "_ = __wit_plot_sample")
       y = nil
       begin
         y = @interpreter.run(sample_src)
@@ -1076,56 +1290,21 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
       if type(y) != "Float" && type(y) != "Int"
         ins(DIM + "  (plot unavailable: non-numeric sample)" + RESET)
         return nil
-      ys.push(y.to_f)
       col = col + 1
-    ymin = ~0.0
-    ymax = ~0.0
-    i = 0
-    while i < dots_w
-      if ys[i] < ymin
-        ymin = ys[i]
-      if ys[i] > ymax
-        ymax = ys[i]
-      i = i + 1
-    span = ymax - ymin
-    if span <= ~0.0
-      span = ~1.0
-    cells_w = dots_w / 2
-    cells_h = dots_h / 4
-    cells = []
-    i = 0
-    while i < cells_w * cells_h
-      cells.push(0)
-      i = i + 1
-    zero_dy = dots_h - 1 - (((~0.0 - ymin) / span) * (dots_h - 1)).to_i
-    col = 0
-    while col < dots_w
-      dy = dots_h - 1 - (((ys[col] - ymin) / span) * (dots_h - 1)).to_i
-      lo = dy
-      hi = zero_dy
-      if lo > hi
-        lo = zero_dy
-        hi = dy
-      d = lo
-      while d <= hi
-        idx = (d / 4) * cells_w + (col / 2)
-        cells[idx] = cells[idx] | braille_bit(col % 2, d % 4)
-        d = d + 1
-      col = col + 1
-    ins("")
-    r = 0
-    while r < cells_h
-      line = "  "
-      cx = 0
-      while cx < cells_w
-        line = line + (0x2800 + cells[r * cells_w + cx]).chr
-        cx = cx + 1
-      r = r + 1
-      ins(CYAN + line + RESET)
-    pad_n = cells_w - a_text.size() - b_text.size()
-    if pad_n < 1
-      pad_n = 1
-    ins(DIM + "  " + a_text + (" " * pad_n) + b_text + RESET)
+    rendered = ""
+    begin
+      rendered = @interpreter.run(
+        "use drawille/inspection\n" +
+        "_ = DrawilleInspection.render_series(__wit_plot_values, " +
+        a_probe.to_s() + ", " + b_probe.to_s() + ", " +
+        drawille_columns().to_s() + ", " + (dots_h / 4).to_s() + ", true)")
+    rescue e
+      ins(DIM + "  (plot unavailable: " + e.to_s() + ")" + RESET)
+      return nil
+    if rendered == nil || rendered == ""
+      ins(DIM + "  (plot unavailable: Drawille rejected the sampled series)" + RESET)
+      return nil
+    ins_block(CYAN + rendered + RESET)
     nil
 
   # ── Rich `? <date>` inspector (port of inspection.rb's date scene) ──────
@@ -1371,6 +1550,8 @@ INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
   -> insp_value_label(v, tn)
     if tn == "Date"
       return insp_iso(v.year, v.month, v.day)
+    if interpreted_object?(v)
+      return insp_safe_field_text(@interpreter.w_inspection_label(v), INSP_RESULT_VALUE_LIMIT)
     format_value(v)
 
   # type label: Tungsten-specific packed types get the Tungsten:: prefix

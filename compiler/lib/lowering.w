@@ -2611,6 +2611,16 @@ use lowering/definitions
       if node.value.op in (:PLUS :MINUS) && node.value.operand != nil
         if ast_kind(node.value.operand) == :int
           value_is_int_literal = true
+    # A decimal literal beyond i64 has already been materialized by
+    # lower_int_bigint_literal as a boxed BigInt (:i64 here means WValue, not
+    # raw machine i64).  Raw-slot promotion would immediately w_to_i64 that
+    # object, discard every limb above the low word, and later rebox only the
+    # truncation at a call boundary.  Mid-width literals that lower as
+    # :raw_i64 remain eligible: all of their bits genuinely fit the slot.
+    if value_is_int_literal && val[:type] == :i64
+      raw_int_candidate = false
+      machine_type = nil
+      inferred = :bigint
     if val[:type] in (:raw_i64 :raw_u64 :raw_i128 :raw_u128) && !value_is_int_literal
       value_machine_type = raw_value_machine_type(val[:type])
       if machine_type == nil

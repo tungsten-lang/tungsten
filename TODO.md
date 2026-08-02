@@ -1,5 +1,46 @@
 # TODO
 
+## BigInt: mutate-if-unique arithmetic (promoted from COW deferral, 2026-08-01)
+
+**What:** add/sub/mul/div mutate the LHS in place when it is provably
+unshared and dead after the statement. Not COW — no limb sharing between
+live values; the uniqueness test is the only overlap with the original COW
+idea.
+
+**Why:** add/sub can compute truly in place (carry propagation is
+element-wise), removing the alloc + TLS pool round-trip — the proven
+overhead class — AND turning `big += small` from O(n) copy into amortized
+O(1) sparse update (GMP's retained-mpz advantage, a complexity-class gap
+today). Mul cannot compute in place (every algorithm re-reads input limbs;
+GMP scratches too) — mutation there is only buffer recycling, which the
+hot-slot pool already approximates; whether true in-place mul is possible
+is now a research thread at
+`~/math/numeric-experiments/inplace_bignum_multiplication.md` (n×1 and
+small-m over-place look solvable by engineering; balanced is the open
+part). Div partial: Knuth consumes the dividend in place; a dead LHS
+buffer can be the remainder scratch.
+
+**Staged route:**
+1. Static, no flag: lowering emits `w_add_mut`/`w_sub_mut` (runtime cap
+   check, fresh-alloc fallback) exactly where the escape pass would insert
+   a free of the old LHS — same proof, different payoff. Zero tax on other
+   paths.
+2. Sticky shared-bit in the header (pad bytes at `runtime/wvalue.h:498`),
+   set at escape sites, checked only in mutating entries — only if
+   profiling shows container-resident accumulators matter. Failure mode of
+   a missed escape site is a silently wrong value (worse than UAF); the
+   escape pass has one known unsoundness (hash frees, see w_value_free
+   comment) — gate and fuzz against the immutable engine.
+3. Never full refcounting (would tax every WValue store language-wide).
+
+**Coupling:** sign-in-the-value makes `-x` an alias of `x`; the uniqueness
+analysis must model negate as aliasing or fall back to copy when the
+operand stays live. Design the alias model once, shared by both features.
+
+**Still deferred (original COW):** sharing limb buffers between live
+values. Mutation makes it less attractive, not more — mutating is only
+legal because nobody shares.
+
 ## Unit conversion contexts
 
 - Add an explicit context scope for conversions whose value depends on

@@ -567,7 +567,7 @@ def harness_is_stale() -> bool:
     if runtime_dir.is_dir():
         sources += [
             path
-            for pattern in ("*.c", "*.h", "*.m")
+            for pattern in ("*.c", "*.h", "*.m", "generated/*.h")
             for path in runtime_dir.glob(pattern)
         ]
     return any(p.exists() and p.stat().st_mtime > built for p in sources)

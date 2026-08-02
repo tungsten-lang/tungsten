@@ -103,6 +103,40 @@ int main(int argc, char **argv) {
 
     if (strcmp(mode, "mul") == 0 || strcmp(mode, "both") == 0) {
         printf("MUL forced kernels (ns/op, best of 9)\n");
+        printf("%6s %12s %12s %12s %12s\n", "limbs", "toom2", "toom3",
+               "toom4", "toom6");
+        static const int32_t mul_lo_sizes[] = {128, 192, 256, 320, 368,
+                                               384, 416, 448, 512, 640,
+                                               768, 1024};
+        for (size_t si = 0;
+             si < sizeof(mul_lo_sizes) / sizeof(mul_lo_sizes[0]); si++) {
+            int32_t n = mul_lo_sizes[si];
+            uint64_t *a = (uint64_t *)malloc((size_t)n * sizeof(uint64_t));
+            uint64_t *b = (uint64_t *)malloc((size_t)n * sizeof(uint64_t));
+            uint64_t *out =
+                (uint64_t *)calloc((size_t)2 * n + 4, sizeof(uint64_t));
+            uint64_t *scratch =
+                (uint64_t *)calloc((size_t)n * 128 + 4096, sizeof(uint64_t));
+            for (int32_t i = 0; i < n; i++) a[i] = xr_next();
+            for (int32_t i = 0; i < n; i++) b[i] = xr_next();
+            a[n - 1] |= 1ULL << 63;
+            b[n - 1] |= 1ULL << 63;
+            bn_toom2(out, a, b, n, scratch);
+            check_against_gmp("toom2", out, a, b, n);
+            bn_toom3(out, a, b, n, scratch);
+            check_against_gmp("toom3", out, a, b, n);
+            bn_toom4(out, a, b, n, scratch);
+            check_against_gmp("toom4", out, a, b, n);
+            bn_toom6(out, a, b, n, scratch);
+            check_against_gmp("toom6", out, a, b, n);
+            double t2 = time_mul(bn_toom2, a, b, n, out, scratch);
+            double t3 = time_mul(bn_toom3, a, b, n, out, scratch);
+            double t4 = time_mul(bn_toom4, a, b, n, out, scratch);
+            double t6 = time_mul(bn_toom6, a, b, n, out, scratch);
+            printf("%6d %12.1f %12.1f %12.1f %12.1f\n", n, t2, t3, t4, t6);
+            free(a); free(b); free(out); free(scratch);
+        }
+        printf("\nMUL high band (ns/op, best of 9)\n");
         printf("%6s %12s %12s %8s\n", "limbs", "toom4", "toom6", "t6/t4");
         for (size_t si = 0; si < sizeof(mul_sizes) / sizeof(mul_sizes[0]);
              si++) {

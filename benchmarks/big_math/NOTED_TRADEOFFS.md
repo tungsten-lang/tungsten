@@ -4,6 +4,56 @@ Wins in one area that cost another get recorded here instead of shipped:
 the measured win, the measured loss, and the condition that would make the
 trade worth it. (Bignum campaign ground rule, 2026-08-02.)
 
+## Toom-6 enablement (B3a) — NOT taken (2026-08-02)
+
+Forced-kernel sweep (`run_kernel_crossover.sh mul`, GMP-verified operands):
+`bn_toom6` is 12-63% SLOWER than `bn_toom4` at every size 384..4096 — the
+entire band below BN_SSA_THRESHOLD. There is no crossover to set a
+threshold at; both BN_TOOM6_THRESHOLD and BN_SQR_TOOM6_THRESHOLD stay
+INT32_MAX. The kernel is written but not competitive on this uarch.
+**Condition to take it:** kernel work first (compare against GMP's
+__gmpn_toom6h_mul to see whether the interpolation spine or the eval
+chunking is the gap), then re-run the crossover. Threshold flipping alone
+cannot help.
+
+## Per-host threshold tuner output — REJECTED as built (2026-08-02)
+
+`tune_bigint_thresholds.sh` (first-best-per-family heuristic, REPS=3)
+proposed KARA=15 / TOOM3=176 / TOOM4=2816 — contradicted by the forced
+crossover data (toom4 dominates from ~600, toom2 wins to ~360). The
+heuristic picks the first size a family wins a noisy 3-rep row, which is
+not a crossover. Its generated header is also invisible to
+`harness_is_stale` (fixed: `runtime/generated/*.h` is now watched), so
+past tuner validations may have measured stale binaries. Before the
+tuner's output is trusted, it needs best-of-9 rows and a
+crossover-by-fit, not first-best.
+
+**Parallel cutoffs (BN_TOOM_PAR/BN_SSA_PAR/threads): retune deferred** —
+thread-timing measurements on this box (load 12+) cannot adjudicate the
+1-5% at stake, and every affected cell is currently green.
+
+## NEW red cells: mul@384 (1.03) and mul@448 (1.20) — kernel gap, not tuning
+
+Neither size is in DEFAULT_SIZES (the 368..512 blind spot strikes again).
+Forced-kernel data says dispatch already picks our best kernel at both
+sizes; at 448 the BEST forced kernel (toom3, 17.4 us) loses to GMP's
+whole mpz op (14.7 us), so no threshold can fix it. At 384 our toom3
+KERNEL beats GMP's forced toom33 (0.88x) yet the cell loses 1.03
+end-to-end — the deficit is entry/dispatch overhead, not the kernel.
+Phase-4 material: toom3 eval/interp shape at 400-500 limbs, and the
+mul entry path at the toom2/toom3 boundary.
+
+The "empty Toom-3 squaring window" [392, 616) is CORRECT as configured:
+forced `bn_toom3_sq` loses to `bn_kara_sq` throughout it (392: 10.9 vs
+10.4 us; 512: 16.5 vs 8.0). What the crossover actually found was the
+opposite mis-tune — kara's ceiling was far too LOW; see commit a36ac29
+(BN_SQR_TOOM4_THRESHOLD 616 -> 2560, sqr@704 1.07 -> 0.73).
+
+The fixed-leaf gaps (8-11, 13-14, 18-19, 22-23, 25-32) stay unfilled: the
+P0.1 matrix has zero red cells at those sizes and the projected gains sit
+under the +-5% measurement floor (finding 7A) — unresolvable on this box
+without instructions-retired plumbing.
+
 ## BN_BIGINT_HYBRID_CAP default flip — NOT taken (2026-08-02)
 
 **Claimed win (prior session, real workloads):** hybrid (p2<=32 + q32)

@@ -36,9 +36,13 @@ if ARGV.include?("--help") || ARGV.include?("-h")
       --force     Ignore cached stage binaries and rebuild
       --pgo       Build the compiler with profile-guided optimization
       --no-bits   Skip compiling bit entry points (implied by -0, -1, and -2)
-      --release   Full-LTO release profile (portable CPU baseline by default)
-      --native    Tune compiler and runtime for this host
-      --portable  Target the portable x86-64-v2 / armv8-a baseline
+      --release   -O3, full LTO, no dev checks, reduced runtime metadata
+      --debug     Include debug symbols, safety checks, and runtime metadata
+      --no-debug  Omit debug symbols and development checks (release default)
+      --cpu CPU   Target CPU (v1/v2/v3/v4/native aliases accepted)
+      --native    Shorthand for --cpu native
+      --target T  Build an artifact for target triple T
+      --portable  Build x86-64-v2 and x86-64-v3 release artifacts
       --fast      Enable fast, non-IEEE floating-point optimization
       -h, --help  Show this help
 
@@ -387,41 +391,90 @@ end
 #                              w_array_get, etc.) for partial cross-optimization.
 #   --release:  -flto=full   — single LLVM module; strongest optimization;
 #                              ~30% slower link, marginal further perf gain.
-release_mode  = ARGV.delete("--release") ? true : false
-native_mode   = ARGV.delete("--native") ? true : false
-portable_mode = ARGV.delete("--portable") ? true : false
+take_value_flag = lambda do |name|
+  prefix = "#{name}="
+  joined = ARGV.find { |arg| arg.start_with?(prefix) }
+  if joined
+    ARGV.delete(joined)
+    next joined.delete_prefix(prefix)
+  end
+  index = ARGV.index(name)
+  next nil unless index
+  if ARGV[index + 1].nil?
+    warn "#{name} requires a value"
+    exit 1
+  end
+  value = ARGV[index + 1]
+  ARGV.slice!(index, 2)
+  value
+end
+
+release_mode       = !!ARGV.delete("--release")
+native_mode        = !!ARGV.delete("--native")
+portable_mode      = !!ARGV.delete("--portable")
+debug_requested    = !!ARGV.delete("--debug")
+no_debug_requested = !!ARGV.delete("--no-debug")
+cpu_name           = take_value_flag.call("--cpu")
+target_triple      = take_value_flag.call("--target")
+target_sysroot     = take_value_flag.call("--sysroot")
 fast_mode     = !!(ARGV.delete("--fast") || ARGV.delete("-fast"))
-if native_mode && portable_mode
-  $stderr.puts "--native and --portable are mutually exclusive"
+if debug_requested && no_debug_requested
+  $stderr.puts "--debug and --no-debug are mutually exclusive"
   exit 1
 end
+if portable_mode && (native_mode || cpu_name)
+  $stderr.puts "--portable selects the x86-64-v2/v3 release set and cannot be combined with --native or --cpu"
+  exit 1
+end
+if target_triple && native_mode
+  $stderr.puts "--target cannot be combined with --native; name a target CPU with --cpu"
+  exit 1
+end
+if target_sysroot && !target_triple
+  $stderr.puts "--sysroot requires --target"
+  exit 1
+end
+if stage0_only && (portable_mode || target_triple)
+  $stderr.puts "-0 cannot emit release artifacts; build at least stage 1"
+  exit 1
+end
+debug_enabled = debug_requested || (!no_debug_requested && !release_mode && !portable_mode)
 LTO_FLAG = release_mode ? "-flto=full" : "-flto=thin"
 
 require File.join(ROOT, "implementations/ruby/lib/tungsten/build_flags")
-MARCH_FLAGS = Tungsten::BuildFlags.march_for(
-  release: release_mode,
-  native: native_mode,
-  portable: portable_mode,
-  override: ENV["TUNGSTEN_MARCH_ARGS"]
-)
+begin
+  host_cpu_name = Tungsten::BuildFlags.resolve_cpu(
+    cpu: target_triple ? nil : cpu_name,
+    native: target_triple ? false : native_mode,
+    configured: Tungsten::BuildFlags.configured_cpu
+  )
+  MARCH_FLAGS = Tungsten::BuildFlags.march_for(
+    cpu: host_cpu_name,
+    override: ENV["TUNGSTEN_MARCH_ARGS"]
+  )
+rescue ArgumentError => e
+  warn e.message
+  exit 1
+end
 
 # Hand the resolved target to every bootstrap host. The stage-0 C VM cannot
 # implement setenv itself, and compiler IR must carry the same target attributes
 # as the C runtime objects it links against.
 ENV["TUNGSTEN_MARCH_ARGS"] = MARCH_FLAGS.join(" ")
 
-# Bootstrap compilers remain release-profile binaries, preserving the prior
-# default-build behavior. Public build flags remain orthogonal: release chooses
-# the full-LTO build profile, while target and fast mode are forwarded intact.
-STAGE_FLAGS = ["--release"]
-STAGE_FLAGS << "--native" if native_mode
-STAGE_FLAGS << "--portable" if portable_mode
+# Profile, CPU, and floating-point choices are orthogonal. Stage 1 and stage 2
+# receive the same resolved host CPU so the fixed-point build remains runnable;
+# a cross-target artifact is emitted only after that host bootstrap completes.
+STAGE_FLAGS = []
+STAGE_FLAGS << "--release" if release_mode
+STAGE_FLAGS.concat(["--cpu", host_cpu_name]) if host_cpu_name
+STAGE_FLAGS << (debug_enabled ? "--debug" : "--no-debug")
 STAGE_FLAGS << "--fast" if fast_mode
 
 PROGRAM_FLAGS = []
 PROGRAM_FLAGS << "--release" if release_mode
-PROGRAM_FLAGS << "--native" if native_mode
-PROGRAM_FLAGS << "--portable" if portable_mode
+PROGRAM_FLAGS.concat(["--cpu", host_cpu_name]) if host_cpu_name
+PROGRAM_FLAGS << (debug_enabled ? "--debug" : "--no-debug")
 PROGRAM_FLAGS << "--fast" if fast_mode
 
 color = $stderr.tty? && !ENV["NO_COLOR"]
@@ -642,8 +695,11 @@ tls_flags = tls_enabled && File.exist?("#{openssl_prefix}/include/openssl/ssl.h"
   ["-DTUNGSTEN_TLS", "-I#{openssl_prefix}/include"] : []
 
 nghttp2_prefix = "/opt/homebrew/opt/libnghttp2"
-http2_flags = File.exist?("#{nghttp2_prefix}/include/nghttp2/nghttp2.h") ?
+http2_enabled = ENV["HTTP2"] || ENV["TUNGSTEN_HTTP2"]
+http2_flags = http2_enabled && File.exist?("#{nghttp2_prefix}/include/nghttp2/nghttp2.h") ?
   ["-DTUNGSTEN_HTTP2", "-I#{nghttp2_prefix}/include"] : []
+http2_libs = http2_flags.any? ? ["-L#{nghttp2_prefix}/lib", "-lnghttp2"] : []
+runtime_srcs << "http2.c" if http2_flags.any?
 
 onig_cflags, onig_libs = onig_flags
 
@@ -774,14 +830,15 @@ run_pgo_post_step = lambda do |stage2_bin, label|
 end
 
 
-# Stage 1 and stage 2 both link this archive with --no-lto. Keeping LLVM
-# bitcode here made clang reprocess the runtime during each supposedly
-# no-LTO link; native objects cut several seconds while preserving emitted IR.
+# Development stage 1/2 links use this native-object archive with --no-lto;
+# release stages compile the runtime into the full-LTO link so the public
+# release profile has the same contract as a direct release compile.
 # Bit entry points still use LTO_FLAG independently in link_flags below.
 runtime_cache_schema = "runtime-cache-v2"
 fast_clang_flags = fast_mode ? %w[-ffast-math] : []
-cc_flags = %W[-O2 -DNDEBUG -pthread] + MARCH_FLAGS + fast_clang_flags + %w[-c] + tls_flags + http2_flags + onig_cflags + zstd_cflags
-runtime_objc_flags = %W[-O2 -DNDEBUG] + MARCH_FLAGS + fast_clang_flags + %w[-c -x objective-c]
+profile_cflags = [release_mode ? "-O3" : "-O0", debug_enabled ? "-g" : "-DNDEBUG"]
+cc_flags = profile_cflags + %w[-pthread] + MARCH_FLAGS + fast_clang_flags + %w[-c] + tls_flags + http2_flags + onig_cflags + zstd_cflags
+runtime_objc_flags = profile_cflags + MARCH_FLAGS + fast_clang_flags + %w[-c -x objective-c]
 # TUNGSTEN_SANITIZE="-fsanitize=thread" (or address) instruments the runtime
 # objects; the flags join the compile key below so sanitized and plain
 # archives cache side by side. Pass the matching -fsanitize in LDFLAGS when
@@ -814,6 +871,7 @@ compiler_probe_env = {
   "TUNGSTEN_ZSTD_LDFLAGS" => zstd_libs.join(" "),
   "TUNGSTEN_ONIG_CFLAGS"  => onig_cflags.join(" "),
   "TUNGSTEN_ONIG_LDFLAGS" => onig_libs.join(" "),
+  "TUNGSTEN_HTTP2_LDFLAGS" => http2_libs.join(" "),
   "TUNGSTEN_OS"           => (RUBY_PLATFORM =~ /darwin/ ? "Darwin" :
                               RUBY_PLATFORM =~ /linux/ ? "Linux" : "")
 }.merge(compiler_toolchain_env)
@@ -831,9 +889,13 @@ bootstrap_compiler_clang_opt =
   if !ENV["TUNGSTEN_CLANG_OPT"].to_s.empty?
     ENV["TUNGSTEN_CLANG_OPT"]
   elsif release_mode
-    fast_mode ? "#{release_default_opt} -ffast-math" : release_default_opt
+    debug_flag = debug_enabled ? " -g" : ""
+    fast_flag = fast_mode ? " -ffast-math" : ""
+    "#{release_default_opt}#{debug_flag}#{fast_flag}"
   else
-    fast_mode ? "-O0 -ffast-math" : "-O0"
+    debug_flag = debug_enabled ? " -g" : ""
+    fast_flag = fast_mode ? " -ffast-math" : ""
+    "-O0#{debug_flag}#{fast_flag}"
   end
 
 runtime_dependencies_key = Digest::SHA256.new
@@ -1059,7 +1121,7 @@ unless bit_only
   end
 
   if use_c_bootstrap
-    c_stage_cache_schema = "c-stage-content-v2"
+    c_stage_cache_schema = "c-stage-content-v3"
     c_stage1_sources_sha = tree_sha(*compiler_source_paths)
     puts
     puts "#{bold}==> Stage 0: implementations/c VM#{reset}"
@@ -1129,15 +1191,12 @@ unless bit_only
         "TUNGSTEN_LL_PATH" => stage1_ll
       )
       stage1_log = File.join(Dir.tmpdir, "tungsten-c-stage1.log")
-      # --runtime points clang at the pre-built runtime archive (cached up
-      # in the runtime stage); without it the compiler script falls into
-      # link_binary's `runtime_objs == nil` branch and recompiles every
-      # runtime .c file from source, costing ~1s per stage. --no-lto
-      # disables full LTO at link — mixing -flto with the runtime archive's
-      # thin-LTO bitcode crashes clang's linker (LLVM ERROR: Unexistent
-      # dir). Spinel's stage 2 invocation uses the same combination.
+      # Development builds take the fast cached-runtime/no-LTO path. Release
+      # builds omit it so link_binary recompiles the runtime into one full-LTO
+      # product, as promised by the public release profile.
+      stage1_link_flags = release_mode ? [] : ["--runtime", runtime_archive, "--no-lto"]
       unless system(stage1_env, c_interp_for_build, TUNGSTEN_W, "compile", TUNGSTEN_W, "--out", stage1, *STAGE_FLAGS,
-                    "--runtime", runtime_archive, "--no-lto",
+                    *stage1_link_flags,
                     [:out, :err] => stage1_log)
         $stderr.puts File.read(stage1_log) if File.exist?(stage1_log)
         $stderr.puts "#{red}Stage 1 (C VM) failed#{reset}"
@@ -1194,11 +1253,9 @@ unless bit_only
           "TUNGSTEN_LL_PATH" => stage2_ll
         )
         stage2_log = File.join(Dir.tmpdir, "tungsten-c-stage2.log")
-        # Same --runtime + --no-lto combination as stage 1; the produced
-        # stage 2 binary is the installed compiler, but bit builds use it
-        # to invoke clang independently with their own LTO settings.
+        stage2_link_flags = release_mode ? [] : ["--runtime", runtime_archive, "--no-lto"]
         unless system(stage2_env, stage1, "compile", TUNGSTEN_W, "--out", stage2, *STAGE_FLAGS,
-                      "--runtime", runtime_archive, "--no-lto",
+                      *stage2_link_flags,
                       [:out, :err] => stage2_log)
           $stderr.puts File.read(stage2_log) if File.exist?(stage2_log)
           $stderr.puts "#{red}Stage 2 failed#{reset} (#{$?.inspect})"
@@ -1303,8 +1360,9 @@ unless bit_only
         "TUNGSTEN_LL_DIR" => spinel_stage2_ll_dir,
         "TUNGSTEN_LL_PATH" => tmp_ll
       )
+      spinel_link_flags = release_mode ? [] : ["--runtime", spinel_runtime, "--no-lto"]
       unless system(
-        stage2_env, stage1, "compile", "compiler/tungsten.w", "--runtime", spinel_runtime, "--no-lto",
+        stage2_env, stage1, "compile", "compiler/tungsten.w", *spinel_link_flags,
         *STAGE_FLAGS, "--out", stage2
       )
         $stderr.puts "#{red}Stage 2 failed#{reset} (#{$?.inspect})"
@@ -1477,6 +1535,59 @@ unless bit_only
   end
 end
 
+# Cross-target and portable products are emitted after the runnable host
+# fixed-point compiler exists. This avoids trying to execute a stage-1 binary
+# for another architecture while still producing fully target-specific runtime
+# code. Artifacts are additive; the configured host compiler remains installed.
+artifact_specs = []
+if portable_mode
+  portable_target = target_triple || if RUBY_PLATFORM =~ /darwin/
+                                         "x86_64-apple-macos"
+                                       else
+                                         "x86_64-unknown-linux-gnu"
+                                       end
+  unless portable_target.match?(/\Ax86_64[-_]/)
+    $stderr.puts "--portable is the x86-64 release set; target must be an x86_64 triple"
+    exit 1
+  end
+  Tungsten::BuildFlags::RELEASE_CPUS.each do |release_cpu|
+    artifact_specs << [portable_target, release_cpu, true]
+  end
+elsif target_triple
+  artifact_specs << [target_triple, cpu_name, release_mode]
+end
+
+unless artifact_specs.empty?
+  puts
+  puts "#{bold}==> Release artifacts#{reset}"
+  artifact_specs.each do |artifact_target, artifact_cpu, artifact_release|
+    cpu_label = artifact_cpu || "default"
+    target_label = artifact_target.gsub(/[^A-Za-z0-9_.+-]/, "_")
+    out_dir = File.join(ROOT, "build/releases", target_label, cpu_label)
+    out_bin = File.join(out_dir, "tungsten-compiler")
+    FileUtils.mkdir_p(out_dir)
+    artifact_flags = []
+    artifact_flags << "--release" if artifact_release
+    artifact_flags << (debug_enabled ? "--debug" : "--no-debug")
+    artifact_flags.concat(["--target", artifact_target])
+    artifact_flags.concat(["--cpu", artifact_cpu]) if artifact_cpu
+    artifact_flags.concat(["--sysroot", target_sysroot]) if target_sysroot
+    artifact_flags << "--fast" if fast_mode
+    artifact_env = compiler_probe_env.merge("TUNGSTEN_MARCH_ARGS" => "")
+    unless system(artifact_env, COMPILER_BIN, "compile", TUNGSTEN_W, "--out", out_bin,
+                  *artifact_flags, chdir: ROOT)
+      $stderr.puts "#{red}Failed to build #{artifact_target}/#{cpu_label}#{reset}"
+      exit 1
+    end
+    if artifact_target.include?("apple") &&
+       !system("codesign", "--force", "-s", "-", out_bin, out: File::NULL, err: File::NULL)
+      $stderr.puts "#{red}Failed to ad-hoc sign #{artifact_target}/#{cpu_label}#{reset}"
+      exit 1
+    end
+    puts "    #{green}built#{reset} #{project_relative_path(out_bin)}"
+  end
+end
+
 # ── Phase 2: Runtime archive already built above ─────────────────
 t3 = t_runtime_start
 t4 = t_runtime_end
@@ -1484,9 +1595,9 @@ t4 = t_runtime_end
 # ── Shared link config ──────────────────────────────────────────
 
 bit_clang_opt = ENV["TUNGSTEN_BITS_CLANG_OPT"].to_s
-bit_clang_opt = "-O0" if bit_clang_opt.empty?
+bit_clang_opt = release_mode ? "-O3" : "-O0" if bit_clang_opt.empty?
 bit_clang_opt = "#{bit_clang_opt} -ffast-math" if fast_mode && !bit_clang_opt.split.include?("-ffast-math")
-link_flags = [bit_clang_opt, "-DNDEBUG", *MARCH_FLAGS, LTO_FLAG]
+link_flags = [bit_clang_opt, debug_enabled ? "-g" : "-DNDEBUG", *MARCH_FLAGS, LTO_FLAG]
 if RUBY_PLATFORM =~ /darwin/
   link_flags << "-Wl,-dead_strip"
 else
@@ -1497,7 +1608,7 @@ else
 end
 link_libs = []
 link_libs += ["-L#{openssl_prefix}/lib", "-lssl", "-lcrypto"] if tls_flags.any?
-link_libs += ["-L#{nghttp2_prefix}/lib", "-lnghttp2"] if http2_flags.any?
+link_libs += http2_libs
 link_libs += onig_libs
 runtime_key = Digest::SHA256.hexdigest([
   runtime_dependency_files.map { |path| file_sha(path) }.join(":"),

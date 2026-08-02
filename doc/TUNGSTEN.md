@@ -94,7 +94,11 @@ OPTIONS
         Enable color output, on by default.
 
     -d, --debug
-        Enable debug mode.
+        Include debug symbols, development safety checks, and full runtime
+        source-location metadata. Overrides --release's no-debug default.
+
+        --no-debug
+        Omit debug symbols and development safety checks.
 
     -e, --eval EXPRESSION
         Execute an expression, often for CLI one-liners.
@@ -147,9 +151,25 @@ OPTIONS
         Enable quiet mode.
 
     -r, --release
-        Compile in release mode.
+        Compile with the release optimization profile: -O3, full LTO, no
+        development safety checks, and reduced runtime metadata. Defaults to
+        --no-debug; an explicit --debug retains symbols/checks/metadata.
 
-        Equivalent: --no-debug --no-warning
+        --cpu CPU
+        Optimize for a CPU or ISA group. v1, v2, v3, v4, and native are
+        shorthand; LLVM CPU names such as apple-m5 are also accepted.
+
+        --native
+        Shorthand for --cpu native. Local builds use [build] cpu from
+        ~/.tungsten/config, or native when it is absent.
+
+        --target TRIPLE
+        Generate code for another target triple. It can be combined with
+        --cpu: the output runs on TRIPLE and is optimized for that CPU variant.
+
+        --portable
+        With build/bootstrap, generate the documented x86-64-v2 and x86-64-v3
+        release binaries under build/releases/<triple>/<cpu>/.
 
     -t, --threads
         Max number of threads.

@@ -91,9 +91,9 @@ detect_target_memo = {}
   cc = host_c_compiler()
   # Cross-compilation: TUNGSTEN_TARGET (set by `--target=<triple>`) retargets
   # codegen. Probe the target's datalayout+triple by asking clang to lower an
-  # empty TU FOR that triple — LLVM's codegen is fully retargetable. Host-
-  # specific -march=native function attrs are dropped for a cross target (they
-  # name the host CPU and would be wrong / rejected for another arch).
+  # empty TU FOR that triple — LLVM's codegen is fully retargetable. When an
+  # explicit --cpu accompanies it, the same probe stamps target-cpu/features
+  # for that target rather than leaking host attributes.
   cross = env("TUNGSTEN_TARGET")
   tflag = ""
   if cross != nil && cross != ""
@@ -110,9 +110,7 @@ detect_target_memo = {}
   if parts.size() > 1
     triple = parts[1]
 
-  fn_attrs = ""
-  if cross == nil || cross == ""
-    fn_attrs = detect_host_fn_attrs()
+  fn_attrs = detect_target_fn_attrs(cross)
 
   { datalayout: datalayout, triple: triple, fn_attrs: fn_attrs }
 
@@ -129,20 +127,27 @@ detect_target_memo = {}
 # BACKEND-EXPANDED feature set (e.g. auto-added +v8.1a…+v8.6a from
 # +v8.6a), which is what the runtime's functions will actually carry.
 # The driver-level `clang -###` output is a subset and won't match.
--> detect_host_fn_attrs
+-> detect_target_fn_attrs(cross = nil)
   cc = host_c_compiler()
   awk = "awk '/^attributes #0 / { for(i=1;i<=NF;i++){ "
   awk = awk + "if($i~/^\"target-cpu\"=/||$i~/^\"target-features\"=/||$i~/^\"tune-cpu\"=/) "
   awk = awk + "printf \"%s \", $i } print \"\" }'"
   # Match the march the binary is actually built with. tungsten.w resolves the
   # profile/target flags into TUNGSTEN_MARCH_ARGS before lowering, so emitted
-  # functions and the runtime use the same native, portable, or custom feature
-  # set.
+  # functions and the runtime use the same configured CPU feature set.
   march = env("TUNGSTEN_MARCH_ARGS")
   if march == nil || march == ""
-    march = "-march=native -mtune=native"
+    if cross == nil || cross == ""
+      host_arch = capture("uname -m").strip()
+      if host_arch == "x86_64" || host_arch == "amd64"
+        march = "-march=native -mtune=native"
+      else
+        march = "-mcpu=native"
+  target_flag = ""
+  if cross != nil && cross != ""
+    target_flag = " --target=" + cross
   script = "echo 'void __tungsten_probe(void){}' | " + cc
-  script = script + " -O3 " + march + " -S -emit-llvm -xc - -o - 2>/dev/null | " + awk
+  script = script + target_flag + " -O3 " + march + " -S -emit-llvm -xc - -o - 2>/dev/null | " + awk
   capture(script).strip()
 
 -> normalize_designator(name)

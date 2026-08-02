@@ -15,6 +15,9 @@ COMPILER="$ROOT/bin/tungsten-compiler"
 RUBY_CLI="$ROOT/bin/tungsten.rb"
 CUSTOM_RUBY="$ROOT/src/patched/ruby/ruby"
 
+. "$ROOT/bin/commands/config.sh"
+tungsten_load_build_config
+
 # Single-source the version from the repo-root VERSION file, so children (the
 # compiled CLI, the REPL banner) read it from the environment instead of
 # re-hardcoding it.
@@ -96,7 +99,7 @@ case "$1" in
         -h|--help)
           echo "Usage: tungsten bench [primitive...] [--compare] [--baseline] [--runs N] [--list]"
           echo "       tungsten bench --suite [benchmark...] [--only LANGS] [--runs N] [--list]"
-          echo "       tungsten bench bignum [--quick] [--python] [--rust] [--odin] [--json]"
+          echo "       tungsten bench bignum [--quick] [--all] [--json]"
           echo
           echo "  Default: Tungsten primitive-op velocity baseline (ops/sec). Each op is"
           echo "  auto-calibrated to ~1s after a 3s warmup. If bench_baseline.txt exists,"
@@ -114,7 +117,7 @@ case "$1" in
           echo "  --only LANGS   (suite) comma list, e.g. w,c,rust,go"
           echo
           echo "  bignum         compare boxed immutable integer operations across Tungsten,"
-          echo "                 GMP, and Python; also test result-buffer capacity policies"
+          echo "                 GMP, Python, Rust, and Odin; test buffer-capacity policies"
           exit 0 ;;
         *)           bench_args+=("$1") ;;
       esac

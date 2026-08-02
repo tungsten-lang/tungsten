@@ -22,17 +22,50 @@ RELEASE_MODE = ARGV.delete("--release") ? true : false
 # the fast path so `tungsten -o file.w --release` reaches the backend's LTO path.
 LTO_MODE      = ARGV.delete("--lto") ? true : false
 NATIVE_MODE   = ARGV.delete("--native") ? true : false
-PORTABLE_MODE = ARGV.delete("--portable") ? true : false
-if NATIVE_MODE && PORTABLE_MODE
-  warn "--native and --portable are mutually exclusive"
+if ARGV.delete("--portable")
+  warn "--portable builds the release matrix; use `tungsten build --portable` or select one binary with --cpu"
   exit 1
 end
+
+take_value_flag = lambda do |name|
+  prefix = "#{name}="
+  joined = ARGV.find { |arg| arg.start_with?(prefix) }
+  if joined
+    ARGV.delete(joined)
+    next joined.delete_prefix(prefix)
+  end
+  index = ARGV.index(name)
+  next nil unless index
+  if ARGV[index + 1].nil?
+    warn "#{name} requires a value"
+    exit 1
+  end
+  value = ARGV[index + 1]
+  ARGV.slice!(index, 2)
+  value
+end
+
+CPU_NAME = take_value_flag.call("--cpu")
+TARGET_TRIPLE = take_value_flag.call("--target")
+TARGET_SYSROOT = take_value_flag.call("--sysroot")
+DEBUG_REQUESTED = !!ARGV.delete("--debug")
+NO_DEBUG_REQUESTED = !!ARGV.delete("--no-debug")
+if DEBUG_REQUESTED && NO_DEBUG_REQUESTED
+  warn "--debug and --no-debug are mutually exclusive"
+  exit 1
+end
+if TARGET_SYSROOT && !TARGET_TRIPLE
+  warn "--sysroot requires --target"
+  exit 1
+end
+DEBUG_ENABLED = DEBUG_REQUESTED || (!NO_DEBUG_REQUESTED && !RELEASE_MODE)
 
 BACKEND_FLAGS = []
 BACKEND_FLAGS << "--release" if RELEASE_MODE
 BACKEND_FLAGS << "--lto" if LTO_MODE
 BACKEND_FLAGS << "--native" if NATIVE_MODE
-BACKEND_FLAGS << "--portable" if PORTABLE_MODE
+BACKEND_FLAGS.concat(["--cpu", CPU_NAME]) if CPU_NAME
+BACKEND_FLAGS << (DEBUG_ENABLED ? "--debug" : "--no-debug")
 LTO_FLAG = RELEASE_MODE ? "-flto=full" : "-flto=thin"
 
 # Floating-point math mode. Unlike --release (which only tunes Ruby-side LTO),
@@ -50,39 +83,38 @@ if ARGV.include?("--fast") || ARGV.include?("-fast")
   ARGV.delete("--fast")
   ARGV.delete("-fast")
 end
-# Cross-compilation: --target <triple> [--sysroot <path>] retarget codegen + the
-# link (compiler/tungsten.w + target.w). Value-taking, so strip each flag AND its
-# argument and forward both verbatim to `tungsten-compiler compile`. A runnable
-# cross-binary also needs --sysroot pointing at the target's libc/crt/system libs.
-if (ti = ARGV.index("--target")) && ARGV[ti + 1]
-  MATH_MODE_FLAGS << "--target" << ARGV[ti + 1]
-  ARGV.delete_at(ti + 1)
-  ARGV.delete_at(ti)
-end
-if (si = ARGV.index("--sysroot")) && ARGV[si + 1]
-  MATH_MODE_FLAGS << "--sysroot" << ARGV[si + 1]
-  ARGV.delete_at(si + 1)
-  ARGV.delete_at(si)
-end
+# Cross-compilation retargets both codegen and clang. CPU is deliberately a
+# separate axis: `--target aarch64-linux-gnu --cpu neoverse-v2` means a binary
+# that runs on that target and is tuned for that CPU.
+MATH_MODE_FLAGS.concat(["--target", TARGET_TRIPLE]) if TARGET_TRIPLE
+MATH_MODE_FLAGS.concat(["--sysroot", TARGET_SYSROOT]) if TARGET_SYSROOT
 require File.join(ROOT, "implementations/ruby/lib/tungsten/build_flags")
-MARCH_FLAGS = Tungsten::BuildFlags.march_for(
-  release: RELEASE_MODE,
-  native: NATIVE_MODE,
-  portable: PORTABLE_MODE,
-  override: ENV["TUNGSTEN_MARCH_ARGS"]
-)
+begin
+  MARCH_FLAGS = Tungsten::BuildFlags.march_for(
+    cpu: CPU_NAME,
+    native: NATIVE_MODE,
+    target: TARGET_TRIPLE,
+    override: ENV["TUNGSTEN_MARCH_ARGS"]
+  )
+rescue ArgumentError => e
+  warn e.message
+  exit 1
+end
+ENV["TUNGSTEN_MARCH_ARGS"] = MARCH_FLAGS.join(" ")
+PROFILE_OPT = RELEASE_MODE ? "-O3" : "-O0"
+DEBUG_FLAGS = DEBUG_ENABLED ? ["-g"] : ["-DNDEBUG"]
 CLANG_FLAGS = if ENV["CLANG_FLAGS"]
                 ENV["CLANG_FLAGS"].split
               elsif LINUX
                 # No -fveclib here: libmvec coverage varies by glibc version and
                 # arch; an unresolved _ZGV* symbol would break the link.
-                ["-O3", "-DNDEBUG", *MARCH_FLAGS, LTO_FLAG, "-lm"]
+                [PROFILE_OPT, *DEBUG_FLAGS, *MARCH_FLAGS, LTO_FLAG, "-lm"]
               else
                 # -fveclib lets LLVM's loop vectorizer replace scalar libm calls
                 # (sin/cos/exp/…) in vectorizable loops — e.g. the fused
                 # elementwise loops the compiler emits — with libsystem_m's NEON
                 # SIMD variants (_simd_sin_d2 & co., 2 lanes per call).
-                ["-O3", "-DNDEBUG", *MARCH_FLAGS, LTO_FLAG, "-fveclib=Darwin_libsystem_m", "-Wl,-dead_strip"]
+                [PROFILE_OPT, *DEBUG_FLAGS, *MARCH_FLAGS, LTO_FLAG, "-fveclib=Darwin_libsystem_m", "-Wl,-dead_strip"]
               end
 
 # Helper: find a header in standard paths
@@ -326,9 +358,12 @@ parser = OptionParser.new do |opts|
 
   opts.separator ""
   opts.separator "Build flags:"
-  opts.separator "    --release        Release profile; portable CPU target by default"
-  opts.separator "    --native         Tune for the build host"
-  opts.separator "    --portable       Target the portable x86-64-v2 / armv8-a baseline"
+  opts.separator "    --release        -O3, full LTO, safety checks/metadata off"
+  opts.separator "    --debug          Include symbols, safety checks, and runtime metadata"
+  opts.separator "    --no-debug       Omit debug symbols and development checks"
+  opts.separator "    --cpu CPU        Target CPU (v1/v2/v3/v4/native aliases accepted)"
+  opts.separator "    --native         Shorthand for --cpu native"
+  opts.separator "    --target TRIPLE  Generate code for a different target triple"
   opts.separator "    --fast           Enable fast, non-IEEE floating-point"
 
   opts.on "-v", "Print version, enable verbose mode" do

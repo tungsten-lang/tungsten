@@ -18,13 +18,13 @@ For the language/runtime-wide bignum matrix, use the public CLI:
 
 ```sh
 bin/tungsten bench bignum --quick
-bin/tungsten bench bignum --all-languages --quick --no-capacity
-bin/tungsten bench bignum --all-languages --accurate --json --no-capacity
+bin/tungsten bench bignum --all --quick --no-capacity
+bin/tungsten bench bignum --all --accurate --json --no-capacity
 ```
 
 The default lanes are Tungsten and GMP. `--python`, `--rust`, and `--odin`
 enable CPython `int`, Rust `num-bigint` 0.5.1, and Odin `core:math/big`;
-`--all-languages` enables all three. Rust and Odin harnesses are persistent
+`--all` enables all three. Rust and Odin harnesses are persistent
 sources in `rust/` and `odin/`, built with release optimization and the native
 CPU target only when selected. Dependencies and compiler versions are recorded
 in JSON metadata.

@@ -14,14 +14,46 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 . "$ROOT/bin/commands/bootstrap_helpers.sh"
+. "$ROOT/bin/commands/config.sh"
+tungsten_load_build_config
 
 FORCE=0
-for arg in "$@"; do
-  case "$arg" in
+RELEASE=0
+PORTABLE=0
+DEBUG_REQUESTED=0
+NO_DEBUG_REQUESTED=0
+CPU_ARG=""
+TARGET_TRIPLE=""
+TARGET_SYSROOT=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
     --force|-f) FORCE=1 ;;
+    --release) RELEASE=1 ;;
+    --debug) DEBUG_REQUESTED=1 ;;
+    --no-debug) NO_DEBUG_REQUESTED=1 ;;
+    --native) CPU_ARG=native ;;
+    --cpu)
+      shift
+      [ "$#" -gt 0 ] || { printf 'error: --cpu requires a value\n' >&2; exit 1; }
+      CPU_ARG="$1"
+      ;;
+    --cpu=*) CPU_ARG="${1#--cpu=}" ;;
+    --target)
+      shift
+      [ "$#" -gt 0 ] || { printf 'error: --target requires a value\n' >&2; exit 1; }
+      TARGET_TRIPLE="$1"
+      ;;
+    --target=*) TARGET_TRIPLE="${1#--target=}" ;;
+    --sysroot)
+      shift
+      [ "$#" -gt 0 ] || { printf 'error: --sysroot requires a value\n' >&2; exit 1; }
+      TARGET_SYSROOT="$1"
+      ;;
+    --sysroot=*) TARGET_SYSROOT="${1#--sysroot=}" ;;
+    --portable) PORTABLE=1 ;;
     -h|--help)
       cat <<'EOF'
-Usage: tungsten bootstrap [--force]
+Usage: tungsten bootstrap [options]
 
   Build a stage-1 compiler without Ruby (C VM host path).
 
@@ -33,11 +65,87 @@ Usage: tungsten bootstrap [--force]
 
   Full self-host (stage1 + stage2 identity, bits) remains:
     bin/tungsten build
+
+Options:
+  --force          Ignore cached bootstrap artifacts
+  --release        -O3, full LTO, no dev checks, reduced metadata
+  --debug          Include symbols, safety checks, and runtime metadata
+  --no-debug       Omit debug symbols and development checks
+  --cpu CPU        Target CPU (v1/v2/v3/v4/native aliases accepted)
+  --native         Shorthand for --cpu native
+  --target TRIPLE  Build an artifact for another target
+  --portable       Build x86-64-v2 and x86-64-v3 release artifacts
 EOF
       exit 0
       ;;
+    *) printf 'error: unknown bootstrap option: %s\n' "$1" >&2; exit 1 ;;
   esac
+  shift
 done
+
+if [ "$DEBUG_REQUESTED" -eq 1 ] && [ "$NO_DEBUG_REQUESTED" -eq 1 ]; then
+  printf 'error: --debug and --no-debug are mutually exclusive\n' >&2
+  exit 1
+fi
+if [ "$PORTABLE" -eq 1 ] && [ -n "$CPU_ARG" ]; then
+  printf 'error: --portable selects x86-64-v2/v3 and cannot be combined with --cpu/--native\n' >&2
+  exit 1
+fi
+if [ -n "$TARGET_TRIPLE" ] && [ "$CPU_ARG" = native ]; then
+  printf 'error: --target cannot be combined with --native; name a target CPU with --cpu\n' >&2
+  exit 1
+fi
+if [ -n "$TARGET_SYSROOT" ] && [ -z "$TARGET_TRIPLE" ]; then
+  printf 'error: --sysroot requires --target\n' >&2
+  exit 1
+fi
+if [ "$RELEASE" -eq 1 ] || [ "$PORTABLE" -eq 1 ]; then
+  DEBUG_ENABLED=0
+else
+  DEBUG_ENABLED=1
+fi
+if [ "$DEBUG_REQUESTED" -eq 1 ]; then DEBUG_ENABLED=1; fi
+if [ "$NO_DEBUG_REQUESTED" -eq 1 ]; then DEBUG_ENABLED=0; fi
+
+normalize_cpu() {
+  case "$1" in
+    v1) printf 'x86-64-v1' ;;
+    v2) printf 'x86-64-v2' ;;
+    v3) printf 'x86-64-v3' ;;
+    v4) printf 'x86-64-v4' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+if [ -n "$TARGET_TRIPLE" ]; then
+  HOST_CPU="$(normalize_cpu "${TUNGSTEN_CPU:-native}")"
+else
+  HOST_CPU="$(normalize_cpu "${CPU_ARG:-${TUNGSTEN_CPU:-native}}")"
+fi
+case "$HOST_CPU" in
+  ''|*[!A-Za-z0-9_.+-]*) printf 'error: invalid CPU name: %s\n' "$HOST_CPU" >&2; exit 1 ;;
+esac
+HOST_CPU_FLAGS=()
+case "$HOST_CPU" in
+  x86-64-v1|x86-64-v2|x86-64-v3|x86-64-v4)
+    HOST_CPU_FLAGS=("-march=$HOST_CPU" -mtune=generic)
+    ;;
+  native)
+    case "$(uname -m)" in
+      x86_64|amd64) HOST_CPU_FLAGS=(-march=native -mtune=native) ;;
+      *) HOST_CPU_FLAGS=(-mcpu=native) ;;
+    esac
+    ;;
+  *) HOST_CPU_FLAGS=("-mcpu=$HOST_CPU") ;;
+esac
+export TUNGSTEN_MARCH_ARGS="${HOST_CPU_FLAGS[*]}"
+STAGE_FLAGS=(--cpu "$HOST_CPU")
+if [ "$RELEASE" -eq 1 ]; then STAGE_FLAGS+=(--release); fi
+if [ "$DEBUG_ENABLED" -eq 1 ]; then
+  STAGE_FLAGS+=(--debug)
+else
+  STAGE_FLAGS+=(--no-debug)
+fi
 
 color=0
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then color=1; fi
@@ -124,13 +232,9 @@ fi
 
 # ── 2. Stage 0: C VM ────────────────────────────────────────────
 step "Stage 0: C VM (implementations/c)"
-# Explicit CFLAGS: -O2 + native, no -g (stage0 is throwaway; -g costs i-cache).
-CVM_CFLAGS="-O2 -DNDEBUG -std=c11"
-if [ "$(uname -s)" = Darwin ]; then
-  CVM_CFLAGS="$CVM_CFLAGS -march=native -mtune=native"
-else
-  CVM_CFLAGS="$CVM_CFLAGS -mtune=generic"
-fi
+# Stage 0 is a host tool, but it must use the same configured CPU as the
+# runtime/compiler products so cache identities and local tuning agree.
+CVM_CFLAGS="-O2 -DNDEBUG -std=c11 ${HOST_CPU_FLAGS[*]}"
 CVM_INPUTS=()
 while IFS= read -r path; do CVM_INPUTS+=("$path"); done < <(
   find "$C_INTERP_DIR/src" "$C_INTERP_DIR/include" -type f \
@@ -254,9 +358,11 @@ RUNTIME_SRCS=(
 # shellcheck disable=SC2206
 for m in $METAL_SRCS; do RUNTIME_SRCS+=("$m"); done
 
-cflags=(-O2 -DNDEBUG -pthread $zstd_cflags)
+if [ "$RELEASE" -eq 1 ]; then PROFILE_OPT=-O3; else PROFILE_OPT=-O0; fi
+if [ "$DEBUG_ENABLED" -eq 1 ]; then DEBUG_CFLAG=-g; else DEBUG_CFLAG=-DNDEBUG; fi
+cflags=("$PROFILE_OPT" "$DEBUG_CFLAG" -pthread "${HOST_CPU_FLAGS[@]}" $zstd_cflags)
 if [ "$UNAME_S" = Linux ]; then cflags+=(-D_DEFAULT_SOURCE); fi
-runtime_objc_flags=(-O2 -DNDEBUG -c -x objective-c)
+runtime_objc_flags=("$PROFILE_OPT" "$DEBUG_CFLAG" "${HOST_CPU_FLAGS[@]}" -c -x objective-c)
 
 RUNTIME_INPUTS=()
 for src in "${RUNTIME_SRCS[@]}"; do RUNTIME_INPUTS+=("$RUNTIME_DIR/$src"); done
@@ -334,9 +440,11 @@ fi
 # Skip entirely when the installed compiler is already newer than its inputs.
 step "Stage 1: C VM compiles compiler/tungsten.w"
 export TUNGSTEN_ROOT="$ROOT"
-# -O0 for the stage-1 *product* link: stage1 is only used to drive stage2 /
-# bootstrap install; -O1/-O2 cost ~3s wall for no bootstrap payoff.
-export TUNGSTEN_CLANG_OPT="${TUNGSTEN_CLANG_OPT:--O0}"
+# The public profile controls the product; release is -O3, otherwise bootstrap
+# stays quick at -O0. --debug layers symbols onto either profile.
+bootstrap_product_opt="$PROFILE_OPT"
+if [ "$DEBUG_ENABLED" -eq 1 ]; then bootstrap_product_opt="$bootstrap_product_opt -g"; fi
+export TUNGSTEN_CLANG_OPT="${TUNGSTEN_CLANG_OPT:-$bootstrap_product_opt}"
 # C-native Loader#load_program_ast (parse_ast.c). ~2–3× faster stage1 under
 # the C VM. Off for `tungsten build` so stage1/stage2 keep identical ASTs.
 export TUNGSTEN_C_FAST_PARSE="${TUNGSTEN_C_FAST_PARSE:-1}"
@@ -350,7 +458,7 @@ export TUNGSTEN_LEX64_TABLE="${TUNGSTEN_LEX64_TABLE:-$ROOT/languages/tungsten/tu
 
 stage1_identity="$({
   printf '%s\n' \
-    "bootstrap-stage-content-v2" \
+    "bootstrap-stage-content-v3" \
     "$TUNGSTEN_CLANG_OPT" "$TUNGSTEN_C_FAST_PARSE" \
     "$TUNGSTEN_ZSTD_CFLAGS" "$TUNGSTEN_ZSTD_LDFLAGS" \
     "${TUNGSTEN_ONIG_CFLAGS:-}" "${TUNGSTEN_ONIG_LDFLAGS:-}" \
@@ -383,12 +491,26 @@ else
   stage1_log="/tmp/tungsten-bootstrap-stage1.log"
   stage1_tmp="$CACHE/.bootstrap-stage1-$stage1_identity.$$"
   rm -f "$stage1_tmp" "$stage1_tmp.ll" "$stage1_tmp.sidemap"
-  # tungsten-c <compiler.w> compile <compiler.w> --out … --runtime … --no-lto
-  if ! TUNGSTEN_LL_PATH="$stage1_tmp.ll" \
-    "$C_INTERP" "$COMPILER_W" compile "$COMPILER_W" \
-      --out "$stage1_tmp" --release --native \
-      --runtime "$RUNTIME_A" --no-lto \
-      >"$stage1_log" 2>&1; then
+  # Development bootstrap keeps the fast cached-runtime/no-LTO path. A
+  # release bootstrap recompiles runtime sources into the full-LTO product.
+  stage1_ok=0
+  if [ "$RELEASE" -eq 1 ]; then
+    if TUNGSTEN_LL_PATH="$stage1_tmp.ll" \
+      "$C_INTERP" "$COMPILER_W" compile "$COMPILER_W" \
+        --out "$stage1_tmp" "${STAGE_FLAGS[@]}" \
+        >"$stage1_log" 2>&1; then
+      stage1_ok=1
+    fi
+  else
+    if TUNGSTEN_LL_PATH="$stage1_tmp.ll" \
+      "$C_INTERP" "$COMPILER_W" compile "$COMPILER_W" \
+        --out "$stage1_tmp" "${STAGE_FLAGS[@]}" \
+        --runtime "$RUNTIME_A" --no-lto \
+        >"$stage1_log" 2>&1; then
+      stage1_ok=1
+    fi
+  fi
+  if [ "$stage1_ok" -ne 1 ]; then
     cat "$stage1_log" >&2
     die "stage 1 (C VM) failed — see $stage1_log"
   fi
@@ -451,6 +573,61 @@ else
     rm -f "$COMPILER_BIN.sidemap"
   fi
   ok "installed" "$COMPILER_BIN"
+fi
+
+# Release artifacts are emitted by the runnable host compiler after bootstrap;
+# a cross-target compiler is never executed as the next bootstrap stage.
+artifact_target="$TARGET_TRIPLE"
+artifact_cpus=()
+artifact_release="$RELEASE"
+if [ "$PORTABLE" -eq 1 ]; then
+  artifact_release=1
+  if [ -z "$artifact_target" ]; then
+    case "$UNAME_S" in
+      Darwin) artifact_target=x86_64-apple-macos ;;
+      *) artifact_target=x86_64-unknown-linux-gnu ;;
+    esac
+  fi
+  case "$artifact_target" in
+    x86_64-*|x86_64_*) ;;
+    *) die "--portable is the x86-64 release set; target must be an x86_64 triple" ;;
+  esac
+  artifact_cpus=(x86-64-v2 x86-64-v3)
+elif [ -n "$artifact_target" ]; then
+  if [ -n "$CPU_ARG" ]; then
+    artifact_cpus=("$(normalize_cpu "$CPU_ARG")")
+  else
+    artifact_cpus=("")
+  fi
+fi
+
+if [ "${#artifact_cpus[@]}" -gt 0 ]; then
+  step "Release artifacts"
+  for artifact_cpu in "${artifact_cpus[@]}"; do
+    cpu_label="${artifact_cpu:-default}"
+    target_label="$(printf '%s' "$artifact_target" | tr -c 'A-Za-z0-9_.+-' '_')"
+    artifact_dir="$ROOT/build/releases/$target_label/$cpu_label"
+    artifact_bin="$artifact_dir/tungsten-compiler"
+    mkdir -p "$artifact_dir"
+    artifact_flags=(--target "$artifact_target")
+    if [ -n "$artifact_cpu" ]; then artifact_flags+=(--cpu "$artifact_cpu"); fi
+    if [ -n "$TARGET_SYSROOT" ]; then artifact_flags+=(--sysroot "$TARGET_SYSROOT"); fi
+    if [ "$artifact_release" -eq 1 ]; then artifact_flags+=(--release); fi
+    if [ "$artifact_release" -eq 1 ]; then artifact_opt=-O3; else artifact_opt=-O0; fi
+    if [ "$DEBUG_ENABLED" -eq 1 ]; then
+      artifact_flags+=(--debug)
+      artifact_opt="$artifact_opt -g"
+    else
+      artifact_flags+=(--no-debug)
+    fi
+    TUNGSTEN_MARCH_ARGS="" TUNGSTEN_CLANG_OPT="$artifact_opt" \
+      "$COMPILER_BIN" compile "$COMPILER_W" --out "$artifact_bin" \
+      "${artifact_flags[@]}" || die "failed to build $artifact_target/$cpu_label"
+    case "$artifact_target" in
+      *apple*) codesign --force -s - "$artifact_bin" >/dev/null 2>&1 || die "failed to ad-hoc sign $artifact_target/$cpu_label" ;;
+    esac
+    ok "built" "${artifact_bin#$ROOT/}"
+  done
 fi
 
 # ── 6. Tungsten CLI (Argon) ─────────────────────────────────────

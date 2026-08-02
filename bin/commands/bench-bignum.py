@@ -850,7 +850,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="also time Odin core:math/big (optimized native build)",
     )
     parser.add_argument(
-        "--all-languages",
+        "--all",
         action="store_true",
         help="enable the Python, Rust, and Odin lanes",
     )
@@ -914,7 +914,7 @@ EXTERNAL_BINARIES = {"rust": RUST_BINARY, "odin": ODIN_BINARY}
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    if args.all_languages:
+    if args.all:
         args.python = True
         args.rust = True
         args.odin = True

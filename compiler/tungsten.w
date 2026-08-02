@@ -34,9 +34,12 @@ if args.size() == 0
   << "  --intern ALGO    Static slab encoding (raw or zstd)"
   << "  --no-lto         Disable link-time optimization"
   << "  --frame-pointers Keep frame pointers (for profiling/debugging)"
-  << "  --release        Release profile; portable CPU target by default"
-  << "  --native         Tune for the build host"
-  << "  --portable       Target the portable x86-64-v2 / armv8-a baseline"
+  << "  --release        -O3, full LTO, no dev checks, reduced metadata"
+  << "  --debug          Include symbols, safety checks, and runtime metadata"
+  << "  --no-debug       Omit debug symbols and development checks"
+  << "  --cpu CPU        Target CPU (v1/v2/v3/v4/native aliases accepted)"
+  << "  --native         Shorthand for --cpu native"
+  << "  --target TRIPLE  Generate code for a different target triple"
   << "  --fast, -fast    Fast FP: FMA + reassociation + reciprocals + nnan/ninf"
   << "  --strict-math    Strict IEEE 754: no FMA, no contraction"
   << "  --ll             Write LLVM IR (.ll) next to the binary"
@@ -75,8 +78,12 @@ g_ast_stats_meta = {same_arena_real: 0, cross_arena: 0, child_inline: 0, negativ
 g_ast_stats_same_kind = {}
 release_mode    = false
 native_mode     = false
-portable_mode   = false
+cpu_name        = nil
+cpu_explicit    = false
 cpu_target_mode = "native"
+debug_requested = false
+no_debug_requested = false
+debug_enabled   = false
 dev_mode        = false
 fast_mode       = false
 math_mode       = :precise
@@ -114,9 +121,12 @@ while i < args.size()
     << "  --no-lto         Disable link-time optimization"
     << "  --lto            Whole-program LTO (leaner binary; default links a fast native runtime archive)"
     << "  --frame-pointers Keep frame pointers (for profiling/debugging)"
-    << "  --release        Release profile; portable CPU target by default"
-    << "  --native         Tune for the build host"
-    << "  --portable       Target the portable x86-64-v2 / armv8-a baseline"
+    << "  --release        -O3, full LTO, no dev checks, reduced metadata"
+    << "  --debug          Include symbols, safety checks, and runtime metadata"
+    << "  --no-debug       Omit debug symbols and development checks"
+    << "  --cpu CPU        Target CPU (v1/v2/v3/v4/native aliases accepted)"
+    << "  --native         Shorthand for --cpu native"
+    << "  --target TRIPLE  Generate code for a different target triple"
     << "  --dev            Fast edit-test builds: clang -O0 (~2.8x faster link; binary ~2x slower)"
     << "  --fast, -fast    Fast FP: FMA + reassociation + reciprocals + nnan/ninf"
     << "  --strict-math    Strict IEEE 754: no FMA, no contraction"
@@ -148,10 +158,24 @@ while i < args.size()
     frame_pointers = true
   elsif arg == "--release"
     release_mode = true
+  elsif arg == "--debug"
+    debug_requested = true
+  elsif arg == "--no-debug"
+    no_debug_requested = true
+  elsif arg == "--cpu"
+    i += 1
+    cpu_name = args[i]
+    cpu_explicit = true
+  elsif arg.starts_with?("--cpu=")
+    cpu_name = arg.slice(6, arg.size() - 6)
+    cpu_explicit = true
   elsif arg == "--native"
     native_mode = true
+    cpu_name = "native"
+    cpu_explicit = true
   elsif arg == "--portable"
-    portable_mode = true
+    ccall("w_eputs", "--portable builds the release matrix; use `tungsten build --portable` or select one binary with --cpu")
+    exit 1
   elsif arg == "--dev"
     dev_mode = true
   elsif arg == "--fast" || arg == "-fast"
@@ -171,9 +195,15 @@ while i < args.size()
     cross_target = args[i]
     if env("TUNGSTEN_TARGET") == nil
       ccall("w_setenv", "TUNGSTEN_TARGET", cross_target)
+  elsif arg.starts_with?("--target=")
+    cross_target = arg.slice(9, arg.size() - 9)
+    if env("TUNGSTEN_TARGET") == nil
+      ccall("w_setenv", "TUNGSTEN_TARGET", cross_target)
   elsif arg == "--sysroot"
     i += 1
     cross_sysroot = args[i]
+  elsif arg.starts_with?("--sysroot=")
+    cross_sysroot = arg.slice(10, arg.size() - 10)
   elsif arg == "--ll"
     keep_ll = true
   elsif arg == "--emit-ll"
@@ -239,34 +269,63 @@ while i < args.size()
     script_args.push(arg)
   i += 1
 
-# Resolve the target after parsing every flag so command-line order cannot
-# affect it. An explicit target wins over the release profile's portable
-# fallback and over an ambient TUNGSTEN_MARCH_ARGS. With no explicit target,
-# retain the environment override used by release CI tier builds.
-if native_mode && portable_mode
-  ccall("w_eputs", "--native and --portable are mutually exclusive")
+# Resolve profile and target after parsing every flag so order cannot affect
+# them. Release defaults to no-debug; an explicit --debug keeps safety checks,
+# source-location metadata, and debug symbols while retaining -O3/full-LTO.
+if debug_requested && no_debug_requested
+  ccall("w_eputs", "--debug and --no-debug are mutually exclusive")
+  exit 1
+debug_enabled = debug_requested || (!no_debug_requested && !release_mode)
+if native_mode && cpu_name != "native"
+  ccall("w_eputs", "--native conflicts with --cpu " + cpu_name)
+  exit 1
+if cross_target != "" && !cpu_name_safe?(cross_target)
+  ccall("w_eputs", "invalid --target value: " + cross_target)
+  exit 1
+if cross_sysroot != "" && cross_target == ""
+  ccall("w_eputs", "--sysroot requires --target")
   exit 1
 
 configured_march = env("TUNGSTEN_MARCH_ARGS")
-if native_mode
-  cpu_target_mode = "native"
-  # An unset march already means native. Avoid ccall in that case so stage-0
-  # hosts that cannot implement setenv can still honor --native.
-  if configured_march != nil && configured_march != "" && configured_march != native_march_flags()
-    ccall("w_setenv", "TUNGSTEN_MARCH_ARGS", native_march_flags())
-elsif portable_mode
-  cpu_target_mode = "portable"
-  if configured_march != portable_march_flags()
-    ccall("w_setenv", "TUNGSTEN_MARCH_ARGS", portable_march_flags())
-elsif release_mode && (configured_march == nil || configured_march == "")
-  cpu_target_mode = "portable"
-  ccall("w_setenv", "TUNGSTEN_MARCH_ARGS", portable_march_flags())
-elsif configured_march == native_march_flags()
-  cpu_target_mode = "native"
-elsif configured_march == portable_march_flags()
-  cpu_target_mode = "portable"
+if cpu_explicit
+  cpu_name = normalize_cpu_name(cpu_name)
+  if !cpu_name_safe?(cpu_name)
+    ccall("w_eputs", "invalid --cpu value: " + cpu_name)
+    exit 1
+  cpu_target_mode = cpu_name
+  resolved_cpu_flags = cpu_flags(cpu_name)
+  if configured_march != resolved_cpu_flags
+    ccall("w_setenv", "TUNGSTEN_MARCH_ARGS", resolved_cpu_flags)
+  configured_march = resolved_cpu_flags
+elsif cross_target != ""
+  # A cross target with no explicit CPU uses clang's baseline for that target;
+  # never leak the local apple-m5/native configuration into it.
+  cpu_target_mode = "target-default"
+  configured_march = ""
+  ccall("w_setenv", "TUNGSTEN_MARCH_ARGS", "")
 elsif configured_march != nil && configured_march != ""
   cpu_target_mode = "custom"
+else
+  cpu_name = env("TUNGSTEN_CPU")
+  if cpu_name == nil || cpu_name == ""
+    cpu_name = "native"
+  cpu_name = normalize_cpu_name(cpu_name)
+  if !cpu_name_safe?(cpu_name)
+    ccall("w_eputs", "invalid configured CPU: " + cpu_name)
+    exit 1
+  cpu_target_mode = cpu_name
+  resolved_cpu_flags = cpu_flags(cpu_name)
+  if configured_march != resolved_cpu_flags
+    ccall("w_setenv", "TUNGSTEN_MARCH_ARGS", resolved_cpu_flags)
+  configured_march = resolved_cpu_flags
+
+# Apple cross-architecture builds share the installed macOS SDK. Clang does not
+# infer that sysroot when an explicit --target is supplied, so make portable
+# arm64→x86_64 builds work without forcing users to paste xcrun output.
+if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != nil || cross_target.index("darwin") != nil)
+  detected_sysroot = capture("xcrun --sdk macosx --show-sdk-path 2>/dev/null").strip()
+  if detected_sysroot != ""
+    cross_sysroot = detected_sysroot
 
 -> phase_elapsed(started_at)
   clock - started_at
@@ -284,6 +343,11 @@ elsif configured_march != nil && configured_march != ""
 
 -> ll_needs_zstd_path(ll_path)
   ll_needs_zstd_text(read_file(ll_path))
+
+-> zstd_runtime_source
+  if cross_target != "" && env("TUNGSTEN_CROSS_ZSTD_LDFLAGS") == nil
+    return "slab_zstd_stub.c"
+  "slab_zstd.c"
 
 # Does the emitted module reference any Apple GPU/graphics/HID bridge symbol?
 # Only then are metal.m/graphics.m/hid_bridge.m (and, via their ObjC
@@ -336,6 +400,9 @@ elsif configured_march != nil && configured_march != ""
 # when the compiler is invoked outside bin/tungsten build.
 
 -> zstd_cflags
+  if cross_target != ""
+    cross_flags = env("TUNGSTEN_CROSS_ZSTD_CFLAGS")
+    return cross_flags == nil ? "" : cross_flags
   cached = env("TUNGSTEN_ZSTD_CFLAGS")
   if cached != nil
     return cached
@@ -347,6 +414,9 @@ elsif configured_march != nil && configured_march != ""
   ""
 
 -> zstd_ldflags
+  if cross_target != ""
+    cross_flags = env("TUNGSTEN_CROSS_ZSTD_LDFLAGS")
+    return cross_flags == nil ? "" : cross_flags
   cached = env("TUNGSTEN_ZSTD_LDFLAGS")
   if cached != nil
     return cached
@@ -358,6 +428,9 @@ elsif configured_march != nil && configured_march != ""
   "-lzstd"
 
 -> onig_cflags
+  if cross_target != ""
+    cross_flags = env("TUNGSTEN_CROSS_ONIG_CFLAGS")
+    return cross_flags == nil ? "" : cross_flags
   cached = env("TUNGSTEN_ONIG_CFLAGS")
   if cached != nil
     return cached
@@ -369,6 +442,9 @@ elsif configured_march != nil && configured_march != ""
   ""
 
 -> onig_ldflags
+  if cross_target != ""
+    cross_flags = env("TUNGSTEN_CROSS_ONIG_LDFLAGS")
+    return cross_flags == nil ? "" : cross_flags
   cached = env("TUNGSTEN_ONIG_LDFLAGS")
   if cached != nil
     return cached
@@ -580,7 +656,8 @@ elsif configured_march != nil && configured_march != ""
     << ""
     << fmt_elapsed(t_load) + " load+parse"
 
-  ir = compile(ast, file_path, verbose, frame_pointers, sidemap_path, release_mode, fast_mode, build_defines, math_mode, no_static_slab)
+  strip_runtime_metadata = release_mode && !debug_enabled
+  ir = compile(ast, file_path, verbose, frame_pointers, sidemap_path, strip_runtime_metadata, fast_mode, build_defines, math_mode, no_static_slab)
   if intern_algo == "zstd"
     ir = rewrite_ir_static_slab_zstd(ir)
 
@@ -703,26 +780,77 @@ elsif configured_march != nil && configured_march != ""
     return root + "/runtime/"
   ccall("w_runtime_dir")
 
-# The portable ISA baseline for a distributed binary, so a release artifact never
-# hits an illegal instruction on a CPU older than the build machine: x86-64-v2 on
-# x86, armv8-a on arm, both with generic tuning.
--> portable_march_flags
-  if detect_target()[:arch] == "x86_64"
-    return "-march=x86-64-v2 -mtune=generic"
-  "-march=armv8-a -mtune=generic"
+# CPU names accepted by --cpu are passed to clang command strings, so keep the
+# allowed alphabet deliberately small. LLVM target names such as apple-m5,
+# neoverse-v2, znver5, and x86-64-v3 all fit this set.
+-> cpu_name_safe?(name)
+  if name == nil || name == ""
+    return false
+  chars = name.chars()
+  i = 0
+  while i < chars.size()
+    ch = chars[i]
+    alpha = (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z")
+    digit = ch >= "0" && ch <= "9"
+    if !alpha && !digit && ch != "-" && ch != "_" && ch != "." && ch != "+"
+      return false
+    i += 1
+  true
 
--> native_march_flags
-  "-march=native -mtune=native"
+-> normalize_cpu_name(name)
+  normalized = name.downcase()
+  if normalized == "v1"
+    return "x86-64-v1"
+  if normalized == "v2"
+    return "x86-64-v2"
+  if normalized == "v3"
+    return "x86-64-v3"
+  if normalized == "v4"
+    return "x86-64-v4"
+  normalized
 
-# march/tune flags for the C compiler. Target resolution sets
+-> cpu_flags(name)
+  normalized = normalize_cpu_name(name)
+  if normalized in ("x86-64-v1" "x86-64-v2" "x86-64-v3" "x86-64-v4")
+    return "-march=" + normalized + " -mtune=generic"
+  if normalized == "native" && detect_target()[:arch] == "x86_64"
+    return "-march=native -mtune=native"
+  "-mcpu=" + normalized
+
+# CPU/tuning flags for the C compiler. Target resolution sets
 # TUNGSTEN_MARCH_ARGS so link, runtime compile, and the target-features probe
-# (target.w) all agree. Default: host-tuned native. march
+# (target.w) all agree. Default: host-tuned native (`-mcpu=native` on Arm).
 # is a post-.ll clang flag, so this never affects the stage1==stage2 identity.
 -> march_flags
   m = env("TUNGSTEN_MARCH_ARGS")
   if m != nil && m != ""
     return m
-  native_march_flags()
+  ""
+
+-> profile_opt_flag
+  if release_mode
+    return "-O3"
+  "-O0"
+
+-> debug_compile_flag
+  if debug_enabled
+    return "-g"
+  "-DNDEBUG"
+
+-> cross_compile_flags
+  flags = ""
+  if cross_target != ""
+    flags = flags + "--target=" + cross_target + " "
+  if cross_sysroot != ""
+    flags = flags + "--sysroot=" + dev_runtime_shell_quote(cross_sysroot) + " "
+  flags
+
+-> http2_ldflags
+  if cross_target != ""
+    flags = env("TUNGSTEN_CROSS_HTTP2_LDFLAGS")
+    return flags == nil ? "" : flags
+  flags = env("TUNGSTEN_HTTP2_LDFLAGS")
+  flags == nil ? "" : flags
 
 -> link_binary(ll_path, out_path, runtime_objs, verbose = false)
   ll_probe_text = read_file(ll_path)
@@ -761,7 +889,7 @@ elsif configured_march != nil && configured_march != ""
     # -O0 skips the expensive passes), full build 2.8x faster, produced
     # binary ~2.2x slower — the right trade for edit-test loops. The
     # runtime archive it links against is still the cached -O3 build.
-    clang_opt = dev_mode ? "-O0" : "-O3"
+    clang_opt = (dev_mode || !release_mode) ? "-O0" : "-O3"
 
   # Parallel codegen — OPT-IN via TUNGSTEN_PARALLEL_CODEGEN=1. -O3 on one
   # big module is single-threaded and ~90% of a large build's wall; with
@@ -784,16 +912,18 @@ elsif configured_march != nil && configured_march != ""
   clang_cmd << host_c_compiler()
   clang_cmd << " "
   clang_cmd << clang_opt
-  clang_cmd << " -DNDEBUG "
-  # Host -march=native (e.g. -mcpu=apple-m4) is wrong for a cross target and the
-  # target clang rejects it — the --target triple already selects the arch, so
-  # let clang use the target's default baseline. Native builds keep host tuning.
-  if cross_target == ""
+  clang_cmd << " "
+  clang_cmd << debug_compile_flag()
+  clang_cmd << " "
+  # CPU is an independent target axis. For cross builds, an explicit --cpu is
+  # applied alongside --target; without one march_flags() is intentionally empty.
+  if march_flags() != ""
     clang_cmd << march_flags()
+    clang_cmd << " "
   clang_cmd << " -fmerge-all-constants "
 
-  if !frame_pointers && doing_lto
-    clang_cmd << "-flto "
+  if doing_lto
+    clang_cmd << (release_mode ? "-flto=full " : "-flto ")
 
   if frame_pointers
     clang_cmd << "-fno-omit-frame-pointer "
@@ -805,12 +935,10 @@ elsif configured_march != nil && configured_march != ""
   # (the --jit/--hot REPL links tiny snippet dylibs that resolve against the
   # host instead of relinking the 1.4MB runtime — ~15x faster per line).
   if cross_target != ""
-    # Cross-link: drive clang at the target triple + sysroot with lld. Assumes
-    # a non-macOS (ELF) target — the -dead_strip/-stack_size ld64 flags below
-    # are macOS-only. The sysroot supplies the target's libc/crt/system libs.
-    clang_cmd << "--target=" + cross_target + " "
-    if cross_sysroot != ""
-      clang_cmd << "--sysroot=" + cross_sysroot + " "
+    clang_cmd << cross_compile_flags()
+  if cross_target != "" && detect_target()[:os] != "macos"
+    # Cross-link an ELF target through lld. The sysroot supplies its libc,
+    # crt objects, and system libraries.
     clang_cmd << "-fuse-ld=lld -Wl,--gc-sections -rdynamic "
   elsif detect_target()[:os] == "macos"
     # -fveclib: the LLVM loop vectorizer may replace scalar libm calls in
@@ -865,7 +993,8 @@ elsif configured_march != nil && configured_march != ""
 
     if needs_zstd
       clang_cmd << runtime_dir
-      clang_cmd << "slab_zstd.c "
+      clang_cmd << zstd_runtime_source()
+      clang_cmd << " "
 
   # Gated companions apply on BOTH runtime paths (sources above, or a cached
   # archive via runtime_objs). They MUST be passed as explicit sources here:
@@ -880,7 +1009,7 @@ elsif configured_march != nil && configured_march != ""
   if lexchars_needed
     clang_cmd << gated_dir
     clang_cmd << "lexchar_tables.c "
-  on macos
+  if detect_target()[:os] == "macos"
     if blas_needed
       clang_cmd << gated_dir
       clang_cmd << "blas_bridge.c "
@@ -901,7 +1030,7 @@ elsif configured_march != nil && configured_march != ""
   if wtensor_needed
     clang_cmd << gated_dir
     clang_cmd << "tensor_bridge.c "
-  on linux
+  if detect_target()[:os] == "linux"
     if blas_needed
       # Portable CBLAS (OpenBLAS). Requires libopenblas-dev (or equivalent).
       clang_cmd << gated_dir
@@ -935,6 +1064,11 @@ elsif configured_march != nil && configured_march != ""
     clang_cmd << " "
     clang_cmd << olf
 
+  h2lf = http2_ldflags
+  if h2lf != ""
+    clang_cmd << " "
+    clang_cmd << h2lf
+
   if cross_target == ""
     mif = mimalloc_link_flags()
     if mif != ""
@@ -945,7 +1079,7 @@ elsif configured_march != nil && configured_march != ""
   # cblas_sgemm/dgemm directly); everything else only when the bridges are
   # linked — "harmless" turned out to cost ~1.5ms warm and most of the
   # first-run dyld closure on every plain CLI binary.
-  on macos
+  if detect_target()[:os] == "macos"
     if bridges_needed
       clang_cmd << " -framework Metal -framework Foundation -framework AppKit -framework QuartzCore -framework CoreGraphics -framework IOKit -framework CoreFoundation"
     if blas_needed || sparse_needed
@@ -953,7 +1087,7 @@ elsif configured_march != nil && configured_march != ""
 
   # Linux: libm is a separate library (macOS bundles it into libSystem), and
   # it must follow the objects that reference it.
-  on linux
+  if detect_target()[:os] == "linux"
     clang_cmd << " -lm"
     if blas_needed
       clang_cmd << " -lopenblas"
@@ -1178,7 +1312,7 @@ elsif configured_march != nil && configured_march != ""
   ar_identity = dev_runtime_ar_identity(ar_command, runtime_kind)
   if cc_identity == nil || ar_identity == nil
     return nil
-  compile_flags = "-O3 -DNDEBUG " + march_flags()
+  compile_flags = profile_opt_flag() + " " + debug_compile_flag() + " " + march_flags()
   thresholds_path = runtime_root + "/generated/bigint_thresholds.h"
   generated_thresholds = "absent"
   if file?(thresholds_path)
@@ -1258,7 +1392,12 @@ elsif configured_march != nil && configured_march != ""
   cc << runtime_dir
   cc << " && "
   cc << host_c_compiler()
-  cc << " -O3 -DNDEBUG "
+  cc << " "
+  cc << cross_compile_flags()
+  cc << profile_opt_flag()
+  cc << " "
+  cc << debug_compile_flag()
+  cc << " "
   cc << march_flags()
   cc << " "
 
@@ -1274,8 +1413,8 @@ elsif configured_march != nil && configured_march != ""
     cc << ocf
     cc << " "
 
-  if (release_mode || explicit_lto) && !no_lto && !frame_pointers
-    cc << "-flto "
+  if (release_mode || explicit_lto) && !no_lto
+    cc << (release_mode ? "-flto=full " : "-flto ")
 
   if frame_pointers
     cc << "-fno-omit-frame-pointer "
@@ -1285,16 +1424,22 @@ elsif configured_march != nil && configured_march != ""
   cc << " ssmr_witness.c tls_stub.c aks.c "
 
   if needs_zstd
-    cc << "slab_zstd.c "
+    cc << zstd_runtime_source()
+    cc << " "
 
   # On macOS, also compile the Obj-C Metal bridge so @gpu fn dispatch
   # symbols (w_metal_*) resolve at link time, plus the graphics.m
   # windowing bridge (w_gfx_*). Linux/Windows skip this — those
   # platforms get the no-Metal stubs in runtime.c.
-  on macos
+  if detect_target()[:os] == "macos"
     cc << "&& "
     cc << host_c_compiler()
-    cc << " -O3 -DNDEBUG "
+    cc << " "
+    cc << cross_compile_flags()
+    cc << profile_opt_flag()
+    cc << " "
+    cc << debug_compile_flag()
+    cc << " "
     cc << march_flags()
     cc << " -x objective-c -c metal.m graphics.m hid_bridge.m "
 
@@ -1490,7 +1635,7 @@ elsif configured_march != nil && configured_march != ""
   # clang succeeds; requiring the marker rejects truncated objects from
   # jobs killed mid-write, which still leave a .o on disk.
   system("rm -f " + q_prefix + "*.o " + q_prefix + "*.ok")
-  flags = "-O3 -DNDEBUG " + march_flags() + " -fmerge-all-constants "
+  flags = profile_opt_flag() + " " + debug_compile_flag() + " " + march_flags() + " -fmerge-all-constants "
   on macos
     flags = flags + "-fveclib=Darwin_libsystem_m "
   cmd = StringBuffer(1024)
@@ -1599,7 +1744,7 @@ elsif configured_march != nil && configured_march != ""
   if ra != ""
     ramv = file_mtime_ns(ra)
     ram = ramv == nil ? "missing" : ramv.to_s()
-  ["irbin-v3", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), release_mode.to_s(), cpu_target_mode, march_flags(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
+  ["irbin-v4", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), release_mode.to_s(), debug_enabled.to_s(), cpu_target_mode, march_flags(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
 
 # Valid cached binary for this identity? Reads the manifest, revalidates
 # every recorded (path, mtime_ns), and on success installs the cached
@@ -1843,9 +1988,9 @@ elsif command == "compile-batch"
   args -> (a)
     if skip_next
       skip_next = false
-    elsif a in ("--out" "-o" "--intern" "-e")
+    elsif a in ("--out" "-o" "--intern" "-e" "--cpu" "--target" "--sysroot")
       skip_next = true
-    elsif a != "compile-batch" && a != "--emit-wire" && a != "--no-lto" && a != "--frame-pointers" && a != "--release" && a != "--native" && a != "--portable" && a != "--fast" && a != "-fast" && a != "--verbose" && a != "-v" && a != "--ll"
+    elsif a != "compile-batch" && a != "--emit-wire" && a != "--no-lto" && a != "--frame-pointers" && a != "--release" && a != "--native" && a != "--debug" && a != "--no-debug" && a != "--fast" && a != "-fast" && a != "--verbose" && a != "-v" && a != "--ll" && !a.starts_with?("--cpu=")
       files.push(a)
 
   if files.size() == 0

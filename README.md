@@ -152,6 +152,8 @@ For scientists, mathematicians, and anyone who thinks in code.
 ### Build & Run Flags
 
 **Prerequisites:** `git`, `clang`, `LLVM`, `make` (and `lld` + `libzstd` headers).
+LLVM/Clang 22 or newer is recommended; `doctor` reports a suitable installed
+toolchain or prints platform-specific installation instructions.
 
 Run `bin/tungsten doctor` to check your toolchain (bash; no compiler needed).
 On a fresh clone, get a stage-1 compiler with:
@@ -185,15 +187,46 @@ explicit mode:
 
 New to the language? Start at [doc/getting-started/](doc/getting-started/).
 
-**Performance flags** (for `-o` native builds):
+**Build profiles and targets** (`build`, `bootstrap`, and `-o` native builds):
 
-| Flag         | What it does                                                                                                                |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `--release`  | Release profile: omit debug checks/metadata and use whole-program optimization; defaults portable unless a target is explicit |
-| `--native`   | Tune for the build host (`-march=native -mtune=native`)                                                                  |
-| `--portable` | Target x86-64-v2 or armv8-a with generic tuning                                                                            |
-| `--fast`     | Fast floating-point, non-IEEE                                                                                              |
-| `--no-lto`   | Skip link-time optimization (faster edit-compile loop, slower runtime)                                                      |
+| Flag              | What it does |
+| ----------------- | ------------ |
+| `--release`       | Release profile: `-O3`, full LTO, no development safety checks, and reduced runtime metadata. Defaults to `--no-debug`. |
+| `--debug`         | Include debug symbols, safety checks, and full runtime/source-location metadata. Overrides the release profile's no-debug default. |
+| `--no-debug`      | Omit debug symbols and development checks. |
+| `--cpu CPU`       | Optimize for a CPU or ISA group. `v1`, `v2`, `v3`, `v4`, and `native` are shorthand for the corresponding x86-64 group/native host; LLVM names such as `apple-m5` and `neoverse-v2` are also accepted. |
+| `--native`        | Compatibility shorthand for `--cpu native`. Local builds use the configured CPU, or native when none is configured. |
+| `--target TRIPLE` | Generate code for another target triple. Combine with `--cpu` to mean “runs on this target, optimized for this CPU variant.” A cross target without `--cpu` uses clang's target baseline. |
+| `--portable`      | On `build`/`bootstrap`, emit both documented release binaries: x86-64-v2 and x86-64-v3 under `build/releases/<triple>/<cpu>/`. |
+| `--fast`          | Enable fast, non-IEEE floating-point transformations. |
+| `--no-lto`        | Skip link-time optimization for a direct compile. |
+
+CPU and optimization profile are independent. For example:
+
+```bash
+bin/tungsten build --release --cpu apple-m5
+bin/tungsten build --release --target x86_64-unknown-linux-gnu --cpu v3
+bin/tungsten build --portable
+```
+
+Tungsten's documented x86-64 release set is:
+
+| Artifact | Minimum ISA | Representative minimum CPUs |
+| -------- | ----------- | ---------------------------- |
+| `x86-64-v2` | SSE3, SSSE3, SSE4.1/4.2, POPCNT, CMPXCHG16B, LAHF/SAHF | Intel Nehalem (2008) or AMD Bulldozer (2011) and newer |
+| `x86-64-v3` | v2 plus AVX/AVX2, BMI1/2, F16C, FMA, LZCNT, MOVBE, OSXSAVE | Intel Haswell (2013) or AMD Excavator/Zen-class CPUs and newer |
+
+The ISA feature group—not the marketing name—is authoritative, especially in
+virtual machines where the hypervisor may hide features.
+
+Local defaults live in `~/.tungsten/config`, using this dependency-free
+INI/TOML-compatible subset:
+
+```toml
+[build]
+cpu = apple-m5
+cc = /opt/homebrew/opt/llvm/bin/clang
+```
 
 
 > **_On Windows?_** Tungsten targets macOS and Linux
@@ -205,7 +238,9 @@ New to the language? Start at [doc/getting-started/](doc/getting-started/).
 | --------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `TUNGSTEN_FREE`       | on                            | Compile-time free insertion for non-escaped heap values. Set `TUNGSTEN_FREE=0` to disable.                  |
 | `TUNGSTEN_CLANG_OPT`  | `-O3`                         | Optimization flags for clang. `--fast` defaults this to `-O3 -ffast-math`                                   |
-| `TUNGSTEN_MARCH_ARGS` | `-march=native -mtune=native` | Target CPU/features for codegen. Explicit `--native`/`--portable` wins; otherwise a set value is honored and bare `--release` defaults portable. |
+| `TUNGSTEN_CPU`        | `native`                      | CPU name used when `--cpu` is absent; normally loaded from `[build] cpu` in `~/.tungsten/config`. |
+| `TUNGSTEN_CC`         | `clang`                       | C/LLVM driver; normally loaded from `[build] cc` when configured. |
+| `TUNGSTEN_MARCH_ARGS` | derived from CPU              | Legacy low-level override for clang CPU flags. Prefer `--cpu` or `[build] cpu`. |
 | `TUNGSTEN_BACKTRACE`  | off                           | Set to `1` to include full C backtrace in error dumps (defaults to only Tungsten-level frames).             |
 
 ## Contributing

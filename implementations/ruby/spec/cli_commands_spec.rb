@@ -39,23 +39,23 @@ RSpec.describe "CLI commands surface" do
       out, err, status = run_cli(ruby_cli, "--help")
 
       expect(status.exitstatus).to eq(0), err
-      expect(out).to include("--release", "--native", "--portable", "--fast")
+      expect(out).to include("--release", "--debug", "--cpu", "--target", "--native", "--fast")
     end
 
     it "documents the same build axes on build help" do
       out, err, status = run_cli(ruby_cli, "build", "--help")
 
       expect(status.exitstatus).to eq(0), err
-      expect(out).to include("--release", "--native", "--portable", "--fast")
+      expect(out).to include("--release", "--debug", "--no-debug", "--cpu", "--target", "--portable", "--fast")
     end
   end
 
   describe "CPU target flags" do
-    it "rejects conflicting native and portable targets before compilation" do
-      _out, err, status = run_cli(ruby_cli, "--native", "--portable", "missing.w")
+    it "rejects conflicting native and explicit CPU targets before compilation" do
+      _out, err, status = run_cli(ruby_cli, "--native", "--cpu", "apple-m5", "missing.w")
 
       expect(status.exitstatus).to eq(1)
-      expect(err).to include("--native and --portable are mutually exclusive")
+      expect(err).to include("--native conflicts with --cpu apple-m5")
     end
   end
 
@@ -102,10 +102,11 @@ RSpec.describe "CLI commands surface" do
 
       expect(status.exitstatus).to eq(0), err
       expect(out).to include("clang")
+      expect(out).to include("configured CPU")
       expect(out).to include("lld linker")
       expect(out).to include("libzstd (zstd.h)")
       expect(out).not_to include("llc")
-      expect(out).to match(%r{\d+/7 checks passed})
+      expect(out).to match(%r{\d+/8 checks passed})
     end
   end
 

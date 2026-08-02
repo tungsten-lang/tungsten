@@ -518,8 +518,15 @@ metal_specs=(
   spec/core/schedule_unroll_spec.w
 )
 
-wassat_specs=(
+# Interpreted, solver_spec's pigeonhole/colouring families run for tens of
+# minutes on a loaded box (measured 45+ min). It still guards the solver —
+# run it with TUNGSTEN_SLOW_SPECS=1 (CI nightly / pre-release), not on the
+# default developer loop.
+wassat_slow_specs=(
   bits/tungsten-wassat/spec/solver_spec.w
+)
+
+wassat_specs=(
   bits/tungsten-wassat/spec/cli_spec.w
   bits/tungsten-wassat/spec/preprocess_spec.w
   bits/tungsten-wassat/spec/incremental_spec.w
@@ -578,6 +585,13 @@ if "$TUNGSTEN" compile bits/tungsten-wassat/bin/wassat.w --out "$wassat_bin" --n
   for spec in "${wassat_specs[@]}"; do
     run_wassat_spec "$spec" "$wassat_bin"
   done
+  if [ -n "${TUNGSTEN_SLOW_SPECS:-}" ]; then
+    for spec in "${wassat_slow_specs[@]}"; do
+      run_wassat_spec "$spec" "$wassat_bin"
+    done
+  else
+    echo "skip ${wassat_slow_specs[*]} (set TUNGSTEN_SLOW_SPECS=1 to run)"
+  fi
 else
   echo "FAIL [wassat] CLI compile failed" >&2
   fail=1

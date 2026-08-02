@@ -47,6 +47,14 @@ OPERATIONS = (
 SIZE_CAPS = {"pow": 256, "powmod": 128}
 POW_EXPONENT = 5
 POWMOD_M_SEED = 0xA4093822299F31D0
+# Above this, the harness switches to median-of-reps + interquartile spread:
+# a single op exceeds the timing window and min-of-reps measures page-fault
+# luck on multi-MB operands. FFT-band cells are not directly comparable to
+# the min-based matrix and every report must say so.
+FFT_BAND_LIMBS = 8192
+# BN_BIGINT_POOL_MAX_CAP in runtime.c — sizes above it bypass the recycler
+# entirely, so they measure a different allocation regime.
+POOL_MAX_CAP_LIMBS = 16384
 
 # str(int) / int(str) above 640 digits raise ValueError since Python 3.11
 # unless the conversion-length guard is disabled.
@@ -89,8 +97,15 @@ def parse_csv(value: str, *, integers: bool = False) -> list[Any]:
         result = [int(piece) for piece in pieces]
     except ValueError as error:
         raise argparse.ArgumentTypeError("sizes must be integers") from error
-    if any(item <= 0 or item > 16384 for item in result):
-        raise argparse.ArgumentTypeError("sizes must be in 1..16384 limbs")
+    if any(item <= 0 or item > 1_048_576 for item in result):
+        raise argparse.ArgumentTypeError("sizes must be in 1..1048576 limbs")
+    if any(item > POOL_MAX_CAP_LIMBS for item in result):
+        print(
+            f"note: sizes above {POOL_MAX_CAP_LIMBS} limbs bypass the "
+            "recycler (BN_BIGINT_POOL_MAX_CAP) — those cells measure a "
+            "different allocation regime and must be reported as such",
+            file=sys.stderr,
+        )
     return result
 
 
@@ -631,7 +646,7 @@ def sweep_operation(operation, sizes, runs, target_ms, on_row):
     for line in process.stdout:
         fields = line.rstrip("\n").split("\t")
         if (
-            len(fields) != 6
+            len(fields) != 8
             or fields[0] != "boxed"
             or fields[1] != operation
         ):
@@ -648,6 +663,13 @@ def sweep_operation(operation, sizes, runs, target_ms, on_row):
             "gmp_ns": float(fields[5]),
             "python_ns": 0.0,
         }
+        # FFT band (> 8192 limbs): the harness reports median-of-reps with
+        # the interquartile spread instead of min — not directly comparable
+        # to the min-based cells, so the band is flagged on the row.
+        if int(fields[2]) > FFT_BAND_LIMBS:
+            row["fft_band"] = True
+            row["tungsten_iqr_ns"] = float(fields[6])
+            row["gmp_iqr_ns"] = float(fields[7])
         row["tungsten_over_gmp"] = row["tungsten_ns"] / row["gmp_ns"]
         row["tungsten_over_python"] = 0.0
         row["fastest"] = fastest_label(
@@ -745,6 +767,41 @@ def print_results_summary(
         for lane in lanes[1:]
     )
     print("Overall geometric-mean ratios (lower is better): " + ratios + ".")
+    print(verdict_line(results, aggregate), flush=True)
+
+
+def verdict_line(
+    results: list[dict[str, Any]], aggregate: dict[str, Any]
+) -> str:
+    """One line that scopes its own claim: architecture, size range, op
+    count, fixture nature, and the unresolved band — so the headline can
+    never quietly outrun what was measured."""
+    limb_values = sorted({row["limbs"] for row in results})
+    ops = {row["operation"] for row in results}
+    ratios = [
+        row["tungsten_over_gmp"] for row in results
+        if row.get("tungsten_over_gmp", 0) > 0
+    ]
+    if not ratios:
+        return "verdict: no GMP cells measured"
+    wins = sum(r < 1.0 for r in ratios)
+    unresolved = sum(0.95 < r < 1.05 for r in ratios)
+    fft = sum(1 for row in results if row.get("fft_band"))
+    stats = aggregate["overall"].get("gmp", {})
+    geo = stats.get("tungsten_over_peer_geomean", 0.0)
+    scope = (
+        f"verdict: {platform.machine()} ({platform.system()}), "
+        f"{len(ops)} ops x {limb_values[0]}..{limb_values[-1]} limbs, "
+        f"one deterministic fixture per cell, mpz_* public API: "
+        f"{wins}/{len(ratios)} cells < 1.0, geomean {geo:.3f}; "
+        f"{unresolved} cells inside the +-5% unresolved band"
+    )
+    if fft:
+        scope += (
+            f"; {fft} FFT-band cells (median+IQR, > {FFT_BAND_LIMBS} limbs) "
+            "not comparable to the min-based cells"
+        )
+    return scope + "."
     if len(aggregate["operations"]) <= 1:
         return
     print()
@@ -828,7 +885,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--target-ms",
         type=float,
-        help="per-lane timing target (default: 20, or 5 quick)",
+        help="per-lane timing target ms (default: 2, 1 quick, 110 accurate)",
     )
     parser.add_argument(
         "--python",
@@ -858,10 +915,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--accurate",
         action="store_true",
         help=(
-            "longer timed regions and more reps (~8x slower). Default mode "
-            "agrees with this on ~94%% of win/lose verdicts, median 2.8%% "
-            "deviation; disagreements sit in the 1-7ns cells. Use this "
-            "before concluding anything about a cell within ~5%% of 1.0"
+            "measurement discipline for conclusions: >=110ms timed regions, "
+            "9 runs alternating lane order (a 20ms region is dominated by "
+            "warmup and invents phantom losses). Much slower than the "
+            "default mode; required before concluding anything about a cell "
+            "within ~5%% of 1.0"
         ),
     )
     parser.add_argument(
@@ -955,11 +1013,11 @@ def main() -> int:
     target_ms = args.target_ms
     if target_ms is None:
         if args.accurate:
-            target_ms = 20.0
+            target_ms = 110.0
         else:
             target_ms = 1.0 if args.quick else 2.0
     if args.accurate and args.runs == 3:
-        args.runs = 5
+        args.runs = 9
 
     if args.list:
         print("operations: " + ",".join(OPERATIONS))
@@ -1174,6 +1232,8 @@ def main() -> int:
         if results
         else {"overall": {}, "operations": []}
     )
+    if results and "gmp" in aggregate.get("overall", {}):
+        aggregate["verdict"] = verdict_line(results, aggregate)
     if args.json:
         print(
             json.dumps(

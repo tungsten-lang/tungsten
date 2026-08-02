@@ -4083,6 +4083,9 @@ int main(int argc, char **argv) {
             int iters = want > 40000000.0 ? 40000000
                       : (want < 1.0 ? 1 : (int)want);
             double tw_best = 0.0, gm_best = 0.0;
+            enum { SWEEP_KEEP = 64 };
+            double tw_s[SWEEP_KEEP], gm_s[SWEEP_KEEP];
+            int kept = runs < SWEEP_KEEP ? runs : SWEEP_KEEP;
             for (int r = 0; r < runs; r++) {
                 double tw, gm;
                 if (r & 1) {                       /* alternate lane order */
@@ -4092,11 +4095,36 @@ int main(int argc, char **argv) {
                     tw = bench_boxed_result_churn(op, limbs, iters, 1);
                     gm = bench_gmp_boxed_result_churn(op, limbs, iters);
                 }
+                if (r < SWEEP_KEEP) { tw_s[r] = tw; gm_s[r] = gm; }
                 if (r == 0 || tw < tw_best) tw_best = tw;
                 if (r == 0 || gm < gm_best) gm_best = gm;
             }
-            printf("boxed\t%s\t%d\t%d\t%.3f\t%.3f\n",
-                   argv[2], limbs, iters, tw_best, gm_best);
+            /* FFT band (> 8192 limbs): a single op exceeds the timing
+             * window, calibration yields one iteration, and min-of-reps
+             * measures page-fault luck on multi-MB operands. Report the
+             * median with the interquartile spread instead; these cells
+             * are not directly comparable to the min-based band below and
+             * every report must say so. Below the band the spread fields
+             * are 0 and the min semantics are unchanged. */
+            double tw_rep = tw_best, gm_rep = gm_best;
+            double tw_iqr = 0.0, gm_iqr = 0.0;
+            if (limbs > 8192 && kept >= 3) {
+                for (int i = 1; i < kept; i++) {   /* insertion sort, n<=64 */
+                    double tv = tw_s[i], gv = gm_s[i];
+                    int j = i;
+                    while (j > 0 && tw_s[j - 1] > tv) { tw_s[j] = tw_s[j - 1]; j--; }
+                    tw_s[j] = tv;
+                    j = i;
+                    while (j > 0 && gm_s[j - 1] > gv) { gm_s[j] = gm_s[j - 1]; j--; }
+                    gm_s[j] = gv;
+                }
+                tw_rep = tw_s[kept / 2];
+                gm_rep = gm_s[kept / 2];
+                tw_iqr = tw_s[(3 * kept) / 4] - tw_s[kept / 4];
+                gm_iqr = gm_s[(3 * kept) / 4] - gm_s[kept / 4];
+            }
+            printf("boxed\t%s\t%d\t%d\t%.3f\t%.3f\t%.3f\t%.3f\n",
+                   argv[2], limbs, iters, tw_rep, gm_rep, tw_iqr, gm_iqr);
             fflush(stdout);                        /* stream to the driver */
         }
         return 0;

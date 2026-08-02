@@ -38,9 +38,9 @@ check("fixed inline byte first", ip$bytes[0], 0x20)
 check("fixed inline byte last", ip$bytes[15], 1)
 check("fixed inline bytes remain raw", (ip$bytes[0] << 8) | ip$bytes[1], 0x2001)
 
-# BigInt stores its sign in the signed i32 `length` field. Reading it through
+# BigInt stores its sign in the signed i32 `size` field. Reading it through
 # an explicit receiver must sign-extend i32 -> i64, and the resulting raw value
 # must remain raw through arithmetic rather than being treated as a u32.
 negative_big = -1000000000000000 ## BigInt
-check("signed i32 view field sign-extends", negative_big$length, -1)
-check("signed i32 view field remains raw", negative_big$length * 10 + 3, -7)
+check("signed i32 view field sign-extends", negative_big$size, -1)
+check("signed i32 view field remains raw", negative_big$size * 10 + 3, -7)

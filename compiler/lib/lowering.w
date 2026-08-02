@@ -1832,13 +1832,18 @@ use lowering/definitions
             # per field so bare `components` resolves at dispatch time.
             # lower_class_def emits the corresponding getter body; this
             # pre-pass just ensures runtime dispatch sees the symbol.
-            vd_layout = ast_get(mnode, :count)
-            if vd_layout != nil && type(vd_layout) == "Hash" && vd_layout[:fields] != nil
-              vdf = 0
-              while vdf < vd_layout[:fields].size()
-                vfname = vd_layout[:fields][vdf][:name]
-                register_class_method(main_fn, mod, cname, vfname, 1)
-                vdf += 1
+            # BigInt is excluded in BOTH places: its view is an internal
+            # header mirror and synthesizes no public accessors (see
+            # lower_class_def), so registering the symbols here would
+            # reference getters that are never emitted.
+            if cname != "BigInt"
+              vd_layout = ast_get(mnode, :count)
+              if vd_layout != nil && type(vd_layout) == "Hash" && vd_layout[:fields] != nil
+                vdf = 0
+                while vdf < vd_layout[:fields].size()
+                  vfname = vd_layout[:fields][vdf][:name]
+                  register_class_method(main_fn, mod, cname, vfname, 1)
+                  vdf += 1
           mi2 += 1
     ci += 1
 

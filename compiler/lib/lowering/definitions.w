@@ -1342,9 +1342,17 @@
         df = 0
         while df < vd_layout[:fields].size()
           fname = vd_layout[:fields][df][:name]
-          ivar = "@" + fname
-          getter = Tungsten:AST:MethodDef.new(fname, [], [Tungsten:AST:Ivar.new(ivar)])
-          lower_class_method(ctx, class_name, getter)
+          # BigInt's view mirrors the C WBigint header purely for internal
+          # `$field` reads/writes; its raw signed limb count must not leak
+          # as a public `size` accessor (duck-typed `.size` callers would
+          # silently get limb counts). The view-layout side in
+          # collect_view_fields is untouched, so `$size` keeps working.
+          # Mirrors the interpreter suppression in
+          # register_data_field_accessors.
+          if class_name != "BigInt"
+            ivar = "@" + fname
+            getter = Tungsten:AST:MethodDef.new(fname, [], [Tungsten:AST:Ivar.new(ivar)])
+            lower_class_method(ctx, class_name, getter)
           df += 1
     elsif ast_kind(expr) == :assign && expr.target != nil && ast_kind(expr.target) == :cvar
       # Class variable initialization (@@all = []) — runs at class definition time

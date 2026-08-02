@@ -18,7 +18,7 @@ WARMUP_ITERS = 1_000_000
   # benchmark while exercising the same corrected offsets and raw loads.
   - data
     u8[3] _pad
-    i32 length
+    i32 size
     u32 capacity
     u32 _pad2
     u64[] limbs
@@ -82,11 +82,11 @@ WARMUP_ITERS = 1_000_000
   # Compiled-only direct controls. Keep them separately addressable until the
   # interpreter gains a BigInt field bridge; they must not be production ports.
   -> __w_direct_zero?
-    n = $length ## i64
+    n = $size ## i64
     n == 0
 
   -> __w_direct_even?
-    n = $length ## i64
+    n = $size ## i64
     if n == 0
       return true
     # `limbs` is a flexible inline C array. A bare field load reads limb 0;
@@ -95,18 +95,18 @@ WARMUP_ITERS = 1_000_000
     (low & 1) == 0
 
   -> __w_direct_odd?
-    n = $length ## i64
+    n = $size ## i64
     if n == 0
       return false
     low = wvalue_bits($limbs) ## i64
     (low & 1) != 0
 
   -> __w_direct_negative?
-    n = $length ## i64
+    n = $size ## i64
     n < 0
 
   -> __w_direct_positive?
-    n = $length ## i64
+    n = $size ## i64
     n > 0
 
 -> bigint_case(index)

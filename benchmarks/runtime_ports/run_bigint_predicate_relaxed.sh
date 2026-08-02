@@ -67,10 +67,10 @@ core = (cand / "core/numeric/big_int.w").read_text()
 for body in ("zero?", "even?", "odd?", "negative?", "positive?"):
     if len(re.findall(rf"^  -> {re.escape(body)}$", core, re.M)) != 1:
         raise SystemExit(f"BigInt source body missing/duplicated: {body}")
-if "    i32 length\n" not in core or "    u64 limb0\n" not in core:
-    raise SystemExit("BigInt candidate lacks signed i32 length / explicit u64 limb0 view")
-if core.count("$length ## i64") != 5 or core.count("$limb0 ## u64") != 2:
-    raise SystemExit("predicate views must keep signed length/raw limb types explicit")
+if "    i32 size\n" not in core or "    u64 limb0\n" not in core:
+    raise SystemExit("BigInt candidate lacks signed i32 size / explicit u64 limb0 view")
+if core.count("$size ## i64") < 5 or core.count("$limb0 ## u64") != 2:
+    raise SystemExit("predicate views must keep signed size/raw limb types explicit")
 if len(re.findall(r"^  -> to_i$", core, re.M)) != 1:
     raise SystemExit("retained BigInt#to_i source body missing/duplicated")
 

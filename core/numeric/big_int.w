@@ -3,10 +3,10 @@
   - data
     # BigInt has a dedicated NaN-box subtag, but WBigint retains its C header
     # byte as the live/parked recycler marker. Keep it explicit so
-    # length/capacity/limb0 land at offsets 4/8/16 respectively.
+    # size/capacity/limb0 land at offsets 4/8/16 respectively.
     u8 _type
     u8[3] _pad
-    i32 length
+    i32 size
     u32 capacity
     u32 _pad2
     # The public predicates need only the first word of the flexible `limbs[]`
@@ -16,29 +16,29 @@
     u64 limb0
 
   -> zero?
-    n = $length ## i64
+    n = $size ## i64
     n == 0
 
   -> even?
-    n = $length ## i64
+    n = $size ## i64
     if n == 0
       return true
     low = $limb0 ## u64
     (low & 1) == 0
 
   -> odd?
-    n = $length ## i64
+    n = $size ## i64
     if n == 0
       return false
     low = $limb0 ## u64
     (low & 1) != 0
 
   -> negative?
-    n = $length ## i64
+    n = $size ## i64
     n < 0
 
   -> positive?
-    n = $length ## i64
+    n = $size ## i64
     n > 0
 
   # In-place sign mutation, following the `!` convention (Array#sort!,
@@ -52,14 +52,14 @@
   # SHARE storage with its source and a bang method will be visible through
   # both. Mutate values you constructed, exactly as with Array#sort!.
   -> neg!
-    n = $length ## i64
-    $length = 0 - n
+    n = $size ## i64
+    $size = 0 - n
     self
 
   -> abs!
-    n = $length ## i64
+    n = $size ## i64
     if n < 0
-      $length = 0 - n
+      $size = 0 - n
     self
 
   # Conversion to the already-integral representation is receiver identity.

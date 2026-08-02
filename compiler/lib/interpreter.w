@@ -3001,7 +3001,7 @@ use target
     if cname == "Hash"
       return name in ("count" "capacity" "flags")
     if cname == "BigInt"
-      return name in ("length" "limb0")
+      return name in ("size" "limb0")
     if cname == "StringBuffer"
       return name == "length"
     if cname == "Mmap"
@@ -3015,7 +3015,7 @@ use target
   -> native_data_field_writable?(w_class, name)
     if w_class == nil
       return false
-    w_class[:name] == "BigInt" && name == "length"
+    w_class[:name] == "BigInt" && name == "size"
 
   -> native_data_field_declared?(w_class, name)
     w_class != nil && w_class[:data_fields] != nil && w_class[:data_fields].has_key?(name)
@@ -3814,7 +3814,13 @@ use target
       fname = f[:name]
       if fname != nil
         w_class[:data_fields][fname] = f[:type]
-        if !w_class[:methods].has_key?(fname)
+        # BigInt's view mirrors the C WBigint header purely for internal
+        # `$field` reads/writes; its raw signed limb count must not leak as
+        # a public `size` accessor (Int exposes no such method, and duck-
+        # typed `.size` callers would silently get limb counts). Layout
+        # registration above still happens, so `$size` keeps working.
+        # Mirrors the compiled suppression in lowering/definitions.w.
+        if w_class[:name] != "BigInt" && !w_class[:methods].has_key?(fname)
           accessor = {rt: :method, name: fname, params: [], body: [Tungsten:AST:Ivar.new("@" + fname)], w_class: w_class, data_field: true}
           register_instance_method(w_class, accessor)
 

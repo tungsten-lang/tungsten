@@ -29472,7 +29472,7 @@ WValue w_native_data_field(WValue recv, WValue name_v) {
         if (strcmp(name, "flags") == 0) return w_int(h->flags);
     } else if (w_is_bigint(recv)) {
         WBigint *b = w_as_bigint(recv);
-        if (strcmp(name, "length") == 0) return w_int(b->size);
+        if (strcmp(name, "size") == 0) return w_int(b->size);
         /* `limb0` is the first u64 of WBigint's flexible tail. A size-zero
          * synthetic BigInt has no semantic limb, so keep direct field reads
          * safe even though the source predicates short-circuit first. */
@@ -29500,10 +29500,10 @@ WValue w_native_data_field(WValue recv, WValue name_v) {
  * cannot dereference runtime-backed values and reaches this checked bridge. */
 WValue w_native_data_field_set(WValue recv, WValue name_v, WValue value) {
     const char *name = as_str(name_v);
-    if (w_is_bigint(recv) && strcmp(name, "length") == 0) {
+    if (w_is_bigint(recv) && strcmp(name, "size") == 0) {
         int64_t n = w_as_int(value);
         if (n < INT32_MIN || n > INT32_MAX)
-            w_raise(w_string("BigInt length is outside i32"));
+            w_raise(w_string("BigInt size is outside i32"));
         w_as_bigint(recv)->size = (int32_t)n;
         return value;
     }

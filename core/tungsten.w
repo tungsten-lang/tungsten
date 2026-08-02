@@ -66,6 +66,8 @@
   auto :DenseCholeskyFactor,"linalg"
   auto :DenseQRFactor,"linalg"
   auto :FFT,          "fft"
+  auto :Signal,       "signal"
+  auto :SignalSpectrum, "signal"
   auto :Special,      "special"
   auto :Stats,        "stats"
   auto :Tensor,       "tensor"

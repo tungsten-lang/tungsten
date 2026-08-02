@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(694 total), grouped by area, with its declaration, a one-line
+(696 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -78,6 +78,8 @@ summary from the source header, and a link to the source.
 | `DenseCholeskyFactor` | `+ DenseCholeskyFactor` | Reusable SPD Cholesky factor. The retained row-major lower triangle is the | [`core/linalg.w`](../core/linalg.w) |
 | `DenseQRFactor` | `+ DenseQRFactor` | Compact Householder QR factor for a full-column-rank m×n matrix (m>=n). | [`core/linalg.w`](../core/linalg.w) |
 | `FFT` | `+ FFT` | FFT — discrete Fourier transform (native Cooley–Tukey radix-2). | [`core/fft.w`](../core/fft.w) |
+| `Signal` | `+ Signal` | — | [`core/signal.w`](../core/signal.w) |
+| `SignalSpectrum` | `+ SignalSpectrum` | — | [`core/signal.w`](../core/signal.w) |
 | `Special` | `+ Special` | Special — transcendental / special functions (SciPy `scipy.special` analogue). | [`core/special.w`](../core/special.w) |
 | `Stats` | `+ Stats` | — | [`core/stats.w`](../core/stats.w) |
 | `Tensor` | `+ Tensor` | — | [`core/tensor.w`](../core/tensor.w) |

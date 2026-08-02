@@ -9,6 +9,7 @@ Flat under `core/` (no `core/sci/` namespace):
 | `linalg.w` | dense LA (nested lists) + BLAS |
 | `sparse.w` | **SparseMatrix** CSR/COO; SpMV + Apple Sparse Solvers (QR/Cholesky) |
 | `fft.w` | pure radix-2 DFT |
+| `signal.w` | finite convolution/correlation + one-sided real spectra |
 | `special.w` / `stats.w` | specials + distributions |
 | `solve.w` / `optim.w` / `interpolate.w` | ODE / opt / interp |
 | `calculus.w` | Taylor/differential AD, numerical gradients/Jacobians, Simpson and breakpoint GK15 quadrature |
@@ -41,5 +42,5 @@ Link gating (stage-1 rebuild): `@w_sparse_` → SparseBLAS+Solvers, `@w_tensor_`
 
 Large multi-module programs can hit a compiler SSA name-clash (`t0`); keep specs focused.
 
-Docs: `calculus.md`, `tensor-vs-array.md`, `wtensor.md`, `sparse.md`,
+Docs: `calculus.md`, `signal.md`, `tensor-vs-array.md`, `wtensor.md`, `sparse.md`,
 `io.md` (TH5 honesty), `units.md`, [physics.md](../physics.md).

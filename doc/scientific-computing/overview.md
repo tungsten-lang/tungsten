@@ -17,6 +17,7 @@ Flat under `core/` (no `core/sci/` namespace):
 | `blas.w` | Accelerate BLAS1/2/3 + vDSP |
 | `mlx.w` | MLX GPU opt-in: GEMM + elementwise + reduce + softmax + FFT + RNG |
 | `plot.w` | **Plot** sparklines |
+| `latex.w` | safe, composable LaTeX source for values, equations, tables, and publication profiles |
 | `io.w` | SciIO — CSV/FITS/Zarr/MAT/**TH5** (not full HDF5); no system lib deps |
 | `cuda.w` | CUDA host surface |
 
@@ -42,4 +43,4 @@ Link gating (stage-1 rebuild): `@w_sparse_` → SparseBLAS+Solvers, `@w_tensor_`
 Large multi-module programs can hit a compiler SSA name-clash (`t0`); keep specs focused.
 
 Docs: `calculus.md`, `tensor-vs-array.md`, `wtensor.md`, `sparse.md`,
-`io.md` (TH5 honesty), `units.md`, [physics.md](../physics.md).
+`io.md` (TH5 honesty), `units.md`, `latex.md`, [physics.md](../physics.md).

@@ -30,6 +30,7 @@ of every theorem for which that claim might be useful.
 | Ordinary numeric constants and functions | `π`, `ℯ`, `Math`, `Special` | [scientific-computing/overview.md](scientific-computing/overview.md) |
 | Symbolic expressions, exact identities, calculus | `use calculus`; `Expression`, `Calculus` | [symbolic.md](symbolic.md), [scientific-computing/calculus.md](scientific-computing/calculus.md) |
 | Fields, polynomials, ideals, arithmetic geometry | `use algebra`; `Algebra` | [algebra.md](algebra.md) |
+| Differential geometry and spacetime metrics | `use geometry`; `Geometry` | this guide; REPL examples in [CONSOLE.md](CONSOLE.md) |
 | Arrays, tensors, linear algebra, optimization, ODEs | flat modules under `core/` | [scientific-computing/overview.md](scientific-computing/overview.md) |
 | SAT-backed finite certificates | `tungsten-wassat` producer + `tungsten-wrat` checker | [certified-mathematics.md](certified-mathematics.md) |
 | Plots | `core/plot.w`, `tungsten-drawille` | [scientific-computing/plot.md](scientific-computing/plot.md) |
@@ -66,12 +67,29 @@ Field
 
 The implementation is split by responsibility under `core/algebra/`.
 Coefficient domains and polynomial algorithms do not import curve code.
-Projective spaces, curves, divisors, quartics, and descent currently remain
-under `core/algebra/` because they are algebraic geometry and depend directly
-on the field/ring layer. A future `core/geometry/` facade makes sense when
-Tungsten also has substantial differential, metric, polyhedral, or synthetic
-geometry; moving the existing files before that separation would change paths
-without changing the dependency boundary.
+Projective spaces, curves, divisors, quartics, and descent remain under
+`core/algebra/` because they are algebraic geometry and depend directly on the
+field/ring layer. Differential geometry is a separate `use geometry` chain:
+`Chart`, variance-aware `TensorField`, `Metric`, Levi-Civita connection,
+Riemann/Ricci/scalar/Einstein curvature, the Kretschmann scalar, and geodesic
+systems. Exact symbolic metric operations are currently bounded to dimension
+six.
+
+The first physical models exercise that chain rather than hard-coding their
+curvature. `Schwarzschild.new(M)` derives the coordinate Einstein tensor and
+Kretschmann scalar; focused numeric evaluation verifies the vacuum identities
+away from the chart singularity. It exposes the `r=2M` Killing/event horizon
+and supplies the regular ingoing Eddington-Finkelstein chart. Its
+`regge_wheeler(l)` object is
+the odd-parity linear potential; the attached positivity certificate is only
+a finite-energy axial-mode statement, not full linear or nonlinear stability.
+`RandallSundrum.new(L)` supplies a static Poincare-AdS5 patch with a probe
+brane slice and a spatial hyperbolic bulk chord. It does not yet implement the
+Z2 orbifold, junction conditions, brane tension, or distributional source.
+Its null-return certificate records the important
+negative result: the static flat-brane vacuum has no nontrivial returning
+brane-to-brane null shortcut. Cosmological or deformed branes are outside that
+claim.
 
 The detailed capability table in [algebra.md](algebra.md) is authoritative.
 At a high level:

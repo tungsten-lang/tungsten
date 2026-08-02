@@ -1280,6 +1280,11 @@ use core/special
     algebraic = algebraic || right.class_name == "AlgebraicRealRoot"
     if algebraic
       return AlgebraicRealArithmetic.value(left, right, "/")
+    # Expression is the exact symbolic layer. Substituting integer coordinates
+    # into a symbolic quotient must therefore produce an exact Rational rather
+    # than inherit the language's truncating Integer#/ operator.
+    if Expression.integer?(left) && Expression.integer?(right)
+      return Rational.new(left, right)
     if Expression.scalar_value?(left) && Expression.active_value?(right)
       if right.respond_to?("reciprocal")
         inverse = right.reciprocal

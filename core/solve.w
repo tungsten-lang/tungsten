@@ -12,12 +12,12 @@
 # leaves room for BVP / DAE later without a rename.
 
 + Solve
-  -> .ivp(f, t0, t1, y0, method = :rk4, dt = ~0.01)
+  -> .ivp(f, t_start, t_stop, y0, method = :rk4, dt = ~0.01)
     if method == :euler
-      return Solve.euler(f, t0, t1, y0, dt)
+      return Solve.euler(f, t_start, t_stop, y0, dt)
     if method == :rk45
-      return Solve.rk45(f, t0, t1, y0, dt)
-    Solve.rk4(f, t0, t1, y0, dt)
+      return Solve.rk45(f, t_start, t_stop, y0, dt)
+    Solve.rk4(f, t_start, t_stop, y0, dt)
 
   -> .clone_y(y)
     out = []
@@ -36,15 +36,15 @@
       i = i + 1
     out
 
-  -> .euler(f, t0, t1, y0, dt)
-    t = t0
+  -> .euler(f, t_start, t_stop, y0, dt)
+    t = t_start
     y = Solve.clone_y(y0)
     ts = [t]
     ys = [Solve.clone_y(y)]
-    while t < t1
+    while t < t_stop
       h = dt
-      if t + h > t1
-        h = t1 - t
+      if t + h > t_stop
+        h = t_stop - t
       dy = f(t, y)
       y = Solve.axpy(h, dy, y)
       t = t + h
@@ -67,15 +67,15 @@
       i = i + 1
     out
 
-  -> .rk4(f, t0, t1, y0, dt)
-    t = t0
+  -> .rk4(f, t_start, t_stop, y0, dt)
+    t = t_start
     y = Solve.clone_y(y0)
     ts = [t]
     ys = [Solve.clone_y(y)]
-    while t < t1
+    while t < t_stop
       h = dt
-      if t + h > t1
-        h = t1 - t
+      if t + h > t_stop
+        h = t_stop - t
       y = Solve.rk4_step(f, t, y, h)
       t = t + h
       ts = ts.push(t)
@@ -84,8 +84,8 @@
 
   # Adaptive RK45 — Heun/Euler pair for step control (not full DP5, but
   # robust and dependency-free). Error estimate = ||y_heun − y_euler||.
-  -> .rk45(f, t0, t1, y0, dt0)
-    t = t0
+  -> .rk45(f, t_start, t_stop, y0, dt0)
+    t = t_start
     y = Solve.clone_y(y0)
     h = dt0
     ts = [t]
@@ -93,9 +93,9 @@
     atol = ~1.0e-6
     rtol = ~1.0e-4
     safety = ~0.9
-    while t < t1
-      if t + h > t1
-        h = t1 - t
+    while t < t_stop
+      if t + h > t_stop
+        h = t_stop - t
       k1 = f(t, y)
       y_eu = Solve.axpy(h, k1, y)
       k2 = f(t + h, y_eu)

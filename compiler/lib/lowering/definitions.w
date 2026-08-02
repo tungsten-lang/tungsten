@@ -738,6 +738,7 @@
   populate_definition_var_types(node, child_var_types, mod)
 
   child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types, mod)
+  child_ctx[:mut_accumulators] = mut_accumulator_candidates(body)
 
   # Detect raw-i64 ABI: when every param is ## i64:-annotated and there's
   # no block param or default, the fn takes raw int64_t directly. Callers
@@ -1840,6 +1841,7 @@
       pti += 1
 
   child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types, mod)
+  child_ctx[:mut_accumulators] = mut_accumulator_candidates(body)
 
   block_return_buf = nil
   if needs_block_return

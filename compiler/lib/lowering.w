@@ -1593,6 +1593,7 @@ use lowering/definitions
     bindings: {},
     unboxed_vars: {},
     raw_int_candidates: raw_int_candidate_map(ast.expressions, var_types, mod),
+    mut_accumulators: mut_accumulator_candidates(ast.expressions),
     method_name: nil,
     is_class_method: false,
     is_block: false,
@@ -2351,6 +2352,17 @@ use lowering/definitions
   stmt_position = ctx[:assign_stmt_position] == true
   ctx[:assign_stmt_position] = nil
 
+  # Mutate-if-unique (E4 stage 1): `r = r + e` / `r = r - e` where the
+  # accumulator analysis proved r's value dies here routes the guarded
+  # arm's runtime fallback through w_bigint_add_mut/w_bigint_sub_mut (see
+  # lower_binary_op). Scoped to exactly this assignment's RHS lowering.
+  mut_target_set = false
+  if ast_kind(target) == :var && ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][target.name] == true
+    v = node.value
+    if v != nil && is_ast_node?(v) && ast_kind(v) == :binary_op && v.op in (:PLUS :MINUS) && v.left != nil && is_ast_node?(v.left) && ast_kind(v.left) == :var && v.left.name == target.name
+      ctx[:mut_accum_target] = target.name
+      mut_target_set = true
+
   # Ivar assignment: @name = value
   if ast_kind(target) == :ivar
     val = lower_expression(ctx, node.value)
@@ -2604,6 +2616,8 @@ use lowering/definitions
     return typed_value(raw_float_value_type(target_type), raw_val)
 
   val = lower_expression(ctx, node.value)
+  if mut_target_set
+    ctx[:mut_accum_target] = nil
   inferred = nil
   if node.type_hint == nil
     inferred = infer_type(node.value, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)

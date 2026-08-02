@@ -790,6 +790,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       rt_fb = "w_sub"
     elsif op == :STAR
       rt_fb = "w_mul"
+    # Mutate-if-unique (E4 stage 1): `r += e` / `r -= e` on a proven-dead
+    # accumulator takes the in-place entry; its runtime guards fall back.
+    if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS)
+      rt_fb = op == :PLUS ? "w_bigint_add_mut" : "w_bigint_sub_mut"
     result_temp = next_temp(wfn)
     emit_instruction(wfn, {op: :call_direct_i64, temp: result_temp, name: rt_fb, args: [cur, rhs_reg]})
     if ptr != nil
@@ -1380,6 +1384,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       elsif op == :STAR
         guarded_op = :mul_i48_guarded
         rt_fn = "w_mul"
+      # Mutate-if-unique (E4 stage 1): this binary op is the RHS of
+      # `r = r ± e` for a proven-dead accumulator (lower_assign_expr set
+      # the marker). The i48 fast path is untouched — only the overflow/
+      # boxed fallback becomes the in-place entry, whose runtime guards
+      # (alias count, overlay bit, capacity) fall back to w_add/w_sub.
+      if ctx[:mut_accum_target] != nil && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == ctx[:mut_accum_target] && op in (:PLUS :MINUS)
+        rt_fn = op == :PLUS ? "w_bigint_add_mut" : "w_bigint_sub_mut"
       lhs = lower_expression(ctx, node.left)
       rhs = lower_expression(ctx, node.right)
       lhs_reg = ensure_i64_value(wfn, lhs)
@@ -1575,6 +1586,12 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   rt_name = lowering_op_map[op]
   if rt_name == nil
     rt_name = "w_add"  # fallback, should not happen
+  # Mutate-if-unique (E4 stage 1): the untyped accumulator shape lands here
+  # (an nil-typed `r` skips the machine and guarded arms), so the marker
+  # set by lower_assign_expr routes `r = r ± e` through the in-place entry
+  # instead of __w_add_fast/__w_sub_fast.
+  if ctx[:mut_accum_target] != nil && op in (:PLUS :MINUS) && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == ctx[:mut_accum_target]
+    rt_name = op == :PLUS ? "w_bigint_add_mut" : "w_bigint_sub_mut"
 
   temp = next_temp(wfn)
   emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: rt_name, args: [lhs_reg, rhs_reg]})

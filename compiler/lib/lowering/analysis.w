@@ -1709,3 +1709,205 @@
   # anything unrecognized (blocks, interpolation, nested loops, case, …)
   st[:ok] = false
   nil
+
+# ==== Mutate-if-unique accumulator analysis (E4 stage 1) ====
+#
+# A local qualifies when every value it ever holds is provably safe to
+# mutate in place at its `r = r + e` / `r += e` sites: nobody else can hold
+# a reference to it. Two assignment shapes are allowed, chosen because the
+# runtime guards close their aliasing holes:
+#   (a) literal-leaf arithmetic (`r = 1 << 4096`): mints fresh;
+#   (b) a SINGLE +/- binary op whose LEFT operand is the var itself
+#       (`r = r + anything`), or a +/- compound assign: lowered through
+#       w_bigint_add_mut/w_bigint_sub_mut, whose every return is either
+#       in-place (unique by induction), fresh, the dying receiver, or an
+#       operand alias MARKED SHARED (w_bigint_mut_fallback) — which the
+#       next mut attempt refuses and copies.
+# Shapes like `r = x + r` or `r = r + i + j` are DISQUALIFIED: their outer
+# ops lower through plain w_add, whose identity returns (x + 0 -> x) can
+# seed the var with an unmarked alias of a live value.
+#
+# Uses are whitelisted positionally: binary/unary operands and branch
+# conditions are plain reads. The walker is FAIL-CLOSED — any node kind it
+# does not explicitly handle kills every var named inside it (calls,
+# blocks/closures, returns, container/ivar/global stores, interpolation).
+# A wrong "unique" proof is a silently wrong number, so unknown constructs
+# must never default to safe.
+
+-> mut_mark_all_dead(node, dead)
+  if node == nil
+    return nil
+  if type(node) == "Array"
+    i = 0
+    while i < node.size()
+      mut_mark_all_dead(node[i], dead)
+      i += 1
+    return nil
+  if !is_ast_node?(node)
+    return nil
+  k = ast_kind(node)
+  if k == :var
+    dead[node.name] = true
+    return nil
+  if k in (:int :float :string :symbol :nil :bool :char)
+    return nil
+  case k
+  when :call
+    mut_mark_all_dead(node.receiver, dead)
+    mut_mark_all_dead(node.args, dead)
+    mut_mark_all_dead(node.block, dead)
+  when :binary_op, :and, :or, :target_and, :target_or
+    mut_mark_all_dead(node.left, dead)
+    mut_mark_all_dead(node.right, dead)
+  when :unary_op, :not
+    mut_mark_all_dead(node.operand, dead)
+  when :string_interp, :byte_array_interp
+    mut_mark_all_dead(node.parts, dead)
+  when :array
+    mut_mark_all_dead(node.elements, dead)
+  when :hash_literal
+    mut_mark_all_dead(node.entries, dead)
+  when :range
+    mut_mark_all_dead(node.from, dead)
+    mut_mark_all_dead(node.to, dead)
+  when :assign, :compound_assign
+    mut_mark_all_dead(node.target, dead)
+    mut_mark_all_dead(node.value, dead)
+  when :return, :print, :puts, :raise, :recase
+    mut_mark_all_dead(node.value, dead)
+  when :if
+    mut_mark_all_dead(node.condition, dead)
+    mut_mark_all_dead(node.then_body, dead)
+    mut_mark_all_dead(node.elsif_clauses, dead)
+    mut_mark_all_dead(node.else_body, dead)
+  when :while
+    mut_mark_all_dead(node.condition, dead)
+    mut_mark_all_dead(node.body, dead)
+  when :block
+    mut_mark_all_dead(node.params, dead)
+    mut_mark_all_dead(node.body, dead)
+  else
+    # Unknown kind: its children cannot be enumerated here, so no candidate
+    # in this scope may survive it. mark_subtree_escape's silent fall-through
+    # is exactly the walker-coverage bug class this pass must not inherit —
+    # a missed var here is a silently wrong number, not a leak.
+    dead["__scope_poisoned__"] = true
+  nil
+
+-> mut_literal_leaves_only?(node)
+  if node == nil || !is_ast_node?(node)
+    return false
+  k = ast_kind(node)
+  if k == :int
+    return true
+  if k == :binary_op
+    return mut_literal_leaves_only?(node.left) && mut_literal_leaves_only?(node.right)
+  if k == :unary_op
+    return mut_literal_leaves_only?(node.operand)
+  false
+
+-> mut_self_compound_rhs?(node, name)
+  if node == nil || !is_ast_node?(node)
+    return false
+  if ast_kind(node) != :binary_op
+    return false
+  if !(node.op in (:PLUS :MINUS))
+    return false
+  node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == name
+
+-> mut_walk_expr(node, assigned, dead)
+  # expression position: operands of arithmetic/comparisons are plain reads
+  if node == nil || !is_ast_node?(node)
+    return nil
+  k = ast_kind(node)
+  if k == :var
+    return nil
+  if k == :binary_op
+    mut_walk_expr(node.left, assigned, dead)
+    mut_walk_expr(node.right, assigned, dead)
+    return nil
+  if k == :unary_op
+    mut_walk_expr(node.operand, assigned, dead)
+    return nil
+  if k == :int
+    return nil
+  # anything else in operand position (calls, indexing, interpolation…)
+  # retains-or-escapes as far as this analysis is concerned
+  mut_mark_all_dead(node, dead)
+  nil
+
+-> mut_walk_stmts(body, assigned, dead)
+  if body == nil
+    return nil
+  i = 0
+  while i < body.size()
+    st = body[i]
+    if st == nil || !is_ast_node?(st)
+      i += 1
+      next
+    k = ast_kind(st)
+    if k == :assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :var
+      name = st.target.name
+      if mut_self_compound_rhs?(st.value, name)
+        assigned[name] = true
+        # the right operand is an ordinary read position
+        mut_walk_expr(st.value.right, assigned, dead)
+      elsif mut_literal_leaves_only?(st.value)
+        assigned[name] = true
+      else
+        dead[name] = true
+        # A bare-var RHS is a plain slot copy — an alias minted with NO
+        # runtime entry involved, so no shared mark can guard it. The
+        # SOURCE var dies too (`y = r` then `r += 1` must not move y).
+        if st.value != nil && is_ast_node?(st.value) && ast_kind(st.value) == :var
+          dead[st.value.name] = true
+        mut_walk_expr(st.value, assigned, dead)
+    elsif k == :compound_assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :var
+      name = st.target.name
+      if st.op in (:PLUS :MINUS)
+        assigned[name] = true
+        mut_walk_expr(st.value, assigned, dead)
+      else
+        # e.g. r *= i — w_mul's identity shapes can alias an operand into
+        # the var unmarked; fail closed
+        dead[name] = true
+        mut_walk_expr(st.value, assigned, dead)
+    elsif k == :while
+      mut_walk_expr(st.condition, assigned, dead)
+      mut_walk_stmts(st.body, assigned, dead)
+    elsif k == :if
+      mut_walk_expr(st.condition, assigned, dead)
+      mut_walk_stmts(st.then_body, assigned, dead)
+      mut_walk_stmts(st.else_body, assigned, dead)
+      if st.elsif_clauses != nil
+        j = 0
+        while j < st.elsif_clauses.size()
+          clause = st.elsif_clauses[j]
+          mut_walk_expr(clause[0], assigned, dead)
+          mut_walk_stmts(clause[1], assigned, dead)
+          j += 1
+    elsif k in (:binary_op :unary_op :not :and :or)
+      # A pure-arithmetic expression statement (commonly the implicit
+      # return, `r % m`): its RESULT is fresh-or-caller-owned, and its
+      # operands are plain reads. A BARE var in tail position does NOT
+      # land here (:var is not in this list) — it falls to the kill arm
+      # below, because returning the var itself hands out an alias.
+      mut_walk_expr(st, assigned, dead)
+    else
+      # statements this walker does not model (calls, puts, returns,
+      # blocks, nested defs, stores…) kill every var they mention
+      mut_mark_all_dead(st, dead)
+    i += 1
+  nil
+
+-> mut_accumulator_candidates(body)
+  assigned = {}
+  dead = {}
+  mut_walk_stmts(body, assigned, dead)
+  result = {}
+  if dead["__scope_poisoned__"] == true
+    return result
+  assigned.keys().each -> (name)
+    if dead[name] != true
+      result[name] = true
+  result

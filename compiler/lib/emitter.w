@@ -309,6 +309,10 @@ use hashing
   # Arithmetic
   out << declare_fn("w_add", wv, wv2)
   out << declare_fn("w_sub", wv, wv2)
+  # Mutate-if-unique (E4 stage 1): guarded-i48 fallbacks for accumulators
+  # the mut-candidate analysis proved dead at their compound assignment.
+  out << declare_fn("w_bigint_add_mut", wv, wv2)
+  out << declare_fn("w_bigint_sub_mut", wv, wv2)
   out << declare_fn("w_mul", wv, wv2)
   out << declare_fn("w_pow", wv, wv2)
   out << declare_fn("w_div", wv, wv2)

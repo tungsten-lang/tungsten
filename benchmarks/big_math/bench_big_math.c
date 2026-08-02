@@ -4183,6 +4183,110 @@ int main(int argc, char **argv) {
         free(trace);
         return 0;
     }
+    /* E4 stage-1 gate (D5: blocking, no build flag): differential fuzz of
+     * the mutating add/sub entries against the immutable engine. Each case
+     * builds fresh operands, computes the immutable reference FIRST (from
+     * copies, so the mutation cannot contaminate it), then runs the
+     * mutating entry on a dedicated dying copy and requires identical
+     * results — plus GMP triangulation, self-alias shapes (x+=x, x-=x,
+     * x+=0), guard-refusal shapes (shared/overlay receivers must fall back
+     * and leave the receiver intact), and carry/borrow edges. */
+    if ((argc == 2 || argc == 3) && strcmp(argv[1], "--fuzz-mut") == 0) {
+        int32_t max_limbs = argc == 3 ? (int32_t)atoi(argv[2]) : 64;
+        if (max_limbs <= 0) die("fuzz-mut expects positive max limbs");
+        for (int32_t l = 1; l <= max_limbs; l++) {
+            for (int sa = 0; sa < 2; sa++) {
+                for (int sb = 0; sb < 2; sb++) {
+                    for (int sub = 0; sub < 2; sub++) {
+                        WValue a0, b0, m0;
+                        bench_boxed_operands(BENCH_BOXED_ADD, l, &a0, &b0, &m0);
+                        /* one-limb b: the accumulator shape this is for */
+                        WValue bw = w_box_int(
+                            (int64_t)(w_as_bigint(b0)->limbs[0] >> 17));
+                        WValue a_ref = sa ? w_neg(bench_clone_integer(a0))
+                                          : bench_clone_integer(a0);
+                        WValue b_use = sb ? w_neg(bw) : bw;
+                        WValue want = sub ? bigint_sub_any(a_ref, b_use)
+                                          : bigint_add_any(a_ref, b_use);
+                        /* dying receiver: fresh clone, header-signed */
+                        WValue a_mut = bench_clone_integer(a0);
+                        if (sa) {
+                            WBigint *am = w_as_bigint(a_mut);
+                            am->size = -am->size;
+                        }
+                        WValue got = sub ? w_bigint_sub_mut(a_mut, b_use)
+                                         : w_bigint_add_mut(a_mut, b_use);
+                        if (bigint_compare(got, want) != 0)
+                            dief("fuzz-mut %s mismatch l=%d sa=%d sb=%d",
+                                 sub ? "sub" : "add", l, sa, sb);
+                        mpz_t za, zb, zg;
+                        mpz_inits(za, zb, zg, NULL);
+                        gmp_import_value(za, a_ref);
+                        gmp_import_value(zb, b_use);
+                        if (sub) mpz_sub(zg, za, zb);
+                        else mpz_add(zg, za, zb);
+                        if (!value_matches_mpz(got, zg))
+                            dief("fuzz-mut %s GMP mismatch l=%d sa=%d sb=%d",
+                                 sub ? "sub" : "add", l, sa, sb);
+                        mpz_clears(za, zb, zg, NULL);
+                    }
+                }
+            }
+            /* self-alias: x += x doubles; x -= x zeroes; x += 0 identity */
+            {
+                WValue a0, b0, m0;
+                bench_boxed_operands(BENCH_BOXED_ADD, l, &a0, &b0, &m0);
+                WValue x = bench_clone_integer(a0);
+                WValue two_x = bigint_add_any(bench_clone_integer(a0),
+                                              bench_clone_integer(a0));
+                WValue got = w_bigint_add_mut(x, x);
+                if (bigint_compare(got, two_x) != 0)
+                    dief("fuzz-mut x+=x mismatch l=%d", l);
+                WValue y = bench_clone_integer(a0);
+                WValue gz = w_bigint_sub_mut(y, y);
+                if (!w_is_int(gz) || w_as_int(gz) != 0)
+                    dief("fuzz-mut x-=x nonzero l=%d", l);
+                WValue z = bench_clone_integer(a0);
+                WValue gid = w_bigint_add_mut(z, w_box_int(0));
+                if (bigint_compare(gid, a0) != 0)
+                    dief("fuzz-mut x+=0 mismatch l=%d", l);
+            }
+            /* guard refusal: shared and overlay receivers fall back and the
+             * receiver's value survives */
+            {
+                WValue a0, b0, m0;
+                bench_boxed_operands(BENCH_BOXED_ADD, l, &a0, &b0, &m0);
+                WValue shared = bench_clone_integer(a0);
+                w_bigint_mark_shared(w_as_bigint(shared));
+                WValue got = w_bigint_add_mut(shared, w_box_int(7));
+                if (got == shared)
+                    dief("fuzz-mut mutated a SHARED receiver l=%d", l);
+                if (bigint_compare(shared, a0) != 0)
+                    dief("fuzz-mut shared receiver corrupted l=%d", l);
+                WValue flipped = w_neg(bench_clone_integer(a0));
+                WValue got2 = w_bigint_add_mut(flipped, w_box_int(7));
+                if (got2 == flipped)
+                    dief("fuzz-mut mutated an OVERLAY receiver l=%d", l);
+            }
+            /* carry growth: all-ones magnitude + 1 must grow a limb */
+            {
+                WBigint *ones = bigint_alloc(l + 1);
+                for (int32_t i = 0; i < l; i++) ones->limbs[i] = ~0ULL;
+                ones->size = l;
+                WValue got = w_bigint_add_mut(bigint_box(ones), w_box_int(1));
+                mpz_t zo, zg2;
+                mpz_inits(zo, zg2, NULL);
+                mpz_set_ui(zo, 1);
+                mpz_mul_2exp(zg2, zo, (mp_bitcnt_t)(64 * l));
+                if (!value_matches_mpz(got, zg2))
+                    dief("fuzz-mut carry growth wrong l=%d", l);
+                mpz_clears(zo, zg2, NULL);
+            }
+        }
+        printf("mutate-if-unique differential: CLEAN (1..%d limbs)\n",
+               max_limbs);
+        return 0;
+    }
     if ((argc == 2 || argc == 3) && strcmp(argv[1], "--fuzz-tag-sign") == 0) {
         int32_t max_limbs = argc == 3 ? (int32_t)atoi(argv[2]) : 64;
         if (max_limbs <= 0) die("fuzz-tag-sign expects positive max limbs");

@@ -35,6 +35,9 @@ core/algebra/orders.w             # monogenic orders and Dedekind certificates
 core/algebra/integer_lattice.w    # exact lattices and prime-field kernels
 core/algebra/maximal_orders.w     # degree-generic Round 2 integral closures
 core/algebra/lattice_reduction.w  # exact Gram-matrix LLL and ideal bases
+core/algebra/lattice_polytope.w   # exact simplices, polygons, Ehrhart fixtures, Laurent jets
+core/algebra/parity_lattice.w     # certified affine F2 Construction-A lift
+core/algebra/divided_power.w      # characteristic-two divided squares and carry laws
 core/algebra/residue_algebra.w    # reduced O/pO and primitive idempotents
 core/algebra/prime_ideals.w       # residue maps and certified primes above p
 core/algebra/ideal_arithmetic.w   # HNF ideals, valuations, factorizations
@@ -138,6 +141,128 @@ F16.minimal_polynomial_certificate(a, :x).verified?
 Deterministic modulus search is explicitly resource-bounded. Small geometry
 fields cache their exact multiplication table; larger fields retain sparse
 packed convolution and modular reduction.
+
+## Lattice polytopes, shell quotients, and Laurent jets
+
+The exact combinatorial-geometry spine covers lattice simplices and ordered
+lattice polygons without pretending to be a general convex-hull package:
+
+```w
+use algebra
+
+simplex = LatticeSimplex.new([[-1, -1], [2, -1], [-1, 2]])
+simplex.barycenter                    # [0/1, 0/1]
+simplex.normalized_volume             # 9
+simplex.volume                        # 9/2
+simplex.barycentric_coordinates([0, 0])
+simplex.interior_contains?([0, 0])
+
+newton = LatticePolygon.new([[0, 0], [3, 0], [0, 4]])
+newton.area                           # 6/1
+newton.boundary_lattice_point_count   # 8
+newton.interior_lattice_point_count   # 3, by Pick's theorem
+```
+
+`LatticePolygon` requires the caller to supply a simple polygon in cyclic
+boundary order. The current class verifies integral coordinates and a
+positive shoelace area, but does not certify simplicity; Pick counts are exact
+only under that explicit precondition.
+
+`CenteredEhrhartSimplex` is the sharp fixture
+`T_n=(n+1)Delta_n-(1,...,1)`. It exposes exact volume, closed/interior
+Ehrhart counts, and the number of multivariate jet conditions below a given
+order:
+
+```w
+sharp = CenteredEhrhartSimplex.new(4)
+sharp.volume                          # 625/24
+sharp.unique_level_one_interior_lattice_point?  # true
+sharp.interior_lattice_point_count(3) # binomial(14,4)
+sharp.jet_condition_count(5)          # binomial(8,4)
+```
+
+`DiagonalShellPolytope.new(d)` is the `(d-1)`-dimensional quotient of the
+`d`-dimensional three-sided shell along its diagonal. Its exact Ehrhart count
+is `(k+1)^d-k^d`; its `h_star_coefficients` are Eulerian numbers:
+
+```w
+hexagon = DiagonalShellPolytope.new(3)
+hexagon.vertices.size                 # 6
+hexagon.shell_count(7)                # 3*7^2 + 3*7 + 1
+hexagon.h_star_coefficients           # [1, 4, 1]
+
+rhombic_dodecahedron = DiagonalShellPolytope.new(4)
+rhombic_dodecahedron.vertices.size    # 14
+rhombic_dodecahedron.h_star_coefficients # [1, 11, 11, 1]
+rhombic_dodecahedron.volume           # 4/1
+rhombic_dodecahedron.normalized_volume # 24
+```
+
+The last object is combinatorially a rhombic dodecahedron and is the usual
+one in the natural quotient metric. In the displayed difference coordinates
+with the ordinary coordinate metric, it is an affine rhombic dodecahedron.
+`primitive_facets` exposes every primitive inequality `u_i-u_j<=1`, with
+`u_0=0`; `reflexive_by_construction?` replays their lattice distance one.
+
+`LaurentJetFiltration` builds the exact derivative matrix of Laurent
+monomials at `(1,...,1)`, using generalized falling factorials. `jet_rank`
+and `vanishing_subspace_dimension` expose the finite linear algebra behind
+jet-count filtrations. They do not import the analytic Monge--Ampere or
+Bergman-geodesic argument in which those counts may be used.
+
+## Binary parity systems as integer lattices
+
+`ParityLiftLattice` implements the exact Construction-A lift of a consistent
+affine system `Hx=b` over `F2`:
+
+```w
+lift = ParityLiftLattice.new(
+  [[1, 1, 0], [0, 1, 1]],
+  [1, 0])
+
+lift.rank                             # 2
+lift.basis                            # determinant magnitude 2^rank
+lift.particular_solution              # one binary x with Hx=b
+lift.certified?                       # determinant/mod-2 replay
+lift.minimum_hamming_solution         # bounded exhaustive reference only
+```
+
+In systematic coordinates the basis has block form `[[I,0],[P,2I]]`.
+Reducing `u-lambda` modulo two maps each lattice vector back to an affine
+binary solution. This is a certified finite transformation, not a claim that
+CVP or minimum decoding has become easy; the included minimum-weight search
+has an explicit exponential candidate limit.
+
+## Divided squares and binary carry in characteristic two
+
+`DividedSquareSpace` keeps the diagonal divided-power coordinates that an
+ordinary alternating/polarized model would lose over `F2`. For a rank-`n`
+space its canonical basis is `(i,j)` with `i<=j`, and therefore has dimension
+`n(n+1)/2`:
+
+```w
+space = DividedSquareSpace.new(3)
+space.basis_pairs
+space.square([1, 0, 1])
+
+action = [[0, 1, 0], [1, 0, 0], [0, 0, 1]]
+space.action_certificate(action).verified?       # true
+```
+
+`BinaryCarryGroup` places those coordinates behind an `F2^n` linear part.
+The direct product law has exponent two; the carry cocycle retains the
+diagonal square and produces order-four elements:
+
+```w
+group = BinaryCarryGroup.new(2)
+generator = group.element([1, 0])
+group.order(generator, :direct)                  # 2
+group.order(generator, :carry)                   # 4
+```
+
+The action certificate and bounded group-law replays are exact finite
+algebra. They model the manuscript's characteristic-two obstruction; they do
+not formalize the surrounding ergodic theorem or establish a Collatz result.
 
 Univariate polynomials over prime and extension finite fields have complete
 factorization with multiplicity. The exact pipeline handles inseparable

@@ -27,6 +27,9 @@ use core/algebra/prime_subspace
 use core/algebra/orders
 use core/algebra/maximal_orders
 use core/algebra/lattice_reduction
+use core/algebra/lattice_polytope
+use core/algebra/parity_lattice
+use core/algebra/divided_power
 use core/algebra/residue_algebra
 use core/algebra/real_roots
 use core/algebra/groebner

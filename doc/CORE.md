@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(444 total), grouped by area, with its declaration, a one-line
+(458 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -63,7 +63,10 @@ summary from the source header, and a link to the source.
 | `TaylorJet` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
 | `Differential` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
 | `QuadratureResult` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
+| `RadialMellinTransform` | — | Radial Mellin/Fourier identities used in high-dimensional sphere-packing | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |
+| `CohnElkiesAsymptotics` | — | Radial Mellin/Fourier identities used in high-dimensional sphere-packing | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |
 | `Geometry` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
+| `EuclideanMeasure` | — | Euclidean ball and sphere measures in arbitrary integer dimension.  The | [`core/geometry/measure.w`](../core/geometry/measure.w) |
 | `Chart` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
 | `TensorIndex` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
 | `TensorField` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
@@ -73,6 +76,7 @@ summary from the source header, and a link to the source.
 | `RiemannCurvature` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
 | `GeodesicSystem` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
 | `GeodesicTrajectory` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
+| `WarpedConeSurface` | — | Ideal-apex warped surfaces and their finite Euclidean-cone contrast. | [`core/geometry/warped_cone.w`](../core/geometry/warped_cone.w) |
 | `Horizon` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
 | `HorizonSet` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
 | `SchwarzschildSpacetime` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
@@ -119,6 +123,16 @@ summary from the source header, and a link to the source.
 | `Value` | `+ Value` | — | [`core/value.w`](../core/value.w) |
 | `Vector` | `+ Vector<T> < Number` | Vector — generic real-valued N-dimensional vectors. Distinct from | [`core/vector.w`](../core/vector.w) |
 | `Algebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `LatticeSimplex` | — | Exact lattice-polytope models used by Ehrhart, Newton-polygon, and shell | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
+| `LatticePolygon` | — | Exact lattice-polytope models used by Ehrhart, Newton-polygon, and shell | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
+| `CenteredEhrhartSimplex` | — | Exact lattice-polytope models used by Ehrhart, Newton-polygon, and shell | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
+| `DiagonalShellPolytope` | — | Exact lattice-polytope models used by Ehrhart, Newton-polygon, and shell | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
+| `LaurentJetFiltration` | — | Exact lattice-polytope models used by Ehrhart, Newton-polygon, and shell | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
+| `ParityLiftLattice` | — | Exact Construction-A parity lift for affine binary systems.  A consistent | [`core/algebra/parity_lattice.w`](../core/algebra/parity_lattice.w) |
+| `ParityLiftCertificate` | — | Exact Construction-A parity lift for affine binary systems.  A consistent | [`core/algebra/parity_lattice.w`](../core/algebra/parity_lattice.w) |
+| `DividedSquareSpace` | — | Exact degree-two divided powers over F2 and the associated binary-carry | [`core/algebra/divided_power.w`](../core/algebra/divided_power.w) |
+| `DividedSquareActionCertificate` | — | Exact degree-two divided powers over F2 and the associated binary-carry | [`core/algebra/divided_power.w`](../core/algebra/divided_power.w) |
+| `BinaryCarryGroup` | — | Exact degree-two divided powers over F2 and the associated binary-carry | [`core/algebra/divided_power.w`](../core/algebra/divided_power.w) |
 | `Field` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `RationalField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `FiniteField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |

@@ -138,6 +138,26 @@ inspection_check(
   bulk_chord_picture.include?("not an FTL/null-return claim") &&
   contains_braille?(bulk_chord_picture))
 
+ideal_cone = WarpedConeSurface.exponential(1, 1)
+ideal_cone_picture = DrawilleInspection.render(ideal_cone, 40, 10)
+inspection_check(
+  "warped_cone.ideal_apex_separations",
+  ideal_cone_picture.include?("WarpedConeSurface") &&
+  ideal_cone_picture.include?("ideal apex at t = infinity") &&
+  ideal_cone_picture.include?("normalized separation Delta-theta") &&
+  ideal_cone_picture.include?("physical cross-section arc f(t) Delta-theta") &&
+  ideal_cone_picture.include?("not unrestricted geodesic distance") &&
+  ideal_cone_picture.include?("non-isometric profile wireframe") &&
+  contains_braille?(ideal_cone_picture))
+
+finite_cone_picture = DrawilleInspection.render(
+  WarpedConeSurface.linear(1, 1), 32, 8)
+inspection_check(
+  "warped_cone.finite_apex_labeled",
+  finite_cone_picture.include?("finite apex at t = 1") &&
+  !finite_cone_picture.include?("ideal apex at t = infinity") &&
+  contains_braille?(finite_cone_picture))
+
 qexp = QExpansion.new([0, 1, -2, 3])
 inspection_check("q_expansion", renders(qexp, "q-expansion"))
 finite_qexp = FieldQExpansion.new(FiniteField.new(5), [0, 1, 4])

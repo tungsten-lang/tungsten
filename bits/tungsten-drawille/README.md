@@ -20,6 +20,7 @@ s = Schwarzschild.new(1)
 ? s.horizons
 ? s.regge_wheeler(2)
 ? RandallSundrum.new(1).bulk_chord(4)
+? WarpedConeSurface.exponential(1, 1)
 ```
 
 The adapters recognize polynomial rings and one-, two-, and three-variable
@@ -32,6 +33,13 @@ sampled Regge-Wheeler potentials, and spatial brane/bulk chords. The tensor
 adapter labels numerical sample checks as such; the perturbation view retains
 its linear mode-energy scope, and a spatial bulk chord is never presented as a
 causal or faster-than-light shortcut.
+
+Warped-cone inspection draws a non-isometric profile wireframe of the finite
+terminal window. It labels the shrink law and distinguishes constant normalized
+angular separation from the physical cross-section arc forced toward zero by
+the shrinking metric. That arc is not presented as unrestricted surface
+geodesic distance. An ideal apex is labelled as `t = infinity`; the end of the
+wireframe is never presented as the apex itself.
 
 Formal and q-series are shown as coefficient plots, not as claims of analytic
 convergence. Finite-field and p-adic coordinates are never silently treated as

@@ -207,6 +207,66 @@ Simpson/Richardson estimate, not an interval-arithmetic proof. Improper,
 oscillatory-specialized, singular, and multidimensional quadrature remain
 future capabilities.
 
+## Radial Mellin/Fourier identities
+
+`RadialMellinTransform` models the analytic transform identities used in
+high-dimensional radial Fourier arguments. It is a continuous-transform
+surface, separate from the discrete `FFT`:
+
+```w
+use calculus
+
+m = RadialMellinTransform.critical_multiplier(8, ~2.0)
+m.abs                                      # approximately 1
+
+# Stable even when the Gaussian value itself is too large for f64:
+RadialMellinTransform.gaussian_critical_log_value(1024, ~2.0)
+
+x = RadialMellinTransform.gaussian_critical_line(8, ~2.0)
+residual = RadialMellinTransform.gaussian_reflection_residual(8, ~2.0)
+# x(t) = m(t) x(-t) for the self-Fourier Gaussian
+
+RadialMellinTransform.hankel_multiplier(
+  3, Special.complex(~1.5, ~-0.75))
+```
+
+With the Fourier convention
+`F(f)(xi) = integral f(x) exp(-2*pi*i*x.xi) dx`, the implemented multiplier is
+
+```text
+h_d(z) = pi^(d/2-z) Gamma(z/2) / Gamma((d-z)/2).
+```
+
+On `z=d/2-it` it is a unit-modulus phase and reflection in Mellin frequency.
+Equivalently, after `v=log(r)`, this is ordinary one-dimensional Fourier
+frequency in log radius. `CohnElkiesAsymptotics` supplies the associated
+limiting density root, sign-uncertainty leading scale, limiting Mellin-
+frequency density, and ideal-shell/remote-interval damping formulas. More
+precisely, the logistic density is in Mellin frequency; `v=log(r)` is its
+Fourier-dual coordinate. Shell parameter `a` is a log-dilation parameter in
+`r -> r*exp(+-a/lambda)`, not a Euclidean radius:
+
+```w
+CohnElkiesAsymptotics.density_root_limit
+CohnElkiesAsymptotics.density_root_limit_exact
+CohnElkiesAsymptotics.sign_uncertainty_leading_scale(100)
+CohnElkiesAsymptotics.limiting_mellin_frequency_density(~0.0)
+CohnElkiesAsymptotics.ideal_shell_displacement_exact
+CohnElkiesAsymptotics.interval_shell_damping(~20.0, ~1.5)
+```
+
+Trust boundary:
+
+- the log-Gamma complex evaluations and reflection residuals are **numeric**;
+- the expression objects are **exact symbolic expressions** for the imported
+  closed forms;
+- the density-root, sign-uncertainty, and ideal-shell conclusions are
+  **trusted theorem imports** from the manuscript, not derivations in
+  Tungsten;
+- a small residual is only a floating diagnostic, not a certificate for a
+  Fourier transform, a finite-dimensional packing optimum, or a zeta-zero
+  statement.
+
 ## Certified transcendental enclosures
 
 For proof-oriented real evaluation at rational arguments, `Calculus` has a

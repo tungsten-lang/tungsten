@@ -32,6 +32,7 @@ use scene
       "FormalPowerSeries", "FormalLaurentSeries", "FormalPuiseuxSeries",
       "TaylorJet", "ThetaQuadraticForm",
       "TensorField", "HorizonSet", "ReggeWheelerPotential", "BraneBulkChord",
+      "WarpedConeSurface",
       "Vec2", "Vec3", "Vec4", "Vector", "Array"
     ]
     supported.include?(class_family(name))
@@ -84,6 +85,8 @@ use scene
         return render_regge_wheeler(value, cols, rows)
       elsif name == "BraneBulkChord"
         return render_brane_bulk_chord(value, cols, rows)
+      elsif name == "WarpedConeSurface"
+        return render_warped_cone_surface(value, cols, rows)
       elsif name == "ThetaQuadraticForm"
         return render_theta_form(value, cols)
       elsif name == "QExpansion" || name == "FieldQExpansion"
@@ -878,6 +881,88 @@ use scene
         points[points.size() - 1][0], chord.brane_z)
     out + scene.render(cols, rows, true) + DrawilleScene.label_line(
       points[0][0].to_s(), points[points.size() - 1][0].to_s(), cols)
+
+  # The intrinsic warped metric is dt^2 + f(t)^2 dtheta^2.  The terminal
+  # wireframe uses (f(t) cos(theta), t, f(t) sin(theta)) solely as a readable
+  # profile embedding; unless f is constant that Euclidean embedding is not an
+  # isometry.  Keeping this construction here avoids teaching core/geometry
+  # about camera angles, display horizons, or wireframe density.
+  -> .warped_cone_point(surface, t, theta)
+    radius = DrawilleNumbers.numeric(surface.radius(t))
+    return nil if radius == nil
+    [radius * Math.cos(theta), t.to_f(), radius * Math.sin(theta)]
+
+  -> .warped_cone_display_stop(surface)
+    if !surface.ideal_apex?
+      height = DrawilleNumbers.numeric(surface.finite_apex_height)
+      return height * ~0.97 if height != nil && height > ~0.0
+    ~6.0
+
+  -> .warped_cone_wireframe(surface, start, stop)
+    lines = []
+    pi = ~3.141592653589793
+    ring_count = 7
+    theta_count = 17
+    ring = 0
+    while ring < ring_count
+      t = start + (stop - start) * ring.to_f() / (ring_count - 1).to_f()
+      points = []
+      theta_index = 0
+      while theta_index < theta_count
+        theta = ~2.0 * pi * theta_index.to_f() / (theta_count - 1).to_f()
+        point = warped_cone_point(surface, t, theta)
+        points.push(point) if point != nil
+        theta_index += 1
+      lines.push(points) if points.size() > 1
+      ring += 1
+
+    meridian_count = 8
+    t_count = 25
+    meridian = 0
+    while meridian < meridian_count
+      theta = ~2.0 * pi * meridian.to_f() / meridian_count.to_f()
+      points = []
+      t_index = 0
+      while t_index < t_count
+        t = start + (stop - start) * t_index.to_f() / (t_count - 1).to_f()
+        point = warped_cone_point(surface, t, theta)
+        points.push(point) if point != nil
+        t_index += 1
+      lines.push(points) if points.size() > 1
+      meridian += 1
+    lines
+
+  -> .render_warped_cone_surface(surface, cols, rows)
+    start = ~0.0
+    stop = warped_cone_display_stop(surface)
+    apex = surface.ideal_apex? ? "ideal apex at t = infinity" : (
+      "finite apex at t = " + surface.finite_apex_height.to_s())
+    out = header(
+      "WarpedConeSurface",
+      "shrink law " + surface.shrink_law.to_s() + "; " + apex)
+    out += "  intrinsic metric: dt^2 + f(t)^2 dtheta^2; f(t) = " + (
+      surface.radius_expression.to_s()) + "\n"
+
+    # A one-radian pair of meridians makes the distinction visible without
+    # conflating angular coverage with the metric's forced contraction.
+    theta_a = ~0.0
+    theta_b = ~1.0
+    normalized = surface.normalized_separation(theta_a, theta_b)
+    physical_start = surface.physical_separation(start, theta_a, theta_b)
+    physical_stop = surface.physical_separation(stop, theta_a, theta_b)
+    out += "  normalized separation Delta-theta: " + normalized.to_s() + (
+      " (constant)\n")
+    out += "  physical cross-section arc f(t) Delta-theta: " + (
+      physical_start.to_s()) + " at t=0 -> " + physical_stop.to_s() + (
+      " at t=" + stop.to_s() + " (not unrestricted geodesic distance)\n")
+    out += "  non-isometric profile wireframe (display window only)\n"
+    lines = warped_cone_wireframe(surface, start, stop)
+    out += render_3d_lines(lines, cols, rows)
+    if surface.ideal_apex?
+      return out + "  displayed 0 <= t <= " + stop.to_s() + (
+        "; apex remains at t = infinity\n")
+    out + "  displayed 0 <= t <= " + stop.to_s() + (
+      "; finite apex at t = " + surface.finite_apex_height.to_s() + "\n")
 
   -> .series_coefficients(value)
     return value.coefficients if value.respond_to?("coefficients")

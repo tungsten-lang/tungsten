@@ -155,6 +155,19 @@ use geometry
 s = Schwarzschild.new(1)
 ```
 
+An exponential warped cone places its narrowing apex at infinite intrinsic
+distance. Its inspection shows a finite, non-isometric horn wireframe and
+reports both the constant normalized angular separation and the shrinking
+physical cross-section arc between a pair of meridians. The latter is not an
+unrestricted surface-geodesic distance:
+
+```tungsten
+? WarpedConeSurface.exponential(1, 1)
+```
+
+The narrow end of the drawing is only the end of the sampled display window;
+the labelled ideal apex remains at `t = infinity`.
+
 Inspecting the Einstein tensor derives it from the metric/connection/curvature
 stack and shows its component sparsity. This is a slower inspection (roughly
 10–15 seconds in the tree-walking REPL). Because the current symbolic

@@ -22,6 +22,7 @@ use core/calculus/puiseux
 use core/calculus/jet
 use core/calculus/differential
 use core/calculus/quadrature
+use core/calculus/radial_mellin
 
 + Calculus
   -> .integer?(value)

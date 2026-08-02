@@ -12,12 +12,14 @@
 use core/calculus
 use core/solve
 use core/geometry/support
+use core/geometry/measure
 use core/geometry/chart
 use core/geometry/tensor_field
 use core/geometry/metric
 use core/geometry/connection
 use core/geometry/curvature
 use core/geometry/geodesic
+use core/geometry/warped_cone
 use core/geometry/perturbation
 use core/geometry/spacetime
 use core/geometry/brane

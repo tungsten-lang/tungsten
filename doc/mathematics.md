@@ -31,6 +31,11 @@ of every theorem for which that claim might be useful.
 | Symbolic expressions, exact identities, calculus | `use calculus`; `Expression`, `Calculus` | [symbolic.md](symbolic.md), [scientific-computing/calculus.md](scientific-computing/calculus.md) |
 | Fields, polynomials, ideals, arithmetic geometry | `use algebra`; `Algebra` | [algebra.md](algebra.md) |
 | Differential geometry and spacetime metrics | `use geometry`; `Geometry` | this guide; REPL examples in [CONSOLE.md](CONSOLE.md) |
+| Ideal-apex horns and finite cone controls | `use geometry`; `WarpedConeSurface` | this guide; REPL examples in [CONSOLE.md](CONSOLE.md) |
+| Lattice polytopes, Ehrhart fixtures, Newton polygons | `use algebra`; `LatticeSimplex`, `DiagonalShellPolytope` | [algebra.md](algebra.md) |
+| Characteristic-two divided squares and carry laws | `use algebra`; `DividedSquareSpace`, `BinaryCarryGroup` | [algebra.md](algebra.md) |
+| Radial Mellin/Fourier identities | `use calculus`; `RadialMellinTransform` | [scientific-computing/calculus.md](scientific-computing/calculus.md) |
+| Euclidean ball volume and boundary area | `use geometry`; `EuclideanMeasure` | this guide |
 | Arrays, tensors, linear algebra, optimization, ODEs | flat modules under `core/` | [scientific-computing/overview.md](scientific-computing/overview.md) |
 | SAT-backed finite certificates | `tungsten-wassat` producer + `tungsten-wrat` checker | [certified-mathematics.md](certified-mathematics.md) |
 | Plots | `core/plot.w`, `tungsten-drawille` | [scientific-computing/plot.md](scientific-computing/plot.md) |
@@ -51,6 +56,13 @@ principal Gamma/log-Gamma, complex erf on its power-series disk, and explicit
 integer Lambert-W branches. Exact rational enclosures are available for the
 certified real elementary subset above; certified complex balls remain a
 future layer.
+
+`EuclideanMeasure` uses ambient dimension `d`: `unit_ball_volume(d)` is the
+volume of the unit ball in `R^d`, while `unit_sphere_area(d)` (also named
+`unit_ball_boundary_area(d)`) is the area of its boundary `S^(d-1)`. Exact
+symbolic formulas preserve `pi` and Gamma. Numeric work should use
+`log_unit_ball_volume_numeric` or `unit_ball_root_volume_numeric` once the
+ordinary `f64` volume becomes too small to represent.
 
 ## Exact algebra and geometry
 
@@ -74,6 +86,14 @@ field/ring layer. Differential geometry is a separate `use geometry` chain:
 Riemann/Ricci/scalar/Einstein curvature, the Kretschmann scalar, and geodesic
 systems. Exact symbolic metric operations are currently bounded to dimension
 six.
+
+`WarpedConeSurface` models the intrinsic metric
+`dt^2 + f(t)^2 dtheta^2`. Exponential and power profiles keep `f(t) > 0` at
+every finite proper height while shrinking toward an ideal apex at infinity;
+the linear profile reaches a singular Euclidean-cone tip after finite proper
+distance and is retained as a control. The API reports normalized angular
+separation separately from the shrinking cross-section arc, and its display
+samples are explicitly non-isometric plotting coordinates.
 
 The first physical models exercise that chain rather than hard-coding their
 curvature. `Schwarzschild.new(M)` derives the coordinate Einstein tensor and

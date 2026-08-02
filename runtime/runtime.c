@@ -293,9 +293,10 @@ int bigint_compare(WValue a, WValue b);
 #ifndef BN_BIGINT_HOT_LIVE_HEADER
 #define BN_BIGINT_HOT_LIVE_HEADER 1
 #endif
-/* Hybrid capacity class: powers of two up to BN_BIGINT_HYBRID_P2_LIMIT, then
- * multiples of BN_BIGINT_HYBRID_QUANTUM (both must be powers of two).  Off by
- * default; see the capacity benchmarks in benchmarks/big_math. */
+/* Hybrid capacity class: powers of two up to BN_BIGINT_HYBRID_P2_LIMIT (a
+ * power of two >= 8), then multiples of BN_BIGINT_HYBRID_QUANTUM (any
+ * multiple of 8 — the rounding below is division-form, so non-power-of-two
+ * quanta are exact).  Off by default; see benchmarks/big_math. */
 #ifndef BN_BIGINT_HYBRID_CAP
 #define BN_BIGINT_HYBRID_CAP 0
 #endif
@@ -304,6 +305,18 @@ int bigint_compare(WValue a, WValue b);
 #endif
 #ifndef BN_BIGINT_HYBRID_QUANTUM
 #define BN_BIGINT_HYBRID_QUANTUM 32
+#endif
+#if BN_BIGINT_HYBRID_CAP
+/* The copy kernels round to 8-limb blocks and the fused copy path's guard
+ * (bigint_copy_signed) relies on every hybrid capacity class covering the
+ * rounded width; a quantum that is not a multiple of 8 breaks that covering
+ * argument, and a non-power-of-two limit breaks the p2 rounding. */
+_Static_assert(BN_BIGINT_HYBRID_QUANTUM % 8 == 0,
+               "hybrid quantum must be a multiple of 8 limbs");
+_Static_assert(BN_BIGINT_HYBRID_P2_LIMIT >= 8 &&
+               (BN_BIGINT_HYBRID_P2_LIMIT &
+                (BN_BIGINT_HYBRID_P2_LIMIT - 1)) == 0,
+               "hybrid p2 limit must be a power of two >= 8");
 #endif
 
 #if BN_BIGINT_RECYCLE
@@ -584,8 +597,19 @@ static inline uint32_t bigint_alloc_capacity(uint32_t requested) {
     if (requested > 1 && requested <= BN_BIGINT_POOL_MAX_CAP) {
         if (requested <= BN_BIGINT_HYBRID_P2_LIMIT)
             return 1U << (32 - __builtin_clz(requested - 1));
-        return (requested + (BN_BIGINT_HYBRID_QUANTUM - 1U)) &
-               ~(uint32_t)(BN_BIGINT_HYBRID_QUANTUM - 1U);
+        /* Division form: exact for any quantum. For a power-of-two quantum
+         * clang strength-reduces it to the same add+and pair as the old
+         * mask (verified on -O3 asm), and the mask was WRONG for other
+         * quanta ((x+23) & ~23 is not a multiple of 24), so one form
+         * serves the whole grid instead of an #if pair that would have to
+         * be kept provably identical. */
+        uint32_t rounded = ((requested + (BN_BIGINT_HYBRID_QUANTUM - 1U)) /
+                            BN_BIGINT_HYBRID_QUANTUM) *
+                           BN_BIGINT_HYBRID_QUANTUM;
+        /* Rounding just below the pool ceiling may overshoot it; any cap
+         * >= requested is valid, and clamping keeps the class poolable. */
+        return rounded <= BN_BIGINT_POOL_MAX_CAP ? rounded
+                                                 : BN_BIGINT_POOL_MAX_CAP;
     }
 #elif BN_BIGINT_POWER2_CAP
     if (requested > 1 && requested <= BN_BIGINT_POOL_MAX_CAP)
@@ -606,6 +630,9 @@ static WBigint *bigint_alloc(int32_t cap) {
     /* Round up to 16-byte alignment for w_box_ptr */
     sz = (sz + 15) & ~(size_t)15;
     b = (WBigint *)calloc(1, sz);
+    /* Unreachable at pooled sizes (8 KB), but FFT-band values are 8 MB+
+     * each with several live — die with the size instead of NULL-deref. */
+    if (!b) dief("out of memory allocating bigint (%u limbs)", alloc_cap);
     b->type = W_TYPE_BIGINT;  /* live allocation marker; dispatch uses the object subtag */
     b->cap = alloc_cap;
     b->size = 0;
@@ -625,6 +652,7 @@ static WBigint *bigint_alloc_raw(int32_t cap) {
     size_t sz = sizeof(WBigint) + (size_t)alloc_cap * sizeof(uint64_t);
     sz = (sz + 15) & ~(size_t)15;
     b = (WBigint *)malloc(sz);
+    if (!b) dief("out of memory allocating bigint (%u limbs)", alloc_cap);
 #if BN_RAW_HEADER_STORES
     b->type = W_TYPE_BIGINT;
     b->size = 0;
@@ -6003,13 +6031,17 @@ static void bn_ntt_sqr(uint64_t *out, const uint64_t *a, int32_t n) {
  * elements, which recurse into the (asm-kernel) Toom ladder via
  * bigint_mul_dispatch.
  *
- * v1 simplifications (correct, slightly conservative):
+ * Current simplifications (correct, slightly conservative):
  *   • pieces are limb-aligned (M = 64·w bits) — pack/recompose are limb
  *     slicing + bn_addto, no bit-granular carries;
  *   • K = 64·m, rounded up to a multiple of lcm(64, L/2) so 2^(2K/L) exists
  *     and the K-boundary split in shifts is limb-clean;
- *   • cyclic convolution with 2× zero padding (no negacyclic weights, no √2
- *     trick — those are the remaining distance to GMP).
+ *   • cyclic convolution with 2× zero padding (L = 2·ncoef rounded up).
+ * The √2 trick IS implemented (ssa_shl_half below: √2 = 2^(3K/4) − 2^(K/4),
+ * a primitive 4K-th root, live in the forward and inverse transforms with a
+ * family selector in ssa_choose) — it halves K for a given L. What remains
+ * against GMP is TRUE NEGACYCLIC convolution (weighting away the 2× zero
+ * pad) and bit-granular M; w_mulmod_bnm1 is the CRT building block for it.
  *
  * Ring element: stride S = m+1 limbs; canonical value = lo + top·2^K with
  * top ∈ {0,1} and top==1 ⇒ lo==0 (value 2^K = p−1 exactly). All element

@@ -30036,6 +30036,61 @@ WValue w_bigint_sub_mut(WValue a, WValue b) {
     return w_bigint_addsub_mut(a, b, 1);
 }
 
+/* In-place N x 1 multiply for the same proven-dead accumulator shape
+ * (`r = r * i`, mulchain). bn_mul_1 reads each source index before writing
+ * the destination one, so dst == src is safe; the product needs at most
+ * one extra limb, gated on capacity like the mut add's carry limb. The
+ * word may be an inline i48 or a one-limb bigint; anything wider, any
+ * guard refusal, or a zero falls back to the immutable w_mul — with the
+ * same operand-alias marking as the add/sub fallback, so the accumulator
+ * can never come back holding an unmarked alias. */
+static WValue w_bigint_mul_mut_fallback(WValue a, WValue b) {
+    WValue r = w_mul(a, b);
+    if (r == b && w_is_bigint(r)) w_bigint_mark_shared(w_as_bigint(r));
+    return r;
+}
+
+WValue w_bigint_mul_mut(WValue a, WValue b) {
+    if (!w_is_bigint(a) || (a & W_BIGINT_SIGN_BIT) != 0)
+        return w_bigint_mul_mut_fallback(a, b);
+    WBigint *ba = w_as_bigint(a);
+    if (ba->shared != 0 || ba->size == 0)
+        return w_bigint_mul_mut_fallback(a, b);
+
+    int32_t as = ba->size;              /* overlay clear: header IS the sign */
+    int a_neg = as < 0;
+    int32_t amag = a_neg ? -as : as;
+
+    uint64_t w;
+    int b_neg;
+    if (w_is_int(b)) {
+        int64_t ib = w_as_int(b);
+        if (ib == 0) return w_box_int(0);
+        if (ib == 1) return a;          /* a dies here; identity is the answer */
+        b_neg = ib < 0;
+        w = b_neg ? (uint64_t)(-(ib + 1)) + 1U : (uint64_t)ib;
+    } else if (w_is_bigint(b)) {
+        int32_t bs;
+        WBigint *bb = w_bigint_view(b, &bs);
+        if (bs != 1 && bs != -1)
+            return w_bigint_mul_mut_fallback(a, b);
+        b_neg = bs < 0;
+        w = bb->limbs[0];
+    } else {
+        return w_bigint_mul_mut_fallback(a, b);
+    }
+    if (amag + 1 > (int32_t)ba->cap)
+        return w_bigint_mul_mut_fallback(a, b);
+
+    uint64_t carry = bn_mul_1(ba->limbs, ba->limbs, amag, w);
+    if (carry) {
+        ba->limbs[amag] = carry;
+        amag++;
+    }
+    ba->size = (a_neg != b_neg) ? -amag : amag;
+    return a;
+}
+
 /* Shared-bit surface for the tag-sign aliasing machinery and its specs.
  * Marking a non-bigint is a no-op; querying one answers false. The bit is
  * sticky for the buffer's live lifetime — see WBigint.shared in wvalue.h

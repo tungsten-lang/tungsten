@@ -585,6 +585,7 @@ WValue w_bigint_mark_shared_value(WValue v);
 WValue w_bigint_shared_value(WValue v);
 WValue w_bigint_add_mut(WValue a, WValue b);
 WValue w_bigint_sub_mut(WValue a, WValue b);
+WValue w_bigint_mul_mut(WValue a, WValue b);
 
 /* ---- Hash ---- */
 WValue w_hash_new(void);

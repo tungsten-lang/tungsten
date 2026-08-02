@@ -34,6 +34,34 @@
 check("mut.accumulate", accumulate(50000), ((1 << 200) + 49999 * 25000) % 1000000007)
 check("mut.drain", drain(50000), ((1 << 200) - 49999 * 25000) % 1000000007)
 
+# STAR self-compound: factorial via in-place N x 1 multiply, checked
+# against the arbitrary-precision reference
+-> factorial(n)
+  r = 1 << 64
+  i = 2 ## i64
+  while i <= n
+    r = r * i
+    i = i + 1
+  r % 1000000007
+
+-> factorial_ref(n)
+  r = 1 << 64
+  i = 2
+  acc = r
+  while i <= n
+    j = 0
+    t = 0
+    # multiply by repeated addition through a NON-candidate (aliased) var
+    # so the reference never takes the mut path
+    snapshot = acc
+    while j < i
+      t = t + snapshot
+      j = j + 1
+    acc = t
+    i = i + 1
+  acc % 1000000007
+check("mut.star_factorial", factorial(40), factorial_ref(40))
+
 # carry growth in place: all-ones magnitude + 1 grows a limb
 -> carry_growth
   r = (1 << 256) - 1

@@ -2359,7 +2359,7 @@ use lowering/definitions
   mut_target_set = false
   if ast_kind(target) == :var && ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][target.name] == true
     v = node.value
-    if v != nil && is_ast_node?(v) && ast_kind(v) == :binary_op && v.op in (:PLUS :MINUS) && v.left != nil && is_ast_node?(v.left) && ast_kind(v.left) == :var && v.left.name == target.name
+    if v != nil && is_ast_node?(v) && ast_kind(v) == :binary_op && v.op in (:PLUS :MINUS :STAR) && v.left != nil && is_ast_node?(v.left) && ast_kind(v.left) == :var && v.left.name == target.name
       ctx[:mut_accum_target] = target.name
       mut_target_set = true
 

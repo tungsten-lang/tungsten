@@ -1811,7 +1811,7 @@
     return false
   if ast_kind(node) != :binary_op
     return false
-  if !(node.op in (:PLUS :MINUS))
+  if !(node.op in (:PLUS :MINUS :STAR))
     return false
   node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == name
 
@@ -1864,12 +1864,15 @@
         mut_walk_expr(st.value, assigned, dead)
     elsif k == :compound_assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :var
       name = st.target.name
-      if st.op in (:PLUS :MINUS)
+      if st.op in (:PLUS :MINUS :STAR)
+        # STAR joined once every w_mul identity return became
+        # fresh-or-marked (the N x 1 arm's ±1 aliases carry shared marks,
+        # and bigint x inline is intercepted before the unmarked tail
+        # identities) — the same invariant that admits PLUS/MINUS.
         assigned[name] = true
         mut_walk_expr(st.value, assigned, dead)
       else
-        # e.g. r *= i — w_mul's identity shapes can alias an operand into
-        # the var unmarked; fail closed
+        # any other compound op keeps failing closed
         dead[name] = true
         mut_walk_expr(st.value, assigned, dead)
     elsif k == :while

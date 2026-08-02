@@ -389,6 +389,11 @@ def add_external_lanes(
     if not rows:
         return
     operation = rows[0]["operation"]
+    # The external harnesses (Rust num-bigint, Odin core:math/big) predate
+    # the asymmetric rows; skip ops they don't implement rather than
+    # erroring the whole run.
+    if operation in ("add1", "sub1", "mul1", "div1"):
+        return
     sizes = [row["limbs"] for row in rows]
     by_size = {row["limbs"]: row for row in rows}
     for language in languages:

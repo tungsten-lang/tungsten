@@ -4232,6 +4232,48 @@ int main(int argc, char **argv) {
                     }
                 }
             }
+            /* mul: mutating vs immutable across signs, incl. the carry
+             * limb and word-boundary values */
+            {
+                static const int64_t words[] = {3, -7, 2, 140737488355327LL};
+                for (size_t wi = 0; wi < 4; wi++) {
+                    WValue a0, b0, m0;
+                    bench_boxed_operands(BENCH_BOXED_ADD, l, &a0, &b0, &m0);
+                    for (int sa = 0; sa < 2; sa++) {
+                        WValue a_ref = sa ? w_neg(bench_clone_integer(a0))
+                                          : bench_clone_integer(a0);
+                        WValue want = bigint_mul_any(a_ref,
+                                                     w_box_int(words[wi]));
+                        WValue a_mut = bench_clone_integer(a0);
+                        if (sa) {
+                            WBigint *am = w_as_bigint(a_mut);
+                            am->size = -am->size;
+                        }
+                        WValue got = w_bigint_mul_mut(a_mut,
+                                                      w_box_int(words[wi]));
+                        if (bigint_compare(got, want) != 0)
+                            dief("fuzz-mut mul mismatch l=%d sa=%d w=%lld",
+                                 l, sa, (long long)words[wi]);
+                    }
+                }
+                /* identity and annihilator words */
+                WValue a0, b0, m0;
+                bench_boxed_operands(BENCH_BOXED_ADD, l, &a0, &b0, &m0);
+                WValue x = bench_clone_integer(a0);
+                if (w_bigint_mul_mut(x, w_box_int(1)) != x)
+                    dief("fuzz-mut mul x*1 not identity l=%d", l);
+                WValue z = w_bigint_mul_mut(x, w_box_int(0));
+                if (!w_is_int(z) || w_as_int(z) != 0)
+                    dief("fuzz-mut mul x*0 nonzero l=%d", l);
+                /* shared receivers refuse */
+                WValue shared = bench_clone_integer(a0);
+                w_bigint_mark_shared(w_as_bigint(shared));
+                WValue got = w_bigint_mul_mut(shared, w_box_int(3));
+                if (got == shared)
+                    dief("fuzz-mut mul mutated a SHARED receiver l=%d", l);
+                if (bigint_compare(shared, a0) != 0)
+                    dief("fuzz-mut mul shared receiver corrupted l=%d", l);
+            }
             /* self-alias: x += x doubles; x -= x zeroes; x += 0 identity */
             {
                 WValue a0, b0, m0;

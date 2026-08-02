@@ -186,12 +186,13 @@ New to the language? Start at [doc/getting-started/](doc/getting-started/).
 
 **Performance flags** (for `-o` native builds):
 
-| Flag        | What it does                                                               |
-| ----------- | -------------------------------------------------------------------------- |
-| `--release` | Whole-program optimization build (`-O3 -flto`); inline across linked files |
-| `--native`  | Native build (`-march=native -mtune=native`)                               |
-| `--fast`    | Fast floating-point, non-IEEE.                                             |
-| `--no-lto`  | Skip link-time optimization (faster edit-compile loop, slower runtime).    |
+| Flag         | What it does                                                                                                                |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `--release`  | Release profile: omit debug checks/metadata and use whole-program optimization; defaults portable unless a target is explicit |
+| `--native`   | Tune for the build host (`-march=native -mtune=native`)                                                                  |
+| `--portable` | Target x86-64-v2 or armv8-a with generic tuning                                                                            |
+| `--fast`     | Fast floating-point, non-IEEE                                                                                              |
+| `--no-lto`   | Skip link-time optimization (faster edit-compile loop, slower runtime)                                                      |
 
 
 > **_On Windows?_** Tungsten targets macOS and Linux
@@ -203,7 +204,7 @@ New to the language? Start at [doc/getting-started/](doc/getting-started/).
 | --------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `TUNGSTEN_FREE`       | on                            | Compile-time free insertion for non-escaped heap values. Set `TUNGSTEN_FREE=0` to disable.                  |
 | `TUNGSTEN_CLANG_OPT`  | `-O3`                         | Optimization flags for clang. `--fast` defaults this to `-O3 -ffast-math`                                   |
-| `TUNGSTEN_MARCH_ARGS` | `-march=native -mtune=native` | Target CPU/features for codegen. Set to a generic baseline (e.g. `-march=x86-64-v3`) for portable binaries. |
+| `TUNGSTEN_MARCH_ARGS` | `-march=native -mtune=native` | Target CPU/features for codegen. Explicit `--native`/`--portable` wins; otherwise a set value is honored and bare `--release` defaults portable. |
 | `TUNGSTEN_BACKTRACE`  | off                           | Set to `1` to include full C backtrace in error dumps (defaults to only Tungsten-level frames).             |
 
 ## Contributing

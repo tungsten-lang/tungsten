@@ -134,10 +134,10 @@ detect_target_memo = {}
   awk = "awk '/^attributes #0 / { for(i=1;i<=NF;i++){ "
   awk = awk + "if($i~/^\"target-cpu\"=/||$i~/^\"target-features\"=/||$i~/^\"tune-cpu\"=/) "
   awk = awk + "printf \"%s \", $i } print \"\" }'"
-  # Match the march the binary is actually built with (TUNGSTEN_MARCH_ARGS, set
-  # by tungsten.w's --release), so the target-features baked into every emitted
-  # function are the portable baseline for a release build — not the host's
-  # native features, which would defeat portability and mismatch the runtime.
+  # Match the march the binary is actually built with. tungsten.w resolves the
+  # profile/target flags into TUNGSTEN_MARCH_ARGS before lowering, so emitted
+  # functions and the runtime use the same native, portable, or custom feature
+  # set.
   march = env("TUNGSTEN_MARCH_ARGS")
   if march == nil || march == ""
     march = "-march=native -mtune=native"

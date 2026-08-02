@@ -36,6 +36,10 @@ if ARGV.include?("--help") || ARGV.include?("-h")
       --force     Ignore cached stage binaries and rebuild
       --pgo       Build the compiler with profile-guided optimization
       --no-bits   Skip compiling bit entry points (implied by -0, -1, and -2)
+      --release   Full-LTO release profile (portable CPU baseline by default)
+      --native    Tune compiler and runtime for this host
+      --portable  Target the portable x86-64-v2 / armv8-a baseline
+      --fast      Enable fast, non-IEEE floating-point optimization
       -h, --help  Show this help
 
     Developer options (bootstrap maintainers; not needed day-to-day):
@@ -383,36 +387,42 @@ end
 #                              w_array_get, etc.) for partial cross-optimization.
 #   --release:  -flto=full   — single LLVM module; strongest optimization;
 #                              ~30% slower link, marginal further perf gain.
-release_mode = ARGV.include?("--release")
-ARGV.delete("--release")
+release_mode  = ARGV.delete("--release") ? true : false
+native_mode   = ARGV.delete("--native") ? true : false
+portable_mode = ARGV.delete("--portable") ? true : false
+fast_mode     = !!(ARGV.delete("--fast") || ARGV.delete("-fast"))
+if native_mode && portable_mode
+  $stderr.puts "--native and --portable are mutually exclusive"
+  exit 1
+end
 LTO_FLAG = release_mode ? "-flto=full" : "-flto=thin"
 
-# Optimization flag threaded into the bootstrap stage compiles. Both --release
-# and --native emit identical .ll (both skip debug checks + stacktrace metadata),
-# so the stage1==stage2 byte-identity check holds either way — they differ only
-# in the clang -march the stage binaries are linked with. A normal local build
-# uses --native (host-tuned, fast); a release build (`bin/tungsten build
-# --release`) uses --release (portable x86-64-v2 / armv8-a baseline) so the
-# distributed compiler binary runs on CPUs older than the build machine.
-STAGE_OPT_FLAG = release_mode ? "--release" : "--native"
-
-# ISA/tuning flags for the runtime .o compile, from the shared BuildFlags source
-# (mirrors compiler/tungsten.w's march_flags). Portable only for a release build;
-# host-tuned (native) for a normal local build.
 require File.join(ROOT, "implementations/ruby/lib/tungsten/build_flags")
-# For a release build the ISA/tuning comes from BuildFlags (portable x86-64-v2 /
-# armv8-a), UNLESS the environment already pins TUNGSTEN_MARCH_ARGS — which lets
-# the release CI build extra tiers (e.g. -march=x86-64-v3) without a code change.
-# Local (native) builds leave it unset → host-tuned native.
-MARCH_FLAGS =
-  if release_mode && !ENV["TUNGSTEN_MARCH_ARGS"].to_s.empty?
-    ENV["TUNGSTEN_MARCH_ARGS"].split
-  else
-    Tungsten::BuildFlags.march(release_mode ? :portable : :native)
-  end
-# Hand it to the stage compiles via env so the stage-0 C VM (which can't ccall
-# setenv) bakes the same baseline into the target-features probe + link.
-ENV["TUNGSTEN_MARCH_ARGS"] ||= MARCH_FLAGS.join(" ") if release_mode
+MARCH_FLAGS = Tungsten::BuildFlags.march_for(
+  release: release_mode,
+  native: native_mode,
+  portable: portable_mode,
+  override: ENV["TUNGSTEN_MARCH_ARGS"]
+)
+
+# Hand the resolved target to every bootstrap host. The stage-0 C VM cannot
+# implement setenv itself, and compiler IR must carry the same target attributes
+# as the C runtime objects it links against.
+ENV["TUNGSTEN_MARCH_ARGS"] = MARCH_FLAGS.join(" ")
+
+# Bootstrap compilers remain release-profile binaries, preserving the prior
+# default-build behavior. Public build flags remain orthogonal: release chooses
+# the full-LTO build profile, while target and fast mode are forwarded intact.
+STAGE_FLAGS = ["--release"]
+STAGE_FLAGS << "--native" if native_mode
+STAGE_FLAGS << "--portable" if portable_mode
+STAGE_FLAGS << "--fast" if fast_mode
+
+PROGRAM_FLAGS = []
+PROGRAM_FLAGS << "--release" if release_mode
+PROGRAM_FLAGS << "--native" if native_mode
+PROGRAM_FLAGS << "--portable" if portable_mode
+PROGRAM_FLAGS << "--fast" if fast_mode
 
 color = $stderr.tty? && !ENV["NO_COLOR"]
 bold  = color ? "\e[1m" : ""
@@ -554,7 +564,7 @@ def project_relative_path(path)
 end
 
 def compile_bit(entry, out_bin, compiler, gem_exe, tungsten_w, runtime_archive, link_flags, link_libs, bit_clang_opt,
-                toolchain_env, colors)
+                compiler_flags, toolchain_env, colors)
   bold, dim, green, red, reset = colors
   bit_root = File.dirname(File.dirname(entry))
   bit_name = File.basename(bit_root)
@@ -571,9 +581,9 @@ def compile_bit(entry, out_bin, compiler, gem_exe, tungsten_w, runtime_archive, 
   log_path = File.join(Dir.tmpdir, "tungsten-build-#{bit_name}.log")
   ok = Dir.chdir(ROOT) do
     if File.executable?(compiler)
-      system(build_env, compiler, "compile", entry, "--out", out_bin, [:out, :err] => log_path)
+      system(build_env, compiler, "compile", entry, "--out", out_bin, *compiler_flags, [:out, :err] => log_path)
     else
-      system(build_env, gem_exe, tungsten_w, "--", "compile", entry, "--out", out_bin, [:out, :err] => log_path)
+      system(build_env, gem_exe, tungsten_w, "--", "compile", entry, "--out", out_bin, *compiler_flags, [:out, :err] => log_path)
     end
   end
 
@@ -717,9 +727,10 @@ run_pgo_post_step = lambda do |stage2_bin, label|
   # 3a: Rebuild the compiler with profiling instrumentation. The stage-2
   # binary re-emits its own IR (~2s) and clang links it with our flags.
   puts "    #{dim}instrumenting...#{reset}"
-  instr_env = { "TUNGSTEN_CLANG_OPT" => "-O3 -fprofile-generate=#{pgo_dir} -mllvm -vp-counters-per-site=8",
+  pgo_fast_flag = fast_mode ? " -ffast-math" : ""
+  instr_env = { "TUNGSTEN_CLANG_OPT" => "-O3 -fprofile-generate=#{pgo_dir} -mllvm -vp-counters-per-site=8#{pgo_fast_flag}",
               "TUNGSTEN_INCREMENTAL" => "0" }
-  unless system(instr_env, stage2_bin, "compile", TUNGSTEN_W, "--out", pgo_instrumented, chdir: ROOT)
+  unless system(instr_env, stage2_bin, "compile", TUNGSTEN_W, "--out", pgo_instrumented, *STAGE_FLAGS, chdir: ROOT)
     $stderr.puts "#{red}PGO instrumentation build failed#{reset}"
     exit 1
   end
@@ -730,7 +741,8 @@ run_pgo_post_step = lambda do |stage2_bin, label|
   FileUtils.rm_f(Dir.glob(File.join(pgo_dir, "*.profraw")))
   puts "    #{dim}profiling...#{reset}"
   profile_env = { "LLVM_PROFILE_FILE" => pgo_profraw, "TUNGSTEN_INCREMENTAL" => "0" }
-  unless system(profile_env, pgo_instrumented, "compile", TUNGSTEN_W, "--out", File.join(pgo_dir, "train-out"), chdir: ROOT)
+  unless system(profile_env, pgo_instrumented, "compile", TUNGSTEN_W, "--out", File.join(pgo_dir, "train-out"),
+                *STAGE_FLAGS, chdir: ROOT)
     $stderr.puts "#{red}PGO profiling run failed#{reset}"
     exit 1
   end
@@ -747,9 +759,9 @@ run_pgo_post_step = lambda do |stage2_bin, label|
   # 3d: Rebuild with profile data
   puts "    #{dim}optimizing...#{reset}"
   opt_env = { "TUNGSTEN_CLANG_OPT" =>
-    "-O3 -fprofile-use=#{pgo_profdata} -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date",
+    "-O3 -fprofile-use=#{pgo_profdata} -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date#{pgo_fast_flag}",
     "TUNGSTEN_INCREMENTAL" => "0" }
-  unless system(opt_env, stage2_bin, "compile", TUNGSTEN_W, "--out", pgo_optimized, chdir: ROOT)
+  unless system(opt_env, stage2_bin, "compile", TUNGSTEN_W, "--out", pgo_optimized, *STAGE_FLAGS, chdir: ROOT)
     $stderr.puts "#{red}PGO optimization build failed#{reset}"
     exit 1
   end
@@ -766,9 +778,10 @@ end
 # bitcode here made clang reprocess the runtime during each supposedly
 # no-LTO link; native objects cut several seconds while preserving emitted IR.
 # Bit entry points still use LTO_FLAG independently in link_flags below.
-runtime_cache_schema = "runtime-cache-v1"
-cc_flags = %W[-O2 -DNDEBUG -pthread] + MARCH_FLAGS + %w[-c] + tls_flags + http2_flags + onig_cflags + zstd_cflags
-runtime_objc_flags = %W[-O2 -DNDEBUG] + MARCH_FLAGS + %w[-c -x objective-c]
+runtime_cache_schema = "runtime-cache-v2"
+fast_clang_flags = fast_mode ? %w[-ffast-math] : []
+cc_flags = %W[-O2 -DNDEBUG -pthread] + MARCH_FLAGS + fast_clang_flags + %w[-c] + tls_flags + http2_flags + onig_cflags + zstd_cflags
+runtime_objc_flags = %W[-O2 -DNDEBUG] + MARCH_FLAGS + fast_clang_flags + %w[-c -x objective-c]
 # TUNGSTEN_SANITIZE="-fsanitize=thread" (or address) instruments the runtime
 # objects; the flags join the compile key below so sanitized and plain
 # archives cache side by side. Pass the matching -fsanitize in LDFLAGS when
@@ -818,9 +831,9 @@ bootstrap_compiler_clang_opt =
   if !ENV["TUNGSTEN_CLANG_OPT"].to_s.empty?
     ENV["TUNGSTEN_CLANG_OPT"]
   elsif release_mode
-    release_default_opt
+    fast_mode ? "#{release_default_opt} -ffast-math" : release_default_opt
   else
-    "-O0"
+    fast_mode ? "-O0 -ffast-math" : "-O0"
   end
 
 runtime_dependencies_key = Digest::SHA256.new
@@ -955,7 +968,7 @@ end
 bit_cache_dir = File.join(build_cache_dir, "bits")
 FileUtils.mkdir_p(bit_cache_dir)
 
-def bit_build_sha(bit_path, compiler, runtime_key, link_flags, link_libs, bit_clang_opt)
+def bit_build_sha(bit_path, compiler, runtime_key, link_flags, link_libs, bit_clang_opt, compiler_flags)
   sha = Digest::SHA256.new
   sha.update(tree_sha(bit_path))
   bitfile_includes(bit_path).each do |include_path|
@@ -966,6 +979,7 @@ def bit_build_sha(bit_path, compiler, runtime_key, link_flags, link_libs, bit_cl
   sha.update(link_flags.join("\0"))
   sha.update(link_libs.join("\0"))
   sha.update(bit_clang_opt)
+  sha.update(compiler_flags.join("\0"))
   sha.hexdigest[0..15]
 end
 
@@ -1089,7 +1103,7 @@ unless bit_only
       file_sha(c_interp_for_build),
       file_sha(lex_table_path),
       COMPILER_DIR_NAME,
-      STAGE_OPT_FLAG,
+      STAGE_FLAGS.join("\0"),
       ENV["TUNGSTEN_MARCH_ARGS"].to_s,
       ambient_toolchain_identity,
       c_stage1_base_env.sort.map { |key, value| "#{key}=#{value}" }.join("\0")
@@ -1122,7 +1136,7 @@ unless bit_only
       # disables full LTO at link — mixing -flto with the runtime archive's
       # thin-LTO bitcode crashes clang's linker (LLVM ERROR: Unexistent
       # dir). Spinel's stage 2 invocation uses the same combination.
-      unless system(stage1_env, c_interp_for_build, TUNGSTEN_W, "compile", TUNGSTEN_W, "--out", stage1, STAGE_OPT_FLAG,
+      unless system(stage1_env, c_interp_for_build, TUNGSTEN_W, "compile", TUNGSTEN_W, "--out", stage1, *STAGE_FLAGS,
                     "--runtime", runtime_archive, "--no-lto",
                     [:out, :err] => stage1_log)
         $stderr.puts File.read(stage1_log) if File.exist?(stage1_log)
@@ -1158,7 +1172,7 @@ unless bit_only
         c_stage1_sources_sha,
         c_stage_cache_schema,
         runtime_compile_key,
-        STAGE_OPT_FLAG,
+        STAGE_FLAGS.join("\0"),
         ENV["TUNGSTEN_MARCH_ARGS"].to_s,
         ambient_toolchain_identity,
         c_stage2_base_env.sort.map { |key, value| "#{key}=#{value}" }.join("\0")
@@ -1183,7 +1197,7 @@ unless bit_only
         # Same --runtime + --no-lto combination as stage 1; the produced
         # stage 2 binary is the installed compiler, but bit builds use it
         # to invoke clang independently with their own LTO settings.
-        unless system(stage2_env, stage1, "compile", TUNGSTEN_W, "--out", stage2, STAGE_OPT_FLAG,
+        unless system(stage2_env, stage1, "compile", TUNGSTEN_W, "--out", stage2, *STAGE_FLAGS,
                       "--runtime", runtime_archive, "--no-lto",
                       [:out, :err] => stage2_log)
           $stderr.puts File.read(stage2_log) if File.exist?(stage2_log)
@@ -1252,6 +1266,7 @@ unless bit_only
     spinel_env["TUNGSTEN_CLANG_OPT"] = "-O1" if ENV["TUNGSTEN_CLANG_OPT"].to_s.empty?
     spinel_env["SP_GC_DISABLE"] = ENV.fetch("SP_GC_DISABLE", "1")
     spinel_env["TUNGSTEN_SPINEL_FORCE_STAGE0"] = "1" if force_build
+    spinel_env["TUNGSTEN_SPINEL_FAST"] = "1" if fast_mode
 
     if stage0_only
       puts
@@ -1290,7 +1305,7 @@ unless bit_only
       )
       unless system(
         stage2_env, stage1, "compile", "compiler/tungsten.w", "--runtime", spinel_runtime, "--no-lto",
-        STAGE_OPT_FLAG, "--out", stage2
+        *STAGE_FLAGS, "--out", stage2
       )
         $stderr.puts "#{red}Stage 2 failed#{reset} (#{$?.inspect})"
         exit 1
@@ -1366,13 +1381,13 @@ unless bit_only
         )
         stage1_cmd = [
           stage1_env, CUSTOM_RUBY, GEM_EXE, TUNGSTEN_W, "--", "compile", "-v", TUNGSTEN_W, "--out", stage1,
-          STAGE_OPT_FLAG
+          *STAGE_FLAGS
         ]
       else
         ruby_label = "system Ruby"
         stage1_env = compiler_toolchain_env.merge("TUNGSTEN_LL_DIR" => stage_ll_dir, "TUNGSTEN_LL_PATH" => stage1_ll)
         stage1_cmd = [
-          stage1_env, GEM_EXE, TUNGSTEN_W, "--", "compile", "-v", TUNGSTEN_W, "--out", stage1, STAGE_OPT_FLAG
+          stage1_env, GEM_EXE, TUNGSTEN_W, "--", "compile", "-v", TUNGSTEN_W, "--out", stage1, *STAGE_FLAGS
         ]
       end
       puts
@@ -1424,7 +1439,7 @@ unless bit_only
         "TUNGSTEN_LL_PATH" => stage2_ll,
         "TUNGSTEN_CLANG_OPT" => bootstrap_compiler_clang_opt
       )
-      unless system(stage2_env, stage1, "compile", "-v", TUNGSTEN_W, "--out", stage2, STAGE_OPT_FLAG)
+      unless system(stage2_env, stage1, "compile", "-v", TUNGSTEN_W, "--out", stage2, *STAGE_FLAGS)
         $stderr.puts "#{red}Stage 2 failed#{reset} (#{$?.inspect})"
         exit 1
       end
@@ -1470,7 +1485,8 @@ t4 = t_runtime_end
 
 bit_clang_opt = ENV["TUNGSTEN_BITS_CLANG_OPT"].to_s
 bit_clang_opt = "-O0" if bit_clang_opt.empty?
-link_flags = %W[#{bit_clang_opt} -DNDEBUG -march=native -mtune=native #{LTO_FLAG}]
+bit_clang_opt = "#{bit_clang_opt} -ffast-math" if fast_mode && !bit_clang_opt.split.include?("-ffast-math")
+link_flags = [bit_clang_opt, "-DNDEBUG", *MARCH_FLAGS, LTO_FLAG]
 if RUBY_PLATFORM =~ /darwin/
   link_flags << "-Wl,-dead_strip"
 else
@@ -1511,7 +1527,7 @@ elsif bit_only
   bin_dir = File.join(bit_root, "bin")
   FileUtils.mkdir_p(bin_dir)
   out_bin = File.join(bin_dir, short_name)
-  bit_sha = bit_build_sha(bit_root, COMPILER_BIN, runtime_key, link_flags, link_libs, bit_clang_opt)
+  bit_sha = bit_build_sha(bit_root, COMPILER_BIN, runtime_key, link_flags, link_libs, bit_clang_opt, PROGRAM_FLAGS)
   stamp = bit_cache_stamp(bit_cache_dir, short_name)
 
   puts "#{bold}==> Building #{File.basename(bit_root)}#{reset}"
@@ -1519,7 +1535,7 @@ elsif bit_only
     puts "    #{dim}skip#{reset}    #{project_relative_path(out_bin)}"
     bits_skipped = 1
   elsif compile_bit(entry, out_bin, COMPILER_BIN, GEM_EXE, TUNGSTEN_W, runtime_archive, link_flags, link_libs,
-                    bit_clang_opt, compiler_toolchain_env, colors)
+                    bit_clang_opt, PROGRAM_FLAGS, compiler_toolchain_env, colors)
     File.write(stamp, "#{bit_sha}\n")
     bits_built = 1
   else
@@ -1541,13 +1557,13 @@ else
     next unless File.exist?(entry)
 
     out_bin = File.join(bin_dir, short_name)
-    bit_sha = bit_build_sha(bit_path, COMPILER_BIN, runtime_key, link_flags, link_libs, bit_clang_opt)
+    bit_sha = bit_build_sha(bit_path, COMPILER_BIN, runtime_key, link_flags, link_libs, bit_clang_opt, PROGRAM_FLAGS)
     stamp = bit_cache_stamp(bit_cache_dir, short_name)
     if !force_build && File.executable?(out_bin) && File.exist?(stamp) && File.read(stamp).strip == bit_sha
       puts "    #{dim}skip#{reset}    #{project_relative_path(out_bin)}"
       bits_skipped += 1
     elsif compile_bit(entry, out_bin, COMPILER_BIN, GEM_EXE, TUNGSTEN_W, runtime_archive, link_flags, link_libs,
-                      bit_clang_opt, compiler_toolchain_env, colors)
+                      bit_clang_opt, PROGRAM_FLAGS, compiler_toolchain_env, colors)
       File.write(stamp, "#{bit_sha}\n")
       bits_built += 1
     else

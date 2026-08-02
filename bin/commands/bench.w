@@ -307,7 +307,7 @@ CAL_MAX = 4000000000
 # Returns [ops_per_sec, ok]. Integer microseconds throughout.
 -> bench_native(src, runs)
   out = builddir + "/" + capture("basename \"[src]\" .w").strip
-  # Fast archive-linked -o path (~9x faster to compile than `compile --native`,
+  # Fast archive-linked -o path (~9x faster to compile than `compile --release --native`,
   # identical runtime for these self-contained hot loops).
   system("\"[tungsten]\" -o \"[out]\" \"[src]\" >/dev/null 2>&1")
   if !is_exe(out)

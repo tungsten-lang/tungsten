@@ -17,6 +17,27 @@ module Tungsten
   module BuildFlags
     module_function
 
+    # Resolve optimization-profile and CPU-target flags as separate axes.
+    # A bare release keeps Tungsten's historical portable baseline; an explicit
+    # target wins over both that fallback and an ambient march override.
+    def target_mode(release:, native:, portable:)
+      raise ArgumentError, "--native and --portable are mutually exclusive" if native && portable
+
+      return :native if native
+      return :portable if portable
+
+      release ? :portable : :native
+    end
+
+    def march_for(release:, native:, portable:, override: nil)
+      mode = target_mode(release: release, native: native, portable: portable)
+      if !native && !portable && !override.to_s.empty?
+        override.split
+      else
+        march(mode)
+      end
+    end
+
     def march(mode)
       x86 = RbConfig::CONFIG["host_cpu"] =~ /x86_64|amd64|i\d86/
       if mode == :portable

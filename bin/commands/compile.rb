@@ -15,18 +15,24 @@ MACOS = RUBY_PLATFORM =~ /darwin/
 # archive is built with the matching LTO mode by build.rb so the linker
 # has bitcode for both halves and can cross-optimize through dispatch
 # (w_method_call_cached etc.).
-RELEASE_MODE = ARGV.include?("--release")
-ARGV.delete("--release") if RELEASE_MODE
+RELEASE_MODE = ARGV.delete("--release") ? true : false
 # LTO policy: the compiled `compile` backend links a fast native-object runtime
-# archive by default and does whole-program LTO only for --release/--native/--lto.
+# archive by default and does whole-program LTO only for --release/--lto.
 # Strip those here (OptionParser would reject --lto) and forward them verbatim to
 # the fast path so `tungsten -o file.w --release` reaches the backend's LTO path.
-LTO_MODE = ARGV.delete("--lto") ? true : false
-NATIVE_MODE = ARGV.delete("--native") ? true : false
-LTO_FORWARD = []
-LTO_FORWARD << "--release" if RELEASE_MODE
-LTO_FORWARD << "--lto" if LTO_MODE
-LTO_FORWARD << "--native" if NATIVE_MODE
+LTO_MODE      = ARGV.delete("--lto") ? true : false
+NATIVE_MODE   = ARGV.delete("--native") ? true : false
+PORTABLE_MODE = ARGV.delete("--portable") ? true : false
+if NATIVE_MODE && PORTABLE_MODE
+  warn "--native and --portable are mutually exclusive"
+  exit 1
+end
+
+BACKEND_FLAGS = []
+BACKEND_FLAGS << "--release" if RELEASE_MODE
+BACKEND_FLAGS << "--lto" if LTO_MODE
+BACKEND_FLAGS << "--native" if NATIVE_MODE
+BACKEND_FLAGS << "--portable" if PORTABLE_MODE
 LTO_FLAG = RELEASE_MODE ? "-flto=full" : "-flto=thin"
 
 # Floating-point math mode. Unlike --release (which only tunes Ruby-side LTO),
@@ -59,7 +65,12 @@ if (si = ARGV.index("--sysroot")) && ARGV[si + 1]
   ARGV.delete_at(si)
 end
 require File.join(ROOT, "implementations/ruby/lib/tungsten/build_flags")
-MARCH_FLAGS = Tungsten::BuildFlags.march(RELEASE_MODE ? :portable : :native)
+MARCH_FLAGS = Tungsten::BuildFlags.march_for(
+  release: RELEASE_MODE,
+  native: NATIVE_MODE,
+  portable: PORTABLE_MODE,
+  override: ENV["TUNGSTEN_MARCH_ARGS"]
+)
 CLANG_FLAGS = if ENV["CLANG_FLAGS"]
                 ENV["CLANG_FLAGS"].split
               elsif LINUX
@@ -312,6 +323,13 @@ parser = OptionParser.new do |opts|
   opts.on "--intern ALGO", %w[raw zstd], "Static slab encoding (raw or zstd)" do |algo|
     intern_algo = algo
   end
+
+  opts.separator ""
+  opts.separator "Build flags:"
+  opts.separator "    --release        Release profile; portable CPU target by default"
+  opts.separator "    --native         Tune for the build host"
+  opts.separator "    --portable       Target the portable x86-64-v2 / armv8-a baseline"
+  opts.separator "    --fast           Enable fast, non-IEEE floating-point"
 
   opts.on "-v", "Print version, enable verbose mode" do
     flag_verbose = true
@@ -631,7 +649,7 @@ when ".w"
       Dir.mktmpdir("tungsten-ll") do |dir|
         staged_bin = File.join(dir, File.basename(script, ".w"))
         staged_ll = File.join(dir, File.basename(script, ".w") + ".ll")
-        cmd = [COMPILER, "compile", script, "--out", staged_bin, "--intern", intern_algo] + MATH_MODE_FLAGS
+        cmd = [COMPILER, "compile", script, "--out", staged_bin, "--intern", intern_algo] + MATH_MODE_FLAGS + BACKEND_FLAGS
         # The compiled backend normally isolates implicit LLVM scratch files.
         # This compatibility mode needs a durable path until the child exits,
         # so make that ownership explicit inside this invocation's temp dir.
@@ -668,7 +686,7 @@ when ".w"
     # Fast path: delegate to compiled binary
     cmd = [COMPILER]
     if out_path
-      cmd += ["compile", script, "--out", out_path, "--intern", intern_algo] + MATH_MODE_FLAGS + LTO_FORWARD
+      cmd += ["compile", script, "--out", out_path, "--intern", intern_algo] + MATH_MODE_FLAGS + BACKEND_FLAGS
     else
       cmd += ["run", script, *args]
     end

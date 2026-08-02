@@ -5,7 +5,7 @@ self-compile used by `bin/tungsten build`:
 
 ```text
 tungsten-c compiler/tungsten.w compile compiler/tungsten.w --out <fresh> \
-  --native --runtime <content-addressed-runtime.a> --no-lto
+  --release --native --runtime <content-addressed-runtime.a> --no-lto
 ```
 
 `bench/c-vm-perf.sh` prepares the production stage0/runtime identity first and

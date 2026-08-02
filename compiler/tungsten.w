@@ -34,7 +34,9 @@ if args.size() == 0
   << "  --intern ALGO    Static slab encoding (raw or zstd)"
   << "  --no-lto         Disable link-time optimization"
   << "  --frame-pointers Keep frame pointers (for profiling/debugging)"
-  << "  --release        Skip debug safety checks and stacktrace metadata"
+  << "  --release        Release profile; portable CPU target by default"
+  << "  --native         Tune for the build host"
+  << "  --portable       Target the portable x86-64-v2 / armv8-a baseline"
   << "  --fast, -fast    Fast FP: FMA + reassociation + reciprocals + nnan/ninf"
   << "  --strict-math    Strict IEEE 754: no FMA, no contraction"
   << "  --ll             Write LLVM IR (.ll) next to the binary"
@@ -71,10 +73,13 @@ g_ast_stats_delta = {}
 g_ast_stats_delta_cross = {}
 g_ast_stats_meta = {same_arena_real: 0, cross_arena: 0, child_inline: 0, negative_delta: 0}
 g_ast_stats_same_kind = {}
-release_mode   = false
-dev_mode       = false
-fast_mode      = false
-math_mode      = :precise
+release_mode    = false
+native_mode     = false
+portable_mode   = false
+cpu_target_mode = "native"
+dev_mode        = false
+fast_mode       = false
+math_mode       = :precise
 # Incremental-cache channel out of emit_ir (mutated, never reassigned —
 # fn-body assignment to a top-level var would shadow, not write).
 g_incremental  = {manifest: nil}
@@ -109,7 +114,9 @@ while i < args.size()
     << "  --no-lto         Disable link-time optimization"
     << "  --lto            Whole-program LTO (leaner binary; default links a fast native runtime archive)"
     << "  --frame-pointers Keep frame pointers (for profiling/debugging)"
-    << "  --release        Skip debug safety checks and stacktrace metadata"
+    << "  --release        Release profile; portable CPU target by default"
+    << "  --native         Tune for the build host"
+    << "  --portable       Target the portable x86-64-v2 / armv8-a baseline"
     << "  --dev            Fast edit-test builds: clang -O0 (~2.8x faster link; binary ~2x slower)"
     << "  --fast, -fast    Fast FP: FMA + reassociation + reciprocals + nnan/ninf"
     << "  --strict-math    Strict IEEE 754: no FMA, no contraction"
@@ -141,14 +148,10 @@ while i < args.size()
     frame_pointers = true
   elsif arg == "--release"
     release_mode = true
-    # Portable ISA baseline for a distributed binary. Set once so link, runtime
-    # compile, and the target-features probe (target.w) all agree. The guard lets
-    # the bootstrap pre-set it via env (the stage-0 C VM can't ccall setenv),
-    # while a standalone compiled `tungsten compile --release` sets it itself.
-    if env("TUNGSTEN_MARCH_ARGS") == nil
-      ccall("w_setenv", "TUNGSTEN_MARCH_ARGS", portable_march_flags())
   elsif arg == "--native"
-    release_mode = true
+    native_mode = true
+  elsif arg == "--portable"
+    portable_mode = true
   elsif arg == "--dev"
     dev_mode = true
   elsif arg == "--fast" || arg == "-fast"
@@ -235,6 +238,35 @@ while i < args.size()
   else
     script_args.push(arg)
   i += 1
+
+# Resolve the target after parsing every flag so command-line order cannot
+# affect it. An explicit target wins over the release profile's portable
+# fallback and over an ambient TUNGSTEN_MARCH_ARGS. With no explicit target,
+# retain the environment override used by release CI tier builds.
+if native_mode && portable_mode
+  ccall("w_eputs", "--native and --portable are mutually exclusive")
+  exit 1
+
+configured_march = env("TUNGSTEN_MARCH_ARGS")
+if native_mode
+  cpu_target_mode = "native"
+  # An unset march already means native. Avoid ccall in that case so stage-0
+  # hosts that cannot implement setenv can still honor --native.
+  if configured_march != nil && configured_march != "" && configured_march != native_march_flags()
+    ccall("w_setenv", "TUNGSTEN_MARCH_ARGS", native_march_flags())
+elsif portable_mode
+  cpu_target_mode = "portable"
+  if configured_march != portable_march_flags()
+    ccall("w_setenv", "TUNGSTEN_MARCH_ARGS", portable_march_flags())
+elsif release_mode && (configured_march == nil || configured_march == "")
+  cpu_target_mode = "portable"
+  ccall("w_setenv", "TUNGSTEN_MARCH_ARGS", portable_march_flags())
+elsif configured_march == native_march_flags()
+  cpu_target_mode = "native"
+elsif configured_march == portable_march_flags()
+  cpu_target_mode = "portable"
+elsif configured_march != nil && configured_march != ""
+  cpu_target_mode = "custom"
 
 -> phase_elapsed(started_at)
   clock - started_at
@@ -679,15 +711,18 @@ while i < args.size()
     return "-march=x86-64-v2 -mtune=generic"
   "-march=armv8-a -mtune=generic"
 
-# march/tune flags for the C compiler. Driven by TUNGSTEN_MARCH_ARGS, which the
-# --release arg sets to portable_march_flags() so link, runtime compile, and the
-# target-features probe (target.w) all agree. Default: host-tuned native. march
+-> native_march_flags
+  "-march=native -mtune=native"
+
+# march/tune flags for the C compiler. Target resolution sets
+# TUNGSTEN_MARCH_ARGS so link, runtime compile, and the target-features probe
+# (target.w) all agree. Default: host-tuned native. march
 # is a post-.ll clang flag, so this never affects the stage1==stage2 identity.
 -> march_flags
   m = env("TUNGSTEN_MARCH_ARGS")
   if m != nil && m != ""
     return m
-  "-march=native -mtune=native"
+  native_march_flags()
 
 -> link_binary(ll_path, out_path, runtime_objs, verbose = false)
   ll_probe_text = read_file(ll_path)
@@ -709,7 +744,7 @@ while i < args.size()
   link_started_at = clock
   needs_zstd = ll_needs_zstd_text(ll_probe_text)
   # LTO is opt-in: whole-program LTO (lean binary, slow link) only for
-  # --release / --native / --lto; the default is a native-object runtime
+  # --release / --lto; the default is a target-matched object runtime
   # archive (fatter binary, ~0.1s link vs ~5s recompiling the C runtime).
   doing_lto = (release_mode || explicit_lto) && !no_lto
   # Fast dev link (default): reuse the cached native-object runtime archive
@@ -934,7 +969,7 @@ while i < args.size()
 # runtime.o keeps weak stubs for the gated companions, so link_binary still adds
 # the strong ssmr/lexchar/metal/blas sources when a program needs them. The
 # archive is rebuilt whenever any base runtime source is newer than it. The
-# whole-program-LTO builds (--release / --native / --lto) skip this and rebuild
+# whole-program-LTO builds (--release / --lto) skip this and rebuild
 # the runtime from source for a lean, cross-optimized binary.
 -> dev_runtime_shell_quote(text)
   "'" + text.gsub("'", "'\\''") + "'"
@@ -1564,7 +1599,7 @@ while i < args.size()
   if ra != ""
     ramv = file_mtime_ns(ra)
     ram = ramv == nil ? "missing" : ramv.to_s()
-  ["irbin-v2", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), release_mode.to_s(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
+  ["irbin-v3", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), release_mode.to_s(), cpu_target_mode, march_flags(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
 
 # Valid cached binary for this identity? Reads the manifest, revalidates
 # every recorded (path, mtime_ns), and on success installs the cached
@@ -1810,7 +1845,7 @@ elsif command == "compile-batch"
       skip_next = false
     elsif a in ("--out" "-o" "--intern" "-e")
       skip_next = true
-    elsif a != "compile-batch" && a != "--emit-wire" && a != "--no-lto" && a != "--frame-pointers" && a != "--release" && a != "--fast" && a != "-fast" && a != "--verbose" && a != "-v" && a != "--ll"
+    elsif a != "compile-batch" && a != "--emit-wire" && a != "--no-lto" && a != "--frame-pointers" && a != "--release" && a != "--native" && a != "--portable" && a != "--fast" && a != "-fast" && a != "--verbose" && a != "-v" && a != "--ll"
       files.push(a)
 
   if files.size() == 0

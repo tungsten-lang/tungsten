@@ -31,8 +31,23 @@ mkdir -p "$BUILD"
 : "${TUNGSTEN_CLANG_OPT:=-O1}"
 : "${TUNGSTEN_SPINEL_STAGE1_CLANG_OPT:=-O0}"
 : "${TUNGSTEN_SPINEL_STAGE2_CLANG_OPT:=-O0}"
+: "${TUNGSTEN_MARCH_ARGS:=-march=native -mtune=native}"
 : "${SP_GC_DISABLE:=1}"
+typeset -a STAGE_FLAGS
+STAGE_FLAGS=(--release)
+if [ "${TUNGSTEN_SPINEL_FAST:-0}" = "1" ]; then
+  STAGE_FLAGS+=(--fast)
+  case " $TUNGSTEN_SPINEL_STAGE1_CLANG_OPT " in
+    *" -ffast-math "*) ;;
+    *) TUNGSTEN_SPINEL_STAGE1_CLANG_OPT="$TUNGSTEN_SPINEL_STAGE1_CLANG_OPT -ffast-math" ;;
+  esac
+  case " $TUNGSTEN_SPINEL_STAGE2_CLANG_OPT " in
+    *" -ffast-math "*) ;;
+    *) TUNGSTEN_SPINEL_STAGE2_CLANG_OPT="$TUNGSTEN_SPINEL_STAGE2_CLANG_OPT -ffast-math" ;;
+  esac
+fi
 export TUNGSTEN_CLANG_OPT
+export TUNGSTEN_MARCH_ARGS
 export SP_GC_DISABLE
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -84,6 +99,8 @@ stage1_input_sha() {
     printf "stage0:\n%s\n" "$stage0_fp"
     printf "src=%s\n" "$src_sha"
     printf "clang_opt=%s\n" "$TUNGSTEN_SPINEL_STAGE1_CLANG_OPT"
+    printf "march=%s\n" "$TUNGSTEN_MARCH_ARGS"
+    printf "fast=%s\n" "${TUNGSTEN_SPINEL_FAST:-0}"
   } | shasum -a 256 | awk '{print $1}'
 }
 
@@ -97,6 +114,8 @@ stage2_input_sha() {
   {
     printf "src=%s\n" "$src_sha"
     printf "clang_opt=%s\n" "$TUNGSTEN_SPINEL_STAGE2_CLANG_OPT"
+    printf "march=%s\n" "$TUNGSTEN_MARCH_ARGS"
+    printf "fast=%s\n" "${TUNGSTEN_SPINEL_FAST:-0}"
   } | shasum -a 256 | awk '{print $1}'
 }
 
@@ -138,7 +157,7 @@ else
   rm -f "$STAGE1_LL" "$STAGE1_LL.done"
   TUNGSTEN_LL_DIR="$STAGE1_LL_DIR" TUNGSTEN_LL_PATH="$STAGE1_LL" TUNGSTEN_LL_DONE_MARKER="$STAGE1_LL.done" TUNGSTEN_CACHE_DIR="$STAGE0_CACHE" TUNGSTEN_CLANG_OPT="$TUNGSTEN_SPINEL_STAGE1_CLANG_OPT" "$STAGE0" compiler/tungsten.w compile compiler/tungsten.w \
     --emit-ll \
-    --release \
+    "${STAGE_FLAGS[@]}" \
     >"$STAGE1_BUILD_LOG" 2>&1 &
   stage0_pid=$!
   stage0_status=0
@@ -170,7 +189,7 @@ else
     echo "stage 0 produced no IR at $STAGE1_LL — see $STAGE1_BUILD_LOG" >&2
     exit 1
   fi
-  if ! clang "$TUNGSTEN_SPINEL_STAGE1_CLANG_OPT" -DNDEBUG -march=native -mtune=native \
+  if ! clang ${(z)TUNGSTEN_SPINEL_STAGE1_CLANG_OPT} -DNDEBUG ${=TUNGSTEN_MARCH_ARGS} \
       -Wl,-dead_strip -Wl,-stack_size,0x8000000 \
       "$RUNTIME_ARCHIVE" "$STAGE1_LL" -L/opt/homebrew/lib -lzstd -o "$STAGE1" \
       >>"$STAGE1_BUILD_LOG" 2>&1; then
@@ -212,7 +231,7 @@ else
   if ! TUNGSTEN_LL_DIR="$STAGE2_LL_DIR" TUNGSTEN_LL_PATH="$STAGE2_LL" TUNGSTEN_CLANG_OPT="$TUNGSTEN_SPINEL_STAGE2_CLANG_OPT" "$STAGE1" compile compiler/tungsten.w \
       --runtime "$RUNTIME_ARCHIVE" \
       --no-lto \
-      --release \
+      "${STAGE_FLAGS[@]}" \
       --out "$STAGE2" >"$STAGE2_BUILD_LOG" 2>&1; then
     cat "$STAGE2_BUILD_LOG"
     exit 1

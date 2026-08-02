@@ -386,7 +386,7 @@ else
   # tungsten-c <compiler.w> compile <compiler.w> --out … --runtime … --no-lto
   if ! TUNGSTEN_LL_PATH="$stage1_tmp.ll" \
     "$C_INTERP" "$COMPILER_W" compile "$COMPILER_W" \
-      --out "$stage1_tmp" --native \
+      --out "$stage1_tmp" --release --native \
       --runtime "$RUNTIME_A" --no-lto \
       >"$stage1_log" 2>&1; then
     cat "$stage1_log" >&2

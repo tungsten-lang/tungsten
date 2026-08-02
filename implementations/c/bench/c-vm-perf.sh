@@ -5,7 +5,7 @@
 # in the build output.
 #
 # Runs from project root with a fresh --out/LLVM path for every sample,
-# --native, --no-lto, and TUNGSTEN_CLANG_OPT=-O0. That prevents the output
+# --release --native, --no-lto, and TUNGSTEN_CLANG_OPT=-O0. That prevents the output
 # freshness shortcut from turning later samples into no-ops and matches the
 # production C-VM stage-1 build. An earlier version ran from
 # implementations/c/ with no --out and timed an aborted compile that failed
@@ -167,7 +167,7 @@ for i in $(seq 1 "$N"); do
         TUNGSTEN_LL_DIR="$run_ll_dir" \
         TUNGSTEN_LL_PATH="$run_ll" \
         TUNGSTEN_CLANG_OPT=-O0 \
-        /usr/bin/time -l "$BIN" "$COMPILER" compile "$COMPILER" --out "$run_out" --native \
+        /usr/bin/time -l "$BIN" "$COMPILER" compile "$COMPILER" --out "$run_out" --release --native \
                             --runtime "$RUNTIME_ARCHIVE" --no-lto 2>&1)
   status=$?
   set -e
@@ -244,7 +244,7 @@ if [[ ! -f "$LEDGER" ]]; then
 # C VM perf ledger
 
 Median/minimum timings for `tungsten-c compile compiler/tungsten.w --out ...
---native`, i.e. the same stage-1 invocation `bin/tungsten build` runs.
+--release --native`, i.e. the same stage-1 invocation `bin/tungsten build` runs.
 Captured by `bench/c-vm-perf.sh`. Numbers should track the `built  stage1
 <ms>` line in build output. User/cycles/RSS are from the minimum-wallclock
 sample.

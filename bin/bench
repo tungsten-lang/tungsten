@@ -131,7 +131,7 @@ bench_args = {"polysum": "100000000 10"}
   when "crystal"
     return "crystal build --release -o \"[dir]/[bench]_cr\" \"[dir]/[bench].cr\" 2>/dev/null"
   when "tungsten"
-    return "\"[tungsten]\" compile --native \"[dir]/[bench].w\" -o \"[dir]/[bench]_w\" 2>/dev/null"
+    return "\"[tungsten]\" compile --release --native \"[dir]/[bench].w\" -o \"[dir]/[bench]_w\" 2>/dev/null"
 
 only = env("ONLY")
 langs = all_langs

@@ -34,6 +34,29 @@ RSpec.describe "CLI commands surface" do
       out, = run_cli(ruby_cli, "--help")
       expect(out).to include("alias: console")
     end
+
+    it "documents orthogonal release, CPU-target, and fast-math flags" do
+      out, err, status = run_cli(ruby_cli, "--help")
+
+      expect(status.exitstatus).to eq(0), err
+      expect(out).to include("--release", "--native", "--portable", "--fast")
+    end
+
+    it "documents the same build axes on build help" do
+      out, err, status = run_cli(ruby_cli, "build", "--help")
+
+      expect(status.exitstatus).to eq(0), err
+      expect(out).to include("--release", "--native", "--portable", "--fast")
+    end
+  end
+
+  describe "CPU target flags" do
+    it "rejects conflicting native and portable targets before compilation" do
+      _out, err, status = run_cli(ruby_cli, "--native", "--portable", "missing.w")
+
+      expect(status.exitstatus).to eq(1)
+      expect(err).to include("--native and --portable are mutually exclusive")
+    end
   end
 
   describe "did-you-mean for mistyped commands" do

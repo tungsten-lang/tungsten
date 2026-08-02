@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(694 total), grouped by area, with its declaration, a one-line
+(698 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -197,8 +197,12 @@ summary from the source header, and a link to the source.
 | `Autodiff` | `+ Autodiff` | — | [`core/autodiff.w`](../core/autodiff.w) |
 | `Solve` | `+ Solve` | Solve — initial-value ODE solvers (SciPy solve_ivp analogue). | [`core/solve.w`](../core/solve.w) |
 | `DenseSolution` | `+ DenseSolution` | Continuous DP5(4) solution. Each accepted step keeps its size and the | [`core/solve.w`](../core/solve.w) |
-| `Optim` | `+ Optim` | Optim — scalar / vector optimization and root-finding (v0). | [`core/optim.w`](../core/optim.w) |
+| `Optim` | `+ Optim` | Optim — legacy v0 compatibility surface. | [`core/optim.w`](../core/optim.w) |
 | `LinProg` | `+ LinProg` | LinProg — dense linear programming by the two-phase simplex method. | [`core/linprog.w`](../core/linprog.w) |
+| `Optimization` | `+ Optimization` | — | [`core/optimization.w`](../core/optimization.w) |
+| `OptimizationCriteria` | `+ OptimizationCriteria` | — | [`core/optimization.w`](../core/optimization.w) |
+| `OptimizationResult` | `+ OptimizationResult` | — | [`core/optimization.w`](../core/optimization.w) |
+| `OptimizationStatus` | `+ OptimizationStatus` | — | [`core/optimization.w`](../core/optimization.w) |
 | `Interpolate` | `+ Interpolate` | Interpolate — interpolation and numerical quadrature. | [`core/interpolate.w`](../core/interpolate.w) |
 | `SciIO` | `+ SciIO` | SciIO — scientific data interchange (no system libhdf5/netcdf/arrow). | [`core/io.w`](../core/io.w) |
 | `Plot` | `+ Plot` | Plot — terminal sparklines / heatmaps (zero-dep). | [`core/plot.w`](../core/plot.w) |

@@ -10,7 +10,7 @@ Flat under `core/` (no `core/sci/` namespace):
 | `sparse.w` | **SparseMatrix** CSR/COO; SpMV + Apple Sparse Solvers (QR/Cholesky) |
 | `fft.w` | pure radix-2 DFT |
 | `special.w` / `stats.w` | specials + distributions |
-| `solve.w` / `optim.w` / `interpolate.w` | ODE / opt / interp |
+| `solve.w` / `optimization.w` / `interpolate.w` | ODE / bounded scalar optimization / interpolation (`optim.w`: legacy v0 surface) |
 | `calculus.w` | Taylor/differential AD, numerical gradients/Jacobians, Simpson and breakpoint GK15 quadrature |
 | `autodiff.w` | Dual JVP and Tape/TapeValue VJP; calculus facades |
 | `physics.w` | measurements/GLS, gas laws, Euler systems, Cartesian finite volume, diagnostics |

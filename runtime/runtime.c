@@ -2266,7 +2266,15 @@ WValue bigint_sub_any(WValue a, WValue b) {
 #define BN_SQR_TOOM3_LIMIT 392
 #endif
 #ifndef BN_SQR_TOOM4_THRESHOLD
-#define BN_SQR_TOOM4_THRESHOLD 616
+/* Forced-kernel crossover (benchmarks/big_math/run_kernel_crossover.sh,
+ * 2026-08-02, M-series): the difference-split Karatsuba square with its
+ * parallel point-set path beats bn_toom4_sq through ~2.5k limbs (768:
+ * 13.1 vs 23.4 us; 1024: 20.6 vs 28.5; 2048: 56 vs 68), converging by
+ * 3-4k. End-to-end at the old 616 cutoff, sqr@704 LOST to GMP (1.07) and
+ * 768 was borderline; at 2560 the whole 704..2048 band wins by 20-45%
+ * (sqr geomean over 512..4096: 0.75 -> 0.64). Above 2560 toom4_sq keeps
+ * its measured edge. */
+#define BN_SQR_TOOM4_THRESHOLD 2560
 #endif
 #ifndef BN_SQR_TOOM6_THRESHOLD
 #define BN_SQR_TOOM6_THRESHOLD INT32_MAX
@@ -24177,6 +24185,12 @@ static inline uint64_t w_wymix(uint64_t a, uint64_t b) {
     return (uint64_t)(r >> 64) ^ (uint64_t)r;
 }
 
+static inline uint32_t w_hash_load32(const uint8_t *data) {
+    uint32_t value;
+    memcpy(&value, data, sizeof(value));
+    return value;
+}
+
 static uint64_t w_hash_wyhash(const uint8_t *data, size_t len) {
     const uint64_t s0 = 0xa0761d6478bd642fULL;
     const uint64_t s1 = 0xe7037ed1a0b428dbULL;
@@ -24187,10 +24201,11 @@ static uint64_t w_hash_wyhash(const uint8_t *data, size_t len) {
 
     if (len <= 16) {
         if (len >= 4) {
-            a = ((uint64_t)(*(const uint32_t *)data) << 32) |
-                 (uint64_t)(*(const uint32_t *)(data + ((len >> 3) << 2)));
-            b = ((uint64_t)(*(const uint32_t *)(data + len - 4)) << 32) |
-                 (uint64_t)(*(const uint32_t *)(data + len - 4 - ((len >> 3) << 2)));
+            a = ((uint64_t)w_hash_load32(data) << 32) |
+                 (uint64_t)w_hash_load32(data + ((len >> 3) << 2));
+            b = ((uint64_t)w_hash_load32(data + len - 4) << 32) |
+                 (uint64_t)w_hash_load32(
+                     data + len - 4 - ((len >> 3) << 2));
         } else if (len > 0) {
             a = ((uint64_t)data[0] << 16) | ((uint64_t)data[len >> 1] << 8) | data[len - 1];
             b = 0;

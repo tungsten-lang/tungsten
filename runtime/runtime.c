@@ -7761,6 +7761,40 @@ WValue bigint_sqr_positive_16(WBigint *a) {
 }
 #endif
 
+/* N x 1: a multi-limb magnitude times a single word is one bn_mul_1 pass
+ * plus a top carry limb.  The generic entry rediscovers this shape through
+ * the dispatch ladder and then runs it as nb=1 schoolbook rows — one
+ * addmul_1 call per limb.  A >=2-limb magnitude times a nonzero word is
+ * always >= 2 limbs, so the result never demotes to i48 and boxes directly
+ * (header-signed, overlay-free). */
+#ifndef BN_MUL_N1_FAST
+#define BN_MUL_N1_FAST 1
+#endif
+#if BN_MUL_N1_FAST
+static WValue bigint_mul_n1(const uint64_t *al, int32_t n, uint64_t w,
+                            int negative) {
+    WBigint *r = bigint_alloc_raw_hot(n + 1);
+    /* mul_1 is a two-stream kernel: a destination whose 4 KiB offset
+     * aliases the operand stalls every load.  Rehome the destination once
+     * (the churn then recycles the good buffer) instead of paying a
+     * redirect copy on every call. */
+#if BN_EQ_PAGE_HAZARD_GUARD
+    if (bn_addsub_page_hazard(r->limbs, al) &&
+        !bn_addsub_placement_is_settled(r, al, al))
+        r = bigint_rehome_binary_result(r, al, al);
+#endif
+#if BN_MUL_POWER2_FIXED
+    if (n == 16)
+        r->limbs[16] = bn_mul_1_f16(r->limbs, al, w);
+    else
+#endif
+        r->limbs[n] = bn_mul_1(r->limbs, al, n, w);
+    int32_t size = n + (r->limbs[n] != 0);
+    r->size = negative ? -size : size;
+    return bigint_box(r);
+}
+#endif
+
 static __attribute__((noinline))
 WValue bigint_mul_any_generic(WValue a, WValue b) {
     uint64_t sa, sb;
@@ -7833,6 +7867,26 @@ WValue bigint_mul_any_generic(WValue a, WValue b) {
     return bigint_normalize(r);
 #endif
 }
+
+#if BN_MUL_N1_FAST
+/* Mixed representation: a boxed bigint times an inline i48 word.  0 and ±1
+ * resolve algebraically — ±1 hands back the SAME buffer (tag-sign overlay
+ * for the negation) after marking it shared, so release churn stays safe.
+ * One-limb boxed magnitudes keep the generic entry's i48 demotion. */
+static inline WValue bigint_mul_bigint_word(WValue big, int64_t word) {
+    if (word == 0) return w_box_int(0);
+    if (word == 1 || word == -1) {
+        w_bigint_mark_shared(w_as_bigint(big));
+        return word == 1 ? big : (big ^ W_BIGINT_SIGN_BIT);
+    }
+    int32_t bs;
+    WBigint *b = w_bigint_view(big, &bs);
+    int32_t n = bs < 0 ? -bs : bs;
+    if (n < 2) return bigint_mul_any_generic(big, w_box_int(word));
+    uint64_t w = word < 0 ? (uint64_t)(-word) : (uint64_t)word;
+    return bigint_mul_n1(b->limbs, n, w, (bs < 0) != (word < 0));
+}
+#endif
 
 static inline __attribute__((always_inline))
 WValue bigint_mul_any(WValue a, WValue b) {
@@ -7908,6 +7962,19 @@ WValue bigint_mul_any(WValue a, WValue b) {
              (BN_MUL_POSITIVE_PAIR_40 && n == 40)) &&
             bn == n)
             return bigint_mul_positive_equal(ba, bb, n);
+#if BN_MUL_N1_FAST
+        /* N x 1 (boxed x boxed): a one-limb boxed magnitude is a plain
+         * word (>= 2^47, so never 0/±1 — no identity handling needed). */
+        {
+            int32_t na = n < 0 ? -n : n;
+            int32_t nb = bn < 0 ? -bn : bn;
+            int negative = (n < 0) != (bn < 0);
+            if (nb == 1 && na >= 2)
+                return bigint_mul_n1(ba->limbs, na, bb->limbs[0], negative);
+            if (na == 1 && nb >= 2)
+                return bigint_mul_n1(bb->limbs, nb, ba->limbs[0], negative);
+        }
+#endif
 
         /* Neither operand can be an inline +/-1 here.  Keep the ordinary
          * boxed/boxed path out of the mixed-representation identity checks
@@ -7915,6 +7982,14 @@ WValue bigint_mul_any(WValue a, WValue b) {
          * random widths even though none could match. */
         return bigint_mul_any_generic(a, b);
     }
+#endif
+#if BN_MUL_N1_FAST
+    /* Bigint x inline word (either order): one mul_1 pass; covers the
+     * ±1/0 identities for this shape with the shared-alias return. */
+    if (w_is_bigint(a) && w_is_int(b))
+        return bigint_mul_bigint_word(a, w_as_int(b));
+    if (w_is_int(a) && w_is_bigint(b))
+        return bigint_mul_bigint_word(b, w_as_int(a));
 #endif
 #if BN_ALGEBRAIC_IDENTITY_FAST
     /* Put mixed inline identities after the boxed/boxed kernels so the
@@ -29577,6 +29652,132 @@ WValue w_native_data_field(WValue recv, WValue name_v) {
 
     w_raise(w_string("native data field is unavailable"));
     return W_NIL;
+}
+
+/* ==== Mutate-if-unique entries (E4 stage 1) ====
+ *
+ * In-place a += b / a -= b for a receiver the COMPILER proved dies at this
+ * call (non-escaped, this is its last use). The static proof is the
+ * soundness source; the runtime guards make a wrong proof degrade to the
+ * immutable path, never to corruption:
+ *   - a must be a bigint whose alias count is 0 AND whose overlay bit is
+ *     clear (a count that returned to zero can leave exactly one surviving
+ *     reference, and it may be the tag-flipped one — the bit test excludes
+ *     mutating through a flipped view);
+ *   - a magnitude add keeps one spare limb of capacity (the carry cannot
+ *     be discovered mid-mutation: by then the buffer is already dirty);
+ *   - |b| must not exceed |a| (keeps the single forward pass shape).
+ * Anything else falls through to the allocating entries. b may be an
+ * inline i48 (the `big += small` accumulator shape this exists for) or a
+ * boxed bigint, including b == a (bn_add_n/bn_sub_n are same-index
+ * read-then-write, so self-aliasing is safe). Results demote through
+ * bigint_normalize, which may release the buffer — correct precisely
+ * because the proof says a is dead. */
+/* Fallback for every mut-guard refusal. The immutable entries return an
+ * OPERAND for identity shapes (x + 0 -> x, 0 + b -> b). The caller's next
+ * pass will try to mutate whatever we return, so an alias of b — a value
+ * the proof says is still LIVE — must carry a shared mark before it
+ * escapes into the accumulator slot; the count makes the next mut attempt
+ * refuse and copy. An alias of a needs nothing: the proof says a dies
+ * here. Inline results carry no buffer. */
+static WValue w_bigint_mut_fallback(WValue a, WValue b, int negate_b) {
+    WValue r = negate_b ? w_sub(a, b) : w_add(a, b);
+    if (r == b && w_is_bigint(r)) w_bigint_mark_shared(w_as_bigint(r));
+    return r;
+}
+
+static WValue w_bigint_addsub_mut(WValue a, WValue b, int negate_b) {
+    if (!w_is_bigint(a) || (a & W_BIGINT_SIGN_BIT) != 0)
+        return w_bigint_mut_fallback(a, b, negate_b);
+    WBigint *ba = w_as_bigint(a);
+    if (ba->shared != 0 || ba->size == 0)
+        return w_bigint_mut_fallback(a, b, negate_b);
+
+    int32_t as = ba->size;              /* overlay clear: header IS the sign */
+    int a_neg = as < 0;
+    int32_t amag = a_neg ? -as : as;
+
+    uint64_t bscratch;
+    const uint64_t *bl;
+    int b_neg;
+    int32_t bmag;
+    if (w_is_int(b)) {
+        int64_t ib = w_as_int(b);
+        if (ib == 0) return a;          /* dies-here or not, a is the answer */
+        b_neg = ib < 0;
+        bscratch = b_neg ? (uint64_t)(-(ib + 1)) + 1U : (uint64_t)ib;
+        bl = &bscratch;
+        bmag = 1;
+    } else if (w_is_bigint(b)) {
+        int32_t bs;
+        WBigint *bb = w_bigint_view(b, &bs);
+        if (bs == 0)
+            return w_bigint_mut_fallback(a, b, negate_b);
+        b_neg = bs < 0;
+        bmag = b_neg ? -bs : bs;
+        bl = bb->limbs;
+    } else {
+        return w_bigint_mut_fallback(a, b, negate_b);
+    }
+    if (negate_b) b_neg = !b_neg;
+    if (bmag > amag)
+        return w_bigint_mut_fallback(a, b, negate_b);
+
+    if (a_neg == b_neg) {
+        /* magnitude add; require a spare limb for the possible carry */
+        if (amag + 1 > (int32_t)ba->cap)
+            return w_bigint_mut_fallback(a, b, negate_b);
+        uint64_t carry = bn_add_n(ba->limbs, ba->limbs, bl, bmag);
+        int32_t i = bmag;
+        while (carry && i < amag) {
+            ba->limbs[i]++;
+            carry = ba->limbs[i] == 0;
+            i++;
+        }
+        if (carry) {
+            ba->limbs[amag] = 1;
+            amag++;
+        }
+        ba->size = a_neg ? -amag : amag;
+        return a;
+    }
+
+    /* magnitude subtract: |a| - |b|, sign flips when |b| wins */
+    if (bmag == amag) {
+        int32_t j = amag - 1;
+        while (j >= 0 && ba->limbs[j] == bl[j]) j--;
+        if (j < 0) {                     /* equal magnitudes: exact zero */
+            ba->size = 0;
+            return bigint_normalize(ba);
+        }
+        if (bl[j] > ba->limbs[j]) {      /* |b| > |a|: r = |b| - |a| */
+            (void)bn_sub_n(ba->limbs, bl, ba->limbs, amag);
+            while (amag > 0 && ba->limbs[amag - 1] == 0) amag--;
+            ba->size = b_neg ? -amag : amag;
+            return bigint_normalize(ba);
+        }
+    }
+    {
+        uint64_t borrow = bn_sub_n(ba->limbs, ba->limbs, bl, bmag);
+        int32_t i = bmag;
+        while (borrow && i < amag) {
+            borrow = ba->limbs[i] == 0;
+            ba->limbs[i]--;
+            i++;
+        }
+        /* a final borrow is impossible: |a| >= |b| was established above */
+    }
+    while (amag > 0 && ba->limbs[amag - 1] == 0) amag--;
+    ba->size = a_neg ? -amag : amag;
+    return bigint_normalize(ba);
+}
+
+WValue w_bigint_add_mut(WValue a, WValue b) {
+    return w_bigint_addsub_mut(a, b, 0);
+}
+
+WValue w_bigint_sub_mut(WValue a, WValue b) {
+    return w_bigint_addsub_mut(a, b, 1);
 }
 
 /* Shared-bit surface for the tag-sign aliasing machinery and its specs.

@@ -1214,7 +1214,11 @@ DEFINE_BENCH_LANE(gcd, bigint_gcd_any(a, b))
  * it is for GMP's mpz_neg input and for the abs lane below.  Calling w_neg
  * here would charge only neg for generic numeric/user-class dispatch before
  * reaching the same immutable copy kernel. */
-DEFINE_BENCH_LANE(neg, bigint_copy_signed(w_as_bigint(a), 1))
+/* neg measures the production `-x` path (w_neg: tag flip since v4), not
+ * the copy kernel it called historically — the matrix row means "-x". The
+ * overlay-free copy path stays covered by the tag-sign fuzzer's reference
+ * lane (fuzz_copy_negate). */
+DEFINE_BENCH_LANE(neg, w_neg(a))
 DEFINE_BENCH_LANE(abs, w_ic_bigint_abs(a, NULL, 0))
 /* In-place sign mutation: O(1) field write, nothing allocated.  These
  * return the RECEIVER, so they must not go through the result-churn macro

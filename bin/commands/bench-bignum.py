@@ -60,6 +60,12 @@ POOL_MAX_CAP_LIMBS = 16384
 # unless the conversion-length guard is disabled.
 if hasattr(sys, "set_int_max_str_digits"):
     sys.set_int_max_str_digits(0)
+# 1..8192 is the min-based matrix every op can afford. The FFT band above
+# 8192 stays opt-in (--sizes 16384,...,1048576): those cells use the
+# median+IQR methodology, bypass the recycler above BN_BIGINT_POOL_MAX_CAP,
+# and are not directly comparable — and the heavy ops (div/gcd/tostr/
+# fromstr) cost minutes per cell up there. 384/448 cover the former
+# 368..512 blind spot where two losing cells hid.
 DEFAULT_SIZES = (
     1,
     2,
@@ -74,8 +80,13 @@ DEFAULT_SIZES = (
     64,
     128,
     256,
+    384,
+    448,
     512,
     1024,
+    2048,
+    4096,
+    8192,
 )
 QUICK_SIZES = (1, 4, 16, 64)
 LANE_LABELS = {
@@ -875,7 +886,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--sizes",
         metavar="CSV",
-        help="comma-separated limb counts (default: 15 sizes from 1..1024)",
+        help="comma-separated limb counts (default: 20 sizes from 1..8192; "
+        "the >8192 FFT band is opt-in, see --list)",
     )
     parser.add_argument(
         "--operations",

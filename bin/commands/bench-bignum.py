@@ -526,19 +526,20 @@ def capacity_results(max_limbs: int, requests: int, runs: int) -> list[dict[str,
     results = []
     for line in output.splitlines():
         fields = line.split("\t")
-        if len(fields) != 10 or fields[0] != "capacity":
+        if len(fields) != 11 or fields[0] != "capacity":
             raise RuntimeError(f"unexpected capacity benchmark output: {line}")
         results.append(
             {
                 "policy": fields[1],
-                "max_limbs": int(fields[2]),
-                "requests": int(fields[3]),
-                "ns_per_request": float(fields[4]),
-                "hit_percent": float(fields[5]),
-                "allocations": int(fields[6]),
-                "average_slack_limbs": float(fields[7]),
-                "peak_kib": float(fields[8]),
-                "retained_kib": float(fields[9]),
+                "live_depth": int(fields[2]),
+                "max_limbs": int(fields[3]),
+                "requests": int(fields[4]),
+                "ns_per_request": float(fields[5]),
+                "hit_percent": float(fields[6]),
+                "allocations": int(fields[7]),
+                "average_slack_limbs": float(fields[8]),
+                "peak_kib": float(fields[9]),
+                "retained_kib": float(fields[10]),
             }
         )
     return results
@@ -831,24 +832,29 @@ def print_capacity(results: list[dict[str, Any]]) -> None:
         "sizes, local +1 growth, doubled results, and small-value-heavy traffic."
     )
     print(
-        f"{'policy':<14} {'ns/request':>10} {'hit %':>8} {'allocs':>8} "
-        f"{'slack limbs':>12} {'peak KiB':>10} {'kept KiB':>10}"
+        f"{'policy':<14} {'live':>4} {'ns/request':>10} {'hit %':>8} "
+        f"{'allocs':>8} {'slack limbs':>12} {'peak KiB':>10} {'kept KiB':>10}"
     )
     for row in results:
         print(
-            f"{row['policy']:<14} {row['ns_per_request']:>10.3f} "
+            f"{row['policy']:<14} {row.get('live_depth', 1):>4} "
+            f"{row['ns_per_request']:>10.3f} "
             f"{row['hit_percent']:>8.3f} {row['allocations']:>8} "
             f"{row['average_slack_limbs']:>12.1f} "
             f"{row['peak_kib']:>10.1f} {row['retained_kib']:>10.1f}"
         )
-    fastest = min(results, key=lambda row: row["ns_per_request"])
-    fewest_allocations = min(results, key=lambda row: row["allocations"])
-    least_retained = min(results, key=lambda row: row["retained_kib"])
+    # Depth 1's single-live churn pins hit% near 100 for every policy; the
+    # deeper working sets are where the policies separate, so the verdict
+    # line reads only those.
+    deep = [r for r in results if r.get("live_depth", 1) > 1] or results
+    fastest = min(deep, key=lambda row: row["ns_per_request"])
+    fewest_allocations = min(deep, key=lambda row: row["allocations"])
+    least_retained = min(deep, key=lambda row: row["retained_kib"])
     print()
     print(
         f"Best measured time: {fastest['policy']}; fewest allocations: "
         f"{fewest_allocations['policy']}; least retained memory: "
-        f"{least_retained['policy']}."
+        f"{least_retained['policy']} (live depth > 1)."
     )
 
 

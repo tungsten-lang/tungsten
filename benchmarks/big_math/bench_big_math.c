@@ -3829,12 +3829,21 @@ static uint32_t *bench_capacity_trace(uint32_t max_limbs, uint32_t requests) {
     return trace;
 }
 
+/* A live set of exactly one buffer let the single released buffer serve
+ * almost every take: hit%% pinned at ~100 for EVERY policy and the grid's
+ * recycler stage had no signal. Real programs hold several values live
+ * (operands + result + retained references); `live_depth` models that with
+ * a ring — depth 1 reproduces the old single-live behavior exactly. */
+#define BENCH_CAP_MAX_LIVE 32u
+
 static BenchCapacityStats bench_capacity_policy(
     int policy, const uint32_t *trace, uint32_t requests,
-    uint32_t max_limbs) {
+    uint32_t max_limbs, uint32_t live_depth) {
     BenchCapacityPool pool;
     memset(&pool, 0, sizeof(pool));
-    BenchCapacityBuffer *previous = NULL;
+    BenchCapacityBuffer *live[BENCH_CAP_MAX_LIVE] = {0};
+    if (live_depth == 0) live_depth = 1;
+    if (live_depth > BENCH_CAP_MAX_LIVE) live_depth = BENCH_CAP_MAX_LIVE;
     uint64_t hits = 0;
     uint64_t allocations = 0;
     uint64_t frees = 0;
@@ -3865,13 +3874,15 @@ static BenchCapacityStats bench_capacity_policy(
         next->limbs[requested - 1U] =
             ((uint64_t)requested << 32) ^ ((uint64_t)i << 1);
         bench_sink ^= next->limbs[0] ^ next->limbs[requested - 1U];
-        if (previous)
+        uint32_t slot = i % live_depth;
+        if (live[slot])
             bench_capacity_release(
-                &pool, previous, &resident_limbs, &frees);
-        previous = next;
+                &pool, live[slot], &resident_limbs, &frees);
+        live[slot] = next;
     }
-    if (previous)
-        bench_capacity_release(&pool, previous, &resident_limbs, &frees);
+    for (uint32_t s = 0; s < live_depth; s++)
+        if (live[s])
+            bench_capacity_release(&pool, live[s], &resident_limbs, &frees);
     double elapsed = bench_now() - start;
 
     BenchCapacityStats stats;
@@ -3930,23 +3941,31 @@ int main(int argc, char **argv) {
             die("capacity benchmark expects max limbs 1..16384,"
                 " at least 1000 requests, and positive runs");
         uint32_t *trace = bench_capacity_trace(max_limbs, requests);
+        /* Depth 1 is the historical single-live churn; 4 and 8 hold a
+         * realistic working set so the pool actually misses and the
+         * policies separate. One row per (policy, depth). */
+        static const uint32_t live_depths[] = {1, 4, 8};
         for (int policy = 0; policy < BENCH_CAP_POLICY_COUNT; policy++) {
-            BenchCapacityStats best = {0};
-            best.ns_per_request = 1e300;
-            for (int run = 0; run < runs; run++) {
-                BenchCapacityStats current = bench_capacity_policy(
-                    policy, trace, requests, max_limbs);
-                if (current.ns_per_request < best.ns_per_request)
-                    best = current;
+            for (size_t di = 0;
+                 di < sizeof(live_depths) / sizeof(live_depths[0]); di++) {
+                uint32_t depth = live_depths[di];
+                BenchCapacityStats best = {0};
+                best.ns_per_request = 1e300;
+                for (int run = 0; run < runs; run++) {
+                    BenchCapacityStats current = bench_capacity_policy(
+                        policy, trace, requests, max_limbs, depth);
+                    if (current.ns_per_request < best.ns_per_request)
+                        best = current;
+                }
+                printf("capacity\t%s\t%u\t%u\t%u\t%.3f\t%.3f\t%llu\t%.3f"
+                       "\t%.3f\t%.3f\n",
+                       bench_capacity_policy_name(policy), depth, max_limbs,
+                       requests, best.ns_per_request, best.hit_percent,
+                       (unsigned long long)best.allocations,
+                       best.average_slack,
+                       (double)best.peak_limbs * 8.0 / 1024.0,
+                       (double)best.retained_limbs * 8.0 / 1024.0);
             }
-            printf("capacity\t%s\t%u\t%u\t%.3f\t%.3f\t%llu\t%.3f"
-                   "\t%.3f\t%.3f\n",
-                   bench_capacity_policy_name(policy), max_limbs, requests,
-                   best.ns_per_request, best.hit_percent,
-                   (unsigned long long)best.allocations,
-                   best.average_slack,
-                   (double)best.peak_limbs * 8.0 / 1024.0,
-                   (double)best.retained_limbs * 8.0 / 1024.0);
         }
         free(trace);
         return 0;

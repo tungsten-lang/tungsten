@@ -398,6 +398,10 @@ compiled_specs=(
   benchmarks/runtime_ports/array_leaf_no_use_typed.w
   benchmarks/runtime_ports/small_big_array_no_use_autoload.w
   benchmarks/runtime_ports/sync_wrapper_revisit_exact_factory.w
+  spec/numeric/bigint_bang_spec.w
+  spec/numeric/bigint_limb_sweep_spec.w
+  spec/numeric/bigint_view_field_write_spec.w
+  spec/compiler/hash_free_escape_spec.w
   spec/numeric/bit_ops_spec.w
   spec/numeric/complex_spec.w
   spec/numeric/fp_math_mode_spec.w
@@ -440,6 +444,14 @@ interpreter_specs=(
   spec/compiler/source_argc1_constructor_exclusion_spec.w
   spec/numeric/gcd_spec.w
   spec/interpreter/range_primitive_dispatch_spec.w
+  # BigInt bang methods + the writable native view-field bridge and the
+  # 1..64 limb sweep are engine-parity pins: the interpreter reaches the
+  # same header through native_data_field_writable?, so a compiled-only
+  # fix must not pass alone.
+  spec/numeric/bigint_bang_spec.w
+  spec/numeric/bigint_limb_sweep_spec.w
+  spec/numeric/bigint_view_field_write_spec.w
+  spec/compiler/hash_free_escape_spec.w
   spec/numeric/bit_ops_spec.w
   spec/numeric/rational_spec.w
   spec/interpreter/slab_decl_spec.w

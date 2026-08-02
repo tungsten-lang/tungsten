@@ -1033,6 +1033,16 @@ use lowering/definitions
     # bigint, truncating it to garbage. Falling through to nil routes downstream
     # arithmetic through the boxed, bigint-promoting runtime path, which is the
     # same path the variable form (`2 ** x - 1`) already takes correctly.
+    #
+    # `LIT << x` mirrors that rule: a bare literal base would infer :i64
+    # through the machine map below, authorizing the inline machine path
+    # downstream even though the untyped shift lowers through the boxed
+    # __w_shl_fast and may yield a BigInt — `(1 << 200) + 999` unboxed the
+    # BigInt result and answered 999. A bare literal carries no machine-type
+    # opt-in, so the result is nil (boxed). Declared machine bases
+    # (`## i64`/`## u64` slots) keep their machine result type below.
+    if node.op == :LSHIFT && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int
+      return nil
     if is_integer_like_type(lt) && is_integer_like_type(rt)
       int_ops = infer_maps[:int_op_map]
       cmp_ops = infer_maps[:cmp_op_map]

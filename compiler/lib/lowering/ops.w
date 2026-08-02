@@ -1234,6 +1234,25 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: cname, args: [lhs_reg, rhs_reg]})
     return typed_value(:i64, temp)
 
+  # Untyped shift-left must keep arbitrary-precision semantics. Integer
+  # literals infer :i64 and int-shaped locals ride raw slots, so the machine
+  # and inline arms below would emit a bare `shl` that silently wraps past
+  # 63 bits: `1 << 200` compiled to 0 while the interpreter promotes to
+  # BigInt. A literal base folds when the shifted value provably fits the
+  # inline i48 payload (mask idioms stay free); every other literal-based
+  # shift routes to the boxed __w_shl_fast fallback, whose inline fast path
+  # is itself a checked shl that promotes on overflow. A non-literal base
+  # keeps the machine arm: a machine-typed operand chose wrap semantics.
+  # The fold guard only accepts 0 <= lv < 2^47, where the stage-0 C VM's
+  # wrapped i64 view of a literal agrees exactly with the self-hosted
+  # BigInt view, so the fold decision cannot diverge between stages.
+  shl_literal_base = op == :LSHIFT && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int
+  if shl_literal_base && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int
+    lv = node.left.value
+    rv = node.right.value
+    if lv >= 0 && rv >= 0 && rv <= 46 && lv <= (140737488355327 >> rv)
+      return typed_value(:raw_int, (lv << rv).to_s())
+
   machine_type = machine_int_result_type(lt, rt)
   # `:int` is a BOXED integer that may have promoted to a heap BigInt at
   # runtime -- that is exactly what distinguishes `## int` from `## i64`. It
@@ -1248,7 +1267,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # compound-assign path above, which already refuses the checked i48 ops for
   # `:int` operands for exactly this reason.
   promotable_int_operand = lt == :int || rt == :int
-  if machine_type != nil && !promotable_int_operand && is_integer_like_type(lt) && is_integer_like_type(rt)
+  if machine_type != nil && !promotable_int_operand && !shl_literal_base && is_integer_like_type(lt) && is_integer_like_type(rt)
     int_op = machine_int_op(machine_type, op)
     cmp_pred = machine_cmp_pred(machine_type, op)
 
@@ -1299,7 +1318,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # loop silently became `i + 0`. Known-float operands fall through to the
   # type-directed int×float path below (sitofp + fadd).
   mixed_float_operand = is_machine_float_type(lt) || is_machine_float_type(rt) || lt == :decimal || rt == :decimal
-  if (lhs_unboxed || rhs_unboxed) && !mixed_float_operand && !is_bigint_type(lt) && !is_bigint_type(rt) && !ovf_guard_arith
+  # Shift-left is excluded from the raw-unbox shortcut outright: an unboxed
+  # slot's inferred raw type carries no wrap opt-in (`## i64` operands take
+  # the machine arm above instead), and `x << k` overflows i64 with tiny
+  # operands, so it must reach __w_shl_fast's checked shl to promote.
+  if (lhs_unboxed || rhs_unboxed) && op != :LSHIFT && !mixed_float_operand && !is_bigint_type(lt) && !is_bigint_type(rt) && !ovf_guard_arith
     int_op = lowering_int_op_map[op]
     cmp_pred = lowering_cmp_op_map[op]
     if int_op != nil || cmp_pred != nil
@@ -1386,7 +1409,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     # `b2 & 255` and `b2 >> 8` returned pointer-derived garbage in the
     # default mode too, so `:int` skips this inline path regardless of the
     # lexical overflow mode.
-    if int_op != nil && om_dm != :promote && om_dm != :trap && !promotable_int_operand
+    # :LSHIFT is excluded here for the same reason as the raw-unbox shortcut
+    # above: this inline path wraps at i64, and operands landing here carry
+    # no machine-type wrap opt-in.
+    if int_op != nil && op != :LSHIFT && om_dm != :promote && om_dm != :trap && !promotable_int_operand
       lhs = lower_expression(ctx, node.left)
       rhs = lower_expression(ctx, node.right)
       lhs_raw = ensure_raw_int(wfn, lhs)

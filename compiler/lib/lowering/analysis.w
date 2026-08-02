@@ -418,7 +418,11 @@
         return int_shaped_node?(node.args[0], declared_types, mod)
   when :binary_op
     op = node.op
-    if op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :LSHIFT :RSHIFT)
+    # :LSHIFT is deliberately absent (like :POW): a shift-left overflows i64
+    # with tiny operands, and raw slots have no representation for the BigInt
+    # the untyped semantics then require. Its lowering routes through the
+    # checked __w_shl_fast instead, so a shift-bearing chain must stay boxed.
+    if op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :RSHIFT)
       return int_shaped_node?(node.left, declared_types, mod) && int_shaped_node?(node.right, declared_types, mod)
   else
     false

@@ -166,3 +166,13 @@ use core/math
     if x < ~-0.6931471805599453
       return Math.log1p(~0.0 - Math.exp(x))
     Math.log(~0.0 - Math.expm1(x))
+
+  # log(exp(left) - exp(right)) for left >= right.
+  -> .logdiffexp(left, right)
+    a = left.to_f
+    b = right.to_f
+    if a != a || b != b || b > a
+      raise "probability logdiffexp needs finite ordering left >= right"
+    return ProbabilityNumerics.negative_infinity if a == b
+    return a if b == ProbabilityNumerics.negative_infinity
+    a + ProbabilityNumerics.log1mexp(b - a)

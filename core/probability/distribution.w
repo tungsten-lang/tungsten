@@ -67,3 +67,23 @@ use core/probability/rng
     values = []
     count.times -> values.push(sample(rng))
     values
+
+  -> probabilities(values)
+    if values.class_name != "Array"
+      raise "probability evaluation batch must be an Array"
+    result = []
+    i = 0
+    while i < values.size
+      result.push(probability(values[i]))
+      i += 1
+    result
+
+  -> log_probabilities(values)
+    if values.class_name != "Array"
+      raise "probability evaluation batch must be an Array"
+    result = []
+    i = 0
+    while i < values.size
+      result.push(log_probability(values[i]))
+      i += 1
+    result

@@ -10,7 +10,7 @@ Flat under `core/` (no `core/sci/` namespace):
 | `sparse.w` | **SparseMatrix** CSR/COO; SpMV + Apple Sparse Solvers (QR/Cholesky) |
 | `fft.w` | pure radix-2 DFT |
 | `special.w` / `stats.w` | special functions + scalar descriptive statistics |
-| `probability.w` | checked laws, stable sampling primitives, and stochastic processes |
+| `probability.w` | checked laws, multivariate probability, Monte Carlo inference, and stochastic processes |
 | `solve.w` / `optim.w` / `interpolate.w` | ODE / opt / interp |
 | `calculus.w` | Taylor/differential AD, numerical gradients/Jacobians, Simpson and breakpoint GK15 quadrature |
 | `autodiff.w` | Dual JVP and Tape/TapeValue VJP; calculus facades |

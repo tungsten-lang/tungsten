@@ -177,7 +177,10 @@ use core/probability/support
     ~-0.5 * z * z - Math.log(@standard_deviation) - ~0.9189385332046727
 
   -> log_survival(value)
-    Math.log(survival(value))
+    ProbabilitySpecial.standard_normal_log_survival(standardized(value))
+
+  -> log_cdf(value)
+    ProbabilitySpecial.standard_normal_log_cdf(standardized(value))
 
   -> entropy
     ~0.5 * Math.log(~17.079468445347132 * @variance)

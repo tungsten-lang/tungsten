@@ -18,6 +18,34 @@ use core/probability/primitives
       return ~1.0 - ~0.5 * Special.erfc((~0.0 - value) / ~1.4142135623730951)
     ~0.5 * Special.erfc(value / ~1.4142135623730951)
 
+  # log(P[Z > x]) without first rounding the tail probability to zero.
+  # For x >= 8, use a truncated asymptotic Mills-ratio expansion.  Twelve
+  # alternating terms are well inside the least-term point at that boundary.
+  -> .standard_normal_log_survival(value)
+    x = value.to_f
+    return x if x != x
+    if x < ~0.0
+      return Math.log1p(
+        ~0.0 - ProbabilitySpecial.standard_normal_cdf(x))
+    if x < ~8.0
+      return Math.log(ProbabilitySpecial.standard_normal_survival(x))
+    inverse_square = ~1.0 / (x*x)
+    series = ~1.0
+    term = ~1.0
+    n = 1
+    while n <= 12
+      term *= ((~2.0*(n + ~0.0) - ~1.0)*inverse_square)
+      if n % 2 == 1
+        series -= term
+      else
+        series += term
+      n += 1
+    (~-0.5*x*x - Math.log(x) - ~0.9189385332046727 +
+     Math.log(series))
+
+  -> .standard_normal_log_cdf(value)
+    ProbabilitySpecial.standard_normal_log_survival(~0.0 - value.to_f)
+
   # Peter J. Acklam's binary64 inverse-normal approximation, followed by one
   # Newton correction through the tail-stable CDF above.
   -> .normal_quantile(probability)
@@ -67,8 +95,14 @@ use core/probability/primitives
 
     density = ProbabilitySpecial.standard_normal_pdf(estimate)
     if density > ~0.0
-      estimate -= (
-        ProbabilitySpecial.standard_normal_cdf(estimate) - p) / density
+      if p > ~0.5
+        upper_probability = ~1.0 - p
+        estimate += (
+          ProbabilitySpecial.standard_normal_survival(estimate) -
+          upper_probability) / density
+      else
+        estimate -= (
+          ProbabilitySpecial.standard_normal_cdf(estimate) - p) / density
     estimate
 
   -> .log_factorial(value)

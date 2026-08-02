@@ -82,6 +82,12 @@ use core/probability/primitives
   -> upper
     nil
 
+  -> lower_closed?
+    false
+
+  -> upper_closed?
+    false
+
   -> contains?(value)
     i = 0
     while i < @supports.size
@@ -96,6 +102,39 @@ use core/probability/primitives
       parts.push(@supports[i].to_s)
       i += 1
     "union(" + parts.join(", ") + ")"
+
+  -> inspect
+    self.to_s
+
+
++ ProbabilityFiniteSupport
+  -> new(values)
+    if values.class_name != "Array" || values.size == 0
+      raise "probability finite support needs a nonempty Array"
+    @values = ProbabilityNumerics.copy_array(values)
+    self
+
+  -> values
+    ProbabilityNumerics.copy_array(@values)
+
+  -> discrete?
+    true
+
+  -> continuous?
+    false
+
+  -> bounded?
+    true
+
+  -> contains?(value)
+    i = 0
+    while i < @values.size
+      return true if @values[i] == value
+      i += 1
+    false
+
+  -> to_s
+    "finite(" + @values.join(", ") + ")"
 
   -> inspect
     self.to_s

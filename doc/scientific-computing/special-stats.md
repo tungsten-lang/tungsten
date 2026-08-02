@@ -7,7 +7,7 @@
 | `core/math` | Elementary only (exp/log/sin). Keep thin. |
 | **`core/special`** | denser catalogue (erf, gamma, Bessel) |
 | **`core/stats`** | scalar descriptive/statistical compatibility helpers |
-| **`core/probability`** | checked probability laws, sampling, and stochastic processes |
+| **`core/probability`** | checked laws, numerical probability, Monte Carlo, and stochastic processes |
 | Whole package | The science stack stays separated by mathematical concern. |
 
 ## Special (`core/special.w`)
@@ -34,9 +34,8 @@ Binomial PDFs (and some CDFs), mulberry32 RNG with Box–Muller normals.
 
 `core/probability.w` is the object-oriented, domain-checked layer for new
 stochastic code. Its nested submodules own scalar probability laws, supports,
-stable log-weight operations, explicit RNG streams, Monte Carlo resampling,
-and basic stochastic processes. Implemented distributions are Bernoulli,
-Uniform, Normal, Exponential, Gamma, Beta, Categorical, Poisson, and finite
-mixtures. `Stats` remains the lightweight scalar/descriptive compatibility
-surface and is the domain for future estimation and inference APIs. See
+stable log-weight operations, serial/counter RNG streams, dense multivariate
+Normal laws, Monte Carlo algorithms, copulas, transformations, and stochastic
+processes. `Stats` remains the lightweight scalar/descriptive compatibility
+surface and owns future estimation, regression, and hypothesis-test APIs. See
 [probability.md](probability.md).

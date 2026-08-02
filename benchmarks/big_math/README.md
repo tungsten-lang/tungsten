@@ -14,6 +14,67 @@ The benchmark includes:
 - fixed-modulus BigInt multiply-mod
 - Mersenne square reduction, `s^2 mod (2^p - 1)`
 
+For the language/runtime-wide bignum matrix, use the public CLI:
+
+```sh
+bin/tungsten bench bignum --quick
+bin/tungsten bench bignum --all-languages --quick --no-capacity
+bin/tungsten bench bignum --all-languages --accurate --json --no-capacity
+```
+
+The default lanes are Tungsten and GMP. `--python`, `--rust`, and `--odin`
+enable CPython `int`, Rust `num-bigint` 0.5.1, and Odin `core:math/big`;
+`--all-languages` enables all three. Rust and Odin harnesses are persistent
+sources in `rust/` and `odin/`, built with release optimization and the native
+CPU target only when selected. Dependencies and compiler versions are recorded
+in JSON metadata.
+
+All rows use a common input size of `N * 64` bits. That is a Tungsten/GMP/Rust
+limb count, not an assertion about every implementation's internal layout:
+Odin currently stores 63 payload bits in each `u64` digit. Immutable lanes keep
+one previous result live until the next result exists. GMP and Odin instead use
+their idiomatic mutable APIs with two alternating, capacity-retaining result
+destinations. Each lane calibrates its own iteration count to the requested
+timing window.
+
+The matrix covers add, subtract, multiply, square, divide, modulo, gcd, bitwise
+operations, shifts, comparison, negate/absolute value, power, modular power,
+lcm, integer square root, and decimal conversion in both directions. The
+division and modulo dividend is `2N` limbs and divisor is `N`; integer square
+root takes a `2N`-limb input. Rust uses its public `modpow`; Odin's optimized
+Montgomery/window modular exponentiation is shipped under its `internal_*` API,
+which the metadata calls out explicitly.
+
+The same command also runs a mixed-size capacity-policy experiment unless
+`--no-capacity` is given. `--capacity-only` skips arithmetic. Use `--list` for
+the complete operation, size, and policy catalog.
+
+For allocation/alias-safe algebraic identity timing, build the native harness
+and run:
+
+```sh
+benchmarks/big_math/run.sh --build-only
+benchmarks/big_math/bench_big_math --bench-fastpaths 64 10000 7
+```
+
+This validates and times identities such as `x * 1`, `x / 1`, `x - x`, zero
+shifts, bitwise self/zero/negative-one cases, gcd/lcm identities, powers 0/1,
+and modular-power constants. The harness never releases a result that aliases
+one of its live operands.
+
+To compare Tungsten's full-width `uint64_t` radix with an Odin-style 63-bit
+"nail" radix on the same ARM64 machine:
+
+```sh
+clang -O3 -DNDEBUG -mcpu=native -std=c11 -Wall -Wextra -Werror \
+  benchmarks/big_math/bench_limb_nails.c -lm -o /tmp/bench_limb_nails
+/tmp/bench_limb_nails --target-ms 50 --samples 11
+```
+
+The standalone screen validates `add_n` and `mul_1` against independent
+`__uint128_t` oracles, then reports raw time per limb and density-corrected
+time per useful bit.
+
 `run.sh` compiles `bench_big_math.c` with the runtime included as a single
 translation unit so the benchmark can time internal arithmetic kernels without
 exporting benchmark-only runtime APIs. If `pkg-config gmp` is unavailable, the

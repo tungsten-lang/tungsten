@@ -96,7 +96,7 @@ case "$1" in
         -h|--help)
           echo "Usage: tungsten bench [primitive...] [--compare] [--baseline] [--runs N] [--list]"
           echo "       tungsten bench --suite [benchmark...] [--only LANGS] [--runs N] [--list]"
-          echo "       tungsten bench bignum [--quick] [--sizes CSV] [--operations CSV] [--json]"
+          echo "       tungsten bench bignum [--quick] [--python] [--rust] [--odin] [--json]"
           echo
           echo "  Default: Tungsten primitive-op velocity baseline (ops/sec). Each op is"
           echo "  auto-calibrated to ~1s after a 3s warmup. If bench_baseline.txt exists,"

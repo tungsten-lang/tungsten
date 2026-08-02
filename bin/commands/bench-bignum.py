@@ -8,6 +8,7 @@ import json
 import math
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -69,6 +70,13 @@ DEFAULT_SIZES = (
     1024,
 )
 QUICK_SIZES = (1, 4, 16, 64)
+LANE_LABELS = {
+    "tungsten": "Tungsten",
+    "gmp": "GMP",
+    "python": "Python",
+    "rust": "Rust",
+    "odin": "Odin",
+}
 
 
 def parse_csv(value: str, *, integers: bool = False) -> list[Any]:
@@ -254,13 +262,19 @@ def calibrate_python(
     return iterations
 
 
-def run_checked(command: list[str], *, capture: bool = True) -> str:
+def run_checked(
+    command: list[str],
+    *,
+    capture: bool = True,
+    env: dict[str, str] | None = None,
+) -> str:
     completed = subprocess.run(
         command,
         cwd=ROOT,
         text=True,
         capture_output=capture,
         check=False,
+        env=env,
     )
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "").strip()
@@ -269,6 +283,141 @@ def run_checked(command: list[str], *, capture: bool = True) -> str:
             + (f"\n{detail}" if detail else "")
         )
     return completed.stdout if capture else ""
+
+
+def time_python_case(
+    row: dict[str, Any], runs: int, target_ns: int
+) -> None:
+    operation = row["operation"]
+    limbs = row["limbs"]
+    a, b = operands(operation, limbs)
+    iterations = calibrate_python(operation, a, b, target_ns)
+    samples = [
+        time_python(operation, a, b, iterations) for _ in range(runs)
+    ]
+    row["python_iterations"] = iterations
+    row["python_ns"] = min(samples)
+    row["tungsten_over_python"] = row["tungsten_ns"] / row["python_ns"]
+    row.setdefault("samples", {})["python_ns"] = samples
+
+
+def external_sweep(
+    language: str,
+    operation: str,
+    sizes: list[int],
+    runs: int,
+    target_ms: float,
+) -> dict[int, dict[str, Any]]:
+    binary = EXTERNAL_BINARIES[language]
+    command = [
+        str(binary),
+        "--sweep",
+        operation,
+        ",".join(str(size) for size in sizes),
+        str(runs),
+        f"{target_ms:g}",
+    ]
+    output = run_checked(command)
+    rows: dict[int, dict[str, Any]] = {}
+    for line in output.splitlines():
+        fields = line.split("\t")
+        if (
+            len(fields) != 6
+            or fields[0] != "external"
+            or fields[1] != language
+            or fields[2] != operation
+        ):
+            raise RuntimeError(
+                f"unexpected {language} benchmark output: {line}"
+            )
+        limbs = int(fields[3])
+        rows[limbs] = {
+            "iterations": int(fields[4]),
+            "ns": float(fields[5]),
+        }
+    if not rows and sizes:
+        raise RuntimeError(f"{language} benchmark returned no rows")
+    missing = sorted(set(sizes) - set(rows))
+    if missing:
+        raise RuntimeError(
+            f"{language} benchmark omitted limb sizes: "
+            + ",".join(map(str, missing))
+        )
+    return rows
+
+
+def add_external_lanes(
+    rows: list[dict[str, Any]],
+    languages: list[str],
+    runs: int,
+    target_ms: float,
+) -> None:
+    if not rows:
+        return
+    operation = rows[0]["operation"]
+    sizes = [row["limbs"] for row in rows]
+    by_size = {row["limbs"]: row for row in rows}
+    for language in languages:
+        external = external_sweep(
+            language, operation, sizes, runs, target_ms
+        )
+        for limbs, measurement in external.items():
+            row = by_size[limbs]
+            row[f"{language}_iterations"] = measurement["iterations"]
+            row[f"{language}_ns"] = measurement["ns"]
+            row[f"tungsten_over_{language}"] = (
+                row["tungsten_ns"] / measurement["ns"]
+            )
+
+
+def fastest_label(timings: dict[str, float]) -> str:
+    best = min(timings.values())
+    winners = [lane for lane, timing in timings.items() if timing == best]
+    return winners[0] if len(winners) == 1 else "tie"
+
+
+def update_fastest(row: dict[str, Any], lanes: list[str]) -> None:
+    timings: dict[str, float] = {
+        lane: row[f"{lane}_ns"]
+        for lane in lanes
+        if f"{lane}_ns" in row and row[f"{lane}_ns"] > 0
+    }
+    row["fastest"] = fastest_label(timings)
+
+
+def geometric_mean(values: list[float]) -> float:
+    return math.exp(sum(math.log(value) for value in values) / len(values))
+
+
+def aggregate_results(
+    results: list[dict[str, Any]], lanes: list[str]
+) -> dict[str, Any]:
+    competitors = lanes[1:]
+    overall: dict[str, Any] = {}
+    for lane in competitors:
+        ratios = [row[f"tungsten_over_{lane}"] for row in results]
+        overall[lane] = {
+            "cases": len(ratios),
+            "tungsten_wins": sum(ratio < 1.0 for ratio in ratios),
+            "tungsten_ties": sum(ratio == 1.0 for ratio in ratios),
+            "tungsten_losses": sum(ratio > 1.0 for ratio in ratios),
+            "tungsten_over_peer_geomean": geometric_mean(ratios),
+        }
+    operations = []
+    for operation in OPERATIONS:
+        selected = [row for row in results if row["operation"] == operation]
+        if not selected:
+            continue
+        item: dict[str, Any] = {
+            "operation": operation,
+            "cases": len(selected),
+        }
+        for lane in competitors:
+            item[f"tungsten_over_{lane}_geomean"] = geometric_mean(
+                [row[f"tungsten_over_{lane}"] for row in selected]
+            )
+        operations.append(item)
+    return {"overall": overall, "operations": operations}
 
 
 def native_sample(
@@ -340,7 +489,7 @@ def benchmark_case(
         "python_ns": python_ns,
         "tungsten_over_gmp": tungsten_ns / gmp_ns,
         "tungsten_over_python": tungsten_ns / python_ns,
-        "fastest": min(timings, key=timings.get),
+        "fastest": fastest_label(timings),
         "samples": {
             "tungsten_ns": tungsten_samples,
             "gmp_ns": gmp_samples,
@@ -390,6 +539,13 @@ def harness_is_stale() -> bool:
     """
     if not NATIVE.exists():
         return True
+    try:
+        expected_profile = run_checked([str(BUILD), "--profile"]).strip()
+        actual_profile = NATIVE_PROFILE.read_text().strip()
+    except (RuntimeError, OSError):
+        return True
+    if actual_profile != expected_profile:
+        return True
     built = NATIVE.stat().st_mtime
     sources = [ROOT / "benchmarks" / "big_math" / "bench_big_math.c", BUILD]
     runtime_dir = ROOT / "runtime"
@@ -400,6 +556,59 @@ def harness_is_stale() -> bool:
             for path in runtime_dir.glob(pattern)
         ]
     return any(p.exists() and p.stat().st_mtime > built for p in sources)
+
+
+def external_harness_is_stale(language: str) -> bool:
+    binary = EXTERNAL_BINARIES[language]
+    if not binary.exists():
+        return True
+    built = binary.stat().st_mtime
+    if language == "rust":
+        sources = list(RUST_DIR.rglob("*.rs")) + [
+            RUST_DIR / "Cargo.toml",
+            RUST_DIR / "Cargo.lock",
+        ]
+    else:
+        sources = list(ODIN_DIR.rglob("*.odin"))
+    return any(path.exists() and path.stat().st_mtime > built for path in sources)
+
+
+def build_external_harness(language: str) -> None:
+    if language == "rust":
+        if shutil.which("cargo") is None:
+            raise RuntimeError("--rust requested, but cargo is not installed")
+        env = os.environ.copy()
+        native_flag = "-C target-cpu=native"
+        existing_flags = env.get("RUSTFLAGS", "").strip()
+        env["RUSTFLAGS"] = (
+            f"{existing_flags} {native_flag}".strip()
+        )
+        run_checked(
+            [
+                "cargo",
+                "build",
+                "--manifest-path",
+                str(RUST_DIR / "Cargo.toml"),
+                "--release",
+                "--locked",
+            ],
+            env=env,
+        )
+        return
+    if shutil.which("odin") is None:
+        raise RuntimeError("--odin requested, but odin is not installed")
+    run_checked(
+        [
+            "odin",
+            "build",
+            str(ODIN_DIR),
+            "-o:speed",
+            "-microarch:native",
+            "-no-bounds-check",
+            "-disable-assert",
+            f"-out:{ODIN_BINARY}",
+        ]
+    )
 
 
 def sweep_operation(operation, sizes, runs, target_ms, on_row):
@@ -418,9 +627,15 @@ def sweep_operation(operation, sizes, runs, target_ms, on_row):
         command, cwd=ROOT, text=True,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
+    malformed: list[str] = []
     for line in process.stdout:
         fields = line.rstrip("\n").split("\t")
-        if len(fields) != 6 or fields[0] != "boxed":
+        if (
+            len(fields) != 6
+            or fields[0] != "boxed"
+            or fields[1] != operation
+        ):
+            malformed.append(line.rstrip("\n"))
             continue
         row = {
             "operation": operation,
@@ -435,8 +650,8 @@ def sweep_operation(operation, sizes, runs, target_ms, on_row):
         }
         row["tungsten_over_gmp"] = row["tungsten_ns"] / row["gmp_ns"]
         row["tungsten_over_python"] = 0.0
-        row["fastest"] = (
-            "tungsten" if row["tungsten_ns"] < row["gmp_ns"] else "gmp"
+        row["fastest"] = fastest_label(
+            {"tungsten": row["tungsten_ns"], "gmp": row["gmp_ns"]}
         )
         rows.append(row)
         on_row(row)
@@ -445,6 +660,16 @@ def sweep_operation(operation, sizes, runs, target_ms, on_row):
         detail = (process.stderr.read() or "").strip()
         raise RuntimeError(
             f"sweep failed for {operation}" + (f"\n{detail}" if detail else "")
+        )
+    if malformed:
+        raise RuntimeError(
+            f"sweep emitted malformed rows for {operation}: {malformed!r}"
+        )
+    actual_sizes = [row["limbs"] for row in rows]
+    if actual_sizes != list(sizes):
+        raise RuntimeError(
+            f"sweep row mismatch for {operation}: "
+            f"expected {list(sizes)!r}, got {actual_sizes!r}"
         )
     return rows
 
@@ -458,69 +683,81 @@ def format_time(value: float) -> str:
 
 
 def print_results_header(metadata: dict[str, Any]) -> None:
-    lanes = (
-        f"Tungsten BigInt vs GMP {metadata['gmp_version']}"
-        + (f" vs Python {metadata['python_version']}"
-           if metadata.get("python_lane") else "")
-    )
-    print(lanes)
+    labels = [f"Tungsten BigInt", f"GMP {metadata['gmp_version']}"]
+    if metadata.get("python_lane"):
+        labels.append(f"Python {metadata['python_version']}")
+    if metadata.get("rust_lane"):
+        labels.append(f"Rust num-bigint {metadata['rust_bigint_version']}")
+    if metadata.get("odin_lane"):
+        labels.append(f"Odin core:math/big ({metadata['odin_version']})")
+    print(" vs ".join(labels))
     print(
         "Lower is better. Best-of-"
         f"{metadata['runs']}; operands are deterministic positive 64-bit limbs."
     )
+    mutable = "GMP"
+    if metadata.get("odin_lane"):
+        mutable += " and Odin"
     print(
-        "Each lane computes a new immutable result while the previous result "
-        "is live; Tungsten and GMP may reuse dead result capacity."
+        "Immutable lanes keep the previous result live while computing the "
+        f"next; {mutable} alternate two mutable destinations."
     )
     print()
-    if metadata.get("python_lane"):
-        print(
-            f"{'op':<8} {'limbs':>6} {'bits':>8} {'N iters':>9} {'Py iters':>9} "
-            f"{'Tungsten':>11} {'GMP':>11} {'Python':>11} "
-            f"{'T/GMP':>7} {'T/Py':>7} {'fastest':>9}"
-        )
-    else:
-        print(
-            f"{'op':<8} {'limbs':>6} {'bits':>8} {'N iters':>9} "
-            f"{'Tungsten':>11} {'GMP':>11} {'T/GMP':>7} {'fastest':>9}"
-        )
+    lanes = metadata["lanes"]
+    columns = f"{'op':<8} {'limbs':>6} {'bits':>8} {'N iters':>9}"
+    for lane in lanes:
+        columns += f" {LANE_LABELS[lane]:>11}"
+    for lane in lanes[1:]:
+        columns += f" {('T/' + LANE_LABELS[lane]):>8}"
+    columns += f" {'fastest':>10}"
+    print(columns)
 
 
-def print_result_row(row: dict[str, Any], python_lane: bool) -> None:
-    if python_lane:
-        print(
-            f"{row['operation']:<8} {row['limbs']:>6} {row['bits']:>8} "
-            f"{row['native_iterations']:>9} {row['python_iterations']:>9} "
-            f"{format_time(row['tungsten_ns']):>11} "
-            f"{format_time(row['gmp_ns']):>11} "
-            f"{format_time(row['python_ns']):>11} "
-            f"{row['tungsten_over_gmp']:>7.2f} "
-            f"{row['tungsten_over_python']:>7.2f} "
-            f"{row['fastest']:>9}",
-            flush=True,
-        )
-    else:
-        print(
-            f"{row['operation']:<8} {row['limbs']:>6} {row['bits']:>8} "
-            f"{row['native_iterations']:>9} "
-            f"{format_time(row['tungsten_ns']):>11} "
-            f"{format_time(row['gmp_ns']):>11} "
-            f"{row['tungsten_over_gmp']:>7.2f} "
-            f"{row['fastest']:>9}",
-            flush=True,
-        )
+def print_result_row(row: dict[str, Any], lanes: list[str]) -> None:
+    line = (
+        f"{row['operation']:<8} {row['limbs']:>6} {row['bits']:>8} "
+        f"{row['native_iterations']:>9}"
+    )
+    for lane in lanes:
+        line += f" {format_time(row[f'{lane}_ns']):>11}"
+    for lane in lanes[1:]:
+        line += f" {row[f'tungsten_over_{lane}']:>8.2f}"
+    line += f" {row['fastest']:>10}"
+    print(line, flush=True)
 
 
-def print_results_summary(results: list[dict[str, Any]], python_lane: bool) -> None:
+def print_results_summary(
+    results: list[dict[str, Any]], lanes: list[str], aggregate: dict[str, Any]
+) -> None:
     if not results:
         return
-    gmp_wins = sum(row["tungsten_ns"] < row["gmp_ns"] for row in results)
     print()
-    line = f"Tungsten faster than GMP in {gmp_wins}/{len(results)} cases"
-    if python_lane:
-        py = sum(row["tungsten_ns"] < row["python_ns"] for row in results)
-        line += f"; faster than Python in {py}/{len(results)} cases"
-    print(line + ".")
+    pieces = []
+    for lane in lanes[1:]:
+        stats = aggregate["overall"][lane]
+        pieces.append(
+            f"{LANE_LABELS[lane]} {stats['tungsten_wins']}/{stats['cases']}"
+        )
+    print("Tungsten faster than: " + "; ".join(pieces) + ".")
+    ratios = "; ".join(
+        f"T/{LANE_LABELS[lane]} "
+        f"{aggregate['overall'][lane]['tungsten_over_peer_geomean']:.3f}"
+        for lane in lanes[1:]
+    )
+    print("Overall geometric-mean ratios (lower is better): " + ratios + ".")
+    if len(aggregate["operations"]) <= 1:
+        return
+    print()
+    header = f"{'op':<8} {'cases':>5}"
+    for lane in lanes[1:]:
+        header += f" {('T/' + LANE_LABELS[lane]):>10}"
+    print(header)
+    for item in aggregate["operations"]:
+        line = f"{item['operation']:<8} {item['cases']:>5}"
+        for lane in lanes[1:]:
+            ratio = item[f"tungsten_over_{lane}_geomean"]
+            line += f" {ratio:>10.3f}"
+        print(line)
 
 
 def print_capacity(results: list[dict[str, Any]]) -> None:
@@ -563,7 +800,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="tungsten bench bignum",
         description=(
             "Compare boxed immutable bignum operations across Tungsten, GMP, "
-            "and Python, then test reusable-buffer capacity policies."
+            "Python, Rust num-bigint, and Odin core:math/big, then test "
+            "reusable-buffer capacity policies."
         ),
     )
     parser.add_argument(
@@ -600,6 +838,21 @@ def build_parser() -> argparse.ArgumentParser:
             "10-30x slower than the other two, so calibrating and running it "
             "dominated the suite"
         ),
+    )
+    parser.add_argument(
+        "--rust",
+        action="store_true",
+        help="also time Rust num-bigint 0.5.1 (optimized native build)",
+    )
+    parser.add_argument(
+        "--odin",
+        action="store_true",
+        help="also time Odin core:math/big (optimized native build)",
+    )
+    parser.add_argument(
+        "--all-languages",
+        action="store_true",
+        help="enable the Python, Rust, and Odin lanes",
     )
     parser.add_argument(
         "--accurate",
@@ -650,11 +903,30 @@ def build_parser() -> argparse.ArgumentParser:
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / "benchmarks" / "big_math" / "run.sh"
 NATIVE = ROOT / "benchmarks" / "big_math" / "bench_big_math"
+NATIVE_PROFILE = ROOT / "benchmarks" / "big_math" / "bench_big_math.profile"
+RUST_DIR = ROOT / "benchmarks" / "big_math" / "rust"
+RUST_BINARY = RUST_DIR / "target" / "release" / "tungsten-bignum-rust-bench"
+ODIN_DIR = ROOT / "benchmarks" / "big_math" / "odin"
+ODIN_BINARY = ROOT / "benchmarks" / "big_math" / "bench_big_math_odin"
+EXTERNAL_BINARIES = {"rust": RUST_BINARY, "odin": ODIN_BINARY}
 
 
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if args.all_languages:
+        args.python = True
+        args.rust = True
+        args.odin = True
+    external_languages = [
+        language
+        for language, enabled in (("rust", args.rust), ("odin", args.odin))
+        if enabled
+    ]
+    lanes = ["tungsten", "gmp"]
+    if args.python:
+        lanes.append("python")
+    lanes.extend(external_languages)
     if args.runs <= 0:
         parser.error("--runs must be positive")
     if args.target_ms is not None and args.target_ms <= 0:
@@ -701,6 +973,7 @@ def main() -> int:
             "capacity policies: exact/+1,quantum-4,quantum-8,"
             "quantum-16,quantum-32,reserve-1.5x,power-of-two"
         )
+        print("optional lanes: python,rust-num-bigint-0.5.1,odin-core-math-big")
         return 0
 
     if harness_is_stale():
@@ -711,24 +984,60 @@ def main() -> int:
             print(f"tungsten bench bignum: {error}", file=sys.stderr)
             return 1
 
+    if not args.capacity_only:
+        for language in external_languages:
+            if not external_harness_is_stale(language):
+                continue
+            print(
+                f"Building optimized native {language.title()} harness...",
+                file=sys.stderr,
+            )
+            try:
+                build_external_harness(language)
+            except RuntimeError as error:
+                print(f"tungsten bench bignum: {error}", file=sys.stderr)
+                return 1
+
     try:
         gmp_version = run_checked(
             ["pkg-config", "--modversion", "gmp"]
         ).strip()
     except (RuntimeError, FileNotFoundError):
         gmp_version = "unknown"
+    rustc_version = ""
+    if args.rust:
+        try:
+            rustc_version = run_checked(["rustc", "--version"]).strip()
+        except (RuntimeError, FileNotFoundError):
+            rustc_version = "unknown"
+    odin_version = ""
+    if args.odin:
+        try:
+            odin_version = run_checked(["odin", "version"]).strip()
+            if " version " in odin_version:
+                odin_version = odin_version.split(" version ", 1)[1]
+        except (RuntimeError, FileNotFoundError):
+            odin_version = "unknown"
     metadata = {
         "runs": args.runs,
         "python_lane": bool(args.python),
+        "rust_lane": bool(args.rust),
+        "odin_lane": bool(args.odin),
+        "lanes": lanes,
         "target_ms": target_ms,
         "python_version": platform.python_version(),
         "gmp_version": gmp_version,
+        "rust_bigint_version": "0.5.1",
+        "rustc_version": rustc_version,
+        "rust_digit_bits": 64,
+        "odin_version": odin_version,
+        "odin_digit_bits": 63,
         "platform": platform.platform(),
         "limb_bits": 64,
         "methodology": {
             "result_lifecycle": (
-                "compute next immutable result while previous result remains "
-                "live, then release previous"
+                "immutable APIs compute the next result while the previous "
+                "one remains live; mutable APIs alternate two destinations"
             ),
             "tungsten": (
                 "dead result capacity returned to a thread-local "
@@ -736,6 +1045,14 @@ def main() -> int:
             ),
             "gmp": "two alternating mpz result destinations retain capacity",
             "python": "ordinary immutable Python integer expressions",
+            "rust": (
+                "borrowed operands and ordinary immutable num-bigint results; "
+                "the previous result stays live until the next is computed"
+            ),
+            "odin": (
+                "two alternating mutable core:math/big destinations retain "
+                "capacity, matching the library's idiomatic API"
+            ),
             "division_shape": "2N-limb positive dividend by N-limb positive divisor",
             "isqrt_shape": "2N-limb positive operand, N-limb root",
             "cmp_operands": (
@@ -743,8 +1060,10 @@ def main() -> int:
             ),
             "pow_exponent": POW_EXPONENT,
             "powmod": (
-                "Tungsten lane mirrors Int#modpow (naive LSB-first "
-                "square-and-multiply); odd modulus"
+                "Tungsten uses bigint_powmod_any's Montgomery/Barrett window "
+                "implementation (also validated against an independent naive "
+                "mirror); Rust uses num-bigint modpow; Odin uses its shipped "
+                "internal Montgomery/window implementation; odd modulus"
             ),
             "size_caps": SIZE_CAPS,
             "shift_bits": 13,
@@ -753,9 +1072,10 @@ def main() -> int:
                 "alternate Tungsten-first and GMP-first samples"
             ),
             "calibration": (
-                "native and Python iteration counts calibrated independently "
-                "to the requested per-lane timing target; native harness "
-                "warms both implementations before timing"
+                "the shared native iteration count is derived from the "
+                "faster Tungsten/GMP pilot so both lanes reach the requested "
+                "window; Python, Rust, and Odin are calibrated independently; "
+                "native harness warms both implementations before timing"
             ),
             "capacity_trace": (
                 "ascending/descending sweeps, uniform and logarithmic sizes, "
@@ -793,25 +1113,46 @@ def main() -> int:
                 ]
                 if not todo:
                     continue
+                operation_rows = sweep_operation(
+                    operation, todo, args.runs, target_ms, lambda row: None
+                )
                 if args.python:
-                    for limbs in todo:
-                        row = benchmark_case(
-                            operation, limbs, args.runs,
+                    for row in operation_rows:
+                        time_python_case(
+                            row,
+                            args.runs,
                             round(target_ms * 1_000_000),
                         )
-                        results.append(row)
-                        if streaming:
-                            print_result_row(row, python_lane=True)
-                else:
-                    results.extend(
-                        sweep_operation(
-                            operation, todo, args.runs, target_ms,
-                            (lambda row: print_result_row(row, python_lane=False))
-                            if streaming else (lambda row: None),
-                        )
-                    )
+                add_external_lanes(
+                    operation_rows,
+                    external_languages,
+                    args.runs,
+                    target_ms,
+                )
+                for row in operation_rows:
+                    update_fastest(row, lanes)
+                    results.append(row)
+                    if streaming:
+                        print_result_row(row, lanes)
         except RuntimeError as error:
             print(f"tungsten bench bignum: {error}", file=sys.stderr)
+            return 1
+        expected_keys = [
+            (operation, limbs)
+            for operation in operations
+            for limbs in sizes
+            if SIZE_CAPS.get(operation) is None
+            or limbs <= SIZE_CAPS[operation]
+        ]
+        actual_keys = [
+            (row["operation"], row["limbs"]) for row in results
+        ]
+        if actual_keys != expected_keys or len(set(actual_keys)) != total:
+            print(
+                "tungsten bench bignum: incomplete or duplicate matrix: "
+                f"expected {total} ordered cells, got {len(actual_keys)}",
+                file=sys.stderr,
+            )
             return 1
 
     capacities: list[dict[str, Any]] = []
@@ -828,12 +1169,18 @@ def main() -> int:
             print(f"tungsten bench bignum: {error}", file=sys.stderr)
             return 1
 
+    aggregate = (
+        aggregate_results(results, lanes)
+        if results
+        else {"overall": {}, "operations": []}
+    )
     if args.json:
         print(
             json.dumps(
                 {
                     "metadata": metadata,
                     "results": results,
+                    "summary": aggregate,
                     "capacity_policies": capacities,
                 },
                 indent=2,
@@ -842,10 +1189,7 @@ def main() -> int:
         )
     else:
         if not args.capacity_only:
-            if args.python:
-                # non-streaming path already printed rows above
-                pass
-            print_results_summary(results, bool(args.python))
+            print_results_summary(results, lanes, aggregate)
         print_capacity(capacities)
     return 0
 

@@ -1091,7 +1091,11 @@ DEFINE_BENCH_LANE(bxor, bignum_bitwise('^', a, b))
 DEFINE_BENCH_LANE(shl, bignum_shl(a, 13))
 DEFINE_BENCH_LANE(shr, bignum_shr(a, 13))
 DEFINE_BENCH_LANE(gcd, bigint_gcd_any(a, b))
-DEFINE_BENCH_LANE(neg, w_neg(a))
+/* This is the BigInt matrix, so the receiver class is already known just as
+ * it is for GMP's mpz_neg input and for the abs lane below.  Calling w_neg
+ * here would charge only neg for generic numeric/user-class dispatch before
+ * reaching the same immutable copy kernel. */
+DEFINE_BENCH_LANE(neg, bigint_copy_signed(w_as_bigint(a), 1))
 DEFINE_BENCH_LANE(abs, w_ic_bigint_abs(a, NULL, 0))
 /* In-place sign mutation: O(1) field write, nothing allocated.  These
  * return the RECEIVER, so they must not go through the result-churn macro
@@ -1147,16 +1151,18 @@ bench_lane_tostr(BenchLaneCtx *cx) {
     double warm_start = bench_now();
     do {
         for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++) {
-            WValue text = w_to_s(a);
-            bench_sink ^= (uint64_t)w_string_byte_length(text);
+            WValue text = w_int_to_s(a);
+            bench_sink ^= (uint64_t)(unsigned char)
+                          w_as_heap_str(text)->data[0];
             w_value_free(text);
         }
     } while (bench_now() - warm_start < bench_warm_seconds);
     int iters = cx->iters;
     double timed_start = bench_now();
     for (int timed_i = 0; timed_i < iters; timed_i++) {
-        WValue text = w_to_s(a);
-        bench_sink ^= (uint64_t)w_string_byte_length(text) ^
+        WValue text = w_int_to_s(a);
+        bench_sink ^= (uint64_t)(unsigned char)
+                          w_as_heap_str(text)->data[0] ^
                       (uint64_t)timed_i;
         w_value_free(text);
     }
@@ -1170,7 +1176,17 @@ static double bench_boxed_result_churn(int op, int32_t limbs, int iters,
     /* fromstr parses one fixed decimal string (precomputed outside timing);
      * the correctness check verifies it byte-matches GMP's writer. */
     WValue parse_input = W_NIL;
-    if (op == BENCH_BOXED_FROMSTR) parse_input = w_to_s(a);
+    if (op == BENCH_BOXED_FROMSTR) parse_input = w_int_to_s(a);
+    if (op == BENCH_BOXED_TOSTR) {
+        /* Every benchmark operand is at least 2^63 and the slab is frozen,
+         * so production formatting returns a mode-7 heap string.  Establish
+         * that invariant outside timing: the lane can then observe data[0]
+         * exactly as GMP observes its returned char buffer's first byte. */
+        WValue probe = w_int_to_s(a);
+        if (!w_is_heap_str(probe))
+            die("boxed tostr expected a post-freeze heap string");
+        w_value_free(probe);
+    }
 
     bigint_pool_release_thread();
     BenchLaneCtx cx;
@@ -1221,6 +1237,246 @@ static double bench_boxed_result_churn(int op, int32_t limbs, int iters,
     return elapsed * 1e9 / (double)iters;
 }
 
+/*
+ * Focused algebraic fast-path benchmark.  Unlike the general boxed-result
+ * lanes above, these operations are explicitly allowed to return one of
+ * their operands.  Keep the benchmark-owned values separate from temporary
+ * results so a new identity path cannot make the harness recycle a live
+ * operand.  Volatile operand slots are reloaded inside the timed loop: this
+ * prevents the C optimizer from specializing an invariant zero/one argument
+ * away before the runtime entry point sees it.
+ */
+typedef struct {
+    WValue x;
+    WValue negative_x;
+    WValue bitwise_not_x;
+    WValue modulus;
+    WValue modulus_minus_one;
+} BenchFastpathOwned;
+
+typedef struct {
+    const char *name;
+    volatile WValue a;
+    volatile WValue b;
+    volatile WValue m;
+    volatile int64_t shift;
+    WValue expected;
+    const BenchFastpathOwned *owned;
+} BenchFastpathLaneCtx;
+
+typedef double (*BenchFastpathLane)(BenchFastpathLaneCtx *, int);
+
+typedef struct {
+    const char *name;
+    BenchFastpathLane lane;
+    BenchFastpathLaneCtx cx;
+} BenchFastpathScenario;
+
+static int bench_fastpath_is_owned(WValue value,
+                                   const BenchFastpathOwned *owned) {
+    return value == owned->x || value == owned->negative_x ||
+           value == owned->bitwise_not_x || value == owned->modulus ||
+           value == owned->modulus_minus_one;
+}
+
+static void bench_fastpath_release_result(WValue result,
+                                          const BenchFastpathOwned *owned) {
+    if (w_is_bigint(result) && !bench_fastpath_is_owned(result, owned))
+        bigint_release_if_live(w_as_bigint(result));
+}
+
+static void bench_fastpath_expect(BenchFastpathLaneCtx *cx, WValue got) {
+    if (!w_is_integer_any(got) || bigint_compare(got, cx->expected) != 0) {
+        fprintf(stderr, "fastpath validation failed: %s\n", cx->name);
+        exit(2);
+    }
+}
+
+#define DEFINE_FASTPATH_BINARY_LANE(NAME, APPLY)                           \
+static double __attribute__((noinline, aligned(128)))                      \
+bench_fastpath_lane_##NAME(BenchFastpathLaneCtx *cx, int iters) {          \
+    {                                                                      \
+        WValue a = cx->a;                                                  \
+        WValue b = cx->b;                                                  \
+        WValue check = (APPLY);                                            \
+        bench_fastpath_expect(cx, check);                                  \
+        bench_fastpath_release_result(check, cx->owned);                   \
+    }                                                                      \
+    double start = bench_now();                                            \
+    for (int i = 0; i < iters; i++) {                                     \
+        WValue a = cx->a;                                                  \
+        WValue b = cx->b;                                                  \
+        WValue result = (APPLY);                                           \
+        bench_sink ^= (uint64_t)integer_low_i64(result) ^ (uint64_t)i;     \
+        bench_fastpath_release_result(result, cx->owned);                  \
+    }                                                                      \
+    return bench_now() - start;                                            \
+}
+
+DEFINE_FASTPATH_BINARY_LANE(add, bigint_add_any(a, b))
+DEFINE_FASTPATH_BINARY_LANE(sub, bigint_sub_any(a, b))
+DEFINE_FASTPATH_BINARY_LANE(mul, bigint_mul_any(a, b))
+DEFINE_FASTPATH_BINARY_LANE(div, bigint_div_any(a, b))
+DEFINE_FASTPATH_BINARY_LANE(mod, bigint_mod_any(a, b))
+DEFINE_FASTPATH_BINARY_LANE(band, bignum_bitwise('&', a, b))
+DEFINE_FASTPATH_BINARY_LANE(bor, bignum_bitwise('|', a, b))
+DEFINE_FASTPATH_BINARY_LANE(bxor, bignum_bitwise('^', a, b))
+DEFINE_FASTPATH_BINARY_LANE(gcd, bigint_gcd_any(a, b))
+DEFINE_FASTPATH_BINARY_LANE(lcm, w_ic_integer_lcm(a, &b, 1))
+DEFINE_FASTPATH_BINARY_LANE(pow, w_pow(a, b))
+#undef DEFINE_FASTPATH_BINARY_LANE
+
+#define DEFINE_FASTPATH_SHIFT_LANE(NAME, APPLY)                            \
+static double __attribute__((noinline, aligned(128)))                      \
+bench_fastpath_lane_##NAME(BenchFastpathLaneCtx *cx, int iters) {          \
+    {                                                                      \
+        WValue a = cx->a;                                                  \
+        int64_t shift = cx->shift;                                         \
+        WValue check = (APPLY);                                            \
+        bench_fastpath_expect(cx, check);                                  \
+        bench_fastpath_release_result(check, cx->owned);                   \
+    }                                                                      \
+    double start = bench_now();                                            \
+    for (int i = 0; i < iters; i++) {                                     \
+        WValue a = cx->a;                                                  \
+        int64_t shift = cx->shift;                                         \
+        WValue result = (APPLY);                                           \
+        bench_sink ^= (uint64_t)integer_low_i64(result) ^ (uint64_t)i;     \
+        bench_fastpath_release_result(result, cx->owned);                  \
+    }                                                                      \
+    return bench_now() - start;                                            \
+}
+
+DEFINE_FASTPATH_SHIFT_LANE(shl, bignum_shl(a, shift))
+DEFINE_FASTPATH_SHIFT_LANE(shr, bignum_shr(a, shift))
+#undef DEFINE_FASTPATH_SHIFT_LANE
+
+static double __attribute__((noinline, aligned(128)))
+bench_fastpath_lane_powmod(BenchFastpathLaneCtx *cx, int iters) {
+    WValue check_a = cx->a;
+    WValue check_b = cx->b;
+    WValue check_m = cx->m;
+    WValue check = bigint_powmod_any(check_a, check_b, check_m);
+    bench_fastpath_expect(cx, check);
+    bench_fastpath_release_result(check, cx->owned);
+    double start = bench_now();
+    for (int i = 0; i < iters; i++) {
+        WValue a = cx->a;
+        WValue b = cx->b;
+        WValue m = cx->m;
+        WValue result = bigint_powmod_any(a, b, m);
+        bench_sink ^= (uint64_t)integer_low_i64(result) ^ (uint64_t)i;
+        bench_fastpath_release_result(result, cx->owned);
+    }
+    return bench_now() - start;
+}
+
+static void bench_fastpaths(int32_t limbs, int iters, int runs) {
+    bigint_pool_release_thread();
+
+    BenchFastpathOwned owned;
+    owned.x = bench_bigint(limbs,
+                           0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
+    WBigint *xb = w_as_bigint(owned.x);
+    xb->limbs[limbs - 1] &= ~(UINT64_C(1) << 63);
+    xb->limbs[limbs - 1] |= UINT64_C(1) << 62;
+    xb->limbs[0] |= 1;
+
+    owned.negative_x = bench_clone_integer(owned.x);
+    w_as_bigint(owned.negative_x)->size =
+        -w_as_bigint(owned.negative_x)->size;
+
+    owned.modulus = bench_bigint(
+        limbs, BENCH_BOXED_M_SEED ^ (uint64_t)limbs);
+    owned.modulus_minus_one = bench_clone_integer(owned.modulus);
+    /* bench_bigint makes the low limb odd, so this cannot borrow. */
+    w_as_bigint(owned.modulus_minus_one)->limbs[0]--;
+
+    WValue zero = w_box_int(0);
+    WValue one = w_box_int(1);
+    WValue negative_one = w_box_int(-1);
+    WValue exponent16 = w_box_int(16);
+    WValue exponent17 = w_box_int(17);
+    owned.bitwise_not_x = bigint_sub_any(owned.negative_x, one);
+
+#define FASTPATH_SCENARIO(LABEL, LANE, A, B, M, SHIFT, EXPECTED)           \
+    { LABEL, bench_fastpath_lane_##LANE,                                   \
+      { LABEL, A, B, M, SHIFT, EXPECTED, &owned } }
+    BenchFastpathScenario scenarios[] = {
+        FASTPATH_SCENARIO("add_x_0", add, owned.x, zero, zero, 0, owned.x),
+        FASTPATH_SCENARIO("sub_x_0", sub, owned.x, zero, zero, 0, owned.x),
+        FASTPATH_SCENARIO("sub_x_x", sub, owned.x, owned.x, zero, 0, zero),
+        FASTPATH_SCENARIO("mul_x_0", mul, owned.x, zero, zero, 0, zero),
+        FASTPATH_SCENARIO("mul_x_1", mul, owned.x, one, zero, 0, owned.x),
+        FASTPATH_SCENARIO("mul_x_neg1", mul, owned.x, negative_one, zero, 0,
+                          owned.negative_x),
+        FASTPATH_SCENARIO("div_x_1", div, owned.x, one, zero, 0, owned.x),
+        FASTPATH_SCENARIO("div_x_neg1", div, owned.x, negative_one, zero, 0,
+                          owned.negative_x),
+        FASTPATH_SCENARIO("div_x_x", div, owned.x, owned.x, zero, 0, one),
+        FASTPATH_SCENARIO("mod_x_1", mod, owned.x, one, zero, 0, zero),
+        FASTPATH_SCENARIO("mod_x_x", mod, owned.x, owned.x, zero, 0, zero),
+        FASTPATH_SCENARIO("shl_x_0", shl, owned.x, zero, zero, 0, owned.x),
+        FASTPATH_SCENARIO("shr_x_0", shr, owned.x, zero, zero, 0, owned.x),
+        FASTPATH_SCENARIO("and_x_x", band, owned.x, owned.x, zero, 0, owned.x),
+        FASTPATH_SCENARIO("and_x_0", band, owned.x, zero, zero, 0, zero),
+        FASTPATH_SCENARIO("and_x_neg1", band, owned.x, negative_one, zero, 0,
+                          owned.x),
+        FASTPATH_SCENARIO("or_x_x", bor, owned.x, owned.x, zero, 0, owned.x),
+        FASTPATH_SCENARIO("or_x_0", bor, owned.x, zero, zero, 0, owned.x),
+        FASTPATH_SCENARIO("or_x_neg1", bor, owned.x, negative_one, zero, 0,
+                          negative_one),
+        FASTPATH_SCENARIO("xor_x_x", bxor, owned.x, owned.x, zero, 0, zero),
+        FASTPATH_SCENARIO("xor_x_0", bxor, owned.x, zero, zero, 0, owned.x),
+        FASTPATH_SCENARIO("xor_x_neg1", bxor, owned.x, negative_one, zero, 0,
+                          owned.bitwise_not_x),
+        FASTPATH_SCENARIO("gcd_x_0", gcd, owned.x, zero, zero, 0, owned.x),
+        FASTPATH_SCENARIO("gcd_x_1", gcd, owned.x, one, zero, 0, one),
+        FASTPATH_SCENARIO("gcd_x_x", gcd, owned.x, owned.x, zero, 0, owned.x),
+        FASTPATH_SCENARIO("lcm_x_0", lcm, owned.x, zero, zero, 0, zero),
+        FASTPATH_SCENARIO("lcm_x_1", lcm, owned.x, one, zero, 0, owned.x),
+        FASTPATH_SCENARIO("lcm_x_x", lcm, owned.x, owned.x, zero, 0, owned.x),
+        FASTPATH_SCENARIO("pow_x_0", pow, owned.x, zero, zero, 0, one),
+        FASTPATH_SCENARIO("pow_x_1", pow, owned.x, one, zero, 0, owned.x),
+        FASTPATH_SCENARIO("powmod_exp_0", powmod, owned.x, zero,
+                          owned.modulus, 0, one),
+        FASTPATH_SCENARIO("powmod_exp_1", powmod, owned.x, one,
+                          owned.modulus, 0, owned.x),
+        FASTPATH_SCENARIO("powmod_base_0", powmod, zero, exponent17,
+                          owned.modulus, 0, zero),
+        FASTPATH_SCENARIO("powmod_base_1", powmod, one, exponent17,
+                          owned.modulus, 0, one),
+        FASTPATH_SCENARIO("powmod_base_neg1_even", powmod, negative_one,
+                          exponent16, owned.modulus, 0, one),
+        FASTPATH_SCENARIO("powmod_base_neg1_odd", powmod, negative_one,
+                          exponent17, owned.modulus, 0,
+                          owned.modulus_minus_one),
+        FASTPATH_SCENARIO("powmod_mod_1", powmod, owned.x, exponent17,
+                          one, 0, zero)
+    };
+#undef FASTPATH_SCENARIO
+
+    size_t count = sizeof(scenarios) / sizeof(scenarios[0]);
+    for (size_t i = 0; i < count; i++) {
+        double best = 1e300;
+        for (int run = 0; run < runs; run++) {
+            double elapsed = scenarios[i].lane(&scenarios[i].cx, iters);
+            if (elapsed < best) best = elapsed;
+        }
+        printf("fastpath\t%s\t%d\t%d\t%d\t%.3f\n",
+               scenarios[i].name, limbs, iters, runs,
+               best * 1e9 / (double)iters);
+        fflush(stdout);
+    }
+
+    bigint_pool_release_thread();
+    bench_free_value(owned.modulus_minus_one);
+    bench_free_value(owned.modulus);
+    bench_free_value(owned.bitwise_not_x);
+    bench_free_value(owned.negative_x);
+    bench_free_value(owned.x);
+}
+
 static WValue bench_mersenne_value(uint64_t p) {
     int32_t limbs = (int32_t)((p + 63ULL) >> 6);
     uint32_t top_bits = (uint32_t)(p & 63ULL);
@@ -1266,6 +1522,7 @@ static double bench_tungsten_mersenne_square(uint64_t p, int iters) {
 static void gmp_import_limbs(mpz_t z, const uint64_t *limbs, int32_t n) {
     mpz_import(z, (size_t)n, -1, sizeof(uint64_t), 0, 0, limbs);
 }
+static void gmp_import_value(mpz_t z, WValue v);
 
 static int value_matches_mpz(WValue value, const mpz_t z) {
     uint64_t scratch;
@@ -1750,6 +2007,122 @@ static uint64_t gcd_fuzz_next(uint64_t *state) {
     return x;
 }
 
+static void check_tostr_one_limb_case(uint64_t magnitude, int negative,
+                                      int case_index) {
+    WBigint *b = bigint_alloc_raw(1);
+    b->limbs[0] = magnitude;
+    b->size = magnitude == 0 ? 0 : (negative ? -1 : 1);
+    WValue text = bigint_to_s_impl(b);
+
+    mpz_t expected_z;
+    mpz_init(expected_z);
+    mpz_import(expected_z, 1, -1, sizeof(magnitude), 0, 0, &magnitude);
+    if (negative && magnitude != 0) mpz_neg(expected_z, expected_z);
+    char *expected = mpz_get_str(NULL, 10, expected_z);
+    if (strcmp(as_str(text), expected) != 0) {
+        fprintf(stderr,
+                "one-limb tostr mismatch: case=%d magnitude=%llu sign=%s"
+                " got=%s expected=%s\n",
+                case_index, (unsigned long long)magnitude,
+                negative ? "negative" : "positive", as_str(text), expected);
+        abort();
+    }
+
+    void (*gmp_free_fn)(void *, size_t);
+    mp_get_memory_functions(NULL, NULL, &gmp_free_fn);
+    gmp_free_fn(expected, strlen(expected) + 1);
+    mpz_clear(expected_z);
+    w_value_free(text);
+    free(b);
+}
+
+static void check_tostr_two_limb_case(uint64_t lo, uint64_t hi, int negative,
+                                      int case_index) {
+    uint64_t limbs[2] = {lo, hi};
+    WBigint *b = bigint_alloc_raw(2);
+    b->limbs[0] = lo;
+    b->limbs[1] = hi;
+    b->size = negative ? -2 : 2;
+    WValue text = bigint_to_s_impl(b);
+
+    mpz_t expected_z;
+    mpz_init(expected_z);
+    mpz_import(expected_z, 2, -1, sizeof(uint64_t), 0, 0, limbs);
+    if (negative) mpz_neg(expected_z, expected_z);
+    char *expected = mpz_get_str(NULL, 10, expected_z);
+    if (strcmp(as_str(text), expected) != 0) {
+        fprintf(stderr,
+                "two-limb tostr mismatch: case=%d hi=%llu lo=%llu sign=%s"
+                " got=%s expected=%s\n",
+                case_index, (unsigned long long)hi, (unsigned long long)lo,
+                negative ? "negative" : "positive", as_str(text), expected);
+        abort();
+    }
+
+    void (*gmp_free_fn)(void *, size_t);
+    mp_get_memory_functions(NULL, NULL, &gmp_free_fn);
+    gmp_free_fn(expected, strlen(expected) + 1);
+    mpz_clear(expected_z);
+    w_value_free(text);
+    free(b);
+}
+
+static void fuzz_tostr_small_against_gmp(int cases) {
+    int checked = 0;
+    /* Every decimal digit-count transition representable by u64, on both
+     * sides and with both signs.  Include the signed/unsigned handoff and the
+     * absolute u64 endpoint explicitly. */
+    check_tostr_one_limb_case(0, 0, checked++);
+    uint64_t power = 10;
+    for (int digits = 1; digits <= 19; digits++) {
+        uint64_t values[3] = {power - 1, power, power + 1};
+        for (int vi = 0; vi < 3; vi++) {
+            check_tostr_one_limb_case(values[vi], 0, checked++);
+            check_tostr_one_limb_case(values[vi], 1, checked++);
+        }
+        if (digits < 19) power *= 10;
+    }
+    const uint64_t endpoints[] = {
+        (1ULL << 63) - 1, 1ULL << 63, (1ULL << 63) + 1,
+        UINT64_MAX - 1, UINT64_MAX
+    };
+    for (size_t i = 0; i < sizeof(endpoints) / sizeof(endpoints[0]); i++) {
+        check_tostr_one_limb_case(endpoints[i], 0, checked++);
+        check_tostr_one_limb_case(endpoints[i], 1, checked++);
+    }
+
+    uint64_t state = 0x510e527fade682d1ULL;
+    for (int i = 0; i < cases; i++) {
+        uint64_t magnitude = gcd_fuzz_next(&state);
+        check_tostr_one_limb_case(magnitude, 0, checked++);
+        if (magnitude != 0)
+            check_tostr_one_limb_case(magnitude, 1, checked++);
+    }
+
+    const uint64_t two_limb_endpoints[][2] = {
+        {0, 1}, {UINT64_MAX, 1}, {0, 1ULL << 63},
+        {UINT64_MAX - 1, UINT64_MAX}, {UINT64_MAX, UINT64_MAX}
+    };
+    for (size_t i = 0;
+         i < sizeof(two_limb_endpoints) / sizeof(two_limb_endpoints[0]);
+         i++) {
+        check_tostr_two_limb_case(
+            two_limb_endpoints[i][0], two_limb_endpoints[i][1], 0,
+            checked++);
+        check_tostr_two_limb_case(
+            two_limb_endpoints[i][0], two_limb_endpoints[i][1], 1,
+            checked++);
+    }
+    for (int i = 0; i < cases; i++) {
+        uint64_t lo = gcd_fuzz_next(&state);
+        uint64_t hi = gcd_fuzz_next(&state) | 1ULL;
+        check_tostr_two_limb_case(lo, hi, 0, checked++);
+        check_tostr_two_limb_case(lo, hi, 1, checked++);
+    }
+    printf("one-/two-limb tostr fuzz vs GMP: %d cases match"
+           " (%d random values per width)\n", checked, cases);
+}
+
 static int fuzz_sqr_against_gmp(int cases, int32_t max_limbs) {
     uint64_t state = 0x9e3779b97f4a7c15ULL;
     for (int t = 0; t < cases; t++) {
@@ -1817,6 +2190,356 @@ static int fuzz_mul_against_gmp(int cases, int32_t max_limbs) {
         free(a);
     }
     return 0;
+}
+
+static int fuzz_mul_rect4_against_gmp(int cases, int32_t max_short_limbs) {
+    static const int32_t boundary_short_limbs[] = {
+        BN_RECT4_PAR_THRESHOLD,
+        BN_RECT4_PAR_THRESHOLD + 1,
+        BN_RECT4_PAR_THRESHOLD + 7,
+        BN_RECT4_PAR_THRESHOLD + 63,
+        BN_RECT4_PAR_THRESHOLD * 2 - 1,
+        BN_RECT4_PAR_THRESHOLD * 2
+    };
+    uint64_t state = 0xa4093822299f31d0ULL;
+    int32_t span = max_short_limbs - BN_RECT4_PAR_THRESHOLD + 1;
+    for (int t = 0; t < cases; t++) {
+        int32_t lo;
+        int boundary_index = t - (t + 3) / 4;
+        if ((t & 3) == 0) {
+            /* The tuned serial rung used by the 24-limb x**5 path. */
+            lo = 24;
+        } else if (boundary_index <
+                       (int)(sizeof(boundary_short_limbs) /
+                             sizeof(boundary_short_limbs[0])) &&
+                   boundary_short_limbs[boundary_index] <= max_short_limbs) {
+            lo = boundary_short_limbs[boundary_index];
+        } else {
+            lo = BN_RECT4_PAR_THRESHOLD +
+                 (int32_t)(gcd_fuzz_next(&state) % (uint64_t)span);
+        }
+        int32_t hi = 4 * lo;
+        uint64_t *big = bench_limbs(hi, gcd_fuzz_next(&state));
+        uint64_t *small = bench_limbs(lo, gcd_fuzz_next(&state));
+        size_t product_limbs = (size_t)hi + (size_t)lo;
+        uint64_t *tw =
+            (uint64_t *)calloc(product_limbs + 4U, sizeof(uint64_t));
+        uint64_t *gm =
+            (uint64_t *)calloc(product_limbs + 4U, sizeof(uint64_t));
+        if (!big || !small || !tw || !gm)
+            die("out of memory in exact 4:1 multiply fuzz");
+
+        if (t & 1)
+            bigint_mul_dispatch(tw, small, lo, big, hi);
+        else
+            bigint_mul_dispatch(tw, big, hi, small, lo);
+        mpn_mul((mp_limb_t *)gm, (const mp_limb_t *)big, (mp_size_t)hi,
+                (const mp_limb_t *)small, (mp_size_t)lo);
+        if (memcmp(tw, gm, product_limbs * sizeof(uint64_t)) != 0) {
+            fprintf(stderr,
+                    "exact 4:1 multiply fuzz mismatch: case=%d hi=%d lo=%d"
+                    " order=%s\n",
+                    t, hi, lo, (t & 1) ? "small-first" : "big-first");
+            free(gm);
+            free(tw);
+            free(small);
+            free(big);
+            return 1;
+        }
+        free(gm);
+        free(tw);
+        free(small);
+        free(big);
+    }
+    return 0;
+}
+
+static int fuzz_pow5_against_gmp(int cases, int32_t max_limbs) {
+    static const uint64_t one_limb_boundaries[] = {
+        0,
+        1,
+        (uint64_t)W_INT48_MAX,
+        (uint64_t)W_INT48_MAX + 1,
+        UINT64_C(1) << 63,
+        UINT64_MAX
+    };
+    uint64_t state = 0x082efa98ec4e6c89ULL;
+    mpz_t zbase, zpow;
+    mpz_inits(zbase, zpow, NULL);
+    for (int t = 0; t < cases; t++) {
+        int32_t limbs;
+        WBigint *base_storage;
+        if ((t & 3) == 0) {
+            limbs = 1;
+            base_storage = bigint_alloc(1);
+            int boundary = t / 4;
+            base_storage->limbs[0] =
+                boundary < (int)(sizeof(one_limb_boundaries) /
+                                 sizeof(one_limb_boundaries[0]))
+                    ? one_limb_boundaries[boundary]
+                    : gcd_fuzz_next(&state);
+        } else {
+            limbs = 1 + (int32_t)(
+                gcd_fuzz_next(&state) % (uint64_t)max_limbs);
+            WValue generated = bench_bigint(limbs, gcd_fuzz_next(&state));
+            base_storage = w_as_bigint(generated);
+        }
+        base_storage->size = (t & 4) ? -limbs : limbs;
+        WValue base = bigint_box(base_storage);
+        WValue got = w_pow(base, w_box_int(BENCH_BOXED_POW_EXP));
+        gmp_import_limbs(zbase, base_storage->limbs, limbs);
+        if (base_storage->size < 0) mpz_neg(zbase, zbase);
+        mpz_pow_ui(zpow, zbase, BENCH_BOXED_POW_EXP);
+        if (!value_matches_mpz(got, zpow)) {
+            fprintf(stderr,
+                    "power fuzz mismatch: case=%d limbs=%d exponent=%d\n",
+                    t, limbs, BENCH_BOXED_POW_EXP);
+            bench_free_value(got);
+            bench_free_value(base);
+            mpz_clears(zbase, zpow, NULL);
+            return 1;
+        }
+        bench_free_value(got);
+        bench_free_value(base);
+    }
+    mpz_clears(zbase, zpow, NULL);
+    return 0;
+}
+
+static int fuzz_mulmod_bnm1_against_gmp(int cases, int32_t max_limbs) {
+    static const int32_t boundaries[] = {
+        1, 2, 3, 6, 7, 8, 9, 12, 16, 24, 32, 48, 64,
+        W_POWM_REDC_MULLO_MIN - 1,
+        W_POWM_REDC_MULLO_MIN,
+        W_POWM_REDC_MULLO_MIN + 1,
+        127, 128, 129
+    };
+    uint64_t state = 0x3c6ef372fe94f82bULL;
+    mpz_t za, zb, zm, zr;
+    mpz_inits(za, zb, zm, zr, NULL);
+    for (int t = 0; t < cases; t++) {
+        int32_t limbs;
+        if (t < (int)(sizeof(boundaries) / sizeof(boundaries[0])) &&
+            boundaries[t] <= max_limbs)
+            limbs = boundaries[t];
+        else
+            limbs = 1 + (int32_t)(gcd_fuzz_next(&state) %
+                                  (uint64_t)max_limbs);
+        uint64_t *a = bench_limbs(limbs, gcd_fuzz_next(&state));
+        uint64_t *b = bench_limbs(limbs, gcd_fuzz_next(&state));
+        uint64_t *got = (uint64_t *)calloc((size_t)limbs, sizeof(uint64_t));
+        uint64_t *expected =
+            (uint64_t *)calloc((size_t)limbs, sizeof(uint64_t));
+        uint64_t *scratch =
+            (uint64_t *)calloc((size_t)4 * limbs + 16U, sizeof(uint64_t));
+        if (!a || !b || !got || !expected || !scratch)
+            die("out of memory in B^n-1 product fuzz");
+
+        /* Force the two zero representations and the CRT's signed extremes,
+         * in addition to the random full-width cases. */
+        switch (t & 15) {
+        case 0: memset(a, 0, (size_t)limbs * sizeof(uint64_t)); break;
+        case 1: memset(a, 0xff, (size_t)limbs * sizeof(uint64_t)); break;
+        case 2: memset(b, 0, (size_t)limbs * sizeof(uint64_t)); break;
+        case 3: memset(b, 0xff, (size_t)limbs * sizeof(uint64_t)); break;
+        case 4:
+            memset(a, 0, (size_t)limbs * sizeof(uint64_t));
+            memset(b, 0xff, (size_t)limbs * sizeof(uint64_t));
+            a[0] = 1;
+            b[0]--;
+            break;
+        default: break;
+        }
+
+        w_mulmod_bnm1(got, a, b, limbs, scratch);
+        gmp_import_limbs(za, a, limbs);
+        gmp_import_limbs(zb, b, limbs);
+        mpz_set_ui(zm, 1);
+        mpz_mul_2exp(zm, zm, (mp_bitcnt_t)limbs * 64U);
+        mpz_sub_ui(zm, zm, 1);
+        mpz_mul(zr, za, zb);
+        mpz_mod(zr, zr, zm);
+        size_t count = 0;
+        mpz_export(expected, &count, -1, sizeof(uint64_t), 0, 0, zr);
+        if (count > (size_t)limbs ||
+            memcmp(got, expected, (size_t)limbs * sizeof(uint64_t)) != 0) {
+            fprintf(stderr,
+                    "B^n-1 product fuzz mismatch: case=%d limbs=%d\n",
+                    t, limbs);
+            free(scratch); free(expected); free(got); free(b); free(a);
+            mpz_clears(za, zb, zm, zr, NULL);
+            return 1;
+        }
+        free(scratch); free(expected); free(got); free(b); free(a);
+    }
+    mpz_clears(za, zb, zm, zr, NULL);
+    return 0;
+}
+
+static int fuzz_powmod_against_gmp(int cases, int32_t max_limbs) {
+    static const int32_t boundaries[] = {
+        1, 2, 3, 4, 7, 8, 16, 32, 64,
+        W_POWM_REDC_MULLO_MIN - 2,
+        W_POWM_REDC_MULLO_MIN - 1,
+        W_POWM_REDC_MULLO_MIN,
+        W_POWM_REDC_MULLO_MIN + 1,
+        W_POWM_REDC_MULLO_MIN + 2,
+        126, 127, 128, 129
+    };
+    uint64_t state = 0xbb67ae8584caa73bULL;
+    mpz_t za, ze, zm, zr;
+    mpz_inits(za, ze, zm, zr, NULL);
+    for (int t = 0; t < cases; t++) {
+        int32_t limbs;
+        if (t < (int)(sizeof(boundaries) / sizeof(boundaries[0])) &&
+            boundaries[t] <= max_limbs) {
+            limbs = boundaries[t];
+        } else if (max_limbs >= W_POWM_REDC_MULLO_MIN && (t & 1)) {
+            limbs = W_POWM_REDC_MULLO_MIN + (int32_t)(
+                gcd_fuzz_next(&state) %
+                (uint64_t)(max_limbs - W_POWM_REDC_MULLO_MIN + 1));
+        } else {
+            limbs = 1 + (int32_t)(gcd_fuzz_next(&state) %
+                                  (uint64_t)max_limbs);
+        }
+        int32_t base_limbs = (t & 7) == 0 ? 2 * limbs : limbs;
+        WValue base = bench_bigint(base_limbs, gcd_fuzz_next(&state));
+        WValue mod = bench_bigint(limbs, gcd_fuzz_next(&state));
+        WBigint *mb = w_as_bigint(mod);
+        mb->limbs[0] |= 1ULL;                     /* Montgomery requires odd */
+        if (t & 2) w_as_bigint(base)->size = -w_as_bigint(base)->size;
+        if (t & 4) mb->size = -mb->size;          /* result still modulo |m| */
+
+        WValue exponent;
+        if ((t & 31) == 0) {
+            exponent = w_box_int(0);
+        } else if ((t & 31) == 1) {
+            exponent = w_box_int(1);
+        } else {
+            int32_t elen = 1 + (int32_t)(gcd_fuzz_next(&state) % 4U);
+            exponent = bench_bigint(elen, gcd_fuzz_next(&state));
+            if ((t & 15) == 2)
+                memset(w_as_bigint(exponent)->limbs, 0xff,
+                       (size_t)elen * sizeof(uint64_t));
+        }
+
+        WValue got = bigint_powmod_any(base, exponent, mod);
+        gmp_import_value(za, base);
+        gmp_import_value(ze, exponent);
+        gmp_import_value(zm, mod);
+        mpz_abs(zm, zm);
+        mpz_powm(zr, za, ze, zm);
+        if (!value_matches_mpz(got, zr)) {
+            fprintf(stderr,
+                    "powmod fuzz mismatch: case=%d modulus_limbs=%d"
+                    " exponent_limbs=%d\n",
+                    t, limbs,
+                    w_is_bigint(exponent)
+                        ? (w_as_bigint(exponent)->size < 0
+                               ? -w_as_bigint(exponent)->size
+                               : w_as_bigint(exponent)->size)
+                        : 0);
+            if (got != base && got != exponent && got != mod)
+                bench_free_value(got);
+            bench_free_value(base); bench_free_value(exponent);
+            bench_free_value(mod);
+            mpz_clears(za, ze, zm, zr, NULL);
+            return 1;
+        }
+        if (got != base && got != exponent && got != mod)
+            bench_free_value(got);
+        bench_free_value(base); bench_free_value(exponent);
+        bench_free_value(mod);
+    }
+    mpz_clears(za, ze, zm, zr, NULL);
+    return 0;
+}
+
+typedef struct {
+    int id;
+    int iters;
+    int32_t limbs;
+    _Atomic int *ready;
+    _Atomic int *go;
+    _Atomic int *bad;
+} BenchPowmodStress;
+
+static void *bench_powmod_stress_worker(void *opaque) {
+    BenchPowmodStress *job = (BenchPowmodStress *)opaque;
+    WValue base = bench_bigint(
+        job->limbs, UINT64_C(0x243f6a8885a308d3) ^ (uint64_t)job->id);
+    WValue exponent = bench_bigint(
+        2, UINT64_C(0x13198a2e03707344) ^ ((uint64_t)job->id << 32));
+    WValue modulus = bench_bigint(
+        job->limbs, UINT64_C(0xa4093822299f31d0) ^ (uint64_t)job->id);
+    WBigint *bb = w_as_bigint(base);
+    WBigint *mb = w_as_bigint(modulus);
+    mb->limbs[0] |= 1ULL;
+    if (job->id & 1) bb->size = -bb->size;
+    if (job->id & 2) mb->size = -mb->size;
+    uint64_t saved = bb->limbs[0];
+    mpz_t za, ze, zm, zr;
+    mpz_inits(za, ze, zm, zr, NULL);
+    gmp_import_value(ze, exponent);
+    gmp_import_value(zm, modulus);
+    mpz_abs(zm, zm);
+
+    atomic_fetch_add_explicit(job->ready, 1, memory_order_release);
+    while (!atomic_load_explicit(job->go, memory_order_acquire))
+        bn_toom_pool_spin_hint();
+    for (int i = 0; i < job->iters; i++) {
+        bb->limbs[0] = saved + (uint64_t)i;
+        WValue got = bigint_powmod_any(base, exponent, modulus);
+        gmp_import_value(za, base);
+        mpz_powm(zr, za, ze, zm);
+        if (!value_matches_mpz(got, zr)) {
+            atomic_store_explicit(job->bad, 1, memory_order_release);
+            if (got != base && got != exponent && got != modulus)
+                bench_free_value(got);
+            break;
+        }
+        if (got != base && got != exponent && got != modulus)
+            bench_free_value(got);
+    }
+    mpz_clears(za, ze, zm, zr, NULL);
+    bench_free_value(base);
+    bench_free_value(exponent);
+    bench_free_value(modulus);
+    bn_ws_release_thread();
+    bigint_pool_release_thread();
+    return NULL;
+}
+
+static void stress_powmod_against_gmp(int threads, int iters, int32_t limbs) {
+    pthread_t *workers =
+        (pthread_t *)malloc((size_t)threads * sizeof(pthread_t));
+    BenchPowmodStress *jobs =
+        (BenchPowmodStress *)calloc((size_t)threads, sizeof(*jobs));
+    if (!workers || !jobs) die("out of memory creating powmod stress");
+    _Atomic int ready = 0;
+    _Atomic int go = 0;
+    _Atomic int bad = 0;
+    for (int t = 0; t < threads; t++) {
+        jobs[t].id = t;
+        jobs[t].iters = iters;
+        jobs[t].limbs = limbs;
+        jobs[t].ready = &ready;
+        jobs[t].go = &go;
+        jobs[t].bad = &bad;
+        if (pthread_create(&workers[t], NULL, bench_powmod_stress_worker,
+                           &jobs[t]) != 0)
+            die("could not create powmod stress worker");
+    }
+    while (atomic_load_explicit(&ready, memory_order_acquire) < threads)
+        bn_toom_pool_spin_hint();
+    atomic_store_explicit(&go, 1, memory_order_release);
+    for (int t = 0; t < threads; t++) pthread_join(workers[t], NULL);
+    int failed = atomic_load_explicit(&bad, memory_order_acquire);
+    free(jobs);
+    free(workers);
+    if (failed) die("parallel powmod stress mismatch");
+    printf("parallel powmod stress vs GMP: %d threads x %d iterations"
+           " match (%d limbs)\n", threads, iters, limbs);
 }
 
 typedef struct {
@@ -2164,6 +2887,75 @@ static void fuzz_add_sub_against_gmp(int cases, int32_t max_limbs) {
     uint64_t state = 0x2ffd72dbd01adfb7ULL;
     mpz_t za, zb, zg;
     mpz_inits(za, zb, zg, NULL);
+    if (max_limbs >= 128) {
+        /* Force the 128-limb carry-select boundary correction to ripple.
+         * The independent chunk result starts with zero at limb 16, while
+         * the borrow produced by limb 0 must pass through it; the optimized
+         * kernel must recognize that shape and replay the serial chain. */
+        WBigint *ab = bigint_alloc(128);
+        WBigint *bb = bigint_alloc(128);
+        ab->size = 128;
+        bb->size = 128;
+        ab->limbs[127] = 2;
+        bb->limbs[127] = 1;
+        bb->limbs[0] = 1;
+        WValue a = bigint_box(ab);
+        WValue b = bigint_box(bb);
+        gmp_import_value(za, a);
+        gmp_import_value(zb, b);
+        WValue difference = bigint_sub_any(a, b);
+        mpz_sub(zg, za, zb);
+        if (!value_matches_mpz(difference, zg))
+            die("sub128 carry-select ripple fallback mismatch");
+        bench_free_value(difference);
+        bench_free_value(a);
+        bench_free_value(b);
+    }
+    if (max_limbs >= 256) {
+        /* Force the shared subtraction kernel's 256-limb ripple fallback. */
+        WBigint *ab = bigint_alloc(256);
+        WBigint *bb = bigint_alloc(256);
+        ab->size = 256;
+        bb->size = 256;
+        ab->limbs[255] = 2;
+        bb->limbs[255] = 1;
+        bb->limbs[0] = 1;
+        WValue a = bigint_box(ab);
+        WValue b = bigint_box(bb);
+        gmp_import_value(za, a);
+        gmp_import_value(zb, b);
+        WValue difference = bigint_sub_any(a, b);
+        mpz_sub(zg, za, zb);
+        if (!value_matches_mpz(difference, zg))
+            die("sub256 carry-select ripple fallback mismatch");
+        bench_free_value(difference);
+        bench_free_value(a);
+        bench_free_value(b);
+
+        /* Carry out of chunk zero must increment an all-ones boundary limb,
+         * forcing the existing 256-limb addition kernel's serial replay. */
+        ab = bigint_alloc(256);
+        bb = bigint_alloc(256);
+        ab->size = 256;
+        bb->size = 256;
+        for (int32_t i = 0; i < 16; i++)
+            ab->limbs[i] = UINT64_MAX;
+        bb->limbs[0] = 1;
+        ab->limbs[16] = UINT64_MAX;
+        ab->limbs[255] = 1;
+        bb->limbs[255] = 1;
+        a = bigint_box(ab);
+        b = bigint_box(bb);
+        gmp_import_value(za, a);
+        gmp_import_value(zb, b);
+        WValue sum = bigint_add_any(a, b);
+        mpz_add(zg, za, zb);
+        if (!value_matches_mpz(sum, zg))
+            die("add256 carry-select ripple fallback mismatch");
+        bench_free_value(sum);
+        bench_free_value(a);
+        bench_free_value(b);
+    }
     for (int t = 0; t < cases; t++) {
         int32_t a_limbs =
             1 + (int32_t)(bench_rng(&state) % (uint64_t)max_limbs);
@@ -2200,9 +2992,10 @@ static void fuzz_add_sub_against_gmp(int cases, int32_t max_limbs) {
         bench_free_value(b);
     }
     mpz_clears(za, zb, zg, NULL);
-    printf("signed add/sub fuzz vs GMP: %d/%d match"
-           " (max %d limbs)\n",
-           cases, cases, max_limbs);
+    int boundary_cases = max_limbs >= 256 ? 3 : (max_limbs >= 128 ? 1 : 0);
+    printf("signed add/sub fuzz vs GMP: %d/%d random match"
+           " + %d carry/borrow boundary cases (max %d limbs)\n",
+           cases, cases, boundary_cases, max_limbs);
 }
 
 static void fuzz_bitwise_shifts_against_gmp(
@@ -2262,7 +3055,7 @@ static void fuzz_bitwise_shifts_against_gmp(
                     t, a_limbs, (unsigned long long)k);
             abort();
         }
-        bench_free_value(left);
+        if (left != a && left != b) bench_free_value(left);
 
         WValue right = bignum_shr(a, (int64_t)k);
         mpz_fdiv_q_2exp(zg, za, (mp_bitcnt_t)k);
@@ -2272,7 +3065,7 @@ static void fuzz_bitwise_shifts_against_gmp(
                     t, a_limbs, (unsigned long long)k);
             abort();
         }
-        bench_free_value(right);
+        if (right != a && right != b) bench_free_value(right);
         bench_free_value(a);
         bench_free_value(b);
     }
@@ -2451,12 +3244,12 @@ static void check_bitwise_shifts_against_gmp(int32_t limbs) {
             WValue left = bignum_shl(a, k);
             mpz_mul_2exp(zg, za, (mp_bitcnt_t)k);
             if (!value_matches_mpz(left, zg)) die("left shift mismatch vs GMP");
-            bench_free_value(left);
+            if (left != a) bench_free_value(left);
 
             WValue right = bignum_shr(a, k);
             mpz_fdiv_q_2exp(zg, za, (mp_bitcnt_t)k);
             if (!value_matches_mpz(right, zg)) die("right shift mismatch vs GMP");
-            bench_free_value(right);
+            if (right != a) bench_free_value(right);
         }
         if (neg) mpz_neg(za, za);
     }
@@ -2566,7 +3359,7 @@ static void check_boxed_op_against_gmp(int op, int32_t limbs) {
         break;
     }
     case BENCH_BOXED_NEG: {
-        WValue got = bigint_sub_any(w_box_int(0), a);
+        WValue got = bigint_copy_signed(w_as_bigint(a), 1);
         mpz_neg(zg, za);
         if (!value_matches_mpz(got, zg)) die("boxed neg mismatch vs GMP");
         if (got != a && got != b) bench_free_value(got);
@@ -2641,7 +3434,7 @@ static void check_boxed_op_against_gmp(int op, int32_t limbs) {
          * byte-match GMP's, and parsing that string must return the value. */
         void (*gmp_free_fn)(void *, size_t);
         mp_get_memory_functions(NULL, NULL, &gmp_free_fn);
-        WValue text = w_to_s(a);
+        WValue text = w_int_to_s(a);
         char *expected = mpz_get_str(NULL, 10, za);
         if (strcmp(as_str(text), expected) != 0)
             die("boxed tostr mismatch vs GMP");
@@ -2709,7 +3502,7 @@ static double bench_gmp_boxed_result_churn(
         } while (bench_now() - warm_start < bench_warm_seconds);                       \
         double timed_start = bench_now();                                 \
         for (int timed_i = 0; timed_i < iters; timed_i++) {               \
-            mpz_ptr r = result[timed_i & 1];                              \
+            mpz_ptr r = result[(warm_index + timed_i) & 1];               \
             APPLY;                                                        \
             bench_sink ^= (uint64_t)mpz_get_ui(r) ^ (uint64_t)timed_i;   \
         }                                                                 \
@@ -2741,8 +3534,19 @@ static double bench_gmp_boxed_result_churn(
         BENCH_BOXED_GMP_RUN(mpz_fdiv_q_2exp(r, a, 13)); break;
     case BENCH_BOXED_GCD:
         BENCH_BOXED_GMP_RUN(mpz_gcd(r, a, b)); break;
-    case BENCH_BOXED_CMP:
-        BENCH_BOXED_GMP_RUN(mpz_set_si(r, (long)mpz_cmp(a, b))); break;
+    case BENCH_BOXED_CMP: {
+        double warm_start = bench_now();
+        do {
+            for (int warm_i = 0; warm_i < warm_chunk; warm_i++)
+                bench_sink ^= (uint64_t)(int64_t)mpz_cmp(a, b);
+        } while (bench_now() - warm_start < bench_warm_seconds);
+        double timed_start = bench_now();
+        for (int timed_i = 0; timed_i < iters; timed_i++)
+            bench_sink ^= (uint64_t)(int64_t)mpz_cmp(a, b) ^
+                          (uint64_t)timed_i;
+        elapsed = bench_now() - timed_start;
+        break;
+    }
     case BENCH_BOXED_NEG:
         BENCH_BOXED_GMP_RUN(mpz_neg(r, a)); break;
     case BENCH_BOXED_ABS:
@@ -3083,6 +3887,40 @@ static BenchCapacityStats bench_capacity_policy(
 }
 
 int main(int argc, char **argv) {
+    /* Compiled Tungsten initializes its static string slab and freezes it
+     * before user code.  This source-including native harness has no emitted
+     * startup, so reproduce that lifecycle before correctness checks or
+     * timing.  Initializing first matters: lazy w_slab_init resets frozen. */
+    if (!g_string_slab.base) w_slab_init();
+    /* A compiled program's static literals populate the intern table before
+     * it freezes.  Seed a nondecimal entry so short decimal results pay the
+     * same frozen-table miss instead of taking the empty-table shortcut. */
+    (void)w_string("bignum-bench");
+    w_slab_freeze();
+
+    if (argc == 5 && strcmp(argv[1], "--bench-fastpaths") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        int iters = atoi(argv[3]);
+        int runs = atoi(argv[4]);
+        if (limbs <= 0 || iters <= 0 || runs <= 0)
+            die("fastpath benchmark expects positive limbs, iterations,"
+                " and runs");
+        bench_fastpaths(limbs, iters, runs);
+        return 0;
+    }
+    if (argc == 3 &&
+        (strcmp(argv[1], "--fuzz-tostr-small") == 0 ||
+         strcmp(argv[1], "--fuzz-tostr-one-limb") == 0)) {
+        int cases = atoi(argv[2]);
+        if (cases <= 0)
+            die("small tostr fuzz expects a positive case count");
+#ifdef HAVE_GMP
+        fuzz_tostr_small_against_gmp(cases);
+#else
+        die("small tostr fuzz requires GMP");
+#endif
+        return 0;
+    }
     if (argc == 5 && strcmp(argv[1], "--bench-capacity-policies") == 0) {
         uint32_t max_limbs = (uint32_t)strtoul(argv[2], NULL, 10);
         uint32_t requests = (uint32_t)strtoul(argv[3], NULL, 10);
@@ -3225,20 +4063,23 @@ int main(int argc, char **argv) {
              * slow end — 64 iterations of powmod at 128 limbs (~137ms each)
              * costs ~9 seconds before the real measurement even starts. */
             int pilot = 1;
-            double pt, pg, slowest;
+            double pt, pg, fastest;
             for (;;) {
                 pt = bench_boxed_result_churn(op, limbs, pilot, 1);
                 pg = bench_gmp_boxed_result_churn(op, limbs, pilot);
-                slowest = pt > pg ? pt : pg;
-                if (slowest * pilot >= 20000.0 || pilot >= 4096) break;
+                fastest = pt < pg ? pt : pg;
+                if (fastest * pilot >= 20000.0 || pilot >= 4096) break;
                 pilot *= 16;                       /* still cheap: <20us so far */
             }
-            if (slowest < 0.001) slowest = 0.001;
+            if (fastest < 0.001) fastest = 0.001;
             /* Floor of 1, not 16: when a single operation already exceeds
              * the target window (powmod at 128 limbs runs ~137ms), forcing
              * 16 of them costs seconds per rep and measures nothing extra —
              * `runs` already provides the repetition. */
-            double want = target_ns / slowest;
+            /* A shared iteration count keeps the input/lifecycle contract
+             * identical, but derive it from the faster lane so BOTH timed
+             * regions reach the requested window. */
+            double want = target_ns / fastest;
             int iters = want > 40000000.0 ? 40000000
                       : (want < 1.0 ? 1 : (int)want);
             double tw_best = 0.0, gm_best = 0.0;
@@ -3441,6 +4282,85 @@ int main(int argc, char **argv) {
 #else
         die("multiply fuzz requires GMP");
 #endif
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-mul-rect4") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t max_short_limbs = (int32_t)atoi(argv[3]);
+        if (cases <= 0 || max_short_limbs < BN_RECT4_PAR_THRESHOLD ||
+            max_short_limbs > BN_PAR_TOOM_LIMIT)
+            die("exact 4:1 multiply fuzz expects positive cases and a"
+                " short-side width within the parallel range");
+#ifdef HAVE_GMP
+        int bad = fuzz_mul_rect4_against_gmp(cases, max_short_limbs);
+        printf("exact 4:1 multiply fuzz vs GMP: %d/%d match"
+               " (short side 24 and %d..%d limbs)%s\n",
+               cases - bad, cases, BN_RECT4_PAR_THRESHOLD, max_short_limbs,
+               bad ? "  *** MISMATCH ***" : "");
+        return bad ? 1 : 0;
+#else
+        die("exact 4:1 multiply fuzz requires GMP");
+#endif
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-pow5") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t max_limbs = (int32_t)atoi(argv[3]);
+        if (cases <= 0 || max_limbs <= 0 ||
+            max_limbs > BN_PAR_TOOM_LIMIT)
+            die("power fuzz expects positive cases and a max base width"
+                " within the supported parallel range");
+#ifdef HAVE_GMP
+        int bad = fuzz_pow5_against_gmp(cases, max_limbs);
+        printf("x**5 fuzz vs GMP: %d/%d match (max %d base limbs)%s\n",
+               cases - bad, cases, max_limbs,
+               bad ? "  *** MISMATCH ***" : "");
+        return bad ? 1 : 0;
+#else
+        die("power fuzz requires GMP");
+#endif
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-mulmod-bnm1") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t max_limbs = (int32_t)atoi(argv[3]);
+        if (cases <= 0 || max_limbs <= 0)
+            die("B^n-1 product fuzz expects positive cases and max limbs");
+#ifdef HAVE_GMP
+        int bad = fuzz_mulmod_bnm1_against_gmp(cases, max_limbs);
+        printf("mulmod B^n-1 fuzz vs GMP: %d/%d match (max %d limbs)%s\n",
+               cases - bad, cases, max_limbs,
+               bad ? "  *** MISMATCH ***" : "");
+        return bad ? 1 : 0;
+#else
+        die("B^n-1 product fuzz requires GMP");
+#endif
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-powmod") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t max_limbs = (int32_t)atoi(argv[3]);
+        if (cases <= 0 || max_limbs <= 0)
+            die("powmod fuzz expects positive cases and max modulus limbs");
+#ifdef HAVE_GMP
+        int bad = fuzz_powmod_against_gmp(cases, max_limbs);
+        printf("powmod fuzz vs GMP: %d/%d match (max %d modulus limbs)%s\n",
+               cases - bad, cases, max_limbs,
+               bad ? "  *** MISMATCH ***" : "");
+        return bad ? 1 : 0;
+#else
+        die("powmod fuzz requires GMP");
+#endif
+    }
+    if (argc == 5 && strcmp(argv[1], "--stress-powmod") == 0) {
+        int threads = atoi(argv[2]);
+        int iters = atoi(argv[3]);
+        int32_t limbs = (int32_t)atoi(argv[4]);
+        if (threads < 2 || threads > 16 || iters <= 0 || limbs <= 0)
+            die("powmod stress expects 2..16 threads, positive iterations,"
+                " and a positive modulus width");
+#ifdef HAVE_GMP
+        stress_powmod_against_gmp(threads, iters, limbs);
+#else
+        die("powmod stress requires GMP");
+#endif
+        return 0;
     }
     if (argc == 5 && strcmp(argv[1], "--stress-parallel-mul") == 0) {
         int threads = atoi(argv[2]);

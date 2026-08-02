@@ -1322,7 +1322,16 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # slot's inferred raw type carries no wrap opt-in (`## i64` operands take
   # the machine arm above instead), and `x << k` overflows i64 with tiny
   # operands, so it must reach __w_shl_fast's checked shl to promote.
-  if (lhs_unboxed || rhs_unboxed) && op != :LSHIFT && !mixed_float_operand && !is_bigint_type(lt) && !is_bigint_type(rt) && !ovf_guard_arith
+  #
+  # The NON-unboxed side must have a KNOWN inline-int-safe type before this
+  # arm may ensure_raw_int it: an nil-typed operand can hold anything —
+  # `r = 1 << 4096` infers nil and holds a heap BigInt, and nanunboxing it
+  # fed pointer bits to `add i64` (accumulate checksum diverged from the
+  # interpreter). `:int` is excluded for the same reason as everywhere
+  # else: it may have promoted at runtime.
+  lhs_raw_safe = lhs_unboxed || (lt != nil && lt != :int && is_integer_like_type(lt) && !is_bigint_type(lt))
+  rhs_raw_safe = rhs_unboxed || (rt != nil && rt != :int && is_integer_like_type(rt) && !is_bigint_type(rt))
+  if (lhs_unboxed || rhs_unboxed) && lhs_raw_safe && rhs_raw_safe && op != :LSHIFT && !mixed_float_operand && !is_bigint_type(lt) && !is_bigint_type(rt) && !ovf_guard_arith
     int_op = lowering_int_op_map[op]
     cmp_pred = lowering_cmp_op_map[op]
     if int_op != nil || cmp_pred != nil

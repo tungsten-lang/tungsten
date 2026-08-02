@@ -817,6 +817,7 @@ enum {
      * accumulate/mulchain workloads); these rows measure it per-op, with
      * the GMP lane using its strongest idiom (mpz_*_ui). */
     BENCH_BOXED_ADD1,
+    BENCH_BOXED_SUB1,
     BENCH_BOXED_MUL1,
     BENCH_BOXED_DIV1
 };
@@ -946,6 +947,7 @@ static void fuzz_tag_sign_case(size_t oi, int32_t limbs) {
 static int bench_boxed_op_parse(const char *name) {
     if (strcmp(name, "add") == 0) return BENCH_BOXED_ADD;
     if (strcmp(name, "add1") == 0) return BENCH_BOXED_ADD1;
+    if (strcmp(name, "sub1") == 0) return BENCH_BOXED_SUB1;
     if (strcmp(name, "mul1") == 0) return BENCH_BOXED_MUL1;
     if (strcmp(name, "div1") == 0) return BENCH_BOXED_DIV1;
     if (strcmp(name, "sub") == 0) return BENCH_BOXED_SUB;
@@ -1003,8 +1005,8 @@ static void bench_boxed_operands(int op, int32_t limbs,
         w_as_bigint(b)->limbs[0] ^= 1ULL;
     } else {
         int32_t b_limbs =
-            (op == BENCH_BOXED_ADD1 || op == BENCH_BOXED_MUL1 ||
-             op == BENCH_BOXED_DIV1)
+            (op == BENCH_BOXED_ADD1 || op == BENCH_BOXED_SUB1 ||
+             op == BENCH_BOXED_MUL1 || op == BENCH_BOXED_DIV1)
                 ? 1
                 : limbs;
         b = bench_bigint(b_limbs, 0x13198a2e03707344ULL ^ (uint64_t)limbs);
@@ -1116,6 +1118,7 @@ static WValue bench_boxed_op_apply(int op, WValue a, WValue b) {
     case BENCH_BOXED_ABS_BANG: return bench_bigint_abs_bang_c_ref(a, NULL, 0);
     case BENCH_BOXED_GCD: return bigint_gcd_any(a, b);
     case BENCH_BOXED_ADD1: return bigint_add_any(a, b);
+    case BENCH_BOXED_SUB1: return bigint_sub_any(a, b);
     case BENCH_BOXED_MUL1: return bigint_mul_any(a, b);
     case BENCH_BOXED_DIV1: return bigint_div_any(a, b);
     default: die("unknown boxed-result benchmark operation");
@@ -1239,6 +1242,7 @@ DEFINE_BENCH_LANE(gcd, bigint_gcd_any(a, b))
 DEFINE_BENCH_LANE(neg, w_neg(a))
 DEFINE_BENCH_LANE(abs, w_ic_bigint_abs(a, NULL, 0))
 DEFINE_BENCH_LANE(add1, bigint_add_any(a, b))
+DEFINE_BENCH_LANE(sub1, bigint_sub_any(a, b))
 DEFINE_BENCH_LANE(mul1, bigint_mul_any(a, b))
 DEFINE_BENCH_LANE(div1, bigint_div_any(a, b))
 /* In-place sign mutation: O(1) field write, nothing allocated.  These
@@ -1361,6 +1365,7 @@ static double bench_boxed_result_churn(int op, int32_t limbs, int iters,
     case BENCH_BOXED_NEG:    elapsed = bench_lane_neg(&cx); break;
     case BENCH_BOXED_ABS:    elapsed = bench_lane_abs(&cx); break;
     case BENCH_BOXED_ADD1:   elapsed = bench_lane_add1(&cx); break;
+    case BENCH_BOXED_SUB1:   elapsed = bench_lane_sub1(&cx); break;
     case BENCH_BOXED_MUL1:   elapsed = bench_lane_mul1(&cx); break;
     case BENCH_BOXED_DIV1:   elapsed = bench_lane_div1(&cx); break;
     case BENCH_BOXED_NEG_BANG: elapsed = bench_lane_negbang(&cx); break;
@@ -3486,6 +3491,7 @@ static void bench_gmp_boxed_apply(
     case BENCH_BOXED_GCD: mpz_gcd(out, a, b); break;
     /* one-limb rows: idiomatic GMP reaches for the _ui entry */
     case BENCH_BOXED_ADD1: mpz_add_ui(out, a, mpz_get_ui(b)); break;
+    case BENCH_BOXED_SUB1: mpz_sub_ui(out, a, mpz_get_ui(b)); break;
     case BENCH_BOXED_MUL1: mpz_mul_ui(out, a, mpz_get_ui(b)); break;
     case BENCH_BOXED_DIV1: mpz_tdiv_q_ui(out, a, mpz_get_ui(b)); break;
     default: die("unknown GMP boxed benchmark operation");
@@ -3689,6 +3695,10 @@ static double bench_gmp_boxed_result_churn(
     case BENCH_BOXED_ADD1: {
         unsigned long w = mpz_get_ui(b);
         BENCH_BOXED_GMP_RUN(mpz_add_ui(r, a, w)); break;
+    }
+    case BENCH_BOXED_SUB1: {
+        unsigned long w = mpz_get_ui(b);
+        BENCH_BOXED_GMP_RUN(mpz_sub_ui(r, a, w)); break;
     }
     case BENCH_BOXED_MUL1: {
         unsigned long w = mpz_get_ui(b);

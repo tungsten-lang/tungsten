@@ -42,6 +42,7 @@ OPERATIONS = (
     # Asymmetric rows: second operand is ONE limb ("big op small", the
     # dominant real-loop shape E3 exposed). The GMP lane uses mpz_*_ui.
     "add1",
+    "sub1",
     "mul1",
     "div1",
 )
@@ -155,7 +156,7 @@ def operands(operation: str, limbs: int) -> tuple[int, int]:
     a = operand(a_limbs, 0x243F6A8885A308D3 ^ limbs)
     if operation == "cmp":
         b = a ^ 1
-    elif operation in ("add1", "mul1", "div1"):
+    elif operation in ("add1", "sub1", "mul1", "div1"):
         b = operand(1, 0x13198A2E03707344 ^ limbs)
     else:
         b = operand(limbs, 0x13198A2E03707344 ^ limbs)
@@ -182,7 +183,7 @@ def time_python(operation: str, a: int, b: int, iterations: int) -> float:
         for _ in range(iterations):
             result = a + b
             previous = result
-    elif operation == "sub":
+    elif operation in ("sub", "sub1"):
         for _ in range(iterations):
             result = a - b
             previous = result

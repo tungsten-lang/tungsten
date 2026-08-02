@@ -46842,9 +46842,9 @@ WValue w_freeze(WValue obj) {
 }
 
 /* Release a WValue if it's a heap-allocated type. Safe to call on any value.
- * Frees mode-7 heap strings and returns bounded-size BigInt boxes to the
- * thread-local capacity recycler. Arrays, hashes, objects have more complex
- * lifetimes and are not freed by this function.
+ * Frees mode-7 heap strings, arrays, hashes, string buffers and closures,
+ * and returns bounded-size BigInt boxes to the thread-local capacity
+ * recycler. Objects/instances are never freed here.
  * Bigints: a single calloc (limbs are a flexible array member, see
  * bigint_alloc) and never interned — every bigint_from_* mints or takes a
  * distinct allocation, so releasing a provably-dead box is safe. The compiler emits
@@ -46883,14 +46883,27 @@ void w_value_free(WValue v) {
         free(arr);
         return;
     }
-    /* Hash: NOT freed here. w_hash_new is a recognized heap producer, so hash
-     * literals get a :free_value at scope exit — but enabling the actual free
-     * SIGSEGVs the stage-2 self-host: the ownership/escape pass marks at least
-     * one still-live hash non-escaped and we then free it under an alias (UAF).
-     * The w_value_free logic itself is sound (3M isolated alloc/set/free is
-     * clean and RSS-stable) — the unsoundness is upstream in the escape pass
-     * for w_hash_new results, which the old no-op silently masked. Freeing
-     * hashes safely needs an owns/liveness fix there first. */
+    /* Hash (W_SUBTAG_HASH). w_hash_new calloc's the WHash and mallocs
+     * keys/values (w_hash_allocate_storage); all three are private to the
+     * hash. Freed WValues inside are NOT recursed into — they may be live
+     * elsewhere, exactly like closure captures below. Bail when the pool
+     * still holds it (W_HASH_FLAG_POOLED) or it was frozen for sharing.
+     * History: this branch was a deliberate no-op for a while — the
+     * ownership pass marked a constructor-stored hash non-escaped
+     * (:ivar_set_idx had no mark_escapes arm) and freeing it was a UAF.
+     * That hole and its siblings (:phi_i64, :store_cvar, view/inline
+     * container stores, cleanup/recycle pushes) are closed in
+     * compiler/lib/ownership.w, gated by spec/compiler/
+     * hash_free_escape_spec.w + ownership_phi_escape_spec.w and the
+     * stage-2 self-host. */
+    if (w_is_hash(v)) {
+        WHash *h = (WHash *)w_as_ptr(v);
+        if (h->flags & (W_HASH_FLAG_POOLED | W_HASH_FLAG_FROZEN)) return;
+        free(h->keys);
+        free(h->values);
+        free(h);
+        return;
+    }
     /* StringBuffer (W_SUBTAG_STRBUF). w_strbuf_new / w_strbuf_recycle_or_new
      * malloc(WStrBuf) + malloc(data); `data` is always a private heap buffer
      * (append reallocs it in place). Never free one parked in the recycle pool

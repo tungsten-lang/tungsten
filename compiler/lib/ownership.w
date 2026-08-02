@@ -120,6 +120,52 @@ use runtime_types
         i += 1
     return nil
 
+  # Lowering-emitted phi (safe-nav merge, rescue-expression merge, inlined
+  # iterator carry): same dominance argument as :phi_ssa above, different
+  # shape — two (value, label) pairs instead of an incoming list.
+  if op == :phi_i64
+    escaped[inst[:temp]] = true
+    if inst[:a_value] != nil
+      escaped[inst[:a_value]] = true
+    if inst[:b_value] != nil
+      escaped[inst[:b_value]] = true
+    return nil
+
+  # Stores that retain the value past the scope: class variables, `- data`
+  # view fields (w64/scalar slots hold a boxed WValue), memo-table globals,
+  # class objects, and the constructor slab fast path's sibling.
+  if op in (:store_cvar :view_store_field :store_memo_ptr :class_store :slab_node_set_idx)
+    escaped[inst[:value]] = true
+    return nil
+
+  # Inline container element stores — a WValue written into an array slot
+  # without a runtime call the arg-escape arm above would see.
+  if op in (:small_array_set_inline :typed_array_set_inline :typed_array_compound_op_inline)
+    escaped[inst[:value]] = true
+    return nil
+  if op in (:bool_array_set_inline :bool_array_set_byte_inline)
+    escaped[inst[:val]] = true
+    return nil
+
+  # Runtime retention the free pass cannot see: the raise-unwind cleanup
+  # stack holds the value (free + cleanup-recycle would double-free), and
+  # the recycle ops hand the buffer to a pool.
+  if op in (:cleanup_push_hash :cleanup_push_array :cleanup_push_typed :cleanup_push_strbuf :call_recycle_hash :call_recycle_array :call_recycle_typed :call_recycle_strbuf)
+    escaped[inst[:value]] = true
+    return nil
+
+  # Remaining call shapes: today these carry raw pointers/slots rather than
+  # boxed WValues, but nothing enforces that — escape their args so a future
+  # WValue-carrying use fails safe (a leak, not a UAF).
+  if op in (:call_direct_i128 :call_direct_i64_ptr1 :call_direct_void_ptr1 :call_direct_ptr :call_fused_out_reuse)
+    args = inst[:args]
+    if args != nil
+      i = 0
+      while i < args.size()
+        escaped[args[i]] = true
+        i += 1
+    return nil
+
   nil
 
 # Analyze one function: classify all value-producing temps.

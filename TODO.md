@@ -29,8 +29,11 @@ buffer can be the remainder scratch.
    set at escape sites, checked only in mutating entries — only if
    profiling shows container-resident accumulators matter. Failure mode of
    a missed escape site is a silently wrong value (worse than UAF); the
-   escape pass has one known unsoundness (hash frees, see w_value_free
-   comment) — gate and fuzz against the immutable engine.
+   ownership pass's known unsoundness (hash frees) was repaired 2026-08-02
+   (missing mark_escapes arms closed, hash freeing re-enabled with stage-2
+   self-host green — see ownership.w and hash_free_escape_spec.w), but any
+   E4 work must still gate and fuzz against the immutable engine: a wrong
+   uniqueness proof computes silently wrong numbers either way.
 3. Never full refcounting (would tax every WValue store language-wide).
 
 **Coupling:** sign-in-the-value makes `-x` an alias of `x`; the uniqueness

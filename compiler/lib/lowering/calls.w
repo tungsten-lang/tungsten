@@ -905,8 +905,10 @@
         # A raw machine int boxed here may mint a heap bigint (>2^47 via
         # w_int/w_u64/w_i128/w_u128). The typed callee unboxes the param on
         # entry, so the box is provably dead once the call returns — free
-        # it or every wide-valued call leaks one WBigint.
-        if val[:type] in (:raw_i64 :raw_u64 :raw_i128 :raw_u128)
+        # it or every wide-valued call leaks one WBigint. Honors the
+        # TUNGSTEN_FREE=0 kill switch like every other compiler-inserted
+        # free, so corruption triage can rule these out too.
+        if val[:type] in (:raw_i64 :raw_u64 :raw_i128 :raw_u128) && env("TUNGSTEN_FREE") != "0"
           fresh_boxes.push(reg)
         arg_regs.push(reg)
         i += 1
@@ -967,7 +969,9 @@
           while i < args.size()
             val = lower_expression(ctx, args[i])
             reg = ensure_i64_value(wfn, val)
-            if val[:type] in (:raw_i64 :raw_u64 :raw_i128 :raw_u128)
+            # TUNGSTEN_FREE=0 kill switch — same rationale as the typed
+            # direct-call path above.
+            if val[:type] in (:raw_i64 :raw_u64 :raw_i128 :raw_u128) && env("TUNGSTEN_FREE") != "0"
               fresh_boxes.push(reg)
             reg = guard_typed_array_arg(ctx, reg, fallback_types[i], arg_types[i], name, i)
             arg_regs.push(reg)

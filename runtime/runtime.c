@@ -535,6 +535,14 @@ static void bigint_release(WBigint *b) {
 static inline __attribute__((always_inline))
 void bigint_release_if_live(WBigint *b) {
     if (__builtin_expect(b->type != W_TYPE_BIGINT, 0)) return;
+    /* A shared buffer has an alias somewhere (tag-flipped negate, escape
+     * instrumentation); recycling it would hand its storage to the next
+     * allocation underneath that alias. Sharing is countless by design, so
+     * a shared buffer is simply never reclaimed here — the compiler's
+     * escape analysis stops freeing values it saw alias anyway; this guard
+     * is the runtime backstop that turns a wrong proof into a leak instead
+     * of a use-after-free. */
+    if (__builtin_expect(b->shared != 0, 0)) return;
 #ifndef BN_BIGINT_RELEASE_INLINE_HANDOFF
 #define BN_BIGINT_RELEASE_INLINE_HANDOFF 1
 #endif
@@ -584,7 +592,10 @@ static inline WBigint *bigint_pool_take(uint32_t min_cap) {
 }
 static inline void bigint_release(WBigint *b) { free(b); }
 static inline void bigint_release_cold(WBigint *b) { free(b); }
-static inline void bigint_release_if_live(WBigint *b) { free(b); }
+static inline void bigint_release_if_live(WBigint *b) {
+    if (b->shared != 0) return;   /* alias may exist; leak, don't free */
+    free(b);
+}
 static inline void bigint_pool_release_thread(void) {}
 #endif
 
@@ -655,6 +666,7 @@ static WBigint *bigint_alloc_raw(int32_t cap) {
     if (!b) dief("out of memory allocating bigint (%u limbs)", alloc_cap);
 #if BN_RAW_HEADER_STORES
     b->type = W_TYPE_BIGINT;
+    b->shared = 0;      /* fresh malloc: the shared bit is garbage bytes */
     b->size = 0;
     b->cap = alloc_cap;
 #else
@@ -674,6 +686,7 @@ static WBigint *bigint_alloc_raw_fresh_capacity(uint32_t alloc_cap) {
     WBigint *b = (WBigint *)malloc(sz);
     if (!b) die("out of memory allocating bigint");
     b->type = W_TYPE_BIGINT;
+    b->shared = 0;
     b->size = 0;
     b->cap = alloc_cap;
     return b;
@@ -29515,6 +29528,19 @@ WValue w_native_data_field(WValue recv, WValue name_v) {
 
     w_raise(w_string("native data field is unavailable"));
     return W_NIL;
+}
+
+/* Shared-bit surface for the tag-sign aliasing machinery and its specs.
+ * Marking a non-bigint is a no-op; querying one answers false. The bit is
+ * sticky for the buffer's live lifetime — see WBigint.shared in wvalue.h
+ * and the release guards in bigint_release_if_live. */
+WValue w_bigint_mark_shared_value(WValue v) {
+    if (w_is_bigint(v)) w_bigint_mark_shared(w_as_bigint(v));
+    return v;
+}
+
+WValue w_bigint_shared_value(WValue v) {
+    return w_bool(w_is_bigint(v) && w_bigint_is_shared(w_as_bigint(v)));
 }
 
 /* Tree-walker mirror for the intentionally tiny writable subset of native

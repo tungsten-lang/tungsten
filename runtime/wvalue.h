@@ -520,12 +520,24 @@ static inline int w_is_domain_obj(WValue v) { return w_is_obj(v) && w_subtag(v) 
    The type byte is retained as the live/parked recycler marker. */
 typedef struct {
     uint8_t  type;      /* W_TYPE_BIGINT while live; 0 while pooled */
-    uint8_t  _pad[3];   /* align `size` at offset 4 */
+    uint8_t  shared;    /* sticky: another reference may alias this buffer
+                           (set when -x hands out a tag-flipped alias, and
+                           by future escape-site instrumentation). Mutating
+                           entries that would repurpose the buffer must
+                           copy instead when set. Never cleared while live;
+                           reset on allocation/pool-take. A stale 1 on a
+                           recycled buffer costs one spurious copy; a stale
+                           0 is impossible (marking happens only on live,
+                           reachable values). */
+    uint8_t  _pad[2];   /* align `size` at offset 4 */
     int32_t  size;      /* abs(size) = limb count; sign = number sign; 0 = zero */
     uint32_t cap;       /* allocated limbs */
     uint32_t _pad2;     /* align `limbs` at 8-byte boundary */
     uint64_t limbs[];   /* little-endian: limbs[0] is least significant */
 } WBigint;
+
+static inline void w_bigint_mark_shared(WBigint *b) { b->shared = 1; }
+static inline int  w_bigint_is_shared(const WBigint *b) { return b->shared != 0; }
 
 static inline WBigint *w_as_bigint(WValue v) {
     /* v4: BigInt rides its own top-level tag (0xFFF8). Bits 0-46 carry the
